@@ -1,0 +1,21 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+
+# Claude temp files
+tmpclaude-*
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+*.test
+*.out
+.claude/settings.local.json
+prompt.md
