@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/pkg/sftp"
@@ -23,7 +24,21 @@ func main() {
 	dest := flag.String("dest", "", "Remote destination path")
 	download := flag.String("download", "", "Remote file to download")
 	localDest := flag.String("local-dest", "", "Local destination for download")
+	deploy := flag.Bool("deploy", false, "Deploy dialtone to Raspberry Pi (cross-compiles and restarts)")
 	flag.Parse()
+
+	if *deploy {
+		if *host == "" {
+			fmt.Println("Error: -host (user@host) is required for deployment")
+			os.Exit(1)
+		}
+		if *pass == "" {
+			fmt.Println("Error: -pass is required for deployment")
+			os.Exit(1)
+		}
+		deployDialtone(*host, *port, *pass)
+		return
+	}
 
 	if *host == "" {
 		fmt.Println("Usage:")
@@ -189,4 +204,68 @@ func downloadFile(client *ssh.Client, remotePath, localPath string) error {
 	}
 
 	return nil
+}
+
+func deployDialtone(host, port, pass string) {
+	fmt.Println("🚀 Starting deployment of Dialtone...")
+
+	// 1. Cross-compile locally
+	fmt.Println("📦 Building for linux/arm64...")
+	os.MkdirAll("bin", 0755)
+	outputPath := filepath.Join("bin", "dialtone_linux_arm64")
+	cmdBuild := exec.Command("go", "build", "-o", outputPath, "./src/dialtone.go")
+	cmdBuild.Env = append(os.Environ(), "GOOS=linux", "GOARCH=arm64")
+	if output, err := cmdBuild.CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "Build failed: %v\nOutput: %s\n", err, output)
+		os.Exit(1)
+	}
+	defer os.Remove(outputPath)
+
+	// Parse user@host
+	username := ""
+	hostname := host
+	for i, c := range host {
+		if c == '@' {
+			username = host[:i]
+			hostname = host[i+1:]
+			break
+		}
+	}
+
+	// Connect SSH
+	config := &ssh.ClientConfig{
+		User:            username,
+		Auth:            []ssh.AuthMethod{ssh.Password(pass)},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	}
+	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%s", hostname, port), config)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to connect: %v\n", err)
+		os.Exit(1)
+	}
+	defer client.Close()
+
+	// 2. Kill existing process
+	fmt.Println("🛑 Stopping remote dialtone...")
+	runCommand(client, "pkill dialtone || true")
+
+	// 3. Upload binary
+	fmt.Println("📤 Uploading new binary...")
+	err = uploadFile(client, outputPath, "/home/tim/dialtone")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Upload failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	// 4. Start service
+	fmt.Println("🎬 Restarting service...")
+	// We use nohup and redirect to nats.log to match the existing setup
+	startCmd := "chmod +x ~/dialtone && nohup ~/dialtone -hostname drone-nats > ~/nats.log 2>&1 &"
+	_, err = runCommand(client, startCmd)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to start: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("\n✅ Deployment complete!")
 }

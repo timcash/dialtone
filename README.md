@@ -6,6 +6,7 @@ A Go application that runs an embedded [NATS](https://nats.io/) server exposed v
 
 - Embedded NATS server (no external dependencies)
 - Tailscale integration via [tsnet](https://tailscale.com/kb/1244/tsnet) - no separate Tailscale daemon required
+- **Web Dashboard**: Real-time status, NATS metrics, and Tailscale networking info
 - Headless authentication support for remote/SSH deployments
 - Ephemeral node option for temporary deployments
 - Local-only mode for development without Tailscale
@@ -43,10 +44,7 @@ go mod download
 # Build the executable
 go build -o bin/dialtone.exe src/dialtone.go
 
-# For Linux (e.g., Raspberry Pi)
-GOOS=linux GOARCH=arm64 go build -o bin/dialtone src/dialtone.go
-
-# Build SSH tools
+# Build SSH deployment tools
 go build -o bin/ssh_tools.exe src/ssh_tools.go
 ```
 
@@ -82,35 +80,33 @@ go build -o bin/ssh_tools.exe src/ssh_tools.go
 ./dialtone -local-only
 ```
 
-## Headless Authentication (SSH/Remote Deployment)
+### Automated Deployment (Recommended)
 
-For deploying to remote servers without GUI access (e.g., via SSH), use an auth key:
-
-### Step 1: Generate an Auth Key
-
-1. Go to [Tailscale Admin Console](https://login.tailscale.com/admin/settings/keys)
-2. Click "Generate auth key"
-3. Options:
-   - **Reusable**: For multiple deployments
-   - **Single-use**: For one-time setup (more secure)
-   - **Ephemeral**: Node auto-removes when disconnected
-   - **Pre-authorized**: Skip manual device approval
-
-### Step 2: Deploy and Run
+The included `ssh_tools.go` can automate building for ARM64, uploading, and restarting the service on a remote Raspberry Pi:
 
 ```bash
-# SSH into your remote server
-ssh user@server
+# Deploy to Raspberry Pi
+bin/ssh_tools.exe -host user@192.168.4.36 -pass yourpassword -deploy
+```
 
-# Copy the binary
+This command will:
+1. Cross-compile `dialtone` for `linux/arm64`.
+2. Stop the existing `dialtone` process on the Pi.
+3. Upload the new binary to `~/dialtone`.
+4. Start the service using `nohup`.
+
+### Manual Deployment
+```bash
+# Cross-compile for Pi
+GOOS=linux GOARCH=arm64 go build -o dialtone src/dialtone.go
+
+# Copy to server
 scp dialtone user@server:~/
 
-# Set the auth key and run
+# SSH and run
+ssh user@server
 export TS_AUTHKEY="tskey-auth-xxxxx-xxxxxxxxx"
 ./dialtone
-
-# Or for ephemeral deployment
-TS_AUTHKEY="tskey-auth-xxxxx" ./dialtone -ephemeral
 ```
 
 ### Step 3: Connect from Other Tailnet Devices
