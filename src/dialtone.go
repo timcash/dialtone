@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -139,22 +140,28 @@ func runWithTailscale(hostname string, port, webPort int, stateDir string, ephem
 
 	// Start web server in goroutine
 	go func() {
-		// Use hostname and IP for display
+		// Use full DNS name from Tailscale status if available
 		displayHostname := hostname
-		if len(status.TailscaleIPs) > 0 {
-			// If we have an IP, we can also use that as a sure-fire URL
+		if status.Self != nil && status.Self.DNSName != "" {
+			displayHostname = strings.TrimSuffix(status.Self.DNSName, ".")
+		} else {
+			// Fallback: try CertDomains
+			domains := ts.CertDomains()
+			if len(domains) > 0 {
+				displayHostname = domains[0]
+			}
 		}
 
 		fmt.Println("\n=======================================================")
 		fmt.Printf("🌍 WEB SERVER READY\n")
-		// We print the hostname-based URL which works with MagicDNS
+		// We print the FQDN-based URL if available, otherwise hostname
 		fmt.Printf("   URL: http://%s:%d\n", displayHostname, webPort)
 
 		// If we have an IP, print that too as a fallback/direct link
 		if len(status.TailscaleIPs) > 0 {
 			fmt.Printf("   IP:  http://%s:%d\n", status.TailscaleIPs[0], webPort)
 		}
-		fmt.Println("=======================================================\n")
+		fmt.Println("=======================================================")
 
 		if err := http.Serve(webLn, webHandler); err != nil {
 			log.Printf("Web server error: %v", err)

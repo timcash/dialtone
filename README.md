@@ -158,6 +158,15 @@ Visit this URL to authenticate. For headless servers, you can copy this URL and 
 
 The NATS server runs on localhost (not exposed) while tsnet handles all external connections through the Tailscale network.
 
+## Troubleshooting MagicDNS
+
+If you can access the dashboard via IP but not the FQDN URL (e.g., `http://drone-nats.xxxx.ts.net`):
+
+1. **Verify Tailscale is Running**: Ensure your local machine is connected to the same Tailscale network.
+2. **Check DNS Settings**: In the Tailscale Admin Console, ensure **MagicDNS** is enabled.
+3. **FQDN Resolution**: On some Windows machines, you may need to use the full FQDN including the trailing dot in some tools, though browser access usually handles this.
+4. **Local Proxy/VPN**: Disable any other local proxies or VPNs that might be interfering with Tailscale's DNS resolution.
+
 ## Configuration
 
 ### Environment Variables

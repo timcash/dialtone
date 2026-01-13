@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -577,4 +578,107 @@ func TestStateDirCreation(t *testing.T) {
 	if !info.IsDir() {
 		t.Error("Should be a directory")
 	}
+}
+
+// =============================================================================
+// Web Server Tests
+// =============================================================================
+
+func TestTailscaleWebAccess(t *testing.T) {
+	// Skip if no auth key is available
+	if os.Getenv("TS_AUTHKEY") == "" {
+		t.Skip("Skipping Tailscale test: TS_AUTHKEY not set")
+	}
+
+	// Create temp directory for state
+	stateDir, err := os.MkdirTemp("", "tsnet-web-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(stateDir)
+
+	hostname := "web-test"
+	ts := &tsnet.Server{
+		Hostname:  hostname,
+		Dir:       stateDir,
+		Ephemeral: true,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	status, err := ts.Up(ctx)
+	if err != nil {
+		t.Fatalf("Failed to connect to Tailscale: %v", err)
+	}
+	defer ts.Close()
+
+	// Start a backend NATS server (needed for the web dashboard)
+	ns := startTestNATSServer(t, "127.0.0.1", 14260)
+	defer ns.Shutdown()
+
+	// Create Tailscale listener for web
+	webPort := 8080
+	webLn, err := ts.Listen("tcp", fmt.Sprintf(":%d", webPort))
+	if err != nil {
+		t.Fatalf("Failed to listen for web: %v", err)
+	}
+	defer webLn.Close()
+
+	// Get FQDN
+	fqdn := hostname
+	if status.Self != nil && status.Self.DNSName != "" {
+		importStrings := "strings" // manual check if strings is imported
+		_ = importStrings
+		fqdn = status.Self.DNSName
+		// strip trailing dot
+		if len(fqdn) > 0 && fqdn[len(fqdn)-1] == '.' {
+			fqdn = fqdn[:len(fqdn)-1]
+		}
+	}
+
+	// Create web handler
+	// hostname string, natsPort, webPort int, ns *server.Server, lc *tailscale.LocalClient, ips []netip.Addr
+	webHandler := createWebHandler(hostname, 4222, webPort, ns, nil, status.TailscaleIPs)
+
+	// Start web server
+	go http.Serve(webLn, webHandler)
+
+	// Create a transport that uses the tsnet dialer
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: ts.Dial,
+		},
+		Timeout: 10 * time.Second,
+	}
+
+	// Try to fetch the homepage using the FQDN
+	url := fmt.Sprintf("http://%s:%d/", fqdn, webPort)
+	t.Logf("Testing accessibility via URL: %s", url)
+
+	resp, err := client.Get(url)
+	if err != nil {
+		t.Fatalf("Failed to fetch dashboard via %s: %v", fqdn, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !contains(string(body), "Dialtone Dashboard") {
+		t.Error("Dashboard content missing from response")
+	}
+
+	t.Log("Successfully accessed web dashboard via MagicDNS FQDN!")
+}
+
+func contains(s, substr string) bool {
+	for i := 0; i < len(s)-len(substr)+1; i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
