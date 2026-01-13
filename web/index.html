@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dialtone Dashboard</title>
+</head>
+
+<body>
+  <div id="app">
+    <header>
+      <h1>Dialtone Dashboard <span id="hostname-display"></span></h1>
+      <div id="status-indicator" class="status-offline">
+        <span class="status-dot"></span>
+        <span id="status-text">DISCONNECTED</span>
+      </div>
+    </header>
+
+    <section class="grid-container">
+      <!-- System Stats -->
+      <div class="section dashboard-card">
+        <h2>System <span class="live-indicator"></span></h2>
+        <table>
+          <tr>
+            <th>Uptime</th>
+            <td id="uptime">--</td>
+          </tr>
+          <tr>
+            <th>Platform</th>
+            <td id="platform">--</td>
+          </tr>
+          <tr>
+            <th>Viewer</th>
+            <td id="viewer">--</td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- NATS Stats -->
+      <div class="section dashboard-card">
+        <h2>NATS Server</h2>
+        <table>
+          <tr>
+            <th>Status</th>
+            <td class="status active">Running</td>
+          </tr>
+          <tr>
+            <th>Connections</th>
+            <td id="connections">--</td>
+          </tr>
+          <tr>
+            <th>Messages</th>
+            <td>In: <span id="in_msgs">--</span> / Out: <span id="out_msgs">--</span></td>
+          </tr>
+          <tr>
+            <th>Data</th>
+            <td>In: <span id="in_bytes">--</span> / Out: <span id="out_bytes">--</span></td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- Camera Feed -->
+      <div class="section dashboard-card full-width">
+        <h2>Live Feed</h2>
+        <div class="camera-container">
+          <img id="stream-img" src="/stream" alt="Live Camera Feed"
+            onerror="this.classList.add('hidden'); this.nextElementSibling.classList.remove('hidden');">
+          <div class="camera-error hidden">Camera stream unavailable</div>
+        </div>
+      </div>
+
+      <!-- NATS Messenger -->
+      <div class="section dashboard-card full-width">
+        <h2>NATS Messenger</h2>
+        <div class="messenger-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Subject</label>
+              <input type="text" id="subject" class="mono" value="drone.telemetry">
+            </div>
+            <div class="form-group">
+              <button id="send-btn" disabled>SEND_MESSAGE</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Payload</label>
+            <textarea id="message" class="mono" rows="4" placeholder='{"command": "takeoff"}'></textarea>
+          </div>
+        </div>
+        <div id="log-list" class="log-list"></div>
+      </div>
+
+      <!-- Network & Endpoints -->
+      <div class="section dashboard-card">
+        <h2>Network</h2>
+        <table>
+          <tr>
+            <th>Tailscale IPs</th>
+            <td><span class="mono" id="ts-ips">--</span></td>
+          </tr>
+        </table>
+      </div>
+
+      <div class="section dashboard-card">
+        <h2>Endpoints</h2>
+        <table>
+          <tr>
+            <td><a href="/api/status">/api/status</a></td>
+            <td>Status API</td>
+          </tr>
+          <tr>
+            <td><a href="/api/cameras">/api/cameras</a></td>
+            <td>Cameras List</td>
+          </tr>
+          <tr>
+            <td><a href="/stream">/stream</a></td>
+            <td>MJPEG Stream</td>
+          </tr>
+        </table>
+      </div>
+    </section>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+
+</html>

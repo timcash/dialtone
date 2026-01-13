@@ -2,16 +2,26 @@
 
 Write-Host "Starting Build and Deploy Process for Dialtone..." -ForegroundColor Cyan
 
-# 1. Compile SSH Tools
-Write-Host "Compiling SSH Tools..." -ForegroundColor Yellow
-go build -o bin/ssh_tools.exe src/ssh_tools.go
+# 1. Build Web UI
+Write-Host "Building Web UI..." -ForegroundColor Yellow
+Set-Location web
+npm install
+npm run build
+Set-Location ..
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "Failed to compile SSH Tools" -ForegroundColor Red
+    Write-Host "Web UI build failed" -ForegroundColor Red
     exit $LASTEXITCODE
 }
 
+# Copy web files to src/web for embedding
+Remove-Item -Recurse -Force src/web -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path src/web -Force
+Copy-Item -Path web/dist/* -Destination src/web -Recurse
+
 # 1b. Build Dialtone for ARM64 using Podman
 Write-Host "Building Dialtone for ARM64 using Podman..." -ForegroundColor Yellow
+# Ensure ssh_tools is compiled first as bin\ssh_tools.exe -podman-build uses it
+go build -o bin/ssh_tools.exe src/ssh_tools.go
 bin\ssh_tools.exe -podman-build
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Podman build failed" -ForegroundColor Red

@@ -533,58 +533,6 @@ func (d *tsnetDialer) Dial(network, address string) (net.Conn, error) {
 	return d.ts.Dial(d.ctx, network, address)
 }
 
-// =============================================================================
-// StartNATSServer Function Test
-// =============================================================================
-
-func TestStartNATSServerFunction(t *testing.T) {
-	ns := startNATSServer("127.0.0.1", 14250, false)
-	defer ns.Shutdown()
-
-	if !ns.Running() {
-		t.Error("Server should be running")
-	}
-
-	// Test we can connect
-	nc, err := nats.Connect("nats://localhost:14250")
-	if err != nil {
-		t.Fatalf("Failed to connect: %v", err)
-	}
-	defer nc.Close()
-
-	if !nc.IsConnected() {
-		t.Error("Should be connected")
-	}
-}
-
-// =============================================================================
-// State Directory Test
-// =============================================================================
-
-func TestStateDirCreation(t *testing.T) {
-	// Test that we can create state directories
-	tempDir := filepath.Join(os.TempDir(), "tsnet-state-test")
-	defer os.RemoveAll(tempDir)
-
-	err := os.MkdirAll(tempDir, 0700)
-	if err != nil {
-		t.Fatalf("Failed to create state dir: %v", err)
-	}
-
-	info, err := os.Stat(tempDir)
-	if err != nil {
-		t.Fatalf("Failed to stat dir: %v", err)
-	}
-
-	if !info.IsDir() {
-		t.Error("Should be a directory")
-	}
-}
-
-// =============================================================================
-// Web Server Tests
-// =============================================================================
-
 func TestTailscaleWebAccess(t *testing.T) {
 	// Skip if no auth key is available
 	if os.Getenv("TS_AUTHKEY") == "" {
@@ -629,8 +577,6 @@ func TestTailscaleWebAccess(t *testing.T) {
 	// Get FQDN
 	fqdn := hostname
 	if status.Self != nil && status.Self.DNSName != "" {
-		importStrings := "strings" // manual check if strings is imported
-		_ = importStrings
 		fqdn = status.Self.DNSName
 		// strip trailing dot
 		if len(fqdn) > 0 && fqdn[len(fqdn)-1] == '.' {
@@ -639,8 +585,7 @@ func TestTailscaleWebAccess(t *testing.T) {
 	}
 
 	// Create web handler
-	// hostname string, natsPort, webPort int, ns *server.Server, lc *tailscale.LocalClient, ips []netip.Addr
-	webHandler := createWebHandler(hostname, 4222, webPort, ns, nil, status.TailscaleIPs)
+	webHandler := createWebHandler(hostname, 4222, 4223, webPort, ns, nil, status.TailscaleIPs)
 
 	// Start web server
 	go http.Serve(webLn, webHandler)
@@ -673,4 +618,52 @@ func TestTailscaleWebAccess(t *testing.T) {
 	}
 
 	t.Log("Successfully accessed web dashboard via MagicDNS FQDN!")
+}
+
+// =============================================================================
+// StartNATSServer Function Test
+// =============================================================================
+
+func TestStartNATSServerFunction(t *testing.T) {
+	ns := startNATSServer("127.0.0.1", 14250, 14251, false)
+	defer ns.Shutdown()
+
+	if !ns.Running() {
+		t.Error("Server should be running")
+	}
+
+	// Test we can connect
+	nc, err := nats.Connect("nats://localhost:14250")
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer nc.Close()
+
+	if !nc.IsConnected() {
+		t.Error("Should be connected")
+	}
+}
+
+// =============================================================================
+// State Directory Test
+// =============================================================================
+
+func TestStateDirCreation(t *testing.T) {
+	// Test that we can create state directories
+	tempDir := filepath.Join(os.TempDir(), "tsnet-state-test")
+	defer os.RemoveAll(tempDir)
+
+	err := os.MkdirAll(tempDir, 0700)
+	if err != nil {
+		t.Fatalf("Failed to create state dir: %v", err)
+	}
+
+	info, err := os.Stat(tempDir)
+	if err != nil {
+		t.Fatalf("Failed to stat dir: %v", err)
+	}
+
+	if !info.IsDir() {
+		t.Error("Should be a directory")
+	}
 }

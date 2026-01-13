@@ -251,6 +251,34 @@ func uploadFile(client *ssh.Client, localPath, remotePath string) error {
 	return nil
 }
 
+func uploadDir(client *ssh.Client, localDir, remoteDir string) error {
+	sftpClient, err := sftp.NewClient(client)
+	if err != nil {
+		return fmt.Errorf("failed to create SFTP client: %w", err)
+	}
+	defer sftpClient.Close()
+
+	return filepath.Walk(localDir, func(localPath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Calculate remote path
+		relPath, err := filepath.Rel(localDir, localPath)
+		if err != nil {
+			return err
+		}
+		remotePath := path.Join(remoteDir, filepath.ToSlash(relPath))
+
+		if info.IsDir() {
+			return sftpClient.MkdirAll(remotePath)
+		}
+
+		// Upload file
+		return uploadFile(client, localPath, remotePath)
+	})
+}
+
 func downloadFile(client *ssh.Client, remotePath, localPath string) error {
 	sftpClient, err := sftp.NewClient(client)
 	if err != nil {
@@ -329,6 +357,19 @@ func deployDialtone(host, port, pass string) {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to upload binary: %v\n", err)
 			os.Exit(1)
+		}
+
+		// 3. Upload web directory if it exists
+		localWebDir := "bin/web"
+		if _, err := os.Stat(localWebDir); err == nil {
+			fmt.Println("Uploading web assets...")
+			remoteWebDir := path.Join(remoteDir, "web")
+			runCommand(client, fmt.Sprintf("mkdir -p %s", remoteWebDir))
+			err = uploadDir(client, localWebDir, remoteWebDir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to upload web assets: %v\n", err)
+				// Non-fatal, but warn
+			}
 		}
 	} else {
 		// 1. Create remote directory (clean slate)

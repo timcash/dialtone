@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -21,7 +22,6 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/coder/websocket/wsjson"
 	"github.com/nats-io/nats-server/v2/server"
 	"tailscale.com/client/tailscale"
 	"tailscale.com/tsnet"
@@ -35,6 +35,7 @@ func main() {
 	stateDir := flag.String("state-dir", "", "Directory to store Tailscale state (default: ~/.config/dialtone)")
 	ephemeral := flag.Bool("ephemeral", false, "Register as ephemeral node (auto-cleanup on disconnect)")
 	localOnly := flag.Bool("local-only", false, "Run without Tailscale (local NATS only)")
+	wsPort := flag.Int("ws-port", 4223, "NATS WebSocket port")
 	verbose := flag.Bool("verbose", false, "Enable verbose logging")
 	flag.Parse()
 
@@ -48,16 +49,16 @@ func main() {
 	}
 
 	if *localOnly {
-		runLocalOnly(*natsPort, *verbose)
+		runLocalOnly(*natsPort, *wsPort, *verbose)
 		return
 	}
 
-	runWithTailscale(*hostname, *natsPort, *webPort, *stateDir, *ephemeral, *verbose)
+	runWithTailscale(*hostname, *natsPort, *wsPort, *webPort, *stateDir, *ephemeral, *verbose)
 }
 
 // runLocalOnly starts NATS without Tailscale (original behavior)
-func runLocalOnly(port int, verbose bool) {
-	ns := startNATSServer("0.0.0.0", port, verbose)
+func runLocalOnly(port, wsPort int, verbose bool) {
+	ns := startNATSServer("0.0.0.0", port, wsPort, verbose)
 	defer ns.Shutdown()
 
 	log.Printf("NATS server started on port %d (local only)", port)
@@ -69,11 +70,15 @@ func runLocalOnly(port int, verbose bool) {
 // Global start time for uptime calculation
 var startTime = time.Now()
 
+//go:embed all:web
+var webFS embed.FS
+
 //go:embed index.html
-var indexHTML embed.FS
+var fallbackHTML embed.FS
 
-var tmpl = template.Must(template.ParseFS(indexHTML, "index.html"))
+var tmpl = template.Must(template.ParseFS(fallbackHTML, "index.html"))
 
+// TemplateData for the original dashboard (fallback)
 type TemplateData struct {
 	Hostname    string
 	Uptime      string
@@ -92,7 +97,7 @@ type TemplateData struct {
 }
 
 // runWithTailscale starts NATS exposed via Tailscale
-func runWithTailscale(hostname string, port, webPort int, stateDir string, ephemeral, verbose bool) {
+func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir string, ephemeral, verbose bool) {
 	// Ensure state directory exists
 	if err := os.MkdirAll(stateDir, 0700); err != nil {
 		log.Fatalf("Failed to create state directory: %v", err)
@@ -132,7 +137,8 @@ func runWithTailscale(hostname string, port, webPort int, stateDir string, ephem
 
 	// Start NATS on localhost only (not directly exposed)
 	localNATSPort := port + 10000 // Use offset port internally
-	ns := startNATSServer("127.0.0.1", localNATSPort, verbose)
+	localWSPort := wsPort + 10000
+	ns := startNATSServer("127.0.0.1", localNATSPort, localWSPort, verbose)
 	defer ns.Shutdown()
 
 	// Listen on Tailscale network for NATS
@@ -142,8 +148,16 @@ func runWithTailscale(hostname string, port, webPort int, stateDir string, ephem
 	}
 	defer natsLn.Close()
 
+	// Listen on Tailscale network for NATS WebSockets
+	wsLn, err := ts.Listen("tcp", fmt.Sprintf(":%d", wsPort))
+	if err != nil {
+		log.Fatalf("Failed to listen on Tailscale for NATS WS: %v", err)
+	}
+	defer wsLn.Close()
+
 	log.Printf("NATS server available on Tailscale at %s:%d", hostname, port)
-	log.Printf("Connect using: nats://%s:%d", hostname, port)
+	log.Printf("NATS WebSockets available on Tailscale at %s:%d", hostname, wsPort)
+	log.Printf("Connect using: nats://%s:%d or ws://%s:%d", hostname, port, hostname, wsPort)
 
 	// Start camera in background if available
 	go func() {
@@ -164,8 +178,9 @@ func runWithTailscale(hostname string, port, webPort int, stateDir string, ephem
 		}
 	}()
 
-	// Start proxy to forward Tailscale connections to local NATS
+	// Start proxies to forward Tailscale connections to local NATS
 	go proxyListener(natsLn, fmt.Sprintf("127.0.0.1:%d", localNATSPort))
+	go proxyListener(wsLn, fmt.Sprintf("127.0.0.1:%d", localWSPort))
 
 	// Start web server on Tailscale
 	webLn, err := ts.Listen("tcp", fmt.Sprintf(":%d", webPort))
@@ -181,7 +196,7 @@ func runWithTailscale(hostname string, port, webPort int, stateDir string, ephem
 	}
 
 	// Create web handler
-	webHandler := createWebHandler(hostname, port, webPort, ns, lc, status.TailscaleIPs)
+	webHandler := createWebHandler(hostname, port, wsPort, webPort, ns, lc, status.TailscaleIPs)
 
 	// Start web server in goroutine
 	go func() {
@@ -218,12 +233,17 @@ func runWithTailscale(hostname string, port, webPort int, stateDir string, ephem
 }
 
 // startNATSServer creates and starts an embedded NATS server
-func startNATSServer(host string, port int, verbose bool) *server.Server {
+func startNATSServer(host string, port, wsPort int, verbose bool) *server.Server {
 	opts := &server.Options{
 		Host:  host,
 		Port:  port,
 		Debug: verbose,
 		Trace: verbose,
+		Websocket: server.WebsocketOpts{
+			Host:  host,
+			Port:  wsPort,
+			NoTLS: true, // Internal/Tailscale networking is trusted
+		},
 	}
 
 	ns, err := server.NewServer(opts)
@@ -321,11 +341,156 @@ func waitForShutdown() {
 	<-c
 }
 
-// createWebHandler creates the HTTP handler for the web dashboard
-func createWebHandler(hostname string, natsPort, webPort int, ns *server.Server, lc *tailscale.LocalClient, ips []netip.Addr) http.Handler {
+// createWebHandler creates the HTTP handler for the unified web dashboard
+func createWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server.Server, lc *tailscale.LocalClient, ips []netip.Addr) http.Handler {
 	mux := http.NewServeMux()
 
-	// Main dashboard
+	// 1. JSON init API for the frontend
+	mux.HandleFunc("/api/init", func(w http.ResponseWriter, r *http.Request) {
+		data := map[string]interface{}{
+			"hostname":  hostname,
+			"nats_port": natsPort,
+			"ws_port":   wsPort,
+			"web_port":  webPort,
+			"ips":       ips,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(data)
+	})
+
+	// 2. JSON status API
+	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+		varz, _ := ns.Varz(nil)
+		var connections int
+		var inMsgs, outMsgs, inBytes, outBytes int64
+		if varz != nil {
+			connections = varz.Connections
+			inMsgs = varz.InMsgs
+			outMsgs = varz.OutMsgs
+			inBytes = varz.InBytes
+			outBytes = varz.OutBytes
+		}
+
+		status := map[string]any{
+			"hostname":      hostname,
+			"uptime":        time.Since(startTime).String(),
+			"uptime_secs":   time.Since(startTime).Seconds(),
+			"platform":      runtime.GOOS,
+			"arch":          runtime.GOARCH,
+			"tailscale_ips": formatIPs(ips),
+			"nats": map[string]any{
+				"url":          fmt.Sprintf("nats://%s:%d", hostname, natsPort),
+				"connections":  connections,
+				"messages_in":  inMsgs,
+				"messages_out": outMsgs,
+				"bytes_in":     inBytes,
+				"bytes_out":    outBytes,
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(status)
+	})
+
+	// 3. Cameras API
+	mux.HandleFunc("/api/cameras", func(w http.ResponseWriter, r *http.Request) {
+		cameras, err := ListCameras()
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(cameras)
+	})
+
+	// 4. Video Stream MJPEG
+	mux.HandleFunc("/stream", StreamHandler)
+
+	// 5. WebSocket for real-time updates (legacy dashboard)
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+			InsecureSkipVerify: true,
+		})
+		if err != nil {
+			log.Printf("WebSocket accept error: %v", err)
+			return
+		}
+		defer c.Close(websocket.StatusInternalError, "closing")
+
+		ctx := r.Context()
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				varz, _ := ns.Varz(nil)
+				var connections int
+				var inMsgs, outMsgs, inBytes, outBytes int64
+				if varz != nil {
+					connections = varz.Connections
+					inMsgs = varz.InMsgs
+					outMsgs = varz.OutMsgs
+					inBytes = varz.InBytes
+					outBytes = varz.OutBytes
+				}
+
+				callerInfo := "Unknown"
+				if lc != nil {
+					who, err := lc.WhoIs(ctx, r.RemoteAddr)
+					if err == nil && who.UserProfile != nil {
+						callerInfo = who.UserProfile.DisplayName
+						if who.Node != nil {
+							callerInfo += " (" + who.Node.Name + ")"
+						}
+					}
+				}
+
+				stats := map[string]any{
+					"uptime":      formatDuration(time.Since(startTime)),
+					"os":          runtime.GOOS,
+					"arch":        runtime.GOARCH,
+					"caller":      callerInfo,
+					"connections": connections,
+					"in_msgs":     inMsgs,
+					"out_msgs":    outMsgs,
+					"in_bytes":    formatBytes(inBytes),
+					"out_bytes":   formatBytes(outBytes),
+				}
+
+				data, _ := json.Marshal(stats)
+				if err := c.Write(ctx, websocket.MessageText, data); err != nil {
+					return
+				}
+			}
+		}
+	})
+
+	// 6. Static Asset Serving (Embedded or Fallback)
+	subFS, err := fs.Sub(webFS, "web")
+	if err == nil {
+		// Verify there's actually something in there
+		if _, err := subFS.Open("index.html"); err == nil {
+			log.Printf("Using embedded web assets")
+			staticHandler := http.FileServer(http.FS(subFS))
+			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+				// If it's a known static file, serve it
+				f, err := subFS.Open(strings.TrimPrefix(r.URL.Path, "/"))
+				if err == nil {
+					f.Close()
+					staticHandler.ServeHTTP(w, r)
+					return
+				}
+				// Otherwise serve index.html for SPA
+				http.ServeFileFS(w, r, subFS, "index.html")
+			})
+			return mux
+		}
+	}
+
+	// Fallback to original dashboard template if embedded assets missing
+	log.Printf("Warning: Embedded web assets not found, using Go template fallback")
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// Get caller info
 		callerInfo := "Unknown"
@@ -375,112 +540,6 @@ func createWebHandler(hostname string, natsPort, webPort int, ns *server.Server,
 		if err := tmpl.Execute(w, data); err != nil {
 			log.Printf("Template execution error: %v", err)
 		}
-	})
-
-	// JSON status API
-	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
-		varz, _ := ns.Varz(nil)
-		var connections int
-		var inMsgs, outMsgs, inBytes, outBytes int64
-		if varz != nil {
-			connections = varz.Connections
-			inMsgs = varz.InMsgs
-			outMsgs = varz.OutMsgs
-			inBytes = varz.InBytes
-			outBytes = varz.OutBytes
-		}
-
-		status := map[string]any{
-			"hostname":      hostname,
-			"uptime":        time.Since(startTime).String(),
-			"uptime_secs":   time.Since(startTime).Seconds(),
-			"platform":      runtime.GOOS,
-			"arch":          runtime.GOARCH,
-			"tailscale_ips": formatIPs(ips),
-			"nats": map[string]any{
-				"url":          fmt.Sprintf("nats://%s:%d", hostname, natsPort),
-				"connections":  connections,
-				"messages_in":  inMsgs,
-				"messages_out": outMsgs,
-				"bytes_in":     inBytes,
-				"bytes_out":    outBytes,
-			},
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(status)
-	})
-
-	// Cameras API
-	mux.HandleFunc("/api/cameras", func(w http.ResponseWriter, r *http.Request) {
-		cameras, err := ListCameras()
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(cameras)
-	})
-
-	// Video Stream MJPEG
-	mux.HandleFunc("/stream", StreamHandler)
-
-	// WebSocket for real-time updates
-	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-			InsecureSkipVerify: true, // Allow connections from different Tailscale hostnames if needed
-		})
-		if err != nil {
-			log.Printf("WebSocket accept error: %v", err)
-			return
-		}
-		defer c.Close(websocket.StatusInternalError, "closing")
-
-		ctx := r.Context()
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				varz, _ := ns.Varz(nil)
-				var connections int
-				var inMsgs, outMsgs, inBytes, outBytes int64
-				if varz != nil {
-					connections = varz.Connections
-					inMsgs = varz.InMsgs
-					outMsgs = varz.OutMsgs
-					inBytes = varz.InBytes
-					outBytes = varz.OutBytes
-				}
-
-				stats := map[string]any{
-					"uptime":      formatDuration(time.Since(startTime)),
-					"connections": connections,
-					"in_msgs":     inMsgs,
-					"out_msgs":    outMsgs,
-					"in_bytes":    formatBytes(inBytes),
-					"out_bytes":   formatBytes(outBytes),
-				}
-
-				err = wsjson.Write(ctx, c, stats)
-				if err != nil {
-					return
-				}
-			}
-		}
-	})
-
-	// NATS varz - forward the full varz
-	mux.HandleFunc("/api/varz", func(w http.ResponseWriter, r *http.Request) {
-		varz, err := ns.Varz(nil)
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(varz)
 	})
 
 	return mux
