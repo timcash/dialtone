@@ -4,19 +4,21 @@ Write-Host "Starting Build and Deploy Process for Dialtone..." -ForegroundColor 
 
 # 1. Build Web UI
 Write-Host "Building Web UI..." -ForegroundColor Yellow
-Set-Location web
+$originalDir = Get-Location
+Set-Location src/web
 npm install
 npm run build
-Set-Location ..
+Set-Location $originalDir
+
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Web UI build failed" -ForegroundColor Red
     exit $LASTEXITCODE
 }
 
-# Copy web files to src/web for embedding
-Remove-Item -Recurse -Force src/web -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Path src/web -Force
-Copy-Item -Path web/dist/* -Destination src/web -Recurse
+# Copy web files to src/web_build for embedding
+Remove-Item -Recurse -Force src/web_build -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path src/web_build -Force
+Copy-Item -Path src/web/dist/* -Destination src/web_build -Recurse
 
 # 1b. Build Dialtone for ARM64 using Podman
 Write-Host "Building Dialtone for ARM64 using Podman..." -ForegroundColor Yellow

@@ -359,18 +359,7 @@ func deployDialtone(host, port, pass string) {
 			os.Exit(1)
 		}
 
-		// 3. Upload web directory if it exists
-		localWebDir := "bin/web"
-		if _, err := os.Stat(localWebDir); err == nil {
-			fmt.Println("Uploading web assets...")
-			remoteWebDir := path.Join(remoteDir, "web")
-			runCommand(client, fmt.Sprintf("mkdir -p %s", remoteWebDir))
-			err = uploadDir(client, localWebDir, remoteWebDir)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to upload web assets: %v\n", err)
-				// Non-fatal, but warn
-			}
-		}
+		// No external web assets needed, they are embedded
 	} else {
 		// 1. Create remote directory (clean slate)
 		remoteDir := "/home/tim/dialtone_src"
@@ -384,7 +373,6 @@ func deployDialtone(host, port, pass string) {
 			"src/dialtone.go",
 			"src/camera_linux.go",
 			"src/camera_stub.go",
-			"src/index.html",
 		}
 
 		for _, file := range filesToUpload {

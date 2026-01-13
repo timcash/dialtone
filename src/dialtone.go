@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"html/template"
 	"io"
 	"io/fs"
 	"log"
@@ -70,31 +69,8 @@ func runLocalOnly(port, wsPort int, verbose bool) {
 // Global start time for uptime calculation
 var startTime = time.Now()
 
-//go:embed all:web
+//go:embed all:web_build
 var webFS embed.FS
-
-//go:embed index.html
-var fallbackHTML embed.FS
-
-var tmpl = template.Must(template.ParseFS(fallbackHTML, "index.html"))
-
-// TemplateData for the original dashboard (fallback)
-type TemplateData struct {
-	Hostname    string
-	Uptime      string
-	OS          string
-	Arch        string
-	Caller      string
-	NATSPort    int
-	Connections int
-	InMsgs      int64
-	OutMsgs     int64
-	InBytes     string
-	OutBytes    string
-	IPs         string
-	WebPort     int
-	Cameras     []Camera
-}
 
 // runWithTailscale starts NATS exposed via Tailscale
 func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir string, ephemeral, verbose bool) {
@@ -467,79 +443,25 @@ func createWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server
 		}
 	})
 
-	// 6. Static Asset Serving (Embedded or Fallback)
-	subFS, err := fs.Sub(webFS, "web")
-	if err == nil {
-		// Verify there's actually something in there
-		if _, err := subFS.Open("index.html"); err == nil {
-			log.Printf("Using embedded web assets")
-			staticHandler := http.FileServer(http.FS(subFS))
-			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-				// If it's a known static file, serve it
-				f, err := subFS.Open(strings.TrimPrefix(r.URL.Path, "/"))
-				if err == nil {
-					f.Close()
-					staticHandler.ServeHTTP(w, r)
-					return
-				}
-				// Otherwise serve index.html for SPA
-				http.ServeFileFS(w, r, subFS, "index.html")
-			})
-			return mux
-		}
+	// 6. Static Asset Serving (Embedded)
+	subFS, err := fs.Sub(webFS, "web_build")
+	if err != nil {
+		log.Printf("Error accessing sub-filesystem: %v", err)
 	}
 
-	// Fallback to original dashboard template if embedded assets missing
-	log.Printf("Warning: Embedded web assets not found, using Go template fallback")
+	// Fallback/SPA logic for embedded web assets
+	log.Printf("Using embedded web assets")
+	staticHandler := http.FileServer(http.FS(subFS))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Get caller info
-		callerInfo := "Unknown"
-		if lc != nil {
-			who, err := lc.WhoIs(r.Context(), r.RemoteAddr)
-			if err == nil && who.UserProfile != nil {
-				callerInfo = who.UserProfile.DisplayName
-				if who.Node != nil {
-					callerInfo += " (" + who.Node.Name + ")"
-				}
-			}
+		// If it's a known static file, serve it
+		f, err := subFS.Open(strings.TrimPrefix(r.URL.Path, "/"))
+		if err == nil {
+			f.Close()
+			staticHandler.ServeHTTP(w, r)
+			return
 		}
-
-		// Get NATS stats
-		varz, _ := ns.Varz(nil)
-		var connections int
-		var inMsgs, outMsgs, inBytes, outBytes int64
-		if varz != nil {
-			connections = varz.Connections
-			inMsgs = varz.InMsgs
-			outMsgs = varz.OutMsgs
-			inBytes = varz.InBytes
-			outBytes = varz.OutBytes
-		}
-
-		// Get cameras
-		cameras, _ := ListCameras()
-
-		data := TemplateData{
-			Hostname:    hostname,
-			Uptime:      formatDuration(time.Since(startTime)),
-			OS:          runtime.GOOS,
-			Arch:        runtime.GOARCH,
-			Caller:      callerInfo,
-			NATSPort:    natsPort,
-			Connections: connections,
-			InMsgs:      inMsgs,
-			OutMsgs:     outMsgs,
-			InBytes:     formatBytes(inBytes),
-			OutBytes:    formatBytes(outBytes),
-			IPs:         formatIPs(ips),
-			WebPort:     webPort,
-			Cameras:     cameras,
-		}
-
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := tmpl.Execute(w, data); err != nil {
-			log.Printf("Template execution error: %v", err)
-		}
+		// Otherwise serve index.html for SPA
+		http.ServeFileFS(w, r, subFS, "index.html")
 	})
 
 	return mux
