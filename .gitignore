@@ -3,9 +3,6 @@ bin/
 *.exe
 *.exe~
 
-# Claude temp files
-tmpclaude-*
-
 # IDE
 .vscode/
 .idea/
@@ -17,5 +14,5 @@ Thumbs.db
 # Go
 *.test
 *.out
-.claude/settings.local.json
+.claude
 prompt.md
