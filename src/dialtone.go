@@ -20,6 +20,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 	"github.com/nats-io/nats-server/v2/server"
 	"tailscale.com/client/tailscale"
 	"tailscale.com/tsnet"
@@ -86,6 +88,7 @@ type TemplateData struct {
 	OutBytes    string
 	IPs         string
 	WebPort     int
+	Cameras     []Camera
 }
 
 // runWithTailscale starts NATS exposed via Tailscale
@@ -141,6 +144,25 @@ func runWithTailscale(hostname string, port, webPort int, stateDir string, ephem
 
 	log.Printf("NATS server available on Tailscale at %s:%d", hostname, port)
 	log.Printf("Connect using: nats://%s:%d", hostname, port)
+
+	// Start camera in background if available
+	go func() {
+		cameras, err := ListCameras()
+		if err != nil {
+			log.Printf("CAMERA: Failed to list devices: %v", err)
+			return
+		}
+		if len(cameras) > 0 {
+			log.Printf("CAMERA: Found %d devices, using %s", len(cameras), cameras[0].Device)
+			if err := StartCamera(context.Background(), cameras[0].Device); err != nil {
+				log.Printf("CAMERA: Failed to start %s: %v", cameras[0].Device, err)
+			} else {
+				log.Printf("CAMERA: %s started successfully", cameras[0].Device)
+			}
+		} else {
+			log.Printf("CAMERA: No devices found")
+		}
+	}()
 
 	// Start proxy to forward Tailscale connections to local NATS
 	go proxyListener(natsLn, fmt.Sprintf("127.0.0.1:%d", localNATSPort))
@@ -329,6 +351,9 @@ func createWebHandler(hostname string, natsPort, webPort int, ns *server.Server,
 			outBytes = varz.OutBytes
 		}
 
+		// Get cameras
+		cameras, _ := ListCameras()
+
 		data := TemplateData{
 			Hostname:    hostname,
 			Uptime:      formatDuration(time.Since(startTime)),
@@ -343,6 +368,7 @@ func createWebHandler(hostname string, natsPort, webPort int, ns *server.Server,
 			OutBytes:    formatBytes(outBytes),
 			IPs:         formatIPs(ips),
 			WebPort:     webPort,
+			Cameras:     cameras,
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -382,6 +408,68 @@ func createWebHandler(hostname string, natsPort, webPort int, ns *server.Server,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(status)
+	})
+
+	// Cameras API
+	mux.HandleFunc("/api/cameras", func(w http.ResponseWriter, r *http.Request) {
+		cameras, err := ListCameras()
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(cameras)
+	})
+
+	// Video Stream MJPEG
+	mux.HandleFunc("/stream", StreamHandler)
+
+	// WebSocket for real-time updates
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+			InsecureSkipVerify: true, // Allow connections from different Tailscale hostnames if needed
+		})
+		if err != nil {
+			log.Printf("WebSocket accept error: %v", err)
+			return
+		}
+		defer c.Close(websocket.StatusInternalError, "closing")
+
+		ctx := r.Context()
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				varz, _ := ns.Varz(nil)
+				var connections int
+				var inMsgs, outMsgs, inBytes, outBytes int64
+				if varz != nil {
+					connections = varz.Connections
+					inMsgs = varz.InMsgs
+					outMsgs = varz.OutMsgs
+					inBytes = varz.InBytes
+					outBytes = varz.OutBytes
+				}
+
+				stats := map[string]any{
+					"uptime":      formatDuration(time.Since(startTime)),
+					"connections": connections,
+					"in_msgs":     inMsgs,
+					"out_msgs":    outMsgs,
+					"in_bytes":    formatBytes(inBytes),
+					"out_bytes":   formatBytes(outBytes),
+				}
+
+				err = wsjson.Write(ctx, c, stats)
+				if err != nil {
+					return
+				}
+			}
+		}
 	})
 
 	// NATS varz - forward the full varz

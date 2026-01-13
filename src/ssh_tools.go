@@ -7,8 +7,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
+	"path"
 	"path/filepath"
+	"time"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -133,6 +134,27 @@ func runCommand(client *ssh.Client, cmd string) (string, error) {
 	return string(output), nil
 }
 
+func runCommandNoWait(client *ssh.Client, cmd string) error {
+	session, err := client.NewSession()
+	if err != nil {
+		return fmt.Errorf("failed to create session: %w", err)
+	}
+	// We don't defer session.Close() here because we want it to stay alive
+	// long enough for the command to start and background itself.
+	// Actually, session.Start() returns immediately.
+
+	err = session.Start(cmd)
+	if err != nil {
+		session.Close()
+		return fmt.Errorf("failed to start command: %w", err)
+	}
+
+	// Small sleep to let the command start
+	time.Sleep(500 * time.Millisecond)
+	session.Close()
+	return nil
+}
+
 func uploadFile(client *ssh.Client, localPath, remotePath string) error {
 	sftpClient, err := sftp.NewClient(client)
 	if err != nil {
@@ -207,19 +229,7 @@ func downloadFile(client *ssh.Client, remotePath, localPath string) error {
 }
 
 func deployDialtone(host, port, pass string) {
-	fmt.Println("Starting deployment of Dialtone...")
-
-	// 1. Cross-compile locally
-	fmt.Println("Building for linux/arm64...")
-	os.MkdirAll("bin", 0755)
-	outputPath := filepath.Join("bin", "dialtone_linux_arm64")
-	cmdBuild := exec.Command("go", "build", "-o", outputPath, "./src/dialtone.go")
-	cmdBuild.Env = append(os.Environ(), "GOOS=linux", "GOARCH=arm64")
-	if output, err := cmdBuild.CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "Build failed: %v\nOutput: %s\n", err, output)
-		os.Exit(1)
-	}
-	defer os.Remove(outputPath)
+	fmt.Println("Starting deployment of Dialtone (Remote Build)...")
 
 	// Parse user@host
 	username := ""
@@ -245,23 +255,54 @@ func deployDialtone(host, port, pass string) {
 	}
 	defer client.Close()
 
-	// 2. Kill existing process
-	fmt.Println("Stopping remote dialtone...")
-	runCommand(client, "pkill dialtone || true")
+	// 1. Create remote directory (clean slate)
+	remoteDir := "/home/tim/dialtone_src"
+	fmt.Printf("Cleaning and creating remote directory %s...\n", remoteDir)
+	runCommand(client, fmt.Sprintf("rm -rf %s && mkdir -p %s/src", remoteDir, remoteDir))
 
-	// 3. Upload binary
-	fmt.Println("Uploading new binary...")
-	err = uploadFile(client, outputPath, "/home/tim/dialtone")
+	// 2. Upload source files
+	filesToUpload := []string{
+		"go.mod",
+		"go.sum",
+		"src/dialtone.go",
+		"src/camera_linux.go",
+		"src/camera_stub.go",
+		"src/index.html",
+	}
+
+	for _, file := range filesToUpload {
+		fmt.Printf("Uploading %s...\n", file)
+		remotePath := path.Join(remoteDir, file)
+		// Ensure remote subdirectory exists
+		remoteSubDir := path.Dir(remotePath)
+		runCommand(client, fmt.Sprintf("mkdir -p %s", remoteSubDir))
+
+		err = uploadFile(client, file, remotePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to upload %s: %v\n", file, err)
+			os.Exit(1)
+		}
+	}
+
+	// 3. Build remotely
+	fmt.Println("Building on Raspberry Pi...")
+	buildCmd := fmt.Sprintf("cd %s && /usr/local/go/bin/go build -o dialtone ./src", remoteDir)
+	output, err := runCommand(client, buildCmd)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Upload failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Remote build failed: %v\nOutput: %s\n", err, output)
+		fmt.Println("\nTIP: Make sure 'go' is installed on the Raspberry Pi.")
 		os.Exit(1)
 	}
 
-	// 4. Start service
-	fmt.Println("Restarting service...")
-	// We use nohup and redirect to nats.log to match the existing setup
-	startCmd := "chmod +x ~/dialtone && nohup ~/dialtone -hostname drone-nats > ~/nats.log 2>&1 &"
-	_, err = runCommand(client, startCmd)
+	// 4. Stop existing process
+	fmt.Println("Stopping remote dialtone...")
+	runCommand(client, "pkill dialtone || true")
+
+	// 5. Move binary to home and start
+	fmt.Println("Starting service...")
+	// Use < /dev/null to ensure the session doesn't wait for input
+	startCmd := fmt.Sprintf("cp %s/dialtone ~/dialtone && chmod +x ~/dialtone && nohup ~/dialtone -hostname drone-nats > ~/nats.log 2>&1 < /dev/null &", remoteDir)
+	err = runCommandNoWait(client, startCmd)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to start: %v\n", err)
 		os.Exit(1)
