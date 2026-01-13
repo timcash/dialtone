@@ -6,7 +6,8 @@ A Go application that runs an embedded [NATS](https://nats.io/) server exposed v
 
 - Embedded NATS server (no external dependencies)
 - Tailscale integration via [tsnet](https://tailscale.com/kb/1244/tsnet) - no separate Tailscale daemon required
-- **Web Dashboard**: Real-time status, NATS metrics, and Tailscale networking info
+- **Live MJPEG Camera Stream**: High-performance video streaming from Linux V4L2 devices
+- **Real-time Dashboard**: Live status, NATS metrics, and camera feed via WebSocket updates
 - Headless authentication support for remote/SSH deployments
 - Ephemeral node option for temporary deployments
 - Local-only mode for development without Tailscale
@@ -22,9 +23,13 @@ A Go application that runs an embedded [NATS](https://nats.io/) server exposed v
 ```
 dialtone/
 ├── src/
-│   ├── dialtone.go       # Main application
-│   ├── dialtone_test.go  # Tests
-│   └── ssh_tools.go      # SSH utility tool
+│   ├── dialtone.go       # Main application & Web Server
+│   ├── camera_linux.go   # V4L2 camera implementation
+│   ├── camera_stub.go    # Stub for non-Linux platforms
+│   ├── camera_test.go    # Standalone diagnostic tool
+│   ├── index.html        # Dashboard template with WebSocket client
+│   ├── dialtone_test.go  # Integration tests
+│   └── ssh_tools.go      # SSH utility & deployment tool
 ├── bin/                   # Compiled binaries (gitignored)
 ├── go.mod
 ├── go.sum
@@ -134,6 +139,40 @@ https://login.tailscale.com/a/abc123def456
 ```
 
 Visit this URL to authenticate. For headless servers, you can copy this URL and open it on any browser.
+
+## Camera System
+
+Dialtone includes a built-in camera streaming system designed for Raspberry Pi and other Linux-based robotics platforms.
+
+### Streaming Endpoints
+
+- **`/stream`**: Low-latency MJPEG video stream. Can be embedded in any `<img>` tag or viewed directly.
+- **`/api/cameras`**: JSON list of detected V4L2 video devices.
+
+### Hardware Compatibility
+
+The system uses [go4vl](https://github.com/vladimirvivien/go4vl) to interact with V4L2 devices. It automatically searches for the first available capture device (usually `/dev/video0`) and configures it for 640x480 MJPEG captures at 30 FPS.
+
+### Hardware Diagnostic Tool
+
+If you encounter issues with the camera (e.g., "Device or resource busy"), use the included diagnostic tool:
+
+```bash
+# On the Raspberry Pi
+cd ~/dialtone_src
+go build -o camera_diagnostic src/camera_test.go
+./camera_diagnostic
+```
+
+This tool will list all video devices, attempt to open them, and save a single frame `test_frame_videoX.jpg` if successful.
+
+## Dashboard WebSocket
+
+The web dashboard uses WebSockets for real-time updates. This avoids page flickering and provides sub-second monitoring of:
+- **System Uptime**
+- **NATS Connection Counts**
+- **Message Throughput** (In/Out)
+- **Data Transfer** (Bytes)
 
 ## Architecture
 
