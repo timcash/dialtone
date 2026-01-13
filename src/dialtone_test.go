@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -667,18 +668,9 @@ func TestTailscaleWebAccess(t *testing.T) {
 	}
 
 	body, _ := io.ReadAll(resp.Body)
-	if !contains(string(body), "Dialtone Dashboard") {
+	if !strings.Contains(string(body), "Dialtone Dashboard") {
 		t.Error("Dashboard content missing from response")
 	}
 
 	t.Log("Successfully accessed web dashboard via MagicDNS FQDN!")
-}
-
-func contains(s, substr string) bool {
-	for i := 0; i < len(s)-len(substr)+1; i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
