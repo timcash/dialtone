@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"html/template"
 	"io"
 	"log"
 	"net"
@@ -64,6 +66,27 @@ func runLocalOnly(port int, verbose bool) {
 
 // Global start time for uptime calculation
 var startTime = time.Now()
+
+//go:embed index.html
+var indexHTML embed.FS
+
+var tmpl = template.Must(template.ParseFS(indexHTML, "index.html"))
+
+type TemplateData struct {
+	Hostname    string
+	Uptime      string
+	OS          string
+	Arch        string
+	Caller      string
+	NATSPort    int
+	Connections int
+	InMsgs      int64
+	OutMsgs     int64
+	InBytes     string
+	OutBytes    string
+	IPs         string
+	WebPort     int
+}
 
 // runWithTailscale starts NATS exposed via Tailscale
 func runWithTailscale(hostname string, port, webPort int, stateDir string, ephemeral, verbose bool) {
@@ -153,7 +176,7 @@ func runWithTailscale(hostname string, port, webPort int, stateDir string, ephem
 		}
 
 		fmt.Println("\n=======================================================")
-		fmt.Printf("🌍 WEB SERVER READY\n")
+		fmt.Printf("WEB SERVER READY\n")
 		// We print the FQDN-based URL if available, otherwise hostname
 		fmt.Printf("   URL: http://%s:%d\n", displayHostname, webPort)
 
@@ -306,88 +329,26 @@ func createWebHandler(hostname string, natsPort, webPort int, ns *server.Server,
 			outBytes = varz.OutBytes
 		}
 
+		data := TemplateData{
+			Hostname:    hostname,
+			Uptime:      formatDuration(time.Since(startTime)),
+			OS:          runtime.GOOS,
+			Arch:        runtime.GOARCH,
+			Caller:      callerInfo,
+			NATSPort:    natsPort,
+			Connections: connections,
+			InMsgs:      inMsgs,
+			OutMsgs:     outMsgs,
+			InBytes:     formatBytes(inBytes),
+			OutBytes:    formatBytes(outBytes),
+			IPs:         formatIPs(ips),
+			WebPort:     webPort,
+		}
+
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
-<head>
-    <title>Dialtone - %s</title>
-    <meta http-equiv="refresh" content="5">
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-               max-width: 800px; margin: 50px auto; padding: 20px; background: #1a1a2e; color: #eee; }
-        h1 { color: #00d9ff; }
-        .card { background: #16213e; border-radius: 8px; padding: 20px; margin: 20px 0; }
-        .status { display: inline-block; width: 12px; height: 12px; border-radius: 50%%; margin-right: 8px; }
-        .status.ok { background: #00ff88; }
-        .status.error { background: #ff4444; }
-        table { width: 100%%; border-collapse: collapse; }
-        td, th { padding: 10px; text-align: left; border-bottom: 1px solid #333; }
-        th { color: #00d9ff; }
-        .mono { font-family: monospace; background: #0f0f23; padding: 2px 6px; border-radius: 4px; }
-        a { color: #00d9ff; }
-    </style>
-</head>
-<body>
-    <h1>🎵 Dialtone Dashboard</h1>
-
-    <div class="card">
-        <h2><span class="status ok"></span>System Status</h2>
-        <table>
-            <tr><th>Hostname</th><td class="mono">%s</td></tr>
-            <tr><th>Uptime</th><td>%s</td></tr>
-            <tr><th>Platform</th><td>%s / %s</td></tr>
-            <tr><th>Viewer</th><td>%s</td></tr>
-        </table>
-    </div>
-
-    <div class="card">
-        <h2><span class="status ok"></span>NATS Server</h2>
-        <table>
-            <tr><th>Status</th><td><span class="status ok"></span>Running</td></tr>
-            <tr><th>Connection URL</th><td class="mono">nats://%s:%d</td></tr>
-            <tr><th>Connections</th><td>%d</td></tr>
-            <tr><th>Messages In</th><td>%d</td></tr>
-            <tr><th>Messages Out</th><td>%d</td></tr>
-            <tr><th>Bytes In</th><td>%s</td></tr>
-            <tr><th>Bytes Out</th><td>%s</td></tr>
-        </table>
-    </div>
-
-    <div class="card">
-        <h2>🌐 Tailscale Network</h2>
-        <table>
-            <tr><th>Tailscale IPs</th><td class="mono">%s</td></tr>
-            <tr><th>Web Dashboard</th><td><a href="http://%s:%d">http://%s:%d</a></td></tr>
-        </table>
-    </div>
-
-    <div class="card">
-        <h2>📡 API Endpoints</h2>
-        <table>
-            <tr><td><a href="/api/status">/api/status</a></td><td>JSON status endpoint</td></tr>
-            <tr><td><a href="/api/varz">/api/varz</a></td><td>NATS server variables</td></tr>
-        </table>
-    </div>
-
-    <p style="color: #666; text-align: center; margin-top: 40px;">
-        Auto-refreshes every 5 seconds
-    </p>
-</body>
-</html>`,
-			hostname,
-			hostname,
-			formatDuration(time.Since(startTime)),
-			runtime.GOOS, runtime.GOARCH,
-			callerInfo,
-			hostname, natsPort,
-			connections,
-			inMsgs,
-			outMsgs,
-			formatBytes(inBytes),
-			formatBytes(outBytes),
-			formatIPs(ips),
-			hostname, webPort, hostname, webPort,
-		)
+		if err := tmpl.Execute(w, data); err != nil {
+			log.Printf("Template execution error: %v", err)
+		}
 	})
 
 	// JSON status API

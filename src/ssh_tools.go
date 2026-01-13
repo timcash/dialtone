@@ -207,10 +207,10 @@ func downloadFile(client *ssh.Client, remotePath, localPath string) error {
 }
 
 func deployDialtone(host, port, pass string) {
-	fmt.Println("🚀 Starting deployment of Dialtone...")
+	fmt.Println("Starting deployment of Dialtone...")
 
 	// 1. Cross-compile locally
-	fmt.Println("📦 Building for linux/arm64...")
+	fmt.Println("Building for linux/arm64...")
 	os.MkdirAll("bin", 0755)
 	outputPath := filepath.Join("bin", "dialtone_linux_arm64")
 	cmdBuild := exec.Command("go", "build", "-o", outputPath, "./src/dialtone.go")
@@ -246,11 +246,11 @@ func deployDialtone(host, port, pass string) {
 	defer client.Close()
 
 	// 2. Kill existing process
-	fmt.Println("🛑 Stopping remote dialtone...")
+	fmt.Println("Stopping remote dialtone...")
 	runCommand(client, "pkill dialtone || true")
 
 	// 3. Upload binary
-	fmt.Println("📤 Uploading new binary...")
+	fmt.Println("Uploading new binary...")
 	err = uploadFile(client, outputPath, "/home/tim/dialtone")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Upload failed: %v\n", err)
@@ -258,7 +258,7 @@ func deployDialtone(host, port, pass string) {
 	}
 
 	// 4. Start service
-	fmt.Println("🎬 Restarting service...")
+	fmt.Println("Restarting service...")
 	// We use nohup and redirect to nats.log to match the existing setup
 	startCmd := "chmod +x ~/dialtone && nohup ~/dialtone -hostname drone-nats > ~/nats.log 2>&1 &"
 	_, err = runCommand(client, startCmd)
@@ -267,5 +267,5 @@ func deployDialtone(host, port, pass string) {
 		os.Exit(1)
 	}
 
-	fmt.Println("\n✅ Deployment complete!")
+	fmt.Println("\nDeployment complete!")
 }

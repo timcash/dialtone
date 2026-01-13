@@ -1,0 +1,29 @@
+# build_and_deploy.ps1
+
+Write-Host "Starting Build and Deploy Process for Dialtone..." -ForegroundColor Cyan
+
+# 1. Compile SSH Tools
+Write-Host "Compiling SSH Tools..." -ForegroundColor Yellow
+go build -o bin/ssh_tools.exe src/ssh_tools.go
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Failed to compile SSH Tools" -ForegroundColor Red
+    exit $LASTEXITCODE
+}
+
+# 2. Execute Deployment
+Write-Host "Deploying to Raspberry Pi..." -ForegroundColor Yellow
+bin\ssh_tools.exe -host tim@192.168.4.36 -pass password -deploy
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Deployment failed" -ForegroundColor Red
+    exit $LASTEXITCODE
+}
+
+# 3. Run Verification Tests
+Write-Host "Running Verification Tests..." -ForegroundColor Yellow
+go test -v ./src/...
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Tests failed" -ForegroundColor Red
+    exit $LASTEXITCODE
+}
+
+Write-Host "Build and Deploy Successful!" -ForegroundColor Green
