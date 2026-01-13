@@ -13,6 +13,7 @@ import (
 
 	"os/exec"
 
+	"github.com/joho/godotenv"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
@@ -30,6 +31,12 @@ func main() {
 	deploy := flag.Bool("deploy", false, "Deploy dialtone to Raspberry Pi (cross-compiles and restarts)")
 	podmanBuild := flag.Bool("podman-build", false, "Build dialtone locally using Podman for Linux ARM64")
 	flag.Parse()
+
+	// Load .env file if it exists
+	if err := godotenv.Load(); err != nil {
+		// Non-fatal, just log if verbose
+		// fmt.Printf("No .env file found: %v\n", err)
+	}
 
 	if *podmanBuild {
 		buildWithPodman()
@@ -346,7 +353,10 @@ func deployDialtone(host, port, pass string) {
 
 	if usePrebuilt {
 		// 1. Clean remote directory
-		remoteDir := "/home/tim/dialtone_deploy"
+		remoteDir := os.Getenv("REMOTE_DIR_DEPLOY")
+		if remoteDir == "" {
+			remoteDir = "/home/tim/dialtone_deploy"
+		}
 		fmt.Printf("Cleaning and creating remote directory %s...\n", remoteDir)
 		runCommand(client, fmt.Sprintf("rm -rf %s && mkdir -p %s", remoteDir, remoteDir))
 
@@ -362,7 +372,10 @@ func deployDialtone(host, port, pass string) {
 		// No external web assets needed, they are embedded
 	} else {
 		// 1. Create remote directory (clean slate)
-		remoteDir := "/home/tim/dialtone_src"
+		remoteDir := os.Getenv("REMOTE_DIR_SRC")
+		if remoteDir == "" {
+			remoteDir = "/home/tim/dialtone_src"
+		}
 		fmt.Printf("Cleaning and creating remote directory %s...\n", remoteDir)
 		runCommand(client, fmt.Sprintf("rm -rf %s && mkdir -p %s/src", remoteDir, remoteDir))
 
@@ -407,11 +420,24 @@ func deployDialtone(host, port, pass string) {
 	// 5. Move binary to home and start
 	fmt.Println("Starting service...")
 	// Use < /dev/null to ensure the session doesn't wait for input
-	remoteBinaryPath := "/home/tim/dialtone_src/dialtone"
-	if usePrebuilt {
-		remoteBinaryPath = "/home/tim/dialtone_deploy/dialtone"
+	remoteBaseDir := os.Getenv("REMOTE_DIR_SRC")
+	if remoteBaseDir == "" {
+		remoteBaseDir = "/home/tim/dialtone_src"
 	}
-	startCmd := fmt.Sprintf("cp %s ~/dialtone && chmod +x ~/dialtone && nohup ~/dialtone -hostname drone-nats > ~/nats.log 2>&1 < /dev/null &", remoteBinaryPath)
+	if usePrebuilt {
+		remoteBaseDir = os.Getenv("REMOTE_DIR_DEPLOY")
+		if remoteBaseDir == "" {
+			remoteBaseDir = "/home/tim/dialtone_deploy"
+		}
+	}
+	remoteBinaryPath := path.Join(remoteBaseDir, "dialtone")
+
+	hostnameParam := os.Getenv("DIALTONE_HOSTNAME")
+	if hostnameParam == "" {
+		hostnameParam = "drone-nats"
+	}
+
+	startCmd := fmt.Sprintf("cp %s ~/dialtone && chmod +x ~/dialtone && nohup ~/dialtone -hostname %s > ~/nats.log 2>&1 < /dev/null &", remoteBinaryPath, hostnameParam)
 	err = runCommandNoWait(client, startCmd)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to start: %v\n", err)

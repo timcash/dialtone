@@ -17,3 +17,6 @@ Thumbs.db
 *.out
 .claude
 prompt.md
+
+# ENV
+.env
