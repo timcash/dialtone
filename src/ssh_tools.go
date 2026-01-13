@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"os/exec"
+
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
@@ -26,7 +28,15 @@ func main() {
 	download := flag.String("download", "", "Remote file to download")
 	localDest := flag.String("local-dest", "", "Local destination for download")
 	deploy := flag.Bool("deploy", false, "Deploy dialtone to Raspberry Pi (cross-compiles and restarts)")
+	podmanBuild := flag.Bool("podman-build", false, "Build dialtone locally using Podman for Linux ARM64")
 	flag.Parse()
+
+	if *podmanBuild {
+		buildWithPodman()
+		if !*deploy {
+			return
+		}
+	}
 
 	if *deploy {
 		if *host == "" {
@@ -118,6 +128,49 @@ func main() {
 		}
 		fmt.Printf("Downloaded %s to %s\n", *download, *localDest)
 	}
+}
+
+func buildWithPodman() {
+	fmt.Println("Building Dialtone for Linux ARM64 using Podman...")
+
+	// Use absolute path for mounting
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to get current directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Create bin directory if it doesn't exist
+	if err := os.MkdirAll("bin", 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create bin directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Podman command to cross-compile
+	// We mount the current directory and build for linux/arm64
+	buildCmd := []string{
+		"run", "--rm",
+		"-v", fmt.Sprintf("%s:/src:Z", cwd),
+		"-w", "/src",
+		"-e", "GOOS=linux",
+		"-e", "GOARCH=arm64",
+		"-e", "CGO_ENABLED=1",
+		"-e", "CC=aarch64-linux-gnu-gcc",
+		"golang:1.25.5",
+		"bash", "-c", "apt-get update && apt-get install -y gcc-aarch64-linux-gnu && go build -buildvcs=false -o bin/dialtone-arm64 ./src",
+	}
+
+	fmt.Printf("Running: podman %v\n", buildCmd)
+	cmd := exec.Command("podman", buildCmd...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Podman build failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Build successful: bin/dialtone-arm64")
 }
 
 func runCommand(client *ssh.Client, cmd string) (string, error) {
@@ -242,6 +295,14 @@ func deployDialtone(host, port, pass string) {
 		}
 	}
 
+	// Check if we have a pre-built local binary
+	localBinary := "bin/dialtone-arm64"
+	usePrebuilt := false
+	if _, err := os.Stat(localBinary); err == nil {
+		usePrebuilt = true
+		fmt.Println("Found pre-built binary, using it for deployment.")
+	}
+
 	// Connect SSH
 	config := &ssh.ClientConfig{
 		User:            username,
@@ -255,43 +316,59 @@ func deployDialtone(host, port, pass string) {
 	}
 	defer client.Close()
 
-	// 1. Create remote directory (clean slate)
-	remoteDir := "/home/tim/dialtone_src"
-	fmt.Printf("Cleaning and creating remote directory %s...\n", remoteDir)
-	runCommand(client, fmt.Sprintf("rm -rf %s && mkdir -p %s/src", remoteDir, remoteDir))
+	if usePrebuilt {
+		// 1. Clean remote directory
+		remoteDir := "/home/tim/dialtone_deploy"
+		fmt.Printf("Cleaning and creating remote directory %s...\n", remoteDir)
+		runCommand(client, fmt.Sprintf("rm -rf %s && mkdir -p %s", remoteDir, remoteDir))
 
-	// 2. Upload source files
-	filesToUpload := []string{
-		"go.mod",
-		"go.sum",
-		"src/dialtone.go",
-		"src/camera_linux.go",
-		"src/camera_stub.go",
-		"src/index.html",
-	}
-
-	for _, file := range filesToUpload {
-		fmt.Printf("Uploading %s...\n", file)
-		remotePath := path.Join(remoteDir, file)
-		// Ensure remote subdirectory exists
-		remoteSubDir := path.Dir(remotePath)
-		runCommand(client, fmt.Sprintf("mkdir -p %s", remoteSubDir))
-
-		err = uploadFile(client, file, remotePath)
+		// 2. Upload only the binary
+		fmt.Printf("Uploading pre-built binary %s...\n", localBinary)
+		remotePath := path.Join(remoteDir, "dialtone")
+		err = uploadFile(client, localBinary, remotePath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to upload %s: %v\n", file, err)
+			fmt.Fprintf(os.Stderr, "Failed to upload binary: %v\n", err)
 			os.Exit(1)
 		}
-	}
+	} else {
+		// 1. Create remote directory (clean slate)
+		remoteDir := "/home/tim/dialtone_src"
+		fmt.Printf("Cleaning and creating remote directory %s...\n", remoteDir)
+		runCommand(client, fmt.Sprintf("rm -rf %s && mkdir -p %s/src", remoteDir, remoteDir))
 
-	// 3. Build remotely
-	fmt.Println("Building on Raspberry Pi...")
-	buildCmd := fmt.Sprintf("cd %s && /usr/local/go/bin/go build -o dialtone ./src", remoteDir)
-	output, err := runCommand(client, buildCmd)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Remote build failed: %v\nOutput: %s\n", err, output)
-		fmt.Println("\nTIP: Make sure 'go' is installed on the Raspberry Pi.")
-		os.Exit(1)
+		// 2. Upload source files
+		filesToUpload := []string{
+			"go.mod",
+			"go.sum",
+			"src/dialtone.go",
+			"src/camera_linux.go",
+			"src/camera_stub.go",
+			"src/index.html",
+		}
+
+		for _, file := range filesToUpload {
+			fmt.Printf("Uploading %s...\n", file)
+			remotePath := path.Join(remoteDir, file)
+			// Ensure remote subdirectory exists
+			remoteSubDir := path.Dir(remotePath)
+			runCommand(client, fmt.Sprintf("mkdir -p %s", remoteSubDir))
+
+			err = uploadFile(client, file, remotePath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to upload %s: %v\n", file, err)
+				os.Exit(1)
+			}
+		}
+
+		// 3. Build remotely
+		fmt.Println("Building on Raspberry Pi...")
+		buildCmd := fmt.Sprintf("cd %s && /usr/local/go/bin/go build -o dialtone ./src", remoteDir)
+		output, err := runCommand(client, buildCmd)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Remote build failed: %v\nOutput: %s\n", err, output)
+			fmt.Println("\nTIP: Make sure 'go' is installed on the Raspberry Pi.")
+			os.Exit(1)
+		}
 	}
 
 	// 4. Stop existing process
@@ -301,7 +378,11 @@ func deployDialtone(host, port, pass string) {
 	// 5. Move binary to home and start
 	fmt.Println("Starting service...")
 	// Use < /dev/null to ensure the session doesn't wait for input
-	startCmd := fmt.Sprintf("cp %s/dialtone ~/dialtone && chmod +x ~/dialtone && nohup ~/dialtone -hostname drone-nats > ~/nats.log 2>&1 < /dev/null &", remoteDir)
+	remoteBinaryPath := "/home/tim/dialtone_src/dialtone"
+	if usePrebuilt {
+		remoteBinaryPath = "/home/tim/dialtone_deploy/dialtone"
+	}
+	startCmd := fmt.Sprintf("cp %s ~/dialtone && chmod +x ~/dialtone && nohup ~/dialtone -hostname drone-nats > ~/nats.log 2>&1 < /dev/null &", remoteBinaryPath)
 	err = runCommandNoWait(client, startCmd)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to start: %v\n", err)

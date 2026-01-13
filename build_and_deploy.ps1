@@ -10,6 +10,14 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
+# 1b. Build Dialtone for ARM64 using Podman
+Write-Host "Building Dialtone for ARM64 using Podman..." -ForegroundColor Yellow
+bin\ssh_tools.exe -podman-build
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Podman build failed" -ForegroundColor Red
+    exit $LASTEXITCODE
+}
+
 # 2. Execute Deployment
 Write-Host "Deploying to Raspberry Pi..." -ForegroundColor Yellow
 bin\ssh_tools.exe -host tim@192.168.4.36 -pass password -deploy
