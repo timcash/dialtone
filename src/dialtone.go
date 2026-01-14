@@ -61,6 +61,12 @@ func Execute() {
 		runLogs(args)
 	case "start":
 		runStart(args)
+	case "install-deps":
+		RunInstallDeps(args)
+	case "sync-code":
+		RunSyncCode(args)
+	case "remote-build":
+		RunRemoteBuild(args)
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
 		printUsage()
@@ -70,13 +76,16 @@ func Execute() {
 func printUsage() {
 	fmt.Println("Usage: dialtone <command> [options]")
 	fmt.Println("\nCommands:")
-	fmt.Println("  build       Build for ARM64 using Podman")
-	fmt.Println("  full-build  Build Web UI, local CLI, and ARM64 binary")
-	fmt.Println("  deploy      Deploy to remote robot")
-	fmt.Println("  ssh         SSH tools (upload, download, cmd)")
-	fmt.Println("  provision   Generate Tailscale Auth Key")
-	fmt.Println("  logs        Tail remote logs")
-	fmt.Println("  start       Start the NATS and Web server")
+	fmt.Println("  build         Build for ARM64 using Podman")
+	fmt.Println("  full-build    Build Web UI, local CLI, and ARM64 binary")
+	fmt.Println("  deploy        Deploy to remote robot")
+	fmt.Println("  install-deps  Install Go and Node.js on remote robot")
+	fmt.Println("  sync-code     Sync source code to remote robot")
+	fmt.Println("  remote-build  Build Go and Web code on remote robot")
+	fmt.Println("  ssh           SSH tools (upload, download, cmd)")
+	fmt.Println("  provision     Generate Tailscale Auth Key")
+	fmt.Println("  logs          Tail remote logs")
+	fmt.Println("  start         Start the NATS and Web server")
 }
 
 func runStart(args []string) {
