@@ -1,4 +1,4 @@
-package main
+package test
 
 import (
 	"context"
@@ -15,6 +15,8 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
+
+	dialtone "rover/nats/src"
 )
 
 // startTestNATSServer creates and starts an embedded NATS server for testing
@@ -141,7 +143,7 @@ func TestProxy_Bidirectional(t *testing.T) {
 	}
 	defer proxyLn.Close()
 
-	go proxyListener(proxyLn, "127.0.0.1:14232")
+	go dialtone.ProxyListener(proxyLn, "127.0.0.1:14232")
 
 	// Test connection through proxy
 	conn, err := net.Dial("tcp", "127.0.0.1:14233")
@@ -200,7 +202,7 @@ func TestLocalWebUI(t *testing.T) {
 	}
 
 	// Create web handler
-	handler := createWebHandler("localhost", natsPort, wsPort, webPort, ns, nil, nil)
+	handler := dialtone.CreateWebHandler("localhost", natsPort, wsPort, webPort, ns, nil, nil)
 
 	server := &http.Server{
 		Addr:    fmt.Sprintf("127.0.0.1:%d", webPort),

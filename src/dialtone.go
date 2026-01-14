@@ -1,4 +1,4 @@
-package main
+package dialtone
 
 import (
 	"context"
@@ -26,7 +26,7 @@ import (
 	"tailscale.com/tsnet"
 )
 
-func main() {
+func Execute() {
 	if len(os.Args) < 2 {
 		printUsage()
 		return
@@ -202,8 +202,8 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 	}()
 
 	// Start proxies to forward Tailscale connections to local NATS
-	go proxyListener(natsLn, fmt.Sprintf("127.0.0.1:%d", localNATSPort))
-	go proxyListener(wsLn, fmt.Sprintf("127.0.0.1:%d", localWSPort))
+	go ProxyListener(natsLn, fmt.Sprintf("127.0.0.1:%d", localNATSPort))
+	go ProxyListener(wsLn, fmt.Sprintf("127.0.0.1:%d", localWSPort))
 
 	// Start web server on Tailscale
 	webLn, err := ts.Listen("tcp", fmt.Sprintf(":%d", webPort))
@@ -219,7 +219,7 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 	}
 
 	// Create web handler
-	webHandler := createWebHandler(hostname, port, wsPort, webPort, ns, lc, status.TailscaleIPs)
+	webHandler := CreateWebHandler(hostname, port, wsPort, webPort, ns, lc, status.TailscaleIPs)
 
 	// Start web server in goroutine
 	go func() {
@@ -288,20 +288,20 @@ func startNATSServer(host string, port, wsPort int, verbose bool) *server.Server
 	return ns
 }
 
-// proxyListener accepts connections and proxies them to the target address
-func proxyListener(ln net.Listener, targetAddr string) {
+// ProxyListener accepts connections and proxies them to the target address
+func ProxyListener(ln net.Listener, targetAddr string) {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			// Listener closed
 			return
 		}
-		go proxyConnection(conn, targetAddr)
+		go ProxyConnection(conn, targetAddr)
 	}
 }
 
-// proxyConnection proxies data between source and destination
-func proxyConnection(src net.Conn, targetAddr string) {
+// ProxyConnection proxies data between source and destination
+func ProxyConnection(src net.Conn, targetAddr string) {
 	defer src.Close()
 
 	dst, err := net.Dial("tcp", targetAddr)
@@ -364,8 +364,8 @@ func waitForShutdown() {
 	<-c
 }
 
-// createWebHandler creates the HTTP handler for the unified web dashboard
-func createWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server.Server, lc *tailscale.LocalClient, ips []netip.Addr) http.Handler {
+// CreateWebHandler creates the HTTP handler for the unified web dashboard
+func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server.Server, lc *tailscale.LocalClient, ips []netip.Addr) http.Handler {
 	mux := http.NewServeMux()
 
 	// 1. JSON init API for the frontend

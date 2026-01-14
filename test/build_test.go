@@ -1,4 +1,4 @@
-package main
+package test
 
 import (
 	"os"
@@ -22,7 +22,7 @@ func TestBuildTools_NPM(t *testing.T) {
 
 func TestWebUI_BuildOutput(t *testing.T) {
 	// Check if the web build directory exists (this is what gets embedded)
-	info, err := os.Stat("web_build")
+	info, err := os.Stat("../src/web_build")
 	if err != nil {
 		if os.IsNotExist(err) {
 			t.Log("Warning: src/web_build does not exist. Run './build_and_deploy.ps1' to build and prepare assets.")

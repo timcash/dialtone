@@ -1,6 +1,6 @@
 //go:build linux
 
-package main
+package test
 
 import (
 	"context"
@@ -9,13 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/vladimirvivien/go4vl/device"
 	"github.com/vladimirvivien/go4vl/v4l2"
 )
 
-func main() {
+func TestCameraDiag(t *testing.T) {
 	fmt.Println("=== Camera Diagnostic Tool ===")
 
 	// 1. List all video devices
