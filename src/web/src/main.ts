@@ -27,6 +27,8 @@ const subjectInput = document.getElementById('subject') as HTMLInputElement;
 const messageInput = document.getElementById('message') as HTMLTextAreaElement;
 const sendBtn = document.getElementById('send-btn') as HTMLButtonElement;
 const logList = document.getElementById('log-list')!;
+const armBtn = document.getElementById('arm-btn') as HTMLButtonElement;
+const disarmBtn = document.getElementById('disarm-btn') as HTMLButtonElement;
 
 function addLog(msg: string, type: 'info' | 'error' | 'success' = 'info') {
   const item = document.createElement('div');
@@ -110,6 +112,29 @@ async function initNatsWS(port: number) {
       }
     })();
 
+    // Subscribe to Status Text
+    const statusSub = nc.subscribe("mavlink.statustext");
+    (async () => {
+      for await (const m of statusSub) {
+        try {
+            const msg = jc.decode(m.data) as any;
+            const severity = msg.severity <= 3 ? 'error' : 'info';
+            addLog(`MAV: ${msg.text}`, severity);
+        } catch (e) {}
+      }
+    })();
+
+    // Subscribe to ACKs
+    const ackSub = nc.subscribe("mavlink.ack");
+    (async () => {
+      for await (const m of ackSub) {
+        try {
+            const msg = jc.decode(m.data) as any;
+            addLog(`CMD ACK: Cmd=${msg.command} Res=${msg.result}`, msg.result === 0 ? 'success' : 'error');
+        } catch (e) {}
+      }
+    })();
+
     nc.closed().then(() => {
       statusIndicator.className = 'status-offline';
       statusText.textContent = 'DISCONNECTED';
@@ -153,5 +178,21 @@ sendBtn.addEventListener('click', async () => {
     addLog(`Publish failed: ${err}`, 'error');
   }
 });
+
+if (armBtn) {
+  armBtn.addEventListener('click', () => {
+      if (!nc) return;
+      nc.publish("rover.command", jc.encode({ type: "arm" }));
+      addLog("Sent ARM command", "info");
+  });
+}
+
+if (disarmBtn) {
+  disarmBtn.addEventListener('click', () => {
+      if (!nc) return;
+      nc.publish("rover.command", jc.encode({ type: "disarm" }));
+      addLog("Sent DISARM command", "info");
+  });
+}
 
 initApp();
