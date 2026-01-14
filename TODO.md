@@ -1,8 +1,25 @@
-# Improve testing
-0. create branch called improve-testing
-1. improve UI tests to use aria labels after adding them to the web ui
-2. deploy the new binary and run the remote UI tests against the remote robot web UI
-3. send a nats message and recieve feedback in a test all via chromedp and aria labels to get the elements
+# add mavlink capabilities to dialtone
+0. the previous LLM agent broke so you are picking up where it left off
+1. read the main `README.md`
+2. reed the `docs/develop.md`
+3. use `mavlink/rover.py` as a reference for how to implement mavlink capabilities into golang
+4. you can also use `https://github.com/bluenviron/mavp2p` for inspiration
+6. implement only receiving mavlink heatbeat 
+7. attemp to deploy to the robot and test it
+8. show the heartbeat messages in the web ui passed via a nats subject
+9. to debug you can also send ssh commands to the rover via the dialtone cli and it will pull details from the .env file
+10. make sure to use the project logger at `src/logger.go`
+
+# investigate mavlink deprecation warnings
+* read the main `README.md`
+* reed the `docs/develop.md`
+* look at this warning
+```
+gomavlib.NewNode is deprecated: replaced by Node.Initialize().
+```
+* figure out how to fix it
+* to debug you can also send ssh commands to the rover via the dialtone cli and it will pull details from the .env file
+* make sure to use the project logger at `src/logger.go`
 
 # Create plugin system
 1. keep it simple. it should really just be a basic code template that serves as an example for how to create a plugin.
