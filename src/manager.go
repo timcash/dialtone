@@ -33,8 +33,6 @@ func RunBuild(args []string) {
 	full := fs.Bool("full", false, "Build Web UI, local CLI, and ARM64 binary")
 	fs.Parse(args)
 
-	LoadConfig()
-
 	if *full {
 		buildEverything()
 	} else {
@@ -45,13 +43,12 @@ func RunBuild(args []string) {
 // RunDeploy handles deployment to remote robot
 func RunDeploy(args []string) {
 	fs := flag.NewFlagSet("deploy", flag.ExitOnError)
-	host := fs.String("host", "", "SSH host (user@host)")
+	host := fs.String("host", os.Getenv("ROBOT_HOST"), "SSH host")
 	port := fs.String("port", "22", "SSH port")
-	pass := fs.String("pass", "", "SSH password")
+	user := fs.String("user", os.Getenv("ROBOT_USER"), "SSH user")
+	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password")
 	ephemeral := fs.Bool("ephemeral", true, "Register as ephemeral node on Tailscale")
 	fs.Parse(args)
-
-	LoadConfig()
 
 	if *host == "" || *pass == "" {
 		fmt.Println("Error: -host (user@host) and -pass are required for deployment")
@@ -60,24 +57,22 @@ func RunDeploy(args []string) {
 
 	validateRequiredVars([]string{"REMOTE_DIR_SRC", "REMOTE_DIR_DEPLOY", "DIALTONE_HOSTNAME", "TS_AUTHKEY"})
 
-	deployDialtone(*host, *port, *pass, *ephemeral)
+	deployDialtone(*host, *port, *user, *pass, *ephemeral)
 }
 
 // RunSSH handles general SSH tools (upload, download, cmd)
 func RunSSH(args []string) {
 	fs := flag.NewFlagSet("ssh", flag.ExitOnError)
-	host := fs.String("host", "", "SSH host (user@host)")
+	host := fs.String("host", os.Getenv("ROBOT_HOST"), "SSH host")
 	port := fs.String("port", "22", "SSH port")
-	user := fs.String("user", "", "SSH username (overrides user@host)")
-	pass := fs.String("pass", "", "SSH password")
+	user := fs.String("user", os.Getenv("ROBOT_USER"), "SSH username (overrides user@host)")
+	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password")
 	cmd := fs.String("cmd", "", "Command to execute remotely")
 	upload := fs.String("upload", "", "Local file to upload")
 	dest := fs.String("dest", "", "Remote destination path")
 	download := fs.String("download", "", "Remote file to download")
 	localDest := fs.String("local-dest", "", "Local destination for download")
 	fs.Parse(args)
-
-	LoadConfig()
 
 	if *host == "" || *pass == "" {
 		fmt.Println("Error: -host and -pass are required for SSH tools")
@@ -434,7 +429,7 @@ func downloadFile(client *ssh.Client, remotePath, localPath string) error {
 	return nil
 }
 
-func deployDialtone(host, port, pass string, ephemeral bool) {
+func deployDialtone(host, port, user, pass string, ephemeral bool) {
 	fmt.Println("Starting deployment of Dialtone (Remote Build)...")
 
 	localBinary := "bin/dialtone-arm64"
@@ -444,7 +439,7 @@ func deployDialtone(host, port, pass string, ephemeral bool) {
 		fmt.Println("Found pre-built binary, using it for deployment.")
 	}
 
-	client, err := dialSSH(host, port, "", pass)
+	client, err := dialSSH(host, port, user, pass)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to connect: %v\n", err)
 		os.Exit(1)
@@ -540,13 +535,11 @@ func deployDialtone(host, port, pass string, ephemeral bool) {
 
 func runLogs(args []string) {
 	fs := flag.NewFlagSet("logs", flag.ExitOnError)
-	host := fs.String("host", "", "SSH host (user@host)")
+	host := fs.String("host", os.Getenv("ROBOT_HOST"), "SSH host")
 	port := fs.String("port", "22", "SSH port")
-	user := fs.String("user", "", "SSH username")
-	pass := fs.String("pass", "", "SSH password")
+	user := fs.String("user", os.Getenv("ROBOT_USER"), "SSH username")
+	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password")
 	fs.Parse(args)
-
-	LoadConfig()
 
 	if *host == "" || *pass == "" {
 		fmt.Println("Error: -host and -pass are required for logs")
@@ -578,8 +571,6 @@ func RunProvision(args []string) {
 	fs := flag.NewFlagSet("provision", flag.ExitOnError)
 	apiKey := fs.String("api-key", "", "Tailscale API Access Token")
 	fs.Parse(args)
-
-	LoadConfig()
 
 	token := *apiKey
 	if token == "" {
