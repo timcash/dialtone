@@ -32,6 +32,9 @@ func Execute() {
 		return
 	}
 
+	// Load configuration before parsing any flags or running commands
+	LoadConfig()
+
 	command := os.Args[1]
 	args := os.Args[2:]
 
