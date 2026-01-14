@@ -20,9 +20,53 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func RunTools(args []string) {
-	fs := flag.NewFlagSet("tools", flag.ExitOnError)
-	host := fs.String("host", "", "SSH host (user@host or just host)")
+// LoadConfig loads environment variables from .env
+func LoadConfig() {
+	if err := godotenv.Load(); err != nil {
+		// Non-fatal
+	}
+}
+
+// RunBuild handles building for different platforms
+func RunBuild(args []string) {
+	fs := flag.NewFlagSet("build", flag.ExitOnError)
+	full := fs.Bool("full", false, "Build Web UI, local CLI, and ARM64 binary")
+	fs.Parse(args)
+
+	LoadConfig()
+
+	if *full {
+		buildEverything()
+	} else {
+		buildWithPodman()
+	}
+}
+
+// RunDeploy handles deployment to remote robot
+func RunDeploy(args []string) {
+	fs := flag.NewFlagSet("deploy", flag.ExitOnError)
+	host := fs.String("host", "", "SSH host (user@host)")
+	port := fs.String("port", "22", "SSH port")
+	pass := fs.String("pass", "", "SSH password")
+	ephemeral := fs.Bool("ephemeral", true, "Register as ephemeral node on Tailscale")
+	fs.Parse(args)
+
+	LoadConfig()
+
+	if *host == "" || *pass == "" {
+		fmt.Println("Error: -host (user@host) and -pass are required for deployment")
+		os.Exit(1)
+	}
+
+	validateRequiredVars([]string{"REMOTE_DIR_SRC", "REMOTE_DIR_DEPLOY", "DIALTONE_HOSTNAME", "TS_AUTHKEY"})
+
+	deployDialtone(*host, *port, *pass, *ephemeral)
+}
+
+// RunSSH handles general SSH tools (upload, download, cmd)
+func RunSSH(args []string) {
+	fs := flag.NewFlagSet("ssh", flag.ExitOnError)
+	host := fs.String("host", "", "SSH host (user@host)")
 	port := fs.String("port", "22", "SSH port")
 	user := fs.String("user", "", "SSH username (overrides user@host)")
 	pass := fs.String("pass", "", "SSH password")
@@ -31,97 +75,22 @@ func RunTools(args []string) {
 	dest := fs.String("dest", "", "Remote destination path")
 	download := fs.String("download", "", "Remote file to download")
 	localDest := fs.String("local-dest", "", "Local destination for download")
-	deploy := fs.Bool("deploy", false, "Deploy dialtone to Raspberry Pi (cross-compiles and restarts)")
-	podmanBuild := fs.Bool("podman-build", false, "Build dialtone locally using Podman for Linux ARM64")
-	fullBuild := fs.Bool("full-build", false, "Build everything (Web UI, local binary, then Podman build)")
-	ephemeral := fs.Bool("ephemeral", true, "Register as ephemeral node on Tailscale")
 	fs.Parse(args)
 
-	// Load .env file if it exists
-	if err := godotenv.Load(); err != nil {
-		// Non-fatal, just log if verbose
-		// fmt.Printf("No .env file found: %v\n", err)
-	}
+	LoadConfig()
 
-	if *fullBuild {
-		buildEverything()
-		if !*deploy {
-			return
-		}
-	}
-
-	// Validate required environment variables for deployment
-	requiredVars := []string{"REMOTE_DIR_SRC", "REMOTE_DIR_DEPLOY", "DIALTONE_HOSTNAME", "TS_AUTHKEY"}
-	for _, v := range requiredVars {
-		if os.Getenv(v) == "" {
-			fmt.Printf("ERROR: Environment variable %s is not set. Please check your .env file.\n", v)
-			os.Exit(1)
-		}
-	}
-
-	if *podmanBuild {
-		buildWithPodman()
-		if !*deploy {
-			return
-		}
-	}
-
-	if *deploy {
-		if *host == "" {
-			fmt.Println("Error: -host (user@host) is required for deployment")
-			os.Exit(1)
-		}
-		if *pass == "" {
-			fmt.Println("Error: -pass is required for deployment")
-			os.Exit(1)
-		}
-		deployDialtone(*host, *port, *pass, *ephemeral)
-		return
-	}
-
-	if *host == "" {
-		fmt.Println("Usage:")
-		fmt.Println("  Execute command:  ssh_tools -host user@host -pass password -cmd 'ls -la'")
-		fmt.Println("  Upload file:      ssh_tools -host user@host -pass password -upload local.txt -dest /remote/path/")
-		fmt.Println("  Download file:    ssh_tools -host user@host -pass password -download /remote/file -local-dest local.txt")
+	if *host == "" || *pass == "" {
+		fmt.Println("Error: -host and -pass are required for SSH tools")
 		os.Exit(1)
 	}
 
-	// Parse user@host format
-	username := *user
-	hostname := *host
-	if username == "" {
-		for i, c := range *host {
-			if c == '@' {
-				username = (*host)[:i]
-				hostname = (*host)[i+1:]
-				break
-			}
-		}
-	}
-	if username == "" {
-		username = os.Getenv("USER")
-	}
-
-	// Create SSH client config
-	config := &ssh.ClientConfig{
-		User: username,
-		Auth: []ssh.AuthMethod{
-			ssh.Password(*pass),
-		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-	}
-
-	// Connect
-	addr := fmt.Sprintf("%s:%s", hostname, *port)
-	client, err := ssh.Dial("tcp", addr, config)
+	client, err := dialSSH(*host, *port, *user, *pass)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to connect: %v\n", err)
+		fmt.Fprintf(os.Stderr, "SSH connection failed: %v\n", err)
 		os.Exit(1)
 	}
 	defer client.Close()
 
-	// Execute command
 	if *cmd != "" {
 		output, err := runCommand(client, *cmd)
 		if err != nil {
@@ -131,26 +100,22 @@ func RunTools(args []string) {
 		fmt.Print(output)
 	}
 
-	// Upload file
 	if *upload != "" {
 		if *dest == "" {
 			*dest = filepath.Base(*upload)
 		}
-		err := uploadFile(client, *upload, *dest)
-		if err != nil {
+		if err := uploadFile(client, *upload, *dest); err != nil {
 			fmt.Fprintf(os.Stderr, "Upload failed: %v\n", err)
 			os.Exit(1)
 		}
 		fmt.Printf("Uploaded %s to %s\n", *upload, *dest)
 	}
 
-	// Download file
 	if *download != "" {
 		if *localDest == "" {
 			*localDest = filepath.Base(*download)
 		}
-		err := downloadFile(client, *download, *localDest)
-		if err != nil {
+		if err := downloadFile(client, *download, *localDest); err != nil {
 			fmt.Fprintf(os.Stderr, "Download failed: %v\n", err)
 			os.Exit(1)
 		}
@@ -158,24 +123,29 @@ func RunTools(args []string) {
 	}
 }
 
+func validateRequiredVars(vars []string) {
+	for _, v := range vars {
+		if os.Getenv(v) == "" {
+			fmt.Printf("ERROR: Environment variable %s is not set. Please check your .env file.\n", v)
+			os.Exit(1)
+		}
+	}
+}
+
 func buildWithPodman() {
 	fmt.Println("Building Dialtone for Linux ARM64 using Podman...")
 
-	// Use absolute path for mounting
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to get current directory: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Create bin directory if it doesn't exist
 	if err := os.MkdirAll("bin", 0755); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create bin directory: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Podman command to cross-compile
-	// We mount the current directory and build for linux/arm64
 	buildCmd := []string{
 		"run", "--rm",
 		"-v", fmt.Sprintf("%s:/src:Z", cwd),
@@ -221,24 +191,38 @@ func buildEverything() {
 	copyDir(filepath.Join("src", "web", "dist"), webBuildDir)
 
 	// 3. Build Dialtone locally (the tool itself)
-	fmt.Println("Building Dialtone CLI...")
-	exePath := filepath.Join("bin", "dialtone.exe")
+	BuildSelf()
+
+	// 4. Build for ARM64 using Podman
+	buildWithPodman()
+
+	fmt.Println("Full build successful!")
+}
+
+// BuildSelf rebuilds the current binary and replaces it
+func BuildSelf() {
+	fmt.Println("Building Dialtone CLI (Self)...")
+
+	exePath, err := os.Executable()
+	if err != nil {
+		fmt.Printf("Warning: Could not determine executable path, defaulting to bin/dialtone.exe: %v\n", err)
+		exePath = filepath.Join("bin", "dialtone.exe")
+	}
+
 	oldExePath := exePath + ".old"
 
 	// Rename old exe if it exists (allows overwriting while running on Windows)
 	os.Remove(oldExePath) // Clean up any previous old file
 	if _, err := os.Stat(exePath); err == nil {
 		if err := os.Rename(exePath, oldExePath); err != nil {
-			fmt.Printf("Warning: Failed to rename old exe, build might fail: %v\n", err)
+			fmt.Printf("Warning: Failed to rename current exe, build might fail: %v\n", err)
+		} else {
+			fmt.Printf("Renamed current binary to %s\n", filepath.Base(oldExePath))
 		}
 	}
 
 	runShell(".", "go", "build", "-o", exePath, "./src")
-
-	// 4. Build for ARM64 using Podman
-	buildWithPodman()
-
-	fmt.Println("Full build successful!")
+	fmt.Printf("Successfully built %s\n", exePath)
 }
 
 func runShell(dir string, name string, args ...string) {
@@ -284,6 +268,32 @@ func copyDir(src, dst string) {
 	}
 }
 
+func dialSSH(host, port, user, pass string) (*ssh.Client, error) {
+	username := user
+	hostname := host
+	if username == "" {
+		if i := strings.Index(host, "@"); i != -1 {
+			username = host[:i]
+			hostname = host[i+1:]
+		}
+	}
+	if username == "" {
+		username = os.Getenv("USER")
+	}
+
+	config := &ssh.ClientConfig{
+		User: username,
+		Auth: []ssh.AuthMethod{
+			ssh.Password(pass),
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         10 * time.Second,
+	}
+
+	addr := fmt.Sprintf("%s:%s", hostname, port)
+	return ssh.Dial("tcp", addr, config)
+}
+
 func runCommand(client *ssh.Client, cmd string) (string, error) {
 	session, err := client.NewSession()
 	if err != nil {
@@ -303,9 +313,6 @@ func runCommandNoWait(client *ssh.Client, cmd string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create session: %w", err)
 	}
-	// We don't defer session.Close() here because we want it to stay alive
-	// long enough for the command to start and background itself.
-	// Actually, session.Start() returns immediately.
 
 	err = session.Start(cmd)
 	if err != nil {
@@ -313,7 +320,6 @@ func runCommandNoWait(client *ssh.Client, cmd string) error {
 		return fmt.Errorf("failed to start command: %w", err)
 	}
 
-	// Small sleep to let the command start
 	time.Sleep(500 * time.Millisecond)
 	session.Close()
 	return nil
@@ -326,68 +332,30 @@ func uploadFile(client *ssh.Client, localPath, remotePath string) error {
 	}
 	defer sftpClient.Close()
 
-	// Open local file
 	localFile, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("failed to open local file: %w", err)
 	}
 	defer localFile.Close()
 
-	// Get local file info for permissions
 	localInfo, err := localFile.Stat()
 	if err != nil {
 		return fmt.Errorf("failed to stat local file: %w", err)
 	}
 
-	// Create remote file
 	remoteFile, err := sftpClient.Create(remotePath)
 	if err != nil {
 		return fmt.Errorf("failed to create remote file: %w", err)
 	}
 	defer remoteFile.Close()
 
-	// Copy content
 	_, err = io.Copy(remoteFile, localFile)
 	if err != nil {
 		return fmt.Errorf("failed to copy file: %w", err)
 	}
 
-	// Set permissions
-	err = sftpClient.Chmod(remotePath, localInfo.Mode())
-	if err != nil {
-		// Non-fatal, just log
-		fmt.Fprintf(os.Stderr, "Warning: failed to set permissions: %v\n", err)
-	}
-
+	_ = sftpClient.Chmod(remotePath, localInfo.Mode())
 	return nil
-}
-
-func uploadDir(client *ssh.Client, localDir, remoteDir string) error {
-	sftpClient, err := sftp.NewClient(client)
-	if err != nil {
-		return fmt.Errorf("failed to create SFTP client: %w", err)
-	}
-	defer sftpClient.Close()
-
-	return filepath.Walk(localDir, func(localPath string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Calculate remote path
-		relPath, err := filepath.Rel(localDir, localPath)
-		if err != nil {
-			return err
-		}
-		remotePath := path.Join(remoteDir, filepath.ToSlash(relPath))
-
-		if info.IsDir() {
-			return sftpClient.MkdirAll(remotePath)
-		}
-
-		// Upload file
-		return uploadFile(client, localPath, remotePath)
-	})
 }
 
 func downloadFile(client *ssh.Client, remotePath, localPath string) error {
@@ -397,21 +365,18 @@ func downloadFile(client *ssh.Client, remotePath, localPath string) error {
 	}
 	defer sftpClient.Close()
 
-	// Open remote file
 	remoteFile, err := sftpClient.Open(remotePath)
 	if err != nil {
 		return fmt.Errorf("failed to open remote file: %w", err)
 	}
 	defer remoteFile.Close()
 
-	// Create local file
 	localFile, err := os.Create(localPath)
 	if err != nil {
 		return fmt.Errorf("failed to create local file: %w", err)
 	}
 	defer localFile.Close()
 
-	// Copy content
 	_, err = io.Copy(localFile, remoteFile)
 	if err != nil {
 		return fmt.Errorf("failed to copy file: %w", err)
@@ -423,18 +388,6 @@ func downloadFile(client *ssh.Client, remotePath, localPath string) error {
 func deployDialtone(host, port, pass string, ephemeral bool) {
 	fmt.Println("Starting deployment of Dialtone (Remote Build)...")
 
-	// Parse user@host
-	username := ""
-	hostname := host
-	for i, c := range host {
-		if c == '@' {
-			username = host[:i]
-			hostname = host[i+1:]
-			break
-		}
-	}
-
-	// Check if we have a pre-built local binary
 	localBinary := "bin/dialtone-arm64"
 	usePrebuilt := false
 	if _, err := os.Stat(localBinary); err == nil {
@@ -442,13 +395,7 @@ func deployDialtone(host, port, pass string, ephemeral bool) {
 		fmt.Println("Found pre-built binary, using it for deployment.")
 	}
 
-	// Connect SSH
-	config := &ssh.ClientConfig{
-		User:            username,
-		Auth:            []ssh.AuthMethod{ssh.Password(pass)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-	}
-	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%s", hostname, port), config)
+	client, err := dialSSH(host, port, "", pass)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to connect: %v\n", err)
 		os.Exit(1)
@@ -456,83 +403,54 @@ func deployDialtone(host, port, pass string, ephemeral bool) {
 	defer client.Close()
 
 	if usePrebuilt {
-		// 1. Clean remote directory
 		remoteDir := os.Getenv("REMOTE_DIR_DEPLOY")
 		if remoteDir == "" {
 			remoteDir = "/home/tim/dialtone_deploy"
 		}
 		fmt.Printf("Cleaning and creating remote directory %s...\n", remoteDir)
-		runCommand(client, fmt.Sprintf("rm -rf %s && mkdir -p %s", remoteDir, remoteDir))
+		_, _ = runCommand(client, fmt.Sprintf("rm -rf %s && mkdir -p %s", remoteDir, remoteDir))
 
-		// 2. Upload only the binary
 		fmt.Printf("Uploading pre-built binary %s...\n", localBinary)
 		remotePath := path.Join(remoteDir, "dialtone")
-		err = uploadFile(client, localBinary, remotePath)
-		if err != nil {
+		if err := uploadFile(client, localBinary, remotePath); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to upload binary: %v\n", err)
 			os.Exit(1)
 		}
-
-		// No external web assets needed, they are embedded
 	} else {
-		// 1. Create remote directory (clean slate)
 		remoteDir := os.Getenv("REMOTE_DIR_SRC")
 		if remoteDir == "" {
 			remoteDir = "/home/tim/dialtone_src"
 		}
 		fmt.Printf("Cleaning and creating remote directory %s...\n", remoteDir)
-		runCommand(client, fmt.Sprintf("rm -rf %s && mkdir -p %s/src", remoteDir, remoteDir))
+		_, _ = runCommand(client, fmt.Sprintf("rm -rf %s && mkdir -p %s/src", remoteDir, remoteDir))
 
-		// 2. Upload source files
-		filesToUpload := []string{
-			"go.mod",
-			"go.sum",
-			"src/dialtone.go",
-			"src/camera_linux.go",
-			"src/camera_stub.go",
-		}
-
+		filesToUpload := []string{"go.mod", "go.sum", "src/dialtone.go", "src/camera_linux.go", "src/camera_stub.go"}
 		for _, file := range filesToUpload {
 			fmt.Printf("Uploading %s...\n", file)
 			remotePath := path.Join(remoteDir, file)
-			// Ensure remote subdirectory exists
-			remoteSubDir := path.Dir(remotePath)
-			runCommand(client, fmt.Sprintf("mkdir -p %s", remoteSubDir))
-
-			err = uploadFile(client, file, remotePath)
-			if err != nil {
+			_, _ = runCommand(client, fmt.Sprintf("mkdir -p %s", path.Dir(remotePath)))
+			if err := uploadFile(client, file, remotePath); err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to upload %s: %v\n", file, err)
 				os.Exit(1)
 			}
 		}
 
-		// 3. Build remotely
 		fmt.Println("Building on Raspberry Pi...")
 		buildCmd := fmt.Sprintf("cd %s && /usr/local/go/bin/go build -o dialtone ./src", remoteDir)
 		output, err := runCommand(client, buildCmd)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Remote build failed: %v\nOutput: %s\n", err, output)
-			fmt.Println("\nTIP: Make sure 'go' is installed on the Raspberry Pi.")
 			os.Exit(1)
 		}
 	}
 
-	// 4. Stop existing process
 	fmt.Println("Stopping remote dialtone...")
-	runCommand(client, "pkill dialtone || true")
+	_, _ = runCommand(client, "pkill dialtone || true")
 
-	// 5. Move binary to home and start
 	fmt.Println("Starting service...")
-	// Use < /dev/null to ensure the session doesn't wait for input
 	remoteBaseDir := os.Getenv("REMOTE_DIR_SRC")
-	if remoteBaseDir == "" {
-		remoteBaseDir = "/home/tim/dialtone_src"
-	}
 	if usePrebuilt {
 		remoteBaseDir = os.Getenv("REMOTE_DIR_DEPLOY")
-		if remoteBaseDir == "" {
-			remoteBaseDir = "/home/tim/dialtone_deploy"
-		}
 	}
 	remoteBinaryPath := path.Join(remoteBaseDir, "dialtone")
 
@@ -542,24 +460,14 @@ func deployDialtone(host, port, pass string, ephemeral bool) {
 	}
 
 	tsAuthKey := os.Getenv("TS_AUTHKEY")
-
 	ephemeralFlag := ""
 	if ephemeral {
 		ephemeralFlag = "-ephemeral"
 	}
 
-	// Use sh -c to ensure environment variables are exported correctly before running the binary
 	startCmd := fmt.Sprintf("cp %s ~/dialtone && chmod +x ~/dialtone && nohup sh -c 'TS_AUTHKEY=%s ~/dialtone start -hostname %s %s' > ~/nats.log 2>&1 < /dev/null &", remoteBinaryPath, tsAuthKey, hostnameParam, ephemeralFlag)
 
-	// Sanitize log for user
-	displayKey := tsAuthKey
-	if len(displayKey) > 10 {
-		displayKey = displayKey[:10] + "..."
-	}
-	fmt.Printf("Executing remote start command (sanitized): ...TS_AUTHKEY=%s ~/dialtone start -hostname %s %s...\n", displayKey, hostnameParam, ephemeralFlag)
-
-	err = runCommandNoWait(client, startCmd)
-	if err != nil {
+	if err := runCommandNoWait(client, startCmd); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to start: %v\n", err)
 		os.Exit(1)
 	}
@@ -569,45 +477,20 @@ func deployDialtone(host, port, pass string, ephemeral bool) {
 
 func runLogs(args []string) {
 	fs := flag.NewFlagSet("logs", flag.ExitOnError)
-	host := fs.String("host", "", "SSH host (user@host or just host)")
+	host := fs.String("host", "", "SSH host (user@host)")
 	port := fs.String("port", "22", "SSH port")
 	user := fs.String("user", "", "SSH username")
 	pass := fs.String("pass", "", "SSH password")
 	fs.Parse(args)
 
+	LoadConfig()
+
 	if *host == "" || *pass == "" {
-		fmt.Println("Error: -host (user@host) and -pass are required for logs")
+		fmt.Println("Error: -host and -pass are required for logs")
 		os.Exit(1)
 	}
 
-	// Parse user@host format
-	username := *user
-	hostname := *host
-	if username == "" {
-		for i, c := range *host {
-			if c == '@' {
-				username = (*host)[:i]
-				hostname = (*host)[i+1:]
-				break
-			}
-		}
-	}
-	if username == "" {
-		username = os.Getenv("USER")
-	}
-
-	// Create SSH client config
-	config := &ssh.ClientConfig{
-		User: username,
-		Auth: []ssh.AuthMethod{
-			ssh.Password(*pass),
-		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-	}
-
-	// Connect
-	addr := fmt.Sprintf("%s:%s", hostname, *port)
-	client, err := ssh.Dial("tcp", addr, config)
+	client, err := dialSSH(*host, *port, *user, *pass)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to connect: %v\n", err)
 		os.Exit(1)
@@ -624,18 +507,16 @@ func runLogs(args []string) {
 	session.Stdout = os.Stdout
 	session.Stderr = os.Stderr
 
-	fmt.Printf("Tailing logs on %s...\n", hostname)
-	err = session.Run("tail -f ~/nats.log")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Session failed: %v\n", err)
-		os.Exit(1)
-	}
+	fmt.Printf("Tailing logs on %s...\n", *host)
+	_ = session.Run("tail -f ~/nats.log")
 }
 
 func RunProvision(args []string) {
 	fs := flag.NewFlagSet("provision", flag.ExitOnError)
 	apiKey := fs.String("api-key", "", "Tailscale API Access Token")
 	fs.Parse(args)
+
+	LoadConfig()
 
 	token := *apiKey
 	if token == "" {
@@ -644,16 +525,12 @@ func RunProvision(args []string) {
 
 	if token == "" {
 		fmt.Println("Error: --api-key flag or TS_API_KEY environment variable is required.")
-		fmt.Println("You can generate an API Access Token at https://login.tailscale.com/admin/settings/keys")
 		os.Exit(1)
 	}
 
 	fmt.Println("Generating new Tailscale Auth Key...")
 
-	// Tailscale API V2: Create Key
-	// Endpoint: https://api.tailscale.com/api/v2/tailnet/-/keys
 	url := "https://api.tailscale.com/api/v2/tailnet/-/keys"
-
 	payload := map[string]interface{}{
 		"capabilities": map[string]interface{}{
 			"devices": map[string]interface{}{
@@ -678,8 +555,7 @@ func RunProvision(args []string) {
 	req.SetBasicAuth(token, "")
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		fmt.Printf("API request failed: %v\n", err)
 		os.Exit(1)
@@ -695,31 +571,16 @@ func RunProvision(args []string) {
 	var result struct {
 		Key string `json:"key"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		fmt.Printf("Failed to decode API response: %v\n", err)
-		os.Exit(1)
-	}
+	_ = json.NewDecoder(resp.Body).Decode(&result)
 
 	fmt.Printf("Successfully generated key: %s...\n", result.Key[:10])
-
-	// Update .env file
 	updateEnv("TS_AUTHKEY", result.Key)
 	fmt.Println("Updated .env with new TS_AUTHKEY.")
 }
 
 func updateEnv(key, value string) {
 	envFile := ".env"
-	content, err := os.ReadFile(envFile)
-	if err != nil {
-		// If file doesn't exist, create it
-		if os.IsNotExist(err) {
-			content = []byte("")
-		} else {
-			fmt.Printf("Failed to read .env: %v\n", err)
-			return
-		}
-	}
-
+	content, _ := os.ReadFile(envFile)
 	lines := strings.Split(string(content), "\n")
 	found := false
 	for i, line := range lines {
@@ -729,13 +590,8 @@ func updateEnv(key, value string) {
 			break
 		}
 	}
-
 	if !found {
 		lines = append(lines, fmt.Sprintf("%s=%s", key, value))
 	}
-
-	newContent := strings.Join(lines, "\n")
-	if err := os.WriteFile(envFile, []byte(newContent), 0644); err != nil {
-		fmt.Printf("Failed to write .env: %v\n", err)
-	}
+	_ = os.WriteFile(envFile, []byte(strings.Join(lines, "\n")), 0644)
 }

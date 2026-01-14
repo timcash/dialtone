@@ -19,7 +19,7 @@ When adding features or fixing bugs (especially when utilizing LLM-based coding 
 2. **Implement**: Write the minimal code needed to satisfy the test.
 3. **Iterate**: Run `go test -v ./src/...` locally for immediate feedback.
 4. **Lint**: Run `golangci-lint run` locally for immediate feedback.
-5. **Build & Deploy**: Once local tests are green, run `dialtone full-build -deploy`.
+5. **Build & Deploy**: Once local tests are green, run `dialtone full-build` followed by `dialtone deploy`.
 6. **README Update**: If you changed interfaces (new NATS subjects, new API endpoints), update the documentation immediately.
 7. **Security Audit**: Always verify no keys are commited in code, printed in logs or transferred to remote hosts. 
 8. **Verify Live**: Run system-level tests against the Tailscale IP of the robot to verify end-to-end functionality.
@@ -28,7 +28,31 @@ When adding features or fixing bugs (especially when utilizing LLM-based coding 
 11. **Push**: Push changes to the remote repository.
 12. **Merge**: Merge changes into main.
 
-## 3. System Design
+## 3. Code Style
+pipelines not pyramids examples
+```golang
+// pyramid of functions is bad
+func request(ctx context.Context) {
+    func auth(ctx context.Context) {
+        func database1(ctx context.Context) {
+            func database2(ctx context.Context) {
+                func logger(ctx context.Context) {
+            }
+        }
+    }
+}
+
+// pipeline is good
+func request(ctx context.Context) {
+    var auth_result = auth(ctx)
+    var database1_result = database1(ctx)
+    var database2_result = database2(ctx)
+    var logger_result = logger(ctx)
+    return ctx
+}
+```
+
+## 4. System Design
 
 The system is designed to run as a single-binary appliance on ARM64-based robotic platforms.
 
@@ -42,7 +66,7 @@ The system is designed to run as a single-binary appliance on ARM64-based roboti
 - **Control Computer**: A Go application that orchestrates the camera feed, NATS server, and web interface.
 - **Web UI**: A real-time dashboard built with Vite/TypeScript and embedded directly into the Go binary.
 
-## 4. Network Architecture
+## 5. Network Architecture
 
 Dialtone leverages a modern, identity-based networking stack to eliminate the need for port forwarding or public IPs.
 
@@ -53,30 +77,21 @@ Dialtone leverages a modern, identity-based networking stack to eliminate the ne
     - **NATS Bridge**: A WebSocket interface for interacting with the NATS bus directly from the browser.
     - **System Metrics**: Real-time stats on uptime, connection count, and throughput.
 
-## 5. Build System (Podman)
+## 6. Build System (Podman)
 
 To ensure consistent builds for ARM64 robots from any development machine (Windows/Mac/Linux), Dialtone uses a containerized build loop.
 
 - **Cross-Compilation**: The `dialtone` CLI uses **Podman** to spin up a specialized Linux container (`golang:1.25.5`) with the `aarch64-linux-gnu-gcc` toolchain.
 - **CGO Support**: This enables building the V4L2 camera drivers (which require Linux headers) correctly for the target platform even when developing on Windows.
-- **Asset Embedding**: The build script (`build_and_deploy.ps1`) compiles the Vite frontend and uses `go:embed` to package the entire UI into the final binary.
+- **Asset Embedding**: The `dialtone` CLI compiles the Vite frontend and uses `go:embed` to package the entire UI into the final binary during `full-build`.
 
-## 6. Automated Deployment (Unified CLI)
+## 7. Automated Deployment (Unified CLI)
 
 Deployment is handled directly through the `dialtone` binary, which serves as a unified manager for the robotic network.
 
-```bash
-# Build everything and deploy in one shot
-dialtone full-build -deploy -host user@ip -pass password
-```
-
-The unified CLI performs:
-1. **Web Build**: Runs `npm install` and `npm run build` programmatically.
-2. **Compilation**: `dialtone build` triggers Podman-based cross-compilation.
-3. **Transfer**: `dialtone deploy` handles SFTP upload and server restart.
 4. **Observation**: `dialtone logs` tails the remote execution logs via SSH.
 
-## 7. Build Instructions
+## 8. Build Instructions
 
 ### Prerequisites
 To build Dialtone, your development machine must have:
@@ -95,16 +110,17 @@ To ensure successful operation and deployment, create a `.env` file in the proje
 The programs will fail at startup with a descriptive error message if any of these are missing.
 
 ### Full Build & Deploy
-The recommended way to build the entire project is using the unified command:
+The recommended way to build the entire project is using the unified commands:
 
 ```bash
 go build -o bin/dialtone.exe ./src
-bin/dialtone.exe full-build -deploy -host user@ip -pass password
+bin/dialtone.exe full-build
+bin/dialtone.exe deploy -host user@ip -pass password
 ```
 
 This automates the following verified steps:
 1.  **Web Assets**: Compiles the Vite/TS frontend.
-2.  **CLI Tooling**: Self-updates the `dialtone.exe` manager.
+2.  **CLI Tooling**: Self-updates the `dialtone.exe` manager via `BuildSelf`.
 3.  **ARM64 Cross-Build**: Invokes Podman for the target binary.
 4.  **Remote Deployment**: SFTPs and restarts the service.
 

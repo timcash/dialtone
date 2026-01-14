@@ -37,19 +37,19 @@ func main() {
 
 	switch command {
 	case "build":
-		RunTools(append([]string{"-podman-build"}, args...))
-	case "deploy":
-		RunTools(append([]string{"-deploy"}, args...))
+		RunBuild(args)
 	case "full-build":
-		RunTools(append([]string{"-full-build"}, args...))
+		RunBuild(append([]string{"-full"}, args...))
+	case "deploy":
+		RunDeploy(args)
+	case "ssh":
+		RunSSH(args)
 	case "provision":
 		RunProvision(args)
-	case "start":
-		runStart(args)
 	case "logs":
 		runLogs(args)
-	case "ssh":
-		RunTools(args)
+	case "start":
+		runStart(args)
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
 		printUsage()
@@ -60,11 +60,12 @@ func printUsage() {
 	fmt.Println("Usage: dialtone <command> [options]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  build       Build for ARM64 using Podman")
+	fmt.Println("  full-build  Build Web UI, local CLI, and ARM64 binary")
 	fmt.Println("  deploy      Deploy to remote robot")
-	fmt.Println("  full-build  Run full build (Web UI + Podman)")
-	fmt.Println("  provision   Generate and save Tailscale Auth Key")
-	fmt.Println("  start       Start the NATS and Web server")
+	fmt.Println("  ssh         SSH tools (upload, download, cmd)")
+	fmt.Println("  provision   Generate Tailscale Auth Key")
 	fmt.Println("  logs        Tail remote logs")
+	fmt.Println("  start       Start the NATS and Web server")
 }
 
 func runStart(args []string) {
