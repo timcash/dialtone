@@ -3,23 +3,12 @@
 1. read the main `README.md`
 2. reed the `docs/develop.md`
 3. use `mavlink/rover.py` as a reference for how to implement mavlink capabilities into golang
-4. you can also use `https://github.com/bluenviron/mavp2p` for inspiration
 6. implement only receiving mavlink heatbeat 
 7. attemp to deploy to the robot and test it
 8. show the heartbeat messages in the web ui passed via a nats subject
 9. to debug you can also send ssh commands to the rover via the dialtone cli and it will pull details from the .env file
 10. make sure to use the project logger at `src/logger.go`
 
-# investigate mavlink deprecation warnings
-* read the main `README.md`
-* reed the `docs/develop.md`
-* look at this warning
-```
-gomavlib.NewNode is deprecated: replaced by Node.Initialize().
-```
-* figure out how to fix it
-* to debug you can also send ssh commands to the rover via the dialtone cli and it will pull details from the .env file
-* make sure to use the project logger at `src/logger.go`
 
 # Create plugin system
 1. keep it simple. it should really just be a basic code template that serves as an example for how to create a plugin.

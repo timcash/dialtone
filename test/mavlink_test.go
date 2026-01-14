@@ -41,14 +41,15 @@ func TestMavlinkHeartbeat(t *testing.T) {
     // We wait a bit for the server to start
     time.Sleep(500 * time.Millisecond)
 
-    clientNode, err := gomavlib.NewNode(gomavlib.NodeConf{
+    clientNode := &gomavlib.Node{
 		Endpoints: []gomavlib.EndpointConf{
 			gomavlib.EndpointUDPClient{Address: fmt.Sprintf("127.0.0.1:%d", port)},
 		},
 		Dialect:     common.Dialect,
 		OutVersion:  gomavlib.V2,
 		OutSystemID: 11, // Different from dialtone
-	})
+	}
+    err = clientNode.Initialize()
 	if err != nil {
 		t.Fatalf("Failed to create client node: %v", err)
 	}
