@@ -16,7 +16,7 @@ import (
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 
-	dialtone "rover/nats/src"
+	dialtone "dialtone/cli/src"
 )
 
 // startTestNATSServer creates and starts an embedded NATS server for testing

@@ -1,7 +1,7 @@
 package main
 
 import (
-	dialtone "rover/nats/src"
+	dialtone "dialtone/cli/src"
 )
 
 func main() {
