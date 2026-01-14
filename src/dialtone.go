@@ -27,16 +27,49 @@ import (
 )
 
 func main() {
-	// Command-line flags
-	hostname := flag.String("hostname", "nats", "Tailscale hostname for this NATS server")
-	natsPort := flag.Int("port", 4222, "NATS port to listen on (both local and Tailscale)")
-	webPort := flag.Int("web-port", 80, "Web dashboard port")
-	stateDir := flag.String("state-dir", "", "Directory to store Tailscale state (default: ~/.config/dialtone)")
-	ephemeral := flag.Bool("ephemeral", false, "Register as ephemeral node (auto-cleanup on disconnect)")
-	localOnly := flag.Bool("local-only", false, "Run without Tailscale (local NATS only)")
-	wsPort := flag.Int("ws-port", 4223, "NATS WebSocket port")
-	verbose := flag.Bool("verbose", false, "Enable verbose logging")
-	flag.Parse()
+	if len(os.Args) < 2 {
+		printUsage()
+		return
+	}
+
+	command := os.Args[1]
+	args := os.Args[2:]
+
+	switch command {
+	case "build":
+		RunTools(append([]string{"-podman-build"}, args...))
+	case "deploy":
+		RunTools(append([]string{"-deploy"}, args...))
+	case "start":
+		runStart(args)
+	case "logs":
+		runLogs(args)
+	default:
+		fmt.Printf("Unknown command: %s\n", command)
+		printUsage()
+	}
+}
+
+func printUsage() {
+	fmt.Println("Usage: dialtone <command> [options]")
+	fmt.Println("\nCommands:")
+	fmt.Println("  build   Build for ARM64 using Podman")
+	fmt.Println("  deploy  Deploy to remote robot")
+	fmt.Println("  start   Start the NATS and Web server")
+	fmt.Println("  logs    Tail remote logs")
+}
+
+func runStart(args []string) {
+	fs := flag.NewFlagSet("start", flag.ExitOnError)
+	hostname := fs.String("hostname", "nats", "Tailscale hostname for this NATS server")
+	natsPort := fs.Int("port", 4222, "NATS port to listen on (both local and Tailscale)")
+	webPort := fs.Int("web-port", 80, "Web dashboard port")
+	stateDir := fs.String("state-dir", "", "Directory to store Tailscale state (default: ~/.config/dialtone)")
+	ephemeral := fs.Bool("ephemeral", false, "Register as ephemeral node (auto-cleanup on disconnect)")
+	localOnly := fs.Bool("local-only", false, "Run without Tailscale (local NATS only)")
+	wsPort := fs.Int("ws-port", 4223, "NATS WebSocket port")
+	verbose := fs.Bool("verbose", false, "Enable verbose logging")
+	fs.Parse(args)
 
 	// Determine state directory
 	if *stateDir == "" {
@@ -89,6 +122,11 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 
 	if verbose {
 		ts.Logf = log.Printf
+	}
+
+	// Validate required environment variables
+	if os.Getenv("TS_AUTHKEY") == "" {
+		log.Fatal("ERROR: TS_AUTHKEY environment variable is not set. A Tailscale auth key is required for headless operation.")
 	}
 
 	// Print auth instructions for headless scenarios

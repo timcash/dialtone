@@ -1,271 +1,139 @@
 # Dialtone
 
-A Go application that runs an embedded [NATS](https://nats.io/) server exposed via [Tailscale](https://tailscale.com/). This enables secure, private messaging accessible only to devices on your Tailscale network (tailnet), without any port forwarding or firewall configuration.
+![Web Interface](ui.png)
 
-## Features
+Dialtone is a high-performance **video teleoperation network** designed for robotic coordination and serves as a specialized **training ground for physical AI**. It provides a secure, encrypted, and ultra-low latency bridge between remote robotic hardware and humanoid/agentic control systems.
 
-- Embedded NATS server (no external dependencies)
-- Tailscale integration via [tsnet](https://tailscale.com/kb/1244/tsnet) - no separate Tailscale daemon required
-- **Live MJPEG Camera Stream**: High-performance video streaming from Linux V4L2 devices
-- **Real-time Dashboard**: Live status, NATS metrics, and camera feed via WebSocket updates
-- Headless authentication support for remote/SSH deployments
-- Ephemeral node option for temporary deployments
-- Local-only mode for development without Tailscale
-- Graceful shutdown on SIGINT (Ctrl+C) or SIGTERM
+## 1. System Purpose
 
-## Requirements
+The project aims to solve the "last mile" connectivity problem for physical AI. By combining user-space networking with embedded messaging, Dialtone allows developers to:
+- **Teleoperate Robots**: Low-latency MJPEG streaming and real-time NATS command loops.
+- **Train AI Models**: Collect high-fidelity sensor and video data over private networks for imitation learning.
+- **Coordinate Fleets**: Securely manage multiple robotic nodes without complex firewall or VPN configurations.
 
-- Go 1.25.5 or later
-- A Tailscale account (free tier available)
+## 2. System Design
 
-## Project Structure
+The system is designed to run as a single-binary appliance on ARM64-based robotic platforms.
 
+### Hardware Stack
+- **The Robot**: Target platforms like Raspberry Pi 4/5 or NVIDIA Jetson. These handle the physical interaction with the environment.
+- **Connected Devices**:
+    - **Cameras**: Supports V4L2-compatible USB and MIPI cameras (e.g., Raspberry Pi Camera Module).
+    - **Motors/Servos**: Interface via GPIO or serial bridges (e.g., MAVLink) integrated into the NATS bus.
+
+### Software Stack
+- **Control Computer**: A Go application that orchestrates the camera feed, NATS server, and web interface.
+- **Web UI**: A real-time dashboard built with Vite/TypeScript and embedded directly into the Go binary.
+
+## 3. Network Architecture
+
+Dialtone leverages a modern, identity-based networking stack to eliminate the need for port forwarding or public IPs.
+
+- **NATS**: The "central nervous system" of the robot. Telemetry (video, sensors) and commands (velocity, attitude) are published to a built-in NATS server.
+- **tsnet (Tailscale)**: The system embeds Tailscale directly. It appears as a first-class node on your private **tailnet**, providing automatic wireguard encryption and stable DNS (MagicDNS).
+- **Web Server & UI**: Accessible via `http://<hostname>:80`. It provides:
+    - **Live MJPEG Stream**: Low-latency video feedback.
+    - **NATS Bridge**: A WebSocket interface for interacting with the NATS bus directly from the browser.
+    - **System Metrics**: Real-time stats on uptime, connection count, and throughput.
+
+## 4. Build System (Podman)
+
+To ensure consistent builds for ARM64 robots from any development machine (Windows/Mac/Linux), Dialtone uses a containerized build loop.
+
+- **Cross-Compilation**: The `ssh_tools` utility uses **Podman** to spin up a specialized Linux container (`golang:1.25.5`) with the `aarch64-linux-gnu-gcc` toolchain.
+- **CGO Support**: This enables building the V4L2 camera drivers (which require Linux headers) correctly for the target platform even when developing on Windows.
+- **Asset Embedding**: The build script (`build_and_deploy.ps1`) compiles the Vite frontend and uses `go:embed` to package the entire UI into the final binary.
+
+## 5. Automated Deployment (SSH Tool)
+
+Deployment is handled by the internal `ssh_tools.go` utility, which automates the transfer and lifecycle management of the application.
+
+```powershell
+# Full build and deploy cycle
+./build_and_deploy.ps1
 ```
-dialtone/
-├── src/
-│   ├── dialtone.go       # Main application & Web Server
-│   ├── camera_linux.go   # V4L2 camera implementation
-│   ├── camera_stub.go    # Stub for non-Linux platforms
-│   ├── camera_test.go    # Standalone diagnostic tool
-│   ├── index.html        # Dashboard template with WebSocket client
-│   ├── dialtone_test.go  # Integration tests
-│   └── ssh_tools.go      # SSH utility & deployment tool
-├── bin/                   # Compiled binaries (gitignored)
-├── go.mod
-├── go.sum
-└── README.md
+
+The deployment tool performs:
+1. **Compilation**: Podman-based cross-compilation for `linux/arm64`.
+2. **Transfer**: SFTP upload of the 30MB+ binary to the robot.
+3. **Lifecycle**: Graceful stop of existing processes and a background `nohup` restart of the new version.
+4. **Environment**: Automatic propagation of authentication keys and environment variables.
+
+## 6. Development Workflow (TDD for AI Agents)
+
+When adding features or fixing bugs (especially when utilizing LLM-based coding assistants), follow this Test-Driven Development (TDD) loop to ensure stability across the network.
+
+### The Loop
+1. **Create Test**: Add a local unit test in `src/dialtone_test.go` or a remote integration test in `src/remote_test.go`.
+2. **Implement**: Write the minimal code needed to satisfy the test.
+3. **Iterate**: Run `go test -v ./src/...` locally for immediate feedback.
+4. **Build & Deploy**: Once local tests are green, run `./build_and_deploy.ps1` to push to the physical robot.
+5. **README Update**: If you changed interfaces (new NATS subjects, new API endpoints), update the documentation immediately.
+6. **Verify Live**: Run system-level tests against the Tailscale IP of the robot to verify end-to-end functionality.
+
+## 7. Build Instructions
+
+### Prerequisites
+To build Dialtone, your development machine must have:
+- **Go 1.25.5+**: For compiling the backend and SSH tools.
+- **Node.js v22+ & npm**: For building the TypeScript dashboard.
+### Required Environment Variables
+To ensure successful operation and deployment, create a `.env` file in the project root with the following:
+
+- **`TS_AUTHKEY`**: Your Tailscale auth key (required for headless operation).
+- **`REMOTE_DIR_SRC`**: Remote path for source-based deployment (e.g., `/home/user/dialtone_src`).
+- **`REMOTE_DIR_DEPLOY`**: Remote path for binary-based deployment (e.g., `/home/user/dialtone`).
+- **`DIALTONE_HOSTNAME`**: The desired Tailscale hostname for your robot (e.g., `drone-nats`).
+
+The programs will fail at startup with a descriptive error message if any of these are missing.
+
+### Automated Build & Deploy
+The recommended way to build the entire project is using the provided PowerShell script.
+
+```powershell
+./build_and_deploy.ps1
 ```
 
-## Installation
+This script automates the following verified steps:
+1.  **Web Assets**: Compiles the Vite/TS frontend in `src/web` and copies the output to `src/web_build`.
+2.  **SSH Tooling**: Builds the custom `ssh_tools.exe` used for remote management.
+3.  **ARM64 Cross-Build**: Invokes Podman to build the Linux binary with CGO enabled for camera support.
+4.  **Remote Deployment**: SFTPs the binary to the robot and restarts the service.
 
+### Manual Build Steps
+If you need to build components individually:
+
+**1. Build the Web Interface**
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd dialtone
-
-# Download dependencies
-go mod download
-
-# Build the executable
-go build -o bin/dialtone.exe src/dialtone.go
-
-# Build SSH deployment tools
-go build -o bin/ssh_tools.exe src/ssh_tools.go
+cd src/web
+npm install
+npm run build
 ```
 
-## Usage
+**2. Build the ARM64 Binary (via Podman)**
+```bash
+go build -o bin/ssh_tools.exe src/ssh_tools.go
+bin/ssh_tools.exe -podman-build
+```
+
+**3. Build Local-Only Binary (Windows/Mac)**
+```bash
+go build -o bin/dialtone.exe ./src
+```
+
+### Common Build Issues
+- **Podman VM Not Running**: Ensure the Podman machine is started (`podman machine start`).
+- **NPM Version Conflicts**: Use Node v22+ to ensure compatibility with the Vite build loop.
+- **SSH Timeout**: Verfiy the robot's IP address in `build_and_deploy.ps1` matches your hardware.
+
+---
 
 ### Command-Line Options
 
-```
--hostname string    Tailscale hostname for this NATS server (default "nats")
--port int           NATS port to listen on (default 4222)
--state-dir string   Directory to store Tailscale state (default ~/.config/dialtone)
--ephemeral          Register as ephemeral node (auto-cleanup on disconnect)
--local-only         Run without Tailscale (local NATS only)
--verbose            Enable verbose logging
-```
-
-### Running with Tailscale
-
-```bash
-# Basic usage - will prompt for authentication
-./dialtone
-
-# With custom hostname
-./dialtone -hostname my-nats-server
-
-# Ephemeral mode (node removed when disconnected)
-./dialtone -ephemeral
-```
-
-### Local-Only Mode (No Tailscale)
-
-```bash
-./dialtone -local-only
-```
-
-### Automated Deployment (Recommended)
-
-The included `ssh_tools.go` can automate building for ARM64, uploading, and restarting the service on a remote Raspberry Pi:
-
-```bash
-# Deploy to Raspberry Pi
-bin/ssh_tools.exe -host user@192.168.4.36 -pass yourpassword -deploy
-```
-
-This command will:
-1. Cross-compile `dialtone` for `linux/arm64`.
-2. Stop the existing `dialtone` process on the Pi.
-3. Upload the new binary to `~/dialtone`.
-4. Start the service using `nohup`.
-
-### Manual Deployment
-```bash
-# Cross-compile for Pi
-GOOS=linux GOARCH=arm64 go build -o dialtone src/dialtone.go
-
-# Copy to server
-scp dialtone user@server:~/
-
-# SSH and run
-ssh user@server
-export TS_AUTHKEY="tskey-auth-xxxxx-xxxxxxxxx"
-./dialtone
-```
-
-### Step 3: Connect from Other Tailnet Devices
-
-From any device on your tailnet:
-
-```bash
-# Using NATS CLI
-nats sub test.subject -s nats://nats:4222
-
-# In another terminal
-nats pub test.subject "Hello from Tailscale!"
-
-# Or programmatically
-nc, _ := nats.Connect("nats://nats:4222")
-```
-
-### Without Auth Key (Interactive)
-
-If no auth key is set, the server prints a login URL:
-
-```
-To start this tsnet server, restart with TS_AUTHKEY set, or go to:
-https://login.tailscale.com/a/abc123def456
-```
-
-Visit this URL to authenticate. For headless servers, you can copy this URL and open it on any browser.
-
-## Camera System
-
-Dialtone includes a built-in camera streaming system designed for Raspberry Pi and other Linux-based robotics platforms.
-
-### Streaming Endpoints
-
-- **`/stream`**: Low-latency MJPEG video stream. Can be embedded in any `<img>` tag or viewed directly.
-- **`/api/cameras`**: JSON list of detected V4L2 video devices.
-
-### Hardware Compatibility
-
-The system uses [go4vl](https://github.com/vladimirvivien/go4vl) to interact with V4L2 devices. It automatically searches for the first available capture device (usually `/dev/video0`) and configures it for 640x480 MJPEG captures at 30 FPS.
-
-### Hardware Diagnostic Tool
-
-If you encounter issues with the camera (e.g., "Device or resource busy"), use the included diagnostic tool:
-
-```bash
-# On the Raspberry Pi
-cd ~/dialtone_src
-go build -o camera_diagnostic src/camera_test.go
-./camera_diagnostic
-```
-
-This tool will list all video devices, attempt to open them, and save a single frame `test_frame_videoX.jpg` if successful.
-
-## Dashboard WebSocket
-
-The web dashboard uses WebSockets for real-time updates. This avoids page flickering and provides sub-second monitoring of:
-- **System Uptime**
-- **NATS Connection Counts**
-- **Message Throughput** (In/Out)
-- **Data Transfer** (Bytes)
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                      dialtone                            │
-│                                                          │
-│  ┌──────────────┐     ┌──────────────┐                  │
-│  │   tsnet      │────▶│  TCP Proxy   │                  │
-│  │  (Tailscale) │     │              │                  │
-│  │  :4222       │     │              │                  │
-│  └──────────────┘     └──────┬───────┘                  │
-│                              │                           │
-│                              ▼                           │
-│                       ┌──────────────┐                  │
-│                       │ NATS Server  │                  │
-│                       │ (localhost)  │                  │
-│                       │   :14222     │                  │
-│                       └──────────────┘                  │
-└─────────────────────────────────────────────────────────┘
-```
-
-The NATS server runs on localhost (not exposed) while tsnet handles all external connections through the Tailscale network.
-
-## Troubleshooting MagicDNS
-
-If you can access the dashboard via IP but not the FQDN URL (e.g., `http://drone-nats.xxxx.ts.net`):
-
-1. **Verify Tailscale is Running**: Ensure your local machine is connected to the same Tailscale network.
-2. **Check DNS Settings**: In the Tailscale Admin Console, ensure **MagicDNS** is enabled.
-3. **FQDN Resolution**: On some Windows machines, you may need to use the full FQDN including the trailing dot in some tools, though browser access usually handles this.
-4. **Local Proxy/VPN**: Disable any other local proxies or VPNs that might be interfering with Tailscale's DNS resolution.
-
-## Configuration
-
-### Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `TS_AUTHKEY` | Tailscale auth key for headless authentication |
-
-### State Directory
-
-Tailscale state (node keys, config) is stored in:
-- Default: `~/.config/dialtone/`
-- Custom: Use `-state-dir /path/to/dir`
-
-For ephemeral nodes (`-ephemeral`), state is temporary and cleaned up on disconnect.
-
-## Testing
-
-```bash
-# Run all tests (Tailscale tests skip without TS_AUTHKEY)
-go test -v ./src/...
-
-# Run with Tailscale integration tests
-TS_AUTHKEY="tskey-auth-xxxxx" go test -v ./src/...
-```
-
-### Test Categories
-
-1. **NATS Server Tests** - Verify embedded NATS functionality
-2. **Proxy Tests** - Verify the TCP proxy used for Tailscale integration
-3. **Tailscale Tests** - Full integration tests (require TS_AUTHKEY)
-
-## Security Considerations
-
-- NATS is only accessible via your Tailscale network
-- No ports exposed to the public internet
-- Use Tailscale ACLs to control which devices can connect
-- Auth keys should be treated as secrets (don't commit to git)
-- Consider ephemeral mode for temporary/CI deployments
-
-## Example: Secure Microservices Messaging
-
-```go
-// Service A (on any tailnet device)
-nc, _ := nats.Connect("nats://nats:4222")
-nc.Publish("orders.new", orderData)
-
-// Service B (on any other tailnet device)
-nc, _ := nats.Connect("nats://nats:4222")
-nc.Subscribe("orders.new", func(m *nats.Msg) {
-    processOrder(m.Data)
-})
-```
-
-## Dependencies
-
-- [nats-server](https://github.com/nats-io/nats-server) v2.12.3 - Embedded NATS server
-- [tsnet](https://tailscale.com/kb/1244/tsnet) - Embedded Tailscale
-- [nats.go](https://github.com/nats-io/nats.go) - NATS client (for testing)
-
-## License
-
-See the [NATS Server License](https://github.com/nats-io/nats-server/blob/main/LICENSE) and [Tailscale License](https://github.com/tailscale/tailscale/blob/main/LICENSE) for their respective components.
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-hostname` | `nats` | Tailscale hostname for this node |
+| `-port` | `4222` | NATS port on the tailnet |
+| `-web-port` | `80` | Dashboard port |
+| `-local-only`| `false` | Run without Tailscale for local debugging |
+| `-ephemeral` | `false` | Node is removed from tailnet on exit |

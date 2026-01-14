@@ -1,5 +1,3 @@
-//go:build ignore
-
 package main
 
 import (
@@ -18,24 +16,34 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func main() {
-	host := flag.String("host", "", "SSH host (user@host or just host)")
-	port := flag.String("port", "22", "SSH port")
-	user := flag.String("user", "", "SSH username (overrides user@host)")
-	pass := flag.String("pass", "", "SSH password")
-	cmd := flag.String("cmd", "", "Command to execute remotely")
-	upload := flag.String("upload", "", "Local file to upload")
-	dest := flag.String("dest", "", "Remote destination path")
-	download := flag.String("download", "", "Remote file to download")
-	localDest := flag.String("local-dest", "", "Local destination for download")
-	deploy := flag.Bool("deploy", false, "Deploy dialtone to Raspberry Pi (cross-compiles and restarts)")
-	podmanBuild := flag.Bool("podman-build", false, "Build dialtone locally using Podman for Linux ARM64")
-	flag.Parse()
+func RunTools(args []string) {
+	fs := flag.NewFlagSet("tools", flag.ExitOnError)
+	host := fs.String("host", "", "SSH host (user@host or just host)")
+	port := fs.String("port", "22", "SSH port")
+	user := fs.String("user", "", "SSH username (overrides user@host)")
+	pass := fs.String("pass", "", "SSH password")
+	cmd := fs.String("cmd", "", "Command to execute remotely")
+	upload := fs.String("upload", "", "Local file to upload")
+	dest := fs.String("dest", "", "Remote destination path")
+	download := fs.String("download", "", "Remote file to download")
+	localDest := fs.String("local-dest", "", "Local destination for download")
+	deploy := fs.Bool("deploy", false, "Deploy dialtone to Raspberry Pi (cross-compiles and restarts)")
+	podmanBuild := fs.Bool("podman-build", false, "Build dialtone locally using Podman for Linux ARM64")
+	fs.Parse(args)
 
 	// Load .env file if it exists
 	if err := godotenv.Load(); err != nil {
 		// Non-fatal, just log if verbose
 		// fmt.Printf("No .env file found: %v\n", err)
+	}
+
+	// Validate required environment variables for deployment
+	requiredVars := []string{"REMOTE_DIR_SRC", "REMOTE_DIR_DEPLOY", "DIALTONE_HOSTNAME", "TS_AUTHKEY"}
+	for _, v := range requiredVars {
+		if os.Getenv(v) == "" {
+			fmt.Printf("ERROR: Environment variable %s is not set. Please check your .env file.\n", v)
+			os.Exit(1)
+		}
 	}
 
 	if *podmanBuild {
@@ -437,7 +445,9 @@ func deployDialtone(host, port, pass string) {
 		hostnameParam = "drone-nats"
 	}
 
-	startCmd := fmt.Sprintf("cp %s ~/dialtone && chmod +x ~/dialtone && nohup ~/dialtone -hostname %s > ~/nats.log 2>&1 < /dev/null &", remoteBinaryPath, hostnameParam)
+	tsAuthKey := os.Getenv("TS_AUTHKEY")
+
+	startCmd := fmt.Sprintf("cp %s ~/dialtone && chmod +x ~/dialtone && nohup TS_AUTHKEY=%s ~/dialtone -hostname %s > ~/nats.log 2>&1 < /dev/null &", remoteBinaryPath, tsAuthKey, hostnameParam)
 	err = runCommandNoWait(client, startCmd)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to start: %v\n", err)
