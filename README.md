@@ -15,9 +15,9 @@ The project aims to solve the "last mile" connectivity problem for physical AI. 
 When adding features or fixing bugs (especially when utilizing LLM-based coding assistants), follow this Test-Driven Development (TDD) loop to ensure stability across the network.
 
 0. **Start a branch**: `git checkout -b feature-name`
-1. **Create Test**: Add a local unit test in `src/dialtone_test.go` or a remote integration test in `src/remote_test.go`.
+1. **Create Test**: Add a local unit test in `test/local_test.go` or a remote integration test in `test/remote_rover_test.go`.
 2. **Implement**: Write the minimal code needed to satisfy the test.
-3. **Iterate**: Run `go test -v ./src/...` locally for immediate feedback.
+3. **Iterate**: Run `go test -v ./test/...` locally for immediate feedback.
 4. **Lint**: Run `golangci-lint run` locally for immediate feedback.
 5. **Build & Deploy**: Once local tests are green, run `dialtone full-build` followed by `dialtone deploy`.
 6. **README Update**: If you changed interfaces (new NATS subjects, new API endpoints), update the documentation immediately.
@@ -84,6 +84,7 @@ To ensure consistent builds for ARM64 robots from any development machine (Windo
 - **Cross-Compilation**: The `dialtone` CLI uses **Podman** to spin up a specialized Linux container (`golang:1.25.5`) with the `aarch64-linux-gnu-gcc` toolchain.
 - **CGO Support**: This enables building the V4L2 camera drivers (which require Linux headers) correctly for the target platform even when developing on Windows.
 - **Asset Embedding**: The `dialtone` CLI compiles the Vite frontend and uses `go:embed` to package the entire UI into the final binary during `full-build`.
+- **Library Architecture**: The core logic resides in `src/` as `package dialtone`, allowing for clean imports in both the CLI entry point (`dialtone.go`) and the comprehensive test suite in `test/`.
 
 ## 7. Automated Deployment (Unified CLI)
 
@@ -113,7 +114,7 @@ The programs will fail at startup with a descriptive error message if any of the
 The recommended way to build the entire project is using the unified commands:
 
 ```bash
-go build -o bin/dialtone.exe ./src
+go build -o bin/dialtone.exe .
 bin/dialtone.exe full-build
 bin/dialtone.exe deploy -host user@ip -pass password
 ```
@@ -136,7 +137,7 @@ npm run build
 
 **2. Build the ARM64 Binary (via Podman)**
 ```bash
-go build -o bin/dialtone.exe ./src
+go build -o bin/dialtone.exe .
 bin/dialtone.exe build
 ```
 
@@ -173,7 +174,7 @@ bin/dialtone.exe logs -host user@ip -pass password
 
 ### Build Local-Only Binary (Windows/Mac)
 ```bash
-go build -o bin/dialtone.exe ./src
+go build -o bin/dialtone.exe .
 ```
 
 ---
