@@ -3,6 +3,7 @@ package test
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 )
 
@@ -25,7 +26,7 @@ func TestWebUI_BuildOutput(t *testing.T) {
 	info, err := os.Stat("../src/web_build")
 	if err != nil {
 		if os.IsNotExist(err) {
-			t.Log("Warning: src/web_build does not exist. Run './build_and_deploy.ps1' to build and prepare assets.")
+			t.Log("Warning: src/web_build does not exist.")
 			return
 		}
 		t.Fatalf("Failed to stat src/web_build: %v", err)
@@ -33,5 +34,30 @@ func TestWebUI_BuildOutput(t *testing.T) {
 
 	if !info.IsDir() {
 		t.Error("src/web_build should be a directory")
+	}
+}
+
+func TestBuildScript_PowerShell(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		t.Skip("Skipping PowerShell test in CI")
+	}
+
+	// Move to root for running build script
+	err := os.Chdir("..")
+	if err != nil {
+		t.Fatalf("Failed to change dir to root: %v", err)
+	}
+	defer os.Chdir("test")
+
+	cmd := exec.Command("powershell", "-ExecutionPolicy", "Bypass", "-File", "build.ps1")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build.ps1 failed: %v\nOutput: %s", err, string(output))
+	}
+
+	// Verify binary exists
+	binaryPath := filepath.Join("bin", "dialtone.exe")
+	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
+		t.Errorf("Binary %s not created by build.ps1", binaryPath)
 	}
 }

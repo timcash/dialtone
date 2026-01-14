@@ -141,6 +141,16 @@ go build -o bin/dialtone.exe .
 bin/dialtone.exe build
 ```
 
+**3. Simple Build (Go only)**
+If you are developing locally or don't need ARM64/CGO cross-compilation:
+```powershell
+./build.ps1
+```
+or 
+```bash
+./build.sh
+```
+
 ### Automated Tailscale Provisioning
 
 Dialtone uses two types of Tailscale credentials to manage its secure, per-process VPN network without requiring a system-level installation:
@@ -188,3 +198,17 @@ go build -o bin/dialtone.exe .
 | `-web-port` | `80` | Dashboard port |
 | `-local-only`| `false` | Run without Tailscale for local debugging |
 | `-ephemeral` | `false` | Node is removed from tailnet on exit |
+
+---
+
+### UI Testing & Screenshots
+Dialtone includes an automated UI testing suite using `chromedp`. This allows for visual regression testing by capturing screenshots of the live dashboard.
+
+**Run UI Tests:**
+```bash
+go test -v ./test/ui_screenshot_test.go
+```
+Screenshots are saved to `test/screenshots/` and include:
+- `initial_load.png`: The dashboard immediately after loading.
+- `before_send.png`: State after filling in NATS message inputs.
+- `after_send.png`: Confirmation after successfully sending a message.
