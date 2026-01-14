@@ -577,6 +577,237 @@ func RunProvision(args []string) {
 	provisionKey(token)
 }
 
+func RunInstallDeps(args []string) {
+	fs := flag.NewFlagSet("install-deps", flag.ExitOnError)
+	host := fs.String("host", os.Getenv("ROBOT_HOST"), "SSH host")
+	port := fs.String("port", "22", "SSH port")
+	user := fs.String("user", os.Getenv("ROBOT_USER"), "SSH user")
+	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password")
+	fs.Parse(args)
+
+	if *host == "" || *pass == "" {
+		LogFatal("Error: -host (user@host) and -pass are required for install-deps")
+	}
+
+	client, err := dialSSH(*host, *port, *user, *pass)
+	if err != nil {
+		LogFatal("SSH connection failed: %v", err)
+	}
+	defer client.Close()
+
+	LogInfo("Installing dependencies on %s...", *host)
+
+	// Install Go
+	goVersion := "1.25.5"
+	goTarball := fmt.Sprintf("go%s.linux-arm64.tar.gz", goVersion)
+	installGoCmd := fmt.Sprintf(`
+		if ! command -v go &> /dev/null; then
+			echo "Installing Go %s..."
+			wget https://go.dev/dl/%s
+			sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf %s
+			rm %s
+			echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile
+			echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
+		else
+			echo "Go is already installed."
+		fi
+	`, goVersion, goTarball, goTarball, goTarball)
+
+	output, err := runCommand(client, installGoCmd)
+	if err != nil {
+		LogFatal("Failed to install Go: %v\nOutput: %s", err, output)
+	}
+	LogInfo(output)
+
+	// Install Node.js
+	installNodeCmd := `
+		if ! command -v node &> /dev/null; then
+			echo "Installing Node.js..."
+			curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+			sudo apt-get install -y nodejs
+		else
+			echo "Node.js is already installed."
+		fi
+	`
+	output, err = runCommand(client, installNodeCmd)
+	if err != nil {
+		LogFatal("Failed to install Node.js: %v\nOutput: %s", err, output)
+	}
+	LogInfo(output)
+}
+
+func RunSyncCode(args []string) {
+	fs := flag.NewFlagSet("sync-code", flag.ExitOnError)
+	host := fs.String("host", os.Getenv("ROBOT_HOST"), "SSH host")
+	port := fs.String("port", "22", "SSH port")
+	user := fs.String("user", os.Getenv("ROBOT_USER"), "SSH user")
+	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password")
+	fs.Parse(args)
+
+	if *host == "" || *pass == "" {
+		LogFatal("Error: -host (user@host) and -pass are required for sync-code")
+	}
+
+	client, err := dialSSH(*host, *port, *user, *pass)
+	if err != nil {
+		LogFatal("SSH connection failed: %v", err)
+	}
+	defer client.Close()
+
+	remoteDir := os.Getenv("REMOTE_DIR_SRC")
+	if remoteDir == "" {
+		remoteDir = "/home/tim/dialtone_src"
+	}
+
+	LogInfo("Syncing code to %s on %s...", remoteDir, *host)
+
+	// Clean remote src dir partially? Or just overwrite.
+	// We definitely need to ensure directories exist.
+	_, _ = runCommand(client, fmt.Sprintf("mkdir -p %s/src/web", remoteDir))
+
+	// Sync root files
+	filesToUpload := []string{"go.mod", "go.sum", "dialtone.go", "build.sh", "build.ps1", "README.md"}
+	for _, file := range filesToUpload {
+		if _, err := os.Stat(file); err == nil {
+			LogInfo("Uploading %s...", file)
+			if err := uploadFile(client, file, path.Join(remoteDir, file)); err != nil {
+				LogFatal("Failed to upload %s: %v", file, err)
+			}
+		}
+	}
+
+	// Sync src/*.go
+	srcFiles, _ := filepath.Glob("src/*.go")
+	for _, f := range srcFiles {
+		LogInfo("Uploading %s...", f)
+		if err := uploadFile(client, f, path.Join(remoteDir, f)); err != nil {
+			LogFatal("Failed to upload %s: %v", f, err)
+		}
+	}
+
+	// Sync src/web (excluding node_modules and dist)
+	LogInfo("Uploading src/web source...")
+	uploadDirFiltered(client, filepath.Join("src", "web"), path.Join(remoteDir, "src", "web"), []string{"node_modules", "dist", ".git"})
+
+	LogInfo("Code sync complete.")
+}
+
+func RunRemoteBuild(args []string) {
+	fs := flag.NewFlagSet("remote-build", flag.ExitOnError)
+	host := fs.String("host", os.Getenv("ROBOT_HOST"), "SSH host")
+	port := fs.String("port", "22", "SSH port")
+	user := fs.String("user", os.Getenv("ROBOT_USER"), "SSH user")
+	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password")
+	fs.Parse(args)
+
+	if *host == "" || *pass == "" {
+		LogFatal("Error: -host (user@host) and -pass are required for remote-build")
+	}
+
+	client, err := dialSSH(*host, *port, *user, *pass)
+	if err != nil {
+		LogFatal("SSH connection failed: %v", err)
+	}
+	defer client.Close()
+
+	remoteDir := os.Getenv("REMOTE_DIR_SRC")
+	if remoteDir == "" {
+		remoteDir = "/home/tim/dialtone_src"
+	}
+
+	LogInfo("Building on remote %s...", *host)
+
+	// Build Web
+	webCmd := fmt.Sprintf(`
+		export PATH=$PATH:/usr/local/go/bin
+		cd %s/src/web
+		echo "Installing npm dependencies..."
+		npm install
+		echo "Building web assets..."
+		npm run build
+		cd ..
+		rm -rf web_build
+		mkdir -p web_build
+		cp -r web/dist/* web_build/
+	`, remoteDir)
+
+	output, err := runCommand(client, webCmd)
+	if err != nil {
+		LogFatal("Remote web build failed: %v\nOutput: %s", err, output)
+	}
+	LogInfo(output)
+
+	// Build Go
+	goCmd := fmt.Sprintf(`
+		export PATH=$PATH:/usr/local/go/bin
+		cd %s
+		echo "Building Go binary..."
+		go build -v -o dialtone .
+	`, remoteDir)
+
+	output, err = runCommand(client, goCmd)
+	if err != nil {
+		LogFatal("Remote Go build failed: %v\nOutput: %s", err, output)
+	}
+	LogInfo(output)
+	LogInfo("Remote build successful.")
+}
+
+func uploadDirFiltered(client *ssh.Client, localDir, remoteDir string, ignore []string) {
+	sftpClient, err := sftp.NewClient(client)
+	if err != nil {
+		LogInfo("Failed to create SFTP client: %v", err)
+		return
+	}
+	defer sftpClient.Close()
+
+	// Ensure remote dir exists
+	_ = sftpClient.MkdirAll(remoteDir)
+
+	entries, err := os.ReadDir(localDir)
+	if err != nil {
+		LogFatal("Failed to read local dir %s: %v", localDir, err)
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		shouldIgnore := false
+		for _, ig := range ignore {
+			if name == ig {
+				shouldIgnore = true
+				break
+			}
+		}
+		if shouldIgnore {
+			continue
+		}
+
+		srcPath := filepath.Join(localDir, name)
+		dstPath := path.Join(remoteDir, name)
+
+		if entry.IsDir() {
+			uploadDirFiltered(client, srcPath, dstPath, ignore)
+		} else {
+			// Upload file
+			localFile, err := os.Open(srcPath)
+			if err != nil {
+				LogFatal("Failed to open %s: %v", srcPath, err)
+			}
+			defer localFile.Close()
+
+			remoteFile, err := sftpClient.Create(dstPath)
+			if err != nil {
+				LogFatal("Failed to create remote file %s: %v", dstPath, err)
+			}
+			defer remoteFile.Close()
+
+			if _, err := io.Copy(remoteFile, localFile); err != nil {
+				LogFatal("Failed to copy %s: %v", srcPath, err)
+			}
+		}
+	}
+}
+
 func provisionKey(token string) {
 	LogInfo("Generating new Tailscale Auth Key...")
 
