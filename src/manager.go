@@ -155,7 +155,7 @@ func buildWithPodman() {
 		"-e", "CGO_ENABLED=1",
 		"-e", "CC=aarch64-linux-gnu-gcc",
 		"golang:1.25.5",
-		"bash", "-c", "apt-get update && apt-get install -y gcc-aarch64-linux-gnu && go build -buildvcs=false -o bin/dialtone-arm64 ./src",
+		"bash", "-c", "apt-get update && apt-get install -y gcc-aarch64-linux-gnu && go build -buildvcs=false -o bin/dialtone-arm64 .",
 	}
 
 	fmt.Printf("Running: podman %v\n", buildCmd)
@@ -203,10 +203,10 @@ func buildEverything() {
 func BuildSelf() {
 	fmt.Println("Building Dialtone CLI (Self)...")
 
-	exePath, err := os.Executable()
-	if err != nil {
-		fmt.Printf("Warning: Could not determine executable path, defaulting to bin/dialtone.exe: %v\n", err)
-		exePath = filepath.Join("bin", "dialtone.exe")
+	// Always aim for bin/dialtone.exe when building from source
+	exePath := filepath.Join("bin", "dialtone.exe")
+	if _, err := os.Stat("bin"); os.IsNotExist(err) {
+		os.MkdirAll("bin", 0755)
 	}
 
 	oldExePath := exePath + ".old"
@@ -221,7 +221,7 @@ func BuildSelf() {
 		}
 	}
 
-	runShell(".", "go", "build", "-o", exePath, "./src")
+	runShell(".", "go", "build", "-o", exePath, ".")
 	fmt.Printf("Successfully built %s\n", exePath)
 }
 
@@ -358,6 +358,55 @@ func uploadFile(client *ssh.Client, localPath, remotePath string) error {
 	return nil
 }
 
+func uploadDir(client *ssh.Client, localDir, remoteDir string) {
+	fmt.Printf("Uploading directory %s to %s...\n", localDir, remoteDir)
+
+	sftpClient, err := sftp.NewClient(client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create SFTP client: %v\n", err)
+		return
+	}
+	defer sftpClient.Close()
+
+	filepath.Walk(localDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relPath, err := filepath.Rel(localDir, path)
+		if err != nil {
+			return err
+		}
+
+		remotePath := filepath.Join(remoteDir, relPath)
+		remotePath = filepath.ToSlash(remotePath)
+
+		if info.IsDir() {
+			return sftpClient.MkdirAll(remotePath)
+		}
+
+		localFile, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer localFile.Close()
+
+		remoteFile, err := sftpClient.Create(remotePath)
+		if err != nil {
+			return err
+		}
+		defer remoteFile.Close()
+
+		_, err = io.Copy(remoteFile, localFile)
+		if err != nil {
+			return err
+		}
+
+		_ = sftpClient.Chmod(remotePath, info.Mode())
+		return nil
+	})
+}
+
 func downloadFile(client *ssh.Client, remotePath, localPath string) error {
 	sftpClient, err := sftp.NewClient(client)
 	if err != nil {
@@ -424,19 +473,33 @@ func deployDialtone(host, port, pass string, ephemeral bool) {
 		fmt.Printf("Cleaning and creating remote directory %s...\n", remoteDir)
 		_, _ = runCommand(client, fmt.Sprintf("rm -rf %s && mkdir -p %s/src", remoteDir, remoteDir))
 
-		filesToUpload := []string{"go.mod", "go.sum", "src/dialtone.go", "src/camera_linux.go", "src/camera_stub.go"}
+		filesToUpload := []string{"go.mod", "go.sum", "dialtone.go"}
+		srcFiles, _ := filepath.Glob("src/*.go")
+		for _, f := range srcFiles {
+			filesToUpload = append(filesToUpload, f)
+		}
+
 		for _, file := range filesToUpload {
 			fmt.Printf("Uploading %s...\n", file)
 			remotePath := path.Join(remoteDir, file)
-			_, _ = runCommand(client, fmt.Sprintf("mkdir -p %s", path.Dir(remotePath)))
+			// Ensure parent directory exists on remote
+			parentDir := filepath.ToSlash(path.Dir(remotePath))
+			_, _ = runCommand(client, fmt.Sprintf("mkdir -p %s", parentDir))
 			if err := uploadFile(client, file, remotePath); err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to upload %s: %v\n", file, err)
 				os.Exit(1)
 			}
 		}
 
+		// Also upload web_build if it exists
+		webBuildDir := filepath.Join("src", "web_build")
+		if _, err := os.Stat(webBuildDir); err == nil {
+			fmt.Println("Uploading web assets...")
+			uploadDir(client, webBuildDir, path.Join(remoteDir, "src", "web_build"))
+		}
+
 		fmt.Println("Building on Raspberry Pi...")
-		buildCmd := fmt.Sprintf("cd %s && /usr/local/go/bin/go build -o dialtone ./src", remoteDir)
+		buildCmd := fmt.Sprintf("cd %s && /usr/local/go/bin/go build -v -o dialtone .", remoteDir)
 		output, err := runCommand(client, buildCmd)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Remote build failed: %v\nOutput: %s\n", err, output)
