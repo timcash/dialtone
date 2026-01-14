@@ -28,4 +28,9 @@ if (-not (Test-Path "bin")) {
 }
 go build -o bin/dialtone.exe .
 
+# 4. Auto-provision Tailscale key if API key is available
+# Note: The binary itself loads .env, so we just need to run it.
+Write-Host "Checking for TS_API_KEY to auto-provision..." -ForegroundColor Yellow
+.\bin\dialtone.exe provision -optional
+
 Write-Host "Build successful!" -ForegroundColor Green

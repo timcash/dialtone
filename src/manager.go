@@ -33,6 +33,12 @@ func RunBuild(args []string) {
 	full := fs.Bool("full", false, "Build Web UI, local CLI, and ARM64 binary")
 	fs.Parse(args)
 
+	// If TS_API_KEY is available, provision a new auth key before building
+	if os.Getenv("TS_API_KEY") != "" {
+		LogInfo("TS_API_KEY found, auto-provisioning new TS_AUTHKEY...")
+		provisionKey(os.Getenv("TS_API_KEY"))
+	}
+
 	if *full {
 		buildEverything()
 	} else {
@@ -49,6 +55,12 @@ func RunDeploy(args []string) {
 	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password")
 	ephemeral := fs.Bool("ephemeral", true, "Register as ephemeral node on Tailscale")
 	fs.Parse(args)
+
+	// If TS_API_KEY is available, provision a fresh key before deployment
+	if os.Getenv("TS_API_KEY") != "" {
+		LogInfo("TS_API_KEY found, auto-provisioning fresh TS_AUTHKEY for deployment...")
+		provisionKey(os.Getenv("TS_API_KEY"))
+	}
 
 	if *host == "" || *pass == "" {
 		LogFatal("Error: -host (user@host) and -pass are required for deployment")
@@ -546,6 +558,7 @@ func runLogs(args []string) {
 func RunProvision(args []string) {
 	fs := flag.NewFlagSet("provision", flag.ExitOnError)
 	apiKey := fs.String("api-key", "", "Tailscale API Access Token")
+	optional := fs.Bool("optional", false, "Skip instead of failing if TS_API_KEY is missing")
 	fs.Parse(args)
 
 	token := *apiKey
@@ -554,9 +567,17 @@ func RunProvision(args []string) {
 	}
 
 	if token == "" {
+		if *optional {
+			LogInfo("TS_API_KEY not found, skipping provisioning.")
+			return
+		}
 		LogFatal("Error: --api-key flag or TS_API_KEY environment variable is required.")
 	}
 
+	provisionKey(token)
+}
+
+func provisionKey(token string) {
 	LogInfo("Generating new Tailscale Auth Key...")
 
 	url := "https://api.tailscale.com/api/v2/tailnet/-/keys"
@@ -605,6 +626,9 @@ func RunProvision(args []string) {
 }
 
 func updateEnv(key, value string) {
+	// Update current process environment
+	os.Setenv(key, value)
+
 	envFile := ".env"
 	content, _ := os.ReadFile(envFile)
 	lines := strings.Split(string(content), "\n")
