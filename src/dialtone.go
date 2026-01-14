@@ -92,11 +92,6 @@ func runStart(args []string) {
 	mavlinkAddr := fs.String("mavlink", "", "Mavlink connection string (e.g. serial:/dev/ttyAMA0:57600 or udp:0.0.0.0:14550)")
 	fs.Parse(args)
 
-	// Start Mavlink service if requested
-	if *mavlinkAddr != "" {
-		go startMavlink(*mavlinkAddr)
-	}
-
 	// Determine state directory
 	if *stateDir == "" {
 		homeDir, err := os.UserHomeDir()
@@ -107,19 +102,24 @@ func runStart(args []string) {
 	}
 
 	if *localOnly {
-		runLocalOnly(*natsPort, *wsPort, *verbose)
+		runLocalOnly(*natsPort, *wsPort, *verbose, *mavlinkAddr)
 		return
 	}
 
-	runWithTailscale(*hostname, *natsPort, *wsPort, *webPort, *stateDir, *ephemeral, *verbose)
+	runWithTailscale(*hostname, *natsPort, *wsPort, *webPort, *stateDir, *ephemeral, *verbose, *mavlinkAddr)
 }
 
 // runLocalOnly starts NATS without Tailscale (original behavior)
-func runLocalOnly(port, wsPort int, verbose bool) {
+func runLocalOnly(port, wsPort int, verbose bool, mavlinkAddr string) {
 	ns := startNATSServer("0.0.0.0", port, wsPort, verbose)
 	defer ns.Shutdown()
 
 	LogInfo("NATS server started on port %d (local only)", port)
+
+	// Start Mavlink service if requested
+	if mavlinkAddr != "" {
+		go startMavlink(mavlinkAddr, port)
+	}
 
 	// Start NATS publisher loop for Mavlink
 	startNatsPublisher(port)
@@ -135,7 +135,7 @@ var startTime = time.Now()
 var webFS embed.FS
 
 // runWithTailscale starts NATS exposed via Tailscale
-func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir string, ephemeral, verbose bool) {
+func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir string, ephemeral, verbose bool, mavlinkAddr string) {
 	// Ensure state directory exists
 	if err := os.MkdirAll(stateDir, 0700); err != nil {
 		LogFatal("Failed to create state directory: %v", err)
@@ -183,6 +183,11 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 	localWSPort := wsPort + 10000
 	ns := startNATSServer("127.0.0.1", localNATSPort, localWSPort, verbose)
 	defer ns.Shutdown()
+
+	// Start Mavlink service if requested (connect to LOCAL NATS port)
+	if mavlinkAddr != "" {
+		go startMavlink(mavlinkAddr, localNATSPort)
+	}
 
 	// Start NATS publisher loop for Mavlink
 	startNatsPublisher(localNATSPort)
@@ -378,16 +383,21 @@ Visit that URL to authenticate this device.
 `)
 }
 
-func startMavlink(endpoint string) {
+func startMavlink(endpoint string, natsPort int) {
 	LogInfo("Starting Mavlink Service on %s...", endpoint)
 
 	config := MavlinkConfig{
 		Endpoint: endpoint,
 		Callback: func(evt *MavlinkEvent) {
-			if evt.Type == "HEARTBEAT" {
+			var subject string
+			var data []byte
+			var err error
+
+			switch evt.Type {
+			case "HEARTBEAT":
 				if msg, ok := evt.Data.(*common.MessageHeartbeat); ok {
-					// Publish to NATS via channel
-					data, _ := json.Marshal(map[string]any{
+					subject = "mavlink.heartbeat"
+					data, err = json.Marshal(map[string]any{
 						"type":          "HEARTBEAT",
 						"mav_type":      msg.Type,
 						"autopilot":     msg.Autopilot,
@@ -396,15 +406,30 @@ func startMavlink(endpoint string) {
 						"system_status": msg.SystemStatus,
 						"timestamp":     time.Now().Unix(),
 					})
+				}
+			case "COMMAND_ACK":
+				if msg, ok := evt.Data.(*common.MessageCommandAck); ok {
+					subject = "mavlink.ack"
+					data, err = json.Marshal(map[string]any{
+						"command": msg.Command,
+						"result":  msg.Result,
+					})
+				}
+			case "STATUSTEXT":
+				if msg, ok := evt.Data.(*common.MessageStatustext); ok {
+					subject = "mavlink.statustext"
+					data, err = json.Marshal(map[string]any{
+						"severity": msg.Severity,
+						"text":     string(msg.Text[:]), // Convert char array to string
+					})
+				}
+			}
 
-					LogInfo("MAVLINK HEARTBEAT: %s", string(data))
-
-					// Send to publishing channel
-					select {
-					case mavlinkPubChan <- mavlinkNatsMsg{Subject: "mavlink.heartbeat", Data: data}:
-					default:
-						// Drop message if channel full
-					}
+			if err == nil && subject != "" {
+				select {
+				case mavlinkPubChan <- mavlinkNatsMsg{Subject: subject, Data: data}:
+				default:
+					// Drop message if channel full
 				}
 			}
 		},
@@ -414,6 +439,39 @@ func startMavlink(endpoint string) {
 	if err != nil {
 		LogFatal("Failed to create Mavlink service: %v", err)
 	}
+
+	// Connect to NATS for subscribing to commands
+	go func() {
+		// Wait for NATS to start
+		time.Sleep(3 * time.Second)
+		
+		nc, err := nats.Connect(fmt.Sprintf("nats://127.0.0.1:%d", natsPort))
+		if err != nil {
+			LogInfo("MAVLINK: Failed to connect to NATS for commands: %v", err)
+			return
+		}
+		
+		LogInfo("MAVLINK: Subscribed to rover.command")
+		
+		nc.Subscribe("rover.command", func(m *nats.Msg) {
+			var cmd map[string]interface{}
+			if err := json.Unmarshal(m.Data, &cmd); err != nil {
+				return
+			}
+			
+			typeStr, _ := cmd["type"].(string)
+			if typeStr == "" {
+				typeStr, _ = cmd["cmd"].(string)
+			}
+			
+			switch typeStr {
+			case "arm":
+				svc.Arm()
+			case "disarm":
+				svc.Disarm()
+			}
+		})
+	}()
 
 	go svc.Start()
 }

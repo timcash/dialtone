@@ -100,6 +100,20 @@ func (s *MavlinkService) Start() {
 						Data: msg,
 					})
 				}
+			case *common.MessageCommandAck:
+				if s.config.Callback != nil {
+					s.config.Callback(&MavlinkEvent{
+						Type: "COMMAND_ACK",
+						Data: msg,
+					})
+				}
+			case *common.MessageStatustext:
+				if s.config.Callback != nil {
+					s.config.Callback(&MavlinkEvent{
+						Type: "STATUSTEXT",
+						Data: msg,
+					})
+				}
 			}
 		case *gomavlib.EventParseError:
 			// LogInfo("MAVLink parse error: %v", e.Error)
@@ -116,4 +130,28 @@ func (s *MavlinkService) Start() {
 // Close closes the MAVLink service
 func (s *MavlinkService) Close() {
 	s.node.Close()
+}
+
+// Arm sends the arm command to the rover
+func (s *MavlinkService) Arm() error {
+	LogInfo("MavlinkService: Sending ARM command")
+	return s.node.WriteMessageAll(&common.MessageCommandLong{
+		TargetSystem:    0, // Broadcast
+		TargetComponent: 0, // Broadcast
+		Command:         common.MAV_CMD_COMPONENT_ARM_DISARM,
+		Param1:          1, // 1 = Arm
+		Param2:          0, // 0 = Emergency Disarm (not used for arming)
+	})
+}
+
+// Disarm sends the disarm command to the rover
+func (s *MavlinkService) Disarm() error {
+	LogInfo("MavlinkService: Sending DISARM command")
+	return s.node.WriteMessageAll(&common.MessageCommandLong{
+		TargetSystem:    0,
+		TargetComponent: 0,
+		Command:         common.MAV_CMD_COMPONENT_ARM_DISARM,
+		Param1:          0, // 0 = Disarm
+		Param2:          0,
+	})
 }
