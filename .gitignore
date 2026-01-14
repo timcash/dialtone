@@ -3,6 +3,7 @@ bin/
 src/web_build/
 *.exe
 *.exe~
+*.old
 
 # IDE
 .vscode/
