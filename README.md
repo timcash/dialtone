@@ -1,7 +1,7 @@
 # Dialtone
 ![Web Interface](ui.png)
 
-Dialtone is a high-performance **video teleoperation network** designed for robotic coordination and serves as a specialized **training ground for physical AI**. It provides a secure, encrypted, and ultra-low latency bridge between remote robotic hardware and humanoid/agentic control systems.
+Dialtone is a **video teleoperation network** designed for robotic coordination and allows people to work with and train **physical AI**. It provides a secure, encrypted, and low latency bridge between remote robotic hardware and humanoid/agentic control systems.
 
 ## 1. System Purpose
 
@@ -10,7 +10,25 @@ The project aims to solve the "last mile" connectivity problem for physical AI. 
 - **Train AI Models**: Collect high-fidelity sensor and video data over private networks for imitation learning.
 - **Coordinate Fleets**: Securely manage multiple robotic nodes without complex firewall or VPN configurations.
 
-## 2. System Design
+## 2. Development Workflow (TDD for AI Agents)
+
+When adding features or fixing bugs (especially when utilizing LLM-based coding assistants), follow this Test-Driven Development (TDD) loop to ensure stability across the network.
+
+0. **Start a branch**: `git checkout -b feature-name`
+1. **Create Test**: Add a local unit test in `src/dialtone_test.go` or a remote integration test in `src/remote_test.go`.
+2. **Implement**: Write the minimal code needed to satisfy the test.
+3. **Iterate**: Run `go test -v ./src/...` locally for immediate feedback.
+4. **Lint**: Run `golangci-lint run` locally for immediate feedback.
+5. **Build & Deploy**: Once local tests are green, run `dialtone full-build -deploy`.
+6. **README Update**: If you changed interfaces (new NATS subjects, new API endpoints), update the documentation immediately.
+7. **Security Audit**: Always verify no keys are commited in code, printed in logs or transferred to remote hosts. 
+8. **Verify Live**: Run system-level tests against the Tailscale IP of the robot to verify end-to-end functionality.
+9. **Commit**: Commit changes to the repository.
+10. **Integrate main into feature branch**: before pushing to remote, ensure your feature branch is up to date with main.
+11. **Push**: Push changes to the remote repository.
+12. **Merge**: Merge changes into main.
+
+## 3. System Design
 
 The system is designed to run as a single-binary appliance on ARM64-based robotic platforms.
 
@@ -24,7 +42,7 @@ The system is designed to run as a single-binary appliance on ARM64-based roboti
 - **Control Computer**: A Go application that orchestrates the camera feed, NATS server, and web interface.
 - **Web UI**: A real-time dashboard built with Vite/TypeScript and embedded directly into the Go binary.
 
-## 3. Network Architecture
+## 4. Network Architecture
 
 Dialtone leverages a modern, identity-based networking stack to eliminate the need for port forwarding or public IPs.
 
@@ -35,7 +53,7 @@ Dialtone leverages a modern, identity-based networking stack to eliminate the ne
     - **NATS Bridge**: A WebSocket interface for interacting with the NATS bus directly from the browser.
     - **System Metrics**: Real-time stats on uptime, connection count, and throughput.
 
-## 4. Build System (Podman)
+## 5. Build System (Podman)
 
 To ensure consistent builds for ARM64 robots from any development machine (Windows/Mac/Linux), Dialtone uses a containerized build loop.
 
@@ -43,7 +61,7 @@ To ensure consistent builds for ARM64 robots from any development machine (Windo
 - **CGO Support**: This enables building the V4L2 camera drivers (which require Linux headers) correctly for the target platform even when developing on Windows.
 - **Asset Embedding**: The build script (`build_and_deploy.ps1`) compiles the Vite frontend and uses `go:embed` to package the entire UI into the final binary.
 
-## 5. Automated Deployment (Unified CLI)
+## 6. Automated Deployment (Unified CLI)
 
 Deployment is handled directly through the `dialtone` binary, which serves as a unified manager for the robotic network.
 
@@ -57,18 +75,6 @@ The unified CLI performs:
 2. **Compilation**: `dialtone build` triggers Podman-based cross-compilation.
 3. **Transfer**: `dialtone deploy` handles SFTP upload and server restart.
 4. **Observation**: `dialtone logs` tails the remote execution logs via SSH.
-
-## 6. Development Workflow (TDD for AI Agents)
-
-When adding features or fixing bugs (especially when utilizing LLM-based coding assistants), follow this Test-Driven Development (TDD) loop to ensure stability across the network.
-
-### The Loop
-1. **Create Test**: Add a local unit test in `src/dialtone_test.go` or a remote integration test in `src/remote_test.go`.
-2. **Implement**: Write the minimal code needed to satisfy the test.
-3. **Iterate**: Run `go test -v ./src/...` locally for immediate feedback.
-4. **Build & Deploy**: Once local tests are green, run `dialtone full-build -deploy`.
-5. **README Update**: If you changed interfaces (new NATS subjects, new API endpoints), update the documentation immediately.
-6. **Verify Live**: Run system-level tests against the Tailscale IP of the robot to verify end-to-end functionality.
 
 ## 7. Build Instructions
 
@@ -134,13 +140,13 @@ Security is maintained by ensuring the Auth Key is never permanently stored on t
 3.  **Process Injection**: The remote `dialtone` binary is started via an `env TS_AUTHKEY=...` command inside a `nohup` block. The key exists only in the volatile memory of the running process.
 4.  **Auto-Cleanup**: Because the key is marked as **ephemeral**, Tailscale will automatically remove the robot from your machine list as soon as the process disconnects, keeping your admin console clean.
 
-**3. Provision Tailscale Key (Optional)**
+### Provision Tailscale Key (Optional)
 If you have a Tailscale API Access Token, you can generate a new auth key and update `.env` automatically:
 ```bash
 bin/dialtone.exe provision -api-key your_tailscale_api_token
 ```
 
-**4. Deploy and View Logs**
+### Deploy and View Logs
 ```bash
 # Deploy to robot
 bin/dialtone.exe deploy -host user@ip -pass password
@@ -149,7 +155,7 @@ bin/dialtone.exe deploy -host user@ip -pass password
 bin/dialtone.exe logs -host user@ip -pass password
 ```
 
-**4. Build Local-Only Binary (Windows/Mac)**
+### Build Local-Only Binary (Windows/Mac)
 ```bash
 go build -o bin/dialtone.exe ./src
 ```
