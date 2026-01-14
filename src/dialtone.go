@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
 	"net"
 	"net/http"
 	"net/netip"
@@ -87,7 +86,7 @@ func runStart(args []string) {
 	if *stateDir == "" {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
-			log.Fatalf("Failed to get home directory: %v", err)
+			LogFatal("Failed to get home directory: %v", err)
 		}
 		*stateDir = filepath.Join(homeDir, ".config", "dialtone")
 	}
@@ -105,10 +104,10 @@ func runLocalOnly(port, wsPort int, verbose bool) {
 	ns := startNATSServer("0.0.0.0", port, wsPort, verbose)
 	defer ns.Shutdown()
 
-	log.Printf("NATS server started on port %d (local only)", port)
+	LogInfo("NATS server started on port %d (local only)", port)
 
 	waitForShutdown()
-	log.Printf("Shutting down NATS server...")
+	LogInfo("Shutting down NATS server...")
 }
 
 // Global start time for uptime calculation
@@ -121,7 +120,7 @@ var webFS embed.FS
 func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir string, ephemeral, verbose bool) {
 	// Ensure state directory exists
 	if err := os.MkdirAll(stateDir, 0700); err != nil {
-		log.Fatalf("Failed to create state directory: %v", err)
+		LogFatal("Failed to create state directory: %v", err)
 	}
 
 	// Configure tsnet server
@@ -129,36 +128,36 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 		Hostname:  hostname,
 		Dir:       stateDir,
 		Ephemeral: ephemeral,
-		UserLogf:  log.Printf, // Auth URLs and user-facing messages
+		UserLogf:  LogInfo, // Auth URLs and user-facing messages
 	}
 
 	if verbose {
-		ts.Logf = log.Printf
+		ts.Logf = LogInfo
 	}
 
 	// Validate required environment variables
 	if os.Getenv("TS_AUTHKEY") == "" {
-		log.Fatal("ERROR: TS_AUTHKEY environment variable is not set. A Tailscale auth key is required for headless operation.")
+		LogFatal("ERROR: TS_AUTHKEY environment variable is not set. A Tailscale auth key is required for headless operation.")
 	}
 
 	// Print auth instructions for headless scenarios
 	printAuthInstructions()
 
 	// Start tsnet and wait for connection
-	log.Printf("Connecting to Tailscale...")
+	LogInfo("Connecting to Tailscale...")
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	status, err := ts.Up(ctx)
 	if err != nil {
-		log.Fatalf("Failed to connect to Tailscale: %v", err)
+		LogFatal("Failed to connect to Tailscale: %v", err)
 	}
 	defer ts.Close()
 
 	// Log connection info
-	log.Printf("Connected to Tailscale as %s", hostname)
+	LogInfo("Connected to Tailscale as %s", hostname)
 	for _, ip := range status.TailscaleIPs {
-		log.Printf("  Tailscale IP: %s", ip)
+		LogInfo("  Tailscale IP: %s", ip)
 	}
 
 	// Start NATS on localhost only (not directly exposed)
@@ -170,37 +169,37 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 	// Listen on Tailscale network for NATS
 	natsLn, err := ts.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
-		log.Fatalf("Failed to listen on Tailscale for NATS: %v", err)
+		LogFatal("Failed to listen on Tailscale for NATS: %v", err)
 	}
 	defer natsLn.Close()
 
 	// Listen on Tailscale network for NATS WebSockets
 	wsLn, err := ts.Listen("tcp", fmt.Sprintf(":%d", wsPort))
 	if err != nil {
-		log.Fatalf("Failed to listen on Tailscale for NATS WS: %v", err)
+		LogFatal("Failed to listen on Tailscale for NATS WS: %v", err)
 	}
 	defer wsLn.Close()
 
-	log.Printf("NATS server available on Tailscale at %s:%d", hostname, port)
-	log.Printf("NATS WebSockets available on Tailscale at %s:%d", hostname, wsPort)
-	log.Printf("Connect using: nats://%s:%d or ws://%s:%d", hostname, port, hostname, wsPort)
+	LogInfo("NATS server available on Tailscale at %s:%d", hostname, port)
+	LogInfo("NATS WebSockets available on Tailscale at %s:%d", hostname, wsPort)
+	LogInfo("Connect using: nats://%s:%d or ws://%s:%d", hostname, port, hostname, wsPort)
 
 	// Start camera in background if available
 	go func() {
 		cameras, err := ListCameras()
 		if err != nil {
-			log.Printf("CAMERA: Failed to list devices: %v", err)
+			LogInfo("CAMERA: Failed to list devices: %v", err)
 			return
 		}
 		if len(cameras) > 0 {
-			log.Printf("CAMERA: Found %d devices, using %s", len(cameras), cameras[0].Device)
+			LogInfo("CAMERA: Found %d devices, using %s", len(cameras), cameras[0].Device)
 			if err := StartCamera(context.Background(), cameras[0].Device); err != nil {
-				log.Printf("CAMERA: Failed to start %s: %v", cameras[0].Device, err)
+				LogInfo("CAMERA: Failed to start %s: %v", cameras[0].Device, err)
 			} else {
-				log.Printf("CAMERA: %s started successfully", cameras[0].Device)
+				LogInfo("CAMERA: %s started successfully", cameras[0].Device)
 			}
 		} else {
-			log.Printf("CAMERA: No devices found")
+			LogInfo("CAMERA: No devices found")
 		}
 	}()
 
@@ -211,14 +210,14 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 	// Start web server on Tailscale
 	webLn, err := ts.Listen("tcp", fmt.Sprintf(":%d", webPort))
 	if err != nil {
-		log.Fatalf("Failed to listen on Tailscale for web: %v", err)
+		LogFatal("Failed to listen on Tailscale for web: %v", err)
 	}
 	defer webLn.Close()
 
 	// Get LocalClient for identifying callers
 	lc, err := ts.LocalClient()
 	if err != nil {
-		log.Fatalf("Failed to get LocalClient: %v", err)
+		LogFatal("Failed to get LocalClient: %v", err)
 	}
 
 	// Create web handler
@@ -238,24 +237,22 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 			}
 		}
 
-		fmt.Println("\n=======================================================")
-		fmt.Printf("WEB SERVER READY\n")
-		// We print the FQDN-based URL if available, otherwise hostname
-		fmt.Printf("   URL: http://%s:%d\n", displayHostname, webPort)
+		LogInfo("=======================================================")
+		LogInfo("WEB SERVER READY")
+		LogInfo("   URL: http://%s:%d", displayHostname, webPort)
 
-		// If we have an IP, print that too as a fallback/direct link
 		if len(status.TailscaleIPs) > 0 {
-			fmt.Printf("   IP:  http://%s:%d\n", status.TailscaleIPs[0], webPort)
+			LogInfo("   IP:  http://%s:%d", status.TailscaleIPs[0], webPort)
 		}
-		fmt.Println("=======================================================")
+		LogInfo("=======================================================")
 
 		if err := http.Serve(webLn, webHandler); err != nil {
-			log.Printf("Web server error: %v", err)
+			LogInfo("Web server error: %v", err)
 		}
 	}()
 
 	waitForShutdown()
-	log.Printf("Shutting down...")
+	LogInfo("Shutting down...")
 }
 
 // startNATSServer creates and starts an embedded NATS server
@@ -274,18 +271,18 @@ func startNATSServer(host string, port, wsPort int, verbose bool) *server.Server
 
 	ns, err := server.NewServer(opts)
 	if err != nil {
-		log.Fatalf("Failed to create NATS server: %v", err)
+		LogFatal("Failed to create NATS server: %v", err)
 	}
 
 	// Configure logging if verbose
 	if verbose {
-		ns.ConfigureLogger()
+		ns.SetLogger(GetNATSLogger(), verbose, verbose)
 	}
 
 	go ns.Start()
 
 	if !ns.ReadyForConnections(10 * time.Second) {
-		log.Fatalf("NATS server failed to start")
+		LogFatal("NATS server failed to start")
 	}
 
 	return ns
@@ -309,7 +306,7 @@ func ProxyConnection(src net.Conn, targetAddr string) {
 
 	dst, err := net.Dial("tcp", targetAddr)
 	if err != nil {
-		log.Printf("Failed to connect to NATS backend: %v", err)
+		LogInfo("Failed to connect to NATS backend: %v", err)
 		return
 	}
 	defer dst.Close()
@@ -437,7 +434,7 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server
 			InsecureSkipVerify: true,
 		})
 		if err != nil {
-			log.Printf("WebSocket accept error: %v", err)
+			LogInfo("WebSocket accept error: %v", err)
 			return
 		}
 		defer c.Close(websocket.StatusInternalError, "closing")
@@ -496,11 +493,11 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server
 	// 6. Static Asset Serving (Embedded)
 	subFS, err := fs.Sub(webFS, "web_build")
 	if err != nil {
-		log.Printf("Error accessing sub-filesystem: %v", err)
+		LogInfo("Error accessing sub-filesystem: %v", err)
 	}
 
 	// Fallback/SPA logic for embedded web assets
-	log.Printf("Using embedded web assets")
+	LogInfo("Using embedded web assets")
 	staticHandler := http.FileServer(http.FS(subFS))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// If it's a known static file, serve it

@@ -23,7 +23,7 @@ func TestNATSTailscale_Integration(t *testing.T) {
 
 	authKey := os.Getenv("TS_AUTHKEY")
 	if authKey == "" {
-		t.Log("TS_AUTHKEY not set, skipping Tailscale integration test")
+		dialtone.LogInfo("TS_AUTHKEY not set, skipping Tailscale integration test")
 		return
 	}
 
@@ -39,10 +39,9 @@ func TestNATSTailscale_Integration(t *testing.T) {
 		Dir:       tmpDir,
 		Ephemeral: true,
 		Logf: func(format string, args ...any) {
-			t.Logf(format, args...)
+			dialtone.LogPrintf(format, args...)
 		},
 	}
-	defer s.Close()
 
 	// Start NATS server
 	natsPort := 4222 // Default NATS port
@@ -86,7 +85,7 @@ func TestNATSTailscale_Integration(t *testing.T) {
 		}
 	}()
 
-	t.Logf("NATS is now 'exposed' via Tailscale at %s:%d", hostname, natsPort)
+	dialtone.LogPrintf("NATS is now 'exposed' via Tailscale at %s:%d", hostname, natsPort)
 
 	// Verification: Since we are running locally, we might not be able to "dial" the tailnet address
 	// from the same process easily without using s.Dial, but we can verify the listener is up.
@@ -98,10 +97,10 @@ func TestNATSTailscale_Integration(t *testing.T) {
 	// Wait for Tailscale to be ready
 	status, err := s.Up(ctx)
 	if err != nil {
-		t.Logf("Tailscale Up error (expected if no key/network): %v", err)
+		dialtone.LogPrintf("Tailscale Up error (expected if no key/network): %v", err)
 		// We'll proceed sparingly
 	} else {
-		t.Logf("Tailscale Status: %+v", status)
+		dialtone.LogPrintf("Tailscale Status: %+v", status)
 	}
 
 	// Note: Fully testing connectivity requires a real auth key and potentially

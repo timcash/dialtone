@@ -85,7 +85,7 @@ func TestUI_ScreenshotsAndMessaging(t *testing.T) {
 		chromedp.CaptureScreenshot(&buf),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			path := filepath.Join(screenshotDir, "initial_load.png")
-			t.Logf("Saving screenshot to %s", path)
+			dialtone.LogPrintf("Saving screenshot to %s", path)
 			return os.WriteFile(path, buf, 0644)
 		}),
 
@@ -118,5 +118,5 @@ func TestUI_ScreenshotsAndMessaging(t *testing.T) {
 		t.Fatalf("UI Test failed: %v", err)
 	}
 
-	t.Log("UI screenshots saved successfully")
+	dialtone.LogInfo("UI screenshots saved successfully")
 }

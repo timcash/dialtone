@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	dialtone "dialtone/cli/src"
+
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
@@ -35,7 +37,7 @@ func TestRemoteRover_WebUI(t *testing.T) {
 	}
 
 	targetURL := fmt.Sprintf("http://%s", targetHost)
-	t.Logf("Checking remote rover UI at %s", targetURL)
+	dialtone.LogPrintf("Checking remote rover UI at %s", targetURL)
 
 	// 1. Setup Chromedp
 	ctx, cancel := chromedp.NewContext(context.Background())
@@ -46,7 +48,7 @@ func TestRemoteRover_WebUI(t *testing.T) {
 		switch ev := ev.(type) {
 		case *runtime.EventConsoleAPICalled:
 			for _, arg := range ev.Args {
-				t.Logf("browser console: %s", arg.Value)
+				dialtone.LogPrintf("browser console: %s", arg.Value)
 			}
 		}
 	})
@@ -67,12 +69,12 @@ func TestRemoteRover_WebUI(t *testing.T) {
 		var buf []byte
 		if err2 := chromedp.Run(ctx, chromedp.FullScreenshot(&buf, 100)); err2 == nil {
 			os.WriteFile("remote_failure.png", buf, 0644)
-			t.Log("Saved remote_failure.png")
+			dialtone.LogInfo("Saved remote_failure.png")
 		}
 		t.Fatalf("Remote UI check failed for %s: %v", targetURL, err)
 	}
 
-	t.Logf("Remote UI Status: %s", statusText)
+	dialtone.LogPrintf("Remote UI Status: %s", statusText)
 	if !strings.Contains(statusText, "CONNECTED") {
 		t.Errorf("Expected status 'CONNECTED', got %q", statusText)
 	}

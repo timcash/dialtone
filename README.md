@@ -2,7 +2,15 @@
 
 ![Web Interface](ui.png)
 
-Dialtone is a **video teleoperation network** designed for robotic coordination and allows people to work with and train **physical AI**. It provides a secure, encrypted, and low latency bridge between remote robotic hardware and humanoid/agentic control systems.
+Dialtone is a **robotic video operator network** desined to allow humans and AI to cooperativly train and control robots.
+
+# Features
+0. Simple single binary CLI to connect and control any robot
+1. Built in virtual private network
+2. Scalable command and control with queueing, streaming, and telemetry
+3. Real-time video streaming
+4. Automated sensor and actuator discovery
+5. Overlays opensource projects like ROS, mavlink, ardupilot, etc.
 
 ---
 
@@ -17,7 +25,7 @@ Detailed information about System Architecture, Installation, and Development ca
 - **[Networking (Tailscale)](./docs/tsnet.md)**: Identity-based networking and automated provisioning.
 - **[Messaging (NATS)](./docs/nats.md)**: System message bus and real-time telemetry.
 - **[Testing Guide](./docs/test.md)**: Unit tests, integration tests, and UI screenshots.
-
+- **[TODO](./todo.md)**: List of features to implement.
 ---
 
 ## 🚀 Quick Start
@@ -25,24 +33,18 @@ Detailed information about System Architecture, Installation, and Development ca
 Build the manager and deploy to a remote target:
 
 ```bash
-# 1. Build the dialtone manager
+# 1a. Build the dialtone manager on windows
 go build -o bin/dialtone.exe .
 
+# 1b. Build the dialtone manager on linux/macos
+go build -o bin/dialtone .
+
 # 2. Perform a full build (Web + ARM64 binary)
-bin/dialtone.exe full-build
+bin/dialtone full-build
 
 # 3. Deploy to the robot
-bin/dialtone.exe deploy
+bin/dialtone deploy
 
 # 4. Tail remote logs
-bin/dialtone.exe logs
+bin/dialtone logs
 ```
-
----
-
-## 🛠 Features
-
-- **Low-Latency MJPEG Streaming**: Real-time video feedback from V4L2 devices.
-- **Secure by Default**: Zero-disk secret propagation via Tailscale/tsnet.
-- **Hybrid Build Strategy**: Cross-compile for ARM64 using Podman containers.
-- **Integrated Control**: Embedded NATS server for command and telemetry coordination.

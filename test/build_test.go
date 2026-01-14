@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	dialtone "dialtone/cli/src"
 )
 
 func TestBuildTools_Go(t *testing.T) {
@@ -26,7 +28,7 @@ func TestWebUI_BuildOutput(t *testing.T) {
 	info, err := os.Stat("../src/web_build")
 	if err != nil {
 		if os.IsNotExist(err) {
-			t.Log("Warning: src/web_build does not exist.")
+			dialtone.LogInfo("Warning: src/web_build does not exist.")
 			return
 		}
 		t.Fatalf("Failed to stat src/web_build: %v", err)

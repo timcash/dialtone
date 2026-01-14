@@ -51,8 +51,7 @@ func RunDeploy(args []string) {
 	fs.Parse(args)
 
 	if *host == "" || *pass == "" {
-		fmt.Println("Error: -host (user@host) and -pass are required for deployment")
-		os.Exit(1)
+		LogFatal("Error: -host (user@host) and -pass are required for deployment")
 	}
 
 	validateRequiredVars([]string{"REMOTE_DIR_SRC", "REMOTE_DIR_DEPLOY", "DIALTONE_HOSTNAME", "TS_AUTHKEY"})
@@ -75,22 +74,19 @@ func RunSSH(args []string) {
 	fs.Parse(args)
 
 	if *host == "" || *pass == "" {
-		fmt.Println("Error: -host and -pass are required for SSH tools")
-		os.Exit(1)
+		LogFatal("Error: -host and -pass are required for SSH tools")
 	}
 
 	client, err := dialSSH(*host, *port, *user, *pass)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "SSH connection failed: %v\n", err)
-		os.Exit(1)
+		LogFatal("SSH connection failed: %v", err)
 	}
 	defer client.Close()
 
 	if *cmd != "" {
 		output, err := runCommand(client, *cmd)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Command failed: %v\n", err)
-			os.Exit(1)
+			LogFatal("Command failed: %v", err)
 		}
 		fmt.Print(output)
 	}
@@ -100,10 +96,9 @@ func RunSSH(args []string) {
 			*dest = filepath.Base(*upload)
 		}
 		if err := uploadFile(client, *upload, *dest); err != nil {
-			fmt.Fprintf(os.Stderr, "Upload failed: %v\n", err)
-			os.Exit(1)
+			LogFatal("Upload failed: %v", err)
 		}
-		fmt.Printf("Uploaded %s to %s\n", *upload, *dest)
+		LogInfo("Uploaded %s to %s", *upload, *dest)
 	}
 
 	if *download != "" {
@@ -111,34 +106,30 @@ func RunSSH(args []string) {
 			*localDest = filepath.Base(*download)
 		}
 		if err := downloadFile(client, *download, *localDest); err != nil {
-			fmt.Fprintf(os.Stderr, "Download failed: %v\n", err)
-			os.Exit(1)
+			LogFatal("Download failed: %v", err)
 		}
-		fmt.Printf("Downloaded %s to %s\n", *download, *localDest)
+		LogInfo("Downloaded %s to %s", *download, *localDest)
 	}
 }
 
 func validateRequiredVars(vars []string) {
 	for _, v := range vars {
 		if os.Getenv(v) == "" {
-			fmt.Printf("ERROR: Environment variable %s is not set. Please check your .env file.\n", v)
-			os.Exit(1)
+			LogFatal("ERROR: Environment variable %s is not set. Please check your .env file.", v)
 		}
 	}
 }
 
 func buildWithPodman() {
-	fmt.Println("Building Dialtone for Linux ARM64 using Podman...")
+	LogInfo("Building Dialtone for Linux ARM64 using Podman...")
 
 	cwd, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to get current directory: %v\n", err)
-		os.Exit(1)
+		LogFatal("Failed to get current directory: %v", err)
 	}
 
 	if err := os.MkdirAll("bin", 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create bin directory: %v\n", err)
-		os.Exit(1)
+		LogFatal("Failed to create bin directory: %v", err)
 	}
 
 	buildCmd := []string{
@@ -153,35 +144,33 @@ func buildWithPodman() {
 		"bash", "-c", "apt-get update && apt-get install -y gcc-aarch64-linux-gnu && go build -buildvcs=false -o bin/dialtone-arm64 .",
 	}
 
-	fmt.Printf("Running: podman %v\n", buildCmd)
+	LogInfo("Running: podman %v", buildCmd)
 	cmd := exec.Command("podman", buildCmd...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Podman build failed: %v\n", err)
-		os.Exit(1)
+		LogFatal("Podman build failed: %v", err)
 	}
 
-	fmt.Println("Build successful: bin/dialtone-arm64")
+	LogInfo("Build successful: bin/dialtone-arm64")
 }
 
 func buildEverything() {
-	fmt.Println("Starting Full Build Process...")
+	LogInfo("Starting Full Build Process...")
 
 	// 1. Build Web UI
-	fmt.Println("Building Web UI...")
+	LogInfo("Building Web UI...")
 	webDir := filepath.Join("src", "web")
 	runShell(webDir, "npm", "install")
 	runShell(webDir, "npm", "run", "build")
 
 	// 2. Sync web assets
-	fmt.Println("Syncing web assets to src/web_build...")
+	LogInfo("Syncing web assets to src/web_build...")
 	webBuildDir := filepath.Join("src", "web_build")
 	os.RemoveAll(webBuildDir)
 	if err := os.MkdirAll(webBuildDir, 0755); err != nil {
-		fmt.Printf("Failed to create web_build dir: %v\n", err)
-		os.Exit(1)
+		LogFatal("Failed to create web_build dir: %v", err)
 	}
 	copyDir(filepath.Join("src", "web", "dist"), webBuildDir)
 
@@ -191,12 +180,12 @@ func buildEverything() {
 	// 4. Build for ARM64 using Podman
 	buildWithPodman()
 
-	fmt.Println("Full build successful!")
+	LogInfo("Full build successful!")
 }
 
 // BuildSelf rebuilds the current binary and replaces it
 func BuildSelf() {
-	fmt.Println("Building Dialtone CLI (Self)...")
+	LogInfo("Building Dialtone CLI (Self)...")
 
 	// Always aim for bin/dialtone.exe when building from source
 	exePath := filepath.Join("bin", "dialtone.exe")
@@ -210,33 +199,31 @@ func BuildSelf() {
 	os.Remove(oldExePath) // Clean up any previous old file
 	if _, err := os.Stat(exePath); err == nil {
 		if err := os.Rename(exePath, oldExePath); err != nil {
-			fmt.Printf("Warning: Failed to rename current exe, build might fail: %v\n", err)
+			LogInfo("Warning: Failed to rename current exe, build might fail: %v", err)
 		} else {
-			fmt.Printf("Renamed current binary to %s\n", filepath.Base(oldExePath))
+			LogInfo("Renamed current binary to %s", filepath.Base(oldExePath))
 		}
 	}
 
 	runShell(".", "go", "build", "-o", exePath, ".")
-	fmt.Printf("Successfully built %s\n", exePath)
+	LogInfo("Successfully built %s", exePath)
 }
 
 func runShell(dir string, name string, args ...string) {
-	fmt.Printf("Running: %s %v in %s\n", name, args, dir)
+	LogInfo("Running: %s %v in %s", name, args, dir)
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		fmt.Printf("Command failed: %v\n", err)
-		os.Exit(1)
+		LogFatal("Command failed: %v", err)
 	}
 }
 
 func copyDir(src, dst string) {
 	entries, err := os.ReadDir(src)
 	if err != nil {
-		fmt.Printf("Failed to read src dir %s: %v\n", src, err)
-		os.Exit(1)
+		LogFatal("Failed to read src dir %s: %v", src, err)
 	}
 
 	for _, entry := range entries {
@@ -245,19 +232,16 @@ func copyDir(src, dst string) {
 
 		if entry.IsDir() {
 			if err := os.MkdirAll(dstPath, 0755); err != nil {
-				fmt.Printf("Failed to create dir %s: %v\n", dstPath, err)
-				os.Exit(1)
+				LogFatal("Failed to create dir %s: %v", dstPath, err)
 			}
 			copyDir(srcPath, dstPath)
 		} else {
 			data, err := os.ReadFile(srcPath)
 			if err != nil {
-				fmt.Printf("Failed to read file %s: %v\n", srcPath, err)
-				os.Exit(1)
+				LogFatal("Failed to read file %s: %v", srcPath, err)
 			}
 			if err := os.WriteFile(dstPath, data, 0644); err != nil {
-				fmt.Printf("Failed to write file %s: %v\n", dstPath, err)
-				os.Exit(1)
+				LogFatal("Failed to write file %s: %v", dstPath, err)
 			}
 		}
 	}
@@ -354,7 +338,7 @@ func uploadFile(client *ssh.Client, localPath, remotePath string) error {
 }
 
 func uploadDir(client *ssh.Client, localDir, remoteDir string) {
-	fmt.Printf("Uploading directory %s to %s...\n", localDir, remoteDir)
+	LogInfo("Uploading directory %s to %s...", localDir, remoteDir)
 
 	sftpClient, err := sftp.NewClient(client)
 	if err != nil {
@@ -430,19 +414,18 @@ func downloadFile(client *ssh.Client, remotePath, localPath string) error {
 }
 
 func deployDialtone(host, port, user, pass string, ephemeral bool) {
-	fmt.Println("Starting deployment of Dialtone (Remote Build)...")
+	LogInfo("Starting deployment of Dialtone (Remote Build)...")
 
 	localBinary := "bin/dialtone-arm64"
 	usePrebuilt := false
 	if _, err := os.Stat(localBinary); err == nil {
 		usePrebuilt = true
-		fmt.Println("Found pre-built binary, using it for deployment.")
+		LogInfo("Found pre-built binary, using it for deployment.")
 	}
 
 	client, err := dialSSH(host, port, user, pass)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to connect: %v\n", err)
-		os.Exit(1)
+		LogFatal("Failed to connect: %v", err)
 	}
 	defer client.Close()
 
@@ -451,21 +434,20 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 		if remoteDir == "" {
 			remoteDir = "/home/tim/dialtone_deploy"
 		}
-		fmt.Printf("Cleaning and creating remote directory %s...\n", remoteDir)
+		LogInfo("Cleaning and creating remote directory %s...", remoteDir)
 		_, _ = runCommand(client, fmt.Sprintf("rm -rf %s && mkdir -p %s", remoteDir, remoteDir))
 
-		fmt.Printf("Uploading pre-built binary %s...\n", localBinary)
+		LogInfo("Uploading pre-built binary %s...", localBinary)
 		remotePath := path.Join(remoteDir, "dialtone")
 		if err := uploadFile(client, localBinary, remotePath); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to upload binary: %v\n", err)
-			os.Exit(1)
+			LogFatal("Failed to upload binary: %v", err)
 		}
 	} else {
 		remoteDir := os.Getenv("REMOTE_DIR_SRC")
 		if remoteDir == "" {
 			remoteDir = "/home/tim/dialtone_src"
 		}
-		fmt.Printf("Cleaning and creating remote directory %s...\n", remoteDir)
+		LogInfo("Cleaning and creating remote directory %s...", remoteDir)
 		_, _ = runCommand(client, fmt.Sprintf("rm -rf %s && mkdir -p %s/src", remoteDir, remoteDir))
 
 		filesToUpload := []string{"go.mod", "go.sum", "dialtone.go"}
@@ -475,37 +457,35 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 		}
 
 		for _, file := range filesToUpload {
-			fmt.Printf("Uploading %s...\n", file)
+			LogInfo("Uploading %s...", file)
 			remotePath := path.Join(remoteDir, file)
 			// Ensure parent directory exists on remote
 			parentDir := filepath.ToSlash(path.Dir(remotePath))
 			_, _ = runCommand(client, fmt.Sprintf("mkdir -p %s", parentDir))
 			if err := uploadFile(client, file, remotePath); err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to upload %s: %v\n", file, err)
-				os.Exit(1)
+				LogFatal("Failed to upload %s: %v", file, err)
 			}
 		}
 
 		// Also upload web_build if it exists
 		webBuildDir := filepath.Join("src", "web_build")
 		if _, err := os.Stat(webBuildDir); err == nil {
-			fmt.Println("Uploading web assets...")
+			LogInfo("Uploading web assets...")
 			uploadDir(client, webBuildDir, path.Join(remoteDir, "src", "web_build"))
 		}
 
-		fmt.Println("Building on Raspberry Pi...")
+		LogInfo("Building on Raspberry Pi...")
 		buildCmd := fmt.Sprintf("cd %s && /usr/local/go/bin/go build -v -o dialtone .", remoteDir)
 		output, err := runCommand(client, buildCmd)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Remote build failed: %v\nOutput: %s\n", err, output)
-			os.Exit(1)
+			LogFatal("Remote build failed: %v\nOutput: %s", err, output)
 		}
 	}
 
-	fmt.Println("Stopping remote dialtone...")
+	LogInfo("Stopping remote dialtone...")
 	_, _ = runCommand(client, "pkill dialtone || true")
 
-	fmt.Println("Starting service...")
+	LogInfo("Starting service...")
 	remoteBaseDir := os.Getenv("REMOTE_DIR_SRC")
 	if usePrebuilt {
 		remoteBaseDir = os.Getenv("REMOTE_DIR_DEPLOY")
@@ -526,11 +506,10 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 	startCmd := fmt.Sprintf("cp %s ~/dialtone && chmod +x ~/dialtone && nohup sh -c 'TS_AUTHKEY=%s ~/dialtone start -hostname %s %s' > ~/nats.log 2>&1 < /dev/null &", remoteBinaryPath, tsAuthKey, hostnameParam, ephemeralFlag)
 
 	if err := runCommandNoWait(client, startCmd); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to start: %v\n", err)
-		os.Exit(1)
+		LogFatal("Failed to start: %v", err)
 	}
 
-	fmt.Println("\nDeployment complete!")
+	LogInfo("Deployment complete!")
 }
 
 func runLogs(args []string) {
@@ -542,28 +521,25 @@ func runLogs(args []string) {
 	fs.Parse(args)
 
 	if *host == "" || *pass == "" {
-		fmt.Println("Error: -host and -pass are required for logs")
-		os.Exit(1)
+		LogFatal("Error: -host and -pass are required for logs")
 	}
 
 	client, err := dialSSH(*host, *port, *user, *pass)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to connect: %v\n", err)
-		os.Exit(1)
+		LogFatal("Failed to connect: %v", err)
 	}
 	defer client.Close()
 
 	session, err := client.NewSession()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create session: %v\n", err)
-		os.Exit(1)
+		LogFatal("Failed to create session: %v", err)
 	}
 	defer session.Close()
 
 	session.Stdout = os.Stdout
 	session.Stderr = os.Stderr
 
-	fmt.Printf("Tailing logs on %s...\n", *host)
+	LogInfo("Tailing logs on %s...", *host)
 	_ = session.Run("tail -f ~/nats.log")
 }
 
@@ -578,11 +554,10 @@ func RunProvision(args []string) {
 	}
 
 	if token == "" {
-		fmt.Println("Error: --api-key flag or TS_API_KEY environment variable is required.")
-		os.Exit(1)
+		LogFatal("Error: --api-key flag or TS_API_KEY environment variable is required.")
 	}
 
-	fmt.Println("Generating new Tailscale Auth Key...")
+	LogInfo("Generating new Tailscale Auth Key...")
 
 	url := "https://api.tailscale.com/api/v2/tailnet/-/keys"
 	payload := map[string]interface{}{
@@ -602,8 +577,7 @@ func RunProvision(args []string) {
 	jsonPayload, _ := json.Marshal(payload)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
 	if err != nil {
-		fmt.Printf("Failed to create request: %v\n", err)
-		os.Exit(1)
+		LogFatal("Failed to create request: %v", err)
 	}
 
 	req.SetBasicAuth(token, "")
@@ -611,15 +585,13 @@ func RunProvision(args []string) {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		fmt.Printf("API request failed: %v\n", err)
-		os.Exit(1)
+		LogFatal("API request failed: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
-		fmt.Printf("API error (%d): %s\n", resp.StatusCode, string(body))
-		os.Exit(1)
+		LogFatal("API error (%d): %s", resp.StatusCode, string(body))
 	}
 
 	var result struct {
@@ -627,9 +599,9 @@ func RunProvision(args []string) {
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&result)
 
-	fmt.Printf("Successfully generated key: %s...\n", result.Key[:10])
+	LogInfo("Successfully generated key: %s...", result.Key[:10])
 	updateEnv("TS_AUTHKEY", result.Key)
-	fmt.Println("Updated .env with new TS_AUTHKEY.")
+	LogInfo("Updated .env with new TS_AUTHKEY.")
 }
 
 func updateEnv(key, value string) {

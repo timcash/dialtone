@@ -20,3 +20,5 @@
 2. turn off blue tooth with the config file
 3. set the hostname
 4. add a robot user
+# Add aria labels to the web ui
+1. use aria labels for all automated testing via chromedp

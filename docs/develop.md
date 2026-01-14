@@ -8,7 +8,8 @@ When adding features or fixing bugs (especially when utilizing LLM-based coding 
 1. **Create Test**: Add a local unit test in `test/local_test.go` or a remote integration test in `test/remote_rover_test.go`.
 2. **Implement**: Write the minimal code needed to satisfy the test.
 3. **Iterate**: Run `go test -v ./test/...` locally for immediate feedback.
-4. **Lint**: Run `golangci-lint run` locally for immediate feedback.
+3. **Logging**: Use `dialtone.LogInfo`, `dialtone.LogError`, `dialtone.LogFatal` for logging.
+4. **Lint**: Run linter locally for immediate feedback.
 5. **Build & Deploy**: Once local tests are green, run `dialtone full-build` followed by `dialtone deploy`.
 6. **README Update**: If you changed interfaces (new NATS subjects, new API endpoints), update the documentation immediately.
 7. **Security Audit**: Always verify no keys are commited in code, printed in logs or transferred to remote hosts. 
