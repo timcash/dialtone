@@ -26,7 +26,7 @@ func isResolvable(host string) bool {
 func TestRemoteRover_WebUI(t *testing.T) {
 	targetHost := os.Getenv("ROVER_HOST")
 	if targetHost == "" {
-		targetHost = "drone-nats" // Use the default drone-nats Tailscale node name
+		targetHost = "dialtone-1" // Use the default dialtone-1 Tailscale node name
 	}
 
 	// Skip if host is not resolvable

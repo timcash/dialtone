@@ -538,7 +538,7 @@ func deployDialtone(host, port, pass string, ephemeral bool) {
 
 	hostnameParam := os.Getenv("DIALTONE_HOSTNAME")
 	if hostnameParam == "" {
-		hostnameParam = "drone-nats"
+		hostnameParam = "dialtone-1"
 	}
 
 	tsAuthKey := os.Getenv("TS_AUTHKEY")

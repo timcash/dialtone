@@ -69,7 +69,7 @@ func printUsage() {
 
 func runStart(args []string) {
 	fs := flag.NewFlagSet("start", flag.ExitOnError)
-	hostname := fs.String("hostname", "nats", "Tailscale hostname for this NATS server")
+	hostname := fs.String("hostname", "dialtone-1", "Tailscale hostname for this NATS server")
 	natsPort := fs.Int("port", 4222, "NATS port to listen on (both local and Tailscale)")
 	webPort := fs.Int("web-port", 80, "Web dashboard port")
 	stateDir := fs.String("state-dir", "", "Directory to store Tailscale state (default: ~/.config/dialtone)")

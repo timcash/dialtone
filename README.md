@@ -144,18 +144,13 @@ bin/dialtone.exe logs -host user@ip -pass password
 go build -o bin/dialtone.exe ./src
 ```
 
-### Common Build Issues
-- **Podman VM Not Running**: Ensure the Podman machine is started (`podman machine start`).
-- **NPM Version Conflicts**: Use Node v22+ to ensure compatibility with the Vite build loop.
-- **SSH Timeout**: Verfiy the robot's IP address in `build_and_deploy.ps1` matches your hardware.
-
 ---
 
 ### Command-Line Options
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-hostname` | `nats` | Tailscale hostname for this node |
+| `-hostname` | `dialtone-1` | Tailscale hostname for this node |
 | `-port` | `4222` | NATS port on the tailnet |
 | `-web-port` | `80` | Dashboard port |
 | `-local-only`| `false` | Run without Tailscale for local debugging |
