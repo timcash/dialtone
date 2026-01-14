@@ -60,8 +60,16 @@ func TestRemoteRover_WebUI(t *testing.T) {
 	err := chromedp.Run(ctx,
 		chromedp.Navigate(targetURL),
 		// Wait for the status indicator to reflect an online NATS connection
-		chromedp.WaitVisible(`#status-indicator.status-online`, chromedp.ByQuery),
-		chromedp.TextContent(`#status-text`, &statusText, chromedp.ByID),
+		chromedp.WaitVisible(`[aria-label="System Status"].status-online`, chromedp.ByQuery),
+		chromedp.TextContent(`[aria-label="System Status"] #status-text`, &statusText, chromedp.ByQuery),
+
+		// Send a test message
+		chromedp.SendKeys(`[aria-label="NATS Subject"]`, "test.remote.message", chromedp.ByQuery),
+		chromedp.SendKeys(`[aria-label="Message Body"]`, `{"remote": "test"}`, chromedp.ByQuery),
+		chromedp.Click(`[aria-label="Send NATS Message"]`, chromedp.ByQuery),
+
+		// Wait for feedback (log entry)
+		chromedp.WaitVisible(`[aria-label="Log Entry success"]`, chromedp.ByQuery),
 	)
 
 	if err != nil {

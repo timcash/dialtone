@@ -79,7 +79,7 @@ func TestUI_ScreenshotsAndMessaging(t *testing.T) {
 
 	err = chromedp.Run(ctx,
 		chromedp.Navigate(targetURL),
-		chromedp.WaitVisible(`#status-indicator.status-online`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[aria-label="System Status"].status-online`, chromedp.ByQuery),
 
 		// Take initial screenshot
 		chromedp.CaptureScreenshot(&buf),
@@ -90,8 +90,8 @@ func TestUI_ScreenshotsAndMessaging(t *testing.T) {
 		}),
 
 		// Fill inputs
-		chromedp.SendKeys(`#subject`, "test.ui.message", chromedp.ByID),
-		chromedp.SendKeys(`#message`, `{"hello": "world"}`, chromedp.ByID),
+		chromedp.SendKeys(`[aria-label="NATS Subject"]`, "test.ui.message", chromedp.ByQuery),
+		chromedp.SendKeys(`[aria-label="Message Body"]`, `{"hello": "world"}`, chromedp.ByQuery),
 
 		// Take screenshot before send
 		chromedp.CaptureScreenshot(&buf),
@@ -101,10 +101,10 @@ func TestUI_ScreenshotsAndMessaging(t *testing.T) {
 		}),
 
 		// Click send
-		chromedp.Click(`#send-btn`, chromedp.ByID),
+		chromedp.Click(`[aria-label="Send NATS Message"]`, chromedp.ByQuery),
 
 		// Wait for log entry
-		chromedp.WaitVisible(`.log-item.success`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[aria-label="Log Entry success"]`, chromedp.ByQuery),
 
 		// Take final screenshot
 		chromedp.CaptureScreenshot(&buf),

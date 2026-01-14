@@ -1,12 +1,8 @@
-# Integrate .env variable for tsnet API key
-1. I added a variable to the .env file for the tsnet API key
-2. integrate using it in the cli provision command if it is available. do not log it
-3. provision a new key AUTHKEY via the CLI before each deploy by adding it as an automated step  when building via build.ps1 or build.sh or dialtone cli build
-
 # Improve testing
 0. create branch called improve-testing
 1. improve UI tests to use aria labels after adding them to the web ui
-2. send a nats message and recieve feedback in a test all via chromedp and aria labels to get the elements
+2. deploy the new binary and run the remote UI tests against the remote robot web UI
+3. send a nats message and recieve feedback in a test all via chromedp and aria labels to get the elements
 
 # Create plugin system
 1. keep it simple. it should really just be a basic code template that serves as an example for how to create a plugin.
