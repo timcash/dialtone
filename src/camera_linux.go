@@ -5,7 +5,6 @@ package dialtone
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -75,7 +74,7 @@ func StartCamera(ctx context.Context, devName string) error {
 		return nil
 	}
 
-	log.Printf("Opening camera device %s...", devName)
+	LogInfo("Opening camera device %s...", devName)
 	cam, err := device.Open(
 		devName,
 		device.WithPixFormat(v4l2.PixFormat{
@@ -117,7 +116,7 @@ func StreamHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	log.Printf("Starting stream for %s", r.RemoteAddr)
+	LogInfo("Starting stream for %s", r.RemoteAddr)
 
 	// Get the frame channel from the camera
 	frames := cam.GetFrames()
@@ -125,11 +124,11 @@ func StreamHandler(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
-			log.Printf("Stream closed by client %s", r.RemoteAddr)
+			LogInfo("Stream closed by client %s", r.RemoteAddr)
 			return
 		case frame, ok := <-frames:
 			if !ok {
-				log.Printf("Frame channel closed")
+				LogInfo("Frame channel closed")
 				return
 			}
 			// Write the MJPEG boundary and frame metadata

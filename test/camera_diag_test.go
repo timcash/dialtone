@@ -4,8 +4,8 @@ package test
 
 import (
 	"context"
+	dialtone "dialtone/cli/src"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,16 +17,16 @@ import (
 )
 
 func TestCameraDiag(t *testing.T) {
-	fmt.Println("=== Camera Diagnostic Tool ===")
+	dialtone.LogInfo("=== Camera Diagnostic Tool ===")
 
 	// 1. List all video devices
 	matches, err := filepath.Glob("/sys/class/video4linux/video*")
 	if err != nil {
-		log.Fatalf("Failed to glob video devices: %v", err)
+		dialtone.LogFatal("Failed to glob video devices: %v", err)
 	}
 
 	if len(matches) == 0 {
-		fmt.Println("No video devices found in /sys/class/video4linux/")
+		dialtone.LogInfo("No video devices found in /sys/class/video4linux/")
 		return
 	}
 
@@ -36,19 +36,19 @@ func TestCameraDiag(t *testing.T) {
 		nameBytes, _ := os.ReadFile(namePath)
 		name := strings.TrimSpace(string(nameBytes))
 
-		fmt.Printf("\nChecking Device: %s (%s)\n", devPath, name)
+		dialtone.LogPrintf("Checking Device: %s (%s)", devPath, name)
 
 		// Try to open and capture
 		if err := testDevice(devPath); err != nil {
-			fmt.Printf("  [!] Failed: %v\n", err)
+			dialtone.LogPrintf("  [!] Failed: %v", err)
 		} else {
-			fmt.Printf("  [+] Success! Frame saved for %s\n", devPath)
+			dialtone.LogPrintf("  [+] Success! Frame saved for %s", devPath)
 		}
 	}
 }
 
 func testDevice(devName string) error {
-	fmt.Printf("  Opening %s...\n", devName)
+	dialtone.LogPrintf("  Opening %s...", devName)
 
 	// Try MJPEG first
 	cam, err := device.Open(
@@ -61,7 +61,7 @@ func testDevice(devName string) error {
 	)
 
 	if err != nil {
-		fmt.Printf("  MJPEG open failed, trying default format...\n")
+		dialtone.LogPrintf("  MJPEG open failed, trying default format...")
 		cam, err = device.Open(devName)
 		if err != nil {
 			return fmt.Errorf("open failed: %w", err)
@@ -71,14 +71,14 @@ func testDevice(devName string) error {
 
 	// List supported formats for debugging
 	caps := cam.Capability()
-	fmt.Printf("  Driver: %s, Card: %s, Bus: %s\n", caps.Driver, caps.Card, caps.BusInfo)
+	dialtone.LogPrintf("  Driver: %s, Card: %s, Bus: %s", caps.Driver, caps.Card, caps.BusInfo)
 
 	// Start stream
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	// Capture one frame
-	fmt.Println("  Waiting for frame...")
+	dialtone.LogInfo("  Waiting for frame...")
 	frames := cam.GetFrames()
 
 	if err := cam.Start(ctx); err != nil {
@@ -97,7 +97,7 @@ func testDevice(devName string) error {
 		if err := os.WriteFile(fileName, frame.Data, 0644); err != nil {
 			return fmt.Errorf("failed to save frame: %w", err)
 		}
-		fmt.Printf("  Captured %d bytes to %s\n", len(frame.Data), fileName)
+		dialtone.LogPrintf("  Captured %d bytes to %s", len(frame.Data), fileName)
 		return nil
 	case <-time.After(3 * time.Second):
 		return fmt.Errorf("timeout waiting for frame")

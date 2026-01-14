@@ -3,12 +3,14 @@ package test
 import (
 	"os"
 	"testing"
+
+	dialtone "dialtone/cli/src"
 )
 
 func TestDeploy_BinaryExists(t *testing.T) {
 	// We now build bin/dialtone.exe
 	_, err := os.Stat("../bin/dialtone.exe")
 	if err != nil {
-		t.Log("Note: bin/dialtone.exe not found. This is expected if the build command hasn't run.")
+		dialtone.LogInfo("Note: bin/dialtone.exe not found. This is expected if the build command hasn't run.")
 	}
 }
