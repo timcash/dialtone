@@ -1,214 +1,48 @@
 # Dialtone
+
 ![Web Interface](ui.png)
 
 Dialtone is a **video teleoperation network** designed for robotic coordination and allows people to work with and train **physical AI**. It provides a secure, encrypted, and low latency bridge between remote robotic hardware and humanoid/agentic control systems.
 
-## 1. System Purpose
+---
 
-The project aims to solve the "last mile" connectivity problem for physical AI. By combining user-space networking with embedded messaging, Dialtone allows developers to:
-- **Teleoperate Robots**: Low-latency MJPEG streaming and real-time NATS command loops.
-- **Train AI Models**: Collect high-fidelity sensor and video data over private networks for imitation learning.
-- **Coordinate Fleets**: Securely manage multiple robotic nodes without complex firewall or VPN configurations.
+## 📚 Documentation Map
 
-## 2. Development Workflow (TDD for AI Agents)
+Detailed information about System Architecture, Installation, and Development can be found in the [docs/](./docs) directory:
 
-When adding features or fixing bugs (especially when utilizing LLM-based coding assistants), follow this Test-Driven Development (TDD) loop to ensure stability across the network.
+- **[System Design & Tech Stack](./docs/techstack.md)**: Hardware/Software stack overview.
+- **[Installation & Setup](./docs/install.md)**: Prerequisites and environment configuration.
+- **[Build & Deployment](./docs/build.md)**: Containerized builds, ARM64 cross-compilation, and deployment commands.
+- **[Development Workflow](./docs/develop.md)**: TDD loop, code style, and CLI options.
+- **[Networking (Tailscale)](./docs/tsnet.md)**: Identity-based networking and automated provisioning.
+- **[Messaging (NATS)](./docs/nats.md)**: System message bus and real-time telemetry.
+- **[Testing Guide](./docs/test.md)**: Unit tests, integration tests, and UI screenshots.
 
-0. **Start a branch**: `git checkout -b feature-name`
-1. **Create Test**: Add a local unit test in `test/local_test.go` or a remote integration test in `test/remote_rover_test.go`.
-2. **Implement**: Write the minimal code needed to satisfy the test.
-3. **Iterate**: Run `go test -v ./test/...` locally for immediate feedback.
-4. **Lint**: Run `golangci-lint run` locally for immediate feedback.
-5. **Build & Deploy**: Once local tests are green, run `dialtone full-build` followed by `dialtone deploy`.
-6. **README Update**: If you changed interfaces (new NATS subjects, new API endpoints), update the documentation immediately.
-7. **Security Audit**: Always verify no keys are commited in code, printed in logs or transferred to remote hosts. 
-8. **Verify Live**: Run system-level tests against the Tailscale IP of the robot to verify end-to-end functionality.
-9. **Commit**: Commit changes to the repository.
-10. **Integrate main into feature branch**: before pushing to remote, ensure your feature branch is up to date with main.
-11. **Push**: Push changes to the remote repository.
-12. **Merge**: Merge changes into main.
+---
 
-## 3. Code Style
-pipelines not pyramids examples
-```golang
-// pyramid of functions is bad
-func request(ctx context.Context) {
-    func auth(ctx context.Context) {
-        func database1(ctx context.Context) {
-            func database2(ctx context.Context) {
-                func logger(ctx context.Context) {
-            }
-        }
-    }
-}
+## 🚀 Quick Start
 
-// pipeline is good
-func request(ctx context.Context) {
-    var auth_result = auth(ctx)
-    var database1_result = database1(ctx)
-    var database2_result = database2(ctx)
-    var logger_result = logger(ctx)
-    return ctx
-}
-```
-
-## 4. System Design
-
-The system is designed to run as a single-binary appliance on ARM64-based robotic platforms.
-
-### Hardware Stack
-- **The Robot**: Target platforms like Raspberry Pi 4/5 or NVIDIA Jetson. These handle the physical interaction with the environment.
-- **Connected Devices**:
-    - **Cameras**: Supports V4L2-compatible USB and MIPI cameras (e.g., Raspberry Pi Camera Module).
-    - **Motors/Servos**: Interface via GPIO or serial bridges (e.g., MAVLink) integrated into the NATS bus.
-
-### Software Stack
-- **Control Computer**: A Go application that orchestrates the camera feed, NATS server, and web interface.
-- **Web UI**: A real-time dashboard built with Vite/TypeScript and embedded directly into the Go binary.
-
-## 5. Network Architecture
-
-Dialtone leverages a modern, identity-based networking stack to eliminate the need for port forwarding or public IPs.
-
-- **NATS**: The "central nervous system" of the robot. Telemetry (video, sensors) and commands (velocity, attitude) are published to a built-in NATS server.
-- **tsnet (Tailscale)**: The system embeds Tailscale directly. It appears as a first-class node on your private **tailnet**, providing automatic wireguard encryption and stable DNS (MagicDNS).
-- **Web Server & UI**: Accessible via `http://<hostname>:80`. It provides:
-    - **Live MJPEG Stream**: Low-latency video feedback.
-    - **NATS Bridge**: A WebSocket interface for interacting with the NATS bus directly from the browser.
-    - **System Metrics**: Real-time stats on uptime, connection count, and throughput.
-
-## 6. Build System (Podman)
-
-To ensure consistent builds for ARM64 robots from any development machine (Windows/Mac/Linux), Dialtone uses a containerized build loop.
-
-- **Cross-Compilation**: The `dialtone` CLI uses **Podman** to spin up a specialized Linux container (`golang:1.25.5`) with the `aarch64-linux-gnu-gcc` toolchain.
-- **CGO Support**: This enables building the V4L2 camera drivers (which require Linux headers) correctly for the target platform even when developing on Windows.
-- **Asset Embedding**: The `dialtone` CLI compiles the Vite frontend and uses `go:embed` to package the entire UI into the final binary during `full-build`.
-- **Library Architecture**: The core logic resides in `src/` as `package dialtone`, allowing for clean imports in both the CLI entry point (`dialtone.go`) and the comprehensive test suite in `test/`.
-
-## 7. Automated Deployment (Unified CLI)
-
-Deployment is handled directly through the `dialtone` binary, which serves as a unified manager for the robotic network.
-
-4. **Observation**: `dialtone logs` tails the remote execution logs via SSH.
-
-## 8. Build Instructions
-
-### Prerequisites
-To build Dialtone, your development machine must have:
-- **Go 1.25.5+**: For compiling the backend.
-- **Node.js v22+ & npm**: For building the TypeScript dashboard.
-- **Podman**: Required for ARM64 cross-compilation.
-
-### Required Environment Variables
-To ensure successful operation and deployment, create a `.env` file in the project root with the following:
-
-- **`TS_AUTHKEY`**: Your Tailscale auth key (required for headless operation).
-- **`REMOTE_DIR_SRC`**: Remote path for source-based deployment (e.g., `/home/user/dialtone_src`).
-- **`REMOTE_DIR_DEPLOY`**: Remote path for binary-based deployment (e.g., `/home/user/dialtone_deploy`).
-- **`DIALTONE_HOSTNAME`**: The desired Tailscale hostname for your robot (e.g., `dialtone-1`).
-
-The programs will fail at startup with a descriptive error message if any of these are missing.
-
-### Full Build & Deploy
-The recommended way to build the entire project is using the unified commands:
+Build the manager and deploy to a remote target:
 
 ```bash
+# 1. Build the dialtone manager
 go build -o bin/dialtone.exe .
+
+# 2. Perform a full build (Web + ARM64 binary)
 bin/dialtone.exe full-build
-bin/dialtone.exe deploy -host user@ip -pass password
-```
 
-This automates the following verified steps:
-1.  **Web Assets**: Compiles the Vite/TS frontend.
-2.  **CLI Tooling**: Self-updates the `dialtone.exe` manager via `BuildSelf`.
-3.  **ARM64 Cross-Build**: Invokes Podman for the target binary.
-4.  **Remote Deployment**: SFTPs and restarts the service.
+# 3. Deploy to the robot
+bin/dialtone.exe deploy
 
-### Manual Build Steps
-If you need to build components individually:
-
-**1. Build the Web Interface**
-```bash
-cd src/web
-npm install
-npm run build
-```
-
-**2. Build the ARM64 Binary (via Podman)**
-```bash
-go build -o bin/dialtone.exe .
-bin/dialtone.exe build
-```
-
-**3. Simple Build (Go only)**
-If you are developing locally or don't need ARM64/CGO cross-compilation:
-```powershell
-./build.ps1
-```
-or 
-```bash
-./build.sh
-```
-
-### Automated Tailscale Provisioning
-
-Dialtone uses two types of Tailscale credentials to manage its secure, per-process VPN network without requiring a system-level installation:
-
-1.  **Tailscale API Access Token**: (Conceptual "Master Key") Used only on your local machine to programmatically generate smaller "Visitor Keys".
-    - **How to get it**: Go to [Tailscale Settings > Keys](https://login.tailscale.com/admin/settings/keys) and generate an "Access Token".
-2.  **Tailscale Auth Key**: (Conceptual "Ephemeral Visitor Key") A temporary, short-lived credential that allows the `dialtone` process on the robot to join your network.
-    - **How it works**: When you run `dialtone provision`, the CLI uses your API Token to request a one-time use, ephemeral key from Tailscale.
-
-#### How the Key reaches the Robot
-Security is maintained by ensuring the Auth Key is never permanently stored on the robot's disk:
-1.  **Local Storage**: The `provision` command saves the generated `TS_AUTHKEY` in your local `.env` file.
-2.  **SSH Propagation**: When you run `dialtone deploy`, the local CLI reads the key from `.env` and passes it to the remote computer via the **SSH environment**. 
-3.  **Process Injection**: The remote `dialtone` binary is started via an `env TS_AUTHKEY=...` command inside a `nohup` block. The key exists only in the volatile memory of the running process.
-4.  **Auto-Cleanup**: Because the key is marked as **ephemeral**, Tailscale will automatically remove the robot from your machine list as soon as the process disconnects, keeping your admin console clean.
-
-### Provision Tailscale Key (Optional)
-If you have a Tailscale API Access Token, you can generate a new auth key and update `.env` automatically:
-```bash
-bin/dialtone.exe provision -api-key your_tailscale_api_token
-```
-
-### Deploy and View Logs
-```bash
-# Deploy to robot
-bin/dialtone.exe deploy -host user@ip -pass password
-
-# Tail remote logs
-bin/dialtone.exe logs -host user@ip -pass password
-```
-
-### Build Local-Only Binary (Windows/Mac)
-```bash
-go build -o bin/dialtone.exe .
+# 4. Tail remote logs
+bin/dialtone.exe logs
 ```
 
 ---
 
-### Command-Line Options
+## 🛠 Features
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-hostname` | `dialtone-1` | Tailscale hostname for this node |
-| `-port` | `4222` | NATS port on the tailnet |
-| `-web-port` | `80` | Dashboard port |
-| `-local-only`| `false` | Run without Tailscale for local debugging |
-| `-ephemeral` | `false` | Node is removed from tailnet on exit |
-
----
-
-### UI Testing & Screenshots
-Dialtone includes an automated UI testing suite using `chromedp`. This allows for visual regression testing by capturing screenshots of the live dashboard.
-
-**Run UI Tests:**
-```bash
-go test -v ./test/ui_screenshot_test.go
-```
-Screenshots are saved to `test/screenshots/` and include:
-- `initial_load.png`: The dashboard immediately after loading.
-- `before_send.png`: State after filling in NATS message inputs.
-- `after_send.png`: Confirmation after successfully sending a message.
+- **Low-Latency MJPEG Streaming**: Real-time video feedback from V4L2 devices.
+- **Secure by Default**: Zero-disk secret propagation via Tailscale/tsnet.
+- **Hybrid Build Strategy**: Cross-compile for ARM64 using Podman containers.
+- **Integrated Control**: Embedded NATS server for command and telemetry coordination.
