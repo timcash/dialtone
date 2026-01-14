@@ -21,9 +21,18 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/nats-io/nats-server/v2/server"
+	"github.com/nats-io/nats.go"
+	"github.com/bluenviron/gomavlib/v3/pkg/dialects/common"
 	"tailscale.com/client/tailscale"
 	"tailscale.com/tsnet"
 )
+
+var mavlinkPubChan = make(chan mavlinkNatsMsg, 100)
+
+type mavlinkNatsMsg struct {
+	Subject string
+	Data    []byte
+}
 
 func Execute() {
 	if len(os.Args) < 2 {
@@ -80,7 +89,13 @@ func runStart(args []string) {
 	localOnly := fs.Bool("local-only", false, "Run without Tailscale (local NATS only)")
 	wsPort := fs.Int("ws-port", 4223, "NATS WebSocket port")
 	verbose := fs.Bool("verbose", false, "Enable verbose logging")
+	mavlinkAddr := fs.String("mavlink", "", "Mavlink connection string (e.g. serial:/dev/ttyAMA0:57600 or udp:0.0.0.0:14550)")
 	fs.Parse(args)
+
+	// Start Mavlink service if requested
+	if *mavlinkAddr != "" {
+		go startMavlink(*mavlinkAddr)
+	}
 
 	// Determine state directory
 	if *stateDir == "" {
@@ -105,6 +120,9 @@ func runLocalOnly(port, wsPort int, verbose bool) {
 	defer ns.Shutdown()
 
 	LogInfo("NATS server started on port %d (local only)", port)
+
+	// Start NATS publisher loop for Mavlink
+	startNatsPublisher(port)
 
 	waitForShutdown()
 	LogInfo("Shutting down NATS server...")
@@ -165,6 +183,9 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 	localWSPort := wsPort + 10000
 	ns := startNATSServer("127.0.0.1", localNATSPort, localWSPort, verbose)
 	defer ns.Shutdown()
+
+	// Start NATS publisher loop for Mavlink
+	startNatsPublisher(localNATSPort)
 
 	// Listen on Tailscale network for NATS
 	natsLn, err := ts.Listen("tcp", fmt.Sprintf(":%d", port))
@@ -357,11 +378,75 @@ Visit that URL to authenticate this device.
 `)
 }
 
+func startMavlink(endpoint string) {
+	LogInfo("Starting Mavlink Service on %s...", endpoint)
+
+	config := MavlinkConfig{
+		Endpoint: endpoint,
+		Callback: func(evt *MavlinkEvent) {
+			if evt.Type == "HEARTBEAT" {
+				if msg, ok := evt.Data.(*common.MessageHeartbeat); ok {
+					// Publish to NATS via channel
+					data, _ := json.Marshal(map[string]any{
+						"type":          "HEARTBEAT",
+						"mav_type":      msg.Type,
+						"autopilot":     msg.Autopilot,
+						"base_mode":     msg.BaseMode,
+						"custom_mode":   msg.CustomMode,
+						"system_status": msg.SystemStatus,
+						"timestamp":     time.Now().Unix(),
+					})
+
+					LogInfo("MAVLINK HEARTBEAT: %s", string(data))
+
+					// Send to publishing channel
+					select {
+					case mavlinkPubChan <- mavlinkNatsMsg{Subject: "mavlink.heartbeat", Data: data}:
+					default:
+						// Drop message if channel full
+					}
+				}
+			}
+		},
+	}
+
+	svc, err := NewMavlinkService(config)
+	if err != nil {
+		LogFatal("Failed to create Mavlink service: %v", err)
+	}
+
+	go svc.Start()
+}
+
+// startNatsPublisher connects to the local NATS server and publishes messages from the channel
+func startNatsPublisher(port int) {
+	go func() {
+		// Wait for NATS to start
+		time.Sleep(2 * time.Second)
+
+		nc, err := nats.Connect(fmt.Sprintf("nats://127.0.0.1:%d", port))
+		if err != nil {
+			LogInfo("Failed to connect to NATS for publishing: %v", err)
+			return
+		}
+		defer nc.Close()
+
+		LogInfo("Mavlink NATS Publisher connected")
+
+		for msg := range mavlinkPubChan {
+			if err := nc.Publish(msg.Subject, msg.Data); err != nil {
+				LogInfo("Error publishing to NATS: %v", err)
+			}
+		}
+	}()
+}
+
 // waitForShutdown blocks until SIGINT or SIGTERM is received
 func waitForShutdown() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	<-c
+	<-
+c
 }
 
 // CreateWebHandler creates the HTTP handler for the unified web dashboard
@@ -443,11 +528,21 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
+						for {
+
+							select {
+
+										case <-ctx.Done():
+
+											return
+
+										case <-ticker.C:
+
+							
+
+				
+
+		
 				varz, _ := ns.Varz(nil)
 				var connections int
 				var inMsgs, outMsgs, inBytes, outBytes int64

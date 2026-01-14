@@ -14,6 +14,12 @@ const outMsgsEl = document.getElementById('out_msgs')!;
 const inBytesEl = document.getElementById('in_bytes')!;
 const outBytesEl = document.getElementById('out_bytes')!;
 const tsIpsEl = document.getElementById('ts-ips')!;
+// MAVLink Elements
+const mavHeartbeatEl = document.getElementById('mav-heartbeat')!;
+const mavModeEl = document.getElementById('mav-mode')!;
+const mavStatusEl = document.getElementById('mav-status')!;
+const mavTypeEl = document.getElementById('mav-type')!;
+
 const hostnameDisplay = document.getElementById('hostname-display')!;
 const statusIndicator = document.getElementById('status-indicator')!;
 const statusText = document.getElementById('status-text')!;
@@ -83,6 +89,26 @@ async function initNatsWS(port: number) {
     statusText.textContent = 'CONNECTED';
     sendBtn.disabled = false;
     addLog('NATS Messaging Ready', 'success');
+
+    // Subscribe to MAVLink heartbeats
+    const sub = nc.subscribe("mavlink.heartbeat");
+    (async () => {
+      for await (const m of sub) {
+        try {
+          const msg = jc.decode(m.data) as any;
+          mavHeartbeatEl.textContent = new Date(msg.timestamp * 1000).toLocaleTimeString();
+          mavModeEl.textContent = msg.base_mode;
+          mavStatusEl.textContent = msg.system_status;
+          mavTypeEl.textContent = msg.mav_type;
+          
+          // Flash effect
+          mavHeartbeatEl.style.color = '#00ff00';
+          setTimeout(() => mavHeartbeatEl.style.color = '', 500);
+        } catch (e) {
+          console.error("Failed to decode heartbeat", e);
+        }
+      }
+    })();
 
     nc.closed().then(() => {
       statusIndicator.className = 'status-offline';
