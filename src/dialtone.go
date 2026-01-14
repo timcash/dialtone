@@ -40,10 +40,16 @@ func main() {
 		RunTools(append([]string{"-podman-build"}, args...))
 	case "deploy":
 		RunTools(append([]string{"-deploy"}, args...))
+	case "full-build":
+		RunTools(append([]string{"-full-build"}, args...))
+	case "provision":
+		RunProvision(args)
 	case "start":
 		runStart(args)
 	case "logs":
 		runLogs(args)
+	case "ssh":
+		RunTools(args)
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
 		printUsage()
@@ -53,10 +59,12 @@ func main() {
 func printUsage() {
 	fmt.Println("Usage: dialtone <command> [options]")
 	fmt.Println("\nCommands:")
-	fmt.Println("  build   Build for ARM64 using Podman")
-	fmt.Println("  deploy  Deploy to remote robot")
-	fmt.Println("  start   Start the NATS and Web server")
-	fmt.Println("  logs    Tail remote logs")
+	fmt.Println("  build       Build for ARM64 using Podman")
+	fmt.Println("  deploy      Deploy to remote robot")
+	fmt.Println("  full-build  Run full build (Web UI + Podman)")
+	fmt.Println("  provision   Generate and save Tailscale Auth Key")
+	fmt.Println("  start       Start the NATS and Web server")
+	fmt.Println("  logs        Tail remote logs")
 }
 
 func runStart(args []string) {
