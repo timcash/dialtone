@@ -33,12 +33,6 @@ func RunBuild(args []string) {
 	full := fs.Bool("full", false, "Build Web UI, local CLI, and ARM64 binary")
 	fs.Parse(args)
 
-	// If TS_API_KEY is available, provision a new auth key before building
-	if os.Getenv("TS_API_KEY") != "" {
-		LogInfo("TS_API_KEY found, auto-provisioning new TS_AUTHKEY...")
-		provisionKey(os.Getenv("TS_API_KEY"))
-	}
-
 	if *full {
 		buildEverything()
 	} else {

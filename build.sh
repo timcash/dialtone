@@ -26,8 +26,4 @@ echo "Building Dialtone binary..."
 mkdir -p bin
 go build -o bin/dialtone .
 
-# 4. Auto-provision Tailscale key if API key is available
-echo "Checking for TS_API_KEY to auto-provision..."
-./bin/dialtone provision -optional
-
 echo "Build successful!"
