@@ -23,7 +23,7 @@ import (
 // LoadConfig loads environment variables from .env
 func LoadConfig() {
 	if err := godotenv.Load(); err != nil {
-		// Non-fatal
+		LogInfo("Warning: godotenv.Load() failed: %v", err)
 	}
 }
 
@@ -509,7 +509,13 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 		ephemeralFlag = "-ephemeral"
 	}
 
-	startCmd := fmt.Sprintf("cp %s ~/dialtone && chmod +x ~/dialtone && nohup sh -c 'TS_AUTHKEY=%s ~/dialtone start -hostname %s %s' > ~/nats.log 2>&1 < /dev/null &", remoteBinaryPath, tsAuthKey, hostnameParam, ephemeralFlag)
+	mavlinkEndpoint := os.Getenv("MAVLINK_ENDPOINT")
+	mavlinkFlag := ""
+	if mavlinkEndpoint != "" {
+		mavlinkFlag = fmt.Sprintf("-mavlink %s", mavlinkEndpoint)
+	}
+
+	startCmd := fmt.Sprintf("cp %s ~/dialtone && chmod +x ~/dialtone && nohup sh -c 'TS_AUTHKEY=%s ~/dialtone start -hostname %s %s %s' > ~/nats.log 2>&1 < /dev/null &", remoteBinaryPath, tsAuthKey, hostnameParam, ephemeralFlag, mavlinkFlag)
 
 	if err := runCommandNoWait(client, startCmd); err != nil {
 		LogFatal("Failed to start: %v", err)
