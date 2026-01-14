@@ -1,4 +1,4 @@
-module rover/nats
+module dialtone/cli
 
 go 1.25.5
 

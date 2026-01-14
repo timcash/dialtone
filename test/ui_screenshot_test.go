@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	dialtone "rover/nats/src"
+	dialtone "dialtone/cli/src"
 
 	"github.com/chromedp/chromedp"
 	"github.com/nats-io/nats-server/v2/server"
