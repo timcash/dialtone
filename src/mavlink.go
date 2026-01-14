@@ -64,12 +64,13 @@ func NewMavlinkService(config MavlinkConfig) (*MavlinkService, error) {
 		return nil, fmt.Errorf("unsupported or invalid endpoint: %s", config.Endpoint)
 	}
 
-	node, err := gomavlib.NewNode(gomavlib.NodeConf{
+	node := &gomavlib.Node{
 		Endpoints:   endpoints,
 		Dialect:     common.Dialect,
 		OutVersion:  gomavlib.V2,
 		OutSystemID: 10, // Dialtone ID
-	})
+	}
+	err := node.Initialize()
 	if err != nil {
 		return nil, err
 	}
