@@ -11,7 +11,7 @@
   <div id="app">
     <header>
       <h1>Dialtone Dashboard v1.0.1 <span id="hostname-display"></span></h1>
-      <div id="status-indicator" class="status-offline">
+      <div id="status-indicator" class="status-offline" aria-label="System Status">
         <span class="status-dot"></span>
         <span id="status-text">DISCONNECTED</span>
       </div>
@@ -77,15 +77,15 @@
           <div class="form-row">
             <div class="form-group">
               <label>Subject</label>
-              <input type="text" id="subject" class="mono" value="drone.telemetry">
+              <input type="text" id="subject" class="mono" value="drone.telemetry" aria-label="NATS Subject">
             </div>
             <div class="form-group">
-              <button id="send-btn" disabled>SEND_MESSAGE</button>
+              <button id="send-btn" disabled aria-label="Send NATS Message">SEND_MESSAGE</button>
             </div>
           </div>
           <div class="form-group">
             <label>Payload</label>
-            <textarea id="message" class="mono" rows="4" placeholder='{"command": "takeoff"}'></textarea>
+            <textarea id="message" class="mono" rows="4" placeholder='{"command": "takeoff"}' aria-label="Message Body"></textarea>
           </div>
         </div>
         <div id="log-list" class="log-list"></div>

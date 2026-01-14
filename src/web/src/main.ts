@@ -26,6 +26,7 @@ function addLog(msg: string, type: 'info' | 'error' | 'success' = 'info') {
   const item = document.createElement('div');
   item.className = `log-item ${type}`;
   item.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  item.setAttribute('aria-label', `Log Entry ${type}`);
   logList.prepend(item);
 }
 
