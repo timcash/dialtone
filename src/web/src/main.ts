@@ -44,7 +44,7 @@ async function initApp() {
     const resp = await fetch('/api/init');
     const config = await resp.json();
 
-    hostnameDisplay.textContent = `: ${config.hostname}`;
+    hostnameDisplay.textContent = `: ${config.hostname} (V2)`;
     tsIpsEl.textContent = (config.ips || []).join(', ');
 
     initStatsWS();
