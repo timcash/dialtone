@@ -61,6 +61,35 @@ func buildLocally() {
 	// For local builds, we enable CGO to support V4L2 drivers
 	os.Setenv("CGO_ENABLED", "1")
 
+	// If local environment exists, use it
+	homeDir, _ := os.UserHomeDir()
+	depsDir := filepath.Join(homeDir, ".dialtone_env")
+	if _, err := os.Stat(depsDir); err == nil {
+		LogInfo("Using local dependencies from %s", depsDir)
+		
+		// Add Go and Node to PATH
+		goBin := filepath.Join(depsDir, "go", "bin")
+		nodeBin := filepath.Join(depsDir, "node", "bin")
+		os.Setenv("PATH", fmt.Sprintf("%s:%s:%s", goBin, nodeBin, os.Getenv("PATH")))
+
+		// If Zig exists, use it as C compiler
+		zigPath := filepath.Join(depsDir, "zig", "zig")
+		if _, err := os.Stat(zigPath); err == nil {
+			os.Setenv("CC", fmt.Sprintf("%s cc -target x86_64-linux-gnu", zigPath))
+		}
+
+		// Add include paths for CGO (V4L2 headers)
+		includePath := filepath.Join(depsDir, "usr", "include")
+		cgoCflags := fmt.Sprintf("-I%s", includePath)
+
+		// Also check for multiarch include path (e.g. x86_64-linux-gnu)
+		matches, _ := filepath.Glob(filepath.Join(includePath, "*-linux-gnu"))
+		for _, match := range matches {
+			cgoCflags += fmt.Sprintf(" -I%s", match)
+		}
+		os.Setenv("CGO_CFLAGS", cgoCflags)
+	}
+
 	// Choose binary name based on OS
 	binaryName := "dialtone"
 	if runtime.GOOS == "windows" {
@@ -695,33 +724,95 @@ func RunInstallDeps(args []string) {
 	LogInfo(output)
 }
 
+func runSimpleShell(command string) {
+	LogInfo("Running: %s", command)
+	cmd := exec.Command("bash", "-c", command)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		LogFatal("Command failed: %v", err)
+	}
+}
+
 func installLocalDepsWSL() {
-	LogInfo("Installing local dependencies for Linux/WSL...")
+	LogInfo("Installing local dependencies for Linux/WSL (User-Local, No Sudo)...")
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		LogFatal("Failed to get home directory: %v", err)
+	}
+	depsDir := filepath.Join(homeDir, ".dialtone_env")
+	os.MkdirAll(depsDir, 0755)
 
 	// 1. Install Go 1.25.5
 	goVersion := "1.25.5"
-	LogInfo("Step 1: Checking for Go %s...", goVersion)
-	if !commandExists("go") {
-		LogInfo("Go not found. Please install Go %s manually: https://go.dev/doc/install", goVersion)
+	goDir := filepath.Join(depsDir, "go")
+	if _, err := os.Stat(filepath.Join(goDir, "bin", "go")); err != nil {
+		LogInfo("Step 1: Installing Go %s...", goVersion)
+		goTarball := fmt.Sprintf("go%s.linux-amd64.tar.gz", goVersion)
+		downloadUrl := fmt.Sprintf("https://go.dev/dl/%s", goTarball)
+		runSimpleShell(fmt.Sprintf("wget -O %s/%s %s", depsDir, goTarball, downloadUrl))
+		runSimpleShell(fmt.Sprintf("tar -C %s -xzf %s/%s", depsDir, depsDir, goTarball))
+		os.Remove(filepath.Join(depsDir, goTarball))
 	} else {
-		LogInfo("Go is already installed. Ensure it is version %s or compatible.", goVersion)
+		LogInfo("Go is already installed in %s", goDir)
 	}
 
 	// 2. Install Node.js
-	LogInfo("Step 2: Checking for Node.js...")
-	if !commandExists("node") {
-		LogInfo("Node.js not found. Installing Node.js via Nodesource...")
-		runSudoShell("curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -")
-		runSudoShell("sudo apt-get install -y nodejs")
+	nodeDir := filepath.Join(depsDir, "node")
+	if _, err := os.Stat(filepath.Join(nodeDir, "bin", "node")); err != nil {
+		LogInfo("Step 2: Installing Node.js...")
+		nodeVersion := "22.13.0" // Current LTS
+		nodeTarball := fmt.Sprintf("node-v%s-linux-x64.tar.xz", nodeVersion)
+		downloadUrl := fmt.Sprintf("https://nodejs.org/dist/v%s/%s", nodeVersion, nodeTarball)
+		runSimpleShell(fmt.Sprintf("wget -q -O %s/%s %s", depsDir, nodeTarball, downloadUrl))
+		runSimpleShell(fmt.Sprintf("mkdir -p %s && tar -C %s --strip-components=1 -xJf %s/%s", nodeDir, nodeDir, depsDir, nodeTarball))
+		os.Remove(filepath.Join(depsDir, nodeTarball))
 	} else {
-		LogInfo("Node.js is already installed.")
+		LogInfo("Node.js is already installed in %s", nodeDir)
 	}
 
-	// 3. Install V4L2 headers
-	LogInfo("Step 3: Installing V4L2 headers and libraries...")
-	runSudoShell("sudo apt-get update && sudo apt-get install -y libv4l-dev linux-libc-dev build-essential")
+	// 2.5 Install Zig (as portable C compiler)
+	zigDir := filepath.Join(depsDir, "zig")
+	if _, err := os.Stat(filepath.Join(zigDir, "zig")); err != nil {
+		LogInfo("Step 2.5: Installing Zig (portable C compiler)...")
+		zigVersion := "0.13.0"
+		zigTarball := fmt.Sprintf("zig-linux-x86_64-%s.tar.xz", zigVersion)
+		downloadUrl := fmt.Sprintf("https://ziglang.org/download/%s/%s", zigVersion, zigTarball)
+		runSimpleShell(fmt.Sprintf("wget -q -O %s/%s %s", depsDir, zigTarball, downloadUrl))
+		runSimpleShell(fmt.Sprintf("mkdir -p %s && tar -C %s --strip-components=1 -xJf %s/%s", zigDir, zigDir, depsDir, zigTarball))
+		os.Remove(filepath.Join(depsDir, zigTarball))
+	} else {
+		LogInfo("Zig is already installed in %s", zigDir)
+	}
 
-	LogInfo("Local dependencies installation complete.")
+	// 3. Install V4L2 headers (extract from deb)
+	includeDir := filepath.Join(depsDir, "usr", "include")
+	if _, err := os.Stat(filepath.Join(includeDir, "linux", "videodev2.h")); err != nil {
+		LogInfo("Step 3: Extracting V4L2 headers...")
+		// Try apt-get download first, then fall back to direct mirrors
+		err := os.Chdir(depsDir)
+		if err == nil {
+			LogInfo("Attempting apt-get download...")
+			cmd := exec.Command("apt-get", "download", "libv4l-dev", "linux-libc-dev")
+			if cmd.Run() != nil {
+				LogInfo("apt-get download failed, falling back to Ubuntu mirrors...")
+				// Noble Noble (24.04) mirrors
+				runSimpleShell("wget -q http://archive.ubuntu.com/ubuntu/pool/main/v/v4l-utils/libv4l-dev_1.26.1-4build3_amd64.deb")
+				runSimpleShell("wget -q http://archive.ubuntu.com/ubuntu/pool/main/l/linux/linux-libc-dev_6.8.0-31.31_amd64.deb")
+			}
+			runSimpleShell("dpkg -x libv4l-dev*.deb .")
+			runSimpleShell("dpkg -x linux-libc-dev*.deb .")
+			runSimpleShell("rm *.deb")
+			os.Chdir(homeDir)
+		}
+	} else {
+		LogInfo("V4L2 headers already present in %s", includeDir)
+	}
+
+	LogInfo("Local dependencies installation complete in %s", depsDir)
+	LogInfo("To use these in your shell, add them to your PATH:")
+	LogInfo("export PATH=$PATH:%s/go/bin:%s/node/bin", depsDir, depsDir)
 }
 
 func commandExists(name string) bool {
@@ -730,8 +821,8 @@ func commandExists(name string) bool {
 }
 
 func runSudoShell(command string) {
-	LogInfo("Running: %s", command)
-	cmd := exec.Command("bash", "-c", command)
+	LogInfo("Running with sudo: %s", command)
+	cmd := exec.Command("sudo", "bash", "-c", command)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
