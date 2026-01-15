@@ -9,7 +9,30 @@
 8. show the mavlink messages in the web ui passed via a nats subject that get recieved during the arming process
 9. to debug you can also send ssh commands to the rover via the dialtone cli and it will pull details from the .env file
 10. make sure to use the project logger at `src/logger.go`
-11. the rover ssh is `tim@192.168.4.36` with password `password` as per the .env file
+11. the rover ssh is `tim@192.168.4.36` with password `password` if needed for debuging
+
+# allow development on the remote system
+NOTE the previous LLM crashed while working on this
+0. create a branch `git checkout -b feature/remote-development`
+1. read the main `README.md`
+2. read the `docs/develop.md`
+3. implement the following features to allow development directly on the remote robot
+1. currently we develop on a windows machine and build before deploying to the remote robot
+2. we should be able to use the dialtone cli to send remote commmands so we can build and run development code there directly
+3. this will require setting up a golang environment on the remote robot
+4. so the robot will need `npm` and `go` installed
+5. make sure there are cli commands to copy all the code to the remote robot for development
+6. make sure there are cli commands to build the code on the remote robot for development including the web code
+7. make sure there are cli commands to install golang and npm on the remote robot for development
+9. to debug you can also send ssh commands to the rover via the dialtone cli and it will pull details from the .env file
+10. make sure to use the project logger at `src/logger.go`
+11. the rover ssh is `tim@192.168.4.36` with password `password` if needed for debuging
+
+it created these things you need to test
+
+       * install-deps: Installs Go 1.25.5 and Node.js on the remote robot.
+       * sync-code: Syncs source code (Go + Web) to the remote robot.
+       * remote-build: Builds the project (Web + Go) directly on the remote robot.
 
 
 # Create plugin system
