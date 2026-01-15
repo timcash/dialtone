@@ -1,15 +1,20 @@
-# Allow development on Linux/WSL with camera enabled
-0. start a new branch `git checkout -b feature/linux-wsl-camera-support`
-1. read the main `README.md` and `docs/develop.md` for the TDD loop and build commands
-2. implement a new CLI command `install-local-deps` in `src/manager.go` to install Go 1.25.5 and Node.js on the local Ubuntu/WSL system
-3. modify `RunBuild` in `src/manager.go` to support a native build on Linux (without Podman) when a `-local` flag is provided or if Podman is missing
-4. ensure the build enables CGO (`CGO_ENABLED=1`) to support the `go4vl` camera library in `src/camera_linux.go`
-5. create a verification test `test/wsl_camera_test.go` that attempts to compile the project and checks for the presence of V4L2 headers
-6. use the project logger `dialtone.LogInfo` from `src/logger.go` for all status updates
-7. to debug, you can use `test/camera_diag_test.go` which already implements basic camera opening and frame capture
-8. verify the build works by running the newly created test and performing a `dialtone full-build`
-9. update `README.md` to include the new `install-local-deps` command and WSL development instructions
-10. you are using a WSL environment to develop on Linux Ubuntu
+# FEATURE: `linux-wsl-camera-support`
+0. Allow development on Linux/WSL with camera enabled. create a `plan-linux-wsl-camera-support.md` file in the `plan` directory to track progress
+1. start a new branch `git checkout -b feature/linux-wsl-camera-support`
+2. read the main `README.md` and `docs/develop.md` for the TDD loop and build commands
+3. implement a new CLI command `install-local-deps --linux-wsl` in `src/manager.go` to install Go 1.25.5 and Node.js on the local Ubuntu/WSL system
+4. modify `RunBuild` in `src/manager.go` to support a native build on Linux (without Podman) when a `-local` flag is provided or if Podman is missing
+5. ensure the build enables CGO (`CGO_ENABLED=1`) to support the `go4vl` camera library in `src/camera_linux.go`
+6. create a verification test `test/wsl_camera_test.go` that attempts to compile the project and checks for the presence of V4L2 headers
+7. use the project logger `dialtone.LogInfo` from `src/logger.go` for all status updates
+8. to debug, you can use `test/camera_diag_test.go` which already implements basic camera opening and frame capture
+9. verify the build works by running the newly created test and performing a `dialtone full-build`
+10. update `docs/cli.md` to include the new `install-local-deps --linux-wsl` command and WSL development instructions.
+11. integrate any other build docs into `docs/cli.md`
+12. remove any old build docs from `docs/develop.md` and any old build scripts
+13. you are using a WSL environment to develop on Linux Ubuntu
+14. finish by creating a pull request
+15. remember to create a `plan-linux-wsl-camera-support.md` file in the `plan` directory to track progress
 
 # add mavlink capabilities to dialtone
 0. start a new branch `git checkout -b feature/mavlink-upgrade`
