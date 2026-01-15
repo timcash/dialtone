@@ -11,14 +11,7 @@ Use the following commands in order to test the system:
 
 ## UI Testing & Screenshots
 
-Dialtone includes an automated UI testing suite using `chromedp`. This allows for visual regression testing by capturing screenshots of the live dashboard.
-
 **Run UI Tests:**
 ```bash
 go test -v ./test/ui_screenshot_test.go
 ```
-
-Screenshots are saved to `test/screenshots/` and include:
-- `initial_load.png`: The dashboard immediately after loading.
-- `before_send.png`: State after filling in NATS message inputs.
-- `after_send.png`: Confirmation after successfully sending a message.
