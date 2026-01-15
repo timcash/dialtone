@@ -7,7 +7,9 @@ The `dialtone` CLI is the main entry point for building, deploying, and managing
 ### `full-build`
 Builds the Web UI, local CLI, and the binary for the target system.
 - `-full`: Standard full build (includes ARM64 via Podman).
-- `-local`: Build natively on the current system (useful for WSL/Linux development).
+- `-local`: Build natively on the current system. 
+  - Automatically uses portable toolchain in `~/.dialtone_env` if present.
+  - Automatically sets `CGO_ENABLED=1` and `CC` (to Zig if available) for camera support.
 
 ### `build`
 Builds the ARM64 binary.
@@ -23,8 +25,10 @@ Deploys the built binary to a remote robot via SSH.
 
 ### `install-deps`
 Installs necessary dependencies on a target system.
-- `--linux-wsl`: Install dependencies natively on the local Linux/WSL system.
-- `-host`, `-port`, `-user`, `-pass`: Standard SSH flags for remote installation.
+- `--linux-wsl`: **No-Sudo Portable Installation**.
+  - Downloads and extracts Go, Node.js, and Zig into `~/.dialtone_env`.
+  - Extracts V4L2 headers from Ubuntu packages without root access.
+- `-host`, `-port`, `-user`, `-pass`: Standard SSH flags for remote installation on the robot.
 
 ### `logs`
 Tails remote execution logs via SSH.
@@ -32,25 +36,30 @@ Tails remote execution logs via SSH.
 ### `provision`
 Generates a fresh Tailscale Auth Key and updates `.env`.
 
-## WSL Development
+---
 
-To develop natively on WSL with camera support:
+## WSL/Linux Development
 
-1.  **Install Dependencies**:
+To develop natively on WSL with camera support using the source-based workflow:
+
+1.  **Bootstrap (No Sudo Required)**:
     ```bash
-    go build -o bin/dialtone .
-    ./bin/dialtone install-deps --linux-wsl
+    go run . install-deps --linux-wsl
     ```
-2.  **Build Natively**:
+    *This creates a self-contained development environment in `~/.dialtone_env`.*
+
+2.  **Build from Source**:
     ```bash
-    ./bin/dialtone full-build -local
+    go run . full-build -local
     ```
-    This ensures `CGO_ENABLED=1` is set to support the V4L2 drivers.
+    *This builds the Web Dashboard and the native binary with V4L2 drivers enabled.*
 
 3.  **Run Locally**:
     ```bash
     ./bin/dialtone start -local-only
     ```
+
+---
 
 ## Standard Flags
 

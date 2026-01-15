@@ -36,23 +36,28 @@ Detailed information about System Architecture, Installation, and Development ca
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start (WSL/Linux No-Sudo)
 
-Build the manager and deploy to a remote target:
+The fastest way to get started on WSL or Linux without administrative privileges:
 
 ```bash
-# 1. Build the dialtone manager
+# 1. Install dependencies into ~/.dialtone_env (Go, Node, Zig, V4L2 headers)
+go run . install-deps --linux-wsl
+
+# 2. Perform a native full-build (includes Web UI and Camera support)
+go run . full-build -local
+
+# 3. Start the node locally
+./bin/dialtone start -local-only
+```
+
+For standard ARM64 cross-compilation using Podman:
+
+```bash
+# Build the manager and deploy to a remote target
 go build -o bin/dialtone .
-
-# 2. Perform a full build (Web + ARM64 binary)
-# Use -local flag for native builds (WSL/Linux)
-bin/dialtone full-build -local
-
-# 3. Deploy to the robot
+bin/dialtone full-build
 bin/dialtone deploy
-
-# 4. Tail remote logs
-bin/dialtone logs
 ```
 
 ## Why Dialtone uses Golang
