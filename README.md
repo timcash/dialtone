@@ -2,15 +2,34 @@
 
 ![Web Interface](ui.png)
 
-Dialtone is a **robotic video operator network** desined to allow humans and AI to cooperativly train and control robots.
+Dialtone is a **robotic video operations network** desined to allow humans and AI to cooperativly train and control robots.
 
 # Features
 0. Simple single binary CLI to connect and control any robot
-1. Built in virtual private network
-2. Scalable command and control with queueing, streaming, and telemetry
-3. Real-time video streaming
-4. Automated sensor and actuator discovery
-5. Overlays opensource projects like ROS, mavlink, ardupilot, etc.
+    - Cross platform support for Windows, MacOS, and Linux
+    - Single command builds and deploys for ARM64 targets like Raspberry Pi
+1. Built in virtual private network and peer discovery
+    - Users on the network are identified by unique IDs
+    - Access control lists for users and robots
+2. Scalable command and control datastructers
+    - Request/reply for commands
+    - Queueing for fanout and load balancing 
+    - Streaming for live or replay of telemetry and video
+4. Automated discovery and configuration
+    - Sensors like cameras, lidars, gps, imu  
+    - Actuators like mortors and servos
+    - Compute resources like flight controllers, gpus and FPGA's
+    - Power resources like batteries and solar panels
+5. Overlays opensource projects
+    - Use ROS drivers for indrustrial robots like Fanuc, 
+    - mavlink, ardupilot, etc.
+6. Visson and LLM AI assisted operation focused on configuration, telemetry, anomaly detection, and autonomous operation.
+   - Object detection and tracking
+   - Path planning and navigation
+   - Autonomous takeoff and landing
+   - Obstacle avoidance
+   - Visual SLAM
+7. Language model tuned for developemnt of the dialtone system itself.
 
 ---
 
@@ -48,3 +67,11 @@ bin/dialtone deploy
 # 4. Tail remote logs
 bin/dialtone logs
 ```
+
+## Why Dialtone uses Golang
+1. Compiled language that produces single binary executables that are easy to deploy.
+2. Support for concurrency which is important for robotic systems that need to handle
+3. Excelelent standard library and a strong ecosystem of third party libraries.
+4. Golang has good cross compilation support which is important for building for ARM64 systems like Raspberry Pi.
+5. Large projects with many contributors are possible with simple code structure and strong typing.
+6. Networking support is a crtical aspect of dialtone
