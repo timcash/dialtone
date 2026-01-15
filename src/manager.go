@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -31,13 +32,44 @@ func LoadConfig() {
 func RunBuild(args []string) {
 	fs := flag.NewFlagSet("build", flag.ExitOnError)
 	full := fs.Bool("full", false, "Build Web UI, local CLI, and ARM64 binary")
+	local := fs.Bool("local", false, "Build natively on the local system")
 	fs.Parse(args)
 
 	if *full {
-		buildEverything()
+		buildEverything(*local)
 	} else {
-		buildWithPodman()
+		if *local || !hasPodman() {
+			buildLocally()
+		} else {
+			buildWithPodman()
+		}
 	}
+}
+
+func hasPodman() bool {
+	_, err := exec.LookPath("podman")
+	return err == nil
+}
+
+func buildLocally() {
+	LogInfo("Building Dialtone locally (Native Build)...")
+
+	if err := os.MkdirAll("bin", 0755); err != nil {
+		LogFatal("Failed to create bin directory: %v", err)
+	}
+
+	// For local builds, we enable CGO to support V4L2 drivers
+	os.Setenv("CGO_ENABLED", "1")
+
+	// Choose binary name based on OS
+	binaryName := "dialtone"
+	if runtime.GOOS == "windows" {
+		binaryName = "dialtone.exe"
+	}
+
+	outputPath := filepath.Join("bin", binaryName)
+	runShell(".", "go", "build", "-o", outputPath, ".")
+	LogInfo("Build successful: %s", outputPath)
 }
 
 // RunDeploy handles deployment to remote robot
@@ -162,7 +194,7 @@ func buildWithPodman() {
 	LogInfo("Build successful: bin/dialtone-arm64")
 }
 
-func buildEverything() {
+func buildEverything(local bool) {
 	LogInfo("Starting Full Build Process...")
 
 	// 1. Build Web UI
@@ -183,8 +215,12 @@ func buildEverything() {
 	// 3. Build Dialtone locally (the tool itself)
 	BuildSelf()
 
-	// 4. Build for ARM64 using Podman
-	buildWithPodman()
+	// 4. Build for ARM64
+	if local || !hasPodman() {
+		buildLocally()
+	} else {
+		buildWithPodman()
+	}
 
 	LogInfo("Full build successful!")
 }
@@ -599,7 +635,13 @@ func RunInstallDeps(args []string) {
 	port := fs.String("port", "22", "SSH port")
 	user := fs.String("user", os.Getenv("ROBOT_USER"), "SSH user")
 	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password")
+	linuxWSL := fs.Bool("linux-wsl", false, "Install dependencies natively on Linux/WSL")
 	fs.Parse(args)
+
+	if *linuxWSL {
+		installLocalDepsWSL()
+		return
+	}
 
 	if *host == "" || *pass == "" {
 		LogFatal("Error: -host (user@host) and -pass are required for install-deps")
@@ -651,6 +693,50 @@ func RunInstallDeps(args []string) {
 		LogFatal("Failed to install Node.js: %v\nOutput: %s", err, output)
 	}
 	LogInfo(output)
+}
+
+func installLocalDepsWSL() {
+	LogInfo("Installing local dependencies for Linux/WSL...")
+
+	// 1. Install Go 1.25.5
+	goVersion := "1.25.5"
+	LogInfo("Step 1: Checking for Go %s...", goVersion)
+	if !commandExists("go") {
+		LogInfo("Go not found. Please install Go %s manually: https://go.dev/doc/install", goVersion)
+	} else {
+		LogInfo("Go is already installed. Ensure it is version %s or compatible.", goVersion)
+	}
+
+	// 2. Install Node.js
+	LogInfo("Step 2: Checking for Node.js...")
+	if !commandExists("node") {
+		LogInfo("Node.js not found. Installing Node.js via Nodesource...")
+		runSudoShell("curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -")
+		runSudoShell("sudo apt-get install -y nodejs")
+	} else {
+		LogInfo("Node.js is already installed.")
+	}
+
+	// 3. Install V4L2 headers
+	LogInfo("Step 3: Installing V4L2 headers and libraries...")
+	runSudoShell("sudo apt-get update && sudo apt-get install -y libv4l-dev linux-libc-dev build-essential")
+
+	LogInfo("Local dependencies installation complete.")
+}
+
+func commandExists(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
+}
+
+func runSudoShell(command string) {
+	LogInfo("Running: %s", command)
+	cmd := exec.Command("bash", "-c", command)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		LogFatal("Command failed: %v", err)
+	}
 }
 
 func RunSyncCode(args []string) {
