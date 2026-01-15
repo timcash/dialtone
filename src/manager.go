@@ -419,6 +419,14 @@ func downloadFile(client *ssh.Client, remotePath, localPath string) error {
 	return nil
 }
 
+func getRemoteHome(client *ssh.Client) (string, error) {
+	output, err := runCommand(client, "echo $HOME")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(output), nil
+}
+
 func deployDialtone(host, port, user, pass string, ephemeral bool) {
 	LogInfo("Starting deployment of Dialtone (Remote Build)...")
 
@@ -438,7 +446,11 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 	if usePrebuilt {
 		remoteDir := os.Getenv("REMOTE_DIR_DEPLOY")
 		if remoteDir == "" {
-			remoteDir = "/home/tim/dialtone_deploy"
+			home, err := getRemoteHome(client)
+			if err != nil {
+				LogFatal("Failed to get remote home: %v", err)
+			}
+			remoteDir = path.Join(home, "dialtone_deploy")
 		}
 		LogInfo("Cleaning and creating remote directory %s...", remoteDir)
 		_, _ = runCommand(client, fmt.Sprintf("rm -rf %s && mkdir -p %s", remoteDir, remoteDir))
@@ -451,7 +463,11 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 	} else {
 		remoteDir := os.Getenv("REMOTE_DIR_SRC")
 		if remoteDir == "" {
-			remoteDir = "/home/tim/dialtone_src"
+			home, err := getRemoteHome(client)
+			if err != nil {
+				LogFatal("Failed to get remote home: %v", err)
+			}
+			remoteDir = path.Join(home, "dialtone_src")
 		}
 		LogInfo("Cleaning and creating remote directory %s...", remoteDir)
 		_, _ = runCommand(client, fmt.Sprintf("rm -rf %s && mkdir -p %s/src", remoteDir, remoteDir))
@@ -604,14 +620,15 @@ func RunInstallDeps(args []string) {
 		if ! command -v go &> /dev/null; then
 			echo "Installing Go %s..."
 			wget https://go.dev/dl/%s
-			sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf %s
+			echo "%s" | sudo -S rm -rf /usr/local/go
+			echo "%s" | sudo -S tar -C /usr/local -xzf %s
 			rm %s
 			echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile
 			echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
 		else
 			echo "Go is already installed."
 		fi
-	`, goVersion, goTarball, goTarball, goTarball)
+	`, goVersion, goTarball, *pass, *pass, goTarball, goTarball)
 
 	output, err := runCommand(client, installGoCmd)
 	if err != nil {
@@ -620,15 +637,15 @@ func RunInstallDeps(args []string) {
 	LogInfo(output)
 
 	// Install Node.js
-	installNodeCmd := `
+	installNodeCmd := fmt.Sprintf(`
 		if ! command -v node &> /dev/null; then
 			echo "Installing Node.js..."
-			curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-			sudo apt-get install -y nodejs
+			curl -fsSL https://deb.nodesource.com/setup_20.x | echo "%s" | sudo -S -E bash -
+			echo "%s" | sudo -S apt-get install -y nodejs
 		else
 			echo "Node.js is already installed."
 		fi
-	`
+	`, *pass, *pass)
 	output, err = runCommand(client, installNodeCmd)
 	if err != nil {
 		LogFatal("Failed to install Node.js: %v\nOutput: %s", err, output)
@@ -689,6 +706,14 @@ func RunSyncCode(args []string) {
 	LogInfo("Uploading src/web source...")
 	uploadDirFiltered(client, filepath.Join("src", "web"), path.Join(remoteDir, "src", "web"), []string{"node_modules", "dist", ".git"})
 
+	// Sync test directory
+	LogInfo("Uploading test directory...")
+	uploadDirFiltered(client, "test", path.Join(remoteDir, "test"), []string{".git"})
+
+	// Sync mavlink directory
+	LogInfo("Uploading mavlink directory...")
+	uploadDirFiltered(client, "mavlink", path.Join(remoteDir, "mavlink"), []string{".git", "__pycache__"})
+
 	LogInfo("Code sync complete.")
 }
 
@@ -712,7 +737,11 @@ func RunRemoteBuild(args []string) {
 
 	remoteDir := os.Getenv("REMOTE_DIR_SRC")
 	if remoteDir == "" {
-		remoteDir = "/home/tim/dialtone_src"
+		home, err := getRemoteHome(client)
+		if err != nil {
+			LogFatal("Failed to get remote home: %v", err)
+		}
+		remoteDir = path.Join(home, "dialtone_src")
 	}
 
 	LogInfo("Building on remote %s...", *host)
