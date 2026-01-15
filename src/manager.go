@@ -697,7 +697,7 @@ func RunSyncCode(args []string) {
 	srcFiles, _ := filepath.Glob("src/*.go")
 	for _, f := range srcFiles {
 		LogInfo("Uploading %s...", f)
-		if err := uploadFile(client, f, path.Join(remoteDir, f)); err != nil {
+		if err := uploadFile(client, f, path.Join(remoteDir, filepath.ToSlash(f))); err != nil {
 			LogFatal("Failed to upload %s: %v", f, err)
 		}
 	}

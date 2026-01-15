@@ -40,6 +40,7 @@ function addLog(msg: string, type: 'info' | 'error' | 'success' = 'info') {
 
 // Initial Data Fetch
 async function initApp() {
+  console.log("Remote Dev Test v1");
   try {
     const resp = await fetch('/api/init');
     const config = await resp.json();
