@@ -1,6 +1,9 @@
-# Use this prompt template for each change applied to the codebase
+> Use this prompt template for each change applied to the codebase
+
+# FEATURE: feature-branch-name
 1. read the main `README.md` to get an overview of the system
-2. read the `docs/develop.md`
+
+3. Use this prompt template for each change applied to the codebase
 
 
 # Development Workflow
