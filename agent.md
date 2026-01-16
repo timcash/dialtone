@@ -7,6 +7,38 @@ Dialtone is a robotic video operations network for cooperative human-AI robot co
 
 ---
 
+## Quick Start (WSL/Linux No-Sudo)
+
+The fastest way to get started on WSL or Linux without administrative privileges:
+
+```bash
+# Clone the repo
+git clone https://github.com/timcash/dialtone.git
+
+# Install go
+./install_go.sh
+
+# Install go windows
+./install_go.ps1
+
+# Environment setup if no previous install or cli binary is avaible to help with build
+export CC="/home/user/.dialtone_env/zig/zig cc -target x86_64-linux-gnu"
+export CGO_ENABLED=1
+export CGO_CFLAGS="-I/home/user/.dialtone_env/usr/include -I/home/user/.dialtone_env/usr/include/x86_64-linux-gnu"
+export PATH="/home/user/.dialtone_env/go/bin:/home/user/.dialtone_env/node/bin:$PATH"
+
+# Install dependencies into ~/.dialtone_env (Go, Node, Zig, V4L2 headers)
+go run dialtone-dev install --linux-wsl
+
+# Perform a native full-build (includes Web UI and Camera support)
+go run dialtone-dev build --local
+
+# Start the node locally
+go run ./bin/dialtone start --local
+```
+
+---
+
 ## Workflow Stages
 
 ### 1. Plan Stage
