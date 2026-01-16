@@ -110,12 +110,12 @@ func listPlans(planDir string) {
 			name := strings.TrimPrefix(entry.Name(), "plan-")
 			name = strings.TrimSuffix(name, ".md")
 
-			status := "📋"
+			status := "[ ]"
 			if total > 0 {
 				if completed == total {
-					status = "✅"
+					status = "[x]"
 				} else if completed > 0 {
-					status = "🔄"
+					status = "[~]"
 				}
 			}
 
