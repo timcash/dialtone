@@ -15,10 +15,10 @@ Simplify CLI commands to use intuitive names like `install`, `build`, `deploy`, 
 - [x] test_build_local: Verify `dialtone build --local` builds native binary
 - [x] test_build_local_binary_exists: Verify binary is created in bin/
 - [x] test_build_local_architecture: Verify binary matches current architecture
+- [x] test_build_help: Verify `dialtone build --help` shows usage information
+- [x] test_install_help: Verify `dialtone install --help` shows usage information
+- [x] test_deploy_help: Verify `dialtone deploy --help` shows usage information
 - [ ] test_build_podman: Verify `dialtone build --podman` builds ARM64 via container
-- [ ] test_build_help: Verify `dialtone build --help` shows usage information
-- [ ] test_install_help: Verify `dialtone install --help` shows usage information
-- [ ] test_deploy_help: Verify `dialtone deploy --help` shows usage information
 - [ ] test_full_build: Verify `dialtone full-build` builds web + CLI + binary
 
 ## Completed Changes
@@ -30,11 +30,16 @@ Simplify CLI commands to use intuitive names like `install`, `build`, `deploy`, 
 - Added `--linux-wsl` flag for explicit Linux/WSL x86_64 install
 - Checks if dependencies already installed and skips if present
 - Installs Go 1.25.5, Node.js 22.13.0, Zig 0.13.0 to `~/.dialtone_env`
+- Added `--help` flag with detailed usage information
 
 ### Build Command (`dialtone build`)
 - `--local` flag for native build using local toolchain
 - Uses `~/.dialtone_env` deps if available
 - Falls back to Podman if available and `--local` not specified
+- Added `--help` flag with detailed usage information
+
+### Deploy Command (`dialtone deploy`)
+- Added `--help` flag with detailed usage information
 
 ### Documentation
 - Updated `agent.md` with new command names
@@ -42,7 +47,7 @@ Simplify CLI commands to use intuitive names like `install`, `build`, `deploy`, 
 - Added macOS ARM development section to docs
 
 ## Remaining Work
-- [ ] Add `--help` flag to all commands with detailed usage
+- [x] Add `--help` flag to all commands with detailed usage
 - [ ] Implement `dialtone dev` command for development mode
 - [ ] Add `--arch` and `--os` flags to build command for cross-compilation
 - [ ] Test Podman build path
@@ -57,3 +62,5 @@ Simplify CLI commands to use intuitive names like `install`, `build`, `deploy`, 
 - 2026-01-16: Renamed install-deps to install, added auto-detect, added macOS ARM support
 - 2026-01-16: Tested install and build on macOS ARM64 - both working
 - 2026-01-16: Created plan file and branch
+- 2026-01-16: Created unit tests in test/improve-cli-build-commands/unit_test.go - all 7 tests PASS
+- 2026-01-16: Added --help flags to build, install, deploy commands - all 10 tests PASS
