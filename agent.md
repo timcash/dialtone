@@ -97,7 +97,11 @@ Dialtone is a robotic video operations network for cooperative human-AI robot co
 5. `go run dialtone-dev.go pull-request <name> <message>` — Create or update a PR
    - Example: `go run dialtone-dev.go pull-request linux-wsl-camera-support "Added V4L2 support"`
 6. `go run dialtone-dev.go issue <subcmd>` — Manage GitHub issues
+   - Subcommands: `list`, `add`, `comment`, `view`
    - Example: `go run dialtone-dev.go issue list 5`
+7. `go run dialtone-dev.go www <subcmd>` — Manage public webpage (Vercel wrapper)
+   - Subcommands: `publish`, `logs`, `domain`, `login`
+   - Example: `go run dialtone-dev.go www publish`
 
 ---
 
