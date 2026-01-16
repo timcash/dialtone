@@ -31,6 +31,8 @@ func ExecuteDev() {
 		runPullRequest(args)
 	case "issue":
 		runIssue(args)
+	case "www":
+		runWww(args)
 	case "help", "-h", "--help":
 		printDevUsage()
 	default:
@@ -70,6 +72,10 @@ func printDevUsage() {
 	fmt.Println("  dialtone-dev issue list 5            # List top 5 issues")
 	fmt.Println("  dialtone-dev issue add               # Create a new issue")
 	fmt.Println("  dialtone-dev issue comment 123 \"msg\" # Comment on issue #123")
+	fmt.Println("  dialtone-dev www publish             # Publish webpage to Vercel")
+	fmt.Println("  dialtone-dev www logs                # View Vercel deployment logs")
+	fmt.Println("  dialtone-dev www domain              # Manage dialtone.earth domain")
+	fmt.Println("  dialtone-dev www login               # Login to Vercel")
 }
 
 // runPlan handles the plan command
@@ -627,6 +633,7 @@ func runIssue(args []string) {
 		fmt.Println("  list [N]           List the top N issues (default: 10)")
 		fmt.Println("  add                Create a new issue")
 		fmt.Println("  comment <id> <msg> Add a comment to an issue")
+		fmt.Println("  view <id>          View issue details")
 		return
 	}
 
@@ -668,8 +675,111 @@ func runIssue(args []string) {
 			LogFatal("Failed to add comment: %v", err)
 		}
 
+	case "view":
+		if len(subArgs) < 1 {
+			LogFatal("Usage: dialtone-dev issue view <issue-id>")
+		}
+		issueID := subArgs[0]
+		cmd := exec.Command("gh", "issue", "view", issueID)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			LogFatal("Failed to view issue: %v", err)
+		}
+
 	default:
 		fmt.Printf("Unknown issue subcommand: %s\n", subcommand)
 		runIssue([]string{}) // Show usage
+	}
+}
+
+// runWww handles the www command
+func runWww(args []string) {
+	// Check if vercel CLI is available
+	homeDir, _ := os.UserHomeDir()
+	vercelPath := filepath.Join(homeDir, ".dialtone_env", "node", "bin", "vercel")
+	if _, err := os.Stat(vercelPath); os.IsNotExist(err) {
+		// Fallback to searching in PATH
+		if p, err := exec.LookPath("vercel"); err == nil {
+			vercelPath = p
+		} else {
+			LogFatal("Vercel CLI not found. Run 'dialtone install' to install dependencies.")
+		}
+	}
+
+	if len(args) == 0 {
+		fmt.Println("Usage: dialtone-dev www <subcommand> [options]")
+		fmt.Println("\nSubcommands:")
+		fmt.Println("  publish            Deploy the webpage to Vercel")
+		fmt.Println("  logs               View deployment logs")
+		fmt.Println("  domain             Manage the dialtone.earth domain")
+		fmt.Println("  login              Login to Vercel")
+		return
+	}
+
+	subcommand := args[0]
+	// Determine the directory where the webpage code is located
+
+	switch subcommand {
+	case "publish":
+		LogInfo("Deploying webpage to Vercel...")
+		vArgs := append([]string{"deploy", "--prod"}, args[1:]...)
+		cmd := exec.Command(vercelPath, vArgs...)
+		cmd.Dir = "."
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			LogFatal("Failed to deploy: %v", err)
+		}
+		LogInfo("Deployment successful!")
+
+	case "logs":
+		vArgs := append([]string{"logs"}, args[1:]...)
+		cmd := exec.Command(vercelPath, vArgs...)
+		cmd.Dir = "."
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			LogFatal("Failed to show logs: %v", err)
+		}
+
+	case "domain":
+		// Usage: dialtone-dev www domain [deployment-url]
+		// If no deployment-url is given, it will attempt to alias the most recent deployment.
+		vArgs := []string{"alias", "set"}
+		vArgs = append(vArgs, args[1:]...)
+		vArgs = append(vArgs, "dialtone.earth")
+		cmd := exec.Command(vercelPath, vArgs...)
+		cmd.Dir = "."
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			LogFatal("Failed to set domain alias: %v", err)
+		}
+
+	case "login":
+		cmd := exec.Command(vercelPath, "login")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			LogFatal("Failed to login: %v", err)
+		}
+
+	default:
+		// Generic pass-through to vercel CLI
+		LogInfo("Running: vercel %s %s", subcommand, strings.Join(args[1:], " "))
+		vArgs := append([]string{subcommand}, args[1:]...)
+		cmd := exec.Command(vercelPath, vArgs...)
+		cmd.Dir = "."
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			LogFatal("Vercel command failed: %v", err)
+		}
 	}
 }
