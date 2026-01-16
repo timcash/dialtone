@@ -8,7 +8,13 @@ Simplify CLI commands to use intuitive names like `install`, `build`, `deploy`, 
 - [x] test_install_macos_arm: Verify `dialtone install --macos-arm` installs Go, Node.js, Zig for Apple Silicon
 - [x] test_install_linux_wsl: Verify `dialtone install --linux-wsl` installs deps for Linux x86_64
 - [x] test_install_skip_existing: Verify install skips already-installed dependencies
+- [x] test_install_deps_directory: Verify deps directory structure exists
+- [x] test_install_go_version: Verify Go 1.25.x is installed
+- [x] test_install_node_version: Verify Node.js v22.x is installed
+- [x] test_install_zig_version: Verify Zig 0.13.x is installed
 - [x] test_build_local: Verify `dialtone build --local` builds native binary
+- [x] test_build_local_binary_exists: Verify binary is created in bin/
+- [x] test_build_local_architecture: Verify binary matches current architecture
 - [ ] test_build_podman: Verify `dialtone build --podman` builds ARM64 via container
 - [ ] test_build_help: Verify `dialtone build --help` shows usage information
 - [ ] test_install_help: Verify `dialtone install --help` shows usage information
