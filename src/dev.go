@@ -23,8 +23,6 @@ func ExecuteDev() {
 	switch command {
 	case "build":
 		RunBuild(args)
-	case "full-build":
-		RunBuild(append([]string{"-full"}, args...))
 	case "deploy":
 		RunDeploy(args)
 	case "ssh":
@@ -41,8 +39,6 @@ func ExecuteDev() {
 		RunClone(args)
 	case "sync-code":
 		RunSyncCode(args)
-	case "remote-build":
-		RunRemoteBuild(args)
 	case "plan":
 		runPlan(args)
 	case "branch":
@@ -68,12 +64,10 @@ func printDevUsage() {
 	fmt.Println("Usage: dialtone-dev <command> [options]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  install       Install dependencies (--linux-wsl for WSL, --macos-arm for Apple Silicon)")
-	fmt.Println("  build         Build for ARM64 using Podman (use -local for native build)")
-	fmt.Println("  full-build    Build Web, CLI, and ARM64 binary (use -local for native build)")
+	fmt.Println("  build         Build web UI and binary (--local, --full, --remote)")
 	fmt.Println("  deploy        Deploy to remote robot")
 	fmt.Println("  clone         Clone or update the repository")
 	fmt.Println("  sync-code     Sync source code to remote robot")
-	fmt.Println("  remote-build  Build Go and Web code on remote robot")
 	fmt.Println("  ssh           SSH tools (upload, download, cmd)")
 	fmt.Println("  provision     Generate Tailscale Auth Key")
 	fmt.Println("  logs          Tail remote logs")
