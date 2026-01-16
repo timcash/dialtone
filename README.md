@@ -40,20 +40,15 @@ Detailed information about System Architecture, Installation, and Development ca
 ---
 
 #Quick Start (WSL/Linux No-Sudo)
-
-Environment setup if no previous install or cli binary is avaible to help with build
+The fastest way to get started on WSL or Linux without administrative privileges:
 ```bash
+# Environment setup if no previous install or cli binary is avaible to help with build
+ 
 export CC="/home/user/.dialtone_env/zig/zig cc -target x86_64-linux-gnu"
 export CGO_ENABLED=1
 export CGO_CFLAGS="-I/home/user/.dialtone_env/usr/include -I/home/user/.dialtone_env/usr/include/x86_64-linux-gnu"
 export PATH="/home/user/.dialtone_env/go/bin:/home/user/.dialtone_env/node/bin:$PATH"
 
-go run . full-build -local
-```
-
-The fastest way to get started on WSL or Linux without administrative privileges:
-
-```bash
 # 1. Install dependencies into ~/.dialtone_env (Go, Node, Zig, V4L2 headers)
 go run . install-deps --linux-wsl
 
