@@ -1,6 +1,6 @@
 # Dialtone
 
-Dialtone is aspirationally a **robotic video operations network** designed to allow humans and AI to cooperatively train and operate thousands of robots simultaneously.
+Dialtone is aspirationally a **robotic video operations network** designed to allow humans and AI to cooperatively train and operate thousands of robots simultaneously with low latency.
 
 ![dialtone](./dialtone.png)
 
