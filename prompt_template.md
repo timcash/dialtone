@@ -1,10 +1,22 @@
 > Use this prompt template for each change applied to the codebase
-
+== start template ==
 # FEATURE: feature-branch-name
+## Plan Stage
 1. read the main `README.md` to get an overview of the system
+3. look for or create a feature branch using `gh branch feature-branch-name`
+2. look for or create all a plan file like `plan/plan-feature-branch-name.md`
+4. if the branch or plan file are already in place you need to figure out how to continue the work
+5. review the `docs/cli.md` file to understand the CLI commands and it is the center of all development work with tools like `--dev` and `--full-build` and `--deploy`
 
-3. Use this prompt template for each change applied to the codebase
+4. use `gh pr create --title "feature-branch-name" --body "feature-branch-name"` to create a pull request with only the changes in the plan file.
 
+## Development Stage
+5. use `gh pr merge` to merge the pull request
+
+## Verify on live robot
+1. use `dialtone deploy` to deploy the changes to a remote robot
+2. use `dialtone web` to access the web interface
+3. use `dialtone test` to run system tests on the remote robot
 
 # Development Workflow
 
