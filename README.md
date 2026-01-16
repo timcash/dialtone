@@ -1,4 +1,4 @@
-# Dialtone
+# [Dialtone](https://dialtone.earth)
 
 Dialtone is aspirationally a **robotic video operations network** designed to allow humans and AI to cooperatively train and operate thousands of robots simultaneously with low latency.
 
@@ -114,50 +114,6 @@ flowchart TD
 11. Community and Social.
     - One-click sharing of robot "moments" to social platforms to engage with the public.
     - Collaborative "Robot Parties" where multiple users can interact with a shared robot world.
-
-# Documentation Map
-Detailed information about System Architecture, Installation, and Development can be found in the [docs/](./docs) directory:
-
-- **[System Design & Tech Stack](./docs/techstack.md)**: Hardware/Software stack overview.
-- **[Installation & Setup](./docs/install.md)**: Prerequisites and environment configuration.
-- **[Build & Deployment](./docs/cli.md)**: Native and containerized builds, WSL support, and deployment commands.
-- **[Development Workflow](./docs/develop.md)**: TDD loop, code style, and logging.
-- **[Networking (Tailscale)](./docs/tsnet.md)**: Identity-based networking and automated provisioning.
-- **[Messaging (NATS)](./docs/nats.md)**: System message bus and real-time telemetry.
-- **[Testing Guide](./docs/test.md)**: Unit tests, integration tests, and UI screenshots.
-- **[TODO](./todo.md)**: List of features to implement.
-
-
-# Quick Start (WSL/Linux No-Sudo)
-The fastest way to get started on WSL or Linux without administrative privileges:
-```bash
-# Clone the repo
-gh clone https://github.com/timcash/dialtone.git
-
-# Environment setup if no previous install or cli binary is avaible to help with build
-export CC="/home/user/.dialtone_env/zig/zig cc -target x86_64-linux-gnu"
-export CGO_ENABLED=1
-export CGO_CFLAGS="-I/home/user/.dialtone_env/usr/include -I/home/user/.dialtone_env/usr/include/x86_64-linux-gnu"
-export PATH="/home/user/.dialtone_env/go/bin:/home/user/.dialtone_env/node/bin:$PATH"
-
-# Install dependencies into ~/.dialtone_env (Go, Node, Zig, V4L2 headers)
-go run . install-deps --linux-wsl
-
-# Perform a native full-build (includes Web UI and Camera support)
-go run . full-build -local
-
-# Start the node locally
-./bin/dialtone start -local-only
-```
-
-For standard ARM64 cross-compilation using Podman:
-
-```bash
-# Build the manager and deploy to a remote target
-go build -o bin/dialtone .
-bin/dialtone full-build
-bin/dialtone deploy
-```
 
 ## Why Dialtone uses Golang
 1. Compiled language
