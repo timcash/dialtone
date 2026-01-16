@@ -270,10 +270,15 @@ func TestBranchCommand(t *testing.T) {
 // TestTestCommand verifies test command structure
 func TestTestCommand(t *testing.T) {
 	projectRoot := getProjectRoot(t)
+	testFeatureName := "test-cmd-structure-" + randomSuffix()
+	testDir := filepath.Join(projectRoot, "test", testFeatureName)
+
+	// Ensure cleanup of created test directory
+	defer os.RemoveAll(testDir)
 
 	// Run test command on a non-existent feature to verify structure
 	// This will fail but we just want to verify it tries to run go test
-	cmd := exec.Command("go", "run", "dialtone-dev.go", "test", "nonexistent-feature-xyz")
+	cmd := exec.Command("go", "run", "dialtone-dev.go", "test", testFeatureName)
 	cmd.Dir = projectRoot
 
 	output, _ := cmd.CombinedOutput()
