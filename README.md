@@ -2,6 +2,8 @@
 
 Dialtone is aspirationally a **robotic video operations network** designed to allow humans and AI to cooperatively train and operate thousands of robots simultaneously.
 
+![dialtone](./dialtone.png)
+
 # Vision
 The future of robotics is collaborative, not just automated. Dialtone aims to bridge the gap between human intuition and machine precision by providing a unified network where:
 - **Humans** can remotely oversee, teleoperate, and teach robots from anywhere in the world.
@@ -94,6 +96,7 @@ flowchart TD
 8. CAD and Simulation.
     - Built-in modeling tools to assist with hardware modifications and 3D printing.
     - "Digital Twin" simulation to test control logic in a virtual environment before deployment.
+    - Popular localisation and mapping algorithms pre integrated like PyCuVSLAM
 
 9. Public Robot Presence.
     - Publicly accessible URLs at `https://<robot_id>.dialtone.computer` for live streaming and status.
