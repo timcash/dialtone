@@ -44,3 +44,4 @@ Create the `dialtone-dev` CLI tool for development workflow automation. This too
 ## Progress Log
 - 2026-01-16: Created plan file and feature branch
 - 2026-01-16: Implemented all commands (plan, branch, test, pull-request)
+- 2026-01-16: Added test suite with 10 unit tests (test/dialtone-dev-cli/unit_test.go)
