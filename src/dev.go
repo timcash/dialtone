@@ -44,21 +44,23 @@ func printDevUsage() {
 	fmt.Println("  plan [name]        List plans or create/view a plan file")
 	fmt.Println("  branch <name>      Create or checkout a feature branch")
 	fmt.Println("  test [name]        Run tests (all or for specific feature, creates templates if missing)")
-	fmt.Println("  pull-request       Create or update a pull request")
+	fmt.Println("  pull-request       Create or update a pull request (wrapper around gh CLI)")
 	fmt.Println("  help               Show this help message")
 	fmt.Println("\nPull Request Options:")
 	fmt.Println("  --title, -t <title>   Set PR title (default: branch name)")
 	fmt.Println("  --body, -b <body>     Set PR body (default: plan file or auto-generated)")
 	fmt.Println("  --draft, -d           Create as draft PR")
+	fmt.Println("  --view, -v            Open PR in browser")
 	fmt.Println("\nExamples:")
 	fmt.Println("  dialtone-dev plan                    # List all plan files")
 	fmt.Println("  dialtone-dev plan my-feature         # Create/view plan for my-feature")
 	fmt.Println("  dialtone-dev branch my-feature       # Create or checkout branch")
 	fmt.Println("  dialtone-dev test                    # Run all tests")
 	fmt.Println("  dialtone-dev test my-feature         # Run tests for my-feature (creates templates)")
-	fmt.Println("  dialtone-dev pull-request            # Create/update PR using branch name and plan")
+	fmt.Println("  dialtone-dev pull-request            # Create PR or show existing PR info")
 	fmt.Println("  dialtone-dev pull-request --draft    # Create draft PR")
 	fmt.Println("  dialtone-dev pull-request --title \"My Feature\" --body \"Description\"")
+	fmt.Println("  dialtone-dev pull-request --view     # Open existing PR in browser")
 }
 
 // runPlan handles the plan command
@@ -478,7 +480,7 @@ func runPullRequest(args []string) {
 
 	// Parse flags
 	var title, body string
-	var draft bool
+	var draft, view bool
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--title", "-t":
@@ -493,6 +495,8 @@ func runPullRequest(args []string) {
 			}
 		case "--draft", "-d":
 			draft = true
+		case "--view", "-v":
+			view = true
 		}
 	}
 
@@ -508,13 +512,14 @@ func runPullRequest(args []string) {
 		LogFatal("Cannot create PR from main/master branch. Create a feature branch first.")
 	}
 
-	LogInfo("Creating/updating PR for branch: %s", branch)
-
 	// Check if PR already exists
-	checkCmd := exec.Command("gh", "pr", "view", "--json", "number")
-	if err := checkCmd.Run(); err != nil {
+	checkCmd := exec.Command("gh", "pr", "view", "--json", "number,title,url")
+	prOutput, prErr := checkCmd.Output()
+	prExists := prErr == nil
+
+	if !prExists {
 		// PR doesn't exist, create it
-		LogInfo("Creating new pull request...")
+		LogInfo("Creating new pull request for branch: %s", branch)
 		
 		var createArgs []string
 		createArgs = append(createArgs, "pr", "create")
@@ -550,11 +555,41 @@ func runPullRequest(args []string) {
 			LogFatal("Failed to create PR: %v", err)
 		}
 	} else {
-		// PR exists, show info
-		LogInfo("Pull request already exists. Opening in browser...")
-		cmd = exec.Command("gh", "pr", "view", "--web")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Run()
+		// PR exists
+		LogInfo("Pull request exists for branch: %s", branch)
+		
+		// If title or body provided, update the PR
+		if title != "" || body != "" {
+			LogInfo("Updating pull request...")
+			
+			var editArgs []string
+			editArgs = append(editArgs, "pr", "edit")
+			
+			if title != "" {
+				editArgs = append(editArgs, "--title", title)
+			}
+			
+			if body != "" {
+				editArgs = append(editArgs, "--body", body)
+			}
+			
+			cmd = exec.Command("gh", editArgs...)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				LogFatal("Failed to update PR: %v", err)
+			}
+			LogInfo("Pull request updated successfully")
+		}
+		
+		// Show PR info
+		fmt.Printf("%s\n", string(prOutput))
+		
+		// Open in browser if --view flag
+		if view {
+			LogInfo("Opening in browser...")
+			cmd = exec.Command("gh", "pr", "view", "--web")
+			cmd.Run()
+		}
 	}
 }
