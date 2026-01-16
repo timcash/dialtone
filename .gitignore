@@ -21,3 +21,5 @@ prompt.md
 
 # ENV
 .env
+.vercel
+.env*.local

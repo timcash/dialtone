@@ -719,36 +719,43 @@ func runWww(args []string) {
 
 	subcommand := args[0]
 	// Determine the directory where the webpage code is located
-	wwwDir := "dialtone-earth"
 
 	switch subcommand {
 	case "publish":
 		LogInfo("Deploying webpage to Vercel...")
-		cmd := exec.Command(vercelPath, "deploy", "--prod")
-		cmd.Dir = wwwDir
+		vArgs := append([]string{"deploy", "--prod"}, args[1:]...)
+		cmd := exec.Command(vercelPath, vArgs...)
+		cmd.Dir = "."
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
 		if err := cmd.Run(); err != nil {
 			LogFatal("Failed to deploy: %v", err)
 		}
 		LogInfo("Deployment successful!")
 
 	case "logs":
-		cmd := exec.Command(vercelPath, "logs")
-		cmd.Dir = wwwDir
+		vArgs := append([]string{"logs"}, args[1:]...)
+		cmd := exec.Command(vercelPath, vArgs...)
+		cmd.Dir = "."
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
 		if err := cmd.Run(); err != nil {
 			LogFatal("Failed to show logs: %v", err)
 		}
 
 	case "domain":
-		// This could be 'vercel domains' or 'vercel alias'
-		// For dialtone.earth integration, 'vercel alias' is likely what's needed to point the domain
-		cmd := exec.Command(vercelPath, "alias", "set", "dialtone.earth")
-		cmd.Dir = wwwDir
+		// Usage: dialtone-dev www domain [deployment-url]
+		// If no deployment-url is given, it will attempt to alias the most recent deployment.
+		vArgs := []string{"alias", "set"}
+		vArgs = append(vArgs, args[1:]...)
+		vArgs = append(vArgs, "dialtone.earth")
+		cmd := exec.Command(vercelPath, vArgs...)
+		cmd.Dir = "."
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
 		if err := cmd.Run(); err != nil {
 			LogFatal("Failed to set domain alias: %v", err)
 		}
@@ -763,7 +770,16 @@ func runWww(args []string) {
 		}
 
 	default:
-		fmt.Printf("Unknown www subcommand: %s\n", subcommand)
-		runWww([]string{}) // Show usage
+		// Generic pass-through to vercel CLI
+		LogInfo("Running: vercel %s %s", subcommand, strings.Join(args[1:], " "))
+		vArgs := append([]string{subcommand}, args[1:]...)
+		cmd := exec.Command(vercelPath, vArgs...)
+		cmd.Dir = "."
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			LogFatal("Vercel command failed: %v", err)
+		}
 	}
 }
