@@ -50,6 +50,7 @@ func printDevUsage() {
 	fmt.Println("  --title, -t <title>   Set PR title (default: branch name)")
 	fmt.Println("  --body, -b <body>     Set PR body (default: plan file or auto-generated)")
 	fmt.Println("  --draft, -d           Create as draft PR")
+	fmt.Println("  --ready, -r           Mark draft PR as ready for review")
 	fmt.Println("  --view, -v            Open PR in browser")
 	fmt.Println("\nExamples:")
 	fmt.Println("  dialtone-dev plan                    # List all plan files")
@@ -59,6 +60,7 @@ func printDevUsage() {
 	fmt.Println("  dialtone-dev test my-feature         # Run tests for my-feature (creates templates)")
 	fmt.Println("  dialtone-dev pull-request            # Create PR or show existing PR info")
 	fmt.Println("  dialtone-dev pull-request --draft    # Create draft PR")
+	fmt.Println("  dialtone-dev pull-request --ready    # Mark draft as ready for review")
 	fmt.Println("  dialtone-dev pull-request --title \"My Feature\" --body \"Description\"")
 	fmt.Println("  dialtone-dev pull-request --view     # Open existing PR in browser")
 }
@@ -480,7 +482,7 @@ func runPullRequest(args []string) {
 
 	// Parse flags
 	var title, body string
-	var draft, view bool
+	var draft, ready, view bool
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--title", "-t":
@@ -495,6 +497,8 @@ func runPullRequest(args []string) {
 			}
 		case "--draft", "-d":
 			draft = true
+		case "--ready", "-r":
+			ready = true
 		case "--view", "-v":
 			view = true
 		}
@@ -580,6 +584,18 @@ func runPullRequest(args []string) {
 				LogFatal("Failed to update PR: %v", err)
 			}
 			LogInfo("Pull request updated successfully")
+		}
+		
+		// Mark as ready for review if --ready flag
+		if ready {
+			LogInfo("Marking pull request as ready for review...")
+			cmd = exec.Command("gh", "pr", "ready")
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				LogFatal("Failed to mark PR as ready: %v", err)
+			}
+			LogInfo("Pull request is now ready for review")
 		}
 		
 		// Show PR info
