@@ -19,10 +19,11 @@ Dialtone is a robotic video operations network for cooperative human-AI robot co
 3. Run `dialtone-dev branch <feature-branch-name>` to create or checkout the feature branch
 4. Run `dialtone-dev plan <feature-branch-name>` to list plan sections or create a new plan file
 5. Read `README.md` to get an overview of the system
-6. Look for or create a plan file at `plan/plan-<feature-branch-name>.md`
-7. If branch or plan file already exists, figure out how to continue the work
-8. Review `docs/cli.md` to understand CLI commands
-9. Create a draft PR: `dialtone-dev pull-request --draft --title "<feature-branch-name>" --body "Plan file"`
+6. Look for the plan file at `plan/plan-<feature-branch-name>.md`
+7. Write your plan into it as you go with a test list. then mark off each test when it passes
+8. If the branch, plan or tests already exists for `<feature-branch-name>` you should continue the work
+9. Review `docs/cli.md` to understand CLI commands
+10. Create a draft PR: `dialtone-dev pull-request --draft --title "<feature-branch-name>" --body "Plan file"`
 
 ### 2. Development Stage (Iterative Loop)
 
