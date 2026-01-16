@@ -82,6 +82,7 @@ go run ./bin/dialtone start --local
 2. **Integration tests** — Test 2 components together using `test_data/` possibly using IO between the two components 
    - Example test_data: premade video file, MAVLink message file, known-correct response snapshot
 3. **End-to-end tests** — Browser and CLI tests on a live system or simulator
+   - Use Puppeteer for live site verification: `dialtone-earth/test/live_test.ts`
 
 ---
 
@@ -121,8 +122,9 @@ go run ./bin/dialtone start --local
    - Example: `go run dialtone-dev.go branch linux-wsl-camera-support`
 13. `go run dialtone-dev.go test` — Run all tests in `test/` directory
    - Example: `go run dialtone-dev.go test`
-14. `go run dialtone-dev.go test <name>` — Run tests in `test/<name>/` or create example test
-   - Example: `go run dialtone-dev.go test linux-wsl-camera-support`
+14. `go run dialtone-dev.go test <name>` — Run tests in `test/<name>/` or specific component tests
+    - Example: `go run dialtone-dev.go test linux-wsl-camera-support`
+    - Example: `go run dialtone-dev.go test www` (Runs Puppeteer live site verification)
 15. `go run dialtone-dev.go plan <name>` — List plan sections or create plan file
    - Example: `go run dialtone-dev.go plan linux-wsl-camera-support`
 16. `go run dialtone-dev.go pull-request <name> <message>` — Create or update a PR
@@ -132,8 +134,22 @@ go run ./bin/dialtone start --local
    - Example: `go run dialtone-dev.go issue view 10`
    - Example: `go run dialtone-dev.go issue add --title "Bug" --body "Desc" --label "bug"`
 18. `go run dialtone-dev.go www <subcmd>` — Manage public webpage (Vercel wrapper/pass-through)
-   - Subcommands: `publish`, `logs`, `domain`, `login` (unrecognized commands pass through to Vercel)
-   - Example: `go run dialtone-dev.go www publish`
+    - Subcommands: `publish`, `logs`, `domain`, `login` (unrecognized commands pass through to Vercel)
+    - Example: `go run dialtone-dev.go www publish`
+
+---
+
+## Testing the Webpage
+
+The `dialtone-earth` project includes Puppeteer-based live site verification.
+
+1. **Environment Setup**: 
+   - Ensure Node.js v22+ is installed (use `nvm install 22`).
+   - Install system dependencies for Chrome (see `walkthrough.md` for the list of `apt` packages).
+2. **Running Tests**:
+   - Run all tests (includes Go + Web): `go run dialtone-dev.go test`
+   - Run web tests specifically: `go run dialtone-dev.go test www`
+3. **Test Script**: Located at `dialtone-earth/test/live_test.ts`.
 
 ---
 
