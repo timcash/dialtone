@@ -633,6 +633,7 @@ func runIssue(args []string) {
 		fmt.Println("  list [N]           List the top N issues (default: 10)")
 		fmt.Println("  add                Create a new issue")
 		fmt.Println("  comment <id> <msg> Add a comment to an issue")
+		fmt.Println("  view <id>          View issue details")
 		return
 	}
 
@@ -672,6 +673,18 @@ func runIssue(args []string) {
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			LogFatal("Failed to add comment: %v", err)
+		}
+
+	case "view":
+		if len(subArgs) < 1 {
+			LogFatal("Usage: dialtone-dev issue view <issue-id>")
+		}
+		issueID := subArgs[0]
+		cmd := exec.Command("gh", "issue", "view", issueID)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			LogFatal("Failed to view issue: %v", err)
 		}
 
 	default:
