@@ -1,3 +1,9 @@
+# FEATURE: `improve-cli-clarity`
+1. use simple commands like deploy, install, build, dev
+2. add options and a help commands for each
+3. make it clear how to install on linux-arm, linux-intel, windows-wsl-ubuntu, macos
+4. make it clear how to build on each system including using the host OS and podman with docker
+
 # FEATURE: `linux-wsl-camera-support`
 0. Allow development on Linux/WSL with camera enabled. create a `plan-linux-wsl-camera-support.md` file in the `plan` directory to track progress
 1. start a new branch `git checkout -b feature/linux-wsl-camera-support`
