@@ -4,19 +4,28 @@
 ## Plan Stage
 1. read the main `README.md` to get an overview of the system
 3. look for or create a feature branch using `gh branch feature-branch-name`
-2. look for or create all a plan file like `plan/plan-feature-branch-name.md`
+2. look for or create all a plan file like `plan/plan-feature-branch-name.md` it should be a list of tests and notes about each test
 4. if the branch or plan file are already in place you need to figure out how to continue the work
 5. review the `docs/cli.md` file to understand the CLI commands and it is the center of all development work with tools like `--dev` and `--full-build` and `--deploy`
-
 4. use `gh pr create --title "feature-branch-name" --body "feature-branch-name"` to create a pull request with only the changes in the plan file.
 
-## Development Stage
-5. use `gh pr merge` to merge the pull request
+## Development Stage Small Changes
+1. Make small changes and run tests to work iteratively
+1. plan, create or use an existing test
+1. include logs and metrics as part of the test make sure they are the correct format and levels
+1. write or change code ,test_data and docs to pass the test
+2. use `git commit` to stage and commit the changes
 
 ## Verify on live robot
 1. use `dialtone deploy` to deploy the changes to a remote robot
 2. use `dialtone web` to access the web interface
 3. use `dialtone test` to run system tests on the remote robot
+
+## Cleanup and Pull Request
+0. Look at the branch and make sure it is clean and only contains the changes in the plan file.
+1. stage and commit the changes to the branch `git add .` and `git commit -m "feature-branch-name comments"`
+2. update the PR with the new changes `gh pr edit --title "feature-branch-name" --body "feature-branch-name"`
+3. use `gh pr merge` to merge the pull request
 
 # Development Workflow
 
