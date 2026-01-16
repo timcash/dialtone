@@ -19,10 +19,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bluenviron/gomavlib/v3/pkg/dialects/common"
 	"github.com/coder/websocket"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
-	"github.com/bluenviron/gomavlib/v3/pkg/dialects/common"
 	"tailscale.com/client/tailscale"
 	"tailscale.com/tsnet"
 )
@@ -59,10 +59,14 @@ func Execute() {
 		RunProvision(args)
 	case "logs":
 		runLogs(args)
+	case "diagnostic":
+		RunDiagnostic(args)
 	case "start":
 		runStart(args)
 	case "install":
 		RunInstall(args)
+	case "clone":
+		RunClone(args)
 	case "sync-code":
 		RunSyncCode(args)
 	case "remote-build":
@@ -80,11 +84,13 @@ func printUsage() {
 	fmt.Println("  full-build    Build Web, CLI, and ARM64 binary (use -local for native build)")
 	fmt.Println("  deploy        Deploy to remote robot")
 	fmt.Println("  install       Install dependencies (--linux-wsl for WSL, --macos-arm for Apple Silicon)")
+	fmt.Println("  clone         Clone or update the repository")
 	fmt.Println("  sync-code     Sync source code to remote robot")
 	fmt.Println("  remote-build  Build Go and Web code on remote robot")
 	fmt.Println("  ssh           SSH tools (upload, download, cmd)")
 	fmt.Println("  provision     Generate Tailscale Auth Key")
 	fmt.Println("  logs          Tail remote logs")
+	fmt.Println("  diagnostic    Run system diagnostics (local or remote)")
 	fmt.Println("  start         Start the NATS and Web server")
 }
 
@@ -453,26 +459,26 @@ func startMavlink(endpoint string, natsPort int) {
 	go func() {
 		// Wait for NATS to start
 		time.Sleep(3 * time.Second)
-		
+
 		nc, err := nats.Connect(fmt.Sprintf("nats://127.0.0.1:%d", natsPort))
 		if err != nil {
 			LogInfo("MAVLINK: Failed to connect to NATS for commands: %v", err)
 			return
 		}
-		
+
 		LogInfo("MAVLINK: Subscribed to rover.command")
-		
+
 		nc.Subscribe("rover.command", func(m *nats.Msg) {
 			var cmd map[string]interface{}
 			if err := json.Unmarshal(m.Data, &cmd); err != nil {
 				return
 			}
-			
+
 			typeStr, _ := cmd["type"].(string)
 			if typeStr == "" {
 				typeStr, _ = cmd["cmd"].(string)
 			}
-			
+
 			switch typeStr {
 			case "arm":
 				svc.Arm()
@@ -512,8 +518,7 @@ func startNatsPublisher(port int) {
 func waitForShutdown() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	<-
-c
+	<-c
 }
 
 // CreateWebHandler creates the HTTP handler for the unified web dashboard
@@ -595,21 +600,16 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 
-						for {
+		for {
 
-							select {
+			select {
 
-										case <-ctx.Done():
+			case <-ctx.Done():
 
-											return
+				return
 
-										case <-ticker.C:
+			case <-ticker.C:
 
-							
-
-				
-
-		
 				varz, _ := ns.Varz(nil)
 				var connections int
 				var inMsgs, outMsgs, inBytes, outBytes int64
