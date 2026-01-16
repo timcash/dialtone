@@ -1,3 +1,9 @@
+# FEATURE: `dialtone-dev cli tool`
+1. create basic functions to match the descriptions in agent.md
+2. start with the `dialtone-dev plan` command that makes a template plan for editing in the `plan` directory
+3. after that command works look at agent.md again and add more steps to the already created plan. 
+4. rember to follow developmet steps like creating a branch
+
 # FEATURE: `improve-cli-build-commands`
 1. use simple commands like deploy, install, build, dev
 2. add options and a help commands for each
