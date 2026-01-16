@@ -4,7 +4,6 @@ import { useEffect, useRef } from "react"
 import * as d3 from "d3"
 import { useTheme } from "next-themes"
 import { feature } from "topojson-client"
-import * as h3 from "h3-js"
 
 export function Globe() {
   const svgRef = useRef<SVGSVGElement>(null)
@@ -42,53 +41,7 @@ export function Globe() {
       .attr("r", projection.scale())
 
     const map = svg.append("g")
-    const hexGroup = svg.append("g").attr("class", "hexagons")
     const dotsGroup = svg.append("g").attr("class", "dots")
-
-    // Add H3 Hexagons
-    // Resolution 1 has 842 cells - good for global scale SVG performance
-    const h3Res = 1
-    const hexCells = h3.getRes0Cells().flatMap(cell => h3.cellToChildren(cell, h3Res))
-
-    const hexData = hexCells.map(cell => {
-      const boundary = h3.cellToBoundary(cell, true) // true for [lon, lat]
-      return {
-        id: cell,
-        geometry: {
-          type: "Polygon",
-          coordinates: [boundary]
-        }
-      }
-    })
-
-    const hexagons = hexGroup
-      .selectAll("path")
-      .data(hexData)
-      .enter()
-      .append("path")
-      .attr("d", (d: any) => path(d.geometry as any))
-      .attr("fill", "none")
-      .attr("stroke", strokeColor)
-      .attr("stroke-width", 0.5)
-      .attr("stroke-opacity", 0.1)
-
-    const animateHexagon = () => {
-      const randomIndex = Math.floor(Math.random() * hexData.length)
-      const selectedHex = hexagons.filter((_d: any, i: number) => i === randomIndex)
-
-      const isRed = Math.random() > 0.5
-      const targetColor = isRed ? "#ef4444" : "#ffffff"
-
-      selectedHex
-        .transition()
-        .duration(2000)
-        .attr("fill", targetColor)
-        .attr("fill-opacity", 0.4)
-        .transition()
-        .duration(2000)
-        .attr("fill", "none")
-        .attr("fill-opacity", 0)
-    }
 
     // Add graticule (grid lines)
     const graticule = d3.geoGraticule().step([20, 20])
@@ -97,11 +50,13 @@ export function Globe() {
       .append("path")
       .datum(graticule)
       .attr("class", "graticule")
+      .attr("id", "globe-graticule") // Explicit ID
       .attr("d", path as any)
       .attr("fill", "none")
       .attr("stroke", strokeColor)
       .attr("stroke-width", 0.3)
       .attr("stroke-opacity", 0.15)
+
 
     const createRandomDot = () => {
       const lat = Math.random() * 180 - 90 // -90 to 90
@@ -139,17 +94,10 @@ export function Globe() {
     }
 
     let dotIntervalId: ReturnType<typeof setInterval>
-    let hexIntervalId: ReturnType<typeof setInterval>
 
     dotIntervalId = setInterval(() => {
       createRandomDot()
     }, 500)
-
-    hexIntervalId = setInterval(() => {
-      for (let i = 0; i < 2; i++) {
-        animateHexagon()
-      }
-    }, 1000)
 
     // Slow rotation animation - Start immediately
     let rotation = 0
@@ -159,7 +107,6 @@ export function Globe() {
 
       // Re-render all paths
       map.selectAll("path").attr("d", path as any)
-      hexagons.attr("d", (d: any) => path(d.geometry as any))
 
       // Update dots positions
       dotsGroup.selectAll("circle").each(function (this: any, d: any) {
@@ -207,14 +154,12 @@ export function Globe() {
         .attr("r", projection.scale())
 
       map.selectAll("path").attr("d", path as any)
-      hexagons.attr("d", (d: any) => path(d.geometry as any))
     }
 
     window.addEventListener("resize", handleResize)
     return () => {
       window.removeEventListener("resize", handleResize)
       clearInterval(dotIntervalId)
-      clearInterval(hexIntervalId)
     }
   }, [resolvedTheme])
 
