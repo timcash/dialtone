@@ -567,6 +567,11 @@ func runPullRequest(args []string) {
 
 			if body != "" {
 				editArgs = append(editArgs, "--body", body)
+			} else {
+				planFile := filepath.Join("plan", fmt.Sprintf("plan-%s.md", branch))
+				if _, statErr := os.Stat(planFile); statErr == nil {
+					editArgs = append(editArgs, "--body-file", planFile)
+				}
 			}
 
 			cmd = exec.Command("gh", editArgs...)
