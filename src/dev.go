@@ -788,13 +788,14 @@ func runWww(args []string) {
 
 	subcommand := args[0]
 	// Determine the directory where the webpage code is located
+	webDir := "."
 
 	switch subcommand {
 	case "publish":
 		LogInfo("Deploying webpage to Vercel...")
 		vArgs := append([]string{"deploy", "--prod"}, args[1:]...)
 		cmd := exec.Command(vercelPath, vArgs...)
-		cmd.Dir = "."
+		cmd.Dir = webDir
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
@@ -806,7 +807,7 @@ func runWww(args []string) {
 	case "logs":
 		vArgs := append([]string{"logs"}, args[1:]...)
 		cmd := exec.Command(vercelPath, vArgs...)
-		cmd.Dir = "."
+		cmd.Dir = webDir
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
@@ -821,7 +822,7 @@ func runWww(args []string) {
 		vArgs = append(vArgs, args[1:]...)
 		vArgs = append(vArgs, "dialtone.earth")
 		cmd := exec.Command(vercelPath, vArgs...)
-		cmd.Dir = "."
+		cmd.Dir = webDir
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
@@ -843,7 +844,7 @@ func runWww(args []string) {
 		LogInfo("Running: vercel %s %s", subcommand, strings.Join(args[1:], " "))
 		vArgs := append([]string{subcommand}, args[1:]...)
 		cmd := exec.Command(vercelPath, vArgs...)
-		cmd.Dir = "."
+		cmd.Dir = webDir
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin

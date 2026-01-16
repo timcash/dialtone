@@ -9,7 +9,7 @@ async function runTest() {
 
     try {
         console.log('Navigating to Home Page...');
-        await page.goto('https://dialtone-ten.vercel.app/', {
+        await page.goto('https://www.dialtone.earth', {
             waitUntil: 'domcontentloaded',
             timeout: 60000
         });
@@ -32,8 +32,14 @@ async function runTest() {
         console.log('Navigating to About Page...');
         await page.click('a[href="/about"]');
 
-        // Wait for the specific element on the new page instead of waitForNavigation
+        // Wait for the specific element on the new page
         await page.waitForSelector('h1', { timeout: 30000 });
+
+        // Wait for the headline text to be correct (handling client-side transition)
+        await page.waitForFunction(
+            () => document.querySelector('h1')?.innerText === 'Vision',
+            { timeout: 10000 }
+        );
 
         // Verify About Page Content
         const aboutTitle = await page.evaluate(() => document.querySelector('h1')?.innerText);
