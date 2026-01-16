@@ -23,11 +23,14 @@ Deploys the built binary to a remote robot via SSH.
 - `-pass`: SSH password.
 - `-ephemeral`: Register as an ephemeral node on Tailscale.
 
-### `install-deps`
+### `install`
 Installs necessary dependencies on a target system.
-- `--linux-wsl`: **No-Sudo Portable Installation**.
+- `--linux-wsl`: **No-Sudo Portable Installation for Linux/WSL (x86_64)**.
   - Downloads and extracts Go, Node.js, and Zig into `~/.dialtone_env`.
   - Extracts V4L2 headers from Ubuntu packages without root access.
+- `--macos-arm`: **No-Sudo Portable Installation for macOS ARM (Apple Silicon)**.
+  - Downloads and extracts Go, Node.js, and Zig into `~/.dialtone_env`.
+  - macOS uses AVFoundation for camera access (no V4L2 headers needed).
 - `-host`, `-port`, `-user`, `-pass`: Standard SSH flags for remote installation on the robot.
 
 ### `logs`
@@ -44,7 +47,7 @@ To develop natively on WSL with camera support using the source-based workflow:
 
 1.  **Bootstrap (No Sudo Required)**:
     ```bash
-    go run . install-deps --linux-wsl
+    go run . install --linux-wsl
     ```
     *This creates a self-contained development environment in `~/.dialtone_env`.*
 
@@ -58,6 +61,36 @@ To develop natively on WSL with camera support using the source-based workflow:
     ```bash
     ./bin/dialtone start -local-only
     ```
+
+---
+
+## macOS ARM Development (Apple Silicon)
+
+To develop natively on macOS with Apple Silicon (M1/M2/M3):
+
+1.  **Bootstrap (No Sudo Required)**:
+    ```bash
+    go run . install --macos-arm
+    ```
+    *This creates a self-contained development environment in `~/.dialtone_env`.*
+
+2.  **Add to PATH** (add to `~/.zshrc`):
+    ```bash
+    export PATH="$HOME/.dialtone_env/go/bin:$HOME/.dialtone_env/node/bin:$HOME/.dialtone_env/zig:$PATH"
+    ```
+
+3.  **Build from Source**:
+    ```bash
+    go run . full-build -local
+    ```
+    *This builds the Web Dashboard and the native binary.*
+
+4.  **Run Locally**:
+    ```bash
+    ./bin/dialtone start -local-only
+    ```
+
+*Note: macOS uses AVFoundation for camera access, not V4L2.*
 
 ---
 
