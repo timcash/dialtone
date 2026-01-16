@@ -1,0 +1,25 @@
+package move_dev_commands
+
+import (
+	"testing"
+
+	dialtone "dialtone/cli/src"
+)
+
+// Unit tests: Simple tests that run locally without IO operations
+// These tests should be fast and test individual functions/components
+
+func TestUnit_Example(t *testing.T) {
+	dialtone.LogInfo("Running unit test for move-dev-commands")
+	
+	// TODO: Add your unit tests here
+	t.Log("not yet implemented")
+}
+
+func TestUnit_Validation(t *testing.T) {
+	// Test input validation, data parsing, etc.
+	dialtone.LogInfo("Testing validation for move-dev-commands")
+	
+	// TODO: Add validation tests
+	t.Log("not yet implemented")
+}
