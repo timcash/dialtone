@@ -43,16 +43,22 @@ func printDevUsage() {
 	fmt.Println("\nCommands:")
 	fmt.Println("  plan [name]        List plans or create/view a plan file")
 	fmt.Println("  branch <name>      Create or checkout a feature branch")
-	fmt.Println("  test [name]        Run tests (all or for specific feature)")
+	fmt.Println("  test [name]        Run tests (all or for specific feature, creates templates if missing)")
 	fmt.Println("  pull-request       Create or update a pull request")
 	fmt.Println("  help               Show this help message")
+	fmt.Println("\nPull Request Options:")
+	fmt.Println("  --title, -t <title>   Set PR title (default: branch name)")
+	fmt.Println("  --body, -b <body>     Set PR body (default: plan file or auto-generated)")
+	fmt.Println("  --draft, -d           Create as draft PR")
 	fmt.Println("\nExamples:")
 	fmt.Println("  dialtone-dev plan                    # List all plan files")
 	fmt.Println("  dialtone-dev plan my-feature         # Create/view plan for my-feature")
 	fmt.Println("  dialtone-dev branch my-feature       # Create or checkout branch")
 	fmt.Println("  dialtone-dev test                    # Run all tests")
-	fmt.Println("  dialtone-dev test my-feature         # Run tests for my-feature")
-	fmt.Println("  dialtone-dev pull-request            # Create/update PR")
+	fmt.Println("  dialtone-dev test my-feature         # Run tests for my-feature (creates templates)")
+	fmt.Println("  dialtone-dev pull-request            # Create/update PR using branch name and plan")
+	fmt.Println("  dialtone-dev pull-request --draft    # Create draft PR")
+	fmt.Println("  dialtone-dev pull-request --title \"My Feature\" --body \"Description\"")
 }
 
 // runPlan handles the plan command
@@ -470,6 +476,26 @@ func runPullRequest(args []string) {
 		LogFatal("GitHub CLI (gh) not found. Install it from: https://cli.github.com/")
 	}
 
+	// Parse flags
+	var title, body string
+	var draft bool
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--title", "-t":
+			if i+1 < len(args) {
+				title = args[i+1]
+				i++
+			}
+		case "--body", "-b":
+			if i+1 < len(args) {
+				body = args[i+1]
+				i++
+			}
+		case "--draft", "-d":
+			draft = true
+		}
+	}
+
 	// Get current branch name
 	cmd := exec.Command("git", "branch", "--show-current")
 	output, err := cmd.Output()
@@ -490,24 +516,31 @@ func runPullRequest(args []string) {
 		// PR doesn't exist, create it
 		LogInfo("Creating new pull request...")
 		
-		// Try to find the plan file for this branch to use as PR body
-		planFile := filepath.Join("plan", fmt.Sprintf("plan-%s.md", branch))
 		var createArgs []string
+		createArgs = append(createArgs, "pr", "create")
 		
-		createArgs = append(createArgs, "pr", "create", "--title", branch)
-		
-		if _, statErr := os.Stat(planFile); statErr == nil {
-			createArgs = append(createArgs, "--body-file", planFile)
+		// Use provided title or default to branch name
+		if title != "" {
+			createArgs = append(createArgs, "--title", title)
 		} else {
-			createArgs = append(createArgs, "--body", fmt.Sprintf("Feature: %s\n\nSee plan file for details.", branch))
+			createArgs = append(createArgs, "--title", branch)
+		}
+		
+		// Use provided body, or plan file, or default message
+		if body != "" {
+			createArgs = append(createArgs, "--body", body)
+		} else {
+			planFile := filepath.Join("plan", fmt.Sprintf("plan-%s.md", branch))
+			if _, statErr := os.Stat(planFile); statErr == nil {
+				createArgs = append(createArgs, "--body-file", planFile)
+			} else {
+				createArgs = append(createArgs, "--body", fmt.Sprintf("Feature: %s\n\nSee plan file for details.", branch))
+			}
 		}
 		
 		// Add draft flag if specified
-		for _, arg := range args {
-			if arg == "--draft" || arg == "-d" {
-				createArgs = append(createArgs, "--draft")
-				break
-			}
+		if draft {
+			createArgs = append(createArgs, "--draft")
 		}
 
 		cmd = exec.Command("gh", createArgs...)
