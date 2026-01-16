@@ -29,6 +29,8 @@ func ExecuteDev() {
 		runTest(args)
 	case "pull-request", "pr":
 		runPullRequest(args)
+	case "issue":
+		runIssue(args)
 	case "help", "-h", "--help":
 		printDevUsage()
 	default:
@@ -45,6 +47,7 @@ func printDevUsage() {
 	fmt.Println("  branch <name>      Create or checkout a feature branch")
 	fmt.Println("  test [name]        Run tests (all or for specific feature, creates templates if missing)")
 	fmt.Println("  pull-request       Create or update a pull request (wrapper around gh CLI)")
+	fmt.Println("  issue <subcmd>     Manage GitHub issues (wrapper around gh CLI)")
 	fmt.Println("  help               Show this help message")
 	fmt.Println("\nPull Request Options:")
 	fmt.Println("  --title, -t <title>   Set PR title (default: branch name)")
@@ -63,6 +66,10 @@ func printDevUsage() {
 	fmt.Println("  dialtone-dev pull-request --ready    # Mark draft as ready for review")
 	fmt.Println("  dialtone-dev pull-request --title \"My Feature\" --body \"Description\"")
 	fmt.Println("  dialtone-dev pull-request --view     # Open existing PR in browser")
+	fmt.Println("  dialtone-dev issue list              # List recent issues")
+	fmt.Println("  dialtone-dev issue list 5            # List top 5 issues")
+	fmt.Println("  dialtone-dev issue add               # Create a new issue")
+	fmt.Println("  dialtone-dev issue comment 123 \"msg\" # Comment on issue #123")
 }
 
 // runPlan handles the plan command
@@ -604,5 +611,65 @@ func runPullRequest(args []string) {
 			cmd = exec.Command("gh", "pr", "view", "--web")
 			cmd.Run()
 		}
+	}
+}
+
+// runIssue handles the issue command
+func runIssue(args []string) {
+	// Check if gh CLI is available
+	if _, err := exec.LookPath("gh"); err != nil {
+		LogFatal("GitHub CLI (gh) not found. Install it from: https://cli.github.com/")
+	}
+
+	if len(args) == 0 {
+		fmt.Println("Usage: dialtone-dev issue <subcommand> [options]")
+		fmt.Println("\nSubcommands:")
+		fmt.Println("  list [N]           List the top N issues (default: 10)")
+		fmt.Println("  add                Create a new issue")
+		fmt.Println("  comment <id> <msg> Add a comment to an issue")
+		return
+	}
+
+	subcommand := args[0]
+	subArgs := args[1:]
+
+	switch subcommand {
+	case "list":
+		limit := "10"
+		if len(subArgs) > 0 {
+			limit = subArgs[0]
+		}
+		cmd := exec.Command("gh", "issue", "list", "-L", limit)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			LogFatal("Failed to list issues: %v", err)
+		}
+
+	case "add", "create":
+		cmd := exec.Command("gh", "issue", "create")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin // Interactive
+		if err := cmd.Run(); err != nil {
+			LogFatal("Failed to create issue: %v", err)
+		}
+
+	case "comment":
+		if len(subArgs) < 2 {
+			LogFatal("Usage: dialtone-dev issue comment <issue-id> <message>")
+		}
+		issueID := subArgs[0]
+		message := subArgs[1]
+		cmd := exec.Command("gh", "issue", "comment", issueID, "--body", message)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			LogFatal("Failed to add comment: %v", err)
+		}
+
+	default:
+		fmt.Printf("Unknown issue subcommand: %s\n", subcommand)
+		runIssue([]string{}) // Show usage
 	}
 }
