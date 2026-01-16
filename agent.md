@@ -10,22 +10,22 @@ Dialtone is a robotic video operations network for cooperative human-AI robot co
 ## Quick Start (WSL/Linux No-Sudo)
 
 The fastest way to get started on WSL or Linux without administrative privileges:
-
-```bash
+```
 # Clone the repo
 git clone https://github.com/timcash/dialtone.git
+export DAILTONE_ENV="~/dialtone_env"
 
-# Install go
-./install_go.sh
+# For bootstrapping only - Install go for linux and macos
+./setup.sh
 
-# Install go windows
-./install_go.ps1
+# For bootstrapping only - Install go for windows
+./setup.ps1
 
 # Environment setup if no previous install or cli binary is avaible to help with build
-export CC="/home/user/.dialtone_env/zig/zig cc -target x86_64-linux-gnu"
+export CC="${DAILTONE_ENV}/zig/zig cc -target x86_64-linux-gnu"
 export CGO_ENABLED=1
-export CGO_CFLAGS="-I/home/user/.dialtone_env/usr/include -I/home/user/.dialtone_env/usr/include/x86_64-linux-gnu"
-export PATH="/home/user/.dialtone_env/go/bin:/home/user/.dialtone_env/node/bin:$PATH"
+export CGO_CFLAGS="-I${DAILTONE_ENV}/usr/include -I${DAILTONE_ENV}/usr/include/x86_64-linux-gnu"
+export PATH="${DAILTONE_ENV}/go/bin:${DAILTONE_ENV}/node/bin:$PATH"
 
 # Install dependencies into ~/.dialtone_env (Go, Node, Zig, V4L2 headers)
 go run dialtone-dev install --linux-wsl
@@ -43,8 +43,8 @@ go run ./bin/dialtone start --local
 
 ### 1. Plan Stage
 
-1. Run `dialtone install` to verify dependencies are installed
-2. Run `dialtone clone` to clone and verify the repository is up to date
+1. Run `go run dialtone-dev.go install` to verify dependencies are installed
+2. Run `go run dialtone-dev.go clone` to clone and verify the repository is up to date
 3. Run `go run dialtone-dev.go branch <feature-branch-name>` to create or checkout the feature branch
 4. Run `go run dialtone-dev.go plan <feature-branch-name>` to list plan sections or create a new plan file
 5. Read `README.md` to get an overview of the system
@@ -79,7 +79,7 @@ go run ./bin/dialtone start --local
 ## Test Rules
 
 1. **Unit tests** — Simple tests that run locally without IO operations
-2. **Integration tests** — Test 2 components together using `test_data/`
+2. **Integration tests** — Test 2 components together using `test_data/` possibly using IO between the two components 
    - Example test_data: premade video file, MAVLink message file, known-correct response snapshot
 3. **End-to-end tests** — Browser and CLI tests on a live system or simulator
 
@@ -89,52 +89,49 @@ go run ./bin/dialtone start --local
 
 ### Implemented Commands (`dialtone`)
 
-1. `dialtone install` — Install development dependencies
-   - Example: `dialtone install --linux-wsl` (for Linux/WSL x86_64)
-   - Example: `dialtone install --macos-arm` (for macOS Apple Silicon)
-   - Example: `dialtone install --macos-intel` (for macOS Intel)
-   - Example: `dialtone install --linux-arm64` (for Linux ARM64)
-2. `dialtone build` — Build web UI + binary
-   - Example: `dialtone build`
-   - Example: `dialtone build --podman`
-   - Example: `dialtone build --arch arm64 --os linux --podman`
-3. `dialtone deploy` — Send binary over SSH to a robot
-   - Example: `dialtone deploy`
-   - Example: `dialtone deploy --host tim@192.168.4.36 --port 22 --user tim --pass password`
-4. `dialtone web` — Print the web dashboard URL
-   - Example: `dialtone web`
-5. `dialtone diagnostic` — Run system diagnostics on remote robot
-   - Example: `dialtone diagnostic --host 192.168.4.36`
-6. `dialtone env` — Write to the local `.env` file (no reading for security)
-   - Example: `dialtone env TS_AUTHKEY tskey-auth-xxxxx`
-7. `dialtone logs` — Tail remote execution logs via SSH
-   - Example: `dialtone logs`
-8. `dialtone start` — Stop any running server and start a new one
-   - Example: `dialtone start`
-9. `dialtone provision` — Generate a fresh Tailscale Auth Key and update `.env`
+1. `go run dialtone-dev.go install` — Install development dependencies
+   - Example: `go run dialtone-dev.go install --linux-wsl` (for Linux/WSL x86_64)
+   - Example: `go run dialtone-dev.go install --macos-arm` (for macOS Apple Silicon)
+   - Example: `go run dialtone-dev.go install --macos-intel` (for macOS Intel)
+   - Example: `go run dialtone-dev.go install --linux-arm64` (for Linux ARM64)
+2. `go run dialtone-dev.go build` — Build web UI + binary
+   - Example: `go run dialtone-dev.go build`
+   - Example: `go run dialtone-dev.go build --podman`
+   - Example: `go run dialtone-dev.go build --arch arm64 --os linux --podman`
+3. `go run dialtone-dev.go deploy` — Send binary over SSH to a robot
+   - Example: `go run dialtone-dev.go deploy` to use .env for connection details
+   - Example: `go run dialtone-dev.go deploy --host tim@192.168.4.36 --port 22 --user tim --pass password` to override .env values
+4. `go run dialtone-dev.go web` — Print the robot web dashboard URL
+   - Example: `go run dialtone-dev.go web`
+5. `go run dialtone-dev.go diagnostic` — Run system diagnostics on remote robot
+   - Example: `go run dialtone-dev.go diagnostic --host 192.168.4.36`
+6. `go run dialtone-dev.go env` — Write to the local `.env` file (no reading for security)
+   - Example: `go run dialtone-dev.go env TS_AUTHKEY tskey-auth-xxxxx`
+7. `go run dialtone-dev.go logs` tail the local logs
+   - Example: `go run dialtone-dev.go logs --remote` — Tail remote execution logs via SSH and .env settings
+8. `go run dialtone-dev.go start` — Stop any running server and start a new one
+   - Example: `go run dialtone-dev.go start`
+9. `go run dialtone-dev.go provision` — Generate a fresh Tailscale Auth Key and update `.env`
    - Requires `TS_API_KEY` in `.env` or environment
-10. `dialtone clone` — Clone the repository to a local directory
-   - Example: `dialtone clone ./dialtone
-11. `dialtone env <var> <value>` — Write to the local `.env` file
-   - Example: `dialtone env TS_AUTHKEY tskey-auth-xxxxx`
-
-### Aspirational Commands (`go run dialtone-dev.go`)
-
-1. `go run dialtone-dev.go branch <name>` — Create or checkout feature branch
+10. `go run dialtone-dev.go clone` — Clone the repository to a local directory
+   - Example: `go run dialtone-dev.go clone ./dialtone
+11. `go run dialtone-dev.go env <var> <value>` — Write to the local `.env` file
+   - Example: `go run dialtone-dev.go env TS_AUTHKEY tskey-auth-xxxxx`
+12. `go run dialtone-dev.go branch <name>` — Create or checkout feature branch
    - Example: `go run dialtone-dev.go branch linux-wsl-camera-support`
-2. `go run dialtone-dev.go test` — Run all tests in `test/` directory
+13. `go run dialtone-dev.go test` — Run all tests in `test/` directory
    - Example: `go run dialtone-dev.go test`
-3. `go run dialtone-dev.go test <name>` — Run tests in `test/<name>/` or create example test
+14. `go run dialtone-dev.go test <name>` — Run tests in `test/<name>/` or create example test
    - Example: `go run dialtone-dev.go test linux-wsl-camera-support`
-4. `go run dialtone-dev.go plan <name>` — List plan sections or create plan file
+15. `go run dialtone-dev.go plan <name>` — List plan sections or create plan file
    - Example: `go run dialtone-dev.go plan linux-wsl-camera-support`
-5. `go run dialtone-dev.go pull-request <name> <message>` — Create or update a PR
+16. `go run dialtone-dev.go pull-request <name> <message>` — Create or update a PR
    - Example: `go run dialtone-dev.go pull-request linux-wsl-camera-support "Added V4L2 support"`
-6. `go run dialtone-dev.go issue <subcmd>` — Manage GitHub issues
+17. `go run dialtone-dev.go issue <subcmd>` — Manage GitHub issues
    - Subcommands: `list`, `add`, `comment`, `view`
    - Example: `go run dialtone-dev.go issue view 10`
    - Example: `go run dialtone-dev.go issue add --title "Bug" --body "Desc" --label "bug"`
-7. `go run dialtone-dev.go www <subcmd>` — Manage public webpage (Vercel wrapper/pass-through)
+18. `go run dialtone-dev.go www <subcmd>` — Manage public webpage (Vercel wrapper/pass-through)
    - Subcommands: `publish`, `logs`, `domain`, `login` (unrecognized commands pass through to Vercel)
    - Example: `go run dialtone-dev.go www publish`
 
@@ -266,24 +263,13 @@ dialtone.LogInfo("Starting camera capture")
 dialtone.LogError("Failed to connect", err)
 dialtone.LogFatal("Unrecoverable error", err)  // exits program
 ```
-
----
-
-## When You Get Stuck
-
-1. **Command not implemented?** → Use manual git/go commands
-2. **Test failing repeatedly?** → Add debug logging, check assumptions
-3. **Build failing?** → Check `docs/cli.md` for environment setup
-4. **Unsure what to do next?** → Re-read the plan file, ask for clarification
-5. **Need external docs?** → Add summary to `docs/vendor/<name>.md`
-
 ---
 
 ## Final Checklist
 
 1. All plan tests marked complete with `[x]`
 3. `go run dialtone-dev.go test` passes
-4. `go run dialtone.go build` succeeds
+4. `go run dialtone-dev.go build` succeeds
 5. No secrets/keys in commits look for any way they can leak as a result of these changes
 6. README/docs updated if behavior changed
 7. PR created/updated with summary
