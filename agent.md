@@ -101,6 +101,7 @@ Dialtone is a robotic video operations network for cooperative human-AI robot co
 6. `go run dialtone-dev.go issue <subcmd>` — Manage GitHub issues
    - Subcommands: `list`, `add`, `comment`, `view`
    - Example: `go run dialtone-dev.go issue view 10`
+   - Example: `go run dialtone-dev.go issue add --title "Bug" --body "Desc" --label "bug"`
 7. `go run dialtone-dev.go www <subcmd>` — Manage public webpage (Vercel wrapper/pass-through)
    - Subcommands: `publish`, `logs`, `domain`, `login` (unrecognized commands pass through to Vercel)
    - Example: `go run dialtone-dev.go www publish`

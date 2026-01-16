@@ -654,10 +654,44 @@ func runIssue(args []string) {
 		}
 
 	case "add", "create":
-		cmd := exec.Command("gh", "issue", "create")
+		var title, body string
+		var passedArgs []string
+
+		// Simple flag parsing for title and body
+		for i := 0; i < len(subArgs); i++ {
+			switch subArgs[i] {
+			case "--title", "-t":
+				if i+1 < len(subArgs) {
+					title = subArgs[i+1]
+					passedArgs = append(passedArgs, "--title", title)
+					i++
+				}
+			case "--body", "-b":
+				if i+1 < len(subArgs) {
+					body = subArgs[i+1]
+					passedArgs = append(passedArgs, "--body", body)
+					i++
+				}
+			case "--label", "-l":
+				if i+1 < len(subArgs) {
+					passedArgs = append(passedArgs, "--label", subArgs[i+1])
+					i++
+				}
+			}
+		}
+
+		args := []string{"issue", "create"}
+		args = append(args, passedArgs...)
+
+		cmd := exec.Command("gh", args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		cmd.Stdin = os.Stdin // Interactive
+		
+		// Only attach Stdin if interactive (no title provided)
+		if title == "" {
+			cmd.Stdin = os.Stdin
+		}
+		
 		if err := cmd.Run(); err != nil {
 			LogFatal("Failed to create issue: %v", err)
 		}
