@@ -38,20 +38,21 @@ func RunBuild(args []string) {
 	fs.Usage = func() {
 		fmt.Println("Usage: dialtone build [options]")
 		fmt.Println()
-		fmt.Println("Build the Dialtone binary for deployment.")
+		fmt.Println("Build the Dialtone binary and web UI for deployment.")
 		fmt.Println()
 		fmt.Println("Options:")
 		fmt.Println("  --local    Build natively on the local system (uses ~/.dialtone_env if available)")
-		fmt.Println("  --full     Build Web UI, local CLI, and ARM64 binary")
+		fmt.Println("  --full     Full rebuild: Web UI + local CLI + ARM64 binary")
 		fmt.Println("  --help     Show this help message")
 		fmt.Println()
 		fmt.Println("Examples:")
-		fmt.Println("  dialtone build              # Build using Podman (or local if Podman unavailable)")
-		fmt.Println("  dialtone build --local      # Build natively for current OS/arch")
-		fmt.Println("  dialtone build --full       # Full build: web + CLI + ARM64")
+		fmt.Println("  dialtone build              # Build web UI + binary (Podman or local)")
+		fmt.Println("  dialtone build --local      # Build web UI + native binary")
+		fmt.Println("  dialtone build --full       # Force full rebuild of everything")
 		fmt.Println()
 		fmt.Println("Notes:")
-		fmt.Println("  - Uses Podman by default for cross-compilation to ARM64")
+		fmt.Println("  - Automatically builds web UI if not already built")
+		fmt.Println("  - Uses Podman by default for ARM64 cross-compilation")
 		fmt.Println("  - Falls back to local build if Podman is not installed")
 		fmt.Println("  - Run 'dialtone install' first to set up build dependencies")
 	}
@@ -79,8 +80,66 @@ func hasPodman() bool {
 	return err == nil
 }
 
+// buildWebIfNeeded builds the web UI if web_build is missing or empty
+func buildWebIfNeeded() {
+	webBuildDir := filepath.Join("src", "web_build")
+	indexPath := filepath.Join(webBuildDir, "index.html")
+
+	// Check if index.html exists and has real content
+	if info, err := os.Stat(indexPath); err == nil && info.Size() > 100 {
+		LogInfo("Web UI already built (found %s)", indexPath)
+		return
+	}
+
+	LogInfo("Building Web UI...")
+
+	// Check if src/web exists
+	webDir := filepath.Join("src", "web")
+	if _, err := os.Stat(webDir); os.IsNotExist(err) {
+		LogInfo("Warning: src/web directory not found, skipping web build")
+		return
+	}
+
+	// Check for npm
+	if _, err := exec.LookPath("npm"); err != nil {
+		// Try to use npm from .dialtone_env
+		homeDir, _ := os.UserHomeDir()
+		npmPath := filepath.Join(homeDir, ".dialtone_env", "node", "bin", "npm")
+		if _, err := os.Stat(npmPath); os.IsNotExist(err) {
+			LogInfo("Warning: npm not found, skipping web build. Run 'dialtone install' first.")
+			return
+		}
+		// Add node to PATH
+		nodeBin := filepath.Join(homeDir, ".dialtone_env", "node", "bin")
+		os.Setenv("PATH", fmt.Sprintf("%s:%s", nodeBin, os.Getenv("PATH")))
+	}
+
+	// Install and build
+	runShell(webDir, "npm", "install")
+	runShell(webDir, "npm", "run", "build")
+
+	// Sync to web_build
+	LogInfo("Syncing web assets to src/web_build...")
+	os.RemoveAll(webBuildDir)
+	if err := os.MkdirAll(webBuildDir, 0755); err != nil {
+		LogFatal("Failed to create web_build dir: %v", err)
+	}
+
+	distDir := filepath.Join(webDir, "dist")
+	if _, err := os.Stat(distDir); os.IsNotExist(err) {
+		LogInfo("Warning: npm build did not create dist directory")
+		return
+	}
+
+	copyDir(distDir, webBuildDir)
+	LogInfo("Web UI build complete")
+}
+
 func buildLocally() {
 	LogInfo("Building Dialtone locally (Native Build)...")
+
+	// Build web UI if needed
+	buildWebIfNeeded()
 
 	if err := os.MkdirAll("bin", 0755); err != nil {
 		LogFatal("Failed to create bin directory: %v", err)
