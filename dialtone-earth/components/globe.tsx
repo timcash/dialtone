@@ -46,7 +46,8 @@ export function Globe() {
     const dotsGroup = svg.append("g").attr("class", "dots")
 
     // Add H3 Hexagons
-    const h3Res = 3
+    // Resolution 1 has 842 cells - good for global scale SVG performance
+    const h3Res = 1
     const hexCells = h3.getRes0Cells().flatMap(cell => h3.cellToChildren(cell, h3Res))
 
     const hexData = hexCells.map(cell => {
@@ -68,7 +69,7 @@ export function Globe() {
       .attr("d", (d: any) => path(d.geometry as any))
       .attr("fill", "none")
       .attr("stroke", strokeColor)
-      .attr("stroke-width", 0.2)
+      .attr("stroke-width", 0.5)
       .attr("stroke-opacity", 0.1)
 
     const animateHexagon = () => {
@@ -92,7 +93,7 @@ export function Globe() {
     // Add graticule (grid lines)
     const graticule = d3.geoGraticule().step([20, 20])
 
-    map
+    const graticulePath = map
       .append("path")
       .datum(graticule)
       .attr("class", "graticule")
@@ -107,40 +108,33 @@ export function Globe() {
       const lon = Math.random() * 360 - 180 // -180 to 180
       const coords: [number, number] = [lon, lat]
 
-      // Project the coordinates
+      // Initial project
       const projected = projection(coords)
       if (!projected) return
 
-      // Check if point is visible (on front of globe)
-      const geoDistance = d3.geoDistance(coords, [-projection.rotate()[0], -projection.rotate()[1]])
-      if (geoDistance > Math.PI / 2) return // Point is on back of globe
-
       const size = 2 + Math.random() * 6
-
-      const baseDuration = 2000 + (size / 8) * 2000
-      const fadeInDuration = 300 + Math.random() * 200
-      const fadeOutDuration = baseDuration * 0.4
+      const baseDuration = 3000 + Math.random() * 3000
 
       const dot = dotsGroup
         .append("circle")
         .datum(coords)
         .attr("cx", projected[0])
         .attr("cy", projected[1])
-        .attr("r", 0) // Start at 0 and grow
-        .attr("fill", "#1e40af") // Dark blue
+        .attr("r", 0)
+        .attr("fill", "#1e40af")
         .attr("opacity", 0)
 
       dot
         .transition()
-        .duration(fadeInDuration)
-        .attr("opacity", 0.7 + Math.random() * 0.3)
+        .duration(500)
+        .attr("opacity", 0.8)
         .attr("r", size)
         .transition()
-        .duration(baseDuration - fadeInDuration - fadeOutDuration)
+        .duration(baseDuration - 1000)
         .transition()
-        .duration(fadeOutDuration)
+        .duration(500)
         .attr("opacity", 0)
-        .attr("r", size * 0.5)
+        .attr("r", 0)
         .remove()
     }
 
@@ -148,22 +142,41 @@ export function Globe() {
     let hexIntervalId: ReturnType<typeof setInterval>
 
     dotIntervalId = setInterval(() => {
-      const dotCount = Math.random() < 0.8 ? 1 : Math.random() < 0.5 ? 0 : 2
-      for (let i = 0; i < dotCount; i++) {
-        createRandomDot()
-      }
-    }, 200)
+      createRandomDot()
+    }, 500)
 
     hexIntervalId = setInterval(() => {
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 2; i++) {
         animateHexagon()
       }
     }, 1000)
 
-    // Load world data
+    // Slow rotation animation - Start immediately
+    let rotation = 0
+    const timer = d3.timer(() => {
+      rotation += 0.2
+      projection.rotate([rotation, -30])
+
+      // Re-render all paths
+      map.selectAll("path").attr("d", path as any)
+      hexagons.attr("d", (d: any) => path(d.geometry as any))
+
+      // Update dots positions
+      dotsGroup.selectAll("circle").each(function (this: any, d: any) {
+        const projected = projection(d)
+        if (projected) {
+          const geoDistance = d3.geoDistance(d, [-projection.rotate()[0], -projection.rotate()[1]])
+          d3.select(this)
+            .attr("cx", projected[0])
+            .attr("cy", projected[1])
+            .attr("visibility", geoDistance > Math.PI / 2 ? "hidden" : "visible")
+        }
+      })
+    })
+
+    // Load world data asynchronously
     d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json").then((data: any) => {
       if (!data) return
-
       const land = feature(data, data.objects.land)
 
       map
@@ -178,36 +191,6 @@ export function Globe() {
         .attr("stroke", strokeColor)
         .attr("stroke-width", 0.5)
         .attr("stroke-opacity", 0.4)
-
-      // Slow rotation animation
-      let rotation = 0
-      const timer = d3.timer(() => {
-        rotation += 0.15
-        projection.rotate([rotation, -30])
-
-        map.selectAll("path").attr("d", path as any)
-
-        // Update hexagons
-        hexagons.attr("d", (d: any) => path(d.geometry as any))
-          .attr("visibility", (d: any) => {
-            const centroid = h3.cellToLatLng(d.id)
-            const geoDistance = d3.geoDistance([centroid[1], centroid[0]], [-projection.rotate()[0], -projection.rotate()[1]])
-            return geoDistance > Math.PI / 2 ? "hidden" : "visible"
-          })
-
-        dotsGroup.selectAll("circle").each(function (d: any) {
-          const projected = projection(d)
-          if (projected) {
-            const geoDistance = d3.geoDistance(d, [-projection.rotate()[0], -projection.rotate()[1]])
-            d3.select(this)
-              .attr("cx", projected[0])
-              .attr("cy", projected[1])
-              .attr("visibility", geoDistance > Math.PI / 2 ? "hidden" : "visible")
-          }
-        })
-      })
-
-      return () => timer.stop()
     })
 
     const handleResize = () => {
