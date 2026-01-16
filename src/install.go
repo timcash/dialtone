@@ -179,6 +179,14 @@ func installLocalDepsWSL() {
 		LogInfo("Node.js is already installed in %s", nodeDir)
 	}
 
+	// 2.1 Install Vercel CLI
+	if _, err := os.Stat(filepath.Join(nodeDir, "bin", "vercel")); err != nil {
+		LogInfo("Step 2.1: Installing Vercel CLI...")
+		runSimpleShell(fmt.Sprintf("%s/bin/npm install -g vercel", nodeDir))
+	} else {
+		LogInfo("Vercel CLI is already installed")
+	}
+
 	// 2.5 Install Zig (as portable C compiler)
 	zigDir := filepath.Join(depsDir, "zig")
 	if _, err := os.Stat(filepath.Join(zigDir, "zig")); err != nil {
@@ -260,6 +268,14 @@ func installLocalDepsMacOSAMD64() {
 		LogInfo("Node.js is already installed in %s", nodeDir)
 	}
 
+	// 2.1 Install Vercel CLI
+	if _, err := os.Stat(filepath.Join(nodeDir, "bin", "vercel")); err != nil {
+		LogInfo("Step 2.1: Installing Vercel CLI...")
+		runSimpleShell(fmt.Sprintf("%s/bin/npm install -g vercel", nodeDir))
+	} else {
+		LogInfo("Vercel CLI is already installed")
+	}
+
 	// 3. Install Zig for darwin-x86_64
 	zigDir := filepath.Join(depsDir, "zig")
 	if _, err := os.Stat(filepath.Join(zigDir, "zig")); err != nil {
@@ -315,6 +331,14 @@ func installLocalDepsLinuxARM64() {
 		LogInfo("Node.js is already installed in %s", nodeDir)
 	}
 
+	// 2.1 Install Vercel CLI
+	if _, err := os.Stat(filepath.Join(nodeDir, "bin", "vercel")); err != nil {
+		LogInfo("Step 2.1: Installing Vercel CLI...")
+		runSimpleShell(fmt.Sprintf("%s/bin/npm install -g vercel", nodeDir))
+	} else {
+		LogInfo("Vercel CLI is already installed")
+	}
+
 	// 3. Install Zig for linux-aarch64
 	zigDir := filepath.Join(depsDir, "zig")
 	if _, err := os.Stat(filepath.Join(zigDir, "zig")); err != nil {
@@ -368,6 +392,14 @@ func installLocalDepsMacOSARM() {
 		os.Remove(filepath.Join(depsDir, nodeTarball))
 	} else {
 		LogInfo("Node.js is already installed in %s", nodeDir)
+	}
+
+	// 2.1 Install Vercel CLI
+	if _, err := os.Stat(filepath.Join(nodeDir, "bin", "vercel")); err != nil {
+		LogInfo("Step 2.1: Installing Vercel CLI...")
+		runSimpleShell(fmt.Sprintf("%s/bin/npm install -g vercel", nodeDir))
+	} else {
+		LogInfo("Vercel CLI is already installed")
 	}
 
 	// 3. Install Zig for darwin-arm64 (portable C compiler for CGO cross-compilation)
