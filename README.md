@@ -18,10 +18,13 @@ Dialtone is a **robotic video operations network** designed to allow humans and 
 4. Automated discovery and configuration
 5. Vision and LLM AI assisted operation.
 6. Language model tuned for development of the Dialtone system itself.
+7. Geospatial tools connected to Earth Engine and other sources for intelligent alerting and navigation
+8. CAD modeling system for assisting users with modifications to hardware and simulation
+9. Custom IDE with Realtime Strategy interface for AI and human collaboration
 
 ---
 
-## 📚 Documentation Map
+# Documentation Map
 
 Detailed information about System Architecture, Installation, and Development can be found in the [docs/](./docs) directory:
 
@@ -36,7 +39,17 @@ Detailed information about System Architecture, Installation, and Development ca
 
 ---
 
-## 🚀 Quick Start (WSL/Linux No-Sudo)
+#Quick Start (WSL/Linux No-Sudo)
+
+Environment setup if no previous install or cli binary is avaible to help with build
+```bash
+export CC="/home/user/.dialtone_env/zig/zig cc -target x86_64-linux-gnu"
+export CGO_ENABLED=1
+export CGO_CFLAGS="-I/home/user/.dialtone_env/usr/include -I/home/user/.dialtone_env/usr/include/x86_64-linux-gnu"
+export PATH="/home/user/.dialtone_env/go/bin:/home/user/.dialtone_env/node/bin:$PATH"
+
+go run . full-build -local
+```
 
 The fastest way to get started on WSL or Linux without administrative privileges:
 
