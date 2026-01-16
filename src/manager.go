@@ -33,7 +33,35 @@ func RunBuild(args []string) {
 	fs := flag.NewFlagSet("build", flag.ExitOnError)
 	full := fs.Bool("full", false, "Build Web UI, local CLI, and ARM64 binary")
 	local := fs.Bool("local", false, "Build natively on the local system")
+	showHelp := fs.Bool("help", false, "Show help for build command")
+
+	fs.Usage = func() {
+		fmt.Println("Usage: dialtone build [options]")
+		fmt.Println()
+		fmt.Println("Build the Dialtone binary for deployment.")
+		fmt.Println()
+		fmt.Println("Options:")
+		fmt.Println("  --local    Build natively on the local system (uses ~/.dialtone_env if available)")
+		fmt.Println("  --full     Build Web UI, local CLI, and ARM64 binary")
+		fmt.Println("  --help     Show this help message")
+		fmt.Println()
+		fmt.Println("Examples:")
+		fmt.Println("  dialtone build              # Build using Podman (or local if Podman unavailable)")
+		fmt.Println("  dialtone build --local      # Build natively for current OS/arch")
+		fmt.Println("  dialtone build --full       # Full build: web + CLI + ARM64")
+		fmt.Println()
+		fmt.Println("Notes:")
+		fmt.Println("  - Uses Podman by default for cross-compilation to ARM64")
+		fmt.Println("  - Falls back to local build if Podman is not installed")
+		fmt.Println("  - Run 'dialtone install' first to set up build dependencies")
+	}
+
 	fs.Parse(args)
+
+	if *showHelp {
+		fs.Usage()
+		return
+	}
 
 	if *full {
 		buildEverything(*local)
@@ -109,7 +137,37 @@ func RunDeploy(args []string) {
 	user := fs.String("user", os.Getenv("ROBOT_USER"), "SSH user")
 	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password")
 	ephemeral := fs.Bool("ephemeral", true, "Register as ephemeral node on Tailscale")
+	showHelp := fs.Bool("help", false, "Show help for deploy command")
+
+	fs.Usage = func() {
+		fmt.Println("Usage: dialtone deploy [options]")
+		fmt.Println()
+		fmt.Println("Deploy the Dialtone binary to a remote robot via SSH.")
+		fmt.Println()
+		fmt.Println("Options:")
+		fmt.Println("  --host        SSH host (user@host) [env: ROBOT_HOST]")
+		fmt.Println("  --port        SSH port (default: 22)")
+		fmt.Println("  --user        SSH username [env: ROBOT_USER]")
+		fmt.Println("  --pass        SSH password [env: ROBOT_PASSWORD]")
+		fmt.Println("  --ephemeral   Register as ephemeral node on Tailscale (default: true)")
+		fmt.Println("  --help        Show this help message")
+		fmt.Println()
+		fmt.Println("Examples:")
+		fmt.Println("  dialtone deploy --host pi@192.168.1.100 --pass mypassword")
+		fmt.Println("  dialtone deploy   # Uses ROBOT_HOST, ROBOT_PASSWORD from .env")
+		fmt.Println()
+		fmt.Println("Notes:")
+		fmt.Println("  - Builds ARM64 binary if not already present (bin/dialtone-arm64)")
+		fmt.Println("  - Auto-provisions TS_AUTHKEY if TS_API_KEY is set")
+		fmt.Println("  - Requires REMOTE_DIR_SRC, REMOTE_DIR_DEPLOY, DIALTONE_HOSTNAME, TS_AUTHKEY")
+	}
+
 	fs.Parse(args)
+
+	if *showHelp {
+		fs.Usage()
+		return
+	}
 
 	// If TS_API_KEY is available, provision a fresh key before deployment
 	if os.Getenv("TS_API_KEY") != "" {
@@ -118,7 +176,7 @@ func RunDeploy(args []string) {
 	}
 
 	if *host == "" || *pass == "" {
-		LogFatal("Error: -host (user@host) and -pass are required for deployment")
+		LogFatal("Error: --host (user@host) and --pass are required for deployment")
 	}
 
 	validateRequiredVars([]string{"REMOTE_DIR_SRC", "REMOTE_DIR_DEPLOY", "DIALTONE_HOSTNAME", "TS_AUTHKEY"})
@@ -666,7 +724,41 @@ func RunInstall(args []string) {
 	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password")
 	linuxWSL := fs.Bool("linux-wsl", false, "Install dependencies natively on Linux/WSL (x86_64)")
 	macosARM := fs.Bool("macos-arm", false, "Install dependencies natively on macOS ARM (Apple Silicon)")
+	showHelp := fs.Bool("help", false, "Show help for install command")
+
+	fs.Usage = func() {
+		fmt.Println("Usage: dialtone install [options]")
+		fmt.Println()
+		fmt.Println("Install development dependencies (Go, Node.js, Zig) for building Dialtone.")
+		fmt.Println()
+		fmt.Println("Options:")
+		fmt.Println("  --linux-wsl   Install for Linux/WSL x86_64")
+		fmt.Println("  --macos-arm   Install for macOS ARM (Apple Silicon)")
+		fmt.Println("  --host        SSH host for remote installation (user@host)")
+		fmt.Println("  --port        SSH port (default: 22)")
+		fmt.Println("  --user        SSH username")
+		fmt.Println("  --pass        SSH password")
+		fmt.Println("  --help        Show this help message")
+		fmt.Println()
+		fmt.Println("Examples:")
+		fmt.Println("  dialtone install                    # Auto-detect OS/arch and install locally")
+		fmt.Println("  dialtone install --macos-arm        # Install for macOS Apple Silicon")
+		fmt.Println("  dialtone install --linux-wsl        # Install for Linux/WSL x86_64")
+		fmt.Println("  dialtone install --host pi@robot    # Install on remote robot via SSH")
+		fmt.Println()
+		fmt.Println("Notes:")
+		fmt.Println("  - Dependencies are installed to ~/.dialtone_env (no sudo required)")
+		fmt.Println("  - Auto-detects platform if no flags provided")
+		fmt.Println("  - Skips already-installed dependencies")
+		fmt.Println("  - Supported platforms: darwin/arm64, darwin/amd64, linux/amd64, linux/arm64")
+	}
+
 	fs.Parse(args)
+
+	if *showHelp {
+		fs.Usage()
+		return
+	}
 
 	// Explicit flags take priority
 	if *linuxWSL {

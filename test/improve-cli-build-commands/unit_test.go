@@ -178,6 +178,113 @@ func TestBuildLocalBinaryExists(t *testing.T) {
 	}
 }
 
+// TestBuildHelp verifies build --help shows usage information
+func TestBuildHelp(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %v", err)
+	}
+
+	projectRoot := filepath.Join(cwd, "..", "..")
+	cmd := exec.Command("go", "run", ".", "build", "--help")
+	cmd.Dir = projectRoot
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Failed to run build --help: %v", err)
+	}
+
+	helpText := string(output)
+	dialtone.LogInfo("Build help output received (%d bytes)", len(helpText))
+
+	// Verify key sections are present
+	expectedPhrases := []string{
+		"Usage: dialtone build",
+		"--local",
+		"--full",
+		"--help",
+		"Examples:",
+	}
+
+	for _, phrase := range expectedPhrases {
+		if !strings.Contains(helpText, phrase) {
+			t.Errorf("Build help missing expected phrase: %s", phrase)
+		}
+	}
+}
+
+// TestInstallHelp verifies install --help shows usage information
+func TestInstallHelp(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %v", err)
+	}
+
+	projectRoot := filepath.Join(cwd, "..", "..")
+	cmd := exec.Command("go", "run", ".", "install", "--help")
+	cmd.Dir = projectRoot
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Failed to run install --help: %v", err)
+	}
+
+	helpText := string(output)
+	dialtone.LogInfo("Install help output received (%d bytes)", len(helpText))
+
+	// Verify key sections are present
+	expectedPhrases := []string{
+		"Usage: dialtone install",
+		"--linux-wsl",
+		"--macos-arm",
+		"--help",
+		"Examples:",
+		"Auto-detect",
+	}
+
+	for _, phrase := range expectedPhrases {
+		if !strings.Contains(helpText, phrase) {
+			t.Errorf("Install help missing expected phrase: %s", phrase)
+		}
+	}
+}
+
+// TestDeployHelp verifies deploy --help shows usage information
+func TestDeployHelp(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %v", err)
+	}
+
+	projectRoot := filepath.Join(cwd, "..", "..")
+	cmd := exec.Command("go", "run", ".", "deploy", "--help")
+	cmd.Dir = projectRoot
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Failed to run deploy --help: %v", err)
+	}
+
+	helpText := string(output)
+	dialtone.LogInfo("Deploy help output received (%d bytes)", len(helpText))
+
+	// Verify key sections are present
+	expectedPhrases := []string{
+		"Usage: dialtone deploy",
+		"--host",
+		"--pass",
+		"--help",
+		"Examples:",
+		"SSH",
+	}
+
+	for _, phrase := range expectedPhrases {
+		if !strings.Contains(helpText, phrase) {
+			t.Errorf("Deploy help missing expected phrase: %s", phrase)
+		}
+	}
+}
+
 // TestBuildLocalArchitecture verifies the binary is built for the correct architecture
 func TestBuildLocalArchitecture(t *testing.T) {
 	cwd, err := os.Getwd()
