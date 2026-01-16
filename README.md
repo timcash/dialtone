@@ -1,8 +1,63 @@
 # Dialtone
 
-![Web Interface](ui.png)
+Dialtone is aspirationally a **robotic video operations network** designed to allow humans and AI to cooperatively train and control robots.
 
-Dialtone is a **robotic video operations network** designed to allow humans and AI to cooperatively train and control robots.
+# Vision
+The future of robotics is collaborative, not just automated. Dialtone aims to bridge the gap between human intuition and machine precision by providing a unified network where:
+- **Humans** can remotely oversee, teleoperate, and teach robots from anywhere in the world.
+- **AI Agents** can learn from human demonstrations, process complex sensory data, and execute tasks autonomously.
+- **Hardware** becomes secondary to the network, with a single binary allowing any device to join the global robotic collective.
+
+# Architecture Overview
+Dialtone is built on a "Network-First" architecture, prioritizing secure, low-latency communication between distributed components.
+
+```mermaid
+---
+config:
+  layout: elk
+  look: classic
+  theme: dark
+---
+flowchart TD
+    AI[AI Inference Workers]
+    Browser[Web Dashboard / RSI]
+    Bus[NATS Message Bus]
+    VPN[Tailscale Mesh VPN]
+    Web[Web Dashboard / RSI]
+    CLI[Control CLI]
+    Cam[Camera/V4L2]
+    Controller[Controller]
+    Robot_Radio[Radio]
+    Feild_Uplink[Field Uplink]
+    subgraph Operator
+        Browser
+    end
+    subgraph "Dialtone"
+        direction LR
+        Bus
+        VPN
+        Web
+        CLI
+    end
+    subgraph Raspi
+        Dialtone
+    end
+    subgraph Robot
+        Dialtone
+        Raspi
+        Cam
+        Controller
+        Robot_Radio
+    end
+    subgraph Cloud
+        AI
+    end
+    Robot_Radio --> Feild_Uplink
+    Feild_Uplink --> Cloud
+    Feild_Uplink --> Operator
+    Cam --> Raspi
+    Controller --> Raspi
+```
 
 # Features
 0. Simple single binary CLI to connect and control any robot
@@ -16,11 +71,41 @@ Dialtone is a **robotic video operations network** designed to allow humans and 
     - Queuing for fanout and load balancing 
     - Streaming for live or replay of telemetry and video
 4. Automated discovery and configuration
+    - **Sensors**: Plug-and-play support for cameras (V4L2), microphones, IMUs, and LIDAR.
+    - **Actuators**: Unified control interface for PWM servos, stepper motors, and CAN-bus motor controllers.
+    - **Compute**: Dynamic allocation of local and edge resources for AI inference and video encoding.
+    - **Storage**: Automatic management of ring-buffer logs and cloud-synced telemetry.
+    - **Network**: Zero-config peer-to-peer connectivity even behind restrictive NATs.
+
 5. Vision and LLM AI assisted operation.
-6. Language model tuned for development of the Dialtone system itself.
-7. Geospatial tools connected to Earth Engine and other sources for intelligent alerting and navigation
-8. CAD modeling system for assisting users with modifications to hardware and simulation
-9. Custom IDE with Realtime Strategy interface for AI and human collaboration
+    - Real-time object detection and tracking for robot navigation.
+    - Natural language commanding (e.g., "Go to the kitchen and find the blue mug").
+    - Automated troubleshooting using onboard LLMs to analyze telemetry anomalies.
+
+6. System-Tuned Language Model.
+    - Integrated development assistant trained on Dialtone's source code and hardware specifications.
+    - Context-aware code generation for new robot plugins and control logic.
+
+7. Geospatial intelligence.
+    - Integration with Google Earth Engine for environmental context and terrain analysis.
+    - Intelligent alerting based on GPS boundaries and satellite imagery updates.
+    - Global multi-robot fleet visualization on 3D maps.
+
+8. CAD and Simulation.
+    - Built-in modeling tools to assist with hardware modifications and 3D printing.
+    - "Digital Twin" simulation to test control logic in a virtual environment before deployment.
+
+9. Public Robot Presence.
+    - Publicly accessible URLs at `https://<robot_id>.dialtone.computer` for live streaming and status.
+    - Integrated WebRTC for low-latency remote control from any browser.
+
+10. Collaborative RSI (Realtime Strategy Interface).
+    - A strategic dashboard where humans and AI agents cooperatively manage robot swarms.
+    - Drag-and-drop mission planning and real-time command override.
+
+11. Community and Social.
+    - One-click sharing of robot "moments" to social platforms to engage with the public.
+    - Collaborative "Robot Parties" where multiple users can interact with a shared robot world.
 
 ---
 
@@ -42,20 +127,22 @@ Detailed information about System Architecture, Installation, and Development ca
 #Quick Start (WSL/Linux No-Sudo)
 The fastest way to get started on WSL or Linux without administrative privileges:
 ```bash
+# Clone the repo
+gh clone https://github.com/timcash/dialtone.git
+
 # Environment setup if no previous install or cli binary is avaible to help with build
- 
 export CC="/home/user/.dialtone_env/zig/zig cc -target x86_64-linux-gnu"
 export CGO_ENABLED=1
 export CGO_CFLAGS="-I/home/user/.dialtone_env/usr/include -I/home/user/.dialtone_env/usr/include/x86_64-linux-gnu"
 export PATH="/home/user/.dialtone_env/go/bin:/home/user/.dialtone_env/node/bin:$PATH"
 
-# 1. Install dependencies into ~/.dialtone_env (Go, Node, Zig, V4L2 headers)
+# Install dependencies into ~/.dialtone_env (Go, Node, Zig, V4L2 headers)
 go run . install-deps --linux-wsl
 
-# 2. Perform a native full-build (includes Web UI and Camera support)
+# Perform a native full-build (includes Web UI and Camera support)
 go run . full-build -local
 
-# 3. Start the node locally
+# Start the node locally
 ./bin/dialtone start -local-only
 ```
 
@@ -75,3 +162,13 @@ bin/dialtone deploy
 4. Good cross compilation support.
 5. Typo safety and simple structure.
 6. Strong networking support.
+
+---
+
+# Join the Mission
+Dialtone is an open project with an ambitious goal. We are looking for:
+- **Robot Builders**: To integrate their hardware and test the system.
+- **AI Researchers**: To deploy models into the RSI and automate tasks.
+- **Developers**: To help us build the most accessible robotic network on Earth.
+
+Check out the [TODO.md](./todo.md) to see where you can contribute, or start by running the [Quick Start](#quick-start-wsllinux-no-sudo) guide.
