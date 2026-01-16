@@ -23,7 +23,7 @@ func RunBuild(args []string) {
 		fmt.Println("Build the Dialtone binary and web UI for deployment.")
 		fmt.Println()
 		fmt.Println("Options:")
-		fmt.Println("  --local    Build natively on the local system (uses ~/.dialtone_env if available)")
+		fmt.Println("  --local    Build natively on the local system (uses DIALTONE_ENV if available)")
 		fmt.Println("  --full     Full rebuild: Web UI + local CLI + ARM64 binary")
 		fmt.Println("  --remote   Build on remote robot via SSH (requires configured .env)")
 		fmt.Println("  --help     Show help for build command")
@@ -85,15 +85,15 @@ func buildWebIfNeeded() {
 
 	// Check for npm
 	if _, err := exec.LookPath("npm"); err != nil {
-		// Try to use npm from .dialtone_env
-		homeDir, _ := os.UserHomeDir()
-		npmPath := filepath.Join(homeDir, ".dialtone_env", "node", "bin", "npm")
+		// Try to use npm from DIALTONE_ENV
+		depsDir := GetDialtoneEnv()
+		npmPath := filepath.Join(depsDir, "node", "bin", "npm")
 		if _, err := os.Stat(npmPath); os.IsNotExist(err) {
 			LogInfo("Warning: npm not found, skipping web build. Run 'dialtone install' first.")
 			return
 		}
 		// Add node to PATH
-		nodeBin := filepath.Join(homeDir, ".dialtone_env", "node", "bin")
+		nodeBin := filepath.Join(depsDir, "node", "bin")
 		os.Setenv("PATH", fmt.Sprintf("%s:%s", nodeBin, os.Getenv("PATH")))
 	}
 
@@ -132,8 +132,7 @@ func buildLocally() {
 	os.Setenv("CGO_ENABLED", "1")
 
 	// If local environment exists, use it
-	homeDir, _ := os.UserHomeDir()
-	depsDir := filepath.Join(homeDir, ".dialtone_env")
+	depsDir := GetDialtoneEnv()
 	if _, err := os.Stat(depsDir); err == nil {
 		LogInfo("Using local dependencies from %s", depsDir)
 
@@ -167,7 +166,7 @@ func buildLocally() {
 	}
 
 	outputPath := filepath.Join("bin", binaryName)
-	runShell(".", "go", "build", "-o", outputPath, ".")
+	runShell(".", "go", "build", "-o", outputPath, "dialtone.go")
 	LogInfo("Build successful: %s", outputPath)
 }
 
@@ -195,7 +194,7 @@ func buildWithPodman() {
 		"-e", "CGO_ENABLED=1",
 		"-e", "CC=aarch64-linux-gnu-gcc",
 		"golang:1.25.5",
-		"bash", "-c", "apt-get update && apt-get install -y gcc-aarch64-linux-gnu && go build -buildvcs=false -o bin/dialtone-arm64 .",
+		"bash", "-c", "apt-get update && apt-get install -y gcc-aarch64-linux-gnu && go build -buildvcs=false -o bin/dialtone-arm64 dialtone.go",
 	}
 
 	LogInfo("Running: podman %v", buildCmd)
@@ -263,6 +262,6 @@ func BuildSelf() {
 		}
 	}
 
-	runShell(".", "go", "build", "-o", exePath, ".")
+	runShell(".", "go", "build", "-o", exePath, "dialtone.go")
 	LogInfo("Successfully built %s", exePath)
 }

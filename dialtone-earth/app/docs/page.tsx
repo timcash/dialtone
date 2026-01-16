@@ -23,7 +23,7 @@ export default function DocsPage() {
                         <div className="space-y-2">
                             <p className="text-zinc-500"># Clone the repo</p>
                             <p>git clone https://github.com/timcash/dialtone.git</p>
-                            <p>export DAILTONE_ENV="~/dialtone_env"</p>
+                            <p>export DIALTONE_ENV="~/dialtone_env"</p>
                             <br />
                             <p className="text-zinc-500"># Bootstrap environment</p>
                             <p>./setup.sh</p>
