@@ -200,7 +200,7 @@ func showPlan(planPath string) {
 	}
 
 	completed, total := countProgress(planPath)
-	
+
 	fmt.Println("Plan File:", planPath)
 	fmt.Printf("Progress: %d/%d tests completed\n", completed, total)
 	fmt.Println("======================")
@@ -298,6 +298,8 @@ func ensureTestFiles(testDir, featureName string) {
 				LogFatal("Failed to create test file %s: %v", filename, err)
 			}
 			LogInfo("Created test file: %s", filePath)
+		} else {
+			LogInfo("Test file already exists: %s", filePath)
 		}
 	}
 }
@@ -319,13 +321,7 @@ func TestUnit_Example(t *testing.T) {
 	dialtone.LogInfo("Running unit test for %s")
 	
 	// TODO: Add your unit tests here
-	// Example:
-	// result := SomeFunction(input)
-	// if result != expected {
-	//     t.Errorf("Expected %%v, got %%v", expected, result)
-	// }
-	
-	t.Log("Unit test placeholder - implement your tests")
+	t.Log("not yet implemented")
 }
 
 func TestUnit_Validation(t *testing.T) {
@@ -333,7 +329,7 @@ func TestUnit_Validation(t *testing.T) {
 	dialtone.LogInfo("Testing validation for %s")
 	
 	// TODO: Add validation tests
-	t.Log("Validation test placeholder")
+	t.Log("not yet implemented")
 }
 `, packageName, featureName, featureName)
 }
@@ -365,14 +361,7 @@ func TestIntegration_Example(t *testing.T) {
 	_ = projectRoot // Use for accessing test_data/
 	
 	// TODO: Add your integration tests here
-	// Example using test data:
-	// testDataPath := filepath.Join(projectRoot, "test_data", "sample.json")
-	// data, err := os.ReadFile(testDataPath)
-	// if err != nil {
-	//     t.Skip("Test data not available")
-	// }
-	
-	t.Log("Integration test placeholder - implement your tests")
+	t.Log("not yet implemented")
 }
 
 func TestIntegration_Components(t *testing.T) {
@@ -380,7 +369,7 @@ func TestIntegration_Components(t *testing.T) {
 	dialtone.LogInfo("Testing component integration for %s")
 	
 	// TODO: Add component integration tests
-	t.Log("Component integration test placeholder")
+	t.Log("not yet implemented")
 }
 `, packageName, featureName, featureName)
 }
@@ -415,18 +404,10 @@ func TestE2E_CLICommand(t *testing.T) {
 		t.Fatalf("Failed to get working directory: %%v", err)
 	}
 	projectRoot := filepath.Join(cwd, "..", "..")
+	_ = projectRoot
 	
 	// TODO: Add your end-to-end CLI tests here
-	// Example: Test a CLI command
-	// cmd := exec.Command("go", "run", ".", "your-command", "--flag")
-	// cmd.Dir = projectRoot
-	// output, err := cmd.CombinedOutput()
-	// if err != nil {
-	//     t.Fatalf("Command failed: %%v\n%%s", err, output)
-	// }
-	
-	_ = projectRoot
-	t.Log("E2E CLI test placeholder - implement your tests")
+	t.Log("not yet implemented")
 }
 
 func TestE2E_FullWorkflow(t *testing.T) {
@@ -437,13 +418,7 @@ func TestE2E_FullWorkflow(t *testing.T) {
 	dialtone.LogInfo("Running full workflow E2E test for %s")
 	
 	// TODO: Test complete user workflows
-	// This might include:
-	// - Starting services
-	// - Making API calls
-	// - Verifying responses
-	// - Cleaning up
-	
-	t.Log("Full workflow E2E test placeholder")
+	t.Log("not yet implemented")
 }
 
 func TestE2E_BinaryExists(t *testing.T) {
@@ -480,9 +455,11 @@ func runPullRequest(args []string) {
 		LogFatal("GitHub CLI (gh) not found. Install it from: https://cli.github.com/")
 	}
 
-	// Parse flags
+	// Parse flags and capture positional arguments
 	var title, body string
 	var draft, ready, view bool
+	var positional []string
+
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--title", "-t":
@@ -501,7 +478,22 @@ func runPullRequest(args []string) {
 			ready = true
 		case "--view", "-v":
 			view = true
+		default:
+			// Capture positional arguments (not starting with -)
+			if !strings.HasPrefix(args[i], "-") {
+				positional = append(positional, args[i])
+			}
 		}
+	}
+
+	// Example: dialtone-dev pull-request linux-wsl-camera-support "Added V4L2 support"
+	if len(positional) >= 1 && title == "" {
+		// Use first positional as title (could be branch name)
+		title = positional[0]
+	}
+	if len(positional) >= 2 && body == "" {
+		// Use second positional as body
+		body = positional[1]
 	}
 
 	// Get current branch name
@@ -524,17 +516,17 @@ func runPullRequest(args []string) {
 	if !prExists {
 		// PR doesn't exist, create it
 		LogInfo("Creating new pull request for branch: %s", branch)
-		
+
 		var createArgs []string
 		createArgs = append(createArgs, "pr", "create")
-		
+
 		// Use provided title or default to branch name
 		if title != "" {
 			createArgs = append(createArgs, "--title", title)
 		} else {
 			createArgs = append(createArgs, "--title", branch)
 		}
-		
+
 		// Use provided body, or plan file, or default message
 		if body != "" {
 			createArgs = append(createArgs, "--body", body)
@@ -546,7 +538,7 @@ func runPullRequest(args []string) {
 				createArgs = append(createArgs, "--body", fmt.Sprintf("Feature: %s\n\nSee plan file for details.", branch))
 			}
 		}
-		
+
 		// Add draft flag if specified
 		if draft {
 			createArgs = append(createArgs, "--draft")
@@ -561,22 +553,27 @@ func runPullRequest(args []string) {
 	} else {
 		// PR exists
 		LogInfo("Pull request exists for branch: %s", branch)
-		
+
 		// If title or body provided, update the PR
 		if title != "" || body != "" {
 			LogInfo("Updating pull request...")
-			
+
 			var editArgs []string
 			editArgs = append(editArgs, "pr", "edit")
-			
+
 			if title != "" {
 				editArgs = append(editArgs, "--title", title)
 			}
-			
+
 			if body != "" {
 				editArgs = append(editArgs, "--body", body)
+			} else {
+				planFile := filepath.Join("plan", fmt.Sprintf("plan-%s.md", branch))
+				if _, statErr := os.Stat(planFile); statErr == nil {
+					editArgs = append(editArgs, "--body-file", planFile)
+				}
 			}
-			
+
 			cmd = exec.Command("gh", editArgs...)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
@@ -585,7 +582,7 @@ func runPullRequest(args []string) {
 			}
 			LogInfo("Pull request updated successfully")
 		}
-		
+
 		// Mark as ready for review if --ready flag
 		if ready {
 			LogInfo("Marking pull request as ready for review...")
@@ -597,10 +594,10 @@ func runPullRequest(args []string) {
 			}
 			LogInfo("Pull request is now ready for review")
 		}
-		
+
 		// Show PR info
 		fmt.Printf("%s\n", string(prOutput))
-		
+
 		// Open in browser if --view flag
 		if view {
 			LogInfo("Opening in browser...")
