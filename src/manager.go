@@ -658,22 +658,35 @@ func RunProvision(args []string) {
 	provisionKey(token)
 }
 
-func RunInstallDeps(args []string) {
-	fs := flag.NewFlagSet("install-deps", flag.ExitOnError)
+func RunInstall(args []string) {
+	fs := flag.NewFlagSet("install", flag.ExitOnError)
 	host := fs.String("host", os.Getenv("ROBOT_HOST"), "SSH host")
 	port := fs.String("port", "22", "SSH port")
 	user := fs.String("user", os.Getenv("ROBOT_USER"), "SSH user")
 	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password")
-	linuxWSL := fs.Bool("linux-wsl", false, "Install dependencies natively on Linux/WSL")
+	linuxWSL := fs.Bool("linux-wsl", false, "Install dependencies natively on Linux/WSL (x86_64)")
+	macosARM := fs.Bool("macos-arm", false, "Install dependencies natively on macOS ARM (Apple Silicon)")
 	fs.Parse(args)
 
+	// Explicit flags take priority
 	if *linuxWSL {
 		installLocalDepsWSL()
 		return
 	}
 
+	if *macosARM {
+		installLocalDepsMacOSARM()
+		return
+	}
+
+	// If no host specified, auto-detect local OS/arch
+	if *host == "" && *pass == "" {
+		installLocalAuto()
+		return
+	}
+
 	if *host == "" || *pass == "" {
-		LogFatal("Error: -host (user@host) and -pass are required for install-deps")
+		LogFatal("Error: -host (user@host) and -pass are required for remote install")
 	}
 
 	client, err := dialSSH(*host, *port, *user, *pass)
@@ -813,6 +826,201 @@ func installLocalDepsWSL() {
 	LogInfo("Local dependencies installation complete in %s", depsDir)
 	LogInfo("To use these in your shell, add them to your PATH:")
 	LogInfo("export PATH=$PATH:%s/go/bin:%s/node/bin", depsDir, depsDir)
+}
+
+func installLocalAuto() {
+	LogInfo("Auto-detecting system: %s/%s", runtime.GOOS, runtime.GOARCH)
+
+	switch {
+	case runtime.GOOS == "darwin" && runtime.GOARCH == "arm64":
+		installLocalDepsMacOSARM()
+	case runtime.GOOS == "darwin" && runtime.GOARCH == "amd64":
+		LogInfo("macOS x86_64 detected. Installing with Rosetta-compatible deps...")
+		installLocalDepsMacOSAMD64()
+	case runtime.GOOS == "linux" && runtime.GOARCH == "amd64":
+		installLocalDepsWSL()
+	case runtime.GOOS == "linux" && runtime.GOARCH == "arm64":
+		LogInfo("Linux ARM64 detected (likely Raspberry Pi).")
+		installLocalDepsLinuxARM64()
+	default:
+		LogFatal("Unsupported platform: %s/%s. Use --linux-wsl or --macos-arm explicitly.", runtime.GOOS, runtime.GOARCH)
+	}
+}
+
+func installLocalDepsMacOSAMD64() {
+	LogInfo("Installing local dependencies for macOS x86_64 (Intel)...")
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		LogFatal("Failed to get home directory: %v", err)
+	}
+	depsDir := filepath.Join(homeDir, ".dialtone_env")
+	os.MkdirAll(depsDir, 0755)
+
+	// 1. Install Go for darwin-amd64
+	goVersion := "1.25.5"
+	goDir := filepath.Join(depsDir, "go")
+	if _, err := os.Stat(filepath.Join(goDir, "bin", "go")); err != nil {
+		LogInfo("Step 1: Installing Go %s for macOS x86_64...", goVersion)
+		goTarball := fmt.Sprintf("go%s.darwin-amd64.tar.gz", goVersion)
+		downloadUrl := fmt.Sprintf("https://go.dev/dl/%s", goTarball)
+		runSimpleShell(fmt.Sprintf("curl -L -o %s/%s %s", depsDir, goTarball, downloadUrl))
+		runSimpleShell(fmt.Sprintf("tar -C %s -xzf %s/%s", depsDir, depsDir, goTarball))
+		os.Remove(filepath.Join(depsDir, goTarball))
+	} else {
+		LogInfo("Go is already installed in %s", goDir)
+	}
+
+	// 2. Install Node.js for darwin-x64
+	nodeDir := filepath.Join(depsDir, "node")
+	if _, err := os.Stat(filepath.Join(nodeDir, "bin", "node")); err != nil {
+		LogInfo("Step 2: Installing Node.js for macOS x86_64...")
+		nodeVersion := "22.13.0"
+		nodeTarball := fmt.Sprintf("node-v%s-darwin-x64.tar.gz", nodeVersion)
+		downloadUrl := fmt.Sprintf("https://nodejs.org/dist/v%s/%s", nodeVersion, nodeTarball)
+		runSimpleShell(fmt.Sprintf("curl -L -o %s/%s %s", depsDir, nodeTarball, downloadUrl))
+		runSimpleShell(fmt.Sprintf("mkdir -p %s && tar -C %s --strip-components=1 -xzf %s/%s", nodeDir, nodeDir, depsDir, nodeTarball))
+		os.Remove(filepath.Join(depsDir, nodeTarball))
+	} else {
+		LogInfo("Node.js is already installed in %s", nodeDir)
+	}
+
+	// 3. Install Zig for darwin-x86_64
+	zigDir := filepath.Join(depsDir, "zig")
+	if _, err := os.Stat(filepath.Join(zigDir, "zig")); err != nil {
+		LogInfo("Step 3: Installing Zig for macOS x86_64...")
+		zigVersion := "0.13.0"
+		zigTarball := fmt.Sprintf("zig-macos-x86_64-%s.tar.xz", zigVersion)
+		downloadUrl := fmt.Sprintf("https://ziglang.org/download/%s/%s", zigVersion, zigTarball)
+		runSimpleShell(fmt.Sprintf("curl -L -o %s/%s %s", depsDir, zigTarball, downloadUrl))
+		runSimpleShell(fmt.Sprintf("mkdir -p %s && tar -C %s --strip-components=1 -xJf %s/%s", zigDir, zigDir, depsDir, zigTarball))
+		os.Remove(filepath.Join(depsDir, zigTarball))
+	} else {
+		LogInfo("Zig is already installed in %s", zigDir)
+	}
+
+	printInstallComplete(depsDir)
+}
+
+func installLocalDepsLinuxARM64() {
+	LogInfo("Installing local dependencies for Linux ARM64...")
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		LogFatal("Failed to get home directory: %v", err)
+	}
+	depsDir := filepath.Join(homeDir, ".dialtone_env")
+	os.MkdirAll(depsDir, 0755)
+
+	// 1. Install Go for linux-arm64
+	goVersion := "1.25.5"
+	goDir := filepath.Join(depsDir, "go")
+	if _, err := os.Stat(filepath.Join(goDir, "bin", "go")); err != nil {
+		LogInfo("Step 1: Installing Go %s for Linux ARM64...", goVersion)
+		goTarball := fmt.Sprintf("go%s.linux-arm64.tar.gz", goVersion)
+		downloadUrl := fmt.Sprintf("https://go.dev/dl/%s", goTarball)
+		runSimpleShell(fmt.Sprintf("wget -O %s/%s %s", depsDir, goTarball, downloadUrl))
+		runSimpleShell(fmt.Sprintf("tar -C %s -xzf %s/%s", depsDir, depsDir, goTarball))
+		os.Remove(filepath.Join(depsDir, goTarball))
+	} else {
+		LogInfo("Go is already installed in %s", goDir)
+	}
+
+	// 2. Install Node.js for linux-arm64
+	nodeDir := filepath.Join(depsDir, "node")
+	if _, err := os.Stat(filepath.Join(nodeDir, "bin", "node")); err != nil {
+		LogInfo("Step 2: Installing Node.js for Linux ARM64...")
+		nodeVersion := "22.13.0"
+		nodeTarball := fmt.Sprintf("node-v%s-linux-arm64.tar.xz", nodeVersion)
+		downloadUrl := fmt.Sprintf("https://nodejs.org/dist/v%s/%s", nodeVersion, nodeTarball)
+		runSimpleShell(fmt.Sprintf("wget -O %s/%s %s", depsDir, nodeTarball, downloadUrl))
+		runSimpleShell(fmt.Sprintf("mkdir -p %s && tar -C %s --strip-components=1 -xJf %s/%s", nodeDir, nodeDir, depsDir, nodeTarball))
+		os.Remove(filepath.Join(depsDir, nodeTarball))
+	} else {
+		LogInfo("Node.js is already installed in %s", nodeDir)
+	}
+
+	// 3. Install Zig for linux-aarch64
+	zigDir := filepath.Join(depsDir, "zig")
+	if _, err := os.Stat(filepath.Join(zigDir, "zig")); err != nil {
+		LogInfo("Step 3: Installing Zig for Linux ARM64...")
+		zigVersion := "0.13.0"
+		zigTarball := fmt.Sprintf("zig-linux-aarch64-%s.tar.xz", zigVersion)
+		downloadUrl := fmt.Sprintf("https://ziglang.org/download/%s/%s", zigVersion, zigTarball)
+		runSimpleShell(fmt.Sprintf("wget -O %s/%s %s", depsDir, zigTarball, downloadUrl))
+		runSimpleShell(fmt.Sprintf("mkdir -p %s && tar -C %s --strip-components=1 -xJf %s/%s", zigDir, zigDir, depsDir, zigTarball))
+		os.Remove(filepath.Join(depsDir, zigTarball))
+	} else {
+		LogInfo("Zig is already installed in %s", zigDir)
+	}
+
+	printInstallComplete(depsDir)
+}
+
+func printInstallComplete(depsDir string) {
+	LogInfo("")
+	LogInfo("========================================")
+	LogInfo("Installation complete in %s", depsDir)
+	LogInfo("========================================")
+	LogInfo("")
+	LogInfo("Add to your shell profile (~/.zshrc or ~/.bashrc):")
+	LogInfo("  export PATH=\"%s/go/bin:%s/node/bin:%s/zig:$PATH\"", depsDir, depsDir, depsDir)
+	LogInfo("")
+}
+
+func installLocalDepsMacOSARM() {
+	LogInfo("Installing local dependencies for macOS ARM (Apple Silicon)...")
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		LogFatal("Failed to get home directory: %v", err)
+	}
+	depsDir := filepath.Join(homeDir, ".dialtone_env")
+	os.MkdirAll(depsDir, 0755)
+
+	// 1. Install Go 1.25.5 for darwin-arm64
+	goVersion := "1.25.5"
+	goDir := filepath.Join(depsDir, "go")
+	if _, err := os.Stat(filepath.Join(goDir, "bin", "go")); err != nil {
+		LogInfo("Step 1: Installing Go %s for macOS ARM64...", goVersion)
+		goTarball := fmt.Sprintf("go%s.darwin-arm64.tar.gz", goVersion)
+		downloadUrl := fmt.Sprintf("https://go.dev/dl/%s", goTarball)
+		runSimpleShell(fmt.Sprintf("curl -L -o %s/%s %s", depsDir, goTarball, downloadUrl))
+		runSimpleShell(fmt.Sprintf("tar -C %s -xzf %s/%s", depsDir, depsDir, goTarball))
+		os.Remove(filepath.Join(depsDir, goTarball))
+	} else {
+		LogInfo("Go is already installed in %s", goDir)
+	}
+
+	// 2. Install Node.js for darwin-arm64
+	nodeDir := filepath.Join(depsDir, "node")
+	if _, err := os.Stat(filepath.Join(nodeDir, "bin", "node")); err != nil {
+		LogInfo("Step 2: Installing Node.js for macOS ARM64...")
+		nodeVersion := "22.13.0" // Current LTS
+		nodeTarball := fmt.Sprintf("node-v%s-darwin-arm64.tar.gz", nodeVersion)
+		downloadUrl := fmt.Sprintf("https://nodejs.org/dist/v%s/%s", nodeVersion, nodeTarball)
+		runSimpleShell(fmt.Sprintf("curl -L -o %s/%s %s", depsDir, nodeTarball, downloadUrl))
+		runSimpleShell(fmt.Sprintf("mkdir -p %s && tar -C %s --strip-components=1 -xzf %s/%s", nodeDir, nodeDir, depsDir, nodeTarball))
+		os.Remove(filepath.Join(depsDir, nodeTarball))
+	} else {
+		LogInfo("Node.js is already installed in %s", nodeDir)
+	}
+
+	// 3. Install Zig for darwin-arm64 (portable C compiler for CGO cross-compilation)
+	zigDir := filepath.Join(depsDir, "zig")
+	if _, err := os.Stat(filepath.Join(zigDir, "zig")); err != nil {
+		LogInfo("Step 3: Installing Zig (portable C compiler) for macOS ARM64...")
+		zigVersion := "0.13.0"
+		zigTarball := fmt.Sprintf("zig-macos-aarch64-%s.tar.xz", zigVersion)
+		downloadUrl := fmt.Sprintf("https://ziglang.org/download/%s/%s", zigVersion, zigTarball)
+		runSimpleShell(fmt.Sprintf("curl -L -o %s/%s %s", depsDir, zigTarball, downloadUrl))
+		runSimpleShell(fmt.Sprintf("mkdir -p %s && tar -C %s --strip-components=1 -xJf %s/%s", zigDir, zigDir, depsDir, zigTarball))
+		os.Remove(filepath.Join(depsDir, zigTarball))
+	} else {
+		LogInfo("Zig is already installed in %s", zigDir)
+	}
+
+	printInstallComplete(depsDir)
 }
 
 func commandExists(name string) bool {

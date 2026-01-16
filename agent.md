@@ -60,7 +60,8 @@ Dialtone is a robotic video operations network for cooperative human-AI robot co
 ### Implemented Commands (`dialtone`)
 
 1. `dialtone install` — Install development dependencies
-   - Example: `dialtone install`
+   - Example: `dialtone install --linux-wsl` (for Linux/WSL x86_64)
+   - Example: `dialtone install --macos-arm` (for macOS Apple Silicon)
 2. `dialtone build` — Build web UI + binary
    - Example: `dialtone build`
    - Example: `dialtone build --podman`

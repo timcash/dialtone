@@ -1,4 +1,4 @@
-# FEATURE: `improve-cli-clarity`
+# FEATURE: `improve-cli-build-commands`
 1. use simple commands like deploy, install, build, dev
 2. add options and a help commands for each
 3. start by focusing on build commands
