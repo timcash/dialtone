@@ -1,3 +1,11 @@
+# FEATURE: `test agent.md loop`
+1. read `agent.md` and `docs/cli.md`
+2. create a new branch `git checkout -b feature/test-agent-loop`
+3. try to find any cli commands that do not yet function correctly in the `agent.md` loop
+4. fix them
+5. test the loop again
+6. repeat until the loop works correctly
+
 # FEATURE: `dialtone-dev cli tool`
 1. create basic functions to match the descriptions in agent.md
 2. start with the `dialtone-dev plan` command that makes a template plan for editing in the `plan` directory
