@@ -28,13 +28,13 @@ export CGO_CFLAGS="-I${DAILTONE_ENV}/usr/include -I${DAILTONE_ENV}/usr/include/x
 export PATH="${DAILTONE_ENV}/go/bin:${DAILTONE_ENV}/node/bin:$PATH"
 
 # Install dependencies into ~/.dialtone_env (Go, Node, Zig, V4L2 headers)
-go run dialtone-dev install --linux-wsl
+go run dialtone-dev.go install --linux-wsl
 
-# Perform a native full-build (includes Web UI and Camera support)
-go run dialtone-dev build --local
+# Perform a native build (includes Web UI and Camera support)
+go run dialtone-dev.go build --local
 
 # Start the node locally
-go run ./bin/dialtone start --local
+go run dialtone.go start --local
 ```
 
 ---
@@ -88,53 +88,46 @@ go run ./bin/dialtone start --local
 
 ## CLI Reference
 
-### Implemented Commands (`dialtone`)
+### Production CLI (`dialtone`)
+
+1. `go run dialtone.go start` — Stop any running server and start a new one
+   - Example: `go run dialtone.go start --local-only`
+
+### Development CLI (`dialtone-dev.go`)
 
 1. `go run dialtone-dev.go install` — Install development dependencies
    - Example: `go run dialtone-dev.go install --linux-wsl` (for Linux/WSL x86_64)
-   - Example: `go run dialtone-dev.go install --macos-arm` (for macOS Apple Silicon)
-   - Example: `go run dialtone-dev.go install --macos-intel` (for macOS Intel)
-   - Example: `go run dialtone-dev.go install --linux-arm64` (for Linux ARM64)
 2. `go run dialtone-dev.go build` — Build web UI + binary
-   - Example: `go run dialtone-dev.go build`
-   - Example: `go run dialtone-dev.go build --podman`
-   - Example: `go run dialtone-dev.go build --arch arm64 --os linux --podman`
+   - Example: `go run dialtone-dev.go build --local` (Native build)
+   - Example: `go run dialtone-dev.go build --full` (Force full rebuild of everything)
+   - Example: `go run dialtone-dev.go build --remote` (Build on remote robot via SSH)
 3. `go run dialtone-dev.go deploy` — Send binary over SSH to a robot
-   - Example: `go run dialtone-dev.go deploy` to use .env for connection details
-   - Example: `go run dialtone-dev.go deploy --host tim@192.168.4.36 --port 22 --user tim --pass password` to override .env values
-4. `go run dialtone-dev.go web` — Print the robot web dashboard URL
-   - Example: `go run dialtone-dev.go web`
-5. `go run dialtone-dev.go diagnostic` — Run system diagnostics on remote robot
-   - Example: `go run dialtone-dev.go diagnostic --host 192.168.4.36`
-6. `go run dialtone-dev.go env` — Write to the local `.env` file (no reading for security)
-   - Example: `go run dialtone-dev.go env TS_AUTHKEY tskey-auth-xxxxx`
-7. `go run dialtone-dev.go logs` tail the local logs
-   - Example: `go run dialtone-dev.go logs --remote` — Tail remote execution logs via SSH and .env settings
-8. `go run dialtone-dev.go start` — Stop any running server and start a new one
-   - Example: `go run dialtone-dev.go start`
-9. `go run dialtone-dev.go provision` — Generate a fresh Tailscale Auth Key and update `.env`
-   - Requires `TS_API_KEY` in `.env` or environment
-10. `go run dialtone-dev.go clone` — Clone the repository to a local directory
-   - Example: `go run dialtone-dev.go clone ./dialtone
-11. `go run dialtone-dev.go env <var> <value>` — Write to the local `.env` file
-   - Example: `go run dialtone-dev.go env TS_AUTHKEY tskey-auth-xxxxx`
-12. `go run dialtone-dev.go branch <name>` — Create or checkout feature branch
-   - Example: `go run dialtone-dev.go branch linux-wsl-camera-support`
-13. `go run dialtone-dev.go test` — Run all tests in `test/` directory
-   - Example: `go run dialtone-dev.go test`
-14. `go run dialtone-dev.go test <name>` — Run tests in `test/<name>/` or specific component tests
-    - Example: `go run dialtone-dev.go test linux-wsl-camera-support`
-    - Example: `go run dialtone-dev.go test www` (Runs Puppeteer live site verification)
-15. `go run dialtone-dev.go plan <name>` — List plan sections or create plan file
-   - Example: `go run dialtone-dev.go plan linux-wsl-camera-support`
-16. `go run dialtone-dev.go pull-request <name> <message>` — Create or update a PR
-   - Example: `go run dialtone-dev.go pull-request linux-wsl-camera-support "Added V4L2 support"`
-17. `go run dialtone-dev.go issue <subcmd>` — Manage GitHub issues
-   - Subcommands: `list`, `add`, `comment`, `view`
-   - Example: `go run dialtone-dev.go issue view 10`
-   - Example: `go run dialtone-dev.go issue add --title "Bug" --body "Desc" --label "bug"`
-18. `go run dialtone-dev.go www <subcmd>` — Manage public webpage (Vercel wrapper/pass-through)
-    - Subcommands: `publish`, `logs`, `domain`, `login` (unrecognized commands pass through to Vercel)
+   - Example: `go run dialtone-dev.go deploy`
+4. `go run dialtone-dev.go clone` — Clone the repository to a local directory
+   - Example: `go run dialtone-dev.go clone ./dialtone`
+5. `go run dialtone-dev.go sync-code` — Sync source code to remote robot
+   - Example: `go run dialtone-dev.go sync-code`
+6. `go run dialtone-dev.go ssh` — SSH tools (upload, download, cmd)
+   - Example: `go run dialtone-dev.go ssh download /tmp/log.txt`
+7. `go run dialtone-dev.go provision` — Generate a fresh Tailscale Auth Key and update `.env`
+   - Example: `go run dialtone-dev.go provision`
+8. `go run dialtone-dev.go logs` — Tail remote execution logs via SSH
+   - Example: `go run dialtone-dev.go logs`
+9. `go run dialtone-dev.go diagnostic` — Run system diagnostics
+   - Example: `go run dialtone-dev.go diagnostic --remote`
+10. `go run dialtone-dev.go env <var> <value>` — Write to the local `.env` file
+    - Example: `go run dialtone-dev.go env TS_AUTHKEY tskey-auth-xxxxx`
+11. `go run dialtone-dev.go branch <name>` — Create or checkout feature branch
+    - Example: `go run dialtone-dev.go branch my-feature`
+12. `go run dialtone-dev.go plan <name>` — List plan sections or create plan file
+    - Example: `go run dialtone-dev.go plan my-feature`
+13. `go run dialtone-dev.go test [name]` — Run tests (all or for specific feature)
+    - Example: `go run dialtone-dev.go test my-feature`
+14. `go run dialtone-dev.go pull-request [options]` — Create or update a PR
+    - Example: `go run dialtone-dev.go pull-request --draft`
+15. `go run dialtone-dev.go issue <subcmd>` — Manage GitHub issues
+    - Example: `go run dialtone-dev.go issue view 20`
+16. `go run dialtone-dev.go www <subcmd>` — Manage public webpage (Vercel wrapper)
     - Example: `go run dialtone-dev.go www publish`
 
 ---
