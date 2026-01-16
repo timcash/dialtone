@@ -1,0 +1,323 @@
+package dialtone
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"time"
+)
+
+// ExecuteDev is the entry point for the dialtone-dev CLI
+func ExecuteDev() {
+	if len(os.Args) < 2 {
+		printDevUsage()
+		return
+	}
+
+	command := os.Args[1]
+	args := os.Args[2:]
+
+	switch command {
+	case "plan":
+		runPlan(args)
+	case "branch":
+		runBranch(args)
+	case "test":
+		runTest(args)
+	case "pull-request", "pr":
+		runPullRequest(args)
+	case "help", "-h", "--help":
+		printDevUsage()
+	default:
+		fmt.Printf("Unknown command: %s\n", command)
+		printDevUsage()
+		os.Exit(1)
+	}
+}
+
+func printDevUsage() {
+	fmt.Println("Usage: dialtone-dev <command> [options]")
+	fmt.Println("\nCommands:")
+	fmt.Println("  plan [name]        List plans or create/view a plan file")
+	fmt.Println("  branch <name>      Create or checkout a feature branch")
+	fmt.Println("  test [name]        Run tests (all or for specific feature)")
+	fmt.Println("  pull-request       Create or update a pull request")
+	fmt.Println("  help               Show this help message")
+	fmt.Println("\nExamples:")
+	fmt.Println("  dialtone-dev plan                    # List all plan files")
+	fmt.Println("  dialtone-dev plan my-feature         # Create/view plan for my-feature")
+	fmt.Println("  dialtone-dev branch my-feature       # Create or checkout branch")
+	fmt.Println("  dialtone-dev test                    # Run all tests")
+	fmt.Println("  dialtone-dev test my-feature         # Run tests for my-feature")
+	fmt.Println("  dialtone-dev pull-request            # Create/update PR")
+}
+
+// runPlan handles the plan command
+func runPlan(args []string) {
+	planDir := "plan"
+
+	// Ensure plan directory exists
+	if err := os.MkdirAll(planDir, 0755); err != nil {
+		LogFatal("Failed to create plan directory: %v", err)
+	}
+
+	// No args: list all plans
+	if len(args) == 0 {
+		listPlans(planDir)
+		return
+	}
+
+	// With name: create or show plan
+	name := args[0]
+	planFile := filepath.Join(planDir, fmt.Sprintf("plan-%s.md", name))
+
+	if _, err := os.Stat(planFile); os.IsNotExist(err) {
+		// Create new plan from template
+		createPlan(planFile, name)
+	} else {
+		// Show existing plan
+		showPlan(planFile)
+	}
+}
+
+// listPlans lists all plan files with their completion status
+func listPlans(planDir string) {
+	entries, err := os.ReadDir(planDir)
+	if err != nil {
+		LogFatal("Failed to read plan directory: %v", err)
+	}
+
+	fmt.Println("Plan Files:")
+	fmt.Println("===========")
+
+	planFound := false
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasPrefix(entry.Name(), "plan-") && strings.HasSuffix(entry.Name(), ".md") {
+			planFound = true
+			planPath := filepath.Join(planDir, entry.Name())
+			completed, total := countProgress(planPath)
+
+			// Extract feature name from filename
+			name := strings.TrimPrefix(entry.Name(), "plan-")
+			name = strings.TrimSuffix(name, ".md")
+
+			status := "📋"
+			if total > 0 {
+				if completed == total {
+					status = "✅"
+				} else if completed > 0 {
+					status = "🔄"
+				}
+			}
+
+			fmt.Printf("  %s %s [%d/%d] %s\n", status, name, completed, total, entry.Name())
+		}
+	}
+
+	if !planFound {
+		fmt.Println("  No plan files found.")
+		fmt.Println("\nCreate a new plan with: dialtone-dev plan <feature-name>")
+	}
+}
+
+// countProgress counts completed items (- [x]) vs total items (- [ ] or - [x])
+func countProgress(planPath string) (completed, total int) {
+	content, err := os.ReadFile(planPath)
+	if err != nil {
+		return 0, 0
+	}
+
+	lines := strings.Split(string(content), "\n")
+	checkboxPattern := regexp.MustCompile(`^- \[([ xX])\]`)
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		matches := checkboxPattern.FindStringSubmatch(trimmed)
+		if len(matches) > 1 {
+			total++
+			if matches[1] == "x" || matches[1] == "X" {
+				completed++
+			}
+		}
+	}
+
+	return completed, total
+}
+
+// createPlan creates a new plan file from template
+func createPlan(planPath, name string) {
+	template := fmt.Sprintf(`# Plan: %s
+
+## Goal
+[Describe the goal of this feature]
+
+## Tests
+- [ ] test_example_1: [Description of first test]
+- [ ] test_example_2: [Description of second test]
+
+## Notes
+- [Add any relevant notes]
+
+## Blocking Issues
+- None
+
+## Progress Log
+- %s: Created plan file
+`, name, time.Now().Format("2006-01-02"))
+
+	if err := os.WriteFile(planPath, []byte(template), 0644); err != nil {
+		LogFatal("Failed to create plan file: %v", err)
+	}
+
+	LogInfo("Created plan file: %s", planPath)
+	fmt.Println("\nPlan Template Created:")
+	fmt.Println("======================")
+	fmt.Println(template)
+	fmt.Println("\nNext steps:")
+	fmt.Println("  1. Edit the plan file to define your goal and tests")
+	fmt.Println("  2. Create a branch: dialtone-dev branch", name)
+	fmt.Println("  3. Start implementing tests from the plan")
+}
+
+// showPlan displays the contents of a plan file
+func showPlan(planPath string) {
+	content, err := os.ReadFile(planPath)
+	if err != nil {
+		LogFatal("Failed to read plan file: %v", err)
+	}
+
+	completed, total := countProgress(planPath)
+	
+	fmt.Println("Plan File:", planPath)
+	fmt.Printf("Progress: %d/%d tests completed\n", completed, total)
+	fmt.Println("======================")
+	fmt.Println(string(content))
+}
+
+// runBranch handles the branch command
+func runBranch(args []string) {
+	if len(args) == 0 {
+		fmt.Println("Usage: dialtone-dev branch <name>")
+		fmt.Println("\nThis command creates or checks out a feature branch.")
+		os.Exit(1)
+	}
+
+	branchName := args[0]
+
+	// Check if branch exists
+	cmd := exec.Command("git", "branch", "--list", branchName)
+	output, err := cmd.Output()
+	if err != nil {
+		LogFatal("Failed to check branches: %v", err)
+	}
+
+	if strings.TrimSpace(string(output)) != "" {
+		// Branch exists, checkout
+		LogInfo("Branch '%s' exists, checking out...", branchName)
+		cmd = exec.Command("git", "checkout", branchName)
+	} else {
+		// Branch doesn't exist, create
+		LogInfo("Creating new branch '%s'...", branchName)
+		cmd = exec.Command("git", "checkout", "-b", branchName)
+	}
+
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		LogFatal("Git operation failed: %v", err)
+	}
+
+	LogInfo("Now on branch: %s", branchName)
+}
+
+// runTest handles the test command
+func runTest(args []string) {
+	var testPath string
+	if len(args) == 0 {
+		testPath = "./test/..."
+		LogInfo("Running all tests...")
+	} else {
+		name := args[0]
+		testPath = fmt.Sprintf("./test/%s/...", name)
+		LogInfo("Running tests for: %s", name)
+	}
+
+	cmd := exec.Command("go", "test", "-v", testPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = os.Environ()
+
+	if err := cmd.Run(); err != nil {
+		// Test failures are not fatal errors, just exit with the same code
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		}
+		LogFatal("Failed to run tests: %v", err)
+	}
+}
+
+// runPullRequest handles the pull-request command
+func runPullRequest(args []string) {
+	// Check if gh CLI is available
+	if _, err := exec.LookPath("gh"); err != nil {
+		LogFatal("GitHub CLI (gh) not found. Install it from: https://cli.github.com/")
+	}
+
+	// Get current branch name
+	cmd := exec.Command("git", "branch", "--show-current")
+	output, err := cmd.Output()
+	if err != nil {
+		LogFatal("Failed to get current branch: %v", err)
+	}
+	branch := strings.TrimSpace(string(output))
+
+	if branch == "main" || branch == "master" {
+		LogFatal("Cannot create PR from main/master branch. Create a feature branch first.")
+	}
+
+	LogInfo("Creating/updating PR for branch: %s", branch)
+
+	// Check if PR already exists
+	checkCmd := exec.Command("gh", "pr", "view", "--json", "number")
+	if err := checkCmd.Run(); err != nil {
+		// PR doesn't exist, create it
+		LogInfo("Creating new pull request...")
+		
+		// Try to find the plan file for this branch to use as PR body
+		planFile := filepath.Join("plan", fmt.Sprintf("plan-%s.md", branch))
+		var createArgs []string
+		
+		createArgs = append(createArgs, "pr", "create", "--title", branch)
+		
+		if _, statErr := os.Stat(planFile); statErr == nil {
+			createArgs = append(createArgs, "--body-file", planFile)
+		} else {
+			createArgs = append(createArgs, "--body", fmt.Sprintf("Feature: %s\n\nSee plan file for details.", branch))
+		}
+		
+		// Add draft flag if specified
+		for _, arg := range args {
+			if arg == "--draft" || arg == "-d" {
+				createArgs = append(createArgs, "--draft")
+				break
+			}
+		}
+
+		cmd = exec.Command("gh", createArgs...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			LogFatal("Failed to create PR: %v", err)
+		}
+	} else {
+		// PR exists, show info
+		LogInfo("Pull request already exists. Opening in browser...")
+		cmd = exec.Command("gh", "pr", "view", "--web")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Run()
+	}
+}
