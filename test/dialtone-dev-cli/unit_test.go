@@ -397,3 +397,163 @@ Test in-progress status
 func randomSuffix() string {
 	return string(rune('a'+os.Getpid()%26)) + string(rune('0'+os.Getpid()%10))
 }
+
+// TestTestCommandCreatesTemplates verifies test command creates template files
+func TestTestCommandCreatesTemplates(t *testing.T) {
+	projectRoot := getProjectRoot(t)
+	testFeatureName := "test-template-gen-" + randomSuffix()
+	testDir := filepath.Join(projectRoot, "test", testFeatureName)
+
+	// Ensure cleanup
+	defer func() {
+		os.RemoveAll(testDir)
+		dialtone.LogInfo("Cleaned up test directory: %s", testDir)
+	}()
+
+	// Verify test dir doesn't exist yet
+	if _, err := os.Stat(testDir); err == nil {
+		t.Fatalf("Test directory already exists: %s", testDir)
+	}
+
+	// Run dialtone-dev test <name> - this should create the test files
+	cmd := exec.Command("go", "run", "dialtone-dev.go", "test", testFeatureName)
+	cmd.Dir = projectRoot
+	cmd.CombinedOutput() // Ignore exit code, tests will fail but files should be created
+
+	// Verify test directory was created
+	if _, err := os.Stat(testDir); os.IsNotExist(err) {
+		t.Fatalf("Test directory was not created: %s", testDir)
+	}
+
+	// Verify all three test files were created
+	expectedFiles := []string{
+		"unit_test.go",
+		"integration_test.go",
+		"end_to_end_test.go",
+	}
+
+	for _, filename := range expectedFiles {
+		filePath := filepath.Join(testDir, filename)
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			t.Errorf("Expected test file not created: %s", filePath)
+		} else {
+			dialtone.LogInfo("Test file created: %s", filename)
+		}
+	}
+}
+
+// TestTestTemplateContents verifies the generated templates have correct content
+func TestTestTemplateContents(t *testing.T) {
+	projectRoot := getProjectRoot(t)
+	testFeatureName := "test-content-check-" + randomSuffix()
+	testDir := filepath.Join(projectRoot, "test", testFeatureName)
+
+	// Ensure cleanup
+	defer func() {
+		os.RemoveAll(testDir)
+	}()
+
+	// Run dialtone-dev test to create files
+	cmd := exec.Command("go", "run", "dialtone-dev.go", "test", testFeatureName)
+	cmd.Dir = projectRoot
+	cmd.CombinedOutput()
+
+	// Check unit_test.go content
+	unitTestPath := filepath.Join(testDir, "unit_test.go")
+	content, err := os.ReadFile(unitTestPath)
+	if err != nil {
+		t.Fatalf("Failed to read unit_test.go: %v", err)
+	}
+
+	unitContent := string(content)
+
+	// Verify package name uses underscores (Go convention)
+	expectedPackage := strings.ReplaceAll(testFeatureName, "-", "_")
+	if !strings.Contains(unitContent, "package "+expectedPackage) {
+		t.Errorf("Unit test should have package %s", expectedPackage)
+	}
+
+	// Verify it imports dialtone
+	if !strings.Contains(unitContent, `dialtone "dialtone/cli/src"`) {
+		t.Errorf("Unit test should import dialtone package")
+	}
+
+	// Verify it has test functions
+	if !strings.Contains(unitContent, "func Test") {
+		t.Errorf("Unit test should have Test functions")
+	}
+
+	dialtone.LogInfo("Unit test template contents verified")
+
+	// Check integration_test.go has integration-specific content
+	integrationPath := filepath.Join(testDir, "integration_test.go")
+	integrationContent, _ := os.ReadFile(integrationPath)
+	if !strings.Contains(string(integrationContent), "Integration") {
+		t.Errorf("Integration test should mention 'Integration'")
+	}
+
+	// Check end_to_end_test.go has E2E-specific content
+	e2ePath := filepath.Join(testDir, "end_to_end_test.go")
+	e2eContent, _ := os.ReadFile(e2ePath)
+	if !strings.Contains(string(e2eContent), "E2E") {
+		t.Errorf("E2E test should mention 'E2E'")
+	}
+	if !strings.Contains(string(e2eContent), "SKIP_E2E") {
+		t.Errorf("E2E test should check SKIP_E2E env var")
+	}
+
+	dialtone.LogInfo("All test template contents verified")
+}
+
+// TestTestCommandSkipsExistingFiles verifies test command doesn't overwrite existing files
+func TestTestCommandSkipsExistingFiles(t *testing.T) {
+	projectRoot := getProjectRoot(t)
+	testFeatureName := "test-no-overwrite-" + randomSuffix()
+	testDir := filepath.Join(projectRoot, "test", testFeatureName)
+
+	// Create test directory and a custom unit_test.go
+	if err := os.MkdirAll(testDir, 0755); err != nil {
+		t.Fatalf("Failed to create test dir: %v", err)
+	}
+	defer os.RemoveAll(testDir)
+
+	customContent := `package test_no_overwrite
+
+// This is a custom test file that should NOT be overwritten
+func TestCustom(t *testing.T) {
+	t.Log("Custom test")
+}
+`
+	unitTestPath := filepath.Join(testDir, "unit_test.go")
+	if err := os.WriteFile(unitTestPath, []byte(customContent), 0644); err != nil {
+		t.Fatalf("Failed to write custom test file: %v", err)
+	}
+
+	// Run dialtone-dev test
+	cmd := exec.Command("go", "run", "dialtone-dev.go", "test", testFeatureName)
+	cmd.Dir = projectRoot
+	cmd.CombinedOutput()
+
+	// Verify unit_test.go was NOT overwritten
+	content, err := os.ReadFile(unitTestPath)
+	if err != nil {
+		t.Fatalf("Failed to read unit_test.go: %v", err)
+	}
+
+	if !strings.Contains(string(content), "This is a custom test file") {
+		t.Errorf("unit_test.go was overwritten! Custom content should be preserved")
+	}
+
+	// But integration_test.go and end_to_end_test.go should be created
+	integrationPath := filepath.Join(testDir, "integration_test.go")
+	if _, err := os.Stat(integrationPath); os.IsNotExist(err) {
+		t.Errorf("integration_test.go should have been created")
+	}
+
+	e2ePath := filepath.Join(testDir, "end_to_end_test.go")
+	if _, err := os.Stat(e2ePath); os.IsNotExist(err) {
+		t.Errorf("end_to_end_test.go should have been created")
+	}
+
+	dialtone.LogInfo("Verified existing files are not overwritten")
+}

@@ -241,7 +241,12 @@ func runTest(args []string) {
 		LogInfo("Running all tests...")
 	} else {
 		name := args[0]
+		testDir := filepath.Join("test", name)
 		testPath = fmt.Sprintf("./test/%s/...", name)
+
+		// Ensure test directory and template files exist
+		ensureTestFiles(testDir, name)
+
 		LogInfo("Running tests for: %s", name)
 	}
 
@@ -257,6 +262,205 @@ func runTest(args []string) {
 		}
 		LogFatal("Failed to run tests: %v", err)
 	}
+}
+
+// ensureTestFiles creates the test directory and template test files if they don't exist
+func ensureTestFiles(testDir, featureName string) {
+	// Create test directory if it doesn't exist
+	if err := os.MkdirAll(testDir, 0755); err != nil {
+		LogFatal("Failed to create test directory: %v", err)
+	}
+
+	// Convert feature-name to package name (replace - with _)
+	packageName := strings.ReplaceAll(featureName, "-", "_")
+
+	// Define test file templates
+	testFiles := map[string]string{
+		"unit_test.go":        generateUnitTestTemplate(packageName, featureName),
+		"integration_test.go": generateIntegrationTestTemplate(packageName, featureName),
+		"end_to_end_test.go":  generateEndToEndTestTemplate(packageName, featureName),
+	}
+
+	for filename, template := range testFiles {
+		filePath := filepath.Join(testDir, filename)
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			if err := os.WriteFile(filePath, []byte(template), 0644); err != nil {
+				LogFatal("Failed to create test file %s: %v", filename, err)
+			}
+			LogInfo("Created test file: %s", filePath)
+		}
+	}
+}
+
+// generateUnitTestTemplate creates a unit test template
+func generateUnitTestTemplate(packageName, featureName string) string {
+	return fmt.Sprintf(`package %s
+
+import (
+	"testing"
+
+	dialtone "dialtone/cli/src"
+)
+
+// Unit tests: Simple tests that run locally without IO operations
+// These tests should be fast and test individual functions/components
+
+func TestUnit_Example(t *testing.T) {
+	dialtone.LogInfo("Running unit test for %s")
+	
+	// TODO: Add your unit tests here
+	// Example:
+	// result := SomeFunction(input)
+	// if result != expected {
+	//     t.Errorf("Expected %%v, got %%v", expected, result)
+	// }
+	
+	t.Log("Unit test placeholder - implement your tests")
+}
+
+func TestUnit_Validation(t *testing.T) {
+	// Test input validation, data parsing, etc.
+	dialtone.LogInfo("Testing validation for %s")
+	
+	// TODO: Add validation tests
+	t.Log("Validation test placeholder")
+}
+`, packageName, featureName, featureName)
+}
+
+// generateIntegrationTestTemplate creates an integration test template
+func generateIntegrationTestTemplate(packageName, featureName string) string {
+	return fmt.Sprintf(`package %s
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	dialtone "dialtone/cli/src"
+)
+
+// Integration tests: Test 2+ components together using test_data/
+// These tests may use files, but should not require network or external services
+
+func TestIntegration_Example(t *testing.T) {
+	dialtone.LogInfo("Running integration test for %s")
+	
+	// Get project root for test data access
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %%v", err)
+	}
+	projectRoot := filepath.Join(cwd, "..", "..")
+	_ = projectRoot // Use for accessing test_data/
+	
+	// TODO: Add your integration tests here
+	// Example using test data:
+	// testDataPath := filepath.Join(projectRoot, "test_data", "sample.json")
+	// data, err := os.ReadFile(testDataPath)
+	// if err != nil {
+	//     t.Skip("Test data not available")
+	// }
+	
+	t.Log("Integration test placeholder - implement your tests")
+}
+
+func TestIntegration_Components(t *testing.T) {
+	// Test how multiple components work together
+	dialtone.LogInfo("Testing component integration for %s")
+	
+	// TODO: Add component integration tests
+	t.Log("Component integration test placeholder")
+}
+`, packageName, featureName, featureName)
+}
+
+// generateEndToEndTestTemplate creates an end-to-end test template
+func generateEndToEndTestTemplate(packageName, featureName string) string {
+	return fmt.Sprintf(`package %s
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	dialtone "dialtone/cli/src"
+)
+
+// End-to-end tests: Browser and CLI tests on a live system or simulator
+// These tests may require network, external services, or user interaction setup
+
+func TestE2E_CLICommand(t *testing.T) {
+	// Skip if running in CI without required setup
+	if os.Getenv("SKIP_E2E") != "" {
+		t.Skip("Skipping E2E test (SKIP_E2E is set)")
+	}
+	
+	dialtone.LogInfo("Running E2E CLI test for %s")
+	
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %%v", err)
+	}
+	projectRoot := filepath.Join(cwd, "..", "..")
+	
+	// TODO: Add your end-to-end CLI tests here
+	// Example: Test a CLI command
+	// cmd := exec.Command("go", "run", ".", "your-command", "--flag")
+	// cmd.Dir = projectRoot
+	// output, err := cmd.CombinedOutput()
+	// if err != nil {
+	//     t.Fatalf("Command failed: %%v\n%%s", err, output)
+	// }
+	
+	_ = projectRoot
+	t.Log("E2E CLI test placeholder - implement your tests")
+}
+
+func TestE2E_FullWorkflow(t *testing.T) {
+	if os.Getenv("SKIP_E2E") != "" {
+		t.Skip("Skipping E2E test (SKIP_E2E is set)")
+	}
+	
+	dialtone.LogInfo("Running full workflow E2E test for %s")
+	
+	// TODO: Test complete user workflows
+	// This might include:
+	// - Starting services
+	// - Making API calls
+	// - Verifying responses
+	// - Cleaning up
+	
+	t.Log("Full workflow E2E test placeholder")
+}
+
+func TestE2E_BinaryExists(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %%v", err)
+	}
+	projectRoot := filepath.Join(cwd, "..", "..")
+	binPath := filepath.Join(projectRoot, "bin", "dialtone")
+	
+	if _, err := os.Stat(binPath); os.IsNotExist(err) {
+		t.Skip("Binary not built - run 'dialtone build' first")
+	}
+	
+	// Verify binary runs
+	cmd := exec.Command(binPath, "--help")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// --help might exit non-zero, check output instead
+		if !strings.Contains(string(output), "dialtone") {
+			t.Errorf("Binary output doesn't contain 'dialtone': %%s", output)
+		}
+	}
+	
+	dialtone.LogInfo("Binary exists and runs for %s tests")
+}
+`, packageName, featureName, featureName, featureName)
 }
 
 // runPullRequest handles the pull-request command
