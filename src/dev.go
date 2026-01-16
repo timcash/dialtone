@@ -21,6 +21,24 @@ func ExecuteDev() {
 	args := os.Args[2:]
 
 	switch command {
+	case "build":
+		RunBuild(args)
+	case "deploy":
+		RunDeploy(args)
+	case "ssh":
+		RunSSH(args)
+	case "provision":
+		RunProvision(args)
+	case "logs":
+		runLogs(args)
+	case "diagnostic":
+		RunDiagnostic(args)
+	case "install":
+		RunInstall(args)
+	case "clone":
+		RunClone(args)
+	case "sync-code":
+		RunSyncCode(args)
 	case "plan":
 		runPlan(args)
 	case "branch":
@@ -45,37 +63,22 @@ func ExecuteDev() {
 func printDevUsage() {
 	fmt.Println("Usage: dialtone-dev <command> [options]")
 	fmt.Println("\nCommands:")
+	fmt.Println("  install       Install dependencies (--linux-wsl for WSL, --macos-arm for Apple Silicon)")
+	fmt.Println("  build         Build web UI and binary (--local, --full, --remote)")
+	fmt.Println("  deploy        Deploy to remote robot")
+	fmt.Println("  clone         Clone or update the repository")
+	fmt.Println("  sync-code     Sync source code to remote robot")
+	fmt.Println("  ssh           SSH tools (upload, download, cmd)")
+	fmt.Println("  provision     Generate Tailscale Auth Key")
+	fmt.Println("  logs          Tail remote logs")
+	fmt.Println("  diagnostic    Run system diagnostics (local or remote)")
 	fmt.Println("  plan [name]        List plans or create/view a plan file")
 	fmt.Println("  branch <name>      Create or checkout a feature branch")
 	fmt.Println("  test [name]        Run tests (all or for specific feature, creates templates if missing)")
 	fmt.Println("  pull-request       Create or update a pull request (wrapper around gh CLI)")
 	fmt.Println("  issue <subcmd>     Manage GitHub issues (wrapper around gh CLI)")
+	fmt.Println("  www <subcmd>       Manage public webpage (Vercel wrapper)")
 	fmt.Println("  help               Show this help message")
-	fmt.Println("\nPull Request Options:")
-	fmt.Println("  --title, -t <title>   Set PR title (default: branch name)")
-	fmt.Println("  --body, -b <body>     Set PR body (default: plan file or auto-generated)")
-	fmt.Println("  --draft, -d           Create as draft PR")
-	fmt.Println("  --ready, -r           Mark draft PR as ready for review")
-	fmt.Println("  --view, -v            Open PR in browser")
-	fmt.Println("\nExamples:")
-	fmt.Println("  dialtone-dev plan                    # List all plan files")
-	fmt.Println("  dialtone-dev plan my-feature         # Create/view plan for my-feature")
-	fmt.Println("  dialtone-dev branch my-feature       # Create or checkout branch")
-	fmt.Println("  dialtone-dev test                    # Run all tests")
-	fmt.Println("  dialtone-dev test my-feature         # Run tests for my-feature (creates templates)")
-	fmt.Println("  dialtone-dev pull-request            # Create PR or show existing PR info")
-	fmt.Println("  dialtone-dev pull-request --draft    # Create draft PR")
-	fmt.Println("  dialtone-dev pull-request --ready    # Mark draft as ready for review")
-	fmt.Println("  dialtone-dev pull-request --title \"My Feature\" --body \"Description\"")
-	fmt.Println("  dialtone-dev pull-request --view     # Open existing PR in browser")
-	fmt.Println("  dialtone-dev issue list              # List recent issues")
-	fmt.Println("  dialtone-dev issue list 5            # List top 5 issues")
-	fmt.Println("  dialtone-dev issue add               # Create a new issue")
-	fmt.Println("  dialtone-dev issue comment 123 \"msg\" # Comment on issue #123")
-	fmt.Println("  dialtone-dev www publish             # Publish webpage to Vercel")
-	fmt.Println("  dialtone-dev www logs                # View Vercel deployment logs")
-	fmt.Println("  dialtone-dev www domain              # Manage dialtone.earth domain")
-	fmt.Println("  dialtone-dev www login               # Login to Vercel")
 }
 
 // runPlan handles the plan command

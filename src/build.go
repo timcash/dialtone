@@ -14,6 +14,7 @@ func RunBuild(args []string) {
 	fs := flag.NewFlagSet("build", flag.ExitOnError)
 	full := fs.Bool("full", false, "Build Web UI, local CLI, and ARM64 binary")
 	local := fs.Bool("local", false, "Build natively on the local system")
+	remote := fs.Bool("remote", false, "Build on remote robot via SSH")
 	showHelp := fs.Bool("help", false, "Show help for build command")
 
 	fs.Usage = func() {
@@ -24,24 +25,25 @@ func RunBuild(args []string) {
 		fmt.Println("Options:")
 		fmt.Println("  --local    Build natively on the local system (uses ~/.dialtone_env if available)")
 		fmt.Println("  --full     Full rebuild: Web UI + local CLI + ARM64 binary")
-		fmt.Println("  --help     Show this help message")
+		fmt.Println("  --remote   Build on remote robot via SSH (requires configured .env)")
+		fmt.Println("  --help     Show help for build command")
 		fmt.Println()
 		fmt.Println("Examples:")
 		fmt.Println("  dialtone build              # Build web UI + binary (Podman or local)")
 		fmt.Println("  dialtone build --local      # Build web UI + native binary")
 		fmt.Println("  dialtone build --full       # Force full rebuild of everything")
-		fmt.Println()
-		fmt.Println("Notes:")
-		fmt.Println("  - Automatically builds web UI if not already built")
-		fmt.Println("  - Uses Podman by default for ARM64 cross-compilation")
-		fmt.Println("  - Falls back to local build if Podman is not installed")
-		fmt.Println("  - Run 'dialtone install' first to set up build dependencies")
+		fmt.Println("  dialtone build --remote     # Build on remote robot")
 	}
 
 	fs.Parse(args)
 
 	if *showHelp {
 		fs.Usage()
+		return
+	}
+
+	if *remote {
+		RunRemoteBuild(args)
 		return
 	}
 
