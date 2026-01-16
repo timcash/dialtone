@@ -4,11 +4,16 @@ Dialtone is aspirationally a **robotic video operations network** designed to al
 
 ![dialtone](./dialtone.png)
 
-# Vision
-The future of robotics is collaborative, not just automated. Dialtone aims to bridge the gap between human intuition and machine precision by providing a unified network where:
+# Vision`
+The future of robotics is collaborative. Dialtone aims to combine human intuition and machine precision by providing a unified mesh network:
 - **Humans** can remotely oversee, teleoperate, and teach robots from anywhere in the world.
 - **AI Agents** can learn from human demonstrations, process complex sensory data, and execute tasks autonomously.
-- **Hardware** becomes secondary to the network, with a single binary allowing any device to join the global robotic collective.
+- **Open Radio Feild Uplink** open source radio and compute hardware to make relaying real-time video and telemetry possible.
+- **Single Software Binary** a single binary that can run on any device to join the global robotic mesh.
+- **Robotic Hardware** robotic hardware for factory, field civic and home automation becomes widley available.
+- **Open Assembly Instructions** robot system can be assembled in a garage with the correct tools and parts.
+- **Maintainable Parts and Code** robot parts and code are designed to be maintainable and upgradeable working in a cyclic ecosystem.
+
 
 # Architecture Overview
 Dialtone is built on a "Network-First" architecture, prioritizing secure, low-latency communication between distributed components.
