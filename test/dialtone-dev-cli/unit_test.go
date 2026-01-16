@@ -387,15 +387,15 @@ Test in-progress status
 
 	listOutput := string(output)
 
-	// Check for status indicators (✅ for complete, 🔄 for in-progress)
-	if !strings.Contains(listOutput, "✅") {
-		t.Errorf("Should show ✅ for completed plan")
+	// Check for status indicators ([x] for complete, [~] for in-progress)
+	if !strings.Contains(listOutput, "[x]") {
+		t.Errorf("Should show [x] for completed plan")
 	}
-	if !strings.Contains(listOutput, "🔄") {
-		t.Errorf("Should show 🔄 for in-progress plan")
+	if !strings.Contains(listOutput, "[~]") {
+		t.Errorf("Should show [~] for in-progress plan")
 	}
 
-	dialtone.LogInfo("Status icons verified: ✅ for complete, 🔄 for in-progress")
+	dialtone.LogInfo("Status icons verified: [x] for complete, [~] for in-progress")
 }
 
 // randomSuffix generates a simple suffix using process ID and time
