@@ -531,10 +531,25 @@ func runPullRequest(args []string) {
 		if body != "" {
 			createArgs = append(createArgs, "--body", body)
 		} else {
-			planFile := filepath.Join("plan", fmt.Sprintf("plan-%s.md", branch))
-			if _, statErr := os.Stat(planFile); statErr == nil {
-				createArgs = append(createArgs, "--body-file", planFile)
-			} else {
+			// Try various plan file names
+			planNames := []string{
+				fmt.Sprintf("plan-%s.md", branch),
+				fmt.Sprintf("plan-%s.md", strings.TrimPrefix(branch, "feature/")),
+				fmt.Sprintf("plan-%s.md", strings.TrimPrefix(branch, "fix/")),
+				fmt.Sprintf("plan-%s.md", strings.TrimPrefix(branch, "hotfix/")),
+			}
+
+			planFound := false
+			for _, pn := range planNames {
+				planFile := filepath.Join("plan", pn)
+				if _, statErr := os.Stat(planFile); statErr == nil {
+					createArgs = append(createArgs, "--body-file", planFile)
+					planFound = true
+					break
+				}
+			}
+
+			if !planFound {
 				createArgs = append(createArgs, "--body", fmt.Sprintf("Feature: %s\n\nSee plan file for details.", branch))
 			}
 		}
@@ -568,9 +583,20 @@ func runPullRequest(args []string) {
 			if body != "" {
 				editArgs = append(editArgs, "--body", body)
 			} else {
-				planFile := filepath.Join("plan", fmt.Sprintf("plan-%s.md", branch))
-				if _, statErr := os.Stat(planFile); statErr == nil {
-					editArgs = append(editArgs, "--body-file", planFile)
+				// Try various plan file names
+				planNames := []string{
+					fmt.Sprintf("plan-%s.md", branch),
+					fmt.Sprintf("plan-%s.md", strings.TrimPrefix(branch, "feature/")),
+					fmt.Sprintf("plan-%s.md", strings.TrimPrefix(branch, "fix/")),
+					fmt.Sprintf("plan-%s.md", strings.TrimPrefix(branch, "hotfix/")),
+				}
+
+				for _, pn := range planNames {
+					planFile := filepath.Join("plan", pn)
+					if _, statErr := os.Stat(planFile); statErr == nil {
+						editArgs = append(editArgs, "--body-file", planFile)
+						break
+					}
 				}
 			}
 
