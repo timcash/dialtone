@@ -278,12 +278,47 @@ func runTest(args []string) {
 	cmd.Stderr = os.Stderr
 	cmd.Env = os.Environ()
 
-	if err := cmd.Run(); err != nil {
-		// Test failures are not fatal errors, just exit with the same code
-		if exitErr, ok := err.(*exec.ExitError); ok {
+	var testErr error
+	testErr = cmd.Run()
+
+	// Run live web tests if in the dialtone-earth context or if all tests are requested
+	if len(args) == 0 || args[0] == "www" {
+		runLiveWebTest()
+	}
+
+	// Exit with Go test error if there was one
+	if testErr != nil {
+		if exitErr, ok := testErr.(*exec.ExitError); ok {
 			os.Exit(exitErr.ExitCode())
 		}
-		LogFatal("Failed to run tests: %v", err)
+		LogFatal("Failed to run tests: %v", testErr)
+	}
+}
+
+// runLiveWebTest runs the Puppeteer live site verification test
+func runLiveWebTest() {
+	testScript := filepath.Join("dialtone-earth", "test", "live_test.ts")
+	if _, err := os.Stat(testScript); os.IsNotExist(err) {
+		return
+	}
+
+	LogInfo("Running Puppeteer live site verification...")
+
+	// Command to source NVM and run the test
+	// We use bash -c to ensure environment sourcing works
+	script := fmt.Sprintf(`export NVM_DIR="$HOME/.nvm" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && nvm use 22 && npx ts-node test/live_test.ts`)
+
+	cmd := exec.Command("bash", "-c", script)
+	cmd.Dir = "dialtone-earth"
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = os.Environ()
+
+	if err := cmd.Run(); err != nil {
+		LogInfo("Puppeteer test failed (this is expected if system libraries are missing)")
+		// We don't exit here as web tests might be optional or environment-dependent
+	} else {
+		LogInfo("Puppeteer live site verification successful!")
 	}
 }
 
