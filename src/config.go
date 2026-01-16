@@ -3,6 +3,8 @@ package dialtone
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -12,6 +14,23 @@ func LoadConfig() {
 	if err := godotenv.Load(); err != nil {
 		LogInfo("Warning: godotenv.Load() failed: %v", err)
 	}
+}
+
+// GetDialtoneEnv returns the directory where dependencies are installed.
+// It checks the DIALTONE_ENV environment variable, falling back to ~/.dialtone_env.
+func GetDialtoneEnv() string {
+	env := os.Getenv("DIALTONE_ENV")
+	if env != "" {
+		// Expand ~ if present
+		if strings.HasPrefix(env, "~") {
+			home, _ := os.UserHomeDir()
+			env = filepath.Join(home, env[1:])
+		}
+		return env
+	}
+
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".dialtone_env")
 }
 
 func validateRequiredVars(vars []string) {
