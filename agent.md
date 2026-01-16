@@ -1,7 +1,4 @@
 # LLM Agent Workflow Guide
-
-> **Note**: Many `dialtone-dev` commands are **aspirational** (not yet implemented). When a command doesn't exist, use manual git/go commands instead. Replace `<feature-branch-name>` with your actual branch name.
-
 ---
 
 ## About Dialtone
@@ -16,14 +13,14 @@ Dialtone is a robotic video operations network for cooperative human-AI robot co
 
 1. Run `dialtone install` to verify dependencies are installed
 2. Run `dialtone clone` to clone and verify the repository is up to date
-3. Run `dialtone-dev branch <feature-branch-name>` to create or checkout the feature branch
-4. Run `dialtone-dev plan <feature-branch-name>` to list plan sections or create a new plan file
+3. Run `go run dialtone-dev.go branch <feature-branch-name>` to create or checkout the feature branch
+4. Run `go run dialtone-dev.go plan <feature-branch-name>` to list plan sections or create a new plan file
 5. Read `README.md` to get an overview of the system
 6. Look for the plan file at `plan/plan-<feature-branch-name>.md`
 7. Write your plan into it as you go with a test list. then mark off each test when it passes
 8. If the branch, plan or tests already exists for `<feature-branch-name>` you should continue the work
 9. Review `docs/cli.md` to understand CLI commands
-10. Create a draft PR: `dialtone-dev pull-request --draft --title "<feature-branch-name>" --body "Plan file"`
+10. Create a draft PR: `go run dialtone-dev.go pull-request --draft --title "<feature-branch-name>" --body "Plan file"`
 
 ### 2. Development Stage (Iterative Loop)
 
@@ -32,7 +29,7 @@ Dialtone is a robotic video operations network for cooperative human-AI robot co
 3. Include logs and metrics as part of the test
 4. Use the project logger from `src/logger.go`
 5. Write or change code to pass the test
-6. Run test: `dialtone-dev test <feature-branch-name>`
+6. Run test: `go run dialtone-dev.go test <feature-branch-name>`
 7. If PASS → commit and update plan. If FAIL → debug and retry
 8. Update `README.md` and `docs/*` with any changes
 9. Commit changes: `git add .` and `git commit -m "<message>"`
@@ -43,7 +40,7 @@ Dialtone is a robotic video operations network for cooperative human-AI robot co
 
 1. Verify the branch only contains changes related to the feature
 2. Stage and commit: `git add .` and `git commit -m "<feature-branch-name>: complete"`
-3. Update PR: `dialtone-dev pull-request --title "<feature-branch-name>" --body "<summary>"`
+3. Update PR: `go run dialtone-dev.go pull-request --title "<feature-branch-name>" --body "<summary>"`
 
 ---
 
@@ -87,18 +84,20 @@ Dialtone is a robotic video operations network for cooperative human-AI robot co
 11. `dialtone env <var> <value>` — Write to the local `.env` file
    - Example: `dialtone env TS_AUTHKEY tskey-auth-xxxxx`
 
-### Aspirational Commands (`dialtone-dev`)
+### Aspirational Commands (`go run dialtone-dev.go`)
 
-1. `dialtone-dev branch <name>` — Create or checkout feature branch
-   - Example: `dialtone-dev branch linux-wsl-camera-support`
-2. `dialtone-dev test` — Run all tests in `test/` directory
-   - Example: `dialtone-dev test`
-3. `dialtone-dev test <name>` — Run tests in `test/<name>/` or create example test
-   - Example: `dialtone-dev test linux-wsl-camera-support`
-4. `dialtone-dev plan <name>` — List plan sections or create plan file
-   - Example: `dialtone-dev plan linux-wsl-camera-support`
-5. `dialtone-dev pull-request <name> <message>` — Create or update a PR
-   - Example: `dialtone-dev pull-request linux-wsl-camera-support "Added V4L2 support"`
+1. `go run dialtone-dev.go branch <name>` — Create or checkout feature branch
+   - Example: `go run dialtone-dev.go branch linux-wsl-camera-support`
+2. `go run dialtone-dev.go test` — Run all tests in `test/` directory
+   - Example: `go run dialtone-dev.go test`
+3. `go run dialtone-dev.go test <name>` — Run tests in `test/<name>/` or create example test
+   - Example: `go run dialtone-dev.go test linux-wsl-camera-support`
+4. `go run dialtone-dev.go plan <name>` — List plan sections or create plan file
+   - Example: `go run dialtone-dev.go plan linux-wsl-camera-support`
+5. `go run dialtone-dev.go pull-request <name> <message>` — Create or update a PR
+   - Example: `go run dialtone-dev.go pull-request linux-wsl-camera-support "Added V4L2 support"`
+6. `go run dialtone-dev.go issue <subcmd>` — Manage GitHub issues
+   - Example: `go run dialtone-dev.go issue list 5`
 
 ---
 
@@ -124,7 +123,7 @@ File: `plan/plan-linux-wsl-camera-support.md`
 Enable camera support on Linux/WSL without requiring sudo for development.
 
 ## Tests
-- [x] test_install_deps: Verify `dialtone install-deps --linux-wsl` creates ~/.dialtone_env
+- [x] test_install_deps: Verify `dialtone install --linux-wsl` creates ~/.dialtone_env
 - [x] test_v4l2_headers: Verify V4L2 headers are extracted and accessible
 - [ ] test_native_build: Verify `dialtone build` compiles with CGO_ENABLED=1
 - [ ] test_camera_open: Verify camera device can be opened on WSL
@@ -244,9 +243,9 @@ dialtone.LogFatal("Unrecoverable error", err)  // exits program
 ## Final Checklist
 
 1. All plan tests marked complete with `[x]`
-2. `go test -v ./test/...` passes
-3. `dialtone build` succeeds
-4. No secrets/keys in commits
-5. README/docs updated if behavior changed
-6. PR created/updated with summary
-7. Plan file reflects final state
+3. `go run dialtone-dev.go test` passes
+4. `go run dialtone.go build` succeeds
+5. No secrets/keys in commits look for any way they can leak as a result of these changes
+6. README/docs updated if behavior changed
+7. PR created/updated with summary
+8. Plan file reflects final state
