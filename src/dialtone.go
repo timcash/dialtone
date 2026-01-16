@@ -61,8 +61,8 @@ func Execute() {
 		runLogs(args)
 	case "start":
 		runStart(args)
-	case "install-deps":
-		RunInstallDeps(args)
+	case "install":
+		RunInstall(args)
 	case "sync-code":
 		RunSyncCode(args)
 	case "remote-build":
@@ -79,7 +79,7 @@ func printUsage() {
 	fmt.Println("  build         Build for ARM64 using Podman (use -local for native build)")
 	fmt.Println("  full-build    Build Web, CLI, and ARM64 binary (use -local for native build)")
 	fmt.Println("  deploy        Deploy to remote robot")
-	fmt.Println("  install-deps  Install dependencies on remote robot (use --linux-wsl for local WSL)")
+	fmt.Println("  install       Install dependencies (--linux-wsl for WSL, --macos-arm for Apple Silicon)")
 	fmt.Println("  sync-code     Sync source code to remote robot")
 	fmt.Println("  remote-build  Build Go and Web code on remote robot")
 	fmt.Println("  ssh           SSH tools (upload, download, cmd)")
