@@ -1,82 +1,250 @@
-IMPORTANT! Use this prompt template for each change applied to the codebase
-== START TEMPLATE ==
-# FEATURE: <feature-branch-name>
-## Plan Stage
-1. use `dialtone install` to verfiy needed dependencies are installed
-1. use `dialtone clone` to clone and verify the remote code repository is up to date
-1. use `dialtone-dev branch <feature-branch-name>` to create to checkout the feature branch
-1. use `dialtone-dev plan list <feature-branch-name>` to list all tests in the plan or to create
-1. read the main `README.md` to get an overview of the system
-2. look for or create all a plan file like `plan/plan-<feature-branch-name>.md` it should be a list of tests and notes about each test
-4. if the branch or plan file are already in place you need to figure out how to continue the work
-5. review the `docs/cli.md` file to understand the CLI commands as it is the center of all development work with tools like `install`, `dev`, `build` and `deploy`
-4. try to use `gh pr create --title "feature-branch-name" --body "feature-branch-name"` to create a pull request with only the changes in the plan file. if it already exists skip this and add to the already created pull request
+# LLM Agent Workflow Guide
 
-## Quick Start use of the `dialtone-dev` CLI
-1. use `dialtone-dev` for all development work
-1. use `dialtone-dev create-test <feature-branch-name>` to create a test
-1. use `dialtone-dev run-test <feature-branch-name>` to run a test
-1. use `dialtone-dev create-plan <feature-branch-name>` to create a plan
-1. use `dialtone-dev pull-request <feature-branch-name> <message>` to create or update a pull request
-1. use `dialtone-dev plan add <feature-branch-name>` to add a test to the plan
-1. use `dialtone-dev plan remove <feature-branch-name>` to remove a test from the plan
-1. use `dialtone-dev plan list <feature-branch-name>` to list all tests in the plan
-1. use `dialtone-dev plan clear <feature-branch-name>` to clear all tests from the plan
-1. use `dialtone-dev plan merge <feature-branch-name>` to merge a feature branch into main
+> **Note**: Many `dialtone-dev` commands are **aspirational** (not yet implemented). When a command doesn't exist, use manual git/go commands instead. Replace `<feature-branch-name>` with your actual branch name.
 
-## Quick Start use of the `dialtone` CLI
-1. use `dialtone install` to install development dependencies
-1. use `dialtone build` to build the architecture you need
-1. use `dialtone deploy` to send a binary over ssh to a robot
-1. use `dialtone web` to print the web dashboard URL
-1. use `dialtone diagnostic --host <host_url>` to run system diagnostics on remote robot
-1. use `dialtone env <var> <value>` to write to the local `.env` file (no reading for security reasons)
+---
 
-## Development Stage Small Iterative Loop
-1. Make small changes and run tests to work iteratively
-1. Improve an existing test if possible otherswise create a new one
-1. Include logs and metrics as part of the test make sure they are the correct format and levels
-1. All logs should use the project logging library `src/logger.
-1. Write or change code test_data to pass the test
-1. Update `README.md` and `docs/*` with any updates
-2. Use `git commit` to stage and commit changes at each stage of the plan so you can undo work if needed.
-1. Add summarized vendor or external dependecy documentation in markdown format to `docs/vendor/<vendor_name>.md`
-1. Update the plan file at `plan/plan-<feature-branch-name>.md` with the changes you have made and mark completed tests with a checkmark
+## About Dialtone
 
-## Cleanup and Pull Request
-0. Look at the branch and make sure it is clean and only contains the changes in the plan file.
-1. Stage and commit the changes to the branch `git add .` and `git commit -m "     <feature-branch-name> comments"`
-2. Update the PR with the new changes `gh pr edit --title "<feature-branch-name>" --body "<feature-branch-name> message"`
+Dialtone is a robotic video operations network for cooperative human-AI robot control. Key technologies: Go, NATS messaging, Tailscale VPN, V4L2 cameras, MAVLink protocol.
+
+---
+
+## Workflow Stages
+
+### 1. Plan Stage
+
+1. Run `dialtone install` to verify dependencies are installed
+2. Run `dialtone clone` to clone and verify the repository is up to date
+3. Run `dialtone-dev branch <feature-branch-name>` to create or checkout the feature branch
+4. Run `dialtone-dev plan <feature-branch-name>` to list plan sections or create a new plan file
+5. Read `README.md` to get an overview of the system
+6. Look for or create a plan file at `plan/plan-<feature-branch-name>.md`
+7. If branch or plan file already exists, figure out how to continue the work
+8. Review `docs/cli.md` to understand CLI commands
+9. Create a draft PR: `dialtone-dev pull-request --draft --title "<feature-branch-name>" --body "Plan file"`
+
+### 2. Development Stage (Iterative Loop)
+
+1. Pick ONE test from the plan
+2. Improve an existing test if possible, otherwise create a new one
+3. Include logs and metrics as part of the test
+4. Use the project logger from `src/logger.go`
+5. Write or change code to pass the test
+6. Run test: `dialtone-dev test <feature-branch-name>`
+7. If PASS → commit and update plan. If FAIL → debug and retry
+8. Update `README.md` and `docs/*` with any changes
+9. Commit changes: `git add .` and `git commit -m "<message>"`
+10. Add vendor docs to `docs/vendor/<vendor_name>.md` if needed
+11. Mark completed tests with `[x]` in the plan file
+
+### 3. Cleanup and Pull Request
+
+1. Verify the branch only contains changes related to the feature
+2. Stage and commit: `git add .` and `git commit -m "<feature-branch-name>: complete"`
+3. Update PR: `dialtone-dev pull-request --title "<feature-branch-name>" --body "<summary>"`
+
+---
+
+## Test Rules
+
+1. **Unit tests** — Simple tests that run locally without IO operations
+2. **Integration tests** — Test 2 components together using `test_data/`
+   - Example test_data: premade video file, MAVLink message file, known-correct response snapshot
+3. **End-to-end tests** — Browser and CLI tests on a live system or simulator
+
+---
+
+## CLI Reference
+
+### Implemented Commands (`dialtone`)
+
+1. `dialtone install` — Install development dependencies
+   - Example: `dialtone install`
+2. `dialtone build` — Build web UI + binary
+   - Example: `dialtone build`
+   - Example: `dialtone build --podman`
+   - Example: `dialtone build --arch arm64 --os linux --podman`
+3. `dialtone deploy` — Send binary over SSH to a robot
+   - Example: `dialtone deploy`
+   - Example: `dialtone deploy --host tim@192.168.4.36 --port 22 --user tim --pass password`
+4. `dialtone web` — Print the web dashboard URL
+   - Example: `dialtone web`
+5. `dialtone diagnostic` — Run system diagnostics on remote robot
+   - Example: `dialtone diagnostic --host 192.168.4.36`
+6. `dialtone env` — Write to the local `.env` file (no reading for security)
+   - Example: `dialtone env TS_AUTHKEY tskey-auth-xxxxx`
+7. `dialtone logs` — Tail remote execution logs via SSH
+   - Example: `dialtone logs`
+8. `dialtone start` — Stop any running server and start a new one
+   - Example: `dialtone start`
+9. `dialtone provision` — Generate a fresh Tailscale Auth Key and update `.env`
+   - Requires `TS_API_KEY` in `.env` or environment
+10. `dialtone clone` — Clone the repository to a local directory
+   - Example: `dialtone clone ./dialtone
+11. `dialtone env <var> <value>` — Write to the local `.env` file
+   - Example: `dialtone env TS_AUTHKEY tskey-auth-xxxxx`
+
+### Aspirational Commands (`dialtone-dev`)
+
+1. `dialtone-dev branch <name>` — Create or checkout feature branch
+   - Example: `dialtone-dev branch linux-wsl-camera-support`
+2. `dialtone-dev test` — Run all tests in `test/` directory
+   - Example: `dialtone-dev test`
+3. `dialtone-dev test <name>` — Run tests in `test/<name>/` or create example test
+   - Example: `dialtone-dev test linux-wsl-camera-support`
+4. `dialtone-dev plan <name>` — List plan sections or create plan file
+   - Example: `dialtone-dev plan linux-wsl-camera-support`
+5. `dialtone-dev pull-request <name> <message>` — Create or update a PR
+   - Example: `dialtone-dev pull-request linux-wsl-camera-support "Added V4L2 support"`
+
+---
+
+## File Conventions
+
+1. **Plan files**: `plan/plan-<feature-branch-name>.md`
+2. **Feature tests**: `test/<feature-branch-name>/`
+   - `<feature>_unit_test.go`
+   - `<feature>_integration_test.go`
+   - `<feature>_end_to_end_test.go`
+3. **Vendor docs**: `docs/vendor/<vendor_name>.md`
+
+---
+
+## Example Plan File
+
+File: `plan/plan-linux-wsl-camera-support.md`
+
+```markdown
+# Plan: linux-wsl-camera-support
+
+## Goal
+Enable camera support on Linux/WSL without requiring sudo for development.
+
+## Tests
+- [x] test_install_deps: Verify `dialtone install-deps --linux-wsl` creates ~/.dialtone_env
+- [x] test_v4l2_headers: Verify V4L2 headers are extracted and accessible
+- [ ] test_native_build: Verify `dialtone build` compiles with CGO_ENABLED=1
+- [ ] test_camera_open: Verify camera device can be opened on WSL
+- [ ] test_frame_capture: Verify a frame can be captured from /dev/video0
+
+## Notes
+- Using Zig as cross-compiler for CGO
+- V4L2 headers extracted from Ubuntu .deb without root
+- Camera device must be passed through from Windows host
+
+## Blocking Issues
+- None
+
+## Progress Log
+- 2026-01-15: Created plan, implemented install-deps command
+- 2026-01-16: V4L2 headers working, native build compiles
+```
+
+---
+
+## Example Test File
+
+File: `test/linux-wsl-camera-support/wsl_camera_unit_test.go`
+
+```go
+package test
+
+import (
+    "os"
+    "os/exec"
+    "testing"
+
+    "dialtone/src"
+)
+
+func TestV4L2HeadersExist(t *testing.T) {
+    headerPath := os.ExpandEnv("$HOME/.dialtone_env/usr/include/linux/videodev2.h")
+    if _, err := os.Stat(headerPath); os.IsNotExist(err) {
+        t.Fatalf("V4L2 header not found at %s", headerPath)
+    }
+    dialtone.LogInfo("V4L2 headers found")
+}
+
+func TestNativeBuildCompiles(t *testing.T) {
+    cmd := exec.Command("go", "build", "-o", "/dev/null", ".")
+    cmd.Env = append(os.Environ(), "CGO_ENABLED=1")
+
+    output, err := cmd.CombinedOutput()
+    if err != nil {
+        t.Fatalf("Build failed: %s\n%s", err, output)
+    }
+    dialtone.LogInfo("Native build succeeded")
+}
+```
+
+---
 
 ## Code Style
 
-Use simple code pipelines, not pyramids of nested functions.
+Use linear pipelines, not nested pyramids.
 
-```golang
-// contrived example on simple pipeline code avoid nesting code whenever possible
-// use the simplest code features possible like functions and structs
-// do not over architect the code or system with abstractions and interfaces
-// in golang interfaces can be useful but dont overuse them
-struct context {
-    created_at time.Time
-    updated_at time.Time
-    src string
-    dst string
-    auth_token string
-    database1_result string
-    database2_result string
-    logger_result string
-    error error
+```go
+type RequestContext struct {
+    CreatedAt       time.Time
+    Src             string
+    Dst             string
+    AuthToken       string
+    Database1Result string
+    Database2Result string
+    Error           error
 }
-func request(ctx context.Context) {
-    var auth_result = auth(ctx)
-    if auth_result = false {
+
+func HandleRequest(ctx *RequestContext) *RequestContext {
+    authResult := auth(ctx)
+    if authResult == nil {
+        ctx.Error = errors.New("auth failed")
         return ctx
     }
-    var database1_result = database1(ctx, auth_result)
-    var database2_result = database2(ctx, database1_result)
-    var logger_result = logger(ctx, auth_result, database1_result, database2_result)
+
+    ctx.Database1Result = database1(ctx, authResult)
+    ctx.Database2Result = database2(ctx, ctx.Database1Result)
+    logger(ctx, authResult, ctx.Database1Result, ctx.Database2Result)
     return ctx
 }
 ```
-== END TEMPLATE ==
+
+**Rules:**
+1. Use the project logger: `dialtone.LogInfo`, `dialtone.LogError`, `dialtone.LogFatal`
+2. Prefer functions and structs over complicated patterns
+3. Keep functions short and single-purpose
+4. Name variables descriptively
+
+---
+
+## Logging
+
+Always use the project logger from `src/logger.go`:
+
+```go
+dialtone.LogInfo("Starting camera capture")
+dialtone.LogError("Failed to connect", err)
+dialtone.LogFatal("Unrecoverable error", err)  // exits program
+```
+
+---
+
+## When You Get Stuck
+
+1. **Command not implemented?** → Use manual git/go commands
+2. **Test failing repeatedly?** → Add debug logging, check assumptions
+3. **Build failing?** → Check `docs/cli.md` for environment setup
+4. **Unsure what to do next?** → Re-read the plan file, ask for clarification
+5. **Need external docs?** → Add summary to `docs/vendor/<name>.md`
+
+---
+
+## Final Checklist
+
+1. All plan tests marked complete with `[x]`
+2. `go test -v ./test/...` passes
+3. `dialtone build` succeeds
+4. No secrets/keys in commits
+5. README/docs updated if behavior changed
+6. PR created/updated with summary
+7. Plan file reflects final state
