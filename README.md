@@ -1,6 +1,6 @@
 # Dialtone
 
-Dialtone is aspirationally a **robotic video operations network** designed to allow humans and AI to cooperatively train and control robots.
+Dialtone is aspirationally a **robotic video operations network** designed to allow humans and AI to cooperatively train and operate thousands of robots simultaneously.
 
 # Vision
 The future of robotics is collaborative, not just automated. Dialtone aims to bridge the gap between human intuition and machine precision by providing a unified network where:
@@ -107,10 +107,7 @@ flowchart TD
     - One-click sharing of robot "moments" to social platforms to engage with the public.
     - Collaborative "Robot Parties" where multiple users can interact with a shared robot world.
 
----
-
 # Documentation Map
-
 Detailed information about System Architecture, Installation, and Development can be found in the [docs/](./docs) directory:
 
 - **[System Design & Tech Stack](./docs/techstack.md)**: Hardware/Software stack overview.
@@ -122,9 +119,8 @@ Detailed information about System Architecture, Installation, and Development ca
 - **[Testing Guide](./docs/test.md)**: Unit tests, integration tests, and UI screenshots.
 - **[TODO](./todo.md)**: List of features to implement.
 
----
 
-#Quick Start (WSL/Linux No-Sudo)
+# Quick Start (WSL/Linux No-Sudo)
 The fastest way to get started on WSL or Linux without administrative privileges:
 ```bash
 # Clone the repo
@@ -156,14 +152,13 @@ bin/dialtone deploy
 ```
 
 ## Why Dialtone uses Golang
-1. Compiled language that produces single binary executables that are easy to deploy.
-2. Support for concurrency.
-3. Excellent standard library and strong ecosystem.
-4. Good cross compilation support.
-5. Typo safety and simple structure.
-6. Strong networking support.
-
----
+1. Compiled language
+2. Produces single binary executables that are easy to deploy
+3. Concurrency Designed into the language
+4. Excellent standard library with strong ecosystem
+5. Cross compilation support
+6. Type safety
+7. Networking support
 
 # Join the Mission
 Dialtone is an open project with an ambitious goal. We are looking for:
