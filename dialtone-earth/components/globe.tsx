@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react"
 import * as d3 from "d3"
 import { useTheme } from "next-themes"
 import { feature } from "topojson-client"
+import * as h3 from "h3-js"
 
 export function Globe() {
   const svgRef = useRef<SVGSVGElement>(null)
@@ -12,7 +13,7 @@ export function Globe() {
   useEffect(() => {
     if (!svgRef.current) return
 
-    const svg = d3.select(svgRef.current)
+    const svg = d3.select(svgRef.current) as d3.Selection<SVGSVGElement, unknown, null, undefined>
     svg.selectAll("*").remove()
 
     const width = svgRef.current.clientWidth
@@ -41,8 +42,52 @@ export function Globe() {
       .attr("r", projection.scale())
 
     const map = svg.append("g")
-
+    const hexGroup = svg.append("g").attr("class", "hexagons")
     const dotsGroup = svg.append("g").attr("class", "dots")
+
+    // Add H3 Hexagons
+    const h3Res = 3
+    const hexCells = h3.getRes0Cells().flatMap(cell => h3.cellToChildren(cell, h3Res))
+
+    const hexData = hexCells.map(cell => {
+      const boundary = h3.cellToBoundary(cell, true) // true for [lon, lat]
+      return {
+        id: cell,
+        geometry: {
+          type: "Polygon",
+          coordinates: [boundary]
+        }
+      }
+    })
+
+    const hexagons = hexGroup
+      .selectAll("path")
+      .data(hexData)
+      .enter()
+      .append("path")
+      .attr("d", (d: any) => path(d.geometry as any))
+      .attr("fill", "none")
+      .attr("stroke", strokeColor)
+      .attr("stroke-width", 0.2)
+      .attr("stroke-opacity", 0.1)
+
+    const animateHexagon = () => {
+      const randomIndex = Math.floor(Math.random() * hexData.length)
+      const selectedHex = hexagons.filter((_d: any, i: number) => i === randomIndex)
+
+      const isRed = Math.random() > 0.5
+      const targetColor = isRed ? "#ef4444" : "#ffffff"
+
+      selectedHex
+        .transition()
+        .duration(2000)
+        .attr("fill", targetColor)
+        .attr("fill-opacity", 0.4)
+        .transition()
+        .duration(2000)
+        .attr("fill", "none")
+        .attr("fill-opacity", 0)
+    }
 
     // Add graticule (grid lines)
     const graticule = d3.geoGraticule().step([20, 20])
@@ -100,13 +145,20 @@ export function Globe() {
     }
 
     let dotIntervalId: ReturnType<typeof setInterval>
+    let hexIntervalId: ReturnType<typeof setInterval>
+
     dotIntervalId = setInterval(() => {
-      // Random chance to create 0-2 dots per tick for natural variation
       const dotCount = Math.random() < 0.8 ? 1 : Math.random() < 0.5 ? 0 : 2
       for (let i = 0; i < dotCount; i++) {
         createRandomDot()
       }
     }, 200)
+
+    hexIntervalId = setInterval(() => {
+      for (let i = 0; i < 3; i++) {
+        animateHexagon()
+      }
+    }, 1000)
 
     // Load world data
     d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json").then((data: any) => {
@@ -132,7 +184,16 @@ export function Globe() {
       const timer = d3.timer(() => {
         rotation += 0.15
         projection.rotate([rotation, -30])
+
         map.selectAll("path").attr("d", path as any)
+
+        // Update hexagons
+        hexagons.attr("d", (d: any) => path(d.geometry as any))
+          .attr("visibility", (d: any) => {
+            const centroid = h3.cellToLatLng(d.id)
+            const geoDistance = d3.geoDistance([centroid[1], centroid[0]], [-projection.rotate()[0], -projection.rotate()[1]])
+            return geoDistance > Math.PI / 2 ? "hidden" : "visible"
+          })
 
         dotsGroup.selectAll("circle").each(function (d: any) {
           const projected = projection(d)
@@ -163,12 +224,14 @@ export function Globe() {
         .attr("r", projection.scale())
 
       map.selectAll("path").attr("d", path as any)
+      hexagons.attr("d", (d: any) => path(d.geometry as any))
     }
 
     window.addEventListener("resize", handleResize)
     return () => {
       window.removeEventListener("resize", handleResize)
-      clearInterval(dotIntervalId) // Cleanup dot interval
+      clearInterval(dotIntervalId)
+      clearInterval(hexIntervalId)
     }
   }, [resolvedTheme])
 
