@@ -40,7 +40,8 @@ func RunInstall(args []string) {
 		fmt.Println("  dialtone install --host pi@robot    # Install on remote robot via SSH")
 		fmt.Println()
 		fmt.Println("Notes:")
-		fmt.Println("  - Dependencies are installed to ~/.dialtone_env (no sudo required)")
+		fmt.Println("  - Dependencies are installed to the directory specified by DIALTONE_ENV")
+		fmt.Println("  - Default location is ~/.dialtone_env (no sudo required)")
 		fmt.Println("  - Auto-detects platform if no flags provided")
 		fmt.Println("  - Skips already-installed dependencies")
 		fmt.Println("  - Supported platforms: darwin/arm64, darwin/amd64, linux/amd64, linux/arm64")
@@ -144,11 +145,7 @@ func installLocalAuto() {
 func installLocalDepsWSL() {
 	LogInfo("Installing local dependencies for Linux/WSL (User-Local, No Sudo)...")
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		LogFatal("Failed to get home directory: %v", err)
-	}
-	depsDir := filepath.Join(homeDir, ".dialtone_env")
+	depsDir := GetDialtoneEnv()
 	os.MkdirAll(depsDir, 0755)
 
 	// 1. Install Go 1.25.5
@@ -219,7 +216,8 @@ func installLocalDepsWSL() {
 			runSimpleShell("dpkg -x libv4l-dev*.deb .")
 			runSimpleShell("dpkg -x linux-libc-dev*.deb .")
 			runSimpleShell("rm *.deb")
-			os.Chdir(homeDir)
+			home, _ := os.UserHomeDir()
+			os.Chdir(home)
 		}
 	} else {
 		LogInfo("V4L2 headers already present in %s", includeDir)
@@ -233,11 +231,7 @@ func installLocalDepsWSL() {
 func installLocalDepsMacOSAMD64() {
 	LogInfo("Installing local dependencies for macOS x86_64 (Intel)...")
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		LogFatal("Failed to get home directory: %v", err)
-	}
-	depsDir := filepath.Join(homeDir, ".dialtone_env")
+	depsDir := GetDialtoneEnv()
 	os.MkdirAll(depsDir, 0755)
 
 	// 1. Install Go for darwin-amd64
@@ -296,11 +290,7 @@ func installLocalDepsMacOSAMD64() {
 func installLocalDepsLinuxARM64() {
 	LogInfo("Installing local dependencies for Linux ARM64...")
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		LogFatal("Failed to get home directory: %v", err)
-	}
-	depsDir := filepath.Join(homeDir, ".dialtone_env")
+	depsDir := GetDialtoneEnv()
 	os.MkdirAll(depsDir, 0755)
 
 	// 1. Install Go for linux-arm64
@@ -359,11 +349,7 @@ func installLocalDepsLinuxARM64() {
 func installLocalDepsMacOSARM() {
 	LogInfo("Installing local dependencies for macOS ARM (Apple Silicon)...")
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		LogFatal("Failed to get home directory: %v", err)
-	}
-	depsDir := filepath.Join(homeDir, ".dialtone_env")
+	depsDir := GetDialtoneEnv()
 	os.MkdirAll(depsDir, 0755)
 
 	// 1. Install Go 1.25.5 for darwin-arm64

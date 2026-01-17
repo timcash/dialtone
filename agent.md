@@ -13,7 +13,7 @@ The fastest way to get started on WSL or Linux without administrative privileges
 ```
 # Clone the repo
 git clone https://github.com/timcash/dialtone.git
-export DAILTONE_ENV="~/dialtone_env"
+export DIALTONE_ENV="~/dialtone_env"
 
 # For bootstrapping only - Install go for linux and macos
 ./setup.sh
@@ -22,10 +22,10 @@ export DAILTONE_ENV="~/dialtone_env"
 ./setup.ps1
 
 # Environment setup if no previous install or cli binary is avaible to help with build
-export CC="${DAILTONE_ENV}/zig/zig cc -target x86_64-linux-gnu"
+export CC="${DIALTONE_ENV}/zig/zig cc -target x86_64-linux-gnu"
 export CGO_ENABLED=1
-export CGO_CFLAGS="-I${DAILTONE_ENV}/usr/include -I${DAILTONE_ENV}/usr/include/x86_64-linux-gnu"
-export PATH="${DAILTONE_ENV}/go/bin:${DAILTONE_ENV}/node/bin:$PATH"
+export CGO_CFLAGS="-I${DIALTONE_ENV}/usr/include -I${DIALTONE_ENV}/usr/include/x86_64-linux-gnu"
+export PATH="${DIALTONE_ENV}/go/bin:${DIALTONE_ENV}/node/bin:$PATH"
 
 # Install dependencies into ~/.dialtone_env (Go, Node, Zig, V4L2 headers)
 go run dialtone-dev.go install --linux-wsl
