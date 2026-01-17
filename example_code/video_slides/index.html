@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tim Cash</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        scroll-snap-type: y mandatory;
+      }
+
+      .section-title {
+        font-family: monospace; /* Example of a blocky font */
+        font-size: 20px;
+        font-weight: bold;
+        font-stretch: expanded;
+
+        position: absolute;
+        top: 0;
+        left: 0;
+        background-color: black;
+        color: white;
+        padding: 10px;
+        z-index: 2; /* Ensure the title is above the video/background */
+      }
+
+      section {
+        width: 100vw;
+        height: 100vh;
+        scroll-snap-align: start;
+        overflow: hidden;
+        position: relative;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+
+      video {
+        position: absolute;
+        top: 0; /* Align top-left corner of video with section */
+        left: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        z-index: 1; /* Ensure background is below the title */
+      }
+    </style>
+
+  </head>
+  <body>
+    <section id="section1">
+      <div class="section-title">SECTION 1</div>
+      <!-- Placeholder for background image -->
+      <video class="lazy" autoplay loop muted playsinline>
+        <source data-src="video1.mp4" type="video/mp4" />
+      </video>
+    </section>
+
+    <section id="section2">
+      <div class="section-title">Section 2</div>
+      <!-- Placeholder for background video -->
+      <video class="lazy" autoplay loop muted playsinline>
+        <source data-src="video2.mp4" type="video/mp4" />
+      </video>
+    </section>
+    <section id="section3">
+      <div class="section-title">Section 3</div>
+      <!-- Placeholder for background video -->
+      <video class="lazy" autoplay loop muted playsinline>
+        <source data-src="video3.mp4" type="video/mp4" />
+      </video>
+    </section>
+    <section id="section4">
+      <div class="section-title">Section 4</div>
+      <!-- Placeholder for background video -->
+      <video class="lazy" autoplay loop muted playsinline>
+        <source data-src="weld_tack_2.mp4" type="video/mp4" />
+      </video>
+    </section>
+
+    <script>
+      // Lazy loading implementation for videos
+      document.addEventListener('DOMContentLoaded', function() {
+        const lazyVideos = document.querySelectorAll('video.lazy');
+        
+        // Intersection Observer for lazy loading
+        const videoObserver = new IntersectionObserver((entries, observer) => {
+          entries.forEach(entry => {
+            if (entry.isIntersecting) {
+              const video = entry.target;
+              const source = video.querySelector('source[data-src]');
+              
+              if (source) {
+                console.log('Loading video:', source.dataset.src);
+                
+                // Move data-src to src
+                source.src = source.dataset.src;
+                delete source.dataset.src;
+                
+                // Load the video
+                video.load();
+                
+                // Try to play the video
+                video.play().catch(e => {
+                  console.log('Autoplay prevented for video:', source.src, e);
+                });
+                
+                // Stop observing this video
+                observer.unobserve(video);
+              }
+            }
+          });
+        }, {
+          rootMargin: '50px 0px', // Start loading 50px before video comes into view
+          threshold: 0.1
+        });
+        
+        // Start observing all lazy videos
+        lazyVideos.forEach(video => {
+          videoObserver.observe(video);
+        });
+        
+        // Fallback: play videos on user interaction if autoplay fails
+        document.addEventListener('click', function() {
+          lazyVideos.forEach(video => {
+            if (video.paused && video.src) {
+              video.play().catch(e => {
+                console.log('Still cannot play video:', e);
+              });
+            }
+          });
+        }, { once: true });
+        
+        console.log(`Started observing ${lazyVideos.length} lazy videos`);
+      });
+    </script>
+  </body>
+</html>
