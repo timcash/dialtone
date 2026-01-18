@@ -132,6 +132,42 @@ go run dialtone.go start --local
 
 ---
 
+## Remote Robot Deployment
+
+For deploying to a Raspberry Pi or other remote robot, use the following workflow:
+
+### 1. Configure `.env`
+Ensure your local `.env` file contains the correct credentials and host information:
+```ini
+ROBOT_HOST=192.168.4.36
+ROBOT_USER=tim
+ROBOT_PASSWORD=password
+REMOTE_DIR_SRC=/home/tim/dialtone_src
+REMOTE_DIR_DEPLOY=/home/tim/dialtone_deploy
+DIALTONE_HOSTNAME=drone_1
+MAVLINK_ENDPOINT=udp:0.0.0.0:14550
+```
+
+### 2. Synchronization & Building
+The deployment process involves two main steps:
+1. **Sync Code**: `go run dialtone-dev.go sync-code`
+   - Uploads `src/`, `go.mod`, `go.sum`, and web assets to the robot.
+2. **Remote Build**: `go run dialtone-dev.go build --remote`
+   - Compiles the binary on the robot to ensure ARM compatibility and correct CGO linking.
+   - Built assets are stored in `src/web_build`.
+
+### 3. Deploy & Verify
+- **Deploy**: `go run dialtone-dev.go deploy`
+  - Uploads the compiled binary and starts it as a system service.
+- **Logs**: `go run dialtone-dev.go logs`
+  - Tails the remote logs to verify the service started correctly.
+
+### Web UI Clarification
+- **Robot Interface ([src/web](file:///home/user/dialtone/src/web))**: The operational dashboard embedded in the `dialtone` binary via `src/web_build`.
+- **Marketing Site ([dialtone-earth](file:///home/user/dialtone/dialtone-earth))**: A standalone Next.js app for public RSI, published via `dialtone-dev www publish` (typically to Vercel).
+
+---
+
 ## Testing the Webpage
 
 The `dialtone-earth` project includes Puppeteer-based live site verification.
