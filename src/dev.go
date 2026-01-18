@@ -17,6 +17,9 @@ func ExecuteDev() {
 		return
 	}
 
+	// Load configuration
+	LoadConfig()
+
 	command := os.Args[1]
 	args := os.Args[2:]
 
@@ -791,7 +794,7 @@ func runWww(args []string) {
 
 	subcommand := args[0]
 	// Determine the directory where the webpage code is located
-	webDir := "."
+	webDir := "dialtone-earth"
 
 	switch subcommand {
 	case "publish":

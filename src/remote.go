@@ -64,9 +64,8 @@ func RunSyncCode(args []string) {
 
 	LogInfo("Syncing code to %s on %s...", remoteDir, *host)
 
-	// Clean remote src dir partially? Or just overwrite.
-	// We definitely need to ensure directories exist.
-	_, _ = runSSHCommand(client, fmt.Sprintf("mkdir -p %s/src/web", remoteDir))
+	// Clean remote src dir to remove stale files (like legacy manager.go)
+	_, _ = runSSHCommand(client, fmt.Sprintf("rm -rf %s/src && mkdir -p %s/src", remoteDir, remoteDir))
 
 	// Sync root files
 	filesToUpload := []string{"go.mod", "go.sum", "dialtone.go", "build.sh", "build.ps1", "README.md"}
@@ -88,17 +87,23 @@ func RunSyncCode(args []string) {
 		}
 	}
 
-	// Sync src/web (excluding node_modules and dist)
-	LogInfo("Uploading src/web source...")
-	uploadDirFiltered(client, filepath.Join("src", "web"), path.Join(remoteDir, "src", "web"), []string{"node_modules", "dist", ".git"})
+	// Sync drone UI source (src/web)
+	if _, err := os.Stat("src/web"); err == nil {
+		LogInfo("Uploading src/web source...")
+		uploadDirFiltered(client, "src/web", path.Join(remoteDir, "src/web"), []string{".git", "node_modules", "dist"})
+	}
 
 	// Sync test directory
-	LogInfo("Uploading test directory...")
-	uploadDirFiltered(client, "test", path.Join(remoteDir, "test"), []string{".git"})
+	if _, err := os.Stat("test"); err == nil {
+		LogInfo("Uploading test directory...")
+		uploadDirFiltered(client, "test", path.Join(remoteDir, "test"), []string{".git"})
+	}
 
-	// Sync mavlink directory
-	LogInfo("Uploading mavlink directory...")
-	uploadDirFiltered(client, "mavlink", path.Join(remoteDir, "mavlink"), []string{".git", "__pycache__"})
+	// Sync mavlink directory (if it exists)
+	if _, err := os.Stat("mavlink"); err == nil {
+		LogInfo("Uploading mavlink directory...")
+		uploadDirFiltered(client, "mavlink", path.Join(remoteDir, "mavlink"), []string{".git", "__pycache__"})
+	}
 
 	LogInfo("Code sync complete.")
 }
@@ -132,7 +137,7 @@ func RunRemoteBuild(args []string) {
 
 	LogInfo("Building on remote %s...", *host)
 
-	// Build Web
+	// Build Drone UI (src/web)
 	webCmd := fmt.Sprintf(`
 		export PATH=$PATH:/usr/local/go/bin
 		cd %s/src/web
@@ -140,10 +145,10 @@ func RunRemoteBuild(args []string) {
 		npm install
 		echo "Building web assets..."
 		npm run build
-		cd ..
-		rm -rf web_build
-		mkdir -p web_build
-		cp -r web/dist/* web_build/
+		cd ../..
+		rm -rf src/web_build
+		mkdir -p src/web_build
+		cp -r src/web/dist/* src/web_build/
 	`, remoteDir)
 
 	output, err := runSSHCommand(client, webCmd)
