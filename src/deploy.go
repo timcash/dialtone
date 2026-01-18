@@ -133,7 +133,11 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 		}
 
 		LogInfo("Building on Raspberry Pi...")
-		buildCmd := fmt.Sprintf("cd %s && /usr/local/go/bin/go build -v -o dialtone .", remoteDir)
+		buildCmd := fmt.Sprintf(`
+			export PATH=$PATH:/usr/local/go/bin
+			cd %s
+			/usr/local/go/bin/go build -v -o dialtone .
+		`, remoteDir)
 		output, err := runSSHCommand(client, buildCmd)
 		if err != nil {
 			LogFatal("Remote build failed: %v\nOutput: %s", err, output)
@@ -167,7 +171,7 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 		mavlinkFlag = fmt.Sprintf("-mavlink %s", mavlinkEndpoint)
 	}
 
-	startCmd := fmt.Sprintf("cp %s ~/dialtone && chmod +x ~/dialtone && nohup sh -c 'TS_AUTHKEY=%s ~/dialtone start -hostname %s %s %s' > ~/nats.log 2>&1 < /dev/null &", remoteBinaryPath, tsAuthKey, hostnameParam, ephemeralFlag, mavlinkFlag)
+	startCmd := fmt.Sprintf("rm -rf ~/dialtone && cp %s ~/dialtone && chmod +x ~/dialtone && nohup sh -c 'TS_AUTHKEY=%s ~/dialtone start -hostname %s %s %s' > ~/nats.log 2>&1 < /dev/null &", remoteBinaryPath, tsAuthKey, hostnameParam, ephemeralFlag, mavlinkFlag)
 
 	if err := runSSHCommandNoWait(client, startCmd); err != nil {
 		LogFatal("Failed to start: %v", err)
