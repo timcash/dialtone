@@ -43,7 +43,7 @@ func RunBuild(args []string) {
 	}
 
 	if *remote {
-		RunRemoteBuild(args)
+		RunRemoteBuild(fs.Args())
 		return
 	}
 
