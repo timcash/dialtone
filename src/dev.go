@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -54,6 +55,8 @@ func ExecuteDev() {
 		runIssue(args)
 	case "www":
 		runWww(args)
+	case "opencode":
+		runOpencode(args)
 	case "help", "-h", "--help":
 		printDevUsage()
 	default:
@@ -81,6 +84,7 @@ func printDevUsage() {
 	fmt.Println("  pull-request       Create or update a pull request (wrapper around gh CLI)")
 	fmt.Println("  issue <subcmd>     Manage GitHub issues (wrapper around gh CLI)")
 	fmt.Println("  www <subcmd>       Manage public webpage (Vercel wrapper)")
+	fmt.Println("  opencode <subcmd>  Manage opencode AI assistant (start, stop, status, ui)")
 	fmt.Println("  help               Show this help message")
 }
 
@@ -872,4 +876,73 @@ func runWww(args []string) {
 			LogFatal("Vercel command failed: %v", err)
 		}
 	}
+}
+
+// runOpencode handles the opencode command
+func runOpencode(args []string) {
+	if len(args) == 0 {
+		fmt.Println("Usage: dialtone-dev opencode <subcommand> [options]")
+		fmt.Println("\nSubcommands:")
+		fmt.Println("  start         Start the opencode server")
+		fmt.Println("  stop          Stop the opencode server")
+		fmt.Println("  status        Check server status")
+		fmt.Println("  ui            Open the opencode UI in browser")
+		return
+	}
+
+	subcommand := args[0]
+	opencodePath := os.ExpandEnv("$HOME/.opencode/bin/opencode")
+
+	switch subcommand {
+	case "start":
+		LogInfo("Starting opencode server on port 3000...")
+		cmd := exec.Command(opencodePath, "--port", "3000")
+		// Run in background and redirect output
+		logFile, err := os.OpenFile("opencode.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			LogFatal("Failed to open opencode log: %v", err)
+		}
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+		if err := cmd.Start(); err != nil {
+			LogFatal("Failed to start opencode: %v", err)
+		}
+		LogInfo("opencode started (PID: %d). Logs: opencode.log", cmd.Process.Pid)
+
+	case "stop":
+		LogInfo("Stopping opencode server...")
+		// Simple pkill for demonstration
+		cmd := exec.Command("pkill", "-f", "opencode")
+		if err := cmd.Run(); err != nil {
+			LogInfo("Opencode not running or failed to stop: %v", err)
+		} else {
+			LogInfo("opencode stopped")
+		}
+
+	case "status":
+		cmd := exec.Command("pgrep", "-f", "opencode")
+		output, err := cmd.Output()
+		if err == nil && len(output) > 0 {
+			fmt.Printf("opencode is running (PIDs: %s)\n", strings.TrimSpace(string(output)))
+		} else {
+			fmt.Println("opencode is not running")
+		}
+
+	case "ui":
+		LogInfo("Opening opencode UI...")
+		url := "http://127.0.0.1:3000" // Default port based on typical AI assistant apps
+		var cmd *exec.Cmd
+		if runtime.GOOS == "windows" {
+			cmd = exec.Command("cmd", "/c", "start", url)
+		} else if runtime.GOOS == "darwin" {
+			cmd = exec.Command("open", url)
+		} else {
+			cmd = exec.Command("xdg-open", url)
+		}
+		cmd.Run()
+
+default:
+fmt.Printf("Unknown opencode subcommand: %s\n", subcommand)
+runOpencode([]string{})
+}
 }
