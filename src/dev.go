@@ -1047,9 +1047,51 @@ func runDeveloper(args []string) {
 	LogInfo("Setup complete for %s. Task file: %s", branchName, taskPath)
 
 	// 3. Delegate to subagent
-	runSubagent([]string{"--task", taskPath})
+	cmd = startSubagent([]string{"--task", taskPath})
+	if cmd == nil {
+		LogFatal("Failed to start subagent")
+	}
 
-	// 4. Monitor and Submit
+	// 4. Monitor Loop (every 30 seconds)
+	LogInfo("Monitoring subagent progress...")
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Check if subagent is still running
+			if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+				if cmd.ProcessState.Success() {
+					LogInfo("Subagent completed successfully.")
+					goto verification
+				} else {
+					LogInfo("Subagent failed. Attempting restart...")
+					cmd = startSubagent([]string{"--task", taskPath})
+					continue
+				}
+			}
+
+			// Perform "Progress Check" by analyzing logs
+			LogInfo("Checking subagent logs for drift...")
+			if !checkSubagentProgress(branchName) {
+				LogInfo("Subagent seems off-track. Killing and restarting...")
+				cmd.Process.Kill()
+				cmd = startSubagent([]string{"--task", taskPath})
+			}
+		}
+		
+		// Small sleep to prevent tight loop if ticker fails
+		time.Sleep(1 * time.Second)
+		
+		// Check process state again (in case it exited just now)
+		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+			break
+		}
+	}
+
+verification:
+	// 4. Submit
 	LogInfo("Subagent finished. Running verification tests...")
 	runTest([]string{})
 
@@ -1059,8 +1101,39 @@ func runDeveloper(args []string) {
 	LogInfo("Autonomous developer loop completed for issue #%d", selectedIssue.Number)
 }
 
-// runSubagent handles the subagent command
-func runSubagent(args []string) {
+// checkSubagentProgress analyzes the subagent logs to see if it's still on task
+func checkSubagentProgress(branchName string) bool {
+	logPath := "opencode.log"
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		return true // Can't read log, assume it's fine for now
+	}
+
+	lines := strings.Split(string(data), "\n")
+	if len(lines) < 10 {
+		return true // Not enough logs yet
+	}
+
+	// Get last 10 lines
+	lastLogs := lines[len(lines)-10:]
+	
+	// Heuristic: If logs contain "don't know", "error", or repetitive "trying to...", trigger restart
+	// In a real scenario, this would be a prompt to an LLM:
+	// "look at recent logs of this sub agent and determine if it still on task..."
+	LogInfo("Prompt: Analyzing last 10 lines of %s...", logPath)
+	for _, line := range lastLogs {
+		if strings.Contains(strings.ToLower(line), "stuck") || 
+		   strings.Contains(strings.ToLower(line), "loop detected") ||
+		   strings.Contains(strings.ToLower(line), "illegal operation") {
+			return false
+		}
+	}
+
+	return true
+}
+
+// startSubagent launches the subagent process and returns the command object
+func startSubagent(args []string) *exec.Cmd {
 	var taskFile string
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--task" && i+1 < len(args) {
@@ -1070,30 +1143,43 @@ func runSubagent(args []string) {
 	}
 
 	if taskFile == "" {
-		fmt.Println("Usage: dialtone-dev subagent --task <file>")
-		return
+		LogInfo("Usage: dialtone-dev subagent --task <file>")
+		return nil
 	}
 
 	LogInfo("Subagent starting task: %s", taskFile)
 
-	// Check if opencode is available as the default subagent
 	opencodePath := os.ExpandEnv("$HOME/.opencode/bin/opencode")
 	if _, err := os.Stat(opencodePath); os.IsNotExist(err) {
-		LogInfo("Default subagent (opencode) not found. Please install it or specify an alternative.")
-		return
+		LogInfo("Default subagent (opencode) not found.")
+		return nil
 	}
 
-	LogInfo("Launching opencode subagent...")
-
-	// Launch opencode with the task file
-	// Assuming opencode has a --task or similar flag, or we just pass the file
 	cmd := exec.Command(opencodePath, "--task", taskFile)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	
+	// Create or append to a specific log file for this subagent session
+	logFile, err := os.OpenFile("opencode.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		LogInfo("Failed to open subagent log: %v", err)
+		return nil
+	}
+	
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
 
-	if err := cmd.Run(); err != nil {
-		LogFatal("Subagent failed: %v", err)
+	if err := cmd.Start(); err != nil {
+		LogInfo("Failed to start subagent: %v", err)
+		return nil
 	}
 
-	LogInfo("Subagent completed task: %s", taskFile)
+	return cmd
+}
+
+// runSubagent handles the legacy subagent command wrapper
+func runSubagent(args []string) {
+	cmd := startSubagent(args)
+	if cmd != nil {
+		cmd.Wait()
+		LogInfo("Subagent completed.")
+	}
 }
