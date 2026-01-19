@@ -67,7 +67,16 @@ go run dialtone.go start --local
 10. Add vendor docs to `docs/vendor/<vendor_name>.md` if needed
 11. Mark completed tests with `[x]` in the plan file
 
-### 3. Cleanup and Pull Request
+### 3. Autonomous Stage (New)
+
+1. Run `go run dialtone-dev.go developer` to start the autonomous loop.
+2. The agent will fetch issues, prioritize them, and setup a `features/` directory.
+3. A subagent is launched via `dialtone-dev subagent --task <task.md>`.
+4. The developer agent monitors progress every 30 seconds by analyzing `opencode.log`.
+5. If the subagent drifts or hangs, it is automatically restarted to maintain progress.
+6. The developer agent creates a PR upon successful verification.
+
+### 4. Cleanup and Pull Request
 
 1. Verify the branch only contains changes related to the feature
 2. Stage and commit: `git add .` and `git commit -m "<feature-branch-name>: complete"`
@@ -124,10 +133,14 @@ go run dialtone.go start --local
     - Example: `go run dialtone-dev.go test my-feature`
 14. `go run dialtone-dev.go pull-request [options]` — Create or update a PR
     - Example: `go run dialtone-dev.go pull-request --draft`
-15. `go run dialtone-dev.go issue <subcmd>` — Manage GitHub issues
+16. `go run dialtone-dev.go issue <subcmd>` — Manage GitHub issues
     - Example: `go run dialtone-dev.go issue view 20`
-16. `go run dialtone-dev.go www <subcmd>` — Manage public webpage (Vercel wrapper)
+17. `go run dialtone-dev.go www <subcmd>` — Manage public webpage (Vercel wrapper)
     - Example: `go run dialtone-dev.go www publish`
+18. `go run dialtone-dev.go developer` — Start the autonomous developer loop
+    - Example: `go run dialtone-dev.go developer --capability camera`
+19. `go run dialtone-dev.go subagent --task <file>` — Interface for autonomous subagents
+    - Example: `go run dialtone-dev.go subagent --task features/fix-logic/task.md`
 
 ---
 
