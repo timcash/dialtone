@@ -1,6 +1,7 @@
 package dialtone
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -57,6 +58,10 @@ func ExecuteDev() {
 		runWww(args)
 	case "opencode":
 		runOpencode(args)
+	case "developer":
+		runDeveloper(args)
+	case "subagent":
+		runSubagent(args)
 	case "help", "-h", "--help":
 		printDevUsage()
 	default:
@@ -85,6 +90,8 @@ func printDevUsage() {
 	fmt.Println("  issue <subcmd>     Manage GitHub issues (wrapper around gh CLI)")
 	fmt.Println("  www <subcmd>       Manage public webpage (Vercel wrapper)")
 	fmt.Println("  opencode <subcmd>  Manage opencode AI assistant (start, stop, status, ui)")
+	fmt.Println("  developer          Start the autonomous developer loop")
+	fmt.Println("  subagent <options> Interface for autonomous subagents")
 	fmt.Println("  help               Show this help message")
 }
 
@@ -945,4 +952,148 @@ default:
 fmt.Printf("Unknown opencode subcommand: %s\n", subcommand)
 runOpencode([]string{})
 }
+}
+
+// runDeveloper handles the developer command
+func runDeveloper(args []string) {
+	LogInfo("Starting autonomous developer loop...")
+
+	var capabilities []string
+	dryRun := false
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--dry-run" {
+			dryRun = true
+		} else if args[i] == "--capability" && i+1 < len(args) {
+			capabilities = append(capabilities, args[i+1])
+			i++
+		}
+	}
+
+	if dryRun {
+		LogInfo("Running in DRY RUN mode. No changes will be made.")
+	}
+
+	// 1. Fetch and rank issues
+	LogInfo("Fetching open issues from GitHub...")
+
+	cmd := exec.Command("gh", "issue", "list", "--json", "number,title,labels", "--state", "open")
+	output, err := cmd.Output()
+	if err != nil {
+		LogFatal("Failed to fetch issues: %v", err)
+	}
+
+	var issues []struct {
+		Number int    `json:"number"`
+		Title  string `json:"title"`
+		Labels []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+	}
+
+	if err := json.Unmarshal(output, &issues); err != nil {
+		LogFatal("Failed to parse issues: %v", err)
+	}
+
+	if len(issues) == 0 {
+		LogInfo("No open issues found.")
+		return
+	}
+
+	// Rank issues based on matching labels
+	bestIssueIdx := -1
+	maxMatch := -1
+
+	for i, issue := range issues {
+		matchCount := 0
+		for _, label := range issue.Labels {
+			for _, cap := range capabilities {
+				if strings.Contains(strings.ToLower(label.Name), strings.ToLower(cap)) {
+					matchCount++
+				}
+			}
+		}
+		if matchCount > maxMatch {
+			maxMatch = matchCount
+			bestIssueIdx = i
+		}
+	}
+
+	selectedIssue := issues[bestIssueIdx]
+	LogInfo("Selected issue #%d: %s (Match score: %d)", selectedIssue.Number, selectedIssue.Title, maxMatch)
+
+	// 2. Setup feature branch and directory
+	branchName := fmt.Sprintf("issue-%d", selectedIssue.Number)
+	if dryRun {
+		LogInfo("DRY RUN: Would create branch %s and directory features/%s", branchName, branchName)
+		return
+	}
+
+	// Create branch
+	runBranch([]string{branchName})
+
+	// Create feature directory
+	featureDir := filepath.Join("features", branchName)
+	if err := os.MkdirAll(featureDir, 0755); err != nil {
+		LogFatal("Failed to create feature directory: %v", err)
+	}
+
+	// Create initial task.md for subagent
+	taskPath := filepath.Join(featureDir, "task.md")
+	taskContent := fmt.Sprintf("# Task: Solve Issue #%d\n\n- [ ] %s\n", selectedIssue.Number, selectedIssue.Title)
+	if err := os.WriteFile(taskPath, []byte(taskContent), 0644); err != nil {
+		LogFatal("Failed to create task file: %v", err)
+	}
+
+	LogInfo("Setup complete for %s. Task file: %s", branchName, taskPath)
+
+	// 3. Delegate to subagent
+	runSubagent([]string{"--task", taskPath})
+
+	// 4. Monitor and Submit
+	LogInfo("Subagent finished. Running verification tests...")
+	runTest([]string{})
+
+	LogInfo("Tests passed. Creating pull request...")
+	runPullRequest([]string{"--title", fmt.Sprintf("%s: autonomous fix", branchName), "--body", fmt.Sprintf("Autonomous fix for issue #%d\n\nSee %s for details.", selectedIssue.Number, taskPath)})
+
+	LogInfo("Autonomous developer loop completed for issue #%d", selectedIssue.Number)
+}
+
+// runSubagent handles the subagent command
+func runSubagent(args []string) {
+	var taskFile string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--task" && i+1 < len(args) {
+			taskFile = args[i+1]
+			i++
+		}
+	}
+
+	if taskFile == "" {
+		fmt.Println("Usage: dialtone-dev subagent --task <file>")
+		return
+	}
+
+	LogInfo("Subagent starting task: %s", taskFile)
+
+	// Check if opencode is available as the default subagent
+	opencodePath := os.ExpandEnv("$HOME/.opencode/bin/opencode")
+	if _, err := os.Stat(opencodePath); os.IsNotExist(err) {
+		LogInfo("Default subagent (opencode) not found. Please install it or specify an alternative.")
+		return
+	}
+
+	LogInfo("Launching opencode subagent...")
+
+	// Launch opencode with the task file
+	// Assuming opencode has a --task or similar flag, or we just pass the file
+	cmd := exec.Command(opencodePath, "--task", taskFile)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		LogFatal("Subagent failed: %v", err)
+	}
+
+	LogInfo("Subagent completed task: %s", taskFile)
 }
