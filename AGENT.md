@@ -72,7 +72,9 @@ go run dialtone.go start --local
 1. Run `go run dialtone-dev.go developer` to start the autonomous loop.
 2. The agent will fetch issues, prioritize them, and setup a `features/` directory.
 3. A subagent is launched via `dialtone-dev subagent --task <task.md>`.
-4. The developer agent monitors progress and creates a PR upon success.
+4. The developer agent monitors progress every 30 seconds by analyzing `opencode.log`.
+5. If the subagent drifts or hangs, it is automatically restarted to maintain progress.
+6. The developer agent creates a PR upon successful verification.
 
 ### 4. Cleanup and Pull Request
 
