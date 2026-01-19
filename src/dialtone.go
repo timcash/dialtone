@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -72,6 +73,7 @@ func runStart(args []string) {
 	wsPort := fs.Int("ws-port", 4223, "NATS WebSocket port")
 	verbose := fs.Bool("verbose", false, "Enable verbose logging")
 	mavlinkAddr := fs.String("mavlink", "", "Mavlink connection string (e.g. serial:/dev/ttyAMA0:57600 or udp:0.0.0.0:14550)")
+	opencode := fs.Bool("opencode", false, "Start opencode AI assistant server")
 	fs.Parse(args)
 
 	// Determine state directory
@@ -84,15 +86,15 @@ func runStart(args []string) {
 	}
 
 	if *localOnly {
-		runLocalOnly(*natsPort, *wsPort, *verbose, *mavlinkAddr)
+		runLocalOnly(*natsPort, *wsPort, *verbose, *mavlinkAddr, *opencode)
 		return
 	}
 
-	runWithTailscale(*hostname, *natsPort, *wsPort, *webPort, *stateDir, *ephemeral, *verbose, *mavlinkAddr)
+	runWithTailscale(*hostname, *natsPort, *wsPort, *webPort, *stateDir, *ephemeral, *verbose, *mavlinkAddr, *opencode)
 }
 
 // runLocalOnly starts NATS without Tailscale (original behavior)
-func runLocalOnly(port, wsPort int, verbose bool, mavlinkAddr string) {
+func runLocalOnly(port, wsPort int, verbose bool, mavlinkAddr string, opencode bool) {
 	ns := startNATSServer("0.0.0.0", port, wsPort, verbose)
 	defer ns.Shutdown()
 
@@ -101,6 +103,11 @@ func runLocalOnly(port, wsPort int, verbose bool, mavlinkAddr string) {
 	// Start Mavlink service if requested
 	if mavlinkAddr != "" {
 		go startMavlink(mavlinkAddr, port)
+	}
+
+	// Start opencode if requested
+	if opencode {
+		go runOpencodeServer(3000) // Default opencode port
 	}
 
 	// Start NATS publisher loop for Mavlink
@@ -117,7 +124,7 @@ var startTime = time.Now()
 var webFS embed.FS
 
 // runWithTailscale starts NATS exposed via Tailscale
-func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir string, ephemeral, verbose bool, mavlinkAddr string) {
+func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir string, ephemeral, verbose bool, mavlinkAddr string, opencode bool) {
 	// Ensure state directory exists
 	if err := os.MkdirAll(stateDir, 0700); err != nil {
 		LogFatal("Failed to create state directory: %v", err)
@@ -221,6 +228,18 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 		LogFatal("Failed to listen on Tailscale for web: %v", err)
 	}
 	defer webLn.Close()
+
+	// Start opencode proxy if requested
+	if opencode {
+		opencodeLn, err := ts.Listen("tcp", ":3000")
+		if err != nil {
+			LogInfo("Failed to listen on Tailscale for opencode: %v", err)
+		} else {
+			LogInfo("opencode available on Tailscale at %s:3000", hostname)
+			go ProxyListener(opencodeLn, "127.0.0.1:3000")
+			go runOpencodeServer(3000)
+		}
+	}
 
 	// Get LocalClient for identifying callers
 	lc, err := ts.LocalClient()
@@ -689,4 +708,31 @@ func formatIPs(ips []netip.Addr) string {
 		result += ip.String()
 	}
 	return result
+}
+
+// runOpencodeServer starts the opencode AI assistant server
+func runOpencodeServer(port int) {
+opencodePath := os.ExpandEnv("$HOME/.opencode/bin/opencode")
+if _, err := os.Stat(opencodePath); os.IsNotExist(err) {
+LogInfo("opencode binary not found at %s, skipping...", opencodePath)
+return
+}
+
+LogInfo("Starting opencode server on port %d...", port)
+cmd := exec.Command(opencodePath, "--port", fmt.Sprintf("%d", port))
+
+// Create log file
+logFile, err := os.OpenFile("opencode.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+if err != nil {
+LogInfo("Failed to create opencode log file: %v", err)
+return
+}
+defer logFile.Close()
+
+cmd.Stdout = logFile
+cmd.Stderr = logFile
+
+if err := cmd.Run(); err != nil {
+LogInfo("opencode server exited: %v", err)
+}
 }
