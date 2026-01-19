@@ -675,6 +675,7 @@ func runIssue(args []string) {
 		fmt.Println("  add                Create a new issue")
 		fmt.Println("  comment <id> <msg> Add a comment to an issue")
 		fmt.Println("  view <id>          View issue details")
+		fmt.Println("  close <id>         Close a GitHub issue")
 		return
 	}
 
@@ -760,6 +761,19 @@ func runIssue(args []string) {
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			LogFatal("Failed to view issue: %v", err)
+		}
+
+	case "close":
+		if len(subArgs) < 1 {
+			LogFatal("Usage: dialtone-dev issue close <issue-id>")
+		}
+		issueID := subArgs[0]
+		LogInfo("Closing issue #%s...", issueID)
+		cmd := exec.Command("gh", "issue", "close", issueID)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			LogFatal("Failed to close issue: %v", err)
 		}
 
 	default:
