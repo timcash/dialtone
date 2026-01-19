@@ -50,9 +50,8 @@ go run dialtone.go start --local
 5. Read `README.md` to get an overview of the system
 6. Look for the plan file at `plan/plan-<feature-branch-name>.md`
 7. Write your plan into it as you go with a test list. then mark off each test when it passes
-8. If the branch, plan or tests already exists for `<feature-branch-name>` you should continue the work
-9. Review `docs/cli.md` to understand CLI commands
-10. Create a draft PR: `go run dialtone-dev.go pull-request --draft --title "<feature-branch-name>" --body "Plan file"`
+8. If the branch, plan or tests already exists for `<feature-branch-name>` you should continue the work.
+9. Create a draft PR: `go run dialtone-dev.go pull-request --draft --title "<feature-branch-name>" --body "Plan file"`
 
 ### 2. Development Stage (Iterative Loop)
 
