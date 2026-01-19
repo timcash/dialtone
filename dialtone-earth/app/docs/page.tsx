@@ -1,8 +1,11 @@
 import { Button } from "@/components/ui/button"
-import { Home as HomeIcon, Info, Terminal, Box, Activity, Github } from "lucide-react"
+import { Home as HomeIcon, Info, Terminal, Box, Activity, Github, BookOpen } from "lucide-react"
 import Link from "next/link"
+import { getAllDocsSlugs } from "@/lib/docs"
 
 export default function DocsPage() {
+    const docs = getAllDocsSlugs();
+
     return (
         <main className="relative min-h-screen flex flex-col items-center py-20 px-4 bg-background">
             <div className="max-w-4xl w-full space-y-12 relative z-10">
@@ -66,6 +69,26 @@ export default function DocsPage() {
                         </ul>
                     </div>
                 </section>
+
+                {docs.length > 0 && (
+                <section className="space-y-6">
+                    <h2 className="text-3xl font-bold flex items-center gap-2 font-[family-name:var(--font-space-grotesk)]">
+                        <BookOpen className="h-8 w-8" /> Vendor Docs
+                    </h2>
+                    <div className="grid gap-4 md:grid-cols-2">
+                        {docs.map((doc) => (
+                            <Button key={doc.slug} variant="secondary" asChild className="h-auto p-4 justify-start">
+                                <Link href={`/docs/${doc.slug}`}>
+                                    <div className="text-left">
+                                        <div className="font-semibold capitalize">{doc.slug.replace(/_/g, ' ')}</div>
+                                        <div className="text-xs text-muted-foreground">View documentation</div>
+                                    </div>
+                                </Link>
+                            </Button>
+                        ))}
+                    </div>
+                </section>
+                )}
 
                 <section className="space-y-4">
                     <h2 className="text-2xl font-bold font-[family-name:var(--font-space-grotesk)]">CLI Reference</h2>
