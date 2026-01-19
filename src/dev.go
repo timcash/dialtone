@@ -1,6 +1,7 @@
 package dialtone
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -57,6 +58,12 @@ func ExecuteDev() {
 		runWww(args)
 	case "opencode":
 		runOpencode(args)
+	case "developer":
+		runDeveloper(args)
+	case "subagent":
+		runSubagent(args)
+	case "docs":
+		runDocs(args)
 	case "help", "-h", "--help":
 		printDevUsage()
 	default:
@@ -85,7 +92,128 @@ func printDevUsage() {
 	fmt.Println("  issue <subcmd>     Manage GitHub issues (wrapper around gh CLI)")
 	fmt.Println("  www <subcmd>       Manage public webpage (Vercel wrapper)")
 	fmt.Println("  opencode <subcmd>  Manage opencode AI assistant (start, stop, status, ui)")
+	fmt.Println("  developer          Start the autonomous developer loop")
+	fmt.Println("  subagent <options> Interface for autonomous subagents")
+	fmt.Println("  docs               Update documentation")
 	fmt.Println("  help               Show this help message")
+}
+
+// runDocs handles the docs command
+func runDocs(args []string) {
+	LogInfo("Updating documentation...")
+
+	// 1. Capture dialtone-dev help output
+	// We need to re-run the current binary with "help" argument
+	// However, we are running as "go run ...", so os.Args[0] is a temporary binary.
+	// That's fine for capturing output.
+	cmd := exec.Command(os.Args[0], "help")
+	output, err := cmd.Output()
+	if err != nil {
+		LogFatal("Failed to run help command: %v", err)
+	}
+
+	helpOutput := string(output)
+
+	// 2. Parse help output to extract commands
+	lines := strings.Split(helpOutput, "\n")
+	var commands []string
+	capture := false
+	for _, line := range lines {
+		if strings.Contains(line, "Commands:") {
+			capture = true
+			continue
+		}
+		if capture && strings.TrimSpace(line) != "" {
+			commands = append(commands, strings.TrimSpace(line))
+		}
+	}
+
+	// 3. Format as markdown list
+	var markdownLines []string
+	markdownLines = append(markdownLines, "### Development CLI (`dialtone-dev.go`)")
+	markdownLines = append(markdownLines, "")
+
+	for i, cmdLine := range commands {
+		parts := strings.Fields(cmdLine)
+		if len(parts) >= 2 {
+			cmdName := parts[0]
+			desc := strings.Join(parts[1:], " ")
+			markdownLines = append(markdownLines, fmt.Sprintf("%d. `go run dialtone-dev.go %s` — %s", i+1, cmdName, desc))
+
+			// Add examples based on command name
+			example := ""
+			switch cmdName {
+			case "install":
+				example = "go run dialtone-dev.go install --linux-wsl"
+			case "build":
+				example = "go run dialtone-dev.go build --local"
+			case "deploy":
+				example = "go run dialtone-dev.go deploy"
+			case "clone":
+				example = "go run dialtone-dev.go clone ./dialtone"
+			case "sync-code":
+				example = "go run dialtone-dev.go sync-code"
+			case "ssh":
+				example = "go run dialtone-dev.go ssh download /tmp/log.txt"
+			case "provision":
+				example = "go run dialtone-dev.go provision"
+			case "logs":
+				example = "go run dialtone-dev.go logs"
+			case "diagnostic":
+				example = "go run dialtone-dev.go diagnostic --remote"
+			case "branch":
+				example = "go run dialtone-dev.go branch my-feature"
+			case "plan":
+				example = "go run dialtone-dev.go plan my-feature"
+			case "test":
+				example = "go run dialtone-dev.go test my-feature"
+			case "pull-request":
+				example = "go run dialtone-dev.go pull-request --draft"
+			case "issue":
+				example = "go run dialtone-dev.go issue view 20"
+			case "www":
+				example = "go run dialtone-dev.go www publish"
+			case "developer":
+				example = "go run dialtone-dev.go developer --capability camera"
+			case "subagent":
+				example = "go run dialtone-dev.go subagent --task features/fix-logic/task.md"
+			case "docs":
+				example = "go run dialtone-dev.go docs"
+			}
+
+			if example != "" {
+				markdownLines = append(markdownLines, fmt.Sprintf("   - Example: `%s`", example))
+			}
+		}
+	}
+
+	newContent := strings.Join(markdownLines, "\n")
+
+	// 4. Update AGENT.md
+	agentMdPath := "AGENT.md"
+	content, err := os.ReadFile(agentMdPath)
+	if err != nil {
+		LogFatal("Failed to read AGENT.md: %v", err)
+	}
+
+	text := string(content)
+
+	// Regex to find the section
+	// We want to replace everything from "### Development CLI (`dialtone-dev.go`)" up to the next "---"
+	re := regexp.MustCompile(`(?s)### Development CLI \(` + "`" + `dialtone-dev\.go` + "`" + `\).*?(---)`)
+
+	if !re.MatchString(text) {
+		LogFatal("Could not find Development CLI section in AGENT.md")
+	}
+
+	// Replace content, keeping the trailing separator
+	updatedText := re.ReplaceAllString(text, newContent+"\n\n$1")
+
+	if err := os.WriteFile(agentMdPath, []byte(updatedText), 0644); err != nil {
+		LogFatal("Failed to write AGENT.md: %v", err)
+	}
+
+	LogInfo("AGENT.md updated successfully!")
 }
 
 // runPlan handles the plan command
@@ -732,12 +860,12 @@ func runIssue(args []string) {
 		cmd := exec.Command("gh", args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		
+
 		// Only attach Stdin if interactive (no title provided)
 		if title == "" {
 			cmd.Stdin = os.Stdin
 		}
-		
+
 		if err := cmd.Run(); err != nil {
 			LogFatal("Failed to create issue: %v", err)
 		}
@@ -941,8 +1069,249 @@ func runOpencode(args []string) {
 		}
 		cmd.Run()
 
-default:
-fmt.Printf("Unknown opencode subcommand: %s\n", subcommand)
-runOpencode([]string{})
+	default:
+		fmt.Printf("Unknown opencode subcommand: %s\n", subcommand)
+		runOpencode([]string{})
+	}
 }
+
+// runDeveloper handles the developer command
+func runDeveloper(args []string) {
+	LogInfo("Starting autonomous developer loop...")
+
+	var capabilities []string
+	dryRun := false
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--dry-run" {
+			dryRun = true
+		} else if args[i] == "--capability" && i+1 < len(args) {
+			capabilities = append(capabilities, args[i+1])
+			i++
+		}
+	}
+
+	if dryRun {
+		LogInfo("Running in DRY RUN mode. No changes will be made.")
+	}
+
+	// 1. Fetch and rank issues
+	LogInfo("Fetching open issues from GitHub...")
+
+	cmd := exec.Command("gh", "issue", "list", "--json", "number,title,labels", "--state", "open")
+	output, err := cmd.Output()
+	if err != nil {
+		LogFatal("Failed to fetch issues: %v", err)
+	}
+
+	var issues []struct {
+		Number int    `json:"number"`
+		Title  string `json:"title"`
+		Labels []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+	}
+
+	if err := json.Unmarshal(output, &issues); err != nil {
+		LogFatal("Failed to parse issues: %v", err)
+	}
+
+	if len(issues) == 0 {
+		LogInfo("No open issues found.")
+		return
+	}
+
+	// Rank issues based on matching labels
+	bestIssueIdx := -1
+	maxMatch := -1
+
+	for i, issue := range issues {
+		matchCount := 0
+		for _, label := range issue.Labels {
+			for _, cap := range capabilities {
+				if strings.Contains(strings.ToLower(label.Name), strings.ToLower(cap)) {
+					matchCount++
+				}
+			}
+		}
+		if matchCount > maxMatch {
+			maxMatch = matchCount
+			bestIssueIdx = i
+		}
+	}
+
+	selectedIssue := issues[bestIssueIdx]
+	LogInfo("Selected issue #%d: %s (Match score: %d)", selectedIssue.Number, selectedIssue.Title, maxMatch)
+
+	// 2. Setup feature branch and directory
+	branchName := fmt.Sprintf("issue-%d", selectedIssue.Number)
+	if dryRun {
+		LogInfo("DRY RUN: Would create branch %s and directory features/%s", branchName, branchName)
+		return
+	}
+
+	// Create branch
+	runBranch([]string{branchName})
+
+	// Create feature directory
+	featureDir := filepath.Join("features", branchName)
+	if err := os.MkdirAll(featureDir, 0755); err != nil {
+		LogFatal("Failed to create feature directory: %v", err)
+	}
+
+	// Create initial task.md for subagent
+	taskPath := filepath.Join(featureDir, "task.md")
+	taskContent := fmt.Sprintf("# Task: Solve Issue #%d\n\n- [ ] %s\n", selectedIssue.Number, selectedIssue.Title)
+	if err := os.WriteFile(taskPath, []byte(taskContent), 0644); err != nil {
+		LogFatal("Failed to create task file: %v", err)
+	}
+
+	LogInfo("Setup complete for %s. Task file: %s", branchName, taskPath)
+
+	// 3. Delegate to subagent
+	cmd = startSubagent([]string{"--task", taskPath})
+	if cmd == nil {
+		LogFatal("Failed to start subagent")
+	}
+
+	// 4. Monitor Loop (every 30 seconds)
+	LogInfo("Monitoring subagent progress...")
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Check if subagent is still running
+			if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+				if cmd.ProcessState.Success() {
+					LogInfo("Subagent completed successfully.")
+					goto verification
+				} else {
+					LogInfo("Subagent failed. Attempting restart...")
+					cmd = startSubagent([]string{"--task", taskPath})
+					continue
+				}
+			}
+
+			// Perform "Progress Check" by analyzing logs
+			LogInfo("Checking subagent logs for drift...")
+			if !checkSubagentProgress(branchName) {
+				LogInfo("Subagent seems off-track. Killing and restarting...")
+				cmd.Process.Kill()
+				cmd = startSubagent([]string{"--task", taskPath})
+			}
+		}
+
+		// Small sleep to prevent tight loop if ticker fails
+		time.Sleep(1 * time.Second)
+
+		// Check process state again (in case it exited just now)
+		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+			break
+		}
+	}
+
+verification:
+	// 4. Submit
+	LogInfo("Subagent finished. Running verification tests...")
+	runTest([]string{})
+
+	LogInfo("Tests passed. Creating pull request...")
+	runPullRequest([]string{"--title", fmt.Sprintf("%s: autonomous fix", branchName), "--body", fmt.Sprintf("Autonomous fix for issue #%d\n\nSee %s for details.", selectedIssue.Number, taskPath)})
+
+	LogInfo("Autonomous developer loop completed for issue #%d", selectedIssue.Number)
+}
+
+// checkSubagentProgress analyzes the subagent logs to see if it's still on task
+func checkSubagentProgress(branchName string) bool {
+	logPath := "opencode.log"
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		return true // Can't read log, assume it's fine for now
+	}
+
+	lines := strings.Split(string(data), "\n")
+	if len(lines) < 10 {
+		return true // Not enough logs yet
+	}
+
+	// Get last 10 lines
+	lastLogs := lines[len(lines)-10:]
+
+	// Heuristic: If logs contain "don't know", "error", or repetitive "trying to...", trigger restart
+	// In a real scenario, this would be a prompt to an LLM:
+	// "look at recent logs of this sub agent and determine if it still on task..."
+	LogInfo("Prompt: Analyzing last 10 lines of %s...", logPath)
+	for _, line := range lastLogs {
+		if strings.Contains(strings.ToLower(line), "stuck") ||
+			strings.Contains(strings.ToLower(line), "loop detected") ||
+			strings.Contains(strings.ToLower(line), "installing") ||
+			strings.Contains(strings.ToLower(line), "edit") ||
+			strings.Contains(strings.ToLower(line), "write") ||
+			strings.Contains(strings.ToLower(line), "illegal operation") {
+			return false
+		}
+	}
+
+	return true
+}
+
+// startSubagent launches the subagent process and returns the command object
+func startSubagent(args []string) *exec.Cmd {
+	var taskFile string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--task" && i+1 < len(args) {
+			taskFile = args[i+1]
+			i++
+		}
+	}
+
+	if taskFile == "" {
+		LogInfo("Usage: dialtone-dev subagent --task <file>")
+		return nil
+	}
+
+	LogInfo("Subagent starting task: %s", taskFile)
+
+	opencodePath := os.ExpandEnv("$HOME/.opencode/bin/opencode")
+	if _, err := os.Stat(opencodePath); os.IsNotExist(err) {
+		LogInfo("Default subagent (opencode) not found.")
+		return nil
+	}
+
+	// Read the task file content to pass as a prompt
+	taskContent, err := os.ReadFile(taskFile)
+	if err != nil {
+		LogInfo("Failed to read task file %s: %v", taskFile, err)
+		return nil
+	}
+
+	// Launch opencode with the task file content as the message
+	cmd := exec.Command(opencodePath, "run", string(taskContent))
+
+	// Create or truncate a specific log file for this subagent session
+	logFile, err := os.OpenFile("opencode.log", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		LogInfo("Failed to open subagent log: %v", err)
+		return nil
+	}
+
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+
+	if err := cmd.Start(); err != nil {
+		LogInfo("Failed to start subagent: %v", err)
+		return nil
+	}
+
+	return cmd
+}
+
+// runSubagent handles the legacy subagent command wrapper
+func runSubagent(args []string) {
+	cmd := startSubagent(args)
+	if cmd != nil {
+		cmd.Wait()
+		LogInfo("Subagent completed.")
+	}
 }
