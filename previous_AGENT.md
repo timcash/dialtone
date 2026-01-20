@@ -65,12 +65,12 @@ go run dialtone.go start --local
 8. Update `README.md` and `docs/*` with any changes
 9. Commit changes: `git add .` and `git commit -m "<message>"`
 10. Add vendor docs to `docs/vendor/<vendor_name>.md` if needed
-11. Mark completed tests with `[x]` in the plan file
+11. Mark completed tests in the plan file
 
 ### 3. Autonomous Stage (New)
 
 1. Run `go run dialtone-dev.go developer` to start the autonomous loop.
-2. The agent will fetch issues, prioritize them, and setup a `features/` directory.
+2. The agent will fetch tickets, prioritize them, and setup a `features/` directory.
 3. A subagent is launched via `dialtone-dev subagent --task <task.md>`.
 4. The developer agent monitors progress every 30 seconds by analyzing `opencode.log`.
 5. If the subagent drifts or hangs, it is automatically restarted to maintain progress.
@@ -133,8 +133,8 @@ go run dialtone.go start --local
     - Example: `go run dialtone-dev.go test my-feature`
 14. `go run dialtone-dev.go pull-request [options]` — Create or update a PR
     - Example: `go run dialtone-dev.go pull-request --draft`
-16. `go run dialtone-dev.go issue <subcmd>` — Manage GitHub issues
-    - Example: `go run dialtone-dev.go issue view 20`
+16. `go run dialtone-dev.go ticket <subcmd>` — Manage GitHub tickets
+    - Example: `go run dialtone-dev.go ticket view 20`
 17. `go run dialtone-dev.go www <subcmd>` — Manage public webpage (Vercel wrapper)
     - Example: `go run dialtone-dev.go www publish`
 18. `go run dialtone-dev.go developer` — Start the autonomous developer loop
@@ -216,8 +216,8 @@ File: `plan/plan-linux-wsl-camera-support.md`
 Enable camera support on Linux/WSL without requiring sudo for development.
 
 ## Tests
-- [x] test_install_deps: Verify `dialtone install --linux-wsl` creates ~/.dialtone_env
-- [x] test_v4l2_headers: Verify V4L2 headers are extracted and accessible
+- test_install_deps: Verify `dialtone install --linux-wsl` creates ~/.dialtone_env
+- test_v4l2_headers: Verify V4L2 headers are extracted and accessible
 - [ ] test_native_build: Verify `dialtone build` compiles with CGO_ENABLED=1
 - [ ] test_camera_open: Verify camera device can be opened on WSL
 - [ ] test_frame_capture: Verify a frame can be captured from /dev/video0
@@ -227,7 +227,7 @@ Enable camera support on Linux/WSL without requiring sudo for development.
 - V4L2 headers extracted from Ubuntu .deb without root
 - Camera device must be passed through from Windows host
 
-## Blocking Issues
+## Blocking Tickets
 - None
 
 ## Progress Log
@@ -324,7 +324,7 @@ dialtone.LogFatal("Unrecoverable error", err)  // exits program
 
 ## Final Checklist
 
-1. All plan tests marked complete with `[x]`
+1. All plan tests marked complete
 3. `go run dialtone-dev.go test` passes
 4. `go run dialtone-dev.go build` succeeds
 5. No secrets/keys in commits look for any way they can leak as a result of these changes

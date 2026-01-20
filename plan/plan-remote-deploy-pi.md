@@ -14,11 +14,11 @@ Build, deploy, and start the `dialtone` binary on a remote Raspberry Pi (192.168
 ## Notes
 - Target IP: 192.168.4.36
 - User: `tim`, Password: `password` (used `.env` for storage)
-- Fixed structure issues: `dialtone-earth` vs `src/web`
+- Fixed structure tickets: `dialtone-earth` vs `src/web`
 - Fixed flag parsing in `build --remote`
 - Cleaned remote `src` to avoid stale `manager.go` conflicts
 
-## Blocking Issues
+## Blocking Tickets
 - None
 
 ## Progress Log

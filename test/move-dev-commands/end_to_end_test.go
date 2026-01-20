@@ -49,7 +49,7 @@ func TestE2E_CLICommand(t *testing.T) {
 	}
 	outputDev := string(outDev)
 
-	commands := []string{"install", "build", "deploy", "clone", "sync-code", "ssh", "provision", "logs", "diagnostic", "plan", "branch", "test", "pull-request", "issue", "www"}
+	commands := []string{"install", "build", "deploy", "clone", "sync-code", "ssh", "provision", "logs", "diagnostic", "plan", "branch", "test", "pull-request", "ticket", "www"}
 	for _, cmd := range commands {
 		if !strings.Contains(outputDev, "  "+cmd) {
 			t.Errorf("dialtone-dev help missing '%s' command", cmd)
