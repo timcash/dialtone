@@ -43,8 +43,16 @@ mkdir -p bin
 go build -o bin/dialtone-dev dialtone-dev.go
 
 echo "Go $GO_VERSION and dialtone-dev CLI installed successfully."
-echo "Please add the following to your shell configuration (e.g., ~/.bashrc or ~/.zshrc):"
-echo "export PATH=\$HOME/.local/go/bin:\$PATH"
 echo ""
 echo "You can now run:"
 echo "bin/dialtone-dev --help"
+echo ""
+echo "IMPORTANT: To complete the setup, please add the following to your shell configuration (e.g., ~/.bashrc or ~/.zshrc):"
+echo ""
+echo "export DIALTONE_ENV=\"$DIALTONE_ENV\""
+echo "export CC=\"\${DIALTONE_ENV}/zig/zig cc -target x86_64-linux-gnu\""
+echo "export CGO_ENABLED=1"
+echo "export CGO_CFLAGS=\"-I\${DIALTONE_ENV}/usr/include -I\${DIALTONE_ENV}/usr/include/x86_64-linux-gnu\""
+echo "export PATH=\"\${DIALTONE_ENV}/go/bin:\${DIALTONE_ENV}/node/bin:\$HOME/.local/go/bin:\$PATH\""
+echo ""
+echo "Then restart your shell or run: source ~/.bashrc"
