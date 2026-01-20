@@ -1,1 +1,11 @@
-
+- [x] Research existing file parsing and git execution in src/dev.go
+- [x] Create the `src/plugins/ticket` directory structure (app, cli, test, README)
+- [x] Implement `ticket start` CLI argument parsing and git branch creation
+    - [x] Support parsing `# Branch:` from ticket file if path is provided
+- [x] Implement `ticket start` Ticket Scaffolding (`tickets/<name>`, `task.md`, `code/`, `test/`)
+    - [x] Create `unit_test.go`, `integration_test.go`, `e2e_test.go` templates
+    - [x] Verify test files exist
+- [x] Implement `ticket start` Plugin Scaffolding (`--plugin` flag)
+- [x] Implement `ticket test <ticket-name>`
+- [x] Implement `ticket done <ticket-name>`
+- [x] Verification: Run `go run dialtone-dev.go test`

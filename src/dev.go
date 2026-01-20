@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
 )
 
 // ExecuteDev is the entry point for the dialtone-dev CLI
@@ -795,19 +797,17 @@ func runPullRequest(args []string) {
 
 // runTicket handles the ticket command
 func runTicket(args []string) {
-	// Check if gh CLI is available
-	if _, err := exec.LookPath("gh"); err != nil {
-		LogFatal("GitHub CLI (gh) not found. Install it from: https://cli.github.com/")
-	}
-
 	if len(args) == 0 {
 		fmt.Println("Usage: dialtone-dev ticket <subcommand> [options]")
 		fmt.Println("\nSubcommands:")
-		fmt.Println("  list [N]           List the top N tickets (default: 10)")
-		fmt.Println("  add                Create a new ticket")
-		fmt.Println("  comment <id> <msg> Add a comment to a ticket")
-		fmt.Println("  view <id>          View ticket details")
-		fmt.Println("  close <id>         Close a GitHub ticket")
+		fmt.Println("  start <name>       Start a new ticket (branch + scaffold)")
+		fmt.Println("  test <name>        Run ticket tests")
+		fmt.Println("  done <name>        Verify ticket completion")
+		fmt.Println("  list [N]           List the top N tickets (GH)")
+		fmt.Println("  add                Create a new ticket (GH)")
+		fmt.Println("  comment <id> <msg> Add a comment to a ticket (GH)")
+		fmt.Println("  view <id>          View ticket details (GH)")
+		fmt.Println("  close <id>         Close a GitHub ticket (GH)")
 		return
 	}
 
@@ -815,7 +815,30 @@ func runTicket(args []string) {
 	subArgs := args[1:]
 
 	switch subcommand {
+	case "start":
+		ticket_cli.RunStart(subArgs)
+	case "test":
+		ticket_cli.RunTest(subArgs)
+	case "done":
+		ticket_cli.RunDone(subArgs)
+	// Fallback to legacy GitHub CLI commands for everything else
+	// But first check if they exist to provide better error if not
+	case "list", "add", "create", "comment", "view", "close":
+		// Check if gh CLI is available for these commands
+		if _, err := exec.LookPath("gh"); err != nil {
+			LogFatal("GitHub CLI (gh) not found. Install it from: https://cli.github.com/")
+		}
+		// Continue to switch block below (or reuse logic)
+		// Since we can't easily jump into existing switch case from here without code duplication or goto,
+		// I will reimplement the dispatcher to be cleaner.
+	}
+
+	// Re-implement the switch for legacy or just handle legacy logic here
+	switch subcommand {
+	case "start", "test", "done":
+		return // Already handled
 	case "list":
+
 		limit := "10"
 		if len(subArgs) > 0 {
 			limit = subArgs[0]
