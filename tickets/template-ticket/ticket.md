@@ -18,15 +18,16 @@
 - status: todo
 
 ## Subtask: Verification
-- description: Run test: `go run dialtone-dev.go test`
+- description: Run test: `./dialtone.sh test`
 - status: todo
 
 ## Development Cycle
-1. Run `go run dialtone-dev ticket start <ticket-name>` to change the git branch and verify development template files.
+1. Run `./dialtone.sh ticket start <ticket-name>` to change the git branch and verify development template files.
 2. Update a test before writing new code and run the test to show a failure.
 3. Change the system until the test passes.
-4. Use `git add` to update git and ensure `.gitignore` is correct.
-5. Make a commit with `git commit -m "<message>"`. so you can revert to working tests if needed.
+4. Update `ticket.md` to r
+5. Use `git add` to update git and ensure `.gitignore` is correct.
+6. Make a commit with `git commit -m "<message>"`. so you can revert to working tests if needed.
 
 ## Development Stages
 1. **Ticket**: The first step of any change. Ideal for adding new code that can patch `core` or `plugin` code without changing it directly.
@@ -37,7 +38,7 @@
 [A place for humans and the autocoder to share research, technical decisions, or state between context windows.]
 
 ---
-Template version: 4.0. To start work: `go run dialtone-dev.go ticket start <this-file>`
+Template version: 4.1. To start work: `./dialtone.sh ticket start <this-file>`
 
 ---
 # Ticket folder layout:

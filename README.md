@@ -107,7 +107,7 @@ Dialtone is built with a "Test-First" philosophy. Every function, feature, and p
 
 ### Ticket Lifecycle
 1. **Create/Identify Ticket**: All work starts with a `ticket.md` in `./tickets/<ticket_name>/`.
-2. **Start Ticket**: `go run dialtone-dev ticket start <ticket-name>` - This sets up the git branch and verifies the folder structure:
+2. **Start Ticket**: `./dialtone.sh ticket start <ticket-name>` - This sets up the git branch and verifies the folder structure:
    - `ticket.md`: The requirement doc.
    - `task.md`: Scratchpad for tracking sub-progress.
    - `code/`: Local code playground for the ticket.
@@ -141,13 +141,13 @@ Dialtone is built with a "Test-First" philosophy. Every function, feature, and p
 1. `./src/plugins/www` - Contains the web dashboard.
 2. `./src/plugins/www/README.md` - Contains information for users to understand the plugin at a high level.
 3. `./src/plugins/www/app` - Contains a public website for the `dialtone.earth` domain.
-4. `./src/plugins/www/cli` - Contains code for the cli command `dialtone-dev www`.
+4. `./src/plugins/www/cli` - Contains code for the cli command `./dialtone.sh www`.
 5. `./src/plugins/www/test` - Contains test files for the www plugin.
 
 # CLI Tools
-1. `go run dialtone-dev.go` - CLI tool for development.
+1. `./dialtone.sh` - CLI tool for development (Linux/macOS).
 2. `go run dialtone.go` - Minimal binary for robotic deployment.
-3. `setup.sh` and `setup.ps1` - Tools to bootstrap a new development environment.
+3. `.\dialtone.ps1` - CLI tool for development (Windows).
 
 ## Quick Start (WSL/Linux No-Sudo)
 
@@ -157,19 +157,14 @@ The fastest way to get started on WSL or Linux without administrative privileges
 git clone https://github.com/timcash/dialtone.git
 export DIALTONE_ENV="~/dialtone_env"
 
-# For bootstrapping only: Install Go for Linux and macOS
-./setup.sh
+# Install Go, dependencies, and setup environment (Linux/macOS)
+./dialtone.sh install --linux-wsl
 
-# For bootstrapping only: Install Go for Windows
-./setup.ps1
-
-# Environment setup: Follow the instructions printed by the setup script to configure your variables (DIALTONE_ENV, CC, PATH, etc.)
-
-# Install development dependencies into ~/.dialtone_env (Go, Node, Zig, V4L2 headers)
-go run dialtone-dev.go install --linux-wsl
+# Windows equivalent:
+# .\dialtone.ps1 install --linux-wsl
 
 # Perform a native build (includes Web UI and Camera support)
-go run dialtone-dev.go build --local
+./dialtone.sh build --local
 
 # Start the node locally
 go run dialtone.go start --local
