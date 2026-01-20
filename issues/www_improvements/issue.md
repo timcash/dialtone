@@ -43,17 +43,15 @@
 
 
 ## Article List
-1. `dialtone.earth` HERO Slide with call to action and spinning globe with blue blinking dots in the backgroud using three.js and globe.gl https://github.com/vasturiano/globe.gl
-2. `dialtone.earth cli` Article with terminal like graphics in the background showing commands being run built with simple typescript and html
+1. `dialtone` HERO Slide with call to action and spinning globe with blue blinking dots in the backgroud using three.js and globe.gl https://github.com/vasturiano/globe.gl
+2. `dialtone cli` Article with terminal like graphics in the background showing commands being run built with simple typescript and html
 3. 
 
 
 ## Pages
 1. Use `example_code/video_slides` as an example for the pages and how they should snap scroll and dynamically load content
-1. All Pages should be a `slide` type which is a `<article>` with a `<header>` and `<main>`
+1. All Pages should be a `<article>` with a `<header>` and `<main>`
 1. `<article>` is always full 100vh and 100vw and has a fixed position
-1. Add page for self improving AI system with list of issues from GitHub repo
-1. Add page for CAD models of robots with three.js STL loader and wireframe fullscreen view
 1. The site should integrate with vercel for deployment via the `dialtone-dev www deploy` command
 
 ## Page Tools
