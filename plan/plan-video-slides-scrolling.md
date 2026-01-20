@@ -4,7 +4,7 @@
 Implement a full-screen vertical scrolling (snap-to-slide) effect on the main page of `dialtone-earth`, featuring a D3 globe, a lazy-loaded video, and a Three.js graph scene.
 
 ## Tests
-- [x] test_github_issue_created: Verify a GitHub issue is created using `dialtone-dev issue add`
+- [x] test_github_ticket_created: Verify a GitHub ticket is created using `dialtone-dev ticket add`
 - [x] test_layout_snap_css: Verify `layout.tsx` or `globals.css` includes scroll snap styles
 - [x] test_home_page_sections: Verify `page.tsx` has three `<article>` or `<section>` elements for slides
 - [x] test_globe_slide: Verify the first slide contains the D3 Globe component
@@ -19,7 +19,7 @@ Implement a full-screen vertical scrolling (snap-to-slide) effect on the main pa
 - Three.js slide: Need a new component for the line graph.
 - Navigation should probably be sticky or integrated into the layout.
 
-## Blocking Issues
+## Blocking Tickets
 - None
 
 ## Progress Log

@@ -1,4 +1,4 @@
-package github_issue_command
+package github_ticket_command
 
 import (
 	"os"
@@ -19,7 +19,7 @@ func TestE2E_CLICommand(t *testing.T) {
 		t.Skip("Skipping E2E test (SKIP_E2E is set)")
 	}
 	
-	dialtone.LogInfo("Running E2E CLI test for github-issue-command")
+	dialtone.LogInfo("Running E2E CLI test for github-ticket-command")
 	
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -37,7 +37,7 @@ func TestE2E_FullWorkflow(t *testing.T) {
 		t.Skip("Skipping E2E test (SKIP_E2E is set)")
 	}
 	
-	dialtone.LogInfo("Running full workflow E2E test for github-issue-command")
+	dialtone.LogInfo("Running full workflow E2E test for github-ticket-command")
 	
 	// TODO: Test complete user workflows
 	t.Log("not yet implemented")
@@ -65,5 +65,5 @@ func TestE2E_BinaryExists(t *testing.T) {
 		}
 	}
 	
-	dialtone.LogInfo("Binary exists and runs for github-issue-command tests")
+	dialtone.LogInfo("Binary exists and runs for github-ticket-command tests")
 }

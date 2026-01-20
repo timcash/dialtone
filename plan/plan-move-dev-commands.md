@@ -13,9 +13,9 @@ Move all development-related commands from the main `dialtone` CLI into the `dia
 ## Notes
 - Commands to move: build, full-build, deploy, install, clone, sync-code, remote-build, provision, logs, diagnostic, ssh.
 - `dialtone` main will only keep `start`.
-- `dialtone-dev` already handles plan, branch, test, pull-request, issue, www.
+- `dialtone-dev` already handles plan, branch, test, pull-request, ticket, www.
 
-## Blocking Issues
+## Blocking Tickets
 - None
 
 ## Progress Log

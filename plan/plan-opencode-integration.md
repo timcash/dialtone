@@ -13,7 +13,7 @@ Integrate the `opencode` AI assistant server into the Dialtone CLI tools (`dialt
 - Integrated into `dialtone-dev` for manual management.
 - Integrated into `dialtone` for automatic deployment and secure access via Tailscale.
 
-## Blocking Issues
+## Blocking Tickets
 - None
 
 ## Progress Log

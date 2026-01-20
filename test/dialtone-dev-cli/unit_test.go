@@ -119,7 +119,7 @@ func TestPlanTemplate(t *testing.T) {
 		"## Goal",
 		"## Tests",
 		"## Notes",
-		"## Blocking Issues",
+		"## Blocking Tickets",
 		"## Progress Log",
 	}
 

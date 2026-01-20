@@ -1,4 +1,4 @@
-package github_issue_command
+package github_ticket_command
 
 import (
 	"testing"
@@ -10,7 +10,7 @@ import (
 // These tests should be fast and test individual functions/components
 
 func TestUnit_Example(t *testing.T) {
-	dialtone.LogInfo("Running unit test for github-issue-command")
+	dialtone.LogInfo("Running unit test for github-ticket-command")
 	
 	// TODO: Add your unit tests here
 	t.Log("not yet implemented")
@@ -18,7 +18,7 @@ func TestUnit_Example(t *testing.T) {
 
 func TestUnit_Validation(t *testing.T) {
 	// Test input validation, data parsing, etc.
-	dialtone.LogInfo("Testing validation for github-issue-command")
+	dialtone.LogInfo("Testing validation for github-ticket-command")
 	
 	// TODO: Add validation tests
 	t.Log("not yet implemented")

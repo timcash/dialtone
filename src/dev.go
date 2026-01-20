@@ -52,8 +52,8 @@ func ExecuteDev() {
 		runTest(args)
 	case "pull-request", "pr":
 		runPullRequest(args)
-	case "issue":
-		runIssue(args)
+	case "ticket":
+		runTicket(args)
 	case "www":
 		runWww(args)
 	case "opencode":
@@ -89,7 +89,7 @@ func printDevUsage() {
 	fmt.Println("  branch <name>      Create or checkout a feature branch")
 	fmt.Println("  test [name]        Run tests (all or for specific feature, creates templates if missing)")
 	fmt.Println("  pull-request       Create or update a pull request (wrapper around gh CLI)")
-	fmt.Println("  issue <subcmd>     Manage GitHub issues (wrapper around gh CLI)")
+	fmt.Println("  ticket <subcmd>    Manage GitHub tickets (wrapper around gh CLI)")
 	fmt.Println("  www <subcmd>       Manage public webpage (Vercel wrapper)")
 	fmt.Println("  opencode <subcmd>  Manage opencode AI assistant (start, stop, status, ui)")
 	fmt.Println("  developer          Start the autonomous developer loop")
@@ -169,8 +169,8 @@ func runDocs(args []string) {
 				example = "go run dialtone-dev.go test my-feature"
 			case "pull-request":
 				example = "go run dialtone-dev.go pull-request --draft"
-			case "issue":
-				example = "go run dialtone-dev.go issue view 20"
+			case "ticket":
+				example = "go run dialtone-dev.go ticket view 20"
 			case "www":
 				example = "go run dialtone-dev.go www publish"
 			case "developer":
@@ -322,7 +322,7 @@ func createPlan(planPath, name string) {
 ## Notes
 - [Add any relevant notes]
 
-## Blocking Issues
+## Blocking Tickets
 - None
 
 ## Progress Log
@@ -793,21 +793,21 @@ func runPullRequest(args []string) {
 	}
 }
 
-// runIssue handles the issue command
-func runIssue(args []string) {
+// runTicket handles the ticket command
+func runTicket(args []string) {
 	// Check if gh CLI is available
 	if _, err := exec.LookPath("gh"); err != nil {
 		LogFatal("GitHub CLI (gh) not found. Install it from: https://cli.github.com/")
 	}
 
 	if len(args) == 0 {
-		fmt.Println("Usage: dialtone-dev issue <subcommand> [options]")
+		fmt.Println("Usage: dialtone-dev ticket <subcommand> [options]")
 		fmt.Println("\nSubcommands:")
-		fmt.Println("  list [N]           List the top N issues (default: 10)")
-		fmt.Println("  add                Create a new issue")
-		fmt.Println("  comment <id> <msg> Add a comment to an issue")
-		fmt.Println("  view <id>          View issue details")
-		fmt.Println("  close <id>         Close a GitHub issue")
+		fmt.Println("  list [N]           List the top N tickets (default: 10)")
+		fmt.Println("  add                Create a new ticket")
+		fmt.Println("  comment <id> <msg> Add a comment to a ticket")
+		fmt.Println("  view <id>          View ticket details")
+		fmt.Println("  close <id>         Close a GitHub ticket")
 		return
 	}
 
@@ -820,11 +820,11 @@ func runIssue(args []string) {
 		if len(subArgs) > 0 {
 			limit = subArgs[0]
 		}
-		cmd := exec.Command("gh", "issue", "list", "-L", limit)
+		cmd := exec.Command("gh", "ticket", "list", "-L", limit)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			LogFatal("Failed to list issues: %v", err)
+			LogFatal("Failed to list tickets: %v", err)
 		}
 
 	case "add", "create":
@@ -854,7 +854,7 @@ func runIssue(args []string) {
 			}
 		}
 
-		args := []string{"issue", "create"}
+		args := []string{"ticket", "create"}
 		args = append(args, passedArgs...)
 
 		cmd := exec.Command("gh", args...)
@@ -867,16 +867,16 @@ func runIssue(args []string) {
 		}
 
 		if err := cmd.Run(); err != nil {
-			LogFatal("Failed to create issue: %v", err)
+			LogFatal("Failed to create ticket: %v", err)
 		}
 
 	case "comment":
 		if len(subArgs) < 2 {
-			LogFatal("Usage: dialtone-dev issue comment <issue-id> <message>")
+			LogFatal("Usage: dialtone-dev ticket comment <ticket-id> <message>")
 		}
-		issueID := subArgs[0]
+		ticketID := subArgs[0]
 		message := subArgs[1]
-		cmd := exec.Command("gh", "issue", "comment", issueID, "--body", message)
+		cmd := exec.Command("gh", "ticket", "comment", ticketID, "--body", message)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
@@ -885,32 +885,32 @@ func runIssue(args []string) {
 
 	case "view":
 		if len(subArgs) < 1 {
-			LogFatal("Usage: dialtone-dev issue view <issue-id>")
+			LogFatal("Usage: dialtone-dev ticket view <ticket-id>")
 		}
-		issueID := subArgs[0]
-		cmd := exec.Command("gh", "issue", "view", issueID)
+		ticketID := subArgs[0]
+		cmd := exec.Command("gh", "ticket", "view", ticketID)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			LogFatal("Failed to view issue: %v", err)
+			LogFatal("Failed to view ticket: %v", err)
 		}
 
 	case "close":
 		if len(subArgs) < 1 {
-			LogFatal("Usage: dialtone-dev issue close <issue-id>")
+			LogFatal("Usage: dialtone-dev ticket close <ticket-id>")
 		}
-		issueID := subArgs[0]
-		LogInfo("Closing issue #%s...", issueID)
-		cmd := exec.Command("gh", "issue", "close", issueID)
+		ticketID := subArgs[0]
+		LogInfo("Closing ticket #%s...", ticketID)
+		cmd := exec.Command("gh", "ticket", "close", ticketID)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			LogFatal("Failed to close issue: %v", err)
+			LogFatal("Failed to close ticket: %v", err)
 		}
 
 	default:
-		fmt.Printf("Unknown issue subcommand: %s\n", subcommand)
-		runIssue([]string{}) // Show usage
+		fmt.Printf("Unknown ticket subcommand: %s\n", subcommand)
+		runTicket([]string{}) // Show usage
 	}
 }
 
@@ -1094,16 +1094,16 @@ func runDeveloper(args []string) {
 		LogInfo("Running in DRY RUN mode. No changes will be made.")
 	}
 
-	// 1. Fetch and rank issues
-	LogInfo("Fetching open issues from GitHub...")
+	// 1. Fetch and rank tickets
+	LogInfo("Fetching open tickets from GitHub...")
 
-	cmd := exec.Command("gh", "issue", "list", "--json", "number,title,labels", "--state", "open")
+	cmd := exec.Command("gh", "ticket", "list", "--json", "number,title,labels", "--state", "open")
 	output, err := cmd.Output()
 	if err != nil {
-		LogFatal("Failed to fetch issues: %v", err)
+		LogFatal("Failed to fetch tickets: %v", err)
 	}
 
-	var issues []struct {
+	var tickets []struct {
 		Number int    `json:"number"`
 		Title  string `json:"title"`
 		Labels []struct {
@@ -1111,22 +1111,22 @@ func runDeveloper(args []string) {
 		} `json:"labels"`
 	}
 
-	if err := json.Unmarshal(output, &issues); err != nil {
-		LogFatal("Failed to parse issues: %v", err)
+	if err := json.Unmarshal(output, &tickets); err != nil {
+		LogFatal("Failed to parse tickets: %v", err)
 	}
 
-	if len(issues) == 0 {
-		LogInfo("No open issues found.")
+	if len(tickets) == 0 {
+		LogInfo("No open tickets found.")
 		return
 	}
 
-	// Rank issues based on matching labels
-	bestIssueIdx := -1
+	// Rank tickets based on matching labels
+	bestTicketIdx := -1
 	maxMatch := -1
 
-	for i, issue := range issues {
+	for i, ticket := range tickets {
 		matchCount := 0
-		for _, label := range issue.Labels {
+		for _, label := range ticket.Labels {
 			for _, cap := range capabilities {
 				if strings.Contains(strings.ToLower(label.Name), strings.ToLower(cap)) {
 					matchCount++
@@ -1135,15 +1135,15 @@ func runDeveloper(args []string) {
 		}
 		if matchCount > maxMatch {
 			maxMatch = matchCount
-			bestIssueIdx = i
+			bestTicketIdx = i
 		}
 	}
 
-	selectedIssue := issues[bestIssueIdx]
-	LogInfo("Selected issue #%d: %s (Match score: %d)", selectedIssue.Number, selectedIssue.Title, maxMatch)
+	selectedTicket := tickets[bestTicketIdx]
+	LogInfo("Selected ticket #%d: %s (Match score: %d)", selectedTicket.Number, selectedTicket.Title, maxMatch)
 
 	// 2. Setup feature branch and directory
-	branchName := fmt.Sprintf("issue-%d", selectedIssue.Number)
+	branchName := fmt.Sprintf("ticket-%d", selectedTicket.Number)
 	if dryRun {
 		LogInfo("DRY RUN: Would create branch %s and directory features/%s", branchName, branchName)
 		return
@@ -1160,7 +1160,7 @@ func runDeveloper(args []string) {
 
 	// Create initial task.md for subagent
 	taskPath := filepath.Join(featureDir, "task.md")
-	taskContent := fmt.Sprintf("# Task: Solve Issue #%d\n\n- [ ] %s\n", selectedIssue.Number, selectedIssue.Title)
+	taskContent := fmt.Sprintf("# Task: Solve Ticket #%d\n\n- [ ] %s\n", selectedTicket.Number, selectedTicket.Title)
 	if err := os.WriteFile(taskPath, []byte(taskContent), 0644); err != nil {
 		LogFatal("Failed to create task file: %v", err)
 	}
@@ -1217,9 +1217,9 @@ verification:
 	runTest([]string{})
 
 	LogInfo("Tests passed. Creating pull request...")
-	runPullRequest([]string{"--title", fmt.Sprintf("%s: autonomous fix", branchName), "--body", fmt.Sprintf("Autonomous fix for issue #%d\n\nSee %s for details.", selectedIssue.Number, taskPath)})
+	runPullRequest([]string{"--title", fmt.Sprintf("%s: autonomous fix", branchName), "--body", fmt.Sprintf("Autonomous fix for ticket #%d\n\nSee %s for details.", selectedTicket.Number, taskPath)})
 
-	LogInfo("Autonomous developer loop completed for issue #%d", selectedIssue.Number)
+	LogInfo("Autonomous developer loop completed for ticket #%d", selectedTicket.Number)
 }
 
 // checkSubagentProgress analyzes the subagent logs to see if it's still on task
