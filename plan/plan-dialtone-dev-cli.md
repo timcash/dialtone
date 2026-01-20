@@ -18,7 +18,7 @@ Create the `dialtone-dev` CLI tool for development workflow automation. This too
 ### 1. `dialtone-dev plan <name>`
 - If `plan/plan-<name>.md` exists, print its contents
 - If not, create a new plan file from template
-- Template includes: Goal, Tests (empty checklist), Notes, Blocking Issues, Progress Log
+- Template includes: Goal, Tests (empty checklist), Notes, Blocking Tickets, Progress Log
 
 ### 2. `dialtone-dev plan` (no args)
 - List all existing plan files in `plan/` directory

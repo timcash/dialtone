@@ -15,7 +15,7 @@ Integrate the public dialtone.earth webpage into the main repository and provide
 - The `www` command will be a wrapper around the Vercel CLI (`vercel`)
 - Domain management should point `dialtone.earth` to the `dialtone-earth/` subfolder
 
-## Blocking Issues
+## Blocking Tickets
 - None
 
 ## Progress Log
