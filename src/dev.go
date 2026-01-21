@@ -12,6 +12,8 @@ import (
 	"time"
 
 	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
+	www_cli "dialtone/cli/src/plugins/www/cli"
+	plugin_cli "dialtone/cli/src/plugins/plugin/cli"
 )
 
 // ExecuteDev is the entry point for the dialtone-dev CLI
@@ -56,8 +58,10 @@ func ExecuteDev() {
 		runPullRequest(args)
 	case "ticket":
 		runTicket(args)
+	case "plugin":
+		plugin_cli.RunPlugin(args)
 	case "www":
-		runWww(args)
+		www_cli.RunWww(args)
 	case "opencode":
 		runOpencode(args)
 	case "developer":
@@ -92,6 +96,7 @@ func printDevUsage() {
 	fmt.Println("  test [name]        Run tests (all or for specific feature, creates templates if missing)")
 	fmt.Println("  pull-request       Create or update a pull request (wrapper around gh CLI)")
 	fmt.Println("  ticket <subcmd>    Manage GitHub tickets (wrapper around gh CLI)")
+	fmt.Println("  plugin <subcmd>    Manage plugins (create, etc.)")
 	fmt.Println("  www <subcmd>       Manage public webpage (Vercel wrapper)")
 	fmt.Println("  opencode <subcmd>  Manage opencode AI assistant (start, stop, status, ui)")
 	fmt.Println("  developer          Start the autonomous developer loop")
@@ -937,97 +942,7 @@ func runTicket(args []string) {
 	}
 }
 
-// runWww handles the www command
-func runWww(args []string) {
-	// Check if vercel CLI is available
-	homeDir, _ := os.UserHomeDir()
-	vercelPath := filepath.Join(homeDir, ".dialtone_env", "node", "bin", "vercel")
-	if _, err := os.Stat(vercelPath); os.IsNotExist(err) {
-		// Fallback to searching in PATH
-		if p, err := exec.LookPath("vercel"); err == nil {
-			vercelPath = p
-		} else {
-			LogFatal("Vercel CLI not found. Run 'dialtone install' to install dependencies.")
-		}
-	}
 
-	if len(args) == 0 {
-		fmt.Println("Usage: dialtone-dev www <subcommand> [options]")
-		fmt.Println("\nSubcommands:")
-		fmt.Println("  publish            Deploy the webpage to Vercel")
-		fmt.Println("  logs               View deployment logs")
-		fmt.Println("  domain             Manage the dialtone.earth domain")
-		fmt.Println("  login              Login to Vercel")
-		return
-	}
-
-	subcommand := args[0]
-	// Determine the directory where the webpage code is located
-	webDir := "dialtone-earth"
-
-	switch subcommand {
-	case "publish":
-		LogInfo("Deploying webpage to Vercel...")
-		vArgs := append([]string{"deploy", "--prod"}, args[1:]...)
-		cmd := exec.Command(vercelPath, vArgs...)
-		cmd.Dir = webDir
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Stdin = os.Stdin
-		if err := cmd.Run(); err != nil {
-			LogFatal("Failed to deploy: %v", err)
-		}
-		LogInfo("Deployment successful!")
-
-	case "logs":
-		vArgs := append([]string{"logs"}, args[1:]...)
-		cmd := exec.Command(vercelPath, vArgs...)
-		cmd.Dir = webDir
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Stdin = os.Stdin
-		if err := cmd.Run(); err != nil {
-			LogFatal("Failed to show logs: %v", err)
-		}
-
-	case "domain":
-		// Usage: dialtone-dev www domain [deployment-url]
-		// If no deployment-url is given, it will attempt to alias the most recent deployment.
-		vArgs := []string{"alias", "set"}
-		vArgs = append(vArgs, args[1:]...)
-		vArgs = append(vArgs, "dialtone.earth")
-		cmd := exec.Command(vercelPath, vArgs...)
-		cmd.Dir = webDir
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Stdin = os.Stdin
-		if err := cmd.Run(); err != nil {
-			LogFatal("Failed to set domain alias: %v", err)
-		}
-
-	case "login":
-		cmd := exec.Command(vercelPath, "login")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Stdin = os.Stdin
-		if err := cmd.Run(); err != nil {
-			LogFatal("Failed to login: %v", err)
-		}
-
-	default:
-		// Generic pass-through to vercel CLI
-		LogInfo("Running: vercel %s %s", subcommand, strings.Join(args[1:], " "))
-		vArgs := append([]string{subcommand}, args[1:]...)
-		cmd := exec.Command(vercelPath, vArgs...)
-		cmd.Dir = webDir
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Stdin = os.Stdin
-		if err := cmd.Run(); err != nil {
-			LogFatal("Vercel command failed: %v", err)
-		}
-	}
-}
 
 // runOpencode handles the opencode command
 func runOpencode(args []string) {
