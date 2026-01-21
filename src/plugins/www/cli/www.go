@@ -57,7 +57,8 @@ func RunWww(args []string) {
 		// args[1:] contains flags like --yes or --prod
 		vArgs := append([]string{"deploy", "--prod"}, args[1:]...)
 		cmd := exec.Command(vercelPath, vArgs...)
-		cmd.Dir = webDir
+		// Run from root to support Vercel Monorepo "Root Directory" settings
+		// cmd.Dir = webDir <--- REMOVED
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
@@ -72,7 +73,8 @@ func RunWww(args []string) {
 		}
 		vArgs := append([]string{"logs"}, args[1:]...)
 		cmd := exec.Command(vercelPath, vArgs...)
-		cmd.Dir = webDir
+		// Run from root
+		// cmd.Dir = webDir <--- REMOVED
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
@@ -87,7 +89,8 @@ func RunWww(args []string) {
 		vArgs = append(vArgs, args[1:]...)
 		vArgs = append(vArgs, "dialtone.earth")
 		cmd := exec.Command(vercelPath, vArgs...)
-		cmd.Dir = webDir
+		// Run from root
+		// cmd.Dir = webDir <--- REMOVED
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
@@ -104,12 +107,37 @@ func RunWww(args []string) {
 			logFatal("Failed to login: %v", err)
 		}
 
+	case "dev":
+		// Run 'npm run dev' (which runs vite)
+		logInfo("Starting local development server...")
+		cmd := exec.Command("npm", "run", "dev")
+		cmd.Dir = webDir // Keep running in webDir for NPM
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			logFatal("Dev server failed: %v", err)
+		}
+
+	case "build":
+		// Run 'npm run build' (which runs vite build)
+		logInfo("Building project...")
+		cmd := exec.Command("npm", "run", "build")
+		cmd.Dir = webDir // Keep running in webDir for NPM
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			logFatal("Build failed: %v", err)
+		}
+
 	default:
 		// Generic pass-through to vercel CLI
 		logInfo("Running: vercel %s %s", subcommand, strings.Join(args[1:], " "))
 		vArgs := append([]string{subcommand}, args[1:]...)
 		cmd := exec.Command(vercelPath, vArgs...)
-		cmd.Dir = webDir
+		// Run from root
+		// cmd.Dir = webDir <--- REMOVED
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
