@@ -20,9 +20,22 @@
 3. DO NOT implement remote flashing in this ticket.
 
 ## Test
-1. All ticket tests are at `tickets/cross-build-arm/test/`.
-2. All core tests are run with `./dialtone.sh test --core`.
-3. All tests are run with `./dialtone.sh test`.
+1. **Ticket Tests**: Run tests specific to the ARM cross-compilation logic.
+   ```bash
+   ./dialtone.sh ticket test cross-build-arm
+   ```
+2. **Plugin Tests**: Run tests for the newly migrated build plugin.
+   ```bash
+   ./dialtone.sh plugin test build
+   ```
+3. **Feature Tests**: Run tests for the cross-build-arm feature.
+   ```bash
+   ./dialtone.sh test cross-build-arm
+   ```
+4. **All Tests**: Run the entire test suite to ensure no regressions.
+   ```bash
+   ./dialtone.sh test
+   ```
 
 ## Logging
 1. Use the `src/logger.go` package to log messages.
@@ -31,37 +44,37 @@
 ## Subtask: Implementation
 - description: [NEW/MODIFY] Migrate `build` logic from `src/build.go` to `src/plugins/build/cli/build.go` and delegate from `src/dev.go`.
 - test: `./dialtone.sh build --help` works and is served from the plugin.
-- status: todo
+- status: done
 
 ## Subtask: Implementation
 - description: [MODIFY] `src/plugins/install/cli/install.go`: Add support for installing cross-compilation tools and Podman if needed.
 - test: `dialtone.sh install` can install `gcc-arm-linux-gnueabihf`, `gcc-aarch64-linux-gnu`, and `podman`.
-- status: todo
+- status: done
 
 ## Subtask: Research
 - description: Review `src/plugins/build/cli/build.go` (after migration) and `buildWithPodman` implementation. Understand Podman flags for volume mounting in WSL.
 - test: Documentation in Collaborative Notes about architecture-specific compiler names.
-- status: todo
+- status: done
 
 ## Subtask: Implementation
 - description: [MODIFY] `src/plugins/build/cli/build.go`: Add flags for `--podman`, `--linux-arm`, and `--linux-arm64`.
 - test: `RunBuild` correctly parses new flags.
-- status: todo
+- status: done
 
 ## Subtask: Implementation
 - description: [MODIFY] `src/plugins/build/cli/build.go`: Refactor `buildWithPodman` to use target architecture and matching compiler.
 - test: Podman command string contains correct `GOARCH` and `CC` for both arm and arm64 targets.
-- status: todo
+- status: done
 
 ## Subtask: Implementation
 - description: [NEW] `tickets/cross-build-arm/test/integration_test.go`: Integration test to verify build flag logic and command construction.
 - test: Test passes when running `./dialtone.sh test --ticket tickets/cross-build-arm`.
-- status: todo
+- status: done
 
 ## Subtask: Verification
 - description: Run test: `./dialtone.sh test`
 - test: All tests pass.
-- status: todo
+- status: done
 
 ## Collaborative Notes
 - The user wants to build `src/dialtone.go` into a binary for Raspberry Pi with a camera.
