@@ -17,7 +17,9 @@ func LoadConfig() {
 }
 
 // GetDialtoneEnv returns the directory where dependencies are installed.
-// It checks the DIALTONE_ENV environment variable, falling back to ~/.dialtone_env.
+// It checks the DIALTONE_ENV environment variable, falling back to:
+// 1. dialtone_dependencies/ next to the dialtone.sh script (if in a repo)
+// 2. ~/.dialtone_env (default)
 func GetDialtoneEnv() string {
 	env := os.Getenv("DIALTONE_ENV")
 	if env != "" {
@@ -29,8 +31,25 @@ func GetDialtoneEnv() string {
 		return env
 	}
 
+	// Try repo-local path: look for dialtone.sh in current or parent dirs
+	cwd, _ := os.Getwd()
+	for {
+		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
+			localPath := filepath.Join(cwd, "dialtone_dependencies")
+			LogInfo("DIALTONE_ENV not set, using repo-local path: %s", localPath)
+			return localPath
+		}
+		parent := filepath.Dir(cwd)
+		if parent == cwd {
+			break
+		}
+		cwd = parent
+	}
+
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".dialtone_env")
+	defaultPath := filepath.Join(home, ".dialtone_env")
+	LogInfo("DIALTONE_ENV not set, using default path: %s", defaultPath)
+	return defaultPath
 }
 
 func validateRequiredVars(vars []string) {
@@ -41,7 +60,7 @@ func validateRequiredVars(vars []string) {
 	}
 }
 
-func runShell(dir string, name string, args ...string) {
+func RunShell(dir string, name string, args ...string) {
 	LogInfo("Running: %s %v in %s", name, args, dir)
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
@@ -52,7 +71,7 @@ func runShell(dir string, name string, args ...string) {
 	}
 }
 
-func copyDir(src, dst string) {
+func CopyDir(src, dst string) {
 	entries, err := os.ReadDir(src)
 	if err != nil {
 		LogFatal("Failed to read src dir %s: %v", src, err)
@@ -66,7 +85,7 @@ func copyDir(src, dst string) {
 			if err := os.MkdirAll(dstPath, 0755); err != nil {
 				LogFatal("Failed to create dir %s: %v", dstPath, err)
 			}
-			copyDir(srcPath, dstPath)
+			CopyDir(srcPath, dstPath)
 		} else {
 			data, err := os.ReadFile(srcPath)
 			if err != nil {
@@ -79,7 +98,7 @@ func copyDir(src, dst string) {
 	}
 }
 
-func runSimpleShell(command string) {
+func RunSimpleShell(command string) {
 	LogInfo("Running: %s", command)
 	cmd := exec.Command("bash", "-c", command)
 	cmd.Stdout = os.Stdout
@@ -94,7 +113,7 @@ func commandExists(name string) bool {
 	return err == nil
 }
 
-func runSudoShell(command string) {
+func RunSudoShell(command string) {
 	LogInfo("Running with sudo: %s", command)
 	cmd := exec.Command("sudo", "bash", "-c", command)
 	cmd.Stdout = os.Stdout

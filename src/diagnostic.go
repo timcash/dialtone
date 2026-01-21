@@ -27,7 +27,7 @@ func RunDiagnostic(args []string) {
 		LogFatal("Error: -pass is required for remote diagnostics")
 	}
 
-	client, err := dialSSH(*host, *port, *user, *pass)
+	client, err := DialSSH(*host, *port, *user, *pass)
 	if err != nil {
 		LogFatal("SSH connection failed: %v", err)
 	}
@@ -50,7 +50,7 @@ func RunDiagnostic(args []string) {
 
 	for _, c := range commands {
 		fmt.Printf("\n--- %s ---\n", c.name)
-		output, err := runSSHCommand(client, c.cmd)
+		output, err := RunSSHCommand(client, c.cmd)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 		} else {
