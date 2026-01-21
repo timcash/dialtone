@@ -3,6 +3,7 @@ module dialtone/cli
 go 1.25.5
 
 require (
+	github.com/bluenviron/gomavlib/v3 v3.3.0
 	github.com/chromedp/cdproto v0.0.0-20250724212937-08a3db8b4327
 	github.com/chromedp/chromedp v0.14.2
 	github.com/coder/websocket v1.8.12
@@ -20,7 +21,6 @@ require (
 	github.com/akutz/memconn v0.1.0 // indirect
 	github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa // indirect
 	github.com/antithesishq/antithesis-sdk-go v0.5.0-default-no-op // indirect
-	github.com/bluenviron/gomavlib/v3 v3.3.0 // indirect
 	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/creachadair/msync v0.7.1 // indirect
 	github.com/creack/goselect v0.1.2 // indirect
