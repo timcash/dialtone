@@ -1,4 +1,4 @@
-package ticket_install_logs
+package test
 
 import (
 	"os"
@@ -9,17 +9,20 @@ import (
 )
 
 func TestIntegration_DependencyPathResolution(t *testing.T) {
-	// Need to be at project root to run dialtone.sh or dialtone-dev.go
-	if err := os.Chdir("../.."); err != nil {
-		t.Fatalf("Failed to chdir to project root: %v", err)
+	root, err := findRoot()
+	if err != nil {
+		t.Fatalf("Could not find project root: %v", err)
 	}
+	t.Logf("Detected project root: %s", root)
+	dialtoneSh := filepath.Join(root, "dialtone.sh")
 
 	// 1. Default path test: run install without args/env and assert logs the default path.
 	t.Run("DefaultPath", func(t *testing.T) {
-		cmd := exec.Command("bash", "./dialtone.sh", "install", "--help")
+		cmd := exec.Command(dialtoneSh, "install", "--help")
+		cmd.Dir = root
 		output, err := cmd.CombinedOutput()
 		if err != nil {
-			t.Fatalf("Failed to run dialtone.sh: %v\nOutput: %s", err, output)
+			t.Fatalf("Failed to run %s: %v\nOutput: %s", dialtoneSh, err, output)
 		}
 		
 		// Assert output mentions dependency path
@@ -33,10 +36,11 @@ func TestIntegration_DependencyPathResolution(t *testing.T) {
 		tempDir, _ := os.MkdirTemp("", "dialtone-deps-test")
 		defer os.RemoveAll(tempDir)
 		
-		cmd := exec.Command("go", "run", "dialtone-dev.go", "install", tempDir, "--help")
+		cmd := exec.Command(dialtoneSh, "install", tempDir, "--help")
+		cmd.Dir = root
 		output, err := cmd.CombinedOutput()
 		if err != nil {
-			t.Fatalf("Failed to run dialtone-dev.go: %v\nOutput: %s", err, output)
+			t.Fatalf("Failed to run %s: %v\nOutput: %s", dialtoneSh, err, output)
 		}
 		
 		if !strings.Contains(string(output), tempDir) {
@@ -47,11 +51,12 @@ func TestIntegration_DependencyPathResolution(t *testing.T) {
 	// 3. Env var test: set the env var and assert it's prioritized and logged.
 	t.Run("EnvVarPriority", func(t *testing.T) {
 		envDir := "/tmp/mock-env-dir"
-		cmd := exec.Command("go", "run", "dialtone-dev.go", "install", "--help")
+		cmd := exec.Command(dialtoneSh, "install", "--help")
+		cmd.Dir = root
 		cmd.Env = append(os.Environ(), "DIALTONE_ENV="+envDir)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
-			t.Fatalf("Failed to run dialtone-dev.go with ENV: %v\nOutput: %s", err, output)
+			t.Fatalf("Failed to run %s with ENV: %v\nOutput: %s", dialtoneSh, err, output)
 		}
 		
 		if !strings.Contains(string(output), envDir) {
@@ -67,10 +72,11 @@ func TestIntegration_DependencyPathResolution(t *testing.T) {
 		os.MkdirAll(tempDir, 0755)
 		os.WriteFile(mockFile, []byte("test"), 0644)
 		
-		cmd := exec.Command("go", "run", "dialtone-dev.go", "install", tempDir, "--clean", "--help")
+		cmd := exec.Command(dialtoneSh, "install", tempDir, "--clean", "--help")
+		cmd.Dir = root
 		output, err := cmd.CombinedOutput()
 		if err != nil {
-			t.Fatalf("Failed to run dialtone-dev.go --clean: %v\nOutput: %s", err, output)
+			t.Fatalf("Failed to run %s --clean: %v\nOutput: %s", dialtoneSh, err, output)
 		}
 		
 		if _, err := os.Stat(tempDir); !os.IsNotExist(err) {
@@ -78,4 +84,3 @@ func TestIntegration_DependencyPathResolution(t *testing.T) {
 		}
 	})
 }
-

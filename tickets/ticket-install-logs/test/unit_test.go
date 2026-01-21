@@ -1,4 +1,4 @@
-package ticket_install_logs
+package test
 
 import (
 	"testing"
