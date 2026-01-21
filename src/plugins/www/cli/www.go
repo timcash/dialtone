@@ -36,6 +36,8 @@ func RunWww(args []string) {
 		fmt.Println("Usage: dialtone-dev www <subcommand> [options]")
 		fmt.Println("\nSubcommands:")
 		fmt.Println("  publish            Deploy the webpage to Vercel")
+		fmt.Println("  build              Build the project locally")
+		fmt.Println("  dev                Start local development server")
 		fmt.Println("  logs               View deployment logs")
 		fmt.Println("  domain             Manage the dialtone.earth domain")
 		fmt.Println("  login              Login to Vercel")
@@ -51,6 +53,8 @@ func RunWww(args []string) {
 	switch subcommand {
 	case "publish":
 		logInfo("Deploying webpage to Vercel...")
+		// dialtone-dev www publish [--yes]
+		// args[1:] contains flags like --yes or --prod
 		vArgs := append([]string{"deploy", "--prod"}, args[1:]...)
 		cmd := exec.Command(vercelPath, vArgs...)
 		cmd.Dir = webDir
@@ -63,6 +67,9 @@ func RunWww(args []string) {
 		logInfo("Deployment successful!")
 
 	case "logs":
+		if len(args) < 2 {
+			logFatal("Usage: dialtone-dev www logs <deployment-url-or-id>\n   Run 'dialtone-dev www logs --help' for more info.")
+		}
 		vArgs := append([]string{"logs"}, args[1:]...)
 		cmd := exec.Command(vercelPath, vArgs...)
 		cmd.Dir = webDir
