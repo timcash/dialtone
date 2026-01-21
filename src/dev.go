@@ -411,22 +411,38 @@ func runBranch(args []string) {
 
 // runTest handles the test command
 func runTest(args []string) {
-	var testPath string
+	var testPackages []string
+	
 	if len(args) == 0 {
-		testPath = "./test/..."
-		LogInfo("Running all tests...")
+		LogInfo("Running all tests (core, plugins, and tickets)...")
+		testPackages = []string{"./test/...", "./src/plugins/...", "./tickets/..."}
 	} else {
 		name := args[0]
-		testDir := filepath.Join("test", name)
-		testPath = fmt.Sprintf("./test/%s/...", name)
-
-		// Ensure test directory and template files exist
-		ensureTestFiles(testDir, name)
-
-		LogInfo("Running tests for: %s", name)
+		
+		// Hierarchical Discovery:
+		// 1. Check tickets directory
+		ticketTestDir := filepath.Join("tickets", name, "test")
+		if _, err := os.Stat(ticketTestDir); err == nil {
+			LogInfo("Running ticket tests for: %s", name)
+			testPackages = []string{"./" + ticketTestDir + "/..."}
+		} else {
+			// 2. Check plugins directory
+			pluginTestDir := filepath.Join("src", "plugins", name, "test")
+			if _, err := os.Stat(pluginTestDir); err == nil {
+				LogInfo("Running plugin tests for: %s", name)
+				testPackages = []string{"./" + pluginTestDir + "/..."}
+			} else {
+				// 3. Fallback to global test directory
+				testDir := filepath.Join("test", name)
+				LogInfo("Running core tests for: %s", name)
+				ensureTestFiles(testDir, name)
+				testPackages = []string{"./" + testDir + "/..."}
+			}
+		}
 	}
 
-	cmd := exec.Command("go", "test", "-v", testPath)
+	testArgs := append([]string{"test", "-v", "-p", "1"}, testPackages...)
+	cmd := exec.Command("go", testArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = os.Environ()
@@ -434,8 +450,8 @@ func runTest(args []string) {
 	var testErr error
 	testErr = cmd.Run()
 
-	// Run live web tests if in the dialtone-earth context or if all tests are requested
-	if len(args) == 0 || args[0] == "www" {
+	// Run live web tests if in the dialtone context or if specifically requested
+	if len(args) == 0 || (len(args) > 0 && args[0] == "www") {
 		runLiveWebTest()
 	}
 
