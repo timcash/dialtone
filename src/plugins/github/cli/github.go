@@ -129,6 +129,17 @@ func runPullRequest(args []string) {
 		case "close":
 			runClose(args[1:])
 			return
+		case "help", "-h", "--help":
+			printGithubUsage()
+			return
+		}
+		
+		// Also scan for help flag anywhere if not subcommand
+		for _, arg := range args {
+			if arg == "--help" || arg == "-h" {
+				printGithubUsage()
+				return
+			}
 		}
 	}
 
