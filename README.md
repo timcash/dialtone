@@ -155,6 +155,10 @@ Tickets are the primary unit of work in the system. They are used to track chang
 # Use git add to update git and ensure .gitignore is correct. Make atomic commits.
 git add .
 git commit -m "feat: description"
+
+# 7. Create Pull Request
+# Create a pull request for your changes.
+./dialtone.sh github pull-request
 ```
 
 ### Ticket Structure
