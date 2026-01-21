@@ -16,6 +16,7 @@ import (
 	plugin_cli "dialtone/cli/src/plugins/plugin/cli"
 	github_cli "dialtone/cli/src/plugins/github/cli"
 	install_cli "dialtone/cli/src/plugins/install/cli"
+	build_cli "dialtone/cli/src/plugins/build/cli"
 )
 
 // ExecuteDev is the entry point for the dialtone-dev CLI
@@ -33,7 +34,7 @@ func ExecuteDev() {
 
 	switch command {
 	case "build":
-		RunBuild(args)
+		build_cli.RunBuild(args)
 	case "deploy":
 		RunDeploy(args)
 	case "ssh":
@@ -88,7 +89,7 @@ func printDevUsage() {
 	fmt.Println("Usage: dialtone-dev <command> [options]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  install [path] Install dependencies (--linux-wsl for WSL, --macos-arm for Apple Silicon)")
-	fmt.Println("  build         Build web UI and binary (--local, --full, --remote)")
+	fmt.Println("  build         Build web UI and binary (--local, --full, --remote, --podman, --linux-arm, --linux-arm64)")
 	fmt.Println("  deploy        Deploy to remote robot")
 	fmt.Println("  clone         Clone or update the repository")
 	fmt.Println("  sync-code     Sync source code to remote robot")

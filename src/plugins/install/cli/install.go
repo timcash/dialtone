@@ -20,6 +20,8 @@ const (
 	ZigVersion   = "0.13.0"
 	GHVersion    = "2.66.1"
 	PixiVersion  = "latest" // Using latest for pixi
+	PodmanVersion = "latest"
+	ArmCompilerVersion = "latest"
 )
 
 
@@ -361,6 +363,16 @@ func installLocalDepsWSL() {
 	} else {
 		logItemStatus("V4L2 Headers", "latest", headerFile, true)
 	}
+
+	// 4. Install Cross-Compilation Tools & Podman (WSL specific)
+	if runtime.GOOS == "linux" {
+		logger.LogInfo("Step 4: Installing Cross-Compilation Tools and Podman...")
+		// Use sudo apt-get for system-level tools in WSL
+		runSimpleShell("sudo apt-get update")
+		runSimpleShell("sudo apt-get install -y gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu podman")
+		logger.LogInfo("Cross-compilers and Podman installed successfully.")
+	}
+
 	printInstallComplete(depsDir)
 }
 
