@@ -3,8 +3,8 @@
 
 > IMPORTANT: See `README.md` for the full ticket lifecycle and development workflow.
 > Run `./dialtone.sh ticket start <this-file>` to start work.
-> Run `./dialtone.sh plugin create <plugin-name>` to create a new plugin if needed
-> Run `./dialtone.sh github pull-request` to create a pull request
+> Run `./dialtone.sh plugin create <plugin-name>` to create a new plugin if this ticket is about a plugin
+> Run `./dialtone.sh github pull-request` to create a draft pull request
 
 ## Goals
 1. Use tests files in `ticket/<ticket-name>/test/` to drive all work

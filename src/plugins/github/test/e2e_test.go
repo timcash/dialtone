@@ -130,12 +130,19 @@ func TestE2E_CreateAndCleanupPR(t *testing.T) {
 	t.Logf("Created PR #%s", prNumber)
 
 	// 5. Cleanup: Close PR
+	// 5. Cleanup: Close PR
 	t.Logf("Closing PR #%s...", prNumber)
-	if err := exec.Command("gh", "pr", "close", prNumber, "--delete-branch").Run(); err != nil {
-		t.Logf("Failed to close PR (might already be closed or logic error): %v", err)
-		// We already handle local branch deletion in defer, and remote branch deletion in defer
+	// We use `dialtone-dev github pull-request close <prNumber> --delete-branch`
+	// Note: runClose defaults to --delete-branch if no args, but we must pass prNumber because
+	// `gh pr close` without args assumes current branch. And `gh` sometimes complains about deleting Checked out branch.
+	// But we are on the branch.
+	// Let's pass prNumber and --delete-branch explicitly.
+	cmdClose := exec.Command("go", "run", "dialtone-dev.go", "github", "pull-request", "close", prNumber, "--delete-branch")
+	cmdClose.Dir = root
+	if out, err := cmdClose.CombinedOutput(); err != nil {
+		t.Logf("Failed to close PR via dialtone-dev (might already be closed or logic error): %v. Output: %s", err, out)
 	} else {
-		t.Log("PR closed successfully")
+		t.Log("PR closed successfully via dialtone-dev")
 	}
 }
 

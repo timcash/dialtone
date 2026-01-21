@@ -41,15 +41,23 @@
 - status: todo
 - description: [MODIFY] `src/dev.go`: Import `dialtone/cli/src/plugins/github/cli`, add `github` command case, and change `pull-request` case to delegate to `plugin_cli.RunGithub` with `pull-request` arg.
 - status: todo
-- description: [NEW/MODIFY] `src/plugins/github/cli/github.go`: Implement logic to check/wait for Vercel deployment status (e.g., `dialtone-dev github check-deploy`).
+- description: [NEW/MODIFY] `src/plugins/github/cli/github.go`: Implement logic to check/wait for Vercel deployment status (listing deployments).
+- status: done
+- description: [NEW/MODIFY] `src/plugins/github/cli/github.go`: Refactor `pull-request` to handle `merge` and `close` subcommands.
+- status: todo
+- description: [NEW/MODIFY] `src/plugins/github/cli/github.go`: Move `merge` logic to `pull-request merge`.
+- status: todo
+- description: [NEW/MODIFY] `src/plugins/github/cli/github.go`: Move `close` logic to `pull-request close`.
 - status: todo
 
 ## Subtask: Verification
 - description: Run test: `./dialtone.sh ticket test github-plugin`
-- status: todo
+- status: done
 - description: Run test: `./dialtone.sh plugin test github`
-- status: todo
+- status: done
 - description: Run test: `./dialtone.sh test`
+- status: done
+- description: Update E2E test to use `dialtone-dev github close` instead of direct `gh` call.
 - status: todo
 
 ## Collaborative Notes
@@ -60,3 +68,21 @@
 
 ---
 Template version: 5.0. To start work: `./dialtone.sh ticket start <this-file>`
+
+# Usage
+The `github` plugin provides the following commands for managing pull requests and verification:
+
+## Pull Requests
+- **Create/Update**: `dialtone-dev github pull-request [flags]`
+  - Wraps `gh pr create` or `gh pr edit`.
+  - Flags: `--title`, `--body`, `--draft`, `--ready`, `--view`
+- **Merge**: `dialtone-dev github pull-request merge [flags]`
+  - Merges the current PR and deletes the branch.
+  - Wraps `gh pr merge --merge --delete-branch`.
+- **Close**: `dialtone-dev github pull-request close [flags]`
+  - Closes the current PR and deletes the branch.
+  - Wraps `gh pr close --delete-branch`.
+
+## Verification
+- **Check Deployment**: `dialtone-dev github check-deploy`
+  - Lists Vercel deployments to check status.
