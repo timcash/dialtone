@@ -1,0 +1,14 @@
+{
+    "framework": "vite",
+    "outputDirectory": "dist",
+    "rewrites": [
+        {
+            "source": "/about",
+            "destination": "/src/pages/about.html"
+        },
+        {
+            "source": "/docs",
+            "destination": "/src/pages/docs.html"
+        }
+    ]
+}
