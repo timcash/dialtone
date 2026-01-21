@@ -17,10 +17,22 @@
 3. DO NOT [item 3]
 
 ## Test
-1. all ticket tests are at `ticket/<ticket-name>/test/`
-2. all plugin tests are run with `./dialtone.sh plugin test <plugin-name>`
-3. all core tests are run with `./dialtone.sh test --core`
-4. all tests are run with `./dialtone.sh test`
+1. **Ticket Tests**: Run tests specific to this ticket's implementation.
+   ```bash
+   ./dialtone.sh ticket test <ticket-name>
+   ```
+2. **Plugin Tests**: If this ticket involves a plugin, run its specific tests.
+   ```bash
+   ./dialtone.sh plugin test <plugin-name>
+   ```
+3. **Feature Tests**: Run tests for a specific feature, which searches through tickets, plugins, and core tests.
+   ```bash
+   ./dialtone.sh test <feature-name>
+   ```
+4. **All Tests**: Run the entire test suite (core, plugins, and tickets).
+   ```bash
+   ./dialtone.sh test
+   ```
 
 ## Logging
 1. Use the `src/logger.go` package to log messages.
