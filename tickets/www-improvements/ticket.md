@@ -28,20 +28,20 @@
 - description: Verify `tickets/www-improvements/test/` exists (created by start command).
 - description: [NEW] `tickets/www-improvements/test/e2e_test.go`: Implement test to verify `dialtone.sh www dev` starts a server (check localhost:3000).
 - description: [NEW] `tickets/www-improvements/test/integration_test.go`: Implement test to verify `dialtone.sh www build` creates expected artifacts.
-- status: todo
+- status: done
 
 ## Subtask: App Migration
 - description: Move all contents from `dialtone-earth/` to `src/plugins/www/app/`.
-- status: todo
+- status: done
 
 ## Subtask: CLI Refactor
 - description: [NEW] `src/plugins/www/cli/www.go`: Implement `RunWww` function handling `dev`, `build`, `publish`, `logs`, `domain`, `login`.
 - description: [MODIFY] `src/dev.go`: Import `dialtone/cli/src/plugins/www/cli` and delegate `www` command to it. Remove `runWww` implementation.
-- status: todo
+- status: done
 
 ## Subtask: Verification
 - description: Run test: `./dialtone.sh test` (which triggers the ticket tests).
-- status: todo
+- status: done
 
 ## Development Cycle
 1. Run `./dialtone.sh ticket start www_improvements` to change the git branch (already done if you are here).
