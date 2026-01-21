@@ -37,5 +37,8 @@
 ## Collaborative Notes
 [A place for humans and the autocoder to share research, technical decisions, or state between context windows.]
 
+## Tools and Tips for writing great tickets
+1. Use this file as a template for writing tickets
+
 ---
 Template version: 5.0. To start work: `./dialtone.sh ticket start <this-file>`
