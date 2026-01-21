@@ -1,4 +1,4 @@
-# Branch: ticket/short-name
+# Branch: ticket-short-name (do not use / in the branch name they become folders, only use -)
 # Task: [Ticket Title]
 
 > IMPORTANT: See `README.md` for the full ticket lifecycle and development workflow.
@@ -22,16 +22,23 @@
 3. all core tests are run with `./dialtone.sh test --core`
 4. all tests are run with `./dialtone.sh test`
 
+## Logging
+1. Use the `src/logger.go` package to log messages.
+2. Use logs to help debug and understand the code.
+
 ## Subtask: Research
 - description: [List files to explore, documentation to read, or concepts to understand]
+- test: [How to verify this research informed the work]
 - status: todo
 
 ## Subtask: Implementation
 - description: [NEW/MODIFY] [file_path]: [Short description of change]
+- test: [What test or check proves this subtask works]
 - status: todo
 
 ## Subtask: Verification
 - description: Run test: `./dialtone.sh test`
+- test: [Expected outcome or artifact to confirm success]
 - status: todo
 
 ## Collaborative Notes
