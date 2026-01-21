@@ -106,15 +106,48 @@ Dialtone is built with a "Test-First" philosophy. Every function, feature, and p
 3. **Core**: Core code is reserved for features dealing with networking and deployment (dialtone/dialtone-dev). It is the minimal code required to bootstrap the system.
 
 ### Ticket Lifecycle
-1. **Create/Identify Ticket**: All work starts with a `ticket.md` in `./tickets/<ticket_name>/`.
-2. **Start Ticket**: `./dialtone.sh ticket start <ticket-name>` - This sets up the git branch and verifies the folder structure:
-   - `ticket.md`: The requirement doc.
-   - `task.md`: Scratchpad for tracking sub-progress.
-   - `code/`: Local code playground for the ticket.
-   - `test/`: Ticket-specific verification tests.
-3. **Test First**: Update a test file in `test/` (or existing ones) to reflect the new feature. Run it to confirm it fails.
-4. **Implement**: Write code until the test passes.
-5. **Verify & Stage**: Run all relevant plugin and core tests before merging.
+```bash
+# 1. Start Work
+# Start work on a ticket (creates/certifies branch and files)
+./dialtone.sh ticket start <ticket-name>
+
+# OR start work on a ticket + plugin (creates/certifies plugin structure too)
+./dialtone.sh ticket start <ticket-name> --plugin <plugin-name>
+
+# 2. Test First
+# Update a test before writing new code and run the test to show a failure.
+# e.g. tickets/<ticket-name>/test/e2e_test.go
+
+# 3. Implement
+# Change the system until the test passes.
+# e.g. tickets/<ticket-name>/code/stage1.go
+
+# 4. Track
+# Update tickets/<ticket-name>/ticket.md to reflect subtasks completed and those remaining.
+# Update tickets/<ticket-name>/task.md for scratchpad notes.
+
+# 5. Git Hygiene
+# Use git add to update git and ensure .gitignore is correct. Make atomic commits.
+git add .
+git commit -m "feat: description"
+
+# 6. Verify
+# Run relevant tests.
+./dialtone.sh test
+```
+
+### Ticket Structure
+For tickets created via `./dialtone.sh ticket start <ticket-name>`:
+1. `tickets/<ticket-name>/ticket.md` - The requirement doc (from template).
+2. `tickets/<ticket-name>/task.md` - Scratchpad for tracking progress.
+3. `tickets/<ticket-name>/code/` - Local code playground for the ticket.
+4. `tickets/<ticket-name>/test/` - Ticket-specific verification tests.
+
+### Plugin Development Structure
+For new plugins created via `./dialtone.sh ticket start <ticket-name> --plugin <plugin-name>`:
+1. `src/plugins/<name>/app` - Application code.
+2. `src/plugins/<name>/cli` - CLI command code.
+3. `src/plugins/<name>/test` - Plugin-specific tests.
 
 # Why Dialtone Uses Golang
 1. Go is a compiled language that provides the high-performance execution and efficient resource management required for real-time robotic operations.
@@ -163,11 +196,11 @@ export DIALTONE_ENV="~/dialtone_env"
 # Windows equivalent:
 # .\dialtone.ps1 install --linux-wsl
 
-# Perform a native build (includes Web UI and Camera support)
-./dialtone.sh build --local
+# Perform a native build of the robot binary(includes Web UI and Camera support)
+./dialtone.sh build
 
-# Start the node locally
-go run dialtone.go start --local
+# Start the robot node locally - all robot commands pass down to the dialtone.go binary
+./dialtone.sh robot start
 ```
 
 # Join the Mission
