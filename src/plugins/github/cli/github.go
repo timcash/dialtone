@@ -6,17 +6,29 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"dialtone/cli/src/core/logger"
 )
 
-
-
-func logInfo(format string, args ...interface{}) {
-	fmt.Printf("[github] "+format+"\n", args...)
-}
-
-func logFatal(format string, args ...interface{}) {
-	fmt.Printf("[github] FATAL: "+format+"\n", args...)
-	os.Exit(1)
+func findGH() string {
+	depsDir := os.Getenv("DIALTONE_ENV")
+	if depsDir == "" {
+		// Fallback to home if not set, match config.go logic
+		home, _ := os.UserHomeDir()
+		depsDir = filepath.Join(home, ".dialtone_env")
+	}
+	
+	ghPath := filepath.Join(depsDir, "gh", "bin", "gh")
+	if _, err := os.Stat(ghPath); err == nil {
+		return ghPath
+	}
+	
+	// Fallback to system PATH
+	if p, err := exec.LookPath("gh"); err == nil {
+		return p
+	}
+	
+	return "gh"
 }
 
 // RunGithub handles 'github <subcommand>'
@@ -54,12 +66,8 @@ func printGithubUsage() {
 
 // runMerge merges the current pull request
 func runMerge(args []string) {
-	// Check if gh CLI is available
-	if _, err := exec.LookPath("gh"); err != nil {
-		logFatal("GitHub CLI (gh) not found. Install it from: https://cli.github.com/")
-	}
-
-	logInfo("Merging pull request...")
+	gh := findGH()
+	logger.LogInfo("Merging pull request...")
 
 	// Default args: merge current PR, use merge commit, delete branch
 	// We allow user args to override or append?
@@ -75,25 +83,20 @@ func runMerge(args []string) {
 		cmdArgs = append(cmdArgs, "--merge", "--delete-branch")
 	}
 
-	cmd := exec.Command("gh", cmdArgs...)
+	cmd := exec.Command(gh, cmdArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	// gh pr merge might be interactive if not enough info/flags, but we inherit proper stdio so it should be fine.
 	
 	if err := cmd.Run(); err != nil {
-		logFatal("Failed to merge PR: %v", err)
+		logger.LogFatal("Failed to merge PR: %v", err)
 	}
-	logInfo("Pull request merged successfully.")
+	logger.LogInfo("Pull request merged successfully.")
 }
 
-// runClose closes the current pull request
 func runClose(args []string) {
-	// Check if gh CLI is available
-	if _, err := exec.LookPath("gh"); err != nil {
-		logFatal("GitHub CLI (gh) not found. Install it from: https://cli.github.com/")
-	}
-
-	logInfo("Closing pull request...")
+	gh := findGH()
+	logger.LogInfo("Closing pull request...")
 	
 	cmdArgs := []string{"pr", "close"}
 	
@@ -107,19 +110,21 @@ func runClose(args []string) {
 		cmdArgs = append(cmdArgs, "--delete-branch")
 	}
 	
-	cmd := exec.Command("gh", cmdArgs...)
+	cmd := exec.Command(gh, cmdArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	
 	if err := cmd.Run(); err != nil {
-		logFatal("Failed to close PR: %v", err)
+		logger.LogFatal("Failed to close PR: %v", err)
 	}
-	logInfo("Pull request closed successfully.")
+	logger.LogInfo("Pull request closed successfully.")
 }
 
 // runPullRequest handles the pull-request command
 // Migrated from src/dev.go
 func runPullRequest(args []string) {
+	gh := findGH()
+
 	// Check for subcommands
 	if len(args) > 0 {
 		switch args[0] {
@@ -141,11 +146,6 @@ func runPullRequest(args []string) {
 				return
 			}
 		}
-	}
-
-	// Check if gh CLI is available
-	if _, err := exec.LookPath("gh"); err != nil {
-		logFatal("GitHub CLI (gh) not found. Install it from: https://cli.github.com/")
 	}
 
 	// Parse flags and capture positional arguments
@@ -193,22 +193,22 @@ func runPullRequest(args []string) {
 	cmd := exec.Command("git", "branch", "--show-current")
 	output, err := cmd.Output()
 	if err != nil {
-		logFatal("Failed to get current branch: %v", err)
+		logger.LogFatal("Failed to get current branch: %v", err)
 	}
 	branch := strings.TrimSpace(string(output))
 
 	if branch == "main" || branch == "master" {
-		logFatal("Cannot create PR from main/master branch. Create a feature branch first.")
+		logger.LogFatal("Cannot create PR from main/master branch. Create a feature branch first.")
 	}
 
 	// Check if PR already exists
-	checkCmd := exec.Command("gh", "pr", "view", "--json", "number,title,url")
+	checkCmd := exec.Command(gh, "pr", "view", "--json", "number,title,url")
 	prOutput, prErr := checkCmd.Output()
 	prExists := prErr == nil
 
 	if !prExists {
 		// PR doesn't exist, create it
-		logInfo("Creating new pull request for branch: %s", branch)
+		logger.LogInfo("Creating new pull request for branch: %s", branch)
 
 		var createArgs []string
 		createArgs = append(createArgs, "pr", "create")
@@ -237,19 +237,19 @@ func runPullRequest(args []string) {
 			createArgs = append(createArgs, "--draft")
 		}
 
-		cmd = exec.Command("gh", createArgs...)
+		cmd = exec.Command(gh, createArgs...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			logFatal("Failed to create PR: %v", err)
+			logger.LogFatal("Failed to create PR: %v", err)
 		}
 	} else {
 		// PR exists
-		logInfo("Pull request exists for branch: %s", branch)
+		logger.LogInfo("Pull request exists for branch: %s", branch)
 
 		// If title or body provided, update the PR
 		if title != "" || body != "" {
-			logInfo("Updating pull request...")
+			logger.LogInfo("Updating pull request...")
 
 			var editArgs []string
 			editArgs = append(editArgs, "pr", "edit")
@@ -267,25 +267,25 @@ func runPullRequest(args []string) {
 				}
 			}
 
-			cmd = exec.Command("gh", editArgs...)
+			cmd = exec.Command(gh, editArgs...)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			if err := cmd.Run(); err != nil {
-				logFatal("Failed to update PR: %v", err)
+				logger.LogFatal("Failed to update PR: %v", err)
 			}
-			logInfo("Pull request updated successfully")
+			logger.LogInfo("Pull request updated successfully")
 		}
 
 		// Mark as ready for review if --ready flag
 		if ready {
-			logInfo("Marking pull request as ready for review...")
-			cmd = exec.Command("gh", "pr", "ready")
+			logger.LogInfo("Marking pull request as ready for review...")
+			cmd = exec.Command(gh, "pr", "ready")
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			if err := cmd.Run(); err != nil {
-				logFatal("Failed to mark PR as ready: %v", err)
+				logger.LogFatal("Failed to mark PR as ready: %v", err)
 			}
-			logInfo("Pull request is now ready for review")
+			logger.LogInfo("Pull request is now ready for review")
 		}
 
 		// Show PR info
@@ -293,8 +293,8 @@ func runPullRequest(args []string) {
 
 		// Open in browser if --view flag
 		if view {
-			logInfo("Opening in browser...")
-			cmd = exec.Command("gh", "pr", "view", "--web")
+			logger.LogInfo("Opening in browser...")
+			cmd = exec.Command(gh, "pr", "view", "--web")
 			cmd.Run()
 		}
 	}
@@ -302,7 +302,7 @@ func runPullRequest(args []string) {
 
 // runCheckDeploy checks the status of the Vercel deployment for the current branch
 func runCheckDeploy(args []string) {
-	logInfo("Checking Vercel deployment status...")
+	logger.LogInfo("Checking Vercel deployment status...")
 
 	// 1. Find Vercel CLI
 	homeDir, _ := os.UserHomeDir()
@@ -311,7 +311,7 @@ func runCheckDeploy(args []string) {
 		if p, err := exec.LookPath("vercel"); err == nil {
 			vercelPath = p
 		} else {
-			logFatal("Vercel CLI not found. Run 'dialtone install' to install dependencies.")
+			logger.LogFatal("Vercel CLI not found. Run 'dialtone install' to install dependencies.")
 		}
 	}
 
@@ -327,8 +327,8 @@ func runCheckDeploy(args []string) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	
-	logInfo("Running: vercel list (in %s)", webDir)
+	logger.LogInfo("Running: vercel list (in %s)", webDir)
 	if err := cmd.Run(); err != nil {
-		logFatal("Failed to check deployments: %v", err)
+		logger.LogFatal("Failed to check deployments: %v", err)
 	}
 }
