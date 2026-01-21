@@ -141,7 +141,14 @@ Tickets are the primary unit of work in the system. They are used to track chang
 
 # 3. Test Again
 # Show tests are now passing after the code changes.
+# You can run ticket-specific tests:
 ./dialtone.sh ticket test <ticket-name>
+
+# Or run tests for a specific plugin if applicable:
+./dialtone.sh plugin test <plugin-name>
+
+# Or run tests for a specific feature by name:
+./dialtone.sh test <name>
 
 # 4. Track
 # Update tickets/<ticket-name>/ticket.md to reflect subtasks completed and those remaining.
