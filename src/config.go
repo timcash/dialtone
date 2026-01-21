@@ -23,7 +23,6 @@ func LoadConfig() {
 func GetDialtoneEnv() string {
 	env := os.Getenv("DIALTONE_ENV")
 	if env != "" {
-		// Expand ~ if present
 		if strings.HasPrefix(env, "~") {
 			home, _ := os.UserHomeDir()
 			env = filepath.Join(home, env[1:])
@@ -31,13 +30,13 @@ func GetDialtoneEnv() string {
 		return env
 	}
 
-	// Try repo-local path: look for dialtone.sh in current or parent dirs
 	cwd, _ := os.Getwd()
 	for {
 		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
 			localPath := filepath.Join(cwd, "dialtone_dependencies")
-			LogInfo("DIALTONE_ENV not set, using repo-local path: %s", localPath)
-			return localPath
+			if _, err := os.Stat(localPath); err == nil {
+				return localPath
+			}
 		}
 		parent := filepath.Dir(cwd)
 		if parent == cwd {
@@ -48,7 +47,6 @@ func GetDialtoneEnv() string {
 
 	home, _ := os.UserHomeDir()
 	defaultPath := filepath.Join(home, ".dialtone_env")
-	LogInfo("DIALTONE_ENV not set, using default path: %s", defaultPath)
 	return defaultPath
 }
 
