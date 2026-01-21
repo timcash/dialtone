@@ -14,6 +14,7 @@ import (
 	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
 	www_cli "dialtone/cli/src/plugins/www/cli"
 	plugin_cli "dialtone/cli/src/plugins/plugin/cli"
+	github_cli "dialtone/cli/src/plugins/github/cli"
 )
 
 // ExecuteDev is the entry point for the dialtone-dev CLI
@@ -55,7 +56,10 @@ func ExecuteDev() {
 	case "test":
 		runTest(args)
 	case "pull-request", "pr":
-		runPullRequest(args)
+		// Delegate to github plugin
+		github_cli.RunGithub(append([]string{"pull-request"}, args...))
+	case "github":
+		github_cli.RunGithub(args)
 	case "ticket":
 		runTicket(args)
 	case "plugin":
@@ -97,6 +101,7 @@ func printDevUsage() {
 	fmt.Println("  pull-request       Create or update a pull request (wrapper around gh CLI)")
 	fmt.Println("  ticket <subcmd>    Manage GitHub tickets (wrapper around gh CLI)")
 	fmt.Println("  plugin <subcmd>    Manage plugins (create, etc.)")
+	fmt.Println("  github <subcmd>    Manage GitHub interactions (pr, check-deploy)")
 	fmt.Println("  www <subcmd>       Manage public webpage (Vercel wrapper)")
 	fmt.Println("  opencode <subcmd>  Manage opencode AI assistant (start, stop, status, ui)")
 	fmt.Println("  developer          Start the autonomous developer loop")
@@ -178,6 +183,8 @@ func runDocs(args []string) {
 				example = "go run dialtone-dev.go pull-request --draft"
 			case "ticket":
 				example = "go run dialtone-dev.go ticket view 20"
+			case "github":
+				example = "go run dialtone-dev.go github pull-request --draft"
 			case "www":
 				example = "go run dialtone-dev.go www publish"
 			case "developer":
@@ -641,164 +648,7 @@ func TestE2E_BinaryExists(t *testing.T) {
 `, packageName, featureName, featureName, featureName)
 }
 
-// runPullRequest handles the pull-request command
-func runPullRequest(args []string) {
-	// Check if gh CLI is available
-	if _, err := exec.LookPath("gh"); err != nil {
-		LogFatal("GitHub CLI (gh) not found. Install it from: https://cli.github.com/")
-	}
 
-	// Parse flags and capture positional arguments
-	var title, body string
-	var draft, ready, view bool
-	var positional []string
-
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--title", "-t":
-			if i+1 < len(args) {
-				title = args[i+1]
-				i++
-			}
-		case "--body", "-b":
-			if i+1 < len(args) {
-				body = args[i+1]
-				i++
-			}
-		case "--draft", "-d":
-			draft = true
-		case "--ready", "-r":
-			ready = true
-		case "--view", "-v":
-			view = true
-		default:
-			// Capture positional arguments (not starting with -)
-			if !strings.HasPrefix(args[i], "-") {
-				positional = append(positional, args[i])
-			}
-		}
-	}
-
-	// Example: dialtone-dev pull-request linux-wsl-camera-support "Added V4L2 support"
-	if len(positional) >= 1 && title == "" {
-		// Use first positional as title (could be branch name)
-		title = positional[0]
-	}
-	if len(positional) >= 2 && body == "" {
-		// Use second positional as body
-		body = positional[1]
-	}
-
-	// Get current branch name
-	cmd := exec.Command("git", "branch", "--show-current")
-	output, err := cmd.Output()
-	if err != nil {
-		LogFatal("Failed to get current branch: %v", err)
-	}
-	branch := strings.TrimSpace(string(output))
-
-	if branch == "main" || branch == "master" {
-		LogFatal("Cannot create PR from main/master branch. Create a feature branch first.")
-	}
-
-	// Check if PR already exists
-	checkCmd := exec.Command("gh", "pr", "view", "--json", "number,title,url")
-	prOutput, prErr := checkCmd.Output()
-	prExists := prErr == nil
-
-	if !prExists {
-		// PR doesn't exist, create it
-		LogInfo("Creating new pull request for branch: %s", branch)
-
-		var createArgs []string
-		createArgs = append(createArgs, "pr", "create")
-
-		// Use provided title or default to branch name
-		if title != "" {
-			createArgs = append(createArgs, "--title", title)
-		} else {
-			createArgs = append(createArgs, "--title", branch)
-		}
-
-		// Use provided body, or plan file, or default message
-		if body != "" {
-			createArgs = append(createArgs, "--body", body)
-		} else {
-			planFile := filepath.Join("plan", fmt.Sprintf("plan-%s.md", branch))
-			if _, statErr := os.Stat(planFile); statErr == nil {
-				createArgs = append(createArgs, "--body-file", planFile)
-			} else {
-				createArgs = append(createArgs, "--body", fmt.Sprintf("Feature: %s\n\nSee plan file for details.", branch))
-			}
-		}
-
-		// Add draft flag if specified
-		if draft {
-			createArgs = append(createArgs, "--draft")
-		}
-
-		cmd = exec.Command("gh", createArgs...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			LogFatal("Failed to create PR: %v", err)
-		}
-	} else {
-		// PR exists
-		LogInfo("Pull request exists for branch: %s", branch)
-
-		// If title or body provided, update the PR
-		if title != "" || body != "" {
-			LogInfo("Updating pull request...")
-
-			var editArgs []string
-			editArgs = append(editArgs, "pr", "edit")
-
-			if title != "" {
-				editArgs = append(editArgs, "--title", title)
-			}
-
-			if body != "" {
-				editArgs = append(editArgs, "--body", body)
-			} else {
-				planFile := filepath.Join("plan", fmt.Sprintf("plan-%s.md", branch))
-				if _, statErr := os.Stat(planFile); statErr == nil {
-					editArgs = append(editArgs, "--body-file", planFile)
-				}
-			}
-
-			cmd = exec.Command("gh", editArgs...)
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
-				LogFatal("Failed to update PR: %v", err)
-			}
-			LogInfo("Pull request updated successfully")
-		}
-
-		// Mark as ready for review if --ready flag
-		if ready {
-			LogInfo("Marking pull request as ready for review...")
-			cmd = exec.Command("gh", "pr", "ready")
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
-				LogFatal("Failed to mark PR as ready: %v", err)
-			}
-			LogInfo("Pull request is now ready for review")
-		}
-
-		// Show PR info
-		fmt.Printf("%s\n", string(prOutput))
-
-		// Open in browser if --view flag
-		if view {
-			LogInfo("Opening in browser...")
-			cmd = exec.Command("gh", "pr", "view", "--web")
-			cmd.Run()
-		}
-	}
-}
 
 // runTicket handles the ticket command
 func runTicket(args []string) {
@@ -1155,7 +1005,7 @@ verification:
 	runTest([]string{})
 
 	LogInfo("Tests passed. Creating pull request...")
-	runPullRequest([]string{"--title", fmt.Sprintf("%s: autonomous fix", branchName), "--body", fmt.Sprintf("Autonomous fix for ticket #%d\n\nSee %s for details.", selectedTicket.Number, taskPath)})
+	github_cli.RunGithub([]string{"pull-request", "--title", fmt.Sprintf("%s: autonomous fix", branchName), "--body", fmt.Sprintf("Autonomous fix for ticket #%d\n\nSee %s for details.", selectedTicket.Number, taskPath)})
 
 	LogInfo("Autonomous developer loop completed for ticket #%d", selectedTicket.Number)
 }
