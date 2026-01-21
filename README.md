@@ -105,59 +105,7 @@ Dialtone is built with a "Test-First" philosophy. Every function, feature, and p
 2. **Plugin**: The second step is integrating new code into specific feature areas.
 3. **Core**: Core code is reserved for features dealing with networking and deployment (dialtone/dialtone-dev). It is the minimal code required to bootstrap the system.
 
-### Ticket Lifecycle
-```bash
-# 1. Start Work
-# Start work on a ticket (creates/certifies branch and files)
-./dialtone.sh ticket start <ticket-name>
-
-# OR start work on a ticket + plugin (creates/certifies plugin structure too)
-./dialtone.sh ticket start <ticket-name> --plugin <plugin-name>
-
-# 2. Test First
-# Update a test before writing new code and run the test to show a failure.
-# e.g. tickets/<ticket-name>/test/e2e_test.go
-
-# 3. Implement
-# Change the system until the test passes.
-# e.g. tickets/<ticket-name>/code/stage1.go
-
-# 4. Track
-# Update tickets/<ticket-name>/ticket.md to reflect subtasks completed and those remaining.
-# Update tickets/<ticket-name>/task.md for scratchpad notes.
-
-# 5. Git Hygiene
-# Use git add to update git and ensure .gitignore is correct. Make atomic commits.
-git add .
-git commit -m "feat: description"
-
-# 6. Verify
-# Run relevant tests.
-./dialtone.sh test
-```
-
-### Ticket Structure
-For tickets created via `./dialtone.sh ticket start <ticket-name>`:
-1. `tickets/<ticket-name>/ticket.md` - The requirement doc (from template).
-2. `tickets/<ticket-name>/task.md` - Scratchpad for tracking progress.
-3. `tickets/<ticket-name>/code/` - Local code playground for the ticket.
-4. `tickets/<ticket-name>/test/` - Ticket-specific verification tests.
-
-### Plugin Development Structure
-For new plugins created via `./dialtone.sh ticket start <ticket-name> --plugin <plugin-name>`:
-1. `src/plugins/<name>/app` - Application code.
-2. `src/plugins/<name>/cli` - CLI command code.
-3. `src/plugins/<name>/test` - Plugin-specific tests.
-
-# Why Dialtone Uses Golang
-1. Go is a compiled language that provides the high-performance execution and efficient resource management required for real-time robotic operations.
-2. The compilation process produces single, statically-linked binary executables, which dramatically simplifies deployment and consistency across thousands of distributed nodes.
-3. Go's extensive standard library and robust ecosystem provide standardized tools for networking, cryptography, and testing that remain reliable as the codebase expands.
-4. Native support for cross-compilation allows developers to build and deploy to a wide variety of hardware architectures from a single, unified development environment.
-5. Strict type safety and clear, opinionated syntax ensure that large codebases remain maintainable by enforcing readability and catching potential errors at compile-time.
-6. Built-in concurrency primitives like goroutines and channels enable high-performance, thread-safe handling of simultaneous robotic sensors and message streams.
-
-# Project Structure
+# Overall Project Structure
 1. `./tickets/<ticket_name>/ticket.md` - Contains a ticket description for any changes needed to the system.
 2. `./src` - Contains all source code.
 3. `./src/plugins` - Contains all plugins.
@@ -169,18 +117,59 @@ For new plugins created via `./dialtone.sh ticket start <ticket-name> --plugin <
 9. `README.md` - Contains information for users to understand this repo at a high level.
 10. `dialtone.go` - Contains the main entry point for the system.
 11. `dialtone-dev.go` - Contains the development entry point for the system.
+12. `./dialtone.sh` - CLI tool for that wraps `dialtone-dev` development (Linux/macOS).
+13. `./dialtone.ps1` - CLI tool for that wraps `dialtone-dev` development (Windows).
 
-# Plugin Structure
-1. `./src/plugins/www` - Contains the web dashboard.
-2. `./src/plugins/www/README.md` - Contains information for users to understand the plugin at a high level.
-3. `./src/plugins/www/app` - Contains a public website for the `dialtone.earth` domain.
-4. `./src/plugins/www/cli` - Contains code for the cli command `./dialtone.sh www`.
-5. `./src/plugins/www/test` - Contains test files for the www plugin.
+### Ticket Lifecycle
+Tickets are the primary unit of work in the system. They are used to track changes to the system.
+```bash
+# 1a. Start Work
+# Start work on a ticket (creates/certifies branch and files)
+./dialtone.sh ticket start <ticket-name>
 
-# CLI Tools
-1. `./dialtone.sh` - CLI tool for development (Linux/macOS).
-2. `go run dialtone.go` - Minimal binary for robotic deployment.
-3. `.\dialtone.ps1` - CLI tool for development (Windows).
+# 1b. Create Plugin (optional if the ticket needs it) 
+# Create a new plugin to fill in files for the plugin structure
+./dialtone.sh plugin create <plugin-name>
+
+# 2. Test First
+# Update a test before writing new code and run the test to show a failure.
+./dialtone.sh ticket test <ticket-name>
+
+# 3. Implement
+# Change the system until the test passes.
+# e.g. edit tickets/<ticket-name>/code/stage1.go
+
+# 3. Test Again
+# Show tests are now passing after the code changes.
+./dialtone.sh ticket test <ticket-name>
+
+# 4. Track
+# Update tickets/<ticket-name>/ticket.md to reflect subtasks completed and those remaining.
+# Update tickets/<ticket-name>/task.md for scratchpad notes.
+
+# 5. Verify All Tests Pass
+# Run all tests.
+./dialtone.sh test
+
+# 6. Git Hygiene
+# Use git add to update git and ensure .gitignore is correct. Make atomic commits.
+git add .
+git commit -m "feat: description"
+```
+
+### Ticket Structure
+For tickets created via `./dialtone.sh ticket start <ticket-name>`:
+1. `tickets/<ticket-name>/ticket.md` - The requirement doc (from template).
+2. `tickets/<ticket-name>/task.md` - Scratchpad for tracking progress.
+3. `tickets/<ticket-name>/code/` - Local code playground for the ticket.
+4. `tickets/<ticket-name>/test/` - Ticket-specific verification tests.
+
+### Plugin Development Structure
+For new plugins created via `./dialtone.sh plugin create <plugin-name>`:
+1. `src/plugins/<name>/app` - Application code.
+2. `src/plugins/<name>/cli` - CLI command code.
+3. `src/plugins/<name>/test` - Plugin-specific tests.
+4. `src/plugins/<name>/README.md` - Plugin documentation.
 
 ## Quick Start (WSL/Linux No-Sudo)
 
@@ -190,16 +179,16 @@ The fastest way to get started on WSL or Linux without administrative privileges
 git clone https://github.com/timcash/dialtone.git
 export DIALTONE_ENV="~/dialtone_env"
 
-# Install Go, dependencies, and setup environment (Linux/macOS)
+# Install dependencies, and setup environment (Linux/macOS)
 ./dialtone.sh install --linux-wsl
 
 # Windows equivalent:
-# .\dialtone.ps1 install --linux-wsl
+./dialtone.ps1 install --linux-wsl
 
-# Perform a native build of the robot binary(includes Web UI and Camera support)
+# Perform a local build of the robot binary(includes Web UI and Camera support)
 ./dialtone.sh build
 
-# Start the robot node locally - all robot commands pass down to the dialtone.go binary
+# Start the robot node locally (not the development cli)
 ./dialtone.sh robot start
 ```
 

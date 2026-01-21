@@ -1,5 +1,5 @@
 {
     "git": {
-        "ignoreBuildStep": "git diff --quiet HEAD^ HEAD ./dialtone-earth"
+        "ignoreBuildStep": "git diff --quiet HEAD^ HEAD ./src/plugins/www/app"
     }
 }

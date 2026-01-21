@@ -24,15 +24,6 @@ func RunStart(args []string) {
 	}
 
 	arg := args[0]
-	var pluginName string
-
-	// implemented simple arg parsing
-	for i := 1; i < len(args); i++ {
-		if args[i] == "--plugin" && i+1 < len(args) {
-			pluginName = args[i+1]
-			i++
-		}
-	}
 
 	ticketName := GetTicketName(arg)
 
@@ -74,23 +65,6 @@ func RunStart(args []string) {
 		logInfo("Created %s", ticketTaskMd)
 	}
 
-	// 3. Plugin Scaffolding
-	if pluginName != "" {
-		pluginDir := filepath.Join("src", "plugins", pluginName)
-		ensureDir(pluginDir)
-		ensureDir(filepath.Join(pluginDir, "app"))
-		ensureDir(filepath.Join(pluginDir, "cli"))
-		ensureDir(filepath.Join(pluginDir, "test"))
-
-		readmePath := filepath.Join(pluginDir, "README.md")
-		if _, err := os.Stat(readmePath); os.IsNotExist(err) {
-			content := fmt.Sprintf("# Plugin: %s\n\nDescription of %s.\n", pluginName, pluginName)
-			if err := os.WriteFile(readmePath, []byte(content), 0644); err != nil {
-				logFatal("Failed to create README.md: %v", err)
-			}
-			logInfo("Created %s", readmePath)
-		}
-	}
 
 	logInfo("Ticket %s started successfully", ticketName)
 }
