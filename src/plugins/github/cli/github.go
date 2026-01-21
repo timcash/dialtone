@@ -46,14 +46,92 @@ func RunGithub(args []string) {
 func printGithubUsage() {
 	fmt.Println("Usage: dialtone-dev github <command> [options]")
 	fmt.Println("\nCommands:")
-	fmt.Println("  pull-request       Create or update a pull request (wrapper around gh CLI)")
+	fmt.Println("  pull-request       Create, update, merge, or close a pull request")
 	fmt.Println("  check-deploy       Check Vercel deployment status for current branch")
 	fmt.Println("  help               Show this help message")
+}
+
+
+// runMerge merges the current pull request
+func runMerge(args []string) {
+	// Check if gh CLI is available
+	if _, err := exec.LookPath("gh"); err != nil {
+		logFatal("GitHub CLI (gh) not found. Install it from: https://cli.github.com/")
+	}
+
+	logInfo("Merging pull request...")
+
+	// Default args: merge current PR, use merge commit, delete branch
+	// We allow user args to override or append?
+	// gh pr merge [number | url | branch] [flags]
+	// If no arg provided, it uses current branch.
+	
+	cmdArgs := []string{"pr", "merge"}
+	
+	// If user provided args, pass them. If not, default to --merge --delete-branch
+	if len(args) > 0 {
+		cmdArgs = append(cmdArgs, args...)
+	} else {
+		cmdArgs = append(cmdArgs, "--merge", "--delete-branch")
+	}
+
+	cmd := exec.Command("gh", cmdArgs...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	// gh pr merge might be interactive if not enough info/flags, but we inherit proper stdio so it should be fine.
+	
+	if err := cmd.Run(); err != nil {
+		logFatal("Failed to merge PR: %v", err)
+	}
+	logInfo("Pull request merged successfully.")
+}
+
+// runClose closes the current pull request
+func runClose(args []string) {
+	// Check if gh CLI is available
+	if _, err := exec.LookPath("gh"); err != nil {
+		logFatal("GitHub CLI (gh) not found. Install it from: https://cli.github.com/")
+	}
+
+	logInfo("Closing pull request...")
+	
+	cmdArgs := []string{"pr", "close"}
+	
+	// If user provided args, pass them. If not, default to --delete-branch (if user deletes branch local, gh pr close --delete-branch deletes remote?)
+	// gh pr close [number | url | branch] [flags]
+	// --delete-branch: Delete the local and remote branch after close.
+	
+	if len(args) > 0 {
+		cmdArgs = append(cmdArgs, args...)
+	} else {
+		cmdArgs = append(cmdArgs, "--delete-branch")
+	}
+	
+	cmd := exec.Command("gh", cmdArgs...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	
+	if err := cmd.Run(); err != nil {
+		logFatal("Failed to close PR: %v", err)
+	}
+	logInfo("Pull request closed successfully.")
 }
 
 // runPullRequest handles the pull-request command
 // Migrated from src/dev.go
 func runPullRequest(args []string) {
+	// Check for subcommands
+	if len(args) > 0 {
+		switch args[0] {
+		case "merge":
+			runMerge(args[1:])
+			return
+		case "close":
+			runClose(args[1:])
+			return
+		}
+	}
+
 	// Check if gh CLI is available
 	if _, err := exec.LookPath("gh"); err != nil {
 		logFatal("GitHub CLI (gh) not found. Install it from: https://cli.github.com/")

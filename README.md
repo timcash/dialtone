@@ -159,6 +159,12 @@ git commit -m "feat: description"
 # 7. Create Pull Request
 # Create a pull request for your changes.
 ./dialtone.sh github pull-request
+
+# 8. Merge/Close Pull Request
+# After review, merge or close the pull request.
+./dialtone.sh github pull-request merge
+# or
+./dialtone.sh github pull-request close
 ```
 
 ### Ticket Structure
