@@ -3,6 +3,7 @@
 
 > IMPORTANT: See `README.md` for the full ticket lifecycle and development workflow.
 > Run `./dialtone.sh ticket start <this-file>` to start work.
+> Run `./dialtone.sh plugin create <plugin-name>` to create a new plugin if needed
 
 ## Goals
 1. Use tests files in `tickets/plugin-dev/test/` to drive all work.
@@ -15,8 +16,8 @@
 
 ## Test
 1. all ticket tests are at `tickets/plugin-dev/test/`
-2. all plugin tests are run with `./dialtone.sh plugin test plugin` (not built yet)
-3. all core tests are run with `./dialtone.sh test --core` (not built yet)
+2. all plugin tests are run with `./dialtone.sh plugin test plugin`
+3. all core tests are run with `./dialtone.sh test --core`
 4. all tests are run with `./dialtone.sh test`
 
 ## Subtask: Research
