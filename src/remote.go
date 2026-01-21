@@ -20,7 +20,7 @@ func runLogs(args []string) {
 		LogFatal("Error: -host and -pass are required for logs")
 	}
 
-	client, err := dialSSH(*host, *port, *user, *pass)
+	client, err := DialSSH(*host, *port, *user, *pass)
 	if err != nil {
 		LogFatal("Failed to connect: %v", err)
 	}
@@ -51,7 +51,7 @@ func RunSyncCode(args []string) {
 		LogFatal("Error: -host (user@host) and -pass are required for sync-code")
 	}
 
-	client, err := dialSSH(*host, *port, *user, *pass)
+	client, err := DialSSH(*host, *port, *user, *pass)
 	if err != nil {
 		LogFatal("SSH connection failed: %v", err)
 	}
@@ -65,7 +65,7 @@ func RunSyncCode(args []string) {
 	LogInfo("Syncing code to %s on %s...", remoteDir, *host)
 
 	// Clean remote src dir to remove stale files (like legacy manager.go)
-	_, _ = runSSHCommand(client, fmt.Sprintf("rm -rf %s/src && mkdir -p %s/src", remoteDir, remoteDir))
+	_, _ = RunSSHCommand(client, fmt.Sprintf("rm -rf %s/src && mkdir -p %s/src", remoteDir, remoteDir))
 
 	// Sync root files
 	filesToUpload := []string{"go.mod", "go.sum", "dialtone.go", "build.sh", "build.ps1", "README.md"}
@@ -120,7 +120,7 @@ func RunRemoteBuild(args []string) {
 		LogFatal("Error: -host (user@host) and -pass are required for remote-build")
 	}
 
-	client, err := dialSSH(*host, *port, *user, *pass)
+	client, err := DialSSH(*host, *port, *user, *pass)
 	if err != nil {
 		LogFatal("SSH connection failed: %v", err)
 	}
@@ -151,7 +151,7 @@ func RunRemoteBuild(args []string) {
 		cp -r src/web/dist/* src/web_build/
 	`, remoteDir)
 
-	output, err := runSSHCommand(client, webCmd)
+	output, err := RunSSHCommand(client, webCmd)
 	if err != nil {
 		LogFatal("Remote web build failed: %v\nOutput: %s", err, output)
 	}
@@ -165,7 +165,7 @@ func RunRemoteBuild(args []string) {
 		go build -v -o dialtone .
 	`, remoteDir)
 
-	output, err = runSSHCommand(client, goCmd)
+	output, err = RunSSHCommand(client, goCmd)
 	if err != nil {
 		LogFatal("Remote Go build failed: %v\nOutput: %s", err, output)
 	}

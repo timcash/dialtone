@@ -31,14 +31,14 @@ func RunSSH(args []string) {
 		LogFatal("Error: -host and -pass are required for SSH tools")
 	}
 
-	client, err := dialSSH(*host, *port, *user, *pass)
+	client, err := DialSSH(*host, *port, *user, *pass)
 	if err != nil {
 		LogFatal("SSH connection failed: %v", err)
 	}
 	defer client.Close()
 
 	if *cmd != "" {
-		output, err := runSSHCommand(client, *cmd)
+		output, err := RunSSHCommand(client, *cmd)
 		if err != nil {
 			LogFatal("Command failed: %v", err)
 		}
@@ -66,7 +66,7 @@ func RunSSH(args []string) {
 	}
 }
 
-func dialSSH(host, port, user, pass string) (*ssh.Client, error) {
+func DialSSH(host, port, user, pass string) (*ssh.Client, error) {
 	username := user
 	hostname := host
 	if username == "" {
@@ -92,7 +92,7 @@ func dialSSH(host, port, user, pass string) (*ssh.Client, error) {
 	return ssh.Dial("tcp", addr, config)
 }
 
-func runSSHCommand(client *ssh.Client, cmd string) (string, error) {
+func RunSSHCommand(client *ssh.Client, cmd string) (string, error) {
 	session, err := client.NewSession()
 	if err != nil {
 		return "", fmt.Errorf("failed to create session: %w", err)
@@ -233,7 +233,7 @@ func downloadFile(client *ssh.Client, remotePath, localPath string) error {
 }
 
 func getRemoteHome(client *ssh.Client) (string, error) {
-	output, err := runSSHCommand(client, "echo $HOME")
+	output, err := RunSSHCommand(client, "echo $HOME")
 	if err != nil {
 		return "", err
 	}
