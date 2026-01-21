@@ -23,3 +23,6 @@ prompt.md
 .env
 .vercel
 .env*.local
+
+# Local Dependencies
+dialtone_dependencies/

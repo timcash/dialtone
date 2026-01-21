@@ -98,8 +98,8 @@ func buildWebIfNeeded() {
 	}
 
 	// Install and build
-	runShell(webDir, "npm", "install")
-	runShell(webDir, "npm", "run", "build")
+	RunShell(webDir, "npm", "install")
+	RunShell(webDir, "npm", "run", "build")
 
 	// Sync to web_build
 	LogInfo("Syncing web assets to src/web_build...")
@@ -114,7 +114,7 @@ func buildWebIfNeeded() {
 		return
 	}
 
-	copyDir(distDir, webBuildDir)
+	CopyDir(distDir, webBuildDir)
 	LogInfo("Web UI build complete")
 }
 
@@ -166,7 +166,7 @@ func buildLocally() {
 	}
 
 	outputPath := filepath.Join("bin", binaryName)
-	runShell(".", "go", "build", "-o", outputPath, "dialtone.go")
+	RunShell(".", "go", "build", "-o", outputPath, "dialtone.go")
 	LogInfo("Build successful: %s", outputPath)
 }
 
@@ -215,8 +215,8 @@ func buildEverything(local bool) {
 	// 1. Build Web UI
 	LogInfo("Building Web UI...")
 	webDir := filepath.Join("src", "web")
-	runShell(webDir, "npm", "install")
-	runShell(webDir, "npm", "run", "build")
+	RunShell(webDir, "npm", "install")
+	RunShell(webDir, "npm", "run", "build")
 
 	// 2. Sync web assets
 	LogInfo("Syncing web assets to src/web_build...")
@@ -225,7 +225,7 @@ func buildEverything(local bool) {
 	if err := os.MkdirAll(webBuildDir, 0755); err != nil {
 		LogFatal("Failed to create web_build dir: %v", err)
 	}
-	copyDir(filepath.Join("src", "web", "dist"), webBuildDir)
+	CopyDir(filepath.Join("src", "web", "dist"), webBuildDir)
 
 	// 3. Build Dialtone locally (the tool itself)
 	BuildSelf()
@@ -262,6 +262,6 @@ func BuildSelf() {
 		}
 	}
 
-	runShell(".", "go", "build", "-o", exePath, "dialtone.go")
+	RunShell(".", "go", "build", "-o", exePath, "dialtone.go")
 	LogInfo("Successfully built %s", exePath)
 }

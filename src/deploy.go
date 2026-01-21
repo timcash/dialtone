@@ -73,7 +73,7 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 		LogInfo("Found pre-built binary, using it for deployment.")
 	}
 
-	client, err := dialSSH(host, port, user, pass)
+	client, err := DialSSH(host, port, user, pass)
 	if err != nil {
 		LogFatal("Failed to connect: %v", err)
 	}
@@ -89,7 +89,7 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 			remoteDir = path.Join(home, "dialtone_deploy")
 		}
 		LogInfo("Cleaning and creating remote directory %s...", remoteDir)
-		_, _ = runSSHCommand(client, fmt.Sprintf("rm -rf %s && mkdir -p %s", remoteDir, remoteDir))
+		_, _ = RunSSHCommand(client, fmt.Sprintf("rm -rf %s && mkdir -p %s", remoteDir, remoteDir))
 
 		LogInfo("Uploading pre-built binary %s...", localBinary)
 		remotePath := path.Join(remoteDir, "dialtone")
@@ -106,7 +106,7 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 			remoteDir = path.Join(home, "dialtone_src")
 		}
 		LogInfo("Cleaning and creating remote directory %s...", remoteDir)
-		_, _ = runSSHCommand(client, fmt.Sprintf("rm -rf %s && mkdir -p %s/src", remoteDir, remoteDir))
+		_, _ = RunSSHCommand(client, fmt.Sprintf("rm -rf %s && mkdir -p %s/src", remoteDir, remoteDir))
 
 		filesToUpload := []string{"go.mod", "go.sum", "dialtone.go"}
 		srcFiles, _ := filepath.Glob("src/*.go")
@@ -119,7 +119,7 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 			remotePath := path.Join(remoteDir, file)
 			// Ensure parent directory exists on remote
 			parentDir := filepath.ToSlash(path.Dir(remotePath))
-			_, _ = runSSHCommand(client, fmt.Sprintf("mkdir -p %s", parentDir))
+			_, _ = RunSSHCommand(client, fmt.Sprintf("mkdir -p %s", parentDir))
 			if err := uploadFile(client, file, remotePath); err != nil {
 				LogFatal("Failed to upload %s: %v", file, err)
 			}
@@ -138,14 +138,14 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 			cd %s
 			/usr/local/go/bin/go build -v -o dialtone .
 		`, remoteDir)
-		output, err := runSSHCommand(client, buildCmd)
+		output, err := RunSSHCommand(client, buildCmd)
 		if err != nil {
 			LogFatal("Remote build failed: %v\nOutput: %s", err, output)
 		}
 	}
 
 	LogInfo("Stopping remote dialtone...")
-	_, _ = runSSHCommand(client, "pkill dialtone || true")
+	_, _ = RunSSHCommand(client, "pkill dialtone || true")
 
 	LogInfo("Starting service...")
 	remoteBaseDir := os.Getenv("REMOTE_DIR_SRC")
