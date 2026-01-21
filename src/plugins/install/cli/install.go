@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"dialtone/cli/src/core/logger"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -21,21 +22,13 @@ const (
 	PixiVersion  = "latest" // Using latest for pixi
 )
 
-func logInfo(format string, args ...interface{}) {
-	fmt.Printf("[install] "+format+"\n", args...)
-}
-
-func logFatal(format string, args ...interface{}) {
-	fmt.Printf("[install] FATAL: "+format+"\n", args...)
-	os.Exit(1)
-}
 
 func logItemStatus(name, version, path string, alreadyInstalled bool) {
 	status := "installed successfully"
 	if alreadyInstalled {
 		status = "is already installed"
 	}
-	logInfo("%s (%s) %s at %s", name, version, status, path)
+	logger.LogInfo("%s (%s) %s at %s", name, version, status, path)
 }
 
 // GetDialtoneEnv returns the directory where dependencies are installed.
@@ -52,8 +45,10 @@ func GetDialtoneEnv() string {
 	for {
 		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
 			localPath := filepath.Join(cwd, "dialtone_dependencies")
-			logInfo("DIALTONE_ENV not set, using repo-local path: %s", localPath)
-			return localPath
+			if _, err := os.Stat(localPath); err == nil {
+				logger.LogInfo("DIALTONE_ENV not set, using repo-local path: %s", localPath)
+				return localPath
+			}
 		}
 		parent := filepath.Dir(cwd)
 		if parent == cwd {
@@ -63,7 +58,7 @@ func GetDialtoneEnv() string {
 	}
 	home, _ := os.UserHomeDir()
 	defaultPath := filepath.Join(home, ".dialtone_env")
-	logInfo("DIALTONE_ENV not set, using default path: %s", defaultPath)
+	logger.LogInfo("DIALTONE_ENV not set, using default path: %s", defaultPath)
 	return defaultPath
 }
 
@@ -72,7 +67,7 @@ func runSimpleShell(command string) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		logFatal("Command failed: %v", err)
+		logger.LogFatal("Command failed: %v", command, err)
 	}
 }
 
@@ -86,6 +81,7 @@ func RunInstall(args []string) {
 	linuxWSL := fs.Bool("linux-wsl", false, "Install dependencies natively on Linux/WSL (x86_64)")
 	macosARM := fs.Bool("macos-arm", false, "Install dependencies natively on macOS ARM (Apple Silicon)")
 	clean := fs.Bool("clean", false, "Remove all dependencies before installation")
+	check := fs.Bool("check", false, "Check if dependencies are installed and exit")
 	showHelp := fs.Bool("help", false, "Show help for install command")
 
 	fs.Usage = func() {
@@ -105,6 +101,7 @@ func RunInstall(args []string) {
 		fmt.Println("  --user        SSH username")
 		fmt.Println("  --pass        SSH password")
 		fmt.Println("  --clean       Remove all dependencies before installation")
+		fmt.Println("  --check       Check if dependencies are installed and exit")
 		fmt.Println("  --help        Show this help message")
 		fmt.Println()
 		fmt.Println("Notes:")
@@ -124,27 +121,34 @@ func RunInstall(args []string) {
 	}
 
 	fs.Parse(flagArgs)
+	
+	depsDir := GetDialtoneEnv()
+
+	if *check {
+		CheckInstall(depsDir)
+		return
+	}
 
 	// Handle positional argument for install path
 	if len(positionalArgs) > 0 {
 		installPath := positionalArgs[0]
 		os.Setenv("DIALTONE_ENV", installPath)
-		logInfo("Using environment directory from argument: %s", installPath)
+		logger.LogInfo("Using environment directory from argument: %s", installPath)
 	} else if env := os.Getenv("DIALTONE_ENV"); env != "" {
-		logInfo("Using environment directory from DIALTONE_ENV: %s", env)
+		logger.LogInfo("Using environment directory from DIALTONE_ENV: %s", env)
 	}
 
 	// Handle clean option
 	if *clean {
 		depsDir := GetDialtoneEnv()
 		if _, err := os.Stat(depsDir); err == nil {
-			logInfo("Cleaning dependencies directory: %s", depsDir)
+			logger.LogInfo("Cleaning dependencies directory: %s", depsDir)
 			if err := os.RemoveAll(depsDir); err != nil {
-				logFatal("Failed to remove dependencies directory: %v", err)
+				logger.LogFatal("Failed to remove dependencies directory: %v", err)
 			}
-			logInfo("Successfully removed %s", depsDir)
+			logger.LogInfo("Successfully removed %s", depsDir)
 		} else {
-			logInfo("Dependencies directory %s does not exist, nothing to clean", depsDir)
+			logger.LogInfo("Dependencies directory %s does not exist, nothing to clean", depsDir)
 		}
 	}
 
@@ -180,16 +184,16 @@ func RunInstall(args []string) {
 
 	// Remote install path
 	if *host == "" || *pass == "" {
-		logFatal("Error: -host (user@host) and -pass are required for remote install")
+		logger.LogFatal("Error: -host (user@host) and -pass are required for remote install")
 	}
 
 	client, err := dialSSH(*host, *port, *user, *pass)
 	if err != nil {
-		logFatal("SSH connection failed: %v", err)
+		logger.LogFatal("SSH connection failed: %v", err)
 	}
 	defer client.Close()
 
-	logInfo("Installing dependencies on %s...", *host)
+	logger.LogInfo("Installing dependencies on %s...", *host)
 
 	// Install Go (Remote)
 	goTarball := fmt.Sprintf("go%s.linux-arm64.tar.gz", GoVersion)
@@ -209,9 +213,9 @@ func RunInstall(args []string) {
 
 	output, err := runSSHCommand(client, installGoCmd)
 	if err != nil {
-		logFatal("Failed to install Go: %v\nOutput: %s", err, output)
+		logger.LogFatal("Failed to install Go: %v\nOutput: %s", err, output)
 	}
-	logInfo(output)
+	logger.LogInfo(output)
 
 	// Install Node.js (Remote)
 	installNodeCmd := fmt.Sprintf(`
@@ -225,31 +229,31 @@ func RunInstall(args []string) {
 	`, *pass, *pass)
 	output, err = runSSHCommand(client, installNodeCmd)
 	if err != nil {
-		logFatal("Failed to install Node.js: %v\nOutput: %s", err, output)
+		logger.LogFatal("Failed to install Node.js: %v\nOutput: %s", err, output)
 	}
-	logInfo(output)
+	logger.LogInfo(output)
 }
 
 func installLocalAuto() {
-	logInfo("Auto-detecting system: %s/%s", runtime.GOOS, runtime.GOARCH)
+	logger.LogInfo("Auto-detecting system: %s/%s", runtime.GOOS, runtime.GOARCH)
 	switch {
 	case runtime.GOOS == "darwin" && runtime.GOARCH == "arm64":
 		installLocalDepsMacOSARM()
 	case runtime.GOOS == "darwin" && runtime.GOARCH == "amd64":
-		logInfo("macOS x86_64 detected. Installing with Rosetta-compatible deps...")
+		logger.LogInfo("macOS x86_64 detected. Installing with Rosetta-compatible deps...")
 		installLocalDepsMacOSAMD64()
 	case runtime.GOOS == "linux" && runtime.GOARCH == "amd64":
 		installLocalDepsWSL()
 	case runtime.GOOS == "linux" && runtime.GOARCH == "arm64":
-		logInfo("Linux ARM64 detected (likely Raspberry Pi).")
+		logger.LogInfo("Linux ARM64 detected (likely Raspberry Pi).")
 		installLocalDepsLinuxARM64()
 	default:
-		logFatal("Unsupported platform: %s/%s. Use --linux-wsl or --macos-arm explicitly.", runtime.GOOS, runtime.GOARCH)
+		logger.LogFatal("Unsupported platform: %s/%s. Use --linux-wsl or --macos-arm explicitly.", runtime.GOOS, runtime.GOARCH)
 	}
 }
 
 func installLocalDepsWSL() {
-	logInfo("Installing local dependencies for Linux/WSL (User-Local, No Sudo)...")
+	logger.LogInfo("Installing local dependencies for Linux/WSL (User-Local, No Sudo)...")
 	depsDir := GetDialtoneEnv()
 	os.MkdirAll(depsDir, 0755)
 
@@ -257,7 +261,7 @@ func installLocalDepsWSL() {
 	goDir := filepath.Join(depsDir, "go")
 	goBin := filepath.Join(goDir, "bin", "go")
 	if _, err := os.Stat(goBin); err != nil {
-		logInfo("Step 1: Installing Go %s...", GoVersion)
+		logger.LogInfo("Step 1: Installing Go %s...", GoVersion)
 		goTarball := fmt.Sprintf("go%s.linux-amd64.tar.gz", GoVersion)
 		downloadUrl := fmt.Sprintf("https://go.dev/dl/%s", goTarball)
 		runSimpleShell(fmt.Sprintf("wget -O %s/%s %s", depsDir, goTarball, downloadUrl))
@@ -272,7 +276,7 @@ func installLocalDepsWSL() {
 	nodeDir := filepath.Join(depsDir, "node")
 	nodeBin := filepath.Join(nodeDir, "bin", "node")
 	if _, err := os.Stat(nodeBin); err != nil {
-		logInfo("Step 2: Installing Node.js %s...", NodeVersion)
+		logger.LogInfo("Step 2: Installing Node.js %s...", NodeVersion)
 		nodeTarball := fmt.Sprintf("node-v%s-linux-x64.tar.xz", NodeVersion)
 		downloadUrl := fmt.Sprintf("https://nodejs.org/dist/v%s/%s", NodeVersion, nodeTarball)
 		runSimpleShell(fmt.Sprintf("wget -q -O %s/%s %s", depsDir, nodeTarball, downloadUrl))
@@ -286,8 +290,8 @@ func installLocalDepsWSL() {
 	// 2.1 Install Vercel CLI
 	vercelBin := filepath.Join(nodeDir, "bin", "vercel")
 	if _, err := os.Stat(vercelBin); err != nil {
-		logInfo("Step 2.1: Installing Vercel CLI...")
-		runSimpleShell(fmt.Sprintf("%s/bin/npm install -g vercel", nodeDir))
+		logger.LogInfo("Step 2.1: Installing Vercel CLI...")
+		runSimpleShell(fmt.Sprintf("%s/bin/npm install -g --prefix %s vercel", nodeDir, nodeDir))
 		logItemStatus("Vercel CLI", "latest", vercelBin, false)
 	} else {
 		logItemStatus("Vercel CLI", "latest", vercelBin, true)
@@ -297,7 +301,7 @@ func installLocalDepsWSL() {
 	ghDir := filepath.Join(depsDir, "gh")
 	ghBin := filepath.Join(ghDir, "bin", "gh")
 	if _, err := os.Stat(ghBin); err != nil {
-		logInfo("Step 2.2: Installing GitHub CLI %s...", GHVersion)
+		logger.LogInfo("Step 2.2: Installing GitHub CLI %s...", GHVersion)
 		ghTarball := fmt.Sprintf("gh_%s_linux_amd64.tar.gz", GHVersion)
 		downloadUrl := fmt.Sprintf("https://github.com/cli/cli/releases/download/v%s/%s", GHVersion, ghTarball)
 		runSimpleShell(fmt.Sprintf("wget -q -O %s/%s %s", depsDir, ghTarball, downloadUrl))
@@ -312,7 +316,7 @@ func installLocalDepsWSL() {
 	pixiDir := filepath.Join(depsDir, "pixi")
 	pixiBin := filepath.Join(pixiDir, "pixi")
 	if _, err := os.Stat(pixiBin); err != nil {
-		logInfo("Step 2.3: Installing Pixi %s...", PixiVersion)
+		logger.LogInfo("Step 2.3: Installing Pixi %s...", PixiVersion)
 		downloadUrl := "https://github.com/prefix-dev/pixi/releases/latest/download/pixi-x86_64-unknown-linux-musl"
 		runSimpleShell(fmt.Sprintf("mkdir -p %s && wget -q -O %s %s && chmod +x %s", pixiDir, pixiBin, downloadUrl, pixiBin))
 		logItemStatus("Pixi", PixiVersion, pixiBin, false)
@@ -324,7 +328,7 @@ func installLocalDepsWSL() {
 	zigDir := filepath.Join(depsDir, "zig")
 	zigBin := filepath.Join(zigDir, "zig")
 	if _, err := os.Stat(zigBin); err != nil {
-		logInfo("Step 2.5: Installing Zig %s...", ZigVersion)
+		logger.LogInfo("Step 2.5: Installing Zig %s...", ZigVersion)
 		zigTarball := fmt.Sprintf("zig-linux-x86_64-%s.tar.xz", ZigVersion)
 		downloadUrl := fmt.Sprintf("https://ziglang.org/download/%s/%s", ZigVersion, zigTarball)
 		runSimpleShell(fmt.Sprintf("wget -q -O %s/%s %s", depsDir, zigTarball, downloadUrl))
@@ -339,7 +343,7 @@ func installLocalDepsWSL() {
 	includeDir := filepath.Join(depsDir, "usr", "include")
 	headerFile := filepath.Join(includeDir, "linux", "videodev2.h")
 	if _, err := os.Stat(headerFile); err != nil {
-		logInfo("Step 3: Extracting V4L2 headers...")
+		logger.LogInfo("Step 3: Extracting V4L2 headers...")
 		err := os.Chdir(depsDir)
 		if err == nil {
 			cmd := exec.Command("apt-get", "download", "libv4l-dev", "linux-libc-dev")
@@ -361,7 +365,7 @@ func installLocalDepsWSL() {
 }
 
 func installLocalDepsMacOSAMD64() {
-	logInfo("Installing local dependencies for macOS x86_64 (Intel)...")
+	logger.LogInfo("Installing local dependencies for macOS x86_64 (Intel)...")
 	depsDir := GetDialtoneEnv()
 	os.MkdirAll(depsDir, 0755)
 
@@ -369,7 +373,7 @@ func installLocalDepsMacOSAMD64() {
 	goDir := filepath.Join(depsDir, "go")
 	goBin := filepath.Join(goDir, "bin", "go")
 	if _, err := os.Stat(goBin); err != nil {
-		logInfo("Step 1: Installing Go %s for macOS x86_64...", GoVersion)
+		logger.LogInfo("Step 1: Installing Go %s for macOS x86_64...", GoVersion)
 		goTarball := fmt.Sprintf("go%s.darwin-amd64.tar.gz", GoVersion)
 		downloadUrl := fmt.Sprintf("https://go.dev/dl/%s", goTarball)
 		runSimpleShell(fmt.Sprintf("curl -L -o %s/%s %s", depsDir, goTarball, downloadUrl))
@@ -384,7 +388,7 @@ func installLocalDepsMacOSAMD64() {
 	nodeDir := filepath.Join(depsDir, "node")
 	nodeBin := filepath.Join(nodeDir, "bin", "node")
 	if _, err := os.Stat(nodeBin); err != nil {
-		logInfo("Step 2: Installing Node.js %s for macOS x86_64...", NodeVersion)
+		logger.LogInfo("Step 2: Installing Node.js %s for macOS x86_64...", NodeVersion)
 		nodeTarball := fmt.Sprintf("node-v%s-darwin-x64.tar.gz", NodeVersion)
 		downloadUrl := fmt.Sprintf("https://nodejs.org/dist/v%s/%s", NodeVersion, nodeTarball)
 		runSimpleShell(fmt.Sprintf("curl -L -o %s/%s %s", depsDir, nodeTarball, downloadUrl))
@@ -399,7 +403,7 @@ func installLocalDepsMacOSAMD64() {
 	ghDir := filepath.Join(depsDir, "gh")
 	ghBin := filepath.Join(ghDir, "bin", "gh")
 	if _, err := os.Stat(ghBin); err != nil {
-		logInfo("Step 2.2: Installing GitHub CLI %s...", GHVersion)
+		logger.LogInfo("Step 2.2: Installing GitHub CLI %s...", GHVersion)
 		ghZip := fmt.Sprintf("gh_%s_macOS_amd64.zip", GHVersion)
 		downloadUrl := fmt.Sprintf("https://github.com/cli/cli/releases/download/v%s/%s", GHVersion, ghZip)
 		runSimpleShell(fmt.Sprintf("curl -L -o %s/%s %s", depsDir, ghZip, downloadUrl))
@@ -414,7 +418,7 @@ func installLocalDepsMacOSAMD64() {
 	pixiDir := filepath.Join(depsDir, "pixi")
 	pixiBin := filepath.Join(pixiDir, "pixi")
 	if _, err := os.Stat(pixiBin); err != nil {
-		logInfo("Step 2.3: Installing Pixi %s...", PixiVersion)
+		logger.LogInfo("Step 2.3: Installing Pixi %s...", PixiVersion)
 		downloadUrl := "https://github.com/prefix-dev/pixi/releases/latest/download/pixi-x86_64-apple-darwin"
 		runSimpleShell(fmt.Sprintf("mkdir -p %s && curl -L -o %s %s && chmod +x %s", pixiDir, pixiBin, downloadUrl, pixiBin))
 		logItemStatus("Pixi", PixiVersion, pixiBin, false)
@@ -426,7 +430,7 @@ func installLocalDepsMacOSAMD64() {
 	zigDir := filepath.Join(depsDir, "zig")
 	zigBin := filepath.Join(zigDir, "zig")
 	if _, err := os.Stat(zigBin); err != nil {
-		logInfo("Step 3: Installing Zig %s for macOS x86_64...", ZigVersion)
+		logger.LogInfo("Step 3: Installing Zig %s for macOS x86_64...", ZigVersion)
 		zigTarball := fmt.Sprintf("zig-macos-x86_64-%s.tar.xz", ZigVersion)
 		downloadUrl := fmt.Sprintf("https://ziglang.org/download/%s/%s", ZigVersion, zigTarball)
 		runSimpleShell(fmt.Sprintf("curl -L -o %s/%s %s", depsDir, zigTarball, downloadUrl))
@@ -440,7 +444,7 @@ func installLocalDepsMacOSAMD64() {
 }
 
 func installLocalDepsLinuxARM64() {
-	logInfo("Installing local dependencies for Linux ARM64...")
+	logger.LogInfo("Installing local dependencies for Linux ARM64...")
 	depsDir := GetDialtoneEnv()
 	os.MkdirAll(depsDir, 0755)
 
@@ -448,7 +452,7 @@ func installLocalDepsLinuxARM64() {
 	goDir := filepath.Join(depsDir, "go")
 	goBin := filepath.Join(goDir, "bin", "go")
 	if _, err := os.Stat(goBin); err != nil {
-		logInfo("Step 1: Installing Go %s for Linux ARM64...", GoVersion)
+		logger.LogInfo("Step 1: Installing Go %s for Linux ARM64...", GoVersion)
 		goTarball := fmt.Sprintf("go%s.linux-arm64.tar.gz", GoVersion)
 		downloadUrl := fmt.Sprintf("https://go.dev/dl/%s", goTarball)
 		runSimpleShell(fmt.Sprintf("wget -O %s/%s %s", depsDir, goTarball, downloadUrl))
@@ -463,7 +467,7 @@ func installLocalDepsLinuxARM64() {
 	nodeDir := filepath.Join(depsDir, "node")
 	nodeBin := filepath.Join(nodeDir, "bin", "node")
 	if _, err := os.Stat(nodeBin); err != nil {
-		logInfo("Step 2: Installing Node.js %s for Linux ARM64...", NodeVersion)
+		logger.LogInfo("Step 2: Installing Node.js %s for Linux ARM64...", NodeVersion)
 		nodeTarball := fmt.Sprintf("node-v%s-linux-arm64.tar.xz", NodeVersion)
 		downloadUrl := fmt.Sprintf("https://nodejs.org/dist/v%s/%s", NodeVersion, nodeTarball)
 		runSimpleShell(fmt.Sprintf("wget -O %s/%s %s", depsDir, nodeTarball, downloadUrl))
@@ -478,7 +482,7 @@ func installLocalDepsLinuxARM64() {
 	ghDir := filepath.Join(depsDir, "gh")
 	ghBin := filepath.Join(ghDir, "bin", "gh")
 	if _, err := os.Stat(ghBin); err != nil {
-		logInfo("Step 2.2: Installing GitHub CLI %s for ARM64...", GHVersion)
+		logger.LogInfo("Step 2.2: Installing GitHub CLI %s for ARM64...", GHVersion)
 		ghTarball := fmt.Sprintf("gh_%s_linux_arm64.tar.gz", GHVersion)
 		downloadUrl := fmt.Sprintf("https://github.com/cli/cli/releases/download/v%s/%s", GHVersion, ghTarball)
 		runSimpleShell(fmt.Sprintf("wget -q -O %s/%s %s", depsDir, ghTarball, downloadUrl))
@@ -493,7 +497,7 @@ func installLocalDepsLinuxARM64() {
 	pixiDir := filepath.Join(depsDir, "pixi")
 	pixiBin := filepath.Join(pixiDir, "pixi")
 	if _, err := os.Stat(pixiBin); err != nil {
-		logInfo("Step 2.3: Installing Pixi %s for ARM64...", PixiVersion)
+		logger.LogInfo("Step 2.3: Installing Pixi %s for ARM64...", PixiVersion)
 		downloadUrl := "https://github.com/prefix-dev/pixi/releases/latest/download/pixi-aarch64-unknown-linux-musl"
 		runSimpleShell(fmt.Sprintf("mkdir -p %s && wget -q -O %s %s && chmod +x %s", pixiDir, pixiBin, downloadUrl, pixiBin))
 		logItemStatus("Pixi", PixiVersion, pixiBin, false)
@@ -505,7 +509,7 @@ func installLocalDepsLinuxARM64() {
 	zigDir := filepath.Join(depsDir, "zig")
 	zigBin := filepath.Join(zigDir, "zig")
 	if _, err := os.Stat(zigBin); err != nil {
-		logInfo("Step 3: Installing Zig %s for Linux ARM64...", ZigVersion)
+		logger.LogInfo("Step 3: Installing Zig %s for Linux ARM64...", ZigVersion)
 		zigTarball := fmt.Sprintf("zig-linux-aarch64-%s.tar.xz", ZigVersion)
 		downloadUrl := fmt.Sprintf("https://ziglang.org/download/%s/%s", ZigVersion, zigTarball)
 		runSimpleShell(fmt.Sprintf("wget -O %s/%s %s", depsDir, zigTarball, downloadUrl))
@@ -519,7 +523,7 @@ func installLocalDepsLinuxARM64() {
 }
 
 func installLocalDepsMacOSARM() {
-	logInfo("Installing local dependencies for macOS ARM (Apple Silicon)...")
+	logger.LogInfo("Installing local dependencies for macOS ARM (Apple Silicon)...")
 	depsDir := GetDialtoneEnv()
 	os.MkdirAll(depsDir, 0755)
 
@@ -527,7 +531,7 @@ func installLocalDepsMacOSARM() {
 	goDir := filepath.Join(depsDir, "go")
 	goBin := filepath.Join(goDir, "bin", "go")
 	if _, err := os.Stat(goBin); err != nil {
-		logInfo("Step 1: Installing Go %s for macOS ARM64...", GoVersion)
+		logger.LogInfo("Step 1: Installing Go %s for macOS ARM64...", GoVersion)
 		goTarball := fmt.Sprintf("go%s.darwin-arm64.tar.gz", GoVersion)
 		downloadUrl := fmt.Sprintf("https://go.dev/dl/%s", goTarball)
 		runSimpleShell(fmt.Sprintf("curl -L -o %s/%s %s", depsDir, goTarball, downloadUrl))
@@ -542,7 +546,7 @@ func installLocalDepsMacOSARM() {
 	nodeDir := filepath.Join(depsDir, "node")
 	nodeBin := filepath.Join(nodeDir, "bin", "node")
 	if _, err := os.Stat(nodeBin); err != nil {
-		logInfo("Step 2: Installing Node.js %s for macOS ARM64...", NodeVersion)
+		logger.LogInfo("Step 2: Installing Node.js %s for macOS ARM64...", NodeVersion)
 		nodeTarball := fmt.Sprintf("node-v%s-darwin-arm64.tar.gz", NodeVersion)
 		downloadUrl := fmt.Sprintf("https://nodejs.org/dist/v%s/%s", NodeVersion, nodeTarball)
 		runSimpleShell(fmt.Sprintf("curl -L -o %s/%s %s", depsDir, nodeTarball, downloadUrl))
@@ -557,7 +561,7 @@ func installLocalDepsMacOSARM() {
 	ghDir := filepath.Join(depsDir, "gh")
 	ghBin := filepath.Join(ghDir, "bin", "gh")
 	if _, err := os.Stat(ghBin); err != nil {
-		logInfo("Step 2.2: Installing GitHub CLI %s for macOS ARM64...", GHVersion)
+		logger.LogInfo("Step 2.2: Installing GitHub CLI %s for macOS ARM64...", GHVersion)
 		ghZip := fmt.Sprintf("gh_%s_macOS_arm64.zip", GHVersion)
 		downloadUrl := fmt.Sprintf("https://github.com/cli/cli/releases/download/v%s/%s", GHVersion, ghZip)
 		runSimpleShell(fmt.Sprintf("curl -L -o %s/%s %s", depsDir, ghZip, downloadUrl))
@@ -572,7 +576,7 @@ func installLocalDepsMacOSARM() {
 	pixiDir := filepath.Join(depsDir, "pixi")
 	pixiBin := filepath.Join(pixiDir, "pixi")
 	if _, err := os.Stat(pixiBin); err != nil {
-		logInfo("Step 2.3: Installing Pixi %s for macOS ARM64...", PixiVersion)
+		logger.LogInfo("Step 2.3: Installing Pixi %s for macOS ARM64...", PixiVersion)
 		downloadUrl := "https://github.com/prefix-dev/pixi/releases/latest/download/pixi-aarch64-apple-darwin"
 		runSimpleShell(fmt.Sprintf("mkdir -p %s && curl -L -o %s %s && chmod +x %s", pixiDir, pixiBin, downloadUrl, pixiBin))
 		logItemStatus("Pixi", PixiVersion, pixiBin, false)
@@ -584,7 +588,7 @@ func installLocalDepsMacOSARM() {
 	zigDir := filepath.Join(depsDir, "zig")
 	zigBin := filepath.Join(zigDir, "zig")
 	if _, err := os.Stat(zigBin); err != nil {
-		logInfo("Step 3: Installing Zig %s for macOS ARM64...", ZigVersion)
+		logger.LogInfo("Step 3: Installing Zig %s for macOS ARM64...", ZigVersion)
 		zigTarball := fmt.Sprintf("zig-macos-aarch64-%s.tar.xz", ZigVersion)
 		downloadUrl := fmt.Sprintf("https://ziglang.org/download/%s/%s", ZigVersion, zigTarball)
 		runSimpleShell(fmt.Sprintf("curl -L -o %s/%s %s", depsDir, zigTarball, downloadUrl))
@@ -598,14 +602,90 @@ func installLocalDepsMacOSARM() {
 }
 
 func printInstallComplete(depsDir string) {
-	logInfo("")
-	logInfo("========================================")
-	logInfo("Installation complete in %s", depsDir)
-	logInfo("========================================")
-	logInfo("")
-	logInfo("Add to your shell profile (~/.zshrc or ~/.bashrc):")
-	logInfo("  export PATH=\"%s/go/bin:%s/node/bin:%s/zig:%s/gh/bin:%s/pixi:$PATH\"", depsDir, depsDir, depsDir, depsDir, depsDir)
-	logInfo("")
+	logger.LogInfo("")
+	logger.LogInfo("========================================")
+	logger.LogInfo("Installation complete in %s", depsDir)
+	logger.LogInfo("========================================")
+	logger.LogInfo("")
+	logger.LogInfo("Add to your shell profile (~/.zshrc or ~/.bashrc):")
+	logger.LogInfo("  export PATH=\"%s/go/bin:%s/node/bin:%s/zig:%s/gh/bin:%s/pixi:$PATH\"", depsDir, depsDir, depsDir, depsDir, depsDir)
+	logger.LogInfo("")
+}
+
+// CheckInstall verifies if all dependencies are correctly installed
+func CheckInstall(depsDir string) {
+	logger.LogInfo("Checking dependencies in %s...", depsDir)
+	
+	missing := 0
+	
+	// 1. Go
+	goBin := filepath.Join(depsDir, "go", "bin", "go")
+	if _, err := os.Stat(goBin); err == nil {
+		logItemStatus("Go", GoVersion, goBin, true)
+	} else {
+		logger.LogInfo("Go (%s) is MISSING", GoVersion)
+		missing++
+	}
+	
+	// 2. Node.js
+	nodeBin := filepath.Join(depsDir, "node", "bin", "node")
+	if _, err := os.Stat(nodeBin); err == nil {
+		logItemStatus("Node.js", NodeVersion, nodeBin, true)
+	} else {
+		logger.LogInfo("Node.js (%s) is MISSING", NodeVersion)
+		missing++
+	}
+	
+	// 2.1 Vercel
+	vercelBin := filepath.Join(depsDir, "node", "bin", "vercel")
+	if _, err := os.Stat(vercelBin); err == nil {
+		logItemStatus("Vercel CLI", "latest", vercelBin, true)
+	} else {
+		logger.LogInfo("Vercel CLI is MISSING")
+		missing++
+	}
+	
+	// 2.2 GitHub CLI
+	ghBin := filepath.Join(depsDir, "gh", "bin", "gh")
+	if _, err := os.Stat(ghBin); err == nil {
+		logItemStatus("GitHub CLI", GHVersion, ghBin, true)
+	} else {
+		logger.LogInfo("GitHub CLI (%s) is MISSING", GHVersion)
+		missing++
+	}
+	
+	// 2.3 Pixi
+	pixiBin := filepath.Join(depsDir, "pixi", "pixi")
+	if _, err := os.Stat(pixiBin); err == nil {
+		logItemStatus("Pixi", PixiVersion, pixiBin, true)
+	} else {
+		logger.LogInfo("Pixi (%s) is MISSING", PixiVersion)
+		missing++
+	}
+	
+	// 2.5 Zig
+	zigBin := filepath.Join(depsDir, "zig", "zig")
+	if _, err := os.Stat(zigBin); err == nil {
+		logItemStatus("Zig", ZigVersion, zigBin, true)
+	} else {
+		logger.LogInfo("Zig (%s) is MISSING", ZigVersion)
+		missing++
+	}
+	
+	// 3. V4L2 Header
+	headerFile := filepath.Join(depsDir, "usr", "include", "linux", "videodev2.h")
+	if _, err := os.Stat(headerFile); err == nil {
+		logItemStatus("V4L2 Headers", "latest", headerFile, true)
+	} else {
+		logger.LogInfo("V4L2 Headers are MISSING")
+		missing++
+	}
+	
+	if missing == 0 {
+		logger.LogInfo("All dependencies are present.")
+	} else {
+		logger.LogFatal("%d dependencies are missing. Run './dialtone.sh install' to fix.", missing)
+	}
 }
 
 func dialSSH(host, port, user, pass string) (*ssh.Client, error) {
