@@ -1,89 +1,101 @@
-import jax.numpy as jnp
-from jax import jit, random, vmap
+"""JAX geospatial demo: Haversine distance with jit + vmap + benchmarks."""
+
 import time
 
+import jax.numpy as jnp
+import numpy as np
+from jax import jit, random, vmap
+import jax
+
+
 def haversine(lat1, lon1, lat2, lon2):
+    """Compute the great-circle distance in km between two points.
+
+    Args:
+        lat1: Reference latitude in degrees.
+        lon1: Reference longitude in degrees.
+        lat2: Target latitude in degrees (scalar or array).
+        lon2: Target longitude in degrees (scalar or array).
     """
-    Calculate the great circle distance between two points 
-    on the earth (specified in decimal degrees)
-    """
-    R = 6371.0  # Earth radius in km
-    
-    # Convert decimal degrees to radians 
+    earth_radius_km = 6371.0
     dlat = jnp.radians(lat2 - lat1)
     dlon = jnp.radians(lon2 - lon1)
-    
-    # Haversine formula 
-    a = jnp.sin(dlat / 2)**2 + jnp.cos(jnp.radians(lat1)) * jnp.cos(jnp.radians(lat2)) * jnp.sin(dlon / 2)**2
-    c = 2 * jnp.arcsin(jnp.sqrt(a)) 
-    return R * c
+    a = (
+        jnp.sin(dlat / 2) ** 2
+        + jnp.cos(jnp.radians(lat1))
+        * jnp.cos(jnp.radians(lat2))
+        * jnp.sin(dlon / 2) ** 2
+    )
+    c = 2 * jnp.arctan2(jnp.sqrt(a), jnp.sqrt(1 - a))
+    return earth_radius_km * c
 
-# Jitted version for speed
-fast_haversine = jit(haversine)
 
-# Vectorized version to handle arrays of points against a single point
-# (Already handled by JNP broadcasting, but explicit vmap can be used)
-# Actually, jnp.sin etc broadcast natively. 
+"""Vectorize over target points and jit compile for speed."""
+vectorized_haversine = vmap(haversine, in_axes=(None, None, 0, 0))
+fast_haversine = jit(vectorized_haversine)
 
-import numpy as np
 
-def benchmark():
-    print("--- JAX vs NumPy Geospatial Benchmark ---")
-    
+def main():
+    """Generate random points and benchmark NumPy vs JAX (cold/warm)."""
+    ref_lat, ref_lon = 40.7128, -74.0060
     sizes = [10_000, 100_000, 1_000_000, 5_000_000]
-    results = []
+    backend = jax.default_backend()
+    backend_label = "CUDA" if backend == "gpu" else backend.upper()
 
-    # NYC Reference
-    nyc_lat, nyc_lon = 40.7128, -74.0060
+    def haversine_np(lat1, lon1, lat2, lon2):
+        earth_radius_km = 6371.0
+        dlat = np.radians(lat2 - lat1)
+        dlon = np.radians(lon2 - lon1)
+        a = (
+            np.sin(dlat / 2) ** 2
+            + np.cos(np.radians(lat1))
+            * np.cos(np.radians(lat2))
+            * np.sin(dlon / 2) ** 2
+        )
+        c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+        return earth_radius_km * c
 
-    print(f"{'Size':>12} | {'NumPy (s)':>12} | {'JAX Cold (s)':>12} | {'JAX Warm (s)':>12} | {'Speedup':>10}")
-    print("-" * 70)
+    print("--- Geospatial Benchmark ---")
+    print("All timings are in milliseconds (ms).")
+    print(f"Backend for JAX: {backend_label}")
+    print(f"{'Size':>12} | {'Cold':>10} | {'Warm':>10} | {'NumPy':>10} | {'xFaster':>8}")
+    print("-" * 66)
 
     for num_points in sizes:
-        key = random.PRNGKey(42)
-        keys = random.split(key, 2)
-        
-        # JAX Data
-        j_lat2 = random.uniform(keys[0], (num_points,), minval=-90, maxval=90)
-        j_lon2 = random.uniform(keys[1], (num_points,), minval=-180, maxval=180)
-        
-        # NumPy Data (converted from JAX for fairness in transfer if needed, or just generate new)
-        n_lat2 = np.array(j_lat2)
-        n_lon2 = np.array(j_lon2)
+        key = random.PRNGKey(0)
+        lat_key, lon_key = random.split(key, 2)
+        lat2 = random.uniform(lat_key, (num_points,), minval=-90.0, maxval=90.0)
+        lon2 = random.uniform(lon_key, (num_points,), minval=-180.0, maxval=180.0)
 
-        # 1. NumPy Benchmark
-        def haversine_np(lat1, lon1, lat2, lon2):
-            R = 6371.0
-            dlat = np.radians(lat2 - lat1)
-            dlon = np.radians(lon2 - lon1)
-            a = np.sin(dlat / 2)**2 + np.cos(np.radians(lat1)) * np.cos(np.radians(lat2)) * np.sin(dlon / 2)**2
-            c = 2 * np.arcsin(np.sqrt(a))
-            return R * c
+        lat2_np = np.array(lat2)
+        lon2_np = np.array(lon2)
 
         start = time.time()
-        _ = haversine_np(nyc_lat, nyc_lon, n_lat2, n_lon2)
-        numpy_time = time.time() - start
+        _ = haversine_np(ref_lat, ref_lon, lat2_np, lon2_np)
+        numpy_ms = (time.time() - start) * 1000.0
 
-        # 2. JAX Cold Start
         start = time.time()
-        # Note: We redfine/re-jit to force a "cold" start for each size if we want to show compilation overhead
-        # or just use the same one. Let's use the same one to show it's already compiled for the formula 
-        # but might need new tracing for the specific shape.
-        _ = fast_haversine(nyc_lat, nyc_lon, j_lat2, j_lon2).block_until_ready()
-        jax_cold_time = time.time() - start
+        distances = fast_haversine(ref_lat, ref_lon, lat2, lon2)
+        distances.block_until_ready()
+        cold_ms = (time.time() - start) * 1000.0
 
-        # 3. JAX Warm Start
         start = time.time()
-        _ = fast_haversine(nyc_lat, nyc_lon, j_lat2, j_lon2).block_until_ready()
-        jax_warm_time = time.time() - start
+        distances = fast_haversine(ref_lat, ref_lon, lat2, lon2)
+        distances.block_until_ready()
+        warm_ms = (time.time() - start) * 1000.0
 
-        speedup = numpy_time / jax_warm_time
-        
-        print(f"{num_points:12,d} | {numpy_time:12.4f} | {jax_cold_time:12.4f} | {jax_warm_time:12.4f} | {speedup:10.1f}x")
-        results.append((num_points, numpy_time, jax_cold_time, jax_warm_time, speedup))
+        xfaster = numpy_ms / warm_ms if warm_ms > 0 else float("inf")
+        print(
+            f"{num_points:12,d} | {cold_ms:10.2f} | {warm_ms:10.2f} | "
+            f"{numpy_ms:10.2f} | {xfaster:8.2f}"
+        )
 
-    print("-" * 70)
-    print(f"Max Speedup: {max(r[4] for r in results):.1f}x")
+    print("-" * 66)
+    print(f"Calculated {sizes[-1]} distances")
+    print(f"Cold start took: {cold_ms/1000.0:.4f}s")
+    print(f"Warm start took: {warm_ms/1000.0:.4f}s")
+    print(f"Sample distance (km): {float(distances[0]):.2f}")
+
 
 if __name__ == "__main__":
-    benchmark()
+    main()
