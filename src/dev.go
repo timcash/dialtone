@@ -13,6 +13,7 @@ import (
 
 	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
 	www_cli "dialtone/cli/src/plugins/www/cli"
+	plugin_cli "dialtone/cli/src/plugins/plugin/cli"
 )
 
 // ExecuteDev is the entry point for the dialtone-dev CLI
@@ -57,6 +58,8 @@ func ExecuteDev() {
 		runPullRequest(args)
 	case "ticket":
 		runTicket(args)
+	case "plugin":
+		plugin_cli.RunPlugin(args)
 	case "www":
 		www_cli.RunWww(args)
 	case "opencode":
@@ -93,6 +96,7 @@ func printDevUsage() {
 	fmt.Println("  test [name]        Run tests (all or for specific feature, creates templates if missing)")
 	fmt.Println("  pull-request       Create or update a pull request (wrapper around gh CLI)")
 	fmt.Println("  ticket <subcmd>    Manage GitHub tickets (wrapper around gh CLI)")
+	fmt.Println("  plugin <subcmd>    Manage plugins (create, etc.)")
 	fmt.Println("  www <subcmd>       Manage public webpage (Vercel wrapper)")
 	fmt.Println("  opencode <subcmd>  Manage opencode AI assistant (start, stop, status, ui)")
 	fmt.Println("  developer          Start the autonomous developer loop")

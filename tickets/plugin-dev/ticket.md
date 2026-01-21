@@ -27,17 +27,29 @@
 ## Subtask: Scaffold & Test Setup
 - description: Verify `tickets/plugin-dev/test/` exists (created by start command).
 - description: [NEW] `tickets/plugin-dev/test/e2e_test.go`: Implement test to verify `dialtone-dev plugin create test-plugin` creates correct directory structure (`src/plugins/test-plugin/{app,cli,test}`).
-- status: todo
+- status: done
 
 ## Subtask: Implementation
 - description: [NEW] `src/plugins/plugin/cli/plugin.go`: Implement `RunPlugin` entry point and `create` subcommand logic.
 - description: [MODIFY] `src/dev.go`: Import `dialtone/cli/src/plugins/plugin/cli` and delegate `plugin` command to it.
 - description: [MODIFY] `src/plugins/ticket/cli/ticket.go`: Remove `--plugin` scaffolding logic from `RunStart`.
-- status: todo
+- status: done
 
-## Subtask: Verification
-- description: Run test: `./dialtone.sh test` (which triggers the ticket tests).
-- status: todo
+## Subtask: Ticket Verification
+- description: Run test: `./dialtone.sh ticket test <ticket-name>` (which triggers the ticket tests).
+- status: done
+
+## Subtask: Plugin Verification
+- description: Run test: `./dialtone.sh plugin test <plugin-name>` (which triggers the plugin tests).
+- status: done
+
+## Subtask: Core Verification
+- description: Run test: `./dialtone.sh test --core` (which triggers the core tests).
+- status: done
+
+## Subtask: All Verification
+- description: Run test: `./dialtone.sh test` (which triggers all tests).
+- status: done
 
 ## Collaborative Notes
 - We are refactoring the CLI to be more modular.
