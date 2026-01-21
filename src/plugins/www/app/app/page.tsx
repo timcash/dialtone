@@ -93,6 +93,7 @@ export default function Home() {
             dialtone.earth
           </h1>
           <p className="text-lg md:text-xl text-muted-foreground max-w-md">unified robotic networks for earth</p>
+          <p className="text-sm text-muted-foreground mt-2">v1.0.1</p>
         </div>
       </article>
 

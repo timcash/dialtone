@@ -90,6 +90,9 @@ func RunStart(args []string) {
 			}
 			logInfo("Created %s", readmePath)
 		}
+
+		// Create plugin test templates
+		createTestTemplates(filepath.Join(pluginDir, "test"), pluginName)
 	}
 
 	logInfo("Ticket %s started successfully", ticketName)
