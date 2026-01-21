@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"dialtone/cli/src/core/logger"
@@ -44,6 +46,8 @@ func RunGithub(args []string) {
 	switch subcommand {
 	case "pull-request", "pr":
 		runPullRequest(restArgs)
+	case "issue":
+		runIssue(restArgs)
 	case "check-deploy":
 		runCheckDeploy(restArgs)
 	case "help", "-h", "--help":
@@ -59,6 +63,7 @@ func printGithubUsage() {
 	fmt.Println("Usage: dialtone-dev github <command> [options]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  pull-request       Create, update, merge, or close a pull request")
+	fmt.Println("  issue              List or sync GitHub issues to local tickets")
 	fmt.Println("  check-deploy       Check Vercel deployment status for current branch")
 	fmt.Println("  help               Show this help message")
 }
@@ -331,4 +336,176 @@ func runCheckDeploy(args []string) {
 	if err := cmd.Run(); err != nil {
 		logger.LogFatal("Failed to check deployments: %v", err)
 	}
+}
+
+func runIssue(args []string) {
+	if len(args) == 0 {
+		fmt.Println("Usage: dialtone-dev github issue <command> [options]")
+		fmt.Println("\nCommands:")
+		fmt.Println("  list      List open issues")
+		fmt.Println("  sync      Sync open issues to local tickets")
+		fmt.Println("  close     Close specific issue(s)")
+		fmt.Println("  close-all Close all open issues")
+		return
+	}
+
+	subcommand := args[0]
+	restArgs := args[1:]
+
+	switch subcommand {
+	case "list":
+		runIssueList(restArgs)
+	case "sync":
+		runIssueSync(restArgs)
+	case "close":
+		runIssueClose(restArgs)
+	case "close-all":
+		runIssueCloseAll(restArgs)
+	default:
+		fmt.Printf("Unknown issue command: %s\n", subcommand)
+		os.Exit(1)
+	}
+}
+
+type GHInfo struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	Body   string `json:"body"`
+}
+
+func runIssueList(args []string) {
+	gh := findGH()
+	logger.LogInfo("Listing open issues...")
+
+	cmdArgs := []string{"issue", "list", "--json", "number,title"}
+	if len(args) > 0 {
+		cmdArgs = append(cmdArgs, args...)
+	}
+
+	cmd := exec.Command(gh, cmdArgs...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		logger.LogFatal("Failed to list issues: %v", err)
+	}
+}
+
+func runIssueSync(args []string) {
+	gh := findGH()
+	logger.LogInfo("Syncing GitHub issues to local tickets...")
+
+	// Get issues
+	cmd := exec.Command(gh, "issue", "list", "--json", "number,title,body", "--limit", "100")
+	output, err := cmd.Output()
+	if err != nil {
+		logger.LogFatal("Failed to fetch issues: %v", err)
+	}
+
+	var issues []GHInfo
+	if err := json.Unmarshal(output, &issues); err != nil {
+		logger.LogFatal("Failed to parse issues: %v", err)
+	}
+
+	templatePath := filepath.Join("tickets", "template-ticket", "ticket.md")
+	templateBytes, err := os.ReadFile(templatePath)
+	if err != nil {
+		logger.LogFatal("Failed to read ticket template: %v", err)
+	}
+	template := string(templateBytes)
+
+	for _, issue := range issues {
+		slug := generateSlug(issue.Title)
+		ticketDir := filepath.Join("tickets", slug)
+		ticketFile := filepath.Join(ticketDir, "ticket.md")
+
+		if _, err := os.Stat(ticketFile); err == nil {
+			logger.LogInfo("Ticket already exists: %s", slug)
+			continue
+		}
+
+		logger.LogInfo("Creating ticket for issue #%d: %s", issue.Number, issue.Title)
+
+		if err := os.MkdirAll(ticketDir, 0755); err != nil {
+			logger.LogFatal("Failed to create ticket directory: %v", err)
+		}
+
+		content := strings.ReplaceAll(template, "ticket-short-name", slug)
+		content = strings.ReplaceAll(content, "[Ticket Title]", issue.Title)
+		
+		// Add issue body to Collaborative Notes or at the end
+		if issue.Body != "" {
+			bodySection := fmt.Sprintf("\n## Issue Summary\n%s\n", issue.Body)
+			content = strings.ReplaceAll(content, "## Collaborative Notes", bodySection+"\n## Collaborative Notes")
+		}
+
+		if err := os.WriteFile(ticketFile, []byte(content), 0644); err != nil {
+			logger.LogFatal("Failed to write ticket file: %v", err)
+		}
+	}
+}
+
+func runIssueClose(args []string) {
+	if len(args) == 0 {
+		logger.LogFatal("Usage: dialtone-dev github issue close <number>...")
+	}
+
+	gh := findGH()
+	for _, num := range args {
+		logger.LogInfo("Closing issue #%s...", num)
+		cmd := exec.Command(gh, "issue", "close", num)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			logger.LogError("Failed to close issue #%s: %v", num, err)
+		}
+	}
+}
+
+func runIssueCloseAll(args []string) {
+	gh := findGH()
+	logger.LogInfo("Fetching all open issues...")
+
+	cmd := exec.Command(gh, "issue", "list", "--json", "number", "--limit", "100")
+	output, err := cmd.Output()
+	if err != nil {
+		logger.LogFatal("Failed to fetch issues: %v", err)
+	}
+
+	var issues []GHInfo
+	if err := json.Unmarshal(output, &issues); err != nil {
+		logger.LogFatal("Failed to parse issues: %v", err)
+	}
+
+	if len(issues) == 0 {
+		logger.LogInfo("No open issues found.")
+		return
+	}
+
+	logger.LogInfo("Closing %d open issues...", len(issues))
+	for _, issue := range issues {
+		logger.LogInfo("Closing issue #%d...", issue.Number)
+		closeCmd := exec.Command(gh, "issue", "close", fmt.Sprintf("%d", issue.Number))
+		closeCmd.Stdout = os.Stdout
+		closeCmd.Stderr = os.Stderr
+		if err := closeCmd.Run(); err != nil {
+			logger.LogError("Failed to close issue #%d: %v", issue.Number, err)
+		}
+	}
+	logger.LogInfo("All open issues closed.")
+}
+
+func generateSlug(title string) string {
+	slug := strings.ToLower(title)
+	slug = strings.ReplaceAll(slug, " ", "-")
+	
+	// Remove special characters
+	reg := regexp.MustCompile("[^a-z0-9-]+")
+	slug = reg.ReplaceAllString(slug, "")
+	
+	// Remove double dashes
+	for strings.Contains(slug, "--") {
+		slug = strings.ReplaceAll(slug, "--", "-")
+	}
+	
+	return strings.Trim(slug, "-")
 }
