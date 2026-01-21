@@ -1,3 +1,3 @@
 # Task: jax-demo-plugin
 
-- [ ] Initial setup
+- [x] Initial setup

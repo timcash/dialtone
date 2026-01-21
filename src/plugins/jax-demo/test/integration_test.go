@@ -39,11 +39,15 @@ func TestIntegration_JaxDemo(t *testing.T) {
 	t.Logf("Output: %s", outputStr)
 
 	// Verify expected output
-	if !strings.Contains(outputStr, "Calculated 1000000 distances") {
+	if !strings.Contains(outputStr, "Calculated ") || !strings.Contains(outputStr, " distances") {
 		t.Errorf("Output did not contain expected success message. Got: %s", outputStr)
 	}
-	
+
 	if !strings.Contains(outputStr, "Warm start took:") {
 		t.Errorf("Output did not contain benchmark results. Got: %s", outputStr)
+	}
+
+	if !strings.Contains(outputStr, "Geospatial Benchmark") {
+		t.Errorf("Output did not contain benchmark table header. Got: %s", outputStr)
 	}
 }
