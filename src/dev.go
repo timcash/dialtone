@@ -19,6 +19,7 @@ import (
 	build_cli "dialtone/cli/src/plugins/build/cli"
 	logs_cli "dialtone/cli/src/plugins/logs/cli"
 	deploy_cli "dialtone/cli/src/plugins/deploy/cli"
+	chrome_cli "dialtone/cli/src/plugins/chrome/cli"
 	mavlink_cli "dialtone/cli/src/plugins/mavlink/cli"
 	"dialtone/cli/src/core/ssh"
 )
@@ -70,6 +71,8 @@ func ExecuteDev() {
 		runTicket(args)
 	case "plugin":
 		plugin_cli.RunPlugin(args)
+	case "chrome":
+		chrome_cli.RunChrome(args)
 	case "mavlink":
 		mavlink_cli.RunMavlink(args)
 	case "www":
