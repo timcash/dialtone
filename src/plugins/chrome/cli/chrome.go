@@ -11,6 +11,8 @@ import (
 // RunChrome handles the 'chrome' command
 func RunChrome(args []string) {
 	fs := flag.NewFlagSet("chrome", flag.ExitOnError)
+	port := fs.Int("port", 9222, "Remote debugging port")
+	debug := fs.Bool("debug", false, "Enable verbose lifecycle logging")
 	help := fs.Bool("help", false, "Show help for chrome command")
 
 	fs.Parse(args)
@@ -20,8 +22,8 @@ func RunChrome(args []string) {
 		return
 	}
 
-	logger.LogInfo("Verifying Chrome/Chromium connectivity...")
-	if err := chrome.VerifyChrome(); err != nil {
+	logger.LogInfo("Verifying Chrome/Chromium connectivity (Target Port: %d)...", *port)
+	if err := chrome.VerifyChrome(*port, *debug); err != nil {
 		logger.LogFatal("Chrome verification FAILED: %v", err)
 	}
 
@@ -29,7 +31,10 @@ func RunChrome(args []string) {
 }
 
 func printChromeUsage() {
-	fmt.Println("Usage: dialtone chrome")
+	fmt.Println("Usage: dialtone chrome [options]")
+	fmt.Println()
+	fmt.Println("Options:")
+	fmt.Println("  --port <number>   Remote debugging port (default: 9222)")
 	fmt.Println()
 	fmt.Println("Verify Chrome/Chromium connectivity via chromedp.")
 	fmt.Println("Detects local installations on Linux, macOS, and WSL (Windows Chrome).")
