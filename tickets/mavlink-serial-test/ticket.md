@@ -44,22 +44,22 @@
 ## Subtask: Research Serial Setup
 - description: Identify the correct serial device on the target Raspberry Pi (usually `/dev/ttyAMA0` or `/dev/serial0`). Verify user permissions for the serial port.
 - test: `ls -l /dev/ttyAMA0` on the remote Pi shows correct permissions.
-- status: todo
+- status: done
 
 ## Subtask: Remote MAVLink Verification
 - description: [MODIFY] `src/mavlink.go`: Ensure the serial endpoint can be configured via environment variables or flags for the remote robot.
 - test: `dialtone.sh logs --remote` shows MAVLink heartbeats.
-- status: todo
+- status: done
 
 ## Subtask: Web UI Arming Test
 - description: Test the arming sequence through the Web UI. If arming fails, ensure the error from MAVLink (STATUSTEXT or COMMAND_ACK) is visible in the UI or logs.
 - test: Clicking "Arm" in the Web UI results in a successful arming state or a clear error message.
-- status: todo
+- status: done
 
 ## Subtask: Code-Deploy-Verify Workflow
 - description: Make a visible change (e.g., update a version string in `src/dialtone.go`), then run build and deploy. Run diagnostics to confirm the new version is active.
 - test: `dialtone.sh diagnostic --remote` shows the updated version string.
-- status: todo
+- status: done
 
 ## Subtask: Migrate to Plugin
 - description: Create a new plugin for MAVLink using the CLI and migrate the existing logic.
@@ -67,12 +67,12 @@
   2. Migrate `src/mavlink.go` logic to `src/plugins/mavlink/app/` and `src/plugins/mavlink/cli/`.
   3. Refactor `src/dev.go` to delegate MAVLink-related commands/logic to the new plugin.
 - test: `dialtone.sh mavlink` (or equivalent plugin command) works as expected and local tests in `src/plugins/mavlink/test/` pass.
-- status: todo
+- status: done
 
 ## Subtask: Update Documentation
 - description: Update [mavlink.md](file:///home/user/dialtone/docs/vendor/mavlink.md) with any new learnings about serial ports, MAVLink heartbeats, or arming errors encountered during this ticket.
 - test: Documentation is comprehensive and reflects the final implementation.
-- status: todo
+- status: done
 
 ## Collaborative Notes
 - Raspberry Pi Zero/3/4/5 serial ports can vary. `/dev/ttyAMA0` is often the hardware UART, while `/dev/ttyS0` is the mini UART.

@@ -1,0 +1,32 @@
+# Task: Mavlink Serial Test
+
+- [x] Research Serial Setup <!-- id: 0 -->
+    - [x] Identify correct serial device on Raspberry Pi <!-- id: 1 -->
+    - [x] Verify user permissions for serial port <!-- id: 2 -->
+- [x] Remote MAVLink Verification <!-- id: 3 -->
+    - [x] Run `ticket start mavlink-serial-test` <!-- id: 4 -->
+    - [x] Ensure serial endpoint is configurable via env/flags <!-- id: 5 -->
+    - [x] Verify heartbeats on remote Pi <!-- id: 6 -->
+- [x] Web UI Arming Test <!-- id: 7 -->
+    - [x] Verify arming command via NATS/MAVLink <!-- id: 8 -->
+    - [x] Ensure error messages are visible in UI <!-- id: 9 -->
+- [x] Code-Deploy-Verify Workflow <!-- id: 10 -->
+    - [x] Modify version string in `src/dialtone.go` <!-- id: 11 -->
+    - [x] Build and deploy to remote Pi <!-- id: 12 -->
+    - [x] Verify version via diagnostics <!-- id: 13 -->
+- [x] Migrate to Plugin <!-- id: 14 -->
+    - [x] Create `mavlink` plugin <!-- id: 15 -->
+    - [x] Migrate logic from `src/mavlink.go` <!-- id: 16 -->
+    - [x] Refactor `src/dev.go` <!-- id: 17 -->
+- [x] Update Documentation <!-- id: 18 -->
+    - [x] Update `docs/vendor/mavlink.md` <!-- id: 19 -->
+- [x] Build Speed Optimization <!-- id: 20 -->
+    - [x] Create `docs/Dockerfile.builder` <!-- id: 21 -->
+    - [x] Add `builder` subcommand to `dialtone build` <!-- id: 22 -->
+    - [x] Update `buildWithPodman` to use optimized image and build volumes <!-- id: 23 -->
+    - [x] Verify build speed improvement <!-- id: 24 -->
+- [x] Deployment & Local Diagnostics Optimization <!-- id: 25 -->
+    - [x] Ensure Web UI is rebuilt before every `deploy` <!-- id: 26 -->
+    - [x] Install/Configure Chrome for `chromedp` in WSL <!-- id: 27 -->
+    - [x] Verify `diagnostic` tool uses `chromedp` successfully <!-- id: 28 -->
+    - [x] Update `tickets/mavlink-serial-test/task.md` with new progress <!-- id: 29 -->
