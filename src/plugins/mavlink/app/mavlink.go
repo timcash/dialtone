@@ -1,10 +1,11 @@
-package dialtone
+package mavlink
 
 import (
 	"fmt"
 	"strconv"
 	"strings"
 
+	"dialtone/cli/src/core/logger"
 	"github.com/bluenviron/gomavlib/v3"
 	"github.com/bluenviron/gomavlib/v3/pkg/dialects/common"
 )
@@ -84,16 +85,16 @@ func NewMavlinkService(config MavlinkConfig) (*MavlinkService, error) {
 // Start starts the MAVLink event loop
 func (s *MavlinkService) Start() {
 	// defer s.node.Close() // handled by Close()
-	LogInfo("MavlinkService: Starting event loop on %s", s.config.Endpoint)
+	logger.LogInfo("MavlinkService: Starting event loop on %s", s.config.Endpoint)
 
 	for evt := range s.node.Events() {
 		switch e := evt.(type) {
 		case *gomavlib.EventFrame:
-			// LogInfo("MAVLink frame received: systemID=%d componentID=%d", e.SystemID(), e.ComponentID())
+			// logger.LogInfo("MAVLink frame received: systemID=%d componentID=%d", e.SystemID(), e.ComponentID())
 			
 			switch msg := e.Message().(type) {
 			case *common.MessageHeartbeat:
-				// LogInfo("Heartbeat received from system %d", e.SystemID())
+				// logger.LogInfo("Heartbeat received from system %d", e.SystemID())
 				if s.config.Callback != nil {
 					s.config.Callback(&MavlinkEvent{
 						Type: "HEARTBEAT",
@@ -116,13 +117,13 @@ func (s *MavlinkService) Start() {
 				}
 			}
 		case *gomavlib.EventParseError:
-			// LogInfo("MAVLink parse error: %v", e.Error)
+			// logger.LogInfo("MAVLink parse error: %v", e.Error)
 		case *gomavlib.EventStreamRequested:
-			LogInfo("MAVLink stream requested")
+			logger.LogInfo("MAVLink stream requested")
 		case *gomavlib.EventChannelOpen:
-			LogInfo("MAVLink channel open")
+			logger.LogInfo("MAVLink channel open")
 		case *gomavlib.EventChannelClose:
-			LogInfo("MAVLink channel close")
+			logger.LogInfo("MAVLink channel close")
 		}
 	}
 }
@@ -134,7 +135,7 @@ func (s *MavlinkService) Close() {
 
 // Arm sends the arm command to the rover
 func (s *MavlinkService) Arm() error {
-	LogInfo("MavlinkService: Sending ARM command")
+	logger.LogInfo("MavlinkService: Sending ARM command")
 	return s.node.WriteMessageAll(&common.MessageCommandLong{
 		TargetSystem:    0, // Broadcast
 		TargetComponent: 0, // Broadcast
@@ -146,7 +147,7 @@ func (s *MavlinkService) Arm() error {
 
 // Disarm sends the disarm command to the rover
 func (s *MavlinkService) Disarm() error {
-	LogInfo("MavlinkService: Sending DISARM command")
+	logger.LogInfo("MavlinkService: Sending DISARM command")
 	return s.node.WriteMessageAll(&common.MessageCommandLong{
 		TargetSystem:    0,
 		TargetComponent: 0,
