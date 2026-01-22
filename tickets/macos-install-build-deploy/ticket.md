@@ -8,7 +8,7 @@
 ## Goals
 1. Install dependencies on macOS (Apple Silicon) using `./dialtone.sh install`.
 2. Perform a local build of the system using `./dialtone.sh build`
-2. Make a build locally using zig on macos without podman using `./dialtone.sh build --arm64`. the `--arm64` flag may be incorrect. I want to build for the raspberry pi on the robot but from the mac.
+2. Make a build locally using zig on macos without podman using `./dialtone.sh build`
 3. Deploy the binary to a remote robot using `./dialtone.sh deploy`.
 4. Improve the diagnostics output of `./dialtone.sh diagnostics` and look for errors
 5. Get logs via `./dialtone.sh logs --remote`.
