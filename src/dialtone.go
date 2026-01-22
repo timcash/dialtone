@@ -24,6 +24,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
+	mavlink "dialtone/cli/src/plugins/mavlink/app"
 	"tailscale.com/client/tailscale"
 	"tailscale.com/tsnet"
 )
@@ -383,9 +384,9 @@ Visit that URL to authenticate this device.
 func startMavlink(endpoint string, natsPort int) {
 	LogInfo("Starting Mavlink Service on %s...", endpoint)
 
-	config := MavlinkConfig{
+	config := mavlink.MavlinkConfig{
 		Endpoint: endpoint,
-		Callback: func(evt *MavlinkEvent) {
+		Callback: func(evt *mavlink.MavlinkEvent) {
 			var subject string
 			var data []byte
 			var err error
@@ -432,7 +433,7 @@ func startMavlink(endpoint string, natsPort int) {
 		},
 	}
 
-	svc, err := NewMavlinkService(config)
+	svc, err := mavlink.NewMavlinkService(config)
 	if err != nil {
 		LogFatal("Failed to create Mavlink service: %v", err)
 	}
@@ -518,6 +519,7 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server
 	// 1. JSON init API for the frontend
 	mux.HandleFunc("/api/init", func(w http.ResponseWriter, r *http.Request) {
 		data := map[string]interface{}{
+			"version":   "v1.0.2-diag-verified",
 			"hostname":  hostname,
 			"nats_port": natsPort,
 			"ws_port":   wsPort,
