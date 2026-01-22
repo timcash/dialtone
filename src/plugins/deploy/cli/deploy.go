@@ -20,7 +20,7 @@ func RunDeploy(args []string) {
 	port := fs.String("port", "22", "SSH port")
 	user := fs.String("user", os.Getenv("ROBOT_USER"), "SSH user")
 	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password")
-	ephemeral := fs.Bool("ephemeral", true, "Register as ephemeral node on Tailscale")
+	ephemeral := fs.Bool("ephemeral", false, "Register as ephemeral node on Tailscale")
 	showHelp := fs.Bool("help", false, "Show help for deploy command")
 
 	fs.Usage = func() {
@@ -91,7 +91,7 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 
 	// 3. Run Build (Cross-Compile)
 	logger.LogInfo("Cross-compiling for %s...", remoteArch)
-	build_cli.RunBuild([]string{"--podman", buildFlag})
+	build_cli.RunBuild([]string{"--local", buildFlag})
 
 	localBinaryPath := filepath.Join("bin", binaryName)
 	if _, err := os.Stat(localBinaryPath); os.IsNotExist(err) {
@@ -107,7 +107,7 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 		}
 		remoteDir = path.Join(home, "dialtone_deploy")
 	}
-	
+
 	logger.LogInfo("Preparing remote directory %s...", remoteDir)
 	_, _ = ssh.RunSSHCommand(client, "pkill dialtone || true")
 	_, _ = ssh.RunSSHCommand(client, fmt.Sprintf("mkdir -p %s", remoteDir))
@@ -129,7 +129,7 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 
 	// 7. Restart Service
 	logger.LogInfo("Starting service...")
-	
+
 	hostnameParam := os.Getenv("DIALTONE_HOSTNAME")
 	if hostnameParam == "" {
 		hostnameParam = "dialtone-1"
@@ -147,8 +147,7 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 		mavlinkFlag = fmt.Sprintf("-mavlink %s", mavlinkEndpoint)
 	}
 
-	startCmd := fmt.Sprintf("rm -rf ~/dialtone && cp %s ~/dialtone && chmod +x ~/dialtone && nohup sh -c 'TS_AUTHKEY=%%s ~/dialtone start -hostname %%s %%s %%s' > ~/nats.log 2>&1 < /dev/null &", remoteBinaryPath)
-	startCmd = fmt.Sprintf("rm -rf ~/dialtone && cp %s ~/dialtone && chmod +x ~/dialtone && nohup sh -c 'TS_AUTHKEY=%s ~/dialtone start -hostname %s %s %s' > ~/nats.log 2>&1 < /dev/null &", remoteBinaryPath, tsAuthKey, hostnameParam, ephemeralFlag, mavlinkFlag)
+	startCmd := fmt.Sprintf("rm -rf ~/dialtone && cp %s ~/dialtone && chmod +x ~/dialtone && nohup sh -c 'TS_AUTHKEY=%s ~/dialtone start -hostname %s %s %s' > ~/nats.log 2>&1 < /dev/null &", remoteBinaryPath, tsAuthKey, hostnameParam, ephemeralFlag, mavlinkFlag)
 
 	if err := ssh.RunSSHCommandNoWait(client, startCmd); err != nil {
 		logger.LogFatal("Failed to start: %v", err)
