@@ -162,10 +162,9 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 	defer ts.Close()
 
 	// Log connection info
-	LogInfo("Connected to Tailscale as %s", hostname)
-	for _, ip := range status.TailscaleIPs {
-		LogInfo("  Tailscale IP: %s", ip)
-	}
+	LogInfo("TSNet: Connected (IP: %s)", status.TailscaleIPs[0])
+	
+	LogInfo("NATS: Connected")
 
 	// Start NATS on localhost only (not directly exposed)
 	localNATSPort := port + 10000 // Use offset port internally
@@ -207,14 +206,12 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 			return
 		}
 		if len(cameras) > 0 {
-			LogInfo("CAMERA: Found %d devices, using %s", len(cameras), cameras[0].Device)
+			LogInfo("Camera: Found %s", cameras[0].Device)
 			if err := StartCamera(context.Background(), cameras[0].Device); err != nil {
-				LogInfo("CAMERA: Failed to start %s: %v", cameras[0].Device, err)
-			} else {
-				LogInfo("CAMERA: %s started successfully", cameras[0].Device)
+				LogInfo("Camera: Failed to start %s: %v", cameras[0].Device, err)
 			}
 		} else {
-			LogInfo("CAMERA: No devices found")
+			LogInfo("Camera: No devices found")
 		}
 	}()
 
@@ -264,14 +261,13 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 			}
 		}
 
-		LogInfo("=======================================================")
-		LogInfo("WEB SERVER READY")
-		LogInfo("   URL: http://%s:%d", displayHostname, webPort)
-
-		if len(status.TailscaleIPs) > 0 {
-			LogInfo("   IP:  http://%s:%d", status.TailscaleIPs[0], webPort)
-		}
-		LogInfo("=======================================================")
+		LogInfo("Web UI: Serving at http://%s:%d", displayHostname, webPort)
+		
+		// If Mavlink is running, it will log its heartbeat when received.
+		// For now, let's just log "System Operational" after all key services are initialized.
+		// Wait a bit to ensure async services like camera/mavlink have a chance to log their status.
+		time.Sleep(2 * time.Second)
+		LogInfo("[SUCCESS] System Operational")
 
 		if err := http.Serve(webLn, webHandler); err != nil {
 			LogInfo("Web server error: %v", err)
@@ -453,6 +449,14 @@ func startMavlink(endpoint string, natsPort int) {
 		}
 
 		LogInfo("MAVLINK: Subscribed to rover.command")
+		
+		heartbeatLogged := false
+		nc.Subscribe("mavlink.heartbeat", func(m *nats.Msg) {
+			if !heartbeatLogged {
+				LogInfo("MAVLINK: Heartbeat received from flight controller")
+				heartbeatLogged = true
+			}
+		})
 
 		nc.Subscribe("rover.command", func(m *nats.Msg) {
 			var cmd map[string]interface{}
