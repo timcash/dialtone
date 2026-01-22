@@ -108,11 +108,11 @@
                 <p>./setup.sh</p>
                 <br>
                 <p><span class="comment"># Install dependencies</span></p>
-                <p>go run dialtone-dev install --linux-wsl</p>
+                <p>./dialtone.sh install --linux-wsl</p>
                 <br>
                 <p><span class="comment"># Build and Start</span></p>
-                <p>go run dialtone-dev build --local</p>
-                <p>go run ./bin/dialtone start --local</p>
+                <p>./dialtone.sh build --local</p>
+                <p>./dialtone.sh start --local</p>
             </div>
 
             <div class="grid-2">
@@ -170,7 +170,7 @@
             </section>
 
             <h2>CLI Reference</h2>
-            <p>The <code>dialtone-dev.go</code> tool is your primary interface for management:</p>
+            <p>The <code>dialtone.sh</code> tool is your primary interface for management:</p>
             <ul>
                 <li><code>install</code>: Set up a local-user dev environment.</li>
                 <li><code>build</code>: Create production-ready binaries.</li>

@@ -225,7 +225,7 @@ func buildLocally(targetArch string) {
 	if _, err := os.Stat(filepath.Join(depsDir, "go", "bin", "go")); err == nil {
 		goBin = filepath.Join(depsDir, "go", "bin", "go")
 	}
-	runShell(".", goBin, "build", "-o", outputPath, "dialtone.go")
+	runShell(".", goBin, "build", "-o", outputPath, "src/cmd/dialtone/main.go")
 	logger.LogInfo("Build successful: %s", outputPath)
 }
 
@@ -268,7 +268,7 @@ func buildWithPodman(arch, compiler string) {
 		"-e", "CGO_ENABLED=1",
 		"-e", "CC=" + strings.TrimPrefix(compiler, "gcc-") + "-gcc",
 		baseImage,
-		"bash", "-c", fmt.Sprintf("%sgo build -buildvcs=false -o bin/%s dialtone.go", installCmd, outputName),
+		"bash", "-c", fmt.Sprintf("%sgo build -buildvcs=false -o bin/%s src/cmd/dialtone/main.go", installCmd, outputName),
 	}
 
 	logger.LogInfo("Running: podman %v", buildCmd)
@@ -336,7 +336,7 @@ func BuildSelf() {
 		}
 	}
 
-	runShell(".", "go", "build", "-o", exePath, "dialtone.go")
+	runShell(".", "go", "build", "-o", exePath, "src/cmd/dialtone/main.go")
 	logger.LogInfo("Successfully built %s", exePath)
 }
 
