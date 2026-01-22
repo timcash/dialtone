@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"time"
 
+	"dialtone/cli/src/core/browser"
 	"dialtone/cli/src/core/ssh"
 	"github.com/chromedp/chromedp"
 )
@@ -123,8 +124,14 @@ func checkWebUI(url string) error {
 	)
 
 	// If on WSL, try to find Windows Chrome if Linux Chrome is missing
-	if chromePath := findChromePath(); chromePath != "" {
+	if chromePath := browser.FindChromePath(); chromePath != "" {
 		opts = append(opts, chromedp.ExecPath(chromePath))
+		opts = append(opts, chromedp.Flag("remote-debugging-address", "127.0.0.1"))
+	}
+
+	// Automated Cleanup: Kill any process on the target port to avoid connection refusal
+	if err := browser.CleanupPort(9222); err != nil {
+		fmt.Printf("Warning: Failed to cleanup port 9222: %v\n", err)
 	}
 
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
@@ -155,31 +162,3 @@ func checkWebUI(url string) error {
 	return nil
 }
 
-func findChromePath() string {
-	// Common Linux paths
-	paths := []string{
-		"/usr/bin/google-chrome",
-		"/usr/bin/chromium-browser",
-		"/usr/bin/chromium",
-	}
-
-	for _, p := range paths {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-
-	// WSL Paths to Windows Chrome
-	wslPaths := []string{
-		"/mnt/c/Program Files/Google/Chrome/Application/chrome.exe",
-		"/mnt/c/Program Files (x86)/Google/Chrome/Application/chrome.exe",
-	}
-
-	for _, p := range wslPaths {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-
-	return ""
-}
