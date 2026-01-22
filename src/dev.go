@@ -11,17 +11,17 @@ import (
 	"strings"
 	"time"
 
-	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
-	www_cli "dialtone/cli/src/plugins/www/cli"
-	plugin_cli "dialtone/cli/src/plugins/plugin/cli"
+	"dialtone/cli/src/core/ssh"
+	build_cli "dialtone/cli/src/plugins/build/cli"
+	chrome_cli "dialtone/cli/src/plugins/chrome/cli"
+	deploy_cli "dialtone/cli/src/plugins/deploy/cli"
 	github_cli "dialtone/cli/src/plugins/github/cli"
 	install_cli "dialtone/cli/src/plugins/install/cli"
-	build_cli "dialtone/cli/src/plugins/build/cli"
 	logs_cli "dialtone/cli/src/plugins/logs/cli"
-	deploy_cli "dialtone/cli/src/plugins/deploy/cli"
-	chrome_cli "dialtone/cli/src/plugins/chrome/cli"
 	mavlink_cli "dialtone/cli/src/plugins/mavlink/cli"
-	"dialtone/cli/src/core/ssh"
+	plugin_cli "dialtone/cli/src/plugins/plugin/cli"
+	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
+	www_cli "dialtone/cli/src/plugins/www/cli"
 )
 
 // ExecuteDev is the entry point for the dialtone-dev CLI
@@ -153,7 +153,7 @@ func runDocs(args []string) {
 
 	// 3. Format as markdown list
 	var markdownLines []string
-	markdownLines = append(markdownLines, "### Development CLI (`dialtone-dev.go`)")
+	markdownLines = append(markdownLines, "### Development CLI (`dialtone.sh`)")
 	markdownLines = append(markdownLines, "")
 
 	for i, cmdLine := range commands {
@@ -161,49 +161,49 @@ func runDocs(args []string) {
 		if len(parts) >= 2 {
 			cmdName := parts[0]
 			desc := strings.Join(parts[1:], " ")
-			markdownLines = append(markdownLines, fmt.Sprintf("%d. `go run dialtone-dev.go %s` — %s", i+1, cmdName, desc))
+			markdownLines = append(markdownLines, fmt.Sprintf("%d. `./dialtone.sh %s` — %s", i+1, cmdName, desc))
 
 			// Add examples based on command name
 			example := ""
 			switch cmdName {
 			case "install":
-				example = "go run dialtone-dev.go install --linux-wsl"
+				example = "./dialtone.sh install --linux-wsl"
 			case "build":
-				example = "go run dialtone-dev.go build --local"
+				example = "./dialtone.sh build --local"
 			case "deploy":
-				example = "go run dialtone-dev.go deploy"
+				example = "./dialtone.sh deploy"
 			case "clone":
-				example = "go run dialtone-dev.go clone ./dialtone"
+				example = "./dialtone.sh clone ./dialtone"
 			case "sync-code":
-				example = "go run dialtone-dev.go sync-code"
+				example = "./dialtone.sh sync-code"
 			case "ssh":
-				example = "go run dialtone-dev.go ssh download /tmp/log.txt"
+				example = "./dialtone.sh ssh download /tmp/log.txt"
 			case "provision":
-				example = "go run dialtone-dev.go provision"
+				example = "./dialtone.sh provision"
 			case "logs":
-				example = "go run dialtone-dev.go logs"
+				example = "./dialtone.sh logs"
 			case "diagnostic":
-				example = "go run dialtone-dev.go diagnostic --remote"
+				example = "./dialtone.sh diagnostic --remote"
 			case "branch":
-				example = "go run dialtone-dev.go branch my-feature"
+				example = "./dialtone.sh branch my-feature"
 			case "plan":
-				example = "go run dialtone-dev.go plan my-feature"
+				example = "./dialtone.sh plan my-feature"
 			case "test":
-				example = "go run dialtone-dev.go test my-feature"
+				example = "./dialtone.sh test my-feature"
 			case "pull-request":
-				example = "go run dialtone-dev.go pull-request --draft"
+				example = "./dialtone.sh pull-request --draft"
 			case "ticket":
-				example = "go run dialtone-dev.go ticket view 20"
+				example = "./dialtone.sh ticket view 20"
 			case "github":
-				example = "go run dialtone-dev.go github pull-request --draft"
+				example = "./dialtone.sh github pull-request --draft"
 			case "www":
-				example = "go run dialtone-dev.go www publish"
+				example = "./dialtone.sh www publish"
 			case "developer":
-				example = "go run dialtone-dev.go developer --capability camera"
+				example = "./dialtone.sh developer --capability camera"
 			case "subagent":
-				example = "go run dialtone-dev.go subagent --task features/fix-logic/task.md"
+				example = "./dialtone.sh subagent --task features/fix-logic/task.md"
 			case "docs":
-				example = "go run dialtone-dev.go docs"
+				example = "./dialtone.sh docs"
 			}
 
 			if example != "" {
@@ -422,13 +422,13 @@ func runBranch(args []string) {
 // runTest handles the test command
 func runTest(args []string) {
 	var testPackages []string
-	
+
 	if len(args) == 0 {
 		LogInfo("Running all tests (core, plugins, and tickets)...")
 		testPackages = []string{"./test/...", "./src/plugins/...", "./tickets/..."}
 	} else {
 		name := args[0]
-		
+
 		// Hierarchical Discovery:
 		// 1. Check tickets directory
 		ticketTestDir := filepath.Join("tickets", name, "test")
@@ -675,8 +675,6 @@ func TestE2E_BinaryExists(t *testing.T) {
 `, packageName, featureName, featureName, featureName)
 }
 
-
-
 // runTicket handles the ticket command
 func runTicket(args []string) {
 	if len(args) == 0 {
@@ -818,8 +816,6 @@ func runTicket(args []string) {
 		runTicket([]string{}) // Show usage
 	}
 }
-
-
 
 // runOpencode handles the opencode command
 func runOpencode(args []string) {

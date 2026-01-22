@@ -35,4 +35,4 @@ fi
 
 # Run the dialtone-dev tool
 # All other environment resolution and dependency checks happen in Go
-exec go run dialtone-dev.go "$@"
+exec go run src/cmd/dev/main.go "$@"
