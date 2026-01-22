@@ -116,8 +116,22 @@ func execCommand(name string, args ...string) (string, error) {
 }
 
 func checkWebUI(url string) error {
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.NoFirstRun,
+		chromedp.NoDefaultBrowserCheck,
+		chromedp.Headless,
+	)
+
+	// If on WSL, try to find Windows Chrome if Linux Chrome is missing
+	if chromePath := findChromePath(); chromePath != "" {
+		opts = append(opts, chromedp.ExecPath(chromePath))
+	}
+
+	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer cancel()
+
 	// Create context
-	ctx, cancel := chromedp.NewContext(context.Background())
+	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
 	// Create a timeout
@@ -139,4 +153,33 @@ func checkWebUI(url string) error {
 
 	fmt.Printf("Dashboard Title: %s\n", title)
 	return nil
+}
+
+func findChromePath() string {
+	// Common Linux paths
+	paths := []string{
+		"/usr/bin/google-chrome",
+		"/usr/bin/chromium-browser",
+		"/usr/bin/chromium",
+	}
+
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+
+	// WSL Paths to Windows Chrome
+	wslPaths := []string{
+		"/mnt/c/Program Files/Google/Chrome/Application/chrome.exe",
+		"/mnt/c/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+	}
+
+	for _, p := range wslPaths {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+
+	return ""
 }
