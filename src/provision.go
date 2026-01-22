@@ -40,8 +40,8 @@ func provisionKey(token string) {
 		"capabilities": map[string]interface{}{
 			"devices": map[string]interface{}{
 				"create": map[string]interface{}{
-					"reusable":      false,
-					"ephemeral":     true,
+					"reusable":      true,
+					"ephemeral":     false,
 					"preauthorized": true,
 				},
 			},

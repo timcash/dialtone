@@ -20,11 +20,12 @@ import (
 	"syscall"
 	"time"
 
+	mavlink "dialtone/cli/src/plugins/mavlink/app"
+
 	"github.com/bluenviron/gomavlib/v3/pkg/dialects/common"
 	"github.com/coder/websocket"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
-	mavlink "dialtone/cli/src/plugins/mavlink/app"
 	"tailscale.com/client/tailscale"
 	"tailscale.com/tsnet"
 )
@@ -153,123 +154,77 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 
 	// Start tsnet and wait for connection
 	LogInfo("Connecting to Tailscale...")
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
 	status, err := ts.Up(ctx)
 	if err != nil {
 		LogFatal("Failed to connect to Tailscale: %v", err)
 	}
+
+	for status == nil || len(status.TailscaleIPs) == 0 {
+		LogInfo("Waiting for Tailscale IP...")
+		time.Sleep(2 * time.Second)
+		status, err = ts.Up(ctx)
+		if err != nil {
+			LogFatal("Failed to connect to Tailscale: %v", err)
+		}
+		if ctx.Err() != nil {
+			LogFatal("Timed out waiting for Tailscale IP")
+		}
+	}
 	defer ts.Close()
 
-	// Log connection info
-	LogInfo("TSNet: Connected (IP: %s)", status.TailscaleIPs[0])
-	
+	// 1. Connection Logging
+	var ips []netip.Addr
+	displayHostname := hostname
+	if status != nil {
+		ips = status.TailscaleIPs
+		if status.Self != nil && status.Self.DNSName != "" {
+			displayHostname = strings.TrimSuffix(status.Self.DNSName, ".")
+		}
+	}
+
+	ipStr := "none"
+	if len(ips) > 0 {
+		ipStr = ips[0].String()
+	}
+	LogInfo("TSNet: Connected (IP: %s)", ipStr)
 	LogInfo("NATS: Connected")
 
-	// Start NATS on localhost only (not directly exposed)
-	localNATSPort := port + 10000 // Use offset port internally
+	// 2. Proxies and Services
+	localNATSPort := port + 10000
 	localWSPort := wsPort + 10000
 	ns := startNATSServer("127.0.0.1", localNATSPort, localWSPort, verbose)
 	defer ns.Shutdown()
 
-	// Start Mavlink service if requested (connect to LOCAL NATS port)
 	if mavlinkAddr != "" {
 		go startMavlink(mavlinkAddr, localNATSPort)
 	}
-
-	// Start NATS publisher loop for Mavlink
 	startNatsPublisher(localNATSPort)
 
-	// Listen on Tailscale network for NATS
-	natsLn, err := ts.Listen("tcp", fmt.Sprintf(":%d", port))
-	if err != nil {
-		LogFatal("Failed to listen on Tailscale for NATS: %v", err)
-	}
+	natsLn, _ := ts.Listen("tcp", fmt.Sprintf(":%d", port))
+	wsLn, _ := ts.Listen("tcp", fmt.Sprintf(":%d", wsPort))
+	webLn, _ := ts.Listen("tcp", fmt.Sprintf(":%d", webPort))
 	defer natsLn.Close()
-
-	// Listen on Tailscale network for NATS WebSockets
-	wsLn, err := ts.Listen("tcp", fmt.Sprintf(":%d", wsPort))
-	if err != nil {
-		LogFatal("Failed to listen on Tailscale for NATS WS: %v", err)
-	}
 	defer wsLn.Close()
-
-	LogInfo("NATS server available on Tailscale at %s:%d", hostname, port)
-	LogInfo("NATS WebSockets available on Tailscale at %s:%d", hostname, wsPort)
-	LogInfo("Connect using: nats://%s:%d or ws://%s:%d", hostname, port, hostname, wsPort)
-
-	// Start camera in background if available
-	go func() {
-		cameras, err := ListCameras()
-		if err != nil {
-			LogInfo("CAMERA: Failed to list devices: %v", err)
-			return
-		}
-		if len(cameras) > 0 {
-			LogInfo("Camera: Found %s", cameras[0].Device)
-			if err := StartCamera(context.Background(), cameras[0].Device); err != nil {
-				LogInfo("Camera: Failed to start %s: %v", cameras[0].Device, err)
-			}
-		} else {
-			LogInfo("Camera: No devices found")
-		}
-	}()
-
-	// Start proxies to forward Tailscale connections to local NATS
-	go ProxyListener(natsLn, fmt.Sprintf("127.0.0.1:%d", localNATSPort))
-	go ProxyListener(wsLn, fmt.Sprintf("127.0.0.1:%d", localWSPort))
-
-	// Start web server on Tailscale
-	webLn, err := ts.Listen("tcp", fmt.Sprintf(":%d", webPort))
-	if err != nil {
-		LogFatal("Failed to listen on Tailscale for web: %v", err)
-	}
 	defer webLn.Close()
 
-	// Start opencode proxy if requested
-	if opencode {
-		opencodeLn, err := ts.Listen("tcp", ":3000")
-		if err != nil {
-			LogInfo("Failed to listen on Tailscale for opencode: %v", err)
-		} else {
-			LogInfo("opencode available on Tailscale at %s:3000", hostname)
-			go ProxyListener(opencodeLn, "127.0.0.1:3000")
-			go runOpencodeServer(3000)
-		}
+	if natsLn != nil {
+		go ProxyListener(natsLn, fmt.Sprintf("127.0.0.1:%d", localNATSPort))
+	}
+	if wsLn != nil {
+		go ProxyListener(wsLn, fmt.Sprintf("127.0.0.1:%d", localWSPort))
 	}
 
-	// Get LocalClient for identifying callers
-	lc, err := ts.LocalClient()
-	if err != nil {
-		LogFatal("Failed to get LocalClient: %v", err)
-	}
+	// 3. Web Handler and Server
+	lc, _ := ts.LocalClient()
+	webHandler := CreateWebHandler(hostname, port, wsPort, webPort, ns, lc, ips)
 
-	// Create web handler
-	webHandler := CreateWebHandler(hostname, port, wsPort, webPort, ns, lc, status.TailscaleIPs)
-
-	// Start web server in goroutine
 	go func() {
-		// Use full DNS name from Tailscale status if available
-		displayHostname := hostname
-		if status.Self != nil && status.Self.DNSName != "" {
-			displayHostname = strings.TrimSuffix(status.Self.DNSName, ".")
-		} else {
-			// Fallback: try CertDomains
-			domains := ts.CertDomains()
-			if len(domains) > 0 {
-				displayHostname = domains[0]
-			}
-		}
-
 		LogInfo("Web UI: Serving at http://%s:%d", displayHostname, webPort)
-		
-		// If Mavlink is running, it will log its heartbeat when received.
-		// For now, let's just log "System Operational" after all key services are initialized.
-		// Wait a bit to ensure async services like camera/mavlink have a chance to log their status.
 		time.Sleep(2 * time.Second)
 		LogInfo("[SUCCESS] System Operational")
-
 		if err := http.Serve(webLn, webHandler); err != nil {
 			LogInfo("Web server error: %v", err)
 		}
@@ -450,7 +405,7 @@ func startMavlink(endpoint string, natsPort int) {
 		}
 
 		LogInfo("MAVLINK: Subscribed to rover.command")
-		
+
 		heartbeatLogged := false
 		nc.Subscribe("mavlink.heartbeat", func(m *nats.Msg) {
 			if !heartbeatLogged {
@@ -718,27 +673,27 @@ func formatIPs(ips []netip.Addr) string {
 
 // runOpencodeServer starts the opencode AI assistant server
 func runOpencodeServer(port int) {
-opencodePath := os.ExpandEnv("$HOME/.opencode/bin/opencode")
-if _, err := os.Stat(opencodePath); os.IsNotExist(err) {
-LogInfo("opencode binary not found at %s, skipping...", opencodePath)
-return
-}
+	opencodePath := os.ExpandEnv("$HOME/.opencode/bin/opencode")
+	if _, err := os.Stat(opencodePath); os.IsNotExist(err) {
+		LogInfo("opencode binary not found at %s, skipping...", opencodePath)
+		return
+	}
 
-LogInfo("Starting opencode server on port %d...", port)
-cmd := exec.Command(opencodePath, "--port", fmt.Sprintf("%d", port))
+	LogInfo("Starting opencode server on port %d...", port)
+	cmd := exec.Command(opencodePath, "--port", fmt.Sprintf("%d", port))
 
-// Create log file
-logFile, err := os.OpenFile("opencode.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-if err != nil {
-LogInfo("Failed to create opencode log file: %v", err)
-return
-}
-defer logFile.Close()
+	// Create log file
+	logFile, err := os.OpenFile("opencode.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		LogInfo("Failed to create opencode log file: %v", err)
+		return
+	}
+	defer logFile.Close()
 
-cmd.Stdout = logFile
-cmd.Stderr = logFile
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
 
-if err := cmd.Run(); err != nil {
-LogInfo("opencode server exited: %v", err)
-}
+	if err := cmd.Run(); err != nil {
+		LogInfo("opencode server exited: %v", err)
+	}
 }
