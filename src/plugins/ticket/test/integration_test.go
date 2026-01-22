@@ -15,21 +15,21 @@ func TestIntegration_TicketStartScaffolding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get working directory: %v", err)
 	}
-	
+
 	// Assuming we run this from project root or having access to dialtone-dev.go
 	// However, tests are usually run from the package directory.
 	// We need to locate dialtone-dev.go.
 	// Let's assume project root is 4 levels up from src/plugins/ticket/test
 	projectRoot := filepath.Join(cwd, "../../../..")
-	dialtoneDev := filepath.Join(projectRoot, "dialtone-dev.go")
-	
+	dialtoneDev := filepath.Join(projectRoot, "src/cmd/dev/main.go")
+
 	if _, err := os.Stat(dialtoneDev); os.IsNotExist(err) {
 		// Fallback: maybe we are running from project root
-		if _, err := os.Stat("dialtone-dev.go"); err == nil {
+		if _, err := os.Stat("src/cmd/dev/main.go"); err == nil {
 			projectRoot = "."
-			dialtoneDev = "dialtone-dev.go"
+			dialtoneDev = "src/cmd/dev/main.go"
 		} else {
-			t.Skip("Could not locate dialtone-dev.go for integration test")
+			t.Skip("Could not locate src/cmd/dev/main.go for integration test")
 		}
 	}
 
@@ -59,7 +59,7 @@ func TestIntegration_TicketStartScaffolding(t *testing.T) {
 			t.Errorf("Expected file not found: %s", fullPath)
 		}
 	}
-	
+
 	// 4. Verify Content (Simple check)
 	unitTestPath := filepath.Join(projectRoot, "tickets", ticketName, "test", "unit_test.go")
 	content, err := os.ReadFile(unitTestPath)
@@ -78,17 +78,17 @@ func TestIntegration_TicketDoneStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get working directory: %v", err)
 	}
-	
+
 	projectRoot := filepath.Join(cwd, "../../../..")
-	dialtoneDev := filepath.Join(projectRoot, "dialtone-dev.go")
-	
+	dialtoneDev := filepath.Join(projectRoot, "src/cmd/dev/main.go")
+
 	if _, err := os.Stat(dialtoneDev); os.IsNotExist(err) {
 		// Fallback
-		if _, err := os.Stat("dialtone-dev.go"); err == nil {
+		if _, err := os.Stat("src/cmd/dev/main.go"); err == nil {
 			projectRoot = "."
-			dialtoneDev = "dialtone-dev.go"
+			dialtoneDev = "src/cmd/dev/main.go"
 		} else {
-			t.Skip("Could not locate dialtone-dev.go for integration test")
+			t.Skip("Could not locate src/cmd/dev/main.go for integration test")
 		}
 	}
 
@@ -108,7 +108,7 @@ func TestIntegration_TicketDoneStatus(t *testing.T) {
 	if err := os.WriteFile(ticketMd, incompleteContent, 0644); err != nil {
 		t.Fatalf("Failed to create incomplete ticket.md: %v", err)
 	}
-	
+
 	// Create dummy test file so "go test" doesn't fail due to no files
 	dummyTest := filepath.Join(testDir, "dummy_test.go")
 	dummyContent := []byte("package test\nimport \"testing\"\nfunc TestDummy(t *testing.T) { t.Log(\"Dummy\") }\n")
@@ -142,6 +142,6 @@ func cleanup(t *testing.T, root, ticketName string) {
 	if err := os.RemoveAll(ticketDir); err != nil {
 		t.Logf("Failed to cleanup %s: %v", ticketDir, err)
 	}
-	// Also delete branch if possible, but might fail if active. 
+	// Also delete branch if possible, but might fail if active.
 	// Ignoring git branch cleanup for simplicity in this test as it runs local commands.
 }

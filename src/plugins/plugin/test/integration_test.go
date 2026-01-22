@@ -14,11 +14,11 @@ func TestIntegration_PluginCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get CWD: %v", err)
 	}
-	
+
 	// We are in src/plugins/plugin/test
 	// Root is ../../../..
 	rootDir := filepath.Join(cwd, "..", "..", "..", "..")
-	
+
 	pluginDir := filepath.Join(rootDir, "src", "plugins", pluginName)
 	os.RemoveAll(pluginDir)
 	defer os.RemoveAll(pluginDir)
@@ -28,8 +28,8 @@ func TestIntegration_PluginCreate(t *testing.T) {
 	// Since we can't easily import the main package's private functions, we run the CLI
 	// Ideally we would refactor plugin.go to have a public CreatePlugin function to test directly.
 	// For now, testing via CLI execution is a valid integration test.
-	
-	cmd := exec.Command("go", "run", "dialtone-dev.go", "plugin", "create", pluginName)
+
+	cmd := exec.Command("go", "run", "src/cmd/dev/main.go", "plugin", "create", pluginName)
 	cmd.Dir = rootDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {

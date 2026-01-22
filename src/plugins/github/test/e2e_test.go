@@ -32,7 +32,7 @@ func TestE2E_CreateAndCleanupPR(t *testing.T) {
 	// 2. Setup: Create a unique branch and commit
 	timestamp := time.Now().Format("20060102-150405")
 	branchName := fmt.Sprintf("e2e-test-pr-%s", timestamp)
-	
+
 	// Get current branch to return to later
 	cmd := exec.Command("git", "branch", "--show-current")
 	output, err := cmd.Output()
@@ -40,7 +40,7 @@ func TestE2E_CreateAndCleanupPR(t *testing.T) {
 		t.Fatalf("Failed to get current branch: %v", err)
 	}
 	originalBranch := strings.TrimSpace(string(output))
-	
+
 	// Checkout new branch
 	if err := exec.Command("git", "checkout", "-b", branchName).Run(); err != nil {
 		t.Fatalf("Failed to create branch %s: %v", branchName, err)
@@ -61,60 +61,60 @@ func TestE2E_CreateAndCleanupPR(t *testing.T) {
 	// This file is in src/plugins/github/test/
 	// dialtone-dev.go is in src/
 	// So we need to go up 3 levels: ../../../
-	
+
 	cwd, _ := os.Getwd()
 	projectRoot := filepath.Join(cwd, "..", "..", "..") // src/plugins/github/test -> src/plugins/github -> src/plugins -> src
-	
-	// Verify dialtone-dev.go exists
-	devGo := filepath.Join(projectRoot, "dialtone-dev.go")
+
+	// Verify dev entry point exists
+	devGo := filepath.Join(projectRoot, "src/cmd/dev/main.go")
 	if _, err := os.Stat(devGo); os.IsNotExist(err) {
 		// Try one more level up if cwd logic is tricky or if run from root
 		// If running from root, cwd is root.
-		if _, err := os.Stat("dialtone-dev.go"); err == nil {
+		if _, err := os.Stat("src/cmd/dev/main.go"); err == nil {
 			projectRoot = "."
 		} else {
-             // Try standard relative path from repo root
-             projectRoot = "../../../.."
-        }
+			// Try standard relative path from repo root
+			projectRoot = "../../../.."
+		}
 	}
-    
-    // Harder to reliably find project root from test execution context without more info,
-    // assuming standard execution from repo root:
-    // dialtone-dev.go is at root of repo (based on previous view_file of dev.go location? No, dev.go is in src/dev.go, dialtone-dev.go is likely at root based on usage in docs)
-    // Wait, dev.go is in `src/dev.go`. `dialtone-dev.go` is usually the wrapper at the top.
-    // Let's assume we can run `go run src/dev.go` if we are at repo root.
-    // If the test runner runs from package dir, we need to find repo root.
-    
-    // Let's look for "dialtone-dev.go" by walking up.
-    root := findRepoRoot(t)
-    
+
+	// Harder to reliably find project root from test execution context without more info,
+	// assuming standard execution from repo root:
+	// dialtone-dev.go is at root of repo (based on previous view_file of dev.go location? No, dev.go is in src/dev.go, dialtone-dev.go is likely at root based on usage in docs)
+	// Wait, dev.go is in `src/dev.go`. `dialtone-dev.go` is usually the wrapper at the top.
+	// Let's assume we can run `go run src/dev.go` if we are at repo root.
+	// If the test runner runs from package dir, we need to find repo root.
+
+	// Let's look for "dialtone-dev.go" by walking up.
+	root := findRepoRoot(t)
+
 	t.Logf("Repo root determined as: %s", root)
 
 	// Command: go run dialtone-dev.go github pull-request --title "E2E Test PR" --body "This is an auto-generated test PR."
-    // Note: gh pr create might prompt for push. We should probably push first to be safe, OR rely on gh behavior but it might be interactive.
-    // `gh pr create` has `--head` but typically it pushes for you if you answer yes.
-    // To make it non-interactive, `gh` usually handles it if we push first.
-    
-    // Push the branch first
-    t.Log("Pushing branch to remote...")
-    if err := exec.Command("git", "push", "origin", branchName).Run(); err != nil {
-        t.Fatalf("Failed to push branch: %v. Ensure you have write access and origin is set.", err)
-    }
-    // Defer remote branch deletion
-    defer func() {
-        exec.Command("git", "push", "origin", "--delete", branchName).Run()
-    }()
+	// Note: gh pr create might prompt for push. We should probably push first to be safe, OR rely on gh behavior but it might be interactive.
+	// `gh pr create` has `--head` but typically it pushes for you if you answer yes.
+	// To make it non-interactive, `gh` usually handles it if we push first.
 
-	cmd = exec.Command("go", "run", "dialtone-dev.go", "github", "pull-request", 
+	// Push the branch first
+	t.Log("Pushing branch to remote...")
+	if err := exec.Command("git", "push", "origin", branchName).Run(); err != nil {
+		t.Fatalf("Failed to push branch: %v. Ensure you have write access and origin is set.", err)
+	}
+	// Defer remote branch deletion
+	defer func() {
+		exec.Command("git", "push", "origin", "--delete", branchName).Run()
+	}()
+
+	cmd = exec.Command("go", "run", "src/cmd/dev/main.go", "github", "pull-request",
 		"--title", fmt.Sprintf("E2E Test PR %s", timestamp),
 		"--body", "This is an auto-generated test PR from dialtone-dev E2E test.")
 	cmd.Dir = root
-	
+
 	t.Log("Running dialtone-dev github pull-request...")
 	out, err := cmd.CombinedOutput()
 	outputStr := string(out)
 	t.Logf("Output: %s", outputStr)
-	
+
 	if err != nil {
 		t.Fatalf("dialtone-dev command failed: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestE2E_CreateAndCleanupPR(t *testing.T) {
 	// `gh pr close` without args assumes current branch. And `gh` sometimes complains about deleting Checked out branch.
 	// But we are on the branch.
 	// Let's pass prNumber and --delete-branch explicitly.
-	cmdClose := exec.Command("go", "run", "dialtone-dev.go", "github", "pull-request", "close", prNumber, "--delete-branch")
+	cmdClose := exec.Command("go", "run", "src/cmd/dev/main.go", "github", "pull-request", "close", prNumber, "--delete-branch")
 	cmdClose.Dir = root
 	if out, err := cmdClose.CombinedOutput(); err != nil {
 		t.Logf("Failed to close PR via dialtone-dev (might already be closed or logic error): %v. Output: %s", err, out)
@@ -147,18 +147,18 @@ func TestE2E_CreateAndCleanupPR(t *testing.T) {
 }
 
 func findRepoRoot(t *testing.T) string {
-    dir, _ := os.Getwd()
-    for {
-        if _, err := os.Stat(filepath.Join(dir, "dialtone-dev.go")); err == nil {
-            return dir
-        }
-        parent := filepath.Dir(dir)
-        if parent == dir {
-            break
-        }
-        dir = parent
-    }
-    // Fallback/Fail
-    t.Fatalf("Could not find repo root (containing dialtone-dev.go)")
-    return ""
+	dir, _ := os.Getwd()
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "src/cmd/dev/main.go")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	// Fallback/Fail
+	t.Fatalf("Could not find repo root (containing src/cmd/dev/main.go)")
+	return ""
 }
