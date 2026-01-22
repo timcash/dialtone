@@ -25,8 +25,6 @@ Dialtone supports the following connection types (powered by `gomavlib`):
 - **UDP Server**: `udp:0.0.0.0:14550` (Listens for incoming packets)
 - **TCP Client**: `tcp:127.0.0.1:5760` (Connects to a TCP server, e.g., SITL)
 
-### Deployment (.env)
-For remote deployment, set the `MAVLINK_ENDPOINT` variable in your `.env` file:
 
 ```bash
 # .env
@@ -35,13 +33,6 @@ MAVLINK_ENDPOINT=serial:/dev/ttyAMA0:57600
 
 This is automatically picked up by the `dialtone deploy` command, which passes it as a flag to the remote instance.
 
-### CLI Usage
-You can also run it manually via the CLI:
-
-```bash
-# Run locally with a UDP listener
-./dialtone start -mavlink udp:0.0.0.0:14550
-```
 
 ## NATS API
 
