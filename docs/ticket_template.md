@@ -1,35 +1,70 @@
-# Ticket Improvement Task
-1. This is a method to improve and extend tickets
-2. Tickets may start as simple notes or ideas dictacted to a noisy room
-2. Always focus on building subtasks that can be tested with simple golang code
-3. Use Test Driven Development Terminology and Techniques to guide Large Language Models
+# Ticket Improvement Guide for LLMs
 
+This guide outlines how to build robust, testable features for the Dialtone project.
 
-## Example of a quick ticket that needs to be improved
-== BEGIN EXAMPLE TICKET ==
-```markdown
-# Branch: jax-demo-plugin
-# Task: Implement a simple JAX plugin
-# 
+## Core Philosophy
+1. **Test-First Development**: Always define subtasks that can be verified with Go tests.
+2. **Atomic Steps**: Break complex features into small, testable units.
+3. **Implicit Context**: Assume the LLM has no prior knowledge. Include explicit CLI commands.
 
-## Subtask
-1. go to this url and read the docs https://docs.jax.dev/en/latest/notebooks/thinking_in_jax.html
-2. using a geospatial theme and dataset (you can create fake data) 
-3. create an outline of the plugin and what it will demonstrate
-4. DO NOT CODE yet just make the outline
+## How to use the `dialtone.sh` CLI for development
 
-use the template ticket at `./tickets/template-ticket/ticket.md` to guide improvements to this ticket 
-
-think about how that pluging could be build step by step using tests to guide the work. 
-
-then fill in a new ticket. you can put code samples in the markdown 
-
-also add docs to `./docs/vendor/jax.md` about jax to help future work as you go
-
-also mention that the user should use `pixi` and python to do the code learn more about pixi here @pixi.md 
-
-tests are always written in golang
-
-make sure the subtasks can be used to guide a Large Language Model
+### 1. Installation & Setup (macOS ARM)
+```bash
+./dialtone.sh install --macos-arm # Install tools
+./dialtone.sh install --check     # Verify installation
 ```
-== END EXAMPLE TICKET ==
+
+### 2. Running Tests
+Tests are your primary feedback loop.
+- **Ticket Tests**: `./dialtone.sh ticket test <ticket-name>` (Runs tests in `tickets/<name>/test/`)
+- **Plugin Tests**: `./dialtone.sh plugin test <plugin-name>` (Runs tests in `src/plugins/<name>/test/`)
+- **Feature Tests**: `./dialtone.sh test <feature-name>` (Discovery across core, plugins, and tickets)
+- **All Tests**: `./dialtone.sh test`
+
+### 3. Build & Deploy
+```bash
+./dialtone.sh build --full  # Build Web UI + local CLI + robot binary
+./dialtone.sh deploy        # Push to remote robot
+./dialtone.sh diagnostic    # Run health checks
+./dialtone.sh logs --remote # Stream remote logs
+```
+
+## Code Style: Linear Pipelines
+Avoid "pyramid" nesting. Keep the main path of execution on the left margin.
+
+```go
+func HandleRequest(ctx *RequestContext) *RequestContext {
+    authResult := auth(ctx)
+    if authResult == nil {
+        ctx.Error = errors.New("auth failed")
+        return ctx
+    }
+
+    ctx.Database1Result = database1(ctx, authResult)
+    ctx.Database2Result = database2(ctx, ctx.Database1Result)
+    return ctx
+}
+```
+
+**Style Rules:**
+1. Use the project logger: `dialtone.LogInfo`, `dialtone.LogError`, `dialtone.LogFatal`.
+2. Prefer functions and structs over complicated patterns.
+3. Keep functions short and single-purpose.
+4. Name variables descriptively.
+
+## Logging
+Always use the project logger from `src/logger.go`:
+```go
+dialtone.LogInfo("Starting capture")
+dialtone.LogError("Failed to connect: %v", err)
+dialtone.LogFatal("Unrecoverable error: %v", err) // Exits program
+```
+
+## Example #SUBTASK Format
+```markdown
+## #SUBTASK: Environment Check
+- description: Verify V4L2 headers exist in the environment.
+- test: Create `TestV4L2Headers` in `tickets/<name>/test/unit_test.go` using `os.Stat`.
+- status: todo
+```

@@ -1,63 +1,35 @@
-# Branch: ticket-short-name (do not use / in the branch name they become folders, only use -)
+# Branch: ticket-short-name (Use - only, no /)
 # Task: [Ticket Title]
 
-> IMPORTANT: See `README.md` for the full ticket lifecycle and development workflow.
-> Run `./dialtone.sh ticket start <this-file>` to start work.
-> Run `./dialtone.sh plugin create <plugin-name>` to create a new plugin if this ticket is about a plugin
-> Run `./dialtone.sh github pull-request` to create a draft pull request
+> [!IMPORTANT]
+> See `README.md`, `docs/workflow.md` and `docs/ticket_template.md` for lifecycle docs.
+> Run `./dialtone.sh ticket start <ticket-name>` to begin.
 
-## Goals
-1. Use tests files in `ticket/<ticket-name>/test/` to drive all work
-2. [item 2]
-3. [item 3]
+## #CAPABILITY: [e.g. Camera, Bus, AI]
+List the core systems this ticket interacts with.
 
-## Non-Goals
-1. DO NOT use manual shell commands to verify functionality.
-2. DO NOT [item 2]
-3. DO NOT [item 3]
+## #GOALS
+1. Use TDD: Update/Create tests in `tickets/<ticket-name>/test/` first.
+2. Follow **Linear Pipeline** style (avoid nested pyramids).
+3. Use the `dialtone` logging package for all output.
 
-## Test
-1. **Ticket Tests**: Run tests specific to this ticket's implementation.
-   ```bash
-   ./dialtone.sh ticket test <ticket-name>
-   ```
-2. **Plugin Tests**: If this ticket involves a plugin, run its specific tests.
-   ```bash
-   ./dialtone.sh plugin test <plugin-name>
-   ```
-3. **Feature Tests**: Run tests for a specific feature, which searches through tickets, plugins, and core tests.
-   ```bash
-   ./dialtone.sh test <feature-name>
-   ```
-4. **All Tests**: Run the entire test suite (core, plugins, and tickets).
-   ```bash
-   ./dialtone.sh test
-   ```
-
-## Logging
-1. Use the `src/logger.go` package to log messages.
-2. Use logs to help debug and understand the code.
-
-## Subtask: Research
-- description: [List files to explore, documentation to read, or concepts to understand]
-- test: [How to verify this research informed the work]
+## #SUBTASK: Research
+- description: Explore relevant files and documentation.
+- test: Create a failing unit test in `tickets/<ticket-name>/test/unit_test.go`.
 - status: todo
 
-## Subtask: Implementation
-- description: [NEW/MODIFY] [file_path]: [Short description of change]
-- test: [What test or check proves this subtask works]
+## #SUBTASK: Implementation
+- description: [MODIFY/NEW] Implement functionality using short, descriptive functions.
+- test: Run `./dialtone.sh ticket test <ticket-name>`.
 - status: todo
 
-## Subtask: Verification
-- description: Run test: `./dialtone.sh test`
-- test: [Expected outcome or artifact to confirm success]
+## #SUBTASK: Final Verification
+- description: Run full system build and all tests.
+- test: Run `./dialtone.sh build --full && ./dialtone.sh test`.
 - status: todo
 
 ## Collaborative Notes
-[A place for humans and the autocoder to share research, technical decisions, or state between context windows.]
-
-## Tools and Tips for writing great tickets
-1. Use this file as a template for writing tickets
+[Record research, technical decisions, and cross-session state here.]
 
 ---
-Template version: 5.0. To start work: `./dialtone.sh ticket start <this-file>`
+Template version: 7.0. Start work: `./dialtone.sh ticket start <ticket-name>`
