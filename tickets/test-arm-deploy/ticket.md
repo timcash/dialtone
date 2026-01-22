@@ -48,22 +48,27 @@
 ## Subtask: Research
 - description: Analyze `src/deploy.go` and `src/plugins/install/cli/install.go` for existing remote SSH patterns.
 - test: Summarize findings in Collaborative Notes.
-- status: todo
+- status: done
 
 ## Subtask: Implementation (Logs)
 - description: [NEW] `src/plugins/logs/cli/logs.go`: Implement `dialtone logs --remote` to stream logs from the remote service (e.g., using `journalctl` or reading a log file via SSH).
 - test: `dialtone logs --remote` shows live logs from the robot.
-- status: todo
+- status: done
 
 ## Subtask: Implementation (Deploy)
 - description: [MODIFY] `src/deploy.go`: Implement architecture auto-detection. Upload only the binary and required assets (Web UI). Do not install Go/Node. Restart service.
 - test: Deploy completes quickly by just moving the binary.
+- status: done
+
+## Subtask: Implementation (Diagnostic)
+- description: [MODIFY] `src/diagnostic.go`: Integrate `github.com/chromedp/chromedp` to visit the robot's Web UI (via Tailscale IP) and verify the dashboard title/content.
+- test: `dialtone diagnostic` reports success for Web UI verification.
 - status: todo
 
-## Subtask: Verification
-- description: Boot the deployed binary and verify all subsystems via `dialtone logs --remote`.
-- test: Logs match the "Startup Verification Logs" format specified above.
-- status: todo
+## Subtask: Web UI Verification
+- description: Verify Web UI is reachable over Tailscale network at `http://drone_1`.
+- test: Browser successfully loads the Dialtone dashboard at the Tailscale URL.
+- status: done
 
 ## Collaborative Notes
 - Remote robots often use 32-bit ARM (`linux-arm`) for older Pi models (ZeroW) and 64-bit (`linux-arm64`) for Pi 4/5. 

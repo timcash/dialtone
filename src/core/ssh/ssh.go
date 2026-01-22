@@ -1,7 +1,6 @@
-package dialtone
+package ssh
 
 import (
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +10,8 @@ import (
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+	"dialtone/cli/src/core/logger"
+	"flag"
 )
 
 // RunSSH handles general SSH tools (upload, download, cmd)
@@ -28,19 +29,19 @@ func RunSSH(args []string) {
 	fs.Parse(args)
 
 	if *host == "" || *pass == "" {
-		LogFatal("Error: -host and -pass are required for SSH tools")
+		logger.LogFatal("Error: -host and -pass are required for SSH tools")
 	}
 
 	client, err := DialSSH(*host, *port, *user, *pass)
 	if err != nil {
-		LogFatal("SSH connection failed: %v", err)
+		logger.LogFatal("SSH connection failed: %v", err)
 	}
 	defer client.Close()
 
 	if *cmd != "" {
 		output, err := RunSSHCommand(client, *cmd)
 		if err != nil {
-			LogFatal("Command failed: %v", err)
+			logger.LogFatal("Command failed: %v", err)
 		}
 		fmt.Print(output)
 	}
@@ -49,20 +50,20 @@ func RunSSH(args []string) {
 		if *dest == "" {
 			*dest = filepath.Base(*upload)
 		}
-		if err := uploadFile(client, *upload, *dest); err != nil {
-			LogFatal("Upload failed: %v", err)
+		if err := UploadFile(client, *upload, *dest); err != nil {
+			logger.LogFatal("Upload failed: %v", err)
 		}
-		LogInfo("Uploaded %s to %s", *upload, *dest)
+		logger.LogInfo("Uploaded %s to %s", *upload, *dest)
 	}
 
 	if *download != "" {
 		if *localDest == "" {
 			*localDest = filepath.Base(*download)
 		}
-		if err := downloadFile(client, *download, *localDest); err != nil {
-			LogFatal("Download failed: %v", err)
+		if err := DownloadFile(client, *download, *localDest); err != nil {
+			logger.LogFatal("Download failed: %v", err)
 		}
-		LogInfo("Downloaded %s to %s", *download, *localDest)
+		logger.LogInfo("Downloaded %s to %s", *download, *localDest)
 	}
 }
 
@@ -106,7 +107,7 @@ func RunSSHCommand(client *ssh.Client, cmd string) (string, error) {
 	return string(output), nil
 }
 
-func runSSHCommandNoWait(client *ssh.Client, cmd string) error {
+func RunSSHCommandNoWait(client *ssh.Client, cmd string) error {
 	session, err := client.NewSession()
 	if err != nil {
 		return fmt.Errorf("failed to create session: %w", err)
@@ -123,7 +124,7 @@ func runSSHCommandNoWait(client *ssh.Client, cmd string) error {
 	return nil
 }
 
-func uploadFile(client *ssh.Client, localPath, remotePath string) error {
+func UploadFile(client *ssh.Client, localPath, remotePath string) error {
 	sftpClient, err := sftp.NewClient(client)
 	if err != nil {
 		return fmt.Errorf("failed to create SFTP client: %w", err)
@@ -156,8 +157,8 @@ func uploadFile(client *ssh.Client, localPath, remotePath string) error {
 	return nil
 }
 
-func uploadDir(client *ssh.Client, localDir, remoteDir string) {
-	LogInfo("Uploading directory %s to %s...", localDir, remoteDir)
+func UploadDir(client *ssh.Client, localDir, remoteDir string) {
+	logger.LogInfo("Uploading directory %s to %s...", localDir, remoteDir)
 
 	sftpClient, err := sftp.NewClient(client)
 	if err != nil {
@@ -205,7 +206,7 @@ func uploadDir(client *ssh.Client, localDir, remoteDir string) {
 	})
 }
 
-func downloadFile(client *ssh.Client, remotePath, localPath string) error {
+func DownloadFile(client *ssh.Client, remotePath, localPath string) error {
 	sftpClient, err := sftp.NewClient(client)
 	if err != nil {
 		return fmt.Errorf("failed to create SFTP client: %w", err)
@@ -232,7 +233,7 @@ func downloadFile(client *ssh.Client, remotePath, localPath string) error {
 	return nil
 }
 
-func getRemoteHome(client *ssh.Client) (string, error) {
+func GetRemoteHome(client *ssh.Client) (string, error) {
 	output, err := RunSSHCommand(client, "echo $HOME")
 	if err != nil {
 		return "", err
@@ -240,10 +241,10 @@ func getRemoteHome(client *ssh.Client) (string, error) {
 	return strings.TrimSpace(output), nil
 }
 
-func uploadDirFiltered(client *ssh.Client, localDir, remoteDir string, ignore []string) {
+func UploadDirFiltered(client *ssh.Client, localDir, remoteDir string, ignore []string) {
 	sftpClient, err := sftp.NewClient(client)
 	if err != nil {
-		LogInfo("Failed to create SFTP client: %v", err)
+		logger.LogInfo("Failed to create SFTP client: %v", err)
 		return
 	}
 	defer sftpClient.Close()
@@ -253,7 +254,7 @@ func uploadDirFiltered(client *ssh.Client, localDir, remoteDir string, ignore []
 
 	entries, err := os.ReadDir(localDir)
 	if err != nil {
-		LogFatal("Failed to read local dir %s: %v", localDir, err)
+		logger.LogFatal("Failed to read local dir %s: %v", localDir, err)
 	}
 
 	for _, entry := range entries {
@@ -274,23 +275,23 @@ func uploadDirFiltered(client *ssh.Client, localDir, remoteDir string, ignore []
 		dstPath = filepath.ToSlash(dstPath)
 
 		if entry.IsDir() {
-			uploadDirFiltered(client, srcPath, dstPath, ignore)
+			UploadDirFiltered(client, srcPath, dstPath, ignore)
 		} else {
 			// Upload file
 			localFile, err := os.Open(srcPath)
 			if err != nil {
-				LogFatal("Failed to open %s: %v", srcPath, err)
+				logger.LogFatal("Failed to open %s: %v", srcPath, err)
 			}
 			defer localFile.Close()
 
 			remoteFile, err := sftpClient.Create(dstPath)
 			if err != nil {
-				LogFatal("Failed to create remote file %s: %v", dstPath, err)
+				logger.LogFatal("Failed to create remote file %s: %v", dstPath, err)
 			}
 			defer remoteFile.Close()
 
 			if _, err := io.Copy(remoteFile, localFile); err != nil {
-				LogFatal("Failed to copy %s: %v", srcPath, err)
+				logger.LogFatal("Failed to copy %s: %v", srcPath, err)
 			}
 		}
 	}
