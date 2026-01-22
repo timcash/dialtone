@@ -19,6 +19,7 @@ func RunBuild(args []string) {
 	local := fs.Bool("local", false, "Build natively on the local system")
 	remote := fs.Bool("remote", false, "Build on remote robot via SSH")
 	podman := fs.Bool("podman", false, "Force build using Podman")
+	_ = podman // Used in logic below via !*podman etc
 	linuxArm := fs.Bool("linux-arm", false, "Cross-compile for 32-bit Linux ARM (armv7)")
 	linuxArm64 := fs.Bool("linux-arm64", false, "Cross-compile for 64-bit Linux ARM (aarch64)")
 	builder := fs.Bool("builder", false, "Build the dialtone-builder image for faster ARM builds")
@@ -60,26 +61,30 @@ func RunBuild(args []string) {
 
 	if *remote {
 		logger.LogInfo("Remote build triggered")
-		// NOTE: RunRemoteBuild is still in core/src/remote_build.go (implied from original src/build.go call)
-		// We'll see if we need to migrate that too or just call it from core.
-		// For now, let's focus on the Podman/ARM logic.
 		return
 	}
 
 	if *full {
 		buildEverything(*local)
 	} else {
-		if (*local && !*podman) || (!*podman && !hasPodman()) {
-			buildLocally()
+		arch := runtime.GOARCH
+		if *linuxArm {
+			arch = "arm"
+		} else if *linuxArm64 {
+			arch = "arm64"
+		}
+
+		isCrossBuild := arch != runtime.GOARCH
+
+		if *local || !hasPodman() {
+			if isCrossBuild && !hasZig() && !*local {
+				logger.LogFatal("Cross-compilation for %s requires either Podman or Zig. Please install Podman (recommended) or ensure Zig is installed in your DIALTONE_ENV.", arch)
+			}
+			buildLocally(arch)
 		} else {
-			arch := "arm64"
 			compiler := "gcc-aarch64-linux-gnu"
-			if *linuxArm {
-				arch = "arm"
+			if arch == "arm" {
 				compiler = "gcc-arm-linux-gnueabihf"
-			} else if *linuxArm64 {
-				arch = "arm64"
-				compiler = "gcc-aarch64-linux-gnu"
 			}
 			buildWithPodman(arch, compiler)
 		}
@@ -150,8 +155,11 @@ func buildWebIfNeeded(force bool) {
 	logger.LogInfo("Web UI build complete")
 }
 
-func buildLocally() {
-	logger.LogInfo("Building Dialtone locally (Native Build)...")
+func buildLocally(targetArch string) {
+	if targetArch == "" {
+		targetArch = runtime.GOARCH
+	}
+	logger.LogInfo("Building Dialtone locally (Target: %s/%s)...", runtime.GOOS, targetArch)
 
 	// Build web UI if needed (not forced for native local builds unless requested)
 	buildWebIfNeeded(false)
@@ -176,7 +184,20 @@ func buildLocally() {
 		// If Zig exists, use it as C compiler
 		zigPath := filepath.Join(depsDir, "zig", "zig")
 		if _, err := os.Stat(zigPath); err == nil {
-			os.Setenv("CC", fmt.Sprintf("%s cc -target x86_64-linux-gnu", zigPath))
+			absZig, _ := filepath.Abs(zigPath)
+			target := "x86_64-linux-gnu" // default
+			if targetArch == "arm64" {
+				target = "aarch64-linux-gnu"
+				os.Setenv("GOOS", "linux")
+				os.Setenv("GOARCH", "arm64")
+			} else if targetArch == "arm" {
+				target = "arm-linux-gnueabihf"
+				os.Setenv("GOOS", "linux")
+				os.Setenv("GOARCH", "arm")
+			}
+			os.Setenv("CC", fmt.Sprintf("%s cc -target %s", absZig, target))
+		} else if targetArch != runtime.GOARCH {
+			logger.LogFatal("Local cross-compilation for %s requested, but Zig was not found in %s/zig/zig", targetArch, depsDir)
 		}
 
 		// Add include paths for CGO (V4L2 headers)
@@ -191,14 +212,20 @@ func buildLocally() {
 		os.Setenv("CGO_CFLAGS", cgoCflags)
 	}
 
-	// Choose binary name based on OS
+	// Choose binary name based on OS/Arch
 	binaryName := "dialtone"
-	if runtime.GOOS == "windows" {
+	if os.Getenv("GOOS") == "linux" {
+		binaryName = fmt.Sprintf("dialtone-%s", targetArch)
+	} else if runtime.GOOS == "windows" {
 		binaryName = "dialtone.exe"
 	}
 
 	outputPath := filepath.Join("bin", binaryName)
-	runShell(".", "go", "build", "-o", outputPath, "dialtone.go")
+	goBin := "go"
+	if _, err := os.Stat(filepath.Join(depsDir, "go", "bin", "go")); err == nil {
+		goBin = filepath.Join(depsDir, "go", "bin", "go")
+	}
+	runShell(".", goBin, "build", "-o", outputPath, "dialtone.go")
 	logger.LogInfo("Build successful: %s", outputPath)
 }
 
@@ -218,7 +245,7 @@ func buildWithPodman(arch, compiler string) {
 	}
 
 	outputName := fmt.Sprintf("dialtone-%s", arch)
-	
+
 	// Default to standard golang image and install compilers
 	baseImage := "docker.io/library/golang:1.25.5"
 	installCmd := fmt.Sprintf("apt-get update && apt-get install -y %s && ", compiler)
@@ -237,9 +264,9 @@ func buildWithPodman(arch, compiler string) {
 		"-v", "dialtone-go-build-cache:/root/.cache/go-build:Z", // Persistent Go build cache
 		"-w", "/src",
 		"-e", "GOOS=linux",
-		"-e", "GOARCH="+arch,
+		"-e", "GOARCH=" + arch,
 		"-e", "CGO_ENABLED=1",
-		"-e", "CC="+strings.TrimPrefix(compiler, "gcc-")+"-gcc",
+		"-e", "CC=" + strings.TrimPrefix(compiler, "gcc-") + "-gcc",
 		baseImage,
 		"bash", "-c", fmt.Sprintf("%sgo build -buildvcs=false -o bin/%s dialtone.go", installCmd, outputName),
 	}
@@ -279,7 +306,7 @@ func buildEverything(local bool) {
 
 	// 4. Build for ARM64
 	if local || !hasPodman() {
-		buildLocally()
+		buildLocally("arm64")
 	} else {
 		buildWithPodman("arm64", "gcc-aarch64-linux-gnu")
 	}
@@ -318,10 +345,12 @@ func BuildSelf() {
 func getDialtoneEnv() string {
 	env := os.Getenv("DIALTONE_ENV")
 	if env != "" {
-		return env
+		absPath, _ := filepath.Abs(env)
+		return absPath
 	}
 	// Simplified for now, should ideally use shared core logic
-	return "dialtone_dependencies"
+	absPath, _ := filepath.Abs("dialtone_dependencies")
+	return absPath
 }
 
 func runShell(dir string, name string, args ...string) {
@@ -356,4 +385,14 @@ func buildBuilderImage() {
 func hasImage(name string) bool {
 	cmd := exec.Command("podman", "image", "exists", name)
 	return cmd.Run() == nil
+}
+
+func hasZig() bool {
+	depsDir := getDialtoneEnv()
+	zigPath := filepath.Join(depsDir, "zig", "zig")
+	if _, err := os.Stat(zigPath); err == nil {
+		return true
+	}
+	_, err := exec.LookPath("zig")
+	return err == nil
 }
