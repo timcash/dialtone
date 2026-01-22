@@ -27,7 +27,8 @@ func GetDialtoneEnv() string {
 			home, _ := os.UserHomeDir()
 			env = filepath.Join(home, env[1:])
 		}
-		return env
+		absEnv, _ := filepath.Abs(env)
+		return absEnv
 	}
 
 	cwd, _ := os.Getwd()
@@ -35,7 +36,8 @@ func GetDialtoneEnv() string {
 		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
 			localPath := filepath.Join(cwd, "dialtone_dependencies")
 			if _, err := os.Stat(localPath); err == nil {
-				return localPath
+				absPath, _ := filepath.Abs(localPath)
+				return absPath
 			}
 		}
 		parent := filepath.Dir(cwd)
@@ -47,7 +49,8 @@ func GetDialtoneEnv() string {
 
 	home, _ := os.UserHomeDir()
 	defaultPath := filepath.Join(home, ".dialtone_env")
-	return defaultPath
+	absPath, _ := filepath.Abs(defaultPath)
+	return absPath
 }
 
 func validateRequiredVars(vars []string) {
