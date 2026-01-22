@@ -7,13 +7,11 @@
 
 ## Goals
 1. Install dependencies on macOS (Apple Silicon) using `./dialtone.sh install`.
-2. Perform a local build of the system using `./dialtone.sh build`.
+2. Perform a local build of the system using `./dialtone.sh build`
+2. Make a build locally using zig on macos without podman using `./dialtone.sh build --arm64`. the `--arm64` flag may be incorrect. I want to build for the raspberry pi on the robot but from the mac.
 3. Deploy the binary to a remote robot using `./dialtone.sh deploy`.
-4. Verify the robot is running and logs are accessible.
-
-## Non-Goals
-1. DO NOT modify the install/build scripts unless bugs are found.
-2. DO NOT implement new deployment features.
+4. Improve the diagnostics output of `./dialtone.sh diagnostics` and look for errors
+5. Get logs via `./dialtone.sh logs --remote`.
 
 ## Test
 1. **Dependency Check**: Run `./dialtone.sh install --check` to verify all tools are present.
@@ -22,18 +20,15 @@
 
 ## Subtask: Installation
 - description: [EXECUTE] Run `./dialtone.sh install --macos-arm` and update shell profile.
-- test: `go version`, `node -v`, `zig version`, and `gh --version` work from the shell.
+- test: test that `./dialtone.sh` loads env vars correctly.
 - status: done
 
 ## Subtask: Build
-- description: [EXECUTE] Run `./dialtone.sh build`.
+- description: [EXECUTE] Run `./dialtone.sh build --arm64`.
 - test: `bin/dialtone --help` runs locally.
 - status: done
 
 ## Subtask: Deployment
-- description: [EXECUTE] Set `ROBOT_HOST`, `ROBOT_PASSWORD`, `DIALTONE_HOSTNAME`, and `TS_AUTHKEY`, then run `./dialtone.sh deploy`.
+- description: [EXECUTE] Run `./dialtone.sh deploy`.
 - test: `./dialtone.sh logs --remote` shows successful startup.
 - status: done
-
-## Collaborative Notes
-- Ensure the robot is accessible via SSH and Tailscale (if using TS_AUTHKEY).
