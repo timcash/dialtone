@@ -14,60 +14,24 @@ graph LR
     NATS_Bus --> Other_Services
 ```
 
-## Configuration
+## Serial Setup (Raspberry Pi)
 
-To enable MAVLink support, you must provide a connection string.
-
-### Connection Strings
-Dialtone supports the following connection types (powered by `gomavlib`):
-
-- **Serial**: `serial:/dev/ttyAMA0:57600` (Device path : Baud rate)
-- **UDP Server**: `udp:0.0.0.0:14550` (Listens for incoming packets)
-- **TCP Client**: `tcp:127.0.0.1:5760` (Connects to a TCP server, e.g., SITL)
-
+For Raspberry Pi targets, use `/dev/ttyAMA0` (hardware UART) or `/dev/serial0`.
+1. Ensure `enable_uart=1` is set in `/boot/config.txt`.
+2. Disable the serial console via `raspi-config`.
 
 ```bash
-# .env
+# Example configuration
 MAVLINK_ENDPOINT=serial:/dev/ttyAMA0:57600
 ```
 
-This is automatically picked up by the `dialtone deploy` command, which passes it as a flag to the remote instance.
+## Arming and Status
 
+The Web UI provides buttons to **ARM** and **DISARM** the vehicle. 
+- **Heartbeat**: Verified via `mavlink.heartbeat` subject.
+- **Arming Errors**: If arming fails, check the "NATS Messenger" or "Log" section for `STATUSTEXT` messages from the flight controller (e.g., "Pre-arm: Yaw is not neutral").
+- **Acknowledgements**: The system listens for `COMMAND_ACK` to confirm if a command was accepted.
 
-## NATS API
-
-### Heartbeat
-- **Subject**: `mavlink.heartbeat`
-- **Direction**: Publish (Dialtone -> NATS)
-- **Payload**: JSON
-
-```json
-{
-  "type": "HEARTBEAT",
-  "mav_type": 10,               // MAV_TYPE (e.g., 10 = Ground Rover)
-  "autopilot": 3,               // MAV_AUTOPILOT (e.g., 3 = ArduPilot)
-  "base_mode": 192,             // Bitmap of enabled modes
-  "custom_mode": 4,             // Vehicle-specific mode (e.g., HOLD, AUTO)
-  "system_status": 4,           // MAV_STATE (e.g., 4 = Active)
-  "timestamp": 1705512345       // Unix timestamp
-}
-```
-
-## Development
-
-The MAVLink service is located in `src/mavlink.go`.
-
-### Adding New Messages
-To support more messages (e.g., ATTITUDE or GLOBAL_POSITION_INT):
-
-1.  **Update `MavlinkService`**: Modify the event loop in `src/mavlink.go` to listen for the specific `gomavlib` message type.
-2.  **Define Callback**: Ensure the `Callback` function in `src/dialtone.go` handles the new message type.
-3.  **Publish**: Marshal the data to JSON and publish to a new NATS subject (e.g., `mavlink.attitude`).
-
-### Testing
-You can use `mavproxy.py` or the provided `mavlink/rover.py` script to simulate a MAVLink source during development.
-
-```bash
-# Start a simulated rover broadcasting to UDP localhost
-python mavlink/rover.py --mock --connection udpin:127.0.0.1:14550
-```
+### Troubleshooting
+- **No Heartbeat**: Check physical UART wiring (TX/RX swapped?) and baud rate (usually 57600 or 115200).
+- **Deployment**: Use `dialtone deploy` to automatically push the binary and web assets to the remote robot.

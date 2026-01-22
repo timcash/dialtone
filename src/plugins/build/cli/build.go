@@ -21,6 +21,7 @@ func RunBuild(args []string) {
 	podman := fs.Bool("podman", false, "Force build using Podman")
 	linuxArm := fs.Bool("linux-arm", false, "Cross-compile for 32-bit Linux ARM (armv7)")
 	linuxArm64 := fs.Bool("linux-arm64", false, "Cross-compile for 64-bit Linux ARM (aarch64)")
+	builder := fs.Bool("builder", false, "Build the dialtone-builder image for faster ARM builds")
 	showHelp := fs.Bool("help", false, "Show help for build command")
 
 	fs.Usage = func() {
@@ -35,6 +36,7 @@ func RunBuild(args []string) {
 		fmt.Println("  --podman       Force build using Podman container")
 		fmt.Println("  --linux-arm    Cross-compile for 32-bit Linux ARM (Raspberry Pi Zero/3/4/5)")
 		fmt.Println("  --linux-arm64  Cross-compile for 64-bit Linux ARM (Raspberry Pi 3/4/5)")
+		fmt.Println("  --builder      Build the dialtone-builder image for faster ARM builds")
 		fmt.Println("  --help         Show help for build command")
 		fmt.Println()
 		fmt.Println("Examples:")
@@ -48,6 +50,11 @@ func RunBuild(args []string) {
 
 	if *showHelp {
 		fs.Usage()
+		return
+	}
+
+	if *builder {
+		buildBuilderImage()
 		return
 	}
 
@@ -84,15 +91,17 @@ func hasPodman() bool {
 	return err == nil
 }
 
-// buildWebIfNeeded builds the web UI if web_build is missing or empty
-func buildWebIfNeeded() {
+// buildWebIfNeeded builds the web UI if web_build is missing or empty, or if force is true
+func buildWebIfNeeded(force bool) {
 	webBuildDir := filepath.Join("src", "web_build")
 	indexPath := filepath.Join(webBuildDir, "index.html")
 
 	// Check if index.html exists and has real content
-	if info, err := os.Stat(indexPath); err == nil && info.Size() > 100 {
-		logger.LogInfo("Web UI already built (found %s)", indexPath)
-		return
+	if !force {
+		if info, err := os.Stat(indexPath); err == nil && info.Size() > 100 {
+			logger.LogInfo("Web UI already built (found %s)", indexPath)
+			return
+		}
 	}
 
 	logger.LogInfo("Building Web UI...")
@@ -144,8 +153,8 @@ func buildWebIfNeeded() {
 func buildLocally() {
 	logger.LogInfo("Building Dialtone locally (Native Build)...")
 
-	// Build web UI if needed
-	buildWebIfNeeded()
+	// Build web UI if needed (not forced for native local builds unless requested)
+	buildWebIfNeeded(false)
 
 	if err := os.MkdirAll("bin", 0755); err != nil {
 		logger.LogFatal("Failed to create bin directory: %v", err)
@@ -196,8 +205,8 @@ func buildLocally() {
 func buildWithPodman(arch, compiler string) {
 	logger.LogInfo("Building Dialtone for Linux %s using Podman (%s)...", arch, compiler)
 
-	// Build web UI first
-	buildWebIfNeeded()
+	// Build web UI first (always force rebuild for remote/podman deployment)
+	buildWebIfNeeded(true)
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -210,17 +219,29 @@ func buildWithPodman(arch, compiler string) {
 
 	outputName := fmt.Sprintf("dialtone-%s", arch)
 	
-	// Podman command should install the required compiler inside the golang container before running go build
+	// Default to standard golang image and install compilers
+	baseImage := "docker.io/library/golang:1.25.5"
+	installCmd := fmt.Sprintf("apt-get update && apt-get install -y %s && ", compiler)
+
+	// Check if optimized builder image exists
+	if hasImage("dialtone-builder") {
+		logger.LogInfo("Using optimized 'dialtone-builder' image (skipping apt-get install)")
+		baseImage = "dialtone-builder"
+		installCmd = "" // Skip installation as it's pre-installed
+	}
+
+	// Podman command
 	buildCmd := []string{
 		"run", "--rm",
 		"-v", fmt.Sprintf("%s:/src:Z", cwd),
+		"-v", "dialtone-go-build-cache:/root/.cache/go-build:Z", // Persistent Go build cache
 		"-w", "/src",
 		"-e", "GOOS=linux",
 		"-e", "GOARCH="+arch,
 		"-e", "CGO_ENABLED=1",
 		"-e", "CC="+strings.TrimPrefix(compiler, "gcc-")+"-gcc",
-		"docker.io/library/golang:1.25.5",
-		"bash", "-c", fmt.Sprintf("apt-get update && apt-get install -y %s && go build -buildvcs=false -o bin/%s dialtone.go", compiler, outputName),
+		baseImage,
+		"bash", "-c", fmt.Sprintf("%sgo build -buildvcs=false -o bin/%s dialtone.go", installCmd, outputName),
 	}
 
 	logger.LogInfo("Running: podman %v", buildCmd)
@@ -319,4 +340,20 @@ func copyDir(src string, dst string) {
 	if err := cmd.Run(); err != nil {
 		logger.LogFatal("Failed to copy directory from %s to %s: %v", src, dst, err)
 	}
+}
+
+func buildBuilderImage() {
+	logger.LogInfo("Building 'dialtone-builder' image...")
+	dockerfile := filepath.Join("docs", "Dockerfile.builder")
+	if _, err := os.Stat(dockerfile); os.IsNotExist(err) {
+		logger.LogFatal("Dockerfile.builder not found: %s", dockerfile)
+	}
+
+	runShell(".", "podman", "build", "-f", dockerfile, "-t", "dialtone-builder", ".")
+	logger.LogInfo("'dialtone-builder' image created successfully.")
+}
+
+func hasImage(name string) bool {
+	cmd := exec.Command("podman", "image", "exists", name)
+	return cmd.Run() == nil
 }
