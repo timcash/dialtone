@@ -11,19 +11,19 @@ import (
 	"time"
 
 	"dialtone/cli/src/core/logger"
+
 	"golang.org/x/crypto/ssh"
 )
 
 const (
-	GoVersion    = "1.25.5"
-	NodeVersion  = "22.13.0"
-	ZigVersion   = "0.13.0"
-	GHVersion    = "2.66.1"
-	PixiVersion  = "latest" // Using latest for pixi
-	PodmanVersion = "latest"
+	GoVersion          = "1.25.5"
+	NodeVersion        = "22.13.0"
+	ZigVersion         = "0.13.0"
+	GHVersion          = "2.66.1"
+	PixiVersion        = "latest" // Using latest for pixi
+	PodmanVersion      = "latest"
 	ArmCompilerVersion = "latest"
 )
-
 
 func logItemStatus(name, version, path string, alreadyInstalled bool) {
 	status := "installed successfully"
@@ -41,7 +41,8 @@ func GetDialtoneEnv() string {
 			home, _ := os.UserHomeDir()
 			env = filepath.Join(home, env[1:])
 		}
-		return env
+		absEnv, _ := filepath.Abs(env)
+		return absEnv
 	}
 	cwd, _ := os.Getwd()
 	for {
@@ -49,7 +50,8 @@ func GetDialtoneEnv() string {
 			localPath := filepath.Join(cwd, "dialtone_dependencies")
 			if _, err := os.Stat(localPath); err == nil {
 				logger.LogInfo("DIALTONE_ENV not set, using repo-local path: %s", localPath)
-				return localPath
+				absPath, _ := filepath.Abs(localPath)
+				return absPath
 			}
 		}
 		parent := filepath.Dir(cwd)
@@ -61,7 +63,8 @@ func GetDialtoneEnv() string {
 	home, _ := os.UserHomeDir()
 	defaultPath := filepath.Join(home, ".dialtone_env")
 	logger.LogInfo("DIALTONE_ENV not set, using default path: %s", defaultPath)
-	return defaultPath
+	absPath, _ := filepath.Abs(defaultPath)
+	return absPath
 }
 
 func runSimpleShell(command string) {
@@ -123,7 +126,7 @@ func RunInstall(args []string) {
 	}
 
 	fs.Parse(flagArgs)
-	
+
 	depsDir := GetDialtoneEnv()
 
 	if *check {
@@ -452,6 +455,7 @@ func installLocalDepsMacOSAMD64() {
 	} else {
 		logItemStatus("Zig", ZigVersion, zigBin, true)
 	}
+
 	printInstallComplete(depsDir)
 }
 
@@ -610,6 +614,7 @@ func installLocalDepsMacOSARM() {
 	} else {
 		logItemStatus("Zig", ZigVersion, zigBin, true)
 	}
+
 	printInstallComplete(depsDir)
 }
 
@@ -619,7 +624,7 @@ func printInstallComplete(depsDir string) {
 	logger.LogInfo("Installation complete in %s", depsDir)
 	logger.LogInfo("========================================")
 	logger.LogInfo("")
-	logger.LogInfo("Add to your shell profile (~/.zshrc or ~/.bashrc):")
+	logger.LogInfo("Add to your shell profile (~/.zshrc or ~/.zshrc):")
 	logger.LogInfo("  export PATH=\"%s/go/bin:%s/node/bin:%s/zig:%s/gh/bin:%s/pixi:$PATH\"", depsDir, depsDir, depsDir, depsDir, depsDir)
 	logger.LogInfo("")
 }
@@ -627,9 +632,9 @@ func printInstallComplete(depsDir string) {
 // CheckInstall verifies if all dependencies are correctly installed
 func CheckInstall(depsDir string) {
 	logger.LogInfo("Checking dependencies in %s...", depsDir)
-	
+
 	missing := 0
-	
+
 	// 1. Go
 	goBin := filepath.Join(depsDir, "go", "bin", "go")
 	if _, err := os.Stat(goBin); err == nil {
@@ -638,7 +643,7 @@ func CheckInstall(depsDir string) {
 		logger.LogInfo("Go (%s) is MISSING", GoVersion)
 		missing++
 	}
-	
+
 	// 2. Node.js
 	nodeBin := filepath.Join(depsDir, "node", "bin", "node")
 	if _, err := os.Stat(nodeBin); err == nil {
@@ -647,16 +652,15 @@ func CheckInstall(depsDir string) {
 		logger.LogInfo("Node.js (%s) is MISSING", NodeVersion)
 		missing++
 	}
-	
-	// 2.1 Vercel
+
+	// 2.1 Vercel (Optional for local dev)
 	vercelBin := filepath.Join(depsDir, "node", "bin", "vercel")
 	if _, err := os.Stat(vercelBin); err == nil {
 		logItemStatus("Vercel CLI", "latest", vercelBin, true)
 	} else {
-		logger.LogInfo("Vercel CLI is MISSING")
-		missing++
+		logger.LogInfo("Vercel CLI is MISSING (Optional)")
 	}
-	
+
 	// 2.2 GitHub CLI
 	ghBin := filepath.Join(depsDir, "gh", "bin", "gh")
 	if _, err := os.Stat(ghBin); err == nil {
@@ -665,7 +669,7 @@ func CheckInstall(depsDir string) {
 		logger.LogInfo("GitHub CLI (%s) is MISSING", GHVersion)
 		missing++
 	}
-	
+
 	// 2.3 Pixi
 	pixiBin := filepath.Join(depsDir, "pixi", "pixi")
 	if _, err := os.Stat(pixiBin); err == nil {
@@ -674,7 +678,7 @@ func CheckInstall(depsDir string) {
 		logger.LogInfo("Pixi (%s) is MISSING", PixiVersion)
 		missing++
 	}
-	
+
 	// 2.5 Zig
 	zigBin := filepath.Join(depsDir, "zig", "zig")
 	if _, err := os.Stat(zigBin); err == nil {
@@ -683,16 +687,25 @@ func CheckInstall(depsDir string) {
 		logger.LogInfo("Zig (%s) is MISSING", ZigVersion)
 		missing++
 	}
-	
-	// 3. V4L2 Header
+
+	// 2.6 Podman
+	podmanBin := filepath.Join(depsDir, "podman", "bin", "podman")
+	if _, err := os.Stat(podmanBin); err == nil {
+		logItemStatus("Podman", "latest", podmanBin, true)
+	} else if runtime.GOOS != "darwin" {
+		logger.LogInfo("Podman is MISSING")
+		missing++
+	}
+
+	// 3. V4L2 Header (Linux only)
 	headerFile := filepath.Join(depsDir, "usr", "include", "linux", "videodev2.h")
 	if _, err := os.Stat(headerFile); err == nil {
 		logItemStatus("V4L2 Headers", "latest", headerFile, true)
-	} else {
+	} else if runtime.GOOS == "linux" {
 		logger.LogInfo("V4L2 Headers are MISSING")
 		missing++
 	}
-	
+
 	if missing == 0 {
 		logger.LogInfo("All dependencies are present.")
 	} else {
@@ -713,10 +726,10 @@ func dialSSH(host, port, user, pass string) (*ssh.Client, error) {
 		username = os.Getenv("USER")
 	}
 	config := &ssh.ClientConfig{
-		User: username,
-		Auth: []ssh.AuthMethod{ssh.Password(pass)},
+		User:            username,
+		Auth:            []ssh.AuthMethod{ssh.Password(pass)},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout: 10 * time.Second,
+		Timeout:         10 * time.Second,
 	}
 	addr := fmt.Sprintf("%s:%s", hostname, port)
 	return ssh.Dial("tcp", addr, config)
