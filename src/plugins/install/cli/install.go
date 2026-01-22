@@ -653,13 +653,12 @@ func CheckInstall(depsDir string) {
 		missing++
 	}
 
-	// 2.1 Vercel
+	// 2.1 Vercel (Optional for local dev)
 	vercelBin := filepath.Join(depsDir, "node", "bin", "vercel")
 	if _, err := os.Stat(vercelBin); err == nil {
 		logItemStatus("Vercel CLI", "latest", vercelBin, true)
 	} else {
-		logger.LogInfo("Vercel CLI is MISSING")
-		missing++
+		logger.LogInfo("Vercel CLI is MISSING (Optional)")
 	}
 
 	// 2.2 GitHub CLI
@@ -698,11 +697,11 @@ func CheckInstall(depsDir string) {
 		missing++
 	}
 
-	// 3. V4L2 Header
+	// 3. V4L2 Header (Linux only)
 	headerFile := filepath.Join(depsDir, "usr", "include", "linux", "videodev2.h")
 	if _, err := os.Stat(headerFile); err == nil {
 		logItemStatus("V4L2 Headers", "latest", headerFile, true)
-	} else {
+	} else if runtime.GOOS == "linux" {
 		logger.LogInfo("V4L2 Headers are MISSING")
 		missing++
 	}
