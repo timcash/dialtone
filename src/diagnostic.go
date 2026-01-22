@@ -2,14 +2,18 @@ package dialtone
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"dialtone/cli/src/core/browser"
 	"dialtone/cli/src/core/ssh"
+
 	"github.com/chromedp/chromedp"
 )
 
@@ -45,37 +49,69 @@ func RunDiagnostic(args []string) {
 		name string
 		cmd  string
 	}{
-		{"CPU Usage", "top -bn1 | grep 'Cpu(s)'"},
-		{"Memory Usage", "free -h"},
-		{"Disk Usage", "df -h /"},
-		{"Network Interfaces", "ip addr show"},
-		{"Tailscale Status", "tailscale status"},
-		{"NATS Status", "ps aux | grep nats-server | grep -v grep || echo 'NATS not running'"},
-		{"Dialtone Status", "ps aux | grep dialtone | grep -v grep || echo 'Dialtone not running'"},
+		{"Hostname", "hostname"},
+		{"Uptime", "uptime -p"},
+		{"CPU Usage", "top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - $1\"% used\"}'"},
+		{"Memory Usage", "free | awk '/^Mem:/ {printf \"%dMi / %dMi (%.1f%%)\", $3/1024, $2/1024, $3/$2*100}'"},
+		{"Disk Usage", "df -h / | awk 'NR==2 {print $3 \" / \" $2 \" (\" $5 \")\"}'"},
+		{"Process: Dialtone", "pgrep -f 'dialtone start' > /dev/null && echo 'RUNNING' || echo 'STOPPED'"},
 	}
 
 	for _, c := range commands {
-		fmt.Printf("\n--- %s ---\n", c.name)
 		output, err := ssh.RunSSHCommand(client, c.cmd)
 		if err != nil {
-			fmt.Printf("Error: %v\n", err)
+			fmt.Printf("[ssh] %s Error: %v\n", c.name, err)
 		} else {
-			fmt.Println(output)
+			lines := strings.Split(strings.TrimSpace(output), "\n")
+			for _, line := range lines {
+				fmt.Printf("[ssh] %s: %s\n", c.name, line)
+			}
 		}
 	}
 
-	// Web UI Check via Chromedp
-	fmt.Printf("\n--- Web UI Check (chromedp) ---\n")
+	// App-Level Status check (tsnet aware)
 	hostname := os.Getenv("DIALTONE_HOSTNAME")
 	if hostname == "" {
-		hostname = "drone_1"
+		hostname = "drone-1"
 	}
 	url := fmt.Sprintf("http://%s", hostname)
-	if err := checkWebUI(url); err != nil {
-		fmt.Printf("Web UI Check FAILED: %v\n", err)
-	} else {
-		fmt.Printf("Web UI Check SUCCESS: %s is reachable and rendering\n", url)
+
+	if err := checkAppStatus(url); err != nil {
+		fmt.Printf("[tsnet] Status Check FAILED: %v\n", err)
 	}
+
+	// Web UI Check via Chromedp
+	if err := checkWebUI(url); err != nil {
+		fmt.Printf("[chromedp] Web UI Check FAILED: %v\n", err)
+	} else {
+		fmt.Printf("[chromedp] Web UI Check SUCCESS: %s is reachable\n", url)
+	}
+}
+
+func checkAppStatus(url string) error {
+	apiClient := http.Client{Timeout: 5 * time.Second}
+	resp, err := apiClient.Get(fmt.Sprintf("%s/api/status", url))
+	if err != nil {
+		return fmt.Errorf("failed to reach status API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("status API returned non-200: %d", resp.StatusCode)
+	}
+
+	var status map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		return fmt.Errorf("failed to decode status JSON: %w", err)
+	}
+
+	fmt.Printf("[tsnet] Tailscale IPs:  %v\n", status["tailscale_ips"])
+	fmt.Printf("[tsnet] App Uptime:     %v\n", status["uptime"])
+	if nats, ok := status["nats"].(map[string]any); ok {
+		fmt.Printf("[nats] (Embedded) URL: %v\n", nats["url"])
+		fmt.Printf("[nats] (Embedded) Conns: %v\n", nats["connections"])
+	}
+	return nil
 }
 
 func runLocalDiagnostics() {
@@ -158,7 +194,6 @@ func checkWebUI(url string) error {
 		return fmt.Errorf("page loaded but title is empty")
 	}
 
-	fmt.Printf("Dashboard Title: %s\n", title)
+	fmt.Printf("[chromedp] Dashboard Title: %s\n", title)
 	return nil
 }
-
