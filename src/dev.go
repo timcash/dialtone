@@ -17,6 +17,9 @@ import (
 	github_cli "dialtone/cli/src/plugins/github/cli"
 	install_cli "dialtone/cli/src/plugins/install/cli"
 	build_cli "dialtone/cli/src/plugins/build/cli"
+	logs_cli "dialtone/cli/src/plugins/logs/cli"
+	deploy_cli "dialtone/cli/src/plugins/deploy/cli"
+	"dialtone/cli/src/core/ssh"
 )
 
 // ExecuteDev is the entry point for the dialtone-dev CLI
@@ -36,13 +39,13 @@ func ExecuteDev() {
 	case "build":
 		build_cli.RunBuild(args)
 	case "deploy":
-		RunDeploy(args)
+		deploy_cli.RunDeploy(args)
 	case "ssh":
-		RunSSH(args)
+		ssh.RunSSH(args)
 	case "provision":
 		RunProvision(args)
 	case "logs":
-		runLogs(args)
+		logs_cli.RunLogs(args)
 	case "diagnostic":
 		RunDiagnostic(args)
 	case "install":

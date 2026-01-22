@@ -1,10 +1,15 @@
 package dialtone
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
+	"time"
+
+	"dialtone/cli/src/core/ssh"
+	"github.com/chromedp/chromedp"
 )
 
 // RunDiagnostic handles the 'diagnostic' command
@@ -27,7 +32,7 @@ func RunDiagnostic(args []string) {
 		LogFatal("Error: -pass is required for remote diagnostics")
 	}
 
-	client, err := DialSSH(*host, *port, *user, *pass)
+	client, err := ssh.DialSSH(*host, *port, *user, *pass)
 	if err != nil {
 		LogFatal("SSH connection failed: %v", err)
 	}
@@ -50,12 +55,25 @@ func RunDiagnostic(args []string) {
 
 	for _, c := range commands {
 		fmt.Printf("\n--- %s ---\n", c.name)
-		output, err := RunSSHCommand(client, c.cmd)
+		output, err := ssh.RunSSHCommand(client, c.cmd)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 		} else {
 			fmt.Println(output)
 		}
+	}
+
+	// Web UI Check via Chromedp
+	fmt.Printf("\n--- Web UI Check (chromedp) ---\n")
+	hostname := os.Getenv("DIALTONE_HOSTNAME")
+	if hostname == "" {
+		hostname = "drone_1"
+	}
+	url := fmt.Sprintf("http://%s", hostname)
+	if err := checkWebUI(url); err != nil {
+		fmt.Printf("Web UI Check FAILED: %v\n", err)
+	} else {
+		fmt.Printf("Web UI Check SUCCESS: %s is reachable and rendering\n", url)
 	}
 }
 
@@ -95,4 +113,30 @@ func execCommand(name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
 	output, err := cmd.CombinedOutput()
 	return string(output), err
+}
+
+func checkWebUI(url string) error {
+	// Create context
+	ctx, cancel := chromedp.NewContext(context.Background())
+	defer cancel()
+
+	// Create a timeout
+	ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	var title string
+	err := chromedp.Run(ctx,
+		chromedp.Navigate(url),
+		chromedp.Title(&title),
+	)
+	if err != nil {
+		return err
+	}
+
+	if title == "" {
+		return fmt.Errorf("page loaded but title is empty")
+	}
+
+	fmt.Printf("Dashboard Title: %s\n", title)
+	return nil
 }
