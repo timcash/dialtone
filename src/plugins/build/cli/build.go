@@ -181,23 +181,49 @@ func buildLocally(targetArch string) {
 		nodeBin := filepath.Join(depsDir, "node", "bin")
 		os.Setenv("PATH", fmt.Sprintf("%s:%s:%s", goBin, nodeBin, os.Getenv("PATH")))
 
-		// If Zig exists, use it as C compiler
-		zigPath := filepath.Join(depsDir, "zig", "zig")
-		if _, err := os.Stat(zigPath); err == nil {
-			absZig, _ := filepath.Abs(zigPath)
-			target := "x86_64-linux-gnu" // default
-			if targetArch == "arm64" {
-				target = "aarch64-linux-gnu"
+		// If local GNU toolchains exist, prioritize them for cross-compilation
+		gcc64Bin := filepath.Join(depsDir, "gcc-aarch64", "bin", "aarch64-none-linux-gnu-gcc")
+		gcc32Bin := filepath.Join(depsDir, "gcc-armhf", "bin", "arm-none-linux-gnueabihf-gcc")
+
+		compilerFound := false
+		if targetArch == "arm64" {
+			if _, err := os.Stat(gcc64Bin); err == nil {
 				os.Setenv("GOOS", "linux")
 				os.Setenv("GOARCH", "arm64")
-			} else if targetArch == "arm" {
-				target = "arm-linux-gnueabihf"
+				os.Setenv("CC", gcc64Bin)
+				compilerFound = true
+			}
+		} else if targetArch == "arm" {
+			if _, err := os.Stat(gcc32Bin); err == nil {
 				os.Setenv("GOOS", "linux")
 				os.Setenv("GOARCH", "arm")
+				os.Setenv("CC", gcc32Bin)
+				compilerFound = true
 			}
-			os.Setenv("CC", fmt.Sprintf("%s cc -target %s", absZig, target))
-		} else if targetArch != runtime.GOARCH {
-			logger.LogFatal("Local cross-compilation for %s requested, but Zig was not found in %s/zig/zig", targetArch, depsDir)
+		}
+
+		if !compilerFound {
+			// If Zig exists, use it as C compiler
+			zigPath := filepath.Join(depsDir, "zig", "zig")
+			if _, err := os.Stat(zigPath); err == nil {
+				absZig, _ := filepath.Abs(zigPath)
+				target := "x86_64-linux-gnu" // default
+				if targetArch == "arm64" {
+					target = "aarch64-linux-gnu"
+					os.Setenv("GOOS", "linux")
+					os.Setenv("GOARCH", "arm64")
+				} else if targetArch == "arm" {
+					target = "arm-linux-gnueabihf"
+					os.Setenv("GOOS", "linux")
+					os.Setenv("GOARCH", "arm")
+				}
+				os.Setenv("CC", fmt.Sprintf("%s cc -target %s", absZig, target))
+				compilerFound = true
+			}
+		}
+
+		if targetArch != runtime.GOARCH && !compilerFound {
+			logger.LogFatal("Local cross-compilation for %s requested, but no suitable compiler (Zig or GNU Toolchain) was found in %s", targetArch, depsDir)
 		}
 
 		// Add include paths for CGO (V4L2 headers)
