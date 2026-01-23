@@ -2,7 +2,7 @@
 trigger: always_on
 ---
 
-Do each subtask one at a time. Subtasks use this format.
+When working on a ticket, always do each subtask one at a time. Subtasks use this format.
 
 # Format
 

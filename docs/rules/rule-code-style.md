@@ -1,8 +1,8 @@
 ---
 trigger: always_on
 ---
-# Code Style: Linear Pipelines
-Avoid "pyramid" nesting. Keep the main path of execution on the left margin.
+
+Code Style: Linear Pipelines Avoid "pyramid" nesting. Keep the main path of execution on the left margin.
 
 ```go
 func HandleRequest(ctx *RequestContext) *RequestContext {
