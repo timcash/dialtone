@@ -104,10 +104,25 @@ func StartCamera(ctx context.Context, devName string) error {
 func StreamHandler(w http.ResponseWriter, r *http.Request) {
 	camMu.Lock()
 	cam := camDev
-	camMu.Unlock()
+	if cam == nil {
+		LogInfo("Camera not initialized, attempting auto-start...")
+		cameras, err := ListCameras()
+		if err == nil && len(cameras) > 0 {
+			camMu.Unlock() // Unlock to call StartCamera which also locks
+			if err := StartCamera(r.Context(), cameras[0].Device); err == nil {
+				camMu.Lock()
+				cam = camDev
+				camMu.Unlock()
+			}
+		} else {
+			camMu.Unlock()
+		}
+	} else {
+		camMu.Unlock()
+	}
 
 	if cam == nil {
-		http.Error(w, "Camera not initialized", http.StatusServiceUnavailable)
+		http.Error(w, "Camera not initialized and no devices found", http.StatusServiceUnavailable)
 		return
 	}
 
