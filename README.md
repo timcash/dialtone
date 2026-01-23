@@ -116,10 +116,10 @@ mv -n .env.example .env
 ./dialtone.sh install --check
 
 # Start work (branch + scaffolding)
-./dialtone.sh ticket start <name>
+./dialtone.sh ticket start <ticket-name>
 
 # Final verification before submission
-./dialtone.sh ticket done <name>
+./dialtone.sh ticket done <ticket-name>
 
 # Runs tests in tickets/<name>/test/
 ./dialtone.sh ticket test <ticket-name>
