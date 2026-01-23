@@ -3,10 +3,6 @@ trigger: always_on
 ---
 How to use `dialtone.sh` CLI and `git` for development
 
-1. Use only these two tools as much as possible `dialtone.sh` CLI and `git`
-2. Always run `./dialtone.sh ticket start <ticket-name>` before making any changes.
-3. `dialtone.sh` is a simple wrapper around `src/dev.go`
-
 ## Installation & Setup
 ```bash
 git pull origin main # update main so you can integrate it into your ticket

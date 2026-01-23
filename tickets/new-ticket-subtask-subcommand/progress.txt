@@ -1,0 +1,2 @@
+Progress log for new-ticket-subtask-subcommand
+
