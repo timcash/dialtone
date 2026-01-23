@@ -22,7 +22,9 @@ const (
 	GHVersion          = "2.66.1"
 	PixiVersion        = "latest" // Using latest for pixi
 	PodmanVersion      = "latest"
-	ArmCompilerVersion = "latest"
+	ArmCompilerVersion = "13.3.rel1"
+	Arm64CompilerUrl   = "https://developer.arm.com/-/media/Files/downloads/gnu/13.3.rel1/binrel/arm-gnu-toolchain-13.3.rel1-x86_64-aarch64-none-linux-gnu.tar.xz"
+	ArmhfCompilerUrl   = "https://developer.arm.com/-/media/Files/downloads/gnu/13.3.rel1/binrel/arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-linux-gnueabihf.tar.xz"
 )
 
 func logItemStatus(name, version, path string, alreadyInstalled bool) {
@@ -367,13 +369,44 @@ func installLocalDepsWSL() {
 		logItemStatus("V4L2 Headers", "latest", headerFile, true)
 	}
 
-	// 4. Install Cross-Compilation Tools & Podman (WSL specific)
+	// 4. Install Cross-Compilation Tools (Local)
 	if runtime.GOOS == "linux" {
-		logger.LogInfo("Step 4: Installing Cross-Compilation Tools and Podman...")
-		// Use sudo apt-get for system-level tools in WSL
-		runSimpleShell("sudo apt-get update")
-		runSimpleShell("sudo apt-get install -y gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu podman")
-		logger.LogInfo("Cross-compilers and Podman installed successfully.")
+		logger.LogInfo("Step 4: Installing ARM Cross-Compilation Toolchains locally...")
+
+		// AArch64 Compiler
+		gcc64Dir := filepath.Join(depsDir, "gcc-aarch64")
+		gcc64Bin := filepath.Join(gcc64Dir, "bin", "aarch64-none-linux-gnu-gcc")
+		if _, err := os.Stat(gcc64Bin); err != nil {
+			logger.LogInfo("Step 4.1: Installing AArch64 Compiler %s...", ArmCompilerVersion)
+			tarball := "gcc-aarch64.tar.xz"
+			runSimpleShell(fmt.Sprintf("wget -q -O %s/%s %s", depsDir, tarball, Arm64CompilerUrl))
+			runSimpleShell(fmt.Sprintf("mkdir -p %s && tar -C %s --strip-components=1 -xJf %s/%s", gcc64Dir, gcc64Dir, depsDir, tarball))
+			os.Remove(filepath.Join(depsDir, tarball))
+			logItemStatus("AArch64 Compiler", ArmCompilerVersion, gcc64Bin, false)
+		} else {
+			logItemStatus("AArch64 Compiler", ArmCompilerVersion, gcc64Bin, true)
+		}
+
+		// ARMhf Compiler
+		gcc32Dir := filepath.Join(depsDir, "gcc-armhf")
+		gcc32Bin := filepath.Join(gcc32Dir, "bin", "arm-none-linux-gnueabihf-gcc")
+		if _, err := os.Stat(gcc32Bin); err != nil {
+			logger.LogInfo("Step 4.2: Installing ARMhf Compiler %s...", ArmCompilerVersion)
+			tarball := "gcc-armhf.tar.xz"
+			runSimpleShell(fmt.Sprintf("wget -q -O %s/%s %s", depsDir, tarball, ArmhfCompilerUrl))
+			runSimpleShell(fmt.Sprintf("mkdir -p %s && tar -C %s --strip-components=1 -xJf %s/%s", gcc32Dir, gcc32Dir, depsDir, tarball))
+			os.Remove(filepath.Join(depsDir, tarball))
+			logItemStatus("ARMhf Compiler", ArmCompilerVersion, gcc32Bin, false)
+		} else {
+			logItemStatus("ARMhf Compiler", ArmCompilerVersion, gcc32Bin, true)
+		}
+
+		// 5. Check for Podman
+		if _, err := exec.LookPath("podman"); err != nil {
+			logger.LogInfo("Step 5: Podman not found. Note: Local rootless Podman installation on WSL requires system-level setup. Please install it manually if needed: 'sudo apt-get install podman'")
+		} else {
+			logger.LogInfo("Step 5: Podman is already installed on the system.")
+		}
 	}
 
 	printInstallComplete(depsDir)
@@ -688,12 +721,27 @@ func CheckInstall(depsDir string) {
 		missing++
 	}
 
-	// 2.6 Podman
-	podmanBin := filepath.Join(depsDir, "podman", "bin", "podman")
-	if _, err := os.Stat(podmanBin); err == nil {
-		logItemStatus("Podman", "latest", podmanBin, true)
+	// 2.6 Podman check (System-level)
+	if _, err := exec.LookPath("podman"); err == nil {
+		logger.LogInfo("Podman (system) is present")
 	} else if runtime.GOOS != "darwin" {
-		logger.LogInfo("Podman is MISSING")
+		logger.LogInfo("Podman is MISSING (Optional, recommended for ARM builds)")
+	}
+
+	// 2.7 ARM Cross-Compilers (Local)
+	gcc64Bin := filepath.Join(depsDir, "gcc-aarch64", "bin", "aarch64-none-linux-gnu-gcc")
+	if _, err := os.Stat(gcc64Bin); err == nil {
+		logItemStatus("AArch64 Compiler", ArmCompilerVersion, gcc64Bin, true)
+	} else {
+		logger.LogInfo("AArch64 Compiler is MISSING")
+		missing++
+	}
+
+	gcc32Bin := filepath.Join(depsDir, "gcc-armhf", "bin", "arm-none-linux-gnueabihf-gcc")
+	if _, err := os.Stat(gcc32Bin); err == nil {
+		logItemStatus("ARMhf Compiler", ArmCompilerVersion, gcc32Bin, true)
+	} else {
+		logger.LogInfo("ARMhf Compiler is MISSING")
 		missing++
 	}
 
