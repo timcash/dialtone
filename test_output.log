@@ -1,0 +1,25 @@
+[ticket] Running tests in tickets/wsl-workflow-check/test...
+=== RUN   TestWSLDependencies
+    unit_test.go:14: getDepsDir: Starting search for project root from CWD=/home/user/dialtone/tickets/wsl-workflow-check/test
+    unit_test.go:18: getDepsDir: Found project root at /home/user/dialtone
+    unit_test.go:32: getDepsDir: DIALTONE_ENV is set to ./dialtone_dependencies
+    unit_test.go:35: getDepsDir: Resolved relative DIALTONE_ENV to /home/user/dialtone/dialtone_dependencies
+    unit_test.go:62: Final dependencies directory: /home/user/dialtone/dialtone_dependencies
+    unit_test.go:75: Checking for binary: /home/user/dialtone/dialtone_dependencies/go/bin/go
+    unit_test.go:79: Binary FOUND: /home/user/dialtone/dialtone_dependencies/go/bin/go
+    unit_test.go:75: Checking for binary: /home/user/dialtone/dialtone_dependencies/node/bin/node
+    unit_test.go:79: Binary FOUND: /home/user/dialtone/dialtone_dependencies/node/bin/node
+    unit_test.go:75: Checking for binary: /home/user/dialtone/dialtone_dependencies/gh/bin/gh
+    unit_test.go:79: Binary FOUND: /home/user/dialtone/dialtone_dependencies/gh/bin/gh
+    unit_test.go:75: Checking for binary: /home/user/dialtone/dialtone_dependencies/pixi/pixi
+    unit_test.go:79: Binary FOUND: /home/user/dialtone/dialtone_dependencies/pixi/pixi
+    unit_test.go:75: Checking for binary: /home/user/dialtone/dialtone_dependencies/zig/zig
+    unit_test.go:79: Binary FOUND: /home/user/dialtone/dialtone_dependencies/zig/zig
+    unit_test.go:75: Checking for binary: /home/user/dialtone/dialtone_dependencies/gcc-aarch64/bin/aarch64-none-linux-gnu-gcc
+    unit_test.go:79: Binary FOUND: /home/user/dialtone/dialtone_dependencies/gcc-aarch64/bin/aarch64-none-linux-gnu-gcc
+    unit_test.go:75: Checking for binary: /home/user/dialtone/dialtone_dependencies/gcc-armhf/bin/arm-none-linux-gnueabihf-gcc
+    unit_test.go:79: Binary FOUND: /home/user/dialtone/dialtone_dependencies/gcc-armhf/bin/arm-none-linux-gnueabihf-gcc
+--- PASS: TestWSLDependencies (0.00s)
+PASS
+ok  	dialtone/cli/tickets/wsl-workflow-check/test	0.002s
+[ticket] All tests passed.
