@@ -84,6 +84,33 @@ func RunStart(args []string) {
 		logInfo("Created %s", progressTxt)
 	}
 
+	// 2.5 Audit & Commit
+	logInfo("Committing scaffolding...")
+	if err := exec.Command("git", "add", ".").Run(); err != nil {
+		logFatal("Failed to git add: %v", err)
+	}
+	commitMsg := fmt.Sprintf("chore: start ticket %s", ticketName)
+	if err := exec.Command("git", "commit", "-m", commitMsg).Run(); err != nil {
+		logFatal("Failed to commit: %v", err)
+	}
+
+	// 3. Git Push & PR
+	logInfo("Pushing branch to origin...")
+	pushCmd := exec.Command("git", "push", "-u", "origin", ticketName)
+	pushCmd.Stdout = os.Stdout
+	pushCmd.Stderr = os.Stderr
+	if err := pushCmd.Run(); err != nil {
+		logFatal("Failed to push branch: %v", err)
+	}
+
+	logInfo("Creating Pull Request...")
+	prCmd := exec.Command("./dialtone.sh", "github", "pr")
+	prCmd.Stdout = os.Stdout
+	prCmd.Stderr = os.Stderr
+	if err := prCmd.Run(); err != nil {
+		logFatal("Failed to create PR: %v", err)
+	}
+
 	logInfo("Ticket %s started successfully", ticketName)
 	logReminder(ticketName)
 }

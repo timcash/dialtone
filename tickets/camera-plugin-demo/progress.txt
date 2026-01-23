@@ -1,0 +1,2 @@
+Progress log for camera-plugin-demo
+
