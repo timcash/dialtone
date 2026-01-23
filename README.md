@@ -10,8 +10,8 @@ Dialtone aims to combine human intuition and machine precision into a unified me
 2. AI agents can learn from human demonstrations, process complex sensory data, and execute tasks autonomously.
 3. Field Radio Uplinks (FRU) relay real-time video and telemetry through open-source radio and compute hardware.
 4. A Single Software Binary (SSB) is simple to deploy and use.
-5. With Open Assembly Instructions, the robot system can be assembled in a garage with the correct tools and parts.
-6. Maintainable Parts and Code ensure robot parts and code are designed to be maintainable and upgradeable, working in a cyclic ecosystem.
+5. Open Assembly Instructions allow the robot system to be assembled in a garage with the correct tools and parts.
+6. Maintainable Parts and Code create a cyclic ecosystem.
 
 ## Features
 ### Dialtone Autocode: System-Tuned Language Model and Self-Modifying Code
@@ -100,14 +100,18 @@ Dialtone aims to combine human intuition and machine precision into a unified me
 # Test-Driven Development (TDD)
 Dialtone is built with a "Test-First" philosophy. Every function, feature, and plugin must have automated tests. The system is designed such that the tests drive the development process.
 
-# How to use `dialtone.sh` CLI and `git` for development
+# `dialtone` development and CLI
 1. Use only these two tools as much as possible `dialtone.sh` CLI and `git`
 2. Always run `./dialtone.sh ticket start <ticket-name>` before making any changes.
 3. `dialtone.sh` is a simple wrapper around `src/dev.go`
 
-## Installation & Setup
+## Clone
 ```bash
 git clone https://github.com/timcash/dialtone.git # Clone the repo
+```
+
+## Installation & Setup
+```bash
 git pull origin main # update main so you can integrate it into your ticket
 mv -n .env.example .env # Only if .env does not exists
 ./dialtone.sh install # Install dev dependencies
@@ -117,11 +121,13 @@ mv -n .env.example .env # Only if .env does not exists
 ## Ticket Lifecycle
 ```bash
 ./dialtone.sh ticket add <ticket-name> # Add a ticket.md to tickets/<ticket-name>/
-./dialtone.sh ticket start <ticket-name> # Start work (branch + scaffolding)
+./dialtone.sh ticket start <ticket-name> # Creates branch and draft pull-request
 ./dialtone.sh ticket subtask list <ticket-name> # List all subtasks in tickets/<ticket-name>/ticket.md
+./dialtone.sh ticket subtask next <ticket-name> # prints the next todo or process subtask for this ticket
+./dialtone.sh ticket subtask test <ticket-name> <subtask-name> # Runs the subtask test
 ./dialtone.sh ticket subtask done <ticket-name> <subtask-name> # mark a subtask as done
 ./dialtone.sh ticket test <ticket-name> # Runs tests in tickets/<ticket-name>/test/
-./dialtone.sh ticket done <ticket-name>  # Final verification before submission
+./dialtone.sh ticket done <ticket-name>  # Final verification and pull-request submission
 ```
 
 ## Running Tests: Tests are the most important concept in `dialtone`
@@ -163,13 +169,15 @@ mv -n .env.example .env # Only if .env does not exists
 ./dialtone.sh github check-deploy # Verify Vercel deployment status
 ```
 
-## Git Hygiene
+## Git Workflow
 ```bash
 git status                        # Check git status
 git add .                         # Add all changes
 git commit -m "feat|fix|chore|docs: description" # Commit changes
-git push                          # Push changes
+git push --set-upstream origin <branch-name> # push branch to remote first time
+git push                          # Push updated branch to remote
 git pull origin main              # Pull changes
+git merge main                    # Merge main into current branch
 ```
 
 ## Develop the WWW site
@@ -249,10 +257,6 @@ flowchart TD
 7. `./example_code` - Contains example code for helping integration or guiding design.
 9. `README.md` - Contains information for users to understand this repo at a high level.
 12. `./dialtone.sh` - CLI tool for that wraps `src/dev.go` development (Linux/macOS/WSL).
-
-# Tickets and Development Workflow
-Tickets are the primary unit of work in the system. They are used to track changes to the system.
-
 
 ## Ticket Structure
 For tickets created via `./dialtone.sh ticket start <ticket-name>`:

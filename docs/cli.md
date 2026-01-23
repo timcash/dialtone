@@ -5,21 +5,22 @@
 
 ## Installation & Setup
 ```bash
-git clone https://github.com/timcash/dialtone.git # Clone the repo
 git pull origin main # update main so you can integrate it into your ticket
 mv -n .env.example .env # Only if .env does not exists
-./dialtone.sh install # Install dev dependencies
-./dialtone.sh install --remote # Install dev dependencies on remote robot
+./dialtone.sh install # Verify and install dev dependencies
+./dialtone.sh install --remote # Verify and install dev dependencies on remote robot
 ```
 
 ## Ticket Lifecycle
 ```bash
 ./dialtone.sh ticket add <ticket-name> # Add a ticket.md to tickets/<ticket-name>/
-./dialtone.sh ticket start <ticket-name> # Start work (branch + scaffolding)
+./dialtone.sh ticket start <ticket-name> # Creates branch and draft pull-request
 ./dialtone.sh ticket subtask list <ticket-name> # List all subtasks in tickets/<ticket-name>/ticket.md
+./dialtone.sh ticket subtask next <ticket-name> # prints the next todo or process subtask for this ticket
+./dialtone.sh ticket subtask test <ticket-name> <subtask-name> # Runs the subtask test
 ./dialtone.sh ticket subtask done <ticket-name> <subtask-name> # mark a subtask as done
 ./dialtone.sh ticket test <ticket-name> # Runs tests in tickets/<ticket-name>/test/
-./dialtone.sh ticket done <ticket-name>  # Final verification before submission
+./dialtone.sh ticket done <ticket-name>  # Final verification and pull-request submission
 ```
 
 ## Running Tests: Tests are the most important concept in `dialtone`
@@ -61,13 +62,15 @@ mv -n .env.example .env # Only if .env does not exists
 ./dialtone.sh github check-deploy # Verify Vercel deployment status
 ```
 
-## Git Hygiene
+## Git Workflow
 ```bash
 git status                        # Check git status
 git add .                         # Add all changes
 git commit -m "feat|fix|chore|docs: description" # Commit changes
-git push                          # Push changes
+git push --set-upstream origin <branch-name> # push branch to remote first time
+git push                          # Push updated branch to remote
 git pull origin main              # Pull changes
+git merge main                    # Merge main into current branch
 ```
 
 ## Develop the WWW site
