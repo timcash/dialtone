@@ -85,7 +85,7 @@ func runMerge(args []string) {
 	if len(args) > 0 {
 		cmdArgs = append(cmdArgs, args...)
 	} else {
-		cmdArgs = append(cmdArgs, "--merge", "--delete-branch")
+		cmdArgs = append(cmdArgs, "--merge")
 	}
 
 	cmd := exec.Command(gh, cmdArgs...)
@@ -112,7 +112,8 @@ func runClose(args []string) {
 	if len(args) > 0 {
 		cmdArgs = append(cmdArgs, args...)
 	} else {
-		cmdArgs = append(cmdArgs, "--delete-branch")
+		// Default: just close
+		// cmdArgs = append(cmdArgs)
 	}
 	
 	cmd := exec.Command(gh, cmdArgs...)
