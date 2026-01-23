@@ -65,8 +65,44 @@ func RunStart(args []string) {
 		logInfo("Created %s", ticketTaskMd)
 	}
 
-
 	logInfo("Ticket %s started successfully", ticketName)
+}
+
+// RunNew handles 'ticket new <ticket-name>'
+func RunNew(args []string) {
+	if len(args) < 1 {
+		logFatal("Usage: ticket new <ticket-name>")
+	}
+
+	arg := args[0]
+	ticketName := GetTicketName(arg)
+
+	// 1. Create directory
+	ticketDir := filepath.Join("tickets", ticketName)
+	ensureDir(ticketDir)
+
+	// 2. Copy ticket.md template
+	templatePath := filepath.Join("tickets", "template-ticket", "ticket.md")
+	targetPath := filepath.Join(ticketDir, "ticket.md")
+
+	if _, err := os.Stat(templatePath); os.IsNotExist(err) {
+		logFatal("Template ticket not found at %s", templatePath)
+	}
+
+	content, err := os.ReadFile(templatePath)
+	if err != nil {
+		logFatal("Failed to read template: %v", err)
+	}
+
+	// 3. Replace placeholders (if any)
+	// Typically templates have '# Branch: ticket-short-name'
+	updatedContent := strings.ReplaceAll(string(content), "ticket-short-name", ticketName)
+
+	if err := os.WriteFile(targetPath, []byte(updatedContent), 0644); err != nil {
+		logFatal("Failed to write ticket.md: %v", err)
+	}
+
+	logInfo("Created %s from template", targetPath)
 }
 
 // RunTest handles 'ticket test <ticket-name>'
@@ -157,7 +193,7 @@ func GetTicketName(arg string) string {
 					return name
 				}
 			}
-			
+
 			logInfo("No '# Branch:' found in %s, using filename as ticket name", arg)
 			base := filepath.Base(arg)
 			return strings.TrimSuffix(base, filepath.Ext(base))
