@@ -56,54 +56,39 @@ func RunStart(args []string) {
 	// Create test templates
 	createTestTemplates(filepath.Join(ticketDir, "test"), ticketName)
 
-	ticketTaskMd := filepath.Join(ticketDir, "task.md")
-	if _, err := os.Stat(ticketTaskMd); os.IsNotExist(err) {
-		content := fmt.Sprintf("# Task: %s\n\n- [ ] Initial setup\n", ticketName)
-		if err := os.WriteFile(ticketTaskMd, []byte(content), 0644); err != nil {
-			logFatal("Failed to create task.md: %v", err)
+	// Copy ticket.md template
+	ticketMd := filepath.Join(ticketDir, "ticket.md")
+	if _, err := os.Stat(ticketMd); os.IsNotExist(err) {
+		templatePath := filepath.Join("docs", "ticket-template.md")
+		content, err := os.ReadFile(templatePath)
+		if err == nil {
+			// Replace placeholders
+			newContent := strings.ReplaceAll(string(content), "<branch-name>", ticketName)
+			newContent = strings.ReplaceAll(newContent, "<ticket-name>", ticketName)
+			
+			if err := os.WriteFile(ticketMd, []byte(newContent), 0644); err != nil {
+				logFatal("Failed to write ticket.md: %v", err)
+			}
+			logInfo("Created %s from %s", ticketMd, templatePath)
+		} else {
+			logInfo("Warning: Template %s not found, skipping ticket.md creation.", templatePath)
 		}
-		logInfo("Created %s", ticketTaskMd)
+	}
+
+	progressTxt := filepath.Join(ticketDir, "progress.txt")
+	if _, err := os.Stat(progressTxt); os.IsNotExist(err) {
+		content := fmt.Sprintf("Progress log for %s\n\n", ticketName)
+		if err := os.WriteFile(progressTxt, []byte(content), 0644); err != nil {
+			logFatal("Failed to create progress.txt: %v", err)
+		}
+		logInfo("Created %s", progressTxt)
 	}
 
 	logInfo("Ticket %s started successfully", ticketName)
+	logReminder(ticketName)
 }
 
-// RunNew handles 'ticket new <ticket-name>'
-func RunNew(args []string) {
-	if len(args) < 1 {
-		logFatal("Usage: ticket new <ticket-name>")
-	}
 
-	arg := args[0]
-	ticketName := GetTicketName(arg)
-
-	// 1. Create directory
-	ticketDir := filepath.Join("tickets", ticketName)
-	ensureDir(ticketDir)
-
-	// 2. Copy ticket.md template
-	templatePath := filepath.Join("tickets", "template-ticket", "ticket.md")
-	targetPath := filepath.Join(ticketDir, "ticket.md")
-
-	if _, err := os.Stat(templatePath); os.IsNotExist(err) {
-		logFatal("Template ticket not found at %s", templatePath)
-	}
-
-	content, err := os.ReadFile(templatePath)
-	if err != nil {
-		logFatal("Failed to read template: %v", err)
-	}
-
-	// 3. Replace placeholders (if any)
-	// Typically templates have '# Branch: ticket-short-name'
-	updatedContent := strings.ReplaceAll(string(content), "ticket-short-name", ticketName)
-
-	if err := os.WriteFile(targetPath, []byte(updatedContent), 0644); err != nil {
-		logFatal("Failed to write ticket.md: %v", err)
-	}
-
-	logInfo("Created %s from template", targetPath)
-}
 
 // RunTest handles 'ticket test <ticket-name>'
 func RunTest(args []string) {
@@ -125,8 +110,10 @@ func RunTest(args []string) {
 		logFatal("Tests failed: %v", err)
 	}
 	logInfo("All tests passed.")
+	logReminder(ticketName)
 }
 
+// RunDone handles 'ticket done <ticket-name>'
 // RunDone handles 'ticket done <ticket-name>'
 func RunDone(args []string) {
 	if len(args) < 1 {
@@ -134,38 +121,65 @@ func RunDone(args []string) {
 	}
 	ticketName := args[0]
 
-	// 1. Verify ticket.md subtasks
-	// Assuming ticket.md is in tickets/<ticketName>/ticket.md
-	ticketMd := filepath.Join("tickets", ticketName, "ticket.md")
-	if _, err := os.Stat(ticketMd); err == nil {
-		content, err := os.ReadFile(ticketMd)
-		if err != nil {
-			logFatal("Failed to read ticket.md: %v", err)
+	// 1. Verify all subtasks are done (except 'ticket-done')
+	subtasks, err := parseSubtasks(ticketName)
+	if err != nil {
+		logFatal("Failed to parse subtasks: %v", err)
+	}
+	for _, st := range subtasks {
+		if st.Name != "ticket-done" && st.Status != "done" {
+			logFatal("Subtask '%s' is not done (status: %s). All subtasks must be done before completing the ticket.", st.Name, st.Status)
 		}
+	}
+	logInfo("All subtasks verified as done (excluding 'ticket-done').")
 
-		lines := strings.Split(string(content), "\n")
-		for i, line := range lines {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "- status:") {
-				// Parse status value
-				parts := strings.SplitN(trimmed, ":", 2)
-				if len(parts) == 2 {
-					statusVal := strings.TrimSpace(parts[1])
-					if statusVal != "done" {
-						logFatal("Ticket has incomplete subtask at line %d: '%s' (expected 'status: done')", i+1, trimmed)
-					}
-				}
-			}
-		}
-		logInfo("All subtasks in ticket.md are verified as 'status: done'.")
-	} else {
-		logInfo("Warning: ticket.md not found at %s, skipping subtask verification.", ticketMd)
+	// 2. Run all tests
+	logInfo("Running all tests...")
+	testCmd := exec.Command("./dialtone.sh", "test")
+	testCmd.Stdout = os.Stdout
+	testCmd.Stderr = os.Stderr
+	if err := testCmd.Run(); err != nil {
+		logFatal("Tests failed: %v", err)
+	}
+	logInfo("All tests passed.")
+
+	// 3. Verify git status
+	cmd := exec.Command("git", "status", "--porcelain")
+	output, err := cmd.Output()
+	if err != nil {
+		logFatal("Failed to run git status: %v", err)
+	}
+	if len(strings.TrimSpace(string(output))) > 0 {
+		logFatal("Uncommitted changes detected. Please commit or stash them before running ticket done.\n%s", string(output))
+	}
+	logInfo("Git status clean.")
+
+	// 4. GitHub PR
+	logInfo("Updating Pull Request...")
+	prCmd := exec.Command("./dialtone.sh", "github", "pr")
+	prCmd.Stdout = os.Stdout
+	prCmd.Stderr = os.Stderr
+	if err := prCmd.Run(); err != nil {
+		logFatal("Failed to update PR: %v", err)
 	}
 
-	// 2. Run tests
-	RunTest(args)
+	// 5. Mark 'ticket-done' as done
+	// We'll proceed even if it doesn't exist, but if it does, it will now be marked done.
+	// Since parseSubtasks worked, we know if it exists.
+	for _, st := range subtasks {
+		if st.Name == "ticket-done" {
+			RunSubtaskDone(ticketName, "ticket-done")
+			logInfo("Marked 'ticket-done' subtask as done.")
+			break
+		}
+	}
 
-	logInfo("Ticket %s verified as DONE.", ticketName)
+	logInfo("Ticket %s done setup complete.", ticketName)
+	logReminder(ticketName)
+}
+
+func logReminder(ticketName string) {
+	fmt.Printf("\nREMINDER: remember to update tickets/%s/progress.txt with important notes\n", ticketName)
 }
 
 func ensureDir(path string) {
