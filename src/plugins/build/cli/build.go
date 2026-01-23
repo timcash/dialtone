@@ -176,10 +176,16 @@ func buildLocally(targetArch string) {
 	if _, err := os.Stat(depsDir); err == nil {
 		logger.LogInfo("Using local dependencies from %s", depsDir)
 
-		// Add Go and Node to PATH
-		goBin := filepath.Join(depsDir, "go", "bin")
-		nodeBin := filepath.Join(depsDir, "node", "bin")
-		os.Setenv("PATH", fmt.Sprintf("%s:%s:%s", goBin, nodeBin, os.Getenv("PATH")))
+		// Prepend dependencies to PATH (Go, Node, Zig, Pixi, GH)
+		paths := []string{
+			filepath.Join(depsDir, "go", "bin"),
+			filepath.Join(depsDir, "node", "bin"),
+			filepath.Join(depsDir, "zig"),
+			filepath.Join(depsDir, "gh", "bin"),
+			filepath.Join(depsDir, "pixi"),
+		}
+		newPath := strings.Join(paths, string(os.PathListSeparator)) + string(os.PathListSeparator) + os.Getenv("PATH")
+		os.Setenv("PATH", newPath)
 
 		// If local GNU toolchains exist, prioritize them for cross-compilation
 		gcc64Bin := filepath.Join(depsDir, "gcc-aarch64", "bin", "aarch64-none-linux-gnu-gcc")
@@ -206,7 +212,6 @@ func buildLocally(targetArch string) {
 			// If Zig exists, use it as C compiler
 			zigPath := filepath.Join(depsDir, "zig", "zig")
 			if _, err := os.Stat(zigPath); err == nil {
-				absZig, _ := filepath.Abs(zigPath)
 				target := "x86_64-linux-gnu" // default
 				if targetArch == "arm64" {
 					target = "aarch64-linux-gnu"
@@ -217,7 +222,10 @@ func buildLocally(targetArch string) {
 					os.Setenv("GOOS", "linux")
 					os.Setenv("GOARCH", "arm")
 				}
-				os.Setenv("CC", fmt.Sprintf("%s cc -target %s", absZig, target))
+				
+				// Configure Zig as CC/CXX
+				os.Setenv("CC", fmt.Sprintf("zig cc -target %s", target))
+				os.Setenv("CXX", fmt.Sprintf("zig c++ -target %s", target))
 				compilerFound = true
 			}
 		}

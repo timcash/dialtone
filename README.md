@@ -16,25 +16,25 @@ Dialtone aims to combine human intuition and machine precision into a unified me
 ## Features
 ### Dialtone Autocode: System-Tuned Language Model and Self-Modifying Code
 - The CLI (Command Line Interface) contains a deep neural network to modify the source code when requested.
-- It overcomes unforeseen challenges live by adapting the code with human-in-the-loop feedback.
+- Autocode overcomes unforeseen challenges live by adapting the code with human-in-the-loop feedback.
 - Code can be modified to fix bugs, improve performance, or add new features.
-- It includes an integrated development assistant trained on Dialtone's source code and hardware specifications.
-- It provides context-aware code generation for new robot plugins and control logic.
+- The Autocode assistant includes an integrated development assistant trained on Dialtone's source code and hardware specifications.
+- Autocode provides context-aware code generation for new robot plugins and control logic.
 - Users can share `Dialtone Autocode` sessions with a web link.
 
 ### Dialtone CLI: Simple Single Binary to Connect and Control Any Robot
-- It offers cross-platform support for Windows, macOS, and Linux.
+- Dialtone CLI offers cross-platform support for Windows, macOS, and Linux.
 - Single command builds and deploys for ARM64 targets like Raspberry Pi.
 - The binary contains tools to connect and copy itself to other devices.
 
 ### Dialtone VPN: Built-in Virtual Private Network and Peer Discovery
 - Users on the network are identified by unique IDs.
-- It supports Access Control Lists (ACLs) for users and robots.
+- The VPN plugin supports Access Control Lists (ACLs) for users and robots.
 
 ### Dialtone Bus: Scalable Command and Control Data Structures
-- It uses request/reply patterns for commands.
-- It supports queuing for fanout and load balancing.
-- It enables streaming for live or replay of telemetry and video.
+- Dialtone Bus uses request/reply patterns for commands.
+- The Bus supports queuing for fanout and load balancing.
+- The Data Bus enables streaming for live or replay of telemetry and video.
 
 ### Dialtone Autoconfig: Automated Discovery and Configuration
 - **Sensors**: Plug-and-play support for cameras (V4L2), microphones, IMUs, and LIDAR.
@@ -100,6 +100,88 @@ Dialtone aims to combine human intuition and machine precision into a unified me
 # Test-Driven Development (TDD)
 Dialtone is built with a "Test-First" philosophy. Every function, feature, and plugin must have automated tests. The system is designed such that the tests drive the development process.
 
+# Dialtone CLI Quickstart
+```bash
+# Clone the repo
+git clone https://github.com/timcash/dialtone.git
+
+# Fill in .env.example and rename it to .env 
+# if .env does not exist
+mv -n .env.example .env
+
+# Install tools
+./dialtone.sh install
+
+# Verify installation
+./dialtone.sh install --check
+
+# Start work (branch + scaffolding)
+./dialtone.sh ticket start <name>
+
+# Final verification before submission
+./dialtone.sh ticket done <name>
+
+# Runs tests in tickets/<name>/test/
+./dialtone.sh ticket test <ticket-name>
+
+# Runs tests in src/plugins/<name>/test/
+./dialtone.sh plugin test <plugin-name>
+
+# Discovery across core, plugins, and tickets
+./dialtone.sh test <feature-name>
+
+# Run all tests
+./dialtone.sh test
+
+# Build Robot Web UI + local CLI + robot binary
+./dialtone.sh build --full
+
+# Push to remote robot
+./dialtone.sh deploy
+
+# Run health checks
+./dialtone.sh diagnostic
+
+# Stream remote logs
+./dialtone.sh logs --remote
+
+# --- GitHub and git Commands ---
+
+# Create or update a pull request
+./dialtone.sh github pr
+
+# Create as a draft
+./dialtone.sh github pr --draft
+
+# Verify Vercel deployment status
+./dialtone.sh github check-deploy
+
+# Git Hygiene
+# Use git add to update git and ensure .gitignore is correct. Make atomic commits.
+git add .
+git commit -m "feat|fix|chore|docs: description"
+
+# --- WWW Plugin Commands ---
+
+# Deploy the webpage to Vercel
+./dialtone.sh www publish
+
+# Build the project locally
+./dialtone.sh www build
+
+# Start local development server
+./dialtone.sh www dev
+
+# View deployment logs
+./dialtone.sh www logs <deployment-url-or-id>
+
+# Manage the dialtone.earth domain alias
+./dialtone.sh www domain [deployment-url]
+
+# Login to Vercel
+./dialtone.sh www login
+```
+
 ### Development Hierarchy
 1. **Ticket**: The first step of any change. Ideal for adding new code that can patch `core` or `plugin` code without changing it directly.
 2. **Plugin**: The second step is integrating new code into specific feature areas.
@@ -113,66 +195,13 @@ Dialtone is built with a "Test-First" philosophy. Every function, feature, and p
 5. `./docs` - Contains virtual machine and container code for assisting development and testing.
 6. `./docs/vendor/<vendor_name>` - Contains vendor documentation.
 7. `./example_code` - Contains example code for helping integration or guiding design.
-8. `AGENT.md` - Contains information for code agents to understand this repo.
 9. `README.md` - Contains information for users to understand this repo at a high level.
-10. `dialtone.go` - Contains the main entry point for the system.
-11. `dialtone-dev.go` - Contains the development entry point for the system.
 12. `./dialtone.sh` - CLI tool for that wraps `dialtone-dev` development (Linux/macOS).
 13. `./dialtone.ps1` - CLI tool for that wraps `dialtone-dev` development (Windows).
 
 ### Ticket Lifecycle
 Tickets are the primary unit of work in the system. They are used to track changes to the system.
-```bash
-# 1a. Start Work
-# Start work on a ticket (creates/certifies branch and files)
-./dialtone.sh ticket start <ticket-name>
 
-# 1b. Create Plugin (optional if the ticket needs it) 
-# Create a new plugin to fill in files for the plugin structure
-./dialtone.sh plugin create <plugin-name>
-
-# 2. Test First
-# Update a test before writing new code and run the test to show a failure.
-./dialtone.sh ticket test <ticket-name>
-
-# 3. Implement
-# Change the system until the test passes.
-# e.g. edit tickets/<ticket-name>/code/stage1.go
-
-# 3. Test Again
-# Show tests are now passing after the code changes.
-# You can run ticket-specific tests:
-./dialtone.sh ticket test <ticket-name>
-
-# Or run tests for a specific plugin if applicable:
-./dialtone.sh plugin test <plugin-name>
-
-# Or run tests for a specific feature by name:
-./dialtone.sh test <name>
-
-# 4. Track
-# Update tickets/<ticket-name>/ticket.md to reflect subtasks completed and those remaining.
-# Update tickets/<ticket-name>/task.md for scratchpad notes.
-
-# 5. Verify All Tests Pass
-# Run all tests.
-./dialtone.sh test
-
-# 6. Git Hygiene
-# Use git add to update git and ensure .gitignore is correct. Make atomic commits.
-git add .
-git commit -m "feat: description"
-
-# 7. Create Pull Request
-# Create a pull request for your changes.
-./dialtone.sh github pull-request
-
-# 8. Merge/Close Pull Request
-# After review, merge or close the pull request.
-./dialtone.sh github pull-request merge
-# or
-./dialtone.sh github pull-request close
-```
 
 ### Ticket Structure
 For tickets created via `./dialtone.sh ticket start <ticket-name>`:
@@ -187,27 +216,6 @@ For new plugins created via `./dialtone.sh plugin create <plugin-name>`:
 2. `src/plugins/<name>/cli` - CLI command code.
 3. `src/plugins/<name>/test` - Plugin-specific tests.
 4. `src/plugins/<name>/README.md` - Plugin documentation.
-
-## Quick Start (WSL/Linux No-Sudo)
-
-The fastest way to get started on WSL or Linux without administrative privileges:
-```bash
-# Clone the repo
-git clone https://github.com/timcash/dialtone.git
-export DIALTONE_ENV="~/dialtone_env"
-
-# Install dependencies, and setup environment (Linux/macOS)
-./dialtone.sh install --linux-wsl
-
-# Windows equivalent:
-./dialtone.ps1 install --linux-wsl
-
-# Perform a local build of the robot binary(includes Web UI and Camera support)
-./dialtone.sh build
-
-# Start the robot node locally (not the development cli)
-./dialtone.sh robot start
-```
 
 # Join the Mission
 Dialtone is an open project with an ambitious goal. We are looking for:
