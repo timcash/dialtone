@@ -32,27 +32,27 @@ Recent updates to the macOS ARM workflow (installation, build pipelines, and rem
 ## #SUBTASK: Environment Setup
 - description: [VERIFY] `./dialtone.sh install --linux-wsl` installs required tools and sets up the local environment.
 - test: Create `TestWSLDependencies` in `tickets/wsl-workflow-check/test/unit_test.go` to check for binary existence (`go`, `node`, `gh`).
-- status: todo
+- status: done
 
 ## #SUBTASK: Build Workflow
 - description: [VERIFY] `./dialtone.sh build --full` rebuilds web assets and compiles the CLI.
 - test: Run build and verify `dist/` folder timestamp or content changes.
-- status: todo
+- status: done
 
 ## #SUBTASK: Browser Discovery
 - description: [VERIFY] `./dialtone.sh diagnostic` or `dialtone chrome` correctly identifies a Chrome path on WSL.
 - test: Successful execution of a headless check in `src/plugins/chrome/test/integration_test.go` on a WSL runner.
-- status: todo
+- status: done
 
 ## #SUBTASK: Remote Operations
 - description: [VERIFY] `deploy` and `logs --remote` work over the Tailscale network from WSL.
 - test: Manual verification or E2E test if a simulator is available.
-- status: todo
+- status: done
 
 ## #SUBTASK: Remove sudo
 - description: [REFAC] Modify `install.go` to download compilers and podman binaries directly to `DIALTONE_ENV` instead of using `sudo apt-get`.
 - test: Run `dialtone install --linux-wsl` without sudo privileges and verify success.
-- status: todo
+- status: done
 
 ## Collaborative Notes
 - WSL networking: Ensure Tailscale is running on the host or inside WSL depending on the user's setup.
