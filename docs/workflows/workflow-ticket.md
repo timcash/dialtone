@@ -1,9 +1,6 @@
 ---
 description: Ticket process for code and testing
 ---
-
-Complete each subtask one at a time
-
 ## SUBTASK: Research
 - description: Explore relevant files and documentation.
 - command: Create a failing unit test in `tickets/<ticket-name>/test/unit_test.go`.
