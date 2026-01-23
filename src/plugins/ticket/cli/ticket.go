@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func logInfo(format string, args ...interface{}) {
@@ -102,6 +103,10 @@ func RunStart(args []string) {
 	if err := pushCmd.Run(); err != nil {
 		logFatal("Failed to push branch: %v", err)
 	}
+
+	logInfo("Waiting for GitHub to sync...")
+	// Wait a moment for GitHub to register the new branch before creating PR
+	time.Sleep(2 * time.Second)
 
 	logInfo("Creating Pull Request...")
 	prCmd := exec.Command("./dialtone.sh", "github", "pr")
