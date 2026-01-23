@@ -1,82 +1,83 @@
-# Dialtone CLI Reference
+# How to use `dialtone.sh` CLI and `git` for development
+1. Use only these two tools as much as possible `dialtone.sh` CLI and `git`
+2. Always run `./dialtone.sh ticket start <ticket-name>` before making any changes.
+3. `dialtone.sh` is a simple wrapper around `src/dev.go`
 
+## Installation & Setup
 ```bash
-# Clone the repo
-git clone https://github.com/timcash/dialtone.git
-
-# Fill in .env.example and rename it to .env 
-# if .env does not exist
-mv -n .env.example .env
-
-# Install tools
-./dialtone.sh install
-
-# Verify installation
-./dialtone.sh install --check
-
-# Start work (branch + scaffolding)
-./dialtone.sh ticket start <ticket-name>
-
-# Final verification before submission
-./dialtone.sh ticket done <ticket-name>
-
-# Runs tests in tickets/<ticket-name>/test/
-./dialtone.sh ticket test <ticket-name>
-
-# Runs tests in src/plugins/<plugin-name>/test/
-./dialtone.sh plugin test <plugin-name>
-
-# Discovery across core, plugins, and tickets
-./dialtone.sh test <feature-name>
-
-# Run all tests
-./dialtone.sh test
-
-# Build Web UI + local CLI + robot binary
-./dialtone.sh build --full
-
-# Push to remote robot
-./dialtone.sh deploy
-
-# Run health checks
-./dialtone.sh diagnostic
-
-# Stream remote logs
-./dialtone.sh logs --remote
-
-# --- GitHub and git Commands ---
-
-# Create or update a pull request
-./dialtone.sh github pr
-
-# Create as a draft
-./dialtone.sh github pr --draft
-
-# Verify Vercel deployment status
-./dialtone.sh github check-deploy
-
-# Git Hygiene
-# Use git add to update git and ensure .gitignore is correct. Make atomic commits.
-git add .
-git commit -m "feat|fix|chore|docs: description"
-
-# --- WWW Plugin Commands ---
-
-# Deploy the webpage to Vercel
-./dialtone.sh www publish
-
-# Build the project locally
-./dialtone.sh www build
-
-# Start local development server
-./dialtone.sh www dev
-
-# View deployment logs
-./dialtone.sh www logs <deployment-url-or-id>
-
-# Manage the dialtone.earth domain alias
-./dialtone.sh www domain [deployment-url]
-
-# Login to Vercel
-./dialtone.sh www login
+git clone https://github.com/timcash/dialtone.git # Clone the repo
+git pull origin main # update main so you can integrate it into your ticket
+mv -n .env.example .env # Only if .env does not exists
+./dialtone.sh install # Install dev dependencies
+./dialtone.sh install --remote # Install dev dependencies on remote robot
 ```
+
+## Ticket Lifecycle
+```bash
+./dialtone.sh ticket add <ticket-name> # Add a ticket.md to tickets/<ticket-name>/
+./dialtone.sh ticket start <ticket-name> # Start work (branch + scaffolding)
+./dialtone.sh ticket subtask list <ticket-name> # List all subtasks in tickets/<ticket-name>/ticket.md
+./dialtone.sh ticket subtask done <ticket-name> <subtask-name> # mark a subtask as done
+./dialtone.sh ticket test <ticket-name> # Runs tests in tickets/<ticket-name>/test/
+./dialtone.sh ticket done <ticket-name>  # Final verification before submission
+```
+
+## Running Tests: Tests are the most important concept in `dialtone`
+```bash
+./dialtone.sh ticket test <ticket-name> # Runs tests in tickets/<ticket-name>/test/
+./dialtone.sh plugin test <plugin-name> # Runs tests in src/plugins/<plugin-name>/test/
+./dialtone.sh test <tag1> <tag2> <tag3> # Scans all tests for any of these tags
+./dialtone.sh test # runs all tests
+```
+
+## Logs
+```bash
+./dialtone.sh logs # Tail and stream local logs
+./dialtone.sh logs --remote # Tail and stream remote logs
+./dialtone.sh logs --lines 10 # get the last 10 lines of local logs
+./dialtone.sh logs --remote --lines 10 # get the last 10 lines of remote logs
+```
+
+## Plugin Lifecycle
+```bash
+./dialtone.sh plugin add <plugin-name> # Add a README.md to src/plugins/<plugin-name>/README.md
+./dialtone.sh plugin install <plugin-name> # Install dependencies
+./dialtone.sh plugin build <plugin-name> # Build the plugin
+./dialtone.sh plugin test <plugin-name> # Runs tests in src/plugins/<plugin-name>/test/
+```
+
+## Build & Deploy
+```bash
+./dialtone.sh build --full  # Build Web UI + local CLI + robot binary
+./dialtone.sh deploy        # Push to remote robot
+./dialtone.sh diagnostic    # Run tests on remote robot
+./dialtone.sh logs --remote # Stream remote logs
+```
+
+## GitHub & Pull Requests
+```bash
+./dialtone.sh github pr           # Create or update a pull request
+./dialtone.sh github pr --draft   # Create as a draft
+./dialtone.sh github check-deploy # Verify Vercel deployment status
+```
+
+## Git Hygiene
+```bash
+git status                        # Check git status
+git add .                         # Add all changes
+git commit -m "feat|fix|chore|docs: description" # Commit changes
+git push                          # Push changes
+git pull origin main              # Pull changes
+```
+
+## Develop the WWW site
+```bash
+./dialtone.sh www dev # Start local development server
+./dialtone.sh www build # Build the project locally
+./dialtone.sh www publish # Deploy the webpage to Vercel
+./dialtone.sh www logs <deployment-url-or-id> # View deployment logs
+./dialtone.sh www domain [deployment-url] # Manage the dialtone.earth domain alias
+./dialtone.sh www login # Login to Vercel
+```
+
+

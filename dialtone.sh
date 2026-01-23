@@ -1,38 +1,50 @@
 #!/bin/bash
 set -e
 
-# Basic Go check
-if ! command -v go >/dev/null 2>&1; then
-    # Try common local install paths
-    LOCAL_GO_PATHS=(
-        "$HOME/.dialtone_env/go/bin/go"
-        "$(pwd)/dialtone_dependencies/go/bin/go"
-        "$HOME/.local/go/bin/go"
-    )
-    
-    for path in "${LOCAL_GO_PATHS[@]}"; do
-        if [ -f "$path" ]; then
-            export PATH="$(dirname "$path"):$PATH"
-            break
-        fi
-    done
+# 1. Resolve DIALTONE_ENV from args
+for i in "$@"; do
+    case $i in
+        --env=*)
+            DIALTONE_ENV="${i#*=}"
+            shift
+            ;;
+        --env)
+            DIALTONE_ENV="$2"
+            shift 2
+            ;;
+    esac
+done
+
+# 2. Resolve DIALTONE_ENV from .env if not set by arg
+if [ -z "$DIALTONE_ENV" ] && [ -f .env ]; then
+    DIALTONE_ENV=$(grep "^DIALTONE_ENV=" .env | cut -d '=' -f2)
 fi
 
-# Final Go check and bootstrap if still missing
-if ! command -v go >/dev/null 2>&1; then
-    GO_VERSION="1.25.5"
-    INSTALL_DIR="$HOME/.dialtone_env/go"
-    echo "Go not found. Bootstrapping Go $GO_VERSION to $INSTALL_DIR..."
-    
-    mkdir -p "$HOME/.dialtone_env"
-    TAR_FILE="go$GO_VERSION.linux-amd64.tar.gz"
-    curl -LO "https://go.dev/dl/$TAR_FILE"
-    tar -C "$HOME/.dialtone_env" -xzf "$TAR_FILE"
-    rm "$TAR_FILE"
-    
-    export PATH="$INSTALL_DIR/bin:$PATH"
+# 3. Warn if DIALTONE_ENV is missing
+if [ -z "$DIALTONE_ENV" ]; then
+    echo "WARNING: DIALTONE_ENV not found in args or .env."
+    echo "Please add DIALTONE_ENV=/path/to/env to your .env file."
 fi
 
-# Run the dialtone-dev tool
-# All other environment resolution and dependency checks happen in Go
+# 4. If DIALTONE_ENV found, handle Go installation
+if [ -n "$DIALTONE_ENV" ]; then
+    GO_BIN="$DIALTONE_ENV/go/bin/go"
+    
+    # Check if golang is installed in that folder
+    if [ ! -f "$GO_BIN" ]; then
+        echo "Go not found in $DIALTONE_ENV/go. Installing..."
+        GO_VERSION="1.25.5"
+        mkdir -p "$DIALTONE_ENV"
+        TAR_FILE="go$GO_VERSION.linux-amd64.tar.gz"
+        curl -LO "https://go.dev/dl/$TAR_FILE"
+        tar -C "$DIALTONE_ENV" -xzf "$TAR_FILE"
+        rm "$TAR_FILE"
+    fi
+    
+    # Update PATH to use the environment's Go
+    export PATH="$DIALTONE_ENV/go/bin:$PATH"
+fi
+
+# 5. Run the dialtone-dev tool
 exec go run src/cmd/dev/main.go "$@"
+
