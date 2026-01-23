@@ -1,9 +1,7 @@
 ---
 trigger: always_on
 ---
-
-
-## Code Style: Linear Pipelines
+# Code Style: Linear Pipelines
 Avoid "pyramid" nesting. Keep the main path of execution on the left margin.
 
 ```go
@@ -20,13 +18,13 @@ func HandleRequest(ctx *RequestContext) *RequestContext {
 }
 ```
 
-**Style Rules:**
+## Style Rules
 1. Use the project logger: `dialtone.LogInfo`, `dialtone.LogError`, `dialtone.LogFatal`.
 2. Prefer functions and structs over complicated patterns.
 3. Keep functions short and single-purpose.
 4. Name variables descriptively.
 
-## Logging
+# Logging
 Always use the project logger from `src/logger.go`:
 ```go
 dialtone.LogInfo("Starting capture")
