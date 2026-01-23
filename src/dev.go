@@ -681,6 +681,7 @@ func runTicket(args []string) {
 		fmt.Println("Usage: dialtone-dev ticket <subcommand> [options]")
 		fmt.Println("\nSubcommands:")
 		fmt.Println("  start <name>       Start a new ticket (branch + scaffold)")
+		fmt.Println("  new <name>         Create a new ticket.md from template")
 		fmt.Println("  test <name>        Run ticket tests")
 		fmt.Println("  done <name>        Verify ticket completion")
 		fmt.Println("  list [N]           List the top N tickets (GH)")
@@ -697,6 +698,8 @@ func runTicket(args []string) {
 	switch subcommand {
 	case "start":
 		ticket_cli.RunStart(subArgs)
+	case "new":
+		ticket_cli.RunNew(subArgs)
 	case "test":
 		ticket_cli.RunTest(subArgs)
 	case "done":
