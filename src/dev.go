@@ -698,12 +698,13 @@ func runTicket(args []string) {
 	switch subcommand {
 	case "start":
 		ticket_cli.RunStart(subArgs)
-	case "new":
-		ticket_cli.RunNew(subArgs)
+
 	case "test":
 		ticket_cli.RunTest(subArgs)
 	case "done":
 		ticket_cli.RunDone(subArgs)
+	case "subtask":
+		ticket_cli.RunSubtask(subArgs)
 	// Fallback to legacy GitHub CLI commands for everything else
 	// But first check if they exist to provide better error if not
 	case "list", "add", "create", "comment", "view", "close":
@@ -718,7 +719,7 @@ func runTicket(args []string) {
 
 	// Re-implement the switch for legacy or just handle legacy logic here
 	switch subcommand {
-	case "start", "test", "done":
+	case "start", "test", "done", "subtask":
 		return // Already handled
 	case "list":
 
