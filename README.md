@@ -108,6 +108,7 @@ Dialtone is built with a "Test-First" philosophy. Every function, feature, and p
 ## Clone
 ```bash
 git clone https://github.com/timcash/dialtone.git # Clone the repo
+cd dialtone
 ```
 
 ## Installation & Setup
