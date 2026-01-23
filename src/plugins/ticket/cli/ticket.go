@@ -104,9 +104,25 @@ func RunStart(args []string) {
 		logFatal("Failed to push branch: %v", err)
 	}
 
-	logInfo("Waiting for GitHub to sync...")
-	// Wait a moment for GitHub to register the new branch before creating PR
-	time.Sleep(2 * time.Second)
+	// Wait for GitHub to sync (exponential backoff)
+	logInfo("Verifying branch on remote...")
+	backoff := 100 * time.Millisecond
+	maxRetries := 10
+	for i := 0; i < maxRetries; i++ {
+		// Check if branch exists on remote
+		checkCmd := exec.Command("git", "ls-remote", "--exit-code", "--heads", "origin", ticketName)
+		if err := checkCmd.Run(); err == nil {
+			logInfo("Branch verified on remote.")
+			break
+		}
+		
+		if i == maxRetries-1 {
+			logFatal("Timed out waiting for branch to appear on remote.")
+		}
+
+		time.Sleep(backoff)
+		backoff *= 2
+	}
 
 	logInfo("Creating Pull Request...")
 	prCmd := exec.Command("./dialtone.sh", "github", "pr")
