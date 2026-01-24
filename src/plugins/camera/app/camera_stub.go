@@ -1,10 +1,11 @@
 //go:build !linux || (linux && !cgo)
 
-package dialtone
+package camera
 
 import (
 	"context"
 	"net/http"
+	"time"
 )
 
 // Camera info structure
@@ -23,7 +24,16 @@ func StartCamera(ctx context.Context, devName string) error {
 	return nil
 }
 
+// StopCamera is a no-op on non-linux platforms.
+func StopCamera() {
+}
+
 // StreamHandler returns a not implemented error on non-linux platforms.
 func StreamHandler(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Camera streaming is only supported on Linux", http.StatusNotImplemented)
+}
+
+// GetLatestFrame returns nil on non-linux platforms.
+func GetLatestFrame() ([]byte, time.Time) {
+	return nil, time.Time{}
 }
