@@ -1,0 +1,2 @@
+Progress log for add-logs-lines-flag
+
