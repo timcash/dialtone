@@ -31,22 +31,7 @@ func GetDialtoneEnv() string {
 		return absEnv
 	}
 
-	cwd, _ := os.Getwd()
-	for {
-		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
-			localPath := filepath.Join(cwd, "dialtone_dependencies")
-			if _, err := os.Stat(localPath); err == nil {
-				absPath, _ := filepath.Abs(localPath)
-				return absPath
-			}
-		}
-		parent := filepath.Dir(cwd)
-		if parent == cwd {
-			break
-		}
-		cwd = parent
-	}
-
+	// If DIALTONE_ENV is not set, use the default path in the user's home directory.
 	home, _ := os.UserHomeDir()
 	defaultPath := filepath.Join(home, ".dialtone_env")
 	absPath, _ := filepath.Abs(defaultPath)
