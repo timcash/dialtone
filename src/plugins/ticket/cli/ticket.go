@@ -151,7 +151,7 @@ func RunTest(args []string) {
 	}
 
 	logInfo("Running tests in %s...", testDir)
-	cmd := exec.Command("go", "test", "-v", "./"+testDir+"/...")
+	cmd := exec.Command("./dialtone.sh", "test", ticketName)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -275,29 +275,29 @@ func createTestTemplates(testDir, ticketName string) {
 	templates := map[string]string{
 		"unit_test.go": fmt.Sprintf(`package test
 
-import "testing"
+import "fmt"
 
-func TestUnit_Example(t *testing.T) {
-	t.Log("Unit test for %s")
-	t.Fatal("Not implemented")
+func RunUnit() error {
+	fmt.Println("Running unit test for %s")
+	return nil
 }
 `, pkgName),
 		"integration_test.go": fmt.Sprintf(`package test
 
-import "testing"
+import "fmt"
 
-func TestIntegration_Example(t *testing.T) {
-	t.Log("Integration test for %s")
-	t.Fatal("Not implemented")
+func RunIntegration() error {
+	fmt.Println("Running integration test for %s")
+	return nil
 }
 `, pkgName),
 		"e2e_test.go": fmt.Sprintf(`package test
 
-import "testing"
+import "fmt"
 
-func TestE2E_Example(t *testing.T) {
-	t.Log("E2E test for %s")
-	t.Fatal("Not implemented")
+func RunE2E() error {
+	fmt.Println("Running E2E test for %s")
+	return nil
 }
 `, pkgName),
 	}

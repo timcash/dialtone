@@ -23,7 +23,7 @@ dialtone install --clean
 
 ## Installed Tools & Dependencies
 
-The plugin installs the following tools into `dialtone_dependencies/` (or `DIALTONE_ENV` location).
+The plugin installs the following tools into `DIALTONE_ENV` location (defaults to `~/.dialtone_env`).
 
 ### Common Dependencies
 | Tool | Version | Notes |
