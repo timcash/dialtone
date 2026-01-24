@@ -13,6 +13,7 @@ import (
 
 	"dialtone/cli/src/core/ssh"
 	build_cli "dialtone/cli/src/plugins/build/cli"
+	camera_cli "dialtone/cli/src/plugins/camera/cli"
 	chrome_cli "dialtone/cli/src/plugins/chrome/cli"
 	deploy_cli "dialtone/cli/src/plugins/deploy/cli"
 	github_cli "dialtone/cli/src/plugins/github/cli"
@@ -72,6 +73,8 @@ func ExecuteDev() {
 		runTicket(args)
 	case "plugin":
 		plugin_cli.RunPlugin(args)
+	case "camera":
+		camera_cli.RunCamera(args)
 	case "chrome":
 		chrome_cli.RunChrome(args)
 	case "mavlink":
@@ -101,6 +104,7 @@ func printDevUsage() {
 	fmt.Println("  install [path] Install dependencies (--linux-wsl for WSL, --macos-arm for Apple Silicon)")
 	fmt.Println("  build         Build web UI and binary (--local, --full, --remote, --podman, --linux-arm, --linux-arm64)")
 	fmt.Println("  deploy        Deploy to remote robot")
+	fmt.Println("  camera        Camera tools (snapshot, stream)")
 	fmt.Println("  clone         Clone or update the repository")
 	fmt.Println("  sync-code     Sync source code to remote robot")
 	fmt.Println("  ssh           SSH tools (upload, download, cmd)")
