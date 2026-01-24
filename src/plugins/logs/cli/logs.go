@@ -17,6 +17,7 @@ func RunLogs(args []string) {
 	port := fs.String("port", "22", "SSH port")
 	user := fs.String("user", os.Getenv("ROBOT_USER"), "SSH user")
 	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password")
+	lines := fs.Int("lines", 0, "Number of lines to show (default: stream logs)")
 	showHelp := fs.Bool("help", false, "Show help for logs command")
 
 	fs.Usage = func() {
@@ -26,6 +27,7 @@ func RunLogs(args []string) {
 		fmt.Println()
 		fmt.Println("Options:")
 		fmt.Println("  --remote      Stream logs from remote robot")
+		fmt.Println("  --lines       Number of lines to show (if set, does not stream)")
 		fmt.Println("  --host        SSH host (user@host) [env: ROBOT_HOST]")
 		fmt.Println("  --port        SSH port (default: 22)")
 		fmt.Println("  --user        SSH username [env: ROBOT_USER]")
@@ -46,7 +48,7 @@ func RunLogs(args []string) {
 			logger.LogFatal("Error: --host and --pass are required for remote logs")
 		}
 		
-		runRemoteLogs(*host, *port, *user, *pass)
+		runRemoteLogs(*host, *port, *user, *pass, *lines)
 	} else {
 		// Local logs (placeholder for now, or maybe just tell user to check locally)
 		logger.LogInfo("Looking for local logs...")
@@ -55,7 +57,7 @@ func RunLogs(args []string) {
 	}
 }
 
-func runRemoteLogs(host, port, user, pass string) {
+func runRemoteLogs(host, port, user, pass string, lines int) {
 	logger.LogInfo("Connecting to %s to stream logs...", host)
 	
 	client, err := ssh.DialSSH(host, port, user, pass)
@@ -66,9 +68,14 @@ func runRemoteLogs(host, port, user, pass string) {
 	
 	// We want to tail the log file. 
 	// Based on the ticket description, the start command redirects output to ~/nats.log
-	cmd := "tail -f ~/nats.log"
-	
-	logger.LogInfo("Streaming logs from ~/nats.log...")
+	var cmd string
+	if lines > 0 {
+		cmd = fmt.Sprintf("tail -n %d ~/nats.log", lines)
+		logger.LogInfo("Getting last %d lines from ~/nats.log...", lines)
+	} else {
+		cmd = "tail -f ~/nats.log"
+		logger.LogInfo("Streaming logs from ~/nats.log...")
+	}
 	
 	// Use RunSSHCommand but we actually want to stream it. 
 	// RunSSHCommand waits for completion, but tail -f runs forever. 
@@ -84,6 +91,10 @@ func runRemoteLogs(host, port, user, pass string) {
 	session.Stderr = os.Stderr
 
 	if err := session.Run(cmd); err != nil {
-		logger.LogFatal("Log streaming interrupted: %v", err)
+		// Ignore error if it's just a signal kill (which happens when user Ctrl+C)
+		// But for -n, it should exit cleanly.
+		if lines > 0 {
+			logger.LogFatal("Command failed: %v", err)
+		}
 	}
 }
