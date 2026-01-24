@@ -2,7 +2,7 @@
 
 Dialtone is aspirationally a **robotic video operations network** designed to allow humans and AI to cooperatively train and operate thousands of robots simultaneously with low latency. Dialtone is open source and free to use and lets people get paid to build, train and operate robots.
 
-![dialtone](./dialtone.png)
+![dialtone](./dialtone.jpg)
 
 # Vision
 Dialtone aims to combine human intuition and machine precision into a unified mesh network, making robotic hardware for factory, field, civic, and home automation widely available.
