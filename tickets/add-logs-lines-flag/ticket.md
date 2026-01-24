@@ -9,14 +9,14 @@
 - description: to start work run the cli command `dialtone.sh ticket start add-logs-lines-flag`
 - test-description: run the ticket tests to verify that the ticket is in a valid state
 - test-command: `dialtone.sh ticket test add-logs-lines-flag`
-- status: todo
+- status: done
 
-## SUBTASK: <subtask-title>
-- name: <subtask-name> (only lowercase and dashes)
-- description: <description>
-- test-description: <test-description>
-- test-command: <test-command>
-- status: todo | processing | done
+## SUBTASK: Implement --lines flag
+- name: implement-lines-flag
+- description: Add --lines flag to dialtone logs cli to allow retrieving specific number of lines
+- test-description: verify manual test with ./dialtone.sh logs --remote --lines 10
+- test-command: ./dialtone.sh logs --remote --lines 10
+- status: done
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
