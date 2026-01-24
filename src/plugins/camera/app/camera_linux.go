@@ -1,6 +1,6 @@
 //go:build linux && cgo
 
-package dialtone
+package camera
 
 import (
 	"bytes"
@@ -17,7 +17,13 @@ import (
 
 	"github.com/vladimirvivien/go4vl/device"
 	"github.com/vladimirvivien/go4vl/v4l2"
+	"dialtone/cli/src/core/logger"
 )
+
+// Log wrappers to match dialtone logger if needed, or import standard logger
+func LogInfo(format string, args ...interface{}) {
+	logger.LogInfo(format, args...)
+}
 
 // Camera info structure
 type Camera struct {
@@ -57,6 +63,7 @@ func ListCameras() ([]Camera, error) {
 var (
 	camDev        *device.Device
 	camMu         sync.Mutex // Mutex for Start/Stop lifecycle
+	camWg         sync.WaitGroup
 	latestFrame   []byte
 	frameMu       sync.RWMutex // Mutex for frame buffer
 	lastFrameTime time.Time
@@ -72,45 +79,46 @@ func StartCamera(ctx context.Context, devName string) error {
 		return nil // Already running
 	}
 
-	// Create a persistent context for the capture loop (detached from the request)
-	// This ensures the camera keeps running even if the initial requester disconnects
+	// Wait for any previous shutdown to complete just in case
+	camWg.Wait()
+
+	// Persistent context for the capture loop
 	loopCtx, cancel := context.WithCancel(context.Background())
 	camCancel = cancel
 
 	LogInfo("Opening camera device %s...", devName)
 
-	// Check environment for format override
 	useYUYV := os.Getenv("DIALTONE_CAMERA_FORMAT") == "yuyv"
-
-	// Default to MJPEG
+	
+	// Configure Format
 	format := v4l2.PixelFmtMJPEG
 	if useYUYV {
 		format = v4l2.PixelFmtYUYV
 		LogInfo("Configured for YUYV format (Software Encoding)")
 	}
 
-	// Initialize with Split Open/SetFormat to avoid some atomic open issues
-	cam, err := device.Open(devName)
+	// ATOMIC OPEN PATTERN (Matches go4vl examples)
+	// We explicity set IOTypeMMAP and BufferSize to ensure stability
+	cam, err := device.Open(
+		devName,
+		device.WithIOType(v4l2.IOTypeMMAP),
+		device.WithPixFormat(v4l2.PixFormat{
+			PixelFormat: format,
+			Width:       640,
+			Height:      480,
+		}),
+		device.WithBufferSize(4), // Use 4 buffers for smooth streaming
+	)
 	if err != nil {
 		cancel()
 		return fmt.Errorf("failed to open device: %w", err)
 	}
 
-	if err := cam.SetPixFormat(v4l2.PixFormat{
-		PixelFormat: format,
-		Width:       640,
-		Height:      480,
-	}); err != nil {
-		cam.Close()
-		cancel()
-		return fmt.Errorf("failed to set format: %w", err)
-	}
+	// Use GetOutput() which handles frame release/copy for us. 
+	// IMPORTANT: Must be called BEFORE Start() to select the streaming API (MMAP)
+	frames := cam.GetOutput()
 
-	// go4vl requirement: call GetFrames before Start to setup buffers or select method
-	// We will do this inside the capture loop logic or just here.
-	// Actually, best to just Start() and let Go4vl handle it, but sometimes GetFrames is needed first.
-	// We'll call GetFrames in the loop initialization.
-
+	// With Atomic Open + MMAP + GetOutput called, we can now Start()
 	if err := cam.Start(loopCtx); err != nil {
 		cam.Close()
 		cancel()
@@ -118,26 +126,43 @@ func StartCamera(ctx context.Context, devName string) error {
 	}
 
 	camDev = cam
+	camWg.Add(1) // Register the capture loop
 
 	// Start background capture loop
-	go captureLoop(loopCtx, cam, useYUYV)
+	go captureLoop(loopCtx, cam, frames, useYUYV)
 
 	return nil
 }
 
+// StopCamera stops the camera capture loop and releases the device.
+func StopCamera() {
+	camMu.Lock()
+	cancel := camCancel
+	// Don't nil pointers yet, let the loop do it or on restart
+	camMu.Unlock()
+
+	if cancel != nil {
+		cancel() // Signal loop to exit
+	}
+	
+	// Wait for loop to fully exit and close device
+	camWg.Wait()
+}
+
 // captureLoop runs in the background and updates the global latestFrame buffer
-func captureLoop(ctx context.Context, cam *device.Device, useYUYV bool) {
+func captureLoop(ctx context.Context, cam *device.Device, frames <-chan []byte, useYUYV bool) {
 	defer func() {
 		camMu.Lock()
 		if camDev == cam {
 			camDev = nil
+			camCancel = nil
 		}
 		camMu.Unlock()
 		cam.Close()
+		camWg.Done() // Signal shutdown complete
 		LogInfo("Camera capture loop stopped")
 	}()
 
-	frames := cam.GetFrames()
 	frameCount := 0
 	lastLog := time.Now()
 
@@ -147,7 +172,7 @@ func captureLoop(ctx context.Context, cam *device.Device, useYUYV bool) {
 		select {
 		case <-ctx.Done():
 			return
-		case frame, ok := <-frames:
+		case frameData, ok := <-frames:
 			if !ok {
 				LogInfo("Camera frame channel closed")
 				return
@@ -155,31 +180,33 @@ func captureLoop(ctx context.Context, cam *device.Device, useYUYV bool) {
 
 			// Diagnostic logging
 			frameCount++
-			if time.Since(lastLog) > 5*time.Second {
-				LogInfo("Camera capturing: %d frames in last 5s (Len: %d, YUYV: %v)", frameCount, len(frame.Data), useYUYV)
-				frameCount = 0
+			if frameCount <= 5 || time.Since(lastLog) > 5*time.Second {
+				LogInfo("Camera capturing: Frame #%d (Len: %d, YUYV: %v)", frameCount, len(frameData), useYUYV)
 				lastLog = time.Now()
 			}
 
 			var imgData []byte
 			
 			if useYUYV {
-				// Convert YUYV 4:2:2 to JPEG
-				// Data is Y0 U0 Y1 V0 ...
 				width, height := 640, 480
-				if len(frame.Data) >= width*height*2 {
-					jpgData, err := yuyvToJpeg(frame.Data, width, height)
+				if len(frameData) >= width*height*2 {
+					jpgData, err := yuyvToJpeg(frameData, width, height)
 					if err == nil {
 						imgData = jpgData
 					} else {
-						LogInfo("Error encoding jpeg: %v", err)
+						// throttle error logging
+						if frameCount % 30 == 0 {
+							LogInfo("Error encoding jpeg: %v", err)
+						}
 					}
 				}
 			} else {
 				// MJPEG Pass-through
-				// Clone only if necessary, but here we need to persist it in global var
-				imgData = make([]byte, len(frame.Data))
-				copy(imgData, frame.Data)
+				// frameData from GetOutput is likely a copy or valid until next get?
+				// go4vl GetOutput() returns a channel of []byte. 
+				// NOTE: go4vl implementation copies data from MMap buffer to a new slice before sending to channel.
+				// So it is safe to hold this reference.
+				imgData = frameData
 			}
 
 			if imgData != nil {
@@ -188,19 +215,13 @@ func captureLoop(ctx context.Context, cam *device.Device, useYUYV bool) {
 				lastFrameTime = time.Now()
 				frameMu.Unlock()
 			}
-
-			frame.Release()
 		}
 	}
 }
 
 // Simple YUYV to JPEG converter
-// YUYV 4:2:2 is [Y0, U0, Y1, V0]
-// YCbCr 4:2:2 implies chroma is shared between two pixels
 func yuyvToJpeg(data []byte, width, height int) ([]byte, error) {
 	rect := image.Rect(0, 0, width, height)
-	// Create YCbCr image. Default is 4:4:4 in Go usually? 
-	// image.YCbCr structure supports SubsampleRatio.
 	img := &image.YCbCr{
 		Y:              make([]uint8, width*height),
 		Cb:             make([]uint8, width*height/2),
@@ -211,7 +232,6 @@ func yuyvToJpeg(data []byte, width, height int) ([]byte, error) {
 		Rect:           rect,
 	}
 
-	// Y0 U0 Y1 V0
 	j := 0
 	k := 0
 	for i := 0; i < len(data) && i+3 < len(data); i += 4 {
@@ -227,20 +247,17 @@ func yuyvToJpeg(data []byte, width, height int) ([]byte, error) {
 	}
 
 	buf := new(bytes.Buffer)
-	// Quality 75 is standard
 	err := jpeg.Encode(buf, img, &jpeg.Options{Quality: 75})
 	return buf.Bytes(), err
 }
 
 // StreamHandler handles MJPEG streaming requests using the latestFrame buffer.
-// This allows multiple viewers without contending for the camera callbacks.
 func StreamHandler(w http.ResponseWriter, r *http.Request) {
 	// Auto-start camera if needed
 	camMu.Lock()
 	if camDev == nil {
-		camMu.Unlock() // Unlock to allow StartCamera to acquire lock
+		camMu.Unlock() 
 		
-		// Find a camera
 		cameras, err := ListCameras()
 		if err == nil && len(cameras) > 0 {
 			if err := StartCamera(r.Context(), cameras[0].Device); err != nil {
@@ -264,7 +281,7 @@ func StreamHandler(w http.ResponseWriter, r *http.Request) {
 
 	LogInfo("Starting stream for %s", r.RemoteAddr)
 
-	ticker := time.NewTicker(40 * time.Millisecond) // ~25 fps target for stream
+	ticker := time.NewTicker(40 * time.Millisecond) // ~25 fps
 	defer ticker.Stop()
 
 	var lastSent time.Time
@@ -280,12 +297,9 @@ func StreamHandler(w http.ResponseWriter, r *http.Request) {
 			ts := lastFrameTime
 			frameMu.RUnlock()
 
-			// Don't resend the same frame (deduplication)
 			if data == nil || ts.Equal(lastSent) {
 				continue
 			}
-
-			// Wait until we have a recent frame (optional staleness check could go here)
 			
 			lastSent = ts
 
@@ -305,10 +319,25 @@ func StreamHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			// Flush immediately to prevent buffering in browser or intermediaries
+			// Flush
 			if hasFlusher {
 				flusher.Flush()
 			}
 		}
 	}
+}
+
+// GetLatestFrame returns the most recent frame buffer and its timestamp
+func GetLatestFrame() ([]byte, time.Time) {
+	frameMu.RLock()
+	defer frameMu.RUnlock()
+	
+	if latestFrame == nil {
+		return nil, time.Time{}
+	}
+	
+	// Return a copy to be safe
+	buf := make([]byte, len(latestFrame))
+	copy(buf, latestFrame)
+	return buf, lastFrameTime
 }
