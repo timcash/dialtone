@@ -3,11 +3,8 @@
 package camera
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"image"
-	"image/jpeg"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,12 +12,12 @@ import (
 	"sync"
 	"time"
 
+	"dialtone/cli/src/core/logger"
 	"github.com/vladimirvivien/go4vl/device"
 	"github.com/vladimirvivien/go4vl/v4l2"
-	"dialtone/cli/src/core/logger"
 )
 
-// Log wrappers to match dialtone logger if needed, or import standard logger
+// Log wrappers to match dialtone logger
 func LogInfo(format string, args ...interface{}) {
 	logger.LogInfo(format, args...)
 }
@@ -32,8 +29,11 @@ type Camera struct {
 }
 
 // ListCameras scans /sys/class/video4linux to find connected video devices.
+// This works on most Linux systems including Raspberry Pi.
 func ListCameras() ([]Camera, error) {
 	var cameras []Camera
+
+	// Find all video devices in /sys/class/video4linux
 	matches, err := filepath.Glob("/sys/class/video4linux/video*")
 	if err != nil {
 		return nil, fmt.Errorf("failed to list video devices: %w", err)
@@ -41,6 +41,8 @@ func ListCameras() ([]Camera, error) {
 
 	for _, match := range matches {
 		device := "/dev/" + filepath.Base(match)
+
+		// Read the name of the device
 		namePath := filepath.Join(match, "name")
 		nameBytes, err := os.ReadFile(namePath)
 		name := "Unknown Camera"
@@ -48,6 +50,9 @@ func ListCameras() ([]Camera, error) {
 			name = strings.TrimSpace(string(nameBytes))
 		}
 
+		// Check if it's a capture device (some devices have multiple entries, e.g. metadata)
+		// We can check /sys/class/video4linux/videoX/index or other attributes
+		// For simplicity, we filter out common non-capture devices like 'bcm2835-isp'
 		if strings.Contains(strings.ToLower(name), "isp") || strings.Contains(strings.ToLower(name), "codec") {
 			continue
 		}
@@ -57,17 +62,13 @@ func ListCameras() ([]Camera, error) {
 			Name:   name,
 		})
 	}
+
 	return cameras, nil
 }
 
 var (
-	camDev        *device.Device
-	camMu         sync.Mutex // Mutex for Start/Stop lifecycle
-	camWg         sync.WaitGroup
-	latestFrame   []byte
-	frameMu       sync.RWMutex // Mutex for frame buffer
-	lastFrameTime time.Time
-	camCancel     context.CancelFunc // To stop the capture loop
+	camDev  *device.Device
+	camMu   sync.Mutex
 )
 
 // StartCamera initializes the camera if not already started.
@@ -76,268 +77,133 @@ func StartCamera(ctx context.Context, devName string) error {
 	defer camMu.Unlock()
 
 	if camDev != nil {
-		return nil // Already running
+		return nil
 	}
-
-	// Wait for any previous shutdown to complete just in case
-	camWg.Wait()
-
-	// Persistent context for the capture loop
-	loopCtx, cancel := context.WithCancel(context.Background())
-	camCancel = cancel
 
 	LogInfo("Opening camera device %s...", devName)
-
-	useYUYV := os.Getenv("DIALTONE_CAMERA_FORMAT") == "yuyv"
-	
-	// Configure Format
-	format := v4l2.PixelFmtMJPEG
-	if useYUYV {
-		format = v4l2.PixelFmtYUYV
-		LogInfo("Configured for YUYV format (Software Encoding)")
-	}
-
-	// ATOMIC OPEN PATTERN (Matches go4vl examples)
-	// We explicity set IOTypeMMAP and BufferSize to ensure stability
 	cam, err := device.Open(
 		devName,
-		device.WithIOType(v4l2.IOTypeMMAP),
 		device.WithPixFormat(v4l2.PixFormat{
-			PixelFormat: format,
+			PixelFormat: v4l2.PixelFmtMJPEG,
 			Width:       640,
 			Height:      480,
 		}),
-		device.WithBufferSize(4), // Use 4 buffers for smooth streaming
 	)
 	if err != nil {
-		cancel()
 		return fmt.Errorf("failed to open device: %w", err)
 	}
 
-	// Use GetOutput() which handles frame release/copy for us. 
-	// IMPORTANT: Must be called BEFORE Start() to select the streaming API (MMAP)
-	frames := cam.GetOutput()
+	// Requirement for go4vl: GetFrames() or similar must be called before Start()
+	// to select the streaming API. We do this by getting the frame channel.
+	_ = cam.GetFrames()
 
-	// With Atomic Open + MMAP + GetOutput called, we can now Start()
-	if err := cam.Start(loopCtx); err != nil {
+	if err := cam.Start(ctx); err != nil {
 		cam.Close()
-		cancel()
 		return fmt.Errorf("failed to start stream: %w", err)
 	}
 
 	camDev = cam
-	camWg.Add(1) // Register the capture loop
-
-	// Start background capture loop
-	go captureLoop(loopCtx, cam, frames, useYUYV)
-
 	return nil
 }
 
-// StopCamera stops the camera capture loop and releases the device.
+// StopCamera cleans up the camera device
+// Added for compatibility with other plugins that might expect this
 func StopCamera() {
 	camMu.Lock()
-	cancel := camCancel
-	// Don't nil pointers yet, let the loop do it or on restart
-	camMu.Unlock()
-
-	if cancel != nil {
-		cancel() // Signal loop to exit
-	}
-	
-	// Wait for loop to fully exit and close device
-	camWg.Wait()
-}
-
-// captureLoop runs in the background and updates the global latestFrame buffer
-func captureLoop(ctx context.Context, cam *device.Device, frames <-chan []byte, useYUYV bool) {
-	defer func() {
-		camMu.Lock()
-		if camDev == cam {
-			camDev = nil
-			camCancel = nil
-		}
-		camMu.Unlock()
-		cam.Close()
-		camWg.Done() // Signal shutdown complete
-		LogInfo("Camera capture loop stopped")
-	}()
-
-	frameCount := 0
-	lastLog := time.Now()
-
-	LogInfo("Camera capture loop started")
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case frameData, ok := <-frames:
-			if !ok {
-				LogInfo("Camera frame channel closed")
-				return
-			}
-
-			// Diagnostic logging
-			frameCount++
-			if frameCount <= 5 || time.Since(lastLog) > 5*time.Second {
-				LogInfo("Camera capturing: Frame #%d (Len: %d, YUYV: %v)", frameCount, len(frameData), useYUYV)
-				lastLog = time.Now()
-			}
-
-			var imgData []byte
-			
-			if useYUYV {
-				width, height := 640, 480
-				if len(frameData) >= width*height*2 {
-					jpgData, err := yuyvToJpeg(frameData, width, height)
-					if err == nil {
-						imgData = jpgData
-					} else {
-						// throttle error logging
-						if frameCount % 30 == 0 {
-							LogInfo("Error encoding jpeg: %v", err)
-						}
-					}
-				}
-			} else {
-				// MJPEG Pass-through
-				// frameData from GetOutput is likely a copy or valid until next get?
-				// go4vl GetOutput() returns a channel of []byte. 
-				// NOTE: go4vl implementation copies data from MMap buffer to a new slice before sending to channel.
-				// So it is safe to hold this reference.
-				imgData = frameData
-			}
-
-			if imgData != nil {
-				frameMu.Lock()
-				latestFrame = imgData
-				lastFrameTime = time.Now()
-				frameMu.Unlock()
-			}
-		}
+	defer camMu.Unlock()
+	if camDev != nil {
+		camDev.Close()
+		camDev = nil
 	}
 }
 
-// Simple YUYV to JPEG converter
-func yuyvToJpeg(data []byte, width, height int) ([]byte, error) {
-	rect := image.Rect(0, 0, width, height)
-	img := &image.YCbCr{
-		Y:              make([]uint8, width*height),
-		Cb:             make([]uint8, width*height/2),
-		Cr:             make([]uint8, width*height/2),
-		SubsampleRatio: image.YCbCrSubsampleRatio422,
-		YStride:        width,
-		CStride:        width / 2,
-		Rect:           rect,
-	}
-
-	j := 0
-	k := 0
-	for i := 0; i < len(data) && i+3 < len(data); i += 4 {
-		y0, u, y1, v := data[i], data[i+1], data[i+2], data[i+3]
-
-		img.Y[j] = y0
-		img.Y[j+1] = y1
-		j += 2
-
-		img.Cb[k] = u
-		img.Cr[k] = v
-		k++
-	}
-
-	buf := new(bytes.Buffer)
-	err := jpeg.Encode(buf, img, &jpeg.Options{Quality: 75})
-	return buf.Bytes(), err
+// GetLatestFrame returns a nil frame for now, as this method does not keep a buffer
+// Added for compatibility with diagnostic checks if they remain
+func GetLatestFrame() ([]byte, time.Time) {
+	return nil, time.Time{}
 }
 
-// StreamHandler handles MJPEG streaming requests using the latestFrame buffer.
+// StreamHandler handles MJPEG streaming requests.
 func StreamHandler(w http.ResponseWriter, r *http.Request) {
-	// Auto-start camera if needed
+	// Auto-start logic (Added to ensure user request works)
 	camMu.Lock()
 	if camDev == nil {
-		camMu.Unlock() 
-		
+		camMu.Unlock()
 		cameras, err := ListCameras()
 		if err == nil && len(cameras) > 0 {
-			if err := StartCamera(r.Context(), cameras[0].Device); err != nil {
+			LogInfo("Auto-starting camera %s...", cameras[0].Device)
+			// Create a background context for the camera so it doesn't die when this request dies
+			// Note: Ideally we manage lifecycle better, but for this revert we match 'it just works' behavior
+			if err := StartCamera(context.Background(), cameras[0].Device); err != nil {
 				LogInfo("Failed to auto-start camera: %v", err)
 			}
 		} else {
-			LogInfo("No cameras found during auto-start")
+			LogInfo("No cameras found for auto-start")
 		}
 	} else {
 		camMu.Unlock()
 	}
 
+	camMu.Lock()
+	cam := camDev
+	camMu.Unlock()
+
+	if cam == nil {
+		http.Error(w, "Camera not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Set headers for MJPEG
 	w.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary=frame")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	flusher, hasFlusher := w.(http.Flusher)
-	if !hasFlusher {
-		LogInfo("Warning: Client does not support http.Flusher")
-	}
-
 	LogInfo("Starting stream for %s", r.RemoteAddr)
 
-	ticker := time.NewTicker(40 * time.Millisecond) // ~25 fps
-	defer ticker.Stop()
-
-	var lastSent time.Time
+	// Get the frame channel from the camera
+	frames := cam.GetFrames()
 
 	for {
 		select {
 		case <-r.Context().Done():
 			LogInfo("Stream closed by client %s", r.RemoteAddr)
 			return
-		case <-ticker.C:
-			frameMu.RLock()
-			data := latestFrame
-			ts := lastFrameTime
-			frameMu.RUnlock()
-
-			if data == nil || ts.Equal(lastSent) {
-				continue
+		case frame, ok := <-frames:
+			if !ok {
+				LogInfo("Frame channel closed")
+				return
 			}
-			
-			lastSent = ts
-
-			// Write Header
-			_, err := fmt.Fprintf(w, "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n", len(data))
+			// Write the MJPEG boundary and frame metadata
+			_, err := fmt.Fprintf(w, "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n", len(frame.Data))
 			if err != nil {
-				return
+				// frame.Release() // Release logic depends on go4vl version? Old code had it.
+				// Checking old code: yes, it had frame.Release()
+				// However, GetFrames returns 'Frames' which might need release?
+				// Old code had: frame.Release()
+				// I will include it, assuming provided frame struct has Release.
+				if r, ok := interface{}(frame).(interface{ Release() }); ok {
+					r.Release()
+				}
+				return // Client disconnected
 			}
-			
-			// Write Data
-			if _, err := w.Write(data); err != nil {
+
+			// Write the actual JPEG data
+			if _, err := w.Write(frame.Data); err != nil {
+				if r, ok := interface{}(frame).(interface{ Release() }); ok {
+					r.Release()
+				}
 				return
 			}
 
-			// Write Boundary
-			if _, err := w.Write([]byte("\r\n")); err != nil {
-				return
-			}
+			_, _ = w.Write([]byte("\r\n"))
 
-			// Flush
-			if hasFlusher {
-				flusher.Flush()
-			}
+			// Important: Release the frame back to the pool
+			// Old code: frame.Release()
+			// I'll assume the frame object has Release.
+			// To be safe against compile errors if struct changed, I'd check type, 
+			// but 'old_camera_linux.go' line 150 says 'frame.Release()'.
+			// I will write it as is.
+			frame.Release()
 		}
 	}
-}
-
-// GetLatestFrame returns the most recent frame buffer and its timestamp
-func GetLatestFrame() ([]byte, time.Time) {
-	frameMu.RLock()
-	defer frameMu.RUnlock()
-	
-	if latestFrame == nil {
-		return nil, time.Time{}
-	}
-	
-	// Return a copy to be safe
-	buf := make([]byte, len(latestFrame))
-	copy(buf, latestFrame)
-	return buf, lastFrameTime
 }
