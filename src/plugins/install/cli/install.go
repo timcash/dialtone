@@ -46,22 +46,7 @@ func GetDialtoneEnv() string {
 		absEnv, _ := filepath.Abs(env)
 		return absEnv
 	}
-	cwd, _ := os.Getwd()
-	for {
-		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
-			localPath := filepath.Join(cwd, "dialtone_dependencies")
-			if _, err := os.Stat(localPath); err == nil {
-				logger.LogInfo("DIALTONE_ENV not set, using repo-local path: %s", localPath)
-				absPath, _ := filepath.Abs(localPath)
-				return absPath
-			}
-		}
-		parent := filepath.Dir(cwd)
-		if parent == cwd {
-			break
-		}
-		cwd = parent
-	}
+	// If DIALTONE_ENV is not set, use the default path in the user's home directory.
 	home, _ := os.UserHomeDir()
 	defaultPath := filepath.Join(home, ".dialtone_env")
 	logger.LogInfo("DIALTONE_ENV not set, using default path: %s", defaultPath)
@@ -113,7 +98,7 @@ func RunInstall(args []string) {
 		fmt.Println()
 		fmt.Println("Notes:")
 		fmt.Println("  - Dependencies are installed to the directory specified by DIALTONE_ENV")
-		fmt.Println("  - Default location is ./dialtone_dependencies (relative to repo) or ~/.dialtone_env")
+		fmt.Println("  - Default location is ~/.dialtone_env")
 	}
 
 	// Handle flags

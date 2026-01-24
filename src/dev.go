@@ -20,6 +20,7 @@ import (
 	logs_cli "dialtone/cli/src/plugins/logs/cli"
 	mavlink_cli "dialtone/cli/src/plugins/mavlink/cli"
 	plugin_cli "dialtone/cli/src/plugins/plugin/cli"
+	test_cli "dialtone/cli/src/plugins/test/cli"
 	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
 	www_cli "dialtone/cli/src/plugins/www/cli"
 )
@@ -61,7 +62,7 @@ func ExecuteDev() {
 	case "branch":
 		runBranch(args)
 	case "test":
-		runTest(args)
+		test_cli.RunTest(args)
 	case "pull-request", "pr":
 		// Delegate to github plugin
 		github_cli.RunGithub(append([]string{"pull-request"}, args...))
@@ -419,261 +420,7 @@ func runBranch(args []string) {
 	LogInfo("Now on branch: %s", branchName)
 }
 
-// runTest handles the test command
-func runTest(args []string) {
-	var testPackages []string
 
-	if len(args) == 0 {
-		LogInfo("Running all tests (core, plugins, and tickets)...")
-		testPackages = []string{"./test/...", "./src/plugins/...", "./tickets/..."}
-	} else {
-		name := args[0]
-
-		// Hierarchical Discovery:
-		// 1. Check tickets directory
-		ticketTestDir := filepath.Join("tickets", name, "test")
-		if _, err := os.Stat(ticketTestDir); err == nil {
-			LogInfo("Running ticket tests for: %s", name)
-			testPackages = []string{"./" + ticketTestDir + "/..."}
-		} else {
-			// 2. Check plugins directory
-			pluginTestDir := filepath.Join("src", "plugins", name, "test")
-			if _, err := os.Stat(pluginTestDir); err == nil {
-				LogInfo("Running plugin tests for: %s", name)
-				testPackages = []string{"./" + pluginTestDir + "/..."}
-			} else {
-				// 3. Fallback to global test directory
-				testDir := filepath.Join("test", name)
-				LogInfo("Running core tests for: %s", name)
-				ensureTestFiles(testDir, name)
-				testPackages = []string{"./" + testDir + "/..."}
-			}
-		}
-	}
-
-	testArgs := append([]string{"test", "-v", "-p", "1"}, testPackages...)
-	cmd := exec.Command("go", testArgs...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Env = os.Environ()
-
-	var testErr error
-	testErr = cmd.Run()
-
-	// Run live web tests if in the dialtone context or if specifically requested
-	if len(args) == 0 || (len(args) > 0 && args[0] == "www") {
-		runLiveWebTest()
-	}
-
-	// Exit with Go test error if there was one
-	if testErr != nil {
-		if exitErr, ok := testErr.(*exec.ExitError); ok {
-			os.Exit(exitErr.ExitCode())
-		}
-		LogFatal("Failed to run tests: %v", testErr)
-	}
-}
-
-// runLiveWebTest runs the Puppeteer live site verification test
-func runLiveWebTest() {
-	testScript := filepath.Join("dialtone-earth", "test", "live_test.ts")
-	if _, err := os.Stat(testScript); os.IsNotExist(err) {
-		return
-	}
-
-	LogInfo("Running Puppeteer live site verification...")
-
-	// Command to source NVM and run the test
-	// We use bash -c to ensure environment sourcing works
-	script := fmt.Sprintf(`export NVM_DIR="$HOME/.nvm" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && nvm use 22 && npx ts-node test/live_test.ts`)
-
-	cmd := exec.Command("bash", "-c", script)
-	cmd.Dir = "dialtone-earth"
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Env = os.Environ()
-
-	if err := cmd.Run(); err != nil {
-		LogInfo("Puppeteer test failed (this is expected if system libraries are missing)")
-		// We don't exit here as web tests might be optional or environment-dependent
-	} else {
-		LogInfo("Puppeteer live site verification successful!")
-	}
-}
-
-// ensureTestFiles creates the test directory and template test files if they don't exist
-func ensureTestFiles(testDir, featureName string) {
-	// Create test directory if it doesn't exist
-	if err := os.MkdirAll(testDir, 0755); err != nil {
-		LogFatal("Failed to create test directory: %v", err)
-	}
-
-	// Convert feature-name to package name (replace - with _)
-	packageName := strings.ReplaceAll(featureName, "-", "_")
-
-	// Define test file templates
-	testFiles := map[string]string{
-		"unit_test.go":        generateUnitTestTemplate(packageName, featureName),
-		"integration_test.go": generateIntegrationTestTemplate(packageName, featureName),
-		"end_to_end_test.go":  generateEndToEndTestTemplate(packageName, featureName),
-	}
-
-	for filename, template := range testFiles {
-		filePath := filepath.Join(testDir, filename)
-		if _, err := os.Stat(filePath); os.IsNotExist(err) {
-			if err := os.WriteFile(filePath, []byte(template), 0644); err != nil {
-				LogFatal("Failed to create test file %s: %v", filename, err)
-			}
-			LogInfo("Created test file: %s", filePath)
-		} else {
-			LogInfo("Test file already exists: %s", filePath)
-		}
-	}
-}
-
-// generateUnitTestTemplate creates a unit test template
-func generateUnitTestTemplate(packageName, featureName string) string {
-	return fmt.Sprintf(`package %s
-
-import (
-	"testing"
-
-	dialtone "dialtone/cli/src"
-)
-
-// Unit tests: Simple tests that run locally without IO operations
-// These tests should be fast and test individual functions/components
-
-func TestUnit_Example(t *testing.T) {
-	dialtone.LogInfo("Running unit test for %s")
-	
-	// TODO: Add your unit tests here
-	t.Log("not yet implemented")
-}
-
-func TestUnit_Validation(t *testing.T) {
-	// Test input validation, data parsing, etc.
-	dialtone.LogInfo("Testing validation for %s")
-	
-	// TODO: Add validation tests
-	t.Log("not yet implemented")
-}
-`, packageName, featureName, featureName)
-}
-
-// generateIntegrationTestTemplate creates an integration test template
-func generateIntegrationTestTemplate(packageName, featureName string) string {
-	return fmt.Sprintf(`package %s
-
-import (
-	"os"
-	"path/filepath"
-	"testing"
-
-	dialtone "dialtone/cli/src"
-)
-
-// Integration tests: Test 2+ components together using test_data/
-// These tests may use files, but should not require network or external services
-
-func TestIntegration_Example(t *testing.T) {
-	dialtone.LogInfo("Running integration test for %s")
-	
-	// Get project root for test data access
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get working directory: %%v", err)
-	}
-	projectRoot := filepath.Join(cwd, "..", "..")
-	_ = projectRoot // Use for accessing test_data/
-	
-	// TODO: Add your integration tests here
-	t.Log("not yet implemented")
-}
-
-func TestIntegration_Components(t *testing.T) {
-	// Test how multiple components work together
-	dialtone.LogInfo("Testing component integration for %s")
-	
-	// TODO: Add component integration tests
-	t.Log("not yet implemented")
-}
-`, packageName, featureName, featureName)
-}
-
-// generateEndToEndTestTemplate creates an end-to-end test template
-func generateEndToEndTestTemplate(packageName, featureName string) string {
-	return fmt.Sprintf(`package %s
-
-import (
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
-	"testing"
-
-	dialtone "dialtone/cli/src"
-)
-
-// End-to-end tests: Browser and CLI tests on a live system or simulator
-// These tests may require network, external services, or user interaction setup
-
-func TestE2E_CLICommand(t *testing.T) {
-	// Skip if running in CI without required setup
-	if os.Getenv("SKIP_E2E") != "" {
-		t.Skip("Skipping E2E test (SKIP_E2E is set)")
-	}
-	
-	dialtone.LogInfo("Running E2E CLI test for %s")
-	
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get working directory: %%v", err)
-	}
-	projectRoot := filepath.Join(cwd, "..", "..")
-	_ = projectRoot
-	
-	// TODO: Add your end-to-end CLI tests here
-	t.Log("not yet implemented")
-}
-
-func TestE2E_FullWorkflow(t *testing.T) {
-	if os.Getenv("SKIP_E2E") != "" {
-		t.Skip("Skipping E2E test (SKIP_E2E is set)")
-	}
-	
-	dialtone.LogInfo("Running full workflow E2E test for %s")
-	
-	// TODO: Test complete user workflows
-	t.Log("not yet implemented")
-}
-
-func TestE2E_BinaryExists(t *testing.T) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get working directory: %%v", err)
-	}
-	projectRoot := filepath.Join(cwd, "..", "..")
-	binPath := filepath.Join(projectRoot, "bin", "dialtone")
-	
-	if _, err := os.Stat(binPath); os.IsNotExist(err) {
-		t.Skip("Binary not built - run 'dialtone build' first")
-	}
-	
-	// Verify binary runs
-	cmd := exec.Command(binPath, "--help")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		// --help might exit non-zero, check output instead
-		if !strings.Contains(string(output), "dialtone") {
-			t.Errorf("Binary output doesn't contain 'dialtone': %%s", output)
-		}
-	}
-	
-	dialtone.LogInfo("Binary exists and runs for %s tests")
-}
-`, packageName, featureName, featureName, featureName)
-}
 
 // runTicket handles the ticket command
 func runTicket(args []string) {
@@ -1029,7 +776,7 @@ func runDeveloper(args []string) {
 verification:
 	// 4. Submit
 	LogInfo("Subagent finished. Running verification tests...")
-	runTest([]string{})
+	test_cli.RunTest([]string{})
 
 	LogInfo("Tests passed. Creating pull request...")
 	github_cli.RunGithub([]string{"pull-request", "--title", fmt.Sprintf("%s: autonomous fix", branchName), "--body", fmt.Sprintf("Autonomous fix for ticket #%d\n\nSee %s for details.", selectedTicket.Number, taskPath)})
