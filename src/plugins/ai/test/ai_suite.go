@@ -10,8 +10,8 @@ import (
 )
 
 func init() {
-	test.Register("ai-binary-exists", "ai", []string{"ai", "binary"}, RunOpencodeBinaryExists)
-	test.Register("ai-cli-version", "ai", []string{"ai", "cli"}, RunOpencodeVersion)
+	test.Register("ai-binary-exists", "ai-migration", []string{"ai", "binary"}, RunOpencodeBinaryExists)
+	test.Register("ai-cli-version", "ai-migration", []string{"ai", "cli"}, RunOpencodeVersion)
 }
 
 // RunAll is the standard entry point required by project rules.
