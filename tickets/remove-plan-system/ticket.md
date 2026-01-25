@@ -51,5 +51,5 @@ Remove the legacy "Plan File" system and the unused `AGENT.md` logic from the re
 - description: run the ticket cli to verify all steps to complete the ticket, git is in the correct state and a pull request is created and ready for review. if it comepletes it should mark the final subtask as done
 - test-description: vailidates all ticket subtasks are done
 - test-command: `dialtone.sh ticket done remove-plan-system`
-- status: todo
+- status: done
 
