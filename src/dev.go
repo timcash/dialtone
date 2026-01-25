@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strings"
 
+	"dialtone/cli/src/core/config"
+	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/ssh"
 	ai_cli "dialtone/cli/src/plugins/ai/cli"
 	build_cli "dialtone/cli/src/plugins/build/cli"
@@ -20,6 +22,7 @@ import (
 	test_cli "dialtone/cli/src/plugins/test/cli"
 	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
 	ui_cli "dialtone/cli/src/plugins/ui/cli"
+	vpn_cli "dialtone/cli/src/plugins/vpn/cli"
 	www_cli "dialtone/cli/src/plugins/www/cli"
 )
 
@@ -31,7 +34,7 @@ func ExecuteDev() {
 	}
 
 	// Load configuration
-	LoadConfig()
+	config.LoadConfig()
 
 	command := os.Args[1]
 	args := os.Args[2:]
@@ -43,8 +46,16 @@ func ExecuteDev() {
 		deploy_cli.RunDeploy(args)
 	case "ssh":
 		ssh.RunSSH(args)
+	case "vpn":
+		// User requested: dialtone vpn ...
+		// run provision logic or subcommands
+		vpn_cli.RunProvision(args)
 	case "provision":
-		RunProvision(args)
+		// Keep legacy provision command mapped to vpn plugin for now?
+		// Or remove it? User said "make ... a cli sub command on a plugin called vpn".
+		// I will redirect provision to vpn for backward compat or just remove it.
+		// Let's redirect it.
+		vpn_cli.RunProvision(args)
 	case "logs":
 		logs_cli.RunLogs(args)
 	case "diagnostic":
@@ -54,7 +65,7 @@ func ExecuteDev() {
 	case "clone":
 		RunClone(args)
 	case "sync-code":
-		RunSyncCode(args)
+		deploy_cli.RunSyncCode(args)
 	case "branch":
 		runBranch(args)
 	case "test":
@@ -135,26 +146,26 @@ func runBranch(args []string) {
 	cmd := exec.Command("git", "branch", "--list", branchName)
 	output, err := cmd.Output()
 	if err != nil {
-		LogFatal("Failed to check branches: %v", err)
+		logger.LogFatal("Failed to check branches: %v", err)
 	}
 
 	if strings.TrimSpace(string(output)) != "" {
 		// Branch exists, checkout
-		LogInfo("Branch '%s' exists, checking out...", branchName)
+		logger.LogInfo("Branch '%s' exists, checking out...", branchName)
 		cmd = exec.Command("git", "checkout", branchName)
 	} else {
 		// Branch doesn't exist, create
-		LogInfo("Creating new branch '%s'...", branchName)
+		logger.LogInfo("Creating new branch '%s'...", branchName)
 		cmd = exec.Command("git", "checkout", "-b", branchName)
 	}
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		LogFatal("Git operation failed: %v", err)
+		logger.LogFatal("Git operation failed: %v", err)
 	}
 
-	LogInfo("Now on branch: %s", branchName)
+	logger.LogInfo("Now on branch: %s", branchName)
 }
 
 // runTicket handles the ticket command
@@ -191,7 +202,7 @@ func runTicket(args []string) {
 	case "list", "create", "comment", "view", "close":
 		// Check if gh CLI is available for these commands
 		if _, err := exec.LookPath("gh"); err != nil {
-			LogFatal("GitHub CLI (gh) not found. Install it from: https://cli.github.com/")
+			logger.LogFatal("GitHub CLI (gh) not found. Install it from: https://cli.github.com/")
 		}
 		// Continue to switch block below (or reuse logic)
 		// Since we can't easily jump into existing switch case from here without code duplication or goto,
@@ -212,7 +223,7 @@ func runTicket(args []string) {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			LogFatal("Failed to list tickets: %v", err)
+			logger.LogFatal("Failed to list tickets: %v", err)
 		}
 
 	case "create":
@@ -255,12 +266,12 @@ func runTicket(args []string) {
 		}
 
 		if err := cmd.Run(); err != nil {
-			LogFatal("Failed to create ticket: %v", err)
+			logger.LogFatal("Failed to create ticket: %v", err)
 		}
 
 	case "comment":
 		if len(subArgs) < 2 {
-			LogFatal("Usage: dialtone-dev ticket comment <ticket-id> <message>")
+			logger.LogFatal("Usage: dialtone-dev ticket comment <ticket-id> <message>")
 		}
 		ticketID := subArgs[0]
 		message := subArgs[1]
@@ -268,32 +279,32 @@ func runTicket(args []string) {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			LogFatal("Failed to add comment: %v", err)
+			logger.LogFatal("Failed to add comment: %v", err)
 		}
 
 	case "view":
 		if len(subArgs) < 1 {
-			LogFatal("Usage: dialtone-dev ticket view <ticket-id>")
+			logger.LogFatal("Usage: dialtone-dev ticket view <ticket-id>")
 		}
 		ticketID := subArgs[0]
 		cmd := exec.Command("gh", "ticket", "view", ticketID)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			LogFatal("Failed to view ticket: %v", err)
+			logger.LogFatal("Failed to view ticket: %v", err)
 		}
 
 	case "close":
 		if len(subArgs) < 1 {
-			LogFatal("Usage: dialtone-dev ticket close <ticket-id>")
+			logger.LogFatal("Usage: dialtone-dev ticket close <ticket-id>")
 		}
 		ticketID := subArgs[0]
-		LogInfo("Closing ticket #%s...", ticketID)
+		logger.LogInfo("Closing ticket #%s...", ticketID)
 		cmd := exec.Command("gh", "ticket", "close", ticketID)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			LogFatal("Failed to close ticket: %v", err)
+			logger.LogFatal("Failed to close ticket: %v", err)
 		}
 
 	default:

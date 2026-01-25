@@ -100,5 +100,11 @@ git merge main                    # Merge main into current branch
 ./dialtone.sh ai help             # Show all AI commands
 ```
 
+## VPN & Provisioning
+```bash
+./dialtone.sh vpn provision --api-key <key> # Provision this device with Tailscale
+./dialtone.sh vpn help                      # Show all VPN commands
+```
+
 
 

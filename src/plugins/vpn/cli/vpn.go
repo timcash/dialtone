@@ -1,7 +1,8 @@
-package dialtone
+package cli
 
 import (
 	"bytes"
+	"dialtone/cli/src/core/logger"
 	"encoding/json"
 	"flag"
 	"io"
@@ -23,17 +24,17 @@ func RunProvision(args []string) {
 
 	if token == "" {
 		if *optional {
-			LogInfo("TS_API_KEY not found, skipping provisioning.")
+			logger.LogInfo("TS_API_KEY not found, skipping provisioning.")
 			return
 		}
-		LogFatal("Error: --api-key flag or TS_API_KEY environment variable is required.")
+		logger.LogFatal("Error: --api-key flag or TS_API_KEY environment variable is required.")
 	}
 
 	provisionKey(token)
 }
 
 func provisionKey(token string) {
-	LogInfo("Generating new Tailscale Auth Key...")
+	logger.LogInfo("Generating new Tailscale Auth Key...")
 
 	url := "https://api.tailscale.com/api/v2/tailnet/-/keys"
 	payload := map[string]interface{}{
@@ -53,7 +54,7 @@ func provisionKey(token string) {
 	jsonPayload, _ := json.Marshal(payload)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
 	if err != nil {
-		LogFatal("Failed to create request: %v", err)
+		logger.LogFatal("Failed to create request: %v", err)
 	}
 
 	req.SetBasicAuth(token, "")
@@ -61,13 +62,13 @@ func provisionKey(token string) {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		LogFatal("API request failed: %v", err)
+		logger.LogFatal("API request failed: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
-		LogFatal("API error (%d): %s", resp.StatusCode, string(body))
+		logger.LogFatal("API error (%d): %s", resp.StatusCode, string(body))
 	}
 
 	var result struct {
@@ -75,9 +76,9 @@ func provisionKey(token string) {
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&result)
 
-	LogInfo("Successfully generated key: %s...", result.Key[:10])
+	logger.LogInfo("Successfully generated key: %s...", result.Key[:10])
 	updateEnv("TS_AUTHKEY", result.Key)
-	LogInfo("Updated .env with new TS_AUTHKEY.")
+	logger.LogInfo("Updated .env with new TS_AUTHKEY.")
 }
 
 func updateEnv(key, value string) {
