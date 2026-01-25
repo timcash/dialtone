@@ -30,7 +30,7 @@ Verify the end-to-end build, deploy, and diagnostic loop by making a visible cha
 - description: run remote diagnostics and check logs to ensure the system is stable.
 - test-description: verify diagnostics pass.
 - test-command: `./dialtone.sh diagnostic && ./dialtone.sh logs --remote`
-- status: processing
+- status: done
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
