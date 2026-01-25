@@ -19,11 +19,11 @@
 ## Test
 1. **Ticket Tests**: Run tests specific to this ticket's implementation.
    ```bash
-   ./dialtone.sh ticket test <ticket-name>
+   ./dialtone.sh test ticket <ticket-name>
    ```
 2. **Plugin Tests**: If this ticket involves a plugin, run its specific tests.
    ```bash
-   ./dialtone.sh plugin test <plugin-name>
+   ./dialtone.sh test plugin <plugin-name>
    ```
 3. **Feature Tests**: Run tests for a specific feature, which searches through tickets, plugins, and core tests.
    ```bash

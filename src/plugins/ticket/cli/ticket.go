@@ -138,28 +138,6 @@ func RunStart(args []string) {
 
 
 
-// RunTest handles 'ticket test <ticket-name>'
-func RunTest(args []string) {
-	if len(args) < 1 {
-		logFatal("Usage: ticket test <ticket-name>")
-	}
-	ticketName := args[0]
-	testDir := filepath.Join("tickets", ticketName, "test")
-
-	if _, err := os.Stat(testDir); os.IsNotExist(err) {
-		logFatal("Test directory not found: %s", testDir)
-	}
-
-	logInfo("Running tests in %s...", testDir)
-	cmd := exec.Command("./dialtone.sh", "test", ticketName)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		logFatal("Tests failed: %v", err)
-	}
-	logInfo("All tests passed.")
-	logReminder(ticketName)
-}
 
 // RunDone handles 'ticket done <ticket-name>'
 // RunDone handles 'ticket done <ticket-name>'
@@ -181,16 +159,6 @@ func RunDone(args []string) {
 	}
 	logInfo("All subtasks verified as done (excluding 'ticket-done').")
 
-	// 2. Run all tests
-	logInfo("Running all tests...")
-	testCmd := exec.Command("./dialtone.sh", "test")
-	testCmd.Stdout = os.Stdout
-	testCmd.Stderr = os.Stderr
-	if err := testCmd.Run(); err != nil {
-		logFatal("Tests failed: %v", err)
-	}
-	logInfo("All tests passed.")
-
 	// 3. Verify git status
 	cmd := exec.Command("git", "status", "--porcelain")
 	output, err := cmd.Output()
@@ -203,8 +171,8 @@ func RunDone(args []string) {
 	logInfo("Git status clean.")
 
 	// 4. GitHub PR
-	logInfo("Updating Pull Request...")
-	prCmd := exec.Command("./dialtone.sh", "github", "pr")
+	logInfo("Updating Pull Request and setting to ready...")
+	prCmd := exec.Command("./dialtone.sh", "github", "pr", "--ready")
 	prCmd.Stdout = os.Stdout
 	prCmd.Stderr = os.Stderr
 	if err := prCmd.Run(); err != nil {

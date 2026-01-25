@@ -10,23 +10,20 @@ import (
 
 	"dialtone/cli/src/plugins/install/cli"
 	"dialtone/cli/src/core/logger"
+	"dialtone/cli/src/core/test"
 )
+
+func init() {
+	test.Register("install-scaffold", "install", []string{"install", "core", "scaffold"}, RunScaffold)
+	test.Register("install-help", "install", []string{"install", "help"}, RunInstallHelp)
+	test.Register("install-local", "install", []string{"install", "local"}, RunLocalInstall)
+	test.Register("install-idempotency", "install", []string{"install", "idempotency"}, RunInstallIdempotency)
+}
 
 // RunAll runs all tests in this package
 func RunAll() error {
-	if err := RunScaffold(); err != nil {
-		return fmt.Errorf("Scaffold test failed: %v", err)
-	}
-	if err := RunInstallHelp(); err != nil {
-		return fmt.Errorf("InstallHelp test failed: %v", err)
-	}
-	if err := RunLocalInstall(); err != nil {
-		return fmt.Errorf("LocalInstall test failed: %v", err)
-	}
-	if err := RunInstallIdempotency(); err != nil {
-		return fmt.Errorf("InstallIdempotency test failed: %v", err)
-	}
-	return nil
+	logger.LogInfo("Running Install Plugin tests...")
+	return test.RunTicket("install")
 }
 
 func setupTestEnv() (string, error) {

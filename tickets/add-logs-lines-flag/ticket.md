@@ -8,7 +8,7 @@
 - name: ticket-start
 - description: to start work run the cli command `dialtone.sh ticket start add-logs-lines-flag`
 - test-description: run the ticket tests to verify that the ticket is in a valid state
-- test-command: `dialtone.sh ticket test add-logs-lines-flag`
+- test-command: `dialtone.sh test ticket add-logs-lines-flag`
 - status: done
 
 ## SUBTASK: Implement --lines flag

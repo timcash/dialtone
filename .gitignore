@@ -17,7 +17,6 @@ Thumbs.db
 *.test
 *.out
 .claude
-prompt.md
 
 # ENV
 .env

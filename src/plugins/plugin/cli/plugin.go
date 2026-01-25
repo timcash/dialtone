@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -30,8 +29,6 @@ func RunPlugin(args []string) {
 	switch command {
 	case "create":
 		runCreate(subArgs)
-	case "test":
-		runTest(subArgs)
 	case "help", "--help", "-h":
 		printUsage()
 	default:
@@ -45,29 +42,7 @@ func printUsage() {
 	fmt.Println("Usage: dialtone-dev plugin <command> [options]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  create <plugin-name>   Create a new plugin structure")
-	fmt.Println("  test <plugin-name>     Run tests for a plugin")
 	fmt.Println("  help                   Show this help message")
-}
-
-func runTest(args []string) {
-	if len(args) < 1 {
-		logFatal("Usage: plugin test <plugin-name>")
-	}
-	pluginName := args[0]
-	testDir := filepath.Join("src", "plugins", pluginName, "test")
-
-	if _, err := os.Stat(testDir); os.IsNotExist(err) {
-		logFatal("Test directory not found: %s", testDir)
-	}
-
-	logInfo("Running tests in %s...", testDir)
-	cmd := exec.Command("./dialtone.sh", "test", pluginName)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		logFatal("Tests failed: %v", err)
-	}
-	logInfo("All tests passed.")
 }
 
 func runCreate(args []string) {

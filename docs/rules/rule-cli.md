@@ -19,16 +19,16 @@ mv -n .env.example .env # Only if .env does not exists
 ./dialtone.sh ticket subtask next <ticket-name> # prints the next todo or process subtask for this ticket
 ./dialtone.sh ticket subtask test <ticket-name> <subtask-name> # Runs the subtask test
 ./dialtone.sh ticket subtask done <ticket-name> <subtask-name> # mark a subtask as done
-./dialtone.sh ticket test <ticket-name> # Runs tests in tickets/<ticket-name>/test/
 ./dialtone.sh ticket done <ticket-name>  # Final verification and pull-request submission
 ```
 
 ## Running Tests: Tests are the most important concept in `dialtone`
 ```bash
-./dialtone.sh ticket test <ticket-name> # Runs tests in tickets/<ticket-name>/test/
-./dialtone.sh plugin test <plugin-name> # Runs tests in src/plugins/<plugin-name>/test/
-./dialtone.sh test <tag1> <tag2> <tag3> # Scans all tests for any of these tags
-./dialtone.sh test # runs all tests
+./dialtone.sh test ticket <ticket-name> # Runs tests in tickets/<ticket-name>/test/
+./dialtone.sh test plugin <plugin-name> # Runs tests in src/plugins/<plugin-name>/test/
+./dialtone.sh test tags [tag1 tag2 ...] # Run tests matching any of the specified tags
+./dialtone.sh test --list                # List tests that would run
+./dialtone.sh test                     # runs all tests
 ```
 
 ## Logs
@@ -44,7 +44,7 @@ mv -n .env.example .env # Only if .env does not exists
 ./dialtone.sh plugin add <plugin-name> # Add a README.md to src/plugins/<plugin-name>/README.md
 ./dialtone.sh plugin install <plugin-name> # Install dependencies
 ./dialtone.sh plugin build <plugin-name> # Build the plugin
-./dialtone.sh plugin test <plugin-name> # Runs tests in src/plugins/<plugin-name>/test/
+./dialtone.sh test plugin <plugin-name> # Runs tests in src/plugins/<plugin-name>/test/
 ```
 
 ## Build & Deploy

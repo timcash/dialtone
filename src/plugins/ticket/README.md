@@ -10,8 +10,9 @@
 7. Push ticket branch to remote with `git push -u origin <ticket-name>`.
 8. Create pull request with `dialtone.sh github pr`.
 
-## `./dialtone.sh ticket test <ticket-name>`
-1. Runs all tests in `tickets/<ticket-name>/test/` and fails if any fail.
+## `./dialtone.sh test ticket <ticket-name>`
+Runs all tests located in `tickets/<ticket-name>/test/`.
+ and fails if any fail.
 
 ## `./dialtone.sh ticket done <ticket-name>`
 1. Verify all subtasks in `ticket.md` are marked `done` (excluding `ticket-done`).

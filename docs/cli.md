@@ -19,16 +19,17 @@ mv -n .env.example .env # Only if .env does not exists
 ./dialtone.sh ticket subtask next <ticket-name> # prints the next todo or process subtask for this ticket
 ./dialtone.sh ticket subtask test <ticket-name> <subtask-name> # Runs the subtask test
 ./dialtone.sh ticket subtask done <ticket-name> <subtask-name> # mark a subtask as done
-./dialtone.sh ticket test <ticket-name> # Runs tests in tickets/<ticket-name>/test/
 ./dialtone.sh ticket done <ticket-name>  # Final verification and pull-request submission
 ```
 
 ## Running Tests: Tests are the most important concept in `dialtone`
 ```bash
-./dialtone.sh ticket test <ticket-name> # Runs tests in tickets/<ticket-name>/test/
-./dialtone.sh test plugin <plugin-name> # Runs tests in src/plugins/<plugin-name>/test/
-./dialtone.sh test <tag1> <tag2> <tag3> # Scans all tests for any of these tags
-./dialtone.sh test # runs all tests
+./dialtone.sh test ticket <ticket-name> # Run all subtask tests for the specific ticket
+./dialtone.sh test ticket <ticket-name> --subtask <subtask-name> # Run a specific subtask test
+./dialtone.sh test plugin <plugin-name> # Run tests for a specific plugin
+./dialtone.sh test tags [tag1 tag2 ...]      # Run tests matching any of the specified tags
+./dialtone.sh test --list                # List tests that would run
+./dialtone.sh test                        # Run all tests
 ```
 
 ## Logs
@@ -91,5 +92,13 @@ git merge main                    # Merge main into current branch
 ./dialtone.sh ui mock-data    # Start a mock data server for testing telemetry/camera
 ./dialtone.sh test plugin ui  # Run integration tests for the UI
 ```
+
+## AI Commands
+```bash
+./dialtone.sh ai opencode start   # Start AI assistant
+./dialtone.sh ai developer        # Start autonomous developer loop
+./dialtone.sh ai help             # Show all AI commands
+```
+
 
 
