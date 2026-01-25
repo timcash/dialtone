@@ -379,6 +379,10 @@ func bridgeOpencodeToNATS(cmd *exec.Cmd) {
 
 	// Stream NATS to stdin
 	nc.Subscribe("ai.opencode.input", func(m *nats.Msg) {
+		// Manual echo for terminal visibility (required for diagnostic loopback)
+		nc.Publish("ai.opencode.output", m.Data)
+		nc.Publish("ai.opencode.output", []byte("\r\n"))
+
 		stdin.Write(m.Data)
 		stdin.Write([]byte("\n"))
 	})

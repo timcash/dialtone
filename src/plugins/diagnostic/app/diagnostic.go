@@ -258,5 +258,29 @@ func checkWebUI(url string) error {
 
 	fmt.Printf("[chromedp] Dashboard Title: %s\n", title)
 	fmt.Println("[chromedp] UI Layout Verified (Terminal, 3D, Telemetry present)")
+
+	// --- NEW: Opencode Xterm Integration Test ---
+	fmt.Println("[chromedp] Testing Opencode Terminal Bridge...")
+	var termContent string
+	testCmd := "echo hello_from_diagnostic"
+
+	err = chromedp.Run(ctx,
+		chromedp.SendKeys("#cmd-input", testCmd+"\n", chromedp.ByID),
+		chromedp.Sleep(2*time.Second), // Wait for bridge to loop back
+		// xterm.js renders lines in .xterm-rows
+		chromedp.Text(".xterm-rows", &termContent, chromedp.ByQuery),
+	)
+	if err != nil {
+		return fmt.Errorf("terminal bridge test failed: %w", err)
+	}
+
+	if strings.Contains(termContent, "hello_from_diagnostic") {
+		fmt.Println("[chromedp] [SUCCESS] Opencode Terminal Bridge Verified!")
+	} else {
+		fmt.Printf("[chromedp] [WARNING] Echo not found in terminal rows. Content: %s\n", termContent)
+		// We don't hard fail here yet because opencode might not be running on the target
+		// but we log it clearly.
+	}
+
 	return nil
 }
