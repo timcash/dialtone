@@ -8,7 +8,7 @@ Resolve camera stability issues on Raspberry Pi by implementing robust frame buf
 - name: ticket-start
 - description: to start work run the cli command `dialtone.sh ticket start integrate-ffmpeg-camera-fix`
 - test-description: run the ticket tests to verify that the ticket is in a valid state
-- test-command: `dialtone.sh ticket test integrate-ffmpeg-camera-fix`
+- test-command: `dialtone.sh test ticket integrate-ffmpeg-camera-fix`
 - status: done
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli

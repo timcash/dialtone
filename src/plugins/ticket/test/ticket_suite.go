@@ -6,14 +6,17 @@ import (
 
 	"dialtone/cli/src/plugins/ticket/cli"
 	"dialtone/cli/src/core/logger"
+	"dialtone/cli/src/core/test"
 )
+
+func init() {
+	test.Register("ticket-metadata", "ticket", []string{"ticket", "core", "metadata"}, RunGetTicketNameTests)
+}
 
 // RunAll runs all tests in this package
 func RunAll() error {
-	if err := RunGetTicketNameTests(); err != nil {
-		return fmt.Errorf("GetTicketName tests failed: %v", err)
-	}
-	return nil
+	logger.LogInfo("Running Ticket Plugin tests...")
+	return test.RunTicket("ticket")
 }
 
 func RunGetTicketNameTests() error {

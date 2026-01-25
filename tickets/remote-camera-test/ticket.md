@@ -8,7 +8,7 @@
 - name: ticket-start
 - description: to start work run the cli command `dialtone.sh ticket start remote-camera-test`
 - test-description: run the ticket tests to verify that the ticket is in a valid state
-- test-command: `dialtone.sh ticket test remote-camera-test`
+- test-command: `dialtone.sh test ticket remote-camera-test`
 - status: todo
 
 ## SUBTASK: <subtask-title>

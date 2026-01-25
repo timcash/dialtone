@@ -17,7 +17,7 @@
 ## Test
 1. **Ticket Tests**: Run tests specific to this ticket's implementation.
    ```bash
-   ./dialtone.sh ticket test integrate-codecad
+   ./dialtone.sh test ticket integrate-codecad
    ```
 2. **All Tests**: Run the entire test suite.
    ```bash

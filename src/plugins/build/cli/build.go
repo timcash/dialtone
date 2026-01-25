@@ -11,6 +11,7 @@ import (
 
 	"dialtone/cli/src/core/logger"
     ui_cli "dialtone/cli/src/plugins/ui/cli"
+	ai_cli "dialtone/cli/src/plugins/ai/cli"
 )
 
 // RunBuild handles building for different platforms
@@ -321,10 +322,13 @@ func buildEverything(local bool) {
 	}
 	copyDir(filepath.Join("src", "web", "dist"), webBuildDir)
 
-	// 3. Build Dialtone locally (the tool itself)
+	// 3. Build AI components
+	ai_cli.RunAI([]string{"build"})
+
+	// 4. Build Dialtone locally (the tool itself)
 	BuildSelf()
 
-	// 4. Build for ARM64
+	// 5. Build for ARM64
 	if local || !hasPodman() {
 		buildLocally("arm64")
 	} else {

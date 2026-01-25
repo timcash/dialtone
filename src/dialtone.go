@@ -22,6 +22,7 @@ import (
 
 	mavlink "dialtone/cli/src/plugins/mavlink/app"
 	camera "dialtone/cli/src/plugins/camera/app"
+	ai_app "dialtone/cli/src/plugins/ai/app"
 
 	"github.com/bluenviron/gomavlib/v3/pkg/dialects/common"
 	"github.com/coder/websocket"
@@ -110,7 +111,7 @@ func runLocalOnly(port, wsPort int, verbose bool, mavlinkAddr string, opencode b
 
 	// Start opencode if requested
 	if opencode {
-		go runOpencodeServer(3000) // Default opencode port
+		go ai_app.RunOpencodeServer(3000) // Default opencode port
 	}
 
 	// Start NATS publisher loop for Mavlink
@@ -202,6 +203,12 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 	if mavlinkAddr != "" {
 		go startMavlink(mavlinkAddr, localNATSPort)
 	}
+
+	// Start opencode if requested
+	if opencode {
+		go ai_app.RunOpencodeServer(3000)
+	}
+
 	startNatsPublisher(localNATSPort)
 
 	natsLn, _ := ts.Listen("tcp", fmt.Sprintf(":%d", port))
@@ -678,32 +685,6 @@ func formatIPs(ips []netip.Addr) string {
 	return result
 }
 
-// runOpencodeServer starts the opencode AI assistant server
-func runOpencodeServer(port int) {
-	opencodePath := os.ExpandEnv("$HOME/.opencode/bin/opencode")
-	if _, err := os.Stat(opencodePath); os.IsNotExist(err) {
-		LogInfo("opencode binary not found at %s, skipping...", opencodePath)
-		return
-	}
-
-	LogInfo("Starting opencode server on port %d...", port)
-	cmd := exec.Command(opencodePath, "--port", fmt.Sprintf("%d", port))
-
-	// Create log file
-	logFile, err := os.OpenFile("opencode.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		LogInfo("Failed to create opencode log file: %v", err)
-		return
-	}
-	defer logFile.Close()
-
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-
-	if err := cmd.Run(); err != nil {
-		LogInfo("opencode server exited: %v", err)
-	}
-}
 
 func checkZombieProcess(device string) {
 	// Simple check using fuser if available

@@ -18,11 +18,11 @@
 ## Test
 1. **Ticket Tests**: Run tests specific to this ticket's implementation.
    ```bash
-   ./dialtone.sh ticket test geospatial-tools
+   ./dialtone.sh test ticket geospatial-tools
    ```
 2. **Plugin Tests**: Run its specific tests.
    ```bash
-   ./dialtone.sh plugin test lidar
+   ./dialtone.sh test plugin lidar
    ```
 3. **All Tests**: Run the entire test suite.
    ```bash
