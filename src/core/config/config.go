@@ -1,4 +1,4 @@
-package dialtone
+package config
 
 import (
 	"os"
@@ -6,13 +6,15 @@ import (
 	"path/filepath"
 	"strings"
 
+	"dialtone/cli/src/core/logger"
+
 	"github.com/joho/godotenv"
 )
 
 // LoadConfig loads environment variables from .env
 func LoadConfig() {
 	if err := godotenv.Load(); err != nil {
-		LogInfo("Warning: godotenv.Load() failed: %v", err)
+		logger.LogInfo("Warning: godotenv.Load() failed: %v", err)
 	}
 }
 
@@ -38,29 +40,29 @@ func GetDialtoneEnv() string {
 	return absPath
 }
 
-func validateRequiredVars(vars []string) {
+func ValidateRequiredVars(vars []string) {
 	for _, v := range vars {
 		if os.Getenv(v) == "" {
-			LogFatal("ERROR: Environment variable %s is not set. Please check your .env file.", v)
+			logger.LogFatal("ERROR: Environment variable %s is not set. Please check your .env file.", v)
 		}
 	}
 }
 
 func RunShell(dir string, name string, args ...string) {
-	LogInfo("Running: %s %v in %s", name, args, dir)
+	logger.LogInfo("Running: %s %v in %s", name, args, dir)
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		LogFatal("Command failed: %v", err)
+		logger.LogFatal("Command failed: %v", err)
 	}
 }
 
 func CopyDir(src, dst string) {
 	entries, err := os.ReadDir(src)
 	if err != nil {
-		LogFatal("Failed to read src dir %s: %v", src, err)
+		logger.LogFatal("Failed to read src dir %s: %v", src, err)
 	}
 
 	for _, entry := range entries {
@@ -69,42 +71,42 @@ func CopyDir(src, dst string) {
 
 		if entry.IsDir() {
 			if err := os.MkdirAll(dstPath, 0755); err != nil {
-				LogFatal("Failed to create dir %s: %v", dstPath, err)
+				logger.LogFatal("Failed to create dir %s: %v", dstPath, err)
 			}
 			CopyDir(srcPath, dstPath)
 		} else {
 			data, err := os.ReadFile(srcPath)
 			if err != nil {
-				LogFatal("Failed to read file %s: %v", srcPath, err)
+				logger.LogFatal("Failed to read file %s: %v", srcPath, err)
 			}
 			if err := os.WriteFile(dstPath, data, 0644); err != nil {
-				LogFatal("Failed to write file %s: %v", dstPath, err)
+				logger.LogFatal("Failed to write file %s: %v", dstPath, err)
 			}
 		}
 	}
 }
 
 func RunSimpleShell(command string) {
-	LogInfo("Running: %s", command)
+	logger.LogInfo("Running: %s", command)
 	cmd := exec.Command("bash", "-c", command)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		LogFatal("Command failed: %v", err)
+		logger.LogFatal("Command failed: %v", err)
 	}
 }
 
-func commandExists(name string) bool {
+func CommandExists(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
 }
 
 func RunSudoShell(command string) {
-	LogInfo("Running with sudo: %s", command)
+	logger.LogInfo("Running with sudo: %s", command)
 	cmd := exec.Command("sudo", "bash", "-c", command)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		LogFatal("Command failed: %v", err)
+		logger.LogFatal("Command failed: %v", err)
 	}
 }
