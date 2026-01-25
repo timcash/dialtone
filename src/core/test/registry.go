@@ -36,6 +36,12 @@ func RunTicket(ticketName string) error {
 	return nil
 }
 
+// RunPlugin executes all registered tests for a specific plugin name
+// Plugins leverage the TicketName field to store the plugin name
+func RunPlugin(pluginName string) error {
+	return RunTicket(pluginName)
+}
+
 // HasAnyTag checks if a test has any of the specified tags
 func HasAnyTag(t TestCase, tags []string) bool {
 	for _, tag := range tags {
