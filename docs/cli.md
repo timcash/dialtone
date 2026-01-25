@@ -26,7 +26,7 @@ mv -n .env.example .env # Only if .env does not exists
 ## Running Tests: Tests are the most important concept in `dialtone`
 ```bash
 ./dialtone.sh ticket test <ticket-name> # Runs tests in tickets/<ticket-name>/test/
-./dialtone.sh plugin test <plugin-name> # Runs tests in src/plugins/<plugin-name>/test/
+./dialtone.sh test plugin <plugin-name> # Runs tests in src/plugins/<plugin-name>/test/
 ./dialtone.sh test <tag1> <tag2> <tag3> # Scans all tests for any of these tags
 ./dialtone.sh test # runs all tests
 ```
@@ -44,7 +44,7 @@ mv -n .env.example .env # Only if .env does not exists
 ./dialtone.sh plugin add <plugin-name> # Add a README.md to src/plugins/<plugin-name>/README.md
 ./dialtone.sh plugin install <plugin-name> # Install dependencies
 ./dialtone.sh plugin build <plugin-name> # Build the plugin
-./dialtone.sh plugin test <plugin-name> # Runs tests in src/plugins/<plugin-name>/test/
+./dialtone.sh test plugin <plugin-name> # Runs tests in src/plugins/<plugin-name>/test/
 ```
 
 ## Build & Deploy
@@ -81,6 +81,15 @@ git merge main                    # Merge main into current branch
 ./dialtone.sh www logs <deployment-url-or-id> # View deployment logs
 ./dialtone.sh www domain [deployment-url] # Manage the dialtone.earth domain alias
 ./dialtone.sh www login # Login to Vercel
+```
+
+## Develop the Web UI
+```bash
+./dialtone.sh ui dev          # Start local development server (vite)
+./dialtone.sh ui build        # Build the production UI bundle
+./dialtone.sh ui install      # Install frontend dependencies
+./dialtone.sh ui mock-data    # Start a mock data server for testing telemetry/camera
+./dialtone.sh test plugin ui  # Run integration tests for the UI
 ```
 
 
