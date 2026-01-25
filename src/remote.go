@@ -116,10 +116,6 @@ func RunRemoteBuild(args []string) {
 		npm install
 		echo "Building web assets..."
 		npm run build
-		cd ../..
-		rm -rf src/web_build
-		mkdir -p src/web_build
-		cp -r src/web/dist/* src/web_build/
 	`, remoteDir)
 
 	output, err := ssh.RunSSHCommand(client, webCmd)
