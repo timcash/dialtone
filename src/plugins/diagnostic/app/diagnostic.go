@@ -1,14 +1,12 @@
-package dialtone
+package diagnostic
 
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 
@@ -19,50 +17,32 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// RunDiagnostic handles the 'diagnostic' command
-func RunDiagnostic(args []string) {
-	logger.LogInfo("Running System Diagnostics...")
-
-	// 1. Check OS/Arch
-	fmt.Printf("OS: %s\n", runtime.GOOS)
-	fmt.Printf("Arch: %s\n", runtime.GOARCH)
-
-	fs := flag.NewFlagSet("diagnostic", flag.ExitOnError)
-	host := fs.String("host", os.Getenv("ROBOT_HOST"), "SSH host (user@host)")
-	port := fs.String("port", "22", "SSH port")
-	user := fs.String("user", os.Getenv("ROBOT_USER"), "SSH user")
-	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password")
-
-	fs.Parse(args)
-
-	if *host == "" {
-		// 2. Check dependencies (Go, Node, Tailscale)
-		if _, err := exec.LookPath("go"); err != nil {
-			logger.LogFatal("Go is not installed.")
-		}
-		if _, err := exec.LookPath("node"); err != nil {
-			logger.LogInfo("Node.js is not installed (warning).")
-		}
-		if _, err := exec.LookPath("tailscale"); err != nil {
-			logger.LogFatal("Tailscale is not installed.")
-		}
-
-		logger.LogInfo("No host specified. Skipping remote diagnostics.")
-		logger.LogInfo("Diagnostics Passed.")
-		return
+// CheckLocalDependencies checks if Go, Node.js, and Tailscale are installed.
+func CheckLocalDependencies() {
+	if _, err := exec.LookPath("go"); err != nil {
+		logger.LogFatal("Go is not installed.")
 	}
+	if _, err := exec.LookPath("node"); err != nil {
+		logger.LogInfo("Node.js is not installed (warning).")
+	}
+	if _, err := exec.LookPath("tailscale"); err != nil {
+		logger.LogFatal("Tailscale is not installed.")
+	}
+}
 
-	if *pass == "" {
+// RunRemoteDiagnostics connects to the remote host and runs diagnostic commands.
+func RunRemoteDiagnostics(host, port, user, pass string) {
+	if pass == "" {
 		logger.LogFatal("Error: -pass is required for remote diagnostics")
 	}
 
-	client, err := ssh.DialSSH(*host, *port, *user, *pass)
+	client, err := ssh.DialSSH(host, port, user, pass)
 	if err != nil {
 		logger.LogFatal("SSH connection failed: %v", err)
 	}
 	defer client.Close()
 
-	logger.LogInfo("Running diagnostics on %s...", *host)
+	logger.LogInfo("Running diagnostics on %s...", host)
 
 	commands := []struct {
 		name string
@@ -146,7 +126,8 @@ func checkAppStatus(url string) error {
 	return nil
 }
 
-func runLocalDiagnostics() {
+// RunLocalDiagnostics runs basic local system checks.
+func RunLocalDiagnostics() {
 	fmt.Println("Local System Diagnostics:")
 	fmt.Println("=========================")
 
