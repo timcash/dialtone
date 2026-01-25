@@ -41,10 +41,11 @@ If you need to define a new test, add it with the `dialtone.sh test add --tick
 
 
 # 4. Complete Subtask
-Once the implementation is complete and the tests pass verify the specific test case defined in the subtask.
+Once the implementation is complete and the tests pass verify the specific test case defined in the subtask. and mark the subtask as done.
 
 ```bash
 ./dialtone.sh test ticket <ticket-name> --subtask <subtask-name>
+./dialtone.sh ticket subtask done <ticket-name> <subtask-name>
 ```
 
 
