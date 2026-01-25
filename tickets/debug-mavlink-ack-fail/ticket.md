@@ -25,9 +25,16 @@ Fix the incorrect "ACK: FAIL" reports in the frontend by ensuring the MAVLink re
 - test-command: `dialtone.sh test`
 - status: done
 
+## SUBTASK: enhance github pr command
+- name: enhance-github-pr
+- description: Update `github pr` command to read `tickets/<branch>/ticket.md` and use it as the PR body.
+- test-description: Verify by running `dialtone.sh ticket done` which triggers `github pr`
+- test-command: `dialtone.sh ticket done debug-mavlink-ack-fail`
+- status: done
+
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
 - description: run the ticket cli to verify all steps to complete the ticket, git is in the correct state and a pull request is created and ready for review. if it comepletes it should mark the final subtask as done
 - test-description: vailidates all ticket subtasks are done
 - test-command: `dialtone.sh ticket done debug-mavlink-ack-fail`
-- status: todo
+- status: done
