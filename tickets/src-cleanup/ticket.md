@@ -63,5 +63,5 @@
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
 - description: run the ticket cli to verify all steps to complete the ticket, git is in the correct state and a pull request is created and ready for review. if it comepletes it should mark the final subtask as done
-- status: todo
+- status: done
 
