@@ -5,155 +5,102 @@
   <meta charset="UTF-8" />
   <link rel="icon" type="image/svg+xml" href="/vite.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dialtone Dashboard v1.0.4-refactored-camfix-v1</title>
+  <title>Dialtone Dashboard</title>
+  
+  <!-- Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+  <!-- Xterm CSS -->
+  <link rel="stylesheet" href="/node_modules/@xterm/xterm/css/xterm.css" />
 </head>
 
 <body>
-  <div id="app">
-    <header style="border-bottom: 2px solid #3498db;">
-      <h1>Dialtone Dashboard v1.0.4-refactored-camfix-v1 <span id="hostname-display"></span></h1>
-      <div id="status-indicator" class="status-offline" aria-label="System Status">
-        <span class="status-dot"></span>
-        <span id="status-text">DISCONNECTED</span>
-      </div>
-    </header>
+  <!-- Helper overlay for notifications just in case -->
+  <div id="notification-overlay"></div>
 
-    <section class="grid-container">
-      <!-- System Stats -->
-      <div class="section dashboard-card">
-        <h2>System <span class="live-indicator"></span></h2>
-        <table>
-          <tr>
-            <th>Uptime</th>
-            <td id="uptime">--</td>
-          </tr>
-          <tr>
-            <th>Platform</th>
-            <td id="platform">--</td>
-          </tr>
-          <tr>
-            <th>Viewer</th>
-            <td id="viewer">--</td>
-          </tr>
-        </table>
-      </div>
-
-      <!-- NATS Stats -->
-      <div class="section dashboard-card">
-        <h2>NATS Server</h2>
-        <table>
-          <tr>
-            <th>Status</th>
-            <td class="status active">Running</td>
-          </tr>
-          <tr>
-            <th>Connections</th>
-            <td id="connections">--</td>
-          </tr>
-          <tr>
-            <th>Messages</th>
-            <td>In: <span id="in_msgs">--</span> / Out: <span id="out_msgs">--</span></td>
-          </tr>
-          <tr>
-            <th>Data</th>
-            <td>In: <span id="in_bytes">--</span> / Out: <span id="out_bytes">--</span></td>
-          </tr>
-        </table>
-      </div>
-
-      <!-- MAVLink Status -->
-      <div class="section dashboard-card">
-        <h2>MAVLink Status</h2>
-        <table>
-          <tr>
-            <th>Heartbeat</th>
-            <td id="mav-heartbeat" class="mono">WAITING...</td>
-          </tr>
-          <tr>
-            <th>Mode / Status</th>
-            <td><span id="mav-mode">--</span> / <span id="mav-status">--</span></td>
-          </tr>
-          <tr>
-            <th>Type</th>
-            <td id="mav-type">--</td>
-          </tr>
-        </table>
-      </div>
-
-      <!-- Controls -->
-      <div class="section dashboard-card">
-        <h2>Controls</h2>
-        <div class="control-group">
-          <button id="arm-btn" class="btn-danger"
-            style="background-color: #e74c3c; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; margin-right: 10px;">ARM</button>
-          <button id="disarm-btn" class="btn-warning"
-            style="background-color: #f39c12; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">DISARM</button>
+  <!-- Main Grid Container -->
+  <div class="grid-container">
+    
+    <!-- LEFT COLUMN: Terminal & Commands -->
+    <section class="panel-left">
+      <header class="panel-header">
+        <h2>CMD // LOGS</h2>
+        <div class="status-indicator" id="conn-status">OFFLINE</div>
+      </header>
+      
+      <div id="terminal-container"></div>
+      
+      <div class="command-palette">
+        <h3>Quick Commands</h3>
+        <div class="btn-grid">
+           <button id="btn-arm" class="btn btn-danger">ARM</button>
+           <button id="btn-disarm" class="btn btn-warning">DISARM</button>
+           <button id="btn-logs" class="btn">FETCH LOGS</button>
+           <button id="btn-system" class="btn">SYSTEM STATUS</button>
         </div>
-      </div>
-
-      <!-- Network -->
-      <div class="section dashboard-card">
-        <h2>Network</h2>
-        <table>
-          <tr>
-            <th>Tailscale IPs</th>
-            <td><span class="mono" id="ts-ips">--</span></td>
-          </tr>
-        </table>
-      </div>
-
-      <!-- Endpoints -->
-      <div class="section dashboard-card">
-        <h2>Endpoints</h2>
-        <table>
-          <tr>
-            <td><a href="/api/status">/api/status</a></td>
-            <td>Status API</td>
-          </tr>
-          <tr>
-            <td><a href="/api/cameras">/api/cameras</a></td>
-            <td>Cameras List</td>
-          </tr>
-          <tr>
-            <td><a href="/stream">/stream</a></td>
-            <td>MJPEG Stream</td>
-          </tr>
-        </table>
-      </div>
-
-      <!-- Camera Feed -->
-      <div class="section dashboard-card full-width">
-        <h2>Live Feed</h2>
-        <div class="camera-container">
-          <img id="stream-img" src="/stream" alt="Live Camera Feed"
-            onerror="this.classList.add('hidden'); this.nextElementSibling.classList.remove('hidden');">
-          <div class="camera-error hidden">Camera stream unavailable</div>
+        <div class="input-group">
+            <input type="text" id="cmd-input" placeholder=">> Send Manual Command..." />
         </div>
-      </div>
-
-      <!-- NATS Messenger -->
-      <div class="section dashboard-card full-width">
-        <h2>NATS Messenger</h2>
-        <div class="messenger-form">
-          <div class="form-row">
-            <div class="form-group">
-              <label>Subject</label>
-              <input type="text" id="subject" class="mono" value="rover.command" aria-label="NATS Subject">
-            </div>
-            <div class="form-group">
-              <button id="send-btn" disabled aria-label="Send NATS Message">SEND_MESSAGE</button>
-            </div>
-          </div>
-          <div class="form-group">
-            <label>Payload</label>
-            <textarea id="message" class="mono" rows="4" placeholder='{"cmd": "arm"}'
-              aria-label="Message Body"></textarea>
-          </div>
-        </div>
-        <div id="log-list" class="log-list"></div>
       </div>
     </section>
+
+    <!-- CENTER COLUMN: 3D Visualization -->
+    <section class="panel-center" id="three-container">
+      <div id="hud-overlay">
+        <div class="hud-top">
+            <div class="hud-stat">ALT: <span id="hud-alt">0.0</span>m</div>
+            <div class="hud-stat">SPD: <span id="hud-spd">0.0</span>m/s</div>
+        </div>
+        <div class="hud-center">
+            <div class="hud-mode" id="hud-mode">STABILIZE</div>
+        </div>
+      </div>
+      <!-- Canvas injected by Three.js -->
+    </section>
+
+    <!-- RIGHT COLUMN: Camera & Telemetry -->
+    <section class="panel-right">
+      <header class="panel-header">
+        <h2>VISION // DATA</h2>
+      </header>
+
+      <div class="camera-feed-container">
+        <img id="camera-feed" src="/stream" alt="No Feed" onerror="this.parentElement.classList.add('no-signal')" />
+        <div class="cam-overlay">CAM 1 - YUYV</div>
+      </div>
+
+      <div class="telemetry-box">
+        <h3>Telemetry Stream</h3>
+        <table class="telemetry-table">
+            <tr>
+                <th>HEARTBEAT</th>
+                <td id="val-heartbeat" class="mono">--</td>
+            </tr>
+            <tr>
+                <th>BATTERY</th>
+                <td id="val-batt" class="mono">-- V</td>
+            </tr>
+            <tr>
+                <th>GPS SATS</th>
+                <td id="val-sats" class="mono">--</td>
+            </tr>
+             <tr>
+                <th>NATS MSGS</th>
+                <td id="val-nats" class="mono">0</td>
+            </tr>
+        </table>
+      </div>
+
+       <div class="system-logs-mini">
+        <h3>Recent Alerts</h3>
+        <ul id="alert-feed">
+            <!-- Dynamic alerts -->
+        </ul>
+      </div>
+
+    </section>
+
   </div>
+
   <script type="module" src="/src/main.ts"></script>
 </body>
 

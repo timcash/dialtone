@@ -20,6 +20,11 @@ if [ -z "$DIALTONE_ENV" ] && [ -f .env ]; then
     DIALTONE_ENV=$(grep "^DIALTONE_ENV=" .env | cut -d '=' -f2)
 fi
 
+# Ensure it is exported for child processes (Go binary)
+if [ -n "$DIALTONE_ENV" ]; then
+    export DIALTONE_ENV
+fi
+
 # 3. Warn if DIALTONE_ENV is missing
 if [ -z "$DIALTONE_ENV" ]; then
     echo "WARNING: DIALTONE_ENV not found in args or .env."
