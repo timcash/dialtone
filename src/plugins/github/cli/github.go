@@ -19,17 +19,17 @@ func findGH() string {
 		home, _ := os.UserHomeDir()
 		depsDir = filepath.Join(home, ".dialtone_env")
 	}
-	
+
 	ghPath := filepath.Join(depsDir, "gh", "bin", "gh")
 	if _, err := os.Stat(ghPath); err == nil {
 		return ghPath
 	}
-	
+
 	// Fallback to system PATH
 	if p, err := exec.LookPath("gh"); err == nil {
 		return p
 	}
-	
+
 	return "gh"
 }
 
@@ -68,7 +68,6 @@ func printGithubUsage() {
 	fmt.Println("  help               Show this help message")
 }
 
-
 // runMerge merges the current pull request
 func runMerge(args []string) {
 	gh := findGH()
@@ -78,9 +77,9 @@ func runMerge(args []string) {
 	// We allow user args to override or append?
 	// gh pr merge [number | url | branch] [flags]
 	// If no arg provided, it uses current branch.
-	
+
 	cmdArgs := []string{"pr", "merge"}
-	
+
 	// If user provided args, pass them. If not, default to --merge --delete-branch
 	if len(args) > 0 {
 		cmdArgs = append(cmdArgs, args...)
@@ -92,7 +91,7 @@ func runMerge(args []string) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	// gh pr merge might be interactive if not enough info/flags, but we inherit proper stdio so it should be fine.
-	
+
 	if err := cmd.Run(); err != nil {
 		logger.LogFatal("Failed to merge PR: %v", err)
 	}
@@ -102,24 +101,24 @@ func runMerge(args []string) {
 func runClose(args []string) {
 	gh := findGH()
 	logger.LogInfo("Closing pull request...")
-	
+
 	cmdArgs := []string{"pr", "close"}
-	
+
 	// If user provided args, pass them. If not, default to --delete-branch (if user deletes branch local, gh pr close --delete-branch deletes remote?)
 	// gh pr close [number | url | branch] [flags]
 	// --delete-branch: Delete the local and remote branch after close.
-	
+
 	if len(args) > 0 {
 		cmdArgs = append(cmdArgs, args...)
 	} else {
 		// Default: just close
 		// cmdArgs = append(cmdArgs)
 	}
-	
+
 	cmd := exec.Command(gh, cmdArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	if err := cmd.Run(); err != nil {
 		logger.LogFatal("Failed to close PR: %v", err)
 	}
@@ -144,7 +143,7 @@ func runPullRequest(args []string) {
 			printGithubUsage()
 			return
 		}
-		
+
 		// Also scan for help flag anywhere if not subcommand
 		for _, arg := range args {
 			if arg == "--help" || arg == "-h" {
@@ -230,11 +229,11 @@ func runPullRequest(args []string) {
 		if body != "" {
 			createArgs = append(createArgs, "--body", body)
 		} else {
-			planFile := filepath.Join("plan", fmt.Sprintf("plan-%s.md", branch))
-			if _, statErr := os.Stat(planFile); statErr == nil {
-				createArgs = append(createArgs, "--body-file", planFile)
+			ticketFile := filepath.Join("tickets", branch, "ticket.md")
+			if _, statErr := os.Stat(ticketFile); statErr == nil {
+				createArgs = append(createArgs, "--body-file", ticketFile)
 			} else {
-				createArgs = append(createArgs, "--body", fmt.Sprintf("Feature: %s\n\nSee plan file for details.", branch))
+				createArgs = append(createArgs, "--body", fmt.Sprintf("Feature: %s", branch))
 			}
 		}
 
@@ -267,9 +266,9 @@ func runPullRequest(args []string) {
 			if body != "" {
 				editArgs = append(editArgs, "--body", body)
 			} else {
-				planFile := filepath.Join("plan", fmt.Sprintf("plan-%s.md", branch))
-				if _, statErr := os.Stat(planFile); statErr == nil {
-					editArgs = append(editArgs, "--body-file", planFile)
+				ticketFile := filepath.Join("tickets", branch, "ticket.md")
+				if _, statErr := os.Stat(ticketFile); statErr == nil {
+					editArgs = append(editArgs, "--body-file", ticketFile)
 				}
 			}
 
@@ -327,12 +326,12 @@ func runCheckDeploy(args []string) {
 	// 3. Run vercel list
 	// We pass args to allow filtering if the user wants, e.g. dialtone-dev github check-deploy <project>
 	vArgs := append([]string{"list"}, args...)
-	
+
 	cmd := exec.Command(vercelPath, vArgs...)
 	cmd.Dir = webDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	logger.LogInfo("Running: vercel list (in %s)", webDir)
 	if err := cmd.Run(); err != nil {
 		logger.LogFatal("Failed to check deployments: %v", err)
@@ -432,7 +431,7 @@ func runIssueSync(args []string) {
 
 		content := strings.ReplaceAll(template, "ticket-short-name", slug)
 		content = strings.ReplaceAll(content, "[Ticket Title]", issue.Title)
-		
+
 		// Add issue body to Collaborative Notes or at the end
 		if issue.Body != "" {
 			bodySection := fmt.Sprintf("\n## Issue Summary\n%s\n", issue.Body)
@@ -498,15 +497,15 @@ func runIssueCloseAll(args []string) {
 func generateSlug(title string) string {
 	slug := strings.ToLower(title)
 	slug = strings.ReplaceAll(slug, " ", "-")
-	
+
 	// Remove special characters
 	reg := regexp.MustCompile("[^a-z0-9-]+")
 	slug = reg.ReplaceAllString(slug, "")
-	
+
 	// Remove double dashes
 	for strings.Contains(slug, "--") {
 		slug = strings.ReplaceAll(slug, "--", "-")
 	}
-	
+
 	return strings.Trim(slug, "-")
 }
