@@ -515,7 +515,7 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server
 	// 1. JSON init API for the frontend
 	mux.HandleFunc("/api/init", func(w http.ResponseWriter, r *http.Request) {
 		data := map[string]interface{}{
-			"version":   "v1.1.0",
+			"version":   "v1.1.1",
 			"hostname":  hostname,
 			"nats_port": natsPort,
 			"ws_port":   wsPort,
