@@ -377,7 +377,7 @@ func startMavlink(endpoint string, natsPort int) {
 					subject = "mavlink.ack"
 					data, err = json.Marshal(map[string]any{
 						"command": msg.Command,
-						"result":  msg.Result,
+						"result":  int(msg.Result),
 					})
 				}
 			case "STATUSTEXT":
