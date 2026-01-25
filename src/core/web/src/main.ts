@@ -180,8 +180,19 @@ async function connectNATS() {
           const data = jc.decode(m.data) as any;
           handleMessage(data, m.subject);
         } catch (e) {
-          // Ignore decode errors
+          // If decoding fails, it might be raw string from opencode
+          const raw = new TextDecoder().decode(m.data);
+          term.write(raw);
         }
+      }
+    })();
+
+    // Subscribe to opencode output specifically if it's not JSON
+    const opencodeSub = nc.subscribe("ai.opencode.output");
+    (async () => {
+      for await (const m of opencodeSub) {
+        const text = new TextDecoder().decode(m.data);
+        term.write(text);
       }
     })();
 
@@ -348,8 +359,9 @@ cmdInput?.addEventListener('keydown', (e) => {
     const val = cmdInput.value;
     if (val) {
       term.writeln(`\r\n$ ${val}`);
-      // Parse command? Or just generic publish?
-      // For now, publish as command log
+      if (nc) {
+        nc.publish("ai.opencode.input", new TextEncoder().encode(val));
+      }
       term.writeln('\x1b[90mCommand sent...\x1b[0m');
       cmdInput.value = '';
     }

@@ -10,9 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"dialtone/cli/src/core"
 	"dialtone/cli/src/core/logger"
 	github_cli "dialtone/cli/src/plugins/github/cli"
 	test_cli "dialtone/cli/src/plugins/test/cli"
+
+	"github.com/nats-io/nats.go"
 )
 
 // RunAI is the entry point for the AI plugin
@@ -90,6 +93,8 @@ func RunOpencode(args []string) {
 			logger.LogFatal("Failed to start opencode: %v", err)
 		}
 		logger.LogInfo("opencode started (PID: %d). Logs: opencode.log", cmd.Process.Pid)
+		// Start NATS Bridge
+		go bridgeOpencodeToNATS(cmd)
 
 	case "stop":
 		logger.LogInfo("Stopping opencode server...")
@@ -344,4 +349,39 @@ func RunSubagent(args []string) {
 		cmd.Wait()
 		logger.LogInfo("Subagent completed.")
 	}
+}
+
+func bridgeOpencodeToNATS(cmd *exec.Cmd) {
+	natsURL := "nats://127.0.0.1:4222" // Default NATS port
+	nc, err := core.NewNatsClient(natsURL)
+	if err != nil {
+		logger.LogInfo("Failed to connect to NATS for AI bridge: %v", err)
+		return
+	}
+	defer nc.Close()
+
+	stdout, _ := cmd.StdoutPipe()
+	stdin, _ := cmd.StdinPipe()
+
+	// Stream stdout to NATS
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			n, err := stdout.Read(buf)
+			if n > 0 {
+				nc.Publish("ai.opencode.output", buf[:n])
+			}
+			if err != nil {
+				break
+			}
+		}
+	}()
+
+	// Stream NATS to stdin
+	nc.Subscribe("ai.opencode.input", func(m *nats.Msg) {
+		stdin.Write(m.Data)
+		stdin.Write([]byte("\n"))
+	})
+
+	cmd.Wait()
 }
