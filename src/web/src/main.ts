@@ -128,6 +128,10 @@ const els = {
   batt: document.getElementById('val-batt'),
   sats: document.getElementById('val-sats'),
   nats: document.getElementById('val-nats'),
+  lat: document.getElementById('val-lat'),
+  lon: document.getElementById('val-lon'),
+  rp: document.getElementById('val-rp'),
+  yaw: document.getElementById('val-yaw'),
   hud: {
     alt: document.getElementById('hud-alt'),
     spd: document.getElementById('hud-spd'),
@@ -207,20 +211,41 @@ function handleMessage(data: any, subject: string) {
     if (els.sats) els.sats.innerText = count;
   }
 
+  // Global Position (GPS Coord)
+  if (subject.includes("global_position_int") || data.lat !== undefined) {
+    if (els.lat) els.lat.innerText = data.lat.toFixed(6);
+    if (els.lon) els.lon.innerText = data.lon.toFixed(6);
+    if (els.hud.alt && data.relative_alt !== undefined) {
+      els.hud.alt.innerText = data.relative_alt.toFixed(1);
+    }
+  }
+
   // HUD (VFR_HUD)
   if (data.airspeed !== undefined || data.vfr_hud) {
     const src = data.vfr_hud || data;
     if (els.hud.spd) els.hud.spd.innerText = parseFloat(src.airspeed).toFixed(1);
-    if (els.hud.alt) els.hud.alt.innerText = parseFloat(src.alt).toFixed(1);
+    if (els.hud.alt && src.alt !== undefined) els.hud.alt.innerText = parseFloat(src.alt).toFixed(1);
   }
 
   // Attitude
-  if (data.roll !== undefined || data.attitude) {
+  if (data.roll !== undefined || data.attitude || subject.includes("attitude")) {
     const att = data.attitude || data;
     // Three.js rotation (order might need tuning)
     robotGroup.rotation.z = -att.roll;  // Roll
     robotGroup.rotation.x = att.pitch; // Pitch
     robotGroup.rotation.y = -att.yaw;   // Yaw
+
+    // Text Display
+    if (els.rp) {
+      const r = (att.roll * 180 / Math.PI).toFixed(1);
+      const p = (att.pitch * 180 / Math.PI).toFixed(1);
+      els.rp.innerText = `${r}° / ${p}°`;
+    }
+    if (els.yaw) {
+      let y = (att.yaw * 180 / Math.PI);
+      if (y < 0) y += 360;
+      els.yaw.innerText = y.toFixed(1) + "°";
+    }
   }
 }
 
