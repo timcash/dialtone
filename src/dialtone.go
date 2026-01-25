@@ -639,7 +639,7 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server
 	})
 
 	// 6. Static Asset Serving (Embedded)
-	subFS, err := fs.Sub(webFS, "web/dist")
+	subFS, err := fs.Sub(webFS, "core/web/dist")
 	if err != nil {
 		logger.LogInfo("Error accessing sub-filesystem: %v", err)
 	}
