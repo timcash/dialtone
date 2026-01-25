@@ -60,6 +60,13 @@
 - test-command: `./dialtone.sh build --full`
 - status: done
 
+## SUBTASK: Debug Web UI
+- name: debug-web-ui
+- description: Fix Web UI embedding in `src/dialtone.go`. The embed directive and `fs.Sub` path must match the new `src/core/web` location.
+- test-description: Deploy and run diagnostic.
+- test-command: `./dialtone.sh deploy && ./dialtone.sh diagnostic`
+- status: done
+
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
 - description: run the ticket cli to verify all steps to complete the ticket, git is in the correct state and a pull request is created and ready for review. if it comepletes it should mark the final subtask as done
