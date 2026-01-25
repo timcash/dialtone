@@ -9,16 +9,12 @@ import (
 	"regexp"
 	"strings"
 
+	"dialtone/cli/src/core/config"
 	"dialtone/cli/src/core/logger"
 )
 
 func findGH() string {
-	depsDir := os.Getenv("DIALTONE_ENV")
-	if depsDir == "" {
-		// Fallback to home if not set, match config.go logic
-		home, _ := os.UserHomeDir()
-		depsDir = filepath.Join(home, ".dialtone_env")
-	}
+	depsDir := config.GetDialtoneEnv()
 
 	ghPath := filepath.Join(depsDir, "gh", "bin", "gh")
 	if _, err := os.Stat(ghPath); err == nil {
@@ -252,8 +248,14 @@ func runPullRequest(args []string) {
 		// PR exists
 		logger.LogInfo("Pull request exists for branch: %s", branch)
 
-		// If title or body provided, update the PR
-		if title != "" || body != "" {
+		// If title or body provided, OR if ticket exists (to sync), update the PR
+		ticketFile := filepath.Join("tickets", branch, "ticket.md")
+		hasTicket := false
+		if _, err := os.Stat(ticketFile); err == nil {
+			hasTicket = true
+		}
+
+		if title != "" || body != "" || (hasTicket && body == "") {
 			logger.LogInfo("Updating pull request...")
 
 			var editArgs []string
@@ -265,10 +267,13 @@ func runPullRequest(args []string) {
 
 			if body != "" {
 				editArgs = append(editArgs, "--body", body)
-			} else {
-				ticketFile := filepath.Join("tickets", branch, "ticket.md")
-				if _, statErr := os.Stat(ticketFile); statErr == nil {
-					editArgs = append(editArgs, "--body-file", ticketFile)
+			} else if hasTicket {
+				// Read file content manually and pass as body to avoid 'gh' file access issues
+				content, err := os.ReadFile(ticketFile)
+				if err == nil {
+					editArgs = append(editArgs, "--body", string(content))
+				} else {
+					logger.LogInfo("Failed to read ticket file: %v", err)
 				}
 			}
 
