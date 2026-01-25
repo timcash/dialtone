@@ -4,12 +4,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"regexp"
 	"strings"
-	"time"
 
 	"dialtone/cli/src/core/ssh"
+	ai_cli "dialtone/cli/src/plugins/ai/cli"
 	build_cli "dialtone/cli/src/plugins/build/cli"
 	camera_cli "dialtone/cli/src/plugins/camera/cli"
 	chrome_cli "dialtone/cli/src/plugins/chrome/cli"
@@ -23,8 +21,6 @@ import (
 	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
 	ui_cli "dialtone/cli/src/plugins/ui/cli"
 	www_cli "dialtone/cli/src/plugins/www/cli"
-	ai_cli "dialtone/cli/src/plugins/ai/cli"
-
 )
 
 // ExecuteDev is the entry point for the dialtone-dev CLI
@@ -59,8 +55,6 @@ func ExecuteDev() {
 		RunClone(args)
 	case "sync-code":
 		RunSyncCode(args)
-	case "plan":
-		runPlan(args)
 	case "branch":
 		runBranch(args)
 	case "test":
@@ -93,8 +87,6 @@ func ExecuteDev() {
 		ai_cli.RunAI(append([]string{"developer"}, args...))
 	case "subagent":
 		ai_cli.RunAI(append([]string{"subagent"}, args...))
-	case "docs":
-		runDocs(args)
 	case "help", "-h", "--help":
 		printDevUsage()
 	default:
@@ -117,7 +109,6 @@ func printDevUsage() {
 	fmt.Println("  provision     Generate Tailscale Auth Key")
 	fmt.Println("  logs          Tail remote logs")
 	fmt.Println("  diagnostic    Run system diagnostics (local or remote)")
-	fmt.Println("  plan [name]        List plans or create/view a plan file")
 	fmt.Println("  branch <name>      Create or checkout a feature branch")
 	fmt.Println("  ticket <subcmd>    Manage GitHub tickets (start, done, subtask, etc.)")
 	fmt.Println("  plugin <subcmd>    Manage plugins (add, install, build)")
@@ -127,270 +118,7 @@ func printDevUsage() {
 	fmt.Println("  test <subcmd>      Run tests (ticket, plugin, tags)")
 
 	fmt.Println("  ai <subcmd>        AI tools (opencode, developer, subagent)")
-	fmt.Println("  docs               Update documentation")
 	fmt.Println("  help               Show this help message")
-}
-
-// runDocs handles the docs command
-func runDocs(args []string) {
-	LogInfo("Updating documentation...")
-
-	// 1. Capture dialtone-dev help output
-	// We need to re-run the current binary with "help" argument
-	// However, we are running as "go run ...", so os.Args[0] is a temporary binary.
-	// That's fine for capturing output.
-	cmd := exec.Command(os.Args[0], "help")
-	output, err := cmd.Output()
-	if err != nil {
-		LogFatal("Failed to run help command: %v", err)
-	}
-
-	helpOutput := string(output)
-
-	// 2. Parse help output to extract commands
-	lines := strings.Split(helpOutput, "\n")
-	var commands []string
-	capture := false
-	for _, line := range lines {
-		if strings.Contains(line, "Commands:") {
-			capture = true
-			continue
-		}
-		if capture && strings.TrimSpace(line) != "" {
-			commands = append(commands, strings.TrimSpace(line))
-		}
-	}
-
-	// 3. Format as markdown list
-	var markdownLines []string
-	markdownLines = append(markdownLines, "### Development CLI (`dialtone.sh`)")
-	markdownLines = append(markdownLines, "")
-
-	for i, cmdLine := range commands {
-		parts := strings.Fields(cmdLine)
-		if len(parts) >= 2 {
-			cmdName := parts[0]
-			desc := strings.Join(parts[1:], " ")
-			markdownLines = append(markdownLines, fmt.Sprintf("%d. `./dialtone.sh %s` — %s", i+1, cmdName, desc))
-
-			// Add examples based on command name
-			example := ""
-			switch cmdName {
-			case "install":
-				example = "./dialtone.sh install --linux-wsl"
-			case "build":
-				example = "./dialtone.sh build --local"
-			case "deploy":
-				example = "./dialtone.sh deploy"
-			case "clone":
-				example = "./dialtone.sh clone ./dialtone"
-			case "sync-code":
-				example = "./dialtone.sh sync-code"
-			case "ssh":
-				example = "./dialtone.sh ssh download /tmp/log.txt"
-			case "provision":
-				example = "./dialtone.sh provision"
-			case "logs":
-				example = "./dialtone.sh logs"
-			case "diagnostic":
-				example = "./dialtone.sh diagnostic --remote"
-			case "branch":
-				example = "./dialtone.sh branch my-feature"
-			case "plan":
-				example = "./dialtone.sh plan my-feature"
-			case "test":
-				example = "./dialtone.sh test my-feature"
-			case "pull-request":
-				example = "./dialtone.sh pull-request --draft"
-			case "ticket":
-				example = "./dialtone.sh ticket add my-feature"
-			case "github":
-				example = "./dialtone.sh github pull-request --draft"
-			case "www":
-				example = "./dialtone.sh www publish"
-			case "ui":
-				example = "./dialtone.sh ui dev"
-			case "ai":
-				example = "./dialtone.sh ai developer --dry-run"
-			case "docs":
-				example = "./dialtone.sh docs"
-			}
-
-			if example != "" {
-				markdownLines = append(markdownLines, fmt.Sprintf("   - Example: `%s`", example))
-			}
-		}
-	}
-
-	newContent := strings.Join(markdownLines, "\n")
-
-	// 4. Update AGENT.md
-	agentMdPath := "AGENT.md"
-	content, err := os.ReadFile(agentMdPath)
-	if err != nil {
-		LogFatal("Failed to read AGENT.md: %v", err)
-	}
-
-	text := string(content)
-
-	// Regex to find the section
-	// We want to replace everything from "### Development CLI (`dialtone-dev.go`)" up to the next "---"
-	re := regexp.MustCompile(`(?s)### Development CLI \(` + "`" + `dialtone-dev\.go` + "`" + `\).*?(---)`)
-
-	if !re.MatchString(text) {
-		LogFatal("Could not find Development CLI section in AGENT.md")
-	}
-
-	// Replace content, keeping the trailing separator
-	updatedText := re.ReplaceAllString(text, newContent+"\n\n$1")
-
-	if err := os.WriteFile(agentMdPath, []byte(updatedText), 0644); err != nil {
-		LogFatal("Failed to write AGENT.md: %v", err)
-	}
-
-	LogInfo("AGENT.md updated successfully!")
-}
-
-// runPlan handles the plan command
-func runPlan(args []string) {
-	planDir := "plan"
-
-	// Ensure plan directory exists
-	if err := os.MkdirAll(planDir, 0755); err != nil {
-		LogFatal("Failed to create plan directory: %v", err)
-	}
-
-	// No args: list all plans
-	if len(args) == 0 {
-		listPlans(planDir)
-		return
-	}
-
-	// With name: create or show plan
-	name := args[0]
-	planFile := filepath.Join(planDir, fmt.Sprintf("plan-%s.md", name))
-
-	if _, err := os.Stat(planFile); os.IsNotExist(err) {
-		// Create new plan from template
-		createPlan(planFile, name)
-	} else {
-		// Show existing plan
-		showPlan(planFile)
-	}
-}
-
-// listPlans lists all plan files with their completion status
-func listPlans(planDir string) {
-	entries, err := os.ReadDir(planDir)
-	if err != nil {
-		LogFatal("Failed to read plan directory: %v", err)
-	}
-
-	fmt.Println("Plan Files:")
-	fmt.Println("===========")
-
-	planFound := false
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasPrefix(entry.Name(), "plan-") && strings.HasSuffix(entry.Name(), ".md") {
-			planFound = true
-			planPath := filepath.Join(planDir, entry.Name())
-			completed, total := countProgress(planPath)
-
-			// Extract feature name from filename
-			name := strings.TrimPrefix(entry.Name(), "plan-")
-			name = strings.TrimSuffix(name, ".md")
-
-			status := "[ ]"
-			if total > 0 {
-				if completed == total {
-					status = "[x]"
-				} else if completed > 0 {
-					status = "[~]"
-				}
-			}
-
-			fmt.Printf("  %s %s [%d/%d] %s\n", status, name, completed, total, entry.Name())
-		}
-	}
-
-	if !planFound {
-		fmt.Println("  No plan files found.")
-		fmt.Println("\nCreate a new plan with: dialtone-dev plan <feature-name>")
-	}
-}
-
-// countProgress counts completed items (- [x]) vs total items (- [ ] or - [x])
-func countProgress(planPath string) (completed, total int) {
-	content, err := os.ReadFile(planPath)
-	if err != nil {
-		return 0, 0
-	}
-
-	lines := strings.Split(string(content), "\n")
-	checkboxPattern := regexp.MustCompile(`^- \[([ xX])\]`)
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		matches := checkboxPattern.FindStringSubmatch(trimmed)
-		if len(matches) > 1 {
-			total++
-			if matches[1] == "x" || matches[1] == "X" {
-				completed++
-			}
-		}
-	}
-
-	return completed, total
-}
-
-// createPlan creates a new plan file from template
-func createPlan(planPath, name string) {
-	template := fmt.Sprintf(`# Plan: %s
-
-## Goal
-[Describe the goal of this feature]
-
-## Tests
-- [ ] test_example_1: [Description of first test]
-- [ ] test_example_2: [Description of second test]
-
-## Notes
-- [Add any relevant notes]
-
-## Blocking Tickets
-- None
-
-## Progress Log
-- %s: Created plan file
-`, name, time.Now().Format("2006-01-02"))
-
-	if err := os.WriteFile(planPath, []byte(template), 0644); err != nil {
-		LogFatal("Failed to create plan file: %v", err)
-	}
-
-	LogInfo("Created plan file: %s", planPath)
-	fmt.Println("\nPlan Template Created:")
-	fmt.Println("======================")
-	fmt.Println(template)
-	fmt.Println("\nNext steps:")
-	fmt.Println("  1. Edit the plan file to define your goal and tests")
-	fmt.Println("  2. Create a branch: dialtone-dev branch", name)
-	fmt.Println("  3. Start implementing tests from the plan")
-}
-
-// showPlan displays the contents of a plan file
-func showPlan(planPath string) {
-	content, err := os.ReadFile(planPath)
-	if err != nil {
-		LogFatal("Failed to read plan file: %v", err)
-	}
-
-	completed, total := countProgress(planPath)
-
-	fmt.Println("Plan File:", planPath)
-	fmt.Printf("Progress: %d/%d tests completed\n", completed, total)
-	fmt.Println("======================")
-	fmt.Println(string(content))
 }
 
 // runBranch handles the branch command
@@ -428,8 +156,6 @@ func runBranch(args []string) {
 
 	LogInfo("Now on branch: %s", branchName)
 }
-
-
 
 // runTicket handles the ticket command
 func runTicket(args []string) {
@@ -575,5 +301,3 @@ func runTicket(args []string) {
 		runTicket([]string{}) // Show usage
 	}
 }
-
-
