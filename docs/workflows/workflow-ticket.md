@@ -31,11 +31,11 @@ If you need to define a new test, add it with the `dialtone.sh test add --tick
 ./dialtone.sh test plugin <plugin-name>
 
 # Mark tests with tags so you can use them later as a list of space separated tags
-./dialtone.sh test tags tag-one tag-two tag-three
+./dialtone.sh test tags tag-one tag-two ...
 
 # Add --list to see the list of tests that would run to any command e.g.
 ./dialtone.sh test ticket <ticket-name> --list
-./dialtone.sh test tags tag-one tag-two --list
+./dialtone.sh test tags tag-one tag-two ... --list
 ```
 
 
@@ -44,7 +44,7 @@ If you need to define a new test, add it with the `dialtone.sh test add --tick
 Once the implementation is complete and the tests pass verify the specific test case defined in the subtask.
 
 ```bash
-./dialtone.sh ticket subtask test <ticket-name> <subtask-name>
+./dialtone.sh test ticket <ticket-name> --subtask <subtask-name>
 ```
 
 
