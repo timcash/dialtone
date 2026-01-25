@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
 	"dialtone/cli/src/core/browser"
+	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/ssh"
 
 	"github.com/chromedp/chromedp"
@@ -19,6 +21,12 @@ import (
 
 // RunDiagnostic handles the 'diagnostic' command
 func RunDiagnostic(args []string) {
+	logger.LogInfo("Running System Diagnostics...")
+
+	// 1. Check OS/Arch
+	fmt.Printf("OS: %s\n", runtime.GOOS)
+	fmt.Printf("Arch: %s\n", runtime.GOARCH)
+
 	fs := flag.NewFlagSet("diagnostic", flag.ExitOnError)
 	host := fs.String("host", os.Getenv("ROBOT_HOST"), "SSH host (user@host)")
 	port := fs.String("port", "22", "SSH port")
@@ -28,22 +36,33 @@ func RunDiagnostic(args []string) {
 	fs.Parse(args)
 
 	if *host == "" {
-		LogInfo("No host specified. Running local diagnostics...")
-		runLocalDiagnostics()
+		// 2. Check dependencies (Go, Node, Tailscale)
+		if _, err := exec.LookPath("go"); err != nil {
+			logger.LogFatal("Go is not installed.")
+		}
+		if _, err := exec.LookPath("node"); err != nil {
+			logger.LogInfo("Node.js is not installed (warning).")
+		}
+		if _, err := exec.LookPath("tailscale"); err != nil {
+			logger.LogFatal("Tailscale is not installed.")
+		}
+
+		logger.LogInfo("No host specified. Skipping remote diagnostics.")
+		logger.LogInfo("Diagnostics Passed.")
 		return
 	}
 
 	if *pass == "" {
-		LogFatal("Error: -pass is required for remote diagnostics")
+		logger.LogFatal("Error: -pass is required for remote diagnostics")
 	}
 
 	client, err := ssh.DialSSH(*host, *port, *user, *pass)
 	if err != nil {
-		LogFatal("SSH connection failed: %v", err)
+		logger.LogFatal("SSH connection failed: %v", err)
 	}
 	defer client.Close()
 
-	LogInfo("Running diagnostics on %s...", *host)
+	logger.LogInfo("Running diagnostics on %s...", *host)
 
 	commands := []struct {
 		name string
@@ -86,6 +105,8 @@ func RunDiagnostic(args []string) {
 	} else {
 		fmt.Printf("[chromedp] Web UI Check SUCCESS: %s is reachable\n", url)
 	}
+
+	logger.LogInfo("Diagnostics Passed.")
 }
 
 func checkAppStatus(url string) error {
@@ -111,6 +132,17 @@ func checkAppStatus(url string) error {
 		fmt.Printf("[nats] (Embedded) URL: %v\n", nats["url"])
 		fmt.Printf("[nats] (Embedded) Conns: %v\n", nats["connections"])
 	}
+
+	// Fetch Version from /api/init
+	respInit, err := apiClient.Get(fmt.Sprintf("%s/api/init", url))
+	if err == nil && respInit.StatusCode == http.StatusOK {
+		var initData map[string]any
+		if err := json.NewDecoder(respInit.Body).Decode(&initData); err == nil {
+			fmt.Printf("[app]   Version:        %v\n", initData["version"])
+		}
+		respInit.Body.Close()
+	}
+
 	return nil
 }
 
@@ -182,14 +214,14 @@ func checkWebUI(url string) error {
 	defer cancel()
 
 	var title string
-    var termExists, threeExists, camExists bool
+	var termExists, threeExists, camExists bool
 	err := chromedp.Run(ctx,
 		chromedp.Navigate(url),
 		chromedp.Title(&title),
-        chromedp.Sleep(2*time.Second), // Allow JS initialization
-        chromedp.Evaluate(`!!document.getElementById("terminal-container")`, &termExists),
-        chromedp.Evaluate(`!!document.getElementById("three-container")`, &threeExists),
-        chromedp.Evaluate(`document.querySelectorAll(".panel-right").length > 0`, &camExists),
+		chromedp.Sleep(2*time.Second), // Allow JS initialization
+		chromedp.Evaluate(`!!document.getElementById("terminal-container")`, &termExists),
+		chromedp.Evaluate(`!!document.getElementById("three-container")`, &threeExists),
+		chromedp.Evaluate(`document.querySelectorAll(".panel-right").length > 0`, &camExists),
 	)
 	if err != nil {
 		return err
@@ -199,43 +231,51 @@ func checkWebUI(url string) error {
 		return fmt.Errorf("page loaded but title is empty")
 	}
 
-    if !termExists || !threeExists || !camExists {
-         return fmt.Errorf("missing UI components: Terminal=%v, 3D=%v, RightPanel=%v", termExists, threeExists, camExists)
-    }
+	if !termExists || !threeExists || !camExists {
+		return fmt.Errorf("missing UI components: Terminal=%v, 3D=%v, RightPanel=%v", termExists, threeExists, camExists)
+	}
 
-    // Check Telemetry Values (wait for them to populate)
-    var natsVal, heartbeatVal string
-    var latVal, lonVal, rpVal, yawVal string
-    err = chromedp.Run(ctx,
-        chromedp.Sleep(3*time.Second),
-        chromedp.Text("#val-nats", &natsVal, chromedp.ByID),
-        chromedp.Text("#val-heartbeat", &heartbeatVal, chromedp.ByID),
-        chromedp.Text("#val-lat", &latVal, chromedp.ByID),
-        chromedp.Text("#val-lon", &lonVal, chromedp.ByID),
-        chromedp.Text("#val-rp", &rpVal, chromedp.ByID),
-        chromedp.Text("#val-yaw", &yawVal, chromedp.ByID),
-    )
-    
-    // Note: If NATS/MAVLink traffic is slow, these might trigger false positives. 
-    // We log them but might not hard fail if 0, unless verified active.
-    // User requested verification.
-    fmt.Printf("[chromedp] Telemetry Check: NATS=%s, Heartbeat=%s\n", natsVal, heartbeatVal)
-    fmt.Printf("[chromedp] 6DOF Check: Lat=%s, Lon=%s, Att=%s, Yaw=%s\n", latVal, lonVal, rpVal, yawVal)
+	// Check Telemetry Values (wait for them to populate)
+	var natsVal, heartbeatVal string
+	var latVal, lonVal, rpVal, yawVal string
+	var uiVersionVal string
+	err = chromedp.Run(ctx,
+		chromedp.Sleep(3*time.Second),
+		chromedp.Text("#val-nats", &natsVal, chromedp.ByID),
+		chromedp.Text("#val-heartbeat", &heartbeatVal, chromedp.ByID),
+		chromedp.Text("#val-lat", &latVal, chromedp.ByID),
+		chromedp.Text("#val-lon", &lonVal, chromedp.ByID),
+		chromedp.Text("#val-rp", &rpVal, chromedp.ByID),
+		chromedp.Text("#val-yaw", &yawVal, chromedp.ByID),
+		chromedp.Text("#ui-version", &uiVersionVal, chromedp.ByID),
+	)
 
-    if natsVal == "0" || natsVal == "--" {
-        fmt.Println("[chromedp] Warning: NATS message count is 0 or uninitialized.")
-    }
-    if heartbeatVal == "--" {
-        fmt.Println("[chromedp] Warning: Heartbeat not received yet.")
-    }
-    if latVal == "--" || lonVal == "--" {
-        fmt.Println("[chromedp] Warning: GPS coordinates not received yet.")
-    }
-    if yawVal == "--" {
-        fmt.Println("[chromedp] Warning: Orientation data not received yet.")
-    }
+	// Verify Version
+	fmt.Printf("[chromedp] UI Version Check: %s\n", uiVersionVal)
+	if uiVersionVal != "v1.1.1" {
+		return fmt.Errorf("UI Version mismatch: expected 'v1.1.1', got '%s'", uiVersionVal)
+	}
+
+	// Note: If NATS/MAVLink traffic is slow, these might trigger false positives.
+	// We log them but might not hard fail if 0, unless verified active.
+	// User requested verification.
+	fmt.Printf("[chromedp] Telemetry Check: NATS=%s, Heartbeat=%s\n", natsVal, heartbeatVal)
+	fmt.Printf("[chromedp] 6DOF Check: Lat=%s, Lon=%s, Att=%s, Yaw=%s\n", latVal, lonVal, rpVal, yawVal)
+
+	if natsVal == "0" || natsVal == "--" {
+		fmt.Println("[chromedp] Warning: NATS message count is 0 or uninitialized.")
+	}
+	if heartbeatVal == "--" {
+		fmt.Println("[chromedp] Warning: Heartbeat not received yet.")
+	}
+	if latVal == "--" || lonVal == "--" {
+		fmt.Println("[chromedp] Warning: GPS coordinates not received yet.")
+	}
+	if yawVal == "--" {
+		fmt.Println("[chromedp] Warning: Orientation data not received yet.")
+	}
 
 	fmt.Printf("[chromedp] Dashboard Title: %s\n", title)
-    fmt.Println("[chromedp] UI Layout Verified (Terminal, 3D, Telemetry present)")
+	fmt.Println("[chromedp] UI Layout Verified (Terminal, 3D, Telemetry present)")
 	return nil
 }
