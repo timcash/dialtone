@@ -14,6 +14,7 @@ import (
 	camera_cli "dialtone/cli/src/plugins/camera/cli"
 	chrome_cli "dialtone/cli/src/plugins/chrome/cli"
 	deploy_cli "dialtone/cli/src/plugins/deploy/cli"
+	diagnostic_cli "dialtone/cli/src/plugins/diagnostic/cli"
 	github_cli "dialtone/cli/src/plugins/github/cli"
 	install_cli "dialtone/cli/src/plugins/install/cli"
 	logs_cli "dialtone/cli/src/plugins/logs/cli"
@@ -59,7 +60,7 @@ func ExecuteDev() {
 	case "logs":
 		logs_cli.RunLogs(args)
 	case "diagnostic":
-		RunDiagnostic(args)
+		diagnostic_cli.RunDiagnostic(args)
 	case "install":
 		install_cli.RunInstall(args)
 	case "clone":
