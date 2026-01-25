@@ -27,17 +27,6 @@ func RunDiagnostic(args []string) {
 	fmt.Printf("OS: %s\n", runtime.GOOS)
 	fmt.Printf("Arch: %s\n", runtime.GOARCH)
 
-	// 2. Check dependencies (Go, Node, Tailscale)
-	if _, err := exec.LookPath("go"); err != nil {
-		logger.LogFatal("Go is not installed.")
-	}
-	if _, err := exec.LookPath("node"); err != nil {
-		logger.LogInfo("Node.js is not installed (warning).")
-	}
-	if _, err := exec.LookPath("tailscale"); err != nil {
-		logger.LogFatal("Tailscale is not installed.")
-	}
-
 	fs := flag.NewFlagSet("diagnostic", flag.ExitOnError)
 	host := fs.String("host", os.Getenv("ROBOT_HOST"), "SSH host (user@host)")
 	port := fs.String("port", "22", "SSH port")
@@ -47,6 +36,17 @@ func RunDiagnostic(args []string) {
 	fs.Parse(args)
 
 	if *host == "" {
+		// 2. Check dependencies (Go, Node, Tailscale)
+		if _, err := exec.LookPath("go"); err != nil {
+			logger.LogFatal("Go is not installed.")
+		}
+		if _, err := exec.LookPath("node"); err != nil {
+			logger.LogInfo("Node.js is not installed (warning).")
+		}
+		if _, err := exec.LookPath("tailscale"); err != nil {
+			logger.LogFatal("Tailscale is not installed.")
+		}
+
 		logger.LogInfo("No host specified. Skipping remote diagnostics.")
 		logger.LogInfo("Diagnostics Passed.")
 		return

@@ -52,7 +52,7 @@ mv -n .env.example .env # Only if .env does not exists
 ```bash
 ./dialtone.sh build --full  # Build Web UI + local CLI + robot binary
 ./dialtone.sh deploy        # Push to remote robot
-./dialtone.sh diagnostic    # Run tests on remote robot
+./dialtone.sh diagnostic    # Run tests on remote robot (Requires ./dialtone.sh deploy first)
 ./dialtone.sh logs --remote # Stream remote logs
 ```
 
