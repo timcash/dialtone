@@ -8,35 +8,35 @@ The goal of this ticket is to implement a comprehensive testing suite for the `i
 - name: ticket-start
 - description: to start work run the cli command `dialtone.sh ticket start install-cli-testing`
 - test-description: run the ticket tests to verify that the ticket is in a valid state
-- test-command: `dialtone.sh ticket test install-cli-testing`
+- test-command: `dialtone.sh test ticket install-cli-testing`
 - status: done
 
 ## SUBTASK: Create Install Plugin Test Scaffold
 - name: create-install-test-scaffold
 - description: Create `src/plugins/install/test/install_test.go` with `setupTestEnv` helper that sets `DIALTONE_ENV` to a temp directory and returns a cleanup function to avoid modifying the host environment.
 - test-description: Verify the test file exists and compiles.
-- test-command: `dialtone.sh plugin test install`
+- test-command: `dialtone.sh test plugin install`
 - status: done
 
 ## SUBTASK: Implement Install Output Test
 - name: implement-install-output-test
 - description: Add `TestInstallHelp` to `install_test.go` to verify `dialtone install --help` prints usage information without error.
 - test-description: Run the specific test case.
-- test-command: `dialtone.sh plugin test install --run TestInstallHelp`
+- test-command: `dialtone.sh test plugin install --run TestInstallHelp`
 - status: done
 
 ## SUBTASK: Implement Local Install Test
 - name: implement-local-install-test
 - description: Add `TestLocalInstall` to `install_test.go`. This test should use `RunInstall` with appropriate flags (e.g. `--linux-wsl` or auto-detect) to install dependencies into the temp environment, then verify key binaries (go, node, zig) exist.
 - test-description: Run the specific test case.
-- test-command: `dialtone.sh plugin test install --run TestLocalInstall`
+- test-command: `dialtone.sh test plugin install --run TestLocalInstall`
 - status: done
 
 ## SUBTASK: Implement Install Idempotency Test
 - name: implement-install-idempotency-test
 - description: Add `TestInstallIdempotency` to `install_test.go`. Run the installation twice in the same temp environment and assert it succeeds both times, and that files are still present.
 - test-description: Run the specific test case.
-- test-command: `dialtone.sh plugin test install --run TestInstallIdempotency`
+- test-command: `dialtone.sh test plugin install --run TestInstallIdempotency`
 - status: done
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli

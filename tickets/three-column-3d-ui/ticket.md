@@ -8,7 +8,7 @@ Upgrade the `src/web` UI to a three-column layout with 3D representation in the 
 - name: ticket-start
 - description: to start work run the cli command `dialtone.sh ticket start three-column-3d-ui`
 - test-description: run the ticket tests to verify that the ticket is in a valid state
-- test-command: `dialtone.sh ticket test three-column-3d-ui`
+- test-command: `dialtone.sh test ticket three-column-3d-ui`
 - status: done
 
 ## SUBTASK: refactor layout to three columns

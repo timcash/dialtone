@@ -18,16 +18,27 @@ Open `tickets/<ticket-name>/ticket.md` and look over the subtasks then run `./di
 
 # 3. Implementation & Testing
 Implement the changes required for the subtask. Run the tests frequently to verify your progress.
+If you need to define a new test, add it with the `dialtone.sh test add --tick
 
 ```bash
-# Run tests for the specific ticket
-./dialtone.sh ticket test <ticket-name>
+# Run all subtask tests for the specific ticket
+./dialtone.sh test ticket <ticket-name>
 
-# Or run a specific test command defined in your subtask
-./dialtone.sh ticket subtask test <ticket-name> <subtask-name>
+# Or run a specific subtask test
+./dialtone.sh test ticket <ticket-name> --subtask <subtask-name>
+
+# If you worked on a plugin you can run the plugin test
+./dialtone.sh test plugin <plugin-name>
+
+# Mark tests with tags so you can use them later as a list of space separated tags
+./dialtone.sh test tags tag-one tag-two tag-three
+
+# Add --list to see the list of tests that would run to any command e.g.
+./dialtone.sh test ticket <ticket-name> --list
+./dialtone.sh test tags tag-one tag-two --list
 ```
 
-If you need to define a new test, add it to `tickets/<ticket-name>/test/`.
+
 
 # 4. Complete Subtask
 Once the implementation is complete and the tests pass verify the specific test case defined in the subtask.

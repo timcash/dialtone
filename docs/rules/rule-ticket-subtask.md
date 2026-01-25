@@ -23,6 +23,6 @@ When working on a ticket, always do each subtask one at a time. Subtasks use thi
 - name: install-video-driver-environment
 - description: write code to install V4L2 headers into the install cli tools
 - test-description: run `dialtone.sh install` then verify `TestV4L2Headers` using `os.Stat`.
-- test-command: `dialtone.sh ticket test video-driver-improvements`
+- test-command: `dialtone.sh test ticket video-driver-improvements`
 - status: todo
 ```
