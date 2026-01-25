@@ -100,16 +100,17 @@ func hasPodman() bool {
 
 // buildWebIfNeeded builds the web UI if needed
 func buildWebIfNeeded(force bool) {
-	// Check if dist/index.html exists and has real content
+	distIndexPath := filepath.Join("src", "core", "web", "dist", "index.html")
+
+	// If not forcing, check if it already exists
 	if !force {
-		distIndexPath := filepath.Join("src", "core", "web", "dist", "index.html")
 		if info, err := os.Stat(distIndexPath); err == nil && info.Size() > 100 {
 			logger.LogInfo("Web UI already built (found %s)", distIndexPath)
 			return
 		}
 	}
 
-	logger.LogInfo("Building Web UI...")
+	logger.LogInfo("Building Web UI (force=%v)...", force)
 
 	// Check if src/core/web exists
 	webDir := filepath.Join("src", "core", "web")
@@ -118,12 +119,28 @@ func buildWebIfNeeded(force bool) {
 		return
 	}
 
-	// Install and build via UI plugin
-	logger.LogInfo("Delegating to UI plugin...")
-	ui_cli.Run([]string{"install"})
-	ui_cli.Run([]string{"build"})
+	// Ensure dist directory is clean if forcing
+	if force {
+		os.RemoveAll(filepath.Join(webDir, "dist"))
+	}
 
-	logger.LogInfo("Web UI build complete")
+	// Install and build via UI plugin
+	logger.LogInfo("Delegating to UI plugin (install)...")
+	if err := ui_cli.Run([]string{"install"}); err != nil {
+		logger.LogFatal("Web UI install failed: %v", err)
+	}
+
+	logger.LogInfo("Delegating to UI plugin (build)...")
+	if err := ui_cli.Run([]string{"build"}); err != nil {
+		logger.LogFatal("Web UI build failed: %v", err)
+	}
+
+	// Verify build succeeded
+	if info, err := os.Stat(distIndexPath); os.IsNotExist(err) {
+		logger.LogFatal("Web UI build failed: %s not found after build", distIndexPath)
+	} else {
+		logger.LogInfo("Web UI build complete (size: %d bytes)", info.Size())
+	}
 }
 
 func buildLocally(targetArch string) {
@@ -293,9 +310,7 @@ func buildEverything(local bool) {
 
 	// 1. Build Web UI
 	logger.LogInfo("Building Web UI via UI Plugin...")
-	// Ensure dependencies are installed
-	ui_cli.Run([]string{"install"})
-	ui_cli.Run([]string{"build"})
+	buildWebIfNeeded(true)
 
 	// 3. Build AI components
 	ai_cli.RunAI([]string{"build"})
@@ -322,6 +337,8 @@ func BuildSelf() {
 		os.MkdirAll("bin", 0755)
 	}
 
+	// Force clean cache to avoid embed issues
+	runShell(".", "go", "clean", "-cache")
 	runShell(".", "go", "build", "-o", exePath, "src/cmd/dialtone/main.go")
 	logger.LogInfo("Successfully built %s", exePath)
 }
