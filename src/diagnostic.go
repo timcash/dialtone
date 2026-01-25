@@ -205,22 +205,34 @@ func checkWebUI(url string) error {
 
     // Check Telemetry Values (wait for them to populate)
     var natsVal, heartbeatVal string
+    var latVal, lonVal, rpVal, yawVal string
     err = chromedp.Run(ctx,
         chromedp.Sleep(3*time.Second),
         chromedp.Text("#val-nats", &natsVal, chromedp.ByID),
         chromedp.Text("#val-heartbeat", &heartbeatVal, chromedp.ByID),
+        chromedp.Text("#val-lat", &latVal, chromedp.ByID),
+        chromedp.Text("#val-lon", &lonVal, chromedp.ByID),
+        chromedp.Text("#val-rp", &rpVal, chromedp.ByID),
+        chromedp.Text("#val-yaw", &yawVal, chromedp.ByID),
     )
     
     // Note: If NATS/MAVLink traffic is slow, these might trigger false positives. 
     // We log them but might not hard fail if 0, unless verified active.
     // User requested verification.
     fmt.Printf("[chromedp] Telemetry Check: NATS=%s, Heartbeat=%s\n", natsVal, heartbeatVal)
+    fmt.Printf("[chromedp] 6DOF Check: Lat=%s, Lon=%s, Att=%s, Yaw=%s\n", latVal, lonVal, rpVal, yawVal)
 
     if natsVal == "0" || natsVal == "--" {
         fmt.Println("[chromedp] Warning: NATS message count is 0 or uninitialized.")
     }
     if heartbeatVal == "--" {
         fmt.Println("[chromedp] Warning: Heartbeat not received yet.")
+    }
+    if latVal == "--" || lonVal == "--" {
+        fmt.Println("[chromedp] Warning: GPS coordinates not received yet.")
+    }
+    if yawVal == "--" {
+        fmt.Println("[chromedp] Warning: Orientation data not received yet.")
     }
 
 	fmt.Printf("[chromedp] Dashboard Title: %s\n", title)
