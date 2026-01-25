@@ -125,7 +125,7 @@ func RunSubtaskTest(ticketName, subtaskName string) {
 	logInfo("Command: %s", target.TestCommand)
 
 	// Execute the test command
-	// The command is likely "dialtone.sh ticket test ..." or similar
+	// The command is likely "dialtone.sh test ticket ..." or similar
 	parts := strings.Fields(target.TestCommand)
 	if len(parts) == 0 {
 		logFatal("Empty test command for subtask %s", subtaskName)

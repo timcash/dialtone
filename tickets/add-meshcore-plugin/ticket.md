@@ -18,11 +18,11 @@
 ## Test
 1. **Ticket Tests**: Run tests specific to this ticket's implementation.
    ```bash
-   ./dialtone.sh ticket test add-meshcore-plugin
+   ./dialtone.sh test ticket add-meshcore-plugin
    ```
 2. **Plugin Tests**: Run its specific tests.
    ```bash
-   ./dialtone.sh plugin test meshcore
+   ./dialtone.sh test plugin meshcore
    ```
 3. **All Tests**: Run the entire test suite.
    ```bash

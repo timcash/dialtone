@@ -3,7 +3,7 @@ package test
 import (
 	"context"
 	"fmt"
-    "net"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,12 +11,21 @@ import (
 
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/chromedp"
-    "dialtone/cli/src/core/browser"
+	"dialtone/cli/src/core/browser"
+	"dialtone/cli/src/core/test"
 )
+
+func init() {
+	test.Register("ui-integration", "ui", []string{"ui", "integration", "browser"}, RunUiIntegration)
+}
 
 // RunAll runs all UI integration tests
 func RunAll() error {
 	fmt.Println(">> [UI] Starting Integration Tests...")
+	return test.RunTicket("ui")
+}
+
+func RunUiIntegration() error {
 
     // 1. Locate Root / dialtone.sh
     // Assuming CWD is dialtone root when running dialtone.sh test
