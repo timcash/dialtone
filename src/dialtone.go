@@ -126,6 +126,8 @@ func runLocalOnly(port, wsPort int, verbose bool, mavlinkAddr string, opencode b
 // Global start time for uptime calculation
 var startTime = time.Now()
 
+// Ensure embed is detected
+//
 //go:embed all:core/web/dist
 var webFS embed.FS
 
@@ -513,7 +515,7 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server
 	// 1. JSON init API for the frontend
 	mux.HandleFunc("/api/init", func(w http.ResponseWriter, r *http.Request) {
 		data := map[string]interface{}{
-			"version":   "v1.0.3-web-verified",
+			"version":   "v1.1.0",
 			"hostname":  hostname,
 			"nats_port": natsPort,
 			"ws_port":   wsPort,

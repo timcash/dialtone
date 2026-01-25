@@ -238,6 +238,7 @@ func checkWebUI(url string) error {
 	// Check Telemetry Values (wait for them to populate)
 	var natsVal, heartbeatVal string
 	var latVal, lonVal, rpVal, yawVal string
+	var uiVersionVal string
 	err = chromedp.Run(ctx,
 		chromedp.Sleep(3*time.Second),
 		chromedp.Text("#val-nats", &natsVal, chromedp.ByID),
@@ -246,7 +247,14 @@ func checkWebUI(url string) error {
 		chromedp.Text("#val-lon", &lonVal, chromedp.ByID),
 		chromedp.Text("#val-rp", &rpVal, chromedp.ByID),
 		chromedp.Text("#val-yaw", &yawVal, chromedp.ByID),
+		chromedp.Text("#ui-version", &uiVersionVal, chromedp.ByID),
 	)
+
+	// Verify Version
+	fmt.Printf("[chromedp] UI Version Check: %s\n", uiVersionVal)
+	if uiVersionVal != "v1.1.0" {
+		return fmt.Errorf("UI Version mismatch: expected 'v1.1.0', got '%s'", uiVersionVal)
+	}
 
 	// Note: If NATS/MAVLink traffic is slow, these might trigger false positives.
 	// We log them but might not hard fail if 0, unless verified active.
