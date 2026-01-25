@@ -115,6 +115,20 @@ func (s *MavlinkService) Start() {
 						Data: msg,
 					})
 				}
+			case *common.MessageGlobalPositionInt:
+				if s.config.Callback != nil {
+					s.config.Callback(&MavlinkEvent{
+						Type: "GLOBAL_POSITION_INT",
+						Data: msg,
+					})
+				}
+			case *common.MessageAttitude:
+				if s.config.Callback != nil {
+					s.config.Callback(&MavlinkEvent{
+						Type: "ATTITUDE",
+						Data: msg,
+					})
+				}
 			}
 		case *gomavlib.EventParseError:
 			// logger.LogInfo("MAVLink parse error: %v", e.Error)

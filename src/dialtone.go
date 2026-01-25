@@ -384,6 +384,32 @@ func startMavlink(endpoint string, natsPort int) {
 						"text":     string(msg.Text[:]), // Convert char array to string
 					})
 				}
+			case "GLOBAL_POSITION_INT":
+				if msg, ok := evt.Data.(*common.MessageGlobalPositionInt); ok {
+					subject = "mavlink.global_position_int"
+					data, err = json.Marshal(map[string]any{
+						"lat": float64(msg.Lat) / 1e7,
+						"lon": float64(msg.Lon) / 1e7,
+						"alt": float64(msg.Alt) / 1000.0,
+						"relative_alt": float64(msg.RelativeAlt) / 1000.0,
+						"vx": float64(msg.Vx) / 100.0,
+						"vy": float64(msg.Vy) / 100.0,
+						"vz": float64(msg.Vz) / 100.0,
+						"hdg": float64(msg.Hdg) / 100.0,
+					})
+				}
+			case "ATTITUDE":
+				if msg, ok := evt.Data.(*common.MessageAttitude); ok {
+					subject = "mavlink.attitude"
+					data, err = json.Marshal(map[string]any{
+						"roll": msg.Roll,
+						"pitch": msg.Pitch,
+						"yaw": msg.Yaw,
+						"rollspeed": msg.Rollspeed,
+						"pitchspeed": msg.Pitchspeed,
+						"yawspeed": msg.Yawspeed,
+					})
+				}
 			}
 
 			if err == nil && subject != "" {
