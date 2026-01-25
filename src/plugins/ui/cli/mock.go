@@ -127,7 +127,7 @@ func runMockPublisher(natsPort int) {
         // Heartbeat
         heartbeat := map[string]interface{}{
             "type":          "HEARTBEAT",
-            "mav_type":      "QUADROTOR",
+            "mav_type":      10, // MAV_TYPE_GROUND_ROVER
             "base_mode":     209,
             "custom_mode":   5,
             "system_status": 4,
@@ -162,6 +162,16 @@ func runMockPublisher(natsPort int) {
              "satellites_visible": 8 + int(math.Sin(t)*2),
         }
         publishJSON(nc, "mavlink.gps_raw_int", gps)
+
+        // Global Position
+        gpos := map[string]interface{}{
+            "lat": 37.7749 + math.Sin(t)*0.001,
+            "lon": -122.4194 + math.Cos(t)*0.001,
+            "alt": 10.0 + math.Cos(t),
+            "relative_alt": 5.0 + math.Cos(t),
+            "hdg": (int(t*10) % 360) * 100,
+        }
+        publishJSON(nc, "mavlink.global_position_int", gpos)
     }
 }
 
