@@ -8,11 +8,12 @@ import (
 
 	"dialtone/cli/src/core/logger"
 	core_test "dialtone/cli/src/core/test"
+	ai_test "dialtone/cli/src/plugins/ai/test"
+	diagnostic_test "dialtone/cli/src/plugins/diagnostic/test"
 	install_test "dialtone/cli/src/plugins/install/test"
 	test_test "dialtone/cli/src/plugins/test/test"
 	ticket_test "dialtone/cli/src/plugins/ticket/test"
 	ui_test "dialtone/cli/src/plugins/ui/test"
-	ai_test "dialtone/cli/src/plugins/ai/test"
 
 	_ "dialtone/cli/tickets/test-test-tags/test"
 )
@@ -194,6 +195,8 @@ func runPluginTest(pluginName string, showList bool) {
 		runUiTests()
 	case "ai":
 		runAiTests()
+	case "diagnostic":
+		runDiagnosticTests()
 	default:
 		logger.LogFatal("Unknown plugin: %s", pluginName)
 	}
@@ -237,7 +240,7 @@ func printTestUsage() {
 	fmt.Println("  help                                      Show this help message")
 	fmt.Println()
 	fmt.Println("Available Plugins:")
-	fmt.Println("  install, ticket, test, ui, ai")
+	fmt.Println("  install, ticket, test, ui, ai, diagnostic")
 }
 
 func runAllTests(showList bool) {
@@ -254,6 +257,7 @@ func runAllTests(showList bool) {
 	runTestPluginTests()
 	runUiTests()
 	runAiTests()
+	runDiagnosticTests()
 }
 
 func runInstallTests() {
@@ -294,4 +298,12 @@ func runAiTests() {
 		logger.LogFatal("AI tests failed: %v", err)
 	}
 	logger.LogInfo("AI Plugin Tests passed!")
+}
+
+func runDiagnosticTests() {
+	logger.LogInfo("Running Diagnostic Plugin Tests...")
+	if err := diagnostic_test.RunAll(); err != nil {
+		logger.LogFatal("Diagnostic tests failed: %v", err)
+	}
+	logger.LogInfo("Diagnostic Plugin Tests passed!")
 }
