@@ -170,3 +170,26 @@ func (s *MavlinkService) Disarm() error {
 		Param2:          0,
 	})
 }
+// SetMode sets the rover mode (e.g., MANUAL, GUIDED)
+func (s *MavlinkService) SetMode(mode string) error {
+	var customMode uint32
+
+	switch strings.ToUpper(mode) {
+	case "MANUAL":
+		customMode = 0 // ArduRover MANUAL
+	case "GUIDED":
+		customMode = 15 // ArduRover GUIDED
+	default:
+		return fmt.Errorf("unsupported mode: %s", mode)
+	}
+
+	logger.LogInfo("MavlinkService: Setting mode to %s (custom_mode=%d)", mode, customMode)
+
+	return s.node.WriteMessageAll(&common.MessageCommandLong{
+		TargetSystem:    0,
+		TargetComponent: 0,
+		Command:         common.MAV_CMD_DO_SET_MODE,
+		Param1:          1, // MAV_MODE_FLAG_CUSTOM_MODE_ENABLED
+		Param2:          float32(customMode),
+	})
+}

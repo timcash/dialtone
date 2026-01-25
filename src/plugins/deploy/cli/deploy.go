@@ -120,14 +120,7 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 	}
 	_, _ = ssh.RunSSHCommand(client, fmt.Sprintf("chmod +x %s", remoteBinaryPath))
 
-	// 6. Upload Web Assets
-	webBuildDir := filepath.Join("src", "web_build")
-	if _, err := os.Stat(webBuildDir); err == nil {
-		logger.LogInfo("Uploading web assets...")
-		ssh.UploadDir(client, webBuildDir, path.Join(remoteDir, "src", "web_build"))
-	}
-
-	// 7. Restart Service
+	// 6. Restart Service
 	logger.LogInfo("Starting service...")
 
 	hostnameParam := os.Getenv("DIALTONE_HOSTNAME")

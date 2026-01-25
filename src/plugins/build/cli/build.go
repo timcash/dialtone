@@ -98,15 +98,13 @@ func hasPodman() bool {
 	return err == nil
 }
 
-// buildWebIfNeeded builds the web UI if web_build is missing or empty, or if force is true
+// buildWebIfNeeded builds the web UI if needed
 func buildWebIfNeeded(force bool) {
-	webBuildDir := filepath.Join("src", "web_build")
-	indexPath := filepath.Join(webBuildDir, "index.html")
-
-	// Check if index.html exists and has real content
+	// Check if dist/index.html exists and has real content
 	if !force {
-		if info, err := os.Stat(indexPath); err == nil && info.Size() > 100 {
-			logger.LogInfo("Web UI already built (found %s)", indexPath)
+		distIndexPath := filepath.Join("src", "web", "dist", "index.html")
+		if info, err := os.Stat(distIndexPath); err == nil && info.Size() > 100 {
+			logger.LogInfo("Web UI already built (found %s)", distIndexPath)
 			return
 		}
 	}
@@ -120,25 +118,11 @@ func buildWebIfNeeded(force bool) {
 		return
 	}
 
-	// Install and build via UI plugin
+    // Install and build via UI plugin
     logger.LogInfo("Delegating to UI plugin...")
     ui_cli.Run([]string{"install"})
     ui_cli.Run([]string{"build"})
 
-	// Sync to web_build
-	logger.LogInfo("Syncing web assets to src/web_build...")
-	os.RemoveAll(webBuildDir)
-	if err := os.MkdirAll(webBuildDir, 0755); err != nil {
-		logger.LogFatal("Failed to create web_build dir: %v", err)
-	}
-
-	distDir := filepath.Join(webDir, "dist")
-	if _, err := os.Stat(distDir); os.IsNotExist(err) {
-		logger.LogInfo("Warning: npm build did not create dist directory")
-		return
-	}
-
-	copyDir(distDir, webBuildDir)
 	logger.LogInfo("Web UI build complete")
 }
 
@@ -313,15 +297,6 @@ func buildEverything(local bool) {
     ui_cli.Run([]string{"install"})
     ui_cli.Run([]string{"build"})
 
-	// 2. Sync web assets
-	logger.LogInfo("Syncing web assets to src/web_build...")
-	webBuildDir := filepath.Join("src", "web_build")
-	os.RemoveAll(webBuildDir)
-	if err := os.MkdirAll(webBuildDir, 0755); err != nil {
-		logger.LogFatal("Failed to create web_build dir: %v", err)
-	}
-	copyDir(filepath.Join("src", "web", "dist"), webBuildDir)
-
 	// 3. Build AI components
 	ai_cli.RunAI([]string{"build"})
 
@@ -342,22 +317,9 @@ func buildEverything(local bool) {
 func BuildSelf() {
 	logger.LogInfo("Building Dialtone CLI (Self)...")
 
-	// Always aim for bin/dialtone.exe when building from source
 	exePath := filepath.Join("bin", "dialtone.exe")
 	if _, err := os.Stat("bin"); os.IsNotExist(err) {
 		os.MkdirAll("bin", 0755)
-	}
-
-	oldExePath := exePath + ".old"
-
-	// Rename old exe if it exists (allows overwriting while running on Windows)
-	os.Remove(oldExePath) // Clean up any previous old file
-	if _, err := os.Stat(exePath); err == nil {
-		if err := os.Rename(exePath, oldExePath); err != nil {
-			logger.LogInfo("Warning: Failed to rename current exe, build might fail: %v", err)
-		} else {
-			logger.LogInfo("Renamed current binary to %s", filepath.Base(oldExePath))
-		}
 	}
 
 	runShell(".", "go", "build", "-o", exePath, "src/cmd/dialtone/main.go")
