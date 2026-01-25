@@ -9,16 +9,12 @@ import (
 	"regexp"
 	"strings"
 
+	"dialtone/cli/src/core/config"
 	"dialtone/cli/src/core/logger"
 )
 
 func findGH() string {
-	depsDir := os.Getenv("DIALTONE_ENV")
-	if depsDir == "" {
-		// Fallback to home if not set, match config.go logic
-		home, _ := os.UserHomeDir()
-		depsDir = filepath.Join(home, ".dialtone_env")
-	}
+	depsDir := config.GetDialtoneEnv()
 
 	ghPath := filepath.Join(depsDir, "gh", "bin", "gh")
 	if _, err := os.Stat(ghPath); err == nil {
@@ -285,10 +281,9 @@ func runPullRequest(args []string) {
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			if err := cmd.Run(); err != nil {
-				logger.LogError("Failed to update PR: %v", err)
-			} else {
-				logger.LogInfo("Pull request updated successfully")
+				logger.LogFatal("Failed to update PR: %v", err)
 			}
+			logger.LogInfo("Pull request updated successfully")
 		}
 
 		// Mark as ready for review if --ready flag
