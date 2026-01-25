@@ -52,7 +52,7 @@ mv -n .env.example .env # Only if .env does not exists
 ```bash
 ./dialtone.sh build --full  # Build Web UI + local CLI + robot binary
 ./dialtone.sh deploy        # Push to remote robot
-./dialtone.sh diagnostic    # Run tests on remote robot
+./dialtone.sh diagnostic    # Run tests on remote robot (Requires ./dialtone.sh deploy first)
 ./dialtone.sh logs --remote # Stream remote logs
 ```
 
@@ -98,6 +98,12 @@ git merge main                    # Merge main into current branch
 ./dialtone.sh ai opencode start   # Start AI assistant
 ./dialtone.sh ai developer        # Start autonomous developer loop
 ./dialtone.sh ai help             # Show all AI commands
+```
+
+## VPN & Provisioning
+```bash
+./dialtone.sh vpn provision --api-key <key> # Provision this device with Tailscale
+./dialtone.sh vpn help                      # Show all VPN commands
 ```
 
 

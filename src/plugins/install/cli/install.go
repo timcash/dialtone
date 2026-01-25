@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"dialtone/cli/src/core/config"
 	"dialtone/cli/src/core/logger"
 
 	"golang.org/x/crypto/ssh"
@@ -37,21 +38,7 @@ func logItemStatus(name, version, path string, alreadyInstalled bool) {
 
 // GetDialtoneEnv returns the directory where dependencies are installed.
 func GetDialtoneEnv() string {
-	env := os.Getenv("DIALTONE_ENV")
-	if env != "" {
-		if strings.HasPrefix(env, "~") {
-			home, _ := os.UserHomeDir()
-			env = filepath.Join(home, env[1:])
-		}
-		absEnv, _ := filepath.Abs(env)
-		return absEnv
-	}
-	// If DIALTONE_ENV is not set, use the default path in the user's home directory.
-	home, _ := os.UserHomeDir()
-	defaultPath := filepath.Join(home, ".dialtone_env")
-	logger.LogInfo("DIALTONE_ENV not set, using default path: %s", defaultPath)
-	absPath, _ := filepath.Abs(defaultPath)
-	return absPath
+	return config.GetDialtoneEnv()
 }
 
 func runSimpleShell(command string) {

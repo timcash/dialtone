@@ -144,7 +144,17 @@ const els = {
   version: document.getElementById('ui-version')
 };
 
-if (els.version) els.version.innerText = 'v1.0.1';
+
+
+// Fetch Config/Init
+fetch('/api/init')
+  .then(res => res.json())
+  .then(data => {
+    if (els.version && data.version) {
+      els.version.innerText = data.version;
+    }
+  })
+  .catch(err => console.error("Failed to fetch init:", err));
 
 // Start Connection
 async function connectNATS() {

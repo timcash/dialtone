@@ -20,9 +20,11 @@ import (
 	"syscall"
 	"time"
 
-	mavlink "dialtone/cli/src/plugins/mavlink/app"
-	camera "dialtone/cli/src/plugins/camera/app"
+	"dialtone/cli/src/core/config"
+	"dialtone/cli/src/core/logger"
 	ai_app "dialtone/cli/src/plugins/ai/app"
+	camera "dialtone/cli/src/plugins/camera/app"
+	mavlink "dialtone/cli/src/plugins/mavlink/app"
 
 	"github.com/bluenviron/gomavlib/v3/pkg/dialects/common"
 	"github.com/coder/websocket"
@@ -46,7 +48,7 @@ func Execute() {
 	}
 
 	// Load configuration before parsing any flags or running commands
-	LoadConfig()
+	config.LoadConfig()
 
 	command := os.Args[1]
 	args := os.Args[2:]
@@ -84,7 +86,7 @@ func runStart(args []string) {
 	if *stateDir == "" {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
-			LogFatal("Failed to get home directory: %v", err)
+			logger.LogFatal("Failed to get home directory: %v", err)
 		}
 		*stateDir = filepath.Join(homeDir, ".config", "dialtone")
 	}
@@ -102,7 +104,7 @@ func runLocalOnly(port, wsPort int, verbose bool, mavlinkAddr string, opencode b
 	ns := startNATSServer("0.0.0.0", port, wsPort, verbose)
 	defer ns.Shutdown()
 
-	LogInfo("NATS server started on port %d (local only)", port)
+	logger.LogInfo("NATS server started on port %d (local only)", port)
 
 	// Start Mavlink service if requested
 	if mavlinkAddr != "" {
@@ -118,20 +120,22 @@ func runLocalOnly(port, wsPort int, verbose bool, mavlinkAddr string, opencode b
 	startNatsPublisher(port)
 
 	waitForShutdown()
-	LogInfo("Shutting down NATS server...")
+	logger.LogInfo("Shutting down NATS server...")
 }
 
 // Global start time for uptime calculation
 var startTime = time.Now()
 
-//go:embed all:web/dist
+// Ensure embed is detected
+//
+//go:embed all:core/web/dist
 var webFS embed.FS
 
 // runWithTailscale starts NATS exposed via Tailscale
 func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir string, ephemeral, verbose bool, mavlinkAddr string, opencode bool) {
 	// Ensure state directory exists
 	if err := os.MkdirAll(stateDir, 0700); err != nil {
-		LogFatal("Failed to create state directory: %v", err)
+		logger.LogFatal("Failed to create state directory: %v", err)
 	}
 
 	// Configure tsnet server
@@ -139,40 +143,40 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 		Hostname:  hostname,
 		Dir:       stateDir,
 		Ephemeral: ephemeral,
-		UserLogf:  LogInfo, // Auth URLs and user-facing messages
+		UserLogf:  logger.LogInfo, // Auth URLs and user-facing messages
 	}
 
 	if verbose {
-		ts.Logf = LogInfo
+		ts.Logf = logger.LogInfo
 	}
 
 	// Validate required environment variables
 	if os.Getenv("TS_AUTHKEY") == "" {
-		LogFatal("ERROR: TS_AUTHKEY environment variable is not set. A Tailscale auth key is required for headless operation.")
+		logger.LogFatal("ERROR: TS_AUTHKEY environment variable is not set. A Tailscale auth key is required for headless operation.")
 	}
 
 	// Print auth instructions for headless scenarios
 	printAuthInstructions()
 
 	// Start tsnet and wait for connection
-	LogInfo("Connecting to Tailscale...")
+	logger.LogInfo("Connecting to Tailscale...")
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
 	status, err := ts.Up(ctx)
 	if err != nil {
-		LogFatal("Failed to connect to Tailscale: %v", err)
+		logger.LogFatal("Failed to connect to Tailscale: %v", err)
 	}
 
 	for status == nil || len(status.TailscaleIPs) == 0 {
-		LogInfo("Waiting for Tailscale IP...")
+		logger.LogInfo("Waiting for Tailscale IP...")
 		time.Sleep(2 * time.Second)
 		status, err = ts.Up(ctx)
 		if err != nil {
-			LogFatal("Failed to connect to Tailscale: %v", err)
+			logger.LogFatal("Failed to connect to Tailscale: %v", err)
 		}
 		if ctx.Err() != nil {
-			LogFatal("Timed out waiting for Tailscale IP")
+			logger.LogFatal("Timed out waiting for Tailscale IP")
 		}
 	}
 	defer ts.Close()
@@ -191,8 +195,8 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 	if len(ips) > 0 {
 		ipStr = ips[0].String()
 	}
-	LogInfo("TSNet: Connected (IP: %s)", ipStr)
-	LogInfo("NATS: Connected")
+	logger.LogInfo("TSNet: Connected (IP: %s)", ipStr)
+	logger.LogInfo("NATS: Connected")
 
 	// 2. Proxies and Services
 	localNATSPort := port + 10000
@@ -230,16 +234,16 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 	webHandler := CreateWebHandler(hostname, port, wsPort, webPort, ns, lc, ips)
 
 	go func() {
-		LogInfo("Web UI: Serving at http://%s:%d", displayHostname, webPort)
+		logger.LogInfo("Web UI: Serving at http://%s:%d", displayHostname, webPort)
 		time.Sleep(2 * time.Second)
-		LogInfo("[SUCCESS] System Operational")
+		logger.LogInfo("[SUCCESS] System Operational")
 		if err := http.Serve(webLn, webHandler); err != nil {
-			LogInfo("Web server error: %v", err)
+			logger.LogInfo("Web server error: %v", err)
 		}
 	}()
 
 	waitForShutdown()
-	LogInfo("Shutting down...")
+	logger.LogInfo("Shutting down...")
 }
 
 // startNATSServer creates and starts an embedded NATS server
@@ -258,18 +262,18 @@ func startNATSServer(host string, port, wsPort int, verbose bool) *server.Server
 
 	ns, err := server.NewServer(opts)
 	if err != nil {
-		LogFatal("Failed to create NATS server: %v", err)
+		logger.LogFatal("Failed to create NATS server: %v", err)
 	}
 
 	// Configure logging if verbose
 	if verbose {
-		ns.SetLogger(GetNATSLogger(), verbose, verbose)
+		ns.SetLogger(logger.GetNATSLogger(), verbose, verbose)
 	}
 
 	go ns.Start()
 
 	if !ns.ReadyForConnections(10 * time.Second) {
-		LogFatal("NATS server failed to start")
+		logger.LogFatal("NATS server failed to start")
 	}
 
 	return ns
@@ -293,7 +297,7 @@ func ProxyConnection(src net.Conn, targetAddr string) {
 
 	dst, err := net.Dial("tcp", targetAddr)
 	if err != nil {
-		LogInfo("Failed to connect to NATS backend: %v", err)
+		logger.LogInfo("Failed to connect to NATS backend: %v", err)
 		return
 	}
 	defer dst.Close()
@@ -345,7 +349,7 @@ Visit that URL to authenticate this device.
 }
 
 func startMavlink(endpoint string, natsPort int) {
-	LogInfo("Starting Mavlink Service on %s...", endpoint)
+	logger.LogInfo("Starting Mavlink Service on %s...", endpoint)
 
 	config := mavlink.MavlinkConfig{
 		Endpoint: endpoint,
@@ -388,26 +392,26 @@ func startMavlink(endpoint string, natsPort int) {
 				if msg, ok := evt.Data.(*common.MessageGlobalPositionInt); ok {
 					subject = "mavlink.global_position_int"
 					data, err = json.Marshal(map[string]any{
-						"lat": float64(msg.Lat) / 1e7,
-						"lon": float64(msg.Lon) / 1e7,
-						"alt": float64(msg.Alt) / 1000.0,
+						"lat":          float64(msg.Lat) / 1e7,
+						"lon":          float64(msg.Lon) / 1e7,
+						"alt":          float64(msg.Alt) / 1000.0,
 						"relative_alt": float64(msg.RelativeAlt) / 1000.0,
-						"vx": float64(msg.Vx) / 100.0,
-						"vy": float64(msg.Vy) / 100.0,
-						"vz": float64(msg.Vz) / 100.0,
-						"hdg": float64(msg.Hdg) / 100.0,
+						"vx":           float64(msg.Vx) / 100.0,
+						"vy":           float64(msg.Vy) / 100.0,
+						"vz":           float64(msg.Vz) / 100.0,
+						"hdg":          float64(msg.Hdg) / 100.0,
 					})
 				}
 			case "ATTITUDE":
 				if msg, ok := evt.Data.(*common.MessageAttitude); ok {
 					subject = "mavlink.attitude"
 					data, err = json.Marshal(map[string]any{
-						"roll": msg.Roll,
-						"pitch": msg.Pitch,
-						"yaw": msg.Yaw,
-						"rollspeed": msg.Rollspeed,
+						"roll":       msg.Roll,
+						"pitch":      msg.Pitch,
+						"yaw":        msg.Yaw,
+						"rollspeed":  msg.Rollspeed,
 						"pitchspeed": msg.Pitchspeed,
-						"yawspeed": msg.Yawspeed,
+						"yawspeed":   msg.Yawspeed,
 					})
 				}
 			}
@@ -424,7 +428,7 @@ func startMavlink(endpoint string, natsPort int) {
 
 	svc, err := mavlink.NewMavlinkService(config)
 	if err != nil {
-		LogFatal("Failed to create Mavlink service: %v", err)
+		logger.LogFatal("Failed to create Mavlink service: %v", err)
 	}
 
 	// Connect to NATS for subscribing to commands
@@ -434,16 +438,16 @@ func startMavlink(endpoint string, natsPort int) {
 
 		nc, err := nats.Connect(fmt.Sprintf("nats://127.0.0.1:%d", natsPort))
 		if err != nil {
-			LogInfo("MAVLINK: Failed to connect to NATS for commands: %v", err)
+			logger.LogInfo("MAVLINK: Failed to connect to NATS for commands: %v", err)
 			return
 		}
 
-		LogInfo("MAVLINK: Subscribed to rover.command")
+		logger.LogInfo("MAVLINK: Subscribed to rover.command")
 
 		heartbeatLogged := false
 		nc.Subscribe("mavlink.heartbeat", func(m *nats.Msg) {
 			if !heartbeatLogged {
-				LogInfo("MAVLINK: Heartbeat received from flight controller")
+				logger.LogInfo("MAVLINK: Heartbeat received from flight controller")
 				heartbeatLogged = true
 			}
 		})
@@ -482,16 +486,16 @@ func startNatsPublisher(port int) {
 
 		nc, err := nats.Connect(fmt.Sprintf("nats://127.0.0.1:%d", port))
 		if err != nil {
-			LogInfo("Failed to connect to NATS for publishing: %v", err)
+			logger.LogInfo("Failed to connect to NATS for publishing: %v", err)
 			return
 		}
 		defer nc.Close()
 
-		LogInfo("Mavlink NATS Publisher connected")
+		logger.LogInfo("Mavlink NATS Publisher connected")
 
 		for msg := range mavlinkPubChan {
 			if err := nc.Publish(msg.Subject, msg.Data); err != nil {
-				LogInfo("Error publishing to NATS: %v", err)
+				logger.LogInfo("Error publishing to NATS: %v", err)
 			}
 		}
 	}()
@@ -511,7 +515,7 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server
 	// 1. JSON init API for the frontend
 	mux.HandleFunc("/api/init", func(w http.ResponseWriter, r *http.Request) {
 		data := map[string]interface{}{
-			"version":   "v1.0.2-diag-verified",
+			"version":   "v1.1.1",
 			"hostname":  hostname,
 			"nats_port": natsPort,
 			"ws_port":   wsPort,
@@ -569,19 +573,13 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server
 	// 4. Video Stream MJPEG
 	mux.HandleFunc("/stream", camera.StreamHandler)
 
-
-
-
-
-
-
 	// 5. WebSocket for real-time updates (legacy dashboard)
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 			InsecureSkipVerify: true,
 		})
 		if err != nil {
-			LogInfo("WebSocket accept error: %v", err)
+			logger.LogInfo("WebSocket accept error: %v", err)
 			return
 		}
 		defer c.Close(websocket.StatusInternalError, "closing")
@@ -643,13 +641,13 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server
 	})
 
 	// 6. Static Asset Serving (Embedded)
-	subFS, err := fs.Sub(webFS, "web/dist")
+	subFS, err := fs.Sub(webFS, "core/web/dist")
 	if err != nil {
-		LogInfo("Error accessing sub-filesystem: %v", err)
+		logger.LogInfo("Error accessing sub-filesystem: %v", err)
 	}
 
 	// Fallback/SPA logic for embedded web assets
-	LogInfo("Using embedded web assets")
+	logger.LogInfo("Using embedded web assets")
 	staticHandler := http.FileServer(http.FS(subFS))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// If it's a known static file, serve it
@@ -714,13 +712,12 @@ func formatIPs(ips []netip.Addr) string {
 	return result
 }
 
-
 func checkZombieProcess(device string) {
 	// Simple check using fuser if available
 	cmd := exec.Command("fuser", device)
 	output, err := cmd.CombinedOutput()
 	if err == nil && len(output) > 0 {
-		LogInfo("[Camera Diagnostic] WARNING: Process holding %s: %s", device, strings.TrimSpace(string(output)))
-		LogInfo("[Camera Diagnostic] This might be a zombie dialtone process. considers running 'pkill dialtone'")
+		logger.LogInfo("[Camera Diagnostic] WARNING: Process holding %s: %s", device, strings.TrimSpace(string(output)))
+		logger.LogInfo("[Camera Diagnostic] This might be a zombie dialtone process. considers running 'pkill dialtone'")
 	}
 }

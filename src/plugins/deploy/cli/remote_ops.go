@@ -1,14 +1,14 @@
-package dialtone
+package cli
 
 import (
+	"dialtone/cli/src/core/logger"
+	"dialtone/cli/src/core/ssh"
 	"flag"
 	"fmt"
 	"os"
 	"path"
 	"path/filepath"
-	"dialtone/cli/src/core/ssh"
 )
-
 
 func RunSyncCode(args []string) {
 	fs := flag.NewFlagSet("sync-code", flag.ExitOnError)
@@ -19,12 +19,12 @@ func RunSyncCode(args []string) {
 	fs.Parse(args)
 
 	if *host == "" || *pass == "" {
-		LogFatal("Error: -host (user@host) and -pass are required for sync-code")
+		logger.LogFatal("Error: -host (user@host) and -pass are required for sync-code")
 	}
 
 	client, err := ssh.DialSSH(*host, *port, *user, *pass)
 	if err != nil {
-		LogFatal("SSH connection failed: %v", err)
+		logger.LogFatal("SSH connection failed: %v", err)
 	}
 	defer client.Close()
 
@@ -33,7 +33,7 @@ func RunSyncCode(args []string) {
 		remoteDir = "/home/tim/dialtone_src"
 	}
 
-	LogInfo("Syncing code to %s on %s...", remoteDir, *host)
+	logger.LogInfo("Syncing code to %s on %s...", remoteDir, *host)
 
 	// Clean remote src dir to remove stale files (like legacy manager.go)
 	_, _ = ssh.RunSSHCommand(client, fmt.Sprintf("rm -rf %s/src && mkdir -p %s/src", remoteDir, remoteDir))
@@ -42,41 +42,56 @@ func RunSyncCode(args []string) {
 	filesToUpload := []string{"go.mod", "go.sum", "dialtone.go", "build.sh", "build.ps1", "README.md"}
 	for _, file := range filesToUpload {
 		if _, err := os.Stat(file); err == nil {
-			LogInfo("Uploading %s...", file)
+			logger.LogInfo("Uploading %s...", file)
 			if err := ssh.UploadFile(client, file, path.Join(remoteDir, file)); err != nil {
-				LogFatal("Failed to upload %s: %v", file, err)
+				logger.LogFatal("Failed to upload %s: %v", file, err)
 			}
 		}
 	}
 
 	// Sync src/*.go
+	// Note: Since we cleaned up src/, checking src/*.go might not match anything relevant if we moved everything.
+	// But we moved config.go and removed remote.go/logger.go.
+	// dialtone.go, dev.go etc are in src/.
 	srcFiles, _ := filepath.Glob("src/*.go")
 	for _, f := range srcFiles {
-		LogInfo("Uploading %s...", f)
+		logger.LogInfo("Uploading %s...", f)
 		if err := ssh.UploadFile(client, f, path.Join(remoteDir, filepath.ToSlash(f))); err != nil {
-			LogFatal("Failed to upload %s: %v", f, err)
+			logger.LogFatal("Failed to upload %s: %v", f, err)
 		}
 	}
 
-	// Sync drone UI source (src/web)
-	if _, err := os.Stat("src/web"); err == nil {
-		LogInfo("Uploading src/web source...")
-		ssh.UploadDirFiltered(client, "src/web", path.Join(remoteDir, "src/web"), []string{".git", "node_modules", "dist"})
+	// Sync src/core
+	if _, err := os.Stat("src/core"); err == nil {
+		logger.LogInfo("Uploading src/core...")
+		ssh.UploadDirFiltered(client, "src/core", path.Join(remoteDir, "src/core"), []string{".git"})
+	}
+
+	// Sync drone UI source (src/core/web now)
+	if _, err := os.Stat("src/core/web"); err == nil {
+		logger.LogInfo("Uploading src/core/web source...")
+		ssh.UploadDirFiltered(client, "src/core/web", path.Join(remoteDir, "src/core/web"), []string{".git", "node_modules", "dist"})
+	}
+
+	// Sync src/plugins
+	if _, err := os.Stat("src/plugins"); err == nil {
+		logger.LogInfo("Uploading src/plugins...")
+		ssh.UploadDirFiltered(client, "src/plugins", path.Join(remoteDir, "src/plugins"), []string{".git", "node_modules", "dist"})
 	}
 
 	// Sync test directory
 	if _, err := os.Stat("test"); err == nil {
-		LogInfo("Uploading test directory...")
+		logger.LogInfo("Uploading test directory...")
 		ssh.UploadDirFiltered(client, "test", path.Join(remoteDir, "test"), []string{".git"})
 	}
 
-	// Sync mavlink directory (if it exists)
+	// Sync mavlink directory (if it exists outside src - unlikely now?)
 	if _, err := os.Stat("mavlink"); err == nil {
-		LogInfo("Uploading mavlink directory...")
+		logger.LogInfo("Uploading mavlink directory...")
 		ssh.UploadDirFiltered(client, "mavlink", path.Join(remoteDir, "mavlink"), []string{".git", "__pycache__"})
 	}
 
-	LogInfo("Code sync complete.")
+	logger.LogInfo("Code sync complete.")
 }
 
 func RunRemoteBuild(args []string) {
@@ -88,12 +103,12 @@ func RunRemoteBuild(args []string) {
 	fs.Parse(args)
 
 	if *host == "" || *pass == "" {
-		LogFatal("Error: -host (user@host) and -pass are required for remote-build")
+		logger.LogFatal("Error: -host (user@host) and -pass are required for remote-build")
 	}
 
 	client, err := ssh.DialSSH(*host, *port, *user, *pass)
 	if err != nil {
-		LogFatal("SSH connection failed: %v", err)
+		logger.LogFatal("SSH connection failed: %v", err)
 	}
 	defer client.Close()
 
@@ -101,17 +116,17 @@ func RunRemoteBuild(args []string) {
 	if remoteDir == "" {
 		home, err := ssh.GetRemoteHome(client)
 		if err != nil {
-			LogFatal("Failed to get remote home: %v", err)
+			logger.LogFatal("Failed to get remote home: %v", err)
 		}
 		remoteDir = path.Join(home, "dialtone_src")
 	}
 
-	LogInfo("Building on remote %s...", *host)
+	logger.LogInfo("Building on remote %s...", *host)
 
-	// Build Drone UI (src/web)
+	// Build Drone UI (src/core/web)
 	webCmd := fmt.Sprintf(`
 		export PATH=$PATH:/usr/local/go/bin
-		cd %s/src/web
+		cd %s/src/core/web
 		echo "Installing npm dependencies..."
 		npm install
 		echo "Building web assets..."
@@ -120,9 +135,9 @@ func RunRemoteBuild(args []string) {
 
 	output, err := ssh.RunSSHCommand(client, webCmd)
 	if err != nil {
-		LogFatal("Remote web build failed: %v\nOutput: %s", err, output)
+		logger.LogFatal("Remote web build failed: %v\nOutput: %s", err, output)
 	}
-	LogInfo(output)
+	logger.LogInfo(output)
 
 	// Build Go
 	goCmd := fmt.Sprintf(`
@@ -134,8 +149,8 @@ func RunRemoteBuild(args []string) {
 
 	output, err = ssh.RunSSHCommand(client, goCmd)
 	if err != nil {
-		LogFatal("Remote Go build failed: %v\nOutput: %s", err, output)
+		logger.LogFatal("Remote Go build failed: %v\nOutput: %s", err, output)
 	}
-	LogInfo(output)
-	LogInfo("Remote build successful.")
+	logger.LogInfo(output)
+	logger.LogInfo("Remote build successful.")
 }
