@@ -285,9 +285,10 @@ func runPullRequest(args []string) {
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			if err := cmd.Run(); err != nil {
-				logger.LogFatal("Failed to update PR: %v", err)
+				logger.LogError("Failed to update PR: %v", err)
+			} else {
+				logger.LogInfo("Pull request updated successfully")
 			}
-			logger.LogInfo("Pull request updated successfully")
 		}
 
 		// Mark as ready for review if --ready flag
