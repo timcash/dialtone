@@ -272,7 +272,13 @@ func runPullRequest(args []string) {
 			if body != "" {
 				editArgs = append(editArgs, "--body", body)
 			} else if hasTicket {
-				editArgs = append(editArgs, "--body-file", ticketFile)
+				// Read file content manually and pass as body to avoid 'gh' file access issues
+				content, err := os.ReadFile(ticketFile)
+				if err == nil {
+					editArgs = append(editArgs, "--body", string(content))
+				} else {
+					logger.LogInfo("Failed to read ticket file: %v", err)
+				}
 			}
 
 			cmd = exec.Command(gh, editArgs...)
