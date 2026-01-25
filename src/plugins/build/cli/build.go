@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"dialtone/cli/src/core/logger"
+    ui_cli "dialtone/cli/src/plugins/ui/cli"
 )
 
 // RunBuild handles building for different platforms
@@ -118,25 +119,10 @@ func buildWebIfNeeded(force bool) {
 		return
 	}
 
-	// Check for npm
-	if _, err := exec.LookPath("npm"); err != nil {
-		// Try to use npm from DIALTONE_ENV
-		// NOTE: We need a way to get DIALTONE_ENV. For now, we'll try to find it.
-		// In the current architecture, these helpers are duplicated or moved to core.
-		depsDir := getDialtoneEnv()
-		npmPath := filepath.Join(depsDir, "node", "bin", "npm")
-		if _, err := os.Stat(npmPath); os.IsNotExist(err) {
-			logger.LogInfo("Warning: npm not found, skipping web build. Run 'dialtone install' first.")
-			return
-		}
-		// Add node to PATH
-		nodeBin := filepath.Join(depsDir, "node", "bin")
-		os.Setenv("PATH", fmt.Sprintf("%s:%s", nodeBin, os.Getenv("PATH")))
-	}
-
-	// Install and build
-	runShell(webDir, "npm", "install")
-	runShell(webDir, "npm", "run", "build")
+	// Install and build via UI plugin
+    logger.LogInfo("Delegating to UI plugin...")
+    ui_cli.Run([]string{"install"})
+    ui_cli.Run([]string{"build"})
 
 	// Sync to web_build
 	logger.LogInfo("Syncing web assets to src/web_build...")
@@ -321,10 +307,10 @@ func buildEverything(local bool) {
 	logger.LogInfo("Starting Full Build Process...")
 
 	// 1. Build Web UI
-	logger.LogInfo("Building Web UI...")
-	webDir := filepath.Join("src", "web")
-	runShell(webDir, "npm", "install")
-	runShell(webDir, "npm", "run", "build")
+	logger.LogInfo("Building Web UI via UI Plugin...")
+    // Ensure dependencies are installed
+    ui_cli.Run([]string{"install"})
+    ui_cli.Run([]string{"build"})
 
 	// 2. Sync web assets
 	logger.LogInfo("Syncing web assets to src/web_build...")
