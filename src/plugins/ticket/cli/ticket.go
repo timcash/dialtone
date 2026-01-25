@@ -18,6 +18,16 @@ func logFatal(format string, args ...interface{}) {
 	os.Exit(1)
 }
 
+// RunAdd handles 'ticket add <ticket-name>'
+func RunAdd(args []string) {
+	if len(args) < 1 {
+		logFatal("Usage: ticket add <ticket-name>")
+	}
+	ticketName := args[0]
+	ScaffoldTicket(ticketName)
+	logInfo("Ticket %s added successfully", ticketName)
+}
+
 // RunStart handles 'ticket start <ticket-name>'
 func RunStart(args []string) {
 	if len(args) < 1 {
@@ -49,41 +59,7 @@ func RunStart(args []string) {
 	}
 
 	// 2. Ticket Scaffolding
-	ticketDir := filepath.Join("tickets", ticketName)
-	ensureDir(ticketDir)
-	ensureDir(filepath.Join(ticketDir, "code"))
-	ensureDir(filepath.Join(ticketDir, "test"))
-
-	// Create test templates
-	createTestTemplates(filepath.Join(ticketDir, "test"), ticketName)
-
-	// Copy ticket.md template
-	ticketMd := filepath.Join(ticketDir, "ticket.md")
-	if _, err := os.Stat(ticketMd); os.IsNotExist(err) {
-		templatePath := filepath.Join("docs", "ticket-template.md")
-		content, err := os.ReadFile(templatePath)
-		if err == nil {
-			// Replace placeholders
-			newContent := strings.ReplaceAll(string(content), "<branch-name>", ticketName)
-			newContent = strings.ReplaceAll(newContent, "<ticket-name>", ticketName)
-			
-			if err := os.WriteFile(ticketMd, []byte(newContent), 0644); err != nil {
-				logFatal("Failed to write ticket.md: %v", err)
-			}
-			logInfo("Created %s from %s", ticketMd, templatePath)
-		} else {
-			logInfo("Warning: Template %s not found, skipping ticket.md creation.", templatePath)
-		}
-	}
-
-	progressTxt := filepath.Join(ticketDir, "progress.txt")
-	if _, err := os.Stat(progressTxt); os.IsNotExist(err) {
-		content := fmt.Sprintf("Progress log for %s\n\n", ticketName)
-		if err := os.WriteFile(progressTxt, []byte(content), 0644); err != nil {
-			logFatal("Failed to create progress.txt: %v", err)
-		}
-		logInfo("Created %s", progressTxt)
-	}
+	ScaffoldTicket(ticketName)
 
 	// 2.5 Audit & Commit
 	logInfo("Committing scaffolding...")
@@ -134,6 +110,44 @@ func RunStart(args []string) {
 
 	logInfo("Ticket %s started successfully", ticketName)
 	logReminder(ticketName)
+}
+
+func ScaffoldTicket(ticketName string) {
+	ticketDir := filepath.Join("tickets", ticketName)
+	ensureDir(ticketDir)
+	ensureDir(filepath.Join(ticketDir, "code"))
+	ensureDir(filepath.Join(ticketDir, "test"))
+
+	// Create test templates
+	createTestTemplates(filepath.Join(ticketDir, "test"), ticketName)
+
+	// Copy ticket.md template
+	ticketMd := filepath.Join(ticketDir, "ticket.md")
+	if _, err := os.Stat(ticketMd); os.IsNotExist(err) {
+		templatePath := filepath.Join("docs", "ticket-template.md")
+		content, err := os.ReadFile(templatePath)
+		if err == nil {
+			// Replace placeholders
+			newContent := strings.ReplaceAll(string(content), "<branch-name>", ticketName)
+			newContent = strings.ReplaceAll(newContent, "<ticket-name>", ticketName)
+			
+			if err := os.WriteFile(ticketMd, []byte(newContent), 0644); err != nil {
+				logFatal("Failed to write ticket.md: %v", err)
+			}
+			logInfo("Created %s from %s", ticketMd, templatePath)
+		} else {
+			logInfo("Warning: Template %s not found, skipping ticket.md creation.", templatePath)
+		}
+	}
+
+	progressTxt := filepath.Join(ticketDir, "progress.txt")
+	if _, err := os.Stat(progressTxt); os.IsNotExist(err) {
+		content := fmt.Sprintf("Progress log for %s\n\n", ticketName)
+		if err := os.WriteFile(progressTxt, []byte(content), 0644); err != nil {
+			logFatal("Failed to create progress.txt: %v", err)
+		}
+		logInfo("Created %s", progressTxt)
+	}
 }
 
 
@@ -246,46 +260,39 @@ func GetTicketName(arg string) string {
 }
 
 func createTestTemplates(testDir, ticketName string) {
-	// Clean up ticket name for package (replace - with _)
-	pkgName := strings.ReplaceAll(ticketName, "-", "_")
-
-	templates := map[string]string{
-		"unit_test.go": fmt.Sprintf(`package test
-
-import "fmt"
-
-func RunUnit() error {
-	fmt.Println("Running unit test for %s")
-	return nil
-}
-`, pkgName),
-		"integration_test.go": fmt.Sprintf(`package test
-
-import "fmt"
-
-func RunIntegration() error {
-	fmt.Println("Running integration test for %s")
-	return nil
-}
-`, pkgName),
-		"e2e_test.go": fmt.Sprintf(`package test
-
-import "fmt"
-
-func RunE2E() error {
-	fmt.Println("Running E2E test for %s")
-	return nil
-}
-`, pkgName),
+	fullPath := filepath.Join(testDir, "test.go")
+	if _, err := os.Stat(fullPath); !os.IsNotExist(err) {
+		return
 	}
 
-	for filename, content := range templates {
-		fullPath := filepath.Join(testDir, filename)
-		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-			if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
-				logFatal("Failed to create test file %s: %v", filename, err)
-			}
-			logInfo("Created test template: %s", fullPath)
-		}
+	content := fmt.Sprintf(`package test
+
+import (
+	"fmt"
+	"dialtone/cli/src/core/test"
+	"dialtone/cli/src/core/logger"
+)
+
+func init() {
+	// Register subtask tests here: test.Register("<subtask-name>", "<ticket-name>", []string{"<tag1>"}, Run<SubtaskName>)
+	test.Register("example-subtask", "%s", []string{"example"}, RunExample)
+}
+
+// RunAll is the standard entry point required by project rules.
+// It uses the registry to find and run all tests for this ticket.
+func RunAll() error {
+	logger.LogInfo("Running %s suite...")
+	return test.RunTicket("%s")
+}
+
+func RunExample() error {
+	fmt.Println("PASS: [example] Subtask logic verified")
+	return nil
+}
+`, ticketName, ticketName, ticketName)
+
+	if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+		logFatal("Failed to create test file %s: %v", fullPath, err)
 	}
+	logInfo("Created test template: %s", fullPath)
 }
