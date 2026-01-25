@@ -30,7 +30,7 @@ if (termContainer) {
   fitAddon.fit();
 }
 
-term.writeln('\x1b[1;36m>>> DIALTONE INTERFACE INITIALIZED\x1b[0m');
+term.writeln('\x1b[1;36m>>> DIALTONE INTERFACE INITIALIZED (v1.0.1)\x1b[0m');
 term.writeln('\x1b[90m>>> Waiting for connection...\x1b[0m');
 
 // Resize Observer for Terminal
@@ -140,8 +140,11 @@ const els = {
   alertFeed: document.getElementById('alert-feed'),
   btnManual: document.getElementById('btn-manual'),
   btnGuided: document.getElementById('btn-guided'),
-  connStatus: document.getElementById('conn-status')
+  connStatus: document.getElementById('conn-status'),
+  version: document.getElementById('ui-version')
 };
+
+if (els.version) els.version.innerText = 'v1.0.1';
 
 // Start Connection
 async function connectNATS() {

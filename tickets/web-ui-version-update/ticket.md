@@ -1,22 +1,36 @@
 # Branch: web-ui-version-update
-# Tags: <tags>
+# Tags: ui, verification, deployment
 
 # Goal
-<goal>
+Verify the end-to-end build, deploy, and diagnostic loop by making a visible change to the Web UI version and confirming it on a remote robot.
 
 ## SUBTASK: start ticket work via `dialtone.sh` cli
 - name: ticket-start
 - description: to start work run the cli command `dialtone.sh ticket start web-ui-version-update`
 - test-description: run the ticket tests to verify that the ticket is in a valid state
 - test-command: `dialtone.sh test ticket web-ui-version-update`
-- status: todo
+- status: done
 
-## SUBTASK: <subtask-title>
-- name: <subtask-name> (only lowercase and dashes)
-- description: <description>
-- test-description: <test-description>
-- test-command: <test-command>
-- status: todo | processing | done
+## SUBTASK: modify web ui text
+- name: modify-ui-text
+- description: update the initialization text in `src/web/src/main.ts` to include a version number (v1.0.1).
+- test-description: verify the string is updated in the source.
+- test-command: `grep "v1.0.1" src/web/src/main.ts`
+- status: done
+
+## SUBTASK: build and deploy UI
+- name: build-deploy-ui
+- description: run a full build and deploy the changes to the robot.
+- test-description: verify build success and deployment.
+- test-command: `./dialtone.sh build --full && ./dialtone.sh deploy`
+- status: done
+
+## SUBTASK: verify remote diagnostics and logs
+- name: verify-remote
+- description: run remote diagnostics and check logs to ensure the system is stable.
+- test-description: verify diagnostics pass.
+- test-command: `./dialtone.sh diagnostic && ./dialtone.sh logs --remote`
+- status: processing
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
