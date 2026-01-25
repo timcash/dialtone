@@ -35,22 +35,22 @@ Migrate `autocode` (developer loop) and `opencode` (AI assistant server) from `s
 ## SUBTASK: ai-test-init
 - name: ai-test-init
 - description: Create the test file `src/plugins/ai/test/ai_plugin_test.go` with standard Go test boilerplate.
-- test-description: Verify file exists.
-- test-command: ls src/plugins/ai/test/ai_plugin_test.go
+- test-description: Verify file exists and is registered.
+- test-command: ./dialtone.sh test plugin ai --list
 - status: done
 
 ## SUBTASK: ai-test-binary
 - name: ai-test-binary
 - description: Implement a test to verify the `opencode` binary is present and reachable in the shell path.
-- test-description: Run the specific test case.
-- test-command: go test -v src/plugins/ai/test/ai_plugin_test.go -run TestOpencodeBinaryExists
+- test-description: Run the specific test case via tags.
+- test-command: ./dialtone.sh test tags ai binary
 - status: done
 
 ## SUBTASK: ai-test-cli-version
 - name: ai-test-cli-version
 - description: Implement a test that runs `opencode --version` to verify the CLI responds correctly without requiring an API key.
-- test-description: Run the specific test case.
-- test-command: go test -v src/plugins/ai/test/ai_plugin_test.go -run TestOpencodeVersion
+- test-description: Run the specific test case via tags.
+- test-command: ./dialtone.sh test tags ai cli
 - status: done
 
 ## SUBTASK: ai-test-delegation
@@ -72,7 +72,7 @@ Migrate `autocode` (developer loop) and `opencode` (AI assistant server) from `s
 - description: run the ticket cli to verify all steps to complete the ticket, git is in the correct state and a pull request is created and ready for review. if it comepletes it should mark the final subtask as done
 - test-description: vailidates all ticket subtasks are done
 - test-command: `dialtone.sh ticket done ai-migration`
-- status: processing
+- status: done
 
 
 
