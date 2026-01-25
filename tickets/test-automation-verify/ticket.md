@@ -8,7 +8,7 @@
 - name: ticket-start
 - description: to start work run the cli command `dialtone.sh ticket start test-automation-verify`
 - test-description: run the ticket tests to verify that the ticket is in a valid state
-- test-command: `dialtone.sh ticket test test-automation-verify`
+- test-command: `dialtone.sh test ticket test-automation-verify`
 - status: todo
 
 ## SUBTASK: <subtask-title>
