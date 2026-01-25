@@ -34,7 +34,7 @@ Migrate `autocode` (developer loop) and `opencode` (AI assistant server) from `s
 
 ## SUBTASK: ai-test-init
 - name: ai-test-init
-- description: Create the test file `src/plugins/ai/test/ai_plugin_test.go` with standard Go test boilerplate.
+- description: Create the test file `src/plugins/ai/test/ai_suite.go` with standard Go test boilerplate.
 - test-description: Verify file exists and is registered.
 - test-command: ./dialtone.sh test plugin ai --list
 - status: done
