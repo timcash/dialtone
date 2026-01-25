@@ -23,7 +23,9 @@ import (
 	plugin_cli "dialtone/cli/src/plugins/plugin/cli"
 	test_cli "dialtone/cli/src/plugins/test/cli"
 	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
+	ui_cli "dialtone/cli/src/plugins/ui/cli"
 	www_cli "dialtone/cli/src/plugins/www/cli"
+
 )
 
 // ExecuteDev is the entry point for the dialtone-dev CLI
@@ -81,6 +83,9 @@ func ExecuteDev() {
 		mavlink_cli.RunMavlink(args)
 	case "www":
 		www_cli.RunWww(args)
+	case "ui":
+		ui_cli.Run(args)
+
 	case "opencode":
 		runOpencode(args)
 	case "developer":
@@ -119,6 +124,8 @@ func printDevUsage() {
 	fmt.Println("  plugin <subcmd>    Manage plugins (create, etc.)")
 	fmt.Println("  github <subcmd>    Manage GitHub interactions (pr, check-deploy)")
 	fmt.Println("  www <subcmd>       Manage public webpage (Vercel wrapper)")
+	fmt.Println("  ui <subcmd>        Manage web UI (dev, build, install)")
+
 	fmt.Println("  opencode <subcmd>  Manage opencode AI assistant (start, stop, status, ui)")
 	fmt.Println("  developer          Start the autonomous developer loop")
 	fmt.Println("  subagent <options> Interface for autonomous subagents")
