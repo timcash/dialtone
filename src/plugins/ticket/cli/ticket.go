@@ -170,7 +170,16 @@ func RunDone(args []string) {
 	}
 	logInfo("Git status clean.")
 
-	// 4. GitHub PR
+	// 4. Push local changes
+	logInfo("Pushing latest changes to origin...")
+	pushCmd := exec.Command("git", "push")
+	pushCmd.Stdout = os.Stdout
+	pushCmd.Stderr = os.Stderr
+	if err := pushCmd.Run(); err != nil {
+		logFatal("Failed to push changes: %v", err)
+	}
+
+	// 5. GitHub PR
 	logInfo("Updating Pull Request and setting to ready...")
 	prCmd := exec.Command("./dialtone.sh", "github", "pr", "--ready")
 	prCmd.Stdout = os.Stdout
