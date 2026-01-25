@@ -19,9 +19,6 @@ func LoadConfig() {
 }
 
 // GetDialtoneEnv returns the directory where dependencies are installed.
-// It checks the DIALTONE_ENV environment variable, falling back to:
-// 1. dialtone_dependencies/ next to the dialtone.sh script (if in a repo)
-// 2. ~/.dialtone_env (default)
 func GetDialtoneEnv() string {
 	env := os.Getenv("DIALTONE_ENV")
 	if env != "" {
@@ -32,12 +29,8 @@ func GetDialtoneEnv() string {
 		absEnv, _ := filepath.Abs(env)
 		return absEnv
 	}
-
-	// If DIALTONE_ENV is not set, use the default path in the user's home directory.
-	home, _ := os.UserHomeDir()
-	defaultPath := filepath.Join(home, ".dialtone_env")
-	absPath, _ := filepath.Abs(defaultPath)
-	return absPath
+	// Strict mode: no fallback
+	return ""
 }
 
 func ValidateRequiredVars(vars []string) {
