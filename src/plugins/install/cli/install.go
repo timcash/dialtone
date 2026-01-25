@@ -20,7 +20,7 @@ const (
 	GoVersion          = "1.25.5"
 	NodeVersion        = "22.13.0"
 	ZigVersion         = "0.13.0"
-	GHVersion          = "2.66.1"
+	GHVersion          = "2.86.0"
 	PixiVersion        = "latest" // Using latest for pixi
 	PodmanVersion      = "latest"
 	ArmCompilerVersion = "13.3.rel1"
