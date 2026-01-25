@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"dialtone/cli/src/core/logger"
-    ui_cli "dialtone/cli/src/plugins/ui/cli"
 	ai_cli "dialtone/cli/src/plugins/ai/cli"
+	ui_cli "dialtone/cli/src/plugins/ui/cli"
 )
 
 // RunBuild handles building for different platforms
@@ -102,7 +102,7 @@ func hasPodman() bool {
 func buildWebIfNeeded(force bool) {
 	// Check if dist/index.html exists and has real content
 	if !force {
-		distIndexPath := filepath.Join("src", "web", "dist", "index.html")
+		distIndexPath := filepath.Join("src", "core", "web", "dist", "index.html")
 		if info, err := os.Stat(distIndexPath); err == nil && info.Size() > 100 {
 			logger.LogInfo("Web UI already built (found %s)", distIndexPath)
 			return
@@ -111,17 +111,17 @@ func buildWebIfNeeded(force bool) {
 
 	logger.LogInfo("Building Web UI...")
 
-	// Check if src/web exists
-	webDir := filepath.Join("src", "web")
+	// Check if src/core/web exists
+	webDir := filepath.Join("src", "core", "web")
 	if _, err := os.Stat(webDir); os.IsNotExist(err) {
-		logger.LogInfo("Warning: src/web directory not found, skipping web build")
+		logger.LogInfo("Warning: src/core/web directory not found, skipping web build")
 		return
 	}
 
-    // Install and build via UI plugin
-    logger.LogInfo("Delegating to UI plugin...")
-    ui_cli.Run([]string{"install"})
-    ui_cli.Run([]string{"build"})
+	// Install and build via UI plugin
+	logger.LogInfo("Delegating to UI plugin...")
+	ui_cli.Run([]string{"install"})
+	ui_cli.Run([]string{"build"})
 
 	logger.LogInfo("Web UI build complete")
 }
@@ -193,7 +193,7 @@ func buildLocally(targetArch string) {
 					os.Setenv("GOOS", "linux")
 					os.Setenv("GOARCH", "arm")
 				}
-				
+
 				// Configure Zig as CC/CXX
 				os.Setenv("CC", fmt.Sprintf("zig cc -target %s", target))
 				os.Setenv("CXX", fmt.Sprintf("zig c++ -target %s", target))
@@ -293,9 +293,9 @@ func buildEverything(local bool) {
 
 	// 1. Build Web UI
 	logger.LogInfo("Building Web UI via UI Plugin...")
-    // Ensure dependencies are installed
-    ui_cli.Run([]string{"install"})
-    ui_cli.Run([]string{"build"})
+	// Ensure dependencies are installed
+	ui_cli.Run([]string{"install"})
+	ui_cli.Run([]string{"build"})
 
 	// 3. Build AI components
 	ai_cli.RunAI([]string{"build"})
