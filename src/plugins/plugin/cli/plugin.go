@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 func logInfo(format string, args ...interface{}) {
@@ -27,7 +26,7 @@ func RunPlugin(args []string) {
 	subArgs := args[1:]
 
 	switch command {
-	case "create":
+	case "create", "add":
 		runCreate(subArgs)
 	case "help", "--help", "-h":
 		printUsage()
@@ -41,7 +40,8 @@ func RunPlugin(args []string) {
 func printUsage() {
 	fmt.Println("Usage: dialtone-dev plugin <command> [options]")
 	fmt.Println("\nCommands:")
-	fmt.Println("  create <plugin-name>   Create a new plugin structure")
+	fmt.Println("  add <plugin-name>      Create a new plugin structure")
+	fmt.Println("  create <plugin-name>   Alias for 'add'")
 	fmt.Println("  help                   Show this help message")
 }
 
@@ -81,46 +81,39 @@ func ensureDir(path string) {
 }
 
 func createTestTemplates(testDir, pluginName string) {
-	// Clean up plugin name for package (replace - with _)
-	pkgName := strings.ReplaceAll(pluginName, "-", "_")
-
-	templates := map[string]string{
-		"unit_test.go": fmt.Sprintf(`package test
-
-import "fmt"
-
-func RunUnit() error {
-	fmt.Println("Running unit test for %s")
-	return nil
-}
-`, pkgName),
-		"integration_test.go": fmt.Sprintf(`package test
-
-import "fmt"
-
-func RunIntegration() error {
-	fmt.Println("Running integration test for %s")
-	return nil
-}
-`, pkgName),
-		"e2e_test.go": fmt.Sprintf(`package test
-
-import "fmt"
-
-func RunE2E() error {
-	fmt.Println("Running E2E test for %s")
-	return nil
-}
-`, pkgName),
+	fullPath := filepath.Join(testDir, "test.go")
+	if _, err := os.Stat(fullPath); !os.IsNotExist(err) {
+		return
 	}
 
-	for filename, content := range templates {
-		fullPath := filepath.Join(testDir, filename)
-		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-			if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
-				logFatal("Failed to create test file %s: %v", filename, err)
-			}
-			logInfo("Created test template: %s", fullPath)
-		}
+	content := fmt.Sprintf(`package test
+
+import (
+	"fmt"
+	"dialtone/cli/src/core/test"
+	"dialtone/cli/src/core/logger"
+)
+
+func init() {
+	// Register plugin tests here: test.Register("<test-name>", "<plugin-name>", []string{"plugin", "<tag>"}, Run<TestName>)
+	test.Register("example-test", "%s", []string{"plugin", "%s"}, RunExample)
+}
+
+// RunAll is the standard entry point required by project rules.
+// It uses the registry to find and run all tests for this plugin.
+func RunAll() error {
+	logger.LogInfo("Running %s plugin suite...")
+	return test.RunPlugin("%s")
+}
+
+func RunExample() error {
+	fmt.Println("PASS: [%s] Plugin logic verified")
+	return nil
+}
+`, pluginName, pluginName, pluginName, pluginName, pluginName)
+
+	if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+		logFatal("Failed to create test file %s: %v", fullPath, err)
 	}
+	logInfo("Created test template: %s", fullPath)
 }
