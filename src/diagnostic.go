@@ -132,6 +132,17 @@ func checkAppStatus(url string) error {
 		fmt.Printf("[nats] (Embedded) URL: %v\n", nats["url"])
 		fmt.Printf("[nats] (Embedded) Conns: %v\n", nats["connections"])
 	}
+
+	// Fetch Version from /api/init
+	respInit, err := apiClient.Get(fmt.Sprintf("%s/api/init", url))
+	if err == nil && respInit.StatusCode == http.StatusOK {
+		var initData map[string]any
+		if err := json.NewDecoder(respInit.Body).Decode(&initData); err == nil {
+			fmt.Printf("[app]   Version:        %v\n", initData["version"])
+		}
+		respInit.Body.Close()
+	}
+
 	return nil
 }
 
