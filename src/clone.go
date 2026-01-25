@@ -1,6 +1,7 @@
 package dialtone
 
 import (
+	"dialtone/cli/src/core/logger"
 	"fmt"
 	"os"
 	"os/exec"
@@ -22,11 +23,11 @@ func RunClone(args []string) {
 		repoUrl = args[1]
 	}
 
-	LogInfo("Cloning repository %s into %s...", repoUrl, targetDir)
+	logger.LogInfo("Cloning repository %s into %s...", repoUrl, targetDir)
 
 	// Check if directory already exists
 	if _, err := os.Stat(targetDir); err == nil {
-		LogInfo("Directory %s already exists. Checking for updates...", targetDir)
+		logger.LogInfo("Directory %s already exists. Checking for updates...", targetDir)
 
 		// If it's a git repo, pull
 		if _, err := os.Stat(filepath.Join(targetDir, ".git")); err == nil {
@@ -35,12 +36,12 @@ func RunClone(args []string) {
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			if err := cmd.Run(); err != nil {
-				LogFatal("Failed to update repository: %v", err)
+				logger.LogFatal("Failed to update repository: %v", err)
 			}
-			LogInfo("Repository updated successfully.")
+			logger.LogInfo("Repository updated successfully.")
 			return
 		} else {
-			LogFatal("Directory %s exists but is not a git repository.", targetDir)
+			logger.LogFatal("Directory %s exists but is not a git repository.", targetDir)
 		}
 	}
 
@@ -49,8 +50,25 @@ func RunClone(args []string) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		LogFatal("Failed to clone repository: %v", err)
+		logger.LogFatal("Failed to clone repository: %v", err)
 	}
 
-	LogInfo("Repository cloned successfully into %s", targetDir)
+	logger.LogInfo("Repository cloned successfully into %s", targetDir)
+}
+
+func RunSyncCodeCopy(args []string) {
+	// Local copy for testing/dev
+	src := "."
+	dst := args[0]
+	if dst == "" {
+		logger.LogFatal("Destination required for local sync")
+	}
+
+	logger.LogInfo("Copying code to %s...", dst)
+	cmd := exec.Command("cp", "-r", src+"/.", dst)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		logger.LogFatal("Failed to copy: %v", err)
+	}
 }
