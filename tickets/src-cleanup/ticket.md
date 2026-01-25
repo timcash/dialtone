@@ -67,6 +67,13 @@
 - test-command: `./dialtone.sh deploy && ./dialtone.sh diagnostic`
 - status: done
 
+## SUBTASK: Fix build automation
+- name: fix-build-automation
+- description: Ensure `src/core/web/dist` is rebuilt automatically if missing during `build --full`, guarding against `//go:embed` errors.
+- test-description: Delete `dist`, run `build --full`, verify success.
+- test-command: `go run src/cmd/dialtone/main.go build --full`
+- status: done
+
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
 - description: run the ticket cli to verify all steps to complete the ticket, git is in the correct state and a pull request is created and ready for review. if it comepletes it should mark the final subtask as done
