@@ -252,8 +252,8 @@ func checkWebUI(url string) error {
 
 	// Verify Version
 	fmt.Printf("[chromedp] UI Version Check: %s\n", uiVersionVal)
-	if uiVersionVal != "v1.1.0" {
-		return fmt.Errorf("UI Version mismatch: expected 'v1.1.0', got '%s'", uiVersionVal)
+	if uiVersionVal != "v1.1.1" {
+		return fmt.Errorf("UI Version mismatch: expected 'v1.1.1', got '%s'", uiVersionVal)
 	}
 
 	// Note: If NATS/MAVLink traffic is slow, these might trigger false positives.
