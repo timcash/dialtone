@@ -3,12 +3,14 @@
 
 <head>
   <meta charset="UTF-8" />
-  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <link rel="icon" type="image/png" href="/favicon.png" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dialtone Dashboard</title>
-  
+
   <!-- Fonts -->
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700&family=IBM+Plex+Mono:wght@300;400;600&display=swap"
+    rel="stylesheet">
   <!-- Xterm CSS -->
   <link rel="stylesheet" href="/node_modules/@xterm/xterm/css/xterm.css" />
 </head>
@@ -19,26 +21,26 @@
 
   <!-- Main Grid Container -->
   <div class="grid-container">
-    
+
     <!-- LEFT COLUMN: Terminal & Commands -->
     <section class="panel-left">
       <header class="panel-header">
         <h2>CMD // LOGS</h2>
         <div class="status-indicator" id="conn-status">OFFLINE</div>
       </header>
-      
+
       <div id="terminal-container"></div>
-      
+
       <div class="command-palette">
         <h3>Quick Commands</h3>
         <div class="btn-grid">
-           <button id="btn-arm" class="btn btn-danger">ARM</button>
-           <button id="btn-disarm" class="btn btn-warning">DISARM</button>
-           <button id="btn-logs" class="btn">FETCH LOGS</button>
-           <button id="btn-system" class="btn">SYSTEM STATUS</button>
+          <button id="btn-arm" class="btn btn-danger">ARM</button>
+          <button id="btn-disarm" class="btn btn-warning">DISARM</button>
+          <button id="btn-manual" class="btn">MANUAL</button>
+          <button id="btn-guided" class="btn">GUIDED</button>
         </div>
         <div class="input-group">
-            <input type="text" id="cmd-input" placeholder=">> Send Manual Command..." />
+          <input type="text" id="cmd-input" placeholder=">> Send Manual Command..." />
         </div>
       </div>
     </section>
@@ -47,11 +49,11 @@
     <section class="panel-center" id="three-container">
       <div id="hud-overlay">
         <div class="hud-top">
-            <div class="hud-stat">ALT: <span id="hud-alt">0.0</span>m</div>
-            <div class="hud-stat">SPD: <span id="hud-spd">0.0</span>m/s</div>
+          <div class="hud-stat">ALT: <span id="hud-alt">0.0</span>m</div>
+          <div class="hud-stat">SPD: <span id="hud-spd">0.0</span>m/s</div>
         </div>
         <div class="hud-center">
-            <div class="hud-mode" id="hud-mode">STABILIZE</div>
+          <div class="hud-mode" id="hud-mode">STABILIZE</div>
         </div>
       </div>
       <!-- Canvas injected by Three.js -->
@@ -71,45 +73,45 @@
       <div class="telemetry-box">
         <h3>Telemetry Stream</h3>
         <table class="telemetry-table">
-            <tr>
-                <th>HEARTBEAT</th>
-                <td id="val-heartbeat" class="mono">--</td>
-            </tr>
-            <tr>
-                <th>BATTERY</th>
-                <td id="val-batt" class="mono">-- V</td>
-            </tr>
-            <tr>
-                <th>GPS SATS</th>
-                <td id="val-sats" class="mono">--</td>
-            </tr>
-            <tr>
-                <th>LATITUDE</th>
-                <td id="val-lat" class="mono">--</td>
-            </tr>
-            <tr>
-                <th>LONGITUDE</th>
-                <td id="val-lon" class="mono">--</td>
-            </tr>
-            <tr>
-                <th>ROLL/PITCH</th>
-                <td id="val-rp" class="mono">-- / --</td>
-            </tr>
-            <tr>
-                <th>YAW (HDG)</th>
-                <td id="val-yaw" class="mono">--</td>
-            </tr>
-             <tr>
-                <th>NATS MSGS</th>
-                <td id="val-nats" class="mono">0</td>
-            </tr>
+          <tr>
+            <th>HEARTBEAT</th>
+            <td id="val-heartbeat" class="mono">--</td>
+          </tr>
+          <tr>
+            <th>BATTERY</th>
+            <td id="val-batt" class="mono">-- V</td>
+          </tr>
+          <tr>
+            <th>GPS SATS</th>
+            <td id="val-sats" class="mono">--</td>
+          </tr>
+          <tr>
+            <th>LATITUDE</th>
+            <td id="val-lat" class="mono">--</td>
+          </tr>
+          <tr>
+            <th>LONGITUDE</th>
+            <td id="val-lon" class="mono">--</td>
+          </tr>
+          <tr>
+            <th>ROLL/PITCH</th>
+            <td id="val-rp" class="mono">-- / --</td>
+          </tr>
+          <tr>
+            <th>YAW (HDG)</th>
+            <td id="val-yaw" class="mono">--</td>
+          </tr>
+          <tr>
+            <th>NATS MSGS</th>
+            <td id="val-nats" class="mono">0</td>
+          </tr>
         </table>
       </div>
 
-       <div class="system-logs-mini">
+      <div class="system-logs-mini">
         <h3>Recent Alerts</h3>
         <ul id="alert-feed">
-            <!-- Dynamic alerts -->
+          <!-- Dynamic alerts -->
         </ul>
       </div>
 

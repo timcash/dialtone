@@ -124,7 +124,7 @@ func runLocalOnly(port, wsPort int, verbose bool, mavlinkAddr string, opencode b
 // Global start time for uptime calculation
 var startTime = time.Now()
 
-//go:embed all:web_build
+//go:embed all:web/dist
 var webFS embed.FS
 
 // runWithTailscale starts NATS exposed via Tailscale
@@ -464,6 +464,9 @@ func startMavlink(endpoint string, natsPort int) {
 				svc.Arm()
 			case "disarm":
 				svc.Disarm()
+			case "mode":
+				mode, _ := cmd["mode"].(string)
+				svc.SetMode(mode)
 			}
 		})
 	}()
@@ -640,7 +643,7 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server
 	})
 
 	// 6. Static Asset Serving (Embedded)
-	subFS, err := fs.Sub(webFS, "web_build")
+	subFS, err := fs.Sub(webFS, "web/dist")
 	if err != nil {
 		LogInfo("Error accessing sub-filesystem: %v", err)
 	}

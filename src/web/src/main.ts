@@ -137,6 +137,9 @@ const els = {
     spd: document.getElementById('hud-spd'),
     mode: document.getElementById('hud-mode')
   },
+  alertFeed: document.getElementById('alert-feed'),
+  btnManual: document.getElementById('btn-manual'),
+  btnGuided: document.getElementById('btn-guided'),
   connStatus: document.getElementById('conn-status')
 };
 
@@ -247,6 +250,36 @@ function handleMessage(data: any, subject: string) {
       els.yaw.innerText = y.toFixed(1) + "°";
     }
   }
+
+  // Status Text / Alerts
+  if (subject.includes("statustext") || data.severity !== undefined) {
+    addAlert(data.text || data, data.severity || 6);
+  }
+
+  // Command ACK
+  if (subject.includes("ack") || data.command !== undefined) {
+    const result = data.result || 0;
+    addAlert(`CMD ${data.command} ACK: ${result === 0 ? 'OK' : 'FAIL (' + result + ')'}`, result === 0 ? 6 : 3);
+  }
+}
+
+function addAlert(text: string, severity: number) {
+  if (!els.alertFeed) return;
+
+  const li = document.createElement('li');
+  li.innerText = `${new Date().toLocaleTimeString([], { hour12: false })} ${text}`;
+
+  // Severity coloring (0-7, where 0-2 are critical/error, 3-4 warning, 5-7 info)
+  if (severity <= 2) li.classList.add('alert-danger');
+  else if (severity <= 4) li.classList.add('alert-warning');
+  else li.classList.add('alert-info');
+
+  els.alertFeed.prepend(li);
+
+  // Keep only last 15
+  while (els.alertFeed.children.length > 15) {
+    els.alertFeed.removeChild(els.alertFeed.lastChild!);
+  }
 }
 
 function updateStatus(online: boolean) {
@@ -278,6 +311,20 @@ document.getElementById('btn-disarm')?.addEventListener('click', () => {
   term.writeln('\x1b[33m[CMD] DISARM SYSTEM REQUESTED\x1b[0m');
   if (nc) {
     nc.publish("rover.command", jc.encode({ cmd: "disarm" }));
+  }
+});
+
+document.getElementById('btn-manual')?.addEventListener('click', () => {
+  term.writeln('\x1b[33m[CMD] SET MODE: MANUAL REQUESTED\x1b[0m');
+  if (nc) {
+    nc.publish("rover.command", jc.encode({ cmd: "mode", mode: "manual" }));
+  }
+});
+
+document.getElementById('btn-guided')?.addEventListener('click', () => {
+  term.writeln('\x1b[33m[CMD] SET MODE: GUIDED REQUESTED\x1b[0m');
+  if (nc) {
+    nc.publish("rover.command", jc.encode({ cmd: "mode", mode: "guided" }));
   }
 });
 
