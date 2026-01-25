@@ -1,13 +1,11 @@
 package dialtone
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"time"
 
@@ -25,6 +23,7 @@ import (
 	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
 	ui_cli "dialtone/cli/src/plugins/ui/cli"
 	www_cli "dialtone/cli/src/plugins/www/cli"
+	ai_cli "dialtone/cli/src/plugins/ai/cli"
 
 )
 
@@ -86,12 +85,14 @@ func ExecuteDev() {
 	case "ui":
 		ui_cli.Run(args)
 
+	case "ai":
+		ai_cli.RunAI(args)
 	case "opencode":
-		runOpencode(args)
+		ai_cli.RunAI(append([]string{"opencode"}, args...))
 	case "developer":
-		runDeveloper(args)
+		ai_cli.RunAI(append([]string{"developer"}, args...))
 	case "subagent":
-		runSubagent(args)
+		ai_cli.RunAI(append([]string{"subagent"}, args...))
 	case "docs":
 		runDocs(args)
 	case "help", "-h", "--help":
@@ -118,17 +119,14 @@ func printDevUsage() {
 	fmt.Println("  diagnostic    Run system diagnostics (local or remote)")
 	fmt.Println("  plan [name]        List plans or create/view a plan file")
 	fmt.Println("  branch <name>      Create or checkout a feature branch")
-	fmt.Println("  test [name]        Run tests (all or for specific feature, creates templates if missing)")
-	fmt.Println("  pull-request       Create or update a pull request (wrapper around gh CLI)")
-	fmt.Println("  ticket <subcmd>    Manage GitHub tickets (wrapper around gh CLI)")
-	fmt.Println("  plugin <subcmd>    Manage plugins (create, etc.)")
+	fmt.Println("  ticket <subcmd>    Manage GitHub tickets (start, done, subtask, etc.)")
+	fmt.Println("  plugin <subcmd>    Manage plugins (add, install, build)")
 	fmt.Println("  github <subcmd>    Manage GitHub interactions (pr, check-deploy)")
 	fmt.Println("  www <subcmd>       Manage public webpage (Vercel wrapper)")
 	fmt.Println("  ui <subcmd>        Manage web UI (dev, build, install)")
+	fmt.Println("  test <subcmd>      Run tests (ticket, plugin, tags)")
 
-	fmt.Println("  opencode <subcmd>  Manage opencode AI assistant (start, stop, status, ui)")
-	fmt.Println("  developer          Start the autonomous developer loop")
-	fmt.Println("  subagent <options> Interface for autonomous subagents")
+	fmt.Println("  ai <subcmd>        AI tools (opencode, developer, subagent)")
 	fmt.Println("  docs               Update documentation")
 	fmt.Println("  help               Show this help message")
 }
@@ -210,10 +208,10 @@ func runDocs(args []string) {
 				example = "./dialtone.sh github pull-request --draft"
 			case "www":
 				example = "./dialtone.sh www publish"
-			case "developer":
-				example = "./dialtone.sh developer --capability camera"
-			case "subagent":
-				example = "./dialtone.sh subagent --task features/fix-logic/task.md"
+			case "ui":
+				example = "./dialtone.sh ui dev"
+			case "ai":
+				example = "./dialtone.sh ai developer --dry-run"
 			case "docs":
 				example = "./dialtone.sh docs"
 			}
@@ -439,9 +437,8 @@ func runTicket(args []string) {
 		fmt.Println("Usage: dialtone-dev ticket <subcommand> [options]")
 		fmt.Println("\nSubcommands:")
 		fmt.Println("  start <name>       Start a new ticket (branch + scaffold)")
-		fmt.Println("  new <name>         Create a new ticket.md from template")
-		fmt.Println("  test <name>        Run ticket tests")
 		fmt.Println("  done <name>        Verify ticket completion")
+		fmt.Println("  subtask <subcmd>   Manage ticket subtasks")
 		fmt.Println("  list [N]           List the top N tickets (GH)")
 		fmt.Println("  add                Create a new ticket (GH)")
 		fmt.Println("  comment <id> <msg> Add a comment to a ticket (GH)")
@@ -456,9 +453,6 @@ func runTicket(args []string) {
 	switch subcommand {
 	case "start":
 		ticket_cli.RunStart(subArgs)
-
-	case "test":
-		ticket_cli.RunTest(subArgs)
 	case "done":
 		ticket_cli.RunDone(subArgs)
 	case "subtask":
@@ -579,312 +573,4 @@ func runTicket(args []string) {
 	}
 }
 
-// runOpencode handles the opencode command
-func runOpencode(args []string) {
-	if len(args) == 0 {
-		fmt.Println("Usage: dialtone-dev opencode <subcommand> [options]")
-		fmt.Println("\nSubcommands:")
-		fmt.Println("  start         Start the opencode server")
-		fmt.Println("  stop          Stop the opencode server")
-		fmt.Println("  status        Check server status")
-		fmt.Println("  ui            Open the opencode UI in browser")
-		return
-	}
 
-	subcommand := args[0]
-	opencodePath := os.ExpandEnv("$HOME/.opencode/bin/opencode")
-
-	switch subcommand {
-	case "start":
-		LogInfo("Starting opencode server on port 3000...")
-		cmd := exec.Command(opencodePath, "--port", "3000")
-		// Run in background and redirect output
-		logFile, err := os.OpenFile("opencode.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if err != nil {
-			LogFatal("Failed to open opencode log: %v", err)
-		}
-		cmd.Stdout = logFile
-		cmd.Stderr = logFile
-		if err := cmd.Start(); err != nil {
-			LogFatal("Failed to start opencode: %v", err)
-		}
-		LogInfo("opencode started (PID: %d). Logs: opencode.log", cmd.Process.Pid)
-
-	case "stop":
-		LogInfo("Stopping opencode server...")
-		// Simple pkill for demonstration
-		cmd := exec.Command("pkill", "-f", "opencode")
-		if err := cmd.Run(); err != nil {
-			LogInfo("Opencode not running or failed to stop: %v", err)
-		} else {
-			LogInfo("opencode stopped")
-		}
-
-	case "status":
-		cmd := exec.Command("pgrep", "-f", "opencode")
-		output, err := cmd.Output()
-		if err == nil && len(output) > 0 {
-			fmt.Printf("opencode is running (PIDs: %s)\n", strings.TrimSpace(string(output)))
-		} else {
-			fmt.Println("opencode is not running")
-		}
-
-	case "ui":
-		LogInfo("Opening opencode UI...")
-		url := "http://127.0.0.1:3000" // Default port based on typical AI assistant apps
-		var cmd *exec.Cmd
-		if runtime.GOOS == "windows" {
-			cmd = exec.Command("cmd", "/c", "start", url)
-		} else if runtime.GOOS == "darwin" {
-			cmd = exec.Command("open", url)
-		} else {
-			cmd = exec.Command("xdg-open", url)
-		}
-		cmd.Run()
-
-	default:
-		fmt.Printf("Unknown opencode subcommand: %s\n", subcommand)
-		runOpencode([]string{})
-	}
-}
-
-// runDeveloper handles the developer command
-func runDeveloper(args []string) {
-	LogInfo("Starting autonomous developer loop...")
-
-	var capabilities []string
-	dryRun := false
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--dry-run" {
-			dryRun = true
-		} else if args[i] == "--capability" && i+1 < len(args) {
-			capabilities = append(capabilities, args[i+1])
-			i++
-		}
-	}
-
-	if dryRun {
-		LogInfo("Running in DRY RUN mode. No changes will be made.")
-	}
-
-	// 1. Fetch and rank tickets
-	LogInfo("Fetching open tickets from GitHub...")
-
-	cmd := exec.Command("gh", "ticket", "list", "--json", "number,title,labels", "--state", "open")
-	output, err := cmd.Output()
-	if err != nil {
-		LogFatal("Failed to fetch tickets: %v", err)
-	}
-
-	var tickets []struct {
-		Number int    `json:"number"`
-		Title  string `json:"title"`
-		Labels []struct {
-			Name string `json:"name"`
-		} `json:"labels"`
-	}
-
-	if err := json.Unmarshal(output, &tickets); err != nil {
-		LogFatal("Failed to parse tickets: %v", err)
-	}
-
-	if len(tickets) == 0 {
-		LogInfo("No open tickets found.")
-		return
-	}
-
-	// Rank tickets based on matching labels
-	bestTicketIdx := -1
-	maxMatch := -1
-
-	for i, ticket := range tickets {
-		matchCount := 0
-		for _, label := range ticket.Labels {
-			for _, cap := range capabilities {
-				if strings.Contains(strings.ToLower(label.Name), strings.ToLower(cap)) {
-					matchCount++
-				}
-			}
-		}
-		if matchCount > maxMatch {
-			maxMatch = matchCount
-			bestTicketIdx = i
-		}
-	}
-
-	selectedTicket := tickets[bestTicketIdx]
-	LogInfo("Selected ticket #%d: %s (Match score: %d)", selectedTicket.Number, selectedTicket.Title, maxMatch)
-
-	// 2. Setup feature branch and directory
-	branchName := fmt.Sprintf("ticket-%d", selectedTicket.Number)
-	if dryRun {
-		LogInfo("DRY RUN: Would create branch %s and directory features/%s", branchName, branchName)
-		return
-	}
-
-	// Create branch
-	runBranch([]string{branchName})
-
-	// Create feature directory
-	featureDir := filepath.Join("features", branchName)
-	if err := os.MkdirAll(featureDir, 0755); err != nil {
-		LogFatal("Failed to create feature directory: %v", err)
-	}
-
-	// Create initial task.md for subagent
-	taskPath := filepath.Join(featureDir, "task.md")
-	taskContent := fmt.Sprintf("# Task: Solve Ticket #%d\n\n- [ ] %s\n", selectedTicket.Number, selectedTicket.Title)
-	if err := os.WriteFile(taskPath, []byte(taskContent), 0644); err != nil {
-		LogFatal("Failed to create task file: %v", err)
-	}
-
-	LogInfo("Setup complete for %s. Task file: %s", branchName, taskPath)
-
-	// 3. Delegate to subagent
-	cmd = startSubagent([]string{"--task", taskPath})
-	if cmd == nil {
-		LogFatal("Failed to start subagent")
-	}
-
-	// 4. Monitor Loop (every 30 seconds)
-	LogInfo("Monitoring subagent progress...")
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			// Check if subagent is still running
-			if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
-				if cmd.ProcessState.Success() {
-					LogInfo("Subagent completed successfully.")
-					goto verification
-				} else {
-					LogInfo("Subagent failed. Attempting restart...")
-					cmd = startSubagent([]string{"--task", taskPath})
-					continue
-				}
-			}
-
-			// Perform "Progress Check" by analyzing logs
-			LogInfo("Checking subagent logs for drift...")
-			if !checkSubagentProgress(branchName) {
-				LogInfo("Subagent seems off-track. Killing and restarting...")
-				cmd.Process.Kill()
-				cmd = startSubagent([]string{"--task", taskPath})
-			}
-		}
-
-		// Small sleep to prevent tight loop if ticker fails
-		time.Sleep(1 * time.Second)
-
-		// Check process state again (in case it exited just now)
-		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
-			break
-		}
-	}
-
-verification:
-	// 4. Submit
-	LogInfo("Subagent finished. Running verification tests...")
-	test_cli.RunTest([]string{})
-
-	LogInfo("Tests passed. Creating pull request...")
-	github_cli.RunGithub([]string{"pull-request", "--title", fmt.Sprintf("%s: autonomous fix", branchName), "--body", fmt.Sprintf("Autonomous fix for ticket #%d\n\nSee %s for details.", selectedTicket.Number, taskPath)})
-
-	LogInfo("Autonomous developer loop completed for ticket #%d", selectedTicket.Number)
-}
-
-// checkSubagentProgress analyzes the subagent logs to see if it's still on task
-func checkSubagentProgress(branchName string) bool {
-	logPath := "opencode.log"
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		return true // Can't read log, assume it's fine for now
-	}
-
-	lines := strings.Split(string(data), "\n")
-	if len(lines) < 10 {
-		return true // Not enough logs yet
-	}
-
-	// Get last 10 lines
-	lastLogs := lines[len(lines)-10:]
-
-	// Heuristic: If logs contain "don't know", "error", or repetitive "trying to...", trigger restart
-	// In a real scenario, this would be a prompt to an LLM:
-	// "look at recent logs of this sub agent and determine if it still on task..."
-	LogInfo("Prompt: Analyzing last 10 lines of %s...", logPath)
-	for _, line := range lastLogs {
-		if strings.Contains(strings.ToLower(line), "stuck") ||
-			strings.Contains(strings.ToLower(line), "loop detected") ||
-			strings.Contains(strings.ToLower(line), "installing") ||
-			strings.Contains(strings.ToLower(line), "edit") ||
-			strings.Contains(strings.ToLower(line), "write") ||
-			strings.Contains(strings.ToLower(line), "illegal operation") {
-			return false
-		}
-	}
-
-	return true
-}
-
-// startSubagent launches the subagent process and returns the command object
-func startSubagent(args []string) *exec.Cmd {
-	var taskFile string
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--task" && i+1 < len(args) {
-			taskFile = args[i+1]
-			i++
-		}
-	}
-
-	if taskFile == "" {
-		LogInfo("Usage: dialtone-dev subagent --task <file>")
-		return nil
-	}
-
-	LogInfo("Subagent starting task: %s", taskFile)
-
-	opencodePath := os.ExpandEnv("$HOME/.opencode/bin/opencode")
-	if _, err := os.Stat(opencodePath); os.IsNotExist(err) {
-		LogInfo("Default subagent (opencode) not found.")
-		return nil
-	}
-
-	// Read the task file content to pass as a prompt
-	taskContent, err := os.ReadFile(taskFile)
-	if err != nil {
-		LogInfo("Failed to read task file %s: %v", taskFile, err)
-		return nil
-	}
-
-	// Launch opencode with the task file content as the message
-	cmd := exec.Command(opencodePath, "run", string(taskContent))
-
-	// Create or truncate a specific log file for this subagent session
-	logFile, err := os.OpenFile("opencode.log", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-	if err != nil {
-		LogInfo("Failed to open subagent log: %v", err)
-		return nil
-	}
-
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-
-	if err := cmd.Start(); err != nil {
-		LogInfo("Failed to start subagent: %v", err)
-		return nil
-	}
-
-	return cmd
-}
-
-// runSubagent handles the legacy subagent command wrapper
-func runSubagent(args []string) {
-	cmd := startSubagent(args)
-	if cmd != nil {
-		cmd.Wait()
-		LogInfo("Subagent completed.")
-	}
-}

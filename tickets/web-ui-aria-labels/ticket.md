@@ -17,7 +17,7 @@
 ## Test
 1. **Ticket Tests**: Run tests specific to this ticket's implementation.
    ```bash
-   ./dialtone.sh ticket test web-ui-aria-labels
+   ./dialtone.sh test ticket web-ui-aria-labels
    ```
 2. **All Tests**: Run the entire test suite.
    ```bash
