@@ -94,4 +94,4 @@ It also covers the refactoring to move GitHub-specific commands (`create`, `view
 - description: Verify that `dialtone.sh ticket done <ticket-name>` performs the final verification, git check, and PR update.
 - test-description: Mock the prerequisites (all subtasks done) and verify the command execution flow.
 - test-command: `dialtone.sh test ticket verify-ticket-plugin --subtask test-ticket-done`
-- status: todo
+- status: done
