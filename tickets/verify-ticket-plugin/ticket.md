@@ -1,5 +1,7 @@
-# Ticket: Verify Ticket Plugin Functionality
+# Branch: verify-ticket-plugin
+# Tags: verification
 
+# Goal
 This ticket tracks the verification of all functionality in the `ticket` plugin as documented in `src/plugins/ticket/README.md`.
 It also covers the refactoring to move GitHub-specific commands (`create`, `view`, `comment`, `close`) fully to the `github` plugin and remove them from the `ticket` plugin CLI to match the README.
 
