@@ -22,6 +22,12 @@ Dialtone aims to combine human intuition and machine precision into a unified me
 - Autocode provides context-aware code generation for new robot plugins and control logic.
 - Users can share `Dialtone Autocode` sessions with a web link.
 
+### Dialtone Mock Mode: Hardware-Free Development
+- Develop and test the dashboard UI without physical hardware.
+- Generates fake telemetry (heartbeat, attitude, GPS) and video streams (color gradient).
+- Disables hardware drivers (camera, serial/UDP Mavlink) and AI features (OpenCode) for a lightweight, fast dev loop.
+- Activate via `dialtone start --mock`.
+
 ### Dialtone CLI: Simple Single Binary to Connect and Control Any Robot
 - Dialtone CLI offers cross-platform support for Windows, macOS, and Linux.
 - Single command builds and deploys for ARM64 targets like Raspberry Pi.
@@ -97,6 +103,34 @@ Dialtone aims to combine human intuition and machine precision into a unified me
 - Data services to store and analyze robot data.
 - AI services to provide AI assistance.
 
+# Binary Architecture: Production vs. Development
+
+Dialtone uses a dual-binary approach to separate runtime efficiency from developer tooling. Both binaries rely on the same core code but expose different capabilities.
+
+```text
++-----------------------+       +-----------------------+
+|   Production Binary   |       |   Development Binary  |
+|      (dialtone)       |       |    (dialtone-dev)     |
++-----------------------+       +-----------------------+
+|  [ Runtime Core ]     |       |  [ Runtime Core ]     |
+|   - start             |       |   - start             |
+|   - vpn               |       |   - vpn               |
++-----------------------+       +-----------------------+
+|                       |       |  [ Dev Tools ]        |
+|                       |       |   - build             |
+|                       |       |   - deploy            |
+|                       |       |   - test              |
+|                       |       |   - ticket            |
+|                       |       |   - ...               |
++-----------------------+       +-----------------------+
+```
+
+| Feature | Production (`dialtone`) | Development (`dialtone-dev`) |
+| :--- | :---: | :---: |
+| **`start`** (Run Robot Software) | ✅ | ✅ |
+| **`vpn`** (Run VPN Node) | ✅ | ✅ |
+| **Developer Tools** (build, test, etc.) | ❌ | ✅ |
+
 # Test-Driven Development (TDD)
 Dialtone is built with a "Test-First" philosophy. Every function, feature, and plugin must have automated tests. The system is designed such that the tests drive the development process.
 
@@ -135,9 +169,9 @@ mv -n .env.example .env # Only if .env does not exists
 ./dialtone.sh test ticket <ticket-name> # Run all subtask tests for the specific ticket
 ./dialtone.sh test ticket <ticket-name> --subtask <subtask-name> # Run a specific subtask test
 ./dialtone.sh test plugin <plugin-name> # Run tests for a specific plugin
-./dialtone.sh test tags [tag1 tag2 ...]      # Run tests matching any of the specified tags
-./dialtone.sh test --list                # List tests that would run
-./dialtone.sh test                     # Run all tests
+./dialtone.sh test tags [tag1 tag2 ...] # Run tests matching any of the specified tags
+./dialtone.sh test --list               # List tests that would run
+./dialtone.sh test                      # Run all tests
 ```
 
 ## Logs

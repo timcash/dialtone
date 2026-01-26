@@ -22,6 +22,7 @@ import (
 
 	"dialtone/cli/src/core/config"
 	"dialtone/cli/src/core/logger"
+	"dialtone/cli/src/core/mock"
 	ai_app "dialtone/cli/src/plugins/ai/app"
 	camera "dialtone/cli/src/plugins/camera/app"
 	mavlink "dialtone/cli/src/plugins/mavlink/app"
@@ -34,12 +35,7 @@ import (
 	"tailscale.com/tsnet"
 )
 
-var mavlinkPubChan = make(chan mavlinkNatsMsg, 100)
-
-type mavlinkNatsMsg struct {
-	Subject string
-	Data    []byte
-}
+// (Moved MavlinkPubChan to src/core/mock)
 
 func Execute() {
 	if len(os.Args) < 2 {
@@ -56,6 +52,8 @@ func Execute() {
 	switch command {
 	case "start":
 		runStart(args)
+	case "vpn":
+		runVPN(args)
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
 		printUsage()
@@ -66,6 +64,7 @@ func printUsage() {
 	fmt.Println("Usage: dialtone <command> [options]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  start         Start the NATS and Web server")
+	fmt.Println("  vpn           Start in simple VPN mode (tsnet only)")
 }
 
 func runStart(args []string) {
@@ -80,6 +79,7 @@ func runStart(args []string) {
 	verbose := fs.Bool("verbose", false, "Enable verbose logging")
 	mavlinkAddr := fs.String("mavlink", "", "Mavlink connection string (e.g. serial:/dev/ttyAMA0:57600 or udp:0.0.0.0:14550)")
 	opencode := fs.Bool("opencode", false, "Start opencode AI assistant server")
+	useMock := fs.Bool("mock", false, "Use mock telemetry and camera data")
 	fs.Parse(args)
 
 	// Determine state directory
@@ -91,23 +91,31 @@ func runStart(args []string) {
 		*stateDir = filepath.Join(homeDir, ".config", "dialtone")
 	}
 
+	// Mock mode forces opencode off
+	if *useMock && *opencode {
+		logger.LogInfo("Mock mode enabled: Disabling opencode")
+		*opencode = false
+	}
+
 	if *localOnly {
-		runLocalOnly(*natsPort, *wsPort, *verbose, *mavlinkAddr, *opencode)
+		runLocalOnly(*natsPort, *wsPort, *verbose, *mavlinkAddr, *opencode, *useMock)
 		return
 	}
 
-	runWithTailscale(*hostname, *natsPort, *wsPort, *webPort, *stateDir, *ephemeral, *verbose, *mavlinkAddr, *opencode)
+	runWithTailscale(*hostname, *natsPort, *wsPort, *webPort, *stateDir, *ephemeral, *verbose, *mavlinkAddr, *opencode, *useMock)
 }
 
 // runLocalOnly starts NATS without Tailscale (original behavior)
-func runLocalOnly(port, wsPort int, verbose bool, mavlinkAddr string, opencode bool) {
+func runLocalOnly(port, wsPort int, verbose bool, mavlinkAddr string, opencode bool, useMock bool) {
 	ns := startNATSServer("0.0.0.0", port, wsPort, verbose)
 	defer ns.Shutdown()
 
 	logger.LogInfo("NATS server started on port %d (local only)", port)
 
 	// Start Mavlink service if requested
-	if mavlinkAddr != "" {
+	if useMock {
+		go mock.StartMockMavlink(port)
+	} else if mavlinkAddr != "" {
 		go startMavlink(mavlinkAddr, port)
 	}
 
@@ -126,13 +134,93 @@ func runLocalOnly(port, wsPort int, verbose bool, mavlinkAddr string, opencode b
 // Global start time for uptime calculation
 var startTime = time.Now()
 
+func runVPN(args []string) {
+	fs := flag.NewFlagSet("vpn", flag.ExitOnError)
+	hostname := fs.String("hostname", os.Getenv("DIALTONE_HOSTNAME"), "Tailscale hostname")
+	stateDir := fs.String("state-dir", "", "State directory")
+	ephemeral := fs.Bool("ephemeral", false, "Register as ephemeral node")
+	verbose := fs.Bool("verbose", false, "Verbose logging")
+	fs.Parse(args)
+
+	if *hostname == "" {
+		*hostname = "dialtone-vpn"
+	}
+
+	if *stateDir == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			logger.LogFatal("Failed to get home directory: %v", err)
+		}
+		*stateDir = filepath.Join(homeDir, ".config", "dialtone-vpn")
+	}
+
+	if err := os.MkdirAll(*stateDir, 0700); err != nil {
+		logger.LogFatal("Failed to create state directory: %v", err)
+	}
+
+	ts := &tsnet.Server{
+		Hostname:  *hostname,
+		Dir:       *stateDir,
+		Ephemeral: *ephemeral,
+		AuthKey:   os.Getenv("TS_AUTHKEY"),
+		UserLogf:  logger.LogInfo,
+	}
+	if *verbose {
+		ts.Logf = logger.LogInfo
+	}
+	defer ts.Close()
+
+	// Pre-flight check for stale MagicDNS entry
+	CheckStaleHostname(*hostname)
+
+	logger.LogInfo("VPN Mode: Connecting to Tailscale as %s...", *hostname)
+	logger.LogInfo("VPN Mode: State directory: %s", *stateDir)
+	ln, err := ts.Listen("tcp", ":80")
+	if err != nil {
+		logger.LogFatal("VPN Mode: Failed to listen on :80: %v", err)
+	}
+	defer ln.Close()
+
+	logger.LogInfo("VPN Mode: Waiting for Tailscale connection...")
+	status, err := ts.Up(context.Background())
+	if err != nil {
+		logger.LogFatal("TS Up failed: %v", err)
+	}
+
+	ipStr := "none"
+	if len(status.TailscaleIPs) > 0 {
+		ipStr = status.TailscaleIPs[0].String()
+	}
+	logger.LogInfo("VPN Mode: Connected (IP: %s)", ipStr)
+	logger.LogInfo("VPN Mode: Serving dashboard at http://%s/vpn", *hostname)
+
+	// Use CreateWebHandler for unified dashboard
+	// Pass 0 for ports since NATS isn't running
+	// Pass nil for NATS server
+	lc, _ := ts.LocalClient()
+	webHandler := CreateWebHandler(*hostname, 0, 0, 80, nil, lc, status.TailscaleIPs, false)
+
+	server := &http.Server{
+		Handler: webHandler,
+	}
+
+	go func() {
+		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
+			logger.LogInfo("HTTP server error: %v", err)
+		}
+	}()
+
+	waitForShutdown()
+	logger.LogInfo("Shutting down VPN mode...")
+}
+
 // Ensure embed is detected
 //
 //go:embed all:core/web/dist
 var webFS embed.FS
 
 // runWithTailscale starts NATS exposed via Tailscale
-func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir string, ephemeral, verbose bool, mavlinkAddr string, opencode bool) {
+func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir string, ephemeral, verbose bool, mavlinkAddr string, opencode bool, mock_mode bool) {
 	// Ensure state directory exists
 	if err := os.MkdirAll(stateDir, 0700); err != nil {
 		logger.LogFatal("Failed to create state directory: %v", err)
@@ -143,12 +231,16 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 		Hostname:  hostname,
 		Dir:       stateDir,
 		Ephemeral: ephemeral,
+		AuthKey:   os.Getenv("TS_AUTHKEY"),
 		UserLogf:  logger.LogInfo, // Auth URLs and user-facing messages
 	}
 
 	if verbose {
 		ts.Logf = logger.LogInfo
 	}
+
+	// Pre-flight check for stale MagicDNS entry
+	CheckStaleHostname(hostname)
 
 	// Validate required environment variables
 	if os.Getenv("TS_AUTHKEY") == "" {
@@ -169,7 +261,7 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 	}
 
 	for status == nil || len(status.TailscaleIPs) == 0 {
-		logger.LogInfo("Waiting for Tailscale IP...")
+		logger.LogInfo("Waiting for Tailscale IP (Status: %v)...", status.BackendState)
 		time.Sleep(2 * time.Second)
 		status, err = ts.Up(ctx)
 		if err != nil {
@@ -184,11 +276,9 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 	// 1. Connection Logging
 	var ips []netip.Addr
 	displayHostname := hostname
-	if status != nil {
-		ips = status.TailscaleIPs
-		if status.Self != nil && status.Self.DNSName != "" {
-			displayHostname = strings.TrimSuffix(status.Self.DNSName, ".")
-		}
+	ips = status.TailscaleIPs
+	if status.Self != nil && status.Self.DNSName != "" {
+		displayHostname = strings.TrimSuffix(status.Self.DNSName, ".")
 	}
 
 	ipStr := "none"
@@ -204,7 +294,9 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 	ns := startNATSServer("127.0.0.1", localNATSPort, localWSPort, verbose)
 	defer ns.Shutdown()
 
-	if mavlinkAddr != "" {
+	if mock_mode {
+		go mock.StartMockMavlink(localNATSPort)
+	} else if mavlinkAddr != "" {
 		go startMavlink(mavlinkAddr, localNATSPort)
 	}
 
@@ -231,10 +323,28 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 
 	// 3. Web Handler and Server
 	lc, _ := ts.LocalClient()
-	webHandler := CreateWebHandler(hostname, port, wsPort, webPort, ns, lc, ips)
+	webHandler := CreateWebHandler(hostname, port, wsPort, webPort, ns, lc, ips, mock_mode)
+
+	// Local listener for testing/dev (use 8080 to avoid permission issues)
+	localWebPort := 8080
+	if webPort != 80 {
+		localWebPort = webPort + 1000 // Offset if 8080 is taken
+	}
+	localWebAddr := fmt.Sprintf("127.0.0.1:%d", localWebPort)
+	localWebLn, err := net.Listen("tcp", localWebAddr)
+	if err == nil {
+		go func() {
+			logger.LogInfo("Web UI (Local): Serving at http://%s", localWebAddr)
+			if err := http.Serve(localWebLn, webHandler); err != nil {
+				logger.LogInfo("Local web server error: %v", err)
+			}
+		}()
+	} else {
+		logger.LogInfo("Warning: Failed to start local web server: %v", err)
+	}
 
 	go func() {
-		logger.LogInfo("Web UI: Serving at http://%s:%d", displayHostname, webPort)
+		logger.LogInfo("Web UI (Tailscale): Serving at http://%s:%d", displayHostname, webPort)
 		time.Sleep(2 * time.Second)
 		logger.LogInfo("[SUCCESS] System Operational")
 		if err := http.Serve(webLn, webHandler); err != nil {
@@ -328,22 +438,7 @@ For headless/remote authentication (SSH into a server without UI):
    - Create a reusable key for multiple deployments
    - Or a single-use key for one-time setup
 
-2. Set the TS_AUTHKEY environment variable before running:
-
-   Linux/macOS:
-     export TS_AUTHKEY="tskey-auth-xxxxx"
-     ./dialtone
-
-   Windows:
-     set TS_AUTHKEY=tskey-auth-xxxxx
-     dialtone.exe
-
-3. For ephemeral nodes (auto-cleanup when disconnected):
-     ./dialtone -ephemeral
-
-If no auth key is set, a login URL will be printed below.
-Visit that URL to authenticate this device.
-
+2. Set the TS_AUTHKEY in .env before running:
 ========================================
 `)
 }
@@ -418,7 +513,7 @@ func startMavlink(endpoint string, natsPort int) {
 
 			if err == nil && subject != "" {
 				select {
-				case mavlinkPubChan <- mavlinkNatsMsg{Subject: subject, Data: data}:
+				case mock.MavlinkPubChan <- mock.MavlinkNatsMsg{Subject: subject, Data: data}:
 				default:
 					// Drop message if channel full
 				}
@@ -493,7 +588,7 @@ func startNatsPublisher(port int) {
 
 		logger.LogInfo("Mavlink NATS Publisher connected")
 
-		for msg := range mavlinkPubChan {
+		for msg := range mock.MavlinkPubChan {
 			if err := nc.Publish(msg.Subject, msg.Data); err != nil {
 				logger.LogInfo("Error publishing to NATS: %v", err)
 			}
@@ -509,7 +604,7 @@ func waitForShutdown() {
 }
 
 // CreateWebHandler creates the HTTP handler for the unified web dashboard
-func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server.Server, lc *tailscale.LocalClient, ips []netip.Addr) http.Handler {
+func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server.Server, lc *tailscale.LocalClient, ips []netip.Addr, useMock bool) http.Handler {
 	mux := http.NewServeMux()
 
 	// 1. JSON init API for the frontend
@@ -528,15 +623,19 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server
 
 	// 2. JSON status API
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
-		varz, _ := ns.Varz(nil)
 		var connections int
 		var inMsgs, outMsgs, inBytes, outBytes int64
-		if varz != nil {
-			connections = varz.Connections
-			inMsgs = varz.InMsgs
-			outMsgs = varz.OutMsgs
-			inBytes = varz.InBytes
-			outBytes = varz.OutBytes
+
+		// Only check NATS vars if server is present
+		if ns != nil {
+			varz, _ := ns.Varz(nil)
+			if varz != nil {
+				connections = varz.Connections
+				inMsgs = varz.InMsgs
+				outMsgs = varz.OutMsgs
+				inBytes = varz.InBytes
+				outBytes = varz.OutBytes
+			}
 		}
 
 		status := map[string]any{
@@ -571,7 +670,11 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server
 	})
 
 	// 4. Video Stream MJPEG
-	mux.HandleFunc("/stream", camera.StreamHandler)
+	if useMock {
+		mux.HandleFunc("/stream", mock.MockStreamHandler)
+	} else {
+		mux.HandleFunc("/stream", camera.StreamHandler)
+	}
 
 	// 5. WebSocket for real-time updates (legacy dashboard)
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
@@ -598,15 +701,19 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server
 
 			case <-ticker.C:
 
-				varz, _ := ns.Varz(nil)
 				var connections int
 				var inMsgs, outMsgs, inBytes, outBytes int64
-				if varz != nil {
-					connections = varz.Connections
-					inMsgs = varz.InMsgs
-					outMsgs = varz.OutMsgs
-					inBytes = varz.InBytes
-					outBytes = varz.OutBytes
+
+				// Only check NATS vars if server is present
+				if ns != nil {
+					varz, _ := ns.Varz(nil)
+					if varz != nil {
+						connections = varz.Connections
+						inMsgs = varz.InMsgs
+						outMsgs = varz.OutMsgs
+						inBytes = varz.InBytes
+						outBytes = varz.OutBytes
+					}
 				}
 
 				callerInfo := "Unknown"
@@ -719,5 +826,18 @@ func checkZombieProcess(device string) {
 	if err == nil && len(output) > 0 {
 		logger.LogInfo("[Camera Diagnostic] WARNING: Process holding %s: %s", device, strings.TrimSpace(string(output)))
 		logger.LogInfo("[Camera Diagnostic] This might be a zombie dialtone process. considers running 'pkill dialtone'")
+	}
+}
+
+func CheckStaleHostname(hostname string) {
+	if hostname == "" {
+		return
+	}
+	// Try to resolve the hostname. If it resolves before we start tsnet, it's likely stale.
+	ips, err := net.LookupIP(hostname)
+	if err == nil && len(ips) > 0 {
+		logger.LogInfo("[Pre-flight] WARNING: Hostname %s already resolves to %v. This might be a stale MagicDNS entry or another node. This can cause 'operation timed out' errors.", hostname, ips)
+	} else {
+		logger.LogInfo("[Pre-flight] Hostname %s is not currently resolvable (this is good).", hostname)
 	}
 }
