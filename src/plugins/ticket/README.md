@@ -75,6 +75,12 @@ Subtasks are defined in the `tickets/<ticket-name>/ticket.md` file. Use the foll
 ./dialtone.sh ticket subtask done my-subtask
 ```
 
+### `ticket subtask failed [ticket-name] <subtask-name>`
+```bash
+# Updates the status of the specified subtask to `failed` in the `ticket.md` file.
+./dialtone.sh ticket subtask failed my-subtask
+```
+
 ## Ticket Subtask Format
 
 A `ticket.md` file is a collection of subtasks. Each subtask must follow this exact markdown format:
