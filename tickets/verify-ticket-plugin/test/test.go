@@ -23,6 +23,7 @@ func init() {
 	test.Register("test-ticket-subtask-next", "verify-ticket-plugin", []string{"core"}, RunTicketSubtaskNext)
 	test.Register("test-ticket-subtask-test", "verify-ticket-plugin", []string{"core"}, RunTicketSubtaskTest)
 	test.Register("test-ticket-subtask-done", "verify-ticket-plugin", []string{"core"}, RunTicketSubtaskDone)
+	test.Register("test-ticket-subtask-failed", "verify-ticket-plugin", []string{"core"}, RunTicketSubtaskFailed)
 	test.Register("example-subtask", "verify-ticket-plugin", []string{"example"}, RunExample)
 }
 
@@ -545,5 +546,71 @@ func RunTicketSubtaskDone() error {
 	}
 
 	fmt.Println("PASS: Ticket subtask done verified successfully")
+	return nil
+}
+
+func RunTicketSubtaskFailed() error {
+	name := "test-ticket-subtask-failed-dummy"
+	dir := "tickets/" + name
+	os.MkdirAll(dir, 0755)
+	defer os.RemoveAll(dir)
+
+	content := `# Ticket: Dummy
+## SUBTASK: Task A
+- name: task-a
+- status: todo
+`
+	if err := os.WriteFile(filepath.Join(dir, "ticket.md"), []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to create dummy ticket: %v", err)
+	}
+
+	// 1. Run without progress.txt. expect progress error
+	cmd := exec.Command("./dialtone.sh", "ticket", "subtask", "failed", name, "task-a")
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err == nil {
+		return fmt.Errorf("FAIL: 'failed' should have failed due to missing progress.txt")
+	}
+	if !strings.Contains(output, "has not been updated") {
+		return fmt.Errorf("FAIL: Expected progress.txt error, got: %s", output)
+	}
+
+	// 2. Create progress.txt. Run without flag. expect git clean error
+	if err := os.WriteFile(filepath.Join(dir, "progress.txt"), []byte("Failed reason"), 0644); err != nil {
+		return fmt.Errorf("failed to create progress.txt: %v", err)
+	}
+
+	cmd = exec.Command("./dialtone.sh", "ticket", "subtask", "failed", name, "task-a")
+	out, err = cmd.CombinedOutput()
+	output = string(out)
+
+	if err == nil {
+		return fmt.Errorf("FAIL: 'failed' should have failed due to dirty git")
+	}
+	if !strings.Contains(output, "Git repository is not clean") {
+		return fmt.Errorf("FAIL: Expected Git clean error, got: %s", output)
+	}
+
+	// 3. Run WITH flag. Should succeed.
+	cmd = exec.Command("./dialtone.sh", "ticket", "subtask", "failed", name, "task-a")
+	cmd.Env = append(os.Environ(), "DIALTONE_DISABLE_GIT_CHECKS=1")
+	out, err = cmd.CombinedOutput()
+	output = string(out)
+
+	if err != nil {
+		return fmt.Errorf("FAIL: 'failed' failed with override flag: %v. Output: %s", err, output)
+	}
+
+	// Verify status updated in ticket.md
+	newContent, err := os.ReadFile(filepath.Join(dir, "ticket.md"))
+	if err != nil {
+		return fmt.Errorf("failed to read updated ticket.md: %v", err)
+	}
+	if !strings.Contains(string(newContent), "status: failed") {
+		return fmt.Errorf("FAIL: Status not updated to failed. Content:\n%s", string(newContent))
+	}
+
+	fmt.Println("PASS: Ticket subtask failed verified successfully")
 	return nil
 }

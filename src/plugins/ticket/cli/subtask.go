@@ -22,7 +22,7 @@ type Subtask struct {
 // RunSubtask is the entry point for 'ticket subtask ...'
 func RunSubtask(args []string) {
 	if len(args) < 1 {
-		logFatal("Usage: ticket subtask <list|next|test|done> <ticket-name> [subtask-name]")
+		logFatal("Usage: ticket subtask <list|next|test|done|failed> <ticket-name> [subtask-name]")
 	}
 
 	subcmd := args[0]
@@ -69,6 +69,11 @@ func RunSubtask(args []string) {
 			logFatal("Usage: ticket subtask done [ticket-name] <subtask-name>")
 		}
 		RunSubtaskDone(ticketName, subtaskName)
+	case "failed":
+		if subtaskName == "" {
+			logFatal("Usage: ticket subtask failed [ticket-name] <subtask-name>")
+		}
+		RunSubtaskFailed(ticketName, subtaskName)
 	default:
 		logFatal("Unknown subtask command: %s", subcmd)
 	}
@@ -96,6 +101,8 @@ func RunSubtaskList(ticketName string) {
 			icon = "[x]"
 		} else if st.Status == "progress" {
 			icon = "[/]"
+		} else if st.Status == "failed" {
+			icon = "[!]"
 		}
 		fmt.Printf("%s %s (%s)\n", icon, st.Name, st.Status)
 	}
@@ -218,6 +225,57 @@ func RunSubtaskDone(ticketName, subtaskName string) {
 	}
 
 	logInfo("Marked subtask '%s' as done.", subtaskName)
+}
+
+// RunSubtaskFailed marks a subtask as failed
+func RunSubtaskFailed(ticketName, subtaskName string) {
+	subtasks, err := parseSubtasks(ticketName)
+	if err != nil {
+		logFatal("Failed to parse subtasks: %v", err)
+	}
+
+	var target *Subtask
+	for _, st := range subtasks {
+		if st.Name == subtaskName {
+			target = &st
+			break
+		}
+	}
+
+	if target == nil {
+		logFatal("Subtask '%s' not found in ticket %s", subtaskName, ticketName)
+	}
+
+	if target.Status == "failed" {
+		logInfo("Subtask '%s' is already marked as failed.", subtaskName)
+		return
+	}
+
+	// For failed, we don't necessarily enforce strict Git cleanliness as the work might be broken
+	// But we still want progress.txt to be updated with WHY it failed?
+	// For simplicity, let's enforce Git checks to ensure consistency and history.
+	validateGitState(ticketName)
+
+	// Update the file
+	ticketMdPath := filepath.Join("tickets", ticketName, "ticket.md")
+	content, err := os.ReadFile(ticketMdPath)
+	if err != nil {
+		logFatal("Failed to read ticket.md: %v", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+
+	if target.LineNumber > 0 && target.LineNumber <= len(lines) {
+		lines[target.LineNumber-1] = strings.Replace(lines[target.LineNumber-1], target.Status, "failed", 1)
+	} else {
+		logFatal("Could not find line %d in ticket.md", target.LineNumber)
+	}
+
+	if err := os.WriteFile(ticketMdPath, []byte(strings.Join(lines, "\n")), 0644); err != nil {
+		logFatal("Failed to update ticket.md: %v", err)
+	}
+
+	logInfo("Marked subtask '%s' as failed.", subtaskName)
 }
 
 func validateGitState(ticketName string) {
