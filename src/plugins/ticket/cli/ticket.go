@@ -261,16 +261,9 @@ func RunDone(args []string) {
 	}
 	logInfo("All subtasks verified as done (excluding 'ticket-done').")
 
-	// 3. Verify git status
-	cmd := exec.Command("git", "status", "--porcelain")
-	output, err := cmd.Output()
-	if err != nil {
-		logFatal("Failed to run git status: %v", err)
-	}
-	if len(strings.TrimSpace(string(output))) > 0 {
-		logFatal("Uncommitted changes detected. Please commit or stash them before running ticket done.\n%s", string(output))
-	}
-	logInfo("Git status clean.")
+	// 3. Verify git status and progress.txt
+	validateGitState(ticketName)
+	logInfo("Git status clean and progress updated.")
 
 	// 4. Push local changes
 	logInfo("Pushing latest changes to origin...")
