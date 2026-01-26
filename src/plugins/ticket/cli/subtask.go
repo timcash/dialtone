@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -193,6 +194,8 @@ func RunSubtaskDone(ticketName, subtaskName string) {
 		return
 	}
 
+	validateGitState(ticketName)
+
 	// Update the file
 	ticketMdPath := filepath.Join("tickets", ticketName, "ticket.md")
 	content, err := os.ReadFile(ticketMdPath)
@@ -201,7 +204,7 @@ func RunSubtaskDone(ticketName, subtaskName string) {
 	}
 
 	lines := strings.Split(string(content), "\n")
-	
+
 	// Just strict replace on the specific line we found earlier
 	// Note: LineNumber is 1-based, array is 0-based
 	if target.LineNumber > 0 && target.LineNumber <= len(lines) {
@@ -215,6 +218,54 @@ func RunSubtaskDone(ticketName, subtaskName string) {
 	}
 
 	logInfo("Marked subtask '%s' as done.", subtaskName)
+}
+
+func validateGitState(ticketName string) {
+	if os.Getenv("DIALTONE_DISABLE_GIT_CHECKS") == "1" {
+		return
+	}
+
+	progressPath := filepath.Join("tickets", ticketName, "progress.txt")
+
+	// 1. Check progress.txt validation
+	if !isProgressUpdated(progressPath) {
+		logFatal("Error: %s has not been updated.\nPlease update your progress summary to reflect the work done before marking the subtask as complete.", progressPath)
+	}
+
+	// 2. Check Git Cleanliness
+	if !isGitClean() {
+		logFatal("Error: Git repository is not clean.\nPlease commit all your changes (including %s) before marking the subtask as done.", progressPath)
+	}
+}
+
+func isProgressUpdated(path string) bool {
+	// Check if file status is dirty (modified, added, untracked)
+	cmd := exec.Command("git", "status", "--porcelain", path)
+	out, err := cmd.Output()
+	if err == nil && len(bytes.TrimSpace(out)) > 0 {
+		return true // Dirty
+	}
+
+	// Check if file was modified in HEAD commit
+	cmd = exec.Command("git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD", path)
+	out, err = cmd.Output()
+	if err == nil && len(bytes.TrimSpace(out)) > 0 {
+		// Verify output matches path roughly (git output is relative to root)
+		// Simply check if output is non-empty is usually enough if we asked for specific path
+		return true
+	}
+
+	return false
+}
+
+func isGitClean() bool {
+	cmd := exec.Command("git", "status", "--porcelain")
+	out, err := cmd.Output()
+	if err != nil {
+		// If git fails, assume not clean or weird state
+		return false
+	}
+	return len(bytes.TrimSpace(out)) == 0
 }
 
 // parseSubtasks reads ticket.md and extracts subtasks
@@ -238,7 +289,7 @@ func parseSubtasks(ticketName string) ([]Subtask, error) {
 	// Then parses bullet points
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		
+
 		if strings.HasPrefix(trimmed, "## SUBTASK:") {
 			// Save previous if exists
 			if currentSubtask != nil {

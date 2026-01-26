@@ -18,6 +18,11 @@ func init() {
 	test.Register("test-ticket-add", "verify-ticket-plugin", []string{"core"}, RunTicketAdd)
 	test.Register("test-ticket-start", "verify-ticket-plugin", []string{"core"}, RunTicketStart)
 	test.Register("test-ticket-list", "verify-ticket-plugin", []string{"core"}, RunTicketList)
+	test.Register("test-ticket-validate", "verify-ticket-plugin", []string{"core"}, RunTicketValidate)
+	test.Register("test-ticket-subtask-list", "verify-ticket-plugin", []string{"core"}, RunTicketSubtaskList)
+	test.Register("test-ticket-subtask-next", "verify-ticket-plugin", []string{"core"}, RunTicketSubtaskNext)
+	test.Register("test-ticket-subtask-test", "verify-ticket-plugin", []string{"core"}, RunTicketSubtaskTest)
+	test.Register("test-ticket-subtask-done", "verify-ticket-plugin", []string{"core"}, RunTicketSubtaskDone)
 	test.Register("example-subtask", "verify-ticket-plugin", []string{"example"}, RunExample)
 }
 
@@ -275,5 +280,270 @@ func RunTicketList() error {
 	}
 
 	fmt.Println("PASS: Ticket list verified successfully")
+	return nil
+}
+
+func RunTicketValidate() error {
+	// 1. Valid Ticket
+	validName := "test-ticket-validate-valid"
+	validDir := "tickets/" + validName
+	os.MkdirAll(validDir, 0755)
+	defer os.RemoveAll(validDir)
+
+	validContent := `# Ticket: Valid Ticket
+# Goal
+Some goal.
+
+## SUBTASK: Subtask 1
+- name: subtask-1
+- description: desc
+- test-description: test desc
+- test-command: echo pass
+- status: todo
+`
+	if err := os.WriteFile(filepath.Join(validDir, "ticket.md"), []byte(validContent), 0644); err != nil {
+		return fmt.Errorf("failed to create valid ticket: %v", err)
+	}
+
+	cmd := exec.Command("./dialtone.sh", "ticket", "validate", validName)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("FAIL: Valid ticket failed validation: %v. Output: %s", err, string(out))
+	}
+
+	// 2. Invalid Ticket (Missing status)
+	invalidName := "test-ticket-validate-invalid"
+	invalidDir := "tickets/" + invalidName
+	os.MkdirAll(invalidDir, 0755)
+	defer os.RemoveAll(invalidDir)
+
+	invalidContent := `# Ticket: Invalid Ticket
+## SUBTASK: Subtask 1
+- name: subtask-1
+- status: invalid-status-value
+`
+	if err := os.WriteFile(filepath.Join(invalidDir, "ticket.md"), []byte(invalidContent), 0644); err != nil {
+		return fmt.Errorf("failed to create invalid ticket: %v", err)
+	}
+
+	cmd = exec.Command("./dialtone.sh", "ticket", "validate", invalidName)
+	// We expect this to fail
+	if err := cmd.Run(); err == nil {
+		return fmt.Errorf("FAIL: Invalid ticket PASSED validation (it should have failed).Content:\n%s", invalidContent)
+	}
+
+	fmt.Println("PASS: Ticket validate verified successfully")
+	return nil
+}
+
+func RunTicketSubtaskList() error {
+	name := "test-ticket-subtask-list-dummy"
+	dir := "tickets/" + name
+	os.MkdirAll(dir, 0755)
+	defer os.RemoveAll(dir)
+
+	content := `# Ticket: Dummy
+## SUBTASK: Task A
+- name: task-a
+- status: done
+
+## SUBTASK: Task B
+- name: task-b
+- status: todo
+`
+	if err := os.WriteFile(filepath.Join(dir, "ticket.md"), []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to create dummy ticket: %v", err)
+	}
+
+	cmd := exec.Command("./dialtone.sh", "ticket", "subtask", "list", name)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("subtask list failed: %v", err)
+	}
+	output := string(out)
+
+	// Verify output contains subtask names and statuses
+	checks := []string{
+		"task-a", "done",
+		"task-b", "todo",
+	}
+
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			return fmt.Errorf("FAIL: Output missing expected string '%s'", check)
+		}
+	}
+
+	fmt.Println("PASS: Ticket subtask list verified successfully")
+	return nil
+}
+
+func RunTicketSubtaskNext() error {
+	name := "test-ticket-subtask-next-dummy"
+	dir := "tickets/" + name
+	os.MkdirAll(dir, 0755)
+	defer os.RemoveAll(dir)
+
+	content := `# Ticket: Dummy
+## SUBTASK: Task A
+- name: task-a
+- status: done
+
+## SUBTASK: Task B
+- name: task-b
+- status: todo
+
+## SUBTASK: Task C
+- name: task-c
+- status: todo
+`
+	if err := os.WriteFile(filepath.Join(dir, "ticket.md"), []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to create dummy ticket: %v", err)
+	}
+
+	cmd := exec.Command("./dialtone.sh", "ticket", "subtask", "next", name)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("subtask next failed: %v", err)
+	}
+	output := string(out)
+
+	// Verify it shows Task B (first todo)
+	checks := []string{
+		"task-b",
+	}
+
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			return fmt.Errorf("FAIL: Output missing expected string '%s' (should be task-b). Output:\n%s", check, output)
+		}
+	}
+
+	// Verify it does NOT show Task A or C details as "Next"
+	// (Simple check: name should match task-b)
+	if strings.Contains(output, "task-a") {
+		return fmt.Errorf("FAIL: Output contains task-a which is done")
+	}
+
+	fmt.Println("PASS: Ticket subtask next verified successfully")
+	return nil
+}
+
+func RunTicketSubtaskTest() error {
+	name := "test-ticket-subtask-test-dummy"
+	dir := "tickets/" + name
+	os.MkdirAll(dir, 0755)
+	defer os.RemoveAll(dir)
+
+	// Create ticket with a subtask that runs 'echo hello-world-test'
+	content := `# Ticket: Dummy
+## SUBTASK: Task A
+- name: task-a
+- test-command: echo hello-world-test
+- status: todo
+`
+	if err := os.WriteFile(filepath.Join(dir, "ticket.md"), []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to create dummy ticket: %v", err)
+	}
+
+	cmd := exec.Command("./dialtone.sh", "ticket", "subtask", "test", name, "task-a")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("subtask test failed: %v", err)
+	}
+	output := string(out)
+
+	if !strings.Contains(output, "hello-world-test") {
+		return fmt.Errorf("FAIL: Output missing execution result 'hello-world-test'. Output:\n%s", output)
+	}
+
+	fmt.Println("PASS: Ticket subtask test verified successfully")
+	return nil
+}
+
+func RunTicketSubtaskDone() error {
+	name := "test-ticket-subtask-done-dummy"
+	dir := "tickets/" + name
+	os.MkdirAll(dir, 0755)
+	defer os.RemoveAll(dir)
+
+	content := `# Ticket: Dummy
+## SUBTASK: Task A
+- name: task-a
+- status: todo
+`
+	if err := os.WriteFile(filepath.Join(dir, "ticket.md"), []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to create dummy ticket: %v", err)
+	}
+
+	// 1. Run without progress.txt. Should fail on Progress Check.
+	// NOTE: We assume the test environment *might* have git logic working.
+	// However, 'git status' on untracked file 'dummy/progress.txt' returns "?? ...".
+	// The code validation says: if output > 0, it is dirty.
+	// But here progress.txt DOES NOT EXIST.
+	// The code: exec("git", "status", ... path)
+	// If file doesn't exist, git status might return nothing for that path or error?
+	// Actually git status returns nothing if file is ignored or clean.
+	// If file is missing and not tracked, it returns nothing.
+	// So `isProgressUpdated` returns false.
+	// So we expect "Error: ... has not been updated"
+
+	cmd := exec.Command("./dialtone.sh", "ticket", "subtask", "done", name, "task-a")
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err == nil {
+		return fmt.Errorf("FAIL: 'done' should have failed due to missing progress.txt")
+	}
+	if !strings.Contains(output, "has not been updated") {
+		// It might have failed on "Git repository is not clean" if checking logic is skipped?
+		// No, code says check progress first.
+		return fmt.Errorf("FAIL: Expected progress.txt error, got: %s", output)
+	}
+
+	// 2. Create progress.txt. Run without flag. Should fail on Git Clean Check (assuming dirty dev env).
+	// If the dev env happens to be clean, this test step relies on it being dirty?
+	// That's flaky.
+	// The integration test runner (me) knows I am editing files.
+	// But ideally tests shouldn't rely on it.
+	// However, if I make progress.txt DIRTY (untracked), then the repo IS DIRTY.
+	// So Git Clean Check MUST FAIL.
+	if err := os.WriteFile(filepath.Join(dir, "progress.txt"), []byte("Progress update"), 0644); err != nil {
+		return fmt.Errorf("failed to create progress.txt: %v", err)
+	}
+
+	cmd = exec.Command("./dialtone.sh", "ticket", "subtask", "done", name, "task-a")
+	out, err = cmd.CombinedOutput()
+	output = string(out)
+
+	if err == nil {
+		return fmt.Errorf("FAIL: 'done' should have failed due to dirty git (untracked progress.txt)")
+	}
+	if !strings.Contains(output, "Git repository is not clean") {
+		// It might fail on progress check?
+		// isProgressUpdated returns true (dirty).
+		// So it proceeds to git clean check.
+		return fmt.Errorf("FAIL: Expected Git clean error, got: %s", output)
+	}
+
+	// 3. Run WITH flag. Should succeed.
+	cmd = exec.Command("./dialtone.sh", "ticket", "subtask", "done", name, "task-a")
+	cmd.Env = append(os.Environ(), "DIALTONE_DISABLE_GIT_CHECKS=1")
+	out, err = cmd.CombinedOutput()
+	output = string(out)
+
+	if err != nil {
+		return fmt.Errorf("FAIL: 'done' failed with override flag: %v. Output: %s", err, output)
+	}
+
+	// Verify status updated in ticket.md
+	newContent, err := os.ReadFile(filepath.Join(dir, "ticket.md"))
+	if err != nil {
+		return fmt.Errorf("failed to read updated ticket.md: %v", err)
+	}
+	if !strings.Contains(string(newContent), "status: done") {
+		return fmt.Errorf("FAIL: Status not updated to done. Content:\n%s", string(newContent))
+	}
+
+	fmt.Println("PASS: Ticket subtask done verified successfully")
 	return nil
 }
