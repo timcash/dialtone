@@ -146,7 +146,10 @@ func runTicketTest(ticketName, subtaskName string, showList bool) {
 	if subtaskName != "" {
 		// 1. Check if it's a registered Go test first
 		found := false
-		for _, t := range core_test.GetRegistry() {
+		registry := core_test.GetRegistry()
+		logger.LogInfo("Debugging Registry: Found %d tests", len(registry))
+		for _, t := range registry {
+			// logger.LogInfo("  - [%s] %s", t.TicketName, t.Name) // verbose, but needed if count > 0
 			if t.TicketName == ticketName && t.Name == subtaskName {
 				found = true
 				if showList {
@@ -167,7 +170,7 @@ func runTicketTest(ticketName, subtaskName string, showList bool) {
 		}
 
 		// 2. If not found in registry, try delegation to ticket subtask command
-		logger.LogInfo("Subtask test not found in registry. Delegating to ticket subtask test command...", ticketName, subtaskName)
+		logger.LogInfo("Subtask test not found in registry. Delegating to ticket subtask test command... (%s, %s)", ticketName, subtaskName)
 		cmd := exec.Command("./dialtone.sh", "ticket", "subtask", "test", ticketName, subtaskName)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
