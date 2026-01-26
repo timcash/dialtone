@@ -18,6 +18,7 @@ import (
 
 	_ "dialtone/cli/tickets/mock-data-support/test"
 	_ "dialtone/cli/tickets/test-test-tags/test"
+	_ "dialtone/cli/tickets/verify-ticket-plugin/test"
 )
 
 // RunTest handles the 'test' command
@@ -149,7 +150,7 @@ func runTicketTest(ticketName, subtaskName string, showList bool) {
 		registry := core_test.GetRegistry()
 		logger.LogInfo("Debugging Registry: Found %d tests", len(registry))
 		for _, t := range registry {
-			// logger.LogInfo("  - [%s] %s", t.TicketName, t.Name) // verbose, but needed if count > 0
+			logger.LogInfo("  - [%s] %s", t.TicketName, t.Name) // verbose, but needed if count > 0
 			if t.TicketName == ticketName && t.Name == subtaskName {
 				found = true
 				if showList {
