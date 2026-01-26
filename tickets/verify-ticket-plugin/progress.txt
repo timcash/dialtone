@@ -30,6 +30,8 @@
 - [x] test-ticket-subtask-failed
       - Verified `ticket subtask failed` updates status to `failed`.
       - Verified enforcement of `progress.txt` updates and clean git state.
+- [x] test-ticket-done
+      - Verified `ticket done` checks git/progress validation before proceeding.
 
 ## Current Status
 - Fixed infinite loop in test runner (missing import for ticket test package).
