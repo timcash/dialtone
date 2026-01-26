@@ -159,21 +159,27 @@ fetch('/api/init')
 // Start Connection
 async function connectNATS() {
   const wsPort = 4223; // Standard NATS WS port
-  // Use hostname from window location (handles remote/local)
-  const server = `${PROTOCOL}//${HOSTNAME}:${wsPort}`;
+  // Use 127.0.0.1 for local/headless consistency, otherwise use location hostname
+  const host = (HOSTNAME === 'localhost' || HOSTNAME === '127.0.0.1') ? '127.0.0.1' : HOSTNAME;
+  const server = `${PROTOCOL}//${host}:${wsPort}`;
 
+  console.log(`NATS Connection Info: PROTOCOL=${PROTOCOL}, HOSTNAME=${HOSTNAME}, host=${host}, server=${server}`);
   term.writeln(`\x1b[90m>>> Connecting to NATS at ${server}...\x1b[0m`);
 
   try {
+    console.log(`Attempting to connect to NATS at ${server}...`);
     nc = await connect({ servers: [server] });
+    console.log("NATS Connected!");
     updateStatus(true);
 
     // Subscribe to ALL mavlink messages for debugging/telemetry
     const sub = nc.subscribe("mavlink.>");
+    console.log("Subscribed to mavlink.>");
     (async () => {
       let msgCount = 0;
       for await (const m of sub) {
         msgCount++;
+        console.log(`Received message ${msgCount} on ${m.subject}`);
         if (els.nats) els.nats.innerText = msgCount.toString();
 
         try {
