@@ -16,6 +16,17 @@
       - Verified `ticket start` creates Git branch and PR (integration test).
 - [x] test-ticket-list
       - Verified `ticket list` shows local tickets and "Remote GitHub Issues" header.
+- [x] test-ticket-validate
+      - Verified `ticket validate` accepts valid and rejects invalid tickets.
+- [x] test-ticket-subtask-list
+      - Verified `ticket subtask list` output contains subtask names and statuses.
+- [x] test-ticket-subtask-next
+      - Verified `ticket subtask next` returns the first TODO subtask.
+- [x] test-ticket-subtask-test
+      - Verified `ticket subtask test` runs the defined `test-command`.
+- [x] test-ticket-subtask-done
+      - Verified `ticket subtask done` updates status to `done`.
+      - Verified enforcement of `progress.txt` updates and clean git state.
 
 ## Current Status
 - Fixed infinite loop in test runner (missing import for ticket test package).

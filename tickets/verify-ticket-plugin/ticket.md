@@ -51,35 +51,35 @@ It also covers the refactoring to move GitHub-specific commands (`create`, `view
 - name: test-ticket-validate
 - description: Verify that `dialtone.sh ticket validate <name>` correctly checks the structure and status values of the `ticket.md` file.
 - test-description: Create a valid and an invalid `ticket.md` and verify the validation command returns success and failure respectively.
-- test-command: `dialtone.sh test ticket verify-ticket-plugin`
-- status: todo
+- test-command: `dialtone.sh test ticket verify-ticket-plugin --subtask test-ticket-validate`
+- status: done
 
 ## SUBTASK: Test Ticket Subtask List Command
 - name: test-ticket-subtask-list
 - description: Verify that `dialtone.sh ticket subtask list` correctly lists all subtasks and their current statuses.
 - test-description: Parse the output of `subtask list` for a known `ticket.md` and match against expected subtasks.
-- test-command: `dialtone.sh test ticket verify-ticket-plugin`
-- status: todo
+- test-command: `dialtone.sh test ticket verify-ticket-plugin --subtask test-ticket-subtask-list`
+- status: done
 
 ## SUBTASK: Test Ticket Subtask Next Command
 - name: test-ticket-subtask-next
 - description: Verify that `dialtone.sh ticket subtask next` displays the details of the next pending subtask (first non-done item).
 - test-description: Set up a `ticket.md` with mixed statuses and verify `next` returns the correct subtask.
-- test-command: `dialtone.sh test ticket verify-ticket-plugin`
-- status: todo
+- test-command: `dialtone.sh test ticket verify-ticket-plugin --subtask test-ticket-subtask-next`
+- status: done
 
 ## SUBTASK: Test Ticket Subtask Test Command
 - name: test-ticket-subtask-test
 - description: Verify that `dialtone.sh ticket subtask test [ticket-name] <subtask-name>` runs the specific test command defined in the subtask.
 - test-description: Define a subtask with a simple echo test command and verify it executes.
-- test-command: `dialtone.sh test ticket verify-ticket-plugin`
-- status: todo
+- test-command: `dialtone.sh test ticket verify-ticket-plugin --subtask test-ticket-subtask-test`
+- status: done
 
 ## SUBTASK: Test Ticket Subtask Done Command
 - name: test-ticket-subtask-done
 - description: Verify that `dialtone.sh ticket subtask done [ticket-name] <subtask-name>` updates the status of the subtask to `done` in `ticket.md`.
-- test-description: Run the command and check the file content for the status change.
-- test-command: `dialtone.sh test ticket verify-ticket-plugin`
+- test-description: Create a dummy ticket with a todo subtask, run `done` command, and verify status is updated.
+- test-command: `dialtone.sh test ticket verify-ticket-plugin --subtask test-ticket-subtask-done`
 - status: todo
 
 ## SUBTASK: Test Ticket Subtask Failed Command
