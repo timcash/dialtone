@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -21,7 +22,7 @@ type Subtask struct {
 // RunSubtask is the entry point for 'ticket subtask ...'
 func RunSubtask(args []string) {
 	if len(args) < 1 {
-		logFatal("Usage: ticket subtask <list|next|test|done> <ticket-name> [subtask-name]")
+		logFatal("Usage: ticket subtask <list|next|test|done|failed> <ticket-name> [subtask-name]")
 	}
 
 	subcmd := args[0]
@@ -68,6 +69,11 @@ func RunSubtask(args []string) {
 			logFatal("Usage: ticket subtask done [ticket-name] <subtask-name>")
 		}
 		RunSubtaskDone(ticketName, subtaskName)
+	case "failed":
+		if subtaskName == "" {
+			logFatal("Usage: ticket subtask failed [ticket-name] <subtask-name>")
+		}
+		RunSubtaskFailed(ticketName, subtaskName)
 	default:
 		logFatal("Unknown subtask command: %s", subcmd)
 	}
@@ -95,6 +101,8 @@ func RunSubtaskList(ticketName string) {
 			icon = "[x]"
 		} else if st.Status == "progress" {
 			icon = "[/]"
+		} else if st.Status == "failed" {
+			icon = "[!]"
 		}
 		fmt.Printf("%s %s (%s)\n", icon, st.Name, st.Status)
 	}
@@ -193,6 +201,8 @@ func RunSubtaskDone(ticketName, subtaskName string) {
 		return
 	}
 
+	validateGitState(ticketName)
+
 	// Update the file
 	ticketMdPath := filepath.Join("tickets", ticketName, "ticket.md")
 	content, err := os.ReadFile(ticketMdPath)
@@ -201,7 +211,7 @@ func RunSubtaskDone(ticketName, subtaskName string) {
 	}
 
 	lines := strings.Split(string(content), "\n")
-	
+
 	// Just strict replace on the specific line we found earlier
 	// Note: LineNumber is 1-based, array is 0-based
 	if target.LineNumber > 0 && target.LineNumber <= len(lines) {
@@ -215,6 +225,105 @@ func RunSubtaskDone(ticketName, subtaskName string) {
 	}
 
 	logInfo("Marked subtask '%s' as done.", subtaskName)
+}
+
+// RunSubtaskFailed marks a subtask as failed
+func RunSubtaskFailed(ticketName, subtaskName string) {
+	subtasks, err := parseSubtasks(ticketName)
+	if err != nil {
+		logFatal("Failed to parse subtasks: %v", err)
+	}
+
+	var target *Subtask
+	for _, st := range subtasks {
+		if st.Name == subtaskName {
+			target = &st
+			break
+		}
+	}
+
+	if target == nil {
+		logFatal("Subtask '%s' not found in ticket %s", subtaskName, ticketName)
+	}
+
+	if target.Status == "failed" {
+		logInfo("Subtask '%s' is already marked as failed.", subtaskName)
+		return
+	}
+
+	// For failed, we don't necessarily enforce strict Git cleanliness as the work might be broken
+	// But we still want progress.txt to be updated with WHY it failed?
+	// For simplicity, let's enforce Git checks to ensure consistency and history.
+	validateGitState(ticketName)
+
+	// Update the file
+	ticketMdPath := filepath.Join("tickets", ticketName, "ticket.md")
+	content, err := os.ReadFile(ticketMdPath)
+	if err != nil {
+		logFatal("Failed to read ticket.md: %v", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+
+	if target.LineNumber > 0 && target.LineNumber <= len(lines) {
+		lines[target.LineNumber-1] = strings.Replace(lines[target.LineNumber-1], target.Status, "failed", 1)
+	} else {
+		logFatal("Could not find line %d in ticket.md", target.LineNumber)
+	}
+
+	if err := os.WriteFile(ticketMdPath, []byte(strings.Join(lines, "\n")), 0644); err != nil {
+		logFatal("Failed to update ticket.md: %v", err)
+	}
+
+	logInfo("Marked subtask '%s' as failed.", subtaskName)
+}
+
+func validateGitState(ticketName string) {
+	if os.Getenv("DIALTONE_DISABLE_GIT_CHECKS") == "1" {
+		return
+	}
+
+	progressPath := filepath.Join("tickets", ticketName, "progress.txt")
+
+	// 1. Check progress.txt validation
+	if !isProgressUpdated(progressPath) {
+		logFatal("Error: %s has not been updated.\nPlease update your progress summary to reflect the work done before marking the subtask as complete.", progressPath)
+	}
+
+	// 2. Check Git Cleanliness
+	if !isGitClean() {
+		logFatal("Error: Git repository is not clean.\nPlease commit all your changes (including %s) before marking the subtask as done.", progressPath)
+	}
+}
+
+func isProgressUpdated(path string) bool {
+	// Check if file status is dirty (modified, added, untracked)
+	cmd := exec.Command("git", "status", "--porcelain", path)
+	out, err := cmd.Output()
+	if err == nil && len(bytes.TrimSpace(out)) > 0 {
+		return true // Dirty
+	}
+
+	// Check if file was modified in HEAD commit
+	cmd = exec.Command("git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD", path)
+	out, err = cmd.Output()
+	if err == nil && len(bytes.TrimSpace(out)) > 0 {
+		// Verify output matches path roughly (git output is relative to root)
+		// Simply check if output is non-empty is usually enough if we asked for specific path
+		return true
+	}
+
+	return false
+}
+
+func isGitClean() bool {
+	cmd := exec.Command("git", "status", "--porcelain")
+	out, err := cmd.Output()
+	if err != nil {
+		// If git fails, assume not clean or weird state
+		return false
+	}
+	return len(bytes.TrimSpace(out)) == 0
 }
 
 // parseSubtasks reads ticket.md and extracts subtasks
@@ -238,7 +347,7 @@ func parseSubtasks(ticketName string) ([]Subtask, error) {
 	// Then parses bullet points
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		
+
 		if strings.HasPrefix(trimmed, "## SUBTASK:") {
 			// Save previous if exists
 			if currentSubtask != nil {
