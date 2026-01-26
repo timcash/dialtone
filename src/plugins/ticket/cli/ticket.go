@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	github_cli "dialtone/cli/src/plugins/github/cli"
 )
 
 func logInfo(format string, args ...interface{}) {
@@ -16,6 +18,87 @@ func logInfo(format string, args ...interface{}) {
 func logFatal(format string, args ...interface{}) {
 	fmt.Printf("[ticket] FATAL: "+format+"\n", args...)
 	os.Exit(1)
+}
+
+// Run handles all ticket subcommands
+func Run(args []string) {
+	if len(args) == 0 {
+		fmt.Println("Usage: dialtone-dev ticket <subcommand> [options]")
+		fmt.Println("\nSubcommands:")
+		fmt.Println("  add <name>         Add a new local ticket (scaffold only)")
+		fmt.Println("  start <name>       Start a new ticket (branch + scaffold + PR)")
+		fmt.Println("  done <name>        Verify and complete ticket (commit + merge)")
+		fmt.Println("  validate <name>    Validate ticket.md format")
+		fmt.Println("  list               List local tickets and GitHub issues")
+		fmt.Println("  subtask <subcmd>   Manage subtasks in current ticket")
+		fmt.Println("  create             Create a new GitHub issue")
+		fmt.Println("  view <id>          View GitHub issue details")
+		fmt.Println("  comment <id> <msg> Add a comment to a GitHub issue")
+		fmt.Println("  close <id>         Close a GitHub issue")
+		return
+	}
+
+	subcommand := args[0]
+	subArgs := args[1:]
+
+	switch subcommand {
+	case "add":
+		RunAdd(subArgs)
+	case "start":
+		RunStart(subArgs)
+	case "done":
+		RunDone(subArgs)
+	case "validate":
+		RunValidate(subArgs)
+	case "subtask":
+		RunSubtask(subArgs)
+	case "list":
+		RunList(subArgs)
+	case "help", "-h", "--help":
+		Run([]string{})
+		return
+	// Delegate GitHub commands to the github plugin
+	case "create", "comment", "view", "close":
+		runTicketGhCommand(subcommand, subArgs)
+	default:
+		fmt.Printf("Unknown ticket subcommand: %s\n", subcommand)
+		Run([]string{})
+	}
+}
+
+// RunList lists local tickets in the tickets/ directory
+func RunList(args []string) {
+	files, err := os.ReadDir("tickets")
+	if err != nil {
+		logFatal("Failed to read tickets directory: %v", err)
+	}
+
+	fmt.Println("\nLocal Tickets:")
+	fmt.Println("---------------------------------------------------")
+	count := 0
+	for _, f := range files {
+		if f.IsDir() {
+			// Check if it has a ticket.md
+			ticketMd := filepath.Join("tickets", f.Name(), "ticket.md")
+			if _, err := os.Stat(ticketMd); err == nil {
+				fmt.Printf("- %s\n", f.Name())
+				count++
+			}
+		}
+	}
+	if count == 0 {
+		fmt.Println("(No local tickets found)")
+	}
+	fmt.Println("---------------------------------------------------")
+
+	fmt.Println("\nRemote GitHub Issues:")
+	fmt.Println("---------------------------------------------------")
+	github_cli.RunGithub([]string{"issue", "list"})
+}
+
+func runTicketGhCommand(subcommand string, subArgs []string) {
+	// Re-route to github plugin's issue runner
+	github_cli.RunGithub(append([]string{"issue", subcommand}, subArgs...))
 }
 
 // RunAdd handles 'ticket add <ticket-name>'
@@ -95,7 +178,7 @@ func RunStart(args []string) {
 			logInfo("Branch verified on remote.")
 			break
 		}
-		
+
 		if i == maxRetries-1 {
 			logFatal("Timed out waiting for branch to appear on remote.")
 		}
@@ -134,7 +217,7 @@ func ScaffoldTicket(ticketName string) {
 			// Replace placeholders
 			newContent := strings.ReplaceAll(string(content), "<branch-name>", ticketName)
 			newContent = strings.ReplaceAll(newContent, "<ticket-name>", ticketName)
-			
+
 			if err := os.WriteFile(ticketMd, []byte(newContent), 0644); err != nil {
 				logFatal("Failed to write ticket.md: %v", err)
 			}
@@ -153,9 +236,6 @@ func ScaffoldTicket(ticketName string) {
 		logInfo("Created %s", progressTxt)
 	}
 }
-
-
-
 
 // RunDone handles 'ticket done <ticket-name>'
 // RunDone handles 'ticket done <ticket-name>'

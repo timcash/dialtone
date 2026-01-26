@@ -15,7 +15,6 @@ import (
 )
 
 func init() {
-	logger.LogInfo("DEBUG: Registering verify-tsnet-connection...")
 	Register("verify-tsnet-connection", "core", []string{"core", "vpn", "tailscale"}, RunTsnetTest)
 }
 
