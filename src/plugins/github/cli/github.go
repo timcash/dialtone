@@ -349,6 +349,8 @@ func runIssue(args []string) {
 		fmt.Println("\nCommands:")
 		fmt.Println("  list      List open issues")
 		fmt.Println("  sync      Sync open issues to local tickets")
+		fmt.Println("  view      View issue details")
+		fmt.Println("  comment   Add a comment to an issue")
 		fmt.Println("  close     Close specific issue(s)")
 		fmt.Println("  close-all Close all open issues")
 		return
@@ -362,6 +364,10 @@ func runIssue(args []string) {
 		runIssueList(restArgs)
 	case "sync":
 		runIssueSync(restArgs)
+	case "view":
+		runIssueView(restArgs)
+	case "comment":
+		runIssueComment(restArgs)
 	case "close":
 		runIssueClose(restArgs)
 	case "close-all":
@@ -446,6 +452,32 @@ func runIssueSync(args []string) {
 		if err := os.WriteFile(ticketFile, []byte(content), 0644); err != nil {
 			logger.LogFatal("Failed to write ticket file: %v", err)
 		}
+	}
+}
+
+func runIssueView(args []string) {
+	if len(args) < 1 {
+		logger.LogFatal("Usage: github issue view <number>")
+	}
+	gh := findGH()
+	cmd := exec.Command(gh, "issue", "view", args[0])
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		logger.LogFatal("Failed to view issue: %v", err)
+	}
+}
+
+func runIssueComment(args []string) {
+	if len(args) < 2 {
+		logger.LogFatal("Usage: github issue comment <number> <message>")
+	}
+	gh := findGH()
+	cmd := exec.Command(gh, "issue", "comment", args[0], "--body", args[1])
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		logger.LogFatal("Failed to add comment: %v", err)
 	}
 }
 
