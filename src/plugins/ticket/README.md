@@ -7,8 +7,11 @@ The `ticket` plugin provides a structured, test-driven development (TDD) workflo
 ### `ticket add [ticket-name]`
 Scaffolds a new local ticket directory. If no name is provided, it uses the current git branch name.
 
+> [!NOTE]
+> This command does **not switch branches**. It is ideal for agents to log side-tasks or bugs found during other work without losing their current context.
+
 ```bash
-./dialtone.sh ticket add my-feature-task
+./dialtone.sh ticket add bug-found-in-other-module
 ```
 
 ### `ticket start <ticket-name>`
