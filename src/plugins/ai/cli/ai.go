@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,6 +34,8 @@ func RunAI(args []string) {
 		RunDeveloper(subArgs)
 	case "subagent":
 		RunSubagent(subArgs)
+	case "chat":
+		RunChat(subArgs)
 	case "build":
 		RunAIBuild(subArgs)
 	case "help", "-h", "--help":
@@ -48,6 +51,7 @@ func PrintAIUsage() {
 	fmt.Println("Usage: dialtone ai <command> [options]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  opencode <subcmd>  Manage opencode AI assistant (start, stop, status, ui)")
+	fmt.Println("  chat <query>       Ask the AI assistant a question")
 	fmt.Println("  developer          Start the autonomous developer loop")
 	fmt.Println("  subagent <options> Interface for autonomous subagents")
 	fmt.Println("  build              Build AI related components")
@@ -325,6 +329,62 @@ func StartSubagent(args []string) *exec.Cmd {
 		return nil
 	}
 	return cmd
+}
+
+func RunChat(args []string) {
+	if len(args) < 1 {
+		fmt.Println("Usage: dialtone ai chat <query>")
+		return
+	}
+
+	query := strings.Join(args, " ")
+	apiKey := os.Getenv("OPENCODE_API_KEY")
+	if apiKey == "" {
+		logger.LogFatal("OPENCODE_API_KEY environment variable is not set.")
+	}
+
+	logger.LogInfo("Thinking...")
+
+	// Simple OpenAI API call
+	requestBody, _ := json.Marshal(map[string]any{
+		"model": "gpt-4o",
+		"messages": []map[string]string{
+			{"role": "system", "content": "You are a helpful robot assistant called Opencode. You help the user manage their Dialtone robot system."},
+			{"role": "user", "content": query},
+		},
+	})
+
+	apiURL := os.Getenv("OPENCODE_API_URL")
+	if apiURL == "" {
+		apiURL = "https://api.openai.com/v1/chat/completions"
+	}
+
+	req, _ := http.NewRequest("POST", apiURL, strings.NewReader(string(requestBody)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		logger.LogFatal("Failed to call AI API: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errData map[string]any
+		json.NewDecoder(resp.Body).Decode(&errData)
+		logger.LogFatal("AI API returned error (%d): %v", resp.StatusCode, errData)
+	}
+
+	var result map[string]any
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	choices := result["choices"].([]any)
+	if len(choices) > 0 {
+		message := choices[0].(map[string]any)["message"].(map[string]any)
+		content := message["content"].(string)
+		fmt.Println(content)
+	}
 }
 
 func RunSubagent(args []string) {

@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/ssh"
@@ -112,13 +113,22 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 	_, _ = ssh.RunSSHCommand(client, "pkill dialtone || true")
 	_, _ = ssh.RunSSHCommand(client, fmt.Sprintf("mkdir -p %s", remoteDir))
 
-	// 5. Upload Binary
+	// 5. Upload Binary and .env
 	logger.LogInfo("Uploading binary %s...", localBinaryPath)
 	remoteBinaryPath := path.Join(remoteDir, "dialtone")
 	if err := ssh.UploadFile(client, localBinaryPath, remoteBinaryPath); err != nil {
 		logger.LogFatal("Failed to upload binary: %v", err)
 	}
 	_, _ = ssh.RunSSHCommand(client, fmt.Sprintf("chmod +x %s", remoteBinaryPath))
+
+	// Upload .env if it exists
+	if _, err := os.Stat(".env"); err == nil {
+		logger.LogInfo("Uploading .env file...")
+		remoteEnvPath := path.Join(remoteDir, ".env")
+		if err := ssh.UploadFile(client, ".env", remoteEnvPath); err != nil {
+			logger.LogInfo("Warning: Failed to upload .env: %v", err)
+		}
+	}
 
 	// 6. Restart Service
 	logger.LogInfo("Starting service...")
@@ -150,10 +160,29 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 		logger.LogFatal("Failed to start: %v", err)
 	}
 
+	// 7. Verify Startup
+	logger.LogInfo("Verifying startup (waiting 5s)...")
+	time.Sleep(5 * time.Second)
+
+	logs, err := ssh.RunSSHCommand(client, "tail -n 20 ~/nats.log")
+	if err != nil {
+		logger.LogInfo("Warning: Failed to read startup logs: %v", err)
+	} else {
+		fmt.Println("\n--- Remote Startup Logs ---")
+		fmt.Println(logs)
+		fmt.Println("---------------------------\n")
+
+		if strings.Contains(logs, "error") || strings.Contains(logs, "panic") || strings.Contains(logs, "fatal") {
+			logger.LogInfo("Warning: Potential issues detected in startup logs.")
+		} else {
+			logger.LogInfo("Service seems to have started successfully.")
+		}
+	}
+
 	logger.LogInfo("Deployment complete!")
 	logger.LogInfo("Robot Dashboard: http://%s", hostnameParam)
 	logger.LogInfo("Opencode Web UI: http://%s:3000", hostnameParam)
-	logger.LogInfo("Run './dialtone.sh logs --remote' to verify startup.")
+	logger.LogInfo("Run './dialtone.sh logs --remote' to verify ongoing status.")
 }
 
 func validateRequiredVars(vars []string) {

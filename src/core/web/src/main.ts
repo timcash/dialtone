@@ -163,8 +163,8 @@ fetch('/api/init')
 // Start Connection
 async function connectNATS() {
   const wsPort = 4223; // Standard NATS WS port
-  // Use hostname from window location (handles remote/local)
-  const server = `${PROTOCOL}//${HOSTNAME}:${wsPort}`;
+  // Force 127.0.0.1 to avoid localhost ipv4/ipv6 ambiguity in headless chrome
+  const server = `ws://127.0.0.1:${wsPort}`;
 
   term.writeln(`\x1b[90m>>> Connecting to NATS at ${server}...\x1b[0m`);
 

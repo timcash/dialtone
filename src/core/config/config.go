@@ -1,6 +1,7 @@
 package config
 
 import (
+	"embed"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,11 +12,39 @@ import (
 	"github.com/joho/godotenv"
 )
 
+//go:embed .env
+var embeddedEnv embed.FS
+
 // LoadConfig loads environment variables from .env
 func LoadConfig() {
-	if err := godotenv.Load(); err != nil {
-		logger.LogInfo("Warning: godotenv.Load() failed: %v", err)
+	// 1. Try to load from local .env file first
+	if err := godotenv.Load(); err == nil {
+		return
 	}
+
+	// 2. Fallback to embedded .env
+	data, err := embeddedEnv.ReadFile(".env")
+	if err != nil {
+		logger.LogInfo("Warning: No local .env found and no embedded .env found.")
+		return
+	}
+
+	envMap, err := godotenv.Unmarshal(string(data))
+	if err != nil {
+		logger.LogInfo("Warning: Failed to unmarshal embedded .env: %v", err)
+		return
+	}
+
+	if len(envMap) == 0 {
+		return
+	}
+
+	for k, v := range envMap {
+		if os.Getenv(k) == "" {
+			os.Setenv(k, v)
+		}
+	}
+	logger.LogInfo("Loaded configuration from embedded .env")
 }
 
 // GetDialtoneEnv returns the directory where dependencies are installed.

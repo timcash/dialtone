@@ -3,7 +3,9 @@ package app
 import (
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 
 	"dialtone/cli/src/core"
 	"dialtone/cli/src/core/logger"
@@ -14,8 +16,30 @@ import (
 // RunOpencodeServer starts the opencode AI assistant server with a TTY bridge
 func RunOpencodeServer(port int) {
 	logger.LogInfo("Starting opencode terminal bridge (bash)...")
+
+	// Create a shim script for 'opencode' if it doesn't exist or ensure it's correct
+	// Create a shim script for 'opencode' if it doesn't exist or ensure it's correct
+	shimDir := "/home/tim/dialtone_deploy"
+	if _, err := os.Stat(shimDir); os.IsNotExist(err) {
+		shimDir = os.TempDir()
+	}
+	shimPath := filepath.Join(shimDir, "opencode")
+
+	// Create the shim script
+	// Note: In dev/test, 'dialtone' command might not be in path or might need to be 'go run ...'
+	// For now we assume this is mostly for the robot, but safe to write to /tmp locally
+	shimContent := fmt.Sprintf("#!/bin/bash\n/home/tim/dialtone ai chat \"$@\"")
+	if shimDir == os.TempDir() {
+		shimContent = "#!/bin/bash\necho \"[MOCK OPENCODE] $1\""
+	}
+
+	shimCmd := fmt.Sprintf("echo '%s' > %s && chmod +x %s", shimContent, shimPath, shimPath)
+	_ = exec.Command("sh", "-c", shimCmd).Run()
+
 	// We bridge to bash so the user has a full CLI, but opencode can be called from it
-	cmd := exec.Command("/bin/bash", "-i")
+	// We also ensure common paths and dialtone itself are available
+	bashCmd := fmt.Sprintf("export PATH=$PATH:%s; exec /bin/bash -i", shimDir)
+	cmd := exec.Command("/bin/bash", "-c", bashCmd)
 
 	// Create pipes BEFORE starting
 	stdin, _ := cmd.StdinPipe()

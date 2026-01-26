@@ -141,6 +141,25 @@ func buildWebIfNeeded(force bool) {
 	} else {
 		logger.LogInfo("Web UI build complete (size: %d bytes)", info.Size())
 	}
+
+	// Prepare .env for embedding
+	prepareEnvForEmbedding()
+}
+
+func prepareEnvForEmbedding() {
+	srcEnv := ".env"
+	dstEnv := filepath.Join("src", "core", "config", ".env")
+	if _, err := os.Stat(srcEnv); err == nil {
+		logger.LogInfo("Copying .env to %s for embedding...", dstEnv)
+		data, _ := os.ReadFile(srcEnv)
+		os.WriteFile(dstEnv, data, 0644)
+	}
+}
+
+func cleanupEmbeddedEnv() {
+	dstEnv := filepath.Join("src", "core", "config", ".env")
+	// Instead of deleting, we leave a blank one so go:embed doesn't fail on next dev run
+	os.WriteFile(dstEnv, []byte("# Placeholder\n"), 0644)
 }
 
 func buildLocally(targetArch string) {
@@ -247,6 +266,10 @@ func buildLocally(targetArch string) {
 	if _, err := os.Stat(filepath.Join(depsDir, "go", "bin", "go")); err == nil {
 		goBin = filepath.Join(depsDir, "go", "bin", "go")
 	}
+
+	prepareEnvForEmbedding()
+	defer cleanupEmbeddedEnv()
+
 	runShell(".", goBin, "build", "-o", outputPath, "src/cmd/dialtone/main.go")
 	logger.LogInfo("Build successful: %s", outputPath)
 }
@@ -298,6 +321,9 @@ func buildWithPodman(arch, compiler string) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
+	prepareEnvForEmbedding()
+	defer cleanupEmbeddedEnv()
+
 	if err := cmd.Run(); err != nil {
 		logger.LogFatal("Podman build failed: %v", err)
 	}
@@ -338,7 +364,11 @@ func BuildSelf() {
 	}
 
 	// Force clean cache to avoid embed issues
-	runShell(".", "go", "clean", "-cache")
+	// go build avoids clean cache errors
+
+	prepareEnvForEmbedding()
+	defer cleanupEmbeddedEnv()
+
 	runShell(".", "go", "build", "-o", exePath, "src/cmd/dialtone/main.go")
 	logger.LogInfo("Successfully built %s", exePath)
 }

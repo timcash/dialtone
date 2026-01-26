@@ -14,6 +14,7 @@ import (
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/ssh"
 
+	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
@@ -189,6 +190,19 @@ func checkWebUI(url string) error {
 	// Create context
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
+
+	// Capture Console Logs
+	chromedp.ListenTarget(ctx, func(ev any) {
+		if ev, ok := ev.(*runtime.EventConsoleAPICalled); ok {
+			for _, arg := range ev.Args {
+				var val any
+				if len(arg.Value) > 0 {
+					_ = json.Unmarshal(arg.Value, &val)
+				}
+				fmt.Printf("[browser-console] %s: %v\n", ev.Type, val)
+			}
+		}
+	})
 
 	// Create a timeout
 	ctx, cancel = context.WithTimeout(ctx, 15*time.Second)

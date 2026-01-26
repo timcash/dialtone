@@ -23,6 +23,7 @@ import (
 	"dialtone/cli/src/core/config"
 	"dialtone/cli/src/core/logger"
 	ai_app "dialtone/cli/src/plugins/ai/app"
+	ai_cli "dialtone/cli/src/plugins/ai/cli"
 	camera "dialtone/cli/src/plugins/camera/app"
 	mavlink "dialtone/cli/src/plugins/mavlink/app"
 
@@ -56,6 +57,8 @@ func Execute() {
 	switch command {
 	case "start":
 		runStart(args)
+	case "ai":
+		ai_cli.RunAI(args)
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
 		printUsage()
@@ -66,6 +69,7 @@ func printUsage() {
 	fmt.Println("Usage: dialtone <command> [options]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  start         Start the NATS and Web server")
+	fmt.Println("  ai            AI plugin commands (opencode, developer, chat)")
 }
 
 func runStart(args []string) {
@@ -128,7 +132,7 @@ var startTime = time.Now()
 
 // Ensure embed is detected
 //
-//go:embed all:core/web/dist
+//go:embed core/web/dist/*
 var webFS embed.FS
 
 // runWithTailscale starts NATS exposed via Tailscale
