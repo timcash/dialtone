@@ -17,6 +17,7 @@ func init() {
 	test.Register("implement-github-pr-commands", "verify-ticket-plugin", []string{"feature"}, RunGithubPRCommands)
 	test.Register("test-ticket-add", "verify-ticket-plugin", []string{"core"}, RunTicketAdd)
 	test.Register("test-ticket-start", "verify-ticket-plugin", []string{"core"}, RunTicketStart)
+	test.Register("test-ticket-list", "verify-ticket-plugin", []string{"core"}, RunTicketList)
 	test.Register("example-subtask", "verify-ticket-plugin", []string{"example"}, RunExample)
 }
 
@@ -245,5 +246,34 @@ func RunTicketStart() error {
 	}
 
 	fmt.Println("PASS: Ticket start verified successfully (real integration)")
+	return nil
+}
+
+func RunTicketList() error {
+	ticketName := "test-ticket-list-dummy"
+	ticketDir := "tickets/" + ticketName
+
+	// Create dummy ticket manually to avoid full scaffold overhead/logs
+	os.MkdirAll(ticketDir, 0755)
+	os.WriteFile(filepath.Join(ticketDir, "ticket.md"), []byte("# Branch: "+ticketName), 0644)
+	defer os.RemoveAll(ticketDir)
+
+	cmd := exec.Command("./dialtone.sh", "ticket", "list")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("ticket list failed: %v", err)
+	}
+	output := string(out)
+
+	if !strings.Contains(output, ticketName) {
+		return fmt.Errorf("FAIL: 'ticket list' output does not contain local ticket '%s'", ticketName)
+	}
+
+	// Also check if it lists "Remote GitHub Issues" header
+	if !strings.Contains(output, "Remote GitHub Issues") {
+		return fmt.Errorf("FAIL: 'ticket list' missing 'Remote GitHub Issues' section")
+	}
+
+	fmt.Println("PASS: Ticket list verified successfully")
 	return nil
 }
