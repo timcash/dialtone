@@ -24,6 +24,7 @@ func init() {
 	test.Register("test-ticket-subtask-test", "verify-ticket-plugin", []string{"core"}, RunTicketSubtaskTest)
 	test.Register("test-ticket-subtask-done", "verify-ticket-plugin", []string{"core"}, RunTicketSubtaskDone)
 	test.Register("test-ticket-subtask-failed", "verify-ticket-plugin", []string{"core"}, RunTicketSubtaskFailed)
+	test.Register("test-ticket-done", "verify-ticket-plugin", []string{"core"}, RunTicketDone)
 	test.Register("example-subtask", "verify-ticket-plugin", []string{"example"}, RunExample)
 }
 
@@ -612,5 +613,64 @@ func RunTicketSubtaskFailed() error {
 	}
 
 	fmt.Println("PASS: Ticket subtask failed verified successfully")
+	return nil
+}
+
+func RunTicketDone() error {
+	name := "test-ticket-done-dummy"
+	dir := "tickets/" + name
+	os.MkdirAll(dir, 0755)
+	defer os.RemoveAll(dir)
+
+	content := `# Ticket: Dummy
+## SUBTASK: Task A
+- name: task-a
+- status: done
+
+## SUBTASK: Ticket Done
+- name: ticket-done
+- status: todo
+`
+	if err := os.WriteFile(filepath.Join(dir, "ticket.md"), []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to create dummy ticket: %v", err)
+	}
+
+	// 1. Validate failure (git checks)
+	cmd := exec.Command("./dialtone.sh", "ticket", "done", name)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err == nil {
+		return fmt.Errorf("FAIL: 'ticket done' should have failed due to git/progress checks")
+	}
+	if !strings.Contains(output, "has not been updated") && !strings.Contains(output, "Git repository is not clean") {
+		return fmt.Errorf("FAIL: Expected git validation error, got: %s", output)
+	}
+
+	// 2. Validate bypass and progression to push
+	cmd = exec.Command("./dialtone.sh", "ticket", "done", name)
+	cmd.Env = append(os.Environ(), "DIALTONE_DISABLE_GIT_CHECKS=1")
+	out, err = cmd.CombinedOutput()
+	output = string(out)
+
+	// We expect failure at "Pushing latest changes...", or "Failed to push"
+	// because we haven't set up a git remote for this dummy path.
+	// Actually `git push` might fail because no upstream.
+	if !strings.Contains(output, "Failed to push changes") && !strings.Contains(output, "Pushing local changes") {
+		// If it succeeded? Implies git push worked? Unlikely.
+		// If it failed earlier?
+		if strings.Contains(output, "Git repository is not clean") {
+			return fmt.Errorf("FAIL: Bypass didn't work. Output: %s", output)
+		}
+		// If it says "Pushing latest changes" but then fails...
+		// ticket.go: logInfo("Pushing latest changes to origin...")
+		if strings.Contains(output, "Pushing latest changes to origin") {
+			fmt.Println("PASS: Ticket done verified (reached push stage)")
+			return nil
+		}
+		return fmt.Errorf("FAIL: Unexpected output from ticket done bypass: %s", output)
+	}
+
+	fmt.Println("PASS: Ticket done verified (reached push stage)")
 	return nil
 }

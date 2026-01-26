@@ -87,11 +87,11 @@ It also covers the refactoring to move GitHub-specific commands (`create`, `view
 - description: Verify that `dialtone.sh ticket subtask failed [ticket-name] <subtask-name>` updates the status of the subtask to `failed` in `ticket.md`.
 - test-description: Run the command and check the file content for the status change.
 - test-command: `dialtone.sh test ticket verify-ticket-plugin --subtask test-ticket-subtask-failed`
-- status: todo
+- status: done
 
 ## SUBTASK: Test Ticket Done Command
 - name: test-ticket-done
 - description: Verify that `dialtone.sh ticket done <ticket-name>` performs the final verification, git check, and PR update.
 - test-description: Mock the prerequisites (all subtasks done) and verify the command execution flow.
-- test-command: `dialtone.sh test ticket verify-ticket-plugin`
+- test-command: `dialtone.sh test ticket verify-ticket-plugin --subtask test-ticket-done`
 - status: todo
