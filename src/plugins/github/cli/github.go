@@ -62,6 +62,13 @@ func printGithubUsage() {
 	fmt.Println("  issue              List or sync GitHub issues to local tickets")
 	fmt.Println("  check-deploy       Check Vercel deployment status for current branch")
 	fmt.Println("  help               Show this help message")
+
+	fmt.Println("\nPull Request Subcommands:")
+	fmt.Println("  pr create          Create a pull request")
+	fmt.Println("  pr view <id>       View pull request details")
+	fmt.Println("  pr comment <id>    Comment on a pull request")
+	fmt.Println("  pr merge <id>      Merge a pull request")
+	fmt.Println("  pr close <id>      Close a pull request")
 }
 
 // runMerge merges the current pull request
@@ -124,11 +131,19 @@ func runClose(args []string) {
 // runPullRequest handles the pull-request command
 // Migrated from src/dev.go
 func runPullRequest(args []string) {
-	gh := findGH()
 
 	// Check for subcommands
 	if len(args) > 0 {
 		switch args[0] {
+		case "create":
+			runPullRequestCreate(args[1:])
+			return
+		case "view":
+			runPullRequestView(args[1:])
+			return
+		case "comment":
+			runPullRequestComment(args[1:])
+			return
 		case "merge":
 			runMerge(args[1:])
 			return
@@ -147,7 +162,76 @@ func runPullRequest(args []string) {
 				return
 			}
 		}
+	} else {
+		// No args provided, usually implies interactive or flag parsing for create
+		// But if we want consistent dispatch, we can default to create or flags
 	}
+
+	// Fallback to implicit create/update logic (legacy behavior support)
+	runPullRequestCreate(args)
+}
+
+// runCheckDeploy checks the status of the Vercel deployment for the current branch
+func runCheckDeploy(args []string) {
+	logger.LogInfo("Checking Vercel deployment status...")
+
+	// 1. Find Vercel CLI
+	homeDir, _ := os.UserHomeDir()
+	vercelPath := filepath.Join(homeDir, ".dialtone_env", "node", "bin", "vercel")
+	if _, err := os.Stat(vercelPath); os.IsNotExist(err) {
+		if p, err := exec.LookPath("vercel"); err == nil {
+			vercelPath = p
+		} else {
+			logger.LogFatal("Vercel CLI not found. Run 'dialtone install' to install dependencies.")
+		}
+	}
+
+	// 2. Determine web dir
+	webDir := filepath.Join("src", "plugins", "www", "app")
+
+	// 3. Run vercel list
+	// We pass args to allow filtering if the user wants, e.g. dialtone-dev github check-deploy <project>
+	vArgs := append([]string{"list"}, args...)
+
+	cmd := exec.Command(vercelPath, vArgs...)
+	cmd.Dir = webDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	logger.LogInfo("Running: vercel list (in %s)", webDir)
+	if err := cmd.Run(); err != nil {
+		logger.LogFatal("Failed to check deployments: %v", err)
+	}
+}
+
+func runPullRequestView(args []string) {
+	if len(args) < 1 {
+		logger.LogFatal("Usage: github pr view <number>")
+	}
+	gh := findGH()
+	cmd := exec.Command(gh, "pr", "view", args[0])
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		logger.LogFatal("Failed to view pull request: %v", err)
+	}
+}
+
+func runPullRequestComment(args []string) {
+	if len(args) < 2 {
+		logger.LogFatal("Usage: github pr comment <number> <message>")
+	}
+	gh := findGH()
+	cmd := exec.Command(gh, "pr", "comment", args[0], "--body", args[1])
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		logger.LogFatal("Failed to add comment: %v", err)
+	}
+}
+
+func runPullRequestCreate(args []string) {
+	gh := findGH()
 
 	// Parse flags and capture positional arguments
 	var title, body string
@@ -310,45 +394,14 @@ func runPullRequest(args []string) {
 	}
 }
 
-// runCheckDeploy checks the status of the Vercel deployment for the current branch
-func runCheckDeploy(args []string) {
-	logger.LogInfo("Checking Vercel deployment status...")
-
-	// 1. Find Vercel CLI
-	homeDir, _ := os.UserHomeDir()
-	vercelPath := filepath.Join(homeDir, ".dialtone_env", "node", "bin", "vercel")
-	if _, err := os.Stat(vercelPath); os.IsNotExist(err) {
-		if p, err := exec.LookPath("vercel"); err == nil {
-			vercelPath = p
-		} else {
-			logger.LogFatal("Vercel CLI not found. Run 'dialtone install' to install dependencies.")
-		}
-	}
-
-	// 2. Determine web dir
-	webDir := filepath.Join("src", "plugins", "www", "app")
-
-	// 3. Run vercel list
-	// We pass args to allow filtering if the user wants, e.g. dialtone-dev github check-deploy <project>
-	vArgs := append([]string{"list"}, args...)
-
-	cmd := exec.Command(vercelPath, vArgs...)
-	cmd.Dir = webDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	logger.LogInfo("Running: vercel list (in %s)", webDir)
-	if err := cmd.Run(); err != nil {
-		logger.LogFatal("Failed to check deployments: %v", err)
-	}
-}
-
 func runIssue(args []string) {
 	if len(args) == 0 {
 		fmt.Println("Usage: dialtone-dev github issue <command> [options]")
 		fmt.Println("\nCommands:")
 		fmt.Println("  list      List open issues")
+		fmt.Println("  create    Create a new GitHub issue")
 		fmt.Println("  sync      Sync open issues to local tickets")
+
 		fmt.Println("  view      View issue details")
 		fmt.Println("  comment   Add a comment to an issue")
 		fmt.Println("  close     Close specific issue(s)")
@@ -362,6 +415,8 @@ func runIssue(args []string) {
 	switch subcommand {
 	case "list":
 		runIssueList(restArgs)
+	case "create":
+		runIssueCreate(restArgs)
 	case "sync":
 		runIssueSync(restArgs)
 	case "view":
@@ -372,6 +427,16 @@ func runIssue(args []string) {
 		runIssueClose(restArgs)
 	case "close-all":
 		runIssueCloseAll(restArgs)
+	case "help", "-h", "--help":
+		fmt.Println("Usage: dialtone-dev github issue <command> [options]")
+		fmt.Println("\nCommands:")
+		fmt.Println("  list      List open issues")
+		fmt.Println("  create    Create a new GitHub issue")
+		fmt.Println("  sync      Sync open issues to local tickets")
+		fmt.Println("  view      View issue details")
+		fmt.Println("  comment   Add a comment to an issue")
+		fmt.Println("  close     Close specific issue(s)")
+		fmt.Println("  close-all Close all open issues")
 	default:
 		fmt.Printf("Unknown issue command: %s\n", subcommand)
 		os.Exit(1)
@@ -398,6 +463,25 @@ func runIssueList(args []string) {
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		logger.LogFatal("Failed to list issues: %v", err)
+	}
+}
+
+func runIssueCreate(args []string) {
+	gh := findGH()
+	logger.LogInfo("Creating GitHub issue...")
+
+	cmdArgs := []string{"issue", "create"}
+	if len(args) > 0 {
+		cmdArgs = append(cmdArgs, args...)
+	}
+
+	cmd := exec.Command(gh, cmdArgs...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin // Interactive mode if needed
+
+	if err := cmd.Run(); err != nil {
+		logger.LogFatal("Failed to create issue: %v", err)
 	}
 }
 

@@ -31,10 +31,7 @@ func Run(args []string) {
 		fmt.Println("  validate <name>    Validate ticket.md format")
 		fmt.Println("  list               List local tickets and GitHub issues")
 		fmt.Println("  subtask <subcmd>   Manage subtasks in current ticket")
-		fmt.Println("  create             Create a new GitHub issue")
-		fmt.Println("  view <id>          View GitHub issue details")
-		fmt.Println("  comment <id> <msg> Add a comment to a GitHub issue")
-		fmt.Println("  close <id>         Close a GitHub issue")
+
 		return
 	}
 
@@ -57,9 +54,7 @@ func Run(args []string) {
 	case "help", "-h", "--help":
 		Run([]string{})
 		return
-	// Delegate GitHub commands to the github plugin
-	case "create", "comment", "view", "close":
-		runTicketGhCommand(subcommand, subArgs)
+
 	default:
 		fmt.Printf("Unknown ticket subcommand: %s\n", subcommand)
 		Run([]string{})
@@ -94,11 +89,6 @@ func RunList(args []string) {
 	fmt.Println("\nRemote GitHub Issues:")
 	fmt.Println("---------------------------------------------------")
 	github_cli.RunGithub([]string{"issue", "list"})
-}
-
-func runTicketGhCommand(subcommand string, subArgs []string) {
-	// Re-route to github plugin's issue runner
-	github_cli.RunGithub(append([]string{"issue", subcommand}, subArgs...))
 }
 
 // RunAdd handles 'ticket add <ticket-name>'
