@@ -5,6 +5,7 @@ import (
 	"dialtone/cli/src/core/logger"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -30,10 +31,19 @@ func RunProvision(args []string) {
 		logger.LogFatal("Error: --api-key flag or TS_API_KEY environment variable is required.")
 	}
 
-	provisionKey(token)
+	key, err := ProvisionKey(token, true)
+	if err != nil {
+		logger.LogFatal("Failed to provision key: %v", err)
+	}
+
+	logger.LogInfo("Successfully generated key: %s...", key[:10])
+	updateEnv("TS_AUTHKEY", key)
+	logger.LogInfo("Updated .env with new TS_AUTHKEY.")
 }
 
-func provisionKey(token string) {
+// ProvisionKey generates a new auth key using the Tailscale API.
+// If updateEnvFile is true, it also updates the local .env file.
+func ProvisionKey(token string, updateEnvFile bool) (string, error) {
 	logger.LogInfo("Generating new Tailscale Auth Key...")
 
 	url := "https://api.tailscale.com/api/v2/tailnet/-/keys"
@@ -54,7 +64,7 @@ func provisionKey(token string) {
 	jsonPayload, _ := json.Marshal(payload)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
 	if err != nil {
-		logger.LogFatal("Failed to create request: %v", err)
+		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.SetBasicAuth(token, "")
@@ -62,23 +72,23 @@ func provisionKey(token string) {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		logger.LogFatal("API request failed: %v", err)
+		return "", fmt.Errorf("API request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
-		logger.LogFatal("API error (%d): %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("API error (%d): %s", resp.StatusCode, string(body))
 	}
 
 	var result struct {
 		Key string `json:"key"`
 	}
-	_ = json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
 
-	logger.LogInfo("Successfully generated key: %s...", result.Key[:10])
-	updateEnv("TS_AUTHKEY", result.Key)
-	logger.LogInfo("Updated .env with new TS_AUTHKEY.")
+	return result.Key, nil
 }
 
 func updateEnv(key, value string) {

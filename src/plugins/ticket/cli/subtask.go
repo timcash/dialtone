@@ -27,11 +27,31 @@ func RunSubtask(args []string) {
 	subcmd := args[0]
 	subArgs := args[1:]
 
-	if len(subArgs) < 1 {
-		logFatal("Usage: ticket subtask %s <ticket-name>", subcmd)
+	ticketName := ""
+	subtaskName := ""
+
+	if len(subArgs) >= 1 {
+		// Might be <ticket-name> or <subtask-name>
+		// Use a simple heuristic: if it contains a ticket name, use it.
+		// For now, let's assume if it exists in tickets/, it's a ticket.
+		val := GetTicketName(subArgs[0])
+		if _, err := os.Stat(filepath.Join("tickets", val)); err == nil {
+			ticketName = val
+			if len(subArgs) >= 2 {
+				subtaskName = subArgs[1]
+			}
+		} else {
+			// Try as subtask name with current branch
+			ticketName = GetCurrentBranch()
+			subtaskName = val
+		}
+	} else {
+		ticketName = GetCurrentBranch()
 	}
 
-	ticketName := GetTicketName(subArgs[0])
+	if ticketName == "" {
+		logFatal("Usage: ticket subtask <list|next|test|done> [ticket-name] [subtask-name]\n(You must specify a ticket name or be on a feature branch)")
+	}
 
 	switch subcmd {
 	case "list":
@@ -39,15 +59,15 @@ func RunSubtask(args []string) {
 	case "next":
 		RunSubtaskNext(ticketName)
 	case "test":
-		if len(subArgs) < 2 {
-			logFatal("Usage: ticket subtask test <ticket-name> <subtask-name>")
+		if subtaskName == "" {
+			logFatal("Usage: ticket subtask test [ticket-name] <subtask-name>")
 		}
-		RunSubtaskTest(ticketName, subArgs[1])
+		RunSubtaskTest(ticketName, subtaskName)
 	case "done":
-		if len(subArgs) < 2 {
-			logFatal("Usage: ticket subtask done <ticket-name> <subtask-name>")
+		if subtaskName == "" {
+			logFatal("Usage: ticket subtask done [ticket-name] <subtask-name>")
 		}
-		RunSubtaskDone(ticketName, subArgs[1])
+		RunSubtaskDone(ticketName, subtaskName)
 	default:
 		logFatal("Unknown subtask command: %s", subcmd)
 	}

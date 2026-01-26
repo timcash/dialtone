@@ -355,3 +355,48 @@ cmdInput?.addEventListener('keydown', (e) => {
     }
   }
 });
+// --- 4. VPN Mode Logic ---
+function initVPNMode() {
+  const path = window.location.pathname;
+  if (path === '/vpn') {
+    // Hide Main Dashboard
+    const grid = document.querySelector('.grid-container') as HTMLElement;
+    if (grid) grid.style.display = 'none';
+
+    // Show VPN Container
+    const vpnContainer = document.getElementById('vpn-mode-container');
+    if (vpnContainer) vpnContainer.style.display = 'flex';
+
+    // Start Polling Status
+    pollVPNStatus();
+  }
+}
+
+function pollVPNStatus() {
+  fetch('/api/status')
+    .then(res => res.json())
+    .then(data => {
+      // Update VPN UI
+      const els = {
+        hostname: document.getElementById('vpn-hostname'),
+        ip: document.getElementById('vpn-ip'),
+        stateDir: document.getElementById('vpn-state-dir'),
+        platform: document.getElementById('vpn-platform'),
+        uptime: document.getElementById('vpn-uptime')
+      };
+
+      if (els.hostname) els.hostname.innerText = data.hostname || 'Unknown';
+      if (els.ip) els.ip.innerText = data.tailscale_ips || 'None';
+      // stateDir not currently exposed in /api/status, adding placeholder or modifying API (optional)
+      // platform and uptime are in /api/status
+      if (els.platform) els.platform.innerText = `${data.platform}/${data.arch}`;
+      if (els.uptime) els.uptime.innerText = data.uptime || '--';
+    })
+    .catch(err => console.error("VPN Status Poll Error:", err))
+    .finally(() => {
+      setTimeout(pollVPNStatus, 2000);
+    });
+}
+
+// Initialize
+initVPNMode();

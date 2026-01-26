@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"dialtone/cli/src/core/logger"
+	_ "dialtone/cli/src/core/test"
 	core_test "dialtone/cli/src/core/test"
 	ai_test "dialtone/cli/src/plugins/ai/test"
 	diagnostic_test "dialtone/cli/src/plugins/diagnostic/test"
@@ -15,6 +16,7 @@ import (
 	ticket_test "dialtone/cli/src/plugins/ticket/test"
 	ui_test "dialtone/cli/src/plugins/ui/test"
 
+	_ "dialtone/cli/tickets/mock-data-support/test"
 	_ "dialtone/cli/tickets/test-test-tags/test"
 )
 

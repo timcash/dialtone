@@ -41,6 +41,8 @@ func ExecuteDev() {
 	args := os.Args[2:]
 
 	switch command {
+	case "start":
+		runStart(args)
 	case "build":
 		build_cli.RunBuild(args)
 	case "deploy":
@@ -48,14 +50,8 @@ func ExecuteDev() {
 	case "ssh":
 		ssh.RunSSH(args)
 	case "vpn":
-		// User requested: dialtone vpn ...
-		// run provision logic or subcommands
-		vpn_cli.RunProvision(args)
-	case "provision":
-		// Keep legacy provision command mapped to vpn plugin for now?
-		// Or remove it? User said "make ... a cli sub command on a plugin called vpn".
-		// I will redirect provision to vpn for backward compat or just remove it.
-		// Let's redirect it.
+		runVPN(args)
+	case "vpn-provision", "provision":
 		vpn_cli.RunProvision(args)
 	case "logs":
 		logs_cli.RunLogs(args)
@@ -111,6 +107,7 @@ func ExecuteDev() {
 func printDevUsage() {
 	fmt.Println("Usage: dialtone-dev <command> [options]")
 	fmt.Println("\nCommands:")
+	fmt.Println("  start         Start the NATS and Web server")
 	fmt.Println("  install [path] Install dependencies (--linux-wsl for WSL, --macos-arm for Apple Silicon)")
 	fmt.Println("  build         Build web UI and binary (--local, --full, --remote, --podman, --linux-arm, --linux-arm64)")
 	fmt.Println("  deploy        Deploy to remote robot")
