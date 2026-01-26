@@ -169,7 +169,7 @@ func checkWebUI(url string) error {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.NoFirstRun,
 		chromedp.NoDefaultBrowserCheck,
-		chromedp.Headless,
+		// chromedp.Headless, // Removed for visual verification
 	)
 
 	// If on WSL, try to find Windows Chrome if Linux Chrome is missing

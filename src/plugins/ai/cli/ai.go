@@ -3,7 +3,6 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,12 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"dialtone/cli/src/core"
 	"dialtone/cli/src/core/logger"
+	ai_app "dialtone/cli/src/plugins/ai/app"
 	github_cli "dialtone/cli/src/plugins/github/cli"
 	test_cli "dialtone/cli/src/plugins/test/cli"
-
-	"github.com/nats-io/nats.go"
 )
 
 // RunAI is the entry point for the AI plugin
@@ -80,21 +77,8 @@ func RunOpencode(args []string) {
 	subcommand := args[0]
 	switch subcommand {
 	case "start":
-		logger.LogInfo("Starting opencode terminal bridge (bash)...")
-		cmd := exec.Command("/bin/bash", "-i")
-
-		// Create pipes BEFORE starting
-		stdin, _ := cmd.StdinPipe()
-		stdout, _ := cmd.StdoutPipe()
-		stderr, _ := cmd.StderrPipe()
-
-		if err := cmd.Start(); err != nil {
-			logger.LogFatal("Failed to start bridge shell: %v", err)
-		}
-
-		// Start NATS Bridge with existing pipes
-		go bridgeOpencodeToNATS(cmd, stdin, stdout, stderr)
-		logger.LogInfo("Terminal bridge started (PID: %d).", cmd.Process.Pid)
+		logger.LogInfo("Starting opencode server...")
+		ai_app.RunOpencodeServer(3000)
 
 	case "stop":
 		logger.LogInfo("Stopping opencode server...")
@@ -349,64 +333,4 @@ func RunSubagent(args []string) {
 		cmd.Wait()
 		logger.LogInfo("Subagent completed.")
 	}
-}
-
-func bridgeOpencodeToNATS(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.ReadCloser, stderr io.ReadCloser) {
-	natsURL := nats.DefaultURL // This is "nats://127.0.0.1:4222"
-	logger.LogInfo("AI Bridge: Connecting to NATS at %s...", natsURL)
-	nc, err := core.NewNatsClient(natsURL)
-	if err != nil {
-		logger.LogInfo("AI Bridge: Failed to connect to NATS: %v", err)
-		return
-	}
-	defer nc.Close()
-	logger.LogInfo("AI Bridge: NATS Connected.")
-
-	// Stream stdout to NATS
-	go func() {
-		buf := make([]byte, 2048)
-		for {
-			n, err := stdout.Read(buf)
-			if n > 0 {
-				logger.LogInfo("AI Bridge: STDOUT %d bytes", n)
-				nc.Publish("ai.opencode.output", buf[:n])
-			}
-			if err != nil {
-				logger.LogInfo("AI Bridge: STDOUT End: %v", err)
-				return
-			}
-		}
-	}()
-
-	// Stream stderr to NATS
-	go func() {
-		buf := make([]byte, 2048)
-		for {
-			n, err := stderr.Read(buf)
-			if n > 0 {
-				logger.LogInfo("AI Bridge: STDERR %d bytes", n)
-				nc.Publish("ai.opencode.output", buf[:n])
-			}
-			if err != nil {
-				logger.LogInfo("AI Bridge: STDERR End: %v", err)
-				return
-			}
-		}
-	}()
-
-	// Stream NATS to stdin
-	nc.Subscribe("ai.opencode.input", func(m *nats.Msg) {
-		logger.LogInfo("AI Bridge: Received INPUT via NATS: %s", string(m.Data))
-		// Manual echo for terminal visibility (required for diagnostic loopback)
-		nc.Publish("ai.opencode.output", []byte("\x1b[32m[NATS-ECHO] \x1b[0m"))
-		nc.Publish("ai.opencode.output", m.Data)
-		nc.Publish("ai.opencode.output", []byte("\r\n"))
-
-		stdin.Write(m.Data)
-		stdin.Write([]byte("\n"))
-	})
-
-	logger.LogInfo("AI Bridge: Waiting for process to exit...")
-	cmd.Wait()
-	logger.LogInfo("AI Bridge: Process exited.")
 }

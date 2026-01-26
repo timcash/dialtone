@@ -129,6 +129,7 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 	}
 
 	tsAuthKey := os.Getenv("TS_AUTHKEY")
+	opencodeKey := os.Getenv("OPENCODE_API_KEY")
 	ephemeralFlag := ""
 	if ephemeral {
 		ephemeralFlag = "-ephemeral"
@@ -140,13 +141,18 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 		mavlinkFlag = fmt.Sprintf("-mavlink %s", mavlinkEndpoint)
 	}
 
-	startCmd := fmt.Sprintf("rm -rf ~/dialtone && cp %s ~/dialtone && chmod +x ~/dialtone && nohup sh -c 'TS_AUTHKEY=%s ~/dialtone start -hostname %s %s %s' > ~/nats.log 2>&1 < /dev/null &", remoteBinaryPath, tsAuthKey, hostnameParam, ephemeralFlag, mavlinkFlag)
+	// Always start opencode for now as requested
+	opencodeFlag := "-opencode"
+
+	startCmd := fmt.Sprintf("rm -rf ~/dialtone && cp %s ~/dialtone && chmod +x ~/dialtone && nohup sh -c 'TS_AUTHKEY=%s OPENCODE_API_KEY=%s ~/dialtone start -hostname %s %s %s %s' > ~/nats.log 2>&1 < /dev/null &", remoteBinaryPath, tsAuthKey, opencodeKey, hostnameParam, ephemeralFlag, mavlinkFlag, opencodeFlag)
 
 	if err := ssh.RunSSHCommandNoWait(client, startCmd); err != nil {
 		logger.LogFatal("Failed to start: %v", err)
 	}
 
 	logger.LogInfo("Deployment complete!")
+	logger.LogInfo("Robot Dashboard: http://%s", hostnameParam)
+	logger.LogInfo("Opencode Web UI: http://%s:3000", hostnameParam)
 	logger.LogInfo("Run './dialtone.sh logs --remote' to verify startup.")
 }
 

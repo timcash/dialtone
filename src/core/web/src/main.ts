@@ -153,6 +153,10 @@ fetch('/api/init')
     if (els.version && data.version) {
       els.version.innerText = data.version;
     }
+    const opencodeLink = document.getElementById('opencode-link') as HTMLAnchorElement;
+    if (opencodeLink) {
+      opencodeLink.href = `http://${location.hostname}:3000`;
+    }
   })
   .catch(err => console.error("Failed to fetch init:", err));
 
@@ -190,8 +194,10 @@ async function connectNATS() {
     // Subscribe to opencode output specifically if it's not JSON
     const opencodeSub = nc.subscribe("ai.opencode.output");
     (async () => {
+      console.log("Subscribed to ai.opencode.output");
       for await (const m of opencodeSub) {
         const text = new TextDecoder().decode(m.data);
+        console.log("RECEIVED terminal output:", text);
         term.write(text);
       }
     })();
