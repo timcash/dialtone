@@ -54,6 +54,10 @@ func Run(args []string) {
 		RunSubtask(subArgs)
 	case "list":
 		RunList(subArgs)
+	case "help", "-h", "--help":
+		Run([]string{})
+		return
+	// Delegate GitHub commands to the github plugin
 	case "create", "comment", "view", "close":
 		runTicketGhCommand(subcommand, subArgs)
 	default:
