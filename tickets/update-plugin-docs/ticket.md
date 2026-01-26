@@ -30,4 +30,4 @@ Update README documentation for ticket and github plugins to move descriptive te
 - description: run the ticket cli to verify all steps to complete the ticket, git is in the correct state and a pull request is created and ready for review. if it comepletes it should mark the final subtask as done
 - test-description: vailidates all ticket subtasks are done
 - test-command: `./dialtone.sh ticket done update-plugin-docs`
-- status: todo
+- status: done
