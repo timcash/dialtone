@@ -1,2 +1,32 @@
-Progress log for verify-ticket-plugin
+# Progress Verification: verify-ticket-plugin
 
+## Completed Subtasks
+- [x] move-github-commands
+      - Delegated `create`, `view`, `comment`, `close` to `github` plugin.
+      - Verified `ticket --help` does not show them.
+      - Verified `github issue --help` does show them.
+- [x] verify-ticket-help-sync
+      - Verified `ticket --help` matches `README.md`.
+- [x] implement-github-pr-commands
+      - Added `pr create`, `pr view`, `pr comment` logic.
+      - Verified `github pr --help` shows them.
+- [x] test-ticket-add
+      - Verified `ticket add` scaffolds files correctly.
+- [x] test-ticket-start
+      - Verified `ticket start` creates Git branch and PR (integration test).
+- [x] test-ticket-list
+      - Verified `ticket list` shows local tickets and "Remote GitHub Issues" header.
+
+## Current Status
+- Fixed infinite loop in test runner (missing import for ticket test package).
+- Restored `ticket.md` format to match template.
+- Integration tests are destructive to uncommitted changes (beware).
+
+## Next Steps
+- Implement `test-ticket-validate`
+- Implement `test-ticket-subtask-list`
+- Implement `test-ticket-subtask-next`
+- Implement `test-ticket-subtask-test`
+- Implement `test-ticket-subtask-done`
+- Implement `test-ticket-subtask-failed`
+- Implement `test-ticket-done`

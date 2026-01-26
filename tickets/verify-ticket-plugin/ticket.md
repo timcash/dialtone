@@ -45,7 +45,7 @@ It also covers the refactoring to move GitHub-specific commands (`create`, `view
 - description: Verify that `dialtone.sh ticket list` lists the current local tickets and any open remote GitHub issues.
 - test-description: Create a dummy ticket and verify it appears in the output of `ticket list`.
 - test-command: `dialtone.sh test ticket verify-ticket-plugin --subtask test-ticket-list`
-- status: todo
+- status: done
 
 ## SUBTASK: Test Ticket Validate Command
 - name: test-ticket-validate
