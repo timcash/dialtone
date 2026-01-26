@@ -10,11 +10,18 @@ import (
 )
 
 // CleanupPort attempts to kill any process listening on the specified port.
-// This is primarily used to clear stale Chrome/Chromium debug sessions.
 func CleanupPort(port int) error {
-	if runtime.GOOS == "linux" {
-		// On WSL/Linux, we might need to kill Windows processes if we're using the Windows host Chrome
-		// We'll try to find the PID using netstat via cmd.exe if on WSL
+	switch runtime.GOOS {
+	case "darwin":
+		// macOS: Use lsof to find and kill the process
+		cmd := exec.Command("lsof", "-ti", fmt.Sprintf(":%d", port))
+		out, _ := cmd.Output()
+		pids := strings.Fields(string(out))
+		for _, pid := range pids {
+			fmt.Printf("Cleaning up stale process on port %d (PID: %s)...\n", port, pid)
+			exec.Command("kill", "-9", pid).Run()
+		}
+	case "linux":
 		if isWSL() {
 			cmd := exec.Command("cmd.exe", "/c", fmt.Sprintf("netstat -ano | findstr :%d", port))
 			out, _ := cmd.CombinedOutput()
@@ -30,11 +37,41 @@ func CleanupPort(port int) error {
 				}
 			}
 		} else {
-			// Native Linux (fuser or lsof)
 			exec.Command("fuser", "-k", fmt.Sprintf("%d/tcp", port)).Run()
 		}
 	}
 	return nil
+}
+
+// KillProcessesByName kills all processes with the given name exactly.
+func KillProcessesByName(name string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin", "linux":
+		// Match exact name only, no -f (full command line) to avoid accidental kills
+		cmd = exec.Command("pkill", "-x", name)
+	case "windows":
+		cmd = exec.Command("taskkill", "/F", "/IM", name+".exe")
+	default:
+		return fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+	}
+	return cmd.Run()
+}
+
+// KillProcessesByPattern kills all processes matching a pattern in their full command line.
+// USE WITH CAUTION.
+func KillProcessesByPattern(pattern string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin", "linux":
+		cmd = exec.Command("pkill", "-9", "-f", pattern)
+	case "windows":
+		// No direct equivalent for -f in taskkill, but we can use wmic or tasklist pipe
+		return fmt.Errorf("KillProcessesByPattern not implemented for Windows")
+	default:
+		return fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+	}
+	return cmd.Run()
 }
 
 func isWSL() bool {
@@ -43,6 +80,27 @@ func isWSL() bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(string(data)), "microsoft")
+}
+
+// GetChildPIDs returns a list of PIDs that are children of the given parent PID.
+func GetChildPIDs(parentPID int) ([]int, error) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin", "linux":
+		cmd = exec.Command("pgrep", "-P", fmt.Sprintf("%d", parentPID))
+	default:
+		return nil, nil // Not implemented for Windows yet
+	}
+	out, _ := cmd.Output()
+	var pids []int
+	for _, field := range strings.Fields(string(out)) {
+		var pid int
+		fmt.Sscanf(field, "%d", &pid)
+		if pid > 0 {
+			pids = append(pids, pid)
+		}
+	}
+	return pids, nil
 }
 
 // FindChromePath looks for Chrome/Chromium in common locations based on the OS.

@@ -10,7 +10,15 @@ import (
 	"time"
 )
 
+var logFile *os.File
+
 func init() {
+	var err error
+	logFile, err = os.OpenFile("dialtone.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Printf("Warning: Failed to open dialtone.log: %v\n", err)
+	}
+
 	RedirectStandardLogger()
 }
 
@@ -54,7 +62,11 @@ func LogMsgWithDepth(depth int, level string, format string, args ...interface{}
 	}
 
 	msg := fmt.Sprintf(format, args...)
-	fmt.Printf("[%s | %s | %s] %s\n", timestamp, level, details, msg)
+	out := fmt.Sprintf("[%s | %s | %s] %s\n", timestamp, level, details, msg)
+	fmt.Print(out)
+	if logFile != nil {
+		logFile.WriteString(out)
+	}
 }
 
 // LogInfo logs an informational message
