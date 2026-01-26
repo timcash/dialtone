@@ -296,3 +296,63 @@ h3 {
   border-color: #555;
   color: #888;
 }
+/* VPN Mode Styles */
+.vpn-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100vw;
+  height: 100vh;
+  background: radial-gradient(circle at center, #1f2833 0%, #0b0c10 100%);
+  z-index: 9999;
+}
+
+.vpn-card {
+  background: rgba(11, 12, 16, 0.9);
+  border: 1px solid #45a29e;
+  border-radius: 4px;
+  padding: 40px;
+  width: 500px;
+  box-shadow: 0 0 20px rgba(102, 252, 241, 0.1);
+}
+
+.vpn-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 2px solid #45a29e;
+  padding-bottom: 15px;
+  margin-bottom: 30px;
+}
+
+.vpn-header h2 {
+  margin: 0;
+  color: #66fcf1;
+  font-family: 'Orbitron', monospace;
+  letter-spacing: 2px;
+}
+
+.vpn-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 15px;
+  font-size: 1.1rem;
+}
+
+.vpn-row .label {
+  color: #c5c6c7;
+  opacity: 0.8;
+}
+
+.vpn-row .value {
+  color: #66fcf1;
+}
+
+.vpn-footer {
+  margin-top: 40px;
+  text-align: center;
+  font-size: 0.9rem;
+  opacity: 0.6;
+  border-top: 1px solid #1f2833;
+  padding-top: 20px;
+}

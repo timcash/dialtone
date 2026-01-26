@@ -21,7 +21,11 @@ func logFatal(format string, args ...interface{}) {
 // RunAdd handles 'ticket add <ticket-name>'
 func RunAdd(args []string) {
 	if len(args) < 1 {
-		logFatal("Usage: ticket add <ticket-name>")
+		ticketName := GetCurrentBranch()
+		if ticketName == "" {
+			logFatal("Usage: ticket add <ticket-name> (or run from a feature branch)")
+		}
+		args = []string{ticketName}
 	}
 	ticketName := args[0]
 	ScaffoldTicket(ticketName)
@@ -157,7 +161,11 @@ func ScaffoldTicket(ticketName string) {
 // RunDone handles 'ticket done <ticket-name>'
 func RunDone(args []string) {
 	if len(args) < 1 {
-		logFatal("Usage: ticket done <ticket-name>")
+		ticketName := GetCurrentBranch()
+		if ticketName == "" {
+			logFatal("Usage: ticket done <ticket-name> (or run from a feature branch)")
+		}
+		args = []string{ticketName}
 	}
 	ticketName := args[0]
 
@@ -257,6 +265,20 @@ func GetTicketName(arg string) string {
 		}
 	}
 	return arg
+}
+
+// GetCurrentBranch returns the name of the current git branch, or empty if on main/master or error
+func GetCurrentBranch() string {
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	name := strings.TrimSpace(string(output))
+	if name == "main" || name == "master" || name == "HEAD" || name == "" {
+		return ""
+	}
+	return name
 }
 
 func createTestTemplates(testDir, ticketName string) {
