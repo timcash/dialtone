@@ -23,4 +23,4 @@
 - description: finish the ticket
 - test-description: run `dialtone.sh ticket done ticket-validation-command`
 - test-command: `./dialtone.sh ticket done ticket-validation-command`
-- status: todo
+- status: done
