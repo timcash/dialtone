@@ -18,6 +18,7 @@ import (
 
 	_ "dialtone/cli/tickets/mock-data-support/test"
 	_ "dialtone/cli/tickets/test-test-tags/test"
+	_ "dialtone/cli/tickets/verify-ticket-plugin/test"
 )
 
 // RunTest handles the 'test' command
@@ -144,7 +145,33 @@ func runTicketTest(ticketName, subtaskName string, showList bool) {
 	}
 
 	if subtaskName != "" {
-		logger.LogInfo("Running test for ticket %s, subtask %s...", ticketName, subtaskName)
+		// 1. Check if it's a registered Go test first
+		found := false
+		registry := core_test.GetRegistry()
+		logger.LogInfo("Debugging Registry: Found %d tests", len(registry))
+		for _, t := range registry {
+			logger.LogInfo("  - [%s] %s", t.TicketName, t.Name) // verbose, but needed if count > 0
+			if t.TicketName == ticketName && t.Name == subtaskName {
+				found = true
+				if showList {
+					logger.LogInfo("Would run registered test: %s", t.Name)
+					return
+				}
+				logger.LogInfo("Running registered test: %s...", t.Name)
+				if err := t.Fn(); err != nil {
+					logger.LogFatal("Ticket test %s failed: %v", t.Name, err)
+				}
+				logger.LogInfo("Test passed!")
+				return
+			}
+		}
+
+		if found {
+			return
+		}
+
+		// 2. If not found in registry, try delegation to ticket subtask command
+		logger.LogInfo("Subtask test not found in registry. Delegating to ticket subtask test command... (%s, %s)", ticketName, subtaskName)
 		cmd := exec.Command("./dialtone.sh", "ticket", "subtask", "test", ticketName, subtaskName)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr

@@ -51,34 +51,22 @@ The `ticket` plugin delegates several commands to the `github` plugin for seamle
 
 Subtasks are defined in the `tickets/<ticket-name>/ticket.md` file. Use the following commands to manage them:
 
-### `ticket subtask list [ticket-name]`
+### `ticket subtask` Commands
 ```bash
-# Lists all subtasks and their current status (`todo`, `progress`, or `done`).
+# Lists all subtasks and their current status (`todo`, `progress`, `done`, or `failed`).
 ./dialtone.sh ticket subtask list
-```
 
-### `ticket subtask next [ticket-name]`
-```bash
 # Displays the details of the next pending subtask.
 ./dialtone.sh ticket subtask next
-```
 
-### `ticket subtask test [ticket-name] <subtask-name>`
-```bash
 # Runs the automated `test-command` defined for the specified subtask.
-./dialtone.sh ticket subtask test my-subtask
-```
+./dialtone.sh ticket subtask test [ticket-name] <subtask-name>
 
-### `ticket subtask done [ticket-name] <subtask-name>`
-```bash
 # Updates the status of the specified subtask to `done` in the `ticket.md` file.
-./dialtone.sh ticket subtask done my-subtask
-```
+./dialtone.sh ticket subtask done [ticket-name] <subtask-name>
 
-### `ticket subtask failed [ticket-name] <subtask-name>`
-```bash
 # Updates the status of the specified subtask to `failed` in the `ticket.md` file.
-./dialtone.sh ticket subtask failed my-subtask
+./dialtone.sh ticket subtask failed [ticket-name] <subtask-name>
 ```
 
 ## Ticket Subtask Format
@@ -91,7 +79,7 @@ A `ticket.md` file is a collection of subtasks. Each subtask must follow this ex
 - description: Concise paragraph guiding the implementation.
 - test-description: How the change should be verified.
 - test-command: `dialtone.sh <command-to-run-test>`
-- status: todo | progress | done
+- status: todo | progress | done | failed
 ```
 
 ### TDD & Subtask Workflow
