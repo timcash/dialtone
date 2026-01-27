@@ -1,24 +1,32 @@
 package test
 
 import (
-	"fmt"
-	"dialtone/cli/src/core/test"
 	"dialtone/cli/src/core/logger"
+	"dialtone/cli/src/core/test"
+	"fmt"
+	"os/exec"
 )
 
 func init() {
-	// Register subtask tests here: test.Register("<subtask-name>", "<ticket-name>", []string{"<tag1>"}, Run<SubtaskName>)
-	test.Register("example-subtask", "remove-geminikey-usage", []string{"example"}, RunExample)
+	test.Register("verify-removal", "remove-geminikey-usage", []string{"cleanup"}, RunVerifyRemoval)
 }
 
 // RunAll is the standard entry point required by project rules.
-// It uses the registry to find and run all tests for this ticket.
 func RunAll() error {
 	logger.LogInfo("Running remove-geminikey-usage suite...")
 	return test.RunTicket("remove-geminikey-usage")
 }
 
-func RunExample() error {
-	fmt.Println("PASS: [example] Subtask logic verified")
+func RunVerifyRemoval() error {
+	logger.LogInfo("Checking for 'geminiKey' in src/plugins/ai/cli/...")
+
+	// We'll use grep to find any occurrences
+	out, err := exec.Command("grep", "-r", "geminiKey", "src/plugins/ai/cli/").CombinedOutput()
+	if err == nil {
+		// If grep returns 0, it found something, which is a failure
+		return fmt.Errorf("FAIL: Found 'geminiKey' in source files:\n%s", string(out))
+	}
+
+	logger.LogInfo("PASS: No 'geminiKey' occurrences found.")
 	return nil
 }
