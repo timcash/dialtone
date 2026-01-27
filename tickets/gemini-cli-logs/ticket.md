@@ -18,7 +18,7 @@ Capture output from the `gemini` CLI command into the main `dialtone.log` file s
 - description: Modify `src/plugins/ai/cli/gemini.go` to use `io.Pipe` and `io.MultiWriter` to capture stdout/stderr and send to `logger`.
 - test-description: Run a gemini command and grep the log file for the output.
 - test-command: `./dialtone.sh ai --gemini "hello" && grep "hello" dialtone.log`
-- status: todo
+- status: done
 
 ## SUBTASK: Enable verbose tool logging
 - name: enable-debug-logs
