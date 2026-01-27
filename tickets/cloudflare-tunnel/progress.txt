@@ -1,2 +1,4 @@
 Progress log for cloudflare-tunnel
 
+- Implementing platform-specific cloudflared installation in install.go.
+- Updated plugin and ticket tests to verify binary presence.
