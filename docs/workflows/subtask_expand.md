@@ -155,6 +155,23 @@ After editing, validate the ticket file so another agent can pick it up cleanly:
 ./dialtone.sh ticket validate
 ```
 
+## Step 9: Report Progress
+After each subtask expansion or plan update, ALWAYS report the current status of all subtasks to the USER.
+```bash
+./dialtone.sh ticket subtask list
+```
+**Output Example:**
+```bash
+Subtasks for <ticket-name>:
+---------------------------------------------------
+[x] subtask-1 (done)
+[/] subtask-2 (progress)
+[ ] subtask-3 (todo)
+[!] subtask-4 (failed)
+---------------------------------------------------
+```
+
+
 ## Notes
 
 - This is a **planning workflow**—you are improving the plan, not executing it
