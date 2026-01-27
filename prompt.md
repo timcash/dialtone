@@ -35,3 +35,18 @@ the goal of this workflow is to get issues into `ticket` ready format. That mean
 3. each subtask is not too large and can be done with a small code change
 
 expand on these ideas now
+
+# ticket-format-updates
+add a new ticket about updating all documentation to show ALL tests commands must use the following formats
+
+
+# replace progress.txt with `dialtone.sh ticket next`
+1. remove progress.txt from the repo docs and all code
+2. update all workflows to mention that using `dialtone.sh ticket next` for each subtask is mandatory
+3. `dialtone.sh ticket next` runs all current ticket tests making the ticket.md the source of truth for testings
+3. `dialtone.sh ticket next` validates the ticket and prints any errors
+4. `dialtone.sh ticket next` prints the next subtask to work on
+5. `dialtone.sh ticket next` marks the previous subtask as done
+6. `dialtone.sh ticket next` is the central building block for all ticket workflows
+7. calling `dialtone.sh ticket next` on main branch prints an error and instrucks LLM agents to ask the user for the next ticket.
+

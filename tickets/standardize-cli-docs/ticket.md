@@ -39,7 +39,7 @@ Standardize CLI documentation and help commands across the project.
 - description: run the ticket cli to verify all steps to complete the ticket
 - test-description: validates all ticket subtasks are done
 - test-command: `dialtone.sh ticket done standardize-cli-docs`
-- status: todo
+- status: done
 
 ## Collaborative Notes
 - Context: `[src/plugins/ticket/cli/ticket.go](file:///Users/tim/code/dialtone/src/plugins/ticket/cli/ticket.go)`, `[src/plugins/github/cli/github.go](file:///Users/tim/code/dialtone/src/plugins/github/cli/github.go)`
