@@ -7,3 +7,5 @@ Progress log for cloudflare-tunnel
 - Implementing cloudflare login subcommand.
 - Implemented cloudflare tunnel create and list subcommands.
 - Implemented cloudflare tunnel and serve subcommands.
+- Started the ticket and created branch/PR.
+- Fixed recursive test loop by registering Cloudflare & ticket tests in the test plugin.
