@@ -1,22 +1,43 @@
 # Branch: create-go-plugin
-# Tags: <tags>
+# Tags: toolchain, go, plugin
 
 # Goal
-<goal>
+Create a new Go plugin that handles Go toolchain installation and linting.
 
 ## SUBTASK: start ticket work via `dialtone.sh` cli
 - name: ticket-start
 - description: to start work run the cli command `dialtone.sh ticket start create-go-plugin`
 - test-description: run the ticket tests to verify that the ticket is in a valid state
 - test-command: `dialtone.sh test ticket create-go-plugin`
-- status: todo
+- status: done
 
-## SUBTASK: <subtask-title>
-- name: <subtask-name> (only lowercase and dashes)
-- description: <description>
-- test-description: <test-description>
-- test-command: <test-command>
-- status: todo | processing | done
+## SUBTASK: scaffold-go-plugin
+- name: scaffold-go-plugin
+- description: Create the CLI entry point for the go plugin and register it.
+- test-description: Verify dialtone.sh go command is recognized.
+- test-command: `./dialtone.sh go --help`
+- status: done
+
+## SUBTASK: implement-go-install
+- name: implement-go-install
+- description: Implement the logic to install Go into the DIALTONE_ENV directory.
+- test-description: Verify Go is installed in the dependencies directory.
+- test-command: `./dialtone.sh go install`
+- status: done
+
+## SUBTASK: implement-go-lint
+- name: implement-go-lint
+- description: Implement the go lint command using the local Go toolchain.
+- test-description: Verify go lint runs successfully.
+- test-command: `./dialtone.sh go lint`
+- status: done
+
+## SUBTASK: documentation
+- name: documentation
+- description: Update src/plugins/go/README.md with usage instructions.
+- test-description: Verify README existence and content.
+- test-command: `cat src/plugins/go/README.md`
+- status: done
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
@@ -24,4 +45,3 @@
 - test-description: vailidates all ticket subtasks are done
 - test-command: `dialtone.sh ticket done create-go-plugin`
 - status: todo
-
