@@ -32,44 +32,54 @@ This is the **Source of Truth** for the Dialtone Issue Management API.
 
 ## 2. Automated Triage Workflow
 
-### Step 1: List and Scan
+### Step 1: Backlog Audit
+Scan all open issues to identify high-priority candidates.
 ```bash
-# Audit the backlog to identify p0 and p1 candidates.
 ./dialtone.sh github issue list --markdown
 ```
 
-### Step 2: The Decision Loop (p0 -> p1 -> Discretionary)
+### Step 2: Issue Deep-Dive
+Inspect the specific goals and constraints of a candidate issue.
 ```bash
-# 1. View candidate
 ./dialtone.sh github issue view <id>
+```
 
-# 2. Decision: IMPROVE
-# Requirements are clear but the issue lacks subtasks or tests.
-# Use 'ticket add' to scaffold a local ticket WITHOUT switching branches.
-./dialtone.sh ticket add <name>
+### Step 3: Priority Alignment
+Categorize the issue immediately using shortcut flags.
+```bash
+# If critical, promote to p0.
+./dialtone.sh github issue <id> --p0
 
-# Example (Issue #104: "improve the install plugin"):
-#   The goal is clear. I will scaffold 'improve-install-plugin' 
-#   and populate it with atomic subtasks and test commands.
+# If important but not urgent, mark as p1.
+./dialtone.sh github issue <id> --p1
+```
 
-# 3. Decision: ASK
-# The goal is ambiguous or technical blockers exist.
+### Step 4: Resolution: ASK
+If the goal is ambiguous or technical blockers exist, request clarification.
+```bash
 ./dialtone.sh github issue comment <id> "Need clarification on [X]..."
 ./dialtone.sh github issue <id> --question
 
-# Example (Issue #96: "integrate ideas for memory from claud bot"):
-#   The goal is vague. I will ask: "Could you clarify which specific 
-#   memory patterns or ideas should be prioritized for integration?"
-
-# 4. Finalizing Triage
-# Once Improved (local ticket exists) or Asked (comment sent):
-./dialtone.sh github issue <id> --ready --ticket
+# Example (Issue #96: "memory patterns"):
+#   "Could you clarify which specific memory patterns should be prioritized?"
 ```
 
-### Step 3: Promotion (Optional)
+### Step 5: Resolution: IMPROVE
+If requirements are clear but lack subtasks, scaffold a local ticket.
 ```bash
-# If unprioritized but critical, promote to p0.
-./dialtone.sh github issue <id> --p0
+# Scaffold local ticket WITHOUT switching branches.
+./dialtone.sh ticket add <name>
+
+# Example (Issue #104: "improve install"):
+#   Scaffold 'improve-install-plugin' and populate with atomic subtasks.
+```
+
+### Step 6: Readiness Validation
+Verify the [Ticket Standard](#3-the-ticket-standard) and mark as ready.
+```bash
+# 1. Verify all subtasks and tests are defined in the local ticket.
+# 2. Mark the GitHub issue as 'ready' and 'ticket' using the shortcuts.
+./dialtone.sh github issue <id> --ready --ticket
 ```
 
 ---
