@@ -17,15 +17,10 @@ func RunAIAuth(args []string) {
 	}
 
 	googleKey := os.Getenv("GOOGLE_API_KEY")
-	geminiKey := os.Getenv("GEMINI_API_KEY")
-
-	if googleKey != "" || geminiKey != "" {
-		logger.LogInfo("AI Plugin: Authentication key found in .env")
-		if geminiKey == "" {
-			logger.LogInfo("AI Plugin: Using GOOGLE_API_KEY for Gemini CLI.")
-		}
+	if googleKey != "" {
+		logger.LogInfo("AI Plugin: Authentication key (GOOGLE_API_KEY) found in .env")
 	} else {
-		logger.LogInfo("AI Plugin: No API key found in .env.")
+		logger.LogInfo("AI Plugin: No GOOGLE_API_KEY found in .env.")
 	}
 
 	logger.LogInfo("")
