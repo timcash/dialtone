@@ -53,7 +53,7 @@ Capture output from the `gemini` CLI command into the main `dialtone.log` file, 
 - description: Update `src/plugins/ai/cli/gemini.go` to parse `--errors` and `--tools` flags. When these flags are active (especially in `--raw` mode), tool calls should be marked with a color (e.g., Green/Cyan) and errors with Red at the start of the line.
 - test-description: Run `ai gemini "hello" --raw --tools` and verify tool calls (if any) are colorized.
 - test-command: `./dialtone.sh ai gemini "hello" --raw --tools --errors`
-- status: todo
+- status: done
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
