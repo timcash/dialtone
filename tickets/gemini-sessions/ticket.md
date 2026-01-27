@@ -4,12 +4,7 @@
 # Goal
 Enable session management for the Gemini CLI integration, allowing users to list, resume, and delete chat sessions using standard flags.
 
-## SUBTASK: [Subtask Name]
-- name: <name-with-dashes>
-- description: Single logic change (< 30 mins). Be precise.
-- test-description: Explicitly state how to verify this change.
-- test-command: `./dialtone.sh test <path>` or relevant bash command.
-- status: todo
+
 
 ## SUBTASK: start ticket work via `dialtone.sh` cli
 - name: ticket-start
