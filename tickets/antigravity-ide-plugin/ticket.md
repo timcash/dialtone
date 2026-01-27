@@ -23,7 +23,7 @@ Create an `ide` plugin for Dialtone that provides specialized tools for interact
 - description: Add the `antigravity logs` subcommand to the `ide` plugin that tails the discovered log file.
 - test-description: Verify the command runs and outputs log lines.
 - test-command: `./dialtone.sh test ticket antigravity-ide-plugin --subtask logs-command`
-- status: todo
+- status: done
 
 ## SUBTASK: start ticket work via `dialtone.sh` cli
 - name: ticket-start
