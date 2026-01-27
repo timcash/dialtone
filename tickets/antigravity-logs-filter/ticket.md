@@ -24,7 +24,7 @@ Add a `--clean` filtering option to `dialtone ide antigravity logs` that suppres
 - description: Update `src/plugins/ide/README.md` to document the new `--clean` flag for the `antigravity logs` command.
 - test-description: Verify the README has been updated.
 - test-command: `grep "\--clean" src/plugins/ide/README.md`
-- status: todo
+- status: done
 
 ## SUBTASK: start ticket work via `dialtone.sh` cli
 - name: ticket-start
