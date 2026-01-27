@@ -10,6 +10,9 @@ This workflow defines the standard process for planning, executing, and managing
 ## 1. CLI API Reference
 
 ```bash
+# The primary driver for TDD. Validates, runs tests, and manages subtask state.
+./dialtone.sh ticket next
+
 # Start a new feature or fix (creates branch + PR).
 ./dialtone.sh ticket start <ticket-name>
 
@@ -18,12 +21,6 @@ This workflow defines the standard process for planning, executing, and managing
 
 # View or add a new ticket without switching branches.
 ./dialtone.sh ticket add <ticket-name>
-
-# Check what to do next.
-./dialtone.sh ticket subtask next
-
-# Mark a subtask as done.
-./dialtone.sh ticket subtask done <subtask-name>
 
 # Mark a subtask as failed (for investigation/refactor).
 ./dialtone.sh ticket subtask failed <subtask-name>
@@ -97,31 +94,18 @@ All work starts with a ticket. Use the CLI to manage the state of your work.
 
 Follow this loop for **every** subtask.
 
-1. **Register the Test**: Define your test in `tickets/<ticket-name>/test/test.go`.
-2. **Verify Failure**: Run the test; it must fail first.
+1. **Plan**: Define a small, ~10 minute subtask in `ticket.md`.
+2. **Register the Test**: Define your test in `tickets/<ticket-name>/test/test.go`.
+3. **Execute Automated Loop**: ALWAYS use `ticket next` to drive the workflow.
    ```bash
-   ./dialtone.sh ticket subtask test <name>
+   ./dialtone.sh ticket next
    ```
-3. **Implement**: Write code to satisfy the test.
-4. **Verify Success**: Run the test again to pass.
-5. **Mark Done**: 
-   ```bash
-   ./dialtone.sh ticket subtask done <name>
-   ```
-6. **Report Progress**: After marking a subtask as done, ALWAYS report the current status of all subtasks to the USER.
-   ```bash
-   ./dialtone.sh ticket subtask list
-   ```
-   **Output Example:**
-   ```bash
-   Subtasks for <ticket-name>:
-   ---------------------------------------------------
-   [x] subtask-1 (done)
-   [/] subtask-2 (progress)
-   [ ] subtask-3 (todo)
-   [!] subtask-4 (failed)
-   ---------------------------------------------------
-   ```
+   `ticket next` will:
+   - Validate your `ticket.md`.
+   - Run tests for your current `progress` subtask.
+   - Mark it as `done` if tests pass.
+   - Identify and start the next `todo` subtask.
+   - Print a progress status chart.
 
 
 ## 7. Recovering from Failures

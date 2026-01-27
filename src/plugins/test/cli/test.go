@@ -26,6 +26,7 @@ import (
 	_ "dialtone/cli/tickets/test-test-tags/test"
 	_ "dialtone/cli/tickets/verify-ticket-plugin/test"
 	_ "dialtone/cli/tickets/cloudflare-tunnel/test"
+	_ "dialtone/cli/tickets/replace-progress-with-ticket-next/test"
 )
 
 // RunTest handles the 'test' command
