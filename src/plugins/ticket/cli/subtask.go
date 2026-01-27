@@ -22,7 +22,7 @@ type Subtask struct {
 // RunSubtask is the entry point for 'ticket subtask ...'
 func RunSubtask(args []string) {
 	if len(args) < 1 {
-		logFatal("Usage: ticket subtask <list|next|test|done|failed> <ticket-name> [subtask-name]")
+		logFatal("Usage: ticket subtask <list|next|test|done|failed> [<ticket-name>] [<subtask-name>]")
 	}
 
 	subcmd := args[0]
@@ -51,7 +51,7 @@ func RunSubtask(args []string) {
 	}
 
 	if ticketName == "" {
-		logFatal("Usage: ticket subtask <list|next|test|done> [ticket-name] [subtask-name]\n(You must specify a ticket name or be on a feature branch)")
+		logFatal("Usage: ticket subtask <list|next|test|done|failed> [<ticket-name>] [<subtask-name>]\n(You must specify a ticket name or be on a feature branch)")
 	}
 
 	switch subcmd {
@@ -61,17 +61,17 @@ func RunSubtask(args []string) {
 		RunSubtaskNext(ticketName)
 	case "test":
 		if subtaskName == "" {
-			logFatal("Usage: ticket subtask test [ticket-name] <subtask-name>")
+			logFatal("Usage: ticket subtask test [<ticket-name>] <subtask-name>")
 		}
 		RunSubtaskTest(ticketName, subtaskName)
 	case "done":
 		if subtaskName == "" {
-			logFatal("Usage: ticket subtask done [ticket-name] <subtask-name>")
+			logFatal("Usage: ticket subtask done [<ticket-name>] <subtask-name>")
 		}
 		RunSubtaskDone(ticketName, subtaskName)
 	case "failed":
 		if subtaskName == "" {
-			logFatal("Usage: ticket subtask failed [ticket-name] <subtask-name>")
+			logFatal("Usage: ticket subtask failed [<ticket-name>] <subtask-name>")
 		}
 		RunSubtaskFailed(ticketName, subtaskName)
 	default:

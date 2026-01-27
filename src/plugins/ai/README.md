@@ -26,16 +26,31 @@ This is the autonomous engine that solves tickets.
 
 ## CLI Usage
 
-| Command | Description |
-|---------|-------------|
-| `./dialtone.sh ai opencode start` | Starts the AI assistant server in the background. |
-| `./dialtone.sh ai opencode stop` | Stops the running assistant server. |
-| `./dialtone.sh ai developer` | Starts the autonomous loop to solve open tickets. |
-| `./dialtone.sh ai subagent --task <file>` | Runs a specific task file using the AI assistant. |
-| `./dialtone.sh ai auth` | Authenticates with Google/Gemini. |
-| `./dialtone.sh ai --gemini "prompt"` | Proxies a prompt to the Google Gemini CLI. |
-| `./dialtone.sh ai install` | Installs @google/gemini-cli locally in `DIALTONE_ENV`. |
-| `./dialtone.sh ai build` | Verifies AI component readiness (part of the main build). |
+```bash
+# Starts or stops the background AI assistant server.
+./dialtone.sh ai opencode start
+./dialtone.sh ai opencode stop
+
+# Opens the server UI.
+./dialtone.sh ai opencode ui
+
+# Starts the autonomous developer loop to solve open tickets.
+./dialtone.sh ai developer [--capability <label>]
+
+# Runs a specific task file using the AI assistant.
+./dialtone.sh ai subagent --task <file-path>
+
+# Authenticates with Google/Gemini.
+./dialtone.sh ai auth
+
+# Proxies a prompt to the Google Gemini CLI.
+./dialtone.sh ai --gemini "<prompt>"
+
+# Installs or verifies plugin dependencies.
+./dialtone.sh ai install
+./dialtone.sh ai build
+```
+
 
 ## Dependencies
 - **Binary**: Requires the `opencode` binary installed at `$HOME/.opencode/bin/opencode`.
