@@ -3,4 +3,5 @@ Progress log for ide-plugin-workflows
 [2026-01-26T21:55:30] Added IDE plugin and registered in dev CLI.
 [2026-01-26T21:56:00] Implemented setup-workflows and verified symlinks.
 [2026-01-26T21:56:50] All tests passed. Finalizing ticket.
+[2026-01-26T21:59:00] Changed softlinking to copying based on user feedback. Verified with tests.
 
