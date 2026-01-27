@@ -4,3 +4,7 @@ Progress log for antigravity-logs-filter
 - Added line-by-line log scanning and filtering logic
 - Updated ide README.md with the new flag documentation
 - Verified flag parsing and command startup with automated tests
+- [Subtask] clean-flag-parsing: Finished logic to parse --clean in Run and pass to runAntigravityLogs
+- [Subtask] filter-logic: Implemented Scanner and strings.Contains check for [Terminal] and planner message
+- [Subtask] readme-update: Added examples and description for --clean flag
+- [Subtask] ticket-start: Successfully started ticket branch and pull request
