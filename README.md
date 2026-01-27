@@ -13,126 +13,33 @@ Dialtone aims to combine human intuition and machine precision into a unified me
 5. Open Assembly Instructions allow the robot system to be assembled in a garage with the correct tools and parts.
 6. Maintainable Parts and Code create a cyclic ecosystem.
 
-## Features
-### Dialtone Autocode: System-Tuned Language Model and Self-Modifying Code
-- The CLI (Command Line Interface) contains a deep neural network to modify the source code when requested.
-- Autocode overcomes unforeseen challenges live by adapting the code with human-in-the-loop feedback.
-- Code can be modified to fix bugs, improve performance, or add new features.
-- The Autocode assistant includes an integrated development assistant trained on Dialtone's source code and hardware specifications.
-- Autocode provides context-aware code generation for new robot plugins and control logic.
-- Users can share `Dialtone Autocode` sessions with a web link.
-
-### Dialtone Mock Mode: Hardware-Free Development
-- Develop and test the dashboard UI without physical hardware.
-- Generates fake telemetry (heartbeat, attitude, GPS) and video streams (color gradient).
-- Disables hardware drivers (camera, serial/UDP Mavlink) and AI features (OpenCode) for a lightweight, fast dev loop.
-- Activate via `dialtone start --mock`.
-
-### Dialtone CLI: Simple Single Binary to Connect and Control Any Robot
-- Dialtone CLI offers cross-platform support for Windows, macOS, and Linux.
-- Single command builds and deploys for ARM64 targets like Raspberry Pi.
-- The binary contains tools to connect and copy itself to other devices.
-
-### Dialtone VPN: Built-in Virtual Private Network and Peer Discovery
-- Users on the network are identified by unique IDs.
-- The VPN plugin supports Access Control Lists (ACLs) for users and robots.
-
-### Dialtone Bus: Scalable Command and Control Data Structures
-- Dialtone Bus uses request/reply patterns for commands.
-- The Bus supports queuing for fanout and load balancing.
-- The Data Bus enables streaming for live or replay of telemetry and video.
-
-### Dialtone Autoconfig: Automated Discovery and Configuration
-- **Sensors**: Plug-and-play support for cameras (V4L2), microphones, IMUs, and LIDAR.
-- **Actuators**: Unified control interface for PWM servos, stepper motors, and CAN-bus motor controllers.
-- **Compute**: Dynamic allocation of local and edge resources for AI inference and video encoding.
-- **Storage**: Automatic management of ring-buffer logs and cloud-synced telemetry.
-- **Network**: Zero-config peer-to-peer connectivity even behind restrictive NATs.
-
-### Dialtone AI: Vision and LLM AI-Assisted Operation
-- Real-time object detection and tracking for robot navigation.
-- Natural language commanding (e.g., "Go to the kitchen and find the blue mug").
-- Automated troubleshooting using onboard LLMs to analyze telemetry anomalies.
-
-### Dialtone Geo: Geospatial Intelligence
-- Integration with Google Earth Engine for environmental context and terrain analysis.
-- Intelligent alerting based on GPS boundaries and satellite imagery updates.
-- Global multi-robot fleet visualization on 3D maps.
-
-### Dialtone CAD: CAD and Simulation
-- Built-in modeling tools assist with hardware modifications and 3D printing.
-- "Digital Twin" simulations test control logic in a virtual environment before deployment.
-- Popular localization and mapping algorithms, like PyCuVSLAM, are pre-integrated.
-- FEA (Finite Element Analysis) for stress testing and simulation.
-- CFD (Computational Fluid Dynamics) for fluid dynamics simulation.
-- Thermal, EMI (Electromagnetic Interference), and other physics simulations.
-- Mesh transformation tools for moving between topologies like triangle and quad meshes, point clouds, and voxels.
-
-### Dialtone Web: Public Robot Presence
-- Publicly accessible URLs at `https://<robot_id>.dialtone.earth` for live streaming and status.
-- Integrated WebRTC for low-latency remote control from any browser.
-
-### Dialtone RSI: Collaborative RSI (Realtime Strategy Interface)
-- A strategic dashboard where humans and AI agents cooperatively manage robot swarms.
-- Drag-and-drop mission planning and real-time command override.
-
-### Dialtone Social: Community and Social
-- One-click sharing of robot "moments" to social platforms to engage with the public.
-- Collaborative "Robot Parties" where multiple users can interact with a shared robot world.
-
-### Dialtone Radio: Open Radio Field Uplink
-- Open-source radio and compute hardware to make relaying real-time video and telemetry possible.
-
-### Dialtone Cyber Defense: Security and Privacy
-- Live monitoring of network traffic for anomalies.
-- Automated response to security threats.
-- Privacy-preserving design with end-to-end encryption.
-- Automated key rotation.
-
-### Dialtone Maintenance
-- Supply chain tools.
-- Detailed assembly and maintenance instructions.
-- Automated software updates.
-- Automated hardware diagnostics and repair via regional repair centers.
-
-### Dialtone Marketplace
-- Robotic parts and assemblies.
-- Field services.
-- Maintenance services.
-- Engineering services like Electrical, Mechanical, and Software.
-- Data services to store and analyze robot data.
-- AI services to provide AI assistance.
+## Skills
+Skill are systems of systems that combine into valuable real world actions like navigating a robot or modifying and testing code.
+1. Autocode: Fast, safe code evolution that scales AI-assisted control across large robot networks.
+2. CLI: A single operational interface that standardizes control across distributed fleets.
+3. AI: Vision and language assistance that turns operator intent into network-wide actions.
+4. VPN: Private, identity-aware networking that keeps large robot networks connected and secure.
+5. RSI: Collaborative planning that aligns humans and AI across multi-robot missions.
+6. Marketplace: Parts and services access that scales buildout and support for large networks.
+7. Bus: Scalable command and telemetry flow that coordinates many robots at once.
+8. Radio: Field uplinks that maintain network control when traditional links fail.
+9. Autoconfig: Automated device discovery that accelerates bringing new nodes into the network.
+10. Geo: Geospatial context that enables coordinated operations over large areas.
+11. CAD: Simulation-first validation that reduces risk when rolling updates across fleets.
+12. Web: Public and operator visibility that extends network control beyond the CLI.
+13. Social: Shared moments and coordination channels that strengthen network engagement.
+14. Cyber Defense: Security automation that protects large robotic operation networks.
+15. Maintenance: Cyclic parts and repair supply chains that keep distributed fleets sustainable.
+16. Mock Mode: Hardware-free simulation that keeps network-scale testing and iteration moving.
 
 # Binary Architecture: Production vs. Development
-
-Dialtone uses a dual-binary approach to separate runtime efficiency from developer tooling. Both binaries rely on the same core code but expose different capabilities.
-
-```text
-+-----------------------+       +-----------------------+
-|   Production Binary   |       |   Development Binary  |
-|      (dialtone)       |       |    (dialtone-dev)     |
-+-----------------------+       +-----------------------+
-|  [ Runtime Core ]     |       |  [ Runtime Core ]     |
-|   - start             |       |   - start             |
-|   - vpn               |       |   - vpn               |
-+-----------------------+       +-----------------------+
-|                       |       |  [ Dev Tools ]        |
-|                       |       |   - build             |
-|                       |       |   - deploy            |
-|                       |       |   - test              |
-|                       |       |   - ticket            |
-|                       |       |   - ...               |
-+-----------------------+       +-----------------------+
-```
-
-| Feature | Production (`dialtone`) | Development (`dialtone-dev`) |
-| :--- | :---: | :---: |
-| **`start`** (Run Robot Software) | ✅ | ✅ |
-| **`vpn`** (Run VPN Node) | ✅ | ✅ |
-| **Developer Tools** (build, test, etc.) | ❌ | ✅ |
+Both systems contain the same core code but differ in their capabilities.
+1. `dialtone` a single binary with embeded vpn that networks robots together.
+2. `dialtone-dev` a single binary with embeded vpn that networks robots together.
 
 # Test-Driven Development (TDD)
-Dialtone is built with a "Test-First" philosophy. Every function, feature, and plugin must have automated tests. The system is designed such that the tests drive the development process.
+1. A test is created for every development task.
+2. The test is written before the code therefor driving the design and implementation.
 
 # `dialtone` development and CLI
 1. Use only these two tools as much as possible `dialtone.sh` CLI and `git`
@@ -283,30 +190,107 @@ flowchart TD
     Controller --> Raspi
 ```
 
-## Overall Project Structure
-1. `./tickets` - Contains all tickets.
-2. `./src` - Contains all source code.
-3. `./src/plugins` - Contains all plugins.
-4. `./test` - Contains core test files.
-5. `./docs` - Contains virtual machine and container code for assisting development and testing.
-6. `./docs/vendor/<vendor_name>` - Contains vendor documentation.
-7. `./example_code` - Contains example code for helping integration or guiding design.
-9. `README.md` - Contains information for users to understand this repo at a high level.
-12. `./dialtone.sh` - CLI tool for that wraps `src/dev.go` development (Linux/macOS/WSL).
+## Project Structure
+```
+dialtone/
+├── tickets/           # All tickets
+├── src/               # All source code
+│   └── plugins/       # All plugins
+├── test/              # Core test files
+├── docs/              # VM and container docs
+│   └── vendor/<vendor_name>/  # Vendor docs
+├── example_code/      # Integration/design examples
+├── dialtone.sh        # CLI wrapper for `src/dev.go` (Linux/macOS/WSL)
+└── README.md          # Repo overview
+```
 
 ## Ticket Structure
 For tickets created via `./dialtone.sh ticket start <ticket-name>`:
-1. `tickets/<ticket-name>/ticket.md` - The requirement doc (from template).
-2. `tickets/<ticket-name>/task.md` - Scratchpad for tracking progress.
-3. `tickets/<ticket-name>/code/` - Local code playground for the ticket.
-4. `tickets/<ticket-name>/test/` - Ticket-specific verification tests.
+```
+tickets/<ticket-name>/
+├── ticket.md          # Requirement doc (from template)
+├── task.md            # Scratchpad for tracking progress
+├── code/              # Local code playground
+└── test/              # Ticket-specific verification tests
+```
 
 ## Plugin Development Structure
 For new plugins created via `./dialtone.sh plugin create <plugin-name>`:
-1. `src/plugins/<name>/app` - Application code.
-2. `src/plugins/<name>/cli` - CLI command code.
-3. `src/plugins/<name>/test` - Plugin-specific tests.
-4. `src/plugins/<name>/README.md` - Plugin documentation.
+```
+src/plugins/<name>/
+├── app/               # Application code
+├── cli/               # CLI command code
+├── test/              # Plugin-specific tests
+└── README.md          # Plugin documentation
+```
+
+# Data Objects
+1. `ISSUE`: The source-of-truth problem statement in GitHub that drives triage and labeling.
+2. `TICKET`: The local, time-boxed unit of work (about 60 minutes) that turns an ISSUE into executable subtasks.
+3. `SUBTASK`: A small, ~10 minute step with a single test to keep work atomic and verifiable.
+4. `TEST`: The automated check that proves a subtask works and keeps agents grounded.
+5. `PLUGIN`: A modular feature area with its own CLI commands, docs, and tests.
+6. `WORKFLOW`: A documented CLI-driven process that keeps long-running agent work consistent.
+7. `LOG`: The primary debugging stream for local or remote diagnostics.
+8. `USER`: An identity record (public key) used for auth, authorization, and preferences.
+9. `SKILL`: A bundle of plugins and workflows surfaced as a single CLI command.
+
+## ISSUE: The GitHub source-of-truth for a problem
+1. ID: The GitHub issue ID.
+2. TITLE: The GitHub issue title.
+3. DESCRIPTION: The GitHub issue description.
+4. LABELS: Priority, type, and readiness flags used by the `github` plugin.
+
+## TICKET: The local 60-minute work unit
+1. BRANCH: Git branch created or switched to for the ticket.
+2. DIRECTORY: `tickets/<ticket-name>/` scaffolded with `ticket.md`, `task.md`, `code/`, and `test/`.
+3. SUBTASKS: A list of 10-minute steps that each have a test and status.
+4. LIFECYCLE: `ticket start` -> `subtask` loop -> `ticket done` to ready the PR.
+
+## SUBTASK: Small, test-first unit of work
+1. NAME: Kebab-case identifier used by CLI commands.
+2. DESCRIPTION: Single focused change with file or behavior context.
+3. TEST: One command that must fail first and pass after implementation.
+4. STATUS: `todo`, `progress`, `done`, or `failed`.
+
+## TEST: Proof that a subtask is complete
+1. SCOPE: One subtask or plugin goal.
+2. COMMAND: A `dialtone.sh test ...` invocation tied to the subtask.
+3. OUTCOME: Must fail before the change and pass after.
+
+## PLUGIN: Modular feature area with its own tooling
+1. README: High-level plugin intent and command reference.
+2. CLI: Commands exposed through `dialtone.sh`.
+3. TESTS: Plugin-specific tests under `src/plugins/<name>/test/`.
+4. LIFECYCLE: `plugin add` -> `install`/`build` -> `test`.
+
+## WORKFLOW: Agent grounding for long-running tasks
+1. DOC: A guide in `docs/workflows/` defining how to operate.
+2. CLI: References the commands and expectations for the flow.
+3. PURPOSE: Keeps planning, execution, and verification consistent.
+
+## LOG: Primary debugging stream
+1. LOCAL: `./dialtone.sh logs` for local debugging.
+2. REMOTE: `./dialtone.sh logs --remote` for robot diagnostics.
+3. CONTEXT: Use for tracing failures during tests or deploys.
+
+## USER: Identity record for access and preferences
+1. PUBLIC KEY: The primary identifier for a user.
+2. AUTH: Used for authentication and authorization decisions.
+3. PREFS: Stores user preferences for agent behavior.
+
+## SKILL: Bundled capability surface
+1. WRAPS: A collection of plugins and workflows.
+2. CLI: Exposed as a single agent-facing command.
+3. GOAL: Makes repeatable agent behavior easy to invoke.
+
+## WORKFLOW: Agent-focused CLI process
+1. SCOPE: A long-running task category (issue review, ticket, subtask expansion).
+2. SOURCE: Documented in `docs/workflows/` with step-by-step guidance.
+3. OUTCOME: Clear checks and artifacts that keep agents aligned.
+
+# Workflows
+1. [Issue Review](docs/workflows/issue_review.md)
 
 
 # Join the Mission
