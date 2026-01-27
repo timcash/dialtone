@@ -37,6 +37,9 @@ The command supports additive filtering. If flags are provided, the output is re
 > [!TIP]
 > The `--chat` flag replaces the legacy `--clean` flag for better semantic clarity.
 
+> [!WARNING]
+> **Current Limitation**: The `--chat` flag currently detects conversation updates (file growth) but cannot display the full message content due to proprietary compression in the `.pb` files. Metadata (roles) may be visible, but text content is currently unavailable.
+
 
 
 ## Antigravity Log Discovery Logic
