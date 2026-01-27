@@ -3,50 +3,29 @@ The `cloudflare` plugin integrates Cloudflare Tunnels into Dialtone, enabling se
 
 ## Core Commands
 
-### `cloudflare login`
 ```bash
-# Authenticate with Cloudflare. This will open a browser to authorize the CLI.
-# Once complete, your credentials (cert.pem) are stored locally.
+# Authenticate with Cloudflare (opens browser).
 ./dialtone.sh cloudflare login
-```
 
-### `cloudflare tunnel create <name>`
-```bash
-# Create a named tunnel. The name is arbitrary (e.g., 'local-proxy').
+# Create a named tunnel.
 ./dialtone.sh cloudflare tunnel create <name>
-```
 
-### `cloudflare tunnel list`
-```bash
-# List all tunnels associated with your account and their status.
+# List all associated tunnels and their status.
 ./dialtone.sh cloudflare tunnel list
-```
 
-### `cloudflare tunnel route <name> [hostname]`
-```bash
-# Route a public hostname to a tunnel. If no hostname is provided,
-# it defaults to <DIALTONE_HOSTNAME>.dialtone.earth.
-./dialtone.sh cloudflare tunnel route <name>
-```
+# Route a public hostname to a tunnel. Defaults to <DIALTONE_HOSTNAME>.dialtone.earth.
+./dialtone.sh cloudflare tunnel route <name> [<hostname>]
 
-### `cloudflare tunnel run <name> [options]`
-```bash
 # Run a tunnel and optionally specify a service URL to forward.
-./dialtone.sh cloudflare tunnel run <name> --url http://127.0.0.1:8080
-```
+./dialtone.sh cloudflare tunnel run <name> [--url <service-url>]
 
-### `cloudflare tunnel cleanup`
-```bash
 # Terminate all locally running cloudflared processes.
 ./dialtone.sh cloudflare tunnel cleanup
+
+# Quickly forward a local port or URL using an ephemeral tunnel.
+./dialtone.sh cloudflare serve <port-or-url>
 ```
 
-### `cloudflare serve <port|url>`
-```bash
-# Quickly forward a local service to the web using an ephemeral tunnel.
-# Ideal for sharing a local dev server (e.g., localhost:8080).
-./dialtone.sh cloudflare serve 8080
-```
 
 ## Workflow: Exposing Local Services (e.g., VPN Dashboard)
 

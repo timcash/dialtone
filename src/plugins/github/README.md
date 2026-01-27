@@ -4,59 +4,45 @@ The `github` plugin is the engine for Dialtone's issue and pull request manageme
 
 ## 1. Issue Management
 
-### Core Commands
 ```bash
-# List open issues in a markdown table (optimized for agents).
-./dialtone.sh github issue list --markdown
-
-# List open issues in raw JSON.
-./dialtone.sh github issue list
+# List open issues. Use --markdown for agent-optimized tables.
+./dialtone.sh github issue list [--markdown]
 
 # View full issue details, labels, and comments.
-./dialtone.sh github issue view <id>
-# Shortcut if first arg is an ID:
-./dialtone.sh github issue <id>
+./dialtone.sh github issue view <issue-id>
+./dialtone.sh github issue <issue-id>  # Shortcut
 
-# Create a new GitHub issue.
+# Create or comment on issues.
 ./dialtone.sh github issue create
-
-# Comment on an issue.
-./dialtone.sh github issue comment <id> "Your message here"
+./dialtone.sh github issue comment <issue-id> "Your message here"
 
 # Close specific issue(s) or all open issues.
-./dialtone.sh github issue close <id>
+./dialtone.sh github issue close <issue-id>...
 ./dialtone.sh github issue close-all
+
+# Triage Shortcuts: Apply labels directly via flags.
+# Supported: --p0, --p1, --bug, --ready, --ticket, --enhancement,
+# --docs, --perf, --security, --refactor, --test, --duplicate...
+./dialtone.sh github issue <issue-id> --ready --ticket --p0 --bug
 ```
 
-### Triage & Labeling Shortcuts
-Fast-track triage by applying labels directly to an issue ID.
-```bash
-# Mark as 'ready' and 'ticket' validated.
-./dialtone.sh github issue <id> --ready --ticket
-
-# Apply priority and type labels.
-./dialtone.sh github issue <id> --p0 --bug --enhancement
-
-# Full Shortcut Suite:
-# --p0, --p1, --bug, --ready, --ticket, --enhancement,
-# --docs, --perf, --security, --refactor, --test, 
-# --duplicate, --wontfix, --question
-```
 
 ---
 
 ## 2. Pull Request Management
+
 ```bash
-# Create a new PR (verifies context and clean branch).
+# Create or update a PR (verifies context and clean branch).
 # Flags: --draft, --ready
 ./dialtone.sh github pr create
 
 # View, comment on, and manage PRs.
-./dialtone.sh github pr view <id>
-./dialtone.sh github pr comment <id> "Message"
-./dialtone.sh github pr merge <id>
-./dialtone.sh github pr close <id>
+./dialtone.sh github pr view <pr-id>
+./dialtone.sh github pr comment <pr-id> "Message"
+./dialtone.sh github pr merge [<pr-id>]
+./dialtone.sh github pr close [<pr-id>]
 ```
+
 
 ---
 
