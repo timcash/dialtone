@@ -16,6 +16,7 @@ import (
 	deploy_cli "dialtone/cli/src/plugins/deploy/cli"
 	diagnostic_cli "dialtone/cli/src/plugins/diagnostic/cli"
 	github_cli "dialtone/cli/src/plugins/github/cli"
+	go_cli "dialtone/cli/src/plugins/go/cli"
 	install_cli "dialtone/cli/src/plugins/install/cli"
 	logs_cli "dialtone/cli/src/plugins/logs/cli"
 	mavlink_cli "dialtone/cli/src/plugins/mavlink/cli"
@@ -86,6 +87,8 @@ func ExecuteDev() {
 		www_cli.RunWww(args)
 	case "ui":
 		ui_cli.Run(args)
+	case "go":
+		go_cli.RunGo(args)
 
 	case "ai":
 		ai_cli.RunAI(args)
@@ -127,6 +130,7 @@ func printDevUsage() {
 	fmt.Println("  test <subcmd>      Run tests (ticket, plugin, tags)")
 
 	fmt.Println("  ai <subcmd>        AI tools (opencode, developer, subagent)")
+	fmt.Println("  go <subcmd>        Go toolchain tools (install, lint)")
 	fmt.Println("  help               Show this help message")
 }
 
