@@ -29,6 +29,12 @@ The `cloudflare` plugin integrates Cloudflare Tunnels into Dialtone, enabling se
 ./dialtone.sh cloudflare tunnel route my-server-tunnel
 ```
 
+### `cloudflare tunnel cleanup`
+```bash
+# Terminate all locally running cloudflared processes.
+./dialtone.sh cloudflare tunnel cleanup
+```
+
 ### `cloudflare serve <port|url>`
 ```bash
 # Quickly forward a local service to the web using an ephemeral tunnel.
