@@ -26,6 +26,7 @@ const (
 	ArmCompilerVersion = "13.3.rel1"
 	Arm64CompilerUrl   = "https://developer.arm.com/-/media/Files/downloads/gnu/13.3.rel1/binrel/arm-gnu-toolchain-13.3.rel1-x86_64-aarch64-none-linux-gnu.tar.xz"
 	ArmhfCompilerUrl   = "https://developer.arm.com/-/media/Files/downloads/gnu/13.3.rel1/binrel/arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-linux-gnueabihf.tar.xz"
+	CloudflaredVersion = "2025.1.0"
 )
 
 func logItemStatus(name, version, path string, alreadyInstalled bool) {
@@ -369,19 +370,27 @@ func installLocalDepsWSL() {
 			runSimpleShell(fmt.Sprintf("mkdir -p %s && tar -C %s --strip-components=1 -xJf %s/%s", gcc32Dir, gcc32Dir, depsDir, tarball))
 			os.Remove(filepath.Join(depsDir, tarball))
 			logItemStatus("ARMhf Compiler", ArmCompilerVersion, gcc32Bin, false)
-		} else {
 			logItemStatus("ARMhf Compiler", ArmCompilerVersion, gcc32Bin, true)
 		}
 
-		// 5. Check for Podman
-		if _, err := exec.LookPath("podman"); err != nil {
-			logger.LogInfo("Step 5: Podman not found. Note: Local rootless Podman installation on WSL requires system-level setup. Please install it manually if needed: 'sudo apt-get install podman'")
-		} else {
-			logger.LogInfo("Step 5: Podman is already installed on the system.")
-		}
+		// 6. Install Cloudflared
+		installCloudflaredLinuxAMD64(depsDir)
 	}
 
 	printInstallComplete(depsDir)
+}
+
+func installCloudflaredLinuxAMD64(depsDir string) {
+	cfDir := filepath.Join(depsDir, "cloudflare")
+	cfBin := filepath.Join(cfDir, "cloudflared")
+	if _, err := os.Stat(cfBin); err != nil {
+		logger.LogInfo("Step 6: Installing Cloudflared %s for Linux AMD64...", CloudflaredVersion)
+		downloadUrl := fmt.Sprintf("https://github.com/cloudflare/cloudflared/releases/download/%s/cloudflared-linux-amd64", CloudflaredVersion)
+		runSimpleShell(fmt.Sprintf("mkdir -p %s && wget -q -O %s %s && chmod +x %s", cfDir, cfBin, downloadUrl, cfBin))
+		logItemStatus("Cloudflared", CloudflaredVersion, cfBin, false)
+	} else {
+		logItemStatus("Cloudflared", CloudflaredVersion, cfBin, true)
+	}
 }
 
 func installLocalDepsMacOSAMD64() {
@@ -445,23 +454,25 @@ func installLocalDepsMacOSAMD64() {
 	} else {
 		logItemStatus("Pixi", PixiVersion, pixiBin, true)
 	}
-
-	// 3. Install Zig
-	zigDir := filepath.Join(depsDir, "zig")
-	zigBin := filepath.Join(zigDir, "zig")
-	if _, err := os.Stat(zigBin); err != nil {
-		logger.LogInfo("Step 3: Installing Zig %s for macOS x86_64...", ZigVersion)
-		zigTarball := fmt.Sprintf("zig-macos-x86_64-%s.tar.xz", ZigVersion)
-		downloadUrl := fmt.Sprintf("https://ziglang.org/download/%s/%s", ZigVersion, zigTarball)
-		runSimpleShell(fmt.Sprintf("curl -L -o %s/%s %s", depsDir, zigTarball, downloadUrl))
-		runSimpleShell(fmt.Sprintf("mkdir -p %s && tar -C %s --strip-components=1 -xJf %s/%s", zigDir, zigDir, depsDir, zigTarball))
-		os.Remove(filepath.Join(depsDir, zigTarball))
-		logItemStatus("Zig", ZigVersion, zigBin, false)
-	} else {
-		logItemStatus("Zig", ZigVersion, zigBin, true)
-	}
+	// 4. Install Cloudflared
+	installCloudflaredMacOSAMD64(depsDir)
 
 	printInstallComplete(depsDir)
+}
+
+func installCloudflaredMacOSAMD64(depsDir string) {
+	cfDir := filepath.Join(depsDir, "cloudflare")
+	cfBin := filepath.Join(cfDir, "cloudflared")
+	if _, err := os.Stat(cfBin); err != nil {
+		logger.LogInfo("Step 4: Installing Cloudflared %s for macOS AMD64...", CloudflaredVersion)
+		downloadUrl := fmt.Sprintf("https://github.com/cloudflare/cloudflared/releases/download/%s/cloudflared-darwin-amd64.tgz", CloudflaredVersion)
+		runSimpleShell(fmt.Sprintf("curl -L -o %s/cloudflared.tgz %s", depsDir, downloadUrl))
+		runSimpleShell(fmt.Sprintf("mkdir -p %s && tar -C %s -xzf %s/cloudflared.tgz", cfDir, cfDir, depsDir))
+		os.Remove(filepath.Join(depsDir, "cloudflared.tgz"))
+		logItemStatus("Cloudflared", CloudflaredVersion, cfBin, false)
+	} else {
+		logItemStatus("Cloudflared", CloudflaredVersion, cfBin, true)
+	}
 }
 
 func installLocalDepsLinuxARM64() {
@@ -525,22 +536,23 @@ func installLocalDepsLinuxARM64() {
 	} else {
 		logItemStatus("Pixi", PixiVersion, pixiBin, true)
 	}
+	// 4. Install Cloudflared
+	installCloudflaredLinuxARM64(depsDir)
 
-	// 3. Install Zig
-	zigDir := filepath.Join(depsDir, "zig")
-	zigBin := filepath.Join(zigDir, "zig")
-	if _, err := os.Stat(zigBin); err != nil {
-		logger.LogInfo("Step 3: Installing Zig %s for Linux ARM64...", ZigVersion)
-		zigTarball := fmt.Sprintf("zig-linux-aarch64-%s.tar.xz", ZigVersion)
-		downloadUrl := fmt.Sprintf("https://ziglang.org/download/%s/%s", ZigVersion, zigTarball)
-		runSimpleShell(fmt.Sprintf("wget -O %s/%s %s", depsDir, zigTarball, downloadUrl))
-		runSimpleShell(fmt.Sprintf("mkdir -p %s && tar -C %s --strip-components=1 -xJf %s/%s", zigDir, zigDir, depsDir, zigTarball))
-		os.Remove(filepath.Join(depsDir, zigTarball))
-		logItemStatus("Zig", ZigVersion, zigBin, false)
-	} else {
-		logItemStatus("Zig", ZigVersion, zigBin, true)
-	}
 	printInstallComplete(depsDir)
+}
+
+func installCloudflaredLinuxARM64(depsDir string) {
+	cfDir := filepath.Join(depsDir, "cloudflare")
+	cfBin := filepath.Join(cfDir, "cloudflared")
+	if _, err := os.Stat(cfBin); err != nil {
+		logger.LogInfo("Step 4: Installing Cloudflared %s for Linux ARM64...", CloudflaredVersion)
+		downloadUrl := fmt.Sprintf("https://github.com/cloudflare/cloudflared/releases/download/%s/cloudflared-linux-arm64", CloudflaredVersion)
+		runSimpleShell(fmt.Sprintf("mkdir -p %s && wget -q -O %s %s && chmod +x %s", cfDir, cfBin, downloadUrl, cfBin))
+		logItemStatus("Cloudflared", CloudflaredVersion, cfBin, false)
+	} else {
+		logItemStatus("Cloudflared", CloudflaredVersion, cfBin, true)
+	}
 }
 
 func installLocalDepsMacOSARM() {
@@ -615,12 +627,28 @@ func installLocalDepsMacOSARM() {
 		runSimpleShell(fmt.Sprintf("curl -L -o %s/%s %s", depsDir, zigTarball, downloadUrl))
 		runSimpleShell(fmt.Sprintf("mkdir -p %s && tar -C %s --strip-components=1 -xJf %s/%s", zigDir, zigDir, depsDir, zigTarball))
 		os.Remove(filepath.Join(depsDir, zigTarball))
-		logItemStatus("Zig", ZigVersion, zigBin, false)
-	} else {
 		logItemStatus("Zig", ZigVersion, zigBin, true)
 	}
 
+	// 4. Install Cloudflared
+	installCloudflaredMacOSARM(depsDir)
+
 	printInstallComplete(depsDir)
+}
+
+func installCloudflaredMacOSARM(depsDir string) {
+	cfDir := filepath.Join(depsDir, "cloudflare")
+	cfBin := filepath.Join(cfDir, "cloudflared")
+	if _, err := os.Stat(cfBin); err != nil {
+		logger.LogInfo("Step 4: Installing Cloudflared %s for macOS ARM64...", CloudflaredVersion)
+		downloadUrl := fmt.Sprintf("https://github.com/cloudflare/cloudflared/releases/download/%s/cloudflared-darwin-arm64.tgz", CloudflaredVersion)
+		runSimpleShell(fmt.Sprintf("curl -L -o %s/cloudflared.tgz %s", depsDir, downloadUrl))
+		runSimpleShell(fmt.Sprintf("mkdir -p %s && tar -C %s -xzf %s/cloudflared.tgz", cfDir, cfDir, depsDir))
+		os.Remove(filepath.Join(depsDir, "cloudflared.tgz"))
+		logItemStatus("Cloudflared", CloudflaredVersion, cfBin, false)
+	} else {
+		logItemStatus("Cloudflared", CloudflaredVersion, cfBin, true)
+	}
 }
 
 func printInstallComplete(depsDir string) {
