@@ -37,7 +37,7 @@ Integrate Cloudflare Tunnels as a Dialtone plugin (`cloudflare`) to enable secur
 - description: Implement a `serve` command (e.g., `./dialtone.sh cloudflare serve <port> [--tunnel <name>]`) to forward local HTTP traffic.
 - test-description: Verify the command starts a tunnel session.
 - test-command: `./dialtone.sh test ticket cloudflare-tunnel --subtask cloudflare-serve`
-- status: todo
+- status: done
 
 ## SUBTASK: start ticket work via `dialtone.sh` cli
 - name: ticket-start
