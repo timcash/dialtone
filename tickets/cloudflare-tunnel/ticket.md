@@ -44,7 +44,7 @@ Integrate Cloudflare Tunnels as a Dialtone plugin (`cloudflare`) to enable secur
 - description: run the cli command `dialtone.sh ticket start cloudflare-tunnel`
 - test-description: verify ticket is scaffolded and branch created
 - test-command: `dialtone.sh test ticket cloudflare-tunnel`
-- status: todo
+- status: done
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
