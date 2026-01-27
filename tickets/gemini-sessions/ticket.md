@@ -23,7 +23,7 @@ Enable session management for the Gemini CLI integration, allowing users to list
 - description: Modify `src/plugins/ai/cli/gemini.go` to detect session flags (`--list-sessions`, `--resume`, `--delete-session`) and avoid forcing the `chat` subcommand or requiring a prompt.
 - test-description: Verify `--list-sessions` works.
 - test-command: `./dialtone.sh ai --gemini --list-sessions`
-- status: todo
+- status: done
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
