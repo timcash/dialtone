@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"dialtone/cli/src/core/test"
 	"dialtone/cli/src/core/logger"
+	"dialtone/cli/src/core/config"
 )
 
 func init() {
@@ -22,7 +23,11 @@ func RunAll() error {
 }
 
 func RunInstallTest() error {
-	binPath := filepath.Join("src", "plugins", "cloudflare", "bin", "cloudflared")
+	depsDir := config.GetDialtoneEnv()
+	if depsDir == "" {
+		return fmt.Errorf("DIALTONE_ENV is not set")
+	}
+	binPath := filepath.Join(depsDir, "cloudflare", "cloudflared")
 	if _, err := os.Stat(binPath); os.IsNotExist(err) {
 		return fmt.Errorf("cloudflared binary not found at %s", binPath)
 	}
