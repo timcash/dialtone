@@ -31,3 +31,15 @@ The `ticket` plugin delegates several commands to the `github` plugin for seamle
 #2. Runs `vercel list` in `src/plugins/www/app` to show deployments.
 ./dialtone.sh github check-deploy # Check Vercel deployment status.
 ```
+
+
+## Git Workflow
+```bash
+git status                        # Check git status
+git add .                         # Add all changes
+git commit -m "feat|fix|chore|docs: description" # Commit changes
+git push --set-upstream origin <branch-name> # push branch to remote first time
+git push                          # Push updated branch to remote
+git pull origin main              # Pull changes
+git merge main                    # Merge main into current branch
+```
