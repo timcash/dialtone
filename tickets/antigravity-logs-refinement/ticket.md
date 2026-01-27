@@ -9,7 +9,7 @@ Refine the `ide antigravity logs` command by implementing an additive flag syste
 - description: Update `src/plugins/ide/cli/ide.go` to support `--chat` and `--commands`. The logic should be additive: if flags are provided, only show those types. If no flags are provided, show everything.
 - test-description: Verify that flags can be combined and logic is additive.
 - test-command: `./dialtone.sh ide antigravity logs --chat --commands`
-- status: todo
+- status: done
 
 ## SUBTASK: Implement log line coloring
 - name: log-coloring
