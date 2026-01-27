@@ -32,6 +32,7 @@ This is the autonomous engine that solves tickets.
 | `./dialtone.sh ai opencode stop` | Stops the running assistant server. |
 | `./dialtone.sh ai developer` | Starts the autonomous loop to solve open tickets. |
 | `./dialtone.sh ai subagent --task <file>` | Runs a specific task file using the AI assistant. |
+| `./dialtone.sh ai auth` | Authenticates with Google/Gemini. |
 | `./dialtone.sh ai --gemini "prompt"` | Proxies a prompt to the Google Gemini CLI. |
 | `./dialtone.sh ai install` | Installs @google/gemini-cli locally in `DIALTONE_ENV`. |
 | `./dialtone.sh ai build` | Verifies AI component readiness (part of the main build). |
