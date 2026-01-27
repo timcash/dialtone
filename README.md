@@ -1,19 +1,19 @@
 # [Dialtone](https://dialtone.earth)
 
-Dialtone is aspirationally a **robotic video operations network** designed to allow humans and AI to cooperatively train and operate thousands of robots simultaneously with low latency. Dialtone is open source and free to use and lets people get paid to build, train and operate robots.
+Dialtone is a AI assisted Command Line Interface (CLI) for building, testing, and operating large robotic video and data networks.
 
 ![dialtone](./dialtone.jpg)
 
 # Vision
-Dialtone aims to combine human intuition and machine precision into a unified mesh network, making robotic hardware for factory, field, civic, and home automation widely available.
-1. Humans can remotely oversee, teleoperate, and teach robots from anywhere in the world.
-2. AI agents can learn from human demonstrations, process complex sensory data, and execute tasks autonomously.
-3. Field Radio Uplinks (FRU) relay real-time video and telemetry through open-source radio and compute hardware.
-4. A Single Software Binary (SSB) is simple to deploy and use.
-5. Open Assembly Instructions allow the robot system to be assembled in a garage with the correct tools and parts.
-6. Maintainable Parts and Code create a cyclic ecosystem.
+Dialtone is a clean-room build for robotic systems that scale through four concrete capabilities:
+1. Open hardware and software so anyone can build, modify, and deploy the stack.
+2. Human-in-the-loop remote operations so people can supervise, teleoperate, and teach robots.
+3. Private, encrypted network communication that keeps fleets secure and coordinated.
+4. Field radios that move real-time video and telemetry across open radio and compute hardware.
+5. A geospatial operating system to manage robots across real-world terrain and context.
+6. Self-adapting programs that learn, compose, and improve as the network grows.
 
-## Skills
+# Skills
 Skill are systems of systems that combine into valuable real world actions like navigating a robot or modifying and testing code.
 1. Autocode: Fast, safe code evolution that scales AI-assisted control across large robot networks.
 2. CLI: A single operational interface that standardizes control across distributed fleets.
@@ -28,9 +28,9 @@ Skill are systems of systems that combine into valuable real world actions like 
 11. CAD: Simulation-first validation that reduces risk when rolling updates across fleets.
 12. Web: Public and operator visibility that extends network control beyond the CLI.
 13. Social: Shared moments and coordination channels that strengthen network engagement.
-14. Cyber Defense: Security automation that protects large robotic operation networks.
+14. Cyber: Security automation that constantly scan the network for threats.
 15. Maintenance: Cyclic parts and repair supply chains that keep distributed fleets sustainable.
-16. Mock Mode: Hardware-free simulation that keeps network-scale testing and iteration moving.
+16. Mocks: Hardware-free simulations to speed testing and development.
 
 # Binary Architecture: Production vs. Development
 Both systems contain the same core code but differ in their capabilities.
@@ -290,7 +290,9 @@ src/plugins/<name>/
 3. OUTCOME: Clear checks and artifacts that keep agents aligned.
 
 # Workflows
-1. [Issue Review](docs/workflows/issue_review.md)
+1. [Issue Review](docs/workflows/issue_review.md): Planning-only triage flow that audits issues, asks clarifying questions, and promotes validated tickets.
+2. [Ticket](docs/workflows/ticket.md): Execution workflow for ticket-driven development from `ticket start` through `ticket done` with TDD and scope control.
+3. [Subtask Expansion](docs/workflows/subtask_expand.md): Planning flow to refine or split subtasks into clear, testable 10-minute units.
 
 
 # Join the Mission
