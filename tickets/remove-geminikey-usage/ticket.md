@@ -2,21 +2,21 @@
 # Tags: <tags>
 
 # Goal
-<goal>
+Remove all `geminiKey` usage from the AI plugin and ensure it strictly uses `GOOGLE_API_KEY`.
 
 ## SUBTASK: start ticket work via `dialtone.sh` cli
 - name: ticket-start
 - description: to start work run the cli command `dialtone.sh ticket start remove-geminikey-usage`
 - test-description: run the ticket tests to verify that the ticket is in a valid state
 - test-command: `dialtone.sh test ticket remove-geminikey-usage`
-- status: todo
+- status: done
 
-## SUBTASK: <subtask-title>
-- name: <subtask-name> (only lowercase and dashes)
-- description: <description>
-- test-description: <test-description>
-- test-command: <test-command>
-- status: todo | processing | done
+## SUBTASK: verify removal of geminiKey usage
+- name: verify-removal
+- description: Ensure no occurrences of `geminiKey` remain in the src/plugins/ai/cli directory.
+- test-description: Run a grep search to verify no occurrences exist.
+- test-command: `dialtone.sh test ticket remove-geminikey-usage --subtask verify-removal`
+- status: todo
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
