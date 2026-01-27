@@ -1,0 +1,9 @@
+Progress log for standardize-cli-docs
+
+- Started ticket standardize-cli-docs.
+- Consolidated documentation for test, ticket, github, cloudflare, ide, and ai plugins into bash blocks.
+- Standardized argument placeholders across READMEs and CLI help output in Go code.
+- Verified changes across all modified files.
+- Updated all workflows (ticket.md, issue_review.md, subtask_expand.md) to include standardized progress reporting instructions.
+- Synced updated workflows to .agent/ directory.
+- Completed all subtasks for standardize-cli-docs.
