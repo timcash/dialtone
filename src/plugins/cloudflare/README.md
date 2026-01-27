@@ -77,6 +77,28 @@ Connect your local port to the Cloudflare edge using the tunnel you just created
 ./dialtone.sh cloudflare tunnel run <tunnel-name> --url http://127.0.0.1:8080
 ```
 
+## Workflow: Local-Only Mock Development
+
+This workflow is ideal for testing the Web UI and telemetry systems without needing a Tailscale connection.
+
+### 1. Start Dialtone with Mock Data
+Run Dialtone in local-only mode. This starts the NATS server, Mavlink mock, and the Web UI on a specified local port.
+```bash
+# --local-only: Disables Tailscale integration
+# --mock: Generates mock telemetry and camera data
+./dialtone.sh start --local-only --mock --web-port 8080
+```
+
+### 2. Expose to the Public Web
+Since the node isn't on Tailscale, use a Cloudflare Tunnel to share the UI with others using your `DIALTONE_HOSTNAME`.
+```bash
+# 1. Prepare the route (defaults to <DIALTONE_HOSTNAME>.dialtone.earth)
+./dialtone.sh cloudflare tunnel route <tunnel-name>
+
+# 2. Run the tunnel pointing to your local web port
+./dialtone.sh cloudflare tunnel run <tunnel-name> --url http://127.0.0.1:8080
+```
+
 ## Troubleshooting
 - **Cloudflared not found**: Ensure you have run `./dialtone.sh install` to download the binary to your `DIALTONE_ENV`.
 - **Auth issues**: If commands fail with 401/403, re-run `./dialtone.sh cloudflare login`.
