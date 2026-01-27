@@ -30,7 +30,7 @@ Refine the `ide antigravity logs` command by implementing an additive flag syste
 - description: run the cli command `dialtone.sh ticket start antigravity-logs-refinement`
 - test-description: verify ticket is scaffolded and branch created
 - test-command: `dialtone.sh test ticket antigravity-logs-refinement`
-- status: todo
+- status: done
 
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli
