@@ -23,7 +23,7 @@ Integrate Cloudflare Tunnels as a Dialtone plugin (`cloudflare`) to enable secur
 - description: Add a `login` subcommand to the cloudflare plugin that wraps `cloudflared tunnel login`.
 - test-description: Verify the command triggers the cloudflared login process.
 - test-command: `./dialtone.sh test ticket cloudflare-tunnel --subtask cloudflare-login`
-- status: todo
+- status: done
 
 ## SUBTASK: Implement Tunnel Management
 - name: cloudflare-tunnel-mgmt
