@@ -5,8 +5,10 @@ The `ticket` plugin delegates several commands to the `github` plugin for seamle
 ```bash
 ./dialtone.sh github issue create # Create a new GitHub issue.
 ./dialtone.sh github issue view <id> # View details of an issue.
+./dialtone.sh github issue <id> --ready # Mark an issue as 'ticket' ready.
 ./dialtone.sh github issue comment <id> <msg> # Comment on an issue.
 ./dialtone.sh github issue close <id> # Close an issue.
+./dialtone.sh github issue list --markdown # List open issues in a markdown table.
 ./dialtone.sh github issue list # List open issues (JSON output).
 ./dialtone.sh github issue sync # (DEPRECATED) Sync open issues into tickets.
 ./dialtone.sh github issue close-all # Close all open issues.

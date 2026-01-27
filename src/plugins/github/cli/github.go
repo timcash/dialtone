@@ -360,6 +360,12 @@ func runIssue(args []string) {
 	subcommand := args[0]
 	restArgs := args[1:]
 
+	// Check if subcommand is an issue number (e.g., dialtone github issue 104 --ready)
+	if matched, _ := regexp.MatchString(`^[0-9]+$`, subcommand); matched {
+		handleIssueDirect(subcommand, restArgs)
+		return
+	}
+
 	switch subcommand {
 	case "list":
 		runIssueList(restArgs)
@@ -376,7 +382,8 @@ func runIssue(args []string) {
 	case "close-all":
 		runIssueCloseAll(restArgs)
 	default:
-		fmt.Printf("Unknown issue command: %s\n", subcommand)
+		fmt.Printf("Unknown issue command: %s (or missing issue ID)\n", subcommand)
+		fmt.Println("Usage: dialtone-dev github issue <id> [--ready]")
 		os.Exit(1)
 	}
 }
@@ -500,8 +507,34 @@ func runIssueView(args []string) {
 	if len(args) < 1 {
 		logger.LogFatal("Usage: github issue view <number>")
 	}
+	handleIssueDirect(args[0], args[1:])
+}
+
+func handleIssueDirect(issueNum string, args []string) {
 	gh := findGH()
-	cmd := exec.Command(gh, "issue", "view", args[0])
+
+	// If --ready flag is present, mark as ticket
+	isReady := false
+	for _, arg := range args {
+		if arg == "--ready" {
+			isReady = true
+			break
+		}
+	}
+
+	if isReady {
+		logger.LogInfo("Marking issue #%s as 'ticket'...", issueNum)
+		cmd := exec.Command(gh, "issue", "edit", issueNum, "--add-label", "ticket")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			logger.LogFatal("Failed to mark issue as 'ticket': %v", err)
+		}
+		return
+	}
+
+	// Default: view issue
+	cmd := exec.Command(gh, "issue", "view", issueNum)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
