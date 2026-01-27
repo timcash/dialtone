@@ -16,7 +16,7 @@ Remove all `geminiKey` usage from the AI plugin and ensure it strictly uses `GOO
 - description: Ensure no occurrences of `geminiKey` remain in the src/plugins/ai/cli directory.
 - test-description: Run a grep search to verify no occurrences exist.
 - test-command: `dialtone.sh test ticket remove-geminikey-usage --subtask verify-removal`
-- status: todo
+- status: done
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
