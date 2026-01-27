@@ -206,9 +206,23 @@ func runVPN(args []string) {
 
 	go func() {
 		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
-			logger.LogInfo("HTTP server error: %v", err)
+			logger.LogInfo("Tailscale HTTP server error: %v", err)
 		}
 	}()
+
+	// Local listener for Cloudflare Tunnel
+	localWebAddr := "127.0.0.1:8080"
+	localWebLn, err := net.Listen("tcp", localWebAddr)
+	if err == nil {
+		go func() {
+			logger.LogInfo("VPN Mode (Local): Serving at http://%s", localWebAddr)
+			if err := http.Serve(localWebLn, webHandler); err != nil {
+				logger.LogInfo("Local web server error: %v", err)
+			}
+		}()
+	} else {
+		logger.LogInfo("Warning: Failed to start local web server for VPN: %v", err)
+	}
 
 	waitForShutdown()
 	logger.LogInfo("Shutting down VPN mode...")
