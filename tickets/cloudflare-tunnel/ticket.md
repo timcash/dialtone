@@ -9,7 +9,7 @@ Integrate Cloudflare Tunnels as a Dialtone plugin (`cloudflare`) to enable secur
 - description: Create the plugin structure in `src/plugins/cloudflare` using the CLI.
 - test-description: Verify directory exists and has a README.md.
 - test-command: `./dialtone.sh test ticket cloudflare-tunnel --subtask cloudflare-plugin-add`
-- status: todo
+- status: done
 
 ## SUBTASK: Implement Cloudflare installation logic
 - name: cloudflare-install
