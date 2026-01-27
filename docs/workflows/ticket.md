@@ -108,6 +108,21 @@ Follow this loop for **every** subtask.
    ```bash
    ./dialtone.sh ticket subtask done <name>
    ```
+6. **Report Progress**: After marking a subtask as done, ALWAYS report the current status of all subtasks to the USER.
+   ```bash
+   ./dialtone.sh ticket subtask list
+   ```
+   **Output Example:**
+   ```bash
+   Subtasks for <ticket-name>:
+   ---------------------------------------------------
+   [x] subtask-1 (done)
+   [/] subtask-2 (progress)
+   [ ] subtask-3 (todo)
+   [!] subtask-4 (failed)
+   ---------------------------------------------------
+   ```
+
 
 ## 7. Recovering from Failures
 

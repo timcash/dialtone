@@ -104,6 +104,23 @@ An issue is **Ticket Ready** ONLY when a local `ticket.md` meets these criteria:
 ./dialtone.sh github issue <id> --ready --ticket
 ```
 
+## 5. Report Progress
+After each subtask is complete or when preparing a ticket, ALWAYS report the current status of all subtasks to the USER.
+```bash
+./dialtone.sh ticket subtask list
+```
+**Output Example:**
+```bash
+Subtasks for <ticket-name>:
+---------------------------------------------------
+[x] subtask-1 (done)
+[/] subtask-2 (progress)
+[ ] subtask-3 (todo)
+[!] subtask-4 (failed)
+---------------------------------------------------
+```
+
+
 ---
 
 ## 5. Labeling Reference
