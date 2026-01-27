@@ -14,6 +14,8 @@ func main() {
 		fmt.Println("Usage: go run main.go <pb_file>")
 		os.Exit(1)
 	}
+	fmt.Printf("DEBUG: os.Args: %v\n", os.Args)
+	fmt.Printf("DEBUG: Reading file: %s\n", os.Args[1])
 
 	data, err := os.ReadFile(os.Args[1])
 	if err != nil {
@@ -26,6 +28,7 @@ func main() {
 	// If it's length prefixed, the first "tag" will be invalid field number or wire type.
 	// But let's try to parse as sequence of length-prefixed messages manually.
 	
+	/*
 	offset := 0
 	for offset < len(data) {
 		// Read varint length
@@ -54,11 +57,15 @@ func main() {
 		
 		offset += n + length
 	}
+	*/
+	dump(data, "")
 }
 
 func dump(data []byte, path string) {
+	fmt.Printf("DEBUG: dump called with %d bytes, path %s\n", len(data), path)
 	for len(data) > 0 {
 		num, typ, n := protowire.ConsumeTag(data)
+		fmt.Printf("DEBUG: ConsumeTag: num=%d, typ=%d, n=%d\n", num, typ, n)
 		if n < 0 {
 			break
 		}
@@ -75,27 +82,26 @@ func dump(data []byte, path string) {
 				dump(v, fmt.Sprintf("%s.%d", path, num))
 			}
 
-			// Also check if this specific byte slice is the string
 			if utf8.Valid(v) {
 				s := string(v)
-				// Look for part of the user's prompt
-				if strings.Contains(s, "missing chat logs") {
+				if strings.Contains(s, "test") {
 					fmt.Printf("FOUND AT PATH %s Field %d: %q\n", path, num, s)
 				}
-				// Also print short strings to see roles
-				if len(s) < 20 {
+				if len(s) < 50 {
 					fmt.Printf("PATH %s Field %d Val: %q\n", path, num, s)
 				}
 			}
 
 			data = data[n:]
 		} else if typ == protowire.VarintType {
-			_, n := protowire.ConsumeVarint(data)
+			v, n := protowire.ConsumeVarint(data)
 			if n < 0 { break }
+			fmt.Printf("PATH %s Field %d (Varint): %d\n", path, num, v)
 			data = data[n:]
 		} else {
 			n := protowire.ConsumeFieldValue(num, typ, data)
 			if n < 0 { break }
+			fmt.Printf("PATH %s Field %d (Type %d)\n", path, num, typ)
 			data = data[n:]
 		}
 	}

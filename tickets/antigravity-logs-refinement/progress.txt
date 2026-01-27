@@ -10,4 +10,6 @@ Progress log for antigravity-logs-refinement
 - finalize ticket
 - [Subtask] proto-decoder: Implemented Protobuf decoder for real-time chat logging and added automated test.
 - [Subtask] improve-go-plugin: Added 'exec' and 'pb-dump' subcommands to Go plugin as requested.
+- [Subtask] fix-missing-chat-logs: investigated chat logs, located in .pb files but confirmed as compressed/encoded. documented findings in find_chats.md.
+- [Subtask] test-verify-chat-logs: skipped due to decoding dependency.
 - verified all tests pass

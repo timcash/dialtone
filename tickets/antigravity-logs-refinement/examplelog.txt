@@ -1,0 +1,24 @@
+[2026-01-27T11:00:40.314-08:00 | INFO | asm_arm64.s:goexit:1268] Starting chat log stream...
+[2026-01-27T11:00:40.314-08:00 | INFO | ide.go:func1:107] Tailing conversation: /Users/tim/.gemini/antigravity/conversations/a63e0035-dff6-4e4f-9d45-d0f3ba4d7e18.pb
+[2026-01-27T11:00:40.317-08:00 | INFO | asm_arm64.s:goexit:1268] Tailing system log: /Users/tim/Library/Application Support/Antigravity/logs/20260126T220052/window6/exthost/google.antigravity/Antigravity.log
+2026-01-27 11:00:38.919 [info] I0127 11:00:38.919637 55829 timestamps.go:61] Touching accessed time for KI file:///Users/tim/.gemini/antigravity/knowledge/dialtone_project_overview
+2026-01-27 11:00:39.088 [info] E0127 11:00:39.088865 55829 log.go:354] argument order was not respected: [TaskName Mode PredictedTaskSize] vs [Mode PredictedTaskSize TaskName TaskStatus TaskSummary]
+[CMD ] 2026-01-27 11:00:39.187 [info] (Antigravity) 2026-01-27 11:00:39.186 [INFO]: [Terminal] Command completed: ls -lt $HOME/.gemini/antigravity/conversations/*.pb | head -n 1 exit code 0
+2026-01-27 11:00:39.196 [info] E0127 11:00:39.196347 55829 log.go:354] Checkpoint summary was too long and was truncated to 7500 tokens
+2026-01-27 11:00:39.208 [info] E0127 11:00:39.208146 55829 log.go:354] Checkpoint summary was too long and was truncated to 7500 tokens
+2026-01-27 11:00:39.210 [info] E0127 11:00:39.210214 55829 log.go:354] Checkpoint summary was too long and was truncated to 7500 tokens
+2026-01-27 11:00:39.218 [info] E0127 11:00:39.218620 55829 log.go:354] Checkpoint summary was too long and was truncated to 7500 tokens
+2026-01-27 11:00:39.220 [info] E0127 11:00:39.220299 55829 log.go:354] Checkpoint summary was too long and was truncated to 7500 tokens
+2026-01-27 11:00:40.688 [info] I0127 11:00:40.688444 55829 http_helpers.go:124] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse Trace: 0xbd2e9d3f787df63a
+2026-01-27 11:00:41.281 [info] I0127 11:00:41.281530 55829 timestamps.go:61] Touching accessed time for KI file:///Users/tim/.gemini/antigravity/knowledge/dialtone_project_overview
+2026-01-27 11:00:43.933 [info] I0127 11:00:43.933093 55829 http_helpers.go:124] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse Trace: 0xd6388b618b0eecba
+2026-01-27 11:00:44.784 [info] I0127 11:00:44.784650 55829 http_helpers.go:124] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse Trace: 0xf600a9e7c3cfb43d
+2026-01-27 11:00:49.433 [info] I0127 11:00:49.433288 55829 timestamps.go:61] Touching accessed time for KI file:///Users/tim/.gemini/antigravity/knowledge/dialtone_plugin_ecosystem
+2026-01-27 11:00:49.438 [info] E0127 11:00:49.438630 55829 log.go:354] argument order was not respected: [TaskName Mode PredictedTaskSize] vs [Mode PredictedTaskSize TaskName TaskStatus TaskSummary]
+2026-01-27 11:00:49.963 [info] E0127 11:00:49.963099 55829 log.go:354] Checkpoint summary was too long and was truncated to 7500 tokens
+2026-01-27 11:00:49.970 [info] E0127 11:00:49.970876 55829 log.go:354] Checkpoint summary was too long and was truncated to 7500 tokens
+2026-01-27 11:00:49.978 [info] E0127 11:00:49.977984 55829 log.go:354] Checkpoint summary was too long and was truncated to 7500 tokens
+2026-01-27 11:00:50.012 [info] E0127 11:00:50.012262 55829 log.go:354] Checkpoint summary was too long and was truncated to 7500 tokens
+2026-01-27 11:00:50.017 [info] E0127 11:00:50.017024 55829 log.go:354] Checkpoint summary was too long and was truncated to 7500 tokens
+2026-01-27 11:00:51.760 [info] I0127 11:00:51.760168 55829 http_helpers.go:124] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse Trace: 0x11697d22591ddc0f
+2026-01-27 11:00:52.043 [info] I0127 11:00:52.043568 55829 timestamps.go:61] Touching accessed time for KI file:///Users/tim/.gemini/antigravity/knowledge/dialtone_plugin_ecosystem
