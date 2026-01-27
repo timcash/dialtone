@@ -46,7 +46,7 @@ func runSimpleShell(command string) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		logger.LogFatal("Command failed: %v", command, err)
+		logger.LogFatal("Command failed: %s: %v", command, err)
 	}
 }
 
@@ -194,7 +194,7 @@ func RunInstall(args []string) {
 	if err != nil {
 		logger.LogFatal("Failed to install Go: %v\nOutput: %s", err, output)
 	}
-	logger.LogInfo(output)
+	logger.LogInfo("%s", output)
 
 	// Install Node.js (Remote)
 	installNodeCmd := fmt.Sprintf(`
@@ -210,7 +210,7 @@ func RunInstall(args []string) {
 	if err != nil {
 		logger.LogFatal("Failed to install Node.js: %v\nOutput: %s", err, output)
 	}
-	logger.LogInfo(output)
+	logger.LogInfo("%s", output)
 }
 
 func installLocalAuto() {
