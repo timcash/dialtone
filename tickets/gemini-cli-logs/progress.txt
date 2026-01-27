@@ -18,3 +18,4 @@
 - Implemented `--tools` and `--errors` flags for `ai gemini` to enable colorized markers (`[TOOL]` in Cyan, `[ERR]` in Red) in raw mode.
 - Verified that `--tools` correctly forces `--debug` on the underlying CLI to capture tool call details.
 - Confirmed that tool calls and error messages are correctly identified and highlighted in terminal output.
+- Finalized ticket expansion subtasks.
