@@ -5,3 +5,4 @@ Progress log for cloudflare-tunnel
 - Implemented cloudflare plugin shell with login, tunnel, and serve commands.
 - Registered cloudflare plugin in dev.go.
 - Implementing cloudflare login subcommand.
+- Implemented cloudflare tunnel create and list subcommands.
