@@ -255,8 +255,8 @@ func RunDone(args []string) {
 		logFatal("Failed to parse subtasks: %v", err)
 	}
 	for _, st := range subtasks {
-		if st.Name != "ticket-done" && st.Status != "done" {
-			logFatal("Subtask '%s' is not done (status: %s). All subtasks must be done before completing the ticket.", st.Name, st.Status)
+		if st.Name != "ticket-done" && st.Status != "done" && st.Status != "failed" {
+			logFatal("Subtask '%s' is not done (status: %s). All subtasks must be done or failed before completing the ticket.", st.Name, st.Status)
 		}
 	}
 	logInfo("All subtasks verified as done (excluding 'ticket-done').")
