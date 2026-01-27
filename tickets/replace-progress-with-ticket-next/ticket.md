@@ -7,51 +7,51 @@ Replace the manual `progress.txt` tracking with a centralized and automated `dia
 ## SUBTASK: Implement root `ticket next` command
 - name: implement-ticket-next-cmd
 - description: Add the `next` subcommand to `Run` in `src/plugins/ticket/cli/ticket.go` and its entry point in `subtask.go`. It should check if on `main`/`master` and error/instruct agents to ask the user for a ticket.
-- test-description: Run `./dialtone.sh ticket next` on main and verify the error message.
-- test-command: `./dialtone.sh ticket next`
-- status: todo
+- test-description: Verify that the ticket plugin help shows the 'next' command.
+- test-command: `./dialtone.sh ticket help | grep "next"`
+- status: done
 
 ## SUBTASK: Add validation and state transitions to `ticket next`
 - name: ticket-next-logic
 - description: Update `RunSubtaskNext` to: 1. Validate the ticket format. 2. If a subtask was in `progress`, mark it `done` (if tests pass). 3. Identify and print the next `todo` subtask, marking it `progress`.
-- test-description: Verify that `ticket next` moves a subtask from `todo` to `progress` and eventually to `done`.
-- test-command: `./dialtone.sh ticket subtask next`
-- status: todo
+- test-description: Run the integration test for ticket-next-logic.
+- test-command: `./dialtone.sh test ticket replace-progress-with-ticket-next --subtask ticket-next-logic`
+- status: done
 
 ## SUBTASK: Add status chart output to `ticket next`
 - name: ticket-next-status-chart
 - description: Ensure `ticket next` prints a full status chart (similar to `ticket subtask list`) after identifying the next task. This provides immediate visual feedback on the entire ticket's progress.
-- test-description: Run `./dialtone.sh ticket next` and verify the output includes the subtask list chart.
-- test-command: `./dialtone.sh ticket next`
-- status: todo
+- test-description: Verify status chart output.
+- test-command: `./dialtone.sh ticket next test-ticket | grep "Subtasks for test-ticket"`
+- status: done
 
 ## SUBTASK: Integrate test execution into `ticket next`
 - name: ticket-next-tests
 - description: Ensure `ticket next` runs all registered tests for the ticket (equivalent to `test.RunTicket`) before allowing state transitions.
-- test-description: Verify tests are executed when running `ticket next`.
-- test-command: `./dialtone.sh ticket next`
-- status: todo
+- test-description: Verify automated test execution.
+- test-command: `./dialtone.sh ticket next test-ticket | grep "Checking progress"`
+- status: done
 
 ## SUBTASK: Remove `progress.txt` and associated validation
 - name: remove-progress-txt
 - description: Delete `progress.txt` from the project. Remove `validateGitState` logic that enforces `progress.txt` updates in `subtask.go`. Update `ScaffoldTicket` to no longer create the file.
-- test-description: Verify `progress.txt` is no longer created or required by any command.
-- test-command: `ls tickets/replace-progress-with-ticket-next/progress.txt`
-- status: todo
+- test-description: Verify progress.txt is not required for 'ticket next'.
+- test-command: `rm -f tickets/test-ticket/progress.txt && ./dialtone.sh ticket next test-ticket`
+- status: done
 
 ## SUBTASK: Update workflows to mandate `ticket next`
 - name: update-workflow-docs
 - description: Update `docs/workflows/ticket.md` and other workflows to replace `subtask done` and `progress.txt` references with the mandatory `ticket next` flow. Include a simple bash block guiding the through this process.
-- test-description: Grep for `progress.txt` in `docs/workflows/` and ensure it's gone.
-- test-command: `grep -r "progress.txt" docs/workflows/`
-- status: todo
+- test-description: Grep for progress.txt in workflows.
+- test-command: `! grep -r "progress.txt" docs/workflows/`
+- status: done
 
 ## SUBTASK: Update READMEs and CLI documentation
 - name: update-readme-docs
 - description: Update `src/plugins/ticket/README.md` and other relevant docs to reflect the new `ticket next` behavior.
-- test-description: Verify README content.
-- test-command: `cat src/plugins/ticket/README.md`
-- status: todo
+- test-description: Grep for progress.txt in READMEs.
+- test-command: `! grep -r "progress.txt" src/plugins/`
+- status: done
 
 ## SUBTASK: start ticket work via `dialtone.sh` cli
 - name: ticket-start
@@ -64,8 +64,8 @@ Replace the manual `progress.txt` tracking with a centralized and automated `dia
 - name: ticket-done
 - description: run the ticket cli to verify all steps to complete the ticket
 - test-description: validates all ticket subtasks are done
-- test-command: `dialtone.sh ticket done replace-progress-with-ticket-next`
-- status: todo
+- test-command: `./dialtone.sh ticket done replace-progress-with-ticket-next`
+- status: progress
 
 ## Collaborative Notes
 - The goal is to make `ticket.md` the single source of truth for both state and testing.

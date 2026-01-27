@@ -12,6 +12,9 @@ This is the **Source of Truth** for the Dialtone Issue Management API.
 
 ## 1. CLI API Reference
 ```bash
+# The primary driver for TDD. Validates, runs tests, and manages subtask state.
+./dialtone.sh ticket next
+
 # List open issues in a clean, agent-readable markdown table.
 ./dialtone.sh github issue list --markdown
 
@@ -105,9 +108,9 @@ An issue is **Ticket Ready** ONLY when a local `ticket.md` meets these criteria:
 ```
 
 ## 5. Report Progress
-After each subtask is complete or when preparing a ticket, ALWAYS report the current status of all subtasks to the USER.
+ALWAYS use `ticket next` to report the current status and identify the next task.
 ```bash
-./dialtone.sh ticket subtask list
+./dialtone.sh ticket next
 ```
 **Output Example:**
 ```bash
@@ -118,6 +121,10 @@ Subtasks for <ticket-name>:
 [ ] subtask-3 (todo)
 [!] subtask-4 (failed)
 ---------------------------------------------------
+
+Next Subtask:
+Name: <name>
+...
 ```
 
 

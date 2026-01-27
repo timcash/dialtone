@@ -25,6 +25,7 @@ func Run(args []string) {
 	if len(args) == 0 {
 		fmt.Println("Usage: dialtone-dev ticket <subcommand> [options]")
 		fmt.Println("\nSubcommands:")
+		fmt.Println("  next               Automated TDD loop (validate, test, and transition)")
 		fmt.Println("  add [<name>]       Add a new local ticket (scaffold only)")
 		fmt.Println("  start <name>       Start a new ticket (branch + scaffold + PR)")
 		fmt.Println("  done [<name>]      Verify and complete ticket (commit + merge)")
@@ -43,6 +44,8 @@ func Run(args []string) {
 	subArgs := args[1:]
 
 	switch subcommand {
+	case "next":
+		RunTicketNext(subArgs)
 	case "add":
 		RunAdd(subArgs)
 	case "start":
@@ -197,7 +200,6 @@ func RunStart(args []string) {
 	}
 
 	logInfo("Ticket %s started successfully", ticketName)
-	logReminder(ticketName)
 }
 
 func ScaffoldTicket(ticketName string) {
@@ -228,14 +230,6 @@ func ScaffoldTicket(ticketName string) {
 		}
 	}
 
-	progressTxt := filepath.Join(ticketDir, "progress.txt")
-	if _, err := os.Stat(progressTxt); os.IsNotExist(err) {
-		content := fmt.Sprintf("Progress log for %s\n\n", ticketName)
-		if err := os.WriteFile(progressTxt, []byte(content), 0644); err != nil {
-			logFatal("Failed to create progress.txt: %v", err)
-		}
-		logInfo("Created %s", progressTxt)
-	}
 }
 
 // RunDone handles 'ticket done <ticket-name>'
@@ -262,9 +256,9 @@ func RunDone(args []string) {
 	}
 	logInfo("All subtasks verified as done (excluding 'ticket-done').")
 
-	// 3. Verify git status and progress.txt
+	// 3. Verify git status
 	validateGitState(ticketName)
-	logInfo("Git status clean and progress updated.")
+	logInfo("Git status clean.")
 
 	// 4. Push local changes
 	logInfo("Pushing latest changes to origin...")
@@ -296,12 +290,9 @@ func RunDone(args []string) {
 	}
 
 	logInfo("Ticket %s done setup complete.", ticketName)
-	logReminder(ticketName)
 }
 
-func logReminder(ticketName string) {
-	fmt.Printf("\nREMINDER: remember to update tickets/%s/progress.txt with important notes\n", ticketName)
-}
+// logReminder is removed
 
 func ensureDir(path string) {
 	if err := os.MkdirAll(path, 0755); err != nil {
