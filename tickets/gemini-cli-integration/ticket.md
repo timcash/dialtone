@@ -27,13 +27,25 @@
 - name: install-geminicli
 - description: Update src/plugins/ai/install.go to optionally install geminicli tool.
 - test-command: `./dialtone.sh ai install geminicli`
-- status: todo
+- status: done
 
 ## SUBTASK: Implement geminicli proxy logic
 - name: implement-proxy-logic
 - description: Update src/plugins/ai/cli/gemini.go to proxy commands to geminicli and return results.
 - test-command: `./dialtone.sh ai --gemini "what is dialtone?"`
-- status: todo
+- status: done
+
+## SUBTASK: Implement auth key check and link
+- name: implement-auth-check
+- description: Detect missing GOOGLE_API_KEY and provide authentication link.
+- test-command: `unset GOOGLE_API_KEY && ./dialtone.sh ai --gemini "test"`
+- status: done
+
+## SUBTASK: Update AI plugin README
+- name: update-readme
+- description: Update src/plugins/ai/README.md with --gemini details.
+- test-command: `grep -- "--gemini" src/plugins/ai/README.md`
+- status: done
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
