@@ -368,11 +368,12 @@ func runIssue(args []string) {
 		fmt.Println("\nCommands:")
 		fmt.Println("  list      List open issues")
 		fmt.Println("  sync      (DEPRECATED) Sync open issues to local tickets")
-		fmt.Println("  view      View issue details")
-		fmt.Println("  edit      Edit an issue (add/remove labels)")
-		fmt.Println("  comment   Add a comment to an issue")
-		fmt.Println("  close     Close specific issue(s)")
-		fmt.Println("  close-all Close all open issues")
+		fmt.Println("  view <issue-id>    View issue details")
+		fmt.Println("  edit <issue-id>... Edit an issue (add/remove labels)")
+		fmt.Println("  comment <issue-id> <msg> Add a comment to an issue")
+		fmt.Println("  close <issue-id>... Close specific issue(s)")
+		fmt.Println("  close-all          Close all open issues")
+
 		return
 	}
 
@@ -401,8 +402,9 @@ func runIssue(args []string) {
 	case "close-all":
 		runIssueCloseAll(restArgs)
 	default:
-		fmt.Printf("Unknown issue command: %s (or missing issue ID)\n", subcommand)
-		fmt.Println("Usage: dialtone-dev github issue <id> [--ready]")
+		fmt.Printf("Unknown issue command: %s (or missing issue-id)\n", subcommand)
+		fmt.Println("Usage: dialtone-dev github issue <issue-id> [--ready]")
+
 		os.Exit(1)
 	}
 }
@@ -524,7 +526,8 @@ func runIssueSync(args []string) {
 
 func runIssueView(args []string) {
 	if len(args) < 1 {
-		logger.LogFatal("Usage: github issue view <number>")
+		logger.LogFatal("Usage: github issue view <issue-id>")
+
 	}
 	handleIssueDirect(args[0], args[1:])
 }
@@ -565,7 +568,8 @@ func handleIssueDirect(issueNum string, args []string) {
 
 func runIssueEdit(args []string) {
 	if len(args) < 1 {
-		logger.LogFatal("Usage: dialtone-dev github issue edit <number> [options]")
+		logger.LogFatal("Usage: dialtone-dev github issue edit <issue-id> [options]")
+
 	}
 	issueNum := args[0]
 	gh := findGH()
@@ -611,7 +615,8 @@ func runIssueEdit(args []string) {
 
 func runIssueComment(args []string) {
 	if len(args) < 2 {
-		logger.LogFatal("Usage: github issue comment <number> <message>")
+		logger.LogFatal("Usage: github issue comment <issue-id> <message>")
+
 	}
 	gh := findGH()
 	cmd := exec.Command(gh, "issue", "comment", args[0], "--body", args[1])
@@ -624,7 +629,8 @@ func runIssueComment(args []string) {
 
 func runIssueClose(args []string) {
 	if len(args) == 0 {
-		logger.LogFatal("Usage: dialtone-dev github issue close <number>...")
+		logger.LogFatal("Usage: dialtone-dev github issue close <issue-id>...")
+
 	}
 
 	gh := findGH()

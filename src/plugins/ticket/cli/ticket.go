@@ -25,16 +25,17 @@ func Run(args []string) {
 	if len(args) == 0 {
 		fmt.Println("Usage: dialtone-dev ticket <subcommand> [options]")
 		fmt.Println("\nSubcommands:")
-		fmt.Println("  add <name>         Add a new local ticket (scaffold only)")
+		fmt.Println("  add [<name>]       Add a new local ticket (scaffold only)")
 		fmt.Println("  start <name>       Start a new ticket (branch + scaffold + PR)")
-		fmt.Println("  done <name>        Verify and complete ticket (commit + merge)")
-		fmt.Println("  validate <name>    Validate ticket.md format")
+		fmt.Println("  done [<name>]      Verify and complete ticket (commit + merge)")
+		fmt.Println("  validate [<name>]  Validate ticket.md format")
 		fmt.Println("  list               List local tickets and GitHub issues")
 		fmt.Println("  subtask <subcmd>   Manage subtasks in current ticket")
 		fmt.Println("  create             Create a new GitHub issue")
-		fmt.Println("  view <id>          View GitHub issue details")
-		fmt.Println("  comment <id> <msg> Add a comment to a GitHub issue")
-		fmt.Println("  close <id>         Close a GitHub issue")
+		fmt.Println("  view <issue-id>    View GitHub issue details")
+		fmt.Println("  comment <issue-id> <msg> Add a comment to a GitHub issue")
+		fmt.Println("  close <issue-id>... Close GitHub issue(s)")
+
 		return
 	}
 

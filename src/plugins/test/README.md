@@ -4,23 +4,27 @@ The `test` plugin provides a centralized test runner for `dialtone`. It supports
 
 ## Commands
 
-### `./dialtone.sh test ticket <ticket-name>`
-Runs all tests located in `tickets/<ticket-name>/test/`. It uses `go test` internally.
-- Use `--subtask <subtask-name>` to run a specific subtask test.
-- Use `--list` to see what would run without executing.
+```bash
+# Runs all tests in tickets/<ticket-name>/test/.
+# Use `--subtask <subtask-name>` for a specific test, or `--list` to dry-run.
+./dialtone.sh test ticket <ticket-name>
 
-### `./dialtone.sh test plugin <plugin-name>`
-Runs tests for a specific plugin. Plugins must register a `RunAll() error` function in their `test/` package and connect it to `src/plugins/test/cli/test.go`.
+# Runs tests for a specific plugin. Plugins must register a `RunAll() error`
+# function in their test/ package and connect it to src/plugins/test/cli/test.go.
+./dialtone.sh test plugin <plugin-name>
 
-### `./dialtone.sh test tags [tag1 tag2 ...]`
-Runs all tests registered in the global registry that match any of the specified tags.
-- Example: `./dialtone.sh test tags metadata camera-filters`
+# Runs tests matching any of the specified tags.
+# Example: ./dialtone.sh test tags metadata camera-filters
+./dialtone.sh test tags <tag-name>...
 
-### `./dialtone.sh test`
-Runs all registered tests across all plugins and tickets.
+# Runs all registered tests across all plugins and tickets.
+./dialtone.sh test
 
-### `./dialtone.sh test --list`
-Lists all tests that would be executed by the current command without actually running them.
+# Lists all tests that would be executed by the current command.
+./dialtone.sh test tags [<tag-name>...] --list
+```
+
+
 
 ## Tagging System
 

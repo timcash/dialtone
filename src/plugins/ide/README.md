@@ -3,36 +3,19 @@ The `ide` plugin provides tools for setting up and interacting with integrated d
 
 ## Core Commands
 
-### `ide setup-workflows`
-Updates the local `.agent/workflows` and `.agent/rules` directories with the latest documentation from `docs/workflows` and `docs/rules`. This ensures that any AI agents working in your local environment have the most up-to-date instructions.
-
 ```bash
-# Update agent files by copying (default)
-./dialtone.sh ide setup-workflows
+# Updates local .agent/ directories with latest documentation/rules.
+# Use --symlink for development mode.
+./dialtone.sh ide setup-workflows [--symlink]
 
-# Update agent files using symlinks (recommended for development)
-./dialtone.sh ide setup-workflows --symlink
-```
-
-### `ide antigravity logs`
-Tail the Antigravity extension logs with automatic session discovery and additive filtering.
-
-#### Filtering and Usage
-The command supports additive filtering. If flags are provided, the output is restricted to those types.
-
-```bash
-# Default: Tail all logs with semantic coloring
+# Tail Antigravity extension logs with session discovery.
+# Filter for specific interaction types.
 ./dialtone.sh ide antigravity logs
-
-# Chat: Show only LLM interactions (colored [CHAT])
 ./dialtone.sh ide antigravity logs --chat
-
-# Commands: Show only terminal executions (colored [CMD ])
 ./dialtone.sh ide antigravity logs --commands
-
-# Combined: Monitor multiple interaction layers
 ./dialtone.sh ide antigravity logs --chat --commands
 ```
+
 
 > [!TIP]
 > The `--chat` flag replaces the legacy `--clean` flag for better semantic clarity.
