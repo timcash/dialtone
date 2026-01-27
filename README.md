@@ -35,7 +35,7 @@ Skill are systems of systems that combine into valuable real world actions like 
 # Binary Architecture: Production vs. Development
 Both systems contain the same core code but differ in their capabilities.
 1. `dialtone` a single binary with embeded vpn that networks robots together.
-2. `dialtone-dev` a single binary with embeded vpn that networks robots together.
+2. `dialtone-dev` developer workflows for installing, building, and testing the system.
 
 # Test-Driven Development (TDD)
 1. A test is created for every development task.
