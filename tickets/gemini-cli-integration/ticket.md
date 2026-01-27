@@ -21,7 +21,7 @@
 - name: implement-gemini-cmd
 - description: Create src/plugins/ai/cli/gemini.go with RunGemini function and update src/plugins/ai/cli/ai.go to dispatch it.
 - test-command: `./dialtone.sh ai --gemini "hello"`
-- status: todo | processing | done
+- status: done
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
