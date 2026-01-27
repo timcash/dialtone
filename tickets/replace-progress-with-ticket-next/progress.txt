@@ -1,2 +1,5 @@
 Progress log for replace-progress-with-ticket-next
 
+- Started ticket replace-progress-with-ticket-next.
+- Defined subtasks for the `ticket next` refactor.
+- Prepared implementation plan.
