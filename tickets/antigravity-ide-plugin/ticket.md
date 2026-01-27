@@ -16,7 +16,7 @@ Create an `ide` plugin for Dialtone that provides specialized tools for interact
 - description: Create logic to find the most recent Antigravity extension log file in `~/Library/Application Support/Antigravity/logs/`.
 - test-description: Verify the log path indexer can find the active log file.
 - test-command: `./dialtone.sh test ticket antigravity-ide-plugin --subtask log-discovery`
-- status: todo
+- status: done
 
 ## SUBTASK: Implement `ide antigravity logs` command
 - name: logs-command
