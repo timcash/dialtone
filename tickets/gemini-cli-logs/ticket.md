@@ -46,7 +46,7 @@ Capture output from the `gemini` CLI command into the main `dialtone.log` file, 
 - description: Add ANSI color constants (Red, Green, Yellow, Cyan, Reset) to `src/core/logger/logger.go` to be used by plugins for terminal highlighting.
 - test-description: Verify constants are available and usable in a simple test.
 - test-command: `go test ./src/core/logger/...` (or similar manual verification)
-- status: todo
+- status: done
 
 ## SUBTASK: Implement colorized markers and filter flags in gemini.go
 - name: gemini-colorized-filters
