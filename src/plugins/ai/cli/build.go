@@ -1,4 +1,4 @@
-package ai
+package cli
 
 import (
 	"dialtone/cli/src/core/logger"

@@ -9,7 +9,7 @@
 - description: to start work run the cli command `dialtone.sh ticket start gemini-cli-integration`
 - test-description: run the ticket tests to verify that the ticket is in a valid state
 - test-command: `dialtone.sh test ticket gemini-cli-integration`
-- status: todo
+- status: done
 
 ## SUBTASK: Create install and build files for AI plugin
 - name: create-install-build
