@@ -1,2 +1,7 @@
-Progress log for gemini-sessions
+# Progress Log
 
+## 2026-01-27
+- Started ticket work.
+- Verified that `gemini` CLI supports session flags (`--list-sessions`, `--resume`) natively.
+- Modified `src/plugins/ai/cli/gemini.go` to relax the empty argument check, allowing interactive mode and flag-only invocations.
+- Confirmed that `./dialtone.sh ai --gemini --list-sessions` works correctly.

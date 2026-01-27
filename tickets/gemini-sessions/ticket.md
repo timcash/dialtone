@@ -16,7 +16,7 @@ Enable session management for the Gemini CLI integration, allowing users to list
 - description: run the cli command `dialtone.sh ticket start gemini-sessions`
 - test-description: verify ticket is scaffolded and branch created
 - test-command: `dialtone.sh test ticket gemini-sessions`
-- status: todo
+- status: done
 
 ## SUBTASK: Update gemini.go to support session flags
 - name: impl-session-flags

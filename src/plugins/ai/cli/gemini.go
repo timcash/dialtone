@@ -14,9 +14,14 @@ import (
 
 // RunGemini handles the --gemini flag functionality by proxying to @google/gemini-cli
 func RunGemini(args []string) {
+	// If no args provided, we might want to default to interactive mode or show help.
+	// But let's at least check if we have args. 
+	// Actually, gemini CLI might handle empty args by showing help or interactive.
+	// Let's pass it through.
 	if len(args) == 0 {
-		logger.LogInfo("Gemini: Please provide a prompt. Usage: dialtone ai --gemini \"prompt\"")
-		return
+		// Example: dialtone ai --gemini 
+		// This should probably launch interactive mode if supported, or just show help from gemini.
+		// For now, let's allow it and let gemini decide.
 	}
 
 	// Load .env to get DIALTONE_ENV and GOOGLE_API_KEY
