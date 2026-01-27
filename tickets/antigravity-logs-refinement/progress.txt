@@ -8,3 +8,6 @@ Progress log for antigravity-logs-refinement
 - verified docs and help update
 - verified ticket start
 - finalize ticket
+- [Subtask] proto-decoder: Implemented Protobuf decoder for real-time chat logging and added automated test.
+- [Subtask] improve-go-plugin: Added 'exec' and 'pb-dump' subcommands to Go plugin as requested.
+- verified all tests pass

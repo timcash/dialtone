@@ -33,6 +33,34 @@ Refine the `ide antigravity logs` command by implementing an additive flag syste
 - status: done
 
 
+## SUBTASK: Investigate and Fix Missing Chat Logs
+- name: fix-missing-chat-logs
+- description: The current `ide antigravity logs --chat` command only shows planner requests, not the actual chat messages. Identify the correct log file (likely in `output_logging` or similar) and update `ide.go` to tail the correct file or multiple files if needed.
+- test-description: Verify that sending a chat message in the IDE appears in the tail output with `[CHAT]` prefix.
+- test-command: `./dialtone.sh ide antigravity logs --chat`
+- status: done
+
+## SUBTASK: Create automated test for chat log visibility
+- name: test-verify-chat-logs
+- description: start the logs then have the antigravity chat agent send a message. it should see the message in the logs.
+- test-description: Run the new test case.
+- test-command: `dialtone.sh test plugin ide`
+- status: done
+
+## SUBTASK: Fix Exit Code 1 on logs command
+- name: fix-exit-code-1
+- description: The command `./dialtone.sh ide antigravity logs --commands` was reported to exit with code 1. Debug why the tail command or the wrapper is returning a non-zero exit code during normal operation.
+- test-description: Verify the command runs without error until interrupted.
+- test-command: `./dialtone.sh ide antigravity logs --commands`
+- status: done
+
+## SUBTASK: Improve Go Plugin (User Request)
+- name: improve-go-plugin
+- description: Add `exec` and `pb-dump` subcommands to the `dialtone go` plugin to support better tooling workflows.
+- test-description: Verify commands work.
+- test-command: `./dialtone.sh go help`
+- status: done
+
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
 - description: run the ticket cli to verify all steps to complete the ticket
