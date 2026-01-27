@@ -40,7 +40,7 @@ func RunAI(args []string) {
 		RunAIAuth(subArgs)
 	case "help", "-h", "--help":
 		PrintAIUsage()
-	case "--gemini":
+	case "gemini":
 		RunGemini(subArgs)
 	default:
 		fmt.Printf("Unknown AI command: %s\n", command)
@@ -58,6 +58,7 @@ func PrintAIUsage() {
 	fmt.Println("  build              Build AI related components")
 	fmt.Println("  install <tool>     Install AI related tools (e.g., geminicli)")
 	fmt.Println("  auth               Authenticate with Google / Gemini API")
+	fmt.Println("  gemini <prompt>    Chat with Google Gemini")
 }
 
 // RunAIBuild handles the building of AI related components

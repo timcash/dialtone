@@ -17,14 +17,21 @@ Capture output from the `gemini` CLI command into the main `dialtone.log` file s
 - name: capture-output
 - description: Modify `src/plugins/ai/cli/gemini.go` to use `io.Pipe` and `io.MultiWriter` to capture stdout/stderr and send to `logger`.
 - test-description: Run a gemini command and grep the log file for the output.
-- test-command: `./dialtone.sh ai --gemini "hello" && grep "hello" dialtone.log`
+- test-command: `./dialtone.sh ai gemini "hello" && grep "hello" dialtone.log`
 - status: done
+
+## SUBTASK: Refactor CLI syntax to use positional 'gemini'
+- name: cli-syntax-refactor
+- description: Change `--gemini` flag to `gemini` positional argument in `src/plugins/ai/cli/ai.go`.
+- test-description: Verify both `ai gemini --help` and `ai gemini "hello"` work.
+- test-command: `./dialtone.sh ai gemini --help`
+- status: todo
 
 ## SUBTASK: Enable verbose tool logging
 - name: enable-debug-logs
 - description: Update `src/plugins/ai/cli/gemini.go` to pass a `--debug` flag to the underlying `geminicli` if a specific env var or flag is present, or just default to debug if appropriate for capturing tool calls.
 - test-description: Run with debug enabled and check for verbose tool output.
-- test-command: `./dialtone.sh ai --gemini --debug "hello" && grep "[DEBUG]" dialtone.log`
+- test-command: `./dialtone.sh ai gemini --debug "hello" && grep "[DEBUG]" dialtone.log`
 - status: todo
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli
