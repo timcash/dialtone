@@ -9,3 +9,5 @@
 - Completed formalization of `gemini-cli-logs` ticket.
 - Refactored `ai` command syntax to use `gemini` as a positional argument instead of a `--gemini` flag.
 - Verified that `./dialtone.sh ai gemini --help` and `./dialtone.sh ai gemini "hello"` work correctly.
+- Improved `gemini` logging to detect `[DEBUG]` in stderr and log it at the `DEBUG` level in `dialtone.log`.
+- Verified that `--debug` flag correctly triggers these verbose logs when used with the new syntax.
