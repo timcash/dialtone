@@ -1,3 +1,8 @@
+---
+trigger: model_decision
+description: ticket workflow for new and existing tickets
+---
+
 # Workflow: Ticket-Driven Development (TDD)
 
 This workflow defines the standard process for planning, executing, and managing scope in Dialtone using the `ticket` plugin.
