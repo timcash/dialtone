@@ -65,22 +65,24 @@ If the goal is ambiguous or technical blockers exist, request clarification.
 ```
 
 ### Step 5: Resolution: IMPROVE
-If requirements are clear but lack subtasks, scaffold a local ticket.
+If requirements are clear but lack subtasks, scaffold or edit a local ticket.
 ```bash
-# Scaffold local ticket WITHOUT switching branches.
+# 1. Scaffold or update local ticket.
 ./dialtone.sh ticket add <name>
 
-# Example (Issue #104: "improve install"):
-#   Scaffold 'improve-install-plugin' and populate with atomic subtasks.
-```
+# 2. Populate the ticket (see Section 3: The "Ticket" Standard).
+# 3. Validate the ticket format.
+./dialtone.sh ticket validate <name>
 
-### Step 6: Readiness Validation
-Verify the [Ticket Standard](#3-the-ticket-standard) and mark as ready.
-```bash
-# 1. Verify all subtasks and tests are defined in the local ticket.
-# 2. Mark the GitHub issue as 'ready' and 'ticket' using the shortcuts.
+# 4. Mark the GitHub issue as 'ready' and 'ticket' using the shortcuts.
 ./dialtone.sh github issue <id> --ready --ticket
 ```
+
+### Step 6: Step-by-Step Execution
+Work through ALL open issues one at a time.
+- If it's a candidate for a ticket, follow Step 5 (IMPROVE).
+- If it needs more info, follow Step 4 (ASK).
+- Ensure EVERY issue has either a `question` label/comment or is promoted to a validated `ticket`.
 
 ---
 
