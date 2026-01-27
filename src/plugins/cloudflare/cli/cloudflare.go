@@ -103,8 +103,15 @@ func runTunnel(args []string) {
 		cmdArgs = append(cmdArgs, "list")
 		cmdArgs = append(cmdArgs, subArgs...)
 	case "run":
+		if len(subArgs) < 1 {
+			fmt.Println("Usage: dialtone cloudflare tunnel run <name> [options]")
+			return
+		}
+		tunnelName := subArgs[0]
+		options := subArgs[1:]
 		cmdArgs = append(cmdArgs, "run")
-		cmdArgs = append(cmdArgs, subArgs...)
+		cmdArgs = append(cmdArgs, options...)
+		cmdArgs = append(cmdArgs, tunnelName)
 	case "route":
 		if len(subArgs) == 0 {
 			fmt.Println("Usage: dialtone cloudflare tunnel route <tunnel-name> [hostname]")
