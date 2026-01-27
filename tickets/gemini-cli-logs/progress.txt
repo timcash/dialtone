@@ -6,3 +6,4 @@
 - Verified that Gemini responses are now logged to `dialtone.log`.
 - Updated `gemini.go` to pass `--debug` flag to the underlying CLI, enabling verbose logging for tool calls.
 - Verified debug logs appear in `dialtone.log`.
+- Completed formalization of `gemini-cli-logs` ticket.
