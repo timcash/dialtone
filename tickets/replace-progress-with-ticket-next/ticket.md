@@ -18,6 +18,13 @@ Replace the manual `progress.txt` tracking with a centralized and automated `dia
 - test-command: `./dialtone.sh ticket subtask next`
 - status: todo
 
+## SUBTASK: Add status chart output to `ticket next`
+- name: ticket-next-status-chart
+- description: Ensure `ticket next` prints a full status chart (similar to `ticket subtask list`) after identifying the next task. This provides immediate visual feedback on the entire ticket's progress.
+- test-description: Run `./dialtone.sh ticket next` and verify the output includes the subtask list chart.
+- test-command: `./dialtone.sh ticket next`
+- status: todo
+
 ## SUBTASK: Integrate test execution into `ticket next`
 - name: ticket-next-tests
 - description: Ensure `ticket next` runs all registered tests for the ticket (equivalent to `test.RunTicket`) before allowing state transitions.
