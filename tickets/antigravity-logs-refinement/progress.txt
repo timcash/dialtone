@@ -5,3 +5,4 @@ Progress log for antigravity-logs-refinement
 - [Subtask] docs-help-update: Updated README.md and ide.go help usage.
 - [Subtask] ticket-start: Branch 'antigravity-logs-refinement' started and PR created.
 - verified log coloring
+- verified docs and help update
