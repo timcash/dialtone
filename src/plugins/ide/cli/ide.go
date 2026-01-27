@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -87,58 +88,97 @@ func runAntigravity(args []string) {
 
 
 func runAntigravityLogs(chat, commands bool) {
-	logPath := findRecentAntigravityLog()
-	if logPath == "" {
-		logger.LogFatal("Could not find Antigravity log file.")
+	// If no flags are provided, show both
+	showAll := !chat && !commands
+	if showAll {
+		chat = true
+		commands = true
 	}
 
-	logger.LogInfo("Tailing Antigravity log: %s", logPath)
-	
-	filtering := chat || commands
-	if filtering {
-		logger.LogInfo("Filtering enabled: chat=%v, commands=%v", chat, commands)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan bool)
+
+	// Stream 1: Chat Logs (Proprietary .pb format)
+	if chat {
+		go func() {
+			logger.LogInfo("Starting chat log stream...")
+			StreamChatLogs(ctx, "", os.Stdout)
+			done <- true
+		}()
 	}
 
-	cmd := exec.Command("tail", "-f", logPath)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		logger.LogFatal("Failed to create stdout pipe: %v", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		logger.LogFatal("Failed to start tail: %v", err)
-	}
-
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		line := scanner.Text()
-		
-		isChat := strings.Contains(line, "Requesting planner with")
-		isCmd := strings.Contains(line, "[Terminal]")
-
-		// If filtering is on, only show the enabled types
-		if filtering {
-			if chat && isChat {
-				fmt.Printf("%s[CHAT]%s %s\n", colorGreen, colorReset, line)
-			} else if commands && isCmd {
-				fmt.Printf("%s[CMD ]%s %s\n", colorBlue, colorReset, line)
+	// Stream 2: System/Command Logs (Antigravity.log via tail)
+	if commands {
+		go func() {
+			logPath := findRecentAntigravityLog()
+			if logPath == "" {
+				logger.LogFatal("Could not find Antigravity log file.")
 			}
-			continue
-		}
 
-		// Show all if no filtering, but still color known types
-		if isChat {
-			fmt.Printf("%s[CHAT]%s %s\n", colorGreen, colorReset, line)
-		} else if isCmd {
-			fmt.Printf("%s[CMD ]%s %s\n", colorBlue, colorReset, line)
-		} else {
-			fmt.Println(line)
-		}
-	}
+			logger.LogInfo("Tailing system log: %s", logPath)
+			
+			// If we are showing only commands, filter for them
+			// If showing all, we still want to filter out the noise mentioned in docs
+			// "Requesting planner" lines are noise if we have the real chat stream.
+			
+			cmd := exec.Command("tail", "-f", logPath)
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				logger.LogFatal("Failed to create stdout pipe: %v", err)
+			}
 
-	if err := cmd.Wait(); err != nil {
-		logger.LogFatal("Tail process exited with error: %v", err)
+			if err := cmd.Start(); err != nil {
+				logger.LogFatal("Failed to start tail: %v", err)
+			}
+
+			scanner := bufio.NewScanner(stdout)
+			for scanner.Scan() {
+				line := scanner.Text()
+				
+				isChatNoise := strings.Contains(line, "Requesting planner with")
+				isCmd := strings.Contains(line, "[Terminal]")
+
+				// If we have chat stream enabled, suppress the noise
+				if chat && isChatNoise {
+					continue 
+				}
+
+				if commands && !showAll && !isCmd {
+					// User asked specifically for --commands, so only show commands
+					continue
+				}
+
+				// Colorize
+				if isCmd {
+					fmt.Printf("%s[CMD ]%s %s\n", colorBlue, colorReset, line)
+				} else if showAll {
+					// Determine if we should show other lines?
+					// For now, let's keep it clean as per "Detailed Log Filtering" docs
+					// Only show if it matches high value patterns?
+					// Or just print everything else as usual?
+					// Let's print everything else but colored if known
+					fmt.Println(line)
+				}
+			}
+			
+			if err := cmd.Wait(); err != nil {
+				// Ignore signal exit
+				if exitErr, ok := err.(*exec.ExitError); ok {
+					if exitErr.ExitCode() == -1 || exitErr.ExitCode() == 130 {
+						done <- true
+						return
+					}
+				}
+				logger.LogInfo("Log tail ended.")
+			}
+			done <- true
+		}()
 	}
+	
+	// Wait forever (or until one finishes)
+	<-done
 }
 
 

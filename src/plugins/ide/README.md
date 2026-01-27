@@ -15,24 +15,27 @@ Updates the local `.agent/workflows` and `.agent/rules` directories with the lat
 ```
 
 ### `ide antigravity logs`
-Specifically for users of the Antigravity IDE. This command automatically discovers the latest extension log file and tails it. The command supports additive flags to filter for specific log types with minimal coloring.
+Tail the Antigravity extension logs with automatic session discovery and additive filtering.
 
-- If **no flags** are provided, all logs are shown (with coloring for known types).
-- If **one or more flags** are provided, only logs of those types are shown.
+#### Filtering and Usage
+The command supports additive filtering. If flags are provided, the output is restricted to those types.
 
 ```bash
-# Tail all logs
+# Default: Tail all logs with semantic coloring
 ./dialtone.sh ide antigravity logs
 
-# Show only chat interaction logs (colored [CHAT])
+# Chat: Show only LLM interactions (colored [CHAT])
 ./dialtone.sh ide antigravity logs --chat
 
-# Show only terminal command logs (colored [CMD])
+# Commands: Show only terminal executions (colored [CMD ])
 ./dialtone.sh ide antigravity logs --commands
 
-# Combine flags to show multiple types
+# Combined: Monitor multiple interaction layers
 ./dialtone.sh ide antigravity logs --chat --commands
 ```
+
+> [!TIP]
+> The `--chat` flag replaces the legacy `--clean` flag for better semantic clarity.
 
 
 
