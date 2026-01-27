@@ -85,7 +85,12 @@ func RunGemini(args []string) {
 	go func() {
 		scanner := bufio.NewScanner(prErr)
 		for scanner.Scan() {
-			logger.LogError("[Gemini] %s", scanner.Text())
+			text := scanner.Text()
+			if strings.Contains(text, "[DEBUG]") {
+				logger.LogDebug("[Gemini] %s", text)
+			} else {
+				logger.LogError("[Gemini] %s", text)
+			}
 		}
 	}()
 

@@ -25,7 +25,7 @@ Capture output from the `gemini` CLI command into the main `dialtone.log` file s
 - description: Change `--gemini` flag to `gemini` positional argument in `src/plugins/ai/cli/ai.go`.
 - test-description: Verify both `ai gemini --help` and `ai gemini "hello"` work.
 - test-command: `./dialtone.sh ai gemini --help`
-- status: todo
+- status: done
 
 ## SUBTASK: Enable verbose tool logging
 - name: enable-debug-logs
