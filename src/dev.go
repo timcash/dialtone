@@ -17,6 +17,7 @@ import (
 	diagnostic_cli "dialtone/cli/src/plugins/diagnostic/cli"
 	github_cli "dialtone/cli/src/plugins/github/cli"
 	go_cli "dialtone/cli/src/plugins/go/cli"
+	ide_cli "dialtone/cli/src/plugins/ide/cli"
 	install_cli "dialtone/cli/src/plugins/install/cli"
 	logs_cli "dialtone/cli/src/plugins/logs/cli"
 	mavlink_cli "dialtone/cli/src/plugins/mavlink/cli"
@@ -77,6 +78,8 @@ func ExecuteDev() {
 		ticket_cli.Run(args)
 	case "plugin":
 		plugin_cli.RunPlugin(args)
+	case "ide":
+		ide_cli.Run(args)
 	case "camera":
 		camera_cli.RunCamera(args)
 	case "chrome":
@@ -124,6 +127,7 @@ func printDevUsage() {
 	fmt.Println("  branch <name>      Create or checkout a feature branch")
 	fmt.Println("  ticket <subcmd>    Manage GitHub tickets (start, done, subtask, etc.)")
 	fmt.Println("  plugin <subcmd>    Manage plugins (add, install, build)")
+	fmt.Println("  ide <subcmd>       IDE tools (setup-workflows)")
 	fmt.Println("  github <subcmd>    Manage GitHub interactions (pr, check-deploy)")
 	fmt.Println("  www <subcmd>       Manage public webpage (Vercel wrapper)")
 	fmt.Println("  ui <subcmd>        Manage web UI (dev, build, install)")

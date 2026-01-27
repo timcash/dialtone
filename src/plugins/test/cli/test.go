@@ -11,6 +11,7 @@ import (
 	core_test "dialtone/cli/src/core/test"
 	ai_test "dialtone/cli/src/plugins/ai/test"
 	diagnostic_test "dialtone/cli/src/plugins/diagnostic/test"
+	ide_test "dialtone/cli/src/plugins/ide/test"
 	install_test "dialtone/cli/src/plugins/install/test"
 	test_test "dialtone/cli/src/plugins/test/test"
 	ticket_test "dialtone/cli/src/plugins/ticket/test"
@@ -225,6 +226,8 @@ func runPluginTest(pluginName string, showList bool) {
 		runUiTests()
 	case "ai":
 		runAiTests()
+	case "ide":
+		runIdeTests()
 	case "diagnostic":
 		runDiagnosticTests()
 	default:
@@ -270,7 +273,7 @@ func printTestUsage() {
 	fmt.Println("  help                                      Show this help message")
 	fmt.Println()
 	fmt.Println("Available Plugins:")
-	fmt.Println("  install, ticket, test, ui, ai, diagnostic")
+	fmt.Println("  install, ticket, test, ui, ai, ide, diagnostic")
 }
 
 func runAllTests(showList bool) {
@@ -336,4 +339,12 @@ func runDiagnosticTests() {
 		logger.LogFatal("Diagnostic tests failed: %v", err)
 	}
 	logger.LogInfo("Diagnostic Plugin Tests passed!")
+}
+
+func runIdeTests() {
+	logger.LogInfo("Running IDE Plugin Tests...")
+	if err := ide_test.RunAll(); err != nil {
+		logger.LogFatal("IDE tests failed: %v", err)
+	}
+	logger.LogInfo("IDE Plugin Tests passed!")
 }
