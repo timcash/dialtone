@@ -39,7 +39,7 @@ Refine the `ide antigravity logs` command by implementing an additive flag syste
 - test-description: Verify that sending a chat message in the IDE appears in the tail output with `[CHAT]` prefix.
 - test-command: `./dialtone.sh ide antigravity logs --chat`
 - status: failed
-- failure-reason: The chat content is stored in `~/.gemini/antigravity/conversations/*.pb`, but the text fields appear to be compressed or non-standardly encoded. Standard protobuf decoding yields correct structure but garbage/empty content for text fields. Requires reverse-engineering of the compression format.
+- failure-reason: Investigation complete. The chat content is stored in `~/.gemini/antigravity/conversations/*.pb`, but the text fields appear to be compressed or non-standardly encoded. Standard protobuf decoding yields correct structure but garbage/empty content for text fields. Requires reverse-engineering of the compression format.
 
 ## SUBTASK: Create automated test for chat log visibility
 - name: test-verify-chat-logs
@@ -47,7 +47,7 @@ Refine the `ide antigravity logs` command by implementing an additive flag syste
 - test-description: Run the new test case.
 - test-command: `dialtone.sh test plugin ide`
 - status: failed
-- failure-reason: Blocked by `fix-missing-chat-logs`. The automated test `TestStreamChatLogs` passes on synthetic data but cannot be run against live data until decoding is fixed.
+- failure-reason: Skipped. Blocked by `fix-missing-chat-logs`. The automated test `TestStreamChatLogs` passes on synthetic data but cannot be run against live data until decoding is fixed.
 
 ## SUBTASK: Fix Exit Code 1 on logs command
 - name: fix-exit-code-1
