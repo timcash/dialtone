@@ -19,3 +19,4 @@
 - Verified that `--tools` correctly forces `--debug` on the underlying CLI to capture tool call details.
 - Confirmed that tool calls and error messages are correctly identified and highlighted in terminal output.
 - Finalized ticket expansion subtasks.
+- All testing completed.
