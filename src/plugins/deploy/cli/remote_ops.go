@@ -137,7 +137,7 @@ func RunRemoteBuild(args []string) {
 	if err != nil {
 		logger.LogFatal("Remote web build failed: %v\nOutput: %s", err, output)
 	}
-	logger.LogInfo(output)
+	logger.LogInfo("%s", output)
 
 	// Build Go
 	goCmd := fmt.Sprintf(`
@@ -151,6 +151,6 @@ func RunRemoteBuild(args []string) {
 	if err != nil {
 		logger.LogFatal("Remote Go build failed: %v\nOutput: %s", err, output)
 	}
-	logger.LogInfo(output)
+	logger.LogInfo("%s", output)
 	logger.LogInfo("Remote build successful.")
 }
