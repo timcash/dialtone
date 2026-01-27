@@ -26,6 +26,10 @@ func RunGo(args []string) {
 		runInstall(restArgs)
 	case "lint":
 		runLint(restArgs)
+	case "exec", "run":
+		runExec(restArgs)
+	case "pb-dump":
+		runPbDump(restArgs)
 	case "help", "-h", "--help":
 		printGoUsage()
 	default:
@@ -38,9 +42,59 @@ func RunGo(args []string) {
 func printGoUsage() {
 	fmt.Println("Usage: dialtone go <command> [options]")
 	fmt.Println("\nCommands:")
-	fmt.Println("  install    Install Go toolchain to DIALTONE_ENV")
-	fmt.Println("  lint       Run go vet ./... using local toolchain")
-	fmt.Println("  help       Show this help message")
+	fmt.Println("  install        Install Go toolchain to DIALTONE_ENV")
+	fmt.Println("  lint           Run go vet ./... using local toolchain")
+	fmt.Println("  exec <args...> Run arbitrary go command (e.g. 'run main.go') using local toolchain")
+	fmt.Println("  pb-dump <file> Dump structure/strings of a protobuf file")
+	fmt.Println("  help           Show this help message")
+}
+
+func runExec(args []string) {
+	if len(args) == 0 {
+		logger.LogFatal("Usage: dialtone go exec <args...>")
+	}
+
+	depsDir := config.GetDialtoneEnv()
+	goDir := filepath.Join(depsDir, "go")
+	goBin := filepath.Join(goDir, "bin", "go")
+
+	if _, err := os.Stat(goBin); os.IsNotExist(err) {
+		logger.LogFatal("Go toolchain not found. Run 'dialtone go install' first.")
+	}
+
+	// Set GOROOT to ensure the toolchain uses its own libraries
+	os.Setenv("GOROOT", goDir)
+	
+	// Prepend dependencies bin to PATH so installed tools are found
+	newPath := filepath.Join(goDir, "bin") + string(os.PathListSeparator) + os.Getenv("PATH")
+	os.Setenv("PATH", newPath)
+
+	logger.LogInfo("Running: go %s", fmt.Sprintf("%v", args))
+
+	cmd := exec.Command(goBin, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	
+	if err := cmd.Run(); err != nil {
+		// Pass through the exit code if possible
+		if exitError, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitError.ExitCode())
+		}
+		logger.LogFatal("Command failed: %v", err)
+	}
+}
+
+func runPbDump(args []string) {
+	if len(args) < 1 {
+		logger.LogFatal("Usage: dialtone go pb-dump <file.pb>")
+	}
+	
+	toolPath := "src/plugins/go/tools/pb-dump/main.go"
+	
+	// Delegate to runExec which handles environment
+	execArgs := append([]string{"run", toolPath}, args...)
+	runExec(execArgs)
 }
 
 func runInstall(args []string) {

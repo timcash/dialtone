@@ -13,6 +13,7 @@ require (
 	github.com/pkg/sftp v1.13.10
 	github.com/vladimirvivien/go4vl v0.3.0
 	golang.org/x/crypto v0.46.0
+	google.golang.org/protobuf v1.36.6
 	tailscale.com v1.92.5
 )
 
