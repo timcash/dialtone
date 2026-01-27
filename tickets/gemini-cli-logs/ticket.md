@@ -39,7 +39,7 @@ Capture output from the `gemini` CLI command into the main `dialtone.log` file s
 - description: Add an option to `logger.go` to suppress the prefix (timestamp/level/details) and use it in `gemini.go` for cleaner terminal output.
 - test-description: Run gemini with a flag that minimizes prefixing in terminal output.
 - test-command: `./dialtone.sh ai gemini "hello" --raw`
-- status: todo
+- status: done
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
