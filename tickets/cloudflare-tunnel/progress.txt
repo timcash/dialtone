@@ -25,3 +25,4 @@ Progress log for cloudflare-tunnel
 - Updated frontend to connect to NATS via the proxied path on the main web port.
 - Fixed local-only mode to include Web UI support.
 - Verified end-to-end connectivity for drone-2.dialtone.earth.
+- Final ticket verification and documentation update.
