@@ -13,6 +13,25 @@ import (
 	"dialtone/cli/src/core/logger"
 )
 
+var labelFlags = map[string]string{
+	"--p0":            "p0",
+	"--p1":            "p1",
+	"--bug":           "bug",
+	"--ready":         "ready",
+	"--ticket":        "ticket",
+	"--enhancement":   "enhancement",
+	"--docs":          "documentation",
+	"--documentation": "documentation",
+	"--perf":          "performance",
+	"--performance":   "performance",
+	"--security":      "security",
+	"--refactor":      "refactor",
+	"--test":          "test",
+	"--duplicate":     "duplicate",
+	"--wontfix":       "wontfix",
+	"--question":      "question",
+}
+
 func findGH() string {
 	depsDir := config.GetDialtoneEnv()
 
@@ -513,22 +532,24 @@ func runIssueView(args []string) {
 func handleIssueDirect(issueNum string, args []string) {
 	gh := findGH()
 
-	// If --ready flag is present, mark as ticket
-	isReady := false
+	var labelsToAdd []string
 	for _, arg := range args {
-		if arg == "--ready" {
-			isReady = true
-			break
+		if label, ok := labelFlags[arg]; ok {
+			labelsToAdd = append(labelsToAdd, label)
 		}
 	}
 
-	if isReady {
-		logger.LogInfo("Marking issue #%s as 'ticket'...", issueNum)
-		cmd := exec.Command(gh, "issue", "edit", issueNum, "--add-label", "ticket")
+	if len(labelsToAdd) > 0 {
+		logger.LogInfo("Updating labels for issue #%s: %s", issueNum, strings.Join(labelsToAdd, ", "))
+		cmdArgs := []string{"issue", "edit", issueNum}
+		for _, l := range labelsToAdd {
+			cmdArgs = append(cmdArgs, "--add-label", l)
+		}
+		cmd := exec.Command(gh, cmdArgs...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			logger.LogFatal("Failed to mark issue as 'ticket': %v", err)
+			logger.LogFatal("Failed to update labels: %v", err)
 		}
 		return
 	}
@@ -554,7 +575,8 @@ func runIssueEdit(args []string) {
 
 	hasAction := false
 	for i := 1; i < len(args); i++ {
-		switch args[i] {
+		arg := args[i]
+		switch arg {
 		case "--add-label":
 			if i+1 < len(args) {
 				editArgs = append(editArgs, "--add-label", args[i+1])
@@ -567,11 +589,16 @@ func runIssueEdit(args []string) {
 				i++
 				hasAction = true
 			}
+		default:
+			if label, ok := labelFlags[arg]; ok {
+				editArgs = append(editArgs, "--add-label", label)
+				hasAction = true
+			}
 		}
 	}
 
 	if !hasAction {
-		logger.LogFatal("No action provided for issue edit. Use --add-label or --remove-label.")
+		logger.LogFatal("No action provided for issue edit. Use --add-label, --remove-label, or a shortcut flag (--p0, --bug, etc.)")
 	}
 
 	cmd := exec.Command(gh, editArgs...)
