@@ -32,7 +32,7 @@ func Run(args []string) {
 func printUsage() {
 	fmt.Println("Usage: dialtone-dev ide <command> [options]")
 	fmt.Println("\nCommands:")
-	fmt.Println("  setup-workflows    Softlink docs/workflows to .agent/workflows")
+	fmt.Println("  setup-workflows    Copy docs/workflows to .agent/workflows")
 	fmt.Println("  help               Show this help message")
 }
 
@@ -58,10 +58,12 @@ func runSetupWorkflows(args []string) {
 			continue
 		}
 
-		srcPath, _ := filepath.Abs(filepath.Join(srcDir, file.Name()))
-		destPath, _ := filepath.Abs(filepath.Join(destDir, file.Name()))
+		srcPath := filepath.Join(srcDir, file.Name())
+		destPath := filepath.Join(destDir, file.Name())
 
-		// Remove existing dest if it exists
+		logger.LogInfo("Copying %s -> %s", file.Name(), destPath)
+		
+		// Remove existing to handle cases where it's a symlink or read-only
 		if _, err := os.Lstat(destPath); err == nil {
 			if err := os.Remove(destPath); err != nil {
 				logger.LogError("Failed to remove existing file %s: %v", destPath, err)
@@ -69,9 +71,15 @@ func runSetupWorkflows(args []string) {
 			}
 		}
 
-		logger.LogInfo("Linking %s -> %s", file.Name(), destPath)
-		if err := os.Symlink(srcPath, destPath); err != nil {
-			logger.LogError("Failed to create symlink for %s: %v", file.Name(), err)
+		content, err := os.ReadFile(srcPath)
+		if err != nil {
+			logger.LogError("Failed to read source file %s: %v", srcPath, err)
+			continue
+		}
+
+		if err := os.WriteFile(destPath, content, 0644); err != nil {
+			logger.LogError("Failed to write destination file %s: %v", destPath, err)
+			continue
 		}
 	}
 

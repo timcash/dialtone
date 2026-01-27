@@ -1,6 +1,7 @@
 package test
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,7 +10,7 @@ import (
 )
 
 func init() {
-	test.Register("workflow-linking", "ide", []string{"plugin", "ide"}, RunWorkflowLinking)
+	test.Register("workflow-copy", "ide", []string{"plugin", "ide"}, RunWorkflowCopy)
 }
 
 // RunAll is the standard entry point required by project rules.
@@ -18,35 +19,41 @@ func RunAll() error {
 	return test.RunPlugin("ide")
 }
 
-func RunWorkflowLinking() error {
-	// 1. Check if .agent/workflows exists and has links
+func RunWorkflowCopy() error {
+	// 1. Check if .agent/workflows exists
 	destDir := filepath.Join(".agent", "workflows")
 	if _, err := os.Stat(destDir); os.IsNotExist(err) {
 		return fmt.Errorf("FAIL: .agent/workflows does not exist")
 	}
 
 	// 2. Check for a specific file, e.g., ticket.md
-	ticketLink := filepath.Join(destDir, "ticket.md")
-	info, err := os.Lstat(ticketLink)
+	destFile := filepath.Join(destDir, "ticket.md")
+	info, err := os.Lstat(destFile)
 	if err != nil {
-		return fmt.Errorf("FAIL: %s does not exist: %v", ticketLink, err)
+		return fmt.Errorf("FAIL: %s does not exist: %v", destFile, err)
 	}
 
-	if info.Mode()&os.ModeSymlink == 0 {
-		return fmt.Errorf("FAIL: %s is not a symlink", ticketLink)
+	// 3. Verify it is NOT a symlink
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("FAIL: %s is a symlink, should be a regular file", destFile)
 	}
 
-	// 3. Verify target
-	target, err := os.Readlink(ticketLink)
+	// 4. Verify contents match
+	srcFile := filepath.Join("docs", "workflows", "ticket.md")
+	srcContent, err := os.ReadFile(srcFile)
 	if err != nil {
-		return fmt.Errorf("FAIL: could not read symlink %s: %v", ticketLink, err)
+		return fmt.Errorf("FAIL: could not read source file %s: %v", srcFile, err)
 	}
 
-	expectedTarget, _ := filepath.Abs(filepath.Join("docs", "workflows", "ticket.md"))
-	if target != expectedTarget {
-		return fmt.Errorf("FAIL: symlink target mismatch. Got %s, want %s", target, expectedTarget)
+	destContent, err := os.ReadFile(destFile)
+	if err != nil {
+		return fmt.Errorf("FAIL: could not read destination file %s: %v", destFile, err)
 	}
 
-	fmt.Println("PASS: [ide] Workflow linking verified")
+	if !bytes.Equal(srcContent, destContent) {
+		return fmt.Errorf("FAIL: file contents mismatch for %s", destFile)
+	}
+
+	fmt.Println("PASS: [ide] Workflow copy verified")
 	return nil
 }
