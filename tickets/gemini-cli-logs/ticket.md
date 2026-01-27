@@ -4,12 +4,7 @@
 # Goal
 Capture output from the `gemini` CLI command into the main `dialtone.log` file so that chat history and tool execution details (via debug mode) are preserved and viewable via `dialtone.sh logs` or `dialtone.sh ai opencode ui`.
 
-## SUBTASK: [Subtask Name]
-- name: <name-with-dashes>
-- description: Single logic change (< 30 mins). Be precise.
-- test-description: Explicitly state how to verify this change.
-- test-command: `./dialtone.sh test <path>` or relevant bash command.
-- status: todo
+
 
 ## SUBTASK: start ticket work via `dialtone.sh` cli
 - name: ticket-start
