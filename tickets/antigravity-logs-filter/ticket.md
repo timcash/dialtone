@@ -31,7 +31,7 @@ Add a `--clean` filtering option to `dialtone ide antigravity logs` that suppres
 - description: run the cli command `dialtone.sh ticket start antigravity-logs-filter`
 - test-description: verify ticket is scaffolded and branch created
 - test-command: `dialtone.sh test ticket antigravity-logs-filter`
-- status: todo
+- status: done
 
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli
