@@ -32,8 +32,8 @@ func RunGemini(args []string) {
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 
 	if googleKey == "" && geminiKey == "" {
-		logger.LogInfo("Gemini: GOOGLE_API_KEY is not set. You can get one at: https://aistudio.google.com/app/apikey")
-		logger.LogInfo("Please add GOOGLE_API_KEY=your_key to your .env file.")
+		logger.LogError("Gemini: Authentication failed. No API key found.")
+		logger.LogInfo("Please run 'dialtone ai auth' for instructions on how to set up your API key.")
 		return
 	}
 
@@ -42,12 +42,15 @@ func RunGemini(args []string) {
 		os.Setenv("GEMINI_API_KEY", googleKey)
 	}
 
-	// The gemini executable should be in node_modules/.bin/gemini inside dialtoneEnv
+	// The gemini executable should be in node/bin/gemini inside dialtoneEnv if installed via local npm
+	localGemini := filepath.Join(dialtoneEnv, "node", "bin", "gemini")
 	geminiPath := filepath.Join(dialtoneEnv, "node_modules", ".bin", "gemini")
 
-	// If it doesn't exist there, check if it's in the PATH (for global install)
-	if _, err := os.Stat(geminiPath); os.IsNotExist(err) {
-		logger.LogDebug("Gemini: CLI not found in %s, checking PATH...", geminiPath)
+	if _, err := os.Stat(localGemini); err == nil {
+		logger.LogDebug("Gemini: Using local binary at %s", localGemini)
+		geminiPath = localGemini
+	} else if _, err := os.Stat(geminiPath); os.IsNotExist(err) {
+		logger.LogDebug("Gemini: CLI not found in %s or %s, checking PATH...", localGemini, geminiPath)
 		p, err := exec.LookPath("gemini")
 		if err != nil {
 			logger.LogError("Gemini: CLI not found. Please run 'dialtone ai install' first.")

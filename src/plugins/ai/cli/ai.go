@@ -36,6 +36,8 @@ func RunAI(args []string) {
 		RunAIBuild(subArgs)
 	case "install":
 		RunAIInstall(subArgs)
+	case "auth":
+		RunAIAuth(subArgs)
 	case "help", "-h", "--help":
 		PrintAIUsage()
 	case "--gemini":
@@ -55,6 +57,7 @@ func PrintAIUsage() {
 	fmt.Println("  subagent <options> Interface for autonomous subagents")
 	fmt.Println("  build              Build AI related components")
 	fmt.Println("  install <tool>     Install AI related tools (e.g., geminicli)")
+	fmt.Println("  auth               Authenticate with Google / Gemini API")
 }
 
 // RunAIBuild handles the building of AI related components
