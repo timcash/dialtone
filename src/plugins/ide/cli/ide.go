@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"dialtone/cli/src/core/logger"
 )
 
@@ -50,11 +52,18 @@ func runAntigravity(args []string) {
 	}
 
 	command := args[0]
-	// subArgs := args[1:]
+	subArgs := args[1:]
+
+	clean := false
+	for _, arg := range subArgs {
+		if arg == "--clean" {
+			clean = true
+		}
+	}
 
 	switch command {
 	case "logs":
-		runAntigravityLogs()
+		runAntigravityLogs(clean)
 	default:
 		fmt.Printf("Unknown antigravity command: %s\n", command)
 		runAntigravity([]string{})
@@ -62,20 +71,46 @@ func runAntigravity(args []string) {
 	}
 }
 
-func runAntigravityLogs() {
+func runAntigravityLogs(clean bool) {
 	logPath := findRecentAntigravityLog()
 	if logPath == "" {
 		logger.LogFatal("Could not find Antigravity log file.")
 	}
 
 	logger.LogInfo("Tailing Antigravity log: %s", logPath)
+	if clean {
+		logger.LogInfo("Filtering for chat messages and terminal commands...")
+	}
+
 	cmd := exec.Command("tail", "-f", logPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		logger.LogFatal("Failed to tail log: %v", err)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		logger.LogFatal("Failed to create stdout pipe: %v", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		logger.LogFatal("Failed to start tail: %v", err)
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !clean {
+			fmt.Println(line)
+			continue
+		}
+
+		// Filtering logic
+		if strings.Contains(line, "[Terminal]") || strings.Contains(line, "Requesting planner with") {
+			fmt.Println(line)
+		}
+	}
+
+	if err := cmd.Wait(); err != nil {
+		logger.LogFatal("Tail process exited with error: %v", err)
 	}
 }
+
 
 func findRecentAntigravityLog() string {
 	homeDir, _ := os.UserHomeDir()

@@ -19,6 +19,7 @@ import (
 	_ "dialtone/cli/src/plugins/cloudflare/test"
 
 	_ "dialtone/cli/tickets/antigravity-ide-plugin/test"
+	_ "dialtone/cli/tickets/antigravity-logs-filter/test"
 	_ "dialtone/cli/tickets/mock-data-support/test"
 	_ "dialtone/cli/tickets/remove-geminikey-usage/test"
 	_ "dialtone/cli/tickets/test-test-tags/test"
