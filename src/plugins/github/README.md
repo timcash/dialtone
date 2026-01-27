@@ -1,47 +1,73 @@
-# GitHub plugin
-The `ticket` plugin delegates several commands to the `github` plugin for seamless issue management.
+# GitHub Plugin
 
-## GitHub issue commands
+The `github` plugin is the engine for Dialtone's issue and pull request management. It is designed for high-speed triage and automated development workflows.
+
+## 1. Issue Management
+
+### Core Commands
 ```bash
-./dialtone.sh github issue create # Create a new GitHub issue.
-./dialtone.sh github issue view <id> # View details of an issue.
-./dialtone.sh github issue <id> --ready # Mark an issue as 'ticket' ready.
-./dialtone.sh github issue comment <id> <msg> # Comment on an issue.
-./dialtone.sh github issue close <id> # Close an issue.
-./dialtone.sh github issue list --markdown # List open issues in a markdown table.
-./dialtone.sh github issue list # List open issues (JSON output).
-./dialtone.sh github issue sync # (DEPRECATED) Sync open issues into tickets.
-./dialtone.sh github issue close-all # Close all open issues.
+# List open issues in a markdown table (optimized for agents).
+./dialtone.sh github issue list --markdown
+
+# List open issues in raw JSON.
+./dialtone.sh github issue list
+
+# View full issue details, labels, and comments.
+./dialtone.sh github issue view <id>
+# Shortcut if first arg is an ID:
+./dialtone.sh github issue <id>
+
+# Create a new GitHub issue.
+./dialtone.sh github issue create
+
+# Comment on an issue.
+./dialtone.sh github issue comment <id> "Your message here"
+
+# Close specific issue(s) or all open issues.
+./dialtone.sh github issue close <id>
+./dialtone.sh github issue close-all
 ```
 
-## GitHub pull request commands
+### Triage & Labeling Shortcuts
+Fast-track triage by applying labels directly to an issue ID.
 ```bash
-# Notes:
-# Checks for `gh` in `DIALTONE_ENV` or PATH.
-# flags: `--draft`, `--ready`, `--ticket`, `--p0`, `--p1`, `--bug`, etc. (see issue_review.md for full list).
-# Verifies you are not on `main`/`master` before creating a PR.
-./dialtone.sh github pr create # Create a new pull request.
-./dialtone.sh github pr view <id> # View details of a pull request.
-./dialtone.sh github pr comment <id> <msg> # Comment on a pull request.
-./dialtone.sh github pr merge <id> # Merge a pull request (defaults to --merge).
-./dialtone.sh github pr close <id> # Close a pull request.
+# Mark as 'ready' and 'ticket' validated.
+./dialtone.sh github issue <id> --ready --ticket
+
+# Apply priority and type labels.
+./dialtone.sh github issue <id> --p0 --bug --enhancement
+
+# Full Shortcut Suite:
+# --p0, --p1, --bug, --ready, --ticket, --enhancement,
+# --docs, --perf, --security, --refactor, --test, 
+# --duplicate, --wontfix, --question
 ```
 
-## `dialtone.sh github check-deploy`
+---
+
+## 2. Pull Request Management
 ```bash
-#1. Checks for Vercel CLI.
-#2. Runs `vercel list` in `src/plugins/www/app` to show deployments.
-./dialtone.sh github check-deploy # Check Vercel deployment status.
+# Create a new PR (verifies context and clean branch).
+# Flags: --draft, --ready
+./dialtone.sh github pr create
+
+# View, comment on, and manage PRs.
+./dialtone.sh github pr view <id>
+./dialtone.sh github pr comment <id> "Message"
+./dialtone.sh github pr merge <id>
+./dialtone.sh github pr close <id>
 ```
 
+---
 
-## Git Workflow
+## 3. DevOps & Git
 ```bash
-git status                        # Check git status
-git add .                         # Add all changes
-git commit -m "feat|fix|chore|docs: description" # Commit changes
-git push --set-upstream origin <branch-name> # push branch to remote first time
-git push                          # Push updated branch to remote
-git pull origin main              # Pull changes
-git merge main                    # Merge main into current branch
+# Check Vercel deployment status.
+./dialtone.sh github check-deploy
+
+# Standard Dialtone Git workflow.
+git status
+git add .
+git commit -m "type: description"
+git push
 ```

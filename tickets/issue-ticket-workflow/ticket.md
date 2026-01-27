@@ -44,6 +44,12 @@ Refactor the issue review workflow and GitHub plugin to support a streamlined tr
 - test-description: Verify the table exists and is correctly formatted.
 - test-command: `grep "## 5. Labeling Reference" docs/workflows/issue_review.md`
 - status: done
+## SUBTASK: Overhaul plugin README to bash-first style
+- name: overhaul-github-readme
+- description: Complete overhaul of `src/plugins/github/README.md` to use bash-first blocks and document all label shortcuts.
+- test-description: Verify the README is comprehensive and matches the source of truth workflow.
+- test-command: `grep "Labeling Shortcuts" src/plugins/github/README.md`
+- status: done
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
