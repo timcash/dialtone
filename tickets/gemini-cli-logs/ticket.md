@@ -2,7 +2,7 @@
 # Tags: enhancement, ai, logging
 
 # Goal
-Capture output from the `gemini` CLI command into the main `dialtone.log` file so that chat history and tool execution details (via debug mode) are preserved and viewable via `dialtone.sh logs` or `dialtone.sh ai opencode ui`.
+Capture output from the `gemini` CLI command into the main `dialtone.log` file, and provide a colorized terminal experience for tool calls and errors via `--errors` and `--tools` flags in raw mode.
 
 
 
@@ -40,6 +40,20 @@ Capture output from the `gemini` CLI command into the main `dialtone.log` file s
 - test-description: Run gemini with a flag that minimizes prefixing in terminal output.
 - test-command: `./dialtone.sh ai gemini "hello" --raw`
 - status: done
+
+## SUBTASK: Add color support to logger
+- name: add-logger-colors
+- description: Add ANSI color constants (Red, Green, Yellow, Cyan, Reset) to `src/core/logger/logger.go` to be used by plugins for terminal highlighting.
+- test-description: Verify constants are available and usable in a simple test.
+- test-command: `go test ./src/core/logger/...` (or similar manual verification)
+- status: todo
+
+## SUBTASK: Implement colorized markers and filter flags in gemini.go
+- name: gemini-colorized-filters
+- description: Update `src/plugins/ai/cli/gemini.go` to parse `--errors` and `--tools` flags. When these flags are active (especially in `--raw` mode), tool calls should be marked with a color (e.g., Green/Cyan) and errors with Red at the start of the line.
+- test-description: Run `ai gemini "hello" --raw --tools` and verify tool calls (if any) are colorized.
+- test-command: `./dialtone.sh ai gemini "hello" --raw --tools --errors`
+- status: todo
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done

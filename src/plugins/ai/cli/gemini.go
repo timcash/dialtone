@@ -15,15 +15,34 @@ import (
 // RunGemini handles the --gemini flag functionality by proxying to @google/gemini-cli
 func RunGemini(args []string) {
 	rawMode := false
+	toolsMode := false
+	errorsMode := false
 	var filteredArgs []string
 	for _, arg := range args {
 		if arg == "--raw" {
 			rawMode = true
+		} else if arg == "--tools" {
+			toolsMode = true
+		} else if arg == "--errors" {
+			errorsMode = true
 		} else {
 			filteredArgs = append(filteredArgs, arg)
 		}
 	}
 	args = filteredArgs
+
+	// If toolsMode is on, we must ensure --debug is passed to the underlying CLI
+	// to actually get the tool call logs.
+	hasDebug := false
+	for _, arg := range args {
+		if arg == "--debug" {
+			hasDebug = true
+			break
+		}
+	}
+	if toolsMode && !hasDebug {
+		args = append(args, "--debug")
+	}
 
 	if len(args) == 0 {
 		if rawMode {
@@ -115,10 +134,11 @@ func RunGemini(args []string) {
 	go func() {
 		scanner := bufio.NewScanner(prOut)
 		for scanner.Scan() {
+			text := scanner.Text()
 			if rawMode {
-				logger.LogRaw("%s", scanner.Text())
+				logger.LogRaw("%s", text)
 			} else {
-				logger.LogInfo("[Gemini] %s", scanner.Text())
+				logger.LogInfo("[Gemini] %s", text)
 			}
 		}
 	}()
@@ -127,9 +147,21 @@ func RunGemini(args []string) {
 		scanner := bufio.NewScanner(prErr)
 		for scanner.Scan() {
 			text := scanner.Text()
+			isTool := strings.Contains(text, "[DEBUG]") || strings.Contains(strings.ToLower(text), "tool")
+			isError := strings.Contains(strings.ToLower(text), "error") || strings.Contains(strings.ToLower(text), "failed")
+
 			if rawMode {
-				logger.LogRaw("%s", text)
-			} else if strings.Contains(text, "[DEBUG]") {
+				if toolsMode && isTool {
+					logger.LogRaw("%s[TOOL]%s %s", logger.ColorCyan, logger.ColorReset, text)
+				} else if errorsMode && isError {
+					logger.LogRaw("%s[ERR]%s  %s", logger.ColorRed, logger.ColorReset, text)
+				} else if !toolsMode && !errorsMode {
+					// In raw mode without specific filters, we might still want to show stderr
+					// But if the user didn't ask for tools/errors, maybe we only show normal output?
+					// Actually, let's show anyway but without highlighting if no flags.
+					logger.LogRaw("%s", text)
+				}
+			} else if isTool {
 				logger.LogDebug("[Gemini] %s", text)
 			} else {
 				logger.LogError("[Gemini] %s", text)

@@ -14,4 +14,7 @@
 - Implemented `LogRaw` in `logger.go` to support logging without timestamp/level/details prefixes.
 - Added `--raw` flag to `ai gemini` command to suppress all logger prefixes for human-readable terminal output.
 - Optimized `gemini.go` to avoid duplicate output in terminal when in raw mode by bypassing `MultiWriter` and using `LogRaw` directly.
-- Completed all subtasks and verified functionality. Ready for merge.
+- Added ANSI color constants to `logger.go`.
+- Implemented `--tools` and `--errors` flags for `ai gemini` to enable colorized markers (`[TOOL]` in Cyan, `[ERR]` in Red) in raw mode.
+- Verified that `--tools` correctly forces `--debug` on the underlying CLI to capture tool call details.
+- Confirmed that tool calls and error messages are correctly identified and highlighted in terminal output.
