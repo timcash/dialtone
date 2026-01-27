@@ -1,27 +1,32 @@
 # Branch: <branch-name>
-# Tags: <tags>
+# Tags: <labels> (Must match GitHub labels: p0, bug, ready, enhancement, etc.)
 
 # Goal
-<goal>
+Provide a CLEAR, HIGH-LEVEL OBJECTIVE. Connect the ticket back to the original GitHub issue context.
+
+## SUBTASK: [Subtask Name]
+- name: <name-with-dashes>
+- description: Single logic change (< 30 mins). Be precise.
+- test-description: Explicitly state how to verify this change.
+- test-command: `./dialtone.sh test <path>` or relevant bash command.
+- status: todo
 
 ## SUBTASK: start ticket work via `dialtone.sh` cli
 - name: ticket-start
-- description: to start work run the cli command `dialtone.sh ticket start <ticket-name>`
-- test-description: run the ticket tests to verify that the ticket is in a valid state
+- description: run the cli command `dialtone.sh ticket start <ticket-name>`
+- test-description: verify ticket is scaffolded and branch created
 - test-command: `dialtone.sh test ticket <ticket-name>`
 - status: todo
 
-## SUBTASK: <subtask-title>
-- name: <subtask-name> (only lowercase and dashes)
-- description: <description>
-- test-description: <test-description>
-- test-command: <test-command>
-- status: todo | processing | done
-
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
-- description: run the ticket cli to verify all steps to complete the ticket, git is in the correct state and a pull request is created and ready for review. if it comepletes it should mark the final subtask as done
-- test-description: vailidates all ticket subtasks are done
+- description: run the ticket cli to verify all steps to complete the ticket
+- test-description: validates all ticket subtasks are done
 - test-command: `dialtone.sh ticket done <ticket-name>`
 - status: todo
+
+## Collaborative Notes
+- **Context**: Link relevant files (e.g., `[file.go](file:///path/to/file.go)`)
+- **Implementation Notes**: Document technical decisions or blockers here.
+- **Reference**: https://github.com/timcash/dialtone/issues/<id>
 
