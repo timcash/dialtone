@@ -31,13 +31,26 @@ Refactor the issue review workflow and GitHub plugin to support a streamlined tr
 - test-description: Verify the README has the updated usage.
 - test-command: `grep "\-\-ready" src/plugins/github/README.md`
 - status: done
+## SUBTASK: Implement full suite of label shortcuts
+- name: implement-label-shortcuts
+- description: Add flags like `--p0`, `--bug`, `--docs`, etc., to the GitHub plugin for fast triage.
+- test-description: Verify multiple labels can be added at once.
+- test-command: `./dialtone.sh github issue 97 --bug --p1`
+- status: done
+
+## SUBTASK: Create Labeling Reference in workflow docs
+- name: document-labeling-reference
+- description: Add a "Labeling Reference" table to `docs/workflows/issue_review.md` in a clean, agent-readable format.
+- test-description: Verify the table exists and is correctly formatted.
+- test-command: `grep "## 5. Labeling Reference" docs/workflows/issue_review.md`
+- status: done
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
 - description: run the ticket cli to verify all steps to complete the ticket, git is in the correct state and a pull request is created and ready for review.
 - test-description: validates all ticket subtasks are done
 - test-command: `dialtone.sh ticket done issue-ticket-workflow`
-- status: todo
+- status: done
 
 ## Collaborative Notes
 - Moved work from `integrate-bubbletea-tui` to this ticket to maintain focus.
