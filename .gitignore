@@ -10,7 +10,6 @@ src/web_build/
 
 # AI tools
 .crush
-.agent
 
 # OS
 .DS_Store

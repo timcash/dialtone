@@ -32,15 +32,24 @@ func Run(args []string) {
 func printUsage() {
 	fmt.Println("Usage: dialtone-dev ide <command> [options]")
 	fmt.Println("\nCommands:")
-	fmt.Println("  setup-workflows    Copy docs/workflows to .agent/workflows")
+	fmt.Println("  setup-workflows    Copy docs/workflows and docs/rules to .agent/")
 	fmt.Println("  help               Show this help message")
 }
 
 func runSetupWorkflows(args []string) {
-	logger.LogInfo("Setting up workflows...")
+	logger.LogInfo("Setting up IDE agent files...")
 
-	srcDir := filepath.Join("docs", "workflows")
-	destDir := filepath.Join(".agent", "workflows")
+	// Copy Workflows
+	copyDir("docs/workflows", ".agent/workflows")
+	
+	// Copy Rules
+	copyDir("docs/rules", ".agent/rules")
+
+	logger.LogInfo("IDE setup complete.")
+}
+
+func copyDir(srcDir, destDir string) {
+	logger.LogInfo("Copying %s -> %s", srcDir, destDir)
 
 	// Ensure destination directory exists
 	if err := os.MkdirAll(destDir, 0755); err != nil {
@@ -61,8 +70,6 @@ func runSetupWorkflows(args []string) {
 		srcPath := filepath.Join(srcDir, file.Name())
 		destPath := filepath.Join(destDir, file.Name())
 
-		logger.LogInfo("Copying %s -> %s", file.Name(), destPath)
-		
 		// Remove existing to handle cases where it's a symlink or read-only
 		if _, err := os.Lstat(destPath); err == nil {
 			if err := os.Remove(destPath); err != nil {
@@ -82,6 +89,4 @@ func runSetupWorkflows(args []string) {
 			continue
 		}
 	}
-
-	logger.LogInfo("Workflows setup complete.")
 }
