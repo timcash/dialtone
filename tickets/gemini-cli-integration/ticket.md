@@ -15,7 +15,7 @@
 - name: create-install-build
 - description: Create src/plugins/ai/install.go and src/plugins/ai/build.go.
 - test-command: `ls src/plugins/ai/install.go src/plugins/ai/build.go`
-- status: todo
+- status: done
 
 ## SUBTASK: Implement Gemini Command Logic
 - name: implement-gemini-cmd
