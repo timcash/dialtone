@@ -16,7 +16,7 @@ Capture output from the `gemini` CLI command into the main `dialtone.log` file s
 - description: run the cli command `dialtone.sh ticket start gemini-cli-logs`
 - test-description: verify ticket is scaffolded and branch created
 - test-command: `dialtone.sh test ticket gemini-cli-logs`
-- status: todo
+- status: done
 
 ## SUBTASK: Capture Gemini stdout and stderr
 - name: capture-output
