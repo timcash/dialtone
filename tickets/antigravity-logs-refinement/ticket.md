@@ -38,7 +38,7 @@ Refine the `ide antigravity logs` command by implementing an additive flag syste
 - description: run the ticket cli to verify all steps to complete the ticket
 - test-description: validates all ticket subtasks are done
 - test-command: `dialtone.sh ticket done antigravity-logs-refinement`
-- status: todo
+- status: done
 
 ## Collaborative Notes
 - **Context**: Link relevant files (e.g., `[file.go](file:///path/to/file.go)`)
