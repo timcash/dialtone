@@ -16,11 +16,13 @@ import (
 	test_test "dialtone/cli/src/plugins/test/test"
 	ticket_test "dialtone/cli/src/plugins/ticket/test"
 	ui_test "dialtone/cli/src/plugins/ui/test"
+	_ "dialtone/cli/src/plugins/cloudflare/test"
 
 	_ "dialtone/cli/tickets/mock-data-support/test"
 	_ "dialtone/cli/tickets/remove-geminikey-usage/test"
 	_ "dialtone/cli/tickets/test-test-tags/test"
 	_ "dialtone/cli/tickets/verify-ticket-plugin/test"
+	_ "dialtone/cli/tickets/cloudflare-tunnel/test"
 )
 
 // RunTest handles the 'test' command

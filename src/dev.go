@@ -12,6 +12,7 @@ import (
 	ai_cli "dialtone/cli/src/plugins/ai/cli"
 	build_cli "dialtone/cli/src/plugins/build/cli"
 	camera_cli "dialtone/cli/src/plugins/camera/cli"
+	cloudflare_cli "dialtone/cli/src/plugins/cloudflare/cli"
 	chrome_cli "dialtone/cli/src/plugins/chrome/cli"
 	deploy_cli "dialtone/cli/src/plugins/deploy/cli"
 	diagnostic_cli "dialtone/cli/src/plugins/diagnostic/cli"
@@ -78,6 +79,8 @@ func ExecuteDev() {
 		ticket_cli.Run(args)
 	case "plugin":
 		plugin_cli.RunPlugin(args)
+	case "cloudflare":
+		cloudflare_cli.RunCloudflare(args)
 	case "ide":
 		ide_cli.Run(args)
 	case "camera":
