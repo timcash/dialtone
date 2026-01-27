@@ -53,6 +53,13 @@ Integrate Cloudflare Tunnels as a Dialtone plugin (`cloudflare`) to enable secur
 - test-command: `./dialtone.sh test ticket cloudflare-tunnel --subtask cloudflare-hostname-subdomain`
 - status: done
 
+## SUBTASK: Implement Tunnel Cleanup
+- name: cloudflare-tunnel-cleanup
+- description: Add a `cleanup` subcommand to `dialtone cloudflare tunnel` that identifies and terminates all locally running `cloudflared` processes. This ensures no orphaned tunnels occupy ports or consume resources.
+- test-description: Verify that running the cleanup command successfully terminates any background `cloudflared` processes.
+- test-command: `./dialtone.sh test ticket cloudflare-tunnel --subtask cloudflare-tunnel-cleanup`
+- status: todo
+
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
 - description: run the ticket cli to verify all steps to complete the ticket

@@ -16,3 +16,4 @@ Progress log for cloudflare-tunnel
 - Successfully implemented and verified Cloudflare Tunnel plugin.
 - Implemented default subdomain routing using DIALTONE_HOSTNAME.
 - Finalizing ticket again after subdomain enhancement.
+- Implemented tunnel cleanup to close local cloudflared processes.

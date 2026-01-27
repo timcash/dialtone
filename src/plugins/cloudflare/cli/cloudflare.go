@@ -84,6 +84,7 @@ func runTunnel(args []string) {
 		fmt.Println("  create <name>   Create a new tunnel")
 		fmt.Println("  list            List existing tunnels")
 		fmt.Println("  route <name>    Route a hostname to a tunnel")
+		fmt.Println("  cleanup         Terminate all local tunnel processes")
 		return
 	}
 	
@@ -121,6 +122,9 @@ func runTunnel(args []string) {
 			logger.LogFatal("No hostname provided and DIALTONE_HOSTNAME not set in .env")
 		}
 		cmdArgs = append(cmdArgs, "route", "dns", tunnelName, hostname)
+	case "cleanup":
+		runCleanup()
+		return
 	default:
 		fmt.Printf("Unknown tunnel subcommand: %s\n", sub)
 		return
@@ -155,4 +159,14 @@ func runServe(args []string) {
 	if err := cmd.Run(); err != nil {
 		logger.LogFatal("Cloudflare serve failed: %v", err)
 	}
+}
+
+func runCleanup() {
+	logger.LogInfo("Cleaning up local Cloudflare tunnels...")
+	// We'll use pkill if available, otherwise fallback to a manual process check
+	// For simplicity and speed in a CLI context:
+	cmd := exec.Command("pkill", "-f", "cloudflared")
+	// Ignore error as it fails if no processes are found
+	_ = cmd.Run()
+	logger.LogInfo("Tunnel cleanup complete.")
 }
