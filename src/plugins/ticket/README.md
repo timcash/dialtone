@@ -5,12 +5,15 @@ The `ticket` plugin delegates several commands to the `github` plugin for seamle
 ## Core Ticket Commands
 
 ```bash
+# The primary entry point for new work. Switches branch, scaffolds, and opens PR.
+./dialtone.sh ticket start <ticket-name>
+
+# The primary driver for TDD. Validates, runs tests, and manages subtask state.
+./dialtone.sh ticket next
+
 # Scaffolds a new local ticket directory. Defaults to current branch name.
 # Does not switch branches; ideal for logging side-tasks.
 ./dialtone.sh ticket add [<ticket-name>]
-
-# The primary entry point for new work. Switches branch, scaffolds, and opens PR.
-./dialtone.sh ticket start <ticket-name>
 
 # Lists local tickets and open remote GitHub issues.
 ./dialtone.sh ticket list
@@ -39,7 +42,7 @@ Subtasks are defined in the `tickets/<ticket-name>/ticket.md` file. Use the foll
 ./dialtone.sh ticket subtask test [<ticket-name>] <subtask-name>
 
 # Updates subtask status in ticket.md to 'done' or 'failed'.
-# Enforces git cleanliness and progress.txt updates.
+# Enforces git cleanliness.
 ./dialtone.sh ticket subtask done [<ticket-name>] <subtask-name>
 ./dialtone.sh ticket subtask failed [<ticket-name>] <subtask-name>
 ```
@@ -59,13 +62,11 @@ A `ticket.md` file is a collection of subtasks. Each subtask must follow this ex
 ```
 
 ### TDD & Subtask Workflow
-The plugin encourages a Test-Driven Development (TDD) approach:
+The plugin encourages a Test-Driven Development (TDD) approach using `ticket next`:
 1. **Plan**: Define small, testable subtasks in `ticket.md`.
 2. **Setup Test**: Register your subtask test in `tickets/<ticket-name>/test/test.go`.
-3. **Verify Failure**: Run `./dialtone.sh ticket subtask test <name>` to ensure the test fails initially.
-4. **Implement**: Write the code to fulfill the subtask requirements.
-5. **Verify Success**: Run the test again to verify it passes.
-6. **Mark Done**: Use `./dialtone.sh ticket subtask done <name>` to track progress.
+3. **Execute Loop**: Run `./dialtone.sh ticket next` to automate the transition from `todo` to `progress`, run tests, and mark as `done`.
+4. **Implement**: Write code between loop executions until the subtask passes.
 
 ## Examples
 
@@ -76,17 +77,14 @@ The plugin encourages a Test-Driven Development (TDD) approach:
 
 # 2. (Edit tickets/feature-xyz/ticket.md to add subtasks)
 
-# 3. Check what to do next
-./dialtone.sh ticket subtask next
+# 3. Automated loop: Starts the first 'todo' as 'progress'
+./dialtone.sh ticket next
 
-# 4. Run the test for the first subtask
-./dialtone.sh ticket subtask test init-logic
+# 4. (Implement code)
 
-# 5. (Implement code)
+# 5. Automated loop: Detects fix, marks as 'done', starts next 'todo'
+./dialtone.sh ticket next
 
-# 6. Mark it done
-./dialtone.sh ticket subtask done init-logic
-
-# 7. Complete the ticket
+# 6. Complete the ticket
 ./dialtone.sh ticket done
 ```

@@ -35,14 +35,11 @@ Read the ticket file to understand:
 
 ## Step 3: Identify Subtasks That Need Improvement
 
-First, list all subtasks in the current ticket:
+First, use `ticket next` to see the current status and identifies the immediate next task:
 
 ```bash
-# List all subtasks in the current ticket
-./dialtone.sh ticket subtask list
-
-# Or get the next subtask to see what's currently in progress
-./dialtone.sh ticket subtask next
+# Check the current status and find the next task
+./dialtone.sh ticket next
 ```
 
 Focus on improving a **small set** of subtasks (typically 1-5 subtasks). Look for subtasks that:
@@ -78,7 +75,7 @@ Refer to `docs/workflows/ticket.md` for the complete subtask format. Each subtas
 - Each subtask should be a small, ~10 minute task
 - Write the test FIRST, then the code (TDD approach)
 - Use only `dialtone.sh` and `git` commands when possible
-- Guide all work into `dialtone.sh ticket subtask` commands
+- Use `dialtone.sh ticket next` as your primary TDD execution loop
 - Tests are the most important concept in dialtone
 
 ## Step 5: Write Strong Subtasks (LLM-Focused)
@@ -155,20 +152,10 @@ After editing, validate the ticket file so another agent can pick it up cleanly:
 ./dialtone.sh ticket validate
 ```
 
-## Step 9: Report Progress
-After each subtask expansion or plan update, ALWAYS report the current status of all subtasks to the USER.
+## Step 9: Identify Next Steps
+ALWAYS use `ticket next` to verify your improved plan and identify the immediate next task. The tool output will provide the current status chart and identifying information for the next subtask.
 ```bash
-./dialtone.sh ticket subtask list
-```
-**Output Example:**
-```bash
-Subtasks for <ticket-name>:
----------------------------------------------------
-[x] subtask-1 (done)
-[/] subtask-2 (progress)
-[ ] subtask-3 (todo)
-[!] subtask-4 (failed)
----------------------------------------------------
+./dialtone.sh ticket next
 ```
 
 
