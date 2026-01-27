@@ -7,22 +7,43 @@ description: ticket workflow for new and existing tickets
 
 This workflow defines the standard process for planning, executing, and managing scope in Dialtone using the `ticket` plugin.
 
-## 1. Ticket Lifecycle
-All work starts with a ticket. Use the CLI to manage the state of your work.
-
+## 1. CLI API Reference
 ```bash
-# Start a new feature or fix (creates branch + PR)
+# Start a new feature or fix (creates branch + PR).
 ./dialtone.sh ticket start <ticket-name>
 
-# Check what to do next
+# Validate the ticket structure (subtasks, tests, etc).
+./dialtone.sh ticket validate <ticket-name>
+
+# View or add a new ticket without switching branches.
+./dialtone.sh ticket add <ticket-name>
+
+# Check what to do next.
 ./dialtone.sh ticket subtask next
 
-# Mark the Subtask as done
+# Mark a subtask as done.
 ./dialtone.sh ticket subtask done <subtask-name>
 
-# Finalize (verifies all subtasks are done and marks PR ready)
+# Mark a subtask as failed (for investigation/refactor).
+./dialtone.sh ticket subtask failed <subtask-name>
+
+# Finalize the ticket (verifies all subtasks and marks PR ready).
 ./dialtone.sh ticket done
 ```
+
+## 2. Validation Standard
+Before a ticket is considered "Ready", it MUST pass the validation check.
+
+```bash
+./dialtone.sh ticket validate <ticket-name>
+```
+The validator ensures:
+1. The `# Goal` section is present.
+2. Every `## SUBTASK` has a unique `name`, `description`, `test-command`, and `status`.
+3. The `status` is one of: `todo`, `progress`, `done`, `failed`.
+
+## 3. Ticket Lifecycle
+All work starts with a ticket. Use the CLI to manage the state of your work.
 if you need to create a plugin use the plugin cli 
 ### Plugin Lifecycle
 ```bash

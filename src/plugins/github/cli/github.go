@@ -13,6 +13,25 @@ import (
 	"dialtone/cli/src/core/logger"
 )
 
+var labelFlags = map[string]string{
+	"--p0":            "p0",
+	"--p1":            "p1",
+	"--bug":           "bug",
+	"--ready":         "ready",
+	"--ticket":        "ticket",
+	"--enhancement":   "enhancement",
+	"--docs":          "documentation",
+	"--documentation": "documentation",
+	"--perf":          "performance",
+	"--performance":   "performance",
+	"--security":      "security",
+	"--refactor":      "refactor",
+	"--test":          "test",
+	"--duplicate":     "duplicate",
+	"--wontfix":       "wontfix",
+	"--question":      "question",
+}
+
 func findGH() string {
 	depsDir := config.GetDialtoneEnv()
 
@@ -348,8 +367,9 @@ func runIssue(args []string) {
 		fmt.Println("Usage: dialtone-dev github issue <command> [options]")
 		fmt.Println("\nCommands:")
 		fmt.Println("  list      List open issues")
-		fmt.Println("  sync      Sync open issues to local tickets")
+		fmt.Println("  sync      (DEPRECATED) Sync open issues to local tickets")
 		fmt.Println("  view      View issue details")
+		fmt.Println("  edit      Edit an issue (add/remove labels)")
 		fmt.Println("  comment   Add a comment to an issue")
 		fmt.Println("  close     Close specific issue(s)")
 		fmt.Println("  close-all Close all open issues")
@@ -359,6 +379,12 @@ func runIssue(args []string) {
 	subcommand := args[0]
 	restArgs := args[1:]
 
+	// Check if subcommand is an issue number (e.g., dialtone github issue 104 --ready)
+	if matched, _ := regexp.MatchString(`^[0-9]+$`, subcommand); matched {
+		handleIssueDirect(subcommand, restArgs)
+		return
+	}
+
 	switch subcommand {
 	case "list":
 		runIssueList(restArgs)
@@ -366,6 +392,8 @@ func runIssue(args []string) {
 		runIssueSync(restArgs)
 	case "view":
 		runIssueView(restArgs)
+	case "edit":
+		runIssueEdit(restArgs)
 	case "comment":
 		runIssueComment(restArgs)
 	case "close":
@@ -373,35 +401,74 @@ func runIssue(args []string) {
 	case "close-all":
 		runIssueCloseAll(restArgs)
 	default:
-		fmt.Printf("Unknown issue command: %s\n", subcommand)
+		fmt.Printf("Unknown issue command: %s (or missing issue ID)\n", subcommand)
+		fmt.Println("Usage: dialtone-dev github issue <id> [--ready]")
 		os.Exit(1)
 	}
 }
 
 type GHInfo struct {
-	Number int    `json:"number"`
-	Title  string `json:"title"`
-	Body   string `json:"body"`
+	Number int      `json:"number"`
+	Title  string   `json:"title"`
+	Body   string   `json:"body"`
+	Labels []GHLabel `json:"labels"`
+}
+
+type GHLabel struct {
+	Name string `json:"name"`
 }
 
 func runIssueList(args []string) {
 	gh := findGH()
 	logger.LogInfo("Listing open issues...")
 
-	cmdArgs := []string{"issue", "list", "--json", "number,title"}
-	if len(args) > 0 {
-		cmdArgs = append(cmdArgs, args...)
+	useMarkdown := false
+	var ghArgs []string
+	for _, arg := range args {
+		if arg == "--markdown" {
+			useMarkdown = true
+		} else {
+			ghArgs = append(ghArgs, arg)
+		}
 	}
 
+	// Always ask for labels
+	cmdArgs := []string{"issue", "list", "--json", "number,title,labels"}
+	cmdArgs = append(cmdArgs, ghArgs...)
+
 	cmd := exec.Command(gh, cmdArgs...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		logger.LogFatal("Failed to list issues: %v", err)
+	if useMarkdown {
+		output, err := cmd.Output()
+		if err != nil {
+			logger.LogFatal("Failed to list issues: %v", err)
+		}
+
+		var issues []GHInfo
+		if err := json.Unmarshal(output, &issues); err != nil {
+			logger.LogFatal("Failed to parse issues: %v", err)
+		}
+
+		fmt.Println("| # | Title | Labels |")
+		fmt.Println("|---|-------|--------|")
+		for _, issue := range issues {
+			var labels []string
+			for _, l := range issue.Labels {
+				labels = append(labels, l.Name)
+			}
+			labelStr := strings.Join(labels, ", ")
+			fmt.Printf("| %d | %s | %s |\n", issue.Number, issue.Title, labelStr)
+		}
+	} else {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			logger.LogFatal("Failed to list issues: %v", err)
+		}
 	}
 }
 
 func runIssueSync(args []string) {
+	logger.LogWarn("The 'issue sync' command is DEPRECATED and may be removed in a future version. Please use manual ticket creation.")
 	gh := findGH()
 	logger.LogInfo("Syncing GitHub issues to local tickets...")
 
@@ -459,12 +526,86 @@ func runIssueView(args []string) {
 	if len(args) < 1 {
 		logger.LogFatal("Usage: github issue view <number>")
 	}
+	handleIssueDirect(args[0], args[1:])
+}
+
+func handleIssueDirect(issueNum string, args []string) {
 	gh := findGH()
-	cmd := exec.Command(gh, "issue", "view", args[0])
+
+	var labelsToAdd []string
+	for _, arg := range args {
+		if label, ok := labelFlags[arg]; ok {
+			labelsToAdd = append(labelsToAdd, label)
+		}
+	}
+
+	if len(labelsToAdd) > 0 {
+		logger.LogInfo("Updating labels for issue #%s: %s", issueNum, strings.Join(labelsToAdd, ", "))
+		cmdArgs := []string{"issue", "edit", issueNum}
+		for _, l := range labelsToAdd {
+			cmdArgs = append(cmdArgs, "--add-label", l)
+		}
+		cmd := exec.Command(gh, cmdArgs...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			logger.LogFatal("Failed to update labels: %v", err)
+		}
+		return
+	}
+
+	// Default: view issue
+	cmd := exec.Command(gh, "issue", "view", issueNum)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		logger.LogFatal("Failed to view issue: %v", err)
+	}
+}
+
+func runIssueEdit(args []string) {
+	if len(args) < 1 {
+		logger.LogFatal("Usage: dialtone-dev github issue edit <number> [options]")
+	}
+	issueNum := args[0]
+	gh := findGH()
+
+	var editArgs []string
+	editArgs = append(editArgs, "issue", "edit", issueNum)
+
+	hasAction := false
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		switch arg {
+		case "--add-label":
+			if i+1 < len(args) {
+				editArgs = append(editArgs, "--add-label", args[i+1])
+				i++
+				hasAction = true
+			}
+		case "--remove-label":
+			if i+1 < len(args) {
+				editArgs = append(editArgs, "--remove-label", args[i+1])
+				i++
+				hasAction = true
+			}
+		default:
+			if label, ok := labelFlags[arg]; ok {
+				editArgs = append(editArgs, "--add-label", label)
+				hasAction = true
+			}
+		}
+	}
+
+	if !hasAction {
+		logger.LogFatal("No action provided for issue edit. Use --add-label, --remove-label, or a shortcut flag (--p0, --bug, etc.)")
+	}
+
+	cmd := exec.Command(gh, editArgs...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		logger.LogFatal("Failed to edit issue: %v", err)
 	}
 }
 
