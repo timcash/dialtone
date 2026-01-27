@@ -10,7 +10,7 @@ import (
 )
 
 func init() {
-	test.Register("workflow-copy", "ide", []string{"plugin", "ide"}, RunWorkflowCopy)
+	test.Register("ide-setup-verify", "ide", []string{"plugin", "ide"}, RunIDESetupVerify)
 }
 
 // RunAll is the standard entry point required by project rules.
@@ -19,15 +19,29 @@ func RunAll() error {
 	return test.RunPlugin("ide")
 }
 
-func RunWorkflowCopy() error {
-	// 1. Check if .agent/workflows exists
-	destDir := filepath.Join(".agent", "workflows")
-	if _, err := os.Stat(destDir); os.IsNotExist(err) {
-		return fmt.Errorf("FAIL: .agent/workflows does not exist")
+func RunIDESetupVerify() error {
+	// Verify Workflows
+	if err := verifyCopy("docs/workflows", ".agent/workflows", "ticket.md"); err != nil {
+		return err
 	}
 
-	// 2. Check for a specific file, e.g., ticket.md
-	destFile := filepath.Join(destDir, "ticket.md")
+	// Verify Rules
+	if err := verifyCopy("docs/rules", ".agent/rules", "rule-cli.md"); err != nil {
+		return err
+	}
+
+	fmt.Println("PASS: [ide] IDE setup verified (workflows & rules)")
+	return nil
+}
+
+func verifyCopy(srcDir, destDir, sampleFile string) error {
+	// 1. Check if destDir exists
+	if _, err := os.Stat(destDir); os.IsNotExist(err) {
+		return fmt.Errorf("FAIL: %s does not exist", destDir)
+	}
+
+	// 2. Check for a sample file
+	destFile := filepath.Join(destDir, sampleFile)
 	info, err := os.Lstat(destFile)
 	if err != nil {
 		return fmt.Errorf("FAIL: %s does not exist: %v", destFile, err)
@@ -39,7 +53,7 @@ func RunWorkflowCopy() error {
 	}
 
 	// 4. Verify contents match
-	srcFile := filepath.Join("docs", "workflows", "ticket.md")
+	srcFile := filepath.Join(srcDir, sampleFile)
 	srcContent, err := os.ReadFile(srcFile)
 	if err != nil {
 		return fmt.Errorf("FAIL: could not read source file %s: %v", srcFile, err)
@@ -54,6 +68,5 @@ func RunWorkflowCopy() error {
 		return fmt.Errorf("FAIL: file contents mismatch for %s", destFile)
 	}
 
-	fmt.Println("PASS: [ide] Workflow copy verified")
 	return nil
 }
