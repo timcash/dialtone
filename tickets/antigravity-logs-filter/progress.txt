@@ -1,2 +1,6 @@
 Progress log for antigravity-logs-filter
 
+- Implemented --clean flag parsing in ide.go
+- Added line-by-line log scanning and filtering logic
+- Updated ide README.md with the new flag documentation
+- Verified flag parsing and command startup with automated tests
