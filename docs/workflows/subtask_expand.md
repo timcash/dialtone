@@ -5,7 +5,7 @@ description: expand subtasks in the current ticket
 
 # Subtask Expansion & Improvement Workflow
 
-This workflow guides you to **plan and improve** subtasks in the current ticket. You are **NOT executing** the subtasks here—you are **refining the plan** to make them more actionable, testable, and well-structured.
+This workflow guides LLM agents to **plan and improve** subtasks in the current ticket. You are **NOT executing** the subtasks here—you are **refining the plan** to make them more actionable, testable, and well-structured for other agents to execute.
 
 ## Step 1: Identify the Current Ticket
 
@@ -81,7 +81,44 @@ Refer to `docs/workflows/ticket.md` for the complete subtask format. Each subtas
 - Guide all work into `dialtone.sh ticket subtask` commands
 - Tests are the most important concept in dialtone
 
-## Step 5: Improve the Selected Subtasks
+## Step 5: Write Strong Subtasks (LLM-Focused)
+
+You are writing instructions for an LLM agent. The subtask should be so clear that the agent can:
+1. Identify the exact files to touch,
+2. Write the test first,
+3. Implement a minimal change,
+4. Verify with a single test command.
+
+Use this checklist:
+
+**Clarity**
+- Name the exact file(s) or symbol(s) to change
+- Define the smallest viable change (avoid multiple goals)
+- Specify input/output or behavior in one sentence
+
+**Testability**
+- Provide a concrete test scenario the test should assert
+- Ensure the test can fail before the fix
+- Use one focused `test-command`
+
+**Scope**
+- Keep it <= 10 minutes for a single agent
+- Avoid design decisions unless the ticket requires one
+- If a dependency is missing, split into a new subtask
+
+## Step 6: Use This Subtask Template
+
+```markdown
+## SUBTASK: <Short, specific title>
+- name: <kebab-case-name>
+- description: <single paragraph; include file path(s), function name(s), and exact behavior change>
+- test-description: <single sentence describing the test expectation>
+- test-command: `dialtone.sh test ticket <ticket-name> --subtask <subtask-name>`
+- status: todo
+```
+
+## Step 7: Improve Selected Subtasks
+
 Edit `tickets/<ticket-name>/ticket.md` directly to update the improved subtasks. Make sure to:
 - Preserve the overall ticket structure
 - Keep other subtasks unchanged (unless they also need improvement)
@@ -109,10 +146,19 @@ Edit `tickets/<ticket-name>/ticket.md` directly to update the improved subtasks.
 - status: todo
 ```
 
+## Step 8: Verify Structure
+
+After editing, validate the ticket file so another agent can pick it up cleanly:
+
+```bash
+# Validate the ticket structure and status values
+./dialtone.sh ticket validate
+```
+
 ## Notes
 
 - This is a **planning workflow**—you are improving the plan, not executing it
 - Focus on a **small set** of subtasks (1-5) per improvement session
 - Always refer back to `docs/workflows/ticket.md` for format requirements
-- Consider the project context from `README.md` when writing descriptions
+- Use command examples in `bash` code blocks to keep formatting consistent
 - Ensure subtasks align with the TDD philosophy (test-first approach)
