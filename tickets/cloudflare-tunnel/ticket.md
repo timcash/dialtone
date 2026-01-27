@@ -30,7 +30,7 @@ Integrate Cloudflare Tunnels as a Dialtone plugin (`cloudflare`) to enable secur
 - description: Implement `tunnel create` and `tunnel list` subcommands to manage named tunnels.
 - test-description: Verify commands successfully call wrapped `cloudflared` logic.
 - test-command: `./dialtone.sh test ticket cloudflare-tunnel --subtask cloudflare-tunnel-mgmt`
-- status: todo
+- status: done
 
 ## SUBTASK: Implement Serve/Forwarding Logic
 - name: cloudflare-serve
