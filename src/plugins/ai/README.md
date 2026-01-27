@@ -32,8 +32,14 @@ This is the autonomous engine that solves tickets.
 | `./dialtone.sh ai opencode stop` | Stops the running assistant server. |
 | `./dialtone.sh ai developer` | Starts the autonomous loop to solve open tickets. |
 | `./dialtone.sh ai subagent --task <file>` | Runs a specific task file using the AI assistant. |
+| `./dialtone.sh ai --gemini "prompt"` | Proxies a prompt to the Google Gemini CLI. |
+| `./dialtone.sh ai install` | Installs @google/gemini-cli locally in `DIALTONE_ENV`. |
 | `./dialtone.sh ai build` | Verifies AI component readiness (part of the main build). |
 
 ## Dependencies
 - **Binary**: Requires the `opencode` binary installed at `$HOME/.opencode/bin/opencode`.
-- **API Key**: Needs a valid API key configured (via `.env` or system environment) to perform LLM operations.
+- **Gemini CLI**: Requires `@google/gemini-cli` installed via `./dialtone.sh ai install`.
+- **Environment**:
+    - `DIALTONE_ENV`: Absolute path to a directory for plugin dependencies (e.g., node_modules).
+    - `GOOGLE_API_KEY`: Required for Gemini CLI. Get one at [AI Studio](https://aistudio.google.com/app/apikey).
+- **LLM API Key**: Needs a valid API key configured (via `.env` or system environment) for `opencode` operations.
