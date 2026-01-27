@@ -23,6 +23,14 @@ All work starts with a ticket. Use the CLI to manage the state of your work.
 # Finalize (verifies all subtasks are done and marks PR ready)
 ./dialtone.sh ticket done
 ```
+if you need to create a plugin use the plugin cli 
+### Plugin Lifecycle
+```bash
+./dialtone.sh plugin add <plugin-name> # Add a README.md to src/plugins/<plugin-name>/README.md
+./dialtone.sh plugin install <plugin-name> # Install dependencies
+./dialtone.sh plugin build <plugin-name> # Build the plugin
+./dialtone.sh test plugin <plugin-name> # Runs tests in src/plugins/<plugin-name>/test/
+```
 
 ## 2. Managing Scope & Tangents
 Agents must remain focused on the current ticket's goal. Use these strategies to handle scope creep.
