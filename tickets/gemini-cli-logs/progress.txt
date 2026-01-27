@@ -14,3 +14,4 @@
 - Implemented `LogRaw` in `logger.go` to support logging without timestamp/level/details prefixes.
 - Added `--raw` flag to `ai gemini` command to suppress all logger prefixes for human-readable terminal output.
 - Optimized `gemini.go` to avoid duplicate output in terminal when in raw mode by bypassing `MultiWriter` and using `LogRaw` directly.
+- Completed all subtasks and verified functionality. Ready for merge.
