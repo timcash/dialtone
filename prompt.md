@@ -50,3 +50,31 @@ add a new ticket about updating all documentation to show ALL tests commands mus
 6. `dialtone.sh ticket next` is the central building block for all ticket workflows
 7. calling `dialtone.sh ticket next` on main branch prints an error and instrucks LLM agents to ask the user for the next ticket.
 
+
+This system is driven by a core loop of testing and adaptation
+Use tickets and subtasks to document and validate all work
+Running:
+```bash
+# print ticket report and next subtask
+dialtone.sh ticket next
+```
+Prints:
+```shell
+[ticket] Starting next subtask: core-logic
+Subtasks for fake-ticket:
+---------------------------------------------------
+[x] setup-environment (done)
+[/] core-logic (progress)
+[ ] final-polish (todo)
+---------------------------------------------------
+Next Subtask:
+Name:        core-logic
+Description: Implement the primary business logic for the fake feature.
+Test:        echo "FAIL: Core logic tests" && exit 1
+Status:      progress
+```
+
+
+Ticket Report
+status, test-result, subtask-name, test-command,
+
