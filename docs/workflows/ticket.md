@@ -1,46 +1,87 @@
----
-trigger: model_decision
-description: When working on a ticket, always do each subtask one at a time. Subtasks use this format.
----
-1. turn all prompts or issues into subtasks
-1. write the subtask TEST first 
-1. then write the code to pass the test
-1. try to use only `dialtone.sh` and `git` commands
-1. DO NOT run multiple cli commands in one line e.g. `dialtone.sh deploy`
-1. exceptions for searching code and the web and editing code directly are acceptable
-1. guide all work into `dialtone.sh ticket subtask` commands with a test at the end
-1. build plugins if you do not see one you think fits this subtask
-1. you may REORDER subtasks if needed
-1. use the `dialtone.sh help` to print the help menu
+# Workflow: Ticket-Driven Development (TDD)
 
-# Good Subtask Title Examples:
-- Integrate opencode and robot ui xterm element
-- Allow the robot rover web ui to stream the opencode cli into xterm.js
-- Search the code base for the web ui that gets deployed to the robot
-- Look at the webpage interface that comes with opencode
-- Add a new test for the video driver improvements
-- Remove old logging code and update to the new logger.go package
+This workflow defines the standard process for planning, executing, and managing scope in Dialtone using the `ticket` plugin.
 
-When working on a ticket, always do each subtask one at a time. Subtasks use this format.
+## 1. Ticket Lifecycle
+All work starts with a ticket. Use the CLI to manage the state of your work.
 
-# Format
+```bash
+# Start a new feature or fix (creates branch + PR)
+./dialtone.sh ticket start <ticket-name>
 
-```markdown
-## SUBTASK: Small 10 minute task title
-- name: name-with-only-lowercase-and-dashes
-- description: a single paragraph that guides the LLM to take a small testable step
-- test-description: a suggestion that the LLM can use on how to test this change works
-- test-command: the actual command to run the test in `dialtone.sh <test-command>` format
-- status: one of three status values (todo|progress|done)
+# Check what to do next
+./dialtone.sh ticket subtask next
+
+# Mark the Subtask as done
+./dialtone.sh ticket subtask done <subtask-name>
+
+# Finalize (verifies all subtasks are done and marks PR ready)
+./dialtone.sh ticket done
 ```
 
-# Example
+## 2. Managing Scope & Tangents
+Agents must remain focused on the current ticket's goal. Use these strategies to handle scope creep.
 
+### A. Splitting Large Subtasks
+If a subtask is taking more than 20 minutes or has multiple distinct steps, split it into smaller subtasks in the `ticket.md`.
+
+**Before (Too Large):**
 ```markdown
-## SUBTASK: Install Video Driver Environment
-- name: install-video-driver-environment
-- description: write code to install V4L2 headers into the install cli tools
-- test-description: run `dialtone.sh install` then verify `TestV4L2Headers` using `os.Stat`.
-- test-command: `dialtone.sh test ticket video-driver-improvements`
+## SUBTASK: Implement and Test Camera Driver
+- name: camera-driver
+- description: Write the V4L2 logic and add tests.
+- status: progress
+```
+
+**After (Split):**
+```markdown
+## SUBTASK: Implement V4L2 device discovery
+- name: camera-discovery
+- description: Search /dev for video nodes and return a list of paths.
+- test-command: `dialtone.sh test ticket <name> --subtask camera-discovery`
 - status: todo
+
+## SUBTASK: Implement frame capture logic
+- name: camera-capture
+- description: Open a video device and read a single buffer.
+- test-command: `dialtone.sh test ticket <name> --subtask camera-capture`
+- status: todo
+```
+
+### B. Handling Side-Quests with `ticket add`
+If you find a bug or a missing feature **unrelated** to your current ticket, do not switch branches. Use `ticket add` to log it for future work and stay on task.
+
+```bash
+# You found a bug in 'vpn' while working on 'camera'
+# This creates tickets/fix-vpn-crash/ without changing your branch
+./dialtone.sh ticket add fix-vpn-crash
+```
+
+## 3. The TDD Execution Loop
+Follow this loop for **every** subtask.
+
+1. **Register the Test**: Define your test in `tickets/<ticket-name>/test/test.go`.
+2. **Verify Failure**: Run the test; it must fail first.
+   ```bash
+   ./dialtone.sh ticket subtask test <name>
+   ```
+3. **Implement**: Write code to satisfy the test.
+4. **Verify Success**: Run the test again to pass.
+5. **Mark Done**: 
+   ```bash
+   ./dialtone.sh ticket subtask done <name>
+   ```
+
+## 4. Recovering from Failures
+If a subtask test fails and the fix is complex, do not keep the subtask in `progress` indefinitely. Update the `ticket.md` to reflect the new reality:
+
+1. Mark the current subtask as `failed` (using `./dialtone.sh ticket subtask failed <name>`).
+2. Create two new subtasks in `ticket.md`: one for the **investigation/refactoring** and one for the **original goal**.
+3. Use `ticket subtask list` to verify the new plan.
+
+```bash
+# If subtask 'init-video' is blocked by a dependency bug:
+./dialtone.sh ticket subtask failed init-video
+# (Edit ticket.md to add 'fix-dependency' and 'init-video-v2' subtasks)
+./dialtone.sh ticket subtask next
 ```
