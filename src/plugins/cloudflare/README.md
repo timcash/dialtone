@@ -60,15 +60,15 @@ Create a named tunnel for persistent access and route your DNS.
 ./dialtone.sh cloudflare tunnel create dialtone-test
 
 # 2. Route your public hostname to the tunnel
-# (Requires 'cloudflared' to be in your path or use full path from DIALTONE_ENV)
-cloudflared tunnel route dns dialtone-test test.dialtone.earth
+# If DIALTONE_HOSTNAME=drone-2, this routes drone-2.dialtone.earth
+./dialtone.sh cloudflare tunnel route dialtone-test
 ```
 
 ### 3. Run the Tunnel
 Connect your local port to the Cloudflare edge.
 ```bash
-# Forwards traffic from test.dialtone.earth to your local 8080 dashboard.
-./dialtone.sh cloudflare tunnel run --url http://127.0.0.1:8080 dialtone-test
+# Forwards traffic from <DIALTONE_HOSTNAME>.dialtone.earth to your local 8080 dashboard.
+./dialtone.sh cloudflare tunnel run dialtone-test --url http://127.0.0.1:8080
 ```
 
 ## Troubleshooting
