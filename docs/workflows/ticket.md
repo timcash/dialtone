@@ -8,6 +8,7 @@ description: ticket workflow for new and existing tickets
 This workflow defines the standard process for planning, executing, and managing scope in Dialtone using the `ticket` plugin.
 
 ## 1. CLI API Reference
+
 ```bash
 # Start a new feature or fix (creates branch + PR).
 ./dialtone.sh ticket start <ticket-name>
@@ -32,20 +33,23 @@ This workflow defines the standard process for planning, executing, and managing
 ```
 
 ## 2. Validation Standard
+
 Before a ticket is considered "Ready", it MUST pass the validation check.
 
 ```bash
 ./dialtone.sh ticket validate <ticket-name>
 ```
+
 The validator ensures:
 1. The `# Goal` section is present.
 2. Every `## SUBTASK` has a unique `name`, `description`, `test-command`, and `status`.
 3. The `status` is one of: `todo`, `progress`, `done`, `failed`.
 
 ## 3. Ticket Lifecycle
+
 All work starts with a ticket. Use the CLI to manage the state of your work.
-if you need to create a plugin use the plugin cli 
-### Plugin Lifecycle
+
+*Decision needed: If you need to create a plugin, use the plugin CLI.*
 ```bash
 ./dialtone.sh plugin add <plugin-name> # Add a README.md to src/plugins/<plugin-name>/README.md
 ./dialtone.sh plugin install <plugin-name> # Install dependencies
@@ -53,11 +57,9 @@ if you need to create a plugin use the plugin cli
 ./dialtone.sh test plugin <plugin-name> # Runs tests in src/plugins/<plugin-name>/test/
 ```
 
-## 2. Managing Scope & Tangents
-Agents must remain focused on the current ticket's goal. Use these strategies to handle scope creep.
+## 4. Splitting Large Subtasks
 
-### A. Splitting Large Subtasks
-If a subtask is taking more than 20 minutes or has multiple distinct steps, split it into smaller subtasks in the `ticket.md`.
+*Decision needed: If a subtask is taking more than 20 minutes or has multiple distinct steps, split it into smaller subtasks in the `ticket.md`.*
 
 **Before (Too Large):**
 ```markdown
@@ -82,16 +84,17 @@ If a subtask is taking more than 20 minutes or has multiple distinct steps, spli
 - status: todo
 ```
 
-### B. Handling Side-Quests with `ticket add`
-If you find a bug or a missing feature **unrelated** to your current ticket, do not switch branches. Use `ticket add` to log it for future work and stay on task.
+## 5. Handling Side-Quests
 
+*Decision needed: If you find a bug or a missing feature unrelated to your current ticket.*
 ```bash
 # You found a bug in 'vpn' while working on 'camera'
 # This creates tickets/fix-vpn-crash/ without changing your branch
 ./dialtone.sh ticket add fix-vpn-crash
 ```
 
-## 3. The TDD Execution Loop
+## 6. The TDD Execution Loop
+
 Follow this loop for **every** subtask.
 
 1. **Register the Test**: Define your test in `tickets/<ticket-name>/test/test.go`.
@@ -106,8 +109,9 @@ Follow this loop for **every** subtask.
    ./dialtone.sh ticket subtask done <name>
    ```
 
-## 4. Recovering from Failures
-If a subtask test fails and the fix is complex, do not keep the subtask in `progress` indefinitely. Update the `ticket.md` to reflect the new reality:
+## 7. Recovering from Failures
+
+*Decision needed: If a subtask test fails and the fix is complex, do not keep the subtask in `progress` indefinitely.*
 
 1. Mark the current subtask as `failed` (using `./dialtone.sh ticket subtask failed <name>`).
 2. Create two new subtasks in `ticket.md`: one for the **investigation/refactoring** and one for the **original goal**.
@@ -119,3 +123,5 @@ If a subtask test fails and the fix is complex, do not keep the subtask in `prog
 # (Edit ticket.md to add 'fix-dependency' and 'init-video-v2' subtasks)
 ./dialtone.sh ticket subtask next
 ```
+
+
