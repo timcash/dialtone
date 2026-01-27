@@ -1,2 +1,8 @@
 Progress log for create-go-plugin
 
+- Started ticket create-go-plugin
+- Scaffolded go plugin with install and lint commands
+- Registered go plugin in dev.go
+- Implemented Go toolchain installation logic in Go
+- Implemented go lint command using local toolchain
+- Updated plugin documentation
