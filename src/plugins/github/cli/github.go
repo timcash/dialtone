@@ -379,25 +379,62 @@ func runIssue(args []string) {
 }
 
 type GHInfo struct {
-	Number int    `json:"number"`
-	Title  string `json:"title"`
-	Body   string `json:"body"`
+	Number int      `json:"number"`
+	Title  string   `json:"title"`
+	Body   string   `json:"body"`
+	Labels []GHLabel `json:"labels"`
+}
+
+type GHLabel struct {
+	Name string `json:"name"`
 }
 
 func runIssueList(args []string) {
 	gh := findGH()
 	logger.LogInfo("Listing open issues...")
 
-	cmdArgs := []string{"issue", "list", "--json", "number,title"}
-	if len(args) > 0 {
-		cmdArgs = append(cmdArgs, args...)
+	useMarkdown := false
+	var ghArgs []string
+	for _, arg := range args {
+		if arg == "--markdown" {
+			useMarkdown = true
+		} else {
+			ghArgs = append(ghArgs, arg)
+		}
 	}
 
+	// Always ask for labels
+	cmdArgs := []string{"issue", "list", "--json", "number,title,labels"}
+	cmdArgs = append(cmdArgs, ghArgs...)
+
 	cmd := exec.Command(gh, cmdArgs...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		logger.LogFatal("Failed to list issues: %v", err)
+	if useMarkdown {
+		output, err := cmd.Output()
+		if err != nil {
+			logger.LogFatal("Failed to list issues: %v", err)
+		}
+
+		var issues []GHInfo
+		if err := json.Unmarshal(output, &issues); err != nil {
+			logger.LogFatal("Failed to parse issues: %v", err)
+		}
+
+		fmt.Println("| # | Title | Labels |")
+		fmt.Println("|---|-------|--------|")
+		for _, issue := range issues {
+			var labels []string
+			for _, l := range issue.Labels {
+				labels = append(labels, l.Name)
+			}
+			labelStr := strings.Join(labels, ", ")
+			fmt.Printf("| %d | %s | %s |\n", issue.Number, issue.Title, labelStr)
+		}
+	} else {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			logger.LogFatal("Failed to list issues: %v", err)
+		}
 	}
 }
 
