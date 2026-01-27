@@ -15,12 +15,16 @@ Updates the local `.agent/workflows` and `.agent/rules` directories with the lat
 ```
 
 ### `ide antigravity logs`
-Specifically for users of the Antigravity IDE. This command automatically discovers the latest extension log file and tails it in your terminal, making it easy to monitor the AI engine's status, tool calls, and background activity.
+Specifically for users of the Antigravity IDE. This command automatically discovers the latest extension log file and tails it in your terminal, making it easy to monitor the AI engine's status, tool calls, and background activity. Use the `--clean` flag to filter out engine noise and only show chat messages and terminal commands.
 
 ```bash
 # Tail the most recent Antigravity extension log
 ./dialtone.sh ide antigravity logs
+
+# Filter for chat messages and terminal commands only
+./dialtone.sh ide antigravity logs --clean
 ```
+
 
 ## Antigravity Log Discovery Logic
 The plugin uses a multi-step discovery process to find the correct log file on macOS:
