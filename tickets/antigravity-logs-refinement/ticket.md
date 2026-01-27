@@ -16,7 +16,7 @@ Refine the `ide antigravity logs` command by implementing an additive flag syste
 - description: Add minimal ANSI color prefixes to filtered lines. Use a small block of color at the start to indicate the category (e.g., Green for Chat, Blue for Commands).
 - test-description: Manually verify that output lines have color prefixes.
 - test-command: `./dialtone.sh ide antigravity logs --chat`
-- status: todo
+- status: done
 
 ## SUBTASK: Update documentation and help text
 - name: docs-help-update
