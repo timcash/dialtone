@@ -28,10 +28,18 @@ func RunGemini(args []string) {
 	}
 
 	// Check for API Key
-	if os.Getenv("GOOGLE_API_KEY") == "" && os.Getenv("GEMINI_API_KEY") == "" {
+	googleKey := os.Getenv("GOOGLE_API_KEY")
+	geminiKey := os.Getenv("GEMINI_API_KEY")
+
+	if googleKey == "" && geminiKey == "" {
 		logger.LogInfo("Gemini: GOOGLE_API_KEY is not set. You can get one at: https://aistudio.google.com/app/apikey")
 		logger.LogInfo("Please add GOOGLE_API_KEY=your_key to your .env file.")
 		return
+	}
+
+	// gemini-cli specifically looks for GEMINI_API_KEY
+	if geminiKey == "" && googleKey != "" {
+		os.Setenv("GEMINI_API_KEY", googleKey)
 	}
 
 	// The gemini executable should be in node_modules/.bin/gemini inside dialtoneEnv

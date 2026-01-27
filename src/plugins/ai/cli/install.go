@@ -1,4 +1,4 @@
-package ai
+package cli
 
 import (
 	"dialtone/cli/src/core/logger"
@@ -8,8 +8,8 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// Install handles the installation steps for the AI plugin
-func Install() {
+// RunAIInstall handles the installation steps for the AI plugin
+func RunAIInstall(args []string) {
 	logger.LogInfo("AI Plugin: Checking dependencies...")
 
 	// Load .env to get DIALTONE_ENV
