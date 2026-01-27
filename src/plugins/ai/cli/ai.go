@@ -34,6 +34,8 @@ func RunAI(args []string) {
 		RunSubagent(subArgs)
 	case "build":
 		RunAIBuild(subArgs)
+	case "install":
+		RunAIInstall(subArgs)
 	case "help", "-h", "--help":
 		PrintAIUsage()
 	case "--gemini":
@@ -52,6 +54,7 @@ func PrintAIUsage() {
 	fmt.Println("  developer          Start the autonomous developer loop")
 	fmt.Println("  subagent <options> Interface for autonomous subagents")
 	fmt.Println("  build              Build AI related components")
+	fmt.Println("  install <tool>     Install AI related tools (e.g., geminicli)")
 }
 
 // RunAIBuild handles the building of AI related components

@@ -41,5 +41,5 @@ This is the autonomous engine that solves tickets.
 - **Gemini CLI**: Requires `@google/gemini-cli` installed via `./dialtone.sh ai install`.
 - **Environment**:
     - `DIALTONE_ENV`: Absolute path to a directory for plugin dependencies (e.g., node_modules).
-    - `GOOGLE_API_KEY`: Required for Gemini CLI. Get one at [AI Studio](https://aistudio.google.com/app/apikey).
+    - `GOOGLE_API_KEY`: Required for Gemini CLI. Get one at [AI Studio](https://aistudio.google.com/app/apikey). The plugin automatically maps this to `GEMINI_API_KEY` used by the underlying CLI.
 - **LLM API Key**: Needs a valid API key configured (via `.env` or system environment) for `opencode` operations.
