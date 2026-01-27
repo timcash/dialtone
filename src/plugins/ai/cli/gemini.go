@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bufio"
 	"dialtone/cli/src/core/logger"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -63,9 +65,33 @@ func RunGemini(args []string) {
 	// gemini takes the prompt as arguments
 	cmdArgs := append([]string{"chat"}, args...)
 	cmd := exec.Command(geminiPath, cmdArgs...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// Create pipes to capture stdout/stderr
+	prOut, pwOut := io.Pipe()
+	prErr, pwErr := io.Pipe()
+
+	// MultiWriter allows writing to both original output and our pipe
+	cmd.Stdout = io.MultiWriter(os.Stdout, pwOut)
+	cmd.Stderr = io.MultiWriter(os.Stderr, pwErr)
 	cmd.Stdin = os.Stdin // Allow interactive chat if needed
+
+	// Start goroutines to scan and log output
+	go func() {
+		scanner := bufio.NewScanner(prOut)
+		for scanner.Scan() {
+			logger.LogInfo("[Gemini] %s", scanner.Text())
+		}
+	}()
+
+	go func() {
+		scanner := bufio.NewScanner(prErr)
+		for scanner.Scan() {
+			logger.LogError("[Gemini] %s", scanner.Text())
+		}
+	}()
+
+	// Ensure pipes are closed after command finishes
+	defer pwOut.Close()
+	defer pwErr.Close()
 
 	if err := cmd.Run(); err != nil {
 		logger.LogError("Gemini: CLI execution failed: %v", err)
