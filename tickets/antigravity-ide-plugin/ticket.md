@@ -9,7 +9,7 @@ Create an `ide` plugin for Dialtone that provides specialized tools for interact
 - description: Use the Dialtone CLI to scaffold the `ide` plugin.
 - test-description: Verify the plugin directory structure exists.
 - test-command: `ls src/plugins/ide/README.md`
-- status: todo
+- status: done
 
 ## SUBTASK: Implement Antigravity log discovery
 - name: log-discovery
