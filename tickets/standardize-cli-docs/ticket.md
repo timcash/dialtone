@@ -25,7 +25,7 @@ Standardize CLI documentation and help commands across the project.
 - description: Update all project workflows (ticket.md, issue_review.md, subtask_expand.md) to include instructions for reporting subtask progress in the standard TDD list format.
 - test-description: Verify each workflow file in docs/workflows/ contains the new instruction and the standardized progress list example.
 - test-command: `./dialtone.sh test ticket standardize-cli-docs`
-- status: progress
+- status: done
 
 ## SUBTASK: start ticket work via `dialtone.sh` cli
 - name: ticket-start
