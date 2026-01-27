@@ -16,7 +16,13 @@ func init() {
 	var err error
 	logFile, err = os.OpenFile("dialtone.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		fmt.Printf("Warning: Failed to open dialtone.log: %v\n", err)
+		// The original instruction seems to be for a different file or context,
+		// as 'output' is not defined here and 'logger.' prefix is not needed.
+		// Applying the spirit of the change to log the error and return.
+		LogError("Failed to open dialtone.log: %v", err)
+		// If 'output' was meant to be available here, it would need to be defined.
+		// For now, omitting the LogDebug line that references an undefined 'output'.
+		return
 	}
 
 	RedirectStandardLogger()
@@ -77,6 +83,11 @@ func LogInfo(format string, args ...interface{}) {
 // LogError logs an error message
 func LogError(format string, args ...interface{}) {
 	LogMsgWithDepth(3, "ERROR", format, args...)
+}
+
+// LogDebug logs a debug message
+func LogDebug(format string, args ...interface{}) {
+	LogMsgWithDepth(3, "DEBUG", format, args...)
 }
 
 // LogFatal logs a fatal error and exits
