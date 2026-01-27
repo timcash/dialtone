@@ -10,7 +10,9 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"net/netip"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -98,7 +100,7 @@ func runStart(args []string) {
 	}
 
 	if *localOnly {
-		runLocalOnly(*natsPort, *wsPort, *verbose, *mavlinkAddr, *opencode, *useMock)
+		runLocalOnly(*natsPort, *wsPort, *webPort, *verbose, *mavlinkAddr, *opencode, *useMock, *hostname)
 		return
 	}
 
@@ -106,7 +108,7 @@ func runStart(args []string) {
 }
 
 // runLocalOnly starts NATS without Tailscale (original behavior)
-func runLocalOnly(port, wsPort int, verbose bool, mavlinkAddr string, opencode bool, useMock bool) {
+func runLocalOnly(port, wsPort, webPort int, verbose bool, mavlinkAddr string, opencode bool, useMock bool, hostname string) {
 	ns := startNATSServer("0.0.0.0", port, wsPort, verbose)
 	defer ns.Shutdown()
 
@@ -127,8 +129,27 @@ func runLocalOnly(port, wsPort int, verbose bool, mavlinkAddr string, opencode b
 	// Start NATS publisher loop for Mavlink
 	startNatsPublisher(port)
 
+	// Start Web UI
+	webHandler := CreateWebHandler(hostname, port, wsPort, webPort, ns, nil, nil, useMock)
+	localWebAddr := fmt.Sprintf("0.0.0.0:%d", webPort)
+	if webPort == 80 {
+		localWebAddr = "0.0.0.0:8080" // Use 8080 if 80 is requested but not root
+	}
+	
+	webServer := &http.Server{
+		Addr:    localWebAddr,
+		Handler: webHandler,
+	}
+
+	go func() {
+		logger.LogInfo("Web UI (Local Only): Serving at http://%s", localWebAddr)
+		if err := webServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.LogInfo("Local web server error: %v", err)
+		}
+	}()
+
 	waitForShutdown()
-	logger.LogInfo("Shutting down NATS server...")
+	logger.LogInfo("Shutting down local services...")
 }
 
 // Global start time for uptime calculation
@@ -628,6 +649,7 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server
 			"hostname":  hostname,
 			"nats_port": natsPort,
 			"ws_port":   wsPort,
+			"ws_path":   "/nats-ws", // Path to the proxied NATS WS
 			"web_port":  webPort,
 			"ips":       ips,
 		}
@@ -760,6 +782,12 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server
 			}
 		}
 	})
+
+	// 6. NATS WebSocket Proxy
+	natsWSUrl, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", wsPort))
+	natsWSProxy := httputil.NewSingleHostReverseProxy(natsWSUrl)
+	// Important: NATS WS expects it at the root of the target, but we handle it at /nats-ws locally
+	mux.Handle("/nats-ws", natsWSProxy)
 
 	// 6. Static Asset Serving (Embedded)
 	subFS, err := fs.Sub(webFS, "core/web/dist")

@@ -153,20 +153,30 @@ fetch('/api/init')
     if (els.version && data.version) {
       els.version.innerText = data.version;
     }
+    connectNATS(data);
   })
   .catch(err => console.error("Failed to fetch init:", err));
 
 // Start Connection
-async function connectNATS() {
-  const wsPort = 4223; // Standard NATS WS port
-  // Use hostname from window location (handles remote/local)
-  const server = `${PROTOCOL}//${HOSTNAME}:${wsPort}`;
+async function connectNATS(initData: any) {
+  const wsPort = initData.ws_port || 4223;
+  const wsPath = initData.ws_path || '';
+
+  // Construction: if wsPath is present, we use the same port as the page
+  let server = '';
+  if (wsPath) {
+    server = `${PROTOCOL}//${window.location.host}${wsPath}`;
+  } else {
+    server = `${PROTOCOL}//${HOSTNAME}:${wsPort}`;
+  }
 
   term.writeln(`\x1b[90m>>> Connecting to NATS at ${server}...\x1b[0m`);
 
   try {
     nc = await connect({ servers: [server] });
     updateStatus(true);
+
+    term.writeln(`\x1b[1;32m>>> NATS PROTOCOL ESTABLISHED\x1b[0m`);
 
     // Subscribe to ALL mavlink messages for debugging/telemetry
     const sub = nc.subscribe("mavlink.>");
@@ -185,17 +195,14 @@ async function connectNATS() {
       }
     })();
 
-    // Subscribe to specific topics if needed separately
-    // But wildcard covers it.
-
     nc.closed().then(() => {
       updateStatus(false);
-      setTimeout(connectNATS, 2000);
+      setTimeout(() => connectNATS(initData), 2000);
     });
 
   } catch (err) {
     term.writeln(`\x1b[1;31m>>> NATS CONNECTION FAILED: ${err}\x1b[0m`);
-    setTimeout(connectNATS, 5000);
+    setTimeout(() => connectNATS(initData), 5000);
   }
 }
 
@@ -310,7 +317,8 @@ function updateStatus(online: boolean) {
   isConnected = online;
 }
 
-connectNATS();
+
+// initVPNMode(); (Already called above if needed, but we'll stick to init fetch trigger)
 
 // Command Buttons
 document.getElementById('btn-arm')?.addEventListener('click', () => {
