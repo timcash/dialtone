@@ -83,6 +83,7 @@ func runTunnel(args []string) {
 		fmt.Println("\nSubcommands:")
 		fmt.Println("  create <name>   Create a new tunnel")
 		fmt.Println("  list            List existing tunnels")
+		fmt.Println("  run <name>      Run a tunnel")
 		fmt.Println("  route <name>    Route a hostname to a tunnel")
 		fmt.Println("  cleanup         Terminate all local tunnel processes")
 		return
@@ -100,6 +101,9 @@ func runTunnel(args []string) {
 		cmdArgs = append(cmdArgs, subArgs...)
 	case "list":
 		cmdArgs = append(cmdArgs, "list")
+		cmdArgs = append(cmdArgs, subArgs...)
+	case "run":
+		cmdArgs = append(cmdArgs, "run")
 		cmdArgs = append(cmdArgs, subArgs...)
 	case "route":
 		if len(subArgs) == 0 {
