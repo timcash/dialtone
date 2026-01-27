@@ -2,3 +2,5 @@ Progress log for cloudflare-tunnel
 
 - Implementing platform-specific cloudflared installation in install.go.
 - Updated plugin and ticket tests to verify binary presence.
+- Implemented cloudflare plugin shell with login, tunnel, and serve commands.
+- Registered cloudflare plugin in dev.go.
