@@ -4,48 +4,24 @@ The `ticket` plugin delegates several commands to the `github` plugin for seamle
 
 ## Core Ticket Commands
 
-### `ticket add [ticket-name]`
 ```bash
-# Scaffolds a new local ticket directory. If no name is provided, it uses the current git branch name.
-#
-# Note: This command does *not switch branches*. It is ideal for agents to log side-tasks or bugs found
-# during other work without losing their current context.
-./dialtone.sh ticket add bug-found-in-other-module
-```
+# Scaffolds a new local ticket directory. Defaults to current branch name.
+# Does not switch branches; ideal for logging side-tasks.
+./dialtone.sh ticket add [<ticket-name>]
 
-### `ticket start <ticket-name>`
-```bash
-# The primary entry point for new work. It:
-# 1. Creates or switches to a git branch named `<ticket-name>`.
-# 2. Scaffolds the ticket directory structure in `tickets/<ticket-name>/`.
-# 3. Commits the scaffolding.
-# 4. Pushes the branch to the remote repository.
-# 5. Opens a draft Pull Request on GitHub.
-./dialtone.sh ticket start my-feature-task
-```
+# The primary entry point for new work. Switches branch, scaffolds, and opens PR.
+./dialtone.sh ticket start <ticket-name>
 
-### `ticket list`
-```bash
-# Lists all local tickets (directories in `tickets/` containing a `ticket.md`) and open remote GitHub issues.
+# Lists local tickets and open remote GitHub issues.
 ./dialtone.sh ticket list
+
+# Validates the structure and status values of the ticket.md file.
+./dialtone.sh ticket validate [<ticket-name>]
+
+# Final step: verifies subtasks, pushes code, and sets PR to ready.
+./dialtone.sh ticket done [<ticket-name>]
 ```
 
-### `ticket validate [ticket-name]`
-```bash
-# Validates the structure and status values of the `ticket.md` file.
-./dialtone.sh ticket validate my-feature-task
-```
-
-### `ticket done [ticket-name]`
-```bash
-# The final step in the ticket lifecycle. It:
-# 1. Verifies all subtasks (except `ticket-done`) are marked as `done`.
-# 2. Ensures the git working directory is clean.
-# 3. Pushes final changes to the remote.
-# 4. Updates the Pull Request to be "ready for review."
-# 5. Marks the `ticket-done` subtask as `done`.
-./dialtone.sh ticket done my-feature-task
-```
 
 ## Subtask Management
 
@@ -53,21 +29,21 @@ Subtasks are defined in the `tickets/<ticket-name>/ticket.md` file. Use the foll
 
 ### `ticket subtask` Commands
 ```bash
-# Lists all subtasks and their current status (`todo`, `progress`, `done`, or `failed`).
-./dialtone.sh ticket subtask list
+# Lists all subtasks and their current status (todo, progress, done, failed).
+./dialtone.sh ticket subtask list [<ticket-name>]
 
 # Displays the details of the next pending subtask.
-./dialtone.sh ticket subtask next
+./dialtone.sh ticket subtask next [<ticket-name>]
 
-# Runs the automated `test-command` defined for the specified subtask.
-./dialtone.sh ticket subtask test [ticket-name] <subtask-name>
+# Runs the automated test-command defined for the specified subtask.
+./dialtone.sh ticket subtask test [<ticket-name>] <subtask-name>
 
-# Updates the status of the specified subtask to `done` in the `ticket.md` file.
-./dialtone.sh ticket subtask done [ticket-name] <subtask-name>
-
-# Updates the status of the specified subtask to `failed` in the `ticket.md` file.
-./dialtone.sh ticket subtask failed [ticket-name] <subtask-name>
+# Updates subtask status in ticket.md to 'done' or 'failed'.
+# Enforces git cleanliness and progress.txt updates.
+./dialtone.sh ticket subtask done [<ticket-name>] <subtask-name>
+./dialtone.sh ticket subtask failed [<ticket-name>] <subtask-name>
 ```
+
 
 ## Ticket Subtask Format
 
