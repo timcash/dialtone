@@ -152,20 +152,10 @@ After editing, validate the ticket file so another agent can pick it up cleanly:
 ./dialtone.sh ticket validate
 ```
 
-## Step 9: Report Progress
-ALWAYS use `ticket next` to report the current status and identify the next task.
+## Step 9: Identify Next Steps
+ALWAYS use `ticket next` to verify your improved plan and identify the immediate next task. The tool output will provide the current status chart and identifying information for the next subtask.
 ```bash
 ./dialtone.sh ticket next
-```
-**Output Example:**
-```bash
-Subtasks for <ticket-name>:
----------------------------------------------------
-[x] subtask-1 (done)
-[/] subtask-2 (progress)
-[ ] subtask-3 (todo)
-[!] subtask-4 (failed)
----------------------------------------------------
 ```
 
 

@@ -107,24 +107,10 @@ An issue is **Ticket Ready** ONLY when a local `ticket.md` meets these criteria:
 ./dialtone.sh github issue <id> --ready --ticket
 ```
 
-## 5. Report Progress
-ALWAYS use `ticket next` to report the current status and identify the next task.
+## 5. Identify Next Steps
+ALWAYS use `ticket next` to verify your plan and identify the immediate next task. The tool output will provide the current status chart and identifying information for the next subtask.
 ```bash
 ./dialtone.sh ticket next
-```
-**Output Example:**
-```bash
-Subtasks for <ticket-name>:
----------------------------------------------------
-[x] subtask-1 (done)
-[/] subtask-2 (progress)
-[ ] subtask-3 (todo)
-[!] subtask-4 (failed)
----------------------------------------------------
-
-Next Subtask:
-Name: <name>
-...
 ```
 
 

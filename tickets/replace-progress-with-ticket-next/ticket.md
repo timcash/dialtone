@@ -65,7 +65,7 @@ Replace the manual `progress.txt` tracking with a centralized and automated `dia
 - description: run the ticket cli to verify all steps to complete the ticket
 - test-description: validates all ticket subtasks are done
 - test-command: `./dialtone.sh ticket done replace-progress-with-ticket-next`
-- status: progress
+- status: done
 
 ## Collaborative Notes
 - The goal is to make `ticket.md` the single source of truth for both state and testing.
