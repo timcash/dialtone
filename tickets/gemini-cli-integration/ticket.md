@@ -23,6 +23,18 @@
 - test-command: `./dialtone.sh ai --gemini "hello"`
 - status: done
 
+## SUBTASK: Implement optional geminicli installation
+- name: install-geminicli
+- description: Update src/plugins/ai/install.go to optionally install geminicli tool.
+- test-command: `./dialtone.sh ai install geminicli`
+- status: todo
+
+## SUBTASK: Implement geminicli proxy logic
+- name: implement-proxy-logic
+- description: Update src/plugins/ai/cli/gemini.go to proxy commands to geminicli and return results.
+- test-command: `./dialtone.sh ai --gemini "what is dialtone?"`
+- status: todo
+
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
 - description: run the ticket cli to verify all steps to complete the ticket, git is in the correct state and a pull request is created and ready for review. if it comepletes it should mark the final subtask as done
