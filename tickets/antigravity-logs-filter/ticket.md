@@ -17,7 +17,7 @@ Add a `--clean` filtering option to `dialtone ide antigravity logs` that suppres
 - description: In `src/plugins/ide/cli/ide.go`, replace the simple `tail -f` with a piped process or a Go routine that reads the log line-by-line. If `--clean` is active, only print lines containing `[Terminal]` or `Requesting planner with`.
 - test-description: Verify that only "clean" lines are printed to stdout when the flag is used.
 - test-command: `./dialtone.sh test ticket antigravity-logs-filter --subtask filter-logic`
-- status: todo
+- status: done
 
 ## SUBTASK: Update IDE plugin README
 - name: readme-update
