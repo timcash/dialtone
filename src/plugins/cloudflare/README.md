@@ -12,8 +12,8 @@ The `cloudflare` plugin integrates Cloudflare Tunnels into Dialtone, enabling se
 
 ### `cloudflare tunnel create <name>`
 ```bash
-# Create a named tunnel. Cloudflare generates a persistent ID and credentials file.
-./dialtone.sh cloudflare tunnel create my-server-tunnel
+# Create a named tunnel. The name is arbitrary (e.g., 'local-proxy').
+./dialtone.sh cloudflare tunnel create <name>
 ```
 
 ### `cloudflare tunnel list`
@@ -26,7 +26,13 @@ The `cloudflare` plugin integrates Cloudflare Tunnels into Dialtone, enabling se
 ```bash
 # Route a public hostname to a tunnel. If no hostname is provided,
 # it defaults to <DIALTONE_HOSTNAME>.dialtone.earth.
-./dialtone.sh cloudflare tunnel route my-server-tunnel
+./dialtone.sh cloudflare tunnel route <name>
+```
+
+### `cloudflare tunnel run <name> [options]`
+```bash
+# Run a tunnel and optionally specify a service URL to forward.
+./dialtone.sh cloudflare tunnel run <name> --url http://127.0.0.1:8080
 ```
 
 ### `cloudflare tunnel cleanup`
@@ -54,21 +60,21 @@ Ensure your local Dialtone is running in VPN mode and listening for local traffi
 ```
 
 ### 2. Prepare the Tunnel
-Create a named tunnel for persistent access and route your DNS.
+Create a named tunnel (the name is arbitrary and only used for your reference).
 ```bash
-# 1. Create the tunnel
-./dialtone.sh cloudflare tunnel create dialtone-test
+# 1. Create a tunnel with a name of your choice
+./dialtone.sh cloudflare tunnel create <tunnel-name>
 
 # 2. Route your public hostname to the tunnel
-# If DIALTONE_HOSTNAME=drone-2, this routes drone-2.dialtone.earth
-./dialtone.sh cloudflare tunnel route dialtone-test
+# Defaults to <DIALTONE_HOSTNAME>.dialtone.earth
+./dialtone.sh cloudflare tunnel route <tunnel-name>
 ```
 
 ### 3. Run the Tunnel
-Connect your local port to the Cloudflare edge.
+Connect your local port to the Cloudflare edge using the tunnel you just created.
 ```bash
 # Forwards traffic from <DIALTONE_HOSTNAME>.dialtone.earth to your local 8080 dashboard.
-./dialtone.sh cloudflare tunnel run dialtone-test --url http://127.0.0.1:8080
+./dialtone.sh cloudflare tunnel run <tunnel-name> --url http://127.0.0.1:8080
 ```
 
 ## Troubleshooting
