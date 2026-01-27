@@ -11,11 +11,16 @@
 - test-command: `dialtone.sh test ticket gemini-cli-integration`
 - status: todo
 
-## SUBTASK: <subtask-title>
-- name: <subtask-name> (only lowercase and dashes)
-- description: <description>
-- test-description: <test-description>
-- test-command: <test-command>
+## SUBTASK: Create install and build files for AI plugin
+- name: create-install-build
+- description: Create src/plugins/ai/install.go and src/plugins/ai/build.go.
+- test-command: `ls src/plugins/ai/install.go src/plugins/ai/build.go`
+- status: todo
+
+## SUBTASK: Implement Gemini Command Logic
+- name: implement-gemini-cmd
+- description: Create src/plugins/ai/cli/gemini.go with RunGemini function and update src/plugins/ai/cli/ai.go to dispatch it.
+- test-command: `./dialtone.sh ai --gemini "hello"`
 - status: todo | processing | done
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli
