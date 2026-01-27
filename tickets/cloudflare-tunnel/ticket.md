@@ -16,7 +16,7 @@ Integrate Cloudflare Tunnels as a Dialtone plugin (`cloudflare`) to enable secur
 - description: Implement `install.go` in the cloudflare plugin to download and verify the `cloudflared` binary for the current platform.
 - test-description: Verify `cloudflared` is executable after running install.
 - test-command: `./dialtone.sh test ticket cloudflare-tunnel --subtask cloudflare-install`
-- status: todo
+- status: done
 
 ## SUBTASK: Implement Cloudflare Login
 - name: cloudflare-login
