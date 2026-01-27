@@ -32,24 +32,38 @@ func Run(args []string) {
 func printUsage() {
 	fmt.Println("Usage: dialtone-dev ide <command> [options]")
 	fmt.Println("\nCommands:")
-	fmt.Println("  setup-workflows    Copy docs/workflows and docs/rules to .agent/")
-	fmt.Println("  help               Show this help message")
+	fmt.Println("  setup-workflows    Setup IDE agent files (default: copy)")
+	fmt.Println("\nOptions:")
+	fmt.Println("  --symlink          Use symlinks instead of copying")
+	fmt.Println("  --copy             Use copying (default)")
+	fmt.Println("  --help             Show this help message")
 }
 
 func runSetupWorkflows(args []string) {
-	logger.LogInfo("Setting up IDE agent files...")
+	useSymlink := false
+	for _, arg := range args {
+		if arg == "--symlink" {
+			useSymlink = true
+		}
+	}
 
-	// Copy Workflows
-	copyDir("docs/workflows", ".agent/workflows")
+	mode := "copying"
+	if useSymlink {
+		mode = "symlinking"
+	}
+	logger.LogInfo("Setting up IDE agent files (mode: %s)...", mode)
+
+	// Setup Workflows
+	setupDir("docs/workflows", ".agent/workflows", useSymlink)
 	
-	// Copy Rules
-	copyDir("docs/rules", ".agent/rules")
+	// Setup Rules
+	setupDir("docs/rules", ".agent/rules", useSymlink)
 
 	logger.LogInfo("IDE setup complete.")
 }
 
-func copyDir(srcDir, destDir string) {
-	logger.LogInfo("Copying %s -> %s", srcDir, destDir)
+func setupDir(srcDir, destDir string, useSymlink bool) {
+	logger.LogInfo("Processing %s -> %s", srcDir, destDir)
 
 	// Ensure destination directory exists
 	if err := os.MkdirAll(destDir, 0755); err != nil {
@@ -67,8 +81,8 @@ func copyDir(srcDir, destDir string) {
 			continue
 		}
 
-		srcPath := filepath.Join(srcDir, file.Name())
-		destPath := filepath.Join(destDir, file.Name())
+		srcPath, _ := filepath.Abs(filepath.Join(srcDir, file.Name()))
+		destPath, _ := filepath.Abs(filepath.Join(destDir, file.Name()))
 
 		// Remove existing to handle cases where it's a symlink or read-only
 		if _, err := os.Lstat(destPath); err == nil {
@@ -78,15 +92,22 @@ func copyDir(srcDir, destDir string) {
 			}
 		}
 
-		content, err := os.ReadFile(srcPath)
-		if err != nil {
-			logger.LogError("Failed to read source file %s: %v", srcPath, err)
-			continue
-		}
-
-		if err := os.WriteFile(destPath, content, 0644); err != nil {
-			logger.LogError("Failed to write destination file %s: %v", destPath, err)
-			continue
+		if useSymlink {
+			logger.LogInfo("Linking %s", file.Name())
+			if err := os.Symlink(srcPath, destPath); err != nil {
+				logger.LogError("Failed to create symlink for %s: %v", file.Name(), err)
+			}
+		} else {
+			logger.LogInfo("Copying %s", file.Name())
+			content, err := os.ReadFile(srcPath)
+			if err != nil {
+				logger.LogError("Failed to read source file %s: %v", srcPath, err)
+				continue
+			}
+			if err := os.WriteFile(destPath, content, 0644); err != nil {
+				logger.LogError("Failed to write destination file %s: %v", destPath, err)
+				continue
+			}
 		}
 	}
 }
