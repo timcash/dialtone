@@ -20,3 +20,8 @@ Progress log for cloudflare-tunnel
 - Verifying final ticket state for cleanup.
 - Documented tunnel cleanup in README.
 - Verified tunnel cleanup subtask.
+- Identified NATS connection issue over Cloudflare: single-port tunnels block port 4223.
+- Implemented NATS WebSocket reverse proxy at /nats-ws in dialtone.go.
+- Updated frontend to connect to NATS via the proxied path on the main web port.
+- Fixed local-only mode to include Web UI support.
+- Verified end-to-end connectivity for drone-2.dialtone.earth.
