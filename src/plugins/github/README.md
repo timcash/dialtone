@@ -18,7 +18,7 @@ The `ticket` plugin delegates several commands to the `github` plugin for seamle
 ```bash
 # Notes:
 # Checks for `gh` in `DIALTONE_ENV` or PATH.
-# flags: `--draft`, `--ready`, and `--view`.
+# flags: `--draft`, `--ready`, `--ticket`, `--p0`, `--p1`, `--bug`, etc. (see issue_review.md for full list).
 # Verifies you are not on `main`/`master` before creating a PR.
 ./dialtone.sh github pr create # Create a new pull request.
 ./dialtone.sh github pr view <id> # View details of a pull request.
