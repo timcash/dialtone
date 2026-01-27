@@ -85,6 +85,11 @@ func LogError(format string, args ...interface{}) {
 	LogMsgWithDepth(3, "ERROR", format, args...)
 }
 
+// LogWarn logs a warning message
+func LogWarn(format string, args ...interface{}) {
+	LogMsgWithDepth(3, "WARN", format, args...)
+}
+
 // LogDebug logs a debug message
 func LogDebug(format string, args ...interface{}) {
 	LogMsgWithDepth(3, "DEBUG", format, args...)

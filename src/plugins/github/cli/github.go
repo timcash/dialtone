@@ -348,8 +348,9 @@ func runIssue(args []string) {
 		fmt.Println("Usage: dialtone-dev github issue <command> [options]")
 		fmt.Println("\nCommands:")
 		fmt.Println("  list      List open issues")
-		fmt.Println("  sync      Sync open issues to local tickets")
+		fmt.Println("  sync      (DEPRECATED) Sync open issues to local tickets")
 		fmt.Println("  view      View issue details")
+		fmt.Println("  edit      Edit an issue (add/remove labels)")
 		fmt.Println("  comment   Add a comment to an issue")
 		fmt.Println("  close     Close specific issue(s)")
 		fmt.Println("  close-all Close all open issues")
@@ -366,6 +367,8 @@ func runIssue(args []string) {
 		runIssueSync(restArgs)
 	case "view":
 		runIssueView(restArgs)
+	case "edit":
+		runIssueEdit(restArgs)
 	case "comment":
 		runIssueComment(restArgs)
 	case "close":
@@ -439,6 +442,7 @@ func runIssueList(args []string) {
 }
 
 func runIssueSync(args []string) {
+	logger.LogWarn("The 'issue sync' command is DEPRECATED and may be removed in a future version. Please use manual ticket creation.")
 	gh := findGH()
 	logger.LogInfo("Syncing GitHub issues to local tickets...")
 
@@ -502,6 +506,46 @@ func runIssueView(args []string) {
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		logger.LogFatal("Failed to view issue: %v", err)
+	}
+}
+
+func runIssueEdit(args []string) {
+	if len(args) < 1 {
+		logger.LogFatal("Usage: dialtone-dev github issue edit <number> [options]")
+	}
+	issueNum := args[0]
+	gh := findGH()
+
+	var editArgs []string
+	editArgs = append(editArgs, "issue", "edit", issueNum)
+
+	hasAction := false
+	for i := 1; i < len(args); i++ {
+		switch args[i] {
+		case "--add-label":
+			if i+1 < len(args) {
+				editArgs = append(editArgs, "--add-label", args[i+1])
+				i++
+				hasAction = true
+			}
+		case "--remove-label":
+			if i+1 < len(args) {
+				editArgs = append(editArgs, "--remove-label", args[i+1])
+				i++
+				hasAction = true
+			}
+		}
+	}
+
+	if !hasAction {
+		logger.LogFatal("No action provided for issue edit. Use --add-label or --remove-label.")
+	}
+
+	cmd := exec.Command(gh, editArgs...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		logger.LogFatal("Failed to edit issue: %v", err)
 	}
 }
 
