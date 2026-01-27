@@ -22,6 +22,13 @@ The `cloudflare` plugin integrates Cloudflare Tunnels into Dialtone, enabling se
 ./dialtone.sh cloudflare tunnel list
 ```
 
+### `cloudflare tunnel route <name> [hostname]`
+```bash
+# Route a public hostname to a tunnel. If no hostname is provided,
+# it defaults to <DIALTONE_HOSTNAME>.dialtone.earth.
+./dialtone.sh cloudflare tunnel route my-server-tunnel
+```
+
 ### `cloudflare serve <port|url>`
 ```bash
 # Quickly forward a local service to the web using an ephemeral tunnel.
