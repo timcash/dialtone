@@ -136,6 +136,7 @@ Here is how Issue #104 ("improve the install plugin") is bridged from a GitHub G
 - **Labels**: `p0`, `ready`
 - **Core Goal**: research improve the install plugin to have dev and production install paths for each plugin
 
+== START EXAMPLE TICKET ==
 ### Dialtone Ticket (`tickets/improve-install-plugin/ticket.md`)
 ```markdown
 # Branch: improve-install-plugin
@@ -162,3 +163,4 @@ Refactor the plugin installation system to support distinct `dev` and `productio
 - **Context**: [installer.go](file:///Users/tim/code/dialtone/src/core/install/installer.go)
 - **Reference**: https://github.com/timcash/dialtone/issues/104
 ```
+== END EXAMPLE TICKET ==
