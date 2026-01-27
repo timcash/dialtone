@@ -101,6 +101,24 @@ func LogFatal(format string, args ...interface{}) {
 	os.Exit(1)
 }
 
+// LogRaw logs a message without the prefix (timestamp/level/details)
+func LogRaw(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	fmt.Println(msg)
+	if logFile != nil {
+		logFile.WriteString(msg + "\n")
+	}
+}
+
+// LogRawDebug logs a debug message without the prefix if needed
+func LogRawDebug(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	fmt.Println(msg)
+	if logFile != nil {
+		logFile.WriteString(msg + "\n")
+	}
+}
+
 // Noticef satisfies nats-server Logger interface
 func (w *LoggerWriter) Noticef(format string, v ...interface{}) {
 	LogMsgWithDepth(4, "INFO", format, v...)

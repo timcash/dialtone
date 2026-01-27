@@ -32,6 +32,13 @@ Capture output from the `gemini` CLI command into the main `dialtone.log` file s
 - description: Update `src/plugins/ai/cli/gemini.go` to pass a `--debug` flag to the underlying `geminicli` if a specific env var or flag is present, or just default to debug if appropriate for capturing tool calls.
 - test-description: Run with debug enabled and check for verbose tool output.
 - test-command: `./dialtone.sh ai gemini --debug "hello" && grep "[DEBUG]" dialtone.log`
+- status: done
+
+## SUBTASK: Implement raw logging mode
+- name: suppress-logger-prefix
+- description: Add an option to `logger.go` to suppress the prefix (timestamp/level/details) and use it in `gemini.go` for cleaner terminal output.
+- test-description: Run gemini with a flag that minimizes prefixing in terminal output.
+- test-command: `./dialtone.sh ai gemini "hello" --raw`
 - status: todo
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli

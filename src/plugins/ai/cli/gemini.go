@@ -14,14 +14,31 @@ import (
 
 // RunGemini handles the --gemini flag functionality by proxying to @google/gemini-cli
 func RunGemini(args []string) {
+	rawMode := false
+	var filteredArgs []string
+	for _, arg := range args {
+		if arg == "--raw" {
+			rawMode = true
+		} else {
+			filteredArgs = append(filteredArgs, arg)
+		}
+	}
+	args = filteredArgs
+
 	if len(args) == 0 {
-		logger.LogInfo("Gemini: Please provide a prompt. Usage: dialtone ai --gemini \"prompt\"")
+		if rawMode {
+			logger.LogRaw("Gemini: Please provide a prompt.")
+		} else {
+			logger.LogInfo("Gemini: Please provide a prompt. Usage: dialtone ai gemini \"prompt\"")
+		}
 		return
 	}
 
 	// Load .env to get DIALTONE_ENV and GOOGLE_API_KEY
 	if err := godotenv.Load(); err != nil {
-		logger.LogDebug("Gemini: No .env file found")
+		if !rawMode {
+			logger.LogDebug("Gemini: No .env file found")
+		}
 	}
 
 	dialtoneEnv := os.Getenv("DIALTONE_ENV")
@@ -33,8 +50,12 @@ func RunGemini(args []string) {
 	googleKey := os.Getenv("GOOGLE_API_KEY")
 
 	if googleKey == "" {
-		logger.LogError("Gemini: Authentication failed. No GOOGLE_API_KEY found.")
-		logger.LogInfo("Please run 'dialtone ai auth' for instructions on how to set up your API key.")
+		if rawMode {
+			logger.LogRaw("Gemini: Authentication failed. No GOOGLE_API_KEY found.")
+		} else {
+			logger.LogError("Gemini: Authentication failed. No GOOGLE_API_KEY found.")
+			logger.LogInfo("Please run 'dialtone ai auth' for instructions on how to set up your API key.")
+		}
 		return
 	}
 
@@ -46,20 +67,30 @@ func RunGemini(args []string) {
 	geminiPath := filepath.Join(dialtoneEnv, "node_modules", ".bin", "gemini")
 
 	if _, err := os.Stat(localGemini); err == nil {
-		logger.LogDebug("Gemini: Using local binary at %s", localGemini)
+		if !rawMode {
+			logger.LogDebug("Gemini: Using local binary at %s", localGemini)
+		}
 		geminiPath = localGemini
 	} else if _, err := os.Stat(geminiPath); os.IsNotExist(err) {
-		logger.LogDebug("Gemini: CLI not found in %s or %s, checking PATH...", localGemini, geminiPath)
+		if !rawMode {
+			logger.LogDebug("Gemini: CLI not found in %s or %s, checking PATH...", localGemini, geminiPath)
+		}
 		p, err := exec.LookPath("gemini")
 		if err != nil {
-			logger.LogError("Gemini: CLI not found. Please run 'dialtone ai install' first.")
+			if rawMode {
+				logger.LogRaw("Gemini: CLI not found. Please run 'dialtone ai install' first.")
+			} else {
+				logger.LogError("Gemini: CLI not found. Please run 'dialtone ai install' first.")
+			}
 			return
 		}
 		geminiPath = p
 	}
 
 	prompt := strings.Join(args, " ")
-	logger.LogInfo("Gemini: Sending prompt '%s' to CLI...", prompt)
+	if !rawMode {
+		logger.LogInfo("Gemini: Sending prompt '%s' to CLI...", prompt)
+	}
 
 	// Execute gemini CLI
 	// gemini takes the prompt as arguments
@@ -69,16 +100,26 @@ func RunGemini(args []string) {
 	prOut, pwOut := io.Pipe()
 	prErr, pwErr := io.Pipe()
 
-	// MultiWriter allows writing to both original output and our pipe
-	cmd.Stdout = io.MultiWriter(os.Stdout, pwOut)
-	cmd.Stderr = io.MultiWriter(os.Stderr, pwErr)
+	// If raw mode, don't use MultiWriter with os.Stdout/Stderr to avoid duplicates
+	// since LogRaw will print to terminal.
+	if rawMode {
+		cmd.Stdout = pwOut
+		cmd.Stderr = pwErr
+	} else {
+		cmd.Stdout = io.MultiWriter(os.Stdout, pwOut)
+		cmd.Stderr = io.MultiWriter(os.Stderr, pwErr)
+	}
 	cmd.Stdin = os.Stdin // Allow interactive chat if needed
 
 	// Start goroutines to scan and log output
 	go func() {
 		scanner := bufio.NewScanner(prOut)
 		for scanner.Scan() {
-			logger.LogInfo("[Gemini] %s", scanner.Text())
+			if rawMode {
+				logger.LogRaw("%s", scanner.Text())
+			} else {
+				logger.LogInfo("[Gemini] %s", scanner.Text())
+			}
 		}
 	}()
 
@@ -86,7 +127,9 @@ func RunGemini(args []string) {
 		scanner := bufio.NewScanner(prErr)
 		for scanner.Scan() {
 			text := scanner.Text()
-			if strings.Contains(text, "[DEBUG]") {
+			if rawMode {
+				logger.LogRaw("%s", text)
+			} else if strings.Contains(text, "[DEBUG]") {
 				logger.LogDebug("[Gemini] %s", text)
 			} else {
 				logger.LogError("[Gemini] %s", text)
@@ -99,7 +142,9 @@ func RunGemini(args []string) {
 	defer pwErr.Close()
 
 	if err := cmd.Run(); err != nil {
-		logger.LogError("Gemini: CLI execution failed: %v", err)
+		if !rawMode {
+			logger.LogError("Gemini: CLI execution failed: %v", err)
+		}
 		return
 	}
 }
