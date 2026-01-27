@@ -14,3 +14,4 @@ Progress log for cloudflare-tunnel
 - Completed cloudflare serve logic and verification.
 - Completed final verification of all subtasks.
 - Successfully implemented and verified Cloudflare Tunnel plugin.
+- Implemented default subdomain routing using DIALTONE_HOSTNAME.

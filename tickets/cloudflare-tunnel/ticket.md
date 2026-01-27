@@ -46,6 +46,13 @@ Integrate Cloudflare Tunnels as a Dialtone plugin (`cloudflare`) to enable secur
 - test-command: `dialtone.sh test ticket cloudflare-tunnel`
 - status: done
 
+## SUBTASK: Use DIALTONE_HOSTNAME as Cloudflare subdomain
+- name: cloudflare-hostname-subdomain
+- description: Update the Cloudflare plugin to use the `DIALTONE_HOSTNAME` environment variable as the default subdomain when routing or serving. This should facilitate configuration-free routing for nodes like `<DIALTONE_HOSTNAME>.dialtone.earth`.
+- test-description: Verify that the `cloudflare` plugin logic correctly retrieves `DIALTONE_HOSTNAME` and uses it in the `tunnel route dns` logic.
+- test-command: `./dialtone.sh test ticket cloudflare-tunnel --subtask cloudflare-hostname-subdomain`
+- status: todo
+
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
 - description: run the ticket cli to verify all steps to complete the ticket

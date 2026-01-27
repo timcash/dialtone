@@ -83,6 +83,7 @@ func runTunnel(args []string) {
 		fmt.Println("\nSubcommands:")
 		fmt.Println("  create <name>   Create a new tunnel")
 		fmt.Println("  list            List existing tunnels")
+		fmt.Println("  route <name>    Route a hostname to a tunnel")
 		return
 	}
 	
@@ -99,6 +100,27 @@ func runTunnel(args []string) {
 	case "list":
 		cmdArgs = append(cmdArgs, "list")
 		cmdArgs = append(cmdArgs, subArgs...)
+	case "route":
+		if len(subArgs) == 0 {
+			fmt.Println("Usage: dialtone cloudflare tunnel route <tunnel-name> [hostname]")
+			return
+		}
+		tunnelName := subArgs[0]
+		hostname := ""
+		if len(subArgs) > 1 {
+			hostname = subArgs[1]
+		} else {
+			config.LoadConfig()
+			dh := os.Getenv("DIALTONE_HOSTNAME")
+			if dh != "" {
+				hostname = fmt.Sprintf("%s.dialtone.earth", dh)
+				logger.LogInfo("Using DIALTONE_HOSTNAME for subdomain: %s", hostname)
+			}
+		}
+		if hostname == "" {
+			logger.LogFatal("No hostname provided and DIALTONE_HOSTNAME not set in .env")
+		}
+		cmdArgs = append(cmdArgs, "route", "dns", tunnelName, hostname)
 	default:
 		fmt.Printf("Unknown tunnel subcommand: %s\n", sub)
 		return

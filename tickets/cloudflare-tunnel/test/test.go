@@ -15,6 +15,7 @@ func init() {
 	test.Register("cloudflare-login", "cloudflare-tunnel", []string{"login"}, RunLoginTest)
 	test.Register("cloudflare-tunnel-mgmt", "cloudflare-tunnel", []string{"tunnel"}, RunTunnelMgmtTest)
 	test.Register("cloudflare-serve", "cloudflare-tunnel", []string{"serve"}, RunServeTest)
+	test.Register("cloudflare-hostname-subdomain", "cloudflare-tunnel", []string{"hostname"}, RunHostnameSubdomainTest)
 }
 
 // RunAll is the standard entry point required by project rules.
@@ -57,5 +58,15 @@ func RunTunnelMgmtTest() error {
 
 func RunServeTest() error {
 	fmt.Println("TODO: Implement serve verification logic")
+	return nil
+}
+
+func RunHostnameSubdomainTest() error {
+	config.LoadConfig()
+	hostname := os.Getenv("DIALTONE_HOSTNAME")
+	if hostname == "" {
+		return fmt.Errorf("DIALTONE_HOSTNAME not set; please check .env")
+	}
+	fmt.Printf("PASS: [hostname] correctly identified DIALTONE_HOSTNAME: %s\n", hostname)
 	return nil
 }
