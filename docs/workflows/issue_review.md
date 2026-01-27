@@ -24,7 +24,9 @@ Focus on these first. They are the most critical.
    ./dialtone.sh github issue view <id>
    ```
 2. **Decision: Improve or Ask?**:
-   - **Improve**: If the requirements are actionable but the ticket lacks subtasks or tests, **Improve it**. Update the synced ticket to meet the "Ready" standard.
+   - **Improve**: If the requirements are actionable but the ticket lacks subtasks or tests, **Improve it**. 
+     - Create a local ticket: `./dialtone.sh ticket start <short-name>`
+     - Populate it to meet the "Ready" standard (see below).
    - **Ask**: If the goal is ambiguous, the technical path is unknown, or requirements are missing, **Ask a clarifying question**.
      ```bash
      ./dialtone.sh github issue comment <id> "I'm triaging this for development. I'm currently missing [X] to move this to a 'Ready' state. Could you clarify [Question]?"
@@ -36,7 +38,7 @@ Once p0s are triaged (either improved, commented upon, or already Ready), move d
 
 ### C. Continuous Processing
 Continue working through the list until you have:
-- Marked issues with a `ready` tag (via the collaborative session or by syncing and validating).
+- Marked issues with a `ready` tag (via the collaborative session or by creating and validating a ticket).
 - Or run out of time for the current task session.
 
 ## 3. The "Ready" Standard
