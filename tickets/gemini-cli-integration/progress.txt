@@ -1,7 +1,9 @@
 Progress log for gemini-cli-integration
 
-P- Added install.go and build.go to src/plugins/ai/
-- Implemented gemini.go for prompt processing
+- Added install.go and build.go to src/plugins/ai/
+- Implemented gemini.go for prompt processing and geminicli proxying
 - Updated ai.go to dispatch --gemini flag
-- Verified CLI command execution with stub response
+- Added GOOGLE_API_KEY detection with authentication instructions and link
+- Updated src/plugins/ai/README.md with usage and installation details
+- Verified CLI command execution and build stability
 - Subtasks finalized. Ready for walkthrough.
