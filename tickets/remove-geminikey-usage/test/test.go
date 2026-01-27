@@ -14,7 +14,7 @@ func init() {
 // RunAll is the standard entry point required by project rules.
 func RunAll() error {
 	logger.LogInfo("Running remove-geminikey-usage suite...")
-	return test.RunTicket("remove-geminikey-usage")
+	return RunVerifyRemoval()
 }
 
 func RunVerifyRemoval() error {
