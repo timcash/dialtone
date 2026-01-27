@@ -37,7 +37,7 @@ Create an `ide` plugin for Dialtone that provides specialized tools for interact
 - description: run the ticket cli to verify all steps to complete the ticket
 - test-description: validates all ticket subtasks are done
 - test-command: `dialtone.sh ticket done antigravity-ide-plugin`
-- status: todo
+- status: done
 
 ## Collaborative Notes
 - **Context**: 
