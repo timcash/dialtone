@@ -10,7 +10,7 @@ Add a `--clean` filtering option to `dialtone ide antigravity logs` that suppres
 - description: Update the `Run` and `runAntigravityLogs` functions in `src/plugins/ide/cli/ide.go` to support an optional `--clean` flag.
 - test-description: Verify that the command can be called with `--clean` without erroring.
 - test-command: `./dialtone.sh ide antigravity logs --clean` (expected to start but we'll manually check flag propagation)
-- status: todo
+- status: done
 
 ## SUBTASK: Implement line filtering logic
 - name: filter-logic
