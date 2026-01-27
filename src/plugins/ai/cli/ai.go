@@ -36,6 +36,8 @@ func RunAI(args []string) {
 		RunAIBuild(subArgs)
 	case "help", "-h", "--help":
 		PrintAIUsage()
+	case "--gemini":
+		RunGemini(subArgs)
 	default:
 		fmt.Printf("Unknown AI command: %s\n", command)
 		PrintAIUsage()
