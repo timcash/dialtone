@@ -8,4 +8,6 @@ Progress log for gemini-cli-integration
 - Verified CLI command execution and build stability
 - Refactored AI plugin CLI files to src/plugins/ai/cli/ for better organization and fixed command dispatching.
 - Implemented automatic GOOGLE_API_KEY to GEMINI_API_KEY mapping for seamless geminicli integration.
+- Corrected the `auth` command to provide helpful diagnostics and clear guidance for API key setup.
+- Improved environment variable syncing in `gemini.go` to ensure keys are correctly passed to the CLI.
 - Finalized ticket and updated README.
