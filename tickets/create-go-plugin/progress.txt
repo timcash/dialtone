@@ -1,0 +1,2 @@
+Progress log for create-go-plugin
+
