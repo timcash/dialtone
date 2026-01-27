@@ -23,7 +23,7 @@ Refine the `ide antigravity logs` command by implementing an additive flag syste
 - description: Update the `printUsage` in `ide.go` and `src/plugins/ide/README.md` to reflect the new flags and behavior.
 - test-description: Verify help text shows the new flags.
 - test-command: `./dialtone.sh ide help`
-- status: todo
+- status: done
 
 ## SUBTASK: start ticket work via `dialtone.sh` cli
 - name: ticket-start
