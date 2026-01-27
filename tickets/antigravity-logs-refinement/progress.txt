@@ -1,2 +1,6 @@
 Progress log for antigravity-logs-refinement
 
+- [Subtask] refactor-flags: Renamed --clean to --chat, added --commands, and implemented additive filter logic.
+- [Subtask] log-coloring: Added [CHAT] (Green) and [CMD] (Blue) color prefixes to log lines.
+- [Subtask] docs-help-update: Updated README.md and ide.go help usage.
+- [Subtask] ticket-start: Branch 'antigravity-logs-refinement' started and PR created.

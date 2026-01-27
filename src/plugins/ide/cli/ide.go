@@ -43,27 +43,41 @@ func printUsage() {
 	fmt.Println("  --help             Show this help message")
 }
 
+const (
+	colorReset = "\033[0m"
+	colorGreen = "\033[32m"
+	colorBlue  = "\033[34m"
+)
+
+
 func runAntigravity(args []string) {
 	if len(args) < 1 {
-		fmt.Println("Usage: dialtone ide antigravity <subcommand> [options]")
+		fmt.Println("Usage: dialtone ide antigravity logs [options]")
 		fmt.Println("\nSubcommands:")
 		fmt.Println("  logs    Tail Antigravity extension logs")
+		fmt.Println("\nOptions:")
+		fmt.Println("  --chat       Show only chat interaction logs")
+		fmt.Println("  --commands   Show only terminal command logs")
 		return
 	}
 
 	command := args[0]
 	subArgs := args[1:]
 
-	clean := false
+	chat := false
+	commands := false
 	for _, arg := range subArgs {
-		if arg == "--clean" {
-			clean = true
+		if arg == "--chat" || arg == "--clean" {
+			chat = true
+		}
+		if arg == "--commands" {
+			commands = true
 		}
 	}
 
 	switch command {
 	case "logs":
-		runAntigravityLogs(clean)
+		runAntigravityLogs(chat, commands)
 	default:
 		fmt.Printf("Unknown antigravity command: %s\n", command)
 		runAntigravity([]string{})
@@ -71,15 +85,18 @@ func runAntigravity(args []string) {
 	}
 }
 
-func runAntigravityLogs(clean bool) {
+
+func runAntigravityLogs(chat, commands bool) {
 	logPath := findRecentAntigravityLog()
 	if logPath == "" {
 		logger.LogFatal("Could not find Antigravity log file.")
 	}
 
 	logger.LogInfo("Tailing Antigravity log: %s", logPath)
-	if clean {
-		logger.LogInfo("Filtering for chat messages and terminal commands...")
+	
+	filtering := chat || commands
+	if filtering {
+		logger.LogInfo("Filtering enabled: chat=%v, commands=%v", chat, commands)
 	}
 
 	cmd := exec.Command("tail", "-f", logPath)
@@ -95,13 +112,26 @@ func runAntigravityLogs(clean bool) {
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if !clean {
-			fmt.Println(line)
+		
+		isChat := strings.Contains(line, "Requesting planner with")
+		isCmd := strings.Contains(line, "[Terminal]")
+
+		// If filtering is on, only show the enabled types
+		if filtering {
+			if chat && isChat {
+				fmt.Printf("%s[CHAT]%s %s\n", colorGreen, colorReset, line)
+			} else if commands && isCmd {
+				fmt.Printf("%s[CMD ]%s %s\n", colorBlue, colorReset, line)
+			}
 			continue
 		}
 
-		// Filtering logic
-		if strings.Contains(line, "[Terminal]") || strings.Contains(line, "Requesting planner with") {
+		// Show all if no filtering, but still color known types
+		if isChat {
+			fmt.Printf("%s[CHAT]%s %s\n", colorGreen, colorReset, line)
+		} else if isCmd {
+			fmt.Printf("%s[CMD ]%s %s\n", colorBlue, colorReset, line)
+		} else {
 			fmt.Println(line)
 		}
 	}
@@ -110,6 +140,7 @@ func runAntigravityLogs(clean bool) {
 		logger.LogFatal("Tail process exited with error: %v", err)
 	}
 }
+
 
 
 func findRecentAntigravityLog() string {
