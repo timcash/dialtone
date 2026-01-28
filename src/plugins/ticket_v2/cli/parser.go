@@ -105,6 +105,29 @@ func ParseTicketMd(path string) (*Ticket, error) {
 		ticket.Subtasks = append(ticket.Subtasks, *currentSubtask)
 	}
 
+	// Validation
+	if ticket.ID == "" {
+		return nil, fmt.Errorf("ticket is missing '# Name:' header")
+	}
+
+	validStatuses := map[string]bool{
+		"todo":     true,
+		"progress": true,
+		"done":     true,
+		"failed":   true,
+		"skipped":  true,
+		"":         true, // Allow empty for initial scaffold
+	}
+
+	for _, st := range ticket.Subtasks {
+		if st.Name == "" {
+			return nil, fmt.Errorf("subtask is missing '- name:' field")
+		}
+		if !validStatuses[st.Status] {
+			return nil, fmt.Errorf("subtask %s has invalid status: %s", st.Name, st.Status)
+		}
+	}
+
 	return ticket, scanner.Err()
 }
 

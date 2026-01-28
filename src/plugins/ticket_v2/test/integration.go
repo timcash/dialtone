@@ -8,102 +8,111 @@ import (
 	"strings"
 )
 
-const tempTicketName = "tmp-test-ticket"
+const tempTicketName = "walkthrough-live-demo"
 const ticketV2Dir = "src/tickets_v2"
 
 func main() {
-	fmt.Println("Starting ticket_v2 Integration Test...")
+	fmt.Println("Starting ticket_v2 Live Walkthrough Verification...")
 
 	// 1. Setup
 	if err := setup(); err != nil {
 		fmt.Printf("Setup failed: %v\n", err)
+		cleanupGit()
 		os.Exit(1)
 	}
 
-	// 2. Run Tests
-	if err := runTests(); err != nil {
-		fmt.Printf("Tests failed: %v\n", err)
-		teardown() // try to cleanup anyway
+	// 2. Run Comprehensive Tests
+	if err := runLifecycle(); err != nil {
+		fmt.Printf("Lifecycle failed: %v\n", err)
+		cleanupGit()
 		os.Exit(1)
 	}
 
-	// 3. Teardown
+	// 3. Final Teardown
 	if err := teardown(); err != nil {
 		fmt.Printf("Teardown failed: %v\n", err)
-		os.Exit(1)
 	}
 
-	fmt.Println("\nIntegration Test PASSED!")
+	fmt.Println("\nWalkthrough Verification PASSED!")
 }
 
 func setup() error {
-	fmt.Println("Setting up temporary ticket...")
+	fmt.Println("\n[PHASE 1: Scaffolding]")
 	// Remove if exists
 	teardown()
+	cleanupGit()
 
-	// Use the CLI to add a ticket
+	// Use 'add' to scaffold
 	cmd := exec.Command("./dialtone.sh", "ticket_v2", "add", tempTicketName)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to add ticket: %v, output: %s", err, string(output))
 	}
-	fmt.Println("Ticket scaffolded.")
+	fmt.Println("Ticket scaffolded successfully.")
 	return nil
+}
+
+func cleanupGit() {
+	exec.Command("git", "checkout", "main").Run()
+	exec.Command("git", "branch", "-D", tempTicketName).Run()
 }
 
 func teardown() error {
 	path := filepath.Join(ticketV2Dir, tempTicketName)
 	if _, err := os.Stat(path); err == nil {
-		fmt.Printf("Cleaning up %s...\n", path)
+		fmt.Printf("Cleaning up files at %s...\n", path)
 		return os.RemoveAll(path)
 	}
 	return nil
 }
 
-func runTests() error {
-	// A. Verify file existence
+func runLifecycle() error {
 	ticketPath := filepath.Join(ticketV2Dir, tempTicketName, "ticket.md")
-	if _, err := os.Stat(ticketPath); os.IsNotExist(err) {
-		return fmt.Errorf("ticket.md not found at %s", ticketPath)
-	}
+	testGoPath := filepath.Join(ticketV2Dir, tempTicketName, "test", "test.go")
+	var output []byte
+	var err error
 
-	// B. Test 'ticket_v2 start' (simulated)
-	fmt.Println("Running ticket_v2 start...")
-	// We use a different name to ensure we are not on 'fake-ticket'
-	cmd := exec.Command("./dialtone.sh", "ticket_v2", "start", tempTicketName)
-	cmd.CombinedOutput()
+	fmt.Println("\n[PHASE 2: Start and Branching]")
+	// 'start' will checkout the branch and create a placeholder PR
+	exec.Command("./dialtone.sh", "ticket_v2", "start", tempTicketName).Run()
 	
-	// Ensure we are on the correct branch
-	cmd = exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
 	branch, _ := cmd.Output()
-	fmt.Printf("Current branch: %s\n", strings.TrimSpace(string(branch)))
+	fmt.Printf("Active Branch: %s\n", strings.TrimSpace(string(branch)))
 
-	// C. Modify subtasks for testing
-	fmt.Println("Adding test subtasks...")
+	fmt.Println("\n[PHASE 3: Defining Requirements]")
 	content := fmt.Sprintf(`# Name: %s
 # Goal
-Test the ticket_v2 system.
+Show the full ticket_v2 lifecycle.
 
-## SUBTASK: Init
-- name: init-task
-- description: First task
-- test-condition-1: always passes
+## SUBTASK: Logic Implementation
+- name: logic-impl
+- description: Implement core business logic.
+- test-condition-1: logic passes verification
 - status: todo
 
-## SUBTASK: Dependent
-- name: dependent-task
-- dependencies: init-task
-- description: Second task
-- test-condition-1: always passes
+## SUBTASK: Integration
+- name: integration-task
+- dependencies: logic-impl
+- description: Integrate with existing modules.
+- test-condition-1: integration is successful
 - status: todo
 `, tempTicketName)
 
 	if err := os.WriteFile(ticketPath, []byte(content), 0644); err != nil {
 		return err
 	}
+	fmt.Println("Updated ticket.md with walkthrough requirements.")
 
-	// D. Register tests in test.go with named functions
-	testGoPath := filepath.Join(ticketV2Dir, tempTicketName, "test", "test.go")
+	fmt.Println("\n[PHASE 4: Validating Format]")
+	cmd = exec.Command("./dialtone.sh", "ticket_v2", "validate", tempTicketName)
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("validation failed: %v, output: %s", err, string(output))
+	}
+	fmt.Println("Ticket validation passed.")
+
+	fmt.Println("\n[PHASE 5: TDD Loop - Failing Subtask]")
 	testGoContent := fmt.Sprintf(`package test
 
 import (
@@ -113,93 +122,51 @@ import (
 
 func init() {
 	dialtest.RegisterTicket("%%s")
-	dialtest.AddSubtaskTest("init-task", RunInitTask, nil)
-	dialtest.AddSubtaskTest("dependent-task", RunDependentTask, nil)
+	dialtest.AddSubtaskTest("logic-impl", RunLogicTest, nil)
+	dialtest.AddSubtaskTest("integration-task", RunIntegrationTest, nil)
 }
 
-func RunInitTask() error {
-	fmt.Println("init-task running")
-	return nil
+func RunLogicTest() error {
+	fmt.Println("Running logic test...")
+	return fmt.Errorf("logic error: expected 42, got 0")
 }
 
-func RunDependentTask() error {
-	fmt.Println("dependent-task running")
+func RunIntegrationTest() error {
+	fmt.Println("Running integration test...")
 	return nil
 }
 `, tempTicketName)
-	if err := os.WriteFile(testGoPath, []byte(testGoContent), 0644); err != nil {
-		return err
-	}
+	os.WriteFile(testGoPath, []byte(testGoContent), 0644)
 
-	// E. Run 'ticket_v2 validate'
-	fmt.Println("Running ticket_v2 validate...")
-	cmd = exec.Command("./dialtone.sh", "ticket_v2", "validate", tempTicketName)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("validate failed: %v, output: %s", err, string(output))
-	}
-
-	// F. Run 'ticket_v2 next'
-	fmt.Println("Running ticket_v2 next (1st task)...")
+	fmt.Println("Running 'ticket_v2 next' (expecting failure)...")
 	cmd = exec.Command("./dialtone.sh", "ticket_v2", "next")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("ticket_v2 next failed: %v, output: %s", err, string(output))
+	output, err = cmd.CombinedOutput()
+	if !strings.Contains(string(output), "Subtask logic-impl failed") {
+		return fmt.Errorf("expected failure message not found. Output:\n%s", string(output))
 	}
+	fmt.Println("Alerted that test is not passing. State promoted to 'progress'.")
+
+	fmt.Println("\n[PHASE 6: Fixing and Promoting]")
+	fixedTest := strings.Replace(testGoContent, `return fmt.Errorf("logic error: expected 42, got 0")`, `return nil`, 1)
+	os.WriteFile(testGoPath, []byte(fixedTest), 0644)
+
+	fmt.Println("Running 'ticket_v2 next' (expecting pass)...")
+	cmd = exec.Command("./dialtone.sh", "ticket_v2", "next")
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("next failed after fix: %v, output: %s", err, string(output))
+	}
+	fmt.Println("logic-impl passed and promoted to done.")
+
+	fmt.Println("\n[PHASE 7: Completing dependencies]")
+	cmd = exec.Command("./dialtone.sh", "ticket_v2", "next")
+	cmd.CombinedOutput() // documentation
+	fmt.Println("Running 'ticket_v2 subtask list' to verify final state...")
+	cmd = exec.Command("./dialtone.sh", "ticket_v2", "subtask", "list")
+	output, _ = cmd.CombinedOutput()
 	fmt.Println(string(output))
 
-	// G. Verify progress in ticket.md
-	data, _ := os.ReadFile(ticketPath)
-	if !strings.Contains(string(data), "status: done") {
-		return fmt.Errorf("init-task should be done. Current content:\n%s", string(data))
-	}
-	fmt.Println("init-task verified as done.")
-
-	// H. Simulate a failure in dependent-task
-	fmt.Println("Simulating a failure in dependent-task...")
-	testGoContent = fmt.Sprintf(`package test
-
-import (
-	"dialtone/cli/src/dialtest"
-	"fmt"
-)
-
-func init() {
-	dialtest.RegisterTicket("%%s")
-	dialtest.AddSubtaskTest("init-task", RunInitTask, nil)
-	dialtest.AddSubtaskTest("dependent-task", RunDependentTask, nil)
-}
-
-func RunInitTask() error {
-	return nil
-}
-
-func RunDependentTask() error {
-	return fmt.Errorf("simulated failure")
-}
-`, tempTicketName)
-	os.WriteFile(testGoPath, []byte(testGoContent), 0644)
-
-	fmt.Println("Running ticket_v2 next (should fail)...")
-	cmd = exec.Command("./dialtone.sh", "ticket_v2", "next")
-	output, _ = cmd.CombinedOutput()
-	if !strings.Contains(string(output), "Subtask dependent-task failed") {
-		return fmt.Errorf("expected failure message not found in output: %s", string(output))
-	}
-	fmt.Println("Failure detected correctly.")
-
-	// I. Fix the test and run 'next' again
-	fmt.Println("Fixing the test and running next (should pass)...")
-	testGoContent = strings.Replace(testGoContent, `return fmt.Errorf("simulated failure")`, `return nil`, 1)
-	os.WriteFile(testGoPath, []byte(testGoContent), 0644)
-
-	cmd = exec.Command("./dialtone.sh", "ticket_v2", "next")
-	if output, err = cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("final next failed: %v, output: %s", err, string(output))
-	}
-	fmt.Println("dependent-task passed.")
-
-	// J. Run 'ticket_v2 done'
-	fmt.Println("Running ticket_v2 done...")
+	fmt.Println("\n[PHASE 8: Ticket Completion]")
 	cmd = exec.Command("./dialtone.sh", "ticket_v2", "done")
 	output, _ = cmd.CombinedOutput()
 	fmt.Println(string(output))

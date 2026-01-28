@@ -12,4 +12,4 @@ func init() {
 func RunExample() error {
 	return nil
 }
-%!(EXTRA string=tmp-test-ticket)
+%!(EXTRA string=walkthrough-live-demo)

@@ -1,7 +1,7 @@
-# Name: tmp-test-ticket
+# Name: walkthrough-live-demo
 
 # Goal
-Implement the tmp-test-ticket feature.
+Implement the walkthrough-live-demo feature.
 
 ## SUBTASK: Example Subtask
 - name: example-subtask
