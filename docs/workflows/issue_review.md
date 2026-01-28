@@ -13,7 +13,8 @@ This is the **Source of Truth** for the Dialtone Issue Management API.
 ## 1. CLI API Reference
 ```bash
 # The primary driver for TDD. Validates, runs tests, and manages subtask state.
-./dialtone.sh ticket next
+./dialtone.sh ticket next     # v1
+./dialtone.sh ticket_v2 next  # v2
 
 # List open issues in a clean, agent-readable markdown table.
 ./dialtone.sh github issue list --markdown
@@ -71,11 +72,13 @@ If the goal is ambiguous or technical blockers exist, request clarification.
 If requirements are clear but lack subtasks, scaffold or edit a local ticket.
 ```bash
 # 1. Scaffold or update local ticket.
-./dialtone.sh ticket add <name>
+./dialtone.sh ticket add <name>     # v1
+./dialtone.sh ticket_v2 add <name>  # v2
 
 # 2. Populate the ticket (see Section 3: The "Ticket" Standard).
 # 3. Validate the ticket format.
-./dialtone.sh ticket validate <name>
+./dialtone.sh ticket validate <name>      # v1
+./dialtone.sh ticket_v2 validate <name>   # v2
 
 # 4. Mark the GitHub issue as 'ready' and 'ticket' using the shortcuts.
 ./dialtone.sh github issue <id> --ready --ticket
@@ -108,9 +111,10 @@ An issue is **Ticket Ready** ONLY when a local `ticket.md` meets these criteria:
 ```
 
 ## 5. Identify Next Steps
-ALWAYS use `ticket next` to verify your plan and identify the immediate next task. The tool output will provide the current status chart and identifying information for the next subtask.
+ALWAYS use `ticket next` or `ticket_v2 next` to verify your plan and identify the immediate next task. The tool output will provide the current status chart and identifying information for the next subtask.
 ```bash
-./dialtone.sh ticket next
+./dialtone.sh ticket next     # v1
+./dialtone.sh ticket_v2 next  # v2
 ```
 
 
@@ -149,7 +153,7 @@ Here is how Issue #104 ("improve the install plugin") is bridged from a GitHub G
 - **Core Goal**: research improve the install plugin to have dev and production install paths for each plugin
 
 == START EXAMPLE TICKET ==
-### Dialtone Ticket (`tickets/improve-install-plugin/ticket.md`)
+### Dialtone Ticket (`tickets/<name>/ticket.md` or `src/tickets_v2/<name>/ticket.md`)
 ```markdown
 # Branch: improve-install-plugin
 # Tags: p0, ready, install-system

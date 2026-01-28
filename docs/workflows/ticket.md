@@ -5,36 +5,26 @@ description: ticket workflow for new and existing tickets
 
 # Workflow: Ticket-Driven Development (TDD)
 
-This workflow defines the standard process for planning, executing, and managing scope in Dialtone using the `ticket` plugin.
+This workflow defines the standard process for planning, executing, and managing scope in Dialtone. It supports both the legacy `ticket` plugin and the new standardized `ticket_v2` plugin.
 
 ## 1. CLI API Reference
 
-```bash
-# The primary driver for TDD. Validates, runs tests, and manages subtask state.
-./dialtone.sh ticket next
-
-# Start a new feature or fix (creates branch + PR).
-./dialtone.sh ticket start <ticket-name>
-
-# Validate the ticket structure (subtasks, tests, etc).
-./dialtone.sh ticket validate <ticket-name>
-
-# View or add a new ticket without switching branches.
-./dialtone.sh ticket add <ticket-name>
-
-# Mark a subtask as failed (for investigation/refactor).
-./dialtone.sh ticket subtask failed <subtask-name>
-
-# Finalize the ticket (verifies all subtasks and marks PR ready).
-./dialtone.sh ticket done
-```
+| Action | Legacy CLI (v1) | Standardized CLI (v2) |
+| :--- | :--- | :--- |
+| **Start Ticket** | `./dialtone.sh ticket start <name>` | `./dialtone.sh ticket_v2 start <name>` |
+| **Next Subtask** | `./dialtone.sh ticket next` | `./dialtone.sh ticket_v2 next` |
+| **Add Side-Task** | `./dialtone.sh ticket add <name>` | `./dialtone.sh ticket_v2 add <name>` |
+| **Validate Ticket** | `./dialtone.sh ticket validate <name>` | `./dialtone.sh ticket_v2 validate <name>` |
+| **Mark Failed** | `./dialtone.sh ticket subtask failed <name>` | `./dialtone.sh ticket_v2 subtask failed <name>` |
+| **Finish Ticket** | `./dialtone.sh ticket done` | `./dialtone.sh ticket_v2 done` |
 
 ## 2. Validation Standard
 
 Before a ticket is considered "Ready", it MUST pass the validation check.
 
 ```bash
-./dialtone.sh ticket validate <ticket-name>
+./dialtone.sh ticket validate <ticket-name>      # v1
+./dialtone.sh ticket_v2 validate <ticket-name>   # v2
 ```
 
 The validator ensures:
@@ -86,8 +76,9 @@ All work starts with a ticket. Use the CLI to manage the state of your work.
 *Decision needed: If you find a bug or a missing feature unrelated to your current ticket.*
 ```bash
 # You found a bug in 'vpn' while working on 'camera'
-# This creates tickets/fix-vpn-crash/ without changing your branch
-./dialtone.sh ticket add fix-vpn-crash
+# This creates the scaffold without changing your branch
+./dialtone.sh ticket add fix-vpn-crash      # v1
+./dialtone.sh ticket_v2 add fix-vpn-crash   # v2
 ```
 
 ## 6. The TDD Execution Loop
@@ -95,10 +86,11 @@ All work starts with a ticket. Use the CLI to manage the state of your work.
 Follow this loop for **every** subtask.
 
 1. **Plan**: Define a small, ~10 minute subtask in `ticket.md`.
-2. **Register the Test**: Define your test in `tickets/<ticket-name>/test/test.go`.
-3. **Execute Automated Loop**: ALWAYS use `ticket next` to drive the workflow.
+2. **Register the Test**: Define your test in `tickets/<ticket-name>/test/test.go` (v1) or `src/tickets_v2/<ticket-name>/test/test.go` (v2).
+3. **Execute Automated Loop**: ALWAYS use the `next` command to drive the workflow.
    ```bash
-   ./dialtone.sh ticket next
+   ./dialtone.sh ticket next     # v1
+   ./dialtone.sh ticket_v2 next  # v2
    ```
    `ticket next` will:
    - Validate your `ticket.md`.
