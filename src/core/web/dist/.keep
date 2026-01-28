@@ -1,0 +1,2 @@
+This folder is required for Golang //go:embed directives in src/dialtone.go.
+Even if empty, Go requires this directory to exist during compilation.
