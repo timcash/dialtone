@@ -84,19 +84,47 @@ func RunStart(args []string) {
 		logFatal("Usage: ./dialtone.sh ticket_v2 start <ticket-name>")
 	}
 	name := args[0]
+	
+	// Check if branch exists
+	cmdCheck := exec.Command("git", "branch", "--list", name)
+	outputCheck, _ := cmdCheck.Output()
+	if len(strings.TrimSpace(string(outputCheck))) > 0 {
+		logInfo("Branch %s already exists, switching...", name)
+		checkoutCmd := exec.Command("git", "checkout", name)
+		if output, err := checkoutCmd.CombinedOutput(); err != nil {
+			logFatal("Git checkout failed: %v\nOutput: %s", err, string(output))
+		}
+	} else {
+		logInfo("Branching to %s...", name)
+		checkoutCmd := exec.Command("git", "checkout", "-b", name)
+		if output, err := checkoutCmd.CombinedOutput(); err != nil {
+			logFatal("Git checkout failed: %v\nOutput: %s", err, string(output))
+		}
+	}
+
 	RunAdd(args)
 
-	// Git logic
-	logInfo("Branching to %s...", name)
-	exec.Command("git", "checkout", "-b", name).Run()
-	exec.Command("git", "add", ".").Run()
-	exec.Command("git", "commit", "-m", fmt.Sprintf("chore: start ticket %s", name)).Run()
+	addCmd := exec.Command("git", "add", ".")
+	if output, err := addCmd.CombinedOutput(); err != nil {
+		logFatal("Git add failed: %v\nOutput: %s", err, string(output))
+	}
+	commitCmd := exec.Command("git", "commit", "-m", fmt.Sprintf("chore: start ticket %s", name)) 
+	if output, err := commitCmd.CombinedOutput(); err != nil {
+		logFatal("Git commit failed: %v\nOutput: %s", err, string(output))
+	}
+	
 	logInfo("Pushing branch %s to origin...", name)
-	exec.Command("git", "push", "-u", "origin", name).Run()
+	pushCmd := exec.Command("git", "push", "-u", "origin", name)
+	if output, err := pushCmd.CombinedOutput(); err != nil {
+		logFatal("Git push failed: %v\nOutput: %s", err, string(output))
+	}
 	
 	// PR logic (mocked or calls gh)
 	logInfo("Creating Draft Pull Request...")
-	exec.Command("gh", "pr", "create", "--draft", "--title", name, "--body", "Automated ticket PR").Run()
+	prCmd := exec.Command("gh", "pr", "create", "--draft", "--title", name, "--body", "Automated ticket PR")
+	if output, err := prCmd.CombinedOutput(); err != nil {
+		logInfo("Note: gh pr create failed (likely auth or remote): %v\nOutput: %s", err, string(output))
+	}
 	logInfo("Ticket %s started successfully", name)
 }
 
@@ -140,12 +168,31 @@ func RunDone(args []string) {
 	}
 
 	logInfo("Finalizing ticket %s...", ticket.ID)
+
+	// Check git hygiene
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusOutput, _ := statusCmd.Output()
+	if len(strings.TrimSpace(string(statusOutput))) > 0 {
+		logFatal("Git status is not clean. Please commit or stash changes before running 'done'.")
+	}
+
 	logInfo("Pushing final changes...")
-	exec.Command("git", "push").Run()
+	pushCmd := exec.Command("git", "push")
+	if output, err := pushCmd.CombinedOutput(); err != nil {
+		logFatal("Git push failed: %v\nOutput: %s", err, string(output))
+	}
+	
 	logInfo("Marking PR as ready for review...")
-	exec.Command("gh", "pr", "ready").Run()
+	readyCmd := exec.Command("gh", "pr", "ready")
+	if output, err := readyCmd.CombinedOutput(); err != nil {
+		logInfo("Note: gh pr ready failed: %v\nOutput: %s", err, string(output))
+	}
+	
 	logInfo("Switching back to main branch...")
-	exec.Command("git", "checkout", "main").Run()
+	checkoutCmd := exec.Command("git", "checkout", "main")
+	if output, err := checkoutCmd.CombinedOutput(); err != nil {
+		logFatal("Git checkout failed: %v\nOutput: %s", err, string(output))
+	}
 	logInfo("Ticket %s completed", ticket.ID)
 }
 
