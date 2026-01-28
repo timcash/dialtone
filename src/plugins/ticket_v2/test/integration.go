@@ -57,6 +57,12 @@ func restoreBranch(branch string) {
 	exec.Command("git", "checkout", "-f", branch).Run()
 }
 
+func cleanupRemote(branch string) {
+	fmt.Printf("--- Cleaning up remote branch and PR for %s ---\n", branch)
+	exec.Command("gh", "pr", "close", branch, "--delete-branch").Run()
+	exec.Command("git", "push", "origin", "--delete", branch).Run()
+}
+
 func TestAddGranular() error {
 	initialBranch := getCurrentBranch()
 	name := getUniqueName("test-add")
@@ -90,6 +96,7 @@ func TestStartGranular() error {
 	os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	defer exec.Command("git", "branch", "-D", name).Run()
+	defer cleanupRemote(name)
 	defer restoreBranch(initialBranch)
 
 	output := runCmd("./dialtone.sh", "ticket_v2", "start", name)
@@ -196,6 +203,7 @@ func TestDoneGranular() error {
 	os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	defer exec.Command("git", "branch", "-D", name).Run()
+	defer cleanupRemote(name)
 	defer restoreBranch(initialBranch)
 
 	runCmd("./dialtone.sh", "ticket_v2", "start", name)
@@ -249,6 +257,7 @@ func TestSubtaskDoneFailedGranular() error {
 	os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	defer exec.Command("git", "branch", "-D", name).Run()
+	defer cleanupRemote(name)
 	defer restoreBranch(initialBranch)
 
 	runCmd("./dialtone.sh", "ticket_v2", "start", name)
