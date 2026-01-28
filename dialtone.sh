@@ -33,6 +33,9 @@ Commands:
 EOF
 }
 
+# 0. Ensure critical directories exist for Go embed
+mkdir -p src/core/web/dist
+
 # 1. Resolve DIALTONE_ENV and identify command
 DIALTONE_CMD=""
 ARGS=()
