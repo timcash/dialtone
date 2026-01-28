@@ -75,7 +75,11 @@ func TestAddGranular() error {
 	initialBranch := getCurrentBranch()
 	name := getUniqueName("test-add")
 	os.RemoveAll(filepath.Join(ticketV2Dir, name))
-	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
+	defer func() {
+		if err := os.RemoveAll(filepath.Join(ticketV2Dir, name)); err != nil {
+			fmt.Printf("WARNING: Failed to cleanup %s: %v\n", name, err)
+		}
+	}()
 
 	output := runCmd("./dialtone.sh", "ticket", "add", name)
 	if !strings.Contains(output, "Created") {
@@ -102,7 +106,11 @@ func TestStartGranular() error {
 	initialBranch := getCurrentBranch()
 	name := getUniqueName("test-start")
 	os.RemoveAll(filepath.Join(ticketV2Dir, name))
-	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
+	defer func() {
+		if err := os.RemoveAll(filepath.Join(ticketV2Dir, name)); err != nil {
+			fmt.Printf("WARNING: Failed to cleanup %s: %v\n", name, err)
+		}
+	}()
 	defer exec.Command("git", "branch", "-D", name).Run()
 	defer cleanupRemote(name)
 	defer restoreBranch(initialBranch)
@@ -133,7 +141,11 @@ func TestNextGranular() error {
 	initialBranch := getCurrentBranch()
 	name := getUniqueName("test-next")
 	os.RemoveAll(filepath.Join(ticketV2Dir, name))
-	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
+	defer func() {
+		if err := os.RemoveAll(filepath.Join(ticketV2Dir, name)); err != nil {
+			fmt.Printf("WARNING: Failed to cleanup %s: %v\n", name, err)
+		}
+	}()
 	defer restoreBranch(initialBranch)
 
 	runCmd("./dialtone.sh", "ticket", "add", name)
@@ -194,7 +206,11 @@ func TestValidateGranular() error {
 	fmt.Println("--- Checking Timestamp Regression ---")
 	name := getUniqueName("test-validate")
 	os.MkdirAll(filepath.Join(ticketV2Dir, name), 0755)
-	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
+	defer func() {
+		if err := os.RemoveAll(filepath.Join(ticketV2Dir, name)); err != nil {
+			fmt.Printf("WARNING: Failed to cleanup %s: %v\n", name, err)
+		}
+	}()
 	os.WriteFile(filepath.Join(ticketV2Dir, name, "ticket.md"), []byte("# Name: "+name+"\n\n## SUBTASK: R\n- name: r\n- pass-timestamp: 2026-01-27T10:00:00Z\n- fail-timestamp: 2026-01-27T11:00:00Z\n- status: done\n"), 0644)
 
 	output := runCmd("./dialtone.sh", "ticket", "validate", name)
@@ -209,7 +225,11 @@ func TestDoneGranular() error {
 	initialBranch := getCurrentBranch()
 	name := getUniqueName("test-done")
 	os.RemoveAll(filepath.Join(ticketV2Dir, name))
-	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
+	defer func() {
+		if err := os.RemoveAll(filepath.Join(ticketV2Dir, name)); err != nil {
+			fmt.Printf("WARNING: Failed to cleanup %s: %v\n", name, err)
+		}
+	}()
 	defer exec.Command("git", "branch", "-D", name).Run()
 	defer cleanupRemote(name)
 	defer restoreBranch(initialBranch)
@@ -247,7 +267,11 @@ func TestDoneGranular() error {
 func TestSubtaskBasicsGranular() error {
 	name := getUniqueName("test-sub-basics")
 	os.RemoveAll(filepath.Join(ticketV2Dir, name))
-	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
+	defer func() {
+		if err := os.RemoveAll(filepath.Join(ticketV2Dir, name)); err != nil {
+			fmt.Printf("WARNING: Failed to cleanup %s: %v\n", name, err)
+		}
+	}()
 	runCmd("./dialtone.sh", "ticket", "add", name)
 
 	// subtask list
@@ -263,7 +287,11 @@ func TestSubtaskDoneFailedGranular() error {
 	initialBranch := getCurrentBranch()
 	name := getUniqueName("test-sub-state")
 	os.RemoveAll(filepath.Join(ticketV2Dir, name))
-	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
+	defer func() {
+		if err := os.RemoveAll(filepath.Join(ticketV2Dir, name)); err != nil {
+			fmt.Printf("WARNING: Failed to cleanup %s: %v\n", name, err)
+		}
+	}()
 	defer exec.Command("git", "branch", "-D", name).Run()
 	defer cleanupRemote(name)
 	defer restoreBranch(initialBranch)
