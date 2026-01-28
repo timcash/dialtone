@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 )
 
@@ -28,6 +29,8 @@ func RunPlugin(args []string) {
 	switch command {
 	case "create", "add":
 		runCreate(subArgs)
+	case "test":
+		runTest(subArgs)
 	case "help", "--help", "-h":
 		printUsage()
 	default:
@@ -42,7 +45,37 @@ func printUsage() {
 	fmt.Println("\nCommands:")
 	fmt.Println("  add <plugin-name>      Create a new plugin structure")
 	fmt.Println("  create <plugin-name>   Alias for 'add'")
+	fmt.Println("  test <plugin-name>     Run tests for the specified plugin")
 	fmt.Println("  help                   Show this help message")
+}
+
+func runTest(args []string) {
+	if len(args) < 1 {
+		logFatal("Usage: plugin test <plugin-name>")
+	}
+
+	pluginName := args[0]
+
+	// Special case for 'ticket' plugin which has a standalone integration test
+	if pluginName == "ticket" {
+		logInfo("Running ticket integration tests...")
+		cmd := exec.Command("go", "run", "src/plugins/ticket/test/integration.go")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			logFatal("Ticket integration tests failed: %v", err)
+		}
+		return
+	}
+
+	// For other plugins, delegate to the core 'test' command
+	logInfo("Delegating to 'test plugin %s'...", pluginName)
+	cmd := exec.Command(os.Args[0], "test", "plugin", pluginName)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		logFatal("Plugin test failed: %v", err)
+	}
 }
 
 func runCreate(args []string) {
