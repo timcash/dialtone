@@ -2,7 +2,6 @@ package dialtest
 
 import (
 	"fmt"
-	"strings"
 )
 
 type TestCase struct {
