@@ -24,9 +24,24 @@ func main() {
 	initialBranch := getCurrentBranch()
 	fmt.Printf("=== Starting ticket Granular Integration Tests (Initial Branch: %s) ===\n", initialBranch)
 
+	allPassed := true
+	runTest := func(name string, fn func() error) {
+		fmt.Printf("\n[TEST] %s\n", name)
+		if err := fn(); err != nil {
+			fmt.Printf("FAIL: %s - %v\n", name, err)
+			allPassed = false
+		} else {
+			fmt.Printf("PASS: %s\n", name)
+		}
+	}
+
 	defer func() {
 		fmt.Printf("\n=== Restoring Initial Branch: %s ===\n", initialBranch)
 		exec.Command("git", "checkout", "-f", initialBranch).Run()
+		if !allPassed {
+			fmt.Println("\n!!! SOME TESTS FAILED !!!")
+			os.Exit(1)
+		}
 	}()
 
 	runTest("ticket add", TestAddGranular)
@@ -40,14 +55,7 @@ func main() {
 	fmt.Println("\n=== Integration Tests Completed ===")
 }
 
-func runTest(name string, fn func() error) {
-	fmt.Printf("\n[TEST] %s\n", name)
-	if err := fn(); err != nil {
-		fmt.Printf("FAIL: %s - %v\n", name, err)
-		os.Exit(1)
-	}
-	fmt.Printf("PASS: %s\n", name)
-}
+// runTest removed from global scope to use closure in main for error tracking
 
 func getUniqueName(base string) string {
 	return fmt.Sprintf("%s-%d", base, time.Now().Unix())
@@ -68,7 +76,7 @@ func TestAddGranular() error {
 	name := getUniqueName("test-add")
 	os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
-	
+
 	output := runCmd("./dialtone.sh", "ticket", "add", name)
 	if !strings.Contains(output, "Created") {
 		return fmt.Errorf("expected 'Created' message")
@@ -100,7 +108,7 @@ func TestStartGranular() error {
 	defer restoreBranch(initialBranch)
 
 	output := runCmd("./dialtone.sh", "ticket", "start", name)
-	
+
 	checks := []string{
 		"Branching to " + name,
 		"Pushing branch " + name,
@@ -172,7 +180,7 @@ func init() {
 	if !strings.Contains(output, "Subtask t1 passed") {
 		return fmt.Errorf("expected pass message")
 	}
-	
+
 	cmd := exec.Command("git", "log", "-1", "--pretty=format:%s")
 	logMsg, _ := cmd.Output()
 	if !strings.Contains(string(logMsg), "docs: subtask t1 passed") {
@@ -188,7 +196,7 @@ func TestValidateGranular() error {
 	os.MkdirAll(filepath.Join(ticketV2Dir, name), 0755)
 	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	os.WriteFile(filepath.Join(ticketV2Dir, name, "ticket.md"), []byte("# Name: "+name+"\n\n## SUBTASK: R\n- name: r\n- pass-timestamp: 2026-01-27T10:00:00Z\n- fail-timestamp: 2026-01-27T11:00:00Z\n- status: done\n"), 0644)
-	
+
 	output := runCmd("./dialtone.sh", "ticket", "validate", name)
 	if !strings.Contains(output, "[REGRESSION]") {
 		return fmt.Errorf("failed regression detection")
@@ -241,13 +249,13 @@ func TestSubtaskBasicsGranular() error {
 	os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	runCmd("./dialtone.sh", "ticket", "add", name)
-	
+
 	// subtask list
 	output := runCmd("./dialtone.sh", "ticket", "subtask", "list", name)
 	if !strings.Contains(output, "Subtasks for "+name) {
 		return fmt.Errorf("failed subtask list")
 	}
-	
+
 	return nil
 }
 
