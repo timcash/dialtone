@@ -1,4 +1,5 @@
 ---
+trigger: model_decision
 description: ticket workflow for new and existing tickets
 ---
 
