@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 // ParseTicketMd parses a ticket.md file into a Ticket struct.
@@ -125,6 +126,17 @@ func ParseTicketMd(path string) (*Ticket, error) {
 		}
 		if !validStatuses[st.Status] {
 			return nil, fmt.Errorf("subtask %s has invalid status: %s", st.Name, st.Status)
+		}
+
+		// Regression Check: fail-timestamp should not be newer than pass-timestamp
+		if st.PassTimestamp != "" && st.FailTimestamp != "" {
+			passTime, errP := time.Parse(time.RFC3339, st.PassTimestamp)
+			failTime, errF := time.Parse(time.RFC3339, st.FailTimestamp)
+			if errP == nil && errF == nil {
+				if failTime.After(passTime) {
+					return nil, fmt.Errorf("[REGRESSION] subtask %s failed at %s, which is after it passed at %s", st.Name, st.FailTimestamp, st.PassTimestamp)
+				}
+			}
 		}
 	}
 

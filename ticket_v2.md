@@ -170,6 +170,7 @@ var ExampleTicket = Ticket{
 
 ## `./dialtone.sh ticket_v2 next`
 1. **Validation**: Parses `ticket.md` using a regex or markdown parser to ensure all `SUBTASK` fields are present.
+   - **Regression Check**: If a subtask has a `fail-timestamp` that is newer than its `pass-timestamp`, the command fails, indicating a regression (a previously passing test is now failing).
 2. **Dependency Check**: For the next `todo` subtask, verifies that all listed `dependencies` match subtasks with `status: done`.
 3. **Test Execution**: Identifies the subtask in `progress`. Dispatches to the `dialtest` registry in `src/tickets_v2/<ticket-name>/test/test.go` to run the specific function registered for that subtask name.
 4. **State Transition**:
