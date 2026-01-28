@@ -1,11 +1,9 @@
----
-trigger: model_decision
-description: ticket workflow for new and existing tickets (v2 specific)
+description: ticket workflow for new and existing tickets
 ---
 
-# Workflow: Ticket-Driven Development (TDD) (v2)
+# Workflow: Ticket-Driven Development (TDD)
 
-This workflow defines the standard process for planning, executing, and managing scope in Dialtone (Standardized v2).
+This workflow defines the standard process for planning, executing, and managing scope in Dialtone.
 
 ## 1. CLI API Reference
 

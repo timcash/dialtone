@@ -3,23 +3,24 @@ trigger: model_decision
 description: expand subtasks in the current ticket
 ---
 
-# Subtask Expansion & Improvement Workflow
+# Workflow: Subtask Expansion
 
-This workflow guides LLM agents to **plan and improve** subtasks in the current ticket. You are **NOT executing** the subtasks here—you are **refining the plan** to make them more actionable, testable, and well-structured for other agents to execute.
+This workflow defines how to break down complex goals into atomic, testable units in Dialtone.
+e** subtasks in the current ticket. You are **NOT executing** the subtasks here—you are **refining the plan** to make them more actionable, testable, and well-structured for other agents to execute.
 
 ## Step 1: Identify the Current Ticket
 
 First, determine which ticket you're working with:
 
 ```bash
-# Get the current ticket name (matches the git branch name)
-./dialtone.sh ticket name
+# Get the current ticket name
+./dialtone.sh ticket_v2 name
 
-# Print the full ticket content to review
-./dialtone.sh ticket print
+# Print the full ticket content
+./dialtone.sh ticket_v2 print
 ```
 
-The ticket will be located at `tickets/<ticket-name>/ticket.md`.
+The ticket will be located at `src/tickets_v2/<ticket-name>/ticket.md`.
 
 ## Step 2: Review the Ticket Context
 
@@ -30,19 +31,16 @@ Read the ticket file to understand:
 
 ```bash
 # Print the full ticket content to review
-./dialtone.sh ticket print
+./dialtone.sh ticket_v2 print
 ```
 
 ## Step 3: Identify Subtasks That Need Improvement
 
-First, list all subtasks in the current ticket:
+First, use `ticket_v2 next` to see the current status and identifies the immediate next task:
 
 ```bash
-# List all subtasks in the current ticket
-./dialtone.sh ticket subtask list
-
-# Or get the next subtask to see what's currently in progress
-./dialtone.sh ticket subtask next
+# Check the current status and find the next task
+./dialtone.sh ticket_v2 next
 ```
 
 Focus on improving a **small set** of subtasks (typically 1-5 subtasks). Look for subtasks that:
@@ -52,7 +50,7 @@ Focus on improving a **small set** of subtasks (typically 1-5 subtasks). Look fo
 3. **Too large**: Should be broken into smaller, more focused subtasks
 4. **Missing context**: Need more description to understand the goal
 5. **Status issues**: Subtasks stuck in `progress` that need refinement
-6. **Format problems**: Fix anything that doesn't follow the proper subtask format from `docs/workflows/ticket.md`
+6. **Format problems**: Fix anything that doesn't follow the proper subtask format from `docs/workflows/ticket_v2.md`
 
 ## Step 4: Understand the Subtask Format
 
@@ -60,10 +58,10 @@ Review the subtask format documentation:
 
 ```bash
 # Read the ticket workflow to understand subtask format
-cat docs/workflows/ticket.md
+cat docs/workflows/ticket_v2.md
 ```
 
-Refer to `docs/workflows/ticket.md` for the complete subtask format. Each subtask must have:
+Refer to `docs/workflows/ticket_v2.md` for the complete subtask format. Each subtask must have:
 
 ```markdown
 ## SUBTASK: Small 10 minute task title
@@ -74,11 +72,11 @@ Refer to `docs/workflows/ticket.md` for the complete subtask format. Each subtas
 - status: one of three status values (todo|progress|done)
 ```
 
-**Key principles from `docs/workflows/ticket.md`:**
+**Key principles from `docs/workflows/ticket_v2.md`:**
 - Each subtask should be a small, ~10 minute task
 - Write the test FIRST, then the code (TDD approach)
 - Use only `dialtone.sh` and `git` commands when possible
-- Guide all work into `dialtone.sh ticket subtask` commands
+- Use `dialtone.sh ticket_v2 next` as your primary TDD execution loop
 - Tests are the most important concept in dialtone
 
 ## Step 5: Write Strong Subtasks (LLM-Focused)
@@ -113,13 +111,13 @@ Use this checklist:
 - name: <kebab-case-name>
 - description: <single paragraph; include file path(s), function name(s), and exact behavior change>
 - test-description: <single sentence describing the test expectation>
-- test-command: `dialtone.sh test ticket <ticket-name> --subtask <subtask-name>`
+- test-command: `dialtone.sh test ticket_v2 <name> --subtask <name>`
 - status: todo
 ```
 
 ## Step 7: Improve Selected Subtasks
 
-Edit `tickets/<ticket-name>/ticket.md` directly to update the improved subtasks. Make sure to:
+Edit `src/tickets_v2/<ticket-name>/ticket.md` directly to update the improved subtasks. Make sure to:
 - Preserve the overall ticket structure
 - Keep other subtasks unchanged (unless they also need improvement)
 - Maintain proper markdown formatting
@@ -140,9 +138,9 @@ Edit `tickets/<ticket-name>/ticket.md` directly to update the improved subtasks.
 ```markdown
 ## SUBTASK: Add error handling to camera initialization in camera_linux.go
 - name: add-camera-init-error-handling
-- description: Update the `InitCamera` function in `src/plugins/camera/app/camera_linux.go` to handle V4L2 device open failures. Return a descriptive error if the device path doesn't exist or cannot be opened. Check for device permissions and provide helpful error messages that guide troubleshooting.
+- description: Update the `InitCamera` function in `src/tickets_v2/camera/app/camera_linux.go` to handle V4L2 device open failures. Return a descriptive error if the device path doesn't exist or cannot be opened. Check for device permissions and provide helpful error messages that guide troubleshooting.
 - test-description: Run the test and verify that attempting to initialize a camera with an invalid device path returns a clear error message. The test should check that the error includes the device path and suggests checking permissions or device existence.
-- test-command: `dialtone.sh test ticket camera-improvements --subtask add-camera-init-error-handling`
+- test-command: `dialtone.sh test ticket_v2 camera-improvements --subtask add-camera-init-error-handling`
 - status: todo
 ```
 
@@ -152,23 +150,13 @@ After editing, validate the ticket file so another agent can pick it up cleanly:
 
 ```bash
 # Validate the ticket structure and status values
-./dialtone.sh ticket validate
+./dialtone.sh ticket_v2 validate
 ```
 
-## Step 9: Report Progress
-After each subtask expansion or plan update, ALWAYS report the current status of all subtasks to the USER.
+## Step 9: Identify Next Steps
+ALWAYS use `ticket_v2 next` to verify your improved plan and identify the immediate next task. The tool output will provide the current status chart and identifying information for the next subtask.
 ```bash
-./dialtone.sh ticket subtask list
-```
-**Output Example:**
-```bash
-Subtasks for <ticket-name>:
----------------------------------------------------
-[x] subtask-1 (done)
-[/] subtask-2 (progress)
-[ ] subtask-3 (todo)
-[!] subtask-4 (failed)
----------------------------------------------------
+./dialtone.sh ticket_v2 next
 ```
 
 
@@ -176,6 +164,6 @@ Subtasks for <ticket-name>:
 
 - This is a **planning workflow**—you are improving the plan, not executing it
 - Focus on a **small set** of subtasks (1-5) per improvement session
-- Always refer back to `docs/workflows/ticket.md` for format requirements
+- Always refer back to `docs/workflows/ticket_v2.md` for format requirements
 - Use command examples in `bash` code blocks to keep formatting consistent
 - Ensure subtasks align with the TDD philosophy (test-first approach)
