@@ -148,28 +148,52 @@ func RunIntegrationTest() error {
 
 	fmt.Println("\n[PHASE 6: Fixing and Promoting]")
 	fixedTest := strings.Replace(testGoContent, `return fmt.Errorf("logic error: expected 42, got 0")`, `return nil`, 1)
-	os.WriteFile(testGoPath, []byte(fixedTest), 0644)
+	if err := os.WriteFile(testGoPath, []byte(fixedTest), 0644); err != nil {
+		return err
+	}
 
 	fmt.Println("Running 'ticket_v2 next' (expecting pass)...")
-	cmd = exec.Command("./dialtone.sh", "ticket_v2", "next")
-	output, err = cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("next failed after fix: %v, output: %s", err, string(output))
+	runCmd("./dialtone.sh", "ticket_v2", "next")
+	
+	// G. Verify progress in ticket.md
+	data, _ := os.ReadFile(ticketPath)
+	if !strings.Contains(string(data), "status: done") {
+		return fmt.Errorf("logic-impl should be done. Current content:\n%s", string(data))
 	}
-	fmt.Println("logic-impl passed and promoted to done.")
+	fmt.Println("logic-impl verified as done.")
 
 	fmt.Println("\n[PHASE 7: Completing dependencies]")
-	cmd = exec.Command("./dialtone.sh", "ticket_v2", "next")
-	cmd.CombinedOutput() // documentation
+	// Should run integration-task now
+	runCmd("./dialtone.sh", "ticket_v2", "next")
+	
 	fmt.Println("Running 'ticket_v2 subtask list' to verify final state...")
-	cmd = exec.Command("./dialtone.sh", "ticket_v2", "subtask", "list")
-	output, _ = cmd.CombinedOutput()
-	fmt.Println(string(output))
+	runCmd("./dialtone.sh", "ticket_v2", "subtask", "list")
 
-	fmt.Println("\n[PHASE 8: Ticket Completion]")
+	// J. Done validation - should fail if not all done
+	fmt.Println("\n[PHASE 8: Ticket Completion (Expect Failure)]")
 	cmd = exec.Command("./dialtone.sh", "ticket_v2", "done")
 	output, _ = cmd.CombinedOutput()
 	fmt.Println(string(output))
+	if !strings.Contains(string(output), "is still") {
+		return fmt.Errorf("expected completion failure but it passed")
+	}
+
+	// K. Test validation error demo
+	fmt.Println("\n[PHASE 9: Demonstration of Validation Error]")
+	cmd = exec.Command("./dialtone.sh", "ticket_v2", "validate", "fake-ticket-validate-error")
+	output, _ = cmd.CombinedOutput()
+	fmt.Println(string(output))
+	if !strings.Contains(string(output), "missing '# Name:' header") {
+		return fmt.Errorf("expected validation error not found")
+	}
 
 	return nil
+}
+
+func runCmd(name string, args ...string) string {
+	fmt.Printf("> %s %v\n", name, args)
+	cmd := exec.Command(name, args...)
+	output, _ := cmd.CombinedOutput()
+	fmt.Println(string(output))
+	return string(output)
 }
