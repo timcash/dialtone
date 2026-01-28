@@ -1,0 +1,43 @@
+package main
+
+import (
+	"dialtone/cli/src/dialtest"
+	"flag"
+	"fmt"
+	"os"
+)
+
+// This file is a template that will be copied and modified to import specific ticket tests.
+// For dynamic execution, we use 'go run' on a generated version of this file.
+
+func main() {
+	ticket := flag.String("ticket", "", "Ticket ID")
+	subtask := flag.String("subtask", "", "Subtask name")
+	flag.Parse()
+
+	if *ticket == "" {
+		fmt.Println("Error: ticket flag is required")
+		os.Exit(1)
+	}
+
+	if *subtask != "" {
+		if err := dialtest.RunSubtask(*ticket, *subtask); err != nil {
+			os.Exit(1)
+		}
+	} else {
+		tests := dialtest.GetAllTests(*ticket)
+		if len(tests) == 0 {
+			fmt.Printf("No tests registered for ticket: %s\n", *ticket)
+			os.Exit(0)
+		}
+		failed := false
+		for _, t := range tests {
+			if err := dialtest.RunSubtask(*ticket, t.Name); err != nil {
+				failed = true
+			}
+		}
+		if failed {
+			os.Exit(1)
+		}
+	}
+}
