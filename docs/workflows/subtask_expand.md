@@ -66,10 +66,15 @@ Refer to `docs/workflows/ticket.md` for the complete subtask format. Each subtas
 ```markdown
 ## SUBTASK: Small 10 minute task title
 - name: name-with-only-lowercase-and-dashes
+- tags: comma-separated-tags
+- dependencies: comma-separated-dependency-names
 - description: a single paragraph that guides the LLM to take a small testable step
-- test-description: a suggestion that the LLM can use on how to test this change works
-- test-command: the actual command to run the test in `dialtone.sh <test-command>` format
-- status: one of three status values (todo|progress|done)
+- test-condition-1: specific verification criteria
+- test-condition-2: additional verification criteria
+- agent-notes: notes for or from the agent
+- pass-timestamp: ISO8601 timestamp after pass
+- fail-timestamp: ISO8601 timestamp after failure
+- status: one of four status values (todo|progress|done|failed)
 ```
 
 **Key principles from `docs/workflows/ticket.md`:**
@@ -109,9 +114,14 @@ Use this checklist:
 ```markdown
 ## SUBTASK: <Short, specific title>
 - name: <kebab-case-name>
+- tags: <tags>
+- dependencies: <dependencies>
 - description: <single paragraph; include file path(s), function name(s), and exact behavior change>
-- test-description: <single sentence describing the test expectation>
-- test-command: `dialtone.sh test ticket <name> --subtask <name>`
+- test-condition-1: <verification criteria>
+- test-condition-2: <additional verification criteria>
+- agent-notes: 
+- pass-timestamp: 
+- fail-timestamp: 
 - status: todo
 ```
 
@@ -128,9 +138,13 @@ Edit `src/tickets/<ticket-name>/ticket.md` directly to update the improved subta
 ```markdown
 ## SUBTASK: Fix the bug
 - name: fix-bug
+- tags: bugfix
+- dependencies: 
 - description: fix it
-- test-description: test it works
-- test-command: `dialtone.sh test`
+- test-condition-1: test it works
+- agent-notes:
+- pass-timestamp: 
+- fail-timestamp: 
 - status: todo
 ```
 
@@ -138,9 +152,14 @@ Edit `src/tickets/<ticket-name>/ticket.md` directly to update the improved subta
 ```markdown
 ## SUBTASK: Add error handling to camera initialization in camera_linux.go
 - name: add-camera-init-error-handling
+- tags: core, error-handling
+- dependencies: camera-setup
 - description: Update the `InitCamera` function in `src/tickets/camera/app/camera_linux.go` to handle V4L2 device open failures. Return a descriptive error if the device path doesn't exist or cannot be opened. Check for device permissions and provide helpful error messages that guide troubleshooting.
-- test-description: Run the test and verify that attempting to initialize a camera with an invalid device path returns a clear error message. The test should check that the error includes the device path and suggests checking permissions or device existence.
-- test-command: `dialtone.sh test ticket camera-improvements --subtask add-camera-init-error-handling`
+- test-condition-1: Verify that attempting to initialize a camera with an invalid device path returns a clear error message.
+- test-condition-2: Ensure the error includes the device path and suggests checking permissions or device existence.
+- agent-notes: This task is critical for robust device management.
+- pass-timestamp: 
+- fail-timestamp: 
 - status: todo
 ```
 
