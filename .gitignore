@@ -28,6 +28,9 @@ Thumbs.db
 # logs
 *.log
 
+# Local ticket database
+src/tickets/tickets.duckdb
+
 # Local Dependencies
 dialtone_dependencies/
 dev_dependencies/
