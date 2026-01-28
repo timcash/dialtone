@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const ticketV2Dir = "src/tickets_v2"
@@ -40,9 +41,14 @@ func runTest(name string, fn func() error) {
 	fmt.Printf("PASS: %s\n", name)
 }
 
+func getUniqueName(base string) string {
+	return fmt.Sprintf("%s-%d", base, time.Now().Unix())
+}
+
 func TestAddGranular() error {
-	name := "test-add-granular"
+	name := getUniqueName("test-add")
 	os.RemoveAll(filepath.Join(ticketV2Dir, name))
+	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	
 	output := runCmd("./dialtone.sh", "ticket_v2", "add", name)
 	if !strings.Contains(output, "Created") {
@@ -62,14 +68,14 @@ func TestAddGranular() error {
 		return fmt.Errorf("branch should NOT have changed")
 	}
 
-	os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	return nil
 }
 
 func TestStartGranular() error {
-	name := "test-start-granular"
+	name := getUniqueName("test-start")
 	os.RemoveAll(filepath.Join(ticketV2Dir, name))
-	exec.Command("git", "branch", "-D", name).Run()
+	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
+	defer exec.Command("git", "branch", "-D", name).Run()
 
 	output := runCmd("./dialtone.sh", "ticket_v2", "start", name)
 	
@@ -90,13 +96,13 @@ func TestStartGranular() error {
 		return fmt.Errorf("not on expected branch: %s", getCurrentBranch())
 	}
 
-	os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	return nil
 }
 
 func TestNextGranular() error {
-	name := "test-next-granular"
+	name := getUniqueName("test-next")
 	os.RemoveAll(filepath.Join(ticketV2Dir, name))
+	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	runCmd("./dialtone.sh", "ticket_v2", "add", name)
 
 	// Sub-item 2: Dependency Check & Auto-Promotion
@@ -137,10 +143,6 @@ func init() {
 }
 `, name)), 0644)
 
-	// Since we modified test.go, we MUST commit it for hygiene checks later, 
-	// but RunNext handles auto-commit of the ticket.md mutation only.
-	// Actually, RunNext doesn't check hygiene, but RunDone does.
-	// Let's just make sure the auto-commit of ticket.md works.
 	output = runCmd("./dialtone.sh", "ticket_v2", "next", name)
 	if !strings.Contains(output, "Subtask t1 passed") {
 		return fmt.Errorf("expected pass message")
@@ -152,14 +154,14 @@ func init() {
 		return fmt.Errorf("failed auto-commit check: got %q", string(logMsg))
 	}
 
-	os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	return nil
 }
 
 func TestValidateGranular() error {
 	fmt.Println("--- Checking Timestamp Regression ---")
-	name := "test-validate-reg"
+	name := getUniqueName("test-validate")
 	os.MkdirAll(filepath.Join(ticketV2Dir, name), 0755)
+	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	os.WriteFile(filepath.Join(ticketV2Dir, name, "ticket.md"), []byte("# Name: "+name+"\n\n## SUBTASK: R\n- name: r\n- pass-timestamp: 2026-01-27T10:00:00Z\n- fail-timestamp: 2026-01-27T11:00:00Z\n- status: done\n"), 0644)
 	
 	output := runCmd("./dialtone.sh", "ticket_v2", "validate", name)
@@ -167,21 +169,20 @@ func TestValidateGranular() error {
 		return fmt.Errorf("failed regression detection")
 	}
 
-	os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	return nil
 }
 
 func TestDoneGranular() error {
-	name := "test-done-granular"
+	name := getUniqueName("test-done")
 	os.RemoveAll(filepath.Join(ticketV2Dir, name))
-	exec.Command("git", "branch", "-D", name).Run()
+	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
+	defer exec.Command("git", "branch", "-D", name).Run()
 
 	runCmd("./dialtone.sh", "ticket_v2", "start", name)
 	runCmd("./dialtone.sh", "ticket_v2", "subtask", "done", name, "init")
 
-	// Hygiene check (Expected failure because start creates test.go and ticket.md but we just mutated ticket.md via subtask done)
-	// Actually RunSubtaskDone auto-commits too.
-	fmt.Println("--- Checking Git Hygiene (Expected Failure via dirty.txt) ---")
+	// Hygiene check
+	fmt.Println("--- Checking Git Hygiene (Expected Failure) ---")
 	os.WriteFile("dirty.txt", []byte("trash"), 0644)
 	output := runCmd("./dialtone.sh", "ticket_v2", "done")
 	if !strings.Contains(output, "Git status is not clean") {
@@ -204,13 +205,13 @@ func TestDoneGranular() error {
 		}
 	}
 
-	os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	return nil
 }
 
 func TestSubtaskBasicsGranular() error {
-	name := "test-sub-basics"
+	name := getUniqueName("test-sub-basics")
 	os.RemoveAll(filepath.Join(ticketV2Dir, name))
+	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	runCmd("./dialtone.sh", "ticket_v2", "add", name)
 	
 	// subtask list
@@ -219,14 +220,14 @@ func TestSubtaskBasicsGranular() error {
 		return fmt.Errorf("failed subtask list")
 	}
 	
-	os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	return nil
 }
 
 func TestSubtaskDoneFailedGranular() error {
-	name := "test-sub-state"
+	name := getUniqueName("test-sub-state")
 	os.RemoveAll(filepath.Join(ticketV2Dir, name))
-	exec.Command("git", "branch", "-D", name).Run()
+	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
+	defer exec.Command("git", "branch", "-D", name).Run()
 	runCmd("./dialtone.sh", "ticket_v2", "start", name)
 
 	// Hygiene
@@ -246,7 +247,6 @@ func TestSubtaskDoneFailedGranular() error {
 		return fmt.Errorf("subtask auto-commit fail")
 	}
 
-	os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	return nil
 }
 
