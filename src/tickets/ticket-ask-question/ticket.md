@@ -50,7 +50,7 @@ Add `ticket ask` and `ticket log` commands that write `log.md` entries alongside
 - test-condition-1: README lists ticket ask and log commands
 - test-condition-2: Ticket Structure lists log.md
 - agent-notes: 
-- pass-timestamp: 
+- pass-timestamp: 2026-01-28T14:11:11-08:00
 - fail-timestamp: 
-- status: todo
+- status: done
 
