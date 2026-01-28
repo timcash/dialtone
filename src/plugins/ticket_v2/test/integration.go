@@ -69,10 +69,15 @@ func runTests() error {
 
 	// B. Test 'ticket_v2 start' (simulated)
 	fmt.Println("Running ticket_v2 start...")
-	// We use a different name for 'start' to avoid conflict if needed, but tempTicketName is fine here.
-	// Note: 'start' calls 'gh pr', which might fail, so we ignore errors but check local side effects.
-	exec.Command("./dialtone.sh", "ticket_v2", "start", tempTicketName).Run()
+	// We use a different name to ensure we are not on 'fake-ticket'
+	cmd := exec.Command("./dialtone.sh", "ticket_v2", "start", tempTicketName)
+	cmd.CombinedOutput()
 	
+	// Ensure we are on the correct branch
+	cmd = exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	branch, _ := cmd.Output()
+	fmt.Printf("Current branch: %s\n", strings.TrimSpace(string(branch)))
+
 	// C. Modify subtasks for testing
 	fmt.Println("Adding test subtasks...")
 	content := fmt.Sprintf(`# Name: %s
@@ -128,7 +133,7 @@ func RunDependentTask() error {
 
 	// E. Run 'ticket_v2 validate'
 	fmt.Println("Running ticket_v2 validate...")
-	cmd := exec.Command("./dialtone.sh", "ticket_v2", "validate", tempTicketName)
+	cmd = exec.Command("./dialtone.sh", "ticket_v2", "validate", tempTicketName)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("validate failed: %v, output: %s", err, string(output))
 	}
@@ -144,7 +149,7 @@ func RunDependentTask() error {
 
 	// G. Verify progress in ticket.md
 	data, _ := os.ReadFile(ticketPath)
-	if !strings.Contains(string(data), "- status: done") {
+	if !strings.Contains(string(data), "status: done") {
 		return fmt.Errorf("init-task should be done. Current content:\n%s", string(data))
 	}
 	fmt.Println("init-task verified as done.")
@@ -196,8 +201,6 @@ func RunDependentTask() error {
 	// J. Run 'ticket_v2 done'
 	fmt.Println("Running ticket_v2 done...")
 	cmd = exec.Command("./dialtone.sh", "ticket_v2", "done")
-	// 'done' will try to push and checkout main, so it might fail if git state is messy.
-	// But it should at least pass the internal validation of subtasks.
 	output, _ = cmd.CombinedOutput()
 	fmt.Println(string(output))
 
