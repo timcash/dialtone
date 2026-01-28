@@ -27,3 +27,6 @@
 ## 2026-01-28T14:11:11-08:00
 - command: ticket subtask done ticket-ask-question implement-ticket-log
 
+## 2026-01-28T14:11:11-08:00
+- command: ticket subtask done ticket-ask-question add-integration-test
+

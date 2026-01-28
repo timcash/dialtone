@@ -38,9 +38,9 @@ Add `ticket ask` and `ticket log` commands that write `log.md` entries alongside
 - test-condition-2: integration test validates log.md content for logs
 - test-condition-3: integration test validates log.md command entry
 - agent-notes: 
-- pass-timestamp: 
+- pass-timestamp: 2026-01-28T14:11:11-08:00
 - fail-timestamp: 
-- status: todo
+- status: done
 
 ## SUBTASK: Update Readme
 - name: update-readme
