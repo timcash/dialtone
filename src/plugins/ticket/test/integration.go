@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-const ticketV2Dir = "src/tickets_v2"
-const testDataDir = "src/plugins/ticket_v2/test"
+const ticketV2Dir = "src/tickets"
+const testDataDir = "src/plugins/ticket/test"
 
 func main() {
 	// Check git hygiene
@@ -22,18 +22,18 @@ func main() {
 	}
 
 	initialBranch := getCurrentBranch()
-	fmt.Printf("=== Starting ticket_v2 Granular Integration Tests (Initial Branch: %s) ===\n", initialBranch)
+	fmt.Printf("=== Starting ticket Granular Integration Tests (Initial Branch: %s) ===\n", initialBranch)
 
 	defer func() {
 		fmt.Printf("\n=== Restoring Initial Branch: %s ===\n", initialBranch)
 		exec.Command("git", "checkout", "-f", initialBranch).Run()
 	}()
 
-	runTest("ticket_v2 add", TestAddGranular)
-	runTest("ticket_v2 start", TestStartGranular)
-	runTest("ticket_v2 next", TestNextGranular)
-	runTest("ticket_v2 validate", TestValidateGranular)
-	runTest("ticket_v2 done", TestDoneGranular)
+	runTest("ticket add", TestAddGranular)
+	runTest("ticket start", TestStartGranular)
+	runTest("ticket next", TestNextGranular)
+	runTest("ticket validate", TestValidateGranular)
+	runTest("ticket done", TestDoneGranular)
 	runTest("subtask basics", TestSubtaskBasicsGranular)
 	runTest("subtask done/failed", TestSubtaskDoneFailedGranular)
 
@@ -69,7 +69,7 @@ func TestAddGranular() error {
 	os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	
-	output := runCmd("./dialtone.sh", "ticket_v2", "add", name)
+	output := runCmd("./dialtone.sh", "ticket", "add", name)
 	if !strings.Contains(output, "Created") {
 		return fmt.Errorf("expected 'Created' message")
 	}
@@ -99,7 +99,7 @@ func TestStartGranular() error {
 	defer cleanupRemote(name)
 	defer restoreBranch(initialBranch)
 
-	output := runCmd("./dialtone.sh", "ticket_v2", "start", name)
+	output := runCmd("./dialtone.sh", "ticket", "start", name)
 	
 	checks := []string{
 		"Branching to " + name,
@@ -128,7 +128,7 @@ func TestNextGranular() error {
 	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	defer restoreBranch(initialBranch)
 
-	runCmd("./dialtone.sh", "ticket_v2", "add", name)
+	runCmd("./dialtone.sh", "ticket", "add", name)
 
 	// Sub-item 2: Dependency Check & Auto-Promotion
 	ticketPath := filepath.Join(ticketV2Dir, name, "ticket.md")
@@ -146,7 +146,7 @@ Granular next test
 	os.WriteFile(ticketPath, []byte(content), 0644)
 
 	fmt.Println("--- Checking Auto-Promotion/Execution ---")
-	output := runCmd("./dialtone.sh", "ticket_v2", "next", name)
+	output := runCmd("./dialtone.sh", "ticket", "next", name)
 	if !strings.Contains(output, "Promoting subtask t1 to progress") {
 		return fmt.Errorf("failed auto-promotion")
 	}
@@ -168,7 +168,7 @@ func init() {
 }
 `, name)), 0644)
 
-	output = runCmd("./dialtone.sh", "ticket_v2", "next", name)
+	output = runCmd("./dialtone.sh", "ticket", "next", name)
 	if !strings.Contains(output, "Subtask t1 passed") {
 		return fmt.Errorf("expected pass message")
 	}
@@ -189,7 +189,7 @@ func TestValidateGranular() error {
 	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	os.WriteFile(filepath.Join(ticketV2Dir, name, "ticket.md"), []byte("# Name: "+name+"\n\n## SUBTASK: R\n- name: r\n- pass-timestamp: 2026-01-27T10:00:00Z\n- fail-timestamp: 2026-01-27T11:00:00Z\n- status: done\n"), 0644)
 	
-	output := runCmd("./dialtone.sh", "ticket_v2", "validate", name)
+	output := runCmd("./dialtone.sh", "ticket", "validate", name)
 	if !strings.Contains(output, "[REGRESSION]") {
 		return fmt.Errorf("failed regression detection")
 	}
@@ -206,13 +206,13 @@ func TestDoneGranular() error {
 	defer cleanupRemote(name)
 	defer restoreBranch(initialBranch)
 
-	runCmd("./dialtone.sh", "ticket_v2", "start", name)
-	runCmd("./dialtone.sh", "ticket_v2", "subtask", "done", name, "init")
+	runCmd("./dialtone.sh", "ticket", "start", name)
+	runCmd("./dialtone.sh", "ticket", "subtask", "done", name, "init")
 
 	// Hygiene check
 	fmt.Println("--- Checking Git Hygiene (Expected Failure) ---")
 	os.WriteFile("dirty.txt", []byte("trash"), 0644)
-	output := runCmd("./dialtone.sh", "ticket_v2", "done")
+	output := runCmd("./dialtone.sh", "ticket", "done")
 	if !strings.Contains(output, "Git status is not clean") {
 		os.Remove("dirty.txt")
 		return fmt.Errorf("failed hygiene check")
@@ -221,7 +221,7 @@ func TestDoneGranular() error {
 
 	// Success check
 	fmt.Println("--- Checking Success ---")
-	output = runCmd("./dialtone.sh", "ticket_v2", "done")
+	output = runCmd("./dialtone.sh", "ticket", "done")
 	checks := []string{
 		"Pushing final changes",
 		"Marking PR as ready for review",
@@ -240,10 +240,10 @@ func TestSubtaskBasicsGranular() error {
 	name := getUniqueName("test-sub-basics")
 	os.RemoveAll(filepath.Join(ticketV2Dir, name))
 	defer os.RemoveAll(filepath.Join(ticketV2Dir, name))
-	runCmd("./dialtone.sh", "ticket_v2", "add", name)
+	runCmd("./dialtone.sh", "ticket", "add", name)
 	
 	// subtask list
-	output := runCmd("./dialtone.sh", "ticket_v2", "subtask", "list", name)
+	output := runCmd("./dialtone.sh", "ticket", "subtask", "list", name)
 	if !strings.Contains(output, "Subtasks for "+name) {
 		return fmt.Errorf("failed subtask list")
 	}
@@ -260,11 +260,11 @@ func TestSubtaskDoneFailedGranular() error {
 	defer cleanupRemote(name)
 	defer restoreBranch(initialBranch)
 
-	runCmd("./dialtone.sh", "ticket_v2", "start", name)
+	runCmd("./dialtone.sh", "ticket", "start", name)
 
 	// Hygiene
 	os.WriteFile("dirty.txt", []byte("trash"), 0644)
-	output := runCmd("./dialtone.sh", "ticket_v2", "subtask", "done", name, "init")
+	output := runCmd("./dialtone.sh", "ticket", "subtask", "done", name, "init")
 	if !strings.Contains(output, "Git status is not clean") {
 		os.Remove("dirty.txt")
 		return fmt.Errorf("subtask hygiene fail")
@@ -272,7 +272,7 @@ func TestSubtaskDoneFailedGranular() error {
 	os.Remove("dirty.txt")
 
 	// Auto-commit
-	runCmd("./dialtone.sh", "ticket_v2", "subtask", "done", name, "init")
+	runCmd("./dialtone.sh", "ticket", "subtask", "done", name, "init")
 	cmd := exec.Command("git", "log", "-1", "--pretty=format:%s")
 	logMsg, _ := cmd.Output()
 	if !strings.Contains(string(logMsg), "docs: subtask init done") {

@@ -20,7 +20,7 @@ func runDynamicTest(ticketName, subtaskName string) error {
 	mainContent := fmt.Sprintf(`package main
 import (
 	"dialtone/cli/src/dialtest"
-	_ "dialtone/cli/src/tickets_v2/%s/test"
+	_ "dialtone/cli/src/tickets/%s/test"
 	"os"
 	"fmt"
 )
@@ -38,7 +38,7 @@ func main() {
 		mainContent = fmt.Sprintf(`package main
 import (
 	"dialtone/cli/src/dialtest"
-	_ "dialtone/cli/src/tickets_v2/%s/test"
+	_ "dialtone/cli/src/tickets/%s/test"
 	"os"
 	"fmt"
 )

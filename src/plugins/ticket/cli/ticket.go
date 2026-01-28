@@ -35,22 +35,22 @@ func Run(args []string) {
 	case "test":
 		RunTest(subArgs)
 	default:
-		fmt.Printf("Unknown ticket_v2 subcommand: %s\n", subcommand)
+		fmt.Printf("Unknown ticket subcommand: %s\n", subcommand)
 		printUsage()
 	}
 }
 
 func printUsage() {
-	fmt.Println("Usage: ./dialtone.sh ticket_v2 <command> [args]")
+	fmt.Println("Usage: ./dialtone.sh ticket <command> [args]")
 	fmt.Println("Commands: add, start, list, validate, next, done, subtask, test")
 }
 
 func RunAdd(args []string) {
 	if len(args) < 1 {
-		logFatal("Usage: ./dialtone.sh ticket_v2 add <ticket-name>")
+		logFatal("Usage: ./dialtone.sh ticket add <ticket-name>")
 	}
 	name := args[0]
-	dir := filepath.Join("src", "tickets_v2", name)
+	dir := filepath.Join("src", "tickets", name)
 	os.MkdirAll(filepath.Join(dir, "test"), 0755)
 
 	ticketPath := filepath.Join(dir, "ticket.md")
@@ -81,7 +81,7 @@ func RunExample() error {
 
 func RunStart(args []string) {
 	if len(args) < 1 {
-		logFatal("Usage: ./dialtone.sh ticket_v2 start <ticket-name>")
+		logFatal("Usage: ./dialtone.sh ticket start <ticket-name>")
 	}
 	name := args[0]
 	
@@ -129,7 +129,7 @@ func RunStart(args []string) {
 }
 
 func RunList(args []string) {
-	dir := "src/tickets_v2"
+	dir := "src/tickets"
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		logFatal("Could not read tickets directory: %v", err)
@@ -144,10 +144,10 @@ func RunList(args []string) {
 
 func RunValidate(args []string) {
 	if len(args) < 1 {
-		logFatal("Usage: ./dialtone.sh ticket_v2 validate <ticket-name>")
+		logFatal("Usage: ./dialtone.sh ticket validate <ticket-name>")
 	}
 	name := args[0]
-	path := filepath.Join("src", "tickets_v2", name, "ticket.md")
+	path := filepath.Join("src", "tickets", name, "ticket.md")
 	_, err := ParseTicketMd(path)
 	if err != nil {
 		logFatal("Validation failed: %v", err)
@@ -203,7 +203,7 @@ func GetCurrentTicket() (*Ticket, error) {
 		return nil, err
 	}
 	name := strings.TrimSpace(string(output))
-	path := filepath.Join("src", "tickets_v2", name, "ticket.md")
+	path := filepath.Join("src", "tickets", name, "ticket.md")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil, fmt.Errorf("no ticket found for branch %s at %s", name, path)
 	}
