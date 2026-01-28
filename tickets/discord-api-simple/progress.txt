@@ -1,2 +1,0 @@
-Progress log for discord-api-simple
-

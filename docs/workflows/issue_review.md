@@ -1,19 +1,17 @@
----
-trigger: model_decision
-description: github issue triage workflow for LLM agents (v1 specific)
+description: github issue triage workflow for LLM agents
 ---
 
-# Workflow: Issue Review & Ticket Preparation (v1)
+# Workflow: Issue Review & Ticket Preparation
 
 > [!IMPORTANT]
 > This is a **planning and question** workflow designed to triage and prepare issues. It is **NOT** an execution workflow. Do **NOT** write implementation code while following this process.
 
-This is the **Source of Truth** for the Dialtone Issue Management API (v1).
+This is the **Source of Truth** for the Dialtone Issue Management API.
 
 ## 1. CLI API Reference
 ```bash
 # The primary driver for TDD. Validates, runs tests, and manages subtask state.
-./dialtone.sh ticket next
+./dialtone.sh ticket_v2 next
 
 # List open issues in a clean, agent-readable markdown table.
 ./dialtone.sh github issue list --markdown
@@ -71,11 +69,11 @@ If the goal is ambiguous or technical blockers exist, request clarification.
 If requirements are clear but lack subtasks, scaffold or edit a local ticket.
 ```bash
 # 1. Scaffold or update local ticket.
-./dialtone.sh ticket add <name>
+./dialtone.sh ticket_v2 add <name>
 
 # 2. Populate the ticket (see Section 3: The "Ticket" Standard).
 # 3. Validate the ticket format.
-./dialtone.sh ticket validate <name>
+./dialtone.sh ticket_v2 validate <name>
 
 # 4. Mark the GitHub issue as 'ready' and 'ticket' using the shortcuts.
 ./dialtone.sh github issue <id> --ready --ticket
@@ -108,9 +106,9 @@ An issue is **Ticket Ready** ONLY when a local `ticket.md` meets these criteria:
 ```
 
 ## 5. Identify Next Steps
-ALWAYS use `ticket next` to verify your plan and identify the immediate next task. The tool output will provide the current status chart and identifying information for the next subtask.
+ALWAYS use `ticket_v2 next` to verify your plan and identify the immediate next task. The tool output will provide the current status chart and identifying information for the next subtask.
 ```bash
-./dialtone.sh ticket next
+./dialtone.sh ticket_v2 next
 ```
 
 
@@ -118,24 +116,24 @@ ALWAYS use `ticket next` to verify your plan and identify the immediate next tas
 
 ## 5. Labeling Reference
 
-Use these flags with `github issue <id> --<flag>` to categorize issues.
+Use these flags with `./dialtone.sh github issue <id> --<flag>` to categorize issues.
 
-| Flag | Label | Description |
-| :--- | :--- | :--- |
-| `--p0` | `p0` | Urgent and important. |
-| `--p1` | `p1` | Important but NOT urgent. |
-| `--bug` | `bug` | Feature not working correctly. |
-| `--ready` | `ready` | Ready to be worked on. |
-| `--ticket` | `ticket` | Validated for a ticket. |
-| `--enhancement` | `enhancement` | New feature or upgrade. |
-| `--docs` | `documentation` | Documentation task. |
-| `--perf` | `performance` | Performance improvement. |
-| `--security` | `security` | Security improvement. |
-| `--refactor` | `refactor` | Code structure improvement. |
-| `--test` | `test` | Test coverage improvement. |
-| `--duplicate` | `duplicate` | Already exists. |
-| `--wontfix` | `wontfix` | Not going to fix. |
-| `--question` | `question` | Needs clarification. |
+```bash
+--p0          # Urgent and important.
+--p1          # Important but NOT urgent.
+--bug         # Feature not working correctly.
+--ready       # Ready to be worked on.
+--ticket      # Validated for a ticket.
+--enhancement # New feature or upgrade.
+--docs        # Documentation task.
+--perf        # Performance improvement.
+--security    # Security improvement.
+--refactor    # Code structure improvement.
+--test        # Test coverage improvement.
+--duplicate   # Already exists.
+--wontfix     # Not going to fix.
+--question    # Needs clarification.
+```
 
 ---
 
@@ -147,32 +145,3 @@ Here is how Issue #104 ("improve the install plugin") is bridged from a GitHub G
 - **Title**: improve the install plugin for dev and production
 - **Labels**: `p0`, `ready`
 - **Core Goal**: research improve the install plugin to have dev and production install paths for each plugin
-
-== START EXAMPLE TICKET ==
-### Dialtone Ticket (`tickets/<name>/ticket.md`)
-```markdown
-# Branch: improve-install-plugin
-# Tags: p0, ready, install-system
-
-# Goal
-Refactor the plugin installation system to support distinct `dev` and `production` paths. Move specific installation and build logic from the core into `install.go` and `build.go` within each plugin's directory.
-
-## SUBTASK: Define install/build interfaces
-- name: define-plugin-interfaces
-- description: Create the standard interface for plugin-local `install.go` and `build.go`.
-- test-description: Verify the new files are correctly picked up by the core installer.
-- test-command: `./dialtone.sh test src/core/install/registry_test.go`
-- status: todo
-
-## SUBTASK: Migrate GO plugin install logic
-- name: migrate-go-install
-- description: Move setup logic from core into `src/plugins/go/install.go`.
-- test-description: Verify go plugin installs correctly in a clean DIALTONE_ENV.
-- test-command: `DIALTONE_ENV=/tmp/dt-test ./dialtone.sh plugin install go`
-- status: todo
-
-## Collaborative Notes
-- **Context**: [installer.go](file:///Users/tim/code/dialtone/src/core/install/installer.go)
-- **Reference**: https://github.com/timcash/dialtone/issues/104
-```
-== END EXAMPLE TICKET ==
