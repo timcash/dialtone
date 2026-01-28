@@ -25,10 +25,8 @@ func RunSubtask(args []string) {
 		logSubtaskCommand(command, cmdArgs)
 		RunSubtaskTestCmd(cmdArgs)
 	case "done":
-		logSubtaskCommand(command, cmdArgs)
 		RunSubtaskDone(cmdArgs)
 	case "failed":
-		logSubtaskCommand(command, cmdArgs)
 		RunSubtaskFailed(cmdArgs)
 	case "":
 		// If no command provided, print next incomplete
@@ -178,6 +176,8 @@ func RunSubtaskDone(args []string) {
 		logFatal("Git status is not clean. Please commit or stash changes before running 'subtask done'.")
 	}
 
+	logSubtaskCommand("done", args)
+
 	ticket, _ := ParseTicketMd(filepath.Join("src", "tickets", name, "ticket.md"))
 	for i := range ticket.Subtasks {
 		if ticket.Subtasks[i].Name == subtask {
@@ -188,7 +188,11 @@ func RunSubtaskDone(args []string) {
 	ticketPath := filepath.Join("src", "tickets", name, "ticket.md")
 	WriteTicketMd(ticketPath, ticket)
 
-	addCmd := exec.Command("git", "add", ticketPath)
+	logPath, err := ensureTicketLog(name)
+	if err != nil {
+		logFatal("Could not initialize log for %s: %v", name, err)
+	}
+	addCmd := exec.Command("git", "add", ticketPath, logPath)
 	if addOutput, err := addCmd.CombinedOutput(); err != nil {
 		logFatal("Git add failed: %v\nOutput: %s", err, string(addOutput))
 	}
@@ -212,6 +216,8 @@ func RunSubtaskFailed(args []string) {
 		logFatal("Git status is not clean. Please commit or stash changes before running 'subtask failed'.")
 	}
 
+	logSubtaskCommand("failed", args)
+
 	ticket, _ := ParseTicketMd(filepath.Join("src", "tickets", name, "ticket.md"))
 	for i := range ticket.Subtasks {
 		if ticket.Subtasks[i].Name == subtask {
@@ -222,7 +228,11 @@ func RunSubtaskFailed(args []string) {
 	ticketPath := filepath.Join("src", "tickets", name, "ticket.md")
 	WriteTicketMd(ticketPath, ticket)
 
-	addCmd := exec.Command("git", "add", ticketPath)
+	logPath, err := ensureTicketLog(name)
+	if err != nil {
+		logFatal("Could not initialize log for %s: %v", name, err)
+	}
+	addCmd := exec.Command("git", "add", ticketPath, logPath)
 	if addOutput, err := addCmd.CombinedOutput(); err != nil {
 		logFatal("Git add failed: %v\nOutput: %s", err, string(addOutput))
 	}
