@@ -66,8 +66,9 @@ Use the `ticket` command for new work. It enforces TDD and standardized markdown
 ```bash
 ./dialtone.sh ticket add <ticket-name>      # Scaffold src/tickets/
 ./dialtone.sh ticket start <ticket-name>    # Branch, push, and open Draft PR
-./dialtone.sh ticket ask <question>         # Add a question.md entry for current ticket
+./dialtone.sh ticket ask <question>         # Add a log.md entry for current ticket
 ./dialtone.sh ticket ask --subtask <subtask-name> <question> # Tie question to a subtask
+./dialtone.sh ticket log <message>          # Add a general log entry for current ticket
 ./dialtone.sh ticket test <ticket-name>     # Run all subtask tests
 ./dialtone.sh ticket next                   # Primary TDD driver: runs next test and updates state
 ./dialtone.sh ticket done                   # Final push, PR Ready-for-review, switch to main
@@ -212,7 +213,7 @@ For tickets created via `./dialtone.sh ticket start <ticket-name>`:
 ```
 src/tickets/<ticket-name>/
 ├── ticket.md          # Requirement doc
-├── question.md        # Q/A log from `ticket ask`
+├── log.md             # Ticket log from `ticket ask` and `ticket log`
 └── test/
     └── test.go        # Go integration tests (TDD loop)
 ```

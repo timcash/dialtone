@@ -25,6 +25,8 @@ func Run(args []string) {
 		RunStart(subArgs)
 	case "ask":
 		RunAsk(subArgs)
+	case "log":
+		RunLog(subArgs)
 	case "list":
 		RunList(subArgs)
 	case "validate":
@@ -45,7 +47,7 @@ func Run(args []string) {
 
 func printUsage() {
 	fmt.Println("Usage: ./dialtone.sh ticket <command> [args]")
-	fmt.Println("Commands: add, start, ask, list, validate, next, done, subtask, test")
+	fmt.Println("Commands: add, start, ask, log, list, validate, next, done, subtask, test")
 }
 
 func RunAdd(args []string) {
@@ -80,6 +82,8 @@ func RunExample() error {
 		os.WriteFile(testGo, []byte(content), 0644)
 		logInfo("Created %s", testGo)
 	}
+
+	logTicketCommand(name, "add", args)
 }
 
 func RunStart(args []string) {
@@ -106,6 +110,7 @@ func RunStart(args []string) {
 	}
 
 	RunAdd(args)
+	logTicketCommand(name, "start", args)
 
 	addCmd := exec.Command("git", "add", ".")
 	if output, err := addCmd.CombinedOutput(); err != nil {
@@ -155,34 +160,73 @@ func RunAsk(args []string) {
 		logFatal("Error getting current ticket: %v", err)
 	}
 
-	questionPath := filepath.Join("src", "tickets", ticket.ID, "question.md")
-	header := ""
-	if _, err := os.Stat(questionPath); os.IsNotExist(err) {
-		header = "# Questions\n\n"
+	appendTicketLogEntry(ticket.ID, "question", question, subtask)
+}
+
+func RunLog(args []string) {
+	if len(args) < 1 {
+		logFatal("Usage: ./dialtone.sh ticket log <message>")
+	}
+
+	message := strings.Join(args, " ")
+	ticket, err := GetCurrentTicket()
+	if err != nil {
+		logFatal("Error getting current ticket: %v", err)
+	}
+
+	appendTicketLogEntry(ticket.ID, "log", message, "")
+}
+
+func appendTicketLogEntry(ticketID, entryType, message, subtask string) {
+	logPath, err := ensureTicketLog(ticketID)
+	if err != nil {
+		logFatal("Could not initialize log for %s: %v", ticketID, err)
 	}
 
 	entry := fmt.Sprintf("## %s\n", time.Now().Format(time.RFC3339))
 	if subtask != "" {
 		entry += fmt.Sprintf("- subtask: %s\n", subtask)
 	}
-	entry += fmt.Sprintf("- question: %s\n\n", question)
+	entry += fmt.Sprintf("- %s: %s\n\n", entryType, message)
 
-	file, err := os.OpenFile(questionPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	file, err := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		logFatal("Could not write %s: %v", questionPath, err)
+		logFatal("Could not write %s: %v", logPath, err)
 	}
 	defer file.Close()
 
-	if header != "" {
-		if _, err := file.WriteString(header); err != nil {
-			logFatal("Could not write %s: %v", questionPath, err)
-		}
-	}
 	if _, err := file.WriteString(entry); err != nil {
-		logFatal("Could not write %s: %v", questionPath, err)
+		logFatal("Could not write %s: %v", logPath, err)
 	}
 
-	logInfo("Captured question in %s", questionPath)
+	logInfo("Captured %s in %s", entryType, logPath)
+}
+
+func logTicketCommand(ticketID, command string, args []string) {
+	if ticketID == "" || command == "" {
+		return
+	}
+
+	message := fmt.Sprintf("ticket %s %s", command, strings.Join(args, " "))
+	message = strings.TrimSpace(message)
+	appendTicketLogEntry(ticketID, "command", message, "")
+}
+
+func ensureTicketLog(ticketID string) (string, error) {
+	if ticketID == "" {
+		return "", fmt.Errorf("ticket ID is empty")
+	}
+	dir := filepath.Join("src", "tickets", ticketID)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", err
+	}
+	logPath := filepath.Join(dir, "log.md")
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		if err := os.WriteFile(logPath, []byte("# Log\n\n"), 0644); err != nil {
+			return "", err
+		}
+	}
+	return logPath, nil
 }
 
 func RunList(args []string) {
@@ -197,6 +241,12 @@ func RunList(args []string) {
 			fmt.Printf("- %s\n", f.Name())
 		}
 	}
+
+	if len(args) > 0 {
+		logTicketCommand(args[0], "list", args)
+	} else if ticket, err := GetCurrentTicket(); err == nil {
+		logTicketCommand(ticket.ID, "list", args)
+	}
 }
 
 func RunValidate(args []string) {
@@ -204,6 +254,7 @@ func RunValidate(args []string) {
 		logFatal("Usage: ./dialtone.sh ticket validate <ticket-name>")
 	}
 	name := args[0]
+	logTicketCommand(name, "validate", args)
 	path := filepath.Join("src", "tickets", name, "ticket.md")
 	_, err := ParseTicketMd(path)
 	if err != nil {
@@ -218,6 +269,7 @@ func RunDone(args []string) {
 	if err != nil {
 		logFatal("Error getting current ticket: %v", err)
 	}
+	logTicketCommand(ticket.ID, "done", args)
 	for _, st := range ticket.Subtasks {
 		if st.Status != "done" && st.Status != "failed" && st.Status != "skipped" {
 			logFatal("Subtask %s is still %s", st.Name, st.Status)
