@@ -25,9 +25,9 @@ Add `ticket ask` and `ticket log` commands that write `log.md` entries alongside
 - test-condition-3: log entry includes timestamp and log text
 - test-condition-4: non-ask/log ticket commands append a command entry
 - agent-notes: 
-- pass-timestamp: 
+- pass-timestamp: 2026-01-28T14:11:11-08:00
 - fail-timestamp: 
-- status: todo
+- status: done
 
 ## SUBTASK: Add Integration Test
 - name: add-integration-test
