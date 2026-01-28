@@ -24,7 +24,6 @@ import (
 	mavlink_cli "dialtone/cli/src/plugins/mavlink/cli"
 	plugin_cli "dialtone/cli/src/plugins/plugin/cli"
 	test_cli "dialtone/cli/src/plugins/test/cli"
-	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
 	ticket_v2_cli "dialtone/cli/src/plugins/ticket_v2/cli"
 	ui_cli "dialtone/cli/src/plugins/ui/cli"
 	vpn_cli "dialtone/cli/src/plugins/vpn/cli"
@@ -77,7 +76,7 @@ func ExecuteDev() {
 	case "github":
 		github_cli.RunGithub(args)
 	case "ticket":
-		ticket_cli.Run(args)
+		ticket_v2_cli.Run(args)
 	case "ticket_v2":
 		ticket_v2_cli.Run(args)
 	case "plugin":
