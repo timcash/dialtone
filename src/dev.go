@@ -25,6 +25,7 @@ import (
 	plugin_cli "dialtone/cli/src/plugins/plugin/cli"
 	test_cli "dialtone/cli/src/plugins/test/cli"
 	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
+	ticket_v2_cli "dialtone/cli/src/plugins/ticket_v2/cli"
 	ui_cli "dialtone/cli/src/plugins/ui/cli"
 	vpn_cli "dialtone/cli/src/plugins/vpn/cli"
 	www_cli "dialtone/cli/src/plugins/www/cli"
@@ -77,6 +78,8 @@ func ExecuteDev() {
 		github_cli.RunGithub(args)
 	case "ticket":
 		ticket_cli.Run(args)
+	case "ticket_v2":
+		ticket_v2_cli.Run(args)
 	case "plugin":
 		plugin_cli.RunPlugin(args)
 	case "cloudflare":
@@ -129,6 +132,7 @@ func printDevUsage() {
 	fmt.Println("  diagnostic    Run system diagnostics (local or remote)")
 	fmt.Println("  branch <name>      Create or checkout a feature branch")
 	fmt.Println("  ticket <subcmd>    Manage GitHub tickets (start, done, subtask, etc.)")
+	fmt.Println("  ticket_v2 <subcmd> Manage GitHub tickets V2 (start, next, done, etc.)")
 	fmt.Println("  plugin <subcmd>    Manage plugins (add, install, build)")
 	fmt.Println("  ide <subcmd>       IDE tools (setup-workflows)")
 	fmt.Println("  github <subcmd>    Manage GitHub interactions (pr, check-deploy)")
