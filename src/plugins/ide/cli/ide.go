@@ -3,12 +3,12 @@ package cli
 import (
 	"bufio"
 	"context"
+	"dialtone/cli/src/core/logger"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"dialtone/cli/src/core/logger"
 )
 
 // Run handles the 'ide' command
@@ -38,7 +38,7 @@ func Run(args []string) {
 func printUsage() {
 	fmt.Println("Usage: dialtone ide <command> [options]")
 	fmt.Println("\nCommands:")
-	fmt.Println("  setup-workflows    Setup IDE agent files (default: copy)")
+	fmt.Println("  setup-workflows    Setup IDE agent files (soft links only)")
 	fmt.Println("  antigravity        Commands for Antigravity IDE integration")
 	fmt.Println("\nOptions:")
 	fmt.Println("  --help             Show this help message")
@@ -49,7 +49,6 @@ const (
 	colorGreen = "\033[32m"
 	colorBlue  = "\033[34m"
 )
-
 
 func runAntigravity(args []string) {
 	if len(args) < 1 {
@@ -86,7 +85,6 @@ func runAntigravity(args []string) {
 	}
 }
 
-
 func runAntigravityLogs(chat, commands bool) {
 	// If no flags are provided, show both
 	showAll := !chat && !commands
@@ -118,11 +116,11 @@ func runAntigravityLogs(chat, commands bool) {
 			}
 
 			logger.LogInfo("Tailing system log: %s", logPath)
-			
+
 			// If we are showing only commands, filter for them
 			// If showing all, we still want to filter out the noise mentioned in docs
 			// "Requesting planner" lines are noise if we have the real chat stream.
-			
+
 			cmd := exec.Command("tail", "-f", logPath)
 			stdout, err := cmd.StdoutPipe()
 			if err != nil {
@@ -136,13 +134,13 @@ func runAntigravityLogs(chat, commands bool) {
 			scanner := bufio.NewScanner(stdout)
 			for scanner.Scan() {
 				line := scanner.Text()
-				
+
 				isChatNoise := strings.Contains(line, "Requesting planner with")
 				isCmd := strings.Contains(line, "[Terminal]")
 
 				// If we have chat stream enabled, suppress the noise
 				if chat && isChatNoise {
-					continue 
+					continue
 				}
 
 				if commands && !showAll && !isCmd {
@@ -162,7 +160,7 @@ func runAntigravityLogs(chat, commands bool) {
 					fmt.Println(line)
 				}
 			}
-			
+
 			if err := cmd.Wait(); err != nil {
 				// Ignore signal exit
 				if exitErr, ok := err.(*exec.ExitError); ok {
@@ -176,17 +174,15 @@ func runAntigravityLogs(chat, commands bool) {
 			done <- true
 		}()
 	}
-	
+
 	// Wait forever (or until one finishes)
 	<-done
 }
 
-
-
 func findRecentAntigravityLog() string {
 	homeDir, _ := os.UserHomeDir()
 	logsRoot := filepath.Join(homeDir, "Library/Application Support/Antigravity/logs")
-	
+
 	// 1. Find the latest timestamped folder
 	entries, err := os.ReadDir(logsRoot)
 	if err != nil {
@@ -228,36 +224,26 @@ func findRecentAntigravityLog() string {
 	return bestLog
 }
 
-
 func runSetupWorkflows(args []string) {
-	useSymlink := false
-	for _, arg := range args {
-		if arg == "--symlink" {
-			useSymlink = true
-		}
-	}
-
-	mode := "copying"
-	if useSymlink {
-		mode = "symlinking"
-	}
-	logger.LogInfo("Setting up IDE agent files (mode: %s)...", mode)
+	logger.LogInfo("Setting up IDE agent files (soft links only)...")
 
 	// Setup Workflows
-	setupDir("docs/workflows", ".agent/workflows", useSymlink)
-	
+	setupDir("docs/workflows", ".agent/workflows")
+
 	// Setup Rules
-	setupDir("docs/rules", ".agent/rules", useSymlink)
+	setupDir("docs/rules", ".agent/rules")
 
 	logger.LogInfo("IDE setup complete.")
 }
 
-func setupDir(srcDir, destDir string, useSymlink bool) {
+func setupDir(srcDir, destDir string) {
 	logger.LogInfo("Processing %s -> %s", srcDir, destDir)
 
 	// Ensure destination directory exists
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		logger.LogFatal("Failed to create destination directory %s: %v", destDir, err)
+	if _, err := os.Stat(destDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(destDir, 0755); err != nil {
+			logger.LogFatal("Failed to create destination directory %s: %v", destDir, err)
+		}
 	}
 
 	// Read files from source directory
@@ -274,30 +260,14 @@ func setupDir(srcDir, destDir string, useSymlink bool) {
 		srcPath, _ := filepath.Abs(filepath.Join(srcDir, file.Name()))
 		destPath, _ := filepath.Abs(filepath.Join(destDir, file.Name()))
 
-		// Remove existing to handle cases where it's a symlink or read-only
+		// Fail if destination exists
 		if _, err := os.Lstat(destPath); err == nil {
-			if err := os.Remove(destPath); err != nil {
-				logger.LogError("Failed to remove existing file %s: %v", destPath, err)
-				continue
-			}
+			logger.LogFatal("File already exists: %s. Refusing to overwrite.", destPath)
 		}
 
-		if useSymlink {
-			logger.LogInfo("Linking %s", file.Name())
-			if err := os.Symlink(srcPath, destPath); err != nil {
-				logger.LogError("Failed to create symlink for %s: %v", file.Name(), err)
-			}
-		} else {
-			logger.LogInfo("Copying %s", file.Name())
-			content, err := os.ReadFile(srcPath)
-			if err != nil {
-				logger.LogError("Failed to read source file %s: %v", srcPath, err)
-				continue
-			}
-			if err := os.WriteFile(destPath, content, 0644); err != nil {
-				logger.LogError("Failed to write destination file %s: %v", destPath, err)
-				continue
-			}
+		logger.LogInfo("Linking %s", file.Name())
+		if err := os.Symlink(srcPath, destPath); err != nil {
+			logger.LogFatal("Failed to create symlink for %s: %v", file.Name(), err)
 		}
 	}
 }
