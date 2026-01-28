@@ -7,16 +7,16 @@ Granular next test
 - name: t1
 - description: 
 - agent-notes: exit status 1
-- pass-timestamp: 2026-01-27T17:47:23-08:00
-- fail-timestamp: 2026-01-27T17:47:23-08:00
+- pass-timestamp: 2026-01-27T17:49:00-08:00
+- fail-timestamp: 2026-01-27T17:48:59-08:00
 - status: done
 
 ## SUBTASK: T2
 - name: t2
 - dependencies: t1
 - description: 
-- agent-notes: exit status 1
+- agent-notes: 
 - pass-timestamp: 
-- fail-timestamp: 2026-01-27T17:47:23-08:00
-- status: progress
+- fail-timestamp: 
+- status: todo
 
