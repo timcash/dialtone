@@ -12,14 +12,16 @@ This workflow guides LLM agents to **plan and improve** subtasks in the current 
 First, determine which ticket you're working with:
 
 ```bash
-# Get the current ticket name (matches the git branch name)
-./dialtone.sh ticket name
+# Get the current ticket name
+./dialtone.sh ticket name      # v1
+./dialtone.sh ticket_v2 name   # v2
 
-# Print the full ticket content to review
-./dialtone.sh ticket print
+# Print the full ticket content
+./dialtone.sh ticket print     # v1
+./dialtone.sh ticket_v2 print  # v2
 ```
 
-The ticket will be located at `tickets/<ticket-name>/ticket.md`.
+The ticket will be located at `tickets/<ticket-name>/ticket.md` (v1) or `src/tickets_v2/<ticket-name>/ticket.md` (v2).
 
 ## Step 2: Review the Ticket Context
 
@@ -39,7 +41,8 @@ First, use `ticket next` to see the current status and identifies the immediate 
 
 ```bash
 # Check the current status and find the next task
-./dialtone.sh ticket next
+./dialtone.sh ticket next     # v1
+./dialtone.sh ticket_v2 next  # v2
 ```
 
 Focus on improving a **small set** of subtasks (typically 1-5 subtasks). Look for subtasks that:
@@ -110,7 +113,7 @@ Use this checklist:
 - name: <kebab-case-name>
 - description: <single paragraph; include file path(s), function name(s), and exact behavior change>
 - test-description: <single sentence describing the test expectation>
-- test-command: `dialtone.sh test ticket <ticket-name> --subtask <subtask-name>`
+- test-command: `dialtone.sh test ticket <name> --subtask <name>` (v1) or `dialtest` (v2)
 - status: todo
 ```
 
@@ -149,13 +152,15 @@ After editing, validate the ticket file so another agent can pick it up cleanly:
 
 ```bash
 # Validate the ticket structure and status values
-./dialtone.sh ticket validate
+./dialtone.sh ticket validate     # v1
+./dialtone.sh ticket_v2 validate  # v2
 ```
 
 ## Step 9: Identify Next Steps
-ALWAYS use `ticket next` to verify your improved plan and identify the immediate next task. The tool output will provide the current status chart and identifying information for the next subtask.
+ALWAYS use `ticket next` or `ticket_v2 next` to verify your improved plan and identify the immediate next task. The tool output will provide the current status chart and identifying information for the next subtask.
 ```bash
-./dialtone.sh ticket next
+./dialtone.sh ticket next     # v1
+./dialtone.sh ticket_v2 next  # v2
 ```
 
 
