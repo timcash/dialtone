@@ -46,6 +46,7 @@ func main() {
 
 	runTest("ticket add", TestAddGranular)
 	runTest("ticket start", TestStartGranular)
+	runTest("ticket ask", TestAskGranular)
 	runTest("ticket next", TestNextGranular)
 	runTest("ticket validate", TestValidateGranular)
 	runTest("ticket done", TestDoneGranular)
@@ -132,6 +133,62 @@ func TestStartGranular() error {
 	// Verify we are on the branch
 	if getCurrentBranch() != name {
 		return fmt.Errorf("not on expected branch: %s", getCurrentBranch())
+	}
+
+	return nil
+}
+
+func TestAskGranular() error {
+	initialBranch := getCurrentBranch()
+	name := getUniqueName("test-ask")
+	os.RemoveAll(filepath.Join(ticketV2Dir, name))
+	defer func() {
+		if err := os.RemoveAll(filepath.Join(ticketV2Dir, name)); err != nil {
+			fmt.Printf("WARNING: Failed to cleanup %s: %v\n", name, err)
+		}
+	}()
+	defer exec.Command("git", "branch", "-D", name).Run()
+	defer restoreBranch(initialBranch)
+
+	// Switch to a temporary branch so GetCurrentTicket resolves correctly
+	exec.Command("git", "checkout", "-b", name).Run()
+	runCmd("./dialtone.sh", "ticket", "add", name)
+
+	questionPath := filepath.Join(ticketV2Dir, name, "question.md")
+
+	output := runCmd("./dialtone.sh", "ticket", "ask", "How do we handle auth?")
+	if !strings.Contains(output, "Captured question in") {
+		return fmt.Errorf("missing capture confirmation")
+	}
+	if _, err := os.Stat(questionPath); err != nil {
+		return fmt.Errorf("question.md missing")
+	}
+
+	content, err := os.ReadFile(questionPath)
+	if err != nil {
+		return fmt.Errorf("failed to read question.md: %v", err)
+	}
+	if !strings.Contains(string(content), "# Questions") {
+		return fmt.Errorf("missing header in question.md")
+	}
+	if !strings.Contains(string(content), "question: How do we handle auth?") {
+		return fmt.Errorf("missing question entry")
+	}
+
+	output = runCmd("./dialtone.sh", "ticket", "ask", "--subtask", "init", "Is init required?")
+	if !strings.Contains(output, "Captured question in") {
+		return fmt.Errorf("missing capture confirmation for subtask")
+	}
+
+	content, err = os.ReadFile(questionPath)
+	if err != nil {
+		return fmt.Errorf("failed to read question.md: %v", err)
+	}
+	if !strings.Contains(string(content), "subtask: init") {
+		return fmt.Errorf("missing subtask entry")
+	}
+	if !strings.Contains(string(content), "question: Is init required?") {
+		return fmt.Errorf("missing subtask question")
 	}
 
 	return nil
