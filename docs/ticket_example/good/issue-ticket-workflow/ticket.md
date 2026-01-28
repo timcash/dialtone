@@ -7,8 +7,8 @@ Refactor the issue review workflow and GitHub plugin to support a streamlined tr
 ## SUBTASK: start ticket work via `dialtone.sh` cli
 - name: ticket-start
 - description: to start work run the cli command `dialtone.sh ticket start issue-ticket-workflow`
-- test-description: run the ticket tests to verify that the ticket is in a valid state
-- test-command: `dialtone.sh test ticket issue-ticket-workflow`
+- test-description: run `./dialtone.sh plugin test <plugin-name>` to verify the ticket is valid
+- test-command: `./dialtone.sh plugin test <plugin-name>`
 - status: done
 
 ## SUBTASK: Implement github issue <id> --ready

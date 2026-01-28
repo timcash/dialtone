@@ -12,27 +12,27 @@ Use these commands to manage all ticket work
 # Ideal for logging side-tasks while continuing work on current tasks.
 ./dialtone.sh ticket add [<ticket-name>]
 
-# The primary entry point for new work. Switches branch, scaffolds, and opens PR.
+# The primary entry point for new work. Scaffolds and sets current ticket.
 ./dialtone.sh ticket start <ticket-name>
 
-# Log questions or notes for the current ticket (writes src/tickets/<ticket>/log.md).
+# Log questions or notes for the current ticket (writes to src/tickets/tickets.duckdb).
 ./dialtone.sh ticket ask <question>
 ./dialtone.sh ticket ask --subtask <subtask-name> <question>
 ./dialtone.sh ticket log <message>
 
 # Tests all subtasks in the ticket
-./dialtone.sh ticket test [<ticket-name>]
+./dialtone.sh plugin test <plugin-name>
 
 # The primary driver for TDD. Validates, runs tests, and manages subtask state.
 ./dialtone.sh ticket next
 
-# Lists local tickets and open remote GitHub issues.
+# Lists local tickets.
 ./dialtone.sh ticket list
 
-# Validates the structure and status values of the ticket.md file.
+# Validates the structure and status values stored in DuckDB.
 ./dialtone.sh ticket validate [<ticket-name>]
 
-# Final step: verifies subtasks, pushes code, and sets PR to ready.
+# Final step: verifies subtasks and marks ticket complete.
 ./dialtone.sh ticket done [<ticket-name>]
 ```
 
@@ -49,8 +49,7 @@ Use these commands to manage all subtask work
 # Runs the automated test-command defined for the specified subtask.
 ./dialtone.sh ticket subtask test [<ticket-name>] <subtask-name>
 
-# Updates subtask status in ticket.md to 'done' or 'failed'.
-# Enforces git cleanliness.
+# Updates subtask status in DuckDB to 'done' or 'failed'.
 ./dialtone.sh ticket subtask done [<ticket-name>] <subtask-name>
 
 # To mark a subtask as failed
@@ -58,74 +57,30 @@ Use these commands to manage all subtask work
 ```
 
 
-## Ticket Markdown Format
-Use this format whenever you create a new ticket. This structure is the source of truth for the automated state machine.
-```markdown
-# Name: fake-ticket
-# Tags: p0, ready, fake
-
-# Goal
-Implement the primary business logic for the fake feature.
-
-## SUBTASK: start ticket work via `dialtone.sh` cli
-- name: ticket-start
-- tags: setup
-- dependencies: 
-- description: run the cli command `dialtone.sh ticket start <ticket-name>`
-- test-condition-1: verify ticket is scaffolded
-- test-condition-2: verify branch created
-- agent-notes: 
-- pass-timestamp: 
-- fail-timestamp: 
-- status: todo
-
-## SUBTASK: Authenticate
-- name: authenticate
-- tags: setup, install
-- dependencies: setup-environment
-- description: Allow the user to log in via CLI commmands
-- test-condition-1: look for an api key
-- test-condition-2: print a link if no api key is found
-- agent-notes: Could not find documentation for authentication
-- pass-timestamp: 
-- fail-timestamp: 2026-01-27T16:14:42-08:00
-- status: failed
-
-## SUBTASK: Core Logic
-- name: core-logic
-- tags: core
-- dependencies: setup-environment
-- description: Implement the primary business logic for the fake feature.
-- test-condition-1: the binary can build
-- test-condition-2: a tcp connection can be made to port $DIALTONE_PORT
-- agent-notes:
-- pass-timestamp: 2026-01-27T18:28:42-08:00
-- fail-timestamp: 2026-01-27T16:14:42-08:00
-- status: done
-
-## SUBTASK: Final Polish
-- name: final-polish
-- tags: documentation
-- dependencies: core-logic, authenticate, setup-environment
-- description: Finalize the implementation and ensure it meets the requirements.
-- test-condition-1: the start command prints a metadata report for the user
-- test-condition-2: values cpu, network, memory, disk usage appear in the metadata report
-- agent-notes:
-- pass-timestamp: 
-- fail-timestamp: 2026-01-27T16:14:42-08:00
-- status: todo
-
-## SUBTASK: complete ticket via `dialtone.sh` cli
-- name: ticket-done
-- tags: cleanup
-- dependencies: <last-subtask-name>
-- description: run the ticket cli to verify all steps to complete the ticket
-- test-condition-1: validates all ticket subtasks are done
-- test-condition-2: verifies git status is clean
-- agent-notes: 
-- pass-timestamp: 
-- fail-timestamp: 
-- status: todo
+## Ticket Data Model
+Tickets and logs are stored in DuckDB at `src/tickets/tickets.duckdb`. The logical structure looks like:
+```json
+{
+  "id": "fake-ticket",
+  "tags": ["p0", "ready", "fake"],
+  "description": "Implement the primary business logic for the fake feature.",
+  "subtasks": [
+    {
+      "name": "ticket-start",
+      "tags": ["setup"],
+      "dependencies": [],
+      "description": "run the cli command `dialtone.sh ticket start <ticket-name>`",
+      "test_conditions": [
+        {"condition": "verify ticket is scaffolded"},
+        {"condition": "verify branch created"}
+      ],
+      "agent_notes": "",
+      "pass_timestamp": "",
+      "fail_timestamp": "",
+      "status": "todo"
+    }
+  ]
+}
 ```
 
 
@@ -191,32 +146,26 @@ var ExampleTicket = Ticket{
 # Implementation Command Details
 
 ## `./dialtone.sh ticket start <name>`
-1. Checks if a branch named `<name>` exists via `git branch --list`.
-2. Creates and switches to the branch if it doesn't exist (`git checkout -b <name>`).
-3. Scaffolds the `src/tickets/<ticket-name>/` directory with `ticket.md` (populated from a template) and `src/tickets/<ticket-name>/test/test.go`.
-4. Performs an initial commit: `git add . && git commit -m "chore: start ticket <name>"`.
-5. Pushes the branch: `git push -u origin <name>`.
-6. Creates a **Draft Pull Request** on GitHub using the `gh pr create` CLI or internal GitHub plugin.
+1. Scaffolds the `src/tickets/<ticket-name>/` directory, creates `src/tickets/<ticket-name>/test/test.go`, and inserts the ticket into `src/tickets/tickets.duckdb`.
+2. Sets the current ticket for future `ticket ask/log/next/done` commands.
 
 ## `./dialtone.sh ticket next`
-1. **Validation**: Parses `ticket.md` using a regex or markdown parser to ensure all `SUBTASK` fields are present.
+1. **Validation**: Loads the ticket from DuckDB and ensures all subtask fields are present.
 2. **Dependency Check**: For the next `todo` subtask, verifies that all listed `dependencies` match subtasks with `status: done`.
 3. **Test Execution**: Identifies the subtask in `progress`. Dispatches to the `dialtest` registry in `src/tickets/<ticket-name>/test/test.go` to run the specific function registered for that subtask name.
 4. **State Transition**:
-   - **Pass**: Updates `status: done` in `ticket.md`, records `pass-timestamp` (current ISO8601), and auto-commits the change.
+   - **Pass**: Updates `status: done` in DuckDB and records `pass-timestamp` (current ISO8601).
    - **Fail**: Updates `fail-timestamp` and stays in `progress`, prompting the agent to review `agent-notes`.
 5. **Auto-Promotion**: If no task is in `progress`, it marks the first eligible `todo` (dependencies met) as `progress`.
 
 ## `./dialtone.sh ticket done`
-1. **Final Audit**: Scans `ticket.md` to ensure all subtasks except `ticket-done` are `done` or `failed`.
-2. **Git Hygiene**: Verifies `git status` is clean. Performs a final `git push`.
-3. **PR Finalization**: Updates the GitHub Pull Request status from "Draft" to "Ready for Review".
-4. **Context Reset**: Switches the local git branch back to `main`.
+1. **Final Audit**: Scans DuckDB to ensure all subtasks except `ticket-done` are `done` or `failed`.
+2. **Completion**: Marks the ticket complete and logs the action.
 
 ## `./dialtone.sh ticket add <ticket-name>`
-1. Creates the `src/tickets/<ticket-name>/` directory without changing the current git branch.
-2. Scaffolds the basic `ticket.md` and `src/tickets/<ticket-name>/test/test.go` files.
-3. This is a "side-car" command to capture ideas or bugs without interrupting the primary feature flow.
+1. Creates the `src/tickets/<ticket-name>/` directory.
+2. Inserts a starter ticket into DuckDB and creates `src/tickets/<ticket-name>/test/test.go`.
+3. Sets the current ticket for follow-up `ticket` commands.
 
 # Automated Report Format
 Both `ticket next` and `ticket done` output a standardized report to provide the agent with immediate context on the ticket's progress and next steps.
@@ -281,6 +230,6 @@ func FinalPolish() error {
 ```
 
 # `dialtest` the dialtone testing library
-1. `dialtest.AddSubtaskTest` maps a subtask name (from `ticket.md`) to a Go function execution.
+1. `dialtest.AddSubtaskTest` maps a subtask name (from DuckDB) to a Go function execution.
 2. The `ticket next` command uses an internal registry to find these mappings and execute them during the TDD loop.
 3. Test functions should return an `error`. A `nil` return signifies a PASS.

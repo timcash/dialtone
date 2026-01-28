@@ -7,8 +7,8 @@ Upgrade the `src/web` UI to a three-column layout with 3D representation in the 
 ## SUBTASK: start ticket work via `dialtone.sh` cli
 - name: ticket-start
 - description: to start work run the cli command `dialtone.sh ticket start three-column-3d-ui`
-- test-condition-1: run the ticket tests to verify that the ticket is in a valid state
-- test-condition-2: `dialtone.sh test ticket three-column-3d-ui`
+- test-condition-1: run `./dialtone.sh plugin test <plugin-name>` to verify the ticket is valid
+- test-condition-2: `./dialtone.sh plugin test <plugin-name>`
 - tags: 
 - dependencies: 
 - agent-notes: 
@@ -163,9 +163,9 @@ Upgrade the `src/web` UI to a three-column layout with 3D representation in the 
 
 ## SUBTASK: verify ui plugin integration
 - name: verify-ui-integration
-- description: Verify that `dialtone.sh test plugin ui` successfully starts the dev server and mock-data server, and validates the UI.
+- description: Verify that `./dialtone.sh plugin test ui` successfully starts the dev server and mock-data server, and validates the UI.
 - test-condition-1: run the integration test.
-- test-condition-2: ./dialtone.sh test plugin ui
+- test-condition-2: ./dialtone.sh plugin test ui
 - tags: 
 - dependencies: 
 - agent-notes: 

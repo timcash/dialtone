@@ -8,56 +8,56 @@ Integrate Cloudflare Tunnels as a Dialtone plugin (`cloudflare`) to enable secur
 - name: cloudflare-plugin-add
 - description: Create the plugin structure in `src/plugins/cloudflare` using the CLI.
 - test-description: Verify directory exists and has a README.md.
-- test-command: `./dialtone.sh test ticket cloudflare-tunnel --subtask cloudflare-plugin-add`
+- test-command: `./dialtone.sh plugin test <plugin-name> --subtask cloudflare-plugin-add`
 - status: done
 
 ## SUBTASK: Implement Cloudflare installation logic
 - name: cloudflare-install
 - description: Implement `install.go` in the cloudflare plugin to download and verify the `cloudflared` binary for the current platform.
 - test-description: Verify `cloudflared` is executable after running install.
-- test-command: `./dialtone.sh test ticket cloudflare-tunnel --subtask cloudflare-install`
+- test-command: `./dialtone.sh plugin test <plugin-name> --subtask cloudflare-install`
 - status: done
 
 ## SUBTASK: Implement Cloudflare Login
 - name: cloudflare-login
 - description: Add a `login` subcommand to the cloudflare plugin that wraps `cloudflared tunnel login`.
 - test-description: Verify the command triggers the cloudflared login process.
-- test-command: `./dialtone.sh test ticket cloudflare-tunnel --subtask cloudflare-login`
+- test-command: `./dialtone.sh plugin test <plugin-name> --subtask cloudflare-login`
 - status: done
 
 ## SUBTASK: Implement Tunnel Management
 - name: cloudflare-tunnel-mgmt
 - description: Implement `tunnel create` and `tunnel list` subcommands to manage named tunnels.
 - test-description: Verify commands successfully call wrapped `cloudflared` logic.
-- test-command: `./dialtone.sh test ticket cloudflare-tunnel --subtask cloudflare-tunnel-mgmt`
+- test-command: `./dialtone.sh plugin test <plugin-name> --subtask cloudflare-tunnel-mgmt`
 - status: done
 
 ## SUBTASK: Implement Serve/Forwarding Logic
 - name: cloudflare-serve
 - description: Implement a `serve` command (e.g., `./dialtone.sh cloudflare serve <port> [--tunnel <name>]`) to forward local HTTP traffic.
 - test-description: Verify the command starts a tunnel session.
-- test-command: `./dialtone.sh test ticket cloudflare-tunnel --subtask cloudflare-serve`
+- test-command: `./dialtone.sh plugin test <plugin-name> --subtask cloudflare-serve`
 - status: done
 
 ## SUBTASK: start ticket work via `dialtone.sh` cli
 - name: ticket-start
 - description: run the cli command `dialtone.sh ticket start cloudflare-tunnel`
-- test-description: verify ticket is scaffolded and branch created
-- test-command: `dialtone.sh test ticket cloudflare-tunnel`
+- test-description: verify ticket is scaffolded
+- test-command: `./dialtone.sh plugin test <plugin-name>`
 - status: done
 
 ## SUBTASK: Use DIALTONE_HOSTNAME as Cloudflare subdomain
 - name: cloudflare-hostname-subdomain
 - description: Update the Cloudflare plugin to use the `DIALTONE_HOSTNAME` environment variable as the default subdomain when routing or serving. This should facilitate configuration-free routing for nodes like `<DIALTONE_HOSTNAME>.dialtone.earth`.
 - test-description: Verify that the `cloudflare` plugin logic correctly retrieves `DIALTONE_HOSTNAME` and uses it in the `tunnel route dns` logic.
-- test-command: `./dialtone.sh test ticket cloudflare-tunnel --subtask cloudflare-hostname-subdomain`
+- test-command: `./dialtone.sh plugin test <plugin-name> --subtask cloudflare-hostname-subdomain`
 - status: done
 
 ## SUBTASK: Implement Tunnel Cleanup
 - name: cloudflare-tunnel-cleanup
 - description: Add a `cleanup` subcommand to `dialtone cloudflare tunnel` that identifies and terminates all locally running `cloudflared` processes. This ensures no orphaned tunnels occupy ports or consume resources.
 - test-description: Verify that running the cleanup command successfully terminates any background `cloudflared` processes.
-- test-command: `./dialtone.sh test ticket cloudflare-tunnel --subtask cloudflare-tunnel-cleanup`
+- test-command: `./dialtone.sh plugin test <plugin-name> --subtask cloudflare-tunnel-cleanup`
 - status: done
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli
