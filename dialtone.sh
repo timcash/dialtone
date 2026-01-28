@@ -72,6 +72,11 @@ if [ -z "$DIALTONE_ENV" ] && [ -f .env ]; then
     DIALTONE_ENV=$(grep "^DIALTONE_ENV=" .env | cut -d '=' -f2)
 fi
 
+# Tilde expansion
+if [[ "$DIALTONE_ENV" == "~"* ]]; then
+    DIALTONE_ENV="${DIALTONE_ENV/#\~/$HOME}"
+fi
+
 # Ensure it is exported for child processes (Go binary)
 if [ -n "$DIALTONE_ENV" ]; then
     export DIALTONE_ENV
