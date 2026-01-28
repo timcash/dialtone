@@ -87,12 +87,15 @@ func RunStart(args []string) {
 	RunAdd(args)
 
 	// Git logic
+	logInfo("Branching to %s...", name)
 	exec.Command("git", "checkout", "-b", name).Run()
 	exec.Command("git", "add", ".").Run()
 	exec.Command("git", "commit", "-m", fmt.Sprintf("chore: start ticket %s", name)).Run()
+	logInfo("Pushing branch %s to origin...", name)
 	exec.Command("git", "push", "-u", "origin", name).Run()
 	
 	// PR logic (mocked or calls gh)
+	logInfo("Creating Draft Pull Request...")
 	exec.Command("gh", "pr", "create", "--draft", "--title", name, "--body", "Automated ticket PR").Run()
 	logInfo("Ticket %s started successfully", name)
 }
@@ -137,8 +140,11 @@ func RunDone(args []string) {
 	}
 
 	logInfo("Finalizing ticket %s...", ticket.ID)
+	logInfo("Pushing final changes...")
 	exec.Command("git", "push").Run()
+	logInfo("Marking PR as ready for review...")
 	exec.Command("gh", "pr", "ready").Run()
+	logInfo("Switching back to main branch...")
 	exec.Command("git", "checkout", "main").Run()
 	logInfo("Ticket %s completed", ticket.ID)
 }
