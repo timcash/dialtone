@@ -140,6 +140,14 @@ func RunDone(args []string) {
 	}
 
 	logInfo("Finalizing ticket %s...", ticket.ID)
+	
+	// Check git hygiene
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusOutput, _ := statusCmd.Output()
+	if len(strings.TrimSpace(string(statusOutput))) > 0 {
+		logFatal("Git status is not clean. Please commit or stash changes before running 'done'.")
+	}
+
 	logInfo("Pushing final changes...")
 	exec.Command("git", "push").Run()
 	logInfo("Marking PR as ready for review...")
