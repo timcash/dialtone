@@ -146,7 +146,11 @@ func TestNextGranular() error {
 			fmt.Printf("WARNING: Failed to cleanup %s: %v\n", name, err)
 		}
 	}()
+	defer exec.Command("git", "branch", "-D", name).Run()
 	defer restoreBranch(initialBranch)
+
+	// Switch to a temporary branch so auto-commits don't hit main
+	exec.Command("git", "checkout", "-b", name).Run()
 
 	runCmd("./dialtone.sh", "ticket", "add", name)
 
