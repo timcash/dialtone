@@ -1,3 +1,5 @@
+---
+trigger: model_decision
 description: github issue triage workflow for LLM agents
 ---
 
