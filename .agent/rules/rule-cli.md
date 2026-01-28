@@ -11,15 +11,20 @@ mv -n .env.example .env # Only if .env does not exists
 ./dialtone.sh install --remote # Verify and install dev dependencies on remote robot
 ```
 
-## Ticket Lifecycle
+## Ticket Lifecycle (Legacy v1)
 ```bash
 ./dialtone.sh ticket add <ticket-name> # Add a ticket.md to tickets/<ticket-name>/
 ./dialtone.sh ticket start <ticket-name> # Creates branch and draft pull-request
-./dialtone.sh ticket subtask list <ticket-name> # List all subtasks in tickets/<ticket-name>/ticket.md
-./dialtone.sh ticket subtask next <ticket-name> # prints the next todo or process subtask for this ticket
-./dialtone.sh ticket subtask test <ticket-name> <subtask-name> # Runs the subtask test
-./dialtone.sh ticket subtask done <ticket-name> <subtask-name> # mark a subtask as done
 ./dialtone.sh ticket done <ticket-name>  # Final verification and pull-request submission
+```
+
+## Ticket Lifecycle (Standardized v2)
+```bash
+./dialtone.sh ticket_v2 add <ticket-name> # Scaffold src/tickets_v2/
+./dialtone.sh ticket_v2 start <ticket-name> # Branch, push, and open Draft PR
+./dialtone.sh ticket_v2 test <ticket-name> # Run all subtask tests
+./dialtone.sh ticket_v2 next # Primary TDD driver: runs tests and updates state
+./dialtone.sh ticket_v2 done # Final push, PR Ready-for-review, switch to main
 ```
 
 ## Running Tests: Tests are the most important concept in `dialtone`
