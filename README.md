@@ -60,14 +60,8 @@ mv -n .env.example .env # Only if .env does not exists
 ./dialtone.sh install --remote # Install dev dependencies on remote robot
 ```
 
-## Ticket Lifecycle (Legacy)
-```bash
-./dialtone.sh ticket add <ticket-name>         # Legacy add
-./dialtone.sh ticket start <ticket-name>       # Legacy start
-./dialtone.sh ticket done <ticket-name>        # Legacy done
-```
 
-## Ticket Lifecycle (Standardized v2)
+## Ticket Lifecycle
 Use the `ticket_v2` command for new work. It enforces TDD and standardized markdown schemas.
 ```bash
 ./dialtone.sh ticket_v2 add <ticket-name>      # Scaffold src/tickets_v2/
@@ -79,10 +73,8 @@ Use the `ticket_v2` command for new work. It enforces TDD and standardized markd
 
 ## Running Tests: Tests are the most important concept in `dialtone`
 ```bash
-./dialtone.sh test ticket <ticket-name>      # Run tests using Legacy v1
-./dialtone.sh test ticket_v2 <ticket-name>   # Run tests using Standardized v2
-./dialtone.sh test ticket <ticket-name> --subtask <subtask-name> # v1 specific subtask
-./dialtone.sh test ticket_v2 <ticket-name> --subtask <subtask-name> # v2 specific subtask
+./dialtone.sh test ticket <ticket-name>      # Run tests using ticket_v2
+./dialtone.sh test ticket <ticket-name> --subtask <subtask-name> # Run specific subtask test
 ./dialtone.sh test plugin <plugin-name> # Run tests for a specific plugin
 ./dialtone.sh test tags [tag1 tag2 ...] # Run tests matching any of the specified tags
 ./dialtone.sh test --list               # List tests that would run
@@ -201,10 +193,9 @@ flowchart TD
 ## Project Structure
 ```
 dialtone/
-├── tickets/           # Legacy tickets
 ├── src/               # All source code
 │   ├── plugins/       # All plugins
-│   └── tickets_v2/    # New standardized tickets (v2)
+│   └── tickets_v2/    # Standardized tickets
 ├── test/              # Core test files
 ├── docs/              # VM and container docs
 │   └── vendor/<vendor_name>/  # Vendor docs
@@ -213,21 +204,12 @@ dialtone/
 └── README.md          # Repo overview
 ```
 
-## Ticket Structure (Legacy v1)
-For tickets created via `./dialtone.sh ticket start <ticket-name>`:
-```
-tickets/<ticket-name>/
-├── ticket.md          # Requirement doc (from template)
-├── task.md            # Scratchpad for tracking progress
-├── code/              # Local code playground
-└── test/              # Ticket-specific verification tests
-```
 
-## Ticket Structure (Standardized v2)
+## Ticket Structure
 For tickets created via `./dialtone.sh ticket_v2 start <ticket-name>`:
 ```
 src/tickets_v2/<ticket-name>/
-├── ticket.md          # Requirement doc (v2 schema)
+├── ticket.md          # Requirement doc
 └── test/
     └── test.go        # Go integration tests (TDD loop)
 ```
@@ -261,11 +243,9 @@ src/plugins/<name>/
 
 ## TICKET: The local 60-minute work unit
 1. BRANCH: Git branch created or switched to for the ticket.
-2. DIRECTORY (v1): `tickets/<ticket-name>/` scaffolded with `ticket.md`, `task.md`, `code/`, and `test/`.
-3. DIRECTORY (v2): `src/tickets_v2/<ticket-name>/` scaffolded with `ticket.md` and `test/test.go`.
-4. SUBTASKS: A list of 10-minute steps that each have a test and status.
-5. LIFECYCLE (v1): `ticket start` -> `subtask` loop -> `ticket done` to ready the PR.
-6. LIFECYCLE (v2): `ticket_v2 start` -> `ticket_v2 next` loop -> `ticket_v2 done` to ready the PR.
+2. DIRECTORY: `src/tickets_v2/<ticket-name>/` scaffolded with `ticket.md` and `test/test.go`.
+3. SUBTASKS: A list of 10-minute steps that each have a test and status.
+4. LIFECYCLE: `ticket_v2 start` -> `ticket_v2 next` loop -> `ticket_v2 done` to ready the PR.
 
 ## SUBTASK: Small, test-first unit of work
 1. NAME: Kebab-case identifier used by CLI commands.
@@ -311,7 +291,7 @@ src/plugins/<name>/
 
 # Workflows
 1. [Issue Review](docs/workflows/issue_review.md): Planning-only triage flow that audits issues, asks clarifying questions, and promotes validated tickets.
-2. [Ticket](docs/workflows/ticket.md): Execution workflow for ticket-driven development using `ticket` (v1) or `ticket_v2` (v2) from start through done with TDD and scope control.
+2. [Ticket](docs/workflows/ticket.md): Execution workflow for ticket-driven development using `ticket_v2` from start through done with TDD and scope control.
 3. [Subtask Expansion](docs/workflows/subtask_expand.md): Planning flow to refine or split subtasks into clear, testable 10-minute units.
 
 

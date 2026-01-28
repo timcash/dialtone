@@ -1,2 +1,0 @@
-Progress log for test-automation-verify-2
-

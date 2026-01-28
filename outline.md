@@ -1,23 +1,23 @@
-# Documentation Reconciliation Summary: Ticket v1 & v2
+# Documentation Standardization Summary: v2 Transition
 
-## 1. Core Repository Overview (README.md)
-   - **Project Structure**: Integrated `src/tickets_v2/` as the new standard while labeling `tickets/` as Legacy.
-   - **Ticket Lifecycle**: Documented side-by-side lifecycles for both systems.
-   - **Testing Interface**: Added `test ticket_v2` alongside `test ticket` for both full and subtask-specific testing.
-   - **Directory Layouts**: Detailed the differences between v1 (`task.md`) and v2 (`test/test.go`) internal structures.
-   - **Data Objects**: Updated the `TICKET` definition to reflect dual directory and lifecycle paths.
+This document outlines the changes made to move the repository from dual v1/v2 documentation to a single, standardized "v2" system.
 
-## 2. Planning & Execution Workflows (docs/workflows/)
-   - **Ticket Workflow**: Created a unified API mapping table for both v1 and v2 command sets.
-   - **Subtask Expansion**: Standardized identification, printing, and refinement steps for both `tickets/` and `src/tickets_v2/` paths.
-   - **Issue Review**: Updated promotion (IMPROVE) logic to allow issues to be funneled into either ticket system based on complexity.
+## 1. Deletions (Legacy v1)
+The following legacy v1 files were removed:
+- `docs/workflows/issue_review_v1.md`
+- `docs/workflows/subtask_expand_v1.md`
+- `docs/workflows/ticket_v1.md`
 
-## 3. Agent & Developer Guidance (.agent/)
-   - **CLI Rules**: Updated `rule-cli.md` to ensure agents choose the appropriate tool based on the ticket version.
-   - **Documentation Templates**: (Modified `doc-template.md`) Standardized the foundation for new documentation to show both v1 and v2 layouts.
+## 2. Promotions (v2 to Primary)
+The v2 workflow files were promoted to be the primary documentation by renaming them and removing the `_v2` suffix:
+- `docs/workflows/issue_review_v2.md` -> `docs/workflows/issue_review.md`
+- `docs/workflows/subtask_expand_v2.md` -> `docs/workflows/subtask_expand.md`
+- `docs/workflows/ticket_v2.md` -> `docs/workflows/ticket.md`
 
-## 4. Verification & Integration Status
-   - **Specification Compliance**: Verified `ticket_v2` against 100% of the granular specification in `ticket_v2.md` (now deleted).
-   - **Environment Safety**: Confirmed the integration suite reliably restores the starting git context (branch restoration via `defer`).
-   - **Git Hygiene**: Ensured both documentation and code enforce mandatory cleanliness checks (`git status`) before state transitions.
-   - **Registry Integration**: Confirmed plugin registration in the main `dialtone.sh` CLI wrapper.
+The `.agent/workflows/` directory was also updated to reflect these primary versions.
+
+## 3. Global Updates
+- **README.md**: Removed "Legacy v1" sections and standardized the "Ticket Lifecycle" and "Ticket Structure" sections on the v2 system.
+- **.agent/rules/rule-cli.md**: Removed legacy v1 command references.
+- **Internal Cleanup**: Removed "(v2 specific)" and "(Standardized v2)" labels from all workflow headers and metadata for a cleaner, unified look.
+- **Consistency**: Standardized CLI command examples to use the `./dialtone.sh github` syntax.
