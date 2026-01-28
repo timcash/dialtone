@@ -24,11 +24,11 @@ This workflow defines the standard process for planning, executing, and managing
 ## 2. REVIEW: Scope and Context
 
 ```bash
-# 1. Read the ticket.md and any linked documentation or READMEs.
+# 1. Read the ticket data (DuckDB) and any linked documentation or READMEs.
 # 2. Plugin Decision: Determine if the feature should be a standalone plugin.
 #    (If so, return to START commands for plugins)
 # 3. Identify core dependencies and affected components.
-# 4. Outline the initial plan in ticket.md using ## SUBTASK headers.
+# 4. Outline the initial plan by updating ticket subtasks.
 ```
 
 ## 3. ASK: Clarify Ambiguities
@@ -97,16 +97,15 @@ For every iteration, verify:
 # Build the plugin to ensure no compilation errors
 ./dialtone.sh plugin build <plugin-name>
 
-# Run all plugin tests
+# Run plugin tests
 ./dialtone.sh plugin test <plugin-name>
 ```
 
 ## 6. CLEANUP: Finalize and Commit
 
 ```bash
-# 1. Commits: Ensure all changes are committed with clear messages.
-# 2. Artifacts: Delete any temporary test files or logs.
-# 3. Notify: Summarize accomplishments and ask the user any final questions.
+# 1. Artifacts: Delete any temporary test files or logs.
+# 2. Notify: Summarize accomplishments and ask the user any final questions.
 
 # Close the ticket and mark it as finished
 ./dialtone.sh ticket done

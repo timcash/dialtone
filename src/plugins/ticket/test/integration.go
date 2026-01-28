@@ -1,28 +1,24 @@
 package main
 
 import (
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	_ "github.com/marcboeker/go-duckdb"
 )
 
 const ticketV2Dir = "src/tickets"
 const testDataDir = "src/plugins/ticket/test"
+const ticketDBFile = "tickets.duckdb"
 
 func main() {
-	// Check git hygiene
-	statusCmd := exec.Command("git", "status", "--porcelain")
-	statusOutput, _ := statusCmd.Output()
-	if len(strings.TrimSpace(string(statusOutput))) > 0 {
-		fmt.Println("FATAL: Git status is not clean. Please commit or stash changes before running integration tests.")
-		os.Exit(1)
-	}
-
-	initialBranch := getCurrentBranch()
-	fmt.Printf("=== Starting ticket Granular Integration Tests (Initial Branch: %s) ===\n", initialBranch)
+	fmt.Println("=== Starting ticket Granular Integration Tests ===")
 
 	allPassed := true
 	runTest := func(name string, fn func() error) {
@@ -36,8 +32,7 @@ func main() {
 	}
 
 	defer func() {
-		fmt.Printf("\n=== Restoring Initial Branch: %s ===\n", initialBranch)
-		exec.Command("git", "checkout", "-f", initialBranch).Run()
+		fmt.Println("\n=== Integration Tests Completed ===")
 		if !allPassed {
 			fmt.Println("\n!!! SOME TESTS FAILED !!!")
 			os.Exit(1)
@@ -54,7 +49,7 @@ func main() {
 	runTest("subtask basics", TestSubtaskBasicsGranular)
 	runTest("subtask done/failed", TestSubtaskDoneFailedGranular)
 
-	fmt.Println("\n=== Integration Tests Completed ===")
+	fmt.Println()
 }
 
 // runTest removed from global scope to use closure in main for error tracking
@@ -63,25 +58,10 @@ func getUniqueName(base string) string {
 	return fmt.Sprintf("%s-%d", base, time.Now().Unix())
 }
 
-func restoreBranch(branch string) {
-	exec.Command("git", "checkout", "-f", branch).Run()
-}
-
-func cleanupRemote(branch string) {
-	fmt.Printf("--- Cleaning up remote branch and PR for %s ---\n", branch)
-	exec.Command("gh", "pr", "close", branch, "--delete-branch").Run()
-	exec.Command("git", "push", "origin", "--delete", branch).Run()
-}
-
 func TestAddGranular() error {
-	initialBranch := getCurrentBranch()
 	name := getUniqueName("test-add")
-	os.RemoveAll(filepath.Join(ticketV2Dir, name))
-	defer func() {
-		if err := os.RemoveAll(filepath.Join(ticketV2Dir, name)); err != nil {
-			fmt.Printf("WARNING: Failed to cleanup %s: %v\n", name, err)
-		}
-	}()
+	cleanupTicket(name)
+	defer cleanupTicket(name)
 
 	output := runCmd("./dialtone.sh", "ticket", "add", name)
 	if !strings.Contains(output, "Created") {
@@ -89,51 +69,32 @@ func TestAddGranular() error {
 	}
 
 	// Verify files exist
-	if _, err := os.Stat(filepath.Join(ticketV2Dir, name, "ticket.md")); err != nil {
-		return fmt.Errorf("ticket.md missing")
+	if _, err := os.Stat(ticketDBPath()); err != nil {
+		return fmt.Errorf("tickets.duckdb missing")
 	}
 	if _, err := os.Stat(filepath.Join(ticketV2Dir, name, "test", "test.go")); err != nil {
 		return fmt.Errorf("test/test.go missing")
 	}
-	if _, err := os.Stat(filepath.Join(ticketV2Dir, name, "log.md")); err != nil {
-		return fmt.Errorf("log.md missing")
-	}
 
-	logContent, err := os.ReadFile(filepath.Join(ticketV2Dir, name, "log.md"))
+	entries, err := getLogEntries(name)
 	if err != nil {
-		return fmt.Errorf("failed to read log.md: %v", err)
+		return fmt.Errorf("failed to read log entries: %v", err)
 	}
-	if !strings.Contains(string(logContent), "command: ticket add "+name) {
+	if !findLogEntry(entries, "command", "ticket add "+name, "") {
 		return fmt.Errorf("missing command log entry")
-	}
-
-	// Verify NO branch change
-	if getCurrentBranch() != initialBranch {
-		return fmt.Errorf("branch should NOT have changed")
 	}
 
 	return nil
 }
 
 func TestStartGranular() error {
-	initialBranch := getCurrentBranch()
 	name := getUniqueName("test-start")
-	os.RemoveAll(filepath.Join(ticketV2Dir, name))
-	defer func() {
-		if err := os.RemoveAll(filepath.Join(ticketV2Dir, name)); err != nil {
-			fmt.Printf("WARNING: Failed to cleanup %s: %v\n", name, err)
-		}
-	}()
-	defer exec.Command("git", "branch", "-D", name).Run()
-	defer cleanupRemote(name)
-	defer restoreBranch(initialBranch)
+	cleanupTicket(name)
+	defer cleanupTicket(name)
 
 	output := runCmd("./dialtone.sh", "ticket", "start", name)
 
 	checks := []string{
-		"Branching to " + name,
-		"Pushing branch " + name,
-		"Creating Draft Pull Request",
 		"Ticket " + name + " started successfully",
 	}
 	for _, c := range checks {
@@ -142,48 +103,24 @@ func TestStartGranular() error {
 		}
 	}
 
-	// Verify we are on the branch
-	if getCurrentBranch() != name {
-		return fmt.Errorf("not on expected branch: %s", getCurrentBranch())
-	}
-
 	return nil
 }
 
 func TestAskGranular() error {
-	initialBranch := getCurrentBranch()
 	name := getUniqueName("test-ask")
-	os.RemoveAll(filepath.Join(ticketV2Dir, name))
-	defer func() {
-		if err := os.RemoveAll(filepath.Join(ticketV2Dir, name)); err != nil {
-			fmt.Printf("WARNING: Failed to cleanup %s: %v\n", name, err)
-		}
-	}()
-	defer exec.Command("git", "branch", "-D", name).Run()
-	defer restoreBranch(initialBranch)
-
-	// Switch to a temporary branch so GetCurrentTicket resolves correctly
-	exec.Command("git", "checkout", "-b", name).Run()
+	cleanupTicket(name)
+	defer cleanupTicket(name)
 	runCmd("./dialtone.sh", "ticket", "add", name)
-
-	logPath := filepath.Join(ticketV2Dir, name, "log.md")
 
 	output := runCmd("./dialtone.sh", "ticket", "ask", "How do we handle auth?")
 	if !strings.Contains(output, "Captured question in") {
 		return fmt.Errorf("missing capture confirmation")
 	}
-	if _, err := os.Stat(logPath); err != nil {
-		return fmt.Errorf("log.md missing")
-	}
-
-	content, err := os.ReadFile(logPath)
+	entries, err := getLogEntries(name)
 	if err != nil {
-		return fmt.Errorf("failed to read log.md: %v", err)
+		return fmt.Errorf("failed to read log entries: %v", err)
 	}
-	if !strings.Contains(string(content), "# Log") {
-		return fmt.Errorf("missing header in log.md")
-	}
-	if !strings.Contains(string(content), "question: How do we handle auth?") {
+	if !findLogEntry(entries, "question", "How do we handle auth?", "") {
 		return fmt.Errorf("missing question entry")
 	}
 
@@ -192,14 +129,11 @@ func TestAskGranular() error {
 		return fmt.Errorf("missing capture confirmation for subtask")
 	}
 
-	content, err = os.ReadFile(logPath)
+	entries, err = getLogEntries(name)
 	if err != nil {
-		return fmt.Errorf("failed to read log.md: %v", err)
+		return fmt.Errorf("failed to read log entries: %v", err)
 	}
-	if !strings.Contains(string(content), "subtask: init") {
-		return fmt.Errorf("missing subtask entry")
-	}
-	if !strings.Contains(string(content), "question: Is init required?") {
+	if !findLogEntry(entries, "question", "Is init required?", "init") {
 		return fmt.Errorf("missing subtask question")
 	}
 
@@ -207,36 +141,20 @@ func TestAskGranular() error {
 }
 
 func TestLogGranular() error {
-	initialBranch := getCurrentBranch()
 	name := getUniqueName("test-log")
-	os.RemoveAll(filepath.Join(ticketV2Dir, name))
-	defer func() {
-		if err := os.RemoveAll(filepath.Join(ticketV2Dir, name)); err != nil {
-			fmt.Printf("WARNING: Failed to cleanup %s: %v\n", name, err)
-		}
-	}()
-	defer exec.Command("git", "branch", "-D", name).Run()
-	defer restoreBranch(initialBranch)
-
-	// Switch to a temporary branch so GetCurrentTicket resolves correctly
-	exec.Command("git", "checkout", "-b", name).Run()
+	cleanupTicket(name)
+	defer cleanupTicket(name)
 	runCmd("./dialtone.sh", "ticket", "add", name)
-
-	logPath := filepath.Join(ticketV2Dir, name, "log.md")
 
 	output := runCmd("./dialtone.sh", "ticket", "log", "Adding a note.")
 	if !strings.Contains(output, "Captured log in") {
 		return fmt.Errorf("missing log capture confirmation")
 	}
-	if _, err := os.Stat(logPath); err != nil {
-		return fmt.Errorf("log.md missing")
-	}
-
-	content, err := os.ReadFile(logPath)
+	entries, err := getLogEntries(name)
 	if err != nil {
-		return fmt.Errorf("failed to read log.md: %v", err)
+		return fmt.Errorf("failed to read log entries: %v", err)
 	}
-	if !strings.Contains(string(content), "log: Adding a note.") {
+	if !findLogEntry(entries, "log", "Adding a note.", "") {
 		return fmt.Errorf("missing log entry")
 	}
 
@@ -244,36 +162,26 @@ func TestLogGranular() error {
 }
 
 func TestNextGranular() error {
-	initialBranch := getCurrentBranch()
 	name := getUniqueName("test-next")
-	os.RemoveAll(filepath.Join(ticketV2Dir, name))
-	defer func() {
-		if err := os.RemoveAll(filepath.Join(ticketV2Dir, name)); err != nil {
-			fmt.Printf("WARNING: Failed to cleanup %s: %v\n", name, err)
-		}
-	}()
-	defer exec.Command("git", "branch", "-D", name).Run()
-	defer restoreBranch(initialBranch)
-
-	// Switch to a temporary branch so auto-commits don't hit main
-	exec.Command("git", "checkout", "-b", name).Run()
-
+	cleanupTicket(name)
+	defer cleanupTicket(name)
 	runCmd("./dialtone.sh", "ticket", "add", name)
 
 	// Sub-item 2: Dependency Check & Auto-Promotion
-	ticketPath := filepath.Join(ticketV2Dir, name, "ticket.md")
-	content := fmt.Sprintf(`# Name: %s
-# Goal
-Granular next test
-## SUBTASK: Task1
-- name: t1
-- status: todo
-## SUBTASK: Task2
-- name: t2
-- dependencies: t1
-- status: todo
-`, name)
-	os.WriteFile(ticketPath, []byte(content), 0644)
+	err := saveTicket(name, "Granular next test", []seedSubtask{
+		{
+			Name:   "t1",
+			Status: "todo",
+		},
+		{
+			Name:         "t2",
+			Status:       "todo",
+			Dependencies: []string{"t1"},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to seed ticket: %v", err)
+	}
 
 	fmt.Println("--- Checking Auto-Promotion/Execution ---")
 	output := runCmd("./dialtone.sh", "ticket", "next", name)
@@ -287,8 +195,7 @@ Granular next test
 		return fmt.Errorf("missing fail-timestamp")
 	}
 
-	// Sub-item 5: Auto-commit on Pass
-	fmt.Println("--- Checking Auto-commit on Pass ---")
+	fmt.Println("--- Checking Pass State ---")
 	testGoPath := filepath.Join(ticketV2Dir, name, "test", "test.go")
 	os.WriteFile(testGoPath, []byte(fmt.Sprintf(`package test
 import "dialtone/cli/src/dialtest"
@@ -303,25 +210,25 @@ func init() {
 		return fmt.Errorf("expected pass message")
 	}
 
-	cmd := exec.Command("git", "log", "-1", "--pretty=format:%s")
-	logMsg, _ := cmd.Output()
-	if !strings.Contains(string(logMsg), "docs: subtask t1 passed") {
-		return fmt.Errorf("failed auto-commit check: got %q", string(logMsg))
-	}
-
 	return nil
 }
 
 func TestValidateGranular() error {
 	fmt.Println("--- Checking Timestamp Regression ---")
 	name := getUniqueName("test-validate")
-	os.MkdirAll(filepath.Join(ticketV2Dir, name), 0755)
-	defer func() {
-		if err := os.RemoveAll(filepath.Join(ticketV2Dir, name)); err != nil {
-			fmt.Printf("WARNING: Failed to cleanup %s: %v\n", name, err)
-		}
-	}()
-	os.WriteFile(filepath.Join(ticketV2Dir, name, "ticket.md"), []byte("# Name: "+name+"\n\n## SUBTASK: R\n- name: r\n- pass-timestamp: 2026-01-27T10:00:00Z\n- fail-timestamp: 2026-01-27T11:00:00Z\n- status: done\n"), 0644)
+	cleanupTicket(name)
+	defer cleanupTicket(name)
+	err := saveTicket(name, "", []seedSubtask{
+		{
+			Name:          "r",
+			Status:        "done",
+			PassTimestamp: "2026-01-27T10:00:00Z",
+			FailTimestamp: "2026-01-27T11:00:00Z",
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to seed ticket: %v", err)
+	}
 
 	output := runCmd("./dialtone.sh", "ticket", "validate", name)
 	if !strings.Contains(output, "[REGRESSION]") {
@@ -332,38 +239,17 @@ func TestValidateGranular() error {
 }
 
 func TestDoneGranular() error {
-	initialBranch := getCurrentBranch()
 	name := getUniqueName("test-done")
-	os.RemoveAll(filepath.Join(ticketV2Dir, name))
-	defer func() {
-		if err := os.RemoveAll(filepath.Join(ticketV2Dir, name)); err != nil {
-			fmt.Printf("WARNING: Failed to cleanup %s: %v\n", name, err)
-		}
-	}()
-	defer exec.Command("git", "branch", "-D", name).Run()
-	defer cleanupRemote(name)
-	defer restoreBranch(initialBranch)
+	cleanupTicket(name)
+	defer cleanupTicket(name)
 
 	runCmd("./dialtone.sh", "ticket", "start", name)
 	runCmd("./dialtone.sh", "ticket", "subtask", "done", name, "init")
 
-	// Hygiene check
-	fmt.Println("--- Checking Git Hygiene (Expected Failure) ---")
-	os.WriteFile("dirty.txt", []byte("trash"), 0644)
+	fmt.Println("--- Checking Done Completion ---")
 	output := runCmd("./dialtone.sh", "ticket", "done")
-	if !strings.Contains(output, "Git status is not clean") {
-		os.Remove("dirty.txt")
-		return fmt.Errorf("failed hygiene check")
-	}
-	os.Remove("dirty.txt")
-
-	// Success check
-	fmt.Println("--- Checking Success ---")
-	output = runCmd("./dialtone.sh", "ticket", "done")
 	checks := []string{
-		"Pushing final changes",
-		"Marking PR as ready for review",
-		"Switching back to main branch",
+		"Ticket " + name + " completed",
 	}
 	for _, c := range checks {
 		if !strings.Contains(output, c) {
@@ -376,12 +262,8 @@ func TestDoneGranular() error {
 
 func TestSubtaskBasicsGranular() error {
 	name := getUniqueName("test-sub-basics")
-	os.RemoveAll(filepath.Join(ticketV2Dir, name))
-	defer func() {
-		if err := os.RemoveAll(filepath.Join(ticketV2Dir, name)); err != nil {
-			fmt.Printf("WARNING: Failed to cleanup %s: %v\n", name, err)
-		}
-	}()
+	cleanupTicket(name)
+	defer cleanupTicket(name)
 	runCmd("./dialtone.sh", "ticket", "add", name)
 
 	// subtask list
@@ -394,44 +276,16 @@ func TestSubtaskBasicsGranular() error {
 }
 
 func TestSubtaskDoneFailedGranular() error {
-	initialBranch := getCurrentBranch()
 	name := getUniqueName("test-sub-state")
-	os.RemoveAll(filepath.Join(ticketV2Dir, name))
-	defer func() {
-		if err := os.RemoveAll(filepath.Join(ticketV2Dir, name)); err != nil {
-			fmt.Printf("WARNING: Failed to cleanup %s: %v\n", name, err)
-		}
-	}()
-	defer exec.Command("git", "branch", "-D", name).Run()
-	defer cleanupRemote(name)
-	defer restoreBranch(initialBranch)
+	cleanupTicket(name)
+	defer cleanupTicket(name)
 
 	runCmd("./dialtone.sh", "ticket", "start", name)
 
-	// Hygiene
-	os.WriteFile("dirty.txt", []byte("trash"), 0644)
-	output := runCmd("./dialtone.sh", "ticket", "subtask", "done", name, "init")
-	if !strings.Contains(output, "Git status is not clean") {
-		os.Remove("dirty.txt")
-		return fmt.Errorf("subtask hygiene fail")
-	}
-	os.Remove("dirty.txt")
-
-	// Auto-commit
 	runCmd("./dialtone.sh", "ticket", "subtask", "done", name, "init")
-	cmd := exec.Command("git", "log", "-1", "--pretty=format:%s")
-	logMsg, _ := cmd.Output()
-	if !strings.Contains(string(logMsg), "docs: subtask init done") {
-		return fmt.Errorf("subtask auto-commit fail")
-	}
+	runCmd("./dialtone.sh", "ticket", "subtask", "failed", name, "init")
 
 	return nil
-}
-
-func getCurrentBranch() string {
-	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
-	output, _ := cmd.Output()
-	return strings.TrimSpace(string(output))
 }
 
 func runCmd(name string, args ...string) string {
@@ -440,4 +294,231 @@ func runCmd(name string, args ...string) string {
 	output, _ := cmd.CombinedOutput()
 	fmt.Println(string(output))
 	return string(output)
+}
+
+type logEntry struct {
+	EntryType string
+	Message   string
+	Subtask   string
+}
+
+type seedSubtask struct {
+	Name          string
+	Description   string
+	Status        string
+	Dependencies  []string
+	TestConditions []string
+	AgentNotes    string
+	PassTimestamp string
+	FailTimestamp string
+}
+
+type testCondition struct {
+	Condition string `json:"condition"`
+}
+
+func ticketDBPath() string {
+	return filepath.Join(ticketV2Dir, ticketDBFile)
+}
+
+func openTicketDB() (*sql.DB, error) {
+	if err := os.MkdirAll(ticketV2Dir, 0755); err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("duckdb", ticketDBPath())
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureTicketSchema(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
+func ensureTicketSchema(db *sql.DB) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS tickets (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			tags TEXT,
+			description TEXT
+		);`,
+		`CREATE TABLE IF NOT EXISTS subtasks (
+			ticket_id TEXT NOT NULL,
+			position INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			tags TEXT,
+			dependencies TEXT,
+			description TEXT,
+			test_conditions TEXT,
+			agent_notes TEXT,
+			pass_timestamp TEXT,
+			fail_timestamp TEXT,
+			status TEXT
+		);`,
+		`CREATE TABLE IF NOT EXISTS ticket_logs (
+			ticket_id TEXT NOT NULL,
+			timestamp TEXT NOT NULL,
+			entry_type TEXT NOT NULL,
+			message TEXT NOT NULL,
+			subtask TEXT
+		);`,
+		`CREATE TABLE IF NOT EXISTS ticket_meta (
+			key TEXT PRIMARY KEY,
+			value TEXT
+		);`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func cleanupTicket(name string) {
+	fmt.Printf("--- Cleanup: %s ---\n", name)
+	if err := deleteTicketData(name); err != nil {
+		fmt.Printf("WARNING: Failed to cleanup ticket data %s: %v\n", name, err)
+	} else {
+		fmt.Printf("Deleted DuckDB rows for %s\n", name)
+	}
+	if err := os.RemoveAll(filepath.Join(ticketV2Dir, name)); err != nil {
+		fmt.Printf("WARNING: Failed to cleanup %s: %v\n", name, err)
+	} else {
+		fmt.Printf("Removed directory %s\n", filepath.Join(ticketV2Dir, name))
+	}
+}
+
+func deleteTicketData(name string) error {
+	db, err := openTicketDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM ticket_logs WHERE ticket_id = ?`, name); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM subtasks WHERE ticket_id = ?`, name); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM tickets WHERE id = ?`, name); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM ticket_meta WHERE key = 'current_ticket' AND value = ?`, name); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func saveTicket(name, description string, subtasks []seedSubtask) error {
+	db, err := openTicketDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM subtasks WHERE ticket_id = ?`, name); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`INSERT INTO tickets (id, name, tags, description)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET name = excluded.name, tags = excluded.tags, description = excluded.description`,
+		name, name, "", description); err != nil {
+		return err
+	}
+
+	for i, st := range subtasks {
+		depsPayload, err := json.Marshal(st.Dependencies)
+		if err != nil {
+			return err
+		}
+		tests := make([]testCondition, 0, len(st.TestConditions))
+		for _, cond := range st.TestConditions {
+			tests = append(tests, testCondition{Condition: cond})
+		}
+		testsPayload, err := json.Marshal(tests)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO subtasks (
+			ticket_id, position, name, tags, dependencies, description, test_conditions, agent_notes, pass_timestamp, fail_timestamp, status
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			name,
+			i,
+			st.Name,
+			"",
+			string(depsPayload),
+			st.Description,
+			string(testsPayload),
+			st.AgentNotes,
+			st.PassTimestamp,
+			st.FailTimestamp,
+			st.Status,
+		); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func getLogEntries(ticketID string) ([]logEntry, error) {
+	db, err := openTicketDB()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`SELECT entry_type, message, subtask FROM ticket_logs WHERE ticket_id = ?`, ticketID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []logEntry
+	for rows.Next() {
+		var entry logEntry
+		var subtask sql.NullString
+		if err := rows.Scan(&entry.EntryType, &entry.Message, &subtask); err != nil {
+			return nil, err
+		}
+		if subtask.Valid {
+			entry.Subtask = subtask.String
+		}
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func findLogEntry(entries []logEntry, entryType, messageContains, subtask string) bool {
+	for _, entry := range entries {
+		if entry.EntryType != entryType {
+			continue
+		}
+		if subtask != "" && entry.Subtask != subtask {
+			continue
+		}
+		if strings.Contains(entry.Message, messageContains) {
+			return true
+		}
+	}
+	return false
 }

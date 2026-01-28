@@ -5,13 +5,13 @@ The `test` plugin provides a centralized test runner for `dialtone`. It supports
 ## Commands
 
 ```bash
-# Runs all tests in tickets/<ticket-name>/test/.
+# Runs all tests for a specific plugin.
 # Use `--subtask <subtask-name>` for a specific test, or `--list` to dry-run.
-./dialtone.sh test ticket <ticket-name>
+./dialtone.sh plugin test <plugin-name>
 
 # Runs tests for a specific plugin. Plugins must register a `RunAll() error`
 # function in their test/ package and connect it to src/plugins/test/cli/test.go.
-./dialtone.sh test plugin <plugin-name>
+./dialtone.sh plugin test <plugin-name>
 
 # Runs tests matching any of the specified tags.
 # Example: ./dialtone.sh test tags metadata camera-filters
