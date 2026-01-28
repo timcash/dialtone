@@ -33,3 +33,6 @@
 ## 2026-01-28T14:11:11-08:00
 - command: ticket subtask done ticket-ask-question update-readme
 
+## 2026-01-28T14:11:16-08:00
+- command: ticket done
+
