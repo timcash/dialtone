@@ -1,9 +1,9 @@
 ---
 trigger: model_decision
-description: expand subtasks in the current ticket
+description: expand subtasks in the current ticket (v1 specific)
 ---
 
-# Subtask Expansion & Improvement Workflow
+# Subtask Expansion & Improvement Workflow (v1)
 
 This workflow guides LLM agents to **plan and improve** subtasks in the current ticket. You are **NOT executing** the subtasks here—you are **refining the plan** to make them more actionable, testable, and well-structured for other agents to execute.
 
@@ -13,15 +13,13 @@ First, determine which ticket you're working with:
 
 ```bash
 # Get the current ticket name
-./dialtone.sh ticket name      # v1
-./dialtone.sh ticket_v2 name   # v2
+./dialtone.sh ticket name
 
 # Print the full ticket content
-./dialtone.sh ticket print     # v1
-./dialtone.sh ticket_v2 print  # v2
+./dialtone.sh ticket print
 ```
 
-The ticket will be located at `tickets/<ticket-name>/ticket.md` (v1) or `src/tickets_v2/<ticket-name>/ticket.md` (v2).
+The ticket will be located at `tickets/<ticket-name>/ticket.md`.
 
 ## Step 2: Review the Ticket Context
 
@@ -41,8 +39,7 @@ First, use `ticket next` to see the current status and identifies the immediate 
 
 ```bash
 # Check the current status and find the next task
-./dialtone.sh ticket next     # v1
-./dialtone.sh ticket_v2 next  # v2
+./dialtone.sh ticket next
 ```
 
 Focus on improving a **small set** of subtasks (typically 1-5 subtasks). Look for subtasks that:
@@ -52,7 +49,7 @@ Focus on improving a **small set** of subtasks (typically 1-5 subtasks). Look fo
 3. **Too large**: Should be broken into smaller, more focused subtasks
 4. **Missing context**: Need more description to understand the goal
 5. **Status issues**: Subtasks stuck in `progress` that need refinement
-6. **Format problems**: Fix anything that doesn't follow the proper subtask format from `docs/workflows/ticket.md`
+6. **Format problems**: Fix anything that doesn't follow the proper subtask format from `docs/workflows/ticket_v1.md`
 
 ## Step 4: Understand the Subtask Format
 
@@ -60,10 +57,10 @@ Review the subtask format documentation:
 
 ```bash
 # Read the ticket workflow to understand subtask format
-cat docs/workflows/ticket.md
+cat docs/workflows/ticket_v1.md
 ```
 
-Refer to `docs/workflows/ticket.md` for the complete subtask format. Each subtask must have:
+Refer to `docs/workflows/ticket_v1.md` for the complete subtask format. Each subtask must have:
 
 ```markdown
 ## SUBTASK: Small 10 minute task title
@@ -74,7 +71,7 @@ Refer to `docs/workflows/ticket.md` for the complete subtask format. Each subtas
 - status: one of three status values (todo|progress|done)
 ```
 
-**Key principles from `docs/workflows/ticket.md`:**
+**Key principles from `docs/workflows/ticket_v1.md`:**
 - Each subtask should be a small, ~10 minute task
 - Write the test FIRST, then the code (TDD approach)
 - Use only `dialtone.sh` and `git` commands when possible
@@ -113,7 +110,7 @@ Use this checklist:
 - name: <kebab-case-name>
 - description: <single paragraph; include file path(s), function name(s), and exact behavior change>
 - test-description: <single sentence describing the test expectation>
-- test-command: `dialtone.sh test ticket <name> --subtask <name>` (v1) or `dialtest` (v2)
+- test-command: `dialtone.sh test ticket <name> --subtask <name>`
 - status: todo
 ```
 
@@ -152,15 +149,13 @@ After editing, validate the ticket file so another agent can pick it up cleanly:
 
 ```bash
 # Validate the ticket structure and status values
-./dialtone.sh ticket validate     # v1
-./dialtone.sh ticket_v2 validate  # v2
+./dialtone.sh ticket validate
 ```
 
 ## Step 9: Identify Next Steps
-ALWAYS use `ticket next` or `ticket_v2 next` to verify your improved plan and identify the immediate next task. The tool output will provide the current status chart and identifying information for the next subtask.
+ALWAYS use `ticket next` to verify your improved plan and identify the immediate next task. The tool output will provide the current status chart and identifying information for the next subtask.
 ```bash
-./dialtone.sh ticket next     # v1
-./dialtone.sh ticket_v2 next  # v2
+./dialtone.sh ticket next
 ```
 
 
@@ -168,6 +163,6 @@ ALWAYS use `ticket next` or `ticket_v2 next` to verify your improved plan and id
 
 - This is a **planning workflow**—you are improving the plan, not executing it
 - Focus on a **small set** of subtasks (1-5) per improvement session
-- Always refer back to `docs/workflows/ticket.md` for format requirements
+- Always refer back to `docs/workflows/ticket_v1.md` for format requirements
 - Use command examples in `bash` code blocks to keep formatting consistent
 - Ensure subtasks align with the TDD philosophy (test-first approach)
