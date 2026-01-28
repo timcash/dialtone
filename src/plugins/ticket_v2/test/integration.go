@@ -13,6 +13,14 @@ const ticketV2Dir = "src/tickets_v2"
 const testDataDir = "src/plugins/ticket_v2/test"
 
 func main() {
+	// Check git hygiene
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusOutput, _ := statusCmd.Output()
+	if len(strings.TrimSpace(string(statusOutput))) > 0 {
+		fmt.Println("FATAL: Git status is not clean. Please commit or stash changes before running integration tests.")
+		os.Exit(1)
+	}
+
 	initialBranch := getCurrentBranch()
 	fmt.Printf("=== Starting ticket_v2 Granular Integration Tests (Initial Branch: %s) ===\n", initialBranch)
 
