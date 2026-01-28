@@ -47,6 +47,7 @@ func main() {
 	runTest("ticket add", TestAddGranular)
 	runTest("ticket start", TestStartGranular)
 	runTest("ticket ask", TestAskGranular)
+	runTest("ticket log", TestLogGranular)
 	runTest("ticket next", TestNextGranular)
 	runTest("ticket validate", TestValidateGranular)
 	runTest("ticket done", TestDoneGranular)
@@ -93,6 +94,17 @@ func TestAddGranular() error {
 	}
 	if _, err := os.Stat(filepath.Join(ticketV2Dir, name, "test", "test.go")); err != nil {
 		return fmt.Errorf("test/test.go missing")
+	}
+	if _, err := os.Stat(filepath.Join(ticketV2Dir, name, "log.md")); err != nil {
+		return fmt.Errorf("log.md missing")
+	}
+
+	logContent, err := os.ReadFile(filepath.Join(ticketV2Dir, name, "log.md"))
+	if err != nil {
+		return fmt.Errorf("failed to read log.md: %v", err)
+	}
+	if !strings.Contains(string(logContent), "command: ticket add "+name) {
+		return fmt.Errorf("missing command log entry")
 	}
 
 	// Verify NO branch change
@@ -154,22 +166,22 @@ func TestAskGranular() error {
 	exec.Command("git", "checkout", "-b", name).Run()
 	runCmd("./dialtone.sh", "ticket", "add", name)
 
-	questionPath := filepath.Join(ticketV2Dir, name, "question.md")
+	logPath := filepath.Join(ticketV2Dir, name, "log.md")
 
 	output := runCmd("./dialtone.sh", "ticket", "ask", "How do we handle auth?")
 	if !strings.Contains(output, "Captured question in") {
 		return fmt.Errorf("missing capture confirmation")
 	}
-	if _, err := os.Stat(questionPath); err != nil {
-		return fmt.Errorf("question.md missing")
+	if _, err := os.Stat(logPath); err != nil {
+		return fmt.Errorf("log.md missing")
 	}
 
-	content, err := os.ReadFile(questionPath)
+	content, err := os.ReadFile(logPath)
 	if err != nil {
-		return fmt.Errorf("failed to read question.md: %v", err)
+		return fmt.Errorf("failed to read log.md: %v", err)
 	}
-	if !strings.Contains(string(content), "# Questions") {
-		return fmt.Errorf("missing header in question.md")
+	if !strings.Contains(string(content), "# Log") {
+		return fmt.Errorf("missing header in log.md")
 	}
 	if !strings.Contains(string(content), "question: How do we handle auth?") {
 		return fmt.Errorf("missing question entry")
@@ -180,15 +192,52 @@ func TestAskGranular() error {
 		return fmt.Errorf("missing capture confirmation for subtask")
 	}
 
-	content, err = os.ReadFile(questionPath)
+	content, err = os.ReadFile(logPath)
 	if err != nil {
-		return fmt.Errorf("failed to read question.md: %v", err)
+		return fmt.Errorf("failed to read log.md: %v", err)
 	}
 	if !strings.Contains(string(content), "subtask: init") {
 		return fmt.Errorf("missing subtask entry")
 	}
 	if !strings.Contains(string(content), "question: Is init required?") {
 		return fmt.Errorf("missing subtask question")
+	}
+
+	return nil
+}
+
+func TestLogGranular() error {
+	initialBranch := getCurrentBranch()
+	name := getUniqueName("test-log")
+	os.RemoveAll(filepath.Join(ticketV2Dir, name))
+	defer func() {
+		if err := os.RemoveAll(filepath.Join(ticketV2Dir, name)); err != nil {
+			fmt.Printf("WARNING: Failed to cleanup %s: %v\n", name, err)
+		}
+	}()
+	defer exec.Command("git", "branch", "-D", name).Run()
+	defer restoreBranch(initialBranch)
+
+	// Switch to a temporary branch so GetCurrentTicket resolves correctly
+	exec.Command("git", "checkout", "-b", name).Run()
+	runCmd("./dialtone.sh", "ticket", "add", name)
+
+	logPath := filepath.Join(ticketV2Dir, name, "log.md")
+
+	output := runCmd("./dialtone.sh", "ticket", "log", "Adding a note.")
+	if !strings.Contains(output, "Captured log in") {
+		return fmt.Errorf("missing log capture confirmation")
+	}
+	if _, err := os.Stat(logPath); err != nil {
+		return fmt.Errorf("log.md missing")
+	}
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		return fmt.Errorf("failed to read log.md: %v", err)
+	}
+	if !strings.Contains(string(content), "log: Adding a note.") {
+		return fmt.Errorf("missing log entry")
 	}
 
 	return nil

@@ -19,15 +19,20 @@ func RunSubtask(args []string) {
 
 	switch command {
 	case "list":
+		logSubtaskCommand(command, cmdArgs)
 		RunSubtaskList(cmdArgs)
 	case "test":
+		logSubtaskCommand(command, cmdArgs)
 		RunSubtaskTestCmd(cmdArgs)
 	case "done":
+		logSubtaskCommand(command, cmdArgs)
 		RunSubtaskDone(cmdArgs)
 	case "failed":
+		logSubtaskCommand(command, cmdArgs)
 		RunSubtaskFailed(cmdArgs)
 	case "":
 		// If no command provided, print next incomplete
+		logSubtaskCommand(command, cmdArgs)
 		ticket, err := GetCurrentTicket()
 		if err == nil {
 			st := FindNextSubtask(ticket)
@@ -75,6 +80,8 @@ func RunNext(args []string) {
 	if err != nil {
 		logFatal("Error: %v", err)
 	}
+
+	logTicketCommand(ticketID, "next", args)
 
 	st := FindNextSubtask(ticket)
 	if st == nil {
@@ -148,6 +155,7 @@ func RunTest(args []string) {
 		logFatal("Usage: ./dialtone.sh ticket test <ticket-name>")
 	}
 	name := args[0]
+	logTicketCommand(name, "test", args)
 	logInfo("Testing all subtasks for %s...", name)
 	err := runDynamicTest(name, "")
 	if err != nil {
@@ -222,4 +230,22 @@ func RunSubtaskFailed(args []string) {
 	if commitOutput, err := commitCmd.CombinedOutput(); err != nil {
 		logFatal("Git commit failed: %v\nOutput: %s", err, string(commitOutput))
 	}
+}
+
+func logSubtaskCommand(command string, args []string) {
+	ticketID := ""
+	if len(args) > 0 {
+		ticketID = args[0]
+	} else if ticket, err := GetCurrentTicket(); err == nil {
+		ticketID = ticket.ID
+	}
+	if ticketID == "" {
+		return
+	}
+
+	subArgs := args
+	if command != "" {
+		subArgs = append([]string{command}, args...)
+	}
+	logTicketCommand(ticketID, "subtask", subArgs)
 }
