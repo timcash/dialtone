@@ -47,6 +47,7 @@ Use these commands to manage all subtask work
 # Updates subtask status in ticket.md to 'done' or 'failed'.
 # Enforces git cleanliness.
 ./dialtone.sh ticket subtask done [<ticket-name>] <subtask-name>
+
 # To mark a subtask as failed
 ./dialtone.sh ticket subtask failed [<ticket-name>] <subtask-name>
 ```
@@ -60,6 +61,18 @@ Use this format whenever you create a new ticket. This structure is the source o
 
 # Goal
 Implement the primary business logic for the fake feature.
+
+## SUBTASK: start ticket work via `dialtone.sh` cli
+- name: ticket-start
+- tags: setup
+- dependencies: 
+- description: run the cli command `dialtone.sh ticket start <ticket-name>`
+- test-condition-1: verify ticket is scaffolded
+- test-condition-2: verify branch created
+- agent-notes: 
+- pass-timestamp: 
+- fail-timestamp: 
+- status: todo
 
 ## SUBTASK: Authenticate
 - name: authenticate
@@ -95,6 +108,18 @@ Implement the primary business logic for the fake feature.
 - agent-notes:
 - pass-timestamp: 
 - fail-timestamp: 2026-01-27T16:14:42-08:00
+- status: todo
+
+## SUBTASK: complete ticket via `dialtone.sh` cli
+- name: ticket-done
+- tags: cleanup
+- dependencies: <last-subtask-name>
+- description: run the ticket cli to verify all steps to complete the ticket
+- test-condition-1: validates all ticket subtasks are done
+- test-condition-2: verifies git status is clean
+- agent-notes: 
+- pass-timestamp: 
+- fail-timestamp: 
 - status: todo
 ```
 
