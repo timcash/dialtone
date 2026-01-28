@@ -1,32 +1,47 @@
 # Progress: ticket_v2 Plugin Implementation
 
-## Ticket CLI
-- [/] ticket_v2 add [<ticket-name>] (Tested)
-- [/] ticket_v2 start <ticket-name> (Tested)
-- [/] ticket_v2 test [<ticket-name>] (Tested)
-- [/] ticket_v2 next (Tested)
-- [/] ticket_v2 list (Tested)
-- [/] ticket_v2 validate [<ticket-name>] (Tested)
-- [/] ticket_v2 done [<ticket-name>] (Tested)
+## ticket_v2 start <name>
+- [x] Checks if branch exists
+- [x] Creates and switches to branch
+- [x] Scaffolds src/tickets_v2/<name>/ with ticket.md
+- [x] Scaffolds src/tickets_v2/<name>/test/test.go
+- [x] Performs initial commit: "chore: start ticket <name>"
+- [x] Pushes branch: git push -u origin <name>
+- [x] Creates Draft Pull Request: gh pr create --draft
 
-## Subtask CLI
-- [/] ticket_v2 subtask list [<ticket-name>] (Tested)
-- [ ] ticket_v2 subtask (Implicit in report output)
-- [/] ticket_v2 subtask test [<ticket-name>] <subtask-name> (Tested)
-- [/] ticket_v2 subtask done [<ticket-name>] <subtask-name> (Tested)
-- [/] ticket_v2 subtask failed [<ticket-name>] <subtask-name> (Tested)
+## ticket_v2 next
+- [x] Validation: Ensures all SUBTASK fields are present
+- [x] Dependency Check: Verifies dependencies meet 'done' status
+- [x] Test Execution: Dispatches to dialtest registry
+- [x] State Transition (Pass): Updates status: done and records pass-timestamp
+- [x] State Transition (Pass): Performs auto-commit
+- [x] State Transition (Fail): Updates fail-timestamp and records agent-notes
+- [x] Auto-Promotion: Promotes first eligible 'todo' to 'progress'
 
-## Internal Logic & Validation
-- [x] Markdown Parser (REGEX/Scanner based)
-- [x] Dependency Check (done/skipped status required)
-- [x] State Transitions (todo -> progress -> done/fail)
-- [x] Timestamp Generation (RFC3339)
-- [x] Timestamp Regression Check (fail-timestamp > pass-timestamp = fail)
-- [x] Dynamic Execution Bridge (scratch main.go + Blank Import)
-- [x] Standardized Report Output
+## ticket_v2 done
+- [x] Final Audit: Ensures all tasks are done or failed
+- [x] Git Hygiene: Verifies git status is clean
+- [x] Final Push: Performs final git push
+- [x] PR Finalization: Marks PR as ready (gh pr ready)
+- [x] Context Reset: Switches back to main branch
 
-## Documentation
-- [x] README.md update
-- [x] ticket_v2.md updated with regression rules
-- [x] Final Walkthrough
-- [/] Verification: Git Branching & GitHub Draft/Ready PR (In Progress)
+## ticket_v2 add <name>
+- [x] Creates src/tickets_v2/<name>/ directory
+- [x] Scaffolds ticket.md and test/test.go
+- [x] Does not switch current git branch
+
+## ticket_v2 validate <name>
+- [x] Structural validation (headers, fields)
+- [x] Status value validation
+- [x] Regression Check: fail-timestamp > pass-timestamp detection
+
+## Subtask Commands
+- [x] subtask list: Standardized report format
+- [x] subtask: Prints next incomplete subtask
+- [x] subtask test: Runs specific subtask test
+- [x] subtask done: Updates status and pass-timestamp
+- [x] subtask done: Enforces git cleanliness
+- [x] subtask done: Performs auto-commit
+- [x] subtask failed: Updates status and fail-timestamp
+- [x] subtask failed: Enforces git cleanliness
+- [x] subtask failed: Performs auto-commit

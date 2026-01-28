@@ -2,31 +2,32 @@ package cli
 
 import (
 	"fmt"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
 func RunSubtask(args []string) {
 	if len(args) < 1 {
-		fmt.Println("Usage: ./dialtone.sh ticket_v2 subtask <command> [args]")
+		logInfo("Usage: ./dialtone.sh ticket_v2 subtask <command> [args]")
 		return
 	}
-	subcommand := args[0]
-	subArgs := args[1:]
 
-	switch subcommand {
+	command := args[0]
+	cmdArgs := args[1:]
+
+	switch command {
 	case "list":
-		RunSubtaskList(subArgs)
-	case "next":
-		RunNext(subArgs)
+		RunSubtaskList(cmdArgs)
 	case "test":
-		RunSubtaskTest(subArgs)
+		RunSubtaskTestCmd(cmdArgs)
 	case "done":
-		RunSubtaskDone(subArgs)
+		RunSubtaskDone(cmdArgs)
 	case "failed":
-		RunSubtaskFailed(subArgs)
+		RunSubtaskFailed(cmdArgs)
 	default:
-		fmt.Printf("Unknown subtask command: %s\n", subcommand)
+		logInfo("Unknown subtask command: %s", command)
 	}
 }
 
@@ -98,6 +99,10 @@ func RunNext(args []string) {
 		st.PassTimestamp = time.Now().Format(time.RFC3339)
 		WriteTicketMd(filepath.Join("src", "tickets_v2", ticketID, "ticket.md"), ticket)
 		
+		// Auto-commit on Pass
+		exec.Command("git", "add", filepath.Join("src", "tickets_v2", ticketID, "ticket.md")).Run()
+		exec.Command("git", "commit", "-m", fmt.Sprintf("docs: subtask %s passed", st.Name)).Run()
+
 		// Recurse to next task with same ID
 		RunNext([]string{ticketID})
 	} else {
@@ -109,7 +114,7 @@ func RunNext(args []string) {
 	}
 }
 
-func RunSubtaskTest(args []string) {
+func RunSubtaskTestCmd(args []string) {
 	if len(args) < 2 {
 		logFatal("Usage: ./dialtone.sh ticket_v2 subtask test <ticket-name> <subtask-name>")
 	}
@@ -128,7 +133,6 @@ func RunTest(args []string) {
 	}
 	name := args[0]
 	logInfo("Testing all subtasks for %s...", name)
-	// For simplicity, this demo runs dynamic runner which runs all registered tests
 	err := runDynamicTest(name, "")
 	if err != nil {
 		logFatal("Tests failed: %v", err)
@@ -142,6 +146,14 @@ func RunSubtaskDone(args []string) {
 	}
 	name := args[0]
 	subtask := args[1]
+
+	// Check git hygiene
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusOutput, _ := statusCmd.Output()
+	if len(strings.TrimSpace(string(statusOutput))) > 0 {
+		logFatal("Git status is not clean. Please commit or stash changes before running 'subtask done'.")
+	}
+
 	ticket, _ := ParseTicketMd(filepath.Join("src", "tickets_v2", name, "ticket.md"))
 	for i := range ticket.Subtasks {
 		if ticket.Subtasks[i].Name == subtask {
@@ -149,7 +161,11 @@ func RunSubtaskDone(args []string) {
 			ticket.Subtasks[i].PassTimestamp = time.Now().Format(time.RFC3339)
 		}
 	}
-	WriteTicketMd(filepath.Join("src", "tickets_v2", name, "ticket.md"), ticket)
+	ticketPath := filepath.Join("src", "tickets_v2", name, "ticket.md")
+	WriteTicketMd(ticketPath, ticket)
+
+	exec.Command("git", "add", ticketPath).Run()
+	exec.Command("git", "commit", "-m", fmt.Sprintf("docs: subtask %s done", subtask)).Run()
 }
 
 func RunSubtaskFailed(args []string) {
@@ -158,6 +174,14 @@ func RunSubtaskFailed(args []string) {
 	}
 	name := args[0]
 	subtask := args[1]
+
+	// Check git hygiene
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusOutput, _ := statusCmd.Output()
+	if len(strings.TrimSpace(string(statusOutput))) > 0 {
+		logFatal("Git status is not clean. Please commit or stash changes before running 'subtask failed'.")
+	}
+
 	ticket, _ := ParseTicketMd(filepath.Join("src", "tickets_v2", name, "ticket.md"))
 	for i := range ticket.Subtasks {
 		if ticket.Subtasks[i].Name == subtask {
@@ -165,5 +189,9 @@ func RunSubtaskFailed(args []string) {
 			ticket.Subtasks[i].FailTimestamp = time.Now().Format(time.RFC3339)
 		}
 	}
-	WriteTicketMd(filepath.Join("src", "tickets_v2", name, "ticket.md"), ticket)
+	ticketPath := filepath.Join("src", "tickets_v2", name, "ticket.md")
+	WriteTicketMd(ticketPath, ticket)
+
+	exec.Command("git", "add", ticketPath).Run()
+	exec.Command("git", "commit", "-m", fmt.Sprintf("docs: subtask %s failed", subtask)).Run()
 }
