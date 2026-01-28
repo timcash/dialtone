@@ -1,6 +1,6 @@
-# Verification Audit: ticket_v2
+# Verification Audit: ticket
 
-This document audits the `ticket_v2` implementation against the specifications in `ticket_v2.md`.
+This document audits the `ticket` implementation against the specifications in `ticket.md`.
 
 ## Command Verification
 

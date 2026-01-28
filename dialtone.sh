@@ -19,8 +19,7 @@ Commands:
   logs          Tail remote logs
   diagnostic    Run system diagnostics (local or remote)
   branch <name>      Create or checkout a feature branch
-  ticket <subcmd>    Manage GitHub tickets (start, done, subtask, etc.)
-  ticket_v2 <subcmd> Manage GitHub tickets V2 (start, next, done, etc.)
+  ticket <subcmd>    Manage GitHub tickets (start, next, done, etc.)
   plugin <subcmd>    Manage plugins (add, install, build)
   ide <subcmd>       IDE tools (setup-workflows)
   github <subcmd>    Manage GitHub interactions (pr, check-deploy)

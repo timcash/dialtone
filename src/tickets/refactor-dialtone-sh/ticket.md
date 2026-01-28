@@ -6,37 +6,62 @@ Refactor `dialtone.sh` to provide a help menu by default and only install Go whe
 
 ## SUBTASK: start ticket work via `dialtone.sh` cli
 - name: ticket-start
+- tags: cli
+- dependencies: 
 - description: run the cli command `dialtone.sh ticket start refactor-dialtone-sh`
-- test-description: verify ticket is scaffolded and branch created
-- test-command: `./dialtone.sh ticket start refactor-dialtone-sh`
+- test-condition-1: verify ticket is scaffolded
+- test-condition-2: verify branch created
+- agent-notes:
+- pass-timestamp: 
+- fail-timestamp: 
 - status: done
 
 ## SUBTASK: extract help menu to shell function
 - name: extract-help-menu
+- tags: shell
+- dependencies: ticket-start
 - description: Move the help message from the Go program into a `print_help` function in `dialtone.sh`.
-- test-description: Run `./dialtone.sh` and verify the help menu appears.
-- test-command: `./dialtone.sh | grep "Usage: ./dialtone.sh"`
+- test-condition-1: Run `./dialtone.sh` and verify the help menu appears.
+- test-condition-2: regex check for Usage string
+- agent-notes:
+- pass-timestamp: 
+- fail-timestamp: 
 - status: done
 
 ## SUBTASK: implement conditional go installation
 - name: implement-conditional-install
+- tags: logic
+- dependencies: extract-help-menu
 - description: Modify the script to only perform the Go installation logic if the first argument is `install`.
-- test-description: Run a non-install command with a fake env and ensure it doesn't try to download Go.
-- test-command: `./dialtone.sh build --env=/tmp/fake_env 2>&1 | grep "Installing..."` (Should not find)
+- test-condition-1: Run a non-install command with a fake env and ensure it doesn't try to download Go.
+- test-condition-2: check for absence of "Installing..." string
+- agent-notes:
+- pass-timestamp: 
+- fail-timestamp: 
 - status: done
 
 ## SUBTASK: implement go existence check
 - name: implement-go-existence-check
+- tags: logic
+- dependencies: implement-conditional-install
 - description: For non-install commands, check if Go exists in the environment path and error if missing.
-- test-description: Run `./dialtone.sh build --env=/tmp/fake_env` and verify the error message.
-- test-command: `./dialtone.sh build --env=/tmp/fake_env 2>&1 | grep "Error: Go not found"`
+- test-condition-1: Run `./dialtone.sh build --env=/tmp/fake_env` and verify the error message.
+- test-condition-2: check for "Error: Go not found"
+- agent-notes:
+- pass-timestamp: 
+- fail-timestamp: 
 - status: done
 
 ## SUBTASK: complete ticket via `dialtone.sh` cli
 - name: ticket-done
+- tags: cli
+- dependencies: implement-go-existence-check
 - description: run the ticket cli to verify all steps to complete the ticket
-- test-description: validates all ticket subtasks are done
-- test-command: `./dialtone.sh ticket done refactor-dialtone-sh`
+- test-condition-1: validates all ticket subtasks are done
+- test-condition-2: verifies git status clean
+- agent-notes:
+- pass-timestamp: 
+- fail-timestamp: 
 - status: done
 
 ## Collaborative Notes

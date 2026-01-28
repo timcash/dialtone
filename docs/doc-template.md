@@ -13,7 +13,7 @@ tickets/
 
 Standardized (v2) structure:
 ```shell
-src/tickets_v2/
+src/tickets/
 ├── fake-ticket/
 │   ├── ticket.md
 │   └── test/
@@ -24,7 +24,7 @@ src/tickets_v2/
 Ticket API examples:
 ```shell
 ./dialtone.sh ticket help      # print legacy help
-./dialtone.sh ticket_v2 help   # print v2 help
-./dialtone.sh ticket_v2 next   # TDD drive for v2
-./dialtone.sh ticket_v2 done   # Complete v2 ticket
+./dialtone.sh ticket help   # print v2 help
+./dialtone.sh ticket next   # TDD drive for v2
+./dialtone.sh ticket done   # Complete v2 ticket
 ```

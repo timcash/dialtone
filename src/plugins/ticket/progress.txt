@@ -1,0 +1,32 @@
+# Progress: ticket Plugin Implementation
+
+## Ticket CLI
+- [/] ticket add [<ticket-name>] (Tested)
+- [/] ticket start <ticket-name> (Tested)
+- [/] ticket test [<ticket-name>] (Tested)
+- [/] ticket next (Tested)
+- [/] ticket list (Tested)
+- [/] ticket validate [<ticket-name>] (Tested)
+- [/] ticket done [<ticket-name>] (Tested)
+
+## Subtask CLI
+- [/] ticket subtask list [<ticket-name>] (Tested)
+- [ ] ticket subtask (Implicit in report output)
+- [/] ticket subtask test [<ticket-name>] <subtask-name> (Tested)
+- [/] ticket subtask done [<ticket-name>] <subtask-name> (Tested)
+- [/] ticket subtask failed [<ticket-name>] <subtask-name> (Tested)
+
+## Internal Logic & Validation
+- [x] Markdown Parser (REGEX/Scanner based)
+- [x] Dependency Check (done/skipped status required)
+- [x] State Transitions (todo -> progress -> done/fail)
+- [x] Timestamp Generation (RFC3339)
+- [x] Timestamp Regression Check (fail-timestamp > pass-timestamp = fail)
+- [x] Dynamic Execution Bridge (scratch main.go + Blank Import)
+- [x] Standardized Report Output
+
+## Documentation
+- [x] README.md update
+- [x] ticket.md updated with regression rules
+- [x] Final Walkthrough
+- [/] Verification: Git Branching & GitHub Draft/Ready PR (In Progress)
