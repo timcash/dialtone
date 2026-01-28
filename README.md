@@ -209,7 +209,6 @@ For tickets created via `./dialtone.sh ticket start <ticket-name>`:
 ```
 tickets/<ticket-name>/
 ├── ticket.md          # Requirement doc (from template)
-├── task.md            # Scratchpad for tracking progress
 ├── code/              # Local code playground
 └── test/              # Ticket-specific verification tests
 ```
