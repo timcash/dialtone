@@ -1,15 +1,17 @@
 package test
-
 import (
 	"dialtone/cli/src/dialtest"
+	"fmt"
 )
-
 func init() {
-	dialtest.RegisterTicket("%s")
-	dialtest.AddSubtaskTest("example-subtask", RunExample, []string{"example"})
+	dialtest.RegisterTicket("walkthrough-live-demo")
+	dialtest.AddSubtaskTest("logic-impl", RunLogicTest, nil)
+	dialtest.AddSubtaskTest("integration-task", RunIntegrationTest, nil)
 }
-
-func RunExample() error {
+func RunLogicTest() error {
+	fmt.Println("Running logic test (FIXED)...")
 	return nil
 }
-%!(EXTRA string=walkthrough-live-demo)
+func RunIntegrationTest() error {
+	return nil
+}
