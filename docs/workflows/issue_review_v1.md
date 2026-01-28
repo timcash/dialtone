@@ -1,20 +1,19 @@
 ---
 trigger: model_decision
-description: github issue triage workflow for LLM agents
+description: github issue triage workflow for LLM agents (v1 specific)
 ---
 
-# Workflow: Issue Review & Ticket Preparation
+# Workflow: Issue Review & Ticket Preparation (v1)
 
 > [!IMPORTANT]
 > This is a **planning and question** workflow designed to triage and prepare issues. It is **NOT** an execution workflow. Do **NOT** write implementation code while following this process.
 
-This is the **Source of Truth** for the Dialtone Issue Management API.
+This is the **Source of Truth** for the Dialtone Issue Management API (v1).
 
 ## 1. CLI API Reference
 ```bash
 # The primary driver for TDD. Validates, runs tests, and manages subtask state.
-./dialtone.sh ticket next     # v1
-./dialtone.sh ticket_v2 next  # v2
+./dialtone.sh ticket next
 
 # List open issues in a clean, agent-readable markdown table.
 ./dialtone.sh github issue list --markdown
@@ -72,13 +71,11 @@ If the goal is ambiguous or technical blockers exist, request clarification.
 If requirements are clear but lack subtasks, scaffold or edit a local ticket.
 ```bash
 # 1. Scaffold or update local ticket.
-./dialtone.sh ticket add <name>     # v1
-./dialtone.sh ticket_v2 add <name>  # v2
+./dialtone.sh ticket add <name>
 
 # 2. Populate the ticket (see Section 3: The "Ticket" Standard).
 # 3. Validate the ticket format.
-./dialtone.sh ticket validate <name>      # v1
-./dialtone.sh ticket_v2 validate <name>   # v2
+./dialtone.sh ticket validate <name>
 
 # 4. Mark the GitHub issue as 'ready' and 'ticket' using the shortcuts.
 ./dialtone.sh github issue <id> --ready --ticket
@@ -111,10 +108,9 @@ An issue is **Ticket Ready** ONLY when a local `ticket.md` meets these criteria:
 ```
 
 ## 5. Identify Next Steps
-ALWAYS use `ticket next` or `ticket_v2 next` to verify your plan and identify the immediate next task. The tool output will provide the current status chart and identifying information for the next subtask.
+ALWAYS use `ticket next` to verify your plan and identify the immediate next task. The tool output will provide the current status chart and identifying information for the next subtask.
 ```bash
-./dialtone.sh ticket next     # v1
-./dialtone.sh ticket_v2 next  # v2
+./dialtone.sh ticket next
 ```
 
 
@@ -153,7 +149,7 @@ Here is how Issue #104 ("improve the install plugin") is bridged from a GitHub G
 - **Core Goal**: research improve the install plugin to have dev and production install paths for each plugin
 
 == START EXAMPLE TICKET ==
-### Dialtone Ticket (`tickets/<name>/ticket.md` or `src/tickets_v2/<name>/ticket.md`)
+### Dialtone Ticket (`tickets/<name>/ticket.md`)
 ```markdown
 # Branch: improve-install-plugin
 # Tags: p0, ready, install-system
