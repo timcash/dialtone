@@ -78,10 +78,10 @@ func dependenciesMet(ticket *Ticket, st *Subtask) bool {
 
 // Helpers for consistent logging
 func logInfo(format string, a ...interface{}) {
-	fmt.Printf("[ticket_v2] "+format+"\n", a...)
+	fmt.Printf("[ticket] "+format+"\n", a...)
 }
 
 func logFatal(format string, a ...interface{}) {
-	fmt.Printf("[ticket_v2] FATAL: "+format+"\n", a...)
+	fmt.Printf("[ticket] FATAL: "+format+"\n", a...)
 	os.Exit(1)
 }

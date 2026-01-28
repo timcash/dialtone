@@ -10,10 +10,15 @@ When working on a ticket, always do each subtask one at a time. Subtasks use thi
 ```markdown
 ## SUBTASK: Small 10 minute task title
 - name: name-with-only-lowercase-and-dashes
+- tags: comma, separated, tags
+- dependencies: previous-subtask-name
 - description: a single paragraph that guides the LLM to take a small testable step
-- test-description: a suggestion that the LLM can use on how to test this change works
-- test-command: the actual command to run the test in `dialtone.sh <test-command>` format
-- status: one of three status values (todo|progress|done)
+- test-condition-1: a clear condition that must be met
+- test-condition-2: another clear condition that must be met
+- agent-notes: any notes about implementation or blockers
+- pass-timestamp: ISO8601 timestamp on pass
+- fail-timestamp: ISO8601 timestamp on fail
+- status: one of four status values (todo|progress|done|failed)
 ```
 
 # Example

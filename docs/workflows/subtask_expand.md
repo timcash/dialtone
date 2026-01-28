@@ -14,13 +14,13 @@ First, determine which ticket you're working with:
 
 ```bash
 # Get the current ticket name
-./dialtone.sh ticket_v2 name
+./dialtone.sh ticket name
 
 # Print the full ticket content
-./dialtone.sh ticket_v2 print
+./dialtone.sh ticket print
 ```
 
-The ticket will be located at `src/tickets_v2/<ticket-name>/ticket.md`.
+The ticket will be located at `src/tickets/<ticket-name>/ticket.md`.
 
 ## Step 2: Review the Ticket Context
 
@@ -31,16 +31,16 @@ Read the ticket file to understand:
 
 ```bash
 # Print the full ticket content to review
-./dialtone.sh ticket_v2 print
+./dialtone.sh ticket print
 ```
 
 ## Step 3: Identify Subtasks That Need Improvement
 
-First, use `ticket_v2 next` to see the current status and identifies the immediate next task:
+First, use `ticket next` to see the current status and identifies the immediate next task:
 
 ```bash
 # Check the current status and find the next task
-./dialtone.sh ticket_v2 next
+./dialtone.sh ticket next
 ```
 
 Focus on improving a **small set** of subtasks (typically 1-5 subtasks). Look for subtasks that:
@@ -50,7 +50,7 @@ Focus on improving a **small set** of subtasks (typically 1-5 subtasks). Look fo
 3. **Too large**: Should be broken into smaller, more focused subtasks
 4. **Missing context**: Need more description to understand the goal
 5. **Status issues**: Subtasks stuck in `progress` that need refinement
-6. **Format problems**: Fix anything that doesn't follow the proper subtask format from `docs/workflows/ticket_v2.md`
+6. **Format problems**: Fix anything that doesn't follow the proper subtask format from `docs/workflows/ticket.md`
 
 ## Step 4: Understand the Subtask Format
 
@@ -58,10 +58,10 @@ Review the subtask format documentation:
 
 ```bash
 # Read the ticket workflow to understand subtask format
-cat docs/workflows/ticket_v2.md
+cat docs/workflows/ticket.md
 ```
 
-Refer to `docs/workflows/ticket_v2.md` for the complete subtask format. Each subtask must have:
+Refer to `docs/workflows/ticket.md` for the complete subtask format. Each subtask must have:
 
 ```markdown
 ## SUBTASK: Small 10 minute task title
@@ -72,11 +72,11 @@ Refer to `docs/workflows/ticket_v2.md` for the complete subtask format. Each sub
 - status: one of three status values (todo|progress|done)
 ```
 
-**Key principles from `docs/workflows/ticket_v2.md`:**
+**Key principles from `docs/workflows/ticket.md`:**
 - Each subtask should be a small, ~10 minute task
 - Write the test FIRST, then the code (TDD approach)
 - Use only `dialtone.sh` and `git` commands when possible
-- Use `dialtone.sh ticket_v2 next` as your primary TDD execution loop
+- Use `dialtone.sh ticket next` as your primary TDD execution loop
 - Tests are the most important concept in dialtone
 
 ## Step 5: Write Strong Subtasks (LLM-Focused)
@@ -111,13 +111,13 @@ Use this checklist:
 - name: <kebab-case-name>
 - description: <single paragraph; include file path(s), function name(s), and exact behavior change>
 - test-description: <single sentence describing the test expectation>
-- test-command: `dialtone.sh test ticket_v2 <name> --subtask <name>`
+- test-command: `dialtone.sh test ticket <name> --subtask <name>`
 - status: todo
 ```
 
 ## Step 7: Improve Selected Subtasks
 
-Edit `src/tickets_v2/<ticket-name>/ticket.md` directly to update the improved subtasks. Make sure to:
+Edit `src/tickets/<ticket-name>/ticket.md` directly to update the improved subtasks. Make sure to:
 - Preserve the overall ticket structure
 - Keep other subtasks unchanged (unless they also need improvement)
 - Maintain proper markdown formatting
@@ -138,9 +138,9 @@ Edit `src/tickets_v2/<ticket-name>/ticket.md` directly to update the improved su
 ```markdown
 ## SUBTASK: Add error handling to camera initialization in camera_linux.go
 - name: add-camera-init-error-handling
-- description: Update the `InitCamera` function in `src/tickets_v2/camera/app/camera_linux.go` to handle V4L2 device open failures. Return a descriptive error if the device path doesn't exist or cannot be opened. Check for device permissions and provide helpful error messages that guide troubleshooting.
+- description: Update the `InitCamera` function in `src/tickets/camera/app/camera_linux.go` to handle V4L2 device open failures. Return a descriptive error if the device path doesn't exist or cannot be opened. Check for device permissions and provide helpful error messages that guide troubleshooting.
 - test-description: Run the test and verify that attempting to initialize a camera with an invalid device path returns a clear error message. The test should check that the error includes the device path and suggests checking permissions or device existence.
-- test-command: `dialtone.sh test ticket_v2 camera-improvements --subtask add-camera-init-error-handling`
+- test-command: `dialtone.sh test ticket camera-improvements --subtask add-camera-init-error-handling`
 - status: todo
 ```
 
@@ -150,13 +150,13 @@ After editing, validate the ticket file so another agent can pick it up cleanly:
 
 ```bash
 # Validate the ticket structure and status values
-./dialtone.sh ticket_v2 validate
+./dialtone.sh ticket validate
 ```
 
 ## Step 9: Identify Next Steps
-ALWAYS use `ticket_v2 next` to verify your improved plan and identify the immediate next task. The tool output will provide the current status chart and identifying information for the next subtask.
+ALWAYS use `ticket next` to verify your improved plan and identify the immediate next task. The tool output will provide the current status chart and identifying information for the next subtask.
 ```bash
-./dialtone.sh ticket_v2 next
+./dialtone.sh ticket next
 ```
 
 
@@ -164,6 +164,6 @@ ALWAYS use `ticket_v2 next` to verify your improved plan and identify the immedi
 
 - This is a **planning workflow**—you are improving the plan, not executing it
 - Focus on a **small set** of subtasks (1-5) per improvement session
-- Always refer back to `docs/workflows/ticket_v2.md` for format requirements
+- Always refer back to `docs/workflows/ticket.md` for format requirements
 - Use command examples in `bash` code blocks to keep formatting consistent
 - Ensure subtasks align with the TDD philosophy (test-first approach)

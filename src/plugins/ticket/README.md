@@ -1,4 +1,4 @@
-# Ticket System v2
+# Ticket System
 - `dialtone` is driven by a core loop of testing and adaptation
 - Use tickets and subtasks to document and validate all work
 - This process is designed to automate asynchronous work
@@ -10,25 +10,25 @@ Use these commands to manage all ticket work
 # Scaffolds a new local ticket directory. 
 # Does not switch branches.
 # Ideal for logging side-tasks while continuing work on current tasks.
-./dialtone.sh ticket_v2 add [<ticket-name>]
+./dialtone.sh ticket add [<ticket-name>]
 
 # The primary entry point for new work. Switches branch, scaffolds, and opens PR.
-./dialtone.sh ticket_v2 start <ticket-name>
+./dialtone.sh ticket start <ticket-name>
 
 # Tests all subtasks in the ticket
-./dialtone.sh ticket_v2 test [<ticket-name>]
+./dialtone.sh ticket test [<ticket-name>]
 
 # The primary driver for TDD. Validates, runs tests, and manages subtask state.
-./dialtone.sh ticket_v2 next
+./dialtone.sh ticket next
 
 # Lists local tickets and open remote GitHub issues.
-./dialtone.sh ticket_v2 list
+./dialtone.sh ticket list
 
 # Validates the structure and status values of the ticket.md file.
-./dialtone.sh ticket_v2 validate [<ticket-name>]
+./dialtone.sh ticket validate [<ticket-name>]
 
 # Final step: verifies subtasks, pushes code, and sets PR to ready.
-./dialtone.sh ticket_v2 done [<ticket-name>]
+./dialtone.sh ticket done [<ticket-name>]
 ```
 
 
@@ -36,23 +36,23 @@ Use these commands to manage all ticket work
 Use these commands to manage all subtask work
 ```bash
 # Lists all subtasks and their current status (todo, progress, done, failed).
-./dialtone.sh ticket_v2 subtask list [<ticket-name>]
+./dialtone.sh ticket subtask list [<ticket-name>]
 
 # Print the next incomplete subtask
-./dialtone.sh ticket_v2 subtask
+./dialtone.sh ticket subtask
 
 # Runs the automated test-command defined for the specified subtask.
-./dialtone.sh ticket_v2 subtask test [<ticket-name>] <subtask-name>
+./dialtone.sh ticket subtask test [<ticket-name>] <subtask-name>
 
 # Updates subtask status in ticket.md to 'done' or 'failed'.
 # Enforces git cleanliness.
-./dialtone.sh ticket_v2 subtask done [<ticket-name>] <subtask-name>
+./dialtone.sh ticket subtask done [<ticket-name>] <subtask-name>
 # To mark a subtask as failed
-./dialtone.sh ticket_v2 subtask failed [<ticket-name>] <subtask-name>
+./dialtone.sh ticket subtask failed [<ticket-name>] <subtask-name>
 ```
 
 
-## Ticket_v2 Markdown Format
+## Ticket Markdown Format
 Use this format whenever you create a new ticket. This structure is the source of truth for the automated state machine.
 ```markdown
 # Name: fake-ticket
@@ -160,36 +160,36 @@ var ExampleTicket = Ticket{
 
 # Implementation Command Details
 
-## `./dialtone.sh ticket_v2 start <name>`
+## `./dialtone.sh ticket start <name>`
 1. Checks if a branch named `<name>` exists via `git branch --list`.
 2. Creates and switches to the branch if it doesn't exist (`git checkout -b <name>`).
-3. Scaffolds the `src/tickets_v2/<ticket-name>/` directory with `ticket.md` (populated from a template) and `src/tickets_v2/<ticket-name>/test/test.go`.
+3. Scaffolds the `src/tickets/<ticket-name>/` directory with `ticket.md` (populated from a template) and `src/tickets/<ticket-name>/test/test.go`.
 4. Performs an initial commit: `git add . && git commit -m "chore: start ticket <name>"`.
 5. Pushes the branch: `git push -u origin <name>`.
 6. Creates a **Draft Pull Request** on GitHub using the `gh pr create` CLI or internal GitHub plugin.
 
-## `./dialtone.sh ticket_v2 next`
+## `./dialtone.sh ticket next`
 1. **Validation**: Parses `ticket.md` using a regex or markdown parser to ensure all `SUBTASK` fields are present.
 2. **Dependency Check**: For the next `todo` subtask, verifies that all listed `dependencies` match subtasks with `status: done`.
-3. **Test Execution**: Identifies the subtask in `progress`. Dispatches to the `dialtest` registry in `src/tickets_v2/<ticket-name>/test/test.go` to run the specific function registered for that subtask name.
+3. **Test Execution**: Identifies the subtask in `progress`. Dispatches to the `dialtest` registry in `src/tickets/<ticket-name>/test/test.go` to run the specific function registered for that subtask name.
 4. **State Transition**:
    - **Pass**: Updates `status: done` in `ticket.md`, records `pass-timestamp` (current ISO8601), and auto-commits the change.
    - **Fail**: Updates `fail-timestamp` and stays in `progress`, prompting the agent to review `agent-notes`.
 5. **Auto-Promotion**: If no task is in `progress`, it marks the first eligible `todo` (dependencies met) as `progress`.
 
-## `./dialtone.sh ticket_v2 done`
+## `./dialtone.sh ticket done`
 1. **Final Audit**: Scans `ticket.md` to ensure all subtasks except `ticket-done` are `done` or `failed`.
 2. **Git Hygiene**: Verifies `git status` is clean. Performs a final `git push`.
 3. **PR Finalization**: Updates the GitHub Pull Request status from "Draft" to "Ready for Review".
 4. **Context Reset**: Switches the local git branch back to `main`.
 
-## `./dialtone.sh ticket_v2 add <ticket-name>`
-1. Creates the `src/tickets_v2/<ticket-name>/` directory without changing the current git branch.
-2. Scaffolds the basic `ticket.md` and `src/tickets_v2/<ticket-name>/test/test.go` files.
+## `./dialtone.sh ticket add <ticket-name>`
+1. Creates the `src/tickets/<ticket-name>/` directory without changing the current git branch.
+2. Scaffolds the basic `ticket.md` and `src/tickets/<ticket-name>/test/test.go` files.
 3. This is a "side-car" command to capture ideas or bugs without interrupting the primary feature flow.
 
 # Automated Report Format
-Both `ticket_v2 next` and `ticket_v2 done` output a standardized report to provide the agent with immediate context on the ticket's progress and next steps.
+Both `ticket next` and `ticket done` output a standardized report to provide the agent with immediate context on the ticket's progress and next steps.
 
 ```shell
 Subtasks for fake-ticket:
@@ -213,7 +213,7 @@ Status:          prog
 
 
 # Ticket Test Folder
-The ticket test file is used as an index for all its test commands. It is found at `src/tickets_v2/<ticket-name>/test/test.go` and registers logic for the `ticket_v2 next` command to consume.
+The ticket test file is used as an index for all its test commands. It is found at `src/tickets/<ticket-name>/test/test.go` and registers logic for the `ticket next` command to consume.
 
 ```golang
 import (
@@ -252,5 +252,5 @@ func FinalPolish() error {
 
 # `dialtest` the dialtone testing library
 1. `dialtest.AddSubtaskTest` maps a subtask name (from `ticket.md`) to a Go function execution.
-2. The `ticket_v2 next` command uses an internal registry to find these mappings and execute them during the TDD loop.
+2. The `ticket next` command uses an internal registry to find these mappings and execute them during the TDD loop.
 3. Test functions should return an `error`. A `nil` return signifies a PASS.

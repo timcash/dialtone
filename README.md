@@ -62,18 +62,18 @@ mv -n .env.example .env # Only if .env does not exists
 
 
 ## Ticket Lifecycle
-Use the `ticket_v2` command for new work. It enforces TDD and standardized markdown schemas.
+Use the `ticket` command for new work. It enforces TDD and standardized markdown schemas.
 ```bash
-./dialtone.sh ticket_v2 add <ticket-name>      # Scaffold src/tickets_v2/
-./dialtone.sh ticket_v2 start <ticket-name>    # Branch, push, and open Draft PR
-./dialtone.sh ticket_v2 test <ticket-name>     # Run all subtask tests
-./dialtone.sh ticket_v2 next                   # Primary TDD driver: runs next test and updates state
-./dialtone.sh ticket_v2 done                   # Final push, PR Ready-for-review, switch to main
+./dialtone.sh ticket add <ticket-name>      # Scaffold src/tickets/
+./dialtone.sh ticket start <ticket-name>    # Branch, push, and open Draft PR
+./dialtone.sh ticket test <ticket-name>     # Run all subtask tests
+./dialtone.sh ticket next                   # Primary TDD driver: runs next test and updates state
+./dialtone.sh ticket done                   # Final push, PR Ready-for-review, switch to main
 ```
 
 ## Running Tests: Tests are the most important concept in `dialtone`
 ```bash
-./dialtone.sh test ticket <ticket-name>      # Run tests using ticket_v2
+./dialtone.sh test ticket <ticket-name>      # Run tests using ticket
 ./dialtone.sh test ticket <ticket-name> --subtask <subtask-name> # Run specific subtask test
 ./dialtone.sh test plugin <plugin-name> # Run tests for a specific plugin
 ./dialtone.sh test tags [tag1 tag2 ...] # Run tests matching any of the specified tags
@@ -195,7 +195,7 @@ flowchart TD
 dialtone/
 ├── src/               # All source code
 │   ├── plugins/       # All plugins
-│   └── tickets_v2/    # Standardized tickets
+│   └── tickets/    # Standardized tickets
 ├── test/              # Core test files
 ├── docs/              # VM and container docs
 │   └── vendor/<vendor_name>/  # Vendor docs
@@ -206,9 +206,9 @@ dialtone/
 
 
 ## Ticket Structure
-For tickets created via `./dialtone.sh ticket_v2 start <ticket-name>`:
+For tickets created via `./dialtone.sh ticket start <ticket-name>`:
 ```
-src/tickets_v2/<ticket-name>/
+src/tickets/<ticket-name>/
 ├── ticket.md          # Requirement doc
 └── test/
     └── test.go        # Go integration tests (TDD loop)
@@ -243,9 +243,9 @@ src/plugins/<name>/
 
 ## TICKET: The local 60-minute work unit
 1. BRANCH: Git branch created or switched to for the ticket.
-2. DIRECTORY: `src/tickets_v2/<ticket-name>/` scaffolded with `ticket.md` and `test/test.go`.
+2. DIRECTORY: `src/tickets/<ticket-name>/` scaffolded with `ticket.md` and `test/test.go`.
 3. SUBTASKS: A list of 10-minute steps that each have a test and status.
-4. LIFECYCLE: `ticket_v2 start` -> `ticket_v2 next` loop -> `ticket_v2 done` to ready the PR.
+4. LIFECYCLE: `ticket start` -> `ticket next` loop -> `ticket done` to ready the PR.
 
 ## SUBTASK: Small, test-first unit of work
 1. NAME: Kebab-case identifier used by CLI commands.
@@ -291,7 +291,7 @@ src/plugins/<name>/
 
 # Workflows
 1. [Issue Review](docs/workflows/issue_review.md): Planning-only triage flow that audits issues, asks clarifying questions, and promotes validated tickets.
-2. [Ticket](docs/workflows/ticket.md): Execution workflow for ticket-driven development using `ticket_v2` from start through done with TDD and scope control.
+2. [Ticket](docs/workflows/ticket.md): Execution workflow for ticket-driven development using `ticket` from start through done with TDD and scope control.
 3. [Subtask Expansion](docs/workflows/subtask_expand.md): Planning flow to refine or split subtasks into clear, testable 10-minute units.
 
 
