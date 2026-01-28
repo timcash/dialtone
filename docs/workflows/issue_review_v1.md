@@ -1,14 +1,14 @@
 ---
 trigger: model_decision
-description: github issue triage workflow for LLM agents
+description: github issue triage workflow for LLM agents (v1 specific)
 ---
 
-# Workflow: Issue Review & Ticket Preparation
+# Workflow: Issue Review & Ticket Preparation (v1)
 
 > [!IMPORTANT]
 > This is a **planning and question** workflow designed to triage and prepare issues. It is **NOT** an execution workflow. Do **NOT** write implementation code while following this process.
 
-This is the **Source of Truth** for the Dialtone Issue Management API.
+This is the **Source of Truth** for the Dialtone Issue Management API (v1).
 
 ## 1. CLI API Reference
 ```bash
@@ -149,7 +149,7 @@ Here is how Issue #104 ("improve the install plugin") is bridged from a GitHub G
 - **Core Goal**: research improve the install plugin to have dev and production install paths for each plugin
 
 == START EXAMPLE TICKET ==
-### Dialtone Ticket (`tickets/improve-install-plugin/ticket.md`)
+### Dialtone Ticket (`tickets/<name>/ticket.md`)
 ```markdown
 # Branch: improve-install-plugin
 # Tags: p0, ready, install-system

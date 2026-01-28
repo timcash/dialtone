@@ -1,40 +1,29 @@
 ---
 trigger: model_decision
-description: ticket workflow for new and existing tickets
+description: ticket workflow for new and existing tickets (v2 specific)
 ---
 
-# Workflow: Ticket-Driven Development (TDD)
+# Workflow: Ticket-Driven Development (TDD) (v2)
 
-This workflow defines the standard process for planning, executing, and managing scope in Dialtone using the `ticket` plugin.
+This workflow defines the standard process for planning, executing, and managing scope in Dialtone (Standardized v2).
 
 ## 1. CLI API Reference
 
-```bash
-# The primary driver for TDD. Validates, runs tests, and manages subtask state.
-./dialtone.sh ticket next
-
-# Start a new feature or fix (creates branch + PR).
-./dialtone.sh ticket start <ticket-name>
-
-# Validate the ticket structure (subtasks, tests, etc).
-./dialtone.sh ticket validate <ticket-name>
-
-# View or add a new ticket without switching branches.
-./dialtone.sh ticket add <ticket-name>
-
-# Mark a subtask as failed (for investigation/refactor).
-./dialtone.sh ticket subtask failed <subtask-name>
-
-# Finalize the ticket (verifies all subtasks and marks PR ready).
-./dialtone.sh ticket done
-```
+| Action | Standardized CLI (v2) |
+| :--- | :--- |
+| **Start Ticket** | `./dialtone.sh ticket_v2 start <name>` |
+| **Next Subtask** | `./dialtone.sh ticket_v2 next` |
+| **Add Side-Task** | `./dialtone.sh ticket_v2 add <name>` |
+| **Validate Ticket** | `./dialtone.sh ticket_v2 validate <name>` |
+| **Mark Failed** | `./dialtone.sh ticket_v2 subtask failed <name>` |
+| **Finish Ticket** | `./dialtone.sh ticket_v2 done` |
 
 ## 2. Validation Standard
 
 Before a ticket is considered "Ready", it MUST pass the validation check.
 
 ```bash
-./dialtone.sh ticket validate <ticket-name>
+./dialtone.sh ticket_v2 validate <ticket-name>
 ```
 
 The validator ensures:
@@ -71,13 +60,13 @@ All work starts with a ticket. Use the CLI to manage the state of your work.
 ## SUBTASK: Implement V4L2 device discovery
 - name: camera-discovery
 - description: Search /dev for video nodes and return a list of paths.
-- test-command: `dialtone.sh test ticket <name> --subtask camera-discovery`
+- test-command: `dialtone.sh test ticket_v2 <name> --subtask camera-discovery`
 - status: todo
 
 ## SUBTASK: Implement frame capture logic
 - name: camera-capture
 - description: Open a video device and read a single buffer.
-- test-command: `dialtone.sh test ticket <name> --subtask camera-capture`
+- test-command: `dialtone.sh test ticket_v2 <name> --subtask camera-capture`
 - status: todo
 ```
 
@@ -86,8 +75,8 @@ All work starts with a ticket. Use the CLI to manage the state of your work.
 *Decision needed: If you find a bug or a missing feature unrelated to your current ticket.*
 ```bash
 # You found a bug in 'vpn' while working on 'camera'
-# This creates tickets/fix-vpn-crash/ without changing your branch
-./dialtone.sh ticket add fix-vpn-crash
+# This creates the scaffold without changing your branch
+./dialtone.sh ticket_v2 add fix-vpn-crash
 ```
 
 ## 6. The TDD Execution Loop
@@ -95,12 +84,12 @@ All work starts with a ticket. Use the CLI to manage the state of your work.
 Follow this loop for **every** subtask.
 
 1. **Plan**: Define a small, ~10 minute subtask in `ticket.md`.
-2. **Register the Test**: Define your test in `tickets/<ticket-name>/test/test.go`.
-3. **Execute Automated Loop**: ALWAYS use `ticket next` to drive the workflow.
+2. **Register the Test**: Define your test in `src/tickets_v2/<ticket-name>/test/test.go`.
+3. **Execute Automated Loop**: ALWAYS use the `next` command to drive the workflow.
    ```bash
-   ./dialtone.sh ticket next
+   ./dialtone.sh ticket_v2 next
    ```
-   `ticket next` will:
+   `ticket_v2 next` will:
    - Validate your `ticket.md`.
    - Run tests for your current `progress` subtask.
    - Mark it as `done` if tests pass.
@@ -112,15 +101,13 @@ Follow this loop for **every** subtask.
 
 *Decision needed: If a subtask test fails and the fix is complex, do not keep the subtask in `progress` indefinitely.*
 
-1. Mark the current subtask as `failed` (using `./dialtone.sh ticket subtask failed <name>`).
+1. Mark the current subtask as `failed` (using `./dialtone.sh ticket_v2 subtask failed <name>`).
 2. Create two new subtasks in `ticket.md`: one for the **investigation/refactoring** and one for the **original goal**.
-3. Use `ticket subtask list` to verify the new plan.
+3. Use `ticket_v2 subtask list` to verify the new plan.
 
 ```bash
 # If subtask 'init-video' is blocked by a dependency bug:
-./dialtone.sh ticket subtask failed init-video
+./dialtone.sh ticket_v2 subtask failed init-video
 # (Edit ticket.md to add 'fix-dependency' and 'init-video-v2' subtasks)
-./dialtone.sh ticket subtask next
+./dialtone.sh ticket_v2 subtask next
 ```
-
-
