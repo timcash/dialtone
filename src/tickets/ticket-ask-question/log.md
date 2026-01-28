@@ -18,3 +18,6 @@
 ## 2026-01-28T14:08:30-08:00
 - command: ticket subtask list ticket-ask-question
 
+## 2026-01-28T14:09:37-08:00
+- command: ticket subtask done ticket-ask-question define-ticket-ask
+

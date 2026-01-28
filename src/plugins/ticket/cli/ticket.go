@@ -269,7 +269,6 @@ func RunDone(args []string) {
 	if err != nil {
 		logFatal("Error getting current ticket: %v", err)
 	}
-	logTicketCommand(ticket.ID, "done", args)
 	for _, st := range ticket.Subtasks {
 		if st.Status != "done" && st.Status != "failed" && st.Status != "skipped" {
 			logFatal("Subtask %s is still %s", st.Name, st.Status)
@@ -283,6 +282,20 @@ func RunDone(args []string) {
 	statusOutput, _ := statusCmd.Output()
 	if len(strings.TrimSpace(string(statusOutput))) > 0 {
 		logFatal("Git status is not clean. Please commit or stash changes before running 'done'.")
+	}
+
+	logTicketCommand(ticket.ID, "done", args)
+	logPath, err := ensureTicketLog(ticket.ID)
+	if err != nil {
+		logFatal("Could not initialize log for %s: %v", ticket.ID, err)
+	}
+	addCmd := exec.Command("git", "add", logPath)
+	if output, err := addCmd.CombinedOutput(); err != nil {
+		logFatal("Git add failed: %v\nOutput: %s", err, string(output))
+	}
+	commitCmd := exec.Command("git", "commit", "-m", "docs: log ticket done")
+	if output, err := commitCmd.CombinedOutput(); err != nil {
+		logFatal("Git commit failed: %v\nOutput: %s", err, string(output))
 	}
 
 	logInfo("Pushing final changes...")
