@@ -2,9 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -47,8 +44,7 @@ func RunSubtaskList(args []string) {
 	var ticket *Ticket
 	var err error
 	if len(args) > 0 {
-		path := filepath.Join("src", "tickets", args[0], "ticket.md")
-		ticket, err = ParseTicketMd(path)
+		ticket, err = GetTicket(args[0])
 	} else {
 		ticket, err = GetCurrentTicket()
 	}
@@ -66,8 +62,7 @@ func RunNext(args []string) {
 
 	if len(args) > 0 {
 		ticketID = args[0]
-		path := filepath.Join("src", "tickets", ticketID, "ticket.md")
-		ticket, err = ParseTicketMd(path)
+		ticket, err = GetTicket(ticketID)
 	} else {
 		ticket, err = GetCurrentTicket()
 		if ticket != nil {
@@ -91,15 +86,19 @@ func RunNext(args []string) {
 	if st.Status == "todo" {
 		st.Status = "progress"
 		logInfo("Promoting subtask %s to progress", st.Name)
-		WriteTicketMd(filepath.Join("src", "tickets", ticketID, "ticket.md"), ticket)
+		if err := SaveTicket(ticket); err != nil {
+			logFatal("Could not update ticket %s: %v", ticketID, err)
+		}
 	}
 
 	logInfo("Executing test for subtask: %s", st.Name)
-	err = runDynamicTest(ticketID, st.Name)
+	testErr := runDynamicTest(ticketID, st.Name)
 	
 	// Reload
-	path := filepath.Join("src", "tickets", ticketID, "ticket.md")
-	ticket, _ = ParseTicketMd(path)
+	ticket, err = GetTicket(ticketID)
+	if err != nil {
+		logFatal("Error: %v", err)
+	}
 	st = nil
 	for i := range ticket.Subtasks {
 		if ticket.Subtasks[i].Status == "progress" {
@@ -107,21 +106,12 @@ func RunNext(args []string) {
 		}
 	}
 
-	if err == nil {
+	if testErr == nil {
 		logInfo("Subtask %s passed!", st.Name)
 		st.Status = "done"
 		st.PassTimestamp = time.Now().Format(time.RFC3339)
-		WriteTicketMd(filepath.Join("src", "tickets", ticketID, "ticket.md"), ticket)
-		
-		// Auto-commit on Pass
-		commitMsg := fmt.Sprintf("docs: subtask %s passed", st.Name)
-		addCmd := exec.Command("git", "add", filepath.Join("src", "tickets", ticketID, "ticket.md"))
-		if addOutput, err := addCmd.CombinedOutput(); err != nil {
-			logFatal("Git add failed: %v\nOutput: %s", err, string(addOutput))
-		}
-		commitCmd := exec.Command("git", "commit", "-m", commitMsg)
-		if commitOutput, err := commitCmd.CombinedOutput(); err != nil {
-			logFatal("Git commit failed: %v\nOutput: %s", err, string(commitOutput))
+		if err := SaveTicket(ticket); err != nil {
+			logFatal("Could not update ticket %s: %v", ticketID, err)
 		}
 
 		// Recurse to next task with same ID
@@ -129,8 +119,10 @@ func RunNext(args []string) {
 	} else {
 		logInfo("Subtask %s failed.", st.Name)
 		st.FailTimestamp = time.Now().Format(time.RFC3339)
-		st.AgentNotes = err.Error()
-		WriteTicketMd(filepath.Join("src", "tickets", ticketID, "ticket.md"), ticket)
+		st.AgentNotes = testErr.Error()
+		if err := SaveTicket(ticket); err != nil {
+			logFatal("Could not update ticket %s: %v", ticketID, err)
+		}
 		PrintTicketReport(ticket)
 	}
 }
@@ -169,36 +161,20 @@ func RunSubtaskDone(args []string) {
 	name := args[0]
 	subtask := args[1]
 
-	// Check git hygiene
-	statusCmd := exec.Command("git", "status", "--porcelain")
-	statusOutput, _ := statusCmd.Output()
-	if len(strings.TrimSpace(string(statusOutput))) > 0 {
-		logFatal("Git status is not clean. Please commit or stash changes before running 'subtask done'.")
-	}
-
 	logSubtaskCommand("done", args)
 
-	ticket, _ := ParseTicketMd(filepath.Join("src", "tickets", name, "ticket.md"))
+	ticket, err := GetTicket(name)
+	if err != nil {
+		logFatal("Error: %v", err)
+	}
 	for i := range ticket.Subtasks {
 		if ticket.Subtasks[i].Name == subtask {
 			ticket.Subtasks[i].Status = "done"
 			ticket.Subtasks[i].PassTimestamp = time.Now().Format(time.RFC3339)
 		}
 	}
-	ticketPath := filepath.Join("src", "tickets", name, "ticket.md")
-	WriteTicketMd(ticketPath, ticket)
-
-	logPath, err := ensureTicketLog(name)
-	if err != nil {
-		logFatal("Could not initialize log for %s: %v", name, err)
-	}
-	addCmd := exec.Command("git", "add", ticketPath, logPath)
-	if addOutput, err := addCmd.CombinedOutput(); err != nil {
-		logFatal("Git add failed: %v\nOutput: %s", err, string(addOutput))
-	}
-	commitCmd := exec.Command("git", "commit", "-m", fmt.Sprintf("docs: subtask %s done", subtask))
-	if commitOutput, err := commitCmd.CombinedOutput(); err != nil {
-		logFatal("Git commit failed: %v\nOutput: %s", err, string(commitOutput))
+	if err := SaveTicket(ticket); err != nil {
+		logFatal("Could not update ticket %s: %v", name, err)
 	}
 }
 
@@ -209,36 +185,20 @@ func RunSubtaskFailed(args []string) {
 	name := args[0]
 	subtask := args[1]
 
-	// Check git hygiene
-	statusCmd := exec.Command("git", "status", "--porcelain")
-	statusOutput, _ := statusCmd.Output()
-	if len(strings.TrimSpace(string(statusOutput))) > 0 {
-		logFatal("Git status is not clean. Please commit or stash changes before running 'subtask failed'.")
-	}
-
 	logSubtaskCommand("failed", args)
 
-	ticket, _ := ParseTicketMd(filepath.Join("src", "tickets", name, "ticket.md"))
+	ticket, err := GetTicket(name)
+	if err != nil {
+		logFatal("Error: %v", err)
+	}
 	for i := range ticket.Subtasks {
 		if ticket.Subtasks[i].Name == subtask {
 			ticket.Subtasks[i].Status = "failed"
 			ticket.Subtasks[i].FailTimestamp = time.Now().Format(time.RFC3339)
 		}
 	}
-	ticketPath := filepath.Join("src", "tickets", name, "ticket.md")
-	WriteTicketMd(ticketPath, ticket)
-
-	logPath, err := ensureTicketLog(name)
-	if err != nil {
-		logFatal("Could not initialize log for %s: %v", name, err)
-	}
-	addCmd := exec.Command("git", "add", ticketPath, logPath)
-	if addOutput, err := addCmd.CombinedOutput(); err != nil {
-		logFatal("Git add failed: %v\nOutput: %s", err, string(addOutput))
-	}
-	commitCmd := exec.Command("git", "commit", "-m", fmt.Sprintf("docs: subtask %s failed", subtask))
-	if commitOutput, err := commitCmd.CombinedOutput(); err != nil {
-		logFatal("Git commit failed: %v\nOutput: %s", err, string(commitOutput))
+	if err := SaveTicket(ticket); err != nil {
+		logFatal("Could not update ticket %s: %v", name, err)
 	}
 }
 

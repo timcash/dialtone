@@ -69,16 +69,15 @@ Use the `ticket` command for new work. It enforces TDD and standardized markdown
 ./dialtone.sh ticket ask <question>         # Add a log.md entry for current ticket
 ./dialtone.sh ticket ask --subtask <subtask-name> <question> # Tie question to a subtask
 ./dialtone.sh ticket log <message>          # Add a general log entry for current ticket
-./dialtone.sh ticket test <ticket-name>     # Run all subtask tests
+./dialtone.sh plugin test <plugin-name>     # Run plugin tests
 ./dialtone.sh ticket next                   # Primary TDD driver: runs next test and updates state
 ./dialtone.sh ticket done                   # Final push, PR Ready-for-review, switch to main
 ```
 
 ## Running Tests: Tests are the most important concept in `dialtone`
 ```bash
-./dialtone.sh test ticket <ticket-name>      # Run tests using ticket
-./dialtone.sh test ticket <ticket-name> --subtask <subtask-name> # Run specific subtask test
-./dialtone.sh test plugin <plugin-name> # Run tests for a specific plugin
+./dialtone.sh plugin test <plugin-name> # Run tests for a specific plugin
+./dialtone.sh plugin test <plugin-name> --subtask <subtask-name> # Run specific subtask test
 ./dialtone.sh test tags [tag1 tag2 ...] # Run tests matching any of the specified tags
 ./dialtone.sh test --list               # List tests that would run
 ./dialtone.sh test                      # Run all tests
@@ -97,7 +96,7 @@ Use the `ticket` command for new work. It enforces TDD and standardized markdown
 ./dialtone.sh plugin add <plugin-name> # Add a README.md to src/plugins/<plugin-name>/README.md
 ./dialtone.sh plugin install <plugin-name> # Install dependencies
 ./dialtone.sh plugin build <plugin-name> # Build the plugin
-./dialtone.sh test plugin <plugin-name> # Runs tests in src/plugins/<plugin-name>/test/
+./dialtone.sh plugin test <plugin-name> # Runs tests in src/plugins/<plugin-name>/test/
 ```
 
 ## Build & Deploy

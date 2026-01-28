@@ -14,19 +14,18 @@ mv -n .env.example .env # Only if .env does not exists
 ## Ticket Lifecycle
 ```bash
 ./dialtone.sh ticket add <ticket-name> # Add a ticket.md to tickets/<ticket-name>/
-./dialtone.sh ticket start <ticket-name> # Creates branch and draft pull-request
+./dialtone.sh ticket start <ticket-name> # Sets current ticket and scaffolds
 ./dialtone.sh ticket subtask list <ticket-name> # List all subtasks in tickets/<ticket-name>/ticket.md
 ./dialtone.sh ticket subtask next <ticket-name> # prints the next todo or process subtask for this ticket
 ./dialtone.sh ticket subtask test <ticket-name> <subtask-name> # Runs the subtask test
 ./dialtone.sh ticket subtask done <ticket-name> <subtask-name> # mark a subtask as done
-./dialtone.sh ticket done <ticket-name>  # Final verification and pull-request submission
+./dialtone.sh ticket done <ticket-name>  # Final verification and completion
 ```
 
 ## Running Tests: Tests are the most important concept in `dialtone`
 ```bash
-./dialtone.sh test ticket <ticket-name> # Run all subtask tests for the specific ticket
-./dialtone.sh test ticket <ticket-name> --subtask <subtask-name> # Run a specific subtask test
-./dialtone.sh test plugin <plugin-name> # Run tests for a specific plugin
+./dialtone.sh plugin test <plugin-name> # Run tests for a specific plugin
+./dialtone.sh plugin test <plugin-name> --subtask <subtask-name> # Run a specific subtask test
 ./dialtone.sh test tags [tag1 tag2 ...]      # Run tests matching any of the specified tags
 ./dialtone.sh test --list                # List tests that would run
 ./dialtone.sh test                        # Run all tests
@@ -45,7 +44,7 @@ mv -n .env.example .env # Only if .env does not exists
 ./dialtone.sh plugin add <plugin-name> # Add a README.md to src/plugins/<plugin-name>/README.md
 ./dialtone.sh plugin install <plugin-name> # Install dependencies
 ./dialtone.sh plugin build <plugin-name> # Build the plugin
-./dialtone.sh test plugin <plugin-name> # Runs tests in src/plugins/<plugin-name>/test/
+./dialtone.sh plugin test <plugin-name> # Runs tests in src/plugins/<plugin-name>/test/
 ```
 
 ## Build & Deploy
@@ -90,7 +89,7 @@ git merge main                    # Merge main into current branch
 ./dialtone.sh ui build        # Build the production UI bundle
 ./dialtone.sh ui install      # Install frontend dependencies
 ./dialtone.sh ui mock-data    # Start a mock data server for testing telemetry/camera
-./dialtone.sh test plugin ui  # Run integration tests for the UI
+./dialtone.sh plugin test ui  # Run integration tests for the UI
 ```
 
 ## AI Commands

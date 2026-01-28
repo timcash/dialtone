@@ -1,14 +1,14 @@
 Progress log for cloudflare-tunnel
 
 - Implementing platform-specific cloudflared installation in install.go.
-- Updated plugin and ticket tests to verify binary presence.
+- Updated plugin tests (`./dialtone.sh plugin test <plugin-name>`) to verify binary presence.
 - Implemented cloudflare plugin shell with login, tunnel, and serve commands.
 - Registered cloudflare plugin in dev.go.
 - Implementing cloudflare login subcommand.
 - Implemented cloudflare tunnel create and list subcommands.
 - Implemented cloudflare tunnel and serve subcommands.
-- Started the ticket and created branch/PR.
-- Fixed recursive test loop by registering Cloudflare & ticket tests in the test plugin.
+- Started the ticket and captured initial state.
+- Fixed recursive test loop by registering Cloudflare & ticket tests in the test plugin (run via `./dialtone.sh plugin test <plugin-name>`).
 - Finalizing ticket start phase.
 - Verifying and completing the cloudflare serve subtask.
 - Completed cloudflare serve logic and verification.

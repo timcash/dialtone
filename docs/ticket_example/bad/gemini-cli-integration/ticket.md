@@ -7,8 +7,8 @@
 ## SUBTASK: start ticket work via `dialtone.sh` cli
 - name: ticket-start
 - description: to start work run the cli command `dialtone.sh ticket start gemini-cli-integration`
-- test-description: run the ticket tests to verify that the ticket is in a valid state
-- test-command: `dialtone.sh test ticket gemini-cli-integration`
+- test-description: run `./dialtone.sh plugin test <plugin-name>` to verify the ticket is valid
+- test-command: `./dialtone.sh plugin test <plugin-name>`
 - status: done
 
 ## SUBTASK: Create install and build files for AI plugin
