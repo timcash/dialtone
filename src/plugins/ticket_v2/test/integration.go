@@ -21,6 +21,7 @@ func main() {
 	runTest("Timestamp Regression", TestTimestampRegression)
 	runTest("Almost Done Support", TestAlmostDone)
 	runTest("Lifecycle (start -> next -> done)", TestLifecycle)
+	runTest("Git and PR Integration", TestGitAndPR)
 
 	fmt.Println("\n=== Integration Tests Completed ===")
 }
@@ -99,6 +100,9 @@ func TestAlmostDone() error {
 
 func TestLifecycle() error {
 	os.RemoveAll(filepath.Join(ticketV2Dir, testTicket))
+	// Cleanup git state safely
+	exec.Command("git", "checkout", "main").Run()
+	exec.Command("git", "branch", "-D", testTicket).Run()
 
 	// A. Start
 	fmt.Println("--- Phase: Start ---")
@@ -163,6 +167,56 @@ func init() {
 	if !strings.Contains(output, "completed") {
 		return fmt.Errorf("expected ticket completion")
 	}
+
+	return nil
+}
+
+func TestGitAndPR() error {
+	ticketName := "git-pr-test-ticket"
+	os.RemoveAll(filepath.Join(ticketV2Dir, ticketName))
+	// Cleanup git state safely
+	exec.Command("git", "checkout", "main").Run()
+	exec.Command("git", "branch", "-D", ticketName).Run()
+
+	fmt.Println("--- Verifying 'start' (branch + draft PR) ---")
+	output := runCmd("./dialtone.sh", "ticket_v2", "start", ticketName)
+	if !strings.Contains(output, "Branching to "+ticketName) {
+		return fmt.Errorf("missing branching log")
+	}
+	if !strings.Contains(output, "Creating Draft Pull Request") {
+		return fmt.Errorf("missing draft PR log")
+	}
+
+	// Verify we are indeed on the branch
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	branch, _ := cmd.Output()
+	if strings.TrimSpace(string(branch)) != ticketName {
+		return fmt.Errorf("expected to be on branch %s, but on %s", ticketName, string(branch))
+	}
+
+	fmt.Println("--- Verifying 'done' (final push + ready PR + return to main) ---")
+	// For 'done' to work, subtasks must be done. 'add' creates an 'init' subtask.
+	// Let's mark it as done manually to allow 'done' to proceed.
+	runCmd("./dialtone.sh", "ticket_v2", "subtask", "done", ticketName, "init")
+
+	output = runCmd("./dialtone.sh", "ticket_v2", "done")
+	if !strings.Contains(output, "Marking PR as ready for review") {
+		return fmt.Errorf("missing PR ready log")
+	}
+	if !strings.Contains(output, "Switching back to main branch") {
+		return fmt.Errorf("missing branch switch log")
+	}
+
+	// Verify we are back on main
+	cmd = exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	branch, _ = cmd.Output()
+	if strings.TrimSpace(string(branch)) != "main" {
+		return fmt.Errorf("expected to be on main branch after done, but on %s", string(branch))
+	}
+
+	// Cleanup
+	exec.Command("git", "branch", "-D", ticketName).Run()
+	os.RemoveAll(filepath.Join(ticketV2Dir, ticketName))
 
 	return nil
 }
