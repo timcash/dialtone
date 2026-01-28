@@ -16,7 +16,7 @@ Lifecycle test.
 - dependencies: first-task
 - description: 
 - agent-notes: 
-- pass-timestamp: 
+- pass-timestamp: 2026-01-27T17:53:47-08:00
 - fail-timestamp: 
-- status: todo
+- status: done
 
