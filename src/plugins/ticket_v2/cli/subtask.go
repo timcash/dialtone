@@ -31,7 +31,15 @@ func RunSubtask(args []string) {
 }
 
 func RunSubtaskList(args []string) {
-	ticket, err := GetCurrentTicket()
+	var ticket *Ticket
+	var err error
+	if len(args) > 0 {
+		path := filepath.Join("src", "tickets_v2", args[0], "ticket.md")
+		ticket, err = ParseTicketMd(path)
+	} else {
+		ticket, err = GetCurrentTicket()
+	}
+
 	if err != nil {
 		logFatal("Error: %v", err)
 	}
@@ -39,7 +47,21 @@ func RunSubtaskList(args []string) {
 }
 
 func RunNext(args []string) {
-	ticket, err := GetCurrentTicket()
+	var ticket *Ticket
+	var err error
+	var ticketID string
+
+	if len(args) > 0 {
+		ticketID = args[0]
+		path := filepath.Join("src", "tickets_v2", ticketID, "ticket.md")
+		ticket, err = ParseTicketMd(path)
+	} else {
+		ticket, err = GetCurrentTicket()
+		if ticket != nil {
+			ticketID = ticket.ID
+		}
+	}
+
 	if err != nil {
 		logFatal("Error: %v", err)
 	}
@@ -54,13 +76,15 @@ func RunNext(args []string) {
 	if st.Status == "todo" {
 		st.Status = "progress"
 		logInfo("Promoting subtask %s to progress", st.Name)
-		WriteTicketMd(filepath.Join("src", "tickets_v2", ticket.ID, "ticket.md"), ticket)
+		WriteTicketMd(filepath.Join("src", "tickets_v2", ticketID, "ticket.md"), ticket)
 	}
 
 	logInfo("Executing test for subtask: %s", st.Name)
-	err = runDynamicTest(ticket.ID, st.Name)
+	err = runDynamicTest(ticketID, st.Name)
 	
-	ticket, _ = GetCurrentTicket() // Reload
+	// Reload
+	path := filepath.Join("src", "tickets_v2", ticketID, "ticket.md")
+	ticket, _ = ParseTicketMd(path)
 	st = nil
 	for i := range ticket.Subtasks {
 		if ticket.Subtasks[i].Status == "progress" {
@@ -72,15 +96,15 @@ func RunNext(args []string) {
 		logInfo("Subtask %s passed!", st.Name)
 		st.Status = "done"
 		st.PassTimestamp = time.Now().Format(time.RFC3339)
-		WriteTicketMd(filepath.Join("src", "tickets_v2", ticket.ID, "ticket.md"), ticket)
+		WriteTicketMd(filepath.Join("src", "tickets_v2", ticketID, "ticket.md"), ticket)
 		
-		// Recurse to next task
-		RunNext(args)
+		// Recurse to next task with same ID
+		RunNext([]string{ticketID})
 	} else {
 		logInfo("Subtask %s failed.", st.Name)
 		st.FailTimestamp = time.Now().Format(time.RFC3339)
 		st.AgentNotes = err.Error()
-		WriteTicketMd(filepath.Join("src", "tickets_v2", ticket.ID, "ticket.md"), ticket)
+		WriteTicketMd(filepath.Join("src", "tickets_v2", ticketID, "ticket.md"), ticket)
 		PrintTicketReport(ticket)
 	}
 }
