@@ -147,7 +147,29 @@ func RunIntegrationTest() error {
 	fmt.Println("Alerted that test is not passing. State promoted to 'progress'.")
 
 	fmt.Println("\n[PHASE 6: Fixing and Promoting]")
-	fixedTest := strings.Replace(testGoContent, `return fmt.Errorf("logic error: expected 42, got 0")`, `return nil`, 1)
+	fixedTest := fmt.Sprintf(`package test
+
+import (
+	"dialtone/cli/src/dialtest"
+	"fmt"
+)
+
+func init() {
+	dialtest.RegisterTicket("%%s")
+	dialtest.AddSubtaskTest("logic-impl", RunLogicTest, nil)
+	dialtest.AddSubtaskTest("integration-task", RunIntegrationTest, nil)
+}
+
+func RunLogicTest() error {
+	fmt.Println("Running logic test (FIXED)...")
+	return nil
+}
+
+func RunIntegrationTest() error {
+	fmt.Println("Running integration test...")
+	return nil
+}
+`, tempTicketName)
 	if err := os.WriteFile(testGoPath, []byte(fixedTest), 0644); err != nil {
 		return err
 	}
@@ -163,7 +185,8 @@ func RunIntegrationTest() error {
 	fmt.Println("logic-impl verified as done.")
 
 	fmt.Println("\n[PHASE 7: Completing dependencies]")
-	// Should run integration-task now
+	// Should run integration-task automatically because next recurses, 
+	// but let's call it again to be sure if recursion was stopped.
 	runCmd("./dialtone.sh", "ticket_v2", "next")
 	
 	fmt.Println("Running 'ticket_v2 subtask list' to verify final state...")
