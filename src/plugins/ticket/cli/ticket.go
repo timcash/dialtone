@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func Run(args []string) {
@@ -22,6 +23,8 @@ func Run(args []string) {
 		RunAdd(subArgs)
 	case "start":
 		RunStart(subArgs)
+	case "ask":
+		RunAsk(subArgs)
 	case "list":
 		RunList(subArgs)
 	case "validate":
@@ -42,7 +45,7 @@ func Run(args []string) {
 
 func printUsage() {
 	fmt.Println("Usage: ./dialtone.sh ticket <command> [args]")
-	fmt.Println("Commands: add, start, list, validate, next, done, subtask, test")
+	fmt.Println("Commands: add, start, ask, list, validate, next, done, subtask, test")
 }
 
 func RunAdd(args []string) {
@@ -126,6 +129,60 @@ func RunStart(args []string) {
 		logInfo("Note: gh pr create failed (likely auth or remote): %v\nOutput: %s", err, string(output))
 	}
 	logInfo("Ticket %s started successfully", name)
+}
+
+func RunAsk(args []string) {
+	if len(args) < 1 {
+		logFatal("Usage: ./dialtone.sh ticket ask [--subtask <subtask-name>] <question>")
+	}
+
+	subtask := ""
+	if strings.HasPrefix(args[0], "--subtask=") {
+		subtask = strings.TrimPrefix(args[0], "--subtask=")
+		args = args[1:]
+	} else if len(args) >= 2 && args[0] == "--subtask" {
+		subtask = args[1]
+		args = args[2:]
+	}
+
+	if len(args) < 1 {
+		logFatal("Usage: ./dialtone.sh ticket ask [--subtask <subtask-name>] <question>")
+	}
+
+	question := strings.Join(args, " ")
+	ticket, err := GetCurrentTicket()
+	if err != nil {
+		logFatal("Error getting current ticket: %v", err)
+	}
+
+	questionPath := filepath.Join("src", "tickets", ticket.ID, "question.md")
+	header := ""
+	if _, err := os.Stat(questionPath); os.IsNotExist(err) {
+		header = "# Questions\n\n"
+	}
+
+	entry := fmt.Sprintf("## %s\n", time.Now().Format(time.RFC3339))
+	if subtask != "" {
+		entry += fmt.Sprintf("- subtask: %s\n", subtask)
+	}
+	entry += fmt.Sprintf("- question: %s\n\n", question)
+
+	file, err := os.OpenFile(questionPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		logFatal("Could not write %s: %v", questionPath, err)
+	}
+	defer file.Close()
+
+	if header != "" {
+		if _, err := file.WriteString(header); err != nil {
+			logFatal("Could not write %s: %v", questionPath, err)
+		}
+	}
+	if _, err := file.WriteString(entry); err != nil {
+		logFatal("Could not write %s: %v", questionPath, err)
+	}
+
+	logInfo("Captured question in %s", questionPath)
 }
 
 func RunList(args []string) {
