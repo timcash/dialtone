@@ -18,6 +18,7 @@ import (
 	_ "dialtone/cli/src/plugins/cloudflare/test"
 )
 
+
 // RunTest handles the 'test' command
 func RunTest(args []string) {
 	if len(args) == 0 {
