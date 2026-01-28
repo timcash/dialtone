@@ -15,6 +15,11 @@ Use these commands to manage all ticket work
 # The primary entry point for new work. Switches branch, scaffolds, and opens PR.
 ./dialtone.sh ticket start <ticket-name>
 
+# Log questions or notes for the current ticket (writes src/tickets/<ticket>/log.md).
+./dialtone.sh ticket ask <question>
+./dialtone.sh ticket ask --subtask <subtask-name> <question>
+./dialtone.sh ticket log <message>
+
 # Tests all subtasks in the ticket
 ./dialtone.sh ticket test [<ticket-name>]
 
