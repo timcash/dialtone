@@ -67,7 +67,13 @@ func runTests() error {
 		return fmt.Errorf("ticket.md not found at %s", ticketPath)
 	}
 
-	// B. Modify subtasks for testing
+	// B. Test 'ticket_v2 start' (simulated)
+	fmt.Println("Running ticket_v2 start...")
+	// We use a different name for 'start' to avoid conflict if needed, but tempTicketName is fine here.
+	// Note: 'start' calls 'gh pr', which might fail, so we ignore errors but check local side effects.
+	exec.Command("./dialtone.sh", "ticket_v2", "start", tempTicketName).Run()
+	
+	// C. Modify subtasks for testing
 	fmt.Println("Adding test subtasks...")
 	content := fmt.Sprintf(`# Name: %s
 # Goal
@@ -91,12 +97,7 @@ Test the ticket_v2 system.
 		return err
 	}
 
-	// C. Register tests in test.go (simulated)
-	// We need to make sure the tests are registered.
-	// Since we are running outside the main binary's dev loop, we might need a way to mock dialtest.
-	// But the user wants to verify the ticket_v2 API.
-	
-	// Let's implement a small test helper in the scaffolded test.go
+	// D. Register tests in test.go with named functions
 	testGoPath := filepath.Join(ticketV2Dir, tempTicketName, "test", "test.go")
 	testGoContent := fmt.Sprintf(`package test
 
@@ -107,44 +108,98 @@ import (
 
 func init() {
 	dialtest.RegisterTicket("%%s")
-	dialtest.AddSubtaskTest("init-task", func() error {
-		fmt.Println("init-task running")
-		return nil
-	}, nil)
-	dialtest.AddSubtaskTest("dependent-task", func() error {
-		fmt.Println("dependent-task running")
-		return nil
-	}, nil)
+	dialtest.AddSubtaskTest("init-task", RunInitTask, nil)
+	dialtest.AddSubtaskTest("dependent-task", RunDependentTask, nil)
+}
+
+func RunInitTask() error {
+	fmt.Println("init-task running")
+	return nil
+}
+
+func RunDependentTask() error {
+	fmt.Println("dependent-task running")
+	return nil
 }
 `, tempTicketName)
 	if err := os.WriteFile(testGoPath, []byte(testGoContent), 0644); err != nil {
 		return err
 	}
 
-	// D. Run 'ticket_v2 next'
-	// We need to be on the branch for 'next' to work easily in this implementation
-	// For testing, let's try to pass the ticket name if possible, but my current impl of RunNext uses GetCurrentBranch.
-	// I'll simulate a branch by checking out a temp branch.
-	
-	fmt.Println("Simulating work on branch...")
-	exec.Command("git", "checkout", "-b", tempTicketName).Run()
-	defer exec.Command("git", "checkout", "-").Run()
-	defer exec.Command("git", "branch", "-D", tempTicketName).Run()
+	// E. Run 'ticket_v2 validate'
+	fmt.Println("Running ticket_v2 validate...")
+	cmd := exec.Command("./dialtone.sh", "ticket_v2", "validate", tempTicketName)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("validate failed: %v, output: %s", err, string(output))
+	}
 
-	fmt.Println("Running ticket_v2 next (1st time)...")
-	cmd := exec.Command("./dialtone.sh", "ticket_v2", "next")
+	// F. Run 'ticket_v2 next'
+	fmt.Println("Running ticket_v2 next (1st task)...")
+	cmd = exec.Command("./dialtone.sh", "ticket_v2", "next")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("ticket_v2 next failed: %v, output: %s", err, string(output))
 	}
 	fmt.Println(string(output))
 
-	// E. Verify progress in ticket.md
+	// G. Verify progress in ticket.md
 	data, _ := os.ReadFile(ticketPath)
 	if !strings.Contains(string(data), "- status: done") {
 		return fmt.Errorf("init-task should be done. Current content:\n%s", string(data))
 	}
 	fmt.Println("init-task verified as done.")
+
+	// H. Simulate a failure in dependent-task
+	fmt.Println("Simulating a failure in dependent-task...")
+	testGoContent = fmt.Sprintf(`package test
+
+import (
+	"dialtone/cli/src/dialtest"
+	"fmt"
+)
+
+func init() {
+	dialtest.RegisterTicket("%%s")
+	dialtest.AddSubtaskTest("init-task", RunInitTask, nil)
+	dialtest.AddSubtaskTest("dependent-task", RunDependentTask, nil)
+}
+
+func RunInitTask() error {
+	return nil
+}
+
+func RunDependentTask() error {
+	return fmt.Errorf("simulated failure")
+}
+`, tempTicketName)
+	os.WriteFile(testGoPath, []byte(testGoContent), 0644)
+
+	fmt.Println("Running ticket_v2 next (should fail)...")
+	cmd = exec.Command("./dialtone.sh", "ticket_v2", "next")
+	output, _ = cmd.CombinedOutput()
+	if !strings.Contains(string(output), "Subtask dependent-task failed") {
+		return fmt.Errorf("expected failure message not found in output: %s", string(output))
+	}
+	fmt.Println("Failure detected correctly.")
+
+	// I. Fix the test and run 'next' again
+	fmt.Println("Fixing the test and running next (should pass)...")
+	testGoContent = strings.Replace(testGoContent, `return fmt.Errorf("simulated failure")`, `return nil`, 1)
+	os.WriteFile(testGoPath, []byte(testGoContent), 0644)
+
+	cmd = exec.Command("./dialtone.sh", "ticket_v2", "next")
+	if output, err = cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("final next failed: %v, output: %s", err, string(output))
+	}
+	fmt.Println("dependent-task passed.")
+
+	// J. Run 'ticket_v2 done'
+	fmt.Println("Running ticket_v2 done...")
+	cmd = exec.Command("./dialtone.sh", "ticket_v2", "done")
+	// 'done' will try to push and checkout main, so it might fail if git state is messy.
+	// But it should at least pass the internal validation of subtasks.
+	output, _ = cmd.CombinedOutput()
+	fmt.Println(string(output))
 
 	return nil
 }
