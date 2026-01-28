@@ -215,8 +215,6 @@ func runPluginTest(pluginName string, showList bool) {
 		runInstallTests()
 	case "ticket":
 		runTicketTests()
-	case "test":
-		runTestPluginTests()
 	case "ui":
 		runUiTests()
 	case "ai":
