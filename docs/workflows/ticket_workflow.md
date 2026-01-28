@@ -40,6 +40,8 @@ This workflow defines the standard process for planning, executing, and managing
 ./dialtone.sh ticket ask <question>
 # OR 
 ./dialtone.sh ticket ask --subtask <subtask-name> <question>
+# 4. Capture general notes for the ticket log.
+./dialtone.sh ticket log <message>
 ```
 
 ## 4. SUBTASK SUBLOOP: Iterate Every 10 Minutes
