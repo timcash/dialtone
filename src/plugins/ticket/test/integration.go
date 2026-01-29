@@ -48,8 +48,33 @@ func main() {
 	runTest("ticket done", TestDoneGranular)
 	runTest("subtask basics", TestSubtaskBasicsGranular)
 	runTest("subtask done/failed", TestSubtaskDoneFailedGranular)
+	runTest("conversational flow (V2)", TestConversationalFlow)
+	runTest("subtask verification loop", TestSubtaskVerificationLoop)
+	runTest("summary workflow", TestSummaryWorkflow)
+	runTest("summary search", TestSummarySearch)
+	runTest("summary timeout", TestSummaryTimeout)
 
+	finalCleanup()
 	fmt.Println()
+}
+
+func finalCleanup() {
+	fmt.Println("=== Final Integration Cleanup ===")
+	// List all subdirectories in src/tickets and remove them if they look like test tickets
+	dirs, err := os.ReadDir(ticketV2Dir)
+	if err != nil {
+		return
+	}
+	for _, d := range dirs {
+		if d.IsDir() {
+			fmt.Printf("Removing dangling test directory: %s\n", d.Name())
+			os.RemoveAll(filepath.Join(ticketV2Dir, d.Name()))
+		}
+	}
+	// We keep the DB but clear its rows if needed.
+	// Or just remove the DB for a total fresh start if the user wants "empty".
+	// The user said "the src/tickets folder should be empty", so let's remove everything.
+	os.Remove(filepath.Join(ticketV2Dir, "tickets.duckdb"))
 }
 
 // runTest removed from global scope to use closure in main for error tracking
@@ -213,6 +238,204 @@ func init() {
 	return nil
 }
 
+func TestConversationalFlow() error {
+	name := getUniqueName("test-v2-flow")
+	cleanupTicket(name)
+	defer cleanupTicket(name)
+
+	fmt.Println("--- Checking Start Alert ---")
+	output := runCmd("./dialtone.sh", "ticket", "start", name+"-api")
+	if !strings.Contains(output, "[ALERT]") {
+		return fmt.Errorf("missing contextual alert on start")
+	}
+
+	fmt.Println("--- Checking Next Block on Question ---")
+	runCmd("./dialtone.sh", "ticket", "ask", "What is the meaning of life?")
+	output = runCmd("./dialtone.sh", "ticket", "next")
+	if !strings.Contains(output, "[BLOCK]") {
+		return fmt.Errorf("expected block on unacknowledged question")
+	}
+
+	fmt.Println("--- Checking Next Unblock after Ack ---")
+	runCmd("./dialtone.sh", "ticket", "ack", "I understand everything now.")
+	output = runCmd("./dialtone.sh", "ticket", "next")
+	if strings.Contains(output, "[BLOCK]") {
+		return fmt.Errorf("expected unblock after ack")
+	}
+
+	return nil
+}
+
+func TestSubtaskVerificationLoop() error {
+	name := getUniqueName("test-verify-loop")
+	cleanupTicket(name)
+	defer cleanupTicket(name)
+
+	runCmd("./dialtone.sh", "ticket", "start", name)
+
+	// Overwrite with failing test
+	testGoPath := filepath.Join(ticketV2Dir, name, "test", "test.go")
+	failingTest := fmt.Sprintf(`package test
+import (
+	"dialtone/cli/src/dialtest"
+	"fmt"
+)
+func init() {
+	dialtest.RegisterTicket("%s")
+	dialtest.AddSubtaskTest("init", func() error { return fmt.Errorf("simulated failure") }, nil)
+}
+`, name)
+	os.WriteFile(testGoPath, []byte(failingTest), 0644)
+
+	fmt.Println("--- Checking Failure Block ---")
+	output := runCmd("./dialtone.sh", "ticket", "subtask", "done", name, "init")
+	if !strings.Contains(output, "Verification failed") {
+		return fmt.Errorf("expected failure when test fails")
+	}
+
+	// Overwrite with passing test
+	passingTest := fmt.Sprintf(`package test
+import (
+	"dialtone/cli/src/dialtest"
+)
+func init() {
+	dialtest.RegisterTicket("%s")
+	dialtest.AddSubtaskTest("init", func() error { return nil }, nil)
+}
+`, name)
+	os.WriteFile(testGoPath, []byte(passingTest), 0644)
+
+	fmt.Println("--- Checking Success Unblock ---")
+	// Must create agent_summary.md for V2 done
+	dir := filepath.Join("src", "tickets", name)
+	os.MkdirAll(dir, 0755)
+	os.WriteFile(filepath.Join(dir, "agent_summary.md"), []byte("I did some stuff"), 0644)
+
+	output = runCmd("./dialtone.sh", "ticket", "subtask", "done", name, "init")
+	if !strings.Contains(output, "marked as done") {
+		return fmt.Errorf("expected success after fixing test")
+	}
+
+	fmt.Println("--- Checking ticket test command ---")
+	output = runCmd("./dialtone.sh", "ticket", "test", name)
+	if !strings.Contains(output, "All tests passed") {
+		return fmt.Errorf("expected ticket test success")
+	}
+
+	return nil
+}
+
+func TestSummaryWorkflow() error {
+	name := getUniqueName("test-summary")
+	cleanupTicket(name)
+	defer cleanupTicket(name)
+
+	runCmd("./dialtone.sh", "ticket", "start", name)
+
+	// 1. Check ingest without file fails and prints guidance
+	fmt.Println("--- Checking Missing Summary File Guidance ---")
+	output := runCmd("./dialtone.sh", "ticket", "summary", "update")
+	if !strings.Contains(output, "Could not read") || !strings.Contains(output, "searched with grep") {
+		return fmt.Errorf("expected error with guidance when summary file is missing")
+	}
+
+	// 2. Create file and ingest
+	dir := filepath.Join("src", "tickets", name)
+	summaryPath := filepath.Join(dir, "agent_summary.md")
+	os.WriteFile(summaryPath, []byte("Working on the flux capacitor."), 0644)
+	runCmd("./dialtone.sh", "ticket", "summary", "update")
+
+	// Verify file is deleted
+	if _, err := os.Stat(summaryPath); !os.IsNotExist(err) {
+		return fmt.Errorf("agent_summary.md should have been deleted after update")
+	}
+
+	// 3. Verify SHA256 block (must recreate file)
+	fmt.Println("--- Checking SHA256 Block ---")
+	os.WriteFile(summaryPath, []byte("Working on the flux capacitor."), 0644)
+	output = runCmd("./dialtone.sh", "ticket", "summary", "update")
+	if !strings.Contains(output, "content has not changed") {
+		return fmt.Errorf("expected block on duplicate summary content")
+	}
+
+	// 4. Update file and ingest again
+	fmt.Println("--- Checking Multiple Summaries ---")
+	os.WriteFile(summaryPath, []byte("Flux capacitor now at 1.21 gigawatts."), 0644)
+	runCmd("./dialtone.sh", "ticket", "summary", "update")
+
+	// 5. Check --idle
+	fmt.Println("--- Checking Idle Summary ---")
+	output = runCmd("./dialtone.sh", "ticket", "summary", "--idle")
+	if !strings.Contains(output, "Summary captured") {
+		return fmt.Errorf("idle summary failed")
+	}
+
+	// 6. Print all summaries (User requirement)
+	fmt.Println("--- Final Summary List Printout ---")
+	output = runCmd("./dialtone.sh", "ticket", "summary")
+	if !strings.Contains(output, "Working on the flux capacitor") || !strings.Contains(output, "1.21 gigawatts") {
+		return fmt.Errorf("summary list missing content")
+	}
+
+	return nil
+}
+
+func TestSummarySearch() error {
+	name := getUniqueName("test-search")
+	cleanupTicket(name)
+	defer cleanupTicket(name)
+
+	runCmd("./dialtone.sh", "ticket", "start", name)
+	dir := filepath.Join("src", "tickets", name)
+	os.WriteFile(filepath.Join(dir, "agent_summary.md"), []byte("Found a bug in the matrix."), 0644)
+	runCmd("./dialtone.sh", "ticket", "summary", "update")
+
+	fmt.Println("--- Checking Search ---")
+	output := runCmd("./dialtone.sh", "ticket", "search", "matrix")
+	if !strings.Contains(output, "Found a bug in the matrix") {
+		return fmt.Errorf("search failed to find content")
+	}
+
+	return nil
+}
+
+func TestSummaryTimeout() error {
+	name := getUniqueName("test-timeout")
+	cleanupTicket(name)
+	defer cleanupTicket(name)
+
+	runCmd("./dialtone.sh", "ticket", "start", name)
+
+	// Manually backdate the last summary time in DuckDB
+	db, err := openTicketDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	backdatedTime := time.Now().Add(-15 * time.Minute).Format(time.RFC3339)
+	_, err = db.Exec(`UPDATE tickets SET last_summary_time = ? WHERE id = ?`, backdatedTime, name)
+	db.Close() // RELEASE LOCK BEFORE CLI CALL
+	if err != nil {
+		return fmt.Errorf("failed to backdate: %v", err)
+	}
+
+	fmt.Println("--- Checking Timeout Block ---")
+	output := runCmd("./dialtone.sh", "ticket", "next", name)
+	if !strings.Contains(output, "10-minute activity window exceeded") {
+		return fmt.Errorf("expected block after 10 minutes")
+	}
+
+	fmt.Println("--- Checking Timeout Unblock with --idle ---")
+	output = runCmd("./dialtone.sh", "ticket", "next", name, "--idle")
+	// Should fail on test execution now, but not on timeout block
+	if strings.Contains(output, "10-minute activity window exceeded") {
+		return fmt.Errorf("expected --idle to bypass block")
+	}
+
+	return nil
+}
+
 func TestValidateGranular() error {
 	fmt.Println("--- Checking Timestamp Regression ---")
 	name := getUniqueName("test-validate")
@@ -244,10 +467,24 @@ func TestDoneGranular() error {
 	defer cleanupTicket(name)
 
 	runCmd("./dialtone.sh", "ticket", "start", name)
+
+	// Create agent_summary.md for subtask done
+	dir := filepath.Join("src", "tickets", name)
+	os.MkdirAll(dir, 0755)
+	os.WriteFile(filepath.Join(dir, "agent_summary.md"), []byte("Subtask progress"), 0644)
+
 	runCmd("./dialtone.sh", "ticket", "subtask", "done", name, "init")
 
-	fmt.Println("--- Checking Done Completion ---")
+	fmt.Println("--- Checking Done Missing Summary ---")
+	os.Remove(filepath.Join(dir, "agent_summary.md"))
 	output := runCmd("./dialtone.sh", "ticket", "done")
+	if !strings.Contains(output, "Missing mandatory agent_summary.md") {
+		return fmt.Errorf("expected error for missing agent_summary.md")
+	}
+
+	fmt.Println("--- Checking Done Completion with Summary ---")
+	os.WriteFile(filepath.Join(dir, "agent_summary.md"), []byte("Full ticket summary."), 0644)
+	output = runCmd("./dialtone.sh", "ticket", "done")
 	checks := []string{
 		"Ticket " + name + " completed",
 	}
@@ -282,6 +519,10 @@ func TestSubtaskDoneFailedGranular() error {
 
 	runCmd("./dialtone.sh", "ticket", "start", name)
 
+	// Create agent_summary.md for subtask done
+	dir := filepath.Join("src", "tickets", name)
+	os.WriteFile(filepath.Join(dir, "agent_summary.md"), []byte("Doing initialization"), 0644)
+
 	runCmd("./dialtone.sh", "ticket", "subtask", "done", name, "init")
 	runCmd("./dialtone.sh", "ticket", "subtask", "failed", name, "init")
 
@@ -303,14 +544,14 @@ type logEntry struct {
 }
 
 type seedSubtask struct {
-	Name          string
-	Description   string
-	Status        string
-	Dependencies  []string
+	Name           string
+	Description    string
+	Status         string
+	Dependencies   []string
 	TestConditions []string
-	AgentNotes    string
-	PassTimestamp string
-	FailTimestamp string
+	AgentNotes     string
+	PassTimestamp  string
+	FailTimestamp  string
 }
 
 type testCondition struct {

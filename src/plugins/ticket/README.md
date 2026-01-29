@@ -6,25 +6,47 @@
 
 ## Ticket Command Line Interface (CLI)
 Use these commands to manage all ticket work
-```bash
+```shell
 # Scaffolds a new local ticket directory. 
 # Does not switch branches.
 # Ideal for logging side-tasks while continuing work on current tasks.
 ./dialtone.sh ticket add [<ticket-name>]
 
 # The primary entry point for new work. Scaffolds and sets current ticket.
+# Automatically generates a Go test template in src/tickets/<name>/test/test.go.
 ./dialtone.sh ticket start <ticket-name>
+
+# Agent Summary System: List all captured summaries in Markdown format.
+./dialtone.sh ticket summary
+
+# Ingest agent_summary.md into the summary history. 
+# Performs SHA256 duplicate detection against the last entry.
+./dialtone.sh ticket summary update
+
+# Reset the 10-minute activity timer if no work was performed.
+./dialtone.sh ticket summary --idle
+
+# Full-text search across all agent summaries.
+./dialtone.sh ticket search <query>
 
 # Log questions or notes for the current ticket (writes to src/tickets/tickets.duckdb).
 ./dialtone.sh ticket ask <question>
 ./dialtone.sh ticket ask --subtask <subtask-name> <question>
 ./dialtone.sh ticket log <message>
 
+# Conversational Agent Loop: acknowledge messages or alerts
+./dialtone.sh ticket ack [<message>]
+
+# Resource Management (Scaffold): Grant temporary access to protected resources
+./dialtone.sh ticket grant --scope "stripe-api" --duration "10m"
+
 # Tests all subtasks in the ticket
-./dialtone.sh plugin test <plugin-name>
+./dialtone.sh ticket test <ticket-name>
 
 # The primary driver for TDD. Validates, runs tests, and manages subtask state.
-./dialtone.sh ticket next
+# BLOCKS if 10-minute summary interval is exceeded (unless --idle is used).
+# BLOCKS if there are unacknowledged questions.
+./dialtone.sh ticket next [--idle]
 
 # Lists local tickets.
 ./dialtone.sh ticket list
@@ -34,11 +56,10 @@ Use these commands to manage all ticket work
 
 # Upsert a ticket definition from JSON (stdin or file).
 ./dialtone.sh ticket upsert --file path/to/ticket.json
-# Or pipe JSON directly:
-cat path/to/ticket.json | ./dialtone.sh ticket upsert
 
 # Final step: verifies subtasks and marks ticket complete.
-./dialtone.sh ticket done [<ticket-name>]
+# REQUIRES a non-empty agent_summary.md file.
+./dialtone.sh ticket done
 ```
 
 
@@ -55,6 +76,7 @@ Use these commands to manage all subtask work
 ./dialtone.sh ticket subtask test [<ticket-name>] <subtask-name>
 
 # Updates subtask status in DuckDB to 'done' or 'failed'.
+# GATED: This command will run the associated subtask test and BLOCK if it fails.
 ./dialtone.sh ticket subtask done [<ticket-name>] <subtask-name>
 
 # To mark a subtask as failed
@@ -119,11 +141,14 @@ type Subtask struct {
 }
 
 type Ticket struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Status      string    `json:"status"`
-	Subtasks    []Subtask `json:"subtasks"`
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	Description      string    `json:"description"`
+	Status           string    `json:"status"`
+	AgentSummary     string    `json:"agent_summary"`      // Consolidated history
+	StartTime        string    `json:"start_time"`         // ISO8601
+	LastSummaryTime  string    `json:"last_summary_time"`  // ISO8601
+	Subtasks         []Subtask `json:"subtasks"`
 }
 
 
@@ -157,18 +182,21 @@ var ExampleTicket = Ticket{
 1. Scaffolds the `src/tickets/<ticket-name>/` directory, creates `src/tickets/<ticket-name>/test/test.go`, and inserts the ticket into `src/tickets/tickets.duckdb`.
 2. Sets the current ticket for future `ticket ask/log/next/done` commands.
 
-## `./dialtone.sh ticket next`
+## `./dialtone.sh ticket next [--idle]`
 1. **Validation**: Loads the ticket from DuckDB and ensures all subtask fields are present.
-2. **Dependency Check**: For the next `todo` subtask, verifies that all listed `dependencies` match subtasks with `status: done`.
-3. **Test Execution**: Identifies the subtask in `progress`. Dispatches to the `dialtest` registry in `src/tickets/<ticket-name>/test/test.go` to run the specific function registered for that subtask name.
-4. **State Transition**:
+2. **Time Gating**: Verifies that `LastSummaryTime` is within the last 10 minutes. Blocks execution if expired, unless `--idle` is provided.
+3. **Dependency Check**: For the next `todo` subtask, verifies that all listed `dependencies` match subtasks with `status: done`.
+4. **Test Execution**: Identifies the subtask in `progress`. Dispatches to the `dialtest` registry in `src/tickets/<ticket-name>/test/test.go` to run the specific function registered for that subtask name.
+5. **State Transition**:
    - **Pass**: Updates `status: done` in DuckDB and records `pass-timestamp` (current ISO8601).
    - **Fail**: Updates `fail-timestamp` and stays in `progress`, prompting the agent to review `agent-notes`.
-5. **Auto-Promotion**: If no task is in `progress`, it marks the first eligible `todo` (dependencies met) as `progress`.
+6. **Auto-Promotion**: If no task is in `progress`, it marks the first eligible `todo` (dependencies met) as `progress`.
 
 ## `./dialtone.sh ticket done`
-1. **Final Audit**: Scans DuckDB to ensure all subtasks except `ticket-done` are `done` or `failed`.
-2. **Completion**: Marks the ticket complete and logs the action.
+1. **Final Audit**: Scans DuckDB to ensure all subtasks are `done`, `failed`, or `skipped`.
+2. **Summary Verification**: Reads `agent_summary.md`. Blocks if the file is missing or empty.
+3. **Consolidation**: Appends all granular summaries and the final `agent_summary.md` content into a unified Markdown block in the `AgentSummary` field.
+4. **Completion**: Marks the ticket complete in DuckDB.
 
 ## `./dialtone.sh ticket add <ticket-name>`
 1. Creates the `src/tickets/<ticket-name>/` directory.

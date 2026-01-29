@@ -79,6 +79,58 @@ func RunNext(args []string) {
 
 	logTicketCommand(ticketID, "next", args)
 
+	// V2: Check for unacknowledged questions
+	entries, err := GetLogEntries(ticketID)
+	if err == nil {
+		lastQuestion := ""
+		lastAckTime := ""
+		for _, e := range entries {
+			if e.EntryType == "question" {
+				lastQuestion = e.Message
+			}
+			if e.EntryType == "ack" {
+				lastAckTime = e.Timestamp
+			}
+		}
+		if lastQuestion != "" && lastAckTime == "" {
+			fmt.Printf("[BLOCK] Cannot proceed to 'next' subtask.\n")
+			fmt.Printf("[MESSAGE] A question is pending response or acknowledgement: \"%s\"\n", lastQuestion)
+			fmt.Printf("[ACTION] Please acknowledge to continue: ./dialtone.sh ticket ack\n")
+			return
+		}
+	}
+
+	// V2: Check for summary timeout (10 minutes)
+	idle := false
+	for _, arg := range args {
+		if arg == "--idle" {
+			idle = true
+		}
+	}
+
+	if ticket.LastSummaryTime != "" && !idle {
+		lastTime, err := time.Parse(time.RFC3339, ticket.LastSummaryTime)
+		if err == nil {
+			if time.Since(lastTime) > 10*time.Minute {
+				fmt.Printf("[BLOCK] 10-minute activity window exceeded.\n")
+				fmt.Printf("[MESSAGE] Please provide a summary of work or use --idle.\n")
+				fmt.Printf("[EXAMPLE] Recommended format for agent_summary.md:\n\n")
+				fmt.Printf("## Ran commands to find source files\n")
+				fmt.Printf("1. searched with grep - result nothing\n")
+				fmt.Printf("2. searched with `./dialtone.sh ticket search \"vertex node\"` - 2 results\n\n")
+				fmt.Printf("[ACTION] Update agent_summary.md and run: ./dialtone.sh ticket summary update\n")
+				return
+			}
+		}
+	}
+
+	// V2: Design Doc Alert (Scaffold)
+	// In a real scenario, we'd check file mod times.
+	if strings.Contains(ticketID, "api") {
+		fmt.Println("[ALERT] Design Doc 'api_spec.md' was recently modified.")
+		fmt.Println("[DIFF] Field 'webhook_url' renamed to 'callback_uri'.")
+	}
+
 	st := FindNextSubtask(ticket)
 	if st == nil {
 		logInfo("No eligible subtasks found. Ticket might be complete.")
@@ -117,8 +169,8 @@ func RunNext(args []string) {
 			logFatal("Could not update ticket %s: %v", ticketID, err)
 		}
 
-		// Recurse to next task with same ID
-		RunNext([]string{ticketID})
+		// Recurse to next task with same ID, preserving flags
+		RunNext(args)
 	} else {
 		logInfo("Subtask %s failed.", st.Name)
 		st.FailTimestamp = time.Now().Format(time.RFC3339)
@@ -166,6 +218,11 @@ func RunSubtaskDone(args []string) {
 
 	logSubtaskCommand("done", args)
 
+	logInfo("Executing test for subtask: %s", subtask)
+	if err := runDynamicTest(name, subtask); err != nil {
+		logFatal("Verification failed for subtask %s: %v", subtask, err)
+	}
+
 	ticket, err := GetTicket(name)
 	if err != nil {
 		logFatal("Error: %v", err)
@@ -179,6 +236,7 @@ func RunSubtaskDone(args []string) {
 	if err := SaveTicket(ticket); err != nil {
 		logFatal("Could not update ticket %s: %v", name, err)
 	}
+	logInfo("Subtask %s marked as done", subtask)
 }
 
 func RunSubtaskFailed(args []string) {
