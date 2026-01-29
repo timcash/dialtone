@@ -95,6 +95,8 @@ func ExecuteDev() {
 		ui_cli.Run(args)
 	case "go":
 		go_cli.RunGo(args)
+	case "key":
+		ticket_cli.RunKey(args)
 
 	case "ai":
 		ai_cli.RunAI(args)
@@ -138,6 +140,7 @@ func printDevUsage() {
 
 	fmt.Println("  ai <subcmd>        AI tools (opencode, developer, subagent)")
 	fmt.Println("  go <subcmd>        Go toolchain tools (install, lint)")
+	fmt.Println("  key <subcmd>       Manage encrypted keys (add, list, rm, lease)")
 	fmt.Println("  help               Show this help message")
 }
 

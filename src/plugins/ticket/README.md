@@ -32,6 +32,11 @@ Ticket CLI examples:
 ./dialtone.sh ticket subtask done    # Manually pass a subtask (gated by tests)
 ./dialtone.sh ticket validate        # Check for status regressions or schema errors
 ./dialtone.sh ticket upsert --file f # Import ticket definition from JSON
+
+./dialtone.sh key add <n> <v> <p>   # Securely store an encrypted key
+./dialtone.sh key <n> <p>            # Lease an encrypted key (outputs value)
+./dialtone.sh key list               # List all stored key names
+./dialtone.sh key rm <n>             # Remove a key from storage
 ```
 
 # Workflow Example
@@ -60,6 +65,12 @@ Ticket CLI examples:
 ```
 
 # Advanced
+
+### Environment Variables
+- `TICKET_DB_PATH`: Override the default DuckDB storage location. Useful for integration tests to avoid modifying production ticket data.
+  ```shell
+  TICKET_DB_PATH=src/tickets/test_tickets.duckdb ./dialtone.sh ticket list
+  ```
 
 ### Ticket Data Model (Go)
 ```go
