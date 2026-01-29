@@ -20,6 +20,7 @@ import (
 	ui_test "dialtone/cli/src/plugins/ui/test"
 )
 
+
 // RunTest handles the 'test' command
 func RunTest(args []string) {
 	if len(args) == 0 {
@@ -217,8 +218,6 @@ func runPluginTest(pluginName string, showList bool) {
 		runInstallTests()
 	case "ticket":
 		runTicketTests()
-	case "test":
-		runTestPluginTests()
 	case "ui":
 		runUiTests()
 	case "ai":
