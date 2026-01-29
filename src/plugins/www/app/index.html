@@ -15,7 +15,8 @@
     <header class="header-title">
       <h1>dialtone.earth</h1>
       <p class="subtitle">unified robotic networks for earth</p>
-      <p class="version">v1.0.1</p>
+      <p class="version">v1.0.6</p>
+      <p class="version header-telemetry">ALT <span data-telemetry="altitude">-- KM</span> · SPD <span data-telemetry="speed">-- KM/S</span></p>
     </header>
 
     <nav class="main-nav">
@@ -55,9 +56,13 @@
         </svg>
       </a>
     </div>
-    <!-- Slide 1: Globe & Title -->
+    <!-- Slide 1: Earth V1 -->
     <section id="s-home" class="snap-slide">
-      <div id="globe-container"></div>
+      <div id="earth-container"></div>
+      <button id="earth-config-toggle" class="earth-config-toggle" type="button" aria-expanded="false">
+        Config
+      </button>
+      <div id="earth-config-panel" class="earth-config-panel" hidden></div>
     </section>
 
     <!-- Slide 2: Video -->
