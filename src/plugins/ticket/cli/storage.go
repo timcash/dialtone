@@ -654,3 +654,30 @@ func DeleteKey(name string) error {
 	_, err = db.Exec(`DELETE FROM keys WHERE name = ?`, name)
 	return err
 }
+
+func DeleteTicket(ticketID string) error {
+	db, err := openTicketDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	tables := []string{"tickets", "subtasks", "ticket_summaries", "ticket_logs"}
+	for _, table := range tables {
+		query := fmt.Sprintf("DELETE FROM %s WHERE %s = ?", table, "ticket_id")
+		if table == "tickets" {
+			query = "DELETE FROM tickets WHERE id = ?"
+		}
+		if _, err := tx.Exec(query, ticketID); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
