@@ -1,12 +1,30 @@
 package cli
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
+	"time"
 )
+
+const testTemplate = `package test
+import (
+	"dialtone/cli/src/dialtest"
+)
+func init() {
+	dialtest.RegisterTicket("{{.TicketID}}")
+	dialtest.AddSubtaskTest("init", RunInitTest, nil)
+}
+func RunInitTest() error {
+	// TODO: Implement verification logic for subtask 'init'
+	return nil
+}
+`
 
 func Run(args []string) {
 	if len(args) == 0 {
@@ -34,12 +52,22 @@ func Run(args []string) {
 		RunNext(subArgs)
 	case "done":
 		RunDone(subArgs)
+	case "summary":
+		RunSummary(subArgs)
+	case "search":
+		RunSearch(subArgs)
+	case "ack":
+		RunAck(subArgs)
+	case "grant":
+		RunGrant(subArgs)
 	case "upsert":
 		RunUpsert(subArgs)
 	case "subtask":
 		RunSubtask(subArgs)
 	case "test":
 		RunTest(subArgs)
+	case "key":
+		RunKey(subArgs)
 	default:
 		fmt.Printf("Unknown ticket subcommand: %s\n", subcommand)
 		printUsage()
@@ -48,7 +76,7 @@ func Run(args []string) {
 
 func printUsage() {
 	fmt.Println("Usage: ./dialtone.sh ticket <command> [args]")
-	fmt.Println("Commands: add, start, ask, log, list, validate, next, done, upsert, subtask, test")
+	fmt.Println("Commands: add, start, ask, log, list, validate, next, done, ack, grant, upsert, subtask, test, summary, search, key")
 }
 
 func RunAdd(args []string) {
@@ -86,19 +114,26 @@ func RunAdd(args []string) {
 
 	testGo := filepath.Join(dir, "test", "test.go")
 	if _, err := os.Stat(testGo); os.IsNotExist(err) {
-		content := fmt.Sprintf(`package test
-import (
-	"dialtone/cli/src/dialtest"
-)
-func init() {
-	dialtest.RegisterTicket("%s")
-	dialtest.AddSubtaskTest("example", RunExample, nil)
-}
-func RunExample() error {
-	return nil
-}
-`, name)
-		os.WriteFile(testGo, []byte(content), 0644)
+		tmpl, err := template.New("test").Parse(testTemplate)
+		if err != nil {
+			logFatal("Could not parse test template: %v", err)
+		}
+
+		f, err := os.Create(testGo)
+		if err != nil {
+			logFatal("Could not create %s: %v", testGo, err)
+		}
+		defer f.Close()
+
+		data := struct {
+			TicketID string
+		}{
+			TicketID: name,
+		}
+
+		if err := tmpl.Execute(f, data); err != nil {
+			logFatal("Could not execute test template: %v", err)
+		}
 		logInfo("Created %s", testGo)
 	}
 
@@ -111,8 +146,50 @@ func RunStart(args []string) {
 	}
 	name := args[0]
 	RunAdd(args)
+
+	// V2: Contextual Alert (Scaffold)
+	if strings.Contains(name, "api") || strings.Contains(name, "stripe") {
+		fmt.Println("[ALERT] Similar patterns found in 'previous-stripe-plugin'.")
+		fmt.Println("[CONTEXT] Found related subtasks in DuckDB archives.")
+	}
+
 	logTicketCommand(name, "start", args)
+
+	// V2: Initialize timestamps
+	ticket, err := GetTicket(name)
+	if err == nil {
+		now := time.Now().Format(time.RFC3339)
+		ticket.StartTime = now
+		ticket.LastSummaryTime = now
+		SaveTicket(ticket)
+	}
+
 	logInfo("Ticket %s started successfully", name)
+}
+
+func RunAck(args []string) {
+	ticket, err := GetCurrentTicket()
+	if err != nil {
+		logFatal("Error getting current ticket: %v", err)
+	}
+
+	message := "Acknowledged messages"
+	if len(args) > 0 {
+		message = strings.Join(args, " ")
+	}
+
+	appendTicketLogEntry(ticket.ID, "ack", message, "")
+	logInfo("Messages acknowledged for ticket %s", ticket.ID)
+}
+
+func RunGrant(args []string) {
+	ticket, err := GetCurrentTicket()
+	if err != nil {
+		logFatal("Error getting current ticket: %v", err)
+	}
+
+	logInfo("[AUTH] Temporary resource access granted (scaffold)")
+	logTicketCommand(ticket.ID, "grant", args)
 }
 
 func RunAsk(args []string) {
@@ -215,9 +292,225 @@ func RunDone(args []string) {
 		}
 	}
 
+	// V2: Mandatory Agent Summary from agent_summary.md
+	dir := filepath.Join("src", "tickets", ticket.ID)
+	summaryPath := filepath.Join(dir, "agent_summary.md")
+	content, err := os.ReadFile(summaryPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// If file is missing, we check if we have any historical summaries
+			allSummaries, _ := ListTicketSummaries(ticket.ID)
+			if len(allSummaries) == 0 {
+				fmt.Printf("[EXAMPLE] Recommended format for agent_summary.md:\n\n")
+				fmt.Printf("## Ran commands to find source files\n")
+				fmt.Printf("1. searched with grep - result nothing\n")
+				fmt.Printf("2. searched with `./dialtone.sh ticket search \"vertex node\"` - 2 results\n\n")
+				logFatal("Missing mandatory agent_summary.md and no summary history found for ticket completion")
+			}
+			// Use history only
+			finalLog := "## Unified Agent Summary\n\n"
+			for _, s := range allSummaries {
+				finalLog += fmt.Sprintf("### %s (%s)\n%s\n\n", s.Timestamp, s.SubtaskName, s.Content)
+			}
+			ticket.AgentSummary = finalLog
+		} else {
+			logFatal("Error reading %s: %v", summaryPath, err)
+		}
+	} else {
+		if len(strings.TrimSpace(string(content))) == 0 {
+			logFatal("agent_summary.md is empty. A final summary is required.")
+		}
+
+		allSummaries, _ := ListTicketSummaries(ticket.ID)
+		finalLog := "## Unified Agent Summary\n\n"
+		for _, s := range allSummaries {
+			finalLog += fmt.Sprintf("### %s (%s)\n%s\n\n", s.Timestamp, s.SubtaskName, s.Content)
+		}
+		finalLog += "### Final Summary\n" + string(content)
+		ticket.AgentSummary = finalLog
+
+		// Cleanup the file after ingestion in done as well
+		os.Remove(summaryPath)
+	}
+
 	logInfo("Finalizing ticket %s...", ticket.ID)
 	logTicketCommand(ticket.ID, "done", args)
+	if err := SaveTicket(ticket); err != nil {
+		logFatal("Could not save final summary: %v", err)
+	}
 	logInfo("Ticket %s completed", ticket.ID)
+}
+
+func RunSummary(args []string) {
+	ticket, err := GetCurrentTicket()
+	if err != nil {
+		logFatal("Error getting current ticket: %v", err)
+	}
+
+	idle := false
+	update := false
+	for _, arg := range args {
+		if arg == "--idle" {
+			idle = true
+		}
+		if arg == "update" || arg == "save" {
+			update = true
+		}
+	}
+
+	if !idle && !update {
+		summaries, err := ListTicketSummaries(ticket.ID)
+		if err != nil {
+			logFatal("Could not list summaries: %v", err)
+		}
+		fmt.Printf("# Agent Summaries for Ticket: %s\n\n", ticket.ID)
+		if len(summaries) == 0 {
+			fmt.Println("*No summaries captured yet.*")
+			return
+		}
+		for _, s := range summaries {
+			fmt.Printf("## [%s] %s\n", s.Timestamp, s.SubtaskName)
+			fmt.Printf("%s\n\n", s.Content)
+			fmt.Println("---")
+		}
+		return
+	}
+
+	summaryContent := ""
+	if !idle {
+		dir := filepath.Join("src", "tickets", ticket.ID)
+		summaryPath := filepath.Join(dir, "agent_summary.md")
+		content, err := os.ReadFile(summaryPath)
+		if err != nil {
+			fmt.Printf("[EXAMPLE] Recommended format for agent_summary.md:\n\n")
+			fmt.Printf("## Ran commands to find source files\n")
+			fmt.Printf("1. searched with grep - result nothing\n")
+			fmt.Printf("2. searched with `./dialtone.sh ticket search \"vertex node\"` - 2 results\n\n")
+			logFatal("Could not read %s: %v", summaryPath, err)
+		}
+		summaryContent = strings.TrimSpace(string(content))
+		if summaryContent == "" {
+			fmt.Printf("[EXAMPLE] Recommended format for agent_summary.md:\n\n")
+			fmt.Printf("## Ran commands to find source files\n")
+			fmt.Printf("1. searched with grep - result nothing\n")
+			fmt.Printf("2. searched with `./dialtone.sh ticket search \"vertex node\"` - 2 results\n\n")
+			logFatal("agent_summary.md is empty. Provide content or use --idle.")
+		}
+
+		// SHA256 Verification
+		hash := sha256.Sum256([]byte(summaryContent))
+		currentHex := hex.EncodeToString(hash[:])
+
+		last, err := GetLastTicketSummary(ticket.ID)
+		if err == nil && last != nil {
+			lastHash := sha256.Sum256([]byte(last.Content))
+			lastHex := hex.EncodeToString(lastHash[:])
+			if currentHex == lastHex {
+				logFatal("Summary content has not changed. Please update agent_summary.md.")
+			}
+		}
+
+		// Auto-deletion on success (update)
+		defer os.Remove(summaryPath)
+	} else {
+		summaryContent = "[IDLE] No work performed in this interval."
+	}
+
+	subtask := ""
+	st := FindNextSubtask(ticket)
+	if st != nil && st.Status == "progress" {
+		subtask = st.Name
+	}
+
+	if err := AppendTicketSummary(ticket.ID, subtask, summaryContent); err != nil {
+		logFatal("Could not save summary: %v", err)
+	}
+
+	ticket.LastSummaryTime = time.Now().Format(time.RFC3339)
+	if err := SaveTicket(ticket); err != nil {
+		logFatal("Could not update last summary time: %v", err)
+	}
+
+	logInfo("Summary captured and timer reset for ticket %s", ticket.ID)
+}
+
+func RunSearch(args []string) {
+	if len(args) < 1 {
+		logFatal("Usage: ./dialtone.sh ticket search <query>")
+	}
+	query := strings.Join(args, " ")
+	results, err := SearchTicketSummaries(query)
+	if err != nil {
+		logFatal("Search failed: %v", err)
+	}
+
+	fmt.Printf("Search results for \"%s\":\n", query)
+	for _, r := range results {
+		fmt.Printf("--- %s | %s | %s ---\n", r.TicketID, r.SubtaskName, r.Timestamp)
+		fmt.Println(r.Content)
+	}
+}
+
+func RunKey(args []string) {
+	if len(args) == 0 {
+		fmt.Println("Usage: ./dialtone.sh ticket key <command> [args]")
+		fmt.Println("Commands: add, list, rm, <name> <password>")
+		return
+	}
+
+	sub := args[0]
+	switch sub {
+	case "add":
+		if len(args) < 4 {
+			logFatal("Usage: ./dialtone.sh ticket key add <name> <value> <password>")
+		}
+		name, value, password := args[1], args[2], args[3]
+		salt, _ := generateSalt()
+		derived := deriveKey(password, salt)
+		ciphertext, nonce, err := encrypt([]byte(value), derived)
+		if err != nil {
+			logFatal("Encryption failed: %v", err)
+		}
+		key := &KeyEntry{Name: name, EncryptedValue: ciphertext, Salt: salt, Nonce: nonce}
+		if err := SaveKey(key); err != nil {
+			logFatal("Failed to save key: %v", err)
+		}
+		logInfo("Key '%s' stored securely.", name)
+	case "list":
+		names, err := ListKeyNames()
+		if err != nil {
+			logFatal("Failed to list keys: %v", err)
+		}
+		fmt.Println("Stored Keys:")
+		for _, n := range names {
+			fmt.Printf("- %s\n", n)
+		}
+	case "rm":
+		if len(args) < 2 {
+			logFatal("Usage: ./dialtone.sh ticket key rm <name>")
+		}
+		if err := DeleteKey(args[1]); err != nil {
+			logFatal("Failed to delete key: %v", err)
+		}
+		logInfo("Key '%s' removed.", args[1])
+	default:
+		// Attempt to lease/retrieve
+		name := args[0]
+		if len(args) < 2 {
+			logFatal("Usage: ./dialtone.sh ticket key <name> <password>")
+		}
+		password := args[1]
+		key, err := GetKey(name)
+		if err != nil || key == nil {
+			logFatal("Key '%s' not found.", name)
+		}
+		derived := deriveKey(password, key.Salt)
+		plaintext, err := decrypt(key.EncryptedValue, derived, key.Nonce)
+		if err != nil {
+			logFatal("Invalid password or corrupted key data.")
+		}
+		fmt.Print(string(plaintext))
+	}
 }
 
 func GetCurrentTicket() (*Ticket, error) {

@@ -41,7 +41,16 @@ func ensureTicketSchema(db *sql.DB) error {
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
 			tags TEXT,
-			description TEXT
+			description TEXT,
+			agent_summary TEXT,
+			start_time TEXT,
+			last_summary_time TEXT
+		);`,
+		`CREATE TABLE IF NOT EXISTS ticket_summaries (
+			ticket_id TEXT NOT NULL,
+			subtask_name TEXT,
+			timestamp TEXT NOT NULL,
+			content TEXT NOT NULL
 		);`,
 		`CREATE TABLE IF NOT EXISTS subtasks (
 			ticket_id TEXT NOT NULL,
@@ -67,12 +76,31 @@ func ensureTicketSchema(db *sql.DB) error {
 			key TEXT PRIMARY KEY,
 			value TEXT
 		);`,
+		`CREATE TABLE IF NOT EXISTS keys (
+			name TEXT PRIMARY KEY,
+			encrypted_value BLOB,
+			salt BLOB,
+			nonce BLOB
+		);`,
 	}
 	for _, stmt := range statements {
 		if _, err := db.Exec(stmt); err != nil {
 			return err
 		}
 	}
+
+	// Migrations for V2 summary fields
+	migrations := []string{
+		`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS agent_summary TEXT;`,
+		`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS start_time TEXT;`,
+		`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS last_summary_time TEXT;`,
+	}
+	for _, stmt := range migrations {
+		if _, err := db.Exec(stmt); err != nil {
+			// Ignore errors for already existing columns if IF NOT EXISTS isn't supported/needed
+		}
+	}
+
 	return nil
 }
 
@@ -90,8 +118,11 @@ func GetTicket(ticketID string) (*Ticket, error) {
 	var name string
 	var tags sql.NullString
 	var description sql.NullString
-	row := db.QueryRow(`SELECT id, name, tags, description FROM tickets WHERE id = ?`, ticketID)
-	if err := row.Scan(&id, &name, &tags, &description); err != nil {
+	var agentSummary sql.NullString
+	var startTime sql.NullString
+	var lastSummaryTime sql.NullString
+	row := db.QueryRow(`SELECT id, name, tags, description, agent_summary, start_time, last_summary_time FROM tickets WHERE id = ?`, ticketID)
+	if err := row.Scan(&id, &name, &tags, &description, &agentSummary, &startTime, &lastSummaryTime); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrTicketNotFound
 		}
@@ -99,9 +130,12 @@ func GetTicket(ticketID string) (*Ticket, error) {
 	}
 
 	ticket := &Ticket{
-		ID:          id,
-		Name:        name,
-		Description: description.String,
+		ID:              id,
+		Name:            name,
+		Description:     description.String,
+		AgentSummary:    agentSummary.String,
+		StartTime:       startTime.String,
+		LastSummaryTime: lastSummaryTime.String,
 	}
 	if tagValues, err := decodeStringSlice(tags); err != nil {
 		return nil, err
@@ -194,10 +228,17 @@ func SaveTicket(ticket *Ticket) error {
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO tickets (id, name, tags, description)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET name = excluded.name, tags = excluded.tags, description = excluded.description`,
-		ticket.ID, ticket.Name, tagPayload, ticket.Description); err != nil {
+	if _, err := tx.Exec(`INSERT INTO tickets (id, name, tags, description, agent_summary, start_time, last_summary_time)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET 
+			name = excluded.name, 
+			tags = excluded.tags, 
+			description = excluded.description,
+			agent_summary = excluded.agent_summary,
+			start_time = excluded.start_time,
+			last_summary_time = excluded.last_summary_time`,
+		ticket.ID, ticket.Name, tagPayload, ticket.Description,
+		ticket.AgentSummary, ticket.StartTime, ticket.LastSummaryTime); err != nil {
 		return err
 	}
 
@@ -263,6 +304,100 @@ func ListTickets() ([]string, error) {
 	return ids, nil
 }
 
+func AppendTicketSummary(ticketID, subtaskName, content string) error {
+	if ticketID == "" {
+		return fmt.Errorf("ticket ID is empty")
+	}
+	db, err := openTicketDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`INSERT INTO ticket_summaries (ticket_id, subtask_name, timestamp, content) VALUES (?, ?, ?, ?)`,
+		ticketID,
+		nullOrValue(subtaskName),
+		time.Now().Format(time.RFC3339),
+		content,
+	)
+	return err
+}
+
+func ListTicketSummaries(ticketID string) ([]SummaryEntry, error) {
+	db, err := openTicketDB()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`SELECT subtask_name, timestamp, content FROM ticket_summaries WHERE ticket_id = ? ORDER BY timestamp ASC`, ticketID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []SummaryEntry
+	for rows.Next() {
+		var e SummaryEntry
+		var subtask sql.NullString
+		if err := rows.Scan(&subtask, &e.Timestamp, &e.Content); err != nil {
+			return nil, err
+		}
+		e.SubtaskName = subtask.String
+		e.TicketID = ticketID
+		entries = append(entries, e)
+	}
+	return entries, nil
+}
+
+func GetLastTicketSummary(ticketID string) (*SummaryEntry, error) {
+	db, err := openTicketDB()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	var e SummaryEntry
+	var subtask sql.NullString
+	err = db.QueryRow(`SELECT subtask_name, timestamp, content FROM ticket_summaries WHERE ticket_id = ? ORDER BY timestamp DESC LIMIT 1`, ticketID).Scan(&subtask, &e.Timestamp, &e.Content)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	e.SubtaskName = subtask.String
+	e.TicketID = ticketID
+	return &e, nil
+}
+
+func SearchTicketSummaries(query string) ([]SummaryEntry, error) {
+	db, err := openTicketDB()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`SELECT ticket_id, subtask_name, timestamp, content FROM ticket_summaries WHERE content LIKE ? OR subtask_name LIKE ? ORDER BY timestamp DESC`,
+		"%"+query+"%", "%"+query+"%")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []SummaryEntry
+	for rows.Next() {
+		var e SummaryEntry
+		var subtask sql.NullString
+		if err := rows.Scan(&e.TicketID, &subtask, &e.Timestamp, &e.Content); err != nil {
+			return nil, err
+		}
+		e.SubtaskName = subtask.String
+		entries = append(entries, e)
+	}
+	return entries, nil
+}
+
 func AppendTicketLogEntry(ticketID, entryType, message, subtask string) error {
 	if ticketID == "" {
 		return fmt.Errorf("ticket ID is empty")
@@ -284,6 +419,35 @@ func AppendTicketLogEntry(ticketID, entryType, message, subtask string) error {
 		nullOrValue(subtask),
 	)
 	return err
+}
+
+func GetLogEntries(ticketID string) ([]LogEntry, error) {
+	if ticketID == "" {
+		return nil, fmt.Errorf("ticket ID is empty")
+	}
+	db, err := openTicketDB()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`SELECT timestamp, entry_type, message, subtask FROM ticket_logs WHERE ticket_id = ? ORDER BY timestamp ASC`, ticketID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []LogEntry
+	for rows.Next() {
+		var e LogEntry
+		var subtask sql.NullString
+		if err := rows.Scan(&e.Timestamp, &e.EntryType, &e.Message, &subtask); err != nil {
+			return nil, err
+		}
+		e.Subtask = subtask.String
+		entries = append(entries, e)
+	}
+	return entries, nil
 }
 
 func SetCurrentTicket(ticketID string) error {
@@ -416,4 +580,74 @@ func validateTicket(ticket *Ticket) error {
 	}
 
 	return nil
+}
+
+func SaveKey(key *KeyEntry) error {
+	db, err := openTicketDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`INSERT INTO keys (name, encrypted_value, salt, nonce) 
+		VALUES (?, ?, ?, ?) 
+		ON CONFLICT(name) DO UPDATE SET 
+			encrypted_value = excluded.encrypted_value,
+			salt = excluded.salt,
+			nonce = excluded.nonce`,
+		key.Name, key.EncryptedValue, key.Salt, key.Nonce)
+	return err
+}
+
+func GetKey(name string) (*KeyEntry, error) {
+	db, err := openTicketDB()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	var k KeyEntry
+	err = db.QueryRow(`SELECT name, encrypted_value, salt, nonce FROM keys WHERE name = ?`, name).Scan(&k.Name, &k.EncryptedValue, &k.Salt, &k.Nonce)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &k, nil
+}
+
+func ListKeyNames() ([]string, error) {
+	db, err := openTicketDB()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`SELECT name FROM keys ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+func DeleteKey(name string) error {
+	db, err := openTicketDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`DELETE FROM keys WHERE name = ?`, name)
+	return err
 }
