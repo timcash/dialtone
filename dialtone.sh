@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# --- CONFIGURATION ---
+GRACEFUL_TIMEOUT=${GRACEFUL_TIMEOUT:-5}   # Seconds to wait after SIGTERM before SIGKILL
+PROCESS_TIMEOUT=${PROCESS_TIMEOUT:-0}      # Max runtime in seconds (0 = no limit)
+
 # --- HELP MENU ---
 print_help() {
     cat <<EOF
@@ -30,8 +34,45 @@ Commands:
   ai <subcmd>        AI tools (opencode, developer, subagent)
   go <subcmd>        Go toolchain tools (install, lint)
   help               Show this help message
+
+Global Options:
+  --env <path>       Set DIALTONE_ENV directory
+  --timeout <sec>    Max runtime before graceful shutdown (0 = no limit)
+  --grace <sec>      Seconds to wait after SIGTERM before SIGKILL (default: 5)
 EOF
 }
+
+# --- GRACEFUL SHUTDOWN ---
+CHILD_PID=""
+
+cleanup() {
+    if [ -n "$CHILD_PID" ] && kill -0 "$CHILD_PID" 2>/dev/null; then
+        echo ""
+        echo "[dialtone] Sending SIGTERM to process $CHILD_PID..."
+        kill -TERM "$CHILD_PID" 2>/dev/null || true
+        
+        # Wait for graceful shutdown
+        local waited=0
+        while [ $waited -lt $GRACEFUL_TIMEOUT ] && kill -0 "$CHILD_PID" 2>/dev/null; do
+            sleep 1
+            waited=$((waited + 1))
+            echo "[dialtone] Waiting for graceful shutdown... ($waited/$GRACEFUL_TIMEOUT)"
+        done
+        
+        # Force kill if still running
+        if kill -0 "$CHILD_PID" 2>/dev/null; then
+            echo "[dialtone] Process did not exit, sending SIGKILL..."
+            kill -KILL "$CHILD_PID" 2>/dev/null || true
+        else
+            echo "[dialtone] Process exited gracefully."
+        fi
+    fi
+}
+
+# Trap signals and forward to child
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
 
 # 0. Ensure critical directories exist for Go embed
 mkdir -p src/core/web/dist
@@ -48,6 +89,22 @@ while [[ $# -gt 0 ]]; do
             ;;
         --env)
             DIALTONE_ENV="$2"
+            shift 2
+            ;;
+        --timeout=*)
+            PROCESS_TIMEOUT="${1#*=}"
+            shift
+            ;;
+        --timeout)
+            PROCESS_TIMEOUT="$2"
+            shift 2
+            ;;
+        --grace=*)
+            GRACEFUL_TIMEOUT="${1#*=}"
+            shift
+            ;;
+        --grace)
+            GRACEFUL_TIMEOUT="$2"
             shift 2
             ;;
         -h|--help|help)
@@ -75,15 +132,25 @@ if [ -z "$DIALTONE_ENV" ] && [ -f .env ]; then
     DIALTONE_ENV=$(grep "^DIALTONE_ENV=" .env | cut -d '=' -f2)
 fi
 
+# Error if DIALTONE_ENV is not set
+if [ -z "$DIALTONE_ENV" ]; then
+    echo "Error: DIALTONE_ENV is not set."
+    echo ""
+    echo "Please add DIALTONE_ENV to your .env file:"
+    echo "  echo 'DIALTONE_ENV=/path/to/your/env' >> .env"
+    echo ""
+    echo "Or pass it as an argument:"
+    echo "  ./dialtone.sh --env=/path/to/your/env <command>"
+    exit 1
+fi
+
 # Tilde expansion
 if [[ "$DIALTONE_ENV" == "~"* ]]; then
     DIALTONE_ENV="${DIALTONE_ENV/#\~/$HOME}"
 fi
 
 # Ensure it is exported for child processes (Go binary)
-if [ -n "$DIALTONE_ENV" ]; then
-    export DIALTONE_ENV
-fi
+export DIALTONE_ENV
 
 # 3. Handle Go Installation / Check
 GO_BIN=""
@@ -157,10 +224,44 @@ else
 fi
 
 # 6. Run the tool
+run_with_timeout() {
+    local go_cmd="$1"
+    shift
+    
+    # Run in background and capture PID
+    "$go_cmd" run src/cmd/dev/main.go "$@" &
+    CHILD_PID=$!
+    
+    # If timeout is set, start watchdog
+    if [ "$PROCESS_TIMEOUT" -gt 0 ]; then
+        (
+            sleep "$PROCESS_TIMEOUT"
+            if kill -0 "$CHILD_PID" 2>/dev/null; then
+                echo ""
+                echo "[dialtone] Timeout ($PROCESS_TIMEOUT seconds) reached, initiating shutdown..."
+                kill -TERM "$CHILD_PID" 2>/dev/null || true
+            fi
+        ) &
+        WATCHDOG_PID=$!
+    fi
+    
+    # Wait for child process
+    wait "$CHILD_PID" 2>/dev/null
+    EXIT_CODE=$?
+    CHILD_PID=""
+    
+    # Kill watchdog if it's still running
+    if [ -n "$WATCHDOG_PID" ] && kill -0 "$WATCHDOG_PID" 2>/dev/null; then
+        kill "$WATCHDOG_PID" 2>/dev/null || true
+    fi
+    
+    exit $EXIT_CODE
+}
+
 if [ -n "$GO_BIN" ] && [ -f "$GO_BIN" ]; then
-    exec "$GO_BIN" run src/cmd/dev/main.go "${ARGS[@]}"
+    run_with_timeout "$GO_BIN" "${ARGS[@]}"
 else
     # Fallback to system go if DIALTONE_ENV isn't set or doesn't have go (and we didn't error above)
-    exec go run src/cmd/dev/main.go "${ARGS[@]}"
+    run_with_timeout go "${ARGS[@]}"
 fi
 
