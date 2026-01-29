@@ -1,27 +1,27 @@
 # Test Plugin
 
-The `test` plugin provides a centralized test runner for `dialtone`. It supports running ticket-specific tests, plugin-specific tests, and global tag-based test filtering.
+The `test` plugin provides a centralized test runner for `dialtone`. It supports running plugin-specific tests and global tag-based test filtering.
 
 ## Commands
 
-```bash
-# Runs all tests for a specific plugin.
-# Use `--subtask <subtask-name>` for a specific test, or `--list` to dry-run.
+```shell
+# Run all tests for a specific plugin
 ./dialtone.sh plugin test <plugin-name>
 
-# Runs tests for a specific plugin. Plugins must register a `RunAll() error`
-# function in their test/ package and connect it to src/plugins/test/cli/test.go.
-./dialtone.sh plugin test <plugin-name>
+# Run a specific subtask test
+./dialtone.sh plugin test <plugin-name> --subtask <subtask-name>
 
-# Runs tests matching any of the specified tags.
-# Example: ./dialtone.sh test tags metadata camera-filters
-./dialtone.sh test tags <tag-name>...
+# List available tests for a plugin
+./dialtone.sh plugin test <plugin-name> --list
 
-# Runs all registered tests across all plugins and tickets.
-./dialtone.sh test
+# Run tests matching any of the specified tags
+./dialtone.sh plugin test tags <tag-name>...
 
-# Lists all tests that would be executed by the current command.
-./dialtone.sh test tags [<tag-name>...] --list
+# Run all registered tests
+./dialtone.sh plugin test
+
+# List all tests that would be executed
+./dialtone.sh plugin test --list
 ```
 
 
@@ -51,7 +51,7 @@ func RunMyTest() error {
 
 ### How Tag Filtering Works
 
-When you run `./dialtone.sh test tags <tags>`, the runner:
+When you run `./dialtone.sh plugin test tags <tags>`, the runner:
 1. Iterates through the global registry.
 2. Checks if the test has at least one of the tags requested.
 3. Executes the registered function for each matching test.

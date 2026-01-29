@@ -95,8 +95,5 @@ export PATH="$DIALTONE_ENV/go/bin:$DIALTONE_ENV/node/bin:$DIALTONE_ENV/zig:$DIAL
 ## Tests
 
 ```shell
-./dialtone.sh test install-scaffold     # Environment setup test
-./dialtone.sh test install-help         # Help flag verification
-./dialtone.sh test install-local        # Full local installation
-./dialtone.sh test install-idempotency  # Re-run safety test
+./dialtone.sh plugin test install       # Run all install plugin tests
 ```

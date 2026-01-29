@@ -76,11 +76,11 @@ Use the `ticket` command for new work. It enforces TDD and standardized markdown
 
 ## Running Tests: Tests are the most important concept in `dialtone`
 ```bash
-./dialtone.sh plugin test <plugin-name> # Run tests for a specific plugin
+./dialtone.sh plugin test <plugin-name>                         # Run tests for a specific plugin
 ./dialtone.sh plugin test <plugin-name> --subtask <subtask-name> # Run specific subtask test
-./dialtone.sh test tags [tag1 tag2 ...] # Run tests matching any of the specified tags
-./dialtone.sh test --list               # List tests that would run
-./dialtone.sh test                      # Run all tests
+./dialtone.sh plugin test tags [tag1 tag2 ...]                   # Run tests matching tags
+./dialtone.sh plugin test --list                                 # List tests that would run
+./dialtone.sh plugin test                                        # Run all tests
 ```
 
 ## Logs
@@ -258,7 +258,7 @@ src/plugins/<name>/
 
 ## TEST: Proof that a subtask is complete
 1. SCOPE: One subtask or plugin goal.
-2. COMMAND: A `dialtone.sh test ...` invocation tied to the subtask.
+2. COMMAND: A `dialtone.sh plugin test ...` invocation tied to the subtask.
 3. OUTCOME: Must fail before the change and pass after.
 
 ## PLUGIN: Modular feature area with its own tooling
