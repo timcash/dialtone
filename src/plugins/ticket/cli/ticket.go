@@ -69,6 +69,8 @@ func Run(args []string) {
 		RunTest(subArgs)
 	case "key":
 		RunKey(subArgs)
+	case "delete":
+		RunDelete(subArgs)
 	default:
 		fmt.Printf("Unknown ticket subcommand: %s\n", subcommand)
 		printUsage()
@@ -77,7 +79,7 @@ func Run(args []string) {
 
 func printUsage() {
 	fmt.Println("Usage: ./dialtone.sh ticket <command> [args]")
-	fmt.Println("Commands: add, start, ask, log, list, validate, next, done, ack, grant, upsert, subtask, test, summary, search, key")
+	fmt.Println("Commands: add, start, ask, log, list, validate, next, done, ack, grant, upsert, subtask, test, summary, search, key, delete")
 }
 
 func RunAdd(args []string) {
@@ -538,6 +540,28 @@ func RunKey(args []string) {
 		}
 		fmt.Print(string(plaintext))
 	}
+}
+
+func RunDelete(args []string) {
+	if len(args) < 1 {
+		logFatal("Usage: ./dialtone.sh ticket delete <ticket-name>")
+	}
+	name := args[0]
+
+	// Delete from database
+	if err := DeleteTicket(name); err != nil {
+		logFatal("Could not delete ticket %s from database: %v", name, err)
+	}
+
+	// Delete from file system
+	dir := filepath.Join("src", "tickets", name)
+	if _, err := os.Stat(dir); err == nil {
+		if err := os.RemoveAll(dir); err != nil {
+			logFatal("Could not delete ticket directory %s: %v", dir, err)
+		}
+	}
+
+	logInfo("Ticket %s deleted successfully", name)
 }
 
 func GetCurrentTicket() (*Ticket, error) {
