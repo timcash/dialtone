@@ -1,0 +1,60 @@
+{
+    "id": "create-key-command",
+    "name": "create-key-command",
+    "description": "Implement encrypted key storage and leasing",
+    "subtasks": [
+        {
+            "name": "init",
+            "description": "Initialization",
+            "status": "done"
+        },
+        {
+            "name": "storage-schema",
+            "description": "Update DuckDB schema for 'keys' table",
+            "status": "done"
+        },
+        {
+            "name": "crypto-utils",
+            "description": "Implement AES-GCM and PBKDF2 utilities",
+            "status": "done"
+        },
+        {
+            "name": "cli-routing",
+            "description": "Add 'key' command to the main CLI router",
+            "status": "todo"
+        },
+        {
+            "name": "cmd-add",
+            "description": "Implement 'key add' for secure storage",
+            "status": "todo",
+            "dependencies": [
+                "cli-routing",
+                "crypto-utils"
+            ]
+        },
+        {
+            "name": "cmd-lease",
+            "description": "Implement 'key <name> <password>' for retrieval",
+            "status": "todo",
+            "dependencies": [
+                "cmd-add"
+            ]
+        },
+        {
+            "name": "cmd-list",
+            "description": "Implement 'key list'",
+            "status": "todo",
+            "dependencies": [
+                "cli-routing"
+            ]
+        },
+        {
+            "name": "cmd-rm",
+            "description": "Implement 'key rm'",
+            "status": "todo",
+            "dependencies": [
+                "cli-routing"
+            ]
+        }
+    ]
+}

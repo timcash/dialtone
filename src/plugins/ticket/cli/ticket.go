@@ -66,6 +66,8 @@ func Run(args []string) {
 		RunSubtask(subArgs)
 	case "test":
 		RunTest(subArgs)
+	case "key":
+		RunKey(subArgs)
 	default:
 		fmt.Printf("Unknown ticket subcommand: %s\n", subcommand)
 		printUsage()
@@ -74,7 +76,7 @@ func Run(args []string) {
 
 func printUsage() {
 	fmt.Println("Usage: ./dialtone.sh ticket <command> [args]")
-	fmt.Println("Commands: add, start, ask, log, list, validate, next, done, ack, grant, upsert, subtask, test, summary, search")
+	fmt.Println("Commands: add, start, ask, log, list, validate, next, done, ack, grant, upsert, subtask, test, summary, search, key")
 }
 
 func RunAdd(args []string) {
@@ -446,6 +448,68 @@ func RunSearch(args []string) {
 	for _, r := range results {
 		fmt.Printf("--- %s | %s | %s ---\n", r.TicketID, r.SubtaskName, r.Timestamp)
 		fmt.Println(r.Content)
+	}
+}
+
+func RunKey(args []string) {
+	if len(args) == 0 {
+		fmt.Println("Usage: ./dialtone.sh ticket key <command> [args]")
+		fmt.Println("Commands: add, list, rm, <name> <password>")
+		return
+	}
+
+	sub := args[0]
+	switch sub {
+	case "add":
+		if len(args) < 4 {
+			logFatal("Usage: ./dialtone.sh ticket key add <name> <value> <password>")
+		}
+		name, value, password := args[1], args[2], args[3]
+		salt, _ := generateSalt()
+		derived := deriveKey(password, salt)
+		ciphertext, nonce, err := encrypt([]byte(value), derived)
+		if err != nil {
+			logFatal("Encryption failed: %v", err)
+		}
+		key := &KeyEntry{Name: name, EncryptedValue: ciphertext, Salt: salt, Nonce: nonce}
+		if err := SaveKey(key); err != nil {
+			logFatal("Failed to save key: %v", err)
+		}
+		logInfo("Key '%s' stored securely.", name)
+	case "list":
+		names, err := ListKeyNames()
+		if err != nil {
+			logFatal("Failed to list keys: %v", err)
+		}
+		fmt.Println("Stored Keys:")
+		for _, n := range names {
+			fmt.Printf("- %s\n", n)
+		}
+	case "rm":
+		if len(args) < 2 {
+			logFatal("Usage: ./dialtone.sh ticket key rm <name>")
+		}
+		if err := DeleteKey(args[1]); err != nil {
+			logFatal("Failed to delete key: %v", err)
+		}
+		logInfo("Key '%s' removed.", args[1])
+	default:
+		// Attempt to lease/retrieve
+		name := args[0]
+		if len(args) < 2 {
+			logFatal("Usage: ./dialtone.sh ticket key <name> <password>")
+		}
+		password := args[1]
+		key, err := GetKey(name)
+		if err != nil || key == nil {
+			logFatal("Key '%s' not found.", name)
+		}
+		derived := deriveKey(password, key.Salt)
+		plaintext, err := decrypt(key.EncryptedValue, derived, key.Nonce)
+		if err != nil {
+			logFatal("Invalid password or corrupted key data.")
+		}
+		fmt.Print(string(plaintext))
 	}
 }
 

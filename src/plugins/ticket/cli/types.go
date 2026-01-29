@@ -40,3 +40,10 @@ type LogEntry struct {
 	Message   string
 	Subtask   string
 }
+
+type KeyEntry struct {
+	Name           string
+	EncryptedValue []byte
+	Salt           []byte
+	Nonce          []byte
+}

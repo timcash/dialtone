@@ -76,6 +76,12 @@ func ensureTicketSchema(db *sql.DB) error {
 			key TEXT PRIMARY KEY,
 			value TEXT
 		);`,
+		`CREATE TABLE IF NOT EXISTS keys (
+			name TEXT PRIMARY KEY,
+			encrypted_value BLOB,
+			salt BLOB,
+			nonce BLOB
+		);`,
 	}
 	for _, stmt := range statements {
 		if _, err := db.Exec(stmt); err != nil {
@@ -574,4 +580,74 @@ func validateTicket(ticket *Ticket) error {
 	}
 
 	return nil
+}
+
+func SaveKey(key *KeyEntry) error {
+	db, err := openTicketDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`INSERT INTO keys (name, encrypted_value, salt, nonce) 
+		VALUES (?, ?, ?, ?) 
+		ON CONFLICT(name) DO UPDATE SET 
+			encrypted_value = excluded.encrypted_value,
+			salt = excluded.salt,
+			nonce = excluded.nonce`,
+		key.Name, key.EncryptedValue, key.Salt, key.Nonce)
+	return err
+}
+
+func GetKey(name string) (*KeyEntry, error) {
+	db, err := openTicketDB()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	var k KeyEntry
+	err = db.QueryRow(`SELECT name, encrypted_value, salt, nonce FROM keys WHERE name = ?`, name).Scan(&k.Name, &k.EncryptedValue, &k.Salt, &k.Nonce)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &k, nil
+}
+
+func ListKeyNames() ([]string, error) {
+	db, err := openTicketDB()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`SELECT name FROM keys ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+func DeleteKey(name string) error {
+	db, err := openTicketDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`DELETE FROM keys WHERE name = ?`, name)
+	return err
 }
