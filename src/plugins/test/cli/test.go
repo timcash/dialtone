@@ -29,6 +29,7 @@ import (
 	// _ "dialtone/cli/tickets/replace-progress-with-ticket-next/test"
 )
 
+
 // RunTest handles the 'test' command
 func RunTest(args []string) {
 	if len(args) == 0 {
@@ -226,8 +227,6 @@ func runPluginTest(pluginName string, showList bool) {
 		runInstallTests()
 	case "ticket":
 		runTicketTests()
-	case "test":
-		runTestPluginTests()
 	case "ui":
 		runUiTests()
 	case "ai":
