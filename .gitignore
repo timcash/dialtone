@@ -34,3 +34,4 @@ src/tickets/tickets.duckdb
 # Local Dependencies
 dialtone_dependencies/
 dev_dependencies/
+keys.duckdb

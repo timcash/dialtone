@@ -33,10 +33,10 @@ Ticket CLI examples:
 ./dialtone.sh ticket validate        # Check for status regressions or schema errors
 ./dialtone.sh ticket upsert --file f # Import ticket definition from JSON
 
-./dialtone.sh key add <n> <v> <p>   # Securely store an encrypted key
-./dialtone.sh key <n> <p>            # Lease an encrypted key (outputs value)
-./dialtone.sh key list               # List all stored key names
-./dialtone.sh key rm <n>             # Remove a key from storage
+./dialtone.sh ticket key add <n> <v> <p>   # Securely store an encrypted key
+./dialtone.sh ticket key <n> <p>            # Lease an encrypted key (outputs value)
+./dialtone.sh ticket key list               # List all stored key names
+./dialtone.sh ticket key rm <n>             # Remove a key from storage
 ```
 
 # Workflow Example

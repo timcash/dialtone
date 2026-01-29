@@ -14,13 +14,20 @@ import (
 
 var ErrTicketNotFound = errors.New("ticket not found")
 
-const ticketsDBFilename = "tickets.duckdb"
+const (
+	ticketsDBFilename = "tickets.duckdb"
+	keysDBFilename    = "keys.duckdb"
+)
 
 func ticketDBPath() string {
 	if p := os.Getenv("TICKET_DB_PATH"); p != "" {
 		return p
 	}
 	return filepath.Join("src", "tickets", ticketsDBFilename)
+}
+
+func keysDBPath() string {
+	return keysDBFilename // Root of the repo
 }
 
 func openTicketDB() (*sql.DB, error) {
@@ -32,6 +39,18 @@ func openTicketDB() (*sql.DB, error) {
 		return nil, err
 	}
 	if err := ensureTicketSchema(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
+func openKeysDB() (*sql.DB, error) {
+	db, err := sql.Open("duckdb", keysDBPath())
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureKeysSchema(db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -79,12 +98,6 @@ func ensureTicketSchema(db *sql.DB) error {
 			key TEXT PRIMARY KEY,
 			value TEXT
 		);`,
-		`CREATE TABLE IF NOT EXISTS keys (
-			name TEXT PRIMARY KEY,
-			encrypted_value BLOB,
-			salt BLOB,
-			nonce BLOB
-		);`,
 	}
 	for _, stmt := range statements {
 		if _, err := db.Exec(stmt); err != nil {
@@ -105,6 +118,17 @@ func ensureTicketSchema(db *sql.DB) error {
 	}
 
 	return nil
+}
+
+func ensureKeysSchema(db *sql.DB) error {
+	stmt := `CREATE TABLE IF NOT EXISTS keys (
+		name TEXT PRIMARY KEY,
+		encrypted_value BLOB,
+		salt BLOB,
+		nonce BLOB
+	);`
+	_, err := db.Exec(stmt)
+	return err
 }
 
 func GetTicket(ticketID string) (*Ticket, error) {
@@ -586,7 +610,7 @@ func validateTicket(ticket *Ticket) error {
 }
 
 func SaveKey(key *KeyEntry) error {
-	db, err := openTicketDB()
+	db, err := openKeysDB()
 	if err != nil {
 		return err
 	}
@@ -603,7 +627,7 @@ func SaveKey(key *KeyEntry) error {
 }
 
 func GetKey(name string) (*KeyEntry, error) {
-	db, err := openTicketDB()
+	db, err := openKeysDB()
 	if err != nil {
 		return nil, err
 	}
@@ -621,7 +645,7 @@ func GetKey(name string) (*KeyEntry, error) {
 }
 
 func ListKeyNames() ([]string, error) {
-	db, err := openTicketDB()
+	db, err := openKeysDB()
 	if err != nil {
 		return nil, err
 	}
@@ -645,7 +669,7 @@ func ListKeyNames() ([]string, error) {
 }
 
 func DeleteKey(name string) error {
-	db, err := openTicketDB()
+	db, err := openKeysDB()
 	if err != nil {
 		return err
 	}
