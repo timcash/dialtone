@@ -1,4 +1,4 @@
-# D3 globe visualization
+# Three.js Earth visualization
 
 *Automatically synced with your [v0.app](https://v0.app) deployments*
 

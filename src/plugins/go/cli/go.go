@@ -44,7 +44,8 @@ func printGoUsage() {
 	fmt.Println("\nCommands:")
 	fmt.Println("  install        Install Go toolchain to DIALTONE_ENV")
 	fmt.Println("  lint           Run go vet ./... using local toolchain")
-	fmt.Println("  exec <args...> Run arbitrary go command (e.g. 'run main.go') using local toolchain")
+	fmt.Println("  exec <args...> Run arbitrary go command using local toolchain")
+	fmt.Println("  run <args...>  Alias for exec")
 	fmt.Println("  pb-dump <file> Dump structure/strings of a protobuf file")
 	fmt.Println("  help           Show this help message")
 }

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -25,6 +26,8 @@ func RunSubtask(args []string) {
 		RunSubtaskDone(cmdArgs)
 	case "failed":
 		RunSubtaskFailed(cmdArgs)
+	case "note":
+		RunSubtaskNote(cmdArgs)
 	case "":
 		// If no command provided, print next incomplete
 		logSubtaskCommand(command, cmdArgs)
@@ -93,7 +96,7 @@ func RunNext(args []string) {
 
 	logInfo("Executing test for subtask: %s", st.Name)
 	testErr := runDynamicTest(ticketID, st.Name)
-	
+
 	// Reload
 	ticket, err = GetTicket(ticketID)
 	if err != nil {
@@ -196,6 +199,35 @@ func RunSubtaskFailed(args []string) {
 			ticket.Subtasks[i].Status = "failed"
 			ticket.Subtasks[i].FailTimestamp = time.Now().Format(time.RFC3339)
 		}
+	}
+	if err := SaveTicket(ticket); err != nil {
+		logFatal("Could not update ticket %s: %v", name, err)
+	}
+}
+
+func RunSubtaskNote(args []string) {
+	if len(args) < 3 {
+		logFatal("Usage: ./dialtone.sh ticket subtask note <ticket-name> <subtask-name> <note>")
+	}
+	name := args[0]
+	subtask := args[1]
+	note := strings.Join(args[2:], " ")
+
+	logSubtaskCommand("note", args)
+
+	ticket, err := GetTicket(name)
+	if err != nil {
+		logFatal("Error: %v", err)
+	}
+	found := false
+	for i := range ticket.Subtasks {
+		if ticket.Subtasks[i].Name == subtask {
+			ticket.Subtasks[i].AgentNotes = note
+			found = true
+		}
+	}
+	if !found {
+		logFatal("Subtask not found: %s", subtask)
 	}
 	if err := SaveTicket(ticket); err != nil {
 		logFatal("Could not update ticket %s: %v", name, err)

@@ -1,10 +1,9 @@
 import './../style.css'; // Import styles so Vite processes them
-import { setupGlobe } from './components/globe';
+import { mountEarth } from './components/earth';
 
-// Initialize Globe
-const globeContainer = document.getElementById('globe-container');
-if (globeContainer) {
-    setupGlobe(globeContainer);
+const earthContainer = document.getElementById('earth-container');
+if (earthContainer) {
+    mountEarth(earthContainer);
 }
 
 // Video Lazy Loading

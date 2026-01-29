@@ -34,6 +34,8 @@ func Run(args []string) {
 		RunNext(subArgs)
 	case "done":
 		RunDone(subArgs)
+	case "upsert":
+		RunUpsert(subArgs)
 	case "subtask":
 		RunSubtask(subArgs)
 	case "test":
@@ -46,7 +48,7 @@ func Run(args []string) {
 
 func printUsage() {
 	fmt.Println("Usage: ./dialtone.sh ticket <command> [args]")
-	fmt.Println("Commands: add, start, ask, log, list, validate, next, done, subtask, test")
+	fmt.Println("Commands: add, start, ask, log, list, validate, next, done, upsert, subtask, test")
 }
 
 func RunAdd(args []string) {
