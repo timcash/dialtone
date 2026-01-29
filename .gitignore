@@ -29,7 +29,7 @@ Thumbs.db
 *.log
 
 # Local ticket database
-src/tickets/tickets.duckdb
+# src/tickets/tickets.duckdb
 
 # Local Dependencies
 dialtone_dependencies/
