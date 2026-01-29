@@ -529,8 +529,24 @@ class ProceduralOrbit {
     }
   }
 
+  isVisible = true;
+  frameCount = 0;
+
+  setVisible(visible: boolean) {
+    if (this.isVisible !== visible) {
+      console.log(`%c[earth] ${visible ? '▶️ Resuming' : '⏸️ Pausing'} at frame ${this.frameCount}`, 
+          visible ? 'color: #22c55e' : 'color: #f59e0b');
+    }
+    this.isVisible = visible;
+  }
+
   animate = () => {
     this.frameId = requestAnimationFrame(this.animate);
+    
+    // Skip all calculations when off-screen
+    if (!this.isVisible) return;
+    
+    this.frameCount++;
     const now = performance.now();
     const rawDelta = (now - this.lastFrameTime) / 1000;
     this.lastFrameTime = now;
@@ -695,5 +711,8 @@ class ProceduralOrbit {
 
 export function mountEarth(container: HTMLElement) {
   const orbit = new ProceduralOrbit(container);
-  return () => orbit.dispose();
+  return {
+    dispose: () => orbit.dispose(),
+    setVisible: (visible: boolean) => orbit.setVisible(visible),
+  };
 }
