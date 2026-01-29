@@ -17,9 +17,33 @@ type Subtask struct {
 }
 
 type Ticket struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Tags        []string  `json:"tags,omitempty"`
-	Description string    `json:"description"`
-	Subtasks    []Subtask `json:"subtasks"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	Tags            []string  `json:"tags,omitempty"`
+	Description     string    `json:"description"`
+	Subtasks        []Subtask `json:"subtasks"`
+	AgentSummary    string    `json:"agent_summary,omitempty"`
+	StartTime       string    `json:"start_time,omitempty"`
+	LastSummaryTime string    `json:"last_summary_time,omitempty"`
+}
+
+type SummaryEntry struct {
+	TicketID    string
+	SubtaskName string
+	Timestamp   string
+	Content     string
+}
+
+type LogEntry struct {
+	Timestamp string
+	EntryType string
+	Message   string
+	Subtask   string
+}
+
+type KeyEntry struct {
+	Name           string
+	EncryptedValue []byte
+	Salt           []byte
+	Nonce          []byte
 }
