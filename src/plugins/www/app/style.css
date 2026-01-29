@@ -86,7 +86,8 @@ h2 {
 /* Visualizations */
 #earth-container,
 #nn-container,
-#curriculum-container {
+#curriculum-container,
+#robot-container {
   position: absolute;
   top: 0;
   left: 0;
@@ -97,7 +98,8 @@ h2 {
 
 #earth-container canvas,
 #nn-container canvas,
-#curriculum-container canvas {
+#curriculum-container canvas,
+#robot-container canvas {
   display: block;
 }
 

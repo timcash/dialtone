@@ -2,6 +2,7 @@ import './../style.css';
 import { mountEarth } from './components/earth';
 import { mountNeuralNetwork } from './components/nn';
 import { mountBuildCurriculum } from './components/build-curriculum';
+import { mountRobot } from './components/robot';
 
 // Initialize Earth
 const earthContainer = document.getElementById('earth-container');
@@ -19,6 +20,12 @@ if (nnContainer) {
 const curriculumContainer = document.getElementById('curriculum-container');
 if (curriculumContainer) {
     mountBuildCurriculum(curriculumContainer);
+}
+
+// Initialize Robot Arm
+const robotContainer = document.getElementById('robot-container');
+if (robotContainer) {
+    mountRobot(robotContainer);
 }
 
 // Subtitle updates based on visible slide
