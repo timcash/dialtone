@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -335,10 +336,36 @@ func RunDone(args []string) {
 
 	logInfo("Finalizing ticket %s...", ticket.ID)
 	logTicketCommand(ticket.ID, "done", args)
+
+	// Backup DB to the ticket folder
+	dbPath := ticketDBPath()
+	backupPath := filepath.Join("src", "tickets", ticket.ID, "tickets_backup.duckdb")
+	if err := backupFile(dbPath, backupPath); err != nil {
+		logFatal("Could not backup database: %v", err)
+	}
+	logInfo("Database backup saved to %s", backupPath)
+
 	if err := SaveTicket(ticket); err != nil {
 		logFatal("Could not save final summary: %v", err)
 	}
 	logInfo("Ticket %s completed", ticket.ID)
+}
+
+func backupFile(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	_, err = io.Copy(destFile, sourceFile)
+	return err
 }
 
 func RunSummary(args []string) {
