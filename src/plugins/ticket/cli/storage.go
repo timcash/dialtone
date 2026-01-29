@@ -302,10 +302,9 @@ func SetCurrentTicket(ticketID string) error {
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`DELETE FROM ticket_meta WHERE key = 'current_ticket'`); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`INSERT INTO ticket_meta (key, value) VALUES ('current_ticket', ?)`, ticketID); err != nil {
+	if _, err := tx.Exec(`INSERT INTO ticket_meta (key, value)
+		VALUES ('current_ticket', ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, ticketID); err != nil {
 		return err
 	}
 	return tx.Commit()

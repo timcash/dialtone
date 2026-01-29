@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { HexLayer } from './hex_layer';
 import earthVertexShader from '../shaders/earth.vert.glsl?raw';
 import earthFragmentShader from '../shaders/earth.frag.glsl?raw';
 import cloudVertexShader from '../shaders/cloud.vert.glsl?raw';
@@ -25,6 +26,7 @@ class ProceduralOrbit {
   cloud2!: THREE.Mesh;
   cloud3!: THREE.Mesh;
   cloud4!: THREE.Mesh;
+  hexLayers: HexLayer[] = [];
   atmosphere!: THREE.Mesh;
   sunAtmosphere!: THREE.Mesh;
   issGroup!: THREE.Group;
@@ -77,6 +79,7 @@ class ProceduralOrbit {
   configPanel?: HTMLDivElement;
   configToggle?: HTMLButtonElement;
   configValueMap = new Map<string, HTMLSpanElement>();
+  hexLogSecond = -1;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -165,6 +168,46 @@ class ProceduralOrbit {
     this.cloud4 = new THREE.Mesh(geo(this.earthRadius + 0.18), cloud4Mat);
     this.scene.add(this.cloud4);
 
+    this.hexLayers = [
+      new HexLayer(this.earthRadius, {
+        radiusOffset: 0.06,
+        count: 420,
+        resolution: 3,
+        ratePerSecond: 100,
+        durationSeconds: 3,
+        palette: [
+          new THREE.Color(0.85, 0.85, 0.86),
+          new THREE.Color(0.65, 0.67, 0.7),
+          new THREE.Color(0.1, 0.1, 0.12)
+        ]
+      }),
+      new HexLayer(this.earthRadius, {
+        radiusOffset: 0.08,
+        count: 380,
+        resolution: 3,
+        ratePerSecond: 100,
+        durationSeconds: 3,
+        palette: [
+          new THREE.Color(0.75, 0.75, 0.76),
+          new THREE.Color(0.45, 0.46, 0.5),
+          new THREE.Color(0.05, 0.05, 0.07)
+        ]
+      }),
+      new HexLayer(this.earthRadius, {
+        radiusOffset: 0.12,
+        count: 340,
+        resolution: 3,
+        ratePerSecond: 100,
+        durationSeconds: 3,
+        palette: [
+          new THREE.Color(0.9, 0.9, 0.9),
+          new THREE.Color(0.55, 0.56, 0.6),
+          new THREE.Color(0.15, 0.15, 0.18)
+        ]
+      })
+    ];
+    this.hexLayers.forEach((layer) => this.earth.add(layer.mesh));
+
     const atmoMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       transparent: true,
@@ -203,6 +246,7 @@ class ProceduralOrbit {
     this.sunAtmosphere = new THREE.Mesh(geo(this.earthRadius + 0.32), sunAtmoMat);
     this.scene.add(this.sunAtmosphere);
   }
+
 
   createCloudMaterial(
     scale: number,
@@ -576,6 +620,14 @@ class ProceduralOrbit {
     this.cloud4Material.uniforms.uSunIntensity.value = sunIntensity;
     this.cloud4Material.uniforms.uAmbientIntensity.value = ambientIntensity;
     this.cloud4Material.uniforms.uColorScale.value = this.materialColorScale;
+    if (this.hexLayers.length) {
+      const hexTime = now * 0.001;
+      this.hexLayers.forEach((layer) => layer.update(hexTime));
+      const hexSecond = Math.floor(now / 1000);
+      if (hexSecond !== this.hexLogSecond) {
+        this.hexLogSecond = hexSecond;
+      }
+    }
     this.atmosphereMaterial.uniforms.uSunDir.value.copy(sunDir);
     this.atmosphereMaterial.uniforms.uKeyDir.value.copy(keyDir);
     this.atmosphereMaterial.uniforms.uKeyIntensity.value = keyIntensity;

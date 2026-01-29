@@ -16,13 +16,14 @@ async function runTest() {
             timeout: 60000
         });
 
-        // 1. Verify Slide 1: Globe
-        console.log('Checking Slide 1: Globe');
-        const globeExists = await page.evaluate(() => {
+        // 1. Verify Slide 1: Earth
+        console.log('Checking Slide 1: Earth');
+        const earthExists = await page.evaluate(() => {
             const h1 = document.querySelector('h1');
-            return h1?.innerText.includes('dialtone.earth');
+            const earthContainer = document.getElementById('earth-container');
+            return h1?.innerText.includes('dialtone.earth') && !!earthContainer;
         });
-        if (!globeExists) throw new Error('Slide 1 (Globe) not found or title incorrect');
+        if (!earthExists) throw new Error('Slide 1 (Earth) not found or title incorrect');
 
         // 2. Scroll to Slide 2: Video
         console.log('Scrolling to Slide 2');
@@ -53,8 +54,8 @@ async function runTest() {
 
         const graphExists = await page.evaluate(() => {
             const h2 = Array.from(document.querySelectorAll('h2')).find(el => el.innerText === 'Neural Connectivity');
-            const canvas = document.querySelector('canvas');
-            return !!h2 && !!canvas;
+            const graphContainer = document.getElementById('graph-container');
+            return !!h2 && !!graphContainer;
         });
         if (!graphExists) throw new Error('Slide 3 (LineGraph) not found');
 

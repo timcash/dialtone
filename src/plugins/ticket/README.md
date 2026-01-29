@@ -32,6 +32,11 @@ Use these commands to manage all ticket work
 # Validates the structure and status values stored in DuckDB.
 ./dialtone.sh ticket validate [<ticket-name>]
 
+# Upsert a ticket definition from JSON (stdin or file).
+./dialtone.sh ticket upsert --file path/to/ticket.json
+# Or pipe JSON directly:
+cat path/to/ticket.json | ./dialtone.sh ticket upsert
+
 # Final step: verifies subtasks and marks ticket complete.
 ./dialtone.sh ticket done [<ticket-name>]
 ```
@@ -54,6 +59,9 @@ Use these commands to manage all subtask work
 
 # To mark a subtask as failed
 ./dialtone.sh ticket subtask failed [<ticket-name>] <subtask-name>
+
+# Update subtask agent notes
+./dialtone.sh ticket subtask note <ticket-name> <subtask-name> <note>
 ```
 
 
