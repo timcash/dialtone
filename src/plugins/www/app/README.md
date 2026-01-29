@@ -1,30 +1,54 @@
-# Three.js Earth visualization
+# dialtone.earth
 
-*Automatically synced with your [v0.app](https://v0.app) deployments*
+Three.js Earth visualization and landing page for the Dialtone project.
 
-[![Deployed on Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-black?style=for-the-badge&logo=vercel)](https://vercel.com/timcashs-projects/v0-glimmering-map)
-[![Built with v0](https://img.shields.io/badge/Built%20with-v0.app-black?style=for-the-badge)](https://v0.app/chat/jGI7POKEz7K)
+**Live**: [https://dialtone.earth](https://dialtone.earth)
 
-## Overview
+## Development
 
-This repository will stay in sync with your deployed chats on [v0.app](https://v0.app).
-Any changes you make to your deployed app will be automatically pushed to this repository from [v0.app](https://v0.app).
+```bash
+# Install dependencies
+npm install
+
+# Start dev server
+npm run dev
+
+# Build for production
+npm run build
+```
+
+## Features
+
+- **Earth Globe**: Interactive 3D Earth with atmosphere, clouds, and hex grid overlay
+- **Neural Network**: Animated neural network topology visualization
+- **Build Curriculum**: Training curriculum visualization
+- **Video Section**: Background video showcase
+
+## Tech Stack
+
+- [Vite](https://vitejs.dev/) - Build tool
+- [Three.js](https://threejs.org/) - 3D graphics
+- [TypeScript](https://www.typescriptlang.org/) - Type safety
+- [Vercel](https://vercel.com/) - Hosting
+
+## Pages
+
+- `/` - Home (Earth visualization)
+- `/about` - About page
+- `/docs` - Documentation
 
 ## Deployment
 
-Your project is live at:
+Deployed via the parent plugin. From repo root:
 
-**[https://vercel.com/timcashs-projects/v0-glimmering-map](https://vercel.com/timcashs-projects/v0-glimmering-map)**
+```bash
+./dialtone.sh www publish
+```
 
-## Build your app
+Or manually:
 
-Continue building your app on:
-
-**[https://v0.app/chat/jGI7POKEz7K](https://v0.app/chat/jGI7POKEz7K)**
-
-## How It Works
-
-1. Create and modify your project using [v0.app](https://v0.app)
-2. Deploy your chats from the v0 interface
-3. Changes are automatically pushed to this repository
-4. Vercel deploys the latest version from this repository
+```bash
+VERCEL_PROJECT_ID=prj_vynjSZFIhD8TlR8oOyuXTKjFUQxM \
+VERCEL_ORG_ID=team_4tzswM6M6PoDxaszH2ZHs5J7 \
+vercel deploy --prod
+```
