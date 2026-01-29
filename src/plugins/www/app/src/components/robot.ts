@@ -435,8 +435,8 @@ class RobotArmVisualization {
         this.robotArm.addJoint(new Joint({
             name: 'shoulder',
             axis: 'z',
-            minAngle: -90,
-            maxAngle: 90,
+            minAngle: -100,
+            maxAngle: 100,
         }));
         this.robotArm.addLink(new Link({ length: 1.5, color: 0x606060 }));
 
@@ -451,16 +451,16 @@ class RobotArmVisualization {
         this.robotArm.addJoint(new Joint({
             name: 'forearm',
             axis: 'z',
-            minAngle: -120,
-            maxAngle: 120,
+            minAngle: -100,
+            maxAngle: 100,
         }));
         this.robotArm.addLink(new Link({ length: 1.0, color: 0x707070 }));
 
         this.robotArm.addJoint(new Joint({
             name: 'wrist',
             axis: 'z',
-            minAngle: -90,
-            maxAngle: 90,
+            minAngle: -100,
+            maxAngle: 100,
         }));
         this.robotArm.addLink(new Link({ length: 0.5, color: 0x808080 }));
 
@@ -648,10 +648,10 @@ class RobotArmVisualization {
 
         const jointConfigs = [
             { name: 'Base (Y)', min: -180, max: 180, initial: 0 },
-            { name: 'Shoulder (Z)', min: -90, max: 90, initial: 30 },
+            { name: 'Shoulder (Z)', min: -100, max: 100, initial: 30 },
             { name: 'Elbow (Y)', min: -180, max: 180, initial: 0 },
-            { name: 'Forearm (Z)', min: -120, max: 120, initial: -45 },
-            { name: 'Wrist (Z)', min: -90, max: 90, initial: -20 },
+            { name: 'Forearm (Z)', min: -100, max: 100, initial: -45 },
+            { name: 'Wrist (Z)', min: -100, max: 100, initial: -20 },
         ];
 
         jointConfigs.forEach((config, i) => {
@@ -681,8 +681,24 @@ class RobotArmVisualization {
         );
     }
 
+    isVisible = true;
+    frameCount = 0;
+
+    setVisible(visible: boolean) {
+        if (this.isVisible !== visible) {
+            console.log(`%c[robot] ${visible ? '▶️ Resuming' : '⏸️ Pausing'} at frame ${this.frameCount}`, 
+                visible ? 'color: #22c55e' : 'color: #f59e0b');
+        }
+        this.isVisible = visible;
+    }
+
     animate = () => {
         this.frameId = requestAnimationFrame(this.animate);
+        
+        // Skip all calculations when off-screen
+        if (!this.isVisible) return;
+        
+        this.frameCount++;
         const delta = 0.016;
         this.time += delta;
         
@@ -727,5 +743,8 @@ class RobotArmVisualization {
 
 export function mountRobot(container: HTMLElement) {
     const viz = new RobotArmVisualization(container);
-    return () => viz.dispose();
+    return {
+        dispose: () => viz.dispose(),
+        setVisible: (visible: boolean) => viz.setVisible(visible),
+    };
 }
