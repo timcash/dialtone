@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Procedural LEO Simulation</title>
+    <style>
+      body { margin: 0; background: #000; overflow: hidden; }
+      #overlay {
+        position: absolute; top: 20px; left: 20px;
+        color: #00ff00; font-family: 'Courier New', monospace;
+        pointer-events: none; text-shadow: 1px 1px 2px black;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="overlay">
+      [STATUS: ORBITAL INSERTION COMPLETE]<br>
+      [VIEW: ISS EXTERNAL CAM 01]<br>
+      [ALTITUDE: 408 KM]
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

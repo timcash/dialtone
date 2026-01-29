@@ -1,0 +1,15 @@
+camX: 0.62
+camY: 0.06
+camZ: 0.22
+cloud1RotSpeed: 0
+cloud2RotSpeed: 0
+dt: 0.017
+dtRaw: 0.017
+earthRotSpeed: 0
+fps: 60
+orbitSpeed: 0.00113
+pitch: -16
+roll: 108
+shaderSpeed: 0.76
+timeScale: 1
+yaw: -41
