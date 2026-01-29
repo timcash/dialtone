@@ -84,7 +84,7 @@ h2 {
 }
 
 /* Visualizations */
-#globe-container,
+#earth-container,
 #graph-container {
   position: absolute;
   top: 0;
@@ -92,6 +92,14 @@ h2 {
   width: 100%;
   height: 100%;
   z-index: 1;
+}
+
+#earth-container canvas {
+  display: block;
+}
+
+.header-telemetry {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Video */
@@ -173,6 +181,91 @@ h2 {
 .nav-btn.active {
   background-color: rgba(255, 255, 255, 0.1);
   color: #fff;
+}
+
+/* Earth Config Panel */
+.earth-config-toggle {
+  position: absolute;
+  right: 1.5rem;
+  bottom: 1.5rem;
+  z-index: 20;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid #fff;
+  border-radius: 9999px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.earth-config-toggle:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.earth-config-panel {
+  position: absolute;
+  right: 1.5rem;
+  bottom: 4.5rem;
+  width: min(360px, 90vw);
+  max-height: 70vh;
+  overflow: auto;
+  z-index: 20;
+  border: 1px solid #fff;
+  border-radius: 1rem;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  font-size: 0.85rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.earth-config-panel h3 {
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-top: 0.75rem;
+}
+
+.earth-config-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.earth-config-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.earth-config-row input[type="range"] {
+  width: 100%;
+  accent-color: #fff;
+}
+
+.earth-config-value {
+  font-variant-numeric: tabular-nums;
+  min-width: 52px;
+  text-align: right;
+}
+
+.earth-config-panel button {
+  padding: 0.45rem 0.75rem;
+  border: 1px solid #fff;
+  border-radius: 0.75rem;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.earth-config-panel button:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 /* Page Layouts */
