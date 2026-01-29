@@ -1,1 +1,0 @@
-/Users/dev/code/dialtone/docs/rules/command-line.md
