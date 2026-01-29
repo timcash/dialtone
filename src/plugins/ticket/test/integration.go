@@ -38,6 +38,7 @@ func main() {
 	}()
 
 	runTest("End-to-End Ticket V2 Workflow", TestFullWorkflow)
+	runTest("Key Management Workflow", TestKeyWorkflow)
 
 	finalCleanup()
 	fmt.Println()
@@ -176,6 +177,46 @@ func init() {
 	return nil
 }
 
+func TestKeyWorkflow() error {
+	// --- STEP 1: Add Key ---
+	fmt.Println("\n--- STEP 1: Add Key ---")
+	output := runCmd("./dialtone.sh", "key", "add", "test-key", "secret-value", "password123")
+	if !strings.Contains(output, "stored securely") {
+		return fmt.Errorf("failed to add key")
+	}
+
+	// --- STEP 2: List Keys ---
+	fmt.Println("\n--- STEP 2: List Keys ---")
+	output = runCmd("./dialtone.sh", "key", "list")
+	if !strings.Contains(output, "test-key") {
+		return fmt.Errorf("expected test-key in list")
+	}
+
+	// --- STEP 3: Lease Key (Correct Password) ---
+	fmt.Println("\n--- STEP 3: Lease Key (Correct Password) ---")
+	output = runCmd("./dialtone.sh", "key", "test-key", "password123")
+	if output != "secret-value" {
+		return fmt.Errorf("expected 'secret-value', got '%s'", output)
+	}
+
+	// --- STEP 4: Lease Key (Wrong Password) ---
+	fmt.Println("\n--- STEP 4: Lease Key (Wrong Password) ---")
+	output = runCmd("./dialtone.sh", "key", "test-key", "wrong")
+	if !strings.Contains(output, "Invalid password") {
+		return fmt.Errorf("expected error for wrong password")
+	}
+
+	// --- STEP 5: Remove Key ---
+	fmt.Println("\n--- STEP 5: Remove Key ---")
+	runCmd("./dialtone.sh", "key", "rm", "test-key")
+	output = runCmd("./dialtone.sh", "key", "list")
+	if strings.Contains(output, "test-key") {
+		return fmt.Errorf("expected test-key to be removed")
+	}
+
+	return nil
+}
+
 func getUniqueName(base string) string {
 	return fmt.Sprintf("%s-%d", base, time.Now().Unix())
 }
@@ -187,12 +228,12 @@ func finalCleanup() {
 		return
 	}
 	for _, d := range dirs {
-		if d.IsDir() {
+		if d.IsDir() && strings.HasPrefix(d.Name(), "workflow-demo") {
 			fmt.Printf("Removing dangling test directory: %s\n", d.Name())
 			os.RemoveAll(filepath.Join(ticketV2Dir, d.Name()))
 		}
 	}
-	os.Remove(filepath.Join(ticketV2Dir, "tickets.duckdb"))
+	os.Remove(ticketDBPath())
 }
 
 func cleanupTicket(name string) {
@@ -218,6 +259,9 @@ func runCmd(name string, args ...string) string {
 }
 
 func ticketDBPath() string {
+	if p := os.Getenv("TICKET_DB_PATH"); p != "" {
+		return p
+	}
 	return filepath.Join(ticketV2Dir, ticketDBFile)
 }
 

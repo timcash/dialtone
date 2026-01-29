@@ -17,6 +17,9 @@ var ErrTicketNotFound = errors.New("ticket not found")
 const ticketsDBFilename = "tickets.duckdb"
 
 func ticketDBPath() string {
+	if p := os.Getenv("TICKET_DB_PATH"); p != "" {
+		return p
+	}
 	return filepath.Join("src", "tickets", ticketsDBFilename)
 }
 
