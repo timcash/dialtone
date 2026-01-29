@@ -92,21 +92,46 @@ if [ -n "$DIALTONE_ENV" ]; then
 fi
 
 if [ "$DIALTONE_CMD" = "install" ]; then
+    OS=$(uname | tr '[:upper:]' '[:lower:]')
+    ARCH=$(uname -m)
+    GO_ARCH="$ARCH"
+    if [ "$GO_ARCH" = "x86_64" ]; then GO_ARCH="amd64"; fi
+    if [ "$GO_ARCH" = "aarch64" ] || [ "$GO_ARCH" = "arm64" ]; then GO_ARCH="arm64"; fi
+
+    mkdir -p "$DIALTONE_ENV"
+
+    # Check for C compiler (required for CGO/DuckDB)
+    if ! command -v gcc &> /dev/null && ! command -v clang &> /dev/null; then
+        echo ""
+        echo "WARNING: No C compiler (gcc/clang) found."
+        echo "DuckDB features require a C compiler. To install:"
+        echo "  sudo apt-get update && sudo apt-get install -y build-essential"
+        echo ""
+        echo "Continuing without CGO support..."
+        export CGO_ENABLED=0
+    fi
+
     # Perform Go installation if missing
     if [ -n "$DIALTONE_ENV" ] && [ ! -f "$GO_BIN" ]; then
         echo "Go not found in $DIALTONE_ENV/go. Installing..."
         GO_VERSION=$(grep "^go " go.mod | awk '{print $2}')
-        OS=$(uname | tr '[:upper:]' '[:lower:]')
-        ARCH=$(uname -m)
-        if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; fi
-        if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then ARCH="arm64"; fi
         
-        TAR_FILE="go$GO_VERSION.$OS-$ARCH.tar.gz"
+        TAR_FILE="go$GO_VERSION.$OS-$GO_ARCH.tar.gz"
         echo "Downloading $TAR_FILE..."
-        mkdir -p "$DIALTONE_ENV"
         curl -LO "https://go.dev/dl/$TAR_FILE"
         tar -C "$DIALTONE_ENV" -xzf "$TAR_FILE"
         rm "$TAR_FILE"
+    fi
+
+    # Download Go modules
+    if [ -n "$GO_BIN" ] && [ -f "$GO_BIN" ]; then
+        ABS_ENV=$(cd "$DIALTONE_ENV" && pwd)
+        export PATH="$ABS_ENV/go/bin:$PATH"
+        export GOROOT="$ABS_ENV/go"
+        export GOCACHE="$ABS_ENV/cache"
+        export GOMODCACHE="$ABS_ENV/pkg/mod"
+        echo "Downloading Go modules..."
+        "$GO_BIN" mod download
     fi
 elif [ -n "$DIALTONE_ENV" ] && [ ! -f "$GO_BIN" ]; then
     # Command is not install, and Go is missing in the env folder
@@ -124,7 +149,14 @@ if [ -n "$GO_BIN" ] && [ -f "$GO_BIN" ]; then
     export GOMODCACHE="$ABS_ENV/pkg/mod"
 fi
 
-# 5. Run the tool
+# 5. Enable CGO if C compiler available
+if command -v gcc &> /dev/null || command -v clang &> /dev/null; then
+    export CGO_ENABLED=1
+else
+    export CGO_ENABLED=0
+fi
+
+# 6. Run the tool
 if [ -n "$GO_BIN" ] && [ -f "$GO_BIN" ]; then
     exec "$GO_BIN" run src/cmd/dev/main.go "${ARGS[@]}"
 else

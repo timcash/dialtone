@@ -14,9 +14,9 @@
 
     <header class="header-title">
       <h1>dialtone.earth</h1>
-      <p class="subtitle">unified robotic networks for earth</p>
-      <p class="version">v1.0.8</p>
+      <p class="subtitle" id="header-subtitle">unified robotic networks for earth</p>
       <p class="version header-telemetry">ALT <span data-telemetry="altitude">-- KM</span> · SPD <span data-telemetry="speed">-- KM/S</span></p>
+      <p class="version">v1.0.9</p>
     </header>
 
     <nav class="main-nav">
@@ -57,7 +57,7 @@
       </a>
     </div>
     <!-- Slide 1: Earth V1 -->
-    <section id="s-home" class="snap-slide">
+    <section id="s-home" class="snap-slide" data-subtitle="unified robotic networks for earth">
       <div id="earth-container"></div>
       <button id="earth-config-toggle" class="earth-config-toggle" type="button" aria-expanded="false">
         Config
@@ -66,26 +66,29 @@
     </section>
 
     <!-- Slide 2: Video -->
-    <section id="s-video" class="snap-slide">
+    <section id="s-video" class="snap-slide" data-subtitle="low-latency video streaming and control">
       <video class="bg-video" autoplay loop muted playsinline>
-        <!-- Placeholder video source, assuming one exists or verify later -->
         <source src="/video1.mp4" type="video/mp4" />
       </video>
       <div class="overlay-bg"></div>
-      <div class="overlay-content">
-        <h2>Robotic Operations</h2>
-        <p class="subtitle">Low-latency video streaming and control for cooperative human-AI systems.</p>
-      </div>
     </section>
 
-    <!-- Slide 3: Connectivity -->
-    <section id="s-connectivity" class="snap-slide">
-      <!-- Placeholder for Graph -->
-      <div id="graph-container"></div>
-      <div class="overlay-content">
-        <h2>Neural Connectivity</h2>
-        <p class="subtitle">Decentralized networking patterns connecting edge nodes across the globe.</p>
-      </div>
+    <!-- Slide 3: Neural Network -->
+    <section id="s-neural" class="snap-slide" data-subtitle="neural network topology">
+      <div id="nn-container"></div>
+      <button id="nn-config-toggle" class="earth-config-toggle" type="button" aria-expanded="false">
+        Config
+      </button>
+      <div id="nn-config-panel" class="earth-config-panel" hidden></div>
+    </section>
+
+    <!-- Slide 4: Build Curriculum -->
+    <section id="s-curriculum" class="snap-slide" data-subtitle="build curriculum">
+      <div id="curriculum-container"></div>
+      <button id="curriculum-config-toggle" class="earth-config-toggle" type="button" aria-expanded="false">
+        Config
+      </button>
+      <div id="curriculum-config-panel" class="earth-config-panel" hidden></div>
     </section>
 
   </div>
