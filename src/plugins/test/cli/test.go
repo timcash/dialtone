@@ -20,7 +20,6 @@ import (
 	ui_test "dialtone/cli/src/plugins/ui/test"
 )
 
-
 // RunTest handles the 'test' command
 func RunTest(args []string) {
 	if len(args) == 0 {
@@ -298,11 +297,14 @@ func runInstallTests() {
 }
 
 func runTicketTests() {
-	logger.LogInfo("Running Ticket Plugin Tests...")
-	// if err := ticket_test.RunAll(); err != nil {
-	// 	logger.LogFatal("Ticket tests failed: %v", err)
-	// }
-	logger.LogInfo("Ticket Plugin Tests passed!")
+	logger.LogInfo("Running Ticket Plugin Integration Tests...")
+	cmd := exec.Command("go", "run", "src/plugins/ticket/test/integration.go")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		logger.LogFatal("Ticket tests failed: %v", err)
+	}
+	logger.LogInfo("Ticket Plugin Integration Tests passed!")
 }
 
 func runTestPluginTests() {
