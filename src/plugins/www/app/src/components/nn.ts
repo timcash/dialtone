@@ -355,9 +355,24 @@ class NeuralNetworkVisualization {
         };
     }
 
+    isVisible = true;
+    frameCount = 0;
+
+    setVisible(visible: boolean) {
+        if (this.isVisible !== visible) {
+            console.log(`%c[neural] ${visible ? '▶️ Resuming' : '⏸️ Pausing'} at frame ${this.frameCount}`, 
+                visible ? 'color: #22c55e' : 'color: #f59e0b');
+        }
+        this.isVisible = visible;
+    }
+
     animate = () => {
         this.frameId = requestAnimationFrame(this.animate);
 
+        // Skip all calculations when off-screen
+        if (!this.isVisible) return;
+
+        this.frameCount++;
         const now = performance.now();
         const delta = (now - this.lastFrameTime) / 1000;
         this.lastFrameTime = now;
@@ -410,5 +425,8 @@ class NeuralNetworkVisualization {
 
 export function mountNeuralNetwork(container: HTMLElement) {
     const viz = new NeuralNetworkVisualization(container);
-    return () => viz.dispose();
+    return {
+        dispose: () => viz.dispose(),
+        setVisible: (visible: boolean) => viz.setVisible(visible),
+    };
 }

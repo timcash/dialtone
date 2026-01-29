@@ -1,32 +1,53 @@
 import './../style.css';
-import { mountEarth } from './components/earth';
-import { mountNeuralNetwork } from './components/nn';
-import { mountBuildCurriculum } from './components/build-curriculum';
-import { mountRobot } from './components/robot';
+import { SectionManager } from './components/section';
 
-// Initialize Earth
-const earthContainer = document.getElementById('earth-container');
-if (earthContainer) {
-    mountEarth(earthContainer);
-}
+// Create section manager for lazy loading Three.js components
+const sections = new SectionManager({ debug: true });
 
-// Initialize Neural Network
-const nnContainer = document.getElementById('nn-container');
-if (nnContainer) {
-    mountNeuralNetwork(nnContainer);
-}
+// Register all Three.js sections
+sections.register('s-home', {
+    containerId: 'earth-container',
+    load: async () => {
+        const { mountEarth } = await import('./components/earth');
+        const container = document.getElementById('earth-container');
+        if (!container) throw new Error('earth-container not found');
+        return mountEarth(container);
+    }
+});
 
-// Initialize Build Curriculum
-const curriculumContainer = document.getElementById('curriculum-container');
-if (curriculumContainer) {
-    mountBuildCurriculum(curriculumContainer);
-}
+sections.register('s-robot', {
+    containerId: 'robot-container',
+    load: async () => {
+        const { mountRobot } = await import('./components/robot');
+        const container = document.getElementById('robot-container');
+        if (!container) throw new Error('robot-container not found');
+        return mountRobot(container);
+    }
+});
 
-// Initialize Robot Arm
-const robotContainer = document.getElementById('robot-container');
-if (robotContainer) {
-    mountRobot(robotContainer);
-}
+sections.register('s-neural', {
+    containerId: 'nn-container',
+    load: async () => {
+        const { mountNeuralNetwork } = await import('./components/nn');
+        const container = document.getElementById('nn-container');
+        if (!container) throw new Error('nn-container not found');
+        return mountNeuralNetwork(container);
+    }
+});
+
+sections.register('s-curriculum', {
+    containerId: 'curriculum-container',
+    load: async () => {
+        const { mountBuildCurriculum } = await import('./components/build-curriculum');
+        const container = document.getElementById('curriculum-container');
+        if (!container) throw new Error('curriculum-container not found');
+        return mountBuildCurriculum(container);
+    }
+});
+
+// Start observing visibility and eagerly load first section
+sections.observe();
+sections.eagerLoad('s-home');
 
 // Subtitle updates based on visible slide
 const subtitleEl = document.getElementById('header-subtitle');
@@ -57,5 +78,3 @@ const videoObserver = new IntersectionObserver((entries) => {
 }, { threshold: 0.1 });
 
 videos.forEach(video => videoObserver.observe(video));
-
-console.log("Dialtone WWW Initialized");
