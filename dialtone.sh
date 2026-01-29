@@ -33,7 +33,6 @@ Commands:
 
   ai <subcmd>        AI tools (opencode, developer, subagent)
   go <subcmd>        Go toolchain tools (install, lint)
-  key <subcmd>       Manage encrypted keys (add, list, rm, lease)
   help               Show this help message
 
 Global Options:
