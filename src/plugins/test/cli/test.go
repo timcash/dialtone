@@ -18,15 +18,6 @@ import (
 	// ticket_test "dialtone/cli/src/plugins/ticket/test"
 	_ "dialtone/cli/src/plugins/cloudflare/test"
 	ui_test "dialtone/cli/src/plugins/ui/test"
-	// _ "dialtone/cli/tickets/antigravity-ide-plugin/test"
-	// _ "dialtone/cli/tickets/antigravity-logs-filter/test"
-	// _ "dialtone/cli/tickets/antigravity-logs-refinement/test"
-	// _ "dialtone/cli/tickets/mock-data-support/test"
-	// _ "dialtone/cli/tickets/remove-geminikey-usage/test"
-	// _ "dialtone/cli/tickets/test-test-tags/test"
-	// _ "dialtone/cli/tickets/verify-ticket-plugin/test"
-	// _ "dialtone/cli/tickets/cloudflare-tunnel/test"
-	// _ "dialtone/cli/tickets/replace-progress-with-ticket-next/test"
 )
 
 // RunTest handles the 'test' command
@@ -203,7 +194,7 @@ func runTicketTest(ticketName, subtaskName string, showList bool) {
 
 	if matched == 0 {
 		logger.LogInfo("No registered tests found for ticket %s. Falling back to go test...", ticketName)
-		cmd := exec.Command("go", "test", "-v", "./tickets/"+ticketName+"/test/...")
+		cmd := exec.Command("go", "test", "-v", "./src/tickets/"+ticketName+"/test/...")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
