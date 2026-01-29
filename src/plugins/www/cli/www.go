@@ -23,34 +23,21 @@ func logFatal(format string, args ...interface{}) {
 	os.Exit(1)
 }
 
-type vercelProject struct {
-	ProjectID string `json:"projectId"`
-	OrgID     string `json:"orgId"`
-}
-
 type npmPackage struct {
 	Version string `json:"version"`
 }
 
-func vercelProjectEnv(webDir string) ([]string, error) {
-	projectPath := filepath.Join(webDir, ".vercel", "project.json")
-	data, err := os.ReadFile(projectPath)
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", projectPath, err)
-	}
+// Vercel project configuration for dialtone.earth (app project)
+const (
+	vercelProjectID = "prj_vynjSZFIhD8TlR8oOyuXTKjFUQxM"
+	vercelOrgID     = "team_4tzswM6M6PoDxaszH2ZHs5J7"
+)
 
-	var project vercelProject
-	if err := json.Unmarshal(data, &project); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", projectPath, err)
-	}
-	if project.ProjectID == "" || project.OrgID == "" {
-		return nil, fmt.Errorf("missing project/org id in %s", projectPath)
-	}
-
+func vercelProjectEnv() []string {
 	return []string{
-		"VERCEL_PROJECT_ID=" + project.ProjectID,
-		"VERCEL_ORG_ID=" + project.OrgID,
-	}, nil
+		"VERCEL_PROJECT_ID=" + vercelProjectID,
+		"VERCEL_ORG_ID=" + vercelOrgID,
+	}
 }
 
 func expectedVersion(webDir string) (string, error) {
@@ -166,7 +153,7 @@ func bumpWwwVersion(webDir string) (string, error) {
 	return nextVersion, nil
 }
 
-func publishPrebuilt(webDir string, repoRoot string, vercelPath string, vercelEnv []string, args []string) {
+func publishPrebuilt(webDir string, vercelPath string, vercelEnv []string, args []string) {
 	nextVersion, err := bumpWwwVersion(webDir)
 	if err != nil {
 		logFatal("Failed to bump version: %v", err)
@@ -183,7 +170,7 @@ func publishPrebuilt(webDir string, repoRoot string, vercelPath string, vercelEn
 	}
 
 	prebuildCmd := exec.Command(vercelPath, "build", "--prod")
-	prebuildCmd.Dir = repoRoot
+	prebuildCmd.Dir = webDir
 	prebuildCmd.Env = append(os.Environ(), vercelEnv...)
 	prebuildCmd.Stdout = os.Stdout
 	prebuildCmd.Stderr = os.Stderr
@@ -194,7 +181,7 @@ func publishPrebuilt(webDir string, repoRoot string, vercelPath string, vercelEn
 
 	vArgs := append([]string{"deploy", "--prebuilt", "--prod"}, args...)
 	cmd := exec.Command(vercelPath, vArgs...)
-	cmd.Dir = repoRoot
+	cmd.Dir = webDir
 	cmd.Env = append(os.Environ(), vercelEnv...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -237,21 +224,17 @@ func RunWww(args []string) {
 
 	subcommand := args[0]
 	// Determine the directory where the webpage code is located
-	// Used to be "dialtone-earth", now it is "src/plugins/www/app"
-	// We need to resolve it relative to the project root (where dialtone-dev runs)
+	// All vercel commands run from webDir
 	webDir := filepath.Join("src", "plugins", "www", "app")
-	repoRoot, _ := os.Getwd()
-	vercelEnv, err := vercelProjectEnv(webDir)
-	if err != nil {
-		logFatal("Vercel project not linked in %s/.vercel. Run 'vercel link' there. (%v)", webDir, err)
-	}
+	// Get project env vars (hardcoded for the app project serving dialtone.earth)
+	vercelEnv := vercelProjectEnv()
 
 	switch subcommand {
 	case "publish":
-		publishPrebuilt(webDir, repoRoot, vercelPath, vercelEnv, args[1:])
+		publishPrebuilt(webDir, vercelPath, vercelEnv, args[1:])
 
 	case "publish-prebuilt":
-		publishPrebuilt(webDir, repoRoot, vercelPath, vercelEnv, args[1:])
+		publishPrebuilt(webDir, vercelPath, vercelEnv, args[1:])
 
 	case "logs":
 		if len(args) < 2 {
@@ -259,7 +242,7 @@ func RunWww(args []string) {
 		}
 		vArgs := append([]string{"logs"}, args[1:]...)
 		cmd := exec.Command(vercelPath, vArgs...)
-		cmd.Dir = repoRoot
+		cmd.Dir = webDir
 		cmd.Env = append(os.Environ(), vercelEnv...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -275,7 +258,7 @@ func RunWww(args []string) {
 		vArgs = append(vArgs, args[1:]...)
 		vArgs = append(vArgs, "dialtone.earth")
 		cmd := exec.Command(vercelPath, vArgs...)
-		cmd.Dir = repoRoot
+		cmd.Dir = webDir
 		cmd.Env = append(os.Environ(), vercelEnv...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -336,7 +319,7 @@ func RunWww(args []string) {
 		logInfo("Running: vercel %s %s", subcommand, strings.Join(args[1:], " "))
 		vArgs := append([]string{subcommand}, args[1:]...)
 		cmd := exec.Command(vercelPath, vArgs...)
-		cmd.Dir = repoRoot
+		cmd.Dir = webDir
 		cmd.Env = append(os.Environ(), vercelEnv...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr

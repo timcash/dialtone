@@ -1,37 +1,54 @@
-import './../style.css'; // Import styles so Vite processes them
+import './../style.css';
 import { mountEarth } from './components/earth';
+import { mountNeuralNetwork } from './components/nn';
+import { mountBuildCurriculum } from './components/build-curriculum';
 
+// Initialize Earth
 const earthContainer = document.getElementById('earth-container');
 if (earthContainer) {
     mountEarth(earthContainer);
 }
 
+// Initialize Neural Network
+const nnContainer = document.getElementById('nn-container');
+if (nnContainer) {
+    mountNeuralNetwork(nnContainer);
+}
+
+// Initialize Build Curriculum
+const curriculumContainer = document.getElementById('curriculum-container');
+if (curriculumContainer) {
+    mountBuildCurriculum(curriculumContainer);
+}
+
+// Subtitle updates based on visible slide
+const subtitleEl = document.getElementById('header-subtitle');
+const slides = document.querySelectorAll('.snap-slide[data-subtitle]');
+
+const subtitleObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+        if (entry.isIntersecting && subtitleEl) {
+            const subtitle = (entry.target as HTMLElement).dataset.subtitle || '';
+            subtitleEl.textContent = subtitle;
+        }
+    });
+}, { threshold: 0.5 });
+
+slides.forEach(slide => subtitleObserver.observe(slide));
+
 // Video Lazy Loading
 const videos = document.querySelectorAll('video');
-const observer = new IntersectionObserver((entries) => {
+const videoObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
+        const video = entry.target as HTMLVideoElement;
         if (entry.isIntersecting) {
-            const video = entry.target as HTMLVideoElement;
-            // If it has source children, they might need loading logic, 
-            // but for simple <video src="..."> or <source> with preload="none"
-            // For now, assume standard autoplay behavior triggers when we ensure it's in view?
-            // Actually, best practice for lazy load is data-src.
-            // But let's stick to the React logic: it used src={isVisible ? src : undefined}.
-
-            // In our HTML we put <source src="...">.
-            // If we want lazy, we should have used data-src. 
-            // The HTML I wrote has <source src="...">. 
-            // The browser *might* preload metadata.
-
-            // Let's implement play/pause based on visibility to save resources
             video.play().catch(e => console.log("Autoplay blocked", e));
         } else {
-            const video = entry.target as HTMLVideoElement;
             video.pause();
         }
     });
 }, { threshold: 0.1 });
 
-videos.forEach(video => observer.observe(video));
+videos.forEach(video => videoObserver.observe(video));
 
 console.log("Dialtone WWW Initialized");
