@@ -73,11 +73,13 @@ class ProceduralOrbit {
   cloud1: THREE.Mesh;
   cloud2: THREE.Mesh;
   atmosphere: THREE.Mesh;
+  sunAtmosphere: THREE.Mesh;
   issGroup: THREE.Group;
   earthMaterial!: THREE.ShaderMaterial;
   cloud1Material!: THREE.ShaderMaterial;
   cloud2Material!: THREE.ShaderMaterial;
   atmosphereMaterial!: THREE.ShaderMaterial;
+  sunAtmosphereMaterial!: THREE.ShaderMaterial;
 
   orbitAngle = 0;
   earthRadius = 5;
@@ -109,6 +111,8 @@ class ProceduralOrbit {
   sunKeyLight!: THREE.DirectionalLight;
   ambientLight!: THREE.AmbientLight;
   sunDistance = 40;
+  sunOrbitHeight = 35;
+  sunOrbitAngleDeg = 270;
   materialColorScale = 1;
   lastFrameTime = performance.now();
   fpsLastTime = performance.now();
@@ -189,7 +193,10 @@ class ProceduralOrbit {
                     // Basic Lighting (world-space normal + light dir)
                     vec3 lightDir = normalize(uLightDir);
                     float diffuse = max(dot(vNormal, lightDir), 0.0);
-                    float light = uAmbientIntensity + diffuse * (uKeyIntensity + uSunIntensity);
+                    float ambientFactor = clamp(1.0 - uAmbientIntensity, 0.0, 1.0);
+                    float boostedDiffuse = mix(diffuse, pow(diffuse, 0.65), ambientFactor);
+                    float sunTerm = pow(diffuse, 1.8) * uSunIntensity;
+                    float light = uAmbientIntensity + boostedDiffuse * uKeyIntensity + sunTerm;
                     gl_FragColor = vec4(color * light * uColorScale, 1.0);
                 }
             `
@@ -243,7 +250,10 @@ class ProceduralOrbit {
                     float fresnel = pow(0.7 - dot(vNormal, vec3(0, 0, 1.0)), 4.0);
                     vec3 lightDir = normalize(uLightDir);
                     float diffuse = max(dot(vNormal, lightDir), 0.0);
-                    float light = uAmbientIntensity + diffuse * (uKeyIntensity + uSunIntensity);
+                    float ambientFactor = clamp(1.0 - uAmbientIntensity, 0.0, 1.0);
+                    float boostedDiffuse = mix(diffuse, pow(diffuse, 0.65), ambientFactor);
+                    float sunTerm = pow(diffuse, 2.2) * uSunIntensity * 2.0;
+                    float light = uAmbientIntensity + boostedDiffuse * uKeyIntensity + sunTerm;
                     gl_FragColor = vec4(0.3, 0.6, 1.0, 1.0) * fresnel * light * uColorScale;
                 }
             `
@@ -252,6 +262,54 @@ class ProceduralOrbit {
     this.atmosphere = new THREE.Mesh(geo(this.earthRadius + 0.2), atmoMat);
     this.atmosphere.name = "Atmospheric-Limb";
     this.scene.add(this.atmosphere);
+
+    // 5. SUN-SCATTER ATMOSPHERE (Directional glow)
+    const sunAtmoMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uLightDir: { value: new THREE.Vector3(1, 1, 1).normalize() },
+        uSunIntensity: { value: 0.5 },
+        uAmbientIntensity: { value: 0.1 },
+        uCameraPos: { value: new THREE.Vector3() },
+        uColorScale: { value: this.materialColorScale }
+      },
+      vertexShader: `
+                varying vec3 vWorldPos;
+                varying vec3 vNormal;
+                void main() {
+                    vNormal = normalize(mat3(modelMatrix) * normal);
+                    vec4 worldPos = modelMatrix * vec4(position, 1.0);
+                    vWorldPos = worldPos.xyz;
+                    gl_Position = projectionMatrix * viewMatrix * worldPos;
+                }
+            `,
+      fragmentShader: `
+                varying vec3 vWorldPos;
+                varying vec3 vNormal;
+                uniform vec3 uLightDir;
+                uniform float uSunIntensity;
+                uniform float uAmbientIntensity;
+                uniform vec3 uCameraPos;
+                uniform float uColorScale;
+                void main() {
+                    vec3 normal = normalize(vNormal);
+                    vec3 viewDir = normalize(uCameraPos - vWorldPos);
+                    float rim = pow(1.0 - max(dot(normal, viewDir), 0.0), 3.0);
+                    float sunFacing = pow(max(dot(normal, normalize(uLightDir)), 0.0), 2.6);
+                    float sunBoost = (0.2 + uSunIntensity * 0.06);
+                    float ambientBoost = 0.15 + uAmbientIntensity * 0.2;
+                    float intensity = rim * (ambientBoost + sunFacing * sunBoost);
+                    vec3 color = vec3(0.35, 0.6, 1.0);
+                    gl_FragColor = vec4(color * intensity * uColorScale, intensity);
+                }
+            `
+    });
+    this.sunAtmosphereMaterial = sunAtmoMat;
+    this.sunAtmosphere = new THREE.Mesh(geo(this.earthRadius + 0.32), sunAtmoMat);
+    this.sunAtmosphere.name = "Sun-Atmosphere-Scattering";
+    this.scene.add(this.sunAtmosphere);
   }
 
   createCloudMaterial(scale: number, opacity: number) {
@@ -289,8 +347,12 @@ class ProceduralOrbit {
                     float alpha = smoothstep(0.1, 0.5, n) * ${opacity.toFixed(2)};
                     vec3 lightDir = normalize(uLightDir);
                     float diffuse = max(dot(vNormal, lightDir), 0.0);
-                    float light = uAmbientIntensity + diffuse * (uKeyIntensity + uSunIntensity);
-                    gl_FragColor = vec4(vec3(1.0) * light * uColorScale, alpha);
+                    float ambientFactor = clamp(1.0 - uAmbientIntensity, 0.0, 1.0);
+                    float boostedDiffuse = mix(diffuse, pow(diffuse, 0.65), ambientFactor);
+                    float sunTerm = pow(diffuse, 3.0) * uSunIntensity * 0.08;
+                    float light = uAmbientIntensity + boostedDiffuse * uKeyIntensity + sunTerm;
+                    vec3 litColor = vec3(1.0) * light * uColorScale;
+                    gl_FragColor = vec4(litColor, alpha);
                 }
             `
     });
@@ -323,6 +385,8 @@ class ProceduralOrbit {
     this.sunKeyLight = new THREE.DirectionalLight(0xffd19a, 0.8);
     this.sunKeyLight.position.set(10, 5, 10);
     this.scene.add(this.sunKeyLight);
+    this.sunKeyLight.target.position.set(0, 0, 0);
+    this.scene.add(this.sunKeyLight.target);
     this.ambientLight = new THREE.AmbientLight(0x090a10);
     this.scene.add(this.ambientLight);
 
@@ -515,7 +579,14 @@ class ProceduralOrbit {
       gizmo.appendChild(row);
     };
 
-    const addExpTimeSlider = () => {
+    const addIntSlider = (
+      label: string,
+      value: number,
+      min: number,
+      max: number,
+      step: number,
+      onInput: (v: number) => void
+    ) => {
       const row = document.createElement('div');
       row.style.display = 'flex';
       row.style.alignItems = 'center';
@@ -523,7 +594,48 @@ class ProceduralOrbit {
       row.style.margin = '4px 0';
 
       const name = document.createElement('span');
-      name.textContent = 'Time: ';
+      name.textContent = `${label}: `;
+      name.style.width = '60px';
+      row.appendChild(name);
+
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = `${min}`;
+      slider.max = `${max}`;
+      slider.step = `${step}`;
+      slider.value = `${value}`;
+      slider.style.width = '120px';
+      slider.addEventListener('input', () => onInput(parseFloat(slider.value)));
+      row.appendChild(slider);
+
+      const valueLabel = document.createElement('span');
+      valueLabel.textContent = `${Math.round(value)}`;
+      valueLabel.style.minWidth = '42px';
+      valueLabel.style.textAlign = 'right';
+      row.appendChild(valueLabel);
+
+      slider.addEventListener('input', () => {
+        valueLabel.textContent = `${Math.round(parseFloat(slider.value))}`;
+      });
+
+      gizmo.appendChild(row);
+    };
+
+    const addExpSlider = (
+      label: string,
+      value: number,
+      max: number,
+      onInput: (v: number) => void,
+      precision: number
+    ) => {
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.alignItems = 'center';
+      row.style.gap = '8px';
+      row.style.margin = '4px 0';
+
+      const name = document.createElement('span');
+      name.textContent = `${label}: `;
       name.style.width = '60px';
       row.appendChild(name);
 
@@ -543,21 +655,24 @@ class ProceduralOrbit {
 
       const updateFromSlider = () => {
         const t = parseFloat(slider.value);
-        const expValue = Math.expm1(t * Math.log(101)) / 100;
-        this.timeScale = expValue * 100;
-        valueLabel.textContent = this.timeScale.toFixed(2);
+        const expValue = Math.expm1(t * Math.log(max + 1)) / max;
+        const scaledValue = expValue * max;
+        onInput(scaledValue);
+        valueLabel.textContent = scaledValue.toFixed(precision);
       };
 
       slider.addEventListener('input', updateFromSlider);
 
-      const normalized = Math.log1p(this.timeScale) / Math.log(101);
+      const normalized = Math.log1p(value) / Math.log(max + 1);
       slider.value = normalized.toFixed(2);
       updateFromSlider();
 
       gizmo.appendChild(row);
     };
 
-    addExpTimeSlider();
+    addExpSlider('Time', this.timeScale, 100, (v) => {
+      this.timeScale = v;
+    }, 2);
 
     addSlider('Shader', this.shaderTimeScale, 0.01, 1.0, 0.01, (v) => {
       this.shaderTimeScale = v;
@@ -589,13 +704,22 @@ class ProceduralOrbit {
       this.sunKeyLight.intensity = v;
     });
 
-    addSlider('Sun', this.sunLight.intensity, 0, 2.0, 0.05, (v) => {
+    addExpSlider('Sun', this.sunLight.intensity, 100, (v) => {
       this.sunLight.intensity = v;
-    });
+    }, 2);
 
     addSlider('Ambient', this.ambientLight.intensity, 0, 1.0, 0.02, (v) => {
       this.ambientLight.intensity = v;
     });
+
+    addSlider('Orbit Ht', this.sunOrbitHeight, 5, 80, 1, (v) => {
+      this.sunOrbitHeight = v;
+    });
+
+    addIntSlider('Sun Orbit', this.sunOrbitAngleDeg, 0, 360, 1, (v) => {
+      this.sunOrbitAngleDeg = v;
+    });
+
 
     const materialTitle = document.createElement('div');
     materialTitle.textContent = 'Material';
@@ -766,7 +890,7 @@ class ProceduralOrbit {
   runTestSuite() {
     console.group("🛰️ PROXIMITY SENSOR & GEOMETRY AUDIT");
 
-    const layers = [this.earth, this.cloud1, this.cloud2, this.atmosphere];
+    const layers = [this.earth, this.cloud1, this.cloud2, this.atmosphere, this.sunAtmosphere];
     layers.forEach(l => {
       const radius = (l.geometry as THREE.SphereGeometry).parameters.radius;
       console.log(`[PASS] Layer: ${l.name} | Radius: ${radius.toFixed(2)}`);
@@ -812,11 +936,17 @@ class ProceduralOrbit {
     this.issGroup.position.z = Math.sin(this.orbitAngle) * orbitRadius;
     this.issGroup.position.y = Math.sin(this.orbitAngle * 0.5) * 0.5; // Slight orbital inclination
 
-    // Keep sun opposite the ISS, across the planet
-    const sunDirection = this.issGroup.position.clone().normalize().multiplyScalar(-1);
-    this.sunGlow.position.copy(sunDirection).multiplyScalar(this.sunDistance);
-    this.sunLight.position.copy(this.sunGlow.position);
-    this.sunKeyLight.position.copy(this.sunGlow.position);
+    // Orbit lights around the Earth (per-light angles + heights)
+    const sunAngle = this.sunOrbitAngleDeg * DEG_TO_RAD;
+    const sunRadius = this.earthRadius + this.sunOrbitHeight;
+    this.sunLight.position.set(
+      Math.cos(sunAngle) * sunRadius,
+      0,
+      Math.sin(sunAngle) * sunRadius
+    );
+    this.sunGlow.position.copy(this.sunLight.position);
+
+    this.sunKeyLight.position.copy(this.sunLight.position);
 
     const lightDir = this.sunKeyLight.position.clone().normalize();
     const keyIntensity = this.sunKeyLight.intensity;
@@ -842,6 +972,11 @@ class ProceduralOrbit {
     this.atmosphereMaterial.uniforms.uSunIntensity.value = sunIntensity;
     this.atmosphereMaterial.uniforms.uAmbientIntensity.value = ambientIntensity;
     this.atmosphereMaterial.uniforms.uColorScale.value = this.materialColorScale;
+    this.sunAtmosphereMaterial.uniforms.uLightDir.value.copy(lightDir);
+    this.sunAtmosphereMaterial.uniforms.uSunIntensity.value = sunIntensity;
+    this.sunAtmosphereMaterial.uniforms.uAmbientIntensity.value = ambientIntensity;
+    this.sunAtmosphereMaterial.uniforms.uCameraPos.value.copy(this.camera.position);
+    this.sunAtmosphereMaterial.uniforms.uColorScale.value = this.materialColorScale;
 
     // Look toward direction of travel
     this.issGroup.lookAt(
