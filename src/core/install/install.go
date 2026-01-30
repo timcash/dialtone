@@ -304,6 +304,8 @@ func installLocalDepsWSL() {
 	headerFile := filepath.Join(includeDir, "linux", "videodev2.h")
 	if _, err := os.Stat(headerFile); err != nil {
 		logger.LogInfo("Step 3: Extracting V4L2 headers...")
+		// Save original directory to restore later
+		origDir, _ := os.Getwd()
 		err := os.Chdir(depsDir)
 		if err == nil {
 			cmd := exec.Command("apt-get", "download", "libv4l-dev", "linux-libc-dev")
@@ -314,8 +316,8 @@ func installLocalDepsWSL() {
 			runSimpleShell("dpkg -x libv4l-dev*.deb .")
 			runSimpleShell("dpkg -x linux-libc-dev*.deb .")
 			runSimpleShell("rm *.deb")
-			home, _ := os.UserHomeDir()
-			os.Chdir(home)
+			// Restore original directory
+			os.Chdir(origDir)
 			logItemStatus("V4L2 Headers", "latest", headerFile, false)
 		}
 	} else {
