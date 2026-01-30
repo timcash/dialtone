@@ -1,4 +1,4 @@
-package cli
+package install
 
 import (
 	"flag"
@@ -238,19 +238,7 @@ func installLocalDepsWSL() {
 	os.MkdirAll(depsDir, 0755)
 
 	// 1. Install Go
-	goDir := filepath.Join(depsDir, "go")
-	goBin := filepath.Join(goDir, "bin", "go")
-	if _, err := os.Stat(goBin); err != nil {
-		logger.LogInfo("Step 1: Installing Go %s...", GoVersion)
-		goTarball := fmt.Sprintf("go%s.linux-amd64.tar.gz", GoVersion)
-		downloadUrl := fmt.Sprintf("https://go.dev/dl/%s", goTarball)
-		runSimpleShell(fmt.Sprintf("wget -O %s/%s %s", depsDir, goTarball, downloadUrl))
-		runSimpleShell(fmt.Sprintf("tar -C %s -xzf %s/%s", depsDir, depsDir, goTarball))
-		os.Remove(filepath.Join(depsDir, goTarball))
-		logItemStatus("Go", GoVersion, goBin, false)
-	} else {
-		logItemStatus("Go", GoVersion, goBin, true)
-	}
+	runSimpleShell("./dialtone.sh plugin install go")
 
 	// 2. Install Node.js
 	nodeDir := filepath.Join(depsDir, "node")
@@ -373,6 +361,9 @@ func installLocalDepsWSL() {
 			logItemStatus("ARMhf Compiler", ArmCompilerVersion, gcc32Bin, true)
 		}
 
+		// 7. Install AI
+		runSimpleShell("./dialtone.sh plugin install ai")
+
 		// 6. Install Cloudflared
 		installCloudflaredLinuxAMD64(depsDir)
 	}
@@ -399,19 +390,7 @@ func installLocalDepsMacOSAMD64() {
 	os.MkdirAll(depsDir, 0755)
 
 	// 1. Install Go
-	goDir := filepath.Join(depsDir, "go")
-	goBin := filepath.Join(goDir, "bin", "go")
-	if _, err := os.Stat(goBin); err != nil {
-		logger.LogInfo("Step 1: Installing Go %s for macOS x86_64...", GoVersion)
-		goTarball := fmt.Sprintf("go%s.darwin-amd64.tar.gz", GoVersion)
-		downloadUrl := fmt.Sprintf("https://go.dev/dl/%s", goTarball)
-		runSimpleShell(fmt.Sprintf("curl -L -o %s/%s %s", depsDir, goTarball, downloadUrl))
-		runSimpleShell(fmt.Sprintf("tar -C %s -xzf %s/%s", depsDir, depsDir, goTarball))
-		os.Remove(filepath.Join(depsDir, goTarball))
-		logItemStatus("Go", GoVersion, goBin, false)
-	} else {
-		logItemStatus("Go", GoVersion, goBin, true)
-	}
+	runSimpleShell("./dialtone.sh plugin install go")
 
 	// 2. Install Node.js
 	nodeDir := filepath.Join(depsDir, "node")
@@ -481,19 +460,7 @@ func installLocalDepsLinuxARM64() {
 	os.MkdirAll(depsDir, 0755)
 
 	// 1. Install Go
-	goDir := filepath.Join(depsDir, "go")
-	goBin := filepath.Join(goDir, "bin", "go")
-	if _, err := os.Stat(goBin); err != nil {
-		logger.LogInfo("Step 1: Installing Go %s for Linux ARM64...", GoVersion)
-		goTarball := fmt.Sprintf("go%s.linux-arm64.tar.gz", GoVersion)
-		downloadUrl := fmt.Sprintf("https://go.dev/dl/%s", goTarball)
-		runSimpleShell(fmt.Sprintf("wget -O %s/%s %s", depsDir, goTarball, downloadUrl))
-		runSimpleShell(fmt.Sprintf("tar -C %s -xzf %s/%s", depsDir, depsDir, goTarball))
-		os.Remove(filepath.Join(depsDir, goTarball))
-		logItemStatus("Go", GoVersion, goBin, false)
-	} else {
-		logItemStatus("Go", GoVersion, goBin, true)
-	}
+	runSimpleShell("./dialtone.sh plugin install go")
 
 	// 2. Install Node.js
 	nodeDir := filepath.Join(depsDir, "node")
@@ -561,19 +528,7 @@ func installLocalDepsMacOSARM() {
 	os.MkdirAll(depsDir, 0755)
 
 	// 1. Install Go
-	goDir := filepath.Join(depsDir, "go")
-	goBin := filepath.Join(goDir, "bin", "go")
-	if _, err := os.Stat(goBin); err != nil {
-		logger.LogInfo("Step 1: Installing Go %s for macOS ARM64...", GoVersion)
-		goTarball := fmt.Sprintf("go%s.darwin-arm64.tar.gz", GoVersion)
-		downloadUrl := fmt.Sprintf("https://go.dev/dl/%s", goTarball)
-		runSimpleShell(fmt.Sprintf("curl -L -o %s/%s %s", depsDir, goTarball, downloadUrl))
-		runSimpleShell(fmt.Sprintf("tar -C %s -xzf %s/%s", depsDir, depsDir, goTarball))
-		os.Remove(filepath.Join(depsDir, goTarball))
-		logItemStatus("Go", GoVersion, goBin, false)
-	} else {
-		logItemStatus("Go", GoVersion, goBin, true)
-	}
+	runSimpleShell("./dialtone.sh plugin install go")
 
 	// 2. Install Node.js
 	nodeDir := filepath.Join(depsDir, "node")

@@ -65,6 +65,9 @@ func RunGithub(args []string) {
 		runIssue(restArgs)
 	case "check-deploy":
 		runCheckDeploy(restArgs)
+	case "install":
+		// Already handled by core installer (gh CLI)
+		logger.LogInfo("Github plugin: Dependencies already handled by core installer.")
 	case "help", "-h", "--help":
 		printGithubUsage()
 	default:
@@ -410,9 +413,9 @@ func runIssue(args []string) {
 }
 
 type GHInfo struct {
-	Number int      `json:"number"`
-	Title  string   `json:"title"`
-	Body   string   `json:"body"`
+	Number int       `json:"number"`
+	Title  string    `json:"title"`
+	Body   string    `json:"body"`
 	Labels []GHLabel `json:"labels"`
 }
 

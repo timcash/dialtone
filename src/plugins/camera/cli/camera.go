@@ -23,6 +23,9 @@ func RunCamera(args []string) {
 		runSnapshot()
 	case "stream":
 		runStream()
+	case "install":
+		// Camera plugin currently uses system libraries (V4L2)
+		fmt.Println("[camera] Camera plugin: No specific dependencies to install.")
 	default:
 		fmt.Printf("Unknown camera command: %s\n", command)
 		printUsage()

@@ -67,6 +67,9 @@ func Run(args []string) {
 		RunSubtask(subArgs)
 	case "test":
 		RunTest(subArgs)
+	case "install":
+		// Ticket plugin doesn't have specific dependencies to install via Go yet
+		logInfo("Ticket plugin: No specific dependencies to install.")
 	case "key":
 		RunKey(subArgs)
 	case "delete":

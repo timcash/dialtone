@@ -1,26 +1,20 @@
 package cli
 
 import (
+	"dialtone/cli/src/core/config"
 	"dialtone/cli/src/core/logger"
 	"os"
 	"os/exec"
 	"path/filepath"
-
-	"github.com/joho/godotenv"
 )
 
 // RunAIInstall handles the installation steps for the AI plugin
 func RunAIInstall(args []string) {
 	logger.LogInfo("AI Plugin: Checking dependencies...")
 
-	// Load .env to get DIALTONE_ENV
-	if err := godotenv.Load(); err != nil {
-		logger.LogDebug("AI Plugin: No .env file found, using defaults")
-	}
-
-	dialtoneEnv := os.Getenv("DIALTONE_ENV")
+	dialtoneEnv := config.GetDialtoneEnv()
 	if dialtoneEnv == "" {
-		logger.LogFatal("DIALTONE_ENV is not set. Please add it to your .env file.")
+		logger.LogFatal("DIALTONE_ENV is not set.")
 	}
 
 	// Determine npm path
@@ -38,6 +32,16 @@ func RunAIInstall(args []string) {
 		}
 	}
 
+	// Check if already installed
+	geminiCliBin := filepath.Join(dialtoneEnv, "node", "bin", "gemini")
+	if npmPath != localNpm {
+		geminiCliBin = filepath.Join(dialtoneEnv, "bin", "gemini")
+	}
+	if _, err := os.Stat(geminiCliBin); err == nil {
+		logger.LogInfo("AI Plugin: @google/gemini-cli is already installed.")
+		return
+	}
+
 	logger.LogInfo("AI Plugin: Installing @google/gemini-cli...")
 
 	// Create the directory if it doesn't exist
@@ -51,17 +55,18 @@ func RunAIInstall(args []string) {
 	if npmPath == localNpm {
 		// Install into the node directory so binary is in node/bin
 		nodeDir := filepath.Join(dialtoneEnv, "node")
-		logger.LogDebug("AI Plugin: Installing with --prefix %s -g", nodeDir)
+		logger.LogInfo("AI Plugin: Running npm install -g --prefix %s @google/gemini-cli", nodeDir)
 		cmd = exec.Command(npmPath, "install", "-g", "--prefix", nodeDir, "@google/gemini-cli")
 	} else {
-		logger.LogDebug("AI Plugin: Installing with --prefix %s", dialtoneEnv)
+		logger.LogInfo("AI Plugin: Running npm install --prefix %s @google/gemini-cli", dialtoneEnv)
 		cmd = exec.Command(npmPath, "install", "--prefix", dialtoneEnv, "@google/gemini-cli")
 	}
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
 		logger.LogError("AI Plugin: Failed to install @google/gemini-cli: %v", err)
-		logger.LogDebug("npm output: %s", string(output))
 		return
 	}
 

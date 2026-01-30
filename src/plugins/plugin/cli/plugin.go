@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	ai_cli "dialtone/cli/src/plugins/ai/cli"
 )
 
 func logInfo(format string, args ...interface{}) {
@@ -31,6 +33,12 @@ func RunPlugin(args []string) {
 		runCreate(subArgs)
 	case "test":
 		runTest(subArgs)
+	case "install":
+		runInstall(subArgs)
+	case "build":
+		runBuild(subArgs)
+	case "ai", "opencode", "developer", "subagent":
+		runAICommand(command, subArgs)
 	case "help", "--help", "-h":
 		printUsage()
 	default:
@@ -45,8 +53,54 @@ func printUsage() {
 	fmt.Println("\nCommands:")
 	fmt.Println("  add <plugin-name>      Create a new plugin structure")
 	fmt.Println("  create <plugin-name>   Alias for 'add'")
+	fmt.Println("  install <plugin-name>  Install dependencies for the specified plugin")
+	fmt.Println("  build <plugin-name>    Build the specified plugin binary")
 	fmt.Println("  test <plugin-name>     Run tests for the specified plugin")
 	fmt.Println("  help                   Show this help message")
+}
+
+func runInstall(args []string) {
+	if len(args) < 1 {
+		logFatal("Usage: plugin install <plugin-name>")
+	}
+	pluginName := args[0]
+	logInfo("Installing dependencies for plugin: %s", pluginName)
+
+	if pluginName == "ai" {
+		ai_cli.RunAIInstall(args[1:])
+		return
+	}
+
+	// Delegate via shell to avoid static dependencies
+	cmdStr := fmt.Sprintf("./dialtone.sh %s install", pluginName)
+	cmd := exec.Command("bash", "-c", cmdStr)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		logFatal("Failed to install plugin %s: %v", pluginName, err)
+	}
+}
+
+func runBuild(args []string) {
+	if len(args) < 1 {
+		logFatal("Usage: plugin build <plugin-name>")
+	}
+	pluginName := args[0]
+	logInfo("Building plugin: %s", pluginName)
+
+	if pluginName == "ai" {
+		ai_cli.RunAIBuild(args[1:])
+		return
+	}
+
+	// Delegate via shell to avoid static dependencies
+	cmdStr := fmt.Sprintf("./dialtone.sh %s build", pluginName)
+	cmd := exec.Command("bash", "-c", cmdStr)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		logFatal("Failed to build plugin %s: %v", pluginName, err)
+	}
 }
 
 func runTest(args []string) {
@@ -105,6 +159,16 @@ func runCreate(args []string) {
 	createTestTemplates(filepath.Join(pluginDir, "test"), pluginName)
 
 	logInfo("Plugin %s created successfully", pluginName)
+}
+
+func runAICommand(command string, args []string) {
+	// Call AI logic directly as we now have the import here (decoupling from dev.go)
+	if command == "ai" {
+		ai_cli.RunAI(args)
+	} else {
+		// handle opencode, developer, subagent shortcuts
+		ai_cli.RunAI(append([]string{command}, args...))
+	}
 }
 
 func ensureDir(path string) {
