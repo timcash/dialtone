@@ -79,10 +79,33 @@ func Run(args []string) {
 		RunDelete(subArgs)
 	case "load":
 		RunLoad(subArgs)
+	case "reset":
+		RunReset(subArgs)
 	default:
 		fmt.Printf("Unknown ticket subcommand: %s\n", subcommand)
 		printUsage()
 	}
+}
+
+func RunReset(args []string) {
+	ticket, err := GetCurrentTicket()
+	if err != nil {
+		fmt.Printf("[WARNING] No current ticket active: %v\n", err)
+		return
+	}
+
+	for i := range ticket.Subtasks {
+		ticket.Subtasks[i].Status = "todo"
+		ticket.Subtasks[i].PassTimestamp = ""
+		ticket.Subtasks[i].FailTimestamp = ""
+	}
+
+	if err := SaveTicket(ticket); err != nil {
+		logFatal("Could not save ticket: %v", err)
+	}
+
+	logTicketCommand(ticket.ID, "reset", args)
+	logInfo("All subtasks for ticket %s reset to todo", ticket.ID)
 }
 
 func printUsage() {
@@ -94,6 +117,7 @@ func printUsage() {
 	fmt.Println("  list               List all tickets")
 	fmt.Println("  next               Mark current subtask done and move to next")
 	fmt.Println("  done               Complete the current ticket")
+	fmt.Println("  reset              Reset all subtasks to todo for current ticket")
 	fmt.Println("  validate <name>    Validate a ticket's structure")
 	fmt.Println("  delete <name>      Delete a ticket")
 	fmt.Println()

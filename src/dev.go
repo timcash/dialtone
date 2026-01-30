@@ -6,11 +6,19 @@ import (
 	"os/exec"
 	"strings"
 
-	"dialtone/cli/src/core/build"
+	browser_cli "dialtone/cli/src/core/browser/cli"
+	build_cli "dialtone/cli/src/core/build/cli"
 	"dialtone/cli/src/core/config"
-	"dialtone/cli/src/core/install"
+	config_core_cli "dialtone/cli/src/core/config/cli"
+	earth_cli "dialtone/cli/src/core/earth/cli"
+	install_cli "dialtone/cli/src/core/install/cli"
 	"dialtone/cli/src/core/logger"
-	"dialtone/cli/src/core/ssh"
+	logger_cli "dialtone/cli/src/core/logger/cli"
+	mock_cli "dialtone/cli/src/core/mock/cli"
+	ssh_cli "dialtone/cli/src/core/ssh/cli"
+	util_cli "dialtone/cli/src/core/util/cli"
+	web_cli "dialtone/cli/src/core/web/cli"
+
 	camera_cli "dialtone/cli/src/plugins/camera/cli"
 	chrome_cli "dialtone/cli/src/plugins/chrome/cli"
 	cloudflare_cli "dialtone/cli/src/plugins/cloudflare/cli"
@@ -19,6 +27,7 @@ import (
 	github_cli "dialtone/cli/src/plugins/github/cli"
 	go_cli "dialtone/cli/src/plugins/go/cli"
 	ide_cli "dialtone/cli/src/plugins/ide/cli"
+	jax_demo_cli "dialtone/cli/src/plugins/jax-demo/cli"
 	logs_cli "dialtone/cli/src/plugins/logs/cli"
 	mavlink_cli "dialtone/cli/src/plugins/mavlink/cli"
 	plugin_cli "dialtone/cli/src/plugins/plugin/cli"
@@ -46,11 +55,11 @@ func ExecuteDev() {
 	case "start":
 		runStart(args)
 	case "build":
-		build.RunBuild(args)
+		build_cli.Run(args)
 	case "deploy":
 		deploy_cli.RunDeploy(args)
 	case "ssh":
-		ssh.RunSSH(args)
+		ssh_cli.Run(args)
 	case "vpn":
 		runVPN(args)
 	case "vpn-provision", "provision":
@@ -60,7 +69,7 @@ func ExecuteDev() {
 	case "diagnostic":
 		diagnostic_cli.RunDiagnostic(args)
 	case "install":
-		install.RunInstall(args)
+		install_cli.Run(args)
 	case "clone":
 		RunClone(args)
 	case "sync-code":
@@ -94,6 +103,24 @@ func ExecuteDev() {
 		ui_cli.Run(args)
 	case "go":
 		go_cli.RunGo(args)
+	case "jax-demo":
+		jax_demo_cli.Run(args)
+
+	// Core Module Specific Commands
+	case "browser":
+		browser_cli.Run(args)
+	case "config":
+		config_core_cli.Run(args)
+	case "earth":
+		earth_cli.Run(args)
+	case "logger":
+		logger_cli.Run(args)
+	case "mock":
+		mock_cli.Run(args)
+	case "util":
+		util_cli.Run(args)
+	case "web":
+		web_cli.Run(args)
 
 	case "ai", "opencode", "developer", "subagent":
 		// Delegate to plugin command to remove static dependency on AI from core
@@ -132,6 +159,11 @@ func printDevUsage() {
 
 	fmt.Println("  ai <subcmd>        AI tools (opencode, developer, subagent)")
 	fmt.Println("  go <subcmd>        Go toolchain tools (install, lint)")
+	fmt.Println("  jax-demo           JAX Demo Plugin")
+	fmt.Println("\nCore Modules:")
+	fmt.Println("  browser, config, earth, logger, mock, util, web")
+
+	fmt.Println("\nHelp:")
 	fmt.Println("  help               Show this help message")
 }
 

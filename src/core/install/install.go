@@ -61,33 +61,8 @@ func RunInstall(args []string) {
 	linuxWSL := fs.Bool("linux-wsl", false, "Install dependencies natively on Linux/WSL (x86_64)")
 	macosARM := fs.Bool("macos-arm", false, "Install dependencies natively on macOS ARM (Apple Silicon)")
 	clean := fs.Bool("clean", false, "Remove all dependencies before installation")
+	_ = clean // Handled by dialtone.sh
 	check := fs.Bool("check", false, "Check if dependencies are installed and exit")
-	showHelp := fs.Bool("help", false, "Show help for install command")
-
-	fs.Usage = func() {
-		fmt.Println("Usage: dialtone install [options] [install-path]")
-		fmt.Println()
-		fmt.Println("Install development dependencies (Go, Node.js, Zig, GH CLI, Pixi) for building Dialtone.")
-		fmt.Println()
-		fmt.Println("Arguments:")
-		fmt.Println("  [install-path]  Optional: Path where dependencies should be installed.")
-		fmt.Println("                  Overrides DIALTONE_ENV and default locations.")
-		fmt.Println()
-		fmt.Println("Options:")
-		fmt.Println("  --linux-wsl   Install for Linux/WSL x86_64")
-		fmt.Println("  --macos-arm   Install for macOS ARM (Apple Silicon)")
-		fmt.Println("  --host        SSH host for remote installation (user@host)")
-		fmt.Println("  --port        SSH port (default: 22)")
-		fmt.Println("  --user        SSH username")
-		fmt.Println("  --pass        SSH password")
-		fmt.Println("  --clean       Remove all dependencies before installation")
-		fmt.Println("  --check       Check if dependencies are installed and exit")
-		fmt.Println("  --help        Show this help message")
-		fmt.Println()
-		fmt.Println("Notes:")
-		fmt.Println("  - Dependencies are installed to the directory specified by DIALTONE_ENV")
-		fmt.Println("  - Default location is ~/.dialtone_env")
-	}
 
 	// Handle flags
 	var positionalArgs []string
@@ -118,17 +93,6 @@ func RunInstall(args []string) {
 		logger.LogInfo("Using environment directory from DIALTONE_ENV: %s", env)
 	}
 
-	// Handle clean option is now handled in dialtone.sh wrapper
-	if *clean {
-		// No-op here, dialtone.sh already cleaned if this flag was present
-		logger.LogInfo("Clean flag detected (already handled by dialtone.sh)")
-	}
-
-	if *showHelp {
-		fs.Usage()
-		return
-	}
-
 	// Explicit flags take priority
 	if *linuxWSL {
 		installLocalDepsWSL()
@@ -156,7 +120,7 @@ func RunInstall(args []string) {
 
 	// Remote install path
 	if *host == "" || *pass == "" {
-		logger.LogFatal("Error: -host (user@host) and -pass are required for remote install")
+		logger.LogFatal("Error: --host (user@host) and --pass are required for remote install")
 	}
 
 	client, err := dialSSH(*host, *port, *user, *pass)
@@ -654,7 +618,7 @@ func CheckInstall(depsDir string) {
 
 	// 2.3 Pixi
 	pixiBin := filepath.Join(depsDir, "pixi", "pixi")
-	if _, err := os.Stat(pixiBin); err == nil {
+	if _, err := os.Stat(pixiBin); err != nil {
 		logItemStatus("Pixi", PixiVersion, pixiBin, true)
 	} else {
 		logger.LogInfo("Pixi (%s) is MISSING", PixiVersion)

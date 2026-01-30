@@ -23,36 +23,8 @@ func RunBuild(args []string) {
 	linuxArm := fs.Bool("linux-arm", false, "Cross-compile for 32-bit Linux ARM (armv7)")
 	linuxArm64 := fs.Bool("linux-arm64", false, "Cross-compile for 64-bit Linux ARM (aarch64)")
 	builder := fs.Bool("builder", false, "Build the dialtone-builder image for faster ARM builds")
-	showHelp := fs.Bool("help", false, "Show help for build command")
-
-	fs.Usage = func() {
-		fmt.Println("Usage: dialtone build [options]")
-		fmt.Println()
-		fmt.Println("Build the Dialtone binary and web UI for deployment.")
-		fmt.Println()
-		fmt.Println("Options:")
-		fmt.Println("  --local        Build natively on the local system (uses DIALTONE_ENV if available)")
-		fmt.Println("  --full         Full rebuild: Web UI + local CLI + ARM64 binary")
-		fmt.Println("  --remote       Build on remote robot via SSH (requires configured .env)")
-		fmt.Println("  --podman       Force build using Podman container")
-		fmt.Println("  --linux-arm    Cross-compile for 32-bit Linux ARM (Raspberry Pi Zero/3/4/5)")
-		fmt.Println("  --linux-arm64  Cross-compile for 64-bit Linux ARM (Raspberry Pi 3/4/5)")
-		fmt.Println("  --builder      Build the dialtone-builder image for faster ARM builds")
-		fmt.Println("  --help         Show help for build command")
-		fmt.Println()
-		fmt.Println("Examples:")
-		fmt.Println("  dialtone build              # Build web UI + binary (Podman or local)")
-		fmt.Println("  dialtone build --local      # Build web UI + native binary")
-		fmt.Println("  dialtone build --podman     # Force Podman build for ARM64")
-		fmt.Println("  dialtone build --linux-arm  # Cross-compile for 32-bit ARM")
-	}
 
 	fs.Parse(args)
-
-	if *showHelp {
-		fs.Usage()
-		return
-	}
 
 	if *builder {
 		buildBuilderImage()
@@ -396,14 +368,6 @@ func runShell(dir string, name string, args ...string) {
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		logger.LogFatal("Command failed in %s: %v %v: %v", dir, name, args, err)
-	}
-}
-
-func copyDir(src string, dst string) {
-	// Simple implementation or call shell cp -r
-	cmd := exec.Command("cp", "-r", src+"/.", dst)
-	if err := cmd.Run(); err != nil {
-		logger.LogFatal("Failed to copy directory from %s to %s: %v", src, dst, err)
 	}
 }
 
