@@ -14,6 +14,7 @@ Commands:
   start         Start the NATS and Web server
   install [path] Install dependencies (--linux-wsl for WSL, --macos-arm for Apple Silicon)
   build         Build web UI and binary (--local, --full, --remote, --podman, --linux-arm, --linux-arm64)
+  format        Format Go code across the repo
   deploy        Deploy to remote robot
   camera        Camera tools (snapshot, stream)
   clone         Clone or update the repository
@@ -170,6 +171,19 @@ for arg in "${ARGS[@]}"; do
     fi
 done
 
+# If --clean-cache is present, remove the cache directory first
+for arg in "${ARGS[@]}"; do
+    if [[ "$arg" == "--clean-cache" ]]; then
+        if [ -n "$DIALTONE_CACHE" ] && [ -d "$DIALTONE_CACHE" ]; then
+            echo "Cleaning cache directory: $DIALTONE_CACHE"
+            chmod -R u+w "$DIALTONE_CACHE" 2>/dev/null || true
+            rm -rf "$DIALTONE_CACHE"
+            echo "Successfully removed $DIALTONE_CACHE"
+        fi
+        break
+    fi
+done
+
 # If no command provided, show help
 if [ -z "$DIALTONE_CMD" ]; then
     print_help
@@ -181,9 +195,20 @@ if [[ "$DIALTONE_ENV" == "~"* ]]; then
     DIALTONE_ENV="${DIALTONE_ENV/#\~/$HOME}"
 fi
 
+# Default cache directory if not set
+if [ -z "$DIALTONE_CACHE" ]; then
+    DIALTONE_CACHE="$DIALTONE_ENV/cache"
+fi
+
+# Tilde expansion for DIALTONE_CACHE if sourced
+if [[ "$DIALTONE_CACHE" == "~"* ]]; then
+    DIALTONE_CACHE="${DIALTONE_CACHE/#\~/$HOME}"
+fi
+
 # Ensure them exported for child processes (Go binary)
 export DIALTONE_ENV
 export DIALTONE_ENV_FILE
+export DIALTONE_CACHE
 
 # Error if DIALTONE_ENV is still not set
 if [ -z "$DIALTONE_ENV" ]; then
@@ -229,8 +254,16 @@ if [ "$DIALTONE_CMD" = "install" ]; then
         GO_VERSION=$(grep "^go " go.mod | awk '{print $2}')
         TAR_FILE="go$GO_VERSION.$OS-$GO_ARCH.tar.gz"
         TAR_PATH="$DIALTONE_ENV/$TAR_FILE"
+        CACHE_DIR="$DIALTONE_CACHE"
+        CACHE_TAR_PATH="$CACHE_DIR/$TAR_FILE"
+        mkdir -p "$CACHE_DIR"
         echo "Downloading $TAR_FILE to $TAR_PATH..."
-        curl -L -o "$TAR_PATH" "https://go.dev/dl/$TAR_FILE"
+        if [ -f "$CACHE_TAR_PATH" ]; then
+            cp "$CACHE_TAR_PATH" "$TAR_PATH"
+        else
+            curl -L -o "$CACHE_TAR_PATH" "https://go.dev/dl/$TAR_FILE"
+            cp "$CACHE_TAR_PATH" "$TAR_PATH"
+        fi
         tar -C "$DIALTONE_ENV" -xzf "$TAR_PATH"
         rm "$TAR_PATH"
     fi

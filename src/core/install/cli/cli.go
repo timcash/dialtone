@@ -12,6 +12,21 @@ func Run(args []string) {
 		return
 	}
 
+	if len(args) > 0 && args[0] == "test" {
+		runInstallTests()
+		return
+	}
+
+	if len(args) > 0 && args[0] == "list" {
+		install.RunInstallList(args[1:])
+		return
+	}
+
+	if len(args) > 1 && args[0] == "dependency" {
+		install.RunInstallDependency(args[1:])
+		return
+	}
+
 	install.RunInstall(args)
 }
 
@@ -32,7 +47,11 @@ func printUsage() {
 	fmt.Println("  --user        SSH username")
 	fmt.Println("  --pass        SSH password")
 	fmt.Println("  --clean       Remove all dependencies before installation")
+	fmt.Println("  --clean-cache Clear cached downloads before installation")
 	fmt.Println("  --check       Check if dependencies are installed and exit")
+	fmt.Println("  list          List dependencies, download details, and status")
+	fmt.Println("  dependency <name> Install a single dependency")
+	fmt.Println("  test          Run install integration test")
 	fmt.Println("  help          Show help for install command")
 	fmt.Println("  --help        Show help for install command")
 	fmt.Println()

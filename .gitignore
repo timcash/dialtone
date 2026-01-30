@@ -34,5 +34,7 @@ src/tickets/tickets.duckdb
 # Local Dependencies
 dialtone_dependencies/
 test_dialtone_env
+test_dialtone_cache
+dialtone_cache/
 dev_dependencies/
 keys.duckdb

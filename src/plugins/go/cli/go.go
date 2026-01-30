@@ -2,10 +2,12 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"dialtone/cli/src/core/config"
 	"dialtone/cli/src/core/logger"
@@ -127,22 +129,38 @@ func runInstall(args []string) {
 	downloadUrl := fmt.Sprintf("https://go.dev/dl/%s", tarball)
 
 	destTar := filepath.Join(depsDir, tarball)
+	cacheDir := getDialtoneCache(depsDir)
+	cacheTar := filepath.Join(cacheDir, tarball)
 
-	logger.LogInfo("Downloading %s to %s...", downloadUrl, destTar)
-
-	var downloadCmd *exec.Cmd
-	if _, err := exec.LookPath("curl"); err == nil {
-		downloadCmd = exec.Command("curl", "-L", "-o", destTar, downloadUrl)
-	} else if _, err := exec.LookPath("wget"); err == nil {
-		downloadCmd = exec.Command("wget", "-O", destTar, downloadUrl)
-	} else {
-		logger.LogFatal("Neither curl nor wget found in PATH")
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		logger.LogFatal("Failed to create cache directory %s: %v", cacheDir, err)
 	}
 
-	downloadCmd.Stdout = os.Stdout
-	downloadCmd.Stderr = os.Stderr
-	if err := downloadCmd.Run(); err != nil {
-		logger.LogFatal("Failed to download Go: %v", err)
+	if _, err := os.Stat(cacheTar); os.IsNotExist(err) || !validateTarGz(cacheTar) {
+		_ = os.Remove(cacheTar)
+		logger.LogInfo("Downloading %s to %s...", downloadUrl, cacheTar)
+
+		var downloadCmd *exec.Cmd
+		if _, err := exec.LookPath("curl"); err == nil {
+			downloadCmd = exec.Command("curl", "-L", "-o", cacheTar, downloadUrl)
+		} else if _, err := exec.LookPath("wget"); err == nil {
+			downloadCmd = exec.Command("wget", "-O", cacheTar, downloadUrl)
+		} else {
+			logger.LogFatal("Neither curl nor wget found in PATH")
+		}
+
+		downloadCmd.Stdout = os.Stdout
+		downloadCmd.Stderr = os.Stderr
+		if err := downloadCmd.Run(); err != nil {
+			logger.LogFatal("Failed to download Go: %v", err)
+		}
+		if !validateTarGz(cacheTar) {
+			logger.LogFatal("Downloaded Go tarball is invalid: %s", cacheTar)
+		}
+	}
+
+	if err := copyFile(cacheTar, destTar); err != nil {
+		logger.LogFatal("Failed to copy Go tarball: %v", err)
 	}
 
 	logger.LogInfo("Extracting %s...", destTar)
@@ -158,6 +176,61 @@ func runInstall(args []string) {
 	}
 
 	logger.LogInfo("Go toolchain installed successfully at %s", goDir)
+}
+
+func getDialtoneCache(depsDir string) string {
+	cacheDir := os.Getenv("DIALTONE_CACHE")
+	if cacheDir == "" {
+		cacheDir = filepath.Join(depsDir, "cache")
+	}
+	return normalizePath(cacheDir)
+}
+
+func normalizePath(path string) string {
+	if strings.HasPrefix(path, "~") {
+		if home, err := os.UserHomeDir(); err == nil {
+			path = filepath.Join(home, strings.TrimPrefix(path, "~"))
+		}
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
+}
+
+func copyFile(src, dst string) error {
+	if src == dst {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Sync()
+}
+
+func validateTarGz(path string) bool {
+	if _, err := os.Stat(path); err != nil {
+		return false
+	}
+	cmd := exec.Command("tar", "-tzf", path)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	return cmd.Run() == nil
 }
 
 func runLint(args []string) {
