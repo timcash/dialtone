@@ -18,7 +18,6 @@ import (
 	_ "dialtone/cli/src/plugins/cloudflare/test"
 	ui_test "dialtone/cli/src/plugins/ui/test"
 	www_test "dialtone/cli/src/plugins/www/test"
-	_ "dialtone/cli/src/tickets/decouple-plugin-installation/test"
 )
 
 // RunTest handles the 'test' command
@@ -270,6 +269,7 @@ func printTestUsage() {
 	fmt.Println()
 	fmt.Println("Note: For ticket-specific verification, use: ./dialtone.sh ticket test <ticket-name>")
 	fmt.Println()
+	fmt.Println("Available Plugins:")
 	fmt.Println("  ticket, test, ui, ai, ide, diagnostic, www")
 }
 
