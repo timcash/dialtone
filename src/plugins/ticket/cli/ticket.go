@@ -553,7 +553,15 @@ func RunDelete(args []string) {
 		logFatal("Could not delete ticket %s from database: %v", name, err)
 	}
 
-	logInfo("Ticket %s deleted successfully from database (folder preserved)", name)
+	// Delete from file system
+	dir := filepath.Join("src", "tickets", name)
+	if _, err := os.Stat(dir); err == nil {
+		if err := os.RemoveAll(dir); err != nil {
+			logFatal("Could not delete ticket directory %s: %v", dir, err)
+		}
+	}
+
+	logInfo("Ticket %s deleted successfully", name)
 }
 
 func GetCurrentTicket() (*Ticket, error) {
