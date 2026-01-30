@@ -55,7 +55,6 @@ cd dialtone
 ## Installation & Setup
 ```bash
 git pull origin main # update main so you can integrate it into your ticket
-mv -n .env.example .env # Only if .env does not exists
 ./dialtone.sh install # Install dev dependencies
 ./dialtone.sh install --remote # Install dev dependencies on remote robot
 ```
@@ -76,11 +75,10 @@ Use the `ticket` command for new work. It enforces TDD and standardized markdown
 
 ## Running Tests: Tests are the most important concept in `dialtone`
 ```bash
-./dialtone.sh plugin test <plugin-name>                         # Run tests for a specific plugin
+./dialtone.sh plugin test <plugin-name> # Run tests for a specific plugin
 ./dialtone.sh plugin test <plugin-name> --subtask <subtask-name> # Run specific subtask test
-./dialtone.sh plugin test tags [tag1 tag2 ...]                   # Run tests matching tags
-./dialtone.sh plugin test --list                                 # List tests that would run
-./dialtone.sh plugin test                                        # Run all tests
+./dialtone.sh plugin test <plugin-name> --list  # List tests that would run
+./dialtone.sh plugin test <plugin-name> # Run all tests for a plugin
 ```
 
 ## Logs
@@ -111,7 +109,6 @@ Use the `ticket` command for new work. It enforces TDD and standardized markdown
 ```bash
 ./dialtone.sh github pr           # Create or update a pull request
 ./dialtone.sh github pr --draft   # Create as a draft
-./dialtone.sh github check-deploy # Verify Vercel deployment status
 ```
 
 ## Git Workflow
@@ -197,22 +194,17 @@ flowchart TD
 dialtone/
 ├── src/               # All source code
 │   ├── plugins/       # All plugins
-│   └── tickets/    # Standardized tickets
-├── test/              # Core test files
+│   └── tickets/       # Standardized tickets
 ├── docs/              # VM and container docs
 │   └── vendor/<vendor_name>/  # Vendor docs
-├── example_code/      # Integration/design examples
 ├── dialtone.sh        # CLI wrapper for `src/dev.go` (Linux/macOS/WSL)
 └── README.md          # Repo overview
 ```
-
 
 ## Ticket Structure
 For tickets created via `./dialtone.sh ticket start <ticket-name>`:
 ```
 src/tickets/<ticket-name>/
-├── ticket.md          # Requirement doc
-├── log.md             # Ticket log from `ticket ask` and `ticket log`
 └── test/
     └── test.go        # Go integration tests (TDD loop)
 ```
@@ -226,71 +218,6 @@ src/plugins/<name>/
 ├── test/              # Plugin-specific tests
 └── README.md          # Plugin documentation
 ```
-
-# Data Objects
-1. `ISSUE`: The source-of-truth problem statement in GitHub that drives triage and labeling.
-2. `TICKET`: The local, time-boxed unit of work (about 60 minutes) that turns an ISSUE into executable subtasks.
-3. `SUBTASK`: A small, ~10 minute step with a single test to keep work atomic and verifiable.
-4. `TEST`: The automated check that proves a subtask works and keeps agents grounded.
-5. `PLUGIN`: A modular feature area with its own CLI commands, docs, and tests.
-6. `WORKFLOW`: A documented CLI-driven process that keeps long-running agent work consistent.
-7. `LOG`: The primary debugging stream for local or remote diagnostics.
-8. `USER`: An identity record (public key) used for auth, authorization, and preferences.
-9. `SKILL`: A bundle of plugins and workflows surfaced as a single CLI command.
-
-## ISSUE: The GitHub source-of-truth for a problem
-1. ID: The GitHub issue ID.
-2. TITLE: The GitHub issue title.
-3. DESCRIPTION: The GitHub issue description.
-4. LABELS: Priority, type, and readiness flags used by the `github` plugin.
-
-## TICKET: The local 60-minute work unit
-1. BRANCH: Git branch created or switched to for the ticket.
-2. DIRECTORY: `src/tickets/<ticket-name>/` scaffolded with `ticket.md` and `test/test.go`.
-3. SUBTASKS: A list of 10-minute steps that each have a test and status.
-4. LIFECYCLE: `ticket start` -> `ticket next` loop -> `ticket done` to ready the PR.
-
-## SUBTASK: Small, test-first unit of work
-1. NAME: Kebab-case identifier used by CLI commands.
-2. DESCRIPTION: Single focused change with file or behavior context.
-3. TEST: One command that must fail first and pass after implementation.
-4. STATUS: `todo`, `progress`, `done`, or `failed`.
-
-## TEST: Proof that a subtask is complete
-1. SCOPE: One subtask or plugin goal.
-2. COMMAND: A `dialtone.sh plugin test ...` invocation tied to the subtask.
-3. OUTCOME: Must fail before the change and pass after.
-
-## PLUGIN: Modular feature area with its own tooling
-1. README: High-level plugin intent and command reference.
-2. CLI: Commands exposed through `dialtone.sh`.
-3. TESTS: Plugin-specific tests under `src/plugins/<name>/test/`.
-4. LIFECYCLE: `plugin add` -> `install`/`build` -> `test`.
-
-## WORKFLOW: Agent grounding for long-running tasks
-1. DOC: A guide in `docs/workflows/` defining how to operate.
-2. CLI: References the commands and expectations for the flow.
-3. PURPOSE: Keeps planning, execution, and verification consistent.
-
-## LOG: Primary debugging stream
-1. LOCAL: `./dialtone.sh logs` for local debugging.
-2. REMOTE: `./dialtone.sh logs --remote` for robot diagnostics.
-3. CONTEXT: Use for tracing failures during tests or deploys.
-
-## USER: Identity record for access and preferences
-1. PUBLIC KEY: The primary identifier for a user.
-2. AUTH: Used for authentication and authorization decisions.
-3. PREFS: Stores user preferences for agent behavior.
-
-## SKILL: Bundled capability surface
-1. WRAPS: A collection of plugins and workflows.
-2. CLI: Exposed as a single agent-facing command.
-3. GOAL: Makes repeatable agent behavior easy to invoke.
-
-## WORKFLOW: Agent-focused CLI process
-1. SCOPE: A long-running task category (issue review, ticket, subtask expansion).
-2. SOURCE: Documented in `docs/workflows/` with step-by-step guidance.
-3. OUTCOME: Clear checks and artifacts that keep agents aligned.
 
 # Workflows
 1. [Issue Review](docs/workflows/issue_review.md): Planning-only triage flow that audits issues, asks clarifying questions, and promotes validated tickets.
