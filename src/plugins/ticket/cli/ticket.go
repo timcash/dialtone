@@ -324,6 +324,9 @@ func RunValidate(args []string) {
 }
 
 func RunDone(args []string) {
+	// Always run test commands before finalizing
+	RunTest(nil)
+
 	// Simple validation: all subtasks must be done
 	ticket, err := GetCurrentTicket()
 	if err != nil {

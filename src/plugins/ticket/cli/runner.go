@@ -5,9 +5,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 func runDynamicTest(ticketName, subtaskName string) error {
+	if subtaskName != "" {
+		return runSubtaskCommandTest(ticketName, subtaskName)
+	}
 	tmpDir, err := os.MkdirTemp("", "dialtest-*")
 	if err != nil {
 		return err
@@ -67,6 +71,29 @@ func main() {
 	}
 
 	cmd := exec.Command("go", "run", mainGoPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func runSubtaskCommandTest(ticketName, subtaskName string) error {
+	ticket, err := GetTicket(ticketName)
+	if err != nil {
+		return err
+	}
+	for _, st := range ticket.Subtasks {
+		if st.Name == subtaskName {
+			if strings.TrimSpace(st.TestCommand) == "" {
+				return fmt.Errorf("missing test command for subtask %s", subtaskName)
+			}
+			return runShellCommand(st.TestCommand)
+		}
+	}
+	return fmt.Errorf("subtask not found: %s", subtaskName)
+}
+
+func runShellCommand(command string) error {
+	cmd := exec.Command("sh", "-c", command)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
