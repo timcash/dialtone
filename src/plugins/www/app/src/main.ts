@@ -45,6 +45,16 @@ sections.register('s-curriculum', {
     }
 });
 
+sections.register('s-stripe', {
+    containerId: 'stripe-container',
+    load: async () => {
+        const { mountStripe } = await import('./components/stripe');
+        const container = document.getElementById('stripe-container');
+        if (!container) throw new Error('stripe-container not found');
+        return mountStripe(container);
+    }
+});
+
 // Start observing visibility and eagerly load first section
 sections.observe();
 sections.eagerLoad('s-home');
