@@ -118,18 +118,10 @@ func RunInstall(args []string) {
 		logger.LogInfo("Using environment directory from DIALTONE_ENV: %s", env)
 	}
 
-	// Handle clean option
+	// Handle clean option is now handled in dialtone.sh wrapper
 	if *clean {
-		depsDir := GetDialtoneEnv()
-		if _, err := os.Stat(depsDir); err == nil {
-			logger.LogInfo("Cleaning dependencies directory: %s", depsDir)
-			if err := os.RemoveAll(depsDir); err != nil {
-				logger.LogFatal("Failed to remove dependencies directory: %v", err)
-			}
-			logger.LogInfo("Successfully removed %s", depsDir)
-		} else {
-			logger.LogInfo("Dependencies directory %s does not exist, nothing to clean", depsDir)
-		}
+		// No-op here, dialtone.sh already cleaned if this flag was present
+		logger.LogInfo("Clean flag detected (already handled by dialtone.sh)")
 	}
 
 	if *showHelp {
