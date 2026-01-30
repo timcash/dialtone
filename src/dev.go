@@ -6,8 +6,9 @@ import (
 	"os/exec"
 	"strings"
 
-	"dialtone/cli/src/core/build"
+	build_cli "dialtone/cli/src/core/build/cli"
 	"dialtone/cli/src/core/config"
+	format_cli "dialtone/cli/src/core/format/cli"
 	"dialtone/cli/src/core/install"
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/ssh"
@@ -46,9 +47,11 @@ func ExecuteDev() {
 	case "start":
 		runStart(args)
 	case "build":
-		build.RunBuild(args)
+		build_cli.Run(args)
 	case "deploy":
 		deploy_cli.RunDeploy(args)
+	case "format":
+		format_cli.Run(args)
 	case "ssh":
 		ssh.RunSSH(args)
 	case "vpn":
@@ -114,6 +117,7 @@ func printDevUsage() {
 	fmt.Println("  install [path] Install dependencies (--linux-wsl for WSL, --macos-arm for Apple Silicon)")
 	fmt.Println("  build         Build web UI and binary (--local, --full, --remote, --podman, --linux-arm, --linux-arm64)")
 	fmt.Println("  deploy        Deploy to remote robot")
+	fmt.Println("  format        Format Go code across the repo")
 	fmt.Println("  camera        Camera tools (snapshot, stream)")
 	fmt.Println("  clone         Clone or update the repository")
 	fmt.Println("  sync-code     Sync source code to remote robot")
