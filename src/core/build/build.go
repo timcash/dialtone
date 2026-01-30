@@ -67,20 +67,23 @@ func RunBuild(args []string) {
 	if *full {
 		buildEverything(*local)
 	} else {
+		targetOS := runtime.GOOS
 		arch := runtime.GOARCH
 		if *linuxArm {
 			arch = "arm"
+			targetOS = "linux"
 		} else if *linuxArm64 {
 			arch = "arm64"
+			targetOS = "linux"
 		}
 
-		isCrossBuild := arch != runtime.GOARCH
+		isCrossBuild := arch != runtime.GOARCH || targetOS != runtime.GOOS
 
 		if *local || !hasPodman() {
 			if isCrossBuild && !hasZig() && !*local {
-				logger.LogFatal("Cross-compilation for %s requires either Podman or Zig. Please install Podman (recommended) or ensure Zig is installed in your DIALTONE_ENV.", arch)
+				logger.LogFatal("Cross-compilation for %s/%s requires either Podman or Zig. Please install Podman (recommended) or ensure Zig is installed in your DIALTONE_ENV.", targetOS, arch)
 			}
-			buildLocally(arch)
+			buildLocally(targetOS, arch)
 		} else {
 			compiler := "gcc-aarch64-linux-gnu"
 			if arch == "arm" {
@@ -137,11 +140,14 @@ func buildWebIfNeeded(force bool) {
 	}
 }
 
-func buildLocally(targetArch string) {
+func buildLocally(targetOS, targetArch string) {
+	if targetOS == "" {
+		targetOS = runtime.GOOS
+	}
 	if targetArch == "" {
 		targetArch = runtime.GOARCH
 	}
-	logger.LogInfo("Building Dialtone locally (Target: %s/%s)...", runtime.GOOS, targetArch)
+	logger.LogInfo("Building Dialtone locally (Target: %s/%s)...", targetOS, targetArch)
 
 	// Build web UI if needed (not forced for native local builds unless requested)
 	buildWebIfNeeded(false)
@@ -190,26 +196,46 @@ func buildLocally(targetArch string) {
 			}
 		}
 
-		if !compilerFound {
-			// If Zig exists, use it as C compiler
+		nativeDarwin := targetOS == "darwin" && targetArch == runtime.GOARCH
+
+		if !compilerFound && !nativeDarwin {
+			// If Zig exists, use it as C compiler (except for native Darwin where it has permission issues in module cache)
 			zigPath := filepath.Join(depsDir, "zig", "zig")
 			if _, err := os.Stat(zigPath); err == nil {
-				target := "x86_64-linux-gnu" // default
-				if targetArch == "arm64" {
-					target = "aarch64-linux-gnu"
-					os.Setenv("GOOS", "linux")
-					os.Setenv("GOARCH", "arm64")
-				} else if targetArch == "arm" {
-					target = "arm-linux-gnueabihf"
-					os.Setenv("GOOS", "linux")
-					os.Setenv("GOARCH", "arm")
+				zOS := targetOS
+				if zOS == "darwin" {
+					zOS = "macos"
+				}
+
+				zArch := targetArch
+				if zArch == "amd64" {
+					zArch = "x86_64"
+				} else if zArch == "arm64" {
+					zArch = "aarch64"
+				}
+
+				target := fmt.Sprintf("%s-%s", zArch, zOS)
+				if zOS == "linux" {
+					target += "-gnu"
 				}
 
 				// Configure Zig as CC/CXX
-				os.Setenv("CC", fmt.Sprintf("zig cc -target %s", target))
-				os.Setenv("CXX", fmt.Sprintf("zig c++ -target %s", target))
+				os.Setenv("CC", fmt.Sprintf("%s cc -target %s", zigPath, target))
+				os.Setenv("CXX", fmt.Sprintf("%s c++ -target %s", zigPath, target))
+
+				// Set Zig cache directories to ensure they are writable in this environment
+				zigCache := filepath.Join(depsDir, "zig-cache")
+				os.MkdirAll(zigCache, 0755)
+				os.Setenv("ZIG_LOCAL_CACHE_DIR", filepath.Join(zigCache, "local"))
+				os.Setenv("ZIG_GLOBAL_CACHE_DIR", filepath.Join(zigCache, "global"))
+
 				compilerFound = true
 			}
+		}
+
+		if !compilerFound && targetOS == runtime.GOOS && targetArch == runtime.GOARCH {
+			// For native builds, if no compiler was found in env (or we skipped Zig for Darwin), let Go find the system compiler
+			logger.LogInfo("Using system compiler for native build.")
 		}
 
 		if targetArch != runtime.GOARCH && !compilerFound {
@@ -230,9 +256,11 @@ func buildLocally(targetArch string) {
 
 	// Choose binary name based on OS/Arch
 	binaryName := "dialtone"
-	if os.Getenv("GOOS") == "linux" {
+	if targetOS == "linux" && targetArch != runtime.GOARCH {
 		binaryName = fmt.Sprintf("dialtone-%s", targetArch)
-	} else if runtime.GOOS == "windows" {
+	} else if targetOS == "linux" {
+		binaryName = "dialtone"
+	} else if targetOS == "windows" {
 		binaryName = "dialtone.exe"
 	}
 
@@ -241,6 +269,11 @@ func buildLocally(targetArch string) {
 	if _, err := os.Stat(filepath.Join(depsDir, "go", "bin", "go")); err == nil {
 		goBin = filepath.Join(depsDir, "go", "bin", "go")
 	}
+
+	// Set environment for build
+	os.Setenv("GOOS", targetOS)
+	os.Setenv("GOARCH", targetArch)
+
 	runShell(".", goBin, "build", "-o", outputPath, "src/cmd/dialtone/main.go")
 	logger.LogInfo("Build successful: %s", outputPath)
 }
@@ -314,7 +347,7 @@ func buildEverything(local bool) {
 
 	// 5. Build for ARM64
 	if local || !hasPodman() {
-		buildLocally("arm64")
+		buildLocally("linux", "arm64")
 	} else {
 		buildWithPodman("arm64", "gcc-aarch64-linux-gnu")
 	}
@@ -326,15 +359,21 @@ func buildEverything(local bool) {
 func BuildSelf() {
 	logger.LogInfo("Building Dialtone CLI (Self)...")
 
-	exePath := filepath.Join("bin", "dialtone.exe")
+	binaryName := "dialtone"
+	if runtime.GOOS == "windows" {
+		binaryName = "dialtone.exe"
+	}
+
 	if _, err := os.Stat("bin"); os.IsNotExist(err) {
 		os.MkdirAll("bin", 0755)
 	}
 
+	outputPath := filepath.Join("bin", binaryName)
+
 	// Force clean cache to avoid embed issues
 	runShell(".", "go", "clean", "-cache")
-	runShell(".", "go", "build", "-o", exePath, "src/cmd/dialtone/main.go")
-	logger.LogInfo("Successfully built %s", exePath)
+	runShell(".", "go", "build", "-o", outputPath, "src/cmd/dialtone/main.go")
+	logger.LogInfo("Successfully built %s", outputPath)
 }
 
 // Helper functions (mirrored from core/utils or src/build.go)
