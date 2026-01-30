@@ -21,8 +21,8 @@ func RunAll() error {
 }
 
 func RunDemoTicket() error {
-	logger.LogInfo("Demo 2: Running ticket tests via './dialtone.sh test ticket test-test-tags'")
-	return runDemoCommand("./dialtone.sh", "test", "ticket", "test-test-tags", "--list")
+	logger.LogInfo("Demo 2: Running ticket tests via './dialtone.sh ticket test test-test-tags'")
+	return runDemoCommand("./dialtone.sh", "ticket", "test", "test-test-tags", "--list")
 }
 
 func RunDemoTags() error {

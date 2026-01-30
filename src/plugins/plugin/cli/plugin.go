@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	ai_cli "dialtone/cli/src/plugins/ai/cli"
 )
 
 func logInfo(format string, args ...interface{}) {
@@ -35,6 +37,8 @@ func RunPlugin(args []string) {
 		runInstall(subArgs)
 	case "build":
 		runBuild(subArgs)
+	case "ai", "opencode", "developer", "subagent":
+		runAICommand(command, subArgs)
 	case "help", "--help", "-h":
 		printUsage()
 	default:
@@ -61,8 +65,20 @@ func runInstall(args []string) {
 	}
 	pluginName := args[0]
 	logInfo("Installing dependencies for plugin: %s", pluginName)
-	// TODO: Implement actual installation logic
-	fmt.Printf("SKIP: Plugin %s dependencies installed (stub)\n", pluginName)
+
+	if pluginName == "ai" {
+		ai_cli.RunAIInstall(args[1:])
+		return
+	}
+
+	// Delegate via shell to avoid static dependencies
+	cmdStr := fmt.Sprintf("./dialtone.sh %s install", pluginName)
+	cmd := exec.Command("bash", "-c", cmdStr)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		logFatal("Failed to install plugin %s: %v", pluginName, err)
+	}
 }
 
 func runBuild(args []string) {
@@ -71,8 +87,20 @@ func runBuild(args []string) {
 	}
 	pluginName := args[0]
 	logInfo("Building plugin: %s", pluginName)
-	// TODO: Implement actual build logic
-	fmt.Printf("SKIP: Plugin %s built (stub)\n", pluginName)
+
+	if pluginName == "ai" {
+		ai_cli.RunAIBuild(args[1:])
+		return
+	}
+
+	// Delegate via shell to avoid static dependencies
+	cmdStr := fmt.Sprintf("./dialtone.sh %s build", pluginName)
+	cmd := exec.Command("bash", "-c", cmdStr)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		logFatal("Failed to build plugin %s: %v", pluginName, err)
+	}
 }
 
 func runTest(args []string) {
@@ -131,6 +159,16 @@ func runCreate(args []string) {
 	createTestTemplates(filepath.Join(pluginDir, "test"), pluginName)
 
 	logInfo("Plugin %s created successfully", pluginName)
+}
+
+func runAICommand(command string, args []string) {
+	// Call AI logic directly as we now have the import here (decoupling from dev.go)
+	if command == "ai" {
+		ai_cli.RunAI(args)
+	} else {
+		// handle opencode, developer, subagent shortcuts
+		ai_cli.RunAI(append([]string{command}, args...))
+	}
 }
 
 func ensureDir(path string) {

@@ -196,17 +196,42 @@ func RunSubtaskTestCmd(args []string) {
 }
 
 func RunTest(args []string) {
-	if len(args) < 1 {
-		logFatal("Usage: ./dialtone.sh ticket test <ticket-name>")
+	name := ""
+	startIndex := 0
+
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		name = args[0]
+		startIndex = 1
+	} else {
+		currentID, err := GetCurrentTicketID()
+		if err != nil {
+			logFatal("No ticket name provided and %v", err)
+		}
+		name = currentID
 	}
-	name := args[0]
+
+	subtask := ""
+	for i := startIndex; i < len(args); i++ {
+		if strings.HasPrefix(args[i], "--subtask=") {
+			subtask = strings.TrimPrefix(args[i], "--subtask=")
+		} else if args[i] == "--subtask" && i+1 < len(args) {
+			subtask = args[i+1]
+			i++
+		}
+	}
+
 	logTicketCommand(name, "test", args)
-	logInfo("Testing all subtasks for %s...", name)
-	err := runDynamicTest(name, "")
+	if subtask != "" {
+		logInfo("Testing subtask %s for %s...", subtask, name)
+	} else {
+		logInfo("Testing all subtasks for %s...", name)
+	}
+
+	err := runDynamicTest(name, subtask)
 	if err != nil {
 		logFatal("Tests failed: %v", err)
 	}
-	logInfo("All tests passed!")
+	logInfo("Tests passed!")
 }
 
 func RunSubtaskDone(args []string) {
