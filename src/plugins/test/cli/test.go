@@ -18,6 +18,7 @@ import (
 	// ticket_test "dialtone/cli/src/plugins/ticket/test"
 	_ "dialtone/cli/src/plugins/cloudflare/test"
 	ui_test "dialtone/cli/src/plugins/ui/test"
+	www_test "dialtone/cli/src/plugins/www/test"
 )
 
 // RunTest handles the 'test' command
@@ -225,6 +226,8 @@ func runPluginTest(pluginName string, showList bool) {
 		runIdeTests()
 	case "diagnostic":
 		runDiagnosticTests()
+	case "www":
+		runWwwTests()
 	default:
 		logger.LogFatal("Unknown plugin: %s", pluginName)
 	}
@@ -268,7 +271,7 @@ func printTestUsage() {
 	fmt.Println("  help                                      Show this help message")
 	fmt.Println()
 	fmt.Println("Available Plugins:")
-	fmt.Println("  install, ticket, test, ui, ai, ide, diagnostic")
+	fmt.Println("  install, ticket, test, ui, ai, ide, diagnostic, www")
 }
 
 func runAllTests(showList bool) {
@@ -345,4 +348,12 @@ func runIdeTests() {
 		logger.LogFatal("IDE tests failed: %v", err)
 	}
 	logger.LogInfo("IDE Plugin Tests passed!")
+}
+
+func runWwwTests() {
+	logger.LogInfo("Running WWW Plugin Tests...")
+	if err := www_test.RunAll(); err != nil {
+		logger.LogFatal("WWW tests failed: %v", err)
+	}
+	logger.LogInfo("WWW Plugin Tests passed!")
 }
