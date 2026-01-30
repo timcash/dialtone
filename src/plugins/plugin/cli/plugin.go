@@ -31,6 +31,10 @@ func RunPlugin(args []string) {
 		runCreate(subArgs)
 	case "test":
 		runTest(subArgs)
+	case "install":
+		runInstall(subArgs)
+	case "build":
+		runBuild(subArgs)
 	case "help", "--help", "-h":
 		printUsage()
 	default:
@@ -45,8 +49,30 @@ func printUsage() {
 	fmt.Println("\nCommands:")
 	fmt.Println("  add <plugin-name>      Create a new plugin structure")
 	fmt.Println("  create <plugin-name>   Alias for 'add'")
+	fmt.Println("  install <plugin-name>  Install dependencies for the specified plugin")
+	fmt.Println("  build <plugin-name>    Build the specified plugin binary")
 	fmt.Println("  test <plugin-name>     Run tests for the specified plugin")
 	fmt.Println("  help                   Show this help message")
+}
+
+func runInstall(args []string) {
+	if len(args) < 1 {
+		logFatal("Usage: plugin install <plugin-name>")
+	}
+	pluginName := args[0]
+	logInfo("Installing dependencies for plugin: %s", pluginName)
+	// TODO: Implement actual installation logic
+	fmt.Printf("SKIP: Plugin %s dependencies installed (stub)\n", pluginName)
+}
+
+func runBuild(args []string) {
+	if len(args) < 1 {
+		logFatal("Usage: plugin build <plugin-name>")
+	}
+	pluginName := args[0]
+	logInfo("Building plugin: %s", pluginName)
+	// TODO: Implement actual build logic
+	fmt.Printf("SKIP: Plugin %s built (stub)\n", pluginName)
 }
 
 func runTest(args []string) {

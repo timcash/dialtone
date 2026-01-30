@@ -84,11 +84,21 @@ ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --env=*)
-            DIALTONE_ENV="${1#*=}"
+            ENV_VAL="${1#*=}"
+            if [ ! -f "$ENV_VAL" ]; then
+                echo "Error: --env argument '$ENV_VAL' is not a file."
+                exit 1
+            fi
+            DIALTONE_ENV_FILE="$ENV_VAL"
             shift
             ;;
         --env)
-            DIALTONE_ENV="$2"
+            ENV_VAL="$2"
+            if [ ! -f "$ENV_VAL" ]; then
+                echo "Error: --env argument '$ENV_VAL' is not a file."
+                exit 1
+            fi
+            DIALTONE_ENV_FILE="$ENV_VAL"
             shift 2
             ;;
         --timeout=*)
@@ -127,9 +137,13 @@ if [ -z "$DIALTONE_CMD" ]; then
     exit 0
 fi
 
-# 2. Resolve DIALTONE_ENV from .env if not set by arg
-if [ -z "$DIALTONE_ENV" ] && [ -f .env ]; then
-    DIALTONE_ENV=$(grep "^DIALTONE_ENV=" .env | cut -d '=' -f2)
+# 2. Resolve DIALTONE_ENV from specified or default .env if not set by arg
+if [ -z "$DIALTONE_ENV_FILE" ]; then
+    DIALTONE_ENV_FILE=".env"
+fi
+
+if [ -z "$DIALTONE_ENV" ] && [ -f "$DIALTONE_ENV_FILE" ]; then
+    DIALTONE_ENV=$(grep "^DIALTONE_ENV=" "$DIALTONE_ENV_FILE" | cut -d '=' -f2)
 fi
 
 # Error if DIALTONE_ENV is not set
@@ -149,8 +163,9 @@ if [[ "$DIALTONE_ENV" == "~"* ]]; then
     DIALTONE_ENV="${DIALTONE_ENV/#\~/$HOME}"
 fi
 
-# Ensure it is exported for child processes (Go binary)
+# Ensure them exported for child processes (Go binary)
 export DIALTONE_ENV
+export DIALTONE_ENV_FILE
 
 # 3. Handle Go Installation / Check
 GO_BIN=""
@@ -205,6 +220,13 @@ elif [ -n "$DIALTONE_ENV" ] && [ ! -f "$GO_BIN" ]; then
     echo "Error: Go not found in $DIALTONE_ENV/go."
     echo "Please run './dialtone.sh install' first to set up the environment."
     exit 1
+fi
+
+# 3.1 Install plugins if we just installed Go
+if [ "$DIALTONE_CMD" = "install" ] && [ -f "$GO_BIN" ]; then
+    echo "Updating core plugins..."
+    # Delegate to the decoupled plugin install command
+    "$GO_BIN" run src/cmd/dev/main.go plugin install ticket
 fi
 
 # 4. Setup PATH if Go is in DIALTONE_ENV
