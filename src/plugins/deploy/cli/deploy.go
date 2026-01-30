@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"dialtone/cli/src/core/build"
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/ssh"
-	build_cli "dialtone/cli/src/plugins/build/cli"
 )
 
 // RunDeploy handles deployment to remote robot
@@ -91,7 +91,7 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 
 	// 3. Run Build (Cross-Compile)
 	logger.LogInfo("Cross-compiling for %s...", remoteArch)
-	build_cli.RunBuild([]string{"--local", buildFlag})
+	build.RunBuild([]string{"--local", buildFlag})
 
 	localBinaryPath := filepath.Join("bin", binaryName)
 	if _, err := os.Stat(localBinaryPath); os.IsNotExist(err) {

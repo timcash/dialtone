@@ -6,11 +6,11 @@ import (
 	"os/exec"
 	"strings"
 
+	"dialtone/cli/src/core/build"
 	"dialtone/cli/src/core/config"
+	"dialtone/cli/src/core/install"
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/ssh"
-	ai_cli "dialtone/cli/src/plugins/ai/cli"
-	build_cli "dialtone/cli/src/plugins/build/cli"
 	camera_cli "dialtone/cli/src/plugins/camera/cli"
 	chrome_cli "dialtone/cli/src/plugins/chrome/cli"
 	cloudflare_cli "dialtone/cli/src/plugins/cloudflare/cli"
@@ -19,7 +19,6 @@ import (
 	github_cli "dialtone/cli/src/plugins/github/cli"
 	go_cli "dialtone/cli/src/plugins/go/cli"
 	ide_cli "dialtone/cli/src/plugins/ide/cli"
-	install_cli "dialtone/cli/src/plugins/install/cli"
 	logs_cli "dialtone/cli/src/plugins/logs/cli"
 	mavlink_cli "dialtone/cli/src/plugins/mavlink/cli"
 	plugin_cli "dialtone/cli/src/plugins/plugin/cli"
@@ -47,7 +46,7 @@ func ExecuteDev() {
 	case "start":
 		runStart(args)
 	case "build":
-		build_cli.RunBuild(args)
+		build.RunBuild(args)
 	case "deploy":
 		deploy_cli.RunDeploy(args)
 	case "ssh":
@@ -61,7 +60,7 @@ func ExecuteDev() {
 	case "diagnostic":
 		diagnostic_cli.RunDiagnostic(args)
 	case "install":
-		install_cli.RunInstall(args)
+		install.RunInstall(args)
 	case "clone":
 		RunClone(args)
 	case "sync-code":
@@ -96,14 +95,9 @@ func ExecuteDev() {
 	case "go":
 		go_cli.RunGo(args)
 
-	case "ai":
-		ai_cli.RunAI(args)
-	case "opencode":
-		ai_cli.RunAI(append([]string{"opencode"}, args...))
-	case "developer":
-		ai_cli.RunAI(append([]string{"developer"}, args...))
-	case "subagent":
-		ai_cli.RunAI(append([]string{"subagent"}, args...))
+	case "ai", "opencode", "developer", "subagent":
+		// Delegate to plugin command to remove static dependency on AI from core
+		plugin_cli.RunPlugin(append([]string{command}, args...))
 	case "help", "-h", "--help":
 		printDevUsage()
 	default:

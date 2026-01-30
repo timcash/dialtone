@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"dialtone/cli/src/core/logger"
-	"dialtone/cli/src/plugins/chrome/app"
+	chrome "dialtone/cli/src/plugins/chrome/app"
 )
 
 // RunChrome handles the 'chrome' command
@@ -19,6 +19,11 @@ func RunChrome(args []string) {
 
 	if *help {
 		printChromeUsage()
+		return
+	}
+
+	if len(args) > 0 && args[0] == "install" {
+		logger.LogInfo("Chrome plugin: No specific dependencies to install (detects local Chrome).")
 		return
 	}
 

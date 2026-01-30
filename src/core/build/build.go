@@ -1,4 +1,4 @@
-package cli
+package build
 
 import (
 	"flag"
@@ -10,8 +10,6 @@ import (
 	"strings"
 
 	"dialtone/cli/src/core/logger"
-	ai_cli "dialtone/cli/src/plugins/ai/cli"
-	ui_cli "dialtone/cli/src/plugins/ui/cli"
 )
 
 // RunBuild handles building for different platforms
@@ -124,16 +122,12 @@ func buildWebIfNeeded(force bool) {
 		os.RemoveAll(filepath.Join(webDir, "dist"))
 	}
 
-	// Install and build via UI plugin
+	// Install and build via UI plugin (shell delegation for decoupling)
 	logger.LogInfo("Delegating to UI plugin (install)...")
-	if err := ui_cli.Run([]string{"install"}); err != nil {
-		logger.LogFatal("Web UI install failed: %v", err)
-	}
+	runShell(".", "./dialtone.sh", "ui", "install")
 
 	logger.LogInfo("Delegating to UI plugin (build)...")
-	if err := ui_cli.Run([]string{"build"}); err != nil {
-		logger.LogFatal("Web UI build failed: %v", err)
-	}
+	runShell(".", "./dialtone.sh", "ui", "build")
 
 	// Verify build succeeded
 	if info, err := os.Stat(distIndexPath); os.IsNotExist(err) {
@@ -312,8 +306,8 @@ func buildEverything(local bool) {
 	logger.LogInfo("Building Web UI via UI Plugin...")
 	buildWebIfNeeded(true)
 
-	// 3. Build AI components
-	ai_cli.RunAI([]string{"build"})
+	// 3. Build AI components (shell delegation for decoupling)
+	runShell(".", "./dialtone.sh", "ai", "build")
 
 	// 4. Build Dialtone locally (the tool itself)
 	BuildSelf()

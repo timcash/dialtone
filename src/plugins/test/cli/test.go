@@ -12,13 +12,13 @@ import (
 	ai_test "dialtone/cli/src/plugins/ai/test"
 	diagnostic_test "dialtone/cli/src/plugins/diagnostic/test"
 	ide_test "dialtone/cli/src/plugins/ide/test"
-	install_test "dialtone/cli/src/plugins/install/test"
 	test_test "dialtone/cli/src/plugins/test/test"
 
 	// ticket_test "dialtone/cli/src/plugins/ticket/test"
 	_ "dialtone/cli/src/plugins/cloudflare/test"
 	ui_test "dialtone/cli/src/plugins/ui/test"
 	www_test "dialtone/cli/src/plugins/www/test"
+	_ "dialtone/cli/src/tickets/decouple-plugin-installation/test"
 )
 
 // RunTest handles the 'test' command
@@ -214,8 +214,6 @@ func runPluginTest(pluginName string, showList bool) {
 
 	logger.LogInfo("Running tests for plugin %s...", pluginName)
 	switch pluginName {
-	case "install":
-		runInstallTests()
 	case "ticket":
 		runTicketTests()
 	case "ui":
@@ -265,13 +263,14 @@ func printTestUsage() {
 	fmt.Println("Usage: dialtone test <command> [options]")
 	fmt.Println()
 	fmt.Println("Commands:")
-	fmt.Println("  ticket <name> [--subtask <name>] [--list]  Run ticket-specific tests")
+	fmt.Println("  ticket <name> [--subtask <name>] [--list]  Run ticket-specific tests (DEPRECATED: use 'ticket test')")
 	fmt.Println("  plugin <name> [--list]                   Run plugin-specific tests")
 	fmt.Println("  tags <tag1> <tag2> ... [--list]          Run tests with specific tags")
 	fmt.Println("  help                                      Show this help message")
 	fmt.Println()
-	fmt.Println("Available Plugins:")
-	fmt.Println("  install, ticket, test, ui, ai, ide, diagnostic, www")
+	fmt.Println("Note: For ticket-specific verification, use: ./dialtone.sh ticket test <ticket-name>")
+	fmt.Println()
+	fmt.Println("  ticket, test, ui, ai, ide, diagnostic, www")
 }
 
 func runAllTests(showList bool) {
@@ -283,20 +282,11 @@ func runAllTests(showList bool) {
 		return
 	}
 	logger.LogInfo("Running all tests...")
-	runInstallTests()
 	runTicketTests()
 	runTestPluginTests()
 	runUiTests()
 	runAiTests()
 	runDiagnosticTests()
-}
-
-func runInstallTests() {
-	logger.LogInfo("Running Install Plugin Tests...")
-	if err := install_test.RunAll(); err != nil {
-		logger.LogFatal("Install tests failed: %v", err)
-	}
-	logger.LogInfo("Install Plugin Tests passed!")
 }
 
 func runTicketTests() {

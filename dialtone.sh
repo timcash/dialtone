@@ -81,14 +81,42 @@ mkdir -p src/core/web/dist
 DIALTONE_CMD=""
 ARGS=()
 
+# First pass: find --env flag to source it before any other logic
+for arg in "$@"; do
+    if [[ "$arg" == --env=* ]]; then
+        DIALTONE_ENV_FILE="${arg#*=}"
+    fi
+done
+
+# If --env flag wasn't found in first pass, find it as positional if it exists
+for (( i=1; i<=$#; i++ )); do
+    if [[ "${!i}" == "--env" ]]; then
+        j=$((i+1))
+        DIALTONE_ENV_FILE="${!j}"
+    fi
+done
+
+if [ -z "$DIALTONE_ENV_FILE" ]; then
+    DIALTONE_ENV_FILE=".env"
+fi
+
+# SOURCE THE ENV FILE EARLY
+# This puts all variables (including TEST_VAR) into the current shell
+if [ -f "$DIALTONE_ENV_FILE" ]; then
+    # We use a subshell to parse and then export to avoid sourcing logic issues
+    # but a simple source is usually enough if it's a standard .env
+    set -a
+    source "$DIALTONE_ENV_FILE"
+    set +a
+fi
+
+# 2. Parse all flags including command
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --env=*)
-            DIALTONE_ENV="${1#*=}"
             shift
             ;;
         --env)
-            DIALTONE_ENV="$2"
             shift 2
             ;;
         --timeout=*)
@@ -127,30 +155,26 @@ if [ -z "$DIALTONE_CMD" ]; then
     exit 0
 fi
 
-# 2. Resolve DIALTONE_ENV from .env if not set by arg
-if [ -z "$DIALTONE_ENV" ] && [ -f .env ]; then
-    DIALTONE_ENV=$(grep "^DIALTONE_ENV=" .env | cut -d '=' -f2)
+# Tilde expansion for DIALTONE_ENV if sourced
+if [[ "$DIALTONE_ENV" == "~"* ]]; then
+    DIALTONE_ENV="${DIALTONE_ENV/#\~/$HOME}"
 fi
 
-# Error if DIALTONE_ENV is not set
+# Ensure them exported for child processes (Go binary)
+export DIALTONE_ENV
+export DIALTONE_ENV_FILE
+
+# Error if DIALTONE_ENV is still not set
 if [ -z "$DIALTONE_ENV" ]; then
     echo "Error: DIALTONE_ENV is not set."
     echo ""
-    echo "Please add DIALTONE_ENV to your .env file:"
-    echo "  echo 'DIALTONE_ENV=/path/to/your/env' >> .env"
+    echo "Please add DIALTONE_ENV to your $DIALTONE_ENV_FILE file:"
+    echo "  echo 'DIALTONE_ENV=/path/to/your/env' >> $DIALTONE_ENV_FILE"
     echo ""
     echo "Or pass it as an argument:"
     echo "  ./dialtone.sh --env=/path/to/your/env <command>"
     exit 1
 fi
-
-# Tilde expansion
-if [[ "$DIALTONE_ENV" == "~"* ]]; then
-    DIALTONE_ENV="${DIALTONE_ENV/#\~/$HOME}"
-fi
-
-# Ensure it is exported for child processes (Go binary)
-export DIALTONE_ENV
 
 # 3. Handle Go Installation / Check
 GO_BIN=""
@@ -179,15 +203,15 @@ if [ "$DIALTONE_CMD" = "install" ]; then
     fi
 
     # Perform Go installation if missing
-    if [ -n "$DIALTONE_ENV" ] && [ ! -f "$GO_BIN" ]; then
+    if [ -n "$DIALTONE_ENV" ] && [ ! -d "$DIALTONE_ENV/go" ]; then
         echo "Go not found in $DIALTONE_ENV/go. Installing..."
         GO_VERSION=$(grep "^go " go.mod | awk '{print $2}')
-        
         TAR_FILE="go$GO_VERSION.$OS-$GO_ARCH.tar.gz"
-        echo "Downloading $TAR_FILE..."
-        curl -LO "https://go.dev/dl/$TAR_FILE"
-        tar -C "$DIALTONE_ENV" -xzf "$TAR_FILE"
-        rm "$TAR_FILE"
+        TAR_PATH="$DIALTONE_ENV/$TAR_FILE"
+        echo "Downloading $TAR_FILE to $TAR_PATH..."
+        curl -L -o "$TAR_PATH" "https://go.dev/dl/$TAR_FILE"
+        tar -C "$DIALTONE_ENV" -xzf "$TAR_PATH"
+        rm "$TAR_PATH"
     fi
 
     # Download Go modules
@@ -205,6 +229,13 @@ elif [ -n "$DIALTONE_ENV" ] && [ ! -f "$GO_BIN" ]; then
     echo "Error: Go not found in $DIALTONE_ENV/go."
     echo "Please run './dialtone.sh install' first to set up the environment."
     exit 1
+fi
+
+# 3.1 Install plugins if we just installed Go
+if [ "$DIALTONE_CMD" = "install" ] && [ -f "$GO_BIN" ]; then
+    echo "Updating core plugins..."
+    # Delegate to the decoupled plugin install command
+    "$GO_BIN" run src/cmd/dev/main.go plugin install ticket
 fi
 
 # 4. Setup PATH if Go is in DIALTONE_ENV
@@ -261,7 +292,7 @@ run_with_timeout() {
 if [ -n "$GO_BIN" ] && [ -f "$GO_BIN" ]; then
     run_with_timeout "$GO_BIN" "${ARGS[@]}"
 else
-    # Fallback to system go if DIALTONE_ENV isn't set or doesn't have go (and we didn't error above)
-    run_with_timeout go "${ARGS[@]}"
+    echo "Error: Go binary not found at $GO_BIN"
+    exit 1
 fi
 

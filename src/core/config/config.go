@@ -11,10 +11,15 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// LoadConfig loads environment variables from .env
+// LoadConfig loads environment variables from a custom file or defaults to .env
 func LoadConfig() {
-	if err := godotenv.Load(); err != nil {
-		logger.LogInfo("Warning: godotenv.Load() failed: %v", err)
+	envFile := os.Getenv("DIALTONE_ENV_FILE")
+	if envFile == "" {
+		envFile = ".env"
+	}
+
+	if err := godotenv.Load(envFile); err != nil {
+		logger.LogInfo("Warning: godotenv.Load(%s) failed: %v", envFile, err)
 	}
 }
 
