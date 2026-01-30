@@ -136,8 +136,15 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -h|--help|help)
-            print_help
-            exit 0
+            # Only show shell help if no command set yet
+            if [ -z "$DIALTONE_CMD" ]; then
+                print_help
+                exit 0
+            else
+                # Pass --help to the subcommand
+                ARGS+=("$1")
+                shift
+            fi
             ;;
         *)
             if [ -z "$DIALTONE_CMD" ]; then

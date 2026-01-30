@@ -37,6 +37,9 @@ func Run(args []string) {
 	subArgs := args[1:]
 
 	switch subcommand {
+	case "--help", "-h", "help":
+		printUsage()
+		return
 	case "add":
 		RunAdd(subArgs)
 	case "start":
@@ -74,6 +77,8 @@ func Run(args []string) {
 		RunKey(subArgs)
 	case "delete":
 		RunDelete(subArgs)
+	case "load":
+		RunLoad(subArgs)
 	default:
 		fmt.Printf("Unknown ticket subcommand: %s\n", subcommand)
 		printUsage()
@@ -82,7 +87,39 @@ func Run(args []string) {
 
 func printUsage() {
 	fmt.Println("Usage: ./dialtone.sh ticket <command> [args]")
-	fmt.Println("Commands: add, start, ask, log, list, validate, next, done, ack, grant, upsert, subtask, test, summary, search, key, delete")
+	fmt.Println()
+	fmt.Println("Commands:")
+	fmt.Println("  start <name>       Start a new ticket and create branch")
+	fmt.Println("  add <name>         Add a new ticket without starting it")
+	fmt.Println("  list               List all tickets")
+	fmt.Println("  next               Mark current subtask done and move to next")
+	fmt.Println("  done               Complete the current ticket")
+	fmt.Println("  validate <name>    Validate a ticket's structure")
+	fmt.Println("  delete <name>      Delete a ticket")
+	fmt.Println()
+	fmt.Println("  subtask add <name> [--desc \"...\"] [--deps dep1,dep2]")
+	fmt.Println("                     Add a subtask to the current ticket")
+	fmt.Println("  subtask list       List subtasks for current ticket")
+	fmt.Println("  subtask status <name> <status>")
+	fmt.Println("                     Set subtask status (todo, progress, done, failed, skipped)")
+	fmt.Println()
+	fmt.Println("  ask <question>     Log a question for the current ticket")
+	fmt.Println("  log <message>      Log a message for the current ticket")
+	fmt.Println("  summary [update]   Show or update agent summary")
+	fmt.Println("  search <query>     Search ticket summaries")
+	fmt.Println()
+	fmt.Println("  upsert             Import ticket from JSON (stdin or --file)")
+	fmt.Println("  load               Load all duckdb backups into ticket system")
+	fmt.Println("  test <name>        Run tests for a ticket")
+	fmt.Println()
+	fmt.Println("  key add <name> <value> <password>")
+	fmt.Println("                     Store an encrypted key")
+	fmt.Println("  key list           List stored keys")
+	fmt.Println("  key rm <name>      Remove a key")
+	fmt.Println("  key <name> <pass>  Retrieve a key value")
+	fmt.Println()
+	fmt.Println("  ack [message]      Acknowledge messages")
+	fmt.Println("  grant              Grant temporary resource access")
 }
 
 func RunAdd(args []string) {
@@ -565,6 +602,41 @@ func RunDelete(args []string) {
 	}
 
 	logInfo("Ticket %s deleted successfully", name)
+}
+
+func RunLoad(args []string) {
+	ticketsDir := filepath.Join("src", "tickets")
+
+	// Find all tickets_backup.duckdb files
+	entries, err := os.ReadDir(ticketsDir)
+	if err != nil {
+		logFatal("Could not read tickets directory: %v", err)
+	}
+
+	loaded := 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		backupPath := filepath.Join(ticketsDir, entry.Name(), "tickets_backup.duckdb")
+		if _, err := os.Stat(backupPath); os.IsNotExist(err) {
+			continue
+		}
+
+		logInfo("Loading backup from %s...", backupPath)
+		if err := LoadBackupDB(backupPath); err != nil {
+			logInfo("Warning: Could not load %s: %v", backupPath, err)
+			continue
+		}
+		loaded++
+	}
+
+	if loaded == 0 {
+		logInfo("No backup files found in %s", ticketsDir)
+	} else {
+		logInfo("Loaded %d backup(s) into ticket system", loaded)
+	}
 }
 
 func GetCurrentTicket() (*Ticket, error) {
