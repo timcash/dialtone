@@ -149,6 +149,20 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# If --clean is present, remove the environment directory first (before Go runs)
+for arg in "${ARGS[@]}"; do
+    if [[ "$arg" == "--clean" ]]; then
+        if [ -n "$DIALTONE_ENV" ] && [ -d "$DIALTONE_ENV" ]; then
+            echo "Cleaning dependencies directory: $DIALTONE_ENV"
+            # Use chmod to handle read-only files in Go module cache
+            chmod -R u+w "$DIALTONE_ENV" 2>/dev/null || true
+            rm -rf "$DIALTONE_ENV"
+            echo "Successfully removed $DIALTONE_ENV"
+        fi
+        break
+    fi
+done
+
 # If no command provided, show help
 if [ -z "$DIALTONE_CMD" ]; then
     print_help
@@ -213,29 +227,10 @@ if [ "$DIALTONE_CMD" = "install" ]; then
         tar -C "$DIALTONE_ENV" -xzf "$TAR_PATH"
         rm "$TAR_PATH"
     fi
-
-    # Download Go modules
-    if [ -n "$GO_BIN" ] && [ -f "$GO_BIN" ]; then
-        ABS_ENV=$(cd "$DIALTONE_ENV" && pwd)
-        export PATH="$ABS_ENV/go/bin:$PATH"
-        export GOROOT="$ABS_ENV/go"
-        export GOCACHE="$ABS_ENV/cache"
-        export GOMODCACHE="$ABS_ENV/pkg/mod"
-        echo "Downloading Go modules..."
-        "$GO_BIN" mod download
-    fi
 elif [ -n "$DIALTONE_ENV" ] && [ ! -f "$GO_BIN" ]; then
-    # Command is not install, and Go is missing in the env folder
     echo "Error: Go not found in $DIALTONE_ENV/go."
     echo "Please run './dialtone.sh install' first to set up the environment."
     exit 1
-fi
-
-# 3.1 Install plugins if we just installed Go
-if [ "$DIALTONE_CMD" = "install" ] && [ -f "$GO_BIN" ]; then
-    echo "Updating core plugins..."
-    # Delegate to the decoupled plugin install command
-    "$GO_BIN" run src/cmd/dev/main.go plugin install ticket
 fi
 
 # 4. Setup PATH if Go is in DIALTONE_ENV
@@ -291,8 +286,11 @@ run_with_timeout() {
 
 if [ -n "$GO_BIN" ] && [ -f "$GO_BIN" ]; then
     run_with_timeout "$GO_BIN" "${ARGS[@]}"
+elif command -v go &> /dev/null; then
+    echo "Using system Go..."
+    run_with_timeout "go" "${ARGS[@]}"
 else
-    echo "Error: Go binary not found at $GO_BIN"
+    echo "Error: Go binary not found at $GO_BIN and system Go not found."
     exit 1
 fi
 
