@@ -178,6 +178,7 @@ func RunNext(args []string) {
 		RunNext(args)
 	} else {
 		logInfo("Subtask %s failed.", st.Name)
+		st.Status = "todo"
 		st.FailTimestamp = time.Now().Format(time.RFC3339)
 		st.AgentNotes = testErr.Error()
 		if err := SaveTicket(ticket); err != nil {
@@ -193,8 +194,29 @@ func RunSubtaskTestCmd(args []string) {
 	}
 	ticketName := args[0]
 	subtaskName := args[1]
-	err := runDynamicTest(ticketName, subtaskName)
+	ticket, err := GetTicket(ticketName)
 	if err != nil {
+		logFatal("Error: %v", err)
+	}
+	subtaskIndex := -1
+	for i := range ticket.Subtasks {
+		if ticket.Subtasks[i].Name == subtaskName {
+			subtaskIndex = i
+			break
+		}
+	}
+	if subtaskIndex == -1 {
+		logFatal("Subtask not found: %s", subtaskName)
+	}
+
+	err = runSubtaskCommandTest(ticketName, subtaskName)
+	if err != nil {
+		ticket.Subtasks[subtaskIndex].Status = "todo"
+		ticket.Subtasks[subtaskIndex].FailTimestamp = time.Now().Format(time.RFC3339)
+		ticket.Subtasks[subtaskIndex].AgentNotes = err.Error()
+		if saveErr := SaveTicket(ticket); saveErr != nil {
+			logFatal("Could not update ticket %s: %v", ticketName, saveErr)
+		}
 		logFatal("Test failed: %v", err)
 	}
 	logInfo("Test passed!")
@@ -232,10 +254,49 @@ func RunTest(args []string) {
 		logInfo("Testing all subtasks for %s...", name)
 	}
 
-	err := runDynamicTest(name, subtask)
+	ticket, err := GetTicket(name)
 	if err != nil {
-		logFatal("Tests failed: %v", err)
+		logFatal("Error: %v", err)
 	}
+
+	failures := 0
+	if subtask != "" {
+		subtaskIndex := -1
+		for i := range ticket.Subtasks {
+			if ticket.Subtasks[i].Name == subtask {
+				subtaskIndex = i
+				break
+			}
+		}
+		if subtaskIndex == -1 {
+			logFatal("Subtask not found: %s", subtask)
+		}
+		if err := runSubtaskCommandTest(name, subtask); err != nil {
+			failures++
+			ticket.Subtasks[subtaskIndex].Status = "todo"
+			ticket.Subtasks[subtaskIndex].FailTimestamp = time.Now().Format(time.RFC3339)
+			ticket.Subtasks[subtaskIndex].AgentNotes = err.Error()
+		}
+	} else {
+		for i := range ticket.Subtasks {
+			stName := ticket.Subtasks[i].Name
+			if err := runSubtaskCommandTest(name, stName); err != nil {
+				logInfo("Subtask %s failed: %v", stName, err)
+				failures++
+				ticket.Subtasks[i].Status = "todo"
+				ticket.Subtasks[i].FailTimestamp = time.Now().Format(time.RFC3339)
+				ticket.Subtasks[i].AgentNotes = err.Error()
+			}
+		}
+	}
+
+	if failures > 0 {
+		if saveErr := SaveTicket(ticket); saveErr != nil {
+			logFatal("Could not update ticket %s: %v", name, saveErr)
+		}
+		logFatal("Tests failed: %d subtask(s)", failures)
+	}
+
 	logInfo("Tests passed!")
 }
 
@@ -250,6 +311,19 @@ func RunSubtaskDone(args []string) {
 
 	logInfo("Executing test for subtask: %s", subtask)
 	if err := runDynamicTest(name, subtask); err != nil {
+		ticket, ticketErr := GetTicket(name)
+		if ticketErr == nil {
+			for i := range ticket.Subtasks {
+				if ticket.Subtasks[i].Name == subtask {
+					ticket.Subtasks[i].Status = "todo"
+					ticket.Subtasks[i].FailTimestamp = time.Now().Format(time.RFC3339)
+					ticket.Subtasks[i].AgentNotes = err.Error()
+				}
+			}
+			if saveErr := SaveTicket(ticket); saveErr != nil {
+				logFatal("Could not update ticket %s: %v", name, saveErr)
+			}
+		}
 		logFatal("Verification failed for subtask %s: %v", subtask, err)
 	}
 
