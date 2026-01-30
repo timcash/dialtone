@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "github.com/marcboeker/go-duckdb"
@@ -704,4 +705,126 @@ func DeleteTicket(ticketID string) error {
 	}
 
 	return tx.Commit()
+}
+
+// LoadBackupDB imports tickets from a backup duckdb file into the main database
+func LoadBackupDB(backupPath string) error {
+	// Open backup database
+	backupDB, err := sql.Open("duckdb", backupPath)
+	if err != nil {
+		return fmt.Errorf("failed to open backup: %w", err)
+	}
+	defer backupDB.Close()
+
+	// Open main database
+	mainDB, err := openTicketDB()
+	if err != nil {
+		return fmt.Errorf("failed to open main db: %w", err)
+	}
+	defer mainDB.Close()
+
+	// Import tickets
+	rows, err := backupDB.Query(`SELECT id, name, tags, description, agent_summary, start_time, last_summary_time FROM tickets`)
+	if err != nil {
+		return fmt.Errorf("failed to query tickets: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id, name string
+		var tags, description, agentSummary, startTime, lastSummaryTime sql.NullString
+		if err := rows.Scan(&id, &name, &tags, &description, &agentSummary, &startTime, &lastSummaryTime); err != nil {
+			return err
+		}
+		_, err := mainDB.Exec(`INSERT INTO tickets (id, name, tags, description, agent_summary, start_time, last_summary_time)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET 
+				name = excluded.name, 
+				tags = excluded.tags, 
+				description = excluded.description,
+				agent_summary = excluded.agent_summary,
+				start_time = excluded.start_time,
+				last_summary_time = excluded.last_summary_time`,
+			id, name, tags.String, description.String, agentSummary.String, startTime.String, lastSummaryTime.String)
+		if err != nil {
+			return fmt.Errorf("failed to insert ticket %s: %w", id, err)
+		}
+	}
+
+	// Import subtasks
+	subtaskRows, err := backupDB.Query(`SELECT ticket_id, position, name, tags, dependencies, description, test_conditions, agent_notes, pass_timestamp, fail_timestamp, status FROM subtasks`)
+	if err != nil {
+		// Table might not exist in older backups
+		if !strings.Contains(err.Error(), "does not exist") {
+			return fmt.Errorf("failed to query subtasks: %w", err)
+		}
+	} else {
+		defer subtaskRows.Close()
+		for subtaskRows.Next() {
+			var ticketID, name string
+			var position int
+			var tags, deps, description, testConds, agentNotes, passTs, failTs, status sql.NullString
+			if err := subtaskRows.Scan(&ticketID, &position, &name, &tags, &deps, &description, &testConds, &agentNotes, &passTs, &failTs, &status); err != nil {
+				return err
+			}
+			// Delete existing subtasks for this ticket first to avoid duplicates
+			mainDB.Exec(`DELETE FROM subtasks WHERE ticket_id = ? AND name = ?`, ticketID, name)
+			_, err := mainDB.Exec(`INSERT INTO subtasks (ticket_id, position, name, tags, dependencies, description, test_conditions, agent_notes, pass_timestamp, fail_timestamp, status)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				ticketID, position, name, tags.String, deps.String, description.String, testConds.String, agentNotes.String, passTs.String, failTs.String, status.String)
+			if err != nil {
+				return fmt.Errorf("failed to insert subtask %s/%s: %w", ticketID, name, err)
+			}
+		}
+	}
+
+	// Import summaries
+	summaryRows, err := backupDB.Query(`SELECT ticket_id, subtask_name, timestamp, content FROM ticket_summaries`)
+	if err != nil {
+		if !strings.Contains(err.Error(), "does not exist") {
+			return fmt.Errorf("failed to query summaries: %w", err)
+		}
+	} else {
+		defer summaryRows.Close()
+		for summaryRows.Next() {
+			var ticketID, timestamp, content string
+			var subtaskName sql.NullString
+			if err := summaryRows.Scan(&ticketID, &subtaskName, &timestamp, &content); err != nil {
+				return err
+			}
+			// Check if already exists
+			var count int
+			mainDB.QueryRow(`SELECT COUNT(*) FROM ticket_summaries WHERE ticket_id = ? AND timestamp = ?`, ticketID, timestamp).Scan(&count)
+			if count == 0 {
+				mainDB.Exec(`INSERT INTO ticket_summaries (ticket_id, subtask_name, timestamp, content) VALUES (?, ?, ?, ?)`,
+					ticketID, subtaskName.String, timestamp, content)
+			}
+		}
+	}
+
+	// Import logs
+	logRows, err := backupDB.Query(`SELECT ticket_id, timestamp, entry_type, message, subtask FROM ticket_logs`)
+	if err != nil {
+		if !strings.Contains(err.Error(), "does not exist") {
+			return fmt.Errorf("failed to query logs: %w", err)
+		}
+	} else {
+		defer logRows.Close()
+		for logRows.Next() {
+			var ticketID, timestamp, entryType, message string
+			var subtask sql.NullString
+			if err := logRows.Scan(&ticketID, &timestamp, &entryType, &message, &subtask); err != nil {
+				return err
+			}
+			// Check if already exists
+			var count int
+			mainDB.QueryRow(`SELECT COUNT(*) FROM ticket_logs WHERE ticket_id = ? AND timestamp = ?`, ticketID, timestamp).Scan(&count)
+			if count == 0 {
+				mainDB.Exec(`INSERT INTO ticket_logs (ticket_id, timestamp, entry_type, message, subtask) VALUES (?, ?, ?, ?, ?)`,
+					ticketID, timestamp, entryType, message, subtask.String)
+			}
+		}
+	}
+
+	return nil
 }

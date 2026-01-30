@@ -9,6 +9,7 @@ import (
 func RunSubtask(args []string) {
 	if len(args) < 1 {
 		fmt.Println("Usage: ./dialtone.sh ticket subtask <command> [args]")
+		fmt.Println("Commands: add, list, status, done, failed, note, test")
 		return
 	}
 
@@ -16,9 +17,13 @@ func RunSubtask(args []string) {
 	cmdArgs := args[1:]
 
 	switch command {
+	case "add":
+		RunSubtaskAdd(cmdArgs)
 	case "list":
 		logSubtaskCommand(command, cmdArgs)
 		RunSubtaskList(cmdArgs)
+	case "status":
+		RunSubtaskStatus(cmdArgs)
 	case "test":
 		logSubtaskCommand(command, cmdArgs)
 		RunSubtaskTestCmd(cmdArgs)
@@ -333,4 +338,112 @@ func logSubtaskCommand(command string, args []string) {
 		subArgs = append([]string{command}, args...)
 	}
 	logTicketCommand(ticketID, "subtask", subArgs)
+}
+
+func RunSubtaskAdd(args []string) {
+	if len(args) < 1 {
+		logFatal("Usage: ./dialtone.sh ticket subtask add <name> [--desc \"...\"] [--deps dep1,dep2] [--status todo|progress]")
+	}
+
+	name := args[0]
+	desc := ""
+	deps := []string{}
+	status := "todo"
+
+	// Parse optional flags
+	for i := 1; i < len(args); i++ {
+		if strings.HasPrefix(args[i], "--desc=") {
+			desc = strings.TrimPrefix(args[i], "--desc=")
+		} else if args[i] == "--desc" && i+1 < len(args) {
+			desc = args[i+1]
+			i++
+		} else if strings.HasPrefix(args[i], "--deps=") {
+			deps = strings.Split(strings.TrimPrefix(args[i], "--deps="), ",")
+		} else if args[i] == "--deps" && i+1 < len(args) {
+			deps = strings.Split(args[i+1], ",")
+			i++
+		} else if strings.HasPrefix(args[i], "--status=") {
+			status = strings.TrimPrefix(args[i], "--status=")
+		} else if args[i] == "--status" && i+1 < len(args) {
+			status = args[i+1]
+			i++
+		}
+	}
+
+	ticket, err := GetCurrentTicket()
+	if err != nil {
+		logFatal("Error getting current ticket: %v", err)
+	}
+
+	// Check if subtask already exists
+	for _, st := range ticket.Subtasks {
+		if st.Name == name {
+			logFatal("Subtask %s already exists", name)
+		}
+	}
+
+	// Add new subtask
+	ticket.Subtasks = append(ticket.Subtasks, Subtask{
+		Name:         name,
+		Description:  desc,
+		Dependencies: deps,
+		Status:       status,
+	})
+
+	if err := SaveTicket(ticket); err != nil {
+		logFatal("Could not save ticket: %v", err)
+	}
+
+	logSubtaskCommand("add", args)
+	logInfo("Added subtask %s to ticket %s", name, ticket.ID)
+}
+
+func RunSubtaskStatus(args []string) {
+	if len(args) < 2 {
+		logFatal("Usage: ./dialtone.sh ticket subtask status <name> <status>")
+	}
+
+	name := args[0]
+	status := args[1]
+
+	validStatuses := map[string]bool{
+		"todo":     true,
+		"progress": true,
+		"done":     true,
+		"failed":   true,
+		"skipped":  true,
+	}
+	if !validStatuses[status] {
+		logFatal("Invalid status: %s (must be todo, progress, done, failed, or skipped)", status)
+	}
+
+	ticket, err := GetCurrentTicket()
+	if err != nil {
+		logFatal("Error getting current ticket: %v", err)
+	}
+
+	found := false
+	for i := range ticket.Subtasks {
+		if ticket.Subtasks[i].Name == name {
+			ticket.Subtasks[i].Status = status
+			if status == "done" {
+				ticket.Subtasks[i].PassTimestamp = time.Now().Format(time.RFC3339)
+			} else if status == "failed" {
+				ticket.Subtasks[i].FailTimestamp = time.Now().Format(time.RFC3339)
+			}
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		logFatal("Subtask not found: %s", name)
+	}
+
+	if err := SaveTicket(ticket); err != nil {
+		logFatal("Could not save ticket: %v", err)
+	}
+
+	logSubtaskCommand("status", args)
+	logInfo("Set subtask %s status to %s", name, status)
 }
