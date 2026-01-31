@@ -43,23 +43,36 @@ float snoise(vec3 v) {
   vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
   m = m * m;
   return 42.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3) ) );
+float fbm(vec3 p) {
+  float v = 0.0;
+  float a = 0.5;
+  vec3 shift = vec3(100.0);
+  for (int i = 0; i < 4; ++i) {
+    v += a * snoise(p);
+    p = p * 2.0 + shift;
+    a *= 0.5;
+  }
+  return v;
 }
-varying vec3 vPosition;
-varying vec3 vNormal;
-uniform float uTime;
-uniform vec3 uTint;
-uniform vec3 uSunDir;
-uniform vec3 uKeyDir;
-uniform float uKeyIntensity;
-uniform float uSunIntensity;
-uniform float uAmbientIntensity;
-uniform float uColorScale;
+
 void main() {
-    float nBase = snoise(vPosition * (CLOUD_SCALE * 0.65) + uTime * 0.008);
-    float nPatch = snoise(vPosition * (CLOUD_SCALE * 1.2) - uTime * 0.004);
-    float patchMask = smoothstep(-0.05, 0.5, nPatch);
-    float thickness = mix(0.2, 0.6, patchMask);
-    float alpha = smoothstep(0.12, thickness, nBase) * CLOUD_OPACITY;
+    // Domain Warping: Use noise to distort the coordinates for a more organic, swirling look
+    vec3 warpShift = vec3(uTime * 0.04, uTime * 0.03, uTime * 0.02);
+    vec3 q = vec3(
+        fbm(vPosition * (CLOUD_SCALE * 0.3) + warpShift),
+        fbm(vPosition * (CLOUD_SCALE * 0.3) + warpShift + vec3(5.2, 1.3, 0.1)),
+        fbm(vPosition * (CLOUD_SCALE * 0.3) + warpShift + vec3(1.7, 9.2, 2.8))
+    );
+
+    // Multi-octave FBM for base density
+    float nBase = fbm(vPosition * (CLOUD_SCALE * 0.6) + q * 1.5 + uTime * 0.05);
+    
+    // Atmospheric "Breathing" Oscillation
+    // Oscillates the cloud threshold to simulate dynamic weather shifts
+    float breath = sin(uTime * 0.12) * 0.06;
+    float threshold = 0.22 + breath;
+    float alpha = smoothstep(threshold, threshold + 0.35, nBase) * CLOUD_OPACITY;
+
     vec3 sunDir = normalize(uSunDir);
     vec3 keyDir = normalize(uKeyDir);
     float diffuseSun = max(dot(vNormal, sunDir), 0.0);
