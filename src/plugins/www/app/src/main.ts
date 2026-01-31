@@ -88,3 +88,17 @@ const videoObserver = new IntersectionObserver((entries) => {
 }, { threshold: 0.1 });
 
 videos.forEach(video => videoObserver.observe(video));
+// Keyboard Navigation (Space bar to cycle slides)
+window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' || e.keyCode === 32) {
+        e.preventDefault();
+        const slides = Array.from(document.querySelectorAll('.snap-slide'));
+        const currentSlideIndex = slides.findIndex(slide => {
+            const rect = slide.getBoundingClientRect();
+            return rect.top >= -10 && rect.top <= 10;
+        });
+
+        const nextIndex = (currentSlideIndex + 1) % slides.length;
+        slides[nextIndex].scrollIntoView({ behavior: 'smooth' });
+    }
+});
