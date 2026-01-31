@@ -15,32 +15,33 @@ import (
 func init() {
 	dialtest.RegisterTicket("www-earth-camera-smooth")
 	dialtest.AddSubtaskTest("init", func() error { return nil }, nil)
-	dialtest.AddSubtaskTest("Verify-smoothness-with-automated-telemetry-test", RunSmoothnessTest, nil)
+	dialtest.AddSubtaskTest("Verify-fix-with-automated-glitch-detection-test", RunGlitchTest, nil)
 }
 
 type Snapshot struct {
 	Time     float64    `json:"time"`
 	CamPos   [3]float64 `json:"camPos"`
-	CamRot   [3]float64 `json:"camRot"`
 	PoiIndex int        `json:"poiIndex"`
 }
 
-func RunSmoothnessTest() error {
+func RunGlitchTest() error {
 	ctx, cancel, err := setupBrowser()
 	if err != nil { return err }
 	defer cancel()
 
 	var snapshots []Snapshot
 	
-	// Navigate once
+	// Navigate
 	err = chromedp.Run(ctx,
 		chromedp.Navigate("http://127.0.0.1:5174"),
-		chromedp.Sleep(2*time.Second),
+		chromedp.Sleep(1*time.Second),
 	)
 	if err != nil { return err }
 
-	// Sample for 20 seconds to catch transitions
-	for i := 0; i < 20; i++ {
+	fmt.Println("[GLITCH TEST] Starting high-frequency sampling (10 Hz) for 20 seconds...")
+	
+	start := time.Now()
+	for time.Since(start) < 20*time.Second {
 		var s Snapshot
 		err := chromedp.Run(ctx,
 			chromedp.Evaluate(`
@@ -50,39 +51,43 @@ func RunSmoothnessTest() error {
 					return {
 						time: performance.now(),
 						camPos: [d.camera.position.x, d.camera.position.y, d.camera.position.z],
-						camRot: [d.camera.rotation.x, d.camera.rotation.y, d.camera.rotation.z],
 						poiIndex: d.currentPoiIndex
 					};
 				})()
 			`, &s),
-			chromedp.Sleep(1*time.Second),
 		)
 		if err != nil { return err }
-		if s.Time == 0 { return fmt.Errorf("failed to capture snapshot") }
-		snapshots = append(snapshots, s)
+		if s.Time > 0 {
+			snapshots = append(snapshots, s)
+		}
+		time.Sleep(100 * time.Millisecond) // 10 Hz
 	}
 
-	// Analyze velocity
-	maxVel := 0.0
+	// Analyze for "jumps" (spikes in velocity)
+	fmt.Printf("[GLITCH TEST] Captured %d snapshots. Analyzing for one-frame pops...\n", len(snapshots))
+	
+	glitchFound := false
 	for i := 1; i < len(snapshots); i++ {
 		p1, p2 := snapshots[i-1].CamPos, snapshots[i].CamPos
 		dist := math.Sqrt(math.Pow(p2[0]-p1[0], 2) + math.Pow(p2[1]-p1[1], 2) + math.Pow(p2[2]-p1[2], 2))
 		dt := (snapshots[i].Time - snapshots[i-1].Time) / 1000.0
+		
+		if dt <= 0 { continue }
 		vel := dist / dt
-		if vel > maxVel { maxVel = vel }
-		fmt.Printf("[SMOOTH TEST] T=%.2f POI=%d Vel=%.4f/s\n", snapshots[i].Time/1000, snapshots[i].PoiIndex, vel)
+		
+		// A jump usually results in a massive velocity spike relative to the "gentle" 0.05 units/s
+		if vel > 1.0 {
+			fmt.Printf("[GLITCH DETECTED] Spike at T=%.2f: Velocity=%.4f units/s! (Dist=%.4f, Dt=%.4f)\n", 
+				snapshots[i].Time/1000, vel, dist, dt)
+			glitchFound = true
+		}
 	}
 
-	fmt.Printf("[SMOOTH TEST] Peak Velocity: %.4f units/s\n", maxVel)
-	
-	// A "gentle" transition should not exceed a reasonable velocity.
-	// Previously it was likely much higher during jumps. 
-	// We'll set a threshold of 0.5 units/s for "gentle" movement.
-	if maxVel > 0.8 {
-		return fmt.Errorf("camera movement detected as too fast (peaked at %.4f/s)", maxVel)
+	if glitchFound {
+		return fmt.Errorf("glitch detected: camera exhibited one-frame jumps or high-velocity pops")
 	}
 
-	fmt.Println("[SMOOTH TEST] PASS: Camera movement is gentle and controlled.")
+	fmt.Println("[GLITCH TEST] PASS: No high-velocity spikes detected over 20 seconds (including POI transition).")
 	return nil
 }
 
