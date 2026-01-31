@@ -55,20 +55,20 @@ class ProceduralOrbit {
   cloud2RotSpeed = 0.000085;
   cloud3RotSpeed = 0.000031;
   cloud4RotSpeed = 0.000073;
-  orbitHeightBase = 0.79;
+  orbitHeightBase = 1.75;
 
   // Camera POI sequence
   poiSequence = [
-    { offset: new THREE.Vector3(0, 0, 1.3), look: new THREE.Vector3(0, 0, 0), euler: new THREE.Euler(0, 0, 0) },
-    { offset: new THREE.Vector3(0.15, 0.2, 1.4), look: new THREE.Vector3(0, 0.05, 0), euler: new THREE.Euler(-5 * DEG_TO_RAD, 3 * DEG_TO_RAD, 0) },
-    { offset: new THREE.Vector3(-0.1, -0.15, 1.35), look: new THREE.Vector3(0.02, -0.02, 0), euler: new THREE.Euler(3 * DEG_TO_RAD, -4 * DEG_TO_RAD, 1 * DEG_TO_RAD) },
-    { offset: new THREE.Vector3(0.25, 0.05, 1.3), look: new THREE.Vector3(-0.05, 0, 0), euler: new THREE.Euler(2 * DEG_TO_RAD, 6 * DEG_TO_RAD, -2 * DEG_TO_RAD) },
+    { offset: new THREE.Vector3(0, 0, 0.45), look: new THREE.Vector3(0, 0, 0), euler: new THREE.Euler(0, 0, 0) },
+    { offset: new THREE.Vector3(0.15, 0.3, 0.6), look: new THREE.Vector3(0.05, 0.15, 0), euler: new THREE.Euler(-12 * DEG_TO_RAD, 15 * DEG_TO_RAD, 0) },
+    { offset: new THREE.Vector3(-0.25, -0.1, 0.5), look: new THREE.Vector3(0.1, -0.1, 0), euler: new THREE.Euler(8 * DEG_TO_RAD, -25 * DEG_TO_RAD, 5 * DEG_TO_RAD) },
+    { offset: new THREE.Vector3(0.3, 0.05, 0.4), look: new THREE.Vector3(-0.2, 0, 0), euler: new THREE.Euler(5 * DEG_TO_RAD, 40 * DEG_TO_RAD, -5 * DEG_TO_RAD) },
   ];
   currentPoiIndex = 0;
   nextPoiIndex = 1;
   phaseStartTime = performance.now();
-  dwellDuration = 10000;
-  transitionDuration = 8000;
+  dwellDuration = 12000;
+  transitionDuration = 10000;
 
   // Intermediate state for lerps
   cameraOffset = new THREE.Vector3().copy(this.poiSequence[0].offset);
@@ -487,8 +487,8 @@ class ProceduralOrbit {
     }
 
     // Centering constraint: Bias look-at target towards Earth center (0,0,0)
-    // This ensures that even with look-at offsets, the globe stays prominently in frame.
-    this.cameraLookTarget.lerp(new THREE.Vector3(0, 0, 0), 0.5);
+    // Stronger bias for higher orbit to keep globe framed during large sweeps.
+    this.cameraLookTarget.lerp(new THREE.Vector3(0, 0, 0), 0.7);
 
     this.camera.position.copy(this.issGroup.position);
     this.cameraOffsetWorld.copy(this.cameraOffset).applyQuaternion(this.issGroup.quaternion);
