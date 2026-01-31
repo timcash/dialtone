@@ -43,24 +43,35 @@ float snoise(vec3 v) {
   vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
   m = m * m;
   return 42.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3) ) );
+float fbm(vec3 p) {
+  float v = 0.0;
+  float a = 0.5;
+  vec3 shift = vec3(100.0);
+  for (int i = 0; i < 4; ++i) {
+    v += a * snoise(p);
+    p = p * 2.0 + shift;
+    a *= 0.5;
+  }
+  return v;
 }
-varying vec3 vPosition;
-varying vec3 vNormal;
-uniform float uTime;
-uniform vec3 uTint;
-uniform float uGlow;
-uniform vec3 uSunDir;
-uniform vec3 uKeyDir;
-uniform float uKeyIntensity;
-uniform float uSunIntensity;
-uniform float uAmbientIntensity;
-uniform float uColorScale;
+
 void main() {
-    float nBase = snoise(vPosition * (CLOUD_SCALE * 0.7) + uTime * 0.01);
-    float nPatch = snoise(vPosition * (CLOUD_SCALE * 1.3) - uTime * 0.005);
-    float patchMask = smoothstep(-0.02, 0.45, nPatch);
-    float thickness = mix(0.16, 0.52, patchMask);
-    float alpha = smoothstep(0.1, thickness, nBase) * CLOUD_OPACITY;
+    // Domain Warping
+    vec3 warpShift = vec3(uTime * 0.03, uTime * 0.02, uTime * 0.04);
+    vec3 q = vec3(
+        fbm(vPosition * (CLOUD_SCALE * 0.35) + warpShift),
+        fbm(vPosition * (CLOUD_SCALE * 0.35) + warpShift + vec3(1.2, 4.3, 7.1)),
+        fbm(vPosition * (CLOUD_SCALE * 0.35) + warpShift + vec3(8.7, 2.2, 1.8))
+    );
+
+    // Multi-octave FBM for base density
+    float nBase = fbm(vPosition * (CLOUD_SCALE * 0.7) + q * 1.3 + uTime * 0.06);
+    
+    // Atmospheric "Breathing" Oscillation
+    float breath = sin(uTime * 0.15) * 0.05;
+    float threshold = 0.2 + breath;
+    float alpha = smoothstep(threshold, threshold + 0.4, nBase) * CLOUD_OPACITY;
+
     vec3 sunDir = normalize(uSunDir);
     vec3 keyDir = normalize(uKeyDir);
     float diffuseSun = max(dot(vNormal, sunDir), 0.0);
@@ -69,6 +80,7 @@ void main() {
     float boostedDiffuse = mix(diffuseKey, pow(diffuseKey, 0.65), ambientFactor);
     float sunTerm = pow(diffuseSun, 2.6) * uSunIntensity * 0.12;
     float light = uAmbientIntensity + boostedDiffuse * uKeyIntensity + sunTerm;
+    
     float rim = pow(1.0 - max(dot(vNormal, keyDir), 0.0), 3.0);
     vec3 glow = uTint * (rim * uGlow);
     vec3 litColor = uTint * light * uColorScale + glow;
