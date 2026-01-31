@@ -24,10 +24,10 @@ const STRIPE_PAYMENT_LINK = 'https://buy.stripe.com/test_5kQaEXcagaAoaC62N20kE00
 
 // Product configuration
 const PRODUCT_CONFIG = {
-    title: 'Support dialtone.earth',
-    description: 'Help fund the future of unified robotic networks',
-    buttonText: 'Contribute Now',
-    amount: '$25', // Display only - actual price set in Stripe dashboard
+    title: 'Dialtone Official Robot Kit',
+    description: 'The complete hardware and software bundle for unified robotics. Includes custom high-torque servos, NATS bridge, and autonomy examples.',
+    buttonText: 'Get the Kit - $1,000',
+    amount: '$1,000', // Display only - actual price set in Stripe dashboard
 };
 
 class StripeButton {
@@ -77,7 +77,7 @@ class StripeButton {
 
         // Add styles
         this.injectStyles();
-        
+
         this.container.appendChild(this.wrapper);
     }
 
