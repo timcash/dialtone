@@ -147,14 +147,16 @@ h2 {
 
 .main-nav {
   position: fixed;
-  top: 1rem;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 1.5rem;
+  right: 1.5rem;
+  left: auto;
+  transform: none;
   z-index: 50;
   display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 0.25rem;
-  padding: 0.25rem 0.5rem;
+  gap: 0.35rem;
+  padding: 0.35rem 0.5rem;
   border-radius: 9999px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   background-color: rgba(0, 0, 0, 0.5);
