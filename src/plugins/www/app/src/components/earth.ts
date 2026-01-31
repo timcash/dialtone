@@ -53,9 +53,6 @@ class ProceduralOrbit {
   cloud3RotSpeed = 0.000031;
   cloud4RotSpeed = 0.000073;
   orbitHeightBase = 0.79;
-  orbitHeightOsc = 0.13;
-  orbitHeightSpeed = 0.00015;
-  timeOscSpeed = 0.00028;
   cameraEuler = new THREE.Euler(160 * DEG_TO_RAD, -180 * DEG_TO_RAD, 62 * DEG_TO_RAD, 'XYZ');
   cameraExtraQuat = new THREE.Quaternion();
   cameraOffset = new THREE.Vector3(0.83, 0.25, 0.82);
@@ -109,7 +106,21 @@ class ProceduralOrbit {
     const rect = this.container.getBoundingClientRect();
     const width = Math.max(1, rect.width);
     const height = Math.max(1, rect.height);
-    this.camera.aspect = width / height;
+    const ratio = width / height;
+
+    this.camera.aspect = ratio;
+
+    // Adjust FOV or offset based on aspect ratio for mobile visibility
+    if (ratio < 1) {
+      // Mobile / Portrait
+      this.camera.fov = 110;
+      this.cameraOffset.set(1.4, 0.4, 1.4);
+    } else {
+      // Desktop / Landscape
+      this.camera.fov = 90;
+      this.cameraOffset.set(0.83, 0.25, 0.82);
+    }
+
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height, false);
   };
@@ -410,15 +421,6 @@ class ProceduralOrbit {
     addSlider('orbitHeightBase', 'Orbit Base', this.orbitHeightBase, 0.05, 1.5, 0.01, (v) => {
       this.orbitHeightBase = v;
     }, (v) => v.toFixed(2));
-    addSlider('orbitHeightOsc', 'Orbit Osc', this.orbitHeightOsc, 0, 0.5, 0.01, (v) => {
-      this.orbitHeightOsc = v;
-    }, (v) => v.toFixed(2));
-    addSlider('orbitHeightSpeed', 'Orbit Osc Spd', this.orbitHeightSpeed, 0, 0.005, 0.00001, (v) => {
-      this.orbitHeightSpeed = v;
-    }, (v) => v.toFixed(5));
-    addSlider('timeOscSpeed', 'Time Osc Spd', this.timeOscSpeed, 0, 0.002, 0.00001, (v) => {
-      this.timeOscSpeed = v;
-    }, (v) => v.toFixed(5));
 
     addSection('Rotation');
     addSlider('earthRotSpeed', 'Earth Rot', this.earthRotSpeed, 0, 0.0002, 0.000001, (v) => {
@@ -504,70 +506,36 @@ class ProceduralOrbit {
     addCopyButton();
   }
 
-  getOscillatingTimeScale(now: number) {
-    if (this.timeOscSpeed <= 0) {
-      return this.timeScale;
-    }
-    const osc = (Math.sin(now * this.timeOscSpeed) + 1) / 2;
-    let bias = Math.pow(osc, 4);
-    if (osc > 0.985) {
-      bias = 1;
-    }
-    const scaled = bias * 100;
-    return Math.max(0.05, Math.min(100, scaled));
-  }
-
-  updateTelemetry(orbitRadius: number, timeScaleValue: number) {
+  updateTelemetry(orbitRadius: number) {
     const kmPerUnit = 6371 / this.earthRadius;
     const altitudeKm = (orbitRadius - this.earthRadius) * kmPerUnit;
-    const speedKmPerSec = this.orbitSpeed * timeScaleValue * orbitRadius * kmPerUnit;
     if (this.altitudeEl) {
       this.altitudeEl.textContent = `${altitudeKm.toFixed(0)} KM`;
-    }
-    if (this.speedEl) {
-      this.speedEl.textContent = `${speedKmPerSec.toFixed(2)} KM/S`;
     }
   }
 
   isVisible = true;
-  frameCount = 0;
+  // frameCount = 0; // Removed as per instruction
 
   setVisible(visible: boolean) {
-    if (this.isVisible !== visible) {
-      console.log(`%c[earth] ${visible ? '▶️ Resuming' : '⏸️ Pausing'} at frame ${this.frameCount}`, 
-          visible ? 'color: #22c55e' : 'color: #f59e0b');
-    }
     this.isVisible = visible;
   }
 
   animate = () => {
     this.frameId = requestAnimationFrame(this.animate);
-    
-    // Skip all calculations when off-screen
     if (!this.isVisible) return;
-    
-    this.frameCount++;
+
+    // this.frameCount++; // Removed as per instruction
     const now = performance.now();
-    const rawDelta = (now - this.lastFrameTime) / 1000;
-    this.lastFrameTime = now;
-    const timeScaleValue = this.getOscillatingTimeScale(now);
-    this.timeScale = timeScaleValue;
-    const deltaSeconds = rawDelta * this.timeScale;
     const cloudTime = now * 0.001 * this.shaderTimeScale;
 
-    this.earth.rotation.y += this.earthRotSpeed * deltaSeconds;
-    this.cloud1.rotateOnAxis(this.cloud1Axis, this.cloud1RotSpeed * rawDelta);
-    this.cloud2.rotateOnAxis(this.cloud2Axis, this.cloud2RotSpeed * rawDelta);
-    this.cloud3.rotateOnAxis(this.cloud3Axis, this.cloud3RotSpeed * rawDelta);
-    this.cloud4.rotateOnAxis(this.cloud4Axis, this.cloud4RotSpeed * rawDelta);
-
+    // Static rendering: No per-frame rotations or angle updates for now
     (this.cloud1.material as THREE.ShaderMaterial).uniforms.uTime.value = cloudTime;
     (this.cloud2.material as THREE.ShaderMaterial).uniforms.uTime.value = cloudTime;
     (this.cloud3.material as THREE.ShaderMaterial).uniforms.uTime.value = cloudTime;
     (this.cloud4.material as THREE.ShaderMaterial).uniforms.uTime.value = cloudTime;
 
-    this.orbitAngle += this.orbitSpeed * deltaSeconds;
-    const orbitHeight = this.orbitHeightBase + Math.sin(now * this.orbitHeightSpeed) * this.orbitHeightOsc;
+    const orbitHeight = this.orbitHeightBase;
     const orbitRadius = this.earthRadius + orbitHeight;
     this.issGroup.position.x = Math.cos(this.orbitAngle) * orbitRadius;
     this.issGroup.position.z = Math.sin(this.orbitAngle) * orbitRadius;
@@ -588,10 +556,10 @@ class ProceduralOrbit {
     this.camera.quaternion.multiply(this.cameraExtraQuat);
 
     const sunRadius = this.earthRadius + this.sunOrbitHeight;
-    const orbitAngle = now * this.sunOrbitSpeed + this.sunOrbitAngleDeg * DEG_TO_RAD;
+    const orbitAngle = this.sunOrbitAngleDeg * DEG_TO_RAD; // Static angle
     const sunX = Math.cos(orbitAngle) * sunRadius;
     const sunZ = Math.sin(orbitAngle) * sunRadius;
-    const sunY = Math.sin(orbitAngle * 0.5) * 0.5;
+    const sunY = 0;
     this.sunLight.position.set(sunX, sunY, sunZ);
     this.sunGlow.position.copy(this.sunLight.position);
 
@@ -606,58 +574,30 @@ class ProceduralOrbit {
     const keyIntensity = this.sunKeyLight.intensity;
     const sunIntensity = this.sunLight.intensity;
     const ambientIntensity = this.ambientLight.intensity;
+
     this.earthMaterial.uniforms.uSunDir.value.copy(sunDir);
     this.earthMaterial.uniforms.uKeyDir.value.copy(keyDir);
     this.earthMaterial.uniforms.uKeyIntensity.value = keyIntensity;
     this.earthMaterial.uniforms.uSunIntensity.value = sunIntensity;
     this.earthMaterial.uniforms.uAmbientIntensity.value = ambientIntensity;
     this.earthMaterial.uniforms.uColorScale.value = this.materialColorScale;
+
     this.cloud1Material.uniforms.uSunDir.value.copy(sunDir);
-    this.cloud1Material.uniforms.uKeyDir.value.copy(keyDir);
-    this.cloud1Material.uniforms.uKeyIntensity.value = keyIntensity;
-    this.cloud1Material.uniforms.uSunIntensity.value = sunIntensity;
-    this.cloud1Material.uniforms.uAmbientIntensity.value = ambientIntensity;
-    this.cloud1Material.uniforms.uColorScale.value = this.materialColorScale;
     this.cloud2Material.uniforms.uSunDir.value.copy(sunDir);
-    this.cloud2Material.uniforms.uKeyDir.value.copy(keyDir);
-    this.cloud2Material.uniforms.uKeyIntensity.value = keyIntensity;
-    this.cloud2Material.uniforms.uSunIntensity.value = sunIntensity;
-    this.cloud2Material.uniforms.uAmbientIntensity.value = ambientIntensity;
-    this.cloud2Material.uniforms.uColorScale.value = this.materialColorScale;
     this.cloud3Material.uniforms.uSunDir.value.copy(sunDir);
-    this.cloud3Material.uniforms.uKeyDir.value.copy(keyDir);
-    this.cloud3Material.uniforms.uKeyIntensity.value = keyIntensity;
-    this.cloud3Material.uniforms.uSunIntensity.value = sunIntensity;
-    this.cloud3Material.uniforms.uAmbientIntensity.value = ambientIntensity;
-    this.cloud3Material.uniforms.uColorScale.value = this.materialColorScale;
     this.cloud4Material.uniforms.uSunDir.value.copy(sunDir);
-    this.cloud4Material.uniforms.uKeyDir.value.copy(keyDir);
-    this.cloud4Material.uniforms.uKeyIntensity.value = keyIntensity;
-    this.cloud4Material.uniforms.uSunIntensity.value = sunIntensity;
-    this.cloud4Material.uniforms.uAmbientIntensity.value = ambientIntensity;
-    this.cloud4Material.uniforms.uColorScale.value = this.materialColorScale;
+
     if (this.hexLayers.length) {
       const hexTime = now * 0.001;
       this.hexLayers.forEach((layer) => layer.update(hexTime));
-      const hexSecond = Math.floor(now / 1000);
-      if (hexSecond !== this.hexLogSecond) {
-        this.hexLogSecond = hexSecond;
-      }
     }
+
     this.atmosphereMaterial.uniforms.uSunDir.value.copy(sunDir);
-    this.atmosphereMaterial.uniforms.uKeyDir.value.copy(keyDir);
-    this.atmosphereMaterial.uniforms.uKeyIntensity.value = keyIntensity;
-    this.atmosphereMaterial.uniforms.uSunIntensity.value = sunIntensity;
-    this.atmosphereMaterial.uniforms.uAmbientIntensity.value = ambientIntensity;
-    this.atmosphereMaterial.uniforms.uColorScale.value = this.materialColorScale;
     this.sunAtmosphereMaterial.uniforms.uSunDir.value.copy(sunDir);
-    this.sunAtmosphereMaterial.uniforms.uSunIntensity.value = sunIntensity;
-    this.sunAtmosphereMaterial.uniforms.uAmbientIntensity.value = ambientIntensity;
     this.sunAtmosphereMaterial.uniforms.uCameraPos.value.copy(this.camera.position);
-    this.sunAtmosphereMaterial.uniforms.uColorScale.value = this.materialColorScale;
 
     this.renderer.render(this.scene, this.camera);
-    this.updateTelemetry(orbitRadius, timeScaleValue);
+    this.updateTelemetry(orbitRadius);
   };
 
   buildConfigSnapshot() {
@@ -665,10 +605,7 @@ class ProceduralOrbit {
     return {
       orbit: {
         speed: Number(this.orbitSpeed.toFixed(6)),
-        heightBase: Number(this.orbitHeightBase.toFixed(3)),
-        heightOsc: Number(this.orbitHeightOsc.toFixed(3)),
-        heightSpeed: Number(this.orbitHeightSpeed.toFixed(6)),
-        timeOscSpeed: Number(this.timeOscSpeed.toFixed(6))
+        heightBase: Number(this.orbitHeightBase.toFixed(3))
       },
       rotation: {
         earth: Number(this.earthRotSpeed.toFixed(9)),
