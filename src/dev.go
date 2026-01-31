@@ -22,6 +22,7 @@ import (
 	ide_cli "dialtone/cli/src/plugins/ide/cli"
 	logs_cli "dialtone/cli/src/plugins/logs/cli"
 	mavlink_cli "dialtone/cli/src/plugins/mavlink/cli"
+	nexttone_cli "dialtone/cli/src/plugins/nexttone/cli"
 	plugin_cli "dialtone/cli/src/plugins/plugin/cli"
 	test_cli "dialtone/cli/src/plugins/test/cli"
 	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
@@ -79,6 +80,8 @@ func ExecuteDev() {
 		github_cli.RunGithub(args)
 	case "ticket":
 		ticket_cli.Run(args)
+	case "nexttone":
+		nexttone_cli.Run(args)
 	case "plugin":
 		plugin_cli.RunPlugin(args)
 	case "cloudflare":
@@ -127,6 +130,7 @@ func printDevUsage() {
 	fmt.Println("  diagnostic    Run system diagnostics (local or remote)")
 	fmt.Println("  branch <name>      Create or checkout a feature branch")
 	fmt.Println("  ticket <subcmd>    Manage GitHub tickets (start, next, done, etc.)")
+	fmt.Println("  nexttone <subcmd>  Nexttone microtone workflow (next, list)")
 	fmt.Println("  plugin <subcmd>    Manage plugins (add, install, build)")
 	fmt.Println("  ide <subcmd>       IDE tools (setup-workflows)")
 	fmt.Println("  github <subcmd>    Manage GitHub interactions (pr, check-deploy)")
