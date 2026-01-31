@@ -23,6 +23,24 @@ func initDBPath() string {
 	return filepath.Join("src", "plugins", "nexttone", "init.duckdb")
 }
 
+func toneName() string {
+	if name := os.Getenv("NEXTTONE_TONE"); name != "" {
+		return name
+	}
+	return "default"
+}
+
+func toneRootDir() string {
+	if dir := os.Getenv("NEXTTONE_TONE_DIR"); dir != "" {
+		return dir
+	}
+	return filepath.Join("src", "tones")
+}
+
+func toneTestDir() string {
+	return filepath.Join(toneRootDir(), toneName(), "test")
+}
+
 func openNexttoneDB() (*sql.DB, error) {
 	dbPath := nexttoneDBPath()
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
@@ -55,6 +73,16 @@ func InitDB(path string) error {
 		return err
 	}
 	return db.Close()
+}
+
+func backupDB() error {
+	src := nexttoneDBPath()
+	dstDir := toneTestDir()
+	if err := os.MkdirAll(dstDir, 0755); err != nil {
+		return err
+	}
+	dst := filepath.Join(dstDir, "nexttone_backup.duckdb")
+	return copyIfExists(src, dst)
 }
 
 func copyIfExists(src, dst string) error {

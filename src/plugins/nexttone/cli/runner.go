@@ -3,6 +3,9 @@ package cli
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -55,6 +58,10 @@ func RunNext(args []string) {
 			fmt.Printf("[error] %v\n", err)
 			return
 		}
+		if err := backupDB(); err != nil {
+			fmt.Printf("[error] backup failed: %v\n", err)
+			return
+		}
 		if sign == "yes" {
 			if current.Name == "subtone-review" {
 				if err := setCurrentMicrotone(db, "subtone-run-test"); err != nil {
@@ -100,7 +107,6 @@ func RunNext(args []string) {
 
 func printMicrotoneQuestion(db *sql.DB, mt microtone, currentSubtone string) {
 	fmt.Printf("DIALTONE [%s]:\n", mt.Name)
-	fmt.Printf("MICROTONE: %s\n", mt.Name)
 	if mt.Name == "review-all-subtones" {
 		subtones, err := getSubtones(db)
 		if err == nil {
@@ -114,11 +120,38 @@ func printMicrotoneQuestion(db *sql.DB, mt microtone, currentSubtone string) {
 		fmt.Printf("SUBTONE: %s\n", currentSubtone)
 	}
 	if mt.Name == "subtone-run-test" {
-		fmt.Println("TEST RESULT: PASS")
+		if err := runSubtoneTest(currentSubtone); err != nil {
+			fmt.Printf("TEST RESULT: FAIL (%s)\n", err.Error())
+		} else {
+			fmt.Println("TEST RESULT: PASS")
+		}
 	}
 	fmt.Printf("DIALTONE: %s\n", mt.Question)
 	fmt.Printf("  ./dialtone.sh nexttone --sign no\n")
 	fmt.Printf("  ./dialtone.sh nexttone --sign yes\n")
+}
+
+func runSubtoneTest(subtone string) error {
+	testDir := toneTestDir()
+	testFile := filepath.Join(testDir, "test.go")
+	if _, err := os.Stat(testFile); err != nil {
+		return fmt.Errorf("missing test.go at %s", testFile)
+	}
+
+	testTarget := testDir
+	if !filepath.IsAbs(testDir) {
+		testTarget = "./" + testDir
+	}
+	cmd := exec.Command("go", "test", testTarget+"/...")
+	cmd.Env = append(os.Environ(),
+		"NEXTTONE_TONE="+toneName(),
+		"NEXTTONE_SUBTONE="+subtone,
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("test failed: %s", strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 func parseSign(args []string) string {
