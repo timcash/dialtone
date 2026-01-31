@@ -6,8 +6,9 @@ import (
 	"os/exec"
 	"strings"
 
-	"dialtone/cli/src/core/build"
+	build_cli "dialtone/cli/src/core/build/cli"
 	"dialtone/cli/src/core/config"
+	format_cli "dialtone/cli/src/core/format/cli"
 	"dialtone/cli/src/core/install"
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/ssh"
@@ -21,6 +22,7 @@ import (
 	ide_cli "dialtone/cli/src/plugins/ide/cli"
 	logs_cli "dialtone/cli/src/plugins/logs/cli"
 	mavlink_cli "dialtone/cli/src/plugins/mavlink/cli"
+	nexttone_cli "dialtone/cli/src/plugins/nexttone/cli"
 	plugin_cli "dialtone/cli/src/plugins/plugin/cli"
 	test_cli "dialtone/cli/src/plugins/test/cli"
 	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
@@ -46,9 +48,11 @@ func ExecuteDev() {
 	case "start":
 		runStart(args)
 	case "build":
-		build.RunBuild(args)
+		build_cli.Run(args)
 	case "deploy":
 		deploy_cli.RunDeploy(args)
+	case "format":
+		format_cli.Run(args)
 	case "ssh":
 		ssh.RunSSH(args)
 	case "vpn":
@@ -76,6 +80,8 @@ func ExecuteDev() {
 		github_cli.RunGithub(args)
 	case "ticket":
 		ticket_cli.Run(args)
+	case "nexttone":
+		nexttone_cli.Run(args)
 	case "plugin":
 		plugin_cli.RunPlugin(args)
 	case "cloudflare":
@@ -114,6 +120,7 @@ func printDevUsage() {
 	fmt.Println("  install [path] Install dependencies (--linux-wsl for WSL, --macos-arm for Apple Silicon)")
 	fmt.Println("  build         Build web UI and binary (--local, --full, --remote, --podman, --linux-arm, --linux-arm64)")
 	fmt.Println("  deploy        Deploy to remote robot")
+	fmt.Println("  format        Format Go code across the repo")
 	fmt.Println("  camera        Camera tools (snapshot, stream)")
 	fmt.Println("  clone         Clone or update the repository")
 	fmt.Println("  sync-code     Sync source code to remote robot")
@@ -123,6 +130,7 @@ func printDevUsage() {
 	fmt.Println("  diagnostic    Run system diagnostics (local or remote)")
 	fmt.Println("  branch <name>      Create or checkout a feature branch")
 	fmt.Println("  ticket <subcmd>    Manage GitHub tickets (start, next, done, etc.)")
+	fmt.Println("  nexttone <subcmd>  Nexttone microtone workflow (next, list)")
 	fmt.Println("  plugin <subcmd>    Manage plugins (add, install, build)")
 	fmt.Println("  ide <subcmd>       IDE tools (setup-workflows)")
 	fmt.Println("  github <subcmd>    Manage GitHub interactions (pr, check-deploy)")
