@@ -56,17 +56,12 @@ export function setupConfigPanel(orbit: ProceduralOrbit) {
         panel.appendChild(btn);
     };
 
-    addSection('Orbit');
-    addSlider('orbitSpeed', 'Orbit Speed', orbit.orbitSpeed, 0, 0.005, 0.000001, (v: number) => orbit.orbitSpeed = v, (v: number) => v.toFixed(6));
-    addSlider('orbitHeight', 'Orbit Height', orbit.orbitHeightBase, 0.05, 1.5, 0.01, (v: number) => orbit.orbitHeightBase = v);
-
     addSection('Rotation');
     addSlider('earthRot', 'Earth Rot', orbit.earthRotSpeed, 0, 0.0002, 0.000001, (v: number) => orbit.earthRotSpeed = v, (v: number) => v.toFixed(6));
     addSlider('sunOrbitSpeed', 'Sun Orbit', orbit.sunOrbitSpeed, 0, 0.005, 0.0001, (v: number) => orbit.sunOrbitSpeed = v, (v: number) => v.toFixed(4));
 
     addSection('Camera');
-    addSlider('dwell', 'Dwell (ms)', orbit.dwellDuration, 1000, 15000, 100, (v: number) => orbit.dwellDuration = v, (v: number) => v.toFixed(0));
-    addSlider('transition', 'Transition (ms)', orbit.transitionDuration, 1000, 10000, 100, (v: number) => orbit.transitionDuration = v, (v: number) => v.toFixed(0));
+    addSlider('distance', 'Distance', orbit.cameraDistance, 8, 30, 0.5, (v: number) => orbit.cameraDistance = v, (v: number) => v.toFixed(1));
 
     addCopyButton();
 
