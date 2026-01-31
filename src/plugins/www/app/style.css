@@ -365,6 +365,67 @@ h2 {
   margin-bottom: 0.75rem;
 }
 
+/* Marketing Overlays */
+.marketing-overlay {
+  position: absolute;
+  bottom: 2rem;
+  left: 2rem;
+  z-index: 20;
+  max-width: 400px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  pointer-events: auto;
+  animation: fade-in-up 0.8s ease-out;
+}
+
+.marketing-overlay h3 {
+  font-family: monospace;
+  font-size: 0.9rem;
+  color: #60a5fa;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.marketing-overlay .math-snippet {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 1.1rem;
+  color: #fff;
+  margin-bottom: 0.75rem;
+  display: block;
+  border-left: 2px solid #60a5fa;
+  padding-left: 0.75rem;
+}
+
+.marketing-overlay p {
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Specific for robot kit in stripe section */
+.robot-kit-price {
+  font-size: 2.5rem;
+  font-weight: 800;
+  color: #fff;
+  margin: 1rem 0;
+  font-family: monospace;
+}
+
 .icon-box svg {
   height: 1.5rem;
   width: 1.5rem;
