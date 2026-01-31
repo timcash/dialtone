@@ -83,6 +83,7 @@ func ensureTicketSchema(db *sql.DB) error {
 			dependencies TEXT,
 			description TEXT,
 			test_conditions TEXT,
+			test_command TEXT,
 			agent_notes TEXT,
 			pass_timestamp TEXT,
 			fail_timestamp TEXT,
@@ -111,6 +112,7 @@ func ensureTicketSchema(db *sql.DB) error {
 		`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS agent_summary TEXT;`,
 		`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS start_time TEXT;`,
 		`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS last_summary_time TEXT;`,
+		`ALTER TABLE subtasks ADD COLUMN IF NOT EXISTS test_command TEXT;`,
 	}
 	for _, stmt := range migrations {
 		if _, err := db.Exec(stmt); err != nil {
@@ -171,7 +173,7 @@ func GetTicket(ticketID string) (*Ticket, error) {
 		ticket.Tags = tagValues
 	}
 
-	rows, err := db.Query(`SELECT name, tags, dependencies, description, test_conditions, agent_notes, pass_timestamp, fail_timestamp, status
+	rows, err := db.Query(`SELECT name, tags, dependencies, description, test_conditions, test_command, agent_notes, pass_timestamp, fail_timestamp, status
 		FROM subtasks WHERE ticket_id = ? ORDER BY position`, ticketID)
 	if err != nil {
 		return nil, err
@@ -183,11 +185,12 @@ func GetTicket(ticketID string) (*Ticket, error) {
 		var stTags sql.NullString
 		var stDeps sql.NullString
 		var stTests sql.NullString
+		var stTestCommand sql.NullString
 		var stNotes sql.NullString
 		var stPass sql.NullString
 		var stFail sql.NullString
 		var stStatus sql.NullString
-		if err := rows.Scan(&st.Name, &stTags, &stDeps, &st.Description, &stTests, &stNotes, &stPass, &stFail, &stStatus); err != nil {
+		if err := rows.Scan(&st.Name, &stTags, &stDeps, &st.Description, &stTests, &stTestCommand, &stNotes, &stPass, &stFail, &stStatus); err != nil {
 			return nil, err
 		}
 		if tagValues, err := decodeStringSlice(stTags); err != nil {
@@ -204,6 +207,9 @@ func GetTicket(ticketID string) (*Ticket, error) {
 			return nil, err
 		} else {
 			st.TestConditions = testValues
+		}
+		if stTestCommand.Valid {
+			st.TestCommand = stTestCommand.String
 		}
 		if stNotes.Valid {
 			st.AgentNotes = stNotes.String
@@ -284,8 +290,8 @@ func SaveTicket(ticket *Ticket) error {
 			return err
 		}
 		if _, err := tx.Exec(`INSERT INTO subtasks (
-			ticket_id, position, name, tags, dependencies, description, test_conditions, agent_notes, pass_timestamp, fail_timestamp, status
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			ticket_id, position, name, tags, dependencies, description, test_conditions, test_command, agent_notes, pass_timestamp, fail_timestamp, status
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			ticket.ID,
 			i,
 			st.Name,
@@ -293,6 +299,7 @@ func SaveTicket(ticket *Ticket) error {
 			stDepsPayload,
 			st.Description,
 			stTestsPayload,
+			nullOrValue(st.TestCommand),
 			nullOrValue(st.AgentNotes),
 			nullOrValue(st.PassTimestamp),
 			nullOrValue(st.FailTimestamp),
@@ -752,7 +759,7 @@ func LoadBackupDB(backupPath string) error {
 	}
 
 	// Import subtasks
-	subtaskRows, err := backupDB.Query(`SELECT ticket_id, position, name, tags, dependencies, description, test_conditions, agent_notes, pass_timestamp, fail_timestamp, status FROM subtasks`)
+	subtaskRows, err := backupDB.Query(`SELECT ticket_id, position, name, tags, dependencies, description, test_conditions, test_command, agent_notes, pass_timestamp, fail_timestamp, status FROM subtasks`)
 	if err != nil {
 		// Table might not exist in older backups
 		if !strings.Contains(err.Error(), "does not exist") {
@@ -763,15 +770,15 @@ func LoadBackupDB(backupPath string) error {
 		for subtaskRows.Next() {
 			var ticketID, name string
 			var position int
-			var tags, deps, description, testConds, agentNotes, passTs, failTs, status sql.NullString
-			if err := subtaskRows.Scan(&ticketID, &position, &name, &tags, &deps, &description, &testConds, &agentNotes, &passTs, &failTs, &status); err != nil {
+			var tags, deps, description, testConds, testCommand, agentNotes, passTs, failTs, status sql.NullString
+			if err := subtaskRows.Scan(&ticketID, &position, &name, &tags, &deps, &description, &testConds, &testCommand, &agentNotes, &passTs, &failTs, &status); err != nil {
 				return err
 			}
 			// Delete existing subtasks for this ticket first to avoid duplicates
 			mainDB.Exec(`DELETE FROM subtasks WHERE ticket_id = ? AND name = ?`, ticketID, name)
-			_, err := mainDB.Exec(`INSERT INTO subtasks (ticket_id, position, name, tags, dependencies, description, test_conditions, agent_notes, pass_timestamp, fail_timestamp, status)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				ticketID, position, name, tags.String, deps.String, description.String, testConds.String, agentNotes.String, passTs.String, failTs.String, status.String)
+			_, err := mainDB.Exec(`INSERT INTO subtasks (ticket_id, position, name, tags, dependencies, description, test_conditions, test_command, agent_notes, pass_timestamp, fail_timestamp, status)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				ticketID, position, name, tags.String, deps.String, description.String, testConds.String, testCommand.String, agentNotes.String, passTs.String, failTs.String, status.String)
 			if err != nil {
 				return fmt.Errorf("failed to insert subtask %s/%s: %w", ticketID, name, err)
 			}
