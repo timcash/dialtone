@@ -452,22 +452,27 @@ class ProceduralOrbit {
     this.orbitAngle += this.orbitSpeed * deltaSeconds;
     const orbitRadius = this.earthRadius + this.orbitHeightBase;
     this.issGroup.position.set(Math.cos(this.orbitAngle) * orbitRadius, Math.sin(this.orbitAngle * 0.5) * 0.5, Math.sin(this.orbitAngle) * orbitRadius);
-    this.issGroup.lookAt(Math.cos(this.orbitAngle + 0.01) * orbitRadius, Math.sin((this.orbitAngle + 0.01) * 0.5) * 0.5, Math.sin(this.orbitAngle + 0.01) * orbitRadius);
+
+    // Stable orientation: Force a constant 'up' to avoid flips at poles
+    const futurePos = new THREE.Vector3(Math.cos(this.orbitAngle + 0.01) * orbitRadius, Math.sin((this.orbitAngle + 0.01) * 0.5) * 0.5, Math.sin(this.orbitAngle + 0.01) * orbitRadius);
+    this.issGroup.up.set(0, 1, 0);
+    this.issGroup.lookAt(futurePos);
 
     // Camera Panning
-    const elapsedPhase = now - this.phaseStartTime;
+    let elapsedPhase = now - this.phaseStartTime;
     const cycle = this.dwellDuration + this.transitionDuration;
     if (elapsedPhase > cycle) {
       this.currentPoiIndex = this.nextPoiIndex;
       this.nextPoiIndex = (this.currentPoiIndex + 1) % this.poiSequence.length;
       this.phaseStartTime = now;
+      elapsedPhase = 0; // Reset immediately to prevent one-frame skip
     }
 
     const currentPOI = this.poiSequence[this.currentPoiIndex];
     const nextPOI = this.poiSequence[this.nextPoiIndex];
 
     if (elapsedPhase > this.dwellDuration) {
-      const t = (elapsedPhase - this.dwellDuration) / this.transitionDuration;
+      const t = THREE.MathUtils.clamp((elapsedPhase - this.dwellDuration) / Math.max(1, this.transitionDuration), 0, 1);
       const ease = t * t * (3 - 2 * t);
       this.cameraOffset.lerpVectors(currentPOI.offset, nextPOI.offset, ease);
       this.cameraLookTarget.lerpVectors(currentPOI.look, nextPOI.look, ease);
