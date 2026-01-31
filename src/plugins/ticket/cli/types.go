@@ -10,6 +10,7 @@ type Subtask struct {
 	Dependencies   []string        `json:"dependencies,omitempty"`
 	Description    string          `json:"description"`
 	TestConditions []TestCondition `json:"test_conditions"`
+	TestCommand    string          `json:"test_command,omitempty"`
 	AgentNotes     string          `json:"agent_notes,omitempty"`
 	PassTimestamp  string          `json:"pass_timestamp,omitempty"`
 	FailTimestamp  string          `json:"fail_timestamp,omitempty"`

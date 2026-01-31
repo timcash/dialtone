@@ -37,6 +37,17 @@ func RunUpsert(args []string) {
 	if ticket.Name == "" {
 		ticket.Name = ticket.ID
 	}
+	for _, st := range ticket.Subtasks {
+		if st.Status != "" || st.PassTimestamp != "" || st.FailTimestamp != "" {
+			logInfo("Ignoring subtask status fields from upsert payload. Use ticket CLI commands instead.")
+			break
+		}
+	}
+	for i := range ticket.Subtasks {
+		ticket.Subtasks[i].Status = ""
+		ticket.Subtasks[i].PassTimestamp = ""
+		ticket.Subtasks[i].FailTimestamp = ""
+	}
 
 	if err := SaveTicket(&ticket); err != nil {
 		logFatal("Could not save ticket %s: %v", ticket.ID, err)

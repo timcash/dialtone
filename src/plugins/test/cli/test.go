@@ -225,6 +225,8 @@ func runPluginTest(pluginName string, showList bool) {
 		runDiagnosticTests()
 	case "www":
 		runWwwTests()
+	case "nexttone":
+		runNexttoneTests()
 	default:
 		logger.LogFatal("Unknown plugin: %s", pluginName)
 	}
@@ -270,7 +272,7 @@ func printTestUsage() {
 	fmt.Println("Note: For ticket-specific verification, use: ./dialtone.sh ticket test <ticket-name>")
 	fmt.Println()
 	fmt.Println("Available Plugins:")
-	fmt.Println("  ticket, test, ui, ai, ide, diagnostic, www")
+	fmt.Println("  ticket, test, ui, ai, ide, diagnostic, www, nexttone")
 }
 
 func runAllTests(showList bool) {
@@ -287,6 +289,7 @@ func runAllTests(showList bool) {
 	runUiTests()
 	runAiTests()
 	runDiagnosticTests()
+	runNexttoneTests()
 }
 
 func runTicketTests() {
@@ -346,4 +349,15 @@ func runWwwTests() {
 		logger.LogFatal("WWW tests failed: %v", err)
 	}
 	logger.LogInfo("WWW Plugin Tests passed!")
+}
+
+func runNexttoneTests() {
+	logger.LogInfo("Running Nexttone Plugin Tests...")
+	cmd := exec.Command("go", "run", "src/plugins/nexttone/test/test.go")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		logger.LogFatal("Nexttone tests failed: %v", err)
+	}
+	logger.LogInfo("Nexttone Plugin Tests passed!")
 }
