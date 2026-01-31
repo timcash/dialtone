@@ -45,16 +45,6 @@ sections.register('s-curriculum', {
     }
 });
 
-sections.register('s-stripe', {
-    containerId: 'stripe-container',
-    load: async () => {
-        const { mountStripe } = await import('./components/stripe');
-        const container = document.getElementById('stripe-container');
-        if (!container) throw new Error('stripe-container not found');
-        return mountStripe(container);
-    }
-});
-
 // Start observing visibility and eagerly load first section
 sections.observe();
 sections.eagerLoad('s-home');
@@ -73,6 +63,15 @@ const subtitleObserver = new IntersectionObserver((entries) => {
 }, { threshold: 0.5 });
 
 slides.forEach(slide => subtitleObserver.observe(slide));
+
+// Marketing fade-in on section entry
+const marketingObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+        entry.target.classList.toggle('is-visible', entry.isIntersecting);
+    });
+}, { threshold: 0.45 });
+
+slides.forEach(slide => marketingObserver.observe(slide));
 
 // Video Lazy Loading
 const videos = document.querySelectorAll('video');
