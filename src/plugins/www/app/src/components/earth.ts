@@ -9,11 +9,14 @@ import atmosphereVertexShader from '../shaders/atmosphere.vert.glsl?raw';
 import atmosphereFragmentShader from '../shaders/atmosphere.frag.glsl?raw';
 import sunAtmosphereVertexShader from '../shaders/sun_atmosphere.vert.glsl?raw';
 import sunAtmosphereFragmentShader from '../shaders/sun_atmosphere.frag.glsl?raw';
+import { createISSModel } from './earth/iss_model';
+import { applyHorizonConstraint } from './earth/camera_math';
+import { setupConfigPanel, updateTelemetry } from './earth/config_ui';
 
 const DEG_TO_RAD = Math.PI / 180;
 const TIME_SCALE = 1;
 
-class ProceduralOrbit {
+export class ProceduralOrbit {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(75, 1, 0.01, 1000);
   renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -44,25 +47,25 @@ class ProceduralOrbit {
 
   // Settings
   earthRadius = 5;
-  shaderTimeScale = 0.14;
+  shaderTimeScale = 0.28;
   timeScale = TIME_SCALE;
 
   // Rotations
   orbitAngle = 0;
   orbitSpeed = 0.000214;
   earthRotSpeed = 0.000042;
-  cloud1RotSpeed = 0.000082;
-  cloud2RotSpeed = 0.000085;
-  cloud3RotSpeed = 0.000031;
-  cloud4RotSpeed = 0.000073;
-  orbitHeightBase = 1.75;
+  cloud1RotSpeed = 0.00025;
+  cloud2RotSpeed = 0.00028;
+  cloud3RotSpeed = 0.00012;
+  cloud4RotSpeed = 0.00022;
+  orbitHeightBase = 6.0;
 
   // Camera POI sequence
   poiSequence = [
-    { offset: new THREE.Vector3(0, 0, 0.45), look: new THREE.Vector3(0, 0, 0), euler: new THREE.Euler(0, 0, 0) },
-    { offset: new THREE.Vector3(0.15, 0.3, 0.6), look: new THREE.Vector3(0.05, 0.15, 0), euler: new THREE.Euler(-12 * DEG_TO_RAD, 15 * DEG_TO_RAD, 0) },
-    { offset: new THREE.Vector3(-0.25, -0.1, 0.5), look: new THREE.Vector3(0.1, -0.1, 0), euler: new THREE.Euler(8 * DEG_TO_RAD, -25 * DEG_TO_RAD, 5 * DEG_TO_RAD) },
-    { offset: new THREE.Vector3(0.3, 0.05, 0.4), look: new THREE.Vector3(-0.2, 0, 0), euler: new THREE.Euler(5 * DEG_TO_RAD, 40 * DEG_TO_RAD, -5 * DEG_TO_RAD) },
+    { offset: new THREE.Vector3(0, 5.0, 1.0), look: new THREE.Vector3(0, -0.5, 0), euler: new THREE.Euler(-60 * DEG_TO_RAD, 0, 0) },
+    { offset: new THREE.Vector3(1.5, 6.0, 2.0), look: new THREE.Vector3(0, 0, 0), euler: new THREE.Euler(-70 * DEG_TO_RAD, 15 * DEG_TO_RAD, 0) },
+    { offset: new THREE.Vector3(-2.0, 5.5, 1.5), look: new THREE.Vector3(0.2, -0.2, 0), euler: new THREE.Euler(-65 * DEG_TO_RAD, -25 * DEG_TO_RAD, 5 * DEG_TO_RAD) },
+    { offset: new THREE.Vector3(2.5, 7.0, 0.5), look: new THREE.Vector3(-0.3, 0, 0), euler: new THREE.Euler(-75 * DEG_TO_RAD, 35 * DEG_TO_RAD, -10 * DEG_TO_RAD) },
   ];
   currentPoiIndex = 0;
   nextPoiIndex = 1;
@@ -118,6 +121,7 @@ class ProceduralOrbit {
 
     // @ts-ignore: Expose for testing
     window.earthDebug = this;
+    (window as any).THREE = THREE;
 
     if (typeof ResizeObserver !== 'undefined') {
       this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -308,19 +312,7 @@ class ProceduralOrbit {
   }
 
   initISS() {
-    this.issGroup = new THREE.Group();
-    const body = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.02, 0.02, 0.15),
-      new THREE.MeshStandardMaterial({ color: 0xcccccc })
-    );
-    body.rotation.z = Math.PI / 2;
-    const panelGeo = new THREE.BoxGeometry(0.005, 0.08, 0.4);
-    const panelMat = new THREE.MeshStandardMaterial({ color: 0x113366, metalness: 0.8, roughness: 0.2 });
-    const leftP = new THREE.Mesh(panelGeo, panelMat);
-    const rightP = leftP.clone();
-    leftP.position.x = -0.1;
-    rightP.position.x = 0.1;
-    this.issGroup.add(body, leftP, rightP);
+    this.issGroup = createISSModel();
     this.scene.add(this.issGroup);
   }
 
@@ -339,88 +331,18 @@ class ProceduralOrbit {
     );
     this.scene.add(this.sunGlow);
 
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x111111, 1.0);
+    this.scene.add(hemiLight);
     this.sunLight = new THREE.PointLight(0xffb347, 1.85, 200);
     this.scene.add(this.sunLight);
   }
 
   initConfigPanel() {
-    const panel = document.getElementById('earth-config-panel') as HTMLDivElement | null;
-    const toggle = document.getElementById('earth-config-toggle') as HTMLButtonElement | null;
-    if (!panel || !toggle) return;
-
-    this.configPanel = panel;
-    this.configToggle = toggle;
-
-    const setOpen = (open: boolean) => {
-      panel.hidden = !open;
-      panel.style.display = open ? 'grid' : 'none';
-      toggle.setAttribute('aria-expanded', String(open));
-    };
-
-    setOpen(false);
-    toggle.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setOpen(panel.hidden);
-    });
-
-    const addSection = (title: string) => {
-      const header = document.createElement('h3');
-      header.textContent = title;
-      panel.appendChild(header);
-    };
-
-    const addSlider = (key: string, label: string, value: number, min: number, max: number, step: number, onInput: (v: number) => void, format: (v: number) => string = (v) => v.toFixed(3)) => {
-      const row = document.createElement('div');
-      row.className = 'earth-config-row';
-      const labelWrap = document.createElement('label');
-      labelWrap.textContent = label;
-      const slider = document.createElement('input');
-      slider.type = 'range'; slider.min = `${min}`; slider.max = `${max}`; slider.step = `${step}`; slider.value = `${value}`;
-      labelWrap.appendChild(slider);
-      row.appendChild(labelWrap);
-      const valueEl = document.createElement('span');
-      valueEl.className = 'earth-config-value';
-      valueEl.textContent = format(value);
-      row.appendChild(valueEl);
-      panel.appendChild(row);
-      this.configValueMap.set(key, valueEl);
-      slider.addEventListener('input', () => {
-        const next = parseFloat(slider.value);
-        onInput(next);
-        valueEl.textContent = format(next);
-      });
-    };
-
-    const addCopyButton = () => {
-      const btn = document.createElement('button');
-      btn.textContent = 'Copy Config';
-      btn.addEventListener('click', () => {
-        const payload = JSON.stringify(this.buildConfigSnapshot(), null, 2);
-        navigator.clipboard?.writeText(payload);
-      });
-      panel.appendChild(btn);
-    };
-
-    addSection('Orbit');
-    addSlider('orbitSpeed', 'Orbit Speed', this.orbitSpeed, 0, 0.005, 0.000001, (v) => this.orbitSpeed = v, (v) => v.toFixed(6));
-    addSlider('orbitHeight', 'Orbit Height', this.orbitHeightBase, 0.05, 1.5, 0.01, (v) => this.orbitHeightBase = v);
-
-    addSection('Rotation');
-    addSlider('earthRot', 'Earth Rot', this.earthRotSpeed, 0, 0.0002, 0.000001, (v) => this.earthRotSpeed = v, (v) => v.toFixed(6));
-    addSlider('sunOrbitSpeed', 'Sun Orbit', this.sunOrbitSpeed, 0, 0.005, 0.0001, (v) => this.sunOrbitSpeed = v, (v) => v.toFixed(4));
-
-    addSection('Camera');
-    addSlider('dwell', 'Dwell (ms)', this.dwellDuration, 1000, 15000, 100, (v) => this.dwellDuration = v, (v) => v.toFixed(0));
-    addSlider('transition', 'Transition (ms)', this.transitionDuration, 1000, 10000, 100, (v) => this.transitionDuration = v, (v) => v.toFixed(0));
-
-    addCopyButton();
+    setupConfigPanel(this);
   }
 
   updateTelemetry(orbitRadius: number) {
-    const kmPerUnit = 6371 / this.earthRadius;
-    const altitudeKm = (orbitRadius - this.earthRadius) * kmPerUnit;
-    if (this.altitudeEl) this.altitudeEl.textContent = `${altitudeKm.toFixed(0)} KM`;
+    updateTelemetry(this, orbitRadius);
   }
 
   isVisible = true;
@@ -465,7 +387,7 @@ class ProceduralOrbit {
       this.currentPoiIndex = this.nextPoiIndex;
       this.nextPoiIndex = (this.currentPoiIndex + 1) % this.poiSequence.length;
       this.phaseStartTime = now;
-      elapsedPhase = 0; // Reset immediately to prevent one-frame skip
+      elapsedPhase = 0;
     }
 
     const currentPOI = this.poiSequence[this.currentPoiIndex];
@@ -486,10 +408,7 @@ class ProceduralOrbit {
       this.cameraEuler.copy(currentPOI.euler);
     }
 
-    // Centering constraint: Bias look-at target towards Earth center (0,0,0)
-    // Stronger bias for higher orbit to keep globe framed during large sweeps.
-    this.cameraLookTarget.lerp(new THREE.Vector3(0, 0, 0), 0.7);
-
+    // Apply Camera Transforms
     this.camera.position.copy(this.issGroup.position);
     this.cameraOffsetWorld.copy(this.cameraOffset).applyQuaternion(this.issGroup.quaternion);
     this.camera.position.add(this.cameraOffsetWorld);
@@ -499,13 +418,15 @@ class ProceduralOrbit {
     this.cameraExtraQuat.setFromEuler(this.cameraEuler);
     this.camera.quaternion.multiply(this.cameraExtraQuat);
 
+    // Final "God-View" Horizon Clamp
+    applyHorizonConstraint(this.camera, this.earthRadius);
+
     // Sun Orbit
     const sunRad = this.earthRadius + this.sunOrbitHeight;
     const sunA = now * this.sunOrbitSpeed + this.sunOrbitAngleDeg * DEG_TO_RAD;
     this.sunLight.position.set(Math.cos(sunA) * sunRad, Math.sin(sunA * 0.5) * 5, Math.sin(sunA) * sunRad);
     this.sunGlow.position.copy(this.sunLight.position);
 
-    // Shaders
     const sDir = this.sunLight.position.clone().normalize();
     this.earthMaterial.uniforms.uSunDir.value.copy(sDir);
     (this.cloud1.material as THREE.ShaderMaterial).uniforms.uSunDir.value.copy(sDir);
