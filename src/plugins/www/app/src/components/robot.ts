@@ -326,7 +326,7 @@ class RobotArmVisualization {
     cameraOrbitAngle = 0;
     cameraOrbitSpeed = 0.1;
     cameraRadius = 12;
-    cameraHeight = 5;
+    cameraHeight = 1;
 
     configPanel?: HTMLDivElement;
     configToggle?: HTMLButtonElement;
@@ -379,7 +379,7 @@ class RobotArmVisualization {
 
     initScene() {
         this.camera.position.set(this.cameraRadius, this.cameraHeight, this.cameraRadius);
-        this.camera.lookAt(0, 2, 0);
+        this.camera.lookAt(0, 3.5, 0);
 
         // Strong ambient light
         const ambient = new THREE.AmbientLight(0xffffff, 0.6);
@@ -707,7 +707,7 @@ class RobotArmVisualization {
         const camX = Math.sin(this.cameraOrbitAngle) * this.cameraRadius;
         const camZ = Math.cos(this.cameraOrbitAngle) * this.cameraRadius;
         this.camera.position.set(camX, this.cameraHeight, camZ);
-        this.camera.lookAt(0, 2, 0);
+        this.camera.lookAt(0, 3.5, 0);
         
         if (this.autoAnimate) {
             this.timeSinceTargetSet += delta;

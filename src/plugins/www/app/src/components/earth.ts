@@ -54,7 +54,9 @@ export class ProceduralOrbit {
   cloud2RotSpeed = 0.00028;
   cloud3RotSpeed = 0.00012;
   cloud4RotSpeed = 0.00022;
-  cameraDistance = 16;
+  cameraDistance = 4.5;
+  cameraOffsetX = 5.0;
+  cameraYaw = 1;
 
   // Lights
   sunGlow!: THREE.Mesh;
@@ -65,7 +67,8 @@ export class ProceduralOrbit {
   sunDistance = 78;
   sunOrbitHeight = 87;
   sunOrbitAngleDeg = 0;
-  sunOrbitSpeed = (Math.PI * 2) / SUN_ORBIT_PERIOD_MS;
+  sunOrbitSpeed = (Math.PI * 2) / SUN_ORBIT_PERIOD_MS / 2;
+  sunOrbitIncline = 20 * DEG_TO_RAD;
 
   keyLightDistance = 147;
   keyLightHeight = 40;
@@ -98,8 +101,9 @@ export class ProceduralOrbit {
     this.initLights();
     this.initConfigPanel();
     this.resize();
-    this.camera.position.set(0, 0, this.cameraDistance);
+    this.camera.position.set(this.cameraOffsetX, 0, this.cameraDistance);
     this.camera.lookAt(0, 0, 0);
+    this.camera.rotation.y += this.cameraYaw;
     this.animate();
 
     // @ts-ignore: Expose for testing
@@ -348,13 +352,18 @@ export class ProceduralOrbit {
     (this.cloud3.material as THREE.ShaderMaterial).uniforms.uTime.value = cloudTime;
     (this.cloud4.material as THREE.ShaderMaterial).uniforms.uTime.value = cloudTime;
 
-    this.camera.position.set(0, 0, this.cameraDistance);
+    this.camera.position.set(this.cameraOffsetX, 0, this.cameraDistance);
     this.camera.lookAt(0, 0, 0);
+    this.camera.rotation.y += this.cameraYaw;
 
     // Sun Orbit
     const sunRad = this.earthRadius + this.sunOrbitHeight;
     const sunA = now * this.sunOrbitSpeed + this.sunOrbitAngleDeg * DEG_TO_RAD;
-    this.sunLight.position.set(Math.cos(sunA) * sunRad, Math.sin(sunA * 0.5) * 5, Math.sin(sunA) * sunRad);
+    const sinA = Math.sin(sunA);
+    const cosA = Math.cos(sunA);
+    const y = sinA * Math.sin(this.sunOrbitIncline) * sunRad;
+    const z = sinA * Math.cos(this.sunOrbitIncline) * sunRad;
+    this.sunLight.position.set(cosA * sunRad, y, z);
     this.sunGlow.position.copy(this.sunLight.position);
 
     const sDir = this.sunLight.position.clone().normalize();
