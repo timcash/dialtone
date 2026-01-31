@@ -9,12 +9,11 @@ import atmosphereVertexShader from '../shaders/atmosphere.vert.glsl?raw';
 import atmosphereFragmentShader from '../shaders/atmosphere.frag.glsl?raw';
 import sunAtmosphereVertexShader from '../shaders/sun_atmosphere.vert.glsl?raw';
 import sunAtmosphereFragmentShader from '../shaders/sun_atmosphere.frag.glsl?raw';
-import { createISSModel } from './earth/iss_model';
-import { applyHorizonConstraint } from './earth/camera_math';
 import { setupConfigPanel, updateTelemetry } from './earth/config_ui';
 
 const DEG_TO_RAD = Math.PI / 180;
 const TIME_SCALE = 1;
+const SUN_ORBIT_PERIOD_MS = 5000;
 
 export class ProceduralOrbit {
   scene = new THREE.Scene();
@@ -32,7 +31,6 @@ export class ProceduralOrbit {
   hexLayers: HexLayer[] = [];
   atmosphere!: THREE.Mesh;
   sunAtmosphere!: THREE.Mesh;
-  issGroup!: THREE.Group;
   earthMaterial!: THREE.ShaderMaterial;
   cloud1Material!: THREE.ShaderMaterial;
   cloud2Material!: THREE.ShaderMaterial;
@@ -51,34 +49,12 @@ export class ProceduralOrbit {
   timeScale = TIME_SCALE;
 
   // Rotations
-  orbitAngle = 0;
-  orbitSpeed = 0.000214;
   earthRotSpeed = 0.000042;
   cloud1RotSpeed = 0.00025;
   cloud2RotSpeed = 0.00028;
   cloud3RotSpeed = 0.00012;
   cloud4RotSpeed = 0.00022;
-  orbitHeightBase = 6.0;
-
-  // Camera POI sequence
-  poiSequence = [
-    { offset: new THREE.Vector3(0, 5.0, 1.0), look: new THREE.Vector3(0, -0.5, 0), euler: new THREE.Euler(-60 * DEG_TO_RAD, 0, 0) },
-    { offset: new THREE.Vector3(1.5, 6.0, 2.0), look: new THREE.Vector3(0, 0, 0), euler: new THREE.Euler(-70 * DEG_TO_RAD, 15 * DEG_TO_RAD, 0) },
-    { offset: new THREE.Vector3(-2.0, 5.5, 1.5), look: new THREE.Vector3(0.2, -0.2, 0), euler: new THREE.Euler(-65 * DEG_TO_RAD, -25 * DEG_TO_RAD, 5 * DEG_TO_RAD) },
-    { offset: new THREE.Vector3(2.5, 7.0, 0.5), look: new THREE.Vector3(-0.3, 0, 0), euler: new THREE.Euler(-75 * DEG_TO_RAD, 35 * DEG_TO_RAD, -10 * DEG_TO_RAD) },
-  ];
-  currentPoiIndex = 0;
-  nextPoiIndex = 1;
-  phaseStartTime = performance.now();
-  dwellDuration = 12000;
-  transitionDuration = 10000;
-
-  // Intermediate state for lerps
-  cameraOffset = new THREE.Vector3().copy(this.poiSequence[0].offset);
-  cameraLookTarget = new THREE.Vector3().copy(this.poiSequence[0].look);
-  cameraEuler = new THREE.Euler().copy(this.poiSequence[0].euler);
-  cameraOffsetWorld = new THREE.Vector3();
-  cameraExtraQuat = new THREE.Quaternion();
+  cameraDistance = 16;
 
   // Lights
   sunGlow!: THREE.Mesh;
@@ -88,8 +64,8 @@ export class ProceduralOrbit {
 
   sunDistance = 78;
   sunOrbitHeight = 87;
-  sunOrbitAngleDeg = 103;
-  sunOrbitSpeed = 0.0005;
+  sunOrbitAngleDeg = 0;
+  sunOrbitSpeed = (Math.PI * 2) / SUN_ORBIT_PERIOD_MS;
 
   keyLightDistance = 147;
   keyLightHeight = 40;
@@ -107,16 +83,23 @@ export class ProceduralOrbit {
     this.container = container;
     this.renderer.setClearColor(0x000000, 1);
     this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.domElement.style.position = 'absolute';
+    this.renderer.domElement.style.top = '0';
+    this.renderer.domElement.style.left = '0';
+    this.renderer.domElement.style.width = '100%';
+    this.renderer.domElement.style.height = '100%';
+    this.renderer.domElement.style.display = 'block';
     this.container.appendChild(this.renderer.domElement);
 
     this.altitudeEl = document.querySelector('[data-telemetry="altitude"]') || undefined;
     this.speedEl = document.querySelector('[data-telemetry="speed"]') || undefined;
 
     this.initLayers();
-    this.initISS();
     this.initLights();
     this.initConfigPanel();
     this.resize();
+    this.camera.position.set(0, 0, this.cameraDistance);
+    this.camera.lookAt(0, 0, 0);
     this.animate();
 
     // @ts-ignore: Expose for testing
@@ -311,11 +294,6 @@ export class ProceduralOrbit {
     });
   }
 
-  initISS() {
-    this.issGroup = createISSModel();
-    this.scene.add(this.issGroup);
-  }
-
   initLights() {
     this.sunKeyLight = new THREE.DirectionalLight(0xffd19a, 0.3);
     this.sunKeyLight.position.set(10, 5, 10);
@@ -370,56 +348,8 @@ export class ProceduralOrbit {
     (this.cloud3.material as THREE.ShaderMaterial).uniforms.uTime.value = cloudTime;
     (this.cloud4.material as THREE.ShaderMaterial).uniforms.uTime.value = cloudTime;
 
-    // Orbit Position
-    this.orbitAngle += this.orbitSpeed * deltaSeconds;
-    const orbitRadius = this.earthRadius + this.orbitHeightBase;
-    this.issGroup.position.set(Math.cos(this.orbitAngle) * orbitRadius, Math.sin(this.orbitAngle * 0.5) * 0.5, Math.sin(this.orbitAngle) * orbitRadius);
-
-    // Stable orientation: Force a constant 'up' to avoid flips at poles
-    const futurePos = new THREE.Vector3(Math.cos(this.orbitAngle + 0.01) * orbitRadius, Math.sin((this.orbitAngle + 0.01) * 0.5) * 0.5, Math.sin(this.orbitAngle + 0.01) * orbitRadius);
-    this.issGroup.up.set(0, 1, 0);
-    this.issGroup.lookAt(futurePos);
-
-    // Camera Panning
-    let elapsedPhase = now - this.phaseStartTime;
-    const cycle = this.dwellDuration + this.transitionDuration;
-    if (elapsedPhase > cycle) {
-      this.currentPoiIndex = this.nextPoiIndex;
-      this.nextPoiIndex = (this.currentPoiIndex + 1) % this.poiSequence.length;
-      this.phaseStartTime = now;
-      elapsedPhase = 0;
-    }
-
-    const currentPOI = this.poiSequence[this.currentPoiIndex];
-    const nextPOI = this.poiSequence[this.nextPoiIndex];
-
-    if (elapsedPhase > this.dwellDuration) {
-      const t = THREE.MathUtils.clamp((elapsedPhase - this.dwellDuration) / Math.max(1, this.transitionDuration), 0, 1);
-      const ease = t * t * (3 - 2 * t);
-      this.cameraOffset.lerpVectors(currentPOI.offset, nextPOI.offset, ease);
-      this.cameraLookTarget.lerpVectors(currentPOI.look, nextPOI.look, ease);
-      const qS = new THREE.Quaternion().setFromEuler(currentPOI.euler);
-      const qE = new THREE.Quaternion().setFromEuler(nextPOI.euler);
-      this.cameraExtraQuat.slerpQuaternions(qS, qE, ease);
-      this.cameraEuler.setFromQuaternion(this.cameraExtraQuat);
-    } else {
-      this.cameraOffset.copy(currentPOI.offset);
-      this.cameraLookTarget.copy(currentPOI.look);
-      this.cameraEuler.copy(currentPOI.euler);
-    }
-
-    // Apply Camera Transforms
-    this.camera.position.copy(this.issGroup.position);
-    this.cameraOffsetWorld.copy(this.cameraOffset).applyQuaternion(this.issGroup.quaternion);
-    this.camera.position.add(this.cameraOffsetWorld);
-
-    const target = this.cameraLookTarget.clone().applyQuaternion(this.issGroup.quaternion).add(this.issGroup.position);
-    this.camera.lookAt(target);
-    this.cameraExtraQuat.setFromEuler(this.cameraEuler);
-    this.camera.quaternion.multiply(this.cameraExtraQuat);
-
-    // Final "God-View" Horizon Clamp
-    applyHorizonConstraint(this.camera, this.earthRadius);
+    this.camera.position.set(0, 0, this.cameraDistance);
+    this.camera.lookAt(0, 0, 0);
 
     // Sun Orbit
     const sunRad = this.earthRadius + this.sunOrbitHeight;
@@ -440,12 +370,12 @@ export class ProceduralOrbit {
     this.sunAtmosphereMaterial.uniforms.uCameraPos.value.copy(this.camera.position);
 
     this.renderer.render(this.scene, this.camera);
-    this.updateTelemetry(orbitRadius);
+    this.updateTelemetry(this.camera.position.length());
   };
 
   buildConfigSnapshot() {
     return {
-      camera: { index: this.currentPoiIndex, offset: this.cameraOffset },
+      camera: { distance: this.cameraDistance },
       sun: { angle: this.sunOrbitAngleDeg, speed: this.sunOrbitSpeed }
     };
   }

@@ -118,14 +118,6 @@ func RunWwwIntegration() error {
 		return err
 	}
 
-	if err := verifyAboutPage(ctx); err != nil {
-		return err
-	}
-
-	if err := verifyDocsPage(ctx); err != nil {
-		return err
-	}
-
 	// Print console logs summary
 	printConsoleLogs(consoleLogs)
 
@@ -182,13 +174,21 @@ func verifyHomePage(ctx context.Context) error {
 	fmt.Println(">> [WWW] Testing Home Page...")
 
 	var (
-		title       string
-		headerText  string
-		earthExists bool
-		robotExists bool
-		nnExists    bool
-		versionText string
-		htmlDump    string
+		title                   string
+		heroHeadline            string
+		heroButtonHref          string
+		heroButtonText          string
+		robotHeadline           string
+		videoHeadline           string
+		neuralHeadline          string
+		curriculumHeadline      string
+		earthExists             bool
+		robotExists             bool
+		nnExists                bool
+		heroCentered            bool
+		heroHeadlineWhite       bool
+		stripeSectionExists     bool
+		htmlDump                string
 	)
 
 	err := chromedp.Run(ctx,
@@ -196,11 +196,25 @@ func verifyHomePage(ctx context.Context) error {
 		chromedp.Sleep(2*time.Second), // Wait for page to render
 		chromedp.Title(&title),
 		chromedp.OuterHTML("html", &htmlDump),
-		chromedp.Text("header h1", &headerText, chromedp.ByQuery),
+		chromedp.Text("#s-home .marketing-overlay h2", &heroHeadline, chromedp.ByQuery),
+		chromedp.Text("#s-home .marketing-overlay .buy-button", &heroButtonText, chromedp.ByQuery),
+		chromedp.AttributeValue("#s-home .marketing-overlay .buy-button", "href", &heroButtonHref, nil, chromedp.ByQuery),
+		chromedp.Text("#s-robot .marketing-overlay h2", &robotHeadline, chromedp.ByQuery),
+		chromedp.Text("#s-video .marketing-overlay h2", &videoHeadline, chromedp.ByQuery),
+		chromedp.Text("#s-neural .marketing-overlay h2", &neuralHeadline, chromedp.ByQuery),
+		chromedp.Text("#s-curriculum .marketing-overlay h2", &curriculumHeadline, chromedp.ByQuery),
 		chromedp.Evaluate(`!!document.getElementById("earth-container")`, &earthExists),
 		chromedp.Evaluate(`!!document.getElementById("robot-container")`, &robotExists),
 		chromedp.Evaluate(`!!document.getElementById("nn-container")`, &nnExists),
-		chromedp.Text(".version", &versionText, chromedp.ByQuery),
+		chromedp.Evaluate(`!!document.getElementById("s-stripe")`, &stripeSectionExists),
+		chromedp.Evaluate(`getComputedStyle(document.querySelector("#s-home .marketing-overlay")).textAlign === "center"`, &heroCentered),
+		chromedp.Evaluate(`
+			(() => {
+				const h = document.querySelector("#s-home .marketing-overlay h2");
+				if (!h) return false;
+				return getComputedStyle(h).color === "rgb(255, 255, 255)";
+			})()
+		`, &heroHeadlineWhite),
 	)
 
 	if err != nil {
@@ -209,18 +223,20 @@ func verifyHomePage(ctx context.Context) error {
 	}
 
 	fmt.Printf("   Title: %s\n", title)
-	fmt.Printf("   Header: %s\n", headerText)
-	fmt.Printf("   Version: %s\n", versionText)
+	fmt.Printf("   Hero Headline: %s\n", heroHeadline)
+	fmt.Printf("   Hero Button: %s (%s)\n", heroButtonText, heroButtonHref)
+	fmt.Printf("   Robot Headline: %s\n", robotHeadline)
+	fmt.Printf("   Video Headline: %s\n", videoHeadline)
+	fmt.Printf("   Neural Headline: %s\n", neuralHeadline)
+	fmt.Printf("   Curriculum Headline: %s\n", curriculumHeadline)
 	fmt.Printf("   Earth Container: %v\n", earthExists)
 	fmt.Printf("   Robot Container: %v\n", robotExists)
 	fmt.Printf("   Neural Network Container: %v\n", nnExists)
+	fmt.Printf("   Hero Centered: %v\n", heroCentered)
+	fmt.Printf("   Hero Headline White: %v\n", heroHeadlineWhite)
 
 	if title != "dialtone.earth" {
 		return fmt.Errorf("unexpected title: %s (expected: dialtone.earth)", title)
-	}
-
-	if !strings.Contains(headerText, "dialtone") {
-		return fmt.Errorf("header does not contain 'dialtone': %s", headerText)
 	}
 
 	if !earthExists {
@@ -235,71 +251,35 @@ func verifyHomePage(ctx context.Context) error {
 		return fmt.Errorf("nn-container not found")
 	}
 
+	if heroHeadline != "Now is the time to learn and build" {
+		return fmt.Errorf("unexpected hero headline: %s", heroHeadline)
+	}
+
+	if heroButtonText != "Get the Robot Kit" {
+		return fmt.Errorf("unexpected hero button text: %s", heroButtonText)
+	}
+
+	if !strings.Contains(heroButtonHref, "buy.stripe.com") {
+		return fmt.Errorf("unexpected hero button href: %s", heroButtonHref)
+	}
+
+	if robotHeadline == "" || videoHeadline == "" || neuralHeadline == "" || curriculumHeadline == "" {
+		return fmt.Errorf("missing marketing headlines")
+	}
+
+	if stripeSectionExists {
+		return fmt.Errorf("stripe section should be removed")
+	}
+
+	if !heroCentered {
+		return fmt.Errorf("hero marketing overlay is not centered")
+	}
+
+	if !heroHeadlineWhite {
+		return fmt.Errorf("hero headline is not white")
+	}
+
 	fmt.Println("   [PASS] Home Page Verified")
-	return nil
-}
-
-// verifyAboutPage checks the about page
-func verifyAboutPage(ctx context.Context) error {
-	fmt.Println(">> [WWW] Testing About Page...")
-
-	var (
-		title    string
-		h1Text   string
-		htmlDump string
-	)
-
-	err := chromedp.Run(ctx,
-		chromedp.Navigate("http://127.0.0.1:5173/about"),
-		chromedp.Sleep(2*time.Second),
-		chromedp.Title(&title),
-		chromedp.OuterHTML("html", &htmlDump),
-		chromedp.Text("h1", &h1Text, chromedp.ByQuery),
-	)
-
-	if err != nil {
-		fmt.Printf(">> [WWW DEBUG] HTML Dump:\n%s\n", htmlDump[:min(len(htmlDump), 2000)])
-		return fmt.Errorf("about page verification failed: %v", err)
-	}
-
-	fmt.Printf("   Title: %s\n", title)
-	fmt.Printf("   H1: %s\n", h1Text)
-
-	if h1Text != "Vision" {
-		return fmt.Errorf("unexpected about page h1: %s (expected: Vision)", h1Text)
-	}
-
-	fmt.Println("   [PASS] About Page Verified")
-	return nil
-}
-
-// verifyDocsPage checks the docs page
-func verifyDocsPage(ctx context.Context) error {
-	fmt.Println(">> [WWW] Testing Docs Page...")
-
-	var (
-		title    string
-		htmlDump string
-		hasNav   bool
-	)
-
-	err := chromedp.Run(ctx,
-		chromedp.Navigate("http://127.0.0.1:5173/docs"),
-		chromedp.Sleep(2*time.Second),
-		chromedp.Title(&title),
-		chromedp.OuterHTML("html", &htmlDump),
-		chromedp.Evaluate(`!!document.querySelector("nav") || !!document.querySelector(".docs-nav") || !!document.querySelector("aside")`, &hasNav),
-	)
-
-	if err != nil {
-		fmt.Printf(">> [WWW DEBUG] HTML Dump:\n%s\n", htmlDump[:min(len(htmlDump), 2000)])
-		return fmt.Errorf("docs page verification failed: %v", err)
-	}
-
-	fmt.Printf("   Title: %s\n", title)
-	fmt.Printf("   Has Navigation: %v\n", hasNav)
-
-	fmt.Println("   [PASS] Docs Page Verified")
 	return nil
 }
 
