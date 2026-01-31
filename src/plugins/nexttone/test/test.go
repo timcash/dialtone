@@ -13,8 +13,12 @@ import (
 )
 
 const nexttoneDBEnv = "NEXTTONE_DB_PATH"
+const nexttoneToneEnv = "NEXTTONE_TONE"
+const nexttoneToneDirEnv = "NEXTTONE_TONE_DIR"
 
 var testDBPath = tempDBPath()
+var testToneName = "demo-tone"
+var testToneRoot = ""
 
 func main() {
 	logLine("info", "Starting nexttone integration test")
@@ -38,6 +42,8 @@ func main() {
 		}
 	}()
 
+	setupToneDir()
+
 	runTest("Nexttone list shows graph + cursor", TestListShowsGraph)
 	runTest("Nexttone requires signature", TestNextRequiresSignature)
 	runTest("Nexttone sign advances microtone", TestSignAdvancesMicrotone)
@@ -45,6 +51,7 @@ func main() {
 	runTest("Nexttone completes tone", TestCompleteTone)
 
 	cleanupDB()
+	cleanupToneDir()
 	fmt.Println()
 }
 
@@ -75,8 +82,8 @@ func TestNextRequiresSignature() error {
 	if !strings.Contains(output, "?") {
 		return fmt.Errorf("expected a question in DIALTONE output")
 	}
-	if !strings.Contains(output, "MICROTONE") && !strings.Contains(output, "[") {
-		return fmt.Errorf("expected microtone identifier in DIALTONE output")
+	if !strings.Contains(output, "DIALTONE [") {
+		return fmt.Errorf("expected DIALTONE microtone tag")
 	}
 	if err := assertState("set-git-clean", "alpha"); err != nil {
 		return err
@@ -87,17 +94,20 @@ func TestNextRequiresSignature() error {
 func TestSignAdvancesMicrotone() error {
 	logLine("step", "Sign advances microtone")
 	first := runCmd("./dialtone.sh", "nexttone")
-	if !strings.Contains(first, "MICROTONE") {
-		return fmt.Errorf("expected microtone identifier in first prompt")
+	if !strings.Contains(first, "DIALTONE [") {
+		return fmt.Errorf("expected microtone tag in first prompt")
 	}
 	after := runCmd("./dialtone.sh", "nexttone", "--sign", "yes")
-	if strings.Contains(after, "MICROTONE: set-git-clean") && strings.Contains(first, "MICROTONE: set-git-clean") {
+	if strings.Contains(after, "DIALTONE [set-git-clean]") && strings.Contains(first, "DIALTONE [set-git-clean]") {
 		return fmt.Errorf("expected microtone to advance after signing")
 	}
-	if !strings.Contains(after, "MICROTONE") || !strings.Contains(after, "?") {
+	if !strings.Contains(after, "DIALTONE [") || !strings.Contains(after, "?") {
 		return fmt.Errorf("expected next microtone prompt after signing")
 	}
 	if err := assertState("align-goal-subtone-names", "alpha"); err != nil {
+		return err
+	}
+	if err := assertBackupExists(); err != nil {
 		return err
 	}
 	return nil
@@ -130,10 +140,16 @@ func TestLoopOverSubtones() error {
 		if err := assertState("subtone-run-test", "alpha"); err != nil {
 			return err
 		}
+		if err := assertBackupExists(); err != nil {
+			return err
+		}
 		return nil
 	}
 	if strings.Contains(first, "SUBTONE: beta") {
 		if err := assertState("subtone-run-test", "beta"); err != nil {
+			return err
+		}
+		if err := assertBackupExists(); err != nil {
 			return err
 		}
 		return nil
@@ -225,13 +241,20 @@ func TestCompleteTone() error {
 	if !strings.Contains(output, "COMPLETE!") || !strings.Contains(output, "PR merged") {
 		return fmt.Errorf("expected COMPLETE and PR merged confirmation")
 	}
+	if err := assertBackupExists(); err != nil {
+		return err
+	}
 	return nil
 }
 
 func runCmd(name string, args ...string) string {
 	logLine("cmd", fmt.Sprintf("%s %v", name, args))
 	cmd := exec.Command(name, args...)
-	cmd.Env = append(os.Environ(), nexttoneDBEnv+"="+testDBPath)
+	cmd.Env = append(os.Environ(),
+		nexttoneDBEnv+"="+testDBPath,
+		nexttoneToneEnv+"="+testToneName,
+		nexttoneToneDirEnv+"="+testToneRoot,
+	)
 	output, _ := cmd.CombinedOutput()
 	fmt.Print(string(output))
 	return string(output)
@@ -250,6 +273,49 @@ func cleanupDB() {
 
 func logLine(level, message string) {
 	fmt.Printf("[%s] %s\n", level, message)
+}
+
+func setupToneDir() {
+	base := filepath.Join("src", "tones", "tmp")
+	if err := os.MkdirAll(base, 0755); err != nil {
+		logLine("error", fmt.Sprintf("failed to create temp base: %v", err))
+		os.Exit(1)
+	}
+	dir, err := os.MkdirTemp(base, "nexttone-tone-*")
+	if err != nil {
+		logLine("error", fmt.Sprintf("failed to create temp tone dir: %v", err))
+		os.Exit(1)
+	}
+	testToneRoot = dir
+	toneTestDir := filepath.Join(testToneRoot, testToneName, "test")
+	if err := os.MkdirAll(toneTestDir, 0755); err != nil {
+		logLine("error", fmt.Sprintf("failed to create tone test dir: %v", err))
+		os.Exit(1)
+	}
+	testGo := filepath.Join(toneTestDir, "test.go")
+	content := []byte(`package test
+
+import (
+	"os"
+	"testing"
+)
+
+func TestSubtone(t *testing.T) {
+	if os.Getenv("NEXTTONE_SUBTONE") == "" {
+		t.Skip("no subtone provided")
+	}
+}
+`)
+	if err := os.WriteFile(testGo, content, 0644); err != nil {
+		logLine("error", fmt.Sprintf("failed to write test.go: %v", err))
+		os.Exit(1)
+	}
+}
+
+func cleanupToneDir() {
+	if testToneRoot != "" {
+		_ = os.RemoveAll(testToneRoot)
+	}
 }
 
 func assertState(expectedMicrotone, expectedSubtone string) error {
@@ -271,6 +337,14 @@ func assertState(expectedMicrotone, expectedSubtone string) error {
 	}
 	if subtone != expectedSubtone {
 		return fmt.Errorf("expected subtone %s, got %s", expectedSubtone, subtone)
+	}
+	return nil
+}
+
+func assertBackupExists() error {
+	backupPath := filepath.Join(testToneRoot, testToneName, "test", "nexttone_backup.duckdb")
+	if _, err := os.Stat(backupPath); err != nil {
+		return fmt.Errorf("expected backup at %s", backupPath)
 	}
 	return nil
 }
