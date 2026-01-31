@@ -15,8 +15,9 @@
     <header class="header-title">
       <h1>dialtone.earth</h1>
       <p class="subtitle" id="header-subtitle">unified robotic networks for earth</p>
-      <p class="version header-telemetry">ALT <span data-telemetry="altitude">-- KM</span> · SPD <span data-telemetry="speed">-- KM/S</span></p>
-      <p class="version">v1.0.11</p>
+      <p class="version header-telemetry">ALT <span data-telemetry="altitude">-- KM</span> · SPD <span
+          data-telemetry="speed">-- KM/S</span></p>
+      <p class="version">v1.0.12</p>
     </header>
 
     <nav class="main-nav">
@@ -58,8 +59,14 @@
     </div>
 
     <!-- Slide 1: Earth V1 -->
-    <section id="s-home" class="snap-slide" data-subtitle="unified robotic networks for earth">
+    <section id="s-home" class="snap-slide" data-subtitle="unified robotic networks for earth"
+      aria-label="Home section: Unified Networks visualization">
       <div id="earth-container"></div>
+      <div class="marketing-overlay" aria-label="Unified Networks marketing information">
+        <h3>Unified Networks</h3>
+        <code class="math-snippet" aria-label="Latency formula">latency &lt; 150ms</code>
+        <p>Global Coordination. Unified robotic networks scaling across 12,742km. Real-time NATS orchestration.</p>
+      </div>
       <button id="earth-config-toggle" class="earth-config-toggle" type="button" aria-expanded="false">
         Config
       </button>
@@ -67,8 +74,14 @@
     </section>
 
     <!-- Slide 2: Robot Arm -->
-    <section id="s-robot" class="snap-slide" data-subtitle="inverse kinematics">
+    <section id="s-robot" class="snap-slide" data-subtitle="inverse kinematics"
+      aria-label="Robot section: Precision Control visualization">
       <div id="robot-container"></div>
+      <div class="marketing-overlay" aria-label="Precision Control marketing information">
+        <h3>Precision Control</h3>
+        <code class="math-snippet" aria-label="Inverse kinematics formula">θ = acos( (d1²+d2²-L²) / 2d1d2 )</code>
+        <p>Inverse kinematics in 6 degrees of freedom. Precise hardware-accelerated motion paths.</p>
+      </div>
       <button id="robot-config-toggle" class="earth-config-toggle" type="button" aria-expanded="false">
         Config
       </button>
@@ -76,16 +89,28 @@
     </section>
 
     <!-- Slide 3: Video -->
-    <section id="s-video" class="snap-slide" data-subtitle="low-latency video streaming and control">
-      <video class="bg-video" autoplay loop muted playsinline>
+    <section id="s-video" class="snap-slide" data-subtitle="low-latency video streaming and control"
+      aria-label="Video section: Low Latency streaming visualization">
+      <video class="bg-video" autoplay loop muted playsinline aria-label="Background video showing robotic operations">
         <source src="/video1.mp4" type="video/mp4" />
       </video>
+      <div class="marketing-overlay" aria-label="Low Latency marketing information">
+        <h3>Low Latency</h3>
+        <code class="math-snippet" aria-label="Protocol stack">H264 / WebSockets / NATS</code>
+        <p>Direct byte-stream via NATS WebSockets. Real-time visual feedback for remote operations.</p>
+      </div>
       <div class="overlay-bg"></div>
     </section>
 
     <!-- Slide 4: Neural Network -->
-    <section id="s-neural" class="snap-slide" data-subtitle="neural network topology">
+    <section id="s-neural" class="snap-slide" data-subtitle="neural network topology"
+      aria-label="Neural section: Distributed Intelligence visualization">
       <div id="nn-container"></div>
+      <div class="marketing-overlay" aria-label="Distributed Intelligence marketing information">
+        <h3>Distributed Intelligence</h3>
+        <code class="math-snippet" aria-label="Neural network formula">y = σ(W·x + b)</code>
+        <p>Inference graphs training the next generation of humanoid autonomy across distributed nodes.</p>
+      </div>
       <button id="nn-config-toggle" class="earth-config-toggle" type="button" aria-expanded="false">
         Config
       </button>
@@ -93,8 +118,14 @@
     </section>
 
     <!-- Slide 5: Build Curriculum -->
-    <section id="s-curriculum" class="snap-slide" data-subtitle="build curriculum">
+    <section id="s-curriculum" class="snap-slide" data-subtitle="build curriculum"
+      aria-label="Curriculum section: Build the Future guides">
       <div id="curriculum-container"></div>
+      <div class="marketing-overlay" aria-label="Build the Future marketing information">
+        <h3>Build the Future</h3>
+        <code class="math-snippet" aria-label="Assembly step identifier">step: 001_assembly_v4</code>
+        <p>Step-by-step guides for custom robotics assembly. Open hardware meets unified software.</p>
+      </div>
       <button id="curriculum-config-toggle" class="earth-config-toggle" type="button" aria-expanded="false">
         Config
       </button>
@@ -102,8 +133,9 @@
     </section>
 
     <!-- Slide 6: Stripe Payment -->
-    <section id="s-stripe" class="snap-slide" data-subtitle="support the mission">
-      <div id="stripe-container"></div>
+    <section id="s-stripe" class="snap-slide" data-subtitle="support the mission"
+      aria-label="Order section: Robot Kit offer">
+      <div id="stripe-container" aria-label="Stripe payment container"></div>
     </section>
 
   </div>
