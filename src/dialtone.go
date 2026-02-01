@@ -130,7 +130,8 @@ func runLocalOnly(port, wsPort, webPort int, verbose bool, mavlinkAddr string, o
 	startNatsPublisher(port)
 
 	// Start Web UI
-	webHandler := CreateWebHandler(hostname, port, wsPort, webPort, ns, nil, nil, useMock)
+	// Start Web UI
+	webHandler := CreateWebHandler(hostname, port, wsPort, webPort, port, wsPort, ns, nil, nil, useMock)
 	localWebAddr := fmt.Sprintf("0.0.0.0:%d", webPort)
 	if webPort == 80 {
 		localWebAddr = "0.0.0.0:8080" // Use 8080 if 80 is requested but not root
@@ -219,7 +220,7 @@ func runVPN(args []string) {
 	// Pass 0 for ports since NATS isn't running
 	// Pass nil for NATS server
 	lc, _ := ts.LocalClient()
-	webHandler := CreateWebHandler(*hostname, 0, 0, 80, nil, lc, status.TailscaleIPs, false)
+	webHandler := CreateWebHandler(*hostname, 0, 0, 80, 0, 0, nil, lc, status.TailscaleIPs, false)
 
 	server := &http.Server{
 		Handler: webHandler,
@@ -358,7 +359,7 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 
 	// 3. Web Handler and Server
 	lc, _ := ts.LocalClient()
-	webHandler := CreateWebHandler(hostname, port, wsPort, webPort, ns, lc, ips, mock_mode)
+	webHandler := CreateWebHandler(hostname, port, wsPort, webPort, localNATSPort, localWSPort, ns, lc, ips, mock_mode)
 
 	// Local listener for testing/dev (use 8080 to avoid permission issues)
 	localWebPort := 8080
@@ -639,7 +640,7 @@ func waitForShutdown() {
 }
 
 // CreateWebHandler creates the HTTP handler for the unified web dashboard
-func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server.Server, lc *tailscale.LocalClient, ips []netip.Addr, useMock bool) http.Handler {
+func CreateWebHandler(hostname string, natsPort, wsPort, webPort, internalNATSPort, internalWSPort int, ns *server.Server, lc *tailscale.LocalClient, ips []netip.Addr, useMock bool) http.Handler {
 	mux := http.NewServeMux()
 
 	// 1. JSON init API for the frontend
@@ -784,7 +785,7 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort int, ns *server
 	})
 
 	// 6. NATS WebSocket Proxy
-	natsWSUrl, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", wsPort))
+	natsWSUrl, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", internalWSPort))
 	natsWSProxy := httputil.NewSingleHostReverseProxy(natsWSUrl)
 	// Important: NATS WS expects it at the root of the target, but we handle it at /nats-ws locally
 	mux.Handle("/nats-ws", natsWSProxy)
