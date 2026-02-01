@@ -45,7 +45,7 @@ class NeuralNetworkVisualization {
     // Animation
     time = 0;
     lastFrameTime = performance.now();
-    
+
     // Camera - configurable
     cameraOrbitAngle = 0;
     cameraOrbitSpeed = 0.06;
@@ -62,6 +62,7 @@ class NeuralNetworkVisualization {
     // Config panel
     configPanel?: HTMLDivElement;
     configToggle?: HTMLButtonElement;
+    private setPanelOpen?: (open: boolean) => void;
 
     constructor(container: HTMLElement) {
         this.container = container;
@@ -200,7 +201,7 @@ class NeuralNetworkVisualization {
                     const curve = this.createConnectionCurve(fromNeuron.position, toNeuron.position);
                     const points = curve.getPoints(30);
                     const geometry = new THREE.BufferGeometry().setFromPoints(points);
-                    
+
                     const material = new THREE.LineBasicMaterial({
                         color: COLORS.connection,
                         transparent: true,
@@ -258,6 +259,7 @@ class NeuralNetworkVisualization {
             panel.style.display = open ? 'grid' : 'none';
             toggle.setAttribute('aria-expanded', String(open));
         };
+        this.setPanelOpen = setOpen;
 
         setOpen(false);
         toggle.addEventListener('click', (e) => {
@@ -360,10 +362,13 @@ class NeuralNetworkVisualization {
 
     setVisible(visible: boolean) {
         if (this.isVisible !== visible) {
-            console.log(`%c[neural] ${visible ? '▶️ Resuming' : '⏸️ Pausing'} at frame ${this.frameCount}`, 
+            console.log(`%c[neural] ${visible ? '▶️ Resuming' : '⏸️ Pausing'} at frame ${this.frameCount}`,
                 visible ? 'color: #22c55e' : 'color: #f59e0b');
         }
         this.isVisible = visible;
+        if (!visible) {
+            this.setPanelOpen?.(false);
+        }
     }
 
     animate = () => {
@@ -411,7 +416,7 @@ class NeuralNetworkVisualization {
 
         // Camera orbits around center
         this.cameraOrbitAngle += this.cameraOrbitSpeed * delta;
-        
+
         const camX = Math.sin(this.cameraOrbitAngle) * this.cameraRadius;
         const camZ = Math.cos(this.cameraOrbitAngle) * this.cameraRadius;
         const camY = this.cameraHeight + Math.sin(this.time * this.cameraHeightSpeed) * this.cameraHeightOsc;

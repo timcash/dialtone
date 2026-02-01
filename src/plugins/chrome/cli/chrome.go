@@ -44,8 +44,30 @@ func RunChrome(args []string) {
 		port := newFlags.Int("port", 0, "Remote debugging port")
 		gpu := newFlags.Bool("gpu", false, "Enable GPU acceleration")
 		debug := newFlags.Bool("debug", false, "Enable verbose logging")
-		newFlags.Parse(args[1:])
-		handleNew(*port, *gpu, *debug)
+		// Pre-process arguments to separate flags from the positional URL
+		var flags []string
+		var positional []string
+		for i := 1; i < len(args); i++ {
+			arg := args[i]
+			if strings.HasPrefix(arg, "-") {
+				flags = append(flags, arg)
+				// Handle flags that take values (only -port for now)
+				if (arg == "--port" || arg == "-port") && i+1 < len(args) {
+					flags = append(flags, args[i+1])
+					i++
+				}
+			} else {
+				positional = append(positional, arg)
+			}
+		}
+
+		newFlags.Parse(flags)
+		
+		targetURL := ""
+		if len(positional) > 0 {
+			targetURL = positional[0]
+		}
+		handleNew(*port, *gpu, targetURL, *debug)
 	case "verify":
 		verifyFlags := flag.NewFlagSet("chrome verify", flag.ExitOnError)
 		port := verifyFlags.Int("port", 9222, "Remote debugging port")
@@ -199,14 +221,14 @@ func handleKill(arg string, isWindows, totalAll bool) {
 	logger.LogInfo("Successfully killed process %d", pid)
 }
 
-func handleNew(port int, gpu, debug bool) {
+func handleNew(port int, gpu bool, targetURL string, debug bool) {
 	logger.LogInfo("Launching new headed Chrome instance...")
 	// If port is the default 9222, let's try to find a free one to avoid conflicts if 9222 is taken
 	if port == 9222 {
 		port = 0 // app.LaunchChrome will find one
 	}
 
-	res, err := chrome.LaunchChrome(port, gpu)
+	res, err := chrome.LaunchChrome(port, gpu, targetURL)
 	if err != nil {
 		logger.LogFatal("Failed to launch Chrome: %v", err)
 	}
@@ -224,7 +246,7 @@ func printChromeUsage() {
 	fmt.Println("\nCommands:")
 	fmt.Println("  verify [--port N]   Verify chrome connectivity")
 	fmt.Println("  list [flags]        List detected chrome processes")
-	fmt.Println("  new [--port N] [--gpu] Launch a new headed chrome instance")
+	fmt.Println("  new [URL] [flags]   Launch a new headed chrome instance")
 	fmt.Println("  kill [PID|all] [--all] Kill Dialtone processes (default) or all processes")
 	fmt.Println("  install             Install chrome dependencies")
 	fmt.Println("\nFlags for list:")

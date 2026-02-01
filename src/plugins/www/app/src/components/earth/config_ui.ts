@@ -65,7 +65,11 @@ export function setupConfigPanel(orbit: ProceduralOrbit) {
 
     addCopyButton();
 
-    return { panel, toggle };
+    return {
+        panel,
+        toggle,
+        setOpen
+    };
 }
 
 export function updateTelemetry(orbit: ProceduralOrbit, orbitRadius: number) {

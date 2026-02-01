@@ -70,6 +70,7 @@ class CurriculumVisualization {
     // Config panel
     configPanel?: HTMLDivElement;
     configToggle?: HTMLButtonElement;
+    private setPanelOpen?: (open: boolean) => void;
 
     constructor(container: HTMLElement) {
         this.container = container;
@@ -409,6 +410,7 @@ class CurriculumVisualization {
             panel.style.display = open ? 'grid' : 'none';
             toggle.setAttribute('aria-expanded', String(open));
         };
+        this.setPanelOpen = setOpen;
 
         setOpen(false);
         toggle.addEventListener('click', (e) => {
@@ -515,10 +517,13 @@ class CurriculumVisualization {
 
     setVisible(visible: boolean) {
         if (this.isVisible !== visible) {
-            console.log(`%c[curriculum] ${visible ? '▶️ Resuming' : '⏸️ Pausing'} at frame ${this.frameCount}`, 
+            console.log(`%c[curriculum] ${visible ? '▶️ Resuming' : '⏸️ Pausing'} at frame ${this.frameCount}`,
                 visible ? 'color: #22c55e' : 'color: #f59e0b');
         }
         this.isVisible = visible;
+        if (!visible) {
+            this.setPanelOpen?.(false);
+        }
     }
 
     animate = () => {
@@ -577,7 +582,7 @@ class CurriculumVisualization {
 
         // Camera orbits around center
         this.cameraOrbitAngle += this.cameraOrbitSpeed * delta;
-        
+
         const camX = Math.sin(this.cameraOrbitAngle) * this.cameraOrbitRadius;
         const camZ = Math.cos(this.cameraOrbitAngle) * this.cameraOrbitRadius;
         const camY = this.cameraHeight + Math.sin(this.time * this.cameraHeightSpeed) * this.cameraHeightOsc;

@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -221,6 +223,7 @@ func RunWww(args []string) {
 		fmt.Println("  login              Login to Vercel")
 		fmt.Println("  test               Run WWW integration tests")
 		fmt.Println("  test cad           Run headed browser test for CAD section")
+		fmt.Println("  cad demo           Start CAD server + WWW dev + GPU Chrome")
 		return
 	}
 
@@ -232,6 +235,13 @@ func RunWww(args []string) {
 	vercelEnv := vercelProjectEnv()
 
 	switch subcommand {
+	case "cad":
+		if len(args) > 1 && args[1] == "demo" {
+			handleCadDemo(webDir)
+			return
+		}
+		logFatal("Unknown 'cad' command. Use 'dialtone www help' for usage.")
+
 	case "publish":
 		publishPrebuilt(webDir, vercelPath, vercelEnv, args[1:])
 
@@ -361,4 +371,89 @@ func RunWww(args []string) {
 			logFatal("Vercel command failed: %v", err)
 		}
 	}
+}
+
+func handleCadDemo(webDir string) {
+	logInfo("Setting up CAD Demo Environment...")
+
+	// 1. Aggressive Port Cleanup
+	logInfo("Cleaning up ports 5173 and 8081...")
+	_ = exec.Command("fuser", "-k", "5173/tcp").Run()
+	_ = exec.Command("fuser", "-k", "8081/tcp").Run()
+	time.Sleep(1500 * time.Millisecond)
+
+	// 2. Kill existing Dialtone Chrome instances
+	logInfo("Cleaning up Chrome processes...")
+	_ = exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
+
+	// 3. Start CAD Server (Background)
+	logInfo("Starting CAD Server...")
+	cadCmd := exec.Command("./dialtone.sh", "cad", "server")
+	cadCmd.Stdout = os.Stdout
+	cadCmd.Stderr = os.Stderr
+	if err := cadCmd.Start(); err != nil {
+		logFatal("Failed to start CAD server: %v", err)
+	}
+
+	// Wait for cad to be alive
+	logInfo("Waiting for CAD Server...")
+	cadReady := false
+	for i := 0; i < 20; i++ {
+		time.Sleep(500 * time.Millisecond)
+		r, err := http.Get("http://127.0.0.1:8081/api/cad")
+		if err == nil {
+			r.Body.Close()
+			cadReady = true
+			break
+		}
+	}
+	if !cadReady {
+		logFatal("CAD server failed to respond within 10 seconds")
+	}
+
+	// 4. Start WWW Dev Server (Background)
+	logInfo("Starting WWW Dev Server...")
+	devCmd := exec.Command("npm", "run", "dev", "--", "--host", "127.0.0.1")
+	devCmd.Dir = webDir
+	devCmd.Stdout = os.Stdout
+	devCmd.Stderr = os.Stderr
+	if err := devCmd.Start(); err != nil {
+		logFatal("Failed to start dev server: %v", err)
+	}
+
+	// 4. Wait for dev server to be ready
+	logInfo("Waiting for Dev Server...")
+	ready := false
+	for i := 0; i < 30; i++ {
+		resp, err := http.Get("http://127.0.0.1:5173")
+		if err == nil && resp.StatusCode == 200 {
+			ready = true
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	if !ready {
+		logFatal("Dev server failed to start within 30 seconds")
+	}
+
+	// 5. Launch GPU-enabled Chrome
+	logInfo("Launching GPU-enabled Chrome...")
+	chromeCmd := exec.Command("./dialtone.sh", "chrome", "new", "http://127.0.0.1:5173/#s-cad", "--gpu")
+	chromeCmd.Stdout = os.Stdout
+	chromeCmd.Stderr = os.Stderr
+	if err := chromeCmd.Run(); err != nil {
+		logFatal("Failed to launch Chrome: %v", err)
+	}
+
+	logInfo("CAD Demo Environment is LIVE!")
+	logInfo("Dev Server: http://127.0.0.1:5173/#s-cad")
+	logInfo("CAD Server: http://127.0.0.1:8081")
+	logInfo("Press Ctrl+C to stop...")
+
+	// Wait for interrupt signal
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
+	logInfo("Shutting down...")
 }
