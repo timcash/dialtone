@@ -229,20 +229,19 @@ func RunWww(args []string) {
 
 	// Handle help explicitly
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
-		fmt.Println("Usage: dialtone-dev www <subcommand> [options]")
+		fmt.Println("Usage: dialtone www <subcommand> [options]")
 		fmt.Println("\nSubcommands:")
-		fmt.Println("  publish            Deploy using prebuilt output")
-		fmt.Println("  publish-prebuilt   Alias for publish")
-		fmt.Println("  build              Build the project locally")
-		fmt.Println("  dev                Start local development server")
-		fmt.Println("  validate           Verify dialtone.earth version")
-		fmt.Println("  check-version      Alias for validate")
-		fmt.Println("  logs               View deployment logs")
-		fmt.Println("  domain             Manage the dialtone.earth domain")
-		fmt.Println("  login              Login to Vercel")
-		fmt.Println("  test               Run WWW integration tests")
-		fmt.Println("  test cad           Run headed browser test for CAD section")
-		fmt.Println("  cad demo           Start CAD server + WWW dev + GPU Chrome")
+		fmt.Println("  publish            Full deployment pipeline (version -> build -> deploy)")
+		fmt.Println("  build              Vite build (generates /dist)")
+		fmt.Println("  dev                Vite dev server (hot reload)")
+		fmt.Println("  validate           Check live dialtone.earth version vs local pkg")
+		fmt.Println("  logs <id|url>      Fetch Vercel deployment logs")
+		fmt.Println("  domain             Alias production to dialtone.earth")
+		fmt.Println("  login              Authenticate with Vercel CLI")
+		fmt.Println("  test               Run standard WWW integration tests")
+		fmt.Println("  test cad [--live]  Run headed browser tests for CAD generator")
+		fmt.Println("  cad demo           Zero-config local CAD development environment")
+		fmt.Println("\nRun 'dialtone www <subcommand> --help' for specific details.")
 		return
 	}
 
