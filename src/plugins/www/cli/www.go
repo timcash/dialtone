@@ -365,17 +365,17 @@ func RunWww(args []string) {
 		}
 
 	case "test":
-for _, arg := range args[1:] {
-if arg == "--help" || arg == "-h" {
-fmt.Println("Usage: dialtone www test [cad] [--live]")
-fmt.Println("\nSubcommands:")
-fmt.Println("  (default)          Run all standard integration tests")
-fmt.Println("  cad                Run headed browser tests for the CAD flow")
-fmt.Println("\nFlags for 'test cad':")
-fmt.Println("  --live             Use the production CAD backend instead of local simulator")
-return
-}
-}
+		for _, arg := range args[1:] {
+			if arg == "--help" || arg == "-h" {
+				fmt.Println("Usage: dialtone www test [cad] [--live]")
+				fmt.Println("\nSubcommands:")
+				fmt.Println("  (default)          Run all standard integration tests")
+				fmt.Println("  cad                Run headed browser tests for the CAD flow")
+				fmt.Println("\nFlags for 'test cad':")
+				fmt.Println("  --live             Use the production CAD backend instead of local simulator")
+				return
+			}
+		}
 		if len(args) > 1 && args[1] == "cad" {
 			logInfo("Running headed CAD test...")
 			cmd := exec.Command("./dialtone.sh", "test", "plugin", "www-cad")
@@ -423,13 +423,13 @@ return
 		}
 
 	case "check-version", "validate":
-for _, arg := range args[1:] {
-if arg == "--help" || arg == "-h" {
-fmt.Println("Usage: dialtone www validate")
-fmt.Println("\nCompares the version on dialtone.earth with the local package.json.")
-return
-}
-}
+		for _, arg := range args[1:] {
+			if arg == "--help" || arg == "-h" {
+				fmt.Println("Usage: dialtone www validate")
+				fmt.Println("\nCompares the version on dialtone.earth with the local package.json.")
+				return
+			}
+		}
 		expected, err := expectedVersion(webDir)
 		if err != nil {
 			logFatal("Failed to read expected version: %v", err)
