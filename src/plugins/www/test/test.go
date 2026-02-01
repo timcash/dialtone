@@ -19,6 +19,7 @@ import (
 
 func init() {
 	test.Register("www-dev-server", "www", []string{"www", "integration", "browser"}, RunWwwIntegration)
+	test.Register("www-cad", "www", []string{"www", "cad", "browser"}, RunWwwCadHeaded)
 }
 
 // RunAll runs all www integration tests - entry point for `./dialtone.sh plugin test www`
@@ -309,11 +310,19 @@ func waitForPort(port int, timeout time.Duration) error {
 
 // RunWwwCadHeaded starts a headed browser and scrolls to the CAD section
 func RunWwwCadHeaded() error {
-	fmt.Println(">> [WWW] Starting Headed CAD Verification...")
+	fmt.Println(">> [WWW] Starting CAD Verification...")
+
+	isLive := os.Getenv("CAD_LIVE") == "true"
+	headless := os.Getenv("HEADLESS") == "true"
 
 	// 1. Cleanup existing processes
 	fmt.Println(">> [WWW] Cleaning up existing processes...")
 	browser.CleanupPort(5173) // Dev server port
+	if isLive {
+		browser.CleanupPort(8081) // CAD port
+	}
+	
+	// Aggressively kill chrome instances as requested
 	browser.KillProcessesByName("chrome")
 	browser.KillProcessesByName("google-chrome")
 	browser.KillProcessesByName("chromium")
@@ -335,7 +344,25 @@ func RunWwwCadHeaded() error {
 		}
 	}()
 
-	// 3. Wait for dev server
+	// 3. Start CAD Backend if Live requested
+	if isLive {
+		fmt.Println(">> [WWW] Starting CAD Backend on port 8081...")
+		cadCmd := exec.Command("./dialtone.sh", "cad", "server")
+		if err := cadCmd.Start(); err != nil {
+			return fmt.Errorf("failed to start CAD backend: %v", err)
+		}
+		defer func() {
+			if cadCmd.Process != nil {
+				fmt.Println(">> [WWW] Stopping CAD Backend...")
+				cadCmd.Process.Kill()
+			}
+		}()
+		if err := waitForPort(8081, 15*time.Second); err != nil {
+			return fmt.Errorf("CAD backend port 8081 not ready: %v", err)
+		}
+	}
+
+	// 4. Wait for dev server
 	if err := waitForPort(5173, 30*time.Second); err != nil {
 		return fmt.Errorf("dev server port 5173 not ready: %v", err)
 	}
@@ -352,10 +379,14 @@ func RunWwwCadHeaded() error {
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("no-sandbox", true),
 		chromedp.Flag("window-size", "1280,720"),
-		// Force headed mode
-		chromedp.Flag("headless", false),
 		chromedp.Flag("remote-debugging-address", "127.0.0.1"),
 	)
+	
+	if headless {
+		opts = append(opts, chromedp.Headless)
+	} else {
+		opts = append(opts, chromedp.Flag("headless", false))
+	}
 
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer cancel()
@@ -379,8 +410,7 @@ func RunWwwCadHeaded() error {
 		}
 	})
 
-	fmt.Println(">> [WWW] Launching Headed Chrome and navigating to CAD section...")
-	isLive := os.Getenv("CAD_LIVE") == "true"
+	fmt.Printf(">> [WWW] Launching Chrome (Headless: %v) and navigating to CAD section...\n", headless)
 	
 	injectLiveFlag := chromedp.ActionFunc(func(ctx context.Context) error {
 		if isLive {
@@ -455,14 +485,14 @@ func RunWwwCadHeaded() error {
 			fmt.Println("   [PASS] Verified CAD STL loaded in Three.js")
 			return nil
 		}),
-		chromedp.Sleep(10*time.Second), // Pause for user inspection
+		chromedp.Sleep(5*time.Second), // Briefly pause
 	)
 
 	if err != nil {
-		return fmt.Errorf("headed CAD test failed: %v", err)
+		return fmt.Errorf("CAD test failed: %v", err)
 	}
 
-	fmt.Println(">> [WWW] Headed CAD Verification Complete.")
+	fmt.Println(">> [WWW] CAD Verification Complete.")
 	return nil
 }
 
