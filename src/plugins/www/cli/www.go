@@ -156,6 +156,18 @@ func bumpWwwVersion(webDir string) (string, error) {
 }
 
 func publishPrebuilt(webDir string, vercelPath string, vercelEnv []string, args []string) {
+	for _, arg := range args {
+		if arg == "--help" || arg == "-h" {
+			fmt.Println("Usage: dialtone-dev www publish [options]")
+			fmt.Println("\nOptions:")
+			fmt.Println("  --help, -h         Show this help message")
+			fmt.Println("\nAll other options are passed through to 'vercel deploy'.")
+			fmt.Println("Example:")
+			fmt.Println("  dialtone-dev www publish --debug")
+			return
+		}
+	}
+
 	nextVersion, err := bumpWwwVersion(webDir)
 	if err != nil {
 		logFatal("Failed to bump version: %v", err)
