@@ -3,11 +3,9 @@ package cli
 import (
 	"fmt"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"os/exec"
-	"time"
+	"dialtone/cli/src/plugins/cad/app"
 )
 
 // RunCad handles the 'cad' command
@@ -41,27 +39,15 @@ func printUsage() {
 }
 
 func runServer() {
-	// 1. Start Python Backend
-	fmt.Println("[cad] Starting Python backend via pixi...")
-	pythonCmd := exec.Command("pixi", "run", "python", "main.py")
-	pythonCmd.Dir = "src/plugins/cad/backend"
-	pythonCmd.Stdout = os.Stdout
-	pythonCmd.Stderr = os.Stderr
-	if err := pythonCmd.Start(); err != nil {
-		fmt.Printf("[cad] Failed to start Python backend: %v\n", err)
-		os.Exit(1)
-	}
-	defer pythonCmd.Process.Kill()
+	fmt.Println("[cad] Starting Go backend server on :8081...")
+	
+	mux := http.NewServeMux()
+	
+	// Register CAD handlers
+	app.RegisterHandlers(mux)
 
-	// 2. Wait for Python backend
-	time.Sleep(2 * time.Second)
-
-	// 3. Setup Proxy
-	pythonURL, _ := url.Parse("http://127.0.0.1:8082")
-	proxy := httputil.NewSingleHostReverseProxy(pythonURL)
-
-	fmt.Println("[cad] Starting Go proxy server on :8081...")
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	// Add CORS middleware
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
@@ -70,11 +56,11 @@ func runServer() {
 			return
 		}
 		
-		fmt.Printf("[cad] Proxying %s %s\n", r.Method, r.URL.Path)
-		proxy.ServeHTTP(w, r)
+		fmt.Printf("[cad] Handling %s %s\n", r.Method, r.URL.Path)
+		mux.ServeHTTP(w, r)
 	})
 
-	err := http.ListenAndServe(":8081", nil)
+	err := http.ListenAndServe(":8081", handler)
 	if err != nil {
 		fmt.Printf("[cad] Server failed: %v\n", err)
 		os.Exit(1)

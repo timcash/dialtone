@@ -140,6 +140,7 @@ export class CADViewer {
             const baseUrl = isLive ? 'http://127.0.0.1:8081' : '';
             const url = `${baseUrl}/api/cad/generate`;
 
+            console.log(`[cad] Fetching STL from: ${url} (Live: ${isLive})`);
             const response = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -147,10 +148,21 @@ export class CADViewer {
                 signal: this.abortController.signal
             });
 
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`HTTP ${response.status}: ${text}`);
+            }
 
+            console.log('[cad] STL Response OK, reading ArrayBuffer...');
             const arrayBuffer = await response.arrayBuffer();
+            console.log(`[cad] Received ${arrayBuffer.byteLength} bytes. Parsing STL...`);
+
+            if (arrayBuffer.byteLength === 0) {
+                throw new Error('Received empty STL data from backend');
+            }
+
             const geometry = this.loader.parse(arrayBuffer);
+            console.log('[cad] STL Parsing successful, updating scene...');
             geometry.center();
             geometry.computeVertexNormals();
 
@@ -172,10 +184,11 @@ export class CADViewer {
             const wireMat = new THREE.LineBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.35 });
             this.currentWireframe = new THREE.LineSegments(new THREE.WireframeGeometry(geometry), wireMat);
             this.gearGroup.add(this.currentWireframe);
+            console.log('[cad] Scene updated successfully');
 
         } catch (e: any) {
             if (e.name !== 'AbortError') {
-                console.warn('CAD model sync failed:', e);
+                console.error('[cad] Model update failed:', e);
             }
         }
     }
@@ -255,8 +268,14 @@ export class CADViewer {
 
 export function mountCAD(container: HTMLElement) {
     const viewer = new CADViewer(container);
+    // @ts-ignore
+    window.cadViewer = viewer;
     return {
-        dispose: () => viewer.dispose(),
+        dispose: () => {
+            // @ts-ignore
+            delete window.cadViewer;
+            viewer.dispose();
+        },
         setVisible: (v: boolean) => viewer.setVisible(v)
     };
 }
