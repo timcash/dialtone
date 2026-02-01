@@ -1,3 +1,5 @@
+@import "./themes.css";
+
 :root {
   --font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
   --bg-color: #000;
@@ -53,7 +55,7 @@ body {
 .overlay-content {
   position: relative;
   z-index: 10;
-  text-align: center;
+  text-align: left;
   pointer-events: none;
   /* Let clicks pass through if needed, or auto */
   padding: 1rem;
@@ -195,43 +197,63 @@ h2 {
 .earth-config-toggle {
   position: relative;
   z-index: 60;
-  padding: 0.5rem 0.9rem;
-  border: 1px solid #fff;
+  padding: 0.6rem 1.1rem;
+  border: 1px solid var(--theme-border);
   border-radius: 9999px;
-  background: rgba(0, 0, 0, 0.65);
-  color: #fff;
+  background: var(--theme-bg);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--theme-text);
   font-size: 0.85rem;
+  font-weight: 500;
   letter-spacing: 0.02em;
   cursor: pointer;
   display: none;
+  transition: all 0.2s ease;
 }
 
 .snap-slide.is-visible[id="s-home"]~.top-right-controls #earth-config-toggle,
 .snap-slide.is-visible[id="s-robot"]~.top-right-controls #robot-config-toggle,
+.snap-slide.is-visible[id="s-neural"]~.top-right-controls #nn-config-toggle,
+.snap-slide.is-visible[id="s-curriculum"]~.top-right-controls #curriculum-config-toggle,
 .snap-slide.is-visible[id="s-cad"]~.top-right-controls #cad-config-toggle {
   display: inline-block;
 }
 
 .earth-config-toggle:hover {
-  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--theme-primary);
+  box-shadow: 0 0 15px var(--theme-accent);
 }
 
 .earth-config-panel {
   position: fixed;
-  top: 4.5rem;
-  right: 1.5rem;
-  width: min(360px, 90vw);
-  max-height: 70vh;
-  overflow: auto;
-  z-index: 60;
-  border: 1px solid #fff;
-  border-radius: 1rem;
-  padding: 1rem;
-  background: rgba(0, 0, 0, 0.85);
-  color: #fff;
-  font-size: 0.85rem;
-  display: grid;
-  gap: 0.5rem;
+  top: 100px;
+  right: 20px;
+  width: 320px;
+  background: var(--theme-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 24px;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--theme-border);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  z-index: 50;
+  color: var(--theme-text);
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+}
+
+/* Scrollbar matching Code CAD */
+.earth-config-panel::-webkit-scrollbar {
+  width: 6px;
+}
+
+.earth-config-panel::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
 }
 
 .earth-config-panel[hidden] {
@@ -239,54 +261,85 @@ h2 {
 }
 
 .earth-config-panel h3 {
-  font-size: 0.95rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin-top: 0.75rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  background: var(--theme-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .earth-config-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.cad-config-row {
-  grid-template-columns: 1fr 40px !important;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .earth-config-row label {
+  font-size: 0.85rem;
+  color: var(--theme-text-dim);
   display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.7);
+  justify-content: space-between;
 }
 
 .earth-config-row input[type="range"] {
-  width: 100%;
-  accent-color: #fff;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 180px;
+  /* Reduced width as requested */
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  outline: none;
+  margin: 8px 0;
+}
+
+.earth-config-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--theme-primary);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.earth-config-row input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+}
+
+.earth-config-row input[type="range"]::-webkit-slider-thumb:active {
+  transform: scale(0.95);
+  background: var(--theme-secondary);
 }
 
 .earth-config-value {
-  font-variant-numeric: tabular-nums;
-  min-width: 52px;
-  text-align: right;
+  color: var(--theme-text);
+  font-family: monospace;
+  font-size: 0.85rem;
 }
 
 .earth-config-panel button {
-  padding: 0.45rem 0.75rem;
-  border: 1px solid #fff;
-  border-radius: 0.75rem;
-  background: transparent;
-  color: #fff;
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--theme-gradient);
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
   cursor: pointer;
-  font-size: 0.8rem;
+  color: var(--theme-btn-text);
+  font-size: 0.95rem;
+  transition: opacity 0.2s, transform 0.1s;
 }
 
 .earth-config-panel button:hover {
-  background: rgba(255, 255, 255, 0.08);
+  opacity: 0.9;
+}
+
+.earth-config-panel button:active {
+  transform: scale(0.98);
 }
 
 /* Page Layouts */
@@ -525,10 +578,10 @@ h2 {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  align-items: center;
-  text-align: center;
+  align-items: flex-start;
+  text-align: left;
   gap: 1.5rem;
-  padding: 0 2.5rem;
+  padding: 0 5rem;
   pointer-events: none;
   opacity: 0;
   transform: translateY(20px);
@@ -545,14 +598,16 @@ h2 {
   font-weight: 700;
   color: #fff;
   letter-spacing: -0.02em;
-  max-width: 900px;
+  max-width: 800px;
+  margin: 0;
 }
 
 .marketing-overlay p {
-  font-size: clamp(1.05rem, 1.2vw + 0.7rem, 1.6rem);
-  line-height: 1.55;
-  color: #fff;
-  max-width: 720px;
+  font-size: clamp(1rem, 1.2vw, 1.25rem);
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.8);
+  max-width: 600px;
+  margin: 0;
 }
 
 .buy-button {
@@ -604,4 +659,61 @@ h2 {
   align-items: center;
   gap: 0.75rem;
   margin-bottom: 0.75rem;
+}
+
+/* Theme Assignments */
+
+/* Home / Earth */
+.snap-slide.is-visible[id="s-home"],
+.snap-slide.is-visible[id="s-home"]~* {
+  --theme-primary: #00ccff;
+  --theme-secondary: #0088ff;
+  --theme-accent: rgba(0, 204, 255, 0.3);
+  --theme-bg: rgba(20, 20, 20, 0.85);
+  --theme-border: rgba(255, 255, 255, 0.1);
+  --theme-gradient: linear-gradient(90deg, #00ccff, #0088ff);
+}
+
+/* Robot */
+.snap-slide.is-visible[id="s-robot"],
+.snap-slide.is-visible[id="s-robot"]~* {
+  --theme-primary: #facc15;
+  --theme-secondary: #eab308;
+  --theme-accent: rgba(250, 204, 21, 0.3);
+  --theme-bg: rgba(15, 15, 15, 0.9);
+  --theme-border: rgba(250, 204, 21, 0.2);
+  --theme-gradient: linear-gradient(90deg, #facc15, #eab308);
+}
+
+/* Neural */
+.snap-slide.is-visible[id="s-neural"],
+.snap-slide.is-visible[id="s-neural"]~* {
+  --theme-primary: #8b5cf6;
+  --theme-secondary: #ec4899;
+  --theme-accent: rgba(139, 92, 246, 0.3);
+  --theme-bg: rgba(20, 10, 30, 0.85);
+  --theme-border: rgba(139, 92, 246, 0.2);
+  --theme-gradient: linear-gradient(90deg, #8b5cf6, #ec4899);
+}
+
+/* Curriculum */
+.snap-slide.is-visible[id="s-curriculum"],
+.snap-slide.is-visible[id="s-curriculum"]~* {
+  --theme-primary: #10b981;
+  --theme-secondary: #06b6d4;
+  --theme-accent: rgba(16, 185, 129, 0.3);
+  --theme-bg: rgba(10, 25, 20, 0.85);
+  --theme-border: rgba(16, 185, 129, 0.15);
+  --theme-gradient: linear-gradient(90deg, #10b981, #06b6d4);
+}
+
+/* CAD */
+.snap-slide.is-visible[id="s-cad"],
+.snap-slide.is-visible[id="s-cad"]~* {
+  --theme-primary: #00ff88;
+  --theme-secondary: #00ccff;
+  --theme-accent: rgba(0, 255, 136, 0.3);
+  --theme-bg: rgba(10, 25, 20, 0.85);
+  --theme-border: rgba(0, 255, 136, 0.2);
+  --theme-gradient: linear-gradient(90deg, #00ff88, #00ccff);
 }
