@@ -255,6 +255,18 @@ func RunWww(args []string) {
 	switch subcommand {
 	case "cad":
 		if len(args) > 1 && args[1] == "demo" {
+			for _, arg := range args[2:] {
+				if arg == "--help" || arg == "-h" {
+					fmt.Println("Usage: dialtone www cad demo")
+					fmt.Println("\nOrchestrates a full local CAD development environment:")
+					fmt.Println("  1. Cleans up ports 5173 and 8081.")
+					fmt.Println("  2. Kills existing Chrome debug instances.")
+					fmt.Println("  3. Starts the Go CAD server.")
+					fmt.Println("  4. Starts the Vite WWW dev server.")
+					fmt.Println("  5. Launches Chrome with GPU acceleration on the CAD section.")
+					return
+				}
+			}
 			handleCadDemo(webDir)
 			return
 		}
@@ -307,6 +319,14 @@ func RunWww(args []string) {
 		}
 
 	case "dev":
+		for _, arg := range args[1:] {
+			if arg == "--help" || arg == "-h" {
+				fmt.Println("Usage: dialtone www dev")
+				fmt.Println("\nStarts the local Vite development server with hot module replacement.")
+				fmt.Println("The server typically runs at http://127.0.0.1:5173")
+				return
+			}
+		}
 		// Run 'npm run dev' (which runs vite)
 		logInfo("Starting local development server...")
 		cmd := exec.Command("npm", "run", "dev")
@@ -350,6 +370,14 @@ func RunWww(args []string) {
 		}
 
 	case "build":
+		for _, arg := range args[1:] {
+			if arg == "--help" || arg == "-h" {
+				fmt.Println("Usage: dialtone www build")
+				fmt.Println("\nCompiles the TypeScript and Vite project into static assets.")
+				fmt.Println("Outputs are generated in: src/plugins/www/app/dist")
+				return
+			}
+		}
 		// Run 'npm run build' (which runs vite build)
 		logInfo("Building project...")
 		cmd := exec.Command("npm", "run", "build")
