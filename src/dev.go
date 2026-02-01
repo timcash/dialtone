@@ -1,3 +1,4 @@
+//go:build !no_duckdb
 package dialtone
 
 import (

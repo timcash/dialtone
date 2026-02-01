@@ -90,6 +90,7 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 	}
 
 	// 3. Run Build (Cross-Compile)
+	// We use --local to favor our Zig installation which is configured for GLIBC 2.36 targeting.
 	logger.LogInfo("Cross-compiling for %s...", remoteArch)
 	build.RunBuild([]string{"--local", buildFlag})
 
