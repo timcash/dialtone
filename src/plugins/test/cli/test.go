@@ -13,6 +13,7 @@ import (
 	diagnostic_test "dialtone/cli/src/plugins/diagnostic/test"
 	ide_test "dialtone/cli/src/plugins/ide/test"
 	test_test "dialtone/cli/src/plugins/test/test"
+	cad_test "dialtone/cli/src/plugins/cad/test"
 
 	// ticket_test "dialtone/cli/src/plugins/ticket/test"
 	_ "dialtone/cli/src/plugins/cloudflare/test"
@@ -227,6 +228,10 @@ func runPluginTest(pluginName string, showList bool) {
 		runWwwTests()
 	case "nexttone":
 		runNexttoneTests()
+	case "cad":
+		runCadTests()
+	case "www-cad":
+		runWwwCadTests()
 	default:
 		logger.LogFatal("Unknown plugin: %s", pluginName)
 	}
@@ -272,7 +277,7 @@ func printTestUsage() {
 	fmt.Println("Note: For ticket-specific verification, use: ./dialtone.sh ticket test <ticket-name>")
 	fmt.Println()
 	fmt.Println("Available Plugins:")
-	fmt.Println("  ticket, test, ui, ai, ide, diagnostic, www, nexttone")
+	fmt.Println("  ticket, test, ui, ai, ide, diagnostic, www, nexttone, cad")
 }
 
 func runAllTests(showList bool) {
@@ -360,4 +365,19 @@ func runNexttoneTests() {
 		logger.LogFatal("Nexttone tests failed: %v", err)
 	}
 	logger.LogInfo("Nexttone Plugin Tests passed!")
+}
+ 
+func runCadTests() {
+	logger.LogInfo("Running CAD Plugin Tests...")
+	if err := cad_test.RunAll(); err != nil {
+		logger.LogFatal("CAD tests failed: %v", err)
+	}
+	logger.LogInfo("CAD Plugin Tests passed!")
+}
+func runWwwCadTests() {
+	logger.LogInfo("Running WWW CAD Headed Test...")
+	if err := www_test.RunWwwCadHeaded(); err != nil {
+		logger.LogFatal("WWW CAD test failed: %v", err)
+	}
+	logger.LogInfo("WWW CAD Test passed!")
 }

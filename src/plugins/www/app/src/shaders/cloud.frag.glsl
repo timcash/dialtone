@@ -1,3 +1,14 @@
+uniform float uTime;
+uniform vec3 uSunDir;
+uniform vec3 uKeyDir;
+uniform float uSunIntensity;
+uniform float uKeyIntensity;
+uniform float uAmbientIntensity;
+uniform vec3 uTint;
+uniform float uColorScale;
+varying vec3 vPosition;
+varying vec3 vNormal;
+
 vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
 vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
 vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
@@ -43,6 +54,7 @@ float snoise(vec3 v) {
   vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
   m = m * m;
   return 42.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3) ) );
+}
 float fbm(vec3 p) {
   float v = 0.0;
   float a = 0.5;
