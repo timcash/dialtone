@@ -229,7 +229,7 @@ h2 {
   position: fixed;
   top: 100px;
   right: 20px;
-  width: 320px;
+  width: 300px;
   background: var(--theme-bg);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -286,8 +286,8 @@ h2 {
 .earth-config-row input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
-  width: 180px;
-  /* Reduced width as requested */
+  width: 140px;
+  /* Reduced width to fit 300px container */
   height: 4px;
   background: rgba(255, 255, 255, 0.1);
   border-radius: 2px;
@@ -446,7 +446,7 @@ h2 {
   position: absolute;
   bottom: 2.5rem;
   right: 2.5rem;
-  width: 440px;
+  width: 300px;
   max-height: 520px;
   background: rgba(8, 8, 8, 0.75);
   backdrop-filter: blur(24px);
