@@ -122,21 +122,23 @@ func RunWwwIntegration() error {
 		return err
 	}
 
-	// Print console logs summary
-	printConsoleLogs(consoleLogs)
+	// Print console logs summary and fail if errors found
+	if err := printConsoleLogs(consoleLogs); err != nil {
+		return err
+	}
 
 	fmt.Println("\n[PASS] WWW Integration Tests Complete")
 	return nil
 }
 
-// printConsoleLogs prints collected browser console logs
-func printConsoleLogs(logs []string) {
+// printConsoleLogs prints collected browser console logs and returns error if critical failures found
+func printConsoleLogs(logs []string) error {
 	fmt.Println("\n>> [WWW] Browser Console Logs:")
 	fmt.Println("   ----------------------------------------")
 	
 	if len(logs) == 0 {
 		fmt.Println("   (no console output)")
-		return
+		return nil
 	}
 
 	var filtered []string
@@ -172,9 +174,11 @@ func printConsoleLogs(logs []string) {
 				fmt.Printf("   >> %s\n", log)
 			}
 		}
+		return fmt.Errorf("critical console errors detected during browser execution")
 	} else {
 		fmt.Printf("   [PASS] %d console messages, no errors\n", len(filtered))
 	}
+	return nil
 }
 
 // verifyHomePage checks the main landing page by navigating through sections
@@ -465,7 +469,7 @@ func RunWwwCadHeaded() error {
 				scad.scrollIntoView({ behavior: 'smooth' });
 			}
 		`, nil),
-		chromedp.Sleep(10*time.Second), // Give it time to load live STL after scroll
+		chromedp.Sleep(20*time.Second), // Give it time to load live STL after scroll
 		// Verify three.js gear loaded
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			var loaded bool
@@ -479,7 +483,6 @@ func RunWwwCadHeaded() error {
 				return fmt.Errorf("failed to check CAD status: %v", err)
 			}
 			if !loaded {
-				printConsoleLogs(consoleLogs)
 				return fmt.Errorf("CAD STL was not loaded into the Three.js scene")
 			}
 			fmt.Println("   [PASS] Verified CAD STL loaded in Three.js")
@@ -489,11 +492,14 @@ func RunWwwCadHeaded() error {
 	)
 
 	if err != nil {
+		printConsoleLogs(consoleLogs)
 		return fmt.Errorf("CAD test failed: %v", err)
 	}
 
 	fmt.Println(">> [WWW] CAD Verification Complete.")
-	return nil
+	
+	// Final check for console errors
+	return printConsoleLogs(consoleLogs)
 }
 
 func min(a, b int) int {
