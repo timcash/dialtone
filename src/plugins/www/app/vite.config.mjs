@@ -21,6 +21,15 @@ export default defineConfig({
         }
     ],
     appType: 'mpa',
+    server: {
+        host: '127.0.0.1',
+        proxy: {
+            '/api/cad': {
+                target: 'http://127.0.0.1:8081',
+                changeOrigin: true,
+            }
+        }
+    },
     build: {
         rollupOptions: {
             input: {
