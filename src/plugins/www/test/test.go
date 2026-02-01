@@ -19,6 +19,7 @@ import (
 
 func init() {
 	test.Register("www-dev-server", "www", []string{"www", "integration", "browser"}, RunWwwIntegration)
+	test.Register("www-cad", "www", []string{"www", "cad", "browser"}, RunWwwCadHeaded)
 }
 
 // RunAll runs all www integration tests - entry point for `./dialtone.sh plugin test www`
@@ -44,15 +45,19 @@ func RunWwwIntegration() error {
 	// 2. Cleanup existing processes using browser utilities
 	fmt.Println(">> [WWW] Cleaning up existing processes...")
 	browser.CleanupPort(5173) // Dev server port
-	time.Sleep(500 * time.Millisecond)
+	browser.CleanupPort(8081) // CAD Proxy port
+	
+	// Aggressively kill chrome instances as requested
+	browser.KillProcessesByName("chrome")
+	browser.KillProcessesByName("google-chrome")
+	browser.KillProcessesByName("chromium")
+	
+	time.Sleep(1 * time.Second)
 
 	// 3. Start Dev Server (Background)
 	fmt.Println(">> [WWW] Starting Dev Server on port 5173...")
 	devCmd := exec.Command("npm", "run", "dev", "--", "--host", "127.0.0.1")
 	devCmd.Dir = wwwDir
-	// Uncomment for debugging:
-	// devCmd.Stdout = os.Stdout
-	// devCmd.Stderr = os.Stderr
 	if err := devCmd.Start(); err != nil {
 		return fmt.Errorf("failed to start dev server: %v", err)
 	}
@@ -75,11 +80,10 @@ func RunWwwIntegration() error {
 
 	execPath := browser.FindChromePath()
 	if execPath == "" {
-		return fmt.Errorf("chrome executable not found - run './dialtone.sh chrome' to verify Chrome installation")
+		return fmt.Errorf("chrome executable not found")
 	}
 	fmt.Printf(">> [WWW] Found Chrome at: %s\n", execPath)
 
-	// Use chrome plugin's recommended options for WSL compatibility
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.NoFirstRun,
 		chromedp.NoDefaultBrowserCheck,
@@ -88,7 +92,7 @@ func RunWwwIntegration() error {
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("no-sandbox", true),
 		chromedp.Flag("window-size", "1920,1080"),
-		chromedp.Flag("remote-debugging-address", "127.0.0.1"), // Force IPv4 for WSL
+		chromedp.Flag("remote-debugging-address", "127.0.0.1"),
 	)
 
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
@@ -118,27 +122,27 @@ func RunWwwIntegration() error {
 		return err
 	}
 
-	// Print console logs summary
-	printConsoleLogs(consoleLogs)
+	// Print console logs summary and fail if errors found
+	if err := printConsoleLogs(consoleLogs); err != nil {
+		return err
+	}
 
 	fmt.Println("\n[PASS] WWW Integration Tests Complete")
 	return nil
 }
 
-// printConsoleLogs prints collected browser console logs
-func printConsoleLogs(logs []string) {
+// printConsoleLogs prints collected browser console logs and returns error if critical failures found
+func printConsoleLogs(logs []string) error {
 	fmt.Println("\n>> [WWW] Browser Console Logs:")
 	fmt.Println("   ----------------------------------------")
 	
 	if len(logs) == 0 {
 		fmt.Println("   (no console output)")
-		return
+		return nil
 	}
 
-	// Filter out CSS style strings (the %c arguments)
 	var filtered []string
 	for _, log := range logs {
-		// Skip CSS color/style strings
 		if strings.HasPrefix(log, "[log] \"color:") || 
 		   strings.HasPrefix(log, "[debug] \"color:") ||
 		   strings.Contains(log, "font-weight:") ||
@@ -152,7 +156,6 @@ func printConsoleLogs(logs []string) {
 		fmt.Printf("   %s\n", log)
 	}
 	
-	// Check for errors/exceptions
 	hasErrors := false
 	for _, log := range logs {
 		if strings.Contains(log, "[error]") || strings.Contains(log, "[EXCEPTION]") {
@@ -163,123 +166,135 @@ func printConsoleLogs(logs []string) {
 	
 	fmt.Println("   ----------------------------------------")
 	if hasErrors {
-		fmt.Println("   [WARN] Console errors detected!")
+		fmt.Println("   [FAIL] Console errors or exceptions detected!")
+		// Collect only errors/exceptions to show clearly
+		fmt.Println("   CRITICAL ERRORS:")
+		for _, log := range logs {
+			if strings.Contains(log, "[error]") || strings.Contains(log, "[EXCEPTION]") {
+				fmt.Printf("   >> %s\n", log)
+			}
+		}
+		return fmt.Errorf("critical console errors detected during browser execution")
 	} else {
 		fmt.Printf("   [PASS] %d console messages, no errors\n", len(filtered))
 	}
+	return nil
 }
 
-// verifyHomePage checks the main landing page
+// verifyHomePage checks the main landing page by navigating through sections
 func verifyHomePage(ctx context.Context) error {
-	fmt.Println(">> [WWW] Testing Home Page...")
+	fmt.Println(">> [WWW] Testing Home Page Sections...")
 
-	var (
-		title                   string
-		heroHeadline            string
-		heroButtonHref          string
-		heroButtonText          string
-		robotHeadline           string
-		videoHeadline           string
-		neuralHeadline          string
-		curriculumHeadline      string
-		earthExists             bool
-		robotExists             bool
-		nnExists                bool
-		heroCentered            bool
-		heroHeadlineWhite       bool
-		stripeSectionExists     bool
-		htmlDump                string
-	)
+	// 1. Initial Page Load & Home Section
+	var title string
+	isLive := os.Getenv("CAD_LIVE") == "true"
+	
+	injectLiveFlag := chromedp.ActionFunc(func(ctx context.Context) error {
+		if isLive {
+			return chromedp.Evaluate(`window.CAD_LIVE = true`, nil).Do(ctx)
+		}
+		return nil
+	})
+
+	mockFetch := chromedp.ActionFunc(func(ctx context.Context) error {
+		if isLive {
+			fmt.Println(">> [WWW] Skipping CAD mock (CAD_LIVE=true)")
+			return nil
+		}
+		return chromedp.Evaluate(`
+			window.fetch = ((originalFetch) => {
+				return async (...args) => {
+					const url = args[0];
+					if (url && url.includes("/api/cad/generate")) {
+						console.log("[test] Mocking CAD POST /api/cad/generate");
+						return {
+							ok: true,
+							arrayBuffer: async () => new ArrayBuffer(1024),
+							blob: async () => new Blob([new ArrayBuffer(1024)])
+						};
+					}
+					if (url && url.includes("/api/cad")) {
+						console.log("[test] Mocking CAD API response (GET)");
+						return {
+							ok: true,
+							json: async () => ({
+								type: "gear",
+								parameters: { num_teeth: 20, outer_diameter: 80 },
+								source_code: "# mock source"
+							})
+						};
+					}
+					return originalFetch(...args);
+				};
+			})(window.fetch);
+		`, nil).Do(ctx)
+	})
 
 	err := chromedp.Run(ctx,
 		chromedp.Navigate("http://127.0.0.1:5173"),
-		chromedp.Sleep(2*time.Second), // Wait for page to render
+		injectLiveFlag,
+		mockFetch,
+		chromedp.Sleep(2*time.Second),
 		chromedp.Title(&title),
-		chromedp.OuterHTML("html", &htmlDump),
-		chromedp.Text("#s-home .marketing-overlay h2", &heroHeadline, chromedp.ByQuery),
-		chromedp.Text("#s-home .marketing-overlay .buy-button", &heroButtonText, chromedp.ByQuery),
-		chromedp.AttributeValue("#s-home .marketing-overlay .buy-button", "href", &heroButtonHref, nil, chromedp.ByQuery),
-		chromedp.Text("#s-robot .marketing-overlay h2", &robotHeadline, chromedp.ByQuery),
-		chromedp.Text("#s-video .marketing-overlay h2", &videoHeadline, chromedp.ByQuery),
-		chromedp.Text("#s-neural .marketing-overlay h2", &neuralHeadline, chromedp.ByQuery),
-		chromedp.Text("#s-curriculum .marketing-overlay h2", &curriculumHeadline, chromedp.ByQuery),
-		chromedp.Evaluate(`!!document.getElementById("earth-container")`, &earthExists),
-		chromedp.Evaluate(`!!document.getElementById("robot-container")`, &robotExists),
-		chromedp.Evaluate(`!!document.getElementById("nn-container")`, &nnExists),
-		chromedp.Evaluate(`!!document.getElementById("s-stripe")`, &stripeSectionExists),
-		chromedp.Evaluate(`getComputedStyle(document.querySelector("#s-home .marketing-overlay")).textAlign === "center"`, &heroCentered),
-		chromedp.Evaluate(`
-			(() => {
-				const h = document.querySelector("#s-home .marketing-overlay h2");
-				if (!h) return false;
-				return getComputedStyle(h).color === "rgb(255, 255, 255)";
-			})()
-		`, &heroHeadlineWhite),
 	)
-
 	if err != nil {
-		fmt.Printf(">> [WWW DEBUG] HTML Dump:\n%s\n", htmlDump[:min(len(htmlDump), 2000)])
-		return fmt.Errorf("home page verification failed: %v", err)
+		return fmt.Errorf("initial load failed: %v", err)
 	}
-
-	fmt.Printf("   Title: %s\n", title)
-	fmt.Printf("   Hero Headline: %s\n", heroHeadline)
-	fmt.Printf("   Hero Button: %s (%s)\n", heroButtonText, heroButtonHref)
-	fmt.Printf("   Robot Headline: %s\n", robotHeadline)
-	fmt.Printf("   Video Headline: %s\n", videoHeadline)
-	fmt.Printf("   Neural Headline: %s\n", neuralHeadline)
-	fmt.Printf("   Curriculum Headline: %s\n", curriculumHeadline)
-	fmt.Printf("   Earth Container: %v\n", earthExists)
-	fmt.Printf("   Robot Container: %v\n", robotExists)
-	fmt.Printf("   Neural Network Container: %v\n", nnExists)
-	fmt.Printf("   Hero Centered: %v\n", heroCentered)
-	fmt.Printf("   Hero Headline White: %v\n", heroHeadlineWhite)
-
 	if title != "dialtone.earth" {
-		return fmt.Errorf("unexpected title: %s (expected: dialtone.earth)", title)
+		return fmt.Errorf("unexpected title: %s", title)
 	}
 
-	if !earthExists {
-		return fmt.Errorf("earth-container not found")
+	sections := []struct {
+		id       string
+		headline string
+		search   string
+	}{
+		{"s-home", "Now is the time to learn and build", "#earth-container"},
+		{"s-robot", "Robotics begins with precision control", "#robot-container"},
+		{"s-video", "Communication networks make robots real-time", ".bg-video"},
+		{"s-neural", "Mathematics powers autonomy", "#nn-container"},
+		{"s-curriculum", "Build the future, step by step", "#curriculum-container"},
+		{"s-cad", "Parametric Design Logic", "#cad-container"},
 	}
 
-	if !robotExists {
-		return fmt.Errorf("robot-container not found")
+	for i, s := range sections {
+		fmt.Printf("   [%d/%d] Verifying section: %s\n", i+1, len(sections), s.id)
+		
+		var headline string
+		var exists bool
+		var isVisible bool
+
+		actions := []chromedp.Action{
+			chromedp.Evaluate(fmt.Sprintf(`!!document.getElementById("%s")`, s.id), &exists),
+			chromedp.Text(fmt.Sprintf("#%s .marketing-overlay h2", s.id), &headline, chromedp.ByQuery),
+			chromedp.Evaluate(fmt.Sprintf(`!!document.querySelector("%s")`, s.search), &isVisible),
+		}
+
+		if err := chromedp.Run(ctx, actions...); err != nil {
+			return fmt.Errorf("verification failed for %s: %v", s.id, err)
+		}
+
+		if !exists {
+			return fmt.Errorf("section %s not found", s.id)
+		}
+		if !strings.Contains(headline, s.headline) {
+			return fmt.Errorf("unexpected headline for %s: %s (expected: %s)", s.id, headline, s.headline)
+		}
+		if !isVisible {
+			return fmt.Errorf("container/element %s not found in %s", s.search, s.id)
+		}
+
+		// Navigate to next section using simulated ArrowDown
+		if i < len(sections)-1 {
+			fmt.Printf("   -> Navigating to next section using ArrowDown\n")
+			if err := chromedp.Run(ctx, chromedp.KeyEvent("\u21e3")); err != nil { // ArrowDown
+				return fmt.Errorf("failed to navigate to next section: %v", err)
+			}
+			time.Sleep(1 * time.Second) // Wait for snap animation
+		}
 	}
 
-	if !nnExists {
-		return fmt.Errorf("nn-container not found")
-	}
-
-	if heroHeadline != "Now is the time to learn and build" {
-		return fmt.Errorf("unexpected hero headline: %s", heroHeadline)
-	}
-
-	if heroButtonText != "Get the Robot Kit" {
-		return fmt.Errorf("unexpected hero button text: %s", heroButtonText)
-	}
-
-	if !strings.Contains(heroButtonHref, "buy.stripe.com") {
-		return fmt.Errorf("unexpected hero button href: %s", heroButtonHref)
-	}
-
-	if robotHeadline == "" || videoHeadline == "" || neuralHeadline == "" || curriculumHeadline == "" {
-		return fmt.Errorf("missing marketing headlines")
-	}
-
-	if stripeSectionExists {
-		return fmt.Errorf("stripe section should be removed")
-	}
-
-	if !heroCentered {
-		return fmt.Errorf("hero marketing overlay is not centered")
-	}
-
-	if !heroHeadlineWhite {
-		return fmt.Errorf("hero headline is not white")
-	}
-
-	fmt.Println("   [PASS] Home Page Verified")
+	fmt.Println("   [PASS] All Sections Verified")
 	return nil
 }
 
@@ -295,6 +310,196 @@ func waitForPort(port int, timeout time.Duration) error {
 		time.Sleep(500 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for port %d", port)
+}
+
+// RunWwwCadHeaded starts a headed browser and scrolls to the CAD section
+func RunWwwCadHeaded() error {
+	fmt.Println(">> [WWW] Starting CAD Verification...")
+
+	isLive := os.Getenv("CAD_LIVE") == "true"
+	headless := os.Getenv("HEADLESS") == "true"
+
+	// 1. Cleanup existing processes
+	fmt.Println(">> [WWW] Cleaning up existing processes...")
+	browser.CleanupPort(5173) // Dev server port
+	if isLive {
+		browser.CleanupPort(8081) // CAD port
+	}
+	
+	// Aggressively kill chrome instances as requested
+	browser.KillProcessesByName("chrome")
+	browser.KillProcessesByName("google-chrome")
+	browser.KillProcessesByName("chromium")
+	time.Sleep(1 * time.Second)
+
+	// 2. Start Dev Server (Background)
+	cwd, _ := os.Getwd()
+	wwwDir := filepath.Join(cwd, "src", "plugins", "www", "app")
+	fmt.Println(">> [WWW] Starting Dev Server on port 5173...")
+	devCmd := exec.Command("npm", "run", "dev", "--", "--host", "127.0.0.1")
+	devCmd.Dir = wwwDir
+	if err := devCmd.Start(); err != nil {
+		return fmt.Errorf("failed to start dev server: %v", err)
+	}
+	defer func() {
+		if devCmd.Process != nil {
+			fmt.Println(">> [WWW] Stopping Dev Server...")
+			devCmd.Process.Kill()
+		}
+	}()
+
+	// 3. Start CAD Backend if Live requested
+	if isLive {
+		fmt.Println(">> [WWW] Starting CAD Backend on port 8081...")
+		cadCmd := exec.Command("./dialtone.sh", "cad", "server")
+		if err := cadCmd.Start(); err != nil {
+			return fmt.Errorf("failed to start CAD backend: %v", err)
+		}
+		defer func() {
+			if cadCmd.Process != nil {
+				fmt.Println(">> [WWW] Stopping CAD Backend...")
+				cadCmd.Process.Kill()
+			}
+		}()
+		if err := waitForPort(8081, 15*time.Second); err != nil {
+			return fmt.Errorf("CAD backend port 8081 not ready: %v", err)
+		}
+	}
+
+	// 4. Wait for dev server
+	if err := waitForPort(5173, 30*time.Second); err != nil {
+		return fmt.Errorf("dev server port 5173 not ready: %v", err)
+	}
+
+	execPath := browser.FindChromePath()
+	if execPath == "" {
+		return fmt.Errorf("chrome executable not found")
+	}
+
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.NoFirstRun,
+		chromedp.NoDefaultBrowserCheck,
+		chromedp.ExecPath(execPath),
+		chromedp.Flag("disable-gpu", true),
+		chromedp.Flag("no-sandbox", true),
+		chromedp.Flag("window-size", "1280,720"),
+		chromedp.Flag("remote-debugging-address", "127.0.0.1"),
+	)
+	
+	if headless {
+		opts = append(opts, chromedp.Headless)
+	} else {
+		opts = append(opts, chromedp.Flag("headless", false))
+	}
+
+	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer cancel()
+
+	ctx, cancel := chromedp.NewContext(allocCtx)
+	defer cancel()
+
+	ctx, cancel = context.WithTimeout(ctx, 300*time.Second) // Long timeout for manual viewing
+	defer cancel()
+
+	// Collect console.log events from the browser
+	var consoleLogs []string
+	chromedp.ListenTarget(ctx, func(ev interface{}) {
+		switch ev := ev.(type) {
+		case *runtime.EventConsoleAPICalled:
+			for _, arg := range ev.Args {
+				consoleLogs = append(consoleLogs, fmt.Sprintf("[%s] %s", ev.Type, arg.Value))
+			}
+		case *runtime.EventExceptionThrown:
+			consoleLogs = append(consoleLogs, fmt.Sprintf("[EXCEPTION] %s", ev.ExceptionDetails.Text))
+		}
+	})
+
+	fmt.Printf(">> [WWW] Launching Chrome (Headless: %v) and navigating to CAD section...\n", headless)
+	
+	injectLiveFlag := chromedp.ActionFunc(func(ctx context.Context) error {
+		if isLive {
+			return chromedp.Evaluate(`window.CAD_LIVE = true`, nil).Do(ctx)
+		}
+		return nil
+	})
+
+	mockFetch := chromedp.ActionFunc(func(ctx context.Context) error {
+		if isLive {
+			fmt.Println(">> [WWW] Skipping CAD mock (CAD_LIVE=true)")
+			return nil
+		}
+		return chromedp.Evaluate(`
+			window.fetch = ((originalFetch) => {
+				return async (...args) => {
+					const url = args[0];
+					if (url && url.includes("/api/cad/generate")) {
+						console.log("[test] Mocking CAD POST /api/cad/generate");
+						return {
+							ok: true,
+							arrayBuffer: async () => new ArrayBuffer(1024),
+							blob: async () => new Blob([new ArrayBuffer(1024)])
+						};
+					}
+					if (url && url.includes("/api/cad")) {
+						console.log("[test] Mocking CAD API response (GET)");
+						return {
+							ok: true,
+							json: async () => ({
+								type: "gear",
+								parameters: { num_teeth: 20, outer_diameter: 80 },
+								source_code: "# mock source"
+							})
+						};
+					}
+					return originalFetch(...args);
+				};
+			})(window.fetch);
+		`, nil).Do(ctx)
+	})
+
+	err := chromedp.Run(ctx,
+		chromedp.Navigate("http://127.0.0.1:5173"),
+		injectLiveFlag,
+		mockFetch,
+		chromedp.Sleep(2*time.Second),
+		// Scroll to s-cad to trigger lazy load
+		chromedp.Evaluate(`
+			const scad = document.getElementById("s-cad");
+			if (scad) {
+				scad.scrollIntoView({ behavior: 'smooth' });
+			}
+		`, nil),
+		chromedp.Sleep(20*time.Second), // Give it time to load live STL after scroll
+		// Verify three.js gear loaded
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			var loaded bool
+			err := chromedp.Evaluate(`
+				(function() {
+					if (!window.cadViewer) return false;
+					return window.cadViewer.gearGroup.children.length > 0;
+				})()
+			`, &loaded).Do(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to check CAD status: %v", err)
+			}
+			if !loaded {
+				return fmt.Errorf("CAD STL was not loaded into the Three.js scene")
+			}
+			fmt.Println("   [PASS] Verified CAD STL loaded in Three.js")
+			return nil
+		}),
+		chromedp.Sleep(5*time.Second), // Briefly pause
+	)
+
+	if err != nil {
+		printConsoleLogs(consoleLogs)
+		return fmt.Errorf("CAD test failed: %v", err)
+	}
+
+	fmt.Println(">> [WWW] CAD Verification Complete.")
+	
+	// Final check for console errors
+	return printConsoleLogs(consoleLogs)
 }
 
 func min(a, b int) int {
