@@ -86,10 +86,12 @@ func RunBuild(args []string) {
 			buildLocally(targetOS, arch)
 		} else {
 			compiler := "gcc-aarch64-linux-gnu"
+			cppCompiler := "g++-aarch64-linux-gnu"
 			if arch == "arm" {
 				compiler = "gcc-arm-linux-gnueabihf"
+				cppCompiler = "g++-arm-linux-gnueabihf"
 			}
-			buildWithPodman(arch, compiler)
+			buildWithPodman(arch, compiler, cppCompiler)
 		}
 	}
 }
@@ -120,10 +122,9 @@ func buildWebIfNeeded(force bool) {
 		return
 	}
 
-	// Ensure dist directory is clean if forcing
-	if force {
-		os.RemoveAll(filepath.Join(webDir, "dist"))
-	}
+	// NOTE: We do NOT RemoveAll(dist) here because it causes bootstrapping failures. 
+	// If the dist directory is deleted, the 'dialtone' tool itself cannot be re-compiled 
+	// by 'go run' during the build process because of the //go:embed pattern in dialtone.go.
 
 	// Install and build via UI plugin (shell delegation for decoupling)
 	logger.LogInfo("Delegating to UI plugin (install)...")
@@ -161,6 +162,8 @@ func buildLocally(targetOS, targetArch string) {
 
 	// If local environment exists, use it
 	depsDir := getDialtoneEnv()
+	tags := []string{}
+
 	if _, err := os.Stat(depsDir); err == nil {
 		logger.LogInfo("Using local dependencies from %s", depsDir)
 
@@ -175,31 +178,12 @@ func buildLocally(targetOS, targetArch string) {
 		newPath := strings.Join(paths, string(os.PathListSeparator)) + string(os.PathListSeparator) + os.Getenv("PATH")
 		os.Setenv("PATH", newPath)
 
-		// If local GNU toolchains exist, prioritize them for cross-compilation
-		gcc64Bin := filepath.Join(depsDir, "gcc-aarch64", "bin", "aarch64-none-linux-gnu-gcc")
-		gcc32Bin := filepath.Join(depsDir, "gcc-armhf", "bin", "arm-none-linux-gnueabihf-gcc")
-
 		compilerFound := false
-		if targetArch == "arm64" {
-			if _, err := os.Stat(gcc64Bin); err == nil {
-				os.Setenv("GOOS", "linux")
-				os.Setenv("GOARCH", "arm64")
-				os.Setenv("CC", gcc64Bin)
-				compilerFound = true
-			}
-		} else if targetArch == "arm" {
-			if _, err := os.Stat(gcc32Bin); err == nil {
-				os.Setenv("GOOS", "linux")
-				os.Setenv("GOARCH", "arm")
-				os.Setenv("CC", gcc32Bin)
-				compilerFound = true
-			}
-		}
-
 		nativeDarwin := targetOS == "darwin" && targetArch == runtime.GOARCH
 
-		if !compilerFound && !nativeDarwin {
-			// If Zig exists, use it as C compiler (except for native Darwin where it has permission issues in module cache)
+		// Prioritize Zig for cross-compilation to allow specific GLIBC targeting
+		isCrossBuild := targetArch != runtime.GOARCH || targetOS != runtime.GOOS
+		if isCrossBuild && !nativeDarwin {
 			zigPath := filepath.Join(depsDir, "zig", "zig")
 			if _, err := os.Stat(zigPath); err == nil {
 				zOS := targetOS
@@ -216,7 +200,10 @@ func buildLocally(targetOS, targetArch string) {
 
 				target := fmt.Sprintf("%s-%s", zArch, zOS)
 				if zOS == "linux" {
-					target += "-gnu"
+					// Target GLIBC 2.36 for compatibility with Debian Bookworm (stable)
+					target += "-gnu.2.36"
+					// Exclude DuckDB and related tools for robot build to avoid C++ linking issues
+					tags = append(tags, "no_duckdb")
 				}
 
 				// Configure Zig as CC/CXX
@@ -230,6 +217,31 @@ func buildLocally(targetOS, targetArch string) {
 				os.Setenv("ZIG_GLOBAL_CACHE_DIR", filepath.Join(zigCache, "global"))
 
 				compilerFound = true
+				logger.LogInfo("Using Zig as cross-compiler (Target: %s, Tags: %v)", target, tags)
+			}
+		}
+
+		// Fallback to GNU toolchain if Zig not used or not found
+		if !compilerFound {
+			gcc64Bin := filepath.Join(depsDir, "gcc-aarch64", "bin", "aarch64-none-linux-gnu-gcc")
+			gcc32Bin := filepath.Join(depsDir, "gcc-armhf", "bin", "arm-none-linux-gnueabihf-gcc")
+
+			if targetArch == "arm64" {
+				if _, err := os.Stat(gcc64Bin); err == nil {
+					os.Setenv("GOOS", "linux")
+					os.Setenv("GOARCH", "arm64")
+					os.Setenv("CC", gcc64Bin)
+					compilerFound = true
+					logger.LogInfo("Using GNU aarch64 toolchain")
+				}
+			} else if targetArch == "arm" {
+				if _, err := os.Stat(gcc32Bin); err == nil {
+					os.Setenv("GOOS", "linux")
+					os.Setenv("GOARCH", "arm")
+					os.Setenv("CC", gcc32Bin)
+					compilerFound = true
+					logger.LogInfo("Using GNU armhf toolchain")
+				}
 			}
 		}
 
@@ -274,12 +286,18 @@ func buildLocally(targetOS, targetArch string) {
 	os.Setenv("GOOS", targetOS)
 	os.Setenv("GOARCH", targetArch)
 
-	runShell(".", goBin, "build", "-o", outputPath, "src/cmd/dialtone/main.go")
+	buildArgs := []string{"build"}
+	if len(tags) > 0 {
+		buildArgs = append(buildArgs, "-tags", strings.Join(tags, ","))
+	}
+	buildArgs = append(buildArgs, "-o", outputPath, "src/cmd/dialtone/main.go")
+
+	runShell(".", goBin, buildArgs...)
 	logger.LogInfo("Build successful: %s", outputPath)
 }
 
-func buildWithPodman(arch, compiler string) {
-	logger.LogInfo("Building Dialtone for Linux %s using Podman (%s)...", arch, compiler)
+func buildWithPodman(arch, compiler, cppCompiler string) {
+	logger.LogInfo("Building Dialtone for Linux %s using Podman (%s, %s)...", arch, compiler, cppCompiler)
 
 	// Build web UI first (always force rebuild for remote/podman deployment)
 	buildWebIfNeeded(true)
@@ -297,7 +315,7 @@ func buildWithPodman(arch, compiler string) {
 
 	// Default to standard golang image and install compilers
 	baseImage := "docker.io/library/golang:1.25.5"
-	installCmd := fmt.Sprintf("apt-get update && apt-get install -y %s && ", compiler)
+	installCmd := fmt.Sprintf("apt-get update && apt-get install -y %s %s && ", compiler, cppCompiler)
 
 	// Check if optimized builder image exists
 	if hasImage("dialtone-builder") {
@@ -316,6 +334,7 @@ func buildWithPodman(arch, compiler string) {
 		"-e", "GOARCH=" + arch,
 		"-e", "CGO_ENABLED=1",
 		"-e", "CC=" + strings.TrimPrefix(compiler, "gcc-") + "-gcc",
+		"-e", "CXX=" + strings.TrimPrefix(cppCompiler, "g++-") + "-g++",
 		baseImage,
 		"bash", "-c", fmt.Sprintf("%sgo build -buildvcs=false -o bin/%s src/cmd/dialtone/main.go", installCmd, outputName),
 	}
@@ -349,7 +368,7 @@ func buildEverything(local bool) {
 	if local || !hasPodman() {
 		buildLocally("linux", "arm64")
 	} else {
-		buildWithPodman("arm64", "gcc-aarch64-linux-gnu")
+		buildWithPodman("arm64", "gcc-aarch64-linux-gnu", "g++-aarch64-linux-gnu")
 	}
 
 	logger.LogInfo("Full build successful!")
