@@ -203,6 +203,13 @@ h2 {
   font-size: 0.85rem;
   letter-spacing: 0.02em;
   cursor: pointer;
+  display: none;
+}
+
+.snap-slide.is-visible[id="s-home"]~.top-right-controls #earth-config-toggle,
+.snap-slide.is-visible[id="s-robot"]~.top-right-controls #robot-config-toggle,
+.snap-slide.is-visible[id="s-cad"]~.top-right-controls #cad-config-toggle {
+  display: inline-block;
 }
 
 .earth-config-toggle:hover {
@@ -243,6 +250,10 @@ h2 {
   grid-template-columns: 1fr auto;
   gap: 0.5rem;
   align-items: center;
+}
+
+.cad-config-row {
+  grid-template-columns: 1fr 40px !important;
 }
 
 .earth-config-row label {
