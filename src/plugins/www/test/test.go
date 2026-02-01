@@ -44,7 +44,14 @@ func RunWwwIntegration() error {
 	// 2. Cleanup existing processes using browser utilities
 	fmt.Println(">> [WWW] Cleaning up existing processes...")
 	browser.CleanupPort(5173) // Dev server port
-	time.Sleep(500 * time.Millisecond)
+	browser.CleanupPort(8081) // CAD Proxy port
+	
+	// Aggressively kill chrome instances as requested
+	browser.KillProcessesByName("chrome")
+	browser.KillProcessesByName("google-chrome")
+	browser.KillProcessesByName("chromium")
+	
+	time.Sleep(1 * time.Second)
 
 	// 3. Start Dev Server (Background)
 	fmt.Println(">> [WWW] Starting Dev Server on port 5173...")
@@ -156,7 +163,14 @@ func printConsoleLogs(logs []string) {
 	
 	fmt.Println("   ----------------------------------------")
 	if hasErrors {
-		fmt.Println("   [WARN] Console errors detected!")
+		fmt.Println("   [FAIL] Console errors or exceptions detected!")
+		// Collect only errors/exceptions to show clearly
+		fmt.Println("   CRITICAL ERRORS:")
+		for _, log := range logs {
+			if strings.Contains(log, "[error]") || strings.Contains(log, "[EXCEPTION]") {
+				fmt.Printf("   >> %s\n", log)
+			}
+		}
 	} else {
 		fmt.Printf("   [PASS] %d console messages, no errors\n", len(filtered))
 	}
@@ -297,6 +311,35 @@ func waitForPort(port int, timeout time.Duration) error {
 func RunWwwCadHeaded() error {
 	fmt.Println(">> [WWW] Starting Headed CAD Verification...")
 
+	// 1. Cleanup existing processes
+	fmt.Println(">> [WWW] Cleaning up existing processes...")
+	browser.CleanupPort(5173) // Dev server port
+	browser.KillProcessesByName("chrome")
+	browser.KillProcessesByName("google-chrome")
+	browser.KillProcessesByName("chromium")
+	time.Sleep(1 * time.Second)
+
+	// 2. Start Dev Server (Background)
+	cwd, _ := os.Getwd()
+	wwwDir := filepath.Join(cwd, "src", "plugins", "www", "app")
+	fmt.Println(">> [WWW] Starting Dev Server on port 5173...")
+	devCmd := exec.Command("npm", "run", "dev", "--", "--host", "127.0.0.1")
+	devCmd.Dir = wwwDir
+	if err := devCmd.Start(); err != nil {
+		return fmt.Errorf("failed to start dev server: %v", err)
+	}
+	defer func() {
+		if devCmd.Process != nil {
+			fmt.Println(">> [WWW] Stopping Dev Server...")
+			devCmd.Process.Kill()
+		}
+	}()
+
+	// 3. Wait for dev server
+	if err := waitForPort(5173, 30*time.Second); err != nil {
+		return fmt.Errorf("dev server port 5173 not ready: %v", err)
+	}
+
 	execPath := browser.FindChromePath()
 	if execPath == "" {
 		return fmt.Errorf("chrome executable not found")
@@ -322,6 +365,19 @@ func RunWwwCadHeaded() error {
 
 	ctx, cancel = context.WithTimeout(ctx, 300*time.Second) // Long timeout for manual viewing
 	defer cancel()
+
+	// Collect console.log events from the browser
+	var consoleLogs []string
+	chromedp.ListenTarget(ctx, func(ev interface{}) {
+		switch ev := ev.(type) {
+		case *runtime.EventConsoleAPICalled:
+			for _, arg := range ev.Args {
+				consoleLogs = append(consoleLogs, fmt.Sprintf("[%s] %s", ev.Type, arg.Value))
+			}
+		case *runtime.EventExceptionThrown:
+			consoleLogs = append(consoleLogs, fmt.Sprintf("[EXCEPTION] %s", ev.ExceptionDetails.Text))
+		}
+	})
 
 	fmt.Println(">> [WWW] Launching Headed Chrome and navigating to CAD section...")
 	isLive := os.Getenv("CAD_LIVE") == "true"
@@ -372,14 +428,34 @@ func RunWwwCadHeaded() error {
 		injectLiveFlag,
 		mockFetch,
 		chromedp.Sleep(2*time.Second),
-		// Scroll to s-cad
+		// Scroll to s-cad to trigger lazy load
 		chromedp.Evaluate(`
 			const scad = document.getElementById("s-cad");
 			if (scad) {
 				scad.scrollIntoView({ behavior: 'smooth' });
 			}
 		`, nil),
-		chromedp.Sleep(30*time.Second), // Pause for user inspection
+		chromedp.Sleep(10*time.Second), // Give it time to load live STL after scroll
+		// Verify three.js gear loaded
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			var loaded bool
+			err := chromedp.Evaluate(`
+				(function() {
+					if (!window.cadViewer) return false;
+					return window.cadViewer.gearGroup.children.length > 0;
+				})()
+			`, &loaded).Do(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to check CAD status: %v", err)
+			}
+			if !loaded {
+				printConsoleLogs(consoleLogs)
+				return fmt.Errorf("CAD STL was not loaded into the Three.js scene")
+			}
+			fmt.Println("   [PASS] Verified CAD STL loaded in Three.js")
+			return nil
+		}),
+		chromedp.Sleep(10*time.Second), // Pause for user inspection
 	)
 
 	if err != nil {
