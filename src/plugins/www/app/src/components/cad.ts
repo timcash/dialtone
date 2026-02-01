@@ -46,10 +46,51 @@ export class CADViewer {
 
         this.initLights();
         this.initUI();
-        this.updateModel();
+
+        // Load default model immediately, then try to update from live backend
+        this.loadDefaultModel().then(() => {
+            this.updateModel();
+        });
+
         this.animate();
 
         window.addEventListener('resize', this.onResize);
+    }
+
+    async loadDefaultModel() {
+        try {
+            console.log('[cad] Loading default gear STL...');
+            const response = await fetch('/default_gear.stl');
+            if (!response.ok) throw new Error('Failed to load default gear');
+            const arrayBuffer = await response.arrayBuffer();
+            this.applyGeometry(this.loader.parse(arrayBuffer));
+        } catch (e) {
+            console.error('[cad] Failed to load default gear:', e);
+        }
+    }
+
+    applyGeometry(geometry: THREE.BufferGeometry) {
+        geometry.center();
+        geometry.computeVertexNormals();
+
+        if (this.currentMesh) {
+            this.gearGroup.remove(this.currentMesh);
+            this.currentMesh.geometry.dispose();
+            (this.currentMesh.material as THREE.Material).dispose();
+        }
+        if (this.currentWireframe) {
+            this.gearGroup.remove(this.currentWireframe);
+            this.currentWireframe.geometry.dispose();
+            (this.currentWireframe.material as THREE.Material).dispose();
+        }
+
+        const glowMat = this.createGlowMaterial(new THREE.Color(0x06b6d4), 1.0);
+        this.currentMesh = new THREE.Mesh(geometry, glowMat);
+        this.gearGroup.add(this.currentMesh);
+
+        const wireMat = new THREE.LineBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.35 });
+        this.currentWireframe = new THREE.LineSegments(new THREE.WireframeGeometry(geometry), wireMat);
+        this.gearGroup.add(this.currentWireframe);
     }
 
     createGlowMaterial(color: THREE.Color, intensity = 1.0): THREE.ShaderMaterial {
@@ -134,6 +175,8 @@ export class CADViewer {
         }
         this.abortController = new AbortController();
 
+        const warningEl = document.getElementById('cad-offline-warning');
+
         try {
             // @ts-ignore
             const isLive = window.CAD_LIVE === true || (typeof process !== 'undefined' && process.env.CAD_LIVE === 'true');
@@ -163,37 +206,15 @@ export class CADViewer {
             }
 
             const geometry = this.loader.parse(arrayBuffer);
-            console.log('[cad] STL Parsing successful, updating scene...');
-            geometry.center();
-            geometry.computeVertexNormals();
+            this.applyGeometry(geometry);
 
-            if (this.currentMesh) {
-                this.gearGroup.remove(this.currentMesh);
-                this.currentMesh.geometry.dispose();
-                (this.currentMesh.material as THREE.Material).dispose();
-            }
-            if (this.currentWireframe) {
-                this.gearGroup.remove(this.currentWireframe);
-                this.currentWireframe.geometry.dispose();
-                (this.currentWireframe.material as THREE.Material).dispose();
-            }
-
-            const glowMat = this.createGlowMaterial(new THREE.Color(0x06b6d4), 1.0);
-            this.currentMesh = new THREE.Mesh(geometry, glowMat);
-            this.gearGroup.add(this.currentMesh);
-
-            const wireMat = new THREE.LineBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.35 });
-            this.currentWireframe = new THREE.LineSegments(new THREE.WireframeGeometry(geometry), wireMat);
-            this.gearGroup.add(this.currentWireframe);
+            if (warningEl) warningEl.hidden = true;
             console.log('[cad] Scene updated successfully');
 
         } catch (e: any) {
             if (e.name !== 'AbortError') {
-                console.error('[cad] Model update failed:', e);
-                if (e instanceof Error) {
-                    console.error('[cad] Error message:', e.message);
-                    console.error('[cad] Error stack:', e.stack);
-                }
+                console.warn('[cad] Model update failed, server might be offline:', e.message);
+                if (warningEl) warningEl.hidden = false;
             }
         }
     }
