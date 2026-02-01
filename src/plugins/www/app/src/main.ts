@@ -45,6 +45,16 @@ sections.register('s-curriculum', {
     }
 });
 
+sections.register('s-cad', {
+    containerId: 'cad-container',
+    load: async () => {
+        const { mountCAD } = await import('./components/cad');
+        const container = document.getElementById('cad-container');
+        if (!container) throw new Error('cad-container not found');
+        return mountCAD(container);
+    }
+});
+
 // Start observing visibility and eagerly load first section
 sections.observe();
 sections.eagerLoad('s-home');

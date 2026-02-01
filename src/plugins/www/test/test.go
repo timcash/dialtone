@@ -181,10 +181,11 @@ func verifyHomePage(ctx context.Context) error {
 		robotHeadline           string
 		videoHeadline           string
 		neuralHeadline          string
-		curriculumHeadline      string
-		earthExists             bool
-		robotExists             bool
-		nnExists                bool
+ 		curriculumHeadline      string
+ 		earthExists             bool
+		cadExists               bool
+ 		robotExists             bool
+ 		nnExists                bool
 		heroCentered            bool
 		heroHeadlineWhite       bool
 		stripeSectionExists     bool
@@ -201,10 +202,11 @@ func verifyHomePage(ctx context.Context) error {
 		chromedp.AttributeValue("#s-home .marketing-overlay .buy-button", "href", &heroButtonHref, nil, chromedp.ByQuery),
 		chromedp.Text("#s-robot .marketing-overlay h2", &robotHeadline, chromedp.ByQuery),
 		chromedp.Text("#s-video .marketing-overlay h2", &videoHeadline, chromedp.ByQuery),
-		chromedp.Text("#s-neural .marketing-overlay h2", &neuralHeadline, chromedp.ByQuery),
-		chromedp.Text("#s-curriculum .marketing-overlay h2", &curriculumHeadline, chromedp.ByQuery),
-		chromedp.Evaluate(`!!document.getElementById("earth-container")`, &earthExists),
-		chromedp.Evaluate(`!!document.getElementById("robot-container")`, &robotExists),
+ 		chromedp.Text("#s-neural .marketing-overlay h2", &neuralHeadline, chromedp.ByQuery),
+ 		chromedp.Text("#s-curriculum .marketing-overlay h2", &curriculumHeadline, chromedp.ByQuery),
+		chromedp.Evaluate(`!!document.getElementById("cad-container")`, &cadExists),
+ 		chromedp.Evaluate(`!!document.getElementById("earth-container")`, &earthExists),
+ 		chromedp.Evaluate(`!!document.getElementById("robot-container")`, &robotExists),
 		chromedp.Evaluate(`!!document.getElementById("nn-container")`, &nnExists),
 		chromedp.Evaluate(`!!document.getElementById("s-stripe")`, &stripeSectionExists),
 		chromedp.Evaluate(`getComputedStyle(document.querySelector("#s-home .marketing-overlay")).textAlign === "center"`, &heroCentered),
@@ -247,11 +249,15 @@ func verifyHomePage(ctx context.Context) error {
 		return fmt.Errorf("robot-container not found")
 	}
 
-	if !nnExists {
-		return fmt.Errorf("nn-container not found")
+ 	if !nnExists {
+ 		return fmt.Errorf("nn-container not found")
+ 	}
+ 
+	if !cadExists {
+		return fmt.Errorf("cad-container not found")
 	}
 
-	if heroHeadline != "Now is the time to learn and build" {
+ 	if heroHeadline != "Now is the time to learn and build" {
 		return fmt.Errorf("unexpected hero headline: %s", heroHeadline)
 	}
 
