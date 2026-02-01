@@ -140,7 +140,7 @@ export class CADViewer {
             const baseUrl = isLive ? 'http://127.0.0.1:8081' : '';
             const url = `${baseUrl}/api/cad/generate`;
 
-            console.log(`[cad] Fetching STL from: ${url} (Live: ${isLive})`);
+            console.log(`[cad] Fetching STL from: ${url} (Live: ${isLive})...`);
             const response = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -148,6 +148,7 @@ export class CADViewer {
                 signal: this.abortController.signal
             });
 
+            console.log(`[cad] Response status: ${response.status} ${response.statusText}`);
             if (!response.ok) {
                 const text = await response.text();
                 throw new Error(`HTTP ${response.status}: ${text}`);
@@ -189,6 +190,10 @@ export class CADViewer {
         } catch (e: any) {
             if (e.name !== 'AbortError') {
                 console.error('[cad] Model update failed:', e);
+                if (e instanceof Error) {
+                    console.error('[cad] Error message:', e.message);
+                    console.error('[cad] Error stack:', e.stack);
+                }
             }
         }
     }
