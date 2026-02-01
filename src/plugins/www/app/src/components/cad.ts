@@ -126,30 +126,32 @@ export class CADViewer {
     }
 
     offlineWarningEl: HTMLDivElement | null = null;
-    codeElement: HTMLElement | null = null;
+    panelEl: HTMLDivElement | null = null;
+    toggleEl: HTMLButtonElement | null = null;
+
+    private setPanelOpen(open: boolean) {
+        if (!this.panelEl || !this.toggleEl) return;
+        this.panelEl.hidden = !open;
+        this.panelEl.style.display = open ? 'grid' : 'none';
+        this.toggleEl.setAttribute('aria-expanded', String(open));
+    }
 
     initConfigPanel() {
-        const panel = document.getElementById('cad-config-panel') as HTMLDivElement | null;
-        const toggle = document.getElementById('cad-config-toggle') as HTMLButtonElement | null;
-        if (!panel || !toggle) return;
+        this.panelEl = document.getElementById('cad-config-panel') as HTMLDivElement | null;
+        this.toggleEl = document.getElementById('cad-config-toggle') as HTMLButtonElement | null;
+        if (!this.panelEl || !this.toggleEl) return;
 
-        const setOpen = (open: boolean) => {
-            panel.hidden = !open;
-            panel.style.display = open ? 'grid' : 'none';
-            toggle.setAttribute('aria-expanded', String(open));
-        };
-
-        setOpen(false);
-        toggle.addEventListener('click', (e) => {
+        this.setPanelOpen(false);
+        this.toggleEl.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            setOpen(panel.hidden);
+            this.setPanelOpen(this.panelEl!.hidden);
         });
 
         const addHeader = (text: string) => {
             const header = document.createElement('h3');
             header.textContent = text;
-            panel.appendChild(header);
+            this.panelEl?.appendChild(header);
         };
 
         const addSlider = (id: string, label: string, min: number, max: number, step: number) => {
@@ -167,7 +169,7 @@ export class CADViewer {
             valueEl.className = 'earth-config-value';
             valueEl.textContent = slider.value;
             row.appendChild(valueEl);
-            panel.appendChild(row);
+            this.panelEl?.appendChild(row);
 
             slider.addEventListener('input', () => {
                 const v = parseFloat(slider.value);
@@ -182,9 +184,9 @@ export class CADViewer {
 
         this.offlineWarningEl = document.createElement('div');
         this.offlineWarningEl.className = 'offline-warning';
-        this.offlineWarningEl.innerHTML = '⚠️ CAD Server Offline. Start with <code>./dialtone.sh start cad</code> to enable parametric changes.';
+        this.offlineWarningEl.innerHTML = '⚠️ CAD Server Offline. Start with <code>./dialtone.sh www cad demo</code> to enable parametric changes.';
         this.offlineWarningEl.hidden = true;
-        panel.appendChild(this.offlineWarningEl);
+        this.panelEl?.appendChild(this.offlineWarningEl);
 
         addSlider('outer_diameter', 'Outer Dia', 20, 200, 1);
         addSlider('inner_diameter', 'Inner Dia', 5, 100, 1);
@@ -201,20 +203,22 @@ export class CADViewer {
             e.preventDefault();
             this.downloadSTL();
         });
-        panel.appendChild(dlBtn);
+        this.panelEl?.appendChild(dlBtn);
 
         const divider = document.createElement('div');
         divider.className = 'code-divider';
-        panel.appendChild(divider);
+        this.panelEl?.appendChild(divider);
 
-        const pre = document.createElement('pre');
-        this.codeElement = document.createElement('code');
-        this.codeElement.textContent = '# Loading source code...';
-        pre.appendChild(this.codeElement);
-        panel.appendChild(pre);
-
-        // Fetch initial source code
-        this.fetchSourceCode();
+        const ghBtn = document.createElement('button');
+        ghBtn.className = 'premium-button github-button';
+        ghBtn.innerHTML = '<span>View Source on GitHub</span>';
+        ghBtn.style.background = 'rgba(255, 255, 255, 0.1)';
+        ghBtn.style.border = '1px solid rgba(255, 255, 255, 0.2)';
+        ghBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            window.open('https://github.com/timcash/dialtone/blob/main/src/plugins/cad/backend/main.py', '_blank');
+        });
+        this.panelEl?.appendChild(ghBtn);
     }
 
     fetchTimeout: any = null;
@@ -222,7 +226,6 @@ export class CADViewer {
         if (this.fetchTimeout) clearTimeout(this.fetchTimeout);
         this.fetchTimeout = setTimeout(() => {
             this.updateModel();
-            this.fetchSourceCode();
         }, 800);
     }
 
@@ -230,12 +233,9 @@ export class CADViewer {
         this.abortController = new AbortController();
 
         try {
-            // @ts-ignore
-            const isLive = window.CAD_LIVE === true || (typeof process !== 'undefined' && process.env.CAD_LIVE === 'true');
-            const baseUrl = isLive ? 'http://127.0.0.1:8081' : '';
-            const url = `${baseUrl}/api/cad/generate`;
+            const url = `/api/cad/generate`;
 
-            console.log(`[cad] Fetching STL from: ${url} (Live: ${isLive})...`);
+            console.log(`[cad] Fetching STL from: ${url}...`);
             const response = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -265,35 +265,16 @@ export class CADViewer {
 
         } catch (e: any) {
             if (e.name !== 'AbortError') {
-                console.warn('[cad] Model update failed, server might be offline:', e.message);
+                console.error('[cad] Model update failed:', e);
+                console.warn('[cad] Server might be offline or erroring:', e.message);
                 if (this.offlineWarningEl) this.offlineWarningEl.hidden = false;
             }
         }
     }
 
-    async fetchSourceCode() {
-        try {
-            // @ts-ignore
-            const isLive = window.CAD_LIVE === true || (typeof process !== 'undefined' && process.env.CAD_LIVE === 'true');
-            const baseUrl = isLive ? 'http://127.0.0.1:8081' : '';
-            // We use GET for metadata/source
-            const response = await fetch(`${baseUrl}/api/cad`);
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-            const data = await response.json();
-            if (this.codeElement && data.source_code) {
-                this.codeElement.textContent = data.source_code;
-            }
-        } catch (e) {
-            console.warn('Failed to fetch source code:', e);
-        }
-    }
-
     async downloadSTL() {
         const query = new URLSearchParams(Object.entries(this.params).map(([k, v]) => [k, String(v)])).toString();
-        // @ts-ignore
-        const isLive = window.CAD_LIVE === true || (typeof process !== 'undefined' && process.env.CAD_LIVE === 'true');
-        const baseUrl = isLive ? 'http://127.0.0.1:8081' : '';
-        const url = `${baseUrl}/api/cad/download?${query}`;
+        const url = `/api/cad/download?${query}`;
         window.open(url, '_blank');
     }
 
@@ -308,6 +289,9 @@ export class CADViewer {
     isVisible = true;
     setVisible(isVisible: boolean) {
         this.isVisible = isVisible;
+        if (!isVisible) {
+            this.setPanelOpen(false);
+        }
     }
 
     animate = () => {
@@ -342,6 +326,7 @@ export class CADViewer {
         this.container.removeChild(this.renderer.domElement);
     }
 }
+
 
 export function mountCAD(container: HTMLElement) {
     const viewer = new CADViewer(container);

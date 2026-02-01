@@ -243,24 +243,24 @@ class RobotArm {
 
         const lastJoint = this.joints[this.joints.length - 1];
         const lastLink = this.links[this.links.length - 1];
-        
+
         if (lastLink) {
             const gripperMount = new THREE.Group();
             gripperMount.position.y = lastLink.length;
-            
+
             gripperMount.add(this.endEffector);
-            
+
             const leftFinger = new Finger({ side: 'left' });
             const rightFinger = new Finger({ side: 'right' });
-            
+
             gripperMount.add(leftFinger.joint.group);
             gripperMount.add(rightFinger.joint.group);
-            
+
             this.fingers.push(leftFinger, rightFinger);
-            
+
             lastJoint.group.add(gripperMount);
         }
-        
+
         this.setGrip(this.gripAmount);
     }
 
@@ -309,20 +309,20 @@ class RobotArmVisualization {
 
     robotArm!: RobotArm;
     ikSolver!: IKSolver;
-    
+
     // Target tracking
     target!: THREE.Mesh;
     targetPosition = new THREE.Vector3(2, 3, 1);
     targetLine!: THREE.Line;
     targetLineMaterial!: THREE.LineBasicMaterial;
-    
+
     // Timing
     timeSinceTargetSet = 0;
     targetMoveInterval = 3.0; // Move target every 3 seconds
-    
+
     time = 0;
     autoAnimate = true;
-    
+
     cameraOrbitAngle = 0;
     cameraOrbitSpeed = 0.1;
     cameraRadius = 12;
@@ -331,20 +331,21 @@ class RobotArmVisualization {
     configPanel?: HTMLDivElement;
     configToggle?: HTMLButtonElement;
     sliders: { slider: HTMLInputElement; valueEl: HTMLSpanElement }[] = [];
+    private setPanelOpen?: (open: boolean) => void;
 
     constructor(container: HTMLElement) {
         this.container = container;
-        
+
         this.renderer.setClearColor(0x000000, 1);
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        
+
         const canvas = this.renderer.domElement;
         canvas.style.position = 'absolute';
         canvas.style.top = '0';
         canvas.style.left = '0';
         canvas.style.width = '100%';
         canvas.style.height = '100%';
-        
+
         this.container.appendChild(canvas);
 
         this.initScene();
@@ -480,9 +481,9 @@ class RobotArmVisualization {
         });
         this.target = new THREE.Mesh(targetGeo, targetMat);
         this.scene.add(this.target);
-        
+
         // Create line from end effector to target
-        this.targetLineMaterial = new THREE.LineBasicMaterial({ 
+        this.targetLineMaterial = new THREE.LineBasicMaterial({
             color: 0xff4444,
             transparent: true,
             opacity: 0.5,
@@ -492,7 +493,7 @@ class RobotArmVisualization {
         ]);
         this.targetLine = new THREE.Line(lineGeo, this.targetLineMaterial);
         this.scene.add(this.targetLine);
-        
+
         // Set initial target position
         this.pickNewTarget();
     }
@@ -501,23 +502,23 @@ class RobotArmVisualization {
         // Generate random point in reachable space
         const maxReach = 4.0;
         const minReach = 1.5;
-        
+
         // Random spherical coordinates
         const theta = Math.random() * Math.PI * 2;
         const phi = Math.random() * Math.PI * 0.5 + Math.PI * 0.15; // Above ground
         const r = Math.random() * (maxReach - minReach) + minReach;
-        
+
         this.targetPosition.set(
             r * Math.sin(phi) * Math.cos(theta),
             r * Math.cos(phi) + 0.5, // Offset up from ground
             r * Math.sin(phi) * Math.sin(theta)
         );
-        
+
         // Clamp Y to be above ground
         if (this.targetPosition.y < 0.5) {
             this.targetPosition.y = 0.5;
         }
-        
+
         this.target.position.copy(this.targetPosition);
         this.timeSinceTargetSet = 0;
     }
@@ -525,14 +526,14 @@ class RobotArmVisualization {
     updateTargetLine(): void {
         const endPos = this.robotArm.getEndEffectorPosition();
         const positions = this.targetLine.geometry.attributes.position.array as Float32Array;
-        
+
         positions[0] = endPos.x;
         positions[1] = endPos.y;
         positions[2] = endPos.z;
         positions[3] = this.targetPosition.x;
         positions[4] = this.targetPosition.y;
         positions[5] = this.targetPosition.z;
-        
+
         this.targetLine.geometry.attributes.position.needsUpdate = true;
     }
 
@@ -549,6 +550,7 @@ class RobotArmVisualization {
             panel.style.display = open ? 'grid' : 'none';
             toggle.setAttribute('aria-expanded', String(open));
         };
+        this.setPanelOpen = setOpen;
 
         setOpen(false);
         toggle.addEventListener('click', (e) => {
@@ -686,40 +688,43 @@ class RobotArmVisualization {
 
     setVisible(visible: boolean) {
         if (this.isVisible !== visible) {
-            console.log(`%c[robot] ${visible ? '▶️ Resuming' : '⏸️ Pausing'} at frame ${this.frameCount}`, 
+            console.log(`%c[robot] ${visible ? '▶️ Resuming' : '⏸️ Pausing'} at frame ${this.frameCount}`,
                 visible ? 'color: #22c55e' : 'color: #f59e0b');
         }
         this.isVisible = visible;
+        if (!visible) {
+            this.setPanelOpen?.(false);
+        }
     }
 
     animate = () => {
         this.frameId = requestAnimationFrame(this.animate);
-        
+
         // Skip all calculations when off-screen
         if (!this.isVisible) return;
-        
+
         this.frameCount++;
         const delta = 0.016;
         this.time += delta;
-        
+
         // Camera pans around the robot
         this.cameraOrbitAngle += this.cameraOrbitSpeed * delta;
         const camX = Math.sin(this.cameraOrbitAngle) * this.cameraRadius;
         const camZ = Math.cos(this.cameraOrbitAngle) * this.cameraRadius;
         this.camera.position.set(camX, this.cameraHeight, camZ);
         this.camera.lookAt(0, 3.5, 0);
-        
+
         if (this.autoAnimate) {
             this.timeSinceTargetSet += delta;
-            
+
             // Move target every 3 seconds no matter what
             if (this.timeSinceTargetSet >= this.targetMoveInterval) {
                 this.pickNewTarget();
             }
-            
+
             // Always run IK solver - arm is always chasing
             this.ikSolver.step(this.targetPosition);
-            
+
             // Update slider displays
             const angles = this.robotArm.getAngles();
             angles.forEach((angle, i) => {
@@ -729,14 +734,14 @@ class RobotArmVisualization {
                 }
             });
         }
-        
+
         // Update target line
         this.updateTargetLine();
-        
+
         // Pulse target sphere
         const pulse = 1 + Math.sin(this.time * 4) * 0.15;
         this.target.scale.setScalar(pulse);
-        
+
         this.renderer.render(this.scene, this.camera);
     };
 }
