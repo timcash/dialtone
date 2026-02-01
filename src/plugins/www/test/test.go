@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -47,10 +48,8 @@ func RunWwwIntegration() error {
 	browser.CleanupPort(5173) // Dev server port
 	browser.CleanupPort(8081) // CAD Proxy port
 	
-	// Aggressively kill chrome instances as requested
-	browser.KillProcessesByName("chrome")
-	browser.KillProcessesByName("google-chrome")
-	browser.KillProcessesByName("chromium")
+	// Use our new CLI for safe cleanup (defaults to Dialtone origin)
+	_ = exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
 	
 	time.Sleep(1 * time.Second)
 
@@ -75,27 +74,33 @@ func RunWwwIntegration() error {
 	}
 	fmt.Println(">> [WWW] Dev Server Ready.")
 
-	// 5. Run ChromeDP Tests using chrome plugin patterns
-	fmt.Println(">> [WWW] Launching Headless Chrome...")
+	// 5. Run ChromeDP Tests using chrome CLI and NewRemoteContext
+	fmt.Println(">> [WWW] Launching Headed Chrome via CLI...")
 
-	execPath := browser.FindChromePath()
-	if execPath == "" {
-		return fmt.Errorf("chrome executable not found")
+	// Launch via CLI to get the signature and origin detection
+	gpu := os.Getenv("GPU") == "true"
+	args := []string{"chrome", "new"}
+	if gpu {
+		args = append(args, "--gpu")
 	}
-	fmt.Printf(">> [WWW] Found Chrome at: %s\n", execPath)
+	
+	launchCmd := exec.Command("./dialtone.sh", args...)
+	output, err := launchCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to launch chrome via CLI: %v\nOutput: %s", err, string(output))
+	}
 
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.NoFirstRun,
-		chromedp.NoDefaultBrowserCheck,
-		chromedp.Headless,
-		chromedp.ExecPath(execPath),
-		chromedp.Flag("disable-gpu", true),
-		chromedp.Flag("no-sandbox", true),
-		chromedp.Flag("window-size", "1920,1080"),
-		chromedp.Flag("remote-debugging-address", "127.0.0.1"),
-	)
+	// Parse WebSocket URL from output
+	// Format: WebSocket URL  : ws://127.0.0.1:XXXXX/devtools/browser/...
+	re := regexp.MustCompile(`ws://127\.0\.0\.1:\d+/devtools/browser/[a-z0-9-]+`)
+	wsURL := re.FindString(string(output))
+	if wsURL == "" {
+		return fmt.Errorf("failed to find WebSocket URL in CLI output: %s", string(output))
+	}
+	fmt.Printf(">> [WWW] Connected to Chrome via: %s\n", wsURL)
 
-	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	// Attach to the browser started by the CLI
+	allocCtx, cancel := chromedp.NewRemoteAllocator(context.Background(), wsURL)
 	defer cancel()
 
 	ctx, cancel := chromedp.NewContext(allocCtx)
@@ -128,6 +133,20 @@ func RunWwwIntegration() error {
 	}
 
 	fmt.Println("\n[PASS] WWW Integration Tests Complete")
+
+	// Final verification: No Dialtone processes leaked
+	fmt.Println(">> [WWW] Verifying no leaked Dialtone processes...")
+	_ = exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
+	
+	// Double check with list
+	listCmd := exec.Command("./dialtone.sh", "chrome", "list")
+	listOutput, _ := listCmd.CombinedOutput()
+	if strings.Contains(string(listOutput), "Dialtone") {
+		fmt.Printf(">> [WARNING] Leaked Dialtone processes detected:\n%s\n", string(listOutput))
+	} else {
+		fmt.Println(">> [WWW] Cleanup verified.")
+	}
+
 	return nil
 }
 
@@ -326,10 +345,8 @@ func RunWwwCadHeaded() error {
 		browser.CleanupPort(8081) // CAD port
 	}
 	
-	// Aggressively kill chrome instances as requested
-	browser.KillProcessesByName("chrome")
-	browser.KillProcessesByName("google-chrome")
-	browser.KillProcessesByName("chromium")
+	// Use our new CLI for safe cleanup
+	_ = exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
 	time.Sleep(1 * time.Second)
 
 	// 2. Start Dev Server (Background)
@@ -371,28 +388,33 @@ func RunWwwCadHeaded() error {
 		return fmt.Errorf("dev server port 5173 not ready: %v", err)
 	}
 
-	execPath := browser.FindChromePath()
-	if execPath == "" {
-		return fmt.Errorf("chrome executable not found")
-	}
-
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.NoFirstRun,
-		chromedp.NoDefaultBrowserCheck,
-		chromedp.ExecPath(execPath),
-		chromedp.Flag("disable-gpu", true),
-		chromedp.Flag("no-sandbox", true),
-		chromedp.Flag("window-size", "1280,720"),
-		chromedp.Flag("remote-debugging-address", "127.0.0.1"),
-	)
+	fmt.Println(">> [WWW] Launching Chrome via CLI...")
 	
+	gpu := os.Getenv("GPU") == "true"
+	args := []string{"chrome", "new"}
 	if headless {
-		opts = append(opts, chromedp.Headless)
-	} else {
-		opts = append(opts, chromedp.Flag("headless", false))
+		args = append(args, "--headless")
+	}
+	if gpu {
+		args = append(args, "--gpu")
 	}
 
-	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	launchCmd := exec.Command("./dialtone.sh", args...)
+	output, err := launchCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to launch chrome via CLI: %v\nOutput: %s", err, string(output))
+	}
+
+	// Parse WebSocket URL
+	re := regexp.MustCompile(`ws://127\.0\.0\.1:\d+/devtools/browser/[a-z0-9-]+`)
+	wsURL := re.FindString(string(output))
+	if wsURL == "" {
+		return fmt.Errorf("failed to find WebSocket URL in CLI output: %s", string(output))
+	}
+	fmt.Printf(">> [WWW] Connected to Chrome via: %s\n", wsURL)
+
+	// Attach
+	allocCtx, cancel := chromedp.NewRemoteAllocator(context.Background(), wsURL)
 	defer cancel()
 
 	ctx, cancel := chromedp.NewContext(allocCtx)
@@ -457,7 +479,7 @@ func RunWwwCadHeaded() error {
 		`, nil).Do(ctx)
 	})
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.Navigate("http://127.0.0.1:5173"),
 		injectLiveFlag,
 		mockFetch,
@@ -498,6 +520,18 @@ func RunWwwCadHeaded() error {
 
 	fmt.Println(">> [WWW] CAD Verification Complete.")
 	
+	// Final verification: No Dialtone processes leaked
+	fmt.Println(">> [WWW] Verifying no leaked Dialtone processes...")
+	_ = exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
+	
+	listCmd := exec.Command("./dialtone.sh", "chrome", "list")
+	listOutput, _ := listCmd.CombinedOutput()
+	if strings.Contains(string(listOutput), "Dialtone") {
+		fmt.Printf(">> [WARNING] Leaked Dialtone processes detected:\n%s\n", string(listOutput))
+	} else {
+		fmt.Println(">> [WWW] Cleanup verified.")
+	}
+
 	// Final check for console errors
 	return printConsoleLogs(consoleLogs)
 }

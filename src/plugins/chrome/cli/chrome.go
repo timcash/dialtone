@@ -42,9 +42,10 @@ func RunChrome(args []string) {
 	case "new":
 		newFlags := flag.NewFlagSet("chrome new", flag.ExitOnError)
 		port := newFlags.Int("port", 0, "Remote debugging port")
+		gpu := newFlags.Bool("gpu", false, "Enable GPU acceleration")
 		debug := newFlags.Bool("debug", false, "Enable verbose logging")
 		newFlags.Parse(args[1:])
-		handleNew(*port, *debug)
+		handleNew(*port, *gpu, *debug)
 	case "verify":
 		verifyFlags := flag.NewFlagSet("chrome verify", flag.ExitOnError)
 		port := verifyFlags.Int("port", 9222, "Remote debugging port")
@@ -198,14 +199,14 @@ func handleKill(arg string, isWindows, totalAll bool) {
 	logger.LogInfo("Successfully killed process %d", pid)
 }
 
-func handleNew(port int, debug bool) {
+func handleNew(port int, gpu, debug bool) {
 	logger.LogInfo("Launching new headed Chrome instance...")
 	// If port is the default 9222, let's try to find a free one to avoid conflicts if 9222 is taken
 	if port == 9222 {
 		port = 0 // app.LaunchChrome will find one
 	}
 
-	res, err := chrome.LaunchChrome(port)
+	res, err := chrome.LaunchChrome(port, gpu)
 	if err != nil {
 		logger.LogFatal("Failed to launch Chrome: %v", err)
 	}
@@ -223,13 +224,15 @@ func printChromeUsage() {
 	fmt.Println("\nCommands:")
 	fmt.Println("  verify [--port N]   Verify chrome connectivity")
 	fmt.Println("  list [flags]        List detected chrome processes")
-	fmt.Println("  new [--port N]      Launch a new headed chrome instance")
+	fmt.Println("  new [--port N] [--gpu] Launch a new headed chrome instance")
 	fmt.Println("  kill [PID|all] [--all] Kill Dialtone processes (default) or all processes")
 	fmt.Println("  install             Install chrome dependencies")
 	fmt.Println("\nFlags for list:")
 	fmt.Println("  --headed            Filter for headed instances only")
 	fmt.Println("  --headless          Filter for headless instances only")
 	fmt.Println("  --verbose, -v       Show full command line report")
+	fmt.Println("\nFlags for new:")
+	fmt.Println("  --gpu               Enable GPU acceleration")
 	fmt.Println("\nFlags for kill:")
 	fmt.Println("  --all               Kill ALL Chrome/Edge processes system-wide")
 	fmt.Println("  --windows           Use with 'kill' for WSL host processes (auto-detected usually)")
