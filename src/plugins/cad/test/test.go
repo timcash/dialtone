@@ -18,12 +18,15 @@ func RunAll() error {
 }
 
 func RunCADObjectTest() error {
-	gear := app.NewGearObject(12, 5.0, 1.0)
+	gear := app.NewGearObject(80.0, 20.0, 20)
 	if gear.Type != "gear" {
 		return fmt.Errorf("unexpected gear type: %s", gear.Type)
 	}
-	if gear.Parameters["teeth"] != 12 {
-		return fmt.Errorf("unexpected teeth count: %v", gear.Parameters["teeth"])
+	if gear.Parameters["num_teeth"] != 20 {
+		return fmt.Errorf("unexpected teeth count: %v", gear.Parameters["num_teeth"])
+	}
+	if gear.Parameters["outer_diameter"] != 80.0 {
+		return fmt.Errorf("unexpected outer diameter: %v", gear.Parameters["outer_diameter"])
 	}
 	fmt.Println("PASS: [cad] Plugin logic verified")
 	return nil

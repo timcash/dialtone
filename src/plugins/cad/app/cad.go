@@ -10,14 +10,19 @@ type CADObject struct {
 	Parameters map[string]interface{} `json:"parameters"`
 }
 
-// NewGearObject creates a new parametric gear object
-func NewGearObject(teeth int, diameter float64, thickness float64) CADObject {
+// NewGearObject creates a new parametric gear object matching gear_generator.py logic
+func NewGearObject(outer float64, inner float64, teeth int) CADObject {
 	return CADObject{
 		Type: "gear",
 		Parameters: map[string]interface{}{
-			"teeth":     teeth,
-			"diameter":  diameter,
-			"thickness": thickness,
+			"outer_diameter":         outer,
+			"inner_diameter":         inner,
+			"num_teeth":              teeth,
+			"thickness":              8.0,
+			"tooth_height":           6.0,
+			"tooth_width":            4.0,
+			"num_mounting_holes":     4,
+			"mounting_hole_diameter": 6.0,
 		},
 	}
 }

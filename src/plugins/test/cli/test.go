@@ -230,6 +230,8 @@ func runPluginTest(pluginName string, showList bool) {
 		runNexttoneTests()
 	case "cad":
 		runCadTests()
+	case "www-cad":
+		runWwwCadTests()
 	default:
 		logger.LogFatal("Unknown plugin: %s", pluginName)
 	}
@@ -371,4 +373,11 @@ func runCadTests() {
 		logger.LogFatal("CAD tests failed: %v", err)
 	}
 	logger.LogInfo("CAD Plugin Tests passed!")
+}
+func runWwwCadTests() {
+	logger.LogInfo("Running WWW CAD Headed Test...")
+	if err := www_test.RunWwwCadHeaded(); err != nil {
+		logger.LogFatal("WWW CAD test failed: %v", err)
+	}
+	logger.LogInfo("WWW CAD Test passed!")
 }
