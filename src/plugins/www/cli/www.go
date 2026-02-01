@@ -279,8 +279,15 @@ func RunWww(args []string) {
 		publishPrebuilt(webDir, vercelPath, vercelEnv, args[1:])
 
 	case "logs":
+		for _, arg := range args[1:] {
+			if arg == "--help" || arg == "-h" {
+				fmt.Println("Usage: dialtone www logs <deployment-url-or-id>")
+				fmt.Println("\nFetches the runtime logs for a specific Vercel deployment.")
+				return
+			}
+		}
 		if len(args) < 2 {
-			logFatal("Usage: dialtone-dev www logs <deployment-url-or-id>\n   Run 'dialtone-dev www logs --help' for more info.")
+			logFatal("Usage: dialtone www logs <deployment-url-or-id>\n   Run 'dialtone www logs --help' for more info.")
 		}
 		vArgs := append([]string{"logs"}, args[1:]...)
 		cmd := exec.Command(vercelPath, vArgs...)
@@ -294,7 +301,15 @@ func RunWww(args []string) {
 		}
 
 	case "domain":
-		// Usage: dialtone-dev www domain [deployment-url]
+		for _, arg := range args[1:] {
+			if arg == "--help" || arg == "-h" {
+				fmt.Println("Usage: dialtone www domain [deployment-url]")
+				fmt.Println("\nAliases a deployment URL to 'dialtone.earth'.")
+				fmt.Println("If no URL is provided, it aliases the most recent deployment.")
+				return
+			}
+		}
+		// Usage: dialtone www domain [deployment-url]
 		// If no deployment-url is given, it will attempt to alias the most recent deployment.
 		vArgs := []string{"alias", "set"}
 		vArgs = append(vArgs, args[1:]...)
@@ -310,6 +325,13 @@ func RunWww(args []string) {
 		}
 
 	case "login":
+		for _, arg := range args[1:] {
+			if arg == "--help" || arg == "-h" {
+				fmt.Println("Usage: dialtone www login")
+				fmt.Println("\nAuthenticates the local CLI with your Vercel account.")
+				return
+			}
+		}
 		cmd := exec.Command(vercelPath, "login")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -343,6 +365,17 @@ func RunWww(args []string) {
 		}
 
 	case "test":
+for _, arg := range args[1:] {
+if arg == "--help" || arg == "-h" {
+fmt.Println("Usage: dialtone www test [cad] [--live]")
+fmt.Println("\nSubcommands:")
+fmt.Println("  (default)          Run all standard integration tests")
+fmt.Println("  cad                Run headed browser tests for the CAD flow")
+fmt.Println("\nFlags for 'test cad':")
+fmt.Println("  --live             Use the production CAD backend instead of local simulator")
+return
+}
+}
 		if len(args) > 1 && args[1] == "cad" {
 			logInfo("Running headed CAD test...")
 			cmd := exec.Command("./dialtone.sh", "test", "plugin", "www-cad")
@@ -390,6 +423,13 @@ func RunWww(args []string) {
 		}
 
 	case "check-version", "validate":
+for _, arg := range args[1:] {
+if arg == "--help" || arg == "-h" {
+fmt.Println("Usage: dialtone www validate")
+fmt.Println("\nCompares the version on dialtone.earth with the local package.json.")
+return
+}
+}
 		expected, err := expectedVersion(webDir)
 		if err != nil {
 			logFatal("Failed to read expected version: %v", err)
