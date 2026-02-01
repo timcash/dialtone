@@ -158,12 +158,19 @@ func bumpWwwVersion(webDir string) (string, error) {
 func publishPrebuilt(webDir string, vercelPath string, vercelEnv []string, args []string) {
 	for _, arg := range args {
 		if arg == "--help" || arg == "-h" {
-			fmt.Println("Usage: dialtone-dev www publish [options]")
+			fmt.Println("Usage: dialtone www publish [options]")
+			fmt.Println("\nThis command performs a full production deployment pipeline:")
+			fmt.Println("  1. Versioning: Bumps patch version in package.json & index.html")
+			fmt.Println("  2. Building:   Runs 'npm run build' for optimized web assets")
+			fmt.Println("  3. Prebuilding: Runs 'vercel build --prod' for edge compatibility")
+			fmt.Println("  4. Deploying:  Runs 'vercel deploy --prebuilt --prod' to dialtone.earth")
 			fmt.Println("\nOptions:")
 			fmt.Println("  --help, -h         Show this help message")
-			fmt.Println("\nAll other options are passed through to 'vercel deploy'.")
-			fmt.Println("Example:")
-			fmt.Println("  dialtone-dev www publish --debug")
+			fmt.Println("\nArguments:")
+			fmt.Println("  Extra arguments are passed directly to the 'vercel deploy' command.")
+			fmt.Println("  Examples: --debug, --force, --no-wait, --token <T>")
+			fmt.Println("\nDemo usage:")
+			fmt.Println("  dialtone www publish --debug")
 			return
 		}
 	}
