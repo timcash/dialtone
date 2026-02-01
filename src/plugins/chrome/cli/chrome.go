@@ -44,7 +44,6 @@ func RunChrome(args []string) {
 		port := newFlags.Int("port", 0, "Remote debugging port")
 		gpu := newFlags.Bool("gpu", false, "Enable GPU acceleration")
 		debug := newFlags.Bool("debug", false, "Enable verbose logging")
-
 		// Pre-process arguments to separate flags from the positional URL
 		var flags []string
 		var positional []string
