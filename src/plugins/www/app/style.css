@@ -87,6 +87,7 @@ h2 {
 #earth-container,
 #nn-container,
 #curriculum-container,
+#cad-container,
 #robot-container {
   position: absolute;
   top: 0;
@@ -202,6 +203,13 @@ h2 {
   font-size: 0.85rem;
   letter-spacing: 0.02em;
   cursor: pointer;
+  display: none;
+}
+
+.snap-slide.is-visible[id="s-home"]~.top-right-controls #earth-config-toggle,
+.snap-slide.is-visible[id="s-robot"]~.top-right-controls #robot-config-toggle,
+.snap-slide.is-visible[id="s-cad"]~.top-right-controls #cad-config-toggle {
+  display: inline-block;
 }
 
 .earth-config-toggle:hover {
@@ -242,6 +250,10 @@ h2 {
   grid-template-columns: 1fr auto;
   gap: 0.5rem;
   align-items: center;
+}
+
+.cad-config-row {
+  grid-template-columns: 1fr 40px !important;
 }
 
 .earth-config-row label {
@@ -369,6 +381,142 @@ h2 {
   margin-bottom: 0.75rem;
 }
 
+.code-header {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  margin-bottom: 1.25rem;
+}
+
+.code-snippet-overlay {
+  position: absolute;
+  bottom: 2.5rem;
+  right: 2.5rem;
+  width: 440px;
+  max-height: 520px;
+  background: rgba(8, 8, 8, 0.75);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 1.5rem;
+  color: rgba(255, 255, 255, 0.9);
+  font-family: 'JetBrains Mono', 'Fira Code', 'Roboto Mono', monospace;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.5s cubic-bezier(0.19, 1, 0.22, 1);
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.8);
+  z-index: 100;
+  pointer-events: auto;
+}
+
+.control-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.offline-warning {
+  background: rgba(220, 38, 38, 0.15);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  border-radius: 6px;
+  color: #f87171;
+  padding: 0.75rem;
+  font-size: 0.75rem;
+  margin-bottom: 1.25rem;
+  line-height: 1.4;
+}
+
+.offline-warning code {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  color: #fff;
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.control-group label {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.value-display {
+  color: #06b6d4;
+  font-weight: 700;
+}
+
+.control-group input[type="range"] {
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  appearance: none;
+  outline: none;
+}
+
+.control-group input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  background: #fff;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.control-group input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  background: #06b6d4;
+}
+
+.premium-button {
+  background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  padding: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin-bottom: 1rem;
+}
+
+.premium-button:hover {
+  filter: brightness(1.2);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(6, 182, 212, 0.4);
+}
+
+.code-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0.5rem 0 1.25rem 0;
+}
+
+.code-snippet-overlay pre {
+  margin: 0;
+  overflow-y: auto;
+  font-size: 0.8rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
 /* Marketing Overlays */
 .marketing-overlay {
   position: absolute;
@@ -377,8 +525,8 @@ h2 {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  align-items: flex-start;
-  text-align: left;
+  align-items: center;
+  text-align: center;
   gap: 1.5rem;
   padding: 0 2.5rem;
   pointer-events: none;

@@ -29,6 +29,7 @@ import (
 	ui_cli "dialtone/cli/src/plugins/ui/cli"
 	vpn_cli "dialtone/cli/src/plugins/vpn/cli"
 	www_cli "dialtone/cli/src/plugins/www/cli"
+	cad_cli "dialtone/cli/src/plugins/cad/cli"
 )
 
 // ExecuteDev is the entry point for the dialtone-dev CLI
@@ -100,6 +101,8 @@ func ExecuteDev() {
 		ui_cli.Run(args)
 	case "go":
 		go_cli.RunGo(args)
+	case "cad":
+		cad_cli.RunCad(args)
 
 	case "ai", "opencode", "developer", "subagent":
 		// Delegate to plugin command to remove static dependency on AI from core

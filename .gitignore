@@ -36,3 +36,4 @@ dialtone_dependencies/
 test_dialtone_env
 dev_dependencies/
 keys.duckdb
+.chrome_data/
