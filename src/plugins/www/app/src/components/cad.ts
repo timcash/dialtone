@@ -45,7 +45,7 @@ export class CADViewer {
         this.camera.lookAt(0, 0, 0);
 
         this.initLights();
-        this.initUI();
+        this.initConfigPanel();
 
         // Load default model immediately, then try to update from live backend
         this.loadDefaultModel().then(() => {
@@ -125,39 +125,96 @@ export class CADViewer {
         this.scene.add(pointLight);
     }
 
-    initUI() {
-        const inputs = [
-            'outer_diameter', 'inner_diameter', 'thickness',
-            'tooth_height', 'tooth_width', 'num_teeth',
-            'num_mounting_holes', 'mounting_hole_diameter'
-        ];
+    offlineWarningEl: HTMLDivElement | null = null;
+    codeElement: HTMLElement | null = null;
 
-        inputs.forEach(id => {
-            const inp = document.getElementById(`inp-${id}`) as HTMLInputElement;
-            const val = document.getElementById(`val-${id}`) as HTMLSpanElement;
-            if (inp && val) {
-                // Initialize values
-                // @ts-ignore
-                inp.value = String(this.params[id]);
-                val.textContent = inp.value;
+    initConfigPanel() {
+        const panel = document.getElementById('cad-config-panel') as HTMLDivElement | null;
+        const toggle = document.getElementById('cad-config-toggle') as HTMLButtonElement | null;
+        if (!panel || !toggle) return;
 
-                inp.addEventListener('input', () => {
-                    const v = parseFloat(inp.value);
-                    // @ts-ignore
-                    this.params[id] = v;
-                    val.textContent = inp.value;
-                    this.debouncedUpdate();
-                });
-            }
+        const setOpen = (open: boolean) => {
+            panel.hidden = !open;
+            panel.style.display = open ? 'grid' : 'none';
+            toggle.setAttribute('aria-expanded', String(open));
+        };
+
+        setOpen(false);
+        toggle.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setOpen(panel.hidden);
         });
 
-        const dlBtn = document.getElementById('btn-download-stl');
-        if (dlBtn) {
-            dlBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                this.downloadSTL();
+        const addHeader = (text: string) => {
+            const header = document.createElement('h3');
+            header.textContent = text;
+            panel.appendChild(header);
+        };
+
+        const addSlider = (id: string, label: string, min: number, max: number, step: number) => {
+            const row = document.createElement('div');
+            row.className = 'earth-config-row cad-config-row';
+            const labelWrap = document.createElement('label');
+            labelWrap.textContent = label;
+            const slider = document.createElement('input');
+            slider.type = 'range'; slider.min = `${min}`; slider.max = `${max}`; slider.step = `${step}`;
+            // @ts-ignore
+            slider.value = String(this.params[id]);
+            labelWrap.appendChild(slider);
+            row.appendChild(labelWrap);
+            const valueEl = document.createElement('span');
+            valueEl.className = 'earth-config-value';
+            valueEl.textContent = slider.value;
+            row.appendChild(valueEl);
+            panel.appendChild(row);
+
+            slider.addEventListener('input', () => {
+                const v = parseFloat(slider.value);
+                // @ts-ignore
+                this.params[id] = v;
+                valueEl.textContent = slider.value;
+                this.debouncedUpdate();
             });
-        }
+        };
+
+        addHeader('Gear Parameters');
+
+        this.offlineWarningEl = document.createElement('div');
+        this.offlineWarningEl.className = 'offline-warning';
+        this.offlineWarningEl.innerHTML = '⚠️ CAD Server Offline. Start with <code>./dialtone.sh start cad</code> to enable parametric changes.';
+        this.offlineWarningEl.hidden = true;
+        panel.appendChild(this.offlineWarningEl);
+
+        addSlider('outer_diameter', 'Outer Dia', 20, 200, 1);
+        addSlider('inner_diameter', 'Inner Dia', 5, 100, 1);
+        addSlider('thickness', 'Thickness', 2, 50, 1);
+        addSlider('num_teeth', 'Num Teeth', 5, 100, 1);
+        addSlider('num_mounting_holes', 'Mount Holes', 0, 12, 1);
+        addSlider('mounting_hole_diameter', 'Hole Dia', 2, 20, 1);
+
+        const dlBtn = document.createElement('button');
+        dlBtn.className = 'premium-button';
+        dlBtn.textContent = 'Download STL';
+        dlBtn.style.marginTop = '1rem';
+        dlBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.downloadSTL();
+        });
+        panel.appendChild(dlBtn);
+
+        const divider = document.createElement('div');
+        divider.className = 'code-divider';
+        panel.appendChild(divider);
+
+        const pre = document.createElement('pre');
+        this.codeElement = document.createElement('code');
+        this.codeElement.textContent = '# Loading source code...';
+        pre.appendChild(this.codeElement);
+        panel.appendChild(pre);
+
+        // Fetch initial source code
+        this.fetchSourceCode();
     }
 
     fetchTimeout: any = null;
@@ -170,12 +227,7 @@ export class CADViewer {
     }
 
     async updateModel() {
-        if (this.abortController) {
-            this.abortController.abort();
-        }
         this.abortController = new AbortController();
-
-        const warningEl = document.getElementById('cad-offline-warning');
 
         try {
             // @ts-ignore
@@ -208,19 +260,18 @@ export class CADViewer {
             const geometry = this.loader.parse(arrayBuffer);
             this.applyGeometry(geometry);
 
-            if (warningEl) warningEl.hidden = true;
+            if (this.offlineWarningEl) this.offlineWarningEl.hidden = true;
             console.log('[cad] Scene updated successfully');
 
         } catch (e: any) {
             if (e.name !== 'AbortError') {
                 console.warn('[cad] Model update failed, server might be offline:', e.message);
-                if (warningEl) warningEl.hidden = false;
+                if (this.offlineWarningEl) this.offlineWarningEl.hidden = false;
             }
         }
     }
 
     async fetchSourceCode() {
-        const codeElement = document.getElementById('cad-code-content');
         try {
             // @ts-ignore
             const isLive = window.CAD_LIVE === true || (typeof process !== 'undefined' && process.env.CAD_LIVE === 'true');
@@ -229,8 +280,8 @@ export class CADViewer {
             const response = await fetch(`${baseUrl}/api/cad`);
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             const data = await response.json();
-            if (codeElement && data.source_code) {
-                codeElement.textContent = data.source_code;
+            if (this.codeElement && data.source_code) {
+                this.codeElement.textContent = data.source_code;
             }
         } catch (e) {
             console.warn('Failed to fetch source code:', e);
