@@ -115,7 +115,7 @@ type LaunchResult struct {
 }
 
 // LaunchChrome starts a new headed Chrome instance and returns its debug info.
-func LaunchChrome(port int) (*LaunchResult, error) {
+func LaunchChrome(port int, gpu bool) (*LaunchResult, error) {
 	path := browser.FindChromePath()
 	if path == "" {
 		return nil, fmt.Errorf("chrome not found")
@@ -159,10 +159,13 @@ func LaunchChrome(port int) (*LaunchResult, error) {
 		"--remote-allow-origins=*",
 		"--no-first-run",
 		"--no-default-browser-check",
-		"--disable-gpu",
 		"--user-data-dir=" + userDataDir,
 		"--new-window",
 		"--dialtone-origin=true",
+	}
+
+	if !gpu {
+		args = append(args, "--disable-gpu")
 	}
 
 	logger.LogInfo("DEBUG: Launching Chrome: %s %v", path, args)
