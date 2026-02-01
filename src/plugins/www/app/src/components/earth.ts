@@ -81,6 +81,7 @@ export class ProceduralOrbit {
   configPanel?: HTMLDivElement;
   configToggle?: HTMLButtonElement;
   configValueMap = new Map<string, HTMLSpanElement>();
+  private setConfigPanelOpen?: (open: boolean) => void;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -320,7 +321,8 @@ export class ProceduralOrbit {
   }
 
   initConfigPanel() {
-    setupConfigPanel(this);
+    const { setOpen } = setupConfigPanel(this);
+    this.setConfigPanelOpen = setOpen;
   }
 
   updateTelemetry(orbitRadius: number) {
@@ -328,7 +330,12 @@ export class ProceduralOrbit {
   }
 
   isVisible = true;
-  setVisible(v: boolean) { this.isVisible = v; }
+  setVisible(v: boolean) {
+    this.isVisible = v;
+    if (!v) {
+      this.setConfigPanelOpen?.(false);
+    }
+  }
 
   animate = () => {
     this.frameId = requestAnimationFrame(this.animate);
