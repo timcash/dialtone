@@ -1,28 +1,17 @@
 import cadquery as cq
 import io
 import os
+import sys
 import tempfile
 import math
-from fastapi import FastAPI, Response, Request
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-
-app = FastAPI()
-
-# Enable CORS for local development
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+import argparse
+import json
 
 # Mock logger for gear_generator compatibility
 class MockLogger:
-    def info(self, msg): print(f"[INFO] {msg}")
-    def error(self, msg): print(f"[ERROR] {msg}")
-    def warn(self, msg): print(f"[WARN] {msg}")
+    def info(self, msg): print(f"[INFO] {msg}", file=sys.stderr)
+    def error(self, msg): print(f"[ERROR] {msg}", file=sys.stderr)
+    def warn(self, msg): print(f"[WARN] {msg}", file=sys.stderr)
 
 logger = MockLogger()
 
@@ -95,82 +84,36 @@ def generate_gear(
         logger.error(f"Failed to generate gear: {e}")
         raise e
 
-class GearParams(BaseModel):
-    outer_diameter: float = 80.0
-    inner_diameter: float = 20.0
-    thickness: float = 8.0
-    tooth_height: float = 6.0
-    tooth_width: float = 4.0
-    num_teeth: int = 20
-    num_mounting_holes: int = 4
-    mounting_hole_diameter: float = 6.0
+def main():
+    parser = argparse.ArgumentParser(description="Generate a parametric gear STL.")
+    parser.add_argument("--outer_diameter", type=float, default=80.0)
+    parser.add_argument("--inner_diameter", type=float, default=20.0)
+    parser.add_argument("--thickness", type=float, default=8.0)
+    parser.add_argument("--tooth_height", type=float, default=6.0)
+    parser.add_argument("--tooth_width", type=float, default=4.0)
+    parser.add_argument("--num_teeth", type=int, default=20)
+    parser.add_argument("--num_mounting_holes", type=int, default=4)
+    parser.add_argument("--mounting_hole_diameter", type=float, default=6.0)
+    parser.add_argument("--output", type=str, help="Output file path. If not provided, writes to stdout.")
+    
+    args = parser.parse_args()
 
-@app.post("/api/cad/generate")
-async def post_generate(params: GearParams):
-    stl_content = generate_gear(
-        params.outer_diameter, params.inner_diameter, params.thickness,
-        params.tooth_height, params.tooth_width, params.num_teeth,
-        params.num_mounting_holes, params.mounting_hole_diameter
-    )
-    return Response(content=stl_content, media_type="application/sla")
-
-@app.get("/api/cad")
-async def get_cad(
-    outer_diameter: float = 80.0,
-    inner_diameter: float = 20.0,
-    thickness: float = 8.0,
-    tooth_height: float = 6.0,
-    tooth_width: float = 4.0,
-    num_teeth: int = 20,
-    num_mounting_holes: int = 4,
-    mounting_hole_diameter: float = 6.0
-):
-    source_code = ""
     try:
-        # Instead of reading this file, we can read the reference file or just this one
-        with open(__file__, "r") as f:
-            source_code = f.read()
+        stl_content = generate_gear(
+            args.outer_diameter, args.inner_diameter, args.thickness,
+            args.tooth_height, args.tooth_width, args.num_teeth,
+            args.num_mounting_holes, args.mounting_hole_diameter
+        )
+        
+        if args.output:
+            with open(args.output, 'wb') as f:
+                f.write(stl_content)
+        else:
+            sys.stdout.buffer.write(stl_content)
+            
     except Exception as e:
-        source_code = f"# Error reading source: {e}"
-
-    return {
-        "type": "gear",
-        "parameters": {
-            "outer_diameter": outer_diameter,
-            "inner_diameter": inner_diameter,
-            "thickness": thickness,
-            "tooth_height": tooth_height,
-            "tooth_width": tooth_width,
-            "num_teeth": num_teeth,
-            "num_mounting_holes": num_mounting_holes,
-            "mounting_hole_diameter": mounting_hole_diameter
-        },
-        "source_code": source_code
-    }
-
-@app.get("/api/cad/download")
-async def download_stl(
-    outer_diameter: float = 80.0,
-    inner_diameter: float = 20.0,
-    thickness: float = 8.0,
-    tooth_height: float = 6.0,
-    tooth_width: float = 4.0,
-    num_teeth: int = 20,
-    num_mounting_holes: int = 4,
-    mounting_hole_diameter: float = 6.0
-):
-    stl_content = generate_gear(
-        outer_diameter, inner_diameter, thickness, tooth_height, 
-        tooth_width, num_teeth, num_mounting_holes, mounting_hole_diameter
-    )
-    return Response(content=stl_content, media_type="application/sla", headers={
-        "Content-Disposition": f"attachment; filename=gear_{num_teeth}t.stl"
-    })
-
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
+        logger.error(f"Execution failed: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8082)
+    main()
