@@ -13,9 +13,15 @@ type microtone struct {
 }
 
 type subtone struct {
-	Name        string
-	Description string
-	Position    int
+	Name          string
+	Description   string
+	Position      int
+	TestCondition string
+	TestConditions []string
+	TestCommand   string
+	DependsOn     string
+	TestOutput    string
+	AgentNotes    string
 }
 
 type microtoneEdge struct {
@@ -85,8 +91,16 @@ func seedMicrotoneGraph(db *sql.DB) error {
 
 	for _, st := range subtones {
 		if _, err := tx.Exec(
-			`INSERT INTO nexttone_subtones (name, position, description) VALUES (?, ?, ?)`,
-			st.Name, st.Position, st.Description,
+			`INSERT INTO nexttone_subtones (name, position, description, test_condition, test_command, depends_on, test_output, agent_notes)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			st.Name,
+			st.Position,
+			st.Description,
+			st.TestCondition,
+			st.TestCommand,
+			st.DependsOn,
+			st.TestOutput,
+			st.AgentNotes,
 		); err != nil {
 			return err
 		}
@@ -186,16 +200,43 @@ func setCurrentMicrotone(db *sql.DB, next string) error {
 
 func getSubtones(db *sql.DB) ([]subtone, error) {
 	subtones := []subtone{}
-	rows, err := db.Query(`SELECT name, description, position FROM nexttone_subtones ORDER BY position`)
+	rows, err := db.Query(`SELECT name, description, position, test_condition, test_command, depends_on, test_output, agent_notes
+		FROM nexttone_subtones ORDER BY position`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var st subtone
-		if err := rows.Scan(&st.Name, &st.Description, &st.Position); err != nil {
+		var description sql.NullString
+		var testCondition sql.NullString
+		var testCommand sql.NullString
+		var dependsOn sql.NullString
+		var testOutput sql.NullString
+		var agentNotes sql.NullString
+		if err := rows.Scan(
+			&st.Name,
+			&description,
+			&st.Position,
+			&testCondition,
+			&testCommand,
+			&dependsOn,
+			&testOutput,
+			&agentNotes,
+		); err != nil {
 			return nil, err
 		}
+		st.Description = description.String
+		st.TestCondition = testCondition.String
+		st.TestCommand = testCommand.String
+		st.DependsOn = dependsOn.String
+		st.TestOutput = testOutput.String
+		st.AgentNotes = agentNotes.String
+		conditions, err := getSubtoneConditions(db, st.Name)
+		if err != nil {
+			return nil, err
+		}
+		st.TestConditions = conditions
 		subtones = append(subtones, st)
 	}
 	return subtones, nil
