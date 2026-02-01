@@ -18,19 +18,46 @@ func RunChrome(args []string) {
 	}
 
 	switch args[0] {
+	case "help", "--help", "-h":
+		printChromeUsage()
 	case "list":
 		listFlags := flag.NewFlagSet("chrome list", flag.ExitOnError)
 		headed := listFlags.Bool("headed", false, "Show only headed processes")
 		headless := listFlags.Bool("headless", false, "Show only headless processes")
 		verbose := listFlags.Bool("verbose", false, "Show full command line report")
 		listFlags.BoolVar(verbose, "v", false, "Alias for --verbose")
+		
+		for _, arg := range args[1:] {
+			if arg == "--help" || arg == "-h" {
+				fmt.Println("Usage: dialtone chrome list [flags]")
+				fmt.Println("\nLists all detected Chrome/Edge processes on the system.")
+				fmt.Println("\nFlags:")
+				listFlags.PrintDefaults()
+				return
+			}
+		}
+
 		listFlags.Parse(args[1:])
 		handleList(*headed, *headless, *verbose)
 	case "kill":
 		killFlags := flag.NewFlagSet("chrome kill", flag.ExitOnError)
-		isWindows := killFlags.Bool("windows", false, "Use for WSL host processes")
-		totalAll := killFlags.Bool("all", false, "Kill ALL Chrome/Edge processes system-wide")
+		isWindows := killFlags.Bool("windows", false, "Use for WSL 2 host processes")
+		totalAll := killFlags.Bool("all", false, "Kill ALL browser processes system-wide")
 		
+		for _, arg := range args[1:] {
+			if arg == "--help" || arg == "-h" {
+				fmt.Println("Usage: dialtone chrome kill [PID|all] [flags]")
+				fmt.Println("\nTerminates Chrome processes. Default behavior is to only kill Dialtone-originated instances.")
+				fmt.Println("\nFlags:")
+				killFlags.PrintDefaults()
+				fmt.Println("\nExamples:")
+				fmt.Println("  dialtone chrome kill all        # Kill only Dialtone-started browsers")
+				fmt.Println("  dialtone chrome kill all --all  # Kill EVERY Chrome process on the PC")
+				fmt.Println("  dialtone chrome kill 1234       # Kill specific process by PID")
+				return
+			}
+		}
+
 		arg := "all"
 		if len(args) > 1 && !strings.HasPrefix(args[1], "-") {
 			arg = args[1]
@@ -41,9 +68,20 @@ func RunChrome(args []string) {
 		handleKill(arg, *isWindows, *totalAll)
 	case "new":
 		newFlags := flag.NewFlagSet("chrome new", flag.ExitOnError)
-		port := newFlags.Int("port", 0, "Remote debugging port")
+		port := newFlags.Int("port", 0, "Remote debugging port (0 for auto)")
 		gpu := newFlags.Bool("gpu", false, "Enable GPU acceleration")
 		debug := newFlags.Bool("debug", false, "Enable verbose logging")
+		
+		for _, arg := range args[1:] {
+			if arg == "--help" || arg == "-h" {
+				fmt.Println("Usage: dialtone chrome new [URL] [flags]")
+				fmt.Println("\nLaunches a new headed Chrome instance linked to Dialtone.")
+				fmt.Println("\nFlags:")
+				newFlags.PrintDefaults()
+				return
+			}
+		}
+
 		// Pre-process arguments to separate flags from the positional URL
 		var flags []string
 		var positional []string
@@ -51,7 +89,7 @@ func RunChrome(args []string) {
 			arg := args[i]
 			if strings.HasPrefix(arg, "-") {
 				flags = append(flags, arg)
-				// Handle flags that take values (only -port for now)
+				// Handle flags that take values
 				if (arg == "--port" || arg == "-port") && i+1 < len(args) {
 					flags = append(flags, args[i+1])
 					i++
@@ -72,6 +110,17 @@ func RunChrome(args []string) {
 		verifyFlags := flag.NewFlagSet("chrome verify", flag.ExitOnError)
 		port := verifyFlags.Int("port", 9222, "Remote debugging port")
 		debug := verifyFlags.Bool("debug", false, "Enable verbose logging")
+
+		for _, arg := range args[1:] {
+			if arg == "--help" || arg == "-h" {
+				fmt.Println("Usage: dialtone chrome verify [flags]")
+				fmt.Println("\nChecks if application is reachable via remote debugging port.")
+				fmt.Println("\nFlags:")
+				verifyFlags.PrintDefaults()
+				return
+			}
+		}
+
 		verifyFlags.Parse(args[1:])
 		verifyChrome(*port, *debug)
 	case "install":
