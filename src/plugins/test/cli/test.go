@@ -353,7 +353,7 @@ func runWwwTests() {
 
 func runNexttoneTests() {
 	logger.LogInfo("Running Nexttone Plugin Tests...")
-	cmd := exec.Command("go", "run", "src/plugins/nexttone/test/test.go")
+	cmd := exec.Command("go", "run", "./src/plugins/nexttone/test")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
