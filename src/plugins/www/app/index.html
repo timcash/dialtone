@@ -118,14 +118,49 @@
       </div>
       <div id="curriculum-config-panel" class="earth-config-panel" hidden></div>
     </section>
- 
+
     <!-- Slide 6: CAD -->
     <section id="s-cad" class="snap-slide" data-subtitle="parametric design"
       aria-label="CAD section: Parametric Design visualization">
       <div id="cad-container"></div>
       <div class="marketing-overlay" aria-label="Parametric Design marketing information">
-        <h2>CAD enables parametric design</h2>
-        <p>Iterate on hardware designs by changing parameters in real-time. Build with confidence.</p>
+        <h2>Parametric Design Logic</h2>
+        <p>Iterate on hardware designs by changing parameters in real-time. Powered by CadQuery.</p>
+      </div>
+
+      <div class="code-snippet-overlay" id="cad-controls-overlay">
+        <div class="code-header">Parametric Controls</div>
+
+        <div class="control-grid">
+          <div class="control-group">
+            <label>Outer Diameter <span id="val-outer_diameter" class="value-display">80</span></label>
+            <input type="range" id="inp-outer_diameter" min="20" max="200" step="1" value="80">
+          </div>
+          <div class="control-group">
+            <label>Inner Diameter <span id="val-inner_diameter" class="value-display">20</span></label>
+            <input type="range" id="inp-inner_diameter" min="5" max="100" step="1" value="20">
+          </div>
+          <div class="control-group">
+            <label>Thickness <span id="val-thickness" class="value-display">8</span></label>
+            <input type="range" id="inp-thickness" min="2" max="50" value="8">
+          </div>
+          <div class="control-group">
+            <label>Num Teeth <span id="val-num_teeth" class="value-display">20</span></label>
+            <input type="range" id="inp-num_teeth" min="5" max="100" step="1" value="20">
+          </div>
+          <div class="control-group">
+            <label>Mounting Holes <span id="val-num_mounting_holes" class="value-display">4</span></label>
+            <input type="range" id="inp-num_mounting_holes" min="0" max="12" step="1" value="4">
+          </div>
+          <div class="control-group">
+            <label>Hole Dia <span id="val-mounting_hole_diameter" class="value-display">6</span></label>
+            <input type="range" id="inp-mounting_hole_diameter" min="2" max="20" value="6">
+          </div>
+        </div>
+
+        <button id="btn-download-stl" class="premium-button">Download STL</button>
+        <div class="code-divider"></div>
+        <pre><code id="cad-code-content"># Loading source code...</code></pre>
       </div>
     </section>
 

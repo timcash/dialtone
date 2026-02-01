@@ -219,6 +219,8 @@ func RunWww(args []string) {
 		fmt.Println("  logs               View deployment logs")
 		fmt.Println("  domain             Manage the dialtone.earth domain")
 		fmt.Println("  login              Login to Vercel")
+		fmt.Println("  test               Run WWW integration tests")
+		fmt.Println("  test cad           Run headed browser test for CAD section")
 		return
 	}
 
@@ -286,6 +288,37 @@ func RunWww(args []string) {
 		cmd.Stdin = os.Stdin
 		if err := cmd.Run(); err != nil {
 			logFatal("Dev server failed: %v", err)
+		}
+
+		if err := cmd.Run(); err != nil {
+			logFatal("Tests failed: %v", err)
+		}
+
+	case "test":
+		if len(args) > 1 && args[1] == "cad" {
+			logInfo("Running headed CAD test...")
+			cmd := exec.Command("./dialtone.sh", "test", "plugin", "www-cad")
+			// Check for --live flag
+			for _, arg := range args[2:] {
+				if arg == "--live" {
+					logInfo("  Using live backend (CAD_LIVE=true)")
+					cmd.Env = append(os.Environ(), "CAD_LIVE=true")
+					break
+				}
+			}
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				logFatal("Headed CAD test failed: %v", err)
+			}
+			return
+		}
+		logInfo("Running integration tests...")
+		cmd := exec.Command("./dialtone.sh", "test", "plugin", "www")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			logFatal("Tests failed: %v", err)
 		}
 
 	case "build":
