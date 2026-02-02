@@ -1,3 +1,4 @@
+uniform float uOpacity;
 uniform float uTime;
 uniform vec3 uSunDir;
 uniform vec3 uKeyDir;
@@ -85,7 +86,7 @@ void main() {
     float baseThreshold = mix(0.5, -0.1, uCloudAmount);
     float breath = sin(uTime * 0.15) * 0.05;
     float threshold = baseThreshold + breath;
-    float alpha = smoothstep(threshold, threshold + 0.4, nBase) * CLOUD_OPACITY;
+    float alpha = smoothstep(threshold, threshold + 0.4, nBase) * uOpacity;
 
     vec3 sunDir = normalize(uSunDir);
     vec3 keyDir = normalize(uKeyDir);

@@ -42,7 +42,12 @@ export class CADViewer {
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.container.appendChild(this.renderer.domElement);
+    const existingCanvas = container.querySelector('canvas');
+    if (existingCanvas) {
+      this.renderer.domElement = existingCanvas as HTMLCanvasElement;
+    } else {
+      this.container.appendChild(this.renderer.domElement);
+    }
 
     this.scene.add(this.gearGroup);
     this.camera.position.set(0, 80, 160);
@@ -398,6 +403,25 @@ export class CADViewer {
 }
 
 export function mountCAD(container: HTMLElement) {
+  // Inject HTML
+  container.innerHTML = `
+      <div class="marketing-overlay" aria-label="CAD marketing information">
+        <h2>Parametric Design Logic</h2>
+        <p>Iterate on hardware designs by changing parameters in real-time. Powered by CadQuery.</p>
+      </div>
+      <div id="cad-config-panel" class="earth-config-panel" hidden></div>
+    `;
+
+  // Create and inject config toggle
+  const controls = document.querySelector('.top-right-controls');
+  const toggle = document.createElement('button');
+  toggle.id = 'cad-config-toggle';
+  toggle.className = 'earth-config-toggle';
+  toggle.type = 'button';
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.textContent = 'Config';
+  controls?.prepend(toggle);
+
   const viewer = new CADViewer(container);
   // @ts-ignore
   window.cadViewer = viewer;
@@ -406,6 +430,8 @@ export function mountCAD(container: HTMLElement) {
       // @ts-ignore
       delete window.cadViewer;
       viewer.dispose();
+      toggle.remove();
+      container.innerHTML = '';
     },
     setVisible: (v: boolean) => viewer.setVisible(v),
   };

@@ -457,9 +457,34 @@ export class ProceduralOrbit {
 }
 
 export function mountEarth(container: HTMLElement) {
+  // Inject HTML
+  container.innerHTML = `
+      <div class="marketing-overlay" aria-label="Unified Networks marketing information">
+        <h2>Now is the time to learn and build</h2>
+        <p>Robotics is moving from labs to the planet. Learn the math, build the software, and connect the machines.</p>
+        <a class="buy-button" href="https://buy.stripe.com/test_5kQaEXcagaAoaC62N20kE00" target="_blank"
+          rel="noopener noreferrer">Get the Robot Kit</a>
+      </div>
+      <div id="earth-config-panel" class="earth-config-panel" hidden></div>
+    `;
+
+  // Create and inject config toggle
+  const controls = document.querySelector('.top-right-controls');
+  const toggle = document.createElement('button');
+  toggle.id = 'earth-config-toggle';
+  toggle.className = 'earth-config-toggle';
+  toggle.type = 'button';
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.textContent = 'Config';
+  controls?.prepend(toggle);
+
   const orbit = new ProceduralOrbit(container);
   return {
-    dispose: () => orbit.dispose(),
+    dispose: () => {
+      orbit.dispose();
+      toggle.remove();
+      container.innerHTML = '';
+    },
     setVisible: (v: boolean) => orbit.setVisible(v),
   };
 }

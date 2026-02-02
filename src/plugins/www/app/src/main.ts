@@ -55,6 +55,26 @@ sections.register('s-cad', {
     }
 });
 
+sections.register('s-about', {
+    containerId: 'about-container',
+    load: async () => {
+        const { mountAbout } = await import('./components/about');
+        const container = document.getElementById('about-container');
+        if (!container) throw new Error('about-container not found');
+        return mountAbout(container);
+    }
+});
+
+sections.register('s-docs', {
+    containerId: 'docs-container',
+    load: async () => {
+        const { mountDocs } = await import('./components/docs');
+        const container = document.getElementById('docs-container');
+        if (!container) throw new Error('docs-container not found');
+        return mountDocs(container);
+    }
+});
+
 // Start observing visibility and eagerly load first section
 sections.observe();
 sections.eagerLoad('s-home');
