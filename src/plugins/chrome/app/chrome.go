@@ -46,6 +46,7 @@ func VerifyChrome(port int, debug bool) error {
 		chromedp.ExecPath(path),
 		chromedp.Flag("remote-debugging-port", fmt.Sprintf("%d", port)),
 		chromedp.Flag("remote-debugging-address", "127.0.0.1"), // Force IPv4 to avoid [::1] connection issues on WSL
+		chromedp.Flag("dialtone-origin", true),
 		chromedp.Flag("disable-gpu", true),
 	)
 
