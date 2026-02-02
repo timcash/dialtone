@@ -1,50 +1,52 @@
 /**
  * Stripe Payment Button Component
- * 
+ *
  * Creates a beautiful centered Stripe payment link button.
- * 
+ *
  * Setup Instructions:
  * 1. Create a Stripe account at https://stripe.com
  * 2. Go to Stripe Dashboard > Products > Create Product
  * 3. Add your product/service details and price
  * 4. Go to Payment Links (in sidebar) > Create payment link
  * 5. Copy the payment link URL and update STRIPE_PAYMENT_LINK below
- * 
+ *
  * For test mode:
  * - Use Stripe's test mode toggle in dashboard
  * - Test card: 4242 4242 4242 4242, any future date, any CVC
  */
 
-import type { VisualizationControl } from './section';
+import type { VisualizationControl } from "./section";
 
 // Replace with your actual Stripe Payment Link
 // Test mode links start with: https://buy.stripe.com/test_...
 // Live mode links start with: https://buy.stripe.com/...
-const STRIPE_PAYMENT_LINK = 'https://buy.stripe.com/test_5kQaEXcagaAoaC62N20kE00';
+const STRIPE_PAYMENT_LINK =
+  "https://buy.stripe.com/test_5kQaEXcagaAoaC62N20kE00";
 
 // Product configuration
 const PRODUCT_CONFIG = {
-    title: 'Dialtone Official Robot Kit',
-    description: 'The complete hardware and software bundle for unified robotics. Includes custom high-torque servos, NATS bridge, and autonomy examples.',
-    buttonText: 'Get the Kit - $1,000',
-    amount: '$1,000', // Display only - actual price set in Stripe dashboard
+  title: "Dialtone Official Robot Kit",
+  description:
+    "The complete hardware and software bundle for unified robotics. Includes custom high-torque servos, NATS bridge, and autonomy examples.",
+  buttonText: "Get the Kit - $1,000",
+  amount: "$1,000", // Display only - actual price set in Stripe dashboard
 };
 
 class StripeButton {
-    private container: HTMLElement;
-    private wrapper: HTMLElement | null = null;
-    isVisible = true;
+  private container: HTMLElement;
+  private wrapper: HTMLElement | null = null;
+  isVisible = true;
 
-    constructor(container: HTMLElement) {
-        this.container = container;
-        this.render();
-    }
+  constructor(container: HTMLElement) {
+    this.container = container;
+    this.render();
+  }
 
-    private render(): void {
-        // Create wrapper with centering
-        this.wrapper = document.createElement('div');
-        this.wrapper.className = 'stripe-wrapper';
-        this.wrapper.innerHTML = `
+  private render(): void {
+    // Create wrapper with centering
+    this.wrapper = document.createElement("div");
+    this.wrapper.className = "stripe-wrapper";
+    this.wrapper.innerHTML = `
             <div class="stripe-card">
                 <div class="stripe-icon">
                     <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -75,19 +77,19 @@ class StripeButton {
             </div>
         `;
 
-        // Add styles
-        this.injectStyles();
+    // Add styles
+    this.injectStyles();
 
-        this.container.appendChild(this.wrapper);
-    }
+    this.container.appendChild(this.wrapper);
+  }
 
-    private injectStyles(): void {
-        // Check if styles already injected
-        if (document.getElementById('stripe-component-styles')) return;
+  private injectStyles(): void {
+    // Check if styles already injected
+    if (document.getElementById("stripe-component-styles")) return;
 
-        const styles = document.createElement('style');
-        styles.id = 'stripe-component-styles';
-        styles.textContent = `
+    const styles = document.createElement("style");
+    styles.id = "stripe-component-styles";
+    styles.textContent = `
             .stripe-wrapper {
                 display: flex;
                 align-items: center;
@@ -230,30 +232,30 @@ class StripeButton {
                 }
             }
         `;
-        document.head.appendChild(styles);
-    }
+    document.head.appendChild(styles);
+  }
 
-    setVisible(visible: boolean): void {
-        this.isVisible = visible;
-        if (this.wrapper) {
-            this.wrapper.style.opacity = visible ? '1' : '0.3';
-        }
+  setVisible(visible: boolean): void {
+    this.isVisible = visible;
+    if (this.wrapper) {
+      this.wrapper.style.opacity = visible ? "1" : "0.3";
     }
+  }
 
-    dispose(): void {
-        if (this.wrapper && this.container.contains(this.wrapper)) {
-            this.container.removeChild(this.wrapper);
-        }
+  dispose(): void {
+    if (this.wrapper && this.container.contains(this.wrapper)) {
+      this.container.removeChild(this.wrapper);
     }
+  }
 }
 
 /**
  * Mount function for SectionManager integration
  */
 export function mountStripe(container: HTMLElement): VisualizationControl {
-    const stripe = new StripeButton(container);
-    return {
-        dispose: () => stripe.dispose(),
-        setVisible: (v) => stripe.setVisible(v),
-    };
+  const stripe = new StripeButton(container);
+  return {
+    dispose: () => stripe.dispose(),
+    setVisible: (v) => stripe.setVisible(v),
+  };
 }
