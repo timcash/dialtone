@@ -16,6 +16,7 @@ import (
 	"dialtone/cli/src/core/ssh"
 
 	"github.com/chromedp/chromedp"
+	"github.com/chromedp/cdproto/runtime"
 )
 
 // CheckLocalDependencies checks if Go, Node.js, and Tailscale are installed.
@@ -192,6 +193,21 @@ func checkWebUI(url string) error {
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	var consoleErrors []string
+	chromedp.ListenTarget(ctx, func(ev interface{}) {
+		switch ev := ev.(type) {
+		case *runtime.EventConsoleAPICalled:
+			if ev.Type != "error" {
+				return
+			}
+			for _, arg := range ev.Args {
+				consoleErrors = append(consoleErrors, fmt.Sprintf("[console] %v", arg.Value))
+			}
+		case *runtime.EventExceptionThrown:
+			consoleErrors = append(consoleErrors, fmt.Sprintf("[exception] %s", ev.ExceptionDetails.Text))
+		}
+	})
+
 	var title string
 	var termExists, threeExists, camExists bool
 	err = chromedp.Run(ctx,
@@ -241,6 +257,10 @@ func checkWebUI(url string) error {
 	fmt.Printf("[chromedp] Telemetry Check: NATS=%s, Heartbeat=%s\n", natsVal, heartbeatVal)
 	fmt.Printf("[chromedp] 6DOF Check: Lat=%s, Lon=%s, Att=%s, Yaw=%s\n", latVal, lonVal, rpVal, yawVal)
 
+	if err := failOnConsoleErrors(consoleErrors); err != nil {
+		return err
+	}
+
 	if natsVal == "0" || natsVal == "--" {
 		fmt.Println("[chromedp] Warning: NATS message count is 0 or uninitialized.")
 	}
@@ -257,6 +277,17 @@ func checkWebUI(url string) error {
 	fmt.Printf("[chromedp] Dashboard Title: %s\n", title)
 	fmt.Println("[chromedp] UI Layout Verified (Terminal, 3D, Telemetry present)")
 	return nil
+}
+
+func failOnConsoleErrors(consoleErrors []string) error {
+	if len(consoleErrors) == 0 {
+		return nil
+	}
+	fmt.Println("[chromedp] Console errors detected:")
+	for _, msg := range consoleErrors {
+		fmt.Printf("  %s\n", msg)
+	}
+	return fmt.Errorf("browser console errors detected")
 }
 
 func resolveDialtoneSh() (string, error) {
