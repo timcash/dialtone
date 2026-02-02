@@ -7,6 +7,7 @@ uniform float uAmbientIntensity;
 uniform vec3 uTint;
 uniform float uColorScale;
 uniform float uGlow;
+uniform float uCloudAmount;
 varying vec3 vPosition;
 varying vec3 vNormal;
 
@@ -81,8 +82,9 @@ void main() {
     float nBase = fbm(vPosition * (CLOUD_SCALE * 0.7) + q * 1.3 + uTime * 0.06);
     
     // Atmospheric "Breathing" Oscillation
+    float baseThreshold = mix(0.5, -0.1, uCloudAmount);
     float breath = sin(uTime * 0.15) * 0.05;
-    float threshold = 0.2 + breath;
+    float threshold = baseThreshold + breath;
     float alpha = smoothstep(threshold, threshold + 0.4, nBase) * CLOUD_OPACITY;
 
     vec3 sunDir = normalize(uSunDir);

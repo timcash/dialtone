@@ -303,11 +303,12 @@ func verifyHomePage(ctx context.Context) error {
 			return fmt.Errorf("container/element %s not found in %s", s.search, s.id)
 		}
 
-		// Navigate to next section using simulated ArrowDown
+		// Navigate to next section using URL anchor
 		if i < len(sections)-1 {
-			fmt.Printf("   -> Navigating to next section using ArrowDown\n")
-			if err := chromedp.Run(ctx, chromedp.KeyEvent("\u21e3")); err != nil { // ArrowDown
-				return fmt.Errorf("failed to navigate to next section: %v", err)
+			nextId := sections[i+1].id
+			fmt.Printf("   -> Navigating to next section using URL: #%s\n", nextId)
+			if err := chromedp.Run(ctx, chromedp.Navigate(fmt.Sprintf("http://127.0.0.1:5173/#%s", nextId))); err != nil {
+				return fmt.Errorf("failed to navigate to next section %s: %v", nextId, err)
 			}
 			time.Sleep(1 * time.Second) // Wait for snap animation
 		}
