@@ -68,7 +68,12 @@ class NeuralNetworkVisualization {
     this.container = container;
     this.renderer.setClearColor(0x000000, 0);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.container.appendChild(this.renderer.domElement);
+    const existingCanvas = container.querySelector('canvas');
+    if (existingCanvas) {
+      this.renderer.domElement = existingCanvas as HTMLCanvasElement;
+    } else {
+      this.container.appendChild(this.renderer.domElement);
+    }
 
     this.initScene();
     this.initConfigPanel();
@@ -473,9 +478,33 @@ class NeuralNetworkVisualization {
 }
 
 export function mountNeuralNetwork(container: HTMLElement) {
+  // Inject HTML
+  container.innerHTML = `
+      <div class="marketing-overlay" aria-label="Neural network marketing information">
+        <h2>Mathematics powers autonomy</h2>
+        <p>From gradients to control loops. Experience the logic that drives intelligent behavior.</p>
+        <button class="buy-button">Coming Soon</button>
+      </div>
+      <div id="nn-config-panel" class="earth-config-panel" hidden></div>
+    `;
+
+  // Create and inject config toggle
+  const controls = document.querySelector('.top-right-controls');
+  const toggle = document.createElement('button');
+  toggle.id = 'nn-config-toggle';
+  toggle.className = 'earth-config-toggle';
+  toggle.type = 'button';
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.textContent = 'Config';
+  controls?.prepend(toggle);
+
   const viz = new NeuralNetworkVisualization(container);
   return {
-    dispose: () => viz.dispose(),
+    dispose: () => {
+      viz.dispose();
+      toggle.remove();
+      container.innerHTML = '';
+    },
     setVisible: (visible: boolean) => viz.setVisible(visible),
   };
 }

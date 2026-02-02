@@ -350,7 +350,12 @@ class RobotArmVisualization {
     canvas.style.width = "100%";
     canvas.style.height = "100%";
 
-    this.container.appendChild(canvas);
+    const existingCanvas = container.querySelector('canvas');
+    if (existingCanvas) {
+      this.renderer.domElement = existingCanvas as HTMLCanvasElement;
+    } else {
+      this.container.appendChild(canvas);
+    }
 
     this.initScene();
     this.initConfigPanel();
@@ -809,9 +814,33 @@ class RobotArmVisualization {
 }
 
 export function mountRobot(container: HTMLElement) {
+  // Inject HTML
+  container.innerHTML = `
+      <div class="marketing-overlay" aria-label="Robot visualization marketing information">
+        <h2>Robotics begins with precision control</h2>
+        <p>Interact with physical systems through low-latency digital twins. Build the future of automation.</p>
+        <button class="buy-button">Coming Soon</button>
+      </div>
+      <div id="robot-config-panel" class="earth-config-panel" hidden></div>
+    `;
+
+  // Create and inject config toggle
+  const controls = document.querySelector('.top-right-controls');
+  const toggle = document.createElement('button');
+  toggle.id = 'robot-config-toggle';
+  toggle.className = 'earth-config-toggle';
+  toggle.type = 'button';
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.textContent = 'Config';
+  controls?.prepend(toggle);
+
   const viz = new RobotArmVisualization(container);
   return {
-    dispose: () => viz.dispose(),
+    dispose: () => {
+      viz.dispose();
+      toggle.remove();
+      container.innerHTML = '';
+    },
     setVisible: (visible: boolean) => viz.setVisible(visible),
   };
 }
