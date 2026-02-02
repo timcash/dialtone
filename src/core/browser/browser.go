@@ -14,6 +14,30 @@ import (
 	"github.com/shirou/gopsutil/v3/process"
 )
 
+// resolveWinBin returns the path to a Windows binary, falling back to absolute paths on WSL.
+func resolveWinBin(binName string, fallbackPath string) string {
+	if _, err := exec.LookPath(binName); err == nil {
+		return binName
+	}
+	if IsWSL() {
+		// Common Windows System32 paths for WSL
+		fullPath := "/mnt/c/Windows/System32/" + binName
+		if binName == "powershell.exe" {
+			fullPath = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+		}
+		if _, err := os.Stat(fullPath); err == nil {
+			return fullPath
+		}
+		// Try provided fallback if any
+		if fallbackPath != "" {
+			if _, err := os.Stat(fallbackPath); err == nil {
+				return fallbackPath
+			}
+		}
+	}
+	return binName
+}
+
 // CleanupPort attempts to kill any process listening on the specified port.
 func CleanupPort(port int) error {
 	switch runtime.GOOS {
@@ -28,7 +52,9 @@ func CleanupPort(port int) error {
 		}
 	case "linux":
 		if IsWSL() {
-			cmd := exec.Command("cmd.exe", "/c", fmt.Sprintf("netstat -ano | findstr :%d", port))
+			cmdBin := resolveWinBin("cmd.exe", "")
+			tkBin := resolveWinBin("taskkill.exe", "")
+			cmd := exec.Command(cmdBin, "/c", fmt.Sprintf("netstat -ano | findstr :%d", port))
 			out, _ := cmd.CombinedOutput()
 			lines := strings.Split(string(out), "\n")
 			for _, line := range lines {
@@ -37,7 +63,7 @@ func CleanupPort(port int) error {
 					if len(parts) > 0 {
 						pid := parts[len(parts)-1]
 						fmt.Printf("Cleaning up stale process on port %d (PID: %s)...\n", port, pid)
-						exec.Command("taskkill.exe", "/F", "/PID", pid).Run()
+						exec.Command(tkBin, "/F", "/PID", pid).Run()
 					}
 				}
 			}
@@ -185,7 +211,8 @@ func ListChromeProcesses(showAll bool) ([]ChromeProcess, error) {
 	if runtime.GOOS == "linux" && IsWSL() {
 		// Get detailed info for filtering and headless detection
 		script := `Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe' OR Name = 'msedge.exe'" | Select-Object ProcessId, CommandLine | ConvertTo-Csv -NoTypeInformation`
-		cmd := exec.Command("powershell.exe", "-Command", script)
+		psBin := resolveWinBin("powershell.exe", "")
+		cmd := exec.Command(psBin, "-Command", script)
 		out, _ := cmd.Output()
 		if len(out) > 0 {
 			reader := csv.NewReader(strings.NewReader(strings.ReplaceAll(string(out), "\r\n", "\n")))
@@ -253,7 +280,8 @@ func detectOrigin(cmdline string) string {
 func KillProcessByPID(pid int, isWindows bool) error {
 	if isWindows && runtime.GOOS == "linux" && IsWSL() {
 		// taskkill.exe is for the real Windows PID
-		return exec.Command("taskkill.exe", "/F", "/PID", fmt.Sprintf("%d", pid)).Run()
+		tkBin := resolveWinBin("taskkill.exe", "")
+		return exec.Command(tkBin, "/F", "/PID", fmt.Sprintf("%d", pid)).Run()
 	}
 
 	// For native Linux/macOS or interop proxies in WSL, use normal kill
@@ -269,7 +297,8 @@ func KillProcessByPID(pid int, isWindows bool) error {
 func KillAllChromeProcesses() error {
 	if runtime.GOOS == "linux" && IsWSL() {
 		// Kill Windows processes
-		_ = exec.Command("powershell.exe", "-Command", "Get-Process chrome, msedge -ErrorAction SilentlyContinue | Stop-Process -Force").Run()
+		psBin := resolveWinBin("powershell.exe", "")
+		_ = exec.Command(psBin, "-Command", "Get-Process chrome, msedge -ErrorAction SilentlyContinue | Stop-Process -Force").Run()
 		// Also kill native Linux processes if any
 	}
 	
