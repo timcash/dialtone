@@ -477,8 +477,8 @@ export function mountNeuralNetwork(container: HTMLElement) {
   // Inject HTML
   container.innerHTML = `
       <div class="marketing-overlay" aria-label="Neural network marketing information">
-        <h2>Mathematics powers autonomy</h2>
-        <p>From gradients to control loops. Experience the logic that drives intelligent behavior.</p>
+        <h2>Neural Intelligence</h2>
+        <p>From simple perceptrons to deep transformers. Explore the biological inspiration behind modern artificial intelligence.</p>
       </div>
       <div id="nn-config-panel" class="earth-config-panel" hidden></div>
     `;
