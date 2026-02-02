@@ -141,9 +141,15 @@ func LaunchChrome(port int, gpu bool, targetURL string) (*LaunchResult, error) {
 	if runtime.GOOS == "linux" && browser.IsWSL() {
 		// Detect if we are in an SSH session where cmd.exe might have issues with UNC paths
 		// We MUST use a local Windows drive (e.g. C:\) for Chrome profiles. 
-		// Chrome does NOT support profiles on network/UNC paths (like \\wsl.localhost\...).
-		
-		out, err := exec.Command("cmd.exe", "/c", "echo %TEMP%").Output()
+		cmdPath := "cmd.exe"
+		if _, err := exec.LookPath(cmdPath); err != nil {
+			// Fallback for SSH environments where C:\Windows\System32 might not be in PATH
+			if _, err := os.Stat("/mnt/c/Windows/System32/cmd.exe"); err == nil {
+				cmdPath = "/mnt/c/Windows/System32/cmd.exe"
+			}
+		}
+
+		out, err := exec.Command(cmdPath, "/c", "echo %TEMP%").Output()
 		if err == nil {
 			// Handle potential UNC path warnings and SSH noise in output
 			// We look for a line that specifically starts with a drive letter (e.g. C:\)
@@ -162,7 +168,6 @@ func LaunchChrome(port int, gpu bool, targetURL string) (*LaunchResult, error) {
 			}
 		}
 
-		// Only if %TEMP% detection failed, we try wslpath but only if we can be sure it's not UNC
 		if userDataDir == "" {
 			cwd, _ := os.Getwd()
 			out, err := exec.Command("wslpath", "-w", cwd).Output()
