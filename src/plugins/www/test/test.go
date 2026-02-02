@@ -271,7 +271,7 @@ func verifyHomePage(ctx context.Context) error {
 		{"s-home", "Now is the time to learn and build", "#earth-container"},
 		{"s-robot", "Robotics begins with precision control", "#robot-container"},
 		{"s-neural", "Mathematics powers autonomy", "#nn-container"},
-		{"s-curriculum", "Build the future, step by step", "#curriculum-container"},
+		{"s-math", "Mathematics powers autonomy", "#math-container"},
 		{"s-cad", "Parametric Design Logic", "#cad-container"},
 		{"s-about", "Vision", "#about-container"},
 		{"s-docs", "Documentation", "#docs-container"},
