@@ -194,7 +194,7 @@ func checkWebUI(url string) error {
 
 	var title string
 	var termExists, threeExists, camExists bool
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.Navigate(url),
 		chromedp.Title(&title),
 		chromedp.Sleep(2*time.Second), // Allow JS initialization
