@@ -139,12 +139,40 @@ func LaunchChrome(port int, gpu bool, targetURL string) (*LaunchResult, error) {
 	// Use a local user data dir in the workspace, segregated by port to allow multiple instances
 	var userDataDir string
 	if runtime.GOOS == "linux" && browser.IsWSL() {
-		// Use Windows %TEMP% to avoid "Network Drive" warnings on /mnt/c
+		// Detect if we are in an SSH session where cmd.exe might have issues with UNC paths
+		// We MUST use a local Windows drive (e.g. C:\) for Chrome profiles. 
+		// Chrome does NOT support profiles on network/UNC paths (like \\wsl.localhost\...).
+		
 		out, err := exec.Command("cmd.exe", "/c", "echo %TEMP%").Output()
 		if err == nil {
-			winTemp := strings.TrimSpace(string(out))
-			// Ensure we use backslashes for the Windows process
-			userDataDir = winTemp + "\\" + fmt.Sprintf("dialtone-chrome-port-%d", port)
+			// Handle potential UNC path warnings and SSH noise in output
+			// We look for a line that specifically starts with a drive letter (e.g. C:\)
+			lines := strings.Split(strings.ReplaceAll(string(out), "\r\n", "\n"), "\n")
+			winTemp := ""
+			for _, l := range lines {
+				l = strings.TrimSpace(l)
+				if len(l) >= 3 && l[1] == ':' && l[2] == '\\' {
+					winTemp = l
+					break
+				}
+			}
+			
+			if winTemp != "" {
+				userDataDir = winTemp + "\\" + fmt.Sprintf("dialtone-chrome-port-%d", port)
+			}
+		}
+
+		// Only if %TEMP% detection failed, we try wslpath but only if we can be sure it's not UNC
+		if userDataDir == "" {
+			cwd, _ := os.Getwd()
+			out, err := exec.Command("wslpath", "-w", cwd).Output()
+			if err == nil {
+				winCwd := strings.TrimSpace(string(out))
+				// Only use it if it's NOT a UNC path (unlikely to work for profiles but better than nothing)
+				if !strings.HasPrefix(winCwd, "\\\\") {
+					userDataDir = winCwd + "\\" + ".chrome_data" + "\\" + fmt.Sprintf("dialtone-chrome-port-%d", port)
+				}
+			}
 		}
 	}
 
