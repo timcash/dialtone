@@ -815,7 +815,6 @@ export function mountRobot(container: HTMLElement) {
       <div class="marketing-overlay" aria-label="Robot visualization marketing information">
         <h2>Robotics begins with precision control</h2>
         <p>Interact with physical systems through low-latency digital twins. Build the future of automation.</p>
-        <button class="buy-button">Coming Soon</button>
       </div>
       <div id="robot-config-panel" class="earth-config-panel" hidden></div>
     `;

@@ -29,7 +29,7 @@
     --theme-gradient: linear-gradient(90deg, #8b5cf6, #ec4899);
 }
 
-[data-theme="curriculum"] {
+[data-theme="math"] {
     --theme-primary: #10b981;
     --theme-secondary: #06b6d4;
     --theme-accent: rgba(16, 185, 129, 0.3);
