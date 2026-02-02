@@ -7,10 +7,12 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"dialtone/cli/src/core/build"
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/ssh"
+	sshlib "golang.org/x/crypto/ssh"
 )
 
 // RunDeploy handles deployment to remote robot
@@ -51,7 +53,7 @@ func RunDeploy(args []string) {
 	}
 
 	// Validate required environment variables
-	validateRequiredVars([]string{"DIALTONE_HOSTNAME", "TS_AUTHKEY"})
+	validateRequiredVars([]string{"DIALTONE_HOSTNAME", "TS_AUTHKEY", "MAVLINK_ENDPOINT"})
 
 	deployDialtone(*host, *port, *user, *pass, *ephemeral)
 }
@@ -92,6 +94,8 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 	// 3. Run Build (Cross-Compile)
 	// We use --local to favor our Zig installation which is configured for GLIBC 2.36 targeting.
 	logger.LogInfo("Cross-compiling for %s...", remoteArch)
+	// Skip public WWW build during deploy (not required for robot binary)
+	_ = os.Setenv("DIALTONE_SKIP_WWW", "1")
 	build.RunBuild([]string{"--local", buildFlag})
 
 	localBinaryPath := filepath.Join("bin", binaryName)
@@ -147,6 +151,8 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 		logger.LogFatal("Failed to start: %v", err)
 	}
 
+	verifyTailscaleAuth(client)
+
 	logger.LogInfo("Deployment complete!")
 	logger.LogInfo("Run './dialtone.sh logs --remote' to verify startup.")
 }
@@ -161,4 +167,63 @@ func validateRequiredVars(vars []string) {
 	if len(missing) > 0 {
 		logger.LogFatal("Missing required environment variables: %s. Please check your .env file.", strings.Join(missing, ", "))
 	}
+}
+
+func verifyTailscaleAuth(client *sshlib.Client) {
+	logger.LogInfo("Verifying Tailscale auth key...")
+
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		logOutput, err := ssh.RunSSHCommand(client, "tail -n 200 ~/nats.log")
+		if err != nil {
+			logger.LogFatal("Failed to read remote logs for Tailscale verification: %v", err)
+		}
+
+		if reason := tsnetFailureReason(logOutput); reason != "" {
+			logger.LogFatal("Tailscale auth failed: %s\nRecent log output:\n%s", reason, tailLines(logOutput, 30))
+		}
+		if tsnetSuccess(logOutput) {
+			logger.LogInfo("Tailscale auth key verified.")
+			return
+		}
+
+		time.Sleep(2 * time.Second)
+	}
+
+	logger.LogInfo("Tailscale auth key verification pending (no failures detected yet).")
+	logger.LogInfo("If startup looks stalled, check logs with './dialtone.sh logs --remote'.")
+}
+
+func tsnetFailureReason(logOutput string) string {
+	failures := map[string]string{
+		"TS_AUTHKEY environment variable is not set": "TS_AUTHKEY is missing on the remote process",
+		"Failed to connect to Tailscale":             "failed to connect to Tailscale (invalid or expired auth key)",
+		"Timed out waiting for Tailscale IP":         "timed out waiting for a Tailscale IP",
+	}
+
+	for needle, reason := range failures {
+		if strings.Contains(logOutput, needle) {
+			return reason
+		}
+	}
+
+	if strings.Contains(logOutput, "[FATAL]") && strings.Contains(strings.ToLower(logOutput), "tailscale") {
+		return "fatal Tailscale error (see logs)"
+	}
+
+	return ""
+}
+
+func tsnetSuccess(logOutput string) bool {
+	return strings.Contains(logOutput, "TSNet: Connected") ||
+		strings.Contains(logOutput, "Connected to Tailscale") ||
+		strings.Contains(logOutput, "Tailscale IP")
+}
+
+func tailLines(output string, maxLines int) string {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) <= maxLines {
+		return strings.Join(lines, "\n")
+	}
+	return strings.Join(lines[len(lines)-maxLines:], "\n")
 }
