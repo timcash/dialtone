@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import { IKSolver } from "./ik";
+import { VisibilityMixin } from "./section";
+
 
 // Joint colors by type
 const JOINT_COLORS = {
@@ -310,6 +312,9 @@ class RobotArmVisualization {
   container: HTMLElement;
   frameId = 0;
   resizeObserver?: ResizeObserver;
+  isVisible = true;
+  frameCount = 0;
+
 
   robotArm!: RobotArm;
   ikSolver!: IKSolver;
@@ -748,17 +753,8 @@ class RobotArmVisualization {
     );
   }
 
-  isVisible = true;
-  frameCount = 0;
-
   setVisible(visible: boolean) {
-    if (this.isVisible !== visible) {
-      console.log(
-        `%c[robot] ${visible ? "▶️ Resuming" : "⏸️ Pausing"} at frame ${this.frameCount}`,
-        visible ? "color: #22c55e" : "color: #f59e0b",
-      );
-    }
-    this.isVisible = visible;
+    VisibilityMixin.setVisible(this, visible, "robot");
     if (!visible) {
       this.setPanelOpen?.(false);
     }

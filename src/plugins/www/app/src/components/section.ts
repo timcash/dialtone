@@ -112,27 +112,31 @@ export class SectionManager {
           const sectionId = entry.target.id;
 
           if (entry.isIntersecting) {
+            // High Priority: Load and show the current section
             this.load(sectionId).then(() => {
               const control = this.visualizations.get(sectionId);
               if (control) {
                 control.setVisible(true);
                 if (this.debug) {
-                  console.log(
-                    `%c[${sectionId}] ▶️ AWAKE - animation running`,
-                    "color: #3b82f6; font-weight: bold",
-                  );
+                  // The component itself will log the "AWAKE" message via VisibilityMixin
                 }
               }
             });
+
+            // Predictive Priority: Preload next section (but keep it paused)
+            const nextId = this.getNextSectionId(sectionId);
+            if (nextId) {
+              if (this.debug) {
+                console.log(`%c[${sectionId}] 🔮 Predictive loading next: ${nextId}`, "color: #94a3b8");
+              }
+              this.load(nextId);
+            }
           } else {
             const control = this.visualizations.get(sectionId);
             if (control) {
               control.setVisible(false);
               if (this.debug) {
-                console.log(
-                  `%c[${sectionId}] 💤 SLEEP - animation paused`,
-                  "color: #8b5cf6",
-                );
+                // The component itself will log the "SLEEP" message via VisibilityMixin
               }
             }
           }
@@ -169,7 +173,27 @@ export class SectionManager {
         "color: #f59e0b",
       );
     }
+    const nextId = this.getNextSectionId(sectionId);
+    if (nextId) {
+      if (this.debug) {
+        console.log(`%c[SectionManager] 🔮 Predictive loading second section: ${nextId}`, "color: #94a3b8");
+      }
+      this.load(nextId);
+    }
+
     return this.load(sectionId);
+  }
+
+  /**
+   * Get the ID of the section immediately following the given section
+   */
+  private getNextSectionId(sectionId: string): string | undefined {
+    const keys = Array.from(this.configs.keys());
+    const index = keys.indexOf(sectionId);
+    if (index !== -1 && index < keys.length - 1) {
+      return keys[index + 1];
+    }
+    return undefined;
   }
 
   /**
@@ -212,10 +236,13 @@ export class SectionManager {
       .load()
       .then((control) => {
         this.visualizations.set(sectionId, control);
+        // Ensure it starts paused (predictive load) until observer wakes it up
+        control.setVisible(false);
+
         if (this.debug) {
           const elapsed = (performance.now() - startTime).toFixed(0);
           console.log(
-            `%c[${sectionId}] ✅ Loaded and mounted (${elapsed}ms)`,
+            `%c[${sectionId}] ✅ Mounted & Paused (${elapsed}ms)`,
             "color: #22c55e; font-weight: bold",
           );
         }
@@ -298,10 +325,17 @@ export const VisibilityMixin = {
     name: string,
   ): void {
     if (target.isVisible !== visible) {
-      console.log(
-        `%c[${name}] ${visible ? "▶️ Resuming" : "⏸️ Pausing"} at frame ${target.frameCount}`,
-        visible ? "color: #22c55e" : "color: #f59e0b",
-      );
+      if (visible) {
+        console.log(
+          `%c[${name}] ▶️ AWAKE - animation running`,
+          "color: #3b82f6; font-weight: bold",
+        );
+      } else {
+        console.log(
+          `%c[${name}] 💤 SLEEP - animation paused`,
+          "color: #8b5cf6",
+        );
+      }
     }
     target.isVisible = visible;
   },

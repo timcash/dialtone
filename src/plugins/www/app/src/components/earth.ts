@@ -10,6 +10,7 @@ import atmosphereFragmentShader from "../shaders/atmosphere.frag.glsl?raw";
 import sunAtmosphereVertexShader from "../shaders/sun_atmosphere.vert.glsl?raw";
 import sunAtmosphereFragmentShader from "../shaders/sun_atmosphere.frag.glsl?raw";
 import { setupConfigPanel, updateTelemetry } from "./earth/config_ui";
+import { VisibilityMixin } from "./section";
 
 const DEG_TO_RAD = Math.PI / 180;
 const TIME_SCALE = 1;
@@ -22,6 +23,9 @@ export class ProceduralOrbit {
   container: HTMLElement;
   frameId = 0;
   resizeObserver?: ResizeObserver;
+
+  isVisible = true;
+  frameCount = 0;
 
   earth!: THREE.Mesh;
   cloud1!: THREE.Mesh;
@@ -343,10 +347,9 @@ export class ProceduralOrbit {
     updateTelemetry(this, orbitRadius);
   }
 
-  isVisible = true;
-  setVisible(v: boolean) {
-    this.isVisible = v;
-    if (!v) {
+  setVisible(visible: boolean) {
+    VisibilityMixin.setVisible(this, visible, "earth");
+    if (!visible) {
       this.setConfigPanelOpen?.(false);
     }
   }
@@ -485,6 +488,6 @@ export function mountEarth(container: HTMLElement) {
       toggle.remove();
       container.innerHTML = '';
     },
-    setVisible: (v: boolean) => orbit.setVisible(v),
+    setVisible: (visible: boolean) => orbit.setVisible(visible),
   };
 }

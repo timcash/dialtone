@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import glowVertexShader from "../shaders/glow.vert.glsl?raw";
 import glowFragmentShader from "../shaders/glow.frag.glsl?raw";
+import { VisibilityMixin } from "./section";
+
 
 const COLORS = {
   input: new THREE.Color(0x06b6d4), // cyan
@@ -33,6 +35,9 @@ class NeuralNetworkVisualization {
   container: HTMLElement;
   frameId = 0;
   resizeObserver?: ResizeObserver;
+  isVisible = true;
+  frameCount = 0;
+
 
   // Neural network structure
   neurons: Neuron[] = [];
@@ -399,17 +404,8 @@ class NeuralNetworkVisualization {
     };
   }
 
-  isVisible = true;
-  frameCount = 0;
-
   setVisible(visible: boolean) {
-    if (this.isVisible !== visible) {
-      console.log(
-        `%c[neural] ${visible ? "▶️ Resuming" : "⏸️ Pausing"} at frame ${this.frameCount}`,
-        visible ? "color: #22c55e" : "color: #f59e0b",
-      );
-    }
-    this.isVisible = visible;
+    VisibilityMixin.setVisible(this, visible, "neural");
     if (!visible) {
       this.setPanelOpen?.(false);
     }
