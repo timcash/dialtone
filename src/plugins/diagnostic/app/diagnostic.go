@@ -292,8 +292,15 @@ func failOnConsoleErrors(consoleErrors []string) error {
 		return nil
 	}
 	fmt.Println("[chromedp] Console errors detected:")
-	for _, msg := range consoleErrors {
+	limit := 5
+	if len(consoleErrors) < limit {
+		limit = len(consoleErrors)
+	}
+	for _, msg := range consoleErrors[:limit] {
 		fmt.Printf("  %s\n", msg)
+	}
+	if len(consoleErrors) > limit {
+		fmt.Printf("  ...and %d more\n", len(consoleErrors)-limit)
 	}
 	return fmt.Errorf("browser console errors detected")
 }
