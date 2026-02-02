@@ -58,6 +58,15 @@
  *    ```
  */
 
+// Header configuration for a section
+export interface HeaderConfig {
+  visible?: boolean; // Hide/show the entire header
+  title?: string; // Override h1 text
+  subtitle?: string; // Override subtitle (priority over data-subtitle)
+  telemetry?: boolean; // Show/hide telemetry line
+  version?: boolean; // Show/hide version line
+}
+
 // Interface that all visualization controls must implement
 export interface VisualizationControl {
   dispose: () => void;
@@ -68,6 +77,7 @@ export interface VisualizationControl {
 export interface SectionConfig {
   containerId: string;
   load: () => Promise<VisualizationControl>;
+  header?: HeaderConfig; // Optional header configuration
 }
 
 /**
@@ -79,6 +89,13 @@ export class SectionManager {
   private configs = new Map<string, SectionConfig>();
   private observer: IntersectionObserver | null = null;
   private debug: boolean;
+
+  // Header element references
+  private headerEl: HTMLElement | null = null;
+  private titleEl: HTMLElement | null = null;
+  private subtitleEl: HTMLElement | null = null;
+  private telemetryEl: HTMLElement | null = null;
+  private versionEl: HTMLElement | null = null;
 
   constructor(options?: { debug?: boolean }) {
     this.debug = options?.debug ?? true;
@@ -93,6 +110,14 @@ export class SectionManager {
         "color: #888",
       );
     }
+
+    // Initialize header element references
+    this.headerEl = document.querySelector(".header-title");
+    this.titleEl = this.headerEl?.querySelector("h1") || null;
+    this.subtitleEl = document.getElementById("header-subtitle");
+    this.telemetryEl = this.headerEl?.querySelector(".header-telemetry") || null;
+    this.versionEl =
+      this.headerEl?.querySelector(".version:not(.header-telemetry)") || null;
   }
 
   /**
@@ -122,6 +147,11 @@ export class SectionManager {
                 }
               }
             });
+
+            // Update header and subtitle based on current section configuration
+            const config = this.configs.get(sectionId);
+            const sectionEl = entry.target as HTMLElement;
+            this.updateHeader(config?.header, sectionEl);
 
             // Predictive Priority: Preload next section (but keep it paused)
             const nextId = this.getNextSectionId(sectionId);
@@ -289,6 +319,43 @@ export class SectionManager {
     });
     this.visualizations.clear();
     this.loadingPromises.clear();
+  }
+
+  /**
+   * Update the global site header based on section configuration
+   */
+  private updateHeader(config?: HeaderConfig, sectionEl?: HTMLElement): void {
+    if (!this.headerEl) return;
+
+    // 1. Handle Visibility
+    const isVisible = config?.visible ?? true;
+    this.headerEl.classList.toggle("is-hidden", !isVisible);
+
+    if (!isVisible) return;
+
+    // 2. Handle Title
+    if (this.titleEl) {
+      this.titleEl.textContent = config?.title || "dialtone.earth";
+    }
+
+    // 3. Handle Subtitle (Priority: Config > data-subtitle > default)
+    if (this.subtitleEl) {
+      const defaultSubtitle = "unified robotic networks for earth";
+      const subtitle =
+        config?.subtitle || sectionEl?.dataset.subtitle || defaultSubtitle;
+      this.subtitleEl.textContent = subtitle;
+    }
+
+    // 4. Handle Telemetry & Version visibility
+    if (this.telemetryEl) {
+      const showTele = config?.telemetry ?? true;
+      this.telemetryEl.style.display = showTele ? "block" : "none";
+    }
+
+    if (this.versionEl) {
+      const showVer = config?.version ?? true;
+      this.versionEl.style.display = showVer ? "block" : "none";
+    }
   }
 }
 
