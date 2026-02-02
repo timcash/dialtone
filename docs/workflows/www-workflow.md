@@ -11,7 +11,7 @@ git checkout main
 git pull origin main
 
 # 2. Create and switch to a new feature branch
-./dialtone.sh branch feature/your-feature-name
+./dialtone.sh branch your-feature-name
 ```
 
 ## STEP 2: Local Development & Visualization
@@ -23,6 +23,9 @@ Use specific demo environments to verify Three.js visualizations and UI changes 
 
 # For CAD/Mechanical changes:
 ./dialtone.sh www cad demo
+
+# To build the plugin assets:
+./dialtone.sh build www
 ```
 
 ## STEP 3: Implementation & Standardization
