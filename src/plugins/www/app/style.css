@@ -588,6 +588,13 @@ h2 {
   transition: opacity 0.8s ease, transform 0.8s ease;
 }
 
+@media (max-width: 768px) {
+  .marketing-overlay {
+    padding: 0 1.5rem;
+    gap: 1rem;
+  }
+}
+
 .snap-slide.is-visible .marketing-overlay {
   opacity: 1;
   transform: translateY(0);

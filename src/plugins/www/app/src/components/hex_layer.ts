@@ -1,5 +1,5 @@
-import * as THREE from 'three';
-import { cellToBoundary, latLngToCell } from 'h3-js';
+import * as THREE from "three";
+import { cellToBoundary, latLngToCell } from "h3-js";
 
 const DEG_TO_RAD = Math.PI / 180;
 
@@ -35,8 +35,10 @@ export class HexLayer {
     const { geometry, material } = this.buildGeometry(this.radius, settings);
     this.mesh = new THREE.Mesh(geometry, material);
     this.material = material;
-    this.positionAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
-    this.startAttr = geometry.getAttribute('aStart') as THREE.BufferAttribute;
+    this.positionAttr = geometry.getAttribute(
+      "position",
+    ) as THREE.BufferAttribute;
+    this.startAttr = geometry.getAttribute("aStart") as THREE.BufferAttribute;
   }
 
   update(timeSeconds: number) {
@@ -52,7 +54,12 @@ export class HexLayer {
         }
         this.writeHexVertices(boundary, hex.vertexStart, positions);
         hex.startTime = timeSeconds;
-        this.writeHexStarts(hex.vertexStart, hex.vertexCount, timeSeconds, starts);
+        this.writeHexStarts(
+          hex.vertexStart,
+          hex.vertexCount,
+          timeSeconds,
+          starts,
+        );
         updated = true;
       }
     });
@@ -71,7 +78,7 @@ export class HexLayer {
       : [
           new THREE.Color(0.7, 0.7, 0.72),
           new THREE.Color(0.4, 0.4, 0.45),
-          new THREE.Color(0.1, 0.1, 0.12)
+          new THREE.Color(0.1, 0.1, 0.12),
         ];
     const cells = this.sampleHexCells(settings.count, settings.resolution);
     this.shuffleCells(cells);
@@ -81,7 +88,10 @@ export class HexLayer {
       const start = index / settings.ratePerSecond;
       const vertexStart = positions.length / 3;
       const center = boundary
-        .reduce((acc, [lng, lat]) => acc.add(this.latLngToVector(lat, lng, radius)), new THREE.Vector3())
+        .reduce(
+          (acc, [lng, lat]) => acc.add(this.latLngToVector(lat, lng, radius)),
+          new THREE.Vector3(),
+        )
         .divideScalar(boundary.length);
 
       for (let i = 0; i < boundary.length; i += 1) {
@@ -98,7 +108,7 @@ export class HexLayer {
           a.z,
           b.x,
           b.y,
-          b.z
+          b.z,
         );
         starts.push(start, start, start);
         colors.push(
@@ -110,7 +120,7 @@ export class HexLayer {
           tint.b,
           tint.r,
           tint.g,
-          tint.b
+          tint.b,
         );
       }
 
@@ -119,14 +129,20 @@ export class HexLayer {
         startTime: start,
         vertexStart,
         vertexCount,
-        sides: boundary.length
+        sides: boundary.length,
       });
     });
 
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    geometry.setAttribute('aStart', new THREE.Float32BufferAttribute(starts, 1));
+    geometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(positions, 3),
+    );
+    geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    geometry.setAttribute(
+      "aStart",
+      new THREE.Float32BufferAttribute(starts, 1),
+    );
     const material = new THREE.ShaderMaterial({
       transparent: true,
       vertexColors: true,
@@ -134,7 +150,7 @@ export class HexLayer {
       uniforms: {
         uTime: { value: 0 },
         uDuration: { value: settings.durationSeconds },
-        uOpacity: { value: settings.opacity ?? 0.7 }
+        uOpacity: { value: settings.opacity ?? 0.7 },
       },
       vertexShader: `
         attribute float aStart;
@@ -161,7 +177,7 @@ export class HexLayer {
           float alpha = isActive * fadeIn * fadeOut * uOpacity;
           gl_FragColor = vec4(vColor, alpha);
         }
-      `
+      `,
     });
 
     return { geometry, material };
@@ -206,9 +222,17 @@ export class HexLayer {
     return null;
   }
 
-  private writeHexVertices(boundary: number[][], vertexStart: number, positions: Float32Array) {
+  private writeHexVertices(
+    boundary: number[][],
+    vertexStart: number,
+    positions: Float32Array,
+  ) {
     const center = boundary
-      .reduce((acc, [lng, lat]) => acc.add(this.latLngToVector(lat, lng, this.radius)), new THREE.Vector3())
+      .reduce(
+        (acc, [lng, lat]) =>
+          acc.add(this.latLngToVector(lat, lng, this.radius)),
+        new THREE.Vector3(),
+      )
       .divideScalar(boundary.length);
     let writeIndex = vertexStart * 3;
     for (let i = 0; i < boundary.length; i += 1) {
@@ -228,7 +252,12 @@ export class HexLayer {
     }
   }
 
-  private writeHexStarts(vertexStart: number, vertexCount: number, startTime: number, starts: Float32Array) {
+  private writeHexStarts(
+    vertexStart: number,
+    vertexCount: number,
+    startTime: number,
+    starts: Float32Array,
+  ) {
     for (let i = 0; i < vertexCount; i += 1) {
       starts[vertexStart + i] = startTime;
     }
@@ -240,7 +269,7 @@ export class HexLayer {
     return new THREE.Vector3(
       radius * Math.sin(phi) * Math.cos(theta),
       radius * Math.cos(phi),
-      radius * Math.sin(phi) * Math.sin(theta)
+      radius * Math.sin(phi) * Math.sin(theta),
     );
   }
 }

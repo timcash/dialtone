@@ -84,6 +84,7 @@ func RunBuild(args []string) {
 				logger.LogFatal("Cross-compilation for %s/%s requires either Podman or Zig. Please install Podman (recommended) or ensure Zig is installed in your DIALTONE_ENV.", targetOS, arch)
 			}
 			buildLocally(targetOS, arch)
+			buildWWW()
 		} else {
 			compiler := "gcc-aarch64-linux-gnu"
 			cppCompiler := "g++-aarch64-linux-gnu"
@@ -92,6 +93,7 @@ func RunBuild(args []string) {
 				cppCompiler = "g++-arm-linux-gnueabihf"
 			}
 			buildWithPodman(arch, compiler, cppCompiler)
+			buildWWW()
 		}
 	}
 }
@@ -139,6 +141,12 @@ func buildWebIfNeeded(force bool) {
 	} else {
 		logger.LogInfo("Web UI build complete (size: %d bytes)", info.Size())
 	}
+}
+
+// buildWWW builds the public marketing page
+func buildWWW() {
+	logger.LogInfo("Building Public WWW Page...")
+	runShell(".", "./dialtone.sh", "www", "build")
 }
 
 func buildLocally(targetOS, targetArch string) {
@@ -357,6 +365,9 @@ func buildEverything(local bool) {
 	// 1. Build Web UI
 	logger.LogInfo("Building Web UI via UI Plugin...")
 	buildWebIfNeeded(true)
+
+	// 2. Build WWW (Public Page)
+	buildWWW()
 
 	// 3. Build AI components (shell delegation for decoupling)
 	runShell(".", "./dialtone.sh", "ai", "build")

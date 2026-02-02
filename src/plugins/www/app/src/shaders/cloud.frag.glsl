@@ -1,3 +1,4 @@
+uniform float uOpacity; // Added uniform
 uniform float uTime;
 uniform vec3 uSunDir;
 uniform vec3 uKeyDir;
@@ -6,6 +7,7 @@ uniform float uKeyIntensity;
 uniform float uAmbientIntensity;
 uniform vec3 uTint;
 uniform float uColorScale;
+uniform float uCloudAmount;
 varying vec3 vPosition;
 varying vec3 vNormal;
 
@@ -80,10 +82,10 @@ void main() {
     float nBase = fbm(vPosition * (CLOUD_SCALE * 0.6) + q * 1.5 + uTime * 0.05);
     
     // Atmospheric "Breathing" Oscillation
-    // Oscillates the cloud threshold to simulate dynamic weather shifts
+    float baseThreshold = mix(0.5, -0.1, uCloudAmount);
     float breath = sin(uTime * 0.12) * 0.06;
-    float threshold = 0.22 + breath;
-    float alpha = smoothstep(threshold, threshold + 0.35, nBase) * CLOUD_OPACITY;
+    float threshold = baseThreshold + breath;
+    float alpha = smoothstep(threshold, threshold + 0.35, nBase) * uOpacity;
 
     vec3 sunDir = normalize(uSunDir);
     vec3 keyDir = normalize(uKeyDir);
@@ -91,7 +93,7 @@ void main() {
     float diffuseKey = max(dot(vNormal, keyDir), 0.0);
     float ambientFactor = clamp(1.0 - uAmbientIntensity, 0.0, 1.0);
     float boostedDiffuse = mix(diffuseKey, pow(diffuseKey, 0.65), ambientFactor);
-    float sunTerm = pow(diffuseSun, 3.0) * uSunIntensity * 0.08;
+    float sunTerm = pow(diffuseSun, 2.5) * uSunIntensity * 0.25;
     float light = uAmbientIntensity + boostedDiffuse * uKeyIntensity + sunTerm;
     vec3 litColor = uTint * light * uColorScale;
     gl_FragColor = vec4(litColor, alpha);

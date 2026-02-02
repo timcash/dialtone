@@ -241,6 +241,7 @@ func RunWww(args []string) {
 		fmt.Println("  test               Run standard WWW integration tests")
 		fmt.Println("  test cad [--live]  Run headed browser tests for CAD generator")
 		fmt.Println("  cad demo           Zero-config local CAD development environment")
+		fmt.Println("  earth demo         Zero-config local Earth development environment")
 		fmt.Println("\nRun 'dialtone www <subcommand> --help' for specific details.")
 		return
 	}
@@ -271,6 +272,23 @@ func RunWww(args []string) {
 			return
 		}
 		logFatal("Unknown 'cad' command. Use 'dialtone www help' for usage.")
+	case "earth":
+		if len(args) > 1 && args[1] == "demo" {
+			for _, arg := range args[2:] {
+				if arg == "--help" || arg == "-h" {
+					fmt.Println("Usage: dialtone www earth demo")
+					fmt.Println("\nOrchestrates a full local Earth development environment:")
+					fmt.Println("  1. Cleans up port 5173.")
+					fmt.Println("  2. Kills existing Chrome debug instances.")
+					fmt.Println("  3. Starts the Vite WWW dev server.")
+					fmt.Println("  4. Launches Chrome with GPU acceleration on the Earth section.")
+					return
+				}
+			}
+			handleEarthDemo(webDir)
+			return
+		}
+		logFatal("Unknown 'earth' command. Use 'dialtone www help' for usage.")
 
 	case "publish":
 		publishPrebuilt(webDir, vercelPath, vercelEnv, args[1:])
@@ -535,6 +553,64 @@ func handleCadDemo(webDir string) {
 	logInfo("CAD Demo Environment is LIVE!")
 	logInfo("Dev Server: http://127.0.0.1:5173/#s-cad")
 	logInfo("CAD Server: http://127.0.0.1:8081")
+	logInfo("Press Ctrl+C to stop...")
+
+	// Wait for interrupt signal
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
+	logInfo("Shutting down...")
+}
+
+func handleEarthDemo(webDir string) {
+	logInfo("Setting up Earth Demo Environment...")
+
+	// 1. Aggressive Port Cleanup
+	logInfo("Cleaning up port 5173...")
+	_ = exec.Command("fuser", "-k", "5173/tcp").Run()
+	time.Sleep(1500 * time.Millisecond)
+
+	// 2. Kill existing Dialtone Chrome instances
+	logInfo("Cleaning up Chrome processes...")
+	_ = exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
+
+	// 3. Start WWW Dev Server (Background)
+	logInfo("Starting WWW Dev Server...")
+	devCmd := exec.Command("npm", "run", "dev", "--", "--host", "127.0.0.1")
+	devCmd.Dir = webDir
+	devCmd.Stdout = os.Stdout
+	devCmd.Stderr = os.Stderr
+	if err := devCmd.Start(); err != nil {
+		logFatal("Failed to start dev server: %v", err)
+	}
+
+	// 4. Wait for dev server to be ready
+	logInfo("Waiting for Dev Server...")
+	ready := false
+	for i := 0; i < 30; i++ {
+		resp, err := http.Get("http://127.0.0.1:5173")
+		if err == nil && resp.StatusCode == 200 {
+			ready = true
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	if !ready {
+		logFatal("Dev server failed to start within 30 seconds")
+	}
+
+	// 5. Launch GPU-enabled Chrome on Earth section
+	logInfo("Launching GPU-enabled Chrome...")
+	chromeCmd := exec.Command("./dialtone.sh", "chrome", "new", "http://127.0.0.1:5173/#s-home", "--gpu")
+	chromeCmd.Stdout = os.Stdout
+	chromeCmd.Stderr = os.Stderr
+	if err := chromeCmd.Run(); err != nil {
+		logFatal("Failed to launch Chrome: %v", err)
+	}
+
+	logInfo("Earth Demo Environment is LIVE!")
+	logInfo("Dev Server: http://127.0.0.1:5173/#s-home")
 	logInfo("Press Ctrl+C to stop...")
 
 	// Wait for interrupt signal
