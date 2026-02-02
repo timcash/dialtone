@@ -72,7 +72,7 @@ func TestChromeNew() error {
 
 func TestChromeListHeaders() error {
 	logLine("step", "Listing Chrome processes")
-	output := runCmd("./dialtone.sh", "chrome", "list")
+	output := runCmd("./dialtone.sh", "chrome", "list", "--verbose")
 	headers := []string{"PID", "PPID", "HEADLESS", "%CPU", "MEM(MB)", "CHILDREN", "PLATFORM", "COMMAND"}
 	for _, h := range headers {
 		if !strings.Contains(output, h) {
@@ -101,27 +101,38 @@ func TestProcessManagement() error {
 	// 2. Start Headed Instance
 	// NOTE: In some environments without X11 this might fail, but let's try with dummy flags
 	logLine("step", "Starting Headed Chrome manually")
-	headedCmd := exec.Command(chromePath, "--remote-debugging-port=9444", "about:blank")
 	var headedPid int
-	if err := headedCmd.Start(); err != nil {
-		logLine("warn", fmt.Sprintf("Failed to start headed chrome: %v (skipping headed test)", err))
+	headedKilled := false
+	output := runCmd("./dialtone.sh", "chrome", "new")
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "PID") {
+			fmt.Sscanf(line, "PID : %d", &headedPid)
+			break
+		}
+	}
+	if headedPid == 0 {
+		logLine("warn", "Failed to extract PID from 'chrome new' output (skipping headed test)")
 	} else {
-		headedPid = headedCmd.Process.Pid
-		defer headedCmd.Process.Kill()
 		logLine("info", fmt.Sprintf("Started Headed Chrome (PID: %d)", headedPid))
+		defer func() {
+			if !headedKilled {
+				runCmd("./dialtone.sh", "chrome", "kill", fmt.Sprintf("%d", headedPid))
+			}
+		}()
 	}
 
 	time.Sleep(2 * time.Second) // Let them settle
 
 	// 3. Verify they are in the list with correct HEADLESS state
 	logLine("step", "Verifying instances and states in dialtone chrome list")
-	output := runCmd("./dialtone.sh", "chrome", "list")
+	output = runCmd("./dialtone.sh", "chrome", "list")
 	
 	// Check Headless
 	if !strings.Contains(output, fmt.Sprintf("%d", hlessPid)) {
 		return fmt.Errorf("headless PID %d not found in list", hlessPid)
 	}
-	lines := strings.Split(output, "\n")
+	lines = strings.Split(output, "\n")
 	foundHless := false
 	for _, line := range lines {
 		if strings.Contains(line, fmt.Sprintf("%d", hlessPid)) && strings.Contains(line, "YES") {
@@ -164,6 +175,7 @@ func TestProcessManagement() error {
 	if headedPid > 0 {
 		logLine("step", fmt.Sprintf("Killing Headed PID %d via dialtone", headedPid))
 		runCmd("./dialtone.sh", "chrome", "kill", fmt.Sprintf("%d", headedPid))
+		headedKilled = true
 		time.Sleep(1 * time.Second)
 
 		logLine("step", "Checking list after headed kill")
