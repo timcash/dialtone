@@ -57,6 +57,7 @@ sections.register('s-cad', {
 
 sections.register('s-about', {
     containerId: 'about-container',
+    header: { visible: false },
     load: async () => {
         const { mountAbout } = await import('./components/about');
         const container = document.getElementById('about-container');
@@ -67,6 +68,7 @@ sections.register('s-about', {
 
 sections.register('s-docs', {
     containerId: 'docs-container',
+    header: { visible: false },
     load: async () => {
         const { mountDocs } = await import('./components/docs');
         const container = document.getElementById('docs-container');
@@ -79,20 +81,7 @@ sections.register('s-docs', {
 sections.observe();
 sections.eagerLoad('s-home');
 
-// Subtitle updates based on visible slide
-const subtitleEl = document.getElementById('header-subtitle');
 const slides = document.querySelectorAll('.snap-slide[data-subtitle]');
-
-const subtitleObserver = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-        if (entry.isIntersecting && subtitleEl) {
-            const subtitle = (entry.target as HTMLElement).dataset.subtitle || '';
-            subtitleEl.textContent = subtitle;
-        }
-    });
-}, { threshold: 0.5 });
-
-slides.forEach(slide => subtitleObserver.observe(slide));
 
 // Marketing fade-in on section entry
 const marketingObserver = new IntersectionObserver((entries) => {
