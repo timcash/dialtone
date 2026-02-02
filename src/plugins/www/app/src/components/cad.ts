@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import glowVertexShader from "../shaders/glow.vert.glsl?raw";
 import glowFragmentShader from "../shaders/glow.frag.glsl?raw";
+import { VisibilityMixin } from "./section";
+
 
 export class CADViewer {
   scene = new THREE.Scene();
@@ -14,6 +16,9 @@ export class CADViewer {
   container: HTMLElement;
   gearGroup = new THREE.Group();
   frameId = 0;
+  isVisible = true;
+  frameCount = 0;
+
 
   // Animation state
   time = 0;
@@ -358,10 +363,9 @@ export class CADViewer {
     this.camera.updateProjectionMatrix();
   };
 
-  isVisible = true;
-  setVisible(isVisible: boolean) {
-    this.isVisible = isVisible;
-    if (!isVisible) {
+  setVisible(visible: boolean) {
+    VisibilityMixin.setVisible(this, visible, "cad");
+    if (!visible) {
       this.setPanelOpen(false);
     }
   }
@@ -433,6 +437,6 @@ export function mountCAD(container: HTMLElement) {
       toggle.remove();
       container.innerHTML = '';
     },
-    setVisible: (v: boolean) => viewer.setVisible(v),
+    setVisible: (visible: boolean) => viewer.setVisible(visible),
   };
 }
