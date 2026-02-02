@@ -46,6 +46,7 @@ func VerifyChrome(port int, debug bool) error {
 		chromedp.ExecPath(path),
 		chromedp.Flag("remote-debugging-port", fmt.Sprintf("%d", port)),
 		chromedp.Flag("remote-debugging-address", "127.0.0.1"), // Force IPv4 to avoid [::1] connection issues on WSL
+		chromedp.Flag("dialtone-origin", true),
 		chromedp.Flag("disable-gpu", true),
 	)
 
@@ -149,7 +150,7 @@ func LaunchChrome(port int, gpu bool, targetURL string) (*LaunchResult, error) {
 
 	if userDataDir == "" {
 		cwd, _ := os.Getwd()
-		userDataDir = filepath.Join(cwd, ".chrome_data", fmt.Sprintf("instance_%d", port))
+		userDataDir = filepath.Join(cwd, ".chrome_data", fmt.Sprintf("dialtone-chrome-port-%d", port))
 		_ = os.MkdirAll(userDataDir, 0755)
 	}
 

@@ -230,6 +230,8 @@ func runPluginTest(pluginName string, showList bool) {
 		runNexttoneTests()
 	case "cad":
 		runCadTests()
+	case "chrome":
+		runChromeTests()
 	case "www-cad":
 		runWwwCadTests()
 	default:
@@ -277,7 +279,7 @@ func printTestUsage() {
 	fmt.Println("Note: For ticket-specific verification, use: ./dialtone.sh ticket test <ticket-name>")
 	fmt.Println()
 	fmt.Println("Available Plugins:")
-	fmt.Println("  ticket, test, ui, ai, ide, diagnostic, www, nexttone, cad")
+	fmt.Println("  ticket, test, ui, ai, ide, diagnostic, www, nexttone, cad, chrome")
 }
 
 func runAllTests(showList bool) {
@@ -373,6 +375,17 @@ func runCadTests() {
 		logger.LogFatal("CAD tests failed: %v", err)
 	}
 	logger.LogInfo("CAD Plugin Tests passed!")
+}
+
+func runChromeTests() {
+	logger.LogInfo("Running Chrome Plugin Tests...")
+	cmd := exec.Command("go", "run", "./src/plugins/chrome/test")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		logger.LogFatal("Chrome tests failed: %v", err)
+	}
+	logger.LogInfo("Chrome Plugin Tests passed!")
 }
 func runWwwCadTests() {
 	logger.LogInfo("Running WWW CAD Headed Test...")
