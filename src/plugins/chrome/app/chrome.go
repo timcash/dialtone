@@ -150,7 +150,7 @@ func LaunchChrome(port int, gpu bool, targetURL string) (*LaunchResult, error) {
 
 	if userDataDir == "" {
 		cwd, _ := os.Getwd()
-		userDataDir = filepath.Join(cwd, ".chrome_data", fmt.Sprintf("instance_%d", port))
+		userDataDir = filepath.Join(cwd, ".chrome_data", fmt.Sprintf("dialtone-chrome-port-%d", port))
 		_ = os.MkdirAll(userDataDir, 0755)
 	}
 
