@@ -12,6 +12,7 @@ import (
 	"dialtone/cli/src/core/build"
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/ssh"
+	sshlib "golang.org/x/crypto/ssh"
 )
 
 // RunDeploy handles deployment to remote robot
@@ -52,7 +53,7 @@ func RunDeploy(args []string) {
 	}
 
 	// Validate required environment variables
-	validateRequiredVars([]string{"DIALTONE_HOSTNAME", "TS_AUTHKEY"})
+	validateRequiredVars([]string{"DIALTONE_HOSTNAME", "TS_AUTHKEY", "MAVLINK_ENDPOINT"})
 
 	deployDialtone(*host, *port, *user, *pass, *ephemeral)
 }
@@ -168,17 +169,15 @@ func validateRequiredVars(vars []string) {
 	}
 }
 
-func verifyTailscaleAuth(client *ssh.Client) {
+func verifyTailscaleAuth(client *sshlib.Client) {
 	logger.LogInfo("Verifying Tailscale auth key...")
 
 	deadline := time.Now().Add(30 * time.Second)
-	lastLog := ""
 	for time.Now().Before(deadline) {
 		logOutput, err := ssh.RunSSHCommand(client, "tail -n 200 ~/nats.log")
 		if err != nil {
 			logger.LogFatal("Failed to read remote logs for Tailscale verification: %v", err)
 		}
-		lastLog = logOutput
 
 		if reason := tsnetFailureReason(logOutput); reason != "" {
 			logger.LogFatal("Tailscale auth failed: %s\nRecent log output:\n%s", reason, tailLines(logOutput, 30))
