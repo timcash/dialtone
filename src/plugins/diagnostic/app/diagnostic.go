@@ -269,6 +269,10 @@ func checkWebUI(url string) error {
 		return err
 	}
 
+	if err := requireMavlinkHeartbeat(heartbeatVal); err != nil {
+		return err
+	}
+
 	if natsVal == "0" || natsVal == "--" {
 		fmt.Println("[chromedp] Warning: NATS message count is 0 or uninitialized.")
 	}
@@ -303,6 +307,13 @@ func failOnConsoleErrors(consoleErrors []string) error {
 		fmt.Printf("  ...and %d more\n", len(consoleErrors)-limit)
 	}
 	return fmt.Errorf("browser console errors detected")
+}
+
+func requireMavlinkHeartbeat(heartbeatVal string) error {
+	if strings.TrimSpace(heartbeatVal) == "" || heartbeatVal == "--" {
+		return fmt.Errorf("mavlink heartbeat missing in UI")
+	}
+	return nil
 }
 
 func resolveDialtoneSh() (string, error) {
