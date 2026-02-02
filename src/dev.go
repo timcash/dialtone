@@ -25,7 +25,7 @@ import (
 	mavlink_cli "dialtone/cli/src/plugins/mavlink/cli"
 	nexttone_cli "dialtone/cli/src/plugins/nexttone/cli"
 	plugin_cli "dialtone/cli/src/plugins/plugin/cli"
-	test_cli "dialtone/cli/src/plugins/test/cli"
+	test_cli "dialtone/cli/src/core/test/cli"
 	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
 	ui_cli "dialtone/cli/src/plugins/ui/cli"
 	vpn_cli "dialtone/cli/src/plugins/vpn/cli"

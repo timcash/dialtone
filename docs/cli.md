@@ -24,11 +24,10 @@ mv -n .env.example .env # Only if .env does not exists
 
 ## Running Tests: Tests are the most important concept in `dialtone`
 ```bash
-./dialtone.sh plugin test <plugin-name>                         # Run tests for a specific plugin
-./dialtone.sh plugin test <plugin-name> --subtask <subtask-name> # Run a specific subtask test
-./dialtone.sh plugin test tags [tag1 tag2 ...]                   # Run tests matching tags
-./dialtone.sh plugin test --list                                 # List tests that would run
-./dialtone.sh plugin test                                        # Run all tests
+./dialtone.sh plugin test <plugin-name>                     # Run tests for a specific plugin
+dialtone-dev test plugin <plugin-name> --list               # List tests that would run
+dialtone-dev test tags <tag1> <tag2> ...                    # Run tests matching tags
+dialtone-dev test ticket <ticket-name> [--subtask <name>]   # Run ticket or subtask tests
 ```
 
 ## Logs
