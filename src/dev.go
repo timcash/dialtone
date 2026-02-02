@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	build_cli "dialtone/cli/src/core/build/cli"
@@ -50,7 +51,11 @@ func ExecuteDev() {
 	case "start":
 		runStart(args)
 	case "build":
-		build_cli.Run(args)
+		if len(args) > 0 && isPlugin(args[0]) && !strings.HasPrefix(args[0], "-") {
+			plugin_cli.RunPlugin(append([]string{"build"}, args...))
+		} else {
+			build_cli.Run(args)
+		}
 	case "deploy":
 		deploy_cli.RunDeploy(args)
 	case "format":
@@ -145,6 +150,13 @@ func printDevUsage() {
 	fmt.Println("  ai <subcmd>        AI tools (opencode, developer, subagent)")
 	fmt.Println("  go <subcmd>        Go toolchain tools (install, lint)")
 	fmt.Println("  help               Show this help message")
+}
+
+// isPlugin checks if a directory exists in src/plugins
+func isPlugin(name string) bool {
+	path := filepath.Join("src", "plugins", name)
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // runBranch handles the branch command
