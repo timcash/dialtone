@@ -7,14 +7,17 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
-	"dialtone/cli/src/core/browser"
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/ssh"
 
+	cdplog "github.com/chromedp/cdproto/log"
 	"github.com/chromedp/chromedp"
+	"github.com/chromedp/cdproto/runtime"
 )
 
 // CheckLocalDependencies checks if Go, Node.js, and Tailscale are installed.
@@ -81,10 +84,9 @@ func RunRemoteDiagnostics(host, port, user, pass string) {
 
 	// Web UI Check via Chromedp
 	if err := checkWebUI(url); err != nil {
-		fmt.Printf("[chromedp] Web UI Check FAILED: %v\n", err)
-	} else {
-		fmt.Printf("[chromedp] Web UI Check SUCCESS: %s is reachable\n", url)
+		logger.LogFatal("Web UI Check FAILED: %v", err)
 	}
+	fmt.Printf("[chromedp] Web UI Check SUCCESS: %s is reachable\n", url)
 
 	logger.LogInfo("Diagnostics Passed.")
 }
@@ -166,40 +168,57 @@ func execCommand(name string, args ...string) (string, error) {
 }
 
 func checkWebUI(url string) error {
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.NoFirstRun,
-		chromedp.NoDefaultBrowserCheck,
-		chromedp.Headless,
-	)
-
-	// If on WSL, try to find Windows Chrome if Linux Chrome is missing
-	if chromePath := browser.FindChromePath(); chromePath != "" {
-		opts = append(opts, chromedp.ExecPath(chromePath))
-		opts = append(opts, chromedp.Flag("remote-debugging-address", "127.0.0.1"))
+	dialtoneSh, err := resolveDialtoneSh()
+	if err != nil {
+		return err
 	}
 
-	// Automated Cleanup: Kill any process on the target port to avoid connection refusal
-	if err := browser.CleanupPort(9222); err != nil {
-		fmt.Printf("Warning: Failed to cleanup port 9222: %v\n", err)
+	// Cleanup any existing Dialtone Chrome processes
+	_ = exec.Command(dialtoneSh, "chrome", "kill", "all").Run()
+	defer func() {
+		_ = exec.Command(dialtoneSh, "chrome", "kill", "all").Run()
+	}()
+
+	wsURL, err := launchChromeForDiagnostics(dialtoneSh, url)
+	if err != nil {
+		return err
 	}
 
-	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	allocCtx, cancel := chromedp.NewRemoteAllocator(context.Background(), wsURL)
 	defer cancel()
 
-	// Create context
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
-	// Create a timeout
-	ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
+	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+
+	var consoleErrors []string
+	chromedp.ListenTarget(ctx, func(ev interface{}) {
+		switch ev := ev.(type) {
+		case *cdplog.EventEntryAdded:
+			if ev.Entry.Level == "error" {
+				consoleErrors = append(consoleErrors, fmt.Sprintf("[log] %s", ev.Entry.Text))
+			}
+		case *runtime.EventConsoleAPICalled:
+			if ev.Type != "error" {
+				return
+			}
+			for _, arg := range ev.Args {
+				consoleErrors = append(consoleErrors, fmt.Sprintf("[console] %v", arg.Value))
+			}
+		case *runtime.EventExceptionThrown:
+			consoleErrors = append(consoleErrors, fmt.Sprintf("[exception] %s", ev.ExceptionDetails.Text))
+		}
+	})
 
 	var title string
 	var termExists, threeExists, camExists bool
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
+		cdplog.Enable(),
 		chromedp.Navigate(url),
 		chromedp.Title(&title),
-		chromedp.Sleep(2*time.Second), // Allow JS initialization
+		chromedp.Sleep(3*time.Second), // Allow JS initialization + websocket attempts
 		chromedp.Evaluate(`!!document.getElementById("terminal-container")`, &termExists),
 		chromedp.Evaluate(`!!document.getElementById("three-container")`, &threeExists),
 		chromedp.Evaluate(`document.querySelectorAll(".panel-right").length > 0`, &camExists),
@@ -243,6 +262,17 @@ func checkWebUI(url string) error {
 	fmt.Printf("[chromedp] Telemetry Check: NATS=%s, Heartbeat=%s\n", natsVal, heartbeatVal)
 	fmt.Printf("[chromedp] 6DOF Check: Lat=%s, Lon=%s, Att=%s, Yaw=%s\n", latVal, lonVal, rpVal, yawVal)
 
+	if err := chromedp.Run(ctx, chromedp.Sleep(2*time.Second)); err != nil {
+		return err
+	}
+	if err := failOnConsoleErrors(consoleErrors); err != nil {
+		return err
+	}
+
+	if err := requireMavlinkHeartbeat(heartbeatVal); err != nil {
+		return err
+	}
+
 	if natsVal == "0" || natsVal == "--" {
 		fmt.Println("[chromedp] Warning: NATS message count is 0 or uninitialized.")
 	}
@@ -259,4 +289,56 @@ func checkWebUI(url string) error {
 	fmt.Printf("[chromedp] Dashboard Title: %s\n", title)
 	fmt.Println("[chromedp] UI Layout Verified (Terminal, 3D, Telemetry present)")
 	return nil
+}
+
+func failOnConsoleErrors(consoleErrors []string) error {
+	if len(consoleErrors) == 0 {
+		return nil
+	}
+	fmt.Println("[chromedp] Console errors detected:")
+	limit := 5
+	if len(consoleErrors) < limit {
+		limit = len(consoleErrors)
+	}
+	for _, msg := range consoleErrors[:limit] {
+		fmt.Printf("  %s\n", msg)
+	}
+	if len(consoleErrors) > limit {
+		fmt.Printf("  ...and %d more\n", len(consoleErrors)-limit)
+	}
+	return fmt.Errorf("browser console errors detected")
+}
+
+func requireMavlinkHeartbeat(heartbeatVal string) error {
+	if strings.TrimSpace(heartbeatVal) == "" || heartbeatVal == "--" {
+		return fmt.Errorf("mavlink heartbeat missing in UI")
+	}
+	return nil
+}
+
+func resolveDialtoneSh() (string, error) {
+	cwd, _ := os.Getwd()
+	dialtoneSh := filepath.Join(cwd, "dialtone.sh")
+	if _, err := os.Stat(dialtoneSh); os.IsNotExist(err) {
+		return "", fmt.Errorf("could not find dialtone.sh in %s", cwd)
+	}
+	return dialtoneSh, nil
+}
+
+func launchChromeForDiagnostics(dialtoneSh, url string) (string, error) {
+	args := []string{"chrome", "new", url, "--gpu"}
+	launchCmd := exec.Command(dialtoneSh, args...)
+	output, err := launchCmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to launch chrome via CLI: %v\nOutput: %s", err, string(output))
+	}
+
+	re := regexp.MustCompile(`ws://127\.0\.0\.1:\d+/devtools/browser/[a-z0-9-]+`)
+	wsURL := re.FindString(string(output))
+	if wsURL == "" {
+		return "", fmt.Errorf("failed to find WebSocket URL in CLI output: %s", string(output))
+	}
+
+	fmt.Printf("[chromedp] Connected to Chrome via: %s\n", wsURL)
+	return wsURL, nil
 }
