@@ -643,6 +643,14 @@ func waitForShutdown() {
 func CreateWebHandler(hostname string, natsPort, wsPort, webPort, internalNATSPort, internalWSPort int, ns *server.Server, lc *tailscale.LocalClient, ips []netip.Addr, useMock bool) http.Handler {
 	mux := http.NewServeMux()
 
+	// In tsnet mode, NATS WS is served on an internal offset port.
+	// If the handler was wired with the external port, correct it here.
+	if lc != nil && internalWSPort == wsPort {
+		internalWSPort = wsPort + 10000
+		logger.LogInfo("Adjusted internal NATS WS port to %d for tsnet proxy", internalWSPort)
+	}
+	logger.LogInfo("NATS WS proxy ports: external=%d internal=%d", wsPort, internalWSPort)
+
 	// 1. JSON init API for the frontend
 	mux.HandleFunc("/api/init", func(w http.ResponseWriter, r *http.Request) {
 		data := map[string]interface{}{
