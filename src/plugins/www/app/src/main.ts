@@ -35,13 +35,13 @@ sections.register('s-neural', {
     }
 });
 
-sections.register('s-curriculum', {
-    containerId: 'curriculum-container',
+sections.register('s-math', {
+    containerId: 'math-container',
     load: async () => {
-        const { mountBuildCurriculum } = await import('./components/build-curriculum');
-        const container = document.getElementById('curriculum-container');
-        if (!container) throw new Error('curriculum-container not found');
-        return mountBuildCurriculum(container);
+        const { mountMath } = await import('./components/math');
+        const container = document.getElementById('math-container');
+        if (!container) throw new Error('math-container not found');
+        return mountMath(container);
     }
 });
 

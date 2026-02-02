@@ -88,7 +88,7 @@ h2 {
 /* Visualizations */
 #earth-container,
 #nn-container,
-#curriculum-container,
+#math-container,
 #cad-container,
 #robot-container {
   position: absolute;
@@ -101,7 +101,7 @@ h2 {
 
 #earth-container canvas,
 #nn-container canvas,
-#curriculum-container canvas,
+#math-container canvas,
 #robot-container canvas {
   display: block;
 }
@@ -313,7 +313,7 @@ h2 {
 .snap-slide.is-visible[id="s-home"]~.top-right-controls #earth-config-toggle,
 .snap-slide.is-visible[id="s-robot"]~.top-right-controls #robot-config-toggle,
 .snap-slide.is-visible[id="s-neural"]~.top-right-controls #nn-config-toggle,
-.snap-slide.is-visible[id="s-curriculum"]~.top-right-controls #curriculum-config-toggle,
+.snap-slide.is-visible[id="s-math"]~.top-right-controls #math-config-toggle,
 .snap-slide.is-visible[id="s-cad"]~.top-right-controls #cad-config-toggle {
   display: inline-block;
 }
@@ -801,9 +801,9 @@ h2 {
   --theme-gradient: linear-gradient(90deg, #8b5cf6, #ec4899);
 }
 
-/* Curriculum */
-.snap-slide.is-visible[id="s-curriculum"],
-.snap-slide.is-visible[id="s-curriculum"]~* {
+/* Math */
+.snap-slide.is-visible[id="s-math"],
+.snap-slide.is-visible[id="s-math"]~* {
   --theme-primary: #10b981;
   --theme-secondary: #06b6d4;
   --theme-accent: rgba(16, 185, 129, 0.3);

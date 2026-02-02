@@ -479,7 +479,6 @@ export function mountNeuralNetwork(container: HTMLElement) {
       <div class="marketing-overlay" aria-label="Neural network marketing information">
         <h2>Mathematics powers autonomy</h2>
         <p>From gradients to control loops. Experience the logic that drives intelligent behavior.</p>
-        <button class="buy-button">Coming Soon</button>
       </div>
       <div id="nn-config-panel" class="earth-config-panel" hidden></div>
     `;

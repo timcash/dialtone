@@ -16,7 +16,7 @@ const COLORS = {
   white: new THREE.Color(0xffffff),
 };
 
-class CurriculumVisualization {
+class MathVisualization {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -490,10 +490,10 @@ class CurriculumVisualization {
 
   initConfigPanel() {
     const panel = document.getElementById(
-      "curriculum-config-panel",
+      "math-config-panel",
     ) as HTMLDivElement | null;
     const toggle = document.getElementById(
-      "curriculum-config-toggle",
+      "math-config-toggle",
     ) as HTMLButtonElement | null;
     if (!panel || !toggle) return;
 
@@ -660,7 +660,7 @@ class CurriculumVisualization {
   }
 
   setVisible(visible: boolean) {
-    VisibilityMixin.setVisible(this, visible, "curriculum");
+    VisibilityMixin.setVisible(this, visible, "math");
     if (!visible) {
       this.setPanelOpen?.(false);
     }
@@ -737,28 +737,27 @@ class CurriculumVisualization {
   };
 }
 
-export function mountBuildCurriculum(container: HTMLElement) {
+export function mountMath(container: HTMLElement) {
   // Inject HTML
   container.innerHTML = `
-      <div class="marketing-overlay" aria-label="Build Curriculum marketing information">
-        <h2>Build the future, step by step</h2>
-        <p>A hands-on curriculum for mastering modern robotics. From first principles to autonomous systems.</p>
-        <button class="buy-button">Coming Soon</button>
+      <div class="marketing-overlay" aria-label="Mathematics marketing information">
+        <h2>Mathematics powers autonomy</h2>
+        <p>From first principles to autonomous systems. Experience the logic that drives intelligent behavior.</p>
       </div>
-      <div id="curriculum-config-panel" class="earth-config-panel" hidden></div>
+      <div id="math-config-panel" class="earth-config-panel" hidden></div>
     `;
 
   // Create and inject config toggle
   const controls = document.querySelector('.top-right-controls');
   const toggle = document.createElement('button');
-  toggle.id = 'curriculum-config-toggle';
+  toggle.id = 'math-config-toggle';
   toggle.className = 'earth-config-toggle';
   toggle.type = 'button';
   toggle.setAttribute('aria-expanded', 'false');
   toggle.textContent = 'Config';
   controls?.prepend(toggle);
 
-  const viz = new CurriculumVisualization(container);
+  const viz = new MathVisualization(container);
   return {
     dispose: () => {
       viz.dispose();
