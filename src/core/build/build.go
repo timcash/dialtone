@@ -145,8 +145,22 @@ func buildWebIfNeeded(force bool) {
 
 // buildWWW builds the public marketing page
 func buildWWW() {
+	if skipBuild("DIALTONE_SKIP_WWW", "SKIP_WWW") {
+		logger.LogInfo("Skipping Public WWW Page build (DIALTONE_SKIP_WWW=1)")
+		return
+	}
 	logger.LogInfo("Building Public WWW Page...")
 	runShell(".", "./dialtone.sh", "www", "build")
+}
+
+func skipBuild(keys ...string) bool {
+	for _, key := range keys {
+		val := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+		if val == "1" || val == "true" || val == "yes" {
+			return true
+		}
+	}
+	return false
 }
 
 func buildLocally(targetOS, targetArch string) {

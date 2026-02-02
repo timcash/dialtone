@@ -92,6 +92,8 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 	// 3. Run Build (Cross-Compile)
 	// We use --local to favor our Zig installation which is configured for GLIBC 2.36 targeting.
 	logger.LogInfo("Cross-compiling for %s...", remoteArch)
+	// Skip public WWW build during deploy (not required for robot binary)
+	_ = os.Setenv("DIALTONE_SKIP_WWW", "1")
 	build.RunBuild([]string{"--local", buildFlag})
 
 	localBinaryPath := filepath.Join("bin", binaryName)
