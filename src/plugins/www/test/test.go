@@ -50,8 +50,6 @@ func RunWwwIntegration() error {
 	
 	// Use our new CLI for safe cleanup (defaults to Dialtone origin)
 	_ = exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
-	
-	time.Sleep(1 * time.Second)
 
 	// 3. Start Dev Server (Background)
 	fmt.Println(">> [WWW] Starting Dev Server on port 5173...")
@@ -78,11 +76,8 @@ func RunWwwIntegration() error {
 	fmt.Println(">> [WWW] Launching Headed Chrome via CLI...")
 
 	// Launch via CLI to get the signature and origin detection
-	gpu := os.Getenv("GPU") == "true"
-	args := []string{"chrome", "new"}
-	if gpu {
-		args = append(args, "--gpu")
-	}
+	// Force GPU for faster rendering in tests
+	args := []string{"chrome", "new", "--gpu"}
 	
 	launchCmd := exec.Command("./dialtone.sh", args...)
 	output, err := launchCmd.CombinedOutput()
@@ -253,7 +248,7 @@ func verifyHomePage(ctx context.Context) error {
 		chromedp.Navigate("http://127.0.0.1:5173"),
 		injectLiveFlag,
 		mockFetch,
-		chromedp.Sleep(2*time.Second),
+		chromedp.WaitReady("#earth-container"), // Wait for existence first
 		chromedp.Title(&title),
 	)
 	if err != nil {
@@ -262,6 +257,7 @@ func verifyHomePage(ctx context.Context) error {
 	if title != "dialtone.earth" {
 		return fmt.Errorf("unexpected title: %s", title)
 	}
+	fmt.Println(">> [WWW] Initial page loaded, starting section verification...")
 
 	sections := []struct {
 		id       string
@@ -320,7 +316,11 @@ func verifyHomePage(ctx context.Context) error {
 			if err := chromedp.Run(ctx, chromedp.Navigate(fmt.Sprintf("http://127.0.0.1:5173/#%s", nextId))); err != nil {
 				return fmt.Errorf("failed to navigate to next section %s: %v", nextId, err)
 			}
-			time.Sleep(1 * time.Second) // Wait for snap animation
+			// Wait for the next section element itself to have the is-visible class
+			waitQuery := fmt.Sprintf("#%s.is-visible", nextId)
+			if err := chromedp.Run(ctx, chromedp.WaitReady(waitQuery)); err != nil {
+				return fmt.Errorf("timeout waiting for section %s to become active (.is-visible)", nextId)
+			}
 		}
 	}
 
@@ -401,13 +401,9 @@ func RunWwwCadHeaded() error {
 
 	fmt.Println(">> [WWW] Launching Chrome via CLI...")
 	
-	gpu := os.Getenv("GPU") == "true"
-	args := []string{"chrome", "new"}
+	args := []string{"chrome", "new", "--gpu"}
 	if headless {
 		args = append(args, "--headless")
-	}
-	if gpu {
-		args = append(args, "--gpu")
 	}
 
 	launchCmd := exec.Command("./dialtone.sh", args...)
