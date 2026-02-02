@@ -15,6 +15,7 @@ import (
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/ssh"
 
+	cdplog "github.com/chromedp/cdproto/log"
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/cdproto/runtime"
 )
@@ -83,10 +84,9 @@ func RunRemoteDiagnostics(host, port, user, pass string) {
 
 	// Web UI Check via Chromedp
 	if err := checkWebUI(url); err != nil {
-		fmt.Printf("[chromedp] Web UI Check FAILED: %v\n", err)
-	} else {
-		fmt.Printf("[chromedp] Web UI Check SUCCESS: %s is reachable\n", url)
+		logger.LogFatal("Web UI Check FAILED: %v", err)
 	}
+	fmt.Printf("[chromedp] Web UI Check SUCCESS: %s is reachable\n", url)
 
 	logger.LogInfo("Diagnostics Passed.")
 }
@@ -196,6 +196,10 @@ func checkWebUI(url string) error {
 	var consoleErrors []string
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
+		case *cdplog.EventEntryAdded:
+			if ev.Entry.Level == "error" {
+				consoleErrors = append(consoleErrors, fmt.Sprintf("[log] %s", ev.Entry.Text))
+			}
 		case *runtime.EventConsoleAPICalled:
 			if ev.Type != "error" {
 				return
@@ -211,9 +215,10 @@ func checkWebUI(url string) error {
 	var title string
 	var termExists, threeExists, camExists bool
 	err = chromedp.Run(ctx,
+		cdplog.Enable(),
 		chromedp.Navigate(url),
 		chromedp.Title(&title),
-		chromedp.Sleep(2*time.Second), // Allow JS initialization
+		chromedp.Sleep(3*time.Second), // Allow JS initialization + websocket attempts
 		chromedp.Evaluate(`!!document.getElementById("terminal-container")`, &termExists),
 		chromedp.Evaluate(`!!document.getElementById("three-container")`, &threeExists),
 		chromedp.Evaluate(`document.querySelectorAll(".panel-right").length > 0`, &camExists),
@@ -257,6 +262,9 @@ func checkWebUI(url string) error {
 	fmt.Printf("[chromedp] Telemetry Check: NATS=%s, Heartbeat=%s\n", natsVal, heartbeatVal)
 	fmt.Printf("[chromedp] 6DOF Check: Lat=%s, Lon=%s, Att=%s, Yaw=%s\n", latVal, lonVal, rpVal, yawVal)
 
+	if err := chromedp.Run(ctx, chromedp.Sleep(2*time.Second)); err != nil {
+		return err
+	}
 	if err := failOnConsoleErrors(consoleErrors); err != nil {
 		return err
 	}
