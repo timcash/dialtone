@@ -113,6 +113,7 @@ func runLocalOnly(port, wsPort, webPort int, verbose bool, mavlinkAddr string, o
 	defer ns.Shutdown()
 
 	logger.LogInfo("NATS server started on port %d (local only)", port)
+	verifyNatsWSPort("127.0.0.1", wsPort, "NATS WS (local)")
 
 	// Start Mavlink service if requested
 	if useMock {
@@ -329,6 +330,8 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 	localWSPort := wsPort + 10000
 	ns := startNATSServer("127.0.0.1", localNATSPort, localWSPort, verbose)
 	defer ns.Shutdown()
+
+	verifyNatsWSPort("127.0.0.1", localWSPort, "NATS WS (internal)")
 
 	if mock_mode {
 		go mock.StartMockMavlink(localNATSPort)
@@ -639,6 +642,30 @@ func waitForShutdown() {
 	<-c
 }
 
+func verifyNatsWSPort(host string, port int, label string) {
+	if port == 0 {
+		return
+	}
+	addr := fmt.Sprintf("%s:%d", host, port)
+	if err := waitForTCP(addr, 5*time.Second); err != nil {
+		logger.LogFatal("%s not listening on %s: %v", label, addr, err)
+	}
+	logger.LogInfo("%s listening on %s", label, addr)
+}
+
+func waitForTCP(address string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", address, 1*time.Second)
+		if err == nil {
+			_ = conn.Close()
+			return nil
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout waiting for %s", address)
+}
+
 // CreateWebHandler creates the HTTP handler for the unified web dashboard
 func CreateWebHandler(hostname string, natsPort, wsPort, webPort, internalNATSPort, internalWSPort int, ns *server.Server, lc *tailscale.LocalClient, ips []netip.Addr, useMock bool) http.Handler {
 	mux := http.NewServeMux()
@@ -690,6 +717,8 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort, internalNATSPo
 			"platform":      runtime.GOOS,
 			"arch":          runtime.GOARCH,
 			"tailscale_ips": formatIPs(ips),
+			"ws_port":       wsPort,
+			"ws_path":       "/nats-ws",
 			"nats": map[string]any{
 				"url":          fmt.Sprintf("nats://%s:%d", hostname, natsPort),
 				"connections":  connections,
