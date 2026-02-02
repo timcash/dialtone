@@ -33,7 +33,7 @@ This skill can use many plugins, including:
 - `./dialtone.sh plugin` for scaffolding and discovery.
 - `./dialtone.sh ticket` for structured task execution.
 - `./dialtone.sh github` for issue and PR linkage.
-- `./dialtone.sh ai`, `./dialtone.sh go`, and `./dialtone.sh test` for implementation and validation.
+- `./dialtone.sh ai`, `./dialtone.sh go`, and `dialtone-dev test` for implementation and validation.
 
 ## Example Tasks
 - Generate a new plugin scaffold and wire it into the CLI.

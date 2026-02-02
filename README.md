@@ -75,10 +75,10 @@ Use the `ticket` command for new work. It enforces TDD and standardized markdown
 
 ## Running Tests: Tests are the most important concept in `dialtone`
 ```bash
-./dialtone.sh plugin test <plugin-name> # Run tests for a specific plugin
-./dialtone.sh plugin test <plugin-name> --subtask <subtask-name> # Run specific subtask test
-./dialtone.sh plugin test <plugin-name> --list  # List tests that would run
-./dialtone.sh plugin test <plugin-name> # Run all tests for a plugin
+./dialtone.sh plugin test <plugin-name>           # Run tests for a specific plugin
+dialtone-dev test plugin <plugin-name> --list     # List tests that would run
+dialtone-dev test tags <tag-one> <tag-two>        # Run tests matching tags
+dialtone-dev test ticket <ticket-name>            # Run ticket-specific tests
 ```
 
 ## Logs
