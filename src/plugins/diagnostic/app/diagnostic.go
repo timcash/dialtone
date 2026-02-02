@@ -7,10 +7,11 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
-	"dialtone/cli/src/core/browser"
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/ssh"
 
@@ -166,32 +167,29 @@ func execCommand(name string, args ...string) (string, error) {
 }
 
 func checkWebUI(url string) error {
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.NoFirstRun,
-		chromedp.NoDefaultBrowserCheck,
-		chromedp.Headless,
-	)
-
-	// If on WSL, try to find Windows Chrome if Linux Chrome is missing
-	if chromePath := browser.FindChromePath(); chromePath != "" {
-		opts = append(opts, chromedp.ExecPath(chromePath))
-		opts = append(opts, chromedp.Flag("remote-debugging-address", "127.0.0.1"))
+	dialtoneSh, err := resolveDialtoneSh()
+	if err != nil {
+		return err
 	}
 
-	// Automated Cleanup: Kill any process on the target port to avoid connection refusal
-	if err := browser.CleanupPort(9222); err != nil {
-		fmt.Printf("Warning: Failed to cleanup port 9222: %v\n", err)
+	// Cleanup any existing Dialtone Chrome processes
+	_ = exec.Command(dialtoneSh, "chrome", "kill", "all").Run()
+	defer func() {
+		_ = exec.Command(dialtoneSh, "chrome", "kill", "all").Run()
+	}()
+
+	wsURL, err := launchChromeForDiagnostics(dialtoneSh, url)
+	if err != nil {
+		return err
 	}
 
-	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	allocCtx, cancel := chromedp.NewRemoteAllocator(context.Background(), wsURL)
 	defer cancel()
 
-	// Create context
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
-	// Create a timeout
-	ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
+	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	var title string
@@ -259,4 +257,31 @@ func checkWebUI(url string) error {
 	fmt.Printf("[chromedp] Dashboard Title: %s\n", title)
 	fmt.Println("[chromedp] UI Layout Verified (Terminal, 3D, Telemetry present)")
 	return nil
+}
+
+func resolveDialtoneSh() (string, error) {
+	cwd, _ := os.Getwd()
+	dialtoneSh := filepath.Join(cwd, "dialtone.sh")
+	if _, err := os.Stat(dialtoneSh); os.IsNotExist(err) {
+		return "", fmt.Errorf("could not find dialtone.sh in %s", cwd)
+	}
+	return dialtoneSh, nil
+}
+
+func launchChromeForDiagnostics(dialtoneSh, url string) (string, error) {
+	args := []string{"chrome", "new", url, "--gpu"}
+	launchCmd := exec.Command(dialtoneSh, args...)
+	output, err := launchCmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to launch chrome via CLI: %v\nOutput: %s", err, string(output))
+	}
+
+	re := regexp.MustCompile(`ws://127\.0\.0\.1:\d+/devtools/browser/[a-z0-9-]+`)
+	wsURL := re.FindString(string(output))
+	if wsURL == "" {
+		return "", fmt.Errorf("failed to find WebSocket URL in CLI output: %s", string(output))
+	}
+
+	fmt.Printf("[chromedp] Connected to Chrome via: %s\n", wsURL)
+	return wsURL, nil
 }
