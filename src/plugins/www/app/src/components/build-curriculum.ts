@@ -3,6 +3,8 @@ import glowVertexShader from "../shaders/glow.vert.glsl?raw";
 import glowFragmentShader from "../shaders/glow.frag.glsl?raw";
 import gridVertexShader from "../shaders/grid.vert.glsl?raw";
 import gridFragmentShader from "../shaders/grid.frag.glsl?raw";
+import { VisibilityMixin } from "./section";
+
 
 const COLORS = {
   cyan: new THREE.Color(0x06b6d4),
@@ -21,6 +23,9 @@ class CurriculumVisualization {
   container: HTMLElement;
   frameId = 0;
   resizeObserver?: ResizeObserver;
+  isVisible = true;
+  frameCount = 0;
+
 
   // Orbital groups
   innerOrbit!: THREE.Group;
@@ -654,17 +659,8 @@ class CurriculumVisualization {
     };
   }
 
-  isVisible = true;
-  frameCount = 0;
-
   setVisible(visible: boolean) {
-    if (this.isVisible !== visible) {
-      console.log(
-        `%c[curriculum] ${visible ? "▶️ Resuming" : "⏸️ Pausing"} at frame ${this.frameCount}`,
-        visible ? "color: #22c55e" : "color: #f59e0b",
-      );
-    }
-    this.isVisible = visible;
+    VisibilityMixin.setVisible(this, visible, "curriculum");
     if (!visible) {
       this.setPanelOpen?.(false);
     }
