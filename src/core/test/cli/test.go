@@ -7,13 +7,11 @@ import (
 	"strings"
 
 	"dialtone/cli/src/core/logger"
-	_ "dialtone/cli/src/core/test"
 	core_test "dialtone/cli/src/core/test"
 	ai_test "dialtone/cli/src/plugins/ai/test"
+	cad_test "dialtone/cli/src/plugins/cad/test"
 	diagnostic_test "dialtone/cli/src/plugins/diagnostic/test"
 	ide_test "dialtone/cli/src/plugins/ide/test"
-	test_test "dialtone/cli/src/plugins/test/test"
-	cad_test "dialtone/cli/src/plugins/cad/test"
 
 	// ticket_test "dialtone/cli/src/plugins/ticket/test"
 	_ "dialtone/cli/src/plugins/cloudflare/test"
@@ -279,7 +277,7 @@ func printTestUsage() {
 	fmt.Println("Note: For ticket-specific verification, use: ./dialtone.sh ticket test <ticket-name>")
 	fmt.Println()
 	fmt.Println("Available Plugins:")
-	fmt.Println("  ticket, test, ui, ai, ide, diagnostic, www, nexttone, cad, chrome")
+	fmt.Println("  ticket, ui, ai, ide, diagnostic, www, nexttone, cad, chrome")
 }
 
 func runAllTests(showList bool) {
@@ -292,7 +290,6 @@ func runAllTests(showList bool) {
 	}
 	logger.LogInfo("Running all tests...")
 	runTicketTests()
-	runTestPluginTests()
 	runUiTests()
 	runAiTests()
 	runDiagnosticTests()
@@ -308,14 +305,6 @@ func runTicketTests() {
 		logger.LogFatal("Ticket tests failed: %v", err)
 	}
 	logger.LogInfo("Ticket Plugin Integration Tests passed!")
-}
-
-func runTestPluginTests() {
-	logger.LogInfo("Running Test Plugin Tests...")
-	if err := test_test.RunAll(); err != nil {
-		logger.LogFatal("Test plugin tests failed: %v", err)
-	}
-	logger.LogInfo("Test Plugin Tests passed!")
 }
 
 func runUiTests() {
@@ -368,7 +357,7 @@ func runNexttoneTests() {
 	}
 	logger.LogInfo("Nexttone Plugin Tests passed!")
 }
- 
+
 func runCadTests() {
 	logger.LogInfo("Running CAD Plugin Tests...")
 	if err := cad_test.RunAll(); err != nil {
@@ -387,6 +376,7 @@ func runChromeTests() {
 	}
 	logger.LogInfo("Chrome Plugin Tests passed!")
 }
+
 func runWwwCadTests() {
 	logger.LogInfo("Running WWW CAD Headed Test...")
 	if err := www_test.RunWwwCadHeaded(); err != nil {

@@ -43,14 +43,14 @@ Migrate `autocode` (developer loop) and `opencode` (AI assistant server) from `s
 - name: ai-test-binary
 - description: Implement a test to verify the `opencode` binary is present and reachable in the shell path.
 - test-description: Run the specific test case via tags.
-- test-command: `./dialtone.sh test tags ai binary`
+- test-command: `dialtone-dev test tags ai binary`
 - status: done
 
 ## SUBTASK: ai-test-cli-version
 - name: ai-test-cli-version
 - description: Implement a test that runs `opencode --version` to verify the CLI responds correctly without requiring an API key.
 - test-description: Run the specific test case via tags.
-- test-command: `./dialtone.sh test tags ai cli`
+- test-command: `dialtone-dev test tags ai cli`
 - status: done
 
 ## SUBTASK: ai-test-delegation

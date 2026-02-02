@@ -31,7 +31,7 @@ This skill can use many workflows, including:
 This skill can use many plugins, including:
 - `./dialtone.sh mavlink` and `./dialtone.sh logs` for data transport and audit.
 - `./dialtone.sh diagnostic` for health checks.
-- `./dialtone.sh test` for pipeline verification.
+- `dialtone-dev test` for pipeline verification.
 
 ## Example Tasks
 - Add a new telemetry stream with replay support.

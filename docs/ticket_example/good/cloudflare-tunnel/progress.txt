@@ -8,7 +8,7 @@ Progress log for cloudflare-tunnel
 - Implemented cloudflare tunnel create and list subcommands.
 - Implemented cloudflare tunnel and serve subcommands.
 - Started the ticket and captured initial state.
-- Fixed recursive test loop by registering Cloudflare & ticket tests in the test plugin (run via `./dialtone.sh plugin test <plugin-name>`).
+- Fixed recursive test loop by registering Cloudflare & ticket tests in the test registry (run via `./dialtone.sh plugin test <plugin-name>`).
 - Finalizing ticket start phase.
 - Verifying and completing the cloudflare serve subtask.
 - Completed cloudflare serve logic and verification.
