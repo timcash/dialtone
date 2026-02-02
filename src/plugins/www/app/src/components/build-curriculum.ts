@@ -76,7 +76,12 @@ class CurriculumVisualization {
     this.container = container;
     this.renderer.setClearColor(0x000000, 0);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.container.appendChild(this.renderer.domElement);
+    const existingCanvas = container.querySelector('canvas');
+    if (existingCanvas) {
+      this.renderer.domElement = existingCanvas as HTMLCanvasElement;
+    } else {
+      this.container.appendChild(this.renderer.domElement);
+    }
 
     this.initScene();
     this.initConfigPanel();
@@ -737,9 +742,33 @@ class CurriculumVisualization {
 }
 
 export function mountBuildCurriculum(container: HTMLElement) {
+  // Inject HTML
+  container.innerHTML = `
+      <div class="marketing-overlay" aria-label="Build Curriculum marketing information">
+        <h2>Build the future, step by step</h2>
+        <p>A hands-on curriculum for mastering modern robotics. From first principles to autonomous systems.</p>
+        <button class="buy-button">Coming Soon</button>
+      </div>
+      <div id="curriculum-config-panel" class="earth-config-panel" hidden></div>
+    `;
+
+  // Create and inject config toggle
+  const controls = document.querySelector('.top-right-controls');
+  const toggle = document.createElement('button');
+  toggle.id = 'curriculum-config-toggle';
+  toggle.className = 'earth-config-toggle';
+  toggle.type = 'button';
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.textContent = 'Config';
+  controls?.prepend(toggle);
+
   const viz = new CurriculumVisualization(container);
   return {
-    dispose: () => viz.dispose(),
+    dispose: () => {
+      viz.dispose();
+      toggle.remove();
+      container.innerHTML = '';
+    },
     setVisible: (visible: boolean) => viz.setVisible(visible),
   };
 }

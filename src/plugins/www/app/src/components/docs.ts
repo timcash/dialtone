@@ -1,89 +1,5 @@
-<!DOCTYPE html>
-<html lang="en">
-
-<head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Docs - dialtone.earth</title>
-    <link rel="stylesheet" href="/style.css"> <!-- Absolute path since this will be in docs/ -->
-    <style>
-        .page-content {
-            padding: 100px 20px;
-            max-width: 800px;
-            margin: 0 auto;
-            text-align: left;
-        }
-
-        h2 {
-            margin-top: 1.5em;
-            font-size: 1.8em;
-        }
-
-        p {
-            margin-bottom: 1em;
-            line-height: 1.6;
-        }
-
-        code {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 2px 5px;
-            border-radius: 4px;
-            font-family: monospace;
-        }
-
-        pre {
-            background: rgba(255, 255, 255, 0.05);
-            padding: 15px;
-            border-radius: 8px;
-            overflow-x: auto;
-            margin-bottom: 1em;
-        }
-    </style>
-</head>
-
-<body>
-    <div id="app">
-
-        <!-- Navigation -->
-        <nav class="main-nav">
-            <a href="/" class="nav-btn" aria-label="Home">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                    <polyline points="9 22 9 12 15 12 15 22" />
-                </svg>
-            </a>
-            <a href="/about" class="nav-btn" aria-label="About">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="10" />
-                    <path d="M12 16v-4" />
-                    <path d="M12 8h.01" />
-                </svg>
-            </a>
-            <a href="/docs" class="nav-btn active" aria-label="Docs">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-                    <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-                </svg>
-            </a>
-        </nav>
-
-        <!-- External Links -->
-        <div class="top-right-nav">
-            <a href="https://github.com/timcash/dialtone" target="_blank" rel="noopener noreferrer" class="nav-btn"
-                aria-label="GitHub">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path
-                        d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4" />
-                    <path d="M9 18c-4.51 2-5-2-7-2" />
-                </svg>
-            </a>
-        </div>
-
+export function mountDocs(container: HTMLElement) {
+  container.innerHTML = `
         <div class="page-content">
             <h1>Documentation</h1>
             <p class="lead">Get started with Dialtone and explore the technical specifications of the robotic network.
@@ -178,7 +94,13 @@
                 <li><code>issue</code>: Manage project tasks and feedback.</li>
             </ul>
         </div>
-    </div>
-</body>
-
-</html>
+    `;
+  return {
+    dispose: () => {
+      container.innerHTML = '';
+    },
+    setVisible: (visible: boolean) => {
+      container.style.opacity = visible ? '1' : '0';
+    }
+  };
+}

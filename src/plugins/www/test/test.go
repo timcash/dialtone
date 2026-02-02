@@ -270,10 +270,11 @@ func verifyHomePage(ctx context.Context) error {
 	}{
 		{"s-home", "Now is the time to learn and build", "#earth-container"},
 		{"s-robot", "Robotics begins with precision control", "#robot-container"},
-		{"s-video", "Communication networks make robots real-time", ".bg-video"},
 		{"s-neural", "Mathematics powers autonomy", "#nn-container"},
 		{"s-curriculum", "Build the future, step by step", "#curriculum-container"},
 		{"s-cad", "Parametric Design Logic", "#cad-container"},
+		{"s-about", "Vision", "#about-container"},
+		{"s-docs", "Documentation", "#docs-container"},
 	}
 
 	for i, s := range sections {
@@ -285,7 +286,16 @@ func verifyHomePage(ctx context.Context) error {
 
 		actions := []chromedp.Action{
 			chromedp.Evaluate(fmt.Sprintf(`!!document.getElementById("%s")`, s.id), &exists),
-			chromedp.Text(fmt.Sprintf("#%s .marketing-overlay h2", s.id), &headline, chromedp.ByQuery),
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				// Try marketing overlay first, then h1 in page-content
+				var query string
+				if s.id == "s-about" || s.id == "s-docs" {
+					query = fmt.Sprintf("#%s h1", s.id)
+				} else {
+					query = fmt.Sprintf("#%s .marketing-overlay h2", s.id)
+				}
+				return chromedp.Text(query, &headline, chromedp.ByQuery).Do(ctx)
+			}),
 			chromedp.Evaluate(fmt.Sprintf(`!!document.querySelector("%s")`, s.search), &isVisible),
 		}
 

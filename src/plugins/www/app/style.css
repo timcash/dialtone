@@ -176,6 +176,97 @@ h2 {
   gap: 0.5rem;
 }
 
+/* Page Layout (About/Docs) */
+#s-about,
+#s-docs {
+  overflow-y: auto;
+  align-items: flex-start;
+  display: block;
+  /* Allow natural flow for long content */
+}
+
+.page-content {
+  padding: 100px 20px;
+  max-width: 800px;
+  margin: 0 auto;
+  text-align: left;
+}
+
+.page-content h1 {
+  font-size: 2.5rem;
+  margin-bottom: 0.5rem;
+  background: linear-gradient(to right, #fff, rgba(255, 255, 255, 0.5));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.page-content h2 {
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+  font-size: 1.5rem;
+  color: #fff;
+}
+
+.page-content p {
+  margin-bottom: 1rem;
+  line-height: 1.6;
+  color: var(--text-color);
+}
+
+.lead {
+  font-size: 1.25rem;
+  color: #fff !important;
+  margin-bottom: 2rem !important;
+}
+
+/* Grid & Cards (Standardized) */
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.5rem;
+  margin: 2rem 0;
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 1.5rem;
+  border-radius: 12px;
+  transition: transform 0.2s, border-color 0.2s;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.card h3 {
+  margin: 1rem 0 0.5rem 0;
+  font-size: 1.1rem;
+  color: #fff;
+}
+
+.icon-box {
+  width: 40px;
+  height: 40px;
+  color: var(--theme-primary, #60a5fa);
+}
+
+.code-block {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 1.5rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  margin-bottom: 2rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.9rem;
+}
+
+.comment {
+  color: #6a9955;
+}
+
 .nav-btn {
   display: inline-flex;
   align-items: center;

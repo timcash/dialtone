@@ -11,7 +11,6 @@
 
 <body>
   <div id="app">
-
     <header class="header-title">
       <h1>dialtone.earth</h1>
       <p class="subtitle" id="header-subtitle">unified robotic networks for earth</p>
@@ -28,7 +27,7 @@
           <polyline points="9 22 9 12 15 12 15 22" />
         </svg>
       </a>
-      <a href="/about" class="nav-btn" aria-label="About">
+      <a href="#s-about" class="nav-btn" aria-label="About">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
           stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="10" />
@@ -36,7 +35,7 @@
           <path d="M12 8h.01" />
         </svg>
       </a>
-      <a href="/docs" class="nav-btn" aria-label="Docs">
+      <a href="#s-docs" class="nav-btn" aria-label="Docs">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
           stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
@@ -49,59 +48,38 @@
     <section id="s-home" class="snap-slide" data-subtitle="now is the time to learn and build"
       aria-label="Home section: Unified Networks visualization">
       <div id="earth-container"></div>
-      <div class="marketing-overlay" aria-label="Unified Networks marketing information">
-        <h2>Now is the time to learn and build</h2>
-        <p>Robotics is moving from labs to the planet. Learn the math, build the software, and connect the machines.</p>
-        <a class="buy-button" href="https://buy.stripe.com/test_5kQaEXcagaAoaC62N20kE00" target="_blank"
-          rel="noopener noreferrer">Get the Robot Kit</a>
-      </div>
-      <div id="earth-config-panel" class="earth-config-panel" hidden></div>
     </section>
 
-    <!-- Slide 2: Robot Arm -->
-    <section id="s-robot" class="snap-slide" data-subtitle="precision robotics"
-      aria-label="Robot section: Precision Control visualization">
+    <!-- Slide 2: Robot -->
+    <section id="s-robot" class="snap-slide" data-subtitle="robotics begins with precision control"
+      aria-label="Robot section">
       <div id="robot-container"></div>
-      <div class="marketing-overlay" aria-label="Precision Control marketing information">
-        <h2>Robotics begins with precision control</h2>
-        <p>Master inverse kinematics so arms, drones, and humanoids move with intent and accuracy.</p>
-      </div>
-      <div id="robot-config-panel" class="earth-config-panel" hidden></div>
     </section>
 
-
-    <!-- Slide 4: Neural Network -->
-    <section id="s-neural" class="snap-slide" data-subtitle="mathematics for intelligence"
-      aria-label="Neural section: Distributed Intelligence visualization">
+    <!-- Slide 3: Neural -->
+    <section id="s-neural" class="snap-slide" data-subtitle="mathematics powers autonomy" aria-label="Neural section">
       <div id="nn-container"></div>
-      <div class="marketing-overlay" aria-label="Distributed Intelligence marketing information">
-        <h2>Mathematics powers autonomy</h2>
-        <p>Linear algebra, optimization, and learning systems turn raw data into intelligent motion.</p>
-      </div>
-      <div id="nn-config-panel" class="earth-config-panel" hidden></div>
     </section>
 
-    <!-- Slide 5: Build Curriculum -->
-    <section id="s-curriculum" class="snap-slide" data-subtitle="build the future"
-      aria-label="Curriculum section: Build the Future guides">
+    <!-- Slide 4: Curriculum -->
+    <section id="s-curriculum" class="snap-slide" data-subtitle="build the future, step by step"
+      aria-label="Curriculum section">
       <div id="curriculum-container"></div>
-      <div class="marketing-overlay" aria-label="Build the Future marketing information">
-        <h2>Build the future, step by step</h2>
-        <p>Guided curricula and open hardware help you go from first build to full robotic fleets.</p>
-      </div>
-      <div id="curriculum-config-panel" class="earth-config-panel" hidden></div>
     </section>
 
-    <!-- Slide 6: CAD -->
-    <section id="s-cad" class="snap-slide" data-subtitle="parametric design"
-      aria-label="CAD section: Parametric Design visualization">
+    <!-- Slide 5: CAD -->
+    <section id="s-cad" class="snap-slide" data-subtitle="parametric design logic" aria-label="CAD section">
       <div id="cad-container"></div>
-      <div class="marketing-overlay" aria-label="Parametric Design marketing information">
-        <h2>Parametric Design Logic</h2>
-        <p>Iterate on hardware designs by changing parameters in real-time. Powered by CadQuery.</p>
-      </div>
+    </section>
 
-      <div id="cad-config-panel" class="earth-config-panel" hidden></div>
+    <!-- Slide 6: About -->
+    <section id="s-about" class="snap-slide" data-subtitle="about dialtone" aria-label="About section">
+      <div id="about-container" style="width: 100%; transition: opacity 0.5s ease;"></div>
+    </section>
+
+    <!-- Slide 7: Docs -->
+    <section id="s-docs" class="snap-slide" data-subtitle="documentation" aria-label="Docs section">
+      <div id="docs-container" style="width: 100%; transition: opacity 0.5s ease;"></div>
     </section>
 
     <div class="top-right-controls">
@@ -114,21 +92,6 @@
           <path d="M9 18c-4.51 2-5-2-7-2" />
         </svg>
       </a>
-      <button id="earth-config-toggle" class="earth-config-toggle" type="button" aria-expanded="false">
-        Config
-      </button>
-      <button id="robot-config-toggle" class="earth-config-toggle" type="button" aria-expanded="false">
-        Config
-      </button>
-      <button id="nn-config-toggle" class="earth-config-toggle" type="button" aria-expanded="false">
-        Config
-      </button>
-      <button id="curriculum-config-toggle" class="earth-config-toggle" type="button" aria-expanded="false">
-        Config
-      </button>
-      <button id="cad-config-toggle" class="earth-config-toggle" type="button" aria-expanded="false">
-        Config
-      </button>
     </div>
   </div>
   <script type="module" src="./src/main.ts"></script>
