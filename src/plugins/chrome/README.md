@@ -8,11 +8,13 @@ The `chrome` plugin manages local Chrome/Chromium instances for Dialtone. It can
 ```
 
 ## Commands
-- **verify**: Verify Chrome/Chromium connectivity on a remote debugging port.
-- **list**: List detected Chrome/Chromium processes with optional filters.
-- **new**: Launch a new headed Chrome instance linked to Dialtone.
-- **kill**: Kill Dialtone-originated processes (or all with `--all`).
-- **install**: No-op (Chrome is detected locally).
+```shell
+./dialtone.sh chrome verify    # Verify Chrome/Chromium connectivity on a remote debugging port.
+./dialtone.sh chrome list      # List detected Chrome/Chromium processes with optional filters.
+./dialtone.sh chrome new       # Launch a new headed Chrome instance linked to Dialtone.
+./dialtone.sh chrome kill      # Kill Dialtone-originated processes (or all with --all).
+./dialtone.sh chrome install   # No-op (Chrome is detected locally).
+```
 
 ## Examples
 ```shell
@@ -23,4 +25,9 @@ The `chrome` plugin manages local Chrome/Chromium instances for Dialtone. It can
 ./dialtone.sh chrome kill all
 ./dialtone.sh chrome kill 12345
 ./dialtone.sh chrome kill all --all
+```
+
+## Tests
+```shell
+./dialtone.sh plugin test chrome
 ```
