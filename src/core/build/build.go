@@ -290,7 +290,8 @@ func buildLocally(targetOS, targetArch string) {
 
 	// Choose binary name based on OS/Arch
 	binaryName := "dialtone"
-	if targetOS == "linux" && targetArch != runtime.GOARCH {
+	isCrossBuild := targetOS != runtime.GOOS || targetArch != runtime.GOARCH
+	if targetOS == "linux" && isCrossBuild {
 		binaryName = fmt.Sprintf("dialtone-%s", targetArch)
 	} else if targetOS == "linux" {
 		binaryName = "dialtone"
