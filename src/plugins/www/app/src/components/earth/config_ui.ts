@@ -74,15 +74,23 @@ export function setupConfigPanel(orbit: ProceduralOrbit) {
   };
 
   addSection("Rotation");
+  const toPeriodSeconds = (rotSpeedRadPerSec: number) => {
+    if (!isFinite(rotSpeedRadPerSec) || rotSpeedRadPerSec <= 0) return Infinity;
+    return (Math.PI * 2) / rotSpeedRadPerSec;
+  };
+  const toRotSpeed = (periodSeconds: number) => {
+    if (!isFinite(periodSeconds) || periodSeconds <= 0) return 0;
+    return (Math.PI * 2) / periodSeconds;
+  };
   addSlider(
-    "earthRot",
-    "Earth Rot",
-    orbit.earthRotSpeed,
-    0,
-    0.0002,
-    0.000001,
-    (v: number) => (orbit.earthRotSpeed = v),
-    (v: number) => v.toFixed(6),
+    "earthRotPeriod",
+    "Earth Rot Period (s)",
+    Math.min(60, toPeriodSeconds(orbit.earthRotSpeed)),
+    1,
+    60,
+    1,
+    (v: number) => (orbit.earthRotSpeed = toRotSpeed(v)),
+    (v: number) => (isFinite(v) ? v.toFixed(0) : "∞"),
   );
   addSlider(
     "sunOrbitSpeed",

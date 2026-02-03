@@ -5,11 +5,11 @@ Managing asynchronous work through TDD and agent-driven workflows.
 Standardized (v2) structure:
 ```shell
 src/tickets/
-├── tickets.duckdb          # Primary storage (DuckDB)
 └── <ticket-id>/
     ├── agent_summary.md    # Deleted after ingestion
     └── test/
         └── test.go         # TDD registry & subtask logic
+    └── <ticket-id>.duckdb  # Per-ticket storage (DuckDB)
 ```
 
 ## Command Line Help
@@ -67,9 +67,9 @@ Ticket CLI examples:
 # Advanced
 
 ### Environment Variables
-- `TICKET_DB_PATH`: Override the default DuckDB storage location. Useful for integration tests to avoid modifying production ticket data.
+- `TICKET_DB_PATH`: Override the default DuckDB storage location (advanced). By default, each ticket uses its own DuckDB file: `src/tickets/<ticket-id>/<ticket-id>.duckdb`.
   ```shell
-  TICKET_DB_PATH=src/tickets/test_tickets.duckdb ./dialtone.sh ticket list
+  TICKET_DB_PATH=src/tickets/test_tickets.duckdb ./dialtone.sh ticket start my-ticket
   ```
 
 ### Ticket Data Model (Go)

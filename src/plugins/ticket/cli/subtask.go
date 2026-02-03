@@ -9,7 +9,7 @@ import (
 func RunSubtask(args []string) {
 	if len(args) < 1 {
 		fmt.Println("Usage: ./dialtone.sh ticket subtask <command> [args]")
-		fmt.Println("Commands: add, list, status, done, failed, note, test")
+		fmt.Println("Commands: add, list, status, done, failed, note, test, testcmd")
 		return
 	}
 
@@ -27,6 +27,8 @@ func RunSubtask(args []string) {
 	case "test":
 		logSubtaskCommand(command, cmdArgs)
 		RunSubtaskTestCmd(cmdArgs)
+	case "testcmd":
+		RunSubtaskTestCmdSet(cmdArgs)
 	case "done":
 		RunSubtaskDone(cmdArgs)
 	case "failed":
@@ -46,6 +48,42 @@ func RunSubtask(args []string) {
 	default:
 		logInfo("Unknown subtask command: %s", command)
 	}
+}
+
+func RunSubtaskTestCmdSet(args []string) {
+	if len(args) < 2 {
+		logFatal("Usage: ./dialtone.sh ticket subtask testcmd <subtask-name> <test-command...>")
+	}
+
+	subtaskName := args[0]
+	testCommand := strings.TrimSpace(strings.Join(args[1:], " "))
+	if testCommand == "" {
+		logFatal("Test command cannot be empty")
+	}
+
+	ticket, err := GetCurrentTicket()
+	if err != nil {
+		logFatal("Error getting current ticket: %v", err)
+	}
+
+	found := false
+	for i := range ticket.Subtasks {
+		if ticket.Subtasks[i].Name == subtaskName {
+			ticket.Subtasks[i].TestCommand = testCommand
+			found = true
+			break
+		}
+	}
+	if !found {
+		logFatal("Subtask not found: %s", subtaskName)
+	}
+
+	if err := SaveTicket(ticket); err != nil {
+		logFatal("Could not save ticket: %v", err)
+	}
+
+	logSubtaskCommand("testcmd", append([]string{subtaskName}, args[1:]...))
+	logInfo("Set test command for subtask %s", subtaskName)
 }
 
 func RunSubtaskList(args []string) {
@@ -152,40 +190,24 @@ func RunNext(args []string) {
 	}
 
 	logInfo("Executing test for subtask: %s", st.Name)
-	testErr := runDynamicTest(ticketID, st.Name)
+	printDialtone(
+		[]string{
+			fmt.Sprintf("ticket: %s", ticketID),
+			fmt.Sprintf("subtask: %s", st.Name),
+			"policy: DIALTONE does not auto-run tests; agent must run and report results",
+			"verify: tests pass; logs contain no ERROR/EXCEPTION; tests clean up resources",
+		},
+		"Run the subtask test command(s) now.\nIf it fails, modify code/tests and re-run until it passes. Then review logs and submit a summary.",
+		[]string{
+			"./dialtone.sh ticket subtask list",
+			"./dialtone.sh plugin test <plugin-name>",
+			"./dialtone.sh logs --lines 200",
+			"./dialtone.sh ticket summary update",
+			"./dialtone.sh ticket subtask done <ticket-name> <subtask-name>",
+		},
+	)
 
-	// Reload
-	ticket, err = GetTicket(ticketID)
-	if err != nil {
-		logFatal("Error: %v", err)
-	}
-	st = nil
-	for i := range ticket.Subtasks {
-		if ticket.Subtasks[i].Status == "progress" {
-			st = &ticket.Subtasks[i]
-		}
-	}
-
-	if testErr == nil {
-		logInfo("Subtask %s passed!", st.Name)
-		st.Status = "done"
-		st.PassTimestamp = time.Now().Format(time.RFC3339)
-		if err := SaveTicket(ticket); err != nil {
-			logFatal("Could not update ticket %s: %v", ticketID, err)
-		}
-
-		// Recurse to next task with same ID, preserving flags
-		RunNext(args)
-	} else {
-		logInfo("Subtask %s failed.", st.Name)
-		st.Status = "todo"
-		st.FailTimestamp = time.Now().Format(time.RFC3339)
-		st.AgentNotes = testErr.Error()
-		if err := SaveTicket(ticket); err != nil {
-			logFatal("Could not update ticket %s: %v", ticketID, err)
-		}
-		PrintTicketReport(ticket)
-	}
+	// Stop here: do not execute tests automatically.
 }
 
 func RunSubtaskTestCmd(args []string) {
@@ -309,24 +331,6 @@ func RunSubtaskDone(args []string) {
 
 	logSubtaskCommand("done", args)
 
-	logInfo("Executing test for subtask: %s", subtask)
-	if err := runDynamicTest(name, subtask); err != nil {
-		ticket, ticketErr := GetTicket(name)
-		if ticketErr == nil {
-			for i := range ticket.Subtasks {
-				if ticket.Subtasks[i].Name == subtask {
-					ticket.Subtasks[i].Status = "todo"
-					ticket.Subtasks[i].FailTimestamp = time.Now().Format(time.RFC3339)
-					ticket.Subtasks[i].AgentNotes = err.Error()
-				}
-			}
-			if saveErr := SaveTicket(ticket); saveErr != nil {
-				logFatal("Could not update ticket %s: %v", name, saveErr)
-			}
-		}
-		logFatal("Verification failed for subtask %s: %v", subtask, err)
-	}
-
 	ticket, err := GetTicket(name)
 	if err != nil {
 		logFatal("Error: %v", err)
@@ -341,6 +345,23 @@ func RunSubtaskDone(args []string) {
 		logFatal("Could not update ticket %s: %v", name, err)
 	}
 	logInfo("Subtask %s marked as done", subtask)
+
+	printDialtone(
+		[]string{
+			fmt.Sprintf("ticket: %s", name),
+			fmt.Sprintf("subtask: %s", subtask),
+			"record: subtask status marked done (manual verification assumed)",
+			"next: submit agent summary and prepare a git commit",
+		},
+		"Please confirm:\n- You ran the subtask tests and they passed\n- You reviewed logs and found no ERROR/EXCEPTION\n- Tests cleaned up any resources they created\n\nThen submit a summary and create a commit.",
+		[]string{
+			"./dialtone.sh ticket summary update",
+			"git status -sb",
+			"git add .",
+			"git commit -m \"Describe the change\"",
+			"./dialtone.sh ticket done",
+		},
+	)
 }
 
 func RunSubtaskFailed(args []string) {
