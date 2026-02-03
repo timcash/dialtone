@@ -55,6 +55,16 @@ sections.register('s-cad', {
     }
 });
 
+sections.register('s-webgpu', {
+    containerId: 'webgpu-container',
+    load: async () => {
+        const { mountWebgpu } = await import('./components/webgpu');
+        const container = document.getElementById('webgpu-container');
+        if (!container) throw new Error('webgpu-container not found');
+        return mountWebgpu(container);
+    }
+});
+
 sections.register('s-about', {
     containerId: 'about-container',
     header: { visible: false },

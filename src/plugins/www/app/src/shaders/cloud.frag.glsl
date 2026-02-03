@@ -61,7 +61,7 @@ float fbm(vec3 p) {
   float v = 0.0;
   float a = 0.5;
   vec3 shift = vec3(100.0);
-  for (int i = 0; i < 4; ++i) {
+  for (int i = 0; i < 3; ++i) {
     v += a * snoise(p);
     p = p * 2.0 + shift;
     a *= 0.5;

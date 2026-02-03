@@ -90,7 +90,8 @@ h2 {
 #nn-container,
 #math-container,
 #cad-container,
-#robot-container {
+#robot-container,
+#webgpu-container {
   position: absolute;
   top: 0;
   left: 0;
@@ -102,7 +103,8 @@ h2 {
 #earth-container canvas,
 #nn-container canvas,
 #math-container canvas,
-#robot-container canvas {
+#robot-container canvas,
+#webgpu-container canvas {
   display: block;
 }
 
@@ -331,13 +333,13 @@ h2 {
   background: var(--theme-bg);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  padding: 24px;
+  padding: 16px;
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
   border: 1px solid var(--theme-border);
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
   z-index: 50;
   color: var(--theme-text);
   max-height: calc(100vh - 120px);
@@ -359,9 +361,9 @@ h2 {
 }
 
 .earth-config-panel h3 {
-  font-size: 1.25rem;
+  font-size: 1.05rem;
   font-weight: 600;
-  margin: 0 0 8px 0;
+  margin: 4px 0 2px 0;
   background: var(--theme-gradient);
   -webkit-background-clip: text;
   background-clip: text;
@@ -370,27 +372,28 @@ h2 {
 
 .earth-config-row {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
+  gap: 10px;
 }
 
 .earth-config-row label {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: var(--theme-text-dim);
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
 }
 
 .earth-config-row input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
-  width: 140px;
-  /* Reduced width to fit 300px container */
+  width: 120px;
   height: 4px;
   background: rgba(255, 255, 255, 0.1);
   border-radius: 2px;
   outline: none;
-  margin: 8px 0;
+  margin: 0;
 }
 
 .earth-config-row input[type="range"]::-webkit-slider-thumb {
@@ -416,7 +419,9 @@ h2 {
 .earth-config-value {
   color: var(--theme-text);
   font-family: monospace;
-  font-size: 0.85rem;
+  font-size: 0.75rem;
+  min-width: 48px;
+  text-align: right;
 }
 
 .earth-config-panel button {

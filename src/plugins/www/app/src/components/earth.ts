@@ -4,12 +4,13 @@ import earthVertexShader from "../shaders/earth.vert.glsl?raw";
 import earthFragmentShader from "../shaders/earth.frag.glsl?raw";
 import cloudVertexShader from "../shaders/cloud.vert.glsl?raw";
 import cloudFragmentShader from "../shaders/cloud.frag.glsl?raw";
-import cloudIceFragmentShader from "../shaders/cloud_ice.frag.glsl?raw";
 import atmosphereVertexShader from "../shaders/atmosphere.vert.glsl?raw";
 import atmosphereFragmentShader from "../shaders/atmosphere.frag.glsl?raw";
 import sunAtmosphereVertexShader from "../shaders/sun_atmosphere.vert.glsl?raw";
 import sunAtmosphereFragmentShader from "../shaders/sun_atmosphere.frag.glsl?raw";
-import { setupConfigPanel, updateTelemetry } from "./earth/config_ui";
+import { setupConfigPanel } from "./earth/config_ui";
+import { FpsCounter } from "./fps";
+import { GpuTimer } from "./gpu_timer";
 import { VisibilityMixin } from "./section";
 
 const DEG_TO_RAD = Math.PI / 180;
@@ -23,6 +24,8 @@ export class ProceduralOrbit {
   container: HTMLElement;
   frameId = 0;
   resizeObserver?: ResizeObserver;
+  gl!: WebGLRenderingContext | WebGL2RenderingContext;
+  gpuTimer = new GpuTimer();
 
   isVisible = true;
   frameCount = 0;
@@ -30,22 +33,16 @@ export class ProceduralOrbit {
   earth!: THREE.Mesh;
   cloud1!: THREE.Mesh;
   cloud2!: THREE.Mesh;
-  cloud3!: THREE.Mesh;
-  cloud4!: THREE.Mesh;
   hexLayers: HexLayer[] = [];
   atmosphere!: THREE.Mesh;
   sunAtmosphere!: THREE.Mesh;
   earthMaterial!: THREE.ShaderMaterial;
   cloud1Material!: THREE.ShaderMaterial;
   cloud2Material!: THREE.ShaderMaterial;
-  cloud3Material!: THREE.ShaderMaterial;
-  cloud4Material!: THREE.ShaderMaterial;
   atmosphereMaterial!: THREE.ShaderMaterial;
   sunAtmosphereMaterial!: THREE.ShaderMaterial;
   cloud1Axis = new THREE.Vector3(0, 1, 0);
   cloud2Axis = new THREE.Vector3(0.2, 1, -0.1).normalize();
-  cloud3Axis = new THREE.Vector3(-0.1, 1, 0.2).normalize();
-  cloud4Axis = new THREE.Vector3(0.3, 1, 0.05).normalize();
 
   // Settings
   earthRadius = 5;
@@ -57,12 +54,8 @@ export class ProceduralOrbit {
   earthRotSpeed = 0.000042;
   cloud1RotSpeed = (Math.PI * 2) / 100;
   cloud2RotSpeed = (Math.PI * 2) / 120;
-  cloud3RotSpeed = (Math.PI * 2) / 150;
-  cloud4RotSpeed = (Math.PI * 2) / 180;
   cloud1Opacity = 0.35;
   cloud2Opacity = 0.2;
-  cloud3Opacity = 0.12;
-  cloud4Opacity = 0.2;
   cloudBrightness = 1.0;
   cameraDistance = 4.5;
   cameraOffsetX = 5.0;
@@ -86,17 +79,16 @@ export class ProceduralOrbit {
   materialColorScale = 1.25;
 
   lastFrameTime = performance.now();
-  altitudeEl?: HTMLElement;
-  speedEl?: HTMLElement;
   configPanel?: HTMLDivElement;
   configToggle?: HTMLButtonElement;
   configValueMap = new Map<string, HTMLSpanElement>();
   private setConfigPanelOpen?: (open: boolean) => void;
+  private fpsCounter = new FpsCounter("earth");
 
   constructor(container: HTMLElement) {
     this.container = container;
     this.renderer.setClearColor(0x000000, 1);
-    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.domElement.style.position = "absolute";
     this.renderer.domElement.style.top = "0";
     this.renderer.domElement.style.left = "0";
@@ -104,11 +96,9 @@ export class ProceduralOrbit {
     this.renderer.domElement.style.height = "100%";
     this.renderer.domElement.style.display = "block";
     this.container.appendChild(this.renderer.domElement);
+    this.gl = this.renderer.getContext();
+    this.gpuTimer.init(this.gl);
 
-    this.altitudeEl =
-      document.querySelector('[data-telemetry="altitude"]') || undefined;
-    this.speedEl =
-      document.querySelector('[data-telemetry="speed"]') || undefined;
 
     this.initLayers();
     this.initLights();
@@ -159,7 +149,11 @@ export class ProceduralOrbit {
   }
 
   initLayers() {
-    const geo = (r: number) => new THREE.SphereGeometry(r, 128, 128);
+    const geo = (r: number, segments: number) =>
+      new THREE.SphereGeometry(r, segments, segments);
+    const earthSegments = 64;
+    const cloudSegments = 48;
+    const atmoSegments = 32;
 
     const earthMat = new THREE.ShaderMaterial({
       uniforms: {
@@ -175,41 +169,33 @@ export class ProceduralOrbit {
       fragmentShader: earthFragmentShader,
     });
     this.earthMaterial = earthMat;
-    this.earth = new THREE.Mesh(geo(this.earthRadius), earthMat);
+    this.earth = new THREE.Mesh(geo(this.earthRadius, earthSegments), earthMat);
     this.scene.add(this.earth);
 
     const cloud1Mat = this.createCloudMaterial(0.2, this.cloud1Opacity);
     this.cloud1Material = cloud1Mat;
-    this.cloud1 = new THREE.Mesh(geo(this.earthRadius + 0.05), cloud1Mat);
+    this.cloud1 = new THREE.Mesh(
+      geo(this.earthRadius + 0.05, cloudSegments),
+      cloud1Mat,
+    );
     this.scene.add(this.cloud1);
 
     const cloud2Mat = this.createCloudMaterial(0.5, this.cloud2Opacity);
     this.cloud2Material = cloud2Mat;
-    this.cloud2 = new THREE.Mesh(geo(this.earthRadius + 0.08), cloud2Mat);
+    this.cloud2 = new THREE.Mesh(
+      geo(this.earthRadius + 0.08, cloudSegments),
+      cloud2Mat,
+    );
     this.scene.add(this.cloud2);
 
-    const cloud3Mat = this.createCloudMaterial(0.9, this.cloud3Opacity);
-    this.cloud3Material = cloud3Mat;
-    this.cloud3 = new THREE.Mesh(geo(this.earthRadius + 0.12), cloud3Mat);
-    this.scene.add(this.cloud3);
-
-    const cloud4Mat = this.createCloudMaterial(
-      1.4,
-      this.cloud4Opacity,
-      new THREE.Color(0.85, 0.95, 1.0), // Brighter
-      cloudIceFragmentShader,
-      { uGlow: { value: 0.45 } },
-    );
-    this.cloud4Material = cloud4Mat;
-    this.cloud4 = new THREE.Mesh(geo(this.earthRadius + 0.18), cloud4Mat);
-    this.scene.add(this.cloud4);
+    // Reduced cloud layers for performance (2 layers instead of 4)
 
     this.hexLayers = [
       new HexLayer(this.earthRadius, {
         radiusOffset: 0.06,
-        count: 420,
+        count: 240,
         resolution: 3,
-        ratePerSecond: 100,
+        ratePerSecond: 45,
         durationSeconds: 3,
         palette: [
           new THREE.Color(0.85, 0.85, 0.86),
@@ -219,9 +205,9 @@ export class ProceduralOrbit {
       }),
       new HexLayer(this.earthRadius, {
         radiusOffset: 0.08,
-        count: 380,
+        count: 200,
         resolution: 3,
-        ratePerSecond: 100,
+        ratePerSecond: 45,
         durationSeconds: 3,
         palette: [
           new THREE.Color(0.75, 0.75, 0.76),
@@ -231,9 +217,9 @@ export class ProceduralOrbit {
       }),
       new HexLayer(this.earthRadius, {
         radiusOffset: 0.12,
-        count: 340,
+        count: 160,
         resolution: 3,
-        ratePerSecond: 100,
+        ratePerSecond: 45,
         durationSeconds: 3,
         palette: [
           new THREE.Color(0.9, 0.9, 0.9),
@@ -260,7 +246,10 @@ export class ProceduralOrbit {
       fragmentShader: atmosphereFragmentShader,
     });
     this.atmosphereMaterial = atmoMat;
-    this.atmosphere = new THREE.Mesh(geo(this.earthRadius + 0.2), atmoMat);
+    this.atmosphere = new THREE.Mesh(
+      geo(this.earthRadius + 0.2, atmoSegments),
+      atmoMat,
+    );
     this.scene.add(this.atmosphere);
 
     const sunAtmoMat = new THREE.ShaderMaterial({
@@ -280,7 +269,7 @@ export class ProceduralOrbit {
     });
     this.sunAtmosphereMaterial = sunAtmoMat;
     this.sunAtmosphere = new THREE.Mesh(
-      geo(this.earthRadius + 0.32),
+      geo(this.earthRadius + 0.32, atmoSegments),
       sunAtmoMat,
     );
     this.scene.add(this.sunAtmosphere);
@@ -343,14 +332,11 @@ export class ProceduralOrbit {
     this.setConfigPanelOpen = setOpen;
   }
 
-  updateTelemetry(orbitRadius: number) {
-    updateTelemetry(this, orbitRadius);
-  }
-
   setVisible(visible: boolean) {
     VisibilityMixin.setVisible(this, visible, "earth");
     if (!visible) {
       this.setConfigPanelOpen?.(false);
+      this.fpsCounter.clear();
     }
   }
 
@@ -358,7 +344,9 @@ export class ProceduralOrbit {
     this.frameId = requestAnimationFrame(this.animate);
     if (!this.isVisible) return;
 
-    const now = performance.now();
+    this.frameCount++;
+    const cpuStart = performance.now();
+    const now = cpuStart;
     const rawDelta = (now - this.lastFrameTime) / 1000;
     this.lastFrameTime = now;
     const deltaSeconds = rawDelta * this.timeScale;
@@ -368,16 +356,10 @@ export class ProceduralOrbit {
     this.earth.rotation.y += this.earthRotSpeed * deltaSeconds;
     this.cloud1.rotateOnAxis(this.cloud1Axis, this.cloud1RotSpeed * rawDelta);
     this.cloud2.rotateOnAxis(this.cloud2Axis, this.cloud2RotSpeed * rawDelta);
-    this.cloud3.rotateOnAxis(this.cloud3Axis, this.cloud3RotSpeed * rawDelta);
-    this.cloud4.rotateOnAxis(this.cloud4Axis, this.cloud4RotSpeed * rawDelta);
 
     (this.cloud1.material as THREE.ShaderMaterial).uniforms.uTime.value =
       cloudTime;
     (this.cloud2.material as THREE.ShaderMaterial).uniforms.uTime.value =
-      cloudTime;
-    (this.cloud3.material as THREE.ShaderMaterial).uniforms.uTime.value =
-      cloudTime;
-    (this.cloud4.material as THREE.ShaderMaterial).uniforms.uTime.value =
       cloudTime;
 
     this.camera.position.set(this.cameraOffsetX, 0, this.cameraDistance);
@@ -402,12 +384,6 @@ export class ProceduralOrbit {
     (this.cloud2.material as THREE.ShaderMaterial).uniforms.uSunDir.value.copy(
       sDir,
     );
-    (this.cloud3.material as THREE.ShaderMaterial).uniforms.uSunDir.value.copy(
-      sDir,
-    );
-    (this.cloud4.material as THREE.ShaderMaterial).uniforms.uSunDir.value.copy(
-      sDir,
-    );
 
     (
       this.cloud1.material as THREE.ShaderMaterial
@@ -415,29 +391,15 @@ export class ProceduralOrbit {
     (
       this.cloud2.material as THREE.ShaderMaterial
     ).uniforms.uSunIntensity.value = 0.5 * this.cloudBrightness;
-    (
-      this.cloud3.material as THREE.ShaderMaterial
-    ).uniforms.uSunIntensity.value = 0.5 * this.cloudBrightness;
-    (
-      this.cloud4.material as THREE.ShaderMaterial
-    ).uniforms.uSunIntensity.value = 0.5 * this.cloudBrightness;
 
     (this.cloud1.material as THREE.ShaderMaterial).uniforms.uOpacity.value =
       this.cloud1Opacity;
     (this.cloud2.material as THREE.ShaderMaterial).uniforms.uOpacity.value =
       this.cloud2Opacity;
-    (this.cloud3.material as THREE.ShaderMaterial).uniforms.uOpacity.value =
-      this.cloud3Opacity;
-    (this.cloud4.material as THREE.ShaderMaterial).uniforms.uOpacity.value =
-      this.cloud4Opacity;
 
     (this.cloud1.material as THREE.ShaderMaterial).uniforms.uCloudAmount.value =
       this.cloudAmount;
     (this.cloud2.material as THREE.ShaderMaterial).uniforms.uCloudAmount.value =
-      this.cloudAmount;
-    (this.cloud3.material as THREE.ShaderMaterial).uniforms.uCloudAmount.value =
-      this.cloudAmount;
-    (this.cloud4.material as THREE.ShaderMaterial).uniforms.uCloudAmount.value =
       this.cloudAmount;
 
     this.hexLayers.forEach((l) => l.update(now * 0.001));
@@ -447,8 +409,12 @@ export class ProceduralOrbit {
       this.camera.position,
     );
 
+    this.gpuTimer.begin(this.gl);
     this.renderer.render(this.scene, this.camera);
-    this.updateTelemetry(this.camera.position.length());
+    this.gpuTimer.end(this.gl);
+    this.gpuTimer.poll(this.gl);
+    const cpuMs = performance.now() - cpuStart;
+    this.fpsCounter.tick(cpuMs, this.gpuTimer.lastMs);
   };
 
   buildConfigSnapshot() {
