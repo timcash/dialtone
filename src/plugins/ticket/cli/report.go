@@ -85,6 +85,41 @@ func logWarn(format string, a ...interface{}) {
 	fmt.Printf("[ticket] WARN: "+format+"\n", a...)
 }
 
+// printDialtone prints a "virtual librarian" guidance block for LLM agents.
+// This is intentionally plain text and copy/paste friendly.
+func printDialtone(contextLines []string, summary string, exampleCommands []string) {
+	fmt.Println()
+	fmt.Println("DIALTONE:")
+	for _, line := range contextLines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Ensure each context line is prefixed for readability.
+		if strings.HasPrefix(line, "- ") {
+			fmt.Println(line)
+		} else {
+			fmt.Println("- " + line)
+		}
+	}
+	if strings.TrimSpace(summary) != "" {
+		fmt.Println()
+		fmt.Println(strings.TrimSpace(summary))
+	}
+	if len(exampleCommands) > 0 {
+		fmt.Println()
+		fmt.Println("example-commands")
+		for _, cmd := range exampleCommands {
+			cmd = strings.TrimSpace(cmd)
+			if cmd == "" {
+				continue
+			}
+			fmt.Println(cmd)
+		}
+	}
+	fmt.Println()
+}
+
 func isDuckDBLockError(message string) bool {
 	// DuckDB single-writer / process lock error signature
 	// Example:
