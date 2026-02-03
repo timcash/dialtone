@@ -1,66 +1,52 @@
 # [Dialtone](https://dialtone.earth)
 
-Dialtone is a AI assisted Command Line Interface (CLI) for building, testing, and operating large robotic video and data networks.
+- **What it is**: Dialtone is a virtual library for building, maintaining, and operating robotic networks—guided by the **Virtual Librarian** `DIALTONE`.
+- **How you work**: The Virtual Librarian helps you navigate the system step by step, turning questions into tickets, tickets into tests, and tests into safe upgrades.
+- **What it runs on**: A CLI-first workflow paired with a secure mesh VPN and a global message bus for commands, telemetry, logs, and coordination.
+- **What you get**: Reliable communication between robots and humans, from lab bench to field deployment.
+
+- **Real-time Earth Twin**: Dialtone includes a real-time Earth digital twin—live, geospatial visualizations that mirror global robotic activity and environments. This Earth twin integrates telemetry, fleet location, and situational context directly into the library, making operations and coordination inherently spatial.
+
+Get started:
+
+```bash
+git clone https://github.com/timcash/dialtone.git
+cd dialtone
+./dialtone.sh install
+./dialtone.sh ticket start <ticket-name>
+./dialtone.sh ticket next
+```
+
 
 ![dialtone](./dialtone.jpg)
 
 # Vision
-Dialtone is a clean-room build for robotic systems that scale through four concrete capabilities:
-1. Open hardware and software so anyone can build, modify, and deploy the stack.
-2. Human-in-the-loop remote operations so people can supervise, teleoperate, and teach robots.
-3. Private, encrypted network communication that keeps fleets secure and coordinated.
-4. Field radios that move real-time video and telemetry across open radio and compute hardware.
-5. A geospatial operating system to manage robots across real-world terrain and context.
-6. Self-adapting programs that learn, compose, and improve as the network grows.
+Dialtone is a virtual library for distributed robotic systems—and a foundation for marketplaces that support education, training, research, manufacturing, maintenance, and real-world operations. The vision is to make robotics work end-to-end by treating fleets as living systems: observable, upgradeable, secure, and learnable.
 
-# Skills
-Skill are systems of systems that combine into valuable real world actions like navigating a robot or modifying and testing code.
-1. Autocode: Fast, safe code evolution that scales AI-assisted control across large robot networks.
-2. CLI: A single operational interface that standardizes control across distributed fleets.
-3. AI: Vision and language assistance that turns operator intent into network-wide actions.
-4. VPN: Private, identity-aware networking that keeps large robot networks connected and secure.
-5. RSI: Collaborative planning that aligns humans and AI across multi-robot missions.
-6. Marketplace: Parts and services access that scales buildout and support for large networks.
-7. Bus: Scalable command and telemetry flow that coordinates many robots at once.
-8. Radio: Field uplinks that maintain network control when traditional links fail.
-9. Autoconfig: Automated device discovery that accelerates bringing new nodes into the network.
-10. Geo: Geospatial context that enables coordinated operations over large areas.
-11. CAD: Simulation-first validation that reduces risk when rolling updates across fleets.
-12. Web: Public and operator visibility that extends network control beyond the CLI.
-13. Social: Shared moments and coordination channels that strengthen network engagement.
-14. Cyber: Security automation that constantly scan the network for threats.
-15. Maintenance: Cyclic parts and repair supply chains that keep distributed fleets sustainable.
-16. Mocks: Hardware-free simulations to speed testing and development.
+### Self-improving loop
+As the network grows, Dialtone captures what works (tests, tickets, logs, telemetry) so new capabilities can be composed from proven building blocks instead of reinvented per robot.
 
-# Binary Architecture: Production vs. Development
-Both systems contain the same core code but differ in their capabilities.
-1. `dialtone` a single binary with embeded vpn that networks robots together.
-2. `dialtone-dev` developer workflows for installing, building, and testing the system.
+### Open hardware + software
+Robotics fails when stacks are locked to a vendor or a single lab. Openness enables interoperability, reproducibility, and a shared library of components that anyone can modify and deploy.
 
-# Test-Driven Development (TDD)
-1. A test is created for every development task.
-2. The test is written before the code therefor driving the design and implementation.
+### Remote operations
+Real robots live in the field. Supervising, teleoperating, and teaching remotely is what turns prototypes into systems that can be maintained and improved over time.
 
-# `dialtone` development and CLI
-1. Use only these two tools as much as possible `dialtone.sh` CLI and `git`
-2. Always run `./dialtone.sh ticket start <ticket-name>` before making any changes.
-3. `dialtone.sh` is a simple wrapper around `src/dev.go`
+### Private, encrypted networking
+Without secure identity and encrypted transport, you can’t safely control a fleet, move sensitive telemetry, or accept third-party integrations. Security is the prerequisite for scale.
 
-## Clone
-```bash
-git clone https://github.com/timcash/dialtone.git # Clone the repo
-cd dialtone
-```
+### Field radios for real bandwidth
+Operations require low-latency control plus high-rate video/telemetry where traditional links fail. Radios are the bridge between robots, edge compute, and operators in contested environments.
 
-## Installation & Setup
-```bash
-git pull origin main # update main so you can integrate it into your ticket
-./dialtone.sh install # Install dev dependencies
-./dialtone.sh install --remote # Install dev dependencies on remote robot
-```
+### Geospatial context
+Robots act in physical space. A geospatial operating system provides shared ground truth—where assets are, what terrain means, and how to coordinate actions across an area.
 
+### AI-assisted education
+A library only matters if people can use it. Dialtone pairs operational tooling with guided learning so teams can understand the math and science behind the system as they build and deploy.
 
-## Ticket Lifecycle
+Together, these pieces create a reliable substrate—a “robotic internet”—that a **library** (reusable components, workflows, and validated upgrades) and a **marketplace** (parts, services, training, and integrations) can be built on top of with confidence.
+
+# Tickets
 Use the `ticket` command for new work. It enforces TDD and standardized markdown schemas.
 ```bash
 ./dialtone.sh ticket add <ticket-name>      # Scaffold src/tickets/
@@ -73,15 +59,102 @@ Use the `ticket` command for new work. It enforces TDD and standardized markdown
 ./dialtone.sh ticket done                   # Final push, PR Ready-for-review, switch to main
 ```
 
-## Running Tests: Tests are the most important concept in `dialtone`
-```bash
-./dialtone.sh plugin test <plugin-name>           # Run tests for a specific plugin
-dialtone-dev test plugin <plugin-name> --list     # List tests that would run
-dialtone-dev test tags <tag-one> <tag-two>        # Run tests matching tags
-dialtone-dev test ticket <ticket-name>            # Run ticket-specific tests
+### Ticket Structure
+For tickets created via `./dialtone.sh ticket start <ticket-name>`:
+```
+src/tickets/<ticket-name>/
+└── test/
+    └── test.go        # Go integration tests (TDD loop)
+└── ticket.md          # Ticket description and subtasks
 ```
 
-## Logs
+# Plugins
+Plugins are feature modules that extend Dialtone with specific operational capabilities. Each plugin packages code, tests, and tooling so you can add functionality without changing core networking and deployment primitives.
+
+### Autocode
+Implements ticket-driven, test-first code changes and validation loops so upgrades can be developed, reviewed, and rolled out consistently across machines.
+
+### CLI
+Provides the command surface for operators and automation, exposing common workflows (tickets, plugins, logs, build/deploy) through a single interface.
+
+### AI
+Integrates vision and language components to interpret operator intent, summarize state, and assist with planning and execution within the ticket/test workflow.
+
+### VPN
+Establishes private, identity-aware connectivity between nodes so control and telemetry can traverse networks securely without bespoke tunnel setup.
+
+### RSI
+Supports human + AI coordination primitives (shared plans, task decomposition, status) for multi-step work that spans fleets and environments.
+
+### Marketplace
+Defines interfaces and workflows for discovering, distributing, and operating third-party parts, services, training, and integrations on top of the base platform.
+
+### Bus
+Implements message transport patterns for commands, events, telemetry, logs, and streams so components can coordinate with low coupling and clear contracts.
+
+### Radio
+Adds field uplink support for deployments that require non-traditional links, keeping control and data flowing when standard connectivity is unavailable.
+
+### Autoconfig
+Automates node bring-up: discovery, configuration, and enrollment so new devices can join the network with minimal manual steps.
+
+### Geo
+Provides geospatial models and utilities for location-aware operations, enabling mapping, spatial queries, and coordinated actions over an area.
+
+### CAD
+Enables simulation-first validation and rollout safety checks so changes can be evaluated before they affect real hardware.
+
+### Web
+Delivers web-based visibility and control surfaces for operators, with status, dashboards, and workflows that complement the CLI.
+
+### Social
+Adds communication and coordination channels for teams, capturing context around operations and making collaboration auditable and searchable.
+
+### Cyber
+Implements security automation (scanning, hardening, monitoring) to reduce exposure and detect issues across distributed deployments.
+
+### Maintenance
+Tracks upkeep workflows—health checks, repair cycles, parts usage, and service history—so fleets remain operable over time.
+
+### Mocks
+Provides hardware-free simulations and mock interfaces to speed development, testing, and CI without requiring physical devices.
+
+### Weather
+Integrates weather data and forecasting inputs that affect safety, planning, routing, and mission scheduling.
+
+### Plugin CLI
+The `plugin` command is used to manage Dialtone plugins.
+```bash
+./dialtone.sh plugin add <plugin-name> # Add a README.md to src/plugins/<plugin-name>/README.md
+./dialtone.sh plugin install <plugin-name> # Install dependencies
+./dialtone.sh plugin build <plugin-name> # Build the plugin
+./dialtone.sh plugin test <plugin-name> # Runs tests in src/plugins/<plugin-name>/test/
+```
+### Plugin Folder Structure
+For new plugins created via `./dialtone.sh plugin create <plugin-name>`:
+```
+src/plugins/<name>/
+├── app/               # Application code
+├── cli/               # CLI command code
+├── test/              # Plugin-specific tests
+└── README.md          # Plugin documentation
+```
+
+
+
+# Logs
+- Logs are used extensively in the system for live debugging and monitoring.
+### Log Format
+- The log format is: `[timestamp | level | file:function:line] message`
+
+```shell
+# Log Examples
+[2026-02-03T12:00:00.123Z07:00 | INFO  | main.go:run:42] starting dialtone
+[2026-02-03T12:00:01.004Z07:00 | WARN  | bus.go:connect:88] reconnecting to nats...
+[2026-02-03T12:00:01.217Z07:00 | ERROR | vpn.go:up:133] failed to bring vpn up: permission denied
+[2026-02-03T12:00:01.219Z07:00 | FATAL | main.go:run:57] unrecoverable error, exiting
+```
+
 ```bash
 ./dialtone.sh logs # Tail and stream local logs
 ./dialtone.sh logs --remote # Tail and stream remote logs
@@ -89,29 +162,22 @@ dialtone-dev test ticket <ticket-name>            # Run ticket-specific tests
 ./dialtone.sh logs --remote --lines 10 # get the last 10 lines of remote logs
 ```
 
-## Plugin Lifecycle
+
+
+# Build & Deploy
 ```bash
-./dialtone.sh plugin add <plugin-name> # Add a README.md to src/plugins/<plugin-name>/README.md
-./dialtone.sh plugin install <plugin-name> # Install dependencies
-./dialtone.sh plugin build <plugin-name> # Build the plugin
-./dialtone.sh plugin test <plugin-name> # Runs tests in src/plugins/<plugin-name>/test/
+./dialtone.sh build         # Build Web UI + local CLI + robot binary
+./dialtone.sh deploy        # Push to a remote robot
+./dialtone.sh diagnostic    # Run tests on a remote robot
 ```
 
-## Build & Deploy
-```bash
-./dialtone.sh build --full  # Build Web UI + local CLI + robot binary
-./dialtone.sh deploy        # Push to remote robot
-./dialtone.sh diagnostic    # Run tests on remote robot
-./dialtone.sh logs --remote # Stream remote logs
-```
-
-## GitHub & Pull Requests
+# GitHub & Pull Requests
 ```bash
 ./dialtone.sh github pr           # Create or update a pull request
 ./dialtone.sh github pr --draft   # Create as a draft
 ```
 
-## Git Workflow
+# Git Workflow
 ```bash
 git status                        # Check git status
 git add .                         # Add all changes
@@ -122,7 +188,7 @@ git pull origin main              # Pull changes
 git merge main                    # Merge main into current branch
 ```
 
-## Develop the WWW site
+# Develop the WWW site
 ```bash
 ./dialtone.sh www dev # Start local development server
 ./dialtone.sh www build # Build the project locally
@@ -133,8 +199,8 @@ git merge main                    # Merge main into current branch
 ```
 
 # Development Hierarchy
-1. **Ticket**: The first step of any change. Ideal for adding new code that can patch `core` or `plugin` code without changing it directly.
-2. **Plugin**: The second step is integrating new code into specific feature areas.
+1. **Tickets**: The first step of any change. Ideal for adding new code that can patch `core` or `plugin` code without changing it directly.
+2. **Plugins**: The second step is integrating new code into specific feature areas.
 3. **Core**: Core code is reserved for features dealing with networking and deployment (dialtone/dialtone-dev). It is the minimal code required to bootstrap the system.
 
 
@@ -193,6 +259,7 @@ flowchart TD
 ```
 dialtone/
 ├── src/               # All source code
+│   ├── core/          # Core code
 │   ├── plugins/       # All plugins
 │   └── tickets/       # Standardized tickets
 ├── docs/              # VM and container docs
@@ -201,23 +268,6 @@ dialtone/
 └── README.md          # Repo overview
 ```
 
-## Ticket Structure
-For tickets created via `./dialtone.sh ticket start <ticket-name>`:
-```
-src/tickets/<ticket-name>/
-└── test/
-    └── test.go        # Go integration tests (TDD loop)
-```
-
-## Plugin Development Structure
-For new plugins created via `./dialtone.sh plugin create <plugin-name>`:
-```
-src/plugins/<name>/
-├── app/               # Application code
-├── cli/               # CLI command code
-├── test/              # Plugin-specific tests
-└── README.md          # Plugin documentation
-```
 
 # Workflows
 1. [Issue Review](docs/workflows/issue_review.md): Planning-only triage flow that audits issues, asks clarifying questions, and promotes validated tickets.
