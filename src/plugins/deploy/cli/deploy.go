@@ -12,6 +12,7 @@ import (
 	"dialtone/cli/src/core/build"
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/ssh"
+
 	sshlib "golang.org/x/crypto/ssh"
 )
 
@@ -165,7 +166,7 @@ func validateRequiredVars(vars []string) {
 		}
 	}
 	if len(missing) > 0 {
-		logger.LogFatal("Missing required environment variables: %s. Please check your .env file.", strings.Join(missing, ", "))
+		logger.LogFatal("Missing required environment variables: %s. Please check your env/.env file.", strings.Join(missing, ", "))
 	}
 }
 

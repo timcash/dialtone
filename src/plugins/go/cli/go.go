@@ -65,7 +65,7 @@ func runExec(args []string) {
 
 	// Set GOROOT to ensure the toolchain uses its own libraries
 	os.Setenv("GOROOT", goDir)
-	
+
 	// Prepend dependencies bin to PATH so installed tools are found
 	newPath := filepath.Join(goDir, "bin") + string(os.PathListSeparator) + os.Getenv("PATH")
 	os.Setenv("PATH", newPath)
@@ -76,7 +76,7 @@ func runExec(args []string) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
-	
+
 	if err := cmd.Run(); err != nil {
 		// Pass through the exit code if possible
 		if exitError, ok := err.(*exec.ExitError); ok {
@@ -90,9 +90,9 @@ func runPbDump(args []string) {
 	if len(args) < 1 {
 		logger.LogFatal("Usage: dialtone go pb-dump <file.pb>")
 	}
-	
+
 	toolPath := "src/plugins/go/tools/pb-dump/main.go"
-	
+
 	// Delegate to runExec which handles environment
 	execArgs := append([]string{"run", toolPath}, args...)
 	runExec(execArgs)
@@ -103,7 +103,7 @@ func runInstall(args []string) {
 
 	depsDir := config.GetDialtoneEnv()
 	if depsDir == "" {
-		logger.LogFatal("DIALTONE_ENV not set in .env or environment")
+		logger.LogFatal("DIALTONE_ENV not set in env/.env or environment")
 	}
 
 	if err := os.MkdirAll(depsDir, 0755); err != nil {
@@ -162,7 +162,7 @@ func runInstall(args []string) {
 
 func runLint(args []string) {
 	logger.LogInfo("Running Go lint (vet)...")
-	
+
 	depsDir := config.GetDialtoneEnv()
 	goBin := filepath.Join(depsDir, "go", "bin", "go")
 
@@ -178,7 +178,7 @@ func runLint(args []string) {
 	cmd := exec.Command(goBin, "vet", "./...")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	logger.LogInfo("Executing: %s vet ./...", goBin)
 	if err := cmd.Run(); err != nil {
 		logger.LogFatal("Lint failed: %v", err)

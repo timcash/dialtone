@@ -6,7 +6,7 @@
 ## Installation & Setup
 ```bash
 git pull origin main # update main so you can integrate it into your ticket
-mv -n .env.example .env # Only if .env does not exists
+mv -n env/.env.example env/.env # Only if env/.env does not exists
 ./dialtone.sh install # Verify and install dev dependencies
 ./dialtone.sh install --remote # Verify and install dev dependencies on remote robot
 ```

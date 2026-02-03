@@ -86,9 +86,12 @@ func RunBuild(args []string) {
 			buildLocally(targetOS, arch)
 			buildWWW()
 		} else {
-			compiler := "gcc-aarch64-linux-gnu"
-			cppCompiler := "g++-aarch64-linux-gnu"
-			if arch == "arm" {
+			compiler := "gcc"
+			cppCompiler := "g++"
+			if arch == "arm64" {
+				compiler = "gcc-aarch64-linux-gnu"
+				cppCompiler = "g++-aarch64-linux-gnu"
+			} else if arch == "arm" {
 				compiler = "gcc-arm-linux-gnueabihf"
 				cppCompiler = "g++-arm-linux-gnueabihf"
 			}
@@ -356,8 +359,8 @@ func buildWithPodman(arch, compiler, cppCompiler string) {
 		"-e", "GOOS=linux",
 		"-e", "GOARCH=" + arch,
 		"-e", "CGO_ENABLED=1",
-		"-e", "CC=" + strings.TrimPrefix(compiler, "gcc-") + "-gcc",
-		"-e", "CXX=" + strings.TrimPrefix(cppCompiler, "g++-") + "-g++",
+		"-e", "CC=" + strings.TrimPrefix(strings.TrimPrefix(compiler, "gcc-"), "gcc") + "gcc",
+		"-e", "CXX=" + strings.TrimPrefix(strings.TrimPrefix(cppCompiler, "g++-"), "g++") + "g++",
 		baseImage,
 		"bash", "-c", fmt.Sprintf("%sgo build -buildvcs=false -o bin/%s src/cmd/dialtone/main.go", installCmd, outputName),
 	}

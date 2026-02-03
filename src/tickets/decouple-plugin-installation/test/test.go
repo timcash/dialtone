@@ -42,7 +42,7 @@ func RunBuildScriptsTest() error {
 func RunPluginInstallTest() error {
 	// Verify 'plugin install' command exists and runs
 	// We pass --env explicitly here to ensure recursive calls also use it
-	cmd := exec.Command("./dialtone.sh", "--env", "test.env", "plugin", "install", "ticket")
+	cmd := exec.Command("./dialtone.sh", "--env", "env/test.env", "install")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("plugin install failed: %v, output: %s", err, string(output))
@@ -80,7 +80,7 @@ func RunVerifyInstallGo() error {
 	os.RemoveAll(filepath.Join(envDir, "go"))
 
 	// We MUST use the primary 'install' command to bootstrap Go when it is missing
-	cmd := exec.Command("./dialtone.sh", "--env", "test.env", "install")
+	cmd := exec.Command("./dialtone.sh", "--env", "env/test.env", "install")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("go bootstrap install failed: %v, output: %s", err, string(output))
@@ -96,7 +96,7 @@ func RunVerifyInstallGo() error {
 
 func RunVerifyInstallAI() error {
 	// Now that Go is installed (from previous subtask or bootstrap), we can use the plugin command
-	cmd := exec.Command("./dialtone.sh", "--env", "test.env", "plugin", "install", "ai")
+	cmd := exec.Command("./dialtone.sh", "--env", "env/test.env", "plugin", "install", "ai")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		if !strings.Contains(string(output), "AI Plugin: Checking dependencies") {
@@ -110,7 +110,7 @@ func RunStubPluginInstallTest() error {
 	// Verify that various plugins respond to 'install' without error
 	plugins := []string{"ticket", "github", "camera", "chrome"}
 	for _, p := range plugins {
-		cmd := exec.Command("./dialtone.sh", "--env", "test.env", "plugin", "install", p)
+		cmd := exec.Command("./dialtone.sh", "--env", "env/test.env", "plugin", "install", p)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("plugin %s install failed: %v, output: %s", p, err, string(output))
@@ -122,7 +122,7 @@ func RunStubPluginInstallTest() error {
 func RunEnvFlagPropagationTest() error {
 	// Verify that the environment from test.env is propagated through recursive shell calls
 	// We'll use a hack of checking if 'plugin install' output mentions the correct environment dir
-	cmd := exec.Command("./dialtone.sh", "--env", "test.env", "plugin", "install", "go")
+	cmd := exec.Command("./dialtone.sh", "--env", "env/test.env", "plugin", "install", "go")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("env propagation check failed: %v", err)
@@ -140,14 +140,14 @@ func RunEnvFlagPropagationTest() error {
 
 func RunSkipInstallIfReadyTest() error {
 	// 1. First run to ensure everything is installed
-	cmd1 := exec.Command("./dialtone.sh", "--env", "test.env", "install")
+	cmd1 := exec.Command("./dialtone.sh", "--env", "env/test.env", "install")
 	if err := cmd1.Run(); err != nil {
 		return fmt.Errorf("initial install failed: %v", err)
 	}
 
 	// 2. Second run should be fast and skip all downloads
 	startTime := time.Now()
-	cmd2 := exec.Command("./dialtone.sh", "--env", "test.env", "install")
+	cmd2 := exec.Command("./dialtone.sh", "--env", "env/test.env", "install")
 	output, err := cmd2.CombinedOutput()
 	duration := time.Since(startTime)
 

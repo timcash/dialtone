@@ -22,6 +22,7 @@ Thumbs.db
 
 # ENV
 .env
+env/.env
 .vercel
 .env*.local
 

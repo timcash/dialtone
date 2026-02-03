@@ -64,7 +64,7 @@ func printCloudflareUsage() {
 func runLogin(args []string) {
 	cf := findCloudflared()
 	logger.LogInfo("Logging into Cloudflare...")
-	
+
 	cmd := exec.Command(cf, "tunnel", "login")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -88,13 +88,13 @@ func runTunnel(args []string) {
 		fmt.Println("  cleanup         Terminate all local tunnel processes")
 		return
 	}
-	
+
 	sub := args[0]
 	subArgs := args[1:]
-	
+
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "tunnel")
-	
+
 	switch sub {
 	case "create":
 		cmdArgs = append(cmdArgs, "create")
@@ -130,7 +130,7 @@ func runTunnel(args []string) {
 			}
 		}
 		if hostname == "" {
-			logger.LogFatal("No hostname provided and DIALTONE_HOSTNAME not set in .env")
+			logger.LogFatal("No hostname provided and DIALTONE_HOSTNAME not set in env/.env")
 		}
 		cmdArgs = append(cmdArgs, "route", "dns", tunnelName, hostname)
 	case "cleanup":
@@ -140,7 +140,7 @@ func runTunnel(args []string) {
 		fmt.Printf("Unknown tunnel subcommand: %s\n", sub)
 		return
 	}
-	
+
 	cmd := exec.Command(cf, cmdArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -155,18 +155,18 @@ func runServe(args []string) {
 		fmt.Println("Usage: dialtone cloudflare serve <port-or-url>")
 		return
 	}
-	
+
 	target := args[0]
 	logger.LogInfo("Starting Cloudflare tunnel to serve %s...", target)
-	
+
 	// cloudflared tunnel --url http://localhost:PORT
 	// Or just cloudflared tunnel --url target
-	
+
 	cmdArgs := []string{"tunnel", "--url", target}
 	cmd := exec.Command(cf, cmdArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	if err := cmd.Run(); err != nil {
 		logger.LogFatal("Cloudflare serve failed: %v", err)
 	}

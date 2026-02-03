@@ -95,7 +95,7 @@ func updateEnv(key, value string) {
 	// Update current process environment
 	os.Setenv(key, value)
 
-	envFile := ".env"
+	envFile := "env/.env"
 	content, _ := os.ReadFile(envFile)
 	lines := strings.Split(string(content), "\n")
 	found := false
