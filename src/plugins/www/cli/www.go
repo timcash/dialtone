@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,11 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"dialtone/cli/src/core/browser"
+
+	"github.com/chromedp/cdproto/runtime"
+	"github.com/chromedp/chromedp"
 )
 
 func logInfo(format string, args ...interface{}) {
@@ -260,6 +266,8 @@ func RunWww(args []string) {
 		fmt.Println("  test cad [--live]  Run headed browser tests for CAD generator")
 		fmt.Println("  cad demo           Zero-config local CAD development environment")
 		fmt.Println("  earth demo         Zero-config local Earth development environment")
+		fmt.Println("  webgpu demo        Zero-config local WebGPU development environment")
+		fmt.Println("  webgpu debug       Chromedp debug run for WebGPU rendering")
 		fmt.Println("\nRun 'dialtone www <subcommand> --help' for specific details.")
 		return
 	}
@@ -307,6 +315,39 @@ func RunWww(args []string) {
 			return
 		}
 		logFatal("Unknown 'earth' command. Use 'dialtone www help' for usage.")
+	case "webgpu":
+		if len(args) > 1 && args[1] == "demo" {
+			for _, arg := range args[2:] {
+				if arg == "--help" || arg == "-h" {
+					fmt.Println("Usage: dialtone www webgpu demo")
+					fmt.Println("\nOrchestrates a full local WebGPU development environment:")
+					fmt.Println("  1. Cleans up port 5173.")
+					fmt.Println("  2. Kills existing Chrome debug instances.")
+					fmt.Println("  3. Starts the Vite WWW dev server.")
+					fmt.Println("  4. Launches Chrome with GPU acceleration on the WebGPU section.")
+					return
+				}
+			}
+			handleWebgpuDemo(webDir)
+			return
+		}
+		if len(args) > 1 && args[1] == "debug" {
+			for _, arg := range args[2:] {
+				if arg == "--help" || arg == "-h" {
+					fmt.Println("Usage: dialtone www webgpu debug")
+					fmt.Println("\nRuns a Chromedp debug pass for the WebGPU section:")
+					fmt.Println("  1. Cleans up port 5173.")
+					fmt.Println("  2. Kills existing Chrome debug instances.")
+					fmt.Println("  3. Starts the Vite WWW dev server.")
+					fmt.Println("  4. Launches Chrome with WebGPU flags.")
+					fmt.Println("  5. Captures WebGPU availability, canvas sizing, and console logs.")
+					return
+				}
+			}
+			handleWebgpuDebug(webDir)
+			return
+		}
+		logFatal("Unknown 'webgpu' command. Use 'dialtone www help' for usage.")
 
 	case "publish":
 		publishPrebuilt(webDir, vercelPath, vercelEnv, args[1:])
@@ -581,8 +622,9 @@ func handleCadDemo(webDir string) {
 	logInfo("Shutting down...")
 }
 
-func handleEarthDemo(webDir string) {
-	logInfo("Setting up Earth Demo Environment...")
+
+func handleWebgpuDemo(webDir string) {
+	logInfo("Setting up WebGPU Demo Environment...")
 
 	// 1. Aggressive Port Cleanup
 	logInfo("Cleaning up port 5173...")
@@ -619,17 +661,17 @@ func handleEarthDemo(webDir string) {
 		logFatal("Dev server failed to start within 30 seconds")
 	}
 
-	// 5. Launch GPU-enabled Chrome on Earth section
+	// 5. Launch GPU-enabled Chrome on WebGPU section
 	logInfo("Launching GPU-enabled Chrome...")
-	chromeCmd := exec.Command("./dialtone.sh", "chrome", "new", "http://127.0.0.1:5173/#s-home", "--gpu")
+	chromeCmd := exec.Command("./dialtone.sh", "chrome", "new", "http://127.0.0.1:5173/#s-webgpu", "--gpu")
 	chromeCmd.Stdout = os.Stdout
 	chromeCmd.Stderr = os.Stderr
 	if err := chromeCmd.Run(); err != nil {
 		logFatal("Failed to launch Chrome: %v", err)
 	}
 
-	logInfo("Earth Demo Environment is LIVE!")
-	logInfo("Dev Server: http://127.0.0.1:5173/#s-home")
+	logInfo("WebGPU Demo Environment is LIVE!")
+	logInfo("Dev Server: http://127.0.0.1:5173/#s-webgpu")
 	logInfo("Press Ctrl+C to stop...")
 
 	// Wait for interrupt signal
@@ -637,4 +679,161 @@ func handleEarthDemo(webDir string) {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
 	logInfo("Shutting down...")
+}
+
+func handleWebgpuDebug(webDir string) {
+	logInfo("Setting up WebGPU Debug Environment...")
+
+	headless := os.Getenv("HEADLESS") == "true"
+
+	// 1. Cleanup ports
+	logInfo("Cleaning up port 5173...")
+	_ = browser.CleanupPort(5173)
+	time.Sleep(1500 * time.Millisecond)
+
+	// 2. Kill existing Dialtone Chrome instances
+	logInfo("Cleaning up Chrome processes...")
+	_ = exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
+
+	// 3. Start WWW Dev Server (Background)
+	logInfo("Starting WWW Dev Server...")
+	devCmd := exec.Command("npm", "run", "dev", "--", "--host", "127.0.0.1")
+	devCmd.Dir = webDir
+	devCmd.Stdout = os.Stdout
+	devCmd.Stderr = os.Stderr
+	if err := devCmd.Start(); err != nil {
+		logFatal("Failed to start dev server: %v", err)
+	}
+	defer func() {
+		if devCmd.Process != nil {
+			logInfo("Stopping Dev Server...")
+			_ = devCmd.Process.Kill()
+		}
+	}()
+
+	// 4. Wait for dev server to be ready
+	logInfo("Waiting for Dev Server...")
+	ready := false
+	for i := 0; i < 30; i++ {
+		resp, err := http.Get("http://127.0.0.1:5173")
+		if err == nil && resp.StatusCode == 200 {
+			resp.Body.Close()
+			ready = true
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	if !ready {
+		logFatal("Dev server failed to start within 30 seconds")
+	}
+
+	chromePath := browser.FindChromePath()
+	if chromePath == "" {
+		logFatal("Chrome not found on this system")
+	}
+
+	logInfo("Launching Chrome (headless=%v) with WebGPU flags...", headless)
+	allocOpts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath(chromePath),
+		chromedp.Flag("headless", headless),
+		chromedp.Flag("disable-gpu", false),
+		chromedp.Flag("enable-unsafe-webgpu", true),
+		chromedp.Flag("enable-features", "Vulkan,UseSkiaRenderer,WebGPU"),
+		chromedp.Flag("use-angle", "metal"),
+		chromedp.Flag("enable-gpu-rasterization", true),
+		chromedp.Flag("enable-zero-copy", true),
+		chromedp.Flag("dialtone-origin", true),
+	)
+
+	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), allocOpts...)
+	defer cancel()
+
+	ctx, cancel := chromedp.NewContext(allocCtx)
+	defer cancel()
+
+	ctx, cancel = context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+
+	var consoleLogs []string
+	chromedp.ListenTarget(ctx, func(ev interface{}) {
+		switch ev := ev.(type) {
+		case *runtime.EventConsoleAPICalled:
+			for _, arg := range ev.Args {
+				consoleLogs = append(consoleLogs, fmt.Sprintf("[%s] %s", ev.Type, arg.Value))
+			}
+		case *runtime.EventExceptionThrown:
+			consoleLogs = append(consoleLogs, fmt.Sprintf("[EXCEPTION] %s", ev.ExceptionDetails.Text))
+		}
+	})
+
+	var hasGPU bool
+	var canvasInfo struct {
+		Width        int    `json:"width"`
+		Height       int    `json:"height"`
+		ClientWidth  int    `json:"clientWidth"`
+		ClientHeight int    `json:"clientHeight"`
+		Text         string `json:"text"`
+		Visible      bool   `json:"visible"`
+		HasContext   bool   `json:"hasContext"`
+	}
+	var isVisible bool
+
+	err := chromedp.Run(ctx,
+		chromedp.Navigate("http://127.0.0.1:5173/#s-webgpu"),
+		chromedp.WaitReady("#webgpu-container"),
+		chromedp.Evaluate(`(function(){
+			const section = document.getElementById("s-webgpu");
+			if (section) section.scrollIntoView({ behavior: "instant" });
+			return true;
+		})()`, nil),
+		chromedp.Sleep(2*time.Second),
+		chromedp.Evaluate(`!!navigator.gpu`, &hasGPU),
+		chromedp.Evaluate(`(function(){
+			const container = document.getElementById("webgpu-container");
+			const canvas = container ? container.querySelector("canvas") : null;
+			const text = container ? container.textContent || "" : "";
+			const rect = canvas ? canvas.getBoundingClientRect() : { width: 0, height: 0 };
+			return {
+				width: canvas ? canvas.width : 0,
+				height: canvas ? canvas.height : 0,
+				clientWidth: canvas ? canvas.clientWidth : 0,
+				clientHeight: canvas ? canvas.clientHeight : 0,
+				text: text.trim(),
+				visible: rect.width > 0 && rect.height > 0,
+				hasContext: canvas ? !!canvas.getContext("webgpu") : false,
+			};
+		})()`, &canvasInfo),
+		chromedp.Evaluate(`(function(){
+			const section = document.getElementById("s-webgpu");
+			return !!(section && section.classList.contains("is-visible"));
+		})()`, &isVisible),
+	)
+
+	if err != nil {
+		logInfo("Chromedp run failed: %v", err)
+	}
+
+	logInfo("WebGPU availability: %v", hasGPU)
+	logInfo("Section visible (.is-visible): %v", isVisible)
+	logInfo("Canvas info: size=%dx%d client=%dx%d visible=%v context=%v",
+		canvasInfo.Width,
+		canvasInfo.Height,
+		canvasInfo.ClientWidth,
+		canvasInfo.ClientHeight,
+		canvasInfo.Visible,
+		canvasInfo.HasContext,
+	)
+	if canvasInfo.Text != "" {
+		logInfo("WebGPU container text: %s", canvasInfo.Text)
+	}
+
+	if len(consoleLogs) > 0 {
+		logInfo("Browser console logs:")
+		for _, line := range consoleLogs {
+			fmt.Printf("  %s\n", line)
+		}
+	} else {
+		logInfo("No browser console output captured.")
+	}
 }
