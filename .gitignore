@@ -31,6 +31,7 @@ env/.env
 
 # Local ticket databases (per-ticket)
 src/tickets/.current_ticket
+src/tickets/.current_ticket_mode
 src/tickets/**/*.duckdb
 
 # Local Dependencies

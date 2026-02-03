@@ -6,7 +6,7 @@ Standardized (v2) structure:
 ```shell
 src/tickets/
 └── <ticket-id>/
-    ├── agent_summary.md    # Deleted after ingestion
+    ├── <subtask>-summary.md  # One persistent summary file per subtask
     └── test/
         └── test.go         # TDD registry & subtask logic
     └── <ticket-id>.duckdb  # Per-ticket storage (DuckDB)
@@ -16,11 +16,12 @@ src/tickets/
 Ticket CLI examples:
 ```shell
 ./dialtone.sh ticket start <name>    # Initialize a new ticket and git branch
+./dialtone.sh ticket review <name>   # Review ticket DB/subtasks only (no tests/logs/code)
 ./dialtone.sh ticket next            # Main TDD driver; runs tests and blocks on questions
-./dialtone.sh ticket done            # Finalize ticket; requires agent_summary.md
+./dialtone.sh ticket done            # Finalize ticket; requires summaries to be up to date
 
 ./dialtone.sh ticket summary         # List all agent summaries for current ticket
-./dialtone.sh ticket summary update  # Ingest agent_summary.md (deleted on success)
+./dialtone.sh ticket summary update  # Sync <subtask>-summary.md into DuckDB (no deletion)
 ./dialtone.sh ticket summary --idle   # Reset 10m timer for idle periods
 ./dialtone.sh ticket search <query>  # Search through historical agent summaries
 
@@ -47,13 +48,21 @@ Ticket CLI examples:
 ./dialtone.sh ticket start feature-name
 ```
 
+## STEP 1b. Review a ticket (prep-only)
+```shell
+# Review a ticket without starting execution:
+# - checks ticket DB/subtasks are well-formed
+# - does NOT demand tests/logs/code changes
+./dialtone.sh ticket review feature-name
+```
+
 ## STEP 2. Iterative Development (TDD)
 ```shell
 # Run the TDD drive. It will promote tasks to 'progress' and run tests.
 ./dialtone.sh ticket next
 
 # If blocked by 10m summary window:
-# 1. Update src/tickets/<name>/agent_summary.md
+# 1. Update src/tickets/<name>/<subtask>-summary.md
 # 2. Run:
 ./dialtone.sh ticket summary update
 ```
