@@ -20,8 +20,8 @@ Tickets are the primary unit of work for changes to the system.
 
 ```bash
 ./dialtone.sh ticket add <ticket-name>
-./dialtone.sh ticket start <ticket-name>
 ./dialtone.sh ticket review <ticket-name>
+./dialtone.sh ticket start <ticket-name>
 ./dialtone.sh ticket ask <question>
 ./dialtone.sh ticket ask --subtask <subtask-name> <question>
 ./dialtone.sh ticket log <message>
