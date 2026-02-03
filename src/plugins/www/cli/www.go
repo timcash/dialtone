@@ -100,6 +100,23 @@ func normalizeVersion(raw string) string {
 	return raw
 }
 
+func ensureNpmDeps(webDir string) {
+	tscPath := filepath.Join(webDir, "node_modules", ".bin", "tsc")
+	if _, err := os.Stat(tscPath); err == nil {
+		return
+	}
+
+	logInfo("Installing npm dependencies...")
+	cmd := exec.Command("npm", "install")
+	cmd.Dir = webDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	if err := cmd.Run(); err != nil {
+		logFatal("npm install failed: %v", err)
+	}
+}
+
 func bumpPatch(version string) (string, error) {
 	parts := strings.Split(version, ".")
 	if len(parts) != 3 {
@@ -181,6 +198,7 @@ func publishPrebuilt(webDir string, vercelPath string, vercelEnv []string, args 
 	}
 	logInfo("Bumped version to v%s", nextVersion)
 	logInfo("Building and deploying prebuilt output...")
+	ensureNpmDeps(webDir)
 	buildCmd := exec.Command("npm", "run", "build")
 	buildCmd.Dir = webDir
 	buildCmd.Stdout = os.Stdout
@@ -431,6 +449,7 @@ func RunWww(args []string) {
 		}
 		// Run 'npm run build' (which runs vite build)
 		logInfo("Building project...")
+		ensureNpmDeps(webDir)
 		cmd := exec.Command("npm", "run", "build")
 		cmd.Dir = webDir // Keep running in webDir for NPM
 		cmd.Stdout = os.Stdout

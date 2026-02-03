@@ -3,6 +3,7 @@ package build
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -103,7 +104,13 @@ func RunBuild(args []string) {
 
 func hasPodman() bool {
 	_, err := exec.LookPath("podman")
-	return err == nil
+	if err != nil {
+		return false
+	}
+	cmd := exec.Command("podman", "info")
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	return cmd.Run() == nil
 }
 
 // buildWebIfNeeded builds the web UI if needed
