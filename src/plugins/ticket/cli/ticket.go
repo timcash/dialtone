@@ -216,6 +216,19 @@ func RunStart(args []string) {
 	}
 
 	logInfo("Ticket %s started successfully", name)
+	printDialtone(
+		[]string{
+			fmt.Sprintf("ticket: %s", name),
+			"goal: keep work ticket-driven; run tests yourself and summarize results",
+			"verify: git branch is correct and working tree is clean before starting",
+		},
+		"Run the next command(s) to validate environment and begin the first subtask.\nThen summarize results and what to do next.",
+		[]string{
+			"./dialtone.sh ticket subtask list",
+			"./dialtone.sh plugin test <plugin-name>",
+			"./dialtone.sh www dev",
+		},
+	)
 }
 
 func RunAck(args []string) {
@@ -332,67 +345,81 @@ func RunValidate(args []string) {
 }
 
 func RunDone(args []string) {
-	// Always run test commands before finalizing
-	RunTest(nil)
-
-	// Simple validation: all subtasks must be done
 	ticket, err := GetCurrentTicket()
 	if err != nil {
 		logFatal("Error getting current ticket: %v", err)
 	}
+
+	// DIALTONE mode: do not run tests automatically. Guide the agent instead.
+	// `done` is only allowed after the agent has run tests, reviewed logs, and submitted summary.
+	dir := filepath.Join("src", "tickets", ticket.ID)
+	summaryPath := filepath.Join(dir, "agent_summary.md")
+	if _, err := os.Stat(summaryPath); err != nil {
+		printDialtone(
+			[]string{
+				fmt.Sprintf("ticket: %s", ticket.ID),
+				"blocker: missing agent_summary.md (required to finalize)",
+				"policy: do not auto-run tests/commits; ask the agent to verify",
+				"verify: tests pass; browser/dev logs contain no ERROR/EXCEPTION; resources cleaned up",
+			},
+			"Create `src/tickets/<ticket>/agent_summary.md` with a final summary.\nThen re-run `./dialtone.sh ticket done`.",
+			[]string{
+				"./dialtone.sh plugin test <plugin-name>",
+				"./dialtone.sh logs --lines 200",
+				"./dialtone.sh ticket summary update",
+				"./dialtone.sh ticket done",
+			},
+		)
+		logFatal("Missing mandatory agent_summary.md for ticket completion")
+	}
+
+	content, err := os.ReadFile(summaryPath)
+	if err != nil {
+		logFatal("Error reading %s: %v", summaryPath, err)
+	}
+	if len(strings.TrimSpace(string(content))) == 0 {
+		logFatal("agent_summary.md is empty. A final summary is required.")
+	}
+
+	// Simple validation: all subtasks must be done (or failed/skipped)
 	for _, st := range ticket.Subtasks {
 		if st.Status != "done" && st.Status != "failed" && st.Status != "skipped" {
+			printDialtone(
+				[]string{
+					fmt.Sprintf("ticket: %s", ticket.ID),
+					fmt.Sprintf("blocker: subtask `%s` is still %s", st.Name, st.Status),
+					"process: run tests, review logs, submit summary, then mark subtask done",
+				},
+				"Loop until the subtask test passes and logs are clean.\nThen mark the subtask done and re-run ticket done.",
+				[]string{
+					"./dialtone.sh ticket subtask list",
+					"./dialtone.sh plugin test <plugin-name>",
+					"./dialtone.sh logs --lines 200",
+					"./dialtone.sh ticket summary update",
+					"./dialtone.sh ticket subtask done <ticket-name> <subtask-name>",
+					"./dialtone.sh ticket done",
+				},
+			)
 			logFatal("Subtask %s is still %s", st.Name, st.Status)
 		}
 	}
 
-	// V2: Mandatory Agent Summary from agent_summary.md
-	dir := filepath.Join("src", "tickets", ticket.ID)
-	summaryPath := filepath.Join(dir, "agent_summary.md")
-	content, err := os.ReadFile(summaryPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// If file is missing, we check if we have any historical summaries
-			allSummaries, _ := ListTicketSummaries(ticket.ID)
-			if len(allSummaries) == 0 {
-				fmt.Printf("[EXAMPLE] Recommended format for agent_summary.md:\n\n")
-				fmt.Printf("## Ran commands to find source files\n")
-				fmt.Printf("1. searched with grep - result nothing\n")
-				fmt.Printf("2. searched with `./dialtone.sh ticket search \"vertex node\"` - 2 results\n\n")
-				logFatal("Missing mandatory agent_summary.md and no summary history found for ticket completion")
-			}
-			// Use history only
-			finalLog := "## Unified Agent Summary\n\n"
-			for _, s := range allSummaries {
-				finalLog += fmt.Sprintf("### %s (%s)\n%s\n\n", s.Timestamp, s.SubtaskName, s.Content)
-			}
-			ticket.AgentSummary = finalLog
-		} else {
-			logFatal("Error reading %s: %v", summaryPath, err)
-		}
-	} else {
-		if len(strings.TrimSpace(string(content))) == 0 {
-			logFatal("agent_summary.md is empty. A final summary is required.")
-		}
-
-		allSummaries, _ := ListTicketSummaries(ticket.ID)
-		finalLog := "## Unified Agent Summary\n\n"
-		for _, s := range allSummaries {
-			finalLog += fmt.Sprintf("### %s (%s)\n%s\n\n", s.Timestamp, s.SubtaskName, s.Content)
-		}
-		finalLog += "### Final Summary\n" + string(content)
-		ticket.AgentSummary = finalLog
-
-		// Cleanup the file after ingestion in done as well
-		os.Remove(summaryPath)
+	// Ingest summaries (history + final file) then delete agent_summary.md
+	allSummaries, _ := ListTicketSummaries(ticket.ID)
+	finalLog := "## Unified Agent Summary\n\n"
+	for _, s := range allSummaries {
+		finalLog += fmt.Sprintf("### %s (%s)\n%s\n\n", s.Timestamp, s.SubtaskName, s.Content)
 	}
+	finalLog += "### Final Summary\n" + string(content)
+	ticket.AgentSummary = finalLog
+	_ = os.Remove(summaryPath)
 
 	logInfo("Finalizing ticket %s...", ticket.ID)
 	logTicketCommand(ticket.ID, "done", args)
 
 	// Backup DB to the ticket folder
 	dbPath := ticketDBPathFor(ticket.ID)
-	backupPath := filepath.Join("src", "tickets", ticket.ID, "tickets_backup.duckdb")
+	backupPath := filepath.Join("src", "tickets", ticket.ID, ticket.ID+"-backup.duckdb")
 	if err := backupFile(dbPath, backupPath); err != nil {
 		logFatal("Could not backup database: %v", err)
 	}
@@ -402,6 +429,21 @@ func RunDone(args []string) {
 		logFatal("Could not save final summary: %v", err)
 	}
 	logInfo("Ticket %s completed", ticket.ID)
+
+	printDialtone(
+		[]string{
+			fmt.Sprintf("ticket: %s", ticket.ID),
+			fmt.Sprintf("backup: %s", backupPath),
+			"next: make a git commit (manual) and open a PR if needed",
+		},
+		"Please verify git status is clean after committing.\nThis tool intentionally does not run git commands automatically.",
+		[]string{
+			"git status -sb",
+			"git add .",
+			"git commit -m \"Describe your changes\"",
+			"./dialtone.sh github pr --draft",
+		},
+	)
 }
 
 func backupFile(src, dst string) error {
@@ -618,7 +660,7 @@ func RunDelete(args []string) {
 func RunLoad(args []string) {
 	ticketsDir := filepath.Join("src", "tickets")
 
-	// Find all tickets_backup.duckdb files
+	// Find all *-backup.duckdb files
 	entries, err := os.ReadDir(ticketsDir)
 	if err != nil {
 		logFatal("Could not read tickets directory: %v", err)
@@ -630,9 +672,15 @@ func RunLoad(args []string) {
 			continue
 		}
 
-		backupPath := filepath.Join(ticketsDir, entry.Name(), "tickets_backup.duckdb")
-		if _, err := os.Stat(backupPath); os.IsNotExist(err) {
-			continue
+		ticketID := entry.Name()
+		backupPath := filepath.Join(ticketsDir, ticketID, ticketID+"-backup.duckdb")
+		if _, err := os.Stat(backupPath); err != nil {
+			// Legacy name (pre-rename)
+			legacy := filepath.Join(ticketsDir, ticketID, "tickets_backup.duckdb")
+			if _, err2 := os.Stat(legacy); err2 != nil {
+				continue
+			}
+			backupPath = legacy
 		}
 
 		logInfo("Loading backup from %s...", backupPath)

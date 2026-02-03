@@ -83,14 +83,15 @@ func init() {
 `, name)), 0644)
 
 	output = runCmd("./dialtone.sh", "ticket", "next")
-	if !strings.Contains(output, "Promoting subtask init to progress") {
-		return fmt.Errorf("expected auto-promotion after ack")
+	// In DIALTONE mode, `next` prints guidance and does not auto-run tests.
+	if !strings.Contains(output, "DIALTONE:") {
+		return fmt.Errorf("expected DIALTONE guidance after next")
 	}
 
 	// --- STEP 4: TDD Failure ---
 	fmt.Println("\n--- STEP 4: TDD Failure ---")
-	if !strings.Contains(output, "Subtask init failed") {
-		return fmt.Errorf("expected fail (no test logic yet)")
+	if !strings.Contains(output, "Run the subtask test") {
+		return fmt.Errorf("expected guidance to run subtask tests")
 	}
 
 	// --- STEP 5: Fixing Test & Passing ---
@@ -105,9 +106,16 @@ func init() {
 }
 `, name)), 0644)
 
-	output = runCmd("./dialtone.sh", "ticket", "next")
-	if !strings.Contains(output, "Subtask init passed") {
-		return fmt.Errorf("expected pass after fixing test")
+	// Agent runs the test explicitly (DIALTONE does not auto-run).
+	output = runCmd("./dialtone.sh", "ticket", "test", name, "--subtask", "init")
+	if !strings.Contains(output, "Tests passed") && !strings.Contains(output, "Test passed") {
+		return fmt.Errorf("expected tests to pass after fixing test")
+	}
+
+	// Mark subtask done (manual step)
+	output = runCmd("./dialtone.sh", "ticket", "subtask", "done", name, "init")
+	if !strings.Contains(output, "marked as done") {
+		return fmt.Errorf("expected subtask to be marked done")
 	}
 
 	// --- STEP 6: Summary Ingestion ---
