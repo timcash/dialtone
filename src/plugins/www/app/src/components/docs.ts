@@ -31,6 +31,24 @@ export function mountDocs(container: HTMLElement) {
                 <p>./dialtone.sh start --local</p>
             </div>
 
+            <h2>WWW Development</h2>
+            <p class="text-muted-foreground">Run the public site locally, validate it with browser tests, then build/publish.</p>
+            <div class="code-block">
+                <p><span class="comment"># Start the local dev server</span></p>
+                <p>./dialtone.sh www dev</p>
+                <br>
+                <p><span class="comment"># Run browser integration tests (captures console logs + JS exceptions)</span></p>
+                <p>./dialtone.sh plugin test www</p>
+                <br>
+                <p><span class="comment"># Build and publish</span></p>
+                <p>./dialtone.sh www build</p>
+                <p>./dialtone.sh www publish</p>
+                <br>
+                <p><span class="comment"># Inspect deployments</span></p>
+                <p>./dialtone.sh www logs &lt;deployment-url-or-id&gt;</p>
+                <p>./dialtone.sh www domain [deployment-url]</p>
+            </div>
+
             <div class="grid-2">
                 <div class="card">
                     <div class="card-header-icon">

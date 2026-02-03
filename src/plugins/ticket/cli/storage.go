@@ -1,4 +1,5 @@
 //go:build !no_duckdb
+
 package cli
 
 import (
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,26 +19,43 @@ import (
 var ErrTicketNotFound = errors.New("ticket not found")
 
 const (
-	ticketsDBFilename = "tickets.duckdb"
-	keysDBFilename    = "keys.duckdb"
+	keysDBFilename = "keys.duckdb"
+
+	// V2 storage:
+	// Each ticket stores its own DuckDB at:
+	//   src/tickets/<ticket-id>/<ticket-id>.duckdb
+	currentTicketFilename = ".current_ticket"
+	ticketDBExtension     = ".duckdb"
 )
 
-func ticketDBPath() string {
+func ticketDir(ticketID string) string {
+	return filepath.Join("src", "tickets", ticketID)
+}
+
+func currentTicketPath() string {
+	return filepath.Join("src", "tickets", currentTicketFilename)
+}
+
+func ticketDBPathFor(ticketID string) string {
+	// Keep env override for integration tests / isolation, but default to per-ticket DB.
 	if p := os.Getenv("TICKET_DB_PATH"); p != "" {
 		return p
 	}
-	return filepath.Join("src", "tickets", ticketsDBFilename)
+	return filepath.Join(ticketDir(ticketID), ticketID+ticketDBExtension)
 }
 
 func keysDBPath() string {
 	return keysDBFilename // Root of the repo
 }
 
-func openTicketDB() (*sql.DB, error) {
-	if err := os.MkdirAll(filepath.Join("src", "tickets"), 0755); err != nil {
+func openTicketDB(ticketID string) (*sql.DB, error) {
+	if strings.TrimSpace(ticketID) == "" {
+		return nil, fmt.Errorf("ticket ID is empty")
+	}
+	if err := os.MkdirAll(ticketDir(ticketID), 0755); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("duckdb", ticketDBPath())
+	db, err := sql.Open("duckdb", ticketDBPathFor(ticketID))
 	if err != nil {
 		return nil, err
 	}
@@ -97,10 +116,6 @@ func ensureTicketSchema(db *sql.DB) error {
 			message TEXT NOT NULL,
 			subtask TEXT
 		);`,
-		`CREATE TABLE IF NOT EXISTS ticket_meta (
-			key TEXT PRIMARY KEY,
-			value TEXT
-		);`,
 	}
 	for _, stmt := range statements {
 		if _, err := db.Exec(stmt); err != nil {
@@ -139,7 +154,7 @@ func GetTicket(ticketID string) (*Ticket, error) {
 	if ticketID == "" {
 		return nil, fmt.Errorf("ticket ID is empty")
 	}
-	db, err := openTicketDB()
+	db, err := openTicketDB(ticketID)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +258,7 @@ func SaveTicket(ticket *Ticket) error {
 	if err := validateTicket(ticket); err != nil {
 		return err
 	}
-	db, err := openTicketDB()
+	db, err := openTicketDB(ticket.ID)
 	if err != nil {
 		return err
 	}
@@ -314,29 +329,26 @@ func SaveTicket(ticket *Ticket) error {
 }
 
 func ListTickets() ([]string, error) {
-	db, err := openTicketDB()
+	root := filepath.Join("src", "tickets")
+	entries, err := os.ReadDir(root)
 	if err != nil {
-		return nil, err
-	}
-	defer db.Close()
-
-	rows, err := db.Query(`SELECT id FROM tickets ORDER BY id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
+		if os.IsNotExist(err) {
+			return nil, nil
 		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	var ids []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		ids = append(ids, name)
+	}
+	sort.Strings(ids)
 	return ids, nil
 }
 
@@ -344,7 +356,7 @@ func AppendTicketSummary(ticketID, subtaskName, content string) error {
 	if ticketID == "" {
 		return fmt.Errorf("ticket ID is empty")
 	}
-	db, err := openTicketDB()
+	db, err := openTicketDB(ticketID)
 	if err != nil {
 		return err
 	}
@@ -360,7 +372,7 @@ func AppendTicketSummary(ticketID, subtaskName, content string) error {
 }
 
 func ListTicketSummaries(ticketID string) ([]SummaryEntry, error) {
-	db, err := openTicketDB()
+	db, err := openTicketDB(ticketID)
 	if err != nil {
 		return nil, err
 	}
@@ -387,7 +399,7 @@ func ListTicketSummaries(ticketID string) ([]SummaryEntry, error) {
 }
 
 func GetLastTicketSummary(ticketID string) (*SummaryEntry, error) {
-	db, err := openTicketDB()
+	db, err := openTicketDB(ticketID)
 	if err != nil {
 		return nil, err
 	}
@@ -408,30 +420,41 @@ func GetLastTicketSummary(ticketID string) (*SummaryEntry, error) {
 }
 
 func SearchTicketSummaries(query string) ([]SummaryEntry, error) {
-	db, err := openTicketDB()
+	if strings.TrimSpace(query) == "" {
+		return nil, fmt.Errorf("query is empty")
+	}
+	ids, err := ListTickets()
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close()
-
-	rows, err := db.Query(`SELECT ticket_id, subtask_name, timestamp, content FROM ticket_summaries WHERE content LIKE ? OR subtask_name LIKE ? ORDER BY timestamp DESC`,
-		"%"+query+"%", "%"+query+"%")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var entries []SummaryEntry
-	for rows.Next() {
-		var e SummaryEntry
-		var subtask sql.NullString
-		if err := rows.Scan(&e.TicketID, &subtask, &e.Timestamp, &e.Content); err != nil {
-			return nil, err
+	var out []SummaryEntry
+	for _, id := range ids {
+		db, err := openTicketDB(id)
+		if err != nil {
+			// Ticket folder may exist without DB yet; skip
+			continue
 		}
-		e.SubtaskName = subtask.String
-		entries = append(entries, e)
+		rows, qerr := db.Query(`SELECT ticket_id, subtask_name, timestamp, content FROM ticket_summaries WHERE content LIKE ? OR subtask_name LIKE ? ORDER BY timestamp DESC`,
+			"%"+query+"%", "%"+query+"%")
+		if qerr != nil {
+			db.Close()
+			continue
+		}
+		for rows.Next() {
+			var e SummaryEntry
+			var subtask sql.NullString
+			if err := rows.Scan(&e.TicketID, &subtask, &e.Timestamp, &e.Content); err != nil {
+				continue
+			}
+			e.SubtaskName = subtask.String
+			out = append(out, e)
+		}
+		rows.Close()
+		db.Close()
 	}
-	return entries, nil
+	// Most recent first across all tickets
+	sort.Slice(out, func(i, j int) bool { return out[i].Timestamp > out[j].Timestamp })
+	return out, nil
 }
 
 func AppendTicketLogEntry(ticketID, entryType, message, subtask string) error {
@@ -441,7 +464,7 @@ func AppendTicketLogEntry(ticketID, entryType, message, subtask string) error {
 	if entryType == "" {
 		return fmt.Errorf("entry type is empty")
 	}
-	db, err := openTicketDB()
+	db, err := openTicketDB(ticketID)
 	if err != nil {
 		return err
 	}
@@ -461,7 +484,7 @@ func GetLogEntries(ticketID string) ([]LogEntry, error) {
 	if ticketID == "" {
 		return nil, fmt.Errorf("ticket ID is empty")
 	}
-	db, err := openTicketDB()
+	db, err := openTicketDB(ticketID)
 	if err != nil {
 		return nil, err
 	}
@@ -490,45 +513,22 @@ func SetCurrentTicket(ticketID string) error {
 	if ticketID == "" {
 		return fmt.Errorf("ticket ID is empty")
 	}
-	db, err := openTicketDB()
-	if err != nil {
+	if err := os.MkdirAll(filepath.Join("src", "tickets"), 0755); err != nil {
 		return err
 	}
-	defer db.Close()
-
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.Exec(`INSERT INTO ticket_meta (key, value)
-		VALUES ('current_ticket', ?)
-		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, ticketID); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return os.WriteFile(currentTicketPath(), []byte(ticketID+"\n"), 0644)
 }
 
 func GetCurrentTicketID() (string, error) {
-	db, err := openTicketDB()
+	content, err := os.ReadFile(currentTicketPath())
 	if err != nil {
-		return "", err
-	}
-	defer db.Close()
-
-	row := db.QueryRow(`SELECT value FROM ticket_meta WHERE key = 'current_ticket'`)
-	var value sql.NullString
-	if err := row.Scan(&value); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", fmt.Errorf("no current ticket set; run 'dialtone.sh ticket start <ticket-name>'")
-		}
-		return "", err
-	}
-	if !value.Valid || value.String == "" {
 		return "", fmt.Errorf("no current ticket set; run 'dialtone.sh ticket start <ticket-name>'")
 	}
-	return value.String, nil
+	id := strings.TrimSpace(string(content))
+	if id == "" {
+		return "", fmt.Errorf("no current ticket set; run 'dialtone.sh ticket start <ticket-name>'")
+	}
+	return id, nil
 }
 
 func nullOrValue(value string) interface{} {
@@ -689,30 +689,16 @@ func DeleteKey(name string) error {
 }
 
 func DeleteTicket(ticketID string) error {
-	db, err := openTicketDB()
-	if err != nil {
+	// Per-ticket DB: delete the DuckDB file if it exists.
+	dbPath := ticketDBPathFor(ticketID)
+	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	defer db.Close()
-
-	tx, err := db.Begin()
-	if err != nil {
-		return err
+	// If this was the current ticket, clear the pointer.
+	if cur, err := GetCurrentTicketID(); err == nil && cur == ticketID {
+		_ = os.Remove(currentTicketPath())
 	}
-	defer tx.Rollback()
-
-	tables := []string{"tickets", "subtasks", "ticket_summaries", "ticket_logs"}
-	for _, table := range tables {
-		query := fmt.Sprintf("DELETE FROM %s WHERE %s = ?", table, "ticket_id")
-		if table == "tickets" {
-			query = "DELETE FROM tickets WHERE id = ?"
-		}
-		if _, err := tx.Exec(query, ticketID); err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
+	return nil
 }
 
 // LoadBackupDB imports tickets from a backup duckdb file into the main database
@@ -724,14 +710,7 @@ func LoadBackupDB(backupPath string) error {
 	}
 	defer backupDB.Close()
 
-	// Open main database
-	mainDB, err := openTicketDB()
-	if err != nil {
-		return fmt.Errorf("failed to open main db: %w", err)
-	}
-	defer mainDB.Close()
-
-	// Import tickets
+	// Import tickets into per-ticket DBs
 	rows, err := backupDB.Query(`SELECT id, name, tags, description, agent_summary, start_time, last_summary_time FROM tickets`)
 	if err != nil {
 		return fmt.Errorf("failed to query tickets: %w", err)
@@ -744,7 +723,11 @@ func LoadBackupDB(backupPath string) error {
 		if err := rows.Scan(&id, &name, &tags, &description, &agentSummary, &startTime, &lastSummaryTime); err != nil {
 			return err
 		}
-		_, err := mainDB.Exec(`INSERT INTO tickets (id, name, tags, description, agent_summary, start_time, last_summary_time)
+		mainDB, err := openTicketDB(id)
+		if err != nil {
+			return fmt.Errorf("failed to open ticket db for %s: %w", id, err)
+		}
+		_, err = mainDB.Exec(`INSERT INTO tickets (id, name, tags, description, agent_summary, start_time, last_summary_time)
 			VALUES (?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET 
 				name = excluded.name, 
@@ -754,6 +737,7 @@ func LoadBackupDB(backupPath string) error {
 				start_time = excluded.start_time,
 				last_summary_time = excluded.last_summary_time`,
 			id, name, tags.String, description.String, agentSummary.String, startTime.String, lastSummaryTime.String)
+		mainDB.Close()
 		if err != nil {
 			return fmt.Errorf("failed to insert ticket %s: %w", id, err)
 		}
@@ -775,11 +759,16 @@ func LoadBackupDB(backupPath string) error {
 			if err := subtaskRows.Scan(&ticketID, &position, &name, &tags, &deps, &description, &testConds, &testCommand, &agentNotes, &passTs, &failTs, &status); err != nil {
 				return err
 			}
+			mainDB, err := openTicketDB(ticketID)
+			if err != nil {
+				return fmt.Errorf("failed to open ticket db for %s: %w", ticketID, err)
+			}
 			// Delete existing subtasks for this ticket first to avoid duplicates
 			mainDB.Exec(`DELETE FROM subtasks WHERE ticket_id = ? AND name = ?`, ticketID, name)
-			_, err := mainDB.Exec(`INSERT INTO subtasks (ticket_id, position, name, tags, dependencies, description, test_conditions, test_command, agent_notes, pass_timestamp, fail_timestamp, status)
+			_, err = mainDB.Exec(`INSERT INTO subtasks (ticket_id, position, name, tags, dependencies, description, test_conditions, test_command, agent_notes, pass_timestamp, fail_timestamp, status)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				ticketID, position, name, tags.String, deps.String, description.String, testConds.String, testCommand.String, agentNotes.String, passTs.String, failTs.String, status.String)
+			mainDB.Close()
 			if err != nil {
 				return fmt.Errorf("failed to insert subtask %s/%s: %w", ticketID, name, err)
 			}
@@ -800,6 +789,10 @@ func LoadBackupDB(backupPath string) error {
 			if err := summaryRows.Scan(&ticketID, &subtaskName, &timestamp, &content); err != nil {
 				return err
 			}
+			mainDB, err := openTicketDB(ticketID)
+			if err != nil {
+				return fmt.Errorf("failed to open ticket db for %s: %w", ticketID, err)
+			}
 			// Check if already exists
 			var count int
 			mainDB.QueryRow(`SELECT COUNT(*) FROM ticket_summaries WHERE ticket_id = ? AND timestamp = ?`, ticketID, timestamp).Scan(&count)
@@ -807,6 +800,7 @@ func LoadBackupDB(backupPath string) error {
 				mainDB.Exec(`INSERT INTO ticket_summaries (ticket_id, subtask_name, timestamp, content) VALUES (?, ?, ?, ?)`,
 					ticketID, subtaskName.String, timestamp, content)
 			}
+			mainDB.Close()
 		}
 	}
 
@@ -824,6 +818,10 @@ func LoadBackupDB(backupPath string) error {
 			if err := logRows.Scan(&ticketID, &timestamp, &entryType, &message, &subtask); err != nil {
 				return err
 			}
+			mainDB, err := openTicketDB(ticketID)
+			if err != nil {
+				return fmt.Errorf("failed to open ticket db for %s: %w", ticketID, err)
+			}
 			// Check if already exists
 			var count int
 			mainDB.QueryRow(`SELECT COUNT(*) FROM ticket_logs WHERE ticket_id = ? AND timestamp = ?`, ticketID, timestamp).Scan(&count)
@@ -831,6 +829,7 @@ func LoadBackupDB(backupPath string) error {
 				mainDB.Exec(`INSERT INTO ticket_logs (ticket_id, timestamp, entry_type, message, subtask) VALUES (?, ?, ?, ?, ?)`,
 					ticketID, timestamp, entryType, message, subtask.String)
 			}
+			mainDB.Close()
 		}
 	}
 

@@ -81,7 +81,63 @@ func logInfo(format string, a ...interface{}) {
 	fmt.Printf("[ticket] "+format+"\n", a...)
 }
 
+func logWarn(format string, a ...interface{}) {
+	fmt.Printf("[ticket] WARN: "+format+"\n", a...)
+}
+
+// printDialtone prints a "virtual librarian" guidance block for LLM agents.
+// This is intentionally plain text and copy/paste friendly.
+func printDialtone(contextLines []string, summary string, exampleCommands []string) {
+	fmt.Println()
+	fmt.Println("DIALTONE:")
+	for _, line := range contextLines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Ensure each context line is prefixed for readability.
+		if strings.HasPrefix(line, "- ") {
+			fmt.Println(line)
+		} else {
+			fmt.Println("- " + line)
+		}
+	}
+	if strings.TrimSpace(summary) != "" {
+		fmt.Println()
+		fmt.Println(strings.TrimSpace(summary))
+	}
+	if len(exampleCommands) > 0 {
+		fmt.Println()
+		fmt.Println("example-commands")
+		for _, cmd := range exampleCommands {
+			cmd = strings.TrimSpace(cmd)
+			if cmd == "" {
+				continue
+			}
+			fmt.Println(cmd)
+		}
+	}
+	fmt.Println()
+}
+
+func isDuckDBLockError(message string) bool {
+	// DuckDB single-writer / process lock error signature
+	// Example:
+	// duckdb error: IO Error: Could not set lock on file "src/tickets/tickets.duckdb": Conflicting lock is held in ...
+	return strings.Contains(message, "duckdb error: IO Error: Could not set lock on file") ||
+		strings.Contains(message, "Conflicting lock is held")
+}
+
 func logFatal(format string, a ...interface{}) {
-	fmt.Printf("[ticket] FATAL: "+format+"\n", a...)
+	msg := fmt.Sprintf(format, a...)
+	if isDuckDBLockError(msg) {
+		logWarn("Ticket database is busy (DuckDB file lock).")
+		logWarn("This usually happens if multiple `./dialtone.sh ticket ...` commands run at once, or a previous ticket command is still running.")
+		logWarn("Fix: wait a moment and re-run; avoid running ticket commands in parallel; if needed, set `TICKET_DB_PATH` to an isolated DB file.")
+		logWarn("Details: %s", msg)
+		os.Exit(1)
+	}
+
+	fmt.Printf("[ticket] FATAL: %s\n", msg)
 	os.Exit(1)
 }

@@ -16,6 +16,18 @@ import { VisibilityMixin } from "./section";
 const DEG_TO_RAD = Math.PI / 180;
 const TIME_SCALE = 1;
 const SUN_ORBIT_PERIOD_MS = 5000;
+// Human-scale axial rotation:
+// Base axial rotation period at timeScale=1:
+// 1 full rotation / 30s while the section is visible.
+// (Animation pauses when you scroll off the section via VisibilityMixin.)
+// Note: rotation is applied as earthRotSpeed * deltaSeconds, where deltaSeconds already includes `timeScale`.
+const EARTH_ROT_PERIOD_SECONDS = 30;
+
+// Light colors (shader-driven). Use warm/orange tones.
+const SUN_COLOR = new THREE.Color(1.0, 0.62, 0.32); // orange
+const KEY1_COLOR = new THREE.Color(1.0, 0.75, 0.45); // warm fill
+const KEY2_COLOR = new THREE.Color(1.0, 0.55, 0.25); // deeper orange (trailing key)
+const KEY2_PHASE_OFFSET_RAD = Math.PI / 2; // 2π/4 behind the sun
 
 export class ProceduralOrbit {
   scene = new THREE.Scene();
@@ -36,6 +48,7 @@ export class ProceduralOrbit {
   hexLayers: HexLayer[] = [];
   atmosphere!: THREE.Mesh;
   sunAtmosphere!: THREE.Mesh;
+  moon!: THREE.Mesh;
   earthMaterial!: THREE.ShaderMaterial;
   cloud1Material!: THREE.ShaderMaterial;
   cloud2Material!: THREE.ShaderMaterial;
@@ -48,18 +61,19 @@ export class ProceduralOrbit {
   earthRadius = 5;
   shaderTimeScale = 0.28;
   timeScale = TIME_SCALE;
-  cloudAmount = 0.75;
+  // Clouds: make them more visible by default.
+  cloudAmount = 0.92;
   cloudOpacityOscAmp = 0.12;
   cloudAmountOscAmp = 0.18;
   cloudOscSpeed = 0.45;
 
   // Rotations
-  earthRotSpeed = 0.000042;
+  earthRotSpeed = (Math.PI * 2) / EARTH_ROT_PERIOD_SECONDS;
   cloud1RotSpeed = (Math.PI * 2) / 100;
   cloud2RotSpeed = (Math.PI * 2) / 120;
-  cloud1Opacity = 0.6;
-  cloud2Opacity = 0.55;
-  cloudBrightness = 1.0;
+  cloud1Opacity = 0.82;
+  cloud2Opacity = 0.78;
+  cloudBrightness = 1.25;
   cameraDistance = 4.5;
   cameraOffsetX = 5.0;
   cameraYaw = 1;
@@ -68,6 +82,7 @@ export class ProceduralOrbit {
   sunGlow!: THREE.Mesh;
   sunLight!: THREE.PointLight;
   sunKeyLight!: THREE.DirectionalLight;
+  sunKeyLight2!: THREE.DirectionalLight;
   ambientLight!: THREE.AmbientLight;
 
   sunDistance = 78;
@@ -75,6 +90,12 @@ export class ProceduralOrbit {
   sunOrbitAngleDeg = 0;
   sunOrbitSpeed = (Math.PI * 2) / SUN_ORBIT_PERIOD_MS / 2;
   sunOrbitIncline = 20 * DEG_TO_RAD;
+
+  // Moon orbit (visual / demo-scale)
+  moonRadius = 0.55;
+  moonOrbitRadius = 12.5;
+  moonOrbitIncline = 8 * DEG_TO_RAD;
+  moonOrbitPhaseRad = 0.6;
 
   keyLightDistance = 147;
   keyLightHeight = 40;
@@ -162,8 +183,13 @@ export class ProceduralOrbit {
       uniforms: {
         uTime: { value: 0 },
         uSunDir: { value: new THREE.Vector3(1, 1, 1).normalize() },
+        uSunColor: { value: SUN_COLOR.clone() },
         uKeyDir: { value: new THREE.Vector3(-1, 0, 0).normalize() },
+        uKeyColor: { value: KEY1_COLOR.clone() },
+        uKeyDir2: { value: new THREE.Vector3(0, 1, 0).normalize() },
+        uKey2Color: { value: KEY2_COLOR.clone() },
         uKeyIntensity: { value: 0.8 },
+        uKeyIntensity2: { value: 0.55 },
         uSunIntensity: { value: 0.5 },
         uAmbientIntensity: { value: 0.1 },
         uColorScale: { value: this.materialColorScale },
@@ -239,8 +265,13 @@ export class ProceduralOrbit {
       blending: THREE.AdditiveBlending,
       uniforms: {
         uSunDir: { value: new THREE.Vector3(1, 1, 1).normalize() },
+        uSunColor: { value: SUN_COLOR.clone() },
         uKeyDir: { value: new THREE.Vector3(-1, 0, 0).normalize() },
+        uKeyColor: { value: KEY1_COLOR.clone() },
+        uKeyDir2: { value: new THREE.Vector3(0, 1, 0).normalize() },
+        uKey2Color: { value: KEY2_COLOR.clone() },
         uKeyIntensity: { value: 0.8 },
+        uKeyIntensity2: { value: 0.55 },
         uSunIntensity: { value: 0.5 },
         uAmbientIntensity: { value: 0.1 },
         uColorScale: { value: this.materialColorScale },
@@ -276,6 +307,15 @@ export class ProceduralOrbit {
       sunAtmoMat,
     );
     this.scene.add(this.sunAtmosphere);
+
+    // Moon: lit by the scene lights (reflects sunLight + key lights)
+    const moonMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(0.78, 0.78, 0.8),
+      roughness: 0.95,
+      metalness: 0.02,
+    });
+    this.moon = new THREE.Mesh(geo(this.moonRadius, 32), moonMat);
+    this.scene.add(this.moon);
   }
 
   createCloudMaterial(
@@ -296,8 +336,13 @@ export class ProceduralOrbit {
         uTint: { value: tint },
         uOpacity: { value: opacity },
         uSunDir: { value: new THREE.Vector3(1, 1, 1).normalize() },
+        uSunColor: { value: SUN_COLOR.clone() },
         uKeyDir: { value: new THREE.Vector3(-1, 0, 0).normalize() },
+        uKeyColor: { value: KEY1_COLOR.clone() },
+        uKeyDir2: { value: new THREE.Vector3(0, 1, 0).normalize() },
+        uKey2Color: { value: KEY2_COLOR.clone() },
         uKeyIntensity: { value: 0.8 },
+        uKeyIntensity2: { value: 0.55 },
         uSunIntensity: { value: 0.5 },
         uAmbientIntensity: { value: 0.1 },
         uColorScale: { value: this.materialColorScale },
@@ -310,11 +355,19 @@ export class ProceduralOrbit {
   }
 
   initLights() {
-    this.sunKeyLight = new THREE.DirectionalLight(0xffd19a, 0.3);
+    // Note: core Earth lighting is shader-driven; these lights are primarily for
+    // non-shader meshes / debugging.
+    this.sunKeyLight = new THREE.DirectionalLight(0xffa15a, 0.35);
     this.sunKeyLight.position.set(10, 5, 10);
     this.scene.add(this.sunKeyLight);
     this.sunKeyLight.target.position.set(0, 0, 0);
     this.scene.add(this.sunKeyLight.target);
+
+    this.sunKeyLight2 = new THREE.DirectionalLight(0xff7a3a, 0.22);
+    this.sunKeyLight2.position.set(-10, -5, -10);
+    this.scene.add(this.sunKeyLight2);
+    this.sunKeyLight2.target.position.set(0, 0, 0);
+    this.scene.add(this.sunKeyLight2.target);
     this.ambientLight = new THREE.AmbientLight(0x090a10, 0.26);
     this.scene.add(this.ambientLight);
 
@@ -326,7 +379,7 @@ export class ProceduralOrbit {
 
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x111111, 1.0);
     this.scene.add(hemiLight);
-    this.sunLight = new THREE.PointLight(0xffb347, 1.85, 200);
+    this.sunLight = new THREE.PointLight(0xff8c42, 2.1, 220);
     this.scene.add(this.sunLight);
   }
 
@@ -395,11 +448,27 @@ export class ProceduralOrbit {
 
     const sDir = this.sunLight.position.clone().normalize();
     this.earthMaterial.uniforms.uSunDir.value.copy(sDir);
+    // Second key light: same orbit, trailing by 2π/4 radians.
+    const keyA = sunA - KEY2_PHASE_OFFSET_RAD;
+    const sinK = Math.sin(keyA);
+    const cosK = Math.cos(keyA);
+    const ky = sinK * Math.sin(this.sunOrbitIncline) * sunRad;
+    const kz = sinK * Math.cos(this.sunOrbitIncline) * sunRad;
+    const keyPos = new THREE.Vector3(cosK * sunRad, ky, kz);
+    const kDir2 = keyPos.clone().normalize();
+    (this.earthMaterial.uniforms as any).uKeyDir2.value.copy(kDir2);
+
     (this.cloud1.material as THREE.ShaderMaterial).uniforms.uSunDir.value.copy(
       sDir,
     );
+    ((this.cloud1.material as THREE.ShaderMaterial).uniforms as any).uKeyDir2.value.copy(
+      kDir2,
+    );
     (this.cloud2.material as THREE.ShaderMaterial).uniforms.uSunDir.value.copy(
       sDir,
+    );
+    ((this.cloud2.material as THREE.ShaderMaterial).uniforms as any).uKeyDir2.value.copy(
+      kDir2,
     );
 
     (
@@ -421,10 +490,15 @@ export class ProceduralOrbit {
 
     this.hexLayers.forEach((l) => l.update(now * 0.001));
     this.atmosphereMaterial.uniforms.uSunDir.value.copy(sDir);
+    (this.atmosphereMaterial.uniforms as any).uKeyDir2.value.copy(kDir2);
     this.sunAtmosphereMaterial.uniforms.uSunDir.value.copy(sDir);
     this.sunAtmosphereMaterial.uniforms.uCameraPos.value.copy(
       this.camera.position,
     );
+
+    // Keep debug lights moving with the same orbits.
+    this.sunKeyLight.position.copy(this.sunLight.position);
+    this.sunKeyLight2.position.copy(keyPos);
 
     this.gpuTimer.begin(this.gl);
     this.renderer.render(this.scene, this.camera);
@@ -432,6 +506,14 @@ export class ProceduralOrbit {
     this.gpuTimer.poll(this.gl);
     const cpuMs = performance.now() - cpuStart;
     this.fpsCounter.tick(cpuMs, this.gpuTimer.lastMs);
+
+    // Moon orbit: 1/10th the speed of the sun (same timebase as sunA).
+    const moonA = now * (this.sunOrbitSpeed / 10) + this.moonOrbitPhaseRad;
+    const moonSinA = Math.sin(moonA);
+    const moonCosA = Math.cos(moonA);
+    const moonY = moonSinA * Math.sin(this.moonOrbitIncline) * this.moonOrbitRadius;
+    const moonZ = moonSinA * Math.cos(this.moonOrbitIncline) * this.moonOrbitRadius;
+    this.moon.position.set(moonCosA * this.moonOrbitRadius, moonY, moonZ);
   };
 
   buildConfigSnapshot() {

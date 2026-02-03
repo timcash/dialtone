@@ -28,6 +28,28 @@ Tickets are the primary unit of work for changes to the system.
 ./dialtone.sh ticket done
 ```
 
+### Tickets (storage)
+- Each ticket stores its own DuckDB file at:
+  - `src/tickets/<ticket-name>/<ticket-name>.duckdb`
+- The “current ticket” pointer is stored in:
+  - `src/tickets/.current_ticket`
+
+### Tickets (tests + browser logging)
+- For `www-*` tickets, the default baseline validation is typically:
+
+```bash
+./dialtone.sh plugin test www
+```
+
+- If you want `ticket next` to run a specific test command for a subtask, set the subtask test command:
+
+```bash
+# Set the test command for the "init" subtask on the current ticket
+./dialtone.sh ticket subtask testcmd init ./dialtone.sh plugin test www
+```
+
+- `./dialtone.sh plugin test www` runs a Chromedp-based integration test that **captures browser `console.*` output and unhandled JS exceptions** and prints them into the test output. The test fails if it detects console errors or exceptions.
+
 ### Plugins (commands)
 
 ```bash
