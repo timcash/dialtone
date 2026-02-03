@@ -4,10 +4,21 @@
 
 - **Context**: what state you’re in and what matters next
 - **Next step**: what to do and why
-- **Example commands**: copy/paste commands to run manually
+- **Example commands**: example commands to run manually
 
 This workflow is optimized for LLM agents and operators doing ticket-driven development (TDD) with strong verification.
 
+### Example log of getting a user prompt with an issue
+
+```text
+[USER]$: turn this issue into a ticket `src/issues/0039.md`
+[LLM-ACTION]: Reading the issue `src/issues/0039.md`
+[LLM-REASONING]: The issue is about adding a section to the www site that shows the Earth spinning. It appears to have enough information to become a ticket. We should start in add mode.
+[LLM-COMMAND]: ./dialtone.sh ticket add www-dev-page-earth-spin
+[DIALTONE-ADD]:  Before adding a ticket
+
+Run the next command(s) to validate environment and begin the first subtask.
+```
 ---
 
 ## Core principles
