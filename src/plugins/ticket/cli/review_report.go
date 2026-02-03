@@ -43,6 +43,9 @@ func printReviewIteration(ticket *Ticket) {
 		} else {
 			fmt.Printf("- test-command: (missing)\n")
 		}
+		if strings.TrimSpace(st.ReviewedTimestamp) != "" {
+			fmt.Printf("- reviewed-timestamp: %s\n", strings.TrimSpace(st.ReviewedTimestamp))
+		}
 		fmt.Println()
 		fmt.Println("[REVIEW] Questions (subtask):")
 		fmt.Println("1. is this subtask aligned with the ticket goal")

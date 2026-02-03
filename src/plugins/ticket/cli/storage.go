@@ -111,6 +111,7 @@ func ensureTicketSchema(db *sql.DB) error {
 			test_conditions TEXT,
 			test_command TEXT,
 			agent_notes TEXT,
+			reviewed_timestamp TEXT,
 			pass_timestamp TEXT,
 			fail_timestamp TEXT,
 			status TEXT
@@ -136,6 +137,7 @@ func ensureTicketSchema(db *sql.DB) error {
 		`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS start_time TEXT;`,
 		`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS last_summary_time TEXT;`,
 		`ALTER TABLE subtasks ADD COLUMN IF NOT EXISTS test_command TEXT;`,
+		`ALTER TABLE subtasks ADD COLUMN IF NOT EXISTS reviewed_timestamp TEXT;`,
 	}
 	for _, stmt := range migrations {
 		if _, err := db.Exec(stmt); err != nil {
@@ -201,7 +203,7 @@ func GetTicket(ticketID string) (*Ticket, error) {
 		ticket.Tags = tagValues
 	}
 
-	rows, err := db.Query(`SELECT name, tags, dependencies, description, test_conditions, test_command, agent_notes, pass_timestamp, fail_timestamp, status
+	rows, err := db.Query(`SELECT name, tags, dependencies, description, test_conditions, test_command, agent_notes, reviewed_timestamp, pass_timestamp, fail_timestamp, status
 		FROM subtasks WHERE ticket_id = ? ORDER BY position`, ticketID)
 	if err != nil {
 		return nil, err
@@ -215,10 +217,11 @@ func GetTicket(ticketID string) (*Ticket, error) {
 		var stTests sql.NullString
 		var stTestCommand sql.NullString
 		var stNotes sql.NullString
+		var stReviewed sql.NullString
 		var stPass sql.NullString
 		var stFail sql.NullString
 		var stStatus sql.NullString
-		if err := rows.Scan(&st.Name, &stTags, &stDeps, &st.Description, &stTests, &stTestCommand, &stNotes, &stPass, &stFail, &stStatus); err != nil {
+		if err := rows.Scan(&st.Name, &stTags, &stDeps, &st.Description, &stTests, &stTestCommand, &stNotes, &stReviewed, &stPass, &stFail, &stStatus); err != nil {
 			return nil, err
 		}
 		if tagValues, err := decodeStringSlice(stTags); err != nil {
@@ -241,6 +244,9 @@ func GetTicket(ticketID string) (*Ticket, error) {
 		}
 		if stNotes.Valid {
 			st.AgentNotes = stNotes.String
+		}
+		if stReviewed.Valid {
+			st.ReviewedTimestamp = stReviewed.String
 		}
 		if stPass.Valid {
 			st.PassTimestamp = stPass.String
@@ -323,8 +329,8 @@ func SaveTicket(ticket *Ticket) error {
 			return err
 		}
 		if _, err := tx.Exec(`INSERT INTO subtasks (
-			ticket_id, position, name, tags, dependencies, description, test_conditions, test_command, agent_notes, pass_timestamp, fail_timestamp, status
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			ticket_id, position, name, tags, dependencies, description, test_conditions, test_command, agent_notes, reviewed_timestamp, pass_timestamp, fail_timestamp, status
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			ticket.ID,
 			i,
 			st.Name,
@@ -334,6 +340,7 @@ func SaveTicket(ticket *Ticket) error {
 			stTestsPayload,
 			nullOrValue(st.TestCommand),
 			nullOrValue(st.AgentNotes),
+			nullOrValue(st.ReviewedTimestamp),
 			nullOrValue(st.PassTimestamp),
 			nullOrValue(st.FailTimestamp),
 			nullOrValue(st.Status),
