@@ -55,6 +55,9 @@ Ticket CLI examples:
 # - asks readiness questions for the ticket + each subtask
 # - does NOT suggest tests/logs or marking subtasks done
 ./dialtone.sh ticket review feature-name
+
+# Re-run the review iteration (same questions) at any time:
+./dialtone.sh ticket next
 ```
 
 ## Ticket state
@@ -97,7 +100,7 @@ type Ticket struct {
 	ID               string    `json:"id"`
 	Name             string    `json:"name"`
 	Description      string    `json:"description"`
-	Status           string    `json:"status"`
+	State            string    `json:"state"`              // new, reviewed, started, blocked, done
 	AgentSummary     string    `json:"agent_summary"`      // Consolidated history
 	StartTime        string    `json:"start_time"`         // ISO8601
 	LastSummaryTime  string    `json:"last_summary_time"`  // ISO8601
