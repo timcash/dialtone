@@ -49,8 +49,8 @@ func TestFullWorkflow() error {
 	cleanupTicket(name)
 	defer cleanupTicket(name)
 
-	// --- STEP 0: Review Mode Blocks Execution ---
-	fmt.Println("\n--- STEP 0: Review Mode Blocks Execution ---")
+	// --- STEP 0: Review Mode Iteration ---
+	fmt.Println("\n--- STEP 0: Review Mode Iteration ---")
 	output := runCmd("./dialtone.sh", "ticket", "review", name)
 	if !strings.Contains(output, "mode: review") {
 		return fmt.Errorf("expected review mode output")
