@@ -18,13 +18,16 @@ git pull origin main
 Use specific demo environments to verify Three.js visualizations and UI changes in real-time.
 
 ```shell
-# For Earth/Globe changes:
+# start the local development server
+./dialtone.sh www dev
+
+# Example of demo for human of Earth/Globe changes:
 ./dialtone.sh www earth demo
 
-# For CAD/Mechanical changes:
+# Example of demo for human of CAD/Mechanical changes:
 ./dialtone.sh www cad demo
 
-# To build the plugin assets:
+# To build the www plugin assets:
 ./dialtone.sh build www
 ```
 
