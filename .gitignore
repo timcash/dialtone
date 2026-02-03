@@ -23,7 +23,6 @@ Thumbs.db
 # ENV
 .env
 env/.env
-env/test.env
 .vercel
 .env*.local
 
