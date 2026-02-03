@@ -15,18 +15,18 @@ import (
 // RunGemini handles the --gemini flag functionality by proxying to @google/gemini-cli
 func RunGemini(args []string) {
 	// If no args provided, we might want to default to interactive mode or show help.
-	// But let's at least check if we have args. 
+	// But let's at least check if we have args.
 	// Actually, gemini CLI might handle empty args by showing help or interactive.
 	// Let's pass it through.
 	if len(args) == 0 {
-		// Example: dialtone ai --gemini 
+		// Example: dialtone ai --gemini
 		// This should probably launch interactive mode if supported, or just show help from gemini.
 		// For now, let's allow it and let gemini decide.
 	}
 
-	// Load .env to get DIALTONE_ENV and GOOGLE_API_KEY
-	if err := godotenv.Load(); err != nil {
-		logger.LogDebug("Gemini: No .env file found")
+	// Load env/.env
+	if err := godotenv.Load("env/.env"); err != nil {
+		logger.LogDebug("AI Plugin: No env/.env file found")
 	}
 
 	dialtoneEnv := os.Getenv("DIALTONE_ENV")
@@ -36,9 +36,11 @@ func RunGemini(args []string) {
 
 	// Check for API Key
 	googleKey := os.Getenv("GOOGLE_API_KEY")
-
-	if googleKey == "" {
-		logger.LogError("Gemini: Authentication failed. No GOOGLE_API_KEY found.")
+	if googleKey != "" {
+		logger.LogInfo("AI Plugin: Authentication key (GOOGLE_API_KEY) found in env/.env")
+	} else {
+		logger.LogInfo("AI Plugin: No GOOGLE_API_KEY found in env/.env.")
+		logger.LogError("AI Plugin: Authentication failed. No GOOGLE_API_KEY found.")
 		logger.LogInfo("Please run 'dialtone ai auth' for instructions on how to set up your API key.")
 		return
 	}

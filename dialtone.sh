@@ -97,7 +97,7 @@ for (( i=1; i<=$#; i++ )); do
 done
 
 if [ -z "$DIALTONE_ENV_FILE" ]; then
-    DIALTONE_ENV_FILE=".env"
+    DIALTONE_ENV_FILE="env/.env"
 fi
 
 # SOURCE THE ENV FILE EARLY

@@ -15,7 +15,7 @@ import (
 func LoadConfig() {
 	envFile := os.Getenv("DIALTONE_ENV_FILE")
 	if envFile == "" {
-		envFile = ".env"
+		envFile = "env/.env"
 	}
 
 	if err := godotenv.Load(envFile); err != nil {
