@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import glowVertexShader from "../shaders/glow.vert.glsl?raw";
 import glowFragmentShader from "../shaders/glow.frag.glsl?raw";
+import { FpsCounter } from "./fps";
+import { GpuTimer } from "./gpu_timer";
 import { VisibilityMixin } from "./section";
 
 
@@ -18,6 +20,8 @@ export class CADViewer {
   frameId = 0;
   isVisible = true;
   frameCount = 0;
+  gl!: WebGLRenderingContext | WebGL2RenderingContext;
+  gpuTimer = new GpuTimer();
 
 
   // Animation state
@@ -41,6 +45,7 @@ export class CADViewer {
   abortController: AbortController | null = null;
   currentMesh: THREE.Mesh | null = null;
   currentWireframe: THREE.LineSegments | null = null;
+  private fpsCounter = new FpsCounter("cad");
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -67,6 +72,9 @@ export class CADViewer {
     });
 
     this.animate();
+
+    this.gl = this.renderer.getContext();
+    this.gpuTimer.init(this.gl);
 
     window.addEventListener("resize", this.onResize);
   }
@@ -367,6 +375,7 @@ export class CADViewer {
     VisibilityMixin.setVisible(this, visible, "cad");
     if (!visible) {
       this.setPanelOpen(false);
+      this.fpsCounter.clear();
     }
   }
 
@@ -374,7 +383,8 @@ export class CADViewer {
     this.frameId = requestAnimationFrame(this.animate);
     if (!this.isVisible) return;
 
-    const now = performance.now();
+    const cpuStart = performance.now();
+    const now = cpuStart;
     const delta = (now - this.lastFrameTime) / 1000;
     this.lastFrameTime = now;
     this.time += delta;
@@ -395,7 +405,12 @@ export class CADViewer {
       this.gearGroup.rotation.x = Math.cos(this.time * 0.25) * 0.12;
     }
 
+    this.gpuTimer.begin(this.gl);
     this.renderer.render(this.scene, this.camera);
+    this.gpuTimer.end(this.gl);
+    this.gpuTimer.poll(this.gl);
+    const cpuMs = performance.now() - cpuStart;
+    this.fpsCounter.tick(cpuMs, this.gpuTimer.lastMs);
   };
 
   dispose() {

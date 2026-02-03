@@ -132,7 +132,7 @@ export function setupConfigPanel(orbit: ProceduralOrbit) {
     "c1Opacity",
     "Opacity",
     orbit.cloud1Opacity,
-    0,
+    0.5,
     1,
     0.01,
     (v: number) => (orbit.cloud1Opacity = v),
@@ -154,54 +154,10 @@ export function setupConfigPanel(orbit: ProceduralOrbit) {
     "c2Opacity",
     "Opacity",
     orbit.cloud2Opacity,
-    0,
+    0.5,
     1,
     0.01,
     (v: number) => (orbit.cloud2Opacity = v),
-    (v: number) => v.toFixed(2),
-  );
-
-  addSection("Cloud Layer 3");
-  addSlider(
-    "c3Speed",
-    "Speed",
-    orbit.cloud3RotSpeed * 100000,
-    0,
-    50,
-    1,
-    (v: number) => (orbit.cloud3RotSpeed = v / 100000),
-    (v: number) => v.toFixed(0),
-  );
-  addSlider(
-    "c3Opacity",
-    "Opacity",
-    orbit.cloud3Opacity,
-    0,
-    1,
-    0.01,
-    (v: number) => (orbit.cloud3Opacity = v),
-    (v: number) => v.toFixed(2),
-  );
-
-  addSection("Cloud Layer 4");
-  addSlider(
-    "c4Speed",
-    "Speed",
-    orbit.cloud4RotSpeed * 100000,
-    0,
-    50,
-    1,
-    (v: number) => (orbit.cloud4RotSpeed = v / 100000),
-    (v: number) => v.toFixed(0),
-  );
-  addSlider(
-    "c4Opacity",
-    "Opacity",
-    orbit.cloud4Opacity,
-    0,
-    1,
-    0.01,
-    (v: number) => (orbit.cloud4Opacity = v),
     (v: number) => v.toFixed(2),
   );
 
@@ -210,7 +166,7 @@ export function setupConfigPanel(orbit: ProceduralOrbit) {
     "distance",
     "Distance",
     orbit.cameraDistance,
-    8,
+    0,
     30,
     0.5,
     (v: number) => (orbit.cameraDistance = v),
@@ -226,9 +182,3 @@ export function setupConfigPanel(orbit: ProceduralOrbit) {
   };
 }
 
-export function updateTelemetry(orbit: ProceduralOrbit, orbitRadius: number) {
-  const kmPerUnit = 6371 / orbit.earthRadius;
-  const altitudeKm = (orbitRadius - orbit.earthRadius) * kmPerUnit;
-  if (orbit.altitudeEl)
-    orbit.altitudeEl.textContent = `${altitudeKm.toFixed(0)} KM`;
-}

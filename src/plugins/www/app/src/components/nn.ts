@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import glowVertexShader from "../shaders/glow.vert.glsl?raw";
 import glowFragmentShader from "../shaders/glow.frag.glsl?raw";
+import { FpsCounter } from "./fps";
+import { GpuTimer } from "./gpu_timer";
 import { VisibilityMixin } from "./section";
 
 
@@ -35,6 +37,8 @@ class NeuralNetworkVisualization {
   container: HTMLElement;
   frameId = 0;
   resizeObserver?: ResizeObserver;
+  gl!: WebGLRenderingContext | WebGL2RenderingContext;
+  gpuTimer = new GpuTimer();
   isVisible = true;
   frameCount = 0;
 
@@ -68,6 +72,7 @@ class NeuralNetworkVisualization {
   configPanel?: HTMLDivElement;
   configToggle?: HTMLButtonElement;
   private setPanelOpen?: (open: boolean) => void;
+  private fpsCounter = new FpsCounter("neural");
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -84,6 +89,9 @@ class NeuralNetworkVisualization {
     this.initConfigPanel();
     this.resize();
     this.animate();
+
+    this.gl = this.renderer.getContext();
+    this.gpuTimer.init(this.gl);
 
     if (typeof ResizeObserver !== "undefined") {
       this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -408,6 +416,7 @@ class NeuralNetworkVisualization {
     VisibilityMixin.setVisible(this, visible, "neural");
     if (!visible) {
       this.setPanelOpen?.(false);
+      this.fpsCounter.clear();
     }
   }
 
@@ -417,6 +426,7 @@ class NeuralNetworkVisualization {
     // Skip all calculations when off-screen
     if (!this.isVisible) return;
 
+    const cpuStart = performance.now();
     this.frameCount++;
     const now = performance.now();
     const delta = (now - this.lastFrameTime) / 1000;
@@ -469,7 +479,12 @@ class NeuralNetworkVisualization {
     this.camera.position.set(camX, camY, camZ);
     this.camera.lookAt(0, this.cameraLookAtY, 0);
 
+    this.gpuTimer.begin(this.gl);
     this.renderer.render(this.scene, this.camera);
+    this.gpuTimer.end(this.gl);
+    this.gpuTimer.poll(this.gl);
+    const cpuMs = performance.now() - cpuStart;
+    this.fpsCounter.tick(cpuMs, this.gpuTimer.lastMs);
   };
 }
 
