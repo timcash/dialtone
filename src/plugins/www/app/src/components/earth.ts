@@ -29,6 +29,56 @@ const KEY1_COLOR = new THREE.Color(1.0, 0.75, 0.45); // warm fill
 const KEY2_COLOR = new THREE.Color(1.0, 0.55, 0.25); // deeper orange (trailing key)
 const KEY2_PHASE_OFFSET_RAD = Math.PI / 2; // 2π/4 behind the sun
 
+const MOON_LIGHT_LAYER = 1;
+
+function createMoonRockTexture(size = 128) {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Failed to create 2D context for moon texture");
+
+  // Base mid-grey.
+  ctx.fillStyle = "#7a7a7a";
+  ctx.fillRect(0, 0, size, size);
+
+  // Fine grain noise.
+  const img = ctx.getImageData(0, 0, size, size);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const n = (Math.random() * 2 - 1) * 24; // +/- 24
+    d[i + 0] = Math.max(0, Math.min(255, d[i + 0] + n));
+    d[i + 1] = Math.max(0, Math.min(255, d[i + 1] + n));
+    d[i + 2] = Math.max(0, Math.min(255, d[i + 2] + n));
+    d[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+
+  // Simple crater-ish blotches.
+  for (let i = 0; i < 22; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const r = 4 + Math.random() * 14;
+    const g = ctx.createRadialGradient(x, y, r * 0.2, x, y, r);
+    g.addColorStop(0, "rgba(40,40,40,0.35)");
+    g.addColorStop(0.6, "rgba(90,90,90,0.10)");
+    g.addColorStop(1, "rgba(120,120,120,0.00)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2, 2);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 export class ProceduralOrbit {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(75, 1, 0.01, 1000);
@@ -131,6 +181,8 @@ export class ProceduralOrbit {
     this.camera.position.set(this.cameraOffsetX, 0, this.cameraDistance);
     this.camera.lookAt(0, 0, 0);
     this.camera.rotation.y += this.cameraYaw;
+    // Ensure we render both the default layer and the moon light-only layer.
+    this.camera.layers.enable(MOON_LIGHT_LAYER);
     this.animate();
 
     // @ts-ignore: Expose for testing
@@ -310,11 +362,14 @@ export class ProceduralOrbit {
 
     // Moon: lit by the scene lights (reflects sunLight + key lights)
     const moonMat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(0.78, 0.78, 0.8),
+      color: new THREE.Color(0.75, 0.75, 0.75),
+      map: createMoonRockTexture(128),
       roughness: 0.95,
       metalness: 0.02,
     });
     this.moon = new THREE.Mesh(geo(this.moonRadius, 32), moonMat);
+    // Moon should only reflect sunlight (no ambient/hemi/key lights).
+    this.moon.layers.set(MOON_LIGHT_LAYER);
     this.scene.add(this.moon);
   }
 
@@ -380,6 +435,8 @@ export class ProceduralOrbit {
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x111111, 1.0);
     this.scene.add(hemiLight);
     this.sunLight = new THREE.PointLight(0xff8c42, 2.1, 220);
+    // The moon is rendered on a dedicated layer so it only sees the sun light.
+    this.sunLight.layers.enable(MOON_LIGHT_LAYER);
     this.scene.add(this.sunLight);
   }
 
