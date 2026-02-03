@@ -32,7 +32,9 @@ func PrintTicketReport(ticket *Ticket) {
 		for i, cond := range nextSt.TestConditions {
 			fmt.Printf("Test-Condition-%d: %s\n", i+1, cond.Condition)
 		}
+		fmt.Printf("Test-Command:    %s\n", nextSt.TestCommand)
 		fmt.Printf("Agent-Notes:     %s\n", nextSt.AgentNotes)
+		fmt.Printf("Reviewed-Timestamp: %s\n", nextSt.ReviewedTimestamp)
 		fmt.Printf("Pass-Timestamp:  %s\n", nextSt.PassTimestamp)
 		fmt.Printf("Fail-Timestamp:  %s\n", nextSt.FailTimestamp)
 		fmt.Printf("Status:          %s\n", nextSt.Status)
