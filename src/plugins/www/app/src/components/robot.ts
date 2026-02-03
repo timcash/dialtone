@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import { IKSolver } from "./ik";
+import { FpsCounter } from "./fps";
+import { GpuTimer } from "./gpu_timer";
 import { VisibilityMixin } from "./section";
 
 
@@ -312,6 +314,8 @@ class RobotArmVisualization {
   container: HTMLElement;
   frameId = 0;
   resizeObserver?: ResizeObserver;
+  gl!: WebGLRenderingContext | WebGL2RenderingContext;
+  gpuTimer = new GpuTimer();
   isVisible = true;
   frameCount = 0;
 
@@ -341,6 +345,7 @@ class RobotArmVisualization {
   configToggle?: HTMLButtonElement;
   sliders: { slider: HTMLInputElement; valueEl: HTMLSpanElement }[] = [];
   private setPanelOpen?: (open: boolean) => void;
+  private fpsCounter = new FpsCounter("robot");
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -366,6 +371,9 @@ class RobotArmVisualization {
     this.initConfigPanel();
     this.resize();
     this.animate();
+
+    this.gl = this.renderer.getContext();
+    this.gpuTimer.init(this.gl);
 
     if (typeof ResizeObserver !== "undefined") {
       this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -757,6 +765,7 @@ class RobotArmVisualization {
     VisibilityMixin.setVisible(this, visible, "robot");
     if (!visible) {
       this.setPanelOpen?.(false);
+      this.fpsCounter.clear();
     }
   }
 
@@ -766,6 +775,7 @@ class RobotArmVisualization {
     // Skip all calculations when off-screen
     if (!this.isVisible) return;
 
+    const cpuStart = performance.now();
     this.frameCount++;
     const delta = 0.016;
     this.time += delta;
@@ -805,7 +815,12 @@ class RobotArmVisualization {
     const pulse = 1 + Math.sin(this.time * 4) * 0.15;
     this.target.scale.setScalar(pulse);
 
+    this.gpuTimer.begin(this.gl);
     this.renderer.render(this.scene, this.camera);
+    this.gpuTimer.end(this.gl);
+    this.gpuTimer.poll(this.gl);
+    const cpuMs = performance.now() - cpuStart;
+    this.fpsCounter.tick(cpuMs, this.gpuTimer.lastMs);
   };
 }
 

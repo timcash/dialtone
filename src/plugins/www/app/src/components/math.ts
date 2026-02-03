@@ -3,6 +3,8 @@ import glowVertexShader from "../shaders/glow.vert.glsl?raw";
 import glowFragmentShader from "../shaders/glow.frag.glsl?raw";
 import gridVertexShader from "../shaders/grid.vert.glsl?raw";
 import gridFragmentShader from "../shaders/grid.frag.glsl?raw";
+import { FpsCounter } from "./fps";
+import { GpuTimer } from "./gpu_timer";
 import { VisibilityMixin } from "./section";
 
 
@@ -23,6 +25,8 @@ class MathVisualization {
   container: HTMLElement;
   frameId = 0;
   resizeObserver?: ResizeObserver;
+  gl!: WebGLRenderingContext | WebGL2RenderingContext;
+  gpuTimer = new GpuTimer();
   isVisible = true;
   frameCount = 0;
 
@@ -76,6 +80,7 @@ class MathVisualization {
   configPanel?: HTMLDivElement;
   configToggle?: HTMLButtonElement;
   private setPanelOpen?: (open: boolean) => void;
+  private fpsCounter = new FpsCounter("math");
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -92,6 +97,9 @@ class MathVisualization {
     this.initConfigPanel();
     this.resize();
     this.animate();
+
+    this.gl = this.renderer.getContext();
+    this.gpuTimer.init(this.gl);
 
     if (typeof ResizeObserver !== "undefined") {
       this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -663,6 +671,7 @@ class MathVisualization {
     VisibilityMixin.setVisible(this, visible, "math");
     if (!visible) {
       this.setPanelOpen?.(false);
+      this.fpsCounter.clear();
     }
   }
 
@@ -672,6 +681,7 @@ class MathVisualization {
     // Skip all calculations when off-screen
     if (!this.isVisible) return;
 
+    const cpuStart = performance.now();
     this.frameCount++;
     const now = performance.now();
     const delta = (now - this.lastFrameTime) / 1000;
@@ -733,7 +743,12 @@ class MathVisualization {
     this.camera.position.set(camX, camY, camZ);
     this.camera.lookAt(0, this.cameraLookAtY, 0);
 
+    this.gpuTimer.begin(this.gl);
     this.renderer.render(this.scene, this.camera);
+    this.gpuTimer.end(this.gl);
+    this.gpuTimer.poll(this.gl);
+    const cpuMs = performance.now() - cpuStart;
+    this.fpsCounter.tick(cpuMs, this.gpuTimer.lastMs);
   };
 }
 
