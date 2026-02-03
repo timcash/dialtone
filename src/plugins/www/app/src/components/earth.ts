@@ -49,13 +49,16 @@ export class ProceduralOrbit {
   shaderTimeScale = 0.28;
   timeScale = TIME_SCALE;
   cloudAmount = 0.75;
+  cloudOpacityOscAmp = 0.12;
+  cloudAmountOscAmp = 0.18;
+  cloudOscSpeed = 0.45;
 
   // Rotations
   earthRotSpeed = 0.000042;
   cloud1RotSpeed = (Math.PI * 2) / 100;
   cloud2RotSpeed = (Math.PI * 2) / 120;
-  cloud1Opacity = 0.35;
-  cloud2Opacity = 0.2;
+  cloud1Opacity = 0.6;
+  cloud2Opacity = 0.55;
   cloudBrightness = 1.0;
   cameraDistance = 4.5;
   cameraOffsetX = 5.0;
@@ -351,6 +354,20 @@ export class ProceduralOrbit {
     this.lastFrameTime = now;
     const deltaSeconds = rawDelta * this.timeScale;
     const cloudTime = now * 0.001 * this.shaderTimeScale;
+    const osc = Math.sin(now * 0.001 * this.cloudOscSpeed);
+    const oscOffset = Math.cos(now * 0.001 * this.cloudOscSpeed * 0.9);
+    const cloudAmount = Math.max(
+      0,
+      Math.min(1, this.cloudAmount + osc * this.cloudAmountOscAmp),
+    );
+    const cloud1Opacity = Math.max(
+      0.5,
+      this.cloud1Opacity + oscOffset * this.cloudOpacityOscAmp,
+    );
+    const cloud2Opacity = Math.max(
+      0.5,
+      this.cloud2Opacity - oscOffset * this.cloudOpacityOscAmp,
+    );
 
     // Rotations
     this.earth.rotation.y += this.earthRotSpeed * deltaSeconds;
@@ -393,14 +410,14 @@ export class ProceduralOrbit {
     ).uniforms.uSunIntensity.value = 0.5 * this.cloudBrightness;
 
     (this.cloud1.material as THREE.ShaderMaterial).uniforms.uOpacity.value =
-      this.cloud1Opacity;
+      cloud1Opacity;
     (this.cloud2.material as THREE.ShaderMaterial).uniforms.uOpacity.value =
-      this.cloud2Opacity;
+      cloud2Opacity;
 
     (this.cloud1.material as THREE.ShaderMaterial).uniforms.uCloudAmount.value =
-      this.cloudAmount;
+      cloudAmount;
     (this.cloud2.material as THREE.ShaderMaterial).uniforms.uCloudAmount.value =
-      this.cloudAmount;
+      cloudAmount;
 
     this.hexLayers.forEach((l) => l.update(now * 0.001));
     this.atmosphereMaterial.uniforms.uSunDir.value.copy(sDir);
