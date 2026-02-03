@@ -12,9 +12,6 @@ This is the **Source of Truth** for the Dialtone Issue Management API.
 
 ## 1. CLI API Reference
 ```bash
-# The primary driver for TDD. Validates, runs tests, and manages subtask state.
-./dialtone.sh ticket next
-
 # List open issues in a clean, agent-readable markdown table.
 ./dialtone.sh github issue list --markdown
 
@@ -76,6 +73,10 @@ If requirements are clear but lack subtasks, scaffold or edit a local ticket.
 # 2. Populate the ticket (see Section 3: The "Ticket" Standard).
 # 3. Validate the ticket format.
 ./dialtone.sh ticket validate <name>
+
+# Optional: Prep-only review (no tests/logs/code). Ensures the ticket DB/subtasks
+# are ready to be worked on later with `ticket start`.
+./dialtone.sh ticket review <name>
 
 # 4. Mark the GitHub issue as 'ready' and 'ticket' using the shortcuts.
 ./dialtone.sh github issue <id> --ready --ticket

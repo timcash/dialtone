@@ -26,6 +26,7 @@ This workflow is optimized for LLM agents and operators doing ticket-driven deve
 
 ```shell
 ./dialtone.sh ticket start <ticket-name>
+./dialtone.sh ticket review <ticket-name>
 ./dialtone.sh ticket subtask list
 ./dialtone.sh ticket subtask add <name> --desc "..."
 ./dialtone.sh ticket subtask testcmd <subtask-name> <test-command...>
@@ -33,6 +34,46 @@ This workflow is optimized for LLM agents and operators doing ticket-driven deve
 ./dialtone.sh ticket subtask done <ticket-name> <subtask-name>
 ./dialtone.sh ticket done
 ```
+
+---
+
+## `review` vs `start`
+
+- `./dialtone.sh ticket review <ticket-name>`
+  - **Purpose**: prep-only. Use this when you want DIALTONE + the LLM to **review the ticket DB and subtasks** and make sure it’s ready to work on later.
+  - **Workflow**: DIALTONE iterates over the ticket and each subtask and asks review questions like:
+    1. is the goal aligned with subtasks
+    2. should there be more subtasks
+    3. are any subtasks too large
+    4. is there work that should be put into a different ticket because it is not relevant
+    5. does this ticket create a new plugin
+    6. does this ticket have a update documentation subtask
+    7. does this subtask have the correct test-command
+  - **Skips**: does **not** suggest running tests, reviewing logs, or marking subtasks `done`.
+  - **Outcome**: the ticket is marked **reviewed** and is ready for `start`.
+  - **Repeatable**: while in `review` mode, re-run the review iteration at any time with `./dialtone.sh ticket next`.
+
+- `./dialtone.sh ticket start <ticket-name>`
+  - **Purpose**: execution. Use this when you are ready to actually do work on the ticket.
+  - **Outcome**: enters the normal subtask/verification workflow.
+
+### Branch rule (applies to `add`, `review`, and `start`)
+
+All ticket work happens on a git branch named **exactly** like the ticket:
+
+- `ticket add <ticket>` / `ticket review <ticket>` / `ticket start <ticket>` should create or switch to the branch named `<ticket>`.
+
+---
+
+## Ticket state
+
+Tickets track a simple `state` field to indicate where they are in the lifecycle:
+
+- `new`: created but not reviewed
+- `reviewed`: reviewed and ready to start later
+- `started`: execution has begun
+- `blocked`: blocked waiting on a question/acknowledgement or missing planning info
+- `done`: finalized
 
 ---
 
@@ -44,9 +85,24 @@ For every subtask, follow this loop until it’s true:
 2. **Run tests**: agent runs the test command and inspects output.
 3. **Fix + rerun**: repeat until the test passes.
 4. **Review logs**: ensure no ERROR/EXCEPTION and that resources are cleaned up.
-5. **Submit summary**: update `agent_summary.md` and run summary ingestion.
+5. **Submit summary**: update the subtask summary file and sync it into the ticket DB.
 6. **Mark subtask done**: `ticket subtask done <ticket> <subtask>`
 7. **Commit**: agent creates a git commit after verification.
+
+### Per-subtask summary files (persistent)
+
+Instead of a single `agent_summary.md`, each ticket uses **one markdown file per subtask**:
+
+- Location: `src/tickets/<ticket-id>/`
+- File name: `<subtask-name>-summary.md`
+
+You update the relevant `<subtask-name>-summary.md`, then run:
+
+```shell
+./dialtone.sh ticket summary update
+```
+
+`ticket summary update` syncs the latest contents into DuckDB so `ticket summary` / `ticket search` work, and **leaves the markdown file in place** (no deletion).
 
 ---
 
@@ -127,7 +183,7 @@ DIALTONE:
 - ticket: www-dev-page-earth-spin
 - subtask: init
 - record: subtask status marked done (manual verification assumed)
-- next: submit agent summary and prepare a git commit
+- next: submit subtask summary and prepare a git commit
 
 Please confirm:
 - You ran the subtask tests and they passed
@@ -174,9 +230,9 @@ example-commands
 ./dialtone.sh ticket done
 ```
 
-When all subtasks are done and `agent_summary.md` exists, `ticket done`:
+When all subtasks are done and subtask summary files exist/are up to date, `ticket done`:
 
-- ingests the summary into the ticket DB
+- syncs the latest per-subtask summaries into the ticket DB (if needed)
 - writes a backup DB named: `src/tickets/<ticket>/<ticket>-backup.duckdb`
 - prints the next manual steps (commit/PR)
 

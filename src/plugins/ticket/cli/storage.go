@@ -24,8 +24,9 @@ const (
 	// V2 storage:
 	// Each ticket stores its own DuckDB at:
 	//   src/tickets/<ticket-id>/<ticket-id>.duckdb
-	currentTicketFilename = ".current_ticket"
-	ticketDBExtension     = ".duckdb"
+	currentTicketFilename     = ".current_ticket"
+	currentTicketModeFilename = ".current_ticket_mode"
+	ticketDBExtension         = ".duckdb"
 )
 
 func ticketDir(ticketID string) string {
@@ -34,6 +35,10 @@ func ticketDir(ticketID string) string {
 
 func currentTicketPath() string {
 	return filepath.Join("src", "tickets", currentTicketFilename)
+}
+
+func currentTicketModePath() string {
+	return filepath.Join("src", "tickets", currentTicketModeFilename)
 }
 
 func ticketDBPathFor(ticketID string) string {
@@ -85,6 +90,7 @@ func ensureTicketSchema(db *sql.DB) error {
 			name TEXT NOT NULL,
 			tags TEXT,
 			description TEXT,
+			state TEXT,
 			agent_summary TEXT,
 			start_time TEXT,
 			last_summary_time TEXT
@@ -105,6 +111,7 @@ func ensureTicketSchema(db *sql.DB) error {
 			test_conditions TEXT,
 			test_command TEXT,
 			agent_notes TEXT,
+			reviewed_timestamp TEXT,
 			pass_timestamp TEXT,
 			fail_timestamp TEXT,
 			status TEXT
@@ -126,9 +133,11 @@ func ensureTicketSchema(db *sql.DB) error {
 	// Migrations for V2 summary fields
 	migrations := []string{
 		`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS agent_summary TEXT;`,
+		`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS state TEXT;`,
 		`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS start_time TEXT;`,
 		`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS last_summary_time TEXT;`,
 		`ALTER TABLE subtasks ADD COLUMN IF NOT EXISTS test_command TEXT;`,
+		`ALTER TABLE subtasks ADD COLUMN IF NOT EXISTS reviewed_timestamp TEXT;`,
 	}
 	for _, stmt := range migrations {
 		if _, err := db.Exec(stmt); err != nil {
@@ -164,11 +173,12 @@ func GetTicket(ticketID string) (*Ticket, error) {
 	var name string
 	var tags sql.NullString
 	var description sql.NullString
+	var state sql.NullString
 	var agentSummary sql.NullString
 	var startTime sql.NullString
 	var lastSummaryTime sql.NullString
-	row := db.QueryRow(`SELECT id, name, tags, description, agent_summary, start_time, last_summary_time FROM tickets WHERE id = ?`, ticketID)
-	if err := row.Scan(&id, &name, &tags, &description, &agentSummary, &startTime, &lastSummaryTime); err != nil {
+	row := db.QueryRow(`SELECT id, name, tags, description, state, agent_summary, start_time, last_summary_time FROM tickets WHERE id = ?`, ticketID)
+	if err := row.Scan(&id, &name, &tags, &description, &state, &agentSummary, &startTime, &lastSummaryTime); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrTicketNotFound
 		}
@@ -179,9 +189,13 @@ func GetTicket(ticketID string) (*Ticket, error) {
 		ID:              id,
 		Name:            name,
 		Description:     description.String,
+		State:           state.String,
 		AgentSummary:    agentSummary.String,
 		StartTime:       startTime.String,
 		LastSummaryTime: lastSummaryTime.String,
+	}
+	if strings.TrimSpace(ticket.State) == "" {
+		ticket.State = "new"
 	}
 	if tagValues, err := decodeStringSlice(tags); err != nil {
 		return nil, err
@@ -189,7 +203,7 @@ func GetTicket(ticketID string) (*Ticket, error) {
 		ticket.Tags = tagValues
 	}
 
-	rows, err := db.Query(`SELECT name, tags, dependencies, description, test_conditions, test_command, agent_notes, pass_timestamp, fail_timestamp, status
+	rows, err := db.Query(`SELECT name, tags, dependencies, description, test_conditions, test_command, agent_notes, reviewed_timestamp, pass_timestamp, fail_timestamp, status
 		FROM subtasks WHERE ticket_id = ? ORDER BY position`, ticketID)
 	if err != nil {
 		return nil, err
@@ -203,10 +217,11 @@ func GetTicket(ticketID string) (*Ticket, error) {
 		var stTests sql.NullString
 		var stTestCommand sql.NullString
 		var stNotes sql.NullString
+		var stReviewed sql.NullString
 		var stPass sql.NullString
 		var stFail sql.NullString
 		var stStatus sql.NullString
-		if err := rows.Scan(&st.Name, &stTags, &stDeps, &st.Description, &stTests, &stTestCommand, &stNotes, &stPass, &stFail, &stStatus); err != nil {
+		if err := rows.Scan(&st.Name, &stTags, &stDeps, &st.Description, &stTests, &stTestCommand, &stNotes, &stReviewed, &stPass, &stFail, &stStatus); err != nil {
 			return nil, err
 		}
 		if tagValues, err := decodeStringSlice(stTags); err != nil {
@@ -229,6 +244,9 @@ func GetTicket(ticketID string) (*Ticket, error) {
 		}
 		if stNotes.Valid {
 			st.AgentNotes = stNotes.String
+		}
+		if stReviewed.Valid {
+			st.ReviewedTimestamp = stReviewed.String
 		}
 		if stPass.Valid {
 			st.PassTimestamp = stPass.String
@@ -278,17 +296,22 @@ func SaveTicket(ticket *Ticket) error {
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO tickets (id, name, tags, description, agent_summary, start_time, last_summary_time)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+	state := strings.TrimSpace(ticket.State)
+	if state == "" {
+		state = "new"
+	}
+	if _, err := tx.Exec(`INSERT INTO tickets (id, name, tags, description, state, agent_summary, start_time, last_summary_time)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET 
 			name = excluded.name, 
 			tags = excluded.tags, 
 			description = excluded.description,
+			state = excluded.state,
 			agent_summary = excluded.agent_summary,
 			start_time = excluded.start_time,
 			last_summary_time = excluded.last_summary_time`,
 		ticket.ID, ticket.Name, tagPayload, ticket.Description,
-		ticket.AgentSummary, ticket.StartTime, ticket.LastSummaryTime); err != nil {
+		state, ticket.AgentSummary, ticket.StartTime, ticket.LastSummaryTime); err != nil {
 		return err
 	}
 
@@ -306,8 +329,8 @@ func SaveTicket(ticket *Ticket) error {
 			return err
 		}
 		if _, err := tx.Exec(`INSERT INTO subtasks (
-			ticket_id, position, name, tags, dependencies, description, test_conditions, test_command, agent_notes, pass_timestamp, fail_timestamp, status
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			ticket_id, position, name, tags, dependencies, description, test_conditions, test_command, agent_notes, reviewed_timestamp, pass_timestamp, fail_timestamp, status
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			ticket.ID,
 			i,
 			st.Name,
@@ -317,6 +340,7 @@ func SaveTicket(ticket *Ticket) error {
 			stTestsPayload,
 			nullOrValue(st.TestCommand),
 			nullOrValue(st.AgentNotes),
+			nullOrValue(st.ReviewedTimestamp),
 			nullOrValue(st.PassTimestamp),
 			nullOrValue(st.FailTimestamp),
 			nullOrValue(st.Status),
@@ -415,6 +439,32 @@ func GetLastTicketSummary(ticketID string) (*SummaryEntry, error) {
 		return nil, err
 	}
 	e.SubtaskName = subtask.String
+	e.TicketID = ticketID
+	return &e, nil
+}
+
+func GetLastTicketSummaryForSubtask(ticketID, subtaskName string) (*SummaryEntry, error) {
+	db, err := openTicketDB(ticketID)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	var e SummaryEntry
+	err = db.QueryRow(
+		`SELECT subtask_name, timestamp, content
+		 FROM ticket_summaries
+		 WHERE ticket_id = ? AND subtask_name = ?
+		 ORDER BY timestamp DESC
+		 LIMIT 1`,
+		ticketID, subtaskName,
+	).Scan(&e.SubtaskName, &e.Timestamp, &e.Content)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
 	e.TicketID = ticketID
 	return &e, nil
 }
@@ -519,16 +569,40 @@ func SetCurrentTicket(ticketID string) error {
 	return os.WriteFile(currentTicketPath(), []byte(ticketID+"\n"), 0644)
 }
 
+func SetCurrentTicketMode(mode string) error {
+	mode = strings.TrimSpace(mode)
+	if mode == "" {
+		return fmt.Errorf("mode is empty")
+	}
+	if err := os.MkdirAll(filepath.Join("src", "tickets"), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(currentTicketModePath(), []byte(mode+"\n"), 0644)
+}
+
 func GetCurrentTicketID() (string, error) {
 	content, err := os.ReadFile(currentTicketPath())
 	if err != nil {
-		return "", fmt.Errorf("no current ticket set; run 'dialtone.sh ticket start <ticket-name>'")
+		return "", fmt.Errorf("no current ticket set; run 'dialtone.sh ticket start <ticket-name>' or 'dialtone.sh ticket review <ticket-name>'")
 	}
 	id := strings.TrimSpace(string(content))
 	if id == "" {
-		return "", fmt.Errorf("no current ticket set; run 'dialtone.sh ticket start <ticket-name>'")
+		return "", fmt.Errorf("no current ticket set; run 'dialtone.sh ticket start <ticket-name>' or 'dialtone.sh ticket review <ticket-name>'")
 	}
 	return id, nil
+}
+
+func GetCurrentTicketMode() string {
+	// Default to start to preserve older behavior if mode file is missing.
+	content, err := os.ReadFile(currentTicketModePath())
+	if err != nil {
+		return "start"
+	}
+	mode := strings.TrimSpace(string(content))
+	if mode == "" {
+		return "start"
+	}
+	return mode
 }
 
 func nullOrValue(value string) interface{} {
@@ -711,32 +785,46 @@ func LoadBackupDB(backupPath string) error {
 	defer backupDB.Close()
 
 	// Import tickets into per-ticket DBs
-	rows, err := backupDB.Query(`SELECT id, name, tags, description, agent_summary, start_time, last_summary_time FROM tickets`)
+	// Older backups may not have `state`, so attempt state-aware query first.
+	hasState := true
+	rows, err := backupDB.Query(`SELECT id, name, tags, description, state, agent_summary, start_time, last_summary_time FROM tickets`)
 	if err != nil {
-		return fmt.Errorf("failed to query tickets: %w", err)
+		// Fallback for older schemas without `state`.
+		hasState = false
+		rows, err = backupDB.Query(`SELECT id, name, tags, description, agent_summary, start_time, last_summary_time FROM tickets`)
+		if err != nil {
+			return fmt.Errorf("failed to query tickets: %w", err)
+		}
 	}
 	defer rows.Close()
 
 	for rows.Next() {
 		var id, name string
-		var tags, description, agentSummary, startTime, lastSummaryTime sql.NullString
-		if err := rows.Scan(&id, &name, &tags, &description, &agentSummary, &startTime, &lastSummaryTime); err != nil {
-			return err
+		var tags, description, state, agentSummary, startTime, lastSummaryTime sql.NullString
+		if hasState {
+			if err := rows.Scan(&id, &name, &tags, &description, &state, &agentSummary, &startTime, &lastSummaryTime); err != nil {
+				return err
+			}
+		} else {
+			if err := rows.Scan(&id, &name, &tags, &description, &agentSummary, &startTime, &lastSummaryTime); err != nil {
+				return err
+			}
 		}
 		mainDB, err := openTicketDB(id)
 		if err != nil {
 			return fmt.Errorf("failed to open ticket db for %s: %w", id, err)
 		}
-		_, err = mainDB.Exec(`INSERT INTO tickets (id, name, tags, description, agent_summary, start_time, last_summary_time)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
+		_, err = mainDB.Exec(`INSERT INTO tickets (id, name, tags, description, state, agent_summary, start_time, last_summary_time)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET 
 				name = excluded.name, 
 				tags = excluded.tags, 
 				description = excluded.description,
+				state = excluded.state,
 				agent_summary = excluded.agent_summary,
 				start_time = excluded.start_time,
 				last_summary_time = excluded.last_summary_time`,
-			id, name, tags.String, description.String, agentSummary.String, startTime.String, lastSummaryTime.String)
+			id, name, tags.String, description.String, state.String, agentSummary.String, startTime.String, lastSummaryTime.String)
 		mainDB.Close()
 		if err != nil {
 			return fmt.Errorf("failed to insert ticket %s: %w", id, err)

@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -44,6 +42,10 @@ func Run(args []string) {
 		RunAdd(subArgs)
 	case "start":
 		RunStart(subArgs)
+	case "review":
+		RunReview(subArgs)
+	case "reviewed":
+		RunReviewed(subArgs)
 	case "ask":
 		RunAsk(subArgs)
 	case "log":
@@ -90,6 +92,8 @@ func printUsage() {
 	fmt.Println()
 	fmt.Println("Commands:")
 	fmt.Println("  start <name>       Start a new ticket and create branch")
+	fmt.Println("  review <name>      Review ticket DB/subtasks only (no tests/logs/code)")
+	fmt.Println("  reviewed <name>    Mark ticket reviewed (after checklist validation)")
 	fmt.Println("  add <name>         Add a new ticket without starting it")
 	fmt.Println("  list               List all tickets")
 	fmt.Println("  next               Mark current subtask done and move to next")
@@ -127,6 +131,9 @@ func RunAdd(args []string) {
 		logFatal("Usage: ./dialtone.sh ticket add <ticket-name>")
 	}
 	name := args[0]
+	if err := ensureOnGitBranch(name); err != nil {
+		logFatal("Could not switch to branch %s: %v", name, err)
+	}
 	dir := filepath.Join("src", "tickets", name)
 	os.MkdirAll(filepath.Join(dir, "test"), 0755)
 
@@ -134,10 +141,10 @@ func RunAdd(args []string) {
 		if !errors.Is(err, ErrTicketNotFound) {
 			logFatal("Could not load ticket %s: %v", name, err)
 		}
-		// Default: allow "init" to run without manual ticket DB edits.
-		// For `www-*` tickets, the expected baseline verification is:
+		// Default: ensure every subtask has a test command placeholder.
+		// For `www-*` tickets, the expected baseline verification is typically:
 		// `./dialtone.sh plugin test www`
-		initTestCmd := ""
+		initTestCmd := "echo \"TODO: set test command\""
 		if strings.HasPrefix(name, "www-") {
 			initTestCmd = "./dialtone.sh plugin test www"
 		}
@@ -145,6 +152,7 @@ func RunAdd(args []string) {
 			ID:          name,
 			Name:        name,
 			Description: "",
+			State:       "new",
 			Subtasks: []Subtask{
 				{
 					Name:        "init",
@@ -162,6 +170,8 @@ func RunAdd(args []string) {
 	if err := SetCurrentTicket(name); err != nil {
 		logFatal("Could not set current ticket %s: %v", name, err)
 	}
+	// `add` is prep work, but keep default mode as review to avoid implying execution.
+	_ = SetCurrentTicketMode("review")
 
 	testGo := filepath.Join(dir, "test", "test.go")
 	if _, err := os.Stat(testGo); os.IsNotExist(err) {
@@ -197,6 +207,7 @@ func RunStart(args []string) {
 	}
 	name := args[0]
 	RunAdd(args)
+	_ = SetCurrentTicketMode("start")
 
 	// V2: Contextual Alert (Scaffold)
 	if strings.Contains(name, "api") || strings.Contains(name, "stripe") {
@@ -212,7 +223,9 @@ func RunStart(args []string) {
 		now := time.Now().Format(time.RFC3339)
 		ticket.StartTime = now
 		ticket.LastSummaryTime = now
+		ticket.State = "started"
 		SaveTicket(ticket)
+		_ = ensureAllSubtaskSummaryFiles(ticket)
 	}
 
 	logInfo("Ticket %s started successfully", name)
@@ -231,6 +244,217 @@ func RunStart(args []string) {
 	)
 }
 
+func RunReview(args []string) {
+	if len(args) < 1 {
+		logFatal("Usage: ./dialtone.sh ticket review <ticket-name>")
+	}
+	name := args[0]
+	_ = SetCurrentTicketMode("review")
+
+	// Ensure we are on the branch named exactly like the ticket.
+	if err := ensureOnGitBranch(name); err != nil {
+		logFatal("Could not switch to branch %s: %v", name, err)
+	}
+
+	// Ensure ticket exists (scaffolds if missing) and set current ticket.
+	RunAdd([]string{name})
+
+	ticket, err := GetTicket(name)
+	if err != nil {
+		printDialtone(
+			[]string{
+				fmt.Sprintf("ticket: %s", name),
+				"mode: review (prep-only)",
+				"blocker: ticket validation failed",
+			},
+			fmt.Sprintf("Dialtone could not load/validate the ticket DB.\n\nError:\n%v\n\nFix the ticket structure (subtasks/deps/status/test commands) and retry.", err),
+			[]string{
+				"./dialtone.sh ticket subtask list " + name,
+				"./dialtone.sh ticket subtask add <name> --desc \"...\"",
+				"./dialtone.sh ticket validate " + name,
+				"./dialtone.sh ticket review " + name,
+			},
+		)
+		logFatal("Could not load ticket %s: %v", name, err)
+	}
+
+	// Create per-subtask summary files to make later work smoother.
+	if err := ensureAllSubtaskSummaryFiles(ticket); err != nil {
+		logFatal("Could not create subtask summary files: %v", err)
+	}
+
+	logTicketCommand(name, "review", args)
+
+	// `GetTicket` already performs structural validation; make that explicit in review output.
+	logInfo("Ticket %s is valid", name)
+
+	// Review-only heuristics: warnings are OK; goal is readiness for later `start`.
+	nameSet := map[string]bool{}
+	progressCount := 0
+	for _, st := range ticket.Subtasks {
+		n := strings.TrimSpace(st.Name)
+		if n != "" {
+			nameSet[n] = true
+		}
+		if st.Status == "progress" {
+			progressCount++
+		}
+	}
+
+	if len(ticket.Subtasks) == 0 {
+		logWarn("Review warning: ticket has 0 subtasks")
+	}
+	if progressCount > 1 {
+		logWarn("Review warning: %d subtasks are in progress (usually should be 1)", progressCount)
+	}
+
+	for _, st := range ticket.Subtasks {
+		stName := strings.TrimSpace(st.Name)
+		if stName == "" {
+			logWarn("Review warning: subtask with empty name")
+			continue
+		}
+		if strings.TrimSpace(st.Description) == "" {
+			logWarn("Review warning: subtask %s has empty description", stName)
+		}
+		if strings.TrimSpace(st.TestCommand) == "" {
+			logWarn("Review warning: subtask %s has no test command set", stName)
+		}
+		for _, d := range st.Dependencies {
+			dep := strings.TrimSpace(d)
+			if dep == "" {
+				continue
+			}
+			if !nameSet[dep] {
+				logWarn("Review warning: subtask %s depends on unknown subtask %s", stName, dep)
+			}
+		}
+	}
+
+	// Enter in-progress review state; completion is done via `ticket reviewed`.
+	if ticket.State != "done" {
+		ticket.State = "review"
+		_ = SaveTicket(ticket)
+	}
+
+	PrintTicketReport(ticket)
+	printReviewIteration(ticket)
+	printDialtone(
+		[]string{
+			fmt.Sprintf("ticket: %s", name),
+			"mode: review (prep-only)",
+			"policy: do not demand tests, logs, or code changes",
+			"goal: ensure the ticket DB/subtasks are ready for `ticket start` later",
+			"verify: branch name matches ticket name",
+			"validate: ticket DB/subtasks loaded successfully",
+			fmt.Sprintf("state: %s", ticket.State),
+		},
+		"Review questions (ticket + each subtask):\n1. is the goal aligned with subtasks\n2. should there be more subtasks\n3. are any subtasks too large\n4. is there work that should be put into a different ticket because it is not relevant\n5. does this ticket create a new plugin\n6. does this ticket have a update documentation subtask\n7. does this subtask have the correct test-command\n\nNotes:\n- review mode skips suggesting tests/log review or marking subtasks done\n- summary files exist at `src/tickets/<ticket>/<subtask>-summary.md` (created if missing)",
+		[]string{
+			"./dialtone.sh ticket subtask list",
+			"./dialtone.sh ticket validate " + name,
+			"./dialtone.sh ticket subtask add <name> --desc \"...\"",
+			"./dialtone.sh ticket subtask testcmd <subtask> <command...>",
+			"./dialtone.sh ticket start " + name,
+		},
+	)
+}
+
+func RunReviewed(args []string) {
+	name := ""
+	if len(args) > 0 {
+		name = args[0]
+	} else if cur, err := GetCurrentTicketID(); err == nil {
+		name = cur
+	}
+	if strings.TrimSpace(name) == "" {
+		logFatal("Usage: ./dialtone.sh ticket reviewed <ticket-name>")
+	}
+
+	ticket, err := GetTicket(name)
+	if err != nil {
+		logFatal("Could not load ticket %s: %v", name, err)
+	}
+
+	// Strict readiness validation: each subtask should have a description and test-command,
+	// and dependencies must reference existing subtasks.
+	nameSet := map[string]bool{}
+	for _, st := range ticket.Subtasks {
+		n := strings.TrimSpace(st.Name)
+		if n != "" {
+			nameSet[n] = true
+		}
+	}
+
+	var problems []string
+	if len(ticket.Subtasks) == 0 {
+		problems = append(problems, "ticket has 0 subtasks")
+	}
+	for _, st := range ticket.Subtasks {
+		stName := strings.TrimSpace(st.Name)
+		if stName == "" {
+			problems = append(problems, "subtask has empty name")
+			continue
+		}
+		if strings.TrimSpace(st.Description) == "" {
+			problems = append(problems, fmt.Sprintf("subtask %s has empty description", stName))
+		}
+		if strings.TrimSpace(st.TestCommand) == "" {
+			problems = append(problems, fmt.Sprintf("subtask %s has empty test-command", stName))
+		}
+		for _, d := range st.Dependencies {
+			dep := strings.TrimSpace(d)
+			if dep == "" {
+				continue
+			}
+			if !nameSet[dep] {
+				problems = append(problems, fmt.Sprintf("subtask %s depends on unknown subtask %s", stName, dep))
+			}
+		}
+	}
+
+	if len(problems) > 0 {
+		printDialtone(
+			[]string{
+				fmt.Sprintf("ticket: %s", ticket.ID),
+				"blocker: ticket review is not complete",
+				"state: review",
+			},
+			"Fix the following issues before marking reviewed:\n- "+strings.Join(problems, "\n- "),
+			[]string{
+				"./dialtone.sh ticket review " + ticket.ID,
+				"./dialtone.sh ticket subtask add <name> --desc \"...\"",
+				"./dialtone.sh ticket subtask testcmd <subtask> <command...>",
+				"./dialtone.sh ticket reviewed " + ticket.ID,
+			},
+		)
+		return
+	}
+
+	now := time.Now().Format(time.RFC3339)
+	for i := range ticket.Subtasks {
+		ticket.Subtasks[i].ReviewedTimestamp = now
+	}
+	ticket.State = "reviewed"
+	if err := SaveTicket(ticket); err != nil {
+		logFatal("Could not mark ticket reviewed: %v", err)
+	}
+	logTicketCommand(ticket.ID, "reviewed", args)
+	logInfo("Ticket %s marked as reviewed", ticket.ID)
+
+	printDialtone(
+		[]string{
+			fmt.Sprintf("ticket: %s", ticket.ID),
+			"state: reviewed",
+			"next: start execution when ready",
+		},
+		"Review is complete.\n\nWhen you’re ready to execute work, run:\n- `./dialtone.sh ticket start <ticket>`",
+		[]string{
+			"./dialtone.sh ticket start " + ticket.ID,
+		},
+	)
+}
+
 func RunAck(args []string) {
 	ticket, err := GetCurrentTicket()
 	if err != nil {
@@ -243,6 +467,18 @@ func RunAck(args []string) {
 	}
 
 	appendTicketLogEntry(ticket.ID, "ack", message, "")
+	// Unblock the ticket when questions are acknowledged.
+	if GetCurrentTicketMode() == "start" {
+		ticket.State = "started"
+	} else {
+		// In review mode, return to in-progress review unless explicitly marked reviewed.
+		if ticket.State == "reviewed" {
+			// keep
+		} else {
+			ticket.State = "review"
+		}
+	}
+	_ = SaveTicket(ticket)
 	logInfo("Messages acknowledged for ticket %s", ticket.ID)
 }
 
@@ -281,6 +517,8 @@ func RunAsk(args []string) {
 	}
 
 	appendTicketLogEntry(ticket.ID, "question", question, subtask)
+	ticket.State = "blocked"
+	_ = SaveTicket(ticket)
 }
 
 func RunLog(args []string) {
@@ -350,36 +588,26 @@ func RunDone(args []string) {
 		logFatal("Error getting current ticket: %v", err)
 	}
 
-	// DIALTONE mode: do not run tests automatically. Guide the agent instead.
-	// `done` is only allowed after the agent has run tests, reviewed logs, and submitted summary.
-	dir := filepath.Join("src", "tickets", ticket.ID)
-	summaryPath := filepath.Join(dir, "agent_summary.md")
-	if _, err := os.Stat(summaryPath); err != nil {
+	// Mode gate: `done` is only allowed in `start` mode.
+	if GetCurrentTicketMode() == "review" {
 		printDialtone(
 			[]string{
 				fmt.Sprintf("ticket: %s", ticket.ID),
-				"blocker: missing agent_summary.md (required to finalize)",
-				"policy: do not auto-run tests/commits; ask the agent to verify",
-				"verify: tests pass; browser/dev logs contain no ERROR/EXCEPTION; resources cleaned up",
+				"mode: review (prep-only)",
+				"blocker: cannot finalize tickets in review mode",
 			},
-			"Create `src/tickets/<ticket>/agent_summary.md` with a final summary.\nThen re-run `./dialtone.sh ticket done`.",
+			"You're currently in `review` mode.\n\nUse `review` to make the ticket DB/subtasks ready.\nWhen you're ready to execute and finalize, switch to start mode:\n- `./dialtone.sh ticket start <ticket>`",
 			[]string{
-				"./dialtone.sh plugin test <plugin-name>",
-				"./dialtone.sh logs --lines 200",
-				"./dialtone.sh ticket summary update",
+				"./dialtone.sh ticket review " + ticket.ID,
+				"./dialtone.sh ticket start " + ticket.ID,
 				"./dialtone.sh ticket done",
 			},
 		)
-		logFatal("Missing mandatory agent_summary.md for ticket completion")
+		return
 	}
 
-	content, err := os.ReadFile(summaryPath)
-	if err != nil {
-		logFatal("Error reading %s: %v", summaryPath, err)
-	}
-	if len(strings.TrimSpace(string(content))) == 0 {
-		logFatal("agent_summary.md is empty. A final summary is required.")
-	}
+	// DIALTONE mode: do not run tests automatically. Guide the agent instead.
+	// `done` is only allowed after the agent has run tests, reviewed logs, and submitted summary.
 
 	// Simple validation: all subtasks must be done (or failed/skipped)
 	for _, st := range ticket.Subtasks {
@@ -404,15 +632,37 @@ func RunDone(args []string) {
 		}
 	}
 
-	// Ingest summaries (history + final file) then delete agent_summary.md
+	// Sync current summary files into DuckDB (no deletion).
+	if err := ensureAllSubtaskSummaryFiles(ticket); err != nil {
+		logFatal("Could not create subtask summary files: %v", err)
+	}
+	// Best-effort sync; do not block on unchanged content.
+	for _, st := range ticket.Subtasks {
+		content, _, err := readSubtaskSummary(ticket.ID, st.Name)
+		if err != nil {
+			logFatal("Could not read summary file for %s: %v", st.Name, err)
+		}
+		content = strings.TrimSpace(content)
+		if content == "" {
+			// If a subtask is marked done, it should already have a summary due to gating in `subtask done`.
+			continue
+		}
+		last, err := GetLastTicketSummaryForSubtask(ticket.ID, st.Name)
+		if err == nil && last != nil && strings.TrimSpace(last.Content) == content {
+			continue
+		}
+		if err := AppendTicketSummary(ticket.ID, st.Name, content); err != nil {
+			logFatal("Could not save summary: %v", err)
+		}
+	}
+
+	// Ingest summaries (history) into the consolidated field.
 	allSummaries, _ := ListTicketSummaries(ticket.ID)
 	finalLog := "## Unified Agent Summary\n\n"
 	for _, s := range allSummaries {
 		finalLog += fmt.Sprintf("### %s (%s)\n%s\n\n", s.Timestamp, s.SubtaskName, s.Content)
 	}
-	finalLog += "### Final Summary\n" + string(content)
 	ticket.AgentSummary = finalLog
-	_ = os.Remove(summaryPath)
 
 	logInfo("Finalizing ticket %s...", ticket.ID)
 	logTicketCommand(ticket.ID, "done", args)
@@ -425,6 +675,7 @@ func RunDone(args []string) {
 	}
 	logInfo("Database backup saved to %s", backupPath)
 
+	ticket.State = "done"
 	if err := SaveTicket(ticket); err != nil {
 		logFatal("Could not save final summary: %v", err)
 	}
@@ -498,54 +749,69 @@ func RunSummary(args []string) {
 		return
 	}
 
-	summaryContent := ""
-	if !idle {
-		dir := filepath.Join("src", "tickets", ticket.ID)
-		summaryPath := filepath.Join(dir, "agent_summary.md")
-		content, err := os.ReadFile(summaryPath)
-		if err != nil {
-			fmt.Printf("[EXAMPLE] Recommended format for agent_summary.md:\n\n")
-			fmt.Printf("## Ran commands to find source files\n")
-			fmt.Printf("1. searched with grep - result nothing\n")
-			fmt.Printf("2. searched with `./dialtone.sh ticket search \"vertex node\"` - 2 results\n\n")
-			logFatal("Could not read %s: %v", summaryPath, err)
-		}
-		summaryContent = strings.TrimSpace(string(content))
-		if summaryContent == "" {
-			fmt.Printf("[EXAMPLE] Recommended format for agent_summary.md:\n\n")
-			fmt.Printf("## Ran commands to find source files\n")
-			fmt.Printf("1. searched with grep - result nothing\n")
-			fmt.Printf("2. searched with `./dialtone.sh ticket search \"vertex node\"` - 2 results\n\n")
-			logFatal("agent_summary.md is empty. Provide content or use --idle.")
-		}
-
-		// SHA256 Verification
-		hash := sha256.Sum256([]byte(summaryContent))
-		currentHex := hex.EncodeToString(hash[:])
-
-		last, err := GetLastTicketSummary(ticket.ID)
-		if err == nil && last != nil {
-			lastHash := sha256.Sum256([]byte(last.Content))
-			lastHex := hex.EncodeToString(lastHash[:])
-			if currentHex == lastHex {
-				logFatal("Summary content has not changed. Please update agent_summary.md.")
-			}
-		}
-
-		// Auto-deletion on success (update)
-		defer os.Remove(summaryPath)
-	} else {
-		summaryContent = "[IDLE] No work performed in this interval."
+	// Ensure summary files exist (persistent per-subtask).
+	if err := ensureAllSubtaskSummaryFiles(ticket); err != nil {
+		logFatal("Could not create subtask summary files: %v", err)
 	}
 
-	subtask := ""
+	if idle {
+		if err := AppendTicketSummary(ticket.ID, "", "[IDLE] No work performed in this interval."); err != nil {
+			logFatal("Could not save summary: %v", err)
+		}
+		ticket.LastSummaryTime = time.Now().Format(time.RFC3339)
+		if err := SaveTicket(ticket); err != nil {
+			logFatal("Could not update last summary time: %v", err)
+		}
+		logInfo("Summary captured and timer reset for ticket %s", ticket.ID)
+		return
+	}
+
+	// Sync summaries from <subtask>-summary.md files into DuckDB.
+	active := ""
 	st := FindNextSubtask(ticket)
 	if st != nil && st.Status == "progress" {
-		subtask = st.Name
+		active = st.Name
 	}
 
-	if err := AppendTicketSummary(ticket.ID, subtask, summaryContent); err != nil {
-		logFatal("Could not save summary: %v", err)
+	if active != "" {
+		content, path, err := readSubtaskSummary(ticket.ID, active)
+		if err != nil {
+			logFatal("Could not read summary file: %v", err)
+		}
+		if strings.TrimSpace(content) == "" {
+			fmt.Printf("[BLOCK] Subtask summary is required before continuing.\n")
+			fmt.Printf("[MESSAGE] Please update: %s\n", path)
+			fmt.Printf("[EXAMPLE] Suggested template:\n\n")
+			fmt.Printf("## What changed\n- ...\n\n## Commands / verification\n- ...\n\n")
+			fmt.Printf("[ACTION] Update the file and run: ./dialtone.sh ticket summary update\n")
+			return
+		}
+	}
+
+	updated := 0
+	for _, s := range ticket.Subtasks {
+		name := strings.TrimSpace(s.Name)
+		if name == "" {
+			continue
+		}
+		content, _, err := readSubtaskSummary(ticket.ID, name)
+		if err != nil {
+			logFatal("Could not read summary file for %s: %v", name, err)
+		}
+		content = strings.TrimSpace(content)
+		if content == "" {
+			continue
+		}
+
+		last, err := GetLastTicketSummaryForSubtask(ticket.ID, name)
+		if err == nil && last != nil && strings.TrimSpace(last.Content) == content {
+			continue
+		}
+
+		if err := AppendTicketSummary(ticket.ID, name, content); err != nil {
+			logFatal("Could not save summary: %v", err)
+		}
+		updated++
 	}
 
 	ticket.LastSummaryTime = time.Now().Format(time.RFC3339)
@@ -553,7 +819,11 @@ func RunSummary(args []string) {
 		logFatal("Could not update last summary time: %v", err)
 	}
 
-	logInfo("Summary captured and timer reset for ticket %s", ticket.ID)
+	if updated == 0 {
+		logInfo("No summary changes detected; timer reset for ticket %s", ticket.ID)
+	} else {
+		logInfo("Synced %d subtask summary file(s); timer reset for ticket %s", updated, ticket.ID)
+	}
 }
 
 func RunSearch(args []string) {
