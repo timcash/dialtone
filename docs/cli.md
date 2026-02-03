@@ -1,6 +1,7 @@
 # How to use `dialtone.sh` CLI and `git` for development
 1. Use only these two tools as much as possible `dialtone.sh` CLI and `git`
-2. Always run `./dialtone.sh ticket start <ticket-name>` before making any changes.
+2. Use `./dialtone.sh ticket review <ticket-name>` to prep/verify the ticket structure, or `./dialtone.sh ticket start <ticket-name>` when you’re ready to execute work.
+3. Ticket commands `add`, `review`, and `start` should ensure you are on a git branch named exactly like the ticket.
 3. `dialtone.sh` is a simple wrapper around `src/dev.go`
 
 ## Installation & Setup
@@ -13,8 +14,9 @@ mv -n env/.env.example env/.env # Only if env/.env does not exists
 
 ## Ticket Lifecycle
 ```bash
-./dialtone.sh ticket add <ticket-name> # Add a ticket.md to tickets/<ticket-name>/
-./dialtone.sh ticket start <ticket-name> # Sets current ticket and scaffolds
+./dialtone.sh ticket add <ticket-name>    # Create ticket scaffolding and switch/create branch
+./dialtone.sh ticket review <ticket-name> # Prep-only review of ticket DB/subtasks (no tests/logs/code)
+./dialtone.sh ticket start <ticket-name>  # Start execution workflow (sets current ticket, branch)
 ./dialtone.sh ticket subtask list <ticket-name> # List all subtasks in tickets/<ticket-name>/ticket.md
 ./dialtone.sh ticket subtask next <ticket-name> # prints the next todo or process subtask for this ticket
 ./dialtone.sh ticket subtask test <ticket-name> <subtask-name> # Runs the subtask test

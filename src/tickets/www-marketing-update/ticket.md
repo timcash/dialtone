@@ -6,7 +6,7 @@ Update the marketing sections to tell a "now is the time to learn and build" sto
 
 ## SUBTASK: start ticket work via `dialtone.sh` cli
 - name: ticket-start
-- description: start work by running `./dialtone.sh ticket start www-marketing-update`
+- description: start work by running `./dialtone.sh ticket start www-marketing-update` (creates/switches to `www-marketing-update` branch)
 - test-condition-1: run `./dialtone.sh plugin test <plugin-name>` to verify the ticket is valid
 - test-condition-2: `./dialtone.sh plugin test <plugin-name>`
 - tags:

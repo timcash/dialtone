@@ -24,8 +24,9 @@ const (
 	// V2 storage:
 	// Each ticket stores its own DuckDB at:
 	//   src/tickets/<ticket-id>/<ticket-id>.duckdb
-	currentTicketFilename = ".current_ticket"
-	ticketDBExtension     = ".duckdb"
+	currentTicketFilename     = ".current_ticket"
+	currentTicketModeFilename = ".current_ticket_mode"
+	ticketDBExtension         = ".duckdb"
 )
 
 func ticketDir(ticketID string) string {
@@ -34,6 +35,10 @@ func ticketDir(ticketID string) string {
 
 func currentTicketPath() string {
 	return filepath.Join("src", "tickets", currentTicketFilename)
+}
+
+func currentTicketModePath() string {
+	return filepath.Join("src", "tickets", currentTicketModeFilename)
 }
 
 func ticketDBPathFor(ticketID string) string {
@@ -419,6 +424,32 @@ func GetLastTicketSummary(ticketID string) (*SummaryEntry, error) {
 	return &e, nil
 }
 
+func GetLastTicketSummaryForSubtask(ticketID, subtaskName string) (*SummaryEntry, error) {
+	db, err := openTicketDB(ticketID)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	var e SummaryEntry
+	err = db.QueryRow(
+		`SELECT subtask_name, timestamp, content
+		 FROM ticket_summaries
+		 WHERE ticket_id = ? AND subtask_name = ?
+		 ORDER BY timestamp DESC
+		 LIMIT 1`,
+		ticketID, subtaskName,
+	).Scan(&e.SubtaskName, &e.Timestamp, &e.Content)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	e.TicketID = ticketID
+	return &e, nil
+}
+
 func SearchTicketSummaries(query string) ([]SummaryEntry, error) {
 	if strings.TrimSpace(query) == "" {
 		return nil, fmt.Errorf("query is empty")
@@ -519,16 +550,40 @@ func SetCurrentTicket(ticketID string) error {
 	return os.WriteFile(currentTicketPath(), []byte(ticketID+"\n"), 0644)
 }
 
+func SetCurrentTicketMode(mode string) error {
+	mode = strings.TrimSpace(mode)
+	if mode == "" {
+		return fmt.Errorf("mode is empty")
+	}
+	if err := os.MkdirAll(filepath.Join("src", "tickets"), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(currentTicketModePath(), []byte(mode+"\n"), 0644)
+}
+
 func GetCurrentTicketID() (string, error) {
 	content, err := os.ReadFile(currentTicketPath())
 	if err != nil {
-		return "", fmt.Errorf("no current ticket set; run 'dialtone.sh ticket start <ticket-name>'")
+		return "", fmt.Errorf("no current ticket set; run 'dialtone.sh ticket start <ticket-name>' or 'dialtone.sh ticket review <ticket-name>'")
 	}
 	id := strings.TrimSpace(string(content))
 	if id == "" {
-		return "", fmt.Errorf("no current ticket set; run 'dialtone.sh ticket start <ticket-name>'")
+		return "", fmt.Errorf("no current ticket set; run 'dialtone.sh ticket start <ticket-name>' or 'dialtone.sh ticket review <ticket-name>'")
 	}
 	return id, nil
+}
+
+func GetCurrentTicketMode() string {
+	// Default to start to preserve older behavior if mode file is missing.
+	content, err := os.ReadFile(currentTicketModePath())
+	if err != nil {
+		return "start"
+	}
+	mode := strings.TrimSpace(string(content))
+	if mode == "" {
+		return "start"
+	}
+	return mode
 }
 
 func nullOrValue(value string) interface{} {

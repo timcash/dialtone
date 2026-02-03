@@ -1,2 +1,0 @@
-Progress log for mavlink-6dof
-

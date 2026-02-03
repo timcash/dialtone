@@ -56,6 +56,8 @@ func RunUpsert(args []string) {
 		if err := SetCurrentTicket(ticket.ID); err != nil {
 			logFatal("Could not set current ticket %s: %v", ticket.ID, err)
 		}
+		// Upsert is typically prep (not execution).
+		_ = SetCurrentTicketMode("review")
 	}
 	logTicketCommand(ticket.ID, "upsert", args)
 	logInfo("Upserted ticket %s", ticket.ID)

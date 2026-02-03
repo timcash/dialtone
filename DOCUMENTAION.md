@@ -21,12 +21,17 @@ Tickets are the primary unit of work for changes to the system.
 ```bash
 ./dialtone.sh ticket add <ticket-name>
 ./dialtone.sh ticket start <ticket-name>
+./dialtone.sh ticket review <ticket-name>
 ./dialtone.sh ticket ask <question>
 ./dialtone.sh ticket ask --subtask <subtask-name> <question>
 ./dialtone.sh ticket log <message>
 ./dialtone.sh ticket next
 ./dialtone.sh ticket done
 ```
+
+Notes:
+- `ticket add`, `ticket start`, and `ticket review` should create or switch to a git branch named exactly like the ticket.
+- `ticket review` is prep-only: it focuses on ensuring the ticket DB/subtasks look correct and ready to be worked on later with `ticket start`.
 
 ### Tickets (storage)
 - Each ticket stores its own DuckDB file at:
