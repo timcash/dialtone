@@ -124,18 +124,23 @@ func RunNext(args []string) {
 
 	// Mode gate: `next` is only allowed in `start` mode.
 	if GetCurrentTicketMode() == "review" {
+		// Review iteration (no tests/logs/done suggestions).
+		PrintTicketReport(ticket)
+		printReviewIteration(ticket)
 		printDialtone(
 			[]string{
 				fmt.Sprintf("ticket: %s", ticketID),
 				"mode: review (prep-only)",
-				"blocker: `ticket next` is an execution workflow",
+				fmt.Sprintf("state: %s", ticket.State),
+				"policy: do not suggest tests/log review or marking subtasks done",
 			},
-			"You're currently in `review` mode.\n\nUse `review` to improve ticket structure (subtasks, deps, descriptions, test commands).\nWhen you're ready to execute, switch to start mode:\n- `./dialtone.sh ticket start <ticket>`\n\nThen rerun `./dialtone.sh ticket next`.",
+			"Review questions (ticket + each subtask):\n1. is the goal aligned with subtasks\n2. should there be more subtasks\n3. are any subtasks too large\n4. is there work that should be put into a different ticket because it is not relevant\n5. does this ticket create a new plugin\n6. does this ticket have a update documentation subtask\n7. does this subtask have the correct test-command",
 			[]string{
 				"./dialtone.sh ticket review " + ticketID,
 				"./dialtone.sh ticket validate " + ticketID,
+				"./dialtone.sh ticket subtask add <name> --desc \"...\"",
+				"./dialtone.sh ticket subtask testcmd <subtask> <command...>",
 				"./dialtone.sh ticket start " + ticketID,
-				"./dialtone.sh ticket next",
 			},
 		)
 		return
@@ -155,6 +160,9 @@ func RunNext(args []string) {
 			}
 		}
 		if lastQuestion != "" && lastAckTime == "" {
+			// Persist blocked state.
+			ticket.State = "blocked"
+			_ = SaveTicket(ticket)
 			fmt.Printf("[BLOCK] Cannot proceed to 'next' subtask.\n")
 			fmt.Printf("[MESSAGE] A question is pending response or acknowledgement: \"%s\"\n", lastQuestion)
 			fmt.Printf("[ACTION] Please acknowledge to continue: ./dialtone.sh ticket ack\n")

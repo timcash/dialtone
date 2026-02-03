@@ -149,6 +149,7 @@ func RunAdd(args []string) {
 			ID:          name,
 			Name:        name,
 			Description: "",
+			State:       "new",
 			Subtasks: []Subtask{
 				{
 					Name:        "init",
@@ -219,6 +220,7 @@ func RunStart(args []string) {
 		now := time.Now().Format(time.RFC3339)
 		ticket.StartTime = now
 		ticket.LastSummaryTime = now
+		ticket.State = "started"
 		SaveTicket(ticket)
 		_ = ensureAllSubtaskSummaryFiles(ticket)
 	}
@@ -326,21 +328,31 @@ func RunReview(args []string) {
 		}
 	}
 
+	// Mark ticket state as reviewed (prep complete).
+	// This is intentionally non-blocking: review mode does not demand tests/logs/code changes.
+	if ticket.State != "done" {
+		ticket.State = "reviewed"
+		_ = SaveTicket(ticket)
+	}
+
 	PrintTicketReport(ticket)
+	printReviewIteration(ticket)
 	printDialtone(
 		[]string{
 			fmt.Sprintf("ticket: %s", name),
 			"mode: review (prep-only)",
 			"policy: do not demand tests, logs, or code changes",
-			"goal: ensure ticket DB/subtasks look correct and ready for `ticket start` later",
+			"goal: ensure the ticket DB/subtasks are ready for `ticket start` later",
 			"verify: branch name matches ticket name",
 			"validate: ticket DB/subtasks loaded successfully",
+			fmt.Sprintf("state: %s", ticket.State),
 		},
-		"Review the ticket structure now:\n- subtasks have clear descriptions\n- dependencies are correct\n- each subtask has an explicit test command (when applicable)\n- summary files exist at `src/tickets/<ticket>/<subtask>-summary.md`",
+		"Review questions (ticket + each subtask):\n1. is the goal aligned with subtasks\n2. should there be more subtasks\n3. are any subtasks too large\n4. is there work that should be put into a different ticket because it is not relevant\n5. does this ticket create a new plugin\n6. does this ticket have a update documentation subtask\n7. does this subtask have the correct test-command\n\nNotes:\n- review mode skips suggesting tests/log review or marking subtasks done\n- summary files exist at `src/tickets/<ticket>/<subtask>-summary.md` (created if missing)",
 		[]string{
 			"./dialtone.sh ticket subtask list",
 			"./dialtone.sh ticket validate " + name,
 			"./dialtone.sh ticket subtask add <name> --desc \"...\"",
+			"./dialtone.sh ticket subtask testcmd <subtask> <command...>",
 			"./dialtone.sh ticket start " + name,
 		},
 	)
@@ -358,6 +370,14 @@ func RunAck(args []string) {
 	}
 
 	appendTicketLogEntry(ticket.ID, "ack", message, "")
+	// Unblock the ticket when questions are acknowledged.
+	if GetCurrentTicketMode() == "start" {
+		ticket.State = "started"
+	} else {
+		// Default to reviewed when acking in review mode.
+		ticket.State = "reviewed"
+	}
+	_ = SaveTicket(ticket)
 	logInfo("Messages acknowledged for ticket %s", ticket.ID)
 }
 
@@ -396,6 +416,8 @@ func RunAsk(args []string) {
 	}
 
 	appendTicketLogEntry(ticket.ID, "question", question, subtask)
+	ticket.State = "blocked"
+	_ = SaveTicket(ticket)
 }
 
 func RunLog(args []string) {
@@ -552,6 +574,7 @@ func RunDone(args []string) {
 	}
 	logInfo("Database backup saved to %s", backupPath)
 
+	ticket.State = "done"
 	if err := SaveTicket(ticket); err != nil {
 		logFatal("Could not save final summary: %v", err)
 	}

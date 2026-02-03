@@ -16,7 +16,7 @@ src/tickets/
 Ticket CLI examples:
 ```shell
 ./dialtone.sh ticket start <name>    # Initialize a new ticket and git branch
-./dialtone.sh ticket review <name>   # Review ticket DB/subtasks only (no tests/logs/code)
+./dialtone.sh ticket review <name>   # Review mode: planning/readiness questions (no tests/logs/done)
 ./dialtone.sh ticket next            # Main TDD driver; runs tests and blocks on questions
 ./dialtone.sh ticket done            # Finalize ticket; requires summaries to be up to date
 
@@ -52,9 +52,19 @@ Ticket CLI examples:
 ```shell
 # Review a ticket without starting execution:
 # - checks ticket DB/subtasks are well-formed
-# - does NOT demand tests/logs/code changes
+# - asks readiness questions for the ticket + each subtask
+# - does NOT suggest tests/logs or marking subtasks done
 ./dialtone.sh ticket review feature-name
 ```
+
+## Ticket state
+Tickets have a `state` field in DuckDB:
+
+- `new`: created but not reviewed
+- `reviewed`: reviewed and ready to start later
+- `started`: execution has begun
+- `blocked`: waiting on a question/acknowledgement or missing planning info
+- `done`: finalized
 
 ## STEP 2. Iterative Development (TDD)
 ```shell

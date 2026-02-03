@@ -22,6 +22,7 @@ type Ticket struct {
 	Name            string    `json:"name"`
 	Tags            []string  `json:"tags,omitempty"`
 	Description     string    `json:"description"`
+	State           string    `json:"state,omitempty"` // new, reviewed, started, done, blocked
 	Subtasks        []Subtask `json:"subtasks"`
 	AgentSummary    string    `json:"agent_summary,omitempty"`
 	StartTime       string    `json:"start_time,omitempty"`

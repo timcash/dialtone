@@ -41,8 +41,16 @@ This workflow is optimized for LLM agents and operators doing ticket-driven deve
 
 - `./dialtone.sh ticket review <ticket-name>`
   - **Purpose**: prep-only. Use this when you want DIALTONE + the LLM to **review the ticket DB and subtasks** and make sure it’s ready to work on later.
-  - **No demands**: does **not** demand running tests, changing code, or reviewing logs.
-  - **Outcome**: confirms the ticket structure looks good (subtasks, deps, descriptions, test commands) and the ticket is ready for `start`.
+  - **Workflow**: DIALTONE iterates over the ticket and each subtask and asks review questions like:
+    1. is the goal aligned with subtasks
+    2. should there be more subtasks
+    3. are any subtasks too large
+    4. is there work that should be put into a different ticket because it is not relevant
+    5. does this ticket create a new plugin
+    6. does this ticket have a update documentation subtask
+    7. does this subtask have the correct test-command
+  - **Skips**: does **not** suggest running tests, reviewing logs, or marking subtasks `done`.
+  - **Outcome**: the ticket is marked **reviewed** and is ready for `start`.
 
 - `./dialtone.sh ticket start <ticket-name>`
   - **Purpose**: execution. Use this when you are ready to actually do work on the ticket.
@@ -53,6 +61,18 @@ This workflow is optimized for LLM agents and operators doing ticket-driven deve
 All ticket work happens on a git branch named **exactly** like the ticket:
 
 - `ticket add <ticket>` / `ticket review <ticket>` / `ticket start <ticket>` should create or switch to the branch named `<ticket>`.
+
+---
+
+## Ticket state
+
+Tickets track a simple `state` field to indicate where they are in the lifecycle:
+
+- `new`: created but not reviewed
+- `reviewed`: reviewed and ready to start later
+- `started`: execution has begun
+- `blocked`: blocked waiting on a question/acknowledgement or missing planning info
+- `done`: finalized
 
 ---
 
