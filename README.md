@@ -1,11 +1,30 @@
-# [Dialtone](https://dialtone.earth)
+# [`DIALTONE`](https://dialtone.earth)
 ![dialtone](./dialtone.jpg)
-- Open civic communications infrastructure
-- Virtual librarian for mathematics, physics, and engineering
-- Publicly owned and assembled robots, radios and tools
-- A low latency geospatial tasking and intelligence system
+- A public information system for civic coordination and education
+- A virtual librarian for mathematics, physics, and engineering
+- Publicly owned and assembled robots, radios, and shared tools
+- Live maps and status for real-world projects and robotic operations
 - A marketplace for parts, services, training, and integrations
-- Tools for creating quantum resistant encrypted keys and signatures
+- Tools for secure identity, keys, and signatures
+
+### Who uses Dialtone
+- Students:
+  - use the virtual library to learn mathematics, physics, and engineering through guided problems tied to real systems
+  - explore examples and tickets that connect theory to robots, radios, mapping, and field work
+- City councils and civic teams:
+  - plan new public spaces as a living system: build plan, operations plan, and long-term maintenance plan
+  - coordinate contractors, parts, schedules, and safety requirements through tickets with budgets and acceptance checks
+  - monitor ongoing work through maps, status, and records (what is deployed, where it is, and whether it is healthy)
+- Builders and operators:
+  - assemble radio and robot kits, bring devices onto the encrypted network, and run missions with auditable workflows
+  - run field trials, learn from failures, and ship improvements as repeatable upgrades
+- Developers, researchers, and documentation contributors:
+  - contribute passively by submitting documentation fixes and small tickets
+  - contribute actively by writing tests, improving plugins, training and evaluating models, and rolling updates to deployed systems
+
+Dialtone supports a spectrum of use:
+- Passive: read the library, file a ticket, fund a ticket, submit a documentation change.
+- Active: run tickets end-to-end, deploy and monitor fleets, and operate robotic systems in the field.
 
 ### Example use cases
 - Small goods delivery and distribution
@@ -35,127 +54,56 @@
 - Dialtone links builders and operators to parts, services, and integrations that work with the platform.
 - Hardware: bill of materials, sourcing links, and compatible alternates for radio and robot kits.
 - Services: assembly help, repairs, calibration, and field support.
-- Software: plugins, integrations, and deployment recipes that can be installed and tested through the same ticket-driven workflow.
-- Trust signals: test coverage, compatibility notes, and operational constraints (power, bandwidth, range, compute).
+- Software: plugins, integrations, and deployment recipes that can be installed and validated through tickets.
+- Trust signals: compatibility notes, safety notes, and practical constraints (power, range, compute).
 
 ### Deep technical education
 - Structured learning paths for the math and engineering behind real systems:
-  - networking (identity, encryption, routing, failure modes)
-  - telemetry (schemas, time-series, logging, observability)
-  - controls (state estimation, feedback, tuning)
-  - mapping and geospatial systems (frames, projections, uncertainty)
-  - radio links (link budgets, latency, throughput, antennas)
-- Learning is tied to doing: each concept maps to tickets, tests, and small deployable changes.
+  - networks and secure communication
+  - sensing, measurement, and monitoring
+  - control and automation
+  - maps and geospatial reasoning
+  - radio links and field connectivity
+- Learning is tied to doing: each concept maps to tickets and small, verifiable changes.
 
 ### Physical shops and labs
 - Find a local shop or lab to build and test radio and robot kits.
 - Access shared equipment (soldering, RF test gear, 3D printing, calibration tools) and repeatable build procedures.
 - Run acceptance tests on hardware before field deployment (power, thermal, radio link, sensor and control checks).
 
-### What Dialtone provides
-- Private encrypted networking for robots and operators (identity-aware connectivity).
-- A message bus for commands, telemetry, events, logs, and streams.
-- A CLI-first workflow for repeatable development, validation, and deployment.
-- An Earth Library: geospatial context for fleet state (location, environment, and operational context).
 
-### Quickstart
+### Teams
+- A 90 day desert sprint to build, test, and deploy a working robotic system end-to-end.
+- Built around immersion: deep technical learning paired with daily hands-on building, integration, and field validation.
+- Outcomes:
+  - a functioning robot + radio link + operator workflow running on Dialtone
+  - documented procedures (build notes, deployment runbooks, troubleshooting)
+  - a set of tickets and tests that make the system repeatable for the next team
+- Sprint structure:
+  - Weeks 1-2: assemble kits, connect devices, establish monitoring and logs
+  - Weeks 3-6: integrate sensors and control loops, build operator workflows, start field trials
+  - Weeks 7-10: harden reliability (power, thermal, link quality), add safety checks and rollback paths
+  - Weeks 11-13: deploy a complete mission workflow and demonstrate repeatable operations
 
-```bash
-git clone https://github.com/timcash/dialtone.git
-cd dialtone
-./dialtone.sh install
-./dialtone.sh ticket start <ticket-name>
-./dialtone.sh ticket next
-```
-
-### How work changes land safely (tickets)
-Dialtone uses a ticket workflow to keep changes small, testable, and reviewable.
-
-```bash
-./dialtone.sh ticket add <ticket-name>         # scaffold a ticket
-./dialtone.sh ticket start <ticket-name>       # branch + draft PR
-./dialtone.sh ticket next                      # run the next test and advance state
-./dialtone.sh ticket done                      # finalize and mark PR ready
-```
-
-### Tickets as work, budgets, and income
-- A ticket is a unit of work that can span hardware, logistics, operations, and software.
-- Tickets can carry budgets and can be funded as paid work by individuals, organizations, or public programs.
-- A ticket is written so someone else can execute it: clear scope, acceptance criteria, and a test or verification plan.
-- Work becomes reusable when tickets land as documented procedures, tested code, validated hardware builds, or repeatable supply and delivery workflows.
+### How the system creates real outcomes
+- `DIALTONE` turns civic questions into clear tasks that people can complete and reuse.
+- Work is organized as tickets with dependencies (a checklist that knows what depends on what), so teams can move from plan to build to verification without losing track of what is required.
+- Tickets can be funded. They can have budgets, acceptance checks, and clear deliverables, making them suitable for paid work and public procurement.
 
 Example tickets:
-- Sourcing a metal supply (vendors, specs, lead times, acceptance tests).
-- Engineering a new part (CAD, manufacturing notes, fit checks, field validation).
+- Sourcing a metal supply (vendors, specs, lead times, acceptance checks).
+- Engineering a new part (design notes, fit checks, field validation).
 - Delivery of small goods (routing, handling, tracking, proof of delivery).
-- Software upgrades to vision models (dataset updates, evaluation, deployment, rollback plan).
+- Software upgrades to vision models (evaluation, safety checks, rollout and rollback plan).
 - Improving documentation (install steps, operator runbooks, troubleshooting guides).
 
-### Neural network management system
-- A neural network management system keeps model changes testable, comparable, and safe to deploy.
-- It manages datasets, training runs, evaluation suites, and deployment artifacts so upgrades can be audited and reproduced.
-- It supports offline evaluation and on-robot validation before a model is promoted to field use.
-- It ties model changes back to tickets so model version, metrics, and rollout decisions are recorded alongside the work.
+### Vision
+- A public library of mathematics, engineering knowledge, and field-tested procedures.
+- Publicly owned tools that make it easier to build and maintain real systems.
+- A shared civic operating picture: maps, status, and accountability for ongoing work.
+- A marketplace that connects communities to parts, services, training, and integrations.
 
-### Vision (why the pieces exist)
-- Learning loop: tests + logs + telemetry turn fleet experience into reusable building blocks.
-- Remote operations: supervision and teaching are required to move from prototypes to maintained systems.
-- Security by default: encrypted, identity-aware connectivity is a prerequisite for safe control and third-party integration.
-- Field connectivity: radios and edge links keep control and data moving when standard networks fail.
-- Geospatial ground truth: shared spatial context enables coordination over real terrain.
-- Education: the library compounds only if teams can learn and apply it.
-
-Together, these create a reliable substrate that a library (components, workflows, validated upgrades) and a marketplace (parts, services, training, integrations) can build on top of.
-
-### Plugins (capabilities you can add)
-Plugins extend Dialtone without modifying core networking and deployment primitives. Common capability areas include:
-- Ops + runtime: VPN, Bus, Radio, Logs, Web dashboards.
-- Development: Autocode (ticket/test loop), Mocks, CAD (simulation-first validation).
-- Fleet context: Geo (spatial), Weather (environmental inputs), Autoconfig (bring-up/enrollment).
-- Human + org: RSI (planning/coordination), Marketplace (distribution and integrations), Maintenance, Cyber, Social.
-
-```bash
-./dialtone.sh plugin add <plugin-name>
-./dialtone.sh plugin install <plugin-name>
-./dialtone.sh plugin build <plugin-name>
-./dialtone.sh plugin test <plugin-name>
-```
-
-### Logs
-Log lines are formatted as 
-```shell
-[timestamp | level | file:function:line] message
-```
-Examples
-```shell
-[2026-02-03T12:00:00.123Z07:00 | INFO  | main.go:run:42] starting dialtone
-[2026-02-03T12:00:01.217Z07:00 | ERROR | vpn.go:up:133] failed to bring vpn up: permission denied
-```
-
-```bash
-./dialtone.sh logs
-./dialtone.sh logs --remote
-./dialtone.sh logs --lines 50
-```
-
-### Build & deploy
-
-```bash
-./dialtone.sh build
-./dialtone.sh deploy
-./dialtone.sh diagnostic
-```
-
-### WWW development
-
-```bash
-./dialtone.sh www dev
-./dialtone.sh www build
-./dialtone.sh www publish
-```
-
-### Workflows and docs
-- `docs/workflows/issue_review.md`
-- `docs/workflows/ticket.md`
-- `docs/workflows/subtask_expand.md`
+### Learn more
+- `DOCUMENTAION.md`: technical CLI user manual (commands and examples).
+- `WORKFLOWS.md`: how ticket execution works (task graph, tests, and validation).
 
