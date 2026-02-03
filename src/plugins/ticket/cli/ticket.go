@@ -44,6 +44,8 @@ func Run(args []string) {
 		RunStart(subArgs)
 	case "review":
 		RunReview(subArgs)
+	case "reviewed":
+		RunReviewed(subArgs)
 	case "ask":
 		RunAsk(subArgs)
 	case "log":
@@ -91,6 +93,7 @@ func printUsage() {
 	fmt.Println("Commands:")
 	fmt.Println("  start <name>       Start a new ticket and create branch")
 	fmt.Println("  review <name>      Review ticket DB/subtasks only (no tests/logs/code)")
+	fmt.Println("  reviewed <name>    Mark ticket reviewed (after checklist validation)")
 	fmt.Println("  add <name>         Add a new ticket without starting it")
 	fmt.Println("  list               List all tickets")
 	fmt.Println("  next               Mark current subtask done and move to next")
@@ -138,10 +141,10 @@ func RunAdd(args []string) {
 		if !errors.Is(err, ErrTicketNotFound) {
 			logFatal("Could not load ticket %s: %v", name, err)
 		}
-		// Default: allow "init" to run without manual ticket DB edits.
-		// For `www-*` tickets, the expected baseline verification is:
+		// Default: ensure every subtask has a test command.
+		// For `www-*` tickets, the expected baseline verification is typically:
 		// `./dialtone.sh plugin test www`
-		initTestCmd := ""
+		initTestCmd := "./dialtone.sh ticket test " + name + " --subtask init"
 		if strings.HasPrefix(name, "www-") {
 			initTestCmd = "./dialtone.sh plugin test www"
 		}
@@ -328,10 +331,9 @@ func RunReview(args []string) {
 		}
 	}
 
-	// Mark ticket state as reviewed (prep complete).
-	// This is intentionally non-blocking: review mode does not demand tests/logs/code changes.
+	// Enter in-progress review state; completion is done via `ticket reviewed`.
 	if ticket.State != "done" {
-		ticket.State = "reviewed"
+		ticket.State = "review"
 		_ = SaveTicket(ticket)
 	}
 
@@ -358,6 +360,101 @@ func RunReview(args []string) {
 	)
 }
 
+func RunReviewed(args []string) {
+	name := ""
+	if len(args) > 0 {
+		name = args[0]
+	} else if cur, err := GetCurrentTicketID(); err == nil {
+		name = cur
+	}
+	if strings.TrimSpace(name) == "" {
+		logFatal("Usage: ./dialtone.sh ticket reviewed <ticket-name>")
+	}
+
+	ticket, err := GetTicket(name)
+	if err != nil {
+		logFatal("Could not load ticket %s: %v", name, err)
+	}
+
+	// Strict readiness validation: each subtask should have a description and test-command,
+	// and dependencies must reference existing subtasks.
+	nameSet := map[string]bool{}
+	for _, st := range ticket.Subtasks {
+		n := strings.TrimSpace(st.Name)
+		if n != "" {
+			nameSet[n] = true
+		}
+	}
+
+	var problems []string
+	if len(ticket.Subtasks) == 0 {
+		problems = append(problems, "ticket has 0 subtasks")
+	}
+	for _, st := range ticket.Subtasks {
+		stName := strings.TrimSpace(st.Name)
+		if stName == "" {
+			problems = append(problems, "subtask has empty name")
+			continue
+		}
+		if strings.TrimSpace(st.Description) == "" {
+			problems = append(problems, fmt.Sprintf("subtask %s has empty description", stName))
+		}
+		if strings.TrimSpace(st.TestCommand) == "" {
+			problems = append(problems, fmt.Sprintf("subtask %s has empty test-command", stName))
+		}
+		for _, d := range st.Dependencies {
+			dep := strings.TrimSpace(d)
+			if dep == "" {
+				continue
+			}
+			if !nameSet[dep] {
+				problems = append(problems, fmt.Sprintf("subtask %s depends on unknown subtask %s", stName, dep))
+			}
+		}
+	}
+
+	if len(problems) > 0 {
+		printDialtone(
+			[]string{
+				fmt.Sprintf("ticket: %s", ticket.ID),
+				"blocker: ticket review is not complete",
+				"state: review",
+			},
+			"Fix the following issues before marking reviewed:\n- "+strings.Join(problems, "\n- "),
+			[]string{
+				"./dialtone.sh ticket review " + ticket.ID,
+				"./dialtone.sh ticket subtask add <name> --desc \"...\"",
+				"./dialtone.sh ticket subtask testcmd <subtask> <command...>",
+				"./dialtone.sh ticket reviewed " + ticket.ID,
+			},
+		)
+		return
+	}
+
+	now := time.Now().Format(time.RFC3339)
+	for i := range ticket.Subtasks {
+		ticket.Subtasks[i].ReviewedTimestamp = now
+	}
+	ticket.State = "reviewed"
+	if err := SaveTicket(ticket); err != nil {
+		logFatal("Could not mark ticket reviewed: %v", err)
+	}
+	logTicketCommand(ticket.ID, "reviewed", args)
+	logInfo("Ticket %s marked as reviewed", ticket.ID)
+
+	printDialtone(
+		[]string{
+			fmt.Sprintf("ticket: %s", ticket.ID),
+			"state: reviewed",
+			"next: start execution when ready",
+		},
+		"Review is complete.\n\nWhen you’re ready to execute work, run:\n- `./dialtone.sh ticket start <ticket>`",
+		[]string{
+			"./dialtone.sh ticket start " + ticket.ID,
+		},
+	)
+}
+
 func RunAck(args []string) {
 	ticket, err := GetCurrentTicket()
 	if err != nil {
@@ -374,8 +471,12 @@ func RunAck(args []string) {
 	if GetCurrentTicketMode() == "start" {
 		ticket.State = "started"
 	} else {
-		// Default to reviewed when acking in review mode.
-		ticket.State = "reviewed"
+		// In review mode, return to in-progress review unless explicitly marked reviewed.
+		if ticket.State == "reviewed" {
+			// keep
+		} else {
+			ticket.State = "review"
+		}
 	}
 	_ = SaveTicket(ticket)
 	logInfo("Messages acknowledged for ticket %s", ticket.ID)
