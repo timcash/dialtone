@@ -6,7 +6,7 @@ Standardized (v2) structure:
 ```shell
 src/tickets/
 └── <ticket-id>/
-    ├── agent_summary.md    # Deleted after ingestion
+    ├── <subtask>-summary.md  # One persistent summary file per subtask
     └── test/
         └── test.go         # TDD registry & subtask logic
     └── <ticket-id>.duckdb  # Per-ticket storage (DuckDB)
@@ -16,11 +16,12 @@ src/tickets/
 Ticket CLI examples:
 ```shell
 ./dialtone.sh ticket start <name>    # Initialize a new ticket and git branch
+./dialtone.sh ticket review <name>   # Review mode: planning/readiness questions (no tests/logs/done)
 ./dialtone.sh ticket next            # Main TDD driver; runs tests and blocks on questions
-./dialtone.sh ticket done            # Finalize ticket; requires agent_summary.md
+./dialtone.sh ticket done            # Finalize ticket; requires summaries to be up to date
 
 ./dialtone.sh ticket summary         # List all agent summaries for current ticket
-./dialtone.sh ticket summary update  # Ingest agent_summary.md (deleted on success)
+./dialtone.sh ticket summary update  # Sync <subtask>-summary.md into DuckDB (no deletion)
 ./dialtone.sh ticket summary --idle   # Reset 10m timer for idle periods
 ./dialtone.sh ticket search <query>  # Search through historical agent summaries
 
@@ -47,13 +48,34 @@ Ticket CLI examples:
 ./dialtone.sh ticket start feature-name
 ```
 
+## STEP 1b. Review a ticket (prep-only)
+```shell
+# Review a ticket without starting execution:
+# - checks ticket DB/subtasks are well-formed
+# - asks readiness questions for the ticket + each subtask
+# - does NOT suggest tests/logs or marking subtasks done
+./dialtone.sh ticket review feature-name
+
+# Re-run the review iteration (same questions) at any time:
+./dialtone.sh ticket next
+```
+
+## Ticket state
+Tickets have a `state` field in DuckDB:
+
+- `new`: created but not reviewed
+- `reviewed`: reviewed and ready to start later
+- `started`: execution has begun
+- `blocked`: waiting on a question/acknowledgement or missing planning info
+- `done`: finalized
+
 ## STEP 2. Iterative Development (TDD)
 ```shell
 # Run the TDD drive. It will promote tasks to 'progress' and run tests.
 ./dialtone.sh ticket next
 
 # If blocked by 10m summary window:
-# 1. Update src/tickets/<name>/agent_summary.md
+# 1. Update src/tickets/<name>/<subtask>-summary.md
 # 2. Run:
 ./dialtone.sh ticket summary update
 ```
@@ -78,7 +100,7 @@ type Ticket struct {
 	ID               string    `json:"id"`
 	Name             string    `json:"name"`
 	Description      string    `json:"description"`
-	Status           string    `json:"status"`
+	State            string    `json:"state"`              // new, reviewed, started, blocked, done
 	AgentSummary     string    `json:"agent_summary"`      // Consolidated history
 	StartTime        string    `json:"start_time"`         // ISO8601
 	LastSummaryTime  string    `json:"last_summary_time"`  // ISO8601

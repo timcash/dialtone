@@ -21,6 +21,15 @@ This workflow defines the standard process for planning, executing, and managing
 ./dialtone.sh plugin install <plugin-name>
 ```
 
+## 1b. REVIEW MODE: Prep-only ticket review
+
+```bash
+# Review a ticket without starting execution:
+# - focuses on ticket DB/subtasks being well-formed
+# - does NOT demand running tests, changing code, or reviewing logs
+./dialtone.sh ticket review <ticket-name>
+```
+
 ## 2. REVIEW: Scope and Context
 
 ```bash

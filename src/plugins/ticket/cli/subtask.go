@@ -122,6 +122,30 @@ func RunNext(args []string) {
 
 	logTicketCommand(ticketID, "next", args)
 
+	// Mode gate: `next` is only allowed in `start` mode.
+	if GetCurrentTicketMode() == "review" {
+		// Review iteration (no tests/logs/done suggestions).
+		PrintTicketReport(ticket)
+		printReviewIteration(ticket)
+		printDialtone(
+			[]string{
+				fmt.Sprintf("ticket: %s", ticketID),
+				"mode: review (prep-only)",
+				fmt.Sprintf("state: %s", ticket.State),
+				"policy: do not suggest tests/log review or marking subtasks done",
+			},
+			"Review questions (ticket + each subtask):\n1. is the goal aligned with subtasks\n2. should there be more subtasks\n3. are any subtasks too large\n4. is there work that should be put into a different ticket because it is not relevant\n5. does this ticket create a new plugin\n6. does this ticket have a update documentation subtask\n7. does this subtask have the correct test-command",
+			[]string{
+				"./dialtone.sh ticket review " + ticketID,
+				"./dialtone.sh ticket validate " + ticketID,
+				"./dialtone.sh ticket subtask add <name> --desc \"...\"",
+				"./dialtone.sh ticket subtask testcmd <subtask> <command...>",
+				"./dialtone.sh ticket start " + ticketID,
+			},
+		)
+		return
+	}
+
 	// V2: Check for unacknowledged questions
 	entries, err := GetLogEntries(ticketID)
 	if err == nil {
@@ -136,6 +160,9 @@ func RunNext(args []string) {
 			}
 		}
 		if lastQuestion != "" && lastAckTime == "" {
+			// Persist blocked state.
+			ticket.State = "blocked"
+			_ = SaveTicket(ticket)
 			fmt.Printf("[BLOCK] Cannot proceed to 'next' subtask.\n")
 			fmt.Printf("[MESSAGE] A question is pending response or acknowledgement: \"%s\"\n", lastQuestion)
 			fmt.Printf("[ACTION] Please acknowledge to continue: ./dialtone.sh ticket ack\n")
@@ -155,13 +182,27 @@ func RunNext(args []string) {
 		lastTime, err := time.Parse(time.RFC3339, ticket.LastSummaryTime)
 		if err == nil {
 			if time.Since(lastTime) > 10*time.Minute {
+				// Prefer the in-progress subtask's summary file.
+				active := ""
+				activePath := ""
+				st := FindNextSubtask(ticket)
+				if st != nil && st.Status == "progress" {
+					active = st.Name
+					activePath = subtaskSummaryPath(ticket.ID, active)
+				}
 				fmt.Printf("[BLOCK] 10-minute activity window exceeded.\n")
 				fmt.Printf("[MESSAGE] Please provide a summary of work or use --idle.\n")
-				fmt.Printf("[EXAMPLE] Recommended format for agent_summary.md:\n\n")
-				fmt.Printf("## Ran commands to find source files\n")
-				fmt.Printf("1. searched with grep - result nothing\n")
-				fmt.Printf("2. searched with `./dialtone.sh ticket search \"vertex node\"` - 2 results\n\n")
-				fmt.Printf("[ACTION] Update agent_summary.md and run: ./dialtone.sh ticket summary update\n")
+				if activePath != "" {
+					fmt.Printf("[FILE] Update: %s\n", activePath)
+				}
+				fmt.Printf("[EXAMPLE] Suggested format for <subtask>-summary.md:\n\n")
+				fmt.Printf("## What changed\n- ...\n\n## Commands / verification\n- ...\n\n## Notes\n- ...\n\n")
+				fmt.Printf("[ACTION] Update the summary file%s and run: ./dialtone.sh ticket summary update\n", func() string {
+					if active != "" {
+						return " for subtask `" + active + "`"
+					}
+					return ""
+				}())
 				return
 			}
 		}
@@ -187,6 +228,11 @@ func RunNext(args []string) {
 		if err := SaveTicket(ticket); err != nil {
 			logFatal("Could not update ticket %s: %v", ticketID, err)
 		}
+	}
+
+	// Ensure the per-subtask summary file exists for the active subtask.
+	if _, err := ensureSubtaskSummaryFile(ticketID, st.Name); err != nil {
+		logFatal("Could not create summary file for %s: %v", st.Name, err)
 	}
 
 	logInfo("Executing test for subtask: %s", st.Name)
@@ -331,6 +377,45 @@ func RunSubtaskDone(args []string) {
 
 	logSubtaskCommand("done", args)
 
+	// Mode gate: `subtask done` is only allowed in `start` mode.
+	if GetCurrentTicketMode() == "review" {
+		printDialtone(
+			[]string{
+				fmt.Sprintf("ticket: %s", name),
+				fmt.Sprintf("subtask: %s", subtask),
+				"mode: review (prep-only)",
+				"blocker: cannot mark subtasks done in review mode",
+			},
+			"Switch to execution mode first:\n- `./dialtone.sh ticket start <ticket>`\n\nThen complete verification and mark the subtask done.",
+			[]string{
+				"./dialtone.sh ticket start " + name,
+				"./dialtone.sh ticket subtask done " + name + " " + subtask,
+			},
+		)
+		return
+	}
+
+	// Require a non-empty per-subtask summary before allowing "done".
+	content, path, err := readSubtaskSummary(name, subtask)
+	if err != nil {
+		logFatal("Could not read subtask summary: %v", err)
+	}
+	if strings.TrimSpace(content) == "" {
+		printDialtone(
+			[]string{
+				fmt.Sprintf("ticket: %s", name),
+				fmt.Sprintf("blocker: missing required subtask summary for `%s`", subtask),
+				"policy: summaries are per-subtask and persistent",
+			},
+			fmt.Sprintf("Update the subtask summary file:\n- %s\n\nThen run `./dialtone.sh ticket summary update` and retry `ticket subtask done`.", path),
+			[]string{
+				"./dialtone.sh ticket summary update",
+				"./dialtone.sh ticket subtask done " + name + " " + subtask,
+			},
+		)
+		return
+	}
+
 	ticket, err := GetTicket(name)
 	if err != nil {
 		logFatal("Error: %v", err)
@@ -351,7 +436,7 @@ func RunSubtaskDone(args []string) {
 			fmt.Sprintf("ticket: %s", name),
 			fmt.Sprintf("subtask: %s", subtask),
 			"record: subtask status marked done (manual verification assumed)",
-			"next: submit agent summary and prepare a git commit",
+			"next: sync subtask summary and prepare a git commit",
 		},
 		"Please confirm:\n- You ran the subtask tests and they passed\n- You reviewed logs and found no ERROR/EXCEPTION\n- Tests cleaned up any resources they created\n\nThen submit a summary and create a commit.",
 		[]string{

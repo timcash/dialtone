@@ -12,6 +12,7 @@ type Subtask struct {
 	TestConditions []TestCondition `json:"test_conditions"`
 	TestCommand    string          `json:"test_command,omitempty"`
 	AgentNotes     string          `json:"agent_notes,omitempty"`
+	ReviewedTimestamp string       `json:"reviewed_timestamp,omitempty"`
 	PassTimestamp  string          `json:"pass_timestamp,omitempty"`
 	FailTimestamp  string          `json:"fail_timestamp,omitempty"`
 	Status         string          `json:"status"` // todo, progress, done, failed, skipped
@@ -22,6 +23,7 @@ type Ticket struct {
 	Name            string    `json:"name"`
 	Tags            []string  `json:"tags,omitempty"`
 	Description     string    `json:"description"`
+	State           string    `json:"state,omitempty"` // new, review, reviewed, started, blocked, done
 	Subtasks        []Subtask `json:"subtasks"`
 	AgentSummary    string    `json:"agent_summary,omitempty"`
 	StartTime       string    `json:"start_time,omitempty"`

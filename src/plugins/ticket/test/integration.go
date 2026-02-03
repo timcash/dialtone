@@ -49,9 +49,20 @@ func TestFullWorkflow() error {
 	cleanupTicket(name)
 	defer cleanupTicket(name)
 
+	// --- STEP 0: Review Mode Iteration ---
+	fmt.Println("\n--- STEP 0: Review Mode Iteration ---")
+	output := runCmd("./dialtone.sh", "ticket", "review", name)
+	if !strings.Contains(output, "mode: review") {
+		return fmt.Errorf("expected review mode output")
+	}
+	output = runCmd("./dialtone.sh", "ticket", "next")
+	if !strings.Contains(output, "mode: review") || !strings.Contains(output, "ticket start") {
+		return fmt.Errorf("expected `next` to be blocked in review mode")
+	}
+
 	// --- STEP 1: Starting Ticket ---
 	fmt.Println("\n--- STEP 1: Starting Ticket ---")
-	output := runCmd("./dialtone.sh", "ticket", "start", name)
+	output = runCmd("./dialtone.sh", "ticket", "start", name)
 	if !strings.Contains(output, "Ticket "+name+" started successfully") {
 		return fmt.Errorf("failed to start ticket")
 	}
@@ -120,20 +131,20 @@ func init() {
 
 	// --- STEP 6: Summary Ingestion ---
 	fmt.Println("\n--- STEP 6: Summary Ingestion ---")
-	summaryPath := filepath.Join(dir, "agent_summary.md")
-	os.WriteFile(summaryPath, []byte("Started implementation. Verified DuckDB schema."), 0644)
+	summaryPath := filepath.Join(dir, "init-summary.md")
+	os.WriteFile(summaryPath, []byte("## What changed\n- Started implementation.\n\n## Commands / verification\n- Verified DuckDB schema.\n"), 0644)
 	runCmd("./dialtone.sh", "ticket", "summary", "update")
 
-	if _, err := os.Stat(summaryPath); !os.IsNotExist(err) {
-		return fmt.Errorf("agent_summary.md should have been deleted")
+	if _, err := os.Stat(summaryPath); err != nil {
+		return fmt.Errorf("expected init-summary.md to remain (no deletion)")
 	}
 
-	// --- STEP 7: SHA256 Block ---
-	fmt.Println("\n--- STEP 7: SHA256 Block ---")
-	os.WriteFile(summaryPath, []byte("Started implementation. Verified DuckDB schema."), 0644)
+	// --- STEP 7: Idempotent Sync ---
+	fmt.Println("\n--- STEP 7: Idempotent Sync ---")
+	// Running summary update twice with unchanged content should not fail.
 	output = runCmd("./dialtone.sh", "ticket", "summary", "update")
-	if !strings.Contains(output, "content has not changed") {
-		return fmt.Errorf("expected SHA256 block")
+	if strings.Contains(output, "FATAL") {
+		return fmt.Errorf("expected summary update to be idempotent (no fatal)")
 	}
 
 	// --- STEP 8: 10-Minute Timeout ---
@@ -156,7 +167,7 @@ func init() {
 
 	// --- STEP 9: Summary Guidance ---
 	fmt.Println("\n--- STEP 9: Summary Guidance ---")
-	if !strings.Contains(output, "[EXAMPLE]") || !strings.Contains(output, "searched with grep") {
+	if !strings.Contains(output, "[EXAMPLE]") || !strings.Contains(output, "Suggested format") {
 		return fmt.Errorf("expected guidance example in block message")
 	}
 
@@ -176,7 +187,6 @@ func init() {
 
 	// --- STEP 12: Completion ---
 	fmt.Println("\n--- STEP 12: Completion ---")
-	os.WriteFile(summaryPath, []byte("Feature finished successfully."), 0644)
 	output = runCmd("./dialtone.sh", "ticket", "done")
 	if !strings.Contains(output, "completed") {
 		return fmt.Errorf("failed to complete ticket")
@@ -257,6 +267,11 @@ func cleanupTicket(name string) {
 	db.Exec(`DELETE FROM tickets WHERE id = ?`, name)
 	db.Exec(`DELETE FROM ticket_meta WHERE key = 'current_ticket' AND value = ?`, name)
 	os.RemoveAll(filepath.Join(ticketV2Dir, name))
+
+	// Cleanup local git branch created by ticket start/review/add.
+	// Best-effort: return to main and delete the branch if it exists.
+	exec.Command("git", "checkout", "main").Run()
+	exec.Command("git", "branch", "-D", name).Run()
 }
 
 func runCmd(name string, args ...string) string {

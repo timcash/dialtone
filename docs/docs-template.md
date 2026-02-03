@@ -31,6 +31,9 @@ Ticket API examples:
 
 ## STEP 2. Review the ticket
 ```shell
+# Prep-only review mode (does not demand tests/logs/code changes)
+./dialtone.sh ticket review fake-ticket
+
 # Read the ticket.md and any linked documentation or READMEs.
 # Plugin Decision: Determine if the feature should be a standalone plugin.
 # Identify core dependencies and affected components.

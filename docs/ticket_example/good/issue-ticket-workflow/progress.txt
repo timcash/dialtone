@@ -1,1 +1,0 @@
-[2026-01-26 21:14] Established high-fidelity ticketing standard. Updated docs/ticket-template.md and embedded a concrete bridge example in docs/workflows/issue_review.md based on issue #104. All systems are now optimized for bridging high-level GitHub goals to atomic, testable local tickets.
