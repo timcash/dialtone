@@ -29,8 +29,9 @@ env/.env
 # logs
 *.log
 
-# Local ticket database
-src/tickets/tickets.duckdb
+# Local ticket databases (per-ticket)
+src/tickets/.current_ticket
+src/tickets/**/*.duckdb
 
 # Local Dependencies
 dialtone_dependencies/

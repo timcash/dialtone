@@ -9,7 +9,7 @@ import (
 func RunSubtask(args []string) {
 	if len(args) < 1 {
 		fmt.Println("Usage: ./dialtone.sh ticket subtask <command> [args]")
-		fmt.Println("Commands: add, list, status, done, failed, note, test")
+		fmt.Println("Commands: add, list, status, done, failed, note, test, testcmd")
 		return
 	}
 
@@ -27,6 +27,8 @@ func RunSubtask(args []string) {
 	case "test":
 		logSubtaskCommand(command, cmdArgs)
 		RunSubtaskTestCmd(cmdArgs)
+	case "testcmd":
+		RunSubtaskTestCmdSet(cmdArgs)
 	case "done":
 		RunSubtaskDone(cmdArgs)
 	case "failed":
@@ -46,6 +48,42 @@ func RunSubtask(args []string) {
 	default:
 		logInfo("Unknown subtask command: %s", command)
 	}
+}
+
+func RunSubtaskTestCmdSet(args []string) {
+	if len(args) < 2 {
+		logFatal("Usage: ./dialtone.sh ticket subtask testcmd <subtask-name> <test-command...>")
+	}
+
+	subtaskName := args[0]
+	testCommand := strings.TrimSpace(strings.Join(args[1:], " "))
+	if testCommand == "" {
+		logFatal("Test command cannot be empty")
+	}
+
+	ticket, err := GetCurrentTicket()
+	if err != nil {
+		logFatal("Error getting current ticket: %v", err)
+	}
+
+	found := false
+	for i := range ticket.Subtasks {
+		if ticket.Subtasks[i].Name == subtaskName {
+			ticket.Subtasks[i].TestCommand = testCommand
+			found = true
+			break
+		}
+	}
+	if !found {
+		logFatal("Subtask not found: %s", subtaskName)
+	}
+
+	if err := SaveTicket(ticket); err != nil {
+		logFatal("Could not save ticket: %v", err)
+	}
+
+	logSubtaskCommand("testcmd", append([]string{subtaskName}, args[1:]...))
+	logInfo("Set test command for subtask %s", subtaskName)
 }
 
 func RunSubtaskList(args []string) {

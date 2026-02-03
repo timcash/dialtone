@@ -2,6 +2,7 @@ package test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -47,7 +48,7 @@ func RunWwwIntegration() error {
 	fmt.Println(">> [WWW] Cleaning up existing processes...")
 	browser.CleanupPort(5173) // Dev server port
 	browser.CleanupPort(8081) // CAD Proxy port
-	
+
 	// Use our new CLI for safe cleanup (defaults to Dialtone origin)
 	_ = exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
 
@@ -78,7 +79,7 @@ func RunWwwIntegration() error {
 	// Launch via CLI to get the signature and origin detection
 	// Force GPU for faster rendering in tests
 	args := []string{"chrome", "new", "--gpu"}
-	
+
 	launchCmd := exec.Command("./dialtone.sh", args...)
 	output, err := launchCmd.CombinedOutput()
 	if err != nil {
@@ -106,11 +107,36 @@ func RunWwwIntegration() error {
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
 		case *runtime.EventConsoleAPICalled:
+			parts := make([]string, 0, len(ev.Args))
 			for _, arg := range ev.Args {
-				consoleLogs = append(consoleLogs, fmt.Sprintf("[%s] %s", ev.Type, arg.Value))
+				parts = append(parts, formatRemoteObject(arg))
 			}
+			line := fmt.Sprintf("[%s] %s", ev.Type, strings.Join(parts, " "))
+			if ev.StackTrace != nil && len(ev.StackTrace.CallFrames) > 0 {
+				f := ev.StackTrace.CallFrames[0]
+				// Avoid noisy internal frames if URL is empty
+				if f.URL != "" {
+					line = fmt.Sprintf("%s (%s:%d:%d)", line, f.URL, f.LineNumber+1, f.ColumnNumber+1)
+				}
+			}
+			consoleLogs = append(consoleLogs, line)
 		case *runtime.EventExceptionThrown:
-			consoleLogs = append(consoleLogs, fmt.Sprintf("[EXCEPTION] %s", ev.ExceptionDetails.Text))
+			d := ev.ExceptionDetails
+			ex := d.Text
+			if d.Exception != nil {
+				exObj := formatRemoteObject(d.Exception)
+				if strings.TrimSpace(exObj) != "" {
+					ex = ex + " | " + exObj
+				}
+			}
+			line := fmt.Sprintf("[EXCEPTION] %s", ex)
+			if d.StackTrace != nil && len(d.StackTrace.CallFrames) > 0 {
+				f := d.StackTrace.CallFrames[0]
+				if f.URL != "" {
+					line = fmt.Sprintf("%s (%s:%d:%d)", line, f.URL, f.LineNumber+1, f.ColumnNumber+1)
+				}
+			}
+			consoleLogs = append(consoleLogs, line)
 		}
 	})
 
@@ -132,7 +158,7 @@ func RunWwwIntegration() error {
 	// Final verification: No Dialtone processes leaked
 	fmt.Println(">> [WWW] Verifying no leaked Dialtone processes...")
 	_ = exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
-	
+
 	// Double check with list
 	listCmd := exec.Command("./dialtone.sh", "chrome", "list")
 	listOutput, _ := listCmd.CombinedOutput()
@@ -145,11 +171,42 @@ func RunWwwIntegration() error {
 	return nil
 }
 
+func formatRemoteObject(o *runtime.RemoteObject) string {
+	if o == nil {
+		return ""
+	}
+
+	// Prefer JSON-ish values if present
+	if len(o.Value) > 0 {
+		// Keep as a single-line JSON-ish string for logs
+		var v interface{}
+		if err := json.Unmarshal(o.Value, &v); err == nil {
+			b, err := json.Marshal(v)
+			if err == nil {
+				return string(b)
+			}
+		}
+		// Fall back to raw bytes if not JSON
+		return string(o.Value)
+	}
+
+	if o.UnserializableValue != "" {
+		return string(o.UnserializableValue)
+	}
+	if o.Description != "" {
+		return o.Description
+	}
+	if o.Type != "" {
+		return string(o.Type)
+	}
+	return ""
+}
+
 // printConsoleLogs prints collected browser console logs and returns error if critical failures found
 func printConsoleLogs(logs []string) error {
 	fmt.Println("\n>> [WWW] Browser Console Logs:")
 	fmt.Println("   ----------------------------------------")
-	
+
 	if len(logs) == 0 {
 		fmt.Println("   (no console output)")
 		return nil
@@ -157,10 +214,10 @@ func printConsoleLogs(logs []string) error {
 
 	var filtered []string
 	for _, log := range logs {
-		if strings.HasPrefix(log, "[log] \"color:") || 
-		   strings.HasPrefix(log, "[debug] \"color:") ||
-		   strings.Contains(log, "font-weight:") ||
-		   strings.Contains(log, "font-size:") {
+		if strings.HasPrefix(log, "[log] \"color:") ||
+			strings.HasPrefix(log, "[debug] \"color:") ||
+			strings.Contains(log, "font-weight:") ||
+			strings.Contains(log, "font-size:") {
 			continue
 		}
 		filtered = append(filtered, log)
@@ -169,7 +226,7 @@ func printConsoleLogs(logs []string) error {
 	for _, log := range filtered {
 		fmt.Printf("   %s\n", log)
 	}
-	
+
 	hasErrors := false
 	for _, log := range logs {
 		if strings.Contains(log, "[error]") || strings.Contains(log, "[EXCEPTION]") {
@@ -177,7 +234,7 @@ func printConsoleLogs(logs []string) error {
 			break
 		}
 	}
-	
+
 	fmt.Println("   ----------------------------------------")
 	if hasErrors {
 		fmt.Println("   [FAIL] Console errors or exceptions detected!")
@@ -202,7 +259,7 @@ func verifyHomePage(ctx context.Context) error {
 	// 1. Initial Page Load & Home Section
 	var title string
 	isLive := os.Getenv("CAD_LIVE") == "true"
-	
+
 	injectLiveFlag := chromedp.ActionFunc(func(ctx context.Context) error {
 		if isLive {
 			return chromedp.Evaluate(`window.CAD_LIVE = true`, nil).Do(ctx)
@@ -275,7 +332,7 @@ func verifyHomePage(ctx context.Context) error {
 
 	for i, s := range sections {
 		fmt.Printf("   [%d/%d] Verifying section: %s\n", i+1, len(sections), s.id)
-		
+
 		var headline string
 		var exists bool
 		var isVisible bool
@@ -355,7 +412,7 @@ func RunWwwCadHeaded() error {
 	if isLive {
 		browser.CleanupPort(8081) // CAD port
 	}
-	
+
 	// Use our new CLI for safe cleanup
 	_ = exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
 	time.Sleep(1 * time.Second)
@@ -400,7 +457,7 @@ func RunWwwCadHeaded() error {
 	}
 
 	fmt.Println(">> [WWW] Launching Chrome via CLI...")
-	
+
 	args := []string{"chrome", "new", "--gpu"}
 	if headless {
 		args = append(args, "--headless")
@@ -444,7 +501,7 @@ func RunWwwCadHeaded() error {
 	})
 
 	fmt.Printf(">> [WWW] Launching Chrome (Headless: %v) and navigating to CAD section...\n", headless)
-	
+
 	injectLiveFlag := chromedp.ActionFunc(func(ctx context.Context) error {
 		if isLive {
 			return chromedp.Evaluate(`window.CAD_LIVE = true`, nil).Do(ctx)
@@ -526,11 +583,11 @@ func RunWwwCadHeaded() error {
 	}
 
 	fmt.Println(">> [WWW] CAD Verification Complete.")
-	
+
 	// Final verification: No Dialtone processes leaked
 	fmt.Println(">> [WWW] Verifying no leaked Dialtone processes...")
 	_ = exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
-	
+
 	listCmd := exec.Command("./dialtone.sh", "chrome", "list")
 	listOutput, _ := listCmd.CombinedOutput()
 	if strings.Contains(string(listOutput), "Dialtone") {

@@ -81,7 +81,28 @@ func logInfo(format string, a ...interface{}) {
 	fmt.Printf("[ticket] "+format+"\n", a...)
 }
 
+func logWarn(format string, a ...interface{}) {
+	fmt.Printf("[ticket] WARN: "+format+"\n", a...)
+}
+
+func isDuckDBLockError(message string) bool {
+	// DuckDB single-writer / process lock error signature
+	// Example:
+	// duckdb error: IO Error: Could not set lock on file "src/tickets/tickets.duckdb": Conflicting lock is held in ...
+	return strings.Contains(message, "duckdb error: IO Error: Could not set lock on file") ||
+		strings.Contains(message, "Conflicting lock is held")
+}
+
 func logFatal(format string, a ...interface{}) {
-	fmt.Printf("[ticket] FATAL: "+format+"\n", a...)
+	msg := fmt.Sprintf(format, a...)
+	if isDuckDBLockError(msg) {
+		logWarn("Ticket database is busy (DuckDB file lock).")
+		logWarn("This usually happens if multiple `./dialtone.sh ticket ...` commands run at once, or a previous ticket command is still running.")
+		logWarn("Fix: wait a moment and re-run; avoid running ticket commands in parallel; if needed, set `TICKET_DB_PATH` to an isolated DB file.")
+		logWarn("Details: %s", msg)
+		os.Exit(1)
+	}
+
+	fmt.Printf("[ticket] FATAL: %s\n", msg)
 	os.Exit(1)
 }

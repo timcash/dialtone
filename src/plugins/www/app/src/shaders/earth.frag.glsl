@@ -47,8 +47,13 @@ float snoise(vec3 v) {
 varying vec3 vPosition;
 varying vec3 vNormal;
 uniform vec3 uSunDir;
+uniform vec3 uSunColor;
 uniform vec3 uKeyDir;
+uniform vec3 uKeyColor;
+uniform vec3 uKeyDir2;
+uniform vec3 uKey2Color;
 uniform float uKeyIntensity;
+uniform float uKeyIntensity2;
 uniform float uSunIntensity;
 uniform float uAmbientIntensity;
 uniform float uColorScale;
@@ -71,11 +76,17 @@ void main() {
 
     vec3 sunDir = normalize(uSunDir);
     vec3 keyDir = normalize(uKeyDir);
+    vec3 keyDir2 = normalize(uKeyDir2);
     float diffuseSun = max(dot(vNormal, sunDir), 0.0);
     float diffuseKey = max(dot(vNormal, keyDir), 0.0);
+    float diffuseKey2 = max(dot(vNormal, keyDir2), 0.0);
     float ambientFactor = clamp(1.0 - uAmbientIntensity, 0.0, 1.0);
     float boostedDiffuse = mix(diffuseKey, pow(diffuseKey, 0.65), ambientFactor);
+    float boostedDiffuse2 = mix(diffuseKey2, pow(diffuseKey2, 0.65), ambientFactor);
     float sunTerm = pow(diffuseSun, 1.8) * uSunIntensity;
-    float light = uAmbientIntensity + boostedDiffuse * uKeyIntensity + sunTerm;
+
+    float key1 = boostedDiffuse * uKeyIntensity;
+    float key2 = boostedDiffuse2 * uKeyIntensity2;
+    vec3 light = vec3(uAmbientIntensity) + uSunColor * sunTerm + uKeyColor * key1 + uKey2Color * key2;
     gl_FragColor = vec4(color * light * uColorScale, 1.0);
 }

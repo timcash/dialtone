@@ -134,6 +134,13 @@ func RunAdd(args []string) {
 		if !errors.Is(err, ErrTicketNotFound) {
 			logFatal("Could not load ticket %s: %v", name, err)
 		}
+		// Default: allow "init" to run without manual ticket DB edits.
+		// For `www-*` tickets, the expected baseline verification is:
+		// `./dialtone.sh plugin test www`
+		initTestCmd := ""
+		if strings.HasPrefix(name, "www-") {
+			initTestCmd = "./dialtone.sh plugin test www"
+		}
 		ticket := &Ticket{
 			ID:          name,
 			Name:        name,
@@ -142,6 +149,7 @@ func RunAdd(args []string) {
 				{
 					Name:        "init",
 					Description: "Initialization",
+					TestCommand: initTestCmd,
 					Status:      "todo",
 				},
 			},
@@ -149,7 +157,7 @@ func RunAdd(args []string) {
 		if err := SaveTicket(ticket); err != nil {
 			logFatal("Could not create ticket %s: %v", name, err)
 		}
-		logInfo("Created %s", ticketDBPath())
+		logInfo("Created %s", ticketDBPathFor(name))
 	}
 	if err := SetCurrentTicket(name); err != nil {
 		logFatal("Could not set current ticket %s: %v", name, err)
@@ -280,7 +288,7 @@ func appendTicketLogEntry(ticketID, entryType, message, subtask string) {
 	if err := AppendTicketLogEntry(ticketID, entryType, message, subtask); err != nil {
 		logFatal("Could not write log for %s: %v", ticketID, err)
 	}
-	logInfo("Captured %s in %s", entryType, ticketDBPath())
+	logInfo("Captured %s in %s", entryType, ticketDBPathFor(ticketID))
 }
 
 func logTicketCommand(ticketID, command string, args []string) {
@@ -383,7 +391,7 @@ func RunDone(args []string) {
 	logTicketCommand(ticket.ID, "done", args)
 
 	// Backup DB to the ticket folder
-	dbPath := ticketDBPath()
+	dbPath := ticketDBPathFor(ticket.ID)
 	backupPath := filepath.Join("src", "tickets", ticket.ID, "tickets_backup.duckdb")
 	if err := backupFile(dbPath, backupPath); err != nil {
 		logFatal("Could not backup database: %v", err)

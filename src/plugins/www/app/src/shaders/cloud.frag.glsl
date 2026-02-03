@@ -1,9 +1,14 @@
 uniform float uOpacity; // Added uniform
 uniform float uTime;
 uniform vec3 uSunDir;
+uniform vec3 uSunColor;
 uniform vec3 uKeyDir;
+uniform vec3 uKeyColor;
+uniform vec3 uKeyDir2;
+uniform vec3 uKey2Color;
 uniform float uSunIntensity;
 uniform float uKeyIntensity;
+uniform float uKeyIntensity2;
 uniform float uAmbientIntensity;
 uniform vec3 uTint;
 uniform float uColorScale;
@@ -89,12 +94,17 @@ void main() {
 
     vec3 sunDir = normalize(uSunDir);
     vec3 keyDir = normalize(uKeyDir);
+    vec3 keyDir2 = normalize(uKeyDir2);
     float diffuseSun = max(dot(vNormal, sunDir), 0.0);
     float diffuseKey = max(dot(vNormal, keyDir), 0.0);
+    float diffuseKey2 = max(dot(vNormal, keyDir2), 0.0);
     float ambientFactor = clamp(1.0 - uAmbientIntensity, 0.0, 1.0);
     float boostedDiffuse = mix(diffuseKey, pow(diffuseKey, 0.65), ambientFactor);
+    float boostedDiffuse2 = mix(diffuseKey2, pow(diffuseKey2, 0.65), ambientFactor);
     float sunTerm = pow(diffuseSun, 2.5) * uSunIntensity * 0.25;
-    float light = uAmbientIntensity + boostedDiffuse * uKeyIntensity + sunTerm;
+    float key1 = boostedDiffuse * uKeyIntensity;
+    float key2 = boostedDiffuse2 * uKeyIntensity2;
+    vec3 light = vec3(uAmbientIntensity) + uSunColor * sunTerm + uKeyColor * key1 + uKey2Color * key2;
     vec3 litColor = uTint * light * uColorScale;
     gl_FragColor = vec4(litColor, alpha);
 }

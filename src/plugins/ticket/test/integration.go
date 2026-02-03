@@ -13,7 +13,7 @@ import (
 )
 
 const ticketV2Dir = "src/tickets"
-const ticketDBFile = "tickets.duckdb"
+const currentTicketFile = ".current_ticket"
 
 func main() {
 	fmt.Println("=== Starting Ticket Workflow Integration Test ===")
@@ -130,7 +130,7 @@ func init() {
 
 	// --- STEP 8: 10-Minute Timeout ---
 	fmt.Println("\n--- STEP 8: 10-Minute Timeout ---")
-	db, err := openTicketDB()
+	db, err := openTicketDB(name)
 	if err != nil {
 		return err
 	}
@@ -180,36 +180,36 @@ func init() {
 func TestKeyWorkflow() error {
 	// --- STEP 1: Add Key ---
 	fmt.Println("\n--- STEP 1: Add Key ---")
-	output := runCmd("./dialtone.sh", "key", "add", "test-key", "secret-value", "password123")
+	output := runCmd("./dialtone.sh", "ticket", "key", "add", "test-key", "secret-value", "password123")
 	if !strings.Contains(output, "stored securely") {
 		return fmt.Errorf("failed to add key")
 	}
 
 	// --- STEP 2: List Keys ---
 	fmt.Println("\n--- STEP 2: List Keys ---")
-	output = runCmd("./dialtone.sh", "key", "list")
+	output = runCmd("./dialtone.sh", "ticket", "key", "list")
 	if !strings.Contains(output, "test-key") {
 		return fmt.Errorf("expected test-key in list")
 	}
 
 	// --- STEP 3: Lease Key (Correct Password) ---
 	fmt.Println("\n--- STEP 3: Lease Key (Correct Password) ---")
-	output = runCmd("./dialtone.sh", "key", "test-key", "password123")
+	output = runCmd("./dialtone.sh", "ticket", "key", "test-key", "password123")
 	if output != "secret-value" {
 		return fmt.Errorf("expected 'secret-value', got '%s'", output)
 	}
 
 	// --- STEP 4: Lease Key (Wrong Password) ---
 	fmt.Println("\n--- STEP 4: Lease Key (Wrong Password) ---")
-	output = runCmd("./dialtone.sh", "key", "test-key", "wrong")
+	output = runCmd("./dialtone.sh", "ticket", "key", "test-key", "wrong")
 	if !strings.Contains(output, "Invalid password") {
 		return fmt.Errorf("expected error for wrong password")
 	}
 
 	// --- STEP 5: Remove Key ---
 	fmt.Println("\n--- STEP 5: Remove Key ---")
-	runCmd("./dialtone.sh", "key", "rm", "test-key")
-	output = runCmd("./dialtone.sh", "key", "list")
+	runCmd("./dialtone.sh", "ticket", "key", "rm", "test-key")
+	output = runCmd("./dialtone.sh", "ticket", "key", "list")
 	if strings.Contains(output, "test-key") {
 		return fmt.Errorf("expected test-key to be removed")
 	}
@@ -233,12 +233,13 @@ func finalCleanup() {
 			os.RemoveAll(filepath.Join(ticketV2Dir, d.Name()))
 		}
 	}
-	os.Remove(ticketDBPath())
+	// Clear current ticket pointer
+	_ = os.Remove(filepath.Join(ticketV2Dir, currentTicketFile))
 }
 
 func cleanupTicket(name string) {
 	fmt.Printf("--- Cleanup: %s ---\n", name)
-	db, err := openTicketDB()
+	db, err := openTicketDB(name)
 	if err != nil {
 		return
 	}
@@ -258,18 +259,18 @@ func runCmd(name string, args ...string) string {
 	return string(output)
 }
 
-func ticketDBPath() string {
+func ticketDBPath(ticketID string) string {
 	if p := os.Getenv("TICKET_DB_PATH"); p != "" {
 		return p
 	}
-	return filepath.Join(ticketV2Dir, ticketDBFile)
+	return filepath.Join(ticketV2Dir, ticketID, ticketID+".duckdb")
 }
 
-func openTicketDB() (*sql.DB, error) {
-	if err := os.MkdirAll(ticketV2Dir, 0755); err != nil {
+func openTicketDB(ticketID string) (*sql.DB, error) {
+	if err := os.MkdirAll(filepath.Join(ticketV2Dir, ticketID), 0755); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("duckdb", ticketDBPath())
+	db, err := sql.Open("duckdb", ticketDBPath(ticketID))
 	if err != nil {
 		return nil, err
 	}
