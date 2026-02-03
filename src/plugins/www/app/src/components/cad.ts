@@ -406,9 +406,7 @@ export class CADViewer {
     }
 
     this.gpuTimer.begin(this.gl);
-    const renderStart = performance.now();
     this.renderer.render(this.scene, this.camera);
-    const renderMs = performance.now() - renderStart;
     this.gpuTimer.end(this.gl);
     this.gpuTimer.poll(this.gl);
     const cpuMs = performance.now() - cpuStart;

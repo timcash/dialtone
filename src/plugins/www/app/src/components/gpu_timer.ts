@@ -46,22 +46,28 @@ export class GpuTimer {
 
   begin(gl: WebGLContext) {
     if (!this.ext || this.activeQuery) return;
-    const query = gl.createQuery ? gl.createQuery() : this.ext.createQueryEXT();
+    let query: WebGLQuery | null = null;
+    if ("createQuery" in gl) {
+      const gl2 = gl as WebGL2RenderingContext;
+      query = gl2.createQuery();
+      if (!query) return;
+      this.activeQuery = query;
+      gl2.beginQuery(this.ext.TIME_ELAPSED_EXT, query);
+      return;
+    }
+    const ext1 = this.ext as WebGL1QueryExt;
+    query = ext1.createQueryEXT();
     if (!query) return;
     this.activeQuery = query;
-    if (gl.beginQuery) {
-      gl.beginQuery(this.ext.TIME_ELAPSED_EXT, query);
-    } else {
-      this.ext.beginQueryEXT(this.ext.TIME_ELAPSED_EXT, query);
-    }
+    ext1.beginQueryEXT(this.ext.TIME_ELAPSED_EXT, query);
   }
 
   end(gl: WebGLContext) {
     if (!this.ext || !this.activeQuery) return;
-    if (gl.endQuery) {
-      gl.endQuery(this.ext.TIME_ELAPSED_EXT);
+    if ("endQuery" in gl) {
+      (gl as WebGL2RenderingContext).endQuery(this.ext.TIME_ELAPSED_EXT);
     } else {
-      this.ext.endQueryEXT(this.ext.TIME_ELAPSED_EXT);
+      (this.ext as WebGL1QueryExt).endQueryEXT(this.ext.TIME_ELAPSED_EXT);
     }
     this.queue.push(this.activeQuery);
     this.activeQuery = null;
@@ -70,25 +76,33 @@ export class GpuTimer {
   poll(gl: WebGLContext) {
     if (!this.ext || this.queue.length === 0) return;
     const query = this.queue[0];
-    const available = gl.getQueryParameter
-      ? (gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE) as boolean)
-      : (this.ext.getQueryObjectEXT(
-          query,
-          this.ext.QUERY_RESULT_AVAILABLE_EXT,
-        ) as boolean);
+    const available =
+      "getQueryParameter" in gl
+        ? ((gl as WebGL2RenderingContext).getQueryParameter(
+            query,
+            (gl as WebGL2RenderingContext).QUERY_RESULT_AVAILABLE,
+          ) as boolean)
+        : ((this.ext as WebGL1QueryExt).getQueryObjectEXT(
+            query,
+            this.ext.QUERY_RESULT_AVAILABLE_EXT,
+          ) as boolean);
     const disjoint = gl.getParameter(this.ext.GPU_DISJOINT_EXT) as boolean;
     if (!available || disjoint) return;
-    const result = gl.getQueryParameter
-      ? (gl.getQueryParameter(query, gl.QUERY_RESULT) as number)
-      : (this.ext.getQueryObjectEXT(
-          query,
-          this.ext.QUERY_RESULT_EXT,
-        ) as number);
+    const result =
+      "getQueryParameter" in gl
+        ? ((gl as WebGL2RenderingContext).getQueryParameter(
+            query,
+            (gl as WebGL2RenderingContext).QUERY_RESULT,
+          ) as number)
+        : ((this.ext as WebGL1QueryExt).getQueryObjectEXT(
+            query,
+            this.ext.QUERY_RESULT_EXT,
+          ) as number);
     this.queue.shift();
-    if (gl.deleteQuery) {
-      gl.deleteQuery(query);
+    if ("deleteQuery" in gl) {
+      (gl as WebGL2RenderingContext).deleteQuery(query);
     } else {
-      this.ext.deleteQueryEXT(query);
+      (this.ext as WebGL1QueryExt).deleteQueryEXT(query);
     }
     this.lastMs = result / 1_000_000;
   }
