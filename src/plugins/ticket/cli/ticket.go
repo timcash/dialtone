@@ -141,10 +141,10 @@ func RunAdd(args []string) {
 		if !errors.Is(err, ErrTicketNotFound) {
 			logFatal("Could not load ticket %s: %v", name, err)
 		}
-		// Default: ensure every subtask has a test command.
+		// Default: ensure every subtask has a test command placeholder.
 		// For `www-*` tickets, the expected baseline verification is typically:
 		// `./dialtone.sh plugin test www`
-		initTestCmd := "./dialtone.sh ticket test " + name + " --subtask init"
+		initTestCmd := "echo \"TODO: set test command\""
 		if strings.HasPrefix(name, "www-") {
 			initTestCmd = "./dialtone.sh plugin test www"
 		}

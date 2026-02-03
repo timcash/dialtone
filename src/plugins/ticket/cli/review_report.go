@@ -12,10 +12,17 @@ func printReviewIteration(ticket *Ticket) {
 
 	fmt.Println()
 	fmt.Printf("[REVIEW] Ticket: %s\n", ticket.ID)
-	if strings.TrimSpace(ticket.Description) != "" {
-		fmt.Printf("- goal: %s\n", strings.TrimSpace(ticket.Description))
-	}
+	fmt.Println("[REVIEW] Field checks (ticket):")
+	fmt.Printf("- id: %s -> is this correct?\n", valueOrEmpty(ticket.ID))
+	fmt.Printf("- name: %s -> is this correct?\n", valueOrEmpty(ticket.Name))
+	fmt.Printf("- tags: %s -> is this correct?\n", valueOrEmpty(strings.Join(ticket.Tags, ", ")))
+	fmt.Printf("- description: %s -> is this correct?\n", valueOrEmpty(ticket.Description))
+	fmt.Printf("- state: %s -> is this correct?\n", valueOrEmpty(ticket.State))
+	fmt.Printf("- start_time: %s -> is this correct?\n", valueOrEmpty(ticket.StartTime))
+	fmt.Printf("- last_summary_time: %s -> is this correct?\n", valueOrEmpty(ticket.LastSummaryTime))
+	fmt.Printf("- agent_summary: %s -> is this correct?\n", summarizeText(ticket.AgentSummary))
 	fmt.Println()
+
 	fmt.Println("[REVIEW] Questions (ticket):")
 	fmt.Println("1. is the goal aligned with subtasks")
 	fmt.Println("2. should there be more subtasks")
@@ -32,20 +39,18 @@ func printReviewIteration(ticket *Ticket) {
 		}
 		fmt.Println("---------------------------------------------------")
 		fmt.Printf("[REVIEW] Subtask: %s\n", name)
-		if strings.TrimSpace(st.Description) != "" {
-			fmt.Printf("- description: %s\n", strings.TrimSpace(st.Description))
-		}
-		if len(st.Dependencies) > 0 {
-			fmt.Printf("- deps: %s\n", strings.Join(st.Dependencies, ", "))
-		}
-		if strings.TrimSpace(st.TestCommand) != "" {
-			fmt.Printf("- test-command: %s\n", strings.TrimSpace(st.TestCommand))
-		} else {
-			fmt.Printf("- test-command: (missing)\n")
-		}
-		if strings.TrimSpace(st.ReviewedTimestamp) != "" {
-			fmt.Printf("- reviewed-timestamp: %s\n", strings.TrimSpace(st.ReviewedTimestamp))
-		}
+		fmt.Println("[REVIEW] Field checks (subtask):")
+		fmt.Printf("- name: %s -> is this correct?\n", valueOrEmpty(st.Name))
+		fmt.Printf("- tags: %s -> is this correct?\n", valueOrEmpty(strings.Join(st.Tags, ", ")))
+		fmt.Printf("- dependencies: %s -> is this correct?\n", valueOrEmpty(strings.Join(st.Dependencies, ", ")))
+		fmt.Printf("- description: %s -> is this correct?\n", valueOrEmpty(st.Description))
+		fmt.Printf("- test-conditions: %s -> is this correct?\n", valueOrEmpty(formatTestConditions(st.TestConditions)))
+		fmt.Printf("- test-command: %s -> is this correct?\n", valueOrEmpty(st.TestCommand))
+		fmt.Printf("- agent-notes: %s -> is this correct?\n", valueOrEmpty(st.AgentNotes))
+		fmt.Printf("- reviewed-timestamp: %s -> is this correct?\n", valueOrEmpty(st.ReviewedTimestamp))
+		fmt.Printf("- pass-timestamp: %s -> is this correct?\n", valueOrEmpty(st.PassTimestamp))
+		fmt.Printf("- fail-timestamp: %s -> is this correct?\n", valueOrEmpty(st.FailTimestamp))
+		fmt.Printf("- status: %s -> is this correct?\n", valueOrEmpty(st.Status))
 		fmt.Println()
 		fmt.Println("[REVIEW] Questions (subtask):")
 		fmt.Println("1. is this subtask aligned with the ticket goal")
@@ -55,5 +60,39 @@ func printReviewIteration(ticket *Ticket) {
 		fmt.Println("5. does this subtask have the correct test-command")
 		fmt.Println()
 	}
+}
+
+func valueOrEmpty(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "(empty)"
+	}
+	return trimmed
+}
+
+func summarizeText(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "(empty)"
+	}
+	if len(trimmed) > 120 {
+		return trimmed[:117] + "..."
+	}
+	return trimmed
+}
+
+func formatTestConditions(conditions []TestCondition) string {
+	if len(conditions) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(conditions))
+	for _, c := range conditions {
+		cond := strings.TrimSpace(c.Condition)
+		if cond == "" {
+			continue
+		}
+		parts = append(parts, cond)
+	}
+	return strings.Join(parts, "; ")
 }
 
