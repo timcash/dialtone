@@ -51,6 +51,7 @@ This workflow is optimized for LLM agents and operators doing ticket-driven deve
     7. does this subtask have the correct test-command
   - **Skips**: does **not** suggest running tests, reviewing logs, or marking subtasks `done`.
   - **Outcome**: the ticket is marked **reviewed** and is ready for `start`.
+  - **Repeatable**: while in `review` mode, re-run the review iteration at any time with `./dialtone.sh ticket next`.
 
 - `./dialtone.sh ticket start <ticket-name>`
   - **Purpose**: execution. Use this when you are ready to actually do work on the ticket.
