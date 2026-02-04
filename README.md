@@ -1,4 +1,6 @@
 # [`DIALTONE`](https://dialtone.earth)
+> IMPORTANT: This should sound like something from a scirence fiction novel about the near future of civic technology.
+
 ![dialtone](./dialtone.jpg)
 - A public information system for civic coordination and education
 - A virtual librarian for mathematics, physics, and engineering

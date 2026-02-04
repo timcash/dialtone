@@ -1,40 +1,73 @@
 # DIALTONE (Virtual Librarian)
 
-`DIALTONE` is a **helpful virtual librarian** embedded in the Dialtone CLI output. It does **not** run tests or git automatically. Instead, after key ticket commands it prints:
+`DIALTONE` is a **virtual librarian** that combines a task database, multimedia search engine, global messaging infrastructure, robotic controls and LLM CLI tools into a single interface. 
 
-- **Context**: what state you’re in and what matters next
-- **Next step**: what to do and why
-- **Example commands**: example commands to run manually
+It does not run commands automatically. Instead, after commands from the `USER` or `LLM` it udpates the database and prints a helpful message.
 
-This workflow is optimized for LLM agents and operators doing ticket-driven development (TDD) with strong verification.
-
-### Example log of getting a user prompt with an issue
-
+### Example Log
 ```text
-[USER]$: turn this issue into a ticket `src/issues/0039.md`
+[USER]: turn this issue into a ticket `src/issues/0039.md`
 [LLM-ACTION]: Reading the issue `src/issues/0039.md`
 [LLM-REASONING]: The issue is about adding a section to the www site that shows the Earth spinning. It appears to have enough information to become a ticket. We should start in add mode.
 [LLM-COMMAND]: ./dialtone.sh ticket add www-dev-page-earth-spin
-[DIALTONE-ADD]:  Before adding a ticket
+[DIALTONE-START]: key-chain::dt-3X4FT-449NV 
+message-length: 1024 bytes
+mode: add
+context: 
+- the ticket has been added with relavant files
+- the files at are `src/tickets/www-dev-page-earth-spin/`
+- before `start` or `review` check other tickets for similarity 
+- use this reference document: `docs/workflows/issue-similarity.md`
 
-Run the next command(s) to validate environment and begin the first subtask.
+Next Commands:
+`./dialtone.sh issue list --sign dt-3X4FT-449NV`
+[DIALTONE-END]: key-chain::dt-3X4FT-449NV
+
+...
+
+[LLM-REASONING]: The ticket has been added but I need to review other tickets to ensure there is no duplication. I must use the `--sign` to advance the state of the ticket.
+[LLM-COMMAND]: ./dialtone.sh issue list --sign dt-3X4FT-449NV
+[DIALTONE-START]: key-chain::dt-8VCCD-332HN
+message-length: 2048 bytes
+mode: list
+------------------
+issue-id: 0023
+issue-title: slow earth spin on www site
+issue-body: the earth model is spinning to fast slow it down to a more realistic speed
+------------------
+issue-id: 0030
+issue-title: add moon orbit to earth model
+issue-body: the earth model should have a moon that orbits around it
+------------------
+issue-id: 0035
+issue-title: build issue on macos
+issue-body: the build process fails on macos with an error about missing dependencies
+------------------
+Next Commands:
+To state there are no similar issues, run:
+`./dialtone.sh ticket review www-dev-page-earth-spin --sign dt-8VCCD-332HN`
+To state there are similar issues, run:
+`./dialtone.sh ticket review www-dev-page-earth-spin --similar dt-8VCCD-332HN`
 ```
----
 
-## Core principles
+This workflow is optimized for LLM agents and operators doing test-driven development (TDD) with strong verification.
 
-- **No automatic test runs**: the agent/operator runs tests and reports results.
-- **No automatic git commits**: the agent/operator commits after verification.
-- **`done` is gated**: you should only finalize a ticket after:
-  - subtasks are actually complete
-  - tests have been run and passed
-  - logs have been reviewed and contain no ERROR/EXCEPTION
-  - the agent summary has been submitted
 
----
+
+
+# Core principles
+
+### No automatic command runs
+The agent/operator runs tests and reports results.
+
+### No automatic git commits
+The agent/operator commits after verification.
+
+### `done` is gated
+You should only finalize a ticket after:
+
 
 ## Commands you will use
-
 ```shell
 ./dialtone.sh ticket start <ticket-name>
 ./dialtone.sh ticket review <ticket-name>
