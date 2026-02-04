@@ -14,40 +14,41 @@ It does not run commands automatically. Instead, after commands from the `USER` 
 message-length: 1024 bytes
 mode: add
 context: 
-- the ticket has been added with relavant files
-- the files at are `src/tickets/www-dev-page-earth-spin/`
-- before `start` or `review` check other tickets for similarity 
-- use this reference document: `docs/workflows/issue-similarity.md`
+1. the ticket has been added with relavant files
+2. the files at are `src/tickets/www-dev-page-earth-spin/`
+3. before `start` or `review` check other tickets for similarity
+4. decide if this issue should belong to an existing open ticket
+5. if so decied if this ticket should be maked as a duplicate
+6. use this reference document: `docs/workflows/issue-similarity.md`
 
-Next Commands:
-`./dialtone.sh issue list --sign dt-3X4FT-449NV`
+To Continue run the next command(s):
+`./dialtone.sh ticket list --sign dt-3X4FT-449NV`
 [DIALTONE-END]: key-chain::dt-3X4FT-449NV
 
 ...
 
-[LLM-REASONING]: The ticket has been added but I need to review other tickets to ensure there is no duplication. I must use the `--sign` to advance the state of the ticket.
-[LLM-COMMAND]: ./dialtone.sh issue list --sign dt-3X4FT-449NV
+[LLM-REASONING]: The ticket has been added but I need to review other tickets to ensure there is no duplication. I must use the `--sign` to advance the state of the ticket. 
+[LLM-COMMAND]: ./dialtone.sh ticket list --sign dt-3X4FT-449NV
 [DIALTONE-START]: key-chain::dt-8VCCD-332HN
 message-length: 2048 bytes
 mode: list
-------------------
-issue-id: 0023
-issue-title: slow earth spin on www site
-issue-body: the earth model is spinning to fast slow it down to a more realistic speed
-------------------
-issue-id: 0030
-issue-title: add moon orbit to earth model
-issue-body: the earth model should have a moon that orbits around it
-------------------
-issue-id: 0035
-issue-title: build issue on macos
-issue-body: the build process fails on macos with an error about missing dependencies
-------------------
-Next Commands:
-To state there are no similar issues, run:
-`./dialtone.sh ticket review www-dev-page-earth-spin --sign dt-8VCCD-332HN`
-To state there are similar issues, run:
-`./dialtone.sh ticket review www-dev-page-earth-spin --similar dt-8VCCD-332HN`
+context: A ticket summary list has been created. Review them for similarity or to potentially add this issue to as a subtask of an existing ticket.
+
+File Location: `src/tickets/ticket-list-summary.md`
+
+To Continue run one of the next commands:
+
+# Sign there are no similar tickets
+`./dialtone.sh ticket --no-similar dt-8VCCD-332HN`
+
+# To state there are similar issues, run:
+`./dialtone.sh ticket --similar dt-8VCCD-332HN`
+[DIALTONE-END]: key-chain::dt-8VCCD-332HN
+
+...
+
+[LLM-REASONING]: After reviewing the ticket list, I have determined that there are similar tickets. I will now link this issue as a subtask to the most relevant ticket.
+[LLM-COMMAND]: ./dialtone.sh ticket --similar dt-8VCCD-332HN
 ```
 
 This workflow is optimized for LLM agents and operators doing test-driven development (TDD) with strong verification.
