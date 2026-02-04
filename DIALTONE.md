@@ -39,38 +39,53 @@
         <item>the ticket has been added with relavant files</item>
         <item>the files at are `src/tickets/www-dev-page-earth-spin/`</item>
         <item>before `start` or `review` check other tickets for similarity</item>
-        <item>decide if this issue should belong to an existing open ticket</item>
-        <item>if so decied if this ticket should be maked as a duplicate</item>
         <item>use this reference document: `docs/workflows/issue-similarity.md`</item>
+        <decision>decide if this issue should be a subtask of an existing open ticket</decision>
+        <decision>decied if this issue should be maked as a duplicate</decision>
       </context>
+
       <next-commands>
         <command>./dialtone.sh ticket list --sign dt-3X4FT-449NV</command>
       </next-commands>
     </dialtone-response>
   </turn>
   <turn>
-    <assistant>
-      <llm-reasoning>The ticket has been added but I need to review other tickets to ensure there is no duplication. I must use the `--sign` to advance the state of the ticket.</llm-reasoning>
-      <llm-command>./dialtone.sh ticket list --sign dt-3X4FT-449NV</llm-command>
-    </assistant>
+    <llm>
+      <reasoning>The ticket has been added but I need to review other tickets to ensure there is no duplication. I must use the `--sign` to advance the state of the ticket.</reasoning>
+      <command>./dialtone.sh ticket list --sign dt-3X4FT-449NV</command>
+    </llm>
     <dialtone id="dt-8VCCD-332HN">
       <message-length>2048 bytes</message-length>
       <mode>list</mode>
-      <context>A ticket summary list has been created. Review them for similarity or to potentially add this issue to as a subtask of an existing ticket.</context>
+      <context>
+        A ticket summary list has been created. With fields "duplicat" and "insert". 
+        Review them for similarity or to potentially add this issue to as a subtask of an existing ticket.
+        Use the `--sign` to advance the state of the ticket.
+      </context>
       <resource path="src/tickets/ticket-list-summary.md"/>
-      <next-steps>
-        <option type="yes">./dialtone.sh ticket --sign dt-no-8VCCD-332HN</option>
-        <option type="no">./dialtone.sh ticket --sign dt-yes-8VCCD-332HN</option>
-      </next-steps>
+      <command-list>
+        <option type="insert">
+          <reasoning>If the issue is not duplicated but does belong in another ticket use this command</reasoning>
+          <command>./dialtone.sh ticket --sign yes-8VCCD-332HN</command>
+        </option>
+        <option type="duplicate">./dialtone.sh ticket --sign no-8VCCD-332HN</option>
+      </command-list>
     </dialtone>
   </turn>
   <turn>
     <assistant>
-      <llm-reasoning>After reviewing the ticket list, I have determined that there are similar tickets. I will now link this issue as a subtask to the most relevant ticket.</llm-reasoning>
-      <llm-command>./dialtone.sh ticket --similar dt-8VCCD-332HN</llm-command>
+      <reasoning>After reviewing the ticket list, I have determined that there are similar tickets. I will now link this issue as a subtask to the most relevant ticket.</reasoning>
+      <command>./dialtone.sh ticket --sign yes-8VCCD-332HN</command>
     </assistant>
     <dialtone>
-    
+      <message-length>1024 bytes</message-length>
+      <mode>add</mode>
+      <context>
+        <item>The 
+      </context>
+      <next-commands>
+        <command>./dialtone.sh ticket list --sign dt-3X4FT-449NV</command>
+      </next-commands>
     </dialtone>
   </turn>
 </transcript>
