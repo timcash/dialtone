@@ -1,9 +1,29 @@
 # DIALTONE (Virtual Librarian)
 
-`DIALTONE` is a **virtual librarian** that combines a task database, multimedia search engine, global messaging infrastructure, robotic controls and LLM CLI tools into a single interface. 
+`DIALTONE:` is a **virtual librarian** that combines a task database, multimedia search engine, global messaging infrastructure, robotic controls and LLM CLI tools into a single interface.
 
-It does not run commands automatically. Instead, after commands from the `USER` or `LLM` it udpates the database and prints a helpful message.
 
+
+`DIALTONE:`
+- an `issue` is any prompt multimodal input from the outside world 
+- after review a `issue`becomes an `outline` becomes a `ticket`
+- programtically explores a task directed asiclic graph (DAG)
+- writes parquet files for flexible and strutured logs
+- assigns scores to `LLM:` and `USER:` created plan outlines
+- uses the concept of a `budget`, `graph-cost` and `success_probability`
+- routes subtasks to multiple `LLM:` and `USER:` for relative comparison
+- injects `subtask` lists into new tickets to act as `workflows`
+- wraps duckdb for larger than memeory analysis and search
+- dynamically writes context to files with a subtask and `--sign` key
+- works with `LLM:` and `USER:` to craft CLI `commands`
+- executes `commands` then proxies to `LLM:` and `USER:`
+- is designed to bootstrap itself up from a shell file
+- uses Zarr for spatial data storage
+- uses Content Address Storage (CAS) to hash file dependency trees
+- works with Merkle Trees
+- uses Golang as a simple but proven at scale interface to computation
+- uses TDD to mananage large codebases
+- uses NATS as a message bus and data infrastructure interface
 ### Example Log
 ```text
 [USER]: turn this issue into a ticket `src/issues/0039.md`
