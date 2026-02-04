@@ -2,11 +2,9 @@
 
 `DIALTONE:` is a **virtual librarian** that combines a task database, multimedia search engine, global messaging infrastructure, robotic controls and LLM CLI tools into a single interface.
 
-
-
 `DIALTONE:`
-- an `issue` is any prompt multimodal input from the outside world 
-- after review a `issue`becomes an `outline` becomes a `ticket`
+- an `issue` is any multimodal prompt input into `./dialtone.sh` 
+- after review an `issue` becomes an `outline` which becomes a `ticket`
 - programtically explores a task directed asiclic graph (DAG)
 - writes parquet files for flexible and strutured logs
 - assigns scores to `LLM:` and `USER:` created plan outlines
@@ -18,57 +16,64 @@
 - works with `LLM:` and `USER:` to craft CLI `commands`
 - executes `commands` then proxies to `LLM:` and `USER:`
 - is designed to bootstrap itself up from a shell file
-- uses Zarr for spatial data storage
-- uses Content Address Storage (CAS) to hash file dependency trees
-- works with Merkle Trees
 - uses Golang as a simple but proven at scale interface to computation
 - uses TDD to mananage large codebases
 - uses NATS as a message bus and data infrastructure interface
+
+
 ### Example Log
-```text
-[USER]: turn this issue into a ticket `src/issues/0039.md`
-[LLM-ACTION]: Reading the issue `src/issues/0039.md`
-[LLM-REASONING]: The issue is about adding a section to the www site that shows the Earth spinning. It appears to have enough information to become a ticket. We should start in add mode.
-[LLM-COMMAND]: ./dialtone.sh ticket add www-dev-page-earth-spin
-[DIALTONE-START]: key-chain::dt-3X4FT-449NV 
-message-length: 1024 bytes
-mode: add
-context: 
-1. the ticket has been added with relavant files
-2. the files at are `src/tickets/www-dev-page-earth-spin/`
-3. before `start` or `review` check other tickets for similarity
-4. decide if this issue should belong to an existing open ticket
-5. if so decied if this ticket should be maked as a duplicate
-6. use this reference document: `docs/workflows/issue-similarity.md`
 
-To Continue run the next command(s):
-`./dialtone.sh ticket list --sign dt-3X4FT-449NV`
-[DIALTONE-END]: key-chain::dt-3X4FT-449NV
-
-...
-
-[LLM-REASONING]: The ticket has been added but I need to review other tickets to ensure there is no duplication. I must use the `--sign` to advance the state of the ticket. 
-[LLM-COMMAND]: ./dialtone.sh ticket list --sign dt-3X4FT-449NV
-[DIALTONE-START]: key-chain::dt-8VCCD-332HN
-message-length: 2048 bytes
-mode: list
-context: A ticket summary list has been created. Review them for similarity or to potentially add this issue to as a subtask of an existing ticket.
-
-File Location: `src/tickets/ticket-list-summary.md`
-
-To Continue run one of the next commands:
-
-# Sign there are no similar tickets
-`./dialtone.sh ticket --no-similar dt-8VCCD-332HN`
-
-# To state there are similar issues, run:
-`./dialtone.sh ticket --similar dt-8VCCD-332HN`
-[DIALTONE-END]: key-chain::dt-8VCCD-332HN
-
-...
-
-[LLM-REASONING]: After reviewing the ticket list, I have determined that there are similar tickets. I will now link this issue as a subtask to the most relevant ticket.
-[LLM-COMMAND]: ./dialtone.sh ticket --similar dt-8VCCD-332HN
+```xml
+<transcript>
+  <turn>
+    <user>turn this issue into a ticket `src/issues/0039.md`</user>
+    <llm>
+      <action>Reading the issue `src/issues/0039.md`</action>
+      <reasoning>The issue is about adding a section to the www site that shows the Earth spinning. It appears to have enough information to become a ticket. We should start in add mode.</reasoning>
+      <command>./dialtone.sh ticket add www-dev-page-earth-spin</command>
+    </llm>
+    <dialtone-response id="dt-3X4FT-449NV">
+      <message-length>1024 bytes</message-length>
+      <mode>add</mode>
+      <context>
+        <item>the ticket has been added with relavant files</item>
+        <item>the files at are `src/tickets/www-dev-page-earth-spin/`</item>
+        <item>before `start` or `review` check other tickets for similarity</item>
+        <item>decide if this issue should belong to an existing open ticket</item>
+        <item>if so decied if this ticket should be maked as a duplicate</item>
+        <item>use this reference document: `docs/workflows/issue-similarity.md`</item>
+      </context>
+      <next-commands>
+        <command>./dialtone.sh ticket list --sign dt-3X4FT-449NV</command>
+      </next-commands>
+    </dialtone-response>
+  </turn>
+  <turn>
+    <assistant>
+      <llm-reasoning>The ticket has been added but I need to review other tickets to ensure there is no duplication. I must use the `--sign` to advance the state of the ticket.</llm-reasoning>
+      <llm-command>./dialtone.sh ticket list --sign dt-3X4FT-449NV</llm-command>
+    </assistant>
+    <dialtone id="dt-8VCCD-332HN">
+      <message-length>2048 bytes</message-length>
+      <mode>list</mode>
+      <context>A ticket summary list has been created. Review them for similarity or to potentially add this issue to as a subtask of an existing ticket.</context>
+      <resource path="src/tickets/ticket-list-summary.md"/>
+      <next-steps>
+        <option type="yes">./dialtone.sh ticket --sign dt-no-8VCCD-332HN</option>
+        <option type="no">./dialtone.sh ticket --sign dt-yes-8VCCD-332HN</option>
+      </next-steps>
+    </dialtone>
+  </turn>
+  <turn>
+    <assistant>
+      <llm-reasoning>After reviewing the ticket list, I have determined that there are similar tickets. I will now link this issue as a subtask to the most relevant ticket.</llm-reasoning>
+      <llm-command>./dialtone.sh ticket --similar dt-8VCCD-332HN</llm-command>
+    </assistant>
+    <dialtone>
+    
+    </dialtone>
+  </turn>
+</transcript>
 ```
 
 This workflow is optimized for LLM agents and operators doing test-driven development (TDD) with strong verification.
