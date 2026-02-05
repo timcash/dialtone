@@ -91,248 +91,99 @@
 </transcript>
 ```
 
-This workflow is optimized for LLM agents and operators doing test-driven development (TDD) with strong verification.
+# Ticket: 
+`./dialtone.sh ticket` keeps a .ticket-config file in the root of the project with the following fields:
+  - `ticket-name`: the name of the ticket
+  - `subtask-name`: the name of the subtask
 
-
-
-
-# Core principles
-
-### No automatic command runs
-The agent/operator runs tests and reports results.
-
-### No automatic git commits
-The agent/operator commits after verification.
-
-### `done` is gated
-You should only finalize a ticket after:
-
-
-## Commands you will use
+### Ticket: command line interface (CLI)
 ```shell
+./dialtone.sh issue list --offset <offset> --limit <limit>
+./dialtone.sh issue add <issue-name>
+./dialtone.sh issue comment <issue-name> <comment>
+./dialtone.sh ticket list
+./dialtone.sh ticket print <ticket-name>
+./dialtone.sh ticket add <ticket-name>
+./dialtone.sh ticket outline <ticket-name>
 ./dialtone.sh ticket start <ticket-name>
 ./dialtone.sh ticket review <ticket-name>
 ./dialtone.sh ticket subtask list
 ./dialtone.sh ticket subtask add <name> --desc "..."
+./dialtone.sh ticket subtask review
+./dialtone.sh ticket subtask start
+./dialtone.sh ticket subtask outline
 ./dialtone.sh ticket subtask testcmd <subtask-name> <test-command...>
 ./dialtone.sh ticket summary update
 ./dialtone.sh ticket subtask done <ticket-name> <subtask-name>
 ./dialtone.sh ticket done
 ```
 
----
+### Ticket: modes
+- `add`: create a new ticket and then guides a search for similarity or overlap
+- `outline`: turn an issue into a ticket outline
+- `review`: turn an outline into a ticket
+- `start`: execute the ticket while adding new subtasks where neededand checking for errors
+- `done`: post ticket review and commit the changes
 
-## `review` vs `start`
+### Ticket: `add` mode
 
+- `./dialtone.sh ticket add <ticket-name>`
+  - **Purpose**: create a new ticket. Use this when you want to create a new ticket.
+  - **Outcome**: creates a new ticket and enters the `add` mode.
+
+### Ticket: `outline` mode
+- `./dialtone.sh ticket outline <ticket-name>`
+- **Purpose**: turn an issue into a ticket outline. Use this when you want to turn an issue into a ticket outline.
+- **Outcome**: turns an issue into a ticket outline and enters the `outline` mode.
+
+### Ticket: `review` mode
 - `./dialtone.sh ticket review <ticket-name>`
-  - **Purpose**: prep-only. Use this when you want DIALTONE + the LLM to **review the ticket DB and subtasks** and make sure it’s ready to work on later.
-  - **Workflow**: DIALTONE iterates over the ticket and each subtask and asks review questions like:
-    1. is the goal aligned with subtasks
-    2. should there be more subtasks
-    3. are any subtasks too large
-    4. is there work that should be put into a different ticket because it is not relevant
-    5. does this ticket create a new plugin
-    6. does this ticket have a update documentation subtask
-    7. does this subtask have the correct test-command
-  - **Skips**: does **not** suggest running tests, reviewing logs, or marking subtasks `done`.
-  - **Outcome**: the ticket is marked **reviewed** and is ready for `start`.
-  - **Repeatable**: while in `review` mode, re-run the review iteration at any time with `./dialtone.sh ticket next`.
+- **Purpose**: prep-only. Use this when you want DIALTONE + the LLM to **review the ticket DB and subtasks** and make sure it’s ready to work on later.
+- **Workflow**: DIALTONE iterates over the ticket and each subtask and asks review questions like:
+  1. is the goal aligned with subtasks
+  2. should there be more subtasks
+  3. are any subtasks too large
+  4. is there work that should be put into a different ticket because it is not relevant
+  5. does this ticket create a new plugin
+  6. does this ticket have a update documentation subtask
+  7. does this subtask have the correct test-command
+- **Skips**: does **not** suggest running tests, reviewing logs, or marking subtasks `done`.
+- **Outcome**: the ticket is marked **reviewed** and is ready for `start`.
+- **Repeatable**: while in `review` mode, re-run the review iteration at any time with `./dialtone.sh ticket next`.
+
+### Ticket: `start` mode
 
 - `./dialtone.sh ticket start <ticket-name>`
   - **Purpose**: execution. Use this when you are ready to actually do work on the ticket.
   - **Outcome**: enters the normal subtask/verification workflow.
 
-### Branch rule (applies to `add`, `review`, and `start`)
+### Ticket: `done` mode
 
-All ticket work happens on a git branch named **exactly** like the ticket:
+- `./dialtone.sh ticket done <ticket-name>`
+  - **Purpose**: finalize. Use this when you are ready to finalize the ticket.
+  - **Outcome**: commits the changes and prints the next steps.
 
-- `ticket add <ticket>` / `ticket review <ticket>` / `ticket start <ticket>` should create or switch to the branch named `<ticket>`.
 
----
-
-## Ticket state
+### Ticket: state
 
 Tickets track a simple `state` field to indicate where they are in the lifecycle:
 
-- `new`: created but not reviewed
-- `reviewed`: reviewed and ready to start later
+- `added`: created but not reviewed
+- `outlined`: turned into a ticket outline
+- `reviewed`: ticket outline reviewed and ready to start later
 - `started`: execution has begun
 - `blocked`: blocked waiting on a question/acknowledgement or missing planning info
-- `done`: finalized
+- `done`: ticket completed and ready to be committed
 
----
+# subtask
+- `added`: subtask created but not reviewed
+- `outlined`: subtask turned into a subtask outline
+- `reviewed`: subtask outline reviewed and ready to start later
+- `started`: subtask execution has begun
+- `blocked`: subtask blocked waiting on a question/acknowledgement or missing planning info
+- `done`: subtask completed and ready to be committed
 
-## Required verification loop (per subtask)
-
-For every subtask, follow this loop until it’s true:
-
-1. **Verify fields**: subtask name/description/test-command are correct.
-2. **Run tests**: agent runs the test command and inspects output.
-3. **Fix + rerun**: repeat until the test passes.
-4. **Review logs**: ensure no ERROR/EXCEPTION and that resources are cleaned up.
-5. **Submit summary**: update the subtask summary file and sync it into the ticket DB.
-6. **Mark subtask done**: `ticket subtask done <ticket> <subtask>`
-7. **Commit**: agent creates a git commit after verification.
-
-### Per-subtask summary files (persistent)
-
-Instead of a single `agent_summary.md`, each ticket uses **one markdown file per subtask**:
-
-- Location: `src/tickets/<ticket-id>/`
-- File name: `<subtask-name>-summary.md`
-
-You update the relevant `<subtask-name>-summary.md`, then run:
-
-```shell
-./dialtone.sh ticket summary update
-```
-
-`ticket summary update` syncs the latest contents into DuckDB so `ticket summary` / `ticket search` work, and **leaves the markdown file in place** (no deletion).
-
----
-
-## Example transcript: `ticket start`
-
-Command you run:
-
-```shell
-./dialtone.sh ticket start www-dev-page-earth-spin
-```
-
-What `DIALTONE` says (example):
-
-```shell
-DIALTONE:
-- ticket: www-dev-page-earth-spin
-- goal: keep work ticket-driven; run tests yourself and summarize results
-- verify: git branch is correct and working tree is clean before starting
-
-Run the next command(s) to validate environment and begin the first subtask.
-Then summarize results and what to do next.
-
-example-commands
-./dialtone.sh ticket subtask list
-./dialtone.sh plugin test <plugin-name>
-./dialtone.sh www dev
-```
-
----
-
-## Example transcript: `ticket next`
-
-Command you run:
-
-```shell
-./dialtone.sh ticket next
-```
-
-What `DIALTONE` says (example):
-
-```shell
-DIALTONE:
-- ticket: www-dev-page-earth-spin
-- subtask: init
-- policy: DIALTONE does not auto-run tests; agent must run and report results
-- verify: tests pass; logs contain no ERROR/EXCEPTION; tests clean up resources
-
-Run the subtask test command(s) now.
-If it fails, modify code/tests and re-run until it passes. Then review logs and submit a summary.
-
-example-commands
-./dialtone.sh ticket subtask list
-./dialtone.sh plugin test <plugin-name>
-./dialtone.sh logs --lines 200
-./dialtone.sh ticket summary update
-./dialtone.sh ticket subtask done <ticket-name> <subtask-name>
-```
-
----
-
-## Example transcript: marking a subtask done
-
-After you have:
-- run tests (pass)
-- reviewed logs (clean)
-- submitted a summary
-
-Command you run:
-
-```shell
-./dialtone.sh ticket subtask done www-dev-page-earth-spin init
-```
-
-What `DIALTONE` says (example):
-
-```shell
-DIALTONE:
-- ticket: www-dev-page-earth-spin
-- subtask: init
-- record: subtask status marked done (manual verification assumed)
-- next: submit subtask summary and prepare a git commit
-
-Please confirm:
-- You ran the subtask tests and they passed
-- You reviewed logs and found no ERROR/EXCEPTION
-- Tests cleaned up any resources they created
-
-Then submit a summary and create a commit.
-
-example-commands
-./dialtone.sh ticket summary update
-git status -sb
-git add .
-git commit -m "Describe the change"
-./dialtone.sh ticket done
-```
-
----
-
-## Example transcript: `ticket done`
-
-Command you run:
-
-```shell
-./dialtone.sh ticket done
-```
-
-If a subtask is still incomplete, `DIALTONE` blocks you (example):
-
-```shell
-DIALTONE:
-- ticket: www-dev-page-earth-spin
-- blocker: subtask `init` is still todo
-- process: run tests, review logs, submit summary, then mark subtask done
-
-Loop until the subtask test passes and logs are clean.
-Then mark the subtask done and re-run ticket done.
-
-example-commands
-./dialtone.sh ticket subtask list
-./dialtone.sh plugin test <plugin-name>
-./dialtone.sh logs --lines 200
-./dialtone.sh ticket summary update
-./dialtone.sh ticket subtask done <ticket-name> <subtask-name>
-./dialtone.sh ticket done
-```
-
-When all subtasks are done and subtask summary files exist/are up to date, `ticket done`:
-
-- syncs the latest per-subtask summaries into the ticket DB (if needed)
-- writes a backup DB named: `src/tickets/<ticket>/<ticket>-backup.duckdb`
-- prints the next manual steps (commit/PR)
-
----
-
-## Notes on log review
-
-The agent/operator should explicitly confirm:
-
-- **No ERROR/EXCEPTION** in browser console logs (Chromedp output) or runtime logs.
-- Tests **clean up** ports/processes/files they start.
-- Git is in the expected state before starting a ticket or marking it done:
-
-```shell
-git status -sb
-git diff
-```
-
+### Subtask: modes
+- `add`: create a new subtask and then guides a search for similarity or overlap
+- `review`: turn an subtask into a subtask outline
+- `start`: execute the subtask while adding new subtasks where neededand checking for errors
