@@ -3,12 +3,15 @@
 `DIALTONE:` is a **virtual librarian** that combines a task database, multimedia search engine, global messaging infrastructure, robotic controls and LLM CLI tools into a single interface.
 
 `DIALTONE:`
-- an `issue` is any multimodal prompt input into `./dialtone.sh` 
-- after review an `issue` becomes an `outline` which becomes a `ticket`
-- programtically explores a task directed asiclic graph (DAG)
+- forms a structured message stream between `LLM:` and `USER:`
+### stream-1: 
+`issues` from a `USER/LLM:` is any multimodal prompt input into `./dialtone.sh` 
+- after colaborative review an `issue` becomes an `outline` which becomes a `task`
+- programtically explores a `task` directed asiclic graph (DAG)
 - writes parquet files for flexible and strutured logs
 - assigns scores to `LLM:` and `USER:` created plan outlines
-- uses the concept of a `budget`, `graph-cost` and `success_probability`
+- uses the concept of a `budget`, `move-score` and `success_probability`
+- compares multiple `LLM:` and `USER:` plans and selects the best one
 - routes subtasks to multiple `LLM:` and `USER:` for relative comparison
 - injects `subtask` lists into new tickets to act as `workflows`
 - wraps duckdb for larger than memeory analysis and search
@@ -24,7 +27,6 @@
 ### Example Log
 
 ```xml
-<transcript>
   <turn>
     <user>turn this issue into a ticket `src/issues/0039.md`</user>
     <llm>
@@ -32,6 +34,8 @@
       <reasoning>The issue is about adding a section to the www site that shows the Earth spinning. It appears to have enough information to become a ticket. We should start in add mode.</reasoning>
       <command>./dialtone.sh ticket add www-dev-page-earth-spin</command>
     </llm>
+  </turn>
+  <turn>
     <dialtone-response id="dt-3X4FT-449NV">
       <message-length>1024 bytes</message-length>
       <mode>add</mode>
@@ -54,6 +58,7 @@
       <reasoning>The ticket has been added but I need to review other tickets to ensure there is no duplication. I must use the `--sign` to advance the state of the ticket.</reasoning>
       <command>./dialtone.sh ticket list --sign dt-3X4FT-449NV</command>
     </llm>
+    <turn>
     <dialtone id="dt-8VCCD-332HN">
       <message-length>2048 bytes</message-length>
       <mode>list</mode>
@@ -88,7 +93,6 @@
       </next-commands>
     </dialtone>
   </turn>
-</transcript>
 ```
 
 # Ticket: 
