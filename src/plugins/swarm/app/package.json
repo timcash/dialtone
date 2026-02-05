@@ -5,14 +5,18 @@
     "main": "index.js",
     "type": "module",
     "dependencies": {
-        "hyperswarm": "latest",
-        "hypercore-crypto": "latest",
-        "b4a": "latest",
+        "autobase": "^7.25.1",
+        "b4a": "^1.7.3",
         "bare-fs": "latest",
-        "bare-path": "latest",
+        "bare-http1": "latest",
         "bare-os": "latest",
-    "bare-http1": "latest",
-    "bare-subprocess": "latest"
+        "bare-path": "latest",
+        "bare-subprocess": "latest",
+        "hyperbee": "^2.27.3",
+        "hypercore": "^11.24.0",
+        "hypercore-crypto": "latest",
+        "hyperswarm": "latest",
+        "ram": "^0.0.3"
     },
     "pear": {
         "name": "dialtone-swarm",
