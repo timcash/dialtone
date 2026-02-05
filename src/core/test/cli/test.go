@@ -230,6 +230,8 @@ func runPluginTest(pluginName string, showList bool) {
 		runChromeTests()
 	case "www-cad":
 		runWwwCadTests()
+	case "github":
+		runGithubTests()
 	default:
 		logger.LogFatal("Unknown plugin: %s", pluginName)
 	}
@@ -275,7 +277,7 @@ func printTestUsage() {
 	fmt.Println("Note: For ticket-specific verification, use: ./dialtone.sh ticket test <ticket-name>")
 	fmt.Println()
 	fmt.Println("Available Plugins:")
-	fmt.Println("  ticket, ui, ai, ide, diagnostic, www, cad, chrome")
+	fmt.Println("  ticket, ui, ai, ide, diagnostic, www, cad, chrome, github")
 }
 
 func runAllTests(showList bool) {
@@ -369,4 +371,15 @@ func runWwwCadTests() {
 		logger.LogFatal("WWW CAD test failed: %v", err)
 	}
 	logger.LogInfo("WWW CAD Test passed!")
+}
+
+func runGithubTests() {
+	logger.LogInfo("Running GitHub Plugin Integration Tests...")
+	cmd := exec.Command("go", "run", "src/plugins/github/test/integration.go")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		logger.LogFatal("GitHub tests failed: %v", err)
+	}
+	logger.LogInfo("GitHub Plugin Integration Tests passed!")
 }
