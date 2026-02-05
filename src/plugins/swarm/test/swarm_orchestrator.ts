@@ -4,7 +4,7 @@ import fs from "fs";
 import path from "path";
 
 const LOG_FILE = path.join(process.cwd(), "e2e_unified.log");
-const SCREENSHOT_PATH = path.join(process.cwd(), "dashboard_screenshot.png");
+const SCREENSHOT_DIR = path.join(process.cwd(), "screenshots");
 const logStream = fs.createWriteStream(LOG_FILE, { flags: "w" });
 
 function log(message: string) {
@@ -14,8 +14,21 @@ function log(message: string) {
     logStream.write(line + "\n");
 }
 
+function ensureScreenshotDir() {
+    if (!fs.existsSync(SCREENSHOT_DIR)) {
+        fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+    }
+}
+
+function screenshotPath(label: string) {
+    const safeLabel = label.replace(/[^a-z0-9-_]+/gi, "_").toLowerCase();
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    return path.join(SCREENSHOT_DIR, `${stamp}_${safeLabel}.png`);
+}
+
 async function runTest() {
     log("Starting Consolidated Swarm E2E Test...");
+    ensureScreenshotDir();
 
     // 1. Start the swarm dashboard
     log("Launching swarm dashboard via dialtone.sh...");
@@ -45,7 +58,7 @@ async function runTest() {
     try {
         const page = await browser.newPage();
 
-        // 3. Inject Browser Logs & Errors
+        // 3. Inject Browser Logs, Errors, and Network Traffic
         page.on('console', msg => {
             log(`[BROWSER CONSOLE] ${msg.type().toUpperCase()}: ${msg.text()}`);
         });
@@ -54,8 +67,22 @@ async function runTest() {
             log(`[BROWSER ERROR] ${err.toString()}`);
         });
 
+        page.on('request', request => {
+            log(`[BROWSER REQUEST] ${request.method()} ${request.url()} (${request.resourceType()})`);
+        });
+
+        page.on('response', response => {
+            log(`[BROWSER RESPONSE] ${response.status()} ${response.url()}`);
+        });
+
+        page.on('requestfailed', request => {
+            const failure = request.failure();
+            log(`[BROWSER REQUEST FAILED] ${request.url()} (${failure?.errorText || 'unknown error'})`);
+        });
+
         log("Visiting http://127.0.0.1:4000...");
         await page.goto("http://127.0.0.1:4000", { waitUntil: "networkidle2", timeout: 15000 });
+        await page.screenshot({ path: screenshotPath("loaded") });
 
         log("Initial load complete. Checking for nodes...");
 
@@ -63,12 +90,13 @@ async function runTest() {
         for (let i = 0; i < 3; i++) {
             const content = await page.evaluate(() => document.body.innerText);
             log(`[POLL ${i}] Nodes found: ${content.includes('Running')}`);
-            await page.screenshot({ path: SCREENSHOT_PATH });
+            await page.screenshot({ path: screenshotPath(`poll_${i}`) });
             await new Promise(r => setTimeout(r, 3000));
         }
 
         const title = await page.title();
         log(`Final verification - Title: ${title}`);
+        await page.screenshot({ path: screenshotPath("final") });
 
     } catch (err) {
         log(`TEST FAILURE: ${err.message}`);
