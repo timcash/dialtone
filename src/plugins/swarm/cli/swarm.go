@@ -8,11 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	swarm_test "dialtone/cli/src/plugins/swarm/test"
 )
+
 
 func RunSwarm(args []string) {
 	if len(args) < 1 {
@@ -46,6 +48,8 @@ func RunSwarm(args []string) {
 		runSwarmStatus(subArgs)
 	case "dashboard":
 		runSwarmDashboard(subArgs)
+	case "lint":
+		runSwarmLint(subArgs)
 	default:
 		// Assume the first argument is the topic if no other subcommand matches
 		runSwarmPear(args)
@@ -133,6 +137,25 @@ func runSwarmTest(args []string) {
 		fmt.Printf("[swarm] Test failed: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func runSwarmLint(args []string) {
+	fmt.Println("[swarm] Running linter (standard)...")
+	appDir := filepath.Join("src", "plugins", "swarm", "app")
+
+	envPath := getDialtoneEnvOrExit()
+	npmBin := resolveNpmBin(envPath)
+
+	cmd := exec.Command(npmBin, "run", "lint")
+	cmd.Dir = appDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("[swarm] Linting failed: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("[swarm] Linting passed.")
 }
 
 func runSwarmStart(args []string) {
@@ -354,9 +377,14 @@ func runSwarmStatus(args []string) {
 
 func getPearBin() string {
 	envPath := getDialtoneEnvOrExit()
+	ext := ""
+	if runtime.GOOS == "windows" {
+		ext = ".cmd"
+	}
+
 	candidates := []string{
-		filepath.Join(envPath, "node", "bin", "pear"),
-		filepath.Join(envPath, "bin", "pear"),
+		filepath.Join(envPath, "node", "bin", "pear"+ext),
+		filepath.Join(envPath, "bin", "pear"+ext),
 	}
 	if pearPath := firstExistingPath(candidates); pearPath != "" {
 		return pearPath
@@ -415,7 +443,11 @@ func getDialtoneEnvOrExit() string {
 }
 
 func resolveNpmBin(envPath string) string {
-	localNpm := filepath.Join(envPath, "node", "bin", "npm")
+	ext := ""
+	if runtime.GOOS == "windows" {
+		ext = ".cmd"
+	}
+	localNpm := filepath.Join(envPath, "node", "bin", "npm"+ext)
 	if _, err := os.Stat(localNpm); err == nil {
 		return localNpm
 	}
@@ -429,9 +461,13 @@ func resolveNpmBin(envPath string) string {
 }
 
 func resolveBunBin(envPath string) string {
+	ext := ""
+	if runtime.GOOS == "windows" {
+		ext = ".exe"
+	}
 	candidates := []string{
-		filepath.Join(envPath, "bin", "bun"),
-		filepath.Join(envPath, "bun", "bin", "bun"),
+		filepath.Join(envPath, "bin", "bun"+ext),
+		filepath.Join(envPath, "bun", "bin", "bun"+ext),
 	}
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {
