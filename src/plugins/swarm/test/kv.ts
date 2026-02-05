@@ -1,9 +1,11 @@
+/** @typedef {import('pear-interface')} */
+
 import Autobase from 'autobase';
 import Hyperbee from 'hyperbee';
 import Hypercore from 'hypercore';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
+import fs from 'bare-fs';
+import path from 'bare-path';
+import os from 'bare-os';
 import b4a from 'b4a';
 
 function createTmpDir() {
