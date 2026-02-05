@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"dialtone/cli/src/core/config"
@@ -404,7 +405,7 @@ func runIssue(args []string) {
 	case "help", "-h", "--help":
 		fmt.Println("Usage: ./dialtone.sh github issue <command> [options]")
 		fmt.Println("\nCommands:")
-		fmt.Println("  list      List open issues")
+		fmt.Println("  list      List open issues [--limit N] [--offset N] [--markdown]")
 		fmt.Println("  view <issue-id>    View issue details")
 		fmt.Println("  edit <issue-id>... Edit an issue (add/remove labels)")
 		fmt.Println("  comment <issue-id> <msg> Add a comment to an issue")
@@ -435,31 +436,56 @@ func runIssueList(args []string) {
 	logger.LogInfo("Listing open issues...")
 
 	useMarkdown := false
+	limit := 10
+	offset := 0
 	var ghArgs []string
-	for _, arg := range args {
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		if arg == "--markdown" {
 			useMarkdown = true
+		} else if arg == "--limit" && i+1 < len(args) {
+			l, err := strconv.Atoi(args[i+1])
+			if err == nil {
+				limit = l
+				i++
+			}
+		} else if arg == "--offset" && i+1 < len(args) {
+			o, err := strconv.Atoi(args[i+1])
+			if err == nil {
+				offset = o
+				i++
+			}
 		} else {
 			ghArgs = append(ghArgs, arg)
 		}
 	}
 
 	// Always ask for labels and body
-	cmdArgs := []string{"issue", "list", "--json", "number,title,labels,body"}
+	// We fetch (offset + limit) to allow slicing
+	totalToFetch := offset + limit
+	cmdArgs := []string{"issue", "list", "--limit", strconv.Itoa(totalToFetch), "--json", "number,title,labels,body"}
 	cmdArgs = append(cmdArgs, ghArgs...)
 
 	cmd := exec.Command(gh, cmdArgs...)
+	output, err := cmd.Output()
+	if err != nil {
+		logger.LogFatal("Failed to list issues: %v", err)
+	}
+
+	var issues []GHInfo
+	if err := json.Unmarshal(output, &issues); err != nil {
+		logger.LogFatal("Failed to parse issues: %v", err)
+	}
+
+	// Apply offset
+	if offset < len(issues) {
+		issues = issues[offset:]
+	} else {
+		issues = []GHInfo{}
+	}
+
 	if useMarkdown {
-		output, err := cmd.Output()
-		if err != nil {
-			logger.LogFatal("Failed to list issues: %v", err)
-		}
-
-		var issues []GHInfo
-		if err := json.Unmarshal(output, &issues); err != nil {
-			logger.LogFatal("Failed to parse issues: %v", err)
-		}
-
 		for _, issue := range issues {
 			var labels []string
 			for _, l := range issue.Labels {
@@ -477,10 +503,16 @@ func runIssueList(args []string) {
 			fmt.Println()
 		}
 	} else {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			logger.LogFatal("Failed to list issues: %v", err)
+		// Table output for non-markdown
+		fmt.Println("| # | Title | Labels |")
+		fmt.Println("|---|-------|--------|")
+		for _, issue := range issues {
+			var labels []string
+			for _, l := range issue.Labels {
+				labels = append(labels, l.Name)
+			}
+			labelStr := strings.Join(labels, ", ")
+			fmt.Printf("| %d | %s | %s |\n", issue.Number, issue.Title, labelStr)
 		}
 	}
 }
