@@ -35,6 +35,8 @@ src/tickets/.current_ticket_mode
 src/tickets/**/*.duckdb
 
 # Local Dependencies
+node_modules/
+package-lock.json
 dialtone_dependencies/
 test_dialtone_env
 dev_dependencies/
@@ -45,3 +47,11 @@ keys.duckdb
 src/plugins/**/node_modules/
 src/plugins/**/swarm-metadata.duckdb
 src/plugins/**/metadata.json
+
+# Screenshots & Logs
+*.png
+*.log
+e2e_unified.log
+e2e_results.log
+e2e_unified.log
+dashboard_screenshot.png
