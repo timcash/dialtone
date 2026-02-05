@@ -1,6 +1,6 @@
 # GitHub Plugin
 
-The `github` plugin is the engine for Dialtone's issue and pull request management. It is designed for high-speed triage and automated development workflows.
+The `github` plugin is the engine for Dialtone's issue and pull request management. It is designed for high-speed triage and automated development workflows, optimized for both human developers and AI agents.
 
 ## 1. Issue Management
 
@@ -26,14 +26,13 @@ The `github` plugin is the engine for Dialtone's issue and pull request manageme
 ./dialtone.sh github issue <issue-id> --ready --ticket --p0 --bug
 ```
 
-
 ---
 
 ## 2. Pull Request Management
 
 ```bash
 # Create or update a PR (verifies context and clean branch).
-# Flags: --draft, --ready
+# Flags: --draft, --ready, --view
 ./dialtone.sh github pr create
 
 # View, comment on, and manage PRs.
@@ -43,17 +42,16 @@ The `github` plugin is the engine for Dialtone's issue and pull request manageme
 ./dialtone.sh github pr close [<pr-id>]
 ```
 
-
 ---
 
-## 3. DevOps & Git
-```bash
-# Check Vercel deployment status.
-./dialtone.sh github check-deploy
+## 3. Git Workflow
 
-# Standard Dialtone Git workflow.
-git status
+Dialtone encourages a clean Git workflow using standardized commit messages and branch management.
+
+```bash
+./dialtone.sh branch <feature-name>
 git add .
 git commit -m "type: description"
 git push
+./dialtone.sh github pr
 ```
