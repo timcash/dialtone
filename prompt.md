@@ -11,3 +11,5 @@ write them to prompt.md under the `# LLM:1` on line 4 using markdown
 4.  **Resolved**: Deprecated `issue sync` command has been removed from the GitHub plugin.
 5.  **Resolved**: Robust pre-flight checks for `gh` have been implemented. The plugin now prompts the user to run `./dialtone.sh github install` if the binary is missing.
 
+# LLM:2 github test
+Run `./dialtone.sh plugin test github` to verify the full GitHub PR lifecycle. The test creates a temporary branch, makes a commit, pushes to remote, creates a draft PR, marks it as ready, and then cleans up (closes PR and deletes remote/local branch).
