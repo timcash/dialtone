@@ -4,6 +4,10 @@
     "description": "Dialtone Hyperswarm Plugin",
     "main": "index.js",
     "type": "module",
+    "scripts": {
+        "test": "pear test",
+        "lint": "standard"
+    },
     "dependencies": {
         "autobase": "^7.25.1",
         "b4a": "^1.7.3",
@@ -23,5 +27,14 @@
         "gui": {
             "main": "dashboard.html"
         }
+    },
+    "standard": {
+        "ignore": [
+            "node_modules/**"
+        ]
+    },
+    "devDependencies": {
+        "pear-interface": "^1.1.0",
+        "standard": "^17.1.2"
     }
 }
