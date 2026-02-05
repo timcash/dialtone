@@ -11,7 +11,8 @@
         "bare-fs": "latest",
         "bare-path": "latest",
         "bare-os": "latest",
-        "bare-http1": "latest"
+    "bare-http1": "latest",
+    "bare-subprocess": "latest"
     },
     "pear": {
         "name": "dialtone-swarm",

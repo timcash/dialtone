@@ -27,12 +27,15 @@ func RunMultiPeerConnection() error {
 	// Use project root for appDir
 	appDir := filepath.Join("src", "plugins", "swarm", "app")
 
-	pearBin := "pear"
 	envPath := config.GetDialtoneEnv()
-	if envPath != "" {
-		testPear := filepath.Join(envPath, "node", "bin", "pear")
-		if _, err := os.Stat(testPear); err == nil {
-			pearBin = testPear
+	if envPath == "" {
+		return fmt.Errorf("DIALTONE_ENV is not set. Please set it in env/.env or pass --env.")
+	}
+	pearBin := filepath.Join(envPath, "node", "bin", "pear")
+	if _, err := os.Stat(pearBin); err != nil {
+		pearBin = filepath.Join(envPath, "bin", "pear")
+		if _, err := os.Stat(pearBin); err != nil {
+			return fmt.Errorf("pear not found in DIALTONE_ENV (%s). Run ./dialtone.sh swarm install to link it or install Pear into DIALTONE_ENV", envPath)
 		}
 	}
 

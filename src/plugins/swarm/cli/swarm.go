@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"bufio"
 	"dialtone/cli/src/core/config"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	swarm_test "dialtone/cli/src/plugins/swarm/test"
@@ -34,6 +36,8 @@ func RunSwarm(args []string) {
 		runSwarmE2E(subArgs)
 	case "start":
 		runSwarmStart(subArgs)
+	case "dev":
+		runSwarmDev(subArgs)
 	case "stop":
 		runSwarmStop(subArgs)
 	case "list":
@@ -49,37 +53,75 @@ func RunSwarm(args []string) {
 }
 
 func runSwarmDashboard(args []string) {
-	fmt.Println("[swarm] Opening dashboard...")
+	fmt.Println("[swarm] Starting dashboard HTTP server...")
 	appDir := filepath.Join("src", "plugins", "swarm", "app")
 	pearBin := getPearBin()
 
-	// Pear run . will now use dashboard.html as defined in package.json gui.main
-	cmd := exec.Command(pearBin, "run", ".")
+	// Run the app in dashboard mode so it serves http://127.0.0.1:4000
+	cmd := exec.Command(pearBin, "run", ".", "dashboard", getRepoRoot())
 	cmd.Dir = appDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(), "DIALTONE_REPO="+getRepoRoot())
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("[swarm] Dashboard failed: %v\n", err)
 	}
 }
 
-func runSwarmInstall(args []string) {
-	fmt.Println("[swarm] Installing dependencies...")
-	appDir := filepath.Join("src", "plugins", "swarm", "app")
-
-	npmBin := "npm"
-	envPath := config.GetDialtoneEnv()
-	if envPath != "" {
-		npmBin = filepath.Join(envPath, "node", "bin", "npm")
+func getRepoRoot() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "."
 	}
+	return cwd
+}
 
+func runSwarmInstall(args []string) {
+	fmt.Println("[swarm] Installing dependencies into DIALTONE_ENV...")
+	appDir := filepath.Join("src", "plugins", "swarm", "app")
+	testDir := filepath.Join("src", "plugins", "swarm", "test")
+
+	envPath := getDialtoneEnvOrExit()
+	envAppDir := filepath.Join(envPath, "plugins", "swarm", "app")
+	envTestDir := filepath.Join(envPath, "plugins", "swarm", "test")
+
+	ensureDir(envAppDir)
+	ensureDir(envTestDir)
+
+	copyFile(filepath.Join(appDir, "package.json"), filepath.Join(envAppDir, "package.json"))
+	copyFileIfExists(filepath.Join(appDir, "package-lock.json"), filepath.Join(envAppDir, "package-lock.json"))
+
+	npmBin := resolveNpmBin(envPath)
 	cmd := exec.Command(npmBin, "install")
-	cmd.Dir = appDir
+	cmd.Dir = envAppDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("[swarm] npm install failed: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Link repo app node_modules to DIALTONE_ENV
+	linkNodeModules(appDir, filepath.Join(envAppDir, "node_modules"))
+
+	// Ensure Pear is available from DIALTONE_ENV/bin
+	ensureEnvToolLink(envPath, "pear")
+	ensureEnvToolLink(envPath, "bun")
+
+	// Install test dependencies with bun
+	writeSwarmTestPackage(envTestDir)
+	bunBin := resolveBunBin(envPath)
+	testCmd := exec.Command(bunBin, "install")
+	testCmd.Dir = envTestDir
+	testCmd.Stdout = os.Stdout
+	testCmd.Stderr = os.Stderr
+	if err := testCmd.Run(); err != nil {
+		fmt.Printf("[swarm] bun install failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Link repo test node_modules to DIALTONE_ENV
+	linkNodeModules(testDir, filepath.Join(envTestDir, "node_modules"))
 }
 
 func runSwarmBuild(args []string) {
@@ -95,16 +137,24 @@ func runSwarmTest(args []string) {
 
 func runSwarmStart(args []string) {
 	if len(args) < 1 {
-		fmt.Println("Usage: ./dialtone.sh swarm start <topic>")
+		fmt.Println("Usage: ./dialtone.sh swarm start <topic> [name]")
 		return
 	}
 	topic := args[0]
+	name := ""
+	if len(args) > 1 {
+		name = args[1]
+	}
 	fmt.Printf("[swarm] Starting background node for topic: %s\n", topic)
 
 	appDir := filepath.Join("src", "plugins", "swarm", "app")
 	pearBin := getPearBin()
 
-	cmd := exec.Command(pearBin, "run", ".", topic)
+	cmdArgs := []string{"run", ".", topic}
+	if name != "" {
+		cmdArgs = append(cmdArgs, name)
+	}
+	cmd := exec.Command(pearBin, cmdArgs...)
 	cmd.Dir = appDir
 
 	logPath := filepath.Join(appDir, "swarm.log")
@@ -129,6 +179,35 @@ func runSwarmStart(args []string) {
 	fmt.Printf("[swarm] Node started with PID %d. Logs: %s\n", cmd.Process.Pid, logPath)
 }
 
+func runSwarmDev(args []string) {
+	mode := "dashboard"
+	name := ""
+	if len(args) > 0 && args[0] != "" {
+		mode = args[0]
+	}
+	if len(args) > 1 {
+		name = args[1]
+	}
+
+	fmt.Printf("[swarm] Starting dev mode (%s)...\n", mode)
+	appDir := filepath.Join("src", "plugins", "swarm", "app")
+	pearBin := getPearBin()
+
+	cmdArgs := []string{"run", "--dev", "--devtools", ".", mode}
+	if mode != "dashboard" && name != "" {
+		cmdArgs = append(cmdArgs, name)
+	}
+	cmd := exec.Command(pearBin, cmdArgs...)
+	cmd.Dir = appDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("[swarm] Dev mode failed: %v\n", err)
+	}
+}
+
 func runSwarmStop(args []string) {
 	if len(args) < 1 {
 		fmt.Println("Usage: ./dialtone.sh swarm stop <pid>")
@@ -150,7 +229,14 @@ func runSwarmStop(args []string) {
 	}
 
 	removeNodeFromRegistry(pid)
+	removeStatusFile(pid)
 	fmt.Println("[swarm] Node stopped and removed from registry.")
+}
+
+func removeStatusFile(pid int) {
+	home, _ := os.UserHomeDir()
+	statusFile := filepath.Join(home, ".dialtone", "swarm", fmt.Sprintf("status_%d.json", pid))
+	_ = os.Remove(statusFile)
 }
 
 func reconcileAndCheckNode(n *SwarmNode, realPids map[string]int) (int, string) {
@@ -267,21 +353,32 @@ func runSwarmStatus(args []string) {
 }
 
 func getPearBin() string {
-	pearBin := "pear"
-	envPath := config.GetDialtoneEnv()
-	if envPath != "" {
-		testPear := filepath.Join(envPath, "node", "bin", "pear")
-		if _, err := os.Stat(testPear); err == nil {
-			pearBin = testPear
+	envPath := getDialtoneEnvOrExit()
+	candidates := []string{
+		filepath.Join(envPath, "node", "bin", "pear"),
+		filepath.Join(envPath, "bin", "pear"),
+	}
+	if pearPath := firstExistingPath(candidates); pearPath != "" {
+		return pearPath
+	}
+
+	if promptInstallPear(envPath) {
+		if pearPath := firstExistingPath(candidates); pearPath != "" {
+			return pearPath
 		}
 	}
-	return pearBin
+
+	fmt.Printf("[swarm] pear not found in DIALTONE_ENV (%s).\n", envPath)
+	fmt.Println("[swarm] Please install Pear and re-run (example: add pear to PATH, then run ./dialtone.sh swarm install).")
+	os.Exit(1)
+	return "pear"
 }
 
 func printSwarmUsage() {
 	fmt.Println("Usage: ./dialtone.sh swarm <subcommand> [args]")
 	fmt.Println("\nSubcommands:")
-	fmt.Println("  start <topic>    Start a background node for a topic")
+	fmt.Println("  start <topic> [name]   Start a background node for a topic")
+	fmt.Println("  dev [topic|dashboard] [name]  Run Pear dev mode with devtools")
 	fmt.Println("  stop <pid>       Stop a background node by PID")
 	fmt.Println("  list             List all running swarm nodes")
 	fmt.Println("  status           Show detailed status/top-like report")
@@ -292,10 +389,12 @@ func printSwarmUsage() {
 }
 
 func runSwarmE2E(args []string) {
-	fmt.Println("[swarm] Running Node + Puppeteer Orchestrated E2E tests...")
+	fmt.Println("[swarm] Running Bun + Puppeteer orchestrated E2E tests...")
 	testFile := filepath.Join("src", "plugins", "swarm", "test", "swarm_orchestrator.ts")
 
-	cmd := exec.Command("npx", "tsx", testFile)
+	envPath := getDialtoneEnvOrExit()
+	bunBin := resolveBunBin(envPath)
+	cmd := exec.Command(bunBin, testFile)
 	cmd.Dir = "." // Run from root to let dialtone.sh work
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -306,14 +405,164 @@ func runSwarmE2E(args []string) {
 	fmt.Println("[swarm] E2E tests complete.")
 }
 
+func getDialtoneEnvOrExit() string {
+	envPath := config.GetDialtoneEnv()
+	if envPath == "" {
+		fmt.Println("[swarm] DIALTONE_ENV is not set. Please set it in env/.env or pass --env.")
+		os.Exit(1)
+	}
+	return envPath
+}
+
+func resolveNpmBin(envPath string) string {
+	localNpm := filepath.Join(envPath, "node", "bin", "npm")
+	if _, err := os.Stat(localNpm); err == nil {
+		return localNpm
+	}
+	if path, err := exec.LookPath("npm"); err == nil {
+		fmt.Printf("[swarm] WARNING: npm not found in DIALTONE_ENV, using system npm at %s\n", path)
+		return path
+	}
+	fmt.Printf("[swarm] npm not found in DIALTONE_ENV (%s). Run ./dialtone.sh install first.\n", envPath)
+	os.Exit(1)
+	return "npm"
+}
+
+func resolveBunBin(envPath string) string {
+	candidates := []string{
+		filepath.Join(envPath, "bin", "bun"),
+		filepath.Join(envPath, "bun", "bin", "bun"),
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	if path, err := exec.LookPath("bun"); err == nil {
+		fmt.Printf("[swarm] WARNING: bun not found in DIALTONE_ENV, using system bun at %s\n", path)
+		return path
+	}
+	fmt.Printf("[swarm] bun not found in DIALTONE_ENV (%s). Install bun to run swarm tests.\n", envPath)
+	os.Exit(1)
+	return "bun"
+}
+
+func ensureEnvToolLink(envPath, tool string) {
+	envBin := filepath.Join(envPath, "bin", tool)
+	if _, err := os.Stat(envBin); err == nil {
+		return
+	}
+	toolPath, err := exec.LookPath(tool)
+	if err != nil {
+		fmt.Printf("[swarm] %s not found in PATH to link into DIALTONE_ENV.\n", tool)
+		return
+	}
+	ensureDir(filepath.Join(envPath, "bin"))
+	_ = os.Remove(envBin)
+	if err := os.Symlink(toolPath, envBin); err != nil {
+		fmt.Printf("[swarm] WARNING: Failed to symlink %s into DIALTONE_ENV: %v\n", tool, err)
+	} else {
+		fmt.Printf("[swarm] Linked %s into DIALTONE_ENV at %s\n", tool, envBin)
+	}
+}
+
+func ensureDir(path string) {
+	if err := os.MkdirAll(path, 0755); err != nil {
+		fmt.Printf("[swarm] Failed to create directory %s: %v\n", path, err)
+		os.Exit(1)
+	}
+}
+
+func copyFile(src, dst string) {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		fmt.Printf("[swarm] Failed to read %s: %v\n", src, err)
+		os.Exit(1)
+	}
+	if err := os.WriteFile(dst, data, 0644); err != nil {
+		fmt.Printf("[swarm] Failed to write %s: %v\n", dst, err)
+		os.Exit(1)
+	}
+}
+
+func copyFileIfExists(src, dst string) {
+	if _, err := os.Stat(src); err != nil {
+		return
+	}
+	copyFile(src, dst)
+}
+
+func linkNodeModules(appDir, envNodeModules string) {
+	target := filepath.Join(appDir, "node_modules")
+	if _, err := os.Stat(envNodeModules); err != nil {
+		fmt.Printf("[swarm] Expected node_modules at %s; install may have failed.\n", envNodeModules)
+		return
+	}
+	if info, err := os.Lstat(target); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			if link, err := os.Readlink(target); err == nil && link == envNodeModules {
+				return
+			}
+		}
+		_ = os.RemoveAll(target)
+	}
+	if err := os.Symlink(envNodeModules, target); err != nil {
+		fmt.Printf("[swarm] WARNING: Failed to link node_modules into app dir: %v\n", err)
+	}
+}
+
+func writeSwarmTestPackage(dir string) {
+	packageJSON := `{
+  "name": "dialtone-swarm-test",
+  "private": true,
+  "dependencies": {
+    "puppeteer": "latest"
+  }
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(packageJSON), 0644); err != nil {
+		fmt.Printf("[swarm] Failed to write test package.json: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func firstExistingPath(candidates []string) string {
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return ""
+}
+
+func promptInstallPear(envPath string) bool {
+	fmt.Println("[swarm] Pear not found in DIALTONE_ENV.")
+	fmt.Printf("[swarm] Install Pear and ensure it is linked at %s/bin/pear.\n", envPath)
+	fmt.Println("[swarm] Example: install Pear on your system, then run ./dialtone.sh swarm install.")
+	fmt.Print("[swarm] Press 'y' then Enter to retry after installing, or any other key to abort: ")
+
+	reader := bufio.NewReader(os.Stdin)
+	answer, _ := reader.ReadString('\n')
+	answer = strings.TrimSpace(strings.ToLower(answer))
+	return answer == "y" || answer == "yes"
+}
+
 func runSwarmPear(args []string) {
 	topic := args[0]
+	name := ""
+	if len(args) > 1 {
+		name = args[1]
+	}
 	fmt.Printf("[swarm] Joining topic: %s\n", topic)
 
 	appDir := filepath.Join("src", "plugins", "swarm", "app")
 	pearBin := getPearBin()
 
-	cmd := exec.Command(pearBin, "run", ".", topic)
+	cmdArgs := []string{"run", ".", topic}
+	if name != "" {
+		cmdArgs = append(cmdArgs, name)
+	}
+	cmd := exec.Command(pearBin, cmdArgs...)
 	cmd.Dir = appDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

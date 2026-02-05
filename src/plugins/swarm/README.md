@@ -5,9 +5,10 @@ The Swarm plugin enables peer-to-peer connectivity for Dialtone using Hyperswarm
 ## CLI Usage
 
 ### Lifecycle Commands
-- `./dialtone.sh swarm install`: Install plugin dependencies (npm).
+- `./dialtone.sh swarm install`: Install plugin dependencies into `DIALTONE_ENV` (npm + bun).
 - `./dialtone.sh swarm test`: Run Go-based multi-peer integration tests.
-- `./dialtone.sh swarm test-e2e`: Run consolidated Node+Puppeteer E2E tests.
+- `./dialtone.sh swarm test-e2e`: Run consolidated Bun+Puppeteer E2E tests.
+- `./dialtone.sh swarm dev [topic|dashboard]`: Run Pear dev mode with devtools (defaults to dashboard).
 
 ### Node Management
 - `./dialtone.sh swarm <topic>`: Join a swarm topic in the foreground.
@@ -17,7 +18,14 @@ The Swarm plugin enables peer-to-peer connectivity for Dialtone using Hyperswarm
 - `./dialtone.sh swarm status`: Live "top-like" report showing peer counts and average latency.
 
 ### Web Dashboard
-- `./dialtone.sh swarm dashboard`: Launch the web-based swarm dashboard on port 4000.
+- `./dialtone.sh swarm dashboard`: Launch the web-based swarm dashboard at `http://127.0.0.1:4000`.
+
+## Development & Testing Strategy
+
+- **Dev loop**: Use `./dialtone.sh swarm dev dashboard` to run the HTTP dashboard with Pear devtools.
+- **Network behavior**: Use `./dialtone.sh swarm dev <topic>` to run a live node with devtools.
+- **Integration tests**: `./dialtone.sh swarm test` runs two Pear peers end-to-end.
+- **UI tests**: `./dialtone.sh swarm test-e2e` runs the dashboard and verifies it via Puppeteer.
 
 ## Implementation Details
 
@@ -28,4 +36,4 @@ Background nodes are tracked in `~/.dialtone/swarm/nodes.json`. Each node period
 The `list` and `status` commands dynamically reconcile process IDs and check for "alive" status using Unix signals.
 
 ### E2E Testing
-The consolidated E2E test suite (`src/plugins/swarm/test/swarm_orchestrator.ts`) uses Node and Puppeteer to orchestrate the entire lifecycle, including launching the dashboard and capturing browser console logs/errors.
+The consolidated E2E test suite (`src/plugins/swarm/test/swarm_orchestrator.ts`) uses Bun and Puppeteer to orchestrate the entire lifecycle, including launching the dashboard and capturing browser console logs/errors.
