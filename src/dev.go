@@ -1,4 +1,5 @@
 //go:build !no_duckdb
+
 package dialtone
 
 import (
@@ -14,6 +15,8 @@ import (
 	"dialtone/cli/src/core/install"
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/ssh"
+	test_cli "dialtone/cli/src/core/test/cli"
+	cad_cli "dialtone/cli/src/plugins/cad/cli"
 	camera_cli "dialtone/cli/src/plugins/camera/cli"
 	chrome_cli "dialtone/cli/src/plugins/chrome/cli"
 	cloudflare_cli "dialtone/cli/src/plugins/cloudflare/cli"
@@ -24,17 +27,14 @@ import (
 	ide_cli "dialtone/cli/src/plugins/ide/cli"
 	logs_cli "dialtone/cli/src/plugins/logs/cli"
 	mavlink_cli "dialtone/cli/src/plugins/mavlink/cli"
-	nexttone_cli "dialtone/cli/src/plugins/nexttone/cli"
 	plugin_cli "dialtone/cli/src/plugins/plugin/cli"
-	test_cli "dialtone/cli/src/core/test/cli"
 	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
 	ui_cli "dialtone/cli/src/plugins/ui/cli"
 	vpn_cli "dialtone/cli/src/plugins/vpn/cli"
 	www_cli "dialtone/cli/src/plugins/www/cli"
-	cad_cli "dialtone/cli/src/plugins/cad/cli"
 )
 
-// ExecuteDev is the entry point for the dialtone-dev CLI
+// ExecuteDev is the entry point for the dialtone CLI
 func ExecuteDev() {
 	if len(os.Args) < 2 {
 		printDevUsage()
@@ -87,8 +87,6 @@ func ExecuteDev() {
 		github_cli.RunGithub(args)
 	case "ticket":
 		ticket_cli.Run(args)
-	case "nexttone":
-		nexttone_cli.Run(args)
 	case "plugin":
 		plugin_cli.RunPlugin(args)
 	case "cloudflare":
@@ -123,7 +121,7 @@ func ExecuteDev() {
 }
 
 func printDevUsage() {
-	fmt.Println("Usage: dialtone-dev <command> [options]")
+	fmt.Println("Usage: ./dialtone.sh <command> [options]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  start         Start the NATS and Web server")
 	fmt.Println("  install [path] Install dependencies (--linux-wsl for WSL, --macos-arm for Apple Silicon)")
@@ -139,7 +137,6 @@ func printDevUsage() {
 	fmt.Println("  diagnostic    Run system diagnostics (local or remote)")
 	fmt.Println("  branch <name>      Create or checkout a feature branch")
 	fmt.Println("  ticket <subcmd>    Manage GitHub tickets (start, next, done, etc.)")
-	fmt.Println("  nexttone <subcmd>  Nexttone microtone workflow (next, list)")
 	fmt.Println("  plugin <subcmd>    Manage plugins (add, install, build)")
 	fmt.Println("  ide <subcmd>       IDE tools (setup-workflows)")
 	fmt.Println("  github <subcmd>    Manage GitHub interactions (pr, check-deploy)")
@@ -162,7 +159,7 @@ func isPlugin(name string) bool {
 // runBranch handles the branch command
 func runBranch(args []string) {
 	if len(args) == 0 {
-		fmt.Println("Usage: dialtone-dev branch <name>")
+		fmt.Println("Usage: ./dialtone.sh branch <name>")
 		fmt.Println("\nThis command creates or checks out a feature branch.")
 		os.Exit(1)
 	}

@@ -224,14 +224,14 @@ func runPluginTest(pluginName string, showList bool) {
 		runDiagnosticTests()
 	case "www":
 		runWwwTests()
-	case "nexttone":
-		runNexttoneTests()
 	case "cad":
 		runCadTests()
 	case "chrome":
 		runChromeTests()
 	case "www-cad":
 		runWwwCadTests()
+	case "github":
+		runGithubTests()
 	default:
 		logger.LogFatal("Unknown plugin: %s", pluginName)
 	}
@@ -277,7 +277,7 @@ func printTestUsage() {
 	fmt.Println("Note: For ticket-specific verification, use: ./dialtone.sh ticket test <ticket-name>")
 	fmt.Println()
 	fmt.Println("Available Plugins:")
-	fmt.Println("  ticket, ui, ai, ide, diagnostic, www, nexttone, cad, chrome")
+	fmt.Println("  ticket, ui, ai, ide, diagnostic, www, cad, chrome, github")
 }
 
 func runAllTests(showList bool) {
@@ -293,7 +293,6 @@ func runAllTests(showList bool) {
 	runUiTests()
 	runAiTests()
 	runDiagnosticTests()
-	runNexttoneTests()
 }
 
 func runTicketTests() {
@@ -347,17 +346,6 @@ func runWwwTests() {
 	logger.LogInfo("WWW Plugin Tests passed!")
 }
 
-func runNexttoneTests() {
-	logger.LogInfo("Running Nexttone Plugin Tests...")
-	cmd := exec.Command("go", "run", "./src/plugins/nexttone/test")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		logger.LogFatal("Nexttone tests failed: %v", err)
-	}
-	logger.LogInfo("Nexttone Plugin Tests passed!")
-}
-
 func runCadTests() {
 	logger.LogInfo("Running CAD Plugin Tests...")
 	if err := cad_test.RunAll(); err != nil {
@@ -383,4 +371,15 @@ func runWwwCadTests() {
 		logger.LogFatal("WWW CAD test failed: %v", err)
 	}
 	logger.LogInfo("WWW CAD Test passed!")
+}
+
+func runGithubTests() {
+	logger.LogInfo("Running GitHub Plugin Integration Tests...")
+	cmd := exec.Command("go", "run", "src/plugins/github/test/integration.go")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		logger.LogFatal("GitHub tests failed: %v", err)
+	}
+	logger.LogInfo("GitHub Plugin Integration Tests passed!")
 }
