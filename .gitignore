@@ -9,7 +9,6 @@ src/web_build/
 .idea/
 
 # AI tools
-.crush
 prompt.md
 
 # OS
