@@ -1,0 +1,16 @@
+{
+    "name": "dialtone-swarm",
+    "version": "1.0.0",
+    "description": "Dialtone Hyperswarm Plugin",
+    "main": "index.js",
+    "type": "module",
+    "dependencies": {
+        "hyperswarm": "latest",
+        "hypercore-crypto": "latest",
+        "b4a": "latest"
+    },
+    "pear": {
+        "name": "dialtone-swarm",
+        "gui": false
+    }
+}

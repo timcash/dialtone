@@ -40,3 +40,8 @@ test_dialtone_env
 dev_dependencies/
 keys.duckdb
 .chrome_data/
+
+# Plugins
+src/plugins/**/node_modules/
+src/plugins/**/swarm-metadata.duckdb
+src/plugins/**/metadata.json
