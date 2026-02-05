@@ -8,23 +8,26 @@ The Swarm plugin enables peer-to-peer connectivity for Dialtone using Hyperswarm
 - `./dialtone.sh swarm install`: Install plugin dependencies into `DIALTONE_ENV` (npm + bun).
 - `./dialtone.sh swarm test`: Run Go-based multi-peer integration tests.
 - `./dialtone.sh swarm test-e2e`: Run consolidated Bun+Puppeteer E2E tests.
-- `./dialtone.sh swarm dev [topic|dashboard]`: Run Pear dev mode with devtools (defaults to dashboard).
+- `./dialtone.sh swarm dev [topic|dashboard] [name]`: Run Pear dev mode with devtools (defaults to dashboard).
 
 ### Node Management
 - `./dialtone.sh swarm <topic>`: Join a swarm topic in the foreground.
-- `./dialtone.sh swarm start <topic>`: Start a background node.
+- `./dialtone.sh swarm start <topic> [name]`: Start a background node with an optional instance name.
 - `./dialtone.sh swarm stop <pid>`: Stop a background node by PID.
 - `./dialtone.sh swarm list`: List all running swarm nodes managed by Dialtone.
 - `./dialtone.sh swarm status`: Live "top-like" report showing peer counts and average latency.
 
 ### Web Dashboard
 - `./dialtone.sh swarm dashboard`: Launch the web-based swarm dashboard at `http://127.0.0.1:4000`.
+- The dashboard can start/stop nodes via HTTP endpoints:
+  - `POST /start` with `{ "topic": "...", "name": "..." }`
+  - `POST /stop` with `{ "pid": "1234" }`
 
 ## Development & Testing Strategy
 
 - **Dev loop**: Use `./dialtone.sh swarm dev dashboard` to run the HTTP dashboard with Pear devtools.
-- **Network behavior**: Use `./dialtone.sh swarm dev <topic>` to run a live node with devtools.
-- **Integration tests**: `./dialtone.sh swarm test` runs two Pear peers end-to-end.
+- **Network behavior**: Use `./dialtone.sh swarm dev <topic> [name]` to run a live node with devtools.
+- **Integration tests**: `./dialtone.sh swarm test` runs two Pear peers via `src/plugins/swarm/app/test.js`.
 - **UI tests**: `./dialtone.sh swarm test-e2e` runs the dashboard and verifies it via Puppeteer.
 
 ## Implementation Details
