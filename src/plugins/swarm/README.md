@@ -2,6 +2,9 @@
 
 The Swarm plugin enables peer-to-peer connectivity for Dialtone using Hyperswarm and the Pear runtime.
 
+## Workflow
+- See `src/plugins/swarm/workflow.md` for the step-by-step workflow.
+
 ## CLI Usage
 
 ### Lifecycle Commands
