@@ -28,6 +28,7 @@ import (
 	logs_cli "dialtone/cli/src/plugins/logs/cli"
 	mavlink_cli "dialtone/cli/src/plugins/mavlink/cli"
 	plugin_cli "dialtone/cli/src/plugins/plugin/cli"
+	swarm_cli "dialtone/cli/src/plugins/swarm/cli"
 	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
 	ui_cli "dialtone/cli/src/plugins/ui/cli"
 	vpn_cli "dialtone/cli/src/plugins/vpn/cli"
@@ -87,6 +88,8 @@ func ExecuteDev() {
 		github_cli.RunGithub(args)
 	case "ticket":
 		ticket_cli.Run(args)
+	case "swarm":
+		swarm_cli.RunSwarm(args)
 	case "plugin":
 		plugin_cli.RunPlugin(args)
 	case "cloudflare":
@@ -137,6 +140,7 @@ func printDevUsage() {
 	fmt.Println("  diagnostic    Run system diagnostics (local or remote)")
 	fmt.Println("  branch <name>      Create or checkout a feature branch")
 	fmt.Println("  ticket <subcmd>    Manage GitHub tickets (start, next, done, etc.)")
+	fmt.Println("  swarm <topic>      Join a Hyperswarm topic")
 	fmt.Println("  plugin <subcmd>    Manage plugins (add, install, build)")
 	fmt.Println("  ide <subcmd>       IDE tools (setup-workflows)")
 	fmt.Println("  github <subcmd>    Manage GitHub interactions (pr, check-deploy)")

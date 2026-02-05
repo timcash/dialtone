@@ -30,3 +30,33 @@ https://github.com/holepunchto/hyperdht
 
 this does not need to integrate with any golang code other than the CLI to start it. 
 as a plugin it can have its own install and build that dev.go can call via CLI 
+
+# LLM 2 Prompt:
+- add a `./dialtone.sh swarm test` command to test the swarm plugin.
+
+# LLM 2 Response:
+I have added the `./dialtone.sh swarm test` command. This command executes a dedicated test script (`src/plugins/swarm/app/test.js`) using the Pear runtime.
+
+### How to Run the Test:
+```bash
+./dialtone.sh swarm test
+```
+The test will attempt to join a test topic and exit successfully upon establishing a connection.
+
+
+# LLM 3 Prompt:
+- I want to test having two different nodes join with different private keys but communicate over the same topic.
+
+# LLM 3 Response:
+I have updated the `./dialtone.sh swarm test` command to perform a multi-peer integration test. 
+
+- **Test Logic**: The command now spawns two parallel Pear processes (`peer-a` and `peer-b`).
+- **Key Derivation**: Each peer derives a unique 32-byte key pair from its name using `hypercore-crypto.hash`.
+- **Communication**: Both peers join the `test-topic`, exchange `ping/pong` messages, and exit successfully upon verifying the connection.
+
+### Run the Integration Test:
+```bash
+./dialtone.sh swarm test
+```
+
+
