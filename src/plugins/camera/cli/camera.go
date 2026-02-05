@@ -26,6 +26,8 @@ func RunCamera(args []string) {
 	case "install":
 		// Camera plugin currently uses system libraries (V4L2)
 		fmt.Println("[camera] Camera plugin: No specific dependencies to install.")
+	case "help", "-h", "--help":
+		printUsage()
 	default:
 		fmt.Printf("Unknown camera command: %s\n", command)
 		printUsage()
@@ -33,7 +35,7 @@ func RunCamera(args []string) {
 }
 
 func printUsage() {
-	fmt.Println("Usage: dialtone-dev camera <command>")
+	fmt.Println("Usage: ./dialtone.sh camera <command>")
 	fmt.Println("\nCommands:")
 	fmt.Println("  snapshot   Capture a single frame to snapshot.jpg")
 	fmt.Println("  stream     Start camera and log frame stats to stdout")
@@ -73,7 +75,7 @@ func runSnapshot() {
 			return
 		case <-ticker.C:
 			frame, ts := app.GetLatestFrame()
-			if frame != nil && len(frame) > 0 {
+			if len(frame) > 0 {
 				fmt.Printf("Captured frame: %d bytes (Time: %s)\n", len(frame), ts.Format(time.RFC3339))
 				if err := os.WriteFile("snapshot.jpg", frame, 0644); err != nil {
 					fmt.Printf("Failed to save snapshot: %v\n", err)
@@ -113,21 +115,18 @@ func runStream() {
 	defer ticker.Stop()
 
 	var lastTs time.Time
-	for {
-		select {
-		case <-ticker.C:
-			frame, ts := app.GetLatestFrame()
-			if frame != nil {
-				age := time.Since(ts)
-				fps := "0"
-				if !ts.Equal(lastTs) {
-					fps = ">0" // Simple liveness check
-				}
-				fmt.Printf("Status: Connected | Frame Size: %d bytes | Latency: %s | Liveness: %s\n", len(frame), age, fps)
-				lastTs = ts
-			} else {
-				fmt.Println("Status: Waiting for frames...")
+	for range ticker.C {
+		frame, ts := app.GetLatestFrame()
+		if frame != nil {
+			age := time.Since(ts)
+			fps := "0"
+			if !ts.Equal(lastTs) {
+				fps = ">0" // Simple liveness check
 			}
+			fmt.Printf("Status: Connected | Frame Size: %d bytes | Latency: %s | Liveness: %s\n", len(frame), age, fps)
+			lastTs = ts
+		} else {
+			fmt.Println("Status: Waiting for frames...")
 		}
 	}
 }

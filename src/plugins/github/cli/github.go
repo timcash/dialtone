@@ -45,7 +45,8 @@ func findGH() string {
 		return p
 	}
 
-	return "gh"
+	logger.LogFatal("GitHub CLI ('gh') not found. Please run './dialtone.sh github install' to install it.")
+	return ""
 }
 
 // RunGithub handles 'github <subcommand>'
@@ -59,15 +60,12 @@ func RunGithub(args []string) {
 	restArgs := args[1:]
 
 	switch subcommand {
-	case "pull-request", "pr":
+	case "pr", "pull-request":
 		runPullRequest(restArgs)
 	case "issue":
 		runIssue(restArgs)
-	case "check-deploy":
-		runCheckDeploy(restArgs)
 	case "install":
-		// Already handled by core installer (gh CLI)
-		logger.LogInfo("Github plugin: Dependencies already handled by core installer.")
+		runGithubInstall(restArgs)
 	case "help", "-h", "--help":
 		printGithubUsage()
 	default:
@@ -77,12 +75,47 @@ func RunGithub(args []string) {
 	}
 }
 
+func runGithubInstall(args []string) {
+	depsDir := config.GetDialtoneEnv()
+	ghDir := filepath.Join(depsDir, "gh")
+	ghBin := filepath.Join(ghDir, "bin", "gh")
+
+	if _, err := os.Stat(ghBin); err == nil {
+		logger.LogInfo("GitHub CLI is already installed at %s", ghBin)
+		return
+	}
+
+	logger.LogInfo("Installing GitHub CLI...")
+
+	// Use the core installer logic (abstracted via dialtone.sh for now)
+	// In a real scenario, we might want to call the internal go functions,
+	// but calling our own shell wrapper ensures consistency with the main installer.
+	cmd := exec.Command("./dialtone.sh", "install", "--check")
+	if err := cmd.Run(); err == nil {
+		// If check passes, we are good
+		return
+	}
+
+	logger.LogInfo("Triggering core installer for GitHub CLI...")
+	// We call the main install command but we could also implement minimal wget/tar here.
+	// For Dialtone, the standard is to let the core installer handle it to avoid fragmentation.
+	cmd = exec.Command("./dialtone.sh", "install")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		logger.LogFatal("Failed to install GitHub CLI: %v", err)
+	}
+
+	logger.LogInfo("GitHub CLI installed successfully.")
+}
+
 func printGithubUsage() {
-	fmt.Println("Usage: dialtone-dev github <command> [options]")
+	fmt.Println("Usage: ./dialtone.sh github <command> [options]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  pull-request       Create, update, merge, or close a pull request")
 	fmt.Println("  issue              List or sync GitHub issues to local tickets")
-	fmt.Println("  check-deploy       Check Vercel deployment status for current branch")
+	fmt.Println("  install            Install dependencies (GitHub CLI)")
 	fmt.Println("  help               Show this help message")
 }
 
@@ -202,7 +235,7 @@ func runPullRequest(args []string) {
 		}
 	}
 
-	// Example: dialtone-dev pull-request linux-wsl-camera-support "Added V4L2 support"
+	// Example: ./dialtone.sh github pull-request linux-wsl-camera-support "Added V4L2 support"
 	if len(positional) >= 1 && title == "" {
 		// Use first positional as title (could be branch name)
 		title = positional[0]
@@ -332,45 +365,11 @@ func runPullRequest(args []string) {
 	}
 }
 
-// runCheckDeploy checks the status of the Vercel deployment for the current branch
-func runCheckDeploy(args []string) {
-	logger.LogInfo("Checking Vercel deployment status...")
-
-	// 1. Find Vercel CLI
-	homeDir, _ := os.UserHomeDir()
-	vercelPath := filepath.Join(homeDir, ".dialtone_env", "node", "bin", "vercel")
-	if _, err := os.Stat(vercelPath); os.IsNotExist(err) {
-		if p, err := exec.LookPath("vercel"); err == nil {
-			vercelPath = p
-		} else {
-			logger.LogFatal("Vercel CLI not found. Run 'dialtone install' to install dependencies.")
-		}
-	}
-
-	// 2. Determine web dir
-	webDir := filepath.Join("src", "plugins", "www", "app")
-
-	// 3. Run vercel list
-	// We pass args to allow filtering if the user wants, e.g. dialtone-dev github check-deploy <project>
-	vArgs := append([]string{"list"}, args...)
-
-	cmd := exec.Command(vercelPath, vArgs...)
-	cmd.Dir = webDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	logger.LogInfo("Running: vercel list (in %s)", webDir)
-	if err := cmd.Run(); err != nil {
-		logger.LogFatal("Failed to check deployments: %v", err)
-	}
-}
-
 func runIssue(args []string) {
 	if len(args) == 0 {
-		fmt.Println("Usage: dialtone-dev github issue <command> [options]")
+		fmt.Println("Usage: ./dialtone.sh github issue <command> [options]")
 		fmt.Println("\nCommands:")
 		fmt.Println("  list      List open issues")
-		fmt.Println("  sync      (DEPRECATED) Sync open issues to local tickets")
 		fmt.Println("  view <issue-id>    View issue details")
 		fmt.Println("  edit <issue-id>... Edit an issue (add/remove labels)")
 		fmt.Println("  comment <issue-id> <msg> Add a comment to an issue")
@@ -392,8 +391,6 @@ func runIssue(args []string) {
 	switch subcommand {
 	case "list":
 		runIssueList(restArgs)
-	case "sync":
-		runIssueSync(restArgs)
 	case "view":
 		runIssueView(restArgs)
 	case "edit":
@@ -404,9 +401,19 @@ func runIssue(args []string) {
 		runIssueClose(restArgs)
 	case "close-all":
 		runIssueCloseAll(restArgs)
+	case "help", "-h", "--help":
+		fmt.Println("Usage: ./dialtone.sh github issue <command> [options]")
+		fmt.Println("\nCommands:")
+		fmt.Println("  list      List open issues")
+		fmt.Println("  view <issue-id>    View issue details")
+		fmt.Println("  edit <issue-id>... Edit an issue (add/remove labels)")
+		fmt.Println("  comment <issue-id> <msg> Add a comment to an issue")
+		fmt.Println("  close <issue-id>... Close specific issue(s)")
+		fmt.Println("  close-all          Close all open issues")
+		return
 	default:
 		fmt.Printf("Unknown issue command: %s (or missing issue-id)\n", subcommand)
-		fmt.Println("Usage: dialtone-dev github issue <issue-id> [--ready]")
+		fmt.Println("Usage: ./dialtone.sh github issue <issue-id> [--ready]")
 
 		os.Exit(1)
 	}
@@ -472,61 +479,6 @@ func runIssueList(args []string) {
 	}
 }
 
-func runIssueSync(args []string) {
-	logger.LogWarn("The 'issue sync' command is DEPRECATED and may be removed in a future version. Please use manual ticket creation.")
-	gh := findGH()
-	logger.LogInfo("Syncing GitHub issues to local tickets...")
-
-	// Get issues
-	cmd := exec.Command(gh, "issue", "list", "--json", "number,title,body", "--limit", "100")
-	output, err := cmd.Output()
-	if err != nil {
-		logger.LogFatal("Failed to fetch issues: %v", err)
-	}
-
-	var issues []GHInfo
-	if err := json.Unmarshal(output, &issues); err != nil {
-		logger.LogFatal("Failed to parse issues: %v", err)
-	}
-
-	templatePath := filepath.Join("tickets", "template-ticket", "ticket.md")
-	templateBytes, err := os.ReadFile(templatePath)
-	if err != nil {
-		logger.LogFatal("Failed to read ticket template: %v", err)
-	}
-	template := string(templateBytes)
-
-	for _, issue := range issues {
-		slug := generateSlug(issue.Title)
-		ticketDir := filepath.Join("tickets", slug)
-		ticketFile := filepath.Join(ticketDir, "ticket.md")
-
-		if _, err := os.Stat(ticketFile); err == nil {
-			logger.LogInfo("Ticket already exists: %s", slug)
-			continue
-		}
-
-		logger.LogInfo("Creating ticket for issue #%d: %s", issue.Number, issue.Title)
-
-		if err := os.MkdirAll(ticketDir, 0755); err != nil {
-			logger.LogFatal("Failed to create ticket directory: %v", err)
-		}
-
-		content := strings.ReplaceAll(template, "ticket-short-name", slug)
-		content = strings.ReplaceAll(content, "[Ticket Title]", issue.Title)
-
-		// Add issue body to Collaborative Notes or at the end
-		if issue.Body != "" {
-			bodySection := fmt.Sprintf("\n## Issue Summary\n%s\n", issue.Body)
-			content = strings.ReplaceAll(content, "## Collaborative Notes", bodySection+"\n## Collaborative Notes")
-		}
-
-		if err := os.WriteFile(ticketFile, []byte(content), 0644); err != nil {
-			logger.LogFatal("Failed to write ticket file: %v", err)
-		}
-	}
-}
-
 func runIssueView(args []string) {
 	if len(args) < 1 {
 		logger.LogFatal("Usage: github issue view <issue-id>")
@@ -571,7 +523,7 @@ func handleIssueDirect(issueNum string, args []string) {
 
 func runIssueEdit(args []string) {
 	if len(args) < 1 {
-		logger.LogFatal("Usage: dialtone-dev github issue edit <issue-id> [options]")
+		logger.LogFatal("Usage: ./dialtone.sh github issue edit <issue-id> [options]")
 
 	}
 	issueNum := args[0]
@@ -632,7 +584,7 @@ func runIssueComment(args []string) {
 
 func runIssueClose(args []string) {
 	if len(args) == 0 {
-		logger.LogFatal("Usage: dialtone-dev github issue close <issue-id>...")
+		logger.LogFatal("Usage: ./dialtone.sh github issue close <issue-id>...")
 
 	}
 

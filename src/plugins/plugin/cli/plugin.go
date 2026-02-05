@@ -49,7 +49,7 @@ func RunPlugin(args []string) {
 }
 
 func printUsage() {
-	fmt.Println("Usage: dialtone-dev plugin <command> [options]")
+	fmt.Println("Usage: ./dialtone.sh plugin <command> [options]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  add <plugin-name>      Create a new plugin structure")
 	fmt.Println("  create <plugin-name>   Alias for 'add'")
