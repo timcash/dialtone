@@ -55,13 +55,33 @@ sections.register('s-cad', {
     }
 });
 
-sections.register('s-webgpu', {
-    containerId: 'webgpu-container',
+sections.register('s-radio', {
+    containerId: 'radio-container',
     load: async () => {
-        const { mountWebgpu } = await import('./components/webgpu');
-        const container = document.getElementById('webgpu-container');
-        if (!container) throw new Error('webgpu-container not found');
-        return mountWebgpu(container);
+        const { mountRadio } = await import('./components/radio');
+        const container = document.getElementById('radio-container');
+        if (!container) throw new Error('radio-container not found');
+        return mountRadio(container);
+    }
+});
+
+sections.register('s-webgpu-template', {
+    containerId: 'webgpu-template-container',
+    load: async () => {
+        const { mountWebgpuTemplate } = await import('./components/webgpu-template');
+        const container = document.getElementById('webgpu-template-container');
+        if (!container) throw new Error('webgpu-template-container not found');
+        return mountWebgpuTemplate(container);
+    }
+});
+
+sections.register('s-threejs-template', {
+    containerId: 'threejs-template-container',
+    load: async () => {
+        const { mountThreeJsTemplate } = await import('./components/threejs-template');
+        const container = document.getElementById('threejs-template-container');
+        if (!container) throw new Error('threejs-template-container not found');
+        return mountThreeJsTemplate(container);
     }
 });
 
@@ -89,9 +109,43 @@ sections.register('s-docs', {
 
 // Start observing visibility and eagerly load first section
 sections.observe();
-sections.eagerLoad('s-home');
+
+// If URL has a section hash (e.g. from demo: #s-radio), scroll there and load that section first
+const initialHash = window.location.hash.slice(1);
+if (initialHash && document.getElementById(initialHash)?.classList.contains('snap-slide')) {
+    sections.eagerLoad(initialHash);
+    const section = document.getElementById(initialHash);
+    if (section) {
+        requestAnimationFrame(() => {
+            section.scrollIntoView({ behavior: 'auto', block: 'start' });
+        });
+    }
+} else {
+    sections.eagerLoad('s-home');
+}
 
 const slides = document.querySelectorAll('.snap-slide[data-subtitle]');
+
+// Update URL hash when scroll brings a section into view (so #s-threejs-template etc. stays in sync)
+const allSlides = document.querySelectorAll('.snap-slide');
+const hashObserver = new IntersectionObserver(
+    (entries) => {
+        let best: { id: string; ratio: number } | null = null;
+        for (const entry of entries) {
+            if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
+                const id = (entry.target as HTMLElement).id;
+                if (id && (!best || entry.intersectionRatio > best.ratio)) {
+                    best = { id, ratio: entry.intersectionRatio };
+                }
+            }
+        }
+        if (best && location.hash.slice(1) !== best.id) {
+            history.replaceState(null, '', '#' + best.id);
+        }
+    },
+    { threshold: [0.5, 0.75, 1] }
+);
+allSlides.forEach((el) => hashObserver.observe(el));
 
 // Marketing fade-in on section entry
 const marketingObserver = new IntersectionObserver((entries) => {
