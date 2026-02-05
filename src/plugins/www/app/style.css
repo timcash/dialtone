@@ -91,7 +91,9 @@ h2 {
 #math-container,
 #cad-container,
 #robot-container,
-#webgpu-container {
+#webgpu-template-container,
+#radio-container,
+#threejs-template-container {
   position: absolute;
   top: 0;
   left: 0;
@@ -104,7 +106,9 @@ h2 {
 #nn-container canvas,
 #math-container canvas,
 #robot-container canvas,
-#webgpu-container canvas {
+#webgpu-template-container canvas,
+#radio-container canvas,
+#threejs-template-container canvas {
   display: block;
 }
 
