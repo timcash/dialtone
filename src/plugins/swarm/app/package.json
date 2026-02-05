@@ -7,10 +7,16 @@
     "dependencies": {
         "hyperswarm": "latest",
         "hypercore-crypto": "latest",
-        "b4a": "latest"
+        "b4a": "latest",
+        "bare-fs": "latest",
+        "bare-path": "latest",
+        "bare-os": "latest",
+        "bare-http1": "latest"
     },
     "pear": {
         "name": "dialtone-swarm",
-        "gui": false
+        "gui": {
+            "main": "dashboard.html"
+        }
     }
 }
