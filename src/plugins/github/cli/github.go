@@ -444,8 +444,8 @@ func runIssueList(args []string) {
 		}
 	}
 
-	// Always ask for labels
-	cmdArgs := []string{"issue", "list", "--json", "number,title,labels"}
+	// Always ask for labels and body
+	cmdArgs := []string{"issue", "list", "--json", "number,title,labels,body"}
 	cmdArgs = append(cmdArgs, ghArgs...)
 
 	cmd := exec.Command(gh, cmdArgs...)
@@ -460,15 +460,19 @@ func runIssueList(args []string) {
 			logger.LogFatal("Failed to parse issues: %v", err)
 		}
 
-		fmt.Println("| # | Title | Labels |")
-		fmt.Println("|---|-------|--------|")
 		for _, issue := range issues {
 			var labels []string
 			for _, l := range issue.Labels {
 				labels = append(labels, l.Name)
 			}
 			labelStr := strings.Join(labels, ", ")
-			fmt.Printf("| %d | %s | %s |\n", issue.Number, issue.Title, labelStr)
+			fmt.Printf("### issue:%d\n", issue.Number)
+			fmt.Printf("title: %s\n", issue.Title)
+			fmt.Printf("> labels: %s\n", labelStr)
+			if issue.Body != "" {
+				fmt.Printf("%s\n", issue.Body)
+			}
+			fmt.Println()
 		}
 	} else {
 		cmd.Stdout = os.Stdout
