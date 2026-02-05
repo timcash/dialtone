@@ -1,11 +1,11 @@
 package cli
 
 import (
+	"dialtone/cli/src/plugins/cad/app"
 	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
-	"dialtone/cli/src/plugins/cad/app"
 )
 
 // RunCad handles the 'cad' command
@@ -31,7 +31,7 @@ func RunCad(args []string) {
 }
 
 func printUsage() {
-	fmt.Println("Usage: dialtone-dev cad <command> [options]")
+	fmt.Println("Usage: ./dialtone.sh cad <command> [options]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  server    Start the CAD backend server")
 	fmt.Println("  test      Run CAD plugin tests")
@@ -40,9 +40,9 @@ func printUsage() {
 
 func runServer() {
 	fmt.Println("[cad] Starting Go backend server on :8081...")
-	
+
 	mux := http.NewServeMux()
-	
+
 	// Register CAD handlers
 	app.RegisterHandlers(mux)
 
@@ -51,11 +51,11 @@ func runServer() {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		
+
 		if r.Method == "OPTIONS" {
 			return
 		}
-		
+
 		fmt.Printf("[cad] Handling %s %s\n", r.Method, r.URL.Path)
 		mux.ServeHTTP(w, r)
 	})

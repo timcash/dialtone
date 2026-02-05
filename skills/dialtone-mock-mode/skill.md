@@ -31,7 +31,7 @@ This skill can use many workflows, including:
 This skill can use many plugins, including:
 - `./dialtone.sh ui` for dashboard behavior.
 - `./dialtone.sh camera` and `./dialtone.sh mavlink` for simulated IO boundaries.
-- `./dialtone.sh logs` and `dialtone-dev test` for validation and snapshots.
+- `./dialtone.sh logs` and `./dialtone.sh test` for validation and snapshots.
 
 ## Example Tasks
 - Validate UI flows using simulated telemetry.

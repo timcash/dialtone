@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"dialtone/cli/src/plugins/mavlink/app"
+	mavlink "dialtone/cli/src/plugins/mavlink/app"
 )
 
 func RunMavlink(args []string) {
@@ -28,7 +28,7 @@ func RunMavlink(args []string) {
 }
 
 func printUsage() {
-	fmt.Println("Usage: dialtone-dev mavlink <command>")
+	fmt.Println("Usage: ./dialtone.sh mavlink <command>")
 	fmt.Println("\nCommands:")
 	fmt.Println("  arm      Arm the robot")
 	fmt.Println("  disarm   Disarm the robot")

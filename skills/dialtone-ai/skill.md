@@ -31,7 +31,7 @@ This skill can use many workflows, including:
 This skill can use many plugins, including:
 - `./dialtone.sh ai` for model orchestration.
 - `./dialtone.sh camera` and `./dialtone.sh mavlink` for sensor inputs.
-- `./dialtone.sh logs` and `dialtone-dev test` for evaluation.
+- `./dialtone.sh logs` and `./dialtone.sh test` for evaluation.
 
 ## Example Tasks
 - Add a new vision model for object tracking.
