@@ -10,6 +10,7 @@ src/web_build/
 
 # AI tools
 .crush
+prompt.md
 
 # OS
 .DS_Store
