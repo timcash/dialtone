@@ -78,6 +78,72 @@ Validate the swarm infrastructure using Pear (p2p) or Puppeteer (e2e).
 # Run Pear-based p2p integration tests
 ./dialtone.sh swarm test
 
+
 # Run full E2E dashboard tests (Puppeteer + Bun)
 ./dialtone.sh swarm test-e2e
 ```
+
+## 5. TypeScript Support
+The Swarm K/V implementation uses `autobase`, which does not currently ship with official TypeScript definitions. To resolve `lint` errors in VS Code or during build time, we include a local declaration file.
+
+### Fixing "Cannot find module 'autobase'"
+If you see this error, ensure your `tsconfig.json` includes the local `types` directory:
+
+```json
+{
+  "compilerOptions": {
+    "typeRoots": ["./node_modules/@types", "./types"]
+  }
+}
+```
+
+We provide a custom definition in `src/plugins/swarm/test/types/autobase.d.ts`.
+
+## 6. Node.js Compatibility
+Pear apps use the Bare runtime, which provides mostly compatible `bare-*` modules for Node.js core APIs (e.g., `bare-fs` instead of `fs`).
+
+### Import Maps (`package.json`)
+To use standard Node.js imports like `import fs from 'fs'`, map them in your `package.json`:
+
+```json
+{
+  "imports": {
+    "fs": {
+      "bare": "bare-fs",
+      "default": "fs"
+    }
+  },
+  "dependencies": {
+    "bare-fs": "^2.1.5"
+  }
+}
+```
+
+### Deviant Mappings
+Most modules map directly (e.g., `path` -> `bare-path`), but some have different names:
+*   `http` -> `bare-http1`
+*   `child_process` -> `bare-subprocess`
+*   `detached` -> `bare-daemon`
+
+See [Pear Node.js Compatibility](https://docs.pears.com/reference/node-compat.html) for full details.
+
+## 7. Pear FAQ Highlights
+Key questions answered in the [official FAQ](https://docs.pears.com/reference/faq.html):
+*   **How Do I Get a List of Pear Applications I've Installed?** (`pear data apps`)
+*   **How Do I Uninstall a Pear Application?** (Currently not supported, use `pear drop` to reset storage)
+*   **Where is the Pear Application stored?** (Operating system dependent, e.g., `~/.config/pear`)
+*   **Can Pear be used with X language?** (Mostly JavaScript/TypeScript, others via native addons)
+*   **How Do I Write an Application Once So It Can Be Run on Desktop, Mobile, etc?** (Separate "Pear-end" logic from UI)
+*   **How is my Application Distributed?** (Via the swarm, ensure `pear seed` is running)
+*   **Why Is NPM Used For Dependencies?** (Bootstrap and package management)
+*   **How Do I Distribute a Binary Version?** (Use `pear-appling`)
+*   **Can Peers Know My IP Address?** (Yes, IP is exchanged for P2P connection)
+
+## 8. Recommended Practices
+Key best practices from the [official guide](https://docs.pears.com/reference/recommended-practices.html):
+*   **One Corestore per App**: Reduces file handles and storage duplication.
+*   **One Hyperswarm per App**: Efficiently manages connections and DHT lookups.
+*   **No Remote Code**: Never load JS over HTTP(S) to prevent supply chain attacks.
+*   **Prune Dev Dependencies**: Run `npm prune --omit=dev` before staging to reduce bundle size.
+*   **Exclude .git**: Ensure `.git` is ignored in your stage configuration.
+
