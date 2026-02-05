@@ -17,14 +17,19 @@ Run `./dialtone.sh plugin test github` to verify the full GitHub PR lifecycle. T
 # Issue Format
 
 ### issue:id
-title:
-> labels:
-body
+- title:
+- labels:
+```markdown
+## Body Internal Markdown Example
+1. Hello
+2. World
+```
 
 # LLM:3
 ### issue:201
-title: upgrade ai gemini plugin
-> labels: 
+- title: upgrade ai gemini plugin
+- labels: 
+```markdown
 use a streaming loops like this 
 ```javascript 
 import { GoogleGenAI } from '@google/genai';
@@ -51,22 +56,28 @@ for await (const chunk of stream) {
 }
 ```
 see https://ai.google.dev/gemini-api/docs/interactions?ua=chat#streaming
+```
 
 ### issue:200
-title: create plugin for web based urdf-studio
-> labels: 
+- title: create plugin for web based urdf-studio
+- labels: 
+```markdown
 see https://github.com/OpenLegged/URDF-Studio
+```
 
 ### issue:199
-title: create plugin for codex SDK
-> labels: 
+- title: create plugin for codex SDK
+- labels: 
+```markdown
 see https://github.com/openai/codex/tree/main/sdk/typescript
 and use the streaming api https://ai.google.dev/gemini-api/docs/interactions?ua=chat#streaming
 
+```
 
 ### issue:198
-title: create holepunch bare js-runtime integration
-> labels: 
+- title: create holepunch bare js-runtime integration
+- labels: 
+```markdown
 see https://github.com/holepunchto/bare
 
 Docs and Requirements 
@@ -90,66 +101,84 @@ as a plugin it can have its own install and build that dev.go can call via CLI
 
 
 
+```
 
 ### issue:138
-title: create a ticket for a plugin to build geospatial maps
-> labels: 
+- title: create a ticket for a plugin to build geospatial maps
+- labels: 
+```markdown
 use https://github.com/milos-agathon/3d-bivariate-climate-maps for examples
+```
 
 ### issue:137
-title: review this paper for camera based navigation
-> labels: 
+- title: review this paper for camera based navigation
+- labels: 
+```markdown
 https://arxiv.org/pdf/2601.19887
 
 extract key ideas and create a summary in this issue as a comment
+```
 
 ### issue:117
-title: integrate a simple plugin with duckdb and graph queries
-> labels: 
+- title: integrate a simple plugin with duckdb and graph queries
+- labels: 
+```markdown
 use https://duckdb.org/2025/10/22/duckdb-graph-queries-duckpgq for inspiration
+```
 
 ### issue:104
-title: improve the install plugin for dev and production
-> labels: p0, ticket, ready
+- title: improve the install plugin for dev and production
+- labels: p0, ticket, ready
+```markdown
 1. research improve the install plugin to have dev and production install paths for each plugin 
 2. move each plugin install and build logic (if they have any) into the plugin
 3. use a install.go and build.go in the plugin folder if needed
 4. test installing different configurations on linux macos windows-wsl and rasberry pi
+```
 
 ### issue:97
-title: ticket integrate a bubbletea plugin
-> labels: bug, enhancement, ticket, p1, ready
+- title: ticket integrate a bubbletea plugin
+- labels: bug, enhancement, ticket, p1, ready
+```markdown
 see https://github.com/charmbracelet/bubbletea
 and give dialtone a TUI
+```
 
 ### issue:96
-title: integrate ideas for memory from clawdbot
-> labels: question
+- title: integrate ideas for memory from clawdbot
+- labels: question
+```markdown
 see post https://x.com/manthanguptaa/status/2015780646770323543?s=46
+```
 
 ### issue:91
-title: ticket create a rf-detr plugin and demo
-> labels: ticket, ready
+- title: ticket create a rf-detr plugin and demo
+- labels: ticket, ready
+```markdown
 integrate https://github.com/roboflow/rf-detr into a plugin
 
 use veo3 or newer to generate a video of a cat to fine tune the model
 
 show using the live camera feed to track a cat
+```
 
 ### issue:90
-title: ticket create a plugin for raspberry pi management
-> labels: question
+- title: ticket create a plugin for raspberry pi management
+- labels: question
 
 ### issue:89
-title: ticket integrate machine learning and blender tools into a plugin
-> labels: ticket, ready
+- title: ticket integrate machine learning and blender tools into a plugin
+- labels: ticket, ready
+```markdown
 use this repo for inspiration https://github.com/Fugtemypt123/VIGA
 
 use blender apis to directly code 3D scenes
+```
 
 ### issue:83
-title: ticket integrate opencode cli into robot ui xterm.js element
-> labels: ticket, ready
+- title: ticket integrate opencode cli into robot ui xterm.js element
+- labels: ticket, ready
+```markdown
 1. turn all prompts or issues into subtasks
 1. write the subtask TEST first 
 1. then write the code to pass the test
@@ -165,19 +194,23 @@ title: ticket integrate opencode cli into robot ui xterm.js element
 ## SUBTASK: look at the web ui that gets deployed to the robot
 ## SUBTASK: also look at the webpage interface that comes with opencode
 ## deploy the code to the robot at the end to verify the discord integration works from the robot
+```
 
 ### issue:82
-title: plugin: integrate discord api at https://discord.com/developers/social-sdk
-> labels: ticket, ready
+- title: plugin: integrate discord api at https://discord.com/developers/social-sdk
+- labels: ticket, ready
+```markdown
 1. Create a new ticket called discord-api-simple
 2. use the ticket workflow
 
 ## SUBTASK: use the documentation
 1. look here to get started https://discord.com/developers/social-sdk
+```
 
 ### issue:55
-title: Create atopile plugin
-> labels: ticket, ready
+- title: Create atopile plugin
+- labels: ticket, ready
+```markdown
 see https://docs.atopile.io/atopile/introduction
 
 Introduction
@@ -185,3 +218,4 @@ Design circuit boards blazing fast - with code
 atopile brings the power of software development workflows to hardware design. By describing electronics with code, you can leverage, modularity version control, and deep validation.
 Capture design intelligence and constraints directly in your code, enabling auto-selection of components, embedded calculations checked on every build, and reliable, configurable modules.
 This allows for rapid iteration, easier collaboration, and robust designs validated through continuous integration.
+```

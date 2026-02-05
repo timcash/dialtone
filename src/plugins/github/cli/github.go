@@ -467,10 +467,12 @@ func runIssueList(args []string) {
 			}
 			labelStr := strings.Join(labels, ", ")
 			fmt.Printf("### issue:%d\n", issue.Number)
-			fmt.Printf("title: %s\n", issue.Title)
-			fmt.Printf("> labels: %s\n", labelStr)
+			fmt.Printf("- title: %s\n", issue.Title)
+			fmt.Printf("- labels: %s\n", labelStr)
 			if issue.Body != "" {
+				fmt.Println("```markdown")
 				fmt.Printf("%s\n", issue.Body)
+				fmt.Println("```")
 			}
 			fmt.Println()
 		}
