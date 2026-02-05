@@ -1,3 +1,4 @@
+/** @typedef {import('pear-interface')} */
 import Hyperswarm from 'hyperswarm'
 import b4a from 'b4a'
 import crypto from 'hypercore-crypto'
@@ -62,7 +63,7 @@ if (mode === 'dashboard') {
       }
     })
 
-  // Start heartbeat
+    // Start heartbeat
     const interval = setInterval(() => {
       socket.write(b4a.from('ping:' + Date.now()))
     }, 5000)
@@ -80,7 +81,7 @@ if (mode === 'dashboard') {
     updateStatus()
   })
 
-// Keep alive and periodic update
+  // Keep alive and periodic update
   setInterval(updateStatus, 10000)
 
   Pear.teardown(async () => {
