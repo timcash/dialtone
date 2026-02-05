@@ -56,3 +56,5 @@ e2e_unified.log
 e2e_results.log
 e2e_unified.log
 dashboard_screenshot.png
+src/plugins/swarm/app/node_modules
+src/plugins/swarm/test/node_modules
