@@ -4,6 +4,7 @@ import { GpuTimer } from "./gpu_timer";
 import { VisibilityMixin } from "./section";
 import cubeGlowVert from "../shaders/template-cube.vert.glsl?raw";
 import cubeGlowFrag from "../shaders/template-cube.frag.glsl?raw";
+import { startTyping } from "./typing";
 
 /**
  * Radio section: aligned with threejs-template (key light, glow, FPS, backend).
@@ -204,14 +205,25 @@ export function mountRadio(container: HTMLElement) {
   container.innerHTML = `
     <div class="marketing-overlay" aria-label="Radio section: handheld with LCD">
       <h2>Open-source radio for small robots</h2>
-      <p>Hand-held form factor, dual antenna, LCD screen. Mount it on your bot and stay connected.</p>
+      <p data-typing-subtitle></p>
     </div>
   `;
+
+  const subtitleEl = container.querySelector(
+    "[data-typing-subtitle]"
+  ) as HTMLParagraphElement | null;
+  const subtitles = [
+    "Hand-held form factor with dual antenna.",
+    "Mount it on your bot and stay connected.",
+    "Built for field links and shared networks.",
+  ];
+  const stopTyping = startTyping(subtitleEl, subtitles);
 
   const viz = new RadioVisualization(container);
   return {
     dispose: () => {
       viz.dispose();
+      stopTyping();
       container.innerHTML = "";
     },
     setVisible: (visible: boolean) => viz.setVisible(visible),

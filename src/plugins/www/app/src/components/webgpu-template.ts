@@ -1,5 +1,6 @@
 import { FpsCounter } from "./fps";
 import { VisibilityMixin } from "./section";
+import { startTyping } from "./typing";
 
 /**
  * WebGPU template: minimal working section using the WebGPU API (no Three.js).
@@ -509,18 +510,30 @@ class WebGpuVisualization {
 }
 
 export async function mountWebgpuTemplate(container: HTMLElement) {
+  let stopTyping = () => {};
   container.innerHTML = `
     <div class="marketing-overlay" aria-label="WebGPU template section">
       <h2>Start here for WebGPU</h2>
-      <p>The simplest working WebGPU section—adapter, device, context, pipeline, and a lit sphere. Copy this component when you add a new WebGPU section to the site.</p>
+      <p data-typing-subtitle></p>
     </div>
   `;
+
+  const subtitleEl = container.querySelector(
+    "[data-typing-subtitle]"
+  ) as HTMLParagraphElement | null;
+  const subtitles = [
+    "Adapter, device, context, pipeline, and a lit sphere.",
+    "Copy this component for new WebGPU sections.",
+    "The simplest working WebGPU template.",
+  ];
+  stopTyping = startTyping(subtitleEl, subtitles);
 
   const canvas = document.createElement("canvas");
   canvas.className = "webgpu-canvas";
   container.appendChild(canvas);
 
   if (!("gpu" in navigator)) {
+    stopTyping();
     container.innerHTML = `
       <div class="marketing-overlay" aria-label="WebGPU unsupported">
         <h2>WebGPU not available</h2>
@@ -579,6 +592,7 @@ export async function mountWebgpuTemplate(container: HTMLElement) {
   return {
     dispose: () => {
       viz.dispose();
+      stopTyping();
       container.innerHTML = "";
     },
     setVisible: (visible: boolean) => viz.setVisible(visible),

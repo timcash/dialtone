@@ -6,6 +6,7 @@ import gridFragmentShader from "../shaders/grid.frag.glsl?raw";
 import { FpsCounter } from "./fps";
 import { GpuTimer } from "./gpu_timer";
 import { VisibilityMixin } from "./section";
+import { startTyping } from "./typing";
 
 
 const COLORS = {
@@ -757,7 +758,7 @@ export function mountMath(container: HTMLElement) {
   container.innerHTML = `
       <div class="marketing-overlay" aria-label="Mathematics marketing information">
         <h2>Mathematics powers autonomy</h2>
-        <p>From first principles to autonomous systems. Experience the logic that drives intelligent behavior.</p>
+        <p data-typing-subtitle></p>
       </div>
       <div id="math-config-panel" class="earth-config-panel" hidden></div>
     `;
@@ -772,11 +773,22 @@ export function mountMath(container: HTMLElement) {
   toggle.textContent = 'Config';
   controls?.prepend(toggle);
 
+  const subtitleEl = container.querySelector(
+    "[data-typing-subtitle]"
+  ) as HTMLParagraphElement | null;
+  const subtitles = [
+    "From first principles to autonomous systems.",
+    "Experience the logic that drives intelligent behavior.",
+    "Learn the math behind motion and control.",
+  ];
+  const stopTyping = startTyping(subtitleEl, subtitles);
+
   const viz = new MathVisualization(container);
   return {
     dispose: () => {
       viz.dispose();
       toggle.remove();
+      stopTyping();
       container.innerHTML = '';
     },
     setVisible: (visible: boolean) => viz.setVisible(visible),

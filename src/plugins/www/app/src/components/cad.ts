@@ -5,6 +5,7 @@ import glowFragmentShader from "../shaders/glow.frag.glsl?raw";
 import { FpsCounter } from "./fps";
 import { GpuTimer } from "./gpu_timer";
 import { VisibilityMixin } from "./section";
+import { startTyping } from "./typing";
 
 
 export class CADViewer {
@@ -425,8 +426,8 @@ export function mountCAD(container: HTMLElement) {
   // Inject HTML
   container.innerHTML = `
       <div class="marketing-overlay" aria-label="CAD marketing information">
-        <h2>Parametric Design Logic</h2>
-        <p>Iterate on hardware designs by changing parameters in real-time. Powered by CadQuery.</p>
+        <h2>Parametric Logic</h2>
+        <p data-typing-subtitle></p>
       </div>
       <div id="cad-config-panel" class="earth-config-panel" hidden></div>
     `;
@@ -441,6 +442,16 @@ export function mountCAD(container: HTMLElement) {
   toggle.textContent = 'Config';
   controls?.prepend(toggle);
 
+  const subtitleEl = container.querySelector(
+    "[data-typing-subtitle]"
+  ) as HTMLParagraphElement | null;
+  const subtitles = [
+    "Iterate on hardware designs in real time.",
+    "Change parameters and rebuild instantly.",
+    "Programmatic CAD that turns code into mass.",
+  ];
+  const stopTyping = startTyping(subtitleEl, subtitles);
+
   const viewer = new CADViewer(container);
   // @ts-ignore
   window.cadViewer = viewer;
@@ -450,6 +461,7 @@ export function mountCAD(container: HTMLElement) {
       delete window.cadViewer;
       viewer.dispose();
       toggle.remove();
+      stopTyping();
       container.innerHTML = '';
     },
     setVisible: (visible: boolean) => viewer.setVisible(visible),
