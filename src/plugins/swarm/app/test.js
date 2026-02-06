@@ -6,8 +6,6 @@
  *   pear run ./test.js session             — Autobase session log test
  */
 
-import Hyperswarm from 'hyperswarm'
-import Corestore from 'corestore'
 import b4a from 'b4a'
 import crypto from 'hypercore-crypto'
 import fs from 'bare-fs'
@@ -85,40 +83,49 @@ async function runKvTest () {
   // K/V test exercises Autobase + Hyperbee convergence for a single topic.
   console.log('--- Starting Swarm K/V (Autobee) Test [Ephemeral Mode] ---')
 
+  const agentIds = ['a', 'b', 'c']
+  const agents = []
+  const agentDirs = []
+
   // Create isolated stores per peer so each writer has its own local state.
-  const dirA = createTmpDir()
-  const kvDirA = path.join(dirA, 'kv')
-  fs.mkdirSync(kvDirA, { recursive: true })
+  for (let i = 0; i < agentIds.length; i++) {
+    const dir = createTmpDir()
+    console.log(`DIALTONE> Created temp dir for KV agent ${agentIds[i].toUpperCase()}: ${dir}`)
+    const kvDir = path.join(dir, 'kv')
+    fs.mkdirSync(kvDir, { recursive: true })
+    agentDirs.push(dir)
+    agents.push(new AutoKV({
+      topic: 'dialtone-kv',
+      storage: kvDir,
+      keepBootstrapHost: i === 0,
+      requireBootstrap: i !== 0
+    }))
+  }
 
-  const storeAkv = new Corestore(kvDirA)
-  // Peer A: bootstrap the K/V Autobase instance.
-  const dbA = new AutoKV(storeAkv, null)
-  await dbA.ready()
-  console.log(`Peer A: ${b4a.toString(dbA.base.local.key, 'hex').slice(0, 8)}... `)
+  // Start host first, then join others in parallel.
+  console.log('DIALTONE> KV agent A ready() begin')
+  await agents[0].ready()
+  console.log('DIALTONE> KV agent A ready() complete')
+  console.log(`Peer A: ${b4a.toString(agents[0].base.local.key, 'hex').slice(0, 8)}... `)
 
-  // Peer B: join Peer A's Autobase via bootstrap key.
-  const dirB = createTmpDir()
-  const kvDirB = path.join(dirB, 'kv')
-  fs.mkdirSync(kvDirB, { recursive: true })
+  await Promise.all(agents.slice(1).map(async (agent, idx) => {
+    const i = idx + 1
+    console.log(`DIALTONE> KV agent ${agentIds[i].toUpperCase()} ready() begin`)
+    await agent.ready()
+    console.log(`DIALTONE> KV agent ${agentIds[i].toUpperCase()} ready() complete`)
+    console.log(`Peer ${agentIds[i].toUpperCase()}: ${b4a.toString(agent.base.local.key, 'hex').slice(0, 8)}... `)
+  }))
 
-  const storeBkv = new Corestore(kvDirB)
-  const dbB = new AutoKV(storeBkv, dbA.base.key)
-  await dbB.ready()
-  console.log(`Peer B: ${b4a.toString(dbB.base.local.key, 'hex').slice(0, 8)}... `)
-
-  // Authorize Peer B as a writer, then replicate to sync metadata.
-  await dbA.addWriter(dbB.base.local.key)
-  await syncBases(dbA.base, dbB.base)
   console.log('Databases ready.')
 
   // Scenario 1: Sequential write on A, read from B after replication.
   console.log('\n[Scenario 1] Sequential Write')
-  await dbA.put('status', 'online')
+  await agents[0].put('status', 'online')
   console.log('Peer A wrote "status" = "online"')
 
-  await syncBases(dbA.base, dbB.base)
+  await waitForKvReplication(agents, 1)
 
-  const ans = await dbB.get('status')
+  const ans = await agents[1].get('status')
   console.log(`Peer B read "status": "${ans ? ans.value : 'null'}"`)
 
   if (ans && ans.value === 'online') {
@@ -128,34 +135,39 @@ async function runKvTest () {
     Bare.exit(1)
   }
 
-  // Scenario 2: Concurrent writes on A/B should converge after replication.
+  // Scenario 2: Concurrent writes on A/B/C should converge after replication.
   console.log('\n[Scenario 2] Concurrent Writes (Convergence)')
-  const p1 = dbA.put('config.a', 1)
-  const p2 = dbB.put('config.b', 2)
-  await Promise.all([p1, p2])
+  const keys = ['config.a', 'config.b', 'config.c']
+  const writes = keys.map((key, idx) => agents[idx].put(key, idx + 1))
+  await Promise.all(writes)
 
   console.log('Syncing...')
-  await syncBases(dbA.base, dbB.base)
+  await waitForKvReplication(agents, 3)
 
-  const valA1 = (await dbA.get('config.a'))?.value
-  const valA2 = (await dbA.get('config.b'))?.value
-  const valB1 = (await dbB.get('config.a'))?.value
-  const valB2 = (await dbB.get('config.b'))?.value
+  const valuesByAgent = []
+  for (let i = 0; i < agents.length; i++) {
+    const values = await Promise.all(keys.map((key) => agents[i].get(key)))
+    const nums = values.map((v) => v?.value)
+    valuesByAgent.push(nums)
+    console.log(`Peer ${agentIds[i].toUpperCase()} Sees: a=${nums[0]}, b=${nums[1]}, c=${nums[2]}`)
+  }
 
-  console.log(`Peer A Sees: a=${valA1}, b=${valA2}`)
-  console.log(`Peer B Sees: a=${valB1}, b=${valB2}`)
+  const expected = [1, 2, 3]
+  const ok = valuesByAgent.every((nums) => (
+    nums.length === expected.length && nums.every((v, idx) => v === expected[idx])
+  ))
 
-  if (valA1 === 1 && valA2 === 2 && valB1 === 1 && valB2 === 2) {
-    console.log('SUCCESS: Both peers converged to the same state (Union of all writes)')
+  if (ok) {
+    console.log('SUCCESS: All peers converged to the same state (Union of all writes)')
   } else {
     console.error('FAILURE: State did not converge correctly')
     Bare.exit(1)
   }
 
-  await storeAkv.close()
-  await storeBkv.close()
-  fs.rmSync(dirA, { recursive: true, force: true })
-  fs.rmSync(dirB, { recursive: true, force: true })
+  await Promise.all(agents.map((agent) => agent.close()))
+  agentDirs.forEach((dir) => {
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
   // Cleanup temp stores to avoid leaking local state between runs.
   console.log('Cleaning up... Temporary directories removed.')
   Bare.exit(0)
@@ -166,57 +178,74 @@ async function runKvTest () {
 // ---------------------------------------------------------------------------
 async function runSessionTest () {
   // Session test exercises Autobase + Corestore log convergence on a different topic.
-  console.log('--- Starting Swarm Session Log Test [Ephemeral Mode] ---')
+  console.log('DIALTONE> Starting Swarm Session Log Test [Ephemeral Mode]...')
+
+  const agentIds = ['a', 'b', 'c', 'd', 'e']
+  const agents = []
+  const agentDirs = []
 
   // Separate stores per peer for the session log topic.
-  const dirA = createTmpDir()
-  const sessionsDirA = path.join(dirA, 'sessions')
-  fs.mkdirSync(sessionsDirA, { recursive: true })
+  for (let i = 0; i < agentIds.length; i++) {
+    const dir = createTmpDir()
+    console.log(`DIALTONE> Created temp dir for session agent ${agentIds[i].toUpperCase()}: ${dir}`)
+    const sessionsDir = path.join(dir, 'sessions')
+    fs.mkdirSync(sessionsDir, { recursive: true })
+    agentDirs.push(dir)
+    agents.push(new AutoLog({
+      topic: 'dialtone-session-log',
+      storage: sessionsDir,
+      keepBootstrapHost: i === 0,
+      requireBootstrap: i !== 0
+    }))
+  }
 
-  const storeAsessions = new Corestore(sessionsDirA)
-  // Peer A: bootstrap the session log Autobase instance.
-  const sessionsA = new AutoLog(storeAsessions, null)
-  await sessionsA.ready()
+  // Start host first, then join others in parallel.
+  console.log('DIALTONE> Session agent A ready() begin')
+  await agents[0].ready()
+  console.log('DIALTONE> Session agent A ready() complete')
 
-  // Peer B: join Peer A's session Autobase via bootstrap key.
-  const dirB = createTmpDir()
-  const sessionsDirB = path.join(dirB, 'sessions')
-  fs.mkdirSync(sessionsDirB, { recursive: true })
+  await Promise.all(agents.slice(1).map(async (agent, idx) => {
+    const i = idx + 1
+    console.log(`DIALTONE> Session agent ${agentIds[i].toUpperCase()} ready() begin`)
+    await agent.ready()
+    console.log(`DIALTONE> Session agent ${agentIds[i].toUpperCase()} ready() complete`)
+  }))
 
-  const storeBsessions = new Corestore(sessionsDirB)
-  const sessionsB = new AutoLog(storeBsessions, sessionsA.base.key)
-  await sessionsB.ready()
+  console.log('DIALTONE> Session logs ready. Running multi-writer append...')
 
-  // Authorize Peer B as a session writer, then replicate to sync metadata.
-  await sessionsA.addWriter(sessionsB.base.local.key)
-  await syncBases(sessionsA.base, sessionsB.base)
-  console.log('Session logs ready.')
+  // Each peer appends a session event; replication should converge via swarm.
+  await Promise.all(agents.map((agent, idx) => agent.append({ peer: agentIds[idx], action: 'join' })))
+  await waitForSessionReplication(agents, agentIds.length)
 
-  // Each peer appends a session event; replication should converge.
-  await sessionsA.append({ peer: 'a', action: 'join' })
-  await sessionsB.append({ peer: 'b', action: 'join' })
-  await syncBases(sessionsA.base, sessionsB.base)
+  const eventsByAgent = []
+  for (let i = 0; i < agents.length; i++) {
+    const events = await agents[i].list()
+    eventsByAgent.push(events)
+    console.log(`LLM-TEST> Peer ${agentIds[i].toUpperCase()} Sessions: ${events.map(s => `${s.peer}:${s.action}`).join(', ')}`)
+  }
 
-  const eventsA = await sessionsA.list()
-  const eventsB = await sessionsB.list()
-  console.log(`Peer A Sessions: ${eventsA.map(s => `${s.peer}:${s.action}`).join(', ')}`)
-  console.log(`Peer B Sessions: ${eventsB.map(s => `${s.peer}:${s.action}`).join(', ')}`)
-  const expected = new Set(['a:join', 'b:join'])
-  const okA = eventsA.every(s => expected.has(`${s.peer}:${s.action}`)) && eventsA.length === 2
-  const okB = eventsB.every(s => expected.has(`${s.peer}:${s.action}`)) && eventsB.length === 2
-  if (okA && okB) {
-    console.log('SUCCESS: Session logs merged via Autobase')
+  const expected = new Set(agentIds.map((id) => `${id}:join`))
+  const allOk = eventsByAgent.every((events) => (
+    events.every(s => expected.has(`${s.peer}:${s.action}`)) && events.length === agentIds.length
+  ))
+
+  const logs = agents.map((agent) => getSessionLog(agent.base))
+  const lengths = logs.map((log) => log.length)
+  const sameLength = lengths.every((len) => len === lengths[0])
+
+  if (allOk && sameLength) {
+    console.log('LLM-TEST> [SUCCESS] Session logs merged via Autobase')
   } else {
-    console.error('FAILURE: Session logs did not converge correctly')
+    console.error('LLM-TEST> [ERROR] Session logs did not converge correctly')
     Bare.exit(1)
   }
 
-  await storeAsessions.close()
-  await storeBsessions.close()
-  fs.rmSync(dirA, { recursive: true, force: true })
-  fs.rmSync(dirB, { recursive: true, force: true })
+  await Promise.all(agents.map((agent) => agent.close()))
+  agentDirs.forEach((dir) => {
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
   // Cleanup temp stores to avoid leaking local state between runs.
-  console.log('Cleaning up... Temporary directories removed.')
+  console.log('DIALTONE> Cleaning up... Temporary directories removed.')
   Bare.exit(0)
 }
 
@@ -227,13 +256,37 @@ function createTmpDir () {
 }
 
 
-async function syncBases (baseA, baseB) {
-  const s1 = baseA.replicate(true)
-  const s2 = baseB.replicate(false)
-  s1.pipe(s2).pipe(s1)
-  await new Promise(r => setTimeout(r, 150))
-  s1.destroy()
-  s2.destroy()
-  await baseA.update()
-  await baseB.update()
+async function waitForSessionReplication (sessions, expectedCount) {
+  const deadline = Date.now() + 10000
+  while (Date.now() < deadline) {
+    const ready = await Promise.all(sessions.map(async (s) => {
+      const log = getSessionLog(s.base)
+      return log.length >= expectedCount
+    }))
+    if (ready.every(Boolean)) {
+      await Promise.all(sessions.map((s) => s.base.update()))
+      return
+    }
+    await new Promise(r => setTimeout(r, 200))
+  }
+  throw new Error('Timed out waiting for session log replication over swarm')
+}
+
+function getSessionLog (base) {
+  return base.view || base._viewStore.get('autolog', { valueEncoding: 'json' })
+}
+
+async function waitForKvReplication (peers, expectedVersion) {
+  const deadline = Date.now() + 10000
+  while (Date.now() < deadline) {
+    const versions = peers.map((p) => p.bee.version || 0)
+    const lengths = peers.map((p) => p.bee.core.length || 0)
+    const minVersion = Math.min(...versions)
+    const allEqual = versions.every((v) => v === versions[0]) && lengths.every((l) => l === lengths[0])
+    if (minVersion >= expectedVersion && allEqual) {
+      return
+    }
+    await new Promise(r => setTimeout(r, 200))
+  }
+  throw new Error('Timed out waiting for K/V replication over swarm')
 }
