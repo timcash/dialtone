@@ -93,6 +93,7 @@ h2 {
 #robot-container,
 #webgpu-template-container,
 #radio-container,
+#geotools-container,
 #threejs-template-container,
 #docs-container,
 #about-container {
@@ -110,6 +111,7 @@ h2 {
 #robot-container canvas,
 #webgpu-template-container canvas,
 #radio-container canvas,
+#geotools-container canvas,
 #threejs-template-container canvas,
 #docs-container canvas,
 #about-container canvas {
@@ -333,7 +335,10 @@ h2 {
 .snap-slide.is-visible[id="s-neural"]~.top-right-controls #nn-config-toggle,
 .snap-slide.is-visible[id="s-math"]~.top-right-controls #math-config-toggle,
 .snap-slide.is-visible[id="s-cad"]~.top-right-controls #cad-config-toggle,
-.snap-slide.is-visible[id="s-about"]~.top-right-controls #about-config-toggle {
+.snap-slide.is-visible[id="s-about"]~.top-right-controls #about-config-toggle,
+.snap-slide.is-visible[id="s-geotools"]~.top-right-controls #geotools-config-toggle,
+.snap-slide.is-visible[id="s-webgpu-template"]~.top-right-controls #webgpu-template-config-toggle,
+.snap-slide.is-visible[id="s-threejs-template"]~.top-right-controls #threejs-template-config-toggle {
   display: inline-block;
 }
 
@@ -361,6 +366,7 @@ h2 {
   color: var(--theme-text);
   max-height: calc(100vh - 120px);
   overflow-y: auto;
+  overflow-x: hidden;
   pointer-events: auto;
 }
 
@@ -389,7 +395,8 @@ h2 {
 }
 
 .earth-config-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 80px 1fr auto;
   align-items: center;
   gap: 10px;
 }
@@ -440,13 +447,10 @@ h2 {
   box-shadow: 0 0 12px var(--theme-accent);
 }
 
-.earth-config-row label {
+.earth-config-label {
   font-size: 0.8rem;
   color: var(--theme-text-dim);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1;
+  text-align: left;
 }
 
 .earth-config-row input[type="range"] {
