@@ -1,124 +1,157 @@
+import * as THREE from "three";
+import { FpsCounter } from "./fps";
+import { GpuTimer } from "./gpu_timer";
+import { VisibilityMixin } from "./section";
+import cubeGlowVert from "../shaders/template-cube.vert.glsl?raw";
+import cubeGlowFrag from "../shaders/template-cube.frag.glsl?raw";
+
+/**
+ * Docs section: Three.js section like the others. Cube + key light + glow,
+ * overlay with WWW workflow bash commands.
+ */
+
+class DocsVisualization {
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  container: HTMLElement;
+  frameId = 0;
+  resizeObserver?: ResizeObserver;
+  gl!: WebGLRenderingContext | WebGL2RenderingContext;
+  gpuTimer = new GpuTimer();
+  isVisible = true;
+  private fpsCounter = new FpsCounter("docs");
+  private cube!: THREE.Mesh;
+  private cubeMaterial!: THREE.ShaderMaterial;
+  private keyLight!: THREE.DirectionalLight;
+  private time = 0;
+  private lightDir = new THREE.Vector3(1, 1, 1).normalize();
+  frameCount = 0;
+
+  constructor(container: HTMLElement) {
+    this.container = container;
+
+    this.renderer.setClearColor(0x0a0a12, 1);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+    const canvas = this.renderer.domElement;
+    canvas.style.position = "absolute";
+    canvas.style.top = "0";
+    canvas.style.left = "0";
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+
+    const existingCanvas = container.querySelector("canvas");
+    if (existingCanvas) {
+      this.renderer.domElement = existingCanvas as HTMLCanvasElement;
+    } else {
+      this.container.appendChild(canvas);
+    }
+
+    this.camera.position.set(0, 0, 3);
+    this.camera.lookAt(0, 0, 0);
+
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+
+    this.keyLight = new THREE.DirectionalLight(0xffffff, 0.9);
+    this.keyLight.position.set(2, 2, 2);
+    this.scene.add(this.keyLight);
+
+    const cubeGeo = new THREE.BoxGeometry(1, 1, 1);
+    this.cubeMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        uColor: { value: new THREE.Color(0x446688) },
+        uGlowColor: { value: new THREE.Color(0x6688aa) },
+        uLightDir: { value: this.lightDir.clone() },
+        uTime: { value: 0 },
+      },
+      vertexShader: cubeGlowVert,
+      fragmentShader: cubeGlowFrag,
+    });
+    this.cube = new THREE.Mesh(cubeGeo, this.cubeMaterial);
+    this.scene.add(this.cube);
+
+    this.resize();
+    this.animate();
+
+    this.gl = this.renderer.getContext();
+    this.gpuTimer.init(this.gl);
+
+    if (typeof ResizeObserver !== "undefined") {
+      this.resizeObserver = new ResizeObserver(() => this.resize());
+      this.resizeObserver.observe(this.container);
+    } else {
+      window.addEventListener("resize", this.resize);
+    }
+  }
+
+  resize = () => {
+    const rect = this.container.getBoundingClientRect();
+    const width = Math.max(1, rect.width);
+    const height = Math.max(1, rect.height);
+    this.camera.aspect = width / height;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(width, height, false);
+  };
+
+  dispose() {
+    cancelAnimationFrame(this.frameId);
+    this.resizeObserver?.disconnect();
+    window.removeEventListener("resize", this.resize);
+    this.renderer.dispose();
+    if (this.container.contains(this.renderer.domElement)) {
+      this.container.removeChild(this.renderer.domElement);
+    }
+  }
+
+  setVisible(visible: boolean) {
+    VisibilityMixin.setVisible(this, visible, "docs");
+    if (!visible) this.fpsCounter.clear();
+  }
+
+  animate = () => {
+    this.frameId = requestAnimationFrame(this.animate);
+    if (!this.isVisible) return;
+
+    this.time += 0.016;
+    this.frameCount++;
+    this.cube.rotation.x = this.time * 0.3;
+    this.cube.rotation.y = this.time * 0.2;
+
+    this.lightDir.set(1, 1, 1).normalize();
+    this.cubeMaterial.uniforms.uLightDir.value.copy(this.lightDir).transformDirection(this.camera.matrixWorldInverse);
+    this.cubeMaterial.uniforms.uTime.value = this.time;
+
+    const cpuStart = performance.now();
+    this.gpuTimer.begin(this.gl);
+    this.renderer.render(this.scene, this.camera);
+    this.gpuTimer.end(this.gl);
+    this.gpuTimer.poll(this.gl);
+    const cpuMs = performance.now() - cpuStart;
+    this.fpsCounter.tick(cpuMs, this.gpuTimer.lastMs);
+  };
+}
+
 export function mountDocs(container: HTMLElement) {
   container.innerHTML = `
-        <div class="page-content">
-            <h1>Documentation</h1>
-            <p class="lead">Get started with Dialtone and explore the technical specifications of the robotic network.
-            </p>
+    <div class="marketing-overlay" aria-label="Docs section: WWW workflow">
+      <h2>WWW workflow</h2>
+      <p>Develop locally, build, and deploy the public site with the CLI.</p>
+      <pre class="docs-bash"><code>./dialtone.sh www dev
+./dialtone.sh www build
+./dialtone.sh www publish
+./dialtone.sh www validate
+./dialtone.sh www logs &lt;url&gt;
+./dialtone.sh www radio demo</code></pre>
+    </div>
+  `;
 
-            <h2>
-                <div class="inline-flex items-center gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
-                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="4 17 10 11 4 5" />
-                        <line x1="12" y1="19" x2="20" y2="19" />
-                    </svg>
-                    Quick Start
-                </div>
-            </h2>
-            <div class="code-block">
-                <p><span class="comment"># Clone the repo</span></p>
-                <p>git clone https://github.com/timcash/dialtone.git</p>
-                <p>export DIALTONE_ENV="~/dialtone_env"</p>
-                <br>
-                <p><span class="comment"># Bootstrap environment</span></p>
-                <p>./setup.sh</p>
-                <br>
-                <p><span class="comment"># Install dependencies</span></p>
-                <p>./dialtone.sh install --linux-wsl</p>
-                <br>
-                <p><span class="comment"># Build and Start</span></p>
-                <p>./dialtone.sh build --local</p>
-                <p>./dialtone.sh start --local</p>
-            </div>
-
-            <h2>WWW Development</h2>
-            <p class="text-muted-foreground">Run the public site locally, validate it with browser tests, then build/publish.</p>
-            <div class="code-block">
-                <p><span class="comment"># Start the local dev server</span></p>
-                <p>./dialtone.sh www dev</p>
-                <br>
-                <p><span class="comment"># Run browser integration tests (captures console logs + JS exceptions)</span></p>
-                <p>./dialtone.sh plugin test www</p>
-                <br>
-                <p><span class="comment"># Build and publish</span></p>
-                <p>./dialtone.sh www build</p>
-                <p>./dialtone.sh www publish</p>
-                <br>
-                <p><span class="comment"># Inspect deployments</span></p>
-                <p>./dialtone.sh www logs &lt;deployment-url-or-id&gt;</p>
-                <p>./dialtone.sh www domain [deployment-url]</p>
-            </div>
-
-            <div class="grid-2">
-                <div class="card">
-                    <div class="card-header-icon">
-                        <svg class="text-primary" xmlns="http://www.w3.org/2000/svg" width="24" height="24"
-                            viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                            stroke-linecap="round" stroke-linejoin="round">
-                            <path
-                                d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-                            <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-                            <line x1="12" y1="22.08" x2="12" y2="12" />
-                        </svg>
-                        <h3>Tech Stack</h3>
-                    </div>
-                    <ul>
-                        <li>• Lang: <strong>Go</strong> (Concurrency, Type-safety)</li>
-                        <li>• Messaging: <strong>NATS</strong> Bus</li>
-                        <li>• Networking: <strong>Tailscale</strong> Mesh VPN</li>
-                        <li>• Protocol: <strong>MAVLink</strong> & WebRTC</li>
-                        <li>• Targets: Linux, ARM64 (Raspi), macOS</li>
-                    </ul>
-                </div>
-                <div class="card">
-                    <div class="card-header-icon">
-                        <svg class="text-primary" xmlns="http://www.w3.org/2000/svg" width="24" height="24"
-                            viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                            stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-                        </svg>
-                        <h3>Features</h3>
-                    </div>
-                    <ul>
-                        <li>• V4L2 Camera Support</li>
-                        <li>• Geospatial (Google Earth Engine)</li>
-                        <li>• System-Tuned AI Assistant</li>
-                        <li>• Telemetry Streaming & Storage</li>
-                        <li>• "Digital Twin" Simulation</li>
-                    </ul>
-                </div>
-            </div>
-
-            <section style="margin-top: 3rem; margin-bottom: 3rem;">
-                <h2>
-                    <div class="inline-flex items-center gap-2">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
-                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-                            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-                        </svg>
-                        Vendor Docs
-                    </div>
-                </h2>
-                <p class="text-muted-foreground"><em>No vendor documentation currently available.</em></p>
-            </section>
-
-            <h2>CLI Reference</h2>
-            <p>The <code>dialtone.sh</code> tool is your primary interface for management:</p>
-            <ul>
-                <li><code>install</code>: Set up a local-user dev environment.</li>
-                <li><code>build</code>: Create production-ready binaries.</li>
-                <li><code>deploy</code>: Push updates to remote robots via SSH.</li>
-                <li><code>issue</code>: Manage project tasks and feedback.</li>
-            </ul>
-        </div>
-    `;
+  const viz = new DocsVisualization(container);
   return {
     dispose: () => {
-      container.innerHTML = '';
+      viz.dispose();
+      container.innerHTML = "";
     },
-    setVisible: (visible: boolean) => {
-      container.style.opacity = visible ? '1' : '0';
-    }
+    setVisible: (visible: boolean) => viz.setVisible(visible),
   };
 }

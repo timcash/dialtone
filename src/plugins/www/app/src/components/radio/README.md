@@ -1,6 +1,6 @@
 # Radio component
 
-Three.js section that shows an open-source handheld radio for small robots. Built on the same stack as **threejs-template** (key light, glow shader, FPS, backend label, marketing overlay).
+Three.js section that shows an open-source handheld radio for small robots. Built on the same stack as **threejs-template** (key light, glow shader, FPS, marketing overlay).
 
 ## Location
 
@@ -47,7 +47,7 @@ Uniforms: `uColor`, `uGlowColor`, `uLightDir` (view space), `uTime`.
 
 - **Mount:** `mountRadio(container)` returns `{ dispose, setVisible }`.
 - **Visibility:** Uses `VisibilityMixin`; animation loop skips work when section is off-screen.
-- **UI:** Marketing overlay (heading + copy) and backend label (`data-radio-backend`) for “Rendering: WebGL 2 · WebGPU: …”.
+- **UI:** Marketing overlay (heading + copy).
 
 ## How to run
 
