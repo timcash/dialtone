@@ -12,6 +12,7 @@ import { setupConfigPanel } from "./earth/config_ui";
 import { FpsCounter } from "./fps";
 import { GpuTimer } from "./gpu_timer";
 import { VisibilityMixin } from "./section";
+import { startTyping } from "./typing";
 
 const DEG_TO_RAD = Math.PI / 180;
 const TIME_SCALE = 1;
@@ -23,10 +24,10 @@ const SUN_ORBIT_PERIOD_MS = 5000;
 // Note: rotation is applied as earthRotSpeed * deltaSeconds, where deltaSeconds already includes `timeScale`.
 const EARTH_ROT_PERIOD_SECONDS = 30;
 
-// Light colors (shader-driven). Use warm/orange tones.
-const SUN_COLOR = new THREE.Color(1.0, 0.62, 0.32); // orange
-const KEY1_COLOR = new THREE.Color(1.0, 0.75, 0.45); // warm fill
-const KEY2_COLOR = new THREE.Color(1.0, 0.55, 0.25); // deeper orange (trailing key)
+// Light colors (shader-driven). Neutral white/cool.
+const SUN_COLOR = new THREE.Color(1.0, 1.0, 1.0);
+const KEY1_COLOR = new THREE.Color(0.9, 0.95, 1.0);
+const KEY2_COLOR = new THREE.Color(0.85, 0.9, 1.0);
 const KEY2_PHASE_OFFSET_RAD = Math.PI / 2; // 2π/4 behind the sun
 
 const MOON_LIGHT_LAYER = 1;
@@ -412,13 +413,13 @@ export class ProceduralOrbit {
   initLights() {
     // Note: core Earth lighting is shader-driven; these lights are primarily for
     // non-shader meshes / debugging.
-    this.sunKeyLight = new THREE.DirectionalLight(0xffa15a, 0.35);
+    this.sunKeyLight = new THREE.DirectionalLight(0xffffff, 0.35);
     this.sunKeyLight.position.set(10, 5, 10);
     this.scene.add(this.sunKeyLight);
     this.sunKeyLight.target.position.set(0, 0, 0);
     this.scene.add(this.sunKeyLight.target);
 
-    this.sunKeyLight2 = new THREE.DirectionalLight(0xff7a3a, 0.22);
+    this.sunKeyLight2 = new THREE.DirectionalLight(0xffffff, 0.22);
     this.sunKeyLight2.position.set(-10, -5, -10);
     this.scene.add(this.sunKeyLight2);
     this.sunKeyLight2.target.position.set(0, 0, 0);
@@ -428,13 +429,13 @@ export class ProceduralOrbit {
 
     this.sunGlow = new THREE.Mesh(
       new THREE.SphereGeometry(6, 32, 32),
-      new THREE.MeshBasicMaterial({ color: 0xffa63d }),
+      new THREE.MeshBasicMaterial({ color: 0xffe08a }),
     );
     this.scene.add(this.sunGlow);
 
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x111111, 1.0);
     this.scene.add(hemiLight);
-    this.sunLight = new THREE.PointLight(0xff8c42, 2.1, 220);
+    this.sunLight = new THREE.PointLight(0xffffff, 2.1, 220);
     // The moon is rendered on a dedicated layer so it only sees the sun light.
     this.sunLight.layers.enable(MOON_LIGHT_LAYER);
     this.scene.add(this.sunLight);
@@ -586,9 +587,7 @@ export function mountEarth(container: HTMLElement) {
   container.innerHTML = `
       <div class="marketing-overlay" aria-label="Unified Networks marketing information">
         <h2>Now is the time to learn and build</h2>
-        <p>Robotics is moving from labs to the planet. Learn the math, build the software, and connect the machines.</p>
-        <a class="buy-button" href="https://buy.stripe.com/test_5kQaEXcagaAoaC62N20kE00" target="_blank"
-          rel="noopener noreferrer">Get the Robot Kit</a>
+        <p data-typing-subtitle></p>
       </div>
       <div id="earth-config-panel" class="earth-config-panel" hidden></div>
     `;
@@ -603,11 +602,22 @@ export function mountEarth(container: HTMLElement) {
   toggle.textContent = 'Config';
   controls?.prepend(toggle);
 
+  const subtitleEl = container.querySelector(
+    "[data-typing-subtitle]"
+  ) as HTMLParagraphElement | null;
+  const subtitles = [
+    "Connect math to real machines.",
+    "Build robots, radios, and AI systems.",
+    "Learn fast, deploy safely, iterate together.",
+  ];
+  const stopTyping = startTyping(subtitleEl, subtitles);
+
   const orbit = new ProceduralOrbit(container);
   return {
     dispose: () => {
       orbit.dispose();
       toggle.remove();
+      stopTyping();
       container.innerHTML = '';
     },
     setVisible: (visible: boolean) => orbit.setVisible(visible),
