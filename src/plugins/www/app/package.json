@@ -1,6 +1,6 @@
 {
   "name": "dialtone-www",
-  "version": "1.0.42",
+  "version": "1.0.44",
   "private": true,
   "scripts": {
     "dev": "vite",
