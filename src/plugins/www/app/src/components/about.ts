@@ -56,6 +56,8 @@ class VisionVisualization {
   private lastStepTime = 0;
   private lightBrushEnabled = true;
   private lastFrameTime = performance.now();
+  private stepIntervalMs = 100;
+  private lastPowerLogMs = performance.now();
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -99,10 +101,10 @@ class VisionVisualization {
     const geo = new THREE.BoxGeometry(0.6, 0.6, 0.6);
     const mat = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.2,
-      metalness: 0.4,
+      roughness: 0.5,
+      metalness: 0.1,
       emissive: new THREE.Color(0xffffff),
-      emissiveIntensity: 0.12,
+      emissiveIntensity: 0.02,
     });
     this.instancedMesh = new THREE.InstancedMesh(geo, mat, MAX_INSTANCES);
     this.instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -157,7 +159,7 @@ class VisionVisualization {
           mesh.setMatrixAt(count, this.dummy.matrix);
           const hue = ((i + j + k) / (NX + NY + NZ)) % 1;
           const glow = Math.min(1, this.grid.glowA[this.grid.index(i, j, k)] / this.grid.glowDurationMs);
-          const lightness = 0.35 + glow * 0.35;
+          const lightness = 0.12 + glow * 0.22;
           this.color.setHSL(hue, 0.5, lightness);
           mesh.setColorAt(count, this.color);
           count++;
@@ -246,6 +248,46 @@ class VisionVisualization {
     this.searchLights.setBrightness(value);
   }
 
+  setMaxPower(value: number) {
+    this.searchLights.setMaxPower(value);
+  }
+
+  setPowerRegenRatePerSec(rate: number) {
+    this.searchLights.setPowerRegenRatePerSec(rate);
+  }
+
+  setSparkIntervalSeconds(seconds: number) {
+    this.searchLights.setSparkIntervalSeconds(seconds);
+  }
+
+  setSparkPauseMs(ms: number) {
+    this.searchLights.setSparkPauseMs(ms);
+  }
+
+  setSparkDrainRatePerMs(rate: number) {
+    this.searchLights.setSparkDrainRatePerMs(rate);
+  }
+
+  setRestThreshold(value: number) {
+    this.searchLights.setRestThreshold(value);
+  }
+
+  setGlideSpeed(value: number) {
+    this.searchLights.setGlideSpeed(value);
+  }
+
+  setGlideAccel(value: number) {
+    this.searchLights.setGlideAccel(value);
+  }
+
+  setStepIntervalMs(intervalMs: number) {
+    if (intervalMs <= 0) {
+      this.stepIntervalMs = Infinity;
+      return;
+    }
+    this.stepIntervalMs = Math.max(10, intervalMs);
+  }
+
   animate = () => {
     this.frameId = requestAnimationFrame(this.animate);
     if (!this.isVisible) return;
@@ -257,15 +299,25 @@ class VisionVisualization {
     const deltaMs = Math.min(100, now - this.lastFrameTime);
     this.lastFrameTime = now;
     this.grid.decayGlow(deltaMs);
-    if (now - this.lastStepTime >= 100) {
+    if (this.stepIntervalMs > 0 && now - this.lastStepTime >= this.stepIntervalMs) {
       this.lastStepTime = now;
       this.grid.step();
     }
     this.searchLights.update(now);
     if (this.lightBrushEnabled) {
       const cells = this.searchLights.getLightGridCells();
-      this.grid.injectLightTrail(cells);
-      this.searchLights.spawnLightning(cells);
+      const sparkedCells = this.searchLights.spawnSpark(cells);
+      if (sparkedCells.length > 0) {
+        this.grid.injectGlider(sparkedCells);
+      }
+    }
+
+    if (now - this.lastPowerLogMs >= 1000) {
+      this.lastPowerLogMs = now;
+      const levels = this.searchLights
+        .getPowerLevels()
+        .map((power) => Number(power.toFixed(2)));
+      console.log("[about] light power levels:", levels);
     }
     this.updateInstances();
 
@@ -350,12 +402,39 @@ export function mountAbout(container: HTMLElement) {
     seed: 1337,
     brightness: 1.35,
   };
+  const sparkConfig = {
+    intervalSeconds: 4,
+    pauseMs: 1200,
+    drainRatePerMs: 0.001,
+  };
+  const powerConfig = {
+    maxPower: 5,
+    regenPerSec: 1,
+    restThreshold: 1,
+  };
+  const motionConfig = {
+    glideSpeed: 7,
+    glideAccel: 8,
+  };
+  const lifeConfig = {
+    stepsPerSecond: 4,
+  };
   viz.setLightCount(lightConfig.count);
   viz.setDwellSeconds(lightConfig.dwell);
   viz.setWanderDistance(lightConfig.wander);
   viz.setSeed(lightConfig.seed);
   viz.setBrightness(lightConfig.brightness);
+  viz.setStepIntervalMs(lifeConfig.stepsPerSecond > 0 ? 1000 / lifeConfig.stepsPerSecond : 0);
+  viz.setSparkIntervalSeconds(sparkConfig.intervalSeconds);
+  viz.setSparkPauseMs(sparkConfig.pauseMs);
+  viz.setSparkDrainRatePerMs(sparkConfig.drainRatePerMs);
+  viz.setMaxPower(powerConfig.maxPower);
+  viz.setPowerRegenRatePerSec(powerConfig.regenPerSec);
+  viz.setRestThreshold(powerConfig.restThreshold);
+  viz.setGlideSpeed(motionConfig.glideSpeed);
+  viz.setGlideAccel(motionConfig.glideAccel);
 
+  let presetSwapTimer: number | null = null;
   if (panel) {
     panel.classList.add("about-config-panel");
     const addHeader = (text: string) => {
@@ -363,6 +442,7 @@ export function mountAbout(container: HTMLElement) {
       header.textContent = text;
       panel.appendChild(header);
     };
+    const sliderRegistry: Record<string, { slider: HTMLInputElement; valueEl: HTMLSpanElement }> = {};
     const addSlider = (
       label: string,
       min: number,
@@ -370,7 +450,8 @@ export function mountAbout(container: HTMLElement) {
       step: number,
       value: number,
       onInput: (v: number) => void,
-      format: (v: number) => string = (v) => v.toFixed(0)
+      format: (v: number) => string = (v) => v.toFixed(0),
+      key?: string
     ) => {
       const row = document.createElement("div");
       row.className = "earth-config-row about-config-row";
@@ -394,17 +475,181 @@ export function mountAbout(container: HTMLElement) {
         onInput(v);
         valueEl.textContent = format(v);
       });
+      if (key) {
+        sliderRegistry[key] = { slider, valueEl };
+      }
+    };
+    const setSliderValue = (key: string, value: number, format?: (v: number) => string) => {
+      const entry = sliderRegistry[key];
+      if (!entry) return;
+      entry.slider.value = `${value}`;
+      entry.valueEl.textContent = format ? format(value) : value.toFixed(0);
     };
 
-    addHeader("Light Behavior");
-    addSlider("Light Count", 1, viz.getMaxLights(), 1, lightConfig.count, (v) => {
-      lightConfig.count = v;
-      viz.setLightCount(v);
-    });
-    addSlider("Brightness", 0.4, 3, 0.1, lightConfig.brightness, (v) => {
-      lightConfig.brightness = v;
-      viz.setBrightness(v);
-    }, (v) => v.toFixed(1));
+    addHeader("Presets");
+    const lightPresets = [
+      {
+        label: "Dim",
+        count: 3,
+        brightness: 0.9,
+        maxPower: 4,
+        regenPerSec: 0.7,
+        restThreshold: 0.8,
+      },
+      {
+        label: "Balanced",
+        count: 4,
+        brightness: 1.35,
+        maxPower: 5,
+        regenPerSec: 1,
+        restThreshold: 1,
+      },
+      {
+        label: "Bright",
+        count: 5,
+        brightness: 1.7,
+        maxPower: 6,
+        regenPerSec: 1.3,
+        restThreshold: 1.2,
+      },
+      {
+        label: "Hot",
+        count: 6,
+        brightness: 2.1,
+        maxPower: 7,
+        regenPerSec: 1.8,
+        restThreshold: 1.4,
+      },
+    ];
+    const motionPresets = [
+      { label: "Floaty", glideSpeed: 4.5, glideAccel: 5.5, wander: 6, dwell: 10 },
+      { label: "Steady", glideSpeed: 7, glideAccel: 8, wander: 8, dwell: 8 },
+      { label: "Agile", glideSpeed: 10, glideAccel: 12, wander: 10, dwell: 6 },
+      { label: "Frenzy", glideSpeed: 12, glideAccel: 14, wander: 12, dwell: 5 },
+    ];
+    const sparkPresets = [
+      { label: "Rare", intervalSeconds: 7, pauseMs: 1500, drainRatePerMs: 0.0006 },
+      { label: "Normal", intervalSeconds: 4, pauseMs: 1200, drainRatePerMs: 0.001 },
+      { label: "Active", intervalSeconds: 2.5, pauseMs: 900, drainRatePerMs: 0.0013 },
+      { label: "Storm", intervalSeconds: 1.5, pauseMs: 700, drainRatePerMs: 0.0016 },
+    ];
+    let lightPresetIndex = 1;
+    let motionPresetIndex = 1;
+    let sparkPresetIndex = 1;
+    let presetSwapEnabled = 0;
+    const presetSwapMs = 5000;
+
+    const applyLightPreset = (index: number, syncUi = false) => {
+      const preset = lightPresets[index];
+      lightConfig.count = preset.count;
+      lightConfig.brightness = preset.brightness;
+      powerConfig.maxPower = preset.maxPower;
+      powerConfig.regenPerSec = preset.regenPerSec;
+      powerConfig.restThreshold = preset.restThreshold;
+      viz.setLightCount(preset.count);
+      viz.setBrightness(preset.brightness);
+      viz.setMaxPower(preset.maxPower);
+      viz.setPowerRegenRatePerSec(preset.regenPerSec);
+      viz.setRestThreshold(preset.restThreshold);
+      if (syncUi) {
+        setSliderValue("lightPreset", index, (v) => lightPresets[Math.round(v)]?.label ?? `${v}`);
+      }
+    };
+    const applyMotionPreset = (index: number, syncUi = false) => {
+      const preset = motionPresets[index];
+      lightConfig.wander = preset.wander;
+      lightConfig.dwell = preset.dwell;
+      motionConfig.glideSpeed = preset.glideSpeed;
+      motionConfig.glideAccel = preset.glideAccel;
+      viz.setWanderDistance(preset.wander);
+      viz.setDwellSeconds(preset.dwell);
+      viz.setGlideSpeed(preset.glideSpeed);
+      viz.setGlideAccel(preset.glideAccel);
+      if (syncUi) {
+        setSliderValue("motionPreset", index, (v) => motionPresets[Math.round(v)]?.label ?? `${v}`);
+      }
+    };
+    const applySparkPreset = (index: number, syncUi = false) => {
+      const preset = sparkPresets[index];
+      sparkConfig.intervalSeconds = preset.intervalSeconds;
+      sparkConfig.pauseMs = preset.pauseMs;
+      sparkConfig.drainRatePerMs = preset.drainRatePerMs;
+      viz.setSparkIntervalSeconds(preset.intervalSeconds);
+      viz.setSparkPauseMs(preset.pauseMs);
+      viz.setSparkDrainRatePerMs(preset.drainRatePerMs);
+      if (syncUi) {
+        setSliderValue("sparkPreset", index, (v) => sparkPresets[Math.round(v)]?.label ?? `${v}`);
+      }
+    };
+
+    applyLightPreset(lightPresetIndex);
+    applyMotionPreset(motionPresetIndex);
+    applySparkPreset(sparkPresetIndex);
+
+    addSlider(
+      "Light Preset",
+      0,
+      lightPresets.length - 1,
+      1,
+      lightPresetIndex,
+      (v) => {
+        lightPresetIndex = Math.round(v);
+        applyLightPreset(lightPresetIndex);
+      },
+      (v) => lightPresets[Math.round(v)]?.label ?? `${v}`,
+      "lightPreset"
+    );
+    addSlider(
+      "Motion Preset",
+      0,
+      motionPresets.length - 1,
+      1,
+      motionPresetIndex,
+      (v) => {
+        motionPresetIndex = Math.round(v);
+        applyMotionPreset(motionPresetIndex);
+      },
+      (v) => motionPresets[Math.round(v)]?.label ?? `${v}`,
+      "motionPreset"
+    );
+    addSlider(
+      "Spark Preset",
+      0,
+      sparkPresets.length - 1,
+      1,
+      sparkPresetIndex,
+      (v) => {
+        sparkPresetIndex = Math.round(v);
+        applySparkPreset(sparkPresetIndex);
+      },
+      (v) => sparkPresets[Math.round(v)]?.label ?? `${v}`,
+      "sparkPreset"
+    );
+    addSlider(
+      "Preset Swap",
+      0,
+      1,
+      1,
+      presetSwapEnabled,
+      (v) => {
+        presetSwapEnabled = Math.round(v);
+        if (presetSwapEnabled && presetSwapTimer === null) {
+          presetSwapTimer = window.setInterval(() => {
+            lightPresetIndex = (lightPresetIndex + 1) % lightPresets.length;
+            motionPresetIndex = (motionPresetIndex + 1) % motionPresets.length;
+            sparkPresetIndex = (sparkPresetIndex + 1) % sparkPresets.length;
+            applyLightPreset(lightPresetIndex, true);
+            applyMotionPreset(motionPresetIndex, true);
+            applySparkPreset(sparkPresetIndex, true);
+          }, presetSwapMs);
+        } else if (!presetSwapEnabled && presetSwapTimer !== null) {
+          window.clearInterval(presetSwapTimer);
+          presetSwapTimer = null;
+        }
+      },
+      (v) => (Math.round(v) === 1 ? "On" : "Off")
+    );
+    addHeader("Seed");
     addSlider("Seed", 1, 9999, 1, lightConfig.seed, (v) => {
       const seed = Math.round(v);
       lightConfig.seed = seed;
@@ -424,6 +669,10 @@ export function mountAbout(container: HTMLElement) {
     dispose: () => {
       viz.dispose();
       toggle.remove();
+      if (presetSwapTimer !== null) {
+        window.clearInterval(presetSwapTimer);
+        presetSwapTimer = null;
+      }
       stopTyping();
       container.innerHTML = "";
     },
