@@ -4,6 +4,7 @@ import { GpuTimer } from "./gpu_timer";
 import { VisibilityMixin } from "./section";
 import cubeGlowVert from "../shaders/template-cube.vert.glsl?raw";
 import cubeGlowFrag from "../shaders/template-cube.frag.glsl?raw";
+import { startTyping } from "./typing";
 
 /**
  * Simplest working section: one cube, camera facing it, key light + soft glow shader.
@@ -136,14 +137,25 @@ export function mountThreeJsTemplate(container: HTMLElement) {
   container.innerHTML = `
     <div class="marketing-overlay" aria-label="Template section: simplest working section">
       <h2>Start here</h2>
-      <p>The simplest working section—one cube, one camera, one light. Copy this component when you add a new Three.js section to the site.</p>
+      <p data-typing-subtitle></p>
     </div>
   `;
+
+  const subtitleEl = container.querySelector(
+    "[data-typing-subtitle]"
+  ) as HTMLParagraphElement | null;
+  const subtitles = [
+    "One cube, one camera, one light.",
+    "Copy this component for new Three.js sections.",
+    "The simplest working section template.",
+  ];
+  const stopTyping = startTyping(subtitleEl, subtitles);
 
   const viz = new TemplateVisualization(container);
   return {
     dispose: () => {
       viz.dispose();
+      stopTyping();
       container.innerHTML = "";
     },
     setVisible: (visible: boolean) => viz.setVisible(visible),

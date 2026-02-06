@@ -6,20 +6,14 @@ import { FpsCounter } from "./fps";
 import { GpuTimer } from "./gpu_timer";
 import { VisibilityMixin } from "./section";
 import { SearchLights } from "./search_lights";
+import { startTyping } from "./typing";
+import { VisionGrid } from "./vision_grid";
 
 const NX = 1;
 const NY = 100;
 const NZ = 100;
-const TOTAL = NX * NY * NZ;
 const MAX_INSTANCES = 80000;
 const INITIAL_ON = 0;
-
-/** 8-neighbor offsets in 2D (Y/Z plane) */
-const NEIGHBORS = [
-  [0, -1, -1], [0, -1, 0], [0, -1, 1],
-  [0, 0, -1], [0, 0, 1],
-  [0, 1, -1], [0, 1, 0], [0, 1, 1],
-];
 
 function makeRng(seed: number): () => number {
   let t = seed >>> 0;
@@ -31,12 +25,6 @@ function makeRng(seed: number): () => number {
   };
 }
 
-function index(i: number, j: number, k: number): number {
-  const ii = ((i % NX) + NX) % NX;
-  const jj = ((j % NY) + NY) % NY;
-  const kk = ((k % NZ) + NZ) % NZ;
-  return ii + jj * NX + kk * NX * NY;
-}
 
 /**
  * Vision section: 3D grid of instanced cubes. Only "on" cells visible.
@@ -57,8 +45,7 @@ class VisionVisualization {
   private time = 0;
   frameCount = 0;
 
-  private gridA: Uint8Array;
-  private gridB: Uint8Array;
+  private grid: VisionGrid;
   private instancedMesh!: THREE.InstancedMesh;
   private dummy = new THREE.Object3D();
   private color = new THREE.Color();
@@ -66,20 +53,13 @@ class VisionVisualization {
   private bloomPass?: UnrealBloomPass;
   private searchLights!: SearchLights;
   private rng: () => number = Math.random;
-  private birthSet = new Set<number>([3]);
-  private surviveSet = new Set<number>([2, 3]);
   private lastStepTime = 0;
-  private lastBurstTime = 0;
-  private burstIntervalMs = 1000;
-  private burstCount = 1;
-  private lastSplashTime = 0;
-  private splashIntervalMs = 3000;
   private lightBrushEnabled = true;
+  private lastFrameTime = performance.now();
 
   constructor(container: HTMLElement) {
     this.container = container;
-    this.gridA = new Uint8Array(TOTAL);
-    this.gridB = new Uint8Array(TOTAL);
+    this.grid = new VisionGrid(NX, NY, NZ, this.rng);
 
     this.renderer.setClearColor(0x000000, 1);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -119,20 +99,11 @@ class VisionVisualization {
     const geo = new THREE.BoxGeometry(0.6, 0.6, 0.6);
     const mat = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.08,
-      metalness: 0.85,
+      roughness: 0.2,
+      metalness: 0.4,
       emissive: new THREE.Color(0xffffff),
-      emissiveIntensity: 0.02,
+      emissiveIntensity: 0.12,
     });
-    mat.onBeforeCompile = (shader) => {
-      shader.fragmentShader = shader.fragmentShader.replace(
-        "#include <emissivemap_fragment>",
-        [
-          "#include <emissivemap_fragment>",
-          "totalEmissiveRadiance += vColor * 0.6;",
-        ].join("\n")
-      );
-    };
     this.instancedMesh = new THREE.InstancedMesh(geo, mat, MAX_INSTANCES);
     this.instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.instancedMesh.instanceColor = new THREE.InstancedBufferAttribute(
@@ -153,11 +124,9 @@ class VisionVisualization {
     );
     this.composer.addPass(this.bloomPass);
 
-    this.seedExactly(INITIAL_ON);
+    this.grid.seedExactly(INITIAL_ON);
     this.updateInstances();
     this.lastStepTime = performance.now();
-    this.lastBurstTime = this.lastStepTime;
-    this.lastSplashTime = this.lastStepTime;
 
     this.resize();
     this.animate();
@@ -173,112 +142,6 @@ class VisionVisualization {
     }
   }
 
-  private randomSeed(density: number) {
-    for (let i = 0; i < TOTAL; i++) {
-      this.gridA[i] = this.rng() < density ? 1 : 0;
-    }
-  }
-
-  /** Turn on exactly n cells at random. */
-  private seedExactly(n: number) {
-    this.gridA.fill(0);
-    const indices = Array.from({ length: TOTAL }, (_, i) => i);
-    for (let i = 0; i < n && i < indices.length; i++) {
-      const r = i + Math.floor(this.rng() * (indices.length - i));
-      [indices[i], indices[r]] = [indices[r], indices[i]];
-      this.gridA[indices[i]] = 1;
-    }
-  }
-
-  /** Fill a central cube (radius in cells from center) with given density. */
-  private centerSeed(radius: number, density: number) {
-    this.gridA.fill(0);
-    const cx = NX / 2;
-    const cy = NY / 2;
-    const cz = NZ / 2;
-    const loX = Math.max(0, Math.floor(cx - radius));
-    const hiX = Math.min(NX, Math.ceil(cx + radius));
-    const loY = Math.max(0, Math.floor(cy - radius));
-    const hiY = Math.min(NY, Math.ceil(cy + radius));
-    const loZ = Math.max(0, Math.floor(cz - radius));
-    const hiZ = Math.min(NZ, Math.ceil(cz + radius));
-    for (let i = loX; i < hiX; i++) {
-      for (let j = loY; j < hiY; j++) {
-        for (let k = loZ; k < hiZ; k++) {
-          if (this.rng() < density) this.gridA[index(i, j, k)] = 1;
-        }
-      }
-    }
-  }
-
-  step() {
-    const read = this.gridA;
-    const write = this.gridB;
-    for (let i = 0; i < NX; i++) {
-      for (let j = 0; j < NY; j++) {
-        for (let k = 0; k < NZ; k++) {
-          let neighbors = 0;
-          for (const [di, dj, dk] of NEIGHBORS) {
-            neighbors += read[index(i + di, j + dj, k + dk)];
-          }
-          const idx = index(i, j, k);
-          const alive = read[idx];
-          if (alive) {
-            write[idx] = this.surviveSet.has(neighbors) ? 1 : 0;
-          } else {
-            write[idx] = this.birthSet.has(neighbors) ? 1 : 0;
-          }
-        }
-      }
-    }
-    const t = this.gridA;
-    this.gridA = this.gridB;
-    this.gridB = t;
-  }
-
-  private injectBurst(count: number) {
-    const glider = [
-      [0, 1],
-      [1, 2],
-      [2, 0],
-      [2, 1],
-      [2, 2],
-    ];
-    let lastSpawn: { y: number; z: number } | null = null;
-    for (let n = 0; n < count; n++) {
-      const j = Math.floor(this.rng() * NY);
-      const k = Math.floor(this.rng() * NZ);
-      for (const [dj, dk] of glider) {
-        this.gridA[index(0, j + dj, k + dk)] = 1;
-      }
-      lastSpawn = { y: j + 1, z: k + 1 };
-    }
-    if (lastSpawn) {
-      this.searchLights.trackSpawn(lastSpawn.y, lastSpawn.z);
-    }
-  }
-
-  private injectSplash() {
-    const splash = [
-      [0, 1], [0, 2], [0, 3],
-      [1, 0], [1, 2], [1, 4],
-      [2, 1], [2, 2], [2, 3],
-      [3, 0], [3, 2], [3, 4],
-      [4, 1], [4, 2], [4, 3],
-    ];
-    const j = Math.floor(this.rng() * NY);
-    const k = Math.floor(this.rng() * NZ);
-    for (const [dj, dk] of splash) {
-      this.gridA[index(0, j + dj, k + dk)] = 1;
-    }
-  }
-
-  private injectLightTrail(cells: Array<{ y: number; z: number }>) {
-    cells.forEach(({ y, z }) => {
-      this.gridA[index(0, y, z)] = 1;
-    });
-  }
-
   private updateInstances() {
     const mesh = this.instancedMesh;
     const halfX = NX / 2;
@@ -288,37 +151,41 @@ class VisionVisualization {
     for (let i = 0; i < NX && count < MAX_INSTANCES; i++) {
       for (let j = 0; j < NY && count < MAX_INSTANCES; j++) {
         for (let k = 0; k < NZ && count < MAX_INSTANCES; k++) {
-          if (this.gridA[index(i, j, k)] === 0) continue;
+          if (this.grid.gridA[this.grid.index(i, j, k)] === 0) continue;
           this.dummy.position.set(i - halfX, j - halfY, k - halfZ);
           this.dummy.updateMatrix();
           mesh.setMatrixAt(count, this.dummy.matrix);
           const hue = ((i + j + k) / (NX + NY + NZ)) % 1;
-          this.color.setHSL(hue, 0.5, 0.22);
+          const glow = Math.min(1, this.grid.glowA[this.grid.index(i, j, k)] / this.grid.glowDurationMs);
+          const lightness = 0.35 + glow * 0.35;
+          this.color.setHSL(hue, 0.5, lightness);
           mesh.setColorAt(count, this.color);
           count++;
         }
       }
     }
     mesh.count = count;
-    mesh.instanceColor.needsUpdate = true;
+    if (mesh.instanceColor) {
+      mesh.instanceColor.needsUpdate = true;
+    }
     mesh.instanceMatrix.needsUpdate = true;
   }
 
   /** Public: randomize grid and refresh instances (for Reset button). */
   reset(density = 0.08) {
-    this.randomSeed(density);
+    this.grid.randomSeed(density);
     this.updateInstances();
   }
 
   /** Public: exactly n cells on at random (for Reset button). */
   resetExactly(n: number) {
-    this.seedExactly(n);
+    this.grid.seedExactly(n);
     this.updateInstances();
   }
 
   /** Public: center-dense seed then refresh (for Reset button). */
   resetCenter(radius: number, density: number) {
-    this.centerSeed(radius, density);
+    this.grid.centerSeed(radius, density);
     this.updateInstances();
   }
 
@@ -354,14 +221,16 @@ class VisionVisualization {
     this.searchLights.setLightCount(count);
   }
 
+  getMaxLights() {
+    return this.searchLights.getMaxLights();
+  }
+
   setSeed(seed: number) {
     this.rng = makeRng(seed);
     this.searchLights.resetForSeed(this.rng);
-    this.gridA.fill(0);
-    this.gridB.fill(0);
+    this.grid.setRng(this.rng);
+    this.grid.clear();
     this.lastStepTime = performance.now();
-    this.lastBurstTime = this.lastStepTime;
-    this.lastSplashTime = this.lastStepTime;
     this.updateInstances();
   }
 
@@ -373,6 +242,10 @@ class VisionVisualization {
     this.searchLights.setWanderDistance(distance);
   }
 
+  setBrightness(value: number) {
+    this.searchLights.setBrightness(value);
+  }
+
   animate = () => {
     this.frameId = requestAnimationFrame(this.animate);
     if (!this.isVisible) return;
@@ -381,14 +254,17 @@ class VisionVisualization {
     this.frameCount++;
 
     const now = performance.now();
+    const deltaMs = Math.min(100, now - this.lastFrameTime);
+    this.lastFrameTime = now;
+    this.grid.decayGlow(deltaMs);
     if (now - this.lastStepTime >= 100) {
       this.lastStepTime = now;
-      this.step();
+      this.grid.step();
     }
     this.searchLights.update(now);
     if (this.lightBrushEnabled) {
       const cells = this.searchLights.getLightGridCells();
-      this.injectLightTrail(cells);
+      this.grid.injectLightTrail(cells);
       this.searchLights.spawnLightning(cells);
     }
     this.updateInstances();
@@ -443,14 +319,9 @@ export function mountAbout(container: HTMLElement) {
     });
   }
 
-  const titleEl = container.querySelector(
-    "[data-typing-title]"
-  ) as HTMLHeadingElement | null;
   const subtitleEl = container.querySelector(
     "[data-typing-subtitle]"
   ) as HTMLParagraphElement | null;
-  let typingTimer: number | undefined;
-  let typingTimeout: number | undefined;
 
   const subtitles = [
     "DIALTONE is a virtual librarian.",
@@ -469,32 +340,7 @@ export function mountAbout(container: HTMLElement) {
     "Open, network-first, community operated.",
   ];
 
-  const startTyping = () => {
-    if (!subtitleEl) return;
-    let index = 0;
-    let charIndex = 0;
-
-    const step = () => {
-      const full = subtitles[index];
-      const next = full.slice(0, Math.min(full.length, charIndex + 1));
-      subtitleEl.textContent = `| ${next || "\u00A0"}`;
-      charIndex += 1;
-
-      if (charIndex >= full.length) {
-        typingTimeout = window.setTimeout(() => {
-          index = (index + 1) % subtitles.length;
-          charIndex = 0;
-          subtitleEl.textContent = "| \u00A0";
-          step();
-        }, 2000);
-        return;
-      }
-      typingTimer = window.setTimeout(step, 30);
-    };
-    step();
-  };
-
-  startTyping();
+  const stopTyping = startTyping(subtitleEl, subtitles);
 
   const viz = new VisionVisualization(container);
   const lightConfig = {
@@ -502,11 +348,13 @@ export function mountAbout(container: HTMLElement) {
     dwell: 8,
     wander: 8,
     seed: 1337,
+    brightness: 1.35,
   };
   viz.setLightCount(lightConfig.count);
   viz.setDwellSeconds(lightConfig.dwell);
   viz.setWanderDistance(lightConfig.wander);
   viz.setSeed(lightConfig.seed);
+  viz.setBrightness(lightConfig.brightness);
 
   if (panel) {
     panel.classList.add("about-config-panel");
@@ -549,10 +397,14 @@ export function mountAbout(container: HTMLElement) {
     };
 
     addHeader("Light Behavior");
-    addSlider("Light Count", 1, 4, 1, lightConfig.count, (v) => {
+    addSlider("Light Count", 1, viz.getMaxLights(), 1, lightConfig.count, (v) => {
       lightConfig.count = v;
       viz.setLightCount(v);
     });
+    addSlider("Brightness", 0.4, 3, 0.1, lightConfig.brightness, (v) => {
+      lightConfig.brightness = v;
+      viz.setBrightness(v);
+    }, (v) => v.toFixed(1));
     addSlider("Seed", 1, 9999, 1, lightConfig.seed, (v) => {
       const seed = Math.round(v);
       lightConfig.seed = seed;
@@ -572,8 +424,7 @@ export function mountAbout(container: HTMLElement) {
     dispose: () => {
       viz.dispose();
       toggle.remove();
-      if (typingTimer) window.clearTimeout(typingTimer);
-      if (typingTimeout) window.clearTimeout(typingTimeout);
+      stopTyping();
       container.innerHTML = "";
     },
     setVisible: (visible: boolean) => viz.setVisible(visible),

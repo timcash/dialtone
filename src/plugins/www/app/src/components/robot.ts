@@ -3,6 +3,7 @@ import { IKSolver } from "./ik";
 import { FpsCounter } from "./fps";
 import { GpuTimer } from "./gpu_timer";
 import { VisibilityMixin } from "./section";
+import { startTyping } from "./typing";
 
 
 // Joint colors by type
@@ -829,7 +830,9 @@ export function mountRobot(container: HTMLElement) {
   container.innerHTML = `
       <div class="marketing-overlay" aria-label="Robot visualization marketing information">
         <h2>Robotics begins with precision control</h2>
-        <p>Interact with physical systems through low-latency digital twins. Build the future of automation.</p>
+        <p data-typing-subtitle></p>
+        <a class="buy-button" href="https://buy.stripe.com/test_5kQaEXcagaAoaC62N20kE00" target="_blank"
+          rel="noopener noreferrer">Get the Robot Kit</a>
       </div>
       <div id="robot-config-panel" class="earth-config-panel" hidden></div>
     `;
@@ -844,11 +847,22 @@ export function mountRobot(container: HTMLElement) {
   toggle.textContent = 'Config';
   controls?.prepend(toggle);
 
+  const subtitleEl = container.querySelector(
+    "[data-typing-subtitle]"
+  ) as HTMLParagraphElement | null;
+  const subtitles = [
+    "Interact with physical systems through low-latency digital twins.",
+    "Build the future of automation with shared tooling.",
+    "Precision control for real machines in the field.",
+  ];
+  const stopTyping = startTyping(subtitleEl, subtitles);
+
   const viz = new RobotArmVisualization(container);
   return {
     dispose: () => {
       viz.dispose();
       toggle.remove();
+      stopTyping();
       container.innerHTML = '';
     },
     setVisible: (visible: boolean) => viz.setVisible(visible),
