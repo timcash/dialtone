@@ -37,25 +37,36 @@ export function setupConfigPanel(orbit: ProceduralOrbit) {
     step: number,
     onInput: (v: number) => void,
     format: (v: number) => string = (v) => v.toFixed(3),
+    getValue?: () => number,
   ) => {
     const row = document.createElement("div");
     row.className = "earth-config-row";
     const labelWrap = document.createElement("label");
+    const sliderId = `earth-config-${key}`;
+    labelWrap.className = "earth-config-label";
+    labelWrap.htmlFor = sliderId;
     labelWrap.textContent = label;
     const slider = document.createElement("input");
     slider.type = "range";
+    slider.id = sliderId;
     slider.min = `${min}`;
     slider.max = `${max}`;
     slider.step = `${step}`;
     slider.value = `${value}`;
-    labelWrap.appendChild(slider);
     row.appendChild(labelWrap);
+    row.appendChild(slider);
     const valueEl = document.createElement("span");
     valueEl.className = "earth-config-value";
     valueEl.textContent = format(value);
     row.appendChild(valueEl);
     panel.appendChild(row);
     orbit.configValueMap.set(key, valueEl);
+    orbit.configSliderMap.set(key, {
+      slider,
+      valueEl,
+      format,
+      getValue: getValue ?? (() => parseFloat(slider.value)),
+    });
     slider.addEventListener("input", () => {
       const next = parseFloat(slider.value);
       onInput(next);
@@ -84,13 +95,17 @@ export function setupConfigPanel(orbit: ProceduralOrbit) {
   };
   addSlider(
     "earthRotPeriod",
-    "Earth Rot Period (s)",
+    "Earth",
     Math.min(60, toPeriodSeconds(orbit.earthRotSpeed)),
     1,
     60,
     1,
     (v: number) => (orbit.earthRotSpeed = toRotSpeed(v)),
     (v: number) => (isFinite(v) ? v.toFixed(0) : "∞"),
+    () => {
+      const v = toPeriodSeconds(orbit.earthRotSpeed);
+      return Math.min(60, Math.max(1, v));
+    },
   );
   addSlider(
     "sunOrbitSpeed",
@@ -101,6 +116,18 @@ export function setupConfigPanel(orbit: ProceduralOrbit) {
     0.0001,
     (v: number) => (orbit.sunOrbitSpeed = v),
     (v: number) => v.toFixed(4),
+    () => orbit.sunOrbitSpeed,
+  );
+  addSlider(
+    "sunOrbitPos",
+    "Sun Pos",
+    orbit.sunOrbitAngleRad,
+    0,
+    Math.PI * 2,
+    0.01,
+    (v: number) => orbit.setSunOrbitAngleRad(v),
+    (v: number) => v.toFixed(2),
+    () => orbit.sunOrbitAngleRad,
   );
 
   addSection("Atmosphere");
@@ -113,6 +140,7 @@ export function setupConfigPanel(orbit: ProceduralOrbit) {
     0.01,
     (v: number) => (orbit.cloudAmount = v),
     (v: number) => v.toFixed(2),
+    () => orbit.cloudAmount,
   );
   addSlider(
     "cloudBrightness",
@@ -123,6 +151,7 @@ export function setupConfigPanel(orbit: ProceduralOrbit) {
     0.1,
     (v: number) => (orbit.cloudBrightness = v),
     (v: number) => v.toFixed(1),
+    () => orbit.cloudBrightness,
   );
 
   addSection("Cloud Layer 1");
@@ -135,6 +164,7 @@ export function setupConfigPanel(orbit: ProceduralOrbit) {
     1,
     (v: number) => (orbit.cloud1RotSpeed = v / 100000),
     (v: number) => v.toFixed(0),
+    () => orbit.cloud1RotSpeed * 100000,
   );
   addSlider(
     "c1Opacity",
@@ -145,6 +175,7 @@ export function setupConfigPanel(orbit: ProceduralOrbit) {
     0.01,
     (v: number) => (orbit.cloud1Opacity = v),
     (v: number) => v.toFixed(2),
+    () => orbit.cloud1Opacity,
   );
 
   addSection("Cloud Layer 2");
@@ -157,6 +188,7 @@ export function setupConfigPanel(orbit: ProceduralOrbit) {
     1,
     (v: number) => (orbit.cloud2RotSpeed = v / 100000),
     (v: number) => v.toFixed(0),
+    () => orbit.cloud2RotSpeed * 100000,
   );
   addSlider(
     "c2Opacity",
@@ -167,6 +199,7 @@ export function setupConfigPanel(orbit: ProceduralOrbit) {
     0.01,
     (v: number) => (orbit.cloud2Opacity = v),
     (v: number) => v.toFixed(2),
+    () => orbit.cloud2Opacity,
   );
 
   addSection("Camera");
@@ -179,6 +212,29 @@ export function setupConfigPanel(orbit: ProceduralOrbit) {
     0.5,
     (v: number) => (orbit.cameraDistance = v),
     (v: number) => v.toFixed(1),
+    () => orbit.cameraDistance,
+  );
+  addSlider(
+    "yaw",
+    "Yaw",
+    orbit.cameraYaw,
+    0,
+    Math.PI * 2,
+    0.01,
+    (v: number) => (orbit.cameraYaw = v),
+    (v: number) => v.toFixed(2),
+    () => orbit.cameraYaw,
+  );
+  addSlider(
+    "orbit",
+    "Orbit",
+    orbit.cameraOrbit,
+    0,
+    Math.PI * 2,
+    0.01,
+    (v: number) => (orbit.cameraOrbit = v),
+    (v: number) => v.toFixed(2),
+    () => orbit.cameraOrbit,
   );
 
   addCopyButton();
