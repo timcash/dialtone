@@ -6,14 +6,13 @@ Usage: `./dialtone.sh swarm [COMMAND] [ARGS]`
 
 | Command | Description |
 | :--- | :--- |
-| `install` | Install dependencies (npm + bun) |
+| `install` | Install dependencies (npm) |
 | `dashboard` | Launch web dashboard (http://127.0.0.1:4000) |
 | `start <topic> [name]` | Start a background node for a topic |
 | `stop <pid>` | Stop a background node by PID |
 | `list` | List all managed nodes |
 | `status` | Show live peer counts and latency |
-| `test` | Run integration tests (Pear) |
-| `test-e2e` | Run E2E tests (Puppeteer) |
+| `test` | Run integration tests (Pear + chromedp) |
 
 # User Guide
 
@@ -68,36 +67,48 @@ We have a demonstration using ephemeral storage (fast, memory-like) to show conc
 ```shell
 # Run the K/V simulation test
 # This starts 2 peers, performs concurrent writes, and verifies convergence.
-bun run src/plugins/swarm/test/kv.ts
+cd src/plugins/swarm/app
+pear run ./test.js kv
 ```
 
 ## 4. Running Tests
-Validate the swarm infrastructure using Pear (p2p) or Puppeteer (e2e).
+Validate the swarm infrastructure using Pear (p2p) plus chromedp (browser UI).
 
 ```shell
-# Run Pear-based p2p integration tests
+# Run Pear unit tests + dashboard + chromedp UI checks
 ./dialtone.sh swarm test
-
-
-# Run full E2E dashboard tests (Puppeteer + Bun)
-./dialtone.sh swarm test-e2e
 ```
 
-## 5. TypeScript Support
-The Swarm K/V implementation uses `autobase`, which does not currently ship with official TypeScript definitions. To resolve `lint` errors in VS Code or during build time, we include a local declaration file.
+## 5. Tests ↔ Code Map
 
-### Fixing "Cannot find module 'autobase'"
-If you see this error, ensure your `tsconfig.json` includes the local `types` directory:
+```mermaid
+flowchart TD
+  A["swarm-test: ./dialtone.sh swarm test"] --> B["swarm-cli: cli/swarm.go runSwarmTest()"]
+  B --> C["swarm-suite: swarm/test/test.go RunAll()"]
+  C --> D["swarm-integration: RunSwarmIntegration()"]
 
-```json
-{
-  "compilerOptions": {
-    "typeRoots": ["./node_modules/@types", "./types"]
-  }
-}
+  %% Unit tests via Pear
+  D --> E["pear-units: runPearUnitTests()"]
+  E --> F["pear-kv: pear run ./test.js kv"]
+  E --> G["pear-peer-a: pear run ./test.js peer-a test-topic"]
+  E --> H["pear-peer-b: pear run ./test.js peer-b test-topic"]
+
+  F --> I["kv-test: swarm/app/test.js (KV/Autobee test)"]
+  G --> J["multi-peer-test: swarm/app/test.js (Hyperswarm multi-peer)"]
+  H --> J
+
+  %% Dashboard server via Pear (index.js -> dashboard.js)
+  D --> K["pear-dashboard: pear run . dashboard <repo>"]
+  K --> L["app-index: swarm/app/index.js (dashboard mode)"]
+  L --> M["dashboard-server: swarm/app/dashboard.js (HTTP server on :4000)"]
+  M --> N["dashboard-ui: swarm/app/dashboard.html (UI)"]
+
+  %% Browser UI test via chromedp
+  D --> O["chrome-connect: chromedp via ./dialtone.sh chrome new --gpu"]
+  O --> P["ui-navigate: http://127.0.0.1:4000"]
+  P --> N
+  O --> Q["console-tap: capture console/error output"]
 ```
-
-We provide a custom definition in `src/plugins/swarm/test/types/autobase.d.ts`.
 
 ## 6. Node.js Compatibility
 Pear apps use the Bare runtime, which provides mostly compatible `bare-*` modules for Node.js core APIs (e.g., `bare-fs` instead of `fs`).

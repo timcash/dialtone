@@ -1,31 +1,48 @@
 package test
 
 import (
-	"dialtone/cli/src/core/config"
-	"dialtone/cli/src/core/logger"
-	"dialtone/cli/src/core/test"
+	"context"
+	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strings"
+	"time"
+
+	"dialtone/cli/src/core/browser"
+	"dialtone/cli/src/core/config"
+	"dialtone/cli/src/core/test"
+
+	"github.com/chromedp/cdproto/runtime"
+	"github.com/chromedp/chromedp"
 )
 
 func init() {
-	test.Register("multi-peer-connection", "swarm", []string{"plugin", "swarm", "network"}, RunMultiPeerConnection)
+	test.Register("swarm-dashboard", "swarm", []string{"plugin", "swarm", "browser"}, RunSwarmIntegration)
 }
 
-// RunAll is the standard entry point required by project rules.
-// It uses the registry to find and run all tests for this plugin.
+// RunAll is the standard entry point for `./dialtone.sh swarm test`.
+// It runs the chromedp-based swarm integration test (dashboard in browser).
 func RunAll() error {
-	logger.LogInfo("Running swarm plugin suite...")
 	return test.RunPlugin("swarm")
 }
 
-func RunMultiPeerConnection() error {
-	fmt.Println("[swarm] Running multi-peer integration test...")
+// RunSwarmIntegration starts the swarm dashboard and runs chromedp tests:
+// launch Chrome via CLI, attach chromedp, load dashboard, capture console/errors.
+func RunSwarmIntegration() error {
+	cwd, _ := os.Getwd()
+	dialtoneSh := filepath.Join(cwd, "dialtone.sh")
+	if _, err := os.Stat(dialtoneSh); os.IsNotExist(err) {
+		return fmt.Errorf("could not find dialtone.sh in %s", cwd)
+	}
 
-	// Use project root for appDir
-	appDir := filepath.Join("src", "plugins", "swarm", "app")
+	appDir := filepath.Join(cwd, "src", "plugins", "swarm", "app")
+	if _, err := os.Stat(appDir); os.IsNotExist(err) {
+		return fmt.Errorf("swarm app directory not found: %s", appDir)
+	}
 
 	envPath := config.GetDialtoneEnv()
 	if envPath == "" {
@@ -35,39 +52,247 @@ func RunMultiPeerConnection() error {
 	if _, err := os.Stat(pearBin); err != nil {
 		pearBin = filepath.Join(envPath, "bin", "pear")
 		if _, err := os.Stat(pearBin); err != nil {
-			return fmt.Errorf("pear not found in DIALTONE_ENV (%s). Run ./dialtone.sh swarm install to link it or install Pear into DIALTONE_ENV", envPath)
+			return fmt.Errorf("pear not found in DIALTONE_ENV (%s). Run ./dialtone.sh swarm install", envPath)
 		}
 	}
 
-	// Run peer-a and peer-b in parallel
-	fmt.Println("[swarm] Starting Peer A...")
+	fmt.Println(">> [swarm] Running Pear unit tests (app/test.js)...")
+	if err := runPearUnitTests(appDir, pearBin); err != nil {
+		return err
+	}
+
+	fmt.Println(">> [swarm] Cleaning up existing processes...")
+	browser.CleanupPort(4000)
+	_ = exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
+
+	fmt.Println(">> [swarm] Starting dashboard on port 4000...")
+	env := append(os.Environ(), "DIALTONE_REPO="+cwd)
+	dashCmd := exec.Command(pearBin, "run", ".", "dashboard", cwd)
+	dashCmd.Dir = appDir
+	dashCmd.Env = env
+	if err := dashCmd.Start(); err != nil {
+		return fmt.Errorf("failed to start dashboard: %v", err)
+	}
+	defer func() {
+		if dashCmd.Process != nil {
+			fmt.Println(">> [swarm] Stopping dashboard...")
+			dashCmd.Process.Kill()
+		}
+	}()
+
+	fmt.Println(">> [swarm] Waiting for dashboard...")
+	if err := waitForPort(4000, 30*time.Second); err != nil {
+		return fmt.Errorf("dashboard port 4000 not ready: %v", err)
+	}
+	fmt.Println(">> [swarm] Dashboard ready.")
+
+	fmt.Println(">> [swarm] Launching Chrome via CLI...")
+	launchCmd := exec.Command("./dialtone.sh", "chrome", "new", "--gpu")
+	launchCmd.Dir = cwd
+	output, err := launchCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to launch chrome via CLI: %v\nOutput: %s", err, string(output))
+	}
+
+	re := regexp.MustCompile(`ws://127\.0\.0\.1:\d+/devtools/browser/[a-z0-9-]+`)
+	wsURL := re.FindString(string(output))
+	if wsURL == "" {
+		return fmt.Errorf("failed to find WebSocket URL in CLI output: %s", string(output))
+	}
+	fmt.Printf(">> [swarm] Connected to Chrome via: %s\n", wsURL)
+
+	allocCtx, cancel := chromedp.NewRemoteAllocator(context.Background(), wsURL)
+	defer cancel()
+
+	ctx, cancel := chromedp.NewContext(allocCtx)
+	defer cancel()
+
+	var consoleLogs []string
+	chromedp.ListenTarget(ctx, func(ev interface{}) {
+		switch ev := ev.(type) {
+		case *runtime.EventConsoleAPICalled:
+			parts := make([]string, 0, len(ev.Args))
+			for _, arg := range ev.Args {
+				parts = append(parts, formatRemoteObject(arg))
+			}
+			line := fmt.Sprintf("[%s] %s", ev.Type, strings.Join(parts, " "))
+			if ev.StackTrace != nil && len(ev.StackTrace.CallFrames) > 0 {
+				f := ev.StackTrace.CallFrames[0]
+				if f.URL != "" {
+					line = fmt.Sprintf("%s (%s:%d:%d)", line, f.URL, f.LineNumber+1, f.ColumnNumber+1)
+				}
+			}
+			consoleLogs = append(consoleLogs, line)
+		case *runtime.EventExceptionThrown:
+			d := ev.ExceptionDetails
+			ex := d.Text
+			if d.Exception != nil {
+				exObj := formatRemoteObject(d.Exception)
+				if strings.TrimSpace(exObj) != "" {
+					ex = ex + " | " + exObj
+				}
+			}
+			line := fmt.Sprintf("[EXCEPTION] %s", ex)
+			if d.StackTrace != nil && len(d.StackTrace.CallFrames) > 0 {
+				f := d.StackTrace.CallFrames[0]
+				if f.URL != "" {
+					line = fmt.Sprintf("%s (%s:%d:%d)", line, f.URL, f.LineNumber+1, f.ColumnNumber+1)
+				}
+			}
+			consoleLogs = append(consoleLogs, line)
+		}
+	})
+
+	ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	if err := verifyDashboard(ctx); err != nil {
+		return err
+	}
+
+	if err := printConsoleLogs(consoleLogs); err != nil {
+		return err
+	}
+
+	fmt.Println("\n[PASS] Swarm integration tests complete")
+
+	fmt.Println(">> [swarm] Verifying no leaked Dialtone processes...")
+	_ = exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
+	listCmd := exec.Command("./dialtone.sh", "chrome", "list")
+	listOutput, _ := listCmd.CombinedOutput()
+	if strings.Contains(string(listOutput), "Dialtone") {
+		fmt.Printf(">> [WARNING] Leaked Dialtone processes detected:\n%s\n", string(listOutput))
+	} else {
+		fmt.Println(">> [swarm] Cleanup verified.")
+	}
+
+	return nil
+}
+
+func formatRemoteObject(o *runtime.RemoteObject) string {
+	if o == nil {
+		return ""
+	}
+	if len(o.Value) > 0 {
+		var v interface{}
+		if err := json.Unmarshal(o.Value, &v); err == nil {
+			b, err := json.Marshal(v)
+			if err == nil {
+				return string(b)
+			}
+		}
+		return string(o.Value)
+	}
+	if o.UnserializableValue != "" {
+		return string(o.UnserializableValue)
+	}
+	if o.Description != "" {
+		return o.Description
+	}
+	if o.Type != "" {
+		return string(o.Type)
+	}
+	return ""
+}
+
+func printConsoleLogs(logs []string) error {
+	fmt.Println("\n>> [swarm] Browser console logs:")
+	fmt.Println("   ----------------------------------------")
+	if len(logs) == 0 {
+		fmt.Println("   (no console output)")
+		return nil
+	}
+	for _, log := range logs {
+		fmt.Printf("   %s\n", log)
+	}
+	hasErrors := false
+	for _, log := range logs {
+		if strings.Contains(log, "[error]") || strings.Contains(log, "[EXCEPTION]") {
+			hasErrors = true
+			break
+		}
+	}
+	fmt.Println("   ----------------------------------------")
+	if hasErrors {
+		fmt.Println("   [FAIL] Console errors or exceptions detected!")
+		for _, log := range logs {
+			if strings.Contains(log, "[error]") || strings.Contains(log, "[EXCEPTION]") {
+				fmt.Printf("   >> %s\n", log)
+			}
+		}
+		return fmt.Errorf("critical console errors detected during browser execution")
+	}
+	fmt.Printf("   [PASS] %d console messages, no errors\n", len(logs))
+	return nil
+}
+
+func verifyDashboard(ctx context.Context) error {
+	fmt.Println(">> [swarm] Loading dashboard at http://127.0.0.1:4000...")
+	var title string
+	err := chromedp.Run(ctx,
+		chromedp.Navigate("http://127.0.0.1:4000"),
+		chromedp.WaitReady("body"),
+		chromedp.Title(&title),
+	)
+	if err != nil {
+		return fmt.Errorf("dashboard load failed: %v", err)
+	}
+	fmt.Printf(">> [swarm] Page title: %q\n", title)
+	return nil
+}
+
+func runPearUnitTests(appDir, pearBin string) error {
+	if err := runPearTest(appDir, pearBin, "kv"); err != nil {
+		return fmt.Errorf("kv test failed: %v", err)
+	}
+
+	fmt.Println(">> [swarm] Running multi-peer test (peer-a, peer-b)...")
 	cmdA := exec.Command(pearBin, "run", "./test.js", "peer-a", "test-topic")
 	cmdA.Dir = appDir
 	cmdA.Stdout = os.Stdout
 	cmdA.Stderr = os.Stderr
 
-	fmt.Println("[swarm] Starting Peer B...")
 	cmdB := exec.Command(pearBin, "run", "./test.js", "peer-b", "test-topic")
 	cmdB.Dir = appDir
 	cmdB.Stdout = os.Stdout
 	cmdB.Stderr = os.Stderr
 
-	// Start both
 	errA := cmdA.Start()
 	errB := cmdB.Start()
-
 	if errA != nil || errB != nil {
 		return fmt.Errorf("failed to start test processes: %v, %v", errA, errB)
 	}
 
-	// Wait for both to finish
 	errA = cmdA.Wait()
 	errB = cmdB.Wait()
-
 	if errA != nil || errB != nil {
 		return fmt.Errorf("one or more peers failed to complete test")
 	}
 
-	fmt.Println("[swarm] Multi-peer test passed!")
+	fmt.Println(">> [swarm] Pear unit tests complete.")
 	return nil
+}
+
+func runPearTest(appDir, pearBin string, args ...string) error {
+	cmd := exec.Command(pearBin, append([]string{"run", "./test.js"}, args...)...)
+	cmd.Dir = appDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func waitForPort(port int, timeout time.Duration) error {
+	start := time.Now()
+	for time.Since(start) < timeout {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 1*time.Second)
+		if err == nil {
+			conn.Close()
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout waiting for port %d", port)
 }
