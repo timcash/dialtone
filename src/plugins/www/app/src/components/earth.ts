@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import { HexLayer } from "./hex_layer";
-import earthVertexShader from "../shaders/earth.vert.glsl?raw";
-import earthFragmentShader from "../shaders/earth.frag.glsl?raw";
+import { polygonToCells } from "h3-js";
 import cloudVertexShader from "../shaders/cloud.vert.glsl?raw";
 import cloudFragmentShader from "../shaders/cloud.frag.glsl?raw";
 import atmosphereVertexShader from "../shaders/atmosphere.vert.glsl?raw";
@@ -100,7 +99,7 @@ export class ProceduralOrbit {
   atmosphere!: THREE.Mesh;
   sunAtmosphere!: THREE.Mesh;
   moon!: THREE.Mesh;
-  earthMaterial!: THREE.ShaderMaterial;
+  earthMaterial!: THREE.MeshStandardMaterial;
   cloud1Material!: THREE.ShaderMaterial;
   cloud2Material!: THREE.ShaderMaterial;
   atmosphereMaterial!: THREE.ShaderMaterial;
@@ -125,9 +124,10 @@ export class ProceduralOrbit {
   cloud1Opacity = 0.82;
   cloud2Opacity = 0.78;
   cloudBrightness = 1.25;
-  cameraDistance = 4.5;
-  cameraOffsetX = 5.0;
-  cameraYaw = 1;
+  cameraDistance = 6.0;
+  cameraOrbit = 0.4;
+  cameraYaw = 0.2;
+  cameraAnchor = new THREE.Vector3(0, 0, 0);
 
   // Lights
   sunGlow!: THREE.Mesh;
@@ -141,6 +141,8 @@ export class ProceduralOrbit {
   sunOrbitAngleDeg = 0;
   sunOrbitSpeed = (Math.PI * 2) / SUN_ORBIT_PERIOD_MS / 2;
   sunOrbitIncline = 20 * DEG_TO_RAD;
+  sunOrbitAngleRad = 0;
+  sunTimeMs = performance.now();
 
   // Moon orbit (visual / demo-scale)
   moonRadius = 0.55;
@@ -157,6 +159,15 @@ export class ProceduralOrbit {
   configPanel?: HTMLDivElement;
   configToggle?: HTMLButtonElement;
   configValueMap = new Map<string, HTMLSpanElement>();
+  configSliderMap = new Map<
+    string,
+    {
+      slider: HTMLInputElement;
+      valueEl: HTMLSpanElement;
+      format: (v: number) => string;
+      getValue: () => number;
+    }
+  >();
   private setConfigPanelOpen?: (open: boolean) => void;
   private fpsCounter = new FpsCounter("earth");
 
@@ -176,12 +187,12 @@ export class ProceduralOrbit {
 
 
     this.initLayers();
+    this.loadLandLayer();
     this.initLights();
     this.initConfigPanel();
     this.resize();
-    this.camera.position.set(this.cameraOffsetX, 0, this.cameraDistance);
-    this.camera.lookAt(0, 0, 0);
-    this.camera.rotation.y += this.cameraYaw;
+    this.initCameraAnchor();
+    this.updateCamera(this.cameraAnchor);
     // Ensure we render both the default layer and the moon light-only layer.
     this.camera.layers.enable(MOON_LIGHT_LAYER);
     this.animate();
@@ -232,23 +243,10 @@ export class ProceduralOrbit {
     const cloudSegments = 48;
     const atmoSegments = 32;
 
-    const earthMat = new THREE.ShaderMaterial({
-      uniforms: {
-        uTime: { value: 0 },
-        uSunDir: { value: new THREE.Vector3(1, 1, 1).normalize() },
-        uSunColor: { value: SUN_COLOR.clone() },
-        uKeyDir: { value: new THREE.Vector3(-1, 0, 0).normalize() },
-        uKeyColor: { value: KEY1_COLOR.clone() },
-        uKeyDir2: { value: new THREE.Vector3(0, 1, 0).normalize() },
-        uKey2Color: { value: KEY2_COLOR.clone() },
-        uKeyIntensity: { value: 0.8 },
-        uKeyIntensity2: { value: 0.55 },
-        uSunIntensity: { value: 0.5 },
-        uAmbientIntensity: { value: 0.1 },
-        uColorScale: { value: this.materialColorScale },
-      },
-      vertexShader: earthVertexShader,
-      fragmentShader: earthFragmentShader,
+    const earthMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(0x0b2a6f),
+      roughness: 0.6,
+      metalness: 0.05,
     });
     this.earthMaterial = earthMat;
     this.earth = new THREE.Mesh(geo(this.earthRadius, earthSegments), earthMat);
@@ -374,6 +372,88 @@ export class ProceduralOrbit {
     this.scene.add(this.moon);
   }
 
+  private async loadLandLayer() {
+    try {
+      const precomputed = await fetch("/land.h3.json");
+      if (precomputed.ok) {
+        const payload = await precomputed.json();
+        const cells = Array.isArray(payload) ? payload : payload?.cells;
+        const resolution = payload?.resolution ?? 3;
+        if (Array.isArray(cells) && cells.length > 0) {
+          this.buildLandLayer(cells, resolution);
+          return;
+        }
+      }
+      const response = await fetch("/land.geojson");
+      if (!response.ok) return;
+      const geojson = await response.json();
+      const cells = this.geojsonToCells(geojson, 3);
+      if (cells.length === 0) return;
+      this.buildLandLayer(cells, 3);
+    } catch {
+      // Land layer is optional; ignore load errors.
+    }
+  }
+
+  private buildLandLayer(cells: string[], resolution: number) {
+    const landRadiusOffset = 0.03;
+    const landLayer = new HexLayer(this.earthRadius, {
+      radiusOffset: landRadiusOffset,
+      count: cells.length,
+      resolution,
+      ratePerSecond: 1,
+      durationSeconds: 9999,
+      opacity: 0.95,
+      palette: [
+        new THREE.Color(0.2, 0.35, 0.2),
+        new THREE.Color(0.25, 0.45, 0.25),
+        new THREE.Color(0.4, 0.5, 0.3),
+      ],
+      cells,
+      animate: false,
+    });
+    landLayer.material.depthWrite = false;
+    landLayer.material.depthTest = true;
+    landLayer.material.polygonOffset = true;
+    landLayer.material.polygonOffsetFactor = -1;
+    landLayer.material.polygonOffsetUnits = -1;
+    landLayer.mesh.renderOrder = 1;
+    landLayer.mesh.frustumCulled = false;
+    this.hexLayers.push(landLayer);
+    this.earth.add(landLayer.mesh);
+    console.log("[earth] land layer ready", {
+      cells: cells.length,
+      resolution,
+      earthRadius: this.earthRadius,
+      landRadius: this.earthRadius + landRadiusOffset,
+      cloud1Radius: this.earthRadius + 0.05,
+      cloud2Radius: this.earthRadius + 0.08,
+    });
+  }
+
+  private geojsonToCells(geojson: any, resolution: number) {
+    const cells = new Set<string>();
+    if (!geojson?.features) return [];
+    geojson.features.forEach((feature: any) => {
+      const geometry = feature?.geometry;
+      if (!geometry) return;
+      const polygons =
+        geometry.type === "Polygon"
+          ? [geometry.coordinates]
+          : geometry.type === "MultiPolygon"
+            ? geometry.coordinates
+            : [];
+      polygons.forEach((coords: number[][][]) => {
+        try {
+          polygonToCells(coords, resolution, true).forEach((cell) => cells.add(cell));
+        } catch {
+          // Skip invalid polygons.
+        }
+      });
+    });
+    return Array.from(cells);
+  }
+
   createCloudMaterial(
     scale: number,
     opacity: number,
@@ -490,13 +570,14 @@ export class ProceduralOrbit {
     (this.cloud2.material as THREE.ShaderMaterial).uniforms.uTime.value =
       cloudTime;
 
-    this.camera.position.set(this.cameraOffsetX, 0, this.cameraDistance);
-    this.camera.lookAt(0, 0, 0);
-    this.camera.rotation.y += this.cameraYaw;
+    this.updateCamera(this.cameraAnchor);
 
     // Sun Orbit
     const sunRad = this.earthRadius + this.sunOrbitHeight;
     const sunA = now * this.sunOrbitSpeed + this.sunOrbitAngleDeg * DEG_TO_RAD;
+    const twoPi = Math.PI * 2;
+    this.sunOrbitAngleRad = ((sunA % twoPi) + twoPi) % twoPi;
+    this.sunTimeMs = now;
     const sinA = Math.sin(sunA);
     const cosA = Math.cos(sunA);
     const y = sinA * Math.sin(this.sunOrbitIncline) * sunRad;
@@ -505,7 +586,6 @@ export class ProceduralOrbit {
     this.sunGlow.position.copy(this.sunLight.position);
 
     const sDir = this.sunLight.position.clone().normalize();
-    this.earthMaterial.uniforms.uSunDir.value.copy(sDir);
     // Second key light: same orbit, trailing by 2π/4 radians.
     const keyA = sunA - KEY2_PHASE_OFFSET_RAD;
     const sinK = Math.sin(keyA);
@@ -514,7 +594,6 @@ export class ProceduralOrbit {
     const kz = sinK * Math.cos(this.sunOrbitIncline) * sunRad;
     const keyPos = new THREE.Vector3(cosK * sunRad, ky, kz);
     const kDir2 = keyPos.clone().normalize();
-    (this.earthMaterial.uniforms as any).uKeyDir2.value.copy(kDir2);
 
     (this.cloud1.material as THREE.ShaderMaterial).uniforms.uSunDir.value.copy(
       sDir,
@@ -553,6 +632,7 @@ export class ProceduralOrbit {
     this.sunAtmosphereMaterial.uniforms.uCameraPos.value.copy(
       this.camera.position,
     );
+    this.syncConfigSliders();
 
     // Keep debug lights moving with the same orbits.
     this.sunKeyLight.position.copy(this.sunLight.position);
@@ -565,6 +645,34 @@ export class ProceduralOrbit {
     const cpuMs = performance.now() - cpuStart;
     this.fpsCounter.tick(cpuMs, this.gpuTimer.lastMs);
 
+    this.updateMoonPosition(now);
+  };
+
+  private syncConfigSliders() {
+    if (!this.configSliderMap.size) return;
+    this.configSliderMap.forEach((entry) => {
+      if (document.activeElement === entry.slider) return;
+      const value = entry.getValue();
+      entry.slider.value = `${value}`;
+      entry.valueEl.textContent = entry.format(value);
+    });
+  }
+
+  private updateCamera(anchor: THREE.Vector3) {
+    const orbitX = Math.cos(this.cameraOrbit) * this.cameraDistance;
+    const orbitZ = Math.sin(this.cameraOrbit) * this.cameraDistance;
+    this.camera.position.set(anchor.x + orbitX, anchor.y, anchor.z + orbitZ);
+    this.camera.lookAt(anchor);
+    this.camera.rotation.y = this.cameraYaw;
+  }
+
+  private initCameraAnchor() {
+    const now = performance.now();
+    this.updateMoonPosition(now);
+    this.cameraAnchor.copy(this.moon.position).multiplyScalar(0.5);
+  }
+
+  private updateMoonPosition(now: number) {
     // Moon orbit: 1/10th the speed of the sun (same timebase as sunA).
     const moonA = now * (this.sunOrbitSpeed / 10) + this.moonOrbitPhaseRad;
     const moonSinA = Math.sin(moonA);
@@ -572,11 +680,19 @@ export class ProceduralOrbit {
     const moonY = moonSinA * Math.sin(this.moonOrbitIncline) * this.moonOrbitRadius;
     const moonZ = moonSinA * Math.cos(this.moonOrbitIncline) * this.moonOrbitRadius;
     this.moon.position.set(moonCosA * this.moonOrbitRadius, moonY, moonZ);
-  };
+  }
 
+  setSunOrbitAngleRad(angleRad: number) {
+    const offsetRad = angleRad - this.sunTimeMs * this.sunOrbitSpeed;
+    this.sunOrbitAngleDeg = offsetRad / DEG_TO_RAD;
+  }
   buildConfigSnapshot() {
     return {
-      camera: { distance: this.cameraDistance },
+      camera: {
+        distance: this.cameraDistance,
+        yaw: this.cameraYaw,
+        orbit: this.cameraOrbit,
+      },
       sun: { angle: this.sunOrbitAngleDeg, speed: this.sunOrbitSpeed },
     };
   }

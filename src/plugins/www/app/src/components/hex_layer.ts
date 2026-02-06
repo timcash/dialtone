@@ -11,6 +11,8 @@ export type HexLayerSettings = {
   durationSeconds: number;
   palette: THREE.Color[];
   opacity?: number;
+  cells?: string[];
+  animate?: boolean;
 };
 
 export class HexLayer {
@@ -19,6 +21,7 @@ export class HexLayer {
   private radius: number;
   private durationSeconds: number;
   private resolution: number;
+  private animate: boolean;
   private hexes: Array<{
     startTime: number;
     vertexStart: number;
@@ -32,6 +35,7 @@ export class HexLayer {
     this.radius = baseRadius + settings.radiusOffset;
     this.durationSeconds = settings.durationSeconds;
     this.resolution = settings.resolution;
+    this.animate = settings.animate ?? true;
     const { geometry, material } = this.buildGeometry(this.radius, settings);
     this.mesh = new THREE.Mesh(geometry, material);
     this.material = material;
@@ -43,6 +47,7 @@ export class HexLayer {
 
   update(timeSeconds: number) {
     this.material.uniforms.uTime.value = timeSeconds;
+    if (!this.animate) return;
     let updated = false;
     const positions = this.positionAttr.array as Float32Array;
     const starts = this.startAttr.array as Float32Array;
@@ -80,12 +85,17 @@ export class HexLayer {
           new THREE.Color(0.4, 0.4, 0.45),
           new THREE.Color(0.1, 0.1, 0.12),
         ];
-    const cells = this.sampleHexCells(settings.count, settings.resolution);
+    const cells = settings.cells?.length
+      ? settings.cells
+      : this.sampleHexCells(settings.count, settings.resolution);
     this.shuffleCells(cells);
+    const animate = settings.animate ?? true;
+    const durationSeconds = animate ? settings.durationSeconds : 1e9;
     cells.forEach((cell, index) => {
       const boundary = cellToBoundary(cell, true);
       const tint = palette[index % palette.length];
-      const start = index / settings.ratePerSecond;
+      const rate = Math.max(0.001, settings.ratePerSecond);
+      const start = animate ? index / rate : 0;
       const vertexStart = positions.length / 3;
       const center = boundary
         .reduce(
@@ -149,7 +159,7 @@ export class HexLayer {
       side: THREE.DoubleSide,
       uniforms: {
         uTime: { value: 0 },
-        uDuration: { value: settings.durationSeconds },
+        uDuration: { value: durationSeconds },
         uOpacity: { value: settings.opacity ?? 0.7 },
       },
       vertexShader: `
