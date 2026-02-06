@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -268,6 +269,7 @@ func RunWww(args []string) {
 		fmt.Println("  earth demo         Zero-config local Earth development environment")
 		fmt.Println("  webgpu demo        Zero-config local WebGPU development environment")
 		fmt.Println("  webgpu debug       Chromedp debug run for WebGPU rendering")
+		fmt.Println("  radio demo         Zero-config local Radio section demo")
 		fmt.Println("\nRun 'dialtone www <subcommand> --help' for specific details.")
 		return
 	}
@@ -348,6 +350,24 @@ func RunWww(args []string) {
 			return
 		}
 		logFatal("Unknown 'webgpu' command. Use 'dialtone www help' for usage.")
+
+	case "radio":
+		if len(args) > 1 && args[1] == "demo" {
+			for _, arg := range args[2:] {
+				if arg == "--help" || arg == "-h" {
+					fmt.Println("Usage: dialtone www radio demo")
+					fmt.Println("\nOrchestrates a local Radio section demo:")
+					fmt.Println("  1. Cleans up port 5173.")
+					fmt.Println("  2. Kills existing Chrome debug instances.")
+					fmt.Println("  3. Starts the Vite WWW dev server.")
+					fmt.Println("  4. Launches Chrome on the Radio section (#s-radio).")
+					return
+				}
+			}
+			handleRadioDemo(webDir)
+			return
+		}
+		logFatal("Unknown 'radio' command. Use 'dialtone www help' for usage.")
 
 	case "publish":
 		publishPrebuilt(webDir, vercelPath, vercelEnv, args[1:])
@@ -663,7 +683,7 @@ func handleWebgpuDemo(webDir string) {
 
 	// 5. Launch GPU-enabled Chrome on WebGPU section
 	logInfo("Launching GPU-enabled Chrome...")
-	chromeCmd := exec.Command("./dialtone.sh", "chrome", "new", "http://127.0.0.1:5173/#s-webgpu", "--gpu")
+	chromeCmd := exec.Command("./dialtone.sh", "chrome", "new", "http://127.0.0.1:5173/#s-webgpu-template", "--gpu")
 	chromeCmd.Stdout = os.Stdout
 	chromeCmd.Stderr = os.Stderr
 	if err := chromeCmd.Run(); err != nil {
@@ -671,10 +691,101 @@ func handleWebgpuDemo(webDir string) {
 	}
 
 	logInfo("WebGPU Demo Environment is LIVE!")
-	logInfo("Dev Server: http://127.0.0.1:5173/#s-webgpu")
+	logInfo("Dev Server: http://127.0.0.1:5173/#s-webgpu-template")
 	logInfo("Press Ctrl+C to stop...")
 
 	// Wait for interrupt signal
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
+	logInfo("Shutting down...")
+}
+
+func handleRadioDemo(webDir string) {
+	logInfo("Setting up Radio Demo Environment...")
+
+	// 1. Port cleanup (same as earth demo)
+	logInfo("Cleaning up port 5173...")
+	_ = exec.Command("fuser", "-k", "5173/tcp").Run()
+	time.Sleep(1500 * time.Millisecond)
+
+	// 2. Kill existing Dialtone Chrome instances
+	logInfo("Cleaning up Chrome processes...")
+	_ = exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
+
+	// 3. Start WWW Dev Server with piped output to detect port (same pattern as earth demo)
+	logInfo("Starting WWW Dev Server...")
+	devCmd := exec.Command("npm", "run", "dev", "--", "--host", "127.0.0.1")
+	devCmd.Dir = webDir
+	stdout, err := devCmd.StdoutPipe()
+	if err != nil {
+		logFatal("Failed to attach to dev server stdout: %v", err)
+	}
+	stderr, err := devCmd.StderrPipe()
+	if err != nil {
+		logFatal("Failed to attach to dev server stderr: %v", err)
+	}
+	if err := devCmd.Start(); err != nil {
+		logFatal("Failed to start dev server: %v", err)
+	}
+
+	// 4. Wait for dev server ready and detect port (like earth_demo.go)
+	logInfo("Waiting for Dev Server...")
+	port := 5173
+	portCh := make(chan int, 1)
+	go func() {
+		reader := io.MultiReader(stdout, stderr)
+		scanner := bufio.NewScanner(reader)
+		re := regexp.MustCompile(`http://127\.0\.0\.1:(\d+)/`)
+		for scanner.Scan() {
+			line := scanner.Text()
+			fmt.Println(line)
+			if match := re.FindStringSubmatch(line); len(match) == 2 {
+				if p, err := strconv.Atoi(match[1]); err == nil {
+					select {
+					case portCh <- p:
+					default:
+					}
+				}
+			}
+		}
+	}()
+
+	select {
+	case detected := <-portCh:
+		port = detected
+	case <-time.After(10 * time.Second):
+		logInfo("Dev server port not detected yet; falling back to %d", port)
+	}
+
+	ready := false
+	for i := 0; i < 30; i++ {
+		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d", port))
+		if err == nil && resp.StatusCode == 200 {
+			resp.Body.Close()
+			ready = true
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+	if !ready {
+		logFatal("Dev server failed to start within 30 seconds")
+	}
+
+	// 5. Launch Chrome straight on Radio section (like earth #s-home, cad #s-cad)
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d/#s-radio", port)
+	logInfo("Launching Chrome on Radio section...")
+	chromeCmd := exec.Command("./dialtone.sh", "chrome", "new", baseURL, "--gpu")
+	chromeCmd.Stdout = os.Stdout
+	chromeCmd.Stderr = os.Stderr
+	if err := chromeCmd.Run(); err != nil {
+		logFatal("Failed to launch Chrome: %v", err)
+	}
+
+	logInfo("Radio Demo Environment is LIVE!")
+	logInfo("Dev Server: %s", baseURL)
+	logInfo("Press Ctrl+C to stop...")
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
@@ -780,17 +891,17 @@ func handleWebgpuDebug(webDir string) {
 	var isVisible bool
 
 	err := chromedp.Run(ctx,
-		chromedp.Navigate("http://127.0.0.1:5173/#s-webgpu"),
-		chromedp.WaitReady("#webgpu-container"),
+		chromedp.Navigate("http://127.0.0.1:5173/#s-webgpu-template"),
+		chromedp.WaitReady("#webgpu-template-container"),
 		chromedp.Evaluate(`(function(){
-			const section = document.getElementById("s-webgpu");
+			const section = document.getElementById("s-webgpu-template");
 			if (section) section.scrollIntoView({ behavior: "instant" });
 			return true;
 		})()`, nil),
 		chromedp.Sleep(2*time.Second),
 		chromedp.Evaluate(`!!navigator.gpu`, &hasGPU),
 		chromedp.Evaluate(`(function(){
-			const container = document.getElementById("webgpu-container");
+			const container = document.getElementById("webgpu-template-container");
 			const canvas = container ? container.querySelector("canvas") : null;
 			const text = container ? container.textContent || "" : "";
 			const rect = canvas ? canvas.getBoundingClientRect() : { width: 0, height: 0 };
@@ -805,7 +916,7 @@ func handleWebgpuDebug(webDir string) {
 			};
 		})()`, &canvasInfo),
 		chromedp.Evaluate(`(function(){
-			const section = document.getElementById("s-webgpu");
+			const section = document.getElementById("s-webgpu-template");
 			return !!(section && section.classList.contains("is-visible"));
 		})()`, &isVisible),
 	)

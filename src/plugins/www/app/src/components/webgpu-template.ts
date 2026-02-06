@@ -1,6 +1,12 @@
 import { FpsCounter } from "./fps";
 import { VisibilityMixin } from "./section";
 
+/**
+ * WebGPU template: minimal working section using the WebGPU API (no Three.js).
+ * Use this as the starting point for new WebGPU-based sections.
+ * Shows a lit sphere, WGSL shaders, adapter/device/context setup, and dispose/setVisible contract.
+ */
+
 type Mat4 = Float32Array;
 
 const FLOATS_PER_MAT4 = 16;
@@ -231,7 +237,7 @@ class WebGpuVisualization {
   lastTime = performance.now();
   isVisible = true;
   frameCount = 0;
-  private fpsCounter = new FpsCounter("webgpu");
+  private fpsCounter = new FpsCounter("webgpu-template");
 
   uniformData = new Float32Array(UNIFORM_FLOATS);
   model = createMat4();
@@ -465,7 +471,7 @@ class WebGpuVisualization {
   }
 
   setVisible(visible: boolean) {
-    VisibilityMixin.setVisible(this, visible, "webgpu");
+    VisibilityMixin.setVisible(this, visible, "webgpu-template");
     if (!visible) {
       this.fpsCounter.clear();
     }
@@ -502,11 +508,11 @@ class WebGpuVisualization {
   }
 }
 
-export async function mountWebgpu(container: HTMLElement) {
+export async function mountWebgpuTemplate(container: HTMLElement) {
   container.innerHTML = `
-    <div class="marketing-overlay" aria-label="WebGPU visualization marketing information">
-      <h2>WebGPU lighting in motion</h2>
-      <p>Pure WebGPU shading with a rotating light source.</p>
+    <div class="marketing-overlay" aria-label="WebGPU template section">
+      <h2>Start here for WebGPU</h2>
+      <p>The simplest working WebGPU section—adapter, device, context, pipeline, and a lit sphere. Copy this component when you add a new WebGPU section to the site.</p>
     </div>
   `;
 
