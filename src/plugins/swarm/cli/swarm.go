@@ -34,8 +34,6 @@ func RunSwarm(args []string) {
 		runSwarmBuild(subArgs)
 	case "test":
 		runSwarmTest(subArgs)
-	case "test-e2e":
-		runSwarmE2E(subArgs)
 	case "start":
 		runSwarmStart(subArgs)
 	case "dev":
@@ -83,14 +81,11 @@ func getRepoRoot() string {
 func runSwarmInstall(args []string) {
 	fmt.Println("[swarm] Installing dependencies into DIALTONE_ENV...")
 	appDir := filepath.Join("src", "plugins", "swarm", "app")
-	testDir := filepath.Join("src", "plugins", "swarm", "test")
 
 	envPath := getDialtoneEnvOrExit()
 	envAppDir := filepath.Join(envPath, "plugins", "swarm", "app")
-	envTestDir := filepath.Join(envPath, "plugins", "swarm", "test")
 
 	ensureDir(envAppDir)
-	ensureDir(envTestDir)
 
 	copyFile(filepath.Join(appDir, "package.json"), filepath.Join(envAppDir, "package.json"))
 	copyFileIfExists(filepath.Join(appDir, "package-lock.json"), filepath.Join(envAppDir, "package-lock.json"))
@@ -105,27 +100,8 @@ func runSwarmInstall(args []string) {
 		os.Exit(1)
 	}
 
-	// Link repo app node_modules to DIALTONE_ENV
 	linkNodeModules(appDir, filepath.Join(envAppDir, "node_modules"))
-
-	// Ensure Pear is available from DIALTONE_ENV/bin
 	ensureEnvToolLink(envPath, "pear")
-	ensureEnvToolLink(envPath, "bun")
-
-	// Install test dependencies with bun
-	writeSwarmTestPackage(envTestDir)
-	bunBin := resolveBunBin(envPath)
-	testCmd := exec.Command(bunBin, "install")
-	testCmd.Dir = envTestDir
-	testCmd.Stdout = os.Stdout
-	testCmd.Stderr = os.Stderr
-	if err := testCmd.Run(); err != nil {
-		fmt.Printf("[swarm] bun install failed: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Link repo test node_modules to DIALTONE_ENV
-	linkNodeModules(testDir, filepath.Join(envTestDir, "node_modules"))
 }
 
 func runSwarmBuild(args []string) {
@@ -133,7 +109,7 @@ func runSwarmBuild(args []string) {
 }
 
 func runSwarmTest(args []string) {
-	if err := swarm_test.RunMultiPeerConnection(); err != nil {
+	if err := swarm_test.RunAll(); err != nil {
 		fmt.Printf("[swarm] Test failed: %v\n", err)
 		os.Exit(1)
 	}
@@ -411,26 +387,8 @@ func printSwarmUsage() {
 	fmt.Println("  list             List all running swarm nodes")
 	fmt.Println("  status           Show detailed status/top-like report")
 	fmt.Println("  install          Install swarm dependencies")
-	fmt.Println("  test             Run integration tests")
-	fmt.Println("  test-e2e         Run consolidated E2E tests with Puppeteer")
+	fmt.Println("  test             Run integration tests (chromedp + dashboard)")
 	fmt.Println("\nConnects to a Hyperswarm topic using Pear runtime.")
-}
-
-func runSwarmE2E(args []string) {
-	fmt.Println("[swarm] Running Bun + Puppeteer orchestrated E2E tests...")
-	testFile := filepath.Join("src", "plugins", "swarm", "test", "swarm_orchestrator.ts")
-
-	envPath := getDialtoneEnvOrExit()
-	bunBin := resolveBunBin(envPath)
-	cmd := exec.Command(bunBin, testFile)
-	cmd.Dir = "." // Run from root to let dialtone.sh work
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		fmt.Printf("[swarm] E2E test failed: %v\n", err)
-	}
-	fmt.Println("[swarm] E2E tests complete.")
 }
 
 func getDialtoneEnvOrExit() string {
@@ -544,21 +502,6 @@ func linkNodeModules(appDir, envNodeModules string) {
 	}
 	if err := os.Symlink(envNodeModules, target); err != nil {
 		fmt.Printf("[swarm] WARNING: Failed to link node_modules into app dir: %v\n", err)
-	}
-}
-
-func writeSwarmTestPackage(dir string) {
-	packageJSON := `{
-  "name": "dialtone-swarm-test",
-  "private": true,
-  "dependencies": {
-    "puppeteer": "latest"
-  }
-}
-`
-	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(packageJSON), 0644); err != nil {
-		fmt.Printf("[swarm] Failed to write test package.json: %v\n", err)
-		os.Exit(1)
 	}
 }
 
