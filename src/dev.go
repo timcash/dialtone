@@ -32,7 +32,10 @@ import (
 	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
 	ui_cli "dialtone/cli/src/plugins/ui/cli"
 	vpn_cli "dialtone/cli/src/plugins/vpn/cli"
+
 	www_cli "dialtone/cli/src/plugins/www/cli"
+	task_cli "dialtone/cli/src/plugins/task/cli"
+
 )
 
 // ExecuteDev is the entry point for the dialtone CLI
@@ -106,7 +109,10 @@ func ExecuteDev() {
 		www_cli.RunWww(args)
 	case "ui":
 		ui_cli.Run(args)
+	case "task":
+		task_cli.Run(args)
 	case "go":
+
 		go_cli.RunGo(args)
 	case "cad":
 		cad_cli.RunCad(args)
