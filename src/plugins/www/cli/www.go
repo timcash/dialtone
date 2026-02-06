@@ -264,6 +264,7 @@ func RunWww(args []string) {
 		fmt.Println("  domain             Alias production to dialtone.earth")
 		fmt.Println("  login              Authenticate with Vercel CLI")
 		fmt.Println("  test               Run standard WWW integration tests")
+		fmt.Println("  smoke              Quick smoke pass across all sections")
 		fmt.Println("  test cad [--live]  Run headed browser tests for CAD generator")
 		fmt.Println("  about demo         Zero-config local About section demo")
 		fmt.Println("  cad demo           Zero-config local CAD development environment")
@@ -515,6 +516,22 @@ func RunWww(args []string) {
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			logFatal("Tests failed: %v", err)
+		}
+
+	case "smoke":
+		for _, arg := range args[1:] {
+			if arg == "--help" || arg == "-h" {
+				fmt.Println("Usage: dialtone www smoke")
+				fmt.Println("\nRuns a quick smoke pass across all WWW sections.")
+				return
+			}
+		}
+		logInfo("Running smoke tests...")
+		cmd := exec.Command("./dialtone.sh", "test", "tags", "smoke")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			logFatal("Smoke tests failed: %v", err)
 		}
 
 	case "build":

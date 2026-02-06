@@ -1,6 +1,7 @@
-import { FpsCounter } from "./fps";
-import { VisibilityMixin } from "./section";
-import { startTyping } from "./typing";
+import { FpsCounter } from "../fps";
+import { VisibilityMixin } from "../section";
+import { startTyping } from "../typing";
+import { setupWebgpuTemplateConfig } from "./config";
 
 /**
  * WebGPU template: minimal working section using the WebGPU API (no Three.js).
@@ -519,32 +520,10 @@ export async function mountWebgpuTemplate(container: HTMLElement) {
     </div>
     <div id="webgpu-template-config-panel" class="earth-config-panel" hidden></div>
   `;
-
-  const controls = document.querySelector(".top-right-controls");
-  const toggle = document.createElement("button");
-  toggle.id = "webgpu-template-config-toggle";
-  toggle.className = "earth-config-toggle";
-  toggle.type = "button";
-  toggle.setAttribute("aria-expanded", "false");
-  toggle.textContent = "Config";
-  controls?.prepend(toggle);
-
-  const panel = document.getElementById(
-    "webgpu-template-config-panel",
-  ) as HTMLDivElement | null;
-  if (panel && toggle) {
-    const setOpen = (open: boolean) => {
-      panel.hidden = !open;
-      panel.style.display = open ? "grid" : "none";
-      toggle.setAttribute("aria-expanded", String(open));
-    };
-    setOpen(false);
-    toggle.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setOpen(panel.hidden);
-    });
-  }
+  const config = setupWebgpuTemplateConfig({
+    spinSpeed: 1,
+    onSpinChange: () => {},
+  });
 
   const subtitleEl = container.querySelector(
     "[data-typing-subtitle]"
@@ -570,7 +549,7 @@ export async function mountWebgpuTemplate(container: HTMLElement) {
     `;
     return {
       dispose: () => {
-        toggle.remove();
+        config.dispose();
         container.innerHTML = "";
       },
       setVisible: () => {},
@@ -587,7 +566,7 @@ export async function mountWebgpuTemplate(container: HTMLElement) {
     `;
     return {
       dispose: () => {
-        toggle.remove();
+        config.dispose();
         container.innerHTML = "";
       },
       setVisible: () => {},
@@ -605,7 +584,7 @@ export async function mountWebgpuTemplate(container: HTMLElement) {
     `;
     return {
       dispose: () => {
-        toggle.remove();
+        config.dispose();
         container.innerHTML = "";
       },
       setVisible: () => {},
@@ -619,37 +598,18 @@ export async function mountWebgpuTemplate(container: HTMLElement) {
     context,
     navigator.gpu.getPreferredCanvasFormat(),
   );
-  if (panel) {
-    const row = document.createElement("div");
-    row.className = "earth-config-row";
-    const label = document.createElement("label");
-    label.className = "earth-config-label";
-    label.htmlFor = "webgpu-template-spin";
-    label.textContent = "Spin";
-    const slider = document.createElement("input");
-    slider.id = "webgpu-template-spin";
-    slider.type = "range";
-    slider.min = "0";
-    slider.max = "2";
-    slider.step = "0.01";
-    slider.value = `${viz.spinSpeed}`;
-    row.appendChild(label);
-    row.appendChild(slider);
-    const valueEl = document.createElement("span");
-    valueEl.className = "earth-config-value";
-    valueEl.textContent = viz.spinSpeed.toFixed(2);
-    row.appendChild(valueEl);
-    panel.appendChild(row);
-    slider.addEventListener("input", () => {
-      viz.spinSpeed = parseFloat(slider.value);
-      valueEl.textContent = viz.spinSpeed.toFixed(2);
-    });
-  }
+  config.dispose();
+  const liveConfig = setupWebgpuTemplateConfig({
+    spinSpeed: viz.spinSpeed,
+    onSpinChange: (value) => {
+      viz.spinSpeed = value;
+    },
+  });
 
   return {
     dispose: () => {
       viz.dispose();
-      toggle.remove();
+      liveConfig.dispose();
       stopTyping();
       container.innerHTML = "";
     },

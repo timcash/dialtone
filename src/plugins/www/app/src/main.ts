@@ -8,7 +8,7 @@ const sections = new SectionManager({ debug: true });
 sections.register('s-home', {
     containerId: 'earth-container',
     load: async () => {
-        const { mountEarth } = await import('./components/earth');
+        const { mountEarth } = await import('./components/earth/index');
         const container = document.getElementById('earth-container');
         if (!container) throw new Error('earth-container not found');
         return mountEarth(container);
@@ -19,7 +19,7 @@ sections.register('s-about', {
     containerId: 'about-container',
     header: { visible: false },
     load: async () => {
-        const { mountAbout } = await import('./components/about');
+        const { mountAbout } = await import('./components/about/index');
         const container = document.getElementById('about-container');
         if (!container) throw new Error('about-container not found');
         return mountAbout(container);
@@ -29,7 +29,7 @@ sections.register('s-about', {
 sections.register('s-robot', {
     containerId: 'robot-container',
     load: async () => {
-        const { mountRobot } = await import('./components/robot');
+        const { mountRobot } = await import('./components/robot/index');
         const container = document.getElementById('robot-container');
         if (!container) throw new Error('robot-container not found');
         return mountRobot(container);
@@ -39,7 +39,7 @@ sections.register('s-robot', {
 sections.register('s-neural', {
     containerId: 'nn-container',
     load: async () => {
-        const { mountNeuralNetwork } = await import('./components/nn');
+        const { mountNeuralNetwork } = await import('./components/nn/index');
         const container = document.getElementById('nn-container');
         if (!container) throw new Error('nn-container not found');
         return mountNeuralNetwork(container);
@@ -49,7 +49,7 @@ sections.register('s-neural', {
 sections.register('s-math', {
     containerId: 'math-container',
     load: async () => {
-        const { mountMath } = await import('./components/math');
+        const { mountMath } = await import('./components/math/index');
         const container = document.getElementById('math-container');
         if (!container) throw new Error('math-container not found');
         return mountMath(container);
@@ -59,7 +59,7 @@ sections.register('s-math', {
 sections.register('s-cad', {
     containerId: 'cad-container',
     load: async () => {
-        const { mountCAD } = await import('./components/cad');
+        const { mountCAD } = await import('./components/cad/index');
         const container = document.getElementById('cad-container');
         if (!container) throw new Error('cad-container not found');
         return mountCAD(container);
@@ -69,7 +69,7 @@ sections.register('s-cad', {
 sections.register('s-radio', {
     containerId: 'radio-container',
     load: async () => {
-        const { mountRadio } = await import('./components/radio');
+        const { mountRadio } = await import('./components/radio/index');
         const container = document.getElementById('radio-container');
         if (!container) throw new Error('radio-container not found');
         return mountRadio(container);
@@ -80,7 +80,7 @@ sections.register('s-geotools', {
     containerId: 'geotools-container',
     header: { visible: false },
     load: async () => {
-        const { mountGeoTools } = await import('./components/geotools');
+        const { mountGeoTools } = await import('./components/geotools/index');
         const container = document.getElementById('geotools-container');
         if (!container) throw new Error('geotools-container not found');
         return mountGeoTools(container);
@@ -91,7 +91,7 @@ sections.register('s-docs', {
     containerId: 'docs-container',
     header: { visible: false },
     load: async () => {
-        const { mountDocs } = await import('./components/docs');
+        const { mountDocs } = await import('./components/docs/index');
         const container = document.getElementById('docs-container');
         if (!container) throw new Error('docs-container not found');
         return mountDocs(container);
@@ -101,7 +101,7 @@ sections.register('s-docs', {
 sections.register('s-webgpu-template', {
     containerId: 'webgpu-template-container',
     load: async () => {
-        const { mountWebgpuTemplate } = await import('./components/webgpu-template');
+        const { mountWebgpuTemplate } = await import('./components/webgpu-template/index');
         const container = document.getElementById('webgpu-template-container');
         if (!container) throw new Error('webgpu-template-container not found');
         return mountWebgpuTemplate(container);
@@ -111,7 +111,7 @@ sections.register('s-webgpu-template', {
 sections.register('s-threejs-template', {
     containerId: 'threejs-template-container',
     load: async () => {
-        const { mountThreeJsTemplate } = await import('./components/threejs-template');
+        const { mountThreeJsTemplate } = await import('./components/threejs-template/index');
         const container = document.getElementById('threejs-template-container');
         if (!container) throw new Error('threejs-template-container not found');
         return mountThreeJsTemplate(container);

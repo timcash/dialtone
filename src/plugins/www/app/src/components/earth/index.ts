@@ -1,17 +1,17 @@
 import * as THREE from "three";
 import { HexLayer } from "./hex_layer";
 import { polygonToCells } from "h3-js";
-import cloudVertexShader from "../shaders/cloud.vert.glsl?raw";
-import cloudFragmentShader from "../shaders/cloud.frag.glsl?raw";
-import atmosphereVertexShader from "../shaders/atmosphere.vert.glsl?raw";
-import atmosphereFragmentShader from "../shaders/atmosphere.frag.glsl?raw";
-import sunAtmosphereVertexShader from "../shaders/sun_atmosphere.vert.glsl?raw";
-import sunAtmosphereFragmentShader from "../shaders/sun_atmosphere.frag.glsl?raw";
-import { setupConfigPanel } from "./earth/config_ui";
-import { FpsCounter } from "./fps";
-import { GpuTimer } from "./gpu_timer";
-import { VisibilityMixin } from "./section";
-import { startTyping } from "./typing";
+import cloudVertexShader from "../../shaders/cloud.vert.glsl?raw";
+import cloudFragmentShader from "../../shaders/cloud.frag.glsl?raw";
+import atmosphereVertexShader from "../../shaders/atmosphere.vert.glsl?raw";
+import atmosphereFragmentShader from "../../shaders/atmosphere.frag.glsl?raw";
+import sunAtmosphereVertexShader from "../../shaders/sun_atmosphere.vert.glsl?raw";
+import sunAtmosphereFragmentShader from "../../shaders/sun_atmosphere.frag.glsl?raw";
+import { setupConfigPanel } from "./config_ui";
+import { FpsCounter } from "../fps";
+import { GpuTimer } from "../gpu_timer";
+import { VisibilityMixin } from "../section";
+import { startTyping } from "../typing";
 
 const DEG_TO_RAD = Math.PI / 180;
 const TIME_SCALE = 1;

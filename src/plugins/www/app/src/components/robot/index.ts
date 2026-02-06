@@ -1,9 +1,10 @@
 import * as THREE from "three";
 import { IKSolver } from "./ik";
-import { FpsCounter } from "./fps";
-import { GpuTimer } from "./gpu_timer";
-import { VisibilityMixin } from "./section";
-import { startTyping } from "./typing";
+import { FpsCounter } from "../fps";
+import { GpuTimer } from "../gpu_timer";
+import { VisibilityMixin } from "../section";
+import { startTyping } from "../typing";
+import { setupRobotConfig } from "./config";
 
 
 // Joint colors by type
@@ -577,6 +578,9 @@ class RobotArmVisualization {
   }
 
   initConfigPanel() {
+    setupRobotConfig(this);
+    return;
+    /*
     const panel = document.getElementById(
       "robot-config-panel",
     ) as HTMLDivElement | null;
@@ -764,6 +768,7 @@ class RobotArmVisualization {
       (v) => this.robotArm.setGrip(v),
       (v) => `${Math.round(v * 100)}%`,
     );
+    */
   }
 
   setVisible(visible: boolean) {

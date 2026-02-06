@@ -1,4 +1,4 @@
-import { ProceduralOrbit } from "../earth";
+import { ProceduralOrbit } from "./index";
 
 export function setupConfigPanel(orbit: ProceduralOrbit) {
   const panel = document.getElementById(
