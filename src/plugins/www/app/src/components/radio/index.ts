@@ -1,10 +1,10 @@
 import * as THREE from "three";
-import { FpsCounter } from "./fps";
-import { GpuTimer } from "./gpu_timer";
-import { VisibilityMixin } from "./section";
-import cubeGlowVert from "../shaders/template-cube.vert.glsl?raw";
-import cubeGlowFrag from "../shaders/template-cube.frag.glsl?raw";
-import { startTyping } from "./typing";
+import { FpsCounter } from "../fps";
+import { GpuTimer } from "../gpu_timer";
+import { VisibilityMixin } from "../section";
+import cubeGlowVert from "../../shaders/template-cube.vert.glsl?raw";
+import cubeGlowFrag from "../../shaders/template-cube.frag.glsl?raw";
+import { startTyping } from "../typing";
 
 /**
  * Radio section: aligned with threejs-template (key light, glow, FPS, backend).

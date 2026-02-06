@@ -1,12 +1,13 @@
 import * as THREE from "three";
-import glowVertexShader from "../shaders/glow.vert.glsl?raw";
-import glowFragmentShader from "../shaders/glow.frag.glsl?raw";
-import gridVertexShader from "../shaders/grid.vert.glsl?raw";
-import gridFragmentShader from "../shaders/grid.frag.glsl?raw";
-import { FpsCounter } from "./fps";
-import { GpuTimer } from "./gpu_timer";
-import { VisibilityMixin } from "./section";
-import { startTyping } from "./typing";
+import glowVertexShader from "../../shaders/glow.vert.glsl?raw";
+import glowFragmentShader from "../../shaders/glow.frag.glsl?raw";
+import gridVertexShader from "../../shaders/grid.vert.glsl?raw";
+import gridFragmentShader from "../../shaders/grid.frag.glsl?raw";
+import { FpsCounter } from "../fps";
+import { GpuTimer } from "../gpu_timer";
+import { VisibilityMixin } from "../section";
+import { startTyping } from "../typing";
+import { setupMathConfig } from "./config";
 
 
 const COLORS = {
@@ -498,6 +499,9 @@ class MathVisualization {
   }
 
   initConfigPanel() {
+    setupMathConfig(this);
+    return;
+    /*
     const panel = document.getElementById(
       "math-config-panel",
     ) as HTMLDivElement | null;
@@ -652,6 +656,7 @@ class MathVisualization {
     );
 
     addCopyButton();
+    */
   }
 
   buildConfigSnapshot() {

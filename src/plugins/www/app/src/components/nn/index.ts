@@ -1,10 +1,11 @@
 import * as THREE from "three";
-import glowVertexShader from "../shaders/glow.vert.glsl?raw";
-import glowFragmentShader from "../shaders/glow.frag.glsl?raw";
-import { FpsCounter } from "./fps";
-import { GpuTimer } from "./gpu_timer";
-import { VisibilityMixin } from "./section";
-import { startTyping } from "./typing";
+import glowVertexShader from "../../shaders/glow.vert.glsl?raw";
+import glowFragmentShader from "../../shaders/glow.frag.glsl?raw";
+import { FpsCounter } from "../fps";
+import { GpuTimer } from "../gpu_timer";
+import { VisibilityMixin } from "../section";
+import { startTyping } from "../typing";
+import { setupNnConfig } from "./config";
 
 
 const COLORS = {
@@ -275,6 +276,9 @@ class NeuralNetworkVisualization {
   }
 
   initConfigPanel() {
+    setupNnConfig(this);
+    return;
+    /*
     const panel = document.getElementById(
       "nn-config-panel",
     ) as HTMLDivElement | null;
@@ -399,6 +403,7 @@ class NeuralNetworkVisualization {
     });
 
     addCopyButton();
+    */
   }
 
   buildConfigSnapshot() {
