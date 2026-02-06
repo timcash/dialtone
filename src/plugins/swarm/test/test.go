@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 	"dialtone/cli/src/core/config"
 	"dialtone/cli/src/core/test"
 
-	"github.com/chromedp/cdproto/runtime"
+	cdpRuntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
@@ -48,16 +49,14 @@ func RunSwarmIntegration() error {
 	if envPath == "" {
 		return fmt.Errorf("DIALTONE_ENV is not set. Please set it in env/.env or pass --env.")
 	}
-	pearBin := filepath.Join(envPath, "node", "bin", "pear")
-	if _, err := os.Stat(pearBin); err != nil {
-		pearBin = filepath.Join(envPath, "bin", "pear")
-		if _, err := os.Stat(pearBin); err != nil {
-			return fmt.Errorf("pear not found in DIALTONE_ENV (%s). Run ./dialtone.sh swarm install", envPath)
-		}
+	pearBin, err := resolvePearBin(envPath)
+	if err != nil {
+		return err
 	}
+	toolEnv := envWithDialtoneTools(envPath)
 
 	fmt.Println(">> [swarm] Running Pear unit tests (app/test.js)...")
-	if err := runPearUnitTests(appDir, pearBin); err != nil {
+	if err := runPearUnitTests(appDir, pearBin, toolEnv); err != nil {
 		return err
 	}
 
@@ -66,10 +65,9 @@ func RunSwarmIntegration() error {
 	_ = exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
 
 	fmt.Println(">> [swarm] Starting dashboard on port 4000...")
-	env := append(os.Environ(), "DIALTONE_REPO="+cwd)
 	dashCmd := exec.Command(pearBin, "run", ".", "dashboard", cwd)
 	dashCmd.Dir = appDir
-	dashCmd.Env = env
+	dashCmd.Env = append(toolEnv, "DIALTONE_REPO="+cwd)
 	if err := dashCmd.Start(); err != nil {
 		return fmt.Errorf("failed to start dashboard: %v", err)
 	}
@@ -110,7 +108,7 @@ func RunSwarmIntegration() error {
 	var consoleLogs []string
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
-		case *runtime.EventConsoleAPICalled:
+		case *cdpRuntime.EventConsoleAPICalled:
 			parts := make([]string, 0, len(ev.Args))
 			for _, arg := range ev.Args {
 				parts = append(parts, formatRemoteObject(arg))
@@ -123,7 +121,7 @@ func RunSwarmIntegration() error {
 				}
 			}
 			consoleLogs = append(consoleLogs, line)
-		case *runtime.EventExceptionThrown:
+		case *cdpRuntime.EventExceptionThrown:
 			d := ev.ExceptionDetails
 			ex := d.Text
 			if d.Exception != nil {
@@ -169,7 +167,7 @@ func RunSwarmIntegration() error {
 	return nil
 }
 
-func formatRemoteObject(o *runtime.RemoteObject) string {
+func formatRemoteObject(o *cdpRuntime.RemoteObject) string {
 	if o == nil {
 		return ""
 	}
@@ -241,8 +239,8 @@ func verifyDashboard(ctx context.Context) error {
 	return nil
 }
 
-func runPearUnitTests(appDir, pearBin string) error {
-	if err := runPearTest(appDir, pearBin, "kv"); err != nil {
+func runPearUnitTests(appDir, pearBin string, env []string) error {
+	if err := runPearTest(appDir, pearBin, env, "kv"); err != nil {
 		return fmt.Errorf("kv test failed: %v", err)
 	}
 
@@ -251,11 +249,13 @@ func runPearUnitTests(appDir, pearBin string) error {
 	cmdA.Dir = appDir
 	cmdA.Stdout = os.Stdout
 	cmdA.Stderr = os.Stderr
+	cmdA.Env = env
 
 	cmdB := exec.Command(pearBin, "run", "./test.js", "peer-b", "test-topic")
 	cmdB.Dir = appDir
 	cmdB.Stdout = os.Stdout
 	cmdB.Stderr = os.Stderr
+	cmdB.Env = env
 
 	errA := cmdA.Start()
 	errB := cmdB.Start()
@@ -273,15 +273,103 @@ func runPearUnitTests(appDir, pearBin string) error {
 	return nil
 }
 
-func runPearTest(appDir, pearBin string, args ...string) error {
+func runPearTest(appDir, pearBin string, env []string, args ...string) error {
 	cmd := exec.Command(pearBin, append([]string{"run", "./test.js"}, args...)...)
 	cmd.Dir = appDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Env = env
 	if err := cmd.Run(); err != nil {
 		return err
 	}
 	return nil
+}
+
+func envWithDialtoneTools(envPath string) []string {
+	env := os.Environ()
+	if envPath == "" {
+		return env
+	}
+	pearRuntimeBin := ""
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		candidate := filepath.Join(homeDir, "Library", "Application Support", "pear", "bin")
+		if _, err := os.Stat(candidate); err == nil {
+			pearRuntimeBin = candidate
+		}
+	}
+	paths := []string{
+		pearRuntimeBin,
+		filepath.Join(envPath, "node", "bin"),
+		filepath.Join(envPath, "bin"),
+		os.Getenv("PATH"),
+	}
+	filtered := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		filtered = append(filtered, p)
+	}
+	newPath := strings.Join(filtered, string(os.PathListSeparator))
+	return replaceEnv(env, "PATH", newPath)
+}
+
+func replaceEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
+}
+
+func resolvePearBin(envPath string) (string, error) {
+	ext := ""
+	if runtime.GOOS == "windows" {
+		ext = ".cmd"
+	}
+	candidates := append(pearRuntimeCandidates(), []string{
+		filepath.Join(envPath, "node", "bin", "pear"+ext),
+		filepath.Join(envPath, "bin", "pear"+ext),
+	}...)
+	for _, p := range candidates {
+		if p == "" {
+			continue
+		}
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("pear not found in DIALTONE_ENV (%s). Run ./dialtone.sh swarm install", envPath)
+}
+
+func pearRuntimeCandidates() []string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	pearDir := ""
+	switch runtime.GOOS {
+	case "darwin":
+		pearDir = filepath.Join(homeDir, "Library", "Application Support", "pear")
+	case "linux":
+		pearDir = filepath.Join(homeDir, ".config", "pear")
+	case "windows":
+		pearDir = filepath.Join(homeDir, "AppData", "Roaming", "pear")
+	default:
+		return nil
+	}
+	runtimeExt := ""
+	if runtime.GOOS == "windows" {
+		runtimeExt = ".exe"
+	}
+	host := runtime.GOOS + "-" + runtime.GOARCH
+	return []string{
+		filepath.Join(pearDir, "bin", "pear"+runtimeExt),
+		filepath.Join(pearDir, "current", "by-arch", host, "bin", "pear-runtime"+runtimeExt),
+	}
 }
 
 func waitForPort(port int, timeout time.Duration) error {
