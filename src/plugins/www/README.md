@@ -57,11 +57,32 @@ src/plugins/www/
 ./dialtone.sh www logs <url>       # View deployment logs
 ./dialtone.sh www domain [url]     # Alias deployment to dialtone.earth
 ./dialtone.sh www login            # Login to Vercel
+./dialtone.sh www about demo       # Dev server + Chrome on About section
 ./dialtone.sh www radio demo       # Dev server + Chrome on Radio section (#s-radio)
 ./dialtone.sh www cad demo         # CAD backend + dev server + Chrome on CAD section
 ./dialtone.sh www earth demo       # Dev server + Chrome on Earth section
 ./dialtone.sh www webgpu demo      # Dev server + Chrome on WebGPU section
 ```
+
+## Working on the site
+
+- **Entrypoints:** `app/index.html` for section markup, `app/src/main.ts` for section registration and lazy loading.
+- **Styling:** `app/style.css` for global layout and section-specific rules.
+- **Components:** `app/src/components/*` for section visuals and UI.
+- **Shaders:** `app/src/shaders/*` for GLSL used by Three.js sections.
+- **Typing subtitles:** `app/src/components/typing.ts` controls default subtitle typing speed (call `startTyping()`).
+- **Version tag:** `app/index.html` has the `<p class="version">vX.Y.Z</p>` tag updated by `www publish`.
+
+## Editing sections
+
+- **About (`s-about`)** lives in `app/src/components/about.ts`. It wires a config panel to visualization setters and runs the Game of Life grid.
+- **Radio (`s-radio`)** lives in `app/src/components/radio.ts`. Marketing copy is in the overlay, and the LCD text is rendered to a canvas texture.
+- **Arc rendering** for spark/link effects is in `app/src/components/arc_renderer.ts` and used by `search_lights.ts`.
+
+## Config panels & presets
+
+- Config sliders are built in `about.ts` using DOM helpers; use presets if you want grouped changes.
+- Toggle buttons for config panels are injected into `.top-right-controls` and visibility is controlled via CSS selectors in `style.css`.
 
 ## Sections
 
