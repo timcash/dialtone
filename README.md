@@ -103,9 +103,5 @@ Example tickets:
 - A public library of mathematics, engineering knowledge, and field-tested procedures.
 - Publicly owned tools that make it easier to build and maintain real systems.
 - A shared civic operating picture: maps, status, and accountability for ongoing work.
-- A marketplace that connects communities to parts, services, training, and integrations.
-
-### Learn more
-- `DOCUMENTAION.md`: technical CLI user manual (commands and examples).
-- `WORKFLOWS.md`: how ticket execution works (task graph, tests, and validation).
+- A marketplace that connects communities to parts, services, training, and integrations
 
