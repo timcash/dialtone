@@ -50,13 +50,18 @@ LLM-CODE> @DIALTONE npm run test:swarm
 DIALTONE> Request received. Sign with `@DIALTONE task --sign swarm-reconnect-logic` to run.
 USER-1> @DIALTONE task --sign swarm-reconnect-logic
 LLM-TEST> @DIALTONE task --sign swarm-reconnect-logic
-DIALTONE> Signatures verified. Running command and streaming logs to all peers...
-DIALTONE> Next: confirm expected backoff behavior in the logs.
+DIALTONE> Signatures verified. Running command via PID 3301...
 
-[ERROR]
+DIALTONE:3301> > dialtone-swarm@1.0.0 test:swarm
+DIALTONE:3301> > tap "test/reconnect_test.js"
+DIALTONE:3301>
+DIALTONE:3301> [FAIL] test/reconnect_test.js
+DIALTONE:3301> Expected backoff: 2000ms, Received: 500ms.
+DIALTONE:3301> Trace: src/plugins/swarm/test/reconnect_test.js:42
+
+DIALTONE> Process 3301 exited with code 1.
+
 LLM-TEST> Test "reconnection-backoff" failed!
-LLM-TEST> Expected backoff: 2000ms, Received: 500ms.
-LLM-TEST> Trace: src/plugins/swarm/test/reconnect_test.js:42
 LLM-TEST> @USER Should we add jitter (±10%) to match the spec?
 LLM-CODE> I'll patch the formula and re-run the tests.
 
@@ -71,11 +76,19 @@ DIALTONE> Signature found: [USER-1] (blocked)
 DIALTONE> Signature found: [LLM-REVIEW]
 DIALTONE> Waiting on an unblocked signature to run the command.
 LLM-CODE> @DIALTONE task --sign swarm-reconnect-logic
-DIALTONE> Signatures verified. Running command and streaming logs to all peers...
+DIALTONE> Signatures verified. Running command via PID 3345...
+
+DIALTONE:3345> > dialtone-swarm@1.0.0 test:swarm
+DIALTONE:3345> > tap "test/reconnect_test.js"
+DIALTONE:3345> 
+DIALTONE:3345> [PASS] swarm-simulation ... OK
+DIALTONE:3345> [PASS] reconnection-backoff ... OK
+DIALTONE:3345> 
+DIALTONE:3345> Tests completed successfully.
+
+DIALTONE> Process 3345 exited with code 0.
 
 LLM-TEST> [SUCCESS] All tests passed.
-LLM-TEST> [LOG] swarm-simulation ... OK
-LLM-TEST> [LOG] reconnection-backoff ... OK
 
 LLM-REVIEW> Reviewing changes in src/plugins/swarm/app/index.js...
 LLM-REVIEW> Code looks clean. Backoff logic is compliant with engineering specs.
@@ -100,8 +113,12 @@ USER-1> @DIALTONE swarm dashboard --dev
 DIALTONE> Request received. Sign with `@DIALTONE task --sign swarm-reconnect-logic` to run.
 USER-1> @DIALTONE task --sign swarm-reconnect-logic
 LLM-REVIEW> @DIALTONE task --sign swarm-reconnect-logic
-DIALTONE> Signatures verified. Starting dashboard server at http://127.0.0.1:4000
+DIALTONE> Signatures verified. Starting dashboard server at http://127.0.0.1:4000 via PID 3402...
 DIALTONE> Launching browser...
+
+DIALTONE:3402> [INFO] Server listening on port 4000
+DIALTONE:3402> [WARN] Metrics collector slow to start (200ms)
+
 DIALTONE> Next: confirm UI state, capture any errors, and queue follow-up tasks.
 
 USER-1> I see a red error banner on the page. Add a debug task for this issue.
@@ -119,7 +136,12 @@ LLM-CODE> @DIALTONE swarm dashboard --dev
 DIALTONE> Request received. Sign with `@DIALTONE task --sign ui-error-banner-debug` to run.
 USER-1> @DIALTONE task --sign ui-error-banner-debug
 LLM-CODE> @DIALTONE task --sign ui-error-banner-debug
-DIALTONE> Signatures verified. Restarting dashboard in dev mode and streaming logs...
+DIALTONE> Signatures verified. Restarting dashboard in dev mode via PID 3410...
+
+DIALTONE:3410> [INFO] Server listening on port 4000
+DIALTONE:3410> [DEBUG] boot: UI initializing...
+DIALTONE:3410> [DEBUG] boot: Config loaded.
+
 DIALTONE> Next: watch UI error logs and capture failing trace.
 
 USER-1> The error is from missing UI error logs in dev mode.
