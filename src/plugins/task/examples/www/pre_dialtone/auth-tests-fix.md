@@ -15,15 +15,10 @@ Fix regressions in login and token refresh tests caused by V2 changes.
 ### test-command:
 `npm run test:auth:flaky`
 ### reviewed:
-# [Waiting for signatures]
 ### tested:
-# [Waiting for tests]
 ### last-error-types:
-# None
 ### last-error-times:
-# None
 ### log-stream-command:
 `@DIALTONE npm run test:auth:watch`
 ### last-error-loglines:
-# None
 ### notes:

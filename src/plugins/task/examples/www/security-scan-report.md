@@ -10,11 +10,11 @@ Run automated security scan (SAST/DAST) against V2 code and endpoints.
 ### documentation:
 - security/reports/latest.md
 ### test-condition-1:
-No High or Critical vulnerabilities found.
+- No High or Critical vulnerabilities found.
 ### test-condition-2:
-Dependencies are audit-clean.
+- Dependencies are audit-clean.
 ### test-command:
-`npm run audit:security`
+- `npm run audit:security`
 ### reviewed:
 - USER-1> 2026-02-06T15:05:00Z :: key-sig-ijk
 - LLM-REVIEW> 2026-02-06T15:10:00Z :: key-sig-lmn
@@ -25,7 +25,7 @@ Dependencies are audit-clean.
 ### last-error-times:
 - VulnFound: 2026-02-06T14:55:00Z
 ### log-stream-command:
-`@DIALTONE npm run audit:security --watch`
+- `@DIALTONE npm run audit:security --watch`
 ### last-error-loglines:
 - VulnFound: "[CRITICAL] Prototype Pollution in older lodash version"
 ### notes:

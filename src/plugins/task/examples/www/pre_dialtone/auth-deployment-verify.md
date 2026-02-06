@@ -12,21 +12,16 @@ Verify the new auth service works in the staging environment.
 ### documentation:
 - deploy/staging/README.md
 ### test-condition-1:
-`/health` endpoint returns 200 OK.
+- `/health` endpoint returns 200 OK.
 ### test-condition-2:
-Can exchange OAuth code for token.
+- Can exchange OAuth code for token.
 ### test-command:
-`npm run verify:staging`
+- `npm run verify:staging`
 ### reviewed:
-# [Waiting for signatures]
 ### tested:
-# [Waiting for tests]
 ### last-error-types:
-# None
 ### last-error-times:
-# None
 ### log-stream-command:
-`@DIALTONE run verify:staging --verbose`
+- `@DIALTONE run verify:staging --verbose`
 ### last-error-loglines:
-# None
 ### notes:

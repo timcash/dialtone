@@ -10,11 +10,11 @@ Implement new support for JWTs from Auth0 provider.
 ### documentation:
 - src/auth/middleware.js
 ### test-condition-1:
-Valid JWT allows access.
+- Valid JWT allows access.
 ### test-condition-2:
-Expired JWT returns 401.
+- Expired JWT returns 401.
 ### test-command:
-`npm run test:auth`
+- `npm run test:auth`
 ### reviewed:
 - USER-1> 2026-02-06T11:00:00Z :: key-sig-jkl
 - LLM-CODE> 2026-02-06T11:05:00Z :: key-sig-mno
@@ -28,7 +28,7 @@ Expired JWT returns 401.
 - TokenExpiredError: 2026-02-06T10:50:00Z
 - JsonWebTokenError: 2026-02-06T10:55:00Z
 ### log-stream-command:
-`@DIALTONE npm run server:auth --watch`
+- `@DIALTONE npm run server:auth --watch`
 ### last-error-loglines:
 - TokenExpiredError: "jwt expired at 2026-02-06T10:00:00Z"
 - JsonWebTokenError: "jwt malformed"

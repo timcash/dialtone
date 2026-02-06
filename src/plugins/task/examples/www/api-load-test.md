@@ -11,11 +11,11 @@ Run calibrated load tests against the V2 API endpoints.
 ### documentation:
 - tests/load/k6-scripts.md
 ### test-condition-1:
-P95 latency < 200ms at 1000 RPS.
+- P95 latency < 200ms at 1000 RPS.
 ### test-condition-2:
-Error rate < 0.1%.
+- Error rate < 0.1%.
 ### test-command:
-`npm run test:load`
+- `npm run test:load`
 ### reviewed:
 - USER-1> 2026-02-06T14:10:00Z :: key-sig-cde
 ### tested:
@@ -25,7 +25,7 @@ Error rate < 0.1%.
 ### last-error-times:
 - ThresholdExceeded: 2026-02-06T14:05:00Z
 ### log-stream-command:
-`@DIALTONE npm run test:load --dashboard`
+- `@DIALTONE npm run test:load --dashboard`
 ### last-error-loglines:
 - ThresholdExceeded: "checks......: 95.00% ✓ 1342 ms  (expected < 200 ms)"
 ### notes:

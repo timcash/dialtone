@@ -10,11 +10,11 @@ Create new admin endpoint for user growth stats using audit log data.
 ### documentation:
 - src/admin/stats.md
 ### test-condition-1:
-GET /admin/stats/growth returns JSON.
+- GET /admin/stats/growth returns JSON.
 ### test-condition-2:
-Requires Admin role.
+- Requires Admin role.
 ### test-command:
-`npm run test:admin`
+- `npm run test:admin`
 ### reviewed:
 - USER-1> 2026-02-06T13:00:00Z :: key-sig-5gh
 - LLM-CODE> 2026-02-06T13:10:00Z :: key-sig-6ij
@@ -25,7 +25,7 @@ Requires Admin role.
 ### last-error-times:
 - RoleMissing: 2026-02-06T12:55:00Z
 ### log-stream-command:
-`@DIALTONE npm run server:admin --watch`
+- `@DIALTONE npm run server:admin --watch`
 ### last-error-loglines:
 - RoleMissing: "AccessDenied: User does not have 'admin' role"
 ### notes:
