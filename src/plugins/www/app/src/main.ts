@@ -76,6 +76,17 @@ sections.register('s-radio', {
     }
 });
 
+sections.register('s-geotools', {
+    containerId: 'geotools-container',
+    header: { visible: false },
+    load: async () => {
+        const { mountGeoTools } = await import('./components/geotools');
+        const container = document.getElementById('geotools-container');
+        if (!container) throw new Error('geotools-container not found');
+        return mountGeoTools(container);
+    }
+});
+
 sections.register('s-docs', {
     containerId: 'docs-container',
     header: { visible: false },

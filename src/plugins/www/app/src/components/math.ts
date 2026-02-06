@@ -542,17 +542,21 @@ class MathVisualization {
       row.className = "earth-config-row";
 
       const labelWrap = document.createElement("label");
+      const sliderId = `math-slider-${label.replace(/\s+/g, "-").toLowerCase()}`;
+      labelWrap.className = "earth-config-label";
+      labelWrap.htmlFor = sliderId;
       labelWrap.textContent = label;
 
       const slider = document.createElement("input");
       slider.type = "range";
+      slider.id = sliderId;
       slider.min = `${min}`;
       slider.max = `${max}`;
       slider.step = `${step}`;
       slider.value = `${value}`;
 
-      labelWrap.appendChild(slider);
       row.appendChild(labelWrap);
+      row.appendChild(slider);
 
       const valueEl = document.createElement("span");
       valueEl.className = "earth-config-value";
