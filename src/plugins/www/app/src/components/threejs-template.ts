@@ -6,11 +6,11 @@ import cubeGlowVert from "../shaders/template-cube.vert.glsl?raw";
 import cubeGlowFrag from "../shaders/template-cube.frag.glsl?raw";
 
 /**
- * Docs section: Three.js section like the others. Cube + key light + glow,
- * overlay with WWW workflow bash commands.
+ * Simplest working section: one cube, camera facing it, key light + soft glow shader.
+ * Use this as the starting point for new Three.js sections.
  */
 
-class DocsVisualization {
+class TemplateVisualization {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
   renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -20,7 +20,7 @@ class DocsVisualization {
   gl!: WebGLRenderingContext | WebGL2RenderingContext;
   gpuTimer = new GpuTimer();
   isVisible = true;
-  private fpsCounter = new FpsCounter("docs");
+  private fpsCounter = new FpsCounter("threejs-template");
   private cube!: THREE.Mesh;
   private cubeMaterial!: THREE.ShaderMaterial;
   private keyLight!: THREE.DirectionalLight;
@@ -31,7 +31,7 @@ class DocsVisualization {
   constructor(container: HTMLElement) {
     this.container = container;
 
-    this.renderer.setClearColor(0x0a0a12, 1);
+    this.renderer.setClearColor(0x111111, 1);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
     const canvas = this.renderer.domElement;
@@ -60,8 +60,8 @@ class DocsVisualization {
     const cubeGeo = new THREE.BoxGeometry(1, 1, 1);
     this.cubeMaterial = new THREE.ShaderMaterial({
       uniforms: {
-        uColor: { value: new THREE.Color(0x446688) },
-        uGlowColor: { value: new THREE.Color(0x6688aa) },
+        uColor: { value: new THREE.Color(0x6688aa) },
+        uGlowColor: { value: new THREE.Color(0x88aacc) },
         uLightDir: { value: this.lightDir.clone() },
         uTime: { value: 0 },
       },
@@ -105,7 +105,7 @@ class DocsVisualization {
   }
 
   setVisible(visible: boolean) {
-    VisibilityMixin.setVisible(this, visible, "docs");
+    VisibilityMixin.setVisible(this, visible, "threejs-template");
     if (!visible) this.fpsCounter.clear();
   }
 
@@ -132,21 +132,15 @@ class DocsVisualization {
   };
 }
 
-export function mountDocs(container: HTMLElement) {
+export function mountThreeJsTemplate(container: HTMLElement) {
   container.innerHTML = `
-    <div class="marketing-overlay" aria-label="Docs section: WWW workflow">
-      <h2>WWW workflow</h2>
-      <p>Develop locally, build, and deploy the public site with the CLI.</p>
-      <pre class="docs-bash"><code>./dialtone.sh www dev
-./dialtone.sh www build
-./dialtone.sh www publish
-./dialtone.sh www validate
-./dialtone.sh www logs &lt;url&gt;
-./dialtone.sh www radio demo</code></pre>
+    <div class="marketing-overlay" aria-label="Template section: simplest working section">
+      <h2>Start here</h2>
+      <p>The simplest working section—one cube, one camera, one light. Copy this component when you add a new Three.js section to the site.</p>
     </div>
   `;
 
-  const viz = new DocsVisualization(container);
+  const viz = new TemplateVisualization(container);
   return {
     dispose: () => {
       viz.dispose();
