@@ -9,11 +9,11 @@ Update user profile API to include new OAuth fields and profile picture.
 ### documentation:
 - src/users/api.md
 ### test-condition-1:
-GET /users/me returns oauth provider.
+- GET /users/me returns oauth provider.
 ### test-condition-2:
-PATCH /users/me updates profile pic.
+- PATCH /users/me updates profile pic.
 ### test-command:
-`npm run test:users`
+- `npm run test:users`
 ### reviewed:
 - USER-1> 2026-02-06T12:30:00Z :: key-sig-3cd
 ### tested:
@@ -23,7 +23,7 @@ PATCH /users/me updates profile pic.
 ### last-error-times:
 - ValidationFailed: 2026-02-06T12:25:00Z
 ### log-stream-command:
-`@DIALTONE npm run server:users --watch`
+- `@DIALTONE npm run server:users --watch`
 ### last-error-loglines:
 - ValidationFailed: "Usage is not valid URL for: profile_pic_url"
 ### notes:

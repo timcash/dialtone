@@ -12,11 +12,11 @@ Verify the new auth service works in the staging environment.
 ### documentation:
 - deploy/staging/README.md
 ### test-condition-1:
-`/health` endpoint returns 200 OK.
+- `/health` endpoint returns 200 OK.
 ### test-condition-2:
-Can exchange OAuth code for token.
+- Can exchange OAuth code for token.
 ### test-command:
-`npm run verify:staging`
+- `npm run verify:staging`
 ### reviewed:
 - USER-1> 2026-02-06T15:30:00Z :: key-sig-rst
 - USER-2> 2026-02-06T15:35:00Z :: key-sig-uvw
@@ -28,7 +28,7 @@ Can exchange OAuth code for token.
 ### last-error-times:
 - ConnectionRefused: 2026-02-06T15:20:00Z
 ### log-stream-command:
-`@DIALTONE run verify:staging --verbose`
+- `@DIALTONE run verify:staging --verbose`
 ### last-error-loglines:
 - ConnectionRefused: "Error: connect ECONNREFUSED 127.0.0.1:4000"
 ### notes:

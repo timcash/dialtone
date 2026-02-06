@@ -9,21 +9,16 @@ Update user profile API to include new OAuth fields and profile picture.
 ### documentation:
 - src/users/api.md
 ### test-condition-1:
-GET /users/me returns oauth provider.
+- GET /users/me returns oauth provider.
 ### test-condition-2:
-PATCH /users/me updates profile pic.
+- PATCH /users/me updates profile pic.
 ### test-command:
-`npm run test:users`
+- `npm run test:users`
 ### reviewed:
-# [Waiting for signatures]
 ### tested:
-# [Waiting for tests]
 ### last-error-types:
-# None
 ### last-error-times:
-# None
 ### log-stream-command:
-`@DIALTONE npm run server:users --watch`
+- `@DIALTONE npm run server:users --watch`
 ### last-error-loglines:
-# None
 ### notes:
