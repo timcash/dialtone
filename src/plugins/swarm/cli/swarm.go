@@ -358,10 +358,10 @@ func getPearBin() string {
 		ext = ".cmd"
 	}
 
-	candidates := []string{
+	candidates := append(pearRuntimeCandidates(), []string{
 		filepath.Join(envPath, "node", "bin", "pear"+ext),
 		filepath.Join(envPath, "bin", "pear"+ext),
-	}
+	}...)
 	if pearPath := firstExistingPath(candidates); pearPath != "" {
 		return pearPath
 	}
@@ -376,6 +376,33 @@ func getPearBin() string {
 	fmt.Println("[swarm] Please install Pear and re-run (example: add pear to PATH, then run ./dialtone.sh swarm install).")
 	os.Exit(1)
 	return "pear"
+}
+
+func pearRuntimeCandidates() []string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	pearDir := ""
+	switch runtime.GOOS {
+	case "darwin":
+		pearDir = filepath.Join(homeDir, "Library", "Application Support", "pear")
+	case "linux":
+		pearDir = filepath.Join(homeDir, ".config", "pear")
+	case "windows":
+		pearDir = filepath.Join(homeDir, "AppData", "Roaming", "pear")
+	default:
+		return nil
+	}
+	runtimeExt := ""
+	if runtime.GOOS == "windows" {
+		runtimeExt = ".exe"
+	}
+	host := runtime.GOOS + "-" + runtime.GOARCH
+	return []string{
+		filepath.Join(pearDir, "bin", "pear"+runtimeExt),
+		filepath.Join(pearDir, "current", "by-arch", host, "bin", "pear-runtime"+runtimeExt),
+	}
 }
 
 func printSwarmUsage() {
