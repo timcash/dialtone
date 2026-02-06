@@ -136,4 +136,3 @@ USER-1> @DIALTONE "search error banner"
 DIALTONE> Search results: `src/plugins/swarm/app/index.js`, `src/plugins/swarm/docs/task-dag.md`.
 DIALTONE> Reminder: pending `--sign` updates will be requested on interval; tests to consider: `npm run test:swarm`; PR required before merge.
 ```
-```
