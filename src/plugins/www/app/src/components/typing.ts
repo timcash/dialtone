@@ -6,7 +6,7 @@ export function startTyping(
   if (!subtitleEl || subtitles.length === 0) {
     return () => {};
   }
-  const typeMs = options.typeMs ?? 85;
+  const typeMs = options.typeMs ?? 42;
   const holdMs = options.holdMs ?? 6000;
   const fadeMs = options.fadeMs ?? 1200;
   let index = 0;
