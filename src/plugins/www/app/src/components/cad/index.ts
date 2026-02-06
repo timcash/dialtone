@@ -1,11 +1,12 @@
 import * as THREE from "three";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
-import glowVertexShader from "../shaders/glow.vert.glsl?raw";
-import glowFragmentShader from "../shaders/glow.frag.glsl?raw";
-import { FpsCounter } from "./fps";
-import { GpuTimer } from "./gpu_timer";
-import { VisibilityMixin } from "./section";
-import { startTyping } from "./typing";
+import glowVertexShader from "../../shaders/glow.vert.glsl?raw";
+import glowFragmentShader from "../../shaders/glow.frag.glsl?raw";
+import { FpsCounter } from "../fps";
+import { GpuTimer } from "../gpu_timer";
+import { VisibilityMixin } from "../section";
+import { startTyping } from "../typing";
+import { setupCadConfig } from "./config";
 
 
 export class CADViewer {
@@ -163,7 +164,7 @@ export class CADViewer {
   panelEl: HTMLDivElement | null = null;
   toggleEl: HTMLButtonElement | null = null;
 
-  private setPanelOpen(open: boolean) {
+  setPanelOpen(open: boolean) {
     if (!this.panelEl || !this.toggleEl) return;
     this.panelEl.hidden = !open;
     this.panelEl.style.display = open ? "grid" : "none";
@@ -171,143 +172,7 @@ export class CADViewer {
   }
 
   initConfigPanel() {
-    this.panelEl = document.getElementById(
-      "cad-config-panel",
-    ) as HTMLDivElement | null;
-    this.toggleEl = document.getElementById(
-      "cad-config-toggle",
-    ) as HTMLButtonElement | null;
-    if (!this.panelEl || !this.toggleEl) return;
-
-    this.setPanelOpen(false);
-    this.toggleEl.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      this.setPanelOpen(this.panelEl!.hidden);
-    });
-
-    const addHeader = (text: string) => {
-      const header = document.createElement("h3");
-      header.textContent = text;
-      this.panelEl?.appendChild(header);
-    };
-
-    const addSlider = (
-      id: string,
-      label: string,
-      min: number,
-      max: number,
-      step: number,
-    ) => {
-      const row = document.createElement("div");
-      row.className = "earth-config-row cad-config-row";
-      const labelWrap = document.createElement("label");
-      const sliderId = `cad-slider-${id}`;
-      labelWrap.className = "earth-config-label";
-      labelWrap.htmlFor = sliderId;
-      labelWrap.textContent = label;
-      const slider = document.createElement("input");
-      slider.type = "range";
-      slider.id = sliderId;
-      slider.min = `${min}`;
-      slider.max = `${max}`;
-      slider.step = `${step}`;
-      // @ts-ignore
-      slider.value = String(this.params[id]);
-      row.appendChild(labelWrap);
-      row.appendChild(slider);
-      const valueEl = document.createElement("span");
-      valueEl.className = "earth-config-value";
-      valueEl.textContent = slider.value;
-      row.appendChild(valueEl);
-      this.panelEl?.appendChild(row);
-
-      slider.addEventListener("input", () => {
-        const v = parseFloat(slider.value);
-        // @ts-ignore
-        this.params[id] = v;
-        valueEl.textContent = slider.value;
-        this.debouncedUpdate();
-      });
-    };
-
-    addHeader("Gear Parameters");
-
-    this.offlineWarningEl = document.createElement("div");
-    this.offlineWarningEl.className = "offline-warning";
-    this.offlineWarningEl.innerHTML =
-      "⚠️ CAD Server Offline. Start with <code>./dialtone.sh www cad demo</code> to enable parametric changes.";
-    this.offlineWarningEl.hidden = true;
-    this.panelEl?.appendChild(this.offlineWarningEl);
-
-    addSlider("outer_diameter", "Outer Dia", 20, 200, 1);
-    addSlider("inner_diameter", "Inner Dia", 5, 100, 1);
-    addSlider("thickness", "Thickness", 2, 50, 1);
-    addSlider("num_teeth", "Num Teeth", 5, 100, 1);
-    addSlider("num_mounting_holes", "Mount Holes", 0, 12, 1);
-    addSlider("mounting_hole_diameter", "Hole Dia", 2, 20, 1);
-
-    const dlBtn = document.createElement("button");
-    dlBtn.className = "premium-button";
-    dlBtn.textContent = "Download STL";
-    dlBtn.style.marginTop = "1rem";
-    dlBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      this.downloadSTL();
-    });
-    this.panelEl?.appendChild(dlBtn);
-
-    addHeader("Visualization");
-    const addTranslationSlider = () => {
-      const row = document.createElement("div");
-      row.className = "earth-config-row cad-config-row";
-      const labelWrap = document.createElement("label");
-      const sliderId = "cad-slider-translation-x";
-      labelWrap.className = "earth-config-label";
-      labelWrap.htmlFor = sliderId;
-      labelWrap.textContent = "Translation X";
-      const slider = document.createElement("input");
-      slider.type = "range";
-      slider.id = sliderId;
-      slider.min = "-200";
-      slider.max = "200";
-      slider.step = "1";
-      slider.value = String(this.translationX);
-      row.appendChild(labelWrap);
-      row.appendChild(slider);
-      const valueEl = document.createElement("span");
-      valueEl.className = "earth-config-value";
-      valueEl.textContent = slider.value;
-      row.appendChild(valueEl);
-      this.panelEl?.appendChild(row);
-
-      slider.addEventListener("input", () => {
-        this.translationX = parseFloat(slider.value);
-        valueEl.textContent = slider.value;
-        if (this.gearGroup) {
-          this.gearGroup.position.x = this.translationX;
-        }
-      });
-    };
-    addTranslationSlider();
-
-    const divider = document.createElement("div");
-    divider.className = "code-divider";
-    this.panelEl?.appendChild(divider);
-
-    const ghBtn = document.createElement("button");
-    ghBtn.className = "premium-button github-button";
-    ghBtn.innerHTML = "<span>View Source on GitHub</span>";
-    ghBtn.style.background = "rgba(255, 255, 255, 0.1)";
-    ghBtn.style.border = "1px solid rgba(255, 255, 255, 0.2)";
-    ghBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      window.open(
-        "https://github.com/timcash/dialtone/blob/main/src/plugins/cad/backend/main.py",
-        "_blank",
-      );
-    });
-    this.panelEl?.appendChild(ghBtn);
+    setupCadConfig(this);
   }
 
   fetchTimeout: any = null;

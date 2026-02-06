@@ -1,130 +1,100 @@
 # Plugin: www
 
-Vercel wrapper for the public website at [dialtone.earth](https://dialtone.earth).
+live website at [dialtone.earth](https://dialtone.earth).
 
-## Simplest working section: `threejs-template`
+## Workflow (local dev → section → publish)
 
-The **threejs-template** component is the minimal example of a working Three.js section. Use it as the starting point for new sections.
-
-- **Component:** `app/src/components/threejs-template.ts`
-- **Section ID:** `s-threejs-template` · **Container:** `#threejs-template-container`
-- **Scene:** One cube in the center, camera facing it, key light and soft glow shader. Implements `VisualizationControl` (dispose, setVisible) and uses `VisibilityMixin` so the section manager can lazy-load and pause when off-screen.
-
-To add a section like this:
-
-1. Add a `<section id="s-yourid" class="snap-slide">` with `<div id="yourid-container"></div>` in `index.html`.
-2. Add `#yourid-container` (and `#yourid-container canvas`) to the visualization container rules in `style.css`.
-3. Register in `main.ts`: `sections.register('s-yourid', { containerId: 'yourid-container', load: async () => { ... mountYour(container) ... } });`
-4. Implement a mount function that returns `{ dispose, setVisible }` and a visualization that respects `setVisible` in its animation loop.
-
-See `threejs-template.ts` and `section.ts` for the contract.
-
-## WebGPU template: `webgpu-template`
-
-The **webgpu-template** component is the minimal example of a working WebGPU section (no Three.js). Use it as the starting point for new WebGPU-based sections.
-
-- **Component:** `app/src/components/webgpu-template.ts`
-- **Section ID:** `s-webgpu-template` · **Container:** `#webgpu-template-container`
-- **Scene:** Lit sphere, WGSL shaders, adapter/device/context setup, depth buffer, uniform buffer, and the same `{ dispose, setVisible }` contract as other sections.
-
-Run `./dialtone.sh www webgpu demo` to open the WebGPU template section. When WebGPU is unavailable, the section shows a fallback message instead of a canvas.
-
-## Folder Structure
+### 1) Start dev server
 
 ```shell
-src/plugins/www/
-├── cli/
-│   └── www.go           # CLI commands and Vercel integration
-├── app/
-│   ├── index.html       # Landing page with version tag
-│   ├── package.json     # Version and dependencies
-│   ├── vite.config.mjs  # Vite build config
-│   ├── vercel.json      
-│   └── src/
-│       ├── main.ts
-│       ├── components/  # Earth, neural network, etc.
-│       └── shaders/     # GLSL shaders
-└── README.md
+./dialtone.sh www dev
 ```
 
-## Command Line Help
+Optional quick openers:
 
 ```shell
-./dialtone.sh www dev              # Start Vite dev server
-./dialtone.sh www build            # Run local production build
-./dialtone.sh www publish          # Bump version + build + deploy
-./dialtone.sh www validate         # Check deployed version matches local
-./dialtone.sh www logs <url>       # View deployment logs
-./dialtone.sh www domain [url]     # Alias deployment to dialtone.earth
-./dialtone.sh www login            # Login to Vercel
-./dialtone.sh www about demo       # Dev server + Chrome on About section
-./dialtone.sh www radio demo       # Dev server + Chrome on Radio section (#s-radio)
-./dialtone.sh www cad demo         # CAD backend + dev server + Chrome on CAD section
-./dialtone.sh www earth demo       # Dev server + Chrome on Earth section
-./dialtone.sh www webgpu demo      # Dev server + Chrome on WebGPU section
+./dialtone.sh www about demo
+./dialtone.sh www radio demo
+./dialtone.sh www cad demo
+./dialtone.sh www earth demo
+./dialtone.sh www webgpu demo
 ```
 
-## Working on the site
+### 2) Create or edit a section
 
-- **Entrypoints:** `app/index.html` for section markup, `app/src/main.ts` for section registration and lazy loading.
-- **Styling:** `app/style.css` for global layout and section-specific rules.
-- **Components:** `app/src/components/*` for section visuals and UI.
-- **Shaders:** `app/src/shaders/*` for GLSL used by Three.js sections.
-- **Typing subtitles:** `app/src/components/typing.ts` controls default subtitle typing speed (call `startTyping()`).
-- **Version tag:** `app/index.html` has the `<p class="version">vX.Y.Z</p>` tag updated by `www publish`.
+Minimal section recipe (Three.js or WebGPU):
 
-## Editing sections
+1. Add the section markup in `app/index.html`:
+   - `<section id="s-yourid" class="snap-slide">`
+   - `<div id="yourid-container"></div>`
+2. Add container CSS in `app/style.css`:
+   - `#yourid-container { position: absolute; inset: 0; }`
+   - `#yourid-container canvas { display: block; }`
+3. Register the section in `app/src/main.ts`:
+   - `sections.register('s-yourid', { containerId: 'yourid-container', load: async () => mountYour(container) });`
+4. Implement `mountYour()` in `app/src/components/*`:
+   - Return `{ dispose, setVisible }`
+   - Respect `VisibilityMixin` so animation pauses when off-screen
 
-- **About (`s-about`)** lives in `app/src/components/about.ts`. It wires a config panel to visualization setters and runs the Game of Life grid.
-- **Radio (`s-radio`)** lives in `app/src/components/radio.ts`. Marketing copy is in the overlay, and the LCD text is rendered to a canvas texture.
-- **Arc rendering** for spark/link effects is in `app/src/components/arc_renderer.ts` and used by `search_lights.ts`.
+Use these templates as starting points:
 
-## Config panels & presets
+- **Three.js template:** `app/src/components/threejs-template.ts` (`s-threejs-template`)
+- **WebGPU template:** `app/src/components/webgpu-template.ts` (`s-webgpu-template`)
 
-- Config sliders are built in `about.ts` using DOM helpers; use presets if you want grouped changes.
-- Toggle buttons for config panels are injected into `.top-right-controls` and visibility is controlled via CSS selectors in `style.css`.
+### 3) Config panel pattern (standard layout)
 
-## Sections
+All config sliders use the same grid layout:
 
-- **s-threejs-template** — Three.js template (cube + key light + glow); use as example for new sections
-- **s-home** — Earth visualization
-- **s-robot** — Robot arm IK
-- **s-neural** — Neural network
-- **s-math** — Math / geometry
-- **s-cad** — Parametric CAD (gear)
-- **s-webgpu-template** — WebGPU template (lit sphere; use as example for WebGPU sections)
-- **s-radio** — Open-source handheld radio (Three.js template)
-- **s-about** — About dialtone
-- **s-docs** — Documentation
+- `.earth-config-row` (3-column grid: label / slider / value)
+- `.earth-config-label` for left-aligned labels
 
-## Publish Workflow
+To add a config panel:
+
+1. Add `<div id="yourid-config-panel" class="earth-config-panel" hidden></div>` to the section markup.
+2. Add a toggle button into `.top-right-controls` (class `earth-config-toggle`).
+3. Show the toggle when the section is visible in `app/style.css` via:
+   - `.snap-slide.is-visible[id="s-yourid"]~.top-right-controls #yourid-config-toggle`
+
+Examples:
+
+- Earth config: `app/src/components/earth/config_ui.ts`
+- About config: `app/src/components/about.ts`
+- Template configs: `app/src/components/threejs-template.ts`, `webgpu-template.ts`
+
+### 4) Earth land layer (GeoJSON → H3)
+
+The Earth section prefers a precomputed H3 layer:
+
+- `app/public/land.h3.json` (loaded first)
+- Falls back to `app/public/land.geojson` if missing
+
+To regenerate:
 
 ```shell
-# What ./dialtone.sh www publish does:
-# 1. Bump patch version in package.json (1.0.9 → 1.0.10)
-# 2. Update version tag in index.html (<p class="version">v1.0.10</p>)
-# 3. Run npm run build (Vite production build)
-# 4. Run vercel build --prod (create prebuilt output)
-# 5. Run vercel deploy --prebuilt --prod
+cd src/plugins/www/app
+node scripts/build_land_h3.cjs 3
 ```
 
-## Vercel Configuration
+### 5) Publish
 
 ```shell
-# Hardcoded in www.go:
+./dialtone.sh www publish
+```
+
+This bumps the version, builds, and deploys to Vercel.
+
+## Where things live
+
+- `app/index.html` — section markup + version tag
+- `app/src/main.ts` — section registration + lazy loading
+- `app/style.css` — global layout + config panel styles
+- `app/src/components/*` — section visuals + UI
+- `app/src/shaders/*` — GLSL for Three.js sections
+- `app/src/components/typing.ts` — subtitle typing defaults
+
+## Vercel config
+
+```shell
 VERCEL_PROJECT_ID=prj_vynjSZFIhD8TlR8oOyuXTKjFUQxM
 VERCEL_ORG_ID=team_4tzswM6M6PoDxaszH2ZHs5J7
-
-# Project name in Vercel dashboard: app
-# Domain: dialtone.earth
-```
-
-## Validation
-
-```shell
-# Verify deployed version matches local package.json
-./dialtone.sh www validate
-
-# Output:
-# [www] Version OK: site=v1.0.9 expected=v1.0.9
 ```

@@ -1,9 +1,10 @@
 import * as THREE from "three";
 import { polygonToCells, cellToLatLng } from "h3-js";
-import { FpsCounter } from "./fps";
-import { GpuTimer } from "./gpu_timer";
-import { VisibilityMixin } from "./section";
-import { startTyping } from "./typing";
+import { FpsCounter } from "../fps";
+import { GpuTimer } from "../gpu_timer";
+import { VisibilityMixin } from "../section";
+import { startTyping } from "../typing";
+import { setupGeoToolsConfig } from "./config";
 
 type GeojsonLike = {
   type: string;
@@ -281,30 +282,6 @@ export function mountGeoTools(container: HTMLElement) {
     <div id="geotools-config-panel" class="earth-config-panel" hidden></div>
   `;
 
-  const controls = document.querySelector(".top-right-controls");
-  const toggle = document.createElement("button");
-  toggle.id = "geotools-config-toggle";
-  toggle.className = "earth-config-toggle";
-  toggle.type = "button";
-  toggle.setAttribute("aria-expanded", "false");
-  toggle.textContent = "Config";
-  controls?.prepend(toggle);
-
-  const panel = document.getElementById("geotools-config-panel") as HTMLDivElement | null;
-  if (panel && toggle) {
-    const setOpen = (open: boolean) => {
-      panel.hidden = !open;
-      panel.style.display = open ? "grid" : "none";
-      toggle.setAttribute("aria-expanded", String(open));
-    };
-    setOpen(false);
-    toggle.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setOpen(panel.hidden);
-    });
-  }
-
   const subtitleEl = container.querySelector(
     "[data-typing-subtitle]"
   ) as HTMLParagraphElement | null;
@@ -318,108 +295,26 @@ export function mountGeoTools(container: HTMLElement) {
   const viz = new GeoToolsVisualization(container);
   let currentGeojson: GeojsonLike | null = null;
   let currentResolution = 3;
-  let statusValue: HTMLSpanElement | null = null;
 
-  const updateStatus = (statusEl: HTMLSpanElement) => {
-    const cells = viz.getCells();
-    statusEl.textContent = currentGeojson
-      ? `${cells.length.toLocaleString()} cells @ r${currentResolution}`
-      : "No data loaded";
-  };
-
-  const applyGeojson = (statusEl: HTMLSpanElement) => {
+  const applyGeojson = () => {
     if (!currentGeojson) return;
     viz.setGeojson(currentGeojson, currentResolution);
-    updateStatus(statusEl);
   };
-
-  const makeButton = (label: string) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "earth-config-toggle";
-    button.textContent = label;
-    return button;
-  };
-
-  if (panel) {
-    const row = document.createElement("div");
-    row.className = "earth-config-row about-config-row";
-    const label = document.createElement("label");
-    label.className = "earth-config-label";
-    label.htmlFor = "geotools-file";
-    label.textContent = "GeoJSON";
-    const fileInput = document.createElement("input");
-    fileInput.type = "file";
-    fileInput.id = "geotools-file";
-    fileInput.accept = ".json,.geojson,application/geo+json";
-    row.appendChild(label);
-    row.appendChild(fileInput);
-    panel.appendChild(row);
-
-    const resolutionRow = document.createElement("div");
-    resolutionRow.className = "earth-config-row about-config-row";
-    const resolutionLabel = document.createElement("label");
-    const resolutionId = "geotools-resolution";
-    resolutionLabel.className = "earth-config-label";
-    resolutionLabel.htmlFor = resolutionId;
-    resolutionLabel.textContent = "H3 Resolution";
-    const resolutionInput = document.createElement("input");
-    resolutionInput.type = "range";
-    resolutionInput.id = resolutionId;
-    resolutionInput.min = "0";
-    resolutionInput.max = "5";
-    resolutionInput.step = "1";
-    resolutionInput.value = `${currentResolution}`;
-    resolutionRow.appendChild(resolutionLabel);
-    resolutionRow.appendChild(resolutionInput);
-    const resolutionValue = document.createElement("span");
-    resolutionValue.className = "earth-config-value";
-    resolutionValue.textContent = `${currentResolution}`;
-    resolutionRow.appendChild(resolutionValue);
-    panel.appendChild(resolutionRow);
-
-    const statusRow = document.createElement("div");
-    statusRow.className = "earth-config-row about-config-row";
-    const statusLabel = document.createElement("label");
-    statusLabel.className = "earth-config-label";
-    statusLabel.textContent = "Status";
-    statusRow.appendChild(statusLabel);
-    statusValue = document.createElement("span");
-    statusValue.className = "earth-config-value";
-    statusRow.appendChild(statusValue);
-    panel.appendChild(statusRow);
-
-    const buttonsRow = document.createElement("div");
-    buttonsRow.className = "earth-config-row about-config-row";
-    const buttonsLabel = document.createElement("label");
-    buttonsLabel.className = "earth-config-label";
-    buttonsLabel.textContent = "Actions";
-    const convertButton = makeButton("Convert");
-    const downloadButton = makeButton("Download H3");
-    buttonsRow.appendChild(buttonsLabel);
-    buttonsRow.appendChild(convertButton);
-    buttonsRow.appendChild(downloadButton);
-    panel.appendChild(buttonsRow);
-
-    fileInput.addEventListener("change", async () => {
-      const file = fileInput.files?.[0];
-      if (!file) return;
+  const config = setupGeoToolsConfig({
+    currentResolution,
+    onResolutionChange: (value) => {
+      currentResolution = value;
+      if (currentGeojson) applyGeojson();
+    },
+    onFile: async (file) => {
       const text = await file.text();
       currentGeojson = JSON.parse(text);
-      applyGeojson(statusValue);
-    });
-
-    resolutionInput.addEventListener("input", () => {
-      currentResolution = parseInt(resolutionInput.value, 10);
-      resolutionValue.textContent = `${currentResolution}`;
-      if (currentGeojson) applyGeojson(statusValue);
-    });
-
-    convertButton.addEventListener("click", () => {
-      if (currentGeojson) applyGeojson(statusValue);
-    });
-
-    downloadButton.addEventListener("click", () => {
+      applyGeojson();
+    },
+    onConvert: () => {
+      if (currentGeojson) applyGeojson();
+    },
+    onDownload: () => {
       const cells = viz.getCells();
       if (!cells.length) return;
       const payload = {
@@ -434,20 +329,21 @@ export function mountGeoTools(container: HTMLElement) {
       link.download = "land.h3.json";
       link.click();
       URL.revokeObjectURL(url);
-    });
-
-    updateStatus(statusValue);
-  }
+    },
+    getStatusText: () => {
+      const cells = viz.getCells();
+      return currentGeojson
+        ? `${cells.length.toLocaleString()} cells @ r${currentResolution}`
+        : "No data loaded";
+    },
+  });
 
   fetch("/land.geojson")
     .then((res) => res.json())
     .then((geojson) => {
       currentGeojson = geojson;
-      if (statusValue) {
-        applyGeojson(statusValue);
-      } else {
-        viz.setGeojson(currentGeojson, currentResolution);
-      }
+      applyGeojson();
+      config.updateStatus();
     })
     .catch(() => {
       // No default geojson available.
@@ -456,7 +352,7 @@ export function mountGeoTools(container: HTMLElement) {
   return {
     dispose: () => {
       viz.dispose();
-      toggle.remove();
+      config.dispose();
       stopTyping();
       container.innerHTML = "";
     },
