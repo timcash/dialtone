@@ -4,6 +4,7 @@ import { GpuTimer } from "./gpu_timer";
 import { VisibilityMixin } from "./section";
 import cubeGlowVert from "../shaders/template-cube.vert.glsl?raw";
 import cubeGlowFrag from "../shaders/template-cube.frag.glsl?raw";
+import { startTyping } from "./typing";
 
 /**
  * Docs section: Three.js section like the others. Cube + key light + glow,
@@ -136,7 +137,7 @@ export function mountDocs(container: HTMLElement) {
   container.innerHTML = `
     <div class="marketing-overlay" aria-label="Docs section: WWW workflow">
       <h2>WWW workflow</h2>
-      <p>Develop locally, build, and deploy the public site with the CLI.</p>
+      <p data-typing-subtitle></p>
       <pre class="docs-bash"><code>./dialtone.sh www dev
 ./dialtone.sh www build
 ./dialtone.sh www publish
@@ -146,10 +147,21 @@ export function mountDocs(container: HTMLElement) {
     </div>
   `;
 
+  const subtitleEl = container.querySelector(
+    "[data-typing-subtitle]"
+  ) as HTMLParagraphElement | null;
+  const subtitles = [
+    "Develop locally, build, and deploy with the CLI.",
+    "Validate changes and inspect deployments.",
+    "Automate docs and workflows for teams.",
+  ];
+  const stopTyping = startTyping(subtitleEl, subtitles);
+
   const viz = new DocsVisualization(container);
   return {
     dispose: () => {
       viz.dispose();
+      stopTyping();
       container.innerHTML = "";
     },
     setVisible: (visible: boolean) => viz.setVisible(visible),

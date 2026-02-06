@@ -15,6 +15,9 @@ export class SearchLights {
     light: THREE.PointLight;
     name: string;
     intensity: number;
+    energy: number;
+    lastSparkMs: number;
+    planeSide: number;
     start: THREE.Vector3;
     target: THREE.Vector3;
     control: THREE.Vector3;
@@ -30,6 +33,15 @@ export class SearchLights {
   private gridRotationY: number;
   private planeOffset: number;
   private lightningDurationMs = 220;
+  private sparkCooldownMs = 300;
+  private energyDrain = 0.18;
+  private energyRegen = 0.08;
+  private lowColor = new THREE.Color(0xffd7b5);
+  private highColor = new THREE.Color(0xffffff);
+  private chargeThreshold = 0.12;
+  private chargeBoost = 0.22;
+  private minIntensityScale = 0.05;
+  private brightness = 1.35;
   private rng: () => number;
   private activeCount = 4;
   private travelBaseMs = 12000;
@@ -59,6 +71,8 @@ export class SearchLights {
       { color: 0xf8f5ef, intensity: 2.2, distance: 220, decay: 1.1 },
       { color: 0xfff2d6, intensity: 2.0, distance: 240, decay: 1.1 },
       { color: 0xffd7b5, intensity: 1.8, distance: 200, decay: 1.2 },
+      { color: 0xfaf2e6, intensity: 1.6, distance: 220, decay: 1.2 },
+      { color: 0xffe8c7, intensity: 1.4, distance: 200, decay: 1.2 },
     ];
     accentLights.forEach((config) => {
       const light = new THREE.PointLight(
@@ -109,7 +123,7 @@ export class SearchLights {
     return local.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.gridRotationY);
   }
 
-  private gridPoint(y: number, z: number): THREE.Vector3 {
+  private gridPoint(y: number, z: number, planeSide = 1, offset = this.planeOffset): THREE.Vector3 {
     const halfX = this.gridSize.x / 2;
     const halfY = this.gridSize.y / 2;
     const halfZ = this.gridSize.z / 2;
@@ -121,31 +135,35 @@ export class SearchLights {
       new THREE.Vector3(0, 1, 0),
       this.gridRotationY
     );
-    return world.add(normal.multiplyScalar(this.planeOffset));
+    return world.add(normal.multiplyScalar(offset * planeSide));
   }
 
-  private randomCellPosition(): THREE.Vector3 {
-    const halfX = this.gridSize.x / 2;
-    const halfY = this.gridSize.y / 2;
-    const halfZ = this.gridSize.z / 2;
-    const i = Math.floor(this.rng() * Math.max(1, this.gridSize.x));
+  private gridPlanePoint(y: number, z: number): THREE.Vector3 {
+    return this.gridPoint(y, z, 1, 0);
+  }
+
+  private randomCellPosition(planeSide: number): THREE.Vector3 {
     const j = Math.floor(this.rng() * this.gridSize.y);
     const k = Math.floor(this.rng() * this.gridSize.z);
-    return this.gridPoint(j, k);
+    return this.gridPoint(j, k, planeSide);
   }
 
   private initSearchLights() {
     const now = performance.now();
     const allLights = [this.orbitLight, ...this.orbitLights];
     allLights.forEach((light, index) => {
-      const start = this.randomCellPosition();
-      const target = this.randomCellPosition();
+      const planeSide = this.rng() < 0.5 ? -1 : 1;
+      const start = this.randomCellPosition(planeSide);
+      const target = this.randomCellPosition(planeSide);
       const control = this.computeArcControl(start, target);
       light.position.copy(start);
       this.searchLights.push({
         light,
         name: `inspector-${index + 1}`,
         intensity: light.intensity,
+        energy: 1,
+        lastSparkMs: 0,
+        planeSide,
         start,
         target,
         control,
@@ -163,10 +181,10 @@ export class SearchLights {
   }
 
   trackSpawn(y: number, z: number) {
-    const target = this.gridPoint(y, z);
     const now = performance.now();
     const primary = this.searchLights[0];
     if (!primary) return;
+    const target = this.gridPoint(y, z, primary.planeSide);
     primary.start.copy(primary.light.position);
     primary.target.copy(target);
     primary.control.copy(this.computeArcControl(primary.start, primary.target));
@@ -197,10 +215,20 @@ export class SearchLights {
   }
 
   update(now: number) {
+    const dt = Math.max(0, (now - this.lastUpdateMs) / 1000);
     this.lastUpdateMs = now;
     this.applyLightVisibility();
     this.searchLights.forEach((state, index) => {
       if (index >= this.activeCount) return;
+      const regenRate = state.energy <= this.chargeThreshold
+        ? this.energyRegen + this.chargeBoost
+        : this.energyRegen;
+      state.energy = Math.min(1, state.energy + dt * regenRate);
+      state.light.intensity =
+        state.intensity *
+        this.brightness *
+        (this.minIntensityScale + (1 - this.minIntensityScale) * state.energy);
+      state.light.color.copy(this.lowColor).lerp(this.highColor, state.energy);
       const elapsed = now - state.startTime;
       if (elapsed <= state.travelMs) {
         const t = elapsed / state.travelMs;
@@ -220,7 +248,8 @@ export class SearchLights {
         return;
       }
       state.start.copy(state.target);
-      state.target.copy(this.randomCellPosition());
+      state.planeSide *= -1;
+      state.target.copy(this.randomCellPosition(state.planeSide));
       state.control.copy(this.computeArcControl(state.start, state.target));
       state.driftOffset.set(
         (this.rng() - 0.5) * 4,
@@ -241,6 +270,9 @@ export class SearchLights {
         light.position.y,
         light.position.z
       );
+      const mat = sphere.material as THREE.MeshStandardMaterial;
+      mat.color.copy(light.color);
+      mat.emissive.copy(light.color);
     });
 
     this.updateLightning(now);
@@ -272,6 +304,12 @@ export class SearchLights {
     return Array.from(cells.values());
   }
 
+  getPrimaryLightPosition(): THREE.Vector3 | null {
+    if (this.searchLights.length === 0 || this.activeCount <= 0) return null;
+    const state = this.searchLights[0];
+    return state ? state.light.position.clone() : null;
+  }
+
   spawnLightning(cells: Array<{ y: number; z: number }>) {
     const now = performance.now();
     const axis = new THREE.Vector3(0, 1, 0);
@@ -279,6 +317,7 @@ export class SearchLights {
     const halfZ = this.gridSize.z / 2;
     this.searchLights.forEach((state, index) => {
       if (index >= this.activeCount) return;
+      if (now - state.lastSparkMs < this.sparkCooldownMs) return;
       const local = state.light.position
         .clone()
         .applyAxisAngle(axis, -this.gridRotationY);
@@ -293,7 +332,9 @@ export class SearchLights {
         this.gridSize.z - 1
       );
       if (!cells.some((cell) => cell.y === y && cell.z === z)) return;
-      const end = this.gridPoint(y, z);
+      state.lastSparkMs = now;
+      state.energy = Math.max(0.15, state.energy - this.energyDrain);
+      const end = this.gridPlanePoint(y, z);
       const start = state.light.position.clone().lerp(end, 0.05);
       const mid = start.clone().lerp(end, 0.5);
       mid.add(
@@ -317,6 +358,10 @@ export class SearchLights {
   setLightCount(count: number) {
     this.activeCount = THREE.MathUtils.clamp(Math.round(count), 1, this.searchLights.length);
     this.applyLightVisibility();
+  }
+
+  getMaxLights() {
+    return this.searchLights.length;
   }
 
   setRng(rng: () => number) {
@@ -347,6 +392,10 @@ export class SearchLights {
       state.control.copy(this.computeArcControl(state.start, state.target));
       state.driftAmp = this.wanderBase + this.rng() * this.wanderJitter;
     });
+  }
+
+  setBrightness(value: number) {
+    this.brightness = Math.max(0.2, value);
   }
 
   private applyLightVisibility() {

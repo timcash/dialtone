@@ -196,10 +196,9 @@ h2 {
 /* Page Layout (About/Docs) */
 #s-about,
 #s-docs {
-  overflow-y: auto;
-  align-items: flex-start;
-  display: block;
-  /* Allow natural flow for long content */
+  overflow: hidden;
+  align-items: center;
+  display: flex;
 }
 
 .page-content {

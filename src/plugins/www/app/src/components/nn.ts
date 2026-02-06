@@ -4,6 +4,7 @@ import glowFragmentShader from "../shaders/glow.frag.glsl?raw";
 import { FpsCounter } from "./fps";
 import { GpuTimer } from "./gpu_timer";
 import { VisibilityMixin } from "./section";
+import { startTyping } from "./typing";
 
 
 const COLORS = {
@@ -493,7 +494,7 @@ export function mountNeuralNetwork(container: HTMLElement) {
   container.innerHTML = `
       <div class="marketing-overlay" aria-label="Neural network marketing information">
         <h2>Neural Intelligence</h2>
-        <p>From simple perceptrons to deep transformers. Explore the biological inspiration behind modern artificial intelligence.</p>
+        <p data-typing-subtitle></p>
       </div>
       <div id="nn-config-panel" class="earth-config-panel" hidden></div>
     `;
@@ -508,11 +509,22 @@ export function mountNeuralNetwork(container: HTMLElement) {
   toggle.textContent = 'Config';
   controls?.prepend(toggle);
 
+  const subtitleEl = container.querySelector(
+    "[data-typing-subtitle]"
+  ) as HTMLParagraphElement | null;
+  const subtitles = [
+    "From simple perceptrons to deep transformers.",
+    "Explore the biological inspiration behind modern AI.",
+    "Train, evaluate, and deploy across the mesh.",
+  ];
+  const stopTyping = startTyping(subtitleEl, subtitles);
+
   const viz = new NeuralNetworkVisualization(container);
   return {
     dispose: () => {
       viz.dispose();
       toggle.remove();
+      stopTyping();
       container.innerHTML = '';
     },
     setVisible: (visible: boolean) => viz.setVisible(visible),
