@@ -124,6 +124,23 @@ export class VisionGrid {
     });
   }
 
+  injectGlider(cells: GridCell[]) {
+    const glider = [
+      [0, 1],
+      [1, 2],
+      [2, 0],
+      [2, 1],
+      [2, 2],
+    ];
+    cells.forEach(({ y, z }) => {
+      for (const [dj, dk] of glider) {
+        const idx = this.index(0, y + dj, z + dk);
+        this.gridA[idx] = 1;
+        this.glowA[idx] = this.glowDurationMs;
+      }
+    });
+  }
+
   injectBurst(count: number) {
     const glider = [
       [0, 1],
