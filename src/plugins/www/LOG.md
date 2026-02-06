@@ -95,7 +95,7 @@ DIALTONE:5108> [EXIT] Process exited with code 0.
 ### 7. Full Workflow: Auth Middleware Refactor
 A complex session involving multiple users, agents, subtasks, and a deployment verification.
 
-![Task Flow](file:///c:/Users/timca/code3/dialtone/src/plugins/www/TASKS.md)
+![Task Flow](file:///c:/Users/timca/code3/dialtone/src/plugins/task/examples/dag_auth.md)
 
 **Context**: Task `auth-middleware-v2` has been started.
 
