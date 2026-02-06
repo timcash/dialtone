@@ -513,7 +513,6 @@ export async function mountWebgpuTemplate(container: HTMLElement) {
     <div class="marketing-overlay" aria-label="WebGPU template section">
       <h2>Start here for WebGPU</h2>
       <p>The simplest working WebGPU section—adapter, device, context, pipeline, and a lit sphere. Copy this component when you add a new WebGPU section to the site.</p>
-      <p class="template-backend" data-webgpu-template-backend aria-live="polite">Rendering: —</p>
     </div>
   `;
 
@@ -576,9 +575,6 @@ export async function mountWebgpuTemplate(container: HTMLElement) {
     context,
     navigator.gpu.getPreferredCanvasFormat(),
   );
-
-  const backendEl = container.querySelector("[data-webgpu-template-backend]");
-  if (backendEl) backendEl.textContent = "Rendering: WebGPU";
 
   return {
     dispose: () => {

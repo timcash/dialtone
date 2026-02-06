@@ -77,8 +77,6 @@ class TemplateVisualization {
     this.gl = this.renderer.getContext();
     this.gpuTimer.init(this.gl);
 
-    this.updateBackendLabel();
-
     if (typeof ResizeObserver !== "undefined") {
       this.resizeObserver = new ResizeObserver(() => this.resize());
       this.resizeObserver.observe(this.container);
@@ -111,23 +109,6 @@ class TemplateVisualization {
     if (!visible) this.fpsCounter.clear();
   }
 
-  private getRenderBackend(): string {
-    if (typeof this.gl === "undefined") return "—";
-    return this.gl instanceof WebGL2RenderingContext ? "WebGL 2" : "WebGL 1";
-  }
-
-  private isWebGPUAvailable(): boolean {
-    return typeof navigator !== "undefined" && "gpu" in navigator;
-  }
-
-  private updateBackendLabel(): void {
-    const el = this.container.querySelector("[data-threejs-template-backend]");
-    if (!el) return;
-    const backend = this.getRenderBackend();
-    const webgpu = this.isWebGPUAvailable();
-    el.textContent = `Rendering: ${backend} · WebGPU: ${webgpu ? "available" : "not available"}`;
-  }
-
   animate = () => {
     this.frameId = requestAnimationFrame(this.animate);
     if (!this.isVisible) return;
@@ -156,7 +137,6 @@ export function mountThreeJsTemplate(container: HTMLElement) {
     <div class="marketing-overlay" aria-label="Template section: simplest working section">
       <h2>Start here</h2>
       <p>The simplest working section—one cube, one camera, one light. Copy this component when you add a new Three.js section to the site.</p>
-      <p class="template-backend" data-threejs-template-backend aria-live="polite">Rendering: —</p>
     </div>
   `;
 

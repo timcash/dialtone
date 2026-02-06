@@ -15,6 +15,17 @@ sections.register('s-home', {
     }
 });
 
+sections.register('s-about', {
+    containerId: 'about-container',
+    header: { visible: false },
+    load: async () => {
+        const { mountAbout } = await import('./components/about');
+        const container = document.getElementById('about-container');
+        if (!container) throw new Error('about-container not found');
+        return mountAbout(container);
+    }
+});
+
 sections.register('s-robot', {
     containerId: 'robot-container',
     load: async () => {
@@ -62,17 +73,6 @@ sections.register('s-radio', {
         const container = document.getElementById('radio-container');
         if (!container) throw new Error('radio-container not found');
         return mountRadio(container);
-    }
-});
-
-sections.register('s-about', {
-    containerId: 'about-container',
-    header: { visible: false },
-    load: async () => {
-        const { mountAbout } = await import('./components/about');
-        const container = document.getElementById('about-container');
-        if (!container) throw new Error('about-container not found');
-        return mountAbout(container);
     }
 });
 
