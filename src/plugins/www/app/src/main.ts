@@ -65,26 +65,6 @@ sections.register('s-radio', {
     }
 });
 
-sections.register('s-webgpu-template', {
-    containerId: 'webgpu-template-container',
-    load: async () => {
-        const { mountWebgpuTemplate } = await import('./components/webgpu-template');
-        const container = document.getElementById('webgpu-template-container');
-        if (!container) throw new Error('webgpu-template-container not found');
-        return mountWebgpuTemplate(container);
-    }
-});
-
-sections.register('s-threejs-template', {
-    containerId: 'threejs-template-container',
-    load: async () => {
-        const { mountThreeJsTemplate } = await import('./components/threejs-template');
-        const container = document.getElementById('threejs-template-container');
-        if (!container) throw new Error('threejs-template-container not found');
-        return mountThreeJsTemplate(container);
-    }
-});
-
 sections.register('s-about', {
     containerId: 'about-container',
     header: { visible: false },
@@ -104,6 +84,26 @@ sections.register('s-docs', {
         const container = document.getElementById('docs-container');
         if (!container) throw new Error('docs-container not found');
         return mountDocs(container);
+    }
+});
+
+sections.register('s-webgpu-template', {
+    containerId: 'webgpu-template-container',
+    load: async () => {
+        const { mountWebgpuTemplate } = await import('./components/webgpu-template');
+        const container = document.getElementById('webgpu-template-container');
+        if (!container) throw new Error('webgpu-template-container not found');
+        return mountWebgpuTemplate(container);
+    }
+});
+
+sections.register('s-threejs-template', {
+    containerId: 'threejs-template-container',
+    load: async () => {
+        const { mountThreeJsTemplate } = await import('./components/threejs-template');
+        const container = document.getElementById('threejs-template-container');
+        if (!container) throw new Error('threejs-template-container not found');
+        return mountThreeJsTemplate(container);
     }
 });
 
