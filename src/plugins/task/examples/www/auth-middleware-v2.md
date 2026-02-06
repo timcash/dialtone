@@ -1,29 +1,36 @@
 # auth-middleware-v2
 ### description:
-Refactor the authentication middleware to support JWT and OAuth2 flows.
+Implement new support for JWTs from Auth0 provider.
 ### tags:
+- backend
 - auth
-- refactor
-- security
 ### task-dependencies:
 - env-config-update
 - database-migration-users
 ### documentation:
-- src/auth/README.md
-- src/auth/DESIGN.md
+- src/auth/middleware.js
 ### test-condition-1:
-All unit tests in `src/auth/tests` pass.
+Valid JWT allows access.
 ### test-condition-2:
-Integration smoke test `npm run test:auth:integration` passes.
+Expired JWT returns 401.
 ### test-command:
 `npm run test:auth`
-### reviewed-at:
-2026-02-06T14:00:00Z
-### tested-at:
-2026-02-06T14:15:00Z
-### last-error-type:
-None
-### last-error-time:
-N/A
+### reviewed:
+- USER-1> 2026-02-06T11:00:00Z :: key-sig-jkl
+- LLM-CODE> 2026-02-06T11:05:00Z :: key-sig-mno
+- LLM-TEST> 2026-02-06T11:10:00Z :: key-sig-pqr
+### tested:
+- LLM-TEST> 2026-02-06T11:15:00Z :: key-sig-stu
+### last-error-types:
+- TokenExpiredError
+- JsonWebTokenError
+### last-error-times:
+- TokenExpiredError: 2026-02-06T10:50:00Z
+- JsonWebTokenError: 2026-02-06T10:55:00Z
 ### log-stream-command:
-`@DIALTONE npm run build:auth --watch`
+`@DIALTONE npm run server:auth --watch`
+### last-error-loglines:
+- TokenExpiredError: "jwt expired at 2026-02-06T10:00:00Z"
+- JsonWebTokenError: "jwt malformed"
+### notes:
+Key rotation schedule needs to be updated.

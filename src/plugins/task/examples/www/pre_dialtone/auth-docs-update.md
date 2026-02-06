@@ -14,13 +14,16 @@ Update Swagger/OpenAPI specs and internal docs for new Auth V2.
 No broken links in generated site.
 ### test-command:
 `npm run test:docs`
-### reviewed-at:
-
-### tested-at:
-
-### last-error-type:
-
-### last-error-time:
-
+### reviewed:
+# [Waiting for signatures]
+### tested:
+# [Waiting for tests]
+### last-error-types:
+# None
+### last-error-times:
+# None
 ### log-stream-command:
 `@DIALTONE npm run docs:serve`
+### last-error-loglines:
+# None
+### notes:

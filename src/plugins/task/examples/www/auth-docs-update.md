@@ -14,13 +14,17 @@ Update Swagger/OpenAPI specs and internal docs for new Auth V2.
 No broken links in generated site.
 ### test-command:
 `npm run test:docs`
-### reviewed-at:
-2026-02-06T14:30:00Z
-### tested-at:
-2026-02-06T14:35:00Z
-### last-error-type:
-BrokenLinkError
-### last-error-time:
-2026-02-06T14:10:00Z
+### reviewed:
+- USER-1> 2026-02-06T13:30:00Z :: key-sig-8mn
+### tested:
+- LLM-TEST> 2026-02-06T13:35:00Z :: key-sig-9op
+### last-error-types:
+- BrokenLinkError
+### last-error-times:
+- BrokenLinkError: 2026-02-06T13:20:00Z
 ### log-stream-command:
 `@DIALTONE npm run docs:serve`
+### last-error-loglines:
+- BrokenLinkError: "[WARN] Link to /auth/v1/login is broken"
+### notes:
+Publish to internal wiki after merge.

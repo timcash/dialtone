@@ -1,26 +1,31 @@
 # audit-logger-service
 ### description:
-Create a service to log critical security events to the database and external SIEM.
+Create background service to log all V2 API accesses to data warehouse.
 ### tags:
-- security
-- logging
+- backend
+- compliance
 ### task-dependencies:
 - database-migration-users
 ### documentation:
-- src/logging/audit.md
+- src/services/audit.js
 ### test-condition-1:
-Events persisted to `audit_logs` table.
+Logs appear in queue within 500ms.
 ### test-condition-2:
-High severity events trigger alert hook.
+No PII is logged in plain text.
 ### test-command:
 `npm run test:audit`
-### reviewed-at:
-2026-02-06T14:05:00Z
-### tested-at:
-2026-02-06T14:30:00Z
-### last-error-type:
-DatabaseConstraintViolation
-### last-error-time:
-2026-02-06T14:20:00Z
+### reviewed:
+- USER-1> 2026-02-06T12:00:00Z :: key-sig-567
+- LLM-REVIEW> 2026-02-06T12:10:00Z :: key-sig-890
+### tested:
+- LLM-TEST> 2026-02-06T12:15:00Z :: key-sig-1ab
+### last-error-types:
+- QueueFullError
+### last-error-times:
+- QueueFullError: 2026-02-06T11:50:00Z
 ### log-stream-command:
-`@DIALTONE npm run audit:tail`
+`@DIALTONE npm run service:audit --tail`
+### last-error-loglines:
+- QueueFullError: "[SQS] Exceeded max batch size of 10"
+### notes:
+Log retention policy is 90 days.

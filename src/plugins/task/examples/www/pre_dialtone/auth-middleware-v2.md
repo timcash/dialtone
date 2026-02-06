@@ -1,29 +1,30 @@
 # auth-middleware-v2
 ### description:
-Refactor the authentication middleware to support JWT and OAuth2 flows.
+Implement new support for JWTs from Auth0 provider.
 ### tags:
+- backend
 - auth
-- refactor
-- security
 ### task-dependencies:
 - env-config-update
 - database-migration-users
 ### documentation:
-- src/auth/README.md
-- src/auth/DESIGN.md
+- src/auth/middleware.js
 ### test-condition-1:
-All unit tests in `src/auth/tests` pass.
+Valid JWT allows access.
 ### test-condition-2:
-Integration smoke test `npm run test:auth:integration` passes.
+Expired JWT returns 401.
 ### test-command:
 `npm run test:auth`
-### reviewed-at:
-
-### tested-at:
-
-### last-error-type:
-None
-### last-error-time:
-N/A
+### reviewed:
+# [Waiting for signatures]
+### tested:
+# [Waiting for tests]
+### last-error-types:
+# None
+### last-error-times:
+# None
 ### log-stream-command:
-`@DIALTONE npm run build:auth --watch`
+`@DIALTONE npm run server:auth --watch`
+### last-error-loglines:
+# None
+### notes:

@@ -1,26 +1,29 @@
 # env-config-update
 ### description:
-Update environment configuration to support V2 auth services (OAuth2 credentials, JWT secrets).
+Update environment variables for the new V2 Auth Service.
 ### tags:
-- infrastructure
 - config
+- devops
 ### task-dependencies:
-[]
+# None
 ### documentation:
-- infra/prod/env.md
+- src/config/README.md
 ### test-condition-1:
-`source .env && echo $JWT_SECRET` returns value.
+`process.env.AUTH_V2_ENABLED` is true.
 ### test-condition-2:
-App boots with new config.
+Secret keys are loaded from Vault.
 ### test-command:
-`npm run dev:boot`
-### reviewed-at:
-
-### tested-at:
-
-### last-error-type:
-MissingKeyError
-### last-error-time:
-2026-02-06T10:00:00Z
+`npm run config:validate`
+### reviewed:
+# [Waiting for signatures]
+### tested:
+# [Waiting for tests]
+### last-error-types:
+# None
+### last-error-times:
+# None
 ### log-stream-command:
-`@DIALTONE env check`
+`@DIALTONE npm run config:print`
+### last-error-loglines:
+# None
+### notes:

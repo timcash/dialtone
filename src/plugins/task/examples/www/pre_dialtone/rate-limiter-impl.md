@@ -1,26 +1,29 @@
 # rate-limiter-impl
 ### description:
-Implement Redis-based rate limiting for V2 API endpoints.
+Implement sliding window rate limiter for API V2.
 ### tags:
-- security
+- backend
 - performance
 ### task-dependencies:
 - env-config-update
 ### documentation:
-- src/security/throttling.md
+- src/middleware/rate_limit.js
 ### test-condition-1:
-Limits enforced per IP.
+Limit > 100 req/min returns 429.
 ### test-condition-2:
-Auth endpoints have stricter limits.
+Headers include Retry-After.
 ### test-command:
-`npm run test:security:ratelimit`
-### reviewed-at:
-
-### tested-at:
-
-### last-error-type:
-
-### last-error-time:
-
+`npm run test:ratelimit`
+### reviewed:
+# [Waiting for signatures]
+### tested:
+# [Waiting for tests]
+### last-error-types:
+# None
+### last-error-times:
+# None
 ### log-stream-command:
-`@DIALTONE npm run test:security --watch`
+`@DIALTONE npm run server:load --verbose`
+### last-error-loglines:
+# None
+### notes:

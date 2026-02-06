@@ -15,13 +15,18 @@ No High or Critical vulnerabilities found.
 Dependencies are audit-clean.
 ### test-command:
 `npm run audit:security`
-### reviewed-at:
-2026-02-06T14:35:00Z
-### tested-at:
-2026-02-06T14:50:00Z
-### last-error-type:
-VulnFound
-### last-error-time:
-2026-02-06T14:40:00Z
+### reviewed:
+- USER-1> 2026-02-06T15:05:00Z :: key-sig-ijk
+- LLM-REVIEW> 2026-02-06T15:10:00Z :: key-sig-lmn
+### tested:
+- LLM-TEST> 2026-02-06T15:15:00Z :: key-sig-opq
+### last-error-types:
+- VulnFound
+### last-error-times:
+- VulnFound: 2026-02-06T14:55:00Z
 ### log-stream-command:
 `@DIALTONE npm run audit:security --watch`
+### last-error-loglines:
+- VulnFound: "[CRITICAL] Prototype Pollution in older lodash version"
+### notes:
+False positives should be added to .sastignore

@@ -1,26 +1,31 @@
 # database-migration-users
 ### description:
-Create migration scripts to add OAuth provider columns to user table.
+Add `oauth_provider` and `profile_pic_url` columns to users table.
 ### tags:
 - database
 - migration
 ### task-dependencies:
-[]
+# None
 ### documentation:
-- src/db/schema.md
+- src/db/migrations/005_users_v2.sql
 ### test-condition-1:
-Migration `20260206_add_oauth` executes successfully.
+Migration script runs successfully.
 ### test-condition-2:
-Rollback works without data loss.
+Rollback script reverts changes cleanly.
 ### test-command:
 `npm run db:migrate:test`
-### reviewed-at:
-2026-02-06T13:15:00Z
-### tested-at:
-2026-02-06T13:20:00Z
-### last-error-type:
-MigrationTimeout
-### last-error-time:
-2026-02-06T13:18:00Z
+### reviewed:
+- USER-1> 2026-02-06T10:15:00Z :: key-sig-abc
+- LLM-CODE> 2026-02-06T10:20:00Z :: key-sig-def
+### tested:
+- LLM-TEST> 2026-02-06T10:25:00Z :: key-sig-ghi
+### last-error-types:
+- SyntaxError
+### last-error-times:
+- SyntaxError: 2026-02-06T10:12:00Z
 ### log-stream-command:
-`@DIALTONE npm run db:migrate --dry-run`
+`@DIALTONE npm run db:status`
+### last-error-loglines:
+- SyntaxError: "PG::SyntaxError: ERROR:  syntax error at or near 'VARCHAR'"
+### notes:
+Backup the user table before running in production.

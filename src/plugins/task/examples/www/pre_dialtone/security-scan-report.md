@@ -15,13 +15,16 @@ No High or Critical vulnerabilities found.
 Dependencies are audit-clean.
 ### test-command:
 `npm run audit:security`
-### reviewed-at:
-
-### tested-at:
-
-### last-error-type:
-
-### last-error-time:
-
+### reviewed:
+# [Waiting for signatures]
+### tested:
+# [Waiting for tests]
+### last-error-types:
+# None
+### last-error-times:
+# None
 ### log-stream-command:
 `@DIALTONE npm run audit:security --watch`
+### last-error-loglines:
+# None
+### notes:
