@@ -77,8 +77,6 @@ class RadioVisualization {
 
     this.gl = this.renderer.getContext();
     this.gpuTimer.init(this.gl);
-    this.updateBackendLabel();
-
     if (typeof ResizeObserver !== "undefined") {
       this.resizeObserver = new ResizeObserver(() => this.resize());
       this.resizeObserver.observe(this.container);
@@ -179,23 +177,6 @@ class RadioVisualization {
     if (!visible) this.fpsCounter.clear();
   }
 
-  private getRenderBackend(): string {
-    if (typeof this.gl === "undefined") return "—";
-    return this.gl instanceof WebGL2RenderingContext ? "WebGL 2" : "WebGL 1";
-  }
-
-  private isWebGPUAvailable(): boolean {
-    return typeof navigator !== "undefined" && "gpu" in navigator;
-  }
-
-  private updateBackendLabel(): void {
-    const el = this.container.querySelector("[data-radio-backend]");
-    if (!el) return;
-    const backend = this.getRenderBackend();
-    const webgpu = this.isWebGPUAvailable();
-    el.textContent = `Rendering: ${backend} · WebGPU: ${webgpu ? "available" : "not available"}`;
-  }
-
   animate = () => {
     this.frameId = requestAnimationFrame(this.animate);
     if (!this.isVisible) return;
@@ -224,7 +205,6 @@ export function mountRadio(container: HTMLElement) {
     <div class="marketing-overlay" aria-label="Radio section: handheld with LCD">
       <h2>Open-source radio for small robots</h2>
       <p>Hand-held form factor, dual antenna, LCD screen. Mount it on your bot and stay connected.</p>
-      <p class="template-backend" data-radio-backend aria-live="polite">Rendering: —</p>
     </div>
   `;
 
