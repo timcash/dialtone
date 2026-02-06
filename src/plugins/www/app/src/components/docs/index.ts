@@ -1,17 +1,17 @@
 import * as THREE from "three";
-import { FpsCounter } from "./fps";
-import { GpuTimer } from "./gpu_timer";
-import { VisibilityMixin } from "./section";
-import cubeGlowVert from "../shaders/template-cube.vert.glsl?raw";
-import cubeGlowFrag from "../shaders/template-cube.frag.glsl?raw";
-import { startTyping } from "./typing";
+import { FpsCounter } from "../fps";
+import { GpuTimer } from "../gpu_timer";
+import { VisibilityMixin } from "../section";
+import cubeGlowVert from "../../shaders/template-cube.vert.glsl?raw";
+import cubeGlowFrag from "../../shaders/template-cube.frag.glsl?raw";
+import { startTyping } from "../typing";
 
 /**
- * Simplest working section: one cube, camera facing it, key light + soft glow shader.
- * Use this as the starting point for new Three.js sections.
+ * Docs section: Three.js section like the others. Cube + key light + glow,
+ * overlay with WWW workflow bash commands.
  */
 
-class TemplateVisualization {
+class DocsVisualization {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
   renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -21,19 +21,18 @@ class TemplateVisualization {
   gl!: WebGLRenderingContext | WebGL2RenderingContext;
   gpuTimer = new GpuTimer();
   isVisible = true;
-  private fpsCounter = new FpsCounter("threejs-template");
+  private fpsCounter = new FpsCounter("docs");
   private cube!: THREE.Mesh;
   private cubeMaterial!: THREE.ShaderMaterial;
   private keyLight!: THREE.DirectionalLight;
   private time = 0;
-  spinSpeed = 0.35;
   private lightDir = new THREE.Vector3(1, 1, 1).normalize();
   frameCount = 0;
 
   constructor(container: HTMLElement) {
     this.container = container;
 
-    this.renderer.setClearColor(0x111111, 1);
+    this.renderer.setClearColor(0x0a0a12, 1);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
     const canvas = this.renderer.domElement;
@@ -62,8 +61,8 @@ class TemplateVisualization {
     const cubeGeo = new THREE.BoxGeometry(1, 1, 1);
     this.cubeMaterial = new THREE.ShaderMaterial({
       uniforms: {
-        uColor: { value: new THREE.Color(0x6688aa) },
-        uGlowColor: { value: new THREE.Color(0x88aacc) },
+        uColor: { value: new THREE.Color(0x446688) },
+        uGlowColor: { value: new THREE.Color(0x6688aa) },
         uLightDir: { value: this.lightDir.clone() },
         uTime: { value: 0 },
       },
@@ -107,7 +106,7 @@ class TemplateVisualization {
   }
 
   setVisible(visible: boolean) {
-    VisibilityMixin.setVisible(this, visible, "threejs-template");
+    VisibilityMixin.setVisible(this, visible, "docs");
     if (!visible) this.fpsCounter.clear();
   }
 
@@ -117,8 +116,8 @@ class TemplateVisualization {
 
     this.time += 0.016;
     this.frameCount++;
-    this.cube.rotation.x = this.time * this.spinSpeed;
-    this.cube.rotation.y = this.time * this.spinSpeed * 0.7;
+    this.cube.rotation.x = this.time * 0.3;
+    this.cube.rotation.y = this.time * 0.2;
 
     this.lightDir.set(1, 1, 1).normalize();
     this.cubeMaterial.uniforms.uLightDir.value.copy(this.lightDir).transformDirection(this.camera.matrixWorldInverse);
@@ -134,82 +133,34 @@ class TemplateVisualization {
   };
 }
 
-export function mountThreeJsTemplate(container: HTMLElement) {
+export function mountDocs(container: HTMLElement) {
   container.innerHTML = `
-    <div class="marketing-overlay" aria-label="Template section: simplest working section">
-      <h2>Start here</h2>
+    <div class="marketing-overlay" aria-label="Docs section: WWW workflow">
+      <h2>WWW workflow</h2>
       <p data-typing-subtitle></p>
+      <pre class="docs-bash"><code>./dialtone.sh www dev
+./dialtone.sh www build
+./dialtone.sh www publish
+./dialtone.sh www validate
+./dialtone.sh www logs &lt;url&gt;
+./dialtone.sh www radio demo</code></pre>
     </div>
-    <div id="threejs-template-config-panel" class="earth-config-panel" hidden></div>
   `;
-
-  const controls = document.querySelector(".top-right-controls");
-  const toggle = document.createElement("button");
-  toggle.id = "threejs-template-config-toggle";
-  toggle.className = "earth-config-toggle";
-  toggle.type = "button";
-  toggle.setAttribute("aria-expanded", "false");
-  toggle.textContent = "Config";
-  controls?.prepend(toggle);
-
-  const panel = document.getElementById(
-    "threejs-template-config-panel",
-  ) as HTMLDivElement | null;
-  if (panel && toggle) {
-    const setOpen = (open: boolean) => {
-      panel.hidden = !open;
-      panel.style.display = open ? "grid" : "none";
-      toggle.setAttribute("aria-expanded", String(open));
-    };
-    setOpen(false);
-    toggle.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setOpen(panel.hidden);
-    });
-  }
 
   const subtitleEl = container.querySelector(
     "[data-typing-subtitle]"
   ) as HTMLParagraphElement | null;
   const subtitles = [
-    "One cube, one camera, one light.",
-    "Copy this component for new Three.js sections.",
-    "The simplest working section template.",
+    "Develop locally, build, and deploy with the CLI.",
+    "Validate changes and inspect deployments.",
+    "Automate docs and workflows for teams.",
   ];
   const stopTyping = startTyping(subtitleEl, subtitles);
 
-  const viz = new TemplateVisualization(container);
-  if (panel) {
-    const row = document.createElement("div");
-    row.className = "earth-config-row";
-    const label = document.createElement("label");
-    label.className = "earth-config-label";
-    label.htmlFor = "threejs-template-spin";
-    label.textContent = "Spin";
-    const slider = document.createElement("input");
-    slider.id = "threejs-template-spin";
-    slider.type = "range";
-    slider.min = "0";
-    slider.max = "1";
-    slider.step = "0.01";
-    slider.value = `${viz.spinSpeed}`;
-    row.appendChild(label);
-    row.appendChild(slider);
-    const valueEl = document.createElement("span");
-    valueEl.className = "earth-config-value";
-    valueEl.textContent = viz.spinSpeed.toFixed(2);
-    row.appendChild(valueEl);
-    panel.appendChild(row);
-    slider.addEventListener("input", () => {
-      viz.spinSpeed = parseFloat(slider.value);
-      valueEl.textContent = viz.spinSpeed.toFixed(2);
-    });
-  }
+  const viz = new DocsVisualization(container);
   return {
     dispose: () => {
       viz.dispose();
-      toggle.remove();
       stopTyping();
       container.innerHTML = "";
     },
