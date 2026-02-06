@@ -193,6 +193,15 @@ h2 {
   gap: 0.5rem;
 }
 
+.radio-lcd-typing {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  font-family: "Press Start 2P", monospace;
+}
+
 /* Page Layout (About/Docs) */
 #s-about,
 #s-docs {

@@ -33,6 +33,9 @@ class RadioVisualization {
   antennasGroup = new THREE.Group();
   knobsGroup = new THREE.Group();
   private bodyMaterial!: THREE.ShaderMaterial;
+  private lcdCanvas?: HTMLCanvasElement;
+  private lcdTexture?: THREE.CanvasTexture;
+  private lcdTypingStop?: () => void;
   private time = 0;
   frameCount = 0;
 
@@ -116,6 +119,17 @@ class RadioVisualization {
       emissiveIntensity: 1.2,
       side: THREE.DoubleSide,
     });
+    this.lcdCanvas = document.createElement("canvas");
+    this.lcdCanvas.width = 256;
+    this.lcdCanvas.height = 96;
+    this.lcdTexture = new THREE.CanvasTexture(this.lcdCanvas);
+    this.lcdTexture.minFilter = THREE.LinearFilter;
+    this.lcdTexture.magFilter = THREE.LinearFilter;
+    this.lcdTexture.wrapS = THREE.ClampToEdgeWrapping;
+    this.lcdTexture.wrapT = THREE.ClampToEdgeWrapping;
+    screenMat.map = this.lcdTexture;
+    screenMat.emissiveMap = this.lcdTexture;
+    screenMat.needsUpdate = true;
     const screen = new THREE.Mesh(screenGeo, screenMat);
     screen.position.set(0, 0.12, bodyD / 2 + 0.01);
     this.lcdGroup.add(screen);
@@ -184,6 +198,9 @@ class RadioVisualization {
 
     this.time += 0.016;
     this.frameCount++;
+    if (this.lcdTexture) {
+      this.lcdTexture.needsUpdate = true;
+    }
     this.lightDir.copy(this.keyLight.position).normalize();
     this.bodyMaterial.uniforms.uLightDir.value.copy(this.lightDir).transformDirection(this.camera.matrixWorldInverse);
     this.bodyMaterial.uniforms.uTime.value = this.time;
@@ -204,15 +221,17 @@ class RadioVisualization {
 export function mountRadio(container: HTMLElement) {
   container.innerHTML = `
     <div class="marketing-overlay" aria-label="Radio section: handheld with LCD">
-      <h2>Open-source radio for small robots</h2>
+      <h2>Radios for robots</h2>
       <p data-typing-subtitle></p>
     </div>
+    <p data-radio-lcd class="radio-lcd-typing"></p>
   `;
 
   const subtitleEl = container.querySelector(
     "[data-typing-subtitle]"
   ) as HTMLParagraphElement | null;
   const subtitles = [
+    "Open hardware and software.",
     "Hand-held form factor with dual antenna.",
     "Mount it on your bot and stay connected.",
     "Built for field links and shared networks.",
@@ -220,10 +239,63 @@ export function mountRadio(container: HTMLElement) {
   const stopTyping = startTyping(subtitleEl, subtitles);
 
   const viz = new RadioVisualization(container);
+  const lcdTextEl = container.querySelector(
+    "[data-radio-lcd]"
+  ) as HTMLParagraphElement | null;
+  const lcdStopTyping = startTyping(lcdTextEl, subtitles);
+
+  if (lcdTextEl && viz["lcdCanvas"]) {
+    const canvas = viz["lcdCanvas"] as HTMLCanvasElement;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      const render = () => {
+        const text = lcdTextEl.textContent?.replace("|", "").trim() ?? "";
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#003a2a";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#7dffcf";
+        ctx.font = "14px \"Press Start 2P\", monospace";
+        ctx.textBaseline = "top";
+        const paddingX = 10;
+        const paddingY = 8;
+        const maxWidth = canvas.width - paddingX * 2;
+        const lineHeight = 18;
+        const words = text.length > 0 ? text.split(/\s+/) : [];
+        const lines: string[] = [];
+        let current = "";
+        words.forEach((word) => {
+          const next = current ? `${current} ${word}` : word;
+          if (ctx.measureText(next).width <= maxWidth) {
+            current = next;
+          } else if (current) {
+            lines.push(current);
+            current = word;
+          } else {
+            lines.push(word);
+            current = "";
+          }
+        });
+        if (current) lines.push(current);
+        if (lines.length === 0) lines.push("");
+        const maxLines = Math.floor((canvas.height - paddingY * 2) / lineHeight);
+        lines.slice(0, maxLines).forEach((line, idx) => {
+          ctx.fillText(line, paddingX, paddingY + idx * lineHeight);
+        });
+      };
+      const observer = new MutationObserver(render);
+      observer.observe(lcdTextEl, { childList: true, characterData: true, subtree: true });
+      render();
+      viz["lcdTypingStop"] = () => observer.disconnect();
+    }
+  }
   return {
     dispose: () => {
       viz.dispose();
       stopTyping();
+      lcdStopTyping();
+      if (viz["lcdTypingStop"]) {
+        viz["lcdTypingStop"]();
+      }
       container.innerHTML = "";
     },
     setVisible: (visible: boolean) => viz.setVisible(visible),
