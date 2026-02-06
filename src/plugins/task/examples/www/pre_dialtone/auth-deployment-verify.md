@@ -17,13 +17,16 @@ Verify the new auth service works in the staging environment.
 Can exchange OAuth code for token.
 ### test-command:
 `npm run verify:staging`
-### reviewed-at:
-
-### tested-at:
-
-### last-error-type:
-
-### last-error-time:
-
+### reviewed:
+# [Waiting for signatures]
+### tested:
+# [Waiting for tests]
+### last-error-types:
+# None
+### last-error-times:
+# None
 ### log-stream-command:
 `@DIALTONE run verify:staging --verbose`
+### last-error-loglines:
+# None
+### notes:

@@ -1,26 +1,31 @@
 # rate-limiter-impl
 ### description:
-Implement Redis-based rate limiting for V2 API endpoints.
+Implement sliding window rate limiter for API V2.
 ### tags:
-- security
+- backend
 - performance
 ### task-dependencies:
 - env-config-update
 ### documentation:
-- src/security/throttling.md
+- src/middleware/rate_limit.js
 ### test-condition-1:
-Limits enforced per IP.
+Limit > 100 req/min returns 429.
 ### test-condition-2:
-Auth endpoints have stricter limits.
+Headers include Retry-After.
 ### test-command:
-`npm run test:security:ratelimit`
-### reviewed-at:
-2026-02-06T14:10:00Z
-### tested-at:
-2026-02-06T14:25:00Z
-### last-error-type:
-RedisConnectionError
-### last-error-time:
-2026-02-06T14:15:00Z
+`npm run test:ratelimit`
+### reviewed:
+- USER-1> 2026-02-06T11:30:00Z :: key-sig-vwx
+- LLM-CODE> 2026-02-06T11:35:00Z :: key-sig-yz1
+### tested:
+- LLM-TEST> 2026-02-06T11:40:00Z :: key-sig-234
+### last-error-types:
+- RedisConnectionError
+### last-error-times:
+- RedisConnectionError: 2026-02-06T11:25:00Z
 ### log-stream-command:
-`@DIALTONE npm run test:security --watch`
+`@DIALTONE npm run server:load --verbose`
+### last-error-loglines:
+- RedisConnectionError: "[REDIS] Connection refused on port 6379"
+### notes:
+Ensure Redis cluster is scaled for higher throughput.

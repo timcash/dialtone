@@ -17,13 +17,19 @@ Verify the new auth service works in the staging environment.
 Can exchange OAuth code for token.
 ### test-command:
 `npm run verify:staging`
-### reviewed-at:
-
-### tested-at:
-
-### last-error-type:
-ConnectionRefused
-### last-error-time:
-2026-02-06T13:50:00Z
+### reviewed:
+- USER-1> 2026-02-06T15:30:00Z :: key-sig-rst
+- USER-2> 2026-02-06T15:35:00Z :: key-sig-uvw
+- LLM-REVIEW> 2026-02-06T15:40:00Z :: key-sig-xyz
+### tested:
+- LLM-TEST> 2026-02-06T15:45:00Z :: key-sig-123
+### last-error-types:
+- ConnectionRefused
+### last-error-times:
+- ConnectionRefused: 2026-02-06T15:20:00Z
 ### log-stream-command:
 `@DIALTONE run verify:staging --verbose`
+### last-error-loglines:
+- ConnectionRefused: "Error: connect ECONNREFUSED 127.0.0.1:4000"
+### notes:
+Rollback plan: Revert docker tag to v1.9.4.

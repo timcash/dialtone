@@ -1,26 +1,29 @@
 # database-migration-users
 ### description:
-Create migration scripts to add OAuth provider columns to user table.
+Add `oauth_provider` and `profile_pic_url` columns to users table.
 ### tags:
 - database
 - migration
 ### task-dependencies:
-[]
+# None
 ### documentation:
-- src/db/schema.md
+- src/db/migrations/005_users_v2.sql
 ### test-condition-1:
-Migration `20260206_add_oauth` executes successfully.
+Migration script runs successfully.
 ### test-condition-2:
-Rollback works without data loss.
+Rollback script reverts changes cleanly.
 ### test-command:
 `npm run db:migrate:test`
-### reviewed-at:
-
-### tested-at:
-
-### last-error-type:
-
-### last-error-time:
-
+### reviewed:
+# [Waiting for signatures]
+### tested:
+# [Waiting for tests]
+### last-error-types:
+# None
+### last-error-times:
+# None
 ### log-stream-command:
-`@DIALTONE npm run db:migrate --dry-run`
+`@DIALTONE npm run db:status`
+### last-error-loglines:
+# None
+### notes:

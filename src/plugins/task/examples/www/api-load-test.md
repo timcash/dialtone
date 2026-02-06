@@ -16,13 +16,17 @@ P95 latency < 200ms at 1000 RPS.
 Error rate < 0.1%.
 ### test-command:
 `npm run test:load`
-### reviewed-at:
-2026-02-06T14:40:00Z
-### tested-at:
-2026-02-06T14:45:00Z
-### last-error-type:
-ThresholdExceeded
-### last-error-time:
-2026-02-06T14:35:00Z
+### reviewed:
+- USER-1> 2026-02-06T14:10:00Z :: key-sig-cde
+### tested:
+- LLM-TEST> 2026-02-06T14:15:00Z :: key-sig-fgh
+### last-error-types:
+- ThresholdExceeded
+### last-error-times:
+- ThresholdExceeded: 2026-02-06T14:05:00Z
 ### log-stream-command:
 `@DIALTONE npm run test:load --dashboard`
+### last-error-loglines:
+- ThresholdExceeded: "checks......: 95.00% ✓ 1342 ms  (expected < 200 ms)"
+### notes:
+Run during off-peak hours.

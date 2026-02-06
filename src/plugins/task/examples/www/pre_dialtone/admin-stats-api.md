@@ -15,13 +15,16 @@ GET /admin/stats/growth returns JSON.
 Requires Admin role.
 ### test-command:
 `npm run test:admin`
-### reviewed-at:
-
-### tested-at:
-
-### last-error-type:
-
-### last-error-time:
-
+### reviewed:
+# [Waiting for signatures]
+### tested:
+# [Waiting for tests]
+### last-error-types:
+# None
+### last-error-times:
+# None
 ### log-stream-command:
 `@DIALTONE npm run server:admin --watch`
+### last-error-loglines:
+# None
+### notes:
