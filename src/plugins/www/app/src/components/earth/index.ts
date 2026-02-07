@@ -81,7 +81,7 @@ function createMoonRockTexture(size = 128) {
 
 export class ProceduralOrbit {
   scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(75, 1, 0.01, 1000);
+  camera = new THREE.PerspectiveCamera(75, 1, 0.1, 10000);
   renderer = new THREE.WebGLRenderer({ antialias: true });
   container: HTMLElement;
   frameId = 0;
@@ -108,25 +108,25 @@ export class ProceduralOrbit {
   cloud2Axis = new THREE.Vector3(0.2, 1, -0.1).normalize();
 
   // Settings
-  earthRadius = 5;
+  earthRadius = 50;
   shaderTimeScale = 0.28;
   timeScale = TIME_SCALE;
   // Clouds: make them more visible by default.
-  cloudAmount = 0.92;
+  cloudAmount = 0.4;
   cloudOpacityOscAmp = 0.12;
   cloudAmountOscAmp = 0.18;
-  cloudOscSpeed = 0.45;
+  cloudOscSpeed = 2.5;
 
   // Rotations
   earthRotSpeed = (Math.PI * 2) / EARTH_ROT_PERIOD_SECONDS;
-  cloud1RotSpeed = (Math.PI * 2) / 100;
-  cloud2RotSpeed = (Math.PI * 2) / 120;
-  cloud1Opacity = 0.82;
-  cloud2Opacity = 0.78;
+  cloud1RotSpeed = (Math.PI * 2) / 20;
+  cloud2RotSpeed = (Math.PI * 2) / 24;
+  cloud1Opacity = 0.95;
+  cloud2Opacity = 0.90;
   cloudBrightness = 1.25;
-  cameraDistance = 6.0;
-  cameraOrbit = 0.4;
-  cameraYaw = 0.2;
+  cameraDistance = 60.0;
+  cameraOrbit = 2.45;
+  cameraYaw = 0.8;
   cameraAnchor = new THREE.Vector3(0, 0, 0);
 
   // Lights
@@ -136,27 +136,29 @@ export class ProceduralOrbit {
   sunKeyLight2!: THREE.DirectionalLight;
   ambientLight!: THREE.AmbientLight;
 
-  sunDistance = 78;
-  sunOrbitHeight = 87;
+  sunDistance = 780;
+  sunOrbitHeight = 870;
   sunOrbitAngleDeg = 0;
-  sunOrbitSpeed = (Math.PI * 2) / SUN_ORBIT_PERIOD_MS / 2;
+  sunOrbitSpeed = 0.0006283185307179586;
   sunOrbitIncline = 20 * DEG_TO_RAD;
   sunOrbitAngleRad = 0;
   sunTimeMs = performance.now();
 
   // Moon orbit (visual / demo-scale)
-  moonRadius = 0.55;
-  moonOrbitRadius = 12.5;
+  moonRadius = 5.5;
+  moonOrbitRadius = 125;
   moonOrbitIncline = 8 * DEG_TO_RAD;
   moonOrbitPhaseRad = 0.6;
 
-  keyLightDistance = 147;
-  keyLightHeight = 40;
+  keyLightDistance = 1470;
+  keyLightHeight = 400;
   keyLightAngleDeg = 63;
   materialColorScale = 1.25;
 
   lastFrameTime = performance.now();
   configCleanup?: () => void;
+
+  private landLayer?: HexLayer;
 
   private fpsCounter = new FpsCounter("earth");
 
@@ -242,18 +244,18 @@ export class ProceduralOrbit {
     this.earth = new THREE.Mesh(geo(this.earthRadius, earthSegments), earthMat);
     this.scene.add(this.earth);
 
-    const cloud1Mat = this.createCloudMaterial(0.2, this.cloud1Opacity);
+    const cloud1Mat = this.createCloudMaterial(0.04, this.cloud1Opacity);
     this.cloud1Material = cloud1Mat;
     this.cloud1 = new THREE.Mesh(
-      geo(this.earthRadius + 0.05, cloudSegments),
+      geo(this.earthRadius + 1.2, cloudSegments),
       cloud1Mat,
     );
     this.scene.add(this.cloud1);
 
-    const cloud2Mat = this.createCloudMaterial(0.5, this.cloud2Opacity);
+    const cloud2Mat = this.createCloudMaterial(0.1, this.cloud2Opacity);
     this.cloud2Material = cloud2Mat;
     this.cloud2 = new THREE.Mesh(
-      geo(this.earthRadius + 0.08, cloudSegments),
+      geo(this.earthRadius + 1.5, cloudSegments),
       cloud2Mat,
     );
     this.scene.add(this.cloud2);
@@ -262,7 +264,7 @@ export class ProceduralOrbit {
 
     this.hexLayers = [
       new HexLayer(this.earthRadius, {
-        radiusOffset: 0.1, // Increased from 0.06
+        radiusOffset: 1.0, // Increased from 0.1
         count: 240,
         resolution: 3,
         ratePerSecond: 45,
@@ -274,7 +276,7 @@ export class ProceduralOrbit {
         ],
       }),
       new HexLayer(this.earthRadius, {
-        radiusOffset: 0.15, // Increased from 0.08
+        radiusOffset: 1.5, // Increased from 0.15
         count: 200,
         resolution: 3,
         ratePerSecond: 45,
@@ -286,7 +288,7 @@ export class ProceduralOrbit {
         ],
       }),
       new HexLayer(this.earthRadius, {
-        radiusOffset: 0.2, // Increased from 0.12
+        radiusOffset: 2.0, // Increased from 0.2
         count: 160,
         resolution: 3,
         ratePerSecond: 45,
@@ -322,7 +324,7 @@ export class ProceduralOrbit {
     });
     this.atmosphereMaterial = atmoMat;
     this.atmosphere = new THREE.Mesh(
-      geo(this.earthRadius + 0.2, atmoSegments),
+      geo(this.earthRadius + 2.0, atmoSegments),
       atmoMat,
     );
     this.scene.add(this.atmosphere);
@@ -344,7 +346,7 @@ export class ProceduralOrbit {
     });
     this.sunAtmosphereMaterial = sunAtmoMat;
     this.sunAtmosphere = new THREE.Mesh(
-      geo(this.earthRadius + 0.32, atmoSegments),
+      geo(this.earthRadius + 3.2, atmoSegments),
       sunAtmoMat,
     );
     this.scene.add(this.sunAtmosphere);
@@ -386,7 +388,7 @@ export class ProceduralOrbit {
   }
 
   private buildLandLayer(cells: string[], resolution: number) {
-    const landRadiusOffset = 0.1;
+    const landRadiusOffset = 0.6;
     const landLayer = new HexLayer(this.earthRadius, {
       radiusOffset: landRadiusOffset,
       count: cells.length,
@@ -411,6 +413,7 @@ export class ProceduralOrbit {
     landLayer.mesh.frustumCulled = false;
     this.hexLayers.push(landLayer);
     this.earth.add(landLayer.mesh);
+    this.landLayer = landLayer;
     console.log("[earth] land layer ready", {
       cells: cells.length,
       resolution,
@@ -457,6 +460,7 @@ export class ProceduralOrbit {
     );
     return new THREE.ShaderMaterial({
       transparent: true,
+      depthWrite: false,
       uniforms: {
         uTime: { value: 0 },
         uTint: { value: tint },
@@ -484,13 +488,13 @@ export class ProceduralOrbit {
     // Note: core Earth lighting is shader-driven; these lights are primarily for
     // non-shader meshes / debugging.
     this.sunKeyLight = new THREE.DirectionalLight(0xffffff, 0.35);
-    this.sunKeyLight.position.set(10, 5, 10);
+    this.sunKeyLight.position.set(100, 50, 100);
     this.scene.add(this.sunKeyLight);
     this.sunKeyLight.target.position.set(0, 0, 0);
     this.scene.add(this.sunKeyLight.target);
 
     this.sunKeyLight2 = new THREE.DirectionalLight(0xffffff, 0.22);
-    this.sunKeyLight2.position.set(-10, -5, -10);
+    this.sunKeyLight2.position.set(-100, -50, -100);
     this.scene.add(this.sunKeyLight2);
     this.sunKeyLight2.target.position.set(0, 0, 0);
     this.scene.add(this.sunKeyLight2.target);
@@ -498,7 +502,7 @@ export class ProceduralOrbit {
     this.scene.add(this.ambientLight);
 
     this.sunGlow = new THREE.Mesh(
-      new THREE.SphereGeometry(6, 32, 32),
+      new THREE.SphereGeometry(60, 32, 32),
       new THREE.MeshBasicMaterial({ color: 0xffe08a }),
     );
     this.scene.add(this.sunGlow);
@@ -669,6 +673,38 @@ export class ProceduralOrbit {
     const offsetRad = angleRad - this.sunTimeMs * this.sunOrbitSpeed;
     this.sunOrbitAngleDeg = offsetRad / DEG_TO_RAD;
   }
+
+  setLandRadius(totalRadius: number) {
+    if (this.landLayer) {
+      this.landLayer.setRadius(this.earthRadius, totalRadius - this.earthRadius);
+    }
+  }
+
+  getLandRadius() {
+    // Default is earthRadius + 0.6
+    return this.earthRadius + 0.6;
+  }
+
+  setCloud1Radius(radius: number) {
+    const initialRadius = this.earthRadius + 1.2;
+    const scale = radius / initialRadius;
+    this.cloud1.scale.set(scale, scale, scale);
+  }
+
+  getCloud1Radius() {
+    return (this.earthRadius + 1.2) * this.cloud1.scale.x;
+  }
+
+  setCloud2Radius(radius: number) {
+    const initialRadius = this.earthRadius + 1.5;
+    const scale = radius / initialRadius;
+    this.cloud2.scale.set(scale, scale, scale);
+  }
+
+  getCloud2Radius() {
+    return (this.earthRadius + 1.5) * this.cloud2.scale.x;
+  }
+
   buildConfigSnapshot() {
     return {
       camera: {
