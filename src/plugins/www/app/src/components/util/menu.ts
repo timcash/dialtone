@@ -1,46 +1,24 @@
 export class Menu {
-
-
+    private static instance: Menu;
     private toggle: HTMLButtonElement;
     private panel: HTMLDivElement;
-    private cleanupScroll: () => void;
 
 
+    private constructor() {
+        // Bind to existing static elements
+        const toggle = document.getElementById("global-menu-toggle") as HTMLButtonElement;
+        const panel = document.getElementById("global-menu-panel") as HTMLDivElement;
 
-    constructor(containerId: string, title = "Menu") {
-        // 1. Create Toggle Button
-        const controls = document.querySelector(".top-right-controls");
-        if (!controls) throw new Error("Could not find .top-right-controls");
-
-        this.toggle = document.createElement("button");
-        this.toggle.className = "menu-toggle";
-        this.toggle.type = "button";
-        this.toggle.setAttribute("aria-expanded", "false");
-        this.toggle.textContent = title;
-        // Prepend to put it before any existing toggles (though usually only one exists per section)
-        controls.prepend(this.toggle);
-
-        // 2. Create/Find Panel
-        let panel = document.getElementById(containerId) as HTMLDivElement | null;
-        if (!panel) {
-            // If not found, create it (backwards compatibility or new standard)
-            panel = document.createElement("div");
-            panel.id = containerId;
-            // Assume it should be appended to the app container or similar?
-            // For now, we expect it to exist in the HTML as per current pattern, 
-            // or we throw if strict. The current pattern is container.innerHTML = ... <div id="...">
-            // So we might just fail if it's not there yet.
-            // Let's assume it exists for now as it's usually part of the component mount.
-            console.warn(`Panel #${containerId} not found in DOM at Menu creation time.`);
+        if (!toggle || !panel) {
+            throw new Error("Global menu elements not found in DOM");
         }
-        this.panel = panel!;
-        this.panel.classList.add("menu-panel");
-        this.panel.hidden = true;
 
-        // 3. Setup Toggle Logic
+        this.toggle = toggle;
+        this.panel = panel;
+
+        // Setup Toggle Logic
         const setOpen = (open: boolean) => {
             this.panel.hidden = !open;
-            this.panel.style.display = open ? "grid" : "none";
             this.toggle.setAttribute("aria-expanded", String(open));
         };
 
@@ -50,18 +28,26 @@ export class Menu {
             setOpen(this.panel.hidden);
         });
 
-        // 4. Auto-close on scroll
+        // Auto-close on scroll
         const onWindowScroll = () => {
             if (!this.panel.hidden) setOpen(false);
         };
         window.addEventListener("scroll", onWindowScroll, { capture: true, passive: true });
-        this.cleanupScroll = () => {
-            window.removeEventListener("scroll", onWindowScroll, { capture: true } as any);
-        };
+
 
         // Default state
         setOpen(false);
+    }
 
+    public static getInstance(): Menu {
+        if (!Menu.instance) {
+            Menu.instance = new Menu();
+        }
+        return Menu.instance;
+    }
+
+    clear() {
+        this.panel.innerHTML = "";
     }
 
     addHeader(text: string) {
@@ -128,18 +114,13 @@ export class Menu {
         button.className = primary ? "menu-button menu-button-primary" : "menu-button";
         button.textContent = label;
         button.addEventListener("click", onClick);
-
-        // If not primary, maybe wrap in a row? Or just append? 
-        // Current design mixes rows and direct buttons. 
-        // Let's checking styling. Premium buttons usually full width or grouped.
-        // For now, append directly.
         this.panel.appendChild(button);
         return button;
     }
 
     addFile(label: string, onFile: (file: File) => void, accept = ".json,.geojson") {
         const row = document.createElement("div");
-        row.className = "menu-row";
+        row.className = "menu-row"; // Not really used for styling yet but consistency
 
         const input = document.createElement("input");
         input.type = "file";
@@ -150,8 +131,7 @@ export class Menu {
         button.type = "button";
         button.className = "menu-button menu-button-primary";
         button.textContent = label;
-        button.style.width = "100%"; // Fill row if inside row? Or just stand alone?
-        // In geotools it was a row with button.
+        // button.style.width = "100%"; // Let CSS handle it
 
         button.addEventListener("click", () => input.click());
         input.addEventListener("change", () => {
@@ -161,10 +141,7 @@ export class Menu {
             }
         });
 
-        // Maybe just append button directly if we want full width? 
-        // But we might want a label?
-        // Geotools had a "Data Source" header then the button.
-        this.panel.appendChild(button); // Direct append for full width
+        this.panel.appendChild(button);
         this.panel.appendChild(input);
     }
 
@@ -190,16 +167,5 @@ export class Menu {
             update: (text: string) => { value.textContent = text; }
         };
     }
-
-    setToggleVisible(visible: boolean) {
-        this.toggle.hidden = !visible;
-        this.toggle.style.display = visible ? "inline-block" : "none";
-    }
-
-    dispose() {
-        this.cleanupScroll();
-        this.toggle.remove();
-        // We don't remove the panel as it's often part of the mount HTML,
-        // but the component disposal usually clears the container anyway.
-    }
 }
+

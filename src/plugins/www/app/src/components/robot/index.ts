@@ -344,11 +344,8 @@ class RobotArmVisualization {
   cameraRadius = 12;
   cameraHeight = 1;
 
-  configPanel?: HTMLDivElement;
-  configToggle?: HTMLButtonElement;
-  configMenu?: { dispose: () => void; setToggleVisible: (v: boolean) => void };
+
   sliders: { slider: HTMLInputElement; valueEl: HTMLSpanElement }[] = [];
-  configCleanup?: () => void;
   private fpsCounter = new FpsCounter("robot");
 
   constructor(container: HTMLElement) {
@@ -372,7 +369,7 @@ class RobotArmVisualization {
     }
 
     this.initScene();
-    this.initConfigPanel();
+    // this.initConfigPanel(); // Menu is now setup on visibility
     this.resize();
     this.animate();
 
@@ -399,8 +396,8 @@ class RobotArmVisualization {
   dispose() {
     cancelAnimationFrame(this.frameId);
     this.resizeObserver?.disconnect();
+    this.resizeObserver?.disconnect();
     window.removeEventListener("resize", this.resize);
-    this.configCleanup?.();
     this.renderer.dispose();
     this.container.removeChild(this.renderer.domElement);
   }
@@ -580,14 +577,12 @@ class RobotArmVisualization {
     this.targetLine.geometry.attributes.position.needsUpdate = true;
   }
 
-  initConfigPanel() {
-    this.configMenu = setupRobotMenu(this);
-  }
+
 
   setVisible(visible: boolean) {
     VisibilityMixin.setVisible(this, visible, "robot");
-    if (this.configMenu) {
-      this.configMenu.setToggleVisible(visible);
+    if (visible) {
+      setupRobotMenu(this);
     }
     if (!visible) {
       this.fpsCounter.clear();
@@ -653,22 +648,14 @@ export function mountRobot(container: HTMLElement) {
   // Inject HTML
   container.innerHTML = `
   <div class="marketing-overlay" aria-label="Robot visualization marketing information">
-    <h2>Robotics begins with precision control</h2>
+    <h2>Robotic Control</h2>
     <p data-typing-subtitle></p>
     <a class="buy-button" href="https://buy.stripe.com/test_5kQaEXcagaAoaC62N20kE00" target="_blank"
       rel="noopener noreferrer">Get the Robot Kit</a>
   </div>
   `;
 
-  // Create and inject config toggle
-  const controls = document.querySelector('.top-right-controls');
-  const toggle = document.createElement('button');
-  toggle.id = 'robot-config-toggle';
-  toggle.className = 'earth-config-toggle';
-  toggle.type = 'button';
-  toggle.setAttribute('aria-expanded', 'false');
-  toggle.textContent = 'Config';
-  controls?.prepend(toggle);
+
 
   const subtitleEl = container.querySelector(
     "[data-typing-subtitle]"
@@ -684,7 +671,7 @@ export function mountRobot(container: HTMLElement) {
   return {
     dispose: () => {
       viz.dispose();
-      toggle.remove();
+
       stopTyping();
       container.innerHTML = '';
     },

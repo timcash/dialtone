@@ -1,8 +1,9 @@
 import { Menu } from "../util/menu";
 import { ProceduralOrbit } from "./index";
 
-export function setupEarthMenu(orbit: ProceduralOrbit) {
-    const menu = new Menu("earth-config-panel", "Menu");
+export function setupEarthMenu(orbit: ProceduralOrbit): void {
+    const menu = Menu.getInstance();
+    menu.clear();
 
     menu.addHeader("Rotation");
 
@@ -141,8 +142,5 @@ export function setupEarthMenu(orbit: ProceduralOrbit) {
         navigator.clipboard?.writeText(payload);
     }, true);
 
-    return {
-        dispose: () => menu.dispose(),
-        setToggleVisible: (visible: boolean) => menu.setToggleVisible(visible),
-    };
+
 }

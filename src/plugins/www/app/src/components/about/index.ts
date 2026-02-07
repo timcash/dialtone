@@ -428,60 +428,60 @@ export function mountAbout(container: HTMLElement) {
     viz.setGlideAccel(motionConfig.glideAccel);
   };
 
-  const menu = setupAboutMenu({
+  const options = {
     viz: {
-      setStepIntervalMs: (v) => {
+      setStepIntervalMs: (v: number) => {
         viz.setStepIntervalMs(v);
       },
-      setLightCount: (v) => {
+      setLightCount: (v: number) => {
         lightConfig.count = v;
         reset();
       },
-      setDwellSeconds: (v) => {
+      setDwellSeconds: (v: number) => {
         lightConfig.dwell = v;
         reset();
       },
-      setWanderDistance: (v) => {
+      setWanderDistance: (v: number) => {
         lightConfig.wander = v;
         reset();
       },
-      setSeed: (v) => {
+      setSeed: (v: number) => {
         lightConfig.seed = v;
         reset();
       },
-      setBrightness: (v) => {
+      setBrightness: (v: number) => {
         lightConfig.brightness = v;
         reset();
       },
-      setSparkIntervalSeconds: (v) => {
+      setSparkIntervalSeconds: (v: number) => {
         sparkConfig.intervalSeconds = v;
         reset();
       },
-      setSparkPauseMs: (v) => {
+      setSparkPauseMs: (v: number) => {
         sparkConfig.pauseMs = v;
         reset();
       },
-      setSparkDrainRatePerMs: (v) => {
+      setSparkDrainRatePerMs: (v: number) => {
         sparkConfig.drainRatePerMs = v;
         reset();
       },
-      setMaxPower: (v) => {
+      setMaxPower: (v: number) => {
         powerConfig.maxPower = v;
         reset();
       },
-      setPowerRegenRatePerSec: (v) => {
+      setPowerRegenRatePerSec: (v: number) => {
         powerConfig.regenPerSec = v;
         reset();
       },
-      setRestThreshold: (v) => {
+      setRestThreshold: (v: number) => {
         powerConfig.restThreshold = v;
         reset();
       },
-      setGlideSpeed: (v) => {
+      setGlideSpeed: (v: number) => {
         motionConfig.glideSpeed = v;
         reset();
       },
-      setGlideAccel: (v) => {
+      setGlideAccel: (v: number) => {
         motionConfig.glideAccel = v;
         reset();
       },
@@ -490,18 +490,24 @@ export function mountAbout(container: HTMLElement) {
     sparkConfig,
     powerConfig,
     motionConfig,
-  });
+  };
+
+  let cleanupMenu = () => { };
 
   return {
     dispose: () => {
       viz.dispose();
-      menu.dispose();
+      cleanupMenu();
       stopTyping();
       container.innerHTML = "";
     },
     setVisible: (visible: boolean) => {
       viz.setVisible(visible);
-      menu.setToggleVisible(visible);
+      if (visible) {
+        cleanupMenu = setupAboutMenu(options);
+      } else {
+        cleanupMenu();
+      }
     },
   };
 }

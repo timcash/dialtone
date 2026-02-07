@@ -30,8 +30,9 @@ export interface MathConfigHost {
     buildConfigSnapshot: () => any;
 }
 
-export function setupMathMenu(viz: MathConfigHost) {
-    const menu = new Menu("math-config-panel", "Menu");
+export function setupMathMenu(viz: MathConfigHost): void {
+    const menu = Menu.getInstance();
+    menu.clear();
 
     menu.addHeader("Camera");
     menu.addSlider("Radius", viz.cameraOrbitRadius, 8, 35, 0.5, (v) => (viz.cameraOrbitRadius = v));
@@ -66,8 +67,5 @@ export function setupMathMenu(viz: MathConfigHost) {
         navigator.clipboard?.writeText(payload);
     }, true);
 
-    return {
-        dispose: () => menu.dispose(),
-        setToggleVisible: (visible: boolean) => menu.setToggleVisible(visible),
-    };
+
 }

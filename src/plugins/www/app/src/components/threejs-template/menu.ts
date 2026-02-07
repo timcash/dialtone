@@ -5,8 +5,9 @@ type ThreeJsTemplateConfigOptions = {
     onSpinChange: (value: number) => void;
 };
 
-export function setupThreeJsTemplateMenu(options: ThreeJsTemplateConfigOptions) {
-    const menu = new Menu("threejs-template-config-panel", "Menu");
+export function setupThreeJsTemplateMenu(options: ThreeJsTemplateConfigOptions): void {
+    const menu = Menu.getInstance();
+    menu.clear();
 
     menu.addHeader("Settings");
 
@@ -20,8 +21,5 @@ export function setupThreeJsTemplateMenu(options: ThreeJsTemplateConfigOptions) 
         (v) => v.toFixed(2),
     );
 
-    return {
-        dispose: () => menu.dispose(),
-        setToggleVisible: (visible: boolean) => menu.setToggleVisible(visible),
-    };
+
 }

@@ -28,8 +28,9 @@ interface RobotVizLike {
     // So I should revert `robot/menu.ts` to match `robot/config.ts` structure.
 }
 
-export function setupRobotMenu(viz: RobotVizLike) {
-    const menu = new Menu("robot-config-panel", "Menu");
+export function setupRobotMenu(viz: RobotVizLike): void {
+    const menu = Menu.getInstance();
+    menu.clear();
 
     menu.addHeader("IK Mode");
     // Checkbox for Auto Track
@@ -96,8 +97,5 @@ export function setupRobotMenu(viz: RobotVizLike) {
     menu.addHeader("Gripper");
     menu.addSlider("Grip", 0.5, 0, 1, 0.01, (v) => viz.robotArm.setGrip(v), (v) => `${Math.round(v * 100)}%`);
 
-    return {
-        dispose: () => menu.dispose(),
-        setToggleVisible: (visible: boolean) => menu.setToggleVisible(visible),
-    };
+
 }

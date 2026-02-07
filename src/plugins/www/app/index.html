@@ -12,10 +12,11 @@
 
 <body>
   <div id="app">
+    <div id="global-menu-panel" class="menu-panel" hidden></div>
     <header class="header-title">
       <h1>dialtone.earth</h1>
       <p class="version header-fps">FPS --</p>
-      <p class="version">v1.0.45</p>
+      <p class="version">v1.0.46</p>
     </header>
 
     <nav class="main-nav">
@@ -77,7 +78,8 @@
     </section>
 
     <!-- Slide 7: Radio -->
-    <section id="s-radio" class="snap-slide" data-subtitle="open-source radio for small robots" aria-label="Radio section">
+    <section id="s-radio" class="snap-slide" data-subtitle="open-source radio for small robots"
+      aria-label="Radio section">
       <div id="radio-container"></div>
     </section>
 
@@ -92,12 +94,14 @@
     </section>
 
     <!-- Slide 10: WebGPU -->
-    <section id="s-webgpu-template" class="snap-slide" data-subtitle="simplest working WebGPU section" aria-label="WebGPU template section">
+    <section id="s-webgpu-template" class="snap-slide" data-subtitle="simplest working WebGPU section"
+      aria-label="WebGPU template section">
       <div id="webgpu-template-container"></div>
     </section>
 
     <!-- Slide 11: Template (simplest section example) -->
-    <section id="s-threejs-template" class="snap-slide" data-subtitle="simplest working Three.js section" aria-label="Three.js template section">
+    <section id="s-threejs-template" class="snap-slide" data-subtitle="simplest working Three.js section"
+      aria-label="Three.js template section">
       <div id="threejs-template-container"></div>
     </section>
 
@@ -111,6 +115,7 @@
           <path d="M9 18c-4.51 2-5-2-7-2" />
         </svg>
       </a>
+      <button id="global-menu-toggle" class="menu-toggle" type="button" aria-expanded="false">Menu</button>
     </div>
   </div>
   <script type="module" src="./src/main.ts"></script>

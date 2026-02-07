@@ -178,7 +178,7 @@ export class ProceduralOrbit {
     this.initLayers();
     this.loadLandLayer();
     this.initLights();
-    this.initConfigPanel();
+    // this.initConfigPanel(); // Menu setup on visibility
     this.resize();
     this.initCameraAnchor();
     this.updateCamera(this.cameraAnchor);
@@ -386,7 +386,7 @@ export class ProceduralOrbit {
   }
 
   private buildLandLayer(cells: string[], resolution: number) {
-    const landRadiusOffset = 0.03;
+    const landRadiusOffset = 0.06;
     const landLayer = new HexLayer(this.earthRadius, {
       radiusOffset: landRadiusOffset,
       count: cells.length,
@@ -511,16 +511,14 @@ export class ProceduralOrbit {
     this.scene.add(this.sunLight);
   }
 
-  configMenu?: { dispose: () => void; setToggleVisible: (v: boolean) => void };
 
-  initConfigPanel() {
-    this.configMenu = setupEarthMenu(this);
-  }
+
+
 
   setVisible(visible: boolean) {
     VisibilityMixin.setVisible(this, visible, "earth");
-    if (this.configMenu) {
-      this.configMenu.setToggleVisible(visible);
+    if (visible) {
+      setupEarthMenu(this);
     }
     if (!visible) {
       this.fpsCounter.clear();

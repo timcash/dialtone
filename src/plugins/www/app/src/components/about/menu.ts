@@ -50,12 +50,13 @@ type AboutConfigOptions = {
     motionConfig: AboutMotionConfig;
 };
 
-export function setupAboutMenu(options: AboutConfigOptions) {
+export function setupAboutMenu(options: AboutConfigOptions): () => void {
     const { viz, lightConfig, sparkConfig, powerConfig, motionConfig } = options;
     let presetSwapTimer: number | null = null;
     const presetSwapMs = 5000;
 
-    const menu = new Menu("about-config-panel", "Menu"); // "Menu" per user request, ID stays for compat if needed, or update ID
+    const menu = Menu.getInstance();
+    menu.clear();
 
     // Presets Data
     const lightPresets = [
@@ -179,14 +180,10 @@ export function setupAboutMenu(options: AboutConfigOptions) {
         viz.setWanderDistance(v);
     });
 
-    return {
-        dispose: () => {
-            menu.dispose();
-            if (presetSwapTimer !== null) {
-                window.clearInterval(presetSwapTimer);
-                presetSwapTimer = null;
-            }
-        },
-        setToggleVisible: (visible: boolean) => menu.setToggleVisible(visible),
+    return () => {
+        if (presetSwapTimer !== null) {
+            window.clearInterval(presetSwapTimer);
+            presetSwapTimer = null;
+        }
     };
 }

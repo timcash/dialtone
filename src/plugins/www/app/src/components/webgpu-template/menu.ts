@@ -5,8 +5,9 @@ type WebGpuTemplateConfigOptions = {
     onSpeedChange: (value: number) => void;
 };
 
-export function setupWebGpuTemplateMenu(options: WebGpuTemplateConfigOptions) {
-    const menu = new Menu("webgpu-template-config-panel", "Menu");
+export function setupWebGpuTemplateMenu(options: WebGpuTemplateConfigOptions): void {
+    const menu = Menu.getInstance();
+    menu.clear();
 
     menu.addHeader("Settings");
 
@@ -20,8 +21,5 @@ export function setupWebGpuTemplateMenu(options: WebGpuTemplateConfigOptions) {
         (v) => v.toFixed(1),
     );
 
-    return {
-        dispose: () => menu.dispose(),
-        setToggleVisible: (visible: boolean) => menu.setToggleVisible(visible),
-    };
+
 }
