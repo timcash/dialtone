@@ -66,7 +66,7 @@ class VisionVisualization {
     this.grid = new VisionGrid(NX, NY, NZ, this.rng);
 
     this.renderer.setClearColor(0x000000, 1);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(window.devicePixelRatio);
 
     const canvas = this.renderer.domElement;
     canvas.style.position = "absolute";
@@ -202,6 +202,7 @@ class VisionVisualization {
     this.renderer.setSize(width, height, false);
     this.composer?.setSize(width, height);
     if (this.bloomPass) this.bloomPass.setSize(width, height);
+    this.searchLights.setArcResolution(width * window.devicePixelRatio, height * window.devicePixelRatio);
   };
 
   dispose() {

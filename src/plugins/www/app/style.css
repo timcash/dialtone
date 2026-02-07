@@ -984,9 +984,9 @@ h2 {
   .marketing-overlay {
     width: 100%;
     /* full width on mobile */
-    padding: 0 2rem;
-    align-items: center;
-    text-align: center;
+    padding: 0 1.5rem;
+    align-items: flex-start;
+    text-align: left;
     gap: 1rem;
   }
 

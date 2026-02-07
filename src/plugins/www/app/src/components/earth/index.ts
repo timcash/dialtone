@@ -21,7 +21,6 @@ const TIME_SCALE = 1;
 // 1 full rotation / 30s while the section is visible.
 // (Animation pauses when you scroll off the section via VisibilityMixin.)
 // Note: rotation is applied as earthRotSpeed * deltaSeconds, where deltaSeconds already includes `timeScale`.
-const EARTH_ROT_PERIOD_SECONDS = 240;
 
 // ...
 
@@ -168,7 +167,7 @@ export class ProceduralOrbit {
   constructor(container: HTMLElement) {
     this.container = container;
     this.renderer.setClearColor(0x000000, 1);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.domElement.style.position = "absolute";
     this.renderer.domElement.style.top = "0";
     this.renderer.domElement.style.left = "0";
