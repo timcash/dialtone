@@ -115,6 +115,11 @@ export class AutoKV {
 
     this.keySwarm.on('connection', (socket, info) => {
       const peerKey = b4a.toString(info.publicKey, 'hex').slice(0, 12)
+
+      // Only handle if this socket is relevant to our keyTopic
+      const isRelevant = info.topics.some(t => b4a.equals(t, keyTopic))
+      if (!isRelevant) return
+
       console.log(`${this.prefix} [${this.localKey}] KeySwarm connection with ${peerKey}...`)
 
       // Initial handshake
@@ -123,7 +128,7 @@ export class AutoKV {
       socket.write(`TOPIC:${this.topicName}\nBASE_KEY:${keyHex}\nWRITER_KEY:${writerHex}\n`)
 
       let socketTopic = null
-      socket.on('data', (data) => {
+      const onData = (data) => {
         const lines = data.toString().split('\n')
         for (const line of lines) {
           if (line.startsWith('TOPIC:')) socketTopic = line.slice('TOPIC:'.length).trim()
@@ -136,11 +141,18 @@ export class AutoKV {
             }
           }
         }
-      })
+      }
+      socket.on('data', onData)
       socket.on('error', () => { })
+      socket.on('close', () => {
+        socket.removeListener('data', onData)
+      })
     })
 
-    this.keySwarm.join(keyTopic, { server: true, client: true })
+    const discovery = this.keySwarm.join(keyTopic, { server: true, client: true })
+    discovery.flushed().then(() => {
+      console.log(`${this.prefix} [${this.localKey}] KeySwarm topic joined and flushed.`)
+    })
     this.keyInterval = setInterval(broadcast, 5000)
     console.log(`${this.prefix} [${this.localKey}] Joined KeySwarm topic for ${this.topicName}`)
   }
