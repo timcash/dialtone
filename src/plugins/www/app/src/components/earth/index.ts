@@ -117,13 +117,11 @@ export class ProceduralOrbit {
   shaderTimeScale = 0.28;
   timeScale = TIME_SCALE;
   // Clouds: make them more visible by default.
+  // Clouds: make them more visible by default.
   cloudAmount = 1.0;
-  cloudOpacityOscAmp = 0.12;
-  cloudAmountOscAmp = 0.18;
-  cloudOscSpeed = 2.5;
 
   // Rotations
-  earthRotSpeed = (Math.PI * 2) / EARTH_ROT_PERIOD_SECONDS;
+  earthRotSpeed = (Math.PI * 2) / 120; // 120s period (faster)
   cloud1RotSpeed = (Math.PI * 2) / 240;
   cloud2RotSpeed = (Math.PI * 2) / 280;
   cloud1Opacity = 0.95;
@@ -547,20 +545,9 @@ export class ProceduralOrbit {
     this.lastFrameTime = now;
     const deltaSeconds = rawDelta * this.timeScale;
     const cloudTime = now * 0.001 * this.shaderTimeScale;
-    const osc = Math.sin(now * 0.001 * this.cloudOscSpeed);
-    const oscOffset = Math.cos(now * 0.001 * this.cloudOscSpeed * 0.9);
-    const cloudAmount = Math.max(
-      0,
-      Math.min(1, this.cloudAmount + osc * this.cloudAmountOscAmp),
-    );
-    const cloud1Opacity = Math.max(
-      0.5,
-      this.cloud1Opacity + oscOffset * this.cloudOpacityOscAmp,
-    );
-    const cloud2Opacity = Math.max(
-      0.5,
-      this.cloud2Opacity - oscOffset * this.cloudOpacityOscAmp,
-    );
+    const cloudAmount = this.cloudAmount;
+    const cloud1Opacity = this.cloud1Opacity;
+    const cloud2Opacity = this.cloud2Opacity;
 
     // Rotations
     this.earth.rotation.y += this.earthRotSpeed * deltaSeconds;

@@ -78,9 +78,9 @@ export function setupAboutMenu(options: AboutConfigOptions): () => void {
         { label: "Storm", intervalSeconds: 1.5, pauseMs: 700, drainRatePerMs: 0.0016 },
     ];
 
-    let lightPresetIndex = 1;
-    let motionPresetIndex = 1;
-    let sparkPresetIndex = 1;
+    let lightPresetIndex = 3; // Hot
+    let motionPresetIndex = 3; // Frenzy
+    let sparkPresetIndex = 3; // Storm
     let presetSwapEnabled = 0;
 
     // Sliders references for syncing

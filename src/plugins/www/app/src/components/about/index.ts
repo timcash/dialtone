@@ -374,25 +374,25 @@ export function mountAbout(container: HTMLElement) {
 
   const viz = new VisionVisualization(container);
   const lightConfig = {
-    count: 4,
-    dwell: 8,
-    wander: 8,
+    count: 6,      // Hot
+    dwell: 5,      // Frenzy
+    wander: 12,    // Frenzy
     seed: 4830,
-    brightness: 1.35,
+    brightness: 2.1, // Hot
   };
   const sparkConfig = {
-    intervalSeconds: 4,
-    pauseMs: 1200,
-    drainRatePerMs: 0.001,
+    intervalSeconds: 1.5, // Storm
+    pauseMs: 700,         // Storm
+    drainRatePerMs: 0.0016, // Storm
   };
   const powerConfig = {
-    maxPower: 5,
-    regenPerSec: 1,
-    restThreshold: 1,
+    maxPower: 7,       // Hot
+    regenPerSec: 1.8,  // Hot
+    restThreshold: 1.4, // Hot
   };
   const motionConfig = {
-    glideSpeed: 7,
-    glideAccel: 8,
+    glideSpeed: 12,   // Frenzy
+    glideAccel: 14,   // Frenzy
   };
   const lifeConfig = {
     stepsPerSecond: 4,
