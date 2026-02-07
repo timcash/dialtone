@@ -47,8 +47,11 @@ export class HexLayer {
     this.startAttr = geometry.getAttribute("aStart") as THREE.BufferAttribute;
   }
 
-  update(timeSeconds: number) {
+  update(timeSeconds: number, sunDir?: THREE.Vector3, sunColor?: THREE.Color) {
     this.material.uniforms.uTime.value = timeSeconds;
+    if (sunDir) this.material.uniforms.uSunDir.value.copy(sunDir);
+    if (sunColor) this.material.uniforms.uSunColor.value.copy(sunColor);
+
     if (!this.animate) return;
     let updated = false;
     const positions = this.positionAttr.array as Float32Array;
@@ -170,14 +173,19 @@ export class HexLayer {
         uTime: { value: 0 },
         uDuration: { value: durationSeconds },
         uOpacity: { value: settings.opacity ?? 0.7 },
+        uSunDir: { value: new THREE.Vector3(1, 1, 1).normalize() },
+        uSunColor: { value: new THREE.Color(1, 1, 1) },
+        uAmbientIntensity: { value: 0.2 },
       },
       vertexShader: `
         attribute float aStart;
         varying vec3 vColor;
         varying float vStart;
+        varying vec3 vNormal;
         void main() {
           vColor = color;
           vStart = aStart;
+          vNormal = normalize(position); // Spherical normal is just normalized position
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
@@ -186,15 +194,25 @@ export class HexLayer {
         uniform float uTime;
         uniform float uDuration;
         uniform float uOpacity;
+        uniform vec3 uSunDir;
+        uniform vec3 uSunColor;
+        uniform float uAmbientIntensity;
         varying vec3 vColor;
         varying float vStart;
+        varying vec3 vNormal;
         void main() {
           float age = uTime - vStart;
           float isActive = step(0.0, age) * step(age, uDuration);
           float fadeIn = smoothstep(0.0, 0.8, age);
           float fadeOut = 1.0 - smoothstep(uDuration - 0.8, uDuration, age);
           float alpha = isActive * fadeIn * fadeOut * uOpacity;
-          gl_FragColor = vec4(vColor, alpha);
+
+          // Lighting
+          float diff = max(dot(vNormal, uSunDir), 0.0);
+          vec3 light = uAmbientIntensity + diff * uSunColor;
+          vec3 finalColor = vColor * light;
+
+          gl_FragColor = vec4(finalColor, alpha);
         }
       `,
     });
