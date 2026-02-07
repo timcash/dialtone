@@ -112,7 +112,7 @@ export class ProceduralOrbit {
   shaderTimeScale = 0.28;
   timeScale = TIME_SCALE;
   // Clouds: make them more visible by default.
-  cloudAmount = 0.4;
+  cloudAmount = 1.0;
   cloudOpacityOscAmp = 0.12;
   cloudAmountOscAmp = 0.18;
   cloudOscSpeed = 2.5;
@@ -123,7 +123,7 @@ export class ProceduralOrbit {
   cloud2RotSpeed = (Math.PI * 2) / 24;
   cloud1Opacity = 0.95;
   cloud2Opacity = 0.90;
-  cloudBrightness = 1.25;
+  cloudBrightness = 5.0;
   cameraDistance = 23.5;
   cameraOrbit = 5.74;
   cameraYaw = 0.99;
