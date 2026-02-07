@@ -11,7 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"sort"
+
 	"strings"
 	"sync"
 	"time"
@@ -466,7 +466,7 @@ func RunWwwSmoke() error {
 	
 	os.WriteFile(smokeMdPath, []byte(strings.Join(smLines, "\n")), 0644)
 
-	if err := TileScreenshots(screenshotsDir, summaryPath); err == nil {
+	if err := TileScreenshots(screenshotsDir, summaryPath, sections); err == nil {
 		fmt.Printf("\n>> [WWW] Smoke COMPLETE")
 		fmt.Printf("\n>> [WWW] GALLERY: file:///%s", strings.ReplaceAll(galleryPath, "\\", "/"))
 		fmt.Printf("\n>> [WWW] SUMMARY: file:///%s\n", strings.ReplaceAll(summaryPath, "\\", "/"))
@@ -508,19 +508,16 @@ func getChromeWebSocketURLHeadless() (string, error) {
 	return wsURL, nil
 }
 
-func TileScreenshots(dir string, output string) error {
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-
+func TileScreenshots(dir string, output string, order []string) error {
 	var pngs []string
-	for _, f := range files {
-		if !f.IsDir() && strings.HasSuffix(f.Name(), ".png") && f.Name() != "summary.png" {
-			pngs = append(pngs, filepath.Join(dir, f.Name()))
+	for _, section := range order {
+		path := filepath.Join(dir, fmt.Sprintf("%s.png", section))
+		if _, err := os.Stat(path); err == nil {
+			pngs = append(pngs, path)
+		} else {
+			fmt.Printf(">> [WWW] Smoke: warning - missing screenshot for %s\n", section)
 		}
 	}
-	sort.Strings(pngs)
 
 	if len(pngs) == 0 {
 		return fmt.Errorf("no screenshots found to tile")
