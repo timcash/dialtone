@@ -1,6 +1,6 @@
 # WWW Plugin Smoke Test Report
 
-**Generated at:** Sat, 07 Feb 2026 14:49:04 PST
+**Generated at:** Sat, 07 Feb 2026 15:19:27 PST
 
 ## 1. Expected Errors (Proof of Life)
 
@@ -8,17 +8,6 @@
 |---|---|---|
 | error | "[PROOFOFLIFE] Intentional Browser Test Error" | ✅ CAPTURED |
 | error | [PROOFOFLIFE] Intentional Go Test Error | ✅ CAPTURED |
-| log | "[PROOFOFLIFE] 📸 SCREENSHOT STARTING: s-home" | ✅ CAPTURED |
-| log | "[PROOFOFLIFE] 📸 SCREENSHOT STARTING: s-about" | ✅ CAPTURED |
-| log | "[PROOFOFLIFE] 📸 SCREENSHOT STARTING: s-neural" | ✅ CAPTURED |
-| log | "[PROOFOFLIFE] 📸 SCREENSHOT STARTING: s-math" | ✅ CAPTURED |
-| log | "[PROOFOFLIFE] 📸 SCREENSHOT STARTING: s-radio" | ✅ CAPTURED |
-| log | "[PROOFOFLIFE] 📸 SCREENSHOT STARTING: s-geotools" | ✅ CAPTURED |
-| log | "[PROOFOFLIFE] 📸 SCREENSHOT STARTING: s-robot" | ✅ CAPTURED |
-| log | "[PROOFOFLIFE] 📸 SCREENSHOT STARTING: s-cad" | ✅ CAPTURED |
-| log | "[PROOFOFLIFE] 📸 SCREENSHOT STARTING: s-docs" | ✅ CAPTURED |
-| log | "[PROOFOFLIFE] 📸 SCREENSHOT STARTING: s-webgpu-template" | ✅ CAPTURED |
-| log | "[PROOFOFLIFE] 📸 SCREENSHOT STARTING: s-threejs-template" | ✅ CAPTURED |
 
 ## 2. Real Errors & Warnings
 
@@ -29,116 +18,6 @@
 Stack Trace:
   loadSection (http://127.0.0.1:5173/src/main.ts:130:10)
    (http://127.0.0.1:5173/src/main.ts:133:5)
-
-```
-
-### [log] s-home
-```
-"%c[main] 🔁 SWAP: #s-home" "color: #8b5cf6; font-weight: bold"
-
-Stack Trace:
-  loadSection (http://127.0.0.1:5173/src/main.ts:112:12)
-   (http://127.0.0.1:5173/src/main.ts:139:2)
-
-```
-
-### [log] s-about
-```
-"%c[main] 🔁 SWAP: #s-about" "color: #8b5cf6; font-weight: bold"
-
-Stack Trace:
-  loadSection (http://127.0.0.1:5173/src/main.ts:112:12)
-   (http://127.0.0.1:5173/src/main.ts:139:2)
-
-```
-
-### [log] s-neural
-```
-"%c[main] 🔁 SWAP: #s-neural" "color: #8b5cf6; font-weight: bold"
-
-Stack Trace:
-  loadSection (http://127.0.0.1:5173/src/main.ts:112:12)
-   (http://127.0.0.1:5173/src/main.ts:139:2)
-
-```
-
-### [log] s-math
-```
-"%c[main] 🔁 SWAP: #s-math" "color: #8b5cf6; font-weight: bold"
-
-Stack Trace:
-  loadSection (http://127.0.0.1:5173/src/main.ts:112:12)
-   (http://127.0.0.1:5173/src/main.ts:139:2)
-
-```
-
-### [log] s-cad
-```
-"%c[main] 🔁 SWAP: #s-cad" "color: #8b5cf6; font-weight: bold"
-
-Stack Trace:
-  loadSection (http://127.0.0.1:5173/src/main.ts:112:12)
-   (http://127.0.0.1:5173/src/main.ts:139:2)
-
-```
-
-### [log] s-webgpu-template
-```
-"%c[main] 🔁 SWAP: #s-webgpu-template" "color: #8b5cf6; font-weight: bold"
-
-Stack Trace:
-  loadSection (http://127.0.0.1:5173/src/main.ts:112:12)
-   (http://127.0.0.1:5173/src/main.ts:139:2)
-
-```
-
-### [log] s-robot
-```
-"%c[main] 🔁 SWAP: #s-robot" "color: #8b5cf6; font-weight: bold"
-
-Stack Trace:
-  loadSection (http://127.0.0.1:5173/src/main.ts:112:12)
-   (http://127.0.0.1:5173/src/main.ts:139:2)
-
-```
-
-### [log] s-radio
-```
-"%c[main] 🔁 SWAP: #s-radio" "color: #8b5cf6; font-weight: bold"
-
-Stack Trace:
-  loadSection (http://127.0.0.1:5173/src/main.ts:112:12)
-   (http://127.0.0.1:5173/src/main.ts:139:2)
-
-```
-
-### [log] s-geotools
-```
-"%c[main] 🔁 SWAP: #s-geotools" "color: #8b5cf6; font-weight: bold"
-
-Stack Trace:
-  loadSection (http://127.0.0.1:5173/src/main.ts:112:12)
-   (http://127.0.0.1:5173/src/main.ts:139:2)
-
-```
-
-### [log] s-docs
-```
-"%c[main] 🔁 SWAP: #s-docs" "color: #8b5cf6; font-weight: bold"
-
-Stack Trace:
-  loadSection (http://127.0.0.1:5173/src/main.ts:112:12)
-   (http://127.0.0.1:5173/src/main.ts:139:2)
-
-```
-
-### [log] s-threejs-template
-```
-"%c[main] 🔁 SWAP: #s-threejs-template" "color: #8b5cf6; font-weight: bold"
-
-Stack Trace:
-  loadSection (http://127.0.0.1:5173/src/main.ts:112:12)
-   (http://127.0.0.1:5173/src/main.ts:139:2)
 
 ```
 
