@@ -70,6 +70,15 @@ export function setupEarthMenu(orbit: ProceduralOrbit): void {
 
     menu.addHeader("Cloud Layer 1");
     menu.addSlider(
+        "Radius",
+        orbit.getCloud1Radius(),
+        50,
+        60,
+        0.01,
+        (v) => orbit.setCloud1Radius(v),
+        (v) => v.toFixed(2)
+    );
+    menu.addSlider(
         "Speed",
         orbit.cloud1RotSpeed * 100000,
         0,
@@ -90,6 +99,15 @@ export function setupEarthMenu(orbit: ProceduralOrbit): void {
 
     menu.addHeader("Cloud Layer 2");
     menu.addSlider(
+        "Radius",
+        orbit.getCloud2Radius(),
+        50,
+        60,
+        0.01,
+        (v) => orbit.setCloud2Radius(v),
+        (v) => v.toFixed(2)
+    );
+    menu.addSlider(
         "Speed",
         orbit.cloud2RotSpeed * 100000,
         0,
@@ -105,6 +123,17 @@ export function setupEarthMenu(orbit: ProceduralOrbit): void {
         1,
         0.01,
         (v) => (orbit.cloud2Opacity = v),
+        (v) => v.toFixed(2)
+    );
+
+    menu.addHeader("Land Layer");
+    menu.addSlider(
+        "Radius",
+        orbit.getLandRadius(),
+        50,
+        55,
+        0.01,
+        (v) => orbit.setLandRadius(v),
         (v) => v.toFixed(2)
     );
 

@@ -377,7 +377,7 @@ export function mountAbout(container: HTMLElement) {
     count: 4,
     dwell: 8,
     wander: 8,
-    seed: 1337,
+    seed: 4830,
     brightness: 1.35,
   };
   const sparkConfig = {

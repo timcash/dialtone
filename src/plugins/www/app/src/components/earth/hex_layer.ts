@@ -18,6 +18,7 @@ export type HexLayerSettings = {
 export class HexLayer {
   mesh: THREE.Mesh;
   material: THREE.ShaderMaterial;
+  private initialRadius: number;
   private radius: number;
   private durationSeconds: number;
   private resolution: number;
@@ -32,7 +33,8 @@ export class HexLayer {
   private startAttr!: THREE.BufferAttribute;
 
   constructor(baseRadius: number, settings: HexLayerSettings) {
-    this.radius = baseRadius + settings.radiusOffset;
+    this.initialRadius = baseRadius + settings.radiusOffset;
+    this.radius = this.initialRadius;
     this.durationSeconds = settings.durationSeconds;
     this.resolution = settings.resolution;
     this.animate = settings.animate ?? true;
@@ -74,6 +76,13 @@ export class HexLayer {
     }
   }
 
+  setRadius(baseRadius: number, radiusOffset: number) {
+    const newRadius = baseRadius + radiusOffset;
+    const scale = newRadius / this.initialRadius;
+    this.mesh.scale.set(scale, scale, scale);
+    this.radius = newRadius;
+  }
+
   private buildGeometry(radius: number, settings: HexLayerSettings) {
     const positions: number[] = [];
     const colors: number[] = [];
@@ -81,10 +90,10 @@ export class HexLayer {
     const palette = settings.palette.length
       ? settings.palette
       : [
-          new THREE.Color(0.7, 0.7, 0.72),
-          new THREE.Color(0.4, 0.4, 0.45),
-          new THREE.Color(0.1, 0.1, 0.12),
-        ];
+        new THREE.Color(0.7, 0.7, 0.72),
+        new THREE.Color(0.4, 0.4, 0.45),
+        new THREE.Color(0.1, 0.1, 0.12),
+      ];
     const cells = settings.cells?.length
       ? settings.cells
       : this.sampleHexCells(settings.count, settings.resolution);
