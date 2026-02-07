@@ -8,10 +8,6 @@ src/web_build/
 .vscode/
 .idea/
 
-# AI tools
-prompt.md
-!src/plugins/www/prompt.md
-
 # OS
 .DS_Store
 Thumbs.db
@@ -49,12 +45,6 @@ src/plugins/**/node_modules/
 src/plugins/**/swarm-metadata.duckdb
 src/plugins/**/metadata.json
 
-# Screenshots & Logs
-*.png
 *.log
-e2e_unified.log
-e2e_results.log
-e2e_unified.log
-dashboard_screenshot.png
 src/plugins/swarm/app/node_modules
 src/plugins/swarm/test/node_modules

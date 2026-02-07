@@ -12,6 +12,8 @@ If you cannot write a test case for a node, it does not belong in the DAG. The D
 ### 1. Layers (The "Why" and "When")
 Organize your nodes into strict horizontal layers. This enforces dependency discipline and shows what can be built in parallel.
 
+**Note on Labels & Colors**: The layers below (Foundation, Core, etc.) are a *recommendation*. You may define your own layers and assign colors differently depending on your context (e.g., "Frontend/Backend" or "Sim/Real"), provided you **include a Legend** that maps each color to its meaning.
+
 -   **Layer 1: Foundation** (Red)
     -   *What*: Config, Environment, Basic Setup.
     -   *Test*: Can I load the config? Is the DB reachable?
