@@ -622,7 +622,7 @@ export class ProceduralOrbit {
     (this.cloud2.material as THREE.ShaderMaterial).uniforms.uCloudAmount.value =
       cloudAmount;
 
-    this.hexLayers.forEach((l) => l.update(now * 0.001));
+    this.hexLayers.forEach((l) => l.update(now * 0.001, sDir, SUN_COLOR));
     this.atmosphereMaterial.uniforms.uSunDir.value.copy(sDir);
     (this.atmosphereMaterial.uniforms as any).uKeyDir2.value.copy(kDir2);
     this.sunAtmosphereMaterial.uniforms.uSunDir.value.copy(sDir);
