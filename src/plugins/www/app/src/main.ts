@@ -1,5 +1,5 @@
 import './../style.css';
-import { SectionManager } from './components/section';
+import { SectionManager } from './components/util/section';
 
 // Create section manager for lazy loading Three.js components
 const sections = new SectionManager({ debug: true });

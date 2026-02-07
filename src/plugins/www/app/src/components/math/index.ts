@@ -3,11 +3,12 @@ import glowVertexShader from "../../shaders/glow.vert.glsl?raw";
 import glowFragmentShader from "../../shaders/glow.frag.glsl?raw";
 import gridVertexShader from "../../shaders/grid.vert.glsl?raw";
 import gridFragmentShader from "../../shaders/grid.frag.glsl?raw";
-import { FpsCounter } from "../fps";
-import { GpuTimer } from "../gpu_timer";
-import { VisibilityMixin } from "../section";
-import { startTyping } from "../typing";
-import { setupMathConfig } from "./config";
+import { FpsCounter } from "../util/fps";
+import { GpuTimer } from "../util/gpu_timer";
+import { VisibilityMixin } from "../util/section";
+import { startTyping } from "../util/typing";
+import { setupMathMenu } from "./menu";
+
 
 
 const COLORS = {
@@ -78,10 +79,28 @@ class MathVisualization {
   middleOrbitSpeed = 0.0018;
   outerOrbitSpeed = 0.001;
 
+  // Camera Roll
+  cameraRoll = 0;
+  cameraRollSpeed = 0;
+
+  // Curve parameters
+  curveA = 1;
+  curveB = 1;
+  curveC = 1;
+  curveD = 1;
+  curveE = 1;
+  curveF = 1;
+
+  // Grid parameters
+  gridOpacity = 0.5;
+  gridOpacityOsc = 0.2;
+  gridOscSpeed = 0.5;
+
   // Config panel
   configPanel?: HTMLDivElement;
   configToggle?: HTMLButtonElement;
-  private setPanelOpen?: (open: boolean) => void;
+  setPanelOpen?: (open: boolean) => void;
+  configCleanup?: () => void;
   private fpsCounter = new FpsCounter("math");
 
   constructor(container: HTMLElement) {
@@ -124,6 +143,7 @@ class MathVisualization {
     cancelAnimationFrame(this.frameId);
     this.resizeObserver?.disconnect();
     window.removeEventListener("resize", this.resize);
+    this.configCleanup?.();
     this.renderer.dispose();
     this.container.removeChild(this.renderer.domElement);
   }
@@ -499,7 +519,7 @@ class MathVisualization {
   }
 
   initConfigPanel() {
-    setupMathConfig(this);
+    // Menu is initialized in mountMath
     return;
     /*
     const panel = document.getElementById(
@@ -769,7 +789,6 @@ export function mountMath(container: HTMLElement) {
         <h2>Mathematics powers autonomy</h2>
         <p data-typing-subtitle></p>
       </div>
-      <div id="math-config-panel" class="earth-config-panel" hidden></div>
     `;
 
   // Create and inject config toggle
@@ -793,13 +812,18 @@ export function mountMath(container: HTMLElement) {
   const stopTyping = startTyping(subtitleEl, subtitles);
 
   const viz = new MathVisualization(container);
+  const menu = setupMathMenu(viz);
+
   return {
     dispose: () => {
       viz.dispose();
-      toggle.remove();
+      menu.dispose();
       stopTyping();
-      container.innerHTML = '';
+      container.innerHTML = "";
     },
-    setVisible: (visible: boolean) => viz.setVisible(visible),
+    setVisible: (visible: boolean) => {
+      viz.setVisible(visible);
+      menu.setToggleVisible(visible);
+    },
   };
 }

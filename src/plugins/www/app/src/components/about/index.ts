@@ -2,12 +2,13 @@ import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
-import { FpsCounter } from "../fps";
-import { GpuTimer } from "../gpu_timer";
-import { VisibilityMixin } from "../section";
+import { FpsCounter } from "../util/fps";
+import { GpuTimer } from "../util/gpu_timer";
+import { VisibilityMixin } from "../util/section";
+import { startTyping } from "../util/typing";
 import { SearchLights } from "./search_lights";
-import { startTyping } from "../typing";
-import { setupAboutConfig } from "./config";
+import { setupAboutMenu } from "./menu";
+
 import { VisionGrid } from "./vision_grid";
 
 const NX = 1;
@@ -345,8 +346,8 @@ export function mountAbout(container: HTMLElement) {
       <h2 data-typing-title>DIALTONE</h2>
       <p data-typing-subtitle></p>
     </div>
-    <div id="about-config-panel" class="earth-config-panel" hidden></div>
   `;
+
 
   const subtitleEl = container.querySelector(
     "[data-typing-subtitle]"
@@ -411,8 +412,80 @@ export function mountAbout(container: HTMLElement) {
   viz.setGlideSpeed(motionConfig.glideSpeed);
   viz.setGlideAccel(motionConfig.glideAccel);
 
-  const config = setupAboutConfig({
-    viz,
+  const reset = () => {
+    viz.setLightCount(lightConfig.count);
+    viz.setDwellSeconds(lightConfig.dwell);
+    viz.setWanderDistance(lightConfig.wander);
+    viz.setSeed(lightConfig.seed);
+    viz.setBrightness(lightConfig.brightness);
+    viz.setSparkIntervalSeconds(sparkConfig.intervalSeconds);
+    viz.setSparkPauseMs(sparkConfig.pauseMs);
+    viz.setSparkDrainRatePerMs(sparkConfig.drainRatePerMs);
+    viz.setMaxPower(powerConfig.maxPower);
+    viz.setPowerRegenRatePerSec(powerConfig.regenPerSec);
+    viz.setRestThreshold(powerConfig.restThreshold);
+    viz.setGlideSpeed(motionConfig.glideSpeed);
+    viz.setGlideAccel(motionConfig.glideAccel);
+  };
+
+  const menu = setupAboutMenu({
+    viz: {
+      setStepIntervalMs: (v) => {
+        viz.setStepIntervalMs(v);
+      },
+      setLightCount: (v) => {
+        lightConfig.count = v;
+        reset();
+      },
+      setDwellSeconds: (v) => {
+        lightConfig.dwell = v;
+        reset();
+      },
+      setWanderDistance: (v) => {
+        lightConfig.wander = v;
+        reset();
+      },
+      setSeed: (v) => {
+        lightConfig.seed = v;
+        reset();
+      },
+      setBrightness: (v) => {
+        lightConfig.brightness = v;
+        reset();
+      },
+      setSparkIntervalSeconds: (v) => {
+        sparkConfig.intervalSeconds = v;
+        reset();
+      },
+      setSparkPauseMs: (v) => {
+        sparkConfig.pauseMs = v;
+        reset();
+      },
+      setSparkDrainRatePerMs: (v) => {
+        sparkConfig.drainRatePerMs = v;
+        reset();
+      },
+      setMaxPower: (v) => {
+        powerConfig.maxPower = v;
+        reset();
+      },
+      setPowerRegenRatePerSec: (v) => {
+        powerConfig.regenPerSec = v;
+        reset();
+      },
+      setRestThreshold: (v) => {
+        powerConfig.restThreshold = v;
+        reset();
+      },
+      setGlideSpeed: (v) => {
+        motionConfig.glideSpeed = v;
+        reset();
+      },
+      setGlideAccel: (v) => {
+        motionConfig.glideAccel = v;
+        reset();
+      },
+    },
     lightConfig,
     sparkConfig,
     powerConfig,
@@ -422,10 +495,13 @@ export function mountAbout(container: HTMLElement) {
   return {
     dispose: () => {
       viz.dispose();
-      config.dispose();
+      menu.dispose();
       stopTyping();
       container.innerHTML = "";
     },
-    setVisible: (visible: boolean) => viz.setVisible(visible),
+    setVisible: (visible: boolean) => {
+      viz.setVisible(visible);
+      menu.setToggleVisible(visible);
+    },
   };
 }

@@ -21,7 +21,15 @@ import (
 
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
+	stdruntime "runtime"
 )
+
+func getDialtoneCmd(args ...string) *exec.Cmd {
+	if stdruntime.GOOS == "windows" {
+		return exec.Command("powershell", append([]string{"-ExecutionPolicy", "Bypass", "-File", ".\\dialtone.ps1"}, args...)...)
+	}
+	return exec.Command("./dialtone.sh", args...)
+}
 
 func logInfo(format string, args ...interface{}) {
 	fmt.Printf("[www] "+format+"\n", args...)
@@ -240,16 +248,19 @@ func publishPrebuilt(webDir string, vercelPath string, vercelEnv []string, args 
 
 // RunWww handles 'www <subcommand>'
 func RunWww(args []string) {
-	// Check if vercel CLI is available
+	// Lazy-load Vercel CLI path
 	homeDir, _ := os.UserHomeDir()
-	vercelPath := filepath.Join(homeDir, ".dialtone_env", "node", "bin", "vercel")
-	if _, err := os.Stat(vercelPath); os.IsNotExist(err) {
-		// Fallback to searching in PATH
-		if p, err := exec.LookPath("vercel"); err == nil {
-			vercelPath = p
-		} else {
+	defaultVercelPath := filepath.Join(homeDir, ".dialtone_env", "node", "bin", "vercel")
+
+	getVercel := func() string {
+		if _, err := os.Stat(defaultVercelPath); os.IsNotExist(err) {
+			// Fallback to searching in PATH
+			if p, err := exec.LookPath("vercel"); err == nil {
+				return p
+			}
 			logFatal("Vercel CLI not found. Run 'dialtone install' to install dependencies.")
 		}
+		return defaultVercelPath
 	}
 
 	// Handle help explicitly
@@ -259,6 +270,7 @@ func RunWww(args []string) {
 		fmt.Println("  publish            Full deployment pipeline (version -> build -> deploy)")
 		fmt.Println("  build              Vite build (generates /dist)")
 		fmt.Println("  dev                Vite dev server (hot reload)")
+		fmt.Println("  lint               Run static analysis (tsc --noEmit)")
 		fmt.Println("  validate           Check live dialtone.earth version vs local pkg")
 		fmt.Println("  logs <id|url>      Fetch Vercel deployment logs")
 		fmt.Println("  domain             Alias production to dialtone.earth")
@@ -389,10 +401,10 @@ func RunWww(args []string) {
 		logFatal("Unknown 'radio' command. Use 'dialtone www help' for usage.")
 
 	case "publish":
-		publishPrebuilt(webDir, vercelPath, vercelEnv, args[1:])
+		publishPrebuilt(webDir, getVercel(), vercelEnv, args[1:])
 
 	case "publish-prebuilt":
-		publishPrebuilt(webDir, vercelPath, vercelEnv, args[1:])
+		publishPrebuilt(webDir, getVercel(), vercelEnv, args[1:])
 
 	case "logs":
 		for _, arg := range args[1:] {
@@ -406,7 +418,7 @@ func RunWww(args []string) {
 			logFatal("Usage: dialtone www logs <deployment-url-or-id>\n   Run 'dialtone www logs --help' for more info.")
 		}
 		vArgs := append([]string{"logs"}, args[1:]...)
-		cmd := exec.Command(vercelPath, vArgs...)
+		cmd := exec.Command(getVercel(), vArgs...)
 		cmd.Dir = webDir
 		cmd.Env = append(os.Environ(), vercelEnv...)
 		cmd.Stdout = os.Stdout
@@ -430,7 +442,7 @@ func RunWww(args []string) {
 		vArgs := []string{"alias", "set"}
 		vArgs = append(vArgs, args[1:]...)
 		vArgs = append(vArgs, "dialtone.earth")
-		cmd := exec.Command(vercelPath, vArgs...)
+		cmd := exec.Command(getVercel(), vArgs...)
 		cmd.Dir = webDir
 		cmd.Env = append(os.Environ(), vercelEnv...)
 		cmd.Stdout = os.Stdout
@@ -448,7 +460,7 @@ func RunWww(args []string) {
 				return
 			}
 		}
-		cmd := exec.Command(vercelPath, "login")
+		cmd := exec.Command(getVercel(), "login")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
@@ -480,6 +492,26 @@ func RunWww(args []string) {
 			logFatal("Tests failed: %v", err)
 		}
 
+	case "lint":
+		for _, arg := range args[1:] {
+			if arg == "--help" || arg == "-h" {
+				fmt.Println("Usage: dialtone www lint")
+				fmt.Println("\nRuns static analysis (TypeScript type-checking) on the codebase.")
+				return
+			}
+		}
+		// Run 'npm run lint'
+		logInfo("Running static analysis...")
+		ensureNpmDeps(webDir)
+		cmd := exec.Command("npm", "run", "lint")
+		cmd.Dir = webDir // Keep running in webDir for NPM
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			logFatal("Lint check failed: %v", err)
+		}
+
 	case "test":
 		for _, arg := range args[1:] {
 			if arg == "--help" || arg == "-h" {
@@ -494,7 +526,7 @@ func RunWww(args []string) {
 		}
 		if len(args) > 1 && args[1] == "cad" {
 			logInfo("Running headed CAD test...")
-			cmd := exec.Command("./dialtone.sh", "test", "plugin", "www-cad")
+			cmd := getDialtoneCmd("test", "plugin", "www-cad")
 			// Check for --live flag
 			for _, arg := range args[2:] {
 				if arg == "--live" {
@@ -511,7 +543,7 @@ func RunWww(args []string) {
 			return
 		}
 		logInfo("Running integration tests...")
-		cmd := exec.Command("./dialtone.sh", "test", "plugin", "www")
+		cmd := getDialtoneCmd("test", "plugin", "www")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
@@ -527,7 +559,7 @@ func RunWww(args []string) {
 			}
 		}
 		logInfo("Running smoke tests...")
-		cmd := exec.Command("./dialtone.sh", "test", "tags", "smoke")
+		cmd := getDialtoneCmd("test", "tags", "smoke")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
@@ -580,7 +612,7 @@ func RunWww(args []string) {
 		// Generic pass-through to vercel CLI
 		logInfo("Running: vercel %s %s", subcommand, strings.Join(args[1:], " "))
 		vArgs := append([]string{subcommand}, args[1:]...)
-		cmd := exec.Command(vercelPath, vArgs...)
+		cmd := exec.Command(getVercel(), vArgs...)
 		cmd.Dir = webDir
 		cmd.Env = append(os.Environ(), vercelEnv...)
 		cmd.Stdout = os.Stdout
@@ -603,11 +635,11 @@ func handleCadDemo(webDir string) {
 
 	// 2. Kill existing Dialtone Chrome instances
 	logInfo("Cleaning up Chrome processes...")
-	_ = exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
+	_ = getDialtoneCmd("chrome", "kill", "all").Run()
 
 	// 3. Start CAD Server (Background)
 	logInfo("Starting CAD Server...")
-	cadCmd := exec.Command("./dialtone.sh", "cad", "server")
+	cadCmd := getDialtoneCmd("cad", "server")
 	cadCmd.Stdout = os.Stdout
 	cadCmd.Stderr = os.Stderr
 	if err := cadCmd.Start(); err != nil {
@@ -658,7 +690,7 @@ func handleCadDemo(webDir string) {
 
 	// 5. Launch GPU-enabled Chrome
 	logInfo("Launching GPU-enabled Chrome...")
-	chromeCmd := exec.Command("./dialtone.sh", "chrome", "new", "http://127.0.0.1:5173/#s-cad", "--gpu")
+	chromeCmd := getDialtoneCmd("chrome", "new", "http://127.0.0.1:5173/#s-cad", "--gpu")
 	chromeCmd.Stdout = os.Stdout
 	chromeCmd.Stderr = os.Stderr
 	if err := chromeCmd.Run(); err != nil {
@@ -687,7 +719,7 @@ func handleWebgpuDemo(webDir string) {
 
 	// 2. Kill existing Dialtone Chrome instances
 	logInfo("Cleaning up Chrome processes...")
-	_ = exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
+	_ = getDialtoneCmd("chrome", "kill", "all").Run()
 
 	// 3. Start WWW Dev Server (Background)
 	logInfo("Starting WWW Dev Server...")
@@ -717,7 +749,7 @@ func handleWebgpuDemo(webDir string) {
 
 	// 5. Launch GPU-enabled Chrome on WebGPU section
 	logInfo("Launching GPU-enabled Chrome...")
-	chromeCmd := exec.Command("./dialtone.sh", "chrome", "new", "http://127.0.0.1:5173/#s-webgpu-template", "--gpu")
+	chromeCmd := getDialtoneCmd("chrome", "new", "http://127.0.0.1:5173/#s-webgpu-template", "--gpu")
 	chromeCmd.Stdout = os.Stdout
 	chromeCmd.Stderr = os.Stderr
 	if err := chromeCmd.Run(); err != nil {
@@ -745,7 +777,7 @@ func handleAboutDemo(webDir string) {
 
 	// 2. Kill existing Dialtone Chrome instances
 	logInfo("Cleaning up Chrome processes...")
-	_ = exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
+	_ = getDialtoneCmd("chrome", "kill", "all").Run()
 
 	// 3. Start WWW Dev Server with piped output to detect port (same pattern as earth demo)
 	logInfo("Starting WWW Dev Server...")
@@ -809,7 +841,7 @@ func handleAboutDemo(webDir string) {
 	// 5. Launch Chrome straight on About section
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d/#s-about", port)
 	logInfo("Launching Chrome on About section...")
-	chromeCmd := exec.Command("./dialtone.sh", "chrome", "new", baseURL, "--gpu")
+	chromeCmd := getDialtoneCmd("chrome", "new", baseURL, "--gpu")
 	chromeCmd.Stdout = os.Stdout
 	chromeCmd.Stderr = os.Stderr
 	if err := chromeCmd.Run(); err != nil {
@@ -836,7 +868,7 @@ func handleRadioDemo(webDir string) {
 
 	// 2. Kill existing Dialtone Chrome instances
 	logInfo("Cleaning up Chrome processes...")
-	_ = exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
+	_ = getDialtoneCmd("chrome", "kill", "all").Run()
 
 	// 3. Start WWW Dev Server with piped output to detect port (same pattern as earth demo)
 	logInfo("Starting WWW Dev Server...")
@@ -900,7 +932,7 @@ func handleRadioDemo(webDir string) {
 	// 5. Launch Chrome straight on Radio section (like earth #s-home, cad #s-cad)
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d/#s-radio", port)
 	logInfo("Launching Chrome on Radio section...")
-	chromeCmd := exec.Command("./dialtone.sh", "chrome", "new", baseURL, "--gpu")
+	chromeCmd := getDialtoneCmd("chrome", "new", baseURL, "--gpu")
 	chromeCmd.Stdout = os.Stdout
 	chromeCmd.Stderr = os.Stderr
 	if err := chromeCmd.Run(); err != nil {
@@ -929,7 +961,7 @@ func handleWebgpuDebug(webDir string) {
 
 	// 2. Kill existing Dialtone Chrome instances
 	logInfo("Cleaning up Chrome processes...")
-	_ = exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
+	_ = getDialtoneCmd("chrome", "kill", "all").Run()
 
 	// 3. Start WWW Dev Server (Background)
 	logInfo("Starting WWW Dev Server...")
