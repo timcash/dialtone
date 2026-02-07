@@ -121,19 +121,48 @@ sections.register('s-threejs-template', {
 // Start observing visibility and eagerly load first section
 sections.observe();
 
-// If URL has a section hash (e.g. from demo: #s-radio), scroll there and load that section first
+// Initial load
 const initialHash = window.location.hash.slice(1);
-if (initialHash && document.getElementById(initialHash)?.classList.contains('snap-slide')) {
-    sections.eagerLoad(initialHash);
-    const section = document.getElementById(initialHash);
-    if (section) {
-        requestAnimationFrame(() => {
-            section.scrollIntoView({ behavior: 'auto', block: 'start' });
-        });
+let isProgrammaticScroll = false;
+let programmaticScrollTimeout: number | null = null;
+
+const loadSection = (id: string, smooth = false) => {
+    console.log(`%c[main] 🧭 loadSection request: #${id} (smooth: ${smooth}, isProgrammatic: ${isProgrammaticScroll})`, "color: #fb923c");
+    if (id && document.getElementById(id)?.classList.contains('snap-slide')) {
+        console.log(`%c[main] 🔁 SWAP: #${id}`, "color: #8b5cf6; font-weight: bold");
+        sections.eagerLoad(id);
+        const el = document.getElementById(id);
+        if (el) {
+            console.log(`%c[main] 🎯 EXECUTE SCROLL to #${id}`, "color: #f97316; font-weight: bold");
+            isProgrammaticScroll = true;
+            if (programmaticScrollTimeout) clearTimeout(programmaticScrollTimeout);
+
+            requestAnimationFrame(() => {
+                el.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' });
+                // Reset flag after animation/scroll settles
+                programmaticScrollTimeout = window.setTimeout(() => {
+                    console.log(`%c[main] ✅ Programmatic scroll SETTLED for #${id}`, "color: #10b981");
+                    isProgrammaticScroll = false;
+                    programmaticScrollTimeout = null;
+                }, 3000); // Increased timeout for stability (covers smoke test wait)
+            });
+        }
+        return true;
     }
-} else {
+    console.warn(`[main] ❌ loadSection failed: #${id} not found or not a slide`);
+    return false;
+};
+
+if (!loadSection(initialHash)) {
     sections.eagerLoad('s-home');
 }
+
+// Handle hash changes for SPA-style navigation
+window.addEventListener('hashchange', () => {
+    const hash = window.location.hash.slice(1);
+    console.log(`[main] hashchange event: ${hash}`);
+    loadSection(hash, true);
+});
 
 const slides = document.querySelectorAll('.snap-slide[data-subtitle]');
 
@@ -141,22 +170,32 @@ const slides = document.querySelectorAll('.snap-slide[data-subtitle]');
 const allSlides = document.querySelectorAll('.snap-slide');
 const hashObserver = new IntersectionObserver(
     (entries) => {
+        if (isProgrammaticScroll) {
+            console.log(`%c[main] 🙈 Observer IGNORING (programmatic scroll active)`, "color: #94a3b8");
+            return;
+        }
         let best: { id: string; ratio: number } | null = null;
         for (const entry of entries) {
             if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
                 const id = (entry.target as HTMLElement).id;
+                console.log(`[main] 👁️  Observer intersection: #${id} (${(entry.intersectionRatio * 100).toFixed(0)}%)`);
                 if (id && (!best || entry.intersectionRatio > best.ratio)) {
                     best = { id, ratio: entry.intersectionRatio };
                 }
             }
         }
         if (best && location.hash.slice(1) !== best.id) {
+            console.log(`%c[main] 🔃 Observer UPDATING HASH to #${best.id}`, "color: #8b5cf6");
             history.replaceState(null, '', '#' + best.id);
         }
     },
     { threshold: [0.5, 0.75, 1] }
 );
-allSlides.forEach((el) => hashObserver.observe(el));
+
+// Delay starting the observer slightly to let initial scroll settle
+setTimeout(() => {
+    allSlides.forEach((el) => hashObserver.observe(el));
+}, 1000);
 
 // Marketing fade-in on section entry
 const marketingObserver = new IntersectionObserver((entries) => {
