@@ -15,7 +15,7 @@ import { setupEarthMenu } from "./menu";
 
 const DEG_TO_RAD = Math.PI / 180;
 const TIME_SCALE = 1;
-const SUN_ORBIT_PERIOD_MS = 5000;
+
 // Human-scale axial rotation:
 // Base axial rotation period at timeScale=1:
 // 1 full rotation / 30s while the section is visible.
@@ -124,9 +124,9 @@ export class ProceduralOrbit {
   cloud1Opacity = 0.95;
   cloud2Opacity = 0.90;
   cloudBrightness = 1.25;
-  cameraDistance = 60.0;
-  cameraOrbit = 2.45;
-  cameraYaw = 0.8;
+  cameraDistance = 23.5;
+  cameraOrbit = 5.74;
+  cameraYaw = 0.99;
   cameraAnchor = new THREE.Vector3(0, 0, 0);
 
   // Lights
@@ -250,6 +250,7 @@ export class ProceduralOrbit {
       geo(this.earthRadius + 1.2, cloudSegments),
       cloud1Mat,
     );
+    this.cloud1.renderOrder = 2;
     this.scene.add(this.cloud1);
 
     const cloud2Mat = this.createCloudMaterial(0.1, this.cloud2Opacity);
@@ -258,6 +259,7 @@ export class ProceduralOrbit {
       geo(this.earthRadius + 1.5, cloudSegments),
       cloud2Mat,
     );
+    this.cloud2.renderOrder = 2;
     this.scene.add(this.cloud2);
 
     // Reduced cloud layers for performance (2 layers instead of 4)
@@ -721,7 +723,7 @@ export function mountEarth(container: HTMLElement) {
   // Inject HTML
   container.innerHTML = `
       <div class="marketing-overlay" aria-label="Unified Networks marketing information">
-        <h2>Now is the time to learn and build</h2>
+        <h2>Global Virtual Library</h2>
         <p data-typing-subtitle></p>
       </div>
     `;
