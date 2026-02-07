@@ -240,33 +240,9 @@ func verifyDashboard(ctx context.Context) error {
 }
 
 func runPearUnitTests(appDir, pearBin string, env []string) error {
-	if err := runPearTest(appDir, pearBin, env, "kv"); err != nil {
-		return fmt.Errorf("kv test failed: %v", err)
-	}
-
-	fmt.Println(">> [swarm] Running multi-peer test (peer-a, peer-b)...")
-	cmdA := exec.Command(pearBin, "run", "./test.js", "peer-a", "test-topic")
-	cmdA.Dir = appDir
-	cmdA.Stdout = os.Stdout
-	cmdA.Stderr = os.Stderr
-	cmdA.Env = env
-
-	cmdB := exec.Command(pearBin, "run", "./test.js", "peer-b", "test-topic")
-	cmdB.Dir = appDir
-	cmdB.Stdout = os.Stdout
-	cmdB.Stderr = os.Stderr
-	cmdB.Env = env
-
-	errA := cmdA.Start()
-	errB := cmdB.Start()
-	if errA != nil || errB != nil {
-		return fmt.Errorf("failed to start test processes: %v, %v", errA, errB)
-	}
-
-	errA = cmdA.Wait()
-	errB = cmdB.Wait()
-	if errA != nil || errB != nil {
-		return fmt.Errorf("one or more peers failed to complete test")
+	fmt.Println(">> [swarm] Running Pear lifecycle tests (app/test.js lifecycle)...")
+	if err := runPearTest(appDir, pearBin, env, "lifecycle"); err != nil {
+		return fmt.Errorf("lifecycle test failed: %v", err)
 	}
 
 	fmt.Println(">> [swarm] Pear unit tests complete.")
