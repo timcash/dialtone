@@ -13,7 +13,9 @@
 - **Objective**: Ensure clouds are visible above the land, but allowing land to be seen through gaps.
 - **Changes**:
     - **Cloud Layers**: Moved to `1.2` (Cloud 1) and `1.5` (Cloud 2) above surface (Land is `0.6`).
-    - **Transparency**: Disabled `depthWrite` in cloud material to prevent occlusion of the land layer behind transparent parts of clouds.
+    - **Transparency Technique**:
+        - **Problem**: Standard transparency (`transparent: true`) usually defaults to `depthWrite: true`. This causes the cloud mesh to write to the depth buffer. If a cloud pixel renders (even with low opacity), it "claims" that Z-depth. When the land layer (located behind the cloud) attempts to render, the GPU checks the depth buffer, sees the cloud is closer, and discards the land pixel—making the land disappear/invisible behind the cloud layer, even where the cloud should be transparent.
+        - **Solution**: Set `depthWrite: false` on the cloud material. The clouds still render their color and contribute to the scene, but they do *not* update the depth buffer. This allows the land layer (which is opaque or handled separately) to render "behind" the clouds without being culled by the Z-test.
     - **Opacity**: Increased to `0.95` (Cloud 1) and `0.90` (Cloud 2) to provide solid occlusion where clouds exist.
 
 ### 3. Visual Refinements
