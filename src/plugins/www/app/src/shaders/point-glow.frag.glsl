@@ -8,15 +8,15 @@ void main() {
 
     if (dist > 0.5) discard;
 
-    // Soft glow falloff
+    // Sharper glow falloff
     float strength = 1.0 - (dist * 2.0);
-    strength = pow(strength, 1.5);
+    strength = pow(strength, 3.0);
 
     // Pulse effect (very subtle)
     float pulse = 0.5 + 0.1 * sin(uTime * 1.5);
     
-    // Final alpha (extremely low for additive blending)
-    float alpha = strength * pulse * 0.05;
+    // Final alpha (increased for better visibility)
+    float alpha = strength * pulse * 0.15;
 
     gl_FragColor = vec4(uColor, alpha);
 }

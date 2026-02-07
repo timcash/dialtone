@@ -43,7 +43,7 @@ class GeoToolsVisualization {
     this.container = container;
 
     this.renderer.setClearColor(0x0b0d14, 1);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(window.devicePixelRatio);
 
     const canvas = this.renderer.domElement;
     canvas.style.position = "absolute";
@@ -62,10 +62,14 @@ class GeoToolsVisualization {
     this.camera.position.set(0, 0, 4);
     this.camera.lookAt(0, 0, 0);
 
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-    this.keyLight = new THREE.DirectionalLight(0xffffff, 0.9);
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.6)); // Increased from 0.4
+    this.keyLight = new THREE.DirectionalLight(0xffffff, 1.0); // Increased from 0.9
     this.keyLight.position.set(2, 2, 2);
     this.scene.add(this.keyLight);
+
+    const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    sunLight.position.set(-2, 1, -2);
+    this.scene.add(sunLight);
 
     this.resize();
     this.animate();
@@ -206,9 +210,10 @@ class GeoToolsVisualization {
 
     const material = new THREE.ShaderMaterial({
       uniforms: {
-        uColor: { value: new THREE.Color(0x666666) }, // Dimmed from white
+        uColor: { value: new THREE.Color(0xeeeeee) }, // Brighter (off-white)
         uSize: { value: 0.6 }, // Ultra fine
         uTime: { value: 0 },
+        uPixelRatio: { value: this.renderer.getPixelRatio() },
       },
       vertexShader: pointGlowVert,
       fragmentShader: pointGlowFrag,
@@ -241,6 +246,7 @@ class GeoToolsVisualization {
         uColor: { value: new THREE.Color(0x4cff9a) },
         uSize: { value: 1.2 }, // Minimum size
         uTime: { value: 0 },
+        uPixelRatio: { value: this.renderer.getPixelRatio() },
       },
       vertexShader: pointGlowVert,
       fragmentShader: pointGlowFrag,

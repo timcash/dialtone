@@ -20,6 +20,12 @@ import (
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 	stdruntime "runtime"
+
+	"image"
+	"image/draw"
+	_ "image/jpeg"
+	"image/png"
+	"sort"
 )
 
 func getDialtoneCmd(args ...string) *exec.Cmd {
@@ -121,21 +127,16 @@ func RunWwwSmoke() error {
 		}
 	})
 
-	sections := []string{
-		"s-home",
-		"s-robot",
-		"s-neural",
-		"s-math",
-		"s-cad",
-		"s-about",
-		"s-radio",
-		"s-geotools",
-		"s-docs",
-		"s-webgpu-template",
-		"s-threejs-template",
+	base := "http://127.0.0.1:5173"
+	var sections []string
+	if err := chromedp.Run(ctx,
+		chromedp.Navigate(base),
+		chromedp.Sleep(1*time.Second),
+		chromedp.Evaluate(`Array.from(document.querySelectorAll('section[id^="s-"]')).map(el => el.id)`, &sections),
+	); err != nil {
+		return fmt.Errorf("failed to fetch section IDs: %v", err)
 	}
 
-	base := "http://127.0.0.1:5173"
 	for _, section := range sections {
 		mu.Lock()
 		currentSection = section
@@ -143,11 +144,24 @@ func RunWwwSmoke() error {
 		mu.Unlock()
 
 		fmt.Printf(">> [WWW] Smoke: navigate #%s\n", section)
+		var buf []byte
 		if err := chromedp.Run(ctx,
 			chromedp.Navigate(fmt.Sprintf("%s/#%s", base, section)),
-			chromedp.Sleep(500*time.Millisecond),
+			chromedp.Sleep(800*time.Millisecond), // Slightly longer wait for rendering
+			chromedp.FullScreenshot(&buf, 90),
 		); err != nil {
 			return fmt.Errorf("navigate %s failed: %v", section, err)
+		}
+
+		if len(buf) > 0 {
+			screenshotsDir := filepath.Join(cwd, "src", "plugins", "www", "screenshots")
+			os.MkdirAll(screenshotsDir, 0755)
+			screenshotPath := filepath.Join(screenshotsDir, fmt.Sprintf("%s.png", section))
+			if err := os.WriteFile(screenshotPath, buf, 0644); err != nil {
+				fmt.Printf(">> [WWW] Smoke: failed to save screenshot for %s: %v\n", section, err)
+			} else {
+				fmt.Printf(">> [WWW] Smoke: saved screenshot to %s\n", screenshotPath)
+			}
 		}
 
 		mu.Lock()
@@ -178,8 +192,94 @@ func RunWwwSmoke() error {
 	if startedDev {
 		fmt.Println(">> [WWW] Smoke complete, stopping dev server.")
 	}
+
+	screenshotsDir := filepath.Join(cwd, "src", "plugins", "www", "screenshots")
+	summaryPath := filepath.Join(screenshotsDir, "summary.png")
+	if err := TileScreenshots(screenshotsDir, summaryPath); err != nil {
+		fmt.Printf(">> [WWW] Smoke: tiling failed: %v\n", err)
+	}
+
 	fmt.Println(">> [WWW] Smoke: pass")
 	return nil
+}
+
+func TileScreenshots(dir string, output string) error {
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+
+	var pngs []string
+	for _, f := range files {
+		if !f.IsDir() && strings.HasSuffix(f.Name(), ".png") && f.Name() != "summary.png" {
+			pngs = append(pngs, filepath.Join(dir, f.Name()))
+		}
+	}
+	sort.Strings(pngs)
+
+	if len(pngs) == 0 {
+		return fmt.Errorf("no screenshots found to tile")
+	}
+
+	// Limit to 9 for 3x3
+	if len(pngs) > 9 {
+		pngs = pngs[:9]
+	}
+
+	const (
+		tileW = 400
+		tileH = 300 // typical aspect ratio
+		grid  = 3
+	)
+
+	dst := image.NewRGBA(image.Rect(0, 0, tileW*grid, tileH*grid))
+	draw.Draw(dst, dst.Bounds(), &image.Uniform{image.Black}, image.Point{}, draw.Src)
+
+	for i, path := range pngs {
+		f, err := os.Open(path)
+		if err != nil {
+			fmt.Printf(">> [WWW] Smoke: failed to open %s: %v\n", path, err)
+			continue
+		}
+		img, _, err := image.Decode(f)
+		f.Close()
+		if err != nil {
+			fmt.Printf(">> [WWW] Smoke: failed to decode %s: %v\n", path, err)
+			continue
+		}
+
+		x := (i % grid) * tileW
+		y := (i / grid) * tileH
+		rect := image.Rect(x, y, x+tileW, y+tileH)
+
+		// Simple nearest neighbor "resize" by drawing into the grid slot
+		// Note: draw.Draw doesn't scale. We need a scaling draw call.
+		// Since we don't have x/image/draw, we'll implement a tiny scaler.
+		drawTile(dst, rect, img)
+	}
+
+	out, err := os.Create(output)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	return png.Encode(out, dst)
+}
+
+func drawTile(dst *image.RGBA, rect image.Rectangle, src image.Image) {
+	sw := src.Bounds().Dx()
+	sh := src.Bounds().Dy()
+	dw := rect.Dx()
+	dh := rect.Dy()
+
+	for y := 0; y < dh; y++ {
+		for x := 0; x < dw; x++ {
+			sx := (x * sw) / dw
+			sy := (y * sh) / dh
+			dst.Set(rect.Min.X+x, rect.Min.Y+y, src.At(sx, sy))
+		}
+	}
 }
 
 func formatConsoleArgs(args []*runtime.RemoteObject) string {
