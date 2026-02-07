@@ -405,14 +405,14 @@ export function mountNeuralNetwork(container: HTMLElement) {
 
   const viz = new NeuralNetworkVisualization(container);
 
-  const menu = setupNnMenu({
+  const options = {
     learningRate: 0.01,
     batchSize: 32,
     hiddenLayers: 2,
     neuronsPerLayer: 64,
     activation: "relu",
     optimizer: "adam",
-    onConfigChange: (cfg) => {
+    onConfigChange: (cfg: any) => {
       // Apply config changes
       // In a real app we'd update the network structure here
       console.log("NN Config changed:", cfg);
@@ -427,18 +427,19 @@ export function mountNeuralNetwork(container: HTMLElement) {
       viz.isPaused = !viz.isPaused;
     },
     isPaused: viz.isPaused,
-  });
+  };
 
   return {
     dispose: () => {
       viz.dispose();
-      menu.dispose();
       stopTyping();
       container.innerHTML = '';
     },
     setVisible: (visible: boolean) => {
       viz.setVisible(visible);
-      menu.setToggleVisible(visible);
+      if (visible) {
+        setupNnMenu(options);
+      }
     },
   };
 }

@@ -23,8 +23,9 @@ export type NnConfig = {
     optimizer: string;
 };
 
-export function setupNnMenu(options: NnConfigOptions) {
-    const menu = new Menu("nn-config-panel", "Menu");
+export function setupNnMenu(options: NnConfigOptions): void {
+    const menu = Menu.getInstance();
+    menu.clear();
     const config: NnConfig = {
         learningRate: options.learningRate,
         batchSize: options.batchSize,
@@ -80,8 +81,5 @@ export function setupNnMenu(options: NnConfigOptions) {
 
     menu.addButton("Reset Weights", options.onReset);
 
-    return {
-        dispose: () => menu.dispose(),
-        setToggleVisible: (visible: boolean) => menu.setToggleVisible(visible),
-    };
+
 }

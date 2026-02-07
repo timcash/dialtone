@@ -322,15 +322,15 @@ export function mountCAD(container: HTMLElement) {
   // @ts-ignore
   window.cadViewer = viewer;
 
-  const menu = setupCadMenu({
+  const options = {
     params: viewer.params,
     translationX: viewer.translationX,
-    onParamChange: (key, value) => {
+    onParamChange: (key: any, value: any) => {
       // @ts-ignore
       viewer.params[key] = value;
       viewer.debouncedUpdate();
     },
-    onTranslationChange: (value) => {
+    onTranslationChange: (value: any) => {
       viewer.translationX = value;
       if (viewer.gearGroup) {
         viewer.gearGroup.position.x = viewer.translationX;
@@ -339,20 +339,21 @@ export function mountCAD(container: HTMLElement) {
     onDownloadStl: () => {
       viewer.downloadSTL();
     },
-  });
+  };
 
   return {
     dispose: () => {
       // @ts-ignore
       delete window.cadViewer;
       viewer.dispose();
-      menu.dispose();
       stopTyping();
       container.innerHTML = "";
     },
     setVisible: (visible: boolean) => {
       viewer.setVisible(visible);
-      menu.setToggleVisible(visible);
+      if (visible) {
+        setupCadMenu(options);
+      }
     },
   };
 }

@@ -15,8 +15,9 @@ type CadConfigOptions = {
     onDownloadStl: () => void;
 };
 
-export function setupCadMenu(options: CadConfigOptions) {
-    const menu = new Menu("cad-config-panel", "Menu"); // "Menu" per user request
+export function setupCadMenu(options: CadConfigOptions): void {
+    const menu = Menu.getInstance();
+    menu.clear();
 
     menu.addHeader("Gear Parameters");
 
@@ -46,8 +47,5 @@ export function setupCadMenu(options: CadConfigOptions) {
     // For now, omitting the GitHub link as it's not core config, or I can add it as a button link?
     // I'll stick to core functionality.
 
-    return {
-        dispose: () => menu.dispose(),
-        setToggleVisible: (visible: boolean) => menu.setToggleVisible(visible),
-    };
+
 }

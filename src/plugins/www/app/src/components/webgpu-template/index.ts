@@ -522,10 +522,7 @@ export async function mountWebgpuTemplate(container: HTMLElement) {
   `;
 
   // Initial menu (before async GPU init)
-  let menu = setupWebGpuTemplateMenu({
-    speed: 1,
-    onSpeedChange: () => { },
-  });
+
 
   const subtitleEl = container.querySelector(
     "[data-typing-subtitle]"
@@ -550,11 +547,10 @@ export async function mountWebgpuTemplate(container: HTMLElement) {
       </div>
     `;
     return {
+      setVisible: () => { },
       dispose: () => {
-        menu.dispose();
         container.innerHTML = "";
       },
-      setVisible: () => { },
     };
   }
 
@@ -567,11 +563,10 @@ export async function mountWebgpuTemplate(container: HTMLElement) {
       </div>
     `;
     return {
+      setVisible: () => { },
       dispose: () => {
-        menu.dispose();
         container.innerHTML = "";
       },
-      setVisible: () => { },
     };
   }
 
@@ -585,11 +580,10 @@ export async function mountWebgpuTemplate(container: HTMLElement) {
       </div>
     `;
     return {
+      setVisible: () => { },
       dispose: () => {
-        menu.dispose();
         container.innerHTML = "";
       },
-      setVisible: () => { },
     };
   }
 
@@ -602,24 +596,24 @@ export async function mountWebgpuTemplate(container: HTMLElement) {
   );
 
   // Re-create menu linked to viz
-  menu.dispose();
-  menu = setupWebGpuTemplateMenu({
-    speed: viz.spinSpeed,
-    onSpeedChange: (value: number) => {
-      viz.spinSpeed = value;
-    },
-  });
+
 
   return {
     dispose: () => {
       viz.dispose();
-      menu.dispose();
       stopTyping();
       container.innerHTML = "";
     },
     setVisible: (visible: boolean) => {
       viz.setVisible(visible);
-      menu.setToggleVisible(visible);
+      if (visible) {
+        setupWebGpuTemplateMenu({
+          speed: viz.spinSpeed,
+          onSpeedChange: (value: number) => {
+            viz.spinSpeed = value;
+          },
+        });
+      }
     },
   };
 }

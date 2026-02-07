@@ -11,7 +11,8 @@ type GeoToolsConfigOptions = {
 };
 
 export function setupGeoToolsMenu(options: GeoToolsConfigOptions) {
-    const menu = new Menu("geotools-config-panel", "Menu"); // "Menu" per user request
+    const menu = Menu.getInstance();
+    menu.clear();
 
     // --- Section: Data ---
     menu.addHeader("Data Source");
@@ -58,9 +59,5 @@ export function setupGeoToolsMenu(options: GeoToolsConfigOptions) {
 
     return {
         updateStatus,
-        dispose: () => {
-            menu.dispose();
-        },
-        setToggleVisible: (visible: boolean) => menu.setToggleVisible(visible),
     };
 }

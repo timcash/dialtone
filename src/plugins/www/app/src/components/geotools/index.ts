@@ -331,22 +331,23 @@ export function mountGeoTools(container: HTMLElement) {
   let resolution = 3;
   let h3Cells: string[] = [];
   let status = "No data loaded";
+  let updateStatusFn = () => { };
 
   const regenerate = () => {
     if (!geoJsonData) {
       viz.setGeojson(null, 0);
       h3Cells = [];
       status = "No data loaded";
-      menu.updateStatus();
+      updateStatusFn();
       return;
     }
     viz.setGeojson(geoJsonData, resolution);
     h3Cells = viz.getCells(); // Assuming getCells now returns the H3 cells based on current geojson and resolution
     status = `${h3Cells.length.toLocaleString()} cells @ r${resolution}`;
-    menu.updateStatus();
+    updateStatusFn();
   };
 
-  const menu = setupGeoToolsMenu({
+  const options = {
     currentResolution: resolution,
     onResolutionChange: (v: number) => {
       resolution = v;
@@ -355,7 +356,7 @@ export function mountGeoTools(container: HTMLElement) {
     onFile: async (file: File) => {
       try {
         status = `Loading ${file.name}...`;
-        menu.updateStatus();
+        updateStatusFn();
         const text = await file.text();
         const json = JSON.parse(text);
         if (json.type !== "FeatureCollection") {
@@ -366,13 +367,13 @@ export function mountGeoTools(container: HTMLElement) {
         regenerate();
       } catch (e) {
         status = `Error: ${(e as Error).message}`;
-        menu.updateStatus();
+        updateStatusFn();
       }
     },
     onConvert: () => {
       if (!geoJsonData) return;
       status = "Converting to H3...";
-      menu.updateStatus();
+      updateStatusFn();
       // setTimeout to allow UI update
       setTimeout(() => {
         const start = performance.now();
@@ -395,7 +396,7 @@ export function mountGeoTools(container: HTMLElement) {
       URL.revokeObjectURL(url);
     },
     getStatusText: () => status,
-  });
+  };
 
   // H3 Conversion Logic (simplified for brevity, assumes polygons/points)
   const convertGeoJsonToH3 = (data: any, res: number): string[] => {
@@ -444,11 +445,16 @@ export function mountGeoTools(container: HTMLElement) {
   return {
     dispose: () => {
       viz.dispose();
-      menu.dispose();
       stopTyping();
       container.innerHTML = "";
     },
-    setVisible: (visible: boolean) => viz.setVisible(visible),
+    setVisible: (visible: boolean) => {
+      viz.setVisible(visible);
+      if (visible) {
+        const { updateStatus } = setupGeoToolsMenu(options);
+        updateStatusFn = updateStatus;
+      }
+    },
   };
 }
 

@@ -155,22 +155,23 @@ export function mountThreeJsTemplate(container: HTMLElement) {
   const stopTyping = startTyping(subtitleEl, subtitles);
 
   const viz = new TemplateVisualization(container);
-  const menu = setupThreeJsTemplateMenu({
+  const options = {
     spinSpeed: viz.spinSpeed,
-    onSpinChange: (value) => {
+    onSpinChange: (value: any) => {
       viz.spinSpeed = value;
     },
-  });
+  };
   return {
     dispose: () => {
       viz.dispose();
-      menu.dispose();
       stopTyping();
       container.innerHTML = "";
     },
     setVisible: (visible: boolean) => {
       viz.setVisible(visible);
-      menu.setToggleVisible(visible);
+      if (visible) {
+        setupThreeJsTemplateMenu(options);
+      }
     },
   };
 }
