@@ -20,6 +20,7 @@ import (
 	"dialtone/cli/src/core/test"
 
 	"github.com/chromedp/cdproto/runtime"
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	stdruntime "runtime"
 
@@ -104,11 +105,27 @@ func RunWwwSmoke() error {
 	}
 	fmt.Println(">> [WWW] Smoke: dev server ready on 5173")
 
-	wsURL, err := getChromeWebSocketURLHeadless()
+	// Check for --headed flag
+	isHeaded := false
+	for _, arg := range os.Args {
+		if arg == "--headed" {
+			isHeaded = true
+			break
+		}
+	}
+
+	useHeadless := os.Getenv("SMOKE_HEADLESS") != "false" && !isHeaded
+	var wsURL string
+	var err error
+	if useHeadless {
+		wsURL, err = getChromeWebSocketURLHeadless()
+	} else {
+		wsURL, err = getChromeWebSocketURL()
+	}
 	if err != nil {
 		return err
 	}
-	fmt.Printf(">> [WWW] Smoke: chrome websocket %s\n", wsURL)
+	fmt.Printf(">> [WWW] Smoke: chrome websocket %s (headless: %v)\n", wsURL, useHeadless)
 
 	allocCtx, cancel := chromedp.NewRemoteAllocator(context.Background(), wsURL)
 	defer cancel()
@@ -126,16 +143,11 @@ func RunWwwSmoke() error {
 		case *runtime.EventConsoleAPICalled:
 			msg := formatConsoleArgs(ev.Args)
 			msgLower := strings.ToLower(msg)
+			// Log everything to stdout as requested, but only track issues for failure
 			isIssue := ev.Type == "warning" || ev.Type == "error" ||
 				(ev.Type == "log" && (
 					strings.Contains(msgLower, "error") ||
-					strings.Contains(msgLower, "warning") ||
-					strings.Contains(msgLower, "swap") ||
-					strings.Contains(msgLower, "screenshot")))
-
-			if !isIssue {
-				return
-			}
+					strings.Contains(msgLower, "warning")))
 
 			stack := ""
 			if ev.StackTrace != nil {
@@ -144,14 +156,16 @@ func RunWwwSmoke() error {
 				}
 			}
 
-			mu.Lock()
-			entries = append(entries, consoleEntry{
-				section: currentSection,
-				level:   string(ev.Type),
-				message: msg,
-				stack:   stack,
-			})
-			mu.Unlock()
+			if isIssue {
+				mu.Lock()
+				entries = append(entries, consoleEntry{
+					section: currentSection,
+					level:   string(ev.Type),
+					message: msg,
+					stack:   stack,
+				})
+				mu.Unlock()
+			}
 			// ... real-time streaming ...
 
 			// Real-time streaming to terminal
@@ -195,6 +209,7 @@ func RunWwwSmoke() error {
 	base := "http://127.0.0.1:5173"
 	var sections []string
 	if err := chromedp.Run(ctx,
+		chromedp.EmulateViewport(375, 812, chromedp.EmulateMobile),
 		chromedp.Navigate(base),
 		chromedp.Sleep(1*time.Second),
 		chromedp.Evaluate(`Array.from(document.querySelectorAll('section[id^="s-"]')).map(el => el.id)`, &sections),
@@ -242,9 +257,8 @@ func RunWwwSmoke() error {
 		// Capture performance metrics before screenshot
 		if err := chromedp.Run(ctx,
 			chromedp.Evaluate(fmt.Sprintf("window.location.hash = '%s'", section), nil),
-			chromedp.Sleep(500*time.Millisecond),
-			chromedp.ScrollIntoView(fmt.Sprintf("#%s", section)),
-			chromedp.Sleep(1500*time.Millisecond),
+			chromedp.Sleep(3500*time.Millisecond), // Wait for main.ts 3000ms scrolling/settling
+			// chromedp.ScrollIntoView(fmt.Sprintf("#%s", section)), // REMOVED: Conflicts with main.ts scroll logic
 			chromedp.Evaluate(`(async () => {
 				const mem = (performance && performance.memory) ? {
 					jsHeap: performance.memory.usedJSHeapSize / (1024 * 1024)
@@ -261,9 +275,18 @@ func RunWwwSmoke() error {
 				};
 			})()`, &m),
 			chromedp.Evaluate("window.location.hash", &currentHash),
-			chromedp.Evaluate("window.scrollY", &scrollY),
+			chromedp.Evaluate("document.body.scrollTop", &scrollY),
 			chromedp.Evaluate(fmt.Sprintf("console.log('[PROOFOFLIFE] 📸 SCREENSHOT STARTING: %s')", section), nil),
-			chromedp.Screenshot(fmt.Sprintf("#%s", section), &buf, chromedp.ByID),
+			// Use Viewport Screenshot (Page.captureScreenshot) instead of Element Screenshot
+			// This avoids implicit scrolling logic in chromedp that might fight with CSS scroll snap
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				b, err := page.CaptureScreenshot().Do(ctx)
+				if err != nil {
+					return err
+				}
+				buf = b
+				return nil
+			}),
 		); err != nil {
 			allErrors = append(allErrors, fmt.Errorf("screenshot %s failed: %v", section, err).Error())
 			continue
@@ -504,8 +527,8 @@ func TileScreenshots(dir string, output string) error {
 	}
 
 	const (
-		tileW = 400
-		tileH = 300
+		tileW = 375
+		tileH = 812
 	)
 
 	n := len(pngs)
