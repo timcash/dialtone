@@ -7,10 +7,15 @@ Swarm plugin structure:
 ```shell
 src/plugins/swarm/
 ├── app/
+│   ├── autokv.js
+│   ├── autolog.js
 │   ├── dashboard.html
 │   ├── dashboard.js
 │   ├── index.js
-│   └── package.json
+│   ├── package.json
+│   ├── task-dag.js
+│   ├── test.js
+│   └── warm.js
 ├── cli/
 │   └── swarm.go
 ├── test/
@@ -97,3 +102,27 @@ To support multiple bases on one swarm core:
 - Use a **Dispatcher Pattern**: Each instance attaches a `data` listener that only processes lines starting with its own `TOPIC:`.
 - **Listener Management**: Always remove listeners on socket `close` to prevent memory leaks and "ghost" processing on pooled connections.
 - **Atomic Handshakes**: Ensure the `BASE_KEY` and `WRITER_KEY` are exchanged in the same logical pulse to prevent partial authorization states.
+## 9. Line Buffering for Handshakes
+P2P streams may deliver handshake messages (`TOPIC:`, `WRITER_KEY:`) in multiple chunks. To ensure reliable parsing, always implement a **Line Buffer** in the `data` listener:
+```javascript
+let buffer = ''
+socket.on('data', (data) => {
+  buffer += data.toString()
+  const lines = buffer.split('\n')
+  buffer = lines.pop() // Keep the trailing fragment
+  for (const line of lines) {
+    // Process line...
+  }
+})
+```
+
+## 10. Authorization Deadlock Protection
+Follower nodes cannot authorize other writers until they are themselves authorized as writers on the base. Attempting to `base.append` (e.g., to authorize a peer) while not writable will hang.
+- **Rule**: Only nodes that are already authorized writers (`base.writable === true`) should attempt to broadcast or process `addWriter` ops.
+
+## 11. Interaction Loop Lifecycle
+Standardize tests on a **30s Interaction Loop** to allow sufficient time for:
+1.  DHT Discovery (10-15s)
+2.  Key Exchange & Authorization (2-5s)
+3.  Concurrent Data Appending (10-15s)
+4.  Final Convergence Verification (5-10s)
