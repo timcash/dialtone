@@ -118,8 +118,12 @@ export class AutoLog {
       socket.write(`TOPIC:${this.topicName}\nBASE_KEY:${keyHex}\nWRITER_KEY:${writerHex}\n`)
 
       let socketTopic = null
+      let buffer = ''
       const onData = (data) => {
-        const lines = data.toString().split('\n')
+        buffer += data.toString()
+        const lines = buffer.split('\n')
+        buffer = lines.pop()
+
         for (const line of lines) {
           if (line.startsWith('TOPIC:')) socketTopic = line.slice('TOPIC:'.length).trim()
           if (socketTopic !== this.topicName) continue
@@ -254,6 +258,7 @@ export class AutoLog {
   }
 
   async addWriter(writerKey) {
+    if (!this.base.writable) return // Only authorized writers can add other writers
     const key = normalizeWriterKey(writerKey)
     const keyHex = b4a.toString(key, 'hex')
     if (this.seenWriterKeys.has(keyHex)) return
