@@ -992,7 +992,7 @@ h2 {
   }
 
   .marketing-overlay h2 {
-    font-size: clamp(2.25rem, 3vw + 0.5rem, 3.75rem);
+    font-size: clamp(1.2rem, 1.5vw + 0.3rem, 2rem);
   }
 
   .marketing-overlay p {
@@ -1006,7 +1006,7 @@ h2 {
 }
 
 .marketing-overlay h2 {
-  font-size: clamp(4.5rem, 6vw + 1rem, 7.5rem);
+  font-size: clamp(2.25rem, 3vw + 0.5rem, 3.75rem);
   font-weight: 700;
   color: #fff;
   letter-spacing: -0.02em;
