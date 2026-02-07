@@ -86,3 +86,14 @@ For realistic multi-node simulation in a single environment, each node MUST use 
 
 ## 6. DHT Discovery Performance
  Discovery on the DHT can take 10-15s for new topics. Always wait for `discovery.flushed()` and implement robust retry/looping for initial bootstrap discovery.
+## 7. Shared KeySwarm Listener Conflict
+When sharing a single `Hyperswarm` instance for discovery across multiple `AutoLog` or `AutoKV` instances, a critical conflict occurs:
+- **Problem**: Every instance attaches its own `swarm.on('connection')` listener.
+- **Symptom**: All instances attempt to perform handshakes on EVERY connection, even for topics they don't own, leading to authorization hangs or duplicate messages.
+- **Solution**: The `connection` handler MUST check `info.topics` (or comparable metadata) to ensure the socket is relevant to the instance's specific bootstrap topic before proceeding.
+
+## 8. Topic-Specific Handshake Dispatcher
+To support multiple bases on one swarm core:
+- Use a **Dispatcher Pattern**: Each instance attaches a `data` listener that only processes lines starting with its own `TOPIC:`.
+- **Listener Management**: Always remove listeners on socket `close` to prevent memory leaks and "ghost" processing on pooled connections.
+- **Atomic Handshakes**: Ensure the `BASE_KEY` and `WRITER_KEY` are exchanged in the same logical pulse to prevent partial authorization states.
