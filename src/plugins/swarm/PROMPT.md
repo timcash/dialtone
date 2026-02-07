@@ -35,8 +35,8 @@ Refer to the full guide: [DAG.md](../task/DAG.md).
 - **Pear/Bare**: The runtime environment. Use `bare-fs`, `bare-path`, `bare-os`.
 
 # Architecture Reference
-- [dag.md](dag.md) (Architecture)
-- [test_dag.md](test_dag.md) (Test Lifecycle)
+- [dag.md](app/dag.md) (Architecture)
+- [test_dag.md](test/dag.md) (Test Lifecycle)
 - **KeySwarm**: Ephemeral swarm for exchanging Writer Keys.
 - **DataSwarm**: Persistent swarm for replicating data.
 - **Dispatcher**: Multiplexes connection data to allow multiple apps (KV, Log) to share one swarm connection.
@@ -79,9 +79,9 @@ You must design the classes to support a **Sub-Process Test Runner**.
 # Reference Files
 - `app/autolog.js`
 - `app/autokv.js`
-- `app/test.js`
+- `test/test.js`
 - `docs/hyperswarm.md`
-- `dag.md`
+- `app/dag.md`
 
 # Example DAG: Swarm Protocol Upgrade
 
