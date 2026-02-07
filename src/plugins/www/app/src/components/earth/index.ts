@@ -21,7 +21,12 @@ const TIME_SCALE = 1;
 // 1 full rotation / 30s while the section is visible.
 // (Animation pauses when you scroll off the section via VisibilityMixin.)
 // Note: rotation is applied as earthRotSpeed * deltaSeconds, where deltaSeconds already includes `timeScale`.
-const EARTH_ROT_PERIOD_SECONDS = 30;
+const EARTH_ROT_PERIOD_SECONDS = 240;
+
+// ...
+
+
+
 
 // Light colors (shader-driven). Neutral white/cool.
 const SUN_COLOR = new THREE.Color(1.0, 1.0, 1.0);
@@ -119,8 +124,8 @@ export class ProceduralOrbit {
 
   // Rotations
   earthRotSpeed = (Math.PI * 2) / EARTH_ROT_PERIOD_SECONDS;
-  cloud1RotSpeed = (Math.PI * 2) / 20;
-  cloud2RotSpeed = (Math.PI * 2) / 24;
+  cloud1RotSpeed = (Math.PI * 2) / 240;
+  cloud2RotSpeed = (Math.PI * 2) / 280;
   cloud1Opacity = 0.95;
   cloud2Opacity = 0.90;
   cloudBrightness = 5.0;
