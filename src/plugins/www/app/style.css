@@ -800,7 +800,8 @@ h2 {
   align-items: flex-start;
   text-align: left;
   gap: 1.5rem;
-  padding-left: 5rem;
+  padding: 0 4rem;
+  /* larger side padding on desktop */
   pointer-events: none;
 
   /* Animation Initial State */
@@ -981,9 +982,11 @@ h2 {
 
 @media (max-width: 768px) {
   .marketing-overlay {
-    width: 90%;
-    /* 90% width on mobile */
-    padding: 0 1.5rem;
+    width: 100%;
+    /* full width on mobile */
+    padding: 0 2rem;
+    align-items: center;
+    text-align: center;
     gap: 1rem;
   }
 
@@ -1011,14 +1014,16 @@ h2 {
 }
 
 .marketing-overlay p {
-  font-size: clamp(2rem, 2.6vw, 3rem);
-  line-height: 1.6;
+  font-size: 1.25rem;
+  line-height: 1.5;
   color: rgba(255, 255, 255, 0.8);
-  max-width: none;
+  max-width: 600px;
+  /* Fixed height for 3 lines of text (approx 1.5 * 3 = 4.5rem) to prevent jumping */
+  min-height: 4.5em;
+  display: flex;
+  align-items: flex-start;
   width: 100%;
   margin: 0;
-  min-height: 3.2em;
-  /* Reserve space for 2 lines to prevent bouncing */
 }
 
 .marketing-overlay .docs-bash {
