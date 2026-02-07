@@ -1,10 +1,10 @@
 import * as THREE from "three";
-import { FpsCounter } from "../fps";
-import { GpuTimer } from "../gpu_timer";
-import { VisibilityMixin } from "../section";
+import { FpsCounter } from "../util/fps";
+import { GpuTimer } from "../util/gpu_timer";
+import { VisibilityMixin } from "../util/section";
 import cubeGlowVert from "../../shaders/template-cube.vert.glsl?raw";
 import cubeGlowFrag from "../../shaders/template-cube.frag.glsl?raw";
-import { startTyping } from "../typing";
+import { startTyping } from "../util/typing";
 
 /**
  * Docs section: Three.js section like the others. Cube + key light + glow,
