@@ -1,7 +1,8 @@
-import { FpsCounter } from "../fps";
-import { VisibilityMixin } from "../section";
-import { startTyping } from "../typing";
-import { setupWebgpuTemplateConfig } from "./config";
+import { FpsCounter } from "../util/fps";
+import { VisibilityMixin } from "../util/section";
+import { startTyping } from "../util/typing";
+import { setupWebGpuTemplateMenu } from "./menu";
+
 
 /**
  * WebGPU template: minimal working section using the WebGPU API (no Three.js).
@@ -512,17 +513,18 @@ class WebGpuVisualization {
 }
 
 export async function mountWebgpuTemplate(container: HTMLElement) {
-  let stopTyping = () => {};
+  let stopTyping = () => { };
   container.innerHTML = `
     <div class="marketing-overlay" aria-label="WebGPU template section">
       <h2>Start here for WebGPU</h2>
       <p data-typing-subtitle></p>
     </div>
-    <div id="webgpu-template-config-panel" class="earth-config-panel" hidden></div>
   `;
-  const config = setupWebgpuTemplateConfig({
-    spinSpeed: 1,
-    onSpinChange: () => {},
+
+  // Initial menu (before async GPU init)
+  let menu = setupWebGpuTemplateMenu({
+    speed: 1,
+    onSpeedChange: () => { },
   });
 
   const subtitleEl = container.querySelector(
@@ -549,10 +551,10 @@ export async function mountWebgpuTemplate(container: HTMLElement) {
     `;
     return {
       dispose: () => {
-        config.dispose();
+        menu.dispose();
         container.innerHTML = "";
       },
-      setVisible: () => {},
+      setVisible: () => { },
     };
   }
 
@@ -566,10 +568,10 @@ export async function mountWebgpuTemplate(container: HTMLElement) {
     `;
     return {
       dispose: () => {
-        config.dispose();
+        menu.dispose();
         container.innerHTML = "";
       },
-      setVisible: () => {},
+      setVisible: () => { },
     };
   }
 
@@ -584,10 +586,10 @@ export async function mountWebgpuTemplate(container: HTMLElement) {
     `;
     return {
       dispose: () => {
-        config.dispose();
+        menu.dispose();
         container.innerHTML = "";
       },
-      setVisible: () => {},
+      setVisible: () => { },
     };
   }
 
@@ -598,10 +600,12 @@ export async function mountWebgpuTemplate(container: HTMLElement) {
     context,
     navigator.gpu.getPreferredCanvasFormat(),
   );
-  config.dispose();
-  const liveConfig = setupWebgpuTemplateConfig({
-    spinSpeed: viz.spinSpeed,
-    onSpinChange: (value) => {
+
+  // Re-create menu linked to viz
+  menu.dispose();
+  menu = setupWebGpuTemplateMenu({
+    speed: viz.spinSpeed,
+    onSpeedChange: (value: number) => {
       viz.spinSpeed = value;
     },
   });
@@ -609,10 +613,13 @@ export async function mountWebgpuTemplate(container: HTMLElement) {
   return {
     dispose: () => {
       viz.dispose();
-      liveConfig.dispose();
+      menu.dispose();
       stopTyping();
       container.innerHTML = "";
     },
-    setVisible: (visible: boolean) => viz.setVisible(visible),
+    setVisible: (visible: boolean) => {
+      viz.setVisible(visible);
+      menu.setToggleVisible(visible);
+    },
   };
 }
