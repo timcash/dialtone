@@ -12,8 +12,8 @@ import path from 'bare-path'
 import os from 'bare-os'
 import b4a from 'b4a'
 import Hyperswarm from 'hyperswarm'
-import { AutoKV } from './autokv.js'
-import { AutoLog } from './autolog.js'
+import { AutoKV } from '../app/autokv.js'
+import { AutoLog } from '../app/autolog.js'
 
 const args = Pear.config?.args || []
 const mode = args[0] || 'lifecycle'
@@ -54,13 +54,11 @@ async function runLifecycleTest() {
     const dir = createTmpDir(nodeIds[i])
     tmpDirs.push(dir)
 
-    const keySwarm = new Hyperswarm()
-
     const log = new AutoLog({
       topic: topic + '-log',
       storage: path.join(dir, 'log'),
       swarm: new Hyperswarm(),
-      keySwarm: keySwarm,
+      keySwarm: new Hyperswarm(),
       requireBootstrap: i !== 0,
       logId: nodeIds[i]
     })
@@ -69,12 +67,12 @@ async function runLifecycleTest() {
       topic: topic + '-kv',
       storage: path.join(dir, 'kv'),
       swarm: new Hyperswarm(),
-      keySwarm: keySwarm,
+      keySwarm: new Hyperswarm(),
       requireBootstrap: i !== 0,
       logId: nodeIds[i]
     })
 
-    nodes.push({ id: nodeIds[i], log, kv, dir, keySwarm })
+    nodes.push({ id: nodeIds[i], log, kv, dir })
   }
 
   try {
