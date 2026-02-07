@@ -386,7 +386,7 @@ export class ProceduralOrbit {
   }
 
   private buildLandLayer(cells: string[], resolution: number) {
-    const landRadiusOffset = 0.06;
+    const landRadiusOffset = 0.1;
     const landLayer = new HexLayer(this.earthRadius, {
       radiusOffset: landRadiusOffset,
       count: cells.length,
