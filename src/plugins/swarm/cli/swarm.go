@@ -15,7 +15,6 @@ import (
 	swarm_test "dialtone/cli/src/plugins/swarm/test"
 )
 
-
 func RunSwarm(args []string) {
 	if len(args) < 1 {
 		printSwarmUsage()
@@ -48,6 +47,8 @@ func RunSwarm(args []string) {
 		runSwarmDashboard(subArgs)
 	case "lint":
 		runSwarmLint(subArgs)
+	case "warm":
+		runSwarmWarm(subArgs)
 	default:
 		// Assume the first argument is the topic if no other subcommand matches
 		runSwarmPear(args)
@@ -102,6 +103,26 @@ func runSwarmInstall(args []string) {
 
 	linkNodeModules(appDir, filepath.Join(envAppDir, "node_modules"))
 	ensureEnvToolLink(envPath, "pear")
+}
+
+func runSwarmWarm(args []string) {
+	topicPrefix := "dialtone-lifecycle-test"
+	if len(args) > 0 {
+		topicPrefix = args[0]
+	}
+	fmt.Printf("[swarm] Starting warm peer for topic prefix: %s\n", topicPrefix)
+
+	appDir := filepath.Join("src", "plugins", "swarm", "app")
+	pearBin := getPearBin()
+
+	cmd := exec.Command(pearBin, "run", "warm.js", topicPrefix)
+	cmd.Dir = appDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("[swarm] Warm peer failed: %v\n", err)
+	}
 }
 
 func runSwarmBuild(args []string) {
@@ -415,6 +436,7 @@ func printSwarmUsage() {
 	fmt.Println("  status           Show detailed status/top-like report")
 	fmt.Println("  install          Install swarm dependencies")
 	fmt.Println("  test             Run integration tests (chromedp + dashboard)")
+	fmt.Println("  warm [prefix]    Start a warm peer to speed up test discovery")
 	fmt.Println("\nConnects to a Hyperswarm topic using Pear runtime.")
 }
 
