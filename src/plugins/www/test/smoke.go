@@ -21,6 +21,7 @@ import (
 
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/cdproto/page"
+	"github.com/chromedp/cdproto/performance" // Added import
 	"github.com/chromedp/chromedp"
 	stdruntime "runtime"
 
@@ -133,6 +134,11 @@ func RunWwwSmoke() error {
 	defer cancel()
 	ctx, cancel = context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
+
+	// Enable performance metrics collection
+	if err := chromedp.Run(ctx, performance.Enable()); err != nil {
+		fmt.Printf(">> [WWW] Smoke: failed to enable performance metrics: %v\n", err)
+	}
 
 	var mu sync.Mutex
 	currentSection := ""
@@ -268,12 +274,24 @@ func RunWwwSmoke() error {
 				const totalSize = resources.reduce((acc, r) => acc + (r.transferSize || 0), 0) / (1024 * 1024);
 				
 				return {
-					cpu: performance.now(),
+					cpu: 0, // Placeholder, populated via CDP
 					memory: totalSize,
 					jsHeap: mem.jsHeap,
 					gpu: 0
 				};
 			})()`, &m),
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				metrics, err := performance.GetMetrics().Do(ctx)
+				if err != nil {
+					return err
+				}
+				for _, metric := range metrics {
+					if metric.Name == "ScriptDuration" {
+						m.CPU = metric.Value // Seconds of script execution
+					}
+				}
+				return nil
+			}),
 			chromedp.Evaluate("window.location.hash", &currentHash),
 			chromedp.Evaluate("document.body.scrollTop", &scrollY),
 			chromedp.Evaluate(fmt.Sprintf("console.log('[PROOFOFLIFE] 📸 SCREENSHOT STARTING: %s')", section), nil),
@@ -392,11 +410,11 @@ func RunWwwSmoke() error {
 	}
 
 	smLines = append(smLines, "\n## 3. Performance Metrics")
-	smLines = append(smLines, "\n| Section | JS Heap (MB) | Resources (MB) | Status |")
-	smLines = append(smLines, "|---|---|---|---|")
+	smLines = append(smLines, "\n| Section | JS Heap (MB) | Resources (MB) | Script Duration (s) | GPU | Status |")
+	smLines = append(smLines, "|---|---|---|---|---|---|")
 	for _, section := range sections {
 		m := performanceData[section]
-		smLines = append(smLines, fmt.Sprintf("| %s | %.2f | %.2f | OK |", section, m.JSHeap, m.Memory))
+		smLines = append(smLines, fmt.Sprintf("| %s | %.2f | %.2f | %.4f | - | OK |", section, m.JSHeap, m.Memory, m.CPU))
 	}
 
 	smLines = append(smLines, "\n## 4. Test Orchestration DAG")
