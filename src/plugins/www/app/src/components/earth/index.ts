@@ -7,11 +7,11 @@ import atmosphereVertexShader from "../../shaders/atmosphere.vert.glsl?raw";
 import atmosphereFragmentShader from "../../shaders/atmosphere.frag.glsl?raw";
 import sunAtmosphereVertexShader from "../../shaders/sun_atmosphere.vert.glsl?raw";
 import sunAtmosphereFragmentShader from "../../shaders/sun_atmosphere.frag.glsl?raw";
-import { setupConfigPanel } from "./config_ui";
-import { FpsCounter } from "../fps";
-import { GpuTimer } from "../gpu_timer";
-import { VisibilityMixin } from "../section";
-import { startTyping } from "../typing";
+import { FpsCounter } from "../util/fps";
+import { GpuTimer } from "../util/gpu_timer";
+import { VisibilityMixin } from "../util/section";
+import { startTyping } from "../util/typing";
+import { setupEarthMenu } from "./menu";
 
 const DEG_TO_RAD = Math.PI / 180;
 const TIME_SCALE = 1;
@@ -156,19 +156,8 @@ export class ProceduralOrbit {
   materialColorScale = 1.25;
 
   lastFrameTime = performance.now();
-  configPanel?: HTMLDivElement;
-  configToggle?: HTMLButtonElement;
-  configValueMap = new Map<string, HTMLSpanElement>();
-  configSliderMap = new Map<
-    string,
-    {
-      slider: HTMLInputElement;
-      valueEl: HTMLSpanElement;
-      format: (v: number) => string;
-      getValue: () => number;
-    }
-  >();
-  private setConfigPanelOpen?: (open: boolean) => void;
+  configCleanup?: () => void;
+
   private fpsCounter = new FpsCounter("earth");
 
   constructor(container: HTMLElement) {
@@ -232,6 +221,7 @@ export class ProceduralOrbit {
     cancelAnimationFrame(this.frameId);
     this.resizeObserver?.disconnect();
     window.removeEventListener("resize", this.resize);
+    this.configCleanup?.();
     this.renderer.dispose();
     this.container.removeChild(this.renderer.domElement);
   }
@@ -272,7 +262,7 @@ export class ProceduralOrbit {
 
     this.hexLayers = [
       new HexLayer(this.earthRadius, {
-        radiusOffset: 0.06,
+        radiusOffset: 0.1, // Increased from 0.06
         count: 240,
         resolution: 3,
         ratePerSecond: 45,
@@ -284,7 +274,7 @@ export class ProceduralOrbit {
         ],
       }),
       new HexLayer(this.earthRadius, {
-        radiusOffset: 0.08,
+        radiusOffset: 0.15, // Increased from 0.08
         count: 200,
         resolution: 3,
         ratePerSecond: 45,
@@ -296,7 +286,7 @@ export class ProceduralOrbit {
         ],
       }),
       new HexLayer(this.earthRadius, {
-        radiusOffset: 0.12,
+        radiusOffset: 0.2, // Increased from 0.12
         count: 160,
         resolution: 3,
         ratePerSecond: 45,
@@ -521,15 +511,18 @@ export class ProceduralOrbit {
     this.scene.add(this.sunLight);
   }
 
+  configMenu?: { dispose: () => void; setToggleVisible: (v: boolean) => void };
+
   initConfigPanel() {
-    const { setOpen } = setupConfigPanel(this);
-    this.setConfigPanelOpen = setOpen;
+    this.configMenu = setupEarthMenu(this);
   }
 
   setVisible(visible: boolean) {
     VisibilityMixin.setVisible(this, visible, "earth");
+    if (this.configMenu) {
+      this.configMenu.setToggleVisible(visible);
+    }
     if (!visible) {
-      this.setConfigPanelOpen?.(false);
       this.fpsCounter.clear();
     }
   }
@@ -632,7 +625,7 @@ export class ProceduralOrbit {
     this.sunAtmosphereMaterial.uniforms.uCameraPos.value.copy(
       this.camera.position,
     );
-    this.syncConfigSliders();
+
 
     // Keep debug lights moving with the same orbits.
     this.sunKeyLight.position.copy(this.sunLight.position);
@@ -648,15 +641,7 @@ export class ProceduralOrbit {
     this.updateMoonPosition(now);
   };
 
-  private syncConfigSliders() {
-    if (!this.configSliderMap.size) return;
-    this.configSliderMap.forEach((entry) => {
-      if (document.activeElement === entry.slider) return;
-      const value = entry.getValue();
-      entry.slider.value = `${value}`;
-      entry.valueEl.textContent = entry.format(value);
-    });
-  }
+
 
   private updateCamera(anchor: THREE.Vector3) {
     const orbitX = Math.cos(this.cameraOrbit) * this.cameraDistance;
@@ -705,18 +690,9 @@ export function mountEarth(container: HTMLElement) {
         <h2>Now is the time to learn and build</h2>
         <p data-typing-subtitle></p>
       </div>
-      <div id="earth-config-panel" class="earth-config-panel" hidden></div>
     `;
 
-  // Create and inject config toggle
-  const controls = document.querySelector('.top-right-controls');
-  const toggle = document.createElement('button');
-  toggle.id = 'earth-config-toggle';
-  toggle.className = 'earth-config-toggle';
-  toggle.type = 'button';
-  toggle.setAttribute('aria-expanded', 'false');
-  toggle.textContent = 'Config';
-  controls?.prepend(toggle);
+
 
   const subtitleEl = container.querySelector(
     "[data-typing-subtitle]"
@@ -732,7 +708,7 @@ export function mountEarth(container: HTMLElement) {
   return {
     dispose: () => {
       orbit.dispose();
-      toggle.remove();
+
       stopTyping();
       container.innerHTML = '';
     },

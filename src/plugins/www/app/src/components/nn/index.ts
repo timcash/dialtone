@@ -1,11 +1,12 @@
 import * as THREE from "three";
 import glowVertexShader from "../../shaders/glow.vert.glsl?raw";
 import glowFragmentShader from "../../shaders/glow.frag.glsl?raw";
-import { FpsCounter } from "../fps";
-import { GpuTimer } from "../gpu_timer";
-import { VisibilityMixin } from "../section";
-import { startTyping } from "../typing";
-import { setupNnConfig } from "./config";
+import { FpsCounter } from "../util/fps";
+import { GpuTimer } from "../util/gpu_timer";
+import { VisibilityMixin } from "../util/section";
+import { startTyping } from "../util/typing";
+import { setupNnMenu } from "./menu";
+
 
 
 const COLORS = {
@@ -71,10 +72,9 @@ class NeuralNetworkVisualization {
   signalTime = 0;
 
   // Config panel
-  configPanel?: HTMLDivElement;
-  configToggle?: HTMLButtonElement;
-  private setPanelOpen?: (open: boolean) => void;
+  configCleanup?: () => void;
   private fpsCounter = new FpsCounter("neural");
+  isPaused = false;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -88,7 +88,6 @@ class NeuralNetworkVisualization {
     }
 
     this.initScene();
-    this.initConfigPanel();
     this.resize();
     this.animate();
 
@@ -116,8 +115,11 @@ class NeuralNetworkVisualization {
     cancelAnimationFrame(this.frameId);
     this.resizeObserver?.disconnect();
     window.removeEventListener("resize", this.resize);
+    this.configCleanup?.();
     this.renderer.dispose();
-    this.container.removeChild(this.renderer.domElement);
+    if (this.container.contains(this.renderer.domElement)) {
+      this.container.removeChild(this.renderer.domElement);
+    }
   }
 
   createGlowMaterial(
@@ -275,135 +277,19 @@ class NeuralNetworkVisualization {
     this.scene.add(grid);
   }
 
-  initConfigPanel() {
-    setupNnConfig(this);
-    return;
-    /*
-    const panel = document.getElementById(
-      "nn-config-panel",
-    ) as HTMLDivElement | null;
-    const toggle = document.getElementById(
-      "nn-config-toggle",
-    ) as HTMLButtonElement | null;
-    if (!panel || !toggle) return;
-
-    this.configPanel = panel;
-    this.configToggle = toggle;
-
-    const setOpen = (open: boolean) => {
-      panel.hidden = !open;
-      panel.style.display = open ? "grid" : "none";
-      toggle.setAttribute("aria-expanded", String(open));
-    };
-    this.setPanelOpen = setOpen;
-
-    setOpen(false);
-    toggle.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setOpen(panel.hidden);
+  resetWeights() {
+    this.connections.forEach(conn => {
+      conn.weight = Math.random() * 2 - 1;
+      const mat = conn.line.material as THREE.LineBasicMaterial;
+      mat.opacity = 0.15 + Math.abs(conn.weight) * 0.2;
     });
+  }
 
-    const addSection = (title: string) => {
-      const header = document.createElement("h3");
-      header.textContent = title;
-      panel.appendChild(header);
-    };
-
-    const addSlider = (
-      label: string,
-      value: number,
-      min: number,
-      max: number,
-      step: number,
-      onInput: (v: number) => void,
-      format: (v: number) => string = (v) => v.toFixed(2),
-    ) => {
-      const row = document.createElement("div");
-      row.className = "earth-config-row";
-
-      const labelWrap = document.createElement("label");
-      const sliderId = `nn-slider-${label.replace(/\s+/g, "-").toLowerCase()}`;
-      labelWrap.className = "earth-config-label";
-      labelWrap.htmlFor = sliderId;
-      labelWrap.textContent = label;
-
-      const slider = document.createElement("input");
-      slider.type = "range";
-      slider.id = sliderId;
-      slider.min = `${min}`;
-      slider.max = `${max}`;
-      slider.step = `${step}`;
-      slider.value = `${value}`;
-
-      row.appendChild(labelWrap);
-      row.appendChild(slider);
-
-      const valueEl = document.createElement("span");
-      valueEl.className = "earth-config-value";
-      valueEl.textContent = format(value);
-      row.appendChild(valueEl);
-      panel.appendChild(row);
-
-      slider.addEventListener("input", () => {
-        const v = parseFloat(slider.value);
-        onInput(v);
-        valueEl.textContent = format(v);
-      });
-    };
-
-    const addCopyButton = () => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = "Copy Config";
-      button.addEventListener("click", () => {
-        const payload = JSON.stringify(this.buildConfigSnapshot(), null, 2);
-        if (navigator.clipboard?.writeText) {
-          navigator.clipboard
-            .writeText(payload)
-            .catch(() => console.log(payload));
-        } else {
-          console.log(payload);
-        }
-      });
-      panel.appendChild(button);
-    };
-
-    addSection("Camera");
-    addSlider("Radius", this.cameraRadius, 5, 30, 0.5, (v) => {
-      this.cameraRadius = v;
-    });
-    addSlider("Height", this.cameraHeight, -5, 10, 0.5, (v) => {
-      this.cameraHeight = v;
-    });
-    addSlider("Height Osc", this.cameraHeightOsc, 0, 5, 0.1, (v) => {
-      this.cameraHeightOsc = v;
-    });
-    addSlider("Height Speed", this.cameraHeightSpeed, 0, 0.5, 0.01, (v) => {
-      this.cameraHeightSpeed = v;
-    });
-    addSlider(
-      "Orbit Speed",
-      this.cameraOrbitSpeed,
-      0,
-      0.2,
-      0.005,
-      (v) => {
-        this.cameraOrbitSpeed = v;
-      },
-      (v) => v.toFixed(3),
-    );
-    addSlider("Look At Y", this.cameraLookAtY, -5, 5, 0.5, (v) => {
-      this.cameraLookAtY = v;
-    });
-
-    addSection("Signal");
-    addSlider("Signal Speed", this.signalSpeed, 0.1, 2, 0.1, (v) => {
-      this.signalSpeed = v;
-    });
-
-    addCopyButton();
-    */
+  step() {
+    // Manual step logic if paused, or just force a frame update logic.
+    // For now, let's just log or do a small simulation tick.
+    // Real stepping would require decoupling simulation from animation loop.
+    console.log("Single step triggered");
   }
 
   buildConfigSnapshot() {
@@ -425,7 +311,6 @@ class NeuralNetworkVisualization {
   setVisible(visible: boolean) {
     VisibilityMixin.setVisible(this, visible, "neural");
     if (!visible) {
-      this.setPanelOpen?.(false);
       this.fpsCounter.clear();
     }
   }
@@ -435,6 +320,7 @@ class NeuralNetworkVisualization {
 
     // Skip all calculations when off-screen
     if (!this.isVisible) return;
+    if (this.isPaused) return;
 
     const cpuStart = performance.now();
     this.frameCount++;
@@ -505,18 +391,7 @@ export function mountNeuralNetwork(container: HTMLElement) {
         <h2>Neural Intelligence</h2>
         <p data-typing-subtitle></p>
       </div>
-      <div id="nn-config-panel" class="earth-config-panel" hidden></div>
     `;
-
-  // Create and inject config toggle
-  const controls = document.querySelector('.top-right-controls');
-  const toggle = document.createElement('button');
-  toggle.id = 'nn-config-toggle';
-  toggle.className = 'earth-config-toggle';
-  toggle.type = 'button';
-  toggle.setAttribute('aria-expanded', 'false');
-  toggle.textContent = 'Config';
-  controls?.prepend(toggle);
 
   const subtitleEl = container.querySelector(
     "[data-typing-subtitle]"
@@ -529,13 +404,41 @@ export function mountNeuralNetwork(container: HTMLElement) {
   const stopTyping = startTyping(subtitleEl, subtitles);
 
   const viz = new NeuralNetworkVisualization(container);
+
+  const menu = setupNnMenu({
+    learningRate: 0.01,
+    batchSize: 32,
+    hiddenLayers: 2,
+    neuronsPerLayer: 64,
+    activation: "relu",
+    optimizer: "adam",
+    onConfigChange: (cfg) => {
+      // Apply config changes
+      // In a real app we'd update the network structure here
+      console.log("NN Config changed:", cfg);
+    },
+    onReset: () => {
+      viz.resetWeights();
+    },
+    onStep: () => {
+      viz.step();
+    },
+    togglePause: () => {
+      viz.isPaused = !viz.isPaused;
+    },
+    isPaused: viz.isPaused,
+  });
+
   return {
     dispose: () => {
       viz.dispose();
-      toggle.remove();
+      menu.dispose();
       stopTyping();
       container.innerHTML = '';
     },
-    setVisible: (visible: boolean) => viz.setVisible(visible),
+    setVisible: (visible: boolean) => {
+      viz.setVisible(visible);
+      menu.setToggleVisible(visible);
+    },
   };
 }

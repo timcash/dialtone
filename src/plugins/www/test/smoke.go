@@ -19,7 +19,15 @@ import (
 
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
+	stdruntime "runtime"
 )
+
+func getDialtoneCmd(args ...string) *exec.Cmd {
+	if stdruntime.GOOS == "windows" {
+		return exec.Command("powershell", append([]string{"-ExecutionPolicy", "Bypass", "-File", ".\\dialtone.ps1"}, args...)...)
+	}
+	return exec.Command("./dialtone.sh", args...)
+}
 
 func init() {
 	test.Register("www-smoke", "www", []string{"www", "smoke", "browser"}, RunWwwSmoke)
@@ -35,9 +43,12 @@ type consoleEntry struct {
 func RunWwwSmoke() error {
 	fmt.Println(">> [WWW] Smoke: start")
 	cwd, _ := os.Getwd()
-	dialtoneSh := filepath.Join(cwd, "dialtone.sh")
-	if _, err := os.Stat(dialtoneSh); os.IsNotExist(err) {
-		return fmt.Errorf("could not find dialtone.sh in %s", cwd)
+	dialtoneScript := filepath.Join(cwd, "dialtone.sh")
+	if stdruntime.GOOS == "windows" {
+		dialtoneScript = filepath.Join(cwd, "dialtone.ps1")
+	}
+	if _, err := os.Stat(dialtoneScript); os.IsNotExist(err) {
+		return fmt.Errorf("could not find dialtone script in %s", cwd)
 	}
 
 	wwwDir := filepath.Join(cwd, "src", "plugins", "www", "app")
@@ -204,7 +215,7 @@ func getChromeWebSocketURL() (string, error) {
 	}
 
 	fmt.Println(">> [WWW] Smoke: launching chrome")
-	launchCmd := exec.Command("./dialtone.sh", "chrome", "new", "--gpu")
+	launchCmd := getDialtoneCmd("chrome", "new", "--gpu")
 	output, err := launchCmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to launch chrome: %v\nOutput: %s", err, string(output))

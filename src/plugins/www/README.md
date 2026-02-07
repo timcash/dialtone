@@ -98,3 +98,16 @@ This bumps the version, builds, and deploys to Vercel.
 VERCEL_PROJECT_ID=prj_vynjSZFIhD8TlR8oOyuXTKjFUQxM
 VERCEL_ORG_ID=team_4tzswM6M6PoDxaszH2ZHs5J7
 ```
+
+# Log
+
+## 2026-02-06T17:41:34-08:00
+
+Migrated the entire application to use a unified `Menu` utility class for configuration panels.
+
+-   **Created `util/menu.ts`**: Centralized UI logic for sliders, buttons, and layout.
+-   **Refactored Components**: Migrated all components (`threejs-template`, `webgpu-template`, `cad`, `earth`, `math`, `robot`, `geotools`, `nn`, `about`) to use the new `Menu` system.
+-   **Cleanup**: Removed legacy `config.ts`, `config_ui.ts`, `config_behavior.ts`, and all `earth-config-panel` HTML injection points.
+-   **Style**: Fixed CSS syntax errors and optimized mobile font sizes for marketing overlays.
+ files.
+-   **Styling**: Enforced consistent styling via `.menu-panel` and related classes.

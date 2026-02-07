@@ -2,11 +2,12 @@ import * as THREE from "three";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import glowVertexShader from "../../shaders/glow.vert.glsl?raw";
 import glowFragmentShader from "../../shaders/glow.frag.glsl?raw";
-import { FpsCounter } from "../fps";
-import { GpuTimer } from "../gpu_timer";
-import { VisibilityMixin } from "../section";
-import { startTyping } from "../typing";
-import { setupCadConfig } from "./config";
+import { FpsCounter } from "../util/fps";
+import { GpuTimer } from "../util/gpu_timer";
+import { VisibilityMixin } from "../util/section";
+import { startTyping } from "../util/typing";
+import { setupCadMenu } from "./menu";
+
 
 
 export class CADViewer {
@@ -24,6 +25,7 @@ export class CADViewer {
   frameCount = 0;
   gl!: WebGLRenderingContext | WebGL2RenderingContext;
   gpuTimer = new GpuTimer();
+
 
 
   // Animation state
@@ -66,7 +68,7 @@ export class CADViewer {
     this.camera.lookAt(0, 0, 0);
 
     this.initLights();
-    this.initConfigPanel();
+    this.initLights();
 
     // Load default model immediately, then try to update from live backend
     this.loadDefaultModel().then(() => {
@@ -171,9 +173,7 @@ export class CADViewer {
     this.toggleEl.setAttribute("aria-expanded", String(open));
   }
 
-  initConfigPanel() {
-    setupCadConfig(this);
-  }
+
 
   fetchTimeout: any = null;
   debouncedUpdate() {
@@ -290,6 +290,7 @@ export class CADViewer {
   dispose() {
     cancelAnimationFrame(this.frameId);
     window.removeEventListener("resize", this.onResize);
+
     this.renderer.dispose();
     this.container.removeChild(this.renderer.domElement);
   }
@@ -302,18 +303,10 @@ export function mountCAD(container: HTMLElement) {
         <h2>Parametric Logic</h2>
         <p data-typing-subtitle></p>
       </div>
-      <div id="cad-config-panel" class="earth-config-panel" hidden></div>
     `;
 
+
   // Create and inject config toggle
-  const controls = document.querySelector('.top-right-controls');
-  const toggle = document.createElement('button');
-  toggle.id = 'cad-config-toggle';
-  toggle.className = 'earth-config-toggle';
-  toggle.type = 'button';
-  toggle.setAttribute('aria-expanded', 'false');
-  toggle.textContent = 'Config';
-  controls?.prepend(toggle);
 
   const subtitleEl = container.querySelector(
     "[data-typing-subtitle]"
@@ -328,15 +321,38 @@ export function mountCAD(container: HTMLElement) {
   const viewer = new CADViewer(container);
   // @ts-ignore
   window.cadViewer = viewer;
+
+  const menu = setupCadMenu({
+    params: viewer.params,
+    translationX: viewer.translationX,
+    onParamChange: (key, value) => {
+      // @ts-ignore
+      viewer.params[key] = value;
+      viewer.debouncedUpdate();
+    },
+    onTranslationChange: (value) => {
+      viewer.translationX = value;
+      if (viewer.gearGroup) {
+        viewer.gearGroup.position.x = viewer.translationX;
+      }
+    },
+    onDownloadStl: () => {
+      viewer.downloadSTL();
+    },
+  });
+
   return {
     dispose: () => {
       // @ts-ignore
       delete window.cadViewer;
       viewer.dispose();
-      toggle.remove();
+      menu.dispose();
       stopTyping();
-      container.innerHTML = '';
+      container.innerHTML = "";
     },
-    setVisible: (visible: boolean) => viewer.setVisible(visible),
+    setVisible: (visible: boolean) => {
+      viewer.setVisible(visible);
+      menu.setToggleVisible(visible);
+    },
   };
 }
