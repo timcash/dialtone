@@ -151,8 +151,19 @@ func RunWwwSmoke() error {
 		}
 
 		mu.Lock()
-		newEntries := append([]consoleEntry{}, entries[startIdx:]...)
+		newEntries := []consoleEntry{}
+		for _, entry := range entries[startIdx:] {
+			// Skip expected CAD backend errors if server is offline.
+			// These can arrive late (e.g. during a subsequent section) so we filter them globally.
+			isCadError := strings.Contains(entry.message, "[cad] Server might be offline") ||
+				strings.Contains(entry.message, "[cad] Model update failed")
+			if isCadError {
+				continue
+			}
+			newEntries = append(newEntries, entry)
+		}
 		mu.Unlock()
+
 		if len(newEntries) > 0 {
 			fmt.Printf(">> [WWW] Smoke: console issues in #%s\n", section)
 			var lines []string
