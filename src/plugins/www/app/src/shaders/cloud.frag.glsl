@@ -86,10 +86,8 @@ void main() {
     // Multi-octave FBM for base density
     float nBase = fbm(vPosition * (CLOUD_SCALE * 0.6) + q * 1.5 + uTime * 0.05);
     
-    // Atmospheric "Breathing" Oscillation
-    float baseThreshold = mix(0.5, -0.1, uCloudAmount);
-    float breath = sin(uTime * 0.12) * 0.06;
-    float threshold = baseThreshold + breath;
+    // Atmospheric Density (Static)
+    float threshold = mix(0.5, -0.1, uCloudAmount);
     float alpha = smoothstep(threshold, threshold + 0.3, nBase) * uOpacity;
 
     vec3 sunDir = normalize(uSunDir);
