@@ -3,15 +3,22 @@ You are a Distributed Systems Engineer expert in the Holepunch, Pear, and Bare e
 
 # Task
 Implement the V2 versions of the Swarm Plugin's core data structures:
-1. `src/plugins/swarm/app/autokv_v2.js`
-2. `src/plugins/swarm/app/autolog_v2.js`
+1. `app/autokv_v2.js`
+2. `app/autolog_v2.js`
+
+## DAG Compliance (MANDATORY)
+You **MUST** follow the architecture and testing strategies defined in:
+1.  **Architecture**: `app/dag.md` (Explains how `autokv_v2` and `autolog_v2` work).
+2.  **Testing**: `test/dag.md` (Explains how to test them).
+
+Do not deviate from these DAGs. They are your source of truth.
 
 # DAG Rules
 To be effective, a DAG must be more than just boxes. It must be a **Verifiable Plan**.
-Refer to the full guide: [DAG.md](src/plugins/task/DAG.md).
+Refer to the full guide: [DAG.md](../task/DAG.md).
 
 ## How to make a good DAG
-1.  **Strict Layers**: Organize by dependency depth. Foundation -> Core -> Features -> QA -> Release.
+1.  **Define Layers**: Organize by dependency depth. You may use the standard (Foundation -> Core -> Features -> QA -> Release) or define your own system (e.g., Protocol -> Implementation -> Simulation), **as long as you provide a Legend**.
 2.  **Verifiable Nodes**: Each node (e.g., `L2_1[auth-middleware]`) represents a unit of work that can be *tested*.
 3.  **Data Flow**: Arrows (`-->`) show the flow of data or prerequisites, not just order of operations.
 
@@ -28,8 +35,8 @@ Refer to the full guide: [DAG.md](src/plugins/task/DAG.md).
 - **Pear/Bare**: The runtime environment. Use `bare-fs`, `bare-path`, `bare-os`.
 
 # Architecture Reference
-- [dag.md](src/plugins/swarm/dag.md) (Architecture)
-- [test_dag.md](src/plugins/swarm/test_dag.md) (Test Lifecycle)
+- [dag.md](dag.md) (Architecture)
+- [test_dag.md](test_dag.md) (Test Lifecycle)
 - **KeySwarm**: Ephemeral swarm for exchanging Writer Keys.
 - **DataSwarm**: Persistent swarm for replicating data.
 - **Dispatcher**: Multiplexes connection data to allow multiple apps (KV, Log) to share one swarm connection.
@@ -37,7 +44,7 @@ Refer to the full guide: [DAG.md](src/plugins/task/DAG.md).
 # Core Requirements for V2
 
 ## 1. Simplify & harden (vs V1)
-Review the V1 code in [autokv.js](src/plugins/swarm/app/autokv.js) and [autolog.js](src/plugins/swarm/app/autolog.js). The V2 versions must be simpler but more robust.
+Review the V1 code in [autokv.js](app/autokv.js) and [autolog.js](app/autolog.js). The V2 versions must be simpler but more robust.
 - **Strict Separation**: Do not mix Discovery logic with Replication logic.
 - **Explicit Authorization**: A node cannot write to the Autobase until an existing member authorizes it (via `addWriter`).
 
@@ -70,11 +77,11 @@ You must design the classes to support a **Sub-Process Test Runner**.
     - If testing locally, ensure the swarm can find local peers quickly (maybe using MDNS or a local bootstrap node if available, but primarily via `hyperswarm`).
 
 # Reference Files
-- `src/plugins/swarm/app/autolog.js`
-- `src/plugins/swarm/app/autokv.js`
-- `src/plugins/swarm/app/test.js`
-- `src/plugins/swarm/docs/hyperswarm.md`
-- `src/plugins/swarm/dag.md`
+- `app/autolog.js`
+- `app/autokv.js`
+- `app/test.js`
+- `docs/hyperswarm.md`
+- `dag.md`
 
 # Example DAG: Swarm Protocol Upgrade
 
@@ -151,7 +158,7 @@ flowchart TD
 
 # Deliverables
 Write the complete code for:
-- `src/plugins/swarm/app/autokv_v2.js`
-- `src/plugins/swarm/app/autolog_v2.js`
+- `app/autokv_v2.js`
+- `app/autolog_v2.js`
 
 Do **not** write tests or updated docs in this step. Focus solely on the robust implementation of these two classes.
