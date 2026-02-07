@@ -17,22 +17,26 @@ Usage: `./dialtone.sh swarm [COMMAND] [ARGS]`
 # User Guide
 
 ## 1. Starting the Swarm
-
- Initialize the swarm environment and start the dashboard to visualize the network.
-
-```shell
-# Install dependencies
-./dialtone.sh swarm install
-
-# Start the dashboard (runs on http://127.0.0.1:4000)
-./dialtone.sh swarm dashboard
-
-# Start a background node on the 'index' topic
-./dialtone.sh swarm start index "main-node"
-
-# Check status of running nodes
-./dialtone.sh swarm status
-```
+ 
+ Initialize the swarm environment and start a "warm" peer to accelerate DHT discovery.
+ 
+ ```shell
+ # Install dependencies
+ ./dialtone.sh swarm install
+ 
+ # Start a warm peer for the 'index' topic prefix
+ # (Speeds up test discovery significantly)
+ ./dialtone.sh swarm warm index
+ 
+ # Start the dashboard (runs on http://127.0.0.1:4000)
+ ./dialtone.sh swarm dashboard
+ 
+ # Start a background node on the 'index' topic
+ ./dialtone.sh swarm start index "main-node"
+ 
+ # Check status of running nodes
+ ./dialtone.sh swarm status
+ ```
 
 ## 2. Adding a Task (Design)
 Tasks are the unit of work in Dialtone v2. They are broadcast over topics.
@@ -151,10 +155,13 @@ Key questions answered in the [official FAQ](https://docs.pears.com/reference/fa
 *   **Can Peers Know My IP Address?** (Yes, IP is exchanged for P2P connection)
 
 ## 8. Recommended Practices
-Key best practices from the [official guide](https://docs.pears.com/reference/recommended-practices.html):
+Key best practices established during the Swarm v2 refactor:
+*   **Storage Isolation**: Each node MUST use a unique `Corestore` storage path to avoid LevelDB locking errors.
+*   **Hybrid Swarm Architecture**: Use isolated **Replication Swarms** for data and a multiplexed **KeySwarm** for discovery/handshakes.
+*   **Periodic Broadcasting**: Connected peers should broadcast their writer keys periodically (e.g., every 5s) to ensure eventual convergence.
+*   **Line Buffering**: Always buffer stream data and split by `\n` to prevent handshake message fragmentation.
+*   **Warm Peer Strategy**: Maintain a persistent background process on the DHT for high-value topics to keep them "fresh" for new peers.
 *   **One Corestore per App**: Reduces file handles and storage duplication.
 *   **One Hyperswarm per App**: Efficiently manages connections and DHT lookups.
-*   **No Remote Code**: Never load JS over HTTP(S) to prevent supply chain attacks.
-*   **Prune Dev Dependencies**: Run `npm prune --omit=dev` before staging to reduce bundle size.
-*   **Exclude .git**: Ensure `.git` is ignored in your stage configuration.
+*   **No Remote Code**: Never load JS over HTTP(S).
 
