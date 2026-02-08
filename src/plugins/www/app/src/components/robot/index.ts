@@ -1,10 +1,11 @@
 import * as THREE from "three";
 import { IKSolver } from "./ik";
-import { FpsCounter } from "../fps";
-import { GpuTimer } from "../gpu_timer";
-import { VisibilityMixin } from "../section";
-import { startTyping } from "../typing";
-import { setupRobotConfig } from "./config";
+import { FpsCounter } from "../util/fps";
+import { GpuTimer } from "../util/gpu_timer";
+import { VisibilityMixin } from "../util/section";
+import { startTyping } from "../util/typing";
+import { setupRobotMenu } from "./menu";
+
 
 
 // Joint colors by type
@@ -343,10 +344,8 @@ class RobotArmVisualization {
   cameraRadius = 12;
   cameraHeight = 1;
 
-  configPanel?: HTMLDivElement;
-  configToggle?: HTMLButtonElement;
+
   sliders: { slider: HTMLInputElement; valueEl: HTMLSpanElement }[] = [];
-  private setPanelOpen?: (open: boolean) => void;
   private fpsCounter = new FpsCounter("robot");
 
   constructor(container: HTMLElement) {
@@ -370,7 +369,7 @@ class RobotArmVisualization {
     }
 
     this.initScene();
-    this.initConfigPanel();
+    // this.initConfigPanel(); // Menu is now setup on visibility
     this.resize();
     this.animate();
 
@@ -396,6 +395,7 @@ class RobotArmVisualization {
 
   dispose() {
     cancelAnimationFrame(this.frameId);
+    this.resizeObserver?.disconnect();
     this.resizeObserver?.disconnect();
     window.removeEventListener("resize", this.resize);
     this.renderer.dispose();
@@ -577,204 +577,14 @@ class RobotArmVisualization {
     this.targetLine.geometry.attributes.position.needsUpdate = true;
   }
 
-  initConfigPanel() {
-    setupRobotConfig(this);
-    return;
-    /*
-    const panel = document.getElementById(
-      "robot-config-panel",
-    ) as HTMLDivElement | null;
-    const toggle = document.getElementById(
-      "robot-config-toggle",
-    ) as HTMLButtonElement | null;
-    if (!panel || !toggle) return;
 
-    this.configPanel = panel;
-    this.configToggle = toggle;
-
-    const setOpen = (open: boolean) => {
-      panel.hidden = !open;
-      panel.style.display = open ? "grid" : "none";
-      toggle.setAttribute("aria-expanded", String(open));
-    };
-    this.setPanelOpen = setOpen;
-
-    setOpen(false);
-    toggle.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setOpen(panel.hidden);
-    });
-
-    const addHeader = (text: string) => {
-      const header = document.createElement("h3");
-      header.textContent = text;
-      panel.appendChild(header);
-    };
-
-    const addSlider = (
-      label: string,
-      value: number,
-      min: number,
-      max: number,
-      step: number,
-      onInput: (v: number) => void,
-      format: (v: number) => string = (v) => `${Math.round(v)}°`,
-    ) => {
-      const row = document.createElement("div");
-      row.className = "earth-config-row";
-
-      const labelWrap = document.createElement("label");
-      const sliderId = `robot-slider-${label.replace(/\s+/g, "-").toLowerCase()}`;
-      labelWrap.className = "earth-config-label";
-      labelWrap.htmlFor = sliderId;
-      labelWrap.textContent = label;
-
-      const slider = document.createElement("input");
-      slider.type = "range";
-      slider.id = sliderId;
-      slider.min = `${min}`;
-      slider.max = `${max}`;
-      slider.step = `${step}`;
-      slider.value = `${value}`;
-
-      row.appendChild(labelWrap);
-      row.appendChild(slider);
-
-      const valueEl = document.createElement("span");
-      valueEl.className = "earth-config-value";
-      valueEl.textContent = format(value);
-      row.appendChild(valueEl);
-      panel.appendChild(row);
-
-      slider.addEventListener("input", () => {
-        const v = parseFloat(slider.value);
-        onInput(v);
-        valueEl.textContent = format(v);
-      });
-
-      return { slider, valueEl };
-    };
-
-    const addCheckbox = (
-      label: string,
-      checked: boolean,
-      onChange: (v: boolean) => void,
-    ) => {
-      const row = document.createElement("div");
-      row.className = "earth-config-row";
-
-      const labelWrap = document.createElement("label");
-      labelWrap.style.display = "flex";
-      labelWrap.style.alignItems = "center";
-      labelWrap.style.gap = "8px";
-
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.checked = checked;
-
-      const text = document.createElement("span");
-      text.textContent = label;
-
-      labelWrap.appendChild(checkbox);
-      labelWrap.appendChild(text);
-      row.appendChild(labelWrap);
-      panel.appendChild(row);
-
-      checkbox.addEventListener("change", () => onChange(checkbox.checked));
-    };
-
-    const addButton = (label: string, onClick: () => void) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = label;
-      button.addEventListener("click", onClick);
-      panel.appendChild(button);
-    };
-
-    addHeader("IK Mode");
-    addCheckbox("Auto Track Target", this.autoAnimate, (v) => {
-      this.autoAnimate = v;
-    });
-    addButton("New Target", () => this.pickNewTarget());
-
-    addHeader("Camera");
-    addSlider(
-      "Distance",
-      this.cameraRadius,
-      6,
-      20,
-      0.5,
-      (v) => {
-        this.cameraRadius = v;
-      },
-      (v) => v.toFixed(1),
-    );
-    addSlider(
-      "Height",
-      this.cameraHeight,
-      1,
-      12,
-      0.5,
-      (v) => {
-        this.cameraHeight = v;
-      },
-      (v) => v.toFixed(1),
-    );
-    addSlider(
-      "Orbit Speed",
-      this.cameraOrbitSpeed,
-      0,
-      0.5,
-      0.01,
-      (v) => {
-        this.cameraOrbitSpeed = v;
-      },
-      (v) => v.toFixed(2),
-    );
-
-    addHeader("Joint Angles");
-
-    const jointConfigs = [
-      { name: "Base (Y)", min: -180, max: 180, initial: 0 },
-      { name: "Shoulder (Z)", min: -100, max: 100, initial: 30 },
-      { name: "Elbow (Y)", min: -180, max: 180, initial: 0 },
-      { name: "Forearm (Z)", min: -100, max: 100, initial: -45 },
-      { name: "Wrist (Z)", min: -100, max: 100, initial: -20 },
-    ];
-
-    jointConfigs.forEach((config, i) => {
-      const { slider, valueEl } = addSlider(
-        config.name,
-        config.initial,
-        config.min,
-        config.max,
-        1,
-        (v) => {
-          this.robotArm.joints[i].setAngle(v);
-          this.autoAnimate = false;
-        },
-      );
-      this.sliders.push({ slider, valueEl });
-    });
-
-    addHeader("Gripper");
-    addSlider(
-      "Grip",
-      0.5,
-      0,
-      1,
-      0.01,
-      (v) => this.robotArm.setGrip(v),
-      (v) => `${Math.round(v * 100)}%`,
-    );
-    */
-  }
 
   setVisible(visible: boolean) {
     VisibilityMixin.setVisible(this, visible, "robot");
+    if (visible) {
+      setupRobotMenu(this);
+    }
     if (!visible) {
-      this.setPanelOpen?.(false);
       this.fpsCounter.clear();
     }
   }
@@ -837,24 +647,15 @@ class RobotArmVisualization {
 export function mountRobot(container: HTMLElement) {
   // Inject HTML
   container.innerHTML = `
-      <div class="marketing-overlay" aria-label="Robot visualization marketing information">
-        <h2>Robotics begins with precision control</h2>
-        <p data-typing-subtitle></p>
-        <a class="buy-button" href="https://buy.stripe.com/test_5kQaEXcagaAoaC62N20kE00" target="_blank"
-          rel="noopener noreferrer">Get the Robot Kit</a>
-      </div>
-      <div id="robot-config-panel" class="earth-config-panel" hidden></div>
-    `;
+  <div class="marketing-overlay" aria-label="Robot visualization marketing information">
+    <h2>Robotic Control</h2>
+    <p data-typing-subtitle></p>
+    <a class="buy-button" href="https://buy.stripe.com/test_5kQaEXcagaAoaC62N20kE00" target="_blank"
+      rel="noopener noreferrer">Get the Robot Kit</a>
+  </div>
+  `;
 
-  // Create and inject config toggle
-  const controls = document.querySelector('.top-right-controls');
-  const toggle = document.createElement('button');
-  toggle.id = 'robot-config-toggle';
-  toggle.className = 'earth-config-toggle';
-  toggle.type = 'button';
-  toggle.setAttribute('aria-expanded', 'false');
-  toggle.textContent = 'Config';
-  controls?.prepend(toggle);
+
 
   const subtitleEl = container.querySelector(
     "[data-typing-subtitle]"
@@ -870,7 +671,7 @@ export function mountRobot(container: HTMLElement) {
   return {
     dispose: () => {
       viz.dispose();
-      toggle.remove();
+
       stopTyping();
       container.innerHTML = '';
     },

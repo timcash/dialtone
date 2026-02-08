@@ -115,8 +115,8 @@ type LaunchResult struct {
 	WebsocketURL string
 }
 
-// LaunchChrome starts a new headed Chrome instance and returns its debug info.
-func LaunchChrome(port int, gpu bool, targetURL string) (*LaunchResult, error) {
+// LaunchChrome starts a new Chrome instance and returns its debug info.
+func LaunchChrome(port int, gpu bool, headless bool, targetURL string) (*LaunchResult, error) {
 	path := browser.FindChromePath()
 	if path == "" {
 		return nil, fmt.Errorf("chrome not found")
@@ -200,6 +200,10 @@ func LaunchChrome(port int, gpu bool, targetURL string) (*LaunchResult, error) {
 
 	if !gpu {
 		args = append(args, "--disable-gpu")
+	}
+
+	if headless {
+		args = append(args, "--headless=new")
 	}
 
 	if targetURL != "" {

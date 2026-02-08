@@ -52,8 +52,9 @@ export class ArcRenderer {
   }
 
   updateResolution(width: number, height: number) {
-    this.sparkMaterial.resolution.set(Math.max(1, width), Math.max(1, height));
-    this.linkMaterial.resolution.set(Math.max(1, width), Math.max(1, height));
+    const pr = window.devicePixelRatio;
+    this.sparkMaterial.resolution.set(Math.max(1, width * pr), Math.max(1, height * pr));
+    this.linkMaterial.resolution.set(Math.max(1, width * pr), Math.max(1, height * pr));
   }
 
   addSparkArc(points: THREE.Vector3[], now: number, getPoints?: () => THREE.Vector3[]) {

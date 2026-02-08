@@ -7,21 +7,25 @@ import atmosphereVertexShader from "../../shaders/atmosphere.vert.glsl?raw";
 import atmosphereFragmentShader from "../../shaders/atmosphere.frag.glsl?raw";
 import sunAtmosphereVertexShader from "../../shaders/sun_atmosphere.vert.glsl?raw";
 import sunAtmosphereFragmentShader from "../../shaders/sun_atmosphere.frag.glsl?raw";
-import { setupConfigPanel } from "./config_ui";
-import { FpsCounter } from "../fps";
-import { GpuTimer } from "../gpu_timer";
-import { VisibilityMixin } from "../section";
-import { startTyping } from "../typing";
+import { FpsCounter } from "../util/fps";
+import { GpuTimer } from "../util/gpu_timer";
+import { VisibilityMixin } from "../util/section";
+import { startTyping } from "../util/typing";
+import { setupEarthMenu } from "./menu";
 
 const DEG_TO_RAD = Math.PI / 180;
 const TIME_SCALE = 1;
-const SUN_ORBIT_PERIOD_MS = 5000;
+
 // Human-scale axial rotation:
 // Base axial rotation period at timeScale=1:
 // 1 full rotation / 30s while the section is visible.
 // (Animation pauses when you scroll off the section via VisibilityMixin.)
 // Note: rotation is applied as earthRotSpeed * deltaSeconds, where deltaSeconds already includes `timeScale`.
-const EARTH_ROT_PERIOD_SECONDS = 30;
+
+// ...
+
+
+
 
 // Light colors (shader-driven). Neutral white/cool.
 const SUN_COLOR = new THREE.Color(1.0, 1.0, 1.0);
@@ -81,7 +85,7 @@ function createMoonRockTexture(size = 128) {
 
 export class ProceduralOrbit {
   scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(75, 1, 0.01, 1000);
+  camera = new THREE.PerspectiveCamera(75, 1, 0.1, 10000);
   renderer = new THREE.WebGLRenderer({ antialias: true });
   container: HTMLElement;
   frameId = 0;
@@ -108,25 +112,23 @@ export class ProceduralOrbit {
   cloud2Axis = new THREE.Vector3(0.2, 1, -0.1).normalize();
 
   // Settings
-  earthRadius = 5;
+  earthRadius = 50;
   shaderTimeScale = 0.28;
   timeScale = TIME_SCALE;
   // Clouds: make them more visible by default.
-  cloudAmount = 0.92;
-  cloudOpacityOscAmp = 0.12;
-  cloudAmountOscAmp = 0.18;
-  cloudOscSpeed = 0.45;
+  // Clouds: make them more visible by default.
+  cloudAmount = 1.0;
 
   // Rotations
-  earthRotSpeed = (Math.PI * 2) / EARTH_ROT_PERIOD_SECONDS;
-  cloud1RotSpeed = (Math.PI * 2) / 100;
-  cloud2RotSpeed = (Math.PI * 2) / 120;
-  cloud1Opacity = 0.82;
-  cloud2Opacity = 0.78;
-  cloudBrightness = 1.25;
-  cameraDistance = 6.0;
-  cameraOrbit = 0.4;
-  cameraYaw = 0.2;
+  earthRotSpeed = (Math.PI * 2) / 120; // 120s period (faster)
+  cloud1RotSpeed = (Math.PI * 2) / 240;
+  cloud2RotSpeed = (Math.PI * 2) / 280;
+  cloud1Opacity = 0.95;
+  cloud2Opacity = 0.90;
+  cloudBrightness = 5.0;
+  cameraDistance = 23.5;
+  cameraOrbit = 5.74;
+  cameraYaw = 0.99;
   cameraAnchor = new THREE.Vector3(0, 0, 0);
 
   // Lights
@@ -136,45 +138,36 @@ export class ProceduralOrbit {
   sunKeyLight2!: THREE.DirectionalLight;
   ambientLight!: THREE.AmbientLight;
 
-  sunDistance = 78;
-  sunOrbitHeight = 87;
+  sunDistance = 780;
+  sunOrbitHeight = 870;
   sunOrbitAngleDeg = 0;
-  sunOrbitSpeed = (Math.PI * 2) / SUN_ORBIT_PERIOD_MS / 2;
+  sunOrbitSpeed = 0.0006283185307179586;
   sunOrbitIncline = 20 * DEG_TO_RAD;
   sunOrbitAngleRad = 0;
   sunTimeMs = performance.now();
 
   // Moon orbit (visual / demo-scale)
-  moonRadius = 0.55;
-  moonOrbitRadius = 12.5;
+  moonRadius = 5.5;
+  moonOrbitRadius = 125;
   moonOrbitIncline = 8 * DEG_TO_RAD;
   moonOrbitPhaseRad = 0.6;
 
-  keyLightDistance = 147;
-  keyLightHeight = 40;
+  keyLightDistance = 1470;
+  keyLightHeight = 400;
   keyLightAngleDeg = 63;
   materialColorScale = 1.25;
 
   lastFrameTime = performance.now();
-  configPanel?: HTMLDivElement;
-  configToggle?: HTMLButtonElement;
-  configValueMap = new Map<string, HTMLSpanElement>();
-  configSliderMap = new Map<
-    string,
-    {
-      slider: HTMLInputElement;
-      valueEl: HTMLSpanElement;
-      format: (v: number) => string;
-      getValue: () => number;
-    }
-  >();
-  private setConfigPanelOpen?: (open: boolean) => void;
+  configCleanup?: () => void;
+
+  private landLayer?: HexLayer;
+
   private fpsCounter = new FpsCounter("earth");
 
   constructor(container: HTMLElement) {
     this.container = container;
     this.renderer.setClearColor(0x000000, 1);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.domElement.style.position = "absolute";
     this.renderer.domElement.style.top = "0";
     this.renderer.domElement.style.left = "0";
@@ -189,7 +182,7 @@ export class ProceduralOrbit {
     this.initLayers();
     this.loadLandLayer();
     this.initLights();
-    this.initConfigPanel();
+    // this.initConfigPanel(); // Menu setup on visibility
     this.resize();
     this.initCameraAnchor();
     this.updateCamera(this.cameraAnchor);
@@ -232,6 +225,7 @@ export class ProceduralOrbit {
     cancelAnimationFrame(this.frameId);
     this.resizeObserver?.disconnect();
     window.removeEventListener("resize", this.resize);
+    this.configCleanup?.();
     this.renderer.dispose();
     this.container.removeChild(this.renderer.domElement);
   }
@@ -252,27 +246,29 @@ export class ProceduralOrbit {
     this.earth = new THREE.Mesh(geo(this.earthRadius, earthSegments), earthMat);
     this.scene.add(this.earth);
 
-    const cloud1Mat = this.createCloudMaterial(0.2, this.cloud1Opacity);
+    const cloud1Mat = this.createCloudMaterial(0.04, this.cloud1Opacity);
     this.cloud1Material = cloud1Mat;
     this.cloud1 = new THREE.Mesh(
-      geo(this.earthRadius + 0.05, cloudSegments),
+      geo(this.earthRadius + 1.2, cloudSegments),
       cloud1Mat,
     );
+    this.cloud1.renderOrder = 2;
     this.scene.add(this.cloud1);
 
-    const cloud2Mat = this.createCloudMaterial(0.5, this.cloud2Opacity);
+    const cloud2Mat = this.createCloudMaterial(0.1, this.cloud2Opacity);
     this.cloud2Material = cloud2Mat;
     this.cloud2 = new THREE.Mesh(
-      geo(this.earthRadius + 0.08, cloudSegments),
+      geo(this.earthRadius + 1.5, cloudSegments),
       cloud2Mat,
     );
+    this.cloud2.renderOrder = 2;
     this.scene.add(this.cloud2);
 
     // Reduced cloud layers for performance (2 layers instead of 4)
 
     this.hexLayers = [
       new HexLayer(this.earthRadius, {
-        radiusOffset: 0.06,
+        radiusOffset: 1.0, // Increased from 0.1
         count: 240,
         resolution: 3,
         ratePerSecond: 45,
@@ -284,7 +280,7 @@ export class ProceduralOrbit {
         ],
       }),
       new HexLayer(this.earthRadius, {
-        radiusOffset: 0.08,
+        radiusOffset: 1.5, // Increased from 0.15
         count: 200,
         resolution: 3,
         ratePerSecond: 45,
@@ -296,7 +292,7 @@ export class ProceduralOrbit {
         ],
       }),
       new HexLayer(this.earthRadius, {
-        radiusOffset: 0.12,
+        radiusOffset: 2.0, // Increased from 0.2
         count: 160,
         resolution: 3,
         ratePerSecond: 45,
@@ -332,7 +328,7 @@ export class ProceduralOrbit {
     });
     this.atmosphereMaterial = atmoMat;
     this.atmosphere = new THREE.Mesh(
-      geo(this.earthRadius + 0.2, atmoSegments),
+      geo(this.earthRadius + 2.0, atmoSegments),
       atmoMat,
     );
     this.scene.add(this.atmosphere);
@@ -354,7 +350,7 @@ export class ProceduralOrbit {
     });
     this.sunAtmosphereMaterial = sunAtmoMat;
     this.sunAtmosphere = new THREE.Mesh(
-      geo(this.earthRadius + 0.32, atmoSegments),
+      geo(this.earthRadius + 3.2, atmoSegments),
       sunAtmoMat,
     );
     this.scene.add(this.sunAtmosphere);
@@ -396,7 +392,7 @@ export class ProceduralOrbit {
   }
 
   private buildLandLayer(cells: string[], resolution: number) {
-    const landRadiusOffset = 0.03;
+    const landRadiusOffset = 0.6;
     const landLayer = new HexLayer(this.earthRadius, {
       radiusOffset: landRadiusOffset,
       count: cells.length,
@@ -421,6 +417,7 @@ export class ProceduralOrbit {
     landLayer.mesh.frustumCulled = false;
     this.hexLayers.push(landLayer);
     this.earth.add(landLayer.mesh);
+    this.landLayer = landLayer;
     console.log("[earth] land layer ready", {
       cells: cells.length,
       resolution,
@@ -467,6 +464,7 @@ export class ProceduralOrbit {
     );
     return new THREE.ShaderMaterial({
       transparent: true,
+      depthWrite: false,
       uniforms: {
         uTime: { value: 0 },
         uTint: { value: tint },
@@ -494,13 +492,13 @@ export class ProceduralOrbit {
     // Note: core Earth lighting is shader-driven; these lights are primarily for
     // non-shader meshes / debugging.
     this.sunKeyLight = new THREE.DirectionalLight(0xffffff, 0.35);
-    this.sunKeyLight.position.set(10, 5, 10);
+    this.sunKeyLight.position.set(100, 50, 100);
     this.scene.add(this.sunKeyLight);
     this.sunKeyLight.target.position.set(0, 0, 0);
     this.scene.add(this.sunKeyLight.target);
 
     this.sunKeyLight2 = new THREE.DirectionalLight(0xffffff, 0.22);
-    this.sunKeyLight2.position.set(-10, -5, -10);
+    this.sunKeyLight2.position.set(-100, -50, -100);
     this.scene.add(this.sunKeyLight2);
     this.sunKeyLight2.target.position.set(0, 0, 0);
     this.scene.add(this.sunKeyLight2.target);
@@ -508,7 +506,7 @@ export class ProceduralOrbit {
     this.scene.add(this.ambientLight);
 
     this.sunGlow = new THREE.Mesh(
-      new THREE.SphereGeometry(6, 32, 32),
+      new THREE.SphereGeometry(60, 32, 32),
       new THREE.MeshBasicMaterial({ color: 0xffe08a }),
     );
     this.scene.add(this.sunGlow);
@@ -521,15 +519,16 @@ export class ProceduralOrbit {
     this.scene.add(this.sunLight);
   }
 
-  initConfigPanel() {
-    const { setOpen } = setupConfigPanel(this);
-    this.setConfigPanelOpen = setOpen;
-  }
+
+
+
 
   setVisible(visible: boolean) {
     VisibilityMixin.setVisible(this, visible, "earth");
+    if (visible) {
+      setupEarthMenu(this);
+    }
     if (!visible) {
-      this.setConfigPanelOpen?.(false);
       this.fpsCounter.clear();
     }
   }
@@ -545,20 +544,9 @@ export class ProceduralOrbit {
     this.lastFrameTime = now;
     const deltaSeconds = rawDelta * this.timeScale;
     const cloudTime = now * 0.001 * this.shaderTimeScale;
-    const osc = Math.sin(now * 0.001 * this.cloudOscSpeed);
-    const oscOffset = Math.cos(now * 0.001 * this.cloudOscSpeed * 0.9);
-    const cloudAmount = Math.max(
-      0,
-      Math.min(1, this.cloudAmount + osc * this.cloudAmountOscAmp),
-    );
-    const cloud1Opacity = Math.max(
-      0.5,
-      this.cloud1Opacity + oscOffset * this.cloudOpacityOscAmp,
-    );
-    const cloud2Opacity = Math.max(
-      0.5,
-      this.cloud2Opacity - oscOffset * this.cloudOpacityOscAmp,
-    );
+    const cloudAmount = this.cloudAmount;
+    const cloud1Opacity = this.cloud1Opacity;
+    const cloud2Opacity = this.cloud2Opacity;
 
     // Rotations
     this.earth.rotation.y += this.earthRotSpeed * deltaSeconds;
@@ -625,14 +613,14 @@ export class ProceduralOrbit {
     (this.cloud2.material as THREE.ShaderMaterial).uniforms.uCloudAmount.value =
       cloudAmount;
 
-    this.hexLayers.forEach((l) => l.update(now * 0.001));
+    this.hexLayers.forEach((l) => l.update(now * 0.001, sDir, SUN_COLOR));
     this.atmosphereMaterial.uniforms.uSunDir.value.copy(sDir);
     (this.atmosphereMaterial.uniforms as any).uKeyDir2.value.copy(kDir2);
     this.sunAtmosphereMaterial.uniforms.uSunDir.value.copy(sDir);
     this.sunAtmosphereMaterial.uniforms.uCameraPos.value.copy(
       this.camera.position,
     );
-    this.syncConfigSliders();
+
 
     // Keep debug lights moving with the same orbits.
     this.sunKeyLight.position.copy(this.sunLight.position);
@@ -648,15 +636,7 @@ export class ProceduralOrbit {
     this.updateMoonPosition(now);
   };
 
-  private syncConfigSliders() {
-    if (!this.configSliderMap.size) return;
-    this.configSliderMap.forEach((entry) => {
-      if (document.activeElement === entry.slider) return;
-      const value = entry.getValue();
-      entry.slider.value = `${value}`;
-      entry.valueEl.textContent = entry.format(value);
-    });
-  }
+
 
   private updateCamera(anchor: THREE.Vector3) {
     const orbitX = Math.cos(this.cameraOrbit) * this.cameraDistance;
@@ -686,6 +666,38 @@ export class ProceduralOrbit {
     const offsetRad = angleRad - this.sunTimeMs * this.sunOrbitSpeed;
     this.sunOrbitAngleDeg = offsetRad / DEG_TO_RAD;
   }
+
+  setLandRadius(totalRadius: number) {
+    if (this.landLayer) {
+      this.landLayer.setRadius(this.earthRadius, totalRadius - this.earthRadius);
+    }
+  }
+
+  getLandRadius() {
+    // Default is earthRadius + 0.6
+    return this.earthRadius + 0.6;
+  }
+
+  setCloud1Radius(radius: number) {
+    const initialRadius = this.earthRadius + 1.2;
+    const scale = radius / initialRadius;
+    this.cloud1.scale.set(scale, scale, scale);
+  }
+
+  getCloud1Radius() {
+    return (this.earthRadius + 1.2) * this.cloud1.scale.x;
+  }
+
+  setCloud2Radius(radius: number) {
+    const initialRadius = this.earthRadius + 1.5;
+    const scale = radius / initialRadius;
+    this.cloud2.scale.set(scale, scale, scale);
+  }
+
+  getCloud2Radius() {
+    return (this.earthRadius + 1.5) * this.cloud2.scale.x;
+  }
+
   buildConfigSnapshot() {
     return {
       camera: {
@@ -702,21 +714,12 @@ export function mountEarth(container: HTMLElement) {
   // Inject HTML
   container.innerHTML = `
       <div class="marketing-overlay" aria-label="Unified Networks marketing information">
-        <h2>Now is the time to learn and build</h2>
+        <h2>Global Virtual Library</h2>
         <p data-typing-subtitle></p>
       </div>
-      <div id="earth-config-panel" class="earth-config-panel" hidden></div>
     `;
 
-  // Create and inject config toggle
-  const controls = document.querySelector('.top-right-controls');
-  const toggle = document.createElement('button');
-  toggle.id = 'earth-config-toggle';
-  toggle.className = 'earth-config-toggle';
-  toggle.type = 'button';
-  toggle.setAttribute('aria-expanded', 'false');
-  toggle.textContent = 'Config';
-  controls?.prepend(toggle);
+
 
   const subtitleEl = container.querySelector(
     "[data-typing-subtitle]"
@@ -732,7 +735,7 @@ export function mountEarth(container: HTMLElement) {
   return {
     dispose: () => {
       orbit.dispose();
-      toggle.remove();
+
       stopTyping();
       container.innerHTML = '';
     },

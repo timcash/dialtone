@@ -70,6 +70,7 @@ func RunChrome(args []string) {
 		newFlags := flag.NewFlagSet("chrome new", flag.ExitOnError)
 		port := newFlags.Int("port", 0, "Remote debugging port (0 for auto)")
 		gpu := newFlags.Bool("gpu", false, "Enable GPU acceleration")
+		headless := newFlags.Bool("headless", false, "Launch in headless mode")
 		debug := newFlags.Bool("debug", false, "Enable verbose logging")
 		
 		for _, arg := range args[1:] {
@@ -105,7 +106,7 @@ func RunChrome(args []string) {
 		if len(positional) > 0 {
 			targetURL = positional[0]
 		}
-		handleNew(*port, *gpu, targetURL, *debug)
+		handleNew(*port, *gpu, *headless, targetURL, *debug)
 	case "verify":
 		verifyFlags := flag.NewFlagSet("chrome verify", flag.ExitOnError)
 		port := verifyFlags.Int("port", 9222, "Remote debugging port")
@@ -270,14 +271,19 @@ func handleKill(arg string, isWindows, totalAll bool) {
 	logger.LogInfo("Successfully killed process %d", pid)
 }
 
-func handleNew(port int, gpu bool, targetURL string, debug bool) {
-	logger.LogInfo("Launching new headed Chrome instance...")
+func handleNew(port int, gpu bool, headless bool, targetURL string, debug bool) {
+	logger.LogInfo("Launching new %s Chrome instance...", func() string {
+		if headless {
+			return "headless"
+		}
+		return "headed"
+	}())
 	// If port is the default 9222, let's try to find a free one to avoid conflicts if 9222 is taken
 	if port == 9222 {
 		port = 0 // app.LaunchChrome will find one
 	}
 
-	res, err := chrome.LaunchChrome(port, gpu, targetURL)
+	res, err := chrome.LaunchChrome(port, gpu, headless, targetURL)
 	if err != nil {
 		logger.LogFatal("Failed to launch Chrome: %v", err)
 	}
@@ -295,7 +301,7 @@ func printChromeUsage() {
 	fmt.Println("\nCommands:")
 	fmt.Println("  verify [--port N]   Verify chrome connectivity")
 	fmt.Println("  list [flags]        List detected chrome processes")
-	fmt.Println("  new [URL] [flags]   Launch a new headed chrome instance")
+	fmt.Println("  new [URL] [flags]   Launch a new Chrome instance")
 	fmt.Println("  kill [PID|all] [--all] Kill Dialtone processes (default) or all processes")
 	fmt.Println("  install             Install chrome dependencies")
 	fmt.Println("\nFlags for list:")
@@ -304,6 +310,7 @@ func printChromeUsage() {
 	fmt.Println("  --verbose, -v       Show full command line report")
 	fmt.Println("\nFlags for new:")
 	fmt.Println("  --gpu               Enable GPU acceleration")
+	fmt.Println("  --headless          Enable headless mode")
 	fmt.Println("\nFlags for kill:")
 	fmt.Println("  --all               Kill ALL Chrome/Edge processes system-wide")
 	fmt.Println("  --windows           Use with 'kill' for WSL host processes (auto-detected usually)")

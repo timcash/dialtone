@@ -1,50 +1,57 @@
-# Binaries
+# OS files
+.DS_Store
+
+# Go binaries
 bin/
-src/web_build/
 *.exe
 *.exe~
+*.dll
+*.so
+*.dylib
 
-# IDE
+# Test binaries
+*.test
+
+# Output files
+*.out
+
+# Environment variables
+.env
+.env.local
+
+# Project specific
 .vscode/
 .idea/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Go
-*.test
-*.out
-.claude
-
-# ENV
-.env
-env/.env
-.vercel
-.env*.local
-
-# logs
-*.log
-
-# Local ticket databases (per-ticket)
-src/tickets/.current_ticket
-src/tickets/.current_ticket_mode
-src/tickets/**/*.duckdb
-
-# Local Dependencies
-node_modules/
-package-lock.json
-dialtone_dependencies/
-test_dialtone_env
-dev_dependencies/
-keys.duckdb
 .chrome_data/
 
-# Plugins
+# DuckDB
+*.duckdb
+*.duckdb.wal
+
+# Node.js
+node_modules/
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm/
+
+# Dialtone specific
+smoke_debug.txt
+smoke_debug_2.txt
+
+# Plugin specific
 src/plugins/**/node_modules/
 src/plugins/**/swarm-metadata.duckdb
 src/plugins/**/metadata.json
 
+# Screenshots & Logs
+*.png
+!src/plugins/www/screenshots/*.png
+!src/plugins/www/screenshots/summary.png
+
 *.log
 src/plugins/swarm/app/node_modules
 src/plugins/swarm/test/node_modules
+
+.vercel

@@ -141,10 +141,8 @@ export class SectionManager {
             this.load(sectionId).then(() => {
               const control = this.visualizations.get(sectionId);
               if (control) {
+                console.log(`%c[SectionManager] 🚀 RESUME #${sectionId}`, "color: #3b82f6; font-weight: bold");
                 control.setVisible(true);
-                if (this.debug) {
-                  // The component itself will log the "AWAKE" message via VisibilityMixin
-                }
               }
             });
 
@@ -164,10 +162,8 @@ export class SectionManager {
           } else {
             const control = this.visualizations.get(sectionId);
             if (control) {
+              console.log(`%c[SectionManager] 💤 PAUSE #${sectionId}`, "color: #8b5cf6");
               control.setVisible(false);
-              if (this.debug) {
-                // The component itself will log the "SLEEP" message via VisibilityMixin
-              }
             }
           }
         });
@@ -272,7 +268,7 @@ export class SectionManager {
         if (this.debug) {
           const elapsed = (performance.now() - startTime).toFixed(0);
           console.log(
-            `%c[${sectionId}] ✅ Mounted & Paused (${elapsed}ms)`,
+            `%c[SectionManager] ✅ Mounted #${sectionId} (${elapsed}ms)`,
             "color: #22c55e; font-weight: bold",
           );
         }
