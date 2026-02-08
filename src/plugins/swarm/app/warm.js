@@ -39,6 +39,7 @@ async function main() {
     }
     
     const bootstrapKeys = await getKeys()
+    writeLog(`Bootstrap Keys Full: Log=${bootstrapKeys.log}, KV=${bootstrapKeys.kv}`)
     writeLog(`Bootstrap Keys: Log=0x${bootstrapKeys.log.slice(0,8)}, KV=0x${bootstrapKeys.kv.slice(0,8)}`)
 
     const log = new AutoLog({
@@ -65,6 +66,12 @@ async function main() {
     await log.ready()
     writeLog('Initializing kv (V2)...')
     await kv.ready()
+
+    // Periodically ack to advance the signed length
+    setInterval(async () => {
+      if (log.base?.writable) await log.base.ack()
+      if (kv.base?.writable) await kv.base.ack()
+    }, 5000)
 
     writeLog(`Peer is now ACTIVE for topic: ${topicPrefix}`)
     writeLog('Holding open BOTH Data and Bootstrap topics.')

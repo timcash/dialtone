@@ -1,3 +1,15 @@
+# Research Notes: Autobase v2 & Writer Authorization
+- **Acknowledgment**: In Autobase v2, writers must be acknowledged to be optimistically applied to the linearized view. This can be done via `host.ackWriter(key)` or by setting an `ackInterval`.
+- **Dynamic Writability**: A follower only becomes writable once its key has been added via `host.addWriter` within the `apply` function and the local Autobase has processed that block.
+- **Replication**: Ensure all relevant cores (including the bootstrap core and all writer cores) are properly replicated through the swarm.
+- **Local Testing**: `mdns: true` is essential for peer discovery when running multiple instances on the same machine.
+
+# V2 Refactor Status: Incremental Testing
+**Next Step**: Systematically debug the synchronization bottleneck by running the incremental test suite (`test_level1` through `test_level4`). 
+- **Level 1 (Corestore Replication)**: PASSED. Basic P2P connectivity works.
+- **Level 2 (Static Autobase Auth)**: STUCK. Authorization messages are appended by Node A but not replicating to Node B.
+- **Goal**: Isolate why `addWriter` ops aren't triggering local writability in followers before proceeding to full V2 class integration.
+
 # Role
 You are a Distributed Systems Engineer expert in the Holepunch, Pear, and Bare ecosystem. You specialize in P2P databases using `autobase`, `hypercore`, and `hyperswarm`.
 
