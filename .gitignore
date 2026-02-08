@@ -51,6 +51,9 @@ src/plugins/**/metadata.json
 
 # Screenshots & Logs
 *.png
+!src/plugins/www/screenshots/*.png
+!src/plugins/www/screenshots/summary.png
+
 *.log
 e2e_unified.log
 e2e_results.log

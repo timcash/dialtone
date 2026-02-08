@@ -54,7 +54,11 @@ type sectionMetrics struct {
 	Memory   float64 `json:"memory"` // MB
 	GPU      float64 `json:"gpu"`    // Placeholder or metric if available
 	JSHeap   float64 `json:"jsHeap"` // MB
+	FPS      int     `json:"fps"`
+	AppCPU   float64 `json:"appCpu"` // ms
+	AppGPU   float64 `json:"appGpu"` // ms
 }
+
 
 // RunWwwSmoke starts the dev server and quickly checks each section for warnings/errors.
 func RunWwwSmoke() error {
@@ -143,6 +147,7 @@ func RunWwwSmoke() error {
 	var mu sync.Mutex
 	currentSection := ""
 	entries := []consoleEntry{}
+	performanceData := make(map[string]sectionMetrics)
 
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
@@ -171,6 +176,43 @@ func RunWwwSmoke() error {
 					stack:   stack,
 				})
 				mu.Unlock()
+			} else if strings.Contains(msg, "[SMOKE_STATS]") {
+				// Parse stats log
+				// msg is likely quoted like "[SMOKE_STATS] {...}" due to formatConsoleArgs
+				cleanMsg := msg
+				if strings.HasPrefix(cleanMsg, "\"") && strings.HasSuffix(cleanMsg, "\"") {
+					cleanMsg = cleanMsg[1 : len(cleanMsg)-1]
+					// Unescape quotes if needed, but simple slicing might be enough for now if no escaped chars inside JSON
+					// Actually, JSON.stringify produces escaped quotes. We should use strconv.Unquote or json.Unmarshal
+					var unquoted string
+					if err := json.Unmarshal([]byte(msg), &unquoted); err == nil {
+						cleanMsg = unquoted
+					}
+				}
+
+				jsonStr := strings.TrimPrefix(cleanMsg, "[SMOKE_STATS] ")
+				var stats struct {
+					FPS    int     `json:"fps"`
+					AppCPU float64 `json:"cpu"`
+					AppGPU float64 `json:"gpu"`
+				}
+				if err := json.Unmarshal([]byte(jsonStr), &stats); err == nil {
+					mu.Lock()
+					if m, ok := performanceData[currentSection]; ok {
+						m.FPS = stats.FPS
+						m.AppCPU = stats.AppCPU
+						m.AppGPU = stats.AppGPU
+						performanceData[currentSection] = m
+					} else {
+						// Initialize if not exists (though loop usually inits)
+						performanceData[currentSection] = sectionMetrics{
+							FPS:    stats.FPS,
+							AppCPU: stats.AppCPU,
+							AppGPU: stats.AppGPU,
+						}
+					}
+					mu.Unlock()
+				}
 			}
 			// ... real-time streaming ...
 
@@ -224,7 +266,7 @@ func RunWwwSmoke() error {
 	}
 
 	var allErrors []string
-	performanceData := make(map[string]sectionMetrics)
+	// performanceData map moved to top scope
 
 	// Navigate once to the base page
 	fmt.Println(">> [WWW] Smoke: loading base page...")
@@ -263,6 +305,30 @@ func RunWwwSmoke() error {
 		// Capture performance metrics before screenshot
 		if err := chromedp.Run(ctx,
 			chromedp.Evaluate(fmt.Sprintf("window.location.hash = '%s'", section), nil),
+			chromedp.Evaluate(`setTimeout(() => {
+				const el = document.querySelector('.header-fps');
+				const text = el ? el.innerText : '';
+				// Parse: FPS (label): 60 · CPU 2.50 ms · GPU 1.10 ms
+				// or FPS --
+				const stats = { fps: 0, cpu: 0, gpu: 0 };
+				if (text && !text.includes('FPS --')) {
+					const parts = text.split('·');
+					if (parts.length >= 3) {
+						// FPS part
+						const fpsMatch = parts[0].match(/: (\d+)/);
+						if (fpsMatch) stats.fps = parseInt(fpsMatch[1]);
+						
+						// CPU part
+						const cpuMatch = parts[1].match(/CPU ([\d\.]+) ms/);
+						if (cpuMatch) stats.cpu = parseFloat(cpuMatch[1]);
+
+						// GPU part
+						const gpuMatch = parts[2].match(/GPU ([\d\.]+) ms/);
+						if (gpuMatch) stats.gpu = parseFloat(gpuMatch[1]);
+					}
+				}
+				console.log('[SMOKE_STATS] ' + JSON.stringify(stats));
+			}, 1500)`, nil),
 			chromedp.Sleep(3500*time.Millisecond), // Wait for main.ts 3000ms scrolling/settling
 			// chromedp.ScrollIntoView(fmt.Sprintf("#%s", section)), // REMOVED: Conflicts with main.ts scroll logic
 			chromedp.Evaluate(`(async () => {
@@ -310,7 +376,20 @@ func RunWwwSmoke() error {
 			continue
 		}
 
-		performanceData[section] = m
+		// Merge heap/memory stats with async captured console stats
+		mu.Lock()
+		if existing, ok := performanceData[section]; ok {
+			existing.JSHeap = m.JSHeap
+			existing.Memory = m.Memory
+			performanceData[section] = existing
+			// Update m for logging below
+			m.FPS = existing.FPS
+			m.AppCPU = existing.AppCPU
+			m.AppGPU = existing.AppGPU
+		} else {
+			performanceData[section] = m
+		}
+		mu.Unlock()
 		fmt.Printf("   [TEST] Verify: hash=%s, scrollY=%.0f, heap=%.1fMB\n", currentHash, scrollY, m.JSHeap)
 
 		if len(buf) > 0 {
@@ -410,11 +489,12 @@ func RunWwwSmoke() error {
 	}
 
 	smLines = append(smLines, "\n## 3. Performance Metrics")
-	smLines = append(smLines, "\n| Section | JS Heap (MB) | Resources (MB) | Script Duration (s) | GPU | Status |")
-	smLines = append(smLines, "|---|---|---|---|---|---|")
+	smLines = append(smLines, "\n| Section | FPS | App CPU (ms) | App GPU (ms) | JS Heap (MB) | Resources (MB) | Status |")
+	smLines = append(smLines, "|---|---|---|---|---|---|---|")
 	for _, section := range sections {
+		// Acquire lock if needed, but performanceData is map and we are single threaded here
 		m := performanceData[section]
-		smLines = append(smLines, fmt.Sprintf("| %s | %.2f | %.2f | %.4f | - | OK |", section, m.JSHeap, m.Memory, m.CPU))
+		smLines = append(smLines, fmt.Sprintf("| %s | %d | %.2f | %.2f | %.2f | %.2f | OK |", section, m.FPS, m.AppCPU, m.AppGPU, m.JSHeap, m.Memory))
 	}
 
 	smLines = append(smLines, "\n## 4. Test Orchestration DAG")

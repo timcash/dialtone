@@ -7,20 +7,20 @@ live website at [dialtone.earth](https://dialtone.earth).
 ### 1) Start dev server
 
 ```shell
-./dialtone.sh www dev
-./dialtone.sh www smoke
-./dialtone.sh www test
-./dialtone.sh www publish
+.\dialtone www dev
+.\dialtone www smoke
+.\dialtone www test
+.\dialtone www publish
 ```
 
 Optional quick openers:
 
 ```shell
-./dialtone.sh www about demo
-./dialtone.sh www radio demo
-./dialtone.sh www cad demo
-./dialtone.sh www earth demo
-./dialtone.sh www webgpu demo
+.\dialtone www about demo
+.\dialtone www radio demo
+.\dialtone www cad demo
+.\dialtone www earth demo
+.\dialtone www webgpu demo
 ```
 
 

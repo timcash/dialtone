@@ -1,6 +1,6 @@
 # WWW Plugin Smoke Test Report
 
-**Generated at:** Sat, 07 Feb 2026 15:19:27 PST
+**Generated at:** Sat, 07 Feb 2026 16:07:11 PST
 
 ## 1. Expected Errors (Proof of Life)
 
@@ -23,19 +23,19 @@ Stack Trace:
 
 ## 3. Performance Metrics
 
-| Section | JS Heap (MB) | Resources (MB) | Status |
-|---|---|---|---|
-| s-home | 0.00 | 0.00 | OK |
-| s-about | 0.00 | 0.00 | OK |
-| s-robot | 0.00 | 0.00 | OK |
-| s-neural | 0.00 | 0.00 | OK |
-| s-math | 0.00 | 0.00 | OK |
-| s-cad | 0.00 | 0.00 | OK |
-| s-radio | 0.00 | 0.00 | OK |
-| s-geotools | 0.00 | 0.00 | OK |
-| s-docs | 0.00 | 0.00 | OK |
-| s-webgpu-template | 0.00 | 0.00 | OK |
-| s-threejs-template | 0.00 | 0.00 | OK |
+| Section | FPS | App CPU (ms) | App GPU (ms) | JS Heap (MB) | Resources (MB) | Status |
+|---|---|---|---|---|---|---|
+| s-home | 60 | 0.45 | 0.13 | 0.00 | 0.00 | OK |
+| s-about | 60 | 1.08 | 0.19 | 0.00 | 0.00 | OK |
+| s-robot | 60 | 0.46 | 1.40 | 0.00 | 0.00 | OK |
+| s-neural | 60 | 0.50 | 9.30 | 0.00 | 0.00 | OK |
+| s-math | 60 | 0.38 | 1.03 | 0.00 | 0.00 | OK |
+| s-cad | 60 | 0.23 | 0.75 | 0.00 | 0.00 | OK |
+| s-radio | 60 | 0.27 | 1.53 | 0.00 | 0.00 | OK |
+| s-geotools | 60 | 0.13 | 2.02 | 0.00 | 0.00 | OK |
+| s-docs | 60 | 0.18 | 0.00 | 0.00 | 0.00 | OK |
+| s-webgpu-template | 60 | 0.10 | 0.06 | 0.00 | 0.00 | OK |
+| s-threejs-template | 60 | 0.14 | 0.00 | 0.00 | 0.00 | OK |
 
 ## 4. Test Orchestration DAG
 
