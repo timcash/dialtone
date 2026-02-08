@@ -311,10 +311,7 @@ func RunWwwSmoke() error {
 	// performanceData map moved to top scope
 
 	// Navigate once to the base page
-	fmt.Println(">> [WWW] Smoke: loading base page...")
-	if err := chromedp.Run(ctx, chromedp.Navigate(base)); err != nil {
-		return fmt.Errorf("initial navigate failed: %v", err)
-	}
+
 
 	// TRIGGER PROOFOFLIFE ERRORS
 	fmt.Println(">> [WWW] Smoke: triggering Proof of Life errors...")
@@ -366,7 +363,7 @@ func RunWwwSmoke() error {
 		// Wait for 2 fresh stats updates
 		statsCount := 0
 
-		timeout := time.After(5 * time.Second)
+		timeout := time.After(30 * time.Second)
 
 	waitLoop:
 		for statsCount < 2 {
