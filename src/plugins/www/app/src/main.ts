@@ -98,6 +98,16 @@ sections.register('s-docs', {
     }
 });
 
+sections.register('s-policy', {
+    containerId: 'policy-container',
+    load: async () => {
+        const { mountPolicy } = await import('./components/policy/index');
+        const container = document.getElementById('policy-container');
+        if (!container) throw new Error('policy-container not found');
+        return mountPolicy(container);
+    }
+});
+
 sections.register('s-webgpu-template', {
     containerId: 'webgpu-template-container',
     load: async () => {

@@ -96,7 +96,8 @@ h2 {
 #geotools-container,
 #threejs-template-container,
 #docs-container,
-#about-container {
+#about-container,
+#policy-container {
   position: absolute;
   top: 0;
   left: 0;
@@ -114,7 +115,8 @@ h2 {
 #geotools-container canvas,
 #threejs-template-container canvas,
 #docs-container canvas,
-#about-container canvas {
+#about-container canvas,
+#policy-container canvas {
   display: block;
 }
 
