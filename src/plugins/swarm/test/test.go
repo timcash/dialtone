@@ -55,7 +55,7 @@ func RunSwarmIntegration() error {
 	}
 	toolEnv := envWithDialtoneTools(envPath)
 
-	fmt.Println(">> [swarm] Running Pear unit tests (app/test_v2.js)...")
+	fmt.Println(">> [swarm] Running Pear unit tests (app/test_7_convergence.js)...")
 	if err := runPearUnitTests(appDir, pearBin, toolEnv); err != nil {
 		return err
 	}
@@ -240,7 +240,7 @@ func verifyDashboard(ctx context.Context) error {
 }
 
 func runPearUnitTests(appDir, pearBin string, env []string) error {
-	fmt.Println(">> [swarm] Running Pear lifecycle tests (app/test_v2.js lifecycle)...")
+	fmt.Println(">> [swarm] Running Pear lifecycle tests (app/test_7_convergence.js lifecycle)...")
 	if err := runPearTest(appDir, pearBin, env, "lifecycle"); err != nil {
 		return fmt.Errorf("lifecycle test failed: %v", err)
 	}
@@ -250,7 +250,7 @@ func runPearUnitTests(appDir, pearBin string, env []string) error {
 }
 
 func runPearTest(appDir, pearBin string, env []string, args ...string) error {
-	cmd := exec.Command(pearBin, append([]string{"run", "./test_v2.js"}, args...)...)
+	cmd := exec.Command(pearBin, append([]string{"run", "./test_7_convergence.js"}, args...)...)
 	cmd.Dir = appDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
