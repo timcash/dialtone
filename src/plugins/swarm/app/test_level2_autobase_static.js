@@ -18,12 +18,12 @@ async function main () {
   
   console.log('--- Level 2: Static Autobase ---')
 
-  const apply = (nodes, view, host) => {
-    for (const node of nodes) {
-      if (node.value.addWriter) {
-        host.addWriter(b4a.from(node.value.addWriter, 'hex'), { indexer: true })
+  const apply = async (nodes, view, host) => {
+    for (const { value } of nodes) {
+      if (value && value.addWriter) {
+        await host.addWriter(b4a.from(value.addWriter, 'hex'), { indexer: true })
       } else {
-        view.append(node.value)
+        await view.append(value)
       }
     }
   }
@@ -32,16 +32,14 @@ async function main () {
   const storeA = new Corestore(path.join(baseDir, 'a'))
   const swarmA = new Hyperswarm({ mdns: true })
   
-  const coreA = storeA.get({ name: 'autobase' })
-  await coreA.ready()
-  const bootstrapKey = b4a.toString(coreA.key, 'hex')
-
-  const baseA = new Autobase(storeA, bootstrapKey, {
+  const baseA = new Autobase(storeA, null, {
     apply,
     open: (store) => store.get('view', { valueEncoding: 'json' }),
-    valueEncoding: 'json'
+    valueEncoding: 'json',
+    ackInterval: 100
   })
   await baseA.ready()
+  const bootstrapKey = baseA.key
 
   swarmA.on('connection', (socket) => storeA.replicate(socket))
   swarmA.join(topic, { server: true, client: true })
@@ -52,7 +50,8 @@ async function main () {
   const baseB = new Autobase(storeB, bootstrapKey, {
     apply,
     open: (store) => store.get('view', { valueEncoding: 'json' }),
-    valueEncoding: 'json'
+    valueEncoding: 'json',
+    ackInterval: 100
   })
   await baseB.ready()
 
@@ -80,12 +79,17 @@ async function main () {
   await baseB.append({ msg: 'Level 2 Success' })
   
   console.log('[test] Finalizing sync...')
+  await baseB.ack()
+  await baseA.update()
+  await baseA.ack()
   await baseB.update()
   await baseA.update()
 
+  console.log(`[test] Node A view length: ${baseA.view.length}`)
   let result = null
   for (let i = 0; i < baseA.view.length; i++) {
     const node = await baseA.view.get(i)
+    console.log(`[test] Node A view[${i}]:`, node)
     if (node?.msg === 'Level 2 Success') result = node
   }
 
