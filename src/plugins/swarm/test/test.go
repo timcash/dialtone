@@ -55,7 +55,7 @@ func RunSwarmIntegration() error {
 	}
 	toolEnv := envWithDialtoneTools(envPath)
 
-	fmt.Println(">> [swarm] Running Pear unit tests (app/test_7_convergence.js)...")
+	fmt.Println(">> [swarm] Running Pear sequential test suite...")
 	if err := runPearUnitTests(appDir, pearBin, toolEnv); err != nil {
 		return err
 	}
@@ -240,17 +240,34 @@ func verifyDashboard(ctx context.Context) error {
 }
 
 func runPearUnitTests(appDir, pearBin string, env []string) error {
-	fmt.Println(">> [swarm] Running Pear lifecycle tests (app/test_7_convergence.js lifecycle)...")
-	if err := runPearTest(appDir, pearBin, env, "lifecycle"); err != nil {
-		return fmt.Errorf("lifecycle test failed: %v", err)
+	tests := []struct {
+		file string
+		args []string
+	}{
+		{"test_1_warm_node.js", nil},
+		{"test_2_corestore_lock.js", nil},
+		{"test_3_corestore.js", nil},
+		{"test_4_autobase_static.js", nil},
+		{"test_5_handshake.js", nil},
+		{"test_6_full_stack.js", nil},
+		{"test_7_convergence.js", []string{"lifecycle"}},
+		{"test_8_warm_connect.js", nil},
 	}
 
-	fmt.Println(">> [swarm] Pear unit tests complete.")
+	for _, t := range tests {
+		fmt.Printf(">> [swarm] Running %s...\n", t.file)
+		if err := runPearTest(appDir, pearBin, env, t.file, t.args...); err != nil {
+			return fmt.Errorf("%s failed: %v", t.file, err)
+		}
+	}
+
+	fmt.Println(">> [swarm] All sequential tests passed.")
 	return nil
 }
 
-func runPearTest(appDir, pearBin string, env []string, args ...string) error {
-	cmd := exec.Command(pearBin, append([]string{"run", "./test_7_convergence.js"}, args...)...)
+func runPearTest(appDir, pearBin string, env []string, fileName string, args ...string) error {
+	fullArgs := append([]string{"run", fileName}, args...)
+	cmd := exec.Command(pearBin, fullArgs...)
 	cmd.Dir = appDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
