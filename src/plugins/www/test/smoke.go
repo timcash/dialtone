@@ -10,7 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
+
 
 	"strings"
 	"sync"
@@ -18,6 +18,9 @@ import (
 
 	"dialtone/cli/src/core/browser"
 	"dialtone/cli/src/core/test"
+	chromeApp "dialtone/cli/src/plugins/chrome/app"
+
+	"strconv"
 
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/cdproto/page"
@@ -98,11 +101,17 @@ func RunWwwSmoke() error {
 		}()
 	}
 
+	var isNewBrowser bool
+
 	// Ensure Chrome cleanup
 	defer func() {
-		fmt.Println(">> [WWW] Smoke: cleaning up browser processes...")
-		killCmd := getDialtoneCmd("chrome", "kill", "all")
-		killCmd.Run()
+		if isNewBrowser {
+			fmt.Println(">> [WWW] Smoke: cleaning up browser processes...")
+			killCmd := getDialtoneCmd("chrome", "kill", "all")
+			killCmd.Run()
+		} else {
+			fmt.Println(">> [WWW] Smoke: keeping existing browser open")
+		}
 	}()
 
 	if err := waitForPortLocal(5173, 30*time.Second); err != nil {
@@ -110,23 +119,30 @@ func RunWwwSmoke() error {
 	}
 	fmt.Println(">> [WWW] Smoke: dev server ready on 5173")
 
-	// Check for --headed flag
+	// Check for --headed, --port, --wait, and --ignore-env flags
 	isHeaded := false
+	targetPort := 0
+
+	ignoreEnv := false
+
 	for _, arg := range os.Args {
 		if arg == "--headed" {
 			isHeaded = true
-			break
+		} else if strings.HasPrefix(arg, "--port=") {
+			pStr := strings.TrimPrefix(arg, "--port=")
+			if p, err := strconv.Atoi(pStr); err == nil {
+				targetPort = p
+			}
+
+		} else if arg == "--ignore-env" {
+			ignoreEnv = true
 		}
 	}
 
+
+
 	useHeadless := os.Getenv("SMOKE_HEADLESS") != "false" && !isHeaded
-	var wsURL string
-	var err error
-	if useHeadless {
-		wsURL, err = getChromeWebSocketURLHeadless()
-	} else {
-		wsURL, err = getChromeWebSocketURL()
-	}
+	wsURL, isNewBrowser, err := resolveChrome(targetPort, useHeadless, ignoreEnv)
 	if err != nil {
 		return err
 	}
@@ -148,6 +164,7 @@ func RunWwwSmoke() error {
 	currentSection := ""
 	entries := []consoleEntry{}
 	performanceData := make(map[string]sectionMetrics)
+	statsCh := make(chan sectionMetrics, 100)
 
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
@@ -178,12 +195,9 @@ func RunWwwSmoke() error {
 				mu.Unlock()
 			} else if strings.Contains(msg, "[SMOKE_STATS]") {
 				// Parse stats log
-				// msg is likely quoted like "[SMOKE_STATS] {...}" due to formatConsoleArgs
 				cleanMsg := msg
 				if strings.HasPrefix(cleanMsg, "\"") && strings.HasSuffix(cleanMsg, "\"") {
 					cleanMsg = cleanMsg[1 : len(cleanMsg)-1]
-					// Unescape quotes if needed, but simple slicing might be enough for now if no escaped chars inside JSON
-					// Actually, JSON.stringify produces escaped quotes. We should use strconv.Unquote or json.Unmarshal
 					var unquoted string
 					if err := json.Unmarshal([]byte(msg), &unquoted); err == nil {
 						cleanMsg = unquoted
@@ -197,21 +211,18 @@ func RunWwwSmoke() error {
 					AppGPU float64 `json:"gpu"`
 				}
 				if err := json.Unmarshal([]byte(jsonStr), &stats); err == nil {
-					mu.Lock()
-					if m, ok := performanceData[currentSection]; ok {
-						m.FPS = stats.FPS
-						m.AppCPU = stats.AppCPU
-						m.AppGPU = stats.AppGPU
-						performanceData[currentSection] = m
-					} else {
-						// Initialize if not exists (though loop usually inits)
-						performanceData[currentSection] = sectionMetrics{
-							FPS:    stats.FPS,
-							AppCPU: stats.AppCPU,
-							AppGPU: stats.AppGPU,
-						}
+					m := sectionMetrics{
+						FPS:    stats.FPS,
+						AppCPU: stats.AppCPU,
+						AppGPU: stats.AppGPU,
 					}
-					mu.Unlock()
+					// Send to channel non-blocking
+					select {
+					case statsCh <- m:
+					default:
+						// Channel is full, drop the stat.
+						// This is acceptable for continuous metrics where we only care about recent values.
+					}
 				}
 			}
 			// ... real-time streaming ...
@@ -259,10 +270,41 @@ func RunWwwSmoke() error {
 	if err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(375, 812, chromedp.EmulateMobile),
 		chromedp.Navigate(base),
-		chromedp.Sleep(1*time.Second),
+		chromedp.WaitVisible(".header-fps", chromedp.ByQuery),
+		chromedp.Evaluate(`
+			(function() {
+				const observer = new MutationObserver(() => {
+					const el = document.querySelector('.header-fps');
+					if (!el) return;
+					const text = el.innerText;
+					if (!text || text.includes('FPS --')) return;
+
+					const stats = { fps: 0, cpu: 0, gpu: 0 };
+					const parts = text.split('·');
+					if (parts.length >= 3) {
+						const fpsMatch = parts[0].match(/: (\d+)/);
+						if (fpsMatch) stats.fps = parseInt(fpsMatch[1]);
+						
+						const cpuMatch = parts[1].match(/CPU ([\d\.]+) ms/);
+						if (cpuMatch) stats.cpu = parseFloat(cpuMatch[1]);
+
+						const gpuMatch = parts[2].match(/GPU ([\d\.]+) ms/);
+						if (gpuMatch) stats.gpu = parseFloat(gpuMatch[1]);
+						
+						console.log('[SMOKE_STATS] ' + JSON.stringify(stats));
+					}
+				});
+				observer.observe(document.querySelector('.header-fps'), { 
+					childList: true, 
+					characterData: true, 
+					subtree: true 
+				});
+				console.log("[SMOKE] Observer injected");
+			})()
+		`, nil),
 		chromedp.Evaluate(`Array.from(document.querySelectorAll('section[id^="s-"]')).map(el => el.id)`, &sections),
 	); err != nil {
-		return fmt.Errorf("failed to fetch section IDs: %v", err)
+		return fmt.Errorf("failed to navigate/inject: %v", err)
 	}
 
 	var allErrors []string
@@ -302,34 +344,60 @@ func RunWwwSmoke() error {
 		var scrollY float64
 		var m sectionMetrics
 		
-		// Capture performance metrics before screenshot
+		// Drain stats channel
+	drain:
+		for {
+			select {
+			case <-statsCh:
+			default:
+				break drain
+			}
+		}
+		
+		fmt.Printf(">> [WWW] Smoke: [%d/%d] NAVIGATING TO: #%s\n", i+1, len(sections), section)
+		
+		// Navigate
 		if err := chromedp.Run(ctx,
 			chromedp.Evaluate(fmt.Sprintf("window.location.hash = '%s'", section), nil),
-			chromedp.Evaluate(`setTimeout(() => {
-				const el = document.querySelector('.header-fps');
-				const text = el ? el.innerText : '';
-				// Parse: FPS (label): 60 · CPU 2.50 ms · GPU 1.10 ms
-				// or FPS --
-				const stats = { fps: 0, cpu: 0, gpu: 0 };
-				if (text && !text.includes('FPS --')) {
-					const parts = text.split('·');
-					if (parts.length >= 3) {
-						// FPS part
-						const fpsMatch = parts[0].match(/: (\d+)/);
-						if (fpsMatch) stats.fps = parseInt(fpsMatch[1]);
-						
-						// CPU part
-						const cpuMatch = parts[1].match(/CPU ([\d\.]+) ms/);
-						if (cpuMatch) stats.cpu = parseFloat(cpuMatch[1]);
+		); err != nil {
+			return err
+		}
 
-						// GPU part
-						const gpuMatch = parts[2].match(/GPU ([\d\.]+) ms/);
-						if (gpuMatch) stats.gpu = parseFloat(gpuMatch[1]);
+		// Wait for 2 fresh stats updates
+		statsCount := 0
+
+		timeout := time.After(5 * time.Second)
+
+	waitLoop:
+		for statsCount < 2 {
+			select {
+			case s := <-statsCh:
+				_ = s
+				statsCount++
+				// Update global map with latest
+				mu.Lock()
+				if m, ok := performanceData[section]; ok {
+					m.FPS = s.FPS
+					m.AppCPU = s.AppCPU
+					m.AppGPU = s.AppGPU
+					performanceData[section] = m
+				} else {
+					performanceData[section] = sectionMetrics{
+						FPS:    s.FPS,
+						AppCPU: s.AppCPU,
+						AppGPU: s.AppGPU,
 					}
 				}
-				console.log('[SMOKE_STATS] ' + JSON.stringify(stats));
-			}, 1500)`, nil),
-			chromedp.Sleep(3500*time.Millisecond), // Wait for main.ts 3000ms scrolling/settling
+				mu.Unlock()
+				fmt.Printf("   [STATS] %s: %d/2 (FPS: %d)\n", section, statsCount, s.FPS)
+			case <-timeout:
+				fmt.Printf("   [WARN] Timeout waiting for stats on %s\n", section)
+				break waitLoop
+			}
+		}
+
+		// Capture screenshot after robust wait
+		if err := chromedp.Run(ctx,
 			// chromedp.ScrollIntoView(fmt.Sprintf("#%s", section)), // REMOVED: Conflicts with main.ts scroll logic
 			chromedp.Evaluate(`(async () => {
 				const mem = (performance && performance.memory) ? {
@@ -580,30 +648,69 @@ func RunWwwSmoke() error {
 	return nil
 }
 
-func getChromeWebSocketURLHeadless() (string, error) {
-	if ws := os.Getenv("CHROME_WS"); ws != "" {
-		fmt.Println(">> [WWW] Smoke: using CHROME_WS")
-		return ws, nil
+func resolveChrome(requestedPort int, headless bool, ignoreEnv bool) (string, bool, error) {
+	// 1. If explicit port provided, try to use it
+	if requestedPort > 0 {
+		fmt.Printf(">> [WWW] Smoke: using requested port %d\n", requestedPort)
+		ws, err := readWebSocketURL(fmt.Sprintf("%d", requestedPort))
+		if err == nil && ws != "" {
+			return ws, false, nil
+		}
+		// If requested port isn't open, we probably shouldn't auto-launch on it unless we really want to enforce it.
+		// For now, fail if explicit port is dead, or optionally launch on that specific port?
+		// Let's try to launch on that port.
+		fmt.Printf(">> [WWW] Smoke: launching chrome on requested port %d\n", requestedPort)
+		res, err := chromeApp.LaunchChrome(requestedPort, true, headless, "")
+		if err != nil {
+			return "", false, err
+		}
+		return res.WebsocketURL, true, nil
 	}
 
-	port := os.Getenv("CHROME_DEBUG_PORT")
-	if port == "" {
-		port = "9222"
+	// 2. Check env vars (unless ignored)
+	if !ignoreEnv {
+		if ws := os.Getenv("CHROME_WS"); ws != "" {
+			fmt.Println(">> [WWW] Smoke: using CHROME_WS")
+			return ws, false, nil
+		}
+		if pStr := os.Getenv("CHROME_DEBUG_PORT"); pStr != "" {
+			if p, err := strconv.Atoi(pStr); err == nil && p > 0 {
+				fmt.Printf(">> [WWW] Smoke: checking env CHROME_DEBUG_PORT %d\n", p)
+				ws, err := readWebSocketURL(pStr)
+				if err == nil && ws != "" {
+					return ws, false, nil
+				}
+			}
+		}
 	}
-	
-	fmt.Println(">> [WWW] Smoke: launching headless chrome")
-	launchCmd := getDialtoneCmd("chrome", "new", "--headless", "--gpu")
-	output, err := launchCmd.CombinedOutput()
+
+	// 3. Auto-detect existing processes
+	procs, err := chromeApp.ListResources(true)
+	if err == nil {
+		for _, p := range procs {
+			if p.DebugPort > 0 {
+				// Optional: Filter by headless status vs requested?
+				// For now, if we found one with a port, reuse it.
+				fmt.Printf(">> [WWW] Smoke: found existing chrome on port %d\n", p.DebugPort)
+				ws, err := readWebSocketURL(fmt.Sprintf("%d", p.DebugPort))
+				if err == nil && ws != "" {
+					return ws, false, nil
+				}
+			}
+		}
+	}
+
+	// 4. Launch new
+	reqDesc := "headed"
+	if headless {
+		reqDesc = "headless"
+	}
+	fmt.Printf(">> [WWW] Smoke: launching new %s chrome (auto-port)\n", reqDesc)
+	res, err := chromeApp.LaunchChrome(0, true, headless, "")
 	if err != nil {
-		return "", fmt.Errorf("failed to launch chrome: %v\nOutput: %s", err, string(output))
+		return "", false, err
 	}
-
-	re := regexp.MustCompile(`ws://127\.0\.0\.1:\d+/devtools/browser/[a-z0-9-]+`)
-	wsURL := re.FindString(string(output))
-	if wsURL == "" {
-		return "", fmt.Errorf("failed to parse chrome WebSocket URL: %s", string(output))
-	}
-	return wsURL, nil
+	return res.WebsocketURL, true, nil
 }
 
 func TileScreenshots(dir string, output string, order []string) error {
@@ -707,36 +814,7 @@ func formatConsoleArgs(args []*runtime.RemoteObject) string {
 	return strings.Join(parts, " ")
 }
 
-func getChromeWebSocketURL() (string, error) {
-	if ws := os.Getenv("CHROME_WS"); ws != "" {
-		fmt.Println(">> [WWW] Smoke: using CHROME_WS")
-		return ws, nil
-	}
 
-	port := os.Getenv("CHROME_DEBUG_PORT")
-	if port == "" {
-		port = "9222"
-	}
-	fmt.Printf(">> [WWW] Smoke: checking chrome debug port %s\n", port)
-	if ws, err := readWebSocketURL(port); err == nil && ws != "" {
-		fmt.Println(">> [WWW] Smoke: attached to existing chrome")
-		return ws, nil
-	}
-
-	fmt.Println(">> [WWW] Smoke: launching chrome")
-	launchCmd := getDialtoneCmd("chrome", "new", "--gpu")
-	output, err := launchCmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("failed to launch chrome: %v\nOutput: %s", err, string(output))
-	}
-
-	re := regexp.MustCompile(`ws://127\.0\.0\.1:\d+/devtools/browser/[a-z0-9-]+`)
-	wsURL := re.FindString(string(output))
-	if wsURL == "" {
-		return "", fmt.Errorf("failed to parse chrome WebSocket URL: %s", string(output))
-	}
-	return wsURL, nil
-}
 
 func readWebSocketURL(port string) (string, error) {
 	fmt.Println(">> [WWW] Smoke: fetching /json/version")

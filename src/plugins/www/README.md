@@ -11,7 +11,30 @@ live website at [dialtone.earth](https://dialtone.earth).
 .\dialtone www smoke
 .\dialtone www test
 .\dialtone www publish
+.\dialtone www dev
+.\dialtone www smoke
+.\dialtone www test
+.\dialtone www publish
 ```
+
+### Smoke Test
+
+Run a visual regression and performance smoke test.
+
+```shell
+# Standard run (default 1.5s/slide)
+.\dialtone www smoke
+
+# Faster run (1.0s/slide)
+.\dialtone www smoke --wait=1.0
+
+# Slower run (3.0s/slide) for heavy assets
+.\dialtone www smoke --wait=3.0
+```
+
+-   **--wait=[seconds]**: Controls the time spent on each slide before capturing stats and screenshots. Default is 1.5s.
+-   **--ignore-env**: Ignores `CHROME_DEBUG_PORT` and `CHROME_WS` environment variables, forcing auto-discovery or a new instance.
+-   **Stats & Screenshots**: Both are captured exactly at the end of the wait period, ensuring the page has settled.
 
 Optional quick openers:
 
