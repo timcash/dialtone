@@ -1,6 +1,6 @@
 # WWW Plugin Smoke Test Report
 
-**Generated at:** Sat, 07 Feb 2026 16:39:23 PST
+**Generated at:** Sat, 07 Feb 2026 16:49:58 PST
 
 ## 1. Expected Errors (Proof of Life)
 
