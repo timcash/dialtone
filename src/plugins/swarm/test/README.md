@@ -1,52 +1,74 @@
-# Swarm Plugin: Testing Framework
+# Swarm Plugin: V2 Testing Workflow
 
-The Swarm Plugin uses a multi-layered testing strategy to verify decentralized consensus and P2P synchronization.
+This framework verifies the **Holepunch** P2P stack using a progressive, layered approach. Tests are numbered `test_N_...` and should generally be run in order when debugging the protocol.
 
-## 🏗 Test Structure
+## 🏗 The Layered Workflow
 
-We categorize tests into three distinct layers:
+### Step 1: Infrastructure Layer (`test_1_warm_node.js`)
+Ensures a stable DHT anchor is running.
+- **Action**: Starts `warm.js` in the background if not already running.
+- **Purpose**: Provides a persistent bootstrap for all subsequent tests, preventing DHT "cold start" delays.
+- **Run**: `pear run test_1_warm_node.js`
 
-### 1. Incremental Protocol Levels (`app/test_level*.js`)
-These tests are used to isolate specific failures in the Holepunch stack. They should be run in sequence when debugging synchronization issues.
+### Step 2: Transport Layer (`test_2_corestore.js`)
+Verifies raw data movement between two peers.
+- **Action**: Node A appends to a Hypercore; Node B replicates it.
+- **Purpose**: Isolates Hyperswarm discovery and Corestore replication from Autobase logic.
+- **Run**: `pear run test_2_corestore.js`
 
-- **Level 1 (Corestore)**: Verifies basic P2P connectivity and raw Hypercore replication.
-- **Level 2 (Static Autobase)**: Verifies manual writer authorization and view linearizing.
-- **Level 3 (Handshake)**: Verifies automated key exchange over the `:bootstrap` topic.
-- **Level 4 (V2 Classes)**: Verifies the high-level `AutoLog` and `AutoKV` classes.
+### Step 3: Consensus Layer (`test_3_autobase_static.js`)
+Verifies the multi-writer linearization engine.
+- **Action**: Node A manually authorizes Node B's key.
+- **Purpose**: Verifies `async apply` logic and `base.ack()` convergence without the complexity of handshakes.
+- **Run**: `pear run test_3_autobase_static.js`
 
-### 2. Convergence Suites (`app/test_v2.js`)
-Comprehensive tests that simulate multiple nodes performing concurrent operations.
-- **Goal**: Ensure all nodes reach an identical state (hash convergence) under load.
-- **Features**: Periodic acks, random write patterns, and automated convergence reporting to `TEST.md`.
+### Step 4: Protocol Layer (`test_4_handshake.js`)
+Verifies automated key exchange.
+- **Action**: Peers exchange keys over the `:bootstrap` topic and self-authorize.
+- **Purpose**: Tests the plain-text handshake used to "warm up" the encrypted data swarm.
+- **Run**: `pear run test_4_handshake.js`
 
-### 3. Environmental / "Warm" Tests (`app/test_warm_connect.js`)
-Tests that verify connectivity against long-lived infrastructure.
-- **Goal**: Verify that new nodes can join an existing "Warm Peer" and sync history correctly.
-- **Usage**: Requires a `warm.js` process running in the background.
+### Step 5: API Layer (`test_5_full_v2.js`)
+Verifies the production `AutoLog` and `AutoKV` classes.
+- **Action**: Simple setup using the high-level V2 API.
+- **Purpose**: Ensures the abstract classes correctly wrap the underlying protocol logic.
+- **Run**: `pear run test_5_full_v2.js`
 
-## 🚀 Execution Guide
+### Step 6: Convergence Suite (`test_6_convergence.js`)
+Stress tests the system with concurrent writers.
+- **Action**: Multiple nodes perform random writes for 30-60s.
+- **Purpose**: Verifies that all nodes reach an identical state (Merkle hash match) under load.
+- **Run**: `pear run test_6_convergence.js lifecycle`
 
-### Running All Levels
+### Step 7: Environment Integration (`test_7_warm_connect.js`)
+Verifies connectivity against the long-lived warm node.
+- **Action**: Client connects to the keys printed by Test 1.
+- **Purpose**: Simulates a real-world scenario where a new user joins an existing stable swarm.
+- **Run**: `pear run test_7_warm_connect.js`
+
+---
+
+## 🚀 Quick Execution Guide
+
+To verify the entire stack from scratch:
+
 ```bash
 cd src/plugins/swarm/app
-pear run test_level1_corestore.js
-pear run test_level2_autobase_static.js
-pear run test_level3_handshake.js
-pear run test_level4_full_v2.js
+
+# 1. Start/Verify Infrastructure
+pear run test_1_warm_node.js
+
+# 2. Run sequential protocol tests
+pear run test_2_corestore.js
+pear run test_3_autobase_static.js
+pear run test_4_handshake.js
+pear run test_5_full_v2.js
+
+# 3. Perform final convergence check
+pear run test_6_convergence.js lifecycle
 ```
 
-### Running the Convergence Test
-```bash
-cd src/plugins/swarm/app
-pear run test_v2.js lifecycle
-```
-
-### Infrastructure-based Test (Simulation of Real Peer)
-1. **Start the anchor**: `pear run warm.js dialtone-v2`
-2. **Run the client**: `pear run test_warm_connect.js`
-
-## 🛠 Best Practices for Agents
-- **Isolate Storage**: Always use `path.join(os.tmpdir(), ...)` with a unique timestamp for every test run to avoid Corestore locking errors.
-- **Wait for Flush**: Always `await discovery.flushed()` before assuming peers can find each other.
-- **Monitor Acks**: If data isn't appearing in the view, verify that `base.ack()` is being called (either via `ackInterval` or manually).
-- **Check MDNS**: When testing locally on one machine, ensure `{ mdns: true }` is passed to the `Hyperswarm` constructor.
+## 🛠 Troubleshooting for Agents
+- **Corestore Locks**: If a test hangs or throws "Access Denied", ensure no other process is using the same `storage` directory.
+- **Signed Length**: In Autobase v2, views do not advance until a quorum of indexers acks. Check `ackInterval` if the view length remains `0`.
+- **MDNS**: Local testing **requires** `{ mdns: true }` in the Hyperswarm config to bypass DHT discovery for peers on the same machine.
