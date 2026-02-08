@@ -1,5 +1,7 @@
 # Plugin: www
 
+![Dialtone WWW Summary](screenshots/summary.png)
+
 live website at [dialtone.earth](https://dialtone.earth).
 
 ## Workflow (local dev → section → publish)
