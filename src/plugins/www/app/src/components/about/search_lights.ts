@@ -201,7 +201,14 @@ export class SearchLights {
     const allLights = [this.orbitLight, ...this.orbitLights];
     allLights.forEach((light, index) => {
       const planeSide = this.rng() < 0.5 ? -1 : 1;
-      const start = this.randomCellPosition(planeSide);
+      // Spawn near center (Gaussian-ish distribution)
+      const cy = this.gridSize.y / 2;
+      const cz = this.gridSize.z / 2;
+      const range = Math.min(this.gridSize.y, this.gridSize.z) * 0.2; // 20% radius
+      const sy = cy + (this.rng() - 0.5) * range;
+      const sz = cz + (this.rng() - 0.5) * range;
+      const start = this.gridPoint(sy, sz, planeSide);
+
       const target = this.randomCellPosition(planeSide);
       const control = this.computeArcControl(start, target);
       light.position.copy(start);
@@ -209,7 +216,7 @@ export class SearchLights {
         light,
         name: `inspector-${index + 1}`,
         intensity: light.intensity,
-        power: this.maxPower * (0.3 + this.rng() * 0.7),
+        power: 0.1 + this.rng() * 0.7, // < 1.0 (Low power start)
         lastSparkMs: 0,
         lastPowerMs: now,
         powerRegenMs: Math.max(500, this.powerRegenMs + (this.rng() - 0.5) * this.powerRegenJitter),

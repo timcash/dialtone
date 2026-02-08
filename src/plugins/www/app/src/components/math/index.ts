@@ -3,11 +3,12 @@ import glowVertexShader from "../../shaders/glow.vert.glsl?raw";
 import glowFragmentShader from "../../shaders/glow.frag.glsl?raw";
 import gridVertexShader from "../../shaders/grid.vert.glsl?raw";
 import gridFragmentShader from "../../shaders/grid.frag.glsl?raw";
-import { FpsCounter } from "../fps";
-import { GpuTimer } from "../gpu_timer";
-import { VisibilityMixin } from "../section";
-import { startTyping } from "../typing";
-import { setupMathConfig } from "./config";
+import { FpsCounter } from "../util/fps";
+import { GpuTimer } from "../util/gpu_timer";
+import { VisibilityMixin } from "../util/section";
+import { startTyping } from "../util/typing";
+import { setupMathMenu } from "./menu";
+
 
 
 const COLORS = {
@@ -78,10 +79,24 @@ class MathVisualization {
   middleOrbitSpeed = 0.0018;
   outerOrbitSpeed = 0.001;
 
-  // Config panel
-  configPanel?: HTMLDivElement;
-  configToggle?: HTMLButtonElement;
-  private setPanelOpen?: (open: boolean) => void;
+  // Camera Roll
+  cameraRoll = 0;
+  cameraRollSpeed = 0;
+
+  // Curve parameters
+  curveA = 1;
+  curveB = 1;
+  curveC = 1;
+  curveD = 1;
+  curveE = 1;
+  curveF = 1;
+
+  // Grid parameters
+  gridOpacity = 0.5;
+  gridOpacityOsc = 0.2;
+  gridOscSpeed = 0.5;
+
+
   private fpsCounter = new FpsCounter("math");
 
   constructor(container: HTMLElement) {
@@ -96,7 +111,7 @@ class MathVisualization {
     }
 
     this.initScene();
-    this.initConfigPanel();
+    // this.initConfigPanel(); // Menu setup on visibility
     this.resize();
     this.animate();
 
@@ -124,6 +139,7 @@ class MathVisualization {
     cancelAnimationFrame(this.frameId);
     this.resizeObserver?.disconnect();
     window.removeEventListener("resize", this.resize);
+
     this.renderer.dispose();
     this.container.removeChild(this.renderer.domElement);
   }
@@ -499,164 +515,11 @@ class MathVisualization {
   }
 
   initConfigPanel() {
-    setupMathConfig(this);
+    // Menu is initialized in mountMath
     return;
-    /*
-    const panel = document.getElementById(
-      "math-config-panel",
-    ) as HTMLDivElement | null;
-    const toggle = document.getElementById(
-      "math-config-toggle",
-    ) as HTMLButtonElement | null;
-    if (!panel || !toggle) return;
 
-    this.configPanel = panel;
-    this.configToggle = toggle;
 
-    const setOpen = (open: boolean) => {
-      panel.hidden = !open;
-      panel.style.display = open ? "grid" : "none";
-      toggle.setAttribute("aria-expanded", String(open));
-    };
-    this.setPanelOpen = setOpen;
 
-    setOpen(false);
-    toggle.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setOpen(panel.hidden);
-    });
-
-    const addSection = (title: string) => {
-      const header = document.createElement("h3");
-      header.textContent = title;
-      panel.appendChild(header);
-    };
-
-    const addSlider = (
-      label: string,
-      value: number,
-      min: number,
-      max: number,
-      step: number,
-      onInput: (v: number) => void,
-      format: (v: number) => string = (v) => v.toFixed(2),
-    ) => {
-      const row = document.createElement("div");
-      row.className = "earth-config-row";
-
-      const labelWrap = document.createElement("label");
-      const sliderId = `math-slider-${label.replace(/\s+/g, "-").toLowerCase()}`;
-      labelWrap.className = "earth-config-label";
-      labelWrap.htmlFor = sliderId;
-      labelWrap.textContent = label;
-
-      const slider = document.createElement("input");
-      slider.type = "range";
-      slider.id = sliderId;
-      slider.min = `${min}`;
-      slider.max = `${max}`;
-      slider.step = `${step}`;
-      slider.value = `${value}`;
-
-      row.appendChild(labelWrap);
-      row.appendChild(slider);
-
-      const valueEl = document.createElement("span");
-      valueEl.className = "earth-config-value";
-      valueEl.textContent = format(value);
-      row.appendChild(valueEl);
-      panel.appendChild(row);
-
-      slider.addEventListener("input", () => {
-        const v = parseFloat(slider.value);
-        onInput(v);
-        valueEl.textContent = format(v);
-      });
-    };
-
-    const addCopyButton = () => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = "Copy Config";
-      button.addEventListener("click", () => {
-        const payload = JSON.stringify(this.buildConfigSnapshot(), null, 2);
-        if (navigator.clipboard?.writeText) {
-          navigator.clipboard
-            .writeText(payload)
-            .catch(() => console.log(payload));
-        } else {
-          console.log(payload);
-        }
-      });
-      panel.appendChild(button);
-    };
-
-    addSection("Camera");
-    addSlider("Radius", this.cameraOrbitRadius, 8, 35, 0.5, (v) => {
-      this.cameraOrbitRadius = v;
-    });
-    addSlider("Height", this.cameraHeight, -5, 15, 0.5, (v) => {
-      this.cameraHeight = v;
-    });
-    addSlider("Height Osc", this.cameraHeightOsc, 0, 6, 0.1, (v) => {
-      this.cameraHeightOsc = v;
-    });
-    addSlider("Height Speed", this.cameraHeightSpeed, 0, 0.5, 0.01, (v) => {
-      this.cameraHeightSpeed = v;
-    });
-    addSlider(
-      "Orbit Speed",
-      this.cameraOrbitSpeed,
-      0,
-      0.2,
-      0.005,
-      (v) => {
-        this.cameraOrbitSpeed = v;
-      },
-      (v) => v.toFixed(3),
-    );
-    addSlider("Look At Y", this.cameraLookAtY, -5, 10, 0.5, (v) => {
-      this.cameraLookAtY = v;
-    });
-
-    addSection("Orbit Rotation");
-    addSlider(
-      "Inner Speed",
-      this.innerOrbitSpeed,
-      0,
-      0.01,
-      0.0005,
-      (v) => {
-        this.innerOrbitSpeed = v;
-      },
-      (v) => v.toFixed(4),
-    );
-    addSlider(
-      "Middle Speed",
-      this.middleOrbitSpeed,
-      0,
-      0.01,
-      0.0005,
-      (v) => {
-        this.middleOrbitSpeed = v;
-      },
-      (v) => v.toFixed(4),
-    );
-    addSlider(
-      "Outer Speed",
-      this.outerOrbitSpeed,
-      0,
-      0.01,
-      0.0005,
-      (v) => {
-        this.outerOrbitSpeed = v;
-      },
-      (v) => v.toFixed(4),
-    );
-
-    addCopyButton();
-    */
   }
 
   buildConfigSnapshot() {
@@ -679,8 +542,10 @@ class MathVisualization {
 
   setVisible(visible: boolean) {
     VisibilityMixin.setVisible(this, visible, "math");
+    if (visible) {
+      setupMathMenu(this);
+    }
     if (!visible) {
-      this.setPanelOpen?.(false);
       this.fpsCounter.clear();
     }
   }
@@ -769,18 +634,9 @@ export function mountMath(container: HTMLElement) {
         <h2>Mathematics powers autonomy</h2>
         <p data-typing-subtitle></p>
       </div>
-      <div id="math-config-panel" class="earth-config-panel" hidden></div>
     `;
 
-  // Create and inject config toggle
-  const controls = document.querySelector('.top-right-controls');
-  const toggle = document.createElement('button');
-  toggle.id = 'math-config-toggle';
-  toggle.className = 'earth-config-toggle';
-  toggle.type = 'button';
-  toggle.setAttribute('aria-expanded', 'false');
-  toggle.textContent = 'Config';
-  controls?.prepend(toggle);
+
 
   const subtitleEl = container.querySelector(
     "[data-typing-subtitle]"
@@ -793,13 +649,16 @@ export function mountMath(container: HTMLElement) {
   const stopTyping = startTyping(subtitleEl, subtitles);
 
   const viz = new MathVisualization(container);
+  // const menu = setupMathMenu(viz); // Menu setup on visibility
+
   return {
     dispose: () => {
       viz.dispose();
-      toggle.remove();
       stopTyping();
-      container.innerHTML = '';
+      container.innerHTML = "";
     },
-    setVisible: (visible: boolean) => viz.setVisible(visible),
+    setVisible: (visible: boolean) => {
+      viz.setVisible(visible);
+    },
   };
 }

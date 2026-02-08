@@ -1,47 +1,48 @@
-# WWW Plugin Update Summary (for next LLM)
+# Handoff: Smoke Test Overhaul
+> [!NOTE]
+> **How to Run**: `$env:SMOKE_HEADLESS="false"; .\dialtone www smoke`
 
-## What was done
-- Added a smoke test at `src/plugins/www/test/smoke.go` using chromedp.
-  - Starts dev server if needed, attaches to Chrome debug port or launches Chrome.
-  - Navigates `/#s-*` sections, waits 0.5s, fails on console warnings/errors.
-  - Logs each step with clear `>> [WWW] Smoke:` messages.
-  - Test is registered as `www-smoke` with tags `www, smoke, browser`.
-- Added CLI entrypoint `./dialtone.sh www smoke` in `src/plugins/www/cli/www.go`.
-  - Runs `./dialtone.sh test tags smoke`.
-- Reorganized `app/src/components/` into per-component folders and moved files with `mv`.
-  - `components/<name>/index.ts` and `components/<name>/config.ts` for each section.
-  - Shared utilities remain in `components/` root (e.g., `fps.ts`, `gpu_timer.ts`, `section.ts`, `typing.ts`).
-  - Earth helpers live in `components/earth/` (already existing).
-  - About helpers moved into `components/about/` (`arc_renderer.ts`, `search_lights.ts`, `vision_grid.ts`).
-  - Earth `hex_layer.ts` moved into `components/earth/hex_layer.ts`.
-- Updated imports to new paths:
-  - Section loaders in `app/src/main.ts` now import `./components/<name>/index`.
-  - Shader import paths updated to `../../shaders/...` in nested folders.
-  - Config imports updated to `./config` within each component folder.
 
-## Current failure observed
-- `./dialtone.sh www smoke` fails while navigating:
-  - `Failed to fetch dynamically imported module: http://127.0.0.1:5173/src/components/robot/index.ts`
-- `curl http://127.0.0.1:5173/src/components/robot/index.ts` returns HTTP 500.
-  - Likely Vite import/path error due to refactor.
+> [!CRITICAL]
+> **Issue**: All screenshots are still images of the Earth (Home Section).
+> Despite the `isProgrammaticScroll` timeout fix, the user reports that the browser is still snapping back to the home section before capture. The next agent must prioritize investigating why the scroll position is not persisting during the 2000ms wait.
 
-## Latest smoke run (2026-02-06)
-- `./dialtone.sh www smoke` still fails at `#s-robot`.
-- Error: `TypeError: Failed to fetch dynamically imported module: http://127.0.0.1:5173/src/components/robot/index.ts`
-- Smoke log shows dev server OK, Chrome launched, `#s-home` OK, `#s-robot` fails.
+**Status**: ⚠️ Partial Success (Logs OK, Visuals Broken)
 
-## Next steps
-1. Fix Vite module resolution errors:
-   - Check Vite dev server logs for exact error (500 on `/src/components/robot/index.ts`).
-   - Verify all imports in `components/robot/index.ts` now point to correct paths.
-   - Repeat for other moved components if needed.
-2. Re-run `./dialtone.sh www smoke` until all sections pass.
-3. If needed, remove old commented config code blocks left in:
-   - `components/math/index.ts`, `components/nn/index.ts`, `components/robot/index.ts`
-4. Consider adding a short note in README about new component folder layout.
+## Context
+We have overhauled the `www` smoke test to resolve screenshot snapback issues, enhance logging visibility, and standardize report generation (`SMOKE.md`).
 
-## Key files changed
-- `src/plugins/www/test/smoke.go`
-- `src/plugins/www/cli/www.go`
-- `src/plugins/www/app/src/main.ts`
-- `src/plugins/www/app/src/components/**` (moved into folders)
+## Key Changes
+1.  **attempted Snapback Fix**:
+    -   **File**: `src/plugins/www/app/src/main.ts`
+    -   **Change**: Increased `isProgrammaticScroll` timeout from **1500ms** to **3000ms**.
+    -   **Why**: To prevent the `IntersectionObserver` from re-activating and resetting scroll position during the 2000ms smoke test capture wait.
+
+2.  **Enhanced Logging**:
+    -   **Main.ts**: Logs `[main] 🔁 SWAP: #<id>` (Magenta) when switching sections.
+    -   **Smoke.go**: Injects `[PROOFOFLIFE] 📸 SCREENSHOT STARTING: <section>` (Cyan) right before capture.
+    -   **Filtering**: `smoke.go` now correctly filters these info logs from the error report while displaying them in the terminal.
+
+3.  **Standardized Reporting**:
+    -   **SMOKE.md**: Now includes a **5-Layer Colored DAG** with a Legend Table (Foundation, Core, Features, QA, Release).
+    -   **Standard**: `SMOKE_REPORTING_STANDARD.md` updated to match this high-fidelity format.
+
+## Recent Logs & Observations (Headed Run)
+User observed: *"I see the earth section starting up and unpausing for every screen shot."*
+This suggests the view is snapping back to Home (Earth) right before capture.
+
+**Console Logs:**
+```text
+[APP] "%c[main] 🔁 SWAP: #s-about" "color: #8b5cf6; font-weight: bold"
+[APP] "[PROOFOFLIFE] 📸 SCREENSHOT STARTING: s-about"
+[TEST] Verify: hash=#s-about, scrollY=0, heap=0.0MB
+```
+*Note: `scrollY=0` is expected because `body` is the scroll container, not `window`. We need to check `document.body.scrollTop`.*
+
+## Known Risks & Maintenance
+-   **Timeout Coupling**: The **3000ms** timeout in `main.ts` must always exceed the **2000ms** wait in `smoke.go`. If wait times increase (e.g., for heavy 3D assets), update `main.ts` accordingly.
+-   **Observer Thresholds**: Verify `threshold: [0.5, 0.75, 1]` still works if very tall sections are added.
+
+## Next Steps
+-   Apply the `SMOKE_REPORTING_STANDARD.md` to other plugins (e.g., `rover`).
+-   Monitor CI/CD runs to ensure the 3000ms timeout is sufficient for slower runners.

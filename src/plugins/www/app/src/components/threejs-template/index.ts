@@ -1,11 +1,12 @@
 import * as THREE from "three";
-import { FpsCounter } from "../fps";
-import { GpuTimer } from "../gpu_timer";
-import { VisibilityMixin } from "../section";
+import { FpsCounter } from "../util/fps";
+import { GpuTimer } from "../util/gpu_timer";
+import { VisibilityMixin } from "../util/section";
 import cubeGlowVert from "../../shaders/template-cube.vert.glsl?raw";
 import cubeGlowFrag from "../../shaders/template-cube.frag.glsl?raw";
-import { startTyping } from "../typing";
-import { setupThreeJsTemplateConfig } from "./config";
+import { startTyping } from "../util/typing";
+import { setupThreeJsTemplateMenu } from "./menu";
+
 
 /**
  * Simplest working section: one cube, camera facing it, key light + soft glow shader.
@@ -141,7 +142,6 @@ export function mountThreeJsTemplate(container: HTMLElement) {
       <h2>Start here</h2>
       <p data-typing-subtitle></p>
     </div>
-    <div id="threejs-template-config-panel" class="earth-config-panel" hidden></div>
   `;
 
   const subtitleEl = container.querySelector(
@@ -155,19 +155,23 @@ export function mountThreeJsTemplate(container: HTMLElement) {
   const stopTyping = startTyping(subtitleEl, subtitles);
 
   const viz = new TemplateVisualization(container);
-  const config = setupThreeJsTemplateConfig({
+  const options = {
     spinSpeed: viz.spinSpeed,
-    onSpinChange: (value) => {
+    onSpinChange: (value: any) => {
       viz.spinSpeed = value;
     },
-  });
+  };
   return {
     dispose: () => {
       viz.dispose();
-      config.dispose();
       stopTyping();
       container.innerHTML = "";
     },
-    setVisible: (visible: boolean) => viz.setVisible(visible),
+    setVisible: (visible: boolean) => {
+      viz.setVisible(visible);
+      if (visible) {
+        setupThreeJsTemplateMenu(options);
+      }
+    },
   };
 }
