@@ -161,7 +161,8 @@ Key best practices established during the Swarm v2 refactor:
 *   **Periodic Broadcasting**: Connected peers should broadcast their writer keys periodically (e.g., every 5s) to ensure eventual convergence.
 *   **Line Buffering**: Always buffer stream data and split by `\n` to prevent handshake message fragmentation.
 *   **Warm Peer Strategy**: Maintain a persistent background process on the DHT for high-value topics to keep them "fresh" for new peers.
-*   **One Corestore per App**: Reduces file handles and storage duplication.
-*   **One Hyperswarm per App**: Efficiently manages connections and DHT lookups.
+*   **Persistent KeySwarm**: Warm nodes MUST hold open both the Data Swarm and the KeySwarm topics. This prevents DHT discovery "cold starts" for writer authorization.
+*   **Reusable Test Topics**: To avoid the high cost of new topic creation, standard tests should use a stable topic (e.g., `dialtone-test`).
+*   **Flushing Reusable Topics**: If a topic becomes polluted, "flush" it by stopping all peers and deleting the local `storage` directory (e.g., `~/.dialtone/swarm/warm/dialtone-test`).
 *   **No Remote Code**: Never load JS over HTTP(S).
 

@@ -49,6 +49,8 @@ func RunSwarm(args []string) {
 		runSwarmLint(subArgs)
 	case "warm":
 		runSwarmWarm(subArgs)
+	case "flush":
+		runSwarmFlush(subArgs)
 	default:
 		// Assume the first argument is the topic if no other subcommand matches
 		runSwarmPear(args)
@@ -106,11 +108,12 @@ func runSwarmInstall(args []string) {
 }
 
 func runSwarmWarm(args []string) {
-	topicPrefix := "dialtone-lifecycle-test"
+	topicPrefix := "dialtone-test"
 	if len(args) > 0 {
 		topicPrefix = args[0]
 	}
-	fmt.Printf("[swarm] Starting warm peer for topic prefix: %s\n", topicPrefix)
+	fmt.Printf("[swarm] Starting persistent warm peer for topic prefix: %s\n", topicPrefix)
+	fmt.Println("[swarm] This node holds open both Data and KeySwarm topics to accelerate discovery.")
 
 	appDir := filepath.Join("src", "plugins", "swarm", "app")
 	pearBin := getPearBin()
@@ -123,6 +126,34 @@ func runSwarmWarm(args []string) {
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("[swarm] Warm peer failed: %v\n", err)
 	}
+}
+
+func runSwarmFlush(args []string) {
+	fmt.Println("[swarm] Flushing all swarm topics and stopping all nodes...")
+
+	// 1. Kill all nodes in registry
+	registry, err := loadRegistry()
+	if err == nil {
+		for _, n := range registry.Nodes {
+			fmt.Printf("[swarm] Killing node %d (%s)...\n", n.PID, n.Topic)
+			proc, _ := os.FindProcess(n.PID)
+			if proc != nil {
+				_ = proc.Kill()
+			}
+			removeStatusFile(n.PID)
+		}
+	}
+
+	// 2. Clear registry
+	_ = saveRegistry(&NodeRegistry{Nodes: []SwarmNode{}})
+
+	// 3. Wipe warm storage
+	home, _ := os.UserHomeDir()
+	warmDir := filepath.Join(home, ".dialtone", "swarm", "warm")
+	fmt.Printf("[swarm] Wiping warm storage: %s\n", warmDir)
+	_ = os.RemoveAll(warmDir)
+
+	fmt.Println("[swarm] Flush complete. System is clean.")
 }
 
 func runSwarmBuild(args []string) {

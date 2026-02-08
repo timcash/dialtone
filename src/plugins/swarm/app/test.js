@@ -12,8 +12,8 @@ import path from 'bare-path'
 import os from 'bare-os'
 import b4a from 'b4a'
 import Hyperswarm from 'hyperswarm'
-import { AutoKV } from '../app/autokv.js'
-import { AutoLog } from '../app/autolog.js'
+import { AutoKV } from './autokv.js'
+import { AutoLog } from './autolog.js'
 
 const args = Pear.config?.args || []
 const mode = args[0] || 'lifecycle'

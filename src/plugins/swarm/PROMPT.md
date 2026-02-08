@@ -37,15 +37,14 @@ Refer to the full guide: [DAG.md](../task/DAG.md).
 # Architecture Reference
 - [dag.md](app/dag.md) (Architecture)
 - [test_dag.md](test/dag.md) (Test Lifecycle)
-- **KeySwarm**: Ephemeral swarm for exchanging Writer Keys.
-- **DataSwarm**: Persistent swarm for replicating data.
-- **Dispatcher**: Multiplexes connection data to allow multiple apps (KV, Log) to share one swarm connection.
+- **Persistent Dual-Topic**: Separate topics for discovery (`:bootstrap`) and replication, both joined persistently.
+- **Handshake**: Plain-text key exchange (TOPIC, BASE_KEY, WRITER_KEY) on the bootstrap topic.
 
 # Core Requirements for V2
 
 ## 1. Simplify & harden (vs V1)
 Review the V1 code in [autokv.js](app/autokv.js) and [autolog.js](app/autolog.js). The V2 versions must be simpler but more robust.
-- **Strict Separation**: Do not mix Discovery logic with Replication logic.
+- **Persistent Topics**: Join both data and bootstrap topics persistently. No ephemeral swarms.
 - **Explicit Authorization**: A node cannot write to the Autobase until an existing member authorizes it (via `addWriter`).
 
 ## 2. Multi-Writer / Multi-Computer Verification
@@ -161,4 +160,20 @@ Write the complete code for:
 - `app/autokv_v2.js`
 - `app/autolog_v2.js`
 
-Do **not** write tests or updated docs in this step. Focus solely on the robust implementation of these two classes.
+# Current Progress (Updated Feb 8, 2026)
+
+## Completed
+1.  **V2 Core Classes**: `autokv_v2.js` and `autolog_v2.js` reimplemented with Persistent Dual-Topic architecture.
+2.  **Incremental Testing**: Established 4 levels of test complexity to isolate bottlenecks.
+3.  **Level 1 Success**: Verified basic Hyperswarm/Corestore P2P replication works.
+
+## Pending / Next Steps
+1.  **Level 2 Debugging**: Resolve hang in `test_level2_autobase_static.js`. Authorization is appended by Node A but not visible to Node B.
+2.  **Handshake Automation**: Verify Level 3 handshake logic once static auth is stable.
+3.  **Refinement**: Ensure the `apply` function correctly uses `host.addWriter` with `indexer: true`.
+4.  **Convergence**: Reach consistent state across all nodes in Level 4.
+
+
+## Context Note
+- All V2 JS files and tests are in `src/plugins/swarm/app/` to comply with the Pear runtime's requirement for a local `package.json`.
+- `TEST.md` is in `src/plugins/swarm/`.
