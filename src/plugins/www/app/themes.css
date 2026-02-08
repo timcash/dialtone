@@ -44,3 +44,12 @@
     --theme-border: rgba(0, 255, 136, 0.2);
     --theme-gradient: linear-gradient(90deg, #00ff88, #00ccff);
 }
+
+[data-theme="policy"] {
+    --theme-primary: #f59e0b;
+    --theme-secondary: #ef4444;
+    --theme-accent: rgba(245, 158, 11, 0.3);
+    --theme-bg: rgba(20, 15, 10, 0.85);
+    --theme-border: rgba(245, 158, 11, 0.2);
+    --theme-gradient: linear-gradient(90deg, #f59e0b, #ef4444);
+}
