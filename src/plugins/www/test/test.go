@@ -328,6 +328,7 @@ func verifyHomePage(ctx context.Context) error {
 		{"s-cad", "Parametric Design Logic", "#cad-container"},
 		{"s-about", "Vision", "#about-container"},
 		{"s-docs", "Documentation", "#docs-container"},
+		{"s-policy", "Global Policy Simulator", "#policy-container"},
 	}
 
 	for i, s := range sections {
