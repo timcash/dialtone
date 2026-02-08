@@ -34,11 +34,11 @@ Verifies automated key exchange.
 - **Purpose**: Tests the plain-text handshake used to "warm up" the encrypted data swarm.
 - **Run**: `pear run test_5_handshake.js`
 
-### Step 6: API Layer (`test_6_full_v2.js`)
+### Step 6: API Layer (`test_6_full_stack.js`)
 Verifies the production `AutoLog` and `AutoKV` classes.
 - **Action**: Simple setup using the high-level V2 API.
 - **Purpose**: Ensures the abstract classes correctly wrap the underlying protocol logic.
-- **Run**: `pear run test_6_full_v2.js`
+- **Run**: `pear run test_6_full_stack.js`
 
 ### Step 7: Convergence Suite (`test_7_convergence.js`)
 Stress tests the system with concurrent writers.
@@ -71,7 +71,7 @@ pear run test_3_corestore.js
 # 3. Protocol & API
 pear run test_4_autobase_static.js
 pear run test_5_handshake.js
-pear run test_6_full_v2.js
+pear run test_6_full_stack.js
 
 # 4. Final convergence check
 pear run test_7_convergence.js lifecycle
