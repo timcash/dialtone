@@ -1,41 +1,65 @@
-# Swarm Plugin Workflow (Incremental Refactor)
+# Swarm Agent Guide: Distributed Systems Protocol (V2)
 
-Use this workflow to develop and test the V2 architecture by moving through complexity levels.
+You are a Distributed Systems Engineer working with **Holepunch**, **Autobase v2**, and **Hyperswarm**. This guide defines the protocol and mental model for the Swarm Plugin.
 
-## Folder Structures
-Swarm plugin structure:
-```shell
-src/plugins/swarm/app/
-├── autokv_v2.js              # V2 KV Class
-├── autolog_v2.js             # V2 Log Class
-├── test_level1_corestore.js  # PASS: Basic P2P Replication
-├── test_level2_autobase.js   # STUCK: Manual Autobase Auth
-├── test_level3_handshake.js  # PENDING: Auto-Auth Handshake
-└── test_level4_full_v2.js    # PENDING: Integration Test
+## 🧠 Mental Model: No Central Server
+There is no "master" database. Every node is a writer of its own append-only log. Consensus is achieved via **Autobase**, which linearizes these logs into a single deterministic view using causal references.
+
+## 📡 The V2 Protocol Flow
+
+### 1. Discovery (KeySwarm)
+Nodes join `topic + ':bootstrap'`. This is a "Warm Topic" intended for plain-text handshakes.
+- **Action**: Broadcast `TOPIC:<name>\nBASE_KEY:<hex>\nWRITER_KEY:<hex>\n`.
+- **Goal**: Collect `WRITER_KEY`s from peers.
+
+### 2. Authorization (AddWriter)
+In Autobase v2, a node is **Read-Only** until an existing member authorizes its key.
+- **Workflow**: 
+    1. Node A (Writer) receives `WRITER_KEY` from Node B (Follower) via KeySwarm.
+    2. Node A appends `{ addWriter: keyB }` to its own log.
+    3. The `apply` function on all nodes sees this op and calls `await host.addWriter(keyB)`.
+    4. Once the block is processed, Node B's `base.writable` becomes `true`.
+
+### 3. Replication (DataSwarm)
+Nodes join the primary `topic`.
+- **Action**: `store.replicate(socket)` handles the binary exchange of Hypercore blocks.
+- **Constraint**: Only authorized cores are indexed by Autobase.
+
+## 💻 Code Reference
+
+### AutoLog & AutoKV Classes
+- `ready()`: Initializes Corestore, joins swarms, and waits for DHT flush.
+- `waitWritable()`: Block until authorized by a peer. Essential for startup scripts.
+- `append(data)` / `put(key, val)`: Atomic operations that trigger a `base.update()`.
+
+### The `apply` Function (The Engine)
+```javascript
+async function apply (nodes, view, host) {
+  for (const { value } of nodes) {
+    if (value.addWriter) {
+      // MUST be awaited to avoid race conditions in system state
+      await host.addWriter(b4a.from(value.addWriter, 'hex'), { indexer: true })
+      continue
+    }
+    // Update the local view (Hypercore or Hyperbee)
+    await view.append(value)
+  }
+}
 ```
 
-# Current Activity: Incremental Verification
+## 🛠 Debugging Checklist for Agents
 
-We are systematically isolating why multi-writer authorization hangs.
+### 1. "Auth is Stuck" (Follower not becoming writable)
+- **Check**: Is the `ackInterval` set? Without acks, the view may not advance to see the `addWriter` op.
+- **Check**: Is the `apply` function `async`? Synchronous `apply` failing to await `addWriter` will cause internal assertion errors.
+- **Check**: Are both nodes joined to the same `:bootstrap` topic?
 
-## LEVEL 1: Corestore Replication (PASSED)
-- **Goal**: Verify Node A can replicate a Hypercore to Node B via Hyperswarm.
-- **Result**: Success. Hyperswarm and Corestore are functioning correctly.
+### 2. "Data not Syncing"
+- **Check**: Run `swarm.connections.size`. If 0, check `mdns: true` for local testing.
+- **Check**: Ensure `store.replicate(socket)` is called on **every** connection in **both** swarms.
 
-## LEVEL 2: Static Autobase (CURRENT FOCUS)
-- **Goal**: Node A authorizes Node B manually via `base.append({ addWriter: keyB })`.
-- **Status**: **STUCK**. Authorization is not propagating to Node B within 10s.
-- **Hypothesis**: Node A needs to be aware of Node B's local input core to correctly linearize and replicate.
-- **Action**: Update Level 2 to ensure `store.replicate(socket)` is called on both sides and check for core discovery.
+### 3. "AssertionError: System changes are only allowed in apply"
+- **Cause**: Attempting to call `host.addWriter` outside of the `apply` loop or losing the context in an un-awaited promise.
 
-## LEVEL 3: Handshake Logic (PENDING)
-- **Goal**: Automate Level 2 using a `:bootstrap` topic for key exchange.
-
-## LEVEL 4: Full V2 Lifecycle (PENDING)
-- **Goal**: Verify the production `AutoLog` and `AutoKV` classes using stable topics.
-
-# Next Steps
-1.  **Debug Level 2**: Refine the replication/auth flow in `test_level2_autobase_static.js`.
-2.  **Verify Level 3**: Once static auth works, verify the automated handshake.
-3.  **Refactor V2**: Apply working patterns from Level 2/3 back to `autolog_v2.js` and `autokv_v2.js`.
-4.  **Finalize Integration**: Hook `test_v2.js` into `./dialtone.sh swarm test`.
+## 🚀 Deployment Strategy
+Always start a **Warm Peer** (`warm.js`) for your topic. This acts as a DHT anchor and significantly reduces "cold start" latency for new peers connecting to the swarm.
