@@ -1,168 +1,58 @@
-# Swarm Plugin Help
+# Swarm Plugin: V2 Distributed Data
 
-Usage: `./dialtone.sh swarm [COMMAND] [ARGS]`
+The Swarm Plugin provides a decentralized, multi-writer data layer for Dialtone using the Holepunch ecosystem (**Autobase v2**, **Hypercore**, **Hyperswarm**).
 
-## Commands
+## 🚀 Quick Start
+
+### 1. Install Dependencies
+```bash
+./dialtone.sh swarm install
+```
+
+### 2. Start a Warm Peer
+A "Warm Peer" stays online to hold DHT topics open, speeding up discovery and providing a stable bootstrap for new nodes.
+```bash
+# Starts a warm peer on the 'dialtone-v2' topic in the background
+cd src/plugins/swarm/app
+pear run warm.js dialtone-v2
+```
+
+### 3. Run a Client Test
+Verify you can connect, authorize, and sync data.
+```bash
+cd src/plugins/swarm/app
+pear run test_warm_connect.js
+```
+
+## 🏗 Core Architecture: The V2 Way
+
+### 1. Dual-Topic Handshake
+Nodes join two separate topics:
+- **`:bootstrap` (Plain-text)**: Used for discovery and exchanging writer keys. Peers announce their `WRITER_KEY` and `BASE_KEY` here.
+- **`:data` (Encrypted)**: Used for actual Hypercore replication once authorization is established.
+
+### 2. Autobase v2 (Apply Pattern)
+We use the **Event Sourcing** pattern. Instead of writing directly to a database, you append "Ops" to a log. The `apply` function processes these ops to build a deterministic view (e.g., a Hyperbee K/V store).
+
+**CRITICAL RULES**:
+- **Async Apply**: The `apply` function MUST be `async` and `await host.addWriter`.
+- **Convergence (Acking)**: Use `ackInterval` or manual `base.ack()` to ensure the linearizer advances the "Signed Length."
+- **Authorization**: A follower only becomes `writable` after an existing writer adds it via `host.addWriter` in their `apply` logic.
+
+## 🛠 CLI Reference
 
 | Command | Description |
 | :--- | :--- |
-| `install` | Install dependencies (npm) |
-| `dashboard` | Launch web dashboard (http://127.0.0.1:4000) |
-| `start <topic> [name]` | Start a background node for a topic |
-| `stop <pid>` | Stop a background node by PID |
-| `list` | List all managed nodes |
-| `status` | Show live peer counts and latency |
-| `test` | Run integration tests (Pear + chromedp) |
+| `./dialtone.sh swarm status` | Show live peer counts and connection info. |
+| `./dialtone.sh swarm test` | Run the full V2 integration suite. |
+| `pear run warm.js <topic>` | Maintain a persistent presence on the DHT. |
 
-# User Guide
+## 🧪 Testing Levels
+We use incremental levels to isolate issues:
+- **Level 1**: Basic P2P Replication (Hypercore + Swarm).
+- **Level 2**: Static Authorization (Manual `addWriter` verification).
+- **Level 3**: Automated Handshake (Topic-based key exchange).
+- **Level 4**: Full V2 Lifecycle (Production `AutoLog`/`AutoKV` classes).
 
-## 1. Starting the Swarm
- 
- Initialize the swarm environment and start a "warm" peer to accelerate DHT discovery.
- 
- ```shell
- # Install dependencies
- ./dialtone.sh swarm install
- 
- # Start a warm peer for the 'index' topic prefix
- # (Speeds up test discovery significantly)
- ./dialtone.sh swarm warm index
- 
- # Start the dashboard (runs on http://127.0.0.1:4000)
- ./dialtone.sh swarm dashboard
- 
- # Start a background node on the 'index' topic
- ./dialtone.sh swarm start index "main-node"
- 
- # Check status of running nodes
- ./dialtone.sh swarm status
- ```
-
-## 2. Adding a Task (Design)
-Tasks are the unit of work in Dialtone v2. They are broadcast over topics.
-
-```shell
-# Add a new task to the 'sessions' topic
-# Note: This uses the 'task' plugin alias (proposed)
-./dialtone.sh task add "fix-login-bug" \
-  --topic sessions \
-  --title "Fix login timeout issue" \
-  --tags "bug,high-priority"
-
-# Claim a task
-./dialtone.sh task claim "fix-login-bug"
-
-# Mark as done (requires signature)
-./dialtone.sh task --sign "fix-login-bug"
-```
-
-## 3. K/V Store (Hyperbee + Autobase)
-The K/V store is a distributed, multi-writer database where all peers converge to the same state using Autobase (causal ordering) and Hyperbee (B-tree index).
-
-### How it works
-1.  **Writes**: Peers append operations to their local input log.
-2.  **Sync**: Autobase linearizes all input logs into a global order.
-3.  **Index**: Hyperbee consumes the linearized view to update the B-tree.
-4.  **Result**: Eventual consistency where all peers see the same data.
-
-### Running the K/V Demo
-We have a demonstration using ephemeral storage (fast, memory-like) to show concurrent convergence.
-
-```shell
-# Run the K/V simulation test
-# This starts 2 peers, performs concurrent writes, and verifies convergence.
-cd src/plugins/swarm/app
-pear run ./test.js kv
-```
-
-## 4. Running Tests
-Validate the swarm infrastructure using Pear (p2p) plus chromedp (browser UI).
-
-```shell
-# Run Pear unit tests + dashboard + chromedp UI checks
-./dialtone.sh swarm test
-```
-
-## 5. Tests ↔ Code Map
-
-```mermaid
-flowchart TD
-  A["swarm-test: ./dialtone.sh swarm test"] --> B["swarm-cli: cli/swarm.go runSwarmTest()"]
-  B --> C["swarm-suite: swarm/test/test.go RunAll()"]
-  C --> D["swarm-integration: RunSwarmIntegration()"]
-
-  %% Unit tests via Pear
-  D --> E["pear-units: runPearUnitTests()"]
-  E --> F["pear-kv: pear run ./test.js kv"]
-  E --> G["pear-peer-a: pear run ./test.js peer-a test-topic"]
-  E --> H["pear-peer-b: pear run ./test.js peer-b test-topic"]
-
-  F --> I["kv-test: swarm/app/test.js (KV/Autobee test)"]
-  G --> J["multi-peer-test: swarm/app/test.js (Hyperswarm multi-peer)"]
-  H --> J
-
-  %% Dashboard server via Pear (index.js -> dashboard.js)
-  D --> K["pear-dashboard: pear run . dashboard <repo>"]
-  K --> L["app-index: swarm/app/index.js (dashboard mode)"]
-  L --> M["dashboard-server: swarm/app/dashboard.js (HTTP server on :4000)"]
-  M --> N["dashboard-ui: swarm/app/dashboard.html (UI)"]
-
-  %% Browser UI test via chromedp
-  D --> O["chrome-connect: chromedp via ./dialtone.sh chrome new --gpu"]
-  O --> P["ui-navigate: http://127.0.0.1:4000"]
-  P --> N
-  O --> Q["console-tap: capture console/error output"]
-```
-
-## 6. Node.js Compatibility
-Pear apps use the Bare runtime, which provides mostly compatible `bare-*` modules for Node.js core APIs (e.g., `bare-fs` instead of `fs`).
-
-### Import Maps (`package.json`)
-To use standard Node.js imports like `import fs from 'fs'`, map them in your `package.json`:
-
-```json
-{
-  "imports": {
-    "fs": {
-      "bare": "bare-fs",
-      "default": "fs"
-    }
-  },
-  "dependencies": {
-    "bare-fs": "^2.1.5"
-  }
-}
-```
-
-### Deviant Mappings
-Most modules map directly (e.g., `path` -> `bare-path`), but some have different names:
-*   `http` -> `bare-http1`
-*   `child_process` -> `bare-subprocess`
-*   `detached` -> `bare-daemon`
-
-See [Pear Node.js Compatibility](https://docs.pears.com/reference/node-compat.html) for full details.
-
-## 7. Pear FAQ Highlights
-Key questions answered in the [official FAQ](https://docs.pears.com/reference/faq.html):
-*   **How Do I Get a List of Pear Applications I've Installed?** (`pear data apps`)
-*   **How Do I Uninstall a Pear Application?** (Currently not supported, use `pear drop` to reset storage)
-*   **Where is the Pear Application stored?** (Operating system dependent, e.g., `~/.config/pear`)
-*   **Can Pear be used with X language?** (Mostly JavaScript/TypeScript, others via native addons)
-*   **How Do I Write an Application Once So It Can Be Run on Desktop, Mobile, etc?** (Separate "Pear-end" logic from UI)
-*   **How is my Application Distributed?** (Via the swarm, ensure `pear seed` is running)
-*   **Why Is NPM Used For Dependencies?** (Bootstrap and package management)
-*   **How Do I Distribute a Binary Version?** (Use `pear-appling`)
-*   **Can Peers Know My IP Address?** (Yes, IP is exchanged for P2P connection)
-
-## 8. Recommended Practices
-Key best practices established during the Swarm v2 refactor:
-*   **Storage Isolation**: Each node MUST use a unique `Corestore` storage path to avoid LevelDB locking errors.
-*   **Hybrid Swarm Architecture**: Use isolated **Replication Swarms** for data and a multiplexed **KeySwarm** for discovery/handshakes.
-*   **Periodic Broadcasting**: Connected peers should broadcast their writer keys periodically (e.g., every 5s) to ensure eventual convergence.
-*   **Line Buffering**: Always buffer stream data and split by `\n` to prevent handshake message fragmentation.
-*   **Warm Peer Strategy**: Maintain a persistent background process on the DHT for high-value topics to keep them "fresh" for new peers.
-*   **Persistent KeySwarm**: Warm nodes MUST hold open both the Data Swarm and the KeySwarm topics. This prevents DHT discovery "cold starts" for writer authorization.
-*   **Reusable Test Topics**: To avoid the high cost of new topic creation, standard tests should use a stable topic (e.g., `dialtone-test`).
-*   **Flushing Reusable Topics**: If a topic becomes polluted, "flush" it by stopping all peers and deleting the local `storage` directory (e.g., `~/.dialtone/swarm/warm/dialtone-test`).
-*   **No Remote Code**: Never load JS over HTTP(S).
-
+---
+*Note: Pear apps use the Bare runtime. Use `bare-fs`, `bare-path`, and `bare-os` for maximum performance.*
