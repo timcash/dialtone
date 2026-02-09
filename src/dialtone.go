@@ -28,6 +28,7 @@ import (
 	ai_app "dialtone/cli/src/plugins/ai/app"
 	camera "dialtone/cli/src/plugins/camera/app"
 	mavlink "dialtone/cli/src/plugins/mavlink/app"
+	nix_cli "dialtone/cli/src/plugins/nix/cli"
 
 	"github.com/bluenviron/gomavlib/v3/pkg/dialects/common"
 	"github.com/coder/websocket"
@@ -56,6 +57,11 @@ func Execute() {
 		runStart(args)
 	case "vpn":
 		runVPN(args)
+	case "nix":
+		if err := nix_cli.Run(args); err != nil {
+			fmt.Printf("Nix command error: %v\n", err)
+			os.Exit(1)
+		}
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
 		printUsage()
@@ -67,6 +73,7 @@ func printUsage() {
 	fmt.Println("\nCommands:")
 	fmt.Println("  start         Start the NATS and Web server")
 	fmt.Println("  vpn           Start in simple VPN mode (tsnet only)")
+	fmt.Println("  nix           Nix plugin commands (e.g. nix smoke src_v1)")
 }
 
 func runStart(args []string) {

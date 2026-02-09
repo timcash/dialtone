@@ -28,7 +28,9 @@ export class AutoKV {
         const bee = new Hyperbee(view, { keyEncoding: 'utf-8', valueEncoding: 'json' })
         for (const { value } of nodes) {
           if (value.addWriter) await host.addWriter(b4a.from(value.addWriter, 'hex'))
-          else if (value.key) await bee.put(value.key, value.value)
+          else if (value.type === 'put') await bee.put(value.key, value.value)
+          else if (value.type === 'del') await bee.del(value.key)
+          else if (value.key) await bee.put(value.key, value.value) // Compatibility
         }
       }
     })
@@ -54,6 +56,14 @@ export class AutoKV {
   async get (key) {
     const node = await this.bee.get(key)
     return node ? node.value : null
+  }
+
+  async list () {
+    const entries = {}
+    for await (const entry of this.bee.createReadStream()) {
+      entries[entry.key] = entry.value
+    }
+    return entries
   }
 
   async close () {

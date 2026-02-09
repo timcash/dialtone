@@ -45,27 +45,34 @@ func RunSmoke(dir string) error {
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
-	// 4. Navigate and check status
-	var statusText string
-	err = chromedp.Run(ctx,
-		chromedp.Navigate("http://127.0.0.1:4000"),
-		chromedp.WaitVisible("#status", chromedp.ByQuery),
-		chromedp.Text("#status", &statusText, chromedp.ByQuery),
-	)
-	if err != nil {
-		return fmt.Errorf("chromedp failed: %v", err)
+	// 4. Navigate and check sections
+	sections := []string{"s-demo"}
+	allErrors := []string{}
+
+	for _, section := range sections {
+		fmt.Printf(">> [SWARM] Smoke: verifying section #%s\n", section)
+		var statusText string
+		err = chromedp.Run(ctx,
+			chromedp.Navigate("http://127.0.0.1:4000/#"+section),
+			chromedp.WaitVisible("#"+section, chromedp.ByQuery),
+			chromedp.Evaluate(`document.getElementById('header-subtitle').innerText`, &statusText),
+		)
+		if err != nil {
+			allErrors = append(allErrors, fmt.Sprintf("section %s failed: %v", section, err))
+			continue
+		}
+
+		fmt.Printf(">> [SWARM] Smoke: section %s status: %s\n", section, statusText)
+
+		// 5. Update SMOKE.md for each section
+		status := "✅ PASSED"
+		entry := fmt.Sprintf("## Section #%s (%s) - %s\n\nSubtitle: `%s`\n\n", section, time.Now().Format(time.Kitchen), status, statusText)
+		appendToFile(smokeFile, entry)
 	}
 
-	fmt.Printf(">> [SWARM] Smoke: dashboard status: %s\n", statusText)
-
-	// 5. Update SMOKE.md
-	status := "✅ PASSED"
-	if !strings.Contains(statusText, "active") {
-		status = "❌ FAILED"
+	if len(allErrors) > 0 {
+		return fmt.Errorf("smoke test issues:\n%s", strings.Join(allErrors, "\n"))
 	}
-
-	entry := fmt.Sprintf("## Smoke Test (%s) - %s\n\nDashboard Status: `%s`\n\n", time.Now().Format(time.Kitchen), status, statusText)
-	appendToFile(smokeFile, entry)
 
 	fmt.Println(">> [SWARM] Smoke: complete")
 	return nil

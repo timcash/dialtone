@@ -6,7 +6,55 @@
     <title>Swarm V2 Node</title>
   </head>
   <body>
-    <div id="app"></div>
+    <header class="header-title">
+      <h1>dialtone.swarm</h1>
+      <p id="header-subtitle">distributed data explorer</p>
+      <div class="header-fps">FPS --</div>
+    </header>
+
+    <div id="global-menu">
+      <button id="global-menu-toggle" aria-expanded="false" aria-label="Toggle Menu">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="3" y1="12" x2="21" y2="12"></line>
+          <line x1="3" y1="6" x2="21" y2="6"></line>
+          <line x1="3" y1="18" x2="21" y2="18"></line>
+        </svg>
+      </button>
+      <div id="global-menu-panel" hidden></div>
+    </div>
+
+    <main id="app">
+      <section id="s-demo" class="viz-section" data-subtitle="interactive node visualization">
+        <div id="demo-container" class="viz-container"></div>
+      </section>
+
+      <section id="s-explorer" class="viz-section" data-subtitle="swarm data explorer">
+        <div class="explorer-container">
+          <div class="explorer-column">
+            <h3>Key/Value Store</h3>
+            <div class="input-row">
+              <input type="text" id="kv-key" placeholder="Key" />
+              <input type="text" id="kv-val" placeholder="Value" />
+              <button id="kv-put">Put</button>
+            </div>
+            <div id="kv-list" class="data-list"></div>
+          </div>
+          <div class="explorer-column">
+            <h3>Event Log</h3>
+            <div class="input-row">
+              <input type="text" id="log-msg" placeholder="Log message..." />
+              <button id="log-append">Append</button>
+            </div>
+            <div id="log-list" class="data-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="s-terminal" class="viz-section" data-subtitle="interactive terminal">
+        <div id="terminal-container"></div>
+      </section>
+    </main>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
