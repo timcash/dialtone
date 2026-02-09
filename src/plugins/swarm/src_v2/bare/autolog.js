@@ -48,6 +48,15 @@ export class AutoLog {
     await this.base.append(data)
   }
 
+  async tail (n = 50) {
+    const entries = []
+    const start = Math.max(0, this.base.view.length - n)
+    for (let i = start; i < this.base.view.length; i++) {
+      entries.push(await this.base.view.get(i))
+    }
+    return entries
+  }
+
   async close () {
     await this.swarm.destroy()
     await this.keySwarm.destroy()

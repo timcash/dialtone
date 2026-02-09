@@ -242,28 +242,31 @@ func runSwarmLint(args []string) {
 }
 
 func runSwarmStart(args []string) {
-	if len(args) < 1 {
-		fmt.Println("Usage: ./dialtone.sh swarm start <topic> [name]")
-		return
+	topic := "dialtone-default"
+	isUi := false
+
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--topic" && i+1 < len(args) {
+			topic = args[i+1]
+			i++
+		} else if args[i] == "--ui" {
+			isUi = true
+		}
 	}
-	topic := args[0]
-	name := ""
-	if len(args) > 1 {
-		name = args[1]
-	}
-	fmt.Printf("[swarm] Starting background node for topic: %s\n", topic)
+
+	fmt.Printf("[swarm] Starting node for topic: %s (UI: %v)\n", topic, isUi)
 
 	appDir := filepath.Join("src", "plugins", "swarm", "app")
 	pearBin := getPearBin()
 
-	cmdArgs := []string{"run", ".", topic}
-	if name != "" {
-		cmdArgs = append(cmdArgs, name)
+	cmdArgs := []string{"run", ".", "--topic", topic}
+	if isUi {
+		cmdArgs = append(cmdArgs, "--ui")
 	}
 	cmd := exec.Command(pearBin, cmdArgs...)
 	cmd.Dir = appDir
 
-	logPath := filepath.Join(appDir, "swarm.log")
+	logPath := filepath.Join(appDir, fmt.Sprintf("swarm-%s.log", topic))
 	logFile, _ := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
@@ -515,7 +518,7 @@ func pearRuntimeCandidates() []string {
 func printSwarmUsage() {
 	fmt.Println("Usage: ./dialtone.sh swarm <subcommand> [args]")
 	fmt.Println("\nSubcommands:")
-	fmt.Println("  start <topic> [name]   Start a background node for a topic")
+	fmt.Println("  start --topic <name> [--ui]  Start a node (optionally with dashboard)")
 	fmt.Println("  dev [topic|dashboard] [name]  Run Pear dev mode with devtools")
 	fmt.Println("  stop <pid>       Stop a background node by PID")
 	fmt.Println("  list             List all running swarm nodes")

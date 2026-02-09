@@ -27,6 +27,7 @@ import (
 	ide_cli "dialtone/cli/src/plugins/ide/cli"
 	logs_cli "dialtone/cli/src/plugins/logs/cli"
 	mavlink_cli "dialtone/cli/src/plugins/mavlink/cli"
+	nix_cli "dialtone/cli/src/plugins/nix/cli"
 	plugin_cli "dialtone/cli/src/plugins/plugin/cli"
 	swarm_cli "dialtone/cli/src/plugins/swarm/cli"
 	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
@@ -111,6 +112,11 @@ func ExecuteDev() {
 		ui_cli.Run(args)
 	case "task":
 		task_cli.Run(args)
+	case "nix":
+		if err := nix_cli.Run(args); err != nil {
+			fmt.Printf("Nix command error: %v\n", err)
+			os.Exit(1)
+		}
 	case "go":
 
 		go_cli.RunGo(args)
@@ -153,6 +159,7 @@ func printDevUsage() {
 	fmt.Println("  www <subcmd>       Manage public webpage (Vercel wrapper)")
 	fmt.Println("  ui <subcmd>        Manage web UI (dev, build, install)")
 	fmt.Println("  test <subcmd>      Run tests (ticket, plugin, tags)")
+	fmt.Println("  nix <subcmd>       Nix plugin tools (smoke)")
 
 	fmt.Println("  ai <subcmd>        AI tools (opencode, developer, subagent)")
 	fmt.Println("  go <subcmd>        Go toolchain tools (install, lint)")
