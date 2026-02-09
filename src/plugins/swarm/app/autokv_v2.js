@@ -166,6 +166,15 @@ export class AutoKV {
     await this.base.update()
   }
 
+  async sync () {
+    if (!this.base) return
+    await this.base.update()
+    if (this.base.writable) {
+      await this.base.ack()
+      await this.base.update()
+    }
+  }
+
   async close () {
     if (this.keyInterval) clearInterval(this.keyInterval)
     if (this.ownKeySwarm) await this.keySwarm.destroy()

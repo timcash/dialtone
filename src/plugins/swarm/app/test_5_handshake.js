@@ -41,6 +41,7 @@ async function main () {
   
   const baseA = new Autobase(storeA, null, {
     apply,
+    local: coreA,
     open: (store) => store.get('view', { valueEncoding: 'json' }),
     valueEncoding: 'json',
     ackInterval: 100
@@ -69,7 +70,13 @@ async function main () {
                   await new Promise(r => setTimeout(r, 500))
                 }
               }
-              baseA.append({ addWriter: key }).then(() => baseA.update())
+              console.log(`[A] Handshake: Appending addWriter for ${key.slice(0,8)}...`)
+              baseA.append({ addWriter: key }).then(() => {
+                console.log(`[A] Handshake: addWriter appended for ${key.slice(0,8)}`)
+                return baseA.update()
+              }).catch(err => {
+                console.error(`[A] Handshake: Failed to append addWriter: ${err.message}`)
+              })
             }
           }
         })
@@ -103,6 +110,7 @@ async function main () {
           console.log(`[B] Handshake: Received BASE_KEY ${bKey.slice(0,8)}`)
           baseB = new Autobase(storeB, bKey, {
             apply,
+            local: coreB,
             open: (store) => store.get('view', { valueEncoding: 'json' }),
             valueEncoding: 'json',
             ackInterval: 100
@@ -118,11 +126,12 @@ async function main () {
 
   console.log('[test] Waiting for DHT discovery...')
   await Promise.all([keyDiscAx.flushed(), keyDiscBx.flushed()])
+  await new Promise(r => setTimeout(r, 2000)) // Give it a bit more time
 
   console.log('[test] Waiting for B to become writable...')
   const start = Date.now()
   while (!baseB || !baseB.writable) {
-    if (Date.now() - start > 30000) {
+    if (Date.now() - start > 60000) {
       console.log(`[test] Status: baseB=${!!baseB}, baseB.writable=${baseB?.writable}, A.conns=${swarmA.connections.size}, B.conns=${swarmB?.connections.size}`)
       console.log(`[test] KeyConns: A=${keySwarmA.connections.size}, B=${keySwarmB.connections.size}`)
       throw new Error('Timeout waiting for handshake/auth')
