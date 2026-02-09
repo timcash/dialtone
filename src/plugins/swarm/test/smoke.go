@@ -1,4 +1,4 @@
-package swarm_test
+package test
 
 import (
 	"context"
@@ -9,13 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"dialtone/cli/src/core/browser"
 	"github.com/chromedp/chromedp"
 )
 
 func RunSmoke(dir string) error {
 	fmt.Printf(">> [SWARM] Smoke: start for %s\n", dir)
-	
+
 	cwd, _ := os.Getwd()
 	swarmDir := filepath.Join(cwd, "src", "plugins", "swarm", dir)
 	smokeFile := filepath.Join(swarmDir, "SMOKE.md")
@@ -70,17 +69,6 @@ func RunSmoke(dir string) error {
 
 	fmt.Println(">> [SWARM] Smoke: complete")
 	return nil
-}
-
-func waitForPort(port int, timeout time.Duration) error {
-	start := time.Now()
-	for time.Since(start) < timeout {
-		if browser.IsPortOpen(port) {
-			return nil
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	return fmt.Errorf("timeout")
 }
 
 func getChromeWS() (string, error) {

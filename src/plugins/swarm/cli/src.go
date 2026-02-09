@@ -1,11 +1,10 @@
-package dialtone
+package cli
 
 import (
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 func runSwarmSrc(args []string) {
@@ -42,11 +41,11 @@ func runSwarmSrc(args []string) {
 
 func validateFiles(dir string) {
 	required := []string{
-		"index.js", 
-		"package.json", 
-		"bare/warm.js", 
-		"bare/dashboard.js", 
-		"bare/autolog.js", 
+		"index.js",
+		"package.json",
+		"bare/warm.js",
+		"bare/dashboard.js",
+		"bare/autolog.js",
 		"bare/autokv.js",
 		"ui/index.html",
 		"ui/package.json",
@@ -81,11 +80,11 @@ func copyDir(src, dst string) error {
 			return os.MkdirAll(targetPath, info.Mode())
 		}
 
-		return copyFile(path, targetPath)
+		return copyFileLocal(path, targetPath)
 	})
 }
 
-func copyFile(src, dst string) error {
+func copyFileLocal(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
