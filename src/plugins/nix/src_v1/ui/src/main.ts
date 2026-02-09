@@ -31,7 +31,7 @@ async function updateStatus() {
     const res = await fetch('/api/status')
     const data = await res.json()
     document.getElementById('status')!.textContent = data.status
-  } catch (e) {
+  } catch {
     document.getElementById('status')!.textContent = 'Offline'
   }
 }
@@ -76,7 +76,7 @@ async function listProcesses() {
         stopBtn.parentElement!.id = p.id;
       }
     })
-  } catch (e) {}
+  } catch {}
 }
 
 (window as any).stopProcess = async (id: string) => {
