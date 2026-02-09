@@ -27,6 +27,8 @@ func RunSwarm(args []string) {
 	switch subcommand {
 	case "help", "-h", "--help":
 		printSwarmUsage()
+	case "src":
+		runSwarmSrc(subArgs)
 	case "install":
 		runSwarmInstall(subArgs)
 	case "build":
@@ -43,6 +45,8 @@ func RunSwarm(args []string) {
 		runSwarmList(subArgs)
 	case "status":
 		runSwarmStatus(subArgs)
+	case "smoke":
+		runSwarmSmoke(subArgs)
 	case "dashboard":
 		runSwarmDashboard(subArgs)
 	case "lint":
@@ -54,6 +58,18 @@ func RunSwarm(args []string) {
 	default:
 		// Assume the first argument is the topic if no other subcommand matches
 		runSwarmPear(args)
+	}
+}
+
+func runSwarmSmoke(args []string) {
+	if len(args) < 1 {
+		fmt.Println("Usage: ./dialtone.sh swarm smoke <dir>")
+		return
+	}
+	dir := args[0]
+	if err := swarm_test.RunSmoke(dir); err != nil {
+		fmt.Printf("[swarm] Smoke test failed: %v\n", err)
+		os.Exit(1)
 	}
 }
 
@@ -468,6 +484,8 @@ func printSwarmUsage() {
 	fmt.Println("  install          Install swarm dependencies")
 	fmt.Println("  test             Run integration tests (chromedp + dashboard)")
 	fmt.Println("  warm [prefix]    Start a warm peer to speed up test discovery")
+	fmt.Println("  src --n N        Create or validate a srcN template folder")
+	fmt.Println("  smoke <dir>      Run smoke tests for a specific directory")
 	fmt.Println("\nConnects to a Hyperswarm topic using Pear runtime.")
 }
 
