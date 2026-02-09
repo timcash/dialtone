@@ -71,8 +71,8 @@ async function checkWarmNode() {
       let output = ''
       ps.stdout.on('data', (data) => { output += data.toString() })
       ps.on('exit', () => {
-        // Look for the sidecar or runtime that typically runs the app
-        resolve(output.includes('pear-runtime'))
+        // Look for warm.js specifically
+        resolve(output.includes('warm.js'))
       })
     } catch {
       resolve(false)

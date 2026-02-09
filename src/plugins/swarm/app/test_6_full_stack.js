@@ -48,8 +48,8 @@ async function main () {
   const syncStart = Date.now()
   let result = null
   while (Date.now() - syncStart < 10000) {
-    await logA.base.update()
-    const list = await logA.list()
+    await logA.sync()
+    const list = await logA.tail(100)
     result = list.find(l => l.data?.msg === 'Level 4 Success')
     if (result) break
     await new Promise(r => setTimeout(r, 500))
