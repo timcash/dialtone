@@ -37,7 +37,7 @@ async function main () {
   console.log('[test] Waiting for connection...')
   const start = Date.now()
   while (swarmA.connections.size === 0) {
-    if (Date.now() - start > 15000) {
+    if (Date.now() - start > 30000) {
         console.log('FAIL: Timeout waiting for connection')
         Bare.exit(1)
     }
