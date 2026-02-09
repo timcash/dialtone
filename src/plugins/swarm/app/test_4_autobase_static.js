@@ -42,7 +42,7 @@ async function main () {
   const bootstrapKey = baseA.key
 
   swarmA.on('connection', (socket) => storeA.replicate(socket))
-  swarmA.join(topic, { server: true, client: true })
+  const discoveryA = swarmA.join(topic, { server: true, client: true })
 
   // 2. Node B (Follower)
   const storeB = new Corestore(path.join(baseDir, 'b'))
@@ -56,7 +56,10 @@ async function main () {
   await baseB.ready()
 
   swarmB.on('connection', (socket) => storeB.replicate(socket))
-  swarmB.join(topic, { server: true, client: true })
+  const discoveryB = swarmB.join(topic, { server: true, client: true })
+
+  console.log('[test] Waiting for DHT discovery...')
+  await Promise.all([discoveryA.flushed(), discoveryB.flushed()])
 
   console.log('[test] Waiting for connection...')
   while (swarmA.connections.size === 0) await new Promise(r => setTimeout(r, 500))
@@ -79,24 +82,35 @@ async function main () {
   await baseB.append({ msg: 'Level 2 Success' })
   
   console.log('[test] Finalizing sync...')
-  await baseB.ack()
-  await baseA.update()
-  await baseA.ack()
-  await baseB.update()
-  await baseA.update()
-
-  console.log(`[test] Node A view length: ${baseA.view.length}`)
+  const syncStart = Date.now()
   let result = null
-  for (let i = 0; i < baseA.view.length; i++) {
-    const node = await baseA.view.get(i)
-    console.log(`[test] Node A view[${i}]:`, node)
-    if (node?.msg === 'Level 2 Success') result = node
+  
+  while (Date.now() - syncStart < 10000) {
+    await baseB.ack()
+    await baseA.update()
+    await baseA.ack()
+    await baseB.update()
+    await baseA.update()
+
+    for (let i = 0; i < baseA.view.length; i++) {
+      const node = await baseA.view.get(i)
+      if (node?.msg === 'Level 2 Success') {
+        result = node
+        break
+      }
+    }
+    if (result) break
+    await new Promise(r => setTimeout(r, 1000))
   }
 
+  console.log(`[test] Node A view length: ${baseA.view.length}`)
   if (result) {
     console.log(`[test] Node A received: ${result.msg}`)
     console.log('--- [PASS] LEVEL 2 SUCCESS ---')
   } else {
+    for (let i = 0; i < baseA.view.length; i++) {
+      console.log(`[test] Node A view[${i}]:`, await baseA.view.get(i))
+    }
     console.error('--- [FAIL] LEVEL 2 MISMATCH ---')
   }
 
