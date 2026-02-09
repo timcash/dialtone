@@ -51,15 +51,28 @@ async function main () {
   keySwarmA.on('connection', (socket) => {
     console.log('[A] KeySwarm connection!')
     socket.write(`BASE_KEY:${bootstrapKey}\n`)
-    socket.on('data', (data) => {
-      const line = data.toString()
-      console.log(`[A] KeySwarm received: ${line.trim()}`)
-      if (line.startsWith('WRITER_KEY:')) {
-        const key = line.split(':')[1].trim()
-        console.log(`[A] Handshake: Authorizing ${key.slice(0,8)}...`)
-        baseA.append({ addWriter: key }).then(() => baseA.update())
-      }
-    })
+    let buffer = ''
+        socket.on('data', async (data) => {
+          buffer += data.toString()
+          const lines = buffer.split('\n')
+          buffer = lines.pop()
+          for (const line of lines) {
+            console.log(`[A] KeySwarm received: ${line.trim()}`)
+            if (line.startsWith('WRITER_KEY:')) {
+              const key = line.slice(line.indexOf(':') + 1).trim()
+              console.log(`[A] Handshake: Authorizing ${key.slice(0,8)}...`)
+              // Wait for main swarm connection if not already present
+              if (swarmA.connections.size === 0) {
+                console.log('[A] Waiting for main swarm connection before auth...')
+                const startAuthWait = Date.now()
+                while (swarmA.connections.size === 0 && Date.now() - startAuthWait < 10000) {
+                  await new Promise(r => setTimeout(r, 500))
+                }
+              }
+              baseA.append({ addWriter: key }).then(() => baseA.update())
+            }
+          }
+        })
   })
   const keyDiscAx = keySwarmA.join(keyTopic, { server: true, client: true })
   
@@ -78,21 +91,26 @@ async function main () {
     await coreB.ready()
     const writerKey = b4a.toString(coreB.key, 'hex')
     socket.write(`WRITER_KEY:${writerKey}\n`)
+    let buffer = ''
     socket.on('data', async (data) => {
-      const line = data.toString()
-      console.log(`[B] KeySwarm received: ${line.trim()}`)
-      if (line.startsWith('BASE_KEY:') && !baseB) {
-        const bKey = line.split(':')[1].trim()
-        console.log(`[B] Handshake: Received BASE_KEY ${bKey.slice(0,8)}`)
-        baseB = new Autobase(storeB, bKey, {
-          apply,
-          open: (store) => store.get('view', { valueEncoding: 'json' }),
-          valueEncoding: 'json',
-          ackInterval: 100
-        })
-        await baseB.ready()
-        swarmB.on('connection', (socket) => storeB.replicate(socket))
-        swarmB.join(topic, { server: true, client: true })
+      buffer += data.toString()
+      const lines = buffer.split('\n')
+      buffer = lines.pop()
+      for (const line of lines) {
+        console.log(`[B] KeySwarm received: ${line.trim()}`)
+        if (line.startsWith('BASE_KEY:') && !baseB) {
+          const bKey = line.slice(line.indexOf(':') + 1).trim()
+          console.log(`[B] Handshake: Received BASE_KEY ${bKey.slice(0,8)}`)
+          baseB = new Autobase(storeB, bKey, {
+            apply,
+            open: (store) => store.get('view', { valueEncoding: 'json' }),
+            valueEncoding: 'json',
+            ackInterval: 100
+          })
+          await baseB.ready()
+          swarmB.on('connection', (socket) => storeB.replicate(socket))
+          swarmB.join(topic, { server: true, client: true })
+        }
       }
     })
   })
@@ -104,9 +122,14 @@ async function main () {
   console.log('[test] Waiting for B to become writable...')
   const start = Date.now()
   while (!baseB || !baseB.writable) {
-    if (Date.now() - start > 20000) throw new Error('Timeout waiting for handshake/auth')
+    if (Date.now() - start > 30000) {
+      console.log(`[test] Status: baseB=${!!baseB}, baseB.writable=${baseB?.writable}, A.conns=${swarmA.connections.size}, B.conns=${swarmB?.connections.size}`)
+      console.log(`[test] KeyConns: A=${keySwarmA.connections.size}, B=${keySwarmB.connections.size}`)
+      throw new Error('Timeout waiting for handshake/auth')
+    }
     if (baseB) {
-      await baseA.ack() // Node A acks to help B see the addWriter
+      await baseA.update()
+      await baseA.ack()
       await baseB.update()
     }
     await new Promise(r => setTimeout(r, 1000))
