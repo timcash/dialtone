@@ -62,7 +62,11 @@ async function main () {
   await Promise.all([discoveryA.flushed(), discoveryB.flushed()])
 
   console.log('[test] Waiting for connection...')
-  while (swarmA.connections.size === 0) await new Promise(r => setTimeout(r, 500))
+  const startCon = Date.now()
+  while (swarmA.connections.size === 0) {
+    if (Date.now() - startCon > 30000) throw new Error('Timeout waiting for connection')
+    await new Promise(r => setTimeout(r, 500))
+  }
 
   // 3. Authorization (A adds B)
   const keyB = b4a.toString(baseB.local.key, 'hex')

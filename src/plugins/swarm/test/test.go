@@ -259,6 +259,8 @@ func runPearUnitTests(appDir, pearBin string, env []string) error {
 		if err := runPearTest(appDir, pearBin, env, t.file, t.args...); err != nil {
 			return fmt.Errorf("%s failed: %v", t.file, err)
 		}
+		// Allow network to settle
+		time.Sleep(5 * time.Second)
 	}
 
 	fmt.Println(">> [swarm] All sequential tests passed.")
