@@ -6,7 +6,61 @@
     <title>Nix Node Manager</title>
   </head>
   <body>
-    <div id="app"></div>
+    <header class="header-title">
+      <h1>dialtone.nix</h1>
+      <p id="header-subtitle">nix process explorer</p>
+      <div class="header-fps">FPS --</div>
+    </header>
+
+    <div id="global-menu">
+      <button id="global-menu-toggle" aria-expanded="false" aria-label="Toggle Menu">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="3" y1="12" x2="21" y2="12"></line>
+          <line x1="3" y1="6" x2="21" y2="6"></line>
+          <line x1="3" y1="18" x2="21" y2="18"></line>
+        </svg>
+      </button>
+      <div id="global-menu-panel" hidden>
+        <div class="menu-header">Navigation</div>
+        <button class="menu-button" onclick="window.location.hash='#s-viz'">Hero Visualization</button>
+        <button class="menu-button" onclick="window.location.hash='#s-nixtable'">Spreadsheet Manager</button>
+      </div>
+    </div>
+
+    <main id="app" class="snap-container">
+      <section id="s-viz" class="viz-section snap-slide" data-subtitle="nix cluster visualization">
+        <div id="viz-container" class="viz-container"></div>
+      </section>
+
+      <section id="s-nixtable" class="viz-section snap-slide" data-subtitle="nix node spreadsheet">
+        <div class="explorer-container">
+          <div class="explorer-column" style="grid-column: span 2;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+              <h3>Nix Process Spreadsheet</h3>
+              <div class="input-row" style="margin-bottom: 0;">
+                <button id="start-node" aria-label="Spawn Nix Node">Spawn Nix Node</button>
+              </div>
+            </div>
+            <div class="spreadsheet-wrapper" style="flex: 1; overflow: auto; background: #050505; border-radius: 4px; border: 1px solid #222;">
+              <table style="width: 100%; border-collapse: collapse; font-family: monospace; font-size: 13px;">
+                <thead>
+                  <tr style="background: #111; text-align: left; border-bottom: 1px solid #333;">
+                    <th style="padding: 12px; color: #00ff88;">PID/ID</th>
+                    <th style="padding: 12px; color: #00ff88;">STATUS</th>
+                    <th style="padding: 12px; color: #00ff88;">LAST LOG OUTPUT</th>
+                    <th style="padding: 12px; color: #00ff88; text-align: right;">ACTIONS</th>
+                  </tr>
+                </thead>
+                <tbody id="node-rows">
+                  <tr><td colspan="4" style="padding: 20px; text-align: center; opacity: 0.5;">Initializing...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
