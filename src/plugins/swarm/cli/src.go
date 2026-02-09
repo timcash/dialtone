@@ -41,7 +41,19 @@ func runSwarmSrc(args []string) {
 }
 
 func validateFiles(dir string) {
-	required := []string{"index.js", "package.json", "warm.js", "dashboard.js", "dashboard.html", "autolog.js", "autokv.js"}
+	required := []string{
+		"index.js", 
+		"package.json", 
+		"bare/warm.js", 
+		"bare/dashboard.js", 
+		"bare/autolog.js", 
+		"bare/autokv.js",
+		"ui/index.html",
+		"ui/package.json",
+		"ui/vite.config.ts",
+		"ui/src/main.ts",
+		"ui/src/style.css",
+	}
 	for _, f := range required {
 		path := filepath.Join(dir, f)
 		if _, err := os.Stat(path); err != nil {
