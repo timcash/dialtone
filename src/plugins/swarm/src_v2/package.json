@@ -1,0 +1,22 @@
+{
+  "name": "dialtone-swarm-template",
+  "version": "1.0.0",
+  "description": "Minimal Swarm V2 Template",
+  "main": "index.js",
+  "type": "module",
+  "dependencies": {
+    "autobase": "^7.25.1",
+    "b4a": "^1.7.3",
+    "corestore": "^7.8.0",
+    "bare-fs": "latest",
+    "bare-http1": "latest",
+    "bare-os": "latest",
+    "bare-path": "latest",
+    "bare-subprocess": "latest",
+    "hyperbee": "^2.27.3",
+    "hypercore": "^11.24.0",
+    "hypercore-crypto": "latest",
+    "hyperswarm": "latest",
+    "ram": "^0.0.3"
+  }
+}
