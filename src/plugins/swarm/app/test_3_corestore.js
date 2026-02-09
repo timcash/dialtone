@@ -21,7 +21,7 @@ async function main () {
     console.log('[A] Connection!')
     storeA.replicate(socket)
   })
-  swarmA.join(topic, { server: true, client: true })
+  const discoveryA = swarmA.join(topic, { server: true, client: true })
 
   const storeB = new Corestore(path.join(baseDir, 'b'))
   const swarmB = new Hyperswarm({ mdns: true })
@@ -29,13 +29,16 @@ async function main () {
     console.log('[B] Connection!')
     storeB.replicate(socket)
   })
-  swarmB.join(topic, { server: true, client: true })
+  const discoveryB = swarmB.join(topic, { server: true, client: true })
+
+  console.log('[test] Waiting for DHT discovery...')
+  await Promise.all([discoveryA.flushed(), discoveryB.flushed()])
 
   console.log('[test] Waiting for connection...')
   const start = Date.now()
   while (swarmA.connections.size === 0) {
-    if (Date.now() - start > 10000) {
-        console.log('FAIL: Timeout')
+    if (Date.now() - start > 15000) {
+        console.log('FAIL: Timeout waiting for connection')
         Bare.exit(1)
     }
     await new Promise(r => setTimeout(r, 500))
