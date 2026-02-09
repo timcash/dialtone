@@ -61,5 +61,21 @@ async function apply (nodes, view, host) {
 ### 3. "AssertionError: System changes are only allowed in apply"
 - **Cause**: Attempting to call `host.addWriter` outside of the `apply` loop or losing the context in an un-awaited promise.
 
-## 🚀 Deployment Strategy
-Always start a **Warm Peer** (`warm.js`) for your topic. This acts as a DHT anchor and significantly reduces "cold start" latency for new peers connecting to the swarm.
+## 🚀 Future Improvements & Next Steps
+
+Use these objectives to further refine the Swarm V2 plugin:
+
+### 1. Test Suite Robustness
+- **Stability**: Reduce flakiness in `test_5_handshake.js` by increasing DHT flush timeouts or implementing a persistent retry for the `WRITER_KEY` exchange.
+- **Chaos Testing**: Update `test_7_convergence.js` to simulate unexpected node exits and ensure the Oplog remains consistent.
+- **Negative Testing**: Implement `test_9_security.js` to verify that data from unauthorized writer keys is dropped by the `apply` logic.
+
+### 2. API Enhancements
+- **`.sync()` Method**: Implement a helper that returns a Promise, resolving only when the local Autobase view matches the remote heads.
+- **Merkle Roots**: Expose `base.getHash()` in a standardized way to allow quick verification between nodes without full history exchange.
+- **Encryption Toggles**: Add tests for private/encrypted topics versus public bootstrap topics.
+
+### 3. Agent Debugging Tips
+- If a test hangs, check `pear-runtime` processes: `ps aux | grep pear-runtime`.
+- Use `tail -f warm_stdout.log` to monitor the background infrastructure while running client tests.
+- Always delete the `.dialtone/swarm/warm` directory if you need to "reset" a topic's history.
