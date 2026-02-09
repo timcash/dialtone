@@ -47,9 +47,8 @@ func (p *NixPlugin) Start() error {
 
 		if r.Method == http.MethodPost {
 			id := fmt.Sprintf("proc-%d", len(p.cmds)+1)
-			// Using simple bash for faster smoke tests
-			cmd := exec.Command("bash", "-c", "while true; do echo 'hello dialtone from "+id+"'; sleep 2; done")
-
+			cmd := exec.Command("bash", "-c", "while true; do echo 'hello dialtone from " + id + "'; sleep 2; done")
+			
 			stdout, _ := cmd.StdoutPipe()
 			stderr, _ := cmd.StderrPipe()
 
@@ -94,17 +93,29 @@ func (p *NixPlugin) Start() error {
 		http.Error(w, "not found", 404)
 	})
 
+	// Smart UI Path detection
 	workDir, _ := os.Getwd()
-	uiPath := filepath.Join(workDir, "src/plugins/nix/src_v1/ui/dist")
-
+	possiblePaths := []string{
+		filepath.Join(workDir, "ui/dist"), // If running from src/plugins/nix/src_v1
+		filepath.Join(workDir, "src/plugins/nix/src_v1/ui/dist"), // If running from root
+	}
+	
+	var uiPath string
+	for _, p := range possiblePaths {
+		if info, err := os.Stat(p); err == nil && info.IsDir() {
+			uiPath = p
+			break
+		}
+	}
+	
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if uiPath == "" {
+			fmt.Fprintf(w, "UI not found. Searching in: %v", possiblePaths)
+			return
+		}
 		path := filepath.Join(uiPath, r.URL.Path)
 		if r.URL.Path == "/" {
 			path = filepath.Join(uiPath, "index.html")
-		}
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			fmt.Fprintf(w, "UI not built. Run 'bun run build' in src/plugins/nix/src_v1/ui")
-			return
 		}
 		http.ServeFile(w, r, path)
 	})
