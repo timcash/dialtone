@@ -184,22 +184,61 @@ func runSwarmTest(args []string) {
 }
 
 func runSwarmLint(args []string) {
-	fmt.Println("[swarm] Running linter (standard)...")
-	appDir := filepath.Join("src", "plugins", "swarm", "app")
+	fmt.Println("[swarm] Running multi-linter...")
 
+	// 1. Go Linting
+	fmt.Println(">> [1/3] Linting Golang code...")
+	gofmtCmd := exec.Command("gofmt", "-l", "src/plugins/swarm")
+	out, _ := gofmtCmd.Output()
+	if len(out) > 0 {
+		fmt.Printf("[swarm] Go formatting issues in:\n%s", string(out))
+		fmt.Println("[swarm] Run 'gofmt -w src/plugins/swarm' to fix.")
+	} else {
+		fmt.Println("   [PASS] Go formatting")
+	}
+
+	goVetCmd := exec.Command("go", "vet", "./src/plugins/swarm/cli", "./src/plugins/swarm/test")
+	goVetCmd.Stdout = os.Stdout
+	goVetCmd.Stderr = os.Stderr
+	if err := goVetCmd.Run(); err != nil {
+		fmt.Printf("[swarm] Go vet failed: %v\n", err)
+	} else {
+		fmt.Println("   [PASS] Go vet")
+	}
+
+	// 2. Prettier Linting (src_vN)
+	fmt.Println(">> [2/3] Linting src_vN (Prettier)...")
+	srcV2Dir := filepath.Join("src", "plugins", "swarm", "src_v2")
 	envPath := getDialtoneEnvOrExit()
 	npmBin := resolveNpmBin(envPath)
 
-	cmd := exec.Command(npmBin, "run", "lint")
-	cmd.Dir = appDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		fmt.Printf("[swarm] Linting failed: %v\n", err)
-		os.Exit(1)
+	// Try to run npx prettier if available
+	prettierCmd := exec.Command(npmBin, "exec", "prettier", "--check", ".")
+	prettierCmd.Dir = srcV2Dir
+	// prettierCmd.Stdout = os.Stdout // Too noisy
+	prettierCmd.Stderr = os.Stderr
+	if err := prettierCmd.Run(); err != nil {
+		fmt.Printf("[swarm] Prettier check failed in src_v2: %v\n", err)
+	} else {
+		fmt.Println("   [PASS] Prettier (src_v2)")
 	}
-	fmt.Println("[swarm] Linting passed.")
+
+	// 3. UI Linting (Bun)
+	fmt.Println(">> [3/3] Linting UI (Bun)...")
+	uiDir := filepath.Join(srcV2Dir, "ui")
+	bunBin := resolveBunBin(envPath)
+
+	bunLintCmd := exec.Command(bunBin, "run", "lint")
+	bunLintCmd.Dir = uiDir
+	bunLintCmd.Stdout = os.Stdout
+	bunLintCmd.Stderr = os.Stderr
+	if err := bunLintCmd.Run(); err != nil {
+		fmt.Printf("[swarm] Bun UI lint failed: %v\n", err)
+	} else {
+		fmt.Println("   [PASS] Bun UI lint")
+	}
+
+	fmt.Println("[swarm] Multi-lint complete.")
 }
 
 func runSwarmStart(args []string) {

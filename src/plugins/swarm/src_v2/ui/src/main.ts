@@ -15,7 +15,7 @@ async function updateStatus() {
     const res = await fetch('/api/status')
     const data = await res.json()
     document.getElementById('status')!.textContent = data.status
-  } catch (e) {
+  } catch {
     document.getElementById('status')!.textContent = 'Offline'
   }
 }
