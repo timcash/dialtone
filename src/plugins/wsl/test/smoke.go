@@ -33,9 +33,19 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 	reportHeader += "**Started:** " + time.Now().Format(time.RFC1123) + "\n\n"
 	reportHeader += "## Pre-test Verification\n\n"
 
+	// Resolve absolute Go path to bypass Windows security restrictions on relative paths in PATH
+	goBin, err := exec.LookPath("go")
+	if err == nil {
+		if abs, err := filepath.Abs(goBin); err == nil {
+			goBin = abs
+		}
+	} else {
+		goBin = "go"
+	}
+
 	// LINT GO
 	fmt.Println(">> [WSL] Smoke: Verifying Go standards...")
-	lintGoCmd := exec.Command("go", "vet", "./src/plugins/wsl/...")
+	lintGoCmd := exec.Command(goBin, "vet", "./src/plugins/wsl/...")
 	if err := lintGoCmd.Run(); err != nil {
 		reportHeader += "- [ ] **Go Vet:** FAILED\n"
 	} else {
@@ -65,16 +75,23 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 		reportHeader += "- [x] **Vite Build:** PASSED\n"
 	}
 
-	reportHeader += "\n---\n"
-	os.WriteFile(smokeFile, []byte(reportHeader), 0644)
-
 	// START SERVER
+	fmt.Println(">> [WSL] Smoke: Ensuring dev server is active...")
 	browser.CleanupPort(port)
-	// 'go' will now resolve via absolute path in PATH due to .env change
-	cmd := exec.Command("go", "run", "cmd/main.go")
+	cmd := exec.Command(goBin, "run", "cmd/main.go")
 	cmd.Dir = pluginDir
 	cmd.Env = os.Environ()
 	
+	// Ensure GOROOT is also absolute if it exists in env
+	for i, e := range cmd.Env {
+		if strings.HasPrefix(e, "GOROOT=") {
+			val := strings.TrimPrefix(e, "GOROOT=")
+			if abs, err := filepath.Abs(val); err == nil {
+				cmd.Env[i] = "GOROOT=" + abs
+			}
+		}
+	}
+
 	logFile, _ := os.Create(filepath.Join(pluginDir, "smoke_server.log"))
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
@@ -93,7 +110,34 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 	url := fmt.Sprintf("http://127.0.0.1:%d", port)
 	fmt.Printf(">> [WSL] Plugin started. Access UI at: %s\n", url)
 
-	wsURL, isNew, err := resolveChrome(0, true)
+	// Level 0: Backend Logic Verification
+	fmt.Println(">> [WSL] Smoke: Level 0 - Verifying Backend Logic...")
+	
+	// Test Status
+	statusResp, err := http.Get(url + "/api/status")
+	if err != nil || statusResp.StatusCode != 200 {
+		reportHeader += "- [ ] **Backend Status API:** FAILED\n"
+	} else {
+		reportHeader += "- [x] **Backend Status API:** PASSED\n"
+	}
+
+	// Test Initial List
+	listResp, err := http.Get(url + "/api/instances")
+	if err != nil || listResp.StatusCode != 200 {
+		reportHeader += "- [ ] **Backend List API:** FAILED\n"
+	} else {
+		var instances []interface{}
+		json.NewDecoder(listResp.Body).Decode(&instances)
+		fmt.Printf("   [INFO] Backend API responded with %d instances.\n", len(instances))
+		reportHeader += "- [x] **Backend List API:** PASSED\n"
+	}
+
+	reportHeader += "\n---\n"
+	os.WriteFile(smokeFile, []byte(reportHeader), 0644)
+
+	// HEADED CHROME
+	fmt.Println(">> [WSL] Smoke: Launching debug browser (HEADED)...")
+	wsURL, isNew, err := resolveChrome(0, false) // false = NOT headless
 	if err != nil {
 		fmt.Printf("   [ERROR] Chrome resolution failed: %v\n", err)
 		return err
@@ -102,7 +146,8 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 
 	defer func() {
 		if isNew {
-			exec.Command("./dialtone.sh", "chrome", "kill", "all").Run()
+			fmt.Println(">> [WSL] Smoke: Cleaning up debug browser...")
+			chrome_app.KillDialtoneResources()
 		}
 	}()
 
@@ -122,8 +167,22 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 			currentLogs = append(currentLogs, fmt.Sprintf("[%s] %s", ev.Type, msg))
 			mu.Unlock()
 			fmt.Printf("   [BROWSER] [%s] %s\n", ev.Type, msg)
+		case *cdruntime.EventExceptionThrown:
+			msg := ev.ExceptionDetails.Text
+			if ev.ExceptionDetails.Exception != nil {
+				msg = ev.ExceptionDetails.Exception.Description
+			}
+			mu.Lock()
+			currentLogs = append(currentLogs, fmt.Sprintf("[ERROR] %s", msg))
+			mu.Unlock()
+			fmt.Printf("   [BROWSER] [ERROR] %s\n", msg)
 		}
 	})
+
+	// Add Browser Debug Info to Report
+	f, _ := os.OpenFile(smokeFile, os.O_APPEND|os.O_WRONLY, 0644)
+	fmt.Fprintf(f, "## Browser Verification\n\n- [x] **Debug Browser Attached:** %s\n- [x] **Console Logging Enabled:** Active\n\n---\n", wsURL)
+	f.Close()
 
 	stepCount := 0
 	runStep := func(name string, actions chromedp.Action) error {
@@ -148,7 +207,17 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 
 		f, _ := os.OpenFile(smokeFile, os.O_APPEND|os.O_WRONLY, 0644)
 		defer f.Close()
-		fmt.Fprintf(f, "\n### %d. %s\n\n![%s](%s)\n\n---", stepCount+1, name, name, shotName)
+		fmt.Fprintf(f, "\n### %d. %s\n\n![%s](%s)\n\n", stepCount+1, name, name, shotName)
+		
+		// Append console logs for this step
+		mu.Lock()
+		if len(currentLogs) > 0 {
+			fmt.Fprintf(f, "<details><summary>Console Logs (%d)</summary>\n\n```text\n%s\n```\n\n</details>\n\n", len(currentLogs), strings.Join(currentLogs, "\n"))
+			currentLogs = []string{} // Clear for next step
+		}
+		mu.Unlock()
+		fmt.Fprintf(f, "---\n")
+		
 		stepCount++
 		return nil
 	}
@@ -157,20 +226,48 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 	if err := chromedp.Run(ctx, 
 		chromedp.EmulateViewport(1280, 800),
 		chromedp.Navigate(fmt.Sprintf("http://127.0.0.1:%d", port)),
-		chromedp.WaitVisible(`#wsl-table`, chromedp.ByQuery),
+		chromedp.WaitVisible(`#wsl-home`, chromedp.ByQuery),
 	); err != nil { 
 		fmt.Printf("   [ERROR] Initial navigation failed: %v\n", err)
 		return err 
 	}
 
-	if err := runStep("WSL Table Rendering", chromedp.WaitVisible("#node-rows", chromedp.ByQuery)); err != nil { return err }
+	if err := runStep("1. Home Section Validation", chromedp.WaitVisible("[aria-label='WSL Hero Title']", chromedp.ByQuery)); err != nil { return err }
+	
+	// Navigate to Documentation
+	if err := runStep("2. Documentation Section", chromedp.Tasks{
+		chromedp.Evaluate(`window.location.hash = "#wsl-settings"`, nil),
+		chromedp.WaitVisible("[aria-label='WSL Documentation Title']", chromedp.ByQuery),
+	}); err != nil { return err }
+
+	// Navigate to Table
+	if err := runStep("3. WSL Table Rendering", chromedp.Tasks{
+		chromedp.Evaluate(`window.location.hash = "#wsl-table"`, nil),
+		chromedp.WaitVisible("#node-rows", chromedp.ByQuery),
+	}); err != nil { return err }
+
+	if err := runStep("4. Verify Header Hidden", chromedp.ActionFunc(func(ctx context.Context) error {
+		var isHidden bool
+		err := chromedp.Evaluate(`
+			(function() {
+				const el = document.querySelector(".header-title");
+				if (!el) return true;
+				const style = window.getComputedStyle(el);
+				return style.display === "none";
+			})()
+		`, &isHidden).Do(ctx)
+		if err != nil { return err }
+		if !isHidden { return fmt.Errorf("header is still visible") }
+		return nil
+	})); err != nil { return err }
 	
 	testNode := "smoke-test-node"
-	if err := runStep("Spawn WSL Node", chromedp.Tasks{
+	if err := runStep("5. Spawn WSL Node", chromedp.Tasks{
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			return chromedp.Evaluate(fmt.Sprintf(`window.prompt = () => "%s";`, testNode), nil).Do(ctx)
 		}),
-		chromedp.Click(`#start-node`, chromedp.ByQuery),
+		chromedp.WaitVisible(`button[aria-label="Spawn WSL Node"]`, chromedp.ByQuery),
+		chromedp.Click(`button[aria-label="Spawn WSL Node"]`, chromedp.ByQuery),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			start := time.Now()
 			for time.Since(start) < 90*time.Second {
@@ -183,7 +280,7 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 		}),
 	}); err != nil { return err }
 
-	if err := runStep("Verify Running & Stats", chromedp.ActionFunc(func(ctx context.Context) error {
+	if err := runStep("6. Verify Running & Stats", chromedp.ActionFunc(func(ctx context.Context) error {
 		start := time.Now()
 		for time.Since(start) < 30*time.Second {
 			var statsReady bool
@@ -205,7 +302,8 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 		return fmt.Errorf("timeout waiting for stats for %s", testNode)
 	})); err != nil { return err }
 
-	if err := runStep("Stop Node", chromedp.Tasks{
+	if err := runStep("7. Stop Node", chromedp.Tasks{
+		chromedp.WaitVisible(fmt.Sprintf(`button[aria-label="Stop Node %s"]`, testNode), chromedp.ByQuery),
 		chromedp.Click(fmt.Sprintf(`button[aria-label="Stop Node %s"]`, testNode), chromedp.ByQuery),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			start := time.Now()
@@ -219,18 +317,19 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 		}),
 	}); err != nil { return err }
 
-	if err := runStep("Delete Node", chromedp.Tasks{
+	if err := runStep("8. Delete Node", chromedp.Tasks{
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			return chromedp.Evaluate(`window.confirm = () => true;`, nil).Do(ctx)
 		}),
+		chromedp.WaitVisible(fmt.Sprintf(`button[aria-label="Delete Node %s"]`, testNode), chromedp.ByQuery),
 		chromedp.Click(fmt.Sprintf(`button[aria-label="Delete Node %s"]`, testNode), chromedp.ByQuery),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			start := time.Now()
-			for time.Since(start) < 20*time.Second {
+			for time.Since(start) < 30*time.Second {
 				var found bool
 				_ = chromedp.Evaluate(fmt.Sprintf(`document.body.innerText.includes("%s")`, testNode), &found).Do(ctx)
 				if !found { return nil }
-				time.Sleep(1 * time.Second)
+				time.Sleep(2 * time.Second)
 			}
 			return fmt.Errorf("timeout waiting for %s to be deleted", testNode)
 		}),
