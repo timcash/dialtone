@@ -13,8 +13,9 @@ export class SectionManager {
     const el = document.getElementById(id);
     if (!el || !config) return;
 
-    // Toggle header visibility via body class
+    // Toggle header/menu visibility via body classes
     document.body.classList.toggle('hide-header', config.header?.visible === false);
+    document.body.classList.toggle('hide-menu', config.header?.menuVisible === false);
 
     if (!this.components.has(id)) {
       const comp = new config.component(el);
@@ -22,7 +23,7 @@ export class SectionManager {
       this.components.set(id, comp);
     }
 
-    document.querySelectorAll('.snap-slide').forEach(s => s.classList.remove('is-active'));
+    document.querySelectorAll('section').forEach(s => s.classList.remove('is-active'));
     el.classList.add('is-active');
     
     // Smooth scroll to section

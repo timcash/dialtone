@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Nix Node Manager</title>
+    <script>console.log('[index.html] 📍 UI LOADING');</script>
   </head>
   <body>
     <header class="header-title">
@@ -22,21 +23,25 @@
       </button>
       <div id="global-menu-panel" hidden>
         <div class="menu-header">Navigation</div>
-        <button class="menu-button" onclick="window.navigateTo('nix-hero')">Hero Visualization</button>
-        <button class="menu-button" onclick="window.navigateTo('nix-docs')">Documentation</button>
-        <button class="menu-button" onclick="window.navigateTo('nix-table')">Spreadsheet Manager</button>
+        <button class="menu-button" onclick="window.location.hash = '#nix-hero'">Hero Visualization</button>
+        <button class="menu-button" onclick="window.location.hash = '#nix-docs'">Documentation</button>
+        <button class="menu-button" onclick="window.location.hash = '#nix-table'">Spreadsheet Manager</button>
       </div>
     </div>
 
     <main id="app">
-      <section id="nix-hero" class="viz-section snap-slide" data-subtitle="nix cluster visualization">
+      <section id="nix-hero" class="viz-section snap-slide" data-subtitle="nix cluster visualization" aria-label="Nix Hero Section">
         <div id="viz-container" class="viz-container"></div>
+        <div class="marketing-overlay">
+          <h2 aria-label="Nix Hero Title">Nix Node Explorer</h2>
+          <p data-typing-subtitle></p>
+        </div>
       </section>
 
-      <section id="nix-docs" class="viz-section snap-slide" data-subtitle="nix documentation">
+      <section id="nix-docs" class="viz-section snap-slide" data-subtitle="nix documentation" aria-label="Nix Documentation Section">
         <div class="explorer-container">
           <div class="docs-text">
-            <h1>Nix & Plugin Architecture</h1>
+            <h1 aria-label="Nix Documentation Title">Nix & Plugin Architecture</h1>
             <ul>
               <li><b>Reproducible:</b> Packages are built in isolation with unique hash-based paths.</li>
               <li><b>Declarative:</b> System states are defined in version-controlled configuration files.</li>
@@ -44,7 +49,7 @@
               <li><b>Snap-UI:</b> High-speed navigation between 3D clusters and edge-to-edge data.</li>
             </ul>
 
-            <div class="code-block">
+            <div class="code-block" aria-label="Nix Documentation Code">
               <code>$ ./dialtone.sh nix build src_v1  # Build UI Assets</code><br/>
               <code>$ ./dialtone.sh nix smoke src_v1  # Run Automated Tests</code>
             </div>
@@ -52,11 +57,11 @@
         </div>
       </section>
 
-      <section id="nix-table" class="viz-section snap-slide" data-subtitle="nix node spreadsheet">
+      <section id="nix-table" class="viz-section snap-slide" data-subtitle="nix node spreadsheet" aria-label="Nix Spreadsheet Section">
         <div class="explorer-container">
           <div class="explorer-column">
             <div class="spreadsheet-wrapper">
-              <table style="width: 100%; border-collapse: collapse; font-family: monospace; font-size: 13px;">
+              <table aria-label="Nix Process Table" style="width: 100%; border-collapse: collapse; font-family: monospace; font-size: 13px;">
                 <thead>
                   <tr style="background: #111; text-align: left; border-bottom: 1px solid #333;">
                     <th style="padding: 12px; color: #00ff88; width: 120px;">ID</th>
