@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/sftp"
-	"golang.org/x/crypto/ssh"
 	"dialtone/cli/src/core/logger"
 	"flag"
+	"github.com/pkg/sftp"
+	"golang.org/x/crypto/ssh"
 )
 
 // RunSSH handles general SSH tools (upload, download, cmd)

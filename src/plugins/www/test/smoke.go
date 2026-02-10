@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 
-
 	"strings"
 	"sync"
 	"time"
@@ -22,9 +21,9 @@ import (
 
 	"strconv"
 
-	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/performance" // Added import
+	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 	stdruntime "runtime"
 
@@ -53,15 +52,14 @@ type consoleEntry struct {
 }
 
 type sectionMetrics struct {
-	CPU      float64 `json:"cpu"`
-	Memory   float64 `json:"memory"` // MB
-	GPU      float64 `json:"gpu"`    // Placeholder or metric if available
-	JSHeap   float64 `json:"jsHeap"` // MB
-	FPS      int     `json:"fps"`
-	AppCPU   float64 `json:"appCpu"` // ms
-	AppGPU   float64 `json:"appGpu"` // ms
+	CPU    float64 `json:"cpu"`
+	Memory float64 `json:"memory"` // MB
+	GPU    float64 `json:"gpu"`    // Placeholder or metric if available
+	JSHeap float64 `json:"jsHeap"` // MB
+	FPS    int     `json:"fps"`
+	AppCPU float64 `json:"appCpu"` // ms
+	AppGPU float64 `json:"appGpu"` // ms
 }
-
 
 // RunWwwSmoke starts the dev server and quickly checks each section for warnings/errors.
 func RunWwwSmoke() error {
@@ -139,8 +137,6 @@ func RunWwwSmoke() error {
 		}
 	}
 
-
-
 	useHeadless := os.Getenv("SMOKE_HEADLESS") != "false" && !isHeaded
 	wsURL, isNewBrowser, err := resolveChrome(targetPort, useHeadless, ignoreEnv)
 	if err != nil {
@@ -173,8 +169,7 @@ func RunWwwSmoke() error {
 			msgLower := strings.ToLower(msg)
 			// Log everything to stdout as requested, but only track issues for failure
 			isIssue := ev.Type == "warning" || ev.Type == "error" ||
-				(ev.Type == "log" && (
-					strings.Contains(msgLower, "error") ||
+				(ev.Type == "log" && (strings.Contains(msgLower, "error") ||
 					strings.Contains(msgLower, "warning")))
 
 			stack := ""
@@ -312,7 +307,6 @@ func RunWwwSmoke() error {
 
 	// Navigate once to the base page
 
-
 	// TRIGGER PROOFOFLIFE ERRORS
 	fmt.Println(">> [WWW] Smoke: triggering Proof of Life errors...")
 	// 1. Browser Error
@@ -340,7 +334,7 @@ func RunWwwSmoke() error {
 		var currentHash string
 		var scrollY float64
 		var m sectionMetrics
-		
+
 		// Drain stats channel
 	drain:
 		for {
@@ -350,9 +344,9 @@ func RunWwwSmoke() error {
 				break drain
 			}
 		}
-		
+
 		fmt.Printf(">> [WWW] Smoke: [%d/%d] NAVIGATING TO: #%s\n", i+1, len(sections), section)
-		
+
 		// Navigate
 		if err := chromedp.Run(ctx,
 			chromedp.Evaluate(fmt.Sprintf("window.location.hash = '%s'", section), nil),
@@ -508,7 +502,7 @@ func RunWwwSmoke() error {
 			strings.Contains(msg, "[cad] Fetch failed") {
 			continue
 		}
-		
+
 		if strings.Contains(msg, "[PROOFOFLIFE]") {
 			if _, ok := proofOfLifeErrors[msg]; !ok {
 				proofOfLifeErrors[msg] = entry
@@ -536,7 +530,7 @@ func RunWwwSmoke() error {
 			smLines = append(smLines, fmt.Sprintf("| %s | %s | ✅ CAPTURED |", entry.level, entry.message))
 		}
 	}
-	
+
 	smLines = append(smLines, "\n## 2. Real Errors & Warnings")
 	if len(uniqueErrors) == 0 {
 		smLines = append(smLines, "\n✅ No actual issues detected.")
@@ -626,7 +620,7 @@ func RunWwwSmoke() error {
 
 	smLines = append(smLines, "\n## 5. Visual Summary Grid")
 	smLines = append(smLines, "\n![Summary Grid](screenshots/summary.png)")
-	
+
 	os.WriteFile(smokeMdPath, []byte(strings.Join(smLines, "\n")), 0644)
 
 	if err := TileScreenshots(screenshotsDir, summaryPath, sections); err == nil {
@@ -810,8 +804,6 @@ func formatConsoleArgs(args []*runtime.RemoteObject) string {
 	}
 	return strings.Join(parts, " ")
 }
-
-
 
 func readWebSocketURL(port string) (string, error) {
 	fmt.Println(">> [WWW] Smoke: fetching /json/version")

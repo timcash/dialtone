@@ -34,9 +34,8 @@ import (
 	ui_cli "dialtone/cli/src/plugins/ui/cli"
 	vpn_cli "dialtone/cli/src/plugins/vpn/cli"
 
-	www_cli "dialtone/cli/src/plugins/www/cli"
 	task_cli "dialtone/cli/src/plugins/task/cli"
-
+	www_cli "dialtone/cli/src/plugins/www/cli"
 )
 
 // ExecuteDev is the entry point for the dialtone CLI

@@ -26,20 +26,24 @@ type Snapshot struct {
 
 func RunGlitchTest() error {
 	ctx, cancel, err := setupBrowser()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer cancel()
 
 	var snapshots []Snapshot
-	
+
 	// Navigate
 	err = chromedp.Run(ctx,
 		chromedp.Navigate("http://127.0.0.1:5174"),
 		chromedp.Sleep(1*time.Second),
 	)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	fmt.Println("[GLITCH TEST] Starting high-frequency sampling (10 Hz) for 20 seconds...")
-	
+
 	start := time.Now()
 	for time.Since(start) < 20*time.Second {
 		var s Snapshot
@@ -56,7 +60,9 @@ func RunGlitchTest() error {
 				})()
 			`, &s),
 		)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		if s.Time > 0 {
 			snapshots = append(snapshots, s)
 		}
@@ -65,19 +71,21 @@ func RunGlitchTest() error {
 
 	// Analyze for "jumps" (spikes in velocity)
 	fmt.Printf("[GLITCH TEST] Captured %d snapshots. Analyzing for one-frame pops...\n", len(snapshots))
-	
+
 	glitchFound := false
 	for i := 1; i < len(snapshots); i++ {
 		p1, p2 := snapshots[i-1].CamPos, snapshots[i].CamPos
 		dist := math.Sqrt(math.Pow(p2[0]-p1[0], 2) + math.Pow(p2[1]-p1[1], 2) + math.Pow(p2[2]-p1[2], 2))
 		dt := (snapshots[i].Time - snapshots[i-1].Time) / 1000.0
-		
-		if dt <= 0 { continue }
+
+		if dt <= 0 {
+			continue
+		}
 		vel := dist / dt
-		
+
 		// A jump usually results in a massive velocity spike relative to the "gentle" 0.05 units/s
 		if vel > 1.0 {
-			fmt.Printf("[GLITCH DETECTED] Spike at T=%.2f: Velocity=%.4f units/s! (Dist=%.4f, Dt=%.4f)\n", 
+			fmt.Printf("[GLITCH DETECTED] Spike at T=%.2f: Velocity=%.4f units/s! (Dist=%.4f, Dt=%.4f)\n",
 				snapshots[i].Time/1000, vel, dist, dt)
 			glitchFound = true
 		}
@@ -116,7 +124,7 @@ func setupBrowser() (context.Context, context.CancelFunc, error) {
 
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	ctx, cancelCtx := chromedp.NewContext(allocCtx)
-	
+
 	return ctx, func() {
 		cancelCtx()
 		cancel()

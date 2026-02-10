@@ -17,14 +17,21 @@ sections.register('s-viz', {
 
 sections.register('s-nixtable', {
   containerId: 's-nixtable',
-  header: { visible: false }, // Hide HUD/Header in table view
+  header: { 
+    visible: false,
+    menuVisible: false // Hide global menu too
+  },
   load: async () => {
     const stopInterval = initManager()
     return {
       dispose: () => { stopInterval() },
       setVisible: (v: boolean) => {
+          console.log('[NIX] s-nixtable setVisible:', v);
           const el = document.getElementById('s-nixtable');
-          if (el) el.style.visibility = v ? 'visible' : 'hidden';
+          if (el) {
+              el.style.visibility = 'visible';
+              el.style.opacity = '1';
+          }
       }
     }
   }
@@ -33,22 +40,67 @@ sections.register('s-nixtable', {
 sections.observe()
 
 // 2. Navigation & Hash Management
-const loadSection = (id: string, smooth = true) => {
+let isProgrammaticScroll = false;
+let programmaticScrollTimeout: number | null = null;
+
+(window as any).navigateTo = (id: string, smooth = true) => {
+    console.log(`[main] 🧭 Navigating to: #${id} (smooth: ${smooth})`);
     const el = document.getElementById(id);
     if (el && el.classList.contains('snap-slide')) {
         sections.load(id); 
+        
+        isProgrammaticScroll = true;
+        if (programmaticScrollTimeout) clearTimeout(programmaticScrollTimeout);
+
         el.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' });
+        
+        // Force is-visible class for programmatic navigation
+        document.querySelectorAll('.snap-slide').forEach(s => s.classList.remove('is-visible'));
+        el.classList.add('is-visible');
+
+        programmaticScrollTimeout = window.setTimeout(() => {
+            console.log(`[main] ✅ Programmatic scroll settled for #${id}`);
+            isProgrammaticScroll = false;
+            programmaticScrollTimeout = null;
+        }, 2000);
+
         return true;
     }
     return false;
 };
 
 const initialHash = window.location.hash.slice(1) || 's-viz';
-setTimeout(() => loadSection(initialHash, false), 100);
+setTimeout(() => (window as any).navigateTo(initialHash, false), 100);
 
 window.addEventListener('hashchange', () => {
-    loadSection(window.location.hash.slice(1), true);
+    (window as any).navigateTo(window.location.hash.slice(1), true);
 });
+
+// Update URL hash when scroll brings a section into view
+const allSlides = document.querySelectorAll('.snap-slide');
+const hashObserver = new IntersectionObserver(
+    (entries) => {
+        if (isProgrammaticScroll) return;
+        let best: { id: string; ratio: number } | null = null;
+        for (const entry of entries) {
+            if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
+                const id = (entry.target as HTMLElement).id;
+                if (id && (!best || entry.intersectionRatio > best.ratio)) {
+                    best = { id, ratio: entry.intersectionRatio };
+                }
+            }
+        }
+        if (best && window.location.hash.slice(1) !== best.id) {
+            console.log(`[main] 🔃 Observer updating hash to #${best.id}`);
+            history.replaceState(null, '', '#' + best.id);
+        }
+    },
+    { threshold: [0.5, 0.75, 1] }
+);
+
+setTimeout(() => {
+    allSlides.forEach((el) => hashObserver.observe(el));
+}, 1000);
 
 // Marketing fade-in
 const marketingObserver = new IntersectionObserver((entries) => {
@@ -64,7 +116,7 @@ function initManager() {
   const startBtn = document.getElementById('start-node') as HTMLButtonElement
   if (!startBtn) return () => {}
 
-  startBtn.onclick = async () => {
+  startBtn.addEventListener('click', async () => {
     console.log('[NIX] Spawning new node...')
     try {
         const res = await fetch('/api/processes', { method: 'POST' })
@@ -74,9 +126,9 @@ function initManager() {
         console.error('[NIX] Spawn failed', e)
     }
     updateSpreadsheet()
-  }
+  })
 
-  const interval = setInterval(updateSpreadsheet, 2000)
+  const interval = setInterval(updateSpreadsheet, 1000)
   updateSpreadsheet()
   
   return () => clearInterval(interval)
@@ -86,6 +138,7 @@ async function updateSpreadsheet() {
   try {
     const res = await fetch('/api/processes')
     const procs = await res.json()
+    
     const tbody = document.getElementById('node-rows')!
     if (!tbody) return
 
@@ -93,6 +146,8 @@ async function updateSpreadsheet() {
         tbody.innerHTML = '<tr><td colspan="4" style="padding: 20px; text-align: center; opacity: 0.5;">No active nodes found</td></tr>';
         return;
     }
+
+    console.log('[NIX] Processes updated:', procs.map((p: any) => `${p.id}:${p.status}`).join(', '))
 
     tbody.innerHTML = procs.map((p: any) => {
       const lastLog = p.logs && p.logs.length > 0 ? p.logs[p.logs.length - 1] : 'Waiting for logs...';
@@ -107,22 +162,35 @@ async function updateSpreadsheet() {
         '</td>' +
         '<td class="node-logs" style="padding: 12px; color: #888; max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">' + lastLog + '</td>' +
         '<td style="padding: 12px; text-align: right;">' +
-          '<button class="stop-btn" aria-label="Stop Node ' + p.id + '" onclick="stopNode(\'' + p.id + '\')" style="background: #331111; color: #ff4444; border: 1px solid #552222; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;">STOP</button>' +
+          '<button class="stop-btn" data-id="' + p.id + '" aria-label="Stop Node ' + p.id + '" style="background: #331111; color: #ff4444; border: 1px solid #552222; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;">STOP</button>' +
         '</td>' +
       '</tr>';
     }).join('')
+
+    // Attach event listeners after rendering
+    tbody.querySelectorAll('.stop-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            console.log('[NIX] Stop button clicked for:', (btn as HTMLElement).dataset.id)
+            const id = (btn as HTMLElement).dataset.id;
+            if (id) stopNode(id);
+        });
+    });
   } catch (e) {
     console.error('[NIX] Update spreadsheet failed', e)
   }
 }
 
-(window as any).stopNode = async (id: string) => {
+async function stopNode(id: string) {
   console.log('[NIX] Requesting stop for node ' + id)
   try {
-      await fetch('/api/stop?id=' + id)
+      const res = await fetch('/api/stop?id=' + id)
+      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`)
       console.log('[NIX] Stop command acknowledged for ' + id)
   } catch (e) {
       console.error('[NIX] Failed to stop ' + id, e)
   }
   updateSpreadsheet()
 }
+
+// Keep global for backwards compatibility if needed, but we use internal stopNode now
+(window as any).stopNode = stopNode;

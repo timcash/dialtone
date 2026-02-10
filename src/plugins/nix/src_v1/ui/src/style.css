@@ -7,15 +7,16 @@
 
 body {
   margin: 0;
-  overflow: hidden; /* Prevent body scroll, use snap-container instead */
-}
-
-.snap-container {
-  height: 100vh;
-  width: 100vw;
+  width: 100%;
+  height: 100%;
   overflow-y: scroll;
   scroll-snap-type: y mandatory;
-  scroll-behavior: smooth;
+  background-color: #000;
+}
+
+/* Hide scrollbar */
+body::-webkit-scrollbar {
+  display: none;
 }
 
 .snap-slide {
@@ -25,6 +26,17 @@ body {
   scroll-snap-stop: always;
   position: relative;
   overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+#s-viz {
+  background: #000;
+}
+
+#s-nixtable {
+  background: #000;
 }
 
 .header-title {
@@ -33,11 +45,13 @@ body {
   left: 2rem;
   z-index: 100;
   pointer-events: none;
-  transition: opacity 0.3s ease;
+  transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
 .header-title.is-hidden {
-  opacity: 0;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 
 .header-title h1 {
@@ -65,6 +79,10 @@ body {
   top: 2rem;
   right: 2rem;
   z-index: 1000;
+}
+
+#global-menu.is-hidden {
+  display: none !important;
 }
 
 #global-menu-toggle {
@@ -132,22 +150,81 @@ body {
 }
 
 .explorer-container {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2rem;
-  padding: 4rem 2rem 2rem 2rem;
-  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  padding: 0;
+  margin: 0;
   box-sizing: border-box;
+  pointer-events: auto;
+  overflow: hidden;
 }
 
 .explorer-column {
+  width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
-  background: #111;
-  border: 1px solid #333;
-  border-radius: 8px;
-  padding: 1.5rem;
+  background: #000;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  margin: 0;
   overflow: hidden;
+  position: relative;
+}
+
+.spreadsheet-wrapper {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background: #000;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.floating-spawn-btn {
+  position: absolute;
+  bottom: 2rem;
+  right: 2rem;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 50%;
+  background: #00ff88;
+  color: #000;
+  border: none;
+  font-size: 2rem;
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 0 4px 15px rgba(0, 255, 136, 0.3);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.floating-spawn-btn:hover {
+  transform: scale(1.1);
+  background: #00cc77;
+}
+
+.floating-spawn-btn:active {
+  transform: scale(0.95);
+}
+
+/* Ensure the table itself takes full width */
+.spreadsheet-wrapper table {
+  width: 100%;
+  border-spacing: 0;
+}
+
+#global-menu.is-hidden {
+  display: none !important;
 }
 
 .explorer-column h3 {

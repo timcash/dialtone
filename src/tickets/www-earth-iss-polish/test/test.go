@@ -18,28 +18,32 @@ func init() {
 }
 
 type FocusSnapshot struct {
-	Time         float64    `json:"time"`
-	CamDist      float64    `json:"camDist"`
-	HorizonAngle float64    `json:"horizonAngle"`
-	LookAngle    float64    `json:"lookAngle"`
+	Time         float64 `json:"time"`
+	CamDist      float64 `json:"camDist"`
+	HorizonAngle float64 `json:"horizonAngle"`
+	LookAngle    float64 `json:"lookAngle"`
 }
 
 func RunFocusTest() error {
 	ctx, cancel, err := setupBrowser()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer cancel() // Ensure cleanup
 
 	var snapshots []FocusSnapshot
-	
+
 	// Navigate
 	err = chromedp.Run(ctx,
 		chromedp.Navigate("http://127.0.0.1:5174"),
 		chromedp.Sleep(2*time.Second),
 	)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	fmt.Println("[FOCUS TEST] Sampling camera gaze for 30 seconds...")
-	
+
 	start := time.Now()
 	for time.Since(start) < 30*time.Second {
 		var s FocusSnapshot
@@ -67,12 +71,14 @@ func RunFocusTest() error {
 				})()
 			`, &s),
 		)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		if s.Time > 0 {
 			snapshots = append(snapshots, s)
 			// Check immediately
-			if s.LookAngle > s.HorizonAngle * 1.01 {
-				return fmt.Errorf("FAIL: Camera looking into space! LookAngle (%.4f) > HorizonAngle (%.4f) at T=%.2f", 
+			if s.LookAngle > s.HorizonAngle*1.01 {
+				return fmt.Errorf("FAIL: Camera looking into space! LookAngle (%.4f) > HorizonAngle (%.4f) at T=%.2f",
 					s.LookAngle, s.HorizonAngle, s.Time/1000)
 			}
 		}
@@ -102,7 +108,7 @@ func setupBrowser() (context.Context, context.CancelFunc, error) {
 
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	ctx, cancelCtx := chromedp.NewContext(allocCtx)
-	
+
 	return ctx, func() {
 		cancelCtx()
 		cancel()

@@ -18,13 +18,15 @@ func init() {
 }
 
 type CloudSnapshot struct {
-	Time  float64 `json:"time"`
-	RotY  float64 `json:"rotY"`
+	Time float64 `json:"time"`
+	RotY float64 `json:"rotY"`
 }
 
 func RunCloudMotionTest() error {
 	ctx, cancel, err := setupBrowser()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer cancel()
 
 	// Navigate to local dev server (port 5176 based on previous output)
@@ -41,12 +43,14 @@ func RunCloudMotionTest() error {
 		chromedp.Navigate(targetURL),
 		chromedp.Sleep(2*time.Second),
 	)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	fmt.Printf("[CLOUD TEST] Sampling cloud rotation at %s...\n", targetURL)
-	
+
 	var initial, final CloudSnapshot
-	
+
 	// Sample 1
 	err = chromedp.Run(ctx,
 		chromedp.Evaluate(`
@@ -57,8 +61,12 @@ func RunCloudMotionTest() error {
 			})()
 		`, &initial),
 	)
-	if err != nil { return err }
-	if initial.Time == 0 { return fmt.Errorf("could not access cloud rotation data") }
+	if err != nil {
+		return err
+	}
+	if initial.Time == 0 {
+		return fmt.Errorf("could not access cloud rotation data")
+	}
 
 	time.Sleep(5 * time.Second)
 
@@ -72,7 +80,9 @@ func RunCloudMotionTest() error {
 			})()
 		`, &final),
 	)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	deltaRot := MathAbs(final.RotY - initial.RotY)
 	deltaTime := (final.Time - initial.Time) / 1000.0
@@ -80,7 +90,7 @@ func RunCloudMotionTest() error {
 
 	fmt.Printf("[CLOUD TEST] DeltaRot: %.6f, DeltaTime: %.2fs, Speed: %.6f rad/s\n", deltaRot, deltaTime, rotPerSec)
 
-	// We increased cloud1RotSpeed to 0.00025. 
+	// We increased cloud1RotSpeed to 0.00025.
 	// The test should verify it's at least 80% of that value (accounting for rendering/timing jitter).
 	minSpeed := 0.00020
 	if rotPerSec < minSpeed {
@@ -92,7 +102,9 @@ func RunCloudMotionTest() error {
 }
 
 func MathAbs(v float64) float64 {
-	if v < 0 { return -v }
+	if v < 0 {
+		return -v
+	}
 	return v
 }
 

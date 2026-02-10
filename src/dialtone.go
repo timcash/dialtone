@@ -144,7 +144,7 @@ func runLocalOnly(port, wsPort, webPort int, verbose bool, mavlinkAddr string, o
 	if webPort == 80 {
 		localWebAddr = "0.0.0.0:8080" // Use 8080 if 80 is requested but not root
 	}
-	
+
 	webServer := &http.Server{
 		Addr:    localWebAddr,
 		Handler: webHandler,

@@ -15,12 +15,14 @@ import (
 
 	"dialtone/cli/src/core/browser"
 	chrome_app "dialtone/cli/src/plugins/chrome/app"
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
 type smokeEntry struct {
 	name       string
+	conditions string
 	status     string
 	errorMsg   string
 	stackTrace string
@@ -69,7 +71,6 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 
 	var mu sync.Mutex
 	var currentLogs []string
-	var lastErrorMsg string
 	var lastStack string
 	
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
@@ -85,7 +86,6 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 			mu.Lock()
 			currentLogs = append(currentLogs, fmt.Sprintf("[%s] %s", ev.Type, msg))
 			if ev.Type == "error" {
-				lastErrorMsg = msg
 				lastStack = stack
 			}
 			mu.Unlock()
@@ -95,12 +95,66 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 
 	testResults := []smokeEntry{}
 
-	// MANUAL TIMEOUT WRAPPER (Strict 10s per test as requested)
-	runStep := func(name string, actions chromedp.Action) error {
+	// Incremental report initialization
+	os.WriteFile(smokeFile, []byte("# Nix Robust Smoke Test Report\n\n**Started:** "+time.Now().Format(time.RFC1123)+"\n"), 0644)
+
+	appendToReport := func(res smokeEntry) {
+		f, err := os.OpenFile(smokeFile, os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			return
+		}
+		defer f.Close()
+
+		sm := []string{}
+		sm = append(sm, fmt.Sprintf("\n### %s", res.name))
+		sm = append(sm, fmt.Sprintf("\n- **Status:** %s", res.status))
+		sm = append(sm, fmt.Sprintf("- **Conditions:** %s", res.conditions))
+		
+		if res.errorMsg != "" {
+			sm = append(sm, fmt.Sprintf("- **Error:** `%s`", res.errorMsg))
+			if res.stackTrace != "" {
+				sm = append(sm, "\n**Stack Trace:**\n```\n"+res.stackTrace+"\n```")
+			}
+		}
+
+		sm = append(sm, "\n#### Visual proof")
+		sm = append(sm, fmt.Sprintf("![%s](%s)", res.name, res.screenshot))
+
+		sm = append(sm, "\n#### Last 10 Console Logs")
+		sm = append(sm, "```")
+		start := 0
+		if len(res.logs) > 10 {
+			start = len(res.logs) - 10
+		}
+		for i := start; i < len(res.logs); i++ {
+			sm = append(sm, res.logs[i])
+		}
+		sm = append(sm, "```")
+		sm = append(sm, "\n---")
+		f.WriteString(strings.Join(sm, "\n"))
+	}
+
+	// POLLING HELPER
+	pollJS := func(condition string, timeout time.Duration) chromedp.Action {
+		return chromedp.ActionFunc(func(ctx context.Context) error {
+			start := time.Now()
+			for time.Since(start) < timeout {
+				var ok bool
+				err := chromedp.Run(ctx, chromedp.Evaluate(condition, &ok))
+				if err == nil && ok {
+					return nil
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+			return fmt.Errorf("timeout polling JS condition: %s", condition)
+		})
+	}
+
+	// MANUAL TIMEOUT WRAPPER
+	runStep := func(name string, conditions string, actions chromedp.Action) error {
 		fmt.Printf(">> [NIX] Step: %s (10s limit)\n", name)
 		
 		mu.Lock()
-		lastErrorMsg = ""
 		lastStack = ""
 		mu.Unlock()
 
@@ -121,7 +175,14 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 		}
 
 		var buf []byte
-		_ = chromedp.Run(ctx, chromedp.Screenshot("#app", &buf, chromedp.NodeVisible))
+		_ = chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+			b, err := page.CaptureScreenshot().Do(ctx)
+			if err != nil {
+				return err
+			}
+			buf = b
+			return nil
+		}))
 		
 		shotName := fmt.Sprintf("smoke_step_%d.png", len(testResults))
 		if len(buf) > 0 {
@@ -133,88 +194,104 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 		if err != nil {
 			status = "❌ FAILED"
 			errDetail = err.Error()
-		} else if lastErrorMsg != "" && strings.Contains(name, "Verify Browser Error") {
-			errDetail = lastErrorMsg
 		}
 
 		mu.Lock()
 		logsCopy := make([]string, len(currentLogs))
 		copy(logsCopy, currentLogs)
 		
-		testResults = append(testResults, smokeEntry{
+		entry := smokeEntry{
 			name:       name,
+			conditions: conditions,
 			status:     status,
 			errorMsg:   errDetail,
 			stackTrace: lastStack,
 			screenshot: shotName,
 			logs:       logsCopy,
-		})
+		}
+		testResults = append(testResults, entry)
 		mu.Unlock()
-		return err
+
+		appendToReport(entry)
+		
+		if err != nil {
+			return fmt.Errorf("smoke test stopped at step '%s': %v", name, err)
+		}
+		return nil
+	}
+
+	// NAVIGATION WRAPPER
+	navigate := func(id string) chromedp.Action {
+		return chromedp.Tasks{
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				for i := 0; i < 50; i++ {
+					var exists bool
+					err := chromedp.Run(ctx, chromedp.Evaluate(`typeof window.navigateTo === 'function'`, &exists))
+					if err == nil && exists {
+						return nil
+					}
+					time.Sleep(100 * time.Millisecond)
+				}
+				return fmt.Errorf("window.navigateTo not found after 5s")
+			}),
+			chromedp.Evaluate(fmt.Sprintf("window.navigateTo('%s')", id), nil),
+			pollJS(fmt.Sprintf(`document.querySelector("#%s").classList.contains("is-visible")`, id), 5*time.Second),
+			chromedp.Evaluate(`new Promise(resolve => {
+				const handler = (e) => {
+					if (e.detail.sectionId === '`+id+`') {
+						window.removeEventListener('section-nav-complete', handler);
+						resolve();
+					}
+				};
+				window.addEventListener('section-nav-complete', handler);
+				// Timeout safety
+				setTimeout(resolve, 2000);
+			})`, nil),
+		}
 	}
 
 	// TEST SEQUENCE
 	
-	runStep("1. Verify Browser Error Capture", chromedp.Tasks{
+	if err := runStep("1. Verify Browser Error Capture", "Navigate to home and verify captured log", chromedp.Tasks{
+		chromedp.EmulateViewport(1280, 800),
 		chromedp.Navigate(fmt.Sprintf("http://127.0.0.1:%d", port)),
+		pollJS(`document.querySelector("#s-viz").classList.contains("is-visible")`, 5*time.Second),
 		chromedp.WaitVisible("#viz-container", chromedp.ByQuery),
 		chromedp.Evaluate(`console.error('[SMOKE-VERIFY-ERR] Log pipeline verified')`, nil),
-		chromedp.Sleep(500 * time.Millisecond),
-	})
+	}); err != nil { return err }
 
-	runStep("2. Hero Section Validation", chromedp.Tasks{
+	if err := runStep("2. Hero Section Validation", "Viz container and marketing overlay visible", chromedp.Tasks{
 		chromedp.WaitVisible("#viz-container", chromedp.ByQuery),
-		chromedp.WaitVisible(".marketing-overlay", chromedp.ByQuery),
-	})
+		chromedp.WaitVisible("#s-viz.is-visible .marketing-overlay", chromedp.ByQuery),
+	}); err != nil { return err }
 
-	runStep("3. Spawn Two Nix Nodes", chromedp.Tasks{
-		chromedp.Evaluate(fmt.Sprintf("window.location.hash = 's-nixtable'"), nil),
+	if err := runStep("3. Navigate to Nix Table and Verify Rendering", "Fullscreen layout + hidden header/menu", chromedp.Tasks{
+		navigate("s-nixtable"),
+		chromedp.WaitVisible("#s-nixtable.is-visible", chromedp.ByQuery),
+		pollJS(`getComputedStyle(document.querySelector('.header-title')).opacity === '0' || getComputedStyle(document.querySelector('.header-title')).visibility === 'hidden'`, 2*time.Second),
+		pollJS(`getComputedStyle(document.getElementById('global-menu')).display === 'none'`, 2*time.Second),
+		chromedp.WaitVisible(".explorer-container", chromedp.ByQuery),
 		chromedp.WaitVisible("#start-node", chromedp.ByQuery),
-		chromedp.Click(`button[aria-label="Spawn Nix Node"]`, chromedp.ByQuery),
+	}); err != nil { return err }
+
+	if err := runStep("4. Spawn Two Nix Nodes", "Two nodes appear in table", chromedp.Tasks{
+		chromedp.Click(`#start-node`, chromedp.ByQuery),
 		chromedp.WaitVisible("#proc-1", chromedp.ByQuery),
-		chromedp.Click(`button[aria-label="Spawn Nix Node"]`, chromedp.ByQuery),
+		chromedp.Click(`#start-node`, chromedp.ByQuery),
 		chromedp.WaitVisible("#proc-2", chromedp.ByQuery),
-	})
+		chromedp.WaitVisible(".node-row", chromedp.ByQuery),
+	}); err != nil { return err }
 
-	runStep("4. Selective Termination (proc-1)", chromedp.Tasks{
-		chromedp.Click(`button[aria-label="Stop Node proc-1"]`, chromedp.ByQuery),
+	if err := runStep("5. Selective Termination (proc-1)", "proc-1 status changes to STOPPED", chromedp.Tasks{
+		chromedp.WaitVisible("#proc-1 .stop-btn", chromedp.ByQuery),
+		chromedp.Click("#proc-1 .stop-btn", chromedp.ByQuery),
 		chromedp.WaitVisible("#proc-1 .status-badge[data-status-text='stopped']", chromedp.ByQuery),
-	})
+	}); err != nil { return err }
 
-	runStep("5. Verify proc-2 Persistence", chromedp.Tasks{
+	if err := runStep("6. Verify proc-2 Persistence", "proc-2 remains RUNNING", chromedp.Tasks{
 		chromedp.WaitVisible("#proc-2 .status-badge[data-status-text='running']", chromedp.ByQuery),
-	})
+	}); err != nil { return err }
 
-	// GENERATE SMOKE.md
-	fmt.Println(">> [NIX] Smoke: generating detailed report...")
-	var sm []string
-	sm = append(sm, "# Nix Robust Smoke Test Report")
-	sm = append(sm, fmt.Sprintf("\n**Generated:** %s", time.Now().Format(time.RFC1123)))
-	
-	for i, res := range testResults {
-		sm = append(sm, fmt.Sprintf("\n### Test %d: %s", i+1, res.name))
-		sm = append(sm, fmt.Sprintf("\n- **Status:** %s", res.status))
-		
-		if res.errorMsg != "" {
-			sm = append(sm, fmt.Sprintf("- **Error:** `%s`", res.errorMsg))
-			if res.stackTrace != "" {
-				sm = append(sm, "\n**Stack Trace:**\n```\n"+res.stackTrace+"\n```")
-			}
-		}
-
-		sm = append(sm, "\n#### Visual proof")
-		sm = append(sm, fmt.Sprintf("![Step %d](%s)", i+1, res.screenshot))
-
-		sm = append(sm, "\n#### Last 20 Console Logs")
-		sm = append(sm, "```")
-		for _, l := range res.logs {
-			sm = append(sm, l)
-		}
-		sm = append(sm, "```")
-		sm = append(sm, "\n---")
-	}
-
-	os.WriteFile(smokeFile, []byte(strings.Join(sm, "\n")), 0644)
 	fmt.Printf(">> [NIX] Smoke: COMPLETE. Report at %s\n", smokeFile)
 	return nil
 }
@@ -261,7 +338,9 @@ func resolveChrome(requestedPort int, headless bool) (string, bool, error) {
 func formatConsoleArgs(args []*runtime.RemoteObject) string {
 	var parts []string
 	for _, arg := range args {
-		if arg == nil { continue }
+		if arg == nil {
+			continue
+		}
 		if len(arg.Value) > 0 {
 			var v interface{}
 			if err := json.Unmarshal(arg.Value, &v); err == nil {
