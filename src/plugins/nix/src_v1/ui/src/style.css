@@ -31,11 +31,15 @@ body::-webkit-scrollbar {
   align-items: center;
 }
 
-#s-viz {
+#nix-hero {
   background: #000;
 }
 
-#s-nixtable {
+#nix-docs {
+  background: #000;
+}
+
+#nix-table {
   background: #000;
 }
 
@@ -160,6 +164,55 @@ body::-webkit-scrollbar {
   box-sizing: border-box;
   pointer-events: auto;
   overflow: hidden;
+}
+
+.page-content {
+  padding: 100px 4rem;
+  max-width: 1000px;
+  margin: 0 auto;
+  text-align: left;
+  width: 100%;
+}
+
+.page-content h1 {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  color: #00ff88;
+}
+
+.lead {
+  font-size: 1.25rem;
+  line-height: 1.6;
+  opacity: 0.8;
+  margin-bottom: 2rem;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  margin: 2rem 0;
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 1.5rem;
+  border-radius: 12px;
+}
+
+.card h3 {
+  margin: 0 0 0.5rem 0;
+  color: #00ff88;
+}
+
+.code-block {
+  background: #111;
+  padding: 1.5rem;
+  border-radius: 8px;
+  border: 1px solid #333;
+  font-family: monospace;
+  margin-top: 2rem;
 }
 
 .explorer-column {

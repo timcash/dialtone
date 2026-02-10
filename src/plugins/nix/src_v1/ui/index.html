@@ -22,25 +22,64 @@
       </button>
       <div id="global-menu-panel" hidden>
         <div class="menu-header">Navigation</div>
-        <button class="menu-button" onclick="window.location.hash='#s-viz'">Hero Visualization</button>
-        <button class="menu-button" onclick="window.location.hash='#s-nixtable'">Spreadsheet Manager</button>
+        <button class="menu-button" onclick="window.navigateTo('nix-hero')">Hero Visualization</button>
+        <button class="menu-button" onclick="window.navigateTo('nix-docs')">Documentation</button>
+        <button class="menu-button" onclick="window.navigateTo('nix-table')">Spreadsheet Manager</button>
       </div>
     </div>
 
     <main id="app">
-      <section id="s-viz" class="viz-section snap-slide" data-subtitle="nix cluster visualization">
+      <section id="nix-hero" class="viz-section snap-slide" data-subtitle="nix cluster visualization">
         <div id="viz-container" class="viz-container"></div>
       </section>
 
-      <section id="s-nixtable" class="viz-section snap-slide" data-subtitle="nix node spreadsheet">
+      <section id="nix-docs" class="viz-section snap-slide" data-subtitle="nix documentation">
+        <div class="explorer-container">
+          <div class="explorer-column">
+            <div class="page-content">
+              <h1>Nix & Plugin Architecture</h1>
+              <p class="lead">Nix is a functional package manager that provides isolated, reproducible, and declarative environments. This plugin bridges that power into the Dialtone mesh.</p>
+              
+              <div class="grid-2">
+                <div class="card">
+                  <h3>The Nix Philosophy</h3>
+                  <ul>
+                    <li>• <b>Isolation:</b> Packages never overwrite each other.</li>
+                    <li>• <b>Rollbacks:</b> Revert any update instantly if it fails.</li>
+                    <li>• <b>Purity:</b> Build results are identical on every machine.</li>
+                  </ul>
+                </div>
+                <div class="card">
+                  <h3>Plugin Integration</h3>
+                  <ul>
+                    <li>• <b>Go Backend:</b> Manages lifecycle of sub-environments.</li>
+                    <li>• <b>3D Viz:</b> Real-time cluster health visualization.</li>
+                    <li>• <b>Live HUD:</b> Edge-to-edge spreadsheet manager.</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div class="code-block">
+                <div style="color: #00ff88; margin-bottom: 0.5rem;">// Dialtone Nix Command Pattern</div>
+                <code>$ ./dialtone.sh nix dev src_v1  <span style="opacity: 0.5;"># Launch Cluster</span></code><br/>
+                <code>$ ./dialtone.sh nix smoke src_v1 <span style="opacity: 0.5;"># Verify Lifecycle</span></code>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="nix-table" class="viz-section snap-slide" data-subtitle="nix node spreadsheet">
         <div class="explorer-container">
           <div class="explorer-column">
             <div class="spreadsheet-wrapper">
               <table style="width: 100%; border-collapse: collapse; font-family: monospace; font-size: 13px;">
                 <thead>
                   <tr style="background: #111; text-align: left; border-bottom: 1px solid #333;">
-                    <th style="padding: 12px; color: #00ff88; width: 120px;">PID/ID</th>
+                    <th style="padding: 12px; color: #00ff88; width: 120px;">ID</th>
+                    <th style="padding: 12px; color: #00ff88; width: 80px;">PID</th>
                     <th style="padding: 12px; color: #00ff88; width: 100px;">STATUS</th>
+                    <th style="padding: 12px; color: #00ff88; width: 120px;">START TIME</th>
                     <th style="padding: 12px; color: #00ff88;">LAST LOG OUTPUT</th>
                     <th style="padding: 12px; color: #00ff88; text-align: right; width: 100px;">ACTIONS</th>
                   </tr>
@@ -51,9 +90,6 @@
               </table>
             </div>
             <button id="start-node" aria-label="Spawn Nix Node" class="floating-spawn-btn">+</button>
-          </div>
-        </div>
-      </section>
           </div>
         </div>
       </section>

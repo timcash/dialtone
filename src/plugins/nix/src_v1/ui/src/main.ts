@@ -6,7 +6,7 @@ const sections = new SectionManager()
 Menu.getInstance()
 
 // 1. Register Sections
-sections.register('s-viz', {
+sections.register('nix-hero', {
   containerId: 'viz-container',
   load: async () => {
     const { mountNixViz } = await import('./components/nix-viz')
@@ -15,8 +15,24 @@ sections.register('s-viz', {
   }
 })
 
-sections.register('s-nixtable', {
-  containerId: 's-nixtable',
+sections.register('nix-docs', {
+  containerId: 'nix-docs',
+  load: async () => {
+    return {
+      dispose: () => {},
+      setVisible: (v: boolean) => {
+          const el = document.getElementById('nix-docs');
+          if (el) {
+              el.style.visibility = v ? 'visible' : 'hidden';
+              el.style.opacity = v ? '1' : '0';
+          }
+      }
+    }
+  }
+})
+
+sections.register('nix-table', {
+  containerId: 'nix-table',
   header: { 
     visible: false,
     menuVisible: false // Hide global menu too
@@ -26,8 +42,8 @@ sections.register('s-nixtable', {
     return {
       dispose: () => { stopInterval() },
       setVisible: (v: boolean) => {
-          console.log('[NIX] s-nixtable setVisible:', v);
-          const el = document.getElementById('s-nixtable');
+          console.log('[NIX] nix-table setVisible:', v);
+          const el = document.getElementById('nix-table');
           if (el) {
               el.style.visibility = 'visible';
               el.style.opacity = '1';
@@ -69,11 +85,14 @@ let programmaticScrollTimeout: number | null = null;
     return false;
 };
 
-const initialHash = window.location.hash.slice(1) || 's-viz';
+const initialHash = window.location.hash.slice(1) || 'nix-hero';
 setTimeout(() => (window as any).navigateTo(initialHash, false), 100);
 
 window.addEventListener('hashchange', () => {
-    (window as any).navigateTo(window.location.hash.slice(1), true);
+    const hash = window.location.hash.slice(1);
+    if (hash) {
+        (window as any).navigateTo(hash, true);
+    }
 });
 
 // Update URL hash when scroll brings a section into view
@@ -143,7 +162,7 @@ async function updateSpreadsheet() {
     if (!tbody) return
 
     if (!procs || !Array.isArray(procs) || procs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" style="padding: 20px; text-align: center; opacity: 0.5;">No active nodes found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="padding: 20px; text-align: center; opacity: 0.5;">No active nodes found</td></tr>';
         return;
     }
 
@@ -158,11 +177,13 @@ async function updateSpreadsheet() {
       
       return '<tr class="node-row" id="' + p.id + '" data-status="' + p.status + '" style="border-bottom: 1px solid #222;">' +
         '<td style="padding: 12px; font-weight: bold; color: #00ff88;">' + p.id + '</td>' +
+        '<td style="padding: 12px; color: #aaa;">' + (p.pid || '-') + '</td>' +
         '<td style="padding: 12px;">' +
           '<span class="status-badge" data-status-text="' + p.status + '" style="padding: 2px 6px; border-radius: 3px; background: ' + statusColor + '; font-size: 11px;">' + 
             p.status.toUpperCase() + 
           '</span>' +
         '</td>' +
+        '<td style="padding: 12px; color: #aaa;">' + (p.start_time || '-') + '</td>' +
         '<td class="node-logs" style="padding: 12px; color: #888; max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">' + lastLog + '</td>' +
         '<td style="padding: 12px; text-align: right;">' +
           '<button class="stop-btn" data-id="' + p.id + '" aria-label="Stop Node ' + p.id + '" style="background: #331111; color: #ff4444; border: 1px solid #552222; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;">STOP</button>' +
