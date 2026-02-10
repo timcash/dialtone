@@ -147,6 +147,9 @@ async function updateSpreadsheet() {
         return;
     }
 
+    // Sort by name (ID) to keep them stable
+    procs.sort((a: any, b: any) => a.id.localeCompare(b.id, undefined, { numeric: true, sensitivity: 'base' }));
+
     console.log('[NIX] Processes updated:', procs.map((p: any) => `${p.id}:${p.status}`).join(', '))
 
     tbody.innerHTML = procs.map((p: any) => {
