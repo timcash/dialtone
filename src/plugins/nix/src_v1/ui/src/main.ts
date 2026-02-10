@@ -59,8 +59,11 @@ sections.observe()
 let isProgrammaticScroll = false;
 let programmaticScrollTimeout: number | null = null;
 
-(window as any).navigateTo = (id: string, smooth = true) => {
-    console.log(`[main] 🧭 Navigating to: #${id} (smooth: ${smooth})`);
+(window as any).navigateTo = (id: string, smooth = false) => {
+    // Override smooth to false for snappy behavior
+    const finalSmooth = id === 'nix-hero' ? false : smooth;
+    
+    console.log(`[main] 🧭 Navigating to: #${id} (snappy)`);
     const el = document.getElementById(id);
     if (el && el.classList.contains('snap-slide')) {
         sections.load(id); 
@@ -68,17 +71,17 @@ let programmaticScrollTimeout: number | null = null;
         isProgrammaticScroll = true;
         if (programmaticScrollTimeout) clearTimeout(programmaticScrollTimeout);
 
-        el.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' });
+        el.scrollIntoView({ behavior: 'auto', block: 'start' });
         
         // Force is-visible class for programmatic navigation
         document.querySelectorAll('.snap-slide').forEach(s => s.classList.remove('is-visible'));
         el.classList.add('is-visible');
 
         programmaticScrollTimeout = window.setTimeout(() => {
-            console.log(`[main] ✅ Programmatic scroll settled for #${id}`);
+            console.log(`[main] ✅ Snappy scroll settled for #${id}`);
             isProgrammaticScroll = false;
             programmaticScrollTimeout = null;
-        }, 2000);
+        }, 100); // Much shorter timeout for snappy behavior
 
         return true;
     }
@@ -91,7 +94,22 @@ setTimeout(() => (window as any).navigateTo(initialHash, false), 100);
 window.addEventListener('hashchange', () => {
     const hash = window.location.hash.slice(1);
     if (hash) {
-        (window as any).navigateTo(hash, true);
+        (window as any).navigateTo(hash, false);
+    }
+});
+
+// Keyboard Navigation (Space bar / Down Arrow to cycle slides)
+window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' || e.code === 'ArrowDown') {
+        e.preventDefault();
+        const slides = Array.from(document.querySelectorAll('.snap-slide'));
+        const currentSlideIndex = slides.findIndex(slide => {
+            const rect = slide.getBoundingClientRect();
+            return rect.top >= -10 && rect.top <= 10;
+        });
+
+        const nextIndex = (currentSlideIndex + 1) % slides.length;
+        (window as any).navigateTo(slides[nextIndex].id, false);
     }
 });
 
