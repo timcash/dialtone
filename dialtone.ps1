@@ -84,6 +84,8 @@ if (-not $env:DIALTONE_ENV) {
 $GoBin = "go"
 # If DIALTONE_ENV is set, prefer local go
 if ($env:DIALTONE_ENV) {
+    # Resolve to absolute path to bypass Windows security restrictions on relative PATH entries
+    $env:DIALTONE_ENV = (Resolve-Path $env:DIALTONE_ENV).Path
     $LocalGo = Join-Path $env:DIALTONE_ENV "go/bin/go.exe"
     if (Test-Path $LocalGo) {
         $GoBin = $LocalGo
