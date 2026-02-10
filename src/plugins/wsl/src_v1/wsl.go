@@ -49,14 +49,17 @@ func (p *WslPlugin) Start() error {
 	mux.HandleFunc("/ws", p.handleWebSocket)
 
 	mux.HandleFunc("/api/instances", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("[WSL] API: %s /api/instances", r.Method)
 		if r.Method == http.MethodPost {
 			var req struct {
 				Name string `json:"name"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				log.Printf("[WSL] API Error: failed to decode create request: %v", err)
 				http.Error(w, err.Error(), 400)
 				return
 			}
+			log.Printf("[WSL] API: triggering creation of %s", req.Name)
 			go p.createInstance(req.Name)
 			w.WriteHeader(http.StatusAccepted)
 			return
@@ -64,9 +67,11 @@ func (p *WslPlugin) Start() error {
 
 		instances, err := p.listInstances()
 		if err != nil {
+			log.Printf("[WSL] API Error: failed to list instances: %v", err)
 			http.Error(w, err.Error(), 500)
 			return
 		}
+		log.Printf("[WSL] API: returning %d instances", len(instances))
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(instances)
 	})

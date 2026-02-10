@@ -11,7 +11,38 @@
       <p id="header-subtitle">wsl instance explorer</p>
     </header>
 
+    <div id="global-menu">
+      <button id="global-menu-toggle" aria-expanded="false" aria-label="Toggle Menu">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="3" y1="12" x2="21" y2="12"></line>
+          <line x1="3" y1="6" x2="21" y2="6"></line>
+          <line x1="3" y1="18" x2="21" y2="18"></line>
+        </svg>
+      </button>
+      <div id="global-menu-panel" hidden>
+        <div class="menu-header">Navigation</div>
+        <button class="menu-button" onclick="window.location.hash = '#wsl-home'">Hero Visualization</button>
+        <button class="menu-button" onclick="window.location.hash = '#wsl-settings'">Documentation</button>
+        <button class="menu-button" onclick="window.location.hash = '#wsl-table'">Spreadsheet Manager</button>
+      </div>
+    </div>
+
     <main id="app">
+      <section id="wsl-home" class="viz-section snap-slide" data-subtitle="wsl cluster visualization" aria-label="WSL Hero Section">
+        <div class="viz-container"></div>
+        <div class="marketing-overlay">
+          <h2 aria-label="WSL Hero Title">WSL Node Explorer</h2>
+          <p data-typing-subtitle></p>
+        </div>
+      </section>
+
+      <section id="wsl-settings" class="viz-section snap-slide" data-subtitle="wsl documentation" aria-label="WSL Documentation Section">
+        <div class="settings-container">
+          <h1 aria-label="WSL Documentation Title">WSL & Plugin Architecture</h1>
+          <p>Full control over your Windows Subsystem for Linux nodes.</p>
+        </div>
+      </section>
+
       <section id="wsl-table" class="viz-section snap-slide" data-subtitle="wsl node spreadsheet" aria-label="WSL Spreadsheet Section">
         <div class="explorer-container">
           <div class="explorer-column">
