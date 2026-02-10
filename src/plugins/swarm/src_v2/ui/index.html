@@ -12,46 +12,44 @@
       <div class="header-fps">FPS --</div>
     </header>
 
-    <div id="global-menu">
-      <button id="global-menu-toggle" aria-expanded="false" aria-label="Toggle Menu">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="3" y1="12" x2="21" y2="12"></line>
-          <line x1="3" y1="6" x2="21" y2="6"></line>
-          <line x1="3" y1="18" x2="21" y2="18"></line>
-        </svg>
-      </button>
-      <div id="global-menu-panel" hidden></div>
+    <div class="top-right-controls">
+      <div class="menu-system">
+        <button id="global-menu-toggle" class="menu-toggle" aria-expanded="false">MENU</button>
+        <div id="global-menu-panel" class="menu-panel" hidden></div>
+      </div>
     </div>
 
     <main id="app">
-      <section id="s-demo" class="viz-section" data-subtitle="interactive node visualization">
+      <section id="s-demo" class="snap-slide" data-subtitle="interactive node visualization">
         <div id="demo-container" class="viz-container"></div>
       </section>
 
-      <section id="s-explorer" class="viz-section" data-subtitle="swarm data explorer">
-        <div class="explorer-container">
-          <div class="explorer-column">
+      <section id="s-explorer" class="snap-slide" data-subtitle="swarm data explorer">
+        <div class="explorer-wrapper">
+          <div class="card">
             <h3>Key/Value Store</h3>
             <div class="input-row">
               <input type="text" id="kv-key" placeholder="Key" />
               <input type="text" id="kv-val" placeholder="Value" />
-              <button id="kv-put">Put</button>
+              <button id="kv-put" class="menu-button-primary">Put</button>
             </div>
             <div id="kv-list" class="data-list"></div>
           </div>
-          <div class="explorer-column">
+          <div class="card">
             <h3>Event Log</h3>
             <div class="input-row">
               <input type="text" id="log-msg" placeholder="Log message..." />
-              <button id="log-append">Append</button>
+              <button id="log-append" class="menu-button-primary">Append</button>
             </div>
             <div id="log-list" class="data-list"></div>
           </div>
         </div>
       </section>
 
-      <section id="s-terminal" class="viz-section" data-subtitle="interactive terminal">
-        <div id="terminal-container"></div>
+      <section id="s-terminal" class="snap-slide" data-subtitle="interactive terminal">
+        <div class="terminal-wrapper">
+          <div id="terminal-container"></div>
+        </div>
       </section>
     </main>
 

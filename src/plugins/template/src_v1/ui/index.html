@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Template Plugin</title>
+  <style>
+    body { margin: 0; font-family: sans-serif; overflow-x: hidden; }
+    header { background: #eee; padding: 1rem; position: fixed; top: 0; width: 100%; z-index: 10; }
+    
+    #global-menu { position: fixed; top: 1rem; right: 1rem; z-index: 20; background: #333; color: white; padding: 0.5rem; border-radius: 4px; cursor: pointer; }
+
+    /* Easy UI Hiding Utility Classes */
+    body.hide-header header { display: none !important; }
+    body.hide-menu #global-menu { display: none !important; }
+
+    section { height: 100vh; padding-top: 60px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-size: 2rem; position: relative; }
+    #home { background: #fff0f0; }
+    #settings { background: #f0f0ff; }
+  </style>
+</head>
+<body>
+  <header class="main-header">
+    <h1>Template Header</h1>
+  </header>
+
+  <div id="global-menu" aria-label="Template Menu">
+    Menu
+  </div>
+
+  <main>
+    <section id="home" aria-label="Home Section">
+      Home Page
+    </section>
+    <section id="settings" aria-label="Settings Section">
+      Settings Page
+    </section>
+  </main>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
