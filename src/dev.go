@@ -27,6 +27,7 @@ import (
 	ide_cli "dialtone/cli/src/plugins/ide/cli"
 	logs_cli "dialtone/cli/src/plugins/logs/cli"
 	mavlink_cli "dialtone/cli/src/plugins/mavlink/cli"
+	dag_cli "dialtone/cli/src/plugins/dag/cli"
 	nix_cli "dialtone/cli/src/plugins/nix/cli"
 	template_cli "dialtone/cli/src/plugins/template/cli"
 	plugin_cli "dialtone/cli/src/plugins/plugin/cli"
@@ -118,6 +119,11 @@ func ExecuteDev() {
 			fmt.Printf("Nix command error: %v\n", err)
 			os.Exit(1)
 		}
+	case "dag":
+		if err := dag_cli.Run(args); err != nil {
+			fmt.Printf("DAG command error: %v\n", err)
+			os.Exit(1)
+		}
 	case "wsl":
 		if err := wsl_cli.Run(args); err != nil {
 			fmt.Printf("WSL command error: %v\n", err)
@@ -171,6 +177,7 @@ func printDevUsage() {
 	fmt.Println("  ui <subcmd>        Manage web UI (dev, build, install)")
 	fmt.Println("  test <subcmd>      Run tests (ticket, plugin, tags)")
 	fmt.Println("  nix <subcmd>       Nix plugin tools (smoke)")
+	fmt.Println("  dag <subcmd>       DAG plugin tools (dev, build, smoke)")
 	fmt.Println("  wsl <subcmd>       WSL plugin tools (smoke)")
 	fmt.Println("  template <subcmd>  Template plugin tools (smoke, new-version)")
 
