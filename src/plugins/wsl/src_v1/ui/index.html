@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WSL Node Manager</title>
+  </head>
+  <body>
+    <header class="header-title">
+      <h1>dialtone.wsl</h1>
+      <p id="header-subtitle">wsl instance explorer</p>
+    </header>
+
+    <main id="app">
+      <section id="wsl-table" class="viz-section snap-slide" data-subtitle="wsl node spreadsheet" aria-label="WSL Spreadsheet Section">
+        <div class="explorer-container">
+          <div class="explorer-column">
+            <div class="spreadsheet-wrapper">
+              <table aria-label="WSL Process Table" style="width: 100%; border-collapse: collapse; font-family: monospace; font-size: 13px;">
+                <thead>
+                  <tr style="background: #111; text-align: left; border-bottom: 1px solid #333;">
+                    <th style="padding: 12px; color: #00ff88; width: 120px;">NAME</th>
+                    <th style="padding: 12px; color: #00ff88; width: 100px;">STATE</th>
+                    <th style="padding: 12px; color: #00ff88; width: 80px;">VERSION</th>
+                    <th style="padding: 12px; color: #00ff88; width: 150px;">MEMORY</th>
+                    <th style="padding: 12px; color: #00ff88;">DISK</th>
+                    <th style="padding: 12px; color: #00ff88; text-align: right; width: 150px;">ACTIONS</th>
+                  </tr>
+                </thead>
+                <tbody id="node-rows">
+                  <tr><td colspan="6" style="padding: 20px; text-align: center; opacity: 0.5;">Initializing...</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <button id="start-node" aria-label="Spawn WSL Node" class="floating-spawn-btn">+</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
