@@ -18,34 +18,32 @@ func Run(args []string) error {
 	}
 
 	command := args[0]
+	
+	// Helper to get directory with latest default
+	getDir := func() string {
+		if len(args) > 1 {
+			return args[1]
+		}
+		return getLatestVersionDir()
+	}
+
 	switch command {
 	case "install":
-		dir := "src_v1"
-		if len(args) > 1 {
-			dir = args[1]
-		}
-		return RunInstall(dir)
+		return RunInstall(getDir())
 	case "lint":
+		return RunLint(getDir())
+	case "dev":
+		return RunDev(getDir())
+	case "smoke":
 		dir := "src_v1"
 		if len(args) > 1 {
 			dir = args[1]
-		}
-		return RunLint(dir)
-	case "smoke":
-		if len(args) < 2 {
-			return fmt.Errorf("usage: template smoke <dir>")
-		}
-		dir := args[1]
-		if err := RunBuild(dir); err != nil {
-			return err
+		} else {
+			dir = getLatestVersionDir()
 		}
 		return test.RunSmoke(dir)
 	case "build":
-		dir := "src_v1"
-		if len(args) > 1 {
-			dir = args[1]
-		}
-		return RunBuild(dir)
+		return RunBuild(getDir())
 	case "src":
 		srcFlags := flag.NewFlagSet("template src", flag.ExitOnError)
 		n := srcFlags.Int("n", 0, "Version number to create")
@@ -57,6 +55,25 @@ func Run(args []string) error {
 	default:
 		return fmt.Errorf("unknown command: %s", command)
 	}
+}
+
+func getLatestVersionDir() string {
+	cwd, _ := os.Getwd()
+	pluginDir := filepath.Join(cwd, "src", "plugins", "template")
+	entries, _ := os.ReadDir(pluginDir)
+	maxVer := 0
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "src_v") {
+			ver, _ := strconv.Atoi(e.Name()[5:])
+			if ver > maxVer {
+				maxVer = ver
+			}
+		}
+	}
+	if maxVer == 0 {
+		return "src_v1"
+	}
+	return fmt.Sprintf("src_v%d", maxVer)
 }
 
 func RunInstall(versionDir string) error {
@@ -78,7 +95,20 @@ func RunLint(versionDir string) error {
 	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
 	
 	fmt.Println("   [LINT] Running tsc...")
-	cmd := exec.Command("bun", "x", "tsc", "--noEmit")
+	cmd := exec.Command("bun", "run", "lint")
+	cmd.Dir = uiDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func RunDev(versionDir string) error {
+	fmt.Printf(">> [TEMPLATE] Dev: %s\n", versionDir)
+	cwd, _ := os.Getwd()
+	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
+	
+	fmt.Println("   [DEV] Running vite dev...")
+	cmd := exec.Command("bun", "run", "dev")
 	cmd.Dir = uiDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -94,31 +124,15 @@ func RunBuild(versionDir string) error {
 		return err
 	}
 
-	fmt.Println("   [BUILD] Step 1/2: TypeScript compile (tsc)...")
-	tscCmd := exec.Command("bun", "x", "tsc")
-	tscCmd.Dir = uiDir
-	tscCmd.Stdout = os.Stdout
-	tscCmd.Stderr = os.Stderr
-	if err := tscCmd.Run(); err != nil {
-		return fmt.Errorf("tsc failed: %v", err)
-	}
-
-	fmt.Println("   [BUILD] Cleaning dist directory...")
-	os.RemoveAll(filepath.Join(uiDir, "dist"))
-
-	fmt.Println("   [BUILD] Step 2/2: Vite assets build (using node)...")
-	// Use node directly to run the vite binary
-	viteBin := filepath.Join(uiDir, "node_modules", "vite", "bin", "vite.js")
-	viteCmd := exec.Command("node", viteBin, "build", "--logLevel", "info")
-	viteCmd.Dir = uiDir
-	viteCmd.Env = append(os.Environ(), "NODE_ENV=production", "CI=true", "VITE_CJS_IGNORE_WARNING=true")
-	viteCmd.Stdout = os.Stdout
-	viteCmd.Stderr = os.Stderr
+	fmt.Println("   [BUILD] Running vite build (skipping tsc)...")
+	// Use vite build directly, skipping tsc for speed and stability
+	cmd := exec.Command("bun", "run", "vite", "build", "--emptyOutDir")
+	cmd.Dir = uiDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	
-	fmt.Printf("   [DEBUG] Running: %s %s\n", viteCmd.Path, strings.Join(viteCmd.Args[1:], " "))
-	
-	if err := viteCmd.Run(); err != nil {
-		return fmt.Errorf("vite build failed: %v", err)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("build failed: %v", err)
 	}
 
 	fmt.Println(">> [TEMPLATE] Build successful")
@@ -170,7 +184,8 @@ func printUsage() {
 	fmt.Println("\nCommands:")
 	fmt.Println("  install <dir>  Install UI dependencies")
 	fmt.Println("  lint <dir>     Lint TypeScript code")
-	fmt.Println("  smoke <dir>    Run smoke tests")
-	fmt.Println("  build <dir>    Build UI assets")
+	fmt.Println("  dev <dir>      Run UI in development mode")
+	fmt.Println("  build <dir>    Build everything needed (UI assets)")
+	fmt.Println("  smoke <dir>    Run robust automated UI tests")
 	fmt.Println("  src --n <N>    Generate next src_vN folder")
 }

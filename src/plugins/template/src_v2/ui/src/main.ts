@@ -1,53 +1,69 @@
-import './style.css'
-import { SectionManager } from './util/section';
-import { HomeSection } from './components/home';
-import { TableSection } from './components/table';
-import { SettingsSection } from './components/settings';
+import { setupApp } from '@ui/ui';
 
-// 1. Core State
-const sections = new SectionManager();
-(window as any).sections = sections;
-
-// 2. Register Sections
-sections.register('home', { component: HomeSection, header: { visible: true, menuVisible: true } });
-sections.register('table', { component: TableSection, header: { visible: false, menuVisible: false } });
-sections.register('settings', { component: SettingsSection, header: { visible: false, menuVisible: false } });
-
-// 3. Navigation Logic
-(window as any).navigateTo = (id: string) => {
-  sections.navigateTo(id);
-};
-
-window.addEventListener('hashchange', () => {
-  const id = window.location.hash.slice(1) || 'home';
-  sections.navigateTo(id);
+// 1. Initialize App with standard patterns
+const { sections, menu } = setupApp({ 
+    title: 'dialtone.template',
+    debug: true
 });
 
-// 4. Global Menu Toggle
-const menuToggle = document.getElementById('global-menu-toggle');
-const menuPanel = document.getElementById('global-menu-panel');
+// 2. Register Sections with Lazy Loading
+sections.register('home', { 
+    containerId: 'home',
+    load: async () => {
+        const { mountHero } = await import('./components/home/index');
+        const container = document.getElementById('home');
+        if (!container) throw new Error('home container not found');
+        return mountHero(container);
+    },
+    header: { visible: true } 
+});
 
-if (menuToggle && menuPanel) {
-  menuToggle.addEventListener('click', () => {
-    const isHidden = menuPanel.hasAttribute('hidden');
-    if (isHidden) {
-      menuPanel.removeAttribute('hidden');
-      menuToggle.setAttribute('aria-expanded', 'true');
-    } else {
-      menuPanel.setAttribute('hidden', '');
-      menuToggle.setAttribute('aria-expanded', 'false');
-    }
-  });
+sections.register('docs', { 
+    containerId: 'docs',
+    load: async () => {
+        const { mountDocs } = await import('./components/docs/index');
+        const container = document.getElementById('docs');
+        if (!container) throw new Error('docs container not found');
+        return mountDocs(container);
+    },
+    header: { visible: true } 
+});
 
-  // Close menu on click outside
-  document.addEventListener('click', (e) => {
-    if (!menuToggle.contains(e.target as Node) && !menuPanel.contains(e.target as Node)) {
-      menuPanel.setAttribute('hidden', '');
-      menuToggle.setAttribute('aria-expanded', 'false');
-    }
-  });
-}
+sections.register('table', { 
+    containerId: 'table',
+    load: async () => {
+        const { mountTable } = await import('./components/table/index');
+        const container = document.getElementById('table');
+        if (!container) throw new Error('table container not found');
+        return mountTable(container);
+    },
+    header: { visible: false } 
+});
 
-// Initial load
+sections.register('settings', { 
+    containerId: 'settings',
+    load: async () => {
+        const { mountSettings } = await import('./components/settings/index');
+        const container = document.getElementById('settings');
+        if (!container) throw new Error('settings container not found');
+        return mountSettings(container);
+    },
+    header: { visible: false } 
+});
+
+// 3. Setup Global Menu
+menu.addHeader('Navigation');
+menu.addButton('Hero Visualization', () => sections.navigateTo('home'));
+menu.addButton('Documentation', () => sections.navigateTo('docs'));
+menu.addButton('Spreadsheet', () => sections.navigateTo('table'));
+menu.addButton('Configuration', () => sections.navigateTo('settings'));
+
+// 4. Start Observation
+sections.observe();
+
+// 5. Initial load based on hash or default to home
 const initialId = window.location.hash.slice(1) || 'home';
-sections.navigateTo(initialId);
+sections.load(initialId).then(() => {
+    const el = document.getElementById(initialId);
+    if (el) el.scrollIntoView({ behavior: 'auto' });
+});
