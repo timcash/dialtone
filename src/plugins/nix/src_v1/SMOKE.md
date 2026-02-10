@@ -1,6 +1,6 @@
 # Nix Robust Smoke Test Report
 
-**Started:** Mon, 09 Feb 2026 16:35:32 PST
+**Started:** Mon, 09 Feb 2026 16:45:09 PST
 
 ### 1. Verify Browser Error Capture
 
@@ -12,7 +12,7 @@
 
 #### Last 10 Console Logs
 ```
-[log] "[main] 🧭 Navigating to: #s-viz (smooth: false)"
+[log] "[main] 🧭 Navigating to: #nix-hero (smooth: false)"
 [error] "[SMOKE-VERIFY-ERR] Log pipeline verified"
 ```
 
@@ -27,43 +27,60 @@
 
 #### Last 10 Console Logs
 ```
-[log] "[main] 🧭 Navigating to: #s-viz (smooth: false)"
+[log] "[main] 🧭 Navigating to: #nix-hero (smooth: false)"
 [error] "[SMOKE-VERIFY-ERR] Log pipeline verified"
 ```
 
 ---
-### 3. Navigate to Nix Table and Verify Rendering
+### 3. Documentation Section Validation
 
 - **Status:** ✅ PASSED
-- **Conditions:** Fullscreen layout + hidden header/menu
+- **Conditions:** Navigate to nix-docs and verify content
 
 #### Visual proof
-![3. Navigate to Nix Table and Verify Rendering](smoke_step_2.png)
+![3. Documentation Section Validation](smoke_step_2.png)
 
 #### Last 10 Console Logs
 ```
-[log] "[main] 🧭 Navigating to: #s-viz (smooth: false)"
+[log] "[main] 🧭 Navigating to: #nix-hero (smooth: false)"
 [error] "[SMOKE-VERIFY-ERR] Log pipeline verified"
-[log] "[main] 🧭 Navigating to: #s-nixtable (smooth: true)"
-[log] "[NIX] s-nixtable setVisible:" false
-[log] "[NIX] s-nixtable setVisible:" true
+[log] "[main] 🧭 Navigating to: #nix-docs (smooth: true)"
 ```
 
 ---
-### 4. Spawn Two Nix Nodes
+### 4. Navigate to Nix Table and Verify Rendering
+
+- **Status:** ✅ PASSED
+- **Conditions:** Switch to nix-table and verify fullscreen layout + hidden header/menu
+
+#### Visual proof
+![4. Navigate to Nix Table and Verify Rendering](smoke_step_3.png)
+
+#### Last 10 Console Logs
+```
+[log] "[main] 🧭 Navigating to: #nix-hero (smooth: false)"
+[error] "[SMOKE-VERIFY-ERR] Log pipeline verified"
+[log] "[main] 🧭 Navigating to: #nix-docs (smooth: true)"
+[log] "[main] 🧭 Navigating to: #nix-table (smooth: true)"
+[log] "[NIX] nix-table setVisible:" false
+[log] "[NIX] nix-table setVisible:" true
+```
+
+---
+### 5. Spawn Two Nix Nodes
 
 - **Status:** ✅ PASSED
 - **Conditions:** Two nodes appear in table
 
 #### Visual proof
-![4. Spawn Two Nix Nodes](smoke_step_3.png)
+![5. Spawn Two Nix Nodes](smoke_step_4.png)
 
 #### Last 10 Console Logs
 ```
-[error] "[SMOKE-VERIFY-ERR] Log pipeline verified"
-[log] "[main] 🧭 Navigating to: #s-nixtable (smooth: true)"
-[log] "[NIX] s-nixtable setVisible:" false
-[log] "[NIX] s-nixtable setVisible:" true
+[log] "[main] 🧭 Navigating to: #nix-docs (smooth: true)"
+[log] "[main] 🧭 Navigating to: #nix-table (smooth: true)"
+[log] "[NIX] nix-table setVisible:" false
+[log] "[NIX] nix-table setVisible:" true
 [log] "[NIX] Spawning new node..."
 [log] "[NIX] Successfully spawned proc-1"
 [log] "[NIX] Processes updated:" "proc-1:running"
@@ -73,13 +90,13 @@
 ```
 
 ---
-### 5. Selective Termination (proc-1)
+### 6. Selective Termination (proc-1)
 
 - **Status:** ✅ PASSED
 - **Conditions:** proc-1 status changes to STOPPED
 
 #### Visual proof
-![5. Selective Termination (proc-1)](smoke_step_4.png)
+![6. Selective Termination (proc-1)](smoke_step_5.png)
 
 #### Last 10 Console Logs
 ```
@@ -96,13 +113,13 @@
 ```
 
 ---
-### 6. Verify proc-2 Persistence
+### 7. Verify proc-2 Persistence
 
 - **Status:** ✅ PASSED
 - **Conditions:** proc-2 remains RUNNING
 
 #### Visual proof
-![6. Verify proc-2 Persistence](smoke_step_5.png)
+![7. Verify proc-2 Persistence](smoke_step_6.png)
 
 #### Last 10 Console Logs
 ```

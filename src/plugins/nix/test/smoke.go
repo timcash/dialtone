@@ -255,26 +255,33 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 	if err := runStep("1. Verify Browser Error Capture", "Navigate to home and verify captured log", chromedp.Tasks{
 		chromedp.EmulateViewport(1280, 800),
 		chromedp.Navigate(fmt.Sprintf("http://127.0.0.1:%d", port)),
-		pollJS(`document.querySelector("#s-viz").classList.contains("is-visible")`, 5*time.Second),
+		pollJS(`document.querySelector("#nix-hero").classList.contains("is-visible")`, 5*time.Second),
 		chromedp.WaitVisible("#viz-container", chromedp.ByQuery),
 		chromedp.Evaluate(`console.error('[SMOKE-VERIFY-ERR] Log pipeline verified')`, nil),
 	}); err != nil { return err }
 
 	if err := runStep("2. Hero Section Validation", "Viz container and marketing overlay visible", chromedp.Tasks{
 		chromedp.WaitVisible("#viz-container", chromedp.ByQuery),
-		chromedp.WaitVisible("#s-viz.is-visible .marketing-overlay", chromedp.ByQuery),
+		chromedp.WaitVisible("#nix-hero.is-visible .marketing-overlay", chromedp.ByQuery),
 	}); err != nil { return err }
 
-	if err := runStep("3. Navigate to Nix Table and Verify Rendering", "Fullscreen layout + hidden header/menu", chromedp.Tasks{
-		navigate("s-nixtable"),
-		chromedp.WaitVisible("#s-nixtable.is-visible", chromedp.ByQuery),
+	if err := runStep("3. Documentation Section Validation", "Navigate to nix-docs and verify content", chromedp.Tasks{
+		navigate("nix-docs"),
+		chromedp.WaitVisible("#nix-docs.is-visible", chromedp.ByQuery),
+		chromedp.WaitVisible("#nix-docs h1", chromedp.ByQuery),
+		chromedp.WaitVisible("#nix-docs .lead", chromedp.ByQuery),
+	}); err != nil { return err }
+
+	if err := runStep("4. Navigate to Nix Table and Verify Rendering", "Switch to nix-table and verify fullscreen layout + hidden header/menu", chromedp.Tasks{
+		navigate("nix-table"),
+		chromedp.WaitVisible("#nix-table.is-visible", chromedp.ByQuery),
 		pollJS(`getComputedStyle(document.querySelector('.header-title')).opacity === '0' || getComputedStyle(document.querySelector('.header-title')).visibility === 'hidden'`, 2*time.Second),
 		pollJS(`getComputedStyle(document.getElementById('global-menu')).display === 'none'`, 2*time.Second),
 		chromedp.WaitVisible(".explorer-container", chromedp.ByQuery),
 		chromedp.WaitVisible("#start-node", chromedp.ByQuery),
 	}); err != nil { return err }
 
-	if err := runStep("4. Spawn Two Nix Nodes", "Two nodes appear in table", chromedp.Tasks{
+	if err := runStep("5. Spawn Two Nix Nodes", "Two nodes appear in table", chromedp.Tasks{
 		chromedp.Click(`#start-node`, chromedp.ByQuery),
 		chromedp.WaitVisible("#proc-1", chromedp.ByQuery),
 		chromedp.Click(`#start-node`, chromedp.ByQuery),
@@ -282,13 +289,13 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 		chromedp.WaitVisible(".node-row", chromedp.ByQuery),
 	}); err != nil { return err }
 
-	if err := runStep("5. Selective Termination (proc-1)", "proc-1 status changes to STOPPED", chromedp.Tasks{
+	if err := runStep("6. Selective Termination (proc-1)", "proc-1 status changes to STOPPED", chromedp.Tasks{
 		chromedp.WaitVisible("#proc-1 .stop-btn", chromedp.ByQuery),
 		chromedp.Click("#proc-1 .stop-btn", chromedp.ByQuery),
 		chromedp.WaitVisible("#proc-1 .status-badge[data-status-text='stopped']", chromedp.ByQuery),
 	}); err != nil { return err }
 
-	if err := runStep("6. Verify proc-2 Persistence", "proc-2 remains RUNNING", chromedp.Tasks{
+	if err := runStep("7. Verify proc-2 Persistence", "proc-2 remains RUNNING", chromedp.Tasks{
 		chromedp.WaitVisible("#proc-2 .status-badge[data-status-text='running']", chromedp.ByQuery),
 	}); err != nil { return err }
 
