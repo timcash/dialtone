@@ -6,6 +6,9 @@
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
     "moduleResolution": "bundler",
+    "paths": {
+      "@ui/*": ["../../../../ui/*"]
+    },
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
@@ -15,5 +18,5 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src", "../../../../ui"]
 }
