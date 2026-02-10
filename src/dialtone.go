@@ -27,6 +27,7 @@ import (
 	"dialtone/cli/src/core/mock"
 	ai_app "dialtone/cli/src/plugins/ai/app"
 	camera "dialtone/cli/src/plugins/camera/app"
+	dag_cli "dialtone/cli/src/plugins/dag/cli"
 	mavlink "dialtone/cli/src/plugins/mavlink/app"
 	nix_cli "dialtone/cli/src/plugins/nix/cli"
 	template_cli "dialtone/cli/src/plugins/template/cli"
@@ -63,6 +64,11 @@ func Execute() {
 			fmt.Printf("Nix command error: %v\n", err)
 			os.Exit(1)
 		}
+	case "dag":
+		if err := dag_cli.Run(args); err != nil {
+			fmt.Printf("DAG command error: %v\n", err)
+			os.Exit(1)
+		}
 	case "template":
 		if err := template_cli.Run(args); err != nil {
 			fmt.Printf("Template command error: %v\n", err)
@@ -80,6 +86,7 @@ func printUsage() {
 	fmt.Println("  start         Start the NATS and Web server")
 	fmt.Println("  vpn           Start in simple VPN mode (tsnet only)")
 	fmt.Println("  nix           Nix plugin commands (e.g. nix smoke src_v1)")
+	fmt.Println("  dag           DAG plugin commands (e.g. dag smoke)")
 	fmt.Println("  template      Template plugin commands (e.g. template smoke src_v1)")
 }
 

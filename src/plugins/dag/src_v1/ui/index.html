@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>dialtone.dag</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+
+<body>
+  <div id="app">
+    <div id="global-menu-panel" class="menu-panel" hidden></div>
+
+    <header class="header-title">
+      <h1>dialtone.dag</h1>
+      <p id="header-subtitle" class="version">nested graph explorer</p>
+      <p class="version header-telemetry">FPS --</p>
+      <p class="version">v0.1.0</p>
+    </header>
+
+    <nav class="main-nav">
+      <a href="#dag-hero" class="nav-btn" aria-label="Hero">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 12h18" />
+          <path d="M12 3l9 9-9 9" />
+        </svg>
+      </a>
+      <a href="#dag-docs" class="nav-btn" aria-label="Docs">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+          <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+        </svg>
+      </a>
+      <a href="#dag-layer-nest" class="nav-btn" aria-label="Layer Nest">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 7h18" />
+          <path d="M3 12h18" />
+          <path d="M3 17h18" />
+        </svg>
+      </a>
+    </nav>
+
+    <section id="dag-hero" class="snap-slide" data-subtitle="dag field station" aria-label="DAG Hero Section">
+      <div id="dag-hero-container" aria-label="DAG Hero Canvas"></div>
+      <div class="marketing-overlay">
+        <h2 aria-label="DAG Hero Title">DAG Field Station</h2>
+        <p>Spin up a tiny graph engine and feel the depth cues that drive nested layouts.</p>
+        <p class="docs-bash" aria-label="DAG Hero Hint">Press Space to advance. Use the menu for details.</p>
+      </div>
+    </section>
+
+    <section id="dag-docs" class="snap-slide" data-subtitle="dag docs" aria-label="DAG Documentation Section">
+      <div id="dag-docs-container"></div>
+      <div class="marketing-overlay">
+        <h2 aria-label="DAG Docs Title">How the DAG Plugin Works</h2>
+        <p>Layered planes, rank-based layout, hover reveal, and Go-backed serving for rapid iteration.</p>
+        <div class="docs-bash" aria-label="DAG Docs Commands">
+          <code>$ ./dialtone.sh dag build src_v1</code><br />
+          <code>$ ./dialtone.sh dag lint src_v1</code><br />
+          <code>$ ./dialtone.sh dag smoke src_v1</code>
+        </div>
+      </div>
+    </section>
+
+    <section id="dag-layer-nest" class="snap-slide" data-subtitle="layer nest" aria-label="DAG Layer Nest">
+      <div id="dag-layer-container" aria-label="DAG Layer Canvas"></div>
+      <div id="dag-layer-ui" class="dag-layer-ui"></div>
+      <div class="marketing-overlay">
+        <h2>Nested Layer Viz</h2>
+        <p>Hover to reveal depth. Click to dive into a node. Scroll to scrub back.</p>
+      </div>
+    </section>
+
+    <div class="top-right-controls">
+      <button id="global-menu-toggle" class="menu-toggle" type="button" aria-expanded="false">Menu</button>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.ts"></script>
+</body>
+
+</html>

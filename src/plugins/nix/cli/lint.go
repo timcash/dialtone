@@ -13,9 +13,9 @@ func RunLint() error {
 	cwd, _ := os.Getwd()
 	nixDir := filepath.Join(cwd, "src", "plugins", "nix")
 
-	// 1. Lint Go Code
+	// 1. Lint Go Code (use dialtone go toolchain)
 	fmt.Println(">> [NIX] Lint: checking Go code...")
-	cmd := exec.Command("go", "vet", "./src/plugins/nix/...")
+	cmd := exec.Command("./dialtone.sh", "go", "exec", "vet", "./src/plugins/nix/...")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -24,7 +24,7 @@ func RunLint() error {
 		fmt.Println("   [PASS] Go vet")
 	}
 
-	cmd = exec.Command("go", "fmt", "./src/plugins/nix/...")
+	cmd = exec.Command("./dialtone.sh", "go", "exec", "fmt", "./src/plugins/nix/...")
 	if out, err := cmd.Output(); err == nil && len(out) > 0 {
 		fmt.Printf("   [WARN] Go fmt modified files:\n%s", out)
 	} else {
