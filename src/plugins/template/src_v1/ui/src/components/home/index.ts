@@ -12,12 +12,14 @@ export class HomeSection {
   constructor(private container: HTMLElement) {
     this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setClearColor(0x000000, 0); // Transparent to show background
-    this.renderer.domElement.style.position = 'absolute';
-    this.renderer.domElement.style.top = '0';
-    this.renderer.domElement.style.left = '0';
-    this.renderer.domElement.style.zIndex = '-1';
-    this.container.appendChild(this.renderer.domElement);
+    this.renderer.setClearColor(0x000000, 1);
+    
+    const vizContainer = this.container.querySelector('#viz-container') as HTMLElement;
+    if (vizContainer) {
+      vizContainer.appendChild(this.renderer.domElement);
+    } else {
+      this.container.appendChild(this.renderer.domElement);
+    }
 
     const geometry = new THREE.BoxGeometry(1, 1, 1);
     const material = new THREE.MeshPhongMaterial({ 
@@ -58,8 +60,8 @@ export class HomeSection {
     window.removeEventListener('resize', this.onResize);
     if (this.stopTyping) this.stopTyping();
     this.renderer.dispose();
-    if (this.container.contains(this.renderer.domElement)) {
-        this.container.removeChild(this.renderer.domElement);
+    if (this.renderer.domElement.parentElement) {
+        this.renderer.domElement.parentElement.removeChild(this.renderer.domElement);
     }
   }
 
