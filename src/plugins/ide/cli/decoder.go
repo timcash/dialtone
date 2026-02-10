@@ -28,7 +28,7 @@ func StreamChatLogs(ctx context.Context, pbPath string, out io.Writer) {
 	}
 
 	logger.LogInfo("Tailing conversation: %s", pbPath)
-	
+
 	f, err := os.Open(pbPath)
 	if err != nil {
 		logger.LogFatal("Failed to open pb file: %v", err)
@@ -37,15 +37,15 @@ func StreamChatLogs(ctx context.Context, pbPath string, out io.Writer) {
 
 	// Parse from the beginning
 	offset := int64(0)
-	headerBuf := make([]byte, 10) 
-	
+	headerBuf := make([]byte, 10)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 		}
-		
+
 		// 1. Read the length prefix
 		_, err := f.Seek(offset, 0)
 		if err != nil {
@@ -63,7 +63,7 @@ func StreamChatLogs(ctx context.Context, pbPath string, out io.Writer) {
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
-		
+
 		// Attempt to consume a varint
 		v, nLen := protowire.ConsumeVarint(headerBuf[:n])
 		if nLen < 0 {
@@ -71,28 +71,30 @@ func StreamChatLogs(ctx context.Context, pbPath string, out io.Writer) {
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
-		
+
 		msgLen := int(v)
 		totalNeeded := nLen + msgLen
-		
+
 		// 2. Read the full message
 		fullBuf := make([]byte, totalNeeded)
 		_, err = f.Seek(offset, 0)
-		if err != nil { continue }
-		
+		if err != nil {
+			continue
+		}
+
 		nRead, err := io.ReadFull(f, fullBuf)
 		if err != nil {
 			// Not enough data yet
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
-		
+
 		if nRead == totalNeeded {
 			// We have the full message. Decode the BODY (skipping length prefix?)
 			// Wait, the file format is [Varint Length] [Message Body]
 			// I read [Varint + Body] into fullBuf.
 			// I should decode fullBuf[nLen:]
-			
+
 			decodeAndPrintMessage(fullBuf[nLen:], out)
 			offset += int64(totalNeeded)
 		}
@@ -102,23 +104,29 @@ func StreamChatLogs(ctx context.Context, pbPath string, out io.Writer) {
 func decodeAndPrintMessage(data []byte, out io.Writer) {
 	// Walk fields looking for content
 	// We look for Field 1 -> Field 11 (Repeated) -> Item -> Field 1 (Text)
-	
+
 	for len(data) > 0 {
 		num, typ, n := protowire.ConsumeTag(data)
-		if n < 0 { break }
+		if n < 0 {
+			break
+		}
 		data = data[n:]
-		
+
 		if typ != protowire.BytesType {
 			m := protowire.ConsumeFieldValue(num, typ, data)
-			if m < 0 { break }
+			if m < 0 {
+				break
+			}
 			data = data[m:]
 			continue
 		}
-		
+
 		val, m := protowire.ConsumeBytes(data)
-		if m < 0 { break }
+		if m < 0 {
+			break
+		}
 		data = data[m:]
-		
+
 		if num == 1 {
 			// Found Field 1 (Conversation/Context?)
 			decodeLevel2(val, out)
@@ -129,20 +137,26 @@ func decodeAndPrintMessage(data []byte, out io.Writer) {
 func decodeLevel2(data []byte, out io.Writer) {
 	for len(data) > 0 {
 		num, typ, n := protowire.ConsumeTag(data)
-		if n < 0 { break }
+		if n < 0 {
+			break
+		}
 		data = data[n:]
-		
+
 		if typ != protowire.BytesType {
 			m := protowire.ConsumeFieldValue(num, typ, data)
-			if m < 0 { break }
+			if m < 0 {
+				break
+			}
 			data = data[m:]
 			continue
 		}
-		
+
 		val, m := protowire.ConsumeBytes(data)
-		if m < 0 { break }
+		if m < 0 {
+			break
+		}
 		data = data[m:]
-		
+
 		if num == 11 {
 			// Found Field 11 (Message Item)
 			decodeMessage(val, out)
@@ -153,17 +167,21 @@ func decodeLevel2(data []byte, out io.Writer) {
 func decodeMessage(data []byte, out io.Writer) {
 	var content string
 	var role string = "UNKNOWN"
-	
+
 	for len(data) > 0 {
 		num, typ, n := protowire.ConsumeTag(data)
-		if n < 0 { break }
+		if n < 0 {
+			break
+		}
 		data = data[n:]
-		
+
 		if typ == protowire.BytesType {
 			val, m := protowire.ConsumeBytes(data)
-			if m < 0 { break }
+			if m < 0 {
+				break
+			}
 			data = data[m:]
-			
+
 			if num == 1 {
 				// Content
 				if utf8.Valid(val) {
@@ -181,29 +199,39 @@ func decodeMessage(data []byte, out io.Writer) {
 			}
 		} else if typ == protowire.VarintType {
 			v, m := protowire.ConsumeVarint(data)
-			if m < 0 { break }
+			if m < 0 {
+				break
+			}
 			data = data[m:]
-			
+
 			if num == 2 || num == 3 {
-				if v == 1 { role = "USER" } 
-				if v == 2 { role = "MODEL" }
+				if v == 1 {
+					role = "USER"
+				}
+				if v == 2 {
+					role = "MODEL"
+				}
 			}
 		} else {
 			m := protowire.ConsumeFieldValue(num, typ, data)
-			if m < 0 { break }
+			if m < 0 {
+				break
+			}
 			data = data[m:]
 		}
 	}
-	
+
 	if content != "" {
 		colorGreen := "\033[32m"
 		colorReset := "\033[0m"
-		
+
 		prefix := fmt.Sprintf("%s[CHAT]%s", colorGreen, colorReset)
 		timestamp := time.Now().Format("15:04:05")
-		
-		if role == "UNKNOWN" { role = "MSG" }
-		
+
+		if role == "UNKNOWN" {
+			role = "MSG"
+		}
+
 		fmt.Fprintf(out, "%s %s (%s): %s\n", prefix, timestamp, role, content)
 	}
 }
@@ -211,13 +239,15 @@ func decodeMessage(data []byte, out io.Writer) {
 func findRecentConversationProto() string {
 	home, _ := os.UserHomeDir()
 	dir := home + "/.gemini/antigravity/conversations"
-	
+
 	entries, err := os.ReadDir(dir)
-	if err != nil { return "" }
-	
+	if err != nil {
+		return ""
+	}
+
 	var bestFile string
 	var bestTime int64
-	
+
 	for _, e := range entries {
 		if !e.IsDir() && strings.HasSuffix(e.Name(), ".pb") {
 			info, _ := e.Info()

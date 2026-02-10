@@ -35,7 +35,7 @@ func NewMavlinkService(config MavlinkConfig) (*MavlinkService, error) {
 	// - serial:/dev/ttyAMA0:57600
 	// - udp:0.0.0.0:14550 (Server)
 	// - tcp:127.0.0.1:5760 (Client)
-	
+
 	var endpoints []gomavlib.EndpointConf
 
 	if strings.HasPrefix(config.Endpoint, "serial:") {
@@ -91,7 +91,7 @@ func (s *MavlinkService) Start() {
 		switch e := evt.(type) {
 		case *gomavlib.EventFrame:
 			// logger.LogInfo("MAVLink frame received: systemID=%d componentID=%d", e.SystemID(), e.ComponentID())
-			
+
 			switch msg := e.Message().(type) {
 			case *common.MessageHeartbeat:
 				// logger.LogInfo("Heartbeat received from system %d", e.SystemID())
@@ -170,6 +170,7 @@ func (s *MavlinkService) Disarm() error {
 		Param2:          0,
 	})
 }
+
 // SetMode sets the rover mode (e.g., MANUAL, GUIDED)
 func (s *MavlinkService) SetMode(mode string) error {
 	var customMode uint32

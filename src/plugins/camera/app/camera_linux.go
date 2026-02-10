@@ -67,8 +67,8 @@ func ListCameras() ([]Camera, error) {
 }
 
 var (
-	camDev  *device.Device
-	camMu   sync.Mutex
+	camDev *device.Device
+	camMu  sync.Mutex
 )
 
 // StartCamera initializes the camera if not already started.
@@ -200,7 +200,7 @@ func StreamHandler(w http.ResponseWriter, r *http.Request) {
 			// Important: Release the frame back to the pool
 			// Old code: frame.Release()
 			// I'll assume the frame object has Release.
-			// To be safe against compile errors if struct changed, I'd check type, 
+			// To be safe against compile errors if struct changed, I'd check type,
 			// but 'old_camera_linux.go' line 150 says 'frame.Release()'.
 			// I will write it as is.
 			frame.Release()

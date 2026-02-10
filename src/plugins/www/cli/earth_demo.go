@@ -138,9 +138,9 @@ func handleEarthDemo(webDir string) {
 		Frames int `json:"frames"`
 	}
 	var domCheck struct {
-		HasEarth   bool `json:"hasEarth"`
-		HasCanvas  bool `json:"hasCanvas"`
-		HasDebug   bool `json:"hasDebug"`
+		HasEarth  bool `json:"hasEarth"`
+		HasCanvas bool `json:"hasCanvas"`
+		HasDebug  bool `json:"hasDebug"`
 	}
 	var rendererInfo struct {
 		Render   map[string]any `json:"render"`

@@ -33,7 +33,7 @@ func RunGeometryTest() error {
 	defer cancel()
 
 	var snapshots []Snapshot
-	
+
 	// Navigate once
 	err = chromedp.Run(ctx,
 		chromedp.Navigate("http://127.0.0.1:5174"),
@@ -69,7 +69,7 @@ func RunGeometryTest() error {
 			return fmt.Errorf("failed to capture snapshot (window.earthDebug might be missing)")
 		}
 		snapshots = append(snapshots, s)
-		fmt.Printf("[GEO TEST] T=%.2f POI=%d CamPos=[%.2f, %.2f, %.2f] SunPos=[%.2f, %.2f, %.2f]\n", 
+		fmt.Printf("[GEO TEST] T=%.2f POI=%d CamPos=[%.2f, %.2f, %.2f] SunPos=[%.2f, %.2f, %.2f]\n",
 			s.Time/1000, s.PoiIndex, s.CamPos[0], s.CamPos[1], s.CamPos[2], s.SunPos[0], s.SunPos[1], s.SunPos[2])
 	}
 
@@ -77,7 +77,7 @@ func RunGeometryTest() error {
 	if snapshots[0].SunPos == snapshots[9].SunPos {
 		return fmt.Errorf("Sun position did not change over 10 seconds - orbit might be broken")
 	}
-	
+
 	// Camera should move (either due to ISS orbit or planning)
 	if snapshots[0].CamPos == snapshots[9].CamPos {
 		return fmt.Errorf("Camera position did not change over 10 seconds")
@@ -112,7 +112,7 @@ func setupBrowser() (context.Context, context.CancelFunc, error) {
 
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	ctx, cancelCtx := chromedp.NewContext(allocCtx)
-	
+
 	return ctx, func() {
 		cancelCtx()
 		cancel()

@@ -16,8 +16,8 @@ import (
 	"dialtone/cli/src/core/ssh"
 
 	cdplog "github.com/chromedp/cdproto/log"
-	"github.com/chromedp/chromedp"
 	"github.com/chromedp/cdproto/runtime"
+	"github.com/chromedp/chromedp"
 )
 
 // CheckLocalDependencies checks if Go, Node.js, and Tailscale are installed.

@@ -178,7 +178,7 @@ func ListChromeProcesses(showAll bool) ([]ChromeProcess, error) {
 
 				name, _ := p.Name()
 				cmdline, _ := p.Cmdline()
-				
+
 				if name == "" || cmdline == "" {
 					continue
 				}
@@ -242,7 +242,7 @@ func ListChromeProcesses(showAll bool) ([]ChromeProcess, error) {
 				if len(record) >= 2 {
 					pidStr := record[0]
 					cmdline := record[1]
-					
+
 					var pid int
 					fmt.Sscanf(pidStr, "%d", &pid)
 
@@ -251,7 +251,7 @@ func ListChromeProcesses(showAll bool) ([]ChromeProcess, error) {
 						if strings.Contains(cmdline, "chrome list") || strings.Contains(cmdline, "chrome new") {
 							continue
 						}
-						
+
 						results = append(results, ChromeProcess{
 							PID:        pid,
 							Command:    cmdline,
@@ -313,7 +313,7 @@ func KillAllChromeProcesses() error {
 		_ = exec.Command(psBin, "-Command", "Get-Process chrome, msedge -ErrorAction SilentlyContinue | Stop-Process -Force").Run()
 		// Also kill native Linux processes if any
 	}
-	
+
 	switch runtime.GOOS {
 	case "windows":
 		_ = exec.Command("taskkill", "/F", "/IM", "chrome.exe").Run()

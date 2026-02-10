@@ -20,7 +20,9 @@ func init() {
 
 func RunBreathingTest() error {
 	ctx, cancel, err := setupBrowser()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer cancel()
 
 	// Find the correct port (Vite shifted to 5177 in previous output)
@@ -39,10 +41,12 @@ func RunBreathingTest() error {
 		chromedp.Navigate(targetURL),
 		chromedp.Sleep(3*time.Second),
 	)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	fmt.Printf("[BREATHING TEST] Sampling cloud thresholds at %s...\n", targetURL)
-	
+
 	const sampleCount = 30
 	const delay = 500 * time.Millisecond
 	var samples []float64
@@ -63,7 +67,9 @@ func RunBreathingTest() error {
 				})()
 			`, &threshold),
 		)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		samples = append(samples, threshold)
 		time.Sleep(delay)
 	}
@@ -71,8 +77,12 @@ func RunBreathingTest() error {
 	// Calculate variance to ensure it's oscillating
 	min, max := math.MaxFloat64, -math.MaxFloat64
 	for _, v := range samples {
-		if v < min { min = v }
-		if v > max { max = v }
+		if v < min {
+			min = v
+		}
+		if v > max {
+			max = v
+		}
 	}
 
 	delta := max - min

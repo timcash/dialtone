@@ -1,9 +1,9 @@
 package test
 
 import (
-	"fmt"
-	"dialtone/cli/src/core/test"
 	"dialtone/cli/src/core/logger"
+	"dialtone/cli/src/core/test"
+	"fmt"
 )
 
 func init() {

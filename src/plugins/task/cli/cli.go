@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-
 )
 
 // Run processes the "task" subcommand
@@ -46,7 +45,7 @@ func runCreate(args []string) {
 		return
 	}
 	taskName := args[0]
-	
+
 	// Directory: src/plugins/task/database/<task-name>/v1
 	// We assume we run from project root, so "src" is available.
 	baseDir := filepath.Join("src", "plugins", "task", "database", taskName, "v1")
@@ -114,9 +113,9 @@ func runValidate(args []string) {
 	scanner := bufio.NewScanner(file)
 	errors := []string{}
 	lineNum := 0
-	
+
 	var currentSection string
-	
+
 	// Regex for standard sections: "### section-name:"
 	sectionRegex := regexp.MustCompile(`^### ([a-z0-9-]+):$`)
 	// Regex for list items: "- something"
@@ -158,7 +157,7 @@ func runValidate(args []string) {
 		// If it's not a section header, it must be a list item, a comment, or text (only in description?)
 		// User rule: "bullet point or key value" implies strictly structured data or comments.
 		// Description might be multiline text, but user said "simple format". Let's assume description allows text.
-		
+
 		if currentSection == "description" {
 			// Description accepts free text.
 			continue

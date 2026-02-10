@@ -1,12 +1,12 @@
 package cli
 
 import (
+	"dialtone/cli/src/core/browser"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
-	"dialtone/cli/src/core/browser"
 )
 
 func RunDev(versionDir string) error {
@@ -25,7 +25,7 @@ func RunDev(versionDir string) error {
 		currentPath := os.Getenv("PATH")
 		fullPath := nixPath + ":" + currentPath
 		nixCmd := "export PATH=\"" + fullPath + "\"; export NIX_REMOTE=daemon; nix --extra-experimental-features \"nix-command flakes\" shell nixpkgs#bun -c bun run build"
-		
+
 		buildCmd := exec.Command("bash", "-c", nixCmd)
 		buildCmd.Dir = filepath.Join(pluginDir, "ui")
 		buildCmd.Stdout = os.Stdout
@@ -43,7 +43,7 @@ func RunDev(versionDir string) error {
 	cmd.Dir = pluginDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start nix host: %v", err)
 	}
