@@ -146,27 +146,30 @@ body.hide-menu #global-menu {
   border-color: #00ff88;
 }
 
+/* --- MARKETING OVERLAY (Clean Reset) --- */
 .marketing-overlay {
   position: absolute;
-  bottom: 4rem;
   left: 4rem;
-  z-index: 10;
-  max-width: 500px;
+  bottom: 4rem;
+  z-index: 100;
   text-align: left;
   pointer-events: auto;
+  max-width: 600px;
 }
 
 .marketing-overlay h2 {
-  font-size: 2.5rem;
+  font-size: 3rem;
+  color: #fff;
   margin: 0;
-  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  letter-spacing: -0.05em;
 }
 
 .marketing-overlay p {
-  font-size: 1.125rem;
-  line-height: 1.5;
-  opacity: 0.8;
-  margin: 1rem 0 0 0;
+  font-size: 1.25rem;
+  color: #00ff88;
+  margin: 0.5rem 0 0 0;
+  opacity: 0.9;
 }
 
 .settings-container {
