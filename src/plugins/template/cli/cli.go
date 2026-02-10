@@ -2,6 +2,7 @@ package cli
 
 import (
 	"dialtone/cli/src/plugins/template/test"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,9 +19,21 @@ func Run(args []string) error {
 
 	command := args[0]
 	switch command {
+	case "install":
+		dir := "src_v1"
+		if len(args) > 1 {
+			dir = args[1]
+		}
+		return RunInstall(dir)
+	case "lint":
+		dir := "src_v1"
+		if len(args) > 1 {
+			dir = args[1]
+		}
+		return RunLint(dir)
 	case "smoke":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: nix smoke <dir>")
+			return fmt.Errorf("usage: template smoke <dir>")
 		}
 		dir := args[1]
 		if err := RunBuild(dir); err != nil {
@@ -33,11 +46,43 @@ func Run(args []string) error {
 			dir = args[1]
 		}
 		return RunBuild(dir)
-	case "new-version":
-		return RunNewVersion()
+	case "src":
+		srcFlags := flag.NewFlagSet("template src", flag.ExitOnError)
+		n := srcFlags.Int("n", 0, "Version number to create")
+		srcFlags.Parse(args[1:])
+		if *n == 0 {
+			return fmt.Errorf("usage: template src --n <N>")
+		}
+		return RunCreateVersion(*n)
 	default:
 		return fmt.Errorf("unknown command: %s", command)
 	}
+}
+
+func RunInstall(versionDir string) error {
+	fmt.Printf(">> [TEMPLATE] Install: %s\n", versionDir)
+	cwd, _ := os.Getwd()
+	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
+	
+	fmt.Println("   [TEMPLATE] Running bun install...")
+	cmd := exec.Command("bun", "install")
+	cmd.Dir = uiDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func RunLint(versionDir string) error {
+	fmt.Printf(">> [TEMPLATE] Lint: %s\n", versionDir)
+	cwd, _ := os.Getwd()
+	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
+	
+	fmt.Println("   [LINT] Running tsc...")
+	cmd := exec.Command("bun", "x", "tsc", "--noEmit")
+	cmd.Dir = uiDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 func RunBuild(versionDir string) error {
@@ -45,24 +90,42 @@ func RunBuild(versionDir string) error {
 	cwd, _ := os.Getwd()
 	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
 	
-	fmt.Println("   [TEMPLATE] Running bun install...")
-	installCmd := exec.Command("bun", "install")
-	installCmd.Dir = uiDir
-	installCmd.Stdout = os.Stdout
-	installCmd.Stderr = os.Stderr
-	if err := installCmd.Run(); err != nil {
+	if err := RunInstall(versionDir); err != nil {
 		return err
 	}
 
-	fmt.Println("   [TEMPLATE] Running bun run build...")
-	cmd := exec.Command("bun", "run", "build")
-	cmd.Dir = uiDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	fmt.Println("   [BUILD] Step 1/2: TypeScript compile (tsc)...")
+	tscCmd := exec.Command("bun", "x", "tsc")
+	tscCmd.Dir = uiDir
+	tscCmd.Stdout = os.Stdout
+	tscCmd.Stderr = os.Stderr
+	if err := tscCmd.Run(); err != nil {
+		return fmt.Errorf("tsc failed: %v", err)
+	}
+
+	fmt.Println("   [BUILD] Cleaning dist directory...")
+	os.RemoveAll(filepath.Join(uiDir, "dist"))
+
+	fmt.Println("   [BUILD] Step 2/2: Vite assets build (using node)...")
+	// Use node directly to run the vite binary
+	viteBin := filepath.Join(uiDir, "node_modules", "vite", "bin", "vite.js")
+	viteCmd := exec.Command("node", viteBin, "build", "--logLevel", "info")
+	viteCmd.Dir = uiDir
+	viteCmd.Env = append(os.Environ(), "NODE_ENV=production", "CI=true", "VITE_CJS_IGNORE_WARNING=true")
+	viteCmd.Stdout = os.Stdout
+	viteCmd.Stderr = os.Stderr
+	
+	fmt.Printf("   [DEBUG] Running: %s %s\n", viteCmd.Path, strings.Join(viteCmd.Args[1:], " "))
+	
+	if err := viteCmd.Run(); err != nil {
+		return fmt.Errorf("vite build failed: %v", err)
+	}
+
+	fmt.Println(">> [TEMPLATE] Build successful")
+	return nil
 }
 
-func RunNewVersion() error {
+func RunCreateVersion(newVer int) error {
 	cwd, _ := os.Getwd()
 	pluginDir := filepath.Join(cwd, "src", "plugins", "template")
 	
@@ -77,9 +140,16 @@ func RunNewVersion() error {
 		}
 	}
 
-	newVer := maxVer + 1
+	if maxVer == 0 {
+		return fmt.Errorf("no existing src_vN folders found to clone from")
+	}
+
 	srcDir := filepath.Join(pluginDir, fmt.Sprintf("src_v%d", maxVer))
 	destDir := filepath.Join(pluginDir, fmt.Sprintf("src_v%d", newVer))
+
+	if _, err := os.Stat(destDir); err == nil {
+		return fmt.Errorf("version directory already exists: %s", destDir)
+	}
 
 	fmt.Printf(">> [TEMPLATE] Creating new version: src_v%d from src_v%d\n", newVer, maxVer)
 	
@@ -98,7 +168,9 @@ func RunNewVersion() error {
 func printUsage() {
 	fmt.Println("Usage: ./dialtone.sh template <command>")
 	fmt.Println("\nCommands:")
+	fmt.Println("  install <dir>  Install UI dependencies")
+	fmt.Println("  lint <dir>     Lint TypeScript code")
 	fmt.Println("  smoke <dir>    Run smoke tests")
 	fmt.Println("  build <dir>    Build UI assets")
-	fmt.Println("  new-version    Generate next src_vN folder")
+	fmt.Println("  src --n <N>    Generate next src_vN folder")
 }
