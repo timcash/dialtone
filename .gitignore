@@ -37,6 +37,31 @@ yarn-debug.log*
 yarn-error.log*
 .npm/
 
+# Pixi
+.pixi/
+**/.pixi/
+
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+**/ .venv/
+venv/
+**/venv/
+.env/
+**/ .env/
+.pytest_cache/
+
+# Go
+vendor/
+**/vendor/
+
+# Rust
+target/
+**/target/
+
 # Dialtone specific
 smoke_debug.txt
 smoke_debug_2.txt
