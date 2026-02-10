@@ -26,7 +26,7 @@ func RunChrome(args []string) {
 		headless := listFlags.Bool("headless", false, "Show only headless processes")
 		verbose := listFlags.Bool("verbose", false, "Show full command line report")
 		listFlags.BoolVar(verbose, "v", false, "Alias for --verbose")
-		
+
 		for _, arg := range args[1:] {
 			if arg == "--help" || arg == "-h" {
 				fmt.Println("Usage: dialtone chrome list [flags]")
@@ -43,7 +43,7 @@ func RunChrome(args []string) {
 		killFlags := flag.NewFlagSet("chrome kill", flag.ExitOnError)
 		isWindows := killFlags.Bool("windows", false, "Use for WSL 2 host processes")
 		totalAll := killFlags.Bool("all", false, "Kill ALL browser processes system-wide")
-		
+
 		for _, arg := range args[1:] {
 			if arg == "--help" || arg == "-h" {
 				fmt.Println("Usage: dialtone chrome kill [PID|all] [flags]")
@@ -72,7 +72,7 @@ func RunChrome(args []string) {
 		gpu := newFlags.Bool("gpu", false, "Enable GPU acceleration")
 		headless := newFlags.Bool("headless", false, "Launch in headless mode")
 		debug := newFlags.Bool("debug", false, "Enable verbose logging")
-		
+
 		for _, arg := range args[1:] {
 			if arg == "--help" || arg == "-h" {
 				fmt.Println("Usage: dialtone chrome new [URL] [flags]")
@@ -101,7 +101,7 @@ func RunChrome(args []string) {
 		}
 
 		newFlags.Parse(flags)
-		
+
 		targetURL := ""
 		if len(positional) > 0 {
 			targetURL = positional[0]
@@ -142,7 +142,7 @@ func verifyChrome(port int, debug bool) {
 func handleList(headedOnly, headlessOnly, verbose bool) {
 	logger.LogInfo("Scanning for Chrome/Chromium resources...")
 	// We always get all and filter/categorize here
-	procs, err := chrome.ListResources(true) 
+	procs, err := chrome.ListResources(true)
 	if err != nil {
 		logger.LogFatal("Failed to list resources: %v", err)
 	}
@@ -159,7 +159,7 @@ func handleList(headedOnly, headlessOnly, verbose bool) {
 		fmt.Printf("\n%-8s %-8s %-8s %-10s %-10s %-6s %-10s %-8s %-5s %-10s\n", "PID", "PPID", "HEADLESS", "ORIGIN", "TYPE", "%CPU", "MEM(MB)", "PORT", "GPU", "PLATFORM")
 		fmt.Println(strings.Repeat("-", 105))
 	}
-	
+
 	count := 0
 	for _, p := range procs {
 		if headedOnly && p.IsHeadless {
@@ -173,7 +173,7 @@ func handleList(headedOnly, headlessOnly, verbose bool) {
 		if p.IsWindows {
 			platform = "Windows"
 		}
-		
+
 		headless := "NO"
 		if p.IsHeadless {
 			headless = "YES"
@@ -213,10 +213,10 @@ func handleList(headedOnly, headlessOnly, verbose bool) {
 			cmd = strings.TrimPrefix(cmd, "/mnt/c/Program Files (x86)/Google/Chrome/Application/")
 			cmd = strings.TrimPrefix(cmd, "C:\\Program Files\\Google\\Chrome\\Application\\")
 
-			fmt.Printf("%-8d %-8d %-8s %-10s %-6s %-10.1f %-8d %-10s %-8s %-5s %s\n", 
+			fmt.Printf("%-8d %-8d %-8s %-10s %-6s %-10.1f %-8d %-10s %-8s %-5s %s\n",
 				p.PID, p.PPID, headless, p.Origin, cpuStr, p.MemoryMB, p.ChildCount, platform, portStr, gpuStatus, cmd)
 		} else {
-			fmt.Printf("%-8d %-8d %-8s %-10s %-10s %-6s %-10.1f %-8s %-5s %-10s\n", 
+			fmt.Printf("%-8d %-8d %-8s %-10s %-10s %-6s %-10.1f %-8s %-5s %-10s\n",
 				p.PID, p.PPID, headless, p.Origin, procType, cpuStr, p.MemoryMB, portStr, gpuStatus, platform)
 		}
 		count++
@@ -253,7 +253,7 @@ func handleKill(arg string, isWindows, totalAll bool) {
 	}
 
 	logger.LogInfo("Killing Chrome process PID %d...", pid)
-	
+
 	// Auto-detect isWindows if not provided
 	if !isWindows {
 		procs, _ := chrome.ListResources(true)

@@ -39,13 +39,8 @@ func RunLint() error {
 			if _, err := os.Stat(filepath.Join(uiDir, "package.json")); err == nil {
 				fmt.Printf(">> [NIX] Lint: checking TypeScript in %s...\n", uiDir)
 
-				nixBinPath := "/nix/var/nix/profiles/default/bin"
-				currentPath := os.Getenv("PATH")
-				fullPath := nixBinPath + ":" + currentPath
-
-				// Ensure dependencies are installed and then lint
-				nixCmd := "export PATH=\"" + fullPath + "\"; export NIX_REMOTE=daemon; nix --extra-experimental-features \"nix-command flakes\" shell nixpkgs#bun -c bash -c \"bun install && bun x eslint .\""
-				cmd := exec.Command("bash", "-c", nixCmd)
+				// Use bun directly as requested
+				cmd := exec.Command("bun", "run", "lint")
 				cmd.Dir = uiDir
 				cmd.Stdout = os.Stdout
 				cmd.Stderr = os.Stderr

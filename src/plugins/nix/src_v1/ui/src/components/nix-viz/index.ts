@@ -64,6 +64,10 @@ class NixVisualization {
 
   setVisible(visible: boolean) {
     VisibilityMixin.setVisible(this, visible, "nix-viz");
+    const overlay = this.container.querySelector(".marketing-overlay") as HTMLElement;
+    if (overlay) {
+      overlay.style.display = visible ? "block" : "none";
+    }
   }
 
   animate = () => {

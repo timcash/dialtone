@@ -19,8 +19,8 @@ func init() {
 	dialtest.RegisterTicket("www-robot-text")
 	dialtest.AddSubtaskTest("init", RunInitTest, nil)
 	dialtest.AddSubtaskTest("change-branch", RunChangeBranchTest, nil)
-	dialtest.AddSubtaskTest("add-marketing-text", func() error { 
-		return checkBrowser("Unified Networks marketing information", "Global Coordination") 
+	dialtest.AddSubtaskTest("add-marketing-text", func() error {
+		return checkBrowser("Unified Networks marketing information", "Global Coordination")
 	}, nil)
 	dialtest.AddSubtaskTest("add-robot-kit-offer", checkBrowserStripe, nil)
 	dialtest.AddSubtaskTest("verify-browser", FinalBrowserPass, nil)
@@ -31,7 +31,9 @@ func RunInitTest() error { return nil }
 func RunChangeBranchTest() error {
 	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
 	out, err := cmd.Output()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	branch := strings.TrimSpace(string(out))
 	if branch != "www-robot-text" {
 		return fmt.Errorf("expected branch www-robot-text, got %s", branch)
@@ -52,7 +54,7 @@ func checkBrowser(ariaLabel, textInside string) error {
 		chromedp.Navigate("http://127.0.0.1:5173"),
 		chromedp.Sleep(2*time.Second),
 		// Press Space to find the right section
-		chromedp.KeyEvent(" "), 
+		chromedp.KeyEvent(" "),
 		chromedp.Sleep(1*time.Second),
 		chromedp.KeyEvent(" "),
 		chromedp.Sleep(1*time.Second),
@@ -60,10 +62,16 @@ func checkBrowser(ariaLabel, textInside string) error {
 		chromedp.Evaluate(fmt.Sprintf(`!!document.querySelector('[aria-label="%s"]')`, ariaLabel), &labelFound),
 		chromedp.Evaluate(fmt.Sprintf(`document.body.textContent.includes("%s")`, textInside), &textFound),
 	)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
-	if !labelFound { return fmt.Errorf("element with aria-label '%s' not found", ariaLabel) }
-	if !textFound { return fmt.Errorf("text '%s' not found in page body", textInside) }
+	if !labelFound {
+		return fmt.Errorf("element with aria-label '%s' not found", ariaLabel)
+	}
+	if !textFound {
+		return fmt.Errorf("text '%s' not found in page body", textInside)
+	}
 	return nil
 }
 
@@ -81,14 +89,20 @@ func checkBrowserStripe() error {
 		chromedp.KeyEvent(" "), chromedp.Sleep(500*time.Millisecond),
 		chromedp.KeyEvent(" "), chromedp.Sleep(500*time.Millisecond),
 		chromedp.KeyEvent(" "), chromedp.Sleep(500*time.Millisecond),
-		
+
 		chromedp.Evaluate(`!!document.querySelector('[aria-label="Order section: Robot Kit offer"]')`, &labelFound),
 		chromedp.Evaluate(`document.body.textContent.includes("1,000")`, &priceFound),
 	)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
-	if !labelFound { return fmt.Errorf("Stripe section aria-label not found") }
-	if !priceFound { return fmt.Errorf("price 1,000 not found in page body") }
+	if !labelFound {
+		return fmt.Errorf("Stripe section aria-label not found")
+	}
+	if !priceFound {
+		return fmt.Errorf("price 1,000 not found in page body")
+	}
 	return nil
 }
 
@@ -115,7 +129,7 @@ func setupBrowser() (context.Context, context.CancelFunc, error) {
 		}, nil
 	}
 
-	// 3. Otherwise, spawn a fresh HEADLESS chrome and KEEP it around 
+	// 3. Otherwise, spawn a fresh HEADLESS chrome and KEEP it around
 	// for the duration of this GO process (or use remote debugging pattern)
 	execPath := browser.FindChromePath()
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
@@ -128,7 +142,7 @@ func setupBrowser() (context.Context, context.CancelFunc, error) {
 
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	ctx, cancelCtx := chromedp.NewContext(allocCtx)
-	
+
 	return ctx, func() {
 		cancelCtx()
 		cancel()
@@ -147,7 +161,9 @@ func isPortOpen(port int) bool {
 func waitForPort(port int, timeout time.Duration) error {
 	start := time.Now()
 	for time.Since(start) < timeout {
-		if isPortOpen(port) { return nil }
+		if isPortOpen(port) {
+			return nil
+		}
 		time.Sleep(500 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for port %d", port)

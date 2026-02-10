@@ -26,6 +26,13 @@ export class Menu {
         return Menu.instance;
     }
 
+    setVisible(visible: boolean) {
+        const menuWrap = document.getElementById("global-menu");
+        if (menuWrap) {
+            menuWrap.classList.toggle("is-hidden", !visible);
+        }
+    }
+
     clear() { this.panel.innerHTML = ""; }
 
     addHeader(text: string) {

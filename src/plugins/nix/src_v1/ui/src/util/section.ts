@@ -1,5 +1,6 @@
 export interface HeaderConfig {
   visible?: boolean;
+  menuVisible?: boolean; // New option to control global menu
   title?: string;
   subtitle?: string;
   telemetry?: boolean;
@@ -26,15 +27,39 @@ export class SectionManager {
   private headerEl: HTMLElement | null = null;
   private titleEl: HTMLElement | null = null;
   private subtitleEl: HTMLElement | null = null;
+  private menuEl: HTMLElement | null = null;
 
   constructor(_options?: { debug?: boolean }) {
     this.headerEl = document.querySelector(".header-title");
     this.titleEl = this.headerEl?.querySelector("h1") || null;
     this.subtitleEl = document.getElementById("header-subtitle");
+    this.menuEl = document.getElementById("global-menu");
   }
 
   register(sectionId: string, config: SectionConfig): void {
     this.configs.set(sectionId, config);
+  }
+
+  async navigateTo(sectionId: string, smooth = true) {
+    console.log(`[SectionManager] 🚀 Navigating to: #${sectionId}`);
+    
+    await this.load(sectionId);
+    
+    const config = this.configs.get(sectionId);
+    const el = document.getElementById(sectionId);
+    
+    if (el) {
+        // Update header/menu state immediately
+        this.updateHeader(config?.header, el);
+        
+        el.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' });
+        
+        // Wait for scroll to finish then emit event
+        const delay = smooth ? 800 : 50;
+        setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('section-nav-complete', { detail: { sectionId } }));
+        }, delay);
+    }
   }
 
   observe(threshold = 0.1): void {
@@ -89,14 +114,21 @@ export class SectionManager {
   }
 
   private updateHeader(config?: HeaderConfig, sectionEl?: HTMLElement): void {
-    if (!this.headerEl) return;
-    const isVisible = config?.visible ?? true;
-    this.headerEl.classList.toggle("is-hidden", !isVisible);
-    if (!isVisible) return;
-    if (this.titleEl) this.titleEl.textContent = config?.title || "dialtone.swarm";
-    if (this.subtitleEl) {
-      this.subtitleEl.textContent = config?.subtitle || sectionEl?.dataset.subtitle || "distributed data explorer";
+    if (this.headerEl) {
+        const isVisible = config?.visible ?? true;
+        this.headerEl.classList.toggle("is-hidden", !isVisible);
+        if (isVisible) {
+            if (this.titleEl) this.titleEl.textContent = config?.title || "dialtone.nix";
+            if (this.subtitleEl) {
+                this.subtitleEl.textContent = config?.subtitle || sectionEl?.dataset.subtitle || "distributed data explorer";
+            }
+        }
     }
+
+    const isMenuVisible = config?.menuVisible ?? true;
+    import("./menu").then(({ Menu }) => {
+        Menu.getInstance().setVisible(isMenuVisible);
+    });
   }
 }
 

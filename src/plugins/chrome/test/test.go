@@ -42,7 +42,7 @@ func main() {
 func TestChromeNew() error {
 	logLine("step", "Running 'dialtone chrome new'")
 	output := runCmd("./dialtone.sh", "chrome", "new")
-	
+
 	if !strings.Contains(output, "Chrome started successfully") {
 		return fmt.Errorf("expected success message in output")
 	}
@@ -127,7 +127,7 @@ func TestProcessManagement() error {
 	// 3. Verify they are in the list with correct HEADLESS state
 	logLine("step", "Verifying instances and states in dialtone chrome list")
 	output = runCmd("./dialtone.sh", "chrome", "list")
-	
+
 	// Check Headless
 	if !strings.Contains(output, fmt.Sprintf("%d", hlessPid)) {
 		return fmt.Errorf("headless PID %d not found in list", hlessPid)

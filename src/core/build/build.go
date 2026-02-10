@@ -134,8 +134,8 @@ func buildWebIfNeeded(force bool) {
 		return
 	}
 
-	// NOTE: We do NOT RemoveAll(dist) here because it causes bootstrapping failures. 
-	// If the dist directory is deleted, the 'dialtone' tool itself cannot be re-compiled 
+	// NOTE: We do NOT RemoveAll(dist) here because it causes bootstrapping failures.
+	// If the dist directory is deleted, the 'dialtone' tool itself cannot be re-compiled
 	// by 'go run' during the build process because of the //go:embed pattern in dialtone.go.
 
 	// Install and build via UI plugin (shell delegation for decoupling)
