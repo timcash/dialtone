@@ -1,6 +1,6 @@
 # Nix Robust Smoke Test Report
 
-**Started:** Mon, 09 Feb 2026 16:45:09 PST
+**Started:** Mon, 09 Feb 2026 16:49:00 PST
 
 ### 1. Verify Browser Error Capture
 
@@ -12,8 +12,9 @@
 
 #### Last 10 Console Logs
 ```
-[log] "[main] 🧭 Navigating to: #nix-hero (smooth: false)"
+[log] "[main] 🧭 Navigating to: #nix-hero (snappy)"
 [error] "[SMOKE-VERIFY-ERR] Log pipeline verified"
+[log] "[main] ✅ Snappy scroll settled for #nix-hero"
 ```
 
 ---
@@ -27,8 +28,9 @@
 
 #### Last 10 Console Logs
 ```
-[log] "[main] 🧭 Navigating to: #nix-hero (smooth: false)"
+[log] "[main] 🧭 Navigating to: #nix-hero (snappy)"
 [error] "[SMOKE-VERIFY-ERR] Log pipeline verified"
+[log] "[main] ✅ Snappy scroll settled for #nix-hero"
 ```
 
 ---
@@ -42,9 +44,11 @@
 
 #### Last 10 Console Logs
 ```
-[log] "[main] 🧭 Navigating to: #nix-hero (smooth: false)"
+[log] "[main] 🧭 Navigating to: #nix-hero (snappy)"
 [error] "[SMOKE-VERIFY-ERR] Log pipeline verified"
-[log] "[main] 🧭 Navigating to: #nix-docs (smooth: true)"
+[log] "[main] ✅ Snappy scroll settled for #nix-hero"
+[log] "[main] 🧭 Navigating to: #nix-docs (snappy)"
+[log] "[main] ✅ Snappy scroll settled for #nix-docs"
 ```
 
 ---
@@ -58,12 +62,15 @@
 
 #### Last 10 Console Logs
 ```
-[log] "[main] 🧭 Navigating to: #nix-hero (smooth: false)"
+[log] "[main] 🧭 Navigating to: #nix-hero (snappy)"
 [error] "[SMOKE-VERIFY-ERR] Log pipeline verified"
-[log] "[main] 🧭 Navigating to: #nix-docs (smooth: true)"
-[log] "[main] 🧭 Navigating to: #nix-table (smooth: true)"
+[log] "[main] ✅ Snappy scroll settled for #nix-hero"
+[log] "[main] 🧭 Navigating to: #nix-docs (snappy)"
+[log] "[main] ✅ Snappy scroll settled for #nix-docs"
+[log] "[main] 🧭 Navigating to: #nix-table (snappy)"
 [log] "[NIX] nix-table setVisible:" false
 [log] "[NIX] nix-table setVisible:" true
+[log] "[main] ✅ Snappy scroll settled for #nix-table"
 ```
 
 ---
@@ -77,10 +84,10 @@
 
 #### Last 10 Console Logs
 ```
-[log] "[main] 🧭 Navigating to: #nix-docs (smooth: true)"
-[log] "[main] 🧭 Navigating to: #nix-table (smooth: true)"
+[log] "[main] 🧭 Navigating to: #nix-table (snappy)"
 [log] "[NIX] nix-table setVisible:" false
 [log] "[NIX] nix-table setVisible:" true
+[log] "[main] ✅ Snappy scroll settled for #nix-table"
 [log] "[NIX] Spawning new node..."
 [log] "[NIX] Successfully spawned proc-1"
 [log] "[NIX] Processes updated:" "proc-1:running"
