@@ -1,10 +1,20 @@
 # Template Smoke Test Report
 
-**Started:** Mon, 09 Feb 2026 18:32:15 PST
+**Started:** Mon, 09 Feb 2026 18:47:23 PST
 
 ### Initial Home
 
 ![Initial Home](smoke_initial_home.png)
+
+---
+### Table Section
+
+![Table Section](smoke_table_section.png)
+
+---
+### Verify Table UI Hidden
+
+![Verify Table UI Hidden](smoke_verify_table_ui_hidden.png)
 
 ---
 ### Settings Section
