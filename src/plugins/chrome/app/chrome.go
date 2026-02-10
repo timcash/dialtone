@@ -140,7 +140,7 @@ func LaunchChrome(port int, gpu bool, headless bool, targetURL string) (*LaunchR
 	var userDataDir string
 	if runtime.GOOS == "linux" && browser.IsWSL() {
 		// Detect if we are in an SSH session where cmd.exe might have issues with UNC paths
-		// We MUST use a local Windows drive (e.g. C:\) for Chrome profiles. 
+		// We MUST use a local Windows drive (e.g. C:\) for Chrome profiles.
 		cmdPath := "cmd.exe"
 		if _, err := exec.LookPath(cmdPath); err != nil {
 			// Fallback for SSH environments where C:\Windows\System32 might not be in PATH
@@ -162,7 +162,7 @@ func LaunchChrome(port int, gpu bool, headless bool, targetURL string) (*LaunchR
 					break
 				}
 			}
-			
+
 			if winTemp != "" {
 				userDataDir = winTemp + "\\" + fmt.Sprintf("dialtone-chrome-port-%d", port)
 			}
@@ -212,7 +212,7 @@ func LaunchChrome(port int, gpu bool, headless bool, targetURL string) (*LaunchR
 
 	logger.LogInfo("DEBUG: Launching Chrome: %s %v", path, args)
 	cmd := exec.Command(path, args...)
-	
+
 	// Capture output to a log file for debugging
 	logFile, err := os.Create("chrome_launch.log")
 	if err == nil {
@@ -235,17 +235,17 @@ func LaunchChrome(port int, gpu bool, headless bool, targetURL string) (*LaunchR
 		}
 	}
 	activePortFile := filepath.Join(linuxUserDataDir, "DevToolsActivePort")
-	
+
 	var wsURL string
 	var assignedPort int
 
 	for i := 0; i < 60; i++ {
 		time.Sleep(1 * time.Second)
-		
+
 		// If on WSL, the file is in winTemp folder which is usually /mnt/c/Users/.../AppData/Local/Temp/...
 		// We need to make sure we can read it.
 		// If we used a custom winUserDataDir that we know the Linux path for, that's better.
-		
+
 		data, err := os.ReadFile(activePortFile)
 		if err == nil {
 			lines := strings.Split(string(data), "\n")
@@ -299,4 +299,3 @@ func getWebsocketURL(port int) (string, error) {
 
 	return data.WebSocketDebuggerURL, nil
 }
-

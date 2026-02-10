@@ -20,86 +20,149 @@ type ProcessInfo struct {
 
 type NixPlugin struct {
 	Addr string
-	mu   sync.Mutex
+
+	mu sync.Mutex
+
 	cmds map[string]*exec.Cmd
+
 	logs map[string][]string
+
+	status map[string]string
 }
 
 func NewNixPlugin(addr string) *NixPlugin {
+
 	return &NixPlugin{
+
 		Addr: addr,
+
 		cmds: make(map[string]*exec.Cmd),
+
 		logs: make(map[string][]string),
+
+		status: make(map[string]string),
 	}
+
 }
 
 func (p *NixPlugin) Start() error {
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+
 		w.Header().Set("Content-Type", "application/json")
+
 		json.NewEncoder(w).Encode(map[string]string{"status": "Online"})
+
 	})
 
 	mux.HandleFunc("/api/processes", func(w http.ResponseWriter, r *http.Request) {
+
 		p.mu.Lock()
+
 		defer p.mu.Unlock()
 
 		if r.Method == http.MethodPost {
+
 			id := fmt.Sprintf("proc-%d", len(p.cmds)+1)
-			cmd := exec.Command("bash", "-c", "while true; do echo 'hello dialtone from " + id + "'; sleep 2; done")
-			
+
+			cmd := exec.Command("bash", "-c", "while true; do echo 'hello dialtone from "+id+"'; sleep 2; done")
+
 			stdout, _ := cmd.StdoutPipe()
+
 			stderr, _ := cmd.StderrPipe()
 
 			if err := cmd.Start(); err != nil {
+
 				http.Error(w, err.Error(), 500)
+
 				return
+
 			}
 
 			p.cmds[id] = cmd
+
 			p.logs[id] = []string{"Process started..."}
 
+			p.status[id] = "running"
+
 			go p.captureLogs(id, stdout)
+
 			go p.captureLogs(id, stderr)
 
+			go func() {
+
+				cmd.Wait()
+
+				p.mu.Lock()
+
+				p.status[id] = "stopped"
+
+				p.mu.Unlock()
+
+			}()
+
 			json.NewEncoder(w).Encode(ProcessInfo{ID: id, Status: "running"})
+
 			return
+
 		}
 
-		var list []ProcessInfo
-		for id, cmd := range p.cmds {
-			status := "running"
-			if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
-				status = "stopped"
-			}
-			list = append(list, ProcessInfo{ID: id, Status: status, Logs: p.logs[id]})
+		list := []ProcessInfo{}
+
+		for id := range p.cmds {
+
+			list = append(list, ProcessInfo{
+
+				ID: id,
+
+				Status: p.status[id],
+
+				Logs: p.logs[id],
+			})
+
 		}
+
 		w.Header().Set("Content-Type", "application/json")
+
 		json.NewEncoder(w).Encode(list)
+
 	})
 
 	mux.HandleFunc("/api/stop", func(w http.ResponseWriter, r *http.Request) {
+
 		id := r.URL.Query().Get("id")
+
 		p.mu.Lock()
+
 		defer p.mu.Unlock()
 
 		if cmd, ok := p.cmds[id]; ok {
+
 			cmd.Process.Kill()
+
+			p.status[id] = "stopped"
+
 			p.logs[id] = append(p.logs[id], "Process terminated.")
+
 			w.WriteHeader(http.StatusOK)
+
 			return
+
 		}
+
 		http.Error(w, "not found", 404)
+
 	})
 
 	// Smart UI Path detection
 	workDir, _ := os.Getwd()
 	possiblePaths := []string{
-		filepath.Join(workDir, "ui/dist"), // If running from src/plugins/nix/src_v1
+		filepath.Join(workDir, "ui/dist"),                        // If running from src/plugins/nix/src_v1
 		filepath.Join(workDir, "src/plugins/nix/src_v1/ui/dist"), // If running from root
 	}
-	
+
 	var uiPath string
 	for _, p := range possiblePaths {
 		if info, err := os.Stat(p); err == nil && info.IsDir() {
@@ -107,7 +170,7 @@ func (p *NixPlugin) Start() error {
 			break
 		}
 	}
-	
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if uiPath == "" {
 			fmt.Fprintf(w, "UI not found. Searching in: %v", possiblePaths)

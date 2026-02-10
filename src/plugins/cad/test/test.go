@@ -2,13 +2,13 @@ package test
 
 import (
 	"bytes"
+	"dialtone/cli/src/core/logger"
+	"dialtone/cli/src/core/test"
+	"dialtone/cli/src/plugins/cad/app"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"dialtone/cli/src/core/test"
-	"dialtone/cli/src/core/logger"
-	"dialtone/cli/src/plugins/cad/app"
 )
 
 func init() {
@@ -39,7 +39,7 @@ func RunCADObjectTest() error {
 
 func RunCADHTTPSTest() error {
 	fmt.Println(">> [cad] Running HTTP API Verification...")
-	
+
 	mux := http.NewServeMux()
 	app.RegisterHandlers(mux)
 	ts := httptest.NewServer(mux)
@@ -48,7 +48,7 @@ func RunCADHTTPSTest() error {
 	// 1. Test POST /api/cad/generate
 	fmt.Println("   Checking /api/cad/generate...")
 	params := map[string]interface{}{
-		"num_teeth": 15,
+		"num_teeth":      15,
 		"outer_diameter": 60,
 	}
 	body, _ := json.Marshal(params)
@@ -72,7 +72,7 @@ func RunCADHTTPSTest() error {
 		return fmt.Errorf("GET /api/cad failed: %v", err)
 	}
 	defer resp.Body.Close()
-	
+
 	var metadata struct {
 		Type       string                 `json:"type"`
 		Parameters map[string]interface{} `json:"parameters"`

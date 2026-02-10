@@ -1,7 +1,9 @@
 package test
+
 import (
 	"dialtone/cli/src/dialtest"
 )
+
 func init() {
 	dialtest.RegisterTicket("www-earth-pan-extreme")
 	dialtest.AddSubtaskTest("init", RunInitTest, nil)

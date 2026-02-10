@@ -4,7 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	
+
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/ssh"
 )
@@ -47,7 +47,7 @@ func RunLogs(args []string) {
 		if *host == "" || *pass == "" {
 			logger.LogFatal("Error: --host and --pass are required for remote logs")
 		}
-		
+
 		runRemoteLogs(*host, *port, *user, *pass, *lines)
 	} else {
 		// Local logs (placeholder for now, or maybe just tell user to check locally)
@@ -59,14 +59,14 @@ func RunLogs(args []string) {
 
 func runRemoteLogs(host, port, user, pass string, lines int) {
 	logger.LogInfo("Connecting to %s to stream logs...", host)
-	
+
 	client, err := ssh.DialSSH(host, port, user, pass)
 	if err != nil {
 		logger.LogFatal("SSH connection failed: %v", err)
 	}
 	defer client.Close()
-	
-	// We want to tail the log file. 
+
+	// We want to tail the log file.
 	// Based on the ticket description, the start command redirects output to ~/nats.log
 	var cmd string
 	if lines > 0 {
@@ -76,11 +76,11 @@ func runRemoteLogs(host, port, user, pass string, lines int) {
 		cmd = "tail -f ~/nats.log"
 		logger.LogInfo("Streaming logs from ~/nats.log...")
 	}
-	
-	// Use RunSSHCommand but we actually want to stream it. 
-	// RunSSHCommand waits for completion, but tail -f runs forever. 
+
+	// Use RunSSHCommand but we actually want to stream it.
+	// RunSSHCommand waits for completion, but tail -f runs forever.
 	// So we need a way to stream stdout.
-	
+
 	session, err := client.NewSession()
 	if err != nil {
 		logger.LogFatal("Failed to create SSH session: %v", err)

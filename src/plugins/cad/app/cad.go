@@ -44,14 +44,14 @@ func (o CADObject) ToJSON() (string, error) {
 // GenerateSTL calls the Python CLI to generate STL data
 func GenerateSTL(params map[string]interface{}) ([]byte, error) {
 	args := []string{"run", "python", "main.py"}
-	
+
 	for k, v := range params {
 		args = append(args, "--"+k, fmt.Sprintf("%v", v))
 	}
 
 	cmd := exec.Command("pixi", args...)
 	cmd.Dir = "src/plugins/cad/backend"
-	
+
 	output, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -59,7 +59,7 @@ func GenerateSTL(params map[string]interface{}) ([]byte, error) {
 		}
 		return nil, err
 	}
-	
+
 	return output, nil
 }
 
