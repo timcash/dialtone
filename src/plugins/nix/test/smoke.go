@@ -223,6 +223,7 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 	// NAVIGATION WRAPPER
 	navigate := func(id string) chromedp.Action {
 		return chromedp.Tasks{
+			// Wait for the navigation function to be available using a Go-side poll
 			chromedp.ActionFunc(func(ctx context.Context) error {
 				for i := 0; i < 50; i++ {
 					var exists bool
@@ -234,8 +235,8 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 				}
 				return fmt.Errorf("window.navigateTo not found after 5s")
 			}),
-			chromedp.Evaluate(fmt.Sprintf("window.navigateTo('%s')", id), nil),
-			pollJS(fmt.Sprintf(`document.querySelector("#%s").classList.contains("is-visible")`, id), 5*time.Second),
+			chromedp.Evaluate(fmt.Sprintf("window.navigateTo('%s', false)", id), nil),
+			pollJS(fmt.Sprintf(`document.querySelector("#%s").classList.contains("is-visible")`, id), 2*time.Second),
 			chromedp.Evaluate(`new Promise(resolve => {
 				const handler = (e) => {
 					if (e.detail.sectionId === '`+id+`') {
@@ -245,7 +246,7 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 				};
 				window.addEventListener('section-nav-complete', handler);
 				// Timeout safety
-				setTimeout(resolve, 2000);
+				setTimeout(resolve, 1000);
 			})`, nil),
 		}
 	}
@@ -269,7 +270,7 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 		navigate("nix-docs"),
 		chromedp.WaitVisible("#nix-docs.is-visible", chromedp.ByQuery),
 		chromedp.WaitVisible("#nix-docs h1", chromedp.ByQuery),
-		chromedp.WaitVisible("#nix-docs .lead", chromedp.ByQuery),
+		chromedp.WaitVisible("#nix-docs ul", chromedp.ByQuery),
 	}); err != nil { return err }
 
 	if err := runStep("4. Navigate to Nix Table and Verify Rendering", "Switch to nix-table and verify fullscreen layout + hidden header/menu", chromedp.Tasks{
