@@ -1,15 +1,21 @@
-export interface SectionComponent {
-  mount: () => Promise<void>;
-  unmount: () => void;
+// Header configuration for a section
+export interface HeaderConfig {
+  visible?: boolean;
+  title?: string;
+  subtitle?: string;
+  telemetry?: boolean;
+  version?: boolean;
+}
+
+// Interface that all visualization controls must implement
+export interface VisualizationControl {
+  dispose: () => void;
   setVisible: (visible: boolean) => void;
 }
 
-export interface HeaderConfig {
-  visible?: boolean;
-  menuVisible?: boolean;
-}
-
+// Configuration for a lazy-loaded section
 export interface SectionConfig {
-  component: new (container: HTMLElement) => SectionComponent;
+  containerId: string;
+  load: () => Promise<VisualizationControl>;
   header?: HeaderConfig;
 }

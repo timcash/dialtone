@@ -1,4 +1,6 @@
-export class SettingsSection {
+import { SectionComponent } from "../../util/ui";
+
+export class SettingsSection implements SectionComponent {
   constructor(_container: HTMLElement) {}
   async mount() { 
     console.log('Settings mounted'); 
