@@ -149,9 +149,10 @@ body.hide-menu #global-menu {
 .marketing-overlay {
   position: absolute;
   bottom: 4rem;
-  left: 2rem;
+  left: 4rem;
   z-index: 10;
-  max-width: 400px;
+  max-width: 500px;
+  text-align: left;
   pointer-events: auto;
 }
 
