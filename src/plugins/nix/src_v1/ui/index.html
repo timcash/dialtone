@@ -38,15 +38,10 @@
           <div class="docs-text">
             <h1>Nix & Plugin Architecture</h1>
             <ul>
-              <li><b>Functional Package Management:</b> Nix treats packages like values—built in isolation and stored in unique hash-based paths.</li>
-              <li><b>Atomic Upgrades & Rollbacks:</b> Every change is atomic; if a build fails, you can instantly revert to a previous working state.</li>
-              <li><b>Reproducible Environments:</b> Dependencies are explicitly declared, ensuring identical results across macOS, Linux, and WSL2.</li>
-              <li><b>Declarative Configuration:</b> Define your entire development environment or system state in a single, version-controlled file.</li>
-              
-              <li style="margin-top: 2rem; border-top: 1px solid #222; padding-top: 1rem;"><b>Go-Powered Lifecycle:</b> The plugin backend manages the spawning and health monitoring of Nix subprocesses on the host.</li>
-              <li><b>Section-Based UI:</b> Optimized for rapid navigation between 3D cluster visualizations, documentation, and live management.</li>
-              <li><b>Real-Time HUD:</b> A truly edge-to-edge spreadsheet manager provides instant visibility into PID, status, and log output.</li>
-              <li><b>Automated Verification:</b> High-speed Chromedp smoke tests ensure the UI and API synchronization remains robust during development.</li>
+              <li><b>Reproducible:</b> Packages are built in isolation with unique hash-based paths.</li>
+              <li><b>Declarative:</b> System states are defined in version-controlled configuration files.</li>
+              <li><b>Go-Backend:</b> Manages the full lifecycle and health of Nix subprocesses.</li>
+              <li><b>Snap-UI:</b> High-speed navigation between 3D clusters and edge-to-edge data.</li>
             </ul>
 
             <div class="code-block">
