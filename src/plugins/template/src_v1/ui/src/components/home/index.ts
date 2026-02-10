@@ -5,7 +5,7 @@ export class HomeSection {
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
   private renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  private cube: THREE.Mesh | null = null;
+  private spheres: THREE.Mesh[] = [];
   private frameId: number = 0;
   private stopTyping: (() => void) | null = null;
 
@@ -21,15 +21,23 @@ export class HomeSection {
       this.container.appendChild(this.renderer.domElement);
     }
 
-    const geometry = new THREE.BoxGeometry(1, 1, 1);
-    const material = new THREE.MeshPhongMaterial({ 
-      color: 0x00ff88,
-      emissive: 0x004422,
-      specular: 0x555555,
-      shininess: 30
-    });
-    this.cube = new THREE.Mesh(geometry, material);
-    this.scene.add(this.cube);
+    const geometry = new THREE.SphereGeometry(0.5, 32, 32);
+    for (let i = 0; i < 5; i++) {
+      const material = new THREE.MeshPhongMaterial({ 
+        color: 0x00ff88,
+        emissive: 0x004422,
+        specular: 0x555555,
+        shininess: 30
+      });
+      const sphere = new THREE.Mesh(geometry, material);
+      sphere.position.set(
+        (Math.random() - 0.5) * 4,
+        (Math.random() - 0.5) * 4,
+        (Math.random() - 0.5) * 2
+      );
+      this.scene.add(sphere);
+      this.spheres.push(sphere);
+    }
 
     const light = new THREE.DirectionalLight(0xffffff, 1);
     light.position.set(1, 1, 2);
@@ -78,10 +86,10 @@ export class HomeSection {
 
   private animate = () => {
     this.frameId = requestAnimationFrame(this.animate);
-    if (this.cube) {
-      this.cube.rotation.x += 0.01;
-      this.cube.rotation.y += 0.01;
-    }
+    this.spheres.forEach((sphere, i) => {
+      sphere.rotation.x += 0.01 * (i + 1);
+      sphere.rotation.y += 0.015;
+    });
     this.renderer.render(this.scene, this.camera);
     
     // Update FPS display if present
