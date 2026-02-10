@@ -1,6 +1,6 @@
 # Nix Robust Smoke Test Report
 
-**Started:** Mon, 09 Feb 2026 16:29:42 PST
+**Started:** Mon, 09 Feb 2026 16:35:32 PST
 
 ### 1. Verify Browser Error Capture
 
@@ -12,8 +12,8 @@
 
 #### Last 10 Console Logs
 ```
-[error] "[SMOKE-VERIFY-ERR] Log pipeline verified"
 [log] "[main] 🧭 Navigating to: #s-viz (smooth: false)"
+[error] "[SMOKE-VERIFY-ERR] Log pipeline verified"
 ```
 
 ---
@@ -27,8 +27,8 @@
 
 #### Last 10 Console Logs
 ```
-[error] "[SMOKE-VERIFY-ERR] Log pipeline verified"
 [log] "[main] 🧭 Navigating to: #s-viz (smooth: false)"
+[error] "[SMOKE-VERIFY-ERR] Log pipeline verified"
 ```
 
 ---
@@ -42,8 +42,8 @@
 
 #### Last 10 Console Logs
 ```
-[error] "[SMOKE-VERIFY-ERR] Log pipeline verified"
 [log] "[main] 🧭 Navigating to: #s-viz (smooth: false)"
+[error] "[SMOKE-VERIFY-ERR] Log pipeline verified"
 [log] "[main] 🧭 Navigating to: #s-nixtable (smooth: true)"
 [log] "[NIX] s-nixtable setVisible:" false
 [log] "[NIX] s-nixtable setVisible:" true
@@ -60,7 +60,7 @@
 
 #### Last 10 Console Logs
 ```
-[log] "[main] 🧭 Navigating to: #s-viz (smooth: false)"
+[error] "[SMOKE-VERIFY-ERR] Log pipeline verified"
 [log] "[main] 🧭 Navigating to: #s-nixtable (smooth: true)"
 [log] "[NIX] s-nixtable setVisible:" false
 [log] "[NIX] s-nixtable setVisible:" true
