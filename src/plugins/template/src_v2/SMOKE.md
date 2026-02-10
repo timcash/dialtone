@@ -1,34 +1,42 @@
-# Template Smoke Test Report
+# Template Robust Smoke Test Report
 
-**Started:** Mon, 09 Feb 2026 20:43:25 PST
+**Started:** Tue, 10 Feb 2026 12:06:31 PST
 
-### Initial Home
+## Phase 1: Environment & Build
 
-![Initial Home](smoke_initial_home.png)
+- [x] **Install**: UI dependencies verified.
+- [x] **Lint**: TypeScript validation passed.
+- [x] **Build**: Vite production assets generated.
 
----
-### Table Section
+## Phase 2: UI & Interactivity
 
-![Table Section](smoke_table_section.png)
+### 1. Hero Section Validation
 
----
-### Verify Table UI Hidden
-
-![Verify Table UI Hidden](smoke_verify_table_ui_hidden.png)
+![Hero Section Validation](smoke_step_1.png)
 
 ---
-### Settings Section
+### 2. Documentation Section Validation
 
-![Settings Section](smoke_settings_section.png)
-
----
-### Verify Header and Menu Hidden
-
-![Verify Header and Menu Hidden](smoke_verify_header_and_menu_hidden.png)
+![Documentation Section Validation](smoke_step_2.png)
 
 ---
-### Return Home
+### 3. Table Section Validation
 
-![Return Home](smoke_return_home.png)
+![Table Section Validation](smoke_step_3.png)
+
+---
+### 4. Verify Header Hidden on Table
+
+![Verify Header Hidden on Table](smoke_step_4.png)
+
+---
+### 5. Settings Section Validation
+
+![Settings Section Validation](smoke_step_5.png)
+
+---
+### 6. Return Home
+
+![Return Home](smoke_step_6.png)
 
 ---

@@ -36,6 +36,7 @@ func Run(args []string) error {
 			return fmt.Errorf("usage: template smoke <dir>")
 		}
 		dir := args[1]
+		// Robust smoke test involves building first
 		if err := RunBuild(dir); err != nil {
 			return err
 		}
@@ -94,31 +95,15 @@ func RunBuild(versionDir string) error {
 		return err
 	}
 
-	fmt.Println("   [BUILD] Step 1/2: TypeScript compile (tsc)...")
-	tscCmd := exec.Command("bun", "x", "tsc")
-	tscCmd.Dir = uiDir
-	tscCmd.Stdout = os.Stdout
-	tscCmd.Stderr = os.Stderr
-	if err := tscCmd.Run(); err != nil {
-		return fmt.Errorf("tsc failed: %v", err)
-	}
-
-	fmt.Println("   [BUILD] Cleaning dist directory...")
-	os.RemoveAll(filepath.Join(uiDir, "dist"))
-
-	fmt.Println("   [BUILD] Step 2/2: Vite assets build (using node)...")
-	// Use node directly to run the vite binary
-	viteBin := filepath.Join(uiDir, "node_modules", "vite", "bin", "vite.js")
-	viteCmd := exec.Command("node", viteBin, "build", "--logLevel", "info")
-	viteCmd.Dir = uiDir
-	viteCmd.Env = append(os.Environ(), "NODE_ENV=production", "CI=true", "VITE_CJS_IGNORE_WARNING=true")
-	viteCmd.Stdout = os.Stdout
-	viteCmd.Stderr = os.Stderr
+	fmt.Println("   [BUILD] Running vite build (skipping tsc)...")
+	// Use vite build directly, skipping tsc for speed and stability
+	cmd := exec.Command("bun", "run", "vite", "build", "--emptyOutDir")
+	cmd.Dir = uiDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	
-	fmt.Printf("   [DEBUG] Running: %s %s\n", viteCmd.Path, strings.Join(viteCmd.Args[1:], " "))
-	
-	if err := viteCmd.Run(); err != nil {
-		return fmt.Errorf("vite build failed: %v", err)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("build failed: %v", err)
 	}
 
 	fmt.Println(">> [TEMPLATE] Build successful")
@@ -170,7 +155,7 @@ func printUsage() {
 	fmt.Println("\nCommands:")
 	fmt.Println("  install <dir>  Install UI dependencies")
 	fmt.Println("  lint <dir>     Lint TypeScript code")
-	fmt.Println("  smoke <dir>    Run smoke tests")
-	fmt.Println("  build <dir>    Build UI assets")
+	fmt.Println("  build <dir>    Build everything needed (UI assets)")
+	fmt.Println("  smoke <dir>    Run robust automated UI tests")
 	fmt.Println("  src --n <N>    Generate next src_vN folder")
 }

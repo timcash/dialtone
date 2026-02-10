@@ -1,5 +1,11 @@
 import { SectionComponent, SectionConfig, HeaderConfig } from './types';
+export * from './types';
+export * from './menu';
+import { Menu } from './menu';
 
+/**
+ * SectionManager handles lazy loading, visibility, and header updates for SPA sections.
+ */
 export class SectionManager {
   private components = new Map<string, SectionComponent>();
   private configs = new Map<string, SectionConfig>();
@@ -10,16 +16,22 @@ export class SectionManager {
   private titleEl: HTMLElement | null = null;
   private subtitleEl: HTMLElement | null = null;
 
-  constructor() {
+  constructor(options: { title?: string } = {}) {
     this.headerEl = document.querySelector(".header-title");
     this.titleEl = this.headerEl?.querySelector("h1") || null;
     this.subtitleEl = document.getElementById("header-subtitle");
+    if (this.titleEl && options.title) {
+        this.titleEl.textContent = options.title;
+    }
   }
 
   register(id: string, config: SectionConfig) {
     this.configs.set(id, config);
   }
 
+  /**
+   * observe setup intersection observer to automatically mount/unmount and show/hide sections.
+   */
   observe(threshold = 0.1): void {
     this.observer = new IntersectionObserver(
       (entries) => {
@@ -32,7 +44,11 @@ export class SectionManager {
             this.updateHeader(config?.header, entry.target as HTMLElement);
           } else {
             const comp = this.components.get(id);
-            if (comp) comp.setVisible(false);
+            if (comp) {
+                comp.setVisible(false);
+                // Optional: Clear menu if this section had one
+                // Menu.getInstance().clear(); 
+            }
           }
         });
       },
@@ -78,14 +94,32 @@ export class SectionManager {
 
     if (!isVisible) return;
 
+    // Use default title if none provided in config
     if (this.titleEl) {
-      this.titleEl.textContent = config?.title || "dialtone.template";
+      this.titleEl.textContent = config?.title || this.titleEl.textContent;
     }
 
     if (this.subtitleEl) {
-      const defaultSubtitle = "plugin architecture template";
-      const subtitle = config?.subtitle || sectionEl?.dataset.subtitle || defaultSubtitle;
+      const subtitle = config?.subtitle || sectionEl?.dataset.subtitle || "";
       this.subtitleEl.textContent = subtitle;
     }
   }
+}
+
+/**
+ * setupApp is a helper to initialize the standard UI patterns.
+ */
+export function setupApp(options: { title: string }) {
+    const sections = new SectionManager({ title: options.title });
+    const menu = Menu.getInstance();
+
+    (window as any).sections = sections;
+    (window as any).navigateTo = (id: string) => sections.navigateTo(id);
+
+    window.addEventListener('hashchange', () => {
+        const id = window.location.hash.slice(1);
+        if (id) sections.navigateTo(id);
+    });
+
+    return { sections, menu };
 }
