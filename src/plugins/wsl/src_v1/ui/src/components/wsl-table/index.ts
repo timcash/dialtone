@@ -5,6 +5,7 @@ export class TableSection {
     constructor(private container: HTMLElement) {}
 
     async mount() {
+        console.log('[WSL] TableSection mounting...');
         const tbody = this.container.querySelector('#node-rows') as HTMLElement;
         if (tbody) {
             tbody.onclick = (e) => {
@@ -12,12 +13,18 @@ export class TableSection {
                 const stopBtn = target.closest('.stop-btn') as HTMLButtonElement;
                 if (stopBtn) {
                     const name = stopBtn.dataset.name;
-                    if (name) this.stopNode(name);
+                    if (name) {
+                        console.log(`[UI_ACTION] User clicked STOP for: ${name}`);
+                        this.stopNode(name);
+                    }
                 }
                 const deleteBtn = target.closest('.delete-btn') as HTMLButtonElement;
                 if (deleteBtn) {
                     const name = deleteBtn.dataset.name;
-                    if (name) this.deleteNode(name);
+                    if (name) {
+                        console.log(`[UI_ACTION] User clicked DELETE for: ${name}`);
+                        this.deleteNode(name);
+                    }
                 }
             };
         }
@@ -27,6 +34,7 @@ export class TableSection {
             startBtn.onclick = async () => {
                 const name = prompt("Enter WSL Instance Name:", "wsl-node-" + Math.floor(Math.random() * 1000));
                 if (!name) return;
+                console.log(`[UI_ACTION] User requested SPAWN for: ${name}`);
                 try {
                     await fetch('/api/instances', { 
                         method: 'POST',
@@ -45,6 +53,7 @@ export class TableSection {
     }
 
     private connectWS() {
+        console.log('[WSL] Connecting to WebSocket...');
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         this.ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
         this.ws.onmessage = (event) => {
