@@ -17,6 +17,10 @@ sections.register('nix-hero', {
 
 sections.register('nix-docs', {
   containerId: 'nix-docs',
+  header: { 
+    visible: false,
+    menuVisible: false 
+  },
   load: async () => {
     return {
       dispose: () => {},
