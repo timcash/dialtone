@@ -1,15 +1,17 @@
-import { VisualizationControl } from "../../util/ui";
-
-export class TableVisualization {
-  constructor(_container: HTMLElement) {}
-  dispose() {}
-  setVisible(_visible: boolean) {}
-}
+import { VisualizationControl } from "@ui/ui";
 
 export function mountTable(container: HTMLElement): VisualizationControl {
-    const viz = new TableVisualization(container);
+    container.innerHTML = `
+        <div class="marketing-overlay" aria-label="Table Section">
+            <h2>Process Table</h2>
+            <p>High-density data visualization.</p>
+        </div>
+    `;
+
     return {
-        dispose: () => viz.dispose(),
-        setVisible: (v) => viz.setVisible(v)
+        dispose: () => {
+            container.innerHTML = '';
+        },
+        setVisible: (_v) => { },
     };
 }

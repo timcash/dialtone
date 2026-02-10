@@ -1,7 +1,10 @@
-import { setupApp } from './util/ui';
+import { setupApp } from '@ui/ui';
 
 // 1. Initialize App with standard patterns
-const { sections, menu } = setupApp({ title: 'dialtone.template' });
+const { sections, menu } = setupApp({ 
+    title: 'dialtone.template',
+    debug: true
+});
 
 // 2. Register Sections with Lazy Loading
 sections.register('home', { 

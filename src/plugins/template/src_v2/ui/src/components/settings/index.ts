@@ -1,15 +1,17 @@
-import { VisualizationControl } from "../../util/ui";
-
-export class SettingsVisualization {
-  constructor(_container: HTMLElement) {}
-  dispose() {}
-  setVisible(_visible: boolean) {}
-}
+import { VisualizationControl } from "@ui/ui";
 
 export function mountSettings(container: HTMLElement): VisualizationControl {
-    const viz = new SettingsVisualization(container);
+    container.innerHTML = `
+        <div class="marketing-overlay" aria-label="Settings Section">
+            <h2>Configuration</h2>
+            <p>System settings and parameters.</p>
+        </div>
+    `;
+
     return {
-        dispose: () => viz.dispose(),
-        setVisible: (v) => viz.setVisible(v)
+        dispose: () => {
+            container.innerHTML = '';
+        },
+        setVisible: (_v) => { },
     };
 }
