@@ -1,7 +1,7 @@
-export class SettingsSection {
+export class TableSection {
   constructor(_container: HTMLElement) {}
-  async mount() { 
-    console.log('Settings mounted'); 
+  async mount() {
+    console.log('Table mounted');
   }
   unmount() {}
   setVisible(_visible: boolean) {

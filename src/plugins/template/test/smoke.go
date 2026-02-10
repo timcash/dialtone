@@ -91,9 +91,14 @@ func RunSmoke(versionDir string) error {
 	); err != nil { return err }
 
 	if err := runStep("Initial Home", dialtest.WaitForAriaLabel("Home Section")); err != nil { return err }
+	if err := runStep("Table Section", dialtest.NavigateToSection("table", "Table Section")); err != nil { return err }
+	if err := runStep("Verify Table UI Hidden", chromedp.Tasks{
+		dialtest.AssertElementHidden(".header-title"),
+		dialtest.AssertElementHidden("#global-menu"),
+	}); err != nil { return err }
 	if err := runStep("Settings Section", dialtest.NavigateToSection("settings", "Settings Section")); err != nil { return err }
 	if err := runStep("Verify Header and Menu Hidden", chromedp.Tasks{
-		dialtest.AssertElementHidden(".main-header"),
+		dialtest.AssertElementHidden(".header-title"),
 		dialtest.AssertElementHidden("#global-menu"),
 	}); err != nil { return err }
 	if err := runStep("Return Home", dialtest.NavigateToSection("home", "Home Section")); err != nil { return err }
