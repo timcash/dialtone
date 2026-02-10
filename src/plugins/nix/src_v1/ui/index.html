@@ -38,14 +38,15 @@
           <div class="docs-text">
             <h1>Nix & Plugin Architecture</h1>
             <ul>
-              <li><b>Isolation:</b> Packages are stored in unique, hash-based paths.</li>
-              <li><b>Immutability:</b> The Nix store is read-only, preventing corruption.</li>
-              <li><b>Purity:</b> Build results depend only on declared inputs.</li>
-              <li><b>Atomic Updates:</b> Upgrades never leave the system in an inconsistent state.</li>
-              <li><b>Rollbacks:</b> Instantly revert to previous generations if a build fails.</li>
-              <li><b>Multi-user:</b> Multiple users can have different profiles on one machine.</li>
-              <li><b>Nix Shell:</b> Spin up temporary dev environments with one command.</li>
-              <li><b>Cross-Platform:</b> Native support for macOS, Linux, and WSL2.</li>
+              <li><b>Functional Package Management:</b> Nix treats packages like values—built in isolation and stored in unique hash-based paths.</li>
+              <li><b>Atomic Upgrades & Rollbacks:</b> Every change is atomic; if a build fails, you can instantly revert to a previous working state.</li>
+              <li><b>Reproducible Environments:</b> Dependencies are explicitly declared, ensuring identical results across macOS, Linux, and WSL2.</li>
+              <li><b>Declarative Configuration:</b> Define your entire development environment or system state in a single, version-controlled file.</li>
+              
+              <li style="margin-top: 2rem; border-top: 1px solid #222; padding-top: 1rem;"><b>Go-Powered Lifecycle:</b> The plugin backend manages the spawning and health monitoring of Nix subprocesses on the host.</li>
+              <li><b>Section-Based UI:</b> Optimized for rapid navigation between 3D cluster visualizations, documentation, and live management.</li>
+              <li><b>Real-Time HUD:</b> A truly edge-to-edge spreadsheet manager provides instant visibility into PID, status, and log output.</li>
+              <li><b>Automated Verification:</b> High-speed Chromedp smoke tests ensure the UI and API synchronization remains robust during development.</li>
             </ul>
 
             <div class="code-block">
