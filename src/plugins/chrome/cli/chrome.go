@@ -8,6 +8,7 @@ import (
 
 	"dialtone/cli/src/core/logger"
 	chrome "dialtone/cli/src/plugins/chrome/app"
+	chrome_test "dialtone/cli/src/plugins/chrome/test"
 )
 
 // RunChrome handles the 'chrome' command
@@ -71,6 +72,8 @@ func RunChrome(args []string) {
 		port := newFlags.Int("port", 0, "Remote debugging port (0 for auto)")
 		gpu := newFlags.Bool("gpu", false, "Enable GPU acceleration")
 		headless := newFlags.Bool("headless", false, "Launch in headless mode")
+		role := newFlags.String("role", "", "Dialtone role tag (e.g. dev, smoke)")
+		reuseExisting := newFlags.Bool("reuse-existing", false, "Attach to existing matching role/headless instance")
 		debug := newFlags.Bool("debug", false, "Enable verbose logging")
 
 		for _, arg := range args[1:] {
@@ -106,7 +109,12 @@ func RunChrome(args []string) {
 		if len(positional) > 0 {
 			targetURL = positional[0]
 		}
-		handleNew(*port, *gpu, *headless, targetURL, *debug)
+		handleNew(*port, *gpu, *headless, targetURL, *role, *reuseExisting, *debug)
+	case "test":
+		if err := chrome_test.Run(); err != nil {
+			logger.LogFatal("Chrome self-test failed: %v", err)
+		}
+		logger.LogInfo("Chrome self-test passed")
 	case "verify":
 		verifyFlags := flag.NewFlagSet("chrome verify", flag.ExitOnError)
 		port := verifyFlags.Int("port", 9222, "Remote debugging port")
@@ -153,10 +161,10 @@ func handleList(headedOnly, headlessOnly, verbose bool) {
 	}
 
 	if verbose {
-		fmt.Printf("\n%-8s %-8s %-8s %-10s %-6s %-10s %-8s %-10s %-8s %-5s %s\n", "PID", "PPID", "HEADLESS", "ORIGIN", "%CPU", "MEM(MB)", "CHILDREN", "PLATFORM", "PORT", "GPU", "COMMAND")
+		fmt.Printf("\n%-8s %-8s %-8s %-10s %-10s %-6s %-10s %-8s %-10s %-8s %-5s %s\n", "PID", "PPID", "HEADLESS", "ORIGIN", "ROLE", "%CPU", "MEM(MB)", "CHILDREN", "PLATFORM", "PORT", "GPU", "COMMAND")
 		fmt.Println(strings.Repeat("-", 180))
 	} else {
-		fmt.Printf("\n%-8s %-8s %-8s %-10s %-10s %-6s %-10s %-8s %-5s %-10s\n", "PID", "PPID", "HEADLESS", "ORIGIN", "TYPE", "%CPU", "MEM(MB)", "PORT", "GPU", "PLATFORM")
+		fmt.Printf("\n%-8s %-8s %-8s %-10s %-10s %-10s %-6s %-10s %-8s %-5s %-10s\n", "PID", "PPID", "HEADLESS", "ORIGIN", "ROLE", "TYPE", "%CPU", "MEM(MB)", "PORT", "GPU", "PLATFORM")
 		fmt.Println(strings.Repeat("-", 105))
 	}
 
@@ -213,11 +221,11 @@ func handleList(headedOnly, headlessOnly, verbose bool) {
 			cmd = strings.TrimPrefix(cmd, "/mnt/c/Program Files (x86)/Google/Chrome/Application/")
 			cmd = strings.TrimPrefix(cmd, "C:\\Program Files\\Google\\Chrome\\Application\\")
 
-			fmt.Printf("%-8d %-8d %-8s %-10s %-6s %-10.1f %-8d %-10s %-8s %-5s %s\n",
-				p.PID, p.PPID, headless, p.Origin, cpuStr, p.MemoryMB, p.ChildCount, platform, portStr, gpuStatus, cmd)
+			fmt.Printf("%-8d %-8d %-8s %-10s %-10s %-6s %-10.1f %-8d %-10s %-8s %-5s %s\n",
+				p.PID, p.PPID, headless, p.Origin, p.Role, cpuStr, p.MemoryMB, p.ChildCount, platform, portStr, gpuStatus, cmd)
 		} else {
-			fmt.Printf("%-8d %-8d %-8s %-10s %-10s %-6s %-10.1f %-8s %-5s %-10s\n",
-				p.PID, p.PPID, headless, p.Origin, procType, cpuStr, p.MemoryMB, portStr, gpuStatus, platform)
+			fmt.Printf("%-8d %-8d %-8s %-10s %-10s %-10s %-6s %-10.1f %-8s %-5s %-10s\n",
+				p.PID, p.PPID, headless, p.Origin, p.Role, procType, cpuStr, p.MemoryMB, portStr, gpuStatus, platform)
 		}
 		count++
 	}
@@ -271,7 +279,7 @@ func handleKill(arg string, isWindows, totalAll bool) {
 	logger.LogInfo("Successfully killed process %d", pid)
 }
 
-func handleNew(port int, gpu bool, headless bool, targetURL string, debug bool) {
+func handleNew(port int, gpu bool, headless bool, targetURL, role string, reuseExisting, debug bool) {
 	logger.LogInfo("Launching new %s Chrome instance...", func() string {
 		if headless {
 			return "headless"
@@ -283,7 +291,14 @@ func handleNew(port int, gpu bool, headless bool, targetURL string, debug bool) 
 		port = 0 // app.LaunchChrome will find one
 	}
 
-	res, err := chrome.LaunchChrome(port, gpu, headless, targetURL)
+	res, err := chrome.StartSession(chrome.SessionOptions{
+		RequestedPort: port,
+		GPU:           gpu,
+		Headless:      headless,
+		TargetURL:     targetURL,
+		Role:          role,
+		ReuseExisting: reuseExisting,
+	})
 	if err != nil {
 		logger.LogFatal("Failed to launch Chrome: %v", err)
 	}
@@ -291,7 +306,8 @@ func handleNew(port int, gpu bool, headless bool, targetURL string, debug bool) 
 	fmt.Println("\n🚀 Chrome started successfully!")
 	fmt.Printf("%-15s: %d\n", "PID", res.PID)
 	fmt.Printf("%-15s: %d\n", "Debug Port", res.Port)
-	fmt.Printf("%-15s: %s\n", "WebSocket URL", res.WebsocketURL)
+	fmt.Printf("%-15s: %s\n", "WebSocket URL", res.WebSocketURL)
+	fmt.Printf("%-15s: %t\n", "Reused", !res.IsNew)
 	fmt.Println()
 	logger.LogInfo("You can now connect to this instance using the WebSocket URL.")
 }
@@ -302,6 +318,7 @@ func printChromeUsage() {
 	fmt.Println("  verify [--port N]   Verify chrome connectivity")
 	fmt.Println("  list [flags]        List detected chrome processes")
 	fmt.Println("  new [URL] [flags]   Launch a new Chrome instance")
+	fmt.Println("  test                Run chrome plugin self-test (dev vs smoke roles)")
 	fmt.Println("  kill [PID|all] [--all] Kill Dialtone processes (default) or all processes")
 	fmt.Println("  install             Install chrome dependencies")
 	fmt.Println("\nFlags for list:")
@@ -311,6 +328,8 @@ func printChromeUsage() {
 	fmt.Println("\nFlags for new:")
 	fmt.Println("  --gpu               Enable GPU acceleration")
 	fmt.Println("  --headless          Enable headless mode")
+	fmt.Println("  --role <name>       Tag launched browser role (dev, smoke, etc.)")
+	fmt.Println("  --reuse-existing    Reuse existing matching role/headless instance")
 	fmt.Println("\nFlags for kill:")
 	fmt.Println("  --all               Kill ALL Chrome/Edge processes system-wide")
 	fmt.Println("  --windows           Use with 'kill' for WSL host processes (auto-detected usually)")

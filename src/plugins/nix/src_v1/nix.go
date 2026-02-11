@@ -14,64 +14,51 @@ import (
 )
 
 type ProcessInfo struct {
+	ID string `json:"id"`
 
-	ID        string   `json:"id"`
+	PID int `json:"pid"`
 
-	PID       int      `json:"pid"`
+	Status string `json:"status"`
 
-	Status    string   `json:"status"`
+	StartTime string `json:"start_time"`
 
-	StartTime string   `json:"start_time"`
-
-	Logs      []string `json:"logs"`
-
+	Logs []string `json:"logs"`
 }
-
-
 
 type NixPlugin struct {
+	Addr string
 
-	Addr      string
+	mu sync.Mutex
 
-	mu        sync.Mutex
+	cmds map[string]*exec.Cmd
 
-	cmds      map[string]*exec.Cmd
+	logs map[string][]string
 
-	logs      map[string][]string
-
-	status    map[string]string
+	status map[string]string
 
 	startTime map[string]time.Time
-
 }
-
-
 
 func NewNixPlugin(addr string) *NixPlugin {
 
 	return &NixPlugin{
 
-		Addr:      addr,
+		Addr: addr,
 
-		cmds:      make(map[string]*exec.Cmd),
+		cmds: make(map[string]*exec.Cmd),
 
-		logs:      make(map[string][]string),
+		logs: make(map[string][]string),
 
-		status:    make(map[string]string),
+		status: make(map[string]string),
 
 		startTime: make(map[string]time.Time),
-
 	}
 
 }
 
-
-
 func (p *NixPlugin) Start() error {
 
 	mux := http.NewServeMux()
-
-
 
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
 
@@ -81,15 +68,11 @@ func (p *NixPlugin) Start() error {
 
 	})
 
-
-
 	mux.HandleFunc("/api/processes", func(w http.ResponseWriter, r *http.Request) {
 
 		p.mu.Lock()
 
 		defer p.mu.Unlock()
-
-
 
 		if r.Method == http.MethodPost {
 
@@ -97,13 +80,9 @@ func (p *NixPlugin) Start() error {
 
 			cmd := exec.Command("bash", "-c", "while true; do echo 'hello dialtone from "+id+"'; sleep 2; done")
 
-
-
 			stdout, _ := cmd.StdoutPipe()
 
 			stderr, _ := cmd.StderrPipe()
-
-
 
 			if err := cmd.Start(); err != nil {
 
@@ -113,8 +92,6 @@ func (p *NixPlugin) Start() error {
 
 			}
 
-
-
 			p.cmds[id] = cmd
 
 			p.logs[id] = []string{"Process started..."}
@@ -122,8 +99,6 @@ func (p *NixPlugin) Start() error {
 			p.status[id] = "running"
 
 			p.startTime[id] = time.Now()
-
-
 
 			go p.captureLogs(id, stdout)
 
@@ -141,25 +116,20 @@ func (p *NixPlugin) Start() error {
 
 			}()
 
-
-
 			json.NewEncoder(w).Encode(ProcessInfo{
 
-				ID:        id,
+				ID: id,
 
-				PID:       cmd.Process.Pid,
+				PID: cmd.Process.Pid,
 
-				Status:    "running",
+				Status: "running",
 
 				StartTime: p.startTime[id].Format(time.Kitchen),
-
 			})
 
 			return
 
 		}
-
-
 
 		list := []ProcessInfo{}
 
@@ -175,16 +145,15 @@ func (p *NixPlugin) Start() error {
 
 			list = append(list, ProcessInfo{
 
-				ID:        id,
+				ID: id,
 
-				PID:       pid,
+				PID: pid,
 
-				Status:    p.status[id],
+				Status: p.status[id],
 
 				StartTime: p.startTime[id].Format(time.Kitchen),
 
-				Logs:      p.logs[id],
-
+				Logs: p.logs[id],
 			})
 
 		}

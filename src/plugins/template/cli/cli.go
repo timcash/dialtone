@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"dialtone/cli/src/libs/dialtest"
 	"flag"
 	"fmt"
 	"os"
@@ -8,7 +9,18 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
+
+func runBun(repoRoot, uiDir string, args ...string) *exec.Cmd {
+	bunArgs := append([]string{"bun", "exec", "--cwd", uiDir}, args...)
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), bunArgs...)
+	cmd.Dir = repoRoot
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd
+}
 
 func Run(args []string) error {
 	if len(args) == 0 {
@@ -17,7 +29,7 @@ func Run(args []string) error {
 	}
 
 	command := args[0]
-	
+
 	// Helper to get directory with latest default
 	getDir := func() string {
 		if len(args) > 1 {
@@ -40,7 +52,7 @@ func Run(args []string) error {
 		if _, err := os.Stat(smokeFile); os.IsNotExist(err) {
 			return fmt.Errorf("smoke test file not found: %s", smokeFile)
 		}
-		
+
 		fmt.Printf(">> [TEMPLATE] Running Smoke Test for %s...\n", dir)
 		cmd := exec.Command("go", "run", smokeFile, dir)
 		cmd.Stdout = os.Stdout
@@ -91,12 +103,9 @@ func RunInstall(versionDir string) error {
 	fmt.Printf(">> [TEMPLATE] Install: %s\n", versionDir)
 	cwd, _ := os.Getwd()
 	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
-	
+
 	fmt.Println("   [TEMPLATE] Running bun install...")
-	cmd := exec.Command("bun", "install")
-	cmd.Dir = uiDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd := runBun(cwd, uiDir, "install")
 	return cmd.Run()
 }
 
@@ -104,12 +113,9 @@ func RunLint(versionDir string) error {
 	fmt.Printf(">> [TEMPLATE] Lint: %s\n", versionDir)
 	cwd, _ := os.Getwd()
 	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
-	
+
 	fmt.Println("   [LINT] Running tsc...")
-	cmd := exec.Command("bun", "run", "lint")
-	cmd.Dir = uiDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd := runBun(cwd, uiDir, "run", "lint")
 	return cmd.Run()
 }
 
@@ -117,31 +123,70 @@ func RunDev(versionDir string) error {
 	fmt.Printf(">> [TEMPLATE] Dev: %s\n", versionDir)
 	cwd, _ := os.Getwd()
 	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
-	
+
+	devPort := 3000
+	devURL := fmt.Sprintf("http://127.0.0.1:%d", devPort)
 	fmt.Println("   [DEV] Running vite dev...")
-	cmd := exec.Command("bun", "run", "dev")
-	cmd.Dir = uiDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	cmd := runBun(cwd, uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(devPort))
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	var (
+		mu      sync.Mutex
+		session *dialtest.ChromeSession
+	)
+
+	go func() {
+		if err := dialtest.WaitForPort(devPort, 30*time.Second); err != nil {
+			fmt.Printf("   [DEV] Warning: vite server not ready on port %d: %v\n", devPort, err)
+			return
+		}
+
+		fmt.Printf("   [DEV] Vite ready at %s\n", devURL)
+		fmt.Println("   [DEV] Launching debug browser (HEADED) with console capture...")
+
+		s, err := dialtest.StartChromeSession(dialtest.ChromeSessionOptions{
+			Headless:      false,
+			Role:          "dev",
+			ReuseExisting: true,
+			URL:           devURL,
+			LogWriter:     os.Stdout,
+			LogPrefix:     "   [BROWSER]",
+		})
+		if err != nil {
+			fmt.Printf("   [DEV] Warning: failed to attach debug browser: %v\n", err)
+			return
+		}
+		mu.Lock()
+		session = s
+		mu.Unlock()
+	}()
+
+	err := cmd.Wait()
+
+	mu.Lock()
+	if session != nil {
+		session.Close()
+	}
+	mu.Unlock()
+
+	return err
 }
 
 func RunBuild(versionDir string) error {
 	fmt.Printf(">> [TEMPLATE] Build: %s\n", versionDir)
 	cwd, _ := os.Getwd()
 	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
-	
+
 	if err := RunInstall(versionDir); err != nil {
 		return err
 	}
 
 	fmt.Println("   [BUILD] Running vite build (skipping tsc)...")
 	// Use vite build directly, skipping tsc for speed and stability
-	cmd := exec.Command("bun", "run", "vite", "build", "--emptyOutDir")
-	cmd.Dir = uiDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	
+	cmd := runBun(cwd, uiDir, "run", "vite", "build", "--emptyOutDir")
+
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("build failed: %v", err)
 	}
@@ -153,7 +198,7 @@ func RunBuild(versionDir string) error {
 func RunCreateVersion(newVer int) error {
 	cwd, _ := os.Getwd()
 	pluginDir := filepath.Join(cwd, "src", "plugins", "template")
-	
+
 	entries, _ := os.ReadDir(pluginDir)
 	maxVer := 0
 	for _, e := range entries {
@@ -177,7 +222,7 @@ func RunCreateVersion(newVer int) error {
 	}
 
 	fmt.Printf(">> [TEMPLATE] Creating new version: src_v%d from src_v%d\n", newVer, maxVer)
-	
+
 	// Simple copy using cp -r
 	cmd := exec.Command("cp", "-r", srcDir, destDir)
 	cmd.Stdout = os.Stdout

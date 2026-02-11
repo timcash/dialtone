@@ -14,23 +14,23 @@ func Run(args []string) error {
 
 	command := args[0]
 	switch command {
-		case "smoke":
-			smokeFlags := flag.NewFlagSet("nix smoke", flag.ContinueOnError)
-			timeout := smokeFlags.Int("smoke-timeout", 45, "Timeout in seconds for smoke test")
-			
-			if len(args) < 2 {
-				return fmt.Errorf("usage: nix smoke <dir> [--smoke-timeout <sec>]")
-			}
-	
-			dir := args[1]
-			smokeFlags.Parse(args[2:])
-			
-			// Always build before smoke test
-			if err := RunBuild(dir); err != nil {
-				return fmt.Errorf("pre-smoke build failed: %v", err)
-			}
-	
-			return test.RunSmoke(dir, *timeout)
+	case "smoke":
+		smokeFlags := flag.NewFlagSet("nix smoke", flag.ContinueOnError)
+		timeout := smokeFlags.Int("smoke-timeout", 45, "Timeout in seconds for smoke test")
+
+		if len(args) < 2 {
+			return fmt.Errorf("usage: nix smoke <dir> [--smoke-timeout <sec>]")
+		}
+
+		dir := args[1]
+		smokeFlags.Parse(args[2:])
+
+		// Always build before smoke test
+		if err := RunBuild(dir); err != nil {
+			return fmt.Errorf("pre-smoke build failed: %v", err)
+		}
+
+		return test.RunSmoke(dir, *timeout)
 	case "lint":
 		return RunLint()
 	case "dev":

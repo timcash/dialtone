@@ -13,7 +13,7 @@ import (
 
 const testTemplate = `package test
 import (
-	"dialtone/cli/src/dialtest"
+	"dialtone/cli/src/libs/dialtest"
 )
 func init() {
 	dialtest.RegisterTicket("{{.TicketID}}")
