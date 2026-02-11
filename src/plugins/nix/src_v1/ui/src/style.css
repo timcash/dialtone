@@ -49,13 +49,6 @@ body::-webkit-scrollbar {
   max-width: 900px;
   width: 100%;
   text-align: left;
-  pointer-events: auto;
-  opacity: 1; /* Instant visibility */
-}
-
-.snap-slide.is-visible .docs-text {
-  opacity: 1 !important;
-  visibility: visible !important;
 }
 
 .docs-text h1 {
@@ -140,28 +133,6 @@ body::-webkit-scrollbar {
 
 #global-menu.is-hidden {
   display: none !important;
-}
-
-/* Easy UI Hiding Utility Classes */
-body.hide-header .header-title {
-  display: none !important;
-}
-
-body.hide-menu #global-menu {
-  display: none !important;
-}
-
-/* Pulsing animation for stopping state */
-@keyframes pulse-orange {
-  0% { background-color: #331111; border-color: #552222; }
-  50% { background-color: #662200; border-color: #ff8800; }
-  100% { background-color: #331111; border-color: #552222; }
-}
-
-.stop-btn.is-stopping {
-  animation: pulse-orange 1s infinite;
-  pointer-events: none;
-  opacity: 0.8;
 }
 
 #global-menu-toggle {
@@ -329,13 +300,14 @@ body.hide-menu #global-menu {
   left: 2rem;
   z-index: 10;
   max-width: 400px;
-  pointer-events: auto;
-  opacity: 1; /* Instant visibility */
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.8s ease, transform 0.8s ease;
 }
 
 .snap-slide.is-visible .marketing-overlay {
-  opacity: 1 !important;
-  visibility: visible !important;
+  opacity: 1;
   transform: translateY(0);
 }
 

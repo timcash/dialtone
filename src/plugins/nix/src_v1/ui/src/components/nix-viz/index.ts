@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { FpsCounter } from "../../util/fps";
 import { GpuTimer } from "../../util/gpu_timer";
-import { VisibilityMixin } from "../../util/visibility";
+import { VisibilityMixin } from "../../util/section";
 import cubeGlowVert from "../../shaders/template-cube.vert.glsl?raw";
 import cubeGlowFrag from "../../shaders/template-cube.frag.glsl?raw";
 import { startTyping } from "../../util/typing";
@@ -21,45 +21,37 @@ class NixVisualization {
   private time = 0;
 
   constructor(container: HTMLElement) {
-    console.log('[NixVisualization] 🛠️ Initializing...');
     this.container = container;
-    try {
-        this.renderer.setClearColor(0x000000, 1);
-        this.renderer.setPixelRatio(window.devicePixelRatio);
-        this.renderer.domElement.style.width = "100%";
-        this.renderer.domElement.style.height = "100%";
-        this.container.appendChild(this.renderer.domElement);
+    this.renderer.setClearColor(0x000000, 1);
+    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.domElement.style.width = "100%";
+    this.renderer.domElement.style.height = "100%";
+    this.container.appendChild(this.renderer.domElement);
 
-        this.camera.position.set(0, 0, 5);
-        this.camera.lookAt(0, 0, 0);
+    this.camera.position.set(0, 0, 5);
+    this.camera.lookAt(0, 0, 0);
 
-        const cubeGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
-        for(let i=0; i<5; i++) {
-            const mat = new THREE.ShaderMaterial({
-                uniforms: {
-                    uColor: { value: new THREE.Color(0x00ff88) },
-                    uGlowColor: { value: new THREE.Color(0x00aaff) },
-                    uLightDir: { value: new THREE.Vector3(1,1,1).normalize() },
-                    uTime: { value: 0 },
-                },
-                vertexShader: cubeGlowVert,
-                fragmentShader: cubeGlowFrag,
-            });
-            const mesh = new THREE.Mesh(cubeGeo, mat);
-            mesh.position.set((Math.random()-0.5)*4, (Math.random()-0.5)*4, (Math.random()-0.5)*2);
-            this.scene.add(mesh);
-            this.nodes.push(mesh);
-        }
-
-        this.gl = this.renderer.getContext();
-        if (!this.gl) throw new Error("Failed to get WebGL context");
-        
-        this.gpuTimer.init(this.gl);
-        this.animate();
-        console.log('[NixVisualization] ✅ Initialization complete');
-    } catch (e) {
-        console.error('[NixVisualization] ❌ Initialization failed:', e);
+    const cubeGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+    for(let i=0; i<5; i++) {
+        const mat = new THREE.ShaderMaterial({
+            uniforms: {
+                uColor: { value: new THREE.Color(0x00ff88) },
+                uGlowColor: { value: new THREE.Color(0x00aaff) },
+                uLightDir: { value: new THREE.Vector3(1,1,1).normalize() },
+                uTime: { value: 0 },
+            },
+            vertexShader: cubeGlowVert,
+            fragmentShader: cubeGlowFrag,
+        });
+        const mesh = new THREE.Mesh(cubeGeo, mat);
+        mesh.position.set((Math.random()-0.5)*4, (Math.random()-0.5)*4, (Math.random()-0.5)*2);
+        this.scene.add(mesh);
+        this.nodes.push(mesh);
     }
+
+    this.gl = this.renderer.getContext();
+    this.gpuTimer.init(this.gl);
+    this.animate();
   }
 
   resize() {
@@ -74,7 +66,7 @@ class NixVisualization {
     VisibilityMixin.setVisible(this, visible, "nix-viz");
     const overlay = this.container.querySelector(".marketing-overlay") as HTMLElement;
     if (overlay) {
-      overlay.classList.toggle("is-visible", visible);
+      overlay.style.display = visible ? "block" : "none";
     }
   }
 
@@ -106,9 +98,13 @@ class NixVisualization {
 }
 
 export function mountNixViz(container: HTMLElement) {
-  console.log('[nix-viz] 🗻 Mounting Nix Viz to:', container.id);
-  const section = container.closest("section");
-  const subtitleEl = section?.querySelector("[data-typing-subtitle]") as HTMLParagraphElement;
+  container.innerHTML = `
+    <div class="marketing-overlay">
+      <h2>Nix Node Explorer</h2>
+      <p data-typing-subtitle></p>
+    </div>
+  `;
+  const subtitleEl = container.querySelector("[data-typing-subtitle]") as HTMLParagraphElement;
   const stopTyping = startTyping(subtitleEl, [
     "Isolated build environments.",
     "Reproducible deployments.",
