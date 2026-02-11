@@ -43,11 +43,63 @@ func Run(versionDir string) error {
 	defer serverCmd.Process.Kill()
 
 	runner.Step("Hero Section Validation", dialtest.WaitForAriaLabel("Home Section"))
+	if err := runner.AssertLastStepLogsContains(
+		"[SectionManager] 📦 LOADING #home",
+		"[SectionManager] ✅ LOADED #home",
+		"[SectionManager] ✨ START #home",
+		"[SectionManager] 🚀 RESUME #home",
+	); err != nil {
+		return err
+	}
+
 	runner.Step("Documentation Section Validation", dialtest.NavigateToSection("docs", "Docs Section"))
+	if err := runner.AssertLastStepLogsContains(
+		"[SectionManager] 🧭 NAVIGATING TO #docs",
+		"[SectionManager] 🧭 NAVIGATE TO #docs",
+		"[SectionManager] 🚀 RESUME #docs",
+		"[SectionManager] 💤 PAUSE #home",
+		"[SectionManager] 🧭 NAVIGATE AWAY #home",
+	); err != nil {
+		return err
+	}
+
 	runner.Step("Table Section Validation", dialtest.NavigateToSection("table", "Table Section"))
+	if err := runner.AssertLastStepLogsContains(
+		"[SectionManager] 🧭 NAVIGATING TO #table",
+		"[SectionManager] 🧭 NAVIGATE TO #table",
+		"[SectionManager] 🚀 RESUME #table",
+		"[SectionManager] 💤 PAUSE #docs",
+		"[SectionManager] 🧭 NAVIGATE AWAY #docs",
+	); err != nil {
+		return err
+	}
+
 	runner.Step("Verify Header Hidden on Table", dialtest.AssertElementHidden(".header-title"))
+
 	runner.Step("Settings Section Validation", dialtest.NavigateToSection("settings", "Settings Section"))
+	if err := runner.AssertLastStepLogsContains(
+		"[SectionManager] 🧭 NAVIGATING TO #settings",
+		"[SectionManager] 🧭 NAVIGATE TO #settings",
+		"[SectionManager] 🚀 RESUME #settings",
+		"[SectionManager] 💤 PAUSE #table",
+		"[SectionManager] 🧭 NAVIGATE AWAY #table",
+	); err != nil {
+		return err
+	}
+
 	runner.Step("Return Home", dialtest.NavigateToSection("home", "Home Section"))
+	if err := runner.AssertLastStepLogsContains(
+		"[SectionManager] 🧭 NAVIGATING TO #home",
+		"[SectionManager] 🧭 NAVIGATE TO #home",
+		"[SectionManager] 🚀 RESUME #home",
+		"[SectionManager] 🧭 NAVIGATE AWAY #settings",
+	); err != nil {
+		return err
+	}
+
+	if err := runner.AssertSectionLifecycle([]string{"home", "docs", "table", "settings"}); err != nil {
+		return err
+	}
 
 	return nil
 }
