@@ -59,7 +59,7 @@ export class TableSection {
         this.ws.onmessage = (event) => {
             try {
                 const msg = JSON.parse(event.data);
-                if (msg.type === 'list') {
+                if (msg.type === 'list' && Array.isArray(msg.data)) {
                     this.renderRows(msg.data);
                 }
             } catch (e) {
@@ -73,7 +73,9 @@ export class TableSection {
         try {
             const res = await fetch('/api/instances');
             const data = await res.json();
-            this.renderRows(data);
+            if (Array.isArray(data)) {
+                this.renderRows(data);
+            }
         } catch (e) {
             console.error('[WSL] Refresh failed', e);
         }
