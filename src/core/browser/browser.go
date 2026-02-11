@@ -159,6 +159,7 @@ type ChromeProcess struct {
 	DebugPort  int     // remote-debugging-port
 	GPUEnabled bool    // true unless --disable-gpu is present
 	Origin     string  // "Dialtone" or "Other"
+	Role       string  // e.g. "dev", "smoke", "default", "unknown"
 }
 
 // ListChromeProcesses returns a list of Chrome-related processes.
@@ -213,6 +214,7 @@ func ListChromeProcesses(showAll bool) ([]ChromeProcess, error) {
 						DebugPort:  extractDebugPort(cmdline),
 						GPUEnabled: !strings.Contains(strings.ToLower(cmdline), "--disable-gpu"),
 						Origin:     detectOrigin(cmdline),
+						Role:       detectRole(cmdline),
 					})
 				}
 			}
@@ -260,6 +262,7 @@ func ListChromeProcesses(showAll bool) ([]ChromeProcess, error) {
 							DebugPort:  extractDebugPort(cmdline),
 							GPUEnabled: !strings.Contains(strings.ToLower(cmdline), "--disable-gpu"),
 							Origin:     detectOrigin(cmdline),
+							Role:       detectRole(cmdline),
 						})
 					}
 				}
@@ -282,10 +285,27 @@ func extractDebugPort(cmdline string) int {
 }
 
 func detectOrigin(cmdline string) string {
-	if strings.Contains(cmdline, "--dialtone-origin=true") || strings.Contains(cmdline, "dialtone-chrome-port-") {
+	if strings.Contains(cmdline, "--dialtone-origin=true") || strings.Contains(cmdline, "dialtone-chrome-") {
 		return "Dialtone"
 	}
 	return "Other"
+}
+
+func detectRole(cmdline string) string {
+	re := regexp.MustCompile(`--dialtone-role=([a-zA-Z0-9_-]+)`)
+	matches := re.FindStringSubmatch(cmdline)
+	if len(matches) > 1 && matches[1] != "" {
+		return matches[1]
+	}
+	re = regexp.MustCompile(`dialtone-chrome-([a-zA-Z0-9_-]+)-port-`)
+	matches = re.FindStringSubmatch(cmdline)
+	if len(matches) > 1 && matches[1] != "" {
+		return matches[1]
+	}
+	if detectOrigin(cmdline) == "Dialtone" {
+		return "default"
+	}
+	return "unknown"
 }
 
 // KillProcessByPID kills a process by its PID.

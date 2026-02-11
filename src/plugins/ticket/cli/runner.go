@@ -20,7 +20,7 @@ func runGoSubtaskTest(ticketName, subtaskName string) error {
 	// We use blank import to trigger init() in the ticket's test package
 	mainContent := fmt.Sprintf(`package main
 import (
-	"dialtone/cli/src/dialtest"
+	"dialtone/cli/src/libs/dialtest"
 	_ "dialtone/cli/src/tickets/%s/test"
 	"os"
 	"fmt"
@@ -60,7 +60,7 @@ func runDynamicTest(ticketName, subtaskName string) error {
 	// We use blank import to trigger init() in the ticket's test package
 	mainContent := fmt.Sprintf(`package main
 import (
-	"dialtone/cli/src/dialtest"
+	"dialtone/cli/src/libs/dialtest"
 	_ "dialtone/cli/src/tickets/%s/test"
 	"os"
 	"fmt"
@@ -78,7 +78,7 @@ func main() {
 		// Run all if subtask is empty
 		mainContent = fmt.Sprintf(`package main
 import (
-	"dialtone/cli/src/dialtest"
+	"dialtone/cli/src/libs/dialtest"
 	_ "dialtone/cli/src/tickets/%s/test"
 	"os"
 	"fmt"

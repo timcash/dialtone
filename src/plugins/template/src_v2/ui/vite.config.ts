@@ -5,7 +5,7 @@ export default defineConfig({
   root: '.',
   resolve: {
     alias: {
-      '@ui': resolve(__dirname, '../../../../ui'),
+      '@ui': resolve(__dirname, '../../../../libs/ui'),
     },
   },
   build: {

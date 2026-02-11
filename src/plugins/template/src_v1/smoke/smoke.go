@@ -3,11 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 
-	"dialtone/cli/src/core/browser"
-	"dialtone/cli/src/dialtest"
+	"dialtone/cli/src/libs/dialtest"
 )
 
 func main() {
@@ -38,23 +36,11 @@ func Run(versionDir string) error {
 	}
 	defer runner.Finalize()
 
-	runner.RunPreflight(cwd, []struct{ Name, Cmd string; Args []string }{
-		{"Install", "bun", []string{"install"}},
-		{"Lint", "bun", []string{"run", "lint"}},
-		{"Build", "bun", []string{"run", "build"}},
-	})
-
-	browser.CleanupPort(runner.Opts.Port)
-	serverCmd := exec.Command("go", "run", "cmd/main.go")
-	serverCmd.Dir = pluginDir
-	if err := runner.StartServer(serverCmd); err != nil {
+	serverCmd, err := runner.PrepareGoPluginSmoke(cwd, "template", nil)
+	if err != nil {
 		return err
 	}
 	defer serverCmd.Process.Kill()
-
-	if err := runner.SetupBrowser("http://127.0.0.1:8080"); err != nil {
-		return err
-	}
 
 	runner.Step("Hero Section Validation", dialtest.WaitForAriaLabel("Home Section"))
 	runner.Step("Documentation Section Validation", dialtest.NavigateToSection("docs", "Docs Section"))

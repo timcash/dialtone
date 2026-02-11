@@ -18,6 +18,8 @@ export class SectionManager {
   private telemetryEl: HTMLElement | null = null;
   private versionEl: HTMLElement | null = null;
   private menuEl: HTMLElement | null = null;
+  private activeSectionId: string | null = null;
+  private resumed = new Map<string, boolean>();
 
   constructor(options: { debug?: boolean } = {}) {
     this.debug = options.debug ?? true;
@@ -44,14 +46,17 @@ export class SectionManager {
           const sectionId = entry.target.id;
 
           if (entry.isIntersecting) {
+            this.setActiveSection(sectionId);
+
             // Toggle visibility class for CSS animations
             entry.target.classList.add('is-visible');
 
             this.load(sectionId).then(() => {
               const control = this.visualizations.get(sectionId);
-              if (control) {
+              if (control && !this.resumed.get(sectionId)) {
                 if (this.debug) console.log(`[SectionManager] 🚀 RESUME #${sectionId}`);
                 control.setVisible(true);
+                this.resumed.set(sectionId, true);
               }
             });
 
@@ -63,10 +68,12 @@ export class SectionManager {
             if (nextId) this.load(nextId);
           } else {
             entry.target.classList.remove('is-visible');
+            if (this.activeSectionId === sectionId) this.setActiveSection(null);
             const control = this.visualizations.get(sectionId);
-            if (control) {
+            if (control && this.resumed.get(sectionId)) {
               if (this.debug) console.log(`[SectionManager] 💤 PAUSE #${sectionId}`);
               control.setVisible(false);
+              this.resumed.set(sectionId, false);
             }
           }
         });
@@ -95,11 +102,12 @@ export class SectionManager {
       .then((control) => {
         const elapsed = (performance.now() - startTime).toFixed(0);
         if (this.debug) console.log(`[SectionManager] ✅ LOADED #${sectionId} (${elapsed}ms)`);
-        
+
         this.visualizations.set(sectionId, control);
         // Start phase: initial setup but paused until visible
         if (this.debug) console.log(`[SectionManager] ✨ START #${sectionId}`);
         control.setVisible(false);
+        this.resumed.set(sectionId, false);
       })
       .catch((err) => {
         console.error(`[SectionManager] ❌ FAILED to load #${sectionId}:`, err);
@@ -116,12 +124,57 @@ export class SectionManager {
     return this.load(sectionId);
   }
 
-  async navigateTo(id: string) {
+  async navigateTo(id: string, options: { updateHash?: boolean } = {}) {
+    const updateHash = options.updateHash ?? true;
     if (this.debug) console.log(`[SectionManager] 🧭 NAVIGATING TO #${id}`);
+    if (updateHash && window.location.hash !== `#${id}`) {
+      window.location.hash = `#${id}`;
+    }
     const el = document.getElementById(id);
     if (el) {
       el.scrollIntoView({ behavior: 'smooth' });
     }
+  }
+
+  private setActiveSection(nextId: string | null): void {
+    if (this.activeSectionId === nextId) return;
+
+    if (this.activeSectionId) {
+      if (this.debug) console.log(`[SectionManager] 🧭 NAVIGATE AWAY #${this.activeSectionId}`);
+    }
+    if (nextId) {
+      if (this.debug) console.log(`[SectionManager] 🧭 NAVIGATE TO #${nextId}`);
+    }
+    this.activeSectionId = nextId;
+
+    window.dispatchEvent(new CustomEvent("dialtone:section-navigation", {
+      detail: {
+        activeSectionId: this.activeSectionId,
+      },
+    }));
+  }
+
+  getDebugSnapshot(): {
+    activeSectionId: string | null;
+    hashSectionId: string;
+    sections: Array<{ id: string; loaded: boolean; resumed: boolean; domVisible: boolean; loading: boolean }>;
+  } {
+    const hashSectionId = window.location.hash.slice(1);
+    const sections = Array.from(this.configs.keys()).map((id) => {
+      const el = document.getElementById(id);
+      return {
+        id,
+        loaded: this.visualizations.has(id),
+        resumed: this.resumed.get(id) ?? false,
+        domVisible: !!el?.classList.contains("is-visible"),
+        loading: this.loadingPromises.has(id),
+      };
+    });
+    return {
+      activeSectionId: this.activeSectionId,
+      hashSectionId,
+      sections,
+    };
   }
 
   private getNextSectionId(sectionId: string): string | undefined {
@@ -169,6 +222,7 @@ export class SectionManager {
     this.observer?.disconnect();
     this.visualizations.forEach(v => v.dispose());
     this.visualizations.clear();
+    this.resumed.clear();
   }
 }
 

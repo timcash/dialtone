@@ -16,10 +16,12 @@ import (
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/ssh"
 	test_cli "dialtone/cli/src/core/test/cli"
+	bun_cli "dialtone/cli/src/plugins/bun/cli"
 	cad_cli "dialtone/cli/src/plugins/cad/cli"
 	camera_cli "dialtone/cli/src/plugins/camera/cli"
 	chrome_cli "dialtone/cli/src/plugins/chrome/cli"
 	cloudflare_cli "dialtone/cli/src/plugins/cloudflare/cli"
+	dag_cli "dialtone/cli/src/plugins/dag/cli"
 	deploy_cli "dialtone/cli/src/plugins/deploy/cli"
 	diagnostic_cli "dialtone/cli/src/plugins/diagnostic/cli"
 	github_cli "dialtone/cli/src/plugins/github/cli"
@@ -27,11 +29,10 @@ import (
 	ide_cli "dialtone/cli/src/plugins/ide/cli"
 	logs_cli "dialtone/cli/src/plugins/logs/cli"
 	mavlink_cli "dialtone/cli/src/plugins/mavlink/cli"
-	dag_cli "dialtone/cli/src/plugins/dag/cli"
 	nix_cli "dialtone/cli/src/plugins/nix/cli"
-	template_cli "dialtone/cli/src/plugins/template/cli"
 	plugin_cli "dialtone/cli/src/plugins/plugin/cli"
 	swarm_cli "dialtone/cli/src/plugins/swarm/cli"
+	template_cli "dialtone/cli/src/plugins/template/cli"
 	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
 	ui_cli "dialtone/cli/src/plugins/ui/cli"
 	vpn_cli "dialtone/cli/src/plugins/vpn/cli"
@@ -104,6 +105,8 @@ func ExecuteDev() {
 		ide_cli.Run(args)
 	case "camera":
 		camera_cli.RunCamera(args)
+	case "bun":
+		bun_cli.RunBun(args)
 	case "chrome":
 		chrome_cli.RunChrome(args)
 	case "mavlink":
@@ -161,6 +164,7 @@ func printDevUsage() {
 	fmt.Println("  deploy        Deploy to remote robot")
 	fmt.Println("  format        Format Go code across the repo")
 	fmt.Println("  camera        Camera tools (snapshot, stream)")
+	fmt.Println("  bun <subcmd>       Bun toolchain tools (exec, run, x)")
 	fmt.Println("  clone         Clone or update the repository")
 	fmt.Println("  sync-code     Sync source code to remote robot")
 	fmt.Println("  ssh           SSH tools (upload, download, cmd)")

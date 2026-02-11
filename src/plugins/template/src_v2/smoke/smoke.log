@@ -1,69 +1,37 @@
-[SMOKE] Preflight: Install...
-[SMOKE] Preflight: Lint...
-[SMOKE] Preflight: Build...
-[SMOKE] Starting plugin server on port 8080...
-[SMOKE] Server ready.
-[SMOKE] Navigating to http://127.0.0.1:8080...
-   [BROWSER] [log] "[SectionManager] 🧭 INITIAL LOAD #home"
-   [BROWSER] [log] "[SectionManager] 📦 LOADING #home..."
-   [BROWSER] [error] "[PROOFOFLIFE] Intentional Browser Test Error"
-   [BROWSER] [log] "[SectionManager] 📦 LOADING #docs..."
-[SMOKE] Step Start: Hero Section Validation
-   [BROWSER] [log] "[SectionManager] ✅ LOADED #home (58ms)"
-   [BROWSER] [log] "[SectionManager] ✨ START #home"
-   [BROWSER] [log] "[hero-viz] SLEEP"
-   [BROWSER] [log] "[SectionManager] 🚀 RESUME #home"
-   [BROWSER] [log] "[hero-viz] AWAKE"
-   [BROWSER] [log] "[SectionManager] ✅ LOADED #docs (41ms)"
-   [BROWSER] [log] "[SectionManager] ✨ START #docs"
-   [BROWSER] [log] "[docs-viz] SLEEP"
-[SMOKE] Step PASSED: Hero Section Validation
-[SMOKE] Step Start: Documentation Section Validation
-   [BROWSER] [log] "[SectionManager] 🧭 NAVIGATING TO #docs"
-   [BROWSER] [log] "[SectionManager] 📦 LOADING #table..."
-   [BROWSER] [log] "[SectionManager] 🚀 RESUME #docs"
-   [BROWSER] [log] "[docs-viz] AWAKE"
-   [BROWSER] [log] "[SectionManager] ✅ LOADED #table (2ms)"
-   [BROWSER] [log] "[SectionManager] ✨ START #table"
-   [BROWSER] [log] "[table-viz] SLEEP"
-   [BROWSER] [log] "[SectionManager] 💤 PAUSE #home"
-   [BROWSER] [log] "[hero-viz] SLEEP"
-[SMOKE] Step PASSED: Documentation Section Validation
-[SMOKE] Step Start: Table Section Validation
-   [BROWSER] [log] "[SectionManager] 🧭 NAVIGATING TO #table"
-   [BROWSER] [log] "[SectionManager] 📦 LOADING #settings..."
-   [BROWSER] [log] "[SectionManager] 🚀 RESUME #table"
-   [BROWSER] [log] "[table-viz] AWAKE"
-   [BROWSER] [log] "[SectionManager] ✅ LOADED #settings (2ms)"
-   [BROWSER] [log] "[SectionManager] ✨ START #settings"
-   [BROWSER] [log] "[settings-viz] SLEEP"
-   [BROWSER] [log] "[SectionManager] 💤 PAUSE #docs"
-   [BROWSER] [log] "[docs-viz] SLEEP"
-[SMOKE] Step PASSED: Table Section Validation
-[SMOKE] Step Start: Verify Header Hidden on Table
-[SMOKE] Step PASSED: Verify Header Hidden on Table
-[SMOKE] Step Start: Settings Section Validation
-   [BROWSER] [log] "[SectionManager] 🧭 NAVIGATING TO #settings"
-   [BROWSER] [log] "[SectionManager] 🚀 RESUME #settings"
-   [BROWSER] [log] "[settings-viz] AWAKE"
-   [BROWSER] [log] "[SectionManager] 💤 PAUSE #table"
-   [BROWSER] [log] "[table-viz] SLEEP"
-[SMOKE] Step PASSED: Settings Section Validation
-[SMOKE] Step Start: Return Home
-   [BROWSER] [log] "[SectionManager] 🧭 NAVIGATING TO #home"
-   [BROWSER] [log] "[SectionManager] 🚀 RESUME #table"
-   [BROWSER] [log] "[table-viz] AWAKE"
-   [BROWSER] [log] "[SectionManager] 💤 PAUSE #settings"
-   [BROWSER] [log] "[settings-viz] SLEEP"
-   [BROWSER] [log] "[SectionManager] 🚀 RESUME #docs"
-   [BROWSER] [log] "[docs-viz] AWAKE"
-   [BROWSER] [log] "[SectionManager] 💤 PAUSE #table"
-   [BROWSER] [log] "[table-viz] SLEEP"
-   [BROWSER] [log] "[SectionManager] 🚀 RESUME #home"
-   [BROWSER] [log] "[hero-viz] AWAKE"
-   [BROWSER] [log] "[SectionManager] 💤 PAUSE #docs"
-   [BROWSER] [log] "[docs-viz] SLEEP"
-[SMOKE] Step PASSED: Return Home
+[SMOKE] Preflight: Go Format...
+   [DIR] /Users/tim/code/dialtone/src/plugins/template/src_v2
+   [CMD] go fmt ./...
+[SMOKE] Preflight PASSED: Go Format (elapsed: 45ms)
+[SMOKE] Preflight: Go Lint...
+   [DIR] /Users/tim/code/dialtone/src/plugins/template/src_v2
+   [CMD] go vet ./...
+[SMOKE] Preflight PASSED: Go Lint (elapsed: 175ms)
+[SMOKE] Preflight: Go Build...
+   [DIR] /Users/tim/code/dialtone/src/plugins/template/src_v2
+   [CMD] go build ./...
+[SMOKE] Preflight PASSED: Go Build (elapsed: 1.017s)
+[SMOKE] Preflight: UI Install...
+   [DIR] /Users/tim/code/dialtone
+   [CMD] /Users/tim/code/dialtone/dialtone.sh bun exec --cwd /Users/tim/code/dialtone/src/plugins/template/src_v2/ui install
+bun install v1.3.9 (cf6cdbbb)
+
+Checked 20 installs across 67 packages (no changes) [2.00ms]
+[SMOKE] Preflight PASSED: UI Install (elapsed: 329ms)
+[SMOKE] Preflight: UI TypeScript Lint...
+   [DIR] /Users/tim/code/dialtone
+   [CMD] /Users/tim/code/dialtone/dialtone.sh bun exec --cwd /Users/tim/code/dialtone/src/plugins/template/src_v2/ui run lint
+$ tsc --noEmit
+[SMOKE] Preflight PASSED: UI TypeScript Lint (elapsed: 773ms)
+[SMOKE] Preflight: UI Build...
+   [DIR] /Users/tim/code/dialtone
+   [CMD] /Users/tim/code/dialtone/dialtone.sh bun exec --cwd /Users/tim/code/dialtone/src/plugins/template/src_v2/ui run build
+$ vite build
+[SMOKE] Preflight still running: UI Build (elapsed: 5s)
+[SMOKE] Preflight still running: UI Build (elapsed: 10s)
+[SMOKE] Preflight still running: UI Build (elapsed: 15s)
+[SMOKE] Preflight still running: UI Build (elapsed: 20s)
+[SMOKE] Preflight still running: UI Build (elapsed: 25s)
+[SMOKE] Preflight still running: UI Build (elapsed: 30s)
+[SMOKE][TIMEOUT][preflight:UI Build] total smoke run exceeded while running "preflight UI Build" (30s)
 [SMOKE] Generating markdown report...
-[SMOKE] COMPLETE. Report at /Users/dev/code/dialtone/src/plugins/template/src_v2/smoke/SMOKE.md
-[SMOKE] Cleaning up browser processes using chrome plugin API...
+[SMOKE] COMPLETE. Report at /Users/tim/code/dialtone/src/plugins/template/src_v2/smoke/SMOKE.md
