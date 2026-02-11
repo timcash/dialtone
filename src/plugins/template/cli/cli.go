@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"dialtone/cli/src/plugins/template/test"
+	smoke_v1 "dialtone/cli/src/plugins/template/src_v1/smoke"
 	smoke_v2 "dialtone/cli/src/plugins/template/src_v2/smoke"
 	"flag"
 	"fmt"
@@ -37,10 +37,13 @@ func Run(args []string) error {
 		return RunDev(getDir())
 	case "smoke":
 		dir := getDir()
+		if dir == "src_v1" {
+			return smoke_v1.Run(dir)
+		}
 		if dir == "src_v2" {
 			return smoke_v2.Run(dir)
 		}
-		return test.RunSmoke(dir)
+		return fmt.Errorf("smoke test not implemented for version: %s", dir)
 	case "build":
 		return RunBuild(getDir())
 	case "src":

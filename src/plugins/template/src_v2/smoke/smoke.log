@@ -1,4 +1,3 @@
-[SMOKE] START for src_v2
 [SMOKE] Preflight: Install...
 [SMOKE] Preflight: Lint...
 [SMOKE] Preflight: Build...
@@ -7,17 +6,17 @@
 [SMOKE] Navigating to http://127.0.0.1:8080...
    [BROWSER] [log] "[SectionManager] 🧭 INITIAL LOAD #home"
    [BROWSER] [log] "[SectionManager] 📦 LOADING #home..."
-   [BROWSER] [log] "[SectionManager] 📦 LOADING #docs..."
-   [BROWSER] [log] "[SectionManager] ✅ LOADED #docs (2ms)"
-   [BROWSER] [log] "[SectionManager] ✨ START #docs"
-   [BROWSER] [log] "[docs-viz] SLEEP"
    [BROWSER] [error] "[PROOFOFLIFE] Intentional Browser Test Error"
-   [BROWSER] [log] "[SectionManager] ✅ LOADED #home (58ms)"
+[SMOKE] Step Start: Hero Section Validation
+   [BROWSER] [log] "[SectionManager] 📦 LOADING #docs..."
+   [BROWSER] [log] "[SectionManager] ✅ LOADED #home (66ms)"
    [BROWSER] [log] "[SectionManager] ✨ START #home"
    [BROWSER] [log] "[hero-viz] SLEEP"
    [BROWSER] [log] "[SectionManager] 🚀 RESUME #home"
    [BROWSER] [log] "[hero-viz] AWAKE"
-[SMOKE] Step Start: Hero Section Validation
+   [BROWSER] [log] "[SectionManager] ✅ LOADED #docs (48ms)"
+   [BROWSER] [log] "[SectionManager] ✨ START #docs"
+   [BROWSER] [log] "[docs-viz] SLEEP"
 [SMOKE] Step PASSED: Hero Section Validation
 [SMOKE] Step Start: Documentation Section Validation
    [BROWSER] [log] "[SectionManager] 🧭 NAVIGATING TO #docs"
