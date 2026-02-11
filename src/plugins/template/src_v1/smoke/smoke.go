@@ -1,6 +1,7 @@
-package smoke
+package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,6 +9,18 @@ import (
 	"dialtone/cli/src/core/browser"
 	"dialtone/cli/src/dialtest"
 )
+
+func main() {
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: smoke <versionDir>")
+		os.Exit(1)
+	}
+	versionDir := os.Args[1]
+	if err := Run(versionDir); err != nil {
+		fmt.Printf("Smoke test failed: %v\n", err)
+		os.Exit(1)
+	}
+}
 
 func Run(versionDir string) error {
 	cwd, _ := os.Getwd()

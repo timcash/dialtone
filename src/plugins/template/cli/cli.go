@@ -1,8 +1,6 @@
 package cli
 
 import (
-	smoke_v1 "dialtone/cli/src/plugins/template/src_v1/smoke"
-	smoke_v2 "dialtone/cli/src/plugins/template/src_v2/smoke"
 	"flag"
 	"fmt"
 	"os"
@@ -37,23 +35,34 @@ func Run(args []string) error {
 		return RunDev(getDir())
 	case "smoke":
 		dir := getDir()
-		if dir == "src_v1" {
-			return smoke_v1.Run(dir)
+		cwd, _ := os.Getwd()
+		smokeFile := filepath.Join(cwd, "src", "plugins", "template", dir, "smoke", "smoke.go")
+		if _, err := os.Stat(smokeFile); os.IsNotExist(err) {
+			return fmt.Errorf("smoke test file not found: %s", smokeFile)
 		}
-		if dir == "src_v2" {
-			return smoke_v2.Run(dir)
-		}
-		return fmt.Errorf("smoke test not implemented for version: %s", dir)
+		
+		fmt.Printf(">> [TEMPLATE] Running Smoke Test for %s...\n", dir)
+		cmd := exec.Command("go", "run", smokeFile, dir)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		return cmd.Run()
 	case "build":
 		return RunBuild(getDir())
 	case "src":
-		srcFlags := flag.NewFlagSet("template src", flag.ExitOnError)
-		n := srcFlags.Int("n", 0, "Version number to create")
-		srcFlags.Parse(args[1:])
-		if *n == 0 {
-			return fmt.Errorf("usage: template src --n <N>")
+		n := 0
+		if len(args) > 1 && !strings.HasPrefix(args[1], "-") {
+			n, _ = strconv.Atoi(args[1])
+		} else {
+			srcFlags := flag.NewFlagSet("template src", flag.ExitOnError)
+			nFlag := srcFlags.Int("n", 0, "Version number to create")
+			srcFlags.Parse(args[1:])
+			n = *nFlag
 		}
-		return RunCreateVersion(*n)
+
+		if n == 0 {
+			return fmt.Errorf("usage: template src <N> or template src --n <N>")
+		}
+		return RunCreateVersion(n)
 	default:
 		return fmt.Errorf("unknown command: %s", command)
 	}
