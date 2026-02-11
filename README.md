@@ -1,5 +1,5 @@
 # [`DIALTONE`](https://dialtone.earth)
-> IMPORTANT: This should sound like something from a scirence fiction novel about the near future of civic technology.
+> IMPORTANT: This should sound like something from a science fiction novel about the near future of civic technology.
 
 ![dialtone](./dialtone.jpg)
 
