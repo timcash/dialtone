@@ -67,6 +67,10 @@ export interface HeaderConfig {
   version?: boolean; // Show/hide version line
 }
 
+export interface MenuConfig {
+  visible?: boolean; // Hide/show the global menu toggle
+}
+
 // Interface that all visualization controls must implement
 export interface VisualizationControl {
   dispose: () => void;
@@ -78,6 +82,7 @@ export interface SectionConfig {
   containerId: string;
   load: () => Promise<VisualizationControl>;
   header?: HeaderConfig; // Optional header configuration
+  menu?: MenuConfig; // Optional menu configuration
 }
 
 /**
@@ -96,6 +101,8 @@ export class SectionManager {
   private subtitleEl: HTMLElement | null = null;
   private telemetryEl: HTMLElement | null = null;
   private versionEl: HTMLElement | null = null;
+  private menuToggleEl: HTMLButtonElement | null = null;
+  private menuPanelEl: HTMLElement | null = null;
 
   constructor(options?: { debug?: boolean }) {
     this.debug = options?.debug ?? true;
@@ -118,6 +125,14 @@ export class SectionManager {
     this.telemetryEl = this.headerEl?.querySelector(".header-telemetry") || null;
     this.versionEl =
       this.headerEl?.querySelector(".version:not(.header-telemetry)") || null;
+    this.menuToggleEl = document.getElementById(
+      "global-menu-toggle",
+    ) as HTMLButtonElement | null;
+    this.menuPanelEl = document.getElementById("global-menu-panel");
+
+    // Default hidden unless a section explicitly opts in.
+    this.headerEl?.classList.add("is-hidden");
+    this.menuToggleEl?.classList.add("is-hidden");
   }
 
   /**
@@ -150,6 +165,7 @@ export class SectionManager {
             const config = this.configs.get(sectionId);
             const sectionEl = entry.target as HTMLElement;
             this.updateHeader(config?.header, sectionEl);
+            this.updateMenu(config?.menu);
 
             // Predictive Priority: Preload next section (but keep it paused)
             const nextId = this.getNextSectionId(sectionId);
@@ -324,7 +340,7 @@ export class SectionManager {
     if (!this.headerEl) return;
 
     // 1. Handle Visibility
-    const isVisible = config?.visible ?? true;
+    const isVisible = config?.visible ?? false;
     this.headerEl.classList.toggle("is-hidden", !isVisible);
 
     if (!isVisible) return;
@@ -351,6 +367,18 @@ export class SectionManager {
     if (this.versionEl) {
       const showVer = config?.version ?? true;
       this.versionEl.style.display = showVer ? "block" : "none";
+    }
+  }
+
+  private updateMenu(config?: MenuConfig): void {
+    if (!this.menuToggleEl) return;
+
+    const isVisible = config?.visible ?? true;
+    this.menuToggleEl.classList.toggle("is-hidden", !isVisible);
+
+    if (!isVisible && this.menuPanelEl) {
+      this.menuPanelEl.hidden = true;
+      this.menuToggleEl.setAttribute("aria-expanded", "false");
     }
   }
 }

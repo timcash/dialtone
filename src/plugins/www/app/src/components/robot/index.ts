@@ -650,6 +650,8 @@ export function mountRobot(container: HTMLElement) {
   <div class="marketing-overlay" aria-label="Robot visualization marketing information">
     <h2>Robotic Control</h2>
     <p data-typing-subtitle></p>
+  </div>
+  <div class="robot-buy-cta">
     <a class="buy-button" href="https://buy.stripe.com/test_5kQaEXcagaAoaC62N20kE00" target="_blank"
       rel="noopener noreferrer">Get the Robot Kit</a>
   </div>
