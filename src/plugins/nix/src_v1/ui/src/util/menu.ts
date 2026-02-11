@@ -6,32 +6,18 @@ export class Menu {
     private constructor() {
         const toggle = document.getElementById("global-menu-toggle") as HTMLButtonElement;
         const panel = document.getElementById("global-menu-panel") as HTMLDivElement;
-        
-        if (!toggle || !panel) {
-            console.warn("[Menu] Global menu elements not found, menu will be disabled");
-            this.toggle = document.createElement("button");
-            this.panel = document.createElement("div");
-        } else {
-            this.toggle = toggle;
-            this.panel = panel;
-        }
-
+        if (!toggle || !panel) throw new Error("Global menu elements not found");
+        this.toggle = toggle;
+        this.panel = panel;
         const setOpen = (open: boolean) => {
-            if (this.panel) this.panel.hidden = !open;
-            if (this.toggle) this.toggle.setAttribute("aria-expanded", String(open));
+            this.panel.hidden = !open;
+            this.toggle.setAttribute("aria-expanded", String(open));
         };
-
-        if (toggle) {
-            this.toggle.addEventListener("click", (e) => {
-                e.preventDefault();
-                setOpen(this.panel.hidden);
-            });
-        }
-
-        window.addEventListener("scroll", () => { 
-            if (this.panel && !this.panel.hidden) setOpen(false); 
-        }, { capture: true, passive: true });
-
+        this.toggle.addEventListener("click", (e) => {
+            e.preventDefault();
+            setOpen(this.panel.hidden);
+        });
+        window.addEventListener("scroll", () => { if (!this.panel.hidden) setOpen(false); }, { capture: true, passive: true });
         setOpen(false);
     }
 
