@@ -1,4 +1,4 @@
-import { setupApp } from '@ui/ui';
+import { setupApp } from './dialtone-ui';
 
 // 1. Initialize App with standard patterns
 const { sections, menu } = setupApp({ 

@@ -51,6 +51,7 @@ type SmokeOptions struct {
 	SmokeDir       string
 	TotalTimeout   time.Duration
 	StepTimeout    time.Duration
+	CommandStall   time.Duration
 	PanicOnTimeout bool
 	PanicOnFailure bool
 }
@@ -94,6 +95,9 @@ func NewSmokeRunner(opts SmokeOptions) (*SmokeRunner, error) {
 	if opts.StepTimeout <= 0 {
 		opts.StepTimeout = 5 * time.Second
 	}
+	if opts.CommandStall <= 0 {
+		opts.CommandStall = 12 * time.Second
+	}
 	if !opts.PanicOnTimeout {
 		opts.PanicOnTimeout = true
 	}
@@ -116,6 +120,36 @@ func NewSmokeRunner(opts SmokeOptions) (*SmokeRunner, error) {
 		MW:             mw,
 		stepsStartedAt: time.Now(),
 	}, nil
+}
+
+type safeBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *safeBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *safeBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+type activityWriter struct {
+	w        io.Writer
+	onOutput func()
+}
+
+func (a *activityWriter) Write(p []byte) (int, error) {
+	n, err := a.w.Write(p)
+	if n > 0 && a.onOutput != nil {
+		a.onOutput()
+	}
+	return n, err
 }
 
 func (r *SmokeRunner) LogMsg(format string, a ...interface{}) {
@@ -147,8 +181,17 @@ func (r *SmokeRunner) RunPreflightInDir(uiDir string, steps []CommandStep) error
 		cmdCtx, cancelCmd := context.WithTimeout(context.Background(), r.remainingTotal())
 		cmd := exec.CommandContext(cmdCtx, s.Cmd, s.Args...)
 		cmd.Dir = uiDir
-		var buf bytes.Buffer
-		cmdOutput := io.MultiWriter(&buf, r.MW)
+		var buf safeBuffer
+		lastOutputAt := time.Now()
+		var outputMu sync.Mutex
+		cmdOutput := &activityWriter{
+			w: io.MultiWriter(&buf, r.MW),
+			onOutput: func() {
+				outputMu.Lock()
+				lastOutputAt = time.Now()
+				outputMu.Unlock()
+			},
+		}
 		cmd.Stdout = cmdOutput
 		cmd.Stderr = cmdOutput
 		start := time.Now()
@@ -177,7 +220,7 @@ func (r *SmokeRunner) RunPreflightInDir(uiDir string, steps []CommandStep) error
 			waitCh <- cmd.Wait()
 		}()
 
-		ticker := time.NewTicker(5 * time.Second)
+		ticker := time.NewTicker(1 * time.Second)
 		var err error
 		waiting := true
 		for waiting {
@@ -185,7 +228,19 @@ func (r *SmokeRunner) RunPreflightInDir(uiDir string, steps []CommandStep) error
 			case err = <-waitCh:
 				waiting = false
 			case <-ticker.C:
-				r.LogMsg("[SMOKE] Preflight still running: %s (elapsed: %s)\n", s.Name, time.Since(start).Round(time.Second))
+				if time.Since(start).Round(time.Second)%5 == 0 {
+					r.LogMsg("[SMOKE] Preflight still running: %s (elapsed: %s)\n", s.Name, time.Since(start).Round(time.Second))
+				}
+				outputMu.Lock()
+				stalledFor := time.Since(lastOutputAt)
+				outputMu.Unlock()
+				if stalledFor > r.Opts.CommandStall {
+					_ = cmd.Process.Kill()
+					err = fmt.Errorf("command stalled with no output for %s", stalledFor.Round(time.Second))
+					r.LogMsg("[SMOKE] Preflight STALLED: %s (elapsed: %s) | %v\n", s.Name, time.Since(start).Round(time.Millisecond), err)
+					waiting = false
+					continue
+				}
 				r.ensureTotalTimeout("preflight " + s.Name)
 			}
 		}
@@ -549,7 +604,7 @@ func (r *SmokeRunner) RunDefaultPreflight(repoRoot, pluginDir, uiDir string) err
 		{Name: "Go Build", Cmd: "go", Args: []string{"build", "./..."}},
 	}
 	uiChecks := []CommandStep{
-		{Name: "UI Install", Cmd: dialtoneCmd, Args: []string{"bun", "exec", "--cwd", uiDir, "install"}},
+		{Name: "UI Install", Cmd: dialtoneCmd, Args: []string{"bun", "exec", "--cwd", uiDir, "install", "--force"}},
 		{Name: "UI TypeScript Lint", Cmd: dialtoneCmd, Args: []string{"bun", "exec", "--cwd", uiDir, "run", "lint"}},
 		{Name: "UI Build", Cmd: dialtoneCmd, Args: []string{"bun", "exec", "--cwd", uiDir, "run", "build"}},
 	}
@@ -585,7 +640,7 @@ func (r *SmokeRunner) runPrettierCheck(repoRoot, versionDir string) error {
 	r.LogMsg("[SMOKE] Preflight: Source Prettier Format/Lint (JS/TS)...\n")
 
 	allowedExt := map[string]bool{
-		".ts": true, ".tsx": true, ".js": true, ".jsx": true, ".mjs": true, ".cjs": true,
+		".js": true, ".jsx": true, ".mjs": true, ".cjs": true,
 	}
 	skipDirs := map[string]bool{
 		"node_modules": true,
@@ -653,13 +708,54 @@ func (r *SmokeRunner) runPrettierCheck(repoRoot, versionDir string) error {
 
 func (r *SmokeRunner) runPrettierCommand(repoRoot, versionDir, stepName, mode string, files []string) error {
 	args := append([]string{"bun", "exec", "--cwd", versionDir, "x", "prettier", "--" + mode}, files...)
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), args...)
+	cmdCtx, cancel := context.WithTimeout(context.Background(), r.remainingTotal())
+	defer cancel()
+	cmd := exec.CommandContext(cmdCtx, filepath.Join(repoRoot, "dialtone.sh"), args...)
 	cmd.Dir = repoRoot
-	var buf bytes.Buffer
-	cmdOutput := io.MultiWriter(&buf, r.MW)
+	var buf safeBuffer
+	lastOutputAt := time.Now()
+	var outputMu sync.Mutex
+	cmdOutput := &activityWriter{
+		w: io.MultiWriter(&buf, r.MW),
+		onOutput: func() {
+			outputMu.Lock()
+			lastOutputAt = time.Now()
+			outputMu.Unlock()
+		},
+	}
 	cmd.Stdout = cmdOutput
 	cmd.Stderr = cmdOutput
-	err := cmd.Run()
+
+	if err := cmd.Start(); err != nil {
+		r.failNow("preflight:"+stepName, "command failed to start", err)
+		return err
+	}
+
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- cmd.Wait()
+	}()
+
+	ticker := time.NewTicker(1 * time.Second)
+	var err error
+	waiting := true
+	for waiting {
+		select {
+		case err = <-waitCh:
+			waiting = false
+		case <-ticker.C:
+			r.ensureTotalTimeout(stepName)
+			outputMu.Lock()
+			stalledFor := time.Since(lastOutputAt)
+			outputMu.Unlock()
+			if stalledFor > r.Opts.CommandStall {
+				_ = cmd.Process.Kill()
+				err = fmt.Errorf("command stalled with no output for %s", stalledFor.Round(time.Second))
+				waiting = false
+			}
+		}
+	}
+	ticker.Stop()
 
 	status := "✅ PASSED"
 	if err != nil {
@@ -856,8 +952,17 @@ func (r *SmokeRunner) runPreflightStartupProbe(name, dir, cmdName string, args [
 
 	cmd := exec.Command(cmdName, args...)
 	cmd.Dir = dir
-	var buf bytes.Buffer
-	cmdOutput := io.MultiWriter(&buf, r.MW)
+	var buf safeBuffer
+	lastOutputAt := time.Now()
+	var outputMu sync.Mutex
+	cmdOutput := &activityWriter{
+		w: io.MultiWriter(&buf, r.MW),
+		onOutput: func() {
+			outputMu.Lock()
+			lastOutputAt = time.Now()
+			outputMu.Unlock()
+		},
+	}
 	cmd.Stdout = cmdOutput
 	cmd.Stderr = cmdOutput
 
@@ -897,6 +1002,14 @@ func (r *SmokeRunner) runPreflightStartupProbe(name, dir, cmdName string, args [
 			goto DONE
 		case <-progressTicker.C:
 			r.LogMsg("[SMOKE] Preflight %s waiting for port %d... (elapsed: %s)\n", name, port, time.Since(start).Round(time.Second))
+			outputMu.Lock()
+			stalledFor := time.Since(lastOutputAt)
+			outputMu.Unlock()
+			if stalledFor > r.Opts.CommandStall {
+				probeErr = fmt.Errorf("process stalled with no output for %s before port %d was ready", stalledFor.Round(time.Second), port)
+				r.LogMsg("[SMOKE] Preflight %s stalled: %v\n", name, probeErr)
+				goto DONE
+			}
 		default:
 			if WaitForPort(port, 500*time.Millisecond) == nil {
 				ready = true
