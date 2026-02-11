@@ -8,23 +8,16 @@
 </head>
 <body>
   <div id="app">
+    <div id="global-menu-panel" hidden></div>
+    
     <header class="header-title">
       <h1>dialtone.template</h1>
       <p id="header-subtitle">plugin architecture template</p>
       <div class="header-fps">FPS --</div>
     </header>
 
-    <div id="global-menu">
-      <button id="global-menu-toggle" aria-expanded="false" aria-label="Toggle Menu">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="3" y1="12" x2="21" y2="12"></line>
-          <line x1="3" x2="21" y1="6" y2="6"></line>
-          <line x1="3" x2="21" y1="18" y2="18"></line>
-        </svg>
-      </button>
-      <div id="global-menu-panel" hidden>
-        <!-- Menu content injected via JS -->
-      </div>
+    <div class="top-right-controls">
+      <button id="global-menu-toggle" class="menu-toggle" type="button" aria-expanded="false">Menu</button>
     </div>
 
     <main>
@@ -49,24 +42,24 @@
 
       <section id="table" class="snap-slide" data-subtitle="data spreadsheet" aria-label="Table Section">
         <div style="width: 100%; height: 100%; display: flex; flex-direction: column; background: #000;">
-          <table aria-label="Template Table" style="width: 100%; border-collapse: collapse; font-family: monospace; font-size: 13px;">
+          <table aria-label="Template Table" class="data-table">
             <thead>
-              <tr style="background: #111; text-align: left; border-bottom: 1px solid #333;">
-                <th style="padding: 12px; color: #00ff88;">KEY</th>
-                <th style="padding: 12px; color: #00ff88;">VALUE</th>
-                <th style="padding: 12px; color: #00ff88;">STATUS</th>
+              <tr>
+                <th>KEY</th>
+                <th>VALUE</th>
+                <th>STATUS</th>
               </tr>
             </thead>
             <tbody id="table-rows">
-              <tr style="border-bottom: 1px solid #222;">
-                <td style="padding: 12px;">system_clock</td>
-                <td style="padding: 12px;">1707525600</td>
-                <td style="padding: 12px; color: #00ff88;">SYNCED</td>
+              <tr>
+                <td>system_clock</td>
+                <td>1707525600</td>
+                <td style="color: var(--primary-color);">SYNCED</td>
               </tr>
-              <tr style="border-bottom: 1px solid #222;">
-                <td style="padding: 12px;">network_latency</td>
-                <td style="padding: 12px;">12ms</td>
-                <td style="padding: 12px; color: #00ff88;">OPTIMAL</td>
+              <tr>
+                <td>network_latency</td>
+                <td>12ms</td>
+                <td style="color: var(--primary-color);">OPTIMAL</td>
               </tr>
             </tbody>
           </table>
