@@ -1,6 +1,6 @@
 # Template Plugin Smoke Test Report
 
-**Generated at:** Wed, 11 Feb 2026 10:13:28 PST
+**Generated at:** Wed, 11 Feb 2026 10:32:46 PST
 
 ## 1. Preflight: Go + TypeScript/JavaScript Checks
 
@@ -9,7 +9,7 @@
 ```text
 [dir] /Users/tim/code/dialtone/src/plugins/template/src_v2
 [cmd] go fmt ./...
-[elapsed] 58ms
+[elapsed] 45ms
 ```
 
 ### Go Lint: ✅ PASSED
@@ -17,7 +17,7 @@
 ```text
 [dir] /Users/tim/code/dialtone/src/plugins/template/src_v2
 [cmd] go vet ./...
-[elapsed] 166ms
+[elapsed] 175ms
 ```
 
 ### Go Build: ✅ PASSED
@@ -25,17 +25,17 @@
 ```text
 [dir] /Users/tim/code/dialtone/src/plugins/template/src_v2
 [cmd] go build ./...
-[elapsed] 996ms
+[elapsed] 1.017s
 ```
 
 ### UI Install: ✅ PASSED
 
 ```text
-[dir] /Users/tim/code/dialtone/src/plugins/template/src_v2/ui
-[cmd] bun install
-[elapsed] 5ms
+[dir] /Users/tim/code/dialtone
+[cmd] /Users/tim/code/dialtone/dialtone.sh bun exec --cwd /Users/tim/code/dialtone/src/plugins/template/src_v2/ui install
+[elapsed] 329ms
 
-bun install v1.2.23 (cf136713)
+bun install v1.3.9 (cf6cdbbb)
 
 Checked 20 installs across 67 packages (no changes) [2.00ms]
 ```
@@ -43,9 +43,9 @@ Checked 20 installs across 67 packages (no changes) [2.00ms]
 ### UI TypeScript Lint: ✅ PASSED
 
 ```text
-[dir] /Users/tim/code/dialtone/src/plugins/template/src_v2/ui
-[cmd] bun run lint
-[elapsed] 363ms
+[dir] /Users/tim/code/dialtone
+[cmd] /Users/tim/code/dialtone/dialtone.sh bun exec --cwd /Users/tim/code/dialtone/src/plugins/template/src_v2/ui run lint
+[elapsed] 774ms
 
 $ tsc --noEmit
 ```

@@ -13,6 +13,15 @@ import (
 	"time"
 )
 
+func runBun(repoRoot, uiDir string, args ...string) *exec.Cmd {
+	bunArgs := append([]string{"bun", "exec", "--cwd", uiDir}, args...)
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), bunArgs...)
+	cmd.Dir = repoRoot
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd
+}
+
 func Run(args []string) error {
 	if len(args) == 0 {
 		printUsage()
@@ -96,10 +105,7 @@ func RunInstall(versionDir string) error {
 	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
 
 	fmt.Println("   [TEMPLATE] Running bun install...")
-	cmd := exec.Command("bun", "install")
-	cmd.Dir = uiDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd := runBun(cwd, uiDir, "install")
 	return cmd.Run()
 }
 
@@ -109,10 +115,7 @@ func RunLint(versionDir string) error {
 	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
 
 	fmt.Println("   [LINT] Running tsc...")
-	cmd := exec.Command("bun", "run", "lint")
-	cmd.Dir = uiDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd := runBun(cwd, uiDir, "run", "lint")
 	return cmd.Run()
 }
 
@@ -124,10 +127,7 @@ func RunDev(versionDir string) error {
 	devPort := 3000
 	devURL := fmt.Sprintf("http://127.0.0.1:%d", devPort)
 	fmt.Println("   [DEV] Running vite dev...")
-	cmd := exec.Command("bun", "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(devPort))
-	cmd.Dir = uiDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd := runBun(cwd, uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(devPort))
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -185,10 +185,7 @@ func RunBuild(versionDir string) error {
 
 	fmt.Println("   [BUILD] Running vite build (skipping tsc)...")
 	// Use vite build directly, skipping tsc for speed and stability
-	cmd := exec.Command("bun", "run", "vite", "build", "--emptyOutDir")
-	cmd.Dir = uiDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd := runBun(cwd, uiDir, "run", "vite", "build", "--emptyOutDir")
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("build failed: %v", err)

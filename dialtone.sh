@@ -1,5 +1,15 @@
 #!/bin/bash
 set -e
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Enforce repository-root execution to keep all relative paths predictable.
+if [ "$PWD" != "$SCRIPT_DIR" ]; then
+    echo "Error: ./dialtone.sh must be run from the repository root."
+    echo "Expected: $SCRIPT_DIR"
+    echo "Current:  $PWD"
+    echo "Run: cd \"$SCRIPT_DIR\" && ./dialtone.sh <command>"
+    exit 1
+fi
 
 # --- CONFIGURATION ---
 GRACEFUL_TIMEOUT=${GRACEFUL_TIMEOUT:-5}   # Seconds to wait after SIGTERM before SIGKILL
@@ -16,6 +26,7 @@ Commands:
   build         Build web UI and binary (--local, --full, --remote, --podman, --linux-arm, --linux-arm64)
   deploy        Deploy to remote robot
   camera        Camera tools (snapshot, stream)
+  bun <subcmd>  Bun toolchain tools (exec, run, x)
   clone         Clone or update the repository
   sync-code     Sync source code to remote robot
   ssh           SSH tools (upload, download, cmd)
@@ -75,7 +86,7 @@ trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
 
 # 0. Ensure critical directories exist for Go embed
-mkdir -p src/core/web/dist
+mkdir -p "$SCRIPT_DIR/src/core/web/dist"
 
 # 1. Resolve DIALTONE_ENV and identify command
 DIALTONE_CMD=""
@@ -97,7 +108,7 @@ for (( i=1; i<=$#; i++ )); do
 done
 
 if [ -z "$DIALTONE_ENV_FILE" ]; then
-    DIALTONE_ENV_FILE="env/.env"
+    DIALTONE_ENV_FILE="$SCRIPT_DIR/env/.env"
 fi
 
 # SOURCE THE ENV FILE EARLY
@@ -226,7 +237,7 @@ if [ "$DIALTONE_CMD" = "install" ]; then
     # Perform Go installation if missing
     if [ -n "$DIALTONE_ENV" ] && [ ! -d "$DIALTONE_ENV/go" ]; then
         echo "Go not found in $DIALTONE_ENV/go. Installing..."
-        GO_VERSION=$(grep "^go " go.mod | awk '{print $2}')
+        GO_VERSION=$(grep "^go " "$SCRIPT_DIR/go.mod" | awk '{print $2}')
         TAR_FILE="go$GO_VERSION.$OS-$GO_ARCH.tar.gz"
         TAR_PATH="$DIALTONE_ENV/$TAR_FILE"
         echo "Downloading $TAR_FILE to $TAR_PATH..."
@@ -262,7 +273,7 @@ run_with_timeout() {
     shift
     
     # Run in background and capture PID
-    "$go_cmd" run src/cmd/dev/main.go "$@" &
+    "$go_cmd" run "$SCRIPT_DIR/src/cmd/dev/main.go" "$@" &
     CHILD_PID=$!
     
     # If timeout is set, start watchdog
@@ -300,4 +311,3 @@ else
     echo "Error: Go binary not found at $GO_BIN and system Go not found."
     exit 1
 fi
-

@@ -148,8 +148,9 @@ func (r *SmokeRunner) RunPreflightInDir(uiDir string, steps []CommandStep) error
 		cmd := exec.CommandContext(cmdCtx, s.Cmd, s.Args...)
 		cmd.Dir = uiDir
 		var buf bytes.Buffer
-		cmd.Stdout = &buf
-		cmd.Stderr = &buf
+		cmdOutput := io.MultiWriter(&buf, r.MW)
+		cmd.Stdout = cmdOutput
+		cmd.Stderr = cmdOutput
 		start := time.Now()
 		if err := cmd.Start(); err != nil {
 			cancelCmd()
@@ -198,7 +199,7 @@ func (r *SmokeRunner) RunPreflightInDir(uiDir string, steps []CommandStep) error
 				firstErr = err
 			}
 			r.LogMsg("[SMOKE] Preflight FAILED: %s (elapsed: %s) | %v\n", s.Name, time.Since(start).Round(time.Millisecond), err)
-			r.failNow("preflight:"+s.Name, "command failed", err)
+			r.failNow("preflight:"+s.Name, "command failed", fmt.Errorf("%w\n%s", err, strings.TrimSpace(buf.String())))
 		} else {
 			r.LogMsg("[SMOKE] Preflight PASSED: %s (elapsed: %s)\n", s.Name, time.Since(start).Round(time.Millisecond))
 		}
@@ -516,7 +517,7 @@ func (r *SmokeRunner) PrepareGoPluginSmoke(repoRoot, pluginName string, prefligh
 	pluginDir := filepath.Join(repoRoot, "src", "plugins", pluginName, r.Opts.VersionDir)
 	uiDir := filepath.Join(pluginDir, "ui")
 
-	if err := r.RunDefaultPreflight(pluginDir, uiDir); err != nil {
+	if err := r.RunDefaultPreflight(repoRoot, pluginDir, uiDir); err != nil {
 		return nil, err
 	}
 	if len(preflight) > 0 {
@@ -540,26 +541,27 @@ func (r *SmokeRunner) PrepareGoPluginSmoke(repoRoot, pluginName string, prefligh
 	return serverCmd, nil
 }
 
-func (r *SmokeRunner) RunDefaultPreflight(pluginDir, uiDir string) error {
+func (r *SmokeRunner) RunDefaultPreflight(repoRoot, pluginDir, uiDir string) error {
+	dialtoneCmd := filepath.Join(repoRoot, "dialtone.sh")
 	goChecks := []CommandStep{
 		{Name: "Go Format", Cmd: "go", Args: []string{"fmt", "./..."}},
 		{Name: "Go Lint", Cmd: "go", Args: []string{"vet", "./..."}},
 		{Name: "Go Build", Cmd: "go", Args: []string{"build", "./..."}},
 	}
 	uiChecks := []CommandStep{
-		{Name: "UI Install", Cmd: "bun", Args: []string{"install"}},
-		{Name: "UI TypeScript Lint", Cmd: "bun", Args: []string{"run", "lint"}},
-		{Name: "UI Build", Cmd: "bun", Args: []string{"run", "build"}},
+		{Name: "UI Install", Cmd: dialtoneCmd, Args: []string{"bun", "exec", "--cwd", uiDir, "install"}},
+		{Name: "UI TypeScript Lint", Cmd: dialtoneCmd, Args: []string{"bun", "exec", "--cwd", uiDir, "run", "lint"}},
+		{Name: "UI Build", Cmd: dialtoneCmd, Args: []string{"bun", "exec", "--cwd", uiDir, "run", "build"}},
 	}
 
 	var firstErr error
 	if err := r.RunPreflightInDir(pluginDir, goChecks); err != nil && firstErr == nil {
 		firstErr = err
 	}
-	if err := r.RunPreflightInDir(uiDir, uiChecks); err != nil && firstErr == nil {
+	if err := r.RunPreflightInDir(repoRoot, uiChecks); err != nil && firstErr == nil {
 		firstErr = err
 	}
-	if err := r.runPrettierCheck(pluginDir); err != nil && firstErr == nil {
+	if err := r.runPrettierCheck(repoRoot, pluginDir); err != nil && firstErr == nil {
 		firstErr = err
 	}
 
@@ -571,7 +573,7 @@ func (r *SmokeRunner) RunDefaultPreflight(pluginDir, uiDir string) error {
 		firstErr = err
 	}
 	if err == nil {
-		if probeErr := r.runPreflightStartupProbe("UI Run", uiDir, "bun", []string{"run", "dev", "--host", "127.0.0.1", "--port", fmt.Sprintf("%d", uiRunPort)}, uiRunPort, 20*time.Second); probeErr != nil && firstErr == nil {
+		if probeErr := r.runPreflightStartupProbe("UI Run", repoRoot, dialtoneCmd, []string{"bun", "exec", "--cwd", uiDir, "run", "dev", "--host", "127.0.0.1", "--port", fmt.Sprintf("%d", uiRunPort)}, uiRunPort, 20*time.Second); probeErr != nil && firstErr == nil {
 			firstErr = probeErr
 		}
 	}
@@ -579,7 +581,7 @@ func (r *SmokeRunner) RunDefaultPreflight(pluginDir, uiDir string) error {
 	return firstErr
 }
 
-func (r *SmokeRunner) runPrettierCheck(versionDir string) error {
+func (r *SmokeRunner) runPrettierCheck(repoRoot, versionDir string) error {
 	r.LogMsg("[SMOKE] Preflight: Source Prettier Format/Lint (JS/TS)...\n")
 
 	allowedExt := map[string]bool{
@@ -615,10 +617,11 @@ func (r *SmokeRunner) runPrettierCheck(versionDir string) error {
 		r.Preflight = append(r.Preflight, PreflightResult{
 			Name:   "Source Prettier Check (JS/TS)",
 			Status: "❌ FAILED",
-			Log:    fmt.Sprintf("[dir] %s\n[cmd] bunx prettier --check <files>\n\nwalk failed: %v", versionDir, walkErr),
-			Cmd:    "bunx prettier --check <files>",
+			Log:    fmt.Sprintf("[dir] %s\n[cmd] ./dialtone.sh bun exec x prettier --check <files>\n\nwalk failed: %v", versionDir, walkErr),
+			Cmd:    "./dialtone.sh bun exec x prettier --check <files>",
 			Dir:    versionDir,
 		})
+		r.failNow("preflight:Source Prettier Check (JS/TS)", "walk failed", walkErr)
 		return walkErr
 	}
 
@@ -626,49 +629,53 @@ func (r *SmokeRunner) runPrettierCheck(versionDir string) error {
 		r.Preflight = append(r.Preflight, PreflightResult{
 			Name:   "Source Prettier Format (JS/TS)",
 			Status: "✅ PASSED",
-			Log:    fmt.Sprintf("[dir] %s\n[cmd] bunx prettier --write <files>\n\nno JS/TS files found", versionDir),
-			Cmd:    "bunx prettier --write <files>",
+			Log:    fmt.Sprintf("[dir] %s\n[cmd] ./dialtone.sh bun exec x prettier --write <files>\n\nno JS/TS files found", versionDir),
+			Cmd:    "./dialtone.sh bun exec x prettier --write <files>",
 			Dir:    versionDir,
 		})
 		r.Preflight = append(r.Preflight, PreflightResult{
 			Name:   "Source Prettier Lint (JS/TS)",
 			Status: "✅ PASSED",
-			Log:    fmt.Sprintf("[dir] %s\n[cmd] bunx prettier --check <files>\n\nno JS/TS files found", versionDir),
-			Cmd:    "bunx prettier --check <files>",
+			Log:    fmt.Sprintf("[dir] %s\n[cmd] ./dialtone.sh bun exec x prettier --check <files>\n\nno JS/TS files found", versionDir),
+			Cmd:    "./dialtone.sh bun exec x prettier --check <files>",
 			Dir:    versionDir,
 		})
 		return nil
 	}
 
-	writeErr := r.runPrettierCommand(versionDir, "Source Prettier Format (JS/TS)", "write", files)
-	checkErr := r.runPrettierCommand(versionDir, "Source Prettier Lint (JS/TS)", "check", files)
+	writeErr := r.runPrettierCommand(repoRoot, versionDir, "Source Prettier Format (JS/TS)", "write", files)
+	checkErr := r.runPrettierCommand(repoRoot, versionDir, "Source Prettier Lint (JS/TS)", "check", files)
 	if writeErr != nil {
 		return writeErr
 	}
 	return checkErr
 }
 
-func (r *SmokeRunner) runPrettierCommand(versionDir, stepName, mode string, files []string) error {
-	args := append([]string{"prettier", "--" + mode}, files...)
-	cmd := exec.Command("bunx", args...)
-	cmd.Dir = versionDir
+func (r *SmokeRunner) runPrettierCommand(repoRoot, versionDir, stepName, mode string, files []string) error {
+	args := append([]string{"bun", "exec", "--cwd", versionDir, "x", "prettier", "--" + mode}, files...)
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), args...)
+	cmd.Dir = repoRoot
 	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
+	cmdOutput := io.MultiWriter(&buf, r.MW)
+	cmd.Stdout = cmdOutput
+	cmd.Stderr = cmdOutput
 	err := cmd.Run()
 
 	status := "✅ PASSED"
 	if err != nil {
 		status = "❌ FAILED"
 	}
-	logText := fmt.Sprintf("[dir] %s\n[cmd] bunx %s\n\n%s", versionDir, strings.Join(args, " "), strings.TrimSpace(buf.String()))
+	logText := fmt.Sprintf("[dir] %s\n[cmd] ./dialtone.sh %s\n\n%s", versionDir, strings.Join(args, " "), strings.TrimSpace(buf.String()))
 	r.Preflight = append(r.Preflight, PreflightResult{
 		Name:   stepName,
 		Status: status,
 		Log:    logText,
-		Cmd:    "bunx " + strings.Join(args, " "),
+		Cmd:    "./dialtone.sh " + strings.Join(args, " "),
 		Dir:    versionDir,
 	})
+	if err != nil {
+		r.failNow("preflight:"+stepName, "command failed", fmt.Errorf("%w\n%s", err, strings.TrimSpace(buf.String())))
+	}
 	return err
 }
 
@@ -850,8 +857,9 @@ func (r *SmokeRunner) runPreflightStartupProbe(name, dir, cmdName string, args [
 	cmd := exec.Command(cmdName, args...)
 	cmd.Dir = dir
 	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
+	cmdOutput := io.MultiWriter(&buf, r.MW)
+	cmd.Stdout = cmdOutput
+	cmd.Stderr = cmdOutput
 
 	if err := cmd.Start(); err != nil {
 		r.Preflight = append(r.Preflight, PreflightResult{
@@ -861,6 +869,7 @@ func (r *SmokeRunner) runPreflightStartupProbe(name, dir, cmdName string, args [
 			Cmd:    cmdName + " " + strings.Join(args, " "),
 			Dir:    dir,
 		})
+		r.failNow("preflight:"+name, "command failed to start", err)
 		return err
 	}
 	r.LogMsg("[SMOKE] Preflight %s started PID=%d\n", name, cmd.Process.Pid)
@@ -940,6 +949,9 @@ DONE:
 		Cmd:    cmdName + " " + strings.Join(args, " "),
 		Dir:    dir,
 	})
+	if probeErr != nil {
+		r.failNow("preflight:"+name, "startup probe failed", fmt.Errorf("%w\n%s", probeErr, strings.TrimSpace(buf.String())))
+	}
 	r.WriteProgressReport("probe:" + name)
 	r.currentActivity = ""
 

@@ -19,6 +19,7 @@ import (
 const (
 	GoVersion          = "1.25.5"
 	NodeVersion        = "22.13.0"
+	BunVersion         = "latest"
 	ZigVersion         = "0.13.0"
 	GHVersion          = "2.86.0"
 	PixiVersion        = "latest" // Using latest for pixi
@@ -49,6 +50,49 @@ func runSimpleShell(command string) {
 	if err := cmd.Run(); err != nil {
 		logger.LogFatal("Command failed: %s: %v", command, err)
 	}
+}
+
+func bunArchiveName() (string, error) {
+	switch {
+	case runtime.GOOS == "darwin" && runtime.GOARCH == "arm64":
+		return "bun-darwin-aarch64.zip", nil
+	case runtime.GOOS == "darwin" && runtime.GOARCH == "amd64":
+		return "bun-darwin-x64.zip", nil
+	case runtime.GOOS == "linux" && runtime.GOARCH == "amd64":
+		return "bun-linux-x64.zip", nil
+	case runtime.GOOS == "linux" && runtime.GOARCH == "arm64":
+		return "bun-linux-aarch64.zip", nil
+	default:
+		return "", fmt.Errorf("unsupported platform for bun: %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+}
+
+func installBun(depsDir string, step string) {
+	bunDir := filepath.Join(depsDir, "bun")
+	bunBin := filepath.Join(bunDir, "bin", "bun")
+	if _, err := os.Stat(bunBin); err == nil {
+		logItemStatus("Bun", BunVersion, bunBin, true)
+		return
+	}
+
+	archive, err := bunArchiveName()
+	if err != nil {
+		logger.LogFatal("Failed to determine bun archive: %v", err)
+	}
+
+	logger.LogInfo("%s: Installing Bun %s...", step, BunVersion)
+	downloadURL := fmt.Sprintf("https://github.com/oven-sh/bun/releases/latest/download/%s", archive)
+	archivePath := filepath.Join(depsDir, archive)
+	extractDir := filepath.Join(depsDir, "bun-extract")
+
+	runSimpleShell(fmt.Sprintf("curl -L -o %s %s", archivePath, downloadURL))
+	runSimpleShell(fmt.Sprintf("rm -rf %s && mkdir -p %s/bin", bunDir, bunDir))
+	runSimpleShell(fmt.Sprintf("rm -rf %s && mkdir -p %s", extractDir, extractDir))
+	runSimpleShell(fmt.Sprintf("unzip -q %s -d %s", archivePath, extractDir))
+	runSimpleShell(fmt.Sprintf("cp -f %s/bun-*/bun %s/bin/bun", extractDir, bunDir))
+	runSimpleShell(fmt.Sprintf("chmod +x %s/bin/bun", bunDir))
+	runSimpleShell(fmt.Sprintf("rm -rf %s %s", archivePath, extractDir))
+	logItemStatus("Bun", BunVersion, bunBin, false)
 }
 
 // RunInstall handles the 'install' command
@@ -247,6 +291,9 @@ func installLocalDepsWSL() {
 		logItemStatus("Node.js", NodeVersion, nodeBin, true)
 	}
 
+	// 2.1 Install Bun
+	installBun(depsDir, "Step 2.1")
+
 	// 2.1 Install Vercel CLI
 	vercelBin := filepath.Join(nodeDir, "bin", "vercel")
 	if _, err := os.Stat(vercelBin); err != nil {
@@ -401,6 +448,9 @@ func installLocalDepsMacOSAMD64() {
 		logItemStatus("Node.js", NodeVersion, nodeBin, true)
 	}
 
+	// 2.1 Install Bun
+	installBun(depsDir, "Step 2.1")
+
 	// 2.2 Install GitHub CLI
 	ghDir := filepath.Join(depsDir, "gh")
 	ghBin := filepath.Join(ghDir, "bin", "gh")
@@ -471,6 +521,9 @@ func installLocalDepsLinuxARM64() {
 		logItemStatus("Node.js", NodeVersion, nodeBin, true)
 	}
 
+	// 2.1 Install Bun
+	installBun(depsDir, "Step 2.1")
+
 	// 2.2 Install GitHub CLI
 	ghDir := filepath.Join(depsDir, "gh")
 	ghBin := filepath.Join(ghDir, "bin", "gh")
@@ -538,6 +591,9 @@ func installLocalDepsMacOSARM() {
 	} else {
 		logItemStatus("Node.js", NodeVersion, nodeBin, true)
 	}
+
+	// 2.1 Install Bun
+	installBun(depsDir, "Step 2.1")
 
 	// 2.2 Install GitHub CLI
 	ghDir := filepath.Join(depsDir, "gh")
@@ -607,7 +663,7 @@ func printInstallComplete(depsDir string) {
 	logger.LogInfo("========================================")
 	logger.LogInfo("")
 	logger.LogInfo("Add to your shell profile (~/.zshrc or ~/.zshrc):")
-	logger.LogInfo("  export PATH=\"%s/go/bin:%s/node/bin:%s/zig:%s/gh/bin:%s/pixi:$PATH\"", depsDir, depsDir, depsDir, depsDir, depsDir)
+	logger.LogInfo("  export PATH=\"%s/go/bin:%s/bun/bin:%s/node/bin:%s/zig:%s/gh/bin:%s/pixi:$PATH\"", depsDir, depsDir, depsDir, depsDir, depsDir, depsDir)
 	logger.LogInfo("")
 }
 
@@ -632,6 +688,15 @@ func CheckInstall(depsDir string) {
 		logItemStatus("Node.js", NodeVersion, nodeBin, true)
 	} else {
 		logger.LogInfo("Node.js (%s) is MISSING", NodeVersion)
+		missing++
+	}
+
+	// 2.1 Bun
+	bunBin := filepath.Join(depsDir, "bun", "bin", "bun")
+	if _, err := os.Stat(bunBin); err == nil {
+		logItemStatus("Bun", BunVersion, bunBin, true)
+	} else {
+		logger.LogInfo("Bun (%s) is MISSING", BunVersion)
 		missing++
 	}
 
