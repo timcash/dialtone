@@ -274,7 +274,7 @@ func installLocalDepsWSL() {
 	os.MkdirAll(depsDir, 0755)
 
 	// 1. Install Go
-	runSimpleShell("./dialtone.sh plugin install go")
+	runSimpleShell("./dialtone.sh go install")
 
 	// 2. Install Node.js
 	nodeDir := filepath.Join(depsDir, "node")
@@ -403,7 +403,7 @@ func installLocalDepsWSL() {
 		}
 
 		// 7. Install AI
-		runSimpleShell("./dialtone.sh plugin install ai")
+		runSimpleShell("./dialtone.sh ai install")
 
 		// 6. Install Cloudflared
 		installCloudflaredLinuxAMD64(depsDir)
@@ -431,7 +431,7 @@ func installLocalDepsMacOSAMD64() {
 	os.MkdirAll(depsDir, 0755)
 
 	// 1. Install Go
-	runSimpleShell("./dialtone.sh plugin install go")
+	runSimpleShell("./dialtone.sh go install")
 
 	// 2. Install Node.js
 	nodeDir := filepath.Join(depsDir, "node")
@@ -504,7 +504,7 @@ func installLocalDepsLinuxARM64() {
 	os.MkdirAll(depsDir, 0755)
 
 	// 1. Install Go
-	runSimpleShell("./dialtone.sh plugin install go")
+	runSimpleShell("./dialtone.sh go install")
 
 	// 2. Install Node.js
 	nodeDir := filepath.Join(depsDir, "node")
@@ -575,7 +575,7 @@ func installLocalDepsMacOSARM() {
 	os.MkdirAll(depsDir, 0755)
 
 	// 1. Install Go
-	runSimpleShell("./dialtone.sh plugin install go")
+	runSimpleShell("./dialtone.sh go install")
 
 	// 2. Install Node.js
 	nodeDir := filepath.Join(depsDir, "node")

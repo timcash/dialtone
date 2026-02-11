@@ -38,7 +38,7 @@ Follow the [Modernization Workflow](file:///home/user/dialtone/docs/workflows/ww
 Run the full test suite. Tests are optimized to use the `--gpu` flag for fast rendering.
 
 ```shell
-./dialtone.sh plugin test www
+./dialtone.sh www test
 ```
 
 ## STEP 5: Create Pull Request

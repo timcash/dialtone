@@ -29,5 +29,5 @@ The `chrome` plugin manages local Chrome/Chromium instances for Dialtone. It can
 
 ## Tests
 ```shell
-./dialtone.sh plugin test chrome
+./dialtone.sh chrome test
 ```

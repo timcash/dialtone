@@ -190,8 +190,15 @@ export class SectionManager {
     if (!this.headerEl) return;
 
     const isVisible = config?.visible ?? true;
+    const isMenuVisible = config?.menuVisible ?? true;
     this.headerEl.classList.toggle("is-hidden", !isVisible);
     this.headerEl.style.display = isVisible ? "flex" : "none";
+    document.body.classList.toggle("hide-header", !isVisible);
+    document.body.classList.toggle("hide-menu", !isMenuVisible);
+
+    if (this.menuEl) {
+      this.menuEl.style.display = isMenuVisible ? "flex" : "none";
+    }
 
     if (!isVisible) return;
 
@@ -212,10 +219,6 @@ export class SectionManager {
       this.versionEl.style.display = config?.version === false ? "none" : "block";
     }
 
-    if (this.menuEl) {
-      const isMenuVisible = config?.menuVisible ?? true;
-      this.menuEl.style.display = isMenuVisible ? "flex" : "none";
-    }
   }
 
   dispose(): void {

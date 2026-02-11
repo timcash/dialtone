@@ -1,52 +1,71 @@
 package cli
 
 import (
-	"dialtone/cli/src/core/browser"
+	"dialtone/cli/src/libs/dialtest"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"strconv"
+	"sync"
 	"time"
 )
 
 func RunDev(versionDir string) error {
 	cwd, _ := os.Getwd()
-	pluginDir := filepath.Join(cwd, "src", "plugins", "dag", versionDir)
-	port := 8080
+	uiDir := filepath.Join(cwd, "src", "plugins", "dag", versionDir, "ui")
+	devPort := 3000
+	devURL := fmt.Sprintf("http://127.0.0.1:%d", devPort)
 
-	fmt.Printf(">> [DAG] Dev: starting %s...\n", versionDir)
+	fmt.Printf(">> [DAG] Dev: %s\n", versionDir)
 
-	uiDist := filepath.Join(pluginDir, "ui", "dist")
-	if _, err := os.Stat(uiDist); os.IsNotExist(err) {
-		fmt.Printf(">> [DAG] Dev: UI dist not found. Building first...\n")
-		if err := RunBuild(versionDir); err != nil {
-			return fmt.Errorf("failed to build UI: %v", err)
-		}
+	if _, err := os.Stat(uiDir); os.IsNotExist(err) {
+		return fmt.Errorf("UI directory not found: %s", uiDir)
 	}
 
-	browser.CleanupPort(port)
-
-	cmd := exec.Command("go", "run", "cmd/main.go")
-	cmd.Dir = pluginDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
+	fmt.Println("   [DEV] Running vite dev...")
+	cmd := runBun(cwd, uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(devPort))
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start dag host: %v", err)
+		return err
 	}
+
+	var (
+		mu      sync.Mutex
+		session *dialtest.ChromeSession
+	)
 
 	go func() {
-		for i := 0; i < 30; i++ {
-			if browser.IsPortOpen(port) {
-				fmt.Printf("\n🚀 DAG Plugin (%s) is READY!\n", versionDir)
-				fmt.Printf("🔗 URL: http://localhost:%d\n\n", port)
-				return
-			}
-			time.Sleep(500 * time.Millisecond)
+		if err := dialtest.WaitForPort(devPort, 30*time.Second); err != nil {
+			fmt.Printf("   [DEV] Warning: vite server not ready on port %d: %v\n", devPort, err)
+			return
 		}
-		fmt.Printf("\n❌ [ERROR] Host node failed to start on port %d\n", port)
+
+		fmt.Printf("   [DEV] Vite ready at %s\n", devURL)
+		fmt.Println("   [DEV] Launching debug browser (HEADED) with console capture...")
+
+		s, err := dialtest.StartChromeSession(dialtest.ChromeSessionOptions{
+			Headless:      false,
+			Role:          "dev",
+			ReuseExisting: true,
+			URL:           devURL,
+			LogWriter:     os.Stdout,
+			LogPrefix:     "   [BROWSER]",
+		})
+		if err != nil {
+			fmt.Printf("   [DEV] Warning: failed to attach debug browser: %v\n", err)
+			return
+		}
+		mu.Lock()
+		session = s
+		mu.Unlock()
 	}()
 
-	fmt.Println(">> [DAG] Dev: host process started. Press Ctrl+C to stop.")
-	return cmd.Wait()
+	err := cmd.Wait()
+
+	mu.Lock()
+	if session != nil {
+		session.Close()
+	}
+	mu.Unlock()
+
+	return err
 }

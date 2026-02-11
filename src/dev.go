@@ -16,6 +16,7 @@ import (
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/ssh"
 	test_cli "dialtone/cli/src/core/test/cli"
+	ai_cli "dialtone/cli/src/plugins/ai/cli"
 	bun_cli "dialtone/cli/src/plugins/bun/cli"
 	cad_cli "dialtone/cli/src/plugins/cad/cli"
 	camera_cli "dialtone/cli/src/plugins/camera/cli"
@@ -30,10 +31,8 @@ import (
 	logs_cli "dialtone/cli/src/plugins/logs/cli"
 	mavlink_cli "dialtone/cli/src/plugins/mavlink/cli"
 	nix_cli "dialtone/cli/src/plugins/nix/cli"
-	plugin_cli "dialtone/cli/src/plugins/plugin/cli"
 	swarm_cli "dialtone/cli/src/plugins/swarm/cli"
 	template_cli "dialtone/cli/src/plugins/template/cli"
-	ticket_cli "dialtone/cli/src/plugins/ticket/cli"
 	ui_cli "dialtone/cli/src/plugins/ui/cli"
 	vpn_cli "dialtone/cli/src/plugins/vpn/cli"
 	wsl_cli "dialtone/cli/src/plugins/wsl/cli"
@@ -59,11 +58,7 @@ func ExecuteDev() {
 	case "start":
 		runStart(args)
 	case "build":
-		if len(args) > 0 && isPlugin(args[0]) && !strings.HasPrefix(args[0], "-") {
-			plugin_cli.RunPlugin(append([]string{"build"}, args...))
-		} else {
-			build_cli.Run(args)
-		}
+		build_cli.Run(args)
 	case "deploy":
 		deploy_cli.RunDeploy(args)
 	case "format":
@@ -93,12 +88,8 @@ func ExecuteDev() {
 		github_cli.RunGithub(append([]string{"pull-request"}, args...))
 	case "github":
 		github_cli.RunGithub(args)
-	case "ticket":
-		ticket_cli.Run(args)
 	case "swarm":
 		swarm_cli.RunSwarm(args)
-	case "plugin":
-		plugin_cli.RunPlugin(args)
 	case "cloudflare":
 		cloudflare_cli.RunCloudflare(args)
 	case "ide":
@@ -144,8 +135,11 @@ func ExecuteDev() {
 		cad_cli.RunCad(args)
 
 	case "ai", "opencode", "developer", "subagent":
-		// Delegate to plugin command to remove static dependency on AI from core
-		plugin_cli.RunPlugin(append([]string{command}, args...))
+		if command == "ai" {
+			ai_cli.RunAI(args)
+		} else {
+			ai_cli.RunAI(append([]string{command}, args...))
+		}
 	case "help", "-h", "--help":
 		printDevUsage()
 	default:
@@ -172,14 +166,12 @@ func printDevUsage() {
 	fmt.Println("  logs          Tail remote logs")
 	fmt.Println("  diagnostic    Run system diagnostics (local or remote)")
 	fmt.Println("  branch <name>      Create or checkout a feature branch")
-	fmt.Println("  ticket <subcmd>    Manage GitHub tickets (start, next, done, etc.)")
 	fmt.Println("  swarm <topic>      Join a Hyperswarm topic")
-	fmt.Println("  plugin <subcmd>    Manage plugins (add, install, build)")
 	fmt.Println("  ide <subcmd>       IDE tools (setup-workflows)")
 	fmt.Println("  github <subcmd>    Manage GitHub interactions (pr, check-deploy)")
 	fmt.Println("  www <subcmd>       Manage public webpage (Vercel wrapper)")
 	fmt.Println("  ui <subcmd>        Manage web UI (dev, build, install)")
-	fmt.Println("  test <subcmd>      Run tests (ticket, plugin, tags)")
+	fmt.Println("  test <subcmd>      Run tests (legacy)")
 	fmt.Println("  nix <subcmd>       Nix plugin tools (smoke)")
 	fmt.Println("  dag <subcmd>       DAG plugin tools (dev, build, smoke)")
 	fmt.Println("  wsl <subcmd>       WSL plugin tools (smoke)")

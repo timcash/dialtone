@@ -52,9 +52,9 @@ Use `ticket review` output to check every ticket/subtask field and fill missing 
 
 ### Add test commands per subtask
 ```shell
-./dialtone.sh ticket subtask testcmd update-hero ./dialtone.sh plugin test www
-./dialtone.sh ticket subtask testcmd update-layout ./dialtone.sh plugin test www
-./dialtone.sh ticket subtask testcmd update-images ./dialtone.sh plugin test www
+./dialtone.sh ticket subtask testcmd update-hero ./dialtone.sh www test
+./dialtone.sh ticket subtask testcmd update-layout ./dialtone.sh www test
+./dialtone.sh ticket subtask testcmd update-images ./dialtone.sh www test
 ./dialtone.sh ticket subtask testcmd update-docs "grep -n \"fake-webpage-update\" docs/ -R"
 ```
 
@@ -77,7 +77,7 @@ Use `ticket review` output to check every ticket/subtask field and fill missing 
 [REVIEW] Field checks (subtask):
 - name: update-hero -> is this correct?
 - description: Refresh hero copy and CTA -> is this correct?
-- test-command: ./dialtone.sh plugin test www -> is this correct?
+- test-command: ./dialtone.sh www test -> is this correct?
 ...
 ```
 

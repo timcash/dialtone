@@ -45,6 +45,28 @@ For a plugin version directory `src/plugins/<plugin>/src_vN`:
 
 Each plugin `src_vN/smoke/smoke.go` should be mostly scenario definitions and assertions for that version, with minimal setup boilerplate.
 
+Recommended shape (same pattern as `src/plugins/template/src_v2/smoke/smoke.go`):
+
+1. Create runner via `dialtest.NewSmokeRunner(...)`
+2. Start server/browser via `runner.PrepareGoPluginSmoke(repoRoot, "<plugin>", nil)`
+3. Define steps with `runner.Step(...)` and assertions (`AssertLastStepLogsContains`, `AssertSectionLifecycle`)
+4. `defer runner.Finalize()`
+
+Example user-facing invocation pattern:
+
+- `./dialtone.sh <plugin> smoke src_vN --smoke-timeout 45`
+
+Plugin CLIs should treat `smoke.go` as the internal entrypoint and execute it via `./dialtone.sh go exec run ...` rather than calling `go` directly.
+
+## Output Layout
+
+By convention, smoke output is written under `src_vN/smoke/`:
+
+- `SMOKE.md`
+- `smoke.log`
+- `smoke_server.log`
+- `smoke_step_<n>.png`
+
 ## Known Problems
 
 - If UI build/lint tools hang (for example `vite build`), the default smoke `TotalTimeout` (30s) can fire before scenario steps begin.

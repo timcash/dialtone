@@ -24,7 +24,7 @@ func init() {
 	test.Register("www-cad", "www", []string{"www", "cad", "browser"}, RunWwwCadHeaded)
 }
 
-// RunAll runs all www integration tests - entry point for `./dialtone.sh plugin test www`
+// RunAll runs all www integration tests - entry point for `./dialtone.sh www test`
 func RunAll() error {
 	fmt.Println(">> [WWW] Starting Integration Tests...")
 	return RunWwwIntegration()

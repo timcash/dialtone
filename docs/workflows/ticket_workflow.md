@@ -13,12 +13,9 @@ This workflow defines the standard process for planning, executing, and managing
 # Start a new feature or bugfix ticket
 ./dialtone.sh ticket start <ticket-name>
 
-# Add a new plugin IF the ticket calls for it
-# Verify there is not already a similar plugin
-./dialtone.sh plugin add <plugin-name>
-
-# Install dependencies for the new plugin
-./dialtone.sh plugin install <plugin-name>
+# If this ticket introduces a plugin, scaffold it manually under src/plugins/<plugin-name>
+# and install dependencies using that plugin's own command surface:
+./dialtone.sh <plugin-name> install
 ```
 
 ## 1b. REVIEW MODE: Prep-only ticket review
@@ -104,10 +101,10 @@ For every iteration, verify:
 ./dialtone.sh ticket validate <ticket-name>
 
 # Build the plugin to ensure no compilation errors
-./dialtone.sh plugin build <plugin-name>
+./dialtone.sh <plugin-name> build
 
 # Run plugin tests
-./dialtone.sh plugin test <plugin-name>
+./dialtone.sh <plugin-name> test
 ```
 
 ## 6. CLEANUP: Finalize and Commit
@@ -119,4 +116,3 @@ For every iteration, verify:
 # Close the ticket and mark it as finished
 ./dialtone.sh ticket done
 ```
-
