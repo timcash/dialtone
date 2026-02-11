@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 
 	"dialtone/cli/src/core/browser"
-	"dialtone/cli/src/dialtest"
+	"dialtone/cli/src/libs/dialtest"
 )
 
 func main() {
