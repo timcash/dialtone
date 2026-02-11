@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -26,8 +27,8 @@ type InstanceInfo struct {
 }
 
 type WslPlugin struct {
-	Addr string
-	mu   sync.Mutex
+	Addr    string
+	mu      sync.Mutex
 	clients map[*websocket.Conn]bool
 }
 
@@ -36,6 +37,25 @@ func NewWslPlugin(addr string) *WslPlugin {
 		Addr:    addr,
 		clients: make(map[*websocket.Conn]bool),
 	}
+}
+
+// wslExec runs a wsl.exe command with a 30-second timeout. Logs the command and result.
+func wslExec(args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	log.Printf("[WSL] exec: wsl.exe %s", strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, "wsl.exe", args...)
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		log.Printf("[WSL] exec TIMEOUT (30s): wsl.exe %s", strings.Join(args, " "))
+		return out, fmt.Errorf("wsl.exe %s timed out after 30s", strings.Join(args, " "))
+	}
+	if err != nil {
+		log.Printf("[WSL] exec ERROR: wsl.exe %s -> %v (output: %s)", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	} else {
+		log.Printf("[WSL] exec OK: wsl.exe %s (%d bytes output)", strings.Join(args, " "), len(out))
+	}
+	return out, err
 }
 
 func (p *WslPlugin) Start() error {
@@ -68,7 +88,9 @@ func (p *WslPlugin) Start() error {
 		instances, err := p.listInstances()
 		if err != nil {
 			log.Printf("[WSL] API Error: failed to list instances: %v", err)
-			http.Error(w, err.Error(), 500)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(500)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
 		log.Printf("[WSL] API: returning %d instances", len(instances))
@@ -118,9 +140,39 @@ func (p *WslPlugin) Start() error {
 	// Start telemetry loop
 	go p.telemetryLoop()
 
-	fmt.Printf("WSL Plugin (v2) starting on %s
-", p.Addr)
-	return http.ListenAndServe(p.Addr, mux)
+	// Intelligent port selection
+	host, portStr, err := net.SplitHostPort(p.Addr)
+	if err != nil {
+		host = "0.0.0.0"
+		portStr = "8080"
+	}
+
+	var listener net.Listener
+	var finalPort int
+	startPort := 8080
+	fmt.Sscanf(portStr, "%d", &startPort)
+
+	for i := 0; i < 100; i++ {
+		tryAddr := fmt.Sprintf("%s:%d", host, startPort+i)
+		l, err := net.Listen("tcp", tryAddr)
+		if err == nil {
+			listener = l
+			finalPort = startPort + i
+			break
+		}
+	}
+
+	if listener == nil {
+		return fmt.Errorf("could not find available port after 100 attempts")
+	}
+
+	p.Addr = fmt.Sprintf("%s:%d", host, finalPort)
+	fmt.Printf("WSL Plugin (v2) starting on %s\n", p.Addr)
+
+	// Write port to file for smoke test
+	os.WriteFile("smoke_port.txt", []byte(fmt.Sprintf("%d", finalPort)), 0644)
+
+	return http.Serve(listener, mux)
 }
 
 func (p *WslPlugin) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -166,15 +218,13 @@ func (p *WslPlugin) broadcast(msg interface{}) {
 }
 
 func (p *WslPlugin) listInstances() ([]InstanceInfo, error) {
-	cmd := exec.Command("wsl.exe", "-l", "-v")
-	out, err := cmd.Output()
+	out, err := wslExec("-l", "-v")
 	if err != nil {
 		return nil, err
 	}
 
 	cleanOut := strings.ReplaceAll(string(out), "\x00", "")
-	lines := strings.Split(cleanOut, "
-")
+	lines := strings.Split(cleanOut, "\n")
 	if len(lines) <= 1 {
 		return []InstanceInfo{}, nil
 	}
@@ -208,13 +258,11 @@ func (p *WslPlugin) listInstances() ([]InstanceInfo, error) {
 func (p *WslPlugin) getStats(name string) (string, string) {
 	mem := "--"
 	disk := "--"
-	cmd := exec.Command("wsl.exe", "-d", name, "--", "sh", "-c", "free -m | grep Mem:; df -h / | grep /$")
-	out, err := cmd.CombinedOutput()
+	out, err := wslExec("-d", name, "--", "sh", "-c", "free -m | grep Mem:; df -h / | grep /$")
 	if err != nil {
 		return mem, disk
 	}
-	lines := strings.Split(string(out), "
-")
+	lines := strings.Split(string(out), "\n")
 	for _, l := range lines {
 		l = strings.TrimSpace(l)
 		if strings.Contains(l, "Mem:") {
@@ -245,47 +293,100 @@ func (p *WslPlugin) telemetryLoop() {
 	}
 }
 
-func (p *WslPlugin) createInstance(name string) {
-	home, _ := os.UserHomeDir()
-	baseDir := filepath.Join(home, "WSL", "_bases")
-	basePath := filepath.Join(baseDir, "alpine.tar.gz")
-	installPath := filepath.Join(home, "WSL", name)
-
-	os.MkdirAll(baseDir, 0755)
-	if _, err := os.Stat(basePath); os.IsNotExist(err) {
-		log.Printf("Fetching Alpine for %s...", name)
-		url := "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/x86_64/alpine-minirootfs-3.21.2-x86_64.tar.gz"
-		cmd := exec.Command("powershell.exe", "-Command", fmt.Sprintf("Invoke-WebRequest -Uri %s -OutFile %s", url, basePath))
-		cmd.Run()
+func (p *WslPlugin) wslBaseDir() string {
+	env := os.Getenv("DIALTONE_ENV")
+	if env == "" {
+		home, _ := os.UserHomeDir()
+		env = filepath.Join(home, "dialtone_dependencies")
 	}
+	// Expand ~ on Windows
+	if strings.HasPrefix(env, "~") {
+		home, _ := os.UserHomeDir()
+		env = filepath.Join(home, env[1:])
+	}
+	// Resolve relative paths from cwd
+	if !filepath.IsAbs(env) {
+		cwd, _ := os.Getwd()
+		env = filepath.Join(cwd, env)
+	}
+	return filepath.Join(env, "wsl")
+}
 
-	log.Printf("Importing WSL instance %s...", name)
-	// Cleanup if exists
-	exec.Command("wsl.exe", "--unregister", name).Run()
-	os.RemoveAll(installPath)
-
-	os.MkdirAll(installPath, 0755)
-	cmd := exec.Command("wsl.exe", "--import", name, installPath, basePath)
-	err := cmd.Run()
-	if err != nil {
-		log.Printf("Import failed: %v", err)
+func (p *WslPlugin) createInstance(name string) {
+	if name == "" {
+		log.Printf("[WSL] createInstance: rejecting empty name")
 		return
 	}
+	wslDir := p.wslBaseDir()
+	baseDir := filepath.Join(wslDir, "_bases")
+	basePath := filepath.Join(baseDir, "alpine.tar.gz")
+	installPath := filepath.Join(wslDir, name)
 
-	log.Printf("Starting %s...", name)
-	go exec.Command("wsl.exe", "-d", name, "-u", "root", "--", "sh", "-c", "while true; do sleep 3600; done").Run()
+	log.Printf("[WSL] createInstance: name=%s wslDir=%s", name, wslDir)
+	os.MkdirAll(baseDir, 0755)
+
+	// Download Alpine rootfs if not cached (or if previous download was corrupt/empty)
+	info, statErr := os.Stat(basePath)
+	if statErr != nil || info.Size() < 1024 {
+		if statErr == nil && info.Size() < 1024 {
+			log.Printf("[WSL] Removing corrupt/empty Alpine tarball (%d bytes)", info.Size())
+			os.Remove(basePath)
+		}
+		log.Printf("[WSL] Downloading Alpine rootfs...")
+		alpineURL := "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/x86_64/alpine-minirootfs-3.21.2-x86_64.tar.gz"
+		dlCmd := exec.Command("curl.exe", "-L", "-o", basePath, alpineURL)
+		dlCmd.Stdout = os.Stdout
+		dlCmd.Stderr = os.Stderr
+		if err := dlCmd.Run(); err != nil {
+			log.Printf("[WSL] Alpine download failed: %v", err)
+			return
+		}
+		if fi, err := os.Stat(basePath); err != nil || fi.Size() < 1024 {
+			log.Printf("[WSL] Alpine download produced invalid file")
+			os.Remove(basePath)
+			return
+		}
+		log.Printf("[WSL] Alpine rootfs downloaded to %s", basePath)
+	} else {
+		log.Printf("[WSL] Using cached Alpine rootfs (%d bytes) at %s", info.Size(), basePath)
+	}
+
+	// Cleanup if exists
+	log.Printf("[WSL] Unregistering old %s if exists...", name)
+	wslExec("--unregister", name)
+	os.RemoveAll(installPath)
+
+	// Import
+	log.Printf("[WSL] Importing %s from %s into %s...", name, basePath, installPath)
+	os.MkdirAll(installPath, 0755)
+	importOut, err := wslExec("--import", name, installPath, basePath)
+	if err != nil {
+		log.Printf("[WSL] Import failed: %v\nOutput: %s", err, string(importOut))
+		return
+	}
+	log.Printf("[WSL] Import succeeded for %s", name)
+
+	// Start the instance with a keep-alive process
+	log.Printf("[WSL] Starting %s...", name)
+	go func() {
+		startOut, err := wslExec("-d", name, "-u", "root", "--", "sh", "-c", "echo STARTED && while true; do sleep 3600; done")
+		if err != nil {
+			log.Printf("[WSL] Start background for %s ended: %v (output: %s)", name, err, strings.TrimSpace(string(startOut)))
+		}
+	}()
 }
 
 func (p *WslPlugin) stopInstance(name string) {
-	log.Printf("Stopping WSL instance %s...", name)
-	exec.Command("wsl.exe", "--terminate", name).Run()
+	log.Printf("[WSL] Stopping instance %s...", name)
+	wslExec("--terminate", name)
+	log.Printf("[WSL] Stop complete for %s", name)
 }
 
 func (p *WslPlugin) deleteInstance(name string) {
-	log.Printf("Deleting WSL instance %s...", name)
+	log.Printf("[WSL] Deleting instance %s...", name)
 	p.stopInstance(name)
-	exec.Command("wsl.exe", "--unregister", name).Run()
-	home, _ := os.UserHomeDir()
-	installPath := filepath.Join(home, "WSL", name)
+	wslExec("--unregister", name)
+	installPath := filepath.Join(p.wslBaseDir(), name)
 	os.RemoveAll(installPath)
+	log.Printf("[WSL] Delete complete for %s", name)
 }
