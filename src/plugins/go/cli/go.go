@@ -9,6 +9,7 @@ import (
 
 	"dialtone/cli/src/core/config"
 	"dialtone/cli/src/core/logger"
+	go_test "dialtone/cli/src/plugins/go/test"
 )
 
 // RunGo handles 'go <subcommand>'
@@ -26,6 +27,8 @@ func RunGo(args []string) {
 		runInstall(restArgs)
 	case "lint":
 		runLint(restArgs)
+	case "test":
+		runTest(restArgs)
 	case "exec", "run":
 		runExec(restArgs)
 	case "pb-dump":
@@ -44,10 +47,21 @@ func printGoUsage() {
 	fmt.Println("\nCommands:")
 	fmt.Println("  install        Install Go toolchain to DIALTONE_ENV")
 	fmt.Println("  lint           Run go vet ./... using local toolchain")
+	fmt.Println("  test           Run go plugin integration tests")
 	fmt.Println("  exec <args...> Run arbitrary go command using local toolchain")
 	fmt.Println("  run <args...>  Alias for exec")
 	fmt.Println("  pb-dump <file> Dump structure/strings of a protobuf file")
 	fmt.Println("  help           Show this help message")
+}
+
+func runTest(args []string) {
+	if len(args) > 0 {
+		logger.LogFatal("Usage: ./dialtone.sh go test")
+	}
+
+	if err := go_test.RunAll(); err != nil {
+		logger.LogFatal("Go tests failed: %v", err)
+	}
 }
 
 func runExec(args []string) {

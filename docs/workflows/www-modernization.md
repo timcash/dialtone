@@ -52,6 +52,6 @@ Ensure tests are fast and reliable by forcing GPU acceleration and using reactiv
 Run the standardized plugin validation suite to ensure performance and correctness.
 
 ```shell
-./dialtone.sh plugin build www
-./dialtone.sh plugin test www
+./dialtone.sh www build
+./dialtone.sh www test
 ```

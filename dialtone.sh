@@ -47,13 +47,11 @@ Commands:
   logs          Tail remote logs
   diagnostic    Run system diagnostics (local or remote)
   branch <name>      Create or checkout a feature branch
-  ticket <subcmd>    Manage GitHub tickets (start, next, done, etc.)
-  plugin <subcmd>    Manage plugins (add, install, build)
   ide <subcmd>       IDE tools (setup-workflows)
   github <subcmd>    Manage GitHub interactions (pr, check-deploy)
   www <subcmd>       Manage public webpage (Vercel wrapper)
   ui <subcmd>        Manage web UI (dev, build, install)
-  test <subcmd>      Run tests (ticket, plugin, tags)
+  test <subcmd>      Run tests (legacy)
 
   ai <subcmd>        AI tools (opencode, developer, subagent)
   go <subcmd>        Go toolchain tools (install, lint)

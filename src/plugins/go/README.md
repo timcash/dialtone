@@ -1,44 +1,68 @@
 # Go Plugin
 
-The Go plugin manages the Go toolchain and provides Go-specific utilities.
+The Go plugin manages the managed Go toolchain and Go-related workflows through `./dialtone.sh go ...`.
 
-## Features
-- **Toolchain Management**: Install a specific Go version into the `DIALTONE_ENV` directory.
-- **Linting**: Run `go vet` using the isolated Go toolchain.
-- **Command Execution**: Run arbitrary `go` commands with the isolated toolchain.
-- **Protobuf Inspection**: Inspect protobuf files via the bundled pb-dump tool.
+## Commands
+
+```bash
+./dialtone.sh go install
+./dialtone.sh go lint
+./dialtone.sh go exec <go-args...>
+./dialtone.sh go run <go-args...>      # alias for exec
+./dialtone.sh go pb-dump <file.pb>
+./dialtone.sh go test
+```
 
 ## Usage
 
-### Install Go
-Installs the Go toolchain (default: 1.25.5) into your configured dependency directory.
+### Install managed Go toolchain
+
 ```bash
 ./dialtone.sh go install
 ```
 
-### Lint Code
-Runs `go vet ./...` using the Go binary in `DIALTONE_ENV`.
+Installs Go into `DIALTONE_ENV/go`.
+
+### Run lint
+
 ```bash
 ./dialtone.sh go lint
 ```
 
-### Run Go Commands
-Runs arbitrary Go commands using the toolchain in `DIALTONE_ENV`.
+Runs `go vet ./...` using the managed toolchain when available.
+
+### Run arbitrary Go commands
+
 ```bash
-./dialtone.sh go exec run ./path/to/main.go
+./dialtone.sh go exec run ./src/cmd/dev/main.go
+./dialtone.sh go exec build ./src/...
 ```
 
-### Run Go (Alias)
-Alias for `exec` that uses the same isolated toolchain.
+`go run` is an alias:
+
 ```bash
-./dialtone.sh go run ./path/to/main.go
+./dialtone.sh go run ./src/cmd/dev/main.go
 ```
 
-### Inspect Protobuf Files
-Uses the bundled pb-dump tool to print protobuf structure/strings.
+### Inspect protobuf binaries
+
 ```bash
 ./dialtone.sh go pb-dump path/to/file.pb
 ```
 
-## Configuration
-The plugin uses `DIALTONE_ENV` from your `.env` file to determine where to install Go.
+## Testing
+
+Run Go plugin integration tests:
+
+```bash
+./dialtone.sh go test
+```
+
+Current test coverage verifies:
+- stdout from child commands is visible through `./dialtone.sh`
+- stderr output and non-zero failure details propagate through `./dialtone.sh`
+
+## Notes
+
+- The plugin relies on `DIALTONE_ENV` to locate managed toolchains.
+- If Go is missing, run `./dialtone.sh install` or `./dialtone.sh go install`.
