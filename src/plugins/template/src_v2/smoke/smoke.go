@@ -3,11 +3,10 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"time"
 
-	"dialtone/cli/src/core/browser"
-	"dialtone/cli/src/dialtest"
+	"dialtone/cli/src/libs/dialtest"
 )
 
 func main() {
@@ -28,40 +27,84 @@ func Run(versionDir string) error {
 	smokeDir := filepath.Join(pluginDir, "smoke")
 
 	runner, err := dialtest.NewSmokeRunner(dialtest.SmokeOptions{
-		Name:       "Template",
-		VersionDir: versionDir,
-		Port:       8080,
-		SmokeDir:   smokeDir,
+		Name:           "Template",
+		VersionDir:     versionDir,
+		Port:           8080,
+		SmokeDir:       smokeDir,
+		TotalTimeout:   30 * time.Second,
+		StepTimeout:    5 * time.Second,
+		CommandStall:   3 * time.Second,
+		PanicOnTimeout: true,
 	})
 	if err != nil {
 		return err
 	}
 	defer runner.Finalize()
 
-	runner.RunPreflight(cwd, []struct{ Name, Cmd string; Args []string }{
-		{"Install", "bun", []string{"install"}},
-		{"Lint", "bun", []string{"run", "lint"}},
-		{"Build", "bun", []string{"run", "build"}},
-	})
-
-	browser.CleanupPort(runner.Opts.Port)
-	serverCmd := exec.Command("go", "run", "cmd/main.go")
-	serverCmd.Dir = pluginDir
-	if err := runner.StartServer(serverCmd); err != nil {
+	serverCmd, err := runner.PrepareGoPluginSmoke(cwd, "template", nil)
+	if err != nil {
 		return err
 	}
 	defer serverCmd.Process.Kill()
 
-	if err := runner.SetupBrowser("http://127.0.0.1:8080"); err != nil {
+	runner.Step("Hero Section Validation", dialtest.WaitForAriaLabel("Home Section"))
+	if err := runner.AssertLastStepLogsContains(
+		"[SectionManager] 📦 LOADING #home",
+		"[SectionManager] ✅ LOADED #home",
+		"[SectionManager] ✨ START #home",
+		"[SectionManager] 🚀 RESUME #home",
+	); err != nil {
 		return err
 	}
 
-	runner.Step("Hero Section Validation", dialtest.WaitForAriaLabel("Home Section"))
 	runner.Step("Documentation Section Validation", dialtest.NavigateToSection("docs", "Docs Section"))
+	if err := runner.AssertLastStepLogsContains(
+		"[SectionManager] 🧭 NAVIGATING TO #docs",
+		"[SectionManager] 🧭 NAVIGATE TO #docs",
+		"[SectionManager] 🚀 RESUME #docs",
+		"[SectionManager] 💤 PAUSE #home",
+		"[SectionManager] 🧭 NAVIGATE AWAY #home",
+	); err != nil {
+		return err
+	}
+
 	runner.Step("Table Section Validation", dialtest.NavigateToSection("table", "Table Section"))
+	if err := runner.AssertLastStepLogsContains(
+		"[SectionManager] 🧭 NAVIGATING TO #table",
+		"[SectionManager] 🧭 NAVIGATE TO #table",
+		"[SectionManager] 🚀 RESUME #table",
+		"[SectionManager] 💤 PAUSE #docs",
+		"[SectionManager] 🧭 NAVIGATE AWAY #docs",
+	); err != nil {
+		return err
+	}
+
 	runner.Step("Verify Header Hidden on Table", dialtest.AssertElementHidden(".header-title"))
+
 	runner.Step("Settings Section Validation", dialtest.NavigateToSection("settings", "Settings Section"))
+	if err := runner.AssertLastStepLogsContains(
+		"[SectionManager] 🧭 NAVIGATING TO #settings",
+		"[SectionManager] 🧭 NAVIGATE TO #settings",
+		"[SectionManager] 🚀 RESUME #settings",
+		"[SectionManager] 💤 PAUSE #table",
+		"[SectionManager] 🧭 NAVIGATE AWAY #table",
+	); err != nil {
+		return err
+	}
+
 	runner.Step("Return Home", dialtest.NavigateToSection("home", "Home Section"))
+	if err := runner.AssertLastStepLogsContains(
+		"[SectionManager] 🧭 NAVIGATING TO #home",
+		"[SectionManager] 🧭 NAVIGATE TO #home",
+		"[SectionManager] 🚀 RESUME #home",
+		"[SectionManager] 🧭 NAVIGATE AWAY #settings",
+	); err != nil {
+		return err
+	}
+
+	if err := runner.AssertSectionLifecycle([]string{"home", "docs", "table", "settings"}); err != nil {
+		return err
+	}
 
 	return nil
 }

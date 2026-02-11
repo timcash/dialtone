@@ -84,7 +84,7 @@ func TestFullWorkflow() error {
 	testGoPath := filepath.Join(dir, "test", "test.go")
 	os.WriteFile(testGoPath, []byte(fmt.Sprintf(`package test
 import (
-	"dialtone/cli/src/dialtest"
+	"dialtone/cli/src/libs/dialtest"
 	"fmt"
 )
 func init() {
@@ -110,7 +110,7 @@ func init() {
 	dir = filepath.Join("src", "tickets", name)
 	testGoPath = filepath.Join(dir, "test", "test.go")
 	os.WriteFile(testGoPath, []byte(fmt.Sprintf(`package test
-import "dialtone/cli/src/dialtest"
+import "dialtone/cli/src/libs/dialtest"
 func init() {
 	dialtest.RegisterTicket("%s")
 	dialtest.AddSubtaskTest("init", func() error { return nil }, nil)

@@ -1,5 +1,5 @@
 /* Import shared UI library styles */
-@import "@ui/style.css";
+@import "../../../../../libs/ui/style.css";
 
 /* Plugin-specific customizations */
 :root {

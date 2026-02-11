@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VisualizationControl, VisibilityMixin, startTyping } from '@ui/ui';
+import { VisualizationControl, VisibilityMixin, startTyping } from '../../dialtone-ui';
 
 class HeroSection {
   private scene = new THREE.Scene();
