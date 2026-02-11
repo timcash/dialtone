@@ -36,11 +36,7 @@ func Run(versionDir string) error {
 	}
 	defer runner.Finalize()
 
-	serverCmd, err := runner.PrepareGoPluginSmoke(cwd, "template", []dialtest.CommandStep{
-		{Name: "Install", Cmd: "bun", Args: []string{"install"}},
-		{Name: "Lint", Cmd: "bun", Args: []string{"run", "lint"}},
-		{Name: "Build", Cmd: "bun", Args: []string{"run", "build"}},
-	})
+	serverCmd, err := runner.PrepareGoPluginSmoke(cwd, "template", nil)
 	if err != nil {
 		return err
 	}

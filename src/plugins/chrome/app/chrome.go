@@ -2,6 +2,7 @@ package chrome
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -115,8 +116,160 @@ type LaunchResult struct {
 	WebsocketURL string
 }
 
+type SessionOptions struct {
+	RequestedPort int
+	GPU           bool
+	Headless      bool
+	TargetURL     string
+	Role          string
+	ReuseExisting bool
+}
+
+type Session struct {
+	PID          int
+	Port         int
+	WebSocketURL string
+	IsNew        bool
+	IsWindows    bool
+}
+
+func StartSession(opts SessionOptions) (*Session, error) {
+	if opts.Role == "" {
+		opts.Role = "default"
+	}
+
+	if opts.ReuseExisting {
+		procs, err := ListResources(true)
+		if err == nil {
+			for _, p := range procs {
+				if p.Origin != "Dialtone" || p.Role != opts.Role {
+					continue
+				}
+				if p.IsHeadless != opts.Headless {
+					continue
+				}
+				wsURL := ""
+				port := p.DebugPort
+				if p.DebugPort > 0 {
+					if resolvedWS, err := getWebsocketURL(p.DebugPort); err == nil {
+						wsURL = resolvedWS
+					}
+				}
+				if wsURL == "" {
+					resolvedWS, resolvedPort, err := getWebsocketFromProcessUserDataDir(p.Command)
+					if err == nil {
+						wsURL = resolvedWS
+						port = resolvedPort
+					}
+				}
+				if wsURL == "" {
+					continue
+				}
+				return &Session{
+					PID:          p.PID,
+					Port:         port,
+					WebSocketURL: wsURL,
+					IsNew:        false,
+					IsWindows:    p.IsWindows,
+				}, nil
+			}
+		}
+	}
+
+	res, err := LaunchChromeWithRole(opts.RequestedPort, opts.GPU, opts.Headless, opts.TargetURL, opts.Role)
+	if err != nil {
+		return nil, err
+	}
+
+	isWindows := false
+	procs, err := ListResources(true)
+	if err == nil {
+		for _, p := range procs {
+			if p.PID == res.PID {
+				isWindows = p.IsWindows
+				break
+			}
+		}
+	}
+
+	return &Session{
+		PID:          res.PID,
+		Port:         res.Port,
+		WebSocketURL: res.WebsocketURL,
+		IsNew:        true,
+		IsWindows:    isWindows,
+	}, nil
+}
+
+func CleanupSession(session *Session) error {
+	if session == nil || !session.IsNew || session.PID <= 0 {
+		return nil
+	}
+	return KillResource(session.PID, session.IsWindows)
+}
+
+func getWebsocketFromProcessUserDataDir(cmdline string) (string, int, error) {
+	userDataDir, err := extractUserDataDir(cmdline)
+	if err != nil {
+		return "", 0, err
+	}
+	activePath := filepath.Join(userDataDir, "DevToolsActivePort")
+	data, err := os.ReadFile(activePath)
+	if err != nil && runtime.GOOS == "linux" && browser.IsWSL() && strings.Contains(userDataDir, "\\") {
+		out, convErr := exec.Command("wslpath", "-u", userDataDir).Output()
+		if convErr == nil {
+			activePath = filepath.Join(strings.TrimSpace(string(out)), "DevToolsActivePort")
+			data, err = os.ReadFile(activePath)
+		}
+	}
+	if err != nil {
+		return "", 0, err
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) < 2 {
+		return "", 0, fmt.Errorf("invalid DevToolsActivePort contents")
+	}
+	var port int
+	if _, err := fmt.Sscanf(lines[0], "%d", &port); err != nil {
+		return "", 0, err
+	}
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%d%s", port, strings.TrimSpace(lines[1]))
+	return wsURL, port, nil
+}
+
+func extractUserDataDir(cmdline string) (string, error) {
+	const prefix = "--user-data-dir="
+	i := strings.Index(cmdline, prefix)
+	if i < 0 {
+		return "", errors.New("user-data-dir flag not found")
+	}
+	value := cmdline[i+len(prefix):]
+	if value == "" {
+		return "", errors.New("empty user-data-dir value")
+	}
+	// Handle quoted value: --user-data-dir=\"...\" and plain value up to next space.
+	if value[0] == '"' {
+		value = value[1:]
+		j := strings.Index(value, "\"")
+		if j < 0 {
+			return "", errors.New("unterminated quoted user-data-dir value")
+		}
+		return value[:j], nil
+	}
+	parts := strings.Fields(value)
+	if len(parts) == 0 {
+		return "", errors.New("invalid user-data-dir value")
+	}
+	return parts[0], nil
+}
+
 // LaunchChrome starts a new Chrome instance and returns its debug info.
 func LaunchChrome(port int, gpu bool, headless bool, targetURL string) (*LaunchResult, error) {
+	return LaunchChromeWithRole(port, gpu, headless, targetURL, "")
+}
+
+// LaunchChromeWithRole starts a new Chrome instance and tags it with a dialtone role (e.g. "dev", "smoke").
+func LaunchChromeWithRole(port int, gpu bool, headless bool, targetURL, role string) (*LaunchResult, error) {
 	path := browser.FindChromePath()
 	if path == "" {
 		return nil, fmt.Errorf("chrome not found")
@@ -134,6 +287,16 @@ func LaunchChrome(port int, gpu bool, headless bool, targetURL string) (*LaunchR
 		}
 		port = l.Addr().(*net.TCPAddr).Port
 		l.Close()
+	}
+
+	rolePart := role
+	if rolePart == "" {
+		rolePart = "default"
+	}
+	profileDirName := fmt.Sprintf("dialtone-chrome-%s-port-%d", rolePart, port)
+	if rolePart == "dev" {
+		// Keep a stable profile for persistent logins/cookies in dev mode.
+		profileDirName = "dialtone-chrome-dev-profile"
 	}
 
 	// Use a local user data dir in the workspace, segregated by port to allow multiple instances
@@ -164,7 +327,7 @@ func LaunchChrome(port int, gpu bool, headless bool, targetURL string) (*LaunchR
 			}
 
 			if winTemp != "" {
-				userDataDir = winTemp + "\\" + fmt.Sprintf("dialtone-chrome-port-%d", port)
+				userDataDir = winTemp + "\\" + profileDirName
 			}
 		}
 
@@ -175,7 +338,7 @@ func LaunchChrome(port int, gpu bool, headless bool, targetURL string) (*LaunchR
 				winCwd := strings.TrimSpace(string(out))
 				// Only use it if it's NOT a UNC path (unlikely to work for profiles but better than nothing)
 				if !strings.HasPrefix(winCwd, "\\\\") {
-					userDataDir = winCwd + "\\" + ".chrome_data" + "\\" + fmt.Sprintf("dialtone-chrome-port-%d", port)
+					userDataDir = winCwd + "\\" + ".chrome_data" + "\\" + profileDirName
 				}
 			}
 		}
@@ -183,7 +346,7 @@ func LaunchChrome(port int, gpu bool, headless bool, targetURL string) (*LaunchR
 
 	if userDataDir == "" {
 		cwd, _ := os.Getwd()
-		userDataDir = filepath.Join(cwd, ".chrome_data", fmt.Sprintf("dialtone-chrome-port-%d", port))
+		userDataDir = filepath.Join(cwd, ".chrome_data", profileDirName)
 		_ = os.MkdirAll(userDataDir, 0755)
 	}
 
@@ -196,6 +359,9 @@ func LaunchChrome(port int, gpu bool, headless bool, targetURL string) (*LaunchR
 		"--user-data-dir=" + userDataDir,
 		"--new-window",
 		"--dialtone-origin=true",
+	}
+	if role != "" {
+		args = append(args, "--dialtone-role="+role)
 	}
 
 	if !gpu {
