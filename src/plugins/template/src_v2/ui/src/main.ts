@@ -26,7 +26,7 @@ sections.register('docs', {
         if (!container) throw new Error('docs container not found');
         return mountDocs(container);
     },
-    header: { visible: true } 
+    header: { visible: true, menuVisible: false } 
 });
 
 sections.register('table', { 
@@ -37,7 +37,7 @@ sections.register('table', {
         if (!container) throw new Error('table container not found');
         return mountTable(container);
     },
-    header: { visible: false } 
+    header: { visible: false, menuVisible: false } 
 });
 
 sections.register('settings', { 
@@ -63,6 +63,7 @@ sections.observe();
 
 // 5. Initial load based on hash or default to home
 const initialId = window.location.hash.slice(1) || 'home';
+console.log(`[SectionManager] 🧭 INITIAL LOAD #${initialId}`);
 sections.load(initialId).then(() => {
     const el = document.getElementById(initialId);
     if (el) el.scrollIntoView({ behavior: 'auto' });
