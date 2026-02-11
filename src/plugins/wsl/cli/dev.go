@@ -39,38 +39,63 @@ func RunDev(versionDir string) error {
 		}
 	}
 
-	// 2. Cleanup port 8080
+	// 2. Cleanup port 8080 and dev port 3000
 	browser.CleanupPort(port)
+	browser.CleanupPort(3000)
 
 	// 3. Start the host node
-	cmd := exec.Command("go", "run", "cmd/main.go")
-	cmd.Dir = pluginDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	backendCmd := exec.Command("go", "run", "cmd/main.go")
+	backendCmd.Dir = pluginDir
+	backendCmd.Stdout = os.Stdout
+	backendCmd.Stderr = os.Stderr
 
-	if err := cmd.Start(); err != nil {
+	if err := backendCmd.Start(); err != nil {
 		return fmt.Errorf("failed to start wsl host: %v", err)
 	}
 
-	// 4. Wait for it to be ready and launch browser
+	// 4. Start the UI dev server
+	uiDir := filepath.Join(pluginDir, "ui")
+	var uiCmd *exec.Cmd
+	if os.Getenv("OS") == "Windows_NT" {
+		uiCmd = exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", filepath.Join(cwd, "dialtone.ps1"), "bun", "exec", "--cwd", uiDir, "run", "dev", "--port", "3000")
+	} else {
+		uiCmd = exec.Command(filepath.Join(cwd, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "dev", "--port", "3000")
+	}
+	uiCmd.Dir = cwd
+	uiCmd.Stdout = os.Stdout
+	uiCmd.Stderr = os.Stderr
+
+	if err := uiCmd.Start(); err != nil {
+		backendCmd.Process.Kill()
+		return fmt.Errorf("failed to start UI dev server: %v", err)
+	}
+
+	// 5. Wait for it to be ready and launch browser
 	go func() {
 		for i := 0; i < 30; i++ {
-			if browser.IsPortOpen(port) {
-				fmt.Printf("\n🚀 WSL Plugin (%s) is READY!\n", versionDir)
-				fmt.Printf("🔗 URL: http://localhost:%d\n\n", port)
+			if browser.IsPortOpen(3000) {
+				fmt.Printf("\n🚀 WSL Plugin (%s) UI is READY!\n", versionDir)
+				fmt.Printf("🔗 URL: http://localhost:3000\n\n")
 
 				// Launch Debug Browser (Headed)
-				launchDebugBrowser(port)
+				launchDebugBrowser(3000)
 				return
 			}
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(1 * time.Second)
 		}
-		fmt.Printf("\n❌ [ERROR] Host node failed to start on port %d\n", port)
+		fmt.Printf("\n❌ [ERROR] UI dev server failed to start on port 3000\n")
 	}()
 
-	// 5. Block until interrupted
-	fmt.Println(">> [WSL] Dev: host process started. Press Ctrl+C to stop.")
-	return cmd.Wait()
+	// 6. Block until interrupted
+	fmt.Println(">> [WSL] Dev: processes started. Press Ctrl+C to stop.")
+	
+	// Wait for either to exit
+	go func() {
+		uiCmd.Wait()
+		backendCmd.Process.Kill()
+	}()
+	
+	return backendCmd.Wait()
 }
 
 func launchDebugBrowser(port int) {
