@@ -15,6 +15,19 @@ fi
 GRACEFUL_TIMEOUT=${GRACEFUL_TIMEOUT:-5}   # Seconds to wait after SIGTERM before SIGKILL
 PROCESS_TIMEOUT=${PROCESS_TIMEOUT:-0}      # Max runtime in seconds (0 = no limit)
 
+# Track nested wrapper invocations so only the outermost wrapper logs shutdown details.
+if [[ "${DIALTONE_WRAPPER_DEPTH:-0}" =~ ^[0-9]+$ ]]; then
+    DIALTONE_WRAPPER_DEPTH=$((DIALTONE_WRAPPER_DEPTH + 1))
+else
+    DIALTONE_WRAPPER_DEPTH=1
+fi
+export DIALTONE_WRAPPER_DEPTH
+
+CLEANUP_VERBOSE=1
+if [ "$DIALTONE_WRAPPER_DEPTH" -gt 1 ]; then
+    CLEANUP_VERBOSE=0
+fi
+
 # --- HELP MENU ---
 print_help() {
     cat <<EOF
@@ -55,11 +68,21 @@ EOF
 
 # --- GRACEFUL SHUTDOWN ---
 CHILD_PID=""
+CLEANUP_RAN=0
 
 cleanup() {
+    # cleanup can be triggered by INT/TERM and then EXIT; run it once.
+    if [ "$CLEANUP_RAN" -eq 1 ]; then
+        return
+    fi
+    CLEANUP_RAN=1
+    trap - EXIT INT TERM
+
     if [ -n "$CHILD_PID" ] && kill -0 "$CHILD_PID" 2>/dev/null; then
-        echo ""
-        echo "[dialtone] Sending SIGTERM to process $CHILD_PID..."
+        if [ "$CLEANUP_VERBOSE" -eq 1 ]; then
+            echo ""
+            echo "[dialtone] Sending SIGTERM to process $CHILD_PID..."
+        fi
         kill -TERM "$CHILD_PID" 2>/dev/null || true
         
         # Wait for graceful shutdown
@@ -67,15 +90,21 @@ cleanup() {
         while [ $waited -lt $GRACEFUL_TIMEOUT ] && kill -0 "$CHILD_PID" 2>/dev/null; do
             sleep 1
             waited=$((waited + 1))
-            echo "[dialtone] Waiting for graceful shutdown... ($waited/$GRACEFUL_TIMEOUT)"
+            if [ "$CLEANUP_VERBOSE" -eq 1 ]; then
+                echo "[dialtone] Waiting for graceful shutdown... ($waited/$GRACEFUL_TIMEOUT)"
+            fi
         done
         
         # Force kill if still running
         if kill -0 "$CHILD_PID" 2>/dev/null; then
-            echo "[dialtone] Process did not exit, sending SIGKILL..."
+            if [ "$CLEANUP_VERBOSE" -eq 1 ]; then
+                echo "[dialtone] Process did not exit, sending SIGKILL..."
+            fi
             kill -KILL "$CHILD_PID" 2>/dev/null || true
         else
-            echo "[dialtone] Process exited gracefully."
+            if [ "$CLEANUP_VERBOSE" -eq 1 ]; then
+                echo "[dialtone] Process exited gracefully."
+            fi
         fi
     fi
 }
