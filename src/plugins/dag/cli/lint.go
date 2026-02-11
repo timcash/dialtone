@@ -41,18 +41,12 @@ func RunLint(versionDir string) error {
 			if _, err := os.Stat(filepath.Join(uiDir, "package.json")); err == nil {
 				fmt.Printf(">> [DAG] Lint: checking TypeScript in %s...\n", uiDir)
 
-				installCmd := exec.Command("bun", "install")
-				installCmd.Dir = uiDir
-				installCmd.Stdout = os.Stdout
-				installCmd.Stderr = os.Stderr
+				installCmd := runBun(cwd, uiDir, "install", "--force")
 				if err := installCmd.Run(); err != nil {
 					return fmt.Errorf("bun install failed in %s: %v", entry.Name(), err)
 				}
 
-				cmd := exec.Command("bun", "run", "lint")
-				cmd.Dir = uiDir
-				cmd.Stdout = os.Stdout
-				cmd.Stderr = os.Stderr
+				cmd := runBun(cwd, uiDir, "run", "lint")
 
 				if err := cmd.Run(); err != nil {
 					return fmt.Errorf("typescript lint failed in %s: %v", entry.Name(), err)

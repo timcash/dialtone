@@ -73,6 +73,10 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   visibility: hidden;
 }
 
+body.hide-header .header-title {
+  display: none !important;
+}
+
 .header-title h1 {
   font-size: 1.5rem;
   letter-spacing: -0.025em;
@@ -103,6 +107,10 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+body.hide-menu .top-right-controls {
+  display: none !important;
 }
 
 .menu-toggle {
