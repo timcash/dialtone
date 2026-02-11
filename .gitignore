@@ -65,6 +65,7 @@ target/
 # Dialtone specific
 smoke_debug.txt
 smoke_debug_2.txt
+tmp/template-ui-build-debug/
 
 # Plugin specific
 src/plugins/**/node_modules/

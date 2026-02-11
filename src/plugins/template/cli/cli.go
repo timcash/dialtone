@@ -105,7 +105,7 @@ func RunInstall(versionDir string) error {
 	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
 
 	fmt.Println("   [TEMPLATE] Running bun install...")
-	cmd := runBun(cwd, uiDir, "install")
+	cmd := runBun(cwd, uiDir, "install", "--force")
 	return cmd.Run()
 }
 

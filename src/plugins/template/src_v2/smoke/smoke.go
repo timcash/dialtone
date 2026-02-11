@@ -33,6 +33,7 @@ func Run(versionDir string) error {
 		SmokeDir:       smokeDir,
 		TotalTimeout:   30 * time.Second,
 		StepTimeout:    5 * time.Second,
+		CommandStall:   3 * time.Second,
 		PanicOnTimeout: true,
 	})
 	if err != nil {

@@ -1,4 +1,4 @@
-import { VisualizationControl, VisibilityMixin } from "@ui/ui";
+import { VisualizationControl, VisibilityMixin } from "../../dialtone-ui";
 
 export function mountTable(container: HTMLElement): VisualizationControl {
     const state = VisibilityMixin.defaults();
