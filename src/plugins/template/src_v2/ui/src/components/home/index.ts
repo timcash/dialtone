@@ -15,7 +15,9 @@ class HeroSection {
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     this.renderer.setClearColor(0x000000, 1);
     
-    this.container.appendChild(this.renderer.domElement);
+    // In many Dialtone templates, we look for a viz-container or append to root
+    const vizContainer = this.container.querySelector('.viz-container') || this.container;
+    vizContainer.appendChild(this.renderer.domElement);
 
     const geometry = new THREE.SphereGeometry(0.5, 32, 32);
     for (let i = 0; i < 5; i++) {
@@ -52,8 +54,9 @@ class HeroSection {
     cancelAnimationFrame(this.frameId);
     window.removeEventListener('resize', this.onResize);
     this.renderer.dispose();
-    if (this.container.contains(this.renderer.domElement)) {
-        this.container.removeChild(this.renderer.domElement);
+    const canvas = this.renderer.domElement;
+    if (canvas.parentElement) {
+        canvas.parentElement.removeChild(canvas);
     }
   }
 
@@ -83,19 +86,26 @@ class HeroSection {
 }
 
 export function mountHero(container: HTMLElement): VisualizationControl {
-    container.innerHTML = `
-        <div class="marketing-overlay" aria-label="Hero Title">
-            <h2>dialtone.template</h2>
-            <p data-typing-subtitle></p>
-        </div>
-    `;
+    // If container is empty, inject default hero layout
+    if (!container.innerHTML.trim() || !container.querySelector('.marketing-overlay')) {
+        container.innerHTML = `
+            <div id="viz-container" class="viz-container"></div>
+            <div class="marketing-overlay" aria-label="Hero Title">
+                <h2>dialtone.template</h2>
+                <p data-typing-subtitle></p>
+            </div>
+        `;
+    }
 
     const subtitleEl = container.querySelector('[data-typing-subtitle]') as HTMLParagraphElement;
-    const stopTyping = startTyping(subtitleEl, [
-        "High-performance plugin architecture.",
-        "Built with TypeScript and Three.js.",
-        "Civic technology for the near future.",
-    ]);
+    let stopTyping = () => {};
+    if (subtitleEl) {
+        stopTyping = startTyping(subtitleEl, [
+            "High-performance plugin architecture.",
+            "Built with TypeScript and Three.js.",
+            "Civic technology for the near future.",
+        ]);
+    }
 
     const viz = new HeroSection(container);
 

@@ -1,4 +1,4 @@
-package test
+package smoke
 
 import (
 	"os"
@@ -9,7 +9,7 @@ import (
 	"dialtone/cli/src/dialtest"
 )
 
-func RunSmoke(versionDir string) error {
+func Run(versionDir string) error {
 	cwd, _ := os.Getwd()
 	pluginDir := filepath.Join(cwd, "src", "plugins", "template", versionDir)
 	smokeDir := filepath.Join(pluginDir, "smoke")

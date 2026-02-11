@@ -1,17 +1,22 @@
-import { VisualizationControl } from "@ui/ui";
+import { VisualizationControl, VisibilityMixin } from "@ui/ui";
 
 export function mountSettings(container: HTMLElement): VisualizationControl {
-    container.innerHTML = `
-        <div class="marketing-overlay" aria-label="Settings Section">
-            <h2>Configuration</h2>
-            <p>System settings and parameters.</p>
-        </div>
-    `;
+    const state = VisibilityMixin.defaults();
+
+    // If container is empty, inject default settings layout
+    if (!container.innerHTML.trim()) {
+        container.innerHTML = `
+            <div class="marketing-overlay" aria-label="Settings Section">
+                <h2>Configuration</h2>
+                <p>Modify your plugin behavior here.</p>
+            </div>
+        `;
+    }
 
     return {
         dispose: () => {
             container.innerHTML = '';
         },
-        setVisible: (_v) => { },
+        setVisible: (v) => VisibilityMixin.setVisible(state, v, 'settings-viz'),
     };
 }
