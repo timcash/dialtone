@@ -81,4 +81,6 @@ src/plugins/**/metadata.json
 src/plugins/swarm/app/node_modules
 src/plugins/swarm/test/node_modules
 
+#ai
+.claude
 .vercel
