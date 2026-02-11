@@ -2,6 +2,7 @@ package cli
 
 import (
 	"dialtone/cli/src/plugins/template/test"
+	smoke_v2 "dialtone/cli/src/plugins/template/src_v2/smoke"
 	"flag"
 	"fmt"
 	"os"
@@ -35,11 +36,9 @@ func Run(args []string) error {
 	case "dev":
 		return RunDev(getDir())
 	case "smoke":
-		dir := "src_v1"
-		if len(args) > 1 {
-			dir = args[1]
-		} else {
-			dir = getLatestVersionDir()
+		dir := getDir()
+		if dir == "src_v2" {
+			return smoke_v2.Run(dir)
 		}
 		return test.RunSmoke(dir)
 	case "build":

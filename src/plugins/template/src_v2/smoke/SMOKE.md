@@ -1,6 +1,6 @@
 # Template Plugin Smoke Test Report
 
-**Generated at:** Tue, 10 Feb 2026 16:35:24 PST
+**Generated at:** Tue, 10 Feb 2026 16:51:43 PST
 
 ## 1. Expected Errors (Proof of Life)
 
@@ -24,7 +24,7 @@
 ```text
 bun install v1.2.22 (6bafe260)
 
-Checked 20 installs across 67 packages (no changes) [32.00ms]
+Checked 20 installs across 67 packages (no changes) [26.00ms]
 ```
 
 ### Lint: ✅ PASSED
@@ -50,7 +50,7 @@ dist/assets/Typing-BI9S19x9.js    0.56 kB │ gzip:   0.34 kB
 dist/assets/index-CnCedI4T.js     0.66 kB │ gzip:   0.43 kB
 dist/assets/index-Cw6LpDXf.js     9.98 kB │ gzip:   3.50 kB
 dist/assets/index-DYnRDjrK.js   468.29 kB │ gzip: 118.39 kB
-✓ built in 617ms
+✓ built in 647ms
 ```
 
 ---
@@ -74,17 +74,17 @@ dist/assets/index-DYnRDjrK.js   468.29 kB │ gzip: 118.39 kB
 ```text
 [log] "[SectionManager] 🧭 INITIAL LOAD #home"
 [log] "[SectionManager] 📦 LOADING #home..."
-[log] "[SectionManager] ✅ LOADED #home (37ms)"
-[log] "[SectionManager] ✨ START #home"
-[log] "[hero-viz] SLEEP"
-[error] "[PROOFOFLIFE] Intentional Browser Test Error"
-[error] [PROOFOFLIFE] Intentional Go Test Error
 [log] "[SectionManager] 📦 LOADING #docs..."
-[log] "[SectionManager] 🚀 RESUME #home"
-[log] "[hero-viz] AWAKE"
-[log] "[SectionManager] ✅ LOADED #docs (3ms)"
+[log] "[SectionManager] ✅ LOADED #docs (2ms)"
 [log] "[SectionManager] ✨ START #docs"
 [log] "[docs-viz] SLEEP"
+[error] "[PROOFOFLIFE] Intentional Browser Test Error"
+[error] [PROOFOFLIFE] Intentional Go Test Error
+[log] "[SectionManager] ✅ LOADED #home (58ms)"
+[log] "[SectionManager] ✨ START #home"
+[log] "[hero-viz] SLEEP"
+[log] "[SectionManager] 🚀 RESUME #home"
+[log] "[hero-viz] AWAKE"
 ```
 
 ![Hero Section Validation](smoke_step_1.png)
