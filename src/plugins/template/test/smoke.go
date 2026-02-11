@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -42,31 +43,45 @@ type stepResult struct {
 }
 
 func RunSmoke(versionDir string) error {
-	fmt.Printf(">> [TEMPLATE] Smoke: START for %s\n", versionDir)
-
 	cwd, _ := os.Getwd()
 	pluginDir := filepath.Join(cwd, "src", "plugins", "template", versionDir)
 	smokeFile := filepath.Join(pluginDir, "SMOKE.md")
+	smokeLogFile := filepath.Join(pluginDir, "smoke.log")
 	port := 8080
+
+	// Initialize log file
+	logF, err := os.Create(smokeLogFile)
+	if err != nil {
+		return fmt.Errorf("failed to create smoke.log: %v", err)
+	}
+	defer logF.Close()
+
+	// Multi-writer for stdout and file
+	mw := io.MultiWriter(os.Stdout, logF)
+	logMsg := func(format string, a ...interface{}) {
+		fmt.Fprintf(mw, format, a...)
+	}
+
+	logMsg("[SMOKE] START for %s\n", versionDir)
 
 	var preflightResults []preflightResult
 	
 	// Phase 1: Preflight (Install, Lint, Build)
-	preflightErr := runPreflight(cwd, versionDir, &preflightResults)
+	preflightErr := runPreflight(cwd, versionDir, &preflightResults, mw)
 	
-	// Start Server anyway to try and get UI results if possible, or fail early if preflight critical
 	if preflightErr != nil {
-		fmt.Printf("   [WARN] Preflight encountered issues, continuing to capture what we can.\n")
+		logMsg("[SMOKE] Preflight encountered issues, continuing to capture what we can.\n")
 	}
 
 	// Phase 2: Start Server
 	browser.CleanupPort(port)
 	cmd := exec.Command("go", "run", "cmd/main.go")
 	cmd.Dir = pluginDir
-	logFile, _ := os.Create(filepath.Join(pluginDir, "smoke_server.log"))
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
+	serverLogFile, _ := os.Create(filepath.Join(pluginDir, "smoke_server.log"))
+	cmd.Stdout = serverLogFile
+	cmd.Stderr = serverLogFile
 
+	logMsg("[SMOKE] Starting plugin server on port %d...\n", port)
 	if err := cmd.Start(); err != nil {
 		writeFinalReport(smokeFile, preflightResults, nil, nil, nil)
 		return fmt.Errorf("failed to start template plugin: %v", err)
@@ -77,6 +92,7 @@ func RunSmoke(versionDir string) error {
 		writeFinalReport(smokeFile, preflightResults, nil, nil, nil)
 		return fmt.Errorf("server timeout: %v", err)
 	}
+	logMsg("[SMOKE] Server ready.\n")
 
 	url := fmt.Sprintf("http://127.0.0.1:%d", port)
 	wsURL, isNew, err := resolveChrome(0, true)
@@ -104,10 +120,11 @@ func RunSmoke(versionDir string) error {
 			mu.Lock()
 			entries = append(entries, consoleEntry{level: string(ev.Type), message: msg})
 			mu.Unlock()
-			fmt.Printf("   [BROWSER] [%s] %s\n", ev.Type, msg)
+			logMsg("   [BROWSER] [%s] %s\n", ev.Type, msg)
 		}
 	})
 
+	logMsg("[SMOKE] Navigating to %s...\n", url)
 	// Navigation & Trigger Proof of Life
 	if err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(1280, 800),
@@ -128,11 +145,11 @@ func RunSmoke(versionDir string) error {
 	var stepResults []stepResult
 	var lastLogIdx int
 	mu.Lock()
-	lastLogIdx = len(entries)
+	lastLogIdx = 0 // Capture everything from the beginning in the first step
 	mu.Unlock()
 
 	runStep := func(name string, actions chromedp.Action) {
-		fmt.Printf(">> [TEMPLATE] Step: %s\n", name)
+		logMsg("[SMOKE] Step Start: %s\n", name)
 		err := chromedp.Run(ctx, actions)
 		
 		var buf []byte
@@ -155,6 +172,9 @@ func RunSmoke(versionDir string) error {
 		status := "PASS"
 		if err != nil {
 			status = "FAIL"
+			logMsg("[SMOKE] Step FAILED: %s | Error: %v\n", name, err)
+		} else {
+			logMsg("[SMOKE] Step PASSED: %s\n", name)
 		}
 		stepResults = append(stepResults, stepResult{
 			name:       name,
@@ -185,13 +205,14 @@ func RunSmoke(versionDir string) error {
 	}
 	mu.Unlock()
 
+	logMsg("[SMOKE] Generating markdown report...\n")
 	writeFinalReport(smokeFile, preflightResults, polEntries, realErrors, stepResults)
 
-	fmt.Printf(">> [TEMPLATE] Smoke: COMPLETE. Report at %s\n", smokeFile)
+	logMsg("[SMOKE] COMPLETE. Report at %s\n", smokeFile)
 	return nil
 }
 
-func runPreflight(repoRoot, versionDir string, results *[]preflightResult) error {
+func runPreflight(repoRoot, versionDir string, results *[]preflightResult, mw io.Writer) error {
 	uiDir := filepath.Join(repoRoot, "src", "plugins", "template", versionDir, "ui")
 	steps := []struct {
 		name string
@@ -205,7 +226,7 @@ func runPreflight(repoRoot, versionDir string, results *[]preflightResult) error
 
 	var firstErr error
 	for _, s := range steps {
-		fmt.Printf("   [PREFLIGHT] %s...\n", s.name)
+		fmt.Fprintf(mw, "[SMOKE] Preflight: %s...\n", s.name)
 		out, err := runCommandCapture(uiDir, s.cmd, s.args...)
 		status := "✅ PASSED"
 		if err != nil {
@@ -257,15 +278,23 @@ func writeFinalReport(smokeFile string, preflight []preflightResult, pol []conso
 
 	// 4. UI & Interactivity
 	buf.WriteString("## 4. UI & Interactivity\n")
+	
+	// Lifecycle Verification
+	buf.WriteString("\n### Lifecycle Verification Summary\n\n")
+	verifyLifecycle(&buf, steps)
+
+	// Pre-Validation Logs
+	if len(steps) > 0 && len(steps[0].logs) > 0 {
+		// We actually don't need a separate section if we keep them in Step 1, 
+		// but let's make sure Step 1 is clean.
+	}
+
 	for i, s := range steps {
 		icon := "✅"
 		if s.status == "FAIL" {
 			icon = "❌"
 		}
 		buf.WriteString(fmt.Sprintf("\n### %d. %s: %s %s\n\n", i+1, s.name, s.status, icon))
-		if s.screenshot != "" {
-			buf.WriteString(fmt.Sprintf("![%s](%s)\n\n", s.name, s.screenshot))
-		}
 		if s.err != nil {
 			buf.WriteString(fmt.Sprintf("**Error:** `%v`\n\n", s.err))
 		}
@@ -276,10 +305,54 @@ func writeFinalReport(smokeFile string, preflight []preflightResult, pol []conso
 			}
 			buf.WriteString("```\n\n")
 		}
+		if s.screenshot != "" {
+			buf.WriteString(fmt.Sprintf("![%s](%s)\n\n", s.name, s.screenshot))
+		}
 		buf.WriteString("---\n")
 	}
 
 	os.WriteFile(smokeFile, buf.Bytes(), 0644)
+}
+
+func verifyLifecycle(buf *bytes.Buffer, steps []stepResult) {
+	events := []string{"LOADING", "LOADED", "START", "RESUME", "PAUSE", "AWAKE", "SLEEP"}
+	found := make(map[string]bool)
+	
+	for _, step := range steps {
+		for _, log := range step.logs {
+			for _, event := range events {
+				if strings.Contains(log.message, event) {
+					found[event] = true
+				}
+			}
+		}
+	}
+
+	buf.WriteString("| Event | Status | Description |\n")
+	buf.WriteString("|---|---|---|\n")
+	
+	eventMeta := []struct{ name, desc string }{
+		{"LOADING", "Section chunk fetching initiated"},
+		{"LOADED", "Section code loaded into memory"},
+		{"START", "Section component initialized"},
+		{"RESUME / AWAKE", "Animation loop active and visible"},
+		{"PAUSE / SLEEP", "Animation loop suspended when off-screen"},
+	}
+
+	for _, meta := range eventMeta {
+		status := "❌ MISSING"
+		// Check for variants
+		if strings.Contains(meta.name, " / ") {
+			parts := strings.Split(meta.name, " / ")
+			if found[parts[0]] || found[parts[1]] {
+				status = "✅ CAPTURED"
+			}
+		} else if found[meta.name] {
+			status = "✅ CAPTURED"
+		}
+		buf.WriteString(fmt.Sprintf("| %s | %s | %s |\n", meta.name, status, meta.desc))
+	}
+	buf.WriteString("\n")
 }
 
 func runCommandCapture(dir string, name string, args ...string) ([]byte, error) {

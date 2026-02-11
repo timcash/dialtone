@@ -17,6 +17,7 @@ export class SectionManager {
   private subtitleEl: HTMLElement | null = null;
   private telemetryEl: HTMLElement | null = null;
   private versionEl: HTMLElement | null = null;
+  private menuEl: HTMLElement | null = null;
 
   constructor(options: { debug?: boolean } = {}) {
     this.debug = options.debug ?? true;
@@ -27,6 +28,7 @@ export class SectionManager {
     this.subtitleEl = document.getElementById("header-subtitle");
     this.telemetryEl = this.headerEl?.querySelector(".header-telemetry") || null;
     this.versionEl = this.headerEl?.querySelector(".version:not(.header-telemetry)") || null;
+    this.menuEl = document.querySelector(".top-right-controls");
   }
 
   register(sectionId: string, config: SectionConfig): void {
@@ -42,6 +44,9 @@ export class SectionManager {
           const sectionId = entry.target.id;
 
           if (entry.isIntersecting) {
+            // Toggle visibility class for CSS animations
+            entry.target.classList.add('is-visible');
+
             this.load(sectionId).then(() => {
               const control = this.visualizations.get(sectionId);
               if (control) {
@@ -57,6 +62,7 @@ export class SectionManager {
             const nextId = this.getNextSectionId(sectionId);
             if (nextId) this.load(nextId);
           } else {
+            entry.target.classList.remove('is-visible');
             const control = this.visualizations.get(sectionId);
             if (control) {
               if (this.debug) console.log(`[SectionManager] 💤 PAUSE #${sectionId}`);
@@ -81,11 +87,22 @@ export class SectionManager {
     const config = this.configs.get(sectionId);
     if (!config) return;
 
+    if (this.debug) console.log(`[SectionManager] 📦 LOADING #${sectionId}...`);
+    const startTime = performance.now();
+
     const loadPromise = config
       .load()
       .then((control) => {
+        const elapsed = (performance.now() - startTime).toFixed(0);
+        if (this.debug) console.log(`[SectionManager] ✅ LOADED #${sectionId} (${elapsed}ms)`);
+        
         this.visualizations.set(sectionId, control);
+        // Start phase: initial setup but paused until visible
+        if (this.debug) console.log(`[SectionManager] ✨ START #${sectionId}`);
         control.setVisible(false);
+      })
+      .catch((err) => {
+        console.error(`[SectionManager] ❌ FAILED to load #${sectionId}:`, err);
       })
       .finally(() => {
         this.loadingPromises.delete(sectionId);
@@ -100,6 +117,7 @@ export class SectionManager {
   }
 
   async navigateTo(id: string) {
+    if (this.debug) console.log(`[SectionManager] 🧭 NAVIGATING TO #${id}`);
     const el = document.getElementById(id);
     if (el) {
       el.scrollIntoView({ behavior: 'smooth' });
@@ -139,6 +157,11 @@ export class SectionManager {
 
     if (this.versionEl) {
       this.versionEl.style.display = config?.version === false ? "none" : "block";
+    }
+
+    if (this.menuEl) {
+      const isMenuVisible = config?.menuVisible ?? true;
+      this.menuEl.style.display = isMenuVisible ? "flex" : "none";
     }
   }
 
