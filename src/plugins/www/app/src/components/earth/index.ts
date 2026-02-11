@@ -120,7 +120,7 @@ export class ProceduralOrbit {
   cloudAmount = 1.0;
 
   // Rotations
-  earthRotSpeed = (Math.PI * 2) / 120; // 120s period (faster)
+  earthRotSpeed = (Math.PI * 2) / 180; // 180s period
   cloud1RotSpeed = (Math.PI * 2) / 240;
   cloud2RotSpeed = (Math.PI * 2) / 280;
   cloud1Opacity = 0.95;
@@ -128,8 +128,12 @@ export class ProceduralOrbit {
   cloudBrightness = 5.0;
   cameraDistance = 23.5;
   cameraOrbit = 5.74;
+  cameraOrbitSpeed = 0.1;
+  cameraFarOffset = 40;
+  cameraOrbitYOffset = -10;
+  cameraShellOffset = 0.4;
+  cameraTangentSpeed = 0.6;
   cameraYaw = 0.99;
-  cameraAnchor = new THREE.Vector3(0, 0, 0);
 
   // Lights
   sunGlow!: THREE.Mesh;
@@ -184,8 +188,7 @@ export class ProceduralOrbit {
     this.initLights();
     // this.initConfigPanel(); // Menu setup on visibility
     this.resize();
-    this.initCameraAnchor();
-    this.updateCamera(this.cameraAnchor);
+    this.updateCamera();
     // Ensure we render both the default layer and the moon light-only layer.
     this.camera.layers.enable(MOON_LIGHT_LAYER);
     this.animate();
@@ -558,7 +561,8 @@ export class ProceduralOrbit {
     (this.cloud2.material as THREE.ShaderMaterial).uniforms.uTime.value =
       cloudTime;
 
-    this.updateCamera(this.cameraAnchor);
+    this.cameraOrbit += this.cameraOrbitSpeed * deltaSeconds;
+    this.updateCamera();
 
     // Sun Orbit
     const sunRad = this.earthRadius + this.sunOrbitHeight;
@@ -638,18 +642,26 @@ export class ProceduralOrbit {
 
 
 
-  private updateCamera(anchor: THREE.Vector3) {
-    const orbitX = Math.cos(this.cameraOrbit) * this.cameraDistance;
-    const orbitZ = Math.sin(this.cameraOrbit) * this.cameraDistance;
-    this.camera.position.set(anchor.x + orbitX, anchor.y, anchor.z + orbitZ);
-    this.camera.lookAt(anchor);
-    this.camera.rotation.y = this.cameraYaw;
-  }
+  private updateCamera() {
+    const nearDistance = this.earthRadius + Math.max(6, this.cameraDistance);
+    const farDistance = nearDistance + this.cameraFarOffset;
+    const orbitPhase = this.cameraOrbit + this.cameraYaw;
 
-  private initCameraAnchor() {
-    const now = performance.now();
-    this.updateMoonPosition(now);
-    this.cameraAnchor.copy(this.moon.position).multiplyScalar(0.5);
+    const localPos = new THREE.Vector3(
+      Math.cos(orbitPhase) * farDistance,
+      this.cameraOrbitYOffset,
+      Math.sin(orbitPhase) * nearDistance,
+    );
+    this.camera.position.copy(localPos);
+
+    const shellRadius = this.earthRadius + this.cameraShellOffset;
+    const equatorPhase = orbitPhase * this.cameraTangentSpeed;
+    const equatorPoint = new THREE.Vector3(
+      Math.cos(equatorPhase) * shellRadius,
+      0,
+      Math.sin(equatorPhase) * shellRadius,
+    );
+    this.camera.lookAt(equatorPoint);
   }
 
   private updateMoonPosition(now: number) {
