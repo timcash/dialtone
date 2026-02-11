@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { VisibilityMixin } from "../../util/section";
 import cubeGlowVert from "../../shaders/template-cube.vert.glsl?raw";
 import cubeGlowFrag from "../../shaders/template-cube.frag.glsl?raw";
 
