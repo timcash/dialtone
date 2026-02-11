@@ -3,18 +3,18 @@
 [SMOKE] Preflight: Build...
 [SMOKE] Starting plugin server on port 8080...
 [SMOKE] Server ready.
-[SMOKE] Navigating to http://127.0.0.1:8080...
    [BROWSER] [log] "[SectionManager] 🧭 INITIAL LOAD #home"
    [BROWSER] [log] "[SectionManager] 📦 LOADING #home..."
    [BROWSER] [error] "[PROOFOFLIFE] Intentional Browser Test Error"
+[SMOKE] Navigating to http://127.0.0.1:8080...
 [SMOKE] Step Start: Hero Section Validation
    [BROWSER] [log] "[SectionManager] 📦 LOADING #docs..."
-   [BROWSER] [log] "[SectionManager] ✅ LOADED #home (108ms)"
+   [BROWSER] [log] "[SectionManager] ✅ LOADED #home (32ms)"
    [BROWSER] [log] "[SectionManager] ✨ START #home"
    [BROWSER] [log] "[hero-viz] SLEEP"
    [BROWSER] [log] "[SectionManager] 🚀 RESUME #home"
    [BROWSER] [log] "[hero-viz] AWAKE"
-   [BROWSER] [log] "[SectionManager] ✅ LOADED #docs (99ms)"
+   [BROWSER] [log] "[SectionManager] ✅ LOADED #docs (23ms)"
    [BROWSER] [log] "[SectionManager] ✨ START #docs"
    [BROWSER] [log] "[docs-viz] SLEEP"
 [SMOKE] Step PASSED: Hero Section Validation
@@ -23,7 +23,7 @@
    [BROWSER] [log] "[SectionManager] 📦 LOADING #table..."
    [BROWSER] [log] "[SectionManager] 🚀 RESUME #docs"
    [BROWSER] [log] "[docs-viz] AWAKE"
-   [BROWSER] [log] "[SectionManager] ✅ LOADED #table (2ms)"
+   [BROWSER] [log] "[SectionManager] ✅ LOADED #table (1ms)"
    [BROWSER] [log] "[SectionManager] ✨ START #table"
    [BROWSER] [log] "[table-viz] SLEEP"
    [BROWSER] [log] "[SectionManager] 💤 PAUSE #home"
@@ -34,7 +34,7 @@
    [BROWSER] [log] "[SectionManager] 📦 LOADING #settings..."
    [BROWSER] [log] "[SectionManager] 🚀 RESUME #table"
    [BROWSER] [log] "[table-viz] AWAKE"
-   [BROWSER] [log] "[SectionManager] ✅ LOADED #settings (3ms)"
+   [BROWSER] [log] "[SectionManager] ✅ LOADED #settings (2ms)"
    [BROWSER] [log] "[SectionManager] ✨ START #settings"
    [BROWSER] [log] "[settings-viz] SLEEP"
    [BROWSER] [log] "[SectionManager] 💤 PAUSE #docs"
