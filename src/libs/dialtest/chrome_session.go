@@ -13,6 +13,8 @@ import (
 type ChromeSessionOptions struct {
 	RequestedPort   int
 	Headless        bool
+	Role            string
+	ReuseExisting   bool
 	URL             string
 	LogWriter       io.Writer
 	LogPrefix       string
@@ -24,15 +26,27 @@ type ChromeSession struct {
 	Ctx          context.Context
 	cancel       context.CancelFunc
 	IsNewBrowser bool
+	BrowserPID   int
+	chrome       *chrome_app.Session
 }
 
 func StartChromeSession(opts ChromeSessionOptions) (*ChromeSession, error) {
-	wsURL, isNew, err := resolveChrome(opts.RequestedPort, opts.Headless)
+	if opts.Role == "" {
+		opts.Role = "default"
+	}
+	resolved, err := chrome_app.StartSession(chrome_app.SessionOptions{
+		RequestedPort: opts.RequestedPort,
+		GPU:           true,
+		Headless:      opts.Headless,
+		TargetURL:     "",
+		Role:          opts.Role,
+		ReuseExisting: opts.ReuseExisting,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), wsURL)
+	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), resolved.WebSocketURL)
 	ctx, ctxCancel := chromedp.NewContext(allocCtx)
 	cancel := func() {
 		ctxCancel()
@@ -91,7 +105,9 @@ func StartChromeSession(opts ChromeSessionOptions) (*ChromeSession, error) {
 	return &ChromeSession{
 		Ctx:          ctx,
 		cancel:       cancel,
-		IsNewBrowser: isNew,
+		IsNewBrowser: resolved.IsNew,
+		BrowserPID:   resolved.PID,
+		chrome:       resolved,
 	}, nil
 }
 
@@ -103,6 +119,6 @@ func (s *ChromeSession) Close() {
 		s.cancel()
 	}
 	if s.IsNewBrowser {
-		_ = chrome_app.KillAllResources()
+		_ = chrome_app.CleanupSession(s.chrome)
 	}
 }

@@ -147,10 +147,12 @@ func RunDev(versionDir string) error {
 		fmt.Println("   [DEV] Launching debug browser (HEADED) with console capture...")
 
 		s, err := dialtest.StartChromeSession(dialtest.ChromeSessionOptions{
-			Headless:  false,
-			URL:       devURL,
-			LogWriter: os.Stdout,
-			LogPrefix: "   [BROWSER]",
+			Headless:      false,
+			Role:          "dev",
+			ReuseExisting: true,
+			URL:           devURL,
+			LogWriter:     os.Stdout,
+			LogPrefix:     "   [BROWSER]",
 		})
 		if err != nil {
 			fmt.Printf("   [DEV] Warning: failed to attach debug browser: %v\n", err)

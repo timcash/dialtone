@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"dialtone/cli/src/core/browser"
-	chrome_app "dialtone/cli/src/plugins/chrome/app"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
@@ -31,6 +30,8 @@ type PreflightResult struct {
 	Name   string
 	Status string
 	Log    string
+	Cmd    string
+	Dir    string
 }
 
 type StepResult struct {
@@ -124,7 +125,14 @@ func (r *SmokeRunner) RunPreflightInDir(uiDir string, steps []CommandStep) error
 				firstErr = err
 			}
 		}
-		r.Preflight = append(r.Preflight, PreflightResult{s.Name, status, buf.String()})
+		logText := fmt.Sprintf("[dir] %s\n[cmd] %s %s\n\n%s", uiDir, s.Cmd, strings.Join(s.Args, " "), strings.TrimSpace(buf.String()))
+		r.Preflight = append(r.Preflight, PreflightResult{
+			Name:   s.Name,
+			Status: status,
+			Log:    logText,
+			Cmd:    s.Cmd + " " + strings.Join(s.Args, " "),
+			Dir:    uiDir,
+		})
 	}
 	return firstErr
 }
@@ -133,6 +141,8 @@ func (r *SmokeRunner) SetupBrowser(url string) error {
 	session, err := StartChromeSession(ChromeSessionOptions{
 		RequestedPort:   0,
 		Headless:        true,
+		Role:            "smoke",
+		ReuseExisting:   false,
 		URL:             url,
 		LogWriter:       r.MW,
 		LogPrefix:       "   [BROWSER]",
@@ -239,8 +249,14 @@ func (r *SmokeRunner) Finalize() {
 func (r *SmokeRunner) PrepareGoPluginSmoke(repoRoot, pluginName string, preflight []CommandStep) (*exec.Cmd, error) {
 	pluginDir := filepath.Join(repoRoot, "src", "plugins", pluginName, r.Opts.VersionDir)
 	uiDir := filepath.Join(pluginDir, "ui")
-	if err := r.RunPreflightInDir(uiDir, preflight); err != nil {
+
+	if err := r.RunDefaultPreflight(pluginDir, uiDir); err != nil {
 		return nil, err
+	}
+	if len(preflight) > 0 {
+		if err := r.RunPreflightInDir(uiDir, preflight); err != nil {
+			return nil, err
+		}
 	}
 
 	browser.CleanupPort(r.Opts.Port)
@@ -256,6 +272,138 @@ func (r *SmokeRunner) PrepareGoPluginSmoke(repoRoot, pluginName string, prefligh
 		return nil, err
 	}
 	return serverCmd, nil
+}
+
+func (r *SmokeRunner) RunDefaultPreflight(pluginDir, uiDir string) error {
+	goChecks := []CommandStep{
+		{Name: "Go Format", Cmd: "go", Args: []string{"fmt", "./..."}},
+		{Name: "Go Lint", Cmd: "go", Args: []string{"vet", "./..."}},
+		{Name: "Go Build", Cmd: "go", Args: []string{"build", "./..."}},
+	}
+	uiChecks := []CommandStep{
+		{Name: "UI Install", Cmd: "bun", Args: []string{"install"}},
+		{Name: "UI TypeScript Lint", Cmd: "bun", Args: []string{"run", "lint"}},
+		{Name: "UI Build", Cmd: "bun", Args: []string{"run", "build"}},
+	}
+
+	var firstErr error
+	if err := r.RunPreflightInDir(pluginDir, goChecks); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if err := r.RunPreflightInDir(uiDir, uiChecks); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if err := r.runPrettierCheck(pluginDir); err != nil && firstErr == nil {
+		firstErr = err
+	}
+
+	if err := r.runPreflightStartupProbe("Go Run", pluginDir, "go", []string{"run", "cmd/main.go"}, r.Opts.Port, 20*time.Second); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	uiRunPort, err := pickFreePort()
+	if err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if err == nil {
+		if probeErr := r.runPreflightStartupProbe("UI Run", uiDir, "bun", []string{"run", "dev", "--host", "127.0.0.1", "--port", fmt.Sprintf("%d", uiRunPort)}, uiRunPort, 20*time.Second); probeErr != nil && firstErr == nil {
+			firstErr = probeErr
+		}
+	}
+
+	return firstErr
+}
+
+func (r *SmokeRunner) runPrettierCheck(versionDir string) error {
+	r.LogMsg("[SMOKE] Preflight: Source Prettier Format/Lint (JS/TS)...\n")
+
+	allowedExt := map[string]bool{
+		".ts": true, ".tsx": true, ".js": true, ".jsx": true, ".mjs": true, ".cjs": true,
+	}
+	skipDirs := map[string]bool{
+		"node_modules": true,
+		".pixi":        true,
+		"dist":         true,
+	}
+
+	var files []string
+	walkErr := filepath.WalkDir(versionDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if skipDirs[d.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if allowedExt[strings.ToLower(filepath.Ext(path))] {
+			rel, relErr := filepath.Rel(versionDir, path)
+			if relErr != nil {
+				return relErr
+			}
+			files = append(files, rel)
+		}
+		return nil
+	})
+	if walkErr != nil {
+		r.Preflight = append(r.Preflight, PreflightResult{
+			Name:   "Source Prettier Check (JS/TS)",
+			Status: "❌ FAILED",
+			Log:    fmt.Sprintf("[dir] %s\n[cmd] bunx prettier --check <files>\n\nwalk failed: %v", versionDir, walkErr),
+			Cmd:    "bunx prettier --check <files>",
+			Dir:    versionDir,
+		})
+		return walkErr
+	}
+
+	if len(files) == 0 {
+		r.Preflight = append(r.Preflight, PreflightResult{
+			Name:   "Source Prettier Format (JS/TS)",
+			Status: "✅ PASSED",
+			Log:    fmt.Sprintf("[dir] %s\n[cmd] bunx prettier --write <files>\n\nno JS/TS files found", versionDir),
+			Cmd:    "bunx prettier --write <files>",
+			Dir:    versionDir,
+		})
+		r.Preflight = append(r.Preflight, PreflightResult{
+			Name:   "Source Prettier Lint (JS/TS)",
+			Status: "✅ PASSED",
+			Log:    fmt.Sprintf("[dir] %s\n[cmd] bunx prettier --check <files>\n\nno JS/TS files found", versionDir),
+			Cmd:    "bunx prettier --check <files>",
+			Dir:    versionDir,
+		})
+		return nil
+	}
+
+	writeErr := r.runPrettierCommand(versionDir, "Source Prettier Format (JS/TS)", "write", files)
+	checkErr := r.runPrettierCommand(versionDir, "Source Prettier Lint (JS/TS)", "check", files)
+	if writeErr != nil {
+		return writeErr
+	}
+	return checkErr
+}
+
+func (r *SmokeRunner) runPrettierCommand(versionDir, stepName, mode string, files []string) error {
+	args := append([]string{"prettier", "--" + mode}, files...)
+	cmd := exec.Command("bunx", args...)
+	cmd.Dir = versionDir
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	err := cmd.Run()
+
+	status := "✅ PASSED"
+	if err != nil {
+		status = "❌ FAILED"
+	}
+	logText := fmt.Sprintf("[dir] %s\n[cmd] bunx %s\n\n%s", versionDir, strings.Join(args, " "), strings.TrimSpace(buf.String()))
+	r.Preflight = append(r.Preflight, PreflightResult{
+		Name:   stepName,
+		Status: status,
+		Log:    logText,
+		Cmd:    "bunx " + strings.Join(args, " "),
+		Dir:    versionDir,
+	})
+	return err
 }
 
 func (r *SmokeRunner) WriteFinalReport() {
@@ -277,8 +425,15 @@ func (r *SmokeRunner) WriteFinalReport() {
 	buf.WriteString(fmt.Sprintf("# %s Plugin Smoke Test Report\n\n", r.Opts.Name))
 	buf.WriteString(fmt.Sprintf("**Generated at:** %s\n\n", time.Now().Format(time.RFC1123)))
 
-	// 1. Expected Errors (Proof of Life)
-	buf.WriteString("## 1. Expected Errors (Proof of Life)\n\n")
+	// 1. Preflight: Environment & Build
+	buf.WriteString("## 1. Preflight: Go + TypeScript/JavaScript Checks\n")
+	for _, p := range r.Preflight {
+		buf.WriteString(fmt.Sprintf("\n### %s: %s\n\n```text\n%s\n```\n", p.Name, p.Status, strings.TrimSpace(p.Log)))
+	}
+	buf.WriteString("\n---\n\n")
+
+	// 2. Expected Errors (Proof of Life)
+	buf.WriteString("## 2. Expected Errors (Proof of Life)\n\n")
 	if len(pol) == 0 {
 		buf.WriteString("❌ ERROR: Proof of Life logs missing! Logging pipeline may be broken.\n")
 	} else {
@@ -290,21 +445,14 @@ func (r *SmokeRunner) WriteFinalReport() {
 	}
 	buf.WriteString("\n---\n\n")
 
-	// 2. Real Errors & Warnings
-	buf.WriteString("## 2. Real Errors & Warnings\n\n")
+	// 3. Real Errors & Warnings
+	buf.WriteString("## 3. Real Errors & Warnings\n\n")
 	if len(real) == 0 {
 		buf.WriteString("✅ No actual issues detected.\n")
 	} else {
 		for _, e := range real {
 			buf.WriteString(fmt.Sprintf("### [%s]\n```text\n%s\n```\n", e.Level, e.Message))
 		}
-	}
-	buf.WriteString("\n---\n\n")
-
-	// 3. Preflight: Environment & Build
-	buf.WriteString("## 3. Preflight: Environment & Build\n")
-	for _, p := range r.Preflight {
-		buf.WriteString(fmt.Sprintf("\n### %s: %s\n\n```text\n%s\n```\n", p.Name, p.Status, strings.TrimSpace(p.Log)))
 	}
 	buf.WriteString("\n---\n\n")
 
@@ -393,30 +541,100 @@ func WaitForPort(port int, timeout time.Duration) error {
 	return fmt.Errorf("timeout")
 }
 
-func resolveChrome(requestedPort int, headless bool) (string, bool, error) {
-	procs, err := chrome_app.ListResources(true)
-	if err == nil {
-		for _, p := range procs {
-			if p.DebugPort > 0 {
-				resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/json/version", p.DebugPort))
-				if err == nil {
-					var data struct {
-						WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
-					}
-					json.NewDecoder(resp.Body).Decode(&data)
-					resp.Body.Close()
-					if data.WebSocketDebuggerURL != "" {
-						return data.WebSocketDebuggerURL, false, nil
-					}
-				}
+func pickFreePort() (int, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port, nil
+}
+
+func (r *SmokeRunner) runPreflightStartupProbe(name, dir, cmdName string, args []string, port int, timeout time.Duration) error {
+	r.LogMsg("[SMOKE] Preflight: %s...\n", name)
+	browser.CleanupPort(port)
+
+	cmd := exec.Command(cmdName, args...)
+	cmd.Dir = dir
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+
+	if err := cmd.Start(); err != nil {
+		r.Preflight = append(r.Preflight, PreflightResult{
+			Name:   name,
+			Status: "❌ FAILED",
+			Log:    fmt.Sprintf("[dir] %s\n[cmd] %s %s\n\nstart failed: %v", dir, cmdName, strings.Join(args, " "), err),
+			Cmd:    cmdName + " " + strings.Join(args, " "),
+			Dir:    dir,
+		})
+		return err
+	}
+
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- cmd.Wait()
+	}()
+
+	start := time.Now()
+	var probeErr error
+	waitConsumed := false
+	ready := false
+	for time.Since(start) < timeout {
+		select {
+		case err := <-waitCh:
+			waitConsumed = true
+			if err != nil {
+				probeErr = fmt.Errorf("process exited before ready: %w", err)
+			} else {
+				probeErr = fmt.Errorf("process exited before port %d became ready", port)
+			}
+			goto DONE
+		default:
+			if WaitForPort(port, 500*time.Millisecond) == nil {
+				ready = true
+				goto DONE
 			}
 		}
 	}
-	res, err := chrome_app.LaunchChrome(requestedPort, true, headless, "")
-	if err != nil {
-		return "", false, err
+	probeErr = fmt.Errorf("timeout waiting for port %d", port)
+
+DONE:
+	_ = cmd.Process.Kill()
+	shutdownWarn := ""
+	if !waitConsumed {
+		select {
+		case <-waitCh:
+		case <-time.After(5 * time.Second):
+			// Readiness is the pass criterion. Record shutdown lag as warning only.
+			shutdownWarn = fmt.Sprintf("timed out waiting for %s process shutdown", name)
+			if !ready && probeErr == nil {
+				probeErr = fmt.Errorf(shutdownWarn)
+			}
+		}
 	}
-	return res.WebsocketURL, true, nil
+	browser.CleanupPort(port)
+
+	status := "✅ PASSED"
+	if probeErr != nil {
+		status = "❌ FAILED"
+	}
+
+	logText := fmt.Sprintf("[dir] %s\n[cmd] %s %s\n\n%s", dir, cmdName, strings.Join(args, " "), strings.TrimSpace(buf.String()))
+	if probeErr != nil {
+		logText = fmt.Sprintf("%s\n\n[probe-error] %v", logText, probeErr)
+	} else if shutdownWarn != "" {
+		logText = fmt.Sprintf("%s\n\n[probe-warning] %s", logText, shutdownWarn)
+	}
+	r.Preflight = append(r.Preflight, PreflightResult{
+		Name:   name,
+		Status: status,
+		Log:    logText,
+		Cmd:    cmdName + " " + strings.Join(args, " "),
+		Dir:    dir,
+	})
+
+	return probeErr
 }
 
 func formatConsoleArgs(args []*runtime.RemoteObject) string {
