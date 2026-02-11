@@ -48,3 +48,8 @@ These logs are consumed by smoke tests and by runtime invariant checks.
 - Section resumed while not visible
 
 These checks run continuously, not only in smoke tests.
+
+## Known Problems
+
+- `src/libs/ui` currently builds through plugin-local Vite configs (`src/plugins/*/src_vN/ui`), so build hangs in a plugin UI pipeline can block smoke before section assertions execute.
+- In that case, lifecycle/invariant logging is still correct at runtime once the UI is served, but smoke coverage for section transitions may not run until the build issue is resolved.
