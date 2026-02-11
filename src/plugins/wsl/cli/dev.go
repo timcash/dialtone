@@ -1,16 +1,16 @@
 package cli
 
 import (
+	"context"
 	"dialtone/cli/src/core/browser"
 	chrome_app "dialtone/cli/src/plugins/chrome/app"
 	"fmt"
+	cdruntime "github.com/chromedp/cdproto/runtime"
+	"github.com/chromedp/chromedp"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
-	"context"
-	"github.com/chromedp/chromedp"
-	cdruntime "github.com/chromedp/cdproto/runtime"
 )
 
 func RunDev(versionDir string) error {
@@ -52,7 +52,7 @@ func RunDev(versionDir string) error {
 			if browser.IsPortOpen(port) {
 				fmt.Printf("\n🚀 WSL Plugin (%s) is READY!\n", versionDir)
 				fmt.Printf("🔗 URL: http://localhost:%d\n\n", port)
-				
+
 				// Launch Debug Browser (Headed)
 				launchDebugBrowser(port)
 				return
@@ -70,7 +70,7 @@ func RunDev(versionDir string) error {
 func launchDebugBrowser(port int) {
 	fmt.Println(">> [WSL] Dev: Launching debug browser (HEADED)...")
 	url := fmt.Sprintf("http://127.0.0.1:%d", port)
-	
+
 	res, err := chrome_app.LaunchChrome(0, true, false, url) // false = headed
 	if err != nil {
 		fmt.Printf("   [ERROR] Failed to launch browser: %v\n", err)

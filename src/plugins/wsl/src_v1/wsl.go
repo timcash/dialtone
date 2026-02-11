@@ -26,8 +26,8 @@ type InstanceInfo struct {
 }
 
 type WslPlugin struct {
-	Addr string
-	mu   sync.Mutex
+	Addr    string
+	mu      sync.Mutex
 	clients map[*websocket.Conn]bool
 }
 

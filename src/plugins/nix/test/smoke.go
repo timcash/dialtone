@@ -32,7 +32,7 @@ type smokeEntry struct {
 
 func RunSmoke(versionDir string, timeoutSec int) error {
 	fmt.Printf(">> [NIX] Smoke: START for %s\n", versionDir)
-	
+
 	cwd, _ := os.Getwd()
 	pluginDir := filepath.Join(cwd, "src", "plugins", "nix", versionDir)
 	smokeFile := filepath.Join(pluginDir, "SMOKE.md")
@@ -44,7 +44,7 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 	logFile, _ := os.Create(filepath.Join(pluginDir, "smoke_server.log"))
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-	
+
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start nix plugin: %v", err)
 	}
@@ -72,7 +72,7 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 	var mu sync.Mutex
 	var currentLogs []string
 	var lastStack string
-	
+
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
 		case *runtime.EventConsoleAPICalled:
@@ -109,7 +109,7 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 		sm = append(sm, fmt.Sprintf("\n### %s", res.name))
 		sm = append(sm, fmt.Sprintf("\n- **Status:** %s", res.status))
 		sm = append(sm, fmt.Sprintf("- **Conditions:** %s", res.conditions))
-		
+
 		if res.errorMsg != "" {
 			sm = append(sm, fmt.Sprintf("- **Error:** `%s`", res.errorMsg))
 			if res.stackTrace != "" {
@@ -153,7 +153,7 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 	// MANUAL TIMEOUT WRAPPER
 	runStep := func(name string, conditions string, actions chromedp.Action) error {
 		fmt.Printf(">> [NIX] Step: %s (10s limit)\n", name)
-		
+
 		mu.Lock()
 		lastStack = ""
 		mu.Unlock()
@@ -183,7 +183,7 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 			buf = b
 			return nil
 		}))
-		
+
 		shotName := fmt.Sprintf("smoke_step_%d.png", len(testResults))
 		if len(buf) > 0 {
 			os.WriteFile(filepath.Join(pluginDir, shotName), buf, 0644)
@@ -199,7 +199,7 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 		mu.Lock()
 		logsCopy := make([]string, len(currentLogs))
 		copy(logsCopy, currentLogs)
-		
+
 		entry := smokeEntry{
 			name:       name,
 			conditions: conditions,
@@ -213,7 +213,7 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 		mu.Unlock()
 
 		appendToReport(entry)
-		
+
 		if err != nil {
 			return fmt.Errorf("smoke test stopped at step '%s': %v", name, err)
 		}
@@ -252,26 +252,32 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 	}
 
 	// TEST SEQUENCE
-	
+
 	if err := runStep("1. Verify Browser Error Capture", "Navigate to home and verify captured log", chromedp.Tasks{
 		chromedp.EmulateViewport(1280, 800),
 		chromedp.Navigate(fmt.Sprintf("http://127.0.0.1:%d", port)),
 		pollJS(`document.querySelector("#nix-hero").classList.contains("is-visible")`, 5*time.Second),
 		chromedp.WaitVisible("#viz-container", chromedp.ByQuery),
 		chromedp.Evaluate(`console.error('[SMOKE-VERIFY-ERR] Log pipeline verified')`, nil),
-	}); err != nil { return err }
+	}); err != nil {
+		return err
+	}
 
 	if err := runStep("2. Hero Section Validation", "Viz container and marketing overlay visible", chromedp.Tasks{
 		chromedp.WaitVisible("#viz-container", chromedp.ByQuery),
 		chromedp.WaitVisible("#nix-hero.is-visible .marketing-overlay", chromedp.ByQuery),
-	}); err != nil { return err }
+	}); err != nil {
+		return err
+	}
 
 	if err := runStep("3. Documentation Section Validation", "Navigate to nix-docs and verify content", chromedp.Tasks{
 		navigate("nix-docs"),
 		chromedp.WaitVisible("#nix-docs.is-visible", chromedp.ByQuery),
 		chromedp.WaitVisible("#nix-docs h1", chromedp.ByQuery),
 		chromedp.WaitVisible("#nix-docs ul", chromedp.ByQuery),
-	}); err != nil { return err }
+	}); err != nil {
+		return err
+	}
 
 	if err := runStep("4. Navigate to Nix Table and Verify Rendering", "Switch to nix-table and verify fullscreen layout + hidden header/menu", chromedp.Tasks{
 		navigate("nix-table"),
@@ -280,7 +286,9 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 		pollJS(`getComputedStyle(document.getElementById('global-menu')).display === 'none'`, 2*time.Second),
 		chromedp.WaitVisible(".explorer-container", chromedp.ByQuery),
 		chromedp.WaitVisible("#start-node", chromedp.ByQuery),
-	}); err != nil { return err }
+	}); err != nil {
+		return err
+	}
 
 	if err := runStep("5. Spawn Two Nix Nodes", "Two nodes appear in table", chromedp.Tasks{
 		chromedp.Click(`#start-node`, chromedp.ByQuery),
@@ -288,17 +296,23 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 		chromedp.Click(`#start-node`, chromedp.ByQuery),
 		chromedp.WaitVisible("#proc-2", chromedp.ByQuery),
 		chromedp.WaitVisible(".node-row", chromedp.ByQuery),
-	}); err != nil { return err }
+	}); err != nil {
+		return err
+	}
 
 	if err := runStep("6. Selective Termination (proc-1)", "proc-1 status changes to STOPPED", chromedp.Tasks{
 		chromedp.WaitVisible("#proc-1 .stop-btn", chromedp.ByQuery),
 		chromedp.Click("#proc-1 .stop-btn", chromedp.ByQuery),
 		chromedp.WaitVisible("#proc-1 .status-badge[data-status-text='stopped']", chromedp.ByQuery),
-	}); err != nil { return err }
+	}); err != nil {
+		return err
+	}
 
 	if err := runStep("7. Verify proc-2 Persistence", "proc-2 remains RUNNING", chromedp.Tasks{
 		chromedp.WaitVisible("#proc-2 .status-badge[data-status-text='running']", chromedp.ByQuery),
-	}); err != nil { return err }
+	}); err != nil {
+		return err
+	}
 
 	fmt.Printf(">> [NIX] Smoke: COMPLETE. Report at %s\n", smokeFile)
 	return nil
