@@ -7,14 +7,14 @@
    [BROWSER] [log] "[SectionManager] 🧭 INITIAL LOAD #home"
    [BROWSER] [log] "[SectionManager] 📦 LOADING #home..."
    [BROWSER] [error] "[PROOFOFLIFE] Intentional Browser Test Error"
-[SMOKE] Step Start: Hero Section Validation
    [BROWSER] [log] "[SectionManager] 📦 LOADING #docs..."
-   [BROWSER] [log] "[SectionManager] ✅ LOADED #home (66ms)"
+[SMOKE] Step Start: Hero Section Validation
+   [BROWSER] [log] "[SectionManager] ✅ LOADED #home (58ms)"
    [BROWSER] [log] "[SectionManager] ✨ START #home"
    [BROWSER] [log] "[hero-viz] SLEEP"
    [BROWSER] [log] "[SectionManager] 🚀 RESUME #home"
    [BROWSER] [log] "[hero-viz] AWAKE"
-   [BROWSER] [log] "[SectionManager] ✅ LOADED #docs (48ms)"
+   [BROWSER] [log] "[SectionManager] ✅ LOADED #docs (41ms)"
    [BROWSER] [log] "[SectionManager] ✨ START #docs"
    [BROWSER] [log] "[docs-viz] SLEEP"
 [SMOKE] Step PASSED: Hero Section Validation
@@ -61,6 +61,9 @@
    [BROWSER] [log] "[table-viz] SLEEP"
    [BROWSER] [log] "[SectionManager] 🚀 RESUME #home"
    [BROWSER] [log] "[hero-viz] AWAKE"
+   [BROWSER] [log] "[SectionManager] 💤 PAUSE #docs"
+   [BROWSER] [log] "[docs-viz] SLEEP"
 [SMOKE] Step PASSED: Return Home
 [SMOKE] Generating markdown report...
 [SMOKE] COMPLETE. Report at /Users/dev/code/dialtone/src/plugins/template/src_v2/smoke/SMOKE.md
+[SMOKE] Cleaning up browser processes using chrome plugin API...

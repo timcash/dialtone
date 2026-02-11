@@ -1,6 +1,6 @@
 # Template Plugin Smoke Test Report
 
-**Generated at:** Tue, 10 Feb 2026 17:00:51 PST
+**Generated at:** Tue, 10 Feb 2026 17:04:57 PST
 
 ## 1. Expected Errors (Proof of Life)
 
@@ -24,7 +24,7 @@
 ```text
 bun install v1.2.22 (6bafe260)
 
-Checked 20 installs across 67 packages (no changes) [24.00ms]
+Checked 20 installs across 67 packages (no changes) [22.00ms]
 ```
 
 ### Lint: ✅ PASSED
@@ -50,7 +50,7 @@ dist/assets/Typing-BI9S19x9.js    0.56 kB │ gzip:   0.34 kB
 dist/assets/index-CnCedI4T.js     0.66 kB │ gzip:   0.43 kB
 dist/assets/index-Cw6LpDXf.js     9.98 kB │ gzip:   3.50 kB
 dist/assets/index-DYnRDjrK.js   468.29 kB │ gzip: 118.39 kB
-✓ built in 604ms
+✓ built in 654ms
 ```
 
 ---
@@ -76,12 +76,12 @@ dist/assets/index-DYnRDjrK.js   468.29 kB │ gzip: 118.39 kB
 [log] "[SectionManager] 📦 LOADING #home..."
 [error] "[PROOFOFLIFE] Intentional Browser Test Error"
 [log] "[SectionManager] 📦 LOADING #docs..."
-[log] "[SectionManager] ✅ LOADED #home (66ms)"
+[log] "[SectionManager] ✅ LOADED #home (58ms)"
 [log] "[SectionManager] ✨ START #home"
 [log] "[hero-viz] SLEEP"
 [log] "[SectionManager] 🚀 RESUME #home"
 [log] "[hero-viz] AWAKE"
-[log] "[SectionManager] ✅ LOADED #docs (48ms)"
+[log] "[SectionManager] ✅ LOADED #docs (41ms)"
 [log] "[SectionManager] ✨ START #docs"
 [log] "[docs-viz] SLEEP"
 ```
@@ -164,6 +164,8 @@ dist/assets/index-DYnRDjrK.js   468.29 kB │ gzip: 118.39 kB
 [log] "[table-viz] SLEEP"
 [log] "[SectionManager] 🚀 RESUME #home"
 [log] "[hero-viz] AWAKE"
+[log] "[SectionManager] 💤 PAUSE #docs"
+[log] "[docs-viz] SLEEP"
 ```
 
 ![Return Home](smoke_step_6.png)

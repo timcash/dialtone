@@ -59,6 +59,7 @@ type SmokeRunner struct {
 	Ctx       context.Context
 	Cancel    context.CancelFunc
 	LastLogIdx int
+	IsNewBrowser bool
 }
 
 func NewSmokeRunner(opts SmokeOptions) (*SmokeRunner, error) {
@@ -112,10 +113,11 @@ func (r *SmokeRunner) RunPreflight(repoRoot string, steps []struct{ Name, Cmd st
 }
 
 func (r *SmokeRunner) SetupBrowser(url string) error {
-	wsURL, _, err := resolveChrome(0, true)
+	wsURL, isNew, err := resolveChrome(0, true)
 	if err != nil {
 		return err
 	}
+	r.IsNewBrowser = isNew
 
 	allocCtx, _ := chromedp.NewRemoteAllocator(context.Background(), wsURL)
 	r.Ctx, r.Cancel = chromedp.NewContext(allocCtx)
@@ -210,6 +212,11 @@ func (r *SmokeRunner) Finalize() {
 	
 	smokeFile := filepath.Join(r.Opts.SmokeDir, "SMOKE.md")
 	r.LogMsg("[SMOKE] COMPLETE. Report at %s\n", smokeFile)
+
+	if r.IsNewBrowser {
+		r.LogMsg("[SMOKE] Cleaning up browser processes using chrome plugin API...\n")
+		chrome_app.KillAllResources()
+	}
 
 	if r.LogF != nil {
 		r.LogF.Close()
