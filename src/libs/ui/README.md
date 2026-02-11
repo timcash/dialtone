@@ -11,6 +11,40 @@
 - Shared base styles (`style.css`)
 - App bootstrap helper (`setupApp`)
 
+## Section Visibility API
+
+Per-section visibility for header/menu is configured through `SectionConfig.header`.
+
+```ts
+sections.register('home', {
+  containerId: 'home',
+  header: { visible: true, menuVisible: true },
+  load: async () => { /* ... */ }
+})
+
+sections.register('docs', {
+  containerId: 'docs',
+  header: { visible: false, menuVisible: false },
+  load: async () => { /* ... */ }
+})
+```
+
+Supported `header` fields:
+
+- `visible?: boolean` controls `.header-title`
+- `menuVisible?: boolean` controls `.top-right-controls`
+- `title?: string`
+- `subtitle?: string`
+- `telemetry?: boolean`
+- `version?: boolean`
+
+At runtime, `SectionManager` also toggles:
+
+- `body.hide-header` when `header.visible === false`
+- `body.hide-menu` when `header.menuVisible === false`
+
+These classes are part of `src/libs/ui/style.css` and can be extended by plugin-local CSS.
+
 ## Independence Contract
 
 This library is intentionally plugin-agnostic:
@@ -35,6 +69,16 @@ It expects only a generic DOM structure (header/menu/sections) and plugin-provid
 - `NAVIGATE AWAY`
 
 These logs are consumed by smoke tests and by runtime invariant checks.
+
+## DOM Contract
+
+`setupApp`/`SectionManager` assumes these shared elements exist:
+
+- `.header-title`
+- `#header-subtitle` (optional but recommended)
+- `.top-right-controls`
+- `#global-menu-toggle`
+- `#global-menu-panel`
 
 ## Live Invariant Checks
 

@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 )
 
@@ -18,19 +17,13 @@ func RunBuild(versionDir string) error {
 	}
 
 	fmt.Printf(">> [DAG] Installing UI dependencies in %s...\n", uiDir)
-	installCmd := exec.Command("bun", "install")
-	installCmd.Dir = uiDir
-	installCmd.Stdout = os.Stdout
-	installCmd.Stderr = os.Stderr
+	installCmd := runBun(cwd, uiDir, "install", "--force")
 	if err := installCmd.Run(); err != nil {
 		return fmt.Errorf("UI install failed: %v", err)
 	}
 
 	fmt.Printf(">> [DAG] Building UI in %s...\n", uiDir)
-	cmd := exec.Command("bun", "run", "build")
-	cmd.Dir = uiDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd := runBun(cwd, uiDir, "run", "build")
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("UI build failed: %v", err)

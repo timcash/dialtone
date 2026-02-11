@@ -5,17 +5,17 @@ A section-based Dialtone plugin for exploring DAGs with a Three.js hero toy, cle
 ## CLI Commands
 
 ```bash
-# 🛠️ Development: Start Go host (serves built UI)
-./dialtone.sh dag dev
+# 🛠️ Development: Start Vite dev server + debug browser session
+./dialtone.sh dag dev src_v2
 
 # 🏗️ Build: Compile UI assets
-./dialtone.sh dag build src_v1
+./dialtone.sh dag build src_v2
 
 # ✅ Lint: Go + TypeScript checks
-./dialtone.sh dag lint src_v1
+./dialtone.sh dag lint src_v2
 
 # 💨 Smoke Test: Build + Automated UI verification (Generates SMOKE.md)
-./dialtone.sh dag smoke src_v1
+./dialtone.sh dag smoke src_v2
 ```
 
 ## Smoke Test Plan (Build Order)

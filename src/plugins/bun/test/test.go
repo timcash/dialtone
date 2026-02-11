@@ -12,15 +12,13 @@ import (
 )
 
 func init() {
-	test.Register("go-cli-stdout-propagates", "go", []string{"plugin", "go", "integration"}, RunStdoutPropagation)
-	test.Register("go-cli-stderr-exit-propagates", "go", []string{"plugin", "go", "integration"}, RunStderrAndExitPropagation)
+	test.Register("bun-cli-stdout-propagates", "bun", []string{"plugin", "bun", "integration"}, RunStdoutPropagation)
+	test.Register("bun-cli-stderr-exit-propagates", "bun", []string{"plugin", "bun", "integration"}, RunStderrAndExitPropagation)
 }
 
-// RunAll is the standard entry point required by project rules.
-// It uses the registry to find and run all tests for this plugin.
 func RunAll() error {
-	logger.LogInfo("Running go plugin suite...")
-	return test.RunPlugin("go")
+	logger.LogInfo("Running bun plugin suite...")
+	return test.RunPlugin("bun")
 }
 
 func RunStdoutPropagation() error {
@@ -29,14 +27,14 @@ func RunStdoutPropagation() error {
 		return err
 	}
 	dialtoneSh := filepath.Join(repoRoot, "dialtone.sh")
-	marker := "GO_STDOUT_MARKER_42"
+	marker := "BUN_STDOUT_MARKER_42"
 
-	cmd := exec.Command(dialtoneSh, "go", "exec", "run", "./src/plugins/go/test/fixtures/stdout/main.go", marker)
+	cmd := exec.Command(dialtoneSh, "bun", "exec", "--eval", fmt.Sprintf("console.log(%q)", marker))
 	cmd.Dir = repoRoot
 	out, err := cmd.CombinedOutput()
 	output := string(out)
 	if err != nil {
-		return fmt.Errorf("expected success from go stdout propagation command, got error: %w\noutput:\n%s", err, output)
+		return fmt.Errorf("expected success from bun stdout propagation command, got error: %w\noutput:\n%s", err, output)
 	}
 	if !strings.Contains(output, marker) {
 		return fmt.Errorf("stdout marker missing from dialtone output\nexpected marker: %s\noutput:\n%s", marker, output)
@@ -50,15 +48,14 @@ func RunStderrAndExitPropagation() error {
 		return err
 	}
 	dialtoneSh := filepath.Join(repoRoot, "dialtone.sh")
-	stderrMarker := "GO_STDERR_MARKER_42"
-	expectedCode := "17"
+	stderrMarker := "BUN_STDERR_MARKER_42"
 
-	cmd := exec.Command(dialtoneSh, "go", "exec", "run", "./src/plugins/go/test/fixtures/stderr_exit/main.go", stderrMarker, expectedCode)
+	cmd := exec.Command(dialtoneSh, "bun", "exec", "--eval", fmt.Sprintf("console.error(%q); process.exit(23)", stderrMarker))
 	cmd.Dir = repoRoot
 	out, err := cmd.CombinedOutput()
 	output := string(out)
 	if err == nil {
-		return fmt.Errorf("expected non-zero exit from go stderr/exit command, got success\noutput:\n%s", output)
+		return fmt.Errorf("expected non-zero exit from bun stderr/exit command, got success\noutput:\n%s", output)
 	}
 
 	var exitErr *exec.ExitError
@@ -71,8 +68,8 @@ func RunStderrAndExitPropagation() error {
 	if !strings.Contains(output, stderrMarker) {
 		return fmt.Errorf("stderr marker missing from dialtone output\nexpected marker: %s\noutput:\n%s", stderrMarker, output)
 	}
-	if !strings.Contains(output, "exit status 17") {
-		return fmt.Errorf("underlying program exit status not propagated in output\nexpected to find: exit status 17\noutput:\n%s", output)
+	if !strings.Contains(output, "exit status 23") {
+		return fmt.Errorf("underlying program exit status not propagated in output\nexpected to find: exit status 23\noutput:\n%s", output)
 	}
 	return nil
 }

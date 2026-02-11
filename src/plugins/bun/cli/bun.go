@@ -8,6 +8,7 @@ import (
 
 	"dialtone/cli/src/core/config"
 	"dialtone/cli/src/core/logger"
+	bun_test "dialtone/cli/src/plugins/bun/test"
 )
 
 func RunBun(args []string) {
@@ -26,6 +27,8 @@ func RunBun(args []string) {
 		runExec(append([]string{"run"}, restArgs...))
 	case "x":
 		runExec(append([]string{"x"}, restArgs...))
+	case "test":
+		runTest(restArgs)
 	case "help", "-h", "--help":
 		printBunUsage()
 	default:
@@ -41,7 +44,18 @@ func printBunUsage() {
 	fmt.Println("  exec <args...>  Run arbitrary bun command using local toolchain")
 	fmt.Println("  run <args...>   Alias for 'exec run <args...>'")
 	fmt.Println("  x <args...>     Alias for 'exec x <args...>'")
+	fmt.Println("  test            Run bun plugin integration tests")
 	fmt.Println("  help            Show this help message")
+}
+
+func runTest(args []string) {
+	if len(args) > 0 {
+		logger.LogFatal("Usage: ./dialtone.sh bun test")
+	}
+
+	if err := bun_test.RunAll(); err != nil {
+		logger.LogFatal("Bun tests failed: %v", err)
+	}
 }
 
 func runExec(args []string) {
