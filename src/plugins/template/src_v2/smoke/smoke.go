@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"dialtone/cli/src/libs/dialtest"
 )
@@ -26,10 +27,13 @@ func Run(versionDir string) error {
 	smokeDir := filepath.Join(pluginDir, "smoke")
 
 	runner, err := dialtest.NewSmokeRunner(dialtest.SmokeOptions{
-		Name:       "Template",
-		VersionDir: versionDir,
-		Port:       8080,
-		SmokeDir:   smokeDir,
+		Name:           "Template",
+		VersionDir:     versionDir,
+		Port:           8080,
+		SmokeDir:       smokeDir,
+		TotalTimeout:   30 * time.Second,
+		StepTimeout:    5 * time.Second,
+		PanicOnTimeout: true,
 	})
 	if err != nil {
 		return err
