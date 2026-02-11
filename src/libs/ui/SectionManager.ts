@@ -127,6 +127,13 @@ export class SectionManager {
   async navigateTo(id: string, options: { updateHash?: boolean } = {}) {
     const updateHash = options.updateHash ?? true;
     if (this.debug) console.log(`[SectionManager] 🧭 NAVIGATING TO #${id}`);
+    
+    // Immediate header update for snappy UI
+    const config = this.configs.get(id);
+    if (config) {
+      this.updateHeader(config.header, document.getElementById(id) || undefined);
+    }
+
     if (updateHash && window.location.hash !== `#${id}`) {
       window.location.hash = `#${id}`;
     }
@@ -191,9 +198,12 @@ export class SectionManager {
 
     const isVisible = config?.visible ?? true;
     this.headerEl.classList.toggle("is-hidden", !isVisible);
-    this.headerEl.style.display = isVisible ? "flex" : "none";
-
-    if (!isVisible) return;
+    
+    if (!isVisible) {
+      return;
+    } else {
+      this.headerEl.style.display = "flex";
+    }
 
     if (this.titleEl && config?.title) {
       this.titleEl.textContent = config.title;

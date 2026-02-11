@@ -56,6 +56,9 @@ func runExec(args []string) {
 
 	depsDir := config.GetDialtoneEnv()
 	bunBin := filepath.Join(depsDir, "bun", "bin", "bun")
+	if os.Getenv("OS") == "Windows_NT" {
+		bunBin += ".exe"
+	}
 	if _, err := os.Stat(bunBin); os.IsNotExist(err) {
 		logger.LogFatal("Bun toolchain not found at %s. Run './dialtone.sh install' first.", bunBin)
 	}

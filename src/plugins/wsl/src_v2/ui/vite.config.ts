@@ -1,15 +1,15 @@
-import { defineConfig } from 'vite';
-import { resolve } from 'path';
+import { defineConfig } from "vite";
+import { resolve } from "path";
 
 export default defineConfig({
-  root: '.',
+  root: ".",
   resolve: {
     alias: {
-      '@ui': resolve(__dirname, '../../../../ui'),
+      "@ui": resolve(__dirname, "../../../../../libs/ui"),
     },
   },
   build: {
-    outDir: 'dist',
+    outDir: "dist",
     emptyOutDir: true,
   },
   server: {

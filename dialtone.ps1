@@ -131,7 +131,7 @@ if ($Command -eq "install") {
     else {
         Write-Host "Go already installed in $GoDir"
     }
-    exit 0
+    # Do not exit here, continue to run src/cmd/dev/main.go install
 }
 
 # --- RUN COMMAND ---
