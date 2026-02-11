@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"dialtone/cli/src/core/browser"
 	chrome_app "dialtone/cli/src/plugins/chrome/app"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
@@ -47,6 +48,12 @@ type SmokeOptions struct {
 	SmokeDir   string
 }
 
+type CommandStep struct {
+	Name string
+	Cmd  string
+	Args []string
+}
+
 type SmokeRunner struct {
 	Opts      SmokeOptions
 	LogF      *os.File
@@ -55,11 +62,11 @@ type SmokeRunner struct {
 	Mu        sync.Mutex
 	Steps     []StepResult
 	Preflight []PreflightResult
-	
-	Ctx       context.Context
-	Cancel    context.CancelFunc
+
+	Ctx        context.Context
+	Cancel     context.CancelFunc
 	LastLogIdx int
-	IsNewBrowser bool
+	Browser    *ChromeSession
 }
 
 func NewSmokeRunner(opts SmokeOptions) (*SmokeRunner, error) {
@@ -67,7 +74,7 @@ func NewSmokeRunner(opts SmokeOptions) (*SmokeRunner, error) {
 		opts.Port = 8080
 	}
 	os.MkdirAll(opts.SmokeDir, 0755)
-	
+
 	smokeLogFile := filepath.Join(opts.SmokeDir, "smoke.log")
 	logF, err := os.Create(smokeLogFile)
 	if err != nil {
@@ -87,9 +94,19 @@ func (r *SmokeRunner) LogMsg(format string, a ...interface{}) {
 	fmt.Fprintf(r.MW, format, a...)
 }
 
-func (r *SmokeRunner) RunPreflight(repoRoot string, steps []struct{ Name, Cmd string; Args []string }) error {
+func (r *SmokeRunner) RunPreflight(repoRoot string, steps []struct {
+	Name, Cmd string
+	Args      []string
+}) error {
 	uiDir := filepath.Join(repoRoot, "src", "plugins", strings.ToLower(r.Opts.Name), r.Opts.VersionDir, "ui")
-	
+	cmdSteps := make([]CommandStep, 0, len(steps))
+	for _, s := range steps {
+		cmdSteps = append(cmdSteps, CommandStep{Name: s.Name, Cmd: s.Cmd, Args: s.Args})
+	}
+	return r.RunPreflightInDir(uiDir, cmdSteps)
+}
+
+func (r *SmokeRunner) RunPreflightInDir(uiDir string, steps []CommandStep) error {
 	var firstErr error
 	for _, s := range steps {
 		r.LogMsg("[SMOKE] Preflight: %s...\n", s.Name)
@@ -99,7 +116,7 @@ func (r *SmokeRunner) RunPreflight(repoRoot string, steps []struct{ Name, Cmd st
 		cmd.Stdout = &buf
 		cmd.Stderr = &buf
 		err := cmd.Run()
-		
+
 		status := "✅ PASSED"
 		if err != nil {
 			status = "❌ FAILED"
@@ -113,32 +130,27 @@ func (r *SmokeRunner) RunPreflight(repoRoot string, steps []struct{ Name, Cmd st
 }
 
 func (r *SmokeRunner) SetupBrowser(url string) error {
-	wsURL, isNew, err := resolveChrome(0, true)
+	session, err := StartChromeSession(ChromeSessionOptions{
+		RequestedPort:   0,
+		Headless:        true,
+		URL:             url,
+		LogWriter:       r.MW,
+		LogPrefix:       "   [BROWSER]",
+		EmitProofOfLife: true,
+		OnEntry: func(entry ConsoleEntry) {
+			r.Mu.Lock()
+			r.Entries = append(r.Entries, entry)
+			r.Mu.Unlock()
+		},
+	})
 	if err != nil {
 		return err
 	}
-	r.IsNewBrowser = isNew
-
-	allocCtx, _ := chromedp.NewRemoteAllocator(context.Background(), wsURL)
-	r.Ctx, r.Cancel = chromedp.NewContext(allocCtx)
-	
-	chromedp.ListenTarget(r.Ctx, func(ev interface{}) {
-		switch ev := ev.(type) {
-		case *runtime.EventConsoleAPICalled:
-			msg := formatConsoleArgs(ev.Args)
-			r.Mu.Lock()
-			r.Entries = append(r.Entries, ConsoleEntry{Level: string(ev.Type), Message: msg})
-			r.Mu.Unlock()
-			r.LogMsg("   [BROWSER] [%s] %s\n", ev.Type, msg)
-		}
-	})
-
 	r.LogMsg("[SMOKE] Navigating to %s...\n", url)
-	return chromedp.Run(r.Ctx,
-		chromedp.EmulateViewport(1280, 800),
-		chromedp.Navigate(url),
-		chromedp.Evaluate(`console.error('[PROOFOFLIFE] Intentional Browser Test Error')`, nil),
-	)
+	r.Browser = session
+	r.Ctx = session.Ctx
+	r.Cancel = session.cancel
+	return nil
 }
 
 func (r *SmokeRunner) StartServer(cmd *exec.Cmd) error {
@@ -162,7 +174,7 @@ func (r *SmokeRunner) StartServer(cmd *exec.Cmd) error {
 func (r *SmokeRunner) Step(name string, actions chromedp.Action) {
 	r.LogMsg("[SMOKE] Step Start: %s\n", name)
 	err := chromedp.Run(r.Ctx, actions)
-	
+
 	var buf []byte
 	_ = chromedp.Run(r.Ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 		b, _ := page.CaptureScreenshot().Do(ctx)
@@ -198,7 +210,9 @@ func (r *SmokeRunner) Step(name string, actions chromedp.Action) {
 }
 
 func (r *SmokeRunner) Finalize() {
-	if r.Cancel != nil {
+	if r.Browser != nil {
+		r.Browser.Close()
+	} else if r.Cancel != nil {
 		r.Cancel()
 	}
 
@@ -209,13 +223,12 @@ func (r *SmokeRunner) Finalize() {
 
 	r.LogMsg("[SMOKE] Generating markdown report...\n")
 	r.WriteFinalReport()
-	
+
 	smokeFile := filepath.Join(r.Opts.SmokeDir, "SMOKE.md")
 	r.LogMsg("[SMOKE] COMPLETE. Report at %s\n", smokeFile)
 
-	if r.IsNewBrowser {
+	if r.Browser != nil && r.Browser.IsNewBrowser {
 		r.LogMsg("[SMOKE] Cleaning up browser processes using chrome plugin API...\n")
-		chrome_app.KillAllResources()
 	}
 
 	if r.LogF != nil {
@@ -223,9 +236,31 @@ func (r *SmokeRunner) Finalize() {
 	}
 }
 
+func (r *SmokeRunner) PrepareGoPluginSmoke(repoRoot, pluginName string, preflight []CommandStep) (*exec.Cmd, error) {
+	pluginDir := filepath.Join(repoRoot, "src", "plugins", pluginName, r.Opts.VersionDir)
+	uiDir := filepath.Join(pluginDir, "ui")
+	if err := r.RunPreflightInDir(uiDir, preflight); err != nil {
+		return nil, err
+	}
+
+	browser.CleanupPort(r.Opts.Port)
+	serverCmd := exec.Command("go", "run", "cmd/main.go")
+	serverCmd.Dir = pluginDir
+	if err := r.StartServer(serverCmd); err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf("http://127.0.0.1:%d", r.Opts.Port)
+	if err := r.SetupBrowser(url); err != nil {
+		_ = serverCmd.Process.Kill()
+		return nil, err
+	}
+	return serverCmd, nil
+}
+
 func (r *SmokeRunner) WriteFinalReport() {
 	smokeFile := filepath.Join(r.Opts.SmokeDir, "SMOKE.md")
-	
+
 	var pol []ConsoleEntry
 	var real []ConsoleEntry
 	r.Mu.Lock()
@@ -275,7 +310,7 @@ func (r *SmokeRunner) WriteFinalReport() {
 
 	// 4. UI & Interactivity
 	buf.WriteString("## 4. UI & Interactivity\n")
-	
+
 	// Lifecycle Verification
 	buf.WriteString("\n### Lifecycle Verification Summary\n\n")
 	r.verifyLifecycle(&buf)
@@ -308,7 +343,7 @@ func (r *SmokeRunner) WriteFinalReport() {
 func (r *SmokeRunner) verifyLifecycle(buf *bytes.Buffer) {
 	events := []string{"LOADING", "LOADED", "START", "RESUME", "PAUSE", "AWAKE", "SLEEP"}
 	found := make(map[string]bool)
-	
+
 	for _, step := range r.Steps {
 		for _, log := range step.Logs {
 			for _, event := range events {
@@ -321,7 +356,7 @@ func (r *SmokeRunner) verifyLifecycle(buf *bytes.Buffer) {
 
 	buf.WriteString("| Event | Status | Description |\n")
 	buf.WriteString("|---|---|---|\n")
-	
+
 	eventMeta := []struct{ name, desc string }{
 		{"LOADING", "Section chunk fetching initiated"},
 		{"LOADED", "Section code loaded into memory"},
