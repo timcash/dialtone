@@ -4,6 +4,9 @@ import (
 	"dialtone/cli/src/plugins/wsl/test"
 	"flag"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 )
 
 func Run(args []string) error {
@@ -15,14 +18,23 @@ func Run(args []string) error {
 	command := args[0]
 	switch command {
 	case "smoke":
-		smokeFlags := flag.NewFlagSet("wsl smoke", flag.ContinueOnError)
-		timeout := smokeFlags.Int("smoke-timeout", 120, "Timeout in seconds for smoke test")
-
 		if len(args) < 2 {
 			return fmt.Errorf("usage: wsl smoke <dir> [--smoke-timeout <sec>]")
 		}
-
 		dir := args[1]
+
+		cwd, _ := os.Getwd()
+		smokeFile := filepath.Join(cwd, "src", "plugins", "wsl", dir, "smoke", "smoke.go")
+		if _, err := os.Stat(smokeFile); err == nil {
+			fmt.Printf(">> [WSL] Running standalone Smoke Test for %s...\n", dir)
+			cmd := exec.Command("go", "run", smokeFile, dir)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			return cmd.Run()
+		}
+
+		smokeFlags := flag.NewFlagSet("wsl smoke", flag.ContinueOnError)
+		timeout := smokeFlags.Int("smoke-timeout", 120, "Timeout in seconds for smoke test")
 		smokeFlags.Parse(args[2:])
 
 		// Always build before smoke test

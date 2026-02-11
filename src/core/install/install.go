@@ -62,6 +62,8 @@ func bunArchiveName() (string, error) {
 		return "bun-linux-x64.zip", nil
 	case runtime.GOOS == "linux" && runtime.GOARCH == "arm64":
 		return "bun-linux-aarch64.zip", nil
+	case runtime.GOOS == "windows" && runtime.GOARCH == "amd64":
+		return "bun-windows-x64.zip", nil
 	default:
 		return "", fmt.Errorf("unsupported platform for bun: %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
@@ -70,6 +72,10 @@ func bunArchiveName() (string, error) {
 func installBun(depsDir string, step string) {
 	bunDir := filepath.Join(depsDir, "bun")
 	bunBin := filepath.Join(bunDir, "bin", "bun")
+	if runtime.GOOS == "windows" {
+		bunBin = filepath.Join(bunDir, "bin", "bun.exe")
+	}
+	
 	if _, err := os.Stat(bunBin); err == nil {
 		logItemStatus("Bun", BunVersion, bunBin, true)
 		return
@@ -85,15 +91,27 @@ func installBun(depsDir string, step string) {
 	archivePath := filepath.Join(depsDir, archive)
 	extractDir := filepath.Join(depsDir, "bun-extract")
 
-	runSimpleShell(fmt.Sprintf("curl -L -o %s %s", archivePath, downloadURL))
-	runSimpleShell(fmt.Sprintf("rm -rf %s && mkdir -p %s/bin", bunDir, bunDir))
-	runSimpleShell(fmt.Sprintf("rm -rf %s && mkdir -p %s", extractDir, extractDir))
-	runSimpleShell(fmt.Sprintf("unzip -q %s -d %s", archivePath, extractDir))
-	runSimpleShell(fmt.Sprintf("cp -f %s/bun-*/bun %s/bin/bun", extractDir, bunDir))
-	runSimpleShell(fmt.Sprintf("chmod +x %s/bin/bun", bunDir))
-	runSimpleShell(fmt.Sprintf("rm -rf %s %s", archivePath, extractDir))
+	if runtime.GOOS == "windows" {
+		psCmd := fmt.Sprintf("Invoke-WebRequest -Uri %s -OutFile %s; Expand-Archive -Path %s -DestinationPath %s -Force; New-Item -ItemType Directory -Force -Path %s/bin; Copy-Item -Path %s/bun-windows-x64/bun.exe -Destination %s/bin/bun.exe -Force; Remove-Item -Recurse -Force %s, %s", 
+			downloadURL, archivePath, archivePath, extractDir, bunDir, extractDir, bunDir, archivePath, extractDir)
+		cmd := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", psCmd)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			logger.LogFatal("Failed to install Bun on Windows: %v", err)
+		}
+	} else {
+		runSimpleShell(fmt.Sprintf("curl -L -o %s %s", archivePath, downloadURL))
+		runSimpleShell(fmt.Sprintf("rm -rf %s && mkdir -p %s/bin", bunDir, bunDir))
+		runSimpleShell(fmt.Sprintf("rm -rf %s && mkdir -p %s", extractDir, extractDir))
+		runSimpleShell(fmt.Sprintf("unzip -q %s -d %s", archivePath, extractDir))
+		runSimpleShell(fmt.Sprintf("cp -f %s/bun-*/bun %s/bin/bun", extractDir, bunDir))
+		runSimpleShell(fmt.Sprintf("chmod +x %s/bin/bun", bunDir))
+		runSimpleShell(fmt.Sprintf("rm -rf %s %s", archivePath, extractDir))
+	}
 	logItemStatus("Bun", BunVersion, bunBin, false)
 }
+
 
 // RunInstall handles the 'install' command
 func RunInstall(args []string) {
@@ -263,10 +281,26 @@ func installLocalAuto() {
 	case runtime.GOOS == "linux" && runtime.GOARCH == "arm64":
 		logger.LogInfo("Linux ARM64 detected (likely Raspberry Pi).")
 		installLocalDepsLinuxARM64()
+	case runtime.GOOS == "windows":
+		installLocalDepsWindows()
 	default:
 		logger.LogFatal("Unsupported platform: %s/%s. Use --linux-wsl or --macos-arm explicitly.", runtime.GOOS, runtime.GOARCH)
 	}
 }
+
+func installLocalDepsWindows() {
+	logger.LogInfo("Installing local dependencies for Windows...")
+	depsDir := GetDialtoneEnv()
+	os.MkdirAll(depsDir, 0755)
+
+	// 1. Go is already handled by dialtone.ps1
+
+	// 2. Install Bun
+	installBun(depsDir, "Step 1")
+
+	printInstallComplete(depsDir)
+}
+
 
 func installLocalDepsWSL() {
 	logger.LogInfo("Installing local dependencies for Linux/WSL (User-Local, No Sudo)...")

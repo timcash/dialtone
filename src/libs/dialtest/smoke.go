@@ -596,184 +596,397 @@ func (r *SmokeRunner) PrepareGoPluginSmoke(repoRoot, pluginName string, prefligh
 	return serverCmd, nil
 }
 
+func (r *SmokeRunner) getDialtoneCmd(repoRoot string) (string, []string) {
+
+	shPath := filepath.Join(repoRoot, "dialtone.sh")
+
+	if os.Getenv("OS") == "Windows_NT" {
+
+		ps1Path := filepath.Join(repoRoot, "dialtone.ps1")
+
+		return "powershell.exe", []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1Path}
+
+	}
+
+	return shPath, nil
+
+}
+
+
+
 func (r *SmokeRunner) RunDefaultPreflight(repoRoot, pluginDir, uiDir string) error {
-	dialtoneCmd := filepath.Join(repoRoot, "dialtone.sh")
+
+	dtCmd, dtBaseArgs := r.getDialtoneCmd(repoRoot)
+
+
+
 	goChecks := []CommandStep{
+
 		{Name: "Go Format", Cmd: "go", Args: []string{"fmt", "./..."}},
+
 		{Name: "Go Lint", Cmd: "go", Args: []string{"vet", "./..."}},
+
 		{Name: "Go Build", Cmd: "go", Args: []string{"build", "./..."}},
+
 	}
+
+
+
 	uiChecks := []CommandStep{
-		{Name: "UI Install", Cmd: dialtoneCmd, Args: []string{"bun", "exec", "--cwd", uiDir, "install", "--force"}},
-		{Name: "UI TypeScript Lint", Cmd: dialtoneCmd, Args: []string{"bun", "exec", "--cwd", uiDir, "run", "lint"}},
-		{Name: "UI Build", Cmd: dialtoneCmd, Args: []string{"bun", "exec", "--cwd", uiDir, "run", "build"}},
+
+		{Name: "UI Install", Cmd: dtCmd, Args: append(append([]string{}, dtBaseArgs...), "bun", "exec", "--cwd", uiDir, "install", "--force")},
+
+		{Name: "UI TypeScript Lint", Cmd: dtCmd, Args: append(append([]string{}, dtBaseArgs...), "bun", "exec", "--cwd", uiDir, "run", "lint")},
+
+		{Name: "UI Build", Cmd: dtCmd, Args: append(append([]string{}, dtBaseArgs...), "bun", "exec", "--cwd", uiDir, "run", "build")},
+
 	}
+
+
 
 	var firstErr error
+
 	if err := r.RunPreflightInDir(pluginDir, goChecks); err != nil && firstErr == nil {
+
 		firstErr = err
+
 	}
+
 	if err := r.RunPreflightInDir(repoRoot, uiChecks); err != nil && firstErr == nil {
+
 		firstErr = err
+
 	}
+
 	if err := r.runPrettierCheck(repoRoot, pluginDir); err != nil && firstErr == nil {
+
 		firstErr = err
+
 	}
+
+
 
 	if err := r.runPreflightStartupProbe("Go Run", pluginDir, "go", []string{"run", "cmd/main.go"}, r.Opts.Port, 20*time.Second); err != nil && firstErr == nil {
+
 		firstErr = err
+
 	}
+
 	uiRunPort, err := pickFreePort()
+
 	if err != nil && firstErr == nil {
+
 		firstErr = err
+
 	}
+
 	if err == nil {
-		if probeErr := r.runPreflightStartupProbe("UI Run", repoRoot, dialtoneCmd, []string{"bun", "exec", "--cwd", uiDir, "run", "dev", "--host", "127.0.0.1", "--port", fmt.Sprintf("%d", uiRunPort)}, uiRunPort, 20*time.Second); probeErr != nil && firstErr == nil {
+
+		args := append(append([]string{}, dtBaseArgs...), "bun", "exec", "--cwd", uiDir, "run", "dev", "--host", "127.0.0.1", "--port", fmt.Sprintf("%d", uiRunPort))
+
+		if probeErr := r.runPreflightStartupProbe("UI Run", repoRoot, dtCmd, args, uiRunPort, 20*time.Second); probeErr != nil && firstErr == nil {
+
 			firstErr = probeErr
+
 		}
+
 	}
+
+
 
 	return firstErr
+
 }
+
+
 
 func (r *SmokeRunner) runPrettierCheck(repoRoot, versionDir string) error {
+
 	r.LogMsg("[SMOKE] Preflight: Source Prettier Format/Lint (JS/TS)...\n")
 
+
+
 	allowedExt := map[string]bool{
-		".js": true, ".jsx": true, ".mjs": true, ".cjs": true,
+
+		".js": true, ".jsx": true, ".mjs": true, ".cjs": true, ".ts": true, ".tsx": true,
+
 	}
+
 	skipDirs := map[string]bool{
+
 		"node_modules": true,
+
 		".pixi":        true,
+
 		"dist":         true,
+
 	}
+
+
 
 	var files []string
+
 	walkErr := filepath.WalkDir(versionDir, func(path string, d fs.DirEntry, err error) error {
+
 		if err != nil {
+
 			return err
+
 		}
+
 		if d.IsDir() {
+
 			if skipDirs[d.Name()] {
+
 				return filepath.SkipDir
+
 			}
+
 			return nil
+
 		}
+
 		if allowedExt[strings.ToLower(filepath.Ext(path))] {
+
 			rel, relErr := filepath.Rel(versionDir, path)
+
 			if relErr != nil {
+
 				return relErr
+
 			}
+
 			files = append(files, rel)
+
 		}
+
 		return nil
+
 	})
+
 	if walkErr != nil {
+
+		dtCmd, _ := r.getDialtoneCmd(repoRoot)
+
 		r.Preflight = append(r.Preflight, PreflightResult{
+
 			Name:   "Source Prettier Check (JS/TS)",
+
 			Status: "❌ FAILED",
-			Log:    fmt.Sprintf("[dir] %s\n[cmd] ./dialtone.sh bun exec x prettier --check <files>\n\nwalk failed: %v", versionDir, walkErr),
-			Cmd:    "./dialtone.sh bun exec x prettier --check <files>",
+
+			Log:    fmt.Sprintf("[dir] %s\n[cmd] %s bun exec x prettier --check <files>\n\nwalk failed: %v", versionDir, dtCmd, walkErr),
+
+			Cmd:    dtCmd + " bun exec x prettier --check <files>",
+
 			Dir:    versionDir,
+
 		})
+
 		r.failNow("preflight:Source Prettier Check (JS/TS)", "walk failed", walkErr)
+
 		return walkErr
+
 	}
+
+
 
 	if len(files) == 0 {
+
+		dtCmd, _ := r.getDialtoneCmd(repoRoot)
+
 		r.Preflight = append(r.Preflight, PreflightResult{
+
 			Name:   "Source Prettier Format (JS/TS)",
+
 			Status: "✅ PASSED",
-			Log:    fmt.Sprintf("[dir] %s\n[cmd] ./dialtone.sh bun exec x prettier --write <files>\n\nno JS/TS files found", versionDir),
-			Cmd:    "./dialtone.sh bun exec x prettier --write <files>",
+
+			Log:    fmt.Sprintf("[dir] %s\n[cmd] %s bun exec x prettier --write <files>\n\nno JS/TS files found", versionDir, dtCmd),
+
+			Cmd:    dtCmd + " bun exec x prettier --write <files>",
+
 			Dir:    versionDir,
+
 		})
+
 		r.Preflight = append(r.Preflight, PreflightResult{
+
 			Name:   "Source Prettier Lint (JS/TS)",
+
 			Status: "✅ PASSED",
-			Log:    fmt.Sprintf("[dir] %s\n[cmd] ./dialtone.sh bun exec x prettier --check <files>\n\nno JS/TS files found", versionDir),
-			Cmd:    "./dialtone.sh bun exec x prettier --check <files>",
+
+			Log:    fmt.Sprintf("[dir] %s\n[cmd] %s bun exec x prettier --check <files>\n\nno JS/TS files found", versionDir, dtCmd),
+
+			Cmd:    dtCmd + " bun exec x prettier --check <files>",
+
 			Dir:    versionDir,
+
 		})
+
 		return nil
+
 	}
+
+
 
 	writeErr := r.runPrettierCommand(repoRoot, versionDir, "Source Prettier Format (JS/TS)", "write", files)
+
 	checkErr := r.runPrettierCommand(repoRoot, versionDir, "Source Prettier Lint (JS/TS)", "check", files)
+
 	if writeErr != nil {
+
 		return writeErr
+
 	}
+
 	return checkErr
+
 }
+
+
 
 func (r *SmokeRunner) runPrettierCommand(repoRoot, versionDir, stepName, mode string, files []string) error {
-	args := append([]string{"bun", "exec", "--cwd", versionDir, "x", "prettier", "--" + mode}, files...)
+
+	dtCmd, dtBaseArgs := r.getDialtoneCmd(repoRoot)
+
+	args := append(append([]string{}, dtBaseArgs...), "bun", "exec", "--cwd", versionDir, "x", "prettier", "--" + mode)
+
+	args = append(args, files...)
+
+	
+
 	cmdCtx, cancel := context.WithTimeout(context.Background(), r.remainingTotal())
+
 	defer cancel()
-	cmd := exec.CommandContext(cmdCtx, filepath.Join(repoRoot, "dialtone.sh"), args...)
+
+	cmd := exec.CommandContext(cmdCtx, dtCmd, args...)
+
 	cmd.Dir = repoRoot
+
 	var buf safeBuffer
+
 	lastOutputAt := time.Now()
+
 	var outputMu sync.Mutex
+
 	cmdOutput := &activityWriter{
+
 		w: io.MultiWriter(&buf, r.MW),
+
 		onOutput: func() {
+
 			outputMu.Lock()
+
 			lastOutputAt = time.Now()
+
 			outputMu.Unlock()
+
 		},
+
 	}
+
 	cmd.Stdout = cmdOutput
+
 	cmd.Stderr = cmdOutput
 
+
+
 	if err := cmd.Start(); err != nil {
+
 		r.failNow("preflight:"+stepName, "command failed to start", err)
+
 		return err
+
 	}
+
+
 
 	waitCh := make(chan error, 1)
+
 	go func() {
+
 		waitCh <- cmd.Wait()
+
 	}()
 
+
+
 	ticker := time.NewTicker(1 * time.Second)
+
 	var err error
+
 	waiting := true
+
 	for waiting {
+
 		select {
+
 		case err = <-waitCh:
+
 			waiting = false
+
 		case <-ticker.C:
+
 			r.ensureTotalTimeout(stepName)
+
 			outputMu.Lock()
+
 			stalledFor := time.Since(lastOutputAt)
+
 			outputMu.Unlock()
+
 			if stalledFor > r.Opts.CommandStall {
+
 				_ = cmd.Process.Kill()
+
 				err = fmt.Errorf("command stalled with no output for %s", stalledFor.Round(time.Second))
+
 				waiting = false
+
 			}
+
 		}
+
 	}
+
 	ticker.Stop()
 
+
+
 	status := "✅ PASSED"
+
 	if err != nil {
+
 		status = "❌ FAILED"
+
 	}
-	logText := fmt.Sprintf("[dir] %s\n[cmd] ./dialtone.sh %s\n\n%s", versionDir, strings.Join(args, " "), strings.TrimSpace(buf.String()))
+
+	logText := fmt.Sprintf("[dir] %s\n[cmd] %s %s\n\n%s", versionDir, dtCmd, strings.Join(args, " "), strings.TrimSpace(buf.String()))
+
 	r.Preflight = append(r.Preflight, PreflightResult{
+
 		Name:   stepName,
+
 		Status: status,
+
 		Log:    logText,
-		Cmd:    "./dialtone.sh " + strings.Join(args, " "),
+
+		Cmd:    dtCmd + " " + strings.Join(args, " "),
+
 		Dir:    versionDir,
+
 	})
+
 	if err != nil {
+
 		r.failNow("preflight:"+stepName, "command failed", fmt.Errorf("%w\n%s", err, strings.TrimSpace(buf.String())))
+
 	}
+
 	return err
+
 }
+
+
 
 func (r *SmokeRunner) WriteFinalReport() {
 	r.writeReport(false)

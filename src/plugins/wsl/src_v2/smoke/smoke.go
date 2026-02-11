@@ -1,14 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
-	"dialtone/cli/src/core/browser"
-	"dialtone/cli/src/dialtest"
+	"dialtone/cli/src/libs/dialtest"
 	"github.com/chromedp/chromedp"
 )
 
@@ -19,8 +18,7 @@ func main() {
 	}
 	versionDir := os.Args[1]
 	if err := Run(versionDir); err != nil {
-		fmt.Printf("Smoke test failed: %v
-", err)
+		fmt.Printf("Smoke test failed: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -31,33 +29,25 @@ func Run(versionDir string) error {
 	smokeDir := filepath.Join(pluginDir, "smoke")
 
 	runner, err := dialtest.NewSmokeRunner(dialtest.SmokeOptions{
-		Name:       "WSL",
-		VersionDir: versionDir,
-		Port:       8080,
-		SmokeDir:   smokeDir,
+		Name:           "WSL",
+		VersionDir:     versionDir,
+		Port:           8080,
+		SmokeDir:       smokeDir,
+		TotalTimeout:   180 * time.Second,
+		StepTimeout:    30 * time.Second,
+		CommandStall:   30 * time.Second,
+		PanicOnTimeout: true,
 	})
 	if err != nil {
 		return err
 	}
 	defer runner.Finalize()
 
-	runner.RunPreflight(cwd, []struct{ Name, Cmd string; Args []string }{
-		{"Install", "bun", []string{"install"}},
-		{"Lint", "bun", []string{"run", "lint"}},
-		{"Build", "bun", []string{"run", "build"}},
-	})
-
-	browser.CleanupPort(runner.Opts.Port)
-	serverCmd := exec.Command("go", "run", "cmd/main.go")
-	serverCmd.Dir = pluginDir
-	if err := runner.StartServer(serverCmd); err != nil {
+	serverCmd, err := runner.PrepareGoPluginSmoke(cwd, "wsl", nil)
+	if err != nil {
 		return err
 	}
 	defer serverCmd.Process.Kill()
-
-	if err := runner.SetupBrowser("http://127.0.0.1:8080"); err != nil {
-		return err
-	}
 
 	runner.Step("Home Section Validation", dialtest.WaitForAriaLabel("WSL Hero Section"))
 	runner.Step("Documentation Section Validation", dialtest.NavigateToSection("docs", "WSL Documentation Section"))
@@ -122,7 +112,11 @@ func Run(versionDir string) error {
 		}),
 	})
 
-	runner.Step("Return Home", dialtest.NavigateToSection("home", "WSL Hero Section"))
+	runner.Step("Return Home", dialtest.NavigateToSection("home", "Home Section"))
+
+	if err := runner.AssertSectionLifecycle([]string{"home", "docs", "table"}); err != nil {
+		return err
+	}
 
 	return nil
 }

@@ -24,8 +24,14 @@ func RunDev(versionDir string) error {
 	uiDist := filepath.Join(pluginDir, "ui", "dist")
 	if _, err := os.Stat(uiDist); os.IsNotExist(err) {
 		fmt.Printf(">> [WSL] Dev: UI dist not found. Building first...\n")
-		buildCmd := exec.Command("bun", "run", "build")
-		buildCmd.Dir = filepath.Join(pluginDir, "ui")
+		uiDir := filepath.Join(pluginDir, "ui")
+		var buildCmd *exec.Cmd
+		if os.Getenv("OS") == "Windows_NT" {
+			buildCmd = exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", filepath.Join(cwd, "dialtone.ps1"), "bun", "exec", "--cwd", uiDir, "run", "build")
+		} else {
+			buildCmd = exec.Command(filepath.Join(cwd, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "build")
+		}
+		buildCmd.Dir = cwd
 		buildCmd.Stdout = os.Stdout
 		buildCmd.Stderr = os.Stderr
 		if err := buildCmd.Run(); err != nil {

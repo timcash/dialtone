@@ -71,6 +71,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   opacity: 0;
   transform: translateY(-10px);
   visibility: hidden;
+  display: none !important;
 }
 
 .header-title h1 {
