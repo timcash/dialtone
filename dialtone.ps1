@@ -23,6 +23,16 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$CurrentDir = (Get-Location).Path
+if ($CurrentDir -ne $ScriptDir) {
+    Write-Host "Error: .\dialtone.ps1 must be run from the repository root." -ForegroundColor Red
+    Write-Host "Expected: $ScriptDir"
+    Write-Host "Current:  $CurrentDir"
+    Write-Host "Run: cd `"$ScriptDir`"; .\dialtone.ps1 <command>"
+    exit 1
+}
+
 # --- HELP MENU ---
 function Show-Help {
     Write-Host "Usage: .\dialtone.ps1 <command> [options]"

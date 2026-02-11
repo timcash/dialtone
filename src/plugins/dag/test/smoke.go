@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"dialtone/cli/src/core/browser"
-	"dialtone/cli/src/dialtest"
+	"dialtone/cli/src/libs/dialtest"
 	chrome_app "dialtone/cli/src/plugins/chrome/app"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
