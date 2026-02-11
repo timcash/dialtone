@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -44,10 +45,14 @@ type StepResult struct {
 }
 
 type SmokeOptions struct {
-	Name       string
-	VersionDir string
-	Port       int
-	SmokeDir   string
+	Name           string
+	VersionDir     string
+	Port           int
+	SmokeDir       string
+	TotalTimeout   time.Duration
+	StepTimeout    time.Duration
+	PanicOnTimeout bool
+	PanicOnFailure bool
 }
 
 type CommandStep struct {
@@ -65,15 +70,35 @@ type SmokeRunner struct {
 	Steps     []StepResult
 	Preflight []PreflightResult
 
-	Ctx        context.Context
-	Cancel     context.CancelFunc
-	LastLogIdx int
-	Browser    *ChromeSession
+	Ctx                context.Context
+	Cancel             context.CancelFunc
+	LastLogIdx         int
+	Browser            *ChromeSession
+	stepsStartedAt     time.Time
+	lastProgressReason string
+	currentActivity    string
+	currentStage       string
+}
+
+type StepOptions struct {
+	Timeout time.Duration
 }
 
 func NewSmokeRunner(opts SmokeOptions) (*SmokeRunner, error) {
 	if opts.Port == 0 {
 		opts.Port = 8080
+	}
+	if opts.TotalTimeout <= 0 {
+		opts.TotalTimeout = 30 * time.Second
+	}
+	if opts.StepTimeout <= 0 {
+		opts.StepTimeout = 5 * time.Second
+	}
+	if !opts.PanicOnTimeout {
+		opts.PanicOnTimeout = true
+	}
+	if !opts.PanicOnFailure {
+		opts.PanicOnFailure = true
 	}
 	os.MkdirAll(opts.SmokeDir, 0755)
 
@@ -86,9 +111,10 @@ func NewSmokeRunner(opts SmokeOptions) (*SmokeRunner, error) {
 	mw := io.MultiWriter(os.Stdout, logF)
 
 	return &SmokeRunner{
-		Opts: opts,
-		LogF: logF,
-		MW:   mw,
+		Opts:           opts,
+		LogF:           logF,
+		MW:             mw,
+		stepsStartedAt: time.Now(),
 	}, nil
 }
 
@@ -111,13 +137,59 @@ func (r *SmokeRunner) RunPreflight(repoRoot string, steps []struct {
 func (r *SmokeRunner) RunPreflightInDir(uiDir string, steps []CommandStep) error {
 	var firstErr error
 	for _, s := range steps {
+		r.currentActivity = s.Name
+		r.WriteProgressReport("preflight-start")
+		r.setStage("preflight:" + s.Name)
+		r.ensureTotalTimeout("preflight " + s.Name)
 		r.LogMsg("[SMOKE] Preflight: %s...\n", s.Name)
-		cmd := exec.Command(s.Cmd, s.Args...)
+		r.LogMsg("   [DIR] %s\n", uiDir)
+		r.LogMsg("   [CMD] %s %s\n", s.Cmd, strings.Join(s.Args, " "))
+		cmdCtx, cancelCmd := context.WithTimeout(context.Background(), r.remainingTotal())
+		cmd := exec.CommandContext(cmdCtx, s.Cmd, s.Args...)
 		cmd.Dir = uiDir
 		var buf bytes.Buffer
 		cmd.Stdout = &buf
 		cmd.Stderr = &buf
-		err := cmd.Run()
+		start := time.Now()
+		if err := cmd.Start(); err != nil {
+			cancelCmd()
+			status := "❌ FAILED"
+			logText := fmt.Sprintf("[dir] %s\n[cmd] %s %s\n\nstart failed: %v", uiDir, s.Cmd, strings.Join(s.Args, " "), err)
+			r.Preflight = append(r.Preflight, PreflightResult{
+				Name:   s.Name,
+				Status: status,
+				Log:    logText,
+				Cmd:    s.Cmd + " " + strings.Join(s.Args, " "),
+				Dir:    uiDir,
+			})
+			if firstErr == nil {
+				firstErr = err
+			}
+			r.LogMsg("[SMOKE] Preflight FAILED to start: %s | %v\n", s.Name, err)
+			r.WriteProgressReport("preflight:" + s.Name)
+			r.failNow("preflight:"+s.Name, "command failed to start", err)
+			continue
+		}
+
+		waitCh := make(chan error, 1)
+		go func() {
+			waitCh <- cmd.Wait()
+		}()
+
+		ticker := time.NewTicker(5 * time.Second)
+		var err error
+		waiting := true
+		for waiting {
+			select {
+			case err = <-waitCh:
+				waiting = false
+			case <-ticker.C:
+				r.LogMsg("[SMOKE] Preflight still running: %s (elapsed: %s)\n", s.Name, time.Since(start).Round(time.Second))
+				r.ensureTotalTimeout("preflight " + s.Name)
+			}
+		}
+		ticker.Stop()
+		cancelCmd()
 
 		status := "✅ PASSED"
 		if err != nil {
@@ -125,8 +197,12 @@ func (r *SmokeRunner) RunPreflightInDir(uiDir string, steps []CommandStep) error
 			if firstErr == nil {
 				firstErr = err
 			}
+			r.LogMsg("[SMOKE] Preflight FAILED: %s (elapsed: %s) | %v\n", s.Name, time.Since(start).Round(time.Millisecond), err)
+			r.failNow("preflight:"+s.Name, "command failed", err)
+		} else {
+			r.LogMsg("[SMOKE] Preflight PASSED: %s (elapsed: %s)\n", s.Name, time.Since(start).Round(time.Millisecond))
 		}
-		logText := fmt.Sprintf("[dir] %s\n[cmd] %s %s\n\n%s", uiDir, s.Cmd, strings.Join(s.Args, " "), strings.TrimSpace(buf.String()))
+		logText := fmt.Sprintf("[dir] %s\n[cmd] %s %s\n[elapsed] %s\n\n%s", uiDir, s.Cmd, strings.Join(s.Args, " "), time.Since(start).Round(time.Millisecond), strings.TrimSpace(buf.String()))
 		r.Preflight = append(r.Preflight, PreflightResult{
 			Name:   s.Name,
 			Status: status,
@@ -134,7 +210,9 @@ func (r *SmokeRunner) RunPreflightInDir(uiDir string, steps []CommandStep) error
 			Cmd:    s.Cmd + " " + strings.Join(s.Args, " "),
 			Dir:    uiDir,
 		})
+		r.WriteProgressReport("preflight:" + s.Name)
 	}
+	r.currentActivity = ""
 	return firstErr
 }
 
@@ -165,6 +243,8 @@ func (r *SmokeRunner) SetupBrowser(url string) error {
 }
 
 func (r *SmokeRunner) StartServer(cmd *exec.Cmd) error {
+	r.setStage("server:start")
+	r.ensureTotalTimeout("start server")
 	serverLogFile, _ := os.Create(filepath.Join(r.Opts.SmokeDir, "smoke_server.log"))
 	cmd.Stdout = serverLogFile
 	cmd.Stderr = serverLogFile
@@ -174,17 +254,40 @@ func (r *SmokeRunner) StartServer(cmd *exec.Cmd) error {
 		return err
 	}
 
-	if err := WaitForPort(r.Opts.Port, 15*time.Second); err != nil {
+	waitTimeout := 15 * time.Second
+	if rem := r.remainingTotal(); rem < waitTimeout {
+		waitTimeout = rem
+	}
+	if err := WaitForPort(r.Opts.Port, waitTimeout); err != nil {
 		cmd.Process.Kill()
+		r.failNow("server:start", "server timeout", err)
 		return fmt.Errorf("server timeout: %v", err)
 	}
 	r.LogMsg("[SMOKE] Server ready.\n")
 	return nil
 }
 
-func (r *SmokeRunner) Step(name string, actions chromedp.Action) {
+func (r *SmokeRunner) Step(name string, actions chromedp.Action, opts ...StepOptions) {
+	r.currentActivity = name
+	r.WriteProgressReport("step-start")
+	r.setStage("step:" + name)
 	r.LogMsg("[SMOKE] Step Start: %s\n", name)
-	err := chromedp.Run(r.Ctx, actions)
+	r.ensureTotalTimeout(name)
+
+	stepTimeout := r.Opts.StepTimeout
+	if len(opts) > 0 && opts[0].Timeout > 0 {
+		stepTimeout = opts[0].Timeout
+	}
+	if stepTimeout <= 0 {
+		stepTimeout = 5 * time.Second
+	}
+	if rem := r.remainingTotal(); rem < stepTimeout {
+		stepTimeout = rem
+	}
+
+	runCtx, cancel := context.WithTimeout(r.Ctx, stepTimeout)
+	err := chromedp.Run(runCtx, actions)
+	cancel()
 
 	var buf []byte
 	_ = chromedp.Run(r.Ctx, chromedp.ActionFunc(func(ctx context.Context) error {
@@ -208,6 +311,7 @@ func (r *SmokeRunner) Step(name string, actions chromedp.Action) {
 	if err != nil {
 		status = "FAIL"
 		r.LogMsg("[SMOKE] Step FAILED: %s | Error: %v\n", name, err)
+		r.failNow("step:"+name, "step action failed", err)
 	} else {
 		r.LogMsg("[SMOKE] Step PASSED: %s\n", name)
 	}
@@ -218,6 +322,13 @@ func (r *SmokeRunner) Step(name string, actions chromedp.Action) {
 		Logs:       stepLogs,
 		Err:        err,
 	})
+	r.WriteProgressReport("step:" + name)
+	r.currentActivity = ""
+
+	if err != nil && (errors.Is(err, context.DeadlineExceeded) || strings.Contains(strings.ToLower(err.Error()), "context deadline exceeded")) {
+		r.timeoutPanic(fmt.Sprintf("step %q exceeded timeout %s", name, stepTimeout))
+	}
+	r.ensureTotalTimeout(name)
 }
 
 func (r *SmokeRunner) AssertLastStepLogsContains(patterns ...string) error {
@@ -247,6 +358,8 @@ func (r *SmokeRunner) AssertLastStepLogsContains(patterns ...string) error {
 	step.Status = "FAIL"
 	step.Err = err
 	r.LogMsg("[SMOKE] Step LOG ASSERT FAILED: %s | Missing: %s\n", step.Name, strings.Join(missing, ", "))
+	r.WriteProgressReport("step-log-assert:" + step.Name)
+	r.failNow("step-log-assert:"+step.Name, "required logs missing", err)
 	return err
 }
 
@@ -314,12 +427,62 @@ func (r *SmokeRunner) AssertSectionLifecycle(sectionIDs []string) error {
 
 	if len(failures) == 0 {
 		r.LogMsg("[SMOKE] Lifecycle ASSERT PASSED for sections: %s\n", strings.Join(sectionIDs, ", "))
+		r.WriteProgressReport("lifecycle-assert")
 		return nil
 	}
 
 	err := fmt.Errorf("lifecycle assertions failed: %s", strings.Join(failures, "; "))
 	r.LogMsg("[SMOKE] Lifecycle ASSERT FAILED: %v\n", err)
+	r.WriteProgressReport("lifecycle-assert-failed")
+	r.failNow("lifecycle-assert", "section lifecycle invariant failed", err)
 	return err
+}
+
+func (r *SmokeRunner) ensureTotalTimeout(stepName string) {
+	if r.Opts.TotalTimeout <= 0 {
+		return
+	}
+	if r.stepsStartedAt.IsZero() {
+		r.stepsStartedAt = time.Now()
+		return
+	}
+	if time.Since(r.stepsStartedAt) > r.Opts.TotalTimeout {
+		r.timeoutPanic(fmt.Sprintf("total smoke run exceeded while running %q (%s)", stepName, r.Opts.TotalTimeout))
+	}
+}
+
+func (r *SmokeRunner) timeoutPanic(msg string) {
+	full := fmt.Sprintf("[SMOKE][TIMEOUT][%s] %s", r.currentStage, msg)
+	r.LogMsg("%s\n", full)
+	if r.Opts.PanicOnTimeout {
+		panic(full)
+	}
+}
+
+func (r *SmokeRunner) remainingTotal() time.Duration {
+	if r.Opts.TotalTimeout <= 0 {
+		return 24 * time.Hour
+	}
+	elapsed := time.Since(r.stepsStartedAt)
+	remaining := r.Opts.TotalTimeout - elapsed
+	if remaining <= 0 {
+		r.timeoutPanic(fmt.Sprintf("total smoke run exceeded %s", r.Opts.TotalTimeout))
+		return 1 * time.Millisecond
+	}
+	return remaining
+}
+
+func (r *SmokeRunner) setStage(stage string) {
+	r.currentStage = stage
+}
+
+func (r *SmokeRunner) failNow(stage, msg string, err error) {
+	if !r.Opts.PanicOnFailure {
+		return
+	}
+	full := fmt.Sprintf("[SMOKE][FAIL][%s] %s: %v", stage, msg, err)
+	r.LogMsg("%s\n", full)
+	panic(full)
 }
 
 func (r *SmokeRunner) Finalize() {
@@ -510,6 +673,10 @@ func (r *SmokeRunner) runPrettierCommand(versionDir, stepName, mode string, file
 }
 
 func (r *SmokeRunner) WriteFinalReport() {
+	r.writeReport(false)
+}
+
+func (r *SmokeRunner) writeReport(inProgress bool) {
 	smokeFile := filepath.Join(r.Opts.SmokeDir, "SMOKE.md")
 
 	var pol []ConsoleEntry
@@ -527,6 +694,20 @@ func (r *SmokeRunner) WriteFinalReport() {
 	var buf bytes.Buffer
 	buf.WriteString(fmt.Sprintf("# %s Plugin Smoke Test Report\n\n", r.Opts.Name))
 	buf.WriteString(fmt.Sprintf("**Generated at:** %s\n\n", time.Now().Format(time.RFC1123)))
+	if inProgress {
+		reason := r.lastProgressReason
+		if reason == "" {
+			reason = "progress update"
+		}
+		buf.WriteString(fmt.Sprintf("**Status:** IN PROGRESS (%s)\n\n", reason))
+		if r.currentActivity != "" {
+			buf.WriteString("## Live Progress\n\n")
+			buf.WriteString(fmt.Sprintf("### %s\n\n", r.currentActivity))
+			buf.WriteString("- Status: IN PROGRESS\n")
+			buf.WriteString(fmt.Sprintf("- Updated: %s\n\n", time.Now().Format(time.RFC1123)))
+			buf.WriteString("---\n\n")
+		}
+	}
 
 	// 1. Preflight: Environment & Build
 	buf.WriteString("## 1. Preflight: Go + TypeScript/JavaScript Checks\n")
@@ -654,7 +835,16 @@ func pickFreePort() (int, error) {
 }
 
 func (r *SmokeRunner) runPreflightStartupProbe(name, dir, cmdName string, args []string, port int, timeout time.Duration) error {
+	r.currentActivity = name
+	r.WriteProgressReport("probe-start")
+	r.setStage("probe:" + name)
+	if rem := r.remainingTotal(); rem < timeout {
+		timeout = rem
+	}
 	r.LogMsg("[SMOKE] Preflight: %s...\n", name)
+	r.LogMsg("   [DIR] %s\n", dir)
+	r.LogMsg("   [CMD] %s %s\n", cmdName, strings.Join(args, " "))
+	r.LogMsg("   [PORT] %d | [TIMEOUT] %s\n", port, timeout)
 	browser.CleanupPort(port)
 
 	cmd := exec.Command(cmdName, args...)
@@ -673,6 +863,7 @@ func (r *SmokeRunner) runPreflightStartupProbe(name, dir, cmdName string, args [
 		})
 		return err
 	}
+	r.LogMsg("[SMOKE] Preflight %s started PID=%d\n", name, cmd.Process.Pid)
 
 	waitCh := make(chan error, 1)
 	go func() {
@@ -683,6 +874,7 @@ func (r *SmokeRunner) runPreflightStartupProbe(name, dir, cmdName string, args [
 	var probeErr error
 	waitConsumed := false
 	ready := false
+	progressTicker := time.NewTicker(2 * time.Second)
 	for time.Since(start) < timeout {
 		select {
 		case err := <-waitCh:
@@ -692,25 +884,34 @@ func (r *SmokeRunner) runPreflightStartupProbe(name, dir, cmdName string, args [
 			} else {
 				probeErr = fmt.Errorf("process exited before port %d became ready", port)
 			}
+			r.LogMsg("[SMOKE] Preflight %s exited before ready (elapsed: %s): %v\n", name, time.Since(start).Round(time.Millisecond), probeErr)
 			goto DONE
+		case <-progressTicker.C:
+			r.LogMsg("[SMOKE] Preflight %s waiting for port %d... (elapsed: %s)\n", name, port, time.Since(start).Round(time.Second))
 		default:
 			if WaitForPort(port, 500*time.Millisecond) == nil {
 				ready = true
+				r.LogMsg("[SMOKE] Preflight %s port %d is ready (elapsed: %s)\n", name, port, time.Since(start).Round(time.Millisecond))
 				goto DONE
 			}
 		}
 	}
 	probeErr = fmt.Errorf("timeout waiting for port %d", port)
+	r.LogMsg("[SMOKE] Preflight %s timeout waiting for port %d (elapsed: %s)\n", name, port, time.Since(start).Round(time.Millisecond))
 
 DONE:
+	progressTicker.Stop()
 	_ = cmd.Process.Kill()
 	shutdownWarn := ""
+	shutdownStart := time.Now()
 	if !waitConsumed {
 		select {
 		case <-waitCh:
+			r.LogMsg("[SMOKE] Preflight %s process exited after kill (shutdown: %s)\n", name, time.Since(shutdownStart).Round(time.Millisecond))
 		case <-time.After(5 * time.Second):
 			// Readiness is the pass criterion. Record shutdown lag as warning only.
 			shutdownWarn = fmt.Sprintf("timed out waiting for %s process shutdown", name)
+			r.LogMsg("[SMOKE] Preflight %s shutdown warning: %s\n", name, shutdownWarn)
 			if !ready && probeErr == nil {
 				probeErr = fmt.Errorf(shutdownWarn)
 			}
@@ -729,6 +930,9 @@ DONE:
 	} else if shutdownWarn != "" {
 		logText = fmt.Sprintf("%s\n\n[probe-warning] %s", logText, shutdownWarn)
 	}
+	if ready {
+		logText = fmt.Sprintf("%s\n[probe-ready] port %d became reachable in %s", logText, port, time.Since(start).Round(time.Millisecond))
+	}
 	r.Preflight = append(r.Preflight, PreflightResult{
 		Name:   name,
 		Status: status,
@@ -736,8 +940,15 @@ DONE:
 		Cmd:    cmdName + " " + strings.Join(args, " "),
 		Dir:    dir,
 	})
+	r.WriteProgressReport("probe:" + name)
+	r.currentActivity = ""
 
 	return probeErr
+}
+
+func (r *SmokeRunner) WriteProgressReport(reason string) {
+	r.lastProgressReason = reason
+	r.writeReport(true)
 }
 
 func formatConsoleArgs(args []*runtime.RemoteObject) string {
