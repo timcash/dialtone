@@ -10,12 +10,12 @@ The plugin follows an incremental versioning pattern (`src_v1`, `src_v2`, etc.).
 - Maintain legacy code while transitioning to new architectures.
 - Run side-by-side comparisons and smoke tests across versions.
 
-### 2. UI Library & Patterns (`src/ui`)
-The plugin utilizes a shared UI library located in `src/ui`. This library provides core utilities:
+### 2. UI Library & Patterns (`src/libs/ui`)
+The plugin utilizes a shared UI library located in `src/libs/ui`. This library provides core utilities:
 - **`SectionManager`**: Orchestrates the SPA (Single Page Application) workflow. It handles lazy-loading components, updating the global header, and managing the visibility of sections.
 - **`Menu`**: A standard side-navigation system.
 - **`VisibilityMixin`**: Standardizes lifecycle logging (`SLEEP`, `AWAKE`).
-- **Styles**: Consolidated CSS variables and layouts in `src/ui/style.css`.
+- **Styles**: Consolidated CSS variables and layouts in `src/libs/ui/style.css`.
 
 ### 3. Lifecycle Management
 Sections in the template plugin go through a managed lifecycle, which is logged to the console for both debugging and automated verification:
@@ -33,7 +33,7 @@ Sections in the template plugin go through a managed lifecycle, which is logged 
 The Template plugin features a high-fidelity automation suite powered by the `dialtest` library.
 
 ### `SmokeRunner` (Centralized Engine)
-The `SmokeRunner` in `src/dialtest/smoke.go` abstracts the complexity of browser automation:
+The `SmokeRunner` in `src/libs/dialtest/smoke.go` abstracts the complexity of browser automation:
 - **Automatic Browser Management**: Launches a dedicated, headless Chrome instance and ensures it is cleaned up via the Chrome Plugin API.
 - **Unified Logging**: Redirects browser console logs and Go-side logs into a single `smoke.log` file.
 - **Preflight Checks**: Automatically runs `install`, `lint`, and `build` before starting the UI tests.

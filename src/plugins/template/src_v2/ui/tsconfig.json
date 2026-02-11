@@ -7,7 +7,7 @@
     "skipLibCheck": true,
     "moduleResolution": "bundler",
     "paths": {
-      "@ui/*": ["../../../../ui/*"]
+      "@ui/*": ["../../../../libs/ui/*"]
     },
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
@@ -18,5 +18,5 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "../../../../ui"]
+  "include": ["src", "../../../../libs/ui"]
 }
