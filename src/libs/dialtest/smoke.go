@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -217,6 +218,108 @@ func (r *SmokeRunner) Step(name string, actions chromedp.Action) {
 		Logs:       stepLogs,
 		Err:        err,
 	})
+}
+
+func (r *SmokeRunner) AssertLastStepLogsContains(patterns ...string) error {
+	if len(r.Steps) == 0 {
+		return fmt.Errorf("no smoke steps recorded")
+	}
+	idx := len(r.Steps) - 1
+	step := &r.Steps[idx]
+
+	var lines []string
+	for _, l := range step.Logs {
+		lines = append(lines, fmt.Sprintf("[%s] %s", l.Level, l.Message))
+	}
+	allLogs := strings.Join(lines, "\n")
+
+	var missing []string
+	for _, p := range patterns {
+		if !strings.Contains(allLogs, p) {
+			missing = append(missing, p)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+
+	err := fmt.Errorf("missing expected logs in step %q: %s", step.Name, strings.Join(missing, ", "))
+	step.Status = "FAIL"
+	step.Err = err
+	r.LogMsg("[SMOKE] Step LOG ASSERT FAILED: %s | Missing: %s\n", step.Name, strings.Join(missing, ", "))
+	return err
+}
+
+func (r *SmokeRunner) AssertSectionLifecycle(sectionIDs []string) error {
+	type counters struct {
+		load         int
+		start        int
+		pause        int
+		resume       int
+		navigateTo   int
+		navigateAway int
+	}
+	bySection := map[string]*counters{}
+	for _, id := range sectionIDs {
+		bySection[id] = &counters{}
+	}
+
+	re := regexp.MustCompile(`\[SectionManager\]\s+(.+?)\s+#([a-zA-Z0-9_-]+)`)
+	for _, e := range r.Entries {
+		m := re.FindStringSubmatch(e.Message)
+		if len(m) != 3 {
+			continue
+		}
+		event := m[1]
+		id := m[2]
+		c, ok := bySection[id]
+		if !ok {
+			continue
+		}
+		switch {
+		case strings.Contains(event, "LOADING"):
+			c.load++
+		case strings.Contains(event, "START"):
+			c.start++
+		case strings.Contains(event, "PAUSE"):
+			c.pause++
+		case strings.Contains(event, "RESUME"):
+			c.resume++
+		case strings.Contains(event, "NAVIGATE TO"):
+			c.navigateTo++
+		case strings.Contains(event, "NAVIGATE AWAY"):
+			c.navigateAway++
+		}
+	}
+
+	var failures []string
+	for _, id := range sectionIDs {
+		c := bySection[id]
+		if c.load != 1 {
+			failures = append(failures, fmt.Sprintf("%s expected 1 load, got %d", id, c.load))
+		}
+		if c.start != 1 {
+			failures = append(failures, fmt.Sprintf("%s expected 1 start, got %d", id, c.start))
+		}
+		if c.resume < 1 {
+			failures = append(failures, fmt.Sprintf("%s expected >=1 resume, got %d", id, c.resume))
+		}
+		if id != "home" && c.pause < 1 {
+			failures = append(failures, fmt.Sprintf("%s expected >=1 pause, got %d", id, c.pause))
+		}
+		if c.navigateTo < 1 {
+			failures = append(failures, fmt.Sprintf("%s expected >=1 navigate-to, got %d", id, c.navigateTo))
+		}
+	}
+
+	if len(failures) == 0 {
+		r.LogMsg("[SMOKE] Lifecycle ASSERT PASSED for sections: %s\n", strings.Join(sectionIDs, ", "))
+		return nil
+	}
+
+	err := fmt.Errorf("lifecycle assertions failed: %s", strings.Join(failures, "; "))
+	r.LogMsg("[SMOKE] Lifecycle ASSERT FAILED: %v\n", err)
+	return err
 }
 
 func (r *SmokeRunner) Finalize() {
