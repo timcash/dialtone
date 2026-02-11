@@ -302,7 +302,8 @@ class GeoToolsVisualization {
 
   private latLngToVector(lat: number, lng: number, radius: number) {
     const phi = (90 - lat) * (Math.PI / 180);
-    const theta = (lng + 180) * (Math.PI / 180);
+    // Negate longitude so west/east map to the expected globe sides in scene space.
+    const theta = (-lng + 180) * (Math.PI / 180);
     return new THREE.Vector3(
       radius * Math.sin(phi) * Math.cos(theta),
       radius * Math.cos(phi),
@@ -463,4 +464,3 @@ export function mountGeoTools(container: HTMLElement) {
     },
   };
 }
-
