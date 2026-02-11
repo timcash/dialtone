@@ -32,15 +32,21 @@ For a plugin version directory `src/plugins/<plugin>/src_vN`:
   - `go build ./...`
   - `go run cmd/main.go` startup probe
 - UI checks in `src_vN/ui`:
-  - `bun install`
-  - `bun run lint`
-  - `bun run build`
-  - `bun run dev ...` startup probe
+  - `./dialtone.sh bun exec install`
+  - `./dialtone.sh bun exec run lint`
+  - `./dialtone.sh bun exec run build`
+  - `./dialtone.sh bun exec run dev ...` startup probe
 - Source formatting/lint:
-  - `bunx prettier --write ...`
-  - `bunx prettier --check ...`
+  - `./dialtone.sh bun exec x prettier --write ...`
+  - `./dialtone.sh bun exec x prettier --check ...`
   - JS/TS source scan excludes `node_modules`, `.pixi`, and `dist`.
 
 ## Intended Use
 
 Each plugin `src_vN/smoke/smoke.go` should be mostly scenario definitions and assertions for that version, with minimal setup boilerplate.
+
+## Known Problems
+
+- If UI build/lint tools hang (for example `vite build`), the default smoke `TotalTimeout` (30s) can fire before scenario steps begin.
+- This is expected fail-fast behavior: runner panics with stage context (for example `preflight:UI Build`) and exits non-zero.
+- In these failures, command output is still streamed live into `src_vN/smoke/smoke.log`, and `SMOKE.md` is written with completed stages.

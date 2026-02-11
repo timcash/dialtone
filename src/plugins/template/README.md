@@ -40,8 +40,8 @@ The `SmokeRunner` in `src/libs/dialtest/smoke.go` abstracts the complexity of br
 - **Automatic Browser Management**: Uses the Chrome plugin session API (`src/plugins/chrome/app`) with role-aware browser ownership (`dev` vs `smoke`) and cleanup.
 - **Unified Logging**: Redirects browser console logs and Go-side logs into a single `smoke.log` file.
 - **Preflight Checks**: Automatically runs Go/UI checks from `src_vN` before UI assertions:
-  - Go `fmt`, `vet`, `build`, `run` startup probe
-  - UI install, TypeScript lint, build, Prettier format/lint for JS/TS source files
+  - Go `fmt`, `vet`, `build`, `run` startup probe via `./dialtone.sh go exec ...`
+  - UI install, TypeScript lint, build, Prettier format/lint for JS/TS source files via `./dialtone.sh bun exec ...`
   - Excludes `node_modules`, `.pixi`, and `dist` from source-level JS/TS formatting checks
 - **Server Orchestration**: Manages the plugin's Go server lifecycle during the test run.
 - **Lifecycle Assertions**: Validates section lifecycle logs per step and aggregate section invariants.
@@ -108,3 +108,9 @@ To add a new section to the template:
     ```
 4.  Add a button to the `menu` in `main.ts`.
 5.  Add a validation step in `smoke/smoke.go`.
+
+## Current Problems
+
+- `src_v2` smoke is currently blocked in preflight at `UI Build` (`vite build`) and can exceed the default 30s smoke timeout.
+- When this happens, the smoke run intentionally panics with a timeout message and exits non-zero before UI navigation steps run.
+- `SMOKE.md` and `smoke.log` are still updated with all completed preflight stages and the exact failing stage.
