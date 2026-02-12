@@ -169,9 +169,9 @@ export function mountThreeJsTemplate(container: HTMLElement) {
     },
     setVisible: (visible: boolean) => {
       viz.setVisible(visible);
-      if (visible) {
-        setupThreeJsTemplateMenu(options);
-      }
     },
+    updateUI: () => {
+      setupThreeJsTemplateMenu(options);
+    }
   };
 }

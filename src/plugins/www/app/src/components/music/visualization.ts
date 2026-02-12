@@ -40,7 +40,8 @@ export class MusicVisualization {
   
   private time = 0;
   
-  sensitivity = 5.0;
+  sensitivity = 2.0;
+  floor = -60;
   rotation = 0;
   autoRotationSpeed = 0.015;
 
@@ -308,7 +309,7 @@ export class MusicVisualization {
         const semitone = NOTE_TO_INDEX[noteName];
         chroma[semitone] = 1.0; 
     } else {
-        chroma = this.analyzer.getChromagram(this.sensitivity);
+        chroma = this.analyzer.getChromagram(this.sensitivity, this.floor);
     }
 
     let strongestIndex = -1;

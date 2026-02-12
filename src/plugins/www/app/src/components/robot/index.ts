@@ -678,5 +678,8 @@ export function mountRobot(container: HTMLElement) {
       container.innerHTML = '';
     },
     setVisible: (visible: boolean) => viz.setVisible(visible),
+    updateUI: () => {
+      setupRobotMenu(viz);
+    }
   };
 }

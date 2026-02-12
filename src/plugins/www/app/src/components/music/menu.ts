@@ -3,6 +3,8 @@ import { Menu } from "../util/menu";
 type MusicConfigOptions = {
     sensitivity: number;
     onSensitivityChange: (value: number) => void;
+    floor: number;
+    onFloorChange: (value: number) => void;
     rotation: number;
     onRotationChange: (value: number) => void;
     enableMic: () => void;
@@ -43,6 +45,16 @@ export function setupMusicMenu(options: MusicConfigOptions): void {
         0.1,
         options.onSensitivityChange,
         (v) => v.toFixed(1),
+    );
+
+    menu.addSlider(
+        "Floor",
+        options.floor,
+        -100,
+        -20,
+        1,
+        options.onFloorChange,
+        (v) => `${v} dB`,
     );
 
     menu.addSlider(

@@ -75,6 +75,7 @@ export interface MenuConfig {
 export interface VisualizationControl {
   dispose: () => void;
   setVisible: (visible: boolean) => void;
+  updateUI?: () => void; // Optional: Update component-specific UI (like menus)
 }
 
 // Configuration for a lazy-loaded section
@@ -142,49 +143,78 @@ export class SectionManager {
     this.configs.set(sectionId, config);
   }
 
+  private visibilityRatios = new Map<string, number>();
+  private activeSectionId: string | null = null;
+
   /**
    * Start observing all registered sections for visibility
    */
-  observe(threshold = 0.1): void {
+  observe(): void {
     this.observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
           const sectionId = entry.target.id;
+          this.visibilityRatios.set(sectionId, entry.intersectionRatio);
 
           if (entry.isIntersecting) {
             // High Priority: Load and show the current section
             this.load(sectionId).then(() => {
               const control = this.visualizations.get(sectionId);
               if (control) {
-                console.log(`%c[SectionManager] 🚀 RESUME #${sectionId}`, "color: #3b82f6; font-weight: bold");
-                control.setVisible(true);
+                // Only log and trigger setVisible if it wasn't already visible
+                if (entry.intersectionRatio > 0) {
+                   control.setVisible(true);
+                }
               }
             });
-
-            // Update header and subtitle based on current section configuration
-            const config = this.configs.get(sectionId);
-            const sectionEl = entry.target as HTMLElement;
-            this.updateHeader(config?.header, sectionEl);
-            this.updateMenu(config?.menu);
 
             // Predictive Priority: Preload next section (but keep it paused)
             const nextId = this.getNextSectionId(sectionId);
             if (nextId) {
-              if (this.debug) {
-                console.log(`%c[${sectionId}] 🔮 Predictive loading next: ${nextId}`, "color: #94a3b8");
-              }
               this.load(nextId);
             }
           } else {
             const control = this.visualizations.get(sectionId);
             if (control) {
-              console.log(`%c[SectionManager] 💤 PAUSE #${sectionId}`, "color: #8b5cf6");
               control.setVisible(false);
             }
           }
         });
+
+        // Determine the "best" section for UI updates (header/menu)
+        let bestId: string | null = null;
+        let maxRatio = -1;
+
+        this.visibilityRatios.forEach((ratio, id) => {
+          if (ratio > maxRatio) {
+            maxRatio = ratio;
+            bestId = id;
+          }
+        });
+
+        // Only update UI if the best section has changed and it's substantially visible
+        if (bestId && bestId !== this.activeSectionId && maxRatio >= 0.45) {
+          this.activeSectionId = bestId;
+          
+          if (this.debug) {
+            console.log(`%c[SectionManager] 🎯 ACTIVE SECTION: #${bestId} (${(maxRatio * 100).toFixed(0)}%)`, "color: #f59e0b; font-weight: bold");
+          }
+
+          const config = this.configs.get(bestId);
+          const sectionEl = document.getElementById(bestId);
+          if (sectionEl) {
+            this.updateHeader(config?.header, sectionEl);
+            this.updateMenu(config?.menu);
+            
+            // Refresh component-specific UI (like menus) if the method exists
+            const control = this.visualizations.get(bestId);
+            if (control && control.updateUI) {
+              control.updateUI();
+            }
+          }
+        }
       },
-      { threshold },
+      { threshold: [0, 0.1, 0.2, 0.3, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0] },
     );
 
     const observedSections: string[] = [];
