@@ -97,7 +97,8 @@ h2 {
 #threejs-template-container,
 #docs-container,
 #about-container,
-#policy-container {
+#policy-container,
+#music-container {
   position: absolute;
   top: 0;
   left: 0;
@@ -116,7 +117,8 @@ h2 {
 #threejs-template-container canvas,
 #docs-container canvas,
 #about-container canvas,
-#policy-container canvas {
+#policy-container canvas,
+#music-container canvas {
   display: block;
 }
 
