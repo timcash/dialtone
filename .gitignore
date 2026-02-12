@@ -85,3 +85,4 @@ src/plugins/swarm/test/node_modules
 #ai
 .claude
 .vercel
+nul
