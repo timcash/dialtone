@@ -161,8 +161,8 @@ export class SectionManager {
             this.load(sectionId).then(() => {
               const control = this.visualizations.get(sectionId);
               if (control) {
-                // Only log and trigger setVisible if it wasn't already visible
-                if (entry.intersectionRatio > 0) {
+                // Resume animation if substantially visible
+                if (entry.intersectionRatio > 0.1) {
                    control.setVisible(true);
                 }
               }
@@ -193,7 +193,7 @@ export class SectionManager {
         });
 
         // Only update UI if the best section has changed and it's substantially visible
-        if (bestId && bestId !== this.activeSectionId && maxRatio >= 0.45) {
+        if (bestId && bestId !== this.activeSectionId && maxRatio >= 0.5) {
           this.activeSectionId = bestId;
           
           if (this.debug) {
@@ -214,7 +214,7 @@ export class SectionManager {
           }
         }
       },
-      { threshold: [0, 0.1, 0.2, 0.3, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0] },
+      { threshold: [0, 0.25, 0.5, 0.75, 1.0] },
     );
 
     const observedSections: string[] = [];
