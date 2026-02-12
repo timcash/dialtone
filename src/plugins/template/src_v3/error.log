@@ -1,4 +1,2 @@
-# Template v3 Error Log (Sample Output)
-# Generated: 2026-02-12 00:00:00 UTC
-# Notes: This file contains only errors and any subprocess non-zero exits.
-
+[browser][error] "[PROOFOFLIFE] Intentional Browser Test Error"
+[PROOFOFLIFE] Intentional Go Test Error
