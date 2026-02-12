@@ -1,6 +1,6 @@
 # WWW Plugin Smoke Test Report
 
-**Generated at:** Sun, 08 Feb 2026 08:16:07 PST
+**Generated at:** Thu, 12 Feb 2026 10:59:39 PST
 
 ## 1. Expected Errors (Proof of Life)
 
@@ -16,8 +16,8 @@
 "[main] ❌ loadSection failed: # not found or not a slide"
 
 Stack Trace:
-  loadSection (http://127.0.0.1:5173/src/main.ts:139:10)
-   (http://127.0.0.1:5173/src/main.ts:142:5)
+  loadSection (http://127.0.0.1:5173/src/main.ts:148:10)
+   (http://127.0.0.1:5173/src/main.ts:151:5)
 
 ```
 
@@ -25,18 +25,19 @@ Stack Trace:
 
 | Section | FPS | App CPU (ms) | App GPU (ms) | JS Heap (MB) | Resources (MB) | Status |
 |---|---|---|---|---|---|---|
-| s-home | 61 | 0.38 | 0.10 | 0.00 | 0.00 | OK |
-| s-about | 63 | 1.22 | 3.08 | 0.00 | 0.00 | OK |
-| s-robot | 56 | 0.49 | 1.67 | 0.00 | 0.00 | OK |
-| s-neural | 61 | 0.60 | 0.72 | 0.00 | 0.00 | OK |
-| s-math | 60 | 0.42 | 2.14 | 0.00 | 0.00 | OK |
-| s-cad | 64 | 0.14 | 0.60 | 0.00 | 0.00 | OK |
-| s-radio | 47 | 0.25 | 1.02 | 0.00 | 0.00 | OK |
-| s-geotools | 61 | 0.12 | 1.87 | 0.00 | 0.00 | OK |
-| s-docs | 60 | 0.14 | 0.15 | 0.00 | 0.00 | OK |
-| s-policy | 35 | 0.28 | 2.02 | 0.00 | 0.00 | OK |
-| s-webgpu-template | 60 | 0.10 | 0.06 | 0.00 | 0.00 | OK |
-| s-threejs-template | 60 | 0.11 | 0.01 | 0.00 | 0.00 | OK |
+| s-home | 60 | 0.37 | 0.12 | 0.00 | 0.00 | OK |
+| s-about | 62 | 1.11 | 3.15 | 0.00 | 0.00 | OK |
+| s-robot | 60 | 0.70 | 0.02 | 0.00 | 0.00 | OK |
+| s-neural | 63 | 1.09 | 0.02 | 0.00 | 0.00 | OK |
+| s-math | 60 | 0.82 | 0.02 | 0.00 | 0.00 | OK |
+| s-cad | 62 | 0.26 | 0.06 | 0.00 | 0.00 | OK |
+| s-radio | 35 | 0.65 | 0.07 | 0.00 | 0.00 | OK |
+| s-geotools | 61 | 0.28 | 0.08 | 0.00 | 0.00 | OK |
+| s-docs | 61 | 0.22 | 0.01 | 0.00 | 0.00 | OK |
+| s-policy | 61 | 0.58 | 0.17 | 0.00 | 0.00 | OK |
+| s-music | 2 | 0.65 | 0.28 | 0.00 | 0.00 | OK |
+| s-webgpu-template | 60 | 0.22 | 0.15 | 0.00 | 0.00 | OK |
+| s-threejs-template | 60 | 0.21 | 0.01 | 0.00 | 0.00 | OK |
 
 ## 4. Test Orchestration DAG
 
