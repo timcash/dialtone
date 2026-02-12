@@ -69,6 +69,6 @@ func Run14ThreeSectionValidation() error {
 		return err
 	}
 
-	shot := filepath.Join(repoRoot, "src", "plugins", "template", "src_v3", "test_step_4.png")
+	shot := filepath.Join(repoRoot, "src", "plugins", "template", "src_v3", "screenshots", "test_step_4.png")
 	return session.CaptureScreenshot(shot)
 }

@@ -1,8 +1,8 @@
 package cli
 
 import (
-	"dialtone/cli/src/libs/dialtest"
-	template_v3 "dialtone/cli/src/plugins/template/src_v3"
+	test_v2 "dialtone/cli/src/libs/test_v2"
+	template_v3 "dialtone/cli/src/plugins/template/src_v3/cmd/ops"
 	"flag"
 	"fmt"
 	"os"
@@ -10,8 +10,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 )
 
 func runBun(repoRoot, uiDir string, args ...string) *exec.Cmd {
@@ -215,55 +213,32 @@ func RunDev(versionDir string) error {
 	fmt.Printf(">> [TEMPLATE] Dev: %s\n", versionDir)
 	cwd, _ := os.Getwd()
 	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
-
+	versionDirPath := filepath.Join(cwd, "src", "plugins", "template", versionDir)
 	devPort := 3000
 	devURL := fmt.Sprintf("http://127.0.0.1:%d", devPort)
+
+	devSession, err := test_v2.NewDevSession(test_v2.DevSessionOptions{
+		VersionDirPath: versionDirPath,
+		Port:           devPort,
+		URL:            devURL,
+		ConsoleWriter:  os.Stdout,
+	})
+	if err != nil {
+		return err
+	}
+	defer devSession.Close()
+
 	fmt.Println("   [DEV] Running vite dev...")
 	cmd := runBun(cwd, uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(devPort))
+	cmd.Stdout = devSession.Writer()
+	cmd.Stderr = devSession.Writer()
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	devSession.StartBrowserAttach()
 
-	var (
-		mu      sync.Mutex
-		session *dialtest.ChromeSession
-	)
-
-	go func() {
-		if err := dialtest.WaitForPort(devPort, 30*time.Second); err != nil {
-			fmt.Printf("   [DEV] Warning: vite server not ready on port %d: %v\n", devPort, err)
-			return
-		}
-
-		fmt.Printf("   [DEV] Vite ready at %s\n", devURL)
-		fmt.Println("   [DEV] Launching debug browser (HEADED) with console capture...")
-
-		s, err := dialtest.StartChromeSession(dialtest.ChromeSessionOptions{
-			Headless:      false,
-			Role:          "dev",
-			ReuseExisting: true,
-			URL:           devURL,
-			LogWriter:     os.Stdout,
-			LogPrefix:     "   [BROWSER]",
-		})
-		if err != nil {
-			fmt.Printf("   [DEV] Warning: failed to attach debug browser: %v\n", err)
-			return
-		}
-		mu.Lock()
-		session = s
-		mu.Unlock()
-	}()
-
-	err := cmd.Wait()
-
-	mu.Lock()
-	if session != nil {
-		session.Close()
-	}
-	mu.Unlock()
-
-	return err
+	waitErr := cmd.Wait()
+	return waitErr
 }
 
 func RunBuild(versionDir string) error {

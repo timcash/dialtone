@@ -66,6 +66,6 @@ func Run13TableSectionValidation() error {
 		return err
 	}
 
-	shot := filepath.Join(repoRoot, "src", "plugins", "template", "src_v3", "test_step_3.png")
+	shot := filepath.Join(repoRoot, "src", "plugins", "template", "src_v3", "screenshots", "test_step_3.png")
 	return session.CaptureScreenshot(shot)
 }

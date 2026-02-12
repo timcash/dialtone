@@ -3,43 +3,38 @@ package main
 import (
 	"fmt"
 	"os"
+
+	test_v2 "dialtone/cli/src/libs/test_v2"
 )
 
-type step struct {
-	name string
-	fn   func() error
-}
-
 func main() {
-	steps := []step{
-		{name: "01 Go Format", fn: Run01GoFormat},
-		{name: "02 Go Vet", fn: Run02GoVet},
-		{name: "03 Go Build", fn: Run03GoBuild},
-		{name: "04 UI Lint", fn: Run04UILint},
-		{name: "05 UI Format", fn: Run05UIFormat},
-		{name: "06 UI Build", fn: Run06UIBuild},
-		{name: "07 Go Run", fn: Run07GoRun},
-		{name: "08 UI Run", fn: Run08UIRun},
-		{name: "09 Expected Errors (Proof of Life)", fn: Run09ExpectedErrorsProofOfLife},
-		{name: "10 Dev Server Running (latest UI)", fn: Run10DevServerRunningLatestUI},
-		{name: "11 Hero Section Validation", fn: Run11HeroSectionValidation},
-		{name: "12 Docs Section Validation", fn: Run12DocsSectionValidation},
-		{name: "13 Table Section Validation", fn: Run13TableSectionValidation},
-		{name: "14 Three Section Validation", fn: Run14ThreeSectionValidation},
-		{name: "15 Xterm Section Validation", fn: Run15XtermSectionValidation},
-		{name: "16 Video Section Validation", fn: Run16VideoSectionValidation},
-		{name: "17 Lifecycle / Invariants", fn: Run17LifecycleInvariants},
-		{name: "18 Cleanup Verification", fn: Run18CleanupVerification},
+	steps := []test_v2.Step{
+		{Name: "01 Go Format", Run: Run01GoFormat},
+		{Name: "02 Go Vet", Run: Run02GoVet},
+		{Name: "03 Go Build", Run: Run03GoBuild},
+		{Name: "04 UI Lint", Run: Run04UILint},
+		{Name: "05 UI Format", Run: Run05UIFormat},
+		{Name: "06 UI Build", Run: Run06UIBuild},
+		{Name: "07 Go Run", Run: Run07GoRun},
+		{Name: "08 UI Run", Run: Run08UIRun},
+		{Name: "09 Expected Errors (Proof of Life)", Run: Run09ExpectedErrorsProofOfLife},
+		{Name: "10 Dev Server Running (latest UI)", Run: Run10DevServerRunningLatestUI},
+		{Name: "11 Hero Section Validation", Run: Run11HeroSectionValidation, SectionID: "hero", Screenshot: "screenshots/test_step_1.png"},
+		{Name: "12 Docs Section Validation", Run: Run12DocsSectionValidation, SectionID: "docs", Screenshot: "screenshots/test_step_2.png"},
+		{Name: "13 Table Section Validation", Run: Run13TableSectionValidation, SectionID: "table", Screenshot: "screenshots/test_step_3.png"},
+		{Name: "14 Three Section Validation", Run: Run14ThreeSectionValidation, SectionID: "three", Screenshot: "screenshots/test_step_4.png"},
+		{Name: "15 Xterm Section Validation", Run: Run15XtermSectionValidation, SectionID: "xterm", Screenshot: "screenshots/test_step_5.png"},
+		{Name: "16 Video Section Validation", Run: Run16VideoSectionValidation, SectionID: "video", Screenshot: "screenshots/test_step_6.png"},
+		{Name: "17 Lifecycle / Invariants", Run: Run17LifecycleInvariants},
+		{Name: "18 Cleanup Verification", Run: Run18CleanupVerification},
 	}
 
-	for _, s := range steps {
-		fmt.Printf("[TEST] START %s\n", s.name)
-		if err := s.fn(); err != nil {
-			fmt.Printf("[TEST] FAIL  %s: %v\n", s.name, err)
-			os.Exit(1)
-		}
-		fmt.Printf("[TEST] PASS  %s\n", s.name)
+	if err := test_v2.RunSuite(test_v2.SuiteOptions{
+		Version:    "src_v3",
+		ReportPath: "src/plugins/template/src_v3/test/TEST.md",
+		LogPath:    "src/plugins/template/src_v3/test/test.log",
+	}, steps); err != nil {
+		fmt.Printf("[TEST] SUITE ERROR: %v\n", err)
+		os.Exit(1)
 	}
-
-	fmt.Println("[TEST] COMPLETE")
 }
