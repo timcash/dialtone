@@ -606,14 +606,14 @@ export async function mountWebgpuTemplate(container: HTMLElement) {
     },
     setVisible: (visible: boolean) => {
       viz.setVisible(visible);
-      if (visible) {
-        setupWebGpuTemplateMenu({
-          speed: viz.spinSpeed,
-          onSpeedChange: (value: number) => {
-            viz.spinSpeed = value;
-          },
-        });
-      }
     },
+    updateUI: () => {
+      setupWebGpuTemplateMenu({
+        speed: viz.spinSpeed,
+        onSpeedChange: (value: number) => {
+          viz.spinSpeed = value;
+        },
+      });
+    }
   };
 }

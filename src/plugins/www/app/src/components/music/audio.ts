@@ -87,7 +87,7 @@ export class AudioAnalyzer {
     }
   }
 
-  getChromagram(sensitivity: number): Float32Array {
+  getChromagram(sensitivity: number, floor: number = -60): Float32Array {
     const chroma = new Float32Array(12).fill(0);
     if (!this.analyzer || !this.dataArray || !this.audioContext || this.audioContext.state === 'suspended') return chroma;
 
@@ -106,7 +106,7 @@ export class AudioAnalyzer {
 
       const noteIndex = Math.round(midiNote) % 12;
       const db = data[i];
-      if (db > -100) {
+      if (db > floor) {
         const magnitude = Math.pow(10, db / 20) * sensitivity;
         chroma[noteIndex] += magnitude;
       }
