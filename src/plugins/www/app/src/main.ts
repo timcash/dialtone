@@ -108,6 +108,16 @@ sections.register('s-policy', {
     }
 });
 
+sections.register('s-music', {
+    containerId: 'music-container',
+    load: async () => {
+        const { mountMusic } = await import('./components/music/index');
+        const container = document.getElementById('music-container');
+        if (!container) throw new Error('music-container not found');
+        return mountMusic(container);
+    }
+});
+
 sections.register('s-webgpu-template', {
     containerId: 'webgpu-template-container',
     load: async () => {
