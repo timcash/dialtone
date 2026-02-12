@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	template_v3 "dialtone/cli/src/plugins/template/src_v3"
+	template_v3 "dialtone/cli/src/plugins/template/src_v3/cmd/ops"
 )
 
 func runTemplateInstall(versionDir string) error {

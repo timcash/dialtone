@@ -1,4 +1,4 @@
-package src_v3
+package ops
 
 import (
 	"os"
@@ -6,13 +6,13 @@ import (
 	"path/filepath"
 )
 
-func Vet() error {
+func Serve() error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
 
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "vet", "./src/plugins/template/src_v3/...")
+	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "run", "src/plugins/template/src_v3/cmd/main.go")
 	cmd.Dir = cwd
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

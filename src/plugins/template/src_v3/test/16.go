@@ -57,6 +57,6 @@ func Run16VideoSectionValidation() error {
 		return err
 	}
 
-	shot := filepath.Join(repoRoot, "src", "plugins", "template", "src_v3", "test_step_6.png")
+	shot := filepath.Join(repoRoot, "src", "plugins", "template", "src_v3", "screenshots", "test_step_6.png")
 	return session.CaptureScreenshot(shot)
 }
