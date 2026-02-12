@@ -11,15 +11,13 @@
 ### Windows
 Run commands using the `dialtone.cmd` wrapper (no PowerShell policy issues):
 ```cmd
-.\dialtone start
-.\dialtone task create my-new-task
+.\dialtone --help
 ```
 
 ### Linux / WSL / macOS
 Run commands using `dialtone.sh`:
 ```bash
-./dialtone.sh start
-./dialtone.sh task create my-new-task
+./dialtone.sh --help
 ```
 
 ## What is Dialtone?
