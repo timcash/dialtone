@@ -12,10 +12,10 @@ if [ "$PWD" != "$SCRIPT_DIR" ]; then
 fi
 
 # --- CONFIGURATION ---
-GRACEFUL_TIMEOUT=${GRACEFUL_TIMEOUT:-5}   # Seconds to wait after SIGTERM before SIGKILL
-PROCESS_TIMEOUT=${PROCESS_TIMEOUT:-0}      # Max runtime in seconds (0 = no limit)
+GRACEFUL_TIMEOUT=${GRACEFUL_TIMEOUT:-5}   # Used by explicit `proc stop` only
+RUNTIME_DIR="$SCRIPT_DIR/.dialtone/run"
 
-# Track nested wrapper invocations so only the outermost wrapper logs shutdown details.
+# Track wrapper depth; only top-level invocations are tracked by `proc`.
 if [[ "${DIALTONE_WRAPPER_DEPTH:-0}" =~ ^[0-9]+$ ]]; then
     DIALTONE_WRAPPER_DEPTH=$((DIALTONE_WRAPPER_DEPTH + 1))
 else
@@ -23,94 +23,323 @@ else
 fi
 export DIALTONE_WRAPPER_DEPTH
 
-CLEANUP_VERBOSE=1
-if [ "$DIALTONE_WRAPPER_DEPTH" -gt 1 ]; then
-    CLEANUP_VERBOSE=0
-fi
+TRACK_PROCESSES=1
 
 # --- HELP MENU ---
 print_help() {
     cat <<EOF
 Usage: ./dialtone.sh <command> [options]
+       ./dialtone.sh help
+       ./dialtone.sh --help
 
 Commands:
-  start         Start the NATS and Web server
-  install [path] Install dependencies (--linux-wsl for WSL, --macos-arm for Apple Silicon)
-  build         Build web UI and binary (--local, --full, --remote, --podman, --linux-arm, --linux-arm64)
-  deploy        Deploy to remote robot
-  camera        Camera tools (snapshot, stream)
-  bun <subcmd>  Bun toolchain tools (exec, run, x)
-  clone         Clone or update the repository
-  sync-code     Sync source code to remote robot
-  ssh           SSH tools (upload, download, cmd)
-  provision     Generate Tailscale Auth Key)
-  logs          Tail remote logs
-  diagnostic    Run system diagnostics (local or remote)
-  branch <name>      Create or checkout a feature branch
-  ide <subcmd>       IDE tools (setup-workflows)
-  github <subcmd>    Manage GitHub interactions (pr, check-deploy)
-  www <subcmd>       Manage public webpage (Vercel wrapper)
-  ui <subcmd>        Manage web UI (dev, build, install)
-  test <subcmd>      Run tests (legacy)
-
-  ai <subcmd>        AI tools (opencode, developer, subagent)
-  go <subcmd>        Go toolchain tools (install, lint)
-  help               Show this help message
+  start               Start the NATS and Web server
+  install [path]      Install Go toolchain to DIALTONE_ENV (go plugin default)
+  build               Build web UI and binary (--local, --full, --remote, --podman, --linux-arm, --linux-arm64)
+  deploy              Deploy to remote robot
+  camera              Camera tools (snapshot, stream)
+  clone               Clone or update the repository
+  sync-code           Sync source code to remote robot
+  ssh                 SSH tools (upload, download, cmd)
+  provision           Generate Tailscale auth key
+  logs                Tail remote logs
+  diagnostic          Run system diagnostics (local or remote)
+  branch <name>       Create or checkout a feature branch
+  ide <subcmd>        IDE tools (setup-workflows)
+  github <subcmd>     GitHub tools (pr, check-deploy)
+  www <subcmd>        Public webpage tools
+  ui <subcmd>         Web UI tools (dev, build, install)
+  ai <subcmd>         AI tools (opencode, developer, subagent)
+  go <subcmd>         Go toolchain tools (install, lint, test, exec)
+  bun <subcmd>        Bun toolchain tools (exec, run, x, test)
+  kill <pid|all>      Kill one Dialtone process tree or all Dialtone shell processes
+  ps <option>         List Dialtone processes (tracked, all, tree)
+  proc <subcmd>       Process management (ps, stop, logs)
+  test <subcmd>       Run tests (legacy)
+  help                Show this help message
 
 Global Options:
-  --env <path>       Set DIALTONE_ENV directory
-  --timeout <sec>    Max runtime before graceful shutdown (0 = no limit)
-  --grace <sec>      Seconds to wait after SIGTERM before SIGKILL (default: 5)
+  --env <path>         Set DIALTONE_ENV directory
+  --grace <sec>        Seconds to wait in proc stop before SIGKILL (default: 5)
+  --timeout <sec>      Deprecated; ignored
+
+Process Notes:
+  - dialtone.sh does not auto-kill child processes on shell exit.
+  - ./dialtone.sh help and ./dialtone.sh --help are equivalent.
+  - Nested ./dialtone.sh subcommands are tracked while running.
+  - Use explicit process commands:
+      ./dialtone.sh ps
+      ./dialtone.sh ps all
+      ./dialtone.sh ps tracked
+      ./dialtone.sh ps tree
+      ./dialtone.sh kill <pid>
+      ./dialtone.sh kill all
+      ./dialtone.sh proc stop <key>
+
+Examples:
+  ./dialtone.sh dag dev src_v2
+  ./dialtone.sh ps
+  ./dialtone.sh kill all
+  ./dialtone.sh proc stop dag_dev_src_v2
 EOF
 }
 
-# --- GRACEFUL SHUTDOWN ---
-CHILD_PID=""
-CLEANUP_RAN=0
-
-cleanup() {
-    # cleanup can be triggered by INT/TERM and then EXIT; run it once.
-    if [ "$CLEANUP_RAN" -eq 1 ]; then
-        return
+sanitize_process_key() {
+    local key="$*"
+    key="${key//\//_}"
+    key="$(echo "$key" | tr '[:space:]' '_' | tr -cd '[:alnum:]_.:-' | sed -E 's/_+/_/g; s/^_+//; s/_+$//')"
+    if [ -z "$key" ]; then
+        key="unnamed"
     fi
-    CLEANUP_RAN=1
-    trap - EXIT INT TERM
-
-    if [ -n "$CHILD_PID" ] && kill -0 "$CHILD_PID" 2>/dev/null; then
-        if [ "$CLEANUP_VERBOSE" -eq 1 ]; then
-            echo ""
-            echo "[dialtone] Sending SIGTERM to process $CHILD_PID..."
-        fi
-        kill -TERM "$CHILD_PID" 2>/dev/null || true
-        
-        # Wait for graceful shutdown
-        local waited=0
-        while [ $waited -lt $GRACEFUL_TIMEOUT ] && kill -0 "$CHILD_PID" 2>/dev/null; do
-            sleep 1
-            waited=$((waited + 1))
-            if [ "$CLEANUP_VERBOSE" -eq 1 ]; then
-                echo "[dialtone] Waiting for graceful shutdown... ($waited/$GRACEFUL_TIMEOUT)"
-            fi
-        done
-        
-        # Force kill if still running
-        if kill -0 "$CHILD_PID" 2>/dev/null; then
-            if [ "$CLEANUP_VERBOSE" -eq 1 ]; then
-                echo "[dialtone] Process did not exit, sending SIGKILL..."
-            fi
-            kill -KILL "$CHILD_PID" 2>/dev/null || true
-        else
-            if [ "$CLEANUP_VERBOSE" -eq 1 ]; then
-                echo "[dialtone] Process exited gracefully."
-            fi
-        fi
-    fi
+    echo "$key"
 }
 
-# Trap signals and forward to child
-trap cleanup EXIT
-trap 'cleanup; exit 130' INT
-trap 'cleanup; exit 143' TERM
+proc_usage() {
+    cat <<EOF
+Usage: ./dialtone.sh proc <subcommand>
+
+Subcommands:
+  ps                 List tracked processes (top-level + nested while running)
+  stop <key>         Stop tracked process by key
+  logs <key>         Tail tracked log for key
+EOF
+}
+
+ps_usage() {
+    cat <<EOF
+Usage: ./dialtone.sh ps <option>
+
+Options:
+  all                Show all running ./dialtone.sh processes (including nested) (default)
+  tracked            Show tracked Dialtone processes (top-level + nested)
+  tree               Show process tree view (dialtone.sh + go/bun children)
+  help               Show this help
+EOF
+}
+
+kill_usage() {
+    cat <<EOF
+Usage: ./dialtone.sh kill <pid|all>
+
+Commands:
+  kill <pid>          Kill PID and its descendant process tree
+  kill all            Kill all running ./dialtone.sh process trees
+  kill help           Show this help
+EOF
+}
+
+proc_ps() {
+    mkdir -p "$RUNTIME_DIR"
+    shopt -s nullglob
+    local files=("$RUNTIME_DIR"/*.pid)
+    shopt -u nullglob
+
+    if [ "${#files[@]}" -eq 0 ]; then
+        echo "No tracked processes."
+        return 0
+    fi
+
+    printf "%-40s %-8s %-8s %s\n" "KEY" "PID" "STATUS" "CMD"
+    for pid_file in "${files[@]}"; do
+        local key pid meta_file cmd status
+        key="$(basename "$pid_file" .pid)"
+        pid="$(cat "$pid_file" 2>/dev/null || true)"
+        meta_file="$RUNTIME_DIR/$key.meta"
+        cmd="$(grep '^CMD=' "$meta_file" 2>/dev/null | sed 's/^CMD=//' || true)"
+        if [ -z "$cmd" ]; then
+            cmd="(unknown)"
+        fi
+
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            status="running"
+        else
+            status="stale"
+            rm -f "$pid_file" "$meta_file"
+        fi
+        printf "%-40s %-8s %-8s %s\n" "$key" "${pid:-n/a}" "$status" "$cmd"
+    done
+}
+
+proc_stop() {
+    local key="$1"
+    local pid_file="$RUNTIME_DIR/$key.pid"
+    local meta_file="$RUNTIME_DIR/$key.meta"
+    if [ ! -f "$pid_file" ]; then
+        echo "No tracked process for key: $key"
+        return 1
+    fi
+
+    local pid
+    pid="$(cat "$pid_file" 2>/dev/null || true)"
+    if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+        echo "Process is not running (cleaning stale state): $key"
+        rm -f "$pid_file" "$meta_file"
+        return 0
+    fi
+
+    local targets=("$pid")
+    while IFS= read -r dpid; do
+        [ -n "$dpid" ] && targets+=("$dpid")
+    done < <(collect_descendants "$pid")
+
+    echo "[dialtone] Stopping $key (pid=$pid) with SIGTERM..."
+    for tpid in "${targets[@]}"; do
+        kill -TERM "$tpid" 2>/dev/null || true
+    done
+
+    local waited=0
+    while [ "$waited" -lt "$GRACEFUL_TIMEOUT" ]; do
+        local any_alive=0
+        for tpid in "${targets[@]}"; do
+            if kill -0 "$tpid" 2>/dev/null; then
+                any_alive=1
+                break
+            fi
+        done
+        if [ "$any_alive" -eq 0 ]; then
+            break
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    local any_alive=0
+    for tpid in "${targets[@]}"; do
+        if kill -0 "$tpid" 2>/dev/null; then
+            any_alive=1
+            break
+        fi
+    done
+    if [ "$any_alive" -eq 1 ]; then
+        echo "[dialtone] Escalating to SIGKILL for $key (pid=$pid)..."
+        for tpid in "${targets[@]}"; do
+            kill -KILL "$tpid" 2>/dev/null || true
+        done
+    fi
+
+    rm -f "$pid_file" "$meta_file"
+}
+
+proc_logs() {
+    local key="$1"
+    local log_file="$RUNTIME_DIR/$key.log"
+    if [ ! -f "$log_file" ]; then
+        echo "No log file found for key: $key"
+        return 1
+    fi
+    tail -f "$log_file"
+}
+
+ps_all() {
+    pgrep -fal '(^|/)dialtone\.sh( |$)' || true
+}
+
+ps_tree() {
+    ps -eo pid=,ppid=,command= \
+        | grep -E 'dialtone\.sh|cmd/dev/main\.go|bun exec|go run .*/src/cmd/dev/main.go' \
+        | grep -v 'grep -E' || true
+}
+
+collect_descendants() {
+    local parent="$1"
+    local child
+    while IFS= read -r child; do
+        [ -z "$child" ] && continue
+        echo "$child"
+        collect_descendants "$child"
+    done < <(pgrep -P "$parent" 2>/dev/null || true)
+}
+
+cleanup_metadata_for_pid() {
+    local target_pid="$1"
+    mkdir -p "$RUNTIME_DIR"
+    shopt -s nullglob
+    local pid_file
+    for pid_file in "$RUNTIME_DIR"/*.pid; do
+        local tracked_pid key meta_file
+        tracked_pid="$(cat "$pid_file" 2>/dev/null || true)"
+        if [ "$tracked_pid" = "$target_pid" ]; then
+            key="$(basename "$pid_file" .pid)"
+            meta_file="$RUNTIME_DIR/$key.meta"
+            rm -f "$pid_file" "$meta_file"
+        fi
+    done
+    shopt -u nullglob
+}
+
+kill_pid_tree() {
+    local pid="$1"
+    if ! [[ "$pid" =~ ^[0-9]+$ ]]; then
+        echo "Invalid PID: $pid"
+        return 1
+    fi
+    if ! kill -0 "$pid" 2>/dev/null; then
+        echo "PID not running: $pid"
+        cleanup_metadata_for_pid "$pid"
+        return 1
+    fi
+
+    local targets=("$pid")
+    while IFS= read -r dpid; do
+        [ -n "$dpid" ] && targets+=("$dpid")
+    done < <(collect_descendants "$pid")
+
+    echo "[dialtone] Killing process tree for pid=$pid (SIGTERM)..."
+    local tpid
+    for tpid in "${targets[@]}"; do
+        kill -TERM "$tpid" 2>/dev/null || true
+    done
+
+    local waited=0
+    while [ "$waited" -lt "$GRACEFUL_TIMEOUT" ]; do
+        local any_alive=0
+        for tpid in "${targets[@]}"; do
+            if kill -0 "$tpid" 2>/dev/null; then
+                any_alive=1
+                break
+            fi
+        done
+        if [ "$any_alive" -eq 0 ]; then
+            break
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    local any_alive=0
+    for tpid in "${targets[@]}"; do
+        if kill -0 "$tpid" 2>/dev/null; then
+            any_alive=1
+            break
+        fi
+    done
+    if [ "$any_alive" -eq 1 ]; then
+        echo "[dialtone] Escalating process tree for pid=$pid (SIGKILL)..."
+        for tpid in "${targets[@]}"; do
+            kill -KILL "$tpid" 2>/dev/null || true
+        done
+    fi
+
+    cleanup_metadata_for_pid "$pid"
+    return 0
+}
+
+kill_all_dialtone() {
+    local pids pid
+    pids="$(pgrep -f '(^|/)dialtone\.sh( |$)' || true)"
+    if [ -z "$pids" ]; then
+        echo "No running ./dialtone.sh processes found."
+        return 0
+    fi
+
+    while IFS= read -r pid; do
+        [ -z "$pid" ] && continue
+        if [ "$pid" = "$$" ] || [ "$pid" = "$PPID" ]; then
+            continue
+        fi
+        kill_pid_tree "$pid" || true
+    done <<< "$pids"
+}
 
 # 0. Ensure critical directories exist for Go embed
 mkdir -p "$SCRIPT_DIR/src/core/web/dist"
@@ -158,11 +387,11 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --timeout=*)
-            PROCESS_TIMEOUT="${1#*=}"
+            echo "[dialtone] --timeout is deprecated and ignored."
             shift
             ;;
         --timeout)
-            PROCESS_TIMEOUT="$2"
+            echo "[dialtone] --timeout is deprecated and ignored."
             shift 2
             ;;
         --grace=*)
@@ -214,6 +443,92 @@ if [ -z "$DIALTONE_CMD" ]; then
     exit 0
 fi
 
+# Process management commands are handled directly in the shell wrapper.
+if [ "$DIALTONE_CMD" = "proc" ]; then
+    subcmd="${ARGS[1]:-}"
+    case "$subcmd" in
+        ps)
+            proc_ps
+            ;;
+        stop)
+            key="${ARGS[2]:-}"
+            if [ -z "$key" ]; then
+                echo "Usage: ./dialtone.sh proc stop <key>"
+                exit 1
+            fi
+            proc_stop "$key"
+            ;;
+        logs)
+            key="${ARGS[2]:-}"
+            if [ -z "$key" ]; then
+                echo "Usage: ./dialtone.sh proc logs <key>"
+                exit 1
+            fi
+            proc_logs "$key"
+            ;;
+        help|-h|--help|"")
+            proc_usage
+            ;;
+        *)
+            echo "Unknown proc command: $subcmd"
+            proc_usage
+            exit 1
+            ;;
+    esac
+    exit $?
+fi
+
+if [ "$DIALTONE_CMD" = "ps" ]; then
+    option="${ARGS[1]:-all}"
+    case "$option" in
+        tracked)
+            proc_ps
+            ;;
+        all)
+            ps_all
+            ;;
+        tree)
+            ps_tree
+            ;;
+        help|-h|--help)
+            ps_usage
+            ;;
+        *)
+            echo "Unknown ps option: $option"
+            ps_usage
+            exit 1
+            ;;
+    esac
+    exit $?
+fi
+
+if [ "$DIALTONE_CMD" = "kill" ]; then
+    target="${ARGS[1]:-}"
+    case "$target" in
+        all)
+            kill_all_dialtone
+            ;;
+        help|-h|--help|"")
+            kill_usage
+            ;;
+        *)
+            kill_pid_tree "$target"
+            ;;
+    esac
+    exit $?
+fi
+
+# Install is handled directly by the go plugin installer script.
+if [ "$DIALTONE_CMD" = "install" ]; then
+    installer="$SCRIPT_DIR/src/plugins/go/install.sh"
+    if [ ! -f "$installer" ]; then
+        echo "Error: installer not found: $installer"
+        exit 1
+    fi
+    bash "$installer" "${ARGS[@]:1}"
+    exit $?
+fi
+
 # Tilde expansion for DIALTONE_ENV if sourced
 if [[ "$DIALTONE_ENV" == "~"* ]]; then
     DIALTONE_ENV="${DIALTONE_ENV/#\~/$HOME}"
@@ -235,106 +550,55 @@ if [ -z "$DIALTONE_ENV" ]; then
     exit 1
 fi
 
-# 3. Handle Go Installation / Check
+# 3. Require managed Go toolchain for all non-install commands
 GO_BIN=""
 if [ -n "$DIALTONE_ENV" ]; then
     GO_BIN="$DIALTONE_ENV/go/bin/go"
 fi
 
-if [ "$DIALTONE_CMD" = "install" ]; then
-    OS=$(uname | tr '[:upper:]' '[:lower:]')
-    ARCH=$(uname -m)
-    GO_ARCH="$ARCH"
-    if [ "$GO_ARCH" = "x86_64" ]; then GO_ARCH="amd64"; fi
-    if [ "$GO_ARCH" = "aarch64" ] || [ "$GO_ARCH" = "arm64" ]; then GO_ARCH="arm64"; fi
-
-    mkdir -p "$DIALTONE_ENV"
-
-    # Check for C compiler (required for CGO/DuckDB)
-    if ! command -v gcc &> /dev/null && ! command -v clang &> /dev/null; then
-        echo ""
-        echo "WARNING: No C compiler (gcc/clang) found."
-        echo "DuckDB features require a C compiler. To install:"
-        echo "  sudo apt-get update && sudo apt-get install -y build-essential"
-        echo ""
-        echo "Continuing without CGO support..."
-        export CGO_ENABLED=0
-    fi
-
-    # Perform Go installation if missing
-    if [ -n "$DIALTONE_ENV" ] && [ ! -d "$DIALTONE_ENV/go" ]; then
-        echo "Go not found in $DIALTONE_ENV/go. Installing..."
-        GO_VERSION=$(grep "^go " "$SCRIPT_DIR/go.mod" | awk '{print $2}')
-        TAR_FILE="go$GO_VERSION.$OS-$GO_ARCH.tar.gz"
-        TAR_PATH="$DIALTONE_ENV/$TAR_FILE"
-        echo "Downloading $TAR_FILE to $TAR_PATH..."
-        curl -L -o "$TAR_PATH" "https://go.dev/dl/$TAR_FILE"
-        tar -C "$DIALTONE_ENV" -xzf "$TAR_PATH"
-        rm "$TAR_PATH"
-    fi
-elif [ -n "$DIALTONE_ENV" ] && [ ! -f "$GO_BIN" ]; then
+if [ ! -x "$GO_BIN" ]; then
     echo "Error: Go not found in $DIALTONE_ENV/go."
     echo "Please run './dialtone.sh install' first to set up the environment."
     exit 1
 fi
 
-# 4. Setup PATH if Go is in DIALTONE_ENV
-if [ -n "$GO_BIN" ] && [ -f "$GO_BIN" ]; then
-    ABS_ENV=$(cd "$DIALTONE_ENV" && pwd)
-    export PATH="$ABS_ENV/go/bin:$PATH"
-    export GOROOT="$ABS_ENV/go"
-    export GOCACHE="$ABS_ENV/cache"
-    export GOMODCACHE="$ABS_ENV/pkg/mod"
-fi
-
-# 5. Enable CGO if C compiler available
-if command -v gcc &> /dev/null || command -v clang &> /dev/null; then
-    export CGO_ENABLED=1
-else
-    export CGO_ENABLED=0
-fi
-
-# 6. Run the tool
-run_with_timeout() {
+# 4. Run the tool and track process metadata.
+run_tool() {
     local go_cmd="$1"
     shift
-    
-    # Run in background and capture PID
-    "$go_cmd" run "$SCRIPT_DIR/src/cmd/dev/main.go" "$@" &
-    CHILD_PID=$!
-    
-    # If timeout is set, start watchdog
-    if [ "$PROCESS_TIMEOUT" -gt 0 ]; then
-        (
-            sleep "$PROCESS_TIMEOUT"
-            if kill -0 "$CHILD_PID" 2>/dev/null; then
-                echo ""
-                echo "[dialtone] Timeout ($PROCESS_TIMEOUT seconds) reached, initiating shutdown..."
-                kill -TERM "$CHILD_PID" 2>/dev/null || true
-            fi
-        ) &
-        WATCHDOG_PID=$!
+
+    mkdir -p "$RUNTIME_DIR"
+
+    local key pid_file meta_file log_file cmdline child_pid exit_code
+    key="$(sanitize_process_key "$@")"
+    if [ "$DIALTONE_WRAPPER_DEPTH" -gt 1 ]; then
+        key="${key}__pid_$$"
     fi
-    
-    # Wait for child process
-    wait "$CHILD_PID" 2>/dev/null
-    EXIT_CODE=$?
-    CHILD_PID=""
-    
-    # Kill watchdog if it's still running
-    if [ -n "$WATCHDOG_PID" ] && kill -0 "$WATCHDOG_PID" 2>/dev/null; then
-        kill "$WATCHDOG_PID" 2>/dev/null || true
-    fi
-    
-    exit $EXIT_CODE
+    pid_file="$RUNTIME_DIR/$key.pid"
+    meta_file="$RUNTIME_DIR/$key.meta"
+    log_file="$RUNTIME_DIR/$key.log"
+    cmdline="./dialtone.sh $*"
+
+    cat >"$meta_file" <<EOF
+CMD=$cmdline
+LOG=$log_file
+STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+EOF
+
+    "$go_cmd" run "$SCRIPT_DIR/src/cmd/dev/main.go" "$@" \
+        > >(tee -a "$log_file") \
+        2> >(tee -a "$log_file" >&2) &
+    child_pid=$!
+    echo "$child_pid" > "$pid_file"
+
+    set +e
+    wait "$child_pid"
+    exit_code=$?
+    set -e
+
+    rm -f "$pid_file" "$meta_file"
+    return "$exit_code"
 }
 
-if [ -n "$GO_BIN" ] && [ -f "$GO_BIN" ]; then
-    run_with_timeout "$GO_BIN" "${ARGS[@]}"
-elif command -v go &> /dev/null; then
-    echo "Using system Go..."
-    run_with_timeout "go" "${ARGS[@]}"
-else
-    echo "Error: Go binary not found at $GO_BIN and system Go not found."
-    exit 1
-fi
+run_tool "$GO_BIN" "${ARGS[@]}"
+exit $?
