@@ -63,6 +63,7 @@ target/
 **/target/
 
 # Dialtone specific
+.dialtone/
 smoke_debug.txt
 smoke_debug_2.txt
 tmp/template-ui-build-debug/
