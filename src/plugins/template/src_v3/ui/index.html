@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Template v3</title>
+    <link rel="stylesheet" href="src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header aria-label="App Header">
+        <h1>dialtone.template</h1>
+      </header>
+
+      <div aria-label="Global Menu">
+        <div aria-label="Global Menu Panel"></div>
+      </div>
+
+      <main>
+        <section id="hero" aria-label="Hero Section">
+          <h2 aria-label="Hero Header">Hero</h2>
+          <canvas aria-label="Hero Canvas"></canvas>
+        </section>
+
+        <section id="docs" aria-label="Docs Section" hidden>
+          <h2 aria-label="Docs Header">Documentation</h2>
+          <p aria-label="Docs Body">Template docs placeholder content.</p>
+        </section>
+
+        <section id="table" aria-label="Table Section" hidden>
+          <h2 aria-label="Table Header">Table</h2>
+          <div aria-label="Table Controls">
+            <button type="button" aria-label="Table Pagination Prev">Prev</button>
+            <span aria-label="Table Page">Page 1</span>
+            <button type="button" aria-label="Table Pagination Next">Next</button>
+          </div>
+        </section>
+
+        <section id="three" aria-label="Three Section" hidden>
+          <h2 aria-label="Three Header">Three</h2>
+          <canvas aria-label="Three Canvas"></canvas>
+        </section>
+
+        <section id="xterm" aria-label="Xterm Section" hidden>
+          <h2 aria-label="Xterm Header">Xterm</h2>
+          <pre aria-label="Xterm Terminal">dialtone@template:~$ booting...</pre>
+        </section>
+
+        <section id="video" aria-label="Video Section" hidden>
+          <h2 aria-label="Video Header">Video</h2>
+          <video aria-label="Test Video" muted playsinline></video>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

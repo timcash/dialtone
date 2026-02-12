@@ -29,6 +29,8 @@ Expected structure for v3:
 - `src/plugins/template/src_v3/cmd/` (Go entrypoint)
 - `src/plugins/template/src_v3/ui/` (Vite UI)
 - `src/plugins/template/src_v3/test/` (automation harness)
+- `src/plugins/template/src_v3/install.go` (v3-local install workflow)
+- `src/plugins/template/src_v3/build.go` (v3-local build workflow)
 - `src/plugins/template/src_v3/DESIGN.md`
 - `src/plugins/template/src_v3/TEST_PLAN.md`
 - `src/plugins/template/src_v3/DAG.md`
@@ -214,6 +216,9 @@ The report is richer than `SMOKE.md`:
   - Replace `smoke` with `test` harness.
   - Strip UI transitions and fades.
 - All v3 changes are local to `src_v3` and the new libraries.
+- `src_v3` owns its own setup/build orchestration files:
+  - `install.go` installs only the dependencies needed for `src_v3`.
+  - `build.go` executes only the build steps needed for `src_v3`.
 
 ## 7. Decisions (Confirmed)
 - `ui_v2` will use a new base stylesheet that targets common HTML elements (`section`, `header`, `button`, etc.) so components “just work” without extra classes.

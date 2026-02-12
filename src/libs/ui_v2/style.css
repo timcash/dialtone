@@ -1,0 +1,71 @@
+:root {
+  color-scheme: dark;
+  --bg: #0a0d12;
+  --panel: #101722;
+  --ink: #e9f0fb;
+  --accent: #59d0ff;
+  --muted: #9cb2c8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+  background: radial-gradient(1200px 600px at 80% -10%, #14324c 0%, transparent 55%), var(--bg);
+  color: var(--ink);
+}
+
+body {
+  overflow: hidden;
+}
+
+header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  padding: 14px 20px;
+  background: color-mix(in srgb, var(--panel) 80%, transparent);
+  backdrop-filter: blur(4px);
+  border-bottom: 1px solid #233040;
+}
+
+main {
+  width: 100%;
+  height: 100%;
+}
+
+section {
+  width: 100%;
+  height: 100%;
+  padding: 90px 20px 20px;
+}
+
+button {
+  padding: 8px 12px;
+  border: 1px solid #2d3d50;
+  border-radius: 8px;
+  background: #162536;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+[aria-label='Global Menu'] {
+  position: fixed;
+  top: 14px;
+  right: 20px;
+  z-index: 11;
+}
+
+[aria-label='Global Menu Panel'] {
+  display: flex;
+  gap: 8px;
+}

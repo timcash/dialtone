@@ -1,0 +1,60 @@
+@import '../../../../../libs/ui_v2/style.css';
+
+section[aria-label='Hero Section'] {
+  display: grid;
+  place-items: center;
+  gap: 12px;
+}
+
+canvas[aria-label='Hero Canvas'] {
+  width: min(90vw, 1000px);
+  height: min(70vh, 560px);
+  border: 1px solid #2f4257;
+  border-radius: 10px;
+  background: #0d1420;
+}
+
+section[aria-label='Table Section'],
+section[aria-label='Three Section'],
+section[aria-label='Xterm Section'],
+section[aria-label='Video Section'] {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+[aria-label='Table Controls'] {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #2f4257;
+  border-radius: 10px;
+  width: fit-content;
+}
+
+canvas[aria-label='Three Canvas'] {
+  width: min(92vw, 1100px);
+  height: min(72vh, 620px);
+  border: 1px solid #2f4257;
+  border-radius: 10px;
+  background: #101824;
+}
+
+pre[aria-label='Xterm Terminal'] {
+  margin: 0;
+  padding: 14px;
+  border: 1px solid #2f4257;
+  border-radius: 10px;
+  background: #090f18;
+  color: #9de684;
+  width: min(92vw, 1000px);
+  min-height: 140px;
+}
+
+video[aria-label='Test Video'] {
+  width: min(92vw, 800px);
+  border: 1px solid #2f4257;
+  border-radius: 10px;
+  background: #000;
+}
