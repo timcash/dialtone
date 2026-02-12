@@ -456,10 +456,10 @@ export function mountGeoTools(container: HTMLElement) {
     },
     setVisible: (visible: boolean) => {
       viz.setVisible(visible);
-      if (visible) {
-        const { updateStatus } = setupGeoToolsMenu(options);
-        updateStatusFn = updateStatus;
-      }
     },
+    updateUI: () => {
+      const { updateStatus } = setupGeoToolsMenu(options);
+      updateStatusFn = updateStatus;
+    }
   };
 }

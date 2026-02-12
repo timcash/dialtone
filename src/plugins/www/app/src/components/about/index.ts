@@ -504,11 +504,12 @@ export function mountAbout(container: HTMLElement) {
     },
     setVisible: (visible: boolean) => {
       viz.setVisible(visible);
-      if (visible) {
-        cleanupMenu = setupAboutMenu(options);
-      } else {
+      if (!visible) {
         cleanupMenu();
       }
     },
+    updateUI: () => {
+      cleanupMenu = setupAboutMenu(options);
+    }
   };
 }
