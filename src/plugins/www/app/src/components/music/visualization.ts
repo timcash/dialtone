@@ -79,9 +79,9 @@ export class MusicVisualization {
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.bloomPass = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
-      1.5, // Strength
+      1.2, // Reduced Strength
       0.4, // Radius
-      0.85 // Threshold
+      0.9  // Increased Threshold (less things glow)
     );
     this.composer.addPass(this.bloomPass);
 
@@ -323,11 +323,12 @@ export class MusicVisualization {
         strongestIndex = i;
       }
 
+      // Scale pulse
       const targetScale = 1.0 + energy * 2.0;
       mesh.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.2);
 
       const mat = mesh.material as THREE.MeshStandardMaterial;
-      mat.emissiveIntensity = 0.2 + energy * 5.0;
+      mat.emissiveIntensity = 0.1 + energy * 2.0;
       
       mesh.position.z = Math.sin(this.time + mesh.userData.angle * 2) * 0.1;
     });
