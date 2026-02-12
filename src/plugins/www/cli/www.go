@@ -506,10 +506,6 @@ func RunWww(args []string) {
 			logFatal("Dev server failed: %v", err)
 		}
 
-		if err := cmd.Run(); err != nil {
-			logFatal("Tests failed: %v", err)
-		}
-
 	case "lint":
 		for _, arg := range args[1:] {
 			if arg == "--help" || arg == "-h" {

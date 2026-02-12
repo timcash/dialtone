@@ -250,7 +250,7 @@ function Cmd-KillAll {
     }
 }
 
-function Forward-Go([string]$Cmd, [string[]]$Args) {
+function Forward-Go([string]$Cmd, [string[]]$ForwardArgs) {
     Ensure-Env
     $goBin = Join-Path $env:DIALTONE_ENV "go/bin/go.exe"
     if (!(Test-Path $goBin)) {
@@ -260,15 +260,15 @@ function Forward-Go([string]$Cmd, [string[]]$Args) {
     }
 
     Ensure-RuntimeDir
-    $key = Get-ProcessKey "$Cmd $($Args -join ' ')"
+    $key = Get-ProcessKey "$Cmd $($ForwardArgs -join ' ')"
     $pidFile = Join-Path $RuntimeDir "$key.pid"
     $metaFile = Join-Path $RuntimeDir "$key.meta"
     $logFile = Join-Path $RuntimeDir "$key.log"
 
-    $goArgs = @("run", "src/cmd/dev/main.go", $Cmd) + $Args
+    $goArgs = @("run", "src/cmd/dev/main.go", $Cmd) + $ForwardArgs
 
     @(
-        "CMD=.\dialtone.ps1 $Cmd $($Args -join ' ')"
+        "CMD=.\dialtone.ps1 $Cmd $($ForwardArgs -join ' ')"
         "LOG=$logFile"
         "STARTED_AT=$([DateTime]::UtcNow.ToString('s'))Z"
     ) | Set-Content -Path $metaFile
@@ -403,6 +403,6 @@ switch ($Command) {
         exit $LASTEXITCODE
     }
     default {
-        Forward-Go -Cmd $Command -Args $ExtraArgs
+        Forward-Go -Cmd $Command -ForwardArgs $ExtraArgs
     }
 }
