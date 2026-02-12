@@ -390,9 +390,9 @@ export function mountPolicy(container: HTMLElement) {
     },
     setVisible: (visible: boolean) => {
       viz.setVisible(visible);
-      if (visible) {
-        setupPolicyMenu(menuOptions);
-      }
     },
+    updateUI: () => {
+      setupPolicyMenu(menuOptions);
+    }
   };
 }

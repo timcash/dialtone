@@ -59,12 +59,11 @@ export function mountMusic(container: HTMLElement) {
   const viz = new MusicVisualization(container);
   
   const updateMenu = () => {
-    const section = document.getElementById("s-music");
-    if (!section?.classList.contains("is-visible")) return;
-
     setupMusicMenu({
       sensitivity: viz.sensitivity,
       onSensitivityChange: (v) => { viz.sensitivity = v; },
+      floor: viz.floor,
+      onFloorChange: (v) => { viz.floor = v; },
       rotation: viz.rotation,
       onRotationChange: (v) => { viz.rotation = v; },
       enableMic: async () => {
@@ -93,9 +92,9 @@ export function mountMusic(container: HTMLElement) {
     },
     setVisible: (visible: boolean) => {
       viz.setVisible(visible);
-      if (visible) {
-        setTimeout(updateMenu, 100);
-      }
     },
+    updateUI: () => {
+      updateMenu();
+    }
   };
 }

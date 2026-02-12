@@ -542,9 +542,6 @@ class MathVisualization {
 
   setVisible(visible: boolean) {
     VisibilityMixin.setVisible(this, visible, "math");
-    if (visible) {
-      setupMathMenu(this);
-    }
     if (!visible) {
       this.fpsCounter.clear();
     }
@@ -660,5 +657,8 @@ export function mountMath(container: HTMLElement) {
     setVisible: (visible: boolean) => {
       viz.setVisible(visible);
     },
+    updateUI: () => {
+      setupMathMenu(viz);
+    }
   };
 }
