@@ -2,6 +2,7 @@ package cli
 
 import (
 	"dialtone/cli/src/libs/dialtest"
+	template_v3 "dialtone/cli/src/plugins/template/src_v3"
 	"flag"
 	"fmt"
 	"os"
@@ -41,10 +42,22 @@ func Run(args []string) error {
 	switch command {
 	case "install":
 		return RunInstall(getDir())
+	case "fmt":
+		return RunFmt(getDir())
+	case "format":
+		return RunFormat(getDir())
+	case "vet":
+		return RunVet(getDir())
+	case "go-build":
+		return RunGoBuild(getDir())
 	case "lint":
 		return RunLint(getDir())
 	case "dev":
 		return RunDev(getDir())
+	case "ui-run":
+		return RunUIRun(getDir(), args[2:])
+	case "serve":
+		return RunServe(getDir())
 	case "smoke":
 		dir := getDir()
 		cwd, _ := os.Getwd()
@@ -55,6 +68,19 @@ func Run(args []string) error {
 
 		fmt.Printf(">> [TEMPLATE] Running Smoke Test for %s...\n", dir)
 		cmd := exec.Command("go", "run", smokeFile, dir)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		return cmd.Run()
+	case "test":
+		dir := getDir()
+		cwd, _ := os.Getwd()
+		testPkg := "./" + filepath.ToSlash(filepath.Join("src", "plugins", "template", dir, "test"))
+		if _, err := os.Stat(filepath.Join(cwd, "src", "plugins", "template", dir, "test", "main.go")); os.IsNotExist(err) {
+			return fmt.Errorf("test runner not found: %s/main.go", testPkg)
+		}
+		fmt.Printf(">> [TEMPLATE] Running Test Suite for %s...\n", dir)
+		cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "run", testPkg)
+		cmd.Dir = cwd
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
@@ -100,22 +126,88 @@ func getLatestVersionDir() string {
 }
 
 func RunInstall(versionDir string) error {
-	fmt.Printf(">> [TEMPLATE] Install: %s\n", versionDir)
-	cwd, _ := os.Getwd()
-	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
+	return runTemplateInstall(versionDir)
+}
 
-	fmt.Println("   [TEMPLATE] Running bun install...")
-	cmd := runBun(cwd, uiDir, "install", "--force")
-	return cmd.Run()
+func RunFmt(versionDir string) error {
+	fmt.Printf(">> [TEMPLATE] Fmt: %s\n", versionDir)
+	if versionDir == "src_v3" {
+		return template_v3.Fmt()
+	}
+
+	return nil
+}
+
+func RunFormat(versionDir string) error {
+	fmt.Printf(">> [TEMPLATE] Format: %s\n", versionDir)
+	if versionDir == "src_v3" {
+		return template_v3.Format()
+	}
+	return nil
+}
+
+func RunVet(versionDir string) error {
+	fmt.Printf(">> [TEMPLATE] Vet: %s\n", versionDir)
+	if versionDir == "src_v3" {
+		return template_v3.Vet()
+	}
+
+	return nil
+}
+
+func RunGoBuild(versionDir string) error {
+	fmt.Printf(">> [TEMPLATE] Go Build: %s\n", versionDir)
+	if versionDir == "src_v3" {
+		return template_v3.GoBuild()
+	}
+
+	return nil
 }
 
 func RunLint(versionDir string) error {
 	fmt.Printf(">> [TEMPLATE] Lint: %s\n", versionDir)
+	if versionDir == "src_v3" {
+		return template_v3.Lint()
+	}
+
 	cwd, _ := os.Getwd()
 	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
 
 	fmt.Println("   [LINT] Running tsc...")
 	cmd := runBun(cwd, uiDir, "run", "lint")
+	return cmd.Run()
+}
+
+func RunServe(versionDir string) error {
+	fmt.Printf(">> [TEMPLATE] Serve: %s\n", versionDir)
+	if versionDir == "src_v3" {
+		return template_v3.Serve()
+	}
+
+	cwd, _ := os.Getwd()
+	pluginDir := filepath.Join(cwd, "src", "plugins", "template", versionDir)
+	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "run", "cmd/main.go")
+	cmd.Dir = pluginDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func RunUIRun(versionDir string, extraArgs []string) error {
+	fmt.Printf(">> [TEMPLATE] UI Run: %s\n", versionDir)
+	port := 3000
+	if len(extraArgs) >= 2 && extraArgs[0] == "--port" {
+		if p, err := strconv.Atoi(extraArgs[1]); err == nil {
+			port = p
+		}
+	}
+	if versionDir == "src_v3" {
+		return template_v3.UIRun(port)
+	}
+
+	cwd, _ := os.Getwd()
+	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
+	cmd := runBun(cwd, uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(port))
 	return cmd.Run()
 }
 
@@ -176,6 +268,10 @@ func RunDev(versionDir string) error {
 
 func RunBuild(versionDir string) error {
 	fmt.Printf(">> [TEMPLATE] Build: %s\n", versionDir)
+	if versionDir == "src_v3" {
+		return template_v3.Build()
+	}
+
 	cwd, _ := os.Getwd()
 	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
 
@@ -239,9 +335,16 @@ func printUsage() {
 	fmt.Println("Usage: ./dialtone.sh template <command>")
 	fmt.Println("\nCommands:")
 	fmt.Println("  install <dir>  Install UI dependencies")
-	fmt.Println("  lint <dir>     Lint TypeScript code")
+	fmt.Println("  fmt <dir>      Run formatting checks/fixes")
+	fmt.Println("  format <dir>   Run UI format checks")
+	fmt.Println("  vet <dir>      Run go vet checks")
+	fmt.Println("  go-build <dir> Run go build checks")
+	fmt.Println("  lint <dir>     Run lint checks")
 	fmt.Println("  dev <dir>      Run UI in development mode")
+	fmt.Println("  ui-run <dir>   Run UI dev server")
+	fmt.Println("  serve <dir>    Run plugin Go server")
 	fmt.Println("  build <dir>    Build everything needed (UI assets)")
+	fmt.Println("  test <dir>     Run automated tests and write TEST.md artifacts")
 	fmt.Println("  smoke <dir>    Run robust automated UI tests")
 	fmt.Println("  src --n <N>    Generate next src_vN folder")
 }
