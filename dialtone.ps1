@@ -111,7 +111,7 @@ function Ensure-Env {
 }
 
 function Get-ProcessKey([string]$Raw) {
-    $key = $Raw -replace '[\\/]', '_' -replace '\s+', '_' -replace '[^A-Za-z0-9_.:-]', ''
+    $key = $Raw -replace '[\\/]', '_' -replace '\s+', '_' -replace '[^A-Za-z0-9_.-]', ''
     $key = $key.Trim('_')
     if ([string]::IsNullOrWhiteSpace($key)) { $key = "unnamed" }
     if ([int]$env:DIALTONE_WRAPPER_DEPTH -gt 1) {

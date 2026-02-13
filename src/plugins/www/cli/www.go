@@ -285,6 +285,7 @@ func RunWww(args []string) {
 		fmt.Println("  webgpu demo        Zero-config local WebGPU development environment")
 		fmt.Println("  webgpu debug       Chromedp debug run for WebGPU rendering")
 		fmt.Println("  radio demo         Zero-config local Radio section demo")
+		fmt.Println("  vision demo        Zero-config local Vision section demo")
 		fmt.Println("\nRun 'dialtone www <subcommand> --help' for specific details.")
 		return
 	}
@@ -297,6 +298,23 @@ func RunWww(args []string) {
 	vercelEnv := vercelProjectEnv()
 
 	switch subcommand {
+	case "vision":
+		if len(args) > 1 && args[1] == "demo" {
+			for _, arg := range args[2:] {
+				if arg == "--help" || arg == "-h" {
+					fmt.Println("Usage: dialtone www vision demo")
+					fmt.Println("\nOrchestrates a local Vision section demo:")
+					fmt.Println("  1. Cleans up port 5173.")
+					fmt.Println("  2. Kills existing Chrome debug instances.")
+					fmt.Println("  3. Starts the Vite WWW dev server.")
+					fmt.Println("  4. Launches Chrome on the Vision section (#s-vision).")
+					return
+				}
+			}
+			handleVisionDemo(webDir)
+			return
+		}
+		logFatal("Unknown 'vision' command. Use 'dialtone www help' for usage.")
 	case "about":
 		if len(args) > 1 && args[1] == "demo" {
 			for _, arg := range args[2:] {

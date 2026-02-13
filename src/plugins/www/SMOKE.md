@@ -1,13 +1,13 @@
 # WWW Plugin Smoke Test Report
 
-**Generated at:** Thu, 12 Feb 2026 13:29:14 PST
+**Generated at:** Fri, 13 Feb 2026 10:01:44 PST
 
 ## 1. Expected Errors (Proof of Life)
 
 | Level | Message | Status |
 |---|---|---|
-| error | [PROOFOFLIFE] Intentional Go Test Error | ✅ CAPTURED |
 | error | "[PROOFOFLIFE] Intentional Browser Test Error" | ✅ CAPTURED |
+| error | [PROOFOFLIFE] Intentional Go Test Error | ✅ CAPTURED |
 
 ## 2. Real Errors & Warnings
 
@@ -16,8 +16,8 @@
 "[main] ❌ loadSection failed: # not found or not a slide"
 
 Stack Trace:
-  loadSection (http://127.0.0.1:5173/src/main.ts:148:10)
-   (http://127.0.0.1:5173/src/main.ts:151:5)
+  loadSection (http://127.0.0.1:5173/src/main.ts:129:10)
+   (http://127.0.0.1:5173/src/main.ts:132:5)
 
 ```
 
@@ -25,19 +25,17 @@ Stack Trace:
 
 | Section | FPS | App CPU (ms) | App GPU (ms) | JS Heap (MB) | Resources (MB) | Status |
 |---|---|---|---|---|---|---|
-| s-home | 51 | 0.34 | 2.33 | 0.00 | 0.00 | OK |
-| s-about | 46 | 0.32 | 1.31 | 0.00 | 0.00 | OK |
-| s-robot | 60 | 1.09 | 0.15 | 0.00 | 0.00 | OK |
-| s-neural | 62 | 0.40 | 0.12 | 0.00 | 0.00 | OK |
-| s-math | 53 | 0.52 | 0.19 | 0.00 | 0.00 | OK |
-| s-cad | 38 | 0.32 | 0.22 | 0.00 | 0.00 | OK |
-| s-radio | 37 | 0.09 | 0.11 | 0.00 | 0.00 | OK |
-| s-geotools | 60 | 0.32 | 0.06 | 0.00 | 0.00 | OK |
-| s-docs | 1 | 0.10 | 0.00 | 0.00 | 0.00 | OK |
-| s-policy | 6 | 0.06 | 0.02 | 0.00 | 0.00 | OK |
-| s-music | 58 | 0.34 | 0.10 | 0.00 | 0.00 | OK |
-| s-webgpu-template | 62 | 0.85 | 0.49 | 0.00 | 0.00 | OK |
-| s-threejs-template | 60 | 0.16 | 0.11 | 0.00 | 0.00 | OK |
+| s-home | 60 | 0.33 | 0.12 | 0.00 | 0.00 | OK |
+| s-about | 44 | 0.26 | 0.51 | 0.00 | 0.00 | OK |
+| s-robot | 63 | 1.17 | 0.59 | 0.00 | 0.00 | OK |
+| s-neural | 24 | 0.63 | 0.22 | 0.00 | 0.00 | OK |
+| s-math | 60 | 0.77 | 0.43 | 0.00 | 0.00 | OK |
+| s-cad | 51 | 0.33 | 0.43 | 0.00 | 0.00 | OK |
+| s-radio | 18 | 0.21 | 0.07 | 0.00 | 0.00 | OK |
+| s-geotools | 60 | 0.28 | 0.22 | 0.00 | 0.00 | OK |
+| s-policy | 2 | 0.20 | 0.00 | 0.00 | 0.00 | OK |
+| s-music | 38 | 0.51 | 2.57 | 0.00 | 0.00 | OK |
+| s-vision | 60 | 0.53 | 1.52 | 0.00 | 0.00 | OK |
 
 ## 4. Test Orchestration DAG
 
