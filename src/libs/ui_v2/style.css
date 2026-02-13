@@ -79,6 +79,7 @@ nav > button {
   width: auto;
   min-width: 90px;
   text-align: center;
+  padding: 0.6rem 1.1rem;
   border-radius: 9999px;
   background: rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(8px);
