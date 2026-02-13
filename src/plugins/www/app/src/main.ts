@@ -1,5 +1,7 @@
 import './../style.css';
 import { SectionManager } from './components/util/section';
+// @ts-ignore
+import TinyGesture from 'tinygesture';
 
 // Create section manager for lazy loading Three.js components
 const sections = new SectionManager({ debug: true });
@@ -87,17 +89,6 @@ sections.register('s-geotools', {
     }
 });
 
-sections.register('s-docs', {
-    containerId: 'docs-container',
-    header: { visible: false },
-    load: async () => {
-        const { mountDocs } = await import('./components/docs/index');
-        const container = document.getElementById('docs-container');
-        if (!container) throw new Error('docs-container not found');
-        return mountDocs(container);
-    }
-});
-
 sections.register('s-policy', {
     containerId: 'policy-container',
     load: async () => {
@@ -118,23 +109,13 @@ sections.register('s-music', {
     }
 });
 
-sections.register('s-webgpu-template', {
-    containerId: 'webgpu-template-container',
+sections.register('s-vision', {
+    containerId: 'vision-container',
     load: async () => {
-        const { mountWebgpuTemplate } = await import('./components/webgpu-template/index');
-        const container = document.getElementById('webgpu-template-container');
-        if (!container) throw new Error('webgpu-template-container not found');
-        return mountWebgpuTemplate(container);
-    }
-});
-
-sections.register('s-threejs-template', {
-    containerId: 'threejs-template-container',
-    load: async () => {
-        const { mountThreeJsTemplate } = await import('./components/threejs-template/index');
-        const container = document.getElementById('threejs-template-container');
-        if (!container) throw new Error('threejs-template-container not found');
-        return mountThreeJsTemplate(container);
+        const { mountVision } = await import('./components/vision/index');
+        const container = document.getElementById('vision-container');
+        if (!container) throw new Error('vision-container not found');
+        return mountVision(container);
     }
 });
 
@@ -239,6 +220,41 @@ const videoObserver = new IntersectionObserver((entries) => {
 }, { threshold: 0.1 });
 
 videos.forEach(video => videoObserver.observe(video));
+
+// Mobile Swipe Navigation
+const gesture = new TinyGesture(document.body);
+
+const navigateSlides = (direction: 'next' | 'prev') => {
+    const slides = Array.from(document.querySelectorAll('.snap-slide'));
+    const currentSlideIndex = slides.findIndex(slide => {
+        const rect = slide.getBoundingClientRect();
+        return rect.top >= -window.innerHeight / 2 && rect.top <= window.innerHeight / 2;
+    });
+
+    if (currentSlideIndex === -1) return;
+
+    let nextIndex = currentSlideIndex;
+    if (direction === 'next' && currentSlideIndex < slides.length - 1) {
+        nextIndex = currentSlideIndex + 1;
+    } else if (direction === 'prev' && currentSlideIndex > 0) {
+        nextIndex = currentSlideIndex - 1;
+    }
+
+    if (nextIndex !== currentSlideIndex) {
+        slides[nextIndex].scrollIntoView({ behavior: 'smooth' });
+    }
+};
+
+gesture.on('swipeup', () => {
+    console.log('[main] ?? Swipe UP detected -> next slide');
+    navigateSlides('next');
+});
+
+gesture.on('swipedown', () => {
+    console.log('[main] ?? Swipe DOWN detected -> prev slide');
+    navigateSlides('prev');
+});
+
 // Keyboard Navigation (Space bar to cycle slides)
 window.addEventListener('keydown', (e) => {
     if (e.code === 'Space' || e.keyCode === 32) {
