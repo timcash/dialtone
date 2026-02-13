@@ -166,6 +166,17 @@ window.addEventListener('keydown', (event) => {
   }
 });
 
+if (import.meta.hot) {
+  window.addEventListener('hashchange', () => {
+    const id = window.location.hash.slice(1);
+    if (id !== 'xterm') return;
+    const xtermEl = document.querySelector('#xterm [aria-label="Xterm Terminal"]') as HTMLElement | null;
+    if (xtermEl) {
+      xtermEl.removeAttribute('data-ready');
+    }
+  });
+}
+
 const hashId = window.location.hash.slice(1);
 const initialId = sectionSet.has(hashId as (typeof sectionOrder)[number]) ? hashId : 'hero';
 console.log(`[SectionManager] INITIAL LOAD #${initialId}`);
