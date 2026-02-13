@@ -86,3 +86,4 @@ src/plugins/swarm/test/node_modules
 .claude
 .vercel
 src/plugins/template/src_v3/error.log
+nul

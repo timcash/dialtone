@@ -437,9 +437,9 @@ export function mountNeuralNetwork(container: HTMLElement) {
     },
     setVisible: (visible: boolean) => {
       viz.setVisible(visible);
-      if (visible) {
-        setupNnMenu(options);
-      }
     },
+    updateUI: () => {
+      setupNnMenu(options);
+    }
   };
 }

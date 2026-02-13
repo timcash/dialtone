@@ -281,6 +281,7 @@ func RunWww(args []string) {
 		fmt.Println("  about demo         Zero-config local About section demo")
 		fmt.Println("  cad demo           Zero-config local CAD development environment")
 		fmt.Println("  earth demo         Zero-config local Earth development environment")
+		fmt.Println("  music demo         Zero-config local Music section demo")
 		fmt.Println("  webgpu demo        Zero-config local WebGPU development environment")
 		fmt.Println("  webgpu debug       Chromedp debug run for WebGPU rendering")
 		fmt.Println("  radio demo         Zero-config local Radio section demo")
@@ -348,6 +349,23 @@ func RunWww(args []string) {
 			return
 		}
 		logFatal("Unknown 'earth' command. Use 'dialtone www help' for usage.")
+	case "music":
+		if len(args) > 1 && args[1] == "demo" {
+			for _, arg := range args[2:] {
+				if arg == "--help" || arg == "-h" {
+					fmt.Println("Usage: dialtone www music demo")
+					fmt.Println("\nOrchestrates a local Music section demo:")
+					fmt.Println("  1. Cleans up port 5173.")
+					fmt.Println("  2. Kills existing Chrome debug instances.")
+					fmt.Println("  3. Starts the Vite WWW dev server on 0.0.0.0.")
+					fmt.Println("  4. Launches Chrome on the Music section (#s-music).")
+					return
+				}
+			}
+			handleMusicDemo(webDir)
+			return
+		}
+		logFatal("Unknown 'music' command. Use 'dialtone www help' for usage.")
 	case "webgpu":
 		if len(args) > 1 && args[1] == "demo" {
 			for _, arg := range args[2:] {
@@ -486,10 +504,6 @@ func RunWww(args []string) {
 		cmd.Stdin = os.Stdin
 		if err := cmd.Run(); err != nil {
 			logFatal("Dev server failed: %v", err)
-		}
-
-		if err := cmd.Run(); err != nil {
-			logFatal("Tests failed: %v", err)
 		}
 
 	case "lint":

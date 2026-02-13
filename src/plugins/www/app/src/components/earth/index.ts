@@ -528,9 +528,6 @@ export class ProceduralOrbit {
 
   setVisible(visible: boolean) {
     VisibilityMixin.setVisible(this, visible, "earth");
-    if (visible) {
-      setupEarthMenu(this);
-    }
     if (!visible) {
       this.fpsCounter.clear();
     }
@@ -752,5 +749,8 @@ export function mountEarth(container: HTMLElement) {
       container.innerHTML = '';
     },
     setVisible: (visible: boolean) => orbit.setVisible(visible),
+    updateUI: () => {
+      setupEarthMenu(orbit);
+    }
   };
 }
