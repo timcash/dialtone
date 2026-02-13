@@ -1,6 +1,6 @@
 # WWW Plugin Smoke Test Report
 
-**Generated at:** Fri, 13 Feb 2026 10:01:44 PST
+**Generated at:** Fri, 13 Feb 2026 10:06:22 PST
 
 ## 1. Expected Errors (Proof of Life)
 
@@ -16,8 +16,8 @@
 "[main] ❌ loadSection failed: # not found or not a slide"
 
 Stack Trace:
-  loadSection (http://127.0.0.1:5173/src/main.ts:129:10)
-   (http://127.0.0.1:5173/src/main.ts:132:5)
+  loadSection (http://127.0.0.1:5173/src/main.ts:130:10)
+   (http://127.0.0.1:5173/src/main.ts:133:5)
 
 ```
 
@@ -25,17 +25,17 @@ Stack Trace:
 
 | Section | FPS | App CPU (ms) | App GPU (ms) | JS Heap (MB) | Resources (MB) | Status |
 |---|---|---|---|---|---|---|
-| s-home | 60 | 0.33 | 0.12 | 0.00 | 0.00 | OK |
-| s-about | 44 | 0.26 | 0.51 | 0.00 | 0.00 | OK |
-| s-robot | 63 | 1.17 | 0.59 | 0.00 | 0.00 | OK |
-| s-neural | 24 | 0.63 | 0.22 | 0.00 | 0.00 | OK |
-| s-math | 60 | 0.77 | 0.43 | 0.00 | 0.00 | OK |
-| s-cad | 51 | 0.33 | 0.43 | 0.00 | 0.00 | OK |
-| s-radio | 18 | 0.21 | 0.07 | 0.00 | 0.00 | OK |
-| s-geotools | 60 | 0.28 | 0.22 | 0.00 | 0.00 | OK |
-| s-policy | 2 | 0.20 | 0.00 | 0.00 | 0.00 | OK |
-| s-music | 38 | 0.51 | 2.57 | 0.00 | 0.00 | OK |
-| s-vision | 60 | 0.53 | 1.52 | 0.00 | 0.00 | OK |
+| s-home | 60 | 0.44 | 0.40 | 0.00 | 0.00 | OK |
+| s-about | 36 | 0.24 | 0.79 | 0.00 | 0.00 | OK |
+| s-robot | 63 | 1.40 | 0.42 | 0.00 | 0.00 | OK |
+| s-neural | 16 | 0.78 | 0.08 | 0.00 | 0.00 | OK |
+| s-math | 60 | 0.71 | 0.33 | 0.00 | 0.00 | OK |
+| s-cad | 48 | 0.30 | 0.39 | 0.00 | 0.00 | OK |
+| s-radio | 49 | 0.11 | 0.12 | 0.00 | 0.00 | OK |
+| s-geotools | 58 | 0.30 | 0.08 | 0.00 | 0.00 | OK |
+| s-policy | 2 | 0.40 | 0.00 | 0.00 | 0.00 | OK |
+| s-music | 54 | 0.35 | 0.38 | 0.00 | 0.00 | OK |
+| s-vision | 60 | 0.66 | 1.79 | 0.00 | 0.00 | OK |
 
 ## 4. Test Orchestration DAG
 
