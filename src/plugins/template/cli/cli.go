@@ -2,9 +2,9 @@ package cli
 
 import (
 	test_v2 "dialtone/cli/src/libs/test_v2"
-	template_v3 "dialtone/cli/src/plugins/template/src_v3/cmd/ops"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -129,44 +129,56 @@ func RunInstall(versionDir string) error {
 
 func RunFmt(versionDir string) error {
 	fmt.Printf(">> [TEMPLATE] Fmt: %s\n", versionDir)
-	if versionDir == "src_v3" {
-		return template_v3.Fmt()
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
 	}
-
-	return nil
+	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "fmt", "./src/plugins/template/"+versionDir+"/...")
+	cmd.Dir = cwd
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 func RunFormat(versionDir string) error {
 	fmt.Printf(">> [TEMPLATE] Format: %s\n", versionDir)
-	if versionDir == "src_v3" {
-		return template_v3.Format()
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
 	}
-	return nil
+	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
+	cmd := runBun(cwd, uiDir, "run", "format")
+	return cmd.Run()
 }
 
 func RunVet(versionDir string) error {
 	fmt.Printf(">> [TEMPLATE] Vet: %s\n", versionDir)
-	if versionDir == "src_v3" {
-		return template_v3.Vet()
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
 	}
-
-	return nil
+	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "vet", "./src/plugins/template/"+versionDir+"/...")
+	cmd.Dir = cwd
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 func RunGoBuild(versionDir string) error {
 	fmt.Printf(">> [TEMPLATE] Go Build: %s\n", versionDir)
-	if versionDir == "src_v3" {
-		return template_v3.GoBuild()
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
 	}
-
-	return nil
+	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "build", "./src/plugins/template/"+versionDir+"/...")
+	cmd.Dir = cwd
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 func RunLint(versionDir string) error {
 	fmt.Printf(">> [TEMPLATE] Lint: %s\n", versionDir)
-	if versionDir == "src_v3" {
-		return template_v3.Lint()
-	}
 
 	cwd, _ := os.Getwd()
 	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
@@ -178,14 +190,10 @@ func RunLint(versionDir string) error {
 
 func RunServe(versionDir string) error {
 	fmt.Printf(">> [TEMPLATE] Serve: %s\n", versionDir)
-	if versionDir == "src_v3" {
-		return template_v3.Serve()
-	}
 
 	cwd, _ := os.Getwd()
-	pluginDir := filepath.Join(cwd, "src", "plugins", "template", versionDir)
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "run", "cmd/main.go")
-	cmd.Dir = pluginDir
+	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "run", filepath.ToSlash(filepath.Join("src", "plugins", "template", versionDir, "cmd", "main.go")))
+	cmd.Dir = cwd
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -198,9 +206,6 @@ func RunUIRun(versionDir string, extraArgs []string) error {
 		if p, err := strconv.Atoi(extraArgs[1]); err == nil {
 			port = p
 		}
-	}
-	if versionDir == "src_v3" {
-		return template_v3.UIRun(port)
 	}
 
 	cwd, _ := os.Getwd()
@@ -243,10 +248,6 @@ func RunDev(versionDir string) error {
 
 func RunBuild(versionDir string) error {
 	fmt.Printf(">> [TEMPLATE] Build: %s\n", versionDir)
-	if versionDir == "src_v3" {
-		return template_v3.Build()
-	}
-
 	cwd, _ := os.Getwd()
 	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
 
@@ -254,9 +255,8 @@ func RunBuild(versionDir string) error {
 		return err
 	}
 
-	fmt.Println("   [BUILD] Running vite build (skipping tsc)...")
-	// Use vite build directly, skipping tsc for speed and stability
-	cmd := runBun(cwd, uiDir, "run", "vite", "build", "--emptyOutDir")
+	fmt.Println("   [BUILD] Running UI build...")
+	cmd := runBun(cwd, uiDir, "run", "build")
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("build failed: %v", err)
@@ -302,8 +302,70 @@ func RunCreateVersion(newVer int) error {
 		return err
 	}
 
+	srcVersion := fmt.Sprintf("src_v%d", maxVer)
+	destVersion := fmt.Sprintf("src_v%d", newVer)
+	if err := rewriteVersionRefs(destDir, srcVersion, destVersion, maxVer, newVer); err != nil {
+		return fmt.Errorf("failed to rewrite version references: %w", err)
+	}
+
 	fmt.Printf(">> [TEMPLATE] New version created at: %s\n", destDir)
 	return nil
+}
+
+func rewriteVersionRefs(destDir, srcVersion, destVersion string, srcVerNum, destVerNum int) error {
+	allowedExt := map[string]bool{
+		".go":   true,
+		".ts":   true,
+		".tsx":  true,
+		".js":   true,
+		".jsx":  true,
+		".css":  true,
+		".html": true,
+		".json": true,
+		".md":   true,
+		".txt":  true,
+		".yml":  true,
+		".yaml": true,
+		".d.ts": true,
+	}
+
+	srcTemplateLabel := fmt.Sprintf("Template v%d", srcVerNum)
+	destTemplateLabel := fmt.Sprintf("Template v%d", destVerNum)
+	srcPackageLabel := fmt.Sprintf("template-ui-v%d", srcVerNum)
+	destPackageLabel := fmt.Sprintf("template-ui-v%d", destVerNum)
+
+	return filepath.WalkDir(destDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if name == "node_modules" || name == "dist" || name == ".pixi" || name == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		ext := filepath.Ext(path)
+		if !allowedExt[ext] {
+			return nil
+		}
+
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		content := string(raw)
+		updated := content
+		updated = strings.ReplaceAll(updated, srcVersion, destVersion)
+		updated = strings.ReplaceAll(updated, srcTemplateLabel, destTemplateLabel)
+		updated = strings.ReplaceAll(updated, srcPackageLabel, destPackageLabel)
+
+		if updated == content {
+			return nil
+		}
+		return os.WriteFile(path, []byte(updated), 0644)
+	})
 }
 
 func printUsage() {
