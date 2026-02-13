@@ -146,17 +146,7 @@ h2 {
 
 /* Navigation */
 .header-title {
-  position: fixed;
-  top: 1.5rem;
-  left: 1.5rem;
-  z-index: 100;
-  pointer-events: none;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  text-align: left;
-  /* FADE IN FASTER: 0.2s delay instead of 0.5s */
-  transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.2s, transform 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.2s;
+  display: none !important;
 }
 
 .header-title.is-hidden {
@@ -777,8 +767,8 @@ h2 {
 /* Marketing Overlays */
 .marketing-overlay {
   position: absolute;
-  top: 6rem;
-  /* offset below fixed header */
+  top: 1.5rem;
+  /* Very top left */
   left: 0;
   width: 66.66%;
   /* 2/3 width on desktop */
