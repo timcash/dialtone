@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Template v3</title>
+    <link rel="stylesheet" href="src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header aria-label="App Header">
+        <h1>dialtone.template</h1>
+      </header>
+
+      <nav aria-label="Global Menu">
+        <div aria-label="Global Menu Panel" hidden></div>
+      </nav>
+
+      <section id="hero" aria-label="Hero Section">
+          <div>
+            <h2 aria-label="Hero Header">Hero</h2>
+            <p aria-label="Hero Body">Template hero visualization with real-time motion and section lifecycle controls.</p>
+          </div>
+          <canvas aria-label="Hero Canvas"></canvas>
+      </section>
+
+      <section id="docs" aria-label="Docs Section" hidden>
+          <div>
+            <h2 aria-label="Docs Header">Documentation</h2>
+            <p aria-label="Docs Body">Template docs placeholder content.</p>
+          </div>
+      </section>
+
+      <section id="table" aria-label="Table Section" hidden>
+          <table aria-label="Template Table">
+            <thead>
+              <tr>
+                <th>KEY</th>
+                <th>VALUE</th>
+                <th>STATUS</th>
+                <th>REGION</th>
+                <th>LATENCY</th>
+                <th>UPDATED</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>system_clock</td><td>1707525600</td><td>SYNCED</td><td>us-west</td><td>12ms</td><td>14:25:01</td></tr>
+              <tr><td>network_latency</td><td>12ms</td><td>OPTIMAL</td><td>us-west</td><td>12ms</td><td>14:25:02</td></tr>
+              <tr><td>cache_hit_rate</td><td>98.1%</td><td>STABLE</td><td>us-east</td><td>18ms</td><td>14:25:03</td></tr>
+              <tr><td>worker_pool</td><td>24</td><td>ACTIVE</td><td>eu-west</td><td>34ms</td><td>14:25:04</td></tr>
+              <tr><td>queue_depth</td><td>42</td><td>NORMAL</td><td>ap-south</td><td>86ms</td><td>14:25:05</td></tr>
+              <tr><td>db_replica_lag</td><td>120ms</td><td>STABLE</td><td>us-east</td><td>22ms</td><td>14:25:06</td></tr>
+              <tr><td>ingest_rate</td><td>8.2k/s</td><td>HEALTHY</td><td>us-west</td><td>14ms</td><td>14:25:07</td></tr>
+              <tr><td>egress_rate</td><td>7.9k/s</td><td>HEALTHY</td><td>us-west</td><td>14ms</td><td>14:25:08</td></tr>
+              <tr><td>auth_success</td><td>99.93%</td><td>STABLE</td><td>eu-central</td><td>29ms</td><td>14:25:09</td></tr>
+              <tr><td>auth_failures</td><td>0.07%</td><td>NORMAL</td><td>eu-central</td><td>29ms</td><td>14:25:10</td></tr>
+              <tr><td>event_backlog</td><td>164</td><td>NORMAL</td><td>ap-south</td><td>91ms</td><td>14:25:11</td></tr>
+              <tr><td>cpu_cluster_a</td><td>61%</td><td>STABLE</td><td>us-east</td><td>21ms</td><td>14:25:12</td></tr>
+              <tr><td>cpu_cluster_b</td><td>57%</td><td>STABLE</td><td>us-west</td><td>12ms</td><td>14:25:13</td></tr>
+              <tr><td>mem_cluster_a</td><td>73%</td><td>STABLE</td><td>us-east</td><td>21ms</td><td>14:25:14</td></tr>
+              <tr><td>mem_cluster_b</td><td>69%</td><td>STABLE</td><td>us-west</td><td>12ms</td><td>14:25:15</td></tr>
+              <tr><td>disk_io_a</td><td>420MB/s</td><td>HEALTHY</td><td>us-east</td><td>20ms</td><td>14:25:16</td></tr>
+              <tr><td>disk_io_b</td><td>401MB/s</td><td>HEALTHY</td><td>us-west</td><td>12ms</td><td>14:25:17</td></tr>
+              <tr><td>api_p95</td><td>122ms</td><td>STABLE</td><td>eu-west</td><td>36ms</td><td>14:25:18</td></tr>
+              <tr><td>api_p99</td><td>244ms</td><td>WATCH</td><td>eu-west</td><td>36ms</td><td>14:25:19</td></tr>
+              <tr><td>websocket_clients</td><td>1284</td><td>ACTIVE</td><td>us-west</td><td>13ms</td><td>14:25:20</td></tr>
+              <tr><td>scheduler_tick</td><td>1s</td><td>SYNCED</td><td>us-east</td><td>22ms</td><td>14:25:21</td></tr>
+              <tr><td>retry_rate</td><td>0.8%</td><td>NORMAL</td><td>ap-south</td><td>95ms</td><td>14:25:22</td></tr>
+              <tr><td>packet_loss</td><td>0.02%</td><td>OPTIMAL</td><td>us-west</td><td>12ms</td><td>14:25:23</td></tr>
+              <tr><td>tls_handshake</td><td>38ms</td><td>HEALTHY</td><td>eu-central</td><td>30ms</td><td>14:25:24</td></tr>
+              <tr><td>stream_partitions</td><td>64</td><td>ACTIVE</td><td>us-east</td><td>20ms</td><td>14:25:25</td></tr>
+              <tr><td>consumer_lag</td><td>87</td><td>NORMAL</td><td>us-east</td><td>20ms</td><td>14:25:26</td></tr>
+              <tr><td>snapshot_age</td><td>14s</td><td>STABLE</td><td>us-west</td><td>12ms</td><td>14:25:27</td></tr>
+              <tr><td>index_freshness</td><td>99.7%</td><td>HEALTHY</td><td>eu-west</td><td>37ms</td><td>14:25:28</td></tr>
+              <tr><td>model_inference</td><td>43ms</td><td>OPTIMAL</td><td>us-west</td><td>11ms</td><td>14:25:29</td></tr>
+              <tr><td>alert_queue</td><td>5</td><td>QUIET</td><td>global</td><td>--</td><td>14:25:30</td></tr>
+            </tbody>
+          </table>
+      </section>
+
+      <section id="three" aria-label="Three Section" hidden>
+        <canvas aria-label="Three Canvas"></canvas>
+      </section>
+
+      <section id="xterm" aria-label="Xterm Section" hidden>
+        <div aria-label="Xterm Terminal"></div>
+        <input aria-label="Xterm Input" type="text" value="status --verbose" placeholder="Enter command..." />
+      </section>
+
+      <section id="video" aria-label="Video Section" hidden>
+        <video aria-label="Test Video" muted playsinline></video>
+      </section>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
