@@ -20,6 +20,15 @@ export class Menu {
         const setOpen = (open: boolean) => {
             this.panel.hidden = !open;
             this.toggle.setAttribute("aria-expanded", String(open));
+            
+            // Disable background scrolling when menu is open
+            if (open) {
+                document.body.style.overflow = 'hidden';
+                document.documentElement.style.overflow = 'hidden';
+            } else {
+                document.body.style.overflow = '';
+                document.documentElement.style.overflow = '';
+            }
         };
 
         this.toggle.addEventListener("click", (e) => {
