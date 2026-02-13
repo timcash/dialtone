@@ -20,7 +20,7 @@ export function setupApp(options: AppOptions = {}) {
 
   window.addEventListener('hashchange', () => {
     const id = window.location.hash.slice(1);
-    if (id) {
+    if (id && id !== sections.getActiveSectionId()) {
       sections.navigateTo(id, { updateHash: false }).catch((err) => {
         console.error('[SectionManager] hash navigation failed', err);
       });

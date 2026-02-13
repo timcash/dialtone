@@ -3,38 +3,13 @@ package main
 import (
 	"fmt"
 	"net"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"time"
 
 	"dialtone/cli/src/core/browser"
 )
 
 func Run18CleanupVerification() error {
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-
-	_ = browser.CleanupPort(8080)
-
-	serve := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "template", "serve", "src_v3")
-	serve.Dir = repoRoot
-	serve.Stdout = os.Stdout
-	serve.Stderr = os.Stderr
-	if err := serve.Start(); err != nil {
-		return err
-	}
-
-	if err := waitForPort("127.0.0.1:8080", 12*time.Second); err != nil {
-		_ = serve.Process.Kill()
-		_, _ = serve.Process.Wait()
-		return err
-	}
-
-	_ = serve.Process.Kill()
-	_, _ = serve.Process.Wait()
+	teardownSharedEnv()
 	_ = browser.CleanupPort(8080)
 
 	deadline := time.Now().Add(5 * time.Second)

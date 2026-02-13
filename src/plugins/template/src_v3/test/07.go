@@ -4,36 +4,11 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"time"
-
-	"dialtone/cli/src/core/browser"
 )
 
 func Run07GoRun() error {
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-
-	_ = browser.CleanupPort(8080)
-
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "template", "serve", "src_v3")
-	cmd.Dir = repoRoot
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	defer func() {
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-	}()
-
-	if err := waitForPort("127.0.0.1:8080", 12*time.Second); err != nil {
+	if err := ensureSharedServer(); err != nil {
 		return err
 	}
 
