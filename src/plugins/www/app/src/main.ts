@@ -1,5 +1,7 @@
 import './../style.css';
 import { SectionManager } from './components/util/section';
+// @ts-ignore
+import TinyGesture from 'tinygesture';
 
 // Create section manager for lazy loading Three.js components
 const sections = new SectionManager({ debug: true });
@@ -218,6 +220,41 @@ const videoObserver = new IntersectionObserver((entries) => {
 }, { threshold: 0.1 });
 
 videos.forEach(video => videoObserver.observe(video));
+
+// Mobile Swipe Navigation
+const gesture = new TinyGesture(document.body);
+
+const navigateSlides = (direction: 'next' | 'prev') => {
+    const slides = Array.from(document.querySelectorAll('.snap-slide'));
+    const currentSlideIndex = slides.findIndex(slide => {
+        const rect = slide.getBoundingClientRect();
+        return rect.top >= -window.innerHeight / 2 && rect.top <= window.innerHeight / 2;
+    });
+
+    if (currentSlideIndex === -1) return;
+
+    let nextIndex = currentSlideIndex;
+    if (direction === 'next' && currentSlideIndex < slides.length - 1) {
+        nextIndex = currentSlideIndex + 1;
+    } else if (direction === 'prev' && currentSlideIndex > 0) {
+        nextIndex = currentSlideIndex - 1;
+    }
+
+    if (nextIndex !== currentSlideIndex) {
+        slides[nextIndex].scrollIntoView({ behavior: 'smooth' });
+    }
+};
+
+gesture.on('swipeup', () => {
+    console.log('[main] ?? Swipe UP detected -> next slide');
+    navigateSlides('next');
+});
+
+gesture.on('swipedown', () => {
+    console.log('[main] ?? Swipe DOWN detected -> prev slide');
+    navigateSlides('prev');
+});
+
 // Keyboard Navigation (Space bar to cycle slides)
 window.addEventListener('keydown', (e) => {
     if (e.code === 'Space' || e.keyCode === 32) {

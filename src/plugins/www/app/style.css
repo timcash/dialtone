@@ -22,6 +22,7 @@ body {
   font-family: var(--font-family);
   scrollbar-width: none;
   -ms-overflow-style: none;
+  touch-action: pan-y;
 }
 
 /* Snap Scroll Container */
@@ -42,6 +43,7 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
+  touch-action: pan-y;
 }
 
 /* Content Styling */
@@ -99,6 +101,7 @@ h2 {
   width: 100%;
   height: 100%;
   z-index: 1;
+  pointer-events: none;
 }
 
 #earth-container canvas,
