@@ -1,25 +1,27 @@
 package cli
 
 import (
+	"dialtone/cli/src/core/install"
 	"fmt"
 	"os"
 	"path/filepath"
-
-	template_v3 "dialtone/cli/src/plugins/template/src_v3/cmd/ops"
 )
+
+var installRequirements = []install.Requirement{
+	{Tool: install.ToolGo, Version: install.GoVersion},
+	{Tool: install.ToolBun, Version: install.BunVersion},
+}
 
 func runTemplateInstall(versionDir string) error {
 	fmt.Printf(">> [TEMPLATE] Install: %s\n", versionDir)
-
-	switch versionDir {
-	case "src_v3":
-		return runInstallV3()
-	default:
-		return runInstallLegacy(versionDir)
-	}
+	return runInstall(versionDir)
 }
 
-func runInstallLegacy(versionDir string) error {
+func runInstall(versionDir string) error {
+	if err := install.EnsureRequirements(installRequirements); err != nil {
+		return err
+	}
+
 	cwd, _ := os.Getwd()
 	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
 
@@ -30,8 +32,4 @@ func runInstallLegacy(versionDir string) error {
 	fmt.Println("   [TEMPLATE] Running bun install...")
 	cmd := runBun(cwd, uiDir, "install", "--force")
 	return cmd.Run()
-}
-
-func runInstallV3() error {
-	return template_v3.Install()
 }

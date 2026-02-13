@@ -10,6 +10,17 @@ Reference plugin for versioned template development under `src/plugins/template/
   - UI app (`ui/`, Vite + TypeScript)
   - Integration test runner (`test/`, outputs `TEST.md`)
 
+## Shared Libraries
+
+- `src/libs/ui_v2`
+  - Shared app shell used by template UI versions.
+  - Provides `SectionManager`, `Menu`, and common styles.
+  - Current shell defaults match the `www` pattern: hidden header, floating bottom-right menu, modal panel behavior, and scroll lock while menu is open.
+- `src/libs/test_v2`
+  - Shared test runner and browser automation utilities.
+  - Generates `TEST.md`, `test.log`, `error.log`, and step screenshots.
+  - Used by `src_vN/test/main.go` suites.
+
 ## Prerequisites
 
 - Go installed
@@ -19,16 +30,69 @@ Reference plugin for versioned template development under `src/plugins/template/
 ## Quick Start (`src_v3`)
 
 ```bash
-# Install UI dependencies (required before lint/dev/test)
+# 1) Install UI dependencies (required before lint/dev/test)
 ./dialtone.sh template install src_v3
 
-# Run dev mode (starts Vite + launches debug browser)
+# 2) Run dev mode (starts Vite + launches debug browser)
 ./dialtone.sh template dev src_v3
 ```
 
 Without `template install`, commands that invoke UI tooling fail with `tsc: command not found` or `vite: command not found`.
+Open the app at `http://127.0.0.1:3000/`.
 
-## Commands
+## Create a New `src_vN`
+
+Use the generator to clone the latest template version into a new version folder:
+
+```bash
+./dialtone.sh template src --n 4
+```
+
+What this now does:
+- Clones from the latest existing `src_vN`.
+- Rewrites internal version references (for example `src_v3` -> `src_v4`) inside the copied files.
+- Keeps all standard sections and tests wired: `hero`, `docs`, `table`, `three`, `xterm`, `video`.
+- Produces a version that can run full test flow and generate `TEST.md` in the new folder.
+
+Recommended follow-up for a new version:
+
+```bash
+./dialtone.sh template install src_v4
+./dialtone.sh template test src_v4
+./dialtone.sh template dev src_v4
+```
+
+## Standard Workflows
+
+### Dev Workflow
+
+```bash
+./dialtone.sh template install src_v3
+./dialtone.sh template dev src_v3
+```
+
+### Test Workflow
+
+```bash
+./dialtone.sh template test src_v3
+```
+
+The suite runs:
+1. Preflight: `fmt`, `vet`, `go-build`, `lint`, `format`, `build`
+2. Go server run check
+3. UI run check
+4. Browser section checks
+5. Lifecycle/invariant checks
+6. Cleanup verification
+
+### Build / Serve Workflow
+
+```bash
+./dialtone.sh template build src_v3
+./dialtone.sh template serve src_v3
+```
+
+## Commands Reference
 
 ```bash
 ./dialtone.sh template install src_v3   # bun install for src_v3/ui
@@ -42,6 +106,7 @@ Without `template install`, commands that invoke UI tooling fail with `tsc: comm
 ./dialtone.sh template ui-run src_v3    # vite dev (default :3000)
 ./dialtone.sh template dev src_v3       # dev session + browser attach
 ./dialtone.sh template test src_v3      # full test_v2 suite -> TEST.md
+./dialtone.sh template src --n <N>      # create new src_vN from latest version
 ```
 
 ## `src_v3` Test Status
@@ -54,13 +119,8 @@ Validated on **February 13, 2026** with:
 
 Latest generated report: `src/plugins/template/src_v3/test/TEST.md`
 
-- Preflight (`fmt`, `vet`, `go-build`, `lint`, `format`, `build`): PASS
-- Steps 02-09 (Go run, UI run, hero/docs/table/three): PASS
-- First failing step: `10 Xterm Section Validation`
-- Failure message:
-  - `aria-label Xterm Terminal is outside viewport (rect top=0.0 left=0.0 bottom=744.0 right=1297.0 viewport=1280.0x800.0)`
-
-This means the suite is mostly healthy, but currently exits non-zero at Xterm viewport validation.
+- Status: `PASS`
+- All 13 steps currently pass end-to-end.
 
 ## Artifacts
 
@@ -70,3 +130,14 @@ This means the suite is mostly healthy, but currently exits non-zero at Xterm vi
 - `src/plugins/template/src_v3/test/test.log`
 - `src/plugins/template/src_v3/test/error.log`
 - `src/plugins/template/src_v3/screenshots/test_step_*.png`
+
+`TEST.md` embeds screenshot paths so it renders correctly on GitHub when the matching screenshot files are committed.
+
+## Troubleshooting
+
+- `tsc: command not found` or `vite: command not found`
+  - Run `./dialtone.sh template install <src_vN>`.
+- Port `3000` busy for `template dev`
+  - Stop existing process on that port, rerun `./dialtone.sh template dev <src_vN>`.
+- Port `8080` busy during tests
+  - Stop existing process on that port, rerun `./dialtone.sh template test <src_vN>`.
