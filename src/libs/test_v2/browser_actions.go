@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
+	"github.com/chromedp/chromedp/kb"
 )
 
 func NavigateToSection(id string, ariaLabel string) chromedp.Action {
@@ -40,6 +41,23 @@ func WaitForAriaLabel(label string) chromedp.Action {
 
 func ClickAriaLabel(label string) chromedp.Action {
 	return chromedp.Click(fmt.Sprintf("[aria-label='%s']", label), chromedp.ByQuery)
+}
+
+func TypeAriaLabel(label string, value string) chromedp.Action {
+	return chromedp.SetValue(fmt.Sprintf("[aria-label='%s']", label), value, chromedp.ByQuery)
+}
+
+func PressEnterAriaLabel(label string) chromedp.Action {
+	return chromedp.SendKeys(fmt.Sprintf("[aria-label='%s']", label), kb.Enter, chromedp.ByQuery)
+}
+
+func TypeAndSubmitAriaLabel(label string, value string) chromedp.Action {
+	return chromedp.Tasks{
+		WaitForAriaLabel(label),
+		ClickAriaLabel(label),
+		TypeAriaLabel(label, value),
+		PressEnterAriaLabel(label),
+	}
 }
 
 func AssertAriaLabelTextContains(label string, substr string) chromedp.Action {
@@ -103,5 +121,35 @@ func AssertElementHidden(selector string) chromedp.Action {
 			time.Sleep(150 * time.Millisecond)
 		}
 		return fmt.Errorf("element %s should be hidden (last display: %s)", selector, display)
+	})
+}
+
+func AssertAriaLabelInsideViewport(label string) chromedp.Action {
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		type rectResult struct {
+			Ok     bool    `json:"ok"`
+			Top    float64 `json:"top"`
+			Left   float64 `json:"left"`
+			Bottom float64 `json:"bottom"`
+			Right  float64 `json:"right"`
+			W      float64 `json:"w"`
+			H      float64 `json:"h"`
+		}
+		var out rectResult
+		if err := chromedp.Run(ctx, chromedp.Evaluate(fmt.Sprintf(`
+			(() => {
+				const el = document.querySelector("[aria-label='%s']");
+				if (!el) return { ok: false, top: 0, left: 0, bottom: 0, right: 0, w: window.innerWidth, h: window.innerHeight };
+				const r = el.getBoundingClientRect();
+				const ok = r.top >= 0 && r.left >= 0 && r.bottom <= window.innerHeight && r.right <= window.innerWidth && r.width > 0 && r.height > 0;
+				return { ok, top: r.top, left: r.left, bottom: r.bottom, right: r.right, w: window.innerWidth, h: window.innerHeight };
+			})()
+		`, label), &out)); err != nil {
+			return err
+		}
+		if !out.Ok {
+			return fmt.Errorf("aria-label %s is outside viewport (rect top=%0.1f left=%0.1f bottom=%0.1f right=%0.1f viewport=%0.1fx%0.1f)", label, out.Top, out.Left, out.Bottom, out.Right, out.W, out.H)
+		}
+		return nil
 	})
 }

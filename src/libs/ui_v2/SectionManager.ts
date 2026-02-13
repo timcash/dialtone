@@ -23,6 +23,10 @@ export class SectionManager {
     this.configs.set(sectionId, config);
   }
 
+  getActiveSectionId(): string | null {
+    return this.activeSectionId;
+  }
+
   async load(sectionId: string): Promise<void> {
     if (this.controls.has(sectionId)) return;
     if (this.loading.has(sectionId)) return this.loading.get(sectionId);
@@ -48,9 +52,15 @@ export class SectionManager {
 
   async navigateTo(sectionId: string, options: { updateHash?: boolean } = {}): Promise<void> {
     const updateHash = options.updateHash ?? true;
-    if (this.debug) console.log(`[SectionManager] NAVIGATING TO #${sectionId}`);
-
     const current = this.activeSectionId;
+    if (current === sectionId) {
+      if (updateHash && window.location.hash !== `#${sectionId}`) {
+        window.location.hash = `#${sectionId}`;
+      }
+      return;
+    }
+
+    if (this.debug) console.log(`[SectionManager] NAVIGATING TO #${sectionId}`);
     await this.load(sectionId);
 
     if (current && current !== sectionId) {

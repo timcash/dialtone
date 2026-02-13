@@ -21,7 +21,8 @@ class HeroControl implements VisualizationControl {
       if (!this.visible) return;
       this.t += 0.02;
 
-      ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
       const cx = this.canvas.width * 0.5;
       const cy = this.canvas.height * 0.5;
       for (let i = 0; i < 10; i++) {

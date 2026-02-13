@@ -33,7 +33,7 @@ sections.register('table', {
     if (!container) throw new Error('table container not found');
     return mountTable(container);
   },
-  header: { visible: true, menuVisible: true, title: 'Template v3 Table' },
+  header: { visible: false, menuVisible: true, title: 'Template v3 Table' },
 });
 
 sections.register('three', {
@@ -88,6 +88,85 @@ menu.addButton('Video', 'Navigate Video', () => {
   void sections.navigateTo('video');
 });
 
-const initialId = window.location.hash.slice(1) || 'hero';
+const sectionOrder = ['hero', 'docs', 'table', 'three', 'xterm', 'video'] as const;
+const wheelLockedSections = new Set(['table', 'three', 'xterm', 'video']);
+let wheelGestureActive = false;
+let wheelNavInFlight = false;
+let wheelGestureTimer = 0;
+const sectionSet = new Set(sectionOrder);
+
+const navigateByDelta = (delta: 1 | -1) => {
+  const current = sections.getActiveSectionId() ?? sectionOrder[0];
+  const currentIndex = sectionOrder.indexOf(current as (typeof sectionOrder)[number]);
+  if (currentIndex < 0) return;
+  const nextIndex = Math.max(0, Math.min(sectionOrder.length - 1, currentIndex + delta));
+  const nextId = sectionOrder[nextIndex];
+  if (nextId === current) return;
+  void sections.navigateTo(nextId).catch((err) => {
+    console.error('[SectionManager] keyboard navigation failed', err);
+  });
+};
+
+window.addEventListener(
+  'wheel',
+  (event) => {
+    if (Math.abs(event.deltaY) < 4) return;
+    const current = sections.getActiveSectionId() ?? sectionOrder[0];
+    if (wheelLockedSections.has(current)) {
+      return;
+    }
+    event.preventDefault();
+    if (wheelGestureTimer) {
+      window.clearTimeout(wheelGestureTimer);
+    }
+    wheelGestureTimer = window.setTimeout(() => {
+      wheelGestureActive = false;
+    }, 650);
+    if (wheelGestureActive || wheelNavInFlight) return;
+
+    wheelGestureActive = true;
+    wheelNavInFlight = true;
+    void sections
+      .navigateTo(
+        sectionOrder[
+          Math.max(
+            0,
+            Math.min(
+              sectionOrder.length - 1,
+              sectionOrder.indexOf(current as (typeof sectionOrder)[number]) + (event.deltaY > 0 ? 1 : -1)
+            )
+          )
+        ]
+      )
+      .catch((err) => {
+        console.error('[SectionManager] wheel navigation failed', err);
+      })
+      .finally(() => {
+        wheelNavInFlight = false;
+      });
+  },
+  { passive: false, capture: true }
+);
+
+window.addEventListener('keydown', (event) => {
+  const target = event.target as HTMLElement | null;
+  if (target) {
+    const tag = target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) {
+      return;
+    }
+  }
+
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    navigateByDelta(1);
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    navigateByDelta(-1);
+  }
+});
+
+const hashId = window.location.hash.slice(1);
+const initialId = sectionSet.has(hashId as (typeof sectionOrder)[number]) ? hashId : 'hero';
 console.log(`[SectionManager] INITIAL LOAD #${initialId}`);
-void sections.navigateTo(initialId, { updateHash: false });
+void sections.navigateTo(initialId, { updateHash: hashId !== initialId });

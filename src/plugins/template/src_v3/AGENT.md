@@ -5,7 +5,7 @@ This handoff is for the next LLM working on:
 - `src/plugins/template/src_v3/ui/`
 
 Goal for next agent:
-- Improve UI styling to align with patterns from `src/libs/ui/`
+- Improve UI styling to align with patterns from `src/libs/ui_v2/`
 - Keep fast section switching behavior (no smooth animated scrolling)
 - Do not add fade-in text behavior
 
@@ -36,9 +36,12 @@ Goal for next agent:
 
 ## Critical UI Direction For Next Agent
 Use style direction from:
-- `src/libs/ui/style.css`
+- `src/libs/ui_v2/style.css`
 
-Apply visual language and structure from `ui` library, but keep these explicit constraints for `src_v3`:
+`src_v3` must import shared styles via:
+- `src/plugins/template/src_v3/ui/src/style.css` -> `@import '../../../../../libs/ui_v2/style.css';`
+
+Apply visual language and structure from `ui_v2` library, but keep these explicit constraints for `src_v3`:
 1. No smooth animated scrolling between sections
 2. No fade-in text effects
 3. Section switches must remain immediate/deterministic for tests
@@ -48,9 +51,9 @@ Apply visual language and structure from `ui` library, but keep these explicit c
 - `src/plugins/template/src_v3/ui/src/main.ts`
 - `src/plugins/template/src_v3/ui/src/style.css`
 - `src/plugins/template/src_v3/ui/index.html`
-- `src/libs/ui/style.css`
-- `src/libs/ui/SectionManager.ts`
-- `src/libs/ui/Menu.ts`
+- `src/libs/ui_v2/style.css`
+- `src/libs/ui_v2/SectionManager.ts`
+- `src/libs/ui_v2/Menu.ts`
 
 ## Behavior To Preserve
 - Existing section IDs and ARIA labels used by tests
@@ -58,7 +61,7 @@ Apply visual language and structure from `ui` library, but keep these explicit c
 - Hash/section navigation behavior used by `test_v2.NavigateToSection`
 
 ## Suggested Execution Plan
-1. Diff `src/libs/ui/style.css` against `src_v3/ui/src/style.css` and align base variables/layout primitives.
+1. Diff `src/libs/ui_v2/style.css` against `src_v3/ui/src/style.css` and align base variables/layout primitives.
 2. Update `src_v3` section markup/classes only where needed to adopt shared style conventions.
 3. Avoid adding any transitions/animations affecting navigation or text reveal.
 4. Run:

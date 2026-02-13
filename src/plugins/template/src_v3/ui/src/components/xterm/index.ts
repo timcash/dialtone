@@ -6,15 +6,8 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
     throw new Error('xterm terminal not found');
   }
 
-  let timer = window.setInterval(() => {
-    const stamp = new Date().toISOString().split('T')[1].slice(0, 8);
-    terminal.textContent = `dialtone@template:~$ heartbeat ${stamp}`;
-  }, 1000);
-
   return {
-    dispose: () => {
-      clearInterval(timer);
-    },
+    dispose: () => {},
     setVisible: (visible: boolean) => {
       if (visible) {
         terminal.setAttribute('data-ready', 'true');

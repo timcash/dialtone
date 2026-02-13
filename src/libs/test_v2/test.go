@@ -20,6 +20,7 @@ import (
 type ConsoleEntry struct {
 	Level   string
 	Message string
+	At      time.Time
 }
 
 type BrowserOptions struct {
@@ -40,6 +41,152 @@ type BrowserSession struct {
 
 	mu      sync.Mutex
 	entries []ConsoleEntry
+}
+
+var (
+	stepLogsMu   sync.Mutex
+	stepLogs     []ConsoleEntry
+	stepLogsOn   bool
+)
+
+func startStepLogCapture() {
+	stepLogsMu.Lock()
+	defer stepLogsMu.Unlock()
+	stepLogs = stepLogs[:0]
+	stepLogsOn = true
+}
+
+func appendStepLog(entry ConsoleEntry) {
+	stepLogsMu.Lock()
+	defer stepLogsMu.Unlock()
+	if !stepLogsOn {
+		return
+	}
+	stepLogs = append(stepLogs, entry)
+}
+
+func endStepLogCapture() []ConsoleEntry {
+	stepLogsMu.Lock()
+	defer stepLogsMu.Unlock()
+	out := make([]ConsoleEntry, len(stepLogs))
+	copy(out, stepLogs)
+	stepLogsOn = false
+	return out
+}
+
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+type elapsedPrefixWriter struct {
+	mu      sync.Mutex
+	started time.Time
+	dst     io.Writer
+	pending string
+}
+
+func (w *elapsedPrefixWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.pending += string(p)
+	for {
+		idx := strings.IndexByte(w.pending, '\n')
+		if idx < 0 {
+			break
+		}
+		line := w.pending[:idx]
+		w.pending = w.pending[idx+1:]
+		if err := w.writeLine(line); err != nil {
+			return 0, err
+		}
+	}
+	return len(p), nil
+}
+
+func (w *elapsedPrefixWriter) Flush() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.pending == "" {
+		return nil
+	}
+	line := w.pending
+	w.pending = ""
+	return w.writeLine(line)
+}
+
+func (w *elapsedPrefixWriter) writeLine(line string) error {
+	_, err := fmt.Fprintf(w.dst, "%s %s\n", elapsedTag(w.started, time.Now()), line)
+	return err
+}
+
+func elapsedTag(started time.Time, at time.Time) string {
+	secs := int(at.Sub(started).Seconds())
+	if secs < 0 {
+		secs = 0
+	}
+	return fmt.Sprintf("[T+%04d]", secs)
+}
+
+func captureStepOutput(started time.Time, run func() error) (string, error) {
+	origStdout := os.Stdout
+	origStderr := os.Stderr
+
+	rOut, wOut, err := os.Pipe()
+	if err != nil {
+		return "", err
+	}
+	rErr, wErr, err := os.Pipe()
+	if err != nil {
+		_ = rOut.Close()
+		_ = wOut.Close()
+		return "", err
+	}
+
+	os.Stdout = wOut
+	os.Stderr = wErr
+
+	var buf lockedBuffer
+	prefixed := &elapsedPrefixWriter{
+		started: started,
+		dst:     io.MultiWriter(origStdout, &buf),
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, _ = io.Copy(prefixed, rOut)
+	}()
+	go func() {
+		defer wg.Done()
+		_, _ = io.Copy(prefixed, rErr)
+	}()
+
+	runErr := run()
+
+	_ = wOut.Close()
+	_ = wErr.Close()
+	os.Stdout = origStdout
+	os.Stderr = origStderr
+	_ = rOut.Close()
+	_ = rErr.Close()
+	wg.Wait()
+	_ = prefixed.Flush()
+
+	return buf.String(), runErr
 }
 
 func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
@@ -75,13 +222,13 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 		var entry *ConsoleEntry
 		switch e := ev.(type) {
 		case *runtime.EventConsoleAPICalled:
-			entry = &ConsoleEntry{Level: string(e.Type), Message: formatConsoleArgs(e.Args)}
+			entry = &ConsoleEntry{Level: string(e.Type), Message: formatConsoleArgs(e.Args), At: time.Now()}
 		case *runtime.EventExceptionThrown:
 			msg := e.ExceptionDetails.Text
 			if e.ExceptionDetails.Exception != nil && e.ExceptionDetails.Exception.Description != "" {
 				msg = e.ExceptionDetails.Exception.Description
 			}
-			entry = &ConsoleEntry{Level: "exception", Message: msg}
+			entry = &ConsoleEntry{Level: "exception", Message: msg, At: time.Now()}
 		}
 		if entry == nil {
 			return
@@ -89,6 +236,7 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 		s.mu.Lock()
 		s.entries = append(s.entries, *entry)
 		s.mu.Unlock()
+		appendStepLog(*entry)
 		if opts.LogWriter != nil {
 			fmt.Fprintf(opts.LogWriter, "%s [%s] %s\n", logPrefix, entry.Level, entry.Message)
 		}
@@ -188,16 +336,35 @@ func formatConsoleArgs(args []*runtime.RemoteObject) string {
 		if len(arg.Value) > 0 {
 			var v interface{}
 			if err := json.Unmarshal(arg.Value, &v); err == nil {
-				b, _ := json.Marshal(v)
-				parts = append(parts, string(b))
+				switch vv := v.(type) {
+				case string:
+					parts = append(parts, vv)
+				default:
+					b, _ := json.Marshal(v)
+					parts = append(parts, string(b))
+				}
 			} else {
-				parts = append(parts, string(arg.Value))
+				parts = append(parts, strings.Trim(string(arg.Value), `"`))
 			}
 		} else if arg.Description != "" {
 			parts = append(parts, arg.Description)
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+func filterLogsForStep(logs []ConsoleEntry, sectionID string) []ConsoleEntry {
+	if sectionID == "" {
+		return logs
+	}
+	token := "#" + sectionID
+	out := make([]ConsoleEntry, 0, len(logs))
+	for _, entry := range logs {
+		if strings.Contains(entry.Message, token) {
+			out = append(out, entry)
+		}
+	}
+	return out
 }
 
 type Step struct {
@@ -211,6 +378,7 @@ type SuiteOptions struct {
 	Version    string
 	ReportPath string
 	LogPath    string
+	ErrorLogPath string
 }
 
 type StepResult struct {
@@ -220,6 +388,8 @@ type StepResult struct {
 	Duration   time.Duration
 	SectionID  string
 	Screenshot string
+	Logs       []ConsoleEntry
+	Output     string
 }
 
 func RunSuite(options SuiteOptions, steps []Step) error {
@@ -229,22 +399,46 @@ func RunSuite(options SuiteOptions, steps []Step) error {
 	}
 	defer logFile.Close()
 
+	errorLogPath := options.ErrorLogPath
+	if strings.TrimSpace(errorLogPath) == "" {
+		errorLogPath = filepath.Join(filepath.Dir(options.LogPath), "error.log")
+	}
+	errorFile, err := os.Create(errorLogPath)
+	if err != nil {
+		return err
+	}
+	defer errorFile.Close()
+	errorWritten := false
+
 	start := time.Now()
 	results := make([]StepResult, 0, len(steps))
 	runnerLogs := make([]string, 0, len(steps)*2+2)
 
 	writeLine := func(line string) {
-		fmt.Println(line)
-		_, _ = fmt.Fprintln(logFile, line)
-		runnerLogs = append(runnerLogs, line)
+		tagged := fmt.Sprintf("%s %s", elapsedTag(start, time.Now()), line)
+		fmt.Println(tagged)
+		_, _ = fmt.Fprintln(logFile, tagged)
+		runnerLogs = append(runnerLogs, tagged)
+	}
+	writeError := func(line string) {
+		errorWritten = true
+		_, _ = fmt.Fprintln(errorFile, line)
 	}
 
 	for _, s := range steps {
 		writeLine(fmt.Sprintf("[TEST] START %s", s.Name))
+		startStepLogCapture()
 
 		stepStart := time.Now()
-		err := s.Run()
+		output, err := captureStepOutput(start, s.Run)
 		duration := time.Since(stepStart)
+		aboutLine := fmt.Sprintf("%s [TEST] RUN   %s", elapsedTag(start, stepStart), s.Name)
+		trimmedOutput := strings.TrimSpace(output)
+		if trimmedOutput == "" {
+			trimmedOutput = aboutLine
+		} else {
+			trimmedOutput = aboutLine + "\n" + trimmedOutput
+		}
 
 		res := StepResult{
 			Name:       s.Name,
@@ -256,21 +450,35 @@ func RunSuite(options SuiteOptions, steps []Step) error {
 		if err != nil {
 			res.Error = err.Error()
 		}
+		res.Logs = endStepLogCapture()
+		res.Output = trimmedOutput
 		results = append(results, res)
+		for _, entry := range res.Logs {
+			if entry.Level == "error" || entry.Level == "exception" {
+				writeError(fmt.Sprintf("%s [%s] (%s) %s", elapsedTag(start, entry.At), entry.Level, s.Name, entry.Message))
+			}
+		}
 
 		if err != nil {
 			writeLine(fmt.Sprintf("[TEST] FAIL  %s: %v", s.Name, err))
-			_ = writeReport(options, results, time.Since(start), runnerLogs)
+			writeError(fmt.Sprintf("%s [TEST] FAIL  %s: %v", elapsedTag(start, time.Now()), s.Name, err))
+			_ = writeReport(options, results, time.Since(start), runnerLogs, start)
+			if !errorWritten {
+				_, _ = fmt.Fprintln(errorFile, "(no errors)")
+			}
 			return err
 		}
 		writeLine(fmt.Sprintf("[TEST] PASS  %s", s.Name))
 	}
 
 	writeLine("[TEST] COMPLETE")
-	return writeReport(options, results, time.Since(start), runnerLogs)
+	if !errorWritten {
+		_, _ = fmt.Fprintln(errorFile, "(no errors)")
+	}
+	return writeReport(options, results, time.Since(start), runnerLogs, start)
 }
 
-func writeReport(options SuiteOptions, results []StepResult, total time.Duration, runnerLogs []string) error {
+func writeReport(options SuiteOptions, results []StepResult, total time.Duration, runnerLogs []string, suiteStart time.Time) error {
 	status := "✅ PASS"
 	for _, r := range results {
 		if !r.Passed {
@@ -326,6 +534,47 @@ func writeReport(options SuiteOptions, results []StepResult, total time.Duration
 		}
 		_, _ = fmt.Fprintln(f, "```")
 		_, _ = fmt.Fprintln(f)
+		_, _ = fmt.Fprintln(f, "#### Runner Output")
+		_, _ = fmt.Fprintln(f)
+		_, _ = fmt.Fprintln(f, "```text")
+		if r.Output == "" {
+			_, _ = fmt.Fprintln(f, "(no output)")
+		} else {
+			_, _ = fmt.Fprintln(f, r.Output)
+		}
+		_, _ = fmt.Fprintln(f, "```")
+		_, _ = fmt.Fprintln(f)
+		filteredLogs := filterLogsForStep(r.Logs, r.SectionID)
+		if len(filteredLogs) > 0 {
+			_, _ = fmt.Fprintln(f, "#### Browser Logs")
+			_, _ = fmt.Fprintln(f)
+			_, _ = fmt.Fprintln(f, "```text")
+			for _, entry := range filteredLogs {
+				_, _ = fmt.Fprintf(f, "%s [%s] %s\n", elapsedTag(suiteStart, entry.At), entry.Level, entry.Message)
+			}
+			_, _ = fmt.Fprintln(f, "```")
+			_, _ = fmt.Fprintln(f)
+
+			hasBrowserErrors := false
+			for _, entry := range filteredLogs {
+				if entry.Level == "error" || entry.Level == "exception" {
+					hasBrowserErrors = true
+					break
+				}
+			}
+			if hasBrowserErrors {
+				_, _ = fmt.Fprintln(f, "#### Browser Errors")
+				_, _ = fmt.Fprintln(f)
+				_, _ = fmt.Fprintln(f, "```text")
+				for _, entry := range filteredLogs {
+					if entry.Level == "error" || entry.Level == "exception" {
+						_, _ = fmt.Fprintf(f, "%s [%s] %s\n", elapsedTag(suiteStart, entry.At), entry.Level, entry.Message)
+					}
+				}
+				_, _ = fmt.Fprintln(f, "```")
+				_, _ = fmt.Fprintln(f)
+			}
+		}
 		if r.Screenshot != "" {
 			_, _ = fmt.Fprintf(f, "![%s](../%s)\n\n", r.Name, r.Screenshot)
 		}
@@ -340,14 +589,6 @@ func writeReport(options SuiteOptions, results []StepResult, total time.Duration
 			_, _ = fmt.Fprintf(f, "- `%s`\n", r.Screenshot)
 		}
 	}
-	_, _ = fmt.Fprintln(f)
-	_, _ = fmt.Fprintln(f, "## Raw Runner Log")
-	_, _ = fmt.Fprintln(f)
-	_, _ = fmt.Fprintln(f, "```text")
-	for _, line := range runnerLogs {
-		_, _ = fmt.Fprintln(f, line)
-	}
-	_, _ = fmt.Fprintln(f, "```")
 
 	return nil
 }
