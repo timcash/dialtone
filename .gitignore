@@ -74,9 +74,6 @@ src/plugins/**/swarm-metadata.duckdb
 src/plugins/**/metadata.json
 
 # Screenshots & Logs
-*.png
-!src/plugins/www/screenshots/*.png
-!src/plugins/www/screenshots/summary.png
 
 *.log
 src/plugins/swarm/app/node_modules

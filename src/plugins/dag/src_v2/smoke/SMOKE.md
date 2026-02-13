@@ -1,6 +1,6 @@
 # Dag Plugin Smoke Test Report
 
-**Generated at:** Wed, 11 Feb 2026 14:10:25 PST
+**Generated at:** Wed, 11 Feb 2026 18:30:19 PST
 
 ## 1. Preflight: Go + TypeScript/JavaScript Checks
 
@@ -9,7 +9,7 @@
 ```text
 [dir] /Users/tim/code/dialtone/src/plugins/dag/src_v2
 [cmd] go fmt ./...
-[elapsed] 52ms
+[elapsed] 69ms
 ```
 
 ### Go Lint: ✅ PASSED
@@ -17,7 +17,7 @@
 ```text
 [dir] /Users/tim/code/dialtone/src/plugins/dag/src_v2
 [cmd] go vet ./...
-[elapsed] 145ms
+[elapsed] 181ms
 ```
 
 ### Go Build: ✅ PASSED
@@ -25,7 +25,7 @@
 ```text
 [dir] /Users/tim/code/dialtone/src/plugins/dag/src_v2
 [cmd] go build ./...
-[elapsed] 998ms
+[elapsed] 1.009s
 ```
 
 ### UI Install: ✅ PASSED
@@ -33,7 +33,7 @@
 ```text
 [dir] /Users/tim/code/dialtone
 [cmd] /Users/tim/code/dialtone/dialtone.sh bun exec --cwd /Users/tim/code/dialtone/src/plugins/dag/src_v2/ui install --force
-[elapsed] 499ms
+[elapsed] 470ms
 
 bun install v1.3.9 (cf6cdbbb)
 Saved lockfile
@@ -47,7 +47,7 @@ Saved lockfile
 + vite@5.4.21
 + three@0.160.1
 
-122 packages installed [176.00ms]
+122 packages installed [165.00ms]
 ```
 
 ### UI TypeScript Lint: ✅ PASSED
@@ -55,7 +55,7 @@ Saved lockfile
 ```text
 [dir] /Users/tim/code/dialtone
 [cmd] /Users/tim/code/dialtone/dialtone.sh bun exec --cwd /Users/tim/code/dialtone/src/plugins/dag/src_v2/ui run lint
-[elapsed] 1.105s
+[elapsed] 1.044s
 
 $ eslint .
 ```
@@ -65,7 +65,7 @@ $ eslint .
 ```text
 [dir] /Users/tim/code/dialtone
 [cmd] /Users/tim/code/dialtone/dialtone.sh bun exec --cwd /Users/tim/code/dialtone/src/plugins/dag/src_v2/ui run build
-[elapsed] 1.521s
+[elapsed] 1.496s
 
 $ vite build
 vite v5.4.21 building for production...
@@ -80,7 +80,7 @@ dist/assets/index-c-OeEQOZ.js           2.02 kB │ gzip:   1.01 kB
 dist/assets/index-C5-ymLP-.js          11.07 kB │ gzip:   3.81 kB
 dist/assets/index-D6z8qNSa.js          12.27 kB │ gzip:   4.17 kB
 dist/assets/three.module-BIu6T-o9.js  466.01 kB │ gzip: 117.99 kB
-✓ built in 480ms
+✓ built in 472ms
 ```
 
 ### Source Prettier Format (JS/TS): ✅ PASSED
@@ -111,23 +111,23 @@ All matched files use Prettier code style!
 DAG Server starting on http://localhost:8080
 
 [probe-warning] timed out waiting for Go Run process shutdown
-[probe-ready] port 8080 became reachable in 5.551s
+[probe-ready] port 8080 became reachable in 5.535s
 ```
 
 ### UI Run: ✅ PASSED
 
 ```text
 [dir] /Users/tim/code/dialtone
-[cmd] /Users/tim/code/dialtone/dialtone.sh bun exec --cwd /Users/tim/code/dialtone/src/plugins/dag/src_v2/ui run dev --host 127.0.0.1 --port 50046
+[cmd] /Users/tim/code/dialtone/dialtone.sh bun exec --cwd /Users/tim/code/dialtone/src/plugins/dag/src_v2/ui run dev --host 127.0.0.1 --port 53034
 
-$ vite --host "127.0.0.1" --port "50046"
+$ vite --host "127.0.0.1" --port "53034"
 
-  VITE v5.4.21  ready in 85 ms
+  VITE v5.4.21  ready in 89 ms
 
-  ➜  Local:   http://127.0.0.1:50046/
+  ➜  Local:   http://127.0.0.1:53034/
 
 [probe-warning] timed out waiting for UI Run process shutdown
-[probe-ready] port 50046 became reachable in 5.553s
+[probe-ready] port 53034 became reachable in 5.553s
 ```
 
 ---
@@ -145,7 +145,15 @@ $ vite --host "127.0.0.1" --port "50046"
 
 ### [error]
 ```text
-"[SectionManager][INVARIANT][interval] hash/active mismatch: hash=#dag-hero active=#dag-layer-nest"
+"[SectionManager][INVARIANT][interval] more than one section marked visible: dag-docs, dag-layer-nest"
+```
+### [error]
+```text
+"[SectionManager][INVARIANT][interval] more than one section resumed: dag-docs, dag-layer-nest"
+```
+### [error]
+```text
+"[SectionManager][INVARIANT][interval] hash/active mismatch: hash=#dag-hero active=#dag-docs"
 ```
 
 ---
@@ -169,14 +177,14 @@ $ vite --host "127.0.0.1" --port "50046"
 ```text
 [log] "[SectionManager] 🧭 INITIAL LOAD #dag-hero"
 [log] "[SectionManager] 📦 LOADING #dag-hero..."
+[error] "[PROOFOFLIFE] Intentional Browser Test Error"
 [log] "[SectionManager] 🧭 NAVIGATE TO #dag-hero"
 [log] "[SectionManager] 📦 LOADING #dag-docs..."
-[log] "[SectionManager] ✅ LOADED #dag-docs (1ms)"
-[log] "[SectionManager] ✨ START #dag-docs"
-[error] "[PROOFOFLIFE] Intentional Browser Test Error"
-[log] "[SectionManager] ✅ LOADED #dag-hero (36ms)"
+[log] "[SectionManager] ✅ LOADED #dag-hero (41ms)"
 [log] "[SectionManager] ✨ START #dag-hero"
 [log] "[SectionManager] 🚀 RESUME #dag-hero"
+[log] "[SectionManager] ✅ LOADED #dag-docs (33ms)"
+[log] "[SectionManager] ✨ START #dag-docs"
 ```
 
 ![Hero Section Validation](smoke_step_1.png)
@@ -224,10 +232,12 @@ $ vite --host "127.0.0.1" --port "50046"
 ```text
 [log] "[SectionManager] 🧭 NAVIGATING TO #dag-hero"
 [log] "[SectionManager] 🧭 NAVIGATING TO #dag-hero"
-[error] "[SectionManager][INVARIANT][interval] hash/active mismatch: hash=#dag-hero active=#dag-layer-nest"
 [log] "[SectionManager] 🧭 NAVIGATE AWAY #dag-layer-nest"
 [log] "[SectionManager] 🧭 NAVIGATE TO #dag-docs"
 [log] "[SectionManager] 🚀 RESUME #dag-docs"
+[error] "[SectionManager][INVARIANT][interval] more than one section marked visible: dag-docs, dag-layer-nest"
+[error] "[SectionManager][INVARIANT][interval] more than one section resumed: dag-docs, dag-layer-nest"
+[error] "[SectionManager][INVARIANT][interval] hash/active mismatch: hash=#dag-hero active=#dag-docs"
 [log] "[SectionManager] 💤 PAUSE #dag-layer-nest"
 [log] "[SectionManager] 🧭 NAVIGATE AWAY #dag-docs"
 [log] "[SectionManager] 🧭 NAVIGATE TO #dag-hero"
