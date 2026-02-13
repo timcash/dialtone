@@ -351,9 +351,9 @@ export function mountCAD(container: HTMLElement) {
     },
     setVisible: (visible: boolean) => {
       viewer.setVisible(visible);
-      if (visible) {
-        setupCadMenu(options);
-      }
     },
+    updateUI: () => {
+      setupCadMenu(options);
+    }
   };
 }

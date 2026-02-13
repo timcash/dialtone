@@ -299,5 +299,8 @@ export function mountRadio(container: HTMLElement) {
       container.innerHTML = "";
     },
     setVisible: (visible: boolean) => viz.setVisible(visible),
+    updateUI: () => {
+        // No menu yet, but consistent with other components
+    }
   };
 }

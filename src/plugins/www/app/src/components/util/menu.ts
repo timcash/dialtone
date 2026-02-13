@@ -28,9 +28,16 @@ export class Menu {
             setOpen(this.panel.hidden);
         });
 
-        // Auto-close on scroll
-        const onWindowScroll = () => {
-            if (!this.panel.hidden) setOpen(false);
+        // Auto-close on scroll (only if scrolling the main page, not the menu itself)
+        const onWindowScroll = (e: Event) => {
+            if (this.panel.hidden) return;
+            
+            // If the scroll happened inside the menu panel, don't close it
+            if (e.target === this.panel || this.panel.contains(e.target as Node)) {
+                return;
+            }
+            
+            setOpen(false);
         };
         window.addEventListener("scroll", onWindowScroll, { capture: true, passive: true });
 

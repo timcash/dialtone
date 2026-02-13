@@ -108,6 +108,16 @@ sections.register('s-policy', {
     }
 });
 
+sections.register('s-music', {
+    containerId: 'music-container',
+    load: async () => {
+        const { mountMusic } = await import('./components/music/index');
+        const container = document.getElementById('music-container');
+        if (!container) throw new Error('music-container not found');
+        return mountMusic(container);
+    }
+});
+
 sections.register('s-webgpu-template', {
     containerId: 'webgpu-template-container',
     load: async () => {
@@ -154,7 +164,7 @@ const loadSection = (id: string, smooth = false) => {
                     console.log(`%c[main] ✅ Programmatic scroll SETTLED for #${id}`, "color: #10b981");
                     isProgrammaticScroll = false;
                     programmaticScrollTimeout = null;
-                }, 3000); // Increased timeout for stability (covers smoke test wait)
+                }, 1000); // 1s is enough for smooth scroll to finish
             });
         }
         return true;
@@ -188,7 +198,6 @@ const hashObserver = new IntersectionObserver(
         for (const entry of entries) {
             if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
                 const id = (entry.target as HTMLElement).id;
-                console.log(`[main] 👁️  Observer intersection: #${id} (${(entry.intersectionRatio * 100).toFixed(0)}%)`);
                 if (id && (!best || entry.intersectionRatio > best.ratio)) {
                     best = { id, ratio: entry.intersectionRatio };
                 }
@@ -199,7 +208,7 @@ const hashObserver = new IntersectionObserver(
             history.replaceState(null, '', '#' + best.id);
         }
     },
-    { threshold: [0.5, 0.75, 1] }
+    { threshold: [0, 0.25, 0.5, 0.75, 1.0] }
 );
 
 // Delay starting the observer slightly to let initial scroll settle
@@ -210,9 +219,9 @@ setTimeout(() => {
 // Marketing fade-in on section entry
 const marketingObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
-        entry.target.classList.toggle('is-visible', entry.isIntersecting);
+        entry.target.classList.toggle('is-visible', entry.intersectionRatio >= 0.5);
     });
-}, { threshold: 0.45 });
+}, { threshold: [0, 0.25, 0.5, 0.75, 1.0] });
 
 slides.forEach(slide => marketingObserver.observe(slide));
 
