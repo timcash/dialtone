@@ -87,17 +87,6 @@ sections.register('s-geotools', {
     }
 });
 
-sections.register('s-docs', {
-    containerId: 'docs-container',
-    header: { visible: false },
-    load: async () => {
-        const { mountDocs } = await import('./components/docs/index');
-        const container = document.getElementById('docs-container');
-        if (!container) throw new Error('docs-container not found');
-        return mountDocs(container);
-    }
-});
-
 sections.register('s-policy', {
     containerId: 'policy-container',
     load: async () => {
@@ -118,23 +107,13 @@ sections.register('s-music', {
     }
 });
 
-sections.register('s-webgpu-template', {
-    containerId: 'webgpu-template-container',
+sections.register('s-vision', {
+    containerId: 'vision-container',
     load: async () => {
-        const { mountWebgpuTemplate } = await import('./components/webgpu-template/index');
-        const container = document.getElementById('webgpu-template-container');
-        if (!container) throw new Error('webgpu-template-container not found');
-        return mountWebgpuTemplate(container);
-    }
-});
-
-sections.register('s-threejs-template', {
-    containerId: 'threejs-template-container',
-    load: async () => {
-        const { mountThreeJsTemplate } = await import('./components/threejs-template/index');
-        const container = document.getElementById('threejs-template-container');
-        if (!container) throw new Error('threejs-template-container not found');
-        return mountThreeJsTemplate(container);
+        const { mountVision } = await import('./components/vision/index');
+        const container = document.getElementById('vision-container');
+        if (!container) throw new Error('vision-container not found');
+        return mountVision(container);
     }
 });
 
