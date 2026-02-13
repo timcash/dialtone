@@ -166,7 +166,7 @@ h2 {
 
 .top-right-controls {
   position: fixed;
-  top: 1.5rem;
+  bottom: 1.5rem;
   right: 1.5rem;
   z-index: 60;
   display: flex;
@@ -826,8 +826,9 @@ h2 {
 
 .menu-panel {
   position: fixed;
-  top: 100px;
-  right: 20px;
+  bottom: 5rem;
+  /* Above the toggle */
+  right: 1.5rem;
   width: 320px;
   background: var(--theme-bg);
   backdrop-filter: blur(12px);
