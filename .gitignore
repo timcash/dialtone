@@ -77,6 +77,7 @@ src/plugins/**/metadata.json
 *.png
 !src/plugins/www/screenshots/*.png
 !src/plugins/www/screenshots/summary.png
+!src/plugins/template/src_v3/screenshots/*.png
 
 *.log
 src/plugins/swarm/app/node_modules

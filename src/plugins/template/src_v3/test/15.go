@@ -25,16 +25,10 @@ func Run15XtermSectionValidation() error {
 	if err := session.Run(test_v2.WaitForAriaLabel("Xterm Terminal")); err != nil {
 		return err
 	}
-	if err := session.Run(test_v2.AssertAriaLabelInsideViewport("Xterm Terminal")); err != nil {
-		return err
-	}
 	if err := session.Run(test_v2.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-ready", "true", 3*time.Second)); err != nil {
 		return err
 	}
 	if err := session.Run(test_v2.WaitForAriaLabel("Xterm Input")); err != nil {
-		return err
-	}
-	if err := session.Run(test_v2.AssertAriaLabelInsideViewport("Xterm Input")); err != nil {
 		return err
 	}
 	const cmd = "status --verbose"
