@@ -9,17 +9,19 @@
 - `Mesh Network`: Decentralized peers synchronize causal events over a P2P log stream (Hyperswarm).
 - `Task DAG`: A directed acyclic graph of task events. Every task update, dependency, signature, and status transition is a timestamped causal entry.
 - `Convergence`: All peers replay the same event log and converge on the same project state.
+- `Mesh Relay`: DIALTONE can broadcast DAG artifacts/events across peers so other nodes can fetch the same signed inputs.
 
 ### Subtone Execution Model
 - `DIALTONE` is a REPL-like command proxy over OS, network, database, and code tools.
-- USER/LLM roles do not execute commands directly; they request execution with `@DIALTONE <command>`.
+- USER/LLM roles can run simple local commands (`cat`, `rg`, `ls`, editors, basic tests) and directly read/write files.
+- USER/LLM roles request privileged or orchestrated actions with `@DIALTONE <command>`.
 - Each executed request runs in a scoped subprocess called a `subtone`.
 - Subtone stdout/stderr is streamed as `DIALTONE:PID:> ...` and persisted in the task log.
-- `DIALTONE` can read/write files, run tests, invoke services, and query state, then attach outputs to the task DAG.
+- `DIALTONE` handles DAG writes, mesh distribution, artifact ingest, signature checks, and policy-gated execution.
 
 ### Artifact + Signature Flow
 - Inputs/outputs are tracked as task artifacts: `code`, `txt`, `markdown`, `json`, `image`, logs, and reports.
-- LLMs and USER request artifact actions through DIALTONE (`artifact add`, `artifact upload`, `artifact link`).
+- LLMs and USER may edit artifacts directly on disk, then ask DIALTONE to register/upload/link them in the DAG.
 - DIALTONE computes hashes, stores artifact metadata, and requests signatures before promote/publish operations.
 - Artifact records include signer public keys (USER + participating LLM roles), signature status, and lineage.
 - Signed artifacts are linked into task summaries so downstream LLMs can search and reuse verified files.
@@ -57,8 +59,8 @@ After `./dialtone.sh` starts, dialog becomes a single interactive stream:
 Use one event per line:
 - `ROLE> message`
 - `DIALTONE:PID:> process output`
-- Command execution is always requested as `@DIALTONE <command>`.
-- USER/LLM roles request actions; only DIALTONE executes OS/network/db commands.
+- `ROLE>` lines may include direct lightweight local commands and file edits.
+- `@DIALTONE <command>` is used for DAG writes, mesh sync, signatures, deployment, and privileged operations.
 
 ### Roles
 - `USER-*`: requesters/operators
