@@ -10,6 +10,7 @@ import { GpuTimer } from "../util/gpu_timer";
 import { VisibilityMixin } from "../util/section";
 import { CIRCLE_OF_FIFTHS, NOTE_TO_INDEX } from "./constants";
 import { AudioAnalyzer } from "./audio";
+import { Histogram } from "./histogram";
 
 export class MusicVisualization {
   scene = new THREE.Scene();
@@ -30,6 +31,7 @@ export class MusicVisualization {
   private labelSprites: THREE.Sprite[] = [];
   private circleGroup = new THREE.Group();
   private centerLabelSprite!: THREE.Sprite;
+  private histogram = new Histogram();
   
   private majorLine!: Line2;
   private minorLine!: Line2;
@@ -71,6 +73,9 @@ export class MusicVisualization {
     this.scene.add(pointLight);
 
     this.scene.add(this.circleGroup);
+    this.histogram.group.position.set(0, -4.5, -2);
+    this.scene.add(this.histogram.group);
+    
     this.createCircle();
     this.createHarmonicLines();
     this.createCenterLabel();
@@ -175,12 +180,10 @@ export class MusicVisualization {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (energy > 0.1) {
-      ctx.fillStyle = "rgba(136, 136, 136, 0.8)";
-      ctx.font = "bold 40px Arial";
+      ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+      ctx.font = "bold 60px Arial";
       ctx.textAlign = "center";
-      ctx.fillText(note, 128, 50);
-      ctx.font = "32px Arial";
-      ctx.fillText(`${freq.toFixed(1)} Hz`, 128, 100);
+      ctx.fillText(note, 128, 80);
     }
     this.centerLabelSprite.material.map!.needsUpdate = true;
   }
@@ -217,12 +220,10 @@ export class MusicVisualization {
       labelCanvas.height = 64;
       const ctx = labelCanvas.getContext("2d");
       if (ctx) {
-        ctx.fillStyle = "#888888";
-        ctx.font = "bold 20px Arial";
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 28px Arial";
         ctx.textAlign = "center";
-        ctx.fillText(note, 64, 25);
-        ctx.font = "14px Arial";
-        ctx.fillText(`${freq.toFixed(1)}Hz`, 64, 50);
+        ctx.fillText(note, 64, 40);
       }
       const labelTexture = new THREE.CanvasTexture(labelCanvas);
       const spriteMaterial = new THREE.SpriteMaterial({ map: labelTexture, transparent: true, opacity: 0.8 });
@@ -311,6 +312,8 @@ export class MusicVisualization {
     } else {
         chroma = this.analyzer.getChromagram(this.sensitivity, this.floor);
     }
+    
+    this.histogram.update(this.analyzer.getFrequencyData(), this.floor);
 
     let strongestIndex = -1;
     let maxEnergy = 0;
