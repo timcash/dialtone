@@ -121,6 +121,12 @@ export class AudioAnalyzer {
     return chroma;
   }
 
+  getFrequencyData(): Float32Array {
+    if (!this.analyzer || !this.dataArray) return new Float32Array(0);
+    this.analyzer.getFloatFrequencyData(this.dataArray);
+    return this.dataArray;
+  }
+
   get isActive() { return this.isEnabled; }
   get isSuspended() { return !this.audioContext || this.audioContext.state === 'suspended'; }
 }
