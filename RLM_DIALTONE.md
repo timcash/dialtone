@@ -1,7 +1,45 @@
 # RLM DIALTONE (Recursive Language Model Orchestration Example)
 
 This file is an example of RLM-style dialog for DIALTONE.
-It is intentionally operational: DIALTONE is a REPL/proxy that executes commands in `subtones`, while USER/LLM roles request actions with `@DIALTONE`.
+It is intentionally operational: LLM/USER roles can run lightweight local commands and edit files directly, while DIALTONE handles DAG/mesh/signature orchestration through `subtones`.
+
+## RLM Basics (Paper-Oriented)
+
+The RLM paper frames reasoning as an interactive loop with an external environment rather than a single long in-context pass.
+Core ideas used here:
+- `Environment state first`: retrieve only the next needed slices (files, logs, metrics), not full history dumps.
+- `Recursive decomposition`: break a task into smaller scoped calls and re-enter the loop with updated state.
+- `Bounded feedback`: return compact outputs from each recursive step to reduce context growth and cost.
+- `Convergence by execution`: use environment checks (tests, metrics, constraints) to validate progress.
+- `Policy adaptation`: feed observed outcomes back into routing/depth/summarization policy.
+
+## Domain Language
+
+Use this compact language in DIALTONE RLM tasks:
+- `observe`: sample environment state (`files`, `logs`, `metrics`, `DAG`) needed for the next step.
+- `decompose`: create recursive subtasks with bounded scope and explicit outputs.
+- `execute`: run command/action locally or in a subtone.
+- `ingest`: register a local artifact into DAG with hash + metadata.
+- `relay`: broadcast DAG events/artifacts to mesh peers with ack tracking.
+- `sign`: attach signer public keys and signature records to artifacts/tasks.
+- `verify`: run tests/checks against objective constraints.
+- `adapt`: update policy from measured deltas and failure modes.
+- `converge`: mark task objective satisfied with signed evidence.
+
+## Glossary
+
+| Term | Meaning in DIALTONE RLM |
+| :--- | :--- |
+| `environment state` | External working memory: files, logs, metrics, DAG entries. |
+| `recursive step` | One bounded subproblem solved before returning compact output. |
+| `bounded feedback` | Token-limited summary/trace emitted by a step for the next step. |
+| `subtone` | PID-scoped execution process started by DIALTONE. |
+| `artifact` | Any task file output (`code`, `txt`, `markdown`, `json`, `image`, logs). |
+| `artifact ingest` | DAG registration of a local artifact with hash, type, lineage, and links. |
+| `mesh relay` | Peer-to-peer propagation of DAG events/artifacts with acknowledgements. |
+| `signature record` | Public-key signature metadata for USER/LLM approvals and provenance. |
+| `policy loop` | Measure -> adjust routing/depth/summarization -> re-measure. |
+| `convergence check` | Objective pass/fail signal from tests, constraints, or runtime metrics. |
 
 ## Comparison Against arXiv:2512.24601v2
 
@@ -20,9 +58,10 @@ What is still partial in this repo (explicitly not fully implemented yet):
 
 ## RLM Operating Rules in DIALTONE
 
-- All execution is via `@DIALTONE <command>`.
+- Lightweight local ops can run directly from USER/LLM roles (`cat`, `rg`, `ls`, editors, basic tests).
+- DAG registration, mesh sync, artifact signing, and privileged ops run via `@DIALTONE <command>`.
 - DIALTONE runs commands in `subtones` and emits output as `DIALTONE:PID:>`.
-- LLM/USER edits become artifacts; DIALTONE uploads, hashes, links, and requests signatures.
+- LLM/USER edits become artifacts; DIALTONE ingests, hashes, links, and requests signatures.
 - Promote/publish steps require signatures from USER and required LLM roles.
 
 ---
@@ -49,78 +88,72 @@ DIALTONE:5011:> [METRIC] task_cost_usd=142.88
 DIALTONE> Process 5011 exited with code 0.
 ```
 
-### Phase 2: LLMs Read Files Through DIALTONE
+### Phase 2: LLMs Read Files and Edit Locally
 
 ```text
-LLM-CODE> @DIALTONE fs read DIALTONE.md --lines 1:120
-DIALTONE> Request received. Sign with `@DIALTONE task --sign rlm-env-index` to run.
-USER-1> @DIALTONE task --sign rlm-env-index
-LLM-CODE> @DIALTONE task --sign rlm-env-index
-DIALTONE> Signatures verified. Running command via PID 5023...
-DIALTONE:5023:> # DIALTONE (Virtual Librarian)
-DIALTONE:5023:> ...
-DIALTONE:5023:> ### Subtone Execution Model
-DIALTONE> Process 5023 exited with code 0.
+LLM-CODE> rg -n "Subtone Execution Model|Artifact \\+ Signature Flow" DIALTONE.md
+LLM-CODE> sed -n '1,120p' DIALTONE.md
+LLM-REVIEW> sed -n '1,220p' RLM_DIALTONE.md
+LLM-TEST> rg -n "partial|bounded feedback|recursive" RLM_DIALTONE.md
+LLM-REVIEW> curl -s https://arxiv.org/html/2512.24601v2 | rg -n "recursive|environment|feedback"
 
-LLM-REVIEW> @DIALTONE fs read RLM_DIALTONE.md --lines 1:220
-DIALTONE> Request received. Sign with `@DIALTONE task --sign rlm-env-index` to run.
-USER-1> @DIALTONE task --sign rlm-env-index
-LLM-REVIEW> @DIALTONE task --sign rlm-env-index
-DIALTONE> Signatures verified. Running command via PID 5031...
-DIALTONE:5031:> # RLM DIALTONE (Recursive Language Model Orchestration Example)
-DIALTONE:5031:> ...
-DIALTONE:5031:> What is still partial in this repo...
-DIALTONE> Process 5031 exited with code 0.
+LLM-CODE> [Edit .dialtone/policy/rlm_routing.yaml: add bounded_feedback_tokens=512 and depth policy]
+LLM-TEST> [Edit docs/rlm/convergence_checks.md: add DAG artifact integrity checks]
+LLM-OPS> [Edit docs/rlm/mesh_relay.md: add peer relay/ack flow]
 ```
 
-### Phase 3: LLMs Write Policy + Prompt Artifacts
+### Phase 3: DIALTONE Ingests Artifacts into DAG and Relays Mesh Data
 
 ```text
-LLM-CODE> @DIALTONE fs write .dialtone/policy/rlm_routing.yaml --from-stdin
+LLM-CODE> @DIALTONE artifact ingest --task rlm-process-upgrade-v1 --path .dialtone/policy/rlm_routing.yaml --kind yaml
 DIALTONE> Request received. Sign with `@DIALTONE task --sign rlm-artifact-signing` to run.
 USER-1> @DIALTONE task --sign rlm-artifact-signing
 LLM-CODE> @DIALTONE task --sign rlm-artifact-signing
-DIALTONE> Signatures verified. Running command via PID 5044...
-DIALTONE:5044:> [WRITE] .dialtone/policy/rlm_routing.yaml bytes=1298
+DIALTONE> Signatures verified. Running artifact ingest via PID 5044...
+DIALTONE:5044:> [ARTIFACT] id=a19 path=.dialtone/policy/rlm_routing.yaml sha256=4d...92 bytes=1298
+DIALTONE:5044:> [DAG] append event=artifact.ingest id=a19 task=rlm-process-upgrade-v1
 DIALTONE> Process 5044 exited with code 0.
 
-LLM-TEST> @DIALTONE fs write docs/rlm/convergence_checks.md --from-stdin
+LLM-TEST> @DIALTONE artifact ingest --task rlm-process-upgrade-v1 --path docs/rlm/convergence_checks.md --kind markdown
 DIALTONE> Request received. Sign with `@DIALTONE task --sign rlm-artifact-signing` to run.
 USER-1> @DIALTONE task --sign rlm-artifact-signing
 LLM-TEST> @DIALTONE task --sign rlm-artifact-signing
-DIALTONE> Signatures verified. Running command via PID 5052...
-DIALTONE:5052:> [WRITE] docs/rlm/convergence_checks.md bytes=2114
+DIALTONE> Signatures verified. Running artifact ingest via PID 5052...
+DIALTONE:5052:> [ARTIFACT] id=a20 path=docs/rlm/convergence_checks.md sha256=ad...0f bytes=2114
+DIALTONE:5052:> [DAG] append event=artifact.ingest id=a20 task=rlm-process-upgrade-v1
 DIALTONE> Process 5052 exited with code 0.
 
-LLM-OPS> @DIALTONE image annotate assets/rlm-loop.png --label "env->subtone->artifact->sign->policy"
+LLM-OPS> @DIALTONE artifact ingest --task rlm-process-upgrade-v1 --path docs/rlm/mesh_relay.md --kind markdown
 DIALTONE> Request received. Sign with `@DIALTONE task --sign rlm-artifact-signing` to run.
 USER-1> @DIALTONE task --sign rlm-artifact-signing
 LLM-OPS> @DIALTONE task --sign rlm-artifact-signing
-DIALTONE> Signatures verified. Running command via PID 5058...
-DIALTONE:5058:> [WRITE] assets/rlm-loop-annotated.png bytes=84321
+DIALTONE> Signatures verified. Running artifact ingest via PID 5058...
+DIALTONE:5058:> [ARTIFACT] id=a21 path=docs/rlm/mesh_relay.md sha256=8a...6c bytes=1766
+DIALTONE:5058:> [DAG] append event=artifact.ingest id=a21 task=rlm-process-upgrade-v1
 DIALTONE> Process 5058 exited with code 0.
-```
 
-### Phase 4: Upload + Public-Key Signatures
-
-```text
-LLM-CODE> @DIALTONE artifact upload --task rlm-process-upgrade-v1 --path .dialtone/policy/rlm_routing.yaml --kind yaml
-LLM-TEST> @DIALTONE artifact upload --task rlm-process-upgrade-v1 --path docs/rlm/convergence_checks.md --kind markdown
-LLM-OPS> @DIALTONE artifact upload --task rlm-process-upgrade-v1 --path assets/rlm-loop-annotated.png --kind image
-DIALTONE> Upload requests queued. Sign with `@DIALTONE task --sign rlm-artifact-signing` to ingest artifacts.
+LLM-OPS> @DIALTONE mesh relay --dag-event artifact.ingest --task rlm-process-upgrade-v1 --peers 6
+DIALTONE> Request received. Sign with `@DIALTONE task --sign rlm-artifact-signing` to run.
 USER-1> @DIALTONE task --sign rlm-artifact-signing
-LLM-CODE> @DIALTONE task --sign rlm-artifact-signing
-LLM-TEST> @DIALTONE task --sign rlm-artifact-signing
 LLM-OPS> @DIALTONE task --sign rlm-artifact-signing
-DIALTONE> Signatures verified. Running artifact ingest via PID 5072...
-DIALTONE:5072:> [ARTIFACT] id=a19 path=.dialtone/policy/rlm_routing.yaml sha256=4d...92
-DIALTONE:5072:> [ARTIFACT] id=a20 path=docs/rlm/convergence_checks.md sha256=ad...0f
-DIALTONE:5072:> [ARTIFACT] id=a21 path=assets/rlm-loop-annotated.png sha256=8a...6c
-DIALTONE:5072:> [SIGN] a19 user_pk=ed25519:usr_9f... llm_pk=ed25519:llm_code_2a...
-DIALTONE:5072:> [SIGN] a20 user_pk=ed25519:usr_9f... llm_pk=ed25519:llm_test_7b...
-DIALTONE:5072:> [SIGN] a21 user_pk=ed25519:usr_9f... llm_pk=ed25519:llm_ops_5d...
-DIALTONE:5072:> [LINK] task=rlm-process-upgrade-v1 artifacts=[a19,a20,a21]
+DIALTONE> Signatures verified. Running mesh relay via PID 5072...
+DIALTONE:5072:> [MESH] relay_start peers=6 events=3
+DIALTONE:5072:> [MESH] peer=12D3KooW... ack artifact=a19
+DIALTONE:5072:> [MESH] peer=12D3KooX... ack artifact=a20
+DIALTONE:5072:> [MESH] peer=12D3KooY... ack artifact=a21
+DIALTONE:5072:> [MESH] relay_complete acked=6/6
 DIALTONE> Process 5072 exited with code 0.
+
+LLM-REVIEW> @DIALTONE artifact sign --task rlm-process-upgrade-v1 --artifacts a19,a20,a21
+DIALTONE> Request received. Sign with `@DIALTONE task --sign rlm-artifact-signing` to run.
+USER-1> @DIALTONE task --sign rlm-artifact-signing
+LLM-REVIEW> @DIALTONE task --sign rlm-artifact-signing
+DIALTONE> Signatures verified. Running signature workflow via PID 5076...
+DIALTONE:5076:> [SIGN] a19 user_pk=ed25519:usr_9f... llm_pk=ed25519:llm_code_2a...
+DIALTONE:5076:> [SIGN] a20 user_pk=ed25519:usr_9f... llm_pk=ed25519:llm_test_7b...
+DIALTONE:5076:> [SIGN] a21 user_pk=ed25519:usr_9f... llm_pk=ed25519:llm_ops_5d...
+DIALTONE:5076:> [DAG] append event=artifact.signed artifacts=[a19,a20,a21]
+DIALTONE> Process 5076 exited with code 0.
 ```
 
 ### Phase 5: Apply Patterns and Show Improvement
@@ -166,5 +199,6 @@ DIALTONE> All done signatures present. Summary written to docs/reports/rlm-proce
 | `subtone` | PID-scoped execution process for one requested command. |
 | `environment state` | Files/logs/metrics/task DAG sampled by DIALTONE for the next step. |
 | `recursive call` | Spawned subtask (`RLM-*`) with bounded scope and returned artifact/metric output. |
-| `artifact ingest` | Upload + hash + signer public keys + task linkage. |
+| `artifact ingest` | Register local file into DAG with hash, metadata, and lineage. |
+| `mesh relay` | Broadcast DAG events/artifacts across peers with ACK tracking. |
 | `policy loop` | Measure results, write policy, apply policy, and re-measure. |
