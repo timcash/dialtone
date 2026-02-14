@@ -11,6 +11,7 @@ export class Menu {
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.textContent = 'Menu';
+    toggle.classList.add('thumb');
     toggle.setAttribute('aria-label', 'Toggle Global Menu');
     toggle.setAttribute('aria-expanded', 'false');
     toggle.addEventListener('click', () => {

@@ -14,6 +14,11 @@ import (
 var sharedServer *exec.Cmd
 var sharedBrowser *test_v2.BrowserSession
 
+const (
+	testViewportWidth  = 390
+	testViewportHeight = 844
+)
+
 func ensureSharedServer() error {
 	if sharedServer != nil {
 		return nil
@@ -59,6 +64,10 @@ func ensureSharedBrowser(emitProofOfLife bool) (*test_v2.BrowserSession, error) 
 			LogPrefix:     "[BROWSER]",
 		})
 		if err != nil {
+			return nil, err
+		}
+		if err := session.Run(chromedp.EmulateViewport(testViewportWidth, testViewportHeight)); err != nil {
+			session.Close()
 			return nil, err
 		}
 		sharedBrowser = session
