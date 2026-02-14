@@ -62,11 +62,11 @@ header h1 {
 
 nav {
   position: fixed;
-  top: 1.5rem;
+  bottom: 1.5rem;
   right: 1.5rem;
   z-index: 1000;
   display: flex;
-  flex-direction: column;
+  flex-direction: column-reverse;
   align-items: flex-end;
   gap: 8px;
 }
@@ -89,6 +89,22 @@ nav > button {
 nav > button:hover {
   border-color: var(--primary-color);
   box-shadow: 0 0 15px var(--accent-color);
+}
+
+nav > button.thumb {
+  width: clamp(58px, 14vw, 74px);
+  height: clamp(58px, 14vw, 74px);
+  min-width: 58px;
+  min-height: 58px;
+  border-radius: 50%;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  touch-action: manipulation;
 }
 
 nav > div {
@@ -139,6 +155,24 @@ button {
   cursor: pointer;
   text-align: left;
   font-size: 0.85rem;
+}
+
+input,
+textarea,
+select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  color: #fff;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
 }
 
 table {

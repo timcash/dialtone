@@ -10,7 +10,7 @@ class ThreeControl implements VisualizationControl {
   private raycaster = new THREE.Raycaster();
   private pointer = new THREE.Vector2(2, 2);
   private cubes: Array<{ id: Exclude<HoveredCubeID, ''>; mesh: THREE.Mesh; material: THREE.MeshStandardMaterial }> = [];
-  private hoveredCubeId: HoveredCubeID = '';
+  private selectedCubeId: HoveredCubeID = '';
   private keyLight: THREE.DirectionalLight;
   private visible = false;
   private frameId = 0;
@@ -23,7 +23,7 @@ class ThreeControl implements VisualizationControl {
     this.renderer.setClearColor(0x000000, 1);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-    this.camera.position.set(0, 0, 3);
+    this.camera.position.set(0, 0, 6.5);
     this.camera.lookAt(0, 0, 0);
 
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.4));
@@ -38,8 +38,9 @@ class ThreeControl implements VisualizationControl {
     this.resize();
     window.addEventListener('resize', this.resize);
     this.canvas.addEventListener('wheel', this.onWheel);
-    this.canvas.addEventListener('mousemove', this.onMouseMove);
-    this.canvas.addEventListener('mouseleave', this.onMouseLeave);
+    this.canvas.addEventListener('touchstart', this.onTouchStart, { passive: true });
+    this.canvas.style.touchAction = 'manipulation';
+    this.canvas.setAttribute('data-selected-cube', '');
     this.canvas.setAttribute('data-hovered-cube', '');
     this.attachDebugBridge();
     this.animate();
@@ -60,11 +61,13 @@ class ThreeControl implements VisualizationControl {
     this.cubes.push({ id, mesh, material });
   }
 
-  private setHoveredCube(id: HoveredCubeID) {
-    if (this.hoveredCubeId === id) {
+  private setSelectedCube(id: HoveredCubeID) {
+    if (this.selectedCubeId === id) {
       return;
     }
-    this.hoveredCubeId = id;
+    this.selectedCubeId = id;
+    this.canvas.setAttribute('data-selected-cube', id);
+    // Backward compatibility for existing selectors/tests.
     this.canvas.setAttribute('data-hovered-cube', id);
     for (const cube of this.cubes) {
       if (cube.id === id) {
@@ -73,7 +76,7 @@ class ThreeControl implements VisualizationControl {
         cube.material.emissive.setHex(0x000000);
       }
     }
-    console.log(`[Three #three] hover cube: ${id || 'none'}`);
+    console.log(`[Three #three] touch cube: ${id || 'none'}`);
   }
 
   private onWheel = () => {
@@ -81,13 +84,13 @@ class ThreeControl implements VisualizationControl {
     this.canvas.setAttribute('data-wheel-count', String(this.wheelCount));
   };
 
-  private onMouseMove = (event: MouseEvent) => {
+  private hitTestClientPoint = (clientX: number, clientY: number): HoveredCubeID => {
     const rect = this.canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
     if (x < 0 || y < 0 || x > rect.width || y > rect.height) {
-      this.setHoveredCube('');
-      return;
+      this.setSelectedCube('');
+      return '';
     }
     this.pointer.x = (x / rect.width) * 2 - 1;
     this.pointer.y = -(y / rect.height) * 2 + 1;
@@ -97,11 +100,14 @@ class ThreeControl implements VisualizationControl {
       false
     );
     const id = (intersects[0]?.object.userData?.id ?? '') as HoveredCubeID;
-    this.setHoveredCube(id);
+    this.setSelectedCube(id);
+    return id;
   };
 
-  private onMouseLeave = () => {
-    this.setHoveredCube('');
+  private onTouchStart = (event: TouchEvent) => {
+    const t = event.changedTouches[0];
+    if (!t) return;
+    this.hitTestClientPoint(t.clientX, t.clientY);
   };
 
   private getProjectedPoint = (id: Exclude<HoveredCubeID, ''>): { ok: boolean; x: number; y: number } => {
@@ -116,11 +122,28 @@ class ThreeControl implements VisualizationControl {
     return { ok: true, x, y };
   };
 
+  private touchProjected = (id: Exclude<HoveredCubeID, ''>): boolean => {
+    const cube = this.cubes.find((c) => c.id === id);
+    if (!cube) return false;
+    const rect = this.canvas.getBoundingClientRect();
+    this.scene.updateMatrixWorld(true);
+    this.camera.updateMatrixWorld(true);
+    const projected = cube.mesh.position.clone().project(this.camera);
+    const clientX = (projected.x * 0.5 + 0.5) * rect.width + rect.left;
+    const clientY = (-projected.y * 0.5 + 0.5) * rect.height + rect.top;
+    const hitId = this.hitTestClientPoint(clientX, clientY);
+    return hitId === id;
+  };
+
   private attachDebugBridge() {
     (window as Window & {
-      templateThreeDebug?: { getProjectedPoint: (id: Exclude<HoveredCubeID, ''>) => { ok: boolean; x: number; y: number } };
+      templateThreeDebug?: {
+        getProjectedPoint: (id: Exclude<HoveredCubeID, ''>) => { ok: boolean; x: number; y: number };
+        touchProjected: (id: Exclude<HoveredCubeID, ''>) => boolean;
+      };
     }).templateThreeDebug = {
       getProjectedPoint: this.getProjectedPoint,
+      touchProjected: this.touchProjected,
     };
   }
 
@@ -152,8 +175,7 @@ class ThreeControl implements VisualizationControl {
     cancelAnimationFrame(this.frameId);
     window.removeEventListener('resize', this.resize);
     this.canvas.removeEventListener('wheel', this.onWheel);
-    this.canvas.removeEventListener('mousemove', this.onMouseMove);
-    this.canvas.removeEventListener('mouseleave', this.onMouseLeave);
+    this.canvas.removeEventListener('touchstart', this.onTouchStart);
     const win = window as Window & { templateThreeDebug?: unknown };
     if (win.templateThreeDebug) {
       delete win.templateThreeDebug;
