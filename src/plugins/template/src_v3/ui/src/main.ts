@@ -11,7 +11,7 @@ sections.register('hero', {
     if (!container) throw new Error('hero container not found');
     return mountHero(container);
   },
-  header: { visible: true, menuVisible: true, title: 'Template v3' },
+  header: { visible: false, menuVisible: true, title: 'Template v3' },
 });
 
 sections.register('docs', {
@@ -22,7 +22,7 @@ sections.register('docs', {
     if (!container) throw new Error('docs container not found');
     return mountDocs(container);
   },
-  header: { visible: true, menuVisible: true, title: 'Template v3 Docs' },
+  header: { visible: false, menuVisible: true, title: 'Template v3 Docs' },
 });
 
 sections.register('table', {
@@ -66,7 +66,7 @@ sections.register('video', {
     if (!container) throw new Error('video container not found');
     return mountVideo(container);
   },
-  header: { visible: true, menuVisible: true, title: 'Template v3 Video' },
+  header: { visible: false, menuVisible: true, title: 'Template v3 Video' },
 });
 
 menu.addButton('Hero', 'Navigate Hero', () => {
@@ -94,6 +94,7 @@ let wheelGestureActive = false;
 let wheelNavInFlight = false;
 let wheelGestureTimer = 0;
 const sectionSet = new Set(sectionOrder);
+const defaultSection = sectionOrder[0];
 
 const navigateByDelta = (delta: 1 | -1) => {
   const current = sections.getActiveSectionId() ?? sectionOrder[0];
@@ -177,7 +178,36 @@ if (import.meta.hot) {
   });
 }
 
-const hashId = window.location.hash.slice(1);
-const initialId = sectionSet.has(hashId as (typeof sectionOrder)[number]) ? hashId : 'hero';
-console.log(`[SectionManager] INITIAL LOAD #${initialId}`);
-void sections.navigateTo(initialId, { updateHash: hashId !== initialId });
+const syncSectionFromURL = (reason = 'event') => {
+  const currentURL = window.location.href;
+  const hashId = window.location.hash.slice(1);
+  const targetId = sectionSet.has(hashId as (typeof sectionOrder)[number]) ? hashId : defaultSection;
+  const activeId = sections.getActiveSectionId();
+  console.log(`[SectionManager] URL PAGE reason=${reason} ${currentURL} hash=${hashId || '(none)'} active=${activeId || '(none)'} target=${targetId}`);
+  if (activeId === targetId) return;
+  console.log(`[SectionManager] URL SYNC #${targetId}`);
+  void sections
+    .navigateTo(targetId, { updateHash: hashId !== targetId })
+    .then(() => {
+      const nextActive = sections.getActiveSectionId();
+      console.log(`[SectionManager] URL SYNC DONE target=${targetId} active=${nextActive || '(none)'}`);
+      if (nextActive !== targetId) {
+        window.setTimeout(() => syncSectionFromURL('retry'), 120);
+      }
+    })
+    .catch((err) => {
+      console.error(`[SectionManager] URL SYNC FAILED #${targetId}`, err);
+      window.setTimeout(() => syncSectionFromURL('retry-error'), 250);
+    });
+};
+
+window.addEventListener('hashchange', () => syncSectionFromURL('hashchange'));
+window.addEventListener('pageshow', () => syncSectionFromURL('pageshow'));
+window.addEventListener('focus', () => syncSectionFromURL('focus'));
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    syncSectionFromURL('visibility');
+  }
+});
+
+syncSectionFromURL('startup');

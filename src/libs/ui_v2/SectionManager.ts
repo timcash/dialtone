@@ -27,6 +27,12 @@ export class SectionManager {
     return this.activeSectionId;
   }
 
+  private waitForLayout(): Promise<void> {
+    return new Promise((resolve) => {
+      window.requestAnimationFrame(() => resolve());
+    });
+  }
+
   async load(sectionId: string): Promise<void> {
     if (this.controls.has(sectionId)) return;
     if (this.loading.has(sectionId)) return this.loading.get(sectionId);
@@ -81,6 +87,8 @@ export class SectionManager {
 
     const ctl = this.controls.get(sectionId);
     if (ctl && !(this.resumed.get(sectionId) ?? false)) {
+      // Let the browser apply visibility/layout before controls read dimensions.
+      await this.waitForLayout();
       ctl.setVisible(true);
       this.resumed.set(sectionId, true);
       if (this.debug) console.log(`[SectionManager] RESUME #${sectionId}`);
