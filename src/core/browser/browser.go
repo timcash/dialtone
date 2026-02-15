@@ -64,12 +64,24 @@ func CleanupPort(port int) error {
 					parts := strings.Fields(line)
 					if len(parts) > 0 {
 						pid := parts[len(parts)-1]
-						fmt.Printf("Cleaning up stale process on port %d (PID: %s)...\n", port, pid)
+						fmt.Printf("Cleaning up stale Windows process on port %d (PID: %s)...\n", port, pid)
 						exec.Command(tkBin, "/F", "/PID", pid).Run()
 					}
 				}
 			}
+		}
+
+		// Always check native Linux processes (on both pure Linux and WSL)
+		cmd := exec.Command("lsof", "-ti", fmt.Sprintf(":%d", port))
+		out, _ := cmd.Output()
+		pids := strings.Fields(string(out))
+		if len(pids) > 0 {
+			for _, pid := range pids {
+				fmt.Printf("Cleaning up stale Linux process on port %d (PID: %s) via lsof...\n", port, pid)
+				exec.Command("kill", "-9", pid).Run()
+			}
 		} else {
+			// Fallback to fuser
 			exec.Command("fuser", "-k", fmt.Sprintf("%d/tcp", port)).Run()
 		}
 	}

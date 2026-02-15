@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -15,16 +14,15 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 
 	"dialtone/cli/src/core/config"
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/mock"
+	"dialtone/cli/src/core/util"
 	ai_app "dialtone/cli/src/plugins/ai/app"
 	camera "dialtone/cli/src/plugins/camera/app"
 	dag_cli "dialtone/cli/src/plugins/dag/cli"
@@ -91,6 +89,13 @@ func printUsage() {
 }
 
 func runStart(args []string) {
+	// Check if running under systemd
+	if os.Getenv("INVOCATION_ID") == "" {
+		logger.LogInfo("[WARNING] Process is not running as a systemd service. Consider running via systemctl.")
+	} else {
+		logger.LogInfo("[INFO] Running as systemd service.")
+	}
+
 	fs := flag.NewFlagSet("start", flag.ExitOnError)
 	hostname := fs.String("hostname", "dialtone-1", "Tailscale hostname for this NATS server")
 	natsPort := fs.Int("port", 4222, "NATS port to listen on (both local and Tailscale)")
@@ -171,7 +176,7 @@ func runLocalOnly(port, wsPort, webPort int, verbose bool, mavlinkAddr string, o
 		}
 	}()
 
-	waitForShutdown()
+	util.WaitForShutdown()
 	logger.LogInfo("Shutting down local services...")
 }
 
@@ -268,7 +273,7 @@ func runVPN(args []string) {
 		logger.LogInfo("Warning: Failed to start local web server for VPN: %v", err)
 	}
 
-	waitForShutdown()
+	util.WaitForShutdown()
 	logger.LogInfo("Shutting down VPN mode...")
 }
 
@@ -375,10 +380,10 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 	defer webLn.Close()
 
 	if natsLn != nil {
-		go ProxyListener(natsLn, fmt.Sprintf("127.0.0.1:%d", localNATSPort))
+		go util.ProxyListener(natsLn, fmt.Sprintf("127.0.0.1:%d", localNATSPort))
 	}
 	if wsLn != nil {
-		go ProxyListener(wsLn, fmt.Sprintf("127.0.0.1:%d", localWSPort))
+		go util.ProxyListener(wsLn, fmt.Sprintf("127.0.0.1:%d", localWSPort))
 	}
 
 	// 3. Web Handler and Server
@@ -412,7 +417,7 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 		}
 	}()
 
-	waitForShutdown()
+	util.WaitForShutdown()
 	logger.LogInfo("Shutting down...")
 }
 
@@ -449,45 +454,6 @@ func startNATSServer(host string, port, wsPort int, verbose bool) *server.Server
 	return ns
 }
 
-// ProxyListener accepts connections and proxies them to the target address
-func ProxyListener(ln net.Listener, targetAddr string) {
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			// Listener closed
-			return
-		}
-		go ProxyConnection(conn, targetAddr)
-	}
-}
-
-// ProxyConnection proxies data between source and destination
-func ProxyConnection(src net.Conn, targetAddr string) {
-	defer src.Close()
-
-	dst, err := net.Dial("tcp", targetAddr)
-	if err != nil {
-		logger.LogInfo("Failed to connect to NATS backend: %v", err)
-		return
-	}
-	defer dst.Close()
-
-	// Bidirectional copy
-	done := make(chan struct{}, 2)
-	go func() {
-		io.Copy(dst, src)
-		done <- struct{}{}
-	}()
-	go func() {
-		io.Copy(src, dst)
-		done <- struct{}{}
-	}()
-
-	// Wait for either direction to complete
-	<-done
-}
-
-// printAuthInstructions prints instructions for headless authentication
 func printAuthInstructions() {
 	fmt.Print(`
 === Tailscale Authentication ===
@@ -656,12 +622,7 @@ func startNatsPublisher(port int) {
 	}()
 }
 
-// waitForShutdown blocks until SIGINT or SIGTERM is received
-func waitForShutdown() {
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	<-c
-}
+// waitForShutdown function is now in src/core/util/signal.go
 
 func verifyNatsWSPort(host string, port int, label string) {
 	if port == 0 {

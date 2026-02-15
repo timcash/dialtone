@@ -46,30 +46,32 @@
       </div>
     </section>
 
-    <!-- CENTER COLUMN: 3D Visualization -->
-    <section class="panel-center" id="three-container">
-      <div id="hud-overlay">
-        <div class="hud-top">
-          <div class="hud-stat">ALT: <span id="hud-alt">0.0</span>m</div>
-          <div class="hud-stat">SPD: <span id="hud-spd">0.0</span>m/s</div>
-        </div>
-        <div class="hud-center">
-          <div class="hud-mode" id="hud-mode">STABILIZE</div>
-        </div>
-      </div>
-      <!-- Canvas injected by Three.js -->
-    </section>
-
-    <!-- RIGHT COLUMN: Camera & Telemetry -->
-    <section class="panel-right">
-      <header class="panel-header">
-        <h2>VISION // DATA</h2>
-      </header>
-
-      <div class="camera-feed-container">
+    <!-- CENTER COLUMN: Video on top, 3D Visualization below -->
+    <section class="panel-center">
+      <div class="camera-feed-container-main">
         <img id="camera-feed" src="/stream" alt="No Feed" onerror="this.parentElement.classList.add('no-signal')" />
         <div class="cam-overlay">CAM 1 - YUYV</div>
       </div>
+
+      <div id="three-container">
+        <div id="hud-overlay">
+          <div class="hud-top">
+            <div class="hud-stat">ALT: <span id="hud-alt">0.0</span>m</div>
+            <div class="hud-stat">SPD: <span id="hud-spd">0.0</span>m/s</div>
+          </div>
+          <div class="hud-center">
+            <div class="hud-mode" id="hud-mode">STABILIZE</div>
+          </div>
+        </div>
+        <!-- Canvas injected by Three.js -->
+      </div>
+    </section>
+
+    <!-- RIGHT COLUMN: Telemetry & Alerts -->
+    <section class="panel-right">
+      <header class="panel-header">
+        <h2>TELEMETRY // ALERTS</h2>
+      </header>
 
       <div class="telemetry-box">
         <h3>Telemetry Stream</h3>

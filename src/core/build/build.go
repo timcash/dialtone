@@ -528,7 +528,7 @@ func copyDir(src string, dst string) {
 
 func buildBuilderImage() {
 	logger.LogInfo("Building 'dialtone-builder' image...")
-	dockerfile := filepath.Join("docs", "Dockerfile.builder")
+	dockerfile := filepath.Join("containers", "Dockerfile.builder")
 	if _, err := os.Stat(dockerfile); os.IsNotExist(err) {
 		logger.LogFatal("Dockerfile.builder not found: %s", dockerfile)
 	}
