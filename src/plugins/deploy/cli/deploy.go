@@ -209,30 +209,54 @@ func deployDialtone(host, port, user, pass string, ephemeral bool, proxy bool, s
 	}
 
 	// 7. Verification
-	verifyDeployment(client, hostnameParam, proxy, service)
+	if err := verifyDeployment(client, hostnameParam, proxy, service); err != nil {
+		logger.LogFatal("Deployment verification FAILED: %v", err)
+	}
+	logger.LogInfo("Deployment verification SUCCESS.")
 }
 
-func verifyDeployment(client *sshlib.Client, hostname string, proxy, service bool) {
+func verifyDeployment(client *sshlib.Client, hostname string, proxy, service bool) error {
 	logger.LogInfo("--- VERIFICATION ---")
 
 	// 1. Remote Service Check
 	if service {
-		out, err := ssh.RunSSHCommand(client, "systemctl is-active dialtone.service")
-		if err == nil && strings.TrimSpace(out) == "active" {
-			logger.LogInfo("[VERIFY] Remote dialtone.service is ACTIVE")
-		} else {
-			logger.LogWarn("[VERIFY] Remote dialtone.service is NOT ACTIVE (status: %s)", strings.TrimSpace(out))
+		logger.LogInfo("Verifying remote dialtone.service...")
+		success := false
+		var lastOut string
+		for i := 0; i < 5; i++ {
+			out, err := ssh.RunSSHCommand(client, "systemctl is-active dialtone.service")
+			lastOut = strings.TrimSpace(out)
+			if err == nil && lastOut == "active" {
+				logger.LogInfo("[VERIFY] Remote dialtone.service is ACTIVE")
+				success = true
+				break
+			}
+			time.Sleep(1 * time.Second)
+		}
+		if !success {
+			return fmt.Errorf("remote dialtone.service is NOT ACTIVE (status: %s)", lastOut)
 		}
 	}
 
 	// 2. Local Service Check
 	if service && proxy {
-		cmd := exec.Command("systemctl", "is-active", fmt.Sprintf("dialtone-proxy-%s.service", hostname))
-		out, err := cmd.Output()
-		if err == nil && strings.TrimSpace(string(out)) == "active" {
-			logger.LogInfo("[VERIFY] Local dialtone-proxy-%s.service is ACTIVE", hostname)
-		} else {
-			logger.LogWarn("[VERIFY] Local proxy service is NOT ACTIVE (status: %s)", strings.TrimSpace(string(out)))
+		serviceName := fmt.Sprintf("dialtone-proxy-%s.service", hostname)
+		logger.LogInfo("Verifying local %s...", serviceName)
+		success := false
+		var lastOut string
+		for i := 0; i < 5; i++ {
+			cmd := exec.Command("systemctl", "is-active", serviceName)
+			out, err := cmd.Output()
+			lastOut = strings.TrimSpace(string(out))
+			if err == nil && lastOut == "active" {
+				logger.LogInfo("[VERIFY] Local %s is ACTIVE", serviceName)
+				success = true
+				break
+			}
+			time.Sleep(1 * time.Second)
+		}
+		if !success {
+			return fmt.Errorf("local proxy service %s is NOT ACTIVE (status: %s)", serviceName, lastOut)
 		}
 	}
 
@@ -241,24 +265,33 @@ func verifyDeployment(client *sshlib.Client, hostname string, proxy, service boo
 		url := fmt.Sprintf("https://%s.dialtone.earth", hostname)
 		logger.LogInfo("Checking Web UI at %s...", url)
 
-		// Give it a moment to stabilize
-		time.Sleep(2 * time.Second)
-
-		httpClient := &http.Client{Timeout: 5 * time.Second}
-		resp, err := httpClient.Get(url)
-		if err != nil {
-			logger.LogWarn("[VERIFY] Failed to reach Cloudflare URL: %v", err)
-		} else {
-			defer resp.Body.Close()
-			body, _ := io.ReadAll(resp.Body)
-			bodyStr := string(body)
-			if strings.Contains(bodyStr, "v1.1.1") {
-				logger.LogInfo("[VERIFY] Web UI is LIVE and running v1.1.1")
+		success := false
+		var lastErr error
+		for i := 0; i < 10; i++ {
+			httpClient := &http.Client{Timeout: 5 * time.Second}
+			resp, err := httpClient.Get(url)
+			if err != nil {
+				lastErr = err
 			} else {
-				logger.LogWarn("[VERIFY] Web UI is accessible but version string 'v1.1.1' not found")
+				defer resp.Body.Close()
+				body, _ := io.ReadAll(resp.Body)
+				bodyStr := string(body)
+				if strings.Contains(bodyStr, "v1.1.1") {
+					logger.LogInfo("[VERIFY] Web UI is LIVE and running v1.1.1")
+					success = true
+					break
+				} else {
+					lastErr = fmt.Errorf("version string 'v1.1.1' not found in response")
+				}
 			}
+			time.Sleep(2 * time.Second)
+		}
+		if !success {
+			return fmt.Errorf("failed to verify Web UI at %s: %v", url, lastErr)
 		}
 	}
+
+	return nil
 }
 
 func setupRemoteService(client *sshlib.Client, hostname, tsAuthKey, ephemeralFlag, mavlinkFlag, binaryPath, user string) {
