@@ -156,24 +156,16 @@ export class SectionManager {
           const sectionId = entry.target.id;
           this.visibilityRatios.set(sectionId, entry.intersectionRatio);
 
-          if (entry.isIntersecting) {
-            // High Priority: Load and show the current section
+          if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
+            // Load only when section is the dominant one
             this.load(sectionId).then(() => {
               const control = this.visualizations.get(sectionId);
-              if (control) {
-                // Resume animation if substantially visible
-                if (entry.intersectionRatio > 0.1) {
-                   control.setVisible(true);
-                }
+              if (control && this.activeSectionId === sectionId) {
+                 control.setVisible(true);
               }
             });
-
-            // Predictive Priority: Preload next section (but keep it paused)
-            const nextId = this.getNextSectionId(sectionId);
-            if (nextId) {
-              this.load(nextId);
-            }
-          } else {
+          } else if (entry.intersectionRatio < 0.1) {
+            // Pause when mostly gone
             const control = this.visualizations.get(sectionId);
             if (control) {
               control.setVisible(false);
@@ -194,10 +186,17 @@ export class SectionManager {
 
         // Only update UI if the best section has changed and it's substantially visible
         if (bestId && bestId !== this.activeSectionId && maxRatio >= 0.5) {
+          const oldId = this.activeSectionId;
           this.activeSectionId = bestId;
           
           if (this.debug) {
             console.log(`%c[SectionManager] 🎯 ACTIVE SECTION: #${bestId} (${(maxRatio * 100).toFixed(0)}%)`, "color: #f59e0b; font-weight: bold");
+          }
+
+          // Pause old
+          if (oldId) {
+              const oldControl = this.visualizations.get(oldId);
+              if (oldControl) oldControl.setVisible(false);
           }
 
           const config = this.configs.get(bestId);
@@ -208,8 +207,11 @@ export class SectionManager {
             
             // Refresh component-specific UI (like menus) if the method exists
             const control = this.visualizations.get(bestId);
-            if (control && control.updateUI) {
-              control.updateUI();
+            if (control) {
+                if (sectionEl.classList.contains('is-ready')) {
+                    control.setVisible(true);
+                }
+                if (control.updateUI) control.updateUI();
             }
           }
         }
@@ -236,23 +238,9 @@ export class SectionManager {
   }
 
   /**
-   * Eagerly load a section (use for first visible section on page load)
+   * Eagerly load a section
    */
   eagerLoad(sectionId: string): Promise<void> {
-    if (this.debug) {
-      console.log(
-        "%c[SectionManager] 🚀 Eagerly loading first section...",
-        "color: #f59e0b",
-      );
-    }
-    const nextId = this.getNextSectionId(sectionId);
-    if (nextId) {
-      if (this.debug) {
-        console.log(`%c[SectionManager] 🔮 Predictive loading second section: ${nextId}`, "color: #94a3b8");
-      }
-      this.load(nextId);
-    }
-
     return this.load(sectionId);
   }
 
@@ -296,6 +284,12 @@ export class SectionManager {
       return;
     }
 
+    const sectionEl = document.getElementById(sectionId);
+    const loadingBar = sectionEl?.querySelector(".loading-bar") as HTMLElement;
+    const updateProgress = (pct: number) => {
+      if (loadingBar) loadingBar.style.width = `${pct}%`;
+    };
+
     const startTime = performance.now();
     if (this.debug) {
       console.log(
@@ -304,9 +298,12 @@ export class SectionManager {
       );
     }
 
+    updateProgress(10);
+
     const loadPromise = config
       .load()
       .then((control) => {
+        updateProgress(90);
         this.visualizations.set(sectionId, control);
         // Ensure it starts paused (predictive load) until observer wakes it up
         control.setVisible(false);
@@ -318,6 +315,13 @@ export class SectionManager {
             "color: #22c55e; font-weight: bold",
           );
         }
+        
+        // Mark as ready
+        updateProgress(100);
+        setTimeout(() => {
+            sectionEl?.classList.add("is-ready");
+            console.log(`[SectionManager] READY: #${sectionId}`);
+        }, 100);
       })
       .catch((err) => {
         console.error(

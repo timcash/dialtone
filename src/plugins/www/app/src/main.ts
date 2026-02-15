@@ -1,7 +1,5 @@
 import './../style.css';
 import { SectionManager } from './components/util/section';
-// @ts-ignore
-import TinyGesture from 'tinygesture';
 
 // Create section manager for lazy loading Three.js components
 const sections = new SectionManager({ debug: true });
@@ -127,145 +125,134 @@ const initialHash = window.location.hash.slice(1);
 let isProgrammaticScroll = false;
 let programmaticScrollTimeout: number | null = null;
 
-const loadSection = (id: string, smooth = false) => {
-    console.log(`%c[main] 🧭 loadSection request: #${id} (smooth: ${smooth}, isProgrammatic: ${isProgrammaticScroll})`, "color: #fb923c");
-    if (id && document.getElementById(id)?.classList.contains('snap-slide')) {
-        console.log(`%c[main] 🔁 SWAP: #${id}`, "color: #8b5cf6; font-weight: bold");
-        sections.eagerLoad(id);
-        const el = document.getElementById(id);
-        if (el) {
-            console.log(`%c[main] 🎯 EXECUTE SCROLL to #${id}`, "color: #f97316; font-weight: bold");
-            isProgrammaticScroll = true;
-            if (programmaticScrollTimeout) clearTimeout(programmaticScrollTimeout);
+const loadSection = (id: string) => {
+    const el = document.getElementById(id);
+    if (id && el?.classList.contains('snap-slide')) {
+        console.log(`[main] SWAP: #${id}`);
+        
+        // Pause all other sections before snapping
+        const allSlideIds = Array.from(document.querySelectorAll('.snap-slide')).map(s => s.id);
+        allSlideIds.forEach(sid => {
+            if (sid !== id) {
+                const control = sections.get(sid);
+                if (control) control.setVisible(false);
+            }
+        });
 
-            requestAnimationFrame(() => {
-                el.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' });
-                // Reset flag after animation/scroll settles
-                programmaticScrollTimeout = window.setTimeout(() => {
-                    console.log(`%c[main] ✅ Programmatic scroll SETTLED for #${id}`, "color: #10b981");
-                    isProgrammaticScroll = false;
-                    programmaticScrollTimeout = null;
-                }, 1000); // 1s is enough for smooth scroll to finish
-            });
-        }
+        sections.eagerLoad(id);
+        isProgrammaticScroll = true;
+        if (programmaticScrollTimeout) clearTimeout(programmaticScrollTimeout);
+
+        console.log(`[main] EXECUTE SNAP to #${id}`);
+        el.scrollIntoView({ behavior: 'auto', block: 'start' });
+        
+        // Reset flag after snap
+        programmaticScrollTimeout = window.setTimeout(() => {
+            console.log(`[main] SETTLED: #${id}`);
+            isProgrammaticScroll = false;
+            programmaticScrollTimeout = null;
+        }, 100); 
         return true;
     }
-    console.warn(`[main] ❌ loadSection failed: #${id} not found or not a slide`);
     return false;
 };
 
-if (!loadSection(initialHash)) {
-    sections.eagerLoad('s-home');
-}
+// Initial load
+const initialHash = window.location.hash.slice(1) || 's-home';
+loadSection(initialHash);
 
-// Handle hash changes for SPA-style navigation
+// Handle hash changes
 window.addEventListener('hashchange', () => {
     const hash = window.location.hash.slice(1);
-    console.log(`[main] hashchange event: ${hash}`);
-    loadSection(hash, true);
+    if (hash) loadSection(hash);
 });
 
-const slides = document.querySelectorAll('.snap-slide[data-subtitle]');
-
-// Update URL hash when scroll brings a section into view (so #s-threejs-template etc. stays in sync)
+// Update URL hash on scroll
 const allSlides = document.querySelectorAll('.snap-slide');
 const hashObserver = new IntersectionObserver(
     (entries) => {
-        if (isProgrammaticScroll) {
-            console.log(`%c[main] 🙈 Observer IGNORING (programmatic scroll active)`, "color: #94a3b8");
-            return;
-        }
-        let best: { id: string; ratio: number } | null = null;
-        for (const entry of entries) {
-            if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
-                const id = (entry.target as HTMLElement).id;
-                if (id && (!best || entry.intersectionRatio > best.ratio)) {
-                    best = { id, ratio: entry.intersectionRatio };
-                }
-            }
-        }
-        if (best && location.hash.slice(1) !== best.id) {
-            console.log(`%c[main] 🔃 Observer UPDATING HASH to #${best.id}`, "color: #8b5cf6");
-            history.replaceState(null, '', '#' + best.id);
+        if (isProgrammaticScroll) return;
+        const entry = entries.find(e => e.isIntersecting && e.intersectionRatio >= 0.5);
+        if (entry && entry.target.id !== location.hash.slice(1)) {
+            history.replaceState(null, '', '#' + entry.target.id);
         }
     },
-    { threshold: [0, 0.25, 0.5, 0.75, 1.0] }
+    { threshold: [0.5] }
 );
+allSlides.forEach((el) => hashObserver.observe(el));
 
-// Delay starting the observer slightly to let initial scroll settle
-setTimeout(() => {
-    allSlides.forEach((el) => hashObserver.observe(el));
-}, 1000);
+// Navigation Logic
+let lastNavTime = 0;
+const NAV_COOLDOWN = 400; // Shorter cooldown for snaps
 
-// Marketing fade-in on section entry
+const getActiveIndex = () => {
+    const slides = Array.from(document.querySelectorAll('.snap-slide'));
+    return slides.findIndex(s => {
+        const rect = s.getBoundingClientRect();
+        return rect.top >= -window.innerHeight / 2 && rect.top <= window.innerHeight / 2;
+    });
+};
+
+const navigate = (direction: 1 | -1) => {
+    if (Date.now() - lastNavTime < NAV_COOLDOWN) return;
+    const slides = Array.from(document.querySelectorAll('.snap-slide'));
+    const current = getActiveIndex();
+    const next = Math.max(0, Math.min(slides.length - 1, current + direction));
+    
+    if (next !== current) {
+        loadSection(slides[next].id);
+        lastNavTime = Date.now();
+    }
+};
+
+// Mouse Wheel
+window.addEventListener('wheel', (e) => {
+    if (Math.abs(e.deltaY) < 30) return;
+    navigate(e.deltaY > 0 ? 1 : -1);
+}, { passive: true });
+
+// Touch Handling
+let touchStart = 0;
+window.addEventListener('touchstart', (e) => {
+    touchStart = e.touches[0].clientY;
+}, { passive: true });
+
+window.addEventListener('touchend', (e) => {
+    const touchEnd = e.changedTouches[0].clientY;
+    const delta = touchStart - touchEnd;
+    if (Math.abs(delta) > 50) {
+        navigate(delta > 0 ? 1 : -1);
+    }
+}, { passive: true });
+
+// Keyboard
+window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        navigate(1);
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        navigate(-1);
+    }
+});
+
+// Marketing fade-in
 const marketingObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
         entry.target.classList.toggle('is-visible', entry.intersectionRatio >= 0.5);
     });
-}, { threshold: [0, 0.25, 0.5, 0.75, 1.0] });
-
-slides.forEach(slide => marketingObserver.observe(slide));
+}, { threshold: [0.5] });
+document.querySelectorAll('.snap-slide').forEach(slide => marketingObserver.observe(slide));
 
 // Video Lazy Loading
-const videos = document.querySelectorAll('video');
 const videoObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
         const video = entry.target as HTMLVideoElement;
         if (entry.isIntersecting) {
-            video.play().catch(e => console.log("Autoplay blocked", e));
+            video.play().catch(() => {});
         } else {
             video.pause();
         }
     });
 }, { threshold: 0.1 });
-
-videos.forEach(video => videoObserver.observe(video));
-
-// Mobile Swipe Navigation
-const gesture = new TinyGesture(document.body);
-
-const navigateSlides = (direction: 'next' | 'prev') => {
-    const slides = Array.from(document.querySelectorAll('.snap-slide'));
-    const currentSlideIndex = slides.findIndex(slide => {
-        const rect = slide.getBoundingClientRect();
-        return rect.top >= -window.innerHeight / 2 && rect.top <= window.innerHeight / 2;
-    });
-
-    if (currentSlideIndex === -1) return;
-
-    let nextIndex = currentSlideIndex;
-    if (direction === 'next' && currentSlideIndex < slides.length - 1) {
-        nextIndex = currentSlideIndex + 1;
-    } else if (direction === 'prev' && currentSlideIndex > 0) {
-        nextIndex = currentSlideIndex - 1;
-    }
-
-    if (nextIndex !== currentSlideIndex) {
-        slides[nextIndex].scrollIntoView({ behavior: 'smooth' });
-    }
-};
-
-gesture.on('swipeup', () => {
-    console.log('[main] ?? Swipe UP detected -> next slide');
-    navigateSlides('next');
-});
-
-gesture.on('swipedown', () => {
-    console.log('[main] ?? Swipe DOWN detected -> prev slide');
-    navigateSlides('prev');
-});
-
-// Keyboard Navigation (Space bar to cycle slides)
-window.addEventListener('keydown', (e) => {
-    if (e.code === 'Space' || e.keyCode === 32) {
-        e.preventDefault();
-        const slides = Array.from(document.querySelectorAll('.snap-slide'));
-        const currentSlideIndex = slides.findIndex(slide => {
-            const rect = slide.getBoundingClientRect();
-            return rect.top >= -10 && rect.top <= 10;
-        });
-
-        const nextIndex = (currentSlideIndex + 1) % slides.length;
-        slides[nextIndex].scrollIntoView({ behavior: 'smooth' });
-    }
-});
+document.querySelectorAll('video').forEach(v => videoObserver.observe(v));

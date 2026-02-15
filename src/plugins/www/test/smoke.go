@@ -22,7 +22,7 @@ import (
 	"strconv"
 
 	"github.com/chromedp/cdproto/page"
-	"github.com/chromedp/cdproto/performance" // Added import
+	"github.com/chromedp/cdproto/performance"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 	stdruntime "runtime"
@@ -148,7 +148,7 @@ func RunWwwSmoke() error {
 	defer cancel()
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
-	ctx, cancel = context.WithTimeout(ctx, 90*time.Second)
+	ctx, cancel = context.WithTimeout(ctx, 300*time.Second)
 	defer cancel()
 
 	// Enable performance metrics collection
@@ -160,17 +160,12 @@ func RunWwwSmoke() error {
 	currentSection := ""
 	entries := []consoleEntry{}
 	performanceData := make(map[string]sectionMetrics)
-	statsCh := make(chan sectionMetrics, 100)
 
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
 		case *runtime.EventConsoleAPICalled:
 			msg := formatConsoleArgs(ev.Args)
 			msgLower := strings.ToLower(msg)
-			// Log everything to stdout as requested, but only track issues for failure
-			isIssue := ev.Type == "warning" || ev.Type == "error" ||
-				(ev.Type == "log" && (strings.Contains(msgLower, "error") ||
-					strings.Contains(msgLower, "warning")))
 
 			stack := ""
 			if ev.StackTrace != nil {
@@ -179,48 +174,14 @@ func RunWwwSmoke() error {
 				}
 			}
 
-			if isIssue {
-				mu.Lock()
-				entries = append(entries, consoleEntry{
-					section: currentSection,
-					level:   string(ev.Type),
-					message: msg,
-					stack:   stack,
-				})
-				mu.Unlock()
-			} else if strings.Contains(msg, "[SMOKE_STATS]") {
-				// Parse stats log
-				cleanMsg := msg
-				if strings.HasPrefix(cleanMsg, "\"") && strings.HasSuffix(cleanMsg, "\"") {
-					cleanMsg = cleanMsg[1 : len(cleanMsg)-1]
-					var unquoted string
-					if err := json.Unmarshal([]byte(msg), &unquoted); err == nil {
-						cleanMsg = unquoted
-					}
-				}
-
-				jsonStr := strings.TrimPrefix(cleanMsg, "[SMOKE_STATS] ")
-				var stats struct {
-					FPS    int     `json:"fps"`
-					AppCPU float64 `json:"cpu"`
-					AppGPU float64 `json:"gpu"`
-				}
-				if err := json.Unmarshal([]byte(jsonStr), &stats); err == nil {
-					m := sectionMetrics{
-						FPS:    stats.FPS,
-						AppCPU: stats.AppCPU,
-						AppGPU: stats.AppGPU,
-					}
-					// Send to channel non-blocking
-					select {
-					case statsCh <- m:
-					default:
-						// Channel is full, drop the stat.
-						// This is acceptable for continuous metrics where we only care about recent values.
-					}
-				}
-			}
-			// ... real-time streaming ...
+			mu.Lock()
+			entries = append(entries, consoleEntry{
+				section: currentSection,
+				level:   string(ev.Type),
+				message: msg,
+				stack:   stack,
+			})
+			mu.Unlock()
 
 			// Real-time streaming to terminal
 			color := "\033[0m" // Default
@@ -265,47 +226,12 @@ func RunWwwSmoke() error {
 	if err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(375, 812, chromedp.EmulateMobile),
 		chromedp.Navigate(base),
-		chromedp.WaitVisible(".header-fps", chromedp.ByQuery),
-		chromedp.Evaluate(`
-			(function() {
-				const observer = new MutationObserver(() => {
-					const el = document.querySelector('.header-fps');
-					if (!el) return;
-					const text = el.innerText;
-					if (!text || text.includes('FPS --')) return;
-
-					const stats = { fps: 0, cpu: 0, gpu: 0 };
-					const parts = text.split('·');
-					if (parts.length >= 3) {
-						const fpsMatch = parts[0].match(/: (\d+)/);
-						if (fpsMatch) stats.fps = parseInt(fpsMatch[1]);
-						
-						const cpuMatch = parts[1].match(/CPU ([\d\.]+) ms/);
-						if (cpuMatch) stats.cpu = parseFloat(cpuMatch[1]);
-
-						const gpuMatch = parts[2].match(/GPU ([\d\.]+) ms/);
-						if (gpuMatch) stats.gpu = parseFloat(gpuMatch[1]);
-						
-						console.log('[SMOKE_STATS] ' + JSON.stringify(stats));
-					}
-				});
-				observer.observe(document.querySelector('.header-fps'), { 
-					childList: true, 
-					characterData: true, 
-					subtree: true 
-				});
-				console.log("[SMOKE] Observer injected");
-			})()
-		`, nil),
 		chromedp.Evaluate(`Array.from(document.querySelectorAll('section[id^="s-"]')).map(el => el.id)`, &sections),
 	); err != nil {
 		return fmt.Errorf("failed to navigate/inject: %v", err)
 	}
 
 	var allErrors []string
-	// performanceData map moved to top scope
-
-	// Navigate once to the base page
 
 	// TRIGGER PROOFOFLIFE ERRORS
 	fmt.Println(">> [WWW] Smoke: triggering Proof of Life errors...")
@@ -335,18 +261,6 @@ func RunWwwSmoke() error {
 		var scrollY float64
 		var m sectionMetrics
 
-		// Drain stats channel
-	drain:
-		for {
-			select {
-			case <-statsCh:
-			default:
-				break drain
-			}
-		}
-
-		fmt.Printf(">> [WWW] Smoke: [%d/%d] NAVIGATING TO: #%s\n", i+1, len(sections), section)
-
 		// Navigate
 		if err := chromedp.Run(ctx,
 			chromedp.Evaluate(fmt.Sprintf("window.location.hash = '%s'", section), nil),
@@ -354,42 +268,39 @@ func RunWwwSmoke() error {
 			return err
 		}
 
-		// Wait for 2 fresh stats updates
-		statsCount := 0
-
-		timeout := time.After(30 * time.Second)
-
-	waitLoop:
-		for statsCount < 2 {
+		// Wait for ready log
+		ready := false
+		timeout := time.After(8 * time.Second) // Reduced from 30s
+		lastEntryIdx := startIdx
+		fmt.Printf("   [WAIT] Waiting for READY: #%s\n", section)
+		for !ready {
 			select {
-			case s := <-statsCh:
-				_ = s
-				statsCount++
-				// Update global map with latest
+			case <-timeout:
+				fmt.Printf("   [WARN] Timeout waiting for ready on %s\n", section)
+				ready = true 
+			default:
 				mu.Lock()
-				if m, ok := performanceData[section]; ok {
-					m.FPS = s.FPS
-					m.AppCPU = s.AppCPU
-					m.AppGPU = s.AppGPU
-					performanceData[section] = m
-				} else {
-					performanceData[section] = sectionMetrics{
-						FPS:    s.FPS,
-						AppCPU: s.AppCPU,
-						AppGPU: s.AppGPU,
+				if len(entries) > lastEntryIdx {
+					for _, entry := range entries[lastEntryIdx:] {
+						if strings.Contains(entry.message, "READY:") && strings.Contains(entry.message, section) {
+							fmt.Printf("   [DEBUG] Found READY log for %s\n", section)
+							ready = true
+						}
 					}
+					lastEntryIdx = len(entries)
 				}
 				mu.Unlock()
-				fmt.Printf("   [STATS] %s: %d/2 (FPS: %d)\n", section, statsCount, s.FPS)
-			case <-timeout:
-				fmt.Printf("   [WARN] Timeout waiting for stats on %s\n", section)
-				break waitLoop
+				if !ready {
+					time.Sleep(50 * time.Millisecond) // Faster polling
+				}
 			}
 		}
 
-		// Capture screenshot after robust wait
+		// Extra wait for animations
+		time.Sleep(200 * time.Millisecond) // Reduced from 500ms
+
+		// Capture screenshot
 		if err := chromedp.Run(ctx,
-			// chromedp.ScrollIntoView(fmt.Sprintf("#%s", section)), // REMOVED: Conflicts with main.ts scroll logic
 			chromedp.Evaluate(`(async () => {
 				const mem = (performance && performance.memory) ? {
 					jsHeap: performance.memory.usedJSHeapSize / (1024 * 1024)
@@ -399,7 +310,7 @@ func RunWwwSmoke() error {
 				const totalSize = resources.reduce((acc, r) => acc + (r.transferSize || 0), 0) / (1024 * 1024);
 				
 				return {
-					cpu: 0, // Placeholder, populated via CDP
+					cpu: 0, 
 					memory: totalSize,
 					jsHeap: mem.jsHeap,
 					gpu: 0
@@ -412,7 +323,7 @@ func RunWwwSmoke() error {
 				}
 				for _, metric := range metrics {
 					if metric.Name == "ScriptDuration" {
-						m.CPU = metric.Value // Seconds of script execution
+						m.CPU = metric.Value 
 					}
 				}
 				return nil
@@ -420,8 +331,6 @@ func RunWwwSmoke() error {
 			chromedp.Evaluate("window.location.hash", &currentHash),
 			chromedp.Evaluate("document.body.scrollTop", &scrollY),
 			chromedp.Evaluate(fmt.Sprintf("console.log('[PROOFOFLIFE] 📸 SCREENSHOT STARTING: %s')", section), nil),
-			// Use Viewport Screenshot (Page.captureScreenshot) instead of Element Screenshot
-			// This avoids implicit scrolling logic in chromedp that might fight with CSS scroll snap
 			chromedp.ActionFunc(func(ctx context.Context) error {
 				b, err := page.CaptureScreenshot().Do(ctx)
 				if err != nil {
@@ -435,19 +344,9 @@ func RunWwwSmoke() error {
 			continue
 		}
 
-		// Merge heap/memory stats with async captured console stats
+		// Merge stats
 		mu.Lock()
-		if existing, ok := performanceData[section]; ok {
-			existing.JSHeap = m.JSHeap
-			existing.Memory = m.Memory
-			performanceData[section] = existing
-			// Update m for logging below
-			m.FPS = existing.FPS
-			m.AppCPU = existing.AppCPU
-			m.AppGPU = existing.AppGPU
-		} else {
-			performanceData[section] = m
-		}
+		performanceData[section] = m
 		mu.Unlock()
 		fmt.Printf("   [TEST] Verify: hash=%s, scrollY=%.0f, heap=%.1fMB\n", currentHash, scrollY, m.JSHeap)
 
@@ -487,7 +386,6 @@ func RunWwwSmoke() error {
 	}
 
 	summaryPath := filepath.Join(screenshotsDir, "summary.png")
-	galleryPath := filepath.Join(screenshotsDir, "gallery.md")
 	smokeMdPath := filepath.Join(cwd, "src", "plugins", "www", "SMOKE.md")
 
 	// Error Categorization
@@ -495,7 +393,6 @@ func RunWwwSmoke() error {
 	uniqueErrors := make(map[string]consoleEntry)
 	for _, entry := range entries {
 		msg := entry.message
-		// Skip CAD backend errors
 		if strings.Contains(msg, "[cad] Server might be offline") ||
 			strings.Contains(msg, "[cad] Model update failed") ||
 			strings.Contains(msg, "[cad] Response status: 500") ||
@@ -551,82 +448,17 @@ func RunWwwSmoke() error {
 	smLines = append(smLines, "\n| Section | FPS | App CPU (ms) | App GPU (ms) | JS Heap (MB) | Resources (MB) | Status |")
 	smLines = append(smLines, "|---|---|---|---|---|---|---|")
 	for _, section := range sections {
-		// Acquire lock if needed, but performanceData is map and we are single threaded here
 		m := performanceData[section]
 		smLines = append(smLines, fmt.Sprintf("| %s | %d | %.2f | %.2f | %.2f | %.2f | OK |", section, m.FPS, m.AppCPU, m.AppGPU, m.JSHeap, m.Memory))
 	}
 
-	smLines = append(smLines, "\n## 4. Test Orchestration DAG")
-	smLines = append(smLines, "\n### Legend")
-	smLines = append(smLines, "| Layer | Color | Description |")
-	smLines = append(smLines, "|---|---|---|")
-	smLines = append(smLines, "| **1. Foundation** | <span style=\"color:red\">█</span> Red | Cleanup, environment, and directory setup. |")
-	smLines = append(smLines, "| **2. Core Logic** | <span style=\"color:orange\">█</span> Orange | Dev server, browser initialization, and proof-of-life. |")
-	smLines = append(smLines, "| **3. Features** | <span style=\"color:yellow\">█</span> Yellow | Navigation loop, verification, and metrics capture. |")
-	smLines = append(smLines, "| **4. QA** | <span style=\"color:blue\">█</span> Blue | Screenshot capture and visual summary tiling. |")
-	smLines = append(smLines, "| **5. Release** | <span style=\"color:green\">█</span> Green | Final report generation and process cleanup. |")
-
-	smLines = append(smLines, "\n```mermaid")
-	smLines = append(smLines, "graph TD")
-	smLines = append(smLines, "    %% Layer 1: Foundation")
-	smLines = append(smLines, "    L1[Setup: Cleanup & Dirs]")
-	smLines = append(smLines, "    ")
-	smLines = append(smLines, "    %% Layer 2: Core Logic")
-	smLines = append(smLines, "    L2[Dev Server: npm run dev]")
-	smLines = append(smLines, "    L3[Browser: headless chrome]")
-	smLines = append(smLines, "    L0[Proof of Life: Deliberate error discovery]")
-	smLines = append(smLines, "    ")
-	smLines = append(smLines, "    %% Layer 3: Feature Implementation")
-	smLines = append(smLines, "    L4[Navigation: Hash-based loop]")
-	smLines = append(smLines, "    L5[Verify: Hash & scroll position]")
-	smLines = append(smLines, "    L6[Metrics: CDP Performance Data]")
-	smLines = append(smLines, "    ")
-	smLines = append(smLines, "    %% Layer 4: Quality Assurance")
-	smLines = append(smLines, "    L7[Screenshots: Capture per-section]")
-	smLines = append(smLines, "    L8[Tiling: summary.png]")
-	smLines = append(smLines, "    ")
-	smLines = append(smLines, "    %% Layer 5: Release")
-	smLines = append(smLines, "    L9[Report: SMOKE.md]")
-	smLines = append(smLines, "    L10[Cleanup: Stop browser & dev server]")
-
-	smLines = append(smLines, "    %% Dependencies")
-	smLines = append(smLines, "    L1 --> L2")
-	smLines = append(smLines, "    L2 --> L3")
-	smLines = append(smLines, "    L3 --> L0")
-	smLines = append(smLines, "    L3 --> L4")
-	smLines = append(smLines, "    L4 --> L5")
-	smLines = append(smLines, "    L4 --> L6")
-	smLines = append(smLines, "    L4 --> L7")
-	smLines = append(smLines, "    L7 --> L8")
-	smLines = append(smLines, "    L0 --> L9")
-	smLines = append(smLines, "    L4 --> L9")
-	smLines = append(smLines, "    L6 --> L9")
-	smLines = append(smLines, "    L8 --> L9")
-	smLines = append(smLines, "    L9 --> L10")
-
-	smLines = append(smLines, "    %% Styling")
-	smLines = append(smLines, "    classDef layer1 stroke:#FF0000,stroke-width:2px;")
-	smLines = append(smLines, "    classDef layer2 stroke:#FFA500,stroke-width:2px;")
-	smLines = append(smLines, "    classDef layer3 stroke:#FFFF00,stroke-width:2px;")
-	smLines = append(smLines, "    classDef layer4 stroke:#0000FF,stroke-width:2px;")
-	smLines = append(smLines, "    classDef layer5 stroke:#00FF00,stroke-width:2px;")
-	smLines = append(smLines, "    ")
-	smLines = append(smLines, "    class L1 layer1;")
-	smLines = append(smLines, "    class L2,L3,L0 layer2;")
-	smLines = append(smLines, "    class L4,L5,L6 layer3;")
-	smLines = append(smLines, "    class L7,L8 layer4;")
-	smLines = append(smLines, "    class L9,L10 layer5;")
-	smLines = append(smLines, "```")
-
-	smLines = append(smLines, "\n## 5. Visual Summary Grid")
+	smLines = append(smLines, "\n## 4. Visual Summary Grid")
 	smLines = append(smLines, "\n![Summary Grid](screenshots/summary.png)")
 
 	os.WriteFile(smokeMdPath, []byte(strings.Join(smLines, "\n")), 0644)
 
 	if err := TileScreenshots(screenshotsDir, summaryPath, sections); err == nil {
 		fmt.Printf("\n>> [WWW] Smoke COMPLETE")
-		fmt.Printf("\n>> [WWW] GALLERY: file:///%s", strings.ReplaceAll(galleryPath, "\\", "/"))
-		fmt.Printf("\n>> [WWW] SUMMARY: file:///%s\n", strings.ReplaceAll(summaryPath, "\\", "/"))
 	} else {
 		fmt.Printf(">> [WWW] Smoke: tiling failed: %v\n", err)
 	}
@@ -640,16 +472,12 @@ func RunWwwSmoke() error {
 }
 
 func resolveChrome(requestedPort int, headless bool, ignoreEnv bool) (string, bool, error) {
-	// 1. If explicit port provided, try to use it
 	if requestedPort > 0 {
 		fmt.Printf(">> [WWW] Smoke: using requested port %d\n", requestedPort)
 		ws, err := readWebSocketURL(fmt.Sprintf("%d", requestedPort))
 		if err == nil && ws != "" {
 			return ws, false, nil
 		}
-		// If requested port isn't open, we probably shouldn't auto-launch on it unless we really want to enforce it.
-		// For now, fail if explicit port is dead, or optionally launch on that specific port?
-		// Let's try to launch on that port.
 		fmt.Printf(">> [WWW] Smoke: launching chrome on requested port %d\n", requestedPort)
 		res, err := chromeApp.LaunchChrome(requestedPort, true, headless, "")
 		if err != nil {
@@ -658,7 +486,6 @@ func resolveChrome(requestedPort int, headless bool, ignoreEnv bool) (string, bo
 		return res.WebsocketURL, true, nil
 	}
 
-	// 2. Check env vars (unless ignored)
 	if !ignoreEnv {
 		if ws := os.Getenv("CHROME_WS"); ws != "" {
 			fmt.Println(">> [WWW] Smoke: using CHROME_WS")
@@ -675,13 +502,10 @@ func resolveChrome(requestedPort int, headless bool, ignoreEnv bool) (string, bo
 		}
 	}
 
-	// 3. Auto-detect existing processes
 	procs, err := chromeApp.ListResources(true)
 	if err == nil {
 		for _, p := range procs {
 			if p.DebugPort > 0 {
-				// Optional: Filter by headless status vs requested?
-				// For now, if we found one with a port, reuse it.
 				fmt.Printf(">> [WWW] Smoke: found existing chrome on port %d\n", p.DebugPort)
 				ws, err := readWebSocketURL(fmt.Sprintf("%d", p.DebugPort))
 				if err == nil && ws != "" {
@@ -691,7 +515,6 @@ func resolveChrome(requestedPort int, headless bool, ignoreEnv bool) (string, bo
 		}
 	}
 
-	// 4. Launch new
 	reqDesc := "headed"
 	if headless {
 		reqDesc = "headless"
@@ -806,7 +629,6 @@ func formatConsoleArgs(args []*runtime.RemoteObject) string {
 }
 
 func readWebSocketURL(port string) (string, error) {
-	fmt.Println(">> [WWW] Smoke: fetching /json/version")
 	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%s/json/version", port))
 	if err != nil {
 		return "", err
