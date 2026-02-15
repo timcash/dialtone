@@ -84,3 +84,4 @@ src/plugins/swarm/test/node_modules
 .vercel
 src/plugins/template/src_v3/error.log
 nul
+dag_viz
