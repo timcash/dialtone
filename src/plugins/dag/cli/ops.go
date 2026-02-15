@@ -8,17 +8,6 @@ import (
 	"strconv"
 )
 
-func RunInstall(versionDir string) error {
-	fmt.Printf(">> [DAG] Install: %s\n", versionDir)
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	uiDir := filepath.Join(cwd, "src", "plugins", "dag", versionDir, "ui")
-	cmd := runBun(cwd, uiDir, "install", "--force")
-	return cmd.Run()
-}
-
 func RunFmt(versionDir string) error {
 	fmt.Printf(">> [DAG] Fmt: %s\n", versionDir)
 	cwd, err := os.Getwd()
