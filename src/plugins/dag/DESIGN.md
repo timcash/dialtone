@@ -182,6 +182,44 @@ WHERE n2.rank <= n1.rank;
 -- Navigation history is intentionally UI-side state for now (not persisted in DB).
 ```
 
+## 12) DuckPGQ Graph Projection (Required for Graph Queries)
+
+```sql
+-- Runtime prerequisite:
+-- INSTALL duckpgq FROM community;
+-- LOAD duckpgq;
+
+CREATE OR REPLACE PROPERTY GRAPH dag_pg
+  VERTEX TABLES (
+    dag_node
+  )
+  EDGE TABLES (
+    dag_edge
+      SOURCE KEY (from_node_id) REFERENCES dag_node (node_id)
+      DESTINATION KEY (to_node_id) REFERENCES dag_node (node_id)
+  );
+```
+
+## 13) Example Graph Queries (DAG Table Baseline)
+
+```sql
+-- Edge traversal count
+SELECT COUNT(*)
+FROM GRAPH_TABLE (dag_pg
+  MATCH (a:dag_node)-[e:dag_edge]->(b:dag_node)
+  COLUMNS (a.node_id AS src, b.node_id AS dst)
+);
+
+-- Shortest path hops
+SELECT hops
+FROM GRAPH_TABLE (dag_pg
+  MATCH p = ANY SHORTEST (a:dag_node)-[e:dag_edge]->+(b:dag_node)
+  WHERE a.node_id = 'n_root' AND b.node_id = 'n_leaf'
+  COLUMNS (path_length(p) AS hops)
+)
+LIMIT 1;
+```
+
 ## Scope
 
 - 3D DAG visualization with nested sub-layers.
