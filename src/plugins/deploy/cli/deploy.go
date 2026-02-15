@@ -77,7 +77,11 @@ func deployDialtone(host, port, user, pass string, ephemeral bool, proxy bool, s
 	}
 	defer client.Close()
 
-	// 2. Detect Architecture
+	// 2. Validate Sudo & Setup SSH Key
+	validateSudo(client, pass)
+	setupSSHKey(client)
+
+	// 3. Detect Architecture
 	logger.LogInfo("Detecting remote architecture...")
 	remoteArch, err := ssh.RunSSHCommand(client, "uname -m")
 	if err != nil {
@@ -350,6 +354,75 @@ func validateRequiredVars(vars []string) {
 	}
 	if len(missing) > 0 {
 		logger.LogFatal("Missing required environment variables: %s. Please check your env/.env file.", strings.Join(missing, ", "))
+	}
+}
+
+func validateSudo(client *sshlib.Client, pass string) {
+	logger.LogInfo("Validating sudo access on robot...")
+
+	// 1. Try to run a simple sudo command using the password
+	// We use sudo -S to read from stdin
+	sudoCmd := fmt.Sprintf("echo '%s' | sudo -S true", pass)
+	_, err := ssh.RunSSHCommand(client, sudoCmd)
+	if err != nil {
+		logger.LogFatal("Sudo validation FAILED: User does not have sudo rights or password is incorrect. Error: %v", err)
+	}
+
+	// 2. Automatically configure passwordless sudo for this user to make automation smoother
+	// This only works if we already have sudo rights (which we just verified)
+	user, _ := ssh.RunSSHCommand(client, "whoami")
+	user = strings.TrimSpace(user)
+
+	logger.LogInfo("Configuring passwordless sudo for user '%s'...", user)
+	sudoersLine := fmt.Sprintf("%s ALL=(ALL) NOPASSWD:ALL", user)
+	// Append to a new file in /etc/sudoers.d/
+	setupSudoers := fmt.Sprintf("echo '%s' | sudo -S sh -c \"echo '%s' > /etc/sudoers.d/dialtone-%s && chmod 0440 /etc/sudoers.d/dialtone-%s\"", pass, sudoersLine, user, user)
+	_, err = ssh.RunSSHCommand(client, setupSudoers)
+	if err != nil {
+		logger.LogWarn("Warning: Failed to configure passwordless sudo: %v", err)
+	} else {
+		logger.LogInfo("Passwordless sudo configured.")
+	}
+}
+
+func setupSSHKey(client *sshlib.Client) {
+	logger.LogInfo("Ensuring SSH key access on robot...")
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		logger.LogWarn("Could not find local home directory: %v", err)
+		return
+	}
+
+	// Check for common public key paths
+	keyPaths := []string{
+		filepath.Join(home, ".ssh", "id_ed25519.pub"),
+		filepath.Join(home, ".ssh", "id_rsa.pub"),
+	}
+
+	var pubKey []byte
+	for _, path := range keyPaths {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			pubKey = data
+			break
+		}
+	}
+
+	if len(pubKey) == 0 {
+		logger.LogWarn("No local SSH public key found (checked id_ed25519 and id_rsa). Skipping key setup.")
+		return
+	}
+
+	pubKeyStr := strings.TrimSpace(string(pubKey))
+	logger.LogInfo("Uploading public key to robot...")
+
+	setupKeyCmd := fmt.Sprintf("mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '%s' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys", pubKeyStr)
+	_, err = ssh.RunSSHCommand(client, setupKeyCmd)
+	if err != nil {
+		logger.LogWarn("Failed to upload SSH key: %v", err)
+	} else {
+		logger.LogInfo("SSH key successfully added to robot.")
 	}
 }
 
