@@ -149,16 +149,60 @@ h3 {
   box-sizing: border-box;
 }
 
-/* --- Center Panel: 3D View --- */
+/* --- Center Panel: Video + 3D View --- */
 .panel-center {
-  position: relative;
   background: black;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.camera-feed-container-main {
+  width: 100%;
+  height: 40%;
+  background: #000;
+  position: relative;
+  border-bottom: 1px solid var(--border-color);
+}
+
+#three-container {
+  flex: 1;
+  position: relative;
   overflow: hidden;
 }
 
 #three-container canvas {
   display: block;
   outline: none;
+}
+
+#camera-feed {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.cam-overlay {
+  position: absolute;
+  bottom: 5px;
+  right: 5px;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 2px 5px;
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  color: white;
+}
+
+.no-signal {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.no-signal::after {
+  content: "NO SIGNAL";
+  color: #555;
+  font-family: var(--font-mono);
 }
 
 #hud-overlay {
@@ -202,48 +246,11 @@ h3 {
   background: rgba(0, 0, 0, 0.8);
 }
 
-/* --- Right Panel: Camera & Telemetry --- */
+/* --- Right Panel: Telemetry --- */
 .panel-right {
   border-left: 1px solid var(--border-color);
   padding: 0;
   overflow-y: auto;
-}
-
-.camera-feed-container {
-  width: 100%;
-  height: 250px;
-  background: #000;
-  position: relative;
-  border-bottom: 1px solid var(--border-color);
-}
-
-#camera-feed {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.cam-overlay {
-  position: absolute;
-  bottom: 5px;
-  right: 5px;
-  background: rgba(0, 0, 0, 0.6);
-  padding: 2px 5px;
-  font-size: 0.7rem;
-  font-family: var(--font-mono);
-  color: white;
-}
-
-.no-signal {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-
-.no-signal::after {
-  content: "NO SIGNAL";
-  color: #555;
-  font-family: var(--font-mono);
 }
 
 .telemetry-box {

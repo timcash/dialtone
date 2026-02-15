@@ -70,6 +70,8 @@ func ExecuteDev() {
 		runVPN(args)
 	case "vpn-provision", "provision":
 		vpn_cli.RunProvision(args)
+	case "vpn-test":
+		vpn_cli.RunTest(args)
 	case "logs":
 		logs_cli.RunLogs(args)
 	case "diagnostic":
