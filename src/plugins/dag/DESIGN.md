@@ -2,6 +2,186 @@
 
 This document captures the DAG behavior represented in `../dag_viz` (`src/`, `src3/`, `src4/`, `src5/`, `summary.md`, `v2.md`) and organizes it into a single product spec for `src/plugins/dag`.
 
+# Domain Language
+
+This section is SQL-first (DuckDB-oriented) and excludes UI/rendering concerns.
+
+## 1) Core Identity Types
+
+```sql
+-- Logical type aliases (DuckDB has no CREATE DOMAIN; use VARCHAR consistently).
+-- GraphId, LayerId, NodeId, EdgeId, CheckpointId => VARCHAR
+-- Rank => INTEGER CHECK(rank >= 0)
+-- Timestamp => TIMESTAMP
+```
+
+## 2) Graph
+
+```sql
+CREATE TABLE IF NOT EXISTS dag_graph (
+  graph_id VARCHAR PRIMARY KEY,
+  root_layer_id VARCHAR NOT NULL,
+  name VARCHAR,
+  tags_json VARCHAR,      -- JSON array encoded as text
+  version VARCHAR,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+## 3) Layer
+
+```sql
+CREATE TABLE IF NOT EXISTS dag_layer (
+  layer_id VARCHAR PRIMARY KEY,
+  graph_id VARCHAR NOT NULL REFERENCES dag_graph(graph_id) ON DELETE CASCADE,
+  parent_node_id VARCHAR, -- nullable; set after dag_node exists
+  layer_name VARCHAR,
+  depth INTEGER NOT NULL DEFAULT 0 CHECK (depth >= 0),
+  semantic_role VARCHAR,
+  annotations_json VARCHAR,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+## 4) Node
+
+```sql
+CREATE TABLE IF NOT EXISTS dag_node (
+  node_id VARCHAR PRIMARY KEY,
+  layer_id VARCHAR NOT NULL REFERENCES dag_layer(layer_id) ON DELETE CASCADE,
+  label VARCHAR NOT NULL,
+  rank INTEGER NOT NULL DEFAULT 0 CHECK (rank >= 0),
+  sub_layer_id VARCHAR UNIQUE, -- at most one parent node per sublayer
+  node_type VARCHAR,
+  node_status VARCHAR,
+  owner VARCHAR,
+  tags_json VARCHAR,
+  attributes_json VARCHAR,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+## 5) Node <-> SubLayer Link Integrity
+
+```sql
+-- Apply after dag_node and dag_layer both exist.
+-- Each nested layer references its parent node via dag_layer.parent_node_id.
+-- Optionally enforce reverse link:
+-- dag_node.sub_layer_id -> dag_layer.layer_id
+ALTER TABLE dag_node
+ADD CONSTRAINT fk_node_sub_layer
+FOREIGN KEY (sub_layer_id) REFERENCES dag_layer(layer_id);
+```
+
+## 6) Edge
+
+```sql
+CREATE TABLE IF NOT EXISTS dag_edge (
+  edge_id VARCHAR PRIMARY KEY,
+  layer_id VARCHAR NOT NULL REFERENCES dag_layer(layer_id) ON DELETE CASCADE,
+  from_node_id VARCHAR NOT NULL REFERENCES dag_node(node_id) ON DELETE CASCADE,
+  to_node_id VARCHAR NOT NULL REFERENCES dag_node(node_id) ON DELETE CASCADE,
+  weight DOUBLE,
+  edge_type VARCHAR,
+  confidence DOUBLE,
+  provenance VARCHAR,
+  annotations_json VARCHAR,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT chk_edge_not_self CHECK (from_node_id <> to_node_id)
+);
+```
+
+## 7) Rank Index (Materialized)
+
+```sql
+CREATE TABLE IF NOT EXISTS dag_rank_index (
+  layer_id VARCHAR NOT NULL REFERENCES dag_layer(layer_id) ON DELETE CASCADE,
+  rank INTEGER NOT NULL CHECK (rank >= 0),
+  node_id VARCHAR NOT NULL REFERENCES dag_node(node_id) ON DELETE CASCADE,
+  ordinal_in_rank INTEGER NOT NULL DEFAULT 0 CHECK (ordinal_in_rank >= 0),
+  PRIMARY KEY (layer_id, rank, node_id)
+);
+```
+
+## 8) Checkpoints (Snapshots)
+
+```sql
+CREATE TABLE IF NOT EXISTS dag_checkpoint (
+  checkpoint_id VARCHAR PRIMARY KEY,
+  graph_id VARCHAR NOT NULL REFERENCES dag_graph(graph_id) ON DELETE CASCADE,
+  snapshot_json VARCHAR NOT NULL, -- serialized deterministic snapshot
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by VARCHAR
+);
+```
+
+## 9) Domain Operations (SQL Templates)
+
+```sql
+-- Create node
+INSERT INTO dag_node (node_id, layer_id, label, rank)
+VALUES (?, ?, ?, COALESCE(?, 0));
+
+-- Update node metadata
+UPDATE dag_node
+SET label = COALESCE(?, label),
+    node_type = COALESCE(?, node_type),
+    node_status = COALESCE(?, node_status),
+    owner = COALESCE(?, owner),
+    tags_json = COALESCE(?, tags_json),
+    attributes_json = COALESCE(?, attributes_json),
+    updated_at = CURRENT_TIMESTAMP
+WHERE node_id = ?;
+
+-- Delete node (cascades edge refs through FK)
+DELETE FROM dag_node WHERE node_id = ?;
+
+-- Create edge
+INSERT INTO dag_edge (edge_id, layer_id, from_node_id, to_node_id, weight)
+VALUES (?, ?, ?, ?, ?);
+
+-- Delete edge
+DELETE FROM dag_edge WHERE edge_id = ?;
+```
+
+## 10) Validation Queries
+
+```sql
+-- Dangling node->layer references (should be 0 rows)
+SELECT n.node_id
+FROM dag_node n
+LEFT JOIN dag_layer l ON l.layer_id = n.layer_id
+WHERE l.layer_id IS NULL;
+
+-- Cross-layer edges (should be 0 rows)
+SELECT e.edge_id
+FROM dag_edge e
+JOIN dag_node n1 ON n1.node_id = e.from_node_id
+JOIN dag_node n2 ON n2.node_id = e.to_node_id
+WHERE n1.layer_id <> n2.layer_id;
+
+-- Rank constraint violations (should be 0 rows)
+SELECT e.edge_id, n1.rank AS from_rank, n2.rank AS to_rank
+FROM dag_edge e
+JOIN dag_node n1 ON n1.node_id = e.from_node_id
+JOIN dag_node n2 ON n2.node_id = e.to_node_id
+WHERE n2.rank <= n1.rank;
+```
+
+## 11) Notes for Later Enforcement
+
+```sql
+-- Acyclic enforcement generally requires procedural validation (DFS/toposort)
+-- in application logic or batch validation queries; not a simple CHECK.
+-- Keep deterministic serialization by ordering:
+-- layer_id, rank, ordinal_in_rank, node_id, edge_id.
+-- Navigation history is intentionally UI-side state for now (not persisted in DB).
+```
+
 ## Scope
 
 - 3D DAG visualization with nested sub-layers.
