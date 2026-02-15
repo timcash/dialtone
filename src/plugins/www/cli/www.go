@@ -40,6 +40,65 @@ func logFatal(format string, args ...interface{}) {
 	os.Exit(1)
 }
 
+func dialtoneBunPath() (string, bool) {
+	envDir := os.Getenv("DIALTONE_ENV")
+	if envDir == "" {
+		return "", false
+	}
+	candidates := []string{
+		filepath.Join(envDir, "bun", "bin", "bun"),
+		filepath.Join(envDir, "bin", "bun"),
+	}
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, true
+		}
+	}
+	return "", false
+}
+
+func dialtoneNpmPath() (string, bool) {
+	envDir := os.Getenv("DIALTONE_ENV")
+	if envDir == "" {
+		return "", false
+	}
+	candidate := filepath.Join(envDir, "node", "bin", "npm")
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate, true
+	}
+	return "", false
+}
+
+func installWwwDeps(webDir string) {
+	if bunPath, ok := dialtoneBunPath(); ok {
+		logInfo("Installing dependencies with DIALTONE_ENV bun: %s", bunPath)
+		cmd := exec.Command(bunPath, "install")
+		cmd.Dir = webDir
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			logFatal("bun install failed: %v", err)
+		}
+		return
+	}
+
+	if npmPath, ok := dialtoneNpmPath(); ok {
+		logInfo("Installing dependencies with DIALTONE_ENV npm: %s", npmPath)
+		cmd := exec.Command(npmPath, "install")
+		cmd.Dir = webDir
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			logFatal("npm install failed: %v", err)
+		}
+		return
+	}
+
+	logFatal("Neither Bun nor npm found in DIALTONE_ENV. Run './dialtone.sh install' first.")
+}
+
 type npmPackage struct {
 	Version string `json:"version"`
 }
@@ -121,15 +180,7 @@ func ensureNpmDeps(webDir string) {
 		return
 	}
 
-	logInfo("Installing npm dependencies...")
-	cmd := exec.Command("npm", "install")
-	cmd.Dir = webDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	if err := cmd.Run(); err != nil {
-		logFatal("npm install failed: %v", err)
-	}
+	installWwwDeps(webDir)
 }
 
 func bumpPatch(version string) (string, error) {
@@ -268,6 +319,7 @@ func RunWww(args []string) {
 		fmt.Println("Usage: dialtone www <subcommand> [options]")
 		fmt.Println("\nSubcommands:")
 		fmt.Println("  publish            Full deployment pipeline (version -> build -> deploy)")
+		fmt.Println("  install            Install WWW dependencies using DIALTONE_ENV bun/npm")
 		fmt.Println("  build              Vite build (generates /dist)")
 		fmt.Println("  dev                Vite dev server (hot reload)")
 		fmt.Println("  lint               Run static analysis (tsc --noEmit)")
@@ -284,6 +336,7 @@ func RunWww(args []string) {
 		fmt.Println("  music demo         Zero-config local Music section demo")
 		fmt.Println("  webgpu demo        Zero-config local WebGPU development environment")
 		fmt.Println("  webgpu debug       Chromedp debug run for WebGPU rendering")
+		fmt.Println("  policy demo        Zero-config local Policy section demo")
 		fmt.Println("  radio demo         Zero-config local Radio section demo")
 		fmt.Println("  vision demo        Zero-config local Vision section demo")
 		fmt.Println("\nRun 'dialtone www <subcommand> --help' for specific details.")
@@ -436,11 +489,40 @@ func RunWww(args []string) {
 		}
 		logFatal("Unknown 'radio' command. Use 'dialtone www help' for usage.")
 
+	case "policy":
+		if len(args) > 1 && args[1] == "demo" {
+			for _, arg := range args[2:] {
+				if arg == "--help" || arg == "-h" {
+					fmt.Println("Usage: dialtone www policy demo")
+					fmt.Println("\nOrchestrates a local Policy section demo:")
+					fmt.Println("  1. Cleans up port 5173.")
+					fmt.Println("  2. Kills existing Chrome debug instances.")
+					fmt.Println("  3. Starts the Vite WWW dev server.")
+					fmt.Println("  4. Launches Chrome on the Policy section (#s-policy).")
+					return
+				}
+			}
+			handlePolicyDemo(webDir)
+			return
+		}
+		logFatal("Unknown 'policy' command. Use 'dialtone www help' for usage.")
+
 	case "publish":
 		publishPrebuilt(webDir, getVercel(), vercelEnv, args[1:])
 
 	case "publish-prebuilt":
 		publishPrebuilt(webDir, getVercel(), vercelEnv, args[1:])
+
+	case "install":
+		for _, arg := range args[1:] {
+			if arg == "--help" || arg == "-h" {
+				fmt.Println("Usage: dialtone www install")
+				fmt.Println("\nInstalls dependencies for the WWW app.")
+				fmt.Println("Prefers Bun from DIALTONE_ENV, then npm from DIALTONE_ENV.")
+				return
+			}
+		}
+		installWwwDeps(webDir)
 
 	case "logs":
 		for _, arg := range args[1:] {
@@ -972,6 +1054,97 @@ func handleRadioDemo(webDir string) {
 	}
 
 	logInfo("Radio Demo Environment is LIVE!")
+	logInfo("Dev Server: %s", baseURL)
+	logInfo("Press Ctrl+C to stop...")
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
+	logInfo("Shutting down...")
+}
+
+func handlePolicyDemo(webDir string) {
+	logInfo("Setting up Policy Demo Environment...")
+
+	// 1. Port cleanup (same as earth demo)
+	logInfo("Cleaning up port 5173...")
+	_ = exec.Command("fuser", "-k", "5173/tcp").Run()
+	time.Sleep(1500 * time.Millisecond)
+
+	// 2. Kill existing Dialtone Chrome instances
+	logInfo("Cleaning up Chrome processes...")
+	_ = getDialtoneCmd("chrome", "kill", "all").Run()
+
+	// 3. Start WWW Dev Server with piped output to detect port (same pattern as earth demo)
+	logInfo("Starting WWW Dev Server...")
+	devCmd := exec.Command("npm", "run", "dev", "--", "--host", "127.0.0.1")
+	devCmd.Dir = webDir
+	stdout, err := devCmd.StdoutPipe()
+	if err != nil {
+		logFatal("Failed to attach to dev server stdout: %v", err)
+	}
+	stderr, err := devCmd.StderrPipe()
+	if err != nil {
+		logFatal("Failed to attach to dev server stderr: %v", err)
+	}
+	if err := devCmd.Start(); err != nil {
+		logFatal("Failed to start dev server: %v", err)
+	}
+
+	// 4. Wait for dev server ready and detect port (like earth_demo.go)
+	logInfo("Waiting for Dev Server...")
+	port := 5173
+	portCh := make(chan int, 1)
+	go func() {
+		reader := io.MultiReader(stdout, stderr)
+		scanner := bufio.NewScanner(reader)
+		re := regexp.MustCompile(`http://127\.0\.0\.1:(\d+)/`)
+		for scanner.Scan() {
+			line := scanner.Text()
+			fmt.Println(line)
+			if match := re.FindStringSubmatch(line); len(match) == 2 {
+				if p, err := strconv.Atoi(match[1]); err == nil {
+					select {
+					case portCh <- p:
+					default:
+					}
+				}
+			}
+		}
+	}()
+
+	select {
+	case detected := <-portCh:
+		port = detected
+	case <-time.After(10 * time.Second):
+		logInfo("Dev server port not detected yet; falling back to %d", port)
+	}
+
+	ready := false
+	for i := 0; i < 30; i++ {
+		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d", port))
+		if err == nil && resp.StatusCode == 200 {
+			resp.Body.Close()
+			ready = true
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+	if !ready {
+		logFatal("Dev server failed to start within 30 seconds")
+	}
+
+	// 5. Launch Chrome straight on Policy section
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d/#s-policy", port)
+	logInfo("Launching Chrome on Policy section...")
+	chromeCmd := getDialtoneCmd("chrome", "new", baseURL, "--gpu")
+	chromeCmd.Stdout = os.Stdout
+	chromeCmd.Stderr = os.Stderr
+	if err := chromeCmd.Run(); err != nil {
+		logFatal("Failed to launch Chrome: %v", err)
+	}
+
+	logInfo("Policy Demo Environment is LIVE!")
 	logInfo("Dev Server: %s", baseURL)
 	logInfo("Press Ctrl+C to stop...")
 
