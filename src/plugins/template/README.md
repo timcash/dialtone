@@ -118,6 +118,25 @@ Required follow-up for a new version:
 ./dialtone.sh template dev src_v4
 ```
 
+## Using `src_v3` As A Base For Another Plugin
+
+If you clone `src/plugins/template/src_v3` into another plugin (for example `src/plugins/<name>/src_v3`), there are a few extra hookup steps:
+
+1. Update plugin-specific strings and paths.
+   - UI title: `dialtone.template` -> your plugin title.
+   - Go serve fallback path in `cmd/main.go`: `src/plugins/template/...` -> your plugin path.
+   - Package name in `ui/package.json`: `template-ui-v3` -> plugin-specific name.
+2. Ensure your plugin CLI exposes the same versioned commands if you want template parity.
+   - `install`, `fmt`, `vet`, `go-build`, `lint`, `format`, `build`, `serve`, `ui-run`, `dev`, `test`, `src --n <N>`.
+3. If you remove sections from template, remove matching UI/deps/artifacts.
+   - Remove unused section DOM + registration + component files.
+   - Remove unused dependencies (`@xterm/*`, video assets, etc.) from `ui/package.json`.
+   - If `video` section is removed, also remove `ui/public/video1.mp4` (template uses it).
+4. Keep only source files when scaffolding.
+   - Do not copy runtime/generated directories into a new plugin version (`ui/node_modules`, `ui/dist`, `.vite`) or run outputs (`dev.log`, `test/TEST.md`, screenshots, logs).
+5. Test viewport assumption.
+   - `test_v2` browser sessions started with a URL use `1280x800` viewport by default, so visual/pixel tests should assert projected points are inside that viewport.
+
 ## Commands Reference
 
 ```bash
