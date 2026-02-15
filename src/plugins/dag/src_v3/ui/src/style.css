@@ -1,12 +1,39 @@
 @import '../../../../../libs/ui_v2/style.css';
 
-section[aria-label='Hit Test Section'] {
+section[aria-label='DAG Table Section'],
+section[aria-label='Three Section'] {
   display: grid;
   place-items: stretch;
+}
+
+section[aria-label='DAG Table Section'] {
+  --table-row-height: 1.45em;
+}
+
+section[aria-label='DAG Table Section'] table {
+  display: table;
+  width: 100%;
+  height: 100%;
+  background: #090f18;
+  align-self: stretch;
+  table-layout: fixed;
+}
+
+section[aria-label='DAG Table Section'] th,
+section[aria-label='DAG Table Section'] td {
+  height: var(--table-row-height);
+  padding: 0 0.6em;
+  line-height: 1.45em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+section[aria-label='Three Section'] {
   background: #000;
 }
 
-canvas[aria-label='Hit Test Canvas'] {
+canvas[aria-label='Three Canvas'] {
   width: 100%;
   height: 100vh;
   border: 0;

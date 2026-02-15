@@ -9,9 +9,11 @@ import (
 
 func main() {
 	steps := []test_v2.Step{
-		{Name: "01 Preflight (Go/UI)", Run: Run01Preflight},
-		{Name: "02 Hit-Test Section Validation", Run: Run02HitTestSectionValidation, SectionID: "hit-test", Screenshot: "screenshots/test_step_1.png"},
-		{Name: "03 Cleanup Verification", Run: Run03CleanupVerification},
+		{Name: "01 DuckDB Graph Query Validation", Run: Run01DuckDBGraphQueries},
+		{Name: "02 Preflight (Go/UI)", Run: Run01Preflight},
+		{Name: "03 DAG Table Section Validation", Run: Run02DagTableSectionValidation, SectionID: "dag-table", Screenshot: "screenshots/test_step_1.png"},
+		{Name: "04 Three Section Validation", Run: Run03ThreeSectionValidation, SectionID: "three", Screenshot: "screenshots/test_step_2.png"},
+		{Name: "05 Cleanup Verification", Run: Run04CleanupVerification},
 	}
 
 	if err := test_v2.RunSuite(test_v2.SuiteOptions{
