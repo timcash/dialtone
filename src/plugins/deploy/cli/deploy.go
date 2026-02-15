@@ -4,9 +4,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"dialtone/cli/src/core/build"
@@ -24,6 +26,7 @@ func RunDeploy(args []string) {
 	user := fs.String("user", os.Getenv("ROBOT_USER"), "SSH user")
 	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password")
 	ephemeral := fs.Bool("ephemeral", false, "Register as ephemeral node on Tailscale")
+	proxy := fs.Bool("proxy", false, "Expose Web UI via Cloudflare proxy (drone-1.dialtone.earth)")
 	showHelp := fs.Bool("help", false, "Show help for deploy command")
 
 	fs.Usage = func() {
@@ -38,6 +41,7 @@ func RunDeploy(args []string) {
 		fmt.Println("  --user        SSH username [env: ROBOT_USER]")
 		fmt.Println("  --pass        SSH password [env: ROBOT_PASSWORD]")
 		fmt.Println("  --ephemeral   Register as ephemeral node on Tailscale (default: false)")
+		fmt.Println("  --proxy       Expose Web UI via Cloudflare proxy [drone-1.dialtone.earth]")
 		fmt.Println("  --help        Show this help message")
 		fmt.Println()
 	}
@@ -56,10 +60,10 @@ func RunDeploy(args []string) {
 	// Validate required environment variables
 	validateRequiredVars([]string{"DIALTONE_HOSTNAME", "TS_AUTHKEY"})
 
-	deployDialtone(*host, *port, *user, *pass, *ephemeral)
+	deployDialtone(*host, *port, *user, *pass, *ephemeral, *proxy)
 }
 
-func deployDialtone(host, port, user, pass string, ephemeral bool) {
+func deployDialtone(host, port, user, pass string, ephemeral bool, proxy bool) {
 	logger.LogInfo("Starting deployment to %s...", host)
 
 	// 1. Connect to Remote
@@ -136,7 +140,10 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 	// 6. Restart Service
 	logger.LogInfo("Starting service...")
 
-	hostnameParam := os.Getenv("DIALTONE_HOSTNAME")
+	hostnameParam := os.Getenv("DIALTONE_DOMAIN")
+	if hostnameParam == "" {
+		hostnameParam = os.Getenv("DIALTONE_HOSTNAME")
+	}
 	if hostnameParam == "" {
 		hostnameParam = "dialtone-1"
 	}
@@ -163,6 +170,24 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 
 	logger.LogInfo("Deployment complete!")
 	logger.LogInfo("Run './dialtone.sh logs --remote' to verify startup.")
+
+	if proxy {
+		logger.LogInfo("Starting Cloudflare proxy for %s.dialtone.earth...", hostnameParam)
+		cwd, _ := os.Getwd()
+		cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "cloudflare", "robot", hostnameParam)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		if err := cmd.Start(); err != nil {
+			logger.LogWarn("Failed to start Cloudflare proxy: %v", err)
+		} else {
+			logger.LogInfo("Cloudflare proxy started (PID: %d)", cmd.Process.Pid)
+		}
+	} else {
+		logger.LogInfo("")
+		logger.LogInfo("To expose this robot's Web UI via Cloudflare subdomain, run:")
+		logger.LogInfo("  ./dialtone.sh cloudflare robot %s", hostnameParam)
+	}
 }
 
 func validateRequiredVars(vars []string) {

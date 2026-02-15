@@ -1,0 +1,3 @@
+# Allow reading logs in .dialtone/run for debugging
+!.dialtone/run/cloudflare_robot_drone-1.log
+

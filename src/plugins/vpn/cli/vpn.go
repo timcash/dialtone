@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"dialtone/cli/src/core/logger"
 	"encoding/json"
 	"flag"
@@ -10,6 +11,9 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
+
+	"tailscale.com/tsnet"
 )
 
 func RunProvision(args []string) {
@@ -89,6 +93,34 @@ func ProvisionKey(token string, updateEnvFile bool) (string, error) {
 	}
 
 	return result.Key, nil
+}
+
+func RunTest(args []string) {
+	logger.LogInfo("Starting tsnet test...")
+
+	s := &tsnet.Server{
+		Hostname: "test-vpn",
+		AuthKey:  os.Getenv("TS_AUTHKEY"),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	s.Logf = func(format string, args ...any) {
+		logger.LogInfo(fmt.Sprintf("tsnet: %s", format), args...)
+	}
+
+	status, err := s.Up(ctx)
+	if err != nil {
+		logger.LogFatal("Failed to start tsnet server: %v", err)
+	}
+	logger.LogInfo("tsnet server started successfully.")
+	logger.LogInfo("Tailscale Status: %v", status)
+	logger.LogInfo("Tailscale IPs: %v", status.TailscaleIPs)
+
+	// Keep the server running for a bit to allow for connections/testing
+	<-ctx.Done()
+	logger.LogInfo("tsnet test finished.")
 }
 
 func updateEnv(key, value string) {

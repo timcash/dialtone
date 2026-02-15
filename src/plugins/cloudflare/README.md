@@ -19,11 +19,39 @@ The `cloudflare` plugin integrates Cloudflare Tunnels into Dialtone, enabling se
 # Run a tunnel and optionally specify a service URL to forward.
 ./dialtone.sh cloudflare tunnel run <name> [--url <service-url>]
 
+# Automate exposing a remote robot (proxy -> tunnel).
+# Assumes robot is reachable via Tailscale.
+./dialtone.sh cloudflare robot <hostname>
+
 # Terminate all locally running cloudflared processes.
 ./dialtone.sh cloudflare tunnel cleanup
 
 # Quickly forward a local port or URL using an ephemeral tunnel.
 ./dialtone.sh cloudflare serve <port-or-url>
+```
+
+
+## Workflow: Exposing Remote Robot (e.g. drone-1.dialtone.earth)
+
+This is the recommended way to share a robot's UI with the world.
+
+1. **Deploy to Robot**
+   ```bash
+   ./dialtone.sh deploy --host drone-1 --pass <pass>
+   ```
+
+2. **Expose via Cloudflare**
+   ```bash
+   # On this computer, run:
+   ./dialtone.sh cloudflare robot drone-1
+   ```
+   This will start a local TCP proxy to `drone-1:8080` and then run a Cloudflare tunnel pointing to it.
+
+## Workflow: Non-Interactive (CI/Headless)
+If you have a `CF_TUNNEL_TOKEN` in your `.env`, you can run tunnels without needing to `login` or have a browser.
+
+```bash
+./dialtone.sh cloudflare robot drone-1 --token <your-token>
 ```
 
 
