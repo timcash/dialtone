@@ -25,9 +25,9 @@ const (
 	PixiVersion        = "latest" // Using latest for pixi
 	PodmanVersion      = "latest"
 	ArmCompilerVersion = "13.3.rel1"
+	CloudflaredVersion = "2025.1.0"
 	Arm64CompilerUrl   = "https://developer.arm.com/-/media/Files/downloads/gnu/13.3.rel1/binrel/arm-gnu-toolchain-13.3.rel1-x86_64-aarch64-none-linux-gnu.tar.xz"
 	ArmhfCompilerUrl   = "https://developer.arm.com/-/media/Files/downloads/gnu/13.3.rel1/binrel/arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-linux-gnueabihf.tar.xz"
-	CloudflaredVersion = "2025.1.0"
 )
 
 func logItemStatus(name, version, path string, alreadyInstalled bool) {
@@ -404,10 +404,10 @@ func installLocalDepsWSL() {
 
 		// 7. Install AI
 		runSimpleShell("./dialtone.sh ai install")
-
-		// 6. Install Cloudflared
-		installCloudflaredLinuxAMD64(depsDir)
 	}
+
+	// 6. Install Cloudflared
+	installCloudflaredLinuxAMD64(depsDir)
 
 	printInstallComplete(depsDir)
 }

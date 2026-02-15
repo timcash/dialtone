@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cloudflare v1</title>
+    <link rel="stylesheet" href="src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header aria-label="App Header">
+        <h1>dialtone.cloudflare</h1>
+      </header>
+
+      <nav aria-label="Global Menu">
+        <div aria-label="Global Menu Panel" hidden></div>
+      </nav>
+
+      <section id="hero" aria-label="Hero Section">
+          <div>
+            <h2 aria-label="Hero Title">Cloudflare Relay</h2>
+            <p aria-label="Hero Subtitle">Cloudflare Tunnel management and status monitoring for remote dialtone robots.</p>
+          </div>
+          <canvas aria-label="Hero Canvas"></canvas>
+      </section>
+
+      <section id="status" aria-label="Status Section" hidden>
+          <div class="status-container">
+            <h3>Tunnel Status</h3>
+            <table aria-label="Tunnel Table">
+              <thead>
+                <tr>
+                  <th>TUNNEL</th>
+                  <th>ID</th>
+                  <th>CONNECTIONS</th>
+                  <th>STATE</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td>test</td><td>2e16d850...</td><td>3</td><td>ACTIVE</td></tr>
+                <tr><td>drone-1</td><td>...</td><td>0</td><td>INACTIVE</td></tr>
+              </tbody>
+            </table>
+
+            <h3>Subdomain Routing</h3>
+            <table aria-label="Routing Table">
+              <thead>
+                <tr>
+                  <th>SUBDOMAIN</th>
+                  <th>TARGET</th>
+                  <th>PROXY</th>
+                  <th>SSL</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td>test.dialtone.earth</td><td>localhost:8080</td><td>ENABLED</td><td>FULL</td></tr>
+                <tr><td>drone-1.dialtone.earth</td><td>drone-1:80</td><td>ENABLED</td><td>FULL</td></tr>
+              </tbody>
+            </table>
+          </div>
+      </section>
+
+      <section id="docs" aria-label="Docs Section" hidden>
+          <div>
+            <h2 aria-label="Docs Title">Cloudflare Documentation</h2>
+            <p aria-label="Docs Subtitle">How to use Cloudflare Tunnels with Dialtone.</p>
+          </div>
+      </section>
+
+      <section id="three" aria-label="Three Section" hidden>
+        <canvas aria-label="Three Canvas"></canvas>
+      </section>
+
+      <section id="xterm" aria-label="Xterm Section" hidden>
+        <div aria-label="Xterm Terminal"></div>
+        <input aria-label="Xterm Input" type="text" value="status --verbose" placeholder="Enter command..." />
+      </section>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
