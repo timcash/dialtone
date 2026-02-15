@@ -17,8 +17,8 @@ starting the service on the target.
 - Connects to the remote host over SSH using `ROBOT_HOST`, `ROBOT_USER`,
   `ROBOT_PASSWORD` (or `--host/--user/--pass` flags).
 - Runs `uname -m` remotely to detect architecture.
-- Cross-compiles locally via `dialtone build --local --linux-arm64` or
-  `--linux-arm` (depending on the remote architecture).
+- Cross-compiles locally via `dialtone build --local --linux-arm64`,
+  `--linux-arm`, or `--linux-amd64` (depending on the remote architecture).
 - Uploads the binary to `REMOTE_DIR_DEPLOY` (defaults to `~/dialtone_deploy`).
 - Restarts the service remotely with `TS_AUTHKEY`, `DIALTONE_HOSTNAME`, and
   optional `MAVLINK_ENDPOINT`.

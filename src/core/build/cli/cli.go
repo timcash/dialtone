@@ -32,6 +32,7 @@ func printUsage() {
 	fmt.Println("  --podman       Force build using Podman container")
 	fmt.Println("  --linux-arm    Cross-compile for 32-bit Linux ARM (Raspberry Pi Zero/3/4/5)")
 	fmt.Println("  --linux-arm64  Cross-compile for 64-bit Linux ARM (Raspberry Pi 3/4/5)")
+	fmt.Println("  --linux-amd64  Cross-compile for 64-bit Linux x86 (amd64)")
 	fmt.Println("  --builder      Build the dialtone-builder image for faster ARM builds")
 	fmt.Println("  test           Run build system integration test")
 	fmt.Println("  help           Show help for build command")

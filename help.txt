@@ -6,6 +6,8 @@ Usage: dialtone <command> [options]
 
 Commands:
   install [path]      Install Go toolchain to DIALTONE_ENV (go plugin default)
+  deploy [options]    Deploy binary to remote robot (auto-detects arch)
+  sync-code [options] Sync source code to remote robot
   ps <option>         List Dialtone processes (all, tracked, tree)
   proc <subcmd>       Process management (ps, stop, logs)
   kill <pid|all>      Kill one Dialtone process tree or all Dialtone wrapper processes

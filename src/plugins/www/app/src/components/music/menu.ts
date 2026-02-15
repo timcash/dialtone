@@ -11,6 +11,7 @@ type MusicConfigOptions = {
     isMicEnabled: boolean;
     toggleDemo: () => void;
     isDemoMode: boolean;
+    demoMode: string;
     toggleSound: () => void;
     isSoundOn: boolean;
 };
@@ -21,7 +22,8 @@ export function setupMusicMenu(options: MusicConfigOptions): void {
 
     menu.addHeader("Music Visualization");
 
-    menu.addButton(options.isDemoMode ? "Stop Demo" : "Start Demo", () => {
+    const demoLabel = options.isDemoMode ? `Demo: ${options.demoMode}` : "Demo: OFF";
+    menu.addButton(demoLabel, () => {
         options.toggleDemo();
     }, options.isDemoMode);
 

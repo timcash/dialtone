@@ -260,15 +260,16 @@ function Forward-Go([string]$Cmd, [string[]]$ForwardArgs) {
     }
 
     Ensure-RuntimeDir
-    $key = Get-ProcessKey "$Cmd $($ForwardArgs -join ' ')"
+    $key = Get-ProcessKey "$Cmd $($validForwardArgs -join ' ')"
     $pidFile = Join-Path $RuntimeDir "$key.pid"
     $metaFile = Join-Path $RuntimeDir "$key.meta"
     $logFile = Join-Path $RuntimeDir "$key.log"
 
-    $goArgs = @("run", "src/cmd/dev/main.go", $Cmd) + $ForwardArgs
+    $validForwardArgs = if ($ForwardArgs) { $ForwardArgs | Where-Object { $_ -ne $null } } else { @() }
+    $goArgs = @("run", "src/cmd/dev/main.go", $Cmd) + $validForwardArgs
 
     @(
-        "CMD=.\dialtone.ps1 $Cmd $($ForwardArgs -join ' ')"
+        "CMD=.\dialtone.ps1 $Cmd $($validForwardArgs -join ' ')"
         "LOG=$logFile"
         "STARTED_AT=$([DateTime]::UtcNow.ToString('s'))Z"
     ) | Set-Content -Path $metaFile

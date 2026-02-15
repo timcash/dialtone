@@ -37,7 +37,7 @@ func RunDeploy(args []string) {
 		fmt.Println("  --port        SSH port (default: 22)")
 		fmt.Println("  --user        SSH username [env: ROBOT_USER]")
 		fmt.Println("  --pass        SSH password [env: ROBOT_PASSWORD]")
-		fmt.Println("  --ephemeral   Register as ephemeral node on Tailscale (default: true)")
+		fmt.Println("  --ephemeral   Register as ephemeral node on Tailscale (default: false)")
 		fmt.Println("  --help        Show this help message")
 		fmt.Println()
 	}
@@ -54,7 +54,7 @@ func RunDeploy(args []string) {
 	}
 
 	// Validate required environment variables
-	validateRequiredVars([]string{"DIALTONE_HOSTNAME", "TS_AUTHKEY", "MAVLINK_ENDPOINT"})
+	validateRequiredVars([]string{"DIALTONE_HOSTNAME", "TS_AUTHKEY"})
 
 	deployDialtone(*host, *port, *user, *pass, *ephemeral)
 }
@@ -88,16 +88,19 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 	case "armv7l", "arm":
 		buildFlag = "--linux-arm"
 		binaryName = "dialtone-arm"
+	case "x86_64", "amd64":
+		buildFlag = "--linux-amd64"
+		binaryName = "dialtone-amd64"
 	default:
 		logger.LogFatal("Unsupported remote architecture: %s", remoteArch)
 	}
 
 	// 3. Run Build (Cross-Compile)
-	// We use --local to favor our Zig installation which is configured for GLIBC 2.36 targeting.
+	// We remove --local to allow Podman-based builds (e.g. on WSL)
 	logger.LogInfo("Cross-compiling for %s...", remoteArch)
 	// Skip public WWW build during deploy (not required for robot binary)
 	_ = os.Setenv("DIALTONE_SKIP_WWW", "1")
-	build.RunBuild([]string{"--local", buildFlag})
+	build.RunBuild([]string{buildFlag})
 
 	localBinaryPath := filepath.Join("bin", binaryName)
 	if _, err := os.Stat(localBinaryPath); os.IsNotExist(err) {
@@ -116,12 +119,16 @@ func deployDialtone(host, port, user, pass string, ephemeral bool) {
 
 	logger.LogInfo("Preparing remote directory %s...", remoteDir)
 	_, _ = ssh.RunSSHCommand(client, "pkill dialtone || true")
-	_, _ = ssh.RunSSHCommand(client, fmt.Sprintf("mkdir -p %s", remoteDir))
+	// Use rm -rf to ensure we can create a directory even if a file exists with the same name
+	if _, err := ssh.RunSSHCommand(client, fmt.Sprintf("rm -rf %s && mkdir -p %s", remoteDir, remoteDir)); err != nil {
+		logger.LogFatal("Failed to create remote directory: %v", err)
+	}
 
 	// 5. Upload Binary
 	logger.LogInfo("Uploading binary %s...", localBinaryPath)
 	remoteBinaryPath := path.Join(remoteDir, "dialtone")
-	if err := ssh.UploadFile(client, localBinaryPath, remoteBinaryPath); err != nil {
+	// Use ToSlash for cross-platform local path handling in SFTP
+	if err := ssh.UploadFile(client, filepath.ToSlash(localBinaryPath), remoteBinaryPath); err != nil {
 		logger.LogFatal("Failed to upload binary: %v", err)
 	}
 	_, _ = ssh.RunSSHCommand(client, fmt.Sprintf("chmod +x %s", remoteBinaryPath))

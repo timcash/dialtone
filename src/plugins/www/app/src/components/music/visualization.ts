@@ -47,7 +47,8 @@ export class MusicVisualization {
   rotation = 0;
   autoRotationSpeed = 0.015;
 
-  public isDemoMode = true; 
+  public isDemoMode = false; 
+  public demoMode: 'fifths' | 'major3rd' | 'minor3rd' | 'chromatic-fifths' = 'fifths';
   private demoInterval: any = null;
   public demoNoteIndex = 0;
 
@@ -64,7 +65,7 @@ export class MusicVisualization {
     canvas.style.height = "100%";
     this.container.appendChild(canvas);
 
-    this.camera.position.set(0, 0, 12);
+    this.camera.position.set(0, 0, 18);
     this.camera.lookAt(0, 0, 0);
 
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.5));
@@ -73,7 +74,7 @@ export class MusicVisualization {
     this.scene.add(pointLight);
 
     this.scene.add(this.circleGroup);
-    this.histogram.group.position.set(0, -4.5, -2);
+    this.histogram.group.position.set(0, -6.5, -2);
     this.scene.add(this.histogram.group);
     
     this.createCircle();
@@ -110,16 +111,29 @@ export class MusicVisualization {
     window.addEventListener('mousedown', resumeOnGesture);
     window.addEventListener('keydown', resumeOnGesture);
 
-    this.startDemoLoop();
+    this.enableMic();
   }
 
   async toggleDemo() {
-    this.isDemoMode = !this.isDemoMode;
-    if (this.isDemoMode) {
+    if (!this.isDemoMode) {
+      this.isDemoMode = true;
+      this.demoMode = 'fifths';
       await this.analyzer.resume();
       this.startDemoLoop();
     } else {
-      this.stopDemoLoop();
+      // Cycle through modes, then turn off
+      const modes: ('fifths' | 'major3rd' | 'minor3rd' | 'chromatic-fifths')[] = ['fifths', 'major3rd', 'minor3rd', 'chromatic-fifths'];
+      const currentIndex = modes.indexOf(this.demoMode);
+      
+      if (currentIndex === modes.length - 1) {
+        this.isDemoMode = false;
+        this.stopDemoLoop();
+      } else {
+        this.demoMode = modes[currentIndex + 1];
+        this.stopDemoLoop();
+        await this.analyzer.resume();
+        this.startDemoLoop();
+      }
     }
   }
 
@@ -136,14 +150,65 @@ export class MusicVisualization {
     if (this.analyzer.isActive) return;
 
     this.demoNoteIndex = 0;
+    
+    const getFreq = (noteName: string) => {
+      const semitone = NOTE_TO_INDEX[noteName];
+      return 440 * Math.pow(2, (semitone - 9) / 12);
+    };
+
     const playNext = async () => {
       if (!this.isDemoMode || this.analyzer.isActive) return;
-      const noteName = CIRCLE_OF_FIFTHS[this.demoNoteIndex];
-      const semitone = NOTE_TO_INDEX[noteName];
-      const freq = 440 * Math.pow(2, (semitone - 9) / 12);
-      await this.analyzer.startDemo(freq);
-      this.demoNoteIndex = (this.demoNoteIndex + 1) % CIRCLE_OF_FIFTHS.length;
-      this.demoInterval = setTimeout(playNext, 2000);
+      
+      let duration = 2000;
+      
+      switch(this.demoMode) {
+        case 'major3rd': {
+          const baseNote = CIRCLE_OF_FIFTHS[this.demoNoteIndex];
+          const freq = getFreq(baseNote);
+          await this.analyzer.startDemo(freq);
+          this.demoNoteIndex = (this.demoNoteIndex + 4) % 12; // 4 steps in circle is Major 3rd relationship? No, 4 steps clockwise is actually Major 3rd in music theory *on circle of fifths*.
+          break;
+        }
+        case 'minor3rd': {
+          const baseNote = CIRCLE_OF_FIFTHS[this.demoNoteIndex];
+          const freq = getFreq(baseNote);
+          await this.analyzer.startDemo(freq);
+          this.demoNoteIndex = (this.demoNoteIndex + 3) % 12; // 3 steps clockwise is Minor 3rd relationship
+          break;
+        }
+        case 'chromatic-fifths': {
+          const startNoteName = CIRCLE_OF_FIFTHS[this.demoNoteIndex];
+          const endNoteIndex = (this.demoNoteIndex + 1) % 12;
+          const endNoteName = CIRCLE_OF_FIFTHS[endNoteIndex];
+          
+          const startSemi = NOTE_TO_INDEX[startNoteName];
+          let endSemi = NOTE_TO_INDEX[endNoteName];
+          // We want to move towards the next note in the circle
+          // This mode plays the chromatic scale between the two fifths
+          const diff = (endSemi - startSemi + 12) % 12;
+          
+          for (let i = 0; i <= diff; i++) {
+            const currentSemi = (startSemi + i) % 12;
+            const isBound = i === 0 || i === diff;
+            const freq = 440 * Math.pow(2, (currentSemi - 9) / 12);
+            await this.analyzer.startDemo(freq);
+            await new Promise(r => setTimeout(r, isBound ? 1000 : 300));
+          }
+          
+          this.demoNoteIndex = endNoteIndex;
+          duration = 500;
+          break;
+        }
+        default: { // fifths
+          const noteName = CIRCLE_OF_FIFTHS[this.demoNoteIndex];
+          const freq = getFreq(noteName);
+          await this.analyzer.startDemo(freq);
+          this.demoNoteIndex = (this.demoNoteIndex + 1) % CIRCLE_OF_FIFTHS.length;
+          break;
+        }
+      }
+      
+      this.demoInterval = setTimeout(playNext, duration);
     };
     playNext();
   }
@@ -183,7 +248,11 @@ export class MusicVisualization {
       ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
       ctx.font = "bold 60px Arial";
       ctx.textAlign = "center";
-      ctx.fillText(note, 128, 80);
+      ctx.fillText(note, 128, 65);
+      
+      ctx.fillStyle = "rgba(200, 200, 200, 0.7)";
+      ctx.font = "24px Arial";
+      ctx.fillText(`${freq.toFixed(1)} Hz`, 128, 105);
     }
     this.centerLabelSprite.material.map!.needsUpdate = true;
   }
@@ -197,9 +266,11 @@ export class MusicVisualization {
       const x = Math.cos(angle) * radius;
       const y = -Math.sin(angle) * radius; 
 
+      const noteIndex = NOTE_TO_INDEX[note];
+      const hue = noteIndex / 12;
       const material = new THREE.MeshStandardMaterial({
-        color: new THREE.Color().setHSL(i / 12, 0.8, 0.5),
-        emissive: new THREE.Color().setHSL(i / 12, 0.8, 0.2),
+        color: new THREE.Color().setHSL(hue, 0.8, 0.5),
+        emissive: new THREE.Color().setHSL(hue, 0.8, 0.2),
         metalness: 0.8,
         roughness: 0.2
       });
@@ -207,7 +278,6 @@ export class MusicVisualization {
       const mesh = new THREE.Mesh(geometry, material);
       mesh.position.set(x, y, 0);
       
-      const noteIndex = NOTE_TO_INDEX[note];
       const freq = 440 * Math.pow(2, (noteIndex - 9) / 12);
       
       mesh.userData = { note, baseScale: 1, angle, noteIndex, freq };
@@ -313,7 +383,12 @@ export class MusicVisualization {
         chroma = this.analyzer.getChromagram(this.sensitivity, this.floor);
     }
     
-    this.histogram.update(this.analyzer.getFrequencyData(), this.floor);
+    this.histogram.update(
+      this.analyzer.getFrequencyData(), 
+      this.floor, 
+      this.analyzer.sampleRate,
+      this.analyzer.fftSize
+    );
 
     let strongestIndex = -1;
     let maxEnergy = 0;
@@ -341,7 +416,9 @@ export class MusicVisualization {
       const strongestMesh = this.noteMeshes[strongestIndex];
       const strongest = strongestMesh.userData;
       const strongestSemitone = strongest.noteIndex;
-      this.updateCenterLabel(strongest.freq, strongest.note, maxEnergy);
+      
+      const realFreq = this.isDemoMode ? strongest.freq : this.analyzer.getPeakFrequency();
+      this.updateCenterLabel(realFreq, strongest.note, maxEnergy);
 
       const updateHarmonicLine = (line: Line2, interval: number) => {
         const targetSemitone = (strongestSemitone + interval) % 12;
