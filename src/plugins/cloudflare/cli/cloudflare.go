@@ -102,6 +102,8 @@ func RunCloudflare(args []string) {
 		RunTest(getDir())
 	case "build":
 		RunBuild(getDir())
+	case "setup-service":
+		RunSetupService(restArgs)
 	case "help", "-h", "--help":
 		printCloudflareUsage()
 	default:
@@ -120,6 +122,7 @@ func printCloudflareUsage() {
 	fmt.Println("  robot       Expose a remote robot via this computer (proxy -> tunnel)")
 	fmt.Println("  proxy       Start a local TCP proxy to a remote target")
 	fmt.Println("  provision   Create a new tunnel and save token to .env (requires API Token)")
+	fmt.Println("  setup-service Set up the Cloudflare proxy as a local systemd service")
 	fmt.Println("\nVersioned Source Commands (src_vN):")
 	fmt.Println("  install     Install UI dependencies")
 	fmt.Println("  fmt         Run formatting checks/fixes")
@@ -132,6 +135,69 @@ func printCloudflareUsage() {
 	fmt.Println("  build       Build everything needed (UI assets)")
 	fmt.Println("  test        Run automated tests and write TEST.md artifacts")
 	fmt.Println("  help        Show this help message")
+}
+
+func RunSetupService(args []string) {
+	fs := flag.NewFlagSet("setup-service", flag.ExitOnError)
+	name := fs.String("name", os.Getenv("DIALTONE_DOMAIN"), "Cloudflare subdomain/robot name")
+	fs.Parse(args)
+
+	robotName := *name
+	if robotName == "" && len(fs.Args()) > 0 {
+		robotName = fs.Args()[0]
+	}
+	if robotName == "" {
+		robotName = os.Getenv("DIALTONE_HOSTNAME")
+	}
+
+	if robotName == "" {
+		logger.LogFatal("Error: robot name is required for setup-service (pass as arg or set DIALTONE_DOMAIN/DIALTONE_HOSTNAME in .env)")
+	}
+
+	cwd, _ := os.Getwd()
+	dialtoneSh := filepath.Join(cwd, "dialtone.sh")
+	user := os.Getenv("USER")
+	if user == "" {
+		user = "user"
+	}
+
+	// Determine dependency dir
+	depsDir := config.GetDialtoneEnv()
+
+	serviceTemplate := `[Unit]
+Description=Dialtone Cloudflare Proxy for %s
+After=network.target
+
+[Service]
+ExecStart=%s cloudflare robot %s
+WorkingDirectory=%s
+User=%s
+Environment=DIALTONE_ENV=%s
+Environment=DIALTONE_ENV_FILE=%s
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+`
+	serviceContent := fmt.Sprintf(serviceTemplate, robotName, dialtoneSh, robotName, cwd, user, depsDir, filepath.Join(cwd, "env/.env"))
+	servicePath := fmt.Sprintf("/etc/systemd/system/dialtone-proxy-%s.service", robotName)
+
+	fmt.Printf("Creating systemd service at %s...\n", servicePath)
+
+	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("dialtone-proxy-%s.service", robotName))
+	err := os.WriteFile(tmpFile, []byte(serviceContent), 0644)
+	if err != nil {
+		logger.LogFatal("Failed to write temporary service file: %v", err)
+	}
+
+	config.RunSudoShell(fmt.Sprintf("cp %s %s", tmpFile, servicePath))
+	config.RunSudoShell("systemctl daemon-reload")
+	config.RunSudoShell(fmt.Sprintf("systemctl enable dialtone-proxy-%s.service", robotName))
+	config.RunSudoShell(fmt.Sprintf("systemctl restart dialtone-proxy-%s.service", robotName))
+
+	logger.LogInfo("SUCCESS: Cloudflare proxy service for '%s' installed and started.", robotName)
+	logger.LogInfo("Check status with: systemctl status dialtone-proxy-%s.service", robotName)
 }
 
 func getLatestVersionDir() string {

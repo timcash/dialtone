@@ -241,6 +241,27 @@ func GetRemoteHome(client *ssh.Client) (string, error) {
 	return strings.TrimSpace(output), nil
 }
 
+func WriteRemoteFile(client *ssh.Client, remotePath string, content string) error {
+	sftpClient, err := sftp.NewClient(client)
+	if err != nil {
+		return fmt.Errorf("failed to create SFTP client: %w", err)
+	}
+	defer sftpClient.Close()
+
+	remoteFile, err := sftpClient.Create(remotePath)
+	if err != nil {
+		return fmt.Errorf("failed to create remote file: %w", err)
+	}
+	defer remoteFile.Close()
+
+	_, err = io.Copy(remoteFile, strings.NewReader(content))
+	if err != nil {
+		return fmt.Errorf("failed to write to remote file: %w", err)
+	}
+
+	return nil
+}
+
 func UploadDirFiltered(client *ssh.Client, localDir, remoteDir string, ignore []string) {
 	sftpClient, err := sftp.NewClient(client)
 	if err != nil {
