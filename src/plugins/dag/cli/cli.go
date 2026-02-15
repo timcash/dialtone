@@ -3,6 +3,7 @@ package cli
 import (
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,12 +27,59 @@ func Run(args []string) error {
 	}
 
 	command := args[0]
+	getDir := func() string {
+		if len(args) > 1 {
+			return args[1]
+		}
+		return getLatestVersionDir()
+	}
+
 	switch command {
+	case "install":
+		return RunInstall(getDir())
+	case "fmt":
+		return RunFmt(getDir())
+	case "format":
+		return RunFormat(getDir())
+	case "vet":
+		return RunVet(getDir())
+	case "go-build":
+		return RunGoBuild(getDir())
+	case "lint":
+		return RunLint(getDir())
+	case "dev":
+		return RunDev(getDir())
+	case "ui-run":
+		extraArgs := []string{}
+		if len(args) > 2 {
+			extraArgs = args[2:]
+		}
+		return RunUIRun(getDir(), extraArgs)
+	case "serve":
+		return RunServe(getDir())
+	case "build":
+		return RunBuild(getDir())
+	case "test":
+		return RunTest(getDir())
+	case "src":
+		n := 0
+		if len(args) > 1 && !strings.HasPrefix(args[1], "-") {
+			n, _ = strconv.Atoi(args[1])
+		} else {
+			srcFlags := flag.NewFlagSet("dag src", flag.ExitOnError)
+			nFlag := srcFlags.Int("n", 0, "Version number to create")
+			srcFlags.Parse(args[1:])
+			n = *nFlag
+		}
+		if n == 0 {
+			return fmt.Errorf("usage: dag src <N> or dag src --n <N>")
+		}
+		return RunCreateVersion(n)
 	case "smoke":
 		smokeFlags := flag.NewFlagSet("dag smoke", flag.ContinueOnError)
 		timeout := smokeFlags.Int("smoke-timeout", 45, "Timeout in seconds for smoke test")
 
-		dir := getLatestVersionDir()
+		dir := getDir()
 		if len(args) > 1 && args[1] != "" && !strings.HasPrefix(args[1], "-") {
 			dir = args[1]
 			smokeFlags.Parse(args[2:])
@@ -40,24 +88,6 @@ func Run(args []string) error {
 		}
 
 		return runSmoke(dir, *timeout)
-	case "dev":
-		dir := getLatestVersionDir()
-		if len(args) > 1 {
-			dir = args[1]
-		}
-		return RunDev(dir)
-	case "build":
-		dir := getLatestVersionDir()
-		if len(args) > 1 {
-			dir = args[1]
-		}
-		return RunBuild(dir)
-	case "lint":
-		dir := ""
-		if len(args) > 1 {
-			dir = args[1]
-		}
-		return RunLint(dir)
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
@@ -69,11 +99,20 @@ func Run(args []string) error {
 func printUsage() {
 	fmt.Println("Usage: ./dialtone.sh dag <command> [args]")
 	fmt.Println("\nCommands:")
-	fmt.Println("  dev [dir]                           Start UI in Vite development mode")
-	fmt.Println("  build [dir]                         Build UI assets")
-	fmt.Println("  lint [dir]                          Lint Go + TypeScript")
-	fmt.Println("  smoke [dir] [--smoke-timeout <sec>] Run automated UI tests (runs lint + build first)")
-	fmt.Println("\nDefault [dir] is the latest src_vN folder.")
+	fmt.Println("  install <dir>  Install UI dependencies")
+	fmt.Println("  fmt <dir>      Run go fmt")
+	fmt.Println("  format <dir>   Run UI format checks")
+	fmt.Println("  vet <dir>      Run go vet")
+	fmt.Println("  go-build <dir> Run go build")
+	fmt.Println("  lint <dir>     Run TypeScript lint checks")
+	fmt.Println("  dev <dir>      Start Vite + debug browser attach")
+	fmt.Println("  ui-run <dir>   Run UI dev server")
+	fmt.Println("  serve <dir>    Run plugin Go server")
+	fmt.Println("  build <dir>    Build UI assets")
+	fmt.Println("  test <dir>     Run automated tests and write TEST.md artifacts")
+	fmt.Println("  smoke <dir>    Run legacy smoke test")
+	fmt.Println("  src --n <N>    Generate next src_vN folder")
+	fmt.Println("\nDefault <dir> is the latest src_vN folder.")
 }
 
 func runSmoke(versionDir string, timeoutSec int) error {
@@ -126,4 +165,104 @@ func getLatestVersionDir() string {
 		return "src_v1"
 	}
 	return fmt.Sprintf("src_v%d", maxVer)
+}
+
+func RunCreateVersion(newVer int) error {
+	cwd, _ := os.Getwd()
+	pluginDir := filepath.Join(cwd, "src", "plugins", "dag")
+
+	entries, _ := os.ReadDir(pluginDir)
+	maxVer := 0
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "src_v") {
+			ver, _ := strconv.Atoi(e.Name()[5:])
+			if ver > maxVer {
+				maxVer = ver
+			}
+		}
+	}
+
+	if maxVer == 0 {
+		return fmt.Errorf("no existing src_vN folders found to clone from")
+	}
+
+	srcDir := filepath.Join(pluginDir, fmt.Sprintf("src_v%d", maxVer))
+	destDir := filepath.Join(pluginDir, fmt.Sprintf("src_v%d", newVer))
+	if _, err := os.Stat(destDir); err == nil {
+		return fmt.Errorf("version directory already exists: %s", destDir)
+	}
+
+	fmt.Printf(">> [DAG] Creating new version: src_v%d from src_v%d\n", newVer, maxVer)
+
+	cmd := exec.Command("cp", "-r", srcDir, destDir)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	srcVersion := fmt.Sprintf("src_v%d", maxVer)
+	destVersion := fmt.Sprintf("src_v%d", newVer)
+	if err := rewriteVersionRefs(destDir, srcVersion, destVersion, maxVer, newVer); err != nil {
+		return fmt.Errorf("failed to rewrite version references: %w", err)
+	}
+
+	fmt.Printf(">> [DAG] New version created at: %s\n", destDir)
+	return nil
+}
+
+func rewriteVersionRefs(destDir, srcVersion, destVersion string, srcVerNum, destVerNum int) error {
+	allowedExt := map[string]bool{
+		".go":   true,
+		".ts":   true,
+		".tsx":  true,
+		".js":   true,
+		".jsx":  true,
+		".css":  true,
+		".html": true,
+		".json": true,
+		".md":   true,
+		".txt":  true,
+		".yml":  true,
+		".yaml": true,
+		".d.ts": true,
+	}
+
+	srcLabel := fmt.Sprintf("DAG v%d", srcVerNum)
+	destLabel := fmt.Sprintf("DAG v%d", destVerNum)
+	srcPackageLabel := fmt.Sprintf("dag-ui-v%d", srcVerNum)
+	destPackageLabel := fmt.Sprintf("dag-ui-v%d", destVerNum)
+
+	return filepath.WalkDir(destDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if name == "node_modules" || name == "dist" || name == ".pixi" || name == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		ext := filepath.Ext(path)
+		if !allowedExt[ext] {
+			return nil
+		}
+
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		content := string(raw)
+		updated := content
+		updated = strings.ReplaceAll(updated, srcVersion, destVersion)
+		updated = strings.ReplaceAll(updated, srcLabel, destLabel)
+		updated = strings.ReplaceAll(updated, srcPackageLabel, destPackageLabel)
+
+		if updated == content {
+			return nil
+		}
+		return os.WriteFile(path, []byte(updated), 0644)
+	})
 }
