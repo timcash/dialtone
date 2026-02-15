@@ -89,6 +89,13 @@ func printUsage() {
 }
 
 func runStart(args []string) {
+	// Check if running under systemd
+	if os.Getenv("INVOCATION_ID") == "" {
+		logger.LogInfo("[WARNING] Process is not running as a systemd service. Consider running via systemctl.")
+	} else {
+		logger.LogInfo("[INFO] Running as systemd service.")
+	}
+
 	fs := flag.NewFlagSet("start", flag.ExitOnError)
 	hostname := fs.String("hostname", "dialtone-1", "Tailscale hostname for this NATS server")
 	natsPort := fs.Int("port", 4222, "NATS port to listen on (both local and Tailscale)")
