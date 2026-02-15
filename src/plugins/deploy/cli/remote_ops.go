@@ -30,16 +30,20 @@ func RunSyncCode(args []string) {
 
 	remoteDir := os.Getenv("REMOTE_DIR_SRC")
 	if remoteDir == "" {
-		remoteDir = "/home/tim/dialtone_src"
+		home, err := ssh.GetRemoteHome(client)
+		if err != nil {
+			logger.LogFatal("Failed to get remote home: %v", err)
+		}
+		remoteDir = path.Join(home, "dialtone_src")
 	}
 
 	logger.LogInfo("Syncing code to %s on %s...", remoteDir, *host)
 
-	// Clean remote src dir to remove stale files (like legacy manager.go)
+	// Clean remote src dir to remove stale files
 	_, _ = ssh.RunSSHCommand(client, fmt.Sprintf("rm -rf %s/src && mkdir -p %s/src", remoteDir, remoteDir))
 
 	// Sync root files
-	filesToUpload := []string{"go.mod", "go.sum", "dialtone.go", "build.sh", "build.ps1", "README.md"}
+	filesToUpload := []string{"go.mod", "go.sum", "dialtone.sh", "dialtone.ps1", "dialtone.cmd", "README.md"}
 	for _, file := range filesToUpload {
 		if _, err := os.Stat(file); err == nil {
 			logger.LogInfo("Uploading %s...", file)
@@ -50,12 +54,10 @@ func RunSyncCode(args []string) {
 	}
 
 	// Sync src/*.go
-	// Note: Since we cleaned up src/, checking src/*.go might not match anything relevant if we moved everything.
-	// But we moved config.go and removed remote.go/logger.go.
-	// dialtone.go, dev.go etc are in src/.
 	srcFiles, _ := filepath.Glob("src/*.go")
 	for _, f := range srcFiles {
 		logger.LogInfo("Uploading %s...", f)
+		// Maintain src/ prefix for remote path
 		if err := ssh.UploadFile(client, f, path.Join(remoteDir, filepath.ToSlash(f))); err != nil {
 			logger.LogFatal("Failed to upload %s: %v", f, err)
 		}

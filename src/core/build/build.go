@@ -23,6 +23,7 @@ func RunBuild(args []string) {
 	_ = podman // Used in logic below via !*podman etc
 	linuxArm := fs.Bool("linux-arm", false, "Cross-compile for 32-bit Linux ARM (armv7)")
 	linuxArm64 := fs.Bool("linux-arm64", false, "Cross-compile for 64-bit Linux ARM (aarch64)")
+	linuxAmd64 := fs.Bool("linux-amd64", false, "Cross-compile for 64-bit Linux x86 (amd64)")
 	builder := fs.Bool("builder", false, "Build the dialtone-builder image for faster ARM builds")
 	showHelp := fs.Bool("help", false, "Show help for build command")
 
@@ -38,6 +39,7 @@ func RunBuild(args []string) {
 		fmt.Println("  --podman       Force build using Podman container")
 		fmt.Println("  --linux-arm    Cross-compile for 32-bit Linux ARM (Raspberry Pi Zero/3/4/5)")
 		fmt.Println("  --linux-arm64  Cross-compile for 64-bit Linux ARM (Raspberry Pi 3/4/5)")
+		fmt.Println("  --linux-amd64  Cross-compile for 64-bit Linux x86 (amd64)")
 		fmt.Println("  --builder      Build the dialtone-builder image for faster ARM builds")
 		fmt.Println("  --help         Show help for build command")
 		fmt.Println()
@@ -76,6 +78,9 @@ func RunBuild(args []string) {
 		} else if *linuxArm64 {
 			arch = "arm64"
 			targetOS = "linux"
+		} else if *linuxAmd64 {
+			arch = "amd64"
+			targetOS = "linux"
 		}
 
 		isCrossBuild := arch != runtime.GOARCH || targetOS != runtime.GOOS
@@ -87,22 +92,31 @@ func RunBuild(args []string) {
 			buildLocally(targetOS, arch)
 			buildWWW()
 		} else {
-			compiler := "gcc"
-			cppCompiler := "g++"
-			if arch == "arm64" {
-				compiler = "gcc-aarch64-linux-gnu"
-				cppCompiler = "g++-aarch64-linux-gnu"
-			} else if arch == "arm" {
-				compiler = "gcc-arm-linux-gnueabihf"
-				cppCompiler = "g++-arm-linux-gnueabihf"
+					compiler := "gcc"
+					cppCompiler := "g++"
+					if arch == "arm64" {
+						compiler = "aarch64-linux-gnu-gcc"
+						cppCompiler = "aarch64-linux-gnu-g++"
+					} else if arch == "arm" {
+						compiler = "arm-linux-gnueabihf-gcc"
+						cppCompiler = "arm-linux-gnueabihf-g++"
+					}
+					buildWithPodman(arch, compiler, cppCompiler)
+					buildWWW()
+				}
 			}
-			buildWithPodman(arch, compiler, cppCompiler)
-			buildWWW()
-		}
-	}
+			
 }
 
 func hasPodman() bool {
+	if runtime.GOOS == "windows" {
+		// Check if podman exists inside WSL
+		cmd := exec.Command("wsl", "-u", "root", "podman", "info")
+		cmd.Stdout = io.Discard
+		cmd.Stderr = io.Discard
+		return cmd.Run() == nil
+	}
+
 	_, err := exec.LookPath("podman")
 	if err != nil {
 		return false
@@ -139,11 +153,12 @@ func buildWebIfNeeded(force bool) {
 	// by 'go run' during the build process because of the //go:embed pattern in dialtone.go.
 
 	// Install and build via UI plugin (shell delegation for decoupling)
+	script := getDialtoneScript()
 	logger.LogInfo("Delegating to UI plugin (install)...")
-	runShell(".", "./dialtone.sh", "ui", "install")
+	runShell(".", script, "ui", "install")
 
 	logger.LogInfo("Delegating to UI plugin (build)...")
-	runShell(".", "./dialtone.sh", "ui", "build")
+	runShell(".", script, "ui", "build")
 
 	// Verify build succeeded
 	if info, err := os.Stat(distIndexPath); os.IsNotExist(err) {
@@ -160,7 +175,14 @@ func buildWWW() {
 		return
 	}
 	logger.LogInfo("Building Public WWW Page...")
-	runShell(".", "./dialtone.sh", "www", "build")
+	runShell(".", getDialtoneScript(), "www", "build")
+}
+
+func getDialtoneScript() string {
+	if runtime.GOOS == "windows" {
+		return ".\\dialtone.cmd"
+	}
+	return "./dialtone.sh"
 }
 
 func skipBuild(keys ...string) bool {
@@ -310,22 +332,18 @@ func buildLocally(targetOS, targetArch string) {
 	}
 
 	outputPath := filepath.Join("bin", binaryName)
-	goBin := "go"
-	if _, err := os.Stat(filepath.Join(depsDir, "go", "bin", "go")); err == nil {
-		goBin = filepath.Join(depsDir, "go", "bin", "go")
-	}
 
 	// Set environment for build
 	os.Setenv("GOOS", targetOS)
 	os.Setenv("GOARCH", targetArch)
 
-	buildArgs := []string{"build"}
+	buildArgs := []string{"go", "build"}
 	if len(tags) > 0 {
 		buildArgs = append(buildArgs, "-tags", strings.Join(tags, ","))
 	}
 	buildArgs = append(buildArgs, "-o", outputPath, "src/cmd/dialtone/main.go")
 
-	runShell(".", goBin, buildArgs...)
+	runShell(".", getDialtoneScript(), buildArgs...)
 	logger.LogInfo("Build successful: %s", outputPath)
 }
 
@@ -346,9 +364,33 @@ func buildWithPodman(arch, compiler, cppCompiler string) {
 
 	outputName := fmt.Sprintf("dialtone-%s", arch)
 
+	// Map compiler binaries to package names for installation
+	pkgMap := map[string]string{
+		"aarch64-linux-gnu-gcc":   "gcc-aarch64-linux-gnu",
+		"aarch64-linux-gnu-g++":   "g++-aarch64-linux-gnu",
+		"arm-linux-gnueabihf-gcc": "gcc-arm-linux-gnueabihf",
+		"arm-linux-gnueabihf-g++": "g++-arm-linux-gnueabihf",
+	}
+
+	installPkgs := []string{}
+	if p, ok := pkgMap[compiler]; ok {
+		installPkgs = append(installPkgs, p)
+	} else if compiler != "gcc" {
+		installPkgs = append(installPkgs, compiler)
+	}
+
+	if p, ok := pkgMap[cppCompiler]; ok {
+		installPkgs = append(installPkgs, p)
+	} else if cppCompiler != "g++" {
+		installPkgs = append(installPkgs, cppCompiler)
+	}
+
 	// Default to standard golang image and install compilers
 	baseImage := "docker.io/library/golang:1.25.5"
-	installCmd := fmt.Sprintf("apt-get update && apt-get install -y %s %s && ", compiler, cppCompiler)
+	installCmd := ""
+	if len(installPkgs) > 0 {
+		installCmd = fmt.Sprintf("apt-get update && apt-get install -y %s && ", strings.Join(installPkgs, " "))
+	}
 
 	// Check if optimized builder image exists
 	if hasImage("dialtone-builder") {
@@ -358,7 +400,7 @@ func buildWithPodman(arch, compiler, cppCompiler string) {
 	}
 
 	// Podman command
-	buildCmd := []string{
+	podmanArgs := []string{
 		"run", "--rm",
 		"-v", fmt.Sprintf("%s:/src:Z", cwd),
 		"-v", "dialtone-go-build-cache:/root/.cache/go-build:Z", // Persistent Go build cache
@@ -366,14 +408,35 @@ func buildWithPodman(arch, compiler, cppCompiler string) {
 		"-e", "GOOS=linux",
 		"-e", "GOARCH=" + arch,
 		"-e", "CGO_ENABLED=1",
-		"-e", "CC=" + strings.TrimPrefix(strings.TrimPrefix(compiler, "gcc-"), "gcc") + "gcc",
-		"-e", "CXX=" + strings.TrimPrefix(strings.TrimPrefix(cppCompiler, "g++-"), "g++") + "g++",
+		"-e", "CC=" + compiler,
+		"-e", "CXX=" + cppCompiler,
 		baseImage,
 		"bash", "-c", fmt.Sprintf("%sgo build -buildvcs=false -o bin/%s src/cmd/dialtone/main.go", installCmd, outputName),
 	}
 
-	logger.LogInfo("Running: podman %v", buildCmd)
-	cmd := exec.Command("podman", buildCmd...)
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		// Convert Windows path to WSL path for volume mount
+		// Assume C: -> /mnt/c
+		wslCwd := filepath.ToSlash(cwd)
+		if len(wslCwd) > 2 && wslCwd[1] == ':' {
+			drive := strings.ToLower(string(wslCwd[0]))
+			wslCwd = "/mnt/" + drive + wslCwd[2:]
+		}
+		// Replace the host path in podmanArgs
+		for i, arg := range podmanArgs {
+			if strings.HasPrefix(arg, cwd+":") {
+				podmanArgs[i] = wslCwd + arg[len(cwd):]
+			}
+		}
+		wslArgs := append([]string{"-u", "root", "podman"}, podmanArgs...)
+		logger.LogInfo("Running: wsl %v", wslArgs)
+		cmd = exec.Command("wsl", wslArgs...)
+	} else {
+		logger.LogInfo("Running: podman %v", podmanArgs)
+		cmd = exec.Command("podman", podmanArgs...)
+	}
+
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -395,7 +458,7 @@ func buildEverything(local bool) {
 	buildWWW()
 
 	// 3. Build AI components (shell delegation for decoupling)
-	runShell(".", "./dialtone.sh", "ai", "build")
+	runShell(".", getDialtoneScript(), "ai", "build")
 
 	// 4. Build Dialtone locally (the tool itself)
 	BuildSelf()
@@ -426,8 +489,9 @@ func BuildSelf() {
 	outputPath := filepath.Join("bin", binaryName)
 
 	// Force clean cache to avoid embed issues
-	runShell(".", "go", "clean", "-cache")
-	runShell(".", "go", "build", "-o", outputPath, "src/cmd/dialtone/main.go")
+	script := getDialtoneScript()
+	runShell(".", script, "go", "clean", "-cache")
+	runShell(".", script, "go", "build", "-o", outputPath, "src/cmd/dialtone/main.go")
 	logger.LogInfo("Successfully built %s", outputPath)
 }
 
@@ -474,6 +538,10 @@ func buildBuilderImage() {
 }
 
 func hasImage(name string) bool {
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("wsl", "-u", "root", "podman", "image", "exists", name)
+		return cmd.Run() == nil
+	}
 	cmd := exec.Command("podman", "image", "exists", name)
 	return cmd.Run() == nil
 }

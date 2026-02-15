@@ -76,6 +76,7 @@ export function mountMusic(container: HTMLElement) {
         updateMenu();
       },
       isDemoMode: viz.isDemoMode,
+      demoMode: viz.demoMode,
       toggleSound: async () => {
           await viz.toggleSound();
           updateMenu();
@@ -83,6 +84,9 @@ export function mountMusic(container: HTMLElement) {
       isSoundOn: viz.analyzer.isSoundOn
     });
   };
+
+  // Initial menu setup
+  updateMenu();
 
   return {
     dispose: () => {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	build_cli "dialtone/cli/src/core/build/cli"
@@ -150,11 +151,15 @@ func ExecuteDev() {
 }
 
 func printDevUsage() {
-	fmt.Println("Usage: ./dialtone.sh <command> [options]")
+	script := "./dialtone.sh"
+	if runtime.GOOS == "windows" {
+		script = ".\\dialtone.cmd"
+	}
+	fmt.Printf("Usage: %s <command> [options]\n", script)
 	fmt.Println("\nCommands:")
 	fmt.Println("  start         Start the NATS and Web server")
 	fmt.Println("  install [path] Install dependencies (--linux-wsl for WSL, --macos-arm for Apple Silicon)")
-	fmt.Println("  build         Build web UI and binary (--local, --full, --remote, --podman, --linux-arm, --linux-arm64)")
+	fmt.Println("  build         Build web UI and binary (--local, --full, --remote, --podman, --linux-arm, --linux-arm64, --linux-amd64)")
 	fmt.Println("  deploy        Deploy to remote robot")
 	fmt.Println("  format        Format Go code across the repo")
 	fmt.Println("  camera        Camera tools (snapshot, stream)")

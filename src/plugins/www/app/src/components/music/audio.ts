@@ -123,10 +123,33 @@ export class AudioAnalyzer {
 
   getFrequencyData(): Float32Array {
     if (!this.analyzer || !this.dataArray) return new Float32Array(0);
-    this.analyzer.getFloatFrequencyData(this.dataArray);
+    this.analyzer.getFloatFrequencyData(this.dataArray as any);
     return this.dataArray;
+  }
+
+  getPeakFrequency(): number {
+    if (!this.analyzer || !this.dataArray || !this.audioContext) return 0;
+    
+    let maxVal = -Infinity;
+    let maxIdx = -1;
+    
+    // Skip very low frequency noise
+    const startBin = Math.floor(20 / (this.audioContext.sampleRate / this.analyzer.fftSize));
+    
+    for (let i = startBin; i < this.dataArray.length; i++) {
+        if (this.dataArray[i] > maxVal) {
+            maxVal = this.dataArray[i];
+            maxIdx = i;
+        }
+    }
+    
+    if (maxIdx === -1 || maxVal < -70) return 0;
+    
+    return maxIdx * (this.audioContext.sampleRate / this.analyzer.fftSize);
   }
 
   get isActive() { return this.isEnabled; }
   get isSuspended() { return !this.audioContext || this.audioContext.state === 'suspended'; }
+  get sampleRate() { return this.audioContext?.sampleRate || 44100; }
+  get fftSize() { return this.analyzer?.fftSize || 4096; }
 }

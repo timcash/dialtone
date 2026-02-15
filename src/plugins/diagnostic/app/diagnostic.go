@@ -9,14 +9,16 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
+	"dialtone/cli/src/core/config"
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/ssh"
 
 	cdplog "github.com/chromedp/cdproto/log"
-	"github.com/chromedp/cdproto/runtime"
+	cdpruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
@@ -35,6 +37,8 @@ func CheckLocalDependencies() {
 
 // RunRemoteDiagnostics connects to the remote host and runs diagnostic commands.
 func RunRemoteDiagnostics(host, port, user, pass string) {
+	config.LoadConfig()
+
 	if pass == "" {
 		logger.LogFatal("Error: -pass is required for remote diagnostics")
 	}
@@ -200,14 +204,14 @@ func checkWebUI(url string) error {
 			if ev.Entry.Level == "error" {
 				consoleErrors = append(consoleErrors, fmt.Sprintf("[log] %s", ev.Entry.Text))
 			}
-		case *runtime.EventConsoleAPICalled:
+		case *cdpruntime.EventConsoleAPICalled:
 			if ev.Type != "error" {
 				return
 			}
 			for _, arg := range ev.Args {
 				consoleErrors = append(consoleErrors, fmt.Sprintf("[console] %v", arg.Value))
 			}
-		case *runtime.EventExceptionThrown:
+		case *cdpruntime.EventExceptionThrown:
 			consoleErrors = append(consoleErrors, fmt.Sprintf("[exception] %s", ev.ExceptionDetails.Text))
 		}
 	})
@@ -318,11 +322,15 @@ func requireMavlinkHeartbeat(heartbeatVal string) error {
 
 func resolveDialtoneSh() (string, error) {
 	cwd, _ := os.Getwd()
-	dialtoneSh := filepath.Join(cwd, "dialtone.sh")
-	if _, err := os.Stat(dialtoneSh); os.IsNotExist(err) {
-		return "", fmt.Errorf("could not find dialtone.sh in %s", cwd)
+	script := "dialtone.sh"
+	if runtime.GOOS == "windows" {
+		script = "dialtone.cmd"
 	}
-	return dialtoneSh, nil
+	dialtonePath := filepath.Join(cwd, script)
+	if _, err := os.Stat(dialtonePath); os.IsNotExist(err) {
+		return "", fmt.Errorf("could not find %s in %s", script, cwd)
+	}
+	return dialtonePath, nil
 }
 
 func launchChromeForDiagnostics(dialtoneSh, url string) (string, error) {
