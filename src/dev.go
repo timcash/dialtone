@@ -178,9 +178,9 @@ func printDevUsage() {
 	fmt.Println("  ui <subcmd>        Manage web UI (dev, build, install)")
 	fmt.Println("  test <subcmd>      Run tests (legacy)")
 	fmt.Println("  nix <subcmd>       Nix plugin tools (smoke)")
-	fmt.Println("  dag <subcmd>       DAG plugin tools (dev, build, smoke)")
+	fmt.Println("  dag <subcmd>       DAG plugin tools (install, dev, build, test, src)")
 	fmt.Println("  wsl <subcmd>       WSL plugin tools (smoke)")
-	fmt.Println("  template <subcmd>  Template plugin tools (smoke, new-version)")
+	fmt.Println("  template <subcmd>  Template plugin tools (install, dev, build, test, src)")
 
 	fmt.Println("  ai <subcmd>        AI tools (opencode, developer, subagent)")
 	fmt.Println("  go <subcmd>        Go toolchain tools (install, lint)")

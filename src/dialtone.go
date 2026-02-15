@@ -86,8 +86,8 @@ func printUsage() {
 	fmt.Println("  start         Start the NATS and Web server")
 	fmt.Println("  vpn           Start in simple VPN mode (tsnet only)")
 	fmt.Println("  nix           Nix plugin commands (e.g. nix smoke src_v1)")
-	fmt.Println("  dag           DAG plugin commands (e.g. dag smoke)")
-	fmt.Println("  template      Template plugin commands (e.g. template smoke src_v1)")
+	fmt.Println("  dag           DAG plugin commands (e.g. dag test src_v3)")
+	fmt.Println("  template      Template plugin commands (e.g. template test src_v3)")
 }
 
 func runStart(args []string) {
