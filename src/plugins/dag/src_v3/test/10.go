@@ -8,14 +8,14 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-func Run10ThreeUserStoryDeleteAndRelabel() error {
+func Run10ThreeUserStoryUnlinkAndRelabel() error {
 	browser, err := ensureSharedBrowser(true)
 	if err != nil {
 		return err
 	}
 	fmt.Println("[THREE] story step7 description:")
-	fmt.Println("[THREE]   - In order to remove a node, user selects it and taps DelN.")
-	fmt.Println("[THREE]   - In order to remove a remaining edge, user picks output/input nodes and taps Unlink.")
+	fmt.Println("[THREE]   - In order to remove edges, user selects output/input nodes and taps Unlink.")
+	fmt.Println("[THREE]   - User clears selections between unlink actions.")
 	fmt.Println("[THREE]   - User then renames processor again and expects camera to stay zoomed-out for full root readability.")
 
 	type evalResult struct {
@@ -50,24 +50,25 @@ func Run10ThreeUserStoryDeleteAndRelabel() error {
 			};
 
 			const story = window.__dagStory || {};
-			const outputID = story.outputID;
 			const processorID = story.processorID;
 			const inputID = story.inputID;
+			const outputID = story.outputID;
 			if (!outputID || !processorID || !inputID) return { ok: false, msg: 'missing root story ids' };
 
-			if (!clickNode(outputID)) return { ok: false, msg: 'cannot select output node for deletion' };
-			if (!click('DAG Delete Node')) return { ok: false, msg: 'remove-node action failed' };
-			let st = api.getState();
-			if (st.visibleNodeIDs.includes(outputID)) return { ok: false, msg: 'output node still visible after delete' };
-
+			if (!click('DAG Clear Picks')) return { ok: false, msg: 'clear picks before unlink input->processor failed' };
 			if (!clickNode(inputID)) return { ok: false, msg: 'cannot select input node for unlink output pick' };
-			if (!click('DAG Pick Output')) return { ok: false, msg: 'pick output for unlink failed' };
 			if (!clickNode(processorID)) return { ok: false, msg: 'cannot select processor for unlink input pick' };
-			if (!click('DAG Pick Input')) return { ok: false, msg: 'pick input for unlink failed' };
-			if (!click('DAG Unlink')) return { ok: false, msg: 'unlink action failed' };
-			st = api.getState();
+			if (!click('DAG Unlink')) return { ok: false, msg: 'unlink input->processor action failed' };
+
+			if (!click('DAG Clear Picks')) return { ok: false, msg: 'clear picks before unlink processor->output failed' };
+			if (!clickNode(processorID)) return { ok: false, msg: 'cannot select processor for second unlink output pick' };
+			if (!clickNode(outputID)) return { ok: false, msg: 'cannot select output node for second unlink input pick' };
+			if (!click('DAG Unlink')) return { ok: false, msg: 'unlink processor->output action failed' };
+
+			if (!clickNode(processorID)) return { ok: false, msg: 'cannot reselect processor after unlinks' };
+			let st = api.getState();
 			if (st.inputNodeIDs.length !== 0) return { ok: false, msg: 'processor should have no inputs after edge deletion' };
-			if (st.outputNodeIDs.length !== 0) return { ok: false, msg: 'processor should have no outputs after output delete + edge delete' };
+			if (st.outputNodeIDs.length !== 0) return { ok: false, msg: 'processor should have no outputs after edge deletion' };
 
 			if (!rename('Processor Final')) return { ok: false, msg: 'final rename failed' };
 			if (api.getNodeLabel(processorID) !== 'Processor Final') return { ok: false, msg: 'final label mismatch' };
