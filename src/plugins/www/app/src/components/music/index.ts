@@ -3,7 +3,7 @@ import { startTyping } from "../util/typing";
 import { setupMusicMenu } from "./menu";
 import { MusicVisualization } from "./visualization";
 
-export function mountMusic(container: HTMLElement, sections: SectionManager): Promise<VisualizationControl> {
+export function mountMusic(container: HTMLElement, sections: SectionManager): VisualizationControl {
   container.innerHTML = `
     <div class="marketing-overlay" aria-label="Music section: frequency circle">
       <h2>Harmonic Vision</h2>

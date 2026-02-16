@@ -369,7 +369,8 @@ class PolicySimVisualization {
     canvas.style.height = "100%";
     this.container.appendChild(canvas);
 
-    this.camera.position.set(0, 2.5, 10);
+    // MOBILE OPTIMIZATION: Pull camera back (from 10 to 13.5)
+    this.camera.position.set(0, 2.5, 13.5);
     this.camera.lookAt(0, 0, 0);
 
     this.scene.add(this.camera);
@@ -544,6 +545,9 @@ class PolicySimVisualization {
     this.histogram.group.position.set(0, -2.35, -7.5);
     this.histogram.group.rotation.set(0, 0, 0);
     this.camera.add(this.histogram.group);
+    
+    // MOBILE OPTIMIZATION: Hide axes and labels while keeping bars
+    this.histogram.setCompactMode(true);
   }
 
   private clearScenario(): void {
@@ -772,6 +776,10 @@ class PolicySimVisualization {
     const npvM = mean / 1e6;
     const probPct = successProbability * 100;
     this.summaryText = `${this.simParams.years}Y | E[NPV] ${npvM.toFixed(2)}M | P+ ${probPct.toFixed(1)}% | Sims ${this.totalSimulations.toLocaleString()}`;
+    
+    // Update simulation count in DOM (Marketing Overlay)
+    const countEl = document.getElementById("policy-sim-count");
+    if (countEl) countEl.innerText = this.totalSimulations.toLocaleString();
   }
 
   private detectModeMeans(
@@ -923,11 +931,14 @@ class PolicySimVisualization {
   };
 }
 
-export function mountPolicy(container: HTMLElement, sections: SectionManager): Promise<VisualizationControl> {
+export function mountPolicy(container: HTMLElement, sections: SectionManager): VisualizationControl {
   container.innerHTML = `
     <div class="marketing-overlay" aria-label="Policy simulator section: interactive global policy visualization">
       <h2>Global Policy Simulator</h2>
       <p data-typing-subtitle></p>
+      <div class="sim-stats" style="margin-top: 1rem; font-family: 'Inter', monospace; font-size: 0.9rem; color: #00ff88; opacity: 0.8;">
+        SIMULATIONS: <span id="policy-sim-count">0</span>
+      </div>
     </div>
   `;
 

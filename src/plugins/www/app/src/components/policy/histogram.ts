@@ -58,8 +58,9 @@ export class PolicyHistogram {
     this.barCount = barCount;
     this.maxHeight = maxHeight;
 
-    const spacing = 0.16;
-    const width = 0.11;
+    // Narrower for mobile (was 0.16 / 0.11)
+    const spacing = 0.12;
+    const width = 0.08;
     this.chartWidth = (this.barCount - 1) * spacing;
 
     for (let i = 0; i < this.barCount; i++) {
@@ -68,7 +69,7 @@ export class PolicyHistogram {
       const edges = new THREE.EdgesGeometry(boxGeometry);
       boxGeometry.dispose();
       const material = new THREE.LineBasicMaterial({
-        color: 0xf5f5f5,
+        color: 0x00ff88, // Use policy green
         transparent: true,
         opacity: 0.62,
       });
@@ -82,6 +83,7 @@ export class PolicyHistogram {
     }
 
     this.baseline = this.makeLine(0xa3a3a3, 0.65);
+    this.baseline.name = "baseline";
     this.yAxis = this.makeLine(0xa3a3a3, 0.65);
     this.meanLine = this.makeLine(0xff4d4d, 0.95);
     this.meanLineB = this.makeLine(0xff4d4d, 0.95);
@@ -128,6 +130,16 @@ export class PolicyHistogram {
     this.setLabel(this.simCountLabel, "Simulations 0");
     this.simCountLabel.position.set(0, -1.36, 0.05);
     this.simCountLabel.scale.set(2.25, 0.58, 1);
+  }
+
+  setCompactMode(compact: boolean) {
+    const hiddenInCompact = [
+      this.yAxis, this.meanLine, this.meanLineB, this.p10Line, this.p90Line, this.breakEvenLine,
+      this.xMinLabel, this.xMaxLabel, this.p10Label, this.meanLabel, this.p90Label, this.breakEvenLabel, this.simCountLabel
+    ];
+    for (const obj of hiddenInCompact) {
+      obj.visible = !compact;
+    }
   }
 
   private makeLine(color: number, opacity: number): THREE.Line {

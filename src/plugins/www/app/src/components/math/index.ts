@@ -625,7 +625,7 @@ class MathVisualization {
   };
 }
 
-export function mountMath(container: HTMLElement, sections: SectionManager): Promise<VisualizationControl> {
+export function mountMath(container: HTMLElement, sections: SectionManager): VisualizationControl {
   // Inject HTML
   container.innerHTML = `
       <div class="marketing-overlay" aria-label="Mathematics marketing information">

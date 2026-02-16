@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { polygonToCells, cellToLatLng, latLngToCell } from "h3-js";
+import { polygonToCells, cellToLatLng } from "h3-js";
 import { FpsCounter } from "../util/fps";
 import { GpuTimer } from "../util/gpu_timer";
 import { VisibilityMixin } from "../util/section";

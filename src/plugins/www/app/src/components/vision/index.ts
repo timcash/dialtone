@@ -4,7 +4,7 @@ import { setupVisionMenu } from "./menu";
 import { VisionVisualization } from "./visualization";
 import { PoseTracker } from "./pose";
 
-export function mountVision(container: HTMLElement, sections: SectionManager): Promise<VisualizationControl> {
+export function mountVision(container: HTMLElement, sections: SectionManager): VisualizationControl {
   container.innerHTML = `
     <div class="marketing-overlay" aria-label="Vision section: body tracking">
       <h2 data-typing-title>Bio-Digital Integration</h2>

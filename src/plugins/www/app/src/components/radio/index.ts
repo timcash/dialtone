@@ -219,7 +219,7 @@ class RadioVisualization {
   };
 }
 
-export function mountRadio(container: HTMLElement, sections: SectionManager): Promise<VisualizationControl> {
+export function mountRadio(container: HTMLElement, sections: SectionManager): VisualizationControl {
   container.innerHTML = `
     <div class="marketing-overlay" aria-label="Radio section: handheld with LCD">
       <h2>Radios for robots</h2>

@@ -385,7 +385,7 @@ class NeuralNetworkVisualization {
   };
 }
 
-export function mountNeuralNetwork(container: HTMLElement, sections: SectionManager): Promise<VisualizationControl> {
+export function mountNeuralNetwork(container: HTMLElement, sections: SectionManager): VisualizationControl {
   // Inject HTML
   container.innerHTML = `
       <div class="marketing-overlay" aria-label="Neural network marketing information">
