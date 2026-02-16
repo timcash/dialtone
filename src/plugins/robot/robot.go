@@ -5,24 +5,21 @@ import (
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/util"
 	"dialtone/cli/src/core/web"
-	// "dialtone/cli/src/core/config" // Not directly used in robot.go anymore
 	"dialtone/cli/src/core/mock"
 	"dialtone/cli/src/core/build"
 	"dialtone/cli/src/core/ssh"
 	mavlink_app "dialtone/cli/src/plugins/mavlink/app"
-	ai_app "dialtone/cli/src/plugins/ai/app"
+	rcli "dialtone/cli/src/plugins/robot/robot_cli"
 	robot_ops "dialtone/cli/src/plugins/robot/src_v1/cmd/ops"
 	"encoding/json"
 	"flag"
 	"fmt"
-	//"net" // Removed: Not directly used in robot.go
 	"net/http"
 	"net/netip"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
-	// "runtime" // Not directly used in robot.go anymore
 	"strconv"
 	"strings"
 	"time"
@@ -62,6 +59,21 @@ func RunRobot(args []string) {
 		RunStart(restArgs)
 	case "deploy":
 		RunDeploy(restArgs)
+	case "deploy-test":
+		vDir := getDir()
+		cmdArgs := restArgs
+		if len(restArgs) > 0 && restArgs[0] == vDir {
+			cmdArgs = restArgs[1:]
+		}
+		if err := rcli.RunDeployTest(vDir, cmdArgs); err != nil {
+			fmt.Printf("Robot deploy-test error: %v\n", err)
+			os.Exit(1)
+		}
+	case "vpn-test":
+		if err := rcli.RunVPNTest(restArgs); err != nil {
+			fmt.Printf("Robot vpn-test error: %v\n", err)
+			os.Exit(1)
+		}
 	case "install":
 		if err := robot_ops.Install(); err != nil {
 			fmt.Printf("Robot install error: %v\n", err)
@@ -94,6 +106,15 @@ func RunRobot(args []string) {
 		} else {
 			fmt.Println("Usage: dialtone robot test src_vN")
 		}
+	case "diagnostic":
+		if len(restArgs) == 0 {
+			fmt.Println("Usage: dialtone robot diagnostic <src_vN>")
+			os.Exit(1)
+		}
+		if err := rcli.RunDiagnostic(restArgs[0]); err != nil {
+			fmt.Printf("Robot diagnostic error: %v\n", err)
+			os.Exit(1)
+		}
 	case "help", "-h", "--help":
 		printRobotUsage()
 	default:
@@ -107,6 +128,8 @@ func printRobotUsage() {
 	fmt.Println("\nCommands:")
 	fmt.Println("  start       Start the NATS and Web server (core robot logic)")
 	fmt.Println("  deploy      Deploy binary to remote robot via SSH")
+	fmt.Println("  deploy-test Step-by-step remote verification using debug binaries")
+	fmt.Println("  vpn-test    Test Tailscale (tsnet) connectivity")
 	fmt.Println("\nVersioned Source Commands (src_vN):")
 	fmt.Println("  install     Install UI dependencies")
 	fmt.Println("  fmt         Run formatting checks/fixes")
@@ -119,6 +142,7 @@ func printRobotUsage() {
 	fmt.Println("  build       Build everything needed (UI assets)")
 	fmt.Println("  serve       Run the plugin Go server")
 	fmt.Println("  test        Run automated test suite")
+	fmt.Println("  diagnostic  Run UI diagnostic against a deployed robot")
 }
 
 func getLatestVersionDir() string {
@@ -164,7 +188,6 @@ func RunStart(args []string) {
 	wsPort := fs.Int("ws-port", 4223, "NATS WebSocket port")
 	verbose := fs.Bool("verbose", false, "Enable verbose logging")
 	mavlinkAddr := fs.String("mavlink", "", "Mavlink connection string")
-	opencode := fs.Bool("opencode", false, "Start opencode AI assistant server")
 	useMock := fs.Bool("mock", false, "Use mock telemetry and camera data")
 	fs.Parse(args)
 
@@ -176,20 +199,19 @@ func RunStart(args []string) {
 		*stateDir = filepath.Join(homeDir, ".config", "dialtone")
 	}
 
-	if *useMock && *opencode {
-		logger.LogInfo("Mock mode enabled: Disabling opencode")
-		*opencode = false
-	}
-
-	if *localOnly {
-		runLocalOnly(*natsPort, *wsPort, *webPort, *verbose, *mavlinkAddr, *opencode, *useMock, *hostname)
+	if *localOnly || os.Getenv("TS_AUTHKEY") == "" {
+		if os.Getenv("TS_AUTHKEY") == "" && !*localOnly {
+			logger.LogInfo("TS_AUTHKEY missing, falling back to local-only mode.")
+		}
+		runLocalOnly(*natsPort, *wsPort, *webPort, *verbose, *mavlinkAddr, *useMock, *hostname)
 		return
 	}
 
-	runWithTailscale(*hostname, *natsPort, *wsPort, *webPort, *stateDir, *ephemeral, *verbose, *mavlinkAddr, *opencode, *useMock)
+	runWithTailscale(*hostname, *natsPort, *wsPort, *webPort, *stateDir, *ephemeral, *verbose, *mavlinkAddr, *useMock)
 }
 
-func runLocalOnly(port, wsPort, webPort int, verbose bool, mavlinkAddr string, opencode bool, useMock bool, hostname string) {
+func runLocalOnly(port, wsPort, webPort int, verbose bool, mavlinkAddr string, useMock bool, hostname string) {
+	// Use 0.0.0.0 to ensure local access works without Tailscale
 	ns := startNATSServer("0.0.0.0", port, wsPort, verbose)
 	defer ns.Shutdown()
 
@@ -201,18 +223,19 @@ func runLocalOnly(port, wsPort, webPort int, verbose bool, mavlinkAddr string, o
 		startMavlink(mavlinkAddr, port)
 	}
 
-	if opencode {
-		go ai_app.RunOpencodeServer(3000)
-	}
-
 	startNatsPublisher(port)
 
 	webHandler := web.CreateWebHandler(hostname, port, wsPort, webPort, port, wsPort, ns, nil, nil, useMock, webFS)
 	if sub, err := fs.Sub(webFS, "src_v1/ui/dist"); err == nil {
 		webHandler = web.CreateWebHandler(hostname, port, wsPort, webPort, port, wsPort, ns, nil, nil, useMock, sub)
 	}
+	
+	// Local web listener
 	localWebAddr := fmt.Sprintf("0.0.0.0:%d", webPort)
 	if webPort == 80 {
+		// Try port 80 but fallback to 8080 if it fails (likely permission denied)
+		logger.LogInfo("Web UI (Local Only): Attempting port 80...")
+		go http.ListenAndServe(":80", webHandler)
 		localWebAddr = "0.0.0.0:8080"
 	}
 
@@ -220,7 +243,7 @@ func runLocalOnly(port, wsPort, webPort int, verbose bool, mavlinkAddr string, o
 	http.ListenAndServe(localWebAddr, webHandler)
 }
 
-func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir string, ephemeral, verbose bool, mavlinkAddr string, opencode bool, useMock bool) {
+func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir string, ephemeral, verbose bool, mavlinkAddr string, useMock bool) {
 	if err := os.MkdirAll(stateDir, 0700); err != nil {
 		logger.LogFatal("Failed to create state directory: %v", err)
 	}
@@ -258,8 +281,8 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 	logger.LogInfo("TSNet: Connected (IP: %s)", ipStr)
 
 	localNATSPort := port + 10000
-	localWSPort := wsPort + 10000
-	ns := startNATSServer("127.0.0.1", localNATSPort, localWSPort, verbose)
+	// Start NATS locally without WebSocket (handled by unified web handler)
+	ns := startNATSServer("0.0.0.0", localNATSPort, 0, verbose)
 	defer ns.Shutdown()
 
 	if useMock {
@@ -268,29 +291,34 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 		startMavlink(mavlinkAddr, localNATSPort)
 	}
 
-	if opencode {
-		go ai_app.RunOpencodeServer(3000)
-	}
-
 	startNatsPublisher(localNATSPort)
 
 	natsLn, _ := ts.Listen("tcp", fmt.Sprintf(":%d", port))
-	wsLn, _ := ts.Listen("tcp", fmt.Sprintf(":%d", wsPort))
 	webLn, _ := ts.Listen("tcp", fmt.Sprintf(":%d", webPort))
 	defer natsLn.Close()
-	defer wsLn.Close()
 	defer webLn.Close()
 
-	go util.ProxyListener(natsLn, fmt.Sprintf("127.0.0.1:%d", localNATSPort))
-	go util.ProxyListener(wsLn, fmt.Sprintf("127.0.0.1:%d", localWSPort))
+	go util.ProxyListener(natsLn, fmt.Sprintf("0.0.0.0:%d", localNATSPort))
 
 	lc, _ := ts.LocalClient()
-	webHandler := web.CreateWebHandler(hostname, port, wsPort, webPort, localNATSPort, localWSPort, ns, lc, ips, useMock, webFS)
+	
+	// Use sub-filesystem for static assets to ensure correct path resolution
+	var staticFS fs.FS = webFS
+	if sub, err := fs.Sub(webFS, "src_v1/ui/dist"); err == nil {
+		staticFS = sub
+	}
+	
+	webHandler := web.CreateWebHandler(hostname, port, wsPort, webPort, localNATSPort, localNATSPort, ns, lc, ips, useMock, staticFS)
 
 	go func() {
 		logger.LogInfo("Web UI (Tailscale): Serving at http://%s:%d", hostname, webPort)
 		http.Serve(webLn, webHandler)
 	}()
+
+	// Start local listener on 8080 for Cloudflare/direct access
+	localWebAddr := "0.0.0.0:8080"
+	logger.LogInfo("Web UI (Local): Serving at http://%s", localWebAddr)
+	go http.ListenAndServe(":8080", webHandler)
 
 	util.WaitForShutdown()
 }
@@ -301,11 +329,13 @@ func startNATSServer(host string, port, wsPort int, verbose bool) *server.Server
 		Port:  port,
 		Debug: verbose,
 		Trace: verbose,
-		Websocket: server.WebsocketOpts{
+	}
+	if wsPort > 0 {
+		opts.Websocket = server.WebsocketOpts{
 			Host:  host,
 			Port:  wsPort,
 			NoTLS: true,
-		},
+		}
 	}
 	ns, err := server.NewServer(opts)
 	if err != nil {
@@ -377,6 +407,7 @@ func RunDeploy(args []string) {
 	hostname := fs.String("hostname", os.Getenv("DIALTONE_HOSTNAME"), "Tailscale hostname for the robot")
 	proxy := fs.Bool("proxy", false, "Expose Web UI via Cloudflare proxy (drone-1.dialtone.earth)")
 	service := fs.Bool("service", false, "Set up Dialtone as a systemd service on the robot")
+	diagnostic := fs.Bool("diagnostic", false, "Run UI diagnostic after deployment")
 	fs.Parse(args)
 
 	if *host == "" || *pass == "" {
@@ -393,8 +424,22 @@ func RunDeploy(args []string) {
 
 	validateRequiredVars([]string{"DIALTONE_HOSTNAME", "TS_AUTHKEY"})
 
+	latestVer := getLatestVersionDir()
 	cwd, _ := os.Getwd()
-	logger.LogInfo("Building Robot UI and Binary...")
+	
+	// Read UI version from package.json
+	uiVersion := "unknown"
+	pkgJSONPath := filepath.Join(cwd, "src", "plugins", "robot", latestVer, "ui", "package.json")
+	if data, err := os.ReadFile(pkgJSONPath); err == nil {
+		var pkg struct { Version string `json:"version"` }
+		if err := json.Unmarshal(data, &pkg); err == nil {
+			uiVersion = pkg.Version
+		}
+	}
+
+	logger.LogInfo("[DEPLOY] Starting deployment of Robot UI %s (%s)...", uiVersion, latestVer)
+	logger.LogInfo("[DEPLOY] Target: %s (%s)", *hostname, *host)
+
 	if err := robot_ops.Install(); err != nil {
 		logger.LogFatal("Failed to install UI dependencies: %v", err)
 	}
@@ -407,26 +452,23 @@ func RunDeploy(args []string) {
 	defer client.Close()
 
 	validateSudo(client, *pass)
-	setupSSHKey(client)
+	setupSSHKey(client, *user, *pass)
 
 	remoteArch, _ := ssh.RunSSHCommand(client, "uname -m")
 	remoteArch = strings.TrimSpace(remoteArch)
 
 	var buildFlag string
-	var binaryName string
 	switch remoteArch {
 	case "aarch64", "arm64":
 		buildFlag = "--linux-arm64"
-		binaryName = "dialtone-arm64"
 	case "x86_64", "amd64":
 		buildFlag = "--linux-amd64"
-		binaryName = "dialtone-amd64"
 	default:
 		logger.LogFatal("Unsupported arch: %s", remoteArch)
 	}
 
-	uiDir := filepath.Join(cwd, "src", "plugins", "robot", "src_v1", "ui")
-	fmt.Printf(">> [Robot] Building UI: src_v1\n")
+	uiDir := filepath.Join(cwd, "src", "plugins", "robot", latestVer, "ui")
+	fmt.Printf(">> [Robot] Building UI: %s\n", latestVer)
 	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "build")
 	cmd.Dir = cwd
 	cmd.Stdout = os.Stdout
@@ -440,23 +482,50 @@ func RunDeploy(args []string) {
 	build.RunBuild([]string{"--output-dir", robotBinDir, "--skip-web", "--skip-www", buildFlag})
 
 	logger.LogInfo("Starting deployment to %s...", *host)
+	
+	// Remote binary name is always dialtone_robot
+	remoteBinaryName := "dialtone_robot"
+	binaryName := "dialtone-arm64"
+	if remoteArch == "x86_64" || remoteArch == "amd64" {
+		binaryName = "dialtone-amd64"
+	}
+	
 	localBinaryPath := filepath.Join("src", "plugins", "robot", "bin", binaryName)
-	
 	remoteDir, _ := ssh.GetRemoteHome(client)
-	remotePath := path.Join(remoteDir, "dialtone")
+	remotePath := path.Join(remoteDir, remoteBinaryName)
+
+	// Stop ALL legacy services and kill any stray processes before uploading
+	logger.LogInfo("[DEPLOY] Stopping all remote services and processes...")
+	// Stop/Disable legacy services if they exist
+	for _, svc := range []string{"dialtone", "dialtone-robot"} {
+		ssh.RunSSHCommand(client, fmt.Sprintf("printf \"%%s\\n\" \"%s\" | sudo -S -p '' systemctl stop %s.service", *pass, svc))
+		ssh.RunSSHCommand(client, fmt.Sprintf("printf \"%%s\\n\" \"%s\" | sudo -S -p '' systemctl disable %s.service", *pass, svc))
+	}
+	// Stop new service if it's already there
+	ssh.RunSSHCommand(client, fmt.Sprintf("printf \"%%s\\n\" \"%s\" | sudo -S -p '' systemctl stop dialtone_robot.service", *pass))
+
+	// Kill any process using old or new name
+	killCmd := fmt.Sprintf("printf \"%%s\\n\" \"%s\" | sudo -S -p '' pkill -9 dialtone; printf \"%%s\\n\" \"%s\" | sudo -S -p '' pkill -9 %s", *pass, *pass, remoteBinaryName)
+	ssh.RunSSHCommand(client, killCmd)
 	
-	logger.LogInfo("Uploading binary...")
-	ssh.UploadFile(client, localBinaryPath, remotePath)
+	// Give it a moment to release the file
+	time.Sleep(1 * time.Second)
+
+	logger.LogInfo("[DEPLOY] Uploading binary to %s...", remotePath)
+	if err := ssh.UploadFile(client, localBinaryPath, remotePath); err != nil {
+		logger.LogFatal("Failed to upload binary: %v", err)
+	}
 	ssh.RunSSHCommand(client, "chmod +x "+remotePath)
 
 	if *service {
-		logger.LogInfo("Setting up systemd service...")
+		logger.LogInfo("[DEPLOY] Setting up systemd service...")
+		// Use port 8080 for local web UI to avoid permission issues
 		systemdServiceContent := fmt.Sprintf(`[Unit]
 Description=Dialtone Robot Service
 After=network.target tailscaled.service
 
 [Service]
-ExecStart=%s robot start --hostname %s --ephemeral --web-port 80 --nats-port 4222 --ws-port 4223
+ExecStart=%s robot start --hostname %s --ephemeral --web-port 8080 --port 4222 --ws-port 4223
 WorkingDirectory=%s
 Environment="TS_AUTHKEY=%s"
 Restart=always
@@ -465,52 +534,60 @@ User=%s
 [Install]
 WantedBy=multi-user.target`, remotePath, *hostname, remoteDir, os.Getenv("TS_AUTHKEY"), *user)
 		
-		ssh.RunSSHCommand(client, fmt.Sprintf("echo \"%s\" | sudo -S tee /etc/systemd/system/dialtone-robot.service", systemdServiceContent))
-		ssh.RunSSHCommand(client, "sudo systemctl enable dialtone-robot")
-		ssh.RunSSHCommand(client, "sudo systemctl start dialtone-robot")
-		logger.LogInfo("Systemd service set up and started.")
+		// Create a temporary file on the remote robot with the service content
+		tempServicePath := path.Join(remoteDir, fmt.Sprintf("dialtone_robot.service.tmp.%d", time.Now().Unix()))
+		err = ssh.WriteRemoteFile(client, tempServicePath, systemdServiceContent)
+		if err != nil {
+			logger.LogFatal("Failed to write temporary systemd service file: %v", err)
+		}
+		
+		// Move the temporary file to /etc/systemd/system/ using sudo mv
+		finalServicePath := "/etc/systemd/system/dialtone_robot.service"
+		sudoMoveCmd := fmt.Sprintf("printf \"%%s\\n\" \"%s\" | sudo -S -p '' mv %s %s", *pass, tempServicePath, finalServicePath)
+		_, err = ssh.RunSSHCommand(client, sudoMoveCmd)
+		if err != nil {
+			logger.LogFatal("Failed to move systemd service file: %v", err)
+		}
+		
+		// Set correct permissions on the service file
+		sudoChmodCmd := fmt.Sprintf("printf \"%%s\\n\" \"%s\" | sudo -S -p '' chmod 0644 %s", *pass, finalServicePath)
+		_, err = ssh.RunSSHCommand(client, sudoChmodCmd)
+		if err != nil {
+			logger.LogFatal("Failed to set permissions on systemd service file: %v", err)
+		}
+
+		// Enable and start the service, piping password to sudo
+		ssh.RunSSHCommand(client, fmt.Sprintf("printf \"%%s\\n\" \"%s\" | sudo -S -p '' systemctl daemon-reload", *pass))
+		ssh.RunSSHCommand(client, fmt.Sprintf("printf \"%%s\\n\" \"%s\" | sudo -S -p '' systemctl enable dialtone_robot.service", *pass))
+		ssh.RunSSHCommand(client, fmt.Sprintf("printf \"%%s\\n\" \"%s\" | sudo -S -p '' systemctl start dialtone_robot.service", *pass))
+		
+		logger.LogInfo("[DEPLOY] Systemd service set up and started.")
 	}
 
 	if *proxy {
-		logger.LogInfo("Setting up Cloudflare tunnel proxy via cloudflare plugin...")
+		logger.LogInfo("[DEPLOY] Setting up Cloudflare tunnel proxy via cloudflare plugin...")
 		cwd, _ := os.Getwd()
 		cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "cloudflare", "setup-service", "--name", *hostname)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			logger.LogInfo("[WARNING] Cloudflare proxy setup failed: %v", err)
+			logger.LogWarn("[WARNING] Cloudflare proxy setup failed: %v", err)
 		} else {
-			logger.LogInfo("Cloudflare tunnel proxy for %s.dialtone.earth setup successfully.", *hostname)
+			logger.LogInfo("[DEPLOY] Cloudflare tunnel proxy for %s.dialtone.earth setup successfully.", *hostname)
 		}
 	}
 	
-	logger.LogInfo("Deployment complete.")
-}
+	logger.LogInfo("[DEPLOY] Deployment complete.")
 
-func RunSyncCode(args []string) {
-	// Simple version of SyncCode
-	fs := flag.NewFlagSet("sync-code", flag.ExitOnError)
-	host := fs.String("host", os.Getenv("ROBOT_HOST"), "SSH host")
-	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password")
-	fs.Parse(args)
-
-	if *host == "" || *pass == "" {
-		logger.LogFatal("Error: -host and -pass required")
+	if *diagnostic {
+		logger.LogInfo("[DEPLOY] Starting post-deployment diagnostic...")
+		// Give the service a moment to start up on the remote
+		time.Sleep(5 * time.Second)
+		if err := rcli.RunDiagnostic(latestVer); err != nil {
+			logger.LogError("Post-deployment diagnostic failed: %v", err)
+			os.Exit(1)
+		}
 	}
-
-	client, err := ssh.DialSSH(*host, "22", "", *pass)
-	if err != nil {
-		logger.LogFatal("SSH failed: %v", err)
-	}
-	defer client.Close()
-
-	home, _ := ssh.GetRemoteHome(client)
-	remoteDir := path.Join(home, "dialtone_src")
-	ssh.RunSSHCommand(client, "mkdir -p "+remoteDir)
-
-	logger.LogInfo("Syncing src/ to %s...", remoteDir)
-	ssh.UploadDirFiltered(client, "src", path.Join(remoteDir, "src"), []string{".git", "node_modules", "dist"})
-	logger.LogInfo("Sync complete.")
 }
 
 func validateRequiredVars(vars []string) {
@@ -522,23 +599,61 @@ func validateRequiredVars(vars []string) {
 }
 
 func validateSudo(client *sshlib.Client, pass string) {
-	sudoCmd := fmt.Sprintf("echo '%s' | sudo -S true", pass)
+	sudoCmd := fmt.Sprintf("echo '%s' | sudo -S true < /dev/null", pass)
 	_, err := ssh.RunSSHCommand(client, sudoCmd)
 	if err != nil {
 		logger.LogFatal("Sudo validation failed")
 	}
 }
 
-func setupSSHKey(client *sshlib.Client) {
+func setupSSHKey(client *sshlib.Client, remoteUser, pass string) {
 	home, _ := os.UserHomeDir()
 	pubKeyPath := filepath.Join(home, ".ssh", "id_ed25519.pub")
 	pubKey, err := os.ReadFile(pubKeyPath)
 	if err != nil {
+		logger.LogInfo("SSH public key not found at %s. Key-based authentication may not be available for passwordless sudo setup.", pubKeyPath)
 		return
 	}
 	pubKeyStr := strings.TrimSpace(string(pubKey))
-	setupKeyCmd := fmt.Sprintf("mkdir -p ~/.ssh && echo '%s' >> ~/.ssh/authorized_keys", pubKeyStr)
-	ssh.RunSSHCommand(client, setupKeyCmd)
+	
+	// Ensure ~/.ssh directory exists with correct permissions
+	setupKeyCmd := fmt.Sprintf("mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '%s' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys", pubKeyStr)
+	_, err = ssh.RunSSHCommand(client, setupKeyCmd)
+	if err != nil {
+		logger.LogWarn("Failed to transfer SSH public key: %v", err)
+	} else {
+		logger.LogInfo("Transferred SSH public key to remote authorized_keys.")
+	}
+
+	// Configure passwordless sudo for the remoteUser
+	sudoersContent := fmt.Sprintf("%s ALL=(ALL) NOPASSWD: ALL", remoteUser)
+	sudoersFile := fmt.Sprintf("/etc/sudoers.d/dialtone_ssh_key_sudo_%s", remoteUser)
+
+	// Create temporary file on remote
+	tempSudoersPath := path.Join("/tmp", fmt.Sprintf("dialtone_ssh_key_sudo_%s.tmp", remoteUser))
+	err = ssh.WriteRemoteFile(client, tempSudoersPath, sudoersContent)
+	if err != nil {
+		logger.LogWarn("Failed to write temporary sudoers file: %v", err)
+		return
+	}
+
+	// Move temporary file to /etc/sudoers.d/ using sudo
+	sudoMoveCmd := fmt.Sprintf("echo '%s' | sudo -S -p '' mv %s %s", pass, tempSudoersPath, sudoersFile)
+	_, err = ssh.RunSSHCommand(client, sudoMoveCmd)
+	if err != nil {
+		logger.LogWarn("Failed to move sudoers file into place. Passwordless sudo not configured: %v", err)
+		return
+	}
+	
+	// Set correct permissions on the sudoers file
+	sudoChmodCmd := fmt.Sprintf("echo '%s' | sudo -S -p '' chmod 0440 %s", pass, sudoersFile)
+	_, err = ssh.RunSSHCommand(client, sudoChmodCmd)
+	if err != nil {
+		logger.LogWarn("Failed to set permissions on sudoers file: %v", err)
+		return
+	}
+	
+	logger.LogInfo("Configured passwordless sudo for user '%s' via SSH key.", remoteUser)
 }
 
 // --- Versioned Source Commands ---
