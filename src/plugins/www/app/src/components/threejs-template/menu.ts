@@ -7,6 +7,7 @@ type ThreeJsTemplateConfigOptions = {
 
 export function setupThreeJsTemplateMenu(options: ThreeJsTemplateConfigOptions): void {
     const menu = Menu.getInstance();
+    menu.clear();
 
     menu.addHeader("Settings");
 

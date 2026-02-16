@@ -56,6 +56,7 @@ export function setupAboutMenu(options: AboutConfigOptions): () => void {
     const presetSwapMs = 5000;
 
     const menu = Menu.getInstance();
+    menu.clear();
 
     // Presets Data
     const lightPresets = [
