@@ -1,0 +1,8 @@
+{
+  "pid": 37238,
+  "debug_port": 49321,
+  "websocket_url": "ws://127.0.0.1:49321/devtools/browser/ea2239ea-204c-4a9a-9337-f2d716c82165",
+  "debug_url": "http://127.0.0.1:49321/devtools/browser/ea2239ea-204c-4a9a-9337-f2d716c82165",
+  "is_new": true,
+  "generated_at_rfc3339": "2026-02-16T13:30:16-08:00"
+}

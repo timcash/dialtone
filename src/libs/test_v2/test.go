@@ -4,7 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/draw"
+	_ "image/jpeg"
+	"image/png"
 	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +20,7 @@ import (
 	chrome_app "dialtone/cli/src/plugins/chrome/app"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
+	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 )
 
@@ -44,9 +51,9 @@ type BrowserSession struct {
 }
 
 var (
-	stepLogsMu   sync.Mutex
-	stepLogs     []ConsoleEntry
-	stepLogsOn   bool
+	stepLogsMu sync.Mutex
+	stepLogs   []ConsoleEntry
+	stepLogsOn bool
 )
 
 func startStepLogCapture() {
@@ -198,7 +205,7 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 	resolved, err := chrome_app.StartSession(chrome_app.SessionOptions{
 		GPU:           true,
 		Headless:      opts.Headless,
-		TargetURL:     "",
+		TargetURL:     opts.URL,
 		Role:          opts.Role,
 		ReuseExisting: opts.ReuseExisting,
 	})
@@ -207,7 +214,11 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 	}
 
 	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), resolved.WebSocketURL)
-	ctx, ctxCancel := chromedp.NewContext(allocCtx)
+	ctx, ctxCancel, err := attachOrCreateTargetContext(allocCtx, resolved.WebSocketURL, resolved.IsNew, opts.ReuseExisting, opts.URL)
+	if err != nil {
+		allocCancel()
+		return nil, err
+	}
 	cancel := func() {
 		ctxCancel()
 		allocCancel()
@@ -266,6 +277,98 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 	return s, nil
 }
 
+func attachOrCreateTargetContext(allocCtx context.Context, websocketURL string, isNew, reuse bool, targetURL string) (context.Context, context.CancelFunc, error) {
+	_ = isNew
+	if strings.TrimSpace(targetURL) != "" {
+		targetID, err := selectTargetIDFromWebsocket(websocketURL, targetURL)
+		if err != nil {
+			return nil, nil, err
+		}
+		ctx, cancel := chromedp.NewContext(allocCtx, chromedp.WithTargetID(target.ID(targetID)))
+		return ctx, cancel, nil
+	}
+	if reuse {
+		targetID, err := selectTargetIDFromWebsocket(websocketURL, "")
+		if err == nil {
+			ctx, cancel := chromedp.NewContext(allocCtx, chromedp.WithTargetID(target.ID(targetID)))
+			return ctx, cancel, nil
+		}
+	}
+	ctx, cancel := chromedp.NewContext(allocCtx)
+	return ctx, cancel, nil
+}
+
+type devtoolsTarget struct {
+	ID   string `json:"id"`
+	Type string `json:"type"`
+	URL  string `json:"url"`
+}
+
+func selectTargetIDFromWebsocket(websocketURL, preferredURL string) (string, error) {
+	base, err := url.Parse(strings.TrimSpace(websocketURL))
+	if err != nil {
+		return "", fmt.Errorf("invalid websocket url: %w", err)
+	}
+	scheme := "http"
+	if base.Scheme == "wss" {
+		scheme = "https"
+	}
+	listURL := fmt.Sprintf("%s://%s/json/list", scheme, base.Host)
+	client := &http.Client{Timeout: 2 * time.Second}
+	want := normalizeURLWithoutFragment(preferredURL)
+
+	for i := 0; i < 30; i++ {
+		resp, err := client.Get(listURL)
+		if err == nil {
+			var infos []devtoolsTarget
+			decodeErr := json.NewDecoder(resp.Body).Decode(&infos)
+			_ = resp.Body.Close()
+			if decodeErr == nil {
+				bestID := ""
+				bestScore := -1
+				for _, info := range infos {
+					if info.Type != "page" {
+						continue
+					}
+					u := strings.TrimSpace(info.URL)
+					if strings.HasPrefix(u, "devtools://") {
+						continue
+					}
+					score := 1
+					if u == "" || u == "about:blank" {
+						score = 0
+					}
+					if want != "" && normalizeURLWithoutFragment(u) == want {
+						score = 100
+					}
+					if score > bestScore {
+						bestScore = score
+						bestID = info.ID
+					}
+				}
+				if bestID != "" {
+					return bestID, nil
+				}
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return "", fmt.Errorf("failed to attach to an existing browser page target")
+}
+
+func normalizeURLWithoutFragment(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	parsed.Fragment = ""
+	return parsed.String()
+}
+
 func (s *BrowserSession) Close() {
 	if s == nil {
 		return
@@ -311,6 +414,13 @@ func (s *BrowserSession) RunWithContext(ctx context.Context, actions chromedp.Ac
 
 func (s *BrowserSession) Context() context.Context {
 	return s.ctx
+}
+
+func (s *BrowserSession) ChromeSession() *chrome_app.Session {
+	if s == nil {
+		return nil
+	}
+	return s.chromeSes
 }
 
 func (s *BrowserSession) CaptureScreenshot(path string) error {
@@ -364,44 +474,69 @@ func formatConsoleArgs(args []*runtime.RemoteObject) string {
 	return strings.Join(parts, " ")
 }
 
-func filterLogsForStep(logs []ConsoleEntry, sectionID string) []ConsoleEntry {
-	if sectionID == "" {
-		return logs
-	}
-	token := "#" + sectionID
-	out := make([]ConsoleEntry, 0, len(logs))
-	for _, entry := range logs {
-		if strings.Contains(entry.Message, token) {
-			out = append(out, entry)
+func filterLogsForStep(logs []ConsoleEntry, sectionID string, mode string) []ConsoleEntry {
+	filtered := logs
+	if sectionID != "" {
+		token := "#" + sectionID
+		out := make([]ConsoleEntry, 0, len(filtered))
+		for _, entry := range filtered {
+			if strings.Contains(entry.Message, token) {
+				out = append(out, entry)
+			}
 		}
+		filtered = out
 	}
-	return out
+	switch mode {
+	case "errors_only":
+		out := make([]ConsoleEntry, 0, len(filtered))
+		for _, entry := range filtered {
+			if entry.Level == "error" || entry.Level == "exception" {
+				out = append(out, entry)
+			}
+		}
+		return out
+	case "test_tagged":
+		out := make([]ConsoleEntry, 0, len(filtered))
+		for _, entry := range filtered {
+			if entry.Level == "error" || entry.Level == "exception" || strings.Contains(entry.Message, "[TESTLIB]") {
+				out = append(out, entry)
+			}
+		}
+		return out
+	default:
+		return filtered
+	}
 }
 
 type Step struct {
-	Name       string
-	Run        func() error
-	SectionID  string
-	Screenshot string
-	Timeout    time.Duration
+	Name           string
+	Run            func() error
+	SectionID      string
+	Screenshot     string
+	Screenshots    []string
+	ScreenshotGrid string
+	Timeout        time.Duration
 }
 
 type SuiteOptions struct {
-	Version    string
-	ReportPath string
-	LogPath    string
-	ErrorLogPath string
+	Version        string
+	ReportPath     string
+	LogPath        string
+	ErrorLogPath   string
+	BrowserLogMode string
 }
 
 type StepResult struct {
-	Name       string
-	Passed     bool
-	Error      string
-	Duration   time.Duration
-	SectionID  string
-	Screenshot string
-	Logs       []ConsoleEntry
-	Output     string
+	Name           string
+	Passed         bool
+	Error          string
+	Duration       time.Duration
+	SectionID      string
+	Screenshot     string
+	Screenshots    []string
+	ScreenshotGrid string
+	Logs           []ConsoleEntry
+	Output         string
 }
 
 func RunSuite(options SuiteOptions, steps []Step) error {
@@ -447,11 +582,11 @@ func RunSuite(options SuiteOptions, steps []Step) error {
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), stepTimeout)
-		
+
 		stepStart := time.Now()
 		var output string
 		var err error
-		
+
 		// Run the step in a goroutine to support context cancellation
 		done := make(chan struct{})
 		go func() {
@@ -477,11 +612,26 @@ func RunSuite(options SuiteOptions, steps []Step) error {
 		}
 
 		res := StepResult{
-			Name:       s.Name,
-			Passed:     err == nil,
-			Duration:   duration,
-			SectionID:  s.SectionID,
-			Screenshot: s.Screenshot,
+			Name:        s.Name,
+			Passed:      err == nil,
+			Duration:    duration,
+			SectionID:   s.SectionID,
+			Screenshot:  s.Screenshot,
+			Screenshots: normalizedStepScreenshots(s),
+		}
+		if len(res.Screenshots) == 1 && res.Screenshot == "" {
+			res.Screenshot = res.Screenshots[0]
+		}
+		if len(res.Screenshots) > 1 || strings.TrimSpace(s.ScreenshotGrid) != "" {
+			gridPath, gridErr := buildScreenshotGrid(res.Screenshots, s.ScreenshotGrid, options.ReportPath)
+			if gridErr != nil && err == nil {
+				err = fmt.Errorf("build screenshot grid: %w", gridErr)
+				res.Passed = false
+			}
+			if gridErr == nil && gridPath != "" {
+				res.ScreenshotGrid = gridPath
+				res.Screenshot = gridPath
+			}
 		}
 		if err != nil {
 			res.Error = err.Error()
@@ -591,7 +741,7 @@ func writeReport(options SuiteOptions, results []StepResult, total time.Duration
 		}
 		_, _ = fmt.Fprintln(f, "```")
 		_, _ = fmt.Fprintln(f)
-		filteredLogs := filterLogsForStep(r.Logs, r.SectionID)
+		filteredLogs := filterLogsForStep(r.Logs, r.SectionID, options.BrowserLogMode)
 		if len(filteredLogs) > 0 {
 			_, _ = fmt.Fprintln(f, "#### Browser Logs")
 			_, _ = fmt.Fprintln(f)
@@ -622,7 +772,9 @@ func writeReport(options SuiteOptions, results []StepResult, total time.Duration
 				_, _ = fmt.Fprintln(f)
 			}
 		}
-		if r.Screenshot != "" {
+		if r.ScreenshotGrid != "" {
+			_, _ = fmt.Fprintf(f, "![%s sequence](../%s)\n\n", r.Name, r.ScreenshotGrid)
+		} else if r.Screenshot != "" {
 			_, _ = fmt.Fprintf(f, "![%s](../%s)\n\n", r.Name, r.Screenshot)
 		}
 	}
@@ -631,11 +783,131 @@ func writeReport(options SuiteOptions, results []StepResult, total time.Duration
 	_, _ = fmt.Fprintln(f)
 	_, _ = fmt.Fprintln(f, "- `test.log`")
 	_, _ = fmt.Fprintln(f, "- `error.log`")
+	wrote := map[string]bool{}
 	for _, r := range results {
-		if r.Screenshot != "" {
+		if r.ScreenshotGrid != "" && !wrote[r.ScreenshotGrid] {
+			_, _ = fmt.Fprintf(f, "- `%s`\n", r.ScreenshotGrid)
+			wrote[r.ScreenshotGrid] = true
+		}
+		for _, shot := range r.Screenshots {
+			if shot != "" && !wrote[shot] {
+				_, _ = fmt.Fprintf(f, "- `%s`\n", shot)
+				wrote[shot] = true
+			}
+		}
+		if r.Screenshot != "" && !wrote[r.Screenshot] {
 			_, _ = fmt.Fprintf(f, "- `%s`\n", r.Screenshot)
+			wrote[r.Screenshot] = true
 		}
 	}
 
 	return nil
+}
+
+func normalizedStepScreenshots(s Step) []string {
+	if len(s.Screenshots) > 0 {
+		out := make([]string, 0, len(s.Screenshots))
+		seen := map[string]bool{}
+		for _, shot := range s.Screenshots {
+			trimmed := strings.TrimSpace(shot)
+			if trimmed == "" || seen[trimmed] {
+				continue
+			}
+			seen[trimmed] = true
+			out = append(out, trimmed)
+		}
+		return out
+	}
+	if strings.TrimSpace(s.Screenshot) != "" {
+		return []string{strings.TrimSpace(s.Screenshot)}
+	}
+	return nil
+}
+
+func buildScreenshotGrid(refs []string, outRef string, reportPath string) (string, error) {
+	validRefs := make([]string, 0, len(refs))
+	validPaths := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		absPath := resolveScreenshotRefPath(reportPath, ref)
+		if _, err := os.Stat(absPath); err == nil {
+			validRefs = append(validRefs, ref)
+			validPaths = append(validPaths, absPath)
+		}
+	}
+	if len(validPaths) == 0 {
+		return "", fmt.Errorf("no screenshot files found")
+	}
+	if len(validPaths) == 1 && strings.TrimSpace(outRef) == "" {
+		return validRefs[0], nil
+	}
+
+	if strings.TrimSpace(outRef) == "" {
+		first := validRefs[0]
+		ext := filepath.Ext(first)
+		base := strings.TrimSuffix(first, ext)
+		outRef = base + "_grid.png"
+	}
+	outPath := resolveScreenshotRefPath(reportPath, outRef)
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+		return "", err
+	}
+
+	firstImage, err := decodeImage(validPaths[0])
+	if err != nil {
+		return "", err
+	}
+	tileW := firstImage.Bounds().Dx()
+	tileH := firstImage.Bounds().Dy()
+	if tileW <= 0 || tileH <= 0 {
+		return "", fmt.Errorf("invalid screenshot bounds")
+	}
+
+	cols := len(validPaths)
+	rows := 1
+	canvas := image.NewRGBA(image.Rect(0, 0, tileW*cols, tileH*rows))
+
+	for i, shotPath := range validPaths {
+		img, err := decodeImage(shotPath)
+		if err != nil {
+			return "", err
+		}
+		x := (i % cols) * tileW
+		y := (i / cols) * tileH
+		draw.Draw(canvas, image.Rect(x, y, x+tileW, y+tileH), img, img.Bounds().Min, draw.Src)
+	}
+
+	f, err := os.Create(outPath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	if err := png.Encode(f, canvas); err != nil {
+		return "", err
+	}
+
+	return outRef, nil
+}
+
+func decodeImage(path string) (image.Image, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	img, _, err := image.Decode(f)
+	if err != nil {
+		return nil, err
+	}
+	return img, nil
+}
+
+func resolveScreenshotRefPath(reportPath string, ref string) string {
+	if filepath.IsAbs(ref) {
+		return ref
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(reportPath), "..", ref))
 }

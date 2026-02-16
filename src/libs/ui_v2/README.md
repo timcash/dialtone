@@ -1,72 +1,49 @@
 # UIv2 Library
 
-This directory contains the core UI framework (`ui.ts`) for building modular, section-based web applications within Dialtone plugins.
+`src/libs/ui_v2` is the shared section shell for Dialtone plugin UIs.
 
-## Key Features
+## Design Language
 
-- **Section Management**: `setupApp` provides `sections` to register and navigate between distinct UI sections.
-- **Dynamic Loading**: Sections are loaded asynchronously (`load` function), supporting code splitting.
-- **Menu Integration**: `menu` allows easy addition of navigation buttons that link to registered sections.
-- **VisualizationControl Interface**: Components implement this interface (`mount` and `dispose` methods) for lifecycle management.
+Each plugin `src_vN` has one `ui`.
 
-## UI Integration Pattern (Example: Robot Plugin)
+Each `ui` can have many `section`.
 
-When integrating a new UI or component that needs to interact with the backend (e.g., sending commands via NATS), follow this pattern:
+Each `section` uses four overlays:
 
-### 1. Global NATS Export (main.ts)
+- `menu` (global): section switcher overlay.
+- `thumb`: interactive controls (buttons, inputs).
+- `legend`: non-interactive context (stats, logs, history).
+- one primary overlay kind: `stage` or `table` or `xterm` or `docs` (more kinds can be added later).
 
-To allow UI components (like control buttons) to easily send messages to the NATS backend, export the `NatsConnection` and `JSONCodec` from your plugin's `src/main.ts`:
+## Menu Overlay Behavior
 
-```typescript
-// src/plugins/your-plugin/src_vX/ui/src/main.ts
-import { connect, JSONCodec, type NatsConnection } from 'nats.ws';
+- `Menu` renders a fullscreen modal.
+- Modal content uses CSS grid for menu buttons.
+- Menu grid has an effective minimum width target of `400px` (bounded by viewport width).
+- While menu is open, active-section `thumb` overlays are hidden automatically.
 
-export let NATS_CONNECTION: NatsConnection | null = null;
-export const NATS_JSON_CODEC = JSONCodec();
+## Section Registration
 
-// ... (rest of your main.ts)
+`SectionConfig` now supports overlay selectors:
 
-async function connectNATS(initData: any) {
-  // ... (connection logic)
-  try {
-    NATS_CONNECTION = await connect({ servers: [server] });
-    // ...
-    NATS_CONNECTION.closed().then(() => {
-      // ...
-    });
-  } catch (err) {
-    // ...
-  }
-}
+```ts
+sections.register('my-section', {
+  containerId: 'my-section',
+  load: async () => mountMySection(),
+  overlays: {
+    primaryKind: 'stage',
+    primary: '.my-stage',
+    thumb: '.my-thumb',
+    legend: '.my-legend',
+  },
+});
 ```
 
-### 2. Component Usage (e.g., Controls Component)
+`SectionManager` tags matched elements with:
 
-Components can then import and use these global exports to publish messages:
+- `data-overlay="<kind>"`
+- `data-overlay-role="primary|thumb|legend"`
+- `data-overlay-section="<section-id>"`
+- `data-overlay-active="true|false"`
 
-```typescript
-// src/plugins/your-plugin/src_vX/ui/src/components/controls/index.ts
-import { VisualizationControl } from '../../../../../../../libs/ui_v2/types';
-import { NATS_CONNECTION, NATS_JSON_CODEC } from '../../main'; // Import from main.ts
-
-class ControlsControl implements VisualizationControl {
-  // ...
-  private sendCommand(cmd: string, mode?: string) {
-    if (!NATS_CONNECTION || !NATS_JSON_CODEC) {
-      console.warn('NATS not connected. Command not sent.');
-      return;
-    }
-
-    const payload: { cmd: string; mode?: string } = { cmd };
-    if (mode) {
-      payload.mode = mode;
-    }
-
-    NATS_CONNECTION.publish('rover.command', NATS_JSON_CODEC.encode(payload));
-    console.log(`[Controls] Command sent: ${JSON.stringify(payload)}`);
-  }
-  // ...
-}
-```
-
-This pattern facilitates communication with the backend while keeping individual UI components self-contained and focused on their specific rendering and interaction logic.
+Sections load dynamically from `load()`. If a section is not cached yet, `ui_v2` shows a quick loading overlay during first load.
