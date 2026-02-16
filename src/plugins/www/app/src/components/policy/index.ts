@@ -369,8 +369,8 @@ class PolicySimVisualization {
     canvas.style.height = "100%";
     this.container.appendChild(canvas);
 
-    // MOBILE OPTIMIZATION: Pull camera back (from 10 to 13.5)
-    this.camera.position.set(0, 2.5, 13.5);
+    // MOBILE OPTIMIZATION: Pull camera back (from 10 to 16.5)
+    this.camera.position.set(0, 2.5, 16.5);
     this.camera.lookAt(0, 0, 0);
 
     this.scene.add(this.camera);
