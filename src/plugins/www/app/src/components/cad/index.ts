@@ -53,6 +53,7 @@ export class CADViewer {
 
   constructor(container: HTMLElement) {
     this.container = container;
+    this.loadingEl = container.querySelector(".cad-loader");
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -86,12 +87,18 @@ export class CADViewer {
   async loadDefaultModel() {
     try {
       console.log("[cad] Loading default gear STL...");
+      if (this.loadingEl) {
+        this.loadingEl.textContent = `loading gear(${this.params.num_mounting_holes} mounting holes) ...`;
+        this.loadingEl.hidden = false;
+      }
       const response = await fetch("/default_gear.stl");
       if (!response.ok) throw new Error("Failed to load default gear");
       const arrayBuffer = await response.arrayBuffer();
       this.applyGeometry(this.loader.parse(arrayBuffer));
     } catch (e) {
       console.error("[cad] Failed to load default gear:", e);
+    } finally {
+      if (this.loadingEl) this.loadingEl.hidden = true;
     }
   }
 
@@ -165,6 +172,7 @@ export class CADViewer {
   offlineWarningEl: HTMLDivElement | null = null;
   panelEl: HTMLDivElement | null = null;
   toggleEl: HTMLButtonElement | null = null;
+  loadingEl: HTMLDivElement | null = null;
 
   setPanelOpen(open: boolean) {
     if (!this.panelEl || !this.toggleEl) return;
@@ -185,6 +193,11 @@ export class CADViewer {
 
   async updateModel() {
     this.abortController = new AbortController();
+
+    if (this.loadingEl) {
+      this.loadingEl.textContent = `loading gear(${this.params.num_mounting_holes} mounting holes) ...`;
+      this.loadingEl.hidden = false;
+    }
 
     try {
       const url = `/api/cad/generate`;
@@ -226,6 +239,8 @@ export class CADViewer {
         console.warn("[cad] Server might be offline or erroring:", e.message);
         if (this.offlineWarningEl) this.offlineWarningEl.hidden = false;
       }
+    } finally {
+      if (this.loadingEl) this.loadingEl.hidden = true;
     }
   }
 
@@ -303,6 +318,7 @@ export function mountCAD(container: HTMLElement) {
         <h2>Parametric Logic</h2>
         <p data-typing-subtitle></p>
       </div>
+      <div class="cad-loader" hidden>loading gear(4 mounting holes) ...</div>
     `;
 
 
