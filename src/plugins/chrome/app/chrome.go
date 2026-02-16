@@ -382,7 +382,6 @@ func LaunchChromeWithRole(port int, gpu bool, headless bool, targetURL, role str
 	// Capture output to a log file for debugging
 	logFile, err := os.Create("chrome_launch.log")
 	if err == nil {
-		defer logFile.Close() // Ensure the log file is closed
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
 	}
