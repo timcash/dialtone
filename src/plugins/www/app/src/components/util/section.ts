@@ -156,18 +156,16 @@ export class SectionManager {
           const sectionId = entry.target.id;
           this.visibilityRatios.set(sectionId, entry.intersectionRatio);
 
-          if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
-            // Load only when section is the dominant one
-            this.load(sectionId).then(() => {
-              const control = this.visualizations.get(sectionId);
-              if (control && this.activeSectionId === sectionId) {
-                 control.setVisible(true);
+          // We no longer trigger loading here. 
+          // IntersectionObserver is strictly for pausing/resuming animations
+          // and updating the UI (header/menu).
+          const control = this.visualizations.get(sectionId);
+          if (control) {
+            if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
+              if (this.activeSectionId === sectionId) {
+                control.setVisible(true);
               }
-            });
-          } else if (entry.intersectionRatio < 0.1) {
-            // Pause when mostly gone
-            const control = this.visualizations.get(sectionId);
-            if (control) {
+            } else if (entry.intersectionRatio < 0.1) {
               control.setVisible(false);
             }
           }
@@ -245,18 +243,6 @@ export class SectionManager {
   }
 
   /**
-   * Get the ID of the section immediately following the given section
-   */
-  private getNextSectionId(sectionId: string): string | undefined {
-    const keys = Array.from(this.configs.keys());
-    const index = keys.indexOf(sectionId);
-    if (index !== -1 && index < keys.length - 1) {
-      return keys[index + 1];
-    }
-    return undefined;
-  }
-
-  /**
    * Load a visualization (called automatically on visibility, or manually via eagerLoad)
    */
   async load(sectionId: string): Promise<void> {
@@ -315,12 +301,17 @@ export class SectionManager {
             "color: #22c55e; font-weight: bold",
           );
         }
-        
+
         // Mark as ready
         updateProgress(100);
         setTimeout(() => {
             sectionEl?.classList.add("is-ready");
             console.log(`[SectionManager] READY: #${sectionId}`);
+            
+            // Start animation immediately if this is the active section
+            if (this.activeSectionId === sectionId) {
+                control.setVisible(true);
+            }
         }, 100);
       })
       .catch((err) => {

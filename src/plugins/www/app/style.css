@@ -16,35 +16,25 @@ html,
 body {
   width: 100%;
   height: 100%;
-  overflow: hidden;
+  overflow: hidden; /* Disable native scroll to prevent bounce/rubber-banding */
   background-color: var(--bg-color);
   color: var(--text-color);
   font-family: var(--font-family);
   scrollbar-width: none;
   -ms-overflow-style: none;
-  touch-action: pan-y;
-}
-
-/* Snap Scroll Container */
-html,
-body {
-  scroll-snap-type: y mandatory;
-  overflow-y: scroll;
-  scroll-behavior: auto;
+  touch-action: none;
 }
 
 .snap-slide {
   width: 100vw;
   height: 100vh;
-  margin-bottom: 25vh; /* Large gap between sections */
-  scroll-snap-align: start;
-  scroll-snap-stop: always;
+  margin-bottom: 0; /* Remove gap */
   position: relative;
   overflow: hidden;
   display: flex;
   justify-content: center;
   align-items: center;
-  touch-action: none; /* We will handle touch manually for better control */
+  touch-action: none;
 }
 
 .snap-slide .section-content {
@@ -830,8 +820,6 @@ h2 {
 
   /* Animation Initial State */
   opacity: 0;
-  transform: translateY(10px);
-  transition: opacity 0.8s ease, transform 0.8s ease;
 }
 
 /* 
@@ -1029,7 +1017,6 @@ h2 {
 
 .snap-slide.is-visible .marketing-overlay {
   opacity: 1;
-  transform: translateY(0);
 }
 
 .marketing-overlay h2 {

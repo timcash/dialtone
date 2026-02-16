@@ -120,38 +120,29 @@ sections.register('s-vision', {
 // Start observing visibility and eagerly load first section
 sections.observe();
 
-// Initial load
-const initialHash = window.location.hash.slice(1);
-let isProgrammaticScroll = false;
-let programmaticScrollTimeout: number | null = null;
-
 const loadSection = (id: string) => {
-    const el = document.getElementById(id);
+    const el = document.getElementById(id) as HTMLElement;
     if (id && el?.classList.contains('snap-slide')) {
         console.log(`[main] SWAP: #${id}`);
         
-        // Pause all other sections before snapping
-        const allSlideIds = Array.from(document.querySelectorAll('.snap-slide')).map(s => s.id);
-        allSlideIds.forEach(sid => {
-            if (sid !== id) {
-                const control = sections.get(sid);
+        // Pause and hide all other sections
+        const allSlides = Array.from(document.querySelectorAll('.snap-slide')) as HTMLElement[];
+        allSlides.forEach(slide => {
+            if (slide.id !== id) {
+                const control = sections.get(slide.id);
                 if (control) control.setVisible(false);
+                slide.style.display = 'none'; // Hide inactive slides
             }
         });
 
+        // Show and snap active slide
+        el.style.display = 'flex';
         sections.eagerLoad(id);
-        isProgrammaticScroll = true;
-        if (programmaticScrollTimeout) clearTimeout(programmaticScrollTimeout);
-
-        console.log(`[main] EXECUTE SNAP to #${id}`);
-        el.scrollIntoView({ behavior: 'auto', block: 'start' });
         
-        // Reset flag after snap
-        programmaticScrollTimeout = window.setTimeout(() => {
-            console.log(`[main] SETTLED: #${id}`);
-            isProgrammaticScroll = false;
-            programmaticScrollTimeout = null;
-        }, 100); 
+        console.log(`[main] EXECUTE SNAP to #${id}`);
+        window.scrollTo(0, 0); // Always at top since only one slide is visible
+        
+        console.log(`[main] SETTLED: #${id}`);
         return true;
     }
     return false;
@@ -167,39 +158,23 @@ window.addEventListener('hashchange', () => {
     if (hash) loadSection(hash);
 });
 
-// Update URL hash on scroll
-const allSlides = document.querySelectorAll('.snap-slide');
-const hashObserver = new IntersectionObserver(
-    (entries) => {
-        if (isProgrammaticScroll) return;
-        const entry = entries.find(e => e.isIntersecting && e.intersectionRatio >= 0.5);
-        if (entry && entry.target.id !== location.hash.slice(1)) {
-            history.replaceState(null, '', '#' + entry.target.id);
-        }
-    },
-    { threshold: [0.5] }
-);
-allSlides.forEach((el) => hashObserver.observe(el));
-
 // Navigation Logic
 let lastNavTime = 0;
-const NAV_COOLDOWN = 400; // Shorter cooldown for snaps
+const NAV_COOLDOWN = 200; 
 
 const getActiveIndex = () => {
-    const slides = Array.from(document.querySelectorAll('.snap-slide'));
-    return slides.findIndex(s => {
-        const rect = s.getBoundingClientRect();
-        return rect.top >= -window.innerHeight / 2 && rect.top <= window.innerHeight / 2;
-    });
+    const slides = Array.from(document.querySelectorAll('.snap-slide')) as HTMLElement[];
+    return slides.findIndex(s => s.style.display !== 'none');
 };
 
 const navigate = (direction: 1 | -1) => {
     if (Date.now() - lastNavTime < NAV_COOLDOWN) return;
-    const slides = Array.from(document.querySelectorAll('.snap-slide'));
+    const slides = Array.from(document.querySelectorAll('.snap-slide')) as HTMLElement[];
     const current = getActiveIndex();
     const next = Math.max(0, Math.min(slides.length - 1, current + direction));
     
     if (next !== current) {
+        history.replaceState(null, '', '#' + slides[next].id);
         loadSection(slides[next].id);
         lastNavTime = Date.now();
     }
