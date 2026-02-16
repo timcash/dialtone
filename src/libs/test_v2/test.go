@@ -302,6 +302,17 @@ func (s *BrowserSession) Run(actions chromedp.Action) error {
 	return chromedp.Run(s.ctx, actions)
 }
 
+func (s *BrowserSession) RunWithContext(ctx context.Context, actions chromedp.Action) error {
+	if s == nil || s.ctx == nil {
+		return fmt.Errorf("browser session is not initialized")
+	}
+	return chromedp.Run(ctx, actions)
+}
+
+func (s *BrowserSession) Context() context.Context {
+	return s.ctx
+}
+
 func (s *BrowserSession) CaptureScreenshot(path string) error {
 	if s == nil || s.ctx == nil {
 		return fmt.Errorf("browser session is not initialized")
@@ -372,6 +383,7 @@ type Step struct {
 	Run        func() error
 	SectionID  string
 	Screenshot string
+	Timeout    time.Duration
 }
 
 type SuiteOptions struct {
@@ -429,8 +441,32 @@ func RunSuite(options SuiteOptions, steps []Step) error {
 		writeLine(fmt.Sprintf("[TEST] START %s", s.Name))
 		startStepLogCapture()
 
+		stepTimeout := s.Timeout
+		if stepTimeout == 0 {
+			stepTimeout = 30 * time.Second
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), stepTimeout)
+		
 		stepStart := time.Now()
-		output, err := captureStepOutput(start, s.Run)
+		var output string
+		var err error
+		
+		// Run the step in a goroutine to support context cancellation
+		done := make(chan struct{})
+		go func() {
+			output, err = captureStepOutput(start, s.Run)
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			cancel()
+		case <-ctx.Done():
+			cancel()
+			err = fmt.Errorf("step timed out after %v", stepTimeout)
+		}
+
 		duration := time.Since(stepStart)
 		aboutLine := fmt.Sprintf("%s [TEST] RUN   %s", elapsedTag(start, stepStart), s.Name)
 		trimmedOutput := strings.TrimSpace(output)
