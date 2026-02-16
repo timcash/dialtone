@@ -112,7 +112,7 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort, internalNATSPo
 		mux.HandleFunc("/stream", camera.StreamHandler)
 	}
 
-	// 5. WebSocket for real-time updates (legacy dashboard)
+	// 5. WebSocket for real-time updates (unified dashboard)
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 			InsecureSkipVerify: true,
@@ -124,9 +124,15 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort, internalNATSPo
 		defer c.Close(websocket.StatusInternalError, "closing")
 
 		ctx := r.Context()
-		ticker := time.NewTicker(time.Second)
+		ticker := time.NewTicker(100 * time.Millisecond) // Faster ticker for attitude
 		defer ticker.Stop()
 
+		// Local state for NATS message count
+		var natsMsgCount int64
+
+		// Subscribe to NATS if available to forward to WS
+		// (In a real system we'd use a more robust pub/sub bridge)
+		
 		for {
 			select {
 			case <-ctx.Done():
@@ -143,6 +149,7 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort, internalNATSPo
 						outMsgs = varz.OutMsgs
 						inBytes = varz.InBytes
 						outBytes = varz.OutBytes
+						natsMsgCount = inMsgs
 					}
 				}
 
@@ -167,9 +174,23 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort, internalNATSPo
 					"out_msgs":    outMsgs,
 					"in_bytes":    formatBytes(inBytes),
 					"out_bytes":   formatBytes(outBytes),
+					"nats_total":  natsMsgCount,
 				}
 
-				data, _ := json.Marshal(stats)
+									// If in mock mode, add mock telemetry directly to the stats
+								// In real mode, this would come from the NATS subscription
+								if useMock {
+									t := time.Since(startTime).Seconds()
+									stats["lat"] = float64(37.7749 + 0.0001*float64(time.Now().Second())/60.0)
+									stats["lon"] = float64(-122.4194 + 0.0001*float64(time.Now().Second())/60.0)
+									stats["alt"] = float64(10.5)
+									stats["roll"] = float64(0.1 * float64(time.Now().Second()%10))
+									stats["pitch"] = float64(0.05 * float64(time.Now().Second()%5))
+									stats["yaw"] = float64(t * 0.1)
+									stats["sats"] = float64(12)
+									stats["battery"] = float64(12.4)
+								}
+								data, _ := json.Marshal(stats)
 				if err := c.Write(ctx, websocket.MessageText, data); err != nil {
 					return
 				}

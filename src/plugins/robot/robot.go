@@ -519,13 +519,13 @@ func RunDeploy(args []string) {
 
 	if *service {
 		logger.LogInfo("[DEPLOY] Setting up systemd service...")
-		// Use port 8080 for local web UI to avoid permission issues
+		// Use port 80 for Tailscale (tsnet doesn't require root for port 80)
 		systemdServiceContent := fmt.Sprintf(`[Unit]
 Description=Dialtone Robot Service
 After=network.target tailscaled.service
 
 [Service]
-ExecStart=%s robot start --hostname %s --ephemeral --web-port 8080 --port 4222 --ws-port 4223
+ExecStart=%s robot start --hostname %s --ephemeral --web-port 80 --port 4222 --ws-port 4223
 WorkingDirectory=%s
 Environment="TS_AUTHKEY=%s"
 Restart=always
@@ -611,7 +611,17 @@ func setupSSHKey(client *sshlib.Client, remoteUser, pass string) {
 	pubKeyPath := filepath.Join(home, ".ssh", "id_ed25519.pub")
 	pubKey, err := os.ReadFile(pubKeyPath)
 	if err != nil {
-		logger.LogInfo("SSH public key not found at %s. Key-based authentication may not be available for passwordless sudo setup.", pubKeyPath)
+		// Fallback to older id_rsa.pub
+		pubKeyPath = filepath.Join(home, ".ssh", "id_rsa.pub")
+		pubKey, err = os.ReadFile(pubKeyPath)
+	}
+
+	if err != nil {
+		logger.LogWarn("--------------------------------------------------------------------------------")
+		logger.LogWarn("[WARNING] No SSH public key found on your machine.")
+		logger.LogWarn("To enable seamless, passwordless deployments, please generate a key:")
+		logger.LogWarn("  ssh-keygen -t ed25519 -N \"\" -f ~/.ssh/id_ed25519")
+		logger.LogWarn("--------------------------------------------------------------------------------")
 		return
 	}
 	pubKeyStr := strings.TrimSpace(string(pubKey))
@@ -638,7 +648,7 @@ func setupSSHKey(client *sshlib.Client, remoteUser, pass string) {
 	}
 
 	// Move temporary file to /etc/sudoers.d/ using sudo
-	sudoMoveCmd := fmt.Sprintf("echo '%s' | sudo -S -p '' mv %s %s", pass, tempSudoersPath, sudoersFile)
+	sudoMoveCmd := fmt.Sprintf("echo '%s' | sudo -S -p '' mv %s %s && sudo chown root:root %s", pass, tempSudoersPath, sudoersFile, sudoersFile)
 	_, err = ssh.RunSSHCommand(client, sudoMoveCmd)
 	if err != nil {
 		logger.LogWarn("Failed to move sudoers file into place. Passwordless sudo not configured: %v", err)

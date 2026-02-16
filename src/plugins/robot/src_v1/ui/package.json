@@ -12,7 +12,8 @@
   "dependencies": {
     "three": "^0.182.0",
     "@xterm/addon-fit": "^0.11.0",
-    "@xterm/xterm": "^6.0.0"
+    "@xterm/xterm": "^6.0.0",
+    "nats.ws": "^1.23.0"
   },
   "devDependencies": {
     "@types/three": "^0.182.0",

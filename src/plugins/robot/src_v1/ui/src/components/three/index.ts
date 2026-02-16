@@ -17,6 +17,8 @@ class ThreeControl implements VisualizationControl {
   private time = 0;
   private spinSpeed = 0.4;
   private wheelCount = 0;
+  private ws: WebSocket | null = null;
+  private attitude = { roll: 0, pitch: 0, yaw: 0 };
 
   constructor(private container: HTMLElement, private canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -31,9 +33,8 @@ class ThreeControl implements VisualizationControl {
     this.keyLight.position.set(2, 2, 2);
     this.scene.add(this.keyLight);
 
-    const cubeGeometry = new THREE.BoxGeometry(0.9, 0.9, 0.9);
-    this.addCube('cube_left', cubeGeometry, -0.8);
-    this.addCube('cube_right', cubeGeometry, 0.8);
+    const cubeGeometry = new THREE.BoxGeometry(1.2, 0.8, 2.5); // More like a robot body
+    this.addCube('cube_left', cubeGeometry, 0); // Single center cube for 6DOF
 
     this.resize();
     window.addEventListener('resize', this.resize);
@@ -43,7 +44,31 @@ class ThreeControl implements VisualizationControl {
     this.canvas.setAttribute('data-selected-cube', '');
     this.canvas.setAttribute('data-hovered-cube', '');
     this.attachDebugBridge();
+    this.connectWS();
     this.animate();
+  }
+
+  private connectWS() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.host;
+    this.ws = new WebSocket(`${protocol}//${host}/ws`);
+    
+    this.ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.roll !== undefined) this.attitude.roll = data.roll;
+        if (data.pitch !== undefined) this.attitude.pitch = data.pitch;
+        if (data.yaw !== undefined) this.attitude.yaw = data.yaw;
+      } catch (e) {
+        // Silently ignore non-JSON or other message formats
+      }
+    };
+
+    this.ws.onclose = () => {
+      if (this.visible) {
+        setTimeout(() => this.connectWS(), 2000);
+      }
+    };
   }
 
   private addCube(id: Exclude<HoveredCubeID, ''>, geometry: THREE.BoxGeometry, x: number) {
@@ -160,12 +185,11 @@ class ThreeControl implements VisualizationControl {
     this.frameId = requestAnimationFrame(this.animate);
     if (!this.visible) return;
 
-    this.time += 0.016;
-    for (let i = 0; i < this.cubes.length; i += 1) {
-      const mesh = this.cubes[i].mesh;
-      const dir = i === 0 ? 1 : -1;
-      mesh.rotation.x = this.time * this.spinSpeed * 0.8;
-      mesh.rotation.y = this.time * this.spinSpeed * dir;
+    if (this.cubes.length > 0) {
+      const mesh = this.cubes[0].mesh;
+      mesh.rotation.x = this.attitude.pitch;
+      mesh.rotation.y = -this.attitude.yaw;
+      mesh.rotation.z = this.attitude.roll;
     }
 
     this.renderer.render(this.scene, this.camera);
@@ -176,6 +200,9 @@ class ThreeControl implements VisualizationControl {
     window.removeEventListener('resize', this.resize);
     this.canvas.removeEventListener('wheel', this.onWheel);
     this.canvas.removeEventListener('touchstart', this.onTouchStart);
+    if (this.ws) {
+      this.ws.close();
+    }
     const win = window as Window & { robotThreeDebug?: unknown };
     if (win.robotThreeDebug) {
       delete win.robotThreeDebug;

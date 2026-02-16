@@ -62,6 +62,7 @@ import (
 	"tailscale.com/tsnet"
 )
 func main() {
+	os.Setenv("TSNET_FORCE_LOGIN", "1")
 	s := &tsnet.Server{
 		Hostname: "%s",
 		AuthKey:  "%s",

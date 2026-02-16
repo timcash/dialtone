@@ -31,7 +31,7 @@ func ensureSharedServer() error {
 
 	_ = browser.CleanupPort(8080)
 
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "vpn", "serve", "src_v1")
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "vpn", "--hostname", "vpn-test-client")
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
