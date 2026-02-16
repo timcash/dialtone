@@ -89,6 +89,18 @@ func DialSSH(host, port, user, pass string) (*ssh.Client, error) {
 		Timeout:         10 * time.Second,
 	}
 
+	// Try to use SSH key if available
+	keyPath := filepath.Join(os.Getenv("HOME"), ".ssh", "id_ed25519")
+	if _, err := os.Stat(keyPath); err == nil {
+		key, err := os.ReadFile(keyPath)
+		if err == nil {
+			signer, err := ssh.ParsePrivateKey(key)
+			if err == nil {
+				config.Auth = append([]ssh.AuthMethod{ssh.PublicKeys(signer)}, config.Auth...)
+			}
+		}
+	}
+
 	addr := fmt.Sprintf("%s:%s", hostname, port)
 	return ssh.Dial("tcp", addr, config)
 }
