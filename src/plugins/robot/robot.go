@@ -33,7 +33,7 @@ import (
 	"io/fs"
 )
 
-//go:embed all:src_v1/ui/dist
+//go:embed all:src_v1/ui
 var webFS embed.FS
 
 // RunRobot handles 'robot <subcommand>'

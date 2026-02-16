@@ -1,25 +1,25 @@
-# Template Plugin v3 Test Report
+# Dag Plugin src_v3 Test Report
 
-**Generated at:** Sun, 15 Feb 2026 19:18:24 -0800
+**Generated at:** Sun, 15 Feb 2026 21:33:38 -0800
 **Version:** `src_v3`
 **Runner:** `test_v2`
 **Status:** ✅ PASS
-**Total Time:** `12.047s`
+**Total Time:** `11.958s`
 
 ## Test Steps
 
 | Step | Result | Duration |
 |---|---|---|
-| 01 DuckDB Graph Query Validation | ✅ PASS | `41ms` |
-| 02 Preflight (Go/UI) | ✅ PASS | `9.18s` |
-| 03 DAG Table Section Validation | ✅ PASS | `2.125s` |
-| 04 User Story: Empty DAG Start + First Node | ✅ PASS | `189ms` |
-| 05 User Story: Build Root IO | ✅ PASS | `86ms` |
-| 06 User Story: Nest + Dive + Nested Build | ✅ PASS | `83ms` |
-| 07 User Story: Rename + Undive + Camera History | ✅ PASS | `85ms` |
-| 08 User Story: Deep Nested Build | ✅ PASS | `102ms` |
-| 09 User Story: Deep Undive + Camera History | ✅ PASS | `76ms` |
-| 10 User Story: Unlink + Relabel + Camera Readability | ✅ PASS | `71ms` |
+| 01 DuckDB Graph Query Validation | ✅ PASS | `54ms` |
+| 02 Preflight (Go/UI) | ✅ PASS | `8.908s` |
+| 03 DAG Table Section Validation | ✅ PASS | `2.349s` |
+| 04 User Story: Empty DAG Start + First Node | ✅ PASS | `135ms` |
+| 05 User Story: Build Root IO | ✅ PASS | `84ms` |
+| 06 User Story: Nest + Dive + Nested Build | ✅ PASS | `85ms` |
+| 07 User Story: Rename + Undive + Camera History | ✅ PASS | `86ms` |
+| 08 User Story: Deep Nested Build | ✅ PASS | `83ms` |
+| 09 User Story: Deep Undive + Camera History | ✅ PASS | `83ms` |
+| 10 User Story: Unlink + Relabel + Camera Readability | ✅ PASS | `85ms` |
 | 11 Cleanup Verification | ✅ PASS | `6ms` |
 
 ## Step Logs
@@ -28,7 +28,7 @@
 
 ```text
 result: PASS
-duration: 41ms
+duration: 54ms
 ```
 
 #### Runner Output
@@ -47,7 +47,7 @@ duration: 41ms
 
 ```text
 result: PASS
-duration: 9.18s
+duration: 8.908s
 ```
 
 #### Runner Output
@@ -55,17 +55,17 @@ duration: 9.18s
 ```text
 [T+0000] [TEST] RUN   02 Preflight (Go/UI)
 [T+0000] >> [DAG] Fmt: src_v3
-[T+0000] [2026-02-15T19:18:12.678-08:00 | INFO | go.go:RunGo:33] Running: go [fmt ./src/plugins/dag/src_v3/...]
+[T+0000] [2026-02-15T21:33:26.946-08:00 | INFO | go.go:RunGo:33] Running: go [fmt ./src/plugins/dag/src_v3/...]
 [T+0000] >> [DAG] Vet: src_v3
-[T+0000] [2026-02-15T19:18:13.108-08:00 | INFO | go.go:RunGo:33] Running: go [vet ./src/plugins/dag/src_v3/...]
+[T+0000] [2026-02-15T21:33:27.386-08:00 | INFO | go.go:RunGo:33] Running: go [vet ./src/plugins/dag/src_v3/...]
 [T+0001] >> [DAG] Go Build: src_v3
-[T+0001] [2026-02-15T19:18:13.690-08:00 | INFO | go.go:RunGo:33] Running: go [build ./src/plugins/dag/src_v3/...]
-[T+0004] >> [DAG] Install: src_v3
-[T+0004]    [DAG] duckdb already installed at /Users/dev/dialtone_dependencies/duckdb/bin/duckdb
-[T+0004]    [DAG] Running version install hook: src/plugins/dag/src_v3/cmd/ops/install.go
-[T+0004] [2026-02-15T19:18:16.592-08:00 | INFO | go.go:RunGo:33] Running: go [run src/plugins/dag/src_v3/cmd/ops/install.go]
+[T+0001] [2026-02-15T21:33:27.962-08:00 | INFO | go.go:RunGo:33] Running: go [build ./src/plugins/dag/src_v3/...]
+[T+0003] >> [DAG] Install: src_v3
+[T+0003]    [DAG] duckdb already installed at /Users/dev/dialtone_dependencies/duckdb/bin/duckdb
+[T+0003]    [DAG] Running version install hook: src/plugins/dag/src_v3/cmd/ops/install.go
+[T+0004] [2026-02-15T21:33:30.675-08:00 | INFO | go.go:RunGo:33] Running: go [run src/plugins/dag/src_v3/cmd/ops/install.go]
 [T+0004]    [DAG src_v3] Ensuring Go module dependency: github.com/marcboeker/go-duckdb
-[T+0004] [2026-02-15T19:18:16.811-08:00 | INFO | go.go:RunGo:33] Running: go [mod download github.com/marcboeker/go-duckdb]
+[T+0004] [2026-02-15T21:33:30.893-08:00 | INFO | go.go:RunGo:33] Running: go [mod download github.com/marcboeker/go-duckdb]
 [T+0004] bun install v1.3.9 (cf6cdbbb)
 [T+0004] Saved lockfile
 [T+0004] 
@@ -74,70 +74,70 @@ duration: 9.18s
 [T+0004] + vite@5.4.21
 [T+0004] + three@0.182.0
 [T+0004] 
-[T+0004] 21 packages installed [140.00ms]
-[T+0005] >> [DAG] Lint: src_v3
+[T+0004] 21 packages installed [161.00ms]
+[T+0004] >> [DAG] Lint: src_v3
 [T+0005] $ tsc --noEmit
 [T+0006] >> [DAG] Format: src_v3
 [T+0006] $ echo format-ok
 [T+0006] format-ok
 [T+0006] >> [DAG] Build: START for src_v3
 [T+0006] >> [DAG] Installing UI dependencies in /Users/dev/code/dialtone/src/plugins/dag/src_v3/ui...
-[T+0007] bun install v1.3.9 (cf6cdbbb)
-[T+0007] Saved lockfile
-[T+0007] 
-[T+0007] + @types/three@0.182.0
-[T+0007] + typescript@5.9.3
-[T+0007] + vite@5.4.21
-[T+0007] + three@0.182.0
-[T+0007] 
-[T+0007] 21 packages installed [131.00ms]
-[T+0007] >> [DAG] Building UI in /Users/dev/code/dialtone/src/plugins/dag/src_v3/ui...
+[T+0006] bun install v1.3.9 (cf6cdbbb)
+[T+0006] 
+[T+0006] + @types/three@0.182.0
+[T+0006] + typescript@5.9.3
+[T+0006] + vite@5.4.21
+[T+0006] + three@0.182.0
+[T+0006] 
+[T+0006] 21 packages installed [126.00ms]
+[T+0006] Saved lockfile
+[T+0006] >> [DAG] Building UI in /Users/dev/code/dialtone/src/plugins/dag/src_v3/ui...
 [T+0007] $ vite build
 [T+0008] vite v5.4.21 building for production...
 [T+0008] transforming...
-[T+0009] ✓ 13 modules transformed.
-[T+0009] rendering chunks...
-[T+0009] computing gzip size...
-[T+0009] dist/index.html                   3.21 kB │ gzip:   0.82 kB
-[T+0009] dist/assets/index-CHeDUyWK.css    6.24 kB │ gzip:   1.86 kB
-[T+0009] dist/assets/index-DuTY0PV9.js     1.93 kB │ gzip:   0.86 kB
-[T+0009] dist/assets/index-CZDboBOI.js     7.53 kB │ gzip:   2.66 kB
-[T+0009] dist/assets/index-CoGENto0.js   522.61 kB │ gzip: 132.39 kB
-[T+0009] 
-[T+0009] (!) Some chunks are larger than 500 kB after minification. Consider:
-[T+0009] - Using dynamic import() to code-split the application
-[T+0009] - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
-[T+0009] - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
-[T+0009] ✓ built in 695ms
-[T+0009] >> [DAG] Build: COMPLETE for src_v3
+[T+0008] ✓ 13 modules transformed.
+[T+0008] rendering chunks...
+[T+0008] computing gzip size...
+[T+0008] dist/index.html                   3.21 kB │ gzip:   0.82 kB
+[T+0008] dist/assets/index-3HM9n234.css    6.98 kB │ gzip:   2.06 kB
+[T+0008] dist/assets/index-DuTY0PV9.js     1.93 kB │ gzip:   0.86 kB
+[T+0008] dist/assets/index-CvcRHLzJ.js     8.36 kB │ gzip:   2.89 kB
+[T+0008] dist/assets/index-FjDXJV4I.js   522.15 kB │ gzip: 132.32 kB
+[T+0008] 
+[T+0008] (!) Some chunks are larger than 500 kB after minification. Consider:
+[T+0008] - Using dynamic import() to code-split the application
+[T+0008] - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+[T+0008] - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+[T+0008] ✓ built in 682ms
+[T+0008] >> [DAG] Build: COMPLETE for src_v3
 ```
 
 ### 03 DAG Table Section Validation
 
 ```text
 result: PASS
-duration: 2.125s
+duration: 2.349s
 section: dag-table
 ```
 
 #### Runner Output
 
 ```text
-[T+0009] [TEST] RUN   03 DAG Table Section Validation
+[T+0008] [TEST] RUN   03 DAG Table Section Validation
 [T+0009] >> [DAG] Serve: src_v3
-[T+0009] [2026-02-15T19:18:21.872-08:00 | INFO | go.go:RunGo:33] Running: go [run src/plugins/dag/src_v3/cmd/main.go]
+[T+0009] [2026-02-15T21:33:35.872-08:00 | INFO | go.go:RunGo:33] Running: go [run src/plugins/dag/src_v3/cmd/main.go]
 [T+0009] DAG Server starting on http://localhost:8080
-[T+0009] [2026-02-15T19:18:22.026-08:00 | INFO | chrome.go:StartSession:179] DEBUG: Launching Chrome: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome [--remote-debugging-port=0 --remote-debugging-address=127.0.0.1 --remote-allow-origins=* --no-first-run --no-default-browser-check --user-data-dir=/Users/dev/code/dialtone/.chrome_data/dialtone-chrome-test-port-58950 --new-window --dialtone-origin=true --dialtone-role=test --headless=new]
-[T+0011] [BROWSER] [log] [SectionManager] NAVIGATING TO #three
-[T+0011] [BROWSER] [log] [SectionManager] LOADING #three
-[T+0011] [BROWSER] [log] [SectionManager] NAVIGATING TO #three
-[T+0011] [BROWSER] [log] [SectionManager] LOADED #three
-[T+0011] [BROWSER] [log] [SectionManager] START #three
-[T+0011] [BROWSER] [log] [SectionManager] NAVIGATE TO #three
-[T+0011] [BROWSER] [log] [SectionManager] NAVIGATE TO #three
-[T+0011] [BROWSER] [log] [SectionManager] RESUME #three
-[T+0011] [BROWSER] [log] [SectionManager] RESUME #three
-[T+0011] [BROWSER] [error] [PROOFOFLIFE] Intentional Browser Test Error
+[T+0009] [2026-02-15T21:33:36.015-08:00 | INFO | chrome.go:StartSession:179] DEBUG: Launching Chrome: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome [--remote-debugging-port=0 --remote-debugging-address=127.0.0.1 --remote-allow-origins=* --no-first-run --no-default-browser-check --user-data-dir=/Users/dev/code/dialtone/.chrome_data/dialtone-chrome-test-port-60311 --new-window --dialtone-origin=true --dialtone-role=test --headless=new]
+[T+0010] [BROWSER] [log] [SectionManager] NAVIGATING TO #three
+[T+0010] [BROWSER] [log] [SectionManager] LOADING #three
+[T+0010] [BROWSER] [log] [SectionManager] NAVIGATING TO #three
+[T+0010] [BROWSER] [log] [SectionManager] LOADED #three
+[T+0010] [BROWSER] [log] [SectionManager] START #three
+[T+0010] [BROWSER] [log] [SectionManager] NAVIGATE TO #three
+[T+0010] [BROWSER] [log] [SectionManager] NAVIGATE TO #three
+[T+0010] [BROWSER] [log] [SectionManager] RESUME #three
+[T+0010] [BROWSER] [log] [SectionManager] RESUME #three
+[T+0010] [BROWSER] [error] [PROOFOFLIFE] Intentional Browser Test Error
 [T+0011] [BROWSER] [log] [SectionManager] NAVIGATING TO #dag-table
 [T+0011] [BROWSER] [log] [SectionManager] LOADING #dag-table
 [T+0011] [BROWSER] [log] [SectionManager] NAVIGATING TO #dag-table
@@ -172,7 +172,7 @@ section: dag-table
 
 ```text
 result: PASS
-duration: 189ms
+duration: 135ms
 section: three
 ```
 
@@ -202,7 +202,7 @@ section: three
 
 ```text
 result: PASS
-duration: 86ms
+duration: 84ms
 section: three
 ```
 
@@ -243,7 +243,7 @@ section: three
 
 ```text
 result: PASS
-duration: 83ms
+duration: 85ms
 section: three
 ```
 
@@ -278,7 +278,7 @@ section: three
 
 ```text
 result: PASS
-duration: 85ms
+duration: 86ms
 section: three
 ```
 
@@ -308,7 +308,7 @@ section: three
 
 ```text
 result: PASS
-duration: 102ms
+duration: 83ms
 section: three
 ```
 
@@ -344,7 +344,7 @@ section: three
 
 ```text
 result: PASS
-duration: 76ms
+duration: 83ms
 section: three
 ```
 
@@ -372,7 +372,7 @@ section: three
 
 ```text
 result: PASS
-duration: 71ms
+duration: 85ms
 section: three
 ```
 
@@ -411,7 +411,7 @@ duration: 6ms
 #### Runner Output
 
 ```text
-[T+0012] [TEST] RUN   11 Cleanup Verification
+[T+0011] [TEST] RUN   11 Cleanup Verification
 ```
 
 ## Artifacts
