@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -11,113 +10,76 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-func Run03ThreeSectionValidation() error {
+func Run03ThreeUserStoryStartEmpty() error {
 	browser, err := ensureSharedBrowser(true)
 	if err != nil {
 		return err
 	}
+	fmt.Println("[THREE] story step1 description:")
+	fmt.Println("[THREE]   - In order to create a new node, the user taps the Mode button until it shows Add, then taps Action.")
+	fmt.Println("[THREE]   - The user starts from an empty DAG in root layer and expects one selected node after add.")
+	fmt.Println("[THREE]   - Camera expectation: zoomed-out root framing with room for upcoming input/output nodes.")
 
-	type projectedPoint struct {
-		OK bool    `json:"ok"`
-		X  float64 `json:"x"`
-		Y  float64 `json:"y"`
+	type evalResult struct {
+		OK  bool   `json:"ok"`
+		Msg string `json:"msg"`
 	}
-	type viewState struct {
-		Point projectedPoint `json:"point"`
-		W     float64        `json:"w"`
-		H     float64        `json:"h"`
-	}
-	var state viewState
+	var result evalResult
 	if err := browser.Run(chromedp.Tasks{
 		chromedp.Navigate("http://127.0.0.1:8080/#three"),
 		test_v2.WaitForAriaLabel("Three Canvas"),
-		test_v2.WaitForAriaLabelAttrEquals("Three Canvas", "data-wheel-count", "0", 2*time.Second),
+		test_v2.WaitForAriaLabelAttrEquals("Three Canvas", "data-ready", "true", 3*time.Second),
+		test_v2.WaitForAriaLabel("DAG Back"),
+		test_v2.WaitForAriaLabel("DAG Action"),
+		test_v2.WaitForAriaLabel("DAG Mode"),
+		test_v2.WaitForAriaLabel("DAG Node Name"),
 		chromedp.Evaluate(`
 			(() => {
 				const api = window.dagHitTestDebug;
-				if (!api || typeof api.getProjectedPoint !== 'function') {
-					throw new Error('dagHitTestDebug API unavailable');
+				if (!api || typeof api.getState !== 'function') return { ok: false, msg: 'missing debug api' };
+				const q = (name) => document.querySelector("[aria-label='" + name + "']");
+				const click = (name) => {
+					const el = q(name);
+					if (!el) return false;
+					el.click();
+					return true;
+				};
+
+				const initial = api.getState();
+				if (!initial || initial.activeLayerId !== 'root') return { ok: false, msg: 'initial root layer missing' };
+				if (initial.visibleNodeIDs.length !== 0) return { ok: false, msg: 'expected empty dag at start' };
+
+				while (api.getState().mode !== 'add') {
+					if (!click('DAG Mode')) return { ok: false, msg: 'cannot reach add mode' };
 				}
-				const p = api.getProjectedPoint('cube_left');
-				return { point: p, w: window.innerWidth, h: window.innerHeight };
+				if (!click('DAG Action')) return { ok: false, msg: 'add action failed' };
+
+				const afterAdd = api.getState();
+				if (afterAdd.visibleNodeIDs.length !== 1) return { ok: false, msg: 'first node not created' };
+				const processorID = afterAdd.lastCreatedNodeId;
+				if (!processorID) return { ok: false, msg: 'missing processor node id' };
+				if (afterAdd.selectedNodeId !== processorID) return { ok: false, msg: 'new node not selected' };
+
+				const store = (window.__dagStory = window.__dagStory || {});
+				store.processorID = processorID;
+				store.rootCameraBeforeDive = afterAdd.camera;
+				return { ok: true, msg: 'ok' };
 			})()
-		`, &state),
+		`, &result),
 	}); err != nil {
 		return err
 	}
-
-	if !state.Point.OK {
-		return fmt.Errorf("getProjectedPoint(cube_left) failed")
-	}
-	clickX := state.Point.X
-	clickY := state.Point.Y
-	if clickX < 0 || clickY < 0 || clickX >= state.W || clickY >= state.H {
-		return fmt.Errorf(
-			"cube projected point is outside viewport: (%.1f,%.1f) not in %.0fx%.0f",
-			clickX,
-			clickY,
-			state.W,
-			state.H,
-		)
+	if !result.OK {
+		return fmt.Errorf("story step1 failed: %s", result.Msg)
 	}
 
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		return err
 	}
-	beforeShot := filepath.Join(repoRoot, "src", "plugins", "dag", "src_v3", "screenshots", "test_step_2_before.png")
-	afterShot := filepath.Join(repoRoot, "src", "plugins", "dag", "src_v3", "screenshots", "test_step_2.png")
-	if err := browser.CaptureScreenshot(beforeShot); err != nil {
-		return fmt.Errorf("capture pre-click screenshot: %w", err)
+	shot := filepath.Join(repoRoot, "src", "plugins", "dag", "src_v3", "screenshots", "test_step_2.png")
+	if err := browser.CaptureScreenshot(shot); err != nil {
+		return fmt.Errorf("capture story step1 screenshot: %w", err)
 	}
-
-	var clickOK bool
-	if err := browser.Run(chromedp.Tasks{
-		chromedp.Evaluate(`
-			(() => {
-				const api = window.dagHitTestDebug;
-				if (!api || typeof api.clickProjected !== 'function') return false;
-				return api.clickProjected('cube_left');
-			})()
-		`, &clickOK),
-		test_v2.WaitForAriaLabelAttrEquals("Three Canvas", "data-selected-cube", "cube_left", 2*time.Second),
-	}); err != nil {
-		return err
-	}
-	if !clickOK {
-		return fmt.Errorf("clickProjected(cube_left) returned false")
-	}
-
-	if err := browser.CaptureScreenshot(afterShot); err != nil {
-		return fmt.Errorf("capture post-click screenshot: %w", err)
-	}
-
-	if err := assertPixelBlueGain(beforeShot, afterShot, int(math.Round(clickX)), int(math.Round(clickY))); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func assertPixelBlueGain(beforePath, afterPath string, x, y int) error {
-	before, err := test_v2.ReadPNGPixel(beforePath, x, y)
-	if err != nil {
-		return fmt.Errorf("read pre-click pixel: %w", err)
-	}
-	after, err := test_v2.ReadPNGPixel(afterPath, x, y)
-	if err != nil {
-		return fmt.Errorf("read post-click pixel: %w", err)
-	}
-
-	blueGain := int(after.B) - int(before.B)
-	if blueGain < 25 || after.B < after.R+10 || after.B < after.G+10 {
-		return fmt.Errorf(
-			"pixel color did not shift to blue highlight at (%d,%d): before rgba(%d,%d,%d,%d), after rgba(%d,%d,%d,%d)",
-			x, y,
-			before.R, before.G, before.B, before.A,
-			after.R, after.G, after.B, after.A,
-		)
-	}
-
 	return nil
 }

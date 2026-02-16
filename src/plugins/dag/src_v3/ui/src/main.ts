@@ -33,6 +33,7 @@ menu.addButton('Three', 'Navigate Three', () => {
 });
 
 const sectionSet = new Set(['dag-table', 'three']);
+const sectionOrder = ['dag-table', 'three'] as const;
 const defaultSection = 'dag-table';
 
 const syncSectionFromURL = () => {
@@ -50,6 +51,39 @@ window.addEventListener('pageshow', syncSectionFromURL);
 window.addEventListener('focus', syncSectionFromURL);
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) syncSectionFromURL();
+});
+
+window.addEventListener('keydown', (event) => {
+  if (event.defaultPrevented) return;
+  const target = event.target as HTMLElement | null;
+  if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+
+  const active = sections.getActiveSectionId() ?? defaultSection;
+  const idx = sectionOrder.indexOf(active as (typeof sectionOrder)[number]);
+  if (idx < 0) return;
+
+  if (event.key === 'ArrowDown' || event.key === 'PageDown' || event.key.toLowerCase() === 'j') {
+    const next = sectionOrder[Math.min(sectionOrder.length - 1, idx + 1)];
+    if (next !== active) {
+      event.preventDefault();
+      void sections.navigateTo(next);
+    }
+    return;
+  }
+  if (event.key === 'ArrowUp' || event.key === 'PageUp' || event.key.toLowerCase() === 'k') {
+    const prev = sectionOrder[Math.max(0, idx - 1)];
+    if (prev !== active) {
+      event.preventDefault();
+      void sections.navigateTo(prev);
+    }
+    return;
+  }
+  if (event.key.toLowerCase() === 'm') {
+    event.preventDefault();
+    const dagMenu = document.querySelector("button[aria-label='DAG Menu']") as HTMLButtonElement | null;
+    const globalMenu = document.querySelector("button[aria-label='Toggle Global Menu']") as HTMLButtonElement | null;
+    (dagMenu ?? globalMenu)?.click();
+  }
 });
 
 syncSectionFromURL();

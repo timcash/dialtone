@@ -11,6 +11,11 @@ This section is SQL-first (DuckDB-oriented) and excludes UI/rendering concerns.
 ```sql
 -- Logical type aliases (DuckDB has no CREATE DOMAIN; use VARCHAR consistently).
 -- GraphId, LayerId, NodeId, EdgeId, CheckpointId => VARCHAR
+-- Relationship vocabulary:
+--   output_node_id => source node for a directed link
+--   input_node_id  => destination node for a directed link
+--   nested_parent_node_id => node that contains a nested layer
+--   nested_layer_id => layer contained by a node
 -- Rank => INTEGER CHECK(rank >= 0)
 -- Timestamp => TIMESTAMP
 ```
@@ -35,7 +40,7 @@ CREATE TABLE IF NOT EXISTS dag_graph (
 CREATE TABLE IF NOT EXISTS dag_layer (
   layer_id VARCHAR PRIMARY KEY,
   graph_id VARCHAR NOT NULL REFERENCES dag_graph(graph_id) ON DELETE CASCADE,
-  parent_node_id VARCHAR, -- nullable; set after dag_node exists
+  nested_parent_node_id VARCHAR, -- nullable; set after dag_node exists
   layer_name VARCHAR,
   depth INTEGER NOT NULL DEFAULT 0 CHECK (depth >= 0),
   semantic_role VARCHAR,
@@ -53,7 +58,7 @@ CREATE TABLE IF NOT EXISTS dag_node (
   layer_id VARCHAR NOT NULL REFERENCES dag_layer(layer_id) ON DELETE CASCADE,
   label VARCHAR NOT NULL,
   rank INTEGER NOT NULL DEFAULT 0 CHECK (rank >= 0),
-  sub_layer_id VARCHAR UNIQUE, -- at most one parent node per sublayer
+  nested_layer_id VARCHAR UNIQUE, -- at most one containing node per nested layer
   node_type VARCHAR,
   node_status VARCHAR,
   owner VARCHAR,
@@ -64,16 +69,16 @@ CREATE TABLE IF NOT EXISTS dag_node (
 );
 ```
 
-## 5) Node <-> SubLayer Link Integrity
+## 5) Node <-> Nested Link Integrity
 
 ```sql
 -- Apply after dag_node and dag_layer both exist.
--- Each nested layer references its parent node via dag_layer.parent_node_id.
+-- Each nested layer references its containing node via dag_layer.nested_parent_node_id.
 -- Optionally enforce reverse link:
--- dag_node.sub_layer_id -> dag_layer.layer_id
+-- dag_node.nested_layer_id -> dag_layer.layer_id
 ALTER TABLE dag_node
-ADD CONSTRAINT fk_node_sub_layer
-FOREIGN KEY (sub_layer_id) REFERENCES dag_layer(layer_id);
+ADD CONSTRAINT fk_node_nested_layer
+FOREIGN KEY (nested_layer_id) REFERENCES dag_layer(layer_id);
 ```
 
 ## 6) Edge
@@ -82,8 +87,8 @@ FOREIGN KEY (sub_layer_id) REFERENCES dag_layer(layer_id);
 CREATE TABLE IF NOT EXISTS dag_edge (
   edge_id VARCHAR PRIMARY KEY,
   layer_id VARCHAR NOT NULL REFERENCES dag_layer(layer_id) ON DELETE CASCADE,
-  from_node_id VARCHAR NOT NULL REFERENCES dag_node(node_id) ON DELETE CASCADE,
-  to_node_id VARCHAR NOT NULL REFERENCES dag_node(node_id) ON DELETE CASCADE,
+  output_node_id VARCHAR NOT NULL REFERENCES dag_node(node_id) ON DELETE CASCADE,
+  input_node_id VARCHAR NOT NULL REFERENCES dag_node(node_id) ON DELETE CASCADE,
   weight DOUBLE,
   edge_type VARCHAR,
   confidence DOUBLE,
@@ -91,7 +96,7 @@ CREATE TABLE IF NOT EXISTS dag_edge (
   annotations_json VARCHAR,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT chk_edge_not_self CHECK (from_node_id <> to_node_id)
+  CONSTRAINT chk_edge_not_self CHECK (output_node_id <> input_node_id)
 );
 ```
 
@@ -141,7 +146,7 @@ WHERE node_id = ?;
 DELETE FROM dag_node WHERE node_id = ?;
 
 -- Create edge
-INSERT INTO dag_edge (edge_id, layer_id, from_node_id, to_node_id, weight)
+INSERT INTO dag_edge (edge_id, layer_id, output_node_id, input_node_id, weight)
 VALUES (?, ?, ?, ?, ?);
 
 -- Delete edge
@@ -160,15 +165,15 @@ WHERE l.layer_id IS NULL;
 -- Cross-layer edges (should be 0 rows)
 SELECT e.edge_id
 FROM dag_edge e
-JOIN dag_node n1 ON n1.node_id = e.from_node_id
-JOIN dag_node n2 ON n2.node_id = e.to_node_id
+JOIN dag_node n1 ON n1.node_id = e.output_node_id
+JOIN dag_node n2 ON n2.node_id = e.input_node_id
 WHERE n1.layer_id <> n2.layer_id;
 
 -- Rank constraint violations (should be 0 rows)
-SELECT e.edge_id, n1.rank AS from_rank, n2.rank AS to_rank
+SELECT e.edge_id, n1.rank AS output_rank, n2.rank AS input_rank
 FROM dag_edge e
-JOIN dag_node n1 ON n1.node_id = e.from_node_id
-JOIN dag_node n2 ON n2.node_id = e.to_node_id
+JOIN dag_node n1 ON n1.node_id = e.output_node_id
+JOIN dag_node n2 ON n2.node_id = e.input_node_id
 WHERE n2.rank <= n1.rank;
 ```
 
@@ -195,8 +200,8 @@ CREATE OR REPLACE PROPERTY GRAPH dag_pg
   )
   EDGE TABLES (
     dag_edge
-      SOURCE KEY (from_node_id) REFERENCES dag_node (node_id)
-      DESTINATION KEY (to_node_id) REFERENCES dag_node (node_id)
+      SOURCE KEY (output_node_id) REFERENCES dag_node (node_id)
+      DESTINATION KEY (input_node_id) REFERENCES dag_node (node_id)
   );
 ```
 

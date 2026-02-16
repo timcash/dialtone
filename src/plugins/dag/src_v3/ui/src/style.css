@@ -8,12 +8,15 @@ section[aria-label='Three Section'] {
 
 section[aria-label='DAG Table Section'] {
   --table-row-height: 1.45em;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 72px 12px 20px 12px;
 }
 
 section[aria-label='DAG Table Section'] table {
   display: table;
   width: 100%;
-  height: 100%;
+  height: auto;
   background: #090f18;
   align-self: stretch;
   table-layout: fixed;
@@ -31,6 +34,27 @@ section[aria-label='DAG Table Section'] td {
 
 section[aria-label='Three Section'] {
   background: #000;
+  position: relative;
+}
+
+nav {
+  top: 14px;
+  right: 14px;
+  bottom: auto;
+  z-index: 1300;
+}
+
+nav > button.thumb {
+  width: 64px;
+  height: 64px;
+  min-width: 56px;
+  min-height: 56px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  background: rgba(9, 14, 24, 0.94);
+}
+
+nav > div {
+  width: min(240px, 85vw);
 }
 
 canvas[aria-label='Three Canvas'] {
@@ -39,4 +63,133 @@ canvas[aria-label='Three Canvas'] {
   border: 0;
   border-radius: 0;
   background: #000;
+  touch-action: manipulation;
+}
+
+.dag-menu-btn {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  right: calc(env(safe-area-inset-right, 0px) + 14px);
+  width: 64px;
+  height: 64px;
+  min-width: 56px;
+  min-height: 56px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  background: rgba(8, 14, 24, 0.9);
+  color: #f2f7ff;
+  text-align: center;
+  font-weight: 700;
+  z-index: 12;
+}
+
+.dag-menu-panel {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 84px);
+  right: calc(env(safe-area-inset-right, 0px) + 14px);
+  width: min(220px, calc(100vw - 28px));
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(8, 12, 20, 0.95);
+  display: grid;
+  gap: 8px;
+  z-index: 12;
+}
+
+/* Use the shared app menu for section switching; keep DAG in-canvas menu hidden. */
+.dag-menu-btn,
+.dag-menu-panel {
+  display: none !important;
+}
+
+.dag-menu-panel > button {
+  height: 44px;
+  border-radius: 10px;
+  text-align: center;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dag-thumb-dock {
+  position: absolute;
+  left: calc(env(safe-area-inset-left, 0px) + 14px);
+  right: calc(env(safe-area-inset-right, 0px) + 14px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 76px);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(56px, 1fr));
+  gap: 12px;
+  z-index: 11;
+  pointer-events: none;
+}
+
+.dag-thumb-cluster {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.dag-thumb-stack {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+}
+
+.dag-thumb {
+  width: 100%;
+  max-width: 92px;
+  min-width: 56px;
+  height: 64px;
+  min-height: 56px;
+  border-radius: 999px;
+  border: 1px solid rgba(240, 246, 255, 0.55);
+  background: rgba(10, 17, 28, 0.92);
+  color: #f2f7ff;
+  text-align: center;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  touch-action: manipulation;
+}
+
+.dag-thumb.secondary {
+  font-size: 0.78rem;
+}
+
+.dag-rename {
+  position: absolute;
+  left: calc(env(safe-area-inset-left, 0px) + 14px);
+  right: calc(env(safe-area-inset-right, 0px) + 14px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  z-index: 11;
+}
+
+.dag-rename > input {
+  height: 46px;
+  border-radius: 12px;
+  border: 1px solid rgba(240, 246, 255, 0.45);
+  background: rgba(10, 17, 28, 0.92);
+  color: #f2f7ff;
+  padding: 0 12px;
+}
+
+.dag-rename > button {
+  width: 96px;
+  height: 46px;
+  border-radius: 12px;
+  border: 1px solid rgba(240, 246, 255, 0.55);
+  background: rgba(10, 17, 28, 0.92);
+  color: #f2f7ff;
+  text-align: center;
+  font-weight: 700;
+}
+
+@media (max-width: 420px) {
+  .dag-thumb {
+    height: 60px;
+  }
 }
