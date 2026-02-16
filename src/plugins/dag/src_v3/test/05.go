@@ -15,7 +15,7 @@ func Run05ThreeUserStoryNestAndDive() error {
 	}
 	fmt.Println("[THREE] story step3 description:")
 	fmt.Println("[THREE]   - In order to create a nested layer, the user selects processor and taps Nest.")
-	fmt.Println("[THREE]   - After dive, user builds nested nodes using Add and validates nested edge flow.")
+	fmt.Println("[THREE]   - After dive, user builds nested nodes using Add, then links them explicitly.")
 	fmt.Println("[THREE]   - Camera expectation: on dive, framing shifts to nested layer and history depth increments.")
 
 	type evalResult struct {
@@ -63,11 +63,17 @@ func Run05ThreeUserStoryNestAndDive() error {
 			const nestedA = st.lastCreatedNodeId;
 			if (!nestedA) return { ok: false, msg: 'nested node A id missing' };
 
-			// Second nested node as output child
+			// Second nested node
 			if (!click('DAG Add')) return { ok: false, msg: 'nested add node B failed' };
 			st = api.getState();
 			const nestedB = st.lastCreatedNodeId;
 			if (!nestedB || nestedB === nestedA) return { ok: false, msg: 'nested node B id missing' };
+
+			// Link nestedA -> nestedB.
+			if (!click('DAG Clear Picks')) return { ok: false, msg: 'clear picks before nested link failed' };
+			if (!clickNode(nestedA)) return { ok: false, msg: 'select nestedA for link source failed' };
+			if (!clickNode(nestedB)) return { ok: false, msg: 'select nestedB for link target failed' };
+			if (!click('DAG Connect')) return { ok: false, msg: 'connect nestedA->nestedB failed' };
 
 			// Validate nested edge exists by selecting first nested node.
 			if (!clickNode(nestedA)) return { ok: false, msg: 'reselect nestedA failed' };

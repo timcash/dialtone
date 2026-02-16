@@ -4,11 +4,11 @@ Versioned DAG plugin development lives under `src/plugins/dag/src_vN`.
 
 ## Next Steps
 
-1. Keep controls as a fixed 3x3 thumb grid for mobile (up to 9 buttons).
-2. Keep each button single-purpose.
-3. Keep graph interaction language explicit: `output node` -> `input node` for directed links.
-4. Keep camera framing readable after every interaction (add/link/nest/back/delete/unlink).
-5. Keep nested layer visibility strict: active layer + parent context only.
+1. Keep controls thumb-friendly and single-purpose on mobile.
+2. Keep link/unlink interaction driven by node selection history.
+3. Keep camera framing readable after add/link/unlink/nest/back interactions.
+4. Keep nested visibility tied to selection history (`parent node in history => child layer visible`).
+5. Keep tests aligned with the live UI workflow and state model.
 
 ## Current State
 
@@ -22,36 +22,37 @@ Versioned DAG plugin development lives under `src/plugins/dag/src_vN`.
 3. `src_v3` starts from an empty root DAG; users build graph structure via UI controls.
 4. `dag-table` is rendered flush at top-left (no section padding/margins).
 5. Three controls are rendered in one unified CSS grid at the bottom:
-   - rows 1-3: 9 action buttons
-   - row 4: label input + rename button
-6. Primary controls use a fixed 9-button grid plus node taps:
+   - rows 1-2: 6 action buttons
+   - row 3: label input + rename button
+6. Primary controls use a fixed thumb grid plus node taps:
    - `DAG Back`
    - `DAG Add`
-   - `DAG Pick Output`
-   - `DAG Pick Input`
-   - `DAG Connect` (link output -> input)
-   - `DAG Unlink` (remove output -> input)
+   - `DAG Connect` (link second-most-recent -> most-recent selected node)
+   - `DAG Unlink` (remove second-most-recent -> most-recent selected node edge)
    - `DAG Nest`
-   - `DAG Delete Node`
-   - `DAG Clear Picks`
-7. A top-left legend in Three explains node colors and displays live first/second link picks:
-   - Selected node
-   - First pick (`output`)
-   - Second pick (`input`)
-   - Inputs to selected node
-   - Outputs from selected node
-8. Section switching uses one menu button that toggles a modal with `Table` and `Three`.
-9. Link workflow is pair-based:
-   - select node A, tap `DAG Pick Output`
-   - select node B, tap `DAG Pick Input`
+   - `DAG Clear` (clears node selection + selection history)
+7. A top-left node history panel shows the last 5 selected nodes (most recent first, top-to-bottom).
+   - Most recent selected node is light blue.
+   - Second-most-recent selected node is blue.
+   - All other nodes are gray.
+8. Section switching uses the shared app menu (`Table` / `Three`).
+9. Link workflow uses selection history:
+   - select node A
+   - select node B
    - tap `DAG Connect` to create directed edge A -> B
 10. Rank rule on link creation:
    - if input node rank is less than or equal to any output rank feeding it, input node shifts to `max(output_rank)+1`.
-11. Unlink workflow is pair-based:
-   - select output/input picks as above
+11. Unlink workflow uses selection history:
+   - select output/input nodes as above
    - tap `DAG Unlink` to remove that specific directed edge.
 12. Nested layers are created/entered from selected nodes using `DAG Nest` and stacked deeper on Z.
-13. `Back` undives through layer history, reframes camera, and hides deeper nested layers.
+13. `Back` behavior is combined:
+   - if nested-layer history exists, it undives layer history and reframes camera
+   - otherwise, it pops node selection history and moves camera focus to the previous selected node
+14. Layer visibility is history-driven:
+   - active layer is always visible
+   - nested layer is visible only while its `parentNodeId` is present in node history
+   - if parent node drops out of history (e.g. `Back` pop), that nested layer hides
 14. Node labels are renameable via the bottom input (`DAG Label Input` + `DAG Rename`) and update in-scene.
 15. Camera framing is intentionally zoomed out for mobile readability.
 
@@ -126,11 +127,11 @@ Current suite validates:
 2. DAG table data + screenshot artifact generation.
 3. Three.js user-story workflow end-to-end:
 - start from empty DAG and create first node
-- build root input/output graph via output/input picks + `DAG Connect`
+- build root input/output graph via selection history + `DAG Connect`
 - create nested layer and dive
 - build deeper nested layers and undive through history with layer visibility constraints
 - rename labels from text input
-- delete nodes and unlink specific directed edges via output/input picks
+- unlink specific directed edges via selection history
 - verify camera remains readable/zoomed out across transitions
 
 Always inspect `TEST.md` after each run.

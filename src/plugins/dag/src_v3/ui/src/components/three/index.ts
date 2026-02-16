@@ -52,13 +52,8 @@ type NestedLink = {
 };
 
 const NODE_BASE_COLOR = 0x5b6873;
-const NODE_SELECTED_COLOR = 0x2b78ff;
-const NODE_INPUT_COLOR = 0x2da44e;
-const NODE_OUTPUT_COLOR = 0xd97706;
-const NODE_NESTED_COLOR = 0x7c3aed;
-const NODE_NESTED_LAYER_COLOR = 0x2f9e9f;
-const NODE_LINK_OUTPUT_PICK_COLOR = 0xfacc15;
-const NODE_LINK_INPUT_PICK_COLOR = 0x38bdf8;
+const NODE_RECENT_COLOR = 0x7dd3fc;
+const NODE_SECOND_RECENT_COLOR = 0x2b78ff;
 const EDGE_BASE_COLOR = 0x6b7280;
 const EDGE_NESTED_LINK_COLOR = 0xfacc15;
 
@@ -90,8 +85,7 @@ class ThreeControl implements VisualizationControl {
 
   private userNodeCounter = 1;
   private edgeCounter = 1;
-  private pendingLinkOutputNodeId = '';
-  private pendingLinkInputNodeId = '';
+  private recentSelectedNodeIDs: NodeID[] = [];
   private labelsVisible = true;
   private lastCreatedNodeId = '';
   private menuOpen = false;
@@ -100,19 +94,15 @@ class ThreeControl implements VisualizationControl {
 
   private backButton: HTMLButtonElement | null = null;
   private addButton: HTMLButtonElement | null = null;
-  private pickOutputButton: HTMLButtonElement | null = null;
-  private pickInputButton: HTMLButtonElement | null = null;
   private connectButton: HTMLButtonElement | null = null;
   private unlinkButton: HTMLButtonElement | null = null;
   private nestButton: HTMLButtonElement | null = null;
-  private deleteNodeButton: HTMLButtonElement | null = null;
   private clearPicksButton: HTMLButtonElement | null = null;
   private menuButton: HTMLButtonElement | null = null;
   private menuPanel: HTMLElement | null = null;
   private menuTableButton: HTMLButtonElement | null = null;
   private menuThreeButton: HTMLButtonElement | null = null;
-  private legendOutputValue: HTMLElement | null = null;
-  private legendInputValue: HTMLElement | null = null;
+  private nodeHistoryValueEls: HTMLElement[] = [];
 
   constructor(private container: HTMLElement, private canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -369,19 +359,21 @@ class ThreeControl implements VisualizationControl {
   private initMobileUI() {
     this.backButton = this.container.querySelector("button[aria-label='DAG Back']");
     this.addButton = this.container.querySelector("button[aria-label='DAG Add']");
-    this.pickOutputButton = this.container.querySelector("button[aria-label='DAG Pick Output']");
-    this.pickInputButton = this.container.querySelector("button[aria-label='DAG Pick Input']");
     this.connectButton = this.container.querySelector("button[aria-label='DAG Connect']");
     this.unlinkButton = this.container.querySelector("button[aria-label='DAG Unlink']");
     this.nestButton = this.container.querySelector("button[aria-label='DAG Nest']");
-    this.deleteNodeButton = this.container.querySelector("button[aria-label='DAG Delete Node']");
     this.clearPicksButton = this.container.querySelector("button[aria-label='DAG Clear Picks']");
     this.menuButton = this.container.querySelector("button[aria-label='DAG Menu']");
     this.menuPanel = this.container.querySelector("[aria-label='DAG Menu Panel']");
     this.menuTableButton = this.container.querySelector("button[aria-label='DAG Menu Navigate Table']");
     this.menuThreeButton = this.container.querySelector("button[aria-label='DAG Menu Navigate Three']");
-    this.legendOutputValue = this.container.querySelector("[aria-label='DAG Legend Output Value']");
-    this.legendInputValue = this.container.querySelector("[aria-label='DAG Legend Input Value']");
+    this.nodeHistoryValueEls = [
+      this.container.querySelector("[aria-label='DAG Node History Item 1']"),
+      this.container.querySelector("[aria-label='DAG Node History Item 2']"),
+      this.container.querySelector("[aria-label='DAG Node History Item 3']"),
+      this.container.querySelector("[aria-label='DAG Node History Item 4']"),
+      this.container.querySelector("[aria-label='DAG Node History Item 5']"),
+    ].filter((el): el is HTMLElement => !!el);
     this.renameInput = this.container.querySelector("input[aria-label='DAG Label Input']");
     this.renameApplyButton = this.container.querySelector("button[aria-label='DAG Rename']");
     const testMode = (() => {
@@ -400,14 +392,6 @@ class ThreeControl implements VisualizationControl {
       this.createChildNodeFromSelected();
       this.syncControlState();
     });
-    this.pickOutputButton?.addEventListener('click', () => {
-      this.pickOutputFromSelection();
-      this.syncControlState();
-    });
-    this.pickInputButton?.addEventListener('click', () => {
-      this.pickInputFromSelection();
-      this.syncControlState();
-    });
     this.connectButton?.addEventListener('click', () => {
       this.performConnectAction();
       this.syncControlState();
@@ -420,13 +404,8 @@ class ThreeControl implements VisualizationControl {
       this.createNestedLayerAndEnter();
       this.syncControlState();
     });
-    this.deleteNodeButton?.addEventListener('click', () => {
-      this.performRemoveNodeAction();
-      this.syncControlState();
-    });
     this.clearPicksButton?.addEventListener('click', () => {
-      this.clearPendingLinkPicks();
-      this.syncControlState();
+      this.clearSelections();
     });
 
     this.menuButton?.addEventListener('click', () => {
@@ -467,7 +446,6 @@ class ThreeControl implements VisualizationControl {
   }
 
   private createChildNodeFromSelected() {
-    this.clearPendingLinkPicks();
     if (!this.selectedNodeId) {
       const nodeId = `n_user_${this.userNodeCounter++}`;
       if (!this.addNode(this.activeLayerId, nodeId, 0, 0)) return;
@@ -480,60 +458,58 @@ class ThreeControl implements VisualizationControl {
     if (!source) return;
     const nodeId = `n_user_${this.userNodeCounter++}`;
     if (!this.addNode(source.layerId, nodeId, source.rank + 1, source.row)) return;
-    const edgeId = `e_user_${this.edgeCounter++}`;
-    this.addEdge(edgeId, source.layerId, source.id, nodeId);
     this.lastCreatedNodeId = nodeId;
     this.selectNode(nodeId);
-    console.log(`[Three #three] action add node: ${nodeId} from ${source.id}`);
+    console.log(`[Three #three] action add node: ${nodeId} near ${source.id}`);
   }
 
   private createNestedLayerAndEnter() {
     if (!this.selectedNodeId) return;
-    this.clearPendingLinkPicks();
     const nestedLayerId = this.ensureNestedLayer(this.selectedNodeId);
     if (!nestedLayerId) return;
     this.enterNested(this.selectedNodeId);
   }
 
-  private pickOutputFromSelection() {
-    if (!this.selectedNodeId) return;
-    this.pendingLinkOutputNodeId = this.selectedNodeId;
+  private getRecentLinkPair(): { outputNodeId: NodeID; inputNodeId: NodeID } | null {
+    if (this.recentSelectedNodeIDs.length < 2) return null;
+    const inputNodeId = this.recentSelectedNodeIDs[0];
+    const outputNodeId = this.recentSelectedNodeIDs[1];
+    if (!outputNodeId || !inputNodeId || outputNodeId === inputNodeId) return null;
+    return { outputNodeId, inputNodeId };
   }
 
-  private pickInputFromSelection() {
-    if (!this.selectedNodeId) return;
-    this.pendingLinkInputNodeId = this.selectedNodeId;
+  private getRecentLinkPairForActiveLayer(): { outputNodeId: NodeID; inputNodeId: NodeID } | null {
+    const pair = this.getRecentLinkPair();
+    if (!pair) return null;
+    const source = this.nodes.get(pair.outputNodeId);
+    const target = this.nodes.get(pair.inputNodeId);
+    if (!source || !target) return null;
+    if (source.layerId !== this.activeLayerId || target.layerId !== this.activeLayerId) return null;
+    return pair;
   }
 
-  private clearPendingLinkPicks() {
-    this.pendingLinkOutputNodeId = '';
-    this.pendingLinkInputNodeId = '';
+  private clearSelections() {
+    this.selectedNodeId = '';
+    this.recentSelectedNodeIDs = [];
+    this.refreshVisualState();
+    this.syncCanvasState();
   }
 
   private performConnectAction() {
-    const source = this.nodes.get(this.pendingLinkOutputNodeId);
-    const target = this.nodes.get(this.pendingLinkInputNodeId);
+    const pair = this.getRecentLinkPairForActiveLayer();
+    if (!pair) return;
+    const source = this.nodes.get(pair.outputNodeId);
+    const target = this.nodes.get(pair.inputNodeId);
     if (!source || !target) return;
     if (source.id === target.id) return;
     if (!source || !target || source.layerId !== target.layerId) return;
     if (source.layerId !== this.activeLayerId) return;
     if (this.findEdgeIDBetween(source.id, target.id)) {
-      this.clearPendingLinkPicks();
       return;
     }
     const edgeId = `e_user_${this.edgeCounter++}`;
     if (this.addEdge(edgeId, source.layerId, source.id, target.id)) {
       console.log(`[Three #three] action add edge: ${source.id} -> ${target.id}`);
-    }
-    this.clearPendingLinkPicks();
-  }
-
-  private performRemoveNodeAction() {
-    if (!this.selectedNodeId) return;
-    const nodeID = this.selectedNodeId;
-    if (this.removeNode(nodeID)) {
-      this.clearPendingLinkPicks();
-      console.log(`[Three #three] action remove node: ${nodeID}`);
     }
   }
 
@@ -549,13 +525,14 @@ class ThreeControl implements VisualizationControl {
   }
 
   private performUnlinkAction() {
-    const outputNodeId = this.pendingLinkOutputNodeId;
-    const inputNodeId = this.pendingLinkInputNodeId;
+    const pair = this.getRecentLinkPairForActiveLayer();
+    if (!pair) return;
+    const outputNodeId = pair.outputNodeId;
+    const inputNodeId = pair.inputNodeId;
     if (!outputNodeId || !inputNodeId) return;
     const edgeID = this.findEdgeIDBetween(outputNodeId, inputNodeId);
     if (!edgeID) return;
     if (this.removeEdge(edgeID)) {
-      this.clearPendingLinkPicks();
       console.log(`[Three #three] action remove edge: ${outputNodeId} -> ${inputNodeId}`);
     }
   }
@@ -594,16 +571,14 @@ class ThreeControl implements VisualizationControl {
   }
 
   private syncControlState() {
-    if (this.pickOutputButton) this.pickOutputButton.textContent = this.pendingLinkOutputNodeId ? 'Out+' : 'Pick Out';
-    if (this.pickInputButton) this.pickInputButton.textContent = this.pendingLinkInputNodeId ? 'In+' : 'Pick In';
-    if (this.backButton) this.backButton.disabled = this.history.length === 0;
-    if (this.connectButton) this.connectButton.disabled = !(this.pendingLinkOutputNodeId && this.pendingLinkInputNodeId);
-    if (this.unlinkButton) this.unlinkButton.disabled = !(this.pendingLinkOutputNodeId && this.pendingLinkInputNodeId);
-    if (this.pickOutputButton) this.pickOutputButton.disabled = !this.selectedNodeId;
-    if (this.pickInputButton) this.pickInputButton.disabled = !this.selectedNodeId;
+    const pair = this.getRecentLinkPairForActiveLayer();
+    if (this.backButton) this.backButton.disabled = this.history.length === 0 && this.recentSelectedNodeIDs.length < 2;
+    if (this.connectButton) this.connectButton.disabled = !pair;
+    if (this.unlinkButton) this.unlinkButton.disabled = !pair;
     if (this.nestButton) this.nestButton.disabled = !this.selectedNodeId;
-    if (this.deleteNodeButton) this.deleteNodeButton.disabled = !this.selectedNodeId;
-    if (this.clearPicksButton) this.clearPicksButton.disabled = !(this.pendingLinkOutputNodeId || this.pendingLinkInputNodeId);
+    if (this.clearPicksButton) {
+      this.clearPicksButton.disabled = !(this.recentSelectedNodeIDs.length > 0 || this.selectedNodeId);
+    }
     if (this.menuButton) this.menuButton.setAttribute('aria-expanded', String(this.menuOpen));
     if (this.menuPanel) this.menuPanel.hidden = !this.menuOpen;
     const selectedNode = this.nodes.get(this.selectedNodeId);
@@ -613,11 +588,12 @@ class ThreeControl implements VisualizationControl {
       this.renameInput.placeholder = selectedNode ? 'Rename selected node' : 'Select node to rename';
     }
     if (this.renameApplyButton) this.renameApplyButton.disabled = !selectedNode;
-    if (this.legendOutputValue) this.legendOutputValue.textContent = this.pendingLinkOutputNodeId || 'none';
-    if (this.legendInputValue) this.legendInputValue.textContent = this.pendingLinkInputNodeId || 'none';
+    for (let i = 0; i < this.nodeHistoryValueEls.length; i += 1) {
+      this.nodeHistoryValueEls[i].textContent = this.recentSelectedNodeIDs[i] || 'none';
+    }
     this.canvas.setAttribute('data-labels-visible', String(this.labelsVisible));
-    this.canvas.setAttribute('data-link-output', this.pendingLinkOutputNodeId);
-    this.canvas.setAttribute('data-link-input', this.pendingLinkInputNodeId);
+    this.canvas.setAttribute('data-link-output', pair?.outputNodeId ?? '');
+    this.canvas.setAttribute('data-link-input', pair?.inputNodeId ?? '');
   }
 
   private hitTestClientPoint(clientX: number, clientY: number): NodeID {
@@ -642,6 +618,8 @@ class ThreeControl implements VisualizationControl {
   private selectNode(nodeId: NodeID) {
     this.selectedNodeId = nodeId;
     if (nodeId) {
+      this.recentSelectedNodeIDs.unshift(nodeId);
+      if (this.recentSelectedNodeIDs.length > 5) this.recentSelectedNodeIDs.length = 5;
       console.log(`[Three #three] selected node: ${nodeId}`);
     }
     this.refreshVisualState();
@@ -652,10 +630,12 @@ class ThreeControl implements VisualizationControl {
     this.activeLayerId = layerId;
     const visibleLayerIDs = new Set<LayerID>();
     visibleLayerIDs.add(layerId);
-    const activeLayer = this.layers.get(layerId);
-    if (activeLayer?.parentNodeId) {
-      const parentNode = this.nodes.get(activeLayer.parentNodeId);
-      if (parentNode) visibleLayerIDs.add(parentNode.layerId);
+    const selectedHistory = new Set(this.recentSelectedNodeIDs);
+    for (const layer of this.layers.values()) {
+      if (!layer.parentNodeId) continue;
+      if (selectedHistory.has(layer.parentNodeId)) {
+        visibleLayerIDs.add(layer.id);
+      }
     }
 
     for (const node of this.nodes.values()) {
@@ -743,27 +723,17 @@ class ThreeControl implements VisualizationControl {
     const activeLayer = this.layers.get(this.activeLayerId);
     if (!activeLayer) return;
 
-    const inputNodeIDs = new Set(this.getInputNodeIDs(this.selectedNodeId));
-    const outputNodeIDs = new Set(this.getOutputNodeIDs(this.selectedNodeId));
+    const mostRecent = this.recentSelectedNodeIDs[0] || '';
+    const secondRecent = this.recentSelectedNodeIDs[1] || '';
 
     for (const nodeId of activeLayer.nodeIds) {
       const node = this.nodes.get(nodeId);
       if (!node) continue;
       const material = node.mesh.material as THREE.MeshStandardMaterial;
-      if (node.id === this.pendingLinkOutputNodeId) {
-        material.color.setHex(NODE_LINK_OUTPUT_PICK_COLOR);
-      } else if (node.id === this.pendingLinkInputNodeId) {
-        material.color.setHex(NODE_LINK_INPUT_PICK_COLOR);
-      } else if (node.id === this.selectedNodeId) {
-        material.color.setHex(NODE_SELECTED_COLOR);
-      } else if (inputNodeIDs.has(node.id)) {
-        material.color.setHex(NODE_INPUT_COLOR);
-      } else if (outputNodeIDs.has(node.id)) {
-        material.color.setHex(NODE_OUTPUT_COLOR);
-      } else if (node.layerId !== 'root') {
-        material.color.setHex(NODE_NESTED_LAYER_COLOR);
-      } else if (node.nestedLayerId) {
-        material.color.setHex(NODE_NESTED_COLOR);
+      if (node.id === mostRecent) {
+        material.color.setHex(NODE_RECENT_COLOR);
+      } else if (node.id === secondRecent) {
+        material.color.setHex(NODE_SECOND_RECENT_COLOR);
       } else {
         material.color.setHex(NODE_BASE_COLOR);
       }
@@ -851,6 +821,44 @@ class ThreeControl implements VisualizationControl {
     return this.selectedNodeId === nodeId;
   }
 
+  private focusCameraOnNode(nodeId: NodeID): boolean {
+    const node = this.nodes.get(nodeId);
+    if (!node) return false;
+    const layerBounds = this.getLayerBounds(node.layerId);
+    if (!layerBounds.ok) return false;
+    const nodeWorld = node.mesh.getWorldPosition(new THREE.Vector3());
+    const offset = this.camera.position.clone().sub(layerBounds.center);
+    this.camera.position.copy(nodeWorld.clone().add(offset));
+    this.camera.lookAt(nodeWorld);
+    this.camera.updateProjectionMatrix();
+    return true;
+  }
+
+  private popSelectionHistoryBack(): boolean {
+    if (this.recentSelectedNodeIDs.length < 2) return false;
+    this.recentSelectedNodeIDs.shift();
+    const prevNodeId = this.recentSelectedNodeIDs[0];
+    if (!prevNodeId) return false;
+    const prevNode = this.nodes.get(prevNodeId);
+    if (!prevNode) {
+      this.recentSelectedNodeIDs = this.recentSelectedNodeIDs.filter((id) => this.nodes.has(id));
+      this.selectedNodeId = this.recentSelectedNodeIDs[0] || '';
+      this.refreshVisualState();
+      this.syncCanvasState();
+      return this.selectedNodeId !== '';
+    }
+    this.selectedNodeId = prevNodeId;
+    if (prevNode.layerId !== this.activeLayerId) {
+      this.applyLayerView(prevNode.layerId);
+    } else {
+      this.focusCameraOnNode(prevNodeId);
+      this.refreshVisualState();
+      this.syncCanvasState();
+    }
+    console.log(`[Three #three] back to selected node: ${prevNodeId}`);
+    return true;
+  }
+
   private enterNested(nodeId?: NodeID): boolean {
     const targetNode = this.nodes.get(nodeId || this.selectedNodeId);
     if (!targetNode || !targetNode.nestedLayerId) return false;
@@ -863,9 +871,9 @@ class ThreeControl implements VisualizationControl {
   }
 
   private goBack(): boolean {
+    if (this.history.length === 0 && this.popSelectionHistoryBack()) return true;
     const prev = this.history.pop();
     if (!prev) return false;
-    this.clearPendingLinkPicks();
     this.selectedNodeId = prev.selectedNodeId;
     this.applyLayerView(prev.layerId);
     console.log(`[Three #three] back to layer: ${prev.layerId}`);
@@ -1027,8 +1035,7 @@ class ThreeControl implements VisualizationControl {
     this.allMeshes = this.allMeshes.filter((m) => m !== node.mesh);
     layer.nodeIds = layer.nodeIds.filter((id) => id !== nodeId);
     if (this.selectedNodeId === nodeId) this.selectedNodeId = '';
-    if (this.pendingLinkOutputNodeId === nodeId) this.pendingLinkOutputNodeId = '';
-    if (this.pendingLinkInputNodeId === nodeId) this.pendingLinkInputNodeId = '';
+    this.recentSelectedNodeIDs = this.recentSelectedNodeIDs.filter((id) => id !== nodeId);
     this.normalizeLayerLayout(node.layerId);
     this.applyLayerView(this.activeLayerId);
     return true;
@@ -1044,8 +1051,7 @@ class ThreeControl implements VisualizationControl {
       nestedNodeIDs: this.getNestedNodeIDs(this.selectedNodeId),
       historyDepth: this.history.length,
       labelsVisible: this.labelsVisible,
-      pendingLinkOutputNodeId: this.pendingLinkOutputNodeId,
-      pendingLinkInputNodeId: this.pendingLinkInputNodeId,
+      recentSelectedNodeIDs: [...this.recentSelectedNodeIDs],
       lastCreatedNodeId: this.lastCreatedNodeId,
       selectedNodeLabel: this.selectedNodeId ? (this.nodes.get(this.selectedNodeId)?.label ?? '') : '',
       camera: { x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z },
@@ -1148,11 +1154,19 @@ class ThreeControl implements VisualizationControl {
     return { ok: true, x: p.x, y: p.y, z: p.z };
   }
 
+  private getNodeColorHex(nodeId: NodeID): { ok: boolean; colorHex: number } {
+    const node = this.nodes.get(nodeId);
+    if (!node) return { ok: false, colorHex: 0 };
+    const material = node.mesh.material as THREE.MeshStandardMaterial;
+    return { ok: true, colorHex: material.color.getHex() };
+  }
+
   private attachDebugBridge() {
     (window as Window & { dagHitTestDebug?: Record<string, unknown> }).dagHitTestDebug = {
       getState: () => this.getState(),
       getProjectedPoint: (nodeId: NodeID) => this.getProjectedPoint(nodeId),
       getNodeWorldPosition: (nodeId: NodeID) => this.getNodeWorldPosition(nodeId),
+      getNodeColorHex: (nodeId: NodeID) => this.getNodeColorHex(nodeId),
       getNodeLabel: (nodeId: NodeID) => this.nodes.get(nodeId)?.label ?? '',
       getNodeTransform: (nodeId: NodeID) => this.getNodeTransform(nodeId),
       getLayerTransform: (layerId: LayerID) => this.getLayerTransform(layerId),

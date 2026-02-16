@@ -31,12 +31,9 @@ func Run03ThreeUserStoryStartEmpty() error {
 		test_v2.WaitForAriaLabelAttrEquals("Three Canvas", "data-ready", "true", 3*time.Second),
 		test_v2.WaitForAriaLabel("DAG Back"),
 		test_v2.WaitForAriaLabel("DAG Add"),
-		test_v2.WaitForAriaLabel("DAG Pick Output"),
-		test_v2.WaitForAriaLabel("DAG Pick Input"),
 		test_v2.WaitForAriaLabel("DAG Connect"),
 		test_v2.WaitForAriaLabel("DAG Unlink"),
 		test_v2.WaitForAriaLabel("DAG Nest"),
-		test_v2.WaitForAriaLabel("DAG Delete Node"),
 		test_v2.WaitForAriaLabel("DAG Clear Picks"),
 		test_v2.WaitForAriaLabel("DAG Label Input"),
 		chromedp.Evaluate(`
