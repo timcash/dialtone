@@ -103,6 +103,7 @@ class ThreeControl implements VisualizationControl {
   private menuPanel: HTMLElement | null = null;
   private menuTableButton: HTMLButtonElement | null = null;
   private menuThreeButton: HTMLButtonElement | null = null;
+  private nodeHistoryLabelEl: HTMLElement | null = null;
   private nodeHistoryValueEls: HTMLElement[] = [];
 
   constructor(private container: HTMLElement, private canvas: HTMLCanvasElement) {
@@ -368,6 +369,7 @@ class ThreeControl implements VisualizationControl {
     this.menuPanel = this.container.querySelector("[aria-label='DAG Menu Panel']");
     this.menuTableButton = this.container.querySelector("button[aria-label='DAG Menu Navigate Table']");
     this.menuThreeButton = this.container.querySelector("button[aria-label='DAG Menu Navigate Three']");
+    this.nodeHistoryLabelEl = this.container.querySelector('.dag-history > h3');
     this.nodeHistoryValueEls = [
       this.container.querySelector("[aria-label='DAG Node History Item 1']"),
       this.container.querySelector("[aria-label='DAG Node History Item 2']"),
@@ -592,9 +594,29 @@ class ThreeControl implements VisualizationControl {
     for (let i = 0; i < this.nodeHistoryValueEls.length; i += 1) {
       this.nodeHistoryValueEls[i].textContent = this.recentSelectedNodeIDs[i] || 'none';
     }
+    if (this.nodeHistoryLabelEl) {
+      this.nodeHistoryLabelEl.textContent = `Node History ${this.getCurrentLayerNumber()}/${this.getVisibleLayerCount()}`;
+    }
     this.canvas.setAttribute('data-labels-visible', String(this.labelsVisible));
     this.canvas.setAttribute('data-link-output', pair?.outputNodeId ?? '');
     this.canvas.setAttribute('data-link-input', pair?.inputNodeId ?? '');
+  }
+
+  private getCurrentLayerNumber(): number {
+    return this.history.length + 1;
+  }
+
+  private getVisibleLayerCount(): number {
+    const visibleLayerIDs = new Set<LayerID>();
+    visibleLayerIDs.add(this.activeLayerId);
+    const selectedHistory = new Set(this.recentSelectedNodeIDs);
+    for (const layer of this.layers.values()) {
+      if (!layer.parentNodeId) continue;
+      if (selectedHistory.has(layer.parentNodeId)) {
+        visibleLayerIDs.add(layer.id);
+      }
+    }
+    return visibleLayerIDs.size;
   }
 
   private hitTestClientPoint(clientX: number, clientY: number): NodeID {
