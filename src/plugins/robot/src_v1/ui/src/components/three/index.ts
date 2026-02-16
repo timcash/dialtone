@@ -137,11 +137,11 @@ class ThreeControl implements VisualizationControl {
 
   private attachDebugBridge() {
     (window as Window & {
-      templateThreeDebug?: {
+      robotThreeDebug?: {
         getProjectedPoint: (id: Exclude<HoveredCubeID, ''>) => { ok: boolean; x: number; y: number };
         touchProjected: (id: Exclude<HoveredCubeID, ''>) => boolean;
       };
-    }).templateThreeDebug = {
+    }).robotThreeDebug = {
       getProjectedPoint: this.getProjectedPoint,
       touchProjected: this.touchProjected,
     };
@@ -176,9 +176,9 @@ class ThreeControl implements VisualizationControl {
     window.removeEventListener('resize', this.resize);
     this.canvas.removeEventListener('wheel', this.onWheel);
     this.canvas.removeEventListener('touchstart', this.onTouchStart);
-    const win = window as Window & { templateThreeDebug?: unknown };
-    if (win.templateThreeDebug) {
-      delete win.templateThreeDebug;
+    const win = window as Window & { robotThreeDebug?: unknown };
+    if (win.robotThreeDebug) {
+      delete win.robotThreeDebug;
     }
     this.renderer.dispose();
   }

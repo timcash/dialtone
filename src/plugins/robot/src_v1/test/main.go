@@ -25,9 +25,9 @@ func main() {
 	}
 
 	if err := test_v2.RunSuite(test_v2.SuiteOptions{
-		Version:    "src_v3",
-		ReportPath: "src/plugins/template/src_v3/test/TEST.md",
-		LogPath:    "src/plugins/template/src_v3/test/test.log",
+		Version:    "src_v1",
+		ReportPath: "src/plugins/robot/src_v1/test/TEST.md",
+		LogPath:    "src/plugins/robot/src_v1/test/test.log",
 	}, steps); err != nil {
 		fmt.Printf("[TEST] SUITE ERROR: %v\n", err)
 		os.Exit(1)

@@ -1,9 +1,12 @@
 package ops
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"dialtone/cli/src/core/build"
 )
 
 func Build() error {
@@ -11,11 +14,19 @@ func Build() error {
 	if err != nil {
 		return err
 	}
-	uiDir := filepath.Join(cwd, "src", "plugins", "template", "src_v3", "ui")
+	uiDir := filepath.Join(cwd, "src", "plugins", "robot", "src_v1", "ui")
 
+	fmt.Printf(">> [Robot] Building UI: src_v1\n")
 	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "build")
 	cmd.Dir = cwd
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	robotBinDir := filepath.Join("src", "plugins", "robot", "bin")
+	fmt.Printf(">> [Robot] Building Dialtone Binary into %s\n", robotBinDir)
+	build.RunBuild([]string{"--output-dir", robotBinDir, "--skip-web", "--skip-www"})
+	return nil
 }

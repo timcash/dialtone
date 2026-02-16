@@ -11,7 +11,7 @@ func Lint() error {
 	if err != nil {
 		return err
 	}
-	uiDir := filepath.Join(cwd, "src", "plugins", "template", "src_v3", "ui")
+	uiDir := filepath.Join(cwd, "src", "plugins", "robot", "src_v1", "ui")
 
 	uiLint := exec.Command(filepath.Join(cwd, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "lint")
 	uiLint.Dir = cwd

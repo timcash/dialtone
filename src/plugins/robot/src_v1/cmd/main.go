@@ -12,8 +12,8 @@ func main() {
 	cwd, _ := os.Getwd()
 	uiPath := filepath.Join(cwd, "ui", "dist")
 	if _, err := os.Stat(uiPath); err != nil {
-		// When launched via "./dialtone.sh template serve src_v3", cwd is repo root.
-		uiPath = filepath.Join(cwd, "src", "plugins", "template", "src_v3", "ui", "dist")
+		// When launched via "./dialtone.sh robot serve src_v1", cwd is repo root.
+		uiPath = filepath.Join(cwd, "src", "plugins", "robot", "src_v1", "ui", "dist")
 	}
 
 	http.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -35,7 +35,7 @@ func main() {
 		http.ServeFile(w, r, path)
 	})
 
-	fmt.Printf("Template Server starting on http://localhost:%s\n", port)
+	fmt.Printf("Robot Server starting on http://localhost:%s\n", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		fmt.Printf("Error starting server: %v\n", err)
 		os.Exit(1)

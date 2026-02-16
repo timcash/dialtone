@@ -12,9 +12,22 @@ func Run07GoRun() error {
 		return err
 	}
 
-	resp, err := http.Get("http://127.0.0.1:8080/health")
+	var resp *http.Response
+	var err error
+	start := time.Now()
+	for time.Since(start) < 5*time.Second {
+		resp, err = http.Get("http://127.0.0.1:8080/health")
+		if err == nil && resp.StatusCode == 200 {
+			break
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to reach /health: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {

@@ -12,7 +12,7 @@ func Run02GoVet() error {
 		return err
 	}
 
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "template", "vet", "src_v3")
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "robot", "vet", "src_v1")
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

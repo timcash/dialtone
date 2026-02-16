@@ -57,7 +57,7 @@ func Run14ThreeSectionValidation() error {
 	var target points
 	if err := session.Run(chromedp.Evaluate(`
 		(() => {
-			const api = window.templateThreeDebug;
+			const api = window.robotThreeDebug;
 			if (!api || typeof api.getProjectedPoint !== 'function') {
 				return {
 					left: { ok: false, x: 0, y: 0 },
@@ -94,7 +94,7 @@ func Run14ThreeSectionValidation() error {
 	var hitOK bool
 	if err := session.Run(chromedp.Evaluate(fmt.Sprintf(`
 		(() => {
-			const api = window.templateThreeDebug;
+			const api = window.robotThreeDebug;
 			if (!api || typeof api.touchProjected !== 'function') return false;
 			return api.touchProjected('%s');
 		})()
@@ -112,7 +112,7 @@ func Run14ThreeSectionValidation() error {
 		return fmt.Errorf("missing three touch hit-test log for %s", selectedID)
 	}
 
-	shot := filepath.Join(repoRoot, "src", "plugins", "template", "src_v3", "screenshots", "test_step_4.png")
+	shot := filepath.Join(repoRoot, "src", "plugins", "robot", "src_v1", "screenshots", "test_step_4.png")
 	if err := session.CaptureScreenshot(shot); err != nil {
 		return err
 	}

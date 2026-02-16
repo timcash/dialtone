@@ -25,6 +25,6 @@ func Run12DocsSectionValidation() error {
 		return err
 	}
 
-	shot := filepath.Join(repoRoot, "src", "plugins", "template", "src_v3", "screenshots", "test_step_2.png")
+	shot := filepath.Join(repoRoot, "src", "plugins", "robot", "src_v1", "screenshots", "test_step_2.png")
 	return session.CaptureScreenshot(shot)
 }

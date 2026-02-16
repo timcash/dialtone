@@ -31,7 +31,7 @@ func ensureSharedServer() error {
 
 	_ = browser.CleanupPort(8080)
 
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "template", "serve", "src_v3")
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "robot", "start", "--mock", "--local-only", "--web-port", "8080")
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

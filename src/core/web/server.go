@@ -28,6 +28,10 @@ var startTime = time.Now()
 func CreateWebHandler(hostname string, natsPort, wsPort, webPort, internalNATSPort, internalWSPort int, ns *server.Server, lc *tailscale.LocalClient, ips []netip.Addr, useMock bool, staticFS fs.FS) http.Handler {
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	})
+
 	// In tsnet mode, NATS WS is served on an internal offset port.
 	// If the handler was wired with the external port, correct it here.
 	if lc != nil && internalWSPort == wsPort {

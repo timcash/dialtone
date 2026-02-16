@@ -21,7 +21,7 @@ func Run08UIRun() error {
 		return err
 	}
 
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "template", "ui-run", "src_v3", "--port", fmt.Sprintf("%d", port))
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "robot", "ui-run", "src_v1", "--port", fmt.Sprintf("%d", port))
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
