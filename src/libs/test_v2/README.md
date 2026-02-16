@@ -1,0 +1,113 @@
+# test_v2
+
+`src/libs/test_v2` is a lightweight Go testing toolkit for browser-driven plugin tests.
+It provides:
+
+- Browser session startup/reuse via the Dialtone Chrome plugin.
+- Per-step execution + timeout handling.
+- Console/error capture from browser and runner.
+- Markdown report generation with screenshots.
+- UI helper actions keyed by `aria-label`.
+- Utility helpers for port waiting and PNG pixel assertions.
+
+## Files
+
+- `test.go`: suite runner, browser session, log capture, report writer.
+- `browser_actions.go`: common chromedp actions/assertions for UI tests.
+- `dev_server.go`: headed dev browser helpers (`role=dev`).
+- `ports.go`: `WaitForPort`, `PickFreePort`.
+- `pixel_assert.go`: PNG pixel color assertions.
+
+## Core Types
+
+- `BrowserOptions`
+  - `Headless`, `Role`, `ReuseExisting`, `URL`, `LogWriter`, `LogPrefix`, `EmitProofOfLife`
+- `BrowserSession`
+  - wraps chromedp context + Chrome plugin session metadata (`isNew`).
+- `Step`
+  - `Name`, `Run`, `SectionID`, `Screenshot`, `Timeout`.
+- `SuiteOptions`
+  - `Version`, `ReportPath`, `LogPath`, `ErrorLogPath`.
+
+## Browser Lifecycle Semantics
+
+`StartBrowser` uses `chrome_app.StartSession(...)` with the provided `Role`/`ReuseExisting` behavior.
+
+Important:
+
+- `BrowserSession.Close()` always cancels chromedp context.
+- `BrowserSession.Close()` only calls `chrome_app.CleanupSession(...)` if `isNew == true`.
+- If the browser was reused (`ReuseExisting: true` and existing role/profile), `Close()` should not kill the shared Chrome process.
+
+`StartDevBrowser` in `dev_server.go` is a convenience wrapper:
+
+- `Headless: false`
+- `Role: dev`
+- `ReuseExisting: true`
+
+## Suite Execution Model (`RunSuite`)
+
+For each step:
+
+1. Starts step log capture.
+2. Runs `Step.Run()` in a goroutine with timeout (default `30s`).
+3. Captures stdout/stderr and prefixes lines with elapsed tags (`[T+0001]`).
+4. Collects browser console entries during the step window.
+5. On failure: writes report + returns immediately.
+6. On success: proceeds to next step.
+
+`RunSuite` itself does not own server/browser lifecycle for plugin-specific sessions; callers manage that.
+
+## Report Outputs
+
+Generated markdown includes:
+
+- Suite metadata (version, status, duration).
+- Step summary table.
+- Per-step:
+  - result/duration/section/error
+  - runner output
+  - filtered browser logs (by `SectionID` token `#<section>`)
+  - browser errors block when present
+  - screenshot embed when provided
+- Artifacts list (`test.log`, `error.log`, screenshots)
+
+## UI Action Helpers (`browser_actions.go`)
+
+Common helpers:
+
+- `NavigateToSection`
+- `WaitForAriaLabel`
+- `ClickAriaLabel`
+- `TypeAriaLabel`
+- `PressEnterAriaLabel`
+- `TypeAndSubmitAriaLabel`
+- `AssertAriaLabelTextContains`
+- `AssertAriaLabelAttrEquals`
+- `WaitForAriaLabelAttrEquals`
+- `AssertElementHidden`
+- `AssertAriaLabelInsideViewport`
+
+Pattern: test UIs should expose stable `aria-label` hooks.
+
+## DevSession Helper (`dev_server.go`)
+
+`DevSession` is optional convenience for dev UX:
+
+- Creates `dev.log` in a version dir.
+- `StartBrowserAttach()` waits for the dev port then opens headed Chrome.
+- `Close()` closes attached browser and log file.
+
+Note: this helper does not start/stop the dev server process itself.
+
+## Port + Pixel Utilities
+
+- `WaitForPort(port, timeout)` polls `127.0.0.1`.
+- `PickFreePort()` reserves and returns an ephemeral local port.
+- `AssertPNGPixelColorWithinTolerance(...)` validates screenshot pixels.
+
+## Practical Notes
+
+- `EmitProofOfLife` intentionally writes a console error marker.
+- `SectionID` filtering depends on console messages containing `#<section>`.
+- If you need a dev server to persist after test command exit, that persistence must be implemented by the caller/CLI orchestration, not by `RunSuite` itself.

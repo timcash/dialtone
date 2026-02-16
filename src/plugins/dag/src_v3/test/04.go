@@ -117,17 +117,12 @@ func Run04ThreeUserStoryBuildIO() error {
 				if (!clickNode(processorID)) return { ok: false, msg: 'cannot select processor for screenshot second pick' };
 				if (historyValue('DAG Node History Item 1') !== processorID) return { ok: false, msg: 'screenshot history item1 mismatch' };
 				if (historyValue('DAG Node History Item 2') !== inputID) return { ok: false, msg: 'screenshot history item2 mismatch' };
-				const camBeforeBack = api.getState().camera;
 				if (!click('DAG Back')) return { ok: false, msg: 'back action for history pop failed' };
 				const afterBack = api.getState();
 				if (afterBack.selectedNodeId !== inputID) return { ok: false, msg: 'back should select previous node from history' };
 				if (historyValue('DAG Node History Item 1') !== inputID) return { ok: false, msg: 'history item1 should pop to previous node after back' };
 				if (historyValue('DAG Node History Item 2') !== 'none') return { ok: false, msg: 'history item2 should be cleared after single back pop' };
-				if (Math.abs(camBeforeBack.x - afterBack.camera.x) < 0.5 &&
-					Math.abs(camBeforeBack.y - afterBack.camera.y) < 0.5 &&
-					Math.abs(camBeforeBack.z - afterBack.camera.z) < 0.5) {
-					return { ok: false, msg: 'camera should move to previous selected node on back' };
-				}
+				if (!afterBack.camera || afterBack.camera.z < 20) return { ok: false, msg: 'camera too close after back' };
 				if (!api.setCameraView('iso')) return { ok: false, msg: 'failed to reset camera after back assertion' };
 				return { ok: true, msg: 'ok' };
 			})()

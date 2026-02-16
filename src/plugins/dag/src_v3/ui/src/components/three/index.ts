@@ -56,6 +56,7 @@ const NODE_RECENT_COLOR = 0x7dd3fc;
 const NODE_SECOND_RECENT_COLOR = 0x2b78ff;
 const EDGE_BASE_COLOR = 0x6b7280;
 const EDGE_NESTED_LINK_COLOR = 0xfacc15;
+const ROOT_IO_CAMERA_VIEW: CameraView = 'iso';
 
 class ThreeControl implements VisualizationControl {
   private scene = new THREE.Scene();
@@ -102,6 +103,7 @@ class ThreeControl implements VisualizationControl {
   private menuPanel: HTMLElement | null = null;
   private menuTableButton: HTMLButtonElement | null = null;
   private menuThreeButton: HTMLButtonElement | null = null;
+  private nodeHistoryLabelEl: HTMLElement | null = null;
   private nodeHistoryValueEls: HTMLElement[] = [];
 
   constructor(private container: HTMLElement, private canvas: HTMLCanvasElement) {
@@ -367,6 +369,7 @@ class ThreeControl implements VisualizationControl {
     this.menuPanel = this.container.querySelector("[aria-label='DAG Menu Panel']");
     this.menuTableButton = this.container.querySelector("button[aria-label='DAG Menu Navigate Table']");
     this.menuThreeButton = this.container.querySelector("button[aria-label='DAG Menu Navigate Three']");
+    this.nodeHistoryLabelEl = this.container.querySelector('.dag-history > h3');
     this.nodeHistoryValueEls = [
       this.container.querySelector("[aria-label='DAG Node History Item 1']"),
       this.container.querySelector("[aria-label='DAG Node History Item 2']"),
@@ -591,9 +594,29 @@ class ThreeControl implements VisualizationControl {
     for (let i = 0; i < this.nodeHistoryValueEls.length; i += 1) {
       this.nodeHistoryValueEls[i].textContent = this.recentSelectedNodeIDs[i] || 'none';
     }
+    if (this.nodeHistoryLabelEl) {
+      this.nodeHistoryLabelEl.textContent = `Node History ${this.getCurrentLayerNumber()}/${this.getVisibleLayerCount()}`;
+    }
     this.canvas.setAttribute('data-labels-visible', String(this.labelsVisible));
     this.canvas.setAttribute('data-link-output', pair?.outputNodeId ?? '');
     this.canvas.setAttribute('data-link-input', pair?.inputNodeId ?? '');
+  }
+
+  private getCurrentLayerNumber(): number {
+    return this.history.length + 1;
+  }
+
+  private getVisibleLayerCount(): number {
+    const visibleLayerIDs = new Set<LayerID>();
+    visibleLayerIDs.add(this.activeLayerId);
+    const selectedHistory = new Set(this.recentSelectedNodeIDs);
+    for (const layer of this.layers.values()) {
+      if (!layer.parentNodeId) continue;
+      if (selectedHistory.has(layer.parentNodeId)) {
+        visibleLayerIDs.add(layer.id);
+      }
+    }
+    return visibleLayerIDs.size;
   }
 
   private hitTestClientPoint(clientX: number, clientY: number): NodeID {
@@ -666,8 +689,7 @@ class ThreeControl implements VisualizationControl {
   }
 
   private fitCameraToLayer(layerId: LayerID) {
-    const defaultView: CameraView = this.camera.aspect < 0.7 ? 'front' : 'iso';
-    this.setCameraViewForLayer(layerId, defaultView);
+    this.setCameraViewForLayer(layerId, ROOT_IO_CAMERA_VIEW);
   }
 
   private getLayerBounds(layerId: LayerID): { ok: boolean; center: THREE.Vector3; maxDim: number } {
@@ -690,15 +712,16 @@ class ThreeControl implements VisualizationControl {
     return { ok: true, center, maxDim: Math.max(4, size.x, size.y) };
   }
 
-  private setCameraViewForLayer(layerId: LayerID, view: CameraView): boolean {
+  private setCameraViewForLayer(layerId: LayerID, _view: CameraView): boolean {
     const bounds = this.getLayerBounds(layerId);
     if (!bounds.ok) return false;
     const fov = THREE.MathUtils.degToRad(this.camera.fov);
     const aspectScale = this.camera.aspect < 1 ? 1 / this.camera.aspect : 1;
     const dist = ((bounds.maxDim * aspectScale) / (2 * Math.tan(fov / 2))) * 1.2 + 14;
     const c = bounds.center;
+    const normalizedView = ROOT_IO_CAMERA_VIEW;
 
-    switch (view) {
+    switch (normalizedView) {
       case 'top':
         this.camera.position.set(c.x, c.y + dist, c.z + 0.01);
         break;
@@ -821,19 +844,6 @@ class ThreeControl implements VisualizationControl {
     return this.selectedNodeId === nodeId;
   }
 
-  private focusCameraOnNode(nodeId: NodeID): boolean {
-    const node = this.nodes.get(nodeId);
-    if (!node) return false;
-    const layerBounds = this.getLayerBounds(node.layerId);
-    if (!layerBounds.ok) return false;
-    const nodeWorld = node.mesh.getWorldPosition(new THREE.Vector3());
-    const offset = this.camera.position.clone().sub(layerBounds.center);
-    this.camera.position.copy(nodeWorld.clone().add(offset));
-    this.camera.lookAt(nodeWorld);
-    this.camera.updateProjectionMatrix();
-    return true;
-  }
-
   private popSelectionHistoryBack(): boolean {
     if (this.recentSelectedNodeIDs.length < 2) return false;
     this.recentSelectedNodeIDs.shift();
@@ -848,13 +858,7 @@ class ThreeControl implements VisualizationControl {
       return this.selectedNodeId !== '';
     }
     this.selectedNodeId = prevNodeId;
-    if (prevNode.layerId !== this.activeLayerId) {
-      this.applyLayerView(prevNode.layerId);
-    } else {
-      this.focusCameraOnNode(prevNodeId);
-      this.refreshVisualState();
-      this.syncCanvasState();
-    }
+    this.applyLayerView(prevNode.layerId);
     console.log(`[Three #three] back to selected node: ${prevNodeId}`);
     return true;
   }

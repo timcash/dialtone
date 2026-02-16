@@ -1,5 +1,11 @@
 # DAG Plugin
 
+## How To Test
+
+```bash
+./dialtone.sh dag test src_v3
+```
+
 Versioned DAG plugin development lives under `src/plugins/dag/src_vN`.
 
 ## Next Steps

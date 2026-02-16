@@ -1,6 +1,32 @@
 # Plugin Versioning Workflow (src_vN)
 
-This guide outlines the standard workflow for creating and evolving plugins using versioned source directories (`src_vN`). This pattern ensures stability, enables safe experimentation, and provides a clear migration path between major implementations.
+This guide outlines the standard workflow for creating and evolving plugins using versioned source directories (`src_vN`). 
+
+## Quick Start (New Plugin)
+
+Scaffold, install, and verify your new plugin in three commands:
+
+```bash
+# 1. Copy the template to your new plugin directory
+./dialtone.sh template copy src_v3 src/plugins/my-plugin/src_v1
+
+# 2. Install UI dependencies
+./dialtone.sh template install src/plugins/my-plugin/src_v1
+
+# 3. Run the automated test suite
+./dialtone.sh go exec run ./src/plugins/my-plugin/src_v1/test
+```
+
+---
+
+## Modular UI Sections
+
+The template includes several example sections (Hero, Docs, Table, Three.js, Xterm, Video). **These are modular and optional.** 
+
+- If you don't need a specific feature (e.g., the Video player or Three.js canvas), simply remove its registration in `ui/src/main.ts`, remove the corresponding `<section>` in `ui/index.html`, and delete the component directory in `ui/src/components/`.
+- Ensure you also remove the corresponding validation steps in `test/main.go` to keep your tests passing.
+
+---
 
 ## Architecture & Conventions
 
@@ -9,87 +35,131 @@ Every versioned plugin implementation lives in its own `src_vN` directory within
 ### Required Structure
 A compliant `src_vN` directory MUST contain:
 - `cmd/`: Go entrypoint (usually a simple HTTP server for the UI).
-- `ui/`: Vite-based TypeScript UI.
-- `test/`: `test_v2` suite providing automated browser and logic validation.
+- `ui/`: Vite-based TypeScript UI using `@src/libs/ui_v2`.
+- `test/`: Go-based test suite using `@src/libs/test_v2`.
 - `DESIGN.md`: Architecture and implementation details for this specific version.
 
 ### Shared Dependencies
-Versioned UIs and Tests leverage shared libraries to maintain consistency:
-- **UI:** `@import '../../../../../libs/ui_v2/style.css'` for unified styling.
-- **Tests:** `dialtone/cli/src/libs/test_v2` for automated reporting and screenshots.
+- **UI:** Powered by `@src/libs/ui_v2` for unified styling, section management, and navigation.
+- **Tests:** Powered by `@src/libs/test_v2` for automated browser validation, screenshots, and `TEST.md` reporting.
 
 ---
 
-## Workflow: Creating a New Plugin Version
+## Workflow: Creating a New Plugin
 
 Follow these steps to migrate an existing plugin to the versioned pattern or to start a new version.
 
-### 1. Scaffold the Version
-Use the `template` plugin's latest version as a base.
+### 1. Scaffold the Plugin
+Use the `template` plugin to bootstrap your new plugin. This command copies the latest template version, rewrites all package names, paths, and labels, and sets up the basic directory structure.
 
 ```bash
-# Example: Creating v1 for a new 'my-plugin'
-mkdir -p src/plugins/my-plugin/src_v1
-cp -r src/plugins/template/src_v3/* src/plugins/my-plugin/src_v1/
+# Example: Creating 'my-plugin' version 'src_v1' from template's 'src_v3'
+./dialtone.sh template copy src_v3 src/plugins/my-plugin/src_v1
 ```
 
-### 2. Customize the Implementation
-Update all references to `template` and `src_v3` in the copied files:
-- **Go Server (`cmd/main.go`):** Update the fallback path to your plugin directory.
-- **UI (`ui/package.json`):** Update the package name and description.
-- **UI (`ui/src/main.ts`):** Update the `setupApp` title.
-- **Tests (`test/main.go`):** Update the `Version` and artifact paths.
+### 2. Install Dependencies
+Initialize the UI dependencies. This uses `bun` under the hood.
 
-### 3. Implement the Plugin Logic
-Develop your feature within the `src_vN` scope. 
-- Avoid animations or fades in the UI to keep tests fast and deterministic.
-- Use `aria-label` extensively for all interactive elements to support stable testing.
-
-### 4. Hook up the CLI
-Update your plugin's CLI dispatcher (e.g., `src/plugins/my-plugin/cli/my-plugin.go`) to support versioned subcommands:
-
-```go
-func RunMyPlugin(args []string) {
-    // ... dispatcher logic ...
-    switch subcommand {
-    case "install": RunInstall(getDir())
-    case "test":    RunTest(getDir())
-    case "build":   RunBuild(getDir())
-    // ...
-    }
-}
-```
-
----
-
-## Testing & Validation Workflow
-
-Testing is mandatory for all `src_vN` implementations and is the "Ground Truth" for version readiness.
-
-### 1. Daily Development
-Run the versioned dev server with browser synchronization:
 ```bash
-./dialtone.sh my-plugin dev src_v1
+./dialtone.sh template install src/plugins/my-plugin/src_v1
 ```
 
-### 2. Continuous Testing
-Run the full automated suite frequently during development:
-```bash
-./dialtone.sh my-plugin test src_v1
-```
+### 3. Verify the Scaffold
+Run the automated test suite to ensure the copied template is fully functional in its new location.
 
-### 3. Review Artifacts
-Every `test` run produces a `TEST.md` report. **Always review this file before committing.**
 ```bash
-# Check step status and embedded screenshots
+# Run the tests and check the generated report
+./dialtone.sh go exec run ./src/plugins/my-plugin/src_v1/test
 cat src/plugins/my-plugin/src_v1/test/TEST.md
 ```
 
 ---
 
-## Migration Lessons (from Cloudflare Plugin)
+## UI Development (`ui_v2`)
 
-- **Immediate Swaps:** Do not use CSS transitions for section changes. Tests expect elements to be interactable immediately.
-- **Lifecycle Logs:** Ensure `SectionManager` lifecycle events are logged. Tests verify these to ensure components aren't leaking memory or state.
-- **Cleanup is Critical:** Always implement thorough cleanup in `test/18.go` (or your final cleanup step) to ensure ports are released for subsequent runs.
-- **ARIA First:** If an element is hard to select in a test, add an `aria-label` instead of using complex CSS selectors.
+The UI is built using a "Section-based" architecture.
+
+### 1. Configuration (`ui/src/main.ts`)
+Use `setupApp` to initialize the layout and `sections.register` to define your views.
+
+```typescript
+import { setupApp } from '../../../../../libs/ui_v2/ui';
+
+// Initialize the app with a title
+const { sections, menu } = setupApp({ title: 'My Plugin', debug: true });
+
+// Register a section
+sections.register('overview', {
+  containerId: 'overview', // ID of the <section> element in index.html
+  load: async () => {
+    const { mountOverview } = await import('./components/overview/index');
+    return mountOverview(document.getElementById('overview')!);
+  },
+  header: { title: 'Overview Page' }
+});
+
+// Add to the global menu
+menu.addButton('Overview', 'Navigate Overview', () => {
+  sections.navigateTo('overview');
+});
+```
+
+### 2. Styling
+Import the global theme for consistent Dialtone aesthetics:
+```css
+/* ui/src/style.css */
+@import '../../../../../libs/ui_v2/style.css';
+```
+
+---
+
+## Automated Testing (`test_v2`)
+
+Tests are the "Ground Truth" for version readiness.
+
+### 1. Test Structure (`test/main.go`)
+Tests are organized into suites of sequential steps.
+
+```go
+func main() {
+    steps := []test_v2.Step{
+        {
+            Name: "01 Hero Validation",
+            SectionID: "hero",
+            Screenshot: "screenshots/hero.png",
+            Run: func() error {
+                // Use browser actions for validation
+                return test_v2.WaitForAriaLabel("Hero Section")
+            },
+        },
+    }
+
+    test_v2.RunSuite(test_v2.SuiteOptions{
+        Version:    "src_v1",
+        ReportPath: "src/plugins/my-plugin/src_v1/test/TEST.md",
+        LogPath:    "src/plugins/my-plugin/src_v1/test/test.log",
+    }, steps)
+}
+```
+
+### 2. Common Browser Actions
+- `NavigateToSection(id, ariaLabel)`
+- `ClickAriaLabel(label)`
+- `TypeAriaLabel(label, value)`
+- `AssertAriaLabelTextContains(label, text)`
+
+---
+
+## Integration with `./dialtone.sh`
+
+To make your plugin discoverable via the main CLI, update `src/dev.go` to add your plugin to the main dispatcher:
+
+```go
+// src/dev.go
+case "my-plugin":
+    if err := my_plugin_cli.Run(args); err != nil {
+        os.Exit(1)
+    }
+```
+
+And implement your plugin's CLI dispatcher in `src/plugins/my-plugin/cli/cli.go`, delegating to the `src_vN` directories based on arguments.
