@@ -3,6 +3,7 @@ import { SectionManager } from './components/util/section';
 
 // Create section manager for lazy loading Three.js components
 const sections = new SectionManager({ debug: true });
+(window as any).sections = sections;
 
 // Register all Three.js sections
 sections.register('s-home', {

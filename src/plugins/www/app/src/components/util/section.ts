@@ -58,6 +58,8 @@
  *    ```
  */
 
+import { Menu } from "./menu";
+
 // Header configuration for a section
 export interface HeaderConfig {
   visible?: boolean; // Hide/show the entire header
@@ -90,9 +92,9 @@ export interface SectionConfig {
  * Manages lazy loading and visibility for Three.js sections
  */
 export class SectionManager {
-  private visualizations = new Map<string, VisualizationControl>();
-  private loadingPromises = new Map<string, Promise<void>>();
-  private configs = new Map<string, SectionConfig>();
+  public visualizations = new Map<string, VisualizationControl>();
+  public loadingPromises = new Map<string, Promise<void>>();
+  public configs = new Map<string, SectionConfig>();
   private observer: IntersectionObserver | null = null;
   private debug: boolean;
 
@@ -144,7 +146,7 @@ export class SectionManager {
   }
 
   private visibilityRatios = new Map<string, number>();
-  private activeSectionId: string | null = null;
+  public activeSectionId: string | null = null;
 
   /**
    * Start observing all registered sections for visibility
@@ -167,6 +169,12 @@ export class SectionManager {
               }
             } else if (entry.intersectionRatio < 0.1) {
               control.setVisible(false);
+              
+              // If this was the active section and it's gone, clear the menu
+              if (this.activeSectionId === sectionId) {
+                  Menu.getInstance().clear();
+                  Menu.getInstance().close();
+              }
             }
           }
         });
@@ -202,6 +210,10 @@ export class SectionManager {
           if (sectionEl) {
             this.updateHeader(config?.header, sectionEl);
             this.updateMenu(config?.menu);
+            
+            // Rebuild the menu for the new active section
+            const menu = Menu.getInstance();
+            menu.clear(bestId);
             
             // Refresh component-specific UI (like menus) if the method exists
             const control = this.visualizations.get(bestId);
@@ -361,7 +373,7 @@ export class SectionManager {
   /**
    * Update the global site header based on section configuration
    */
-  private updateHeader(config?: HeaderConfig, sectionEl?: HTMLElement): void {
+  public updateHeader(config?: HeaderConfig, sectionEl?: HTMLElement): void {
     if (!this.headerEl) return;
 
     // 1. Handle Visibility
@@ -395,7 +407,7 @@ export class SectionManager {
     }
   }
 
-  private updateMenu(config?: MenuConfig): void {
+  public updateMenu(config?: MenuConfig): void {
     if (!this.menuToggleEl) return;
 
     const isVisible = config?.visible ?? true;

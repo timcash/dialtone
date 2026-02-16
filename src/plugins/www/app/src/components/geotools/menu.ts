@@ -12,7 +12,6 @@ type GeoToolsConfigOptions = {
 
 export function setupGeoToolsMenu(options: GeoToolsConfigOptions) {
     const menu = Menu.getInstance();
-    menu.clear();
 
     // --- Section: Data ---
     menu.addHeader("Data Source");

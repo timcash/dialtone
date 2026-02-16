@@ -16,7 +16,6 @@ type PolicyMenuOptions = {
 
 export function setupPolicyMenu(options: PolicyMenuOptions): void {
   const menu = Menu.getInstance();
-  menu.clear();
 
   menu.addHeader("Presets");
   for (const preset of options.presets) {

@@ -17,7 +17,6 @@ type CadConfigOptions = {
 
 export function setupCadMenu(options: CadConfigOptions): void {
     const menu = Menu.getInstance();
-    menu.clear();
 
     menu.addHeader("Gear Parameters");
 
