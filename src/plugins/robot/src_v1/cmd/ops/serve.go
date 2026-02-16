@@ -12,7 +12,7 @@ func Serve() error {
 		return err
 	}
 
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "run", "src/plugins/template/src_v3/cmd/main.go")
+	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "run", "src/plugins/robot/src_v1/cmd/main.go")
 	cmd.Dir = cwd
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

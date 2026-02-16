@@ -23,10 +23,10 @@ func Install() error {
 	if err != nil {
 		return err
 	}
-	uiDir := filepath.Join(cwd, "src", "plugins", "template", "src_v3", "ui")
+	uiDir := filepath.Join(cwd, "src", "plugins", "robot", "src_v1", "ui")
 
 	if _, err := os.Stat(filepath.Join(uiDir, "package.json")); err != nil {
-		return fmt.Errorf("missing src_v3 ui package.json: %w", err)
+		return fmt.Errorf("missing src_v1 ui package.json: %w", err)
 	}
 
 	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "install", "--force")

@@ -12,7 +12,7 @@ func Run05UIFormat() error {
 		return err
 	}
 
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "template", "format", "src_v3")
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "robot", "format", "src_v1")
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

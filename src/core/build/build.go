@@ -25,6 +25,9 @@ func RunBuild(args []string) {
 	linuxArm64 := fs.Bool("linux-arm64", false, "Cross-compile for 64-bit Linux ARM (aarch64)")
 	linuxAmd64 := fs.Bool("linux-amd64", false, "Cross-compile for 64-bit Linux x86 (amd64)")
 	builder := fs.Bool("builder", false, "Build the dialtone-builder image for faster ARM builds")
+	outputDir := fs.String("output-dir", "bin", "Output directory for the binary")
+	skipWeb := fs.Bool("skip-web", false, "Skip building the core Web UI")
+	skipWWW := fs.Bool("skip-www", false, "Skip building the public WWW page")
 	showHelp := fs.Bool("help", false, "Show help for build command")
 
 	fs.Usage = func() {
@@ -41,6 +44,7 @@ func RunBuild(args []string) {
 		fmt.Println("  --linux-arm64  Cross-compile for 64-bit Linux ARM (Raspberry Pi 3/4/5)")
 		fmt.Println("  --linux-amd64  Cross-compile for 64-bit Linux x86 (amd64)")
 		fmt.Println("  --builder      Build the dialtone-builder image for faster ARM builds")
+		fmt.Println("  --output-dir   Output directory for the binary (default: bin)")
 		fmt.Println("  --help         Show help for build command")
 		fmt.Println()
 		fmt.Println("Examples:")
@@ -68,7 +72,7 @@ func RunBuild(args []string) {
 	}
 
 	if *full {
-		buildEverything(*local)
+		buildEverything(*local, *outputDir, *skipWeb, *skipWWW)
 	} else {
 		targetOS := runtime.GOOS
 		arch := runtime.GOARCH
@@ -89,23 +93,26 @@ func RunBuild(args []string) {
 			if isCrossBuild && !hasZig() && !*local {
 				logger.LogFatal("Cross-compilation for %s/%s requires either Podman or Zig. Please install Podman (recommended) or ensure Zig is installed in your DIALTONE_ENV.", targetOS, arch)
 			}
-			buildLocally(targetOS, arch)
-			buildWWW()
-		} else {
-					compiler := "gcc"
-					cppCompiler := "g++"
-					if arch == "arm64" {
-						compiler = "aarch64-linux-gnu-gcc"
-						cppCompiler = "aarch64-linux-gnu-g++"
-					} else if arch == "arm" {
-						compiler = "arm-linux-gnueabihf-gcc"
-						cppCompiler = "arm-linux-gnueabihf-g++"
-					}
-					buildWithPodman(arch, compiler, cppCompiler)
-					buildWWW()
-				}
+			buildLocally(targetOS, arch, *outputDir, *skipWeb)
+			if !*skipWWW {
+				buildWWW()
 			}
-			
+		} else {
+			compiler := "gcc"
+			cppCompiler := "g++"
+			if arch == "arm64" {
+				compiler = "aarch64-linux-gnu-gcc"
+				cppCompiler = "aarch64-linux-gnu-g++"
+			} else if arch == "arm" {
+				compiler = "arm-linux-gnueabihf-gcc"
+				cppCompiler = "arm-linux-gnueabihf-g++"
+			}
+			buildWithPodman(arch, compiler, cppCompiler, *outputDir, *skipWeb)
+			if !*skipWWW {
+				buildWWW()
+			}
+		}
+	}
 }
 
 func hasPodman() bool {
@@ -195,7 +202,7 @@ func skipBuild(keys ...string) bool {
 	return false
 }
 
-func buildLocally(targetOS, targetArch string) {
+func buildLocally(targetOS, targetArch, outputDir string, skipWeb bool) {
 	if targetOS == "" {
 		targetOS = runtime.GOOS
 	}
@@ -205,10 +212,12 @@ func buildLocally(targetOS, targetArch string) {
 	logger.LogInfo("Building Dialtone locally (Target: %s/%s)...", targetOS, targetArch)
 
 	// Build web UI if needed (not forced for native local builds unless requested)
-	buildWebIfNeeded(false)
+	if !skipWeb {
+		buildWebIfNeeded(false)
+	}
 
-	if err := os.MkdirAll("bin", 0755); err != nil {
-		logger.LogFatal("Failed to create bin directory: %v", err)
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		logger.LogFatal("Failed to create output directory %s: %v", outputDir, err)
 	}
 
 	// For local builds, we enable CGO to support V4L2 drivers
@@ -331,7 +340,7 @@ func buildLocally(targetOS, targetArch string) {
 		binaryName = "dialtone.exe"
 	}
 
-	outputPath := filepath.Join("bin", binaryName)
+	outputPath := filepath.Join(outputDir, binaryName)
 
 	// Set environment for build
 	os.Setenv("GOOS", targetOS)
@@ -347,19 +356,21 @@ func buildLocally(targetOS, targetArch string) {
 	logger.LogInfo("Build successful: %s", outputPath)
 }
 
-func buildWithPodman(arch, compiler, cppCompiler string) {
+func buildWithPodman(arch, compiler, cppCompiler, outputDir string, skipWeb bool) {
 	logger.LogInfo("Building Dialtone for Linux %s using Podman (%s, %s)...", arch, compiler, cppCompiler)
 
 	// Build web UI first (always force rebuild for remote/podman deployment)
-	buildWebIfNeeded(true)
+	if !skipWeb {
+		buildWebIfNeeded(true)
+	}
 
 	cwd, err := os.Getwd()
 	if err != nil {
 		logger.LogFatal("Failed to get current directory: %v", err)
 	}
 
-	if err := os.MkdirAll("bin", 0755); err != nil {
-		logger.LogFatal("Failed to create bin directory: %v", err)
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		logger.LogFatal("Failed to create output directory %s: %v", outputDir, err)
 	}
 
 	outputName := fmt.Sprintf("dialtone-%s", arch)
@@ -411,7 +422,7 @@ func buildWithPodman(arch, compiler, cppCompiler string) {
 		"-e", "CC=" + compiler,
 		"-e", "CXX=" + cppCompiler,
 		baseImage,
-		"bash", "-c", fmt.Sprintf("%sgo build -buildvcs=false -o bin/%s src/cmd/dialtone/main.go", installCmd, outputName),
+		"bash", "-c", fmt.Sprintf("%sgo build -buildvcs=false -o %s/%s src/cmd/dialtone/main.go", installCmd, outputDir, outputName),
 	}
 
 	var cmd *exec.Cmd
@@ -447,34 +458,38 @@ func buildWithPodman(arch, compiler, cppCompiler string) {
 	logger.LogInfo("Build successful: bin/%s", outputName)
 }
 
-func buildEverything(local bool) {
+func buildEverything(local bool, outputDir string, skipWeb, skipWWW bool) {
 	logger.LogInfo("Starting Full Build Process...")
 
 	// 1. Build Web UI
-	logger.LogInfo("Building Web UI via UI Plugin...")
-	buildWebIfNeeded(true)
+	if !skipWeb {
+		logger.LogInfo("Building Web UI via UI Plugin...")
+		buildWebIfNeeded(true)
+	}
 
 	// 2. Build WWW (Public Page)
-	buildWWW()
+	if !skipWWW {
+		buildWWW()
+	}
 
 	// 3. Build AI components (shell delegation for decoupling)
 	runShell(".", getDialtoneScript(), "ai", "build")
 
 	// 4. Build Dialtone locally (the tool itself)
-	BuildSelf()
+	BuildSelf(outputDir)
 
 	// 5. Build for ARM64
 	if local || !hasPodman() {
-		buildLocally("linux", "arm64")
+		buildLocally("linux", "arm64", outputDir, skipWeb)
 	} else {
-		buildWithPodman("arm64", "gcc-aarch64-linux-gnu", "g++-aarch64-linux-gnu")
+		buildWithPodman("arm64", "gcc-aarch64-linux-gnu", "g++-aarch64-linux-gnu", outputDir, skipWeb)
 	}
 
 	logger.LogInfo("Full build successful!")
 }
 
 // BuildSelf rebuilds the current binary and replaces it
-func BuildSelf() {
+func BuildSelf(outputDir string) {
 	logger.LogInfo("Building Dialtone CLI (Self)...")
 
 	binaryName := "dialtone"
@@ -482,11 +497,11 @@ func BuildSelf() {
 		binaryName = "dialtone.exe"
 	}
 
-	if _, err := os.Stat("bin"); os.IsNotExist(err) {
-		os.MkdirAll("bin", 0755)
+	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
+		os.MkdirAll(outputDir, 0755)
 	}
 
-	outputPath := filepath.Join("bin", binaryName)
+	outputPath := filepath.Join(outputDir, binaryName)
 
 	// Force clean cache to avoid embed issues
 	script := getDialtoneScript()

@@ -98,18 +98,7 @@ func ExecuteDev() {
 
 	                        install.RunInstall(args)
 
-	                case "clone":
-
-	                        RunClone(args)
-
-	                case "sync-code":
-
-	                        robot.RunRobot(append([]string{"sync-code"}, args...))
-
-	        
-
-	
-	case "branch":
+	                case "branch":
 		runBranch(args)
 	case "test":
 		test_cli.RunTest(args)
@@ -193,8 +182,6 @@ func printDevUsage() {
 	fmt.Println("  format        Format Go code across the repo")
 	fmt.Println("  camera        Camera tools (snapshot, stream)")
 	fmt.Println("  bun <subcmd>       Bun toolchain tools (exec, run, x)")
-	fmt.Println("  clone         Clone or update the repository")
-	fmt.Println("  sync-code     Sync source code to remote robot")
 	fmt.Println("  ssh           SSH tools (upload, download, cmd)")
 	fmt.Println("  provision     Generate Tailscale Auth Key")
 	fmt.Println("  logs          Tail remote logs")

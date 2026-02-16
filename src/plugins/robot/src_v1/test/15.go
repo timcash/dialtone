@@ -39,6 +39,6 @@ func Run15XtermSectionValidation() error {
 		return err
 	}
 
-	shot := filepath.Join(repoRoot, "src", "plugins", "template", "src_v3", "screenshots", "test_step_5.png")
+	shot := filepath.Join(repoRoot, "src", "plugins", "robot", "src_v1", "screenshots", "test_step_5.png")
 	return session.CaptureScreenshot(shot)
 }

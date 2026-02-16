@@ -26,7 +26,7 @@ func Run10DevServerRunningLatestUI() error {
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	url := fmt.Sprintf("http://%s", addr)
 
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "template", "ui-run", "src_v3", "--port", fmt.Sprintf("%d", port))
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "robot", "ui-run", "src_v1", "--port", fmt.Sprintf("%d", port))
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

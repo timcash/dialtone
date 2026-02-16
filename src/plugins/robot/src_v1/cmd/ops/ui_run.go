@@ -15,7 +15,7 @@ func UIRun(port int) error {
 	if port == 0 {
 		port = 3000
 	}
-	uiDir := filepath.Join(cwd, "src", "plugins", "template", "src_v3", "ui")
+	uiDir := filepath.Join(cwd, "src", "plugins", "robot", "src_v1", "ui")
 
 	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(port))
 	cmd.Dir = cwd

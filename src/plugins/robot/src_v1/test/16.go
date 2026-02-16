@@ -22,13 +22,10 @@ func Run16VideoSectionValidation() error {
 	if err := session.Run(test_v2.NavigateToSection("video", "Video Section")); err != nil {
 		return err
 	}
-	if err := session.Run(test_v2.WaitForAriaLabel("Test Video")); err != nil {
-		return err
-	}
-	if err := session.Run(test_v2.WaitForAriaLabelAttrEquals("Test Video", "data-playing", "true", 4*time.Second)); err != nil {
+	if err := session.Run(test_v2.WaitForAriaLabelAttrEquals("Video Section", "data-playing", "true", 4*time.Second)); err != nil {
 		return err
 	}
 
-	shot := filepath.Join(repoRoot, "src", "plugins", "template", "src_v3", "screenshots", "test_step_6.png")
+	shot := filepath.Join(repoRoot, "src", "plugins", "robot", "src_v1", "screenshots", "test_step_6.png")
 	return session.CaptureScreenshot(shot)
 }

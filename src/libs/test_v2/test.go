@@ -498,7 +498,18 @@ func writeReport(options SuiteOptions, results []StepResult, total time.Duration
 	}
 	defer f.Close()
 
-	_, _ = fmt.Fprintln(f, "# Template Plugin v3 Test Report")
+	title := options.Version + " Test Report"
+	if strings.Contains(options.ReportPath, "plugins/") {
+		parts := strings.Split(options.ReportPath, "/")
+		for i, p := range parts {
+			if p == "plugins" && i+1 < len(parts) {
+				title = strings.Title(parts[i+1]) + " Plugin " + options.Version + " Test Report"
+				break
+			}
+		}
+	}
+
+	_, _ = fmt.Fprintf(f, "# %s\n", title)
 	_, _ = fmt.Fprintln(f)
 	_, _ = fmt.Fprintf(f, "**Generated at:** %s\n", time.Now().Format(time.RFC1123Z))
 	_, _ = fmt.Fprintf(f, "**Version:** `%s`\n", options.Version)

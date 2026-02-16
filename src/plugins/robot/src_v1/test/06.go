@@ -12,7 +12,7 @@ func Run06UIBuild() error {
 		return err
 	}
 
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "template", "build", "src_v3")
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "robot", "build", "src_v1")
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

@@ -1,39 +1,39 @@
 # Template Plugin v3 Design (Bottom-Up)
 
-This document rewrites the v3 design from the ground up, mirroring every capability described in `src/plugins/template/README.md` while simplifying the new implementation.
+This document rewrites the v3 design from the ground up, mirroring every capability described in `src/plugins/robot/README.md` while simplifying the new implementation.
 
 ## 0. Entry Point: CLI Usage (Ground Truth)
-All v3 workflows are invoked via `./dialtone.sh` and remain consistent with existing template capabilities.
+All v3 workflows are invoked via `./dialtone.sh` and remain consistent with existing robot capabilities.
 
 Examples (v3 target):
 ```bash
 # Build UI assets
-./dialtone.sh template build src_v3
+./dialtone.sh robot build src_v1
 
 # Run the test suite
-./dialtone.sh template test src_v3
+./dialtone.sh robot test src_v1
 
 # Start dev server
-./dialtone.sh template dev src_v3
+./dialtone.sh robot dev src_v1
 
 # Scaffold a new version
-./dialtone.sh template src --n 4
+./dialtone.sh robot src --n 4
 ```
 
-These commands stay aligned with the template plugin’s current build/dev/test flows and versioned `src_vN` structure.
+These commands stay aligned with the robot plugin’s current build/dev/test flows and versioned `src_vN` structure.
 
 ## 1. Foundation: Versioned Source Layout (`src_vN`)
-We keep the versioned directory pattern from `src/plugins/template/README.md` intact.
+We keep the versioned directory pattern from `src/plugins/robot/README.md` intact.
 
 Expected structure for v3:
-- `src/plugins/template/src_v3/cmd/` (Go entrypoint)
-- `src/plugins/template/src_v3/ui/` (Vite UI)
-- `src/plugins/template/src_v3/test/` (automation harness)
-- `src/plugins/template/src_v3/install.go` (v3-local install workflow)
-- `src/plugins/template/src_v3/build.go` (v3-local build workflow)
-- `src/plugins/template/src_v3/DESIGN.md`
-- `src/plugins/template/src_v3/TEST_PLAN.md`
-- `src/plugins/template/src_v3/DAG.md`
+- `src/plugins/robot/src_v1/cmd/` (Go entrypoint)
+- `src/plugins/robot/src_v1/ui/` (Vite UI)
+- `src/plugins/robot/src_v1/test/` (automation harness)
+- `src/plugins/robot/src_v1/install.go` (v3-local install workflow)
+- `src/plugins/robot/src_v1/build.go` (v3-local build workflow)
+- `src/plugins/robot/src_v1/DESIGN.md`
+- `src/plugins/robot/src_v1/TEST_PLAN.md`
+- `src/plugins/robot/src_v1/DAG.md`
 
 This preserves:
 - Side-by-side versions.
@@ -41,7 +41,7 @@ This preserves:
 - Comparable automation runs across versions.
 
 ## 2. Shared Library Layer (v3 uses new libs only)
-We keep the same architectural intent as the original template README, but use new libraries instead of modifying old ones.
+We keep the same architectural intent as the original robot README, but use new libraries instead of modifying old ones.
 
 ### UI Library (`src/libs/ui_v2`)
 Replaces `src/libs/ui` in v3.
@@ -73,10 +73,10 @@ Naming changes:
 - `test.log`, `TEST.md`, `test_step_N.png`.
 
 ## 3. UI Layer: Section Model (Template Capabilities Preserved)
-The v3 UI implements the same scope of template sections, but with simpler code and faster swaps.
+The v3 UI implements the same scope of robot sections, but with simpler code and faster swaps.
 
 ### Required Section Types (UI Templates)
-Each section must have a dedicated UI template in `src_v3/ui`:
+Each section must have a dedicated UI robot in `src_v1/ui`:
 - `hero` with Three.js background viz.
 - `docs` (static documentation)
 - `table` (with pagination)
@@ -175,13 +175,13 @@ Modeled after the DAG plugin dev flow, v3 adds a dedicated dev server experience
 
 CLI example:
 ```bash
-./dialtone.sh template dev src_v3
+./dialtone.sh robot dev src_v1
 ```
 
 Requirements:
 - Dev server runs in debug mode.
 - Chromedp attaches to the dev server browser session for live inspection.
-- All browser console logs stream to stdout and to `dev.log` in `src/plugins/template/src_v3/`.
+- All browser console logs stream to stdout and to `dev.log` in `src/plugins/robot/src_v1/`.
 - Dev server remains running while tests execute, and test runs force a UI refresh/rebuild so visible UI is always current.
 
 ### Per-Section Test Loop
@@ -215,10 +215,10 @@ The report is richer than `SMOKE.md`:
   - Replace `dialtone-ui` import with `ui_v2` entrypoint.
   - Replace `smoke` with `test` harness.
   - Strip UI transitions and fades.
-- All v3 changes are local to `src_v3` and the new libraries.
-- `src_v3` owns its own setup/build orchestration files:
-  - `install.go` installs only the dependencies needed for `src_v3`.
-  - `build.go` executes only the build steps needed for `src_v3`.
+- All v3 changes are local to `src_v1` and the new libraries.
+- `src_v1` owns its own setup/build orchestration files:
+  - `install.go` installs only the dependencies needed for `src_v1`.
+  - `build.go` executes only the build steps needed for `src_v1`.
 
 ## 7. Decisions (Confirmed)
 - `ui_v2` will use a new base stylesheet that targets common HTML elements (`section`, `header`, `button`, etc.) so components “just work” without extra classes.

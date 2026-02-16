@@ -12,6 +12,7 @@ func Run01Preflight() error {
 		name string
 		run  func() error
 	}{
+		{name: "UI Install", run: Run00Install},
 		{name: "Go Format", run: Run01GoFormat},
 		{name: "Go Vet", run: Run02GoVet},
 		{name: "Go Build", run: Run03GoBuild},
@@ -28,13 +29,26 @@ func Run01Preflight() error {
 	return nil
 }
 
+func Run00Install() error {
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "robot", "install", "src_v1")
+	cmd.Dir = repoRoot
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 func Run01GoFormat() error {
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		return err
 	}
 
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "template", "fmt", "src_v3")
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "robot", "fmt", "src_v1")
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

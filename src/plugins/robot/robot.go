@@ -11,6 +11,7 @@ import (
 	"dialtone/cli/src/core/ssh"
 	mavlink_app "dialtone/cli/src/plugins/mavlink/app"
 	ai_app "dialtone/cli/src/plugins/ai/app"
+	robot_ops "dialtone/cli/src/plugins/robot/src_v1/cmd/ops"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -32,6 +33,7 @@ import (
 	"tailscale.com/tsnet"
 	sshlib "golang.org/x/crypto/ssh"
 	"embed"
+	"io/fs"
 )
 
 //go:embed all:src_v1/ui/dist
@@ -60,10 +62,11 @@ func RunRobot(args []string) {
 		RunStart(restArgs)
 	case "deploy":
 		RunDeploy(restArgs)
-	case "sync-code":
-		RunSyncCode(restArgs)
 	case "install":
-		RunInstall(getDir())
+		if err := robot_ops.Install(); err != nil {
+			fmt.Printf("Robot install error: %v\n", err)
+			os.Exit(1)
+		}
 	case "fmt":
 		RunFmt(getDir())
 	case "format":
@@ -81,7 +84,10 @@ func RunRobot(args []string) {
 	case "dev":
 		RunDev(getDir())
 	case "build":
-		RunBuild(getDir())
+		if err := robot_ops.Build(); err != nil {
+			fmt.Printf("Robot build error: %v\n", err)
+			os.Exit(1)
+		}
 	case "test":
 		if len(restArgs) > 0 && strings.HasPrefix(restArgs[0], "src_v") {
 			RunVersionedTest(restArgs[0])
@@ -101,7 +107,6 @@ func printRobotUsage() {
 	fmt.Println("\nCommands:")
 	fmt.Println("  start       Start the NATS and Web server (core robot logic)")
 	fmt.Println("  deploy      Deploy binary to remote robot via SSH")
-	fmt.Println("  sync-code   Sync source code to remote robot")
 	fmt.Println("\nVersioned Source Commands (src_vN):")
 	fmt.Println("  install     Install UI dependencies")
 	fmt.Println("  fmt         Run formatting checks/fixes")
@@ -146,7 +151,11 @@ func RunStart(args []string) {
 	}
 
 	fs := flag.NewFlagSet("start", flag.ExitOnError)
-	hostname := fs.String("hostname", "dialtone-1", "Tailscale hostname for this NATS server")
+	defaultHostname := os.Getenv("DIALTONE_HOSTNAME")
+	if defaultHostname == "" {
+		defaultHostname = "dialtone-1"
+	}
+	hostname := fs.String("hostname", defaultHostname, "Tailscale hostname for this NATS server")
 	natsPort := fs.Int("port", 4222, "NATS port to listen on (both local and Tailscale)")
 	webPort := fs.Int("web-port", 80, "Web dashboard port")
 	stateDir := fs.String("state-dir", "", "Directory to store Tailscale state")
@@ -199,6 +208,9 @@ func runLocalOnly(port, wsPort, webPort int, verbose bool, mavlinkAddr string, o
 	startNatsPublisher(port)
 
 	webHandler := web.CreateWebHandler(hostname, port, wsPort, webPort, port, wsPort, ns, nil, nil, useMock, webFS)
+	if sub, err := fs.Sub(webFS, "src_v1/ui/dist"); err == nil {
+		webHandler = web.CreateWebHandler(hostname, port, wsPort, webPort, port, wsPort, ns, nil, nil, useMock, sub)
+	}
 	localWebAddr := fmt.Sprintf("0.0.0.0:%d", webPort)
 	if webPort == 80 {
 		localWebAddr = "0.0.0.0:8080"
@@ -362,6 +374,7 @@ func RunDeploy(args []string) {
 	port := fs.String("port", "22", "SSH port")
 	user := fs.String("user", os.Getenv("ROBOT_USER"), "SSH user")
 	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password")
+	hostname := fs.String("hostname", os.Getenv("DIALTONE_HOSTNAME"), "Tailscale hostname for the robot")
 	proxy := fs.Bool("proxy", false, "Expose Web UI via Cloudflare proxy (drone-1.dialtone.earth)")
 	service := fs.Bool("service", false, "Set up Dialtone as a systemd service on the robot")
 	fs.Parse(args)
@@ -370,9 +383,23 @@ func RunDeploy(args []string) {
 		logger.LogFatal("Error: --host and --pass are required")
 	}
 
+	// Use DIALTONE_HOSTNAME if set in env, otherwise fallback to SSH host if flag not provided
+	if *hostname == "" {
+		*hostname = os.Getenv("DIALTONE_HOSTNAME")
+	}
+	if *hostname == "" {
+		*hostname = *host
+	}
+
 	validateRequiredVars([]string{"DIALTONE_HOSTNAME", "TS_AUTHKEY"})
 
-	logger.LogInfo("Starting deployment to %s...", *host)
+	cwd, _ := os.Getwd()
+	logger.LogInfo("Building Robot UI and Binary...")
+	if err := robot_ops.Install(); err != nil {
+		logger.LogFatal("Failed to install UI dependencies: %v", err)
+	}
+
+	logger.LogInfo("Connecting to %s to detect architecture...", *host)
 	client, err := ssh.DialSSH(*host, *port, *user, *pass)
 	if err != nil {
 		logger.LogFatal("Failed to connect: %v", err)
@@ -384,7 +411,7 @@ func RunDeploy(args []string) {
 
 	remoteArch, _ := ssh.RunSSHCommand(client, "uname -m")
 	remoteArch = strings.TrimSpace(remoteArch)
-	
+
 	var buildFlag string
 	var binaryName string
 	switch remoteArch {
@@ -398,8 +425,22 @@ func RunDeploy(args []string) {
 		logger.LogFatal("Unsupported arch: %s", remoteArch)
 	}
 
-	build.RunBuild([]string{buildFlag})
-	localBinaryPath := filepath.Join("bin", binaryName)
+	uiDir := filepath.Join(cwd, "src", "plugins", "robot", "src_v1", "ui")
+	fmt.Printf(">> [Robot] Building UI: src_v1\n")
+	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "build")
+	cmd.Dir = cwd
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		logger.LogFatal("Failed to build UI: %v", err)
+	}
+
+	robotBinDir := filepath.Join("src", "plugins", "robot", "bin")
+	fmt.Printf(">> [Robot] Building Dialtone Binary (%s) into %s\n", buildFlag, robotBinDir)
+	build.RunBuild([]string{"--output-dir", robotBinDir, "--skip-web", "--skip-www", buildFlag})
+
+	logger.LogInfo("Starting deployment to %s...", *host)
+	localBinaryPath := filepath.Join("src", "plugins", "robot", "bin", binaryName)
 	
 	remoteDir, _ := ssh.GetRemoteHome(client)
 	remotePath := path.Join(remoteDir, "dialtone")
@@ -422,7 +463,7 @@ Restart=always
 User=%s
 
 [Install]
-WantedBy=multi-user.target`, remotePath, *host, remoteDir, os.Getenv("TS_AUTHKEY"), *user)
+WantedBy=multi-user.target`, remotePath, *hostname, remoteDir, os.Getenv("TS_AUTHKEY"), *user)
 		
 		ssh.RunSSHCommand(client, fmt.Sprintf("echo \"%s\" | sudo -S tee /etc/systemd/system/dialtone-robot.service", systemdServiceContent))
 		ssh.RunSSHCommand(client, "sudo systemctl enable dialtone-robot")
@@ -431,10 +472,16 @@ WantedBy=multi-user.target`, remotePath, *host, remoteDir, os.Getenv("TS_AUTHKEY
 	}
 
 	if *proxy {
-		logger.LogInfo("Setting up Cloudflare tunnel proxy...")
-		// Placeholder for Cloudflare tunnel setup
-		// This would involve running 'cloudflared tunnel' commands on the remote
-		logger.LogInfo("Cloudflare tunnel setup instructions would go here.")
+		logger.LogInfo("Setting up Cloudflare tunnel proxy via cloudflare plugin...")
+		cwd, _ := os.Getwd()
+		cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "cloudflare", "setup-service", "--name", *hostname)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			logger.LogInfo("[WARNING] Cloudflare proxy setup failed: %v", err)
+		} else {
+			logger.LogInfo("Cloudflare tunnel proxy for %s.dialtone.earth setup successfully.", *hostname)
+		}
 	}
 	
 	logger.LogInfo("Deployment complete.")
@@ -570,24 +617,6 @@ func RunUIRun(versionDir string, extraArgs []string) error {
 
 func RunDev(versionDir string) error {
 	return RunUIRun(versionDir, nil)
-}
-
-func RunBuild(versionDir string) error {
-	cwd, _ := os.Getwd()
-	uiDir := filepath.Join(cwd, "src", "plugins", "robot", versionDir, "ui")
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "build")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
-func RunInstall(versionDir string) error {
-	cwd, _ := os.Getwd()
-	uiDir := filepath.Join(cwd, "src", "plugins", "robot", versionDir, "ui")
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "install")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
 }
 
 func RunVersionedTest(versionDir string) error {
