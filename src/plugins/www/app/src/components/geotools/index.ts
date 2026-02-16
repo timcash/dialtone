@@ -8,6 +8,8 @@ import { setupGeoToolsMenu } from "./menu";
 import pointGlowVert from "../../shaders/point-glow.vert.glsl?raw";
 import pointGlowFrag from "../../shaders/point-glow.frag.glsl?raw";
 
+import type { SectionManager } from "../util/section";
+
 type GeojsonLike = {
   type: string;
   features?: Array<{
@@ -311,7 +313,7 @@ class GeoToolsVisualization {
   }
 }
 
-export function mountGeoTools(container: HTMLElement) {
+export function mountGeoTools(container: HTMLElement, sections: SectionManager) {
   container.innerHTML = `
     <div class="marketing-overlay" aria-label="GeoTools section: GeoJSON to H3">
       <h2>GeoTools</h2>
@@ -361,6 +363,7 @@ export function mountGeoTools(container: HTMLElement) {
     },
     onFile: async (file: File) => {
       try {
+        sections.setLoadingMessage("s-geotools", `parsing ${file.name} ...`);
         status = `Loading ${file.name}...`;
         updateStatusFn();
         const text = await file.text();
@@ -438,6 +441,7 @@ export function mountGeoTools(container: HTMLElement) {
   // Wait, I am replacing the config setup, preserving the logic.
   // I need to be careful not to delete logic I can't see.
 
+  sections.setLoadingMessage("s-geotools", "loading land geometry ...");
   fetch("/land.geojson")
     .then((res) => res.json())
     .then((geojson) => {

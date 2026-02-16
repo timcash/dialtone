@@ -12,20 +12,10 @@ import { GpuTimer } from "../util/gpu_timer";
 import { VisibilityMixin } from "../util/section";
 import { startTyping } from "../util/typing";
 import { setupEarthMenu } from "./menu";
+import type { SectionManager } from "../util/section";
 
 const DEG_TO_RAD = Math.PI / 180;
 const TIME_SCALE = 1;
-
-// Human-scale axial rotation:
-// Base axial rotation period at timeScale=1:
-// 1 full rotation / 30s while the section is visible.
-// (Animation pauses when you scroll off the section via VisibilityMixin.)
-// Note: rotation is applied as earthRotSpeed * deltaSeconds, where deltaSeconds already includes `timeScale`.
-
-// ...
-
-
-
 
 // Light colors (shader-driven). Neutral white/cool.
 const SUN_COLOR = new THREE.Color(1.0, 1.0, 1.0);
@@ -88,6 +78,7 @@ export class ProceduralOrbit {
   camera = new THREE.PerspectiveCamera(75, 1, 0.1, 10000);
   renderer = new THREE.WebGLRenderer({ antialias: true });
   container: HTMLElement;
+  sections: SectionManager;
   frameId = 0;
   resizeObserver?: ResizeObserver;
   gl!: WebGLRenderingContext | WebGL2RenderingContext;
@@ -115,8 +106,6 @@ export class ProceduralOrbit {
   earthRadius = 50;
   shaderTimeScale = 0.28;
   timeScale = TIME_SCALE;
-  // Clouds: make them more visible by default.
-  // Clouds: make them more visible by default.
   cloudAmount = 1.0;
 
   // Rotations
@@ -168,8 +157,9 @@ export class ProceduralOrbit {
 
   private fpsCounter = new FpsCounter("earth");
 
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, sections: SectionManager) {
     this.container = container;
+    this.sections = sections;
     this.renderer.setClearColor(0x000000, 1);
     this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.domElement.style.position = "absolute";
@@ -182,14 +172,12 @@ export class ProceduralOrbit {
     this.gl = this.renderer.getContext();
     this.gpuTimer.init(this.gl);
 
-
+    this.sections.setLoadingMessage("s-home", "loading earth layers ...");
     this.initLayers();
     this.loadLandLayer();
     this.initLights();
-    // this.initConfigPanel(); // Menu setup on visibility
     this.resize();
     this.updateCamera();
-    // Ensure we render both the default layer and the moon light-only layer.
     this.camera.layers.enable(MOON_LIGHT_LAYER);
     this.animate();
 
@@ -213,7 +201,6 @@ export class ProceduralOrbit {
 
     this.camera.aspect = ratio;
 
-    // Centered but mobile FOV adjusted
     if (ratio < 1) {
       this.camera.fov = 95;
     } else {
@@ -267,11 +254,9 @@ export class ProceduralOrbit {
     this.cloud2.renderOrder = 2;
     this.scene.add(this.cloud2);
 
-    // Reduced cloud layers for performance (2 layers instead of 4)
-
     this.hexLayers = [
       new HexLayer(this.earthRadius, {
-        radiusOffset: 1.0, // Increased from 0.1
+        radiusOffset: 1.0,
         count: 240,
         resolution: 3,
         ratePerSecond: 45,
@@ -283,7 +268,7 @@ export class ProceduralOrbit {
         ],
       }),
       new HexLayer(this.earthRadius, {
-        radiusOffset: 1.5, // Increased from 0.15
+        radiusOffset: 1.5,
         count: 200,
         resolution: 3,
         ratePerSecond: 45,
@@ -295,7 +280,7 @@ export class ProceduralOrbit {
         ],
       }),
       new HexLayer(this.earthRadius, {
-        radiusOffset: 2.0, // Increased from 0.2
+        radiusOffset: 2.0,
         count: 160,
         resolution: 3,
         ratePerSecond: 45,
@@ -358,7 +343,6 @@ export class ProceduralOrbit {
     );
     this.scene.add(this.sunAtmosphere);
 
-    // Moon: lit by the scene lights (reflects sunLight + key lights)
     const moonMat = new THREE.MeshStandardMaterial({
       color: new THREE.Color(0.75, 0.75, 0.75),
       map: createMoonRockTexture(128),
@@ -366,13 +350,13 @@ export class ProceduralOrbit {
       metalness: 0.02,
     });
     this.moon = new THREE.Mesh(geo(this.moonRadius, 32), moonMat);
-    // Moon should only reflect sunlight (no ambient/hemi/key lights).
     this.moon.layers.set(MOON_LIGHT_LAYER);
     this.scene.add(this.moon);
   }
 
   private async loadLandLayer() {
     try {
+      this.sections.setLoadingMessage("s-home", "loading land geometry ...");
       const precomputed = await fetch("/land.h3.json");
       if (precomputed.ok) {
         const payload = await precomputed.json();
@@ -390,7 +374,6 @@ export class ProceduralOrbit {
       if (cells.length === 0) return;
       this.buildLandLayer(cells, 3);
     } catch {
-      // Land layer is optional; ignore load errors.
     }
   }
 
@@ -421,14 +404,6 @@ export class ProceduralOrbit {
     this.hexLayers.push(landLayer);
     this.earth.add(landLayer.mesh);
     this.landLayer = landLayer;
-    console.log("[earth] land layer ready", {
-      cells: cells.length,
-      resolution,
-      earthRadius: this.earthRadius,
-      landRadius: this.earthRadius + landRadiusOffset,
-      cloud1Radius: this.earthRadius + 0.05,
-      cloud2Radius: this.earthRadius + 0.08,
-    });
   }
 
   private geojsonToCells(geojson: any, resolution: number) {
@@ -447,7 +422,6 @@ export class ProceduralOrbit {
         try {
           polygonToCells(coords, resolution, true).forEach((cell) => cells.add(cell));
         } catch {
-          // Skip invalid polygons.
         }
       });
     });
@@ -492,8 +466,6 @@ export class ProceduralOrbit {
   }
 
   initLights() {
-    // Note: core Earth lighting is shader-driven; these lights are primarily for
-    // non-shader meshes / debugging.
     this.sunKeyLight = new THREE.DirectionalLight(0xffffff, 0.35);
     this.sunKeyLight.position.set(100, 50, 100);
     this.scene.add(this.sunKeyLight);
@@ -517,14 +489,9 @@ export class ProceduralOrbit {
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x111111, 1.0);
     this.scene.add(hemiLight);
     this.sunLight = new THREE.PointLight(0xffffff, 2.1, 220);
-    // The moon is rendered on a dedicated layer so it only sees the sun light.
     this.sunLight.layers.enable(MOON_LIGHT_LAYER);
     this.scene.add(this.sunLight);
   }
-
-
-
-
 
   setVisible(visible: boolean) {
     VisibilityMixin.setVisible(this, visible, "earth");
@@ -548,7 +515,6 @@ export class ProceduralOrbit {
     const cloud1Opacity = this.cloud1Opacity;
     const cloud2Opacity = this.cloud2Opacity;
 
-    // Rotations
     this.earth.rotation.y += this.earthRotSpeed * deltaSeconds;
     this.cloud1.rotateOnAxis(this.cloud1Axis, this.cloud1RotSpeed * rawDelta);
     this.cloud2.rotateOnAxis(this.cloud2Axis, this.cloud2RotSpeed * rawDelta);
@@ -561,7 +527,6 @@ export class ProceduralOrbit {
     this.cameraOrbit += this.cameraOrbitSpeed * deltaSeconds;
     this.updateCamera();
 
-    // Sun Orbit
     const sunRad = this.earthRadius + this.sunOrbitHeight;
     const sunA = now * this.sunOrbitSpeed + this.sunOrbitAngleDeg * DEG_TO_RAD;
     const twoPi = Math.PI * 2;
@@ -575,7 +540,6 @@ export class ProceduralOrbit {
     this.sunGlow.position.copy(this.sunLight.position);
 
     const sDir = this.sunLight.position.clone().normalize();
-    // Second key light: same orbit, trailing by 2π/4 radians.
     const keyA = sunA - KEY2_PHASE_OFFSET_RAD;
     const sinK = Math.sin(keyA);
     const cosK = Math.cos(keyA);
@@ -622,8 +586,6 @@ export class ProceduralOrbit {
       this.camera.position,
     );
 
-
-    // Keep debug lights moving with the same orbits.
     this.sunKeyLight.position.copy(this.sunLight.position);
     this.sunKeyLight2.position.copy(keyPos);
 
@@ -636,8 +598,6 @@ export class ProceduralOrbit {
 
     this.updateMoonPosition(now);
   };
-
-
 
   private updateCamera() {
     const nearDistance = this.earthRadius + Math.max(6, this.cameraDistance);
@@ -662,7 +622,6 @@ export class ProceduralOrbit {
   }
 
   private updateMoonPosition(now: number) {
-    // Moon orbit: 1/10th the speed of the sun (same timebase as sunA).
     const moonA = now * (this.sunOrbitSpeed / 10) + this.moonOrbitPhaseRad;
     const moonSinA = Math.sin(moonA);
     const moonCosA = Math.cos(moonA);
@@ -683,7 +642,6 @@ export class ProceduralOrbit {
   }
 
   getLandRadius() {
-    // Default is earthRadius + 0.6
     return this.earthRadius + 0.6;
   }
 
@@ -719,16 +677,13 @@ export class ProceduralOrbit {
   }
 }
 
-export function mountEarth(container: HTMLElement) {
-  // Inject HTML
+export function mountEarth(container: HTMLElement, sections: SectionManager) {
   container.innerHTML = `
       <div class="marketing-overlay" aria-label="Unified Networks marketing information">
         <h2>Global Virtual Library</h2>
         <p data-typing-subtitle></p>
       </div>
     `;
-
-
 
   const subtitleEl = container.querySelector(
     "[data-typing-subtitle]"
@@ -740,11 +695,10 @@ export function mountEarth(container: HTMLElement) {
   ];
   const stopTyping = startTyping(subtitleEl, subtitles);
 
-  const orbit = new ProceduralOrbit(container);
+  const orbit = new ProceduralOrbit(container, sections);
   return {
     dispose: () => {
       orbit.dispose();
-
       stopTyping();
       container.innerHTML = '';
     },

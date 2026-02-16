@@ -13,7 +13,7 @@ sections.register('s-home', {
         const { mountEarth } = await import('./components/earth/index');
         const container = document.getElementById('earth-container');
         if (!container) throw new Error('earth-container not found');
-        return mountEarth(container);
+        return mountEarth(container, sections);
     }
 });
 
@@ -64,7 +64,7 @@ sections.register('s-cad', {
         const { mountCAD } = await import('./components/cad/index');
         const container = document.getElementById('cad-container');
         if (!container) throw new Error('cad-container not found');
-        return mountCAD(container);
+        return mountCAD(container, sections);
     }
 });
 
@@ -85,7 +85,7 @@ sections.register('s-geotools', {
         const { mountGeoTools } = await import('./components/geotools/index');
         const container = document.getElementById('geotools-container');
         if (!container) throw new Error('geotools-container not found');
-        return mountGeoTools(container);
+        return mountGeoTools(container, sections);
     }
 });
 

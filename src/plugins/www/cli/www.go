@@ -667,13 +667,20 @@ func RunWww(args []string) {
 	case "smoke":
 		for _, arg := range args[1:] {
 			if arg == "--help" || arg == "-h" {
-				fmt.Println("Usage: dialtone www smoke")
+				fmt.Println("Usage: dialtone www smoke [tags...]")
 				fmt.Println("\nRuns a quick smoke pass across all WWW sections.")
 				return
 			}
 		}
 		logInfo("Running smoke tests...")
-		cmd := getDialtoneCmd("test", "tags", "smoke")
+		
+		tags := []string{"smoke"}
+		if len(args) > 1 {
+			tags = append(tags, args[1:]...)
+		}
+		
+		cmdArgs := append([]string{"test", "tags"}, tags...)
+		cmd := getDialtoneCmd(cmdArgs...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {

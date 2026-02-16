@@ -7,8 +7,7 @@ import { GpuTimer } from "../util/gpu_timer";
 import { VisibilityMixin } from "../util/section";
 import { startTyping } from "../util/typing";
 import { setupCadMenu } from "./menu";
-
-
+import type { SectionManager } from "../util/section";
 
 export class CADViewer {
   scene = new THREE.Scene();
@@ -19,14 +18,13 @@ export class CADViewer {
     powerPreference: "high-performance",
   });
   container: HTMLElement;
+  sections: SectionManager;
   gearGroup = new THREE.Group();
   frameId = 0;
   isVisible = true;
   frameCount = 0;
   gl!: WebGLRenderingContext | WebGL2RenderingContext;
   gpuTimer = new GpuTimer();
-
-
 
   // Animation state
   time = 0;
@@ -51,9 +49,9 @@ export class CADViewer {
   currentWireframe: THREE.LineSegments | null = null;
   private fpsCounter = new FpsCounter("cad");
 
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, sections: SectionManager) {
     this.container = container;
-    this.loadingEl = container.querySelector(".cad-loader");
+    this.sections = sections;
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -68,7 +66,6 @@ export class CADViewer {
     this.camera.position.set(0, 80, 160);
     this.camera.lookAt(0, 0, 0);
 
-    this.initLights();
     this.initLights();
 
     // Load default model immediately, then try to update from live backend
@@ -87,18 +84,14 @@ export class CADViewer {
   async loadDefaultModel() {
     try {
       console.log("[cad] Loading default gear STL...");
-      if (this.loadingEl) {
-        this.loadingEl.textContent = `loading gear(${this.params.num_mounting_holes} mounting holes) ...`;
-        this.loadingEl.hidden = false;
-      }
+      this.sections.setLoadingMessage("s-cad", `loading gear(${this.params.num_mounting_holes} mounting holes) ...`);
+      
       const response = await fetch("/default_gear.stl");
       if (!response.ok) throw new Error("Failed to load default gear");
       const arrayBuffer = await response.arrayBuffer();
       this.applyGeometry(this.loader.parse(arrayBuffer));
     } catch (e) {
       console.error("[cad] Failed to load default gear:", e);
-    } finally {
-      if (this.loadingEl) this.loadingEl.hidden = true;
     }
   }
 
@@ -172,7 +165,6 @@ export class CADViewer {
   offlineWarningEl: HTMLDivElement | null = null;
   panelEl: HTMLDivElement | null = null;
   toggleEl: HTMLButtonElement | null = null;
-  loadingEl: HTMLDivElement | null = null;
 
   setPanelOpen(open: boolean) {
     if (!this.panelEl || !this.toggleEl) return;
@@ -180,8 +172,6 @@ export class CADViewer {
     this.panelEl.style.display = open ? "grid" : "none";
     this.toggleEl.setAttribute("aria-expanded", String(open));
   }
-
-
 
   fetchTimeout: any = null;
   debouncedUpdate() {
@@ -193,11 +183,7 @@ export class CADViewer {
 
   async updateModel() {
     this.abortController = new AbortController();
-
-    if (this.loadingEl) {
-      this.loadingEl.textContent = `loading gear(${this.params.num_mounting_holes} mounting holes) ...`;
-      this.loadingEl.hidden = false;
-    }
+    this.sections.setLoadingMessage("s-cad", `generating parametric gear ...`);
 
     try {
       const url = `/api/cad/generate`;
@@ -210,37 +196,26 @@ export class CADViewer {
         signal: this.abortController.signal,
       });
 
-      console.log(
-        `[cad] Response status: ${response.status} ${response.statusText}`,
-      );
       if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`HTTP ${response.status}: ${text}`);
+        throw new Error(`HTTP ${response.status}`);
       }
 
-      console.log("[cad] STL Response OK, reading ArrayBuffer...");
       const arrayBuffer = await response.arrayBuffer();
-      console.log(
-        `[cad] Received ${arrayBuffer.byteLength} bytes. Parsing STL...`,
-      );
-
       if (arrayBuffer.byteLength === 0) {
-        throw new Error("Received empty STL data from backend");
+        throw new Error("Empty STL data");
       }
 
       const geometry = this.loader.parse(arrayBuffer);
       this.applyGeometry(geometry);
 
       if (this.offlineWarningEl) this.offlineWarningEl.hidden = true;
-      console.log("[cad] Scene updated successfully");
     } catch (e: any) {
       if (e.name !== "AbortError") {
         console.error("[cad] Model update failed:", e);
-        console.warn("[cad] Server might be offline or erroring:", e.message);
         if (this.offlineWarningEl) this.offlineWarningEl.hidden = false;
       }
     } finally {
-      if (this.loadingEl) this.loadingEl.hidden = true;
+      // Logic handled by is-ready class toggle in SectionManager.load
     }
   }
 
@@ -311,18 +286,14 @@ export class CADViewer {
   }
 }
 
-export function mountCAD(container: HTMLElement) {
+export function mountCAD(container: HTMLElement, sections: SectionManager) {
   // Inject HTML
   container.innerHTML = `
       <div class="marketing-overlay" aria-label="CAD marketing information">
         <h2>Parametric Logic</h2>
         <p data-typing-subtitle></p>
       </div>
-      <div class="cad-loader" hidden>loading gear(4 mounting holes) ...</div>
     `;
-
-
-  // Create and inject config toggle
 
   const subtitleEl = container.querySelector(
     "[data-typing-subtitle]"
@@ -334,7 +305,7 @@ export function mountCAD(container: HTMLElement) {
   ];
   const stopTyping = startTyping(subtitleEl, subtitles);
 
-  const viewer = new CADViewer(container);
+  const viewer = new CADViewer(container, sections);
   // @ts-ignore
   window.cadViewer = viewer;
 

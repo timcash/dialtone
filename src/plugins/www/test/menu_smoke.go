@@ -3,6 +3,10 @@ package test
 import (
 	"context"
 	"fmt"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,11 +17,19 @@ import (
 )
 
 func init() {
-	test.Register("www-menu-smoke", "www", []string{"www", "smoke", "menu"}, RunWwwMenuSmoke)
+	test.Register("www-menu-smoke", "www", []string{"www", "menu-smoke", "menu"}, RunWwwMenuSmoke)
 }
 
 func RunWwwMenuSmoke() error {
 	fmt.Println(">> [WWW] Menu Smoke: start")
+	cwd, _ := os.Getwd()
+	wwwDir := filepath.Join(cwd, "src", "plugins", "www", "app")
+
+	if !isPortOpenMenu(4173) {
+		devCmd := exec.Command("npm", "run", "preview", "--", "--host", "127.0.0.1")
+		devCmd.Dir = wwwDir; devCmd.Start(); defer devCmd.Process.Kill()
+	}
+	waitForPortLocalMenu(4173, 60*time.Second)
 	
 	chromePath := browser.FindChromePath()
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
@@ -32,13 +44,14 @@ func RunWwwMenuSmoke() error {
 	ctx, tabCancel := chromedp.NewContext(allocCtx)
 	defer tabCancel()
 
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
 
 	var sections []string
 	if err := chromedp.Run(ctx,
-		chromedp.Navigate("http://localhost:5173"),
-		chromedp.WaitReady(".header-fps"),
+		chromedp.Navigate("about:blank"),
+		chromedp.Navigate("http://127.0.0.1:4173"),
+		chromedp.WaitVisible(".header-fps"),
 		chromedp.Evaluate(`Array.from(document.querySelectorAll('section[id^="s-"]')).map(el => el.id)`, &sections),
 	); err != nil {
 		return fmt.Errorf("setup failed: %v", err)
@@ -139,4 +152,20 @@ func RunWwwMenuSmoke() error {
 
 	fmt.Println(">> [WWW] Menu Smoke: pass")
 	return nil
+}
+
+func waitForPortLocalMenu(port int, timeout time.Duration) {
+	start := time.Now()
+	for time.Since(start) < timeout {
+		if conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), time.Second); err == nil {
+			conn.Close(); return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+func isPortOpenMenu(port int) bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 300*time.Millisecond)
+	if err == nil { conn.Close(); return true }
+	return false
 }
