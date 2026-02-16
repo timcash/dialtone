@@ -254,7 +254,7 @@ export function mountRadio(container: HTMLElement) {
         ctx.fillStyle = "#003a2a";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = "#7dffcf";
-        ctx.font = "14px \"Press Start 2P\", monospace";
+        ctx.font = "14px Inter";
         ctx.textBaseline = "top";
         const paddingX = 10;
         const paddingY = 8;

@@ -183,7 +183,7 @@ function createTextSprite(text: string, scaleX = 1.8, scaleY = 0.45): THREE.Spri
   if (ctx) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = "#f8fbff";
-    ctx.font = "700 31px Arial";
+    ctx.font = "700 31px Inter";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.shadowColor = "rgba(0, 0, 0, 0.65)";
