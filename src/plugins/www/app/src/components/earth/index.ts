@@ -20,7 +20,6 @@ const TIME_SCALE = 1;
 const SUN_COLOR = new THREE.Color(1.0, 1.0, 1.0);
 const KEY1_COLOR = new THREE.Color(0.9, 0.95, 1.0);
 const KEY2_COLOR = new THREE.Color(0.85, 0.9, 1.0);
-const KEY2_PHASE_OFFSET_RAD = Math.PI / 2;
 
 const MOON_LIGHT_LAYER = 1;
 
@@ -59,6 +58,7 @@ function createMoonRockTexture(size = 128) {
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(2, 2);
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
   return tex;
 }
 
@@ -150,17 +150,16 @@ export class ProceduralOrbit {
     if (typeof ResizeObserver !== "undefined") {
       this.resizeObserver = new ResizeObserver(() => this.resize());
       this.resizeObserver.observe(this.container);
+    } else {
+      window.addEventListener("resize", this.resize);
     }
     
-    // Non-blocking asset load
     this.backgroundInit();
   }
 
   async backgroundInit() {
     this.sections.setLoadingMessage("s-home", "loading land geometry ...");
     await this.loadLandLayer();
-    // once fully loaded, the loading screen is likely already gone, 
-    // but we update the message just in case or for future telemetry.
     this.sections.setLoadingMessage("s-home", "");
   }
 
@@ -273,6 +272,21 @@ export class ProceduralOrbit {
     this.sunLight.layers.enable(MOON_LIGHT_LAYER);
     this.scene.add(this.sunLight);
   }
+
+  resize = () => {
+    const rect = this.container.getBoundingClientRect();
+    this.camera.aspect = Math.max(1, rect.width) / Math.max(1, rect.height);
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(rect.width, rect.height, false);
+  };
+
+  dispose = () => {
+    cancelAnimationFrame(this.frameId);
+    this.resizeObserver?.disconnect();
+    window.removeEventListener("resize", this.resize);
+    this.renderer.dispose();
+    this.container.removeChild(this.renderer.domElement);
+  };
 
   setVisible(visible: boolean) {
     VisibilityMixin.setVisible(this, visible, "earth");

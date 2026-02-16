@@ -645,7 +645,7 @@ class RobotArmVisualization {
   };
 }
 
-export function mountRobot(container: HTMLElement, sections: SectionManager): Promise<VisualizationControl> {
+export function mountRobot(container: HTMLElement, sections: SectionManager): VisualizationControl {
   // Inject HTML
   container.innerHTML = `
   <div class="marketing-overlay" aria-label="Robot visualization marketing information">

@@ -342,7 +342,7 @@ class VisionVisualization {
   };
 }
 
-export function mountAbout(container: HTMLElement, sections: SectionManager): Promise<VisualizationControl> {
+export function mountAbout(container: HTMLElement, sections: SectionManager): VisualizationControl {
   container.innerHTML = `
     <div class="marketing-overlay" aria-label="Vision: global virtual librarian">
       <h2 data-typing-title>DIALTONE</h2>
