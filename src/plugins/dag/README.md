@@ -8,7 +8,7 @@ Versioned DAG plugin development lives under `src/plugins/dag/src_vN`.
 2. Keep each button single-purpose.
 3. Keep graph interaction language explicit: `output node` -> `input node` for directed links.
 4. Keep camera framing readable after every interaction (add/link/nest/back/delete/unlink).
-5. Keep nested layer visibility strict: active layer + parent context only.
+5. Keep nested layer visibility strict: active layer only.
 
 ## Current State
 
@@ -22,36 +22,33 @@ Versioned DAG plugin development lives under `src/plugins/dag/src_vN`.
 3. `src_v3` starts from an empty root DAG; users build graph structure via UI controls.
 4. `dag-table` is rendered flush at top-left (no section padding/margins).
 5. Three controls are rendered in one unified CSS grid at the bottom:
-   - rows 1-3: 9 action buttons
-   - row 4: label input + rename button
-6. Primary controls use a fixed 9-button grid plus node taps:
+   - rows 1-2: 6 action buttons
+   - row 3: label input + rename button
+6. Primary controls use a fixed thumb grid plus node taps:
    - `DAG Back`
    - `DAG Add`
-   - `DAG Pick Output`
-   - `DAG Pick Input`
-   - `DAG Connect` (link output -> input)
-   - `DAG Unlink` (remove output -> input)
+   - `DAG Connect` (link second-most-recent -> most-recent selected node)
+   - `DAG Unlink` (remove second-most-recent -> most-recent selected node edge)
    - `DAG Nest`
-   - `DAG Delete Node`
-   - `DAG Clear Picks`
-7. A top-left legend in Three explains node colors and displays live first/second link picks:
-   - Selected node
-   - First pick (`output`)
-   - Second pick (`input`)
-   - Inputs to selected node
-   - Outputs from selected node
+   - `DAG Clear` (clears selection history)
+7. A top-left node history panel shows the last 5 selected nodes (most recent first).
+   - Most recent selected node is light blue.
+   - Second-most-recent selected node is blue.
+   - All other nodes are gray.
 8. Section switching uses one menu button that toggles a modal with `Table` and `Three`.
-9. Link workflow is pair-based:
-   - select node A, tap `DAG Pick Output`
-   - select node B, tap `DAG Pick Input`
+9. Link workflow uses selection history:
+   - select node A
+   - select node B
    - tap `DAG Connect` to create directed edge A -> B
 10. Rank rule on link creation:
    - if input node rank is less than or equal to any output rank feeding it, input node shifts to `max(output_rank)+1`.
-11. Unlink workflow is pair-based:
-   - select output/input picks as above
+11. Unlink workflow uses selection history:
+   - select output/input nodes as above
    - tap `DAG Unlink` to remove that specific directed edge.
 12. Nested layers are created/entered from selected nodes using `DAG Nest` and stacked deeper on Z.
-13. `Back` undives through layer history, reframes camera, and hides deeper nested layers.
+13. `Back` behavior is combined:
+   - on root-level history, it pops the most recent selected node and moves camera focus to the previous selected node
+   - inside nested navigation, it still undives through layer history and reframes camera
 14. Node labels are renameable via the bottom input (`DAG Label Input` + `DAG Rename`) and update in-scene.
 15. Camera framing is intentionally zoomed out for mobile readability.
 
@@ -126,11 +123,11 @@ Current suite validates:
 2. DAG table data + screenshot artifact generation.
 3. Three.js user-story workflow end-to-end:
 - start from empty DAG and create first node
-- build root input/output graph via output/input picks + `DAG Connect`
+- build root input/output graph via selection history + `DAG Connect`
 - create nested layer and dive
 - build deeper nested layers and undive through history with layer visibility constraints
 - rename labels from text input
-- delete nodes and unlink specific directed edges via output/input picks
+- unlink specific directed edges via selection history
 - verify camera remains readable/zoomed out across transitions
 
 Always inspect `TEST.md` after each run.

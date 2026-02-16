@@ -16,7 +16,8 @@ func Run04ThreeUserStoryBuildIO() error {
 	}
 	fmt.Println("[THREE] story step2 description:")
 	fmt.Println("[THREE]   - In order to add output, the user selects processor and taps Add.")
-	fmt.Println("[THREE]   - In order to add input, the user clears selection, taps Add, then picks output=input and input=processor before tapping Link.")
+	fmt.Println("[THREE]   - Add creates nodes only; user selects output=processor and input=output before tapping Link.")
+	fmt.Println("[THREE]   - In order to add input, the user clears selection, taps Add, then selects output=input and input=processor before tapping Link.")
 	fmt.Println("[THREE]   - Camera expectation: root layer remains fully readable while adding and linking nodes.")
 
 	type evalResult struct {
@@ -44,6 +45,14 @@ func Run04ThreeUserStoryBuildIO() error {
 					canvas.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: p.x, clientY: p.y, view: window }));
 					return api.getState().selectedNodeId === nodeId;
 				};
+				const historyValue = (name) => {
+					const el = q(name);
+					return el ? String(el.textContent || '').trim() : '';
+				};
+				const nodeColorHex = (nodeId) => {
+					const info = api.getNodeColorHex(nodeId);
+					return info && info.ok ? info.colorHex : -1;
+				};
 				const story = (window.__dagStory = window.__dagStory || {});
 				const processorID = story.processorID;
 				if (!processorID) return { ok: false, msg: 'missing processor id from step1' };
@@ -54,6 +63,17 @@ func Run04ThreeUserStoryBuildIO() error {
 				let st = api.getState();
 				const outputID = st.lastCreatedNodeId;
 				if (!outputID || outputID === processorID) return { ok: false, msg: 'missing output node id' };
+				if (!click('DAG Clear Picks')) return { ok: false, msg: 'clear picks before connect processor->output failed' };
+				if (!clickNode(processorID)) return { ok: false, msg: 'cannot select processor for output link source' };
+				if (historyValue('DAG Node History Item 1') !== processorID) return { ok: false, msg: 'history item1 did not show processor' };
+				if (historyValue('DAG Node History Item 2') !== 'none') return { ok: false, msg: 'history item2 should be none after first selection' };
+				if (nodeColorHex(processorID) !== 0x7dd3fc) return { ok: false, msg: 'most recent node color should be light blue' };
+				if (!clickNode(outputID)) return { ok: false, msg: 'cannot select output node for output link target' };
+				if (historyValue('DAG Node History Item 1') !== outputID) return { ok: false, msg: 'history item1 did not show output node after second selection' };
+				if (historyValue('DAG Node History Item 2') !== processorID) return { ok: false, msg: 'history item2 did not show processor after second selection' };
+				if (nodeColorHex(outputID) !== 0x7dd3fc) return { ok: false, msg: 'most recent node color should stay light blue after second selection' };
+				if (nodeColorHex(processorID) !== 0x2b78ff) return { ok: false, msg: 'second most recent node color should be blue' };
+				if (!click('DAG Connect')) return { ok: false, msg: 'connect processor->output failed' };
 
 				// Add a standalone input by clearing selection, then add.
 				const canvas = q('Three Canvas');
@@ -64,11 +84,18 @@ func Run04ThreeUserStoryBuildIO() error {
 				const inputID = st.lastCreatedNodeId;
 				if (!inputID || inputID === outputID || inputID === processorID) return { ok: false, msg: 'missing input node id' };
 
-				// Connect input -> processor (pick output then input, then link).
+				// Connect input -> processor (select output then input, then link).
+				if (!click('DAG Clear Picks')) return { ok: false, msg: 'clear picks before connect failed' };
 				if (!clickNode(inputID)) return { ok: false, msg: 'cannot select input node' };
-				if (!click('DAG Pick Output')) return { ok: false, msg: 'pick output failed' };
+				if (historyValue('DAG Node History Item 1') !== inputID) return { ok: false, msg: 'history item1 did not show input node after first selection' };
+				if (historyValue('DAG Node History Item 2') !== 'none') return { ok: false, msg: 'history item2 should be none before second selection' };
+				if (nodeColorHex(inputID) !== 0x7dd3fc) return { ok: false, msg: 'new most recent node should be light blue' };
 				if (!clickNode(processorID)) return { ok: false, msg: 'cannot select processor for connect target' };
-				if (!click('DAG Pick Input')) return { ok: false, msg: 'pick input failed' };
+				if (historyValue('DAG Node History Item 1') !== processorID) return { ok: false, msg: 'history item1 did not show processor after second selection' };
+				if (historyValue('DAG Node History Item 2') !== inputID) return { ok: false, msg: 'history item2 did not show input node after second selection' };
+				if (nodeColorHex(processorID) !== 0x7dd3fc) return { ok: false, msg: 'processor should be light blue when most recent' };
+				if (nodeColorHex(inputID) !== 0x2b78ff) return { ok: false, msg: 'input node should be blue when second most recent' };
+				if (nodeColorHex(outputID) !== 0x5b6873) return { ok: false, msg: 'older nodes should be gray' };
 				if (!click('DAG Connect')) return { ok: false, msg: 'connect apply failed' };
 
 				// Validate processor has both input and output.
@@ -83,6 +110,25 @@ func Run04ThreeUserStoryBuildIO() error {
 
 				story.inputID = inputID;
 				story.outputID = outputID;
+
+				// Leave the two most recent selections visible in history for the step screenshot.
+				if (!click('DAG Clear Picks')) return { ok: false, msg: 'clear picks before screenshot setup failed' };
+				if (!clickNode(inputID)) return { ok: false, msg: 'cannot select input for screenshot first pick' };
+				if (!clickNode(processorID)) return { ok: false, msg: 'cannot select processor for screenshot second pick' };
+				if (historyValue('DAG Node History Item 1') !== processorID) return { ok: false, msg: 'screenshot history item1 mismatch' };
+				if (historyValue('DAG Node History Item 2') !== inputID) return { ok: false, msg: 'screenshot history item2 mismatch' };
+				const camBeforeBack = api.getState().camera;
+				if (!click('DAG Back')) return { ok: false, msg: 'back action for history pop failed' };
+				const afterBack = api.getState();
+				if (afterBack.selectedNodeId !== inputID) return { ok: false, msg: 'back should select previous node from history' };
+				if (historyValue('DAG Node History Item 1') !== inputID) return { ok: false, msg: 'history item1 should pop to previous node after back' };
+				if (historyValue('DAG Node History Item 2') !== 'none') return { ok: false, msg: 'history item2 should be cleared after single back pop' };
+				if (Math.abs(camBeforeBack.x - afterBack.camera.x) < 0.5 &&
+					Math.abs(camBeforeBack.y - afterBack.camera.y) < 0.5 &&
+					Math.abs(camBeforeBack.z - afterBack.camera.z) < 0.5) {
+					return { ok: false, msg: 'camera should move to previous selected node on back' };
+				}
+				if (!api.setCameraView('iso')) return { ok: false, msg: 'failed to reset camera after back assertion' };
 				return { ok: true, msg: 'ok' };
 			})()
 		`, &result),

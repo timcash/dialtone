@@ -71,10 +71,9 @@ func Run08ThreeUserStoryDeepNestedBuild() error {
 			const level2B = st.lastCreatedNodeId;
 			if (!level2B || level2B === level2A) return { ok: false, msg: 'missing level2B id' };
 
+			if (!click('DAG Clear Picks')) return { ok: false, msg: 'clear picks before level2 connect failed' };
 			if (!clickNode(level2A)) return { ok: false, msg: 'select level2A failed' };
-			if (!click('DAG Pick Output')) return { ok: false, msg: 'pick level2 output failed' };
 			if (!clickNode(level2B)) return { ok: false, msg: 'select level2B failed' };
-			if (!click('DAG Pick Input')) return { ok: false, msg: 'pick level2 input failed' };
 			if (!click('DAG Connect')) return { ok: false, msg: 'apply level2 connect failed' };
 			st = api.getState();
 			if (!st.inputNodeIDs.includes(level2A)) return { ok: false, msg: 'level2 edge missing' };
