@@ -4,11 +4,11 @@ Versioned DAG plugin development lives under `src/plugins/dag/src_vN`.
 
 ## Next Steps
 
-1. Keep controls as a fixed 3x3 thumb grid for mobile (up to 9 buttons).
-2. Keep each button single-purpose.
-3. Keep graph interaction language explicit: `output node` -> `input node` for directed links.
-4. Keep camera framing readable after every interaction (add/link/nest/back/delete/unlink).
-5. Keep nested layer visibility strict: active layer only.
+1. Keep controls thumb-friendly and single-purpose on mobile.
+2. Keep link/unlink interaction driven by node selection history.
+3. Keep camera framing readable after add/link/unlink/nest/back interactions.
+4. Keep nested visibility tied to selection history (`parent node in history => child layer visible`).
+5. Keep tests aligned with the live UI workflow and state model.
 
 ## Current State
 
@@ -30,12 +30,12 @@ Versioned DAG plugin development lives under `src/plugins/dag/src_vN`.
    - `DAG Connect` (link second-most-recent -> most-recent selected node)
    - `DAG Unlink` (remove second-most-recent -> most-recent selected node edge)
    - `DAG Nest`
-   - `DAG Clear` (clears selection history)
-7. A top-left node history panel shows the last 5 selected nodes (most recent first).
+   - `DAG Clear` (clears node selection + selection history)
+7. A top-left node history panel shows the last 5 selected nodes (most recent first, top-to-bottom).
    - Most recent selected node is light blue.
    - Second-most-recent selected node is blue.
    - All other nodes are gray.
-8. Section switching uses one menu button that toggles a modal with `Table` and `Three`.
+8. Section switching uses the shared app menu (`Table` / `Three`).
 9. Link workflow uses selection history:
    - select node A
    - select node B
@@ -47,8 +47,12 @@ Versioned DAG plugin development lives under `src/plugins/dag/src_vN`.
    - tap `DAG Unlink` to remove that specific directed edge.
 12. Nested layers are created/entered from selected nodes using `DAG Nest` and stacked deeper on Z.
 13. `Back` behavior is combined:
-   - on root-level history, it pops the most recent selected node and moves camera focus to the previous selected node
-   - inside nested navigation, it still undives through layer history and reframes camera
+   - if nested-layer history exists, it undives layer history and reframes camera
+   - otherwise, it pops node selection history and moves camera focus to the previous selected node
+14. Layer visibility is history-driven:
+   - active layer is always visible
+   - nested layer is visible only while its `parentNodeId` is present in node history
+   - if parent node drops out of history (e.g. `Back` pop), that nested layer hides
 14. Node labels are renameable via the bottom input (`DAG Label Input` + `DAG Rename`) and update in-scene.
 15. Camera framing is intentionally zoomed out for mobile readability.
 
