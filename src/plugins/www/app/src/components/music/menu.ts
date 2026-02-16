@@ -19,7 +19,7 @@ type MusicConfigOptions = {
 export function setupMusicMenu(options: MusicConfigOptions): void {
     const menu = Menu.getInstance();
 
-    menu.addHeader("Music Visualization");
+    menu.addHeader("Harmonic Analysis");
 
     const demoLabel = options.isDemoMode ? `Demo: ${options.demoMode}` : "Demo: OFF";
     menu.addButton(demoLabel, () => {

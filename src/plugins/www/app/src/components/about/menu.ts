@@ -130,7 +130,7 @@ export function setupAboutMenu(options: AboutConfigOptions): () => void {
     applySparkPreset(sparkPresetIndex);
 
     // UI Building
-    menu.addHeader("Presets");
+    menu.addHeader("Vision Grid Presets");
 
     lightSlider = menu.addSlider("Light", lightPresetIndex, 0, lightPresets.length - 1, 1, (v) => {
         lightPresetIndex = Math.round(v);

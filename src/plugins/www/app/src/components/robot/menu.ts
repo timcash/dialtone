@@ -31,7 +31,7 @@ interface RobotVizLike {
 export function setupRobotMenu(viz: RobotVizLike): void {
     const menu = Menu.getInstance();
 
-    menu.addHeader("IK Mode");
+    menu.addHeader("Kinematic Solver");
     // Checkbox for Auto Track
     // Menu doesn't have addCheckbox?
     // `robot/config.ts` had `addCheckbox`.

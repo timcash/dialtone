@@ -37,7 +37,7 @@ export function setupNnMenu(options: NnConfigOptions): void {
     const update = () => options.onConfigChange(config);
 
     // --- Network Architecture ---
-    menu.addHeader("Architecture");
+    menu.addHeader("Neural Topology");
 
     menu.addSlider("Layers", config.hiddenLayers, 1, 10, 1, (v) => {
         config.hiddenLayers = v;

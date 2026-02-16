@@ -22,7 +22,7 @@ type VisionConfigOptions = {
 export function setupVisionMenu(options: VisionConfigOptions): void {
     const menu = Menu.getInstance();
 
-    menu.addHeader("Bio-Digital Integration");
+    menu.addHeader("Pose Estimation");
 
     menu.addButton(options.isCameraOn ? "Camera Off" : "Camera On", () => {
         options.toggleCamera();

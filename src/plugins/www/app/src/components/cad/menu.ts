@@ -18,7 +18,7 @@ type CadConfigOptions = {
 export function setupCadMenu(options: CadConfigOptions): void {
     const menu = Menu.getInstance();
 
-    menu.addHeader("Gear Parameters");
+    menu.addHeader("Parametric Gear");
 
     const addParamSlider = (label: string, key: keyof typeof options.params, min: number, max: number, step: number) => {
         menu.addSlider(label, options.params[key], min, max, step, (v) => {

@@ -118,14 +118,15 @@ func RunWwwMenuSmoke() error {
 		
 		expectedTitle := ""
 		switch section {
-		case "s-home": expectedTitle = "ROTATION"
-		case "s-robot": expectedTitle = "IK MODE"
-		case "s-neural": expectedTitle = "ARCHITECTURE"
-		case "s-math": expectedTitle = "CAMERA"
-		case "s-cad": expectedTitle = "GEAR PARAMETERS"
-		case "s-policy": expectedTitle = "PRESETS"
-		case "s-music": expectedTitle = "MUSIC VISUALIZATION"
-		case "s-vision": expectedTitle = "BIO-DIGITAL INTEGRATION"
+		case "s-home": expectedTitle = "ORBITAL DYNAMICS"
+		case "s-about": expectedTitle = "VISION GRID PRESETS"
+		case "s-robot": expectedTitle = "KINEMATIC SOLVER"
+		case "s-neural": expectedTitle = "NEURAL TOPOLOGY"
+		case "s-math": expectedTitle = "MANIFOLD PROJECTIONS"
+		case "s-cad": expectedTitle = "PARAMETRIC GEAR"
+		case "s-policy": expectedTitle = "MARKOV SCENARIOS"
+		case "s-music": expectedTitle = "HARMONIC ANALYSIS"
+		case "s-vision": expectedTitle = "POSE ESTIMATION"
 		}
 
 		if expectedTitle != "" && !strings.Contains(strings.ToUpper(menuTitle), expectedTitle) {
