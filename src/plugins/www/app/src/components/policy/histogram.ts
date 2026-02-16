@@ -58,9 +58,9 @@ export class PolicyHistogram {
     this.barCount = barCount;
     this.maxHeight = maxHeight;
 
-    // Narrower for mobile (was 0.16 / 0.11)
-    const spacing = 0.12;
-    const width = 0.08;
+    // Even narrower for mobile (was 0.12 / 0.08)
+    const spacing = 0.08;
+    const width = 0.05;
     this.chartWidth = (this.barCount - 1) * spacing;
 
     for (let i = 0; i < this.barCount; i++) {
