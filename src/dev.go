@@ -19,26 +19,27 @@ import (
 	test_cli "dialtone/cli/src/core/test/cli"
 	ai_cli "dialtone/cli/src/plugins/ai/cli"
 	bun_cli "dialtone/cli/src/plugins/bun/cli"
-	cad_cli "dialtone/cli/src/plugins/cad/cli"
-	camera_cli "dialtone/cli/src/plugins/camera/cli"
-	chrome_cli "dialtone/cli/src/plugins/chrome/cli"
-	cloudflare_cli "dialtone/cli/src/plugins/cloudflare/cli"
-	dag_cli "dialtone/cli/src/plugins/dag/cli"
-	deploy_cli "dialtone/cli/src/plugins/deploy/cli"
-	diagnostic_cli "dialtone/cli/src/plugins/diagnostic/cli"
-	github_cli "dialtone/cli/src/plugins/github/cli"
+	        cad_cli "dialtone/cli/src/plugins/cad/cli"
+	        camera_cli "dialtone/cli/src/plugins/camera/cli"
+	        chrome_cli "dialtone/cli/src/plugins/chrome/cli"
+	        cloudflare_cli "dialtone/cli/src/plugins/cloudflare/cli"
+	        dag_cli "dialtone/cli/src/plugins/dag/cli"
+	                          // deploy_cli "dialtone/cli/src/plugins/deploy/cli" // Removed
+	                        diagnostic_cli "dialtone/cli/src/plugins/diagnostic/cli"
+	                github_cli "dialtone/cli/src/plugins/github/cli"
 	go_cli "dialtone/cli/src/plugins/go/cli"
 	ide_cli "dialtone/cli/src/plugins/ide/cli"
 	logs_cli "dialtone/cli/src/plugins/logs/cli"
 	mavlink_cli "dialtone/cli/src/plugins/mavlink/cli"
 	nix_cli "dialtone/cli/src/plugins/nix/cli"
 	swarm_cli "dialtone/cli/src/plugins/swarm/cli"
-	template_cli "dialtone/cli/src/plugins/template/cli"
-	ui_cli "dialtone/cli/src/plugins/ui/cli"
-	vpn_cli "dialtone/cli/src/plugins/vpn/cli"
-	wsl_cli "dialtone/cli/src/plugins/wsl/cli"
-
-	task_cli "dialtone/cli/src/plugins/task/cli"
+	                template_cli "dialtone/cli/src/plugins/template/cli"
+	                ui_cli "dialtone/cli/src/plugins/ui/cli"
+	                "dialtone/cli/src/plugins/vpn"
+	                "dialtone/cli/src/plugins/robot"
+	                wsl_cli "dialtone/cli/src/plugins/wsl/cli"
+	        
+		task_cli "dialtone/cli/src/plugins/task/cli"
 	www_cli "dialtone/cli/src/plugins/www/cli"
 )
 
@@ -55,29 +56,59 @@ func ExecuteDev() {
 	command := os.Args[1]
 	args := os.Args[2:]
 
-	switch command {
-	case "start":
-		runStart(args)
-	case "build":
-		build_cli.Run(args)
-	case "deploy":
-		deploy_cli.RunDeploy(args)
-	case "format":
-		format_cli.Run(args)
-	case "ssh":
-		ssh.RunSSH(args)
-	case "vpn", "vpn-provision", "provision", "vpn-test":
-		vpn_cli.RunVPN(append([]string{command}, args...))
-	case "logs":
-		logs_cli.RunLogs(args)
-	case "diagnostic":
-		diagnostic_cli.RunDiagnostic(args)
-	case "install":
-		install.RunInstall(args)
-	case "clone":
-		RunClone(args)
-	case "sync-code":
-		deploy_cli.RunSyncCode(args)
+	                switch command {
+
+	                case "start":
+
+	                        robot.RunRobot(append([]string{"start"}, args...))
+
+	                case "robot":
+
+	                        robot.RunRobot(args)
+
+	                case "build":
+
+	                        build_cli.Run(args)
+
+	                case "deploy":
+
+	                        robot.RunRobot(append([]string{"deploy"}, args...))
+
+	                case "format":
+
+	                        format_cli.Run(args)
+
+	                case "ssh":
+
+	                        ssh.RunSSH(args)
+
+	                case "vpn", "vpn-provision", "provision", "vpn-test":
+
+	                        vpn.RunVPN(append([]string{command}, args...))
+
+	                case "logs":
+
+	                        logs_cli.RunLogs(args)
+
+	                case "diagnostic":
+
+	                        diagnostic_cli.RunDiagnostic(args)
+
+	                case "install":
+
+	                        install.RunInstall(args)
+
+	                case "clone":
+
+	                        RunClone(args)
+
+	                case "sync-code":
+
+	                        robot.RunRobot(append([]string{"sync-code"}, args...))
+
+	        
+
+	
 	case "branch":
 		runBranch(args)
 	case "test":

@@ -1,12 +1,9 @@
 package web
 
 import (
-	"embed"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/fs"
-	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/netip"
@@ -17,7 +14,6 @@ import (
 
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/mock"
-	ai_app "dialtone/cli/src/plugins/ai/app"
 	camera "dialtone/cli/src/plugins/camera/app"
 
 	"github.com/coder/websocket"
@@ -28,11 +24,8 @@ import (
 // Global start time for uptime calculation
 var startTime = time.Now()
 
-//go:embed all:dist
-var webFS embed.FS
-
 // CreateWebHandler creates the HTTP handler for the unified web dashboard
-func CreateWebHandler(hostname string, natsPort, wsPort, webPort, internalNATSPort, internalWSPort int, ns *server.Server, lc *tailscale.LocalClient, ips []netip.Addr, useMock bool) http.Handler {
+func CreateWebHandler(hostname string, natsPort, wsPort, webPort, internalNATSPort, internalWSPort int, ns *server.Server, lc *tailscale.LocalClient, ips []netip.Addr, useMock bool, staticFS fs.FS) http.Handler {
 	mux := http.NewServeMux()
 
 	// In tsnet mode, NATS WS is served on an internal offset port.
@@ -185,24 +178,20 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort, internalNATSPo
 	natsWSProxy := httputil.NewSingleHostReverseProxy(natsWSUrl)
 	mux.Handle("/nats-ws", natsWSProxy)
 
-	// 6. Static Asset Serving (Embedded)
-	subFS, err := fs.Sub(webFS, ".") // It's already dist
-	if err != nil {
-		logger.LogInfo("Error accessing sub-filesystem: %v", err)
+	// 6. Static Asset Serving
+	if staticFS != nil {
+		logger.LogInfo("Using provided static web assets")
+		staticHandler := http.FileServer(http.FS(staticFS))
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			f, err := staticFS.Open(strings.TrimPrefix(r.URL.Path, "/"))
+			if err == nil {
+				f.Close()
+				staticHandler.ServeHTTP(w, r)
+				return
+			}
+			http.ServeFileFS(w, r, staticFS, "index.html")
+		})
 	}
-
-	// Fallback/SPA logic for embedded web assets
-	logger.LogInfo("Using embedded web assets")
-	staticHandler := http.FileServer(http.FS(subFS))
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		f, err := subFS.Open(strings.TrimPrefix(r.URL.Path, "/"))
-		if err == nil {
-			f.Close()
-			staticHandler.ServeHTTP(w, r)
-			return
-		}
-		http.ServeFileFS(w, r, subFS, "index.html")
-	})
 
 	return mux
 }
