@@ -181,10 +181,27 @@ func StartSession(opts SessionOptions) (*Session, error) {
 		return nil, err
 	}
 
+	// Important for WSL: res.PID is the Linux-side shim PID.
+	// We need the Windows PID to correctly kill the process tree later.
+	finalPID := res.PID
 	isWindows := false
+	
+	// Wait a moment for Windows process listing to reflect the new instance
+	if runtime.GOOS == "linux" && browser.IsWSL() {
+		time.Sleep(3 * time.Second)
+	}
+
 	procs, err := ListResources(true)
 	if err == nil {
 		for _, p := range procs {
+			// In WSL, we match the Windows process by its debug port or role
+			// Match by role if port detection failed or is slow
+			if p.IsWindows && p.Role == opts.Role && (res.Port == 0 || p.DebugPort == res.Port || p.DebugPort == 0) {
+				finalPID = p.PID
+				isWindows = true
+				break
+			}
+			// Fallback: match by shim PID check (sometimes they are adjacent or related)
 			if p.PID == res.PID {
 				isWindows = p.IsWindows
 				break
@@ -193,7 +210,7 @@ func StartSession(opts SessionOptions) (*Session, error) {
 	}
 
 	return &Session{
-		PID:          res.PID,
+		PID:          finalPID,
 		Port:         res.Port,
 		WebSocketURL: res.WebsocketURL,
 		IsNew:        true,

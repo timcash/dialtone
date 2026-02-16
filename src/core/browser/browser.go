@@ -324,14 +324,15 @@ func detectRole(cmdline string) string {
 func KillProcessByPID(pid int, isWindows bool) error {
 	if isWindows && runtime.GOOS == "linux" && IsWSL() {
 		// taskkill.exe is for the real Windows PID
+		// Add /T to kill the process tree
 		tkBin := resolveWinBin("taskkill.exe", "")
-		return exec.Command(tkBin, "/F", "/PID", fmt.Sprintf("%d", pid)).Run()
+		return exec.Command(tkBin, "/F", "/PID", fmt.Sprintf("%d", pid), "/T").Run()
 	}
 
 	// For native Linux/macOS or interop proxies in WSL, use normal kill
 	switch runtime.GOOS {
 	case "windows":
-		return exec.Command("taskkill", "/F", "/PID", fmt.Sprintf("%d", pid)).Run()
+		return exec.Command("taskkill", "/F", "/PID", fmt.Sprintf("%d", pid), "/T").Run()
 	default:
 		return exec.Command("kill", "-9", fmt.Sprintf("%d", pid)).Run()
 	}

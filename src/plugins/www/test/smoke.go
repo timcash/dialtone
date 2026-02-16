@@ -12,8 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"dialtone/cli/src/core/test"
-	"dialtone/cli/src/core/browser"
 
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/performance"
@@ -32,37 +30,18 @@ type sectionMetrics struct {
 	AppCPU, AppGPU           float64
 }
 
-func init() {
-	test.Register("www-smoke", "www", []string{"www", "smoke", "browser"}, func() error {
-		chromePath := browser.FindChromePath()
-		opts := append(chromedp.DefaultExecAllocatorOptions[:],
-			chromedp.NoFirstRun, chromedp.NoDefaultBrowserCheck,
-			chromedp.ExecPath(chromePath),
-			chromedp.Headless,
-		)
-		allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
-		defer allocCancel()
-		return RunWwwSmokeSubTest(allocCtx)
-	})
-}
 
-func RunWwwSmokeSubTest(allocCtx context.Context) error {
+func RunWwwSmokeSubTest(ctx context.Context) error {
 	fmt.Println(">> [WWW] Smoke: start")
 	cwd, _ := os.Getwd()
 	screenshotsDir := filepath.Join(cwd, "src", "plugins", "www", "screenshots")
 	os.RemoveAll(screenshotsDir); os.MkdirAll(screenshotsDir, 0755)
 
-	ctx, tabCancel := chromedp.NewContext(allocCtx)
-	defer tabCancel()
-
-	// Initial setup with large timeout
-	setupCtx, setupCancel := context.WithTimeout(ctx, 180*time.Second)
-	defer setupCancel()
-
 	var mu sync.Mutex
 	performanceData := make(map[string]sectionMetrics)
 	statsCh := make(chan sectionMetrics, 100)
 
+	// Listen using the shared tab context
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		if ce, ok := ev.(*runtime.EventConsoleAPICalled); ok {
 			msg := formatConsoleArgs(ce.Args)
@@ -77,7 +56,7 @@ func RunWwwSmokeSubTest(allocCtx context.Context) error {
 
 	var sections []string
 	fmt.Println(">> [WWW] Smoke: setup")
-	if err := chromedp.Run(setupCtx,
+	if err := chromedp.Run(ctx,
 		performance.Enable(),
 		chromedp.EmulateViewport(375, 812, chromedp.EmulateMobile),
 		chromedp.Navigate("http://127.0.0.1:4173"),
@@ -106,7 +85,7 @@ func RunWwwSmokeSubTest(allocCtx context.Context) error {
 		fmt.Printf(">> [WWW] Smoke: [%d/%d] #%s\n", i+1, len(sections), section)
 		for len(statsCh) > 0 { <-statsCh }
 
-		// Sub-test timeout: 5s
+		// Use a sub-context for the section-specific actions, but NOT a NewContext (which spawns a tab)
 		subCtx, subCancel := context.WithTimeout(ctx, 5*time.Second)
 		
 		var buf []byte

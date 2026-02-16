@@ -9,20 +9,20 @@ import (
 	"path/filepath"
 	"time"
 
-	"dialtone/cli/src/core/test"
-	"dialtone/cli/src/core/browser"
+	chrome "dialtone/cli/src/plugins/chrome/app"
 
 	"github.com/chromedp/chromedp"
 )
 
-func init() {
-	test.Register("www-smoke-suite", "www", []string{"www", "smoke", "browser", "comprehensive"}, RunComprehensiveSmoke)
-}
 
 func RunComprehensiveSmoke() error {
 	fmt.Println(">> [WWW] Comprehensive Smoke Suite: start")
 	cwd, _ := os.Getwd()
 	wwwDir := filepath.Join(cwd, "src", "plugins", "www", "app")
+
+	// 0. Cleanup BEFORE start using plugin tool
+	fmt.Println(">> [WWW] Pre-test browser cleanup...")
+	chrome.KillDialtoneResources()
 
 	// 1. Ensure Servers are up
 	if !isPortOpenSuite(4173) {
@@ -38,27 +38,39 @@ func RunComprehensiveSmoke() error {
 	waitForPortLocalSuite(4173, 60*time.Second)
 	waitForPortLocalSuite(8081, 60*time.Second)
 
-	// 2. Single Shared Browser Allocator
-	chromePath := browser.FindChromePath()
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.NoFirstRun, chromedp.NoDefaultBrowserCheck,
-		chromedp.ExecPath(chromePath),
-		chromedp.Flag("enable-precise-memory-info", true),
-		chromedp.Headless,
-	)
+	// 2. Start Managed Session via Chrome Plugin
+	fmt.Println(">> [WWW] Launching single managed Chrome session...")
+	session, err := chrome.StartSession(chrome.SessionOptions{
+		Role:          "smoke",
+		Headless:      true,
+		GPU:           true,
+		ReuseExisting: false,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to start chrome session: %v", err)
+	}
+	defer func() {
+		fmt.Println(">> [WWW] Cleaning up managed Chrome session...")
+		chrome.CleanupSession(session)
+	}()
 
-	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	// 3. Attach chromedp to the session
+	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), session.WebSocketURL)
 	defer allocCancel()
 
-	// 3. Run Section Smoke Test
+	// Create ONE shared tab context
+	tabCtx, tabCancel := chromedp.NewContext(allocCtx)
+	defer tabCancel()
+
+	// 4. Run Section Smoke Test
 	fmt.Println("\n>> [WWW] Running Section Performance & Stability Test...")
-	if err := RunWwwSmokeSubTest(allocCtx); err != nil {
+	if err := RunWwwSmokeSubTest(tabCtx); err != nil {
 		return fmt.Errorf("performance smoke test failed: %v", err)
 	}
 
-	// 4. Run Menu Smoke Test
+	// 5. Run Menu Smoke Test
 	fmt.Println("\n>> [WWW] Running Menu Lifecycle & Interaction Test...")
-	if err := RunWwwMenuSmokeSubTest(allocCtx); err != nil {
+	if err := RunWwwMenuSmokeSubTest(tabCtx); err != nil {
 		return fmt.Errorf("menu smoke test failed: %v", err)
 	}
 
