@@ -21,6 +21,7 @@ type VisionConfigOptions = {
 
 export function setupVisionMenu(options: VisionConfigOptions): void {
     const menu = Menu.getInstance();
+    menu.clear();
 
     menu.addHeader("Pose Estimation");
 

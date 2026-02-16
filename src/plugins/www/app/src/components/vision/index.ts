@@ -110,8 +110,8 @@ export function mountVision(container: HTMLElement) {
       } else if (!visible && wasVisible) {
           // Becoming invisible
           tracker.stopCamera();
-          isDemo = false;
-          viz.setDemo(false);
+          // We don't force isDemo = false here anymore, 
+          // just stop resources like the camera.
           updateMenu();
       }
     },

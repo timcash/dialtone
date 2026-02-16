@@ -30,6 +30,7 @@ interface RobotVizLike {
 
 export function setupRobotMenu(viz: RobotVizLike): void {
     const menu = Menu.getInstance();
+    menu.clear();
 
     menu.addHeader("Kinematic Solver");
     // Checkbox for Auto Track

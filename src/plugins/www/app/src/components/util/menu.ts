@@ -2,7 +2,6 @@ export class Menu {
     private static instance: Menu;
     private toggle: HTMLButtonElement | null = null;
     private panel: HTMLDivElement | null = null;
-    private onOpenCallback: (() => void) | null = null;
 
     private constructor() {
         this.init();
@@ -10,87 +9,61 @@ export class Menu {
 
     private init() {
         if (typeof document === 'undefined') return;
-        
         this.toggle = document.getElementById("global-menu-toggle") as HTMLButtonElement;
         this.panel = document.getElementById("global-menu-panel") as HTMLDivElement;
 
         if (!this.toggle || !this.panel) return;
 
-        const setOpen = (open: boolean) => {
-            if (!this.panel || !this.toggle) return;
-            
-            if (open) {
-                this.clear(); // Always clear before building
-                if (this.onOpenCallback) {
-                    this.onOpenCallback();
-                }
-            }
-
-            this.panel.hidden = !open;
-            this.toggle.setAttribute("aria-expanded", String(open));
-            
-            if (open) {
-                document.body.style.overflow = 'hidden';
-                document.documentElement.style.overflow = 'hidden';
-            } else {
-                document.body.style.overflow = '';
-                document.documentElement.style.overflow = '';
-            }
-        };
-
         this.toggle.addEventListener("click", (e) => {
             e.preventDefault();
             e.stopPropagation();
-            const nextState = this.panel?.hidden ?? true;
-            setOpen(nextState);
+            this.setOpen(this.panel?.hidden ?? true);
         });
 
-        const onWindowScroll = (e: Event) => {
+        window.addEventListener("scroll", (e: Event) => {
             if (!this.panel || this.panel.hidden) return;
             if (e.target === this.panel || this.panel.contains(e.target as Node)) return;
-            setOpen(false);
-        };
-        window.addEventListener("scroll", onWindowScroll, { capture: true, passive: true });
+            this.setOpen(false);
+        }, { capture: true, passive: true });
+    }
+
+    private setOpen(open: boolean) {
+        if (!this.panel || !this.toggle) return;
+        
+        if (open) {
+            this.clear();
+            window.dispatchEvent(new CustomEvent('menu-opening'));
+        }
+
+        this.panel.hidden = !open;
+        this.toggle.setAttribute("aria-expanded", String(open));
+        document.body.style.overflow = open ? 'hidden' : '';
     }
 
     public static getInstance(): Menu {
-        if (!Menu.instance) {
-            Menu.instance = new Menu();
-        }
+        if (!Menu.instance) Menu.instance = new Menu();
         return Menu.instance;
-    }
-
-    public onOpen(cb: () => void) {
-        this.onOpenCallback = cb;
     }
 
     public isOpen(): boolean {
         return this.panel ? !this.panel.hidden : false;
     }
 
-    clear() {
-        if (this.panel) {
-            this.panel.innerHTML = "";
-            this.panel.scrollTop = 0;
-        }
+    public clear() {
+        if (this.panel) this.panel.innerHTML = "";
     }
 
-    close() {
-        if (!this.panel || !this.toggle) return;
-        if (this.panel.hidden) return;
-        this.panel.hidden = true;
-        this.toggle.setAttribute("aria-expanded", "false");
-        document.body.style.overflow = '';
-        document.documentElement.style.overflow = '';
+    public close() {
+        this.setOpen(false);
     }
 
     addHeader(text: string) {
         if (!this.panel) return null;
-        const header = document.createElement("h3");
-        header.className = "menu-header";
-        header.textContent = text;
-        this.panel.appendChild(header);
-        return header;
+        const el = document.createElement("h3");
+        el.className = "menu-header";
+        el.textContent = text;
+        this.panel.appendChild(el);
+        return el;
     }
 
     addSlider(label: string, value: number, min: number, max: number, step: number, onInput: (v: number) => void, format: (v: number) => string = (v) => v.toFixed(0)) {
@@ -128,16 +101,19 @@ export class Menu {
         return { setValue: (v: number) => { slider.value = String(v); valueEl.textContent = format(v); } };
     }
 
-    addButton(label: string, onClick: () => void, primary = false) {
+    addButton(label: string, onClick: () => void, active = false) {
         if (!this.panel) return document.createElement("button");
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = primary ? "menu-button menu-button-primary" : "menu-button";
-        button.textContent = label;
-        button.setAttribute("aria-label", label);
-        button.addEventListener("click", onClick);
-        this.panel.appendChild(button);
-        return button;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = active ? "menu-button menu-button-active" : "menu-button";
+        btn.textContent = label;
+        btn.setAttribute("aria-label", label);
+        btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            onClick();
+        });
+        this.panel.appendChild(btn);
+        return btn;
     }
 
     addFile(label: string, onFile: (file: File) => void, accept = ".json,.geojson") {
@@ -149,14 +125,13 @@ export class Menu {
 
         const button = document.createElement("button");
         button.type = "button";
-        button.className = "menu-button menu-button-primary";
+        button.className = "menu-button";
         button.textContent = label;
         button.setAttribute("aria-label", label);
 
         button.addEventListener("click", () => input.click());
         input.addEventListener("change", () => {
             if (input.files?.[0]) {
-                button.textContent = input.files[0].name;
                 onFile(input.files[0]);
             }
         });

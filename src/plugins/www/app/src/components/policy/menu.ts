@@ -16,6 +16,7 @@ type PolicyMenuOptions = {
 
 export function setupPolicyMenu(options: PolicyMenuOptions): void {
   const menu = Menu.getInstance();
+  menu.clear();
 
   menu.addHeader("Markov Scenarios");
   for (const preset of options.presets) {

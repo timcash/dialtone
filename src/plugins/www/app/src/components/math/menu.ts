@@ -32,6 +32,7 @@ export interface MathConfigHost {
 
 export function setupMathMenu(viz: MathConfigHost): void {
     const menu = Menu.getInstance();
+    menu.clear();
 
     menu.addHeader("Manifold Projections");
     menu.addSlider("Radius", viz.cameraOrbitRadius, 8, 35, 0.5, (v) => (viz.cameraOrbitRadius = v));
