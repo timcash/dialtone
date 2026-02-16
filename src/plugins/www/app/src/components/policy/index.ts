@@ -1,3 +1,4 @@
+import { type VisualizationControl, type SectionManager } from "../util/section";
 import * as THREE from "three";
 import { FpsCounter } from "../util/fps";
 import { GpuTimer } from "../util/gpu_timer";
@@ -922,7 +923,7 @@ class PolicySimVisualization {
   };
 }
 
-export function mountPolicy(container: HTMLElement) {
+export function mountPolicy(container: HTMLElement, sections: SectionManager): Promise<VisualizationControl> {
   container.innerHTML = `
     <div class="marketing-overlay" aria-label="Policy simulator section: interactive global policy visualization">
       <h2>Global Policy Simulator</h2>
@@ -939,6 +940,7 @@ export function mountPolicy(container: HTMLElement) {
   ];
   const stopTyping = startTyping(subtitleEl, subtitles);
 
+  sections.setLoadingMessage("s-policy", "loading markov scenarios ...");
   const viz = new PolicySimVisualization(container);
 
   if (import.meta.env.DEV) {

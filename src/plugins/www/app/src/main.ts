@@ -24,7 +24,7 @@ sections.register('s-about', {
         const { mountAbout } = await import('./components/about/index');
         const container = document.getElementById('about-container');
         if (!container) throw new Error('about-container not found');
-        return mountAbout(container);
+        return mountAbout(container, sections);
     }
 });
 
@@ -34,7 +34,7 @@ sections.register('s-robot', {
         const { mountRobot } = await import('./components/robot/index');
         const container = document.getElementById('robot-container');
         if (!container) throw new Error('robot-container not found');
-        return mountRobot(container);
+        return mountRobot(container, sections);
     }
 });
 
@@ -44,7 +44,7 @@ sections.register('s-neural', {
         const { mountNeuralNetwork } = await import('./components/nn/index');
         const container = document.getElementById('nn-container');
         if (!container) throw new Error('nn-container not found');
-        return mountNeuralNetwork(container);
+        return mountNeuralNetwork(container, sections);
     }
 });
 
@@ -54,7 +54,7 @@ sections.register('s-math', {
         const { mountMath } = await import('./components/math/index');
         const container = document.getElementById('math-container');
         if (!container) throw new Error('math-container not found');
-        return mountMath(container);
+        return mountMath(container, sections);
     }
 });
 
@@ -74,7 +74,7 @@ sections.register('s-radio', {
         const { mountRadio } = await import('./components/radio/index');
         const container = document.getElementById('radio-container');
         if (!container) throw new Error('radio-container not found');
-        return mountRadio(container);
+        return mountRadio(container, sections);
     }
 });
 
@@ -95,7 +95,7 @@ sections.register('s-policy', {
         const { mountPolicy } = await import('./components/policy/index');
         const container = document.getElementById('policy-container');
         if (!container) throw new Error('policy-container not found');
-        return mountPolicy(container);
+        return mountPolicy(container, sections);
     }
 });
 
@@ -105,7 +105,7 @@ sections.register('s-music', {
         const { mountMusic } = await import('./components/music/index');
         const container = document.getElementById('music-container');
         if (!container) throw new Error('music-container not found');
-        return mountMusic(container);
+        return mountMusic(container, sections);
     }
 });
 
@@ -115,7 +115,7 @@ sections.register('s-vision', {
         const { mountVision } = await import('./components/vision/index');
         const container = document.getElementById('vision-container');
         if (!container) throw new Error('vision-container not found');
-        return mountVision(container);
+        return mountVision(container, sections);
     }
 });
 

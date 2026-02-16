@@ -1,3 +1,4 @@
+import { type VisualizationControl, type SectionManager } from "../util/section";
 import * as THREE from "three";
 import glowVertexShader from "../../shaders/glow.vert.glsl?raw";
 import glowFragmentShader from "../../shaders/glow.frag.glsl?raw";
@@ -624,7 +625,7 @@ class MathVisualization {
   };
 }
 
-export function mountMath(container: HTMLElement) {
+export function mountMath(container: HTMLElement, sections: SectionManager): Promise<VisualizationControl> {
   // Inject HTML
   container.innerHTML = `
       <div class="marketing-overlay" aria-label="Mathematics marketing information">
@@ -645,6 +646,7 @@ export function mountMath(container: HTMLElement) {
   ];
   const stopTyping = startTyping(subtitleEl, subtitles);
 
+  sections.setLoadingMessage("s-math", "loading manifold projections ...");
   const viz = new MathVisualization(container);
   // const menu = setupMathMenu(viz); // Menu setup on visibility
 

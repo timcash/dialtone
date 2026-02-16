@@ -79,15 +79,21 @@ export class SectionManager {
     // Set initial loading message
     this.setLoadingMessage(sectionId, `loading ${sectionId.replace('s-', '')} ...`);
 
-    const control = await config.load();
-    this.visualizations.set(sectionId, control);
-    control.setVisible(false);
-    
-    const sectionEl = document.getElementById(sectionId);
-    setTimeout(() => {
-      sectionEl?.classList.add("is-ready");
-      if (this.activeSectionId === sectionId) control.setVisible(true);
-    }, 100);
+    try {
+      // mount is now much faster/sync-like
+      const control = await config.load();
+      this.visualizations.set(sectionId, control);
+      control.setVisible(false);
+      
+      const sectionEl = document.getElementById(sectionId);
+      setTimeout(() => {
+        sectionEl?.classList.add("is-ready");
+        if (this.activeSectionId === sectionId) control.setVisible(true);
+      }, 100);
+    } catch (err) {
+      console.error(`[SectionManager] Failed to load ${sectionId}:`, err);
+      this.setLoadingMessage(sectionId, `error loading ${sectionId}`);
+    }
   }
 
   private updateHeader(config: any, sectionEl: HTMLElement): void {

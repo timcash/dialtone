@@ -1,3 +1,4 @@
+import { type VisualizationControl, type SectionManager } from "../util/section";
 import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
@@ -341,7 +342,7 @@ class VisionVisualization {
   };
 }
 
-export function mountAbout(container: HTMLElement) {
+export function mountAbout(container: HTMLElement, sections: SectionManager): Promise<VisualizationControl> {
   container.innerHTML = `
     <div class="marketing-overlay" aria-label="Vision: global virtual librarian">
       <h2 data-typing-title>DIALTONE</h2>
@@ -373,6 +374,7 @@ export function mountAbout(container: HTMLElement) {
 
   const stopTyping = startTyping(subtitleEl, subtitles);
 
+  sections.setLoadingMessage("s-about", "loading vision grid ...");
   const viz = new VisionVisualization(container);
   const lightConfig = {
     count: 6,      // Hot
