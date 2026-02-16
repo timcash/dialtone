@@ -14,8 +14,8 @@ func Run05ThreeUserStoryNestAndDive() error {
 		return err
 	}
 	fmt.Println("[THREE] story step3 description:")
-	fmt.Println("[THREE]   - In order to create a nested layer, the user selects processor, switches to Nest mode, then taps Action.")
-	fmt.Println("[THREE]   - After dive, user builds nested nodes in Add mode using Action and validates nested edge flow.")
+	fmt.Println("[THREE]   - In order to create a nested layer, the user selects processor and taps Nest.")
+	fmt.Println("[THREE]   - After dive, user builds nested nodes using Add and validates nested edge flow.")
 	fmt.Println("[THREE]   - Camera expectation: on dive, framing shifts to nested layer and history depth increments.")
 
 	type evalResult struct {
@@ -47,10 +47,7 @@ func Run05ThreeUserStoryNestAndDive() error {
 
 			const rootBeforeDive = api.getState().camera;
 			if (!clickNode(processorID)) return { ok: false, msg: 'select processor failed' };
-			while (api.getState().mode !== 'nest') {
-				if (!click('DAG Mode')) return { ok: false, msg: 'cannot switch to nest mode' };
-			}
-			if (!click('DAG Action')) return { ok: false, msg: 'nest action failed' };
+			if (!click('DAG Nest')) return { ok: false, msg: 'nest action failed' };
 
 			let st = api.getState();
 			if (!st.activeLayerId || st.activeLayerId === 'root') return { ok: false, msg: 'did not dive into nested layer' };
@@ -60,18 +57,14 @@ func Run05ThreeUserStoryNestAndDive() error {
 			story.rootCameraBeforeDive = rootBeforeDive;
 			story.nestedCameraAfterDive = st.camera;
 
-			while (api.getState().mode !== 'add') {
-				if (!click('DAG Mode')) return { ok: false, msg: 'cannot switch to add mode in nested layer' };
-			}
-
 			// First nested node
-			if (!click('DAG Action')) return { ok: false, msg: 'nested add node A failed' };
+			if (!click('DAG Add')) return { ok: false, msg: 'nested add node A failed' };
 			st = api.getState();
 			const nestedA = st.lastCreatedNodeId;
 			if (!nestedA) return { ok: false, msg: 'nested node A id missing' };
 
 			// Second nested node as output child
-			if (!click('DAG Action')) return { ok: false, msg: 'nested add node B failed' };
+			if (!click('DAG Add')) return { ok: false, msg: 'nested add node B failed' };
 			st = api.getState();
 			const nestedB = st.lastCreatedNodeId;
 			if (!nestedB || nestedB === nestedA) return { ok: false, msg: 'nested node B id missing' };

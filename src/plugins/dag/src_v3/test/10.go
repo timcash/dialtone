@@ -14,8 +14,8 @@ func Run10ThreeUserStoryDeleteAndRelabel() error {
 		return err
 	}
 	fmt.Println("[THREE] story step7 description:")
-	fmt.Println("[THREE]   - In order to remove a node, user selects it, switches to DelN mode, and taps Action.")
-	fmt.Println("[THREE]   - In order to remove a remaining edge, user selects processor, switches to DelE mode, and taps Action.")
+	fmt.Println("[THREE]   - In order to remove a node, user selects it and taps DelN.")
+	fmt.Println("[THREE]   - In order to remove a remaining edge, user picks output/input nodes and taps Unlink.")
 	fmt.Println("[THREE]   - User then renames processor again and expects camera to stay zoomed-out for full root readability.")
 
 	type evalResult struct {
@@ -42,31 +42,29 @@ func Run10ThreeUserStoryDeleteAndRelabel() error {
 				return api.getState().selectedNodeId === nodeId;
 			};
 			const rename = (name) => {
-				const input = q('DAG Node Name');
+				const input = q('DAG Label Input');
 				if (!input) return false;
 				input.value = name;
 				input.dispatchEvent(new Event('input', { bubbles: true }));
-				return click('DAG Rename Node');
+				return click('DAG Rename');
 			};
 
 			const story = window.__dagStory || {};
 			const outputID = story.outputID;
 			const processorID = story.processorID;
-			if (!outputID || !processorID) return { ok: false, msg: 'missing root story ids' };
+			const inputID = story.inputID;
+			if (!outputID || !processorID || !inputID) return { ok: false, msg: 'missing root story ids' };
 
 			if (!clickNode(outputID)) return { ok: false, msg: 'cannot select output node for deletion' };
-			while (api.getState().mode !== 'remove-node') {
-				if (!click('DAG Mode')) return { ok: false, msg: 'cannot switch to remove-node mode' };
-			}
-			if (!click('DAG Action')) return { ok: false, msg: 'remove-node action failed' };
+			if (!click('DAG Delete Node')) return { ok: false, msg: 'remove-node action failed' };
 			let st = api.getState();
 			if (st.visibleNodeIDs.includes(outputID)) return { ok: false, msg: 'output node still visible after delete' };
 
-			if (!clickNode(processorID)) return { ok: false, msg: 'cannot select processor for edge delete' };
-			while (api.getState().mode !== 'remove-edge') {
-				if (!click('DAG Mode')) return { ok: false, msg: 'cannot switch to remove-edge mode' };
-			}
-			if (!click('DAG Action')) return { ok: false, msg: 'remove-edge action failed' };
+			if (!clickNode(inputID)) return { ok: false, msg: 'cannot select input node for unlink output pick' };
+			if (!click('DAG Pick Output')) return { ok: false, msg: 'pick output for unlink failed' };
+			if (!clickNode(processorID)) return { ok: false, msg: 'cannot select processor for unlink input pick' };
+			if (!click('DAG Pick Input')) return { ok: false, msg: 'pick input for unlink failed' };
+			if (!click('DAG Unlink')) return { ok: false, msg: 'unlink action failed' };
 			st = api.getState();
 			if (st.inputNodeIDs.length !== 0) return { ok: false, msg: 'processor should have no inputs after edge deletion' };
 			if (st.outputNodeIDs.length !== 0) return { ok: false, msg: 'processor should have no outputs after output delete + edge delete' };
