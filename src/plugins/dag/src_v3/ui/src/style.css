@@ -66,14 +66,13 @@ canvas[aria-label='Three Canvas'] {
   touch-action: manipulation;
 }
 
-.dag-legend {
+.dag-history {
   position: absolute;
   top: calc(env(safe-area-inset-top, 0px) + 14px);
   left: calc(env(safe-area-inset-left, 0px) + 14px);
   width: min(260px, calc(100vw - 104px));
   padding: 10px 12px;
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.24);
   background: rgba(8, 12, 20, 0.9);
   color: #f2f7ff;
   display: grid;
@@ -81,26 +80,26 @@ canvas[aria-label='Three Canvas'] {
   z-index: 12;
 }
 
-.dag-legend > h3 {
+.dag-history > h3 {
   font-size: 0.82rem;
   font-weight: 700;
   letter-spacing: 0.02em;
 }
 
-.dag-legend-row {
+.dag-history-row {
   display: grid;
-  grid-template-columns: 14px 1fr auto;
+  grid-template-columns: 14px 1fr;
   align-items: center;
   column-gap: 8px;
   font-size: 0.73rem;
 }
 
-.dag-legend-row > code {
+.dag-history-row > code {
   font-size: 0.68rem;
   color: #d8e9ff;
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
-  padding: 1px 6px;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
 }
 
 .swatch {
@@ -110,11 +109,9 @@ canvas[aria-label='Three Canvas'] {
   border: 1px solid rgba(255, 255, 255, 0.35);
 }
 
-.swatch.selected { background: #2b78ff; }
-.swatch.pick-output { background: #facc15; }
-.swatch.pick-input { background: #38bdf8; }
-.swatch.input { background: #2da44e; }
-.swatch.output { background: #d97706; }
+.swatch.recent-1 { background: #7dd3fc; }
+.swatch.recent-2 { background: #2b78ff; }
+.swatch.history { background: #5b6873; }
 
 .dag-menu-btn {
   position: absolute;
@@ -168,7 +165,7 @@ canvas[aria-label='Three Canvas'] {
   bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
   display: grid;
   grid-template-columns: repeat(3, minmax(56px, 1fr));
-  grid-template-rows: repeat(3, minmax(56px, auto)) 46px;
+  grid-template-rows: repeat(2, minmax(56px, auto)) 46px;
   gap: 12px;
   z-index: 11;
   pointer-events: auto;

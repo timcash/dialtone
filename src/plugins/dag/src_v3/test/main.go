@@ -18,7 +18,7 @@ func main() {
 		{Name: "07 User Story: Rename + Undive + Camera History", Run: Run06ThreeUserStoryRenameAndUndive, SectionID: "three", Screenshot: "screenshots/test_step_5.png"},
 		{Name: "08 User Story: Deep Nested Build", Run: Run08ThreeUserStoryDeepNestedBuild, SectionID: "three", Screenshot: "screenshots/test_step_6.png"},
 		{Name: "09 User Story: Deep Undive + Camera History", Run: Run09ThreeUserStoryDeepUndiveHistory, SectionID: "three", Screenshot: "screenshots/test_step_7.png"},
-		{Name: "10 User Story: Delete + Relabel + Camera Readability", Run: Run10ThreeUserStoryDeleteAndRelabel, SectionID: "three", Screenshot: "screenshots/test_step_8.png"},
+		{Name: "10 User Story: Unlink + Relabel + Camera Readability", Run: Run10ThreeUserStoryUnlinkAndRelabel, SectionID: "three", Screenshot: "screenshots/test_step_8.png"},
 		{Name: "11 Cleanup Verification", Run: Run11CleanupVerification},
 	}
 

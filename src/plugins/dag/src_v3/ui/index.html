@@ -31,29 +31,27 @@
 
       <section id="three" aria-label="Three Section" hidden>
         <canvas aria-label="Three Canvas"></canvas>
-        <div class="dag-legend" aria-label="DAG Node Legend">
-          <h3>Node Legend</h3>
-          <div class="dag-legend-row">
-            <span class="swatch selected"></span>
-            <span>Selected Node</span>
+        <div class="dag-history" aria-label="DAG Node History">
+          <h3>Node History</h3>
+          <div class="dag-history-row">
+            <span class="swatch recent-1"></span>
+            <code aria-label="DAG Node History Item 1">none</code>
           </div>
-          <div class="dag-legend-row">
-            <span class="swatch pick-output"></span>
-            <span>First Pick (Output)</span>
-            <code aria-label="DAG Legend Output Value">none</code>
+          <div class="dag-history-row">
+            <span class="swatch recent-2"></span>
+            <code aria-label="DAG Node History Item 2">none</code>
           </div>
-          <div class="dag-legend-row">
-            <span class="swatch pick-input"></span>
-            <span>Second Pick (Input)</span>
-            <code aria-label="DAG Legend Input Value">none</code>
+          <div class="dag-history-row">
+            <span class="swatch history"></span>
+            <code aria-label="DAG Node History Item 3">none</code>
           </div>
-          <div class="dag-legend-row">
-            <span class="swatch input"></span>
-            <span>Input To Selected</span>
+          <div class="dag-history-row">
+            <span class="swatch history"></span>
+            <code aria-label="DAG Node History Item 4">none</code>
           </div>
-          <div class="dag-legend-row">
-            <span class="swatch output"></span>
-            <span>Output From Selected</span>
+          <div class="dag-history-row">
+            <span class="swatch history"></span>
+            <code aria-label="DAG Node History Item 5">none</code>
           </div>
         </div>
         <button type="button" class="dag-menu-btn" aria-label="DAG Menu" aria-expanded="false">Menu</button>
@@ -64,12 +62,9 @@
         <div class="dag-controls" aria-label="DAG Controls Grid">
           <button type="button" class="dag-thumb" aria-label="DAG Back">Back</button>
           <button type="button" class="dag-thumb" aria-label="DAG Add">Add</button>
-          <button type="button" class="dag-thumb" aria-label="DAG Pick Output">Pick Out</button>
-          <button type="button" class="dag-thumb" aria-label="DAG Pick Input">Pick In</button>
           <button type="button" class="dag-thumb" aria-label="DAG Connect">Link</button>
           <button type="button" class="dag-thumb" aria-label="DAG Unlink">Unlink</button>
           <button type="button" class="dag-thumb" aria-label="DAG Nest">Nest</button>
-          <button type="button" class="dag-thumb" aria-label="DAG Delete Node">DelN</button>
           <button type="button" class="dag-thumb" aria-label="DAG Clear Picks">Clear</button>
           <input class="dag-label-input" type="text" aria-label="DAG Label Input" placeholder="Select node to rename" />
           <button type="button" class="dag-rename-btn" aria-label="DAG Rename">Rename</button>
