@@ -246,12 +246,12 @@ export class MusicVisualization {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (energy > 0.1) {
       ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
-      ctx.font = "bold 60px Arial";
+      ctx.font = "bold 60px Inter";
       ctx.textAlign = "center";
       ctx.fillText(note, 128, 65);
       
       ctx.fillStyle = "rgba(200, 200, 200, 0.7)";
-      ctx.font = "24px Arial";
+      ctx.font = "24px Inter";
       ctx.fillText(`${freq.toFixed(1)} Hz`, 128, 105);
     }
     this.centerLabelSprite.material.map!.needsUpdate = true;
@@ -291,7 +291,7 @@ export class MusicVisualization {
       const ctx = labelCanvas.getContext("2d");
       if (ctx) {
         ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 28px Arial";
+        ctx.font = "bold 28px Inter";
         ctx.textAlign = "center";
         ctx.fillText(note, 64, 40);
       }

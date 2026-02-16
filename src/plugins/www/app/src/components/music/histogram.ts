@@ -70,7 +70,7 @@ export class Histogram {
         ctx.shadowBlur = intensity * 15;
         ctx.shadowColor = "white";
         ctx.fillStyle = `rgb(${r},${g},${b})`;
-        ctx.font = "bold 32px Arial";
+        ctx.font = "bold 32px Inter";
         ctx.textAlign = "center";
         ctx.fillText(text, 64, 45);
         
