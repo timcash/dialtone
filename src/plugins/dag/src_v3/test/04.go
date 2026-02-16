@@ -15,8 +15,8 @@ func Run04ThreeUserStoryBuildIO() error {
 		return err
 	}
 	fmt.Println("[THREE] story step2 description:")
-	fmt.Println("[THREE]   - In order to add output, the user selects processor and taps Action in Add mode.")
-	fmt.Println("[THREE]   - In order to add input, the user clears selection, taps Action in Add mode, then links input->processor in Connect mode.")
+	fmt.Println("[THREE]   - In order to add output, the user selects processor and taps Add.")
+	fmt.Println("[THREE]   - In order to add input, the user clears selection, taps Add, then picks output=input and input=processor before tapping Link.")
 	fmt.Println("[THREE]   - Camera expectation: root layer remains fully readable while adding and linking nodes.")
 
 	type evalResult struct {
@@ -48,12 +48,9 @@ func Run04ThreeUserStoryBuildIO() error {
 				const processorID = story.processorID;
 				if (!processorID) return { ok: false, msg: 'missing processor id from step1' };
 				if (!clickNode(processorID)) return { ok: false, msg: 'cannot select processor' };
-				while (api.getState().mode !== 'add') {
-					if (!click('DAG Mode')) return { ok: false, msg: 'cannot switch to add mode' };
-				}
 
 				// Add output from processor (processor -> output)
-				if (!click('DAG Action')) return { ok: false, msg: 'add output failed' };
+				if (!click('DAG Add')) return { ok: false, msg: 'add output failed' };
 				let st = api.getState();
 				const outputID = st.lastCreatedNodeId;
 				if (!outputID || outputID === processorID) return { ok: false, msg: 'missing output node id' };
@@ -62,25 +59,27 @@ func Run04ThreeUserStoryBuildIO() error {
 				const canvas = q('Three Canvas');
 				canvas.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 8, clientY: 8, view: window }));
 				if (api.getState().selectedNodeId !== '') return { ok: false, msg: 'failed to clear selection' };
-				if (!click('DAG Action')) return { ok: false, msg: 'add input failed' };
+				if (!click('DAG Add')) return { ok: false, msg: 'add input failed' };
 				st = api.getState();
 				const inputID = st.lastCreatedNodeId;
 				if (!inputID || inputID === outputID || inputID === processorID) return { ok: false, msg: 'missing input node id' };
 
-				// Connect input -> processor using connect mode.
-				while (api.getState().mode !== 'connect') {
-					if (!click('DAG Mode')) return { ok: false, msg: 'cannot switch to connect mode' };
-				}
+				// Connect input -> processor (pick output then input, then link).
 				if (!clickNode(inputID)) return { ok: false, msg: 'cannot select input node' };
-				if (!click('DAG Action')) return { ok: false, msg: 'connect arm failed' };
+				if (!click('DAG Pick Output')) return { ok: false, msg: 'pick output failed' };
 				if (!clickNode(processorID)) return { ok: false, msg: 'cannot select processor for connect target' };
-				if (!click('DAG Action')) return { ok: false, msg: 'connect apply failed' };
+				if (!click('DAG Pick Input')) return { ok: false, msg: 'pick input failed' };
+				if (!click('DAG Connect')) return { ok: false, msg: 'connect apply failed' };
 
 				// Validate processor has both input and output.
 				if (!clickNode(processorID)) return { ok: false, msg: 'cannot reselect processor' };
 				st = api.getState();
 				if (!st.inputNodeIDs.includes(inputID)) return { ok: false, msg: 'processor missing input edge' };
 				if (!st.outputNodeIDs.includes(outputID)) return { ok: false, msg: 'processor missing output edge' };
+				const inputTx = api.getNodeTransform(inputID);
+				const processorTx = api.getNodeTransform(processorID);
+				if (!inputTx.ok || !processorTx.ok) return { ok: false, msg: 'missing node transforms for rank checks' };
+				if (processorTx.rank < inputTx.rank + 1) return { ok: false, msg: 'rank rule violated: input node did not move above highest input rank' };
 
 				story.inputID = inputID;
 				story.outputID = outputID;

@@ -42,11 +42,11 @@ func Run06ThreeUserStoryRenameAndUndive() error {
 				return api.getState().selectedNodeId === nodeId;
 			};
 			const setName = (text) => {
-				const input = q('DAG Node Name');
+				const input = q('DAG Label Input');
 				if (!input) return false;
 				input.value = text;
 				input.dispatchEvent(new Event('input', { bubbles: true }));
-				return click('DAG Rename Node');
+				return click('DAG Rename');
 			};
 
 			const story = window.__dagStory || {};
@@ -59,13 +59,6 @@ func Run06ThreeUserStoryRenameAndUndive() error {
 			if (!clickNode(nestedA)) return { ok: false, msg: 'select nestedA failed' };
 			if (!setName('Nested Input')) return { ok: false, msg: 'rename nestedA action failed' };
 			if (api.getNodeLabel(nestedA) !== 'Nested Input') return { ok: false, msg: 'nested label did not update' };
-
-			// Toggle labels on so renamed text is visible in-scene.
-			while (api.getState().mode !== 'labels') {
-				if (!click('DAG Mode')) return { ok: false, msg: 'cannot switch to labels mode' };
-			}
-			if (!click('DAG Action')) return { ok: false, msg: 'enable labels failed' };
-			if (!api.getState().labelsVisible) return { ok: false, msg: 'labels did not turn on' };
 
 			// Undive back to root and verify camera and history move.
 			const nestedCamera = api.getState().camera;

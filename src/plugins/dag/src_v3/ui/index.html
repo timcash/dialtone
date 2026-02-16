@@ -31,36 +31,48 @@
 
       <section id="three" aria-label="Three Section" hidden>
         <canvas aria-label="Three Canvas"></canvas>
+        <div class="dag-legend" aria-label="DAG Node Legend">
+          <h3>Node Legend</h3>
+          <div class="dag-legend-row">
+            <span class="swatch selected"></span>
+            <span>Selected Node</span>
+          </div>
+          <div class="dag-legend-row">
+            <span class="swatch pick-output"></span>
+            <span>First Pick (Output)</span>
+            <code aria-label="DAG Legend Output Value">none</code>
+          </div>
+          <div class="dag-legend-row">
+            <span class="swatch pick-input"></span>
+            <span>Second Pick (Input)</span>
+            <code aria-label="DAG Legend Input Value">none</code>
+          </div>
+          <div class="dag-legend-row">
+            <span class="swatch input"></span>
+            <span>Input To Selected</span>
+          </div>
+          <div class="dag-legend-row">
+            <span class="swatch output"></span>
+            <span>Output From Selected</span>
+          </div>
+        </div>
         <button type="button" class="dag-menu-btn" aria-label="DAG Menu" aria-expanded="false">Menu</button>
         <div class="dag-menu-panel" aria-label="DAG Menu Panel" hidden>
           <button type="button" aria-label="DAG Menu Navigate Table">Table</button>
           <button type="button" aria-label="DAG Menu Navigate Three">Three</button>
         </div>
-        <div class="dag-thumb-dock" aria-label="DAG Thumb Dock">
-          <div class="dag-thumb-cluster" data-control="back">
-            <div class="dag-thumb-stack" aria-label="DAG Back Stack" hidden>
-              <button type="button" class="dag-thumb secondary" aria-label="DAG Back Root">Root</button>
-            </div>
-            <button type="button" class="dag-thumb" aria-label="DAG Back">Back</button>
-          </div>
-          <div class="dag-thumb-cluster" data-control="action">
-            <div class="dag-thumb-stack" aria-label="DAG Action Stack" hidden>
-              <button type="button" class="dag-thumb secondary" aria-label="DAG Action Labels">Labels</button>
-              <button type="button" class="dag-thumb secondary" aria-label="DAG Action Nest">Nest</button>
-              <button type="button" class="dag-thumb secondary" aria-label="DAG Action Clear">Clear</button>
-            </div>
-            <button type="button" class="dag-thumb" aria-label="DAG Action">Action</button>
-          </div>
-          <div class="dag-thumb-cluster" data-control="mode">
-            <div class="dag-thumb-stack" aria-label="DAG Mode Stack" hidden>
-              <button type="button" class="dag-thumb secondary" aria-label="DAG Mode Prev">Prev</button>
-            </div>
-            <button type="button" class="dag-thumb" aria-label="DAG Mode">Mode</button>
-          </div>
-        </div>
-        <div class="dag-rename" aria-label="DAG Rename Panel">
-          <input type="text" aria-label="DAG Node Name" placeholder="Select node to rename" />
-          <button type="button" aria-label="DAG Rename Node">Rename</button>
+        <div class="dag-controls" aria-label="DAG Controls Grid">
+          <button type="button" class="dag-thumb" aria-label="DAG Back">Back</button>
+          <button type="button" class="dag-thumb" aria-label="DAG Add">Add</button>
+          <button type="button" class="dag-thumb" aria-label="DAG Pick Output">Pick Out</button>
+          <button type="button" class="dag-thumb" aria-label="DAG Pick Input">Pick In</button>
+          <button type="button" class="dag-thumb" aria-label="DAG Connect">Link</button>
+          <button type="button" class="dag-thumb" aria-label="DAG Unlink">Unlink</button>
+          <button type="button" class="dag-thumb" aria-label="DAG Nest">Nest</button>
+          <button type="button" class="dag-thumb" aria-label="DAG Delete Node">DelN</button>
+          <button type="button" class="dag-thumb" aria-label="DAG Clear Picks">Clear</button>
+          <input class="dag-label-input" type="text" aria-label="DAG Label Input" placeholder="Select node to rename" />
+          <button type="button" class="dag-rename-btn" aria-label="DAG Rename">Rename</button>
         </div>
       </section>
     </div>

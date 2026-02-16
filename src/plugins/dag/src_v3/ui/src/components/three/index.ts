@@ -44,7 +44,6 @@ type LayerSnapshot = {
 
 type ProjectedPoint = { ok: boolean; x: number; y: number };
 type CameraView = 'iso' | 'top' | 'side' | 'front';
-type ActionMode = 'add' | 'connect' | 'nest' | 'enter' | 'remove-node' | 'remove-edge' | 'labels';
 type NestedLink = {
   parentNodeId: NodeID;
   childNodeId: NodeID;
@@ -58,9 +57,10 @@ const NODE_INPUT_COLOR = 0x2da44e;
 const NODE_OUTPUT_COLOR = 0xd97706;
 const NODE_NESTED_COLOR = 0x7c3aed;
 const NODE_NESTED_LAYER_COLOR = 0x2f9e9f;
+const NODE_LINK_OUTPUT_PICK_COLOR = 0xfacc15;
+const NODE_LINK_INPUT_PICK_COLOR = 0x38bdf8;
 const EDGE_BASE_COLOR = 0x6b7280;
 const EDGE_NESTED_LINK_COLOR = 0xfacc15;
-const MODE_SEQUENCE: ActionMode[] = ['add', 'connect', 'nest', 'enter', 'remove-node', 'remove-edge', 'labels'];
 
 class ThreeControl implements VisualizationControl {
   private scene = new THREE.Scene();
@@ -90,26 +90,29 @@ class ThreeControl implements VisualizationControl {
 
   private userNodeCounter = 1;
   private edgeCounter = 1;
-  private mode: ActionMode = 'add';
-  private pendingConnectSourceNodeId = '';
-  private labelsVisible = false;
+  private pendingLinkOutputNodeId = '';
+  private pendingLinkInputNodeId = '';
+  private labelsVisible = true;
   private lastCreatedNodeId = '';
   private menuOpen = false;
-  private lastTapAtByControl = new Map<string, number>();
   private renameInput: HTMLInputElement | null = null;
   private renameApplyButton: HTMLButtonElement | null = null;
 
   private backButton: HTMLButtonElement | null = null;
-  private actionButton: HTMLButtonElement | null = null;
-  private modeButton: HTMLButtonElement | null = null;
+  private addButton: HTMLButtonElement | null = null;
+  private pickOutputButton: HTMLButtonElement | null = null;
+  private pickInputButton: HTMLButtonElement | null = null;
+  private connectButton: HTMLButtonElement | null = null;
+  private unlinkButton: HTMLButtonElement | null = null;
+  private nestButton: HTMLButtonElement | null = null;
+  private deleteNodeButton: HTMLButtonElement | null = null;
+  private clearPicksButton: HTMLButtonElement | null = null;
   private menuButton: HTMLButtonElement | null = null;
   private menuPanel: HTMLElement | null = null;
-  private backStack: HTMLElement | null = null;
-  private actionStack: HTMLElement | null = null;
-  private modeStack: HTMLElement | null = null;
   private menuTableButton: HTMLButtonElement | null = null;
   private menuThreeButton: HTMLButtonElement | null = null;
-  private actionLabelsButton: HTMLButtonElement | null = null;
+  private legendOutputValue: HTMLElement | null = null;
+  private legendInputValue: HTMLElement | null = null;
 
   constructor(private container: HTMLElement, private canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -365,18 +368,22 @@ class ThreeControl implements VisualizationControl {
 
   private initMobileUI() {
     this.backButton = this.container.querySelector("button[aria-label='DAG Back']");
-    this.actionButton = this.container.querySelector("button[aria-label='DAG Action']");
-    this.modeButton = this.container.querySelector("button[aria-label='DAG Mode']");
+    this.addButton = this.container.querySelector("button[aria-label='DAG Add']");
+    this.pickOutputButton = this.container.querySelector("button[aria-label='DAG Pick Output']");
+    this.pickInputButton = this.container.querySelector("button[aria-label='DAG Pick Input']");
+    this.connectButton = this.container.querySelector("button[aria-label='DAG Connect']");
+    this.unlinkButton = this.container.querySelector("button[aria-label='DAG Unlink']");
+    this.nestButton = this.container.querySelector("button[aria-label='DAG Nest']");
+    this.deleteNodeButton = this.container.querySelector("button[aria-label='DAG Delete Node']");
+    this.clearPicksButton = this.container.querySelector("button[aria-label='DAG Clear Picks']");
     this.menuButton = this.container.querySelector("button[aria-label='DAG Menu']");
     this.menuPanel = this.container.querySelector("[aria-label='DAG Menu Panel']");
-    this.backStack = this.container.querySelector("[aria-label='DAG Back Stack']");
-    this.actionStack = this.container.querySelector("[aria-label='DAG Action Stack']");
-    this.modeStack = this.container.querySelector("[aria-label='DAG Mode Stack']");
     this.menuTableButton = this.container.querySelector("button[aria-label='DAG Menu Navigate Table']");
     this.menuThreeButton = this.container.querySelector("button[aria-label='DAG Menu Navigate Three']");
-    this.actionLabelsButton = this.container.querySelector("button[aria-label='DAG Action Labels']");
-    this.renameInput = this.container.querySelector("input[aria-label='DAG Node Name']");
-    this.renameApplyButton = this.container.querySelector("button[aria-label='DAG Rename Node']");
+    this.legendOutputValue = this.container.querySelector("[aria-label='DAG Legend Output Value']");
+    this.legendInputValue = this.container.querySelector("[aria-label='DAG Legend Input Value']");
+    this.renameInput = this.container.querySelector("input[aria-label='DAG Label Input']");
+    this.renameApplyButton = this.container.querySelector("button[aria-label='DAG Rename']");
     const testMode = (() => {
       try {
         return window.sessionStorage.getItem('dag_test_mode') === '1';
@@ -384,42 +391,41 @@ class ThreeControl implements VisualizationControl {
         return false;
       }
     })();
-    const backRootButton = this.container.querySelector("button[aria-label='DAG Back Root']");
-    const actionNestButton = this.container.querySelector("button[aria-label='DAG Action Nest']");
-    const actionClearButton = this.container.querySelector("button[aria-label='DAG Action Clear']");
-    const modePrevButton = this.container.querySelector("button[aria-label='DAG Mode Prev']");
 
-    this.bindThumbWithDoubleTap('back', this.backButton, this.backStack, () => {
+    this.backButton?.addEventListener('click', () => {
       this.goBack();
       this.syncControlState();
     });
-    this.bindThumbWithDoubleTap('action', this.actionButton, this.actionStack, () => {
-      this.performAction();
+    this.addButton?.addEventListener('click', () => {
+      this.createChildNodeFromSelected();
       this.syncControlState();
     });
-    this.bindThumbWithDoubleTap('mode', this.modeButton, this.modeStack, () => {
-      this.cycleMode(1);
+    this.pickOutputButton?.addEventListener('click', () => {
+      this.pickOutputFromSelection();
       this.syncControlState();
     });
-
-    backRootButton?.addEventListener('click', () => {
-      this.goBackToRoot();
-      this.collapseStacks();
+    this.pickInputButton?.addEventListener('click', () => {
+      this.pickInputFromSelection();
       this.syncControlState();
     });
-    actionClearButton?.addEventListener('click', () => {
-      this.pendingConnectSourceNodeId = '';
-      this.collapseStacks();
+    this.connectButton?.addEventListener('click', () => {
+      this.performConnectAction();
       this.syncControlState();
     });
-    actionNestButton?.addEventListener('click', () => {
+    this.unlinkButton?.addEventListener('click', () => {
+      this.performUnlinkAction();
+      this.syncControlState();
+    });
+    this.nestButton?.addEventListener('click', () => {
       this.createNestedLayerAndEnter();
-      this.collapseStacks();
       this.syncControlState();
     });
-    modePrevButton?.addEventListener('click', () => {
-      this.cycleMode(-1);
-      this.collapseStacks();
+    this.deleteNodeButton?.addEventListener('click', () => {
+      this.performRemoveNodeAction();
+      this.syncControlState();
+    });
+    this.clearPicksButton?.addEventListener('click', () => {
+      this.clearPendingLinkPicks();
       this.syncControlState();
     });
 
@@ -445,11 +451,6 @@ class ThreeControl implements VisualizationControl {
       this.menuOpen = false;
       this.syncControlState();
     });
-    this.actionLabelsButton?.addEventListener('click', () => {
-      this.toggleLabels();
-      this.collapseStacks();
-      this.syncControlState();
-    });
     this.renameApplyButton?.addEventListener('click', () => this.applyRenameFromInput());
     this.renameInput?.addEventListener('keydown', (event) => {
       if (event.key !== 'Enter') return;
@@ -465,94 +466,8 @@ class ThreeControl implements VisualizationControl {
     this.syncControlState();
   }
 
-  private bindThumbWithDoubleTap(
-    controlID: string,
-    button: HTMLButtonElement | null,
-    stack: HTMLElement | null,
-    onSingleTap: () => void
-  ) {
-    if (!button) return;
-    const onTap = () => {
-      onSingleTap();
-      const now = Date.now();
-      const prev = this.lastTapAtByControl.get(controlID) ?? 0;
-      if (now - prev <= 280 && stack) {
-        stack.hidden = !stack.hidden;
-      }
-      this.lastTapAtByControl.set(controlID, now);
-      this.syncControlState();
-    };
-    button.addEventListener('click', onTap);
-    button.addEventListener('dblclick', () => {
-      if (!stack) return;
-      stack.hidden = !stack.hidden;
-      this.syncControlState();
-    });
-  }
-
-  private collapseStacks() {
-    if (this.backStack) this.backStack.hidden = true;
-    if (this.actionStack) this.actionStack.hidden = true;
-    if (this.modeStack) this.modeStack.hidden = true;
-  }
-
-  private cycleMode(delta: -1 | 1) {
-    const idx = MODE_SEQUENCE.indexOf(this.mode);
-    const nextIdx = (idx + delta + MODE_SEQUENCE.length) % MODE_SEQUENCE.length;
-    this.mode = MODE_SEQUENCE[nextIdx];
-    if (this.mode !== 'connect') this.pendingConnectSourceNodeId = '';
-  }
-
-  private modeToLabel(mode: ActionMode): string {
-    switch (mode) {
-      case 'add':
-        return 'Add';
-      case 'connect':
-        return 'Link';
-      case 'nest':
-        return 'Nest';
-      case 'enter':
-        return 'Dive';
-      case 'remove-node':
-        return 'DelN';
-      case 'remove-edge':
-        return 'DelE';
-      case 'labels':
-        return 'Label';
-      default:
-        return 'Mode';
-    }
-  }
-
-  private performAction() {
-    switch (this.mode) {
-      case 'add':
-        this.createChildNodeFromSelected();
-        return;
-      case 'connect':
-        this.performConnectAction();
-        return;
-      case 'nest':
-        this.createNestedLayerAndEnter();
-        return;
-      case 'enter':
-        if (this.selectedNodeId) this.enterNested(this.selectedNodeId);
-        return;
-      case 'remove-node':
-        this.performRemoveNodeAction();
-        return;
-      case 'remove-edge':
-        this.performRemoveEdgeAction();
-        return;
-      case 'labels':
-        this.toggleLabels();
-        return;
-      default:
-        return;
-    }
-  }
-
   private createChildNodeFromSelected() {
+    this.clearPendingLinkPicks();
     if (!this.selectedNodeId) {
       const nodeId = `n_user_${this.userNodeCounter++}`;
       if (!this.addNode(this.activeLayerId, nodeId, 0, 0)) return;
@@ -574,59 +489,75 @@ class ThreeControl implements VisualizationControl {
 
   private createNestedLayerAndEnter() {
     if (!this.selectedNodeId) return;
+    this.clearPendingLinkPicks();
     const nestedLayerId = this.ensureNestedLayer(this.selectedNodeId);
     if (!nestedLayerId) return;
     this.enterNested(this.selectedNodeId);
   }
 
-  private performConnectAction() {
+  private pickOutputFromSelection() {
     if (!this.selectedNodeId) return;
-    if (!this.pendingConnectSourceNodeId) {
-      this.pendingConnectSourceNodeId = this.selectedNodeId;
+    this.pendingLinkOutputNodeId = this.selectedNodeId;
+  }
+
+  private pickInputFromSelection() {
+    if (!this.selectedNodeId) return;
+    this.pendingLinkInputNodeId = this.selectedNodeId;
+  }
+
+  private clearPendingLinkPicks() {
+    this.pendingLinkOutputNodeId = '';
+    this.pendingLinkInputNodeId = '';
+  }
+
+  private performConnectAction() {
+    const source = this.nodes.get(this.pendingLinkOutputNodeId);
+    const target = this.nodes.get(this.pendingLinkInputNodeId);
+    if (!source || !target) return;
+    if (source.id === target.id) return;
+    if (!source || !target || source.layerId !== target.layerId) return;
+    if (source.layerId !== this.activeLayerId) return;
+    if (this.findEdgeIDBetween(source.id, target.id)) {
+      this.clearPendingLinkPicks();
       return;
     }
-    if (this.pendingConnectSourceNodeId === this.selectedNodeId) return;
-    const source = this.nodes.get(this.pendingConnectSourceNodeId);
-    const target = this.nodes.get(this.selectedNodeId);
-    if (!source || !target || source.layerId !== target.layerId) return;
     const edgeId = `e_user_${this.edgeCounter++}`;
     if (this.addEdge(edgeId, source.layerId, source.id, target.id)) {
       console.log(`[Three #three] action add edge: ${source.id} -> ${target.id}`);
     }
-    this.pendingConnectSourceNodeId = '';
+    this.clearPendingLinkPicks();
   }
 
   private performRemoveNodeAction() {
     if (!this.selectedNodeId) return;
     const nodeID = this.selectedNodeId;
     if (this.removeNode(nodeID)) {
+      this.clearPendingLinkPicks();
       console.log(`[Three #three] action remove node: ${nodeID}`);
     }
   }
 
-  private performRemoveEdgeAction() {
-    if (!this.selectedNodeId) return;
-    const stateEdges: EdgeID[] = [];
+  private findEdgeIDBetween(outputNodeId: NodeID, inputNodeId: NodeID): EdgeID {
     const layer = this.layers.get(this.activeLayerId);
-    if (!layer) return;
+    if (!layer) return '';
     for (const edgeId of layer.edgeIds) {
       const edge = this.edges.get(edgeId);
       if (!edge) continue;
-      if (edge.inputNodeId === this.selectedNodeId || edge.outputNodeId === this.selectedNodeId) stateEdges.push(edge.id);
+      if (edge.outputNodeId === outputNodeId && edge.inputNodeId === inputNodeId) return edge.id;
     }
-    const edgeID = stateEdges.sort()[0];
-    if (!edgeID) return;
-    if (this.removeEdge(edgeID)) {
-      console.log(`[Three #three] action remove edge: ${edgeID}`);
-    }
+    return '';
   }
 
-  private toggleLabels() {
-    this.labelsVisible = !this.labelsVisible;
-    for (const node of this.nodes.values()) {
-      node.labelMesh.visible = node.mesh.visible && this.labelsVisible;
+  private performUnlinkAction() {
+    const outputNodeId = this.pendingLinkOutputNodeId;
+    const inputNodeId = this.pendingLinkInputNodeId;
+    if (!outputNodeId || !inputNodeId) return;
+    const edgeID = this.findEdgeIDBetween(outputNodeId, inputNodeId);
+    if (!edgeID) return;
+    if (this.removeEdge(edgeID)) {
+      this.clearPendingLinkPicks();
+      console.log(`[Three #three] action remove edge: ${outputNodeId} -> ${inputNodeId}`);
     }
-    this.syncControlState();
   }
 
   private redrawNodeLabel(node: DagNode) {
@@ -662,28 +593,19 @@ class ThreeControl implements VisualizationControl {
     }
   }
 
-  private goBackToRoot() {
-    while (this.goBack()) {
-      // Keep popping history until root.
-    }
-  }
-
   private syncControlState() {
-    if (this.modeButton) this.modeButton.textContent = this.modeToLabel(this.mode);
-    if (this.actionButton) {
-      if (this.mode === 'connect' && this.pendingConnectSourceNodeId) {
-        this.actionButton.textContent = 'Link+';
-      } else if (this.mode === 'nest') {
-        this.actionButton.textContent = 'Nest';
-      } else if (this.mode === 'enter') {
-        this.actionButton.textContent = 'Dive';
-      } else {
-        this.actionButton.textContent = 'Action';
-      }
-    }
+    if (this.pickOutputButton) this.pickOutputButton.textContent = this.pendingLinkOutputNodeId ? 'Out+' : 'Pick Out';
+    if (this.pickInputButton) this.pickInputButton.textContent = this.pendingLinkInputNodeId ? 'In+' : 'Pick In';
+    if (this.backButton) this.backButton.disabled = this.history.length === 0;
+    if (this.connectButton) this.connectButton.disabled = !(this.pendingLinkOutputNodeId && this.pendingLinkInputNodeId);
+    if (this.unlinkButton) this.unlinkButton.disabled = !(this.pendingLinkOutputNodeId && this.pendingLinkInputNodeId);
+    if (this.pickOutputButton) this.pickOutputButton.disabled = !this.selectedNodeId;
+    if (this.pickInputButton) this.pickInputButton.disabled = !this.selectedNodeId;
+    if (this.nestButton) this.nestButton.disabled = !this.selectedNodeId;
+    if (this.deleteNodeButton) this.deleteNodeButton.disabled = !this.selectedNodeId;
+    if (this.clearPicksButton) this.clearPicksButton.disabled = !(this.pendingLinkOutputNodeId || this.pendingLinkInputNodeId);
     if (this.menuButton) this.menuButton.setAttribute('aria-expanded', String(this.menuOpen));
     if (this.menuPanel) this.menuPanel.hidden = !this.menuOpen;
-    if (this.actionLabelsButton) this.actionLabelsButton.textContent = this.labelsVisible ? 'Labels Off' : 'Labels On';
     const selectedNode = this.nodes.get(this.selectedNodeId);
     if (this.renameInput) {
       this.renameInput.disabled = !selectedNode;
@@ -691,9 +613,11 @@ class ThreeControl implements VisualizationControl {
       this.renameInput.placeholder = selectedNode ? 'Rename selected node' : 'Select node to rename';
     }
     if (this.renameApplyButton) this.renameApplyButton.disabled = !selectedNode;
-    this.canvas.setAttribute('data-action-mode', this.mode);
+    if (this.legendOutputValue) this.legendOutputValue.textContent = this.pendingLinkOutputNodeId || 'none';
+    if (this.legendInputValue) this.legendInputValue.textContent = this.pendingLinkInputNodeId || 'none';
     this.canvas.setAttribute('data-labels-visible', String(this.labelsVisible));
-    this.canvas.setAttribute('data-connect-pending', this.pendingConnectSourceNodeId);
+    this.canvas.setAttribute('data-link-output', this.pendingLinkOutputNodeId);
+    this.canvas.setAttribute('data-link-input', this.pendingLinkInputNodeId);
   }
 
   private hitTestClientPoint(clientX: number, clientY: number): NodeID {
@@ -826,7 +750,11 @@ class ThreeControl implements VisualizationControl {
       const node = this.nodes.get(nodeId);
       if (!node) continue;
       const material = node.mesh.material as THREE.MeshStandardMaterial;
-      if (node.id === this.selectedNodeId) {
+      if (node.id === this.pendingLinkOutputNodeId) {
+        material.color.setHex(NODE_LINK_OUTPUT_PICK_COLOR);
+      } else if (node.id === this.pendingLinkInputNodeId) {
+        material.color.setHex(NODE_LINK_INPUT_PICK_COLOR);
+      } else if (node.id === this.selectedNodeId) {
         material.color.setHex(NODE_SELECTED_COLOR);
       } else if (inputNodeIDs.has(node.id)) {
         material.color.setHex(NODE_INPUT_COLOR);
@@ -937,6 +865,7 @@ class ThreeControl implements VisualizationControl {
   private goBack(): boolean {
     const prev = this.history.pop();
     if (!prev) return false;
+    this.clearPendingLinkPicks();
     this.selectedNodeId = prev.selectedNodeId;
     this.applyLayerView(prev.layerId);
     console.log(`[Three #three] back to layer: ${prev.layerId}`);
@@ -1098,6 +1027,8 @@ class ThreeControl implements VisualizationControl {
     this.allMeshes = this.allMeshes.filter((m) => m !== node.mesh);
     layer.nodeIds = layer.nodeIds.filter((id) => id !== nodeId);
     if (this.selectedNodeId === nodeId) this.selectedNodeId = '';
+    if (this.pendingLinkOutputNodeId === nodeId) this.pendingLinkOutputNodeId = '';
+    if (this.pendingLinkInputNodeId === nodeId) this.pendingLinkInputNodeId = '';
     this.normalizeLayerLayout(node.layerId);
     this.applyLayerView(this.activeLayerId);
     return true;
@@ -1112,9 +1043,9 @@ class ThreeControl implements VisualizationControl {
       outputNodeIDs: this.getOutputNodeIDs(this.selectedNodeId),
       nestedNodeIDs: this.getNestedNodeIDs(this.selectedNodeId),
       historyDepth: this.history.length,
-      mode: this.mode,
       labelsVisible: this.labelsVisible,
-      pendingConnectSourceNodeId: this.pendingConnectSourceNodeId,
+      pendingLinkOutputNodeId: this.pendingLinkOutputNodeId,
+      pendingLinkInputNodeId: this.pendingLinkInputNodeId,
       lastCreatedNodeId: this.lastCreatedNodeId,
       selectedNodeLabel: this.selectedNodeId ? (this.nodes.get(this.selectedNodeId)?.label ?? '') : '',
       camera: { x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z },
@@ -1232,14 +1163,6 @@ class ThreeControl implements VisualizationControl {
       createNodeAtClient: (layerId: LayerID, clientX: number, clientY: number) => this.createNodeAtClient(layerId, clientX, clientY),
       enterNested: (nodeId?: NodeID) => this.enterNested(nodeId),
       goBack: () => this.goBack(),
-      setMode: (mode: ActionMode) => {
-        if (!MODE_SEQUENCE.includes(mode)) return false;
-        this.mode = mode;
-        this.pendingConnectSourceNodeId = '';
-        this.syncControlState();
-        return true;
-      },
-      toggleLabels: () => this.toggleLabels(),
       addNode: (layerId: LayerID, nodeId: NodeID, rank: number, row: number) => this.addNode(layerId, nodeId, rank, row),
       addEdge: (edgeId: EdgeID, layerId: LayerID, outputNodeId: NodeID, inputNodeId: NodeID) =>
         this.addEdge(edgeId, layerId, outputNodeId, inputNodeId),
