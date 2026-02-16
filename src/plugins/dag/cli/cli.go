@@ -99,7 +99,7 @@ func Run(args []string) error {
 func printUsage() {
 	fmt.Println("Usage: ./dialtone.sh dag <command> [args]")
 	fmt.Println("\nCommands:")
-	fmt.Println("  install <dir>  Install UI dependencies")
+	fmt.Println("  install <dir>  Install Go/Bun requirements, duckdb in DIALTONE_ENV, and UI deps")
 	fmt.Println("  fmt <dir>      Run go fmt")
 	fmt.Println("  format <dir>   Run UI format checks")
 	fmt.Println("  vet <dir>      Run go vet")
