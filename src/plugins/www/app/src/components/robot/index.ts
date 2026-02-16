@@ -342,7 +342,7 @@ class RobotArmVisualization {
   cameraOrbitAngle = 0;
   cameraOrbitSpeed = 0.1;
   cameraRadius = 12;
-  cameraHeight = 1;
+  cameraHeight = 6.5;
 
 
   sliders: { slider: HTMLInputElement; valueEl: HTMLSpanElement }[] = [];
