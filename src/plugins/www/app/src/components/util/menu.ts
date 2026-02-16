@@ -19,9 +19,11 @@ export class Menu {
         const setOpen = (open: boolean) => {
             if (!this.panel || !this.toggle) return;
             
-            if (open && this.onOpenCallback) {
-                this.clear();
-                this.onOpenCallback();
+            if (open) {
+                this.clear(); // Always clear before building
+                if (this.onOpenCallback) {
+                    this.onOpenCallback();
+                }
             }
 
             this.panel.hidden = !open;
@@ -62,12 +64,20 @@ export class Menu {
         this.onOpenCallback = cb;
     }
 
+    public isOpen(): boolean {
+        return this.panel ? !this.panel.hidden : false;
+    }
+
     clear() {
-        if (this.panel) this.panel.innerHTML = "";
+        if (this.panel) {
+            this.panel.innerHTML = "";
+            this.panel.scrollTop = 0;
+        }
     }
 
     close() {
         if (!this.panel || !this.toggle) return;
+        if (this.panel.hidden) return;
         this.panel.hidden = true;
         this.toggle.setAttribute("aria-expanded", "false");
         document.body.style.overflow = '';
@@ -128,6 +138,31 @@ export class Menu {
         button.addEventListener("click", onClick);
         this.panel.appendChild(button);
         return button;
+    }
+
+    addFile(label: string, onFile: (file: File) => void, accept = ".json,.geojson") {
+        if (!this.panel) return;
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = accept;
+        input.style.display = "none";
+
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "menu-button menu-button-primary";
+        button.textContent = label;
+        button.setAttribute("aria-label", label);
+
+        button.addEventListener("click", () => input.click());
+        input.addEventListener("change", () => {
+            if (input.files?.[0]) {
+                button.textContent = input.files[0].name;
+                onFile(input.files[0]);
+            }
+        });
+
+        this.panel.appendChild(button);
+        this.panel.appendChild(input);
     }
 
     addStatus() {
