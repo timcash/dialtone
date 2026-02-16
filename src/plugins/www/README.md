@@ -97,6 +97,14 @@ VERCEL_ORG_ID=team_4tzswM6M6PoDxaszH2ZHs5J7
 
 # Log
 
+## 2026-02-16
+- **Consolidated Smoke Suite**: Unified performance and menu tests into a single pass using a shared headless tab for maximum efficiency.
+- **Chrome Lifecycle Hardening**: Fixed WSL process tree leakage and implemented strict session management via the `chrome` plugin.
+- **Async Loading Lifecycle**: Optimized all 11 sections to settle within 5 seconds using non-blocking background asset initialization.
+- **Policy Mobile Polish**: Improved framing (16.5z camera), implemented compact white-grey histogram, and integrated simulation count into typography overlay.
+- **New Tooling**: Added `www smoke-chrome` command to verify browser reaping.
+- **Architectural Cleanup**: Decoupled WWW tests from the global test registry to ensure leak-free execution.
+
 ## 2026-02-13
 - Added `vision` component with real-time 3D pose estimation.
 - Integrated `tinygesture` for mobile swipe navigation.
