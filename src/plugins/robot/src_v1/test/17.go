@@ -20,10 +20,11 @@ func Run17LifecycleInvariants() error {
 	}{
 		{id: "hero", label: "Hero Section"},
 		{id: "docs", label: "Docs Section"},
-		{id: "table", label: "Table Section"},
+		{id: "table", label: "Telemetry Section"},
 		{id: "three", label: "Three Section"},
 		{id: "xterm", label: "Xterm Section"},
 		{id: "video", label: "Video Section"},
+		{id: "controls", label: "Controls Section"},
 	}
 
 	for _, c := range checks {

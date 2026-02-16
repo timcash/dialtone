@@ -5,9 +5,40 @@
 - **Controls Section**: A new 'Controls' section (`src/plugins/robot/src_v1/ui/src/components/controls/`) has been added, featuring Arm, Disarm, Manual, and Guided buttons. These buttons publish commands to the `rover.command` NATS subject, restoring core robot control functionality from the old UI.
 - **Migrate Remaining Functionality**: Reference the old core web UI (`src/core/web/src/main.ts`) to identify and replicate any remaining functionalities into the new section-based robot UI.
 
+# Log 2026-02-16
+
+- **UIv2 Migration**: Ported `src_v1` to use the standardized overlay model (`menu`, `stage`, `table`, `xterm`, `docs`, `thumb`, `legend`).
+- **Test Hardening**: Integrated `test_v2` suite with robust Chrome lifecycle management.
+- **Session Management**: Implemented `dev` and `test --attach` workflows utilizing the `chrome` plugin for reliable session reuse and process reaping (fixed WSL process tree leaks).
+- **Functionality Parity**: Audited `src_v1` against legacy `src/core/web` to ensure all core robot features are present in the section-based architecture.
+
 # Robot Plugin
 
-The `robot` plugin centralizes core robot functionalities, including starting the robot's services (NATS, Web UI, Mavlink), deployment to remote robots, and code synchronization. It leverages the versioned source pattern (`src_vN`) for its UI and testing infrastructure, similar to the `template` plugin's `src_v3` style.
+The `robot` plugin centralizes core robot functionalities...
+
+## Feature Parity: Legacy vs. src_v1
+
+| Feature | Legacy UI | src_v1 Section | NATS / WS Hook |
+|---------|-----------|----------------|----------------|
+| **Terminal** | Left Panel (xterm) | `xterm` | Shell commands via plugin server |
+| **Quick Controls** | Left Panel (Buttons) | `controls` | `rover.command` (JSON) |
+| **3D Visualization** | Center Panel (Three.js) | `three` | `mavlink.attitude` (roll/pitch/yaw) |
+| **HUD Stats** | 3D Overlay | `three` (Legend) | `vfr_hud` / `global_position_int` |
+| **Camera Feed** | Center Top (MJPEG) | `video` | `/stream` (from camera plugin) |
+| **Telemetry Table** | Right Panel | `table` | `mavlink.>` (Full telemetry stream) |
+| **System Alerts** | Right Bottom | `table` / `xterm` | `statustext` / `ack` subjects |
+| **VPN Status** | `/vpn` route | `docs` (dynamic) | `/api/status` polling |
+
+## How To Test
+
+```bash
+./dialtone.sh robot test src_v1
+```
+
+Use `--attach` to view the test playback in your running `robot dev` browser:
+```bash
+./dialtone.sh robot test src_v1 --attach
+```
 
 ## Current Progress
 

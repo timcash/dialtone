@@ -72,19 +72,28 @@ class TableControl implements VisualizationControl {
   }
 
   private renderRows(): void {
+    console.log('[Table] renderRows called, visible:', this.visible, 'rows:', this.allRows.length);
     const table = this.container.querySelector("table[aria-label='Robot Table']") as HTMLTableElement | null;
-    if (!table) return;
+    if (!table) {
+      console.error('[Table] Table element not found in container');
+      return;
+    }
     const tbody = table.querySelector('tbody');
-    if (!tbody) return;
+    if (!tbody) {
+      console.error('[Table] tbody not found in table');
+      return;
+    }
 
     tbody.innerHTML = this.allRows
       .map((r) => `<tr><td>${r.key}</td><td>${r.value}</td><td>${r.status}</td></tr>`)
       .join('');
     
+    console.log('[Table] setting data-ready=true');
     table.setAttribute('data-ready', 'true');
   }
 
   setVisible(visible: boolean): void {
+    console.log('[Table] setVisible:', visible);
     this.visible = visible;
     if (visible) {
       this.renderRows();

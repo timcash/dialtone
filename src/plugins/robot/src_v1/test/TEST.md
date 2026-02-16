@@ -1,28 +1,28 @@
 # Robot Plugin src_v1 Test Report
 
-**Generated at:** Sun, 15 Feb 2026 18:36:05 -0800
+**Generated at:** Mon, 16 Feb 2026 15:54:39 -0800
 **Version:** `src_v1`
 **Runner:** `test_v2`
 **Status:** ✅ PASS
-**Total Time:** `19.1s`
+**Total Time:** `26.441s`
 
 ## Test Steps
 
 | Step | Result | Duration |
 |---|---|---|
-| 01 Preflight (Go/UI) | ✅ PASS | `11.003s` |
-| 02 Go Run | ✅ PASS | `809ms` |
-| 03 UI Run | ✅ PASS | `516ms` |
-| 04 Expected Errors (Proof of Life) | ✅ PASS | `1.543s` |
-| 05 Dev Server Running (latest UI) | ✅ PASS | `525ms` |
-| 06 Hero Section Validation | ✅ PASS | `109ms` |
-| 07 Docs Section Validation | ✅ PASS | `329ms` |
-| 08 Table Section Validation | ✅ PASS | `1.362s` |
-| 09 Three Section Validation | ✅ PASS | `369ms` |
-| 10 Xterm Section Validation | ✅ PASS | `356ms` |
-| 11 Video Section Validation | ✅ PASS | `391ms` |
-| 12 Lifecycle / Invariants | ✅ PASS | `1.56s` |
-| 13 Cleanup Verification | ✅ PASS | `228ms` |
+| 01 Preflight (Go/UI) | ✅ PASS | `12.104s` |
+| 02 Go Run (Mock Server Check) | ✅ PASS | `3.897s` |
+| 03 UI Run | ✅ PASS | `781ms` |
+| 04 Expected Errors (Proof of Life) | ✅ PASS | `4.525s` |
+| 05 Dev Server Running (latest UI) | ✅ PASS | `776ms` |
+| 06 Hero Section Validation | ✅ PASS | `155ms` |
+| 07 Docs Section Validation | ✅ PASS | `358ms` |
+| 08 Table Section Validation | ✅ PASS | `365ms` |
+| 09 Three Section Validation | ✅ PASS | `373ms` |
+| 10 Xterm Section Validation | ✅ PASS | `372ms` |
+| 11 Video Section Validation | ✅ PASS | `492ms` |
+| 12 Lifecycle / Invariants | ✅ PASS | `1.791s` |
+| 13 Cleanup Verification | ✅ PASS | `449ms` |
 
 ## Step Logs
 
@@ -30,7 +30,7 @@
 
 ```text
 result: PASS
-duration: 11.003s
+duration: 12.104s
 ```
 
 #### Runner Output
@@ -45,175 +45,144 @@ duration: 11.003s
 [T+0000] + vite@5.4.21
 [T+0000] + @xterm/addon-fit@0.11.0
 [T+0000] + @xterm/xterm@6.0.0
+[T+0000] + nats.ws@1.30.3
 [T+0000] + three@0.182.0
 [T+0000] 
-[T+0000] 23 packages installed [38.00ms]
+[T+0000] 26 packages installed [40.00ms]
 [T+0000] >> [Robot] Fmt: src_v1
-[T+0000] [2026-02-15T18:35:49.261-08:00 | INFO | go.go:RunGo:33] Running: go [fmt ./src/plugins/robot/src_v1/...]
+[T+0001] [2026-02-16T15:54:15.657-08:00 | INFO | go.go:RunGo:33] Running: go [fmt ./src/plugins/robot/src_v1/...]
 [T+0001] >> [Robot] Vet: src_v1
-[T+0001] [2026-02-15T18:35:49.759-08:00 | INFO | go.go:RunGo:33] Running: go [vet ./src/plugins/robot/src_v1/...]
-[T+0001] >> [Robot] Go Build: src_v1
-[T+0001] [2026-02-15T18:35:50.366-08:00 | INFO | go.go:RunGo:33] Running: go [build ./src/plugins/robot/src_v1/...]
-[T+0002] >> [Robot] Lint: src_v1
-[T+0002] $ tsc --noEmit
-[T+0003] >> [Robot] Format: src_v1
-[T+0003] $ echo format-ok
-[T+0003] format-ok
-[T+0003] >> [Robot] Building UI: src_v1
-[T+0004] $ vite build
-[T+0004] vite v5.4.21 building for production...
-[T+0004] transforming...
-[T+0004] ✓ 20 modules transformed.
-[T+0005] rendering chunks...
-[T+0005] computing gzip size...
-[T+0005] dist/index.html                   2.78 kB │ gzip:   0.95 kB
-[T+0005] dist/assets/index-6GBZ9nXN.css    5.24 kB │ gzip:   1.92 kB
-[T+0005] dist/assets/index-Ccf8p0iw.css    5.78 kB │ gzip:   1.71 kB
-[T+0005] dist/assets/index-Dbd9b_e5.js     0.08 kB │ gzip:   0.10 kB
-[T+0005] dist/assets/index-DP7yMgmI.js     0.79 kB │ gzip:   0.44 kB
-[T+0005] dist/assets/index-DhBM0cMr.js     1.17 kB │ gzip:   0.67 kB
-[T+0005] dist/assets/index-BTTHdoMO.js     1.17 kB │ gzip:   0.65 kB
-[T+0005] dist/assets/index-Cu3jqA40.js     9.97 kB │ gzip:   3.26 kB
-[T+0005] dist/assets/index-BFRwSQ3x.js   334.99 kB │ gzip:  85.16 kB
-[T+0005] dist/assets/index-DBjX7kzU.js   492.58 kB │ gzip: 125.04 kB
-[T+0005] ✓ built in 995ms
-[T+0005] >> [Robot] Building Dialtone Binary into src/plugins/robot/bin
-[T+0005] [2026-02-15T18:35:54.199-08:00 | INFO | build.go:RunBuild:110] Building Dialtone for Linux amd64 using Podman (gcc, g++)...
-[T+0006] [2026-02-15T18:35:54.588-08:00 | INFO | build.go:RunBuild:110] Using optimized 'dialtone-builder' image (skipping apt-get install)
-[T+0006] [2026-02-15T18:35:54.588-08:00 | INFO | build.go:RunBuild:110] Running: podman [run --rm -v /home/user/dialtone:/src:Z -v dialtone-go-build-cache:/root/.cache/go-build:Z -w /src -e GOOS=linux -e GOARCH=amd64 -e CGO_ENABLED=1 -e CC=gcc -e CXX=g++ dialtone-builder bash -c go build -buildvcs=false -o src/plugins/robot/bin/dialtone-amd64 src/cmd/dialtone/main.go]
-[T+0010] [2026-02-15T18:35:57.718-08:00 | INFO | build.go:RunBuild:110] Build successful: bin/dialtone-amd64
+[T+0001] [2026-02-16T15:54:16.304-08:00 | INFO | go.go:RunGo:33] Running: go [vet ./src/plugins/robot/src_v1/...]
+[T+0002] >> [Robot] Go Build: src_v1
+[T+0002] [2026-02-16T15:54:17.027-08:00 | INFO | go.go:RunGo:33] Running: go [build ./src/plugins/robot/src_v1/...]
+[T+0003] >> [Robot] Lint: src_v1
+[T+0003] $ tsc --noEmit
+[T+0004] >> [Robot] Format: src_v1
+[T+0004] $ echo format-ok
+[T+0004] format-ok
+[T+0004] >> [Robot] Building UI: src_v1
+[T+0005] $ vite build
+[T+0005] vite v5.4.21 building for production...
+[T+0005] transforming...
+[T+0006] ✓ 22 modules transformed.
+[T+0006] rendering chunks...
+[T+0006] computing gzip size...
+[T+0006] dist/index.html                   3.99 kB │ gzip:   1.13 kB
+[T+0006] dist/assets/index-6GBZ9nXN.css    5.24 kB │ gzip:   1.92 kB
+[T+0006] dist/assets/index-DwklqrbF.css    7.82 kB │ gzip:   2.26 kB
+[T+0006] dist/assets/index-Dbd9b_e5.js     0.08 kB │ gzip:   0.10 kB
+[T+0006] dist/assets/index-DP7yMgmI.js     0.79 kB │ gzip:   0.44 kB
+[T+0006] dist/assets/index-WwFTIwNg.js     0.94 kB │ gzip:   0.44 kB
+[T+0006] dist/assets/index-BTTHdoMO.js     1.17 kB │ gzip:   0.65 kB
+[T+0006] dist/assets/index-CP_Shkjd.js     2.32 kB │ gzip:   1.00 kB
+[T+0006] dist/assets/index-DvhyHFmD.js    53.40 kB │ gzip:  19.05 kB
+[T+0006] dist/assets/index-BFRwSQ3x.js   334.99 kB │ gzip:  85.16 kB
+[T+0006] dist/assets/index-wozOi2x5.js   496.42 kB │ gzip: 126.01 kB
+[T+0006] ✓ built in 1.09s
+[T+0006] >> [Robot] Building Dialtone Binary into src/plugins/robot/bin
+[T+0006] [2026-02-16T15:54:21.464-08:00 | INFO | build.go:RunBuild:110] Building Dialtone for Linux amd64 using Podman (gcc, g++)...
+[T+0007] [2026-02-16T15:54:21.889-08:00 | INFO | build.go:RunBuild:110] Using optimized 'dialtone-builder' image (skipping apt-get install)
+[T+0007] [2026-02-16T15:54:21.889-08:00 | INFO | build.go:RunBuild:110] Running: podman [run --rm -v /home/user/dialtone:/src:Z -v dialtone-go-build-cache:/root/.cache/go-build:Z -w /src -e GOOS=linux -e GOARCH=amd64 -e CGO_ENABLED=1 -e CC=gcc -e CXX=g++ dialtone-builder bash -c go build -buildvcs=false -o src/plugins/robot/bin/dialtone-amd64 src/cmd/dialtone/main.go]
+[T+0012] [2026-02-16T15:54:24.678-08:00 | INFO | build.go:RunBuild:110] Build successful: bin/dialtone-amd64
 ```
 
-### 02 Go Run
+### 02 Go Run (Mock Server Check)
 
 ```text
 result: PASS
-duration: 809ms
+duration: 3.897s
 ```
 
 #### Runner Output
 
 ```text
-[T+0011] [TEST] RUN   02 Go Run
-[T+0011] [2026-02-15T18:35:57.972-08:00 | INFO | robot.go:RunRobot:59] [WARNING] Process is not running as a systemd service. Consider running via systemctl.
-[T+0011] [2026-02-15T18:35:58.135-08:00 | INFO | robot.go:RunStart:189] NATS server started on port 4222 (local only)
-[T+0011] [2026-02-15T18:35:58.135-08:00 | INFO | robot.go:runLocalOnly:211] NATS WS proxy ports: external=4223 internal=4223
-[T+0011] [2026-02-15T18:35:58.135-08:00 | INFO | robot.go:runLocalOnly:211] Using provided static web assets
-[T+0011] [2026-02-15T18:35:58.135-08:00 | INFO | asm_amd64.s:goexit:1693] Starting Mock Mavlink Publisher...
-[T+0011] [2026-02-15T18:35:58.135-08:00 | INFO | robot.go:runLocalOnly:213] NATS WS proxy ports: external=4223 internal=4223
-[T+0011] [2026-02-15T18:35:58.135-08:00 | INFO | robot.go:runLocalOnly:213] Using provided static web assets
-[T+0011] [2026-02-15T18:35:58.135-08:00 | INFO | robot.go:RunStart:189] Web UI (Local Only): Serving at http://0.0.0.0:8080
+[T+0012] [TEST] RUN   02 Go Run (Mock Server Check)
+[T+0015] [2026-02-16T15:54:28.247-08:00 | INFO | robot.go:RunRobot:62] [WARNING] Process is not running as a systemd service. Consider running via systemctl.
+[T+0015] [2026-02-16T15:54:28.404-08:00 | INFO | robot.go:RunStart:212] NATS server started on port 4222 (local only)
+[T+0015] [2026-02-16T15:54:28.404-08:00 | INFO | robot.go:runLocalOnly:234] NATS WS proxy ports: external=4223 internal=4223
+[T+0015] [2026-02-16T15:54:28.404-08:00 | INFO | asm_amd64.s:goexit:1693] Starting Mock Mavlink Publisher...
+[T+0015] [2026-02-16T15:54:28.404-08:00 | INFO | robot.go:runLocalOnly:234] Using provided static web assets
+[T+0015] [2026-02-16T15:54:28.404-08:00 | INFO | robot.go:runLocalOnly:236] NATS WS proxy ports: external=4223 internal=4223
+[T+0015] [2026-02-16T15:54:28.404-08:00 | INFO | robot.go:runLocalOnly:236] Using provided static web assets
+[T+0015] [2026-02-16T15:54:28.404-08:00 | INFO | robot.go:RunStart:212] Web UI (Local Only): Serving at http://0.0.0.0:8080
 ```
 
 ### 03 UI Run
 
 ```text
 result: PASS
-duration: 516ms
+duration: 781ms
 ```
 
 #### Runner Output
 
 ```text
-[T+0011] [TEST] RUN   03 UI Run
-[T+0011] >> [Robot] UI Run: src_v1
-[T+0012] $ vite --host "127.0.0.1" --port "43802"
-[T+0012] 
-[T+0012]   VITE v5.4.21  ready in 106 ms
-[T+0012] 
-[T+0012]   ➜  Local:   http://127.0.0.1:43802/
+[T+0016] [TEST] RUN   03 UI Run
+[T+0016] >> [Robot] UI Run: src_v1
+[T+0016] $ vite --host "127.0.0.1" --port "44132"
+[T+0016] 
+[T+0016]   VITE v5.4.21  ready in 99 ms
+[T+0016] 
+[T+0016]   ➜  Local:   http://127.0.0.1:44132/
 ```
 
 ### 04 Expected Errors (Proof of Life)
 
 ```text
 result: PASS
-duration: 1.543s
+duration: 4.525s
 ```
 
 #### Runner Output
 
 ```text
-[T+0012] [TEST] RUN   04 Expected Errors (Proof of Life)
-[T+0012] [2026-02-15T18:35:59.077-08:00 | INFO | chrome.go:StartSession:179] DEBUG: Launching Chrome: /mnt/c/Program Files/Google/Chrome/Application/chrome.exe [--remote-debugging-port=0 --remote-debugging-address=127.0.0.1 --remote-allow-origins=* --no-first-run --no-default-browser-check --user-data-dir=C:\Users\timca\AppData\Local\Temp\dialtone-chrome-test-port-43582 --new-window --dialtone-origin=true --dialtone-role=test --headless=new]
-[T+0013] [BROWSER] [log] [SectionManager] URL PAGE reason=startup http://127.0.0.1:8080/ hash=(none) active=(none) target=hero
-[T+0013] [BROWSER] [log] [SectionManager] URL SYNC #hero
-[T+0013] [BROWSER] [log] [SectionManager] NAVIGATING TO #hero
-[T+0013] [BROWSER] [log] [SectionManager] LOADING #hero
-[T+0013] [BROWSER] [log] [SectionManager] URL PAGE reason=pageshow http://127.0.0.1:8080/ hash=(none) active=(none) target=hero
-[T+0013] [BROWSER] [log] [SectionManager] URL SYNC #hero
-[T+0013] [BROWSER] [log] [SectionManager] NAVIGATING TO #hero
-[T+0013] [BROWSER] [log] [SectionManager] LOADED #hero
-[T+0013] [BROWSER] [log] [SectionManager] START #hero
-[T+0013] [BROWSER] [log] [SectionManager] NAVIGATE TO #hero
-[T+0013] [BROWSER] [log] [SectionManager] NAVIGATE TO #hero
-[T+0013] [BROWSER] [error] [PROOFOFLIFE] Intentional Browser Test Error
+[T+0016] [TEST] RUN   04 Expected Errors (Proof of Life)
+[T+0016] [2026-02-16T15:54:29.392-08:00 | INFO | chrome.go:StartSession:179] DEBUG: Launching Chrome: /mnt/c/Program Files/Google/Chrome/Application/chrome.exe [--remote-debugging-port=0 --remote-debugging-address=127.0.0.1 --remote-allow-origins=* --no-first-run --no-default-browser-check --user-data-dir=C:\Users\timca\AppData\Local\Temp\dialtone-chrome-test-port-44692 --new-window --dialtone-origin=true --dialtone-role=test --headless=new http://127.0.0.1:8080]
 ```
 
 #### Browser Logs
 
 ```text
-[T+0013] [log] [SectionManager] URL PAGE reason=startup http://127.0.0.1:8080/ hash=(none) active=(none) target=hero
-[T+0013] [log] [SectionManager] URL SYNC #hero
-[T+0013] [log] [SectionManager] NAVIGATING TO #hero
-[T+0013] [log] [SectionManager] LOADING #hero
-[T+0013] [log] [SectionManager] URL PAGE reason=pageshow http://127.0.0.1:8080/ hash=(none) active=(none) target=hero
-[T+0013] [log] [SectionManager] URL SYNC #hero
-[T+0013] [log] [SectionManager] NAVIGATING TO #hero
-[T+0013] [log] [SectionManager] LOADED #hero
-[T+0013] [log] [SectionManager] START #hero
-[T+0013] [log] [SectionManager] NAVIGATE TO #hero
-[T+0013] [log] [SectionManager] NAVIGATE TO #hero
-[T+0013] [error] [PROOFOFLIFE] Intentional Browser Test Error
+[T+0021] [error] [PROOFOFLIFE] Intentional Browser Test Error
 ```
 
 #### Browser Errors
 
 ```text
-[T+0013] [error] [PROOFOFLIFE] Intentional Browser Test Error
+[T+0021] [error] [PROOFOFLIFE] Intentional Browser Test Error
 ```
 
 ### 05 Dev Server Running (latest UI)
 
 ```text
 result: PASS
-duration: 525ms
+duration: 776ms
 ```
 
 #### Runner Output
 
 ```text
-[T+0013] [TEST] RUN   05 Dev Server Running (latest UI)
-[T+0014] >> [Robot] UI Run: src_v1
-[T+0014] $ vite --host "127.0.0.1" --port "44780"
-[T+0014] 
-[T+0014]   VITE v5.4.21  ready in 105 ms
-[T+0014] 
-[T+0014]   ➜  Local:   http://127.0.0.1:44780/
-```
-
-#### Browser Logs
-
-```text
-[T+0013] [log] [SectionManager] RESUME #hero
-[T+0013] [log] [SectionManager] URL SYNC DONE target=hero active=hero
-[T+0013] [log] [SectionManager] RESUME #hero
-[T+0013] [log] [SectionManager] URL SYNC DONE target=hero active=hero
-[T+0013] [log] [SectionManager] URL PAGE reason=hashchange http://127.0.0.1:8080/#hero hash=hero active=hero target=hero
+[T+0021] [TEST] RUN   05 Dev Server Running (latest UI)
+[T+0021] >> [Robot] UI Run: src_v1
+[T+0021] $ vite --host "127.0.0.1" --port "45280"
+[T+0021] 
+[T+0021]   VITE v5.4.21  ready in 107 ms
+[T+0021] 
+[T+0021]   ➜  Local:   http://127.0.0.1:45280/
 ```
 
 ### 06 Hero Section Validation
 
 ```text
 result: PASS
-duration: 109ms
+duration: 155ms
 section: hero
 ```
 
 #### Runner Output
 
 ```text
-[T+0014] [TEST] RUN   06 Hero Section Validation
+[T+0022] [TEST] RUN   06 Hero Section Validation
 ```
 
 ![06 Hero Section Validation](../screenshots/test_step_1.png)
@@ -222,26 +191,14 @@ section: hero
 
 ```text
 result: PASS
-duration: 329ms
+duration: 358ms
 section: docs
 ```
 
 #### Runner Output
 
 ```text
-[T+0014] [TEST] RUN   07 Docs Section Validation
-```
-
-#### Browser Logs
-
-```text
-[T+0014] [log] [SectionManager] NAVIGATING TO #docs
-[T+0014] [log] [SectionManager] LOADING #docs
-[T+0014] [log] [SectionManager] LOADED #docs
-[T+0014] [log] [SectionManager] START #docs
-[T+0014] [log] [SectionManager] NAVIGATE TO #docs
-[T+0014] [log] [SectionManager] RESUME #docs
-[T+0014] [log] [SectionManager] URL PAGE reason=hashchange http://127.0.0.1:8080/#docs hash=docs active=docs target=docs
+[T+0022] [TEST] RUN   07 Docs Section Validation
 ```
 
 ![07 Docs Section Validation](../screenshots/test_step_2.png)
@@ -250,26 +207,14 @@ section: docs
 
 ```text
 result: PASS
-duration: 1.362s
+duration: 365ms
 section: table
 ```
 
 #### Runner Output
 
 ```text
-[T+0014] [TEST] RUN   08 Table Section Validation
-```
-
-#### Browser Logs
-
-```text
-[T+0014] [log] [SectionManager] NAVIGATING TO #table
-[T+0014] [log] [SectionManager] LOADING #table
-[T+0014] [log] [SectionManager] LOADED #table
-[T+0014] [log] [SectionManager] START #table
-[T+0014] [log] [SectionManager] NAVIGATE TO #table
-[T+0014] [log] [SectionManager] RESUME #table
-[T+0014] [log] [SectionManager] URL PAGE reason=hashchange http://127.0.0.1:8080/#table hash=table active=table target=table
+[T+0022] [TEST] RUN   08 Table Section Validation
 ```
 
 ![08 Table Section Validation](../screenshots/test_step_3.png)
@@ -278,29 +223,14 @@ section: table
 
 ```text
 result: PASS
-duration: 369ms
+duration: 373ms
 section: three
 ```
 
 #### Runner Output
 
 ```text
-[T+0016] [TEST] RUN   09 Three Section Validation
-[T+0016] [TEST] Three touch-test selected cube_left at (84,422)
-[T+0016] [TEST] Three screenshot pixel check passed at (84,422)
-```
-
-#### Browser Logs
-
-```text
-[T+0016] [log] [SectionManager] NAVIGATING TO #three
-[T+0016] [log] [SectionManager] LOADING #three
-[T+0016] [log] [SectionManager] LOADED #three
-[T+0016] [log] [SectionManager] START #three
-[T+0016] [log] [SectionManager] NAVIGATE TO #three
-[T+0016] [log] [SectionManager] RESUME #three
-[T+0016] [log] [SectionManager] URL PAGE reason=hashchange http://127.0.0.1:8080/#three hash=three active=three target=three
-[T+0016] [log] [Three #three] touch cube: cube_left
+[T+0022] [TEST] RUN   09 Three Section Validation
 ```
 
 ![09 Three Section Validation](../screenshots/test_step_4.png)
@@ -309,26 +239,14 @@ section: three
 
 ```text
 result: PASS
-duration: 356ms
+duration: 372ms
 section: xterm
 ```
 
 #### Runner Output
 
 ```text
-[T+0016] [TEST] RUN   10 Xterm Section Validation
-```
-
-#### Browser Logs
-
-```text
-[T+0016] [log] [SectionManager] NAVIGATING TO #xterm
-[T+0016] [log] [SectionManager] LOADING #xterm
-[T+0016] [log] [SectionManager] LOADED #xterm
-[T+0016] [log] [SectionManager] START #xterm
-[T+0016] [log] [SectionManager] NAVIGATE TO #xterm
-[T+0016] [log] [SectionManager] RESUME #xterm
-[T+0016] [log] [SectionManager] URL PAGE reason=hashchange http://127.0.0.1:8080/#xterm hash=xterm active=xterm target=xterm
+[T+0023] [TEST] RUN   10 Xterm Section Validation
 ```
 
 ![10 Xterm Section Validation](../screenshots/test_step_5.png)
@@ -337,26 +255,14 @@ section: xterm
 
 ```text
 result: PASS
-duration: 391ms
+duration: 492ms
 section: video
 ```
 
 #### Runner Output
 
 ```text
-[T+0016] [TEST] RUN   11 Video Section Validation
-```
-
-#### Browser Logs
-
-```text
-[T+0016] [log] [SectionManager] NAVIGATING TO #video
-[T+0016] [log] [SectionManager] LOADING #video
-[T+0016] [log] [SectionManager] LOADED #video
-[T+0016] [log] [SectionManager] START #video
-[T+0016] [log] [SectionManager] NAVIGATE TO #video
-[T+0016] [log] [SectionManager] RESUME #video
-[T+0016] [log] [SectionManager] URL PAGE reason=hashchange http://127.0.0.1:8080/#video hash=video active=video target=video
+[T+0023] [TEST] RUN   11 Video Section Validation
 ```
 
 ![11 Video Section Validation](../screenshots/test_step_6.png)
@@ -365,68 +271,27 @@ section: video
 
 ```text
 result: PASS
-duration: 1.56s
+duration: 1.791s
 ```
 
 #### Runner Output
 
 ```text
-[T+0017] [TEST] RUN   12 Lifecycle / Invariants
-```
-
-#### Browser Logs
-
-```text
-[T+0017] [log] [SectionManager] NAVIGATING TO #hero
-[T+0017] [log] [SectionManager] NAVIGATE AWAY #video
-[T+0017] [log] [SectionManager] PAUSE #video
-[T+0017] [log] [SectionManager] NAVIGATE TO #hero
-[T+0017] [log] [SectionManager] RESUME #hero
-[T+0017] [log] [SectionManager] URL PAGE reason=hashchange http://127.0.0.1:8080/#hero hash=hero active=hero target=hero
-[T+0017] [log] [SectionManager] NAVIGATING TO #docs
-[T+0017] [log] [SectionManager] NAVIGATE AWAY #hero
-[T+0017] [log] [SectionManager] PAUSE #hero
-[T+0017] [log] [SectionManager] NAVIGATE TO #docs
-[T+0017] [log] [SectionManager] RESUME #docs
-[T+0017] [log] [SectionManager] URL PAGE reason=hashchange http://127.0.0.1:8080/#docs hash=docs active=docs target=docs
-[T+0017] [log] [SectionManager] NAVIGATING TO #table
-[T+0017] [log] [SectionManager] NAVIGATE AWAY #docs
-[T+0017] [log] [SectionManager] PAUSE #docs
-[T+0017] [log] [SectionManager] NAVIGATE TO #table
-[T+0017] [log] [SectionManager] RESUME #table
-[T+0017] [log] [SectionManager] URL PAGE reason=hashchange http://127.0.0.1:8080/#table hash=table active=table target=table
-[T+0018] [log] [SectionManager] NAVIGATING TO #three
-[T+0018] [log] [SectionManager] NAVIGATE AWAY #table
-[T+0018] [log] [SectionManager] PAUSE #table
-[T+0018] [log] [SectionManager] NAVIGATE TO #three
-[T+0018] [log] [SectionManager] RESUME #three
-[T+0018] [log] [SectionManager] URL PAGE reason=hashchange http://127.0.0.1:8080/#three hash=three active=three target=three
-[T+0018] [log] [SectionManager] NAVIGATING TO #xterm
-[T+0018] [log] [SectionManager] NAVIGATE AWAY #three
-[T+0018] [log] [SectionManager] PAUSE #three
-[T+0018] [log] [SectionManager] NAVIGATE TO #xterm
-[T+0018] [log] [SectionManager] RESUME #xterm
-[T+0018] [log] [SectionManager] URL PAGE reason=hashchange http://127.0.0.1:8080/#xterm hash=xterm active=xterm target=xterm
-[T+0018] [log] [SectionManager] NAVIGATING TO #video
-[T+0018] [log] [SectionManager] NAVIGATE AWAY #xterm
-[T+0018] [log] [SectionManager] PAUSE #xterm
-[T+0018] [log] [SectionManager] NAVIGATE TO #video
-[T+0018] [log] [SectionManager] RESUME #video
-[T+0018] [log] [SectionManager] URL PAGE reason=hashchange http://127.0.0.1:8080/#video hash=video active=video target=video
+[T+0024] [TEST] RUN   12 Lifecycle / Invariants
 ```
 
 ### 13 Cleanup Verification
 
 ```text
 result: PASS
-duration: 228ms
+duration: 449ms
 ```
 
 #### Runner Output
 
 ```text
-[T+0018] [TEST] RUN   13 Cleanup Verification
-[T+0018] Cleaning up stale Linux process on port 8080 (PID: 103118) via lsof...
+[T+0025] [TEST] RUN   13 Cleanup Verification
+[T+0026] Cleaning up stale Linux process on port 8080 (PID: 204838) via lsof...
 ```
 
 ## Artifacts

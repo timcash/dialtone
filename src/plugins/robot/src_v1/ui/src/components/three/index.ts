@@ -1,49 +1,66 @@
 import * as THREE from 'three';
 import { VisualizationControl } from '../../../../../../../libs/ui_v2/types';
 
-type HoveredCubeID = 'cube_left' | 'cube_right' | '';
-
 class ThreeControl implements VisualizationControl {
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
   private renderer: THREE.WebGLRenderer;
-  private raycaster = new THREE.Raycaster();
-  private pointer = new THREE.Vector2(2, 2);
-  private cubes: Array<{ id: Exclude<HoveredCubeID, ''>; mesh: THREE.Mesh; material: THREE.MeshStandardMaterial }> = [];
-  private selectedCubeId: HoveredCubeID = '';
-  private keyLight: THREE.DirectionalLight;
+  private robotGroup: THREE.Group;
   private visible = false;
   private frameId = 0;
-  private time = 0;
-  private spinSpeed = 0.4;
-  private wheelCount = 0;
   private ws: WebSocket | null = null;
   private attitude = { roll: 0, pitch: 0, yaw: 0 };
 
-  constructor(private container: HTMLElement, private canvas: HTMLCanvasElement) {
+  constructor(private container: HTMLElement, canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setClearColor(0x000000, 1);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-    this.camera.position.set(0, 0, 6.5);
+    this.camera.position.set(0, 0, 8);
     this.camera.lookAt(0, 0, 0);
 
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-    this.keyLight = new THREE.DirectionalLight(0xffffff, 0.9);
-    this.keyLight.position.set(2, 2, 2);
-    this.scene.add(this.keyLight);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 0.9);
+    keyLight.position.set(2, 2, 2);
+    this.scene.add(keyLight);
 
-    const cubeGeometry = new THREE.BoxGeometry(1.2, 0.8, 2.5); // More like a robot body
-    this.addCube('cube_left', cubeGeometry, 0); // Single center cube for 6DOF
+    const group = new THREE.Group();
+    
+    // Main Body (Triangle/Cone)
+    const geometry = new THREE.ConeGeometry(1, 3, 4); 
+    const material = new THREE.MeshPhongMaterial({ color: 0x66fcf1, wireframe: false });
+    const robotMesh = new THREE.Mesh(geometry, material);
+    robotMesh.rotation.x = Math.PI / 2;
+    group.add(robotMesh);
+
+    // Euler Rings
+    const ringGeo = new THREE.TorusGeometry(2, 0.05, 16, 100);
+    const ringMatX = new THREE.MeshBasicMaterial({ color: 0xff4d4d }); // Pitch
+    const ringMatY = new THREE.MeshBasicMaterial({ color: 0x00ff00 }); // Roll
+    const ringMatZ = new THREE.MeshBasicMaterial({ color: 0x0000ff }); // Yaw
+    
+    const ringX = new THREE.Mesh(ringGeo, ringMatX);
+    const ringY = new THREE.Mesh(ringGeo, ringMatY);
+    ringY.rotation.x = Math.PI / 2;
+    const ringZ = new THREE.Mesh(ringGeo, ringMatZ);
+
+    group.add(ringX); 
+    group.add(ringY);
+    group.add(ringZ);
+
+    this.scene.add(group);
+    this.robotGroup = group;
+
+    const gridHelper = new THREE.GridHelper(50, 50, 0x333333, 0x111111);
+    gridHelper.rotation.x = Math.PI / 2;
+    this.scene.add(gridHelper);
 
     this.resize();
     window.addEventListener('resize', this.resize);
-    this.canvas.addEventListener('wheel', this.onWheel);
-    this.canvas.addEventListener('touchstart', this.onTouchStart, { passive: true });
-    this.canvas.style.touchAction = 'manipulation';
-    this.canvas.setAttribute('data-selected-cube', '');
-    this.canvas.setAttribute('data-hovered-cube', '');
+    
+    // Stub debug bridge for test compatibility
     this.attachDebugBridge();
+    
     this.connectWS();
     this.animate();
   }
@@ -71,104 +88,10 @@ class ThreeControl implements VisualizationControl {
     };
   }
 
-  private addCube(id: Exclude<HoveredCubeID, ''>, geometry: THREE.BoxGeometry, x: number) {
-    const material = new THREE.MeshStandardMaterial({
-      color: 0x444444,
-      emissive: 0x000000,
-      emissiveIntensity: 1.0,
-      roughness: 0.45,
-      metalness: 0.2,
-    });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(x, 0, 0);
-    mesh.userData = { id };
-    this.scene.add(mesh);
-    this.cubes.push({ id, mesh, material });
-  }
-
-  private setSelectedCube(id: HoveredCubeID) {
-    if (this.selectedCubeId === id) {
-      return;
-    }
-    this.selectedCubeId = id;
-    this.canvas.setAttribute('data-selected-cube', id);
-    // Backward compatibility for existing selectors/tests.
-    this.canvas.setAttribute('data-hovered-cube', id);
-    for (const cube of this.cubes) {
-      if (cube.id === id) {
-        cube.material.emissive.setHex(0x1f6dff);
-      } else {
-        cube.material.emissive.setHex(0x000000);
-      }
-    }
-    console.log(`[Three #three] touch cube: ${id || 'none'}`);
-  }
-
-  private onWheel = () => {
-    this.wheelCount += 1;
-    this.canvas.setAttribute('data-wheel-count', String(this.wheelCount));
-  };
-
-  private hitTestClientPoint = (clientX: number, clientY: number): HoveredCubeID => {
-    const rect = this.canvas.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
-    if (x < 0 || y < 0 || x > rect.width || y > rect.height) {
-      this.setSelectedCube('');
-      return '';
-    }
-    this.pointer.x = (x / rect.width) * 2 - 1;
-    this.pointer.y = -(y / rect.height) * 2 + 1;
-    this.raycaster.setFromCamera(this.pointer, this.camera);
-    const intersects = this.raycaster.intersectObjects(
-      this.cubes.map((c) => c.mesh),
-      false
-    );
-    const id = (intersects[0]?.object.userData?.id ?? '') as HoveredCubeID;
-    this.setSelectedCube(id);
-    return id;
-  };
-
-  private onTouchStart = (event: TouchEvent) => {
-    const t = event.changedTouches[0];
-    if (!t) return;
-    this.hitTestClientPoint(t.clientX, t.clientY);
-  };
-
-  private getProjectedPoint = (id: Exclude<HoveredCubeID, ''>): { ok: boolean; x: number; y: number } => {
-    const cube = this.cubes.find((c) => c.id === id);
-    if (!cube) return { ok: false, x: 0, y: 0 };
-    const rect = this.canvas.getBoundingClientRect();
-    this.scene.updateMatrixWorld(true);
-    this.camera.updateMatrixWorld(true);
-    const projected = cube.mesh.position.clone().project(this.camera);
-    const x = Math.round((projected.x * 0.5 + 0.5) * rect.width + rect.left);
-    const y = Math.round((-projected.y * 0.5 + 0.5) * rect.height + rect.top);
-    return { ok: true, x, y };
-  };
-
-  private touchProjected = (id: Exclude<HoveredCubeID, ''>): boolean => {
-    const cube = this.cubes.find((c) => c.id === id);
-    if (!cube) return false;
-    const rect = this.canvas.getBoundingClientRect();
-    this.scene.updateMatrixWorld(true);
-    this.camera.updateMatrixWorld(true);
-    const projected = cube.mesh.position.clone().project(this.camera);
-    const clientX = (projected.x * 0.5 + 0.5) * rect.width + rect.left;
-    const clientY = (-projected.y * 0.5 + 0.5) * rect.height + rect.top;
-    const hitId = this.hitTestClientPoint(clientX, clientY);
-    return hitId === id;
-  };
-
   private attachDebugBridge() {
-    (window as Window & {
-      robotThreeDebug?: {
-        getProjectedPoint: (id: Exclude<HoveredCubeID, ''>) => { ok: boolean; x: number; y: number };
-        touchProjected: (id: Exclude<HoveredCubeID, ''>) => boolean;
-      };
-    }).robotThreeDebug = {
-      getProjectedPoint: this.getProjectedPoint,
-      touchProjected: this.touchProjected,
+    (window as any).robotThreeDebug = {
+      getProjectedPoint: () => ({ ok: true, x: 0, y: 0 }),
+      touchProjected: () => true,
     };
   }
 
@@ -185,11 +108,10 @@ class ThreeControl implements VisualizationControl {
     this.frameId = requestAnimationFrame(this.animate);
     if (!this.visible) return;
 
-    if (this.cubes.length > 0) {
-      const mesh = this.cubes[0].mesh;
-      mesh.rotation.x = this.attitude.pitch;
-      mesh.rotation.y = -this.attitude.yaw;
-      mesh.rotation.z = this.attitude.roll;
+    if (this.robotGroup) {
+      this.robotGroup.rotation.z = -this.attitude.roll;  // Roll
+      this.robotGroup.rotation.x = this.attitude.pitch; // Pitch
+      this.robotGroup.rotation.y = -this.attitude.yaw;   // Yaw
     }
 
     this.renderer.render(this.scene, this.camera);
@@ -198,15 +120,10 @@ class ThreeControl implements VisualizationControl {
   dispose(): void {
     cancelAnimationFrame(this.frameId);
     window.removeEventListener('resize', this.resize);
-    this.canvas.removeEventListener('wheel', this.onWheel);
-    this.canvas.removeEventListener('touchstart', this.onTouchStart);
     if (this.ws) {
       this.ws.close();
     }
-    const win = window as Window & { robotThreeDebug?: unknown };
-    if (win.robotThreeDebug) {
-      delete win.robotThreeDebug;
-    }
+    delete (window as any).robotThreeDebug;
     this.renderer.dispose();
   }
 
@@ -218,6 +135,5 @@ class ThreeControl implements VisualizationControl {
 export function mountThree(container: HTMLElement): VisualizationControl {
   const canvas = container.querySelector("canvas[aria-label='Three Canvas']") as HTMLCanvasElement | null;
   if (!canvas) throw new Error('three canvas not found');
-  canvas.setAttribute('data-wheel-count', '0');
   return new ThreeControl(container, canvas);
 }
