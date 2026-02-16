@@ -6,34 +6,16 @@ import (
 	"strings"
 	"time"
 
-	"dialtone/cli/src/core/test"
-	"dialtone/cli/src/core/browser"
 
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
-func init() {
-	test.Register("www-menu-smoke", "www", []string{"www", "menu-smoke", "menu"}, func() error {
-		chromePath := browser.FindChromePath()
-		opts := append(chromedp.DefaultExecAllocatorOptions[:],
-			chromedp.NoFirstRun, chromedp.NoDefaultBrowserCheck,
-			chromedp.ExecPath(chromePath),
-			chromedp.Headless,
-		)
-		allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
-		defer allocCancel()
-		return RunWwwMenuSmokeSubTest(allocCtx)
-	})
-}
 
-func RunWwwMenuSmokeSubTest(allocCtx context.Context) error {
+func RunWwwMenuSmokeSubTest(ctx context.Context) error {
 	fmt.Println(">> [WWW] Menu Smoke: start")
 	
-	ctx, tabCancel := chromedp.NewContext(allocCtx)
-	defer tabCancel()
-
-	// Capture console logs
+	// Capture console logs using the shared context
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		if ce, ok := ev.(*runtime.EventConsoleAPICalled); ok {
 			var parts []string
@@ -43,9 +25,6 @@ func RunWwwMenuSmokeSubTest(allocCtx context.Context) error {
 			fmt.Printf("   [BROWSER] %s\n", strings.Join(parts, " "))
 		}
 	})
-
-	ctx, cancel := context.WithTimeout(ctx, 600*time.Second)
-	defer cancel()
 
 	var sections []string
 	if err := chromedp.Run(ctx,
@@ -65,12 +44,8 @@ func RunWwwMenuSmokeSubTest(allocCtx context.Context) error {
 
 		fmt.Printf(">> [WWW] Menu Smoke: testing #%s\n", section)
 		
-		// Per-section timeout
-		timeout := 60 * time.Second
-		if section == "s-home" || section == "s-cad" {
-			timeout = 120 * time.Second 
-		}
-		sectCtx, sectCancel := context.WithTimeout(ctx, timeout)
+		// Per-section sub-context (not a new tab)
+		sectCtx, sectCancel := context.WithTimeout(ctx, 60*time.Second)
 		err := chromedp.Run(sectCtx,
 			// Navigate to section
 			chromedp.Evaluate(fmt.Sprintf(`(async function(){
@@ -92,18 +67,10 @@ func RunWwwMenuSmokeSubTest(allocCtx context.Context) error {
 			chromedp.Sleep(5*time.Second),
 			
 			// 1. Verify toggle exists and click it
-			chromedp.ActionFunc(func(ctx context.Context) error {
-				fmt.Printf("   [DEBUG] Clicking toggle for %s\n", section)
-				return nil
-			}),
 			chromedp.WaitVisible("#global-menu-toggle"),
 			chromedp.Click("#global-menu-toggle", chromedp.NodeVisible),
 			
 			// 2. Wait for a header to appear in the menu
-			chromedp.ActionFunc(func(ctx context.Context) error {
-				fmt.Printf("   [DEBUG] Waiting for menu content for %s\n", section)
-				return nil
-			}),
 			chromedp.WaitVisible("#global-menu-panel h3", chromedp.ByQuery),
 			
 			// 3. Verify content

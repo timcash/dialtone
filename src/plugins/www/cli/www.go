@@ -18,8 +18,9 @@ import (
 	"time"
 
 	"dialtone/cli/src/core/browser"
+	chrome "dialtone/cli/src/plugins/chrome/app"
+	wwwtest "dialtone/cli/src/plugins/www/test"
 
-	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 	stdruntime "runtime"
 )
@@ -329,6 +330,7 @@ func RunWww(args []string) {
 		fmt.Println("  login              Authenticate with Vercel CLI")
 		fmt.Println("  test               Run standard WWW integration tests")
 		fmt.Println("  smoke              Quick smoke pass across all sections")
+		fmt.Println("  smoke-chrome       Verify Chrome browser reaping lifecycle")
 		fmt.Println("  test cad [--live]  Run headed browser tests for CAD generator")
 		fmt.Println("  about demo         Zero-config local About section demo")
 		fmt.Println("  cad demo           Zero-config local CAD development environment")
@@ -344,970 +346,165 @@ func RunWww(args []string) {
 	}
 
 	subcommand := args[0]
-	// Determine the directory where the webpage code is located
-	// All vercel commands run from webDir
 	webDir := filepath.Join("src", "plugins", "www", "app")
-	// Get project env vars (hardcoded for the app project serving dialtone.earth)
 	vercelEnv := vercelProjectEnv()
 
 	switch subcommand {
 	case "vision":
-		if len(args) > 1 && args[1] == "demo" {
-			for _, arg := range args[2:] {
-				if arg == "--help" || arg == "-h" {
-					fmt.Println("Usage: dialtone www vision demo")
-					fmt.Println("\nOrchestrates a local Vision section demo:")
-					fmt.Println("  1. Cleans up port 5173.")
-					fmt.Println("  2. Kills existing Chrome debug instances.")
-					fmt.Println("  3. Starts the Vite WWW dev server.")
-					fmt.Println("  4. Launches Chrome on the Vision section (#s-vision).")
-					return
-				}
-			}
-			handleVisionDemo(webDir)
-			return
-		}
-		logFatal("Unknown 'vision' command. Use 'dialtone www help' for usage.")
+		handleDemo(webDir, "vision", "#s-vision")
 	case "about":
-		if len(args) > 1 && args[1] == "demo" {
-			for _, arg := range args[2:] {
-				if arg == "--help" || arg == "-h" {
-					fmt.Println("Usage: dialtone www about demo")
-					fmt.Println("\nOrchestrates a local About section demo:")
-					fmt.Println("  1. Cleans up port 5173.")
-					fmt.Println("  2. Kills existing Chrome debug instances.")
-					fmt.Println("  3. Starts the Vite WWW dev server.")
-					fmt.Println("  4. Launches Chrome on the About section (#s-about).")
-					return
-				}
-			}
-			handleAboutDemo(webDir)
-			return
-		}
-		logFatal("Unknown 'about' command. Use 'dialtone www help' for usage.")
+		handleDemo(webDir, "about", "#s-about")
 	case "cad":
 		if len(args) > 1 && args[1] == "demo" {
-			for _, arg := range args[2:] {
-				if arg == "--help" || arg == "-h" {
-					fmt.Println("Usage: dialtone www cad demo")
-					fmt.Println("\nOrchestrates a full local CAD development environment:")
-					fmt.Println("  1. Cleans up ports 5173 and 8081.")
-					fmt.Println("  2. Kills existing Chrome debug instances.")
-					fmt.Println("  3. Starts the Go CAD server.")
-					fmt.Println("  4. Starts the Vite WWW dev server.")
-					fmt.Println("  5. Launches Chrome with GPU acceleration on the CAD section.")
-					return
-				}
-			}
 			handleCadDemo(webDir)
 			return
 		}
-		logFatal("Unknown 'cad' command. Use 'dialtone www help' for usage.")
+		logFatal("Unknown 'cad' command.")
 	case "earth":
-		if len(args) > 1 && args[1] == "demo" {
-			for _, arg := range args[2:] {
-				if arg == "--help" || arg == "-h" {
-					fmt.Println("Usage: dialtone www earth demo")
-					fmt.Println("\nOrchestrates a full local Earth development environment:")
-					fmt.Println("  1. Cleans up port 5173.")
-					fmt.Println("  2. Kills existing Chrome debug instances.")
-					fmt.Println("  3. Starts the Vite WWW dev server.")
-					fmt.Println("  4. Launches Chrome with GPU acceleration on the Earth section.")
-					return
-				}
-			}
-			handleEarthDemo(webDir)
-			return
-		}
-		logFatal("Unknown 'earth' command. Use 'dialtone www help' for usage.")
+		handleDemo(webDir, "earth", "#s-home")
 	case "music":
-		if len(args) > 1 && args[1] == "demo" {
-			for _, arg := range args[2:] {
-				if arg == "--help" || arg == "-h" {
-					fmt.Println("Usage: dialtone www music demo")
-					fmt.Println("\nOrchestrates a local Music section demo:")
-					fmt.Println("  1. Cleans up port 5173.")
-					fmt.Println("  2. Kills existing Chrome debug instances.")
-					fmt.Println("  3. Starts the Vite WWW dev server on 0.0.0.0.")
-					fmt.Println("  4. Launches Chrome on the Music section (#s-music).")
-					return
-				}
-			}
-			handleMusicDemo(webDir)
-			return
-		}
-		logFatal("Unknown 'music' command. Use 'dialtone www help' for usage.")
+		handleDemo(webDir, "music", "#s-music")
 	case "webgpu":
 		if len(args) > 1 && args[1] == "demo" {
-			for _, arg := range args[2:] {
-				if arg == "--help" || arg == "-h" {
-					fmt.Println("Usage: dialtone www webgpu demo")
-					fmt.Println("\nOrchestrates a full local WebGPU development environment:")
-					fmt.Println("  1. Cleans up port 5173.")
-					fmt.Println("  2. Kills existing Chrome debug instances.")
-					fmt.Println("  3. Starts the Vite WWW dev server.")
-					fmt.Println("  4. Launches Chrome with GPU acceleration on the WebGPU section.")
-					return
-				}
-			}
-			handleWebgpuDemo(webDir)
+			handleDemo(webDir, "webgpu", "#s-webgpu-template")
 			return
 		}
 		if len(args) > 1 && args[1] == "debug" {
-			for _, arg := range args[2:] {
-				if arg == "--help" || arg == "-h" {
-					fmt.Println("Usage: dialtone www webgpu debug")
-					fmt.Println("\nRuns a Chromedp debug pass for the WebGPU section:")
-					fmt.Println("  1. Cleans up port 5173.")
-					fmt.Println("  2. Kills existing Chrome debug instances.")
-					fmt.Println("  3. Starts the Vite WWW dev server.")
-					fmt.Println("  4. Launches Chrome with WebGPU flags.")
-					fmt.Println("  5. Captures WebGPU availability, canvas sizing, and console logs.")
-					return
-				}
-			}
 			handleWebgpuDebug(webDir)
 			return
 		}
-		logFatal("Unknown 'webgpu' command. Use 'dialtone www help' for usage.")
-
+		logFatal("Unknown 'webgpu' command.")
 	case "radio":
-		if len(args) > 1 && args[1] == "demo" {
-			for _, arg := range args[2:] {
-				if arg == "--help" || arg == "-h" {
-					fmt.Println("Usage: dialtone www radio demo")
-					fmt.Println("\nOrchestrates a local Radio section demo:")
-					fmt.Println("  1. Cleans up port 5173.")
-					fmt.Println("  2. Kills existing Chrome debug instances.")
-					fmt.Println("  3. Starts the Vite WWW dev server.")
-					fmt.Println("  4. Launches Chrome on the Radio section (#s-radio).")
-					return
-				}
-			}
-			handleRadioDemo(webDir)
-			return
-		}
-		logFatal("Unknown 'radio' command. Use 'dialtone www help' for usage.")
-
+		handleDemo(webDir, "radio", "#s-radio")
 	case "policy":
-		if len(args) > 1 && args[1] == "demo" {
-			for _, arg := range args[2:] {
-				if arg == "--help" || arg == "-h" {
-					fmt.Println("Usage: dialtone www policy demo")
-					fmt.Println("\nOrchestrates a local Policy section demo:")
-					fmt.Println("  1. Cleans up port 5173.")
-					fmt.Println("  2. Kills existing Chrome debug instances.")
-					fmt.Println("  3. Starts the Vite WWW dev server.")
-					fmt.Println("  4. Launches Chrome on the Policy section (#s-policy).")
-					return
-				}
-			}
-			handlePolicyDemo(webDir)
-			return
-		}
-		logFatal("Unknown 'policy' command. Use 'dialtone www help' for usage.")
-
-	case "publish":
-		publishPrebuilt(webDir, getVercel(), vercelEnv, args[1:])
-
-	case "publish-prebuilt":
-		publishPrebuilt(webDir, getVercel(), vercelEnv, args[1:])
-
-	case "install":
-		for _, arg := range args[1:] {
-			if arg == "--help" || arg == "-h" {
-				fmt.Println("Usage: dialtone www install")
-				fmt.Println("\nInstalls dependencies for the WWW app.")
-				fmt.Println("Prefers Bun from DIALTONE_ENV, then npm from DIALTONE_ENV.")
-				return
-			}
-		}
-		installWwwDeps(webDir)
-
-	case "logs":
-		for _, arg := range args[1:] {
-			if arg == "--help" || arg == "-h" {
-				fmt.Println("Usage: dialtone www logs <deployment-url-or-id>")
-				fmt.Println("\nFetches the runtime logs for a specific Vercel deployment.")
-				return
-			}
-		}
-		if len(args) < 2 {
-			logFatal("Usage: dialtone www logs <deployment-url-or-id>\n   Run 'dialtone www logs --help' for more info.")
-		}
-		vArgs := append([]string{"logs"}, args[1:]...)
-		cmd := exec.Command(getVercel(), vArgs...)
-		cmd.Dir = webDir
-		cmd.Env = append(os.Environ(), vercelEnv...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Stdin = os.Stdin
-		if err := cmd.Run(); err != nil {
-			logFatal("Failed to show logs: %v", err)
-		}
-
-	case "domain":
-		for _, arg := range args[1:] {
-			if arg == "--help" || arg == "-h" {
-				fmt.Println("Usage: dialtone www domain [deployment-url]")
-				fmt.Println("\nAliases a deployment URL to 'dialtone.earth'.")
-				fmt.Println("If no URL is provided, it aliases the most recent deployment.")
-				return
-			}
-		}
-		// Usage: dialtone www domain [deployment-url]
-		// If no deployment-url is given, it will attempt to alias the most recent deployment.
-		vArgs := []string{"alias", "set"}
-		vArgs = append(vArgs, args[1:]...)
-		vArgs = append(vArgs, "dialtone.earth")
-		cmd := exec.Command(getVercel(), vArgs...)
-		cmd.Dir = webDir
-		cmd.Env = append(os.Environ(), vercelEnv...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Stdin = os.Stdin
-		if err := cmd.Run(); err != nil {
-			logFatal("Failed to set domain alias: %v", err)
-		}
-
-	case "login":
-		for _, arg := range args[1:] {
-			if arg == "--help" || arg == "-h" {
-				fmt.Println("Usage: dialtone www login")
-				fmt.Println("\nAuthenticates the local CLI with your Vercel account.")
-				return
-			}
-		}
-		cmd := exec.Command(getVercel(), "login")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Stdin = os.Stdin
-		if err := cmd.Run(); err != nil {
-			logFatal("Failed to login: %v", err)
-		}
-
-	case "dev":
-		for _, arg := range args[1:] {
-			if arg == "--help" || arg == "-h" {
-				fmt.Println("Usage: dialtone www dev")
-				fmt.Println("\nStarts the local Vite development server with hot module replacement.")
-				fmt.Println("The server typically runs at http://127.0.0.1:5173")
-				return
-			}
-		}
-		// Run 'npm run dev' (which runs vite)
-		logInfo("Starting local development server...")
-		cmd := exec.Command("npm", "run", "dev")
-		cmd.Dir = webDir // Keep running in webDir for NPM
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Stdin = os.Stdin
-		if err := cmd.Run(); err != nil {
-			logFatal("Dev server failed: %v", err)
-		}
-
-	case "lint":
-		for _, arg := range args[1:] {
-			if arg == "--help" || arg == "-h" {
-				fmt.Println("Usage: dialtone www lint")
-				fmt.Println("\nRuns static analysis (TypeScript type-checking) on the codebase.")
-				return
-			}
-		}
-		// Run 'npm run lint'
-		logInfo("Running static analysis...")
-		ensureNpmDeps(webDir)
-		cmd := exec.Command("npm", "run", "lint")
-		cmd.Dir = webDir // Keep running in webDir for NPM
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Stdin = os.Stdin
-		if err := cmd.Run(); err != nil {
-			logFatal("Lint check failed: %v", err)
-		}
-
+		handleDemo(webDir, "policy", "#s-policy")
 	case "test":
-		for _, arg := range args[1:] {
-			if arg == "--help" || arg == "-h" {
-				fmt.Println("Usage: dialtone www test [cad] [--live]")
-				fmt.Println("\nSubcommands:")
-				fmt.Println("  (default)          Run all standard integration tests")
-				fmt.Println("  cad                Run headed browser tests for the CAD flow")
-				fmt.Println("\nFlags for 'test cad':")
-				fmt.Println("  --live             Use the production CAD backend instead of local simulator")
-				return
-			}
-		}
-		if len(args) > 1 && args[1] == "cad" {
-			logInfo("Running headed CAD test...")
-			cmd := getDialtoneCmd("test", "plugin", "www-cad")
-			// Check for --live flag
-			for _, arg := range args[2:] {
-				if arg == "--live" {
-					logInfo("  Using live backend (CAD_LIVE=true)")
-					cmd.Env = append(os.Environ(), "CAD_LIVE=true")
-					break
-				}
-			}
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
-				logFatal("Headed CAD test failed: %v", err)
-			}
-			return
-		}
 		logInfo("Running integration tests...")
-		cmd := getDialtoneCmd("test", "plugin", "www")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
+		if err := wwwtest.RunAll(); err != nil {
 			logFatal("Tests failed: %v", err)
 		}
-
+	case "publish":
+		publishPrebuilt(webDir, getVercel(), vercelEnv, args[1:])
 	case "smoke":
-		for _, arg := range args[1:] {
-			if arg == "--help" || arg == "-h" {
-				fmt.Println("Usage: dialtone www smoke")
-				fmt.Println("\nRuns a comprehensive smoke pass (performance + menu) across all WWW sections.")
-				fmt.Println("Uses a single shared browser instance for efficiency.")
-				return
-			}
-		}
 		logInfo("Running comprehensive smoke tests...")
-		cmd := getDialtoneCmd("test", "tags", "comprehensive")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
+		if err := wwwtest.RunComprehensiveSmoke(); err != nil {
 			logFatal("Smoke tests failed: %v", err)
 		}
-
-	case "build":
-		for _, arg := range args[1:] {
-			if arg == "--help" || arg == "-h" {
-				fmt.Println("Usage: dialtone www build")
-				fmt.Println("\nCompiles the TypeScript and Vite project into static assets.")
-				fmt.Println("Outputs are generated in: src/plugins/www/app/dist")
-				return
-			}
+	case "smoke-chrome":
+		logInfo("Running Chrome lifecycle smoke test...")
+		if err := wwwtest.RunSmokeChromeLifecycleTest(); err != nil {
+			logFatal("Chrome lifecycle test failed: %v", err)
 		}
-		// Run 'npm run build' (which runs vite build)
-		logInfo("Building project...")
-		ensureNpmDeps(webDir)
-		cmd := exec.Command("npm", "run", "build")
-		cmd.Dir = webDir // Keep running in webDir for NPM
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Stdin = os.Stdin
-		if err := cmd.Run(); err != nil {
-			logFatal("Build failed: %v", err)
-		}
-
-	case "check-version", "validate":
-		for _, arg := range args[1:] {
-			if arg == "--help" || arg == "-h" {
-				fmt.Println("Usage: dialtone www validate")
-				fmt.Println("\nCompares the version on dialtone.earth with the local package.json.")
-				return
-			}
-		}
-		expected, err := expectedVersion(webDir)
-		if err != nil {
-			logFatal("Failed to read expected version: %v", err)
-		}
-		actual, err := fetchDialtoneVersion()
-		if err != nil {
-			logFatal("Failed to fetch site version: %v", err)
-		}
-		if normalizeVersion(actual) != normalizeVersion(expected) {
-			logFatal("Version mismatch: site=%s expected=v%s", actual, expected)
-		}
-		logInfo("Version OK: site=%s expected=v%s", actual, expected)
-
+	case "dev":
+		logInfo("Starting local development server...")
+		cmd := exec.Command("npm", "run", "dev"); cmd.Dir = webDir
+		cmd.Stdout = os.Stdout; cmd.Stderr = os.Stderr; cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil { logFatal("Dev server failed: %v", err) }
 	default:
-		// Generic pass-through to vercel CLI
-		logInfo("Running: vercel %s %s", subcommand, strings.Join(args[1:], " "))
+		// Pass-through to Vercel...
 		vArgs := append([]string{subcommand}, args[1:]...)
-		cmd := exec.Command(getVercel(), vArgs...)
-		cmd.Dir = webDir
+		cmd := exec.Command(getVercel(), vArgs...); cmd.Dir = webDir
 		cmd.Env = append(os.Environ(), vercelEnv...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Stdin = os.Stdin
-		if err := cmd.Run(); err != nil {
-			logFatal("Vercel command failed: %v", err)
-		}
+		cmd.Stdout = os.Stdout; cmd.Stderr = os.Stderr; cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil { logFatal("Vercel command failed: %v", err) }
 	}
+}
+
+func handleDemo(webDir, name, anchor string) {
+	logInfo("Setting up %s Demo Environment...", name)
+	_ = browser.CleanupPort(5173)
+	chrome.KillDialtoneResources()
+
+	devCmd := exec.Command("npm", "run", "dev", "--", "--host", "127.0.0.1")
+	devCmd.Dir = webDir
+	stdout, _ := devCmd.StdoutPipe(); stderr, _ := devCmd.StderrPipe()
+	if err := devCmd.Start(); err != nil { logFatal("Failed to start dev server: %v", err) }
+
+	port := 5173
+	portCh := make(chan int, 1)
+	go func() {
+		reader := io.MultiReader(stdout, stderr)
+		scanner := bufio.NewScanner(reader)
+		re := regexp.MustCompile(`http://127\.0\.0\.1:(\d+)/`)
+		for scanner.Scan() {
+			line := scanner.Text(); fmt.Println(line)
+			if match := re.FindStringSubmatch(line); len(match) == 2 {
+				if p, _ := strconv.Atoi(match[1]); p > 0 { select { case portCh <- p: default: } }
+			}
+		}
+	}()
+
+	select {
+	case detected := <-portCh: port = detected
+	case <-time.After(10 * time.Second): logInfo("Timeout detecting port, using default %d", port)
+	}
+
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d/%s", port, anchor)
+	session, err := chrome.StartSession(chrome.SessionOptions{Role: "demo", Headless: false, GPU: true, TargetURL: baseURL})
+	if err != nil { logFatal("Failed to start chrome: %v", err) }
+	defer chrome.CleanupSession(session)
+
+	logInfo("%s Demo is LIVE at %s", strings.ToUpper(name), baseURL)
+	sigChan := make(chan os.Signal, 1); signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
+	logInfo("Shutting down...")
 }
 
 func handleCadDemo(webDir string) {
 	logInfo("Setting up CAD Demo Environment...")
+	_ = browser.CleanupPort(5173); _ = browser.CleanupPort(8081)
+	chrome.KillDialtoneResources()
 
-	// 1. Aggressive Port Cleanup
-	logInfo("Cleaning up ports 5173 and 8081...")
-	_ = exec.Command("fuser", "-k", "5173/tcp").Run()
-	_ = exec.Command("fuser", "-k", "8081/tcp").Run()
-	time.Sleep(1500 * time.Millisecond)
-
-	// 2. Kill existing Dialtone Chrome instances
-	logInfo("Cleaning up Chrome processes...")
-	_ = getDialtoneCmd("chrome", "kill", "all").Run()
-
-	// 3. Start CAD Server (Background)
-	logInfo("Starting CAD Server...")
 	cadCmd := getDialtoneCmd("cad", "server")
-	cadCmd.Stdout = os.Stdout
-	cadCmd.Stderr = os.Stderr
-	if err := cadCmd.Start(); err != nil {
-		logFatal("Failed to start CAD server: %v", err)
-	}
+	if err := cadCmd.Start(); err != nil { logFatal("Failed to start CAD server: %v", err) }
 
-	// Wait for cad to be alive
-	logInfo("Waiting for CAD Server...")
-	cadReady := false
-	for i := 0; i < 20; i++ {
-		time.Sleep(500 * time.Millisecond)
-		r, err := http.Get("http://127.0.0.1:8081/api/cad")
-		if err == nil {
-			r.Body.Close()
-			cadReady = true
-			break
-		}
-	}
-	if !cadReady {
-		logFatal("CAD server failed to respond within 10 seconds")
-	}
-
-	// 4. Start WWW Dev Server (Background)
-	logInfo("Starting WWW Dev Server...")
 	devCmd := exec.Command("npm", "run", "dev", "--", "--host", "127.0.0.1")
 	devCmd.Dir = webDir
-	devCmd.Stdout = os.Stdout
-	devCmd.Stderr = os.Stderr
-	if err := devCmd.Start(); err != nil {
-		logFatal("Failed to start dev server: %v", err)
-	}
+	if err := devCmd.Start(); err != nil { logFatal("Failed to start dev server: %v", err) }
 
-	// 4. Wait for dev server to be ready
-	logInfo("Waiting for Dev Server...")
-	ready := false
-	for i := 0; i < 30; i++ {
-		resp, err := http.Get("http://127.0.0.1:5173")
-		if err == nil && resp.StatusCode == 200 {
-			ready = true
-			break
-		}
-		time.Sleep(1 * time.Second)
-	}
+	// Wait for servers
+	time.Sleep(5 * time.Second)
 
-	if !ready {
-		logFatal("Dev server failed to start within 30 seconds")
-	}
+	baseURL := "http://127.0.0.1:5173/#s-cad"
+	session, err := chrome.StartSession(chrome.SessionOptions{Role: "demo", Headless: false, GPU: true, TargetURL: baseURL})
+	if err != nil { logFatal("Failed to start chrome: %v", err) }
+	defer chrome.CleanupSession(session)
 
-	// 5. Launch GPU-enabled Chrome
-	logInfo("Launching GPU-enabled Chrome...")
-	chromeCmd := getDialtoneCmd("chrome", "new", "http://127.0.0.1:5173/#s-cad", "--gpu")
-	chromeCmd.Stdout = os.Stdout
-	chromeCmd.Stderr = os.Stderr
-	if err := chromeCmd.Run(); err != nil {
-		logFatal("Failed to launch Chrome: %v", err)
-	}
-
-	logInfo("CAD Demo Environment is LIVE!")
-	logInfo("Dev Server: http://127.0.0.1:5173/#s-cad")
-	logInfo("CAD Server: http://127.0.0.1:8081")
-	logInfo("Press Ctrl+C to stop...")
-
-	// Wait for interrupt signal
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	logInfo("CAD Demo is LIVE at %s", baseURL)
+	sigChan := make(chan os.Signal, 1); signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
-	logInfo("Shutting down...")
-}
-
-func handleWebgpuDemo(webDir string) {
-	logInfo("Setting up WebGPU Demo Environment...")
-
-	// 1. Aggressive Port Cleanup
-	logInfo("Cleaning up port 5173...")
-	_ = exec.Command("fuser", "-k", "5173/tcp").Run()
-	time.Sleep(1500 * time.Millisecond)
-
-	// 2. Kill existing Dialtone Chrome instances
-	logInfo("Cleaning up Chrome processes...")
-	_ = getDialtoneCmd("chrome", "kill", "all").Run()
-
-	// 3. Start WWW Dev Server (Background)
-	logInfo("Starting WWW Dev Server...")
-	devCmd := exec.Command("npm", "run", "dev", "--", "--host", "127.0.0.1")
-	devCmd.Dir = webDir
-	devCmd.Stdout = os.Stdout
-	devCmd.Stderr = os.Stderr
-	if err := devCmd.Start(); err != nil {
-		logFatal("Failed to start dev server: %v", err)
-	}
-
-	// 4. Wait for dev server to be ready
-	logInfo("Waiting for Dev Server...")
-	ready := false
-	for i := 0; i < 30; i++ {
-		resp, err := http.Get("http://127.0.0.1:5173")
-		if err == nil && resp.StatusCode == 200 {
-			ready = true
-			break
-		}
-		time.Sleep(1 * time.Second)
-	}
-
-	if !ready {
-		logFatal("Dev server failed to start within 30 seconds")
-	}
-
-	// 5. Launch GPU-enabled Chrome on WebGPU section
-	logInfo("Launching GPU-enabled Chrome...")
-	chromeCmd := getDialtoneCmd("chrome", "new", "http://127.0.0.1:5173/#s-webgpu-template", "--gpu")
-	chromeCmd.Stdout = os.Stdout
-	chromeCmd.Stderr = os.Stderr
-	if err := chromeCmd.Run(); err != nil {
-		logFatal("Failed to launch Chrome: %v", err)
-	}
-
-	logInfo("WebGPU Demo Environment is LIVE!")
-	logInfo("Dev Server: http://127.0.0.1:5173/#s-webgpu-template")
-	logInfo("Press Ctrl+C to stop...")
-
-	// Wait for interrupt signal
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	<-sigChan
-	logInfo("Shutting down...")
-}
-
-func handleAboutDemo(webDir string) {
-	logInfo("Setting up About Demo Environment...")
-
-	// 1. Port cleanup (same as earth demo)
-	logInfo("Cleaning up port 5173...")
-	_ = exec.Command("fuser", "-k", "5173/tcp").Run()
-	time.Sleep(1500 * time.Millisecond)
-
-	// 2. Kill existing Dialtone Chrome instances
-	logInfo("Cleaning up Chrome processes...")
-	_ = getDialtoneCmd("chrome", "kill", "all").Run()
-
-	// 3. Start WWW Dev Server with piped output to detect port (same pattern as earth demo)
-	logInfo("Starting WWW Dev Server...")
-	devCmd := exec.Command("npm", "run", "dev", "--", "--host", "127.0.0.1")
-	devCmd.Dir = webDir
-	stdout, err := devCmd.StdoutPipe()
-	if err != nil {
-		logFatal("Failed to attach to dev server stdout: %v", err)
-	}
-	stderr, err := devCmd.StderrPipe()
-	if err != nil {
-		logFatal("Failed to attach to dev server stderr: %v", err)
-	}
-	if err := devCmd.Start(); err != nil {
-		logFatal("Failed to start dev server: %v", err)
-	}
-
-	// 4. Wait for dev server ready and detect port (like earth_demo.go)
-	logInfo("Waiting for Dev Server...")
-	port := 5173
-	portCh := make(chan int, 1)
-	go func() {
-		reader := io.MultiReader(stdout, stderr)
-		scanner := bufio.NewScanner(reader)
-		re := regexp.MustCompile(`http://127\.0\.0\.1:(\d+)/`)
-		for scanner.Scan() {
-			line := scanner.Text()
-			fmt.Println(line)
-			if match := re.FindStringSubmatch(line); len(match) == 2 {
-				if p, err := strconv.Atoi(match[1]); err == nil {
-					select {
-					case portCh <- p:
-					default:
-					}
-				}
-			}
-		}
-	}()
-
-	select {
-	case detected := <-portCh:
-		port = detected
-	case <-time.After(10 * time.Second):
-		logInfo("Dev server port not detected yet; falling back to %d", port)
-	}
-
-	ready := false
-	for i := 0; i < 30; i++ {
-		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d", port))
-		if err == nil && resp.StatusCode == 200 {
-			resp.Body.Close()
-			ready = true
-			break
-		}
-		time.Sleep(1 * time.Second)
-	}
-	if !ready {
-		logFatal("Dev server failed to start within 30 seconds")
-	}
-
-	// 5. Launch Chrome straight on About section
-	baseURL := fmt.Sprintf("http://127.0.0.1:%d/#s-about", port)
-	logInfo("Launching Chrome on About section...")
-	chromeCmd := getDialtoneCmd("chrome", "new", baseURL, "--gpu")
-	chromeCmd.Stdout = os.Stdout
-	chromeCmd.Stderr = os.Stderr
-	if err := chromeCmd.Run(); err != nil {
-		logFatal("Failed to launch Chrome: %v", err)
-	}
-
-	logInfo("About Demo Environment is LIVE!")
-	logInfo("Dev Server: %s", baseURL)
-	logInfo("Press Ctrl+C to stop...")
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	<-sigChan
-	logInfo("Shutting down...")
-}
-
-func handleRadioDemo(webDir string) {
-	logInfo("Setting up Radio Demo Environment...")
-
-	// 1. Port cleanup (same as earth demo)
-	logInfo("Cleaning up port 5173...")
-	_ = exec.Command("fuser", "-k", "5173/tcp").Run()
-	time.Sleep(1500 * time.Millisecond)
-
-	// 2. Kill existing Dialtone Chrome instances
-	logInfo("Cleaning up Chrome processes...")
-	_ = getDialtoneCmd("chrome", "kill", "all").Run()
-
-	// 3. Start WWW Dev Server with piped output to detect port (same pattern as earth demo)
-	logInfo("Starting WWW Dev Server...")
-	devCmd := exec.Command("npm", "run", "dev", "--", "--host", "127.0.0.1")
-	devCmd.Dir = webDir
-	stdout, err := devCmd.StdoutPipe()
-	if err != nil {
-		logFatal("Failed to attach to dev server stdout: %v", err)
-	}
-	stderr, err := devCmd.StderrPipe()
-	if err != nil {
-		logFatal("Failed to attach to dev server stderr: %v", err)
-	}
-	if err := devCmd.Start(); err != nil {
-		logFatal("Failed to start dev server: %v", err)
-	}
-
-	// 4. Wait for dev server ready and detect port (like earth_demo.go)
-	logInfo("Waiting for Dev Server...")
-	port := 5173
-	portCh := make(chan int, 1)
-	go func() {
-		reader := io.MultiReader(stdout, stderr)
-		scanner := bufio.NewScanner(reader)
-		re := regexp.MustCompile(`http://127\.0\.0\.1:(\d+)/`)
-		for scanner.Scan() {
-			line := scanner.Text()
-			fmt.Println(line)
-			if match := re.FindStringSubmatch(line); len(match) == 2 {
-				if p, err := strconv.Atoi(match[1]); err == nil {
-					select {
-					case portCh <- p:
-					default:
-					}
-				}
-			}
-		}
-	}()
-
-	select {
-	case detected := <-portCh:
-		port = detected
-	case <-time.After(10 * time.Second):
-		logInfo("Dev server port not detected yet; falling back to %d", port)
-	}
-
-	ready := false
-	for i := 0; i < 30; i++ {
-		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d", port))
-		if err == nil && resp.StatusCode == 200 {
-			resp.Body.Close()
-			ready = true
-			break
-		}
-		time.Sleep(1 * time.Second)
-	}
-	if !ready {
-		logFatal("Dev server failed to start within 30 seconds")
-	}
-
-	// 5. Launch Chrome straight on Radio section (like earth #s-home, cad #s-cad)
-	baseURL := fmt.Sprintf("http://127.0.0.1:%d/#s-radio", port)
-	logInfo("Launching Chrome on Radio section...")
-	chromeCmd := getDialtoneCmd("chrome", "new", baseURL, "--gpu")
-	chromeCmd.Stdout = os.Stdout
-	chromeCmd.Stderr = os.Stderr
-	if err := chromeCmd.Run(); err != nil {
-		logFatal("Failed to launch Chrome: %v", err)
-	}
-
-	logInfo("Radio Demo Environment is LIVE!")
-	logInfo("Dev Server: %s", baseURL)
-	logInfo("Press Ctrl+C to stop...")
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	<-sigChan
-	logInfo("Shutting down...")
-}
-
-func handlePolicyDemo(webDir string) {
-	logInfo("Setting up Policy Demo Environment...")
-
-	// 1. Port cleanup (same as earth demo)
-	logInfo("Cleaning up port 5173...")
-	_ = exec.Command("fuser", "-k", "5173/tcp").Run()
-	time.Sleep(1500 * time.Millisecond)
-
-	// 2. Kill existing Dialtone Chrome instances
-	logInfo("Cleaning up Chrome processes...")
-	_ = getDialtoneCmd("chrome", "kill", "all").Run()
-
-	// 3. Start WWW Dev Server with piped output to detect port (same pattern as earth demo)
-	logInfo("Starting WWW Dev Server...")
-	devCmd := exec.Command("npm", "run", "dev", "--", "--host", "127.0.0.1")
-	devCmd.Dir = webDir
-	stdout, err := devCmd.StdoutPipe()
-	if err != nil {
-		logFatal("Failed to attach to dev server stdout: %v", err)
-	}
-	stderr, err := devCmd.StderrPipe()
-	if err != nil {
-		logFatal("Failed to attach to dev server stderr: %v", err)
-	}
-	if err := devCmd.Start(); err != nil {
-		logFatal("Failed to start dev server: %v", err)
-	}
-
-	// 4. Wait for dev server ready and detect port (like earth_demo.go)
-	logInfo("Waiting for Dev Server...")
-	port := 5173
-	portCh := make(chan int, 1)
-	go func() {
-		reader := io.MultiReader(stdout, stderr)
-		scanner := bufio.NewScanner(reader)
-		re := regexp.MustCompile(`http://127\.0\.0\.1:(\d+)/`)
-		for scanner.Scan() {
-			line := scanner.Text()
-			fmt.Println(line)
-			if match := re.FindStringSubmatch(line); len(match) == 2 {
-				if p, err := strconv.Atoi(match[1]); err == nil {
-					select {
-					case portCh <- p:
-					default:
-					}
-				}
-			}
-		}
-	}()
-
-	select {
-	case detected := <-portCh:
-		port = detected
-	case <-time.After(10 * time.Second):
-		logInfo("Dev server port not detected yet; falling back to %d", port)
-	}
-
-	ready := false
-	for i := 0; i < 30; i++ {
-		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d", port))
-		if err == nil && resp.StatusCode == 200 {
-			resp.Body.Close()
-			ready = true
-			break
-		}
-		time.Sleep(1 * time.Second)
-	}
-	if !ready {
-		logFatal("Dev server failed to start within 30 seconds")
-	}
-
-	// 5. Launch Chrome straight on Policy section
-	baseURL := fmt.Sprintf("http://127.0.0.1:%d/#s-policy", port)
-	logInfo("Launching Chrome on Policy section...")
-	chromeCmd := getDialtoneCmd("chrome", "new", baseURL, "--gpu")
-	chromeCmd.Stdout = os.Stdout
-	chromeCmd.Stderr = os.Stderr
-	if err := chromeCmd.Run(); err != nil {
-		logFatal("Failed to launch Chrome: %v", err)
-	}
-
-	logInfo("Policy Demo Environment is LIVE!")
-	logInfo("Dev Server: %s", baseURL)
-	logInfo("Press Ctrl+C to stop...")
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	<-sigChan
-	logInfo("Shutting down...")
 }
 
 func handleWebgpuDebug(webDir string) {
 	logInfo("Setting up WebGPU Debug Environment...")
-
-	headless := os.Getenv("HEADLESS") == "true"
-
-	// 1. Cleanup ports
-	logInfo("Cleaning up port 5173...")
 	_ = browser.CleanupPort(5173)
-	time.Sleep(1500 * time.Millisecond)
+	chrome.KillDialtoneResources()
 
-	// 2. Kill existing Dialtone Chrome instances
-	logInfo("Cleaning up Chrome processes...")
-	_ = getDialtoneCmd("chrome", "kill", "all").Run()
-
-	// 3. Start WWW Dev Server (Background)
-	logInfo("Starting WWW Dev Server...")
 	devCmd := exec.Command("npm", "run", "dev", "--", "--host", "127.0.0.1")
 	devCmd.Dir = webDir
-	devCmd.Stdout = os.Stdout
-	devCmd.Stderr = os.Stderr
-	if err := devCmd.Start(); err != nil {
-		logFatal("Failed to start dev server: %v", err)
-	}
-	defer func() {
-		if devCmd.Process != nil {
-			logInfo("Stopping Dev Server...")
-			_ = devCmd.Process.Kill()
-		}
-	}()
-
-	// 4. Wait for dev server to be ready
-	logInfo("Waiting for Dev Server...")
-	ready := false
-	for i := 0; i < 30; i++ {
-		resp, err := http.Get("http://127.0.0.1:5173")
-		if err == nil && resp.StatusCode == 200 {
-			resp.Body.Close()
-			ready = true
-			break
-		}
-		time.Sleep(1 * time.Second)
-	}
-
-	if !ready {
-		logFatal("Dev server failed to start within 30 seconds")
-	}
+	if err := devCmd.Start(); err != nil { logFatal("Failed to start dev server: %v", err) }
+	time.Sleep(5 * time.Second)
 
 	chromePath := browser.FindChromePath()
-	if chromePath == "" {
-		logFatal("Chrome not found on this system")
-	}
-
-	logInfo("Launching Chrome (headless=%v) with WebGPU flags...", headless)
 	allocOpts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.ExecPath(chromePath),
-		chromedp.Flag("headless", headless),
+		chromedp.Flag("headless", false),
 		chromedp.Flag("disable-gpu", false),
 		chromedp.Flag("enable-unsafe-webgpu", true),
-		chromedp.Flag("enable-features", "Vulkan,UseSkiaRenderer,WebGPU"),
-		chromedp.Flag("use-angle", "metal"),
-		chromedp.Flag("enable-gpu-rasterization", true),
-		chromedp.Flag("enable-zero-copy", true),
 		chromedp.Flag("dialtone-origin", true),
 	)
 
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), allocOpts...)
 	defer cancel()
+	defer chrome.KillDialtoneResources()
 
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
-	ctx, cancel = context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
-
-	var consoleLogs []string
-	chromedp.ListenTarget(ctx, func(ev interface{}) {
-		switch ev := ev.(type) {
-		case *runtime.EventConsoleAPICalled:
-			for _, arg := range ev.Args {
-				consoleLogs = append(consoleLogs, fmt.Sprintf("[%s] %s", ev.Type, arg.Value))
-			}
-		case *runtime.EventExceptionThrown:
-			consoleLogs = append(consoleLogs, fmt.Sprintf("[EXCEPTION] %s", ev.ExceptionDetails.Text))
-		}
-	})
-
-	var hasGPU bool
-	var canvasInfo struct {
-		Width        int    `json:"width"`
-		Height       int    `json:"height"`
-		ClientWidth  int    `json:"clientWidth"`
-		ClientHeight int    `json:"clientHeight"`
-		Text         string `json:"text"`
-		Visible      bool   `json:"visible"`
-		HasContext   bool   `json:"hasContext"`
-	}
-	var isVisible bool
-
 	err := chromedp.Run(ctx,
 		chromedp.Navigate("http://127.0.0.1:5173/#s-webgpu-template"),
 		chromedp.WaitReady("#webgpu-template-container"),
-		chromedp.Evaluate(`(function(){
-			const section = document.getElementById("s-webgpu-template");
-			if (section) section.scrollIntoView({ behavior: "instant" });
-			return true;
-		})()`, nil),
-		chromedp.Sleep(2*time.Second),
-		chromedp.Evaluate(`!!navigator.gpu`, &hasGPU),
-		chromedp.Evaluate(`(function(){
-			const container = document.getElementById("webgpu-template-container");
-			const canvas = container ? container.querySelector("canvas") : null;
-			const text = container ? container.textContent || "" : "";
-			const rect = canvas ? canvas.getBoundingClientRect() : { width: 0, height: 0 };
-			return {
-				width: canvas ? canvas.width : 0,
-				height: canvas ? canvas.height : 0,
-				clientWidth: canvas ? canvas.clientWidth : 0,
-				clientHeight: canvas ? canvas.clientHeight : 0,
-				text: text.trim(),
-				visible: rect.width > 0 && rect.height > 0,
-				hasContext: canvas ? !!canvas.getContext("webgpu") : false,
-			};
-		})()`, &canvasInfo),
-		chromedp.Evaluate(`(function(){
-			const section = document.getElementById("s-webgpu-template");
-			return !!(section && section.classList.contains("is-visible"));
-		})()`, &isVisible),
+		chromedp.Sleep(5*time.Second),
 	)
-
-	if err != nil {
-		logInfo("Chromedp run failed: %v", err)
-	}
-
-	logInfo("WebGPU availability: %v", hasGPU)
-	logInfo("Section visible (.is-visible): %v", isVisible)
-	logInfo("Canvas info: size=%dx%d client=%dx%d visible=%v context=%v",
-		canvasInfo.Width,
-		canvasInfo.Height,
-		canvasInfo.ClientWidth,
-		canvasInfo.ClientHeight,
-		canvasInfo.Visible,
-		canvasInfo.HasContext,
-	)
-	if canvasInfo.Text != "" {
-		logInfo("WebGPU container text: %s", canvasInfo.Text)
-	}
-
-	if len(consoleLogs) > 0 {
-		logInfo("Browser console logs:")
-		for _, line := range consoleLogs {
-			fmt.Printf("  %s\n", line)
-		}
-	} else {
-		logInfo("No browser console output captured.")
-	}
+	if err != nil { logInfo("Debug failed: %v", err) }
 }

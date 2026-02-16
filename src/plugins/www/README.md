@@ -64,6 +64,22 @@ Always run a smoke test before publishing. It captures screenshots and performan
 
 Reports are generated at `src/plugins/www/SMOKE.md`.
 
+#### Chrome Lifecycle & Process Management (CRITICAL)
+Due to the high-performance nature of the Three.js visualizations, the Chrome instances used for testing and demos consume significant system resources (GPU/Memory).
+
+- **The Leak Problem**: Improperly managed `chromedp` contexts can result in "Zombie" Chrome processes that persist even after the test script finishes. This is especially prevalent in WSL 2 environments.
+- **Mitigation**:
+    - **Single Tab Architecture**: Smoke tests are designed to use a **single shared headless tab** for the entire suite. Never initialize a new `chromedp` context inside a loop.
+    - **Pre-Test Cleanup**: The smoke suite automatically runs `browser.KillDialtoneChromeProcesses()` before starting to ensure a clean slate.
+    - **Manual Cleanup**: If you notice system slowdown or hundreds of Chrome processes in `top`/`Task Manager`, run:
+      ```bash
+      ./dialtone.sh chrome kill all
+      ```
+- **Lifecycle Verification**: Run the lifecycle test to verify that Dialtone is correctly reaping its browsers:
+  ```bash
+  ./dialtone.sh www smoke-chrome
+  ```
+
 ### 4. Specialized Tooling
 
 #### Earth Land Layer (H3)
