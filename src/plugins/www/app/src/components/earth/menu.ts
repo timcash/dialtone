@@ -4,7 +4,7 @@ import { ProceduralOrbit } from "./index";
 export function setupEarthMenu(orbit: ProceduralOrbit): void {
     const menu = Menu.getInstance();
 
-    menu.addHeader("Rotation");
+    menu.addHeader("Orbital Dynamics");
 
     const toPeriodSeconds = (rotSpeedRadPerSec: number) => {
         if (!isFinite(rotSpeedRadPerSec) || rotSpeedRadPerSec <= 0) return Infinity;

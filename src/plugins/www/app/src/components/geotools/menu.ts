@@ -14,7 +14,7 @@ export function setupGeoToolsMenu(options: GeoToolsConfigOptions) {
     const menu = Menu.getInstance();
 
     // --- Section: Data ---
-    menu.addHeader("Data Source");
+    menu.addHeader("Geo-H3 Projection");
 
     menu.addFile("Choose GeoJSON", async (file) => {
         await options.onFile(file);
