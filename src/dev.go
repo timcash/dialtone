@@ -66,12 +66,8 @@ func ExecuteDev() {
 		format_cli.Run(args)
 	case "ssh":
 		ssh.RunSSH(args)
-	case "vpn":
-		runVPN(args)
-	case "vpn-provision", "provision":
-		vpn_cli.RunProvision(args)
-	case "vpn-test":
-		vpn_cli.RunTest(args)
+	case "vpn", "vpn-provision", "provision", "vpn-test":
+		vpn_cli.RunVPN(append([]string{command}, args...))
 	case "logs":
 		logs_cli.RunLogs(args)
 	case "diagnostic":
