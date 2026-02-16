@@ -134,12 +134,17 @@ export class PolicyHistogram {
 
   setCompactMode(compact: boolean) {
     const hiddenInCompact = [
-      this.yAxis, this.meanLine, this.meanLineB, this.p10Line, this.p90Line, this.breakEvenLine,
+      this.yAxis, 
       this.xMinLabel, this.xMaxLabel, this.p10Label, this.meanLabel, this.p90Label, this.breakEvenLabel, this.simCountLabel
     ];
     for (const obj of hiddenInCompact) {
       obj.visible = !compact;
     }
+    // Ensure mean/percentile lines are always visible
+    this.meanLine.visible = true;
+    this.p10Line.visible = true;
+    this.p90Line.visible = true;
+    this.breakEvenLine.visible = true;
   }
 
   private makeLine(color: number, opacity: number): THREE.Line {
