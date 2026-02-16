@@ -25,21 +25,24 @@ func Run01DuckDBGraphQueries() error {
 		`INSERT INTO dag_graph VALUES ('g1', 'root');`,
 		`INSERT INTO dag_layer VALUES
 			('root', 'g1', NULL, 0),
-			('nested_a', 'g1', 'n_mid_a', 1);`,
+			('nested_a', 'g1', 'n_mid_a', 1),
+			('nested_b', 'g1', 'n_mid_a', 1);`,
 		`INSERT INTO dag_node VALUES
 			('n_root', 'root', 'Root', 0),
 			('n_mid_a', 'root', 'Mid A', 1),
 			('n_mid_b', 'root', 'Mid B', 1),
 			('n_leaf', 'root', 'Leaf', 2),
 			('n_nested_1', 'nested_a', 'Nested 1', 2),
-			('n_nested_2', 'nested_a', 'Nested 2', 3);`,
+			('n_nested_2', 'nested_a', 'Nested 2', 3),
+			('n_nested_3', 'nested_b', 'Nested 3', 2);`,
 		`INSERT INTO dag_edge VALUES
 			('e1', 'root', 'n_root', 'n_mid_a', 0.9),
 			('e2', 'root', 'n_mid_a', 'n_leaf', 0.8),
 			('e3', 'root', 'n_root', 'n_mid_b', 0.7),
 			('e4', 'root', 'n_mid_b', 'n_leaf', 0.6),
 			('e5', 'nested_a', 'n_mid_a', 'n_nested_1', 0.5),
-			('e6', 'nested_a', 'n_nested_1', 'n_nested_2', 0.4);`,
+			('e6', 'nested_a', 'n_nested_1', 'n_nested_2', 0.4),
+			('e7', 'nested_b', 'n_mid_a', 'n_nested_3', 0.3);`,
 		`CREATE PROPERTY GRAPH dag_pg
 			VERTEX TABLES (
 				dag_node
@@ -68,8 +71,8 @@ func Run01DuckDBGraphQueries() error {
 	`).Scan(&edgeCount); err != nil {
 		return fmt.Errorf("graph edge match query failed: %w", err)
 	}
-	if edgeCount != 6 {
-		return fmt.Errorf("expected 6 graph edges from GRAPH_TABLE, got %d", edgeCount)
+	if edgeCount != 7 {
+		return fmt.Errorf("expected 7 graph edges from GRAPH_TABLE, got %d", edgeCount)
 	}
 
 	var hops int
@@ -126,7 +129,7 @@ func Run01DuckDBGraphQueries() error {
 	if err != nil {
 		return fmt.Errorf("nested-node query failed: %w", err)
 	}
-	if err := assertStringSetEquals("nested nodes for n_mid_a", nestedNodes, []string{"n_nested_1", "n_nested_2"}); err != nil {
+	if err := assertStringSetEquals("nested nodes for n_mid_a", nestedNodes, []string{"n_nested_1", "n_nested_2", "n_nested_3"}); err != nil {
 		return err
 	}
 
