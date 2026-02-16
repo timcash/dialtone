@@ -53,9 +53,17 @@ class TableControl implements VisualizationControl {
   private async loadRows(table: HTMLTableElement): Promise<void> {
     table.setAttribute('data-ready', 'loading');
     try {
-      const res = await fetch('/api/dag-table');
+      const res = await fetch('/api/dag-table', {
+        headers: {
+          Accept: 'application/json',
+        },
+      });
       if (!res.ok) {
         throw new Error(`failed to load dag table: ${res.status}`);
+      }
+      const contentType = res.headers.get('content-type') ?? '';
+      if (!contentType.includes('application/json')) {
+        throw new Error(`invalid dag table content-type: ${contentType || 'unknown'}`);
       }
       const body = (await res.json()) as { rows?: TableRow[] };
       const rows = Array.isArray(body.rows) ? body.rows : [];

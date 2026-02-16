@@ -1,7 +1,15 @@
 import { setupApp } from '../../../../../libs/ui_v2/ui';
 import './style.css';
+import './test';
 
 const { sections, menu } = setupApp({ title: 'dialtone.dag', debug: true });
+
+(window as any).reloadDagTestLib = async () => {
+  const stamp = Date.now();
+  await import(/* @vite-ignore */ `/src/test.ts?t=${stamp}`);
+  const lib = (window as any).dagTestLib;
+  return lib && typeof lib.list === 'function' ? lib.list() : [];
+};
 
 sections.register('dag-table', {
   containerId: 'dag-table',
@@ -12,6 +20,12 @@ sections.register('dag-table', {
     return mountTable(container);
   },
   header: { visible: false, menuVisible: true, title: 'DAG Table' },
+  overlays: {
+    primaryKind: 'table',
+    primary: "table[aria-label='DAG Table']",
+    thumb: '.dag-table-thumb',
+    legend: '.dag-table-legend',
+  },
 });
 
 sections.register('three', {
@@ -22,13 +36,19 @@ sections.register('three', {
     if (!container) throw new Error('three container not found');
     return mountThree(container);
   },
-  header: { visible: false, menuVisible: true, title: 'DAG Three' },
+  header: { visible: false, menuVisible: true, title: 'DAG Stage' },
+  overlays: {
+    primaryKind: 'stage',
+    primary: "canvas[aria-label='Three Canvas']",
+    thumb: '.dag-controls',
+    legend: '.dag-history',
+  },
 });
 
 menu.addButton('Table', 'Navigate Table', () => {
   void sections.navigateTo('dag-table');
 });
-menu.addButton('Three', 'Navigate Three', () => {
+menu.addButton('Stage', 'Navigate Stage', () => {
   void sections.navigateTo('three');
 });
 
@@ -80,9 +100,8 @@ window.addEventListener('keydown', (event) => {
   }
   if (event.key.toLowerCase() === 'm') {
     event.preventDefault();
-    const dagMenu = document.querySelector("button[aria-label='DAG Menu']") as HTMLButtonElement | null;
     const globalMenu = document.querySelector("button[aria-label='Toggle Global Menu']") as HTMLButtonElement | null;
-    (dagMenu ?? globalMenu)?.click();
+    globalMenu?.click();
   }
 });
 

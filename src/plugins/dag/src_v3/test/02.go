@@ -1,22 +1,82 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
+	"net/http"
+	"strings"
 	"time"
 
 	test_v2 "dialtone/cli/src/libs/test_v2"
 	"github.com/chromedp/chromedp"
 )
 
+type dagTableAPIResponse struct {
+	Rows []struct {
+		Key    string `json:"key"`
+		Value  string `json:"value"`
+		Status string `json:"status"`
+	} `json:"rows"`
+}
+
+func fetchDagTableRowsFromAPI() (*dagTableAPIResponse, error) {
+	client := &http.Client{Timeout: 6 * time.Second}
+	resp, err := client.Get("http://127.0.0.1:8080/api/dag-table")
+	if err != nil {
+		return nil, fmt.Errorf("api request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("api status not OK: %d", resp.StatusCode)
+	}
+	contentType := resp.Header.Get("Content-Type")
+	if !strings.HasPrefix(contentType, "application/json") {
+		return nil, fmt.Errorf("api content-type is not application/json: %q", contentType)
+	}
+	var out dagTableAPIResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decode api json: %w", err)
+	}
+	if len(out.Rows) < 6 {
+		return nil, fmt.Errorf("api returned too few rows: %d", len(out.Rows))
+	}
+	required := map[string]bool{
+		"node_count":                      false,
+		"edge_count":                      false,
+		"layer_count":                     false,
+		"graph_edge_match_count":          false,
+		"shortest_path_hops_root_to_leaf": false,
+		"rank_violation_count":            false,
+	}
+	for _, row := range out.Rows {
+		if row.Status != "OK" {
+			return nil, fmt.Errorf("api row %q has non-OK status %q", row.Key, row.Status)
+		}
+		if _, ok := required[row.Key]; ok {
+			required[row.Key] = true
+		}
+	}
+	for key, present := range required {
+		if !present {
+			return nil, fmt.Errorf("api missing required metric row %q", key)
+		}
+	}
+	return &out, nil
+}
+
 func Run02DagTableSectionValidation() error {
-	browser, err := ensureSharedBrowser(true)
+	browser, err := ensureSharedBrowser(false)
+	if err != nil {
+		return err
+	}
+
+	apiRows, err := fetchDagTableRowsFromAPI()
 	if err != nil {
 		return err
 	}
 
 	var tableOK bool
+	var rowCount int
 	if err := browser.Run(chromedp.Tasks{
 		chromedp.Navigate("http://127.0.0.1:8080/#dag-table"),
 		test_v2.WaitForAriaLabel("DAG Table"),
@@ -26,26 +86,35 @@ func Run02DagTableSectionValidation() error {
 				const table = document.querySelector("table[aria-label='DAG Table']");
 				if (!table) return false;
 				const rows = table.querySelectorAll('tbody tr');
-				if (rows.length < 5) return false;
+				if (rows.length < 6) return false;
 				const first = rows[0].querySelector('td');
 				if (!first) return false;
-				return first.textContent?.trim() === 'node_count';
+				if (first.textContent?.trim() !== 'node_count') return false;
+				const bad = Array.from(rows).some((row) => {
+					const cells = row.querySelectorAll('td');
+					const key = cells[0]?.textContent?.trim() || '';
+					const status = cells[2]?.textContent?.trim() || '';
+					if (key === 'query_error' || key === 'dev_hint') return true;
+					return status !== 'OK';
+				});
+				return !bad;
 			})()
 		`, &tableOK),
+		chromedp.Evaluate(`(() => document.querySelectorAll("table[aria-label='DAG Table'] tbody tr").length)()`, &rowCount),
 	}); err != nil {
 		return err
 	}
 	if !tableOK {
 		return fmt.Errorf("dag-table assertions failed")
 	}
-
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		return err
+	if rowCount != len(apiRows.Rows) {
+		return fmt.Errorf("table row count (%d) does not match api row count (%d)", rowCount, len(apiRows.Rows))
 	}
-	shot := filepath.Join(repoRoot, "src", "plugins", "dag", "src_v3", "screenshots", "test_step_1.png")
-	if err := browser.CaptureScreenshot(shot); err != nil {
-		return fmt.Errorf("capture table screenshot: %w", err)
+	if err := captureStoryShot(browser, "test_step_1_pre.png"); err != nil {
+		return fmt.Errorf("capture table screenshot pre: %w", err)
+	}
+	if err := captureStoryShot(browser, "test_step_1.png"); err != nil {
+		return fmt.Errorf("capture table screenshot post: %w", err)
 	}
 	return nil
 }

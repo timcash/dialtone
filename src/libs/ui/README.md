@@ -1,3 +1,12 @@
+# Log 2026-02-16 13:36:14 -0800
+
+- Design-language update:
+  - a UI is section-based
+  - each section is modeled with overlays
+  - overlay terms in active DAG work are `menu`, `thumb`, `legend`, plus one primary surface overlay (`stage` / `table` / `xterm` / `docs`)
+- `src/libs/ui` remains legacy/shared runtime for older plugin UIs.
+- New overlay-first work should prefer `src/libs/ui_v2`, while preserving compatibility for existing `src/libs/ui` consumers.
+
 # `ui`
 
 `src/libs/ui` is the shared front-end runtime utility library for Dialtone plugin UIs.

@@ -1,3 +1,14 @@
+# Log 2026-02-16 13:36:14 -0800
+
+- `test_v2` is the active browser test runtime for DAG `src_v3`.
+- Attach semantics are domain-stable:
+  - attach mode reuses the existing headed dev browser role/session
+  - attach binds to an existing page target instead of creating new tabs/windows
+- Screenshot sequence language is standardized:
+  - each step may emit multiple screenshots
+  - per-step `1xN` grid screenshots are generated for compact TEST.md storytelling
+- `test_v2` now carries the session metadata accessor needed by dev orchestration (`pid`, debug websocket/url reporting).
+
 # test_v2
 
 `src/libs/test_v2` is a lightweight Go testing toolkit for browser-driven plugin tests.
@@ -7,6 +18,7 @@ It provides:
 - Per-step execution + timeout handling.
 - Console/error capture from browser and runner.
 - Markdown report generation with screenshots.
+- Per-step screenshot-grid composition for sequence views.
 - UI helper actions keyed by `aria-label`.
 - Utility helpers for port waiting and PNG pixel assertions.
 
@@ -25,7 +37,7 @@ It provides:
 - `BrowserSession`
   - wraps chromedp context + Chrome plugin session metadata (`isNew`).
 - `Step`
-  - `Name`, `Run`, `SectionID`, `Screenshot`, `Timeout`.
+  - `Name`, `Run`, `SectionID`, `Screenshot`, `Screenshots`, `ScreenshotGrid`, `Timeout`.
 - `SuiteOptions`
   - `Version`, `ReportPath`, `LogPath`, `ErrorLogPath`.
 
@@ -69,7 +81,7 @@ Generated markdown includes:
   - runner output
   - filtered browser logs (by `SectionID` token `#<section>`)
   - browser errors block when present
-  - screenshot embed when provided
+  - screenshot grid embed when `Screenshots`/`ScreenshotGrid` is configured
 - Artifacts list (`test.log`, `error.log`, screenshots)
 
 ## UI Action Helpers (`browser_actions.go`)

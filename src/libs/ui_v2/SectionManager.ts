@@ -1,30 +1,38 @@
-import { HeaderConfig, SectionConfig, VisualizationControl } from './types';
+import { HeaderConfig, SectionConfig, SectionOverlayConfig, VisualizationControl } from './types';
 
 export class SectionManager {
   private configs = new Map<string, SectionConfig>();
   private controls = new Map<string, VisualizationControl>();
   private loading = new Map<string, Promise<void>>();
   private resumed = new Map<string, boolean>();
+  private overlays = new Map<string, Partial<Record<'primary' | 'thumb' | 'legend', HTMLElement>>>();
   private activeSectionId: string | null = null;
   private debug: boolean;
 
   private headerEl: HTMLElement | null;
   private titleEl: HTMLElement | null;
   private menuEl: HTMLElement | null;
+  private loadingEl: HTMLElement;
 
   constructor(options: { debug?: boolean } = {}) {
     this.debug = options.debug ?? true;
     this.headerEl = document.querySelector('[aria-label="App Header"]');
     this.titleEl = this.headerEl?.querySelector('h1') ?? null;
     this.menuEl = document.querySelector('[aria-label="Global Menu"]');
+    this.loadingEl = this.ensureLoadingOverlay();
   }
 
   register(sectionId: string, config: SectionConfig): void {
     this.configs.set(sectionId, config);
+    this.bindSectionOverlays(sectionId, config);
   }
 
   getActiveSectionId(): string | null {
     return this.activeSectionId;
+  }
+
+  isLoaded(sectionId: string): boolean {
+    return this.controls.has(sectionId);
   }
 
   private waitForLayout(): Promise<void> {
@@ -66,8 +74,11 @@ export class SectionManager {
       return;
     }
 
+    const needsLoad = !this.isLoaded(sectionId);
+    if (needsLoad) this.setLoadingVisible(true);
     if (this.debug) console.log(`[SectionManager] NAVIGATING TO #${sectionId}`);
     await this.load(sectionId);
+    if (needsLoad) this.setLoadingVisible(false);
 
     if (current && current !== sectionId) {
       if (this.debug) console.log(`[SectionManager] NAVIGATE AWAY #${current}`);
@@ -80,6 +91,7 @@ export class SectionManager {
     }
 
     this.setSectionVisibility(sectionId);
+    this.syncOverlayActivity(sectionId);
     this.applyHeader(this.configs.get(sectionId)?.header);
     this.activeSectionId = sectionId;
 
@@ -111,6 +123,70 @@ export class SectionManager {
         section.setAttribute('data-active', 'false');
       }
     }
+  }
+
+  private bindSectionOverlays(sectionId: string, cfg: SectionConfig): void {
+    const section = document.getElementById(cfg.containerId);
+    if (!section) return;
+    const overlays: Partial<Record<'primary' | 'thumb' | 'legend', HTMLElement>> = {};
+    const selectors: SectionOverlayConfig | null = cfg.overlays ?? null;
+    if (!selectors) {
+      this.overlays.set(sectionId, overlays);
+      return;
+    }
+    const primaryEl = section.querySelector(selectors.primary);
+    if (primaryEl instanceof HTMLElement) {
+      primaryEl.setAttribute('data-overlay', selectors.primaryKind);
+      primaryEl.setAttribute('data-overlay-role', 'primary');
+      primaryEl.setAttribute('data-overlay-section', sectionId);
+      overlays.primary = primaryEl;
+    }
+    const thumbEl = section.querySelector(selectors.thumb);
+    if (thumbEl instanceof HTMLElement) {
+      thumbEl.setAttribute('data-overlay', 'thumb');
+      thumbEl.setAttribute('data-overlay-role', 'thumb');
+      thumbEl.setAttribute('data-overlay-section', sectionId);
+      overlays.thumb = thumbEl;
+    }
+    const legendEl = section.querySelector(selectors.legend);
+    if (legendEl instanceof HTMLElement) {
+      legendEl.setAttribute('data-overlay', 'legend');
+      legendEl.setAttribute('data-overlay-role', 'legend');
+      legendEl.setAttribute('data-overlay-section', sectionId);
+      overlays.legend = legendEl;
+    }
+    this.overlays.set(sectionId, overlays);
+  }
+
+  private syncOverlayActivity(activeId: string): void {
+    for (const [sectionId, sectionOverlays] of this.overlays.entries()) {
+      const isActive = sectionId === activeId;
+      sectionOverlays.primary?.setAttribute('data-overlay-active', isActive ? 'true' : 'false');
+      sectionOverlays.thumb?.setAttribute('data-overlay-active', isActive ? 'true' : 'false');
+      sectionOverlays.legend?.setAttribute('data-overlay-active', isActive ? 'true' : 'false');
+    }
+    document.body.setAttribute('data-active-section', activeId);
+  }
+
+  private ensureLoadingOverlay(): HTMLElement {
+    const app = document.getElementById('app') ?? document.body;
+    const existing = app.querySelector("[aria-label='Section Loading']");
+    if (existing instanceof HTMLElement) return existing;
+    const el = document.createElement('div');
+    el.classList.add('section-loading');
+    el.setAttribute('aria-label', 'Section Loading');
+    el.setAttribute('aria-live', 'polite');
+    el.hidden = true;
+    const text = document.createElement('span');
+    text.textContent = 'Loading section...';
+    el.appendChild(text);
+    app.appendChild(el);
+    return el;
+  }
+
+  private setLoadingVisible(visible: boolean): void {
+    this.loadingEl.hidden = !visible;
+    document.body.classList.toggle('section-loading-open', visible);
   }
 
   private applyHeader(cfg?: HeaderConfig): void {
