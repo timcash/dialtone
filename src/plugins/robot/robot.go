@@ -8,6 +8,7 @@ import (
 	"dialtone/cli/src/core/mock"
 	"dialtone/cli/src/core/build"
 	"dialtone/cli/src/core/ssh"
+	test_v2 "dialtone/cli/src/libs/test_v2"
 	mavlink_app "dialtone/cli/src/plugins/mavlink/app"
 	rcli "dialtone/cli/src/plugins/robot/robot_cli"
 	robot_ops "dialtone/cli/src/plugins/robot/src_v1/cmd/ops"
@@ -18,10 +19,12 @@ import (
 	"net/netip"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/bluenviron/gomavlib/v3/pkg/dialects/common"
@@ -101,11 +104,14 @@ func RunRobot(args []string) {
 			os.Exit(1)
 		}
 	case "test":
-		if len(restArgs) > 0 && strings.HasPrefix(restArgs[0], "src_v") {
-			RunVersionedTest(restArgs[0])
-		} else {
-			fmt.Println("Usage: dialtone robot test src_vN")
+		vDir := getDir()
+		var testArgs []string
+		for _, arg := range restArgs {
+			if arg != vDir {
+				testArgs = append(testArgs, arg)
+			}
 		}
+		RunVersionedTest(vDir, testArgs)
 	case "diagnostic":
 		if len(restArgs) == 0 {
 			fmt.Println("Usage: dialtone robot diagnostic <src_vN>")
@@ -741,14 +747,57 @@ func RunUIRun(versionDir string, extraArgs []string) error {
 }
 
 func RunDev(versionDir string) error {
-	return RunUIRun(versionDir, nil)
+	fmt.Printf(">> [Robot] Dev: %s\n", versionDir)
+	cwd, _ := os.Getwd()
+	
+	// 1. Ensure UI dev server is running in the background
+	uiDir := filepath.Join(cwd, "src", "plugins", "robot", versionDir, "ui")
+	devCmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "dev", "--host", "127.0.0.1", "--port", "3000")
+	devCmd.Stdout = os.Stdout
+	devCmd.Stderr = os.Stderr
+	if err := devCmd.Start(); err != nil {
+		return fmt.Errorf("failed to start dev server: %w", err)
+	}
+	defer devCmd.Process.Kill()
+
+	// 2. Wait for dev server
+	if err := test_v2.WaitForPort(3000, 15*time.Second); err != nil {
+		return fmt.Errorf("dev server failed to start: %w", err)
+	}
+
+	// 3. Launch or attach to Chrome dev session
+	chromeCmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "chrome", "new", "http://127.0.0.1:3000", "--role", "dev", "--reuse-existing", "--gpu")
+	chromeCmd.Stdout = os.Stdout
+	chromeCmd.Stderr = os.Stderr
+	if err := chromeCmd.Run(); err != nil {
+		return fmt.Errorf("failed to launch chrome: %w", err)
+	}
+
+	// 4. Wait for interrupt
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
+	return nil
 }
 
-func RunVersionedTest(versionDir string) error {
+func RunVersionedTest(versionDir string, extraArgs []string) error {
 	cwd, _ := os.Getwd()
 	testPkg := "./" + filepath.Join("src", "plugins", "robot", versionDir, "test")
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "run", testPkg)
+	
+	args := []string{"go", "exec", "run", testPkg}
+	args = append(args, extraArgs...)
+	
+	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	
+	// Pass ROBOT_TEST_ATTACH=1 if --attach is present
+	for _, arg := range extraArgs {
+		if arg == "--attach" {
+			cmd.Env = append(os.Environ(), "ROBOT_TEST_ATTACH=1")
+			break
+		}
+	}
+	
 	return cmd.Run()
 }

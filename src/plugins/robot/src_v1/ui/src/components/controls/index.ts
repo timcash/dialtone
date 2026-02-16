@@ -35,7 +35,7 @@ class ControlsControl implements VisualizationControl {
     // No specific cleanup needed for event listeners attached this way
   }
 
-  setVisible(visible: boolean): void {
+  setVisible(_visible: boolean): void {
     // No specific visibility logic needed for this component
   }
 }

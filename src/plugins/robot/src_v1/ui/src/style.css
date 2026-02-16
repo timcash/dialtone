@@ -1,183 +1,222 @@
 @import '../../../../../libs/ui_v2/style.css';
 
-section[aria-label='Hero Section'] {
-  position: relative;
-  display: block;
+:root {
+  --theme-primary: #66fcf1;
+  --theme-accent: rgba(102, 252, 241, 0.4);
+  --theme-gradient: linear-gradient(135deg, #66fcf1, #45a29e);
 }
 
-canvas[aria-label='Hero Canvas'] {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100vh;
-  display: block;
-  border: 0;
-  border-radius: 0;
-  background: #000;
-}
-
-section[aria-label='Docs Section'] {
+/* SECTION BASE */
+section {
+  display: grid;
+  place-items: stretch;
   position: relative;
   overflow: hidden;
   background: #000;
+  height: 100vh;
+  width: 100vw;
 }
 
-section[aria-label='Hero Section']>div,
-section[aria-label='Docs Section']>div {
+/* OVERLAYS */
+[data-overlay-role="primary"] {
+  width: 100%;
+  height: 100%;
+}
+
+[data-overlay-role="thumb"] {
   position: absolute;
-  top: 1.5rem;
-  left: 1.5rem;
-  width: min(66.66%, 820px);
-  z-index: 20;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(500px, calc(100vw - 28px));
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
+  z-index: 11;
+  pointer-events: auto;
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
-  align-items: flex-start;
-  text-align: left;
-  gap: 0.75rem;
+  gap: 12px;
+}
+
+[data-overlay-role="legend"] {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 24px);
+  left: calc(env(safe-area-inset-left, 0px) + 24px);
+  width: min(280px, calc(100vw - 104px));
+  padding: 16px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #f2f7ff;
+  display: grid;
+  gap: 8px;
+  z-index: 12;
   pointer-events: none;
 }
 
-section[aria-label='Hero Section'] h2,
-section[aria-label='Docs Section'] h2 {
-  font-size: clamp(2.25rem, 3vw + 0.5rem, 3.75rem);
+[data-overlay-role="legend"] h2 {
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--theme-primary);
+}
+
+[data-overlay-role="legend"] p {
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* MENU OVERRIDES */
+.menu-toggle {
+  width: 64px !important;
+  height: 64px !important;
+  min-width: 64px !important;
+  border-radius: 50% !important;
+  padding: 0 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem !important;
+  text-transform: uppercase;
+  font-weight: 700 !important;
+  border: 2px solid var(--theme-accent) !important;
+}
+
+/* HERO */
+.hero-stage {
+  background: radial-gradient(circle at center, #0b0c10 0%, #000 100%);
+}
+
+.hero-thumb button {
+  width: 100%;
+  height: 56px;
+  background: var(--theme-gradient);
+  border: none;
+  border-radius: 28px;
+  color: #000;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  box-shadow: 0 4px 15px var(--theme-accent);
+}
+
+/* DOCS */
+.docs-primary {
+  padding: 4rem 2rem;
+  color: #fff;
+  overflow-y: auto;
+}
+
+/* TELEMETRY TABLE */
+.telemetry-table {
+  width: 100%;
+  height: 100%;
+  background: #000;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.telemetry-table th {
+  position: sticky;
+  top: 0;
+  background: #0a0a0c;
+  padding: 12px 16px;
+  text-align: left;
+  font-size: 0.75rem;
+  color: var(--theme-primary);
+  border-bottom: 1px solid #1f2833;
+}
+
+.telemetry-table td {
+  padding: 10px 16px;
+  border-bottom: 1px solid #1a1a1a;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+}
+
+/* THREE */
+.three-stage {
+  background: #000;
+}
+
+/* XTERM */
+.xterm-primary {
+  background: #000;
+  padding: 8px;
+}
+
+.xterm-thumb input {
+  width: 100%;
+  height: 48px;
+  background: rgba(11, 12, 16, 0.9);
+  border: 1px solid #1f2833;
+  border-radius: 24px;
+  padding: 0 20px;
+  color: var(--theme-primary);
+  font-family: ui-monospace, monospace;
+  outline: none;
+}
+
+.xterm-thumb input:focus {
+  border-color: var(--theme-primary);
+  box-shadow: 0 0 10px var(--theme-accent);
+}
+
+/* VIDEO */
+.video-primary {
+  object-fit: contain;
+  background: #000;
+}
+
+/* CONTROLS */
+.controls-primary {
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+
+.controls-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+  width: 100%;
+  max-width: 440px;
+}
+
+.controls-grid button {
+  height: 80px;
+  font-size: 1rem;
   font-weight: 700;
   color: #fff;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
-  letter-spacing: -0.02em;
-  max-width: 800px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  cursor: pointer;
+  background: rgba(31, 40, 51, 0.4);
+  backdrop-filter: blur(4px);
+  transition: all 0.2s;
+  text-align: center;
 }
 
-section[aria-label='Hero Section'] p,
-section[aria-label='Docs Section'] p {
-  font-size: 1.25rem;
-  line-height: 1.5;
-  color: rgba(255, 255, 255, 0.8);
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
-  max-width: 600px;
-  min-height: 4.5em;
-  display: flex;
-  align-items: flex-start;
-  width: 100%;
+.controls-grid button:hover {
+  background: rgba(69, 162, 158, 0.2);
+  border-color: var(--theme-primary);
+  transform: translateY(-2px);
 }
 
-section[aria-label='Table Section'],
-section[aria-label='Three Section'],
-section[aria-label='Video Section'] {
-  display: grid;
-  place-items: stretch;
-}
+#btn-arm { color: #45f248; border-color: rgba(69, 242, 72, 0.3); }
+#btn-disarm { color: #f24545; border-color: rgba(242, 69, 69, 0.3); }
 
-section[aria-label='Table Section'] {
-  --table-row-height: 1.45em;
-}
-
-section[aria-label='Three Section'],
-section[aria-label='Video Section'] {
-  background: #000;
-}
-
-section[aria-label='Table Section'] table {
-  display: table;
-  width: 100%;
-  height: 100%;
-  background: #090f18;
-  align-self: stretch;
-  table-layout: fixed;
-}
-
-section[aria-label='Table Section'] th,
-section[aria-label='Table Section'] td {
-  height: var(--table-row-height);
-  padding: 0 0.6em;
-  line-height: 1.45em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-section#xterm {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  grid-template-areas:
-    'terminal'
-    'input';
-  width: 100%;
-  height: 100%;
-  padding: 10px 12px 12px;
-  gap: 10px;
-  justify-content: stretch;
-  align-content: stretch;
-  align-items: stretch;
-  justify-items: stretch;
-  overflow: hidden;
-}
-
-section#xterm [aria-label='Xterm Terminal'] {
-  grid-area: terminal;
-  min-height: 0;
-  min-width: 0;
-  height: 100%;
-  width: 100%;
-  justify-self: stretch;
-  align-self: stretch;
-  overflow: hidden;
-  border: 1px solid #222;
-}
-
-section#xterm input[aria-label='Xterm Input'] {
-  grid-area: input;
-  display: block;
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  height: 44px;
-  background: #000;
-  border: 1px solid #333;
-  border-radius: 4px;
-  padding: 0 12px;
-  margin: 0;
-  justify-self: stretch;
-  align-self: stretch;
-}
-
-section#xterm input[aria-label='Xterm Input']:focus {
-  border-color: rgba(255, 255, 255, 0.45);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
-}
-
-canvas[aria-label='Three Canvas'] {
-  width: 100%;
-  height: 100vh;
-  border: 0;
-  border-radius: 0;
-  background: #000;
-}
-
+/* MOBILE ADJUSTMENTS */
 @media (max-width: 768px) {
-
-  section[aria-label='Hero Section']>div,
-  section[aria-label='Docs Section']>div {
-    width: 100%;
-    gap: 1rem;
+  [data-overlay-role="legend"] {
+    width: calc(100vw - 48px);
   }
-
-  section[aria-label='Hero Section'] h2,
-  section[aria-label='Docs Section'] h2 {
-    font-size: clamp(1.2rem, 1.5vw + 0.3rem, 2rem);
+  [data-overlay-role="thumb"] {
+    width: calc(100vw - 32px);
   }
-
-  section[aria-label='Hero Section'] p,
-  section[aria-label='Docs Section'] p {
-    font-size: clamp(1rem, 1.3vw, 1.5rem);
-  }
-}
-
-video[aria-label='Test Video'] {
-  width: 100%;
-  height: 100vh;
-  border: 0;
-  border-radius: 0;
-  background: #000;
-  object-fit: cover;
 }
