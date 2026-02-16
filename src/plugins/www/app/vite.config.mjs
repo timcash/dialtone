@@ -17,6 +17,15 @@ export default defineConfig({
             }
         }
     },
+    preview: {
+        host: '0.0.0.0',
+        proxy: {
+            '/api/cad': {
+                target: 'http://127.0.0.1:8081',
+                changeOrigin: true,
+            }
+        }
+    },
     build: {
         rollupOptions: {
             input: {

@@ -1,3 +1,4 @@
+import { type VisualizationControl, type SectionManager } from "../util/section";
 import * as THREE from "three";
 import glowVertexShader from "../../shaders/glow.vert.glsl?raw";
 import glowFragmentShader from "../../shaders/glow.frag.glsl?raw";
@@ -384,7 +385,7 @@ class NeuralNetworkVisualization {
   };
 }
 
-export function mountNeuralNetwork(container: HTMLElement) {
+export function mountNeuralNetwork(container: HTMLElement, sections: SectionManager): Promise<VisualizationControl> {
   // Inject HTML
   container.innerHTML = `
       <div class="marketing-overlay" aria-label="Neural network marketing information">
@@ -403,6 +404,7 @@ export function mountNeuralNetwork(container: HTMLElement) {
   ];
   const stopTyping = startTyping(subtitleEl, subtitles);
 
+  sections.setLoadingMessage("s-neural", "loading neural topology ...");
   const viz = new NeuralNetworkVisualization(container);
 
   const options = {

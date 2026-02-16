@@ -1,3 +1,4 @@
+import { type VisualizationControl, type SectionManager } from "../util/section";
 import * as THREE from "three";
 import { IKSolver } from "./ik";
 import { FpsCounter } from "../util/fps";
@@ -644,7 +645,7 @@ class RobotArmVisualization {
   };
 }
 
-export function mountRobot(container: HTMLElement) {
+export function mountRobot(container: HTMLElement, sections: SectionManager): Promise<VisualizationControl> {
   // Inject HTML
   container.innerHTML = `
   <div class="marketing-overlay" aria-label="Robot visualization marketing information">
@@ -669,6 +670,7 @@ export function mountRobot(container: HTMLElement) {
   ];
   const stopTyping = startTyping(subtitleEl, subtitles);
 
+  sections.setLoadingMessage("s-robot", "loading robot kinematics ...");
   const viz = new RobotArmVisualization(container);
   return {
     dispose: () => {

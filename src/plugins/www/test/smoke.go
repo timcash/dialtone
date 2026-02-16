@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"strings"
@@ -34,35 +33,24 @@ type sectionMetrics struct {
 }
 
 func init() {
-	test.Register("www-smoke", "www", []string{"www", "smoke", "browser"}, RunWwwSmoke)
+	test.Register("www-smoke", "www", []string{"www", "smoke", "browser"}, func() error {
+		chromePath := browser.FindChromePath()
+		opts := append(chromedp.DefaultExecAllocatorOptions[:],
+			chromedp.NoFirstRun, chromedp.NoDefaultBrowserCheck,
+			chromedp.ExecPath(chromePath),
+			chromedp.Headless,
+		)
+		allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+		defer allocCancel()
+		return RunWwwSmokeSubTest(allocCtx)
+	})
 }
 
-func RunWwwSmoke() error {
+func RunWwwSmokeSubTest(allocCtx context.Context) error {
 	fmt.Println(">> [WWW] Smoke: start")
 	cwd, _ := os.Getwd()
-	wwwDir := filepath.Join(cwd, "src", "plugins", "www", "app")
 	screenshotsDir := filepath.Join(cwd, "src", "plugins", "www", "screenshots")
 	os.RemoveAll(screenshotsDir); os.MkdirAll(screenshotsDir, 0755)
-
-	if !isPortOpen(4173) {
-		devCmd := exec.Command("npm", "run", "preview", "--", "--host", "127.0.0.1")
-		devCmd.Dir = wwwDir; devCmd.Start(); defer devCmd.Process.Kill()
-	}
-	waitForPortLocal(4173, 60*time.Second)
-
-	chromePath := browser.FindChromePath()
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.NoFirstRun, chromedp.NoDefaultBrowserCheck,
-		chromedp.ExecPath(chromePath),
-		chromedp.Flag("remote-debugging-port", "0"),
-		chromedp.Flag("remote-debugging-address", "127.0.0.1"),
-		chromedp.Flag("dialtone-origin", true),
-		chromedp.Flag("enable-precise-memory-info", true),
-		chromedp.Headless,
-	)
-
-	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	defer allocCancel()
 
 	ctx, tabCancel := chromedp.NewContext(allocCtx)
 	defer tabCancel()
@@ -150,8 +138,6 @@ func RunWwwSmoke() error {
 			m.AppCPU = s.AppCPU
 			m.AppGPU = s.AppGPU
 		case <-time.After(2 * time.Second):
-			// We continue even if stats timeout, but user said "error and stop if it exceeds 5 seconds"
-			// The Run call itself is capped at 5s.
 		}
 
 		m.Memory, m.JSHeap = jsM.Memory, jsM.JSHeap

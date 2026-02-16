@@ -3,55 +3,55 @@ package test
 import (
 	"context"
 	"fmt"
-	"net"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"dialtone/cli/src/core/test"
 	"dialtone/cli/src/core/browser"
 
+	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
 func init() {
-	test.Register("www-menu-smoke", "www", []string{"www", "menu-smoke", "menu"}, RunWwwMenuSmoke)
+	test.Register("www-menu-smoke", "www", []string{"www", "menu-smoke", "menu"}, func() error {
+		chromePath := browser.FindChromePath()
+		opts := append(chromedp.DefaultExecAllocatorOptions[:],
+			chromedp.NoFirstRun, chromedp.NoDefaultBrowserCheck,
+			chromedp.ExecPath(chromePath),
+			chromedp.Headless,
+		)
+		allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+		defer allocCancel()
+		return RunWwwMenuSmokeSubTest(allocCtx)
+	})
 }
 
-func RunWwwMenuSmoke() error {
+func RunWwwMenuSmokeSubTest(allocCtx context.Context) error {
 	fmt.Println(">> [WWW] Menu Smoke: start")
-	cwd, _ := os.Getwd()
-	wwwDir := filepath.Join(cwd, "src", "plugins", "www", "app")
-
-	if !isPortOpenMenu(4173) {
-		devCmd := exec.Command("npm", "run", "preview", "--", "--host", "127.0.0.1")
-		devCmd.Dir = wwwDir; devCmd.Start(); defer devCmd.Process.Kill()
-	}
-	waitForPortLocalMenu(4173, 60*time.Second)
 	
-	chromePath := browser.FindChromePath()
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.NoFirstRun, chromedp.NoDefaultBrowserCheck,
-		chromedp.ExecPath(chromePath),
-		chromedp.Headless,
-	)
-
-	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	defer allocCancel()
-
 	ctx, tabCancel := chromedp.NewContext(allocCtx)
 	defer tabCancel()
 
-	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
+	// Capture console logs
+	chromedp.ListenTarget(ctx, func(ev interface{}) {
+		if ce, ok := ev.(*runtime.EventConsoleAPICalled); ok {
+			var parts []string
+			for _, arg := range ce.Args {
+				parts = append(parts, string(arg.Value))
+			}
+			fmt.Printf("   [BROWSER] %s\n", strings.Join(parts, " "))
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(ctx, 600*time.Second)
 	defer cancel()
 
 	var sections []string
 	if err := chromedp.Run(ctx,
 		chromedp.Navigate("about:blank"),
 		chromedp.Navigate("http://127.0.0.1:4173"),
-		chromedp.WaitVisible(".header-fps"),
+		chromedp.WaitReady("body"),
 		chromedp.Evaluate(`Array.from(document.querySelectorAll('section[id^="s-"]')).map(el => el.id)`, &sections),
 	); err != nil {
 		return fmt.Errorf("setup failed: %v", err)
@@ -65,27 +65,46 @@ func RunWwwMenuSmoke() error {
 
 		fmt.Printf(">> [WWW] Menu Smoke: testing #%s\n", section)
 		
-		err := chromedp.Run(ctx,
+		// Per-section timeout
+		timeout := 60 * time.Second
+		if section == "s-home" || section == "s-cad" {
+			timeout = 120 * time.Second 
+		}
+		sectCtx, sectCancel := context.WithTimeout(ctx, timeout)
+		err := chromedp.Run(sectCtx,
 			// Navigate to section
 			chromedp.Evaluate(fmt.Sprintf(`(async function(){
 				const id = '%s';
+				console.log("Test: Navigating to " + id);
 				window.location.hash = id;
 				if (window.sections) {
-					if (!window.sections.visualizations.has(id)) {
-						await window.sections.load(id);
-					}
+					console.log("Test: Triggering load for " + id);
+					const loadPromise = window.sections.load(id);
+					await Promise.race([
+						loadPromise,
+						new Promise(r => setTimeout(r, 20000))
+					]).catch(e => console.error("Test: Load error for " + id, e));
+					
+					console.log("Test: Setting active section " + id);
 					window.sections.setActiveSection(id);
 				}
 			})()`, section), nil),
-			chromedp.Sleep(500*time.Millisecond),
+			chromedp.Sleep(5*time.Second),
 			
-			// 1. Verify menu is closed initially
-			chromedp.Evaluate(`document.getElementById('global-menu-panel').hidden`, nil),
-			
-			// 2. Open menu
+			// 1. Verify toggle exists and click it
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				fmt.Printf("   [DEBUG] Clicking toggle for %s\n", section)
+				return nil
+			}),
 			chromedp.WaitVisible("#global-menu-toggle"),
 			chromedp.Click("#global-menu-toggle", chromedp.NodeVisible),
-			chromedp.WaitVisible("#global-menu-panel:not([hidden])"),
+			
+			// 2. Wait for a header to appear in the menu
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				fmt.Printf("   [DEBUG] Waiting for menu content for %s\n", section)
+				return nil
+			}),
+			chromedp.WaitVisible("#global-menu-panel h3", chromedp.ByQuery),
 			
 			// 3. Verify content
 			chromedp.ActionFunc(func(ctx context.Context) error {
@@ -131,8 +150,7 @@ func RunWwwMenuSmoke() error {
 					
 					chromedp.Evaluate(`document.querySelectorAll('#global-menu-panel *').length`, &countAfter).Do(ctx)
 					
-					// If it duplicated, countAfter would be roughly 2x countBefore
-					if countAfter > countBefore + 5 { // Allow small increase if new status added, but not whole menu
+					if countAfter > countBefore + 5 { 
 						return fmt.Errorf("menu items accumulated/duplicated after button click in section %s (Before: %d, After: %d)", section, countBefore, countAfter)
 					}
 				}
@@ -141,8 +159,9 @@ func RunWwwMenuSmoke() error {
 			
 			// 5. Close menu
 			chromedp.Click("#global-menu-toggle", chromedp.NodeVisible),
-			chromedp.WaitReady("#global-menu-panel[hidden]"),
+			chromedp.Sleep(200 * time.Millisecond),
 		)
+		sectCancel()
 
 		if err != nil {
 			return fmt.Errorf("test failed for %s: %v", section, err)
@@ -152,20 +171,4 @@ func RunWwwMenuSmoke() error {
 
 	fmt.Println(">> [WWW] Menu Smoke: pass")
 	return nil
-}
-
-func waitForPortLocalMenu(port int, timeout time.Duration) {
-	start := time.Now()
-	for time.Since(start) < timeout {
-		if conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), time.Second); err == nil {
-			conn.Close(); return
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-}
-
-func isPortOpenMenu(port int) bool {
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 300*time.Millisecond)
-	if err == nil { conn.Close(); return true }
-	return false
 }

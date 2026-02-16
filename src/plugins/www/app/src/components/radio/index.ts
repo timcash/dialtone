@@ -1,3 +1,4 @@
+import { type VisualizationControl, type SectionManager } from "../util/section";
 import * as THREE from "three";
 import { FpsCounter } from "../util/fps";
 import { GpuTimer } from "../util/gpu_timer";
@@ -218,7 +219,7 @@ class RadioVisualization {
   };
 }
 
-export function mountRadio(container: HTMLElement) {
+export function mountRadio(container: HTMLElement, sections: SectionManager): Promise<VisualizationControl> {
   container.innerHTML = `
     <div class="marketing-overlay" aria-label="Radio section: handheld with LCD">
       <h2>Radios for robots</h2>
@@ -238,6 +239,7 @@ export function mountRadio(container: HTMLElement) {
   ];
   const stopTyping = startTyping(subtitleEl, subtitles);
 
+  sections.setLoadingMessage("s-radio", "loading dialtone radio ...");
   const viz = new RadioVisualization(container);
   const lcdTextEl = container.querySelector(
     "[data-radio-lcd]"

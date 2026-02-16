@@ -1,8 +1,9 @@
+import { type VisualizationControl, type SectionManager } from "../util/section";
 import { startTyping } from "../util/typing";
 import { setupMusicMenu } from "./menu";
 import { MusicVisualization } from "./visualization";
 
-export function mountMusic(container: HTMLElement) {
+export function mountMusic(container: HTMLElement, sections: SectionManager): Promise<VisualizationControl> {
   container.innerHTML = `
     <div class="marketing-overlay" aria-label="Music section: frequency circle">
       <h2>Harmonic Vision</h2>
@@ -56,6 +57,7 @@ export function mountMusic(container: HTMLElement) {
   ];
   const stopTyping = startTyping(subtitleEl, subtitles);
 
+  sections.setLoadingMessage("s-music", "loading harmonic analysis ...");
   const viz = new MusicVisualization(container);
   
   const updateMenu = () => {

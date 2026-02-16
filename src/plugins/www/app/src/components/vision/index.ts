@@ -1,9 +1,10 @@
+import { type VisualizationControl, type SectionManager } from "../util/section";
 import { startTyping } from "../util/typing";
 import { setupVisionMenu } from "./menu";
 import { VisionVisualization } from "./visualization";
 import { PoseTracker } from "./pose";
 
-export function mountVision(container: HTMLElement) {
+export function mountVision(container: HTMLElement, sections: SectionManager): Promise<VisualizationControl> {
   container.innerHTML = `
     <div class="marketing-overlay" aria-label="Vision section: body tracking">
       <h2 data-typing-title>Bio-Digital Integration</h2>
@@ -20,6 +21,7 @@ export function mountVision(container: HTMLElement) {
   ];
   const stopTyping = startTyping(subtitleEl, subtitles);
 
+  sections.setLoadingMessage("s-vision", "loading pose estimation ...");
   const viz = new VisionVisualization(container);
   const tracker = new PoseTracker();
   let isTracking = false;
