@@ -18,6 +18,7 @@ type MusicConfigOptions = {
 
 export function setupMusicMenu(options: MusicConfigOptions): void {
     const menu = Menu.getInstance();
+    menu.clear();
 
     menu.addHeader("Harmonic Analysis");
 
