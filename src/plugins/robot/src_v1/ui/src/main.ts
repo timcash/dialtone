@@ -1,7 +1,43 @@
 import { setupApp } from '../../../../../libs/ui_v2/ui';
 import './style.css';
+import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import { connect, JSONCodec, type NatsConnection } from 'nats.ws';
+
+
+export let NATS_CONNECTION: NatsConnection | null = null;
+export const NATS_JSON_CODEC = JSONCodec();
 
 const { sections, menu } = setupApp({ title: 'dialtone.robot', debug: true });
+
+const HOSTNAME = window.location.hostname;
+const PROTOCOL = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+
+const term = new Terminal({
+  theme: {
+    background: '#0a0a0c',
+    foreground: '#c5c6c7',
+    cursor: '#66fcf1',
+    selectionBackground: 'rgba(102, 252, 241, 0.3)'
+  },
+  fontFamily: '"Orbitron", monospace',
+  fontSize: 12,
+  cursorBlink: true,
+  convertEol: true
+});
+const fitAddon = new FitAddon();
+term.loadAddon(fitAddon);
+
+const termContainer = document.getElementById('terminal-container');
+if (termContainer) {
+  term.open(termContainer);
+  fitAddon.fit();
+
+  // Resize Observer for Terminal
+  new ResizeObserver(() => {
+    fitAddon.fit();
+  }).observe(termContainer);
+}
 
 sections.register('hero', {
   containerId: 'hero',
@@ -69,6 +105,17 @@ sections.register('video', {
   header: { visible: false, menuVisible: true, title: 'Robot Camera' },
 });
 
+sections.register('controls', {
+  containerId: 'controls',
+  load: async () => {
+    const { mountControls } = await import('./components/controls/index');
+    const container = document.getElementById('controls');
+    if (!container) throw new Error('controls container not found');
+    return mountControls(container);
+  },
+  header: { visible: false, menuVisible: true, title: 'Robot Controls' },
+});
+
 menu.addButton('Hero', 'Navigate Hero', () => {
   void sections.navigateTo('hero');
 });
@@ -87,8 +134,11 @@ menu.addButton('Terminal', 'Navigate Terminal', () => {
 menu.addButton('Camera', 'Navigate Camera', () => {
   void sections.navigateTo('video');
 });
+menu.addButton('Controls', 'Navigate Controls', () => {
+  void sections.navigateTo('controls');
+});
 
-const sectionOrder = ['hero', 'docs', 'table', 'three', 'xterm', 'video'] as const;
+const sectionOrder = ['hero', 'docs', 'table', 'three', 'xterm', 'video', 'controls'] as const;
 const wheelLockedSections = new Set(['table', 'three', 'xterm', 'video']);
 let wheelGestureActive = false;
 let wheelNavInFlight = false;

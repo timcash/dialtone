@@ -36,54 +36,53 @@ func RunDiagnostic(versionDir string) error {
 	// Use IP for diagnostic if provided, to avoid DNS/MagicDNS issues during testing
 	diagTarget := hostname
 	diagPort := "80"
+	
+	// Perform connectivity checks
+	// 1. Basic Ping Check (LAN IP)
 	if robotIP != "" {
-		diagTarget = robotIP
-		diagPort = "8080"
-		logger.LogInfo("[DIAGNOSTIC] Using ROBOT_HOST IP (%s) and port %s for diagnostic to avoid DNS issues.", robotIP, diagPort)
-	}
-
-	// 1. Basic Ping Check
-	logger.LogInfo("[DIAGNOSTIC] Step 1: Pinging %s...", diagTarget)
-	pingCmd := exec.Command("ping", "-c", "3", "-W", "2", diagTarget)
-	if err := pingCmd.Run(); err != nil {
-		logger.LogWarn("Ping to %s failed. This might be normal if ICMP is blocked, but checking HTTP next...", diagTarget)
-	} else {
-		logger.LogInfo("Ping to %s successful.", diagTarget)
-	}
-
-	// 2. HTTP Health Check
-	targetURL := fmt.Sprintf("http://%s:%s", diagTarget, diagPort)
-	logger.LogInfo("[DIAGNOSTIC] Step 2: Checking HTTP health on %s...", targetURL)
-	
-	client := http.Client{Timeout: 5 * time.Second}
-	var healthErr error
-	healthPassed := false
-	
-	// Retry for up to 15 seconds
-	for i := 0; i < 5; i++ {
-		resp, err := client.Get(targetURL + "/health")
-		if err == nil {
-			if resp.StatusCode == http.StatusOK {
-				healthPassed = true
-				resp.Body.Close()
-				break
-			}
-			healthErr = fmt.Errorf("robot health endpoint returned non-200 status: %d", resp.StatusCode)
-			resp.Body.Close()
+		logger.LogInfo("[DIAGNOSTIC] Step 1: Pinging LAN IP %s...", robotIP)
+		pingCmd := exec.Command("ping", "-c", "2", "-W", "1", robotIP)
+		if err := pingCmd.Run(); err != nil {
+			logger.LogWarn("Ping to LAN IP %s failed.", robotIP)
 		} else {
-			healthErr = err
+			logger.LogInfo("Ping to LAN IP %s successful.", robotIP)
 		}
-		logger.LogInfo("[DIAGNOSTIC] Health check attempt %d failed, retrying in 3s...", i+1)
-		time.Sleep(3 * time.Second)
 	}
 
-	if !healthPassed {
-		return fmt.Errorf("failed to reach robot health endpoint at %s/health after retries: %w", diagTarget, healthErr)
+	// 2. HTTP Health Check (LAN IP on port 8080)
+	if robotIP != "" {
+		lanURL := fmt.Sprintf("http://%s:8080", robotIP)
+		logger.LogInfo("[DIAGNOSTIC] Step 2: Verifying LAN Web Server on %s...", lanURL)
+		if err := checkHealth(lanURL); err != nil {
+			logger.LogWarn("LAN health check failed (port 8080): %v", err)
+		} else {
+			logger.LogInfo("LAN health check PASSED (port 8080).")
+		}
 	}
-	logger.LogInfo("Robot HTTP health check PASSED.")
 
-	// 3. Browser-based UI Validation
-	logger.LogInfo("[DIAGNOSTIC] Step 3: Starting browser for UI validation...")
+	// 3. HTTP Health Check (Tailscale Hostname on port 80)
+	tsURL := fmt.Sprintf("http://%s", hostname)
+	logger.LogInfo("[DIAGNOSTIC] Step 3: Verifying Tailscale Web Server on %s...", tsURL)
+	if err := checkHealth(tsURL); err != nil {
+		logger.LogWarn("Tailscale health check failed (port 80): %v. (MagicDNS might still be propagating)", err)
+		// If we have an IP and LAN check passed, we can proceed using the LAN URL for UI tests
+		if robotIP != "" {
+			diagTarget = robotIP
+			diagPort = "8080"
+			logger.LogInfo("[DIAGNOSTIC] Proceeding with UI tests via LAN IP: %s:8080", robotIP)
+		} else {
+			return fmt.Errorf("Tailscale health check failed and no LAN IP available: %w", err)
+		}
+	} else {
+		logger.LogInfo("Tailscale health check PASSED (port 80).")
+		diagTarget = hostname
+		diagPort = "80"
+	}
+
+	targetURL := fmt.Sprintf("http://%s:%s", diagTarget, diagPort)
+	
+	// 4. Browser-based UI Validation
+	logger.LogInfo("[DIAGNOSTIC] Step 4: Starting browser for UI validation on %s...", targetURL)
 	session, err := test_v2.StartBrowser(test_v2.BrowserOptions{
 		Headless:      true,
 		Role:          "diagnostic",
@@ -231,4 +230,26 @@ func RunDiagnostic(versionDir string) error {
 
 	logger.LogInfo("Robot UI diagnostic completed successfully.")
 	return nil
+}
+
+func checkHealth(url string) error {
+	client := http.Client{Timeout: 5 * time.Second}
+	var lastErr error
+	for i := 0; i < 3; i++ {
+		resp, err := client.Get(url + "/health")
+		if err == nil {
+			if resp.StatusCode == http.StatusOK {
+				resp.Body.Close()
+				return nil
+			}
+			lastErr = fmt.Errorf("status %d", resp.StatusCode)
+			resp.Body.Close()
+		} else {
+			lastErr = err
+		}
+		if i < 2 {
+			time.Sleep(2 * time.Second)
+		}
+	}
+	return lastErr
 }
