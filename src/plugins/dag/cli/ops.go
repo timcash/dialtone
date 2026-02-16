@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -91,16 +90,23 @@ func RunUIRun(versionDir string, extraArgs []string) error {
 	return cmd.Run()
 }
 
-func RunTest(versionDir string) error {
+func RunTest(versionDir string, attach bool) error {
 	fmt.Printf(">> [DAG] Test: %s\n", versionDir)
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
 
-	devSession, err := ensureDevServerAndHeadedBrowser(cwd, versionDir)
+	allowOpenBrowser := !attach
+	devSession, err := ensureDevServerAndHeadedBrowser(cwd, versionDir, allowOpenBrowser)
 	if err != nil {
 		return err
+	}
+	if attach {
+		attachURL := fmt.Sprintf("http://127.0.0.1:%d/#three", devSession.port)
+		if err := openPersistentDevChrome(attachURL); err != nil {
+			return fmt.Errorf("attach mode could not open or reuse dev browser: %w", err)
+		}
 	}
 	fmt.Printf(">> [DAG] Test: leaving dev preview running at http://127.0.0.1:%d after test completion\n", devSession.port)
 
@@ -114,11 +120,16 @@ func RunTest(versionDir string) error {
 	cmd.Dir = cwd
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(), "DAG_TEST_ATTACH=0")
+	if attach {
+		cmd.Env = append(cmd.Env, "DAG_TEST_ATTACH=1", "DAG_TEST_CLICK_DELAY_MS=120")
+		fmt.Printf(">> [DAG] Test: attach mode enabled (reusing headed dev browser session)\n")
+	}
 	testErr := cmd.Run()
 
 	// Preflight/build steps in the suite can interrupt the dev server.
 	// Re-ensure preview availability after test completion so users can keep interacting.
-	if _, err := ensureDevServerAndHeadedBrowser(cwd, versionDir); err != nil {
+	if _, err := ensureDevServerAndHeadedBrowser(cwd, versionDir, false); err != nil {
 		if testErr == nil {
 			return fmt.Errorf("tests finished, but failed to keep dev preview running: %w", err)
 		}
@@ -139,7 +150,7 @@ func (s *dagDevPreviewSession) Close() {
 	}
 }
 
-func ensureDevServerAndHeadedBrowser(repoRoot, versionDir string) (*dagDevPreviewSession, error) {
+func ensureDevServerAndHeadedBrowser(repoRoot, versionDir string, allowOpenBrowser bool) (*dagDevPreviewSession, error) {
 	uiDir := filepath.Join(repoRoot, "src", "plugins", "dag", versionDir, "ui")
 	if _, err := os.Stat(filepath.Join(uiDir, "index.html")); err != nil {
 		return nil, fmt.Errorf("dag ui entry not found for %s: %w", versionDir, err)
@@ -156,7 +167,7 @@ func ensureDevServerAndHeadedBrowser(repoRoot, versionDir string) (*dagDevPrevie
 		matched, probeErr := devServerMatchesVersion(port, targetTitle)
 		if probeErr == nil && matched {
 			reuse = true
-			fmt.Printf(">> [DAG] Test: reusing dev server for %s at http://127.0.0.1:%d\n", versionDir, port)
+			fmt.Printf(">> [DAG] Test: dev server already running for %s at http://127.0.0.1:%d\n", versionDir, port)
 		} else {
 			freePort, pickErr := test_v2.PickFreePort()
 			if pickErr != nil {
@@ -177,14 +188,17 @@ func ensureDevServerAndHeadedBrowser(repoRoot, versionDir string) (*dagDevPrevie
 		}
 		session.startedHere = true
 		fmt.Printf(">> [DAG] Test: started dev server for %s at http://127.0.0.1:%d\n", versionDir, port)
+		if allowOpenBrowser {
+			url := fmt.Sprintf("http://127.0.0.1:%d/#three", port)
+			if err := openPersistentDevChrome(url); err != nil {
+				session.Close()
+				return nil, err
+			}
+			fmt.Printf(">> [DAG] Test: opened headed Chrome preview at %s\n", url)
+		}
+	} else if allowOpenBrowser {
+		fmt.Printf(">> [DAG] Test: keeping existing dev preview tab at http://127.0.0.1:%d/#three\n", port)
 	}
-
-	url := fmt.Sprintf("http://127.0.0.1:%d/#three", port)
-	if err := openPersistentDevChrome(url); err != nil {
-		session.Close()
-		return nil, err
-	}
-	fmt.Printf(">> [DAG] Test: opened headed Chrome preview at %s\n", url)
 	return session, nil
 }
 
@@ -199,23 +213,7 @@ func openPersistentDevChrome(url string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open persistent dev chrome preview at %s: %w", url, err)
 	}
-	_ = openPreviewURL(url)
 	return nil
-}
-
-func openPreviewURL(url string) error {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", "-a", "Google Chrome", url)
-	case "linux":
-		cmd = exec.Command("xdg-open", url)
-	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", "", url)
-	default:
-		return nil
-	}
-	return cmd.Start()
 }
 
 func startDetachedDagDevServer(repoRoot, versionDir string, port int) error {
