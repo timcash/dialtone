@@ -25,6 +25,7 @@ export type NnConfig = {
 
 export function setupNnMenu(options: NnConfigOptions): void {
     const menu = Menu.getInstance();
+    menu.clear();
     const config: NnConfig = {
         learningRate: options.learningRate,
         batchSize: options.batchSize,

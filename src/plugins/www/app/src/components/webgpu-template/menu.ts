@@ -7,6 +7,7 @@ type WebGpuTemplateConfigOptions = {
 
 export function setupWebGpuTemplateMenu(options: WebGpuTemplateConfigOptions): void {
     const menu = Menu.getInstance();
+    menu.clear();
 
     menu.addHeader("Settings");
 
