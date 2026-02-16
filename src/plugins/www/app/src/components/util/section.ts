@@ -63,18 +63,31 @@ export class SectionManager {
     }
   }
 
+  public setLoadingMessage(sectionId: string, message: string): void {
+    const sectionEl = document.getElementById(sectionId);
+    const messageEl = sectionEl?.querySelector(".loading-message") as HTMLElement;
+    if (messageEl) {
+      messageEl.textContent = message;
+    }
+  }
+
   async load(sectionId: string): Promise<void> {
     if (this.visualizations.has(sectionId)) return;
     const config = this.configs.get(sectionId);
     if (!config) return;
+
+    // Set initial loading message
+    this.setLoadingMessage(sectionId, `loading ${sectionId.replace('s-', '')} ...`);
 
     const control = await config.load();
     this.visualizations.set(sectionId, control);
     control.setVisible(false);
     
     const sectionEl = document.getElementById(sectionId);
-    sectionEl?.classList.add("is-ready");
-    if (this.activeSectionId === sectionId) control.setVisible(true);
+    setTimeout(() => {
+      sectionEl?.classList.add("is-ready");
+      if (this.activeSectionId === sectionId) control.setVisible(true);
+    }, 100);
   }
 
   private updateHeader(config: any, sectionEl: HTMLElement): void {

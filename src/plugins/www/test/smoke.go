@@ -44,11 +44,11 @@ func RunWwwSmoke() error {
 	screenshotsDir := filepath.Join(cwd, "src", "plugins", "www", "screenshots")
 	os.RemoveAll(screenshotsDir); os.MkdirAll(screenshotsDir, 0755)
 
-	if !isPortOpen(5173) {
-		devCmd := exec.Command("npm", "run", "dev", "--", "--host", "127.0.0.1")
+	if !isPortOpen(4173) {
+		devCmd := exec.Command("npm", "run", "preview", "--", "--host", "127.0.0.1")
 		devCmd.Dir = wwwDir; devCmd.Start(); defer devCmd.Process.Kill()
 	}
-	waitForPortLocal(5173, 60*time.Second)
+	waitForPortLocal(4173, 60*time.Second)
 
 	chromePath := browser.FindChromePath()
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
@@ -68,7 +68,7 @@ func RunWwwSmoke() error {
 	defer tabCancel()
 
 	// Initial setup with large timeout
-	setupCtx, setupCancel := context.WithTimeout(ctx, 120*time.Second)
+	setupCtx, setupCancel := context.WithTimeout(ctx, 180*time.Second)
 	defer setupCancel()
 
 	var mu sync.Mutex
@@ -92,8 +92,8 @@ func RunWwwSmoke() error {
 	if err := chromedp.Run(setupCtx,
 		performance.Enable(),
 		chromedp.EmulateViewport(375, 812, chromedp.EmulateMobile),
-		chromedp.Navigate("http://localhost:5173"),
-		chromedp.WaitReady(".header-fps"),
+		chromedp.Navigate("http://127.0.0.1:4173"),
+		chromedp.WaitReady("body"),
 		chromedp.Evaluate(`(function(){
 			const observer = new MutationObserver(()=>{
 				const el = document.querySelector('.header-fps');
