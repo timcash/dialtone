@@ -113,6 +113,10 @@ func printUsage() {
 	fmt.Println("  smoke <dir>    Run legacy smoke test")
 	fmt.Println("  src --n <N>    Generate next src_vN folder")
 	fmt.Println("\nDefault <dir> is the latest src_vN folder.")
+	fmt.Println("\nExamples:")
+	fmt.Println("  ./dialtone.sh dag test src_v3")
+	fmt.Println("  ./dialtone.sh dag dev src_v3")
+	fmt.Println("  ./dialtone.sh dag src --n 5    # creates src/plugins/dag/src_v5")
 }
 
 func runSmoke(versionDir string, timeoutSec int) error {
