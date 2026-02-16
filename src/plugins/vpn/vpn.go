@@ -23,7 +23,7 @@ import (
 	"embed"
 )
 
-//go:embed all:src_v1/ui/dist
+//go:embed all:src_v1/ui
 var webFS embed.FS
 
 // RunVPN handles 'vpn <subcommand>'

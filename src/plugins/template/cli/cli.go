@@ -2,7 +2,6 @@ package cli
 
 import (
 	test_v2 "dialtone/cli/src/libs/test_v2"
-	"flag"
 	"fmt"
 	"io/fs"
 	"os"
@@ -25,6 +24,12 @@ func Run(args []string) error {
 	if len(args) == 0 {
 		printUsage()
 		return nil
+	}
+
+	// Set default plugin dir if not already set by a wrapper
+	if os.Getenv("DIALTONE_PLUGIN_DIR") == "" {
+		cwd, _ := os.Getwd()
+		os.Setenv("DIALTONE_PLUGIN_DIR", filepath.Join(cwd, "src", "plugins", "template"))
 	}
 
 	command := args[0]
@@ -56,19 +61,6 @@ func Run(args []string) error {
 		return RunUIRun(getDir(), args[2:])
 	case "serve":
 		return RunServe(getDir())
-	case "smoke":
-		dir := getDir()
-		cwd, _ := os.Getwd()
-		smokeFile := filepath.Join(cwd, "src", "plugins", "template", dir, "smoke", "smoke.go")
-		if _, err := os.Stat(smokeFile); os.IsNotExist(err) {
-			return fmt.Errorf("smoke test file not found: %s", smokeFile)
-		}
-
-		fmt.Printf(">> [TEMPLATE] Running Smoke Test for %s...\n", dir)
-		cmd := exec.Command("go", "run", smokeFile, dir)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		return cmd.Run()
 	case "test":
 		dir := getDir()
 		cwd, _ := os.Getwd()
@@ -84,21 +76,11 @@ func Run(args []string) error {
 		return cmd.Run()
 	case "build":
 		return RunBuild(getDir())
-	case "src":
-		n := 0
-		if len(args) > 1 && !strings.HasPrefix(args[1], "-") {
-			n, _ = strconv.Atoi(args[1])
-		} else {
-			srcFlags := flag.NewFlagSet("template src", flag.ExitOnError)
-			nFlag := srcFlags.Int("n", 0, "Version number to create")
-			srcFlags.Parse(args[1:])
-			n = *nFlag
+	case "copy":
+		if len(args) < 3 {
+			return fmt.Errorf("usage: template copy <src_vN> <target_directory>")
 		}
-
-		if n == 0 {
-			return fmt.Errorf("usage: template src <N> or template src --n <N>")
-		}
-		return RunCreateVersion(n)
+		return RunCopy(args[1], args[2])
 	default:
 		return fmt.Errorf("unknown command: %s", command)
 	}
@@ -127,13 +109,47 @@ func RunInstall(versionDir string) error {
 	return runTemplateInstall(versionDir)
 }
 
+func resolvePaths(versionDir string) (string, string) {
+	cwd, _ := os.Getwd()
+
+	// 1. Absolute path
+	if filepath.IsAbs(versionDir) {
+		return versionDir, filepath.Join(versionDir, "ui")
+	}
+
+	// 2. Relative to repo root
+	if strings.HasPrefix(versionDir, "src/plugins/") {
+		abs := filepath.Join(cwd, versionDir)
+		return abs, filepath.Join(abs, "ui")
+	}
+
+	// 3. Relative to DIALTONE_PLUGIN_DIR (for when called from another plugin)
+	pluginDir := os.Getenv("DIALTONE_PLUGIN_DIR")
+	if pluginDir != "" {
+		abs := filepath.Join(pluginDir, versionDir)
+		if _, err := os.Stat(abs); err == nil {
+			return abs, filepath.Join(abs, "ui")
+		}
+	}
+
+	// 4. Default to template plugin
+	pluginBase := filepath.Join(cwd, "src", "plugins", "template")
+	versionDirPath := filepath.Join(pluginBase, versionDir)
+	uiDir := filepath.Join(versionDirPath, "ui")
+
+	return versionDirPath, uiDir
+}
+
 func RunFmt(versionDir string) error {
 	fmt.Printf(">> [TEMPLATE] Fmt: %s\n", versionDir)
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "fmt", "./src/plugins/template/"+versionDir+"/...")
+	versionDirPath, _ := resolvePaths(versionDir)
+	relPath, _ := filepath.Rel(cwd, versionDirPath)
+
+	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "fmt", "./"+filepath.ToSlash(relPath)+"/...")
 	cmd.Dir = cwd
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -146,7 +162,7 @@ func RunFormat(versionDir string) error {
 	if err != nil {
 		return err
 	}
-	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
+	_, uiDir := resolvePaths(versionDir)
 	cmd := runBun(cwd, uiDir, "run", "format")
 	return cmd.Run()
 }
@@ -157,7 +173,10 @@ func RunVet(versionDir string) error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "vet", "./src/plugins/template/"+versionDir+"/...")
+	versionDirPath, _ := resolvePaths(versionDir)
+	relPath, _ := filepath.Rel(cwd, versionDirPath)
+
+	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "vet", "./"+filepath.ToSlash(relPath)+"/...")
 	cmd.Dir = cwd
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -170,7 +189,10 @@ func RunGoBuild(versionDir string) error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "build", "./src/plugins/template/"+versionDir+"/...")
+	versionDirPath, _ := resolvePaths(versionDir)
+	relPath, _ := filepath.Rel(cwd, versionDirPath)
+
+	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "build", "./"+filepath.ToSlash(relPath)+"/...")
 	cmd.Dir = cwd
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -181,7 +203,7 @@ func RunLint(versionDir string) error {
 	fmt.Printf(">> [TEMPLATE] Lint: %s\n", versionDir)
 
 	cwd, _ := os.Getwd()
-	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
+	_, uiDir := resolvePaths(versionDir)
 
 	fmt.Println("   [LINT] Running tsc...")
 	cmd := runBun(cwd, uiDir, "run", "lint")
@@ -192,7 +214,8 @@ func RunServe(versionDir string) error {
 	fmt.Printf(">> [TEMPLATE] Serve: %s\n", versionDir)
 
 	cwd, _ := os.Getwd()
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "run", filepath.ToSlash(filepath.Join("src", "plugins", "template", versionDir, "cmd", "main.go")))
+	versionDirPath, _ := resolvePaths(versionDir)
+	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "run", filepath.ToSlash(filepath.Join(versionDirPath, "cmd", "main.go")))
 	cmd.Dir = cwd
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -209,7 +232,7 @@ func RunUIRun(versionDir string, extraArgs []string) error {
 	}
 
 	cwd, _ := os.Getwd()
-	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
+	_, uiDir := resolvePaths(versionDir)
 	cmd := runBun(cwd, uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(port))
 	return cmd.Run()
 }
@@ -217,8 +240,7 @@ func RunUIRun(versionDir string, extraArgs []string) error {
 func RunDev(versionDir string) error {
 	fmt.Printf(">> [TEMPLATE] Dev: %s\n", versionDir)
 	cwd, _ := os.Getwd()
-	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
-	versionDirPath := filepath.Join(cwd, "src", "plugins", "template", versionDir)
+	versionDirPath, uiDir := resolvePaths(versionDir)
 	devPort := 3000
 	devURL := fmt.Sprintf("http://127.0.0.1:%d", devPort)
 
@@ -249,7 +271,7 @@ func RunDev(versionDir string) error {
 func RunBuild(versionDir string) error {
 	fmt.Printf(">> [TEMPLATE] Build: %s\n", versionDir)
 	cwd, _ := os.Getwd()
-	uiDir := filepath.Join(cwd, "src", "plugins", "template", versionDir, "ui")
+	_, uiDir := resolvePaths(versionDir)
 
 	if err := RunInstall(versionDir); err != nil {
 		return err
@@ -266,53 +288,101 @@ func RunBuild(versionDir string) error {
 	return nil
 }
 
-func RunCreateVersion(newVer int) error {
-	cwd, _ := os.Getwd()
-	pluginDir := filepath.Join(cwd, "src", "plugins", "template")
+func copyDir(srcDir, destDir string) error {
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return err
+	}
 
-	entries, _ := os.ReadDir(pluginDir)
-	maxVer := 0
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "src_v") {
-			ver, _ := strconv.Atoi(e.Name()[5:])
-			if ver > maxVer {
-				maxVer = ver
+	return filepath.WalkDir(srcDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(srcDir, path)
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == "node_modules" || d.Name() == "dist" || d.Name() == ".pixi" || d.Name() == ".git" || d.Name() == ".chrome_data" || d.Name() == ".dialtone" {
+				return filepath.SkipDir
+			}
+			return os.MkdirAll(filepath.Join(destDir, rel), 0755)
+		}
+
+		// Copy file
+		input, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(destDir, rel), input, 0644)
+	})
+}
+
+func RunCopy(srcVersion, targetDir string) error {
+	cwd, _ := os.Getwd()
+	srcDir := filepath.Join(cwd, "src", "plugins", "template", srcVersion)
+
+	if _, err := os.Stat(srcDir); os.IsNotExist(err) {
+		return fmt.Errorf("source directory does not exist: %s", srcDir)
+	}
+
+	destDir := targetDir
+	if !filepath.IsAbs(destDir) {
+		destDir = filepath.Join(cwd, targetDir)
+	}
+
+	if _, err := os.Stat(destDir); err == nil {
+		return fmt.Errorf("target directory already exists: %s", destDir)
+	}
+
+	fmt.Printf(">> [TEMPLATE] Copying %s to %s...\n", srcVersion, targetDir)
+
+	// Parse src version number
+	srcVerNum := 0
+	if strings.HasPrefix(srcVersion, "src_v") {
+		srcVerNum, _ = strconv.Atoi(srcVersion[5:])
+	}
+
+	// Parse dest plugin name and version
+	destPlugin := "template"
+	destVersion := srcVersion
+	destVerNum := srcVerNum
+
+	// Example targetDir: src/plugins/my-plugin/src_v5
+	absTarget, _ := filepath.Abs(destDir)
+	relTarget, _ := filepath.Rel(cwd, absTarget)
+	parts := strings.Split(filepath.ToSlash(relTarget), "/")
+
+	// Check if it's in src/plugins/NAME/VERSION
+	if len(parts) >= 3 && parts[0] == "src" && parts[1] == "plugins" {
+		destPlugin = parts[2]
+		if len(parts) >= 4 {
+			destVersion = parts[3]
+			if strings.HasPrefix(destVersion, "src_v") {
+				destVerNum, _ = strconv.Atoi(destVersion[5:])
 			}
 		}
 	}
 
-	if maxVer == 0 {
-		return fmt.Errorf("no existing src_vN folders found to clone from")
-	}
-
-	srcDir := filepath.Join(pluginDir, fmt.Sprintf("src_v%d", maxVer))
-	destDir := filepath.Join(pluginDir, fmt.Sprintf("src_v%d", newVer))
-
-	if _, err := os.Stat(destDir); err == nil {
-		return fmt.Errorf("version directory already exists: %s", destDir)
-	}
-
-	fmt.Printf(">> [TEMPLATE] Creating new version: src_v%d from src_v%d\n", newVer, maxVer)
-
-	// Simple copy using cp -r
-	cmd := exec.Command("cp", "-r", srcDir, destDir)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := copyDir(srcDir, destDir); err != nil {
 		return err
 	}
 
-	srcVersion := fmt.Sprintf("src_v%d", maxVer)
-	destVersion := fmt.Sprintf("src_v%d", newVer)
-	if err := rewriteVersionRefs(destDir, srcVersion, destVersion, maxVer, newVer); err != nil {
-		return fmt.Errorf("failed to rewrite version references: %w", err)
+	if err := rewriteAllRefs(destDir, "template", destPlugin, srcVersion, destVersion, srcVerNum, destVerNum); err != nil {
+		return fmt.Errorf("failed to rewrite references: %w", err)
 	}
 
-	fmt.Printf(">> [TEMPLATE] New version created at: %s\n", destDir)
+	fmt.Printf(">> [TEMPLATE] Successfully copied to: %s\n", destDir)
 	return nil
 }
 
-func rewriteVersionRefs(destDir, srcVersion, destVersion string, srcVerNum, destVerNum int) error {
+func toTitle(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+func rewriteAllRefs(destDir, srcPlugin, destPlugin, srcVersion, destVersion string, srcVerNum, destVerNum int) error {
 	allowedExt := map[string]bool{
 		".go":   true,
 		".ts":   true,
@@ -329,20 +399,28 @@ func rewriteVersionRefs(destDir, srcVersion, destVersion string, srcVerNum, dest
 		".d.ts": true,
 	}
 
-	srcTemplateLabel := fmt.Sprintf("Template v%d", srcVerNum)
-	destTemplateLabel := fmt.Sprintf("Template v%d", destVerNum)
-	srcPackageLabel := fmt.Sprintf("template-ui-v%d", srcVerNum)
-	destPackageLabel := fmt.Sprintf("template-ui-v%d", destVerNum)
+	srcTemplateLabel := "Template"
+	if srcVerNum > 0 {
+		srcTemplateLabel = fmt.Sprintf("Template v%d", srcVerNum)
+	}
+
+	destPluginLabel := toTitle(destPlugin)
+	if destVerNum > 0 {
+		destPluginLabel = fmt.Sprintf("%s v%d", toTitle(destPlugin), destVerNum)
+	}
+
+	srcPackageLabel := fmt.Sprintf("%s-ui-%s", srcPlugin, strings.ReplaceAll(srcVersion, "src_", ""))
+	destPackageLabel := fmt.Sprintf("%s-ui-%s", destPlugin, strings.ReplaceAll(destVersion, "src_", ""))
+
+	// More replacements
+	srcPluginPath := filepath.Join("src", "plugins", srcPlugin)
+	destPluginPath := filepath.Join("src", "plugins", destPlugin)
 
 	return filepath.WalkDir(destDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
-			name := d.Name()
-			if name == "node_modules" || name == "dist" || name == ".pixi" || name == ".git" {
-				return filepath.SkipDir
-			}
 			return nil
 		}
 
@@ -357,9 +435,20 @@ func rewriteVersionRefs(destDir, srcVersion, destVersion string, srcVerNum, dest
 		}
 		content := string(raw)
 		updated := content
+
+		// Order matters: replace specific paths first
+		updated = strings.ReplaceAll(updated, srcPluginPath, destPluginPath)
+		updated = strings.ReplaceAll(updated, "/"+srcPlugin+"/", "/"+destPlugin+"/")
+		updated = strings.ReplaceAll(updated, "\""+srcPlugin+"\"", "\""+destPlugin+"\"")
+		updated = strings.ReplaceAll(updated, "\""+srcPlugin+"\",", "\""+destPlugin+"\",")
+		updated = strings.ReplaceAll(updated, "\""+srcPlugin+" ", "\""+destPlugin+" ")
+		updated = strings.ReplaceAll(updated, "\""+srcVersion+"\"", "\""+destVersion+"\"")
 		updated = strings.ReplaceAll(updated, srcVersion, destVersion)
-		updated = strings.ReplaceAll(updated, srcTemplateLabel, destTemplateLabel)
+		updated = strings.ReplaceAll(updated, srcTemplateLabel, destPluginLabel)
 		updated = strings.ReplaceAll(updated, srcPackageLabel, destPackageLabel)
+
+		// Special case for Template Server in main.go
+		updated = strings.ReplaceAll(updated, "Template Server", fmt.Sprintf("%s Server", toTitle(destPlugin)))
 
 		if updated == content {
 			return nil
@@ -382,6 +471,5 @@ func printUsage() {
 	fmt.Println("  serve <dir>    Run plugin Go server")
 	fmt.Println("  build <dir>    Build everything needed (UI assets)")
 	fmt.Println("  test <dir>     Run automated tests and write TEST.md artifacts")
-	fmt.Println("  smoke <dir>    Run robust automated UI tests")
-	fmt.Println("  src --n <N>    Generate next src_vN folder")
+	fmt.Println("  copy <src_vN> <target_dir> Copy template version to target directory")
 }
