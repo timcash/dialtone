@@ -936,7 +936,7 @@ export function mountPolicy(container: HTMLElement, sections: SectionManager): V
     <div class="marketing-overlay" aria-label="Policy simulator section: interactive global policy visualization">
       <h2>Global Policy Simulator</h2>
       <p data-typing-subtitle></p>
-      <div class="sim-stats" style="margin-top: 1rem; font-family: 'Inter', monospace; font-size: 0.9rem; color: #00ff88; opacity: 0.8;">
+      <div class="sim-stats" style="margin-top: 1rem; font-family: 'Inter', monospace; font-size: 0.9rem; color: #e5e5e5; opacity: 0.8;">
         SIMULATIONS: <span id="policy-sim-count">0</span>
       </div>
     </div>

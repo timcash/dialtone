@@ -69,7 +69,7 @@ export class PolicyHistogram {
       const edges = new THREE.EdgesGeometry(boxGeometry);
       boxGeometry.dispose();
       const material = new THREE.LineBasicMaterial({
-        color: 0x00ff88, // Use policy green
+        color: 0xf5f5f5, // White-grey
         transparent: true,
         opacity: 0.62,
       });
