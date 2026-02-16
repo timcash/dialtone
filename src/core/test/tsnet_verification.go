@@ -11,7 +11,7 @@ import (
 
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/util"
-	"dialtone/cli/src/plugins/vpn/cli"
+	"dialtone/cli/src/plugins/vpn"
 )
 
 func init() {
@@ -25,18 +25,17 @@ func RunTsnetTest() error {
 	apiKey := os.Getenv("TS_API_KEY")
 	authKey := os.Getenv("TS_AUTHKEY")
 
-	if apiKey != "" {
-		logger.LogInfo("TS_API_KEY found, provisioning new ephemeral auth key...")
-		key, err := cli.ProvisionKey(apiKey, false) // Don't overwrite .env for test
-		if err != nil {
-			logger.LogInfo("Failed to provision key: %v. Falling back to TS_AUTHKEY.", err)
-		} else {
-			authKey = key
-			logger.LogInfo("Successfully provisioned fresh key.")
-		}
-	}
-
-	if authKey == "" {
+	        if apiKey != "" {
+	                logger.LogInfo("TS_API_KEY found, provisioning new ephemeral auth key...")
+	                key, err := vpn.ProvisionKey(apiKey, false) // Don't overwrite .env for test
+	                if err != nil {
+	                        logger.LogInfo("Failed to provision key: %v. Falling back to TS_AUTHKEY.", err)
+	                } else {
+	                        authKey = key
+	                        logger.LogInfo("Successfully provisioned fresh key.")
+	                }
+	        }
+		if authKey == "" {
 		return fmt.Errorf("neither TS_API_KEY nor TS_AUTHKEY environment variables are set")
 	}
 
