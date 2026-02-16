@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"sort"
 
 	_ "github.com/marcboeker/go-duckdb"
 )
@@ -22,17 +23,23 @@ func Run01DuckDBGraphQueries() error {
 		`CREATE TABLE dag_node (node_id VARCHAR, layer_id VARCHAR, label VARCHAR, rank INTEGER);`,
 		`CREATE TABLE dag_edge (edge_id VARCHAR, layer_id VARCHAR, from_node_id VARCHAR, to_node_id VARCHAR, weight DOUBLE);`,
 		`INSERT INTO dag_graph VALUES ('g1', 'root');`,
-		`INSERT INTO dag_layer VALUES ('root', 'g1', NULL, 0);`,
+		`INSERT INTO dag_layer VALUES
+			('root', 'g1', NULL, 0),
+			('nested_a', 'g1', 'n_mid_a', 1);`,
 		`INSERT INTO dag_node VALUES
 			('n_root', 'root', 'Root', 0),
 			('n_mid_a', 'root', 'Mid A', 1),
 			('n_mid_b', 'root', 'Mid B', 1),
-			('n_leaf', 'root', 'Leaf', 2);`,
+			('n_leaf', 'root', 'Leaf', 2),
+			('n_nested_1', 'nested_a', 'Nested 1', 2),
+			('n_nested_2', 'nested_a', 'Nested 2', 3);`,
 		`INSERT INTO dag_edge VALUES
 			('e1', 'root', 'n_root', 'n_mid_a', 0.9),
 			('e2', 'root', 'n_mid_a', 'n_leaf', 0.8),
 			('e3', 'root', 'n_root', 'n_mid_b', 0.7),
-			('e4', 'root', 'n_mid_b', 'n_leaf', 0.6);`,
+			('e4', 'root', 'n_mid_b', 'n_leaf', 0.6),
+			('e5', 'nested_a', 'n_mid_a', 'n_nested_1', 0.5),
+			('e6', 'nested_a', 'n_nested_1', 'n_nested_2', 0.4);`,
 		`CREATE PROPERTY GRAPH dag_pg
 			VERTEX TABLES (
 				dag_node
@@ -51,6 +58,7 @@ func Run01DuckDBGraphQueries() error {
 	}
 
 	var edgeCount int
+	fmt.Println("[GRAPH] running: graph_edge_match_count")
 	if err := db.QueryRow(`
 		SELECT COUNT(*)
 		FROM GRAPH_TABLE (dag_pg
@@ -60,11 +68,12 @@ func Run01DuckDBGraphQueries() error {
 	`).Scan(&edgeCount); err != nil {
 		return fmt.Errorf("graph edge match query failed: %w", err)
 	}
-	if edgeCount != 4 {
-		return fmt.Errorf("expected 4 graph edges from GRAPH_TABLE, got %d", edgeCount)
+	if edgeCount != 6 {
+		return fmt.Errorf("expected 6 graph edges from GRAPH_TABLE, got %d", edgeCount)
 	}
 
 	var hops int
+	fmt.Println("[GRAPH] running: shortest_path_hops_root_to_leaf")
 	if err := db.QueryRow(`
 		SELECT hops
 		FROM GRAPH_TABLE (dag_pg
@@ -81,6 +90,7 @@ func Run01DuckDBGraphQueries() error {
 	}
 
 	var rankViolations int
+	fmt.Println("[GRAPH] running: rank_violation_count")
 	if err := db.QueryRow(`
 		SELECT COUNT(*)
 		FROM dag_edge e
@@ -94,5 +104,104 @@ func Run01DuckDBGraphQueries() error {
 		return fmt.Errorf("expected 0 rank violations, got %d", rankViolations)
 	}
 
+	// UI action: given a node, find all nested nodes (nodes inside its nested layers, recursively).
+	fmt.Println("[GRAPH] running: nested_nodes_for_n_mid_a")
+	nestedNodes, err := queryStringList(db, `
+		WITH RECURSIVE nested_layers(layer_id) AS (
+			SELECT l.layer_id
+			FROM dag_layer l
+			WHERE l.parent_node_id = 'n_mid_a'
+			UNION ALL
+			SELECT l2.layer_id
+			FROM dag_layer l2
+			JOIN nested_layers nl ON l2.parent_node_id IN (
+				SELECT n.node_id FROM dag_node n WHERE n.layer_id = nl.layer_id
+			)
+		)
+		SELECT n.node_id
+		FROM dag_node n
+		JOIN nested_layers nl ON nl.layer_id = n.layer_id
+		ORDER BY n.node_id;
+	`)
+	if err != nil {
+		return fmt.Errorf("nested-node query failed: %w", err)
+	}
+	if err := assertStringSetEquals("nested nodes for n_mid_a", nestedNodes, []string{"n_nested_1", "n_nested_2"}); err != nil {
+		return err
+	}
+
+	// UI action: given a node, find all input nodes (edges pointing into the node).
+	fmt.Println("[GRAPH] running: input_nodes_for_n_leaf")
+	inputNodes, err := queryStringList(db, `
+		SELECT input_node
+		FROM GRAPH_TABLE (dag_pg
+			MATCH (src:dag_node)-[e:dag_edge]->(dst:dag_node)
+			WHERE dst.node_id = 'n_leaf'
+			COLUMNS (src.node_id AS input_node)
+		)
+		ORDER BY input_node;
+	`)
+	if err != nil {
+		return fmt.Errorf("input-node query failed: %w", err)
+	}
+	if err := assertStringSetEquals("input nodes for n_leaf", inputNodes, []string{"n_mid_a", "n_mid_b"}); err != nil {
+		return err
+	}
+
+	// UI action: given a node, find all output nodes (edges pointing out of the node).
+	fmt.Println("[GRAPH] running: output_nodes_for_n_root")
+	outputNodes, err := queryStringList(db, `
+		SELECT output_node
+		FROM GRAPH_TABLE (dag_pg
+			MATCH (src:dag_node)-[e:dag_edge]->(dst:dag_node)
+			WHERE src.node_id = 'n_root'
+			COLUMNS (dst.node_id AS output_node)
+		)
+		ORDER BY output_node;
+	`)
+	if err != nil {
+		return fmt.Errorf("output-node query failed: %w", err)
+	}
+	if err := assertStringSetEquals("output nodes for n_root", outputNodes, []string{"n_mid_a", "n_mid_b"}); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func queryStringList(db *sql.DB, query string) ([]string, error) {
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []string{}
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func assertStringSetEquals(label string, got, want []string) error {
+	gotSorted := append([]string(nil), got...)
+	wantSorted := append([]string(nil), want...)
+	sort.Strings(gotSorted)
+	sort.Strings(wantSorted)
+	if len(gotSorted) != len(wantSorted) {
+		return fmt.Errorf("%s mismatch: got %v, want %v", label, gotSorted, wantSorted)
+	}
+	for i := range gotSorted {
+		if gotSorted[i] != wantSorted[i] {
+			return fmt.Errorf("%s mismatch: got %v, want %v", label, gotSorted, wantSorted)
+		}
+	}
 	return nil
 }

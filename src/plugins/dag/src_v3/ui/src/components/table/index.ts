@@ -8,19 +8,10 @@ type TableRow = {
 
 class TableControl implements VisualizationControl {
   private allRows: TableRow[] = [];
-  private onResize = () => {
-    if (!this.visible) return;
-    this.renderVisibleRows();
-  };
-  private visible = false;
 
-  constructor(private container: HTMLElement) {
-    window.addEventListener('resize', this.onResize);
-  }
+  constructor(private container: HTMLElement) {}
 
-  dispose(): void {
-    window.removeEventListener('resize', this.onResize);
-  }
+  dispose(): void {}
 
   private getElements() {
     const table = this.container.querySelector("table[aria-label='DAG Table']") as HTMLTableElement | null;
@@ -37,31 +28,23 @@ class TableControl implements VisualizationControl {
       .join('');
   }
 
-  private renderVisibleRows(): void {
+  private renderAllRows(): void {
     const { table, tbody } = this.getElements();
     if (!table || !tbody) return;
     if (this.allRows.length === 0) return;
-
-    const tableFontSize = parseFloat(window.getComputedStyle(table).fontSize || '13');
-    const rowHeight = Math.max(1, tableFontSize);
-    const headHeight = Math.max(0, table.tHead?.getBoundingClientRect().height ?? 0);
-    const available = Math.max(1, this.container.clientHeight - headHeight);
-    const visibleCount = Math.max(1, Math.min(this.allRows.length, Math.floor(available / rowHeight)));
-
     table.setAttribute('data-total-rows', String(this.allRows.length));
-    table.setAttribute('data-visible-rows', String(visibleCount));
-    this.renderRows(this.allRows.slice(0, visibleCount));
+    table.setAttribute('data-visible-rows', String(this.allRows.length));
+    this.renderRows(this.allRows);
   }
 
   setVisible(visible: boolean): void {
-    this.visible = visible;
     const table = this.container.querySelector("table[aria-label='DAG Table']") as HTMLTableElement | null;
     if (!table) return;
     if (visible) {
       if (this.allRows.length === 0) {
         void this.loadRows(table);
       } else {
-        this.renderVisibleRows();
+        this.renderAllRows();
         table.setAttribute('data-ready', 'true');
       }
     }
@@ -77,12 +60,21 @@ class TableControl implements VisualizationControl {
       const body = (await res.json()) as { rows?: TableRow[] };
       const rows = Array.isArray(body.rows) ? body.rows : [];
       this.allRows = rows;
-      this.renderVisibleRows();
+      this.renderAllRows();
       table.setAttribute('data-ready', 'true');
     } catch (err) {
       console.error('[DAG Table] query failed', err);
-      this.allRows = [{ key: 'query_error', value: 'failed', status: 'ERROR' }];
-      this.renderVisibleRows();
+      this.allRows = [
+        { key: 'query_error', value: 'api_unavailable', status: 'WARN' },
+        { key: 'dev_hint', value: 'start ./dialtone.sh dag serve src_v3 for live api', status: 'INFO' },
+        { key: 'node_count', value: '7', status: 'MOCK' },
+        { key: 'edge_count', value: '7', status: 'MOCK' },
+        { key: 'layer_count', value: '2', status: 'MOCK' },
+        { key: 'graph_edge_match_count', value: '7', status: 'MOCK' },
+        { key: 'shortest_path_hops_root_to_leaf', value: '2', status: 'MOCK' },
+        { key: 'rank_violation_count', value: '0', status: 'MOCK' },
+      ];
+      this.renderAllRows();
       table.setAttribute('data-ready', 'error');
     }
   }
