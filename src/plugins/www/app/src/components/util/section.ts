@@ -30,7 +30,6 @@ export class SectionManager {
   public loadingPromises = new Map<string, Promise<void>>();
   public configs = new Map<string, SectionConfig>();
   private observer: IntersectionObserver | null = null;
-  private debug: boolean;
 
   private headerEl: HTMLElement | null = null;
   private titleEl: HTMLElement | null = null;
@@ -41,9 +40,7 @@ export class SectionManager {
 
   public activeSectionId: string | null = null;
 
-  constructor(options?: { debug?: boolean }) {
-    this.debug = options?.debug ?? true;
-
+  constructor() {
     this.headerEl = document.querySelector(".header-title");
     this.titleEl = this.headerEl?.querySelector("h1") || null;
     this.subtitleEl = document.getElementById("header-subtitle");
@@ -71,6 +68,11 @@ export class SectionManager {
 
   public setActiveSection(sectionId: string): void {
     if (this.activeSectionId === sectionId) return;
+
+    // Clear and close menu on section change
+    const menu = Menu.getInstance();
+    menu.clear();
+    menu.close();
 
     const oldId = this.activeSectionId;
     this.activeSectionId = sectionId;
@@ -114,6 +116,14 @@ export class SectionManager {
       const el = document.getElementById(id);
       if (el) this.observer!.observe(el);
     });
+  }
+
+  public get(sectionId: string): VisualizationControl | undefined {
+    return this.visualizations.get(sectionId);
+  }
+
+  public eagerLoad(sectionId: string): Promise<void> {
+    return this.load(sectionId);
   }
 
   async load(sectionId: string): Promise<void> {

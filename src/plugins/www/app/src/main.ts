@@ -1,8 +1,9 @@
 import './../style.css';
 import { SectionManager } from './components/util/section';
+import { Menu } from './components/util/menu';
 
 // Create section manager for lazy loading Three.js components
-const sections = new SectionManager({ debug: true });
+const sections = new SectionManager();
 (window as any).sections = sections;
 
 // Register all Three.js sections
@@ -139,6 +140,7 @@ const loadSection = (id: string) => {
         // Show and snap active slide
         el.style.display = 'flex';
         sections.eagerLoad(id);
+        sections.setActiveSection(id);
         
         console.log(`[main] EXECUTE SNAP to #${id}`);
         window.scrollTo(0, 0); // Always at top since only one slide is visible
@@ -183,6 +185,7 @@ const navigate = (direction: 1 | -1) => {
 
 // Mouse Wheel
 window.addEventListener('wheel', (e) => {
+    if (Menu.getInstance().isOpen()) return;
     if (Math.abs(e.deltaY) < 30) return;
     navigate(e.deltaY > 0 ? 1 : -1);
 }, { passive: true });
@@ -194,6 +197,7 @@ window.addEventListener('touchstart', (e) => {
 }, { passive: true });
 
 window.addEventListener('touchend', (e) => {
+    if (Menu.getInstance().isOpen()) return;
     const touchEnd = e.changedTouches[0].clientY;
     const delta = touchStart - touchEnd;
     if (Math.abs(delta) > 50) {
@@ -203,6 +207,7 @@ window.addEventListener('touchend', (e) => {
 
 // Keyboard
 window.addEventListener('keydown', (e) => {
+    if (Menu.getInstance().isOpen()) return;
     if (e.code === 'Space' || e.key === 'ArrowDown') {
         e.preventDefault();
         navigate(1);
