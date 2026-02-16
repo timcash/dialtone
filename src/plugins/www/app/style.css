@@ -30,20 +30,64 @@ html,
 body {
   scroll-snap-type: y mandatory;
   overflow-y: scroll;
+  scroll-behavior: auto;
 }
 
 .snap-slide {
   width: 100vw;
   height: 100vh;
+  margin-bottom: 25vh; /* Large gap between sections */
   scroll-snap-align: start;
   scroll-snap-stop: always;
-  scroll-margin-top: 1px;
   position: relative;
   overflow: hidden;
   display: flex;
   justify-content: center;
   align-items: center;
-  touch-action: pan-y;
+  touch-action: none; /* We will handle touch manually for better control */
+}
+
+.snap-slide .section-content {
+  opacity: 0;
+  transition: opacity 0.5s ease;
+  width: 100%;
+  height: 100%;
+}
+
+.snap-slide.is-ready .section-content {
+  opacity: 1;
+}
+
+/* Loading Bar */
+.loading-bar-container {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 200px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+  z-index: 100;
+  transition: opacity 0.3s ease;
+}
+
+.loading-bar {
+  width: 0%;
+  height: 100%;
+  background: var(--theme-primary, #00ccff);
+  transition: width 0.2s ease;
+}
+
+.snap-slide.is-ready .loading-bar-container {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Remove margin from last slide to avoid extra scroll space */
+.snap-slide:last-of-type {
+  margin-bottom: 0;
 }
 
 /* Content Styling */
