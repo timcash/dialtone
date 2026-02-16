@@ -16,7 +16,7 @@ func Run03ThreeUserStoryStartEmpty() error {
 		return err
 	}
 	fmt.Println("[THREE] story step1 description:")
-	fmt.Println("[THREE]   - In order to create a new node, the user taps the Mode button until it shows Add, then taps Action.")
+	fmt.Println("[THREE]   - In order to create a new node, the user taps Add.")
 	fmt.Println("[THREE]   - The user starts from an empty DAG in root layer and expects one selected node after add.")
 	fmt.Println("[THREE]   - Camera expectation: zoomed-out root framing with room for upcoming input/output nodes.")
 
@@ -30,9 +30,15 @@ func Run03ThreeUserStoryStartEmpty() error {
 		test_v2.WaitForAriaLabel("Three Canvas"),
 		test_v2.WaitForAriaLabelAttrEquals("Three Canvas", "data-ready", "true", 3*time.Second),
 		test_v2.WaitForAriaLabel("DAG Back"),
-		test_v2.WaitForAriaLabel("DAG Action"),
-		test_v2.WaitForAriaLabel("DAG Mode"),
-		test_v2.WaitForAriaLabel("DAG Node Name"),
+		test_v2.WaitForAriaLabel("DAG Add"),
+		test_v2.WaitForAriaLabel("DAG Pick Output"),
+		test_v2.WaitForAriaLabel("DAG Pick Input"),
+		test_v2.WaitForAriaLabel("DAG Connect"),
+		test_v2.WaitForAriaLabel("DAG Unlink"),
+		test_v2.WaitForAriaLabel("DAG Nest"),
+		test_v2.WaitForAriaLabel("DAG Delete Node"),
+		test_v2.WaitForAriaLabel("DAG Clear Picks"),
+		test_v2.WaitForAriaLabel("DAG Label Input"),
 		chromedp.Evaluate(`
 			(() => {
 				const api = window.dagHitTestDebug;
@@ -49,10 +55,7 @@ func Run03ThreeUserStoryStartEmpty() error {
 				if (!initial || initial.activeLayerId !== 'root') return { ok: false, msg: 'initial root layer missing' };
 				if (initial.visibleNodeIDs.length !== 0) return { ok: false, msg: 'expected empty dag at start' };
 
-				while (api.getState().mode !== 'add') {
-					if (!click('DAG Mode')) return { ok: false, msg: 'cannot reach add mode' };
-				}
-				if (!click('DAG Action')) return { ok: false, msg: 'add action failed' };
+				if (!click('DAG Add')) return { ok: false, msg: 'add action failed' };
 
 				const afterAdd = api.getState();
 				if (afterAdd.visibleNodeIDs.length !== 1) return { ok: false, msg: 'first node not created' };

@@ -1,26 +1,26 @@
 # Template Plugin v3 Test Report
 
-**Generated at:** Sun, 15 Feb 2026 16:47:41 -0800
+**Generated at:** Sun, 15 Feb 2026 17:59:08 -0800
 **Version:** `src_v3`
 **Runner:** `test_v2`
 **Status:** ✅ PASS
-**Total Time:** `11.696s`
+**Total Time:** `12.787s`
 
 ## Test Steps
 
 | Step | Result | Duration |
 |---|---|---|
 | 01 DuckDB Graph Query Validation | ✅ PASS | `65ms` |
-| 02 Preflight (Go/UI) | ✅ PASS | `8.605s` |
-| 03 DAG Table Section Validation | ✅ PASS | `2.234s` |
-| 04 User Story: Empty DAG Start + First Node | ✅ PASS | `188ms` |
-| 05 User Story: Build Root IO | ✅ PASS | `94ms` |
-| 06 User Story: Nest + Dive + Nested Build | ✅ PASS | `102ms` |
-| 07 User Story: Rename + Undive + Camera History | ✅ PASS | `98ms` |
-| 08 User Story: Deep Nested Build | ✅ PASS | `103ms` |
-| 09 User Story: Deep Undive + Camera History | ✅ PASS | `100ms` |
-| 10 User Story: Delete + Relabel + Camera Readability | ✅ PASS | `100ms` |
-| 11 Cleanup Verification | ✅ PASS | `6ms` |
+| 02 Preflight (Go/UI) | ✅ PASS | `9.828s` |
+| 03 DAG Table Section Validation | ✅ PASS | `2.251s` |
+| 04 User Story: Empty DAG Start + First Node | ✅ PASS | `149ms` |
+| 05 User Story: Build Root IO | ✅ PASS | `84ms` |
+| 06 User Story: Nest + Dive + Nested Build | ✅ PASS | `85ms` |
+| 07 User Story: Rename + Undive + Camera History | ✅ PASS | `83ms` |
+| 08 User Story: Deep Nested Build | ✅ PASS | `78ms` |
+| 09 User Story: Deep Undive + Camera History | ✅ PASS | `70ms` |
+| 10 User Story: Delete + Relabel + Camera Readability | ✅ PASS | `83ms` |
+| 11 Cleanup Verification | ✅ PASS | `9ms` |
 
 ## Step Logs
 
@@ -47,7 +47,7 @@ duration: 65ms
 
 ```text
 result: PASS
-duration: 8.605s
+duration: 9.828s
 ```
 
 #### Runner Output
@@ -55,111 +55,115 @@ duration: 8.605s
 ```text
 [T+0000] [TEST] RUN   02 Preflight (Go/UI)
 [T+0000] >> [DAG] Fmt: src_v3
-[T+0000] [2026-02-15T16:47:29.802-08:00 | INFO | go.go:RunGo:33] Running: go [fmt ./src/plugins/dag/src_v3/...]
+[T+0000] [2026-02-15T17:58:56.677-08:00 | INFO | go.go:RunGo:33] Running: go [fmt ./src/plugins/dag/src_v3/...]
 [T+0000] >> [DAG] Vet: src_v3
-[T+0000] [2026-02-15T16:47:30.243-08:00 | INFO | go.go:RunGo:33] Running: go [vet ./src/plugins/dag/src_v3/...]
+[T+0000] [2026-02-15T17:58:57.120-08:00 | INFO | go.go:RunGo:33] Running: go [vet ./src/plugins/dag/src_v3/...]
 [T+0001] >> [DAG] Go Build: src_v3
-[T+0001] [2026-02-15T16:47:30.816-08:00 | INFO | go.go:RunGo:33] Running: go [build ./src/plugins/dag/src_v3/...]
+[T+0001] [2026-02-15T17:58:57.704-08:00 | INFO | go.go:RunGo:33] Running: go [build ./src/plugins/dag/src_v3/...]
 [T+0004] >> [DAG] Install: src_v3
 [T+0004]    [DAG] duckdb already installed at /Users/dev/dialtone_dependencies/duckdb/bin/duckdb
-[T+0004] bun install v1.3.9 (cf6cdbbb)
-[T+0004] Saved lockfile
-[T+0004] 
-[T+0004] + @types/three@0.182.0
-[T+0004] + typescript@5.9.3
-[T+0004] + vite@5.4.21
-[T+0004] + three@0.182.0
-[T+0004] 
-[T+0004] 21 packages installed [172.00ms]
-[T+0004] >> [DAG] Lint: src_v3
-[T+0004] $ tsc --noEmit
-[T+0005] >> [DAG] Format: src_v3
-[T+0006] $ echo format-ok
-[T+0006] format-ok
-[T+0006] >> [DAG] Build: START for src_v3
-[T+0006] >> [DAG] Installing UI dependencies in /Users/dev/code/dialtone/src/plugins/dag/src_v3/ui...
-[T+0006] bun install v1.3.9 (cf6cdbbb)
-[T+0006] 
-[T+0006] + @types/three@0.182.0
-[T+0006] + typescript@5.9.3
-[T+0006] + vite@5.4.21
-[T+0006] + three@0.182.0
-[T+0006] 
-[T+0006] 21 packages installed [143.00ms]
-[T+0006] Saved lockfile
-[T+0006] >> [DAG] Building UI in /Users/dev/code/dialtone/src/plugins/dag/src_v3/ui...
-[T+0006] $ vite build
-[T+0007] vite v5.4.21 building for production...
-[T+0007] transforming...
-[T+0008] ✓ 13 modules transformed.
-[T+0008] rendering chunks...
-[T+0008] computing gzip size...
-[T+0008] dist/index.html                   3.07 kB │ gzip:   0.80 kB
-[T+0008] dist/assets/index-CC0UNr5i.css    5.78 kB │ gzip:   1.72 kB
-[T+0008] dist/assets/index-DuTY0PV9.js     1.93 kB │ gzip:   0.86 kB
-[T+0008] dist/assets/index-C8_IWv0y.js     7.39 kB │ gzip:   2.62 kB
-[T+0008] dist/assets/index-CjKi6TDZ.js   522.99 kB │ gzip: 132.59 kB
-[T+0008] 
-[T+0008] (!) Some chunks are larger than 500 kB after minification. Consider:
-[T+0008] - Using dynamic import() to code-split the application
-[T+0008] - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
-[T+0008] - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
-[T+0008] ✓ built in 700ms
-[T+0008] >> [DAG] Build: COMPLETE for src_v3
+[T+0004]    [DAG] Running version install hook: src/plugins/dag/src_v3/cmd/ops/install.go
+[T+0004] [2026-02-15T17:59:01.172-08:00 | INFO | go.go:RunGo:33] Running: go [run src/plugins/dag/src_v3/cmd/ops/install.go]
+[T+0005]    [DAG src_v3] Ensuring Go module dependency: github.com/marcboeker/go-duckdb
+[T+0005] [2026-02-15T17:59:01.393-08:00 | INFO | go.go:RunGo:33] Running: go [mod download github.com/marcboeker/go-duckdb]
+[T+0005] bun install v1.3.9 (cf6cdbbb)
+[T+0005] Saved lockfile
+[T+0005] 
+[T+0005] + @types/three@0.182.0
+[T+0005] + typescript@5.9.3
+[T+0005] + vite@5.4.21
+[T+0005] + three@0.182.0
+[T+0005] 
+[T+0005] 21 packages installed [157.00ms]
+[T+0005] >> [DAG] Lint: src_v3
+[T+0005] $ tsc --noEmit
+[T+0007] >> [DAG] Format: src_v3
+[T+0007] $ echo format-ok
+[T+0007] format-ok
+[T+0007] >> [DAG] Build: START for src_v3
+[T+0007] >> [DAG] Installing UI dependencies in /Users/dev/code/dialtone/src/plugins/dag/src_v3/ui...
+[T+0007] bun install v1.3.9 (cf6cdbbb)
+[T+0007] Saved lockfile
+[T+0007] 
+[T+0007] + @types/three@0.182.0
+[T+0007] + typescript@5.9.3
+[T+0007] + vite@5.4.21
+[T+0007] + three@0.182.0
+[T+0007] 
+[T+0007] 21 packages installed [181.00ms]
+[T+0007] >> [DAG] Building UI in /Users/dev/code/dialtone/src/plugins/dag/src_v3/ui...
+[T+0008] $ vite build
+[T+0009] vite v5.4.21 building for production...
+[T+0009] transforming...
+[T+0009] ✓ 13 modules transformed.
+[T+0009] rendering chunks...
+[T+0009] computing gzip size...
+[T+0009] dist/index.html                   2.52 kB │ gzip:   0.74 kB
+[T+0009] dist/assets/index-Cl9iYXEw.css    5.51 kB │ gzip:   1.70 kB
+[T+0009] dist/assets/index-DuTY0PV9.js     1.93 kB │ gzip:   0.86 kB
+[T+0009] dist/assets/index-Ch0KdE0G.js     7.53 kB │ gzip:   2.66 kB
+[T+0009] dist/assets/index-qVnHMv8_.js   522.55 kB │ gzip: 132.31 kB
+[T+0009] 
+[T+0009] (!) Some chunks are larger than 500 kB after minification. Consider:
+[T+0009] - Using dynamic import() to code-split the application
+[T+0009] - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+[T+0009] - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+[T+0009] ✓ built in 678ms
+[T+0009] >> [DAG] Build: COMPLETE for src_v3
 ```
 
 ### 03 DAG Table Section Validation
 
 ```text
 result: PASS
-duration: 2.234s
+duration: 2.251s
 section: dag-table
 ```
 
 #### Runner Output
 
 ```text
-[T+0008] [TEST] RUN   03 DAG Table Section Validation
-[T+0008] >> [DAG] Serve: src_v3
-[T+0009] [2026-02-15T16:47:38.423-08:00 | INFO | go.go:RunGo:33] Running: go [run src/plugins/dag/src_v3/cmd/main.go]
-[T+0009] DAG Server starting on http://localhost:8080
-[T+0009] [2026-02-15T16:47:38.564-08:00 | INFO | chrome.go:StartSession:179] DEBUG: Launching Chrome: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome [--remote-debugging-port=0 --remote-debugging-address=127.0.0.1 --remote-allow-origins=* --no-first-run --no-default-browser-check --user-data-dir=/Users/dev/code/dialtone/.chrome_data/dialtone-chrome-test-port-56476 --new-window --dialtone-origin=true --dialtone-role=test --headless=new]
-[T+0010] [BROWSER] [log] [SectionManager] NAVIGATING TO #three
-[T+0010] [BROWSER] [log] [SectionManager] LOADING #three
-[T+0010] [BROWSER] [log] [SectionManager] NAVIGATING TO #three
-[T+0010] [BROWSER] [log] [SectionManager] LOADED #three
-[T+0010] [BROWSER] [log] [SectionManager] START #three
-[T+0010] [BROWSER] [log] [SectionManager] NAVIGATE TO #three
-[T+0010] [BROWSER] [log] [SectionManager] NAVIGATE TO #three
-[T+0010] [BROWSER] [log] [SectionManager] RESUME #three
-[T+0010] [BROWSER] [log] [SectionManager] RESUME #three
-[T+0010] [BROWSER] [error] [PROOFOFLIFE] Intentional Browser Test Error
-[T+0010] [BROWSER] [log] [SectionManager] NAVIGATING TO #dag-table
-[T+0010] [BROWSER] [log] [SectionManager] LOADING #dag-table
-[T+0010] [BROWSER] [log] [SectionManager] NAVIGATING TO #dag-table
-[T+0010] [BROWSER] [log] [SectionManager] LOADED #dag-table
-[T+0010] [BROWSER] [log] [SectionManager] START #dag-table
-[T+0010] [BROWSER] [log] [SectionManager] NAVIGATE AWAY #three
-[T+0010] [BROWSER] [log] [SectionManager] PAUSE #three
-[T+0010] [BROWSER] [log] [SectionManager] NAVIGATE TO #dag-table
-[T+0010] [BROWSER] [log] [SectionManager] NAVIGATE AWAY #three
-[T+0010] [BROWSER] [log] [SectionManager] NAVIGATE TO #dag-table
-[T+0010] [BROWSER] [log] [SectionManager] RESUME #dag-table
-[T+0010] [BROWSER] [log] [SectionManager] RESUME #dag-table
+[T+0009] [TEST] RUN   03 DAG Table Section Validation
+[T+0010] >> [DAG] Serve: src_v3
+[T+0010] [2026-02-15T17:59:06.483-08:00 | INFO | go.go:RunGo:33] Running: go [run src/plugins/dag/src_v3/cmd/main.go]
+[T+0010] DAG Server starting on http://localhost:8080
+[T+0010] [2026-02-15T17:59:06.616-08:00 | INFO | chrome.go:StartSession:179] DEBUG: Launching Chrome: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome [--remote-debugging-port=0 --remote-debugging-address=127.0.0.1 --remote-allow-origins=* --no-first-run --no-default-browser-check --user-data-dir=/Users/dev/code/dialtone/.chrome_data/dialtone-chrome-test-port-57592 --new-window --dialtone-origin=true --dialtone-role=test --headless=new]
+[T+0011] [BROWSER] [log] [SectionManager] NAVIGATING TO #three
+[T+0011] [BROWSER] [log] [SectionManager] LOADING #three
+[T+0011] [BROWSER] [log] [SectionManager] NAVIGATING TO #three
+[T+0011] [BROWSER] [log] [SectionManager] LOADED #three
+[T+0011] [BROWSER] [log] [SectionManager] START #three
+[T+0011] [BROWSER] [log] [SectionManager] NAVIGATE TO #three
+[T+0011] [BROWSER] [log] [SectionManager] NAVIGATE TO #three
+[T+0011] [BROWSER] [log] [SectionManager] RESUME #three
+[T+0011] [BROWSER] [log] [SectionManager] RESUME #three
+[T+0011] [BROWSER] [error] [PROOFOFLIFE] Intentional Browser Test Error
+[T+0011] [BROWSER] [log] [SectionManager] NAVIGATING TO #dag-table
+[T+0011] [BROWSER] [log] [SectionManager] LOADING #dag-table
+[T+0011] [BROWSER] [log] [SectionManager] NAVIGATING TO #dag-table
+[T+0011] [BROWSER] [log] [SectionManager] LOADED #dag-table
+[T+0011] [BROWSER] [log] [SectionManager] START #dag-table
+[T+0011] [BROWSER] [log] [SectionManager] NAVIGATE AWAY #three
+[T+0011] [BROWSER] [log] [SectionManager] PAUSE #three
+[T+0011] [BROWSER] [log] [SectionManager] NAVIGATE TO #dag-table
+[T+0011] [BROWSER] [log] [SectionManager] NAVIGATE AWAY #three
+[T+0011] [BROWSER] [log] [SectionManager] NAVIGATE TO #dag-table
+[T+0011] [BROWSER] [log] [SectionManager] RESUME #dag-table
+[T+0011] [BROWSER] [log] [SectionManager] RESUME #dag-table
 ```
 
 #### Browser Logs
 
 ```text
-[T+0010] [log] [SectionManager] NAVIGATING TO #dag-table
-[T+0010] [log] [SectionManager] LOADING #dag-table
-[T+0010] [log] [SectionManager] NAVIGATING TO #dag-table
-[T+0010] [log] [SectionManager] LOADED #dag-table
-[T+0010] [log] [SectionManager] START #dag-table
-[T+0010] [log] [SectionManager] NAVIGATE TO #dag-table
-[T+0010] [log] [SectionManager] NAVIGATE TO #dag-table
-[T+0010] [log] [SectionManager] RESUME #dag-table
-[T+0010] [log] [SectionManager] RESUME #dag-table
+[T+0011] [log] [SectionManager] NAVIGATING TO #dag-table
+[T+0011] [log] [SectionManager] LOADING #dag-table
+[T+0011] [log] [SectionManager] NAVIGATING TO #dag-table
+[T+0011] [log] [SectionManager] LOADED #dag-table
+[T+0011] [log] [SectionManager] START #dag-table
+[T+0011] [log] [SectionManager] NAVIGATE TO #dag-table
+[T+0011] [log] [SectionManager] NAVIGATE TO #dag-table
+[T+0011] [log] [SectionManager] RESUME #dag-table
+[T+0011] [log] [SectionManager] RESUME #dag-table
 ```
 
 ![03 DAG Table Section Validation](../screenshots/test_step_1.png)
@@ -168,28 +172,28 @@ section: dag-table
 
 ```text
 result: PASS
-duration: 188ms
+duration: 149ms
 section: three
 ```
 
 #### Runner Output
 
 ```text
-[T+0010] [TEST] RUN   04 User Story: Empty DAG Start + First Node
-[T+0010] [THREE] story step1 description:
-[T+0010] [THREE]   - In order to create a new node, the user taps the Mode button until it shows Add, then taps Action.
-[T+0010] [THREE]   - The user starts from an empty DAG in root layer and expects one selected node after add.
-[T+0010] [THREE]   - Camera expectation: zoomed-out root framing with room for upcoming input/output nodes.
+[T+0012] [TEST] RUN   04 User Story: Empty DAG Start + First Node
+[T+0012] [THREE] story step1 description:
+[T+0012] [THREE]   - In order to create a new node, the user taps Add.
+[T+0012] [THREE]   - The user starts from an empty DAG in root layer and expects one selected node after add.
+[T+0012] [THREE]   - Camera expectation: zoomed-out root framing with room for upcoming input/output nodes.
 ```
 
 #### Browser Logs
 
 ```text
-[T+0010] [log] [SectionManager] NAVIGATING TO #three
-[T+0010] [log] [SectionManager] NAVIGATE TO #three
-[T+0010] [log] [SectionManager] RESUME #three
-[T+0010] [log] [Three #three] selected node: n_user_1
-[T+0010] [log] [Three #three] action add node: n_user_1 on layer root
+[T+0012] [log] [SectionManager] NAVIGATING TO #three
+[T+0012] [log] [SectionManager] NAVIGATE TO #three
+[T+0012] [log] [SectionManager] RESUME #three
+[T+0012] [log] [Three #three] selected node: n_user_1
+[T+0012] [log] [Three #three] action add node: n_user_1 on layer root
 ```
 
 ![04 User Story: Empty DAG Start + First Node](../screenshots/test_step_2.png)
@@ -198,32 +202,32 @@ section: three
 
 ```text
 result: PASS
-duration: 94ms
+duration: 84ms
 section: three
 ```
 
 #### Runner Output
 
 ```text
-[T+0011] [TEST] RUN   05 User Story: Build Root IO
-[T+0011] [THREE] story step2 description:
-[T+0011] [THREE]   - In order to add output, the user selects processor and taps Action in Add mode.
-[T+0011] [THREE]   - In order to add input, the user clears selection, taps Action in Add mode, then links input->processor in Connect mode.
-[T+0011] [THREE]   - Camera expectation: root layer remains fully readable while adding and linking nodes.
+[T+0012] [TEST] RUN   05 User Story: Build Root IO
+[T+0012] [THREE] story step2 description:
+[T+0012] [THREE]   - In order to add output, the user selects processor and taps Add.
+[T+0012] [THREE]   - In order to add input, the user clears selection, taps Add, then picks output=input and input=processor before tapping Link.
+[T+0012] [THREE]   - Camera expectation: root layer remains fully readable while adding and linking nodes.
 ```
 
 #### Browser Logs
 
 ```text
-[T+0011] [log] [Three #three] selected node: n_user_1
-[T+0011] [log] [Three #three] selected node: n_user_2
-[T+0011] [log] [Three #three] action add node: n_user_2 from n_user_1
-[T+0011] [log] [Three #three] selected node: n_user_3
-[T+0011] [log] [Three #three] action add node: n_user_3 on layer root
-[T+0011] [log] [Three #three] selected node: n_user_3
-[T+0011] [log] [Three #three] selected node: n_user_1
-[T+0011] [log] [Three #three] action add edge: n_user_3 -> n_user_1
-[T+0011] [log] [Three #three] selected node: n_user_1
+[T+0012] [log] [Three #three] selected node: n_user_1
+[T+0012] [log] [Three #three] selected node: n_user_2
+[T+0012] [log] [Three #three] action add node: n_user_2 from n_user_1
+[T+0012] [log] [Three #three] selected node: n_user_3
+[T+0012] [log] [Three #three] action add node: n_user_3 on layer root
+[T+0012] [log] [Three #three] selected node: n_user_3
+[T+0012] [log] [Three #three] selected node: n_user_1
+[T+0012] [log] [Three #three] action add edge: n_user_3 -> n_user_1
+[T+0012] [log] [Three #three] selected node: n_user_1
 ```
 
 ![05 User Story: Build Root IO](../screenshots/test_step_3.png)
@@ -232,30 +236,30 @@ section: three
 
 ```text
 result: PASS
-duration: 102ms
+duration: 85ms
 section: three
 ```
 
 #### Runner Output
 
 ```text
-[T+0011] [TEST] RUN   06 User Story: Nest + Dive + Nested Build
-[T+0011] [THREE] story step3 description:
-[T+0011] [THREE]   - In order to create a nested layer, the user selects processor, switches to Nest mode, then taps Action.
-[T+0011] [THREE]   - After dive, user builds nested nodes in Add mode using Action and validates nested edge flow.
-[T+0011] [THREE]   - Camera expectation: on dive, framing shifts to nested layer and history depth increments.
+[T+0012] [TEST] RUN   06 User Story: Nest + Dive + Nested Build
+[T+0012] [THREE] story step3 description:
+[T+0012] [THREE]   - In order to create a nested layer, the user selects processor and taps Nest.
+[T+0012] [THREE]   - After dive, user builds nested nodes using Add and validates nested edge flow.
+[T+0012] [THREE]   - Camera expectation: on dive, framing shifts to nested layer and history depth increments.
 ```
 
 #### Browser Logs
 
 ```text
-[T+0011] [log] [Three #three] selected node: n_user_1
-[T+0011] [log] [Three #three] enter nested layer: layer_nested_n_user_1
-[T+0011] [log] [Three #three] selected node: n_user_4
-[T+0011] [log] [Three #three] action add node: n_user_4 on layer layer_nested_n_user_1
-[T+0011] [log] [Three #three] selected node: n_user_5
-[T+0011] [log] [Three #three] action add node: n_user_5 from n_user_4
-[T+0011] [log] [Three #three] selected node: n_user_4
+[T+0012] [log] [Three #three] selected node: n_user_1
+[T+0012] [log] [Three #three] enter nested layer: layer_nested_n_user_1
+[T+0012] [log] [Three #three] selected node: n_user_4
+[T+0012] [log] [Three #three] action add node: n_user_4 on layer layer_nested_n_user_1
+[T+0012] [log] [Three #three] selected node: n_user_5
+[T+0012] [log] [Three #three] action add node: n_user_5 from n_user_4
+[T+0012] [log] [Three #three] selected node: n_user_4
 ```
 
 ![06 User Story: Nest + Dive + Nested Build](../screenshots/test_step_4.png)
@@ -264,28 +268,28 @@ section: three
 
 ```text
 result: PASS
-duration: 98ms
+duration: 83ms
 section: three
 ```
 
 #### Runner Output
 
 ```text
-[T+0011] [TEST] RUN   07 User Story: Rename + Undive + Camera History
-[T+0011] [THREE] story step4 description:
-[T+0011] [THREE]   - In order to change labels, the user selects node, types name in bottom textbox, and taps Rename.
-[T+0011] [THREE]   - In order to undive, the user taps Back once to return to root.
-[T+0011] [THREE]   - Camera expectation: back navigation re-centers root layer and updates history to zero.
+[T+0012] [TEST] RUN   07 User Story: Rename + Undive + Camera History
+[T+0012] [THREE] story step4 description:
+[T+0012] [THREE]   - In order to change labels, the user selects node, types name in bottom textbox, and taps Rename.
+[T+0012] [THREE]   - In order to undive, the user taps Back once to return to root.
+[T+0012] [THREE]   - Camera expectation: back navigation re-centers root layer and updates history to zero.
 ```
 
 #### Browser Logs
 
 ```text
-[T+0011] [log] [Three #three] selected node: n_user_4
-[T+0011] [log] [Three #three] rename node: n_user_4 -> Nested Input
-[T+0011] [log] [Three #three] back to layer: root
-[T+0011] [log] [Three #three] selected node: n_user_1
-[T+0011] [log] [Three #three] rename node: n_user_1 -> Processor
+[T+0012] [log] [Three #three] selected node: n_user_4
+[T+0012] [log] [Three #three] rename node: n_user_4 -> Nested Input
+[T+0012] [log] [Three #three] back to layer: root
+[T+0012] [log] [Three #three] selected node: n_user_1
+[T+0012] [log] [Three #three] rename node: n_user_1 -> Processor
 ```
 
 ![07 User Story: Rename + Undive + Camera History](../screenshots/test_step_5.png)
@@ -294,34 +298,33 @@ section: three
 
 ```text
 result: PASS
-duration: 103ms
+duration: 78ms
 section: three
 ```
 
 #### Runner Output
 
 ```text
-[T+0011] [TEST] RUN   08 User Story: Deep Nested Build
-[T+0011] [THREE] story step5 description:
-[T+0011] [THREE]   - In order to dive into existing nested layer, user selects processor and taps Action in Dive mode.
-[T+0011] [THREE]   - In order to create second-level nested layer, user selects nested node and taps Action in Nest mode.
-[T+0011] [THREE]   - Camera expectation: each deeper dive keeps active layer centered and still comfortably zoomed out.
+[T+0012] [TEST] RUN   08 User Story: Deep Nested Build
+[T+0012] [THREE] story step5 description:
+[T+0012] [THREE]   - In order to dive into existing nested layer, user selects processor and taps Nest.
+[T+0012] [THREE]   - In order to create second-level nested layer, user selects nested node and taps Nest.
+[T+0012] [THREE]   - Camera expectation: each deeper dive keeps active layer centered and still comfortably zoomed out.
 ```
 
 #### Browser Logs
 
 ```text
-[T+0011] [log] [Three #three] selected node: n_user_1
-[T+0011] [log] [Three #three] enter nested layer: layer_nested_n_user_1
-[T+0011] [log] [Three #three] selected node: n_user_5
-[T+0011] [log] [Three #three] enter nested layer: layer_nested_n_user_5
-[T+0011] [log] [Three #three] selected node: n_user_6
-[T+0011] [log] [Three #three] action add node: n_user_6 on layer layer_nested_n_user_5
-[T+0011] [log] [Three #three] selected node: n_user_7
-[T+0011] [log] [Three #three] action add node: n_user_7 from n_user_6
-[T+0011] [log] [Three #three] selected node: n_user_6
-[T+0011] [log] [Three #three] selected node: n_user_7
-[T+0011] [log] [Three #three] action add edge: n_user_6 -> n_user_7
+[T+0012] [log] [Three #three] selected node: n_user_1
+[T+0012] [log] [Three #three] enter nested layer: layer_nested_n_user_1
+[T+0012] [log] [Three #three] selected node: n_user_5
+[T+0012] [log] [Three #three] enter nested layer: layer_nested_n_user_5
+[T+0012] [log] [Three #three] selected node: n_user_6
+[T+0012] [log] [Three #three] action add node: n_user_6 on layer layer_nested_n_user_5
+[T+0012] [log] [Three #three] selected node: n_user_7
+[T+0012] [log] [Three #three] action add node: n_user_7 from n_user_6
+[T+0012] [log] [Three #three] selected node: n_user_6
+[T+0012] [log] [Three #three] selected node: n_user_7
 ```
 
 ![08 User Story: Deep Nested Build](../screenshots/test_step_6.png)
@@ -330,26 +333,26 @@ section: three
 
 ```text
 result: PASS
-duration: 100ms
+duration: 70ms
 section: three
 ```
 
 #### Runner Output
 
 ```text
-[T+0011] [TEST] RUN   09 User Story: Deep Undive + Camera History
-[T+0011] [THREE] story step6 description:
-[T+0011] [THREE]   - In order to unwind nested history, user taps Back repeatedly.
-[T+0011] [THREE]   - Each back step must reduce history depth and reposition camera to the new current layer.
-[T+0011] [THREE]   - Final expectation: root layer visible with processor input/output context intact.
+[T+0012] [TEST] RUN   09 User Story: Deep Undive + Camera History
+[T+0012] [THREE] story step6 description:
+[T+0012] [THREE]   - In order to unwind nested history, user taps Back repeatedly.
+[T+0012] [THREE]   - Each back step must reduce history depth and reposition camera to the new current layer.
+[T+0012] [THREE]   - Final expectation: root layer visible with processor input/output context intact.
 ```
 
 #### Browser Logs
 
 ```text
-[T+0011] [log] [Three #three] back to layer: layer_nested_n_user_1
-[T+0011] [log] [Three #three] back to layer: root
-[T+0011] [log] [Three #three] selected node: n_user_1
+[T+0012] [log] [Three #three] back to layer: layer_nested_n_user_1
+[T+0012] [log] [Three #three] back to layer: root
+[T+0012] [log] [Three #three] selected node: n_user_1
 ```
 
 ![09 User Story: Deep Undive + Camera History](../screenshots/test_step_7.png)
@@ -358,28 +361,29 @@ section: three
 
 ```text
 result: PASS
-duration: 100ms
+duration: 83ms
 section: three
 ```
 
 #### Runner Output
 
 ```text
-[T+0011] [TEST] RUN   10 User Story: Delete + Relabel + Camera Readability
-[T+0011] [THREE] story step7 description:
-[T+0011] [THREE]   - In order to remove a node, user selects it, switches to DelN mode, and taps Action.
-[T+0011] [THREE]   - In order to remove a remaining edge, user selects processor, switches to DelE mode, and taps Action.
-[T+0011] [THREE]   - User then renames processor again and expects camera to stay zoomed-out for full root readability.
+[T+0012] [TEST] RUN   10 User Story: Delete + Relabel + Camera Readability
+[T+0012] [THREE] story step7 description:
+[T+0012] [THREE]   - In order to remove a node, user selects it and taps DelN.
+[T+0012] [THREE]   - In order to remove a remaining edge, user picks output/input nodes and taps Unlink.
+[T+0012] [THREE]   - User then renames processor again and expects camera to stay zoomed-out for full root readability.
 ```
 
 #### Browser Logs
 
 ```text
-[T+0011] [log] [Three #three] selected node: n_user_2
-[T+0011] [log] [Three #three] action remove node: n_user_2
-[T+0011] [log] [Three #three] selected node: n_user_1
-[T+0011] [log] [Three #three] action remove edge: e_user_2
-[T+0011] [log] [Three #three] rename node: n_user_1 -> Processor Final
+[T+0012] [log] [Three #three] selected node: n_user_2
+[T+0012] [log] [Three #three] action remove node: n_user_2
+[T+0012] [log] [Three #three] selected node: n_user_3
+[T+0012] [log] [Three #three] selected node: n_user_1
+[T+0012] [log] [Three #three] action remove edge: n_user_3 -> n_user_1
+[T+0012] [log] [Three #three] rename node: n_user_1 -> Processor Final
 ```
 
 ![10 User Story: Delete + Relabel + Camera Readability](../screenshots/test_step_8.png)
@@ -388,13 +392,13 @@ section: three
 
 ```text
 result: PASS
-duration: 6ms
+duration: 9ms
 ```
 
 #### Runner Output
 
 ```text
-[T+0011] [TEST] RUN   11 Cleanup Verification
+[T+0012] [TEST] RUN   11 Cleanup Verification
 ```
 
 ## Artifacts

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -40,9 +41,32 @@ func runDagInstall(versionDir string) error {
 	if _, err := os.Stat(filepath.Join(uiDir, "package.json")); err != nil {
 		return fmt.Errorf("ui package.json not found for %s: %w", versionDir, err)
 	}
+	if err := runVersionInstallHook(cwd, versionDir); err != nil {
+		return err
+	}
 
 	cmd := runBun(cwd, uiDir, "install", "--force")
 	return cmd.Run()
+}
+
+func runVersionInstallHook(repoRoot, versionDir string) error {
+	hookPath := filepath.Join(repoRoot, "src", "plugins", "dag", versionDir, "cmd", "ops", "install.go")
+	if _, err := os.Stat(hookPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat version install hook: %w", err)
+	}
+
+	fmt.Printf("   [DAG] Running version install hook: %s\n", filepath.ToSlash(filepath.Join("src", "plugins", "dag", versionDir, "cmd", "ops", "install.go")))
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "go", "exec", "run", filepath.ToSlash(filepath.Join("src", "plugins", "dag", versionDir, "cmd", "ops", "install.go")))
+	cmd.Dir = repoRoot
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("version install hook failed: %w", err)
+	}
+	return nil
 }
 
 func ensureDuckDBInstalled() error {
