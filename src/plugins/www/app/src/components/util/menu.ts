@@ -2,7 +2,7 @@ export class Menu {
     private static instance: Menu;
     private toggle: HTMLButtonElement;
     private panel: HTMLDivElement;
-
+    private currentSectionId: string | null = null;
 
     private constructor() {
         // Bind to existing static elements
@@ -62,8 +62,37 @@ export class Menu {
         return Menu.instance;
     }
 
-    clear() {
+    /**
+     * Clear the menu and optionally associate it with a new section.
+     * If sectionId is provided, it helps ensure we don't double-build.
+     */
+    clear(sectionId: string | null = null) {
         this.panel.innerHTML = "";
+        this.currentSectionId = sectionId;
+    }
+
+    /**
+     * Check if the menu is currently built for a specific section.
+     */
+    isBuiltFor(sectionId: string): boolean {
+        return this.currentSectionId === sectionId;
+    }
+
+    /**
+     * Force the menu to close.
+     */
+    close() {
+        this.panel.hidden = true;
+        this.toggle.setAttribute("aria-expanded", "false");
+        document.body.style.overflow = '';
+        document.documentElement.style.overflow = '';
+    }
+
+    /**
+     * Check if the menu is currently open.
+     */
+    isOpen(): boolean {
+        return !this.panel.hidden;
     }
 
     addHeader(text: string) {
@@ -136,7 +165,7 @@ export class Menu {
 
     addFile(label: string, onFile: (file: File) => void, accept = ".json,.geojson") {
         const row = document.createElement("div");
-        row.className = "menu-row"; // Not really used for styling yet but consistency
+        row.className = "menu-row"; 
 
         const input = document.createElement("input");
         input.type = "file";
@@ -147,7 +176,6 @@ export class Menu {
         button.type = "button";
         button.className = "menu-button menu-button-primary";
         button.textContent = label;
-        // button.style.width = "100%"; // Let CSS handle it
 
         button.addEventListener("click", () => input.click());
         input.addEventListener("change", () => {
@@ -184,4 +212,3 @@ export class Menu {
         };
     }
 }
-

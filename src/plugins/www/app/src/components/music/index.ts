@@ -96,6 +96,10 @@ export function mountMusic(container: HTMLElement) {
     },
     setVisible: (visible: boolean) => {
       viz.setVisible(visible);
+      if (!visible) {
+          viz.stopDemoLoop();
+          viz.analyzer.stopDemo();
+      }
     },
     updateUI: () => {
       updateMenu();

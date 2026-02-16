@@ -30,7 +30,6 @@ interface RobotVizLike {
 
 export function setupRobotMenu(viz: RobotVizLike): void {
     const menu = Menu.getInstance();
-    menu.clear();
 
     menu.addHeader("IK Mode");
     // Checkbox for Auto Track

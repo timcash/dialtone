@@ -3,7 +3,6 @@ import { ProceduralOrbit } from "./index";
 
 export function setupEarthMenu(orbit: ProceduralOrbit): void {
     const menu = Menu.getInstance();
-    menu.clear();
 
     menu.addHeader("Rotation");
 

@@ -110,6 +110,8 @@ export function mountVision(container: HTMLElement) {
       } else if (!visible && wasVisible) {
           // Becoming invisible
           tracker.stopCamera();
+          isDemo = false;
+          viz.setDemo(false);
           updateMenu();
       }
     },
