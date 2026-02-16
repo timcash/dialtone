@@ -1,3 +1,10 @@
+# TODO
+
+- **Three Section (6DOF Data)**: The Three section (`src/plugins/robot/src_v1/ui/src/components/three/index.ts`) has been updated to integrate live 6DOF (roll, pitch, yaw) orientation data from the robot via WebSocket, replacing the previous auto-spinning behavior with real-time attitude visualization.
+- **Telemetry Table (Enhanced Data)**: The Telemetry Table (`src/plugins/robot/src_v1/ui/src/components/table/index.ts`) now displays comprehensive live telemetry, including GPS coordinates (lat, lon, alt, sats), battery voltage, system uptime, NATS message count, and connected clients. The backend (`src/core/web/server.go`) has been updated to broadcast this data over the WebSocket.
+- **Controls Section**: A new 'Controls' section (`src/plugins/robot/src_v1/ui/src/components/controls/`) has been added, featuring Arm, Disarm, Manual, and Guided buttons. These buttons publish commands to the `rover.command` NATS subject, restoring core robot control functionality from the old UI.
+- **Migrate Remaining Functionality**: Reference the old core web UI (`src/core/web/src/main.ts`) to identify and replicate any remaining functionalities into the new section-based robot UI.
+
 # Robot Plugin
 
 The `robot` plugin centralizes core robot functionalities, including starting the robot's services (NATS, Web UI, Mavlink), deployment to remote robots, and code synchronization. It leverages the versioned source pattern (`src_vN`) for its UI and testing infrastructure, similar to the `template` plugin's `src_v3` style.
