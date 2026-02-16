@@ -8,11 +8,18 @@ import (
 
 	"dialtone/cli/src/core/browser"
 	test_v2 "dialtone/cli/src/libs/test_v2"
+	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/chromedp"
 )
 
 var sharedServer *exec.Cmd
 var sharedBrowser *test_v2.BrowserSession
+
+const (
+	mobileViewportWidth  = 390
+	mobileViewportHeight = 844
+	mobileScaleFactor    = 2
+)
 
 func ensureSharedServer() error {
 	if sharedServer != nil {
@@ -53,7 +60,7 @@ func ensureSharedBrowser(emitProofOfLife bool) (*test_v2.BrowserSession, error) 
 			Headless:      true,
 			Role:          "test",
 			ReuseExisting: false,
-			URL:           "http://127.0.0.1:8080/#hit-test",
+			URL:           "http://127.0.0.1:8080/#three",
 			LogWriter:     os.Stdout,
 			LogPrefix:     "[BROWSER]",
 		})
@@ -61,6 +68,14 @@ func ensureSharedBrowser(emitProofOfLife bool) (*test_v2.BrowserSession, error) 
 			return nil, err
 		}
 		sharedBrowser = session
+		if err := sharedBrowser.Run(chromedp.Tasks{
+			chromedp.EmulateViewport(mobileViewportWidth, mobileViewportHeight, chromedp.EmulateScale(mobileScaleFactor)),
+			emulation.SetDeviceMetricsOverride(mobileViewportWidth, mobileViewportHeight, mobileScaleFactor, true),
+			emulation.SetTouchEmulationEnabled(true),
+			chromedp.Evaluate(`window.sessionStorage.setItem('dag_test_mode', '1')`, nil),
+		}); err != nil {
+			return nil, err
+		}
 	}
 
 	if emitProofOfLife {

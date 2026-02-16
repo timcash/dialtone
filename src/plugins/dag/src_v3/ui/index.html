@@ -16,8 +16,52 @@
         <div aria-label="Global Menu Panel" hidden></div>
       </nav>
 
-      <section id="hit-test" aria-label="Hit Test Section">
-        <canvas aria-label="Hit Test Canvas"></canvas>
+      <section id="dag-table" aria-label="DAG Table Section">
+        <table aria-label="DAG Table">
+          <thead>
+            <tr>
+              <th>KEY</th>
+              <th>VALUE</th>
+              <th>STATUS</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <section id="three" aria-label="Three Section" hidden>
+        <canvas aria-label="Three Canvas"></canvas>
+        <button type="button" class="dag-menu-btn" aria-label="DAG Menu" aria-expanded="false">Menu</button>
+        <div class="dag-menu-panel" aria-label="DAG Menu Panel" hidden>
+          <button type="button" aria-label="DAG Menu Navigate Table">Table</button>
+          <button type="button" aria-label="DAG Menu Navigate Three">Three</button>
+        </div>
+        <div class="dag-thumb-dock" aria-label="DAG Thumb Dock">
+          <div class="dag-thumb-cluster" data-control="back">
+            <div class="dag-thumb-stack" aria-label="DAG Back Stack" hidden>
+              <button type="button" class="dag-thumb secondary" aria-label="DAG Back Root">Root</button>
+            </div>
+            <button type="button" class="dag-thumb" aria-label="DAG Back">Back</button>
+          </div>
+          <div class="dag-thumb-cluster" data-control="action">
+            <div class="dag-thumb-stack" aria-label="DAG Action Stack" hidden>
+              <button type="button" class="dag-thumb secondary" aria-label="DAG Action Labels">Labels</button>
+              <button type="button" class="dag-thumb secondary" aria-label="DAG Action Nest">Nest</button>
+              <button type="button" class="dag-thumb secondary" aria-label="DAG Action Clear">Clear</button>
+            </div>
+            <button type="button" class="dag-thumb" aria-label="DAG Action">Action</button>
+          </div>
+          <div class="dag-thumb-cluster" data-control="mode">
+            <div class="dag-thumb-stack" aria-label="DAG Mode Stack" hidden>
+              <button type="button" class="dag-thumb secondary" aria-label="DAG Mode Prev">Prev</button>
+            </div>
+            <button type="button" class="dag-thumb" aria-label="DAG Mode">Mode</button>
+          </div>
+        </div>
+        <div class="dag-rename" aria-label="DAG Rename Panel">
+          <input type="text" aria-label="DAG Node Name" placeholder="Select node to rename" />
+          <button type="button" aria-label="DAG Rename Node">Rename</button>
+        </div>
       </section>
     </div>
     <script type="module" src="/src/main.ts"></script>

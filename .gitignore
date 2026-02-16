@@ -27,6 +27,7 @@ bin/
 # DuckDB
 *.duckdb
 *.duckdb.wal
+!src/plugins/dag/src_v3/test/test.duckdb
 
 # Node.js
 node_modules/
