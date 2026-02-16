@@ -1,174 +1,95 @@
-# Template Plugin
+# Plugin Versioning Workflow (src_vN)
 
-Reference plugin for versioned template development under `src/plugins/template/src_vN`.
+This guide outlines the standard workflow for creating and evolving plugins using versioned source directories (`src_vN`). This pattern ensures stability, enables safe experimentation, and provides a clear migration path between major implementations.
 
-## Architecture Dependencies (Important)
+## Architecture & Conventions
 
-- `src/libs/ui_v2` is a required shared dependency.
-  - Provides `SectionManager`, `Menu`, and base UI shell styles.
-  - Template UI versions import this directly.
-- `src/libs/test_v2` is a required shared dependency.
-  - Provides suite runner/report generation + browser automation actions.
-  - Template tests use this to produce `TEST.md`, `test.log`, `error.log`, and screenshots.
+Every versioned plugin implementation lives in its own `src_vN` directory within the plugin's folder (e.g., `src/plugins/my-plugin/src_v1/`).
 
-If either library changes, all `src_vN` template versions may be affected.
+### Required Structure
+A compliant `src_vN` directory MUST contain:
+- `cmd/`: Go entrypoint (usually a simple HTTP server for the UI).
+- `ui/`: Vite-based TypeScript UI.
+- `test/`: `test_v2` suite providing automated browser and logic validation.
+- `DESIGN.md`: Architecture and implementation details for this specific version.
 
-## Current Version
+### Shared Dependencies
+Versioned UIs and Tests leverage shared libraries to maintain consistency:
+- **UI:** `@import '../../../../../libs/ui_v2/style.css'` for unified styling.
+- **Tests:** `dialtone/cli/src/libs/test_v2` for automated reporting and screenshots.
 
-- Current latest template version is `src_v3`.
-- Each `src_vN` should contain:
-  - `cmd/` Go server entrypoint
-  - `ui/` Vite UI
-  - `test/` test_v2 suite and generated `TEST.md`
+---
 
-## Prerequisites
+## Workflow: Creating a New Plugin Version
 
-- Go
-- Bun
-- Chrome (used by dev attach and browser tests)
+Follow these steps to migrate an existing plugin to the versioned pattern or to start a new version.
 
-## Quick Start (`src_v3`)
+### 1. Scaffold the Version
+Use the `template` plugin's latest version as a base.
 
 ```bash
-# Install UI deps for this version (required before lint/dev/test)
-./dialtone.sh template install src_v3
-
-# Start dev mode (Vite + debug browser attach)
-./dialtone.sh template dev src_v3
-
-# Open in browser
-# http://127.0.0.1:3000/
+# Example: Creating v1 for a new 'my-plugin'
+mkdir -p src/plugins/my-plugin/src_v1
+cp -r src/plugins/template/src_v3/* src/plugins/my-plugin/src_v1/
 ```
 
-If you skip install, typical errors are:
-- `tsc: command not found`
-- `vite: command not found`
+### 2. Customize the Implementation
+Update all references to `template` and `src_v3` in the copied files:
+- **Go Server (`cmd/main.go`):** Update the fallback path to your plugin directory.
+- **UI (`ui/package.json`):** Update the package name and description.
+- **UI (`ui/src/main.ts`):** Update the `setupApp` title.
+- **Tests (`test/main.go`):** Update the `Version` and artifact paths.
 
-## Daily Dev Flow
+### 3. Implement the Plugin Logic
+Develop your feature within the `src_vN` scope. 
+- Avoid animations or fades in the UI to keep tests fast and deterministic.
+- Use `aria-label` extensively for all interactive elements to support stable testing.
 
+### 4. Hook up the CLI
+Update your plugin's CLI dispatcher (e.g., `src/plugins/my-plugin/cli/my-plugin.go`) to support versioned subcommands:
+
+```go
+func RunMyPlugin(args []string) {
+    // ... dispatcher logic ...
+    switch subcommand {
+    case "install": RunInstall(getDir())
+    case "test":    RunTest(getDir())
+    case "build":   RunBuild(getDir())
+    // ...
+    }
+}
+```
+
+---
+
+## Testing & Validation Workflow
+
+Testing is mandatory for all `src_vN` implementations and is the "Ground Truth" for version readiness.
+
+### 1. Daily Development
+Run the versioned dev server with browser synchronization:
 ```bash
-# 1) Ensure deps exist
-./dialtone.sh template install src_v3
-
-# 2) Run dev server + browser attach
-./dialtone.sh template dev src_v3
-
-# 3) Optional: UI-only server (no debug browser attach)
-./dialtone.sh template ui-run src_v3
+./dialtone.sh my-plugin dev src_v1
 ```
 
-## Test Flow (Must Review `TEST.md` Every Run)
-
+### 2. Continuous Testing
+Run the full automated suite frequently during development:
 ```bash
-# Run full suite for the version
-./dialtone.sh template test src_v3
+./dialtone.sh my-plugin test src_v1
 ```
 
-After every test run, check:
-
+### 3. Review Artifacts
+Every `test` run produces a `TEST.md` report. **Always review this file before committing.**
 ```bash
-# Primary report (step-by-step pass/fail + embedded screenshot links)
-cat src/plugins/template/src_v3/test/TEST.md
-
-# Full runner log
-cat src/plugins/template/src_v3/test/test.log
-
-# Error-focused log
-cat src/plugins/template/src_v3/test/error.log
+# Check step status and embedded screenshots
+cat src/plugins/my-plugin/src_v1/test/TEST.md
 ```
 
-What `template test` executes:
-1. Preflight: `fmt`, `vet`, `go-build`, `lint`, `format`, `build`
-2. Go server run check
-3. UI run check
-4. Browser section checks (`hero`, `docs`, `table`, `three`, `xterm`, `video`)
-5. Lifecycle/invariant checks
-6. Cleanup verification
+---
 
-Artifacts written each run:
-- `src/plugins/template/src_v3/test/TEST.md`
-- `src/plugins/template/src_v3/test/test.log`
-- `src/plugins/template/src_v3/test/error.log`
-- `src/plugins/template/src_v3/screenshots/test_step_*.png`
+## Migration Lessons (from Cloudflare Plugin)
 
-`TEST.md` is intended for GitHub rendering, so commit both report + referenced screenshots.
-
-## Create a New `src_vN`
-
-```bash
-# Example: create src_v4 from latest existing src_vN
-./dialtone.sh template src --n 4
-```
-
-Generator behavior:
-- Clones latest template version folder.
-- Rewrites internal version references in copied files (for example `src_v3` -> `src_v4`).
-- Keeps full section/test wiring so new version is immediately testable.
-
-Required follow-up for a new version:
-
-```bash
-# Install deps for new version
-./dialtone.sh template install src_v4
-
-# Validate full suite and generate src_v4/test/TEST.md
-./dialtone.sh template test src_v4
-
-# Start dev on the new version
-./dialtone.sh template dev src_v4
-```
-
-## Using `src_v3` As A Base For Another Plugin
-
-If you clone `src/plugins/template/src_v3` into another plugin (for example `src/plugins/<name>/src_v3`), there are a few extra hookup steps:
-
-1. Update plugin-specific strings and paths.
-   - UI title: `dialtone.template` -> your plugin title.
-   - Go serve fallback path in `cmd/main.go`: `src/plugins/template/...` -> your plugin path.
-   - Package name in `ui/package.json`: `template-ui-v3` -> plugin-specific name.
-2. Ensure your plugin CLI exposes the same versioned commands if you want template parity.
-   - `install`, `fmt`, `vet`, `go-build`, `lint`, `format`, `build`, `serve`, `ui-run`, `dev`, `test`, `src --n <N>`.
-3. If you remove sections from template, remove matching UI/deps/artifacts.
-   - Remove unused section DOM + registration + component files.
-   - Remove unused dependencies (`@xterm/*`, video assets, etc.) from `ui/package.json`.
-   - If `video` section is removed, also remove `ui/public/video1.mp4` (template uses it).
-4. Keep only source files when scaffolding.
-   - Do not copy runtime/generated directories into a new plugin version (`ui/node_modules`, `ui/dist`, `.vite`) or run outputs (`dev.log`, `test/TEST.md`, screenshots, logs).
-5. Test viewport assumption.
-   - `test_v2` browser sessions started with a URL use `1280x800` viewport by default, so visual/pixel tests should assert projected points are inside that viewport.
-
-## Commands Reference
-
-```bash
-./dialtone.sh template install <src_vN>   # bun install for selected version UI
-./dialtone.sh template fmt <src_vN>       # go fmt for selected version
-./dialtone.sh template vet <src_vN>       # go vet for selected version
-./dialtone.sh template go-build <src_vN>  # go build for selected version
-./dialtone.sh template lint <src_vN>      # tsc --noEmit
-./dialtone.sh template format <src_vN>    # UI format check
-./dialtone.sh template build <src_vN>     # UI production build
-./dialtone.sh template serve <src_vN>     # Go server on :8080
-./dialtone.sh template ui-run <src_vN>    # Vite dev server (default :3000)
-./dialtone.sh template dev <src_vN>       # Vite + debug browser attach
-./dialtone.sh template test <src_vN>      # full test_v2 suite -> TEST.md
-./dialtone.sh template src --n <N>        # create a new src_vN
-```
-
-## `src_v3` Test Status
-
-```bash
-# Verified full pass
-./dialtone.sh template test src_v3
-```
-
-- Status: `PASS`
-- All 13 steps currently pass end-to-end.
-
-## Troubleshooting
-
-- Missing UI tools (`tsc`/`vite` not found):
-  - Run `./dialtone.sh template install <src_vN>`.
-- Dev server port conflict (`3000`):
-  - Stop existing process on `3000`, rerun `./dialtone.sh template dev <src_vN>`.
-- Test server port conflict (`8080`):
-  - Stop existing process on `8080`, rerun `./dialtone.sh template test <src_vN>`.
+- **Immediate Swaps:** Do not use CSS transitions for section changes. Tests expect elements to be interactable immediately.
+- **Lifecycle Logs:** Ensure `SectionManager` lifecycle events are logged. Tests verify these to ensure components aren't leaking memory or state.
+- **Cleanup is Critical:** Always implement thorough cleanup in `test/18.go` (or your final cleanup step) to ensure ports are released for subsequent runs.
+- **ARIA First:** If an element is hard to select in a test, add an `aria-label` instead of using complex CSS selectors.

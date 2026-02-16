@@ -23,6 +23,7 @@ import (
 	"dialtone/cli/src/core/logger"
 	"dialtone/cli/src/core/mock"
 	"dialtone/cli/src/core/util"
+	"dialtone/cli/src/core/web"
 	ai_app "dialtone/cli/src/plugins/ai/app"
 	camera "dialtone/cli/src/plugins/camera/app"
 	dag_cli "dialtone/cli/src/plugins/dag/cli"
@@ -183,100 +184,6 @@ func runLocalOnly(port, wsPort, webPort int, verbose bool, mavlinkAddr string, o
 // Global start time for uptime calculation
 var startTime = time.Now()
 
-func runVPN(args []string) {
-	fs := flag.NewFlagSet("vpn", flag.ExitOnError)
-	hostname := fs.String("hostname", os.Getenv("DIALTONE_HOSTNAME"), "Tailscale hostname")
-	stateDir := fs.String("state-dir", "", "State directory")
-	ephemeral := fs.Bool("ephemeral", false, "Register as ephemeral node")
-	verbose := fs.Bool("verbose", false, "Verbose logging")
-	fs.Parse(args)
-
-	if *hostname == "" {
-		*hostname = "dialtone-vpn"
-	}
-
-	if *stateDir == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			logger.LogFatal("Failed to get home directory: %v", err)
-		}
-		*stateDir = filepath.Join(homeDir, ".config", "dialtone-vpn")
-	}
-
-	if err := os.MkdirAll(*stateDir, 0700); err != nil {
-		logger.LogFatal("Failed to create state directory: %v", err)
-	}
-
-	ts := &tsnet.Server{
-		Hostname:  *hostname,
-		Dir:       *stateDir,
-		Ephemeral: *ephemeral,
-		AuthKey:   os.Getenv("TS_AUTHKEY"),
-		UserLogf:  logger.LogInfo,
-	}
-	if *verbose {
-		ts.Logf = logger.LogInfo
-	}
-	defer ts.Close()
-
-	// Pre-flight check for stale MagicDNS entry
-	CheckStaleHostname(*hostname)
-
-	logger.LogInfo("VPN Mode: Connecting to Tailscale as %s...", *hostname)
-	logger.LogInfo("VPN Mode: State directory: %s", *stateDir)
-	ln, err := ts.Listen("tcp", ":80")
-	if err != nil {
-		logger.LogFatal("VPN Mode: Failed to listen on :80: %v", err)
-	}
-	defer ln.Close()
-
-	logger.LogInfo("VPN Mode: Waiting for Tailscale connection...")
-	status, err := ts.Up(context.Background())
-	if err != nil {
-		logger.LogFatal("TS Up failed: %v", err)
-	}
-
-	ipStr := "none"
-	if len(status.TailscaleIPs) > 0 {
-		ipStr = status.TailscaleIPs[0].String()
-	}
-	logger.LogInfo("VPN Mode: Connected (IP: %s)", ipStr)
-	logger.LogInfo("VPN Mode: Serving dashboard at http://%s/vpn", *hostname)
-
-	// Use CreateWebHandler for unified dashboard
-	// Pass 0 for ports since NATS isn't running
-	// Pass nil for NATS server
-	lc, _ := ts.LocalClient()
-	webHandler := CreateWebHandler(*hostname, 0, 0, 80, 0, 0, nil, lc, status.TailscaleIPs, false)
-
-	server := &http.Server{
-		Handler: webHandler,
-	}
-
-	go func() {
-		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
-			logger.LogInfo("Tailscale HTTP server error: %v", err)
-		}
-	}()
-
-	// Local listener for Cloudflare Tunnel
-	localWebAddr := "127.0.0.1:8080"
-	localWebLn, err := net.Listen("tcp", localWebAddr)
-	if err == nil {
-		go func() {
-			logger.LogInfo("VPN Mode (Local): Serving at http://%s", localWebAddr)
-			if err := http.Serve(localWebLn, webHandler); err != nil {
-				logger.LogInfo("Local web server error: %v", err)
-			}
-		}()
-	} else {
-		logger.LogInfo("Warning: Failed to start local web server for VPN: %v", err)
-	}
-
-	util.WaitForShutdown()
-	logger.LogInfo("Shutting down VPN mode...")
-}
-
 // Ensure embed is detected
 //
 //go:embed all:core/web/dist
@@ -303,7 +210,7 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 	}
 
 	// Pre-flight check for stale MagicDNS entry
-	CheckStaleHostname(hostname)
+	util.CheckStaleHostname(hostname)
 
 	// Validate required environment variables
 	if os.Getenv("TS_AUTHKEY") == "" {
