@@ -60,7 +60,16 @@ func Run(args []string) error {
 	case "build":
 		return RunBuild(getDir())
 	case "test":
-		return RunTest(getDir())
+		testFlags := flag.NewFlagSet("dag test", flag.ContinueOnError)
+		attach := testFlags.Bool("attach", false, "Attach to running headed dev browser session")
+		dir := getDir()
+		if len(args) > 1 && args[1] != "" && !strings.HasPrefix(args[1], "-") {
+			dir = args[1]
+			_ = testFlags.Parse(args[2:])
+		} else {
+			_ = testFlags.Parse(args[1:])
+		}
+		return RunTest(dir, *attach)
 	case "src":
 		n := 0
 		if len(args) > 1 && !strings.HasPrefix(args[1], "-") {
@@ -115,6 +124,7 @@ func printUsage() {
 	fmt.Println("\nDefault <dir> is the latest src_vN folder.")
 	fmt.Println("\nExamples:")
 	fmt.Println("  ./dialtone.sh dag test src_v3")
+	fmt.Println("  ./dialtone.sh dag test src_v3 --attach")
 	fmt.Println("  ./dialtone.sh dag dev src_v3")
 	fmt.Println("  ./dialtone.sh dag src --n 5    # creates src/plugins/dag/src_v5")
 }

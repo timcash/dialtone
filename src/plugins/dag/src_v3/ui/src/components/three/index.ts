@@ -15,7 +15,7 @@ type DagNode = {
   labelTexture: THREE.CanvasTexture | null;
   labelCanvas: HTMLCanvasElement | null;
   labelMesh: THREE.Mesh;
-  nestedLayerId?: LayerID;
+  nestedLayerIDs: LayerID[];
 };
 
 type DagEdge = {
@@ -33,6 +33,7 @@ type DagLayer = {
   baseY: number;
   baseZ: number;
   anchor: THREE.Group;
+  grid: THREE.GridHelper;
   nodeIds: NodeID[];
   edgeIds: EdgeID[];
 };
@@ -71,8 +72,8 @@ class ThreeControl implements VisualizationControl {
   private visible = false;
 
   private rankXSpacing = 8;
-  private rowYSpacing = 5.5;
-  private nestedLayerZOffset = 15;
+  private rowZSpacing = 5.5;
+  private nestedLayerYOffset = 15;
 
   private layers = new Map<LayerID, DagLayer>();
   private nodes = new Map<NodeID, DagNode>();
@@ -89,7 +90,6 @@ class ThreeControl implements VisualizationControl {
   private recentSelectedNodeIDs: NodeID[] = [];
   private labelsVisible = true;
   private lastCreatedNodeId = '';
-  private menuOpen = false;
   private renameInput: HTMLInputElement | null = null;
   private renameApplyButton: HTMLButtonElement | null = null;
 
@@ -99,10 +99,6 @@ class ThreeControl implements VisualizationControl {
   private unlinkButton: HTMLButtonElement | null = null;
   private nestButton: HTMLButtonElement | null = null;
   private clearPicksButton: HTMLButtonElement | null = null;
-  private menuButton: HTMLButtonElement | null = null;
-  private menuPanel: HTMLElement | null = null;
-  private menuTableButton: HTMLButtonElement | null = null;
-  private menuThreeButton: HTMLButtonElement | null = null;
   private nodeHistoryLabelEl: HTMLElement | null = null;
   private nodeHistoryValueEls: HTMLElement[] = [];
 
@@ -112,7 +108,7 @@ class ThreeControl implements VisualizationControl {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.autoClear = false;
 
-    this.camera.position.set(0, 0, 28);
+    this.camera.position.set(0, 22, 28);
     this.camera.lookAt(0, 0, 0);
 
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.45));
@@ -146,61 +142,40 @@ class ThreeControl implements VisualizationControl {
     const anchor = new THREE.Group();
     anchor.position.set(baseX, baseY, baseZ);
     anchor.name = `layer_${id}`;
-    this.attachLayerGrid(anchor);
+    const grid = this.attachLayerGrid(anchor);
     this.scene.add(anchor);
-    this.layers.set(id, { id, parentNodeId, baseX, baseY, baseZ, anchor, nodeIds: [], edgeIds: [] });
+    this.layers.set(id, { id, parentNodeId, baseX, baseY, baseZ, anchor, grid, nodeIds: [], edgeIds: [] });
   }
 
-  private attachLayerGrid(anchor: THREE.Group) {
+  private attachLayerGrid(anchor: THREE.Group): THREE.GridHelper {
     const width = 40;
-    const height = 28;
-    const y0 = -2.75;
-    const z = -1.1;
-    const lineColor = 0xb9c8df;
-
-    // Sparse dashed guides, no filled background.
-    const xGuides = [-width / 3, 0, width / 3];
-    const yGuides = [-height / 4, 0, height / 4];
-
-    for (const gx of xGuides) {
-      const line = this.createDashedLine(
-        new THREE.Vector3(gx, y0 - height / 2, z),
-        new THREE.Vector3(gx, y0 + height / 2, z),
-        lineColor
-      );
-      anchor.add(line);
-    }
-    for (const gy of yGuides) {
-      const line = this.createDashedLine(
-        new THREE.Vector3(-width / 2, y0 + gy, z),
-        new THREE.Vector3(width / 2, y0 + gy, z),
-        lineColor
-      );
-      anchor.add(line);
-    }
+    const depth = 28;
+    const size = Math.max(width, depth);
+    const divisions = 32;
+    const grid = new THREE.GridHelper(size, divisions, 0x444444, 0x222222);
+    grid.position.set(0, -1.1, 0);
+    grid.scale.set(width / size, 1, depth / size);
+    const material = grid.material as THREE.Material;
+    material.transparent = true;
+    material.opacity = 0.6;
+    anchor.add(grid);
+    return grid;
   }
 
-  private createDashedLine(from: THREE.Vector3, to: THREE.Vector3, color: number): THREE.Line {
-    const geometry = new THREE.BufferGeometry().setFromPoints([from, to]);
-    const material = new THREE.LineDashedMaterial({
-      color,
-      transparent: true,
-      opacity: 0.24,
-      dashSize: 0.8,
-      gapSize: 0.7,
-      depthWrite: false,
-    });
-    const line = new THREE.Line(geometry, material);
-    line.computeLineDistances();
-    return line;
+  private setLayerGridOpacity(layer: DagLayer, opacity: number) {
+    const materials = Array.isArray(layer.grid.material) ? layer.grid.material : [layer.grid.material];
+    for (const material of materials) {
+      material.transparent = true;
+      material.opacity = opacity;
+    }
   }
 
   private rankToX(rank: number): number {
     return rank * this.rankXSpacing - this.rankXSpacing;
   }
 
-  private rowToY(row: number): number {
-    return -row * this.rowYSpacing;
+  private rowToZ(row: number): number {
+    return -row * this.rowZSpacing;
   }
 
   private createLabelMesh(text: string): { mesh: THREE.Mesh; texture: THREE.CanvasTexture | null; canvas: HTMLCanvasElement | null } {
@@ -226,7 +201,7 @@ class ThreeControl implements VisualizationControl {
     return { mesh: new THREE.Mesh(new THREE.PlaneGeometry(3.2, 1), material), texture, canvas };
   }
 
-  private createNode(id: NodeID, layerId: LayerID, rank: number, row: number, nestedLayerId?: LayerID) {
+  private createNode(id: NodeID, layerId: LayerID, rank: number, row: number, nestedLayerIDs: LayerID[] = []) {
     const layer = this.layers.get(layerId);
     if (!layer) throw new Error(`missing layer ${layerId}`);
 
@@ -239,13 +214,13 @@ class ThreeControl implements VisualizationControl {
       metalness: 0.24,
     });
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(this.rankToX(rank), this.rowToY(row), 0);
+    mesh.position.set(this.rankToX(rank), 0, this.rowToZ(row));
     mesh.userData = { nodeId: id };
     layer.anchor.add(mesh);
     const label = id;
     const labelAsset = this.createLabelMesh(label);
     const labelMesh = labelAsset.mesh;
-    labelMesh.position.set(this.rankToX(rank) + 2.25, this.rowToY(row), 0);
+    labelMesh.position.set(this.rankToX(rank) + 2.25, 0, this.rowToZ(row));
     labelMesh.visible = this.labelsVisible;
     layer.anchor.add(labelMesh);
 
@@ -259,7 +234,7 @@ class ThreeControl implements VisualizationControl {
       labelTexture: labelAsset.texture,
       labelCanvas: labelAsset.canvas,
       labelMesh,
-      nestedLayerId,
+      nestedLayerIDs,
     };
     this.nodes.set(id, node);
     layer.nodeIds.push(id);
@@ -324,16 +299,15 @@ class ThreeControl implements VisualizationControl {
   private ensureNestedLayer(nodeId: NodeID): LayerID {
     const parentNode = this.nodes.get(nodeId);
     if (!parentNode) return '';
-    if (parentNode.nestedLayerId && this.layers.has(parentNode.nestedLayerId)) {
-      return parentNode.nestedLayerId;
-    }
+    const existingLayerIDs = parentNode.nestedLayerIDs.filter((layerID) => this.layers.has(layerID));
+    if (existingLayerIDs.length > 0) return existingLayerIDs[existingLayerIDs.length - 1];
 
     const parentLayer = this.layers.get(parentNode.layerId);
     const parentWorld = parentNode.mesh.getWorldPosition(new THREE.Vector3());
-    const parentBaseZ = parentLayer ? parentLayer.baseZ : 0;
-    const nestedLayerId = `layer_nested_${nodeId}`;
-    this.createLayer(nestedLayerId, nodeId, parentWorld.x, parentWorld.y, parentBaseZ - this.nestedLayerZOffset);
-    parentNode.nestedLayerId = nestedLayerId;
+    const parentBaseY = parentLayer ? parentLayer.baseY : 0;
+    const nestedLayerId = `layer_nested_${nodeId}_${parentNode.nestedLayerIDs.length + 1}`;
+    this.createLayer(nestedLayerId, nodeId, parentWorld.x, parentBaseY + this.nestedLayerYOffset, parentWorld.z);
+    parentNode.nestedLayerIDs.push(nestedLayerId);
     this.refreshVisualState();
     return nestedLayerId;
   }
@@ -355,7 +329,7 @@ class ThreeControl implements VisualizationControl {
 
   private onDoubleClick = () => {
     if (!this.selectedNodeId) return;
-    this.enterNested(this.selectedNodeId);
+    this.openNestedLayer(this.selectedNodeId);
   };
 
   private initMobileUI() {
@@ -365,10 +339,6 @@ class ThreeControl implements VisualizationControl {
     this.unlinkButton = this.container.querySelector("button[aria-label='DAG Unlink']");
     this.nestButton = this.container.querySelector("button[aria-label='DAG Nest']");
     this.clearPicksButton = this.container.querySelector("button[aria-label='DAG Clear Picks']");
-    this.menuButton = this.container.querySelector("button[aria-label='DAG Menu']");
-    this.menuPanel = this.container.querySelector("[aria-label='DAG Menu Panel']");
-    this.menuTableButton = this.container.querySelector("button[aria-label='DAG Menu Navigate Table']");
-    this.menuThreeButton = this.container.querySelector("button[aria-label='DAG Menu Navigate Three']");
     this.nodeHistoryLabelEl = this.container.querySelector('.dag-history > h3');
     this.nodeHistoryValueEls = [
       this.container.querySelector("[aria-label='DAG Node History Item 1']"),
@@ -388,7 +358,7 @@ class ThreeControl implements VisualizationControl {
     })();
 
     this.backButton?.addEventListener('click', () => {
-      this.goBack();
+      this.closeActiveLayer();
       this.syncControlState();
     });
     this.addButton?.addEventListener('click', () => {
@@ -411,39 +381,13 @@ class ThreeControl implements VisualizationControl {
       this.clearSelections();
     });
 
-    this.menuButton?.addEventListener('click', () => {
-      if (testMode) {
-        this.menuOpen = false;
-        if (this.menuPanel) this.menuPanel.hidden = true;
-        this.syncControlState();
-        return;
-      }
-      this.menuOpen = !this.menuOpen;
-      this.syncControlState();
-    });
-    this.menuTableButton?.addEventListener('click', () => {
-      const sections = (window as Window & { sections?: { navigateTo: (id: string) => Promise<void> } }).sections;
-      void sections?.navigateTo('dag-table');
-      this.menuOpen = false;
-      this.syncControlState();
-    });
-    this.menuThreeButton?.addEventListener('click', () => {
-      const sections = (window as Window & { sections?: { navigateTo: (id: string) => Promise<void> } }).sections;
-      void sections?.navigateTo('three');
-      this.menuOpen = false;
-      this.syncControlState();
-    });
     this.renameApplyButton?.addEventListener('click', () => this.applyRenameFromInput());
     this.renameInput?.addEventListener('keydown', (event) => {
       if (event.key !== 'Enter') return;
       event.preventDefault();
       this.applyRenameFromInput();
     });
-    if (testMode) {
-      if (this.menuButton) this.menuButton.setAttribute('data-test-locked', 'true');
-      if (this.menuPanel) this.menuPanel.hidden = true;
-      this.menuOpen = false;
-    }
+    if (testMode) this.container.setAttribute('data-test-mode', 'true');
 
     this.syncControlState();
   }
@@ -470,7 +414,7 @@ class ThreeControl implements VisualizationControl {
     if (!this.selectedNodeId) return;
     const nestedLayerId = this.ensureNestedLayer(this.selectedNodeId);
     if (!nestedLayerId) return;
-    this.enterNested(this.selectedNodeId);
+    this.openNestedLayer(this.selectedNodeId);
   }
 
   private getRecentLinkPair(): { outputNodeId: NodeID; inputNodeId: NodeID } | null {
@@ -582,8 +526,6 @@ class ThreeControl implements VisualizationControl {
     if (this.clearPicksButton) {
       this.clearPicksButton.disabled = !(this.recentSelectedNodeIDs.length > 0 || this.selectedNodeId);
     }
-    if (this.menuButton) this.menuButton.setAttribute('aria-expanded', String(this.menuOpen));
-    if (this.menuPanel) this.menuPanel.hidden = !this.menuOpen;
     const selectedNode = this.nodes.get(this.selectedNodeId);
     if (this.renameInput) {
       this.renameInput.disabled = !selectedNode;
@@ -651,6 +593,7 @@ class ThreeControl implements VisualizationControl {
 
   private applyLayerView(layerId: LayerID) {
     this.activeLayerId = layerId;
+    const activeLayer = this.layers.get(layerId);
     const visibleLayerIDs = new Set<LayerID>();
     visibleLayerIDs.add(layerId);
     const selectedHistory = new Set(this.recentSelectedNodeIDs);
@@ -660,23 +603,44 @@ class ThreeControl implements VisualizationControl {
         visibleLayerIDs.add(layer.id);
       }
     }
+    for (const layer of this.layers.values()) {
+      const isVisible = visibleLayerIDs.has(layer.id);
+      if (!isVisible) {
+        layer.grid.visible = false;
+        continue;
+      }
+      layer.grid.visible = true;
+      const isActive = layer.id === layerId;
+      const isBelowActive = !!activeLayer && layer.baseY < activeLayer.baseY - 0.001;
+      if (isActive) {
+        this.setLayerGridOpacity(layer, 0.6);
+      } else if (isBelowActive) {
+        this.setLayerGridOpacity(layer, 0.14);
+      } else {
+        this.setLayerGridOpacity(layer, 0.28);
+      }
+    }
 
     for (const node of this.nodes.values()) {
       const isVisible = visibleLayerIDs.has(node.layerId);
       const isActive = node.layerId === layerId;
+      const nodeLayer = this.layers.get(node.layerId);
+      const isBelowActive = !!activeLayer && !!nodeLayer && nodeLayer.baseY < activeLayer.baseY - 0.001;
       node.mesh.visible = isVisible;
       node.labelMesh.visible = isVisible && this.labelsVisible;
       const material = node.mesh.material as THREE.MeshStandardMaterial;
       material.transparent = !isActive;
-      material.opacity = isActive ? 1 : 0.24;
+      material.opacity = isActive ? 1 : isBelowActive ? 0.1 : 0.24;
     }
     for (const edge of this.edges.values()) {
       const isVisible = visibleLayerIDs.has(edge.layerId);
       const isActive = edge.layerId === layerId;
+      const edgeLayer = this.layers.get(edge.layerId);
+      const isBelowActive = !!activeLayer && !!edgeLayer && edgeLayer.baseY < activeLayer.baseY - 0.001;
       edge.line.visible = isVisible;
       const material = edge.line.material as THREE.LineBasicMaterial;
       material.transparent = !isActive;
-      material.opacity = isActive ? 1 : 0.2;
+      material.opacity = isActive ? 1 : isBelowActive ? 0.08 : 0.2;
       this.updateEdgeLine(edge);
     }
     for (const link of this.nestedLinks) {
@@ -709,36 +673,31 @@ class ThreeControl implements VisualizationControl {
     }
     const center = bbox.getCenter(new THREE.Vector3());
     const size = bbox.getSize(new THREE.Vector3());
-    return { ok: true, center, maxDim: Math.max(4, size.x, size.y) };
+    return { ok: true, center, maxDim: Math.max(4, size.x, size.z) };
+  }
+
+  private positionCameraAroundPoint(center: THREE.Vector3, maxDim: number) {
+    const fov = THREE.MathUtils.degToRad(this.camera.fov);
+    const aspectScale = this.camera.aspect < 1 ? 1 / this.camera.aspect : 1;
+    const dist = ((maxDim * aspectScale) / (2 * Math.tan(fov / 2))) * 1.2 + 14;
+    this.camera.position.set(center.x + dist * 0.75, center.y + dist * 0.95, center.z + dist * 0.75);
+    this.camera.lookAt(center);
+    this.camera.updateProjectionMatrix();
+  }
+
+  private focusCameraOnNode(nodeId: NodeID): boolean {
+    const node = this.nodes.get(nodeId);
+    if (!node) return false;
+    const center = node.mesh.getWorldPosition(new THREE.Vector3());
+    const bounds = this.getLayerBounds(node.layerId);
+    this.positionCameraAroundPoint(center, bounds.ok ? Math.max(4, bounds.maxDim) : 6);
+    return true;
   }
 
   private setCameraViewForLayer(layerId: LayerID, _view: CameraView): boolean {
     const bounds = this.getLayerBounds(layerId);
     if (!bounds.ok) return false;
-    const fov = THREE.MathUtils.degToRad(this.camera.fov);
-    const aspectScale = this.camera.aspect < 1 ? 1 / this.camera.aspect : 1;
-    const dist = ((bounds.maxDim * aspectScale) / (2 * Math.tan(fov / 2))) * 1.2 + 14;
-    const c = bounds.center;
-    const normalizedView = ROOT_IO_CAMERA_VIEW;
-
-    switch (normalizedView) {
-      case 'top':
-        this.camera.position.set(c.x, c.y + dist, c.z + 0.01);
-        break;
-      case 'side':
-        this.camera.position.set(c.x + dist, c.y, c.z + 0.01);
-        break;
-      case 'iso':
-        this.camera.position.set(c.x + dist*0.75, c.y + dist*0.65, c.z + dist*0.75);
-        break;
-      case 'front':
-      default:
-        this.camera.position.set(c.x, c.y, c.z + dist);
-        break;
-    }
-
-    this.camera.lookAt(c);
-    this.camera.updateProjectionMatrix();
+    this.positionCameraAroundPoint(bounds.center, bounds.maxDim);
     return true;
   }
 
@@ -810,9 +769,14 @@ class ThreeControl implements VisualizationControl {
 
   private getNestedNodeIDs(nodeId: NodeID): NodeID[] {
     const node = this.nodes.get(nodeId);
-    if (!node || !node.nestedLayerId) return [];
-    const layer = this.layers.get(node.nestedLayerId);
-    return layer ? [...layer.nodeIds].sort() : [];
+    if (!node || node.nestedLayerIDs.length === 0) return [];
+    const out = new Set<NodeID>();
+    for (const layerID of node.nestedLayerIDs) {
+      const layer = this.layers.get(layerID);
+      if (!layer) continue;
+      for (const nestedNodeID of layer.nodeIds) out.add(nestedNodeID);
+    }
+    return [...out].sort();
   }
 
   private getProjectedPoint(nodeId: NodeID): ProjectedPoint {
@@ -863,24 +827,45 @@ class ThreeControl implements VisualizationControl {
     return true;
   }
 
-  private enterNested(nodeId?: NodeID): boolean {
+  private openNestedLayer(nodeId?: NodeID): boolean {
     const targetNode = this.nodes.get(nodeId || this.selectedNodeId);
-    if (!targetNode || !targetNode.nestedLayerId) return false;
-    if (!this.layers.has(targetNode.nestedLayerId)) return false;
+    if (!targetNode || targetNode.nestedLayerIDs.length === 0) return false;
+    const candidateLayerIDs = targetNode.nestedLayerIDs.filter((layerID) => this.layers.has(layerID));
+    if (candidateLayerIDs.length === 0) return false;
+    const targetLayerID = candidateLayerIDs[candidateLayerIDs.length - 1];
     this.history.push({ layerId: this.activeLayerId, selectedNodeId: this.selectedNodeId });
     this.selectedNodeId = '';
-    this.applyLayerView(targetNode.nestedLayerId);
-    console.log(`[Three #three] enter nested layer: ${targetNode.nestedLayerId}`);
+    this.applyLayerView(targetLayerID);
+    console.log(`[Three #three] open nested layer: ${targetLayerID}`);
     return true;
   }
 
-  private goBack(): boolean {
+  private clearSelectionHistoryForLayer(layerId: LayerID) {
+    this.recentSelectedNodeIDs = this.recentSelectedNodeIDs.filter((nodeId) => {
+      const node = this.nodes.get(nodeId);
+      return !!node && node.layerId !== layerId;
+    });
+  }
+
+  private closeActiveLayer(): boolean {
     if (this.history.length === 0 && this.popSelectionHistoryBack()) return true;
     const prev = this.history.pop();
     if (!prev) return false;
+    const closedLayerId = this.activeLayerId;
+    const closedLayer = this.layers.get(closedLayerId);
+    const parentNodeId = closedLayer?.parentNodeId ?? '';
+
+    this.clearSelectionHistoryForLayer(closedLayerId);
     this.selectedNodeId = prev.selectedNodeId;
     this.applyLayerView(prev.layerId);
-    console.log(`[Three #three] back to layer: ${prev.layerId}`);
+    if (parentNodeId && this.nodes.has(parentNodeId)) {
+      this.selectedNodeId = parentNodeId;
+      this.recentSelectedNodeIDs = [parentNodeId, ...this.recentSelectedNodeIDs.filter((id) => id !== parentNodeId)].slice(0, 5);
+      this.focusCameraOnNode(parentNodeId);
+      this.refreshVisualState();
+      this.syncCanvasState();
+    }
+    console.log(`[Three #three] close layer: ${closedLayerId} -> ${prev.layerId}`);
     return true;
   }
 
@@ -921,8 +906,8 @@ class ThreeControl implements VisualizationControl {
   }
 
   private updateNodePosition(node: DagNode) {
-    node.mesh.position.set(this.rankToX(node.rank), this.rowToY(node.row), 0);
-    node.labelMesh.position.set(this.rankToX(node.rank) + 2.25, this.rowToY(node.row), 0);
+    node.mesh.position.set(this.rankToX(node.rank), 0, this.rowToZ(node.row));
+    node.labelMesh.position.set(this.rankToX(node.rank) + 2.25, 0, this.rowToZ(node.row));
     for (const edge of this.edges.values()) {
       if (edge.inputNodeId === node.id || edge.outputNodeId === node.id) {
         this.updateEdgeLine(edge);
@@ -967,12 +952,12 @@ class ThreeControl implements VisualizationControl {
     this.pointer.x = (x / rect.width) * 2 - 1;
     this.pointer.y = -(y / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -layer.baseY);
     const world = new THREE.Vector3();
     if (!this.raycaster.ray.intersectPlane(plane, world)) return '';
 
     const approxRank = Math.max(0, Math.round((world.x + this.rankXSpacing) / this.rankXSpacing));
-    const approxRow = Math.max(0, Math.round((layer.baseY - world.y) / this.rowYSpacing));
+    const approxRow = Math.max(0, Math.round((layer.baseZ - world.z) / this.rowZSpacing));
     const finalRow = this.findAvailableRow(layerId, approxRank, approxRow);
     const nodeId = `n_user_${this.userNodeCounter++}`;
     this.createNode(nodeId, layerId, approxRank, finalRow);
@@ -1006,13 +991,15 @@ class ThreeControl implements VisualizationControl {
     }
     for (const edgeId of deleteEdgeIDs) this.removeEdge(edgeId);
 
-    if (node.nestedLayerId) {
-      const nestedLayer = this.layers.get(node.nestedLayerId);
-      if (nestedLayer) {
+    if (node.nestedLayerIDs.length > 0) {
+      for (const nestedLayerID of node.nestedLayerIDs) {
+        const nestedLayer = this.layers.get(nestedLayerID);
+        if (!nestedLayer) continue;
         for (const nestedNodeID of [...nestedLayer.nodeIds]) this.removeNode(nestedNodeID);
         for (const nestedEdgeID of [...nestedLayer.edgeIds]) this.removeEdge(nestedEdgeID);
-        this.layers.delete(node.nestedLayerId);
+        this.layers.delete(nestedLayerID);
       }
+      node.nestedLayerIDs = [];
     }
 
     const keptNestedLinks: NestedLink[] = [];
@@ -1179,8 +1166,10 @@ class ThreeControl implements VisualizationControl {
       logLayoutSnapshot: (layerId: LayerID, nodeIDs: NodeID[]) => this.logLayoutSnapshot(layerId, nodeIDs),
       clickProjected: (nodeId: NodeID) => this.clickProjected(nodeId),
       createNodeAtClient: (layerId: LayerID, clientX: number, clientY: number) => this.createNodeAtClient(layerId, clientX, clientY),
-      enterNested: (nodeId?: NodeID) => this.enterNested(nodeId),
-      goBack: () => this.goBack(),
+      openNestedLayer: (nodeId?: NodeID) => this.openNestedLayer(nodeId),
+      closeActiveLayer: () => this.closeActiveLayer(),
+      enterNested: (nodeId?: NodeID) => this.openNestedLayer(nodeId),
+      goBack: () => this.closeActiveLayer(),
       addNode: (layerId: LayerID, nodeId: NodeID, rank: number, row: number) => this.addNode(layerId, nodeId, rank, row),
       addEdge: (edgeId: EdgeID, layerId: LayerID, outputNodeId: NodeID, inputNodeId: NodeID) =>
         this.addEdge(edgeId, layerId, outputNodeId, inputNodeId),

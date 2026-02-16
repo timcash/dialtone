@@ -1,3 +1,17 @@
+# Log 2026-02-16 13:36:14 -0800
+
+- Template domain language aligns with current UI model:
+  - each plugin `src_vN` owns a `ui`
+  - each `ui` can expose multiple `section`s
+  - each `section` uses overlay composition
+- Standard overlay contract for new template-based sections:
+  - always include `menu`, `thumb`, `legend`
+  - include one primary overlay type (`stage`, `table`, `xterm`, or `docs`)
+- Section load behavior is dynamic:
+  - section overlays load on demand after section selection
+  - cached sections should resume without full reload
+- `ui_v2` is the shared library for enforcing this language and reducing per-plugin UI duplication.
+
 # Plugin Versioning Workflow (src_vN)
 
 This guide outlines the standard workflow for creating and evolving plugins using versioned source directories (`src_vN`). 

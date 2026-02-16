@@ -380,6 +380,15 @@ func LaunchChromeWithRole(port int, gpu bool, headless bool, targetURL, role str
 	if role != "" {
 		args = append(args, "--dialtone-role="+role)
 	}
+	if role == "dev" && !headless {
+		if os.Getenv("DIALTONE_DEVTOOLS_AUTO_OPEN") == "1" {
+			args = append(args, "--auto-open-devtools-for-tabs")
+		}
+		if targetURL != "" {
+			args = append(args, "--app="+targetURL)
+			targetURL = ""
+		}
+	}
 
 	if !gpu {
 		args = append(args, "--disable-gpu")
