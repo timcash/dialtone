@@ -9,7 +9,7 @@
   <body>
     <div id="app">
       <header aria-label="App Header">
-        <h1>dialtone.robot</h1>
+        <h1>dialtone.robot <span id="app-version"></span></h1>
       </header>
 
       <nav aria-label="Global Menu">
@@ -19,13 +19,10 @@
       <!-- HERO SECTION -->
       <section id="hero" aria-label="Hero Section">
         <canvas aria-label="Hero Canvas" class="hero-stage"></canvas>
-        <div class="hero-thumb" aria-label="Hero Controls">
-          <button type="button" aria-label="Hero Action">Action</button>
+        <div class="hero-marketing" aria-label="Hero Marketing">
+          <h1>Dialtone Robot</h1>
+          <p>Autonomous intelligence for the next generation of exploration.</p>
         </div>
-        <aside class="hero-legend" aria-label="Hero Legend">
-          <h2 aria-label="Hero Title">Hero</h2>
-          <p aria-label="Hero Subtitle">Robot hero visualization with real-time motion and section lifecycle controls.</p>
-        </aside>
       </section>
 
       <!-- DOCS SECTION -->
@@ -57,16 +54,29 @@
       <!-- 3D SECTION -->
       <section id="three" aria-label="Three Section" hidden>
         <canvas aria-label="Three Canvas" class="three-stage"></canvas>
-        <div class="three-thumb" aria-label="Three Controls"></div>
-        <aside class="three-legend" aria-label="Three Legend"></aside>
+        <div class="three-thumb" aria-label="Three Controls">
+          <div class="thumb-grid">
+            <button type="button" class="thumb-btn btn-danger" id="three-arm" aria-label="Arm">ARM</button>
+            <button type="button" class="thumb-btn btn-warning" id="three-disarm" aria-label="Disarm">DISARM</button>
+            <button type="button" class="thumb-btn" id="three-manual" aria-label="Manual">MANUAL</button>
+            <button type="button" class="thumb-btn" id="three-guided" aria-label="Guided">GUIDED</button>
+          </div>
+        </div>
+        <aside class="three-legend" aria-label="Three Legend">
+          <div class="hud-row"><span>MODE:</span> <span id="hud-mode">STABILIZE</span></div>
+          <div class="hud-row"><span>BATT:</span> <span id="hud-batt">0.0</span>V</div>
+          <div class="hud-row"><span>ALT:</span> <span id="hud-alt">0.0</span>m</div>
+          <div class="hud-row"><span>SPD:</span> <span id="hud-spd">0.0</span>m/s</div>
+          <div class="hud-row"><span>GPS:</span> <span id="hud-gps">0.0, 0.0</span></div>
+          <div class="hud-row"><span>HDG:</span> <span id="hud-hdg">0.0</span>°</div>
+          <div class="hud-errors" id="hud-errors"></div>
+        </aside>
       </section>
 
       <!-- TERMINAL SECTION -->
       <section id="xterm" aria-label="Xterm Section" hidden>
-        <div aria-label="Xterm Terminal" class="xterm-primary"></div>
-        <div class="xterm-thumb" aria-label="Xterm Controls">
-          <input aria-label="Xterm Input" type="text" value="status --verbose" placeholder="Enter command..." />
-        </div>
+        <div class="xterm-primary" aria-label="Xterm Terminal"></div>
+        <input aria-label="Xterm Input" type="text" value="status --verbose" placeholder="Enter command..." />
         <aside class="xterm-legend" aria-label="Xterm Legend"></aside>
       </section>
 
@@ -75,21 +85,6 @@
         <video aria-label="Test Video" class="video-primary" muted playsinline></video>
         <div class="video-thumb" aria-label="Video Controls"></div>
         <aside class="video-legend" aria-label="Video Legend"></aside>
-      </section>
-
-      <!-- CONTROLS SECTION -->
-      <section id="controls" aria-label="Controls Section" hidden>
-        <div class="controls-primary" aria-label="Controls Dashboard">
-          <h2>Robot Controls</h2>
-          <div class="controls-grid">
-            <button id="btn-arm" aria-label="Arm System">ARM</button>
-            <button id="btn-disarm" aria-label="Disarm System">DISARM</button>
-            <button id="btn-manual" aria-label="Set Mode Manual">MANUAL</button>
-            <button id="btn-guided" aria-label="Set Mode Guided">GUIDED</button>
-          </div>
-        </div>
-        <div class="controls-thumb" aria-label="Controls Panel"></div>
-        <aside class="controls-legend" aria-label="Controls Legend"></aside>
       </section>
     </div>
     <script type="module" src="/src/main.ts"></script>

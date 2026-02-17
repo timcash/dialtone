@@ -1,104 +1,91 @@
-# TODO
-
-- **Three Section (6DOF Data)**: The Three section (`src/plugins/robot/src_v1/ui/src/components/three/index.ts`) has been updated to integrate live 6DOF (roll, pitch, yaw) orientation data from the robot via WebSocket, replacing the previous auto-spinning behavior with real-time attitude visualization.
-- **Telemetry Table (Enhanced Data)**: The Telemetry Table (`src/plugins/robot/src_v1/ui/src/components/table/index.ts`) now displays comprehensive live telemetry, including GPS coordinates (lat, lon, alt, sats), battery voltage, system uptime, NATS message count, and connected clients. The backend (`src/core/web/server.go`) has been updated to broadcast this data over the WebSocket.
-- **Controls Section**: A new 'Controls' section (`src/plugins/robot/src_v1/ui/src/components/controls/`) has been added, featuring Arm, Disarm, Manual, and Guided buttons. These buttons publish commands to the `rover.command` NATS subject, restoring core robot control functionality from the old UI.
-- **Migrate Remaining Functionality**: Reference the old core web UI (`src/core/web/src/main.ts`) to identify and replicate any remaining functionalities into the new section-based robot UI.
-
-# Log 2026-02-16
-
-- **UIv2 Migration**: Ported `src_v1` to use the standardized overlay model (`menu`, `stage`, `table`, `xterm`, `docs`, `thumb`, `legend`).
-- **Test Hardening**: Integrated `test_v2` suite with robust Chrome lifecycle management.
-- **Session Management**: Implemented `dev` and `test --attach` workflows utilizing the `chrome` plugin for reliable session reuse and process reaping (fixed WSL process tree leaks).
-- **Functionality Parity**: Audited `src_v1` against legacy `src/core/web` to ensure all core robot features are present in the section-based architecture.
-
 # Robot Plugin
 
-The `robot` plugin centralizes core robot functionalities...
+The `robot` plugin is the central hub for all robot-specific logic, including MAVLink telemetry integration, NATS messaging, and the mobile-optimized 3D dashboard. 
 
-## Feature Parity: Legacy vs. src_v1
+The plugin is designed to be **self-contained**, minimizing dependencies on the Dialtone `core` by encapsulating build, installation, and deployment logic within versioned source directories (`src_v1`, etc.).
 
-| Feature | Legacy UI | src_v1 Section | NATS / WS Hook |
-|---------|-----------|----------------|----------------|
-| **Terminal** | Left Panel (xterm) | `xterm` | Shell commands via plugin server |
-| **Quick Controls** | Left Panel (Buttons) | `controls` | `rover.command` (JSON) |
-| **3D Visualization** | Center Panel (Three.js) | `three` | `mavlink.attitude` (roll/pitch/yaw) |
-| **HUD Stats** | 3D Overlay | `three` (Legend) | `vfr_hud` / `global_position_int` |
-| **Camera Feed** | Center Top (MJPEG) | `video` | `/stream` (from camera plugin) |
-| **Telemetry Table** | Right Panel | `table` | `mavlink.>` (Full telemetry stream) |
-| **System Alerts** | Right Bottom | `table` / `xterm` | `statustext` / `ack` subjects |
-| **VPN Status** | `/vpn` route | `docs` (dynamic) | `/api/status` polling |
+---
 
-## How To Test
+## 🛠 Development Lifecycle
 
+Use these commands to develop new features, verify them locally, and ship them to the robot. All commands default to the latest `src_vN` version if not specified.
+
+### 1. Environment Setup
+Install all UI dependencies for the target version.
 ```bash
-./dialtone.sh robot test src_v1
+./dialtone.sh robot install src_v1
 ```
 
-Use `--attach` to view the test playback in your running `robot dev` browser:
+### 2. Live Development (Remote Robot)
+Iterate on UI changes using real data from a remote robot without redeploying.
 ```bash
+# Connect local UI to drone-1 (or set DIALTONE_HOSTNAME)
+./dialtone.sh robot local-web-remote-robot src_v1
+```
+
+### 3. Verification & Testing
+Run the full automated test suite to ensure telemetry, navigation, and controls are functional.
+```bash
+# Headless execution
+./dialtone.sh robot test src_v1
+
+# Watch playback in your dev browser
 ./dialtone.sh robot test src_v1 --attach
 ```
 
-## Current Progress
+### 4. Build & Local Serving
+Compile the UI assets and run the Go server locally.
+```bash
+./dialtone.sh robot build src_v1
+./dialtone.sh robot serve src_v1
+```
 
-### ✅ Core Functionality Migrated
-The `start` command logic, previously part of the core `dialtone.go`, has been fully migrated into the `robot` plugin. This includes:
-- NATS server startup and management.
-- Mavlink service integration.
-- Web UI serving using a generic `CreateWebHandler` that accepts an embedded filesystem (`embed.FS`).
+### 5. Deployment
+Build the optimized binary, auto-bump the UI version, and ship to the remote robot.
+```bash
+# Standard background deployment
+./dialtone.sh robot deploy src_v1
 
-### ✅ Deployment Commands
-- **`./dialtone.sh robot deploy`**: This command now handles the deployment of the Dialtone binary to a remote robot via SSH.
-    - **Architecture Detection**: Automatically detects the remote robot's architecture and cross-compiles the Dialtone binary locally using Podman.
-    - **SSH Key Setup**: Ensures SSH key access on the robot for seamless operations.
-    - **Sudo Validation**: Validates and optionally configures passwordless sudo for the remote user to streamline automation.
-    - **`--proxy` flag**: Configures a Cloudflare tunnel proxy on the local machine (via the `cloudflare` plugin) that targets the remote robot's Tailscale address. This enables exposing the Web UI via a public Cloudflare proxy (e.g., `drone-1.dialtone.earth`).
-    - **`--service` flag**: Configures and starts Dialtone as a systemd service on the remote robot, ensuring it runs persistently and automatically restarts.
-- **`./dialtone.sh robot sync-code`**: Synchronizes local source code to the remote robot's development directory, excluding build artifacts and node modules.
+# Deployment as a persistent systemd service
+./dialtone.sh robot deploy src_v1 --service
 
-### ✅ Versioned Source (`src_v1`)
-A `src_v1` directory has been scaffolded for the `robot` plugin, mirroring the `src/plugins/template/src_v3` structure. This includes:
-- `cmd/`: Go entrypoint for serving the UI.
-- `ui/`: Vite-based TypeScript UI.
-- `test/`: Automated browser and logic validation suite.
+# Deployment with Cloudflare Tunnel ( drone-1.dialtone.earth )
+./dialtone.sh robot deploy src_v1 --proxy
+```
 
-### ✅ Robot UI (src_v1)
-The robot's UI has been set up with sections similar to the template plugin, tailored for robot-specific data:
-- **Hero Section**: Generic hero visualization.
-- **Docs Section**: Placeholder for robot documentation.
-- **Telemetry Section**: Replaces the generic 'Table' section to display robot telemetry data.
-- **3D Section**: Full-screen 3D visualization.
-- **Terminal Section**: Full-screen terminal for sending commands to the robot.
-- **Camera Section**: Video display for robot camera feeds.
+### 6. Post-Deployment Diagnostic
+Verify the live robot's UI and telemetry stream from your machine.
+```bash
+./dialtone.sh robot diagnostic src_v1
+```
 
-### ✅ Generic Web Handler
-The `CreateWebHandler` in `src/core/web/server.go` has been refactored to accept an `fs.FS` argument, allowing plugins like `robot` and `vpn` to embed and serve their own UIs without modifying core web serving logic.
+---
 
-## Remaining in Core
+## 🏗 Modular Architecture
 
-The core `dialtone` application (`src/dialtone.go`) now primarily acts as a dispatcher, delegating `start`, `robot`, and other plugin-specific commands to their respective plugins. Utility functions that are generally useful across plugins (e.g., `CheckStaleHostname`, `ProxyListener`) remain in `src/core/util`.
+The plugin is split into specialized modules to ensure maintainability:
 
-## Next Steps: Enhancing `./dialtone.sh robot test src_v1`
+| File | Responsibility |
+|------|----------------|
+| `robot.go` | Entry point and subcommand router. |
+| `start.go` | Core service logic (NATS, Web, MAVLink bridge). |
+| `deploy.go` | SSH management, auto-versioning, and 4-step health checks. |
+| `ops.go` | Version-aware router for `install`, `build`, `test`, etc. |
+| `src_v1/cmd/ops/` | Version-specific implementation of CLI operations. |
 
-The goal is to make the `./dialtone.sh robot test src_v1` command as robust and comprehensive as the `template` plugin's `src_v3` test suite.
+---
 
-### 🛠 To Do: Comprehensive Testing Workflow
-1.  **Local UI Testing with Mock Server**: Implement a mock server within the `robot` plugin's test suite to simulate robot telemetry and camera feeds. This will allow the `robot` UI to be thoroughly tested locally without requiring a physical robot or remote deployment.
-    *   Leverage existing `dialtone/cli/src/core/mock` for mock data generation.
-    *   The test suite should start this mock server during UI tests and verify UI behavior against mock data.
+## 🚀 Recent Improvements (Feb 2026)
 
-2.  **Real Deployment Verification Test**: Create a dedicated test step that performs a real deployment to a remote robot (using the `./dialtone.sh robot deploy` command) and then verifies that the robot UI starts and functions correctly on the deployed system. This will involve:
-    *   Executing the `deploy` command with appropriate flags (`--proxy`, `--service`).
-    *   Connecting to the deployed robot's UI (via Tailscale IP or Cloudflare proxy URL).
-    *   Running browser-based assertions (using `src/libs/test_v2`) to confirm UI responsiveness and data display.
-    *   Verifying that systemd services are active and the robot's web server is accessible.
+- **6DOF Model Sync**: The 3D robot model now accurately reflects real-time MAVLink `ATTITUDE` (Roll, Pitch, Yaw).
+- **Auto-Versioning**: Every deployment automatically increments the UI version (displayed in the header) for instant verification.
+- **Optimized Footprint**: Binary size reduced to ~140MB by stripping symbols and excluding DuckDB (`-tags no_duckdb`).
+- **Xterm Refinement**: Terminal now uses a full-screen **CSS Grid** layout with a sticky input bar, matching UIv2 standards.
+- **MAVLink Bridge**: Bidirectional NATS bridge (`rover.command` -> MAVLink) for ARM, DISARM, and Mode switching.
+- **Robust Health Checks**: Deployment now includes mandatory checks for Service Status, Internal Web (8080), NATS (4222), and Tailscale reachability.
 
-3.  **Align Test Structure with `template/src_v3`**:
-    *   Ensure the `robot/src_v1/test/` directory contains a `main.go` that orchestrates a suite of tests (e.g., 18 steps like `template/src_v3`).
-    *   Each test step should cover specific UI sections (`hero`, `docs`, `telemetry`, `3d`, `terminal`, `camera`) and verify their functionality and lifecycle.
-    *   Implement assertions for console logs, screenshot capture, and invariant checks using `src/libs/test_v2`.
+---
 
-## Vision: Towards a Core-less Dialtone
+## 🎯 The "Core-less" Vision
 
-The ongoing migration of core functionalities into plugins like `robot` reinforces the vision of a highly modular and extensible Dialtone CLI. Eventually, `src/core` could be reduced to only truly generic, universally shared utilities, with all domain-specific logic residing within plugins. This allows for greater flexibility, easier maintenance, and independent evolution of different Dialtone components.
+The `robot` plugin represents the future of the Dialtone CLI: a modular system where `src/core` contains only generic utilities, and all high-level functionality—from building binaries to managing hardware—lives within independent, versioned plugins. This allows us to scale to new robot generations (`src_v2`, `src_v3`) without bloating the main engine.

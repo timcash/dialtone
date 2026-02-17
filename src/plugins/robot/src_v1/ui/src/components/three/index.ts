@@ -16,7 +16,7 @@ class ThreeControl implements VisualizationControl {
     this.renderer.setClearColor(0x000000, 1);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-    this.camera.position.set(0, 0, 8);
+    this.camera.position.set(0, 0, 15);
     this.camera.lookAt(0, 0, 0);
 
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.4));
@@ -72,10 +72,62 @@ class ThreeControl implements VisualizationControl {
     
     this.ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data);
-        if (data.roll !== undefined) this.attitude.roll = data.roll;
-        if (data.pitch !== undefined) this.attitude.pitch = data.pitch;
-        if (data.yaw !== undefined) this.attitude.yaw = data.yaw;
+        const raw = JSON.parse(event.data);
+        
+        // Handle direct stats object (from ticker)
+        if (raw.uptime !== undefined) {
+           this.handleStats(raw);
+           return;
+        }
+
+        // Handle Mavlink messages
+        if (raw.type === 'HEARTBEAT') {
+           const modeEl = document.getElementById('hud-mode');
+           if (modeEl && raw.custom_mode !== undefined) modeEl.innerText = `MODE ${raw.custom_mode}`;
+        } else if (raw.roll !== undefined || raw.attitude !== undefined) {
+           // Attitude (Direct or Nested)
+           const att = raw.attitude || raw;
+           this.attitude.roll = att.roll ?? 0;
+           this.attitude.pitch = att.pitch ?? 0;
+           this.attitude.yaw = att.yaw ?? 0;
+           
+           const hdgEl = document.getElementById('hud-hdg');
+           if (hdgEl) {
+             let deg = this.attitude.yaw * (180 / Math.PI);
+             if (deg < 0) deg += 360;
+             hdgEl.innerText = deg.toFixed(1);
+           }
+        } else if (raw.lat !== undefined) {
+           // Global Position
+           const pos = raw.global_position_int || raw;
+           const gpsEl = document.getElementById('hud-gps');
+           const altEl = document.getElementById('hud-alt');
+           const hdgEl = document.getElementById('hud-hdg');
+           if (gpsEl) {
+             const lat = pos.lat ?? 0;
+             const lon = pos.lon ?? 0;
+             gpsEl.innerText = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+           }
+           if (altEl) {
+             const alt = pos.relative_alt ?? 0;
+             altEl.innerText = alt.toFixed(1);
+           }
+           if (hdgEl) {
+             const hdg = pos.hdg ?? -1;
+             if (hdg !== -1) hdgEl.innerText = hdg.toFixed(1);
+           }
+        } else if (raw.severity !== undefined) {
+           // Statustext
+           const msg = raw.text ?? "";
+           const errorsEl = document.getElementById('hud-errors');
+           if (errorsEl && msg) {
+             const div = document.createElement('div');
+             div.className = 'hud-error-item';
+             div.innerText = msg;
+             errorsEl.prepend(div);
+             while (errorsEl.children.length > 3) errorsEl.removeChild(errorsEl.lastChild!);
+           }
+        }
       } catch (e) {
         // Silently ignore non-JSON or other message formats
       }
@@ -86,6 +138,41 @@ class ThreeControl implements VisualizationControl {
         setTimeout(() => this.connectWS(), 2000);
       }
     };
+  }
+
+  private handleStats(data: any) {
+    // Update internal attitude state for the 3D model
+    if (data.roll !== undefined) this.attitude.roll = data.roll;
+    if (data.pitch !== undefined) this.attitude.pitch = data.pitch;
+    if (data.yaw !== undefined) this.attitude.yaw = data.yaw;
+
+    // Update HUD from stats ticker (mostly mock mode or basic system stats)
+    const modeEl = document.getElementById('hud-mode');
+    const battEl = document.getElementById('hud-batt');
+    const altEl = document.getElementById('hud-alt');
+    const spdEl = document.getElementById('hud-spd');
+    const gpsEl = document.getElementById('hud-gps');
+    const hdgEl = document.getElementById('hud-hdg');
+    const errorsEl = document.getElementById('hud-errors');
+
+    if (modeEl && data.mode !== undefined) modeEl.innerText = data.mode;
+    if (battEl && data.battery !== undefined) battEl.innerText = data.battery.toFixed(1);
+    if (altEl && data.alt !== undefined) altEl.innerText = data.alt.toFixed(1);
+    if (spdEl && data.spd !== undefined) spdEl.innerText = data.spd.toFixed(1);
+    
+    if (gpsEl && data.lat !== undefined && data.lon !== undefined) {
+      gpsEl.innerText = `${data.lat.toFixed(4)}, ${data.lon.toFixed(4)}`;
+    }
+    
+    if (hdgEl && data.yaw !== undefined) {
+      let deg = data.yaw * (180 / Math.PI);
+      if (deg < 0) deg += 360;
+      hdgEl.innerText = deg.toFixed(1);
+    }
+
+    if (errorsEl && data.errors !== undefined) {
+      errorsEl.innerHTML = data.errors.map((err: string) => `<div class="hud-error-item">${err}</div>`).join('');
+    }
   }
 
   private attachDebugBridge() {
@@ -109,9 +196,17 @@ class ThreeControl implements VisualizationControl {
     if (!this.visible) return;
 
     if (this.robotGroup) {
-      this.robotGroup.rotation.z = -this.attitude.roll;  // Roll
-      this.robotGroup.rotation.x = this.attitude.pitch; // Pitch
-      this.robotGroup.rotation.y = -this.attitude.yaw;   // Yaw
+      // Mapping MAVLink (NED) to Three.js (Forward: +Y, Right: +X, Up: +Z)
+      // MAVLink Roll (+ right)  -> Three.js Roll (+ around Y)
+      // MAVLink Pitch (+ down)  -> Three.js Pitch (+ around X)
+      // MAVLink Yaw (+ right)   -> Three.js Yaw (- around Z)
+      
+      this.robotGroup.rotation.set(
+        this.attitude.pitch,  // Pitch around X
+        -this.attitude.roll,  // Roll around Y (negative because MAVLink roll right is positive but Three.js Y-rotation is counter-clockwise looking from +Y)
+        -this.attitude.yaw,   // Yaw around Z
+        'YXZ'
+      );
     }
 
     this.renderer.render(this.scene, this.camera);
@@ -135,5 +230,8 @@ class ThreeControl implements VisualizationControl {
 export function mountThree(container: HTMLElement): VisualizationControl {
   const canvas = container.querySelector("canvas[aria-label='Three Canvas']") as HTMLCanvasElement | null;
   if (!canvas) throw new Error('three canvas not found');
-  return new ThreeControl(container, canvas);
+  const control = new ThreeControl(container, canvas);
+  control.setVisible(true); // Ensure visibility is set for animation
+  return control;
 }
+

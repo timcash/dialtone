@@ -7,7 +7,7 @@ type TableRow = {
 };
 
 class TableControl implements VisualizationControl {
-  private allRows: TableRow[] = [];
+  private allRows = new Map<string, TableRow>();
   private visible = false;
   private ws: WebSocket | null = null;
 
@@ -37,29 +37,35 @@ class TableControl implements VisualizationControl {
   }
 
   private updateData(data: any) {
-    const rows: TableRow[] = [];
-    
-    // Core System Stats
-    if (data.uptime) rows.push({ key: 'uptime', value: data.uptime, status: 'LIVE' });
-    if (data.nats_total !== undefined) rows.push({ key: 'nats_messages', value: String(data.nats_total), status: 'LIVE' });
-    if (data.connections !== undefined) rows.push({ key: 'nats_clients', value: String(data.connections), status: 'LIVE' });
-    
-    // Robot Specific Telemetry
-    if (data.lat !== undefined) rows.push({ key: 'gps_lat', value: data.lat.toFixed(6), status: 'LIVE' });
-    if (data.lon !== undefined) rows.push({ key: 'gps_lon', value: data.lon.toFixed(6), status: 'LIVE' });
-    if (data.alt !== undefined) rows.push({ key: 'gps_alt', value: data.alt.toFixed(1) + 'm', status: 'LIVE' });
-    if (data.sats !== undefined) rows.push({ key: 'gps_sats', value: String(data.sats), status: 'LIVE' });
-    if (data.battery !== undefined) rows.push({ key: 'battery', value: data.battery.toFixed(1) + 'V', status: 'LIVE' });
-    
-    // Add any other dynamic fields
-    Object.entries(data).forEach(([key, value]) => {
-      const skip = ['uptime', 'nats_total', 'connections', 'lat', 'lon', 'alt', 'sats', 'battery', 'roll', 'pitch', 'yaw', 'os', 'arch', 'caller', 'in_msgs', 'out_msgs', 'in_bytes', 'out_bytes'];
-      if (!skip.includes(key)) {
-        rows.push({ key, value: String(value), status: 'LIVE' });
-      }
-    });
+    // Core System Stats (from server ticker, merged with Mavlink if present)
+    if (data.uptime) this.allRows.set('uptime', { key: 'uptime', value: data.uptime, status: 'LIVE' });
+    if (data.nats_total !== undefined) this.allRows.set('nats_messages', { key: 'nats_messages', value: String(data.nats_total), status: 'LIVE' });
+    if (data.connections !== undefined) this.allRows.set('nats_clients', { key: 'nats_clients', value: String(data.connections), status: 'LIVE' });
 
-    this.allRows = rows;
+    // Handle Mavlink messages
+    if (data.type === 'HEARTBEAT') {
+      this.allRows.set('mav_type', { key: 'mav_type', value: String(data.mav_type), status: 'MAV' });
+      this.allRows.set('custom_mode', { key: 'custom_mode', value: String(data.custom_mode), status: 'MAV' });
+      this.allRows.set('heartbeat_ts', { key: 'heartbeat_ts', value: String(data.timestamp), status: 'MAV' });
+    } else if (data.lat !== undefined && data.lon !== undefined) {
+      this.allRows.set('gps_lat', { key: 'gps_lat', value: data.lat.toFixed(6), status: 'MAV' });
+      this.allRows.set('gps_lon', { key: 'gps_lon', value: data.lon.toFixed(6), status: 'MAV' });
+      if (data.alt !== undefined) this.allRows.set('gps_alt', { key: 'gps_alt', value: data.alt.toFixed(1) + 'm', status: 'MAV' });
+      if (data.relative_alt !== undefined) this.allRows.set('gps_relative_alt', { key: 'gps_relative_alt', value: data.relative_alt.toFixed(1) + 'm', status: 'MAV' });
+      if (data.vx !== undefined) this.allRows.set('vx', { key: 'vx', value: data.vx.toFixed(2), status: 'MAV' });
+      if (data.vy !== undefined) this.allRows.set('vy', { key: 'vy', value: data.vy.toFixed(2), status: 'MAV' });
+      if (data.vz !== undefined) this.allRows.set('vz', { key: 'vz', value: data.vz.toFixed(2), status: 'MAV' });
+      if (data.hdg !== undefined) this.allRows.set('hdg', { key: 'hdg', value: data.hdg.toFixed(1), status: 'MAV' });
+    } else if (data.roll !== undefined && data.pitch !== undefined) {
+      this.allRows.set('roll', { key: 'roll', value: data.roll.toFixed(3), status: 'MAV' });
+      this.allRows.set('pitch', { key: 'pitch', value: data.pitch.toFixed(3), status: 'MAV' });
+      this.allRows.set('yaw', { key: 'yaw', value: data.yaw.toFixed(3), status: 'MAV' });
+    } else if (data.text !== undefined && data.severity !== undefined) {
+      this.allRows.set('status_text', { key: 'status_text', value: data.text, status: `MAV_SEV_${data.severity}` });
+    } else if (data.command !== undefined && data.result !== undefined) {
+      this.allRows.set('command_ack_cmd', { key: 'command_ack_cmd', value: String(data.command), status: `MAV_ACK_${data.result}` });
+    }
+    
     if (this.visible) {
       this.renderRows();
     }
@@ -72,28 +78,20 @@ class TableControl implements VisualizationControl {
   }
 
   private renderRows(): void {
-    console.log('[Table] renderRows called, visible:', this.visible, 'rows:', this.allRows.length);
     const table = this.container.querySelector("table[aria-label='Robot Table']") as HTMLTableElement | null;
-    if (!table) {
-      console.error('[Table] Table element not found in container');
-      return;
-    }
+    if (!table) return;
     const tbody = table.querySelector('tbody');
-    if (!tbody) {
-      console.error('[Table] tbody not found in table');
-      return;
-    }
+    if (!tbody) return;
 
-    tbody.innerHTML = this.allRows
+    const rows = Array.from(this.allRows.values());
+    tbody.innerHTML = rows
       .map((r) => `<tr><td>${r.key}</td><td>${r.value}</td><td>${r.status}</td></tr>`)
       .join('');
     
-    console.log('[Table] setting data-ready=true');
     table.setAttribute('data-ready', 'true');
   }
 
   setVisible(visible: boolean): void {
-    console.log('[Table] setVisible:', visible);
     this.visible = visible;
     if (visible) {
       this.renderRows();

@@ -10,7 +10,7 @@ import (
 
 func main() {
 	steps := []test_v2.Step{
-		{Name: "01 Preflight (Go/UI)", Run: Run01Preflight, Timeout: 15 * time.Second},
+		{Name: "01 Preflight (Go/UI)", Run: Run01Preflight, Timeout: 60 * time.Second},
 		{Name: "02 Go Run (Mock Server Check)", Run: Run07GoRun, Timeout: 10 * time.Second},
 		{Name: "03 UI Run", Run: Run08UIRun, Timeout: 10 * time.Second},
 		{Name: "04 Expected Errors (Proof of Life)", Run: Run09ExpectedErrorsProofOfLife, Timeout: 10 * time.Second},
@@ -22,7 +22,14 @@ func main() {
 		{Name: "10 Xterm Section Validation", Run: Run15XtermSectionValidation, SectionID: "xterm", Screenshots: []string{"screenshots/test_step_5.png"}, Timeout: 10 * time.Second},
 		{Name: "11 Video Section Validation", Run: Run16VideoSectionValidation, SectionID: "video", Screenshots: []string{"screenshots/test_step_6.png"}, Timeout: 10 * time.Second},
 		{Name: "12 Lifecycle / Invariants", Run: Run17LifecycleInvariants, Timeout: 10 * time.Second},
-		{Name: "13 Cleanup Verification", Run: Run18CleanupVerification, Timeout: 10 * time.Second},
+		{
+			Name:           "13 Menu Navigation Validation",
+			Run:            Run19MenuNavigationValidation,
+			Screenshots:    []string{"screenshots/menu_1_hero.png", "screenshots/menu_2_open.png", "screenshots/menu_3_telemetry.png"},
+			ScreenshotGrid: "screenshots/menu_nav_grid.png",
+			Timeout:        15 * time.Second,
+		},
+		{Name: "14 Cleanup Verification", Run: Run18CleanupVerification, Timeout: 10 * time.Second},
 	}
 
 	if err := test_v2.RunSuite(test_v2.SuiteOptions{

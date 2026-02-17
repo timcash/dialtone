@@ -25,8 +25,8 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
   term.open(terminal);
   fit.fit();
 
-  term.writeln('dialtone@template:~$ booting...');
-  term.writeln('dialtone@template:~$ ready');
+  term.writeln('dialtone@robot:~$ booting...');
+  term.writeln('dialtone@robot:~$ ready');
 
   const onResize = () => fit.fit();
   window.addEventListener('resize', onResize);

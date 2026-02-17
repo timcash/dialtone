@@ -18,6 +18,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/nats-io/nats-server/v2/server"
+	"github.com/nats-io/nats.go"
 	"tailscale.com/client/tailscale"
 )
 
@@ -127,75 +128,102 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort, internalNATSPo
 		ticker := time.NewTicker(100 * time.Millisecond) // Faster ticker for attitude
 		defer ticker.Stop()
 
+		// Channel to relay messages to the websocket in a thread-safe manner
+		msgChan := make(chan []byte, 100)
+
+		// Goroutine to gather NATS messages
+		if ns != nil {
+			nc, err := nats.Connect(fmt.Sprintf("nats://127.0.0.1:%d", internalNATSPort))
+			if err == nil {
+				nc.Subscribe("mavlink.>", func(m *nats.Msg) {
+					select {
+					case msgChan <- m.Data:
+					default:
+						// Drop message if buffer is full
+					}
+				})
+				defer nc.Close()
+			}
+		}
+
 		// Local state for NATS message count
 		var natsMsgCount int64
 
-		// Subscribe to NATS if available to forward to WS
-		// (In a real system we'd use a more robust pub/sub bridge)
-		
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				var connections int
-				var inMsgs, outMsgs, inBytes, outBytes int64
-
-				if ns != nil {
-					varz, _ := ns.Varz(nil)
-					if varz != nil {
-						connections = varz.Connections
-						inMsgs = varz.InMsgs
-						outMsgs = varz.OutMsgs
-						inBytes = varz.InBytes
-						outBytes = varz.OutBytes
-						natsMsgCount = inMsgs
+		// Main Relay Loop
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case data := <-msgChan:
+					if err := c.Write(ctx, websocket.MessageText, data); err != nil {
+						return
 					}
-				}
+				case <-ticker.C:
+					var connections int
+					var inMsgs, outMsgs, inBytes, outBytes int64
 
-				callerInfo := "Unknown"
-				if lc != nil {
-					who, err := lc.WhoIs(ctx, r.RemoteAddr)
-					if err == nil && who.UserProfile != nil {
-						callerInfo = who.UserProfile.DisplayName
-						if who.Node != nil {
-							callerInfo += " (" + who.Node.Name + ")"
+					if ns != nil {
+						varz, _ := ns.Varz(nil)
+						if varz != nil {
+							connections = varz.Connections
+							inMsgs = varz.InMsgs
+							outMsgs = varz.OutMsgs
+							inBytes = varz.InBytes
+							outBytes = varz.OutBytes
+							natsMsgCount = inMsgs
 						}
 					}
-				}
 
-				stats := map[string]any{
-					"uptime":      formatDuration(time.Since(startTime)),
-					"os":          runtime.GOOS,
-					"arch":        runtime.GOARCH,
-					"caller":      callerInfo,
-					"connections": connections,
-					"in_msgs":     inMsgs,
-					"out_msgs":    outMsgs,
-					"in_bytes":    formatBytes(inBytes),
-					"out_bytes":   formatBytes(outBytes),
-					"nats_total":  natsMsgCount,
-				}
+					callerInfo := "Unknown"
+					if lc != nil {
+						who, err := lc.WhoIs(ctx, r.RemoteAddr)
+						if err == nil && who.UserProfile != nil {
+							callerInfo = who.UserProfile.DisplayName
+							if who.Node != nil {
+								callerInfo += " (" + who.Node.Name + ")"
+							}
+						}
+					}
 
-									// If in mock mode, add mock telemetry directly to the stats
-								// In real mode, this would come from the NATS subscription
-								if useMock {
-									t := time.Since(startTime).Seconds()
-									stats["lat"] = float64(37.7749 + 0.0001*float64(time.Now().Second())/60.0)
-									stats["lon"] = float64(-122.4194 + 0.0001*float64(time.Now().Second())/60.0)
-									stats["alt"] = float64(10.5)
-									stats["roll"] = float64(0.1 * float64(time.Now().Second()%10))
-									stats["pitch"] = float64(0.05 * float64(time.Now().Second()%5))
-									stats["yaw"] = float64(t * 0.1)
-									stats["sats"] = float64(12)
-									stats["battery"] = float64(12.4)
-								}
-								data, _ := json.Marshal(stats)
-				if err := c.Write(ctx, websocket.MessageText, data); err != nil {
-					return
+					stats := map[string]any{
+						"uptime":      formatDuration(time.Since(startTime)),
+						"os":          runtime.GOOS,
+						"arch":        runtime.GOARCH,
+						"caller":      callerInfo,
+						"connections": connections,
+						"in_msgs":     inMsgs,
+						"out_msgs":    outMsgs,
+						"in_bytes":    formatBytes(inBytes),
+						"out_bytes":   formatBytes(outBytes),
+						"nats_total":  natsMsgCount,
+					}
+
+					// If in mock mode, add mock telemetry directly to the stats
+					if useMock {
+						t := time.Since(startTime).Seconds()
+						stats["lat"] = float64(37.7749 + 0.0001*float64(time.Now().Second())/60.0)
+						stats["lon"] = float64(-122.4194 + 0.0001*float64(time.Now().Second())/60.0)
+						stats["alt"] = float64(10.5)
+						stats["roll"] = float64(0.1 * float64(time.Now().Second()%10))
+						stats["pitch"] = float64(0.05 * float64(time.Now().Second()%5))
+						stats["yaw"] = float64(t * 0.1)
+						stats["sats"] = float64(12)
+						stats["battery"] = float64(12.4)
+						stats["mode"] = "GUIDED"
+						stats["errors"] = []string{"Link latency high", "GPS offset detected"}
+					}
+					data, _ := json.Marshal(stats)
+					select {
+					case msgChan <- data:
+					default:
+					}
 				}
 			}
-		}
+		}()
+
+		// Keep connection open until context is done
+		<-ctx.Done()
 	})
 
 	// 6. NATS WebSocket Proxy

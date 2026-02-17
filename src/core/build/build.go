@@ -225,7 +225,12 @@ func buildLocally(targetOS, targetArch, outputDir string, skipWeb bool) {
 
 	// If local environment exists, use it
 	depsDir := getDialtoneEnv()
-	tags := []string{}
+	
+	var tags []string // Declare tags once
+	// If building for Linux with CGO, always add 'no_duckdb' tag
+	if targetOS == "linux" && os.Getenv("CGO_ENABLED") == "1" {
+		tags = append(tags, "no_duckdb")
+	}
 
 	if _, err := os.Stat(depsDir); err == nil {
 		logger.LogInfo("Using local dependencies from %s", depsDir)
@@ -346,7 +351,7 @@ func buildLocally(targetOS, targetArch, outputDir string, skipWeb bool) {
 	os.Setenv("GOOS", targetOS)
 	os.Setenv("GOARCH", targetArch)
 
-	buildArgs := []string{"go", "build"}
+	buildArgs := []string{"go", "build", "-ldflags=-s -w", "-trimpath"}
 	if len(tags) > 0 {
 		buildArgs = append(buildArgs, "-tags", strings.Join(tags, ","))
 	}
@@ -422,7 +427,7 @@ func buildWithPodman(arch, compiler, cppCompiler, outputDir string, skipWeb bool
 		"-e", "CC=" + compiler,
 		"-e", "CXX=" + cppCompiler,
 		baseImage,
-		"bash", "-c", fmt.Sprintf("%sgo build -buildvcs=false -o %s/%s src/cmd/dialtone/main.go", installCmd, outputDir, outputName),
+		"bash", "-c", fmt.Sprintf("%sgo build -buildvcs=false -ldflags=\"-s -w\" -trimpath -tags no_duckdb -o %s/%s src/cmd/dialtone/main.go", installCmd, outputDir, outputName),
 	}
 
 	var cmd *exec.Cmd

@@ -1,11 +1,69 @@
 import { setupApp } from '../../../../../libs/ui_v2/ui';
 import './style.css';
-import { JSONCodec, type NatsConnection } from 'nats.ws';
+import { JSONCodec, connect, type NatsConnection } from 'nats.ws';
 
 export let NATS_CONNECTION: NatsConnection | null = null;
 export const NATS_JSON_CODEC = JSONCodec();
 
+declare const APP_VERSION: string;
+
 const { sections, menu } = setupApp({ title: 'dialtone.robot', debug: true });
+
+// Display version
+const versionEl = document.getElementById('app-version');
+if (versionEl) {
+  versionEl.textContent = `v${APP_VERSION}`;
+}
+
+// --- NATS Connection ---
+async function initNATS() {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const hostname = window.location.hostname;
+
+  try {
+    const res = await fetch('/api/init');
+    const data = await res.json();
+    const wsPort = data.ws_port || 4223;
+    const wsPath = data.ws_path || '';
+
+    let server = '';
+    if (wsPath) {
+      server = `${protocol}//${window.location.host}${wsPath}`;
+    } else {
+      server = `${protocol}//${hostname}:${wsPort}`;
+    }
+
+    console.log(`[NATS] Connecting to ${server}...`);
+    NATS_CONNECTION = await connect({ servers: [server] });
+    console.log(`[NATS] Connected.`);
+
+    NATS_CONNECTION.closed().then(() => {
+      console.warn('[NATS] Connection closed, retrying...');
+      setTimeout(initNATS, 2000);
+    });
+  } catch (err) {
+    console.error('[NATS] Connection failed:', err);
+    setTimeout(initNATS, 5000);
+  }
+}
+
+initNATS();
+
+function sendCommand(cmd: string, mode?: string) {
+  if (!NATS_CONNECTION) {
+    console.warn('[NATS] Not connected, cannot send command:', cmd);
+    return;
+  }
+  const payload: any = { cmd };
+  if (mode) payload.mode = mode;
+  NATS_CONNECTION.publish('rover.command', NATS_JSON_CODEC.encode(payload));
+}
+
+// --- Button Listeners for Three Section ---
+document.getElementById('three-arm')?.addEventListener('click', () => sendCommand('arm'));
+document.getElementById('three-disarm')?.addEventListener('click', () => sendCommand('disarm'));
+document.getElementById('three-manual')?.addEventListener('click', () => sendCommand('mode', 'manual'));
+document.getElementById('three-guided')?.addEventListener('click', () => sendCommand('mode', 'guided'));
 
 sections.register('hero', {
   containerId: 'hero',
@@ -19,8 +77,8 @@ sections.register('hero', {
   overlays: {
     primaryKind: 'stage',
     primary: '.hero-stage',
-    thumb: '.hero-thumb',
-    legend: '.hero-legend',
+    thumb: '', // No thumb for hero
+    legend: '', // No legend for hero
   },
 });
 
@@ -109,23 +167,6 @@ sections.register('video', {
   },
 });
 
-sections.register('controls', {
-  containerId: 'controls',
-  load: async () => {
-    const { mountControls } = await import('./components/controls/index');
-    const container = document.getElementById('controls');
-    if (!container) throw new Error('controls container not found');
-    return mountControls(container);
-  },
-  header: { visible: false, menuVisible: true, title: 'Robot Controls' },
-  overlays: {
-    primaryKind: 'stage',
-    primary: '.controls-primary',
-    thumb: '.controls-thumb',
-    legend: '.controls-legend',
-  },
-});
-
 menu.addButton('Hero', 'Navigate Hero', () => {
   void sections.navigateTo('hero');
 });
@@ -144,11 +185,8 @@ menu.addButton('Terminal', 'Navigate Terminal', () => {
 menu.addButton('Camera', 'Navigate Camera', () => {
   void sections.navigateTo('video');
 });
-menu.addButton('Controls', 'Navigate Controls', () => {
-  void sections.navigateTo('controls');
-});
 
-const sectionOrder = ['hero', 'docs', 'table', 'three', 'xterm', 'video', 'controls'] as const;
+const sectionOrder = ['hero', 'docs', 'table', 'three', 'xterm', 'video'] as const;
 const sectionSet = new Set(sectionOrder);
 const defaultSection = sectionOrder[0];
 
@@ -200,5 +238,27 @@ window.addEventListener('keydown', (event) => {
     globalMenu?.click();
   }
 });
+
+let lastWheelTime = 0;
+const wheelThrottle = 800; // ms
+
+window.addEventListener('wheel', (event) => {
+  const now = Date.now();
+  if (now - lastWheelTime < wheelThrottle) return;
+
+  const active = sections.getActiveSectionId() ?? defaultSection;
+  const idx = sectionOrder.indexOf(active as (typeof sectionOrder)[number]);
+  if (idx < 0) return;
+
+  if (Math.abs(event.deltaY) > 20) {
+    if (event.deltaY > 0 && idx < sectionOrder.length - 1) {
+      lastWheelTime = now;
+      void sections.navigateTo(sectionOrder[idx + 1]);
+    } else if (event.deltaY < 0 && idx > 0) {
+      lastWheelTime = now;
+      void sections.navigateTo(sectionOrder[idx - 1]);
+    }
+  }
+}, { passive: true });
 
 syncSectionFromURL();

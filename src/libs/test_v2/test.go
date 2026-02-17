@@ -909,5 +909,7 @@ func resolveScreenshotRefPath(reportPath string, ref string) string {
 	if filepath.IsAbs(ref) {
 		return ref
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(reportPath), "..", ref))
+	// The screenshots are relative to the test root, and report is also in test root or subdirectory.
+	// We want to find them starting from the same base as the report.
+	return filepath.Join(filepath.Dir(reportPath), ref)
 }
