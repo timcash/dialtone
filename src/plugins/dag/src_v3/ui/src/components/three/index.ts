@@ -707,6 +707,10 @@ class ThreeControl implements VisualizationControl {
     const fov = THREE.MathUtils.degToRad(this.camera.fov);
     const aspectScale = this.camera.aspect < 1 ? 1 / this.camera.aspect : 1;
     const dist = ((maxDim * aspectScale) / (2 * Math.tan(fov / 2))) * 1.2 + 14;
+    const target = center.clone();
+    const verticalBias =
+      view === 'top' ? dist * 0.08 : view === 'side' || view === 'front' ? dist * 0.16 : dist * 0.14;
+    target.y -= verticalBias;
     if (view === 'top') {
       this.camera.position.set(center.x, center.y + dist * 1.35, center.z + 0.01);
     } else if (view === 'side') {
@@ -716,7 +720,7 @@ class ThreeControl implements VisualizationControl {
     } else {
       this.camera.position.set(center.x + dist * 0.75, center.y + dist * 0.95, center.z + dist * 0.75);
     }
-    this.camera.lookAt(center);
+    this.camera.lookAt(target);
     this.camera.updateProjectionMatrix();
   }
 
