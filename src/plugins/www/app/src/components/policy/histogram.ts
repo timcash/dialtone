@@ -47,12 +47,16 @@ export class PolicyHistogram {
   private p90Label: THREE.Sprite;
   private breakEvenLabel: THREE.Sprite;
   private simCountLabel: THREE.Sprite;
+  private meanTopLabel: THREE.Sprite;
+  private meanTopLabelB: THREE.Sprite;
   private currentMeanX = 0;
   private currentMeanBX = 0;
   private currentP10X = 0;
   private currentP90X = 0;
   private currentBreakEvenX = 0;
   private smoothedValues: number[] = [];
+  private currentMinLabelY = 0.22;
+  private currentMaxLabelY = 0.22;
 
   constructor(barCount = 28, maxHeight = 2.8) {
     this.barCount = barCount;
@@ -100,10 +104,24 @@ export class PolicyHistogram {
     this.p90Label = this.makeLabel();
     this.breakEvenLabel = this.makeLabel();
     this.simCountLabel = this.makeLabel();
+    this.meanTopLabel = this.makeLabel();
+    this.meanTopLabelB = this.makeLabel();
 
-    this.group.add(this.xMinLabel, this.xMaxLabel, this.p10Label, this.meanLabel, this.p90Label, this.breakEvenLabel, this.simCountLabel);
+    this.group.add(
+      this.xMinLabel,
+      this.xMaxLabel,
+      this.p10Label,
+      this.meanLabel,
+      this.p90Label,
+      this.breakEvenLabel,
+      this.simCountLabel,
+      this.meanTopLabel,
+      this.meanTopLabelB,
+    );
     this.xMinLabel.scale.set(1.45, 0.42, 1);
     this.xMaxLabel.scale.set(1.45, 0.42, 1);
+    this.meanTopLabel.scale.set(1.45, 0.42, 1);
+    this.meanTopLabelB.scale.set(1.45, 0.42, 1);
 
     this.setLinePoints(this.baseline, -this.chartWidth / 2, 0, this.chartWidth / 2, 0);
     this.setLinePoints(this.yAxis, -this.chartWidth / 2, 0, -this.chartWidth / 2, this.maxHeight);
@@ -130,6 +148,11 @@ export class PolicyHistogram {
     this.setLabel(this.simCountLabel, "Simulations 0");
     this.simCountLabel.position.set(0, -1.36, 0.05);
     this.simCountLabel.scale.set(2.25, 0.58, 1);
+    this.setLabel(this.meanTopLabel, "0.00M");
+    this.setLabel(this.meanTopLabelB, "0.00M");
+    this.meanTopLabel.position.set(this.currentMeanX, this.maxHeight + 0.26, 0.05);
+    this.meanTopLabelB.position.set(this.currentMeanBX, this.maxHeight + 0.26, 0.05);
+    this.meanTopLabelB.visible = false;
   }
 
   setCompactMode(compact: boolean) {
@@ -206,13 +229,22 @@ export class PolicyHistogram {
     this.setLabel(this.meanLabel, `Mean ${formatMillions(meta.mean)}`);
     this.setLabel(this.p90Label, `P90 ${formatMillions(meta.p90)}`);
     this.setLabel(this.breakEvenLabel, "0");
-
-    this.xMinLabel.position.set(-this.chartWidth / 2 - 0.72, 0.22, 0.05);
-    this.xMaxLabel.position.set(this.chartWidth / 2 + 0.72, 0.22, 0.05);
+    this.xMinLabel.position.set(-this.chartWidth / 2 - 0.72, this.currentMinLabelY, 0.05);
+    this.xMaxLabel.position.set(this.chartWidth / 2 + 0.72, this.currentMaxLabelY, 0.05);
     this.p10Label.position.set(this.currentP10X, -1.16, 0.05);
     this.meanLabel.position.set(this.currentMeanX, -0.86, 0.05);
     this.p90Label.position.set(this.currentP90X, -1.16, 0.05);
     this.breakEvenLabel.position.set(this.currentBreakEvenX, -1.44, 0.05);
+    this.setLabel(this.meanTopLabel, formatMillions(meta.meanA));
+    this.meanTopLabel.position.set(this.currentMeanX, this.maxHeight + 0.26, 0.05);
+    this.meanTopLabel.visible = true;
+    if (meta.bimodal) {
+      this.setLabel(this.meanTopLabelB, formatMillions(meta.meanB));
+      this.meanTopLabelB.position.set(this.currentMeanBX, this.maxHeight + 0.26, 0.05);
+      this.meanTopLabelB.visible = true;
+    } else {
+      this.meanTopLabelB.visible = false;
+    }
   }
 
   update(values: number[], meta: HistogramMeta, simulationCount = 0): void {
@@ -225,6 +257,20 @@ export class PolicyHistogram {
       const mat = bar.material as THREE.LineBasicMaterial;
       mat.opacity = 0.28 + this.smoothedValues[i] * 0.7;
     }
+
+    // Move min/max labels with edge activity so they stay visually attached to live histogram motion.
+    const minEdgeHeight = 0.03 + Math.pow(this.smoothedValues[0] ?? 0, 1.05) * this.maxHeight;
+    const maxEdgeHeight = 0.03 + Math.pow(this.smoothedValues[this.bars.length - 1] ?? 0, 1.05) * this.maxHeight;
+    const minYTarget = Math.min(this.maxHeight - 0.12, Math.max(0.22, minEdgeHeight + 0.26));
+    const maxYTarget = Math.min(this.maxHeight - 0.12, Math.max(0.22, maxEdgeHeight + 0.26));
+    this.currentMinLabelY = THREE.MathUtils.lerp(this.currentMinLabelY, minYTarget, 0.18);
+    this.currentMaxLabelY = THREE.MathUtils.lerp(this.currentMaxLabelY, maxYTarget, 0.18);
+    this.xMinLabel.position.y = this.currentMinLabelY;
+    this.xMaxLabel.position.y = this.currentMaxLabelY;
+    const minMat = this.xMinLabel.material as THREE.SpriteMaterial;
+    const maxMat = this.xMaxLabel.material as THREE.SpriteMaterial;
+    minMat.opacity = THREE.MathUtils.lerp(minMat.opacity, 0.7 + (this.smoothedValues[0] ?? 0) * 0.3, 0.18);
+    maxMat.opacity = THREE.MathUtils.lerp(maxMat.opacity, 0.7 + (this.smoothedValues[this.bars.length - 1] ?? 0) * 0.3, 0.18);
 
     const denom = Math.max(1e-6, meta.xMax - meta.xMin);
     const meanTarget = -this.chartWidth / 2 + clamp01((meta.meanA - meta.xMin) / denom) * this.chartWidth;
@@ -276,6 +322,8 @@ export class PolicyHistogram {
       this.p90Label,
       this.breakEvenLabel,
       this.simCountLabel,
+      this.meanTopLabel,
+      this.meanTopLabelB,
     ];
     for (const label of labels) {
       const mat = label.material as THREE.SpriteMaterial;
