@@ -33,6 +33,11 @@ function q(label: string): HTMLElement | null {
   return document.querySelector(`[aria-label='${label}']`);
 }
 
+function isPressed(label: string): boolean {
+  const el = q(label);
+  return !!el && el.getAttribute('aria-pressed') === 'true';
+}
+
 function testClickDelayMS(): number {
   try {
     const v = window.sessionStorage.getItem('dag_test_click_delay_ms') || '0';
@@ -113,6 +118,30 @@ function runStoryStep1(api: DagDebugAPI): TestResult {
   const processorID = afterAdd.lastCreatedNodeId;
   if (!processorID) return { ok: false, msg: 'missing processor node id' };
   if (afterAdd.selectedNodeId !== processorID) return { ok: false, msg: 'new node not selected' };
+
+  const moved = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }) =>
+    Math.abs(a.x - b.x) >= 0.5 || Math.abs(a.y - b.y) >= 0.5 || Math.abs(a.z - b.z) >= 0.5;
+  const camISO = afterAdd.camera;
+  if (!click('DAG Camera Z')) return { ok: false, msg: 'camera z button failed' };
+  const camTop = api.getState().camera;
+  if (!moved(camISO, camTop)) return { ok: false, msg: 'camera did not move on z view' };
+  if (!isPressed('DAG Camera Z') || isPressed('DAG Camera ISO') || isPressed('DAG Camera Side')) {
+    return { ok: false, msg: 'camera z button highlight state invalid' };
+  }
+  if (!click('DAG Camera Side')) return { ok: false, msg: 'camera side button failed' };
+  const camSide = api.getState().camera;
+  if (!moved(camTop, camSide)) return { ok: false, msg: 'camera did not move on side view' };
+  if (!isPressed('DAG Camera Side') || isPressed('DAG Camera Z') || isPressed('DAG Camera ISO')) {
+    return { ok: false, msg: 'camera side button highlight state invalid' };
+  }
+  if (!click('DAG Camera ISO')) return { ok: false, msg: 'camera iso button failed' };
+  const camISO2 = api.getState().camera;
+  if (!moved(camSide, camISO2)) return { ok: false, msg: 'camera did not move on iso view' };
+  if (!isPressed('DAG Camera ISO') || isPressed('DAG Camera Z') || isPressed('DAG Camera Side')) {
+    return { ok: false, msg: 'camera iso button highlight state invalid' };
+  }
+  if (!clickNode(api, processorID)) return { ok: false, msg: 'cannot reselect processor after camera view changes' };
+  if (!isPressed('DAG Camera ISO')) return { ok: false, msg: 'camera style did not persist after node reselection' };
 
   const s = story();
   s.processorID = processorID;
