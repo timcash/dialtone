@@ -11,6 +11,7 @@ export interface SectionOverlayConfig {
   primary: string;
   thumb: string;
   legend: string;
+  chatlog?: string;
 }
 
 export interface HeaderConfig {

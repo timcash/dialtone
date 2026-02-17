@@ -1,15 +1,15 @@
 import { setupApp } from '../../../../../libs/ui_v2/ui';
 import './style.css';
-import './test';
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    void navigator.serviceWorker.register('/sw.js').catch((err) => {
+      console.warn('[DAG PWA] service worker registration failed', err);
+    });
+  });
+}
 
 const { sections, menu } = setupApp({ title: 'dialtone.dag', debug: true });
-
-(window as any).reloadDagTestLib = async () => {
-  const stamp = Date.now();
-  await import(/* @vite-ignore */ `/src/test.ts?t=${stamp}`);
-  const lib = (window as any).dagTestLib;
-  return lib && typeof lib.list === 'function' ? lib.list() : [];
-};
 
 sections.register('dag-table', {
   containerId: 'dag-table',
@@ -42,26 +42,105 @@ sections.register('three', {
     primary: "canvas[aria-label='Three Canvas']",
     thumb: '.dag-controls',
     legend: '.dag-history',
+    chatlog: '.dag-chatlog',
   },
-});
-
-menu.addButton('Table', 'Navigate Table', () => {
-  void sections.navigateTo('dag-table');
-});
-menu.addButton('Stage', 'Navigate Stage', () => {
-  void sections.navigateTo('three');
 });
 
 const sectionSet = new Set(['dag-table', 'three']);
 const sectionOrder = ['dag-table', 'three'] as const;
-const defaultSection = 'dag-table';
+type DagSectionID = (typeof sectionOrder)[number];
+let defaultSection: DagSectionID = 'dag-table';
+const sectionStorageKey = 'dag.src_v3.active_section';
+const apiReadyStorageKey = 'dag.src_v3.api_ready';
+
+const readStoredSection = (): DagSectionID | null => {
+  try {
+    const value = window.sessionStorage.getItem(sectionStorageKey);
+    if (!value) return null;
+    return sectionSet.has(value) ? (value as DagSectionID) : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeStoredSection = (sectionId: DagSectionID) => {
+  try {
+    window.sessionStorage.setItem(sectionStorageKey, sectionId);
+  } catch {
+    // ignore storage errors; hash-based routing still applies
+  }
+};
+
+const isSectionActuallyVisible = (sectionId: DagSectionID): boolean => {
+  const section = document.getElementById(sectionId);
+  if (!section) return false;
+  return !section.hidden && section.getAttribute('data-active') === 'true';
+};
+
+const navigateToSection = (sectionId: DagSectionID, updateHash = true) => {
+  const active = sections.getActiveSectionId() as DagSectionID | null;
+  const activeLooksWrong = active === sectionId && !isSectionActuallyVisible(sectionId);
+  if (activeLooksWrong) {
+    const repairTarget = sectionOrder.find((id) => id !== sectionId) ?? defaultSection;
+    return sections
+      .navigateTo(repairTarget, { updateHash: false })
+      .then(() => sections.navigateTo(sectionId, { updateHash }))
+      .then(() => {
+        writeStoredSection(sectionId);
+      });
+  }
+  return sections.navigateTo(sectionId, { updateHash }).then(() => {
+    writeStoredSection(sectionId);
+  });
+};
+
+const probeDagTableAPI = async (): Promise<boolean> => {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 900);
+  try {
+    const res = await fetch('/api/dag-table', {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+};
+
+const runStartupProbe = async () => {
+  const apiReady = await probeDagTableAPI();
+  defaultSection = apiReady ? 'dag-table' : 'three';
+  try {
+    window.sessionStorage.setItem(apiReadyStorageKey, apiReady ? '1' : '0');
+  } catch {
+    // ignore storage errors
+  }
+  if (!apiReady) {
+    console.warn('[DAG] /api/dag-table unavailable at startup; defaulting to Stage section');
+  }
+};
+
+menu.addButton('Table', 'Navigate Table', () => {
+  void navigateToSection('dag-table');
+});
+menu.addButton('Stage', 'Navigate Stage', () => {
+  void navigateToSection('three');
+});
 
 const syncSectionFromURL = () => {
   const hashID = window.location.hash.slice(1);
-  const targetID = sectionSet.has(hashID) ? hashID : defaultSection;
+  const storedSection = readStoredSection();
+  const targetID = sectionSet.has(hashID) ? (hashID as DagSectionID) : storedSection ?? defaultSection;
   const activeID = sections.getActiveSectionId();
-  if (activeID === targetID) return;
-  void sections.navigateTo(targetID, { updateHash: hashID !== targetID }).catch((err) => {
+  if (activeID === targetID && isSectionActuallyVisible(targetID)) {
+    writeStoredSection(targetID);
+    return;
+  }
+  void navigateToSection(targetID, hashID !== targetID).catch((err) => {
     console.error('[SectionManager] URL sync failed', err);
   });
 };
@@ -86,7 +165,7 @@ window.addEventListener('keydown', (event) => {
     const next = sectionOrder[Math.min(sectionOrder.length - 1, idx + 1)];
     if (next !== active) {
       event.preventDefault();
-      void sections.navigateTo(next);
+      void navigateToSection(next);
     }
     return;
   }
@@ -94,7 +173,7 @@ window.addEventListener('keydown', (event) => {
     const prev = sectionOrder[Math.max(0, idx - 1)];
     if (prev !== active) {
       event.preventDefault();
-      void sections.navigateTo(prev);
+      void navigateToSection(prev);
     }
     return;
   }
@@ -105,4 +184,6 @@ window.addEventListener('keydown', (event) => {
   }
 });
 
-syncSectionFromURL();
+void runStartupProbe().finally(() => {
+  syncSectionFromURL();
+});

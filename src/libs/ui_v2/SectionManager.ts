@@ -5,7 +5,7 @@ export class SectionManager {
   private controls = new Map<string, VisualizationControl>();
   private loading = new Map<string, Promise<void>>();
   private resumed = new Map<string, boolean>();
-  private overlays = new Map<string, Partial<Record<'primary' | 'thumb' | 'legend', HTMLElement>>>();
+  private overlays = new Map<string, Partial<Record<'primary' | 'thumb' | 'legend' | 'chatlog', HTMLElement>>>();
   private activeSectionId: string | null = null;
   private debug: boolean;
 
@@ -128,7 +128,7 @@ export class SectionManager {
   private bindSectionOverlays(sectionId: string, cfg: SectionConfig): void {
     const section = document.getElementById(cfg.containerId);
     if (!section) return;
-    const overlays: Partial<Record<'primary' | 'thumb' | 'legend', HTMLElement>> = {};
+    const overlays: Partial<Record<'primary' | 'thumb' | 'legend' | 'chatlog', HTMLElement>> = {};
     const selectors: SectionOverlayConfig | null = cfg.overlays ?? null;
     if (!selectors) {
       this.overlays.set(sectionId, overlays);
@@ -155,6 +155,13 @@ export class SectionManager {
       legendEl.setAttribute('data-overlay-section', sectionId);
       overlays.legend = legendEl;
     }
+    const chatlogEl = selectors.chatlog ? section.querySelector(selectors.chatlog) : null;
+    if (chatlogEl instanceof HTMLElement) {
+      chatlogEl.setAttribute('data-overlay', 'chatlog');
+      chatlogEl.setAttribute('data-overlay-role', 'chatlog');
+      chatlogEl.setAttribute('data-overlay-section', sectionId);
+      overlays.chatlog = chatlogEl;
+    }
     this.overlays.set(sectionId, overlays);
   }
 
@@ -164,6 +171,7 @@ export class SectionManager {
       sectionOverlays.primary?.setAttribute('data-overlay-active', isActive ? 'true' : 'false');
       sectionOverlays.thumb?.setAttribute('data-overlay-active', isActive ? 'true' : 'false');
       sectionOverlays.legend?.setAttribute('data-overlay-active', isActive ? 'true' : 'false');
+      sectionOverlays.chatlog?.setAttribute('data-overlay-active', isActive ? 'true' : 'false');
     }
     document.body.setAttribute('data-active-section', activeId);
   }

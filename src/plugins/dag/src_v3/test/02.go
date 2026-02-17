@@ -64,23 +64,33 @@ func fetchDagTableRowsFromAPI() (*dagTableAPIResponse, error) {
 	return &out, nil
 }
 
-func Run02DagTableSectionValidation() error {
-	browser, err := ensureSharedBrowser(false)
+func Run02DagTableSectionValidation(ctx *testCtx) (string, error) {
+	browser, err := ctx.browser()
 	if err != nil {
-		return err
+		return "", err
+	}
+	if err := test_v2.WaitForPort(8080, 10*time.Second); err != nil {
+		return "", fmt.Errorf("dag server port 8080 not ready before table validation: %w", err)
 	}
 
 	apiRows, err := fetchDagTableRowsFromAPI()
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	var tableOK bool
 	var rowCount int
+	ctx.appendThought("table validation: load dag-table and wait for ready")
+	if err := ctx.navigate("http://127.0.0.1:8080/#dag-table"); err != nil {
+		return "", err
+	}
+	if err := ctx.waitAria("DAG Table", "need table element for validation"); err != nil {
+		return "", err
+	}
+	if err := ctx.waitAriaAttrEquals("DAG Table", "data-ready", "true", "wait for table ready flag", 8*time.Second); err != nil {
+		return "", err
+	}
 	if err := browser.Run(chromedp.Tasks{
-		chromedp.Navigate("http://127.0.0.1:8080/#dag-table"),
-		test_v2.WaitForAriaLabel("DAG Table"),
-		test_v2.WaitForAriaLabelAttrEquals("DAG Table", "data-ready", "true", 8*time.Second),
 		chromedp.Evaluate(`
 			(() => {
 				const table = document.querySelector("table[aria-label='DAG Table']");
@@ -102,19 +112,19 @@ func Run02DagTableSectionValidation() error {
 		`, &tableOK),
 		chromedp.Evaluate(`(() => document.querySelectorAll("table[aria-label='DAG Table'] tbody tr").length)()`, &rowCount),
 	}); err != nil {
-		return err
+		return "", err
 	}
 	if !tableOK {
-		return fmt.Errorf("dag-table assertions failed")
+		return "", fmt.Errorf("dag-table assertions failed")
 	}
 	if rowCount != len(apiRows.Rows) {
-		return fmt.Errorf("table row count (%d) does not match api row count (%d)", rowCount, len(apiRows.Rows))
+		return "", fmt.Errorf("table row count (%d) does not match api row count (%d)", rowCount, len(apiRows.Rows))
 	}
-	if err := captureStoryShot(browser, "test_step_1_pre.png"); err != nil {
-		return fmt.Errorf("capture table screenshot pre: %w", err)
+	if err := ctx.captureShot("test_step_1_pre.png"); err != nil {
+		return "", fmt.Errorf("capture table screenshot pre: %w", err)
 	}
-	if err := captureStoryShot(browser, "test_step_1.png"); err != nil {
-		return fmt.Errorf("capture table screenshot post: %w", err)
+	if err := ctx.captureShot("test_step_1.png"); err != nil {
+		return "", fmt.Errorf("capture table screenshot post: %w", err)
 	}
-	return nil
+	return "Loaded the DAG table, waited for `data-ready=true`, validated API parity and row status content, then captured pre/post table screenshots.", nil
 }
