@@ -44,6 +44,7 @@ type testCtx struct {
 	attachMode          bool
 	activeAttachSession bool
 	story               storyState
+	lastClickAt         time.Time
 }
 
 func newTestCtx() *testCtx {
@@ -56,6 +57,7 @@ const (
 	mobileViewportWidth  = 390
 	mobileViewportHeight = 844
 	mobileScaleFactor    = 2
+	clickGap             = time.Second
 )
 
 func (t *testCtx) ensureSharedServer() error {
@@ -214,6 +216,19 @@ func (t *testCtx) logClick(kind, target, detail string) {
 	t.appendThought(fmt.Sprintf("click %s (%s)", target, detail))
 }
 
+func (t *testCtx) waitClickGap() {
+	if t.lastClickAt.IsZero() {
+		t.lastClickAt = time.Now()
+		return
+	}
+	nextAllowed := t.lastClickAt.Add(clickGap)
+	now := time.Now()
+	if now.Before(nextAllowed) {
+		time.Sleep(nextAllowed.Sub(now))
+	}
+	t.lastClickAt = time.Now()
+}
+
 func (t *testCtx) waitAria(label, detail string) error {
 	b, err := t.browser()
 	if err != nil {
@@ -237,6 +252,7 @@ func (t *testCtx) clickAria(label, detail string) error {
 	if err != nil {
 		return err
 	}
+	t.waitClickGap()
 	t.logClick("aria", label, detail)
 	return b.Run(test_v2.ClickAriaLabel(label))
 }
@@ -302,11 +318,13 @@ func (t *testCtx) clickAction(mode, actionID string) error {
 	if actionID == "open_or_close_layer" {
 		detail += "; clicking open/close to change layer"
 	}
+	t.waitClickGap()
 	t.logClick("action", actionID, detail)
 	return b.Run(chromedp.Click(fmt.Sprintf("button.dag-action-btn[data-action='%s']", actionID), chromedp.ByQuery))
 }
 
 func (t *testCtx) clickCanvas(x, y int, detail string) error {
+	t.waitClickGap()
 	t.logClick("canvas", "Three Canvas", fmt.Sprintf("%s;x=%d,y=%d", detail, x, y))
 	return t.runEval(fmt.Sprintf(`(() => {
 		const canvas = document.querySelector("[aria-label='Three Canvas']");
@@ -334,6 +352,7 @@ func (t *testCtx) clickNode(nodeID string) error {
 	if !p.OK {
 		return fmt.Errorf("projected point not found for node %s", nodeID)
 	}
+	t.waitClickGap()
 	t.logClick("node", nodeID, fmt.Sprintf("x=%d,y=%d", p.X, p.Y))
 	return t.runEval(fmt.Sprintf(`(() => {
 		const canvas = document.querySelector("[aria-label='Three Canvas']");
