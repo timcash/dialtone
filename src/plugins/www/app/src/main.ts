@@ -171,7 +171,9 @@ window.addEventListener('hashchange', () => {
 
 // Navigation Logic
 let lastNavTime = 0;
-const NAV_COOLDOWN = 200; 
+const NAV_COOLDOWN = 650;
+let wheelGestureLocked = false;
+let wheelGestureUnlockTimer: number | undefined;
 
 const getActiveIndex = () => {
     const slides = Array.from(document.querySelectorAll('.snap-slide')) as HTMLElement[];
@@ -195,6 +197,18 @@ const navigate = (direction: 1 | -1) => {
 window.addEventListener('wheel', (e) => {
     if (Menu.getInstance().isOpen()) return;
     if (Math.abs(e.deltaY) < 30) return;
+    if (wheelGestureLocked) {
+        if (wheelGestureUnlockTimer) window.clearTimeout(wheelGestureUnlockTimer);
+        wheelGestureUnlockTimer = window.setTimeout(() => {
+            wheelGestureLocked = false;
+        }, 180);
+        return;
+    }
+    wheelGestureLocked = true;
+    if (wheelGestureUnlockTimer) window.clearTimeout(wheelGestureUnlockTimer);
+    wheelGestureUnlockTimer = window.setTimeout(() => {
+        wheelGestureLocked = false;
+    }, 180);
     navigate(e.deltaY > 0 ? 1 : -1);
 }, { passive: true });
 
