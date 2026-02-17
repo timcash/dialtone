@@ -22,7 +22,7 @@ func LocalWebRemoteRobot() error {
 	}
 
 	fmt.Printf(">> [Robot] Starting Local UI connected to Remote Robot: %s\n", hostname)
-	
+
 	uiDir := filepath.Join(cwd, "src", "plugins", "robot", "src_v1", "ui")
 
 	// Set environment variable for Vite to use as proxy target

@@ -69,6 +69,13 @@
           <div class="hud-row"><span>SPD:</span> <span id="hud-spd">0.0</span>m/s</div>
           <div class="hud-row"><span>GPS:</span> <span id="hud-gps">0.0, 0.0</span></div>
           <div class="hud-row"><span>HDG:</span> <span id="hud-hdg">0.0</span>°</div>
+          <div class="hud-row latency-graph-row">
+            <span>LATENCY:</span>
+            <div class="latency-graph-container">
+              <canvas id="latency-graph" width="120" height="24"></canvas>
+              <span id="hud-latency">0</span>ms
+            </div>
+          </div>
           <div class="hud-errors" id="hud-errors"></div>
         </aside>
       </section>

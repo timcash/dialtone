@@ -40,7 +40,9 @@ func StartMockMavlink(natsPort int) {
 				"base_mode":     209,
 				"custom_mode":   5,
 				"system_status": 4,
-				"timestamp":     time.Now().Unix(),
+				"timestamp":     time.Now().UnixMilli(),
+				"t_raw":         time.Now().UnixMilli(),
+				"t_pub":         time.Now().UnixMilli(),
 			}
 			PublishMockJSON("mavlink.heartbeat", heartbeat)
 
@@ -54,6 +56,8 @@ func StartMockMavlink(natsPort int) {
 				"vy":           math.Sin(t),
 				"vz":           0.0,
 				"hdg":          float64(int(t*10) % 360),
+				"t_raw":        time.Now().UnixMilli(),
+				"t_pub":        time.Now().UnixMilli(),
 			}
 			PublishMockJSON("mavlink.global_position_int", gpos)
 
@@ -65,6 +69,8 @@ func StartMockMavlink(natsPort int) {
 				"rollspeed":  0.0,
 				"pitchspeed": 0.0,
 				"yawspeed":   0.0,
+				"t_raw":      time.Now().UnixMilli(),
+				"t_pub":      time.Now().UnixMilli(),
 			}
 			PublishMockJSON("mavlink.attitude", att)
 		}

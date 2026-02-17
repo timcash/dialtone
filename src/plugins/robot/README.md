@@ -3,6 +3,7 @@
 ```bash
 # QUICK START: All lifecycle commands (Must be validated)
 ./dialtone.sh robot install src_v1                 # Install UI dependencies
+./dialtone.sh robot install src_v1 --remote        # Sync and install on remote robot
 ./dialtone.sh robot local-web-remote-robot src_v1  # Live UI with remote robot data
 ./dialtone.sh robot test src_v1                    # Run automated test suite
 ./dialtone.sh robot test src_v1 --attach           # Run tests and watch in browser
@@ -14,106 +15,72 @@
 ./dialtone.sh robot deploy src_v1 --service        # Deploy as systemd service
 ./dialtone.sh robot deploy src_v1 --proxy          # Deploy with Cloudflare proxy
 ./dialtone.sh robot diagnostic src_v1              # Verify live robot UI/telemetry
+./dialtone.sh robot telemetry                      # Monitor MAVLink latency on robot
 ```
 
 The `robot` plugin is the central hub for all robot-specific logic, including MAVLink telemetry integration, NATS messaging, and the mobile-optimized 3D dashboard. 
-
-The plugin is designed to be **self-contained**, minimizing dependencies on the Dialtone `core` by encapsulating build, installation, and deployment logic within versioned source directories (`src_v1`, etc.).
 
 ---
 
 ## 🛠 Development Lifecycle
 
-Use these commands to develop new features, verify them locally, and ship them to the robot. All commands default to the latest `src_vN` version if not specified.
+### 1. Remote Development (Native Build)
+To iterate quickly on hardware, use the `--remote` flag with `install` and `build`. This mirrors your local directory structure on the robot and uses your local `env/.env`.
 
-### 1. Environment Setup
-Install all UI dependencies for the target version.
+1.  **Requirement**: Set `ROBOT_HOST`, `ROBOT_USER`, and `ROBOT_PASSWORD` in your local `env/.env`.
+2.  **Install**: This syncs code, installs Go/Bun on the robot, and resolves UI dependencies.
+    ```bash
+    ./dialtone.sh robot install src_v1 --remote
+    ```
+3.  **Build**: This syncs code and compiles the binary natively on the robot's architecture.
+    ```bash
+    ./dialtone.sh robot build src_v1 --remote
+    ```
+
+---
+
+## 📡 Latency Debugging (MAVLink)
+
+If you see high latency (e.g., > 100ms) in the UI HUD, follow these steps to isolate the bottleneck. The UI breakdown is `Total (P:Processing / Q:Queue / N:Network)`.
+
+### 1. Monitor the Internal Pipeline
+Run the telemetry tool directly on the robot to see **P** and **Q** latency components. This tool dynamically discovers the correct NATS port via the Web API.
 ```bash
-./dialtone.sh robot install src_v1
+# On the robot
+./dialtone.sh robot telemetry
 ```
+*   **P (Processing)**: Time from serial port arrival to NATS publication. Goal: `< 2ms`.
+*   **Q (Queueing)**: Time from NATS publication to WebSocket relay. Goal: `< 10ms`.
 
-### 2. Live Development (Remote Robot)
-Iterate on UI changes using real data from a remote robot without redeploying.
+### 2. Isolate Network (N)
+If P and Q are low but the UI shows high latency, the issue is **N (Network)**.
+*   **Direct vs Relay**: Check `tailscale status`. If using a DERP relay, latency will be > 200ms.
+*   **Baud Rate**: Ensure the serial connection is set to `57600` or `115200` in the `robot start` command.
+
+### 3. Verify Timestamps
+Check the raw logs on the robot to see if `MAVLINK-RAW` frames are arriving at the expected frequency (e.g., 10Hz for heartbeats).
 ```bash
-# Connect local UI to drone-1 (or set DIALTONE_HOSTNAME)
-./dialtone.sh robot local-web-remote-robot src_v1
-```
-
-### 3. Verification & Testing
-Run the full automated test suite to ensure telemetry, navigation, and controls are functional.
-```bash
-# Headless execution
-./dialtone.sh robot test src_v1
-
-# Watch playback in your dev browser
-./dialtone.sh robot test src_v1 --attach
-```
-
-### 4. Build & Local Serving
-Compile the UI assets and run the Go server locally.
-```bash
-./dialtone.sh robot build src_v1
-./dialtone.sh robot serve src_v1
-```
-
-### 5. Remote Source Sync (Optional)
-Sync the project source code to the robot to perform native builds on the hardware itself. This is useful for debugging CGO issues or if the cross-compilation environment is unavailable.
-```bash
-./dialtone.sh robot sync-code src_v1
-```
-
-### 6. Remote Build
-Build the optimized binary directly on the remote robot. This command will first synchronize the necessary source code and then execute the build process on the robot via SSH.
-```bash
-./dialtone.sh robot build src_v1 --remote
-```
-
-### 7. Deployment
-Build the optimized binary, auto-bump the UI version, and ship to the remote robot.
-```bash
-# Standard background deployment
-./dialtone.sh robot deploy src_v1
-
-# Deployment as a persistent systemd service
-./dialtone.sh robot deploy src_v1 --service
-
-# Deployment with Cloudflare Tunnel ( drone-1.dialtone.earth )
-./dialtone.sh robot deploy src_v1 --proxy
-```
-
-### 6. Post-Deployment Diagnostic
-Verify the live robot's UI and telemetry stream from your machine.
-```bash
-./dialtone.sh robot diagnostic src_v1
+ssh $ROBOT_USER@$ROBOT_HOST "tail -f ~/dialtone_deploy/robot.log | grep MAVLINK-RAW"
 ```
 
 ---
 
 ## 🏗 Modular Architecture
 
-The plugin is split into specialized modules to ensure maintainability:
-
 | File | Responsibility |
 |------|----------------|
 | `robot.go` | Entry point and subcommand router. |
 | `start.go` | Core service logic (NATS, Web, MAVLink bridge). |
-| `deploy.go` | SSH management, auto-versioning, and 4-step health checks. |
-| `ops.go` | Version-aware router for `install`, `build`, `test`, etc. |
-| `src_v1/cmd/ops/` | Version-specific implementation of CLI operations. |
+| `deploy.go` | SSH management and auto-versioning. |
+| `sync.go`   | Mirroring local project structure to the robot. |
+| `telemetry.go` | CLI tool for real-time latency monitoring. |
+| `mavlink_latency.md` | Detailed report on the 6-step message journey. |
 
 ---
 
 ## 🚀 Recent Improvements (Feb 2026)
 
-- **6DOF Model Sync**: The 3D robot model now accurately reflects real-time MAVLink `ATTITUDE` (Roll, Pitch, Yaw).
-- **Auto-Versioning**: Every deployment automatically increments the UI version (displayed in the header) for instant verification.
-- **Optimized Footprint**: Binary size reduced to ~140MB by stripping symbols and excluding DuckDB (`-tags no_duckdb`).
-- **Xterm Refinement**: Terminal now uses a full-screen **CSS Grid** layout with a sticky input bar, matching UIv2 standards.
-- **MAVLink Bridge**: Bidirectional NATS bridge (`rover.command` -> MAVLink) for ARM, DISARM, and Mode switching.
-- **Robust Health Checks**: Deployment now includes mandatory checks for Service Status, Internal Web (8080), NATS (4222), and Tailscale reachability.
-
----
-
-## 🎯 The "Core-less" Vision
-
-The `robot` plugin represents the future of the Dialtone CLI: a modular system where `src/core` contains only generic utilities, and all high-level functionality—from building binaries to managing hardware—lives within independent, versioned plugins. This allows us to scale to new robot generations (`src_v2`, `src_v3`) without bloating the main engine.
+- **Dynamic Port Discovery**: The UI and CLI tools now query `/api/init` to find the correct NATS/WS ports, eliminating port conflict issues.
+- **Mirrored Remote Sync**: `sync-code` now reproduces your local folder name on the robot (e.g., `/home/user/dialtone`) and copies your `env/.env` automatically.
+- **Precision Tracking**: Every `ATTITUDE` and `HEARTBEAT` message now carries `t_raw` and `t_pub` timestamps for millisecond-accurate profiling.
+- **Unit Normalization**: Fixed a bug where mock telemetry used seconds, causing 30,000ms "ghost" latency in the UI.
