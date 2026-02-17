@@ -1,5 +1,8 @@
 import * as THREE from 'three';
+import { Terminal } from '@xterm/xterm';
+import '@xterm/xterm/css/xterm.css';
 import { VisualizationControl } from '../../../../../../../libs/ui_v2/types';
+import { DagStageCamera, DagCameraView } from './camera';
 
 type NodeID = string;
 type EdgeID = string;
@@ -44,7 +47,22 @@ type LayerSnapshot = {
 };
 
 type ProjectedPoint = { ok: boolean; x: number; y: number };
-type CameraView = 'iso' | 'top' | 'side' | 'front';
+type CameraView = DagCameraView;
+type ThumbMode = 'graph' | 'layer' | 'camera';
+type ThumbActionID =
+  | 'back'
+  | 'add'
+  | 'link_or_unlink'
+  | 'open_or_close_layer'
+  | 'clear_picks'
+  | 'rename'
+  | 'camera_top'
+  | 'camera_iso'
+  | 'camera_side'
+  | 'toggle_labels'
+  | 'focus'
+  | 'none';
+type ThumbActionDef = { id: ThumbActionID; label: string };
 type NestedLink = {
   parentNodeId: NodeID;
   childNodeId: NodeID;
@@ -52,8 +70,8 @@ type NestedLink = {
   line: THREE.Line;
 };
 
-const NODE_BASE_COLOR = 0x5b6873;
-const NODE_RECENT_COLOR = 0x7dd3fc;
+const NODE_BASE_COLOR = 0x475261;
+const NODE_RECENT_COLOR = 0xf3f8ff;
 const NODE_SECOND_RECENT_COLOR = 0x2b78ff;
 const EDGE_BASE_COLOR = 0x6b7280;
 const EDGE_NESTED_LINK_COLOR = 0xfacc15;
@@ -62,6 +80,7 @@ const ROOT_IO_CAMERA_VIEW: CameraView = 'iso';
 class ThreeControl implements VisualizationControl {
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(50, 1, 0.1, 400);
+  private stageCamera = new DagStageCamera(this.camera);
   private renderer: THREE.WebGLRenderer;
   private gizmoScene = new THREE.Scene();
   private gizmoCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 10);
@@ -81,6 +100,7 @@ class ThreeControl implements VisualizationControl {
   private selectedNodeId = '';
   private activeLayerId: LayerID = 'root';
   private history: LayerSnapshot[] = [];
+  private openedLayerIDs = new Set<LayerID>();
   private allMeshes: THREE.Mesh[] = [];
   private keyLight: THREE.DirectionalLight;
   private nestedLinks: NestedLink[] = [];
@@ -93,16 +113,18 @@ class ThreeControl implements VisualizationControl {
   private lastCreatedNodeId = '';
   private renameInput: HTMLInputElement | null = null;
   private renameApplyButton: HTMLButtonElement | null = null;
-
-  private backButton: HTMLButtonElement | null = null;
-  private addButton: HTMLButtonElement | null = null;
-  private connectButton: HTMLButtonElement | null = null;
-  private unlinkButton: HTMLButtonElement | null = null;
-  private nestButton: HTMLButtonElement | null = null;
-  private clearPicksButton: HTMLButtonElement | null = null;
-  private cameraTopButton: HTMLButtonElement | null = null;
-  private cameraIsoButton: HTMLButtonElement | null = null;
-  private cameraSideButton: HTMLButtonElement | null = null;
+  private modeButton: HTMLButtonElement | null = null;
+  private thumbButtons: HTMLButtonElement[] = [];
+  private thumbMode: ThumbMode = 'graph';
+  private chatlogHost: HTMLElement | null = null;
+  private chatlogTerm: Terminal | null = null;
+  private chatlogLines: string[] = [];
+  private readonly modeOrder: ThumbMode[] = ['graph', 'layer', 'camera'];
+  private readonly modeLabels: Record<ThumbMode, string> = {
+    graph: 'Mode: Graph',
+    layer: 'Mode: Layer',
+    camera: 'Mode: Camera',
+  };
   private nodeHistoryLabelEl: HTMLElement | null = null;
   private nodeHistoryValueEls: HTMLElement[] = [];
 
@@ -337,15 +359,17 @@ class ThreeControl implements VisualizationControl {
   };
 
   private initMobileUI() {
-    this.backButton = this.container.querySelector("button[aria-label='DAG Back']");
-    this.addButton = this.container.querySelector("button[aria-label='DAG Add']");
-    this.connectButton = this.container.querySelector("button[aria-label='DAG Connect']");
-    this.unlinkButton = this.container.querySelector("button[aria-label='DAG Unlink']");
-    this.nestButton = this.container.querySelector("button[aria-label='DAG Nest']");
-    this.clearPicksButton = this.container.querySelector("button[aria-label='DAG Clear Picks']");
-    this.cameraTopButton = this.container.querySelector("button[aria-label='DAG Camera Z']");
-    this.cameraIsoButton = this.container.querySelector("button[aria-label='DAG Camera ISO']");
-    this.cameraSideButton = this.container.querySelector("button[aria-label='DAG Camera Side']");
+    this.thumbButtons = [
+      this.container.querySelector("button[aria-label='DAG Thumb 1']"),
+      this.container.querySelector("button[aria-label='DAG Thumb 2']"),
+      this.container.querySelector("button[aria-label='DAG Thumb 3']"),
+      this.container.querySelector("button[aria-label='DAG Thumb 4']"),
+      this.container.querySelector("button[aria-label='DAG Thumb 5']"),
+      this.container.querySelector("button[aria-label='DAG Thumb 6']"),
+      this.container.querySelector("button[aria-label='DAG Thumb 7']"),
+      this.container.querySelector("button[aria-label='DAG Thumb 8']"),
+    ].filter((el): el is HTMLButtonElement => !!el);
+    this.modeButton = this.container.querySelector("button[aria-label='DAG Mode']");
     this.nodeHistoryLabelEl = this.container.querySelector('.dag-history > h3');
     this.nodeHistoryValueEls = [
       this.container.querySelector("[aria-label='DAG Node History Item 1']"),
@@ -356,6 +380,8 @@ class ThreeControl implements VisualizationControl {
     ].filter((el): el is HTMLElement => !!el);
     this.renameInput = this.container.querySelector("input[aria-label='DAG Label Input']");
     this.renameApplyButton = this.container.querySelector("button[aria-label='DAG Rename']");
+    this.chatlogHost = this.container.querySelector('.dag-chatlog-xterm');
+    this.initChatlogTerminal();
     const testMode = (() => {
       try {
         return window.sessionStorage.getItem('dag_test_mode') === '1';
@@ -364,33 +390,16 @@ class ThreeControl implements VisualizationControl {
       }
     })();
 
-    this.backButton?.addEventListener('click', () => {
-      this.closeActiveLayer();
+    for (let i = 0; i < this.thumbButtons.length; i += 1) {
+      const button = this.thumbButtons[i];
+      button.addEventListener('click', () => {
+        this.runThumbActionBySlot(i);
+      });
+    }
+    this.modeButton?.addEventListener('click', () => {
+      this.cycleThumbMode();
       this.syncControlState();
     });
-    this.addButton?.addEventListener('click', () => {
-      this.createChildNodeFromSelected();
-      this.syncControlState();
-    });
-    this.connectButton?.addEventListener('click', () => {
-      this.performConnectAction();
-      this.syncControlState();
-    });
-    this.unlinkButton?.addEventListener('click', () => {
-      this.performUnlinkAction();
-      this.syncControlState();
-    });
-    this.nestButton?.addEventListener('click', () => {
-      this.createNestedLayerAndEnter();
-      this.syncControlState();
-    });
-    this.clearPicksButton?.addEventListener('click', () => {
-      this.clearSelections();
-    });
-    this.cameraTopButton?.addEventListener('click', () => this.setCameraView('top'));
-    this.cameraIsoButton?.addEventListener('click', () => this.setCameraView('iso'));
-    this.cameraSideButton?.addEventListener('click', () => this.setCameraView('side'));
-
     this.renameApplyButton?.addEventListener('click', () => this.applyRenameFromInput());
     this.renameInput?.addEventListener('keydown', (event) => {
       if (event.key !== 'Enter') return;
@@ -400,6 +409,167 @@ class ThreeControl implements VisualizationControl {
     if (testMode) this.container.setAttribute('data-test-mode', 'true');
 
     this.syncControlState();
+  }
+
+  private initChatlogTerminal() {
+    if (!this.chatlogHost) return;
+    this.chatlogTerm?.dispose();
+    this.chatlogHost.innerHTML = '';
+    this.chatlogTerm = new Terminal({
+      allowTransparency: true,
+      convertEol: true,
+      disableStdin: true,
+      cursorBlink: false,
+      cursorStyle: 'bar',
+      rows: 5,
+      cols: 92,
+      scrollback: 0,
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      fontSize: 12,
+      lineHeight: 1.35,
+      theme: {
+        background: 'rgba(0,0,0,0)',
+        foreground: '#a7adb7',
+        cursor: '#a7adb7',
+      },
+    });
+    this.chatlogTerm.open(this.chatlogHost);
+    this.renderChatlog();
+  }
+
+  private normalizeThoughtText(text: string): string {
+    const single = text.replace(/\s+/g, ' ').trim();
+    if (single.length <= 104) return single;
+    return `${single.slice(0, 101)}...`;
+  }
+
+  private renderChatlog() {
+    const term = this.chatlogTerm;
+    if (!term) return;
+    const lines = this.chatlogLines.slice(-5);
+    const padCount = Math.max(0, 5 - lines.length);
+    term.write('\x1b[2J\x1b[H');
+    for (let i = 0; i < padCount; i += 1) term.writeln('');
+    for (let i = 0; i < lines.length; i += 1) {
+      const age = lines.length - 1 - i;
+      const color =
+        age === 0 ? '\x1b[97m' : age === 1 ? '\x1b[37m' : age === 2 ? '\x1b[2;37m' : age === 3 ? '\x1b[90m' : '\x1b[2;90m';
+      term.writeln(`${color}${lines[i]}\x1b[0m`);
+    }
+  }
+
+  private appendThought(text: string): boolean {
+    const clean = this.normalizeThoughtText(text);
+    if (!clean) return false;
+    this.chatlogLines.push(clean);
+    if (this.chatlogLines.length > 5) {
+      this.chatlogLines = this.chatlogLines.slice(-5);
+    }
+    this.renderChatlog();
+    return true;
+  }
+
+  private cycleThumbMode() {
+    const idx = this.modeOrder.indexOf(this.thumbMode);
+    const next = this.modeOrder[(idx + 1) % this.modeOrder.length];
+    this.thumbMode = next;
+  }
+
+  private getThumbActionsForMode(): ThumbActionDef[] {
+    if (this.thumbMode === 'layer') {
+      return [
+        { id: 'open_or_close_layer', label: this.getOpenCloseLayerActionLabel() },
+        { id: 'add', label: 'Add' },
+        { id: 'back', label: 'Back' },
+        { id: 'clear_picks', label: 'Clear' },
+        { id: 'link_or_unlink', label: this.getLinkUnlinkLabel() },
+        { id: 'focus', label: 'Focus' },
+        { id: 'rename', label: 'Rename' },
+        { id: 'none', label: '-' },
+      ];
+    }
+    if (this.thumbMode === 'camera') {
+      return [
+        { id: 'camera_top', label: 'Z' },
+        { id: 'camera_iso', label: 'ISO' },
+        { id: 'camera_side', label: 'SIDE' },
+        { id: 'focus', label: 'Focus' },
+        { id: 'toggle_labels', label: this.labelsVisible ? 'Labels On' : 'Labels Off' },
+        { id: 'open_or_close_layer', label: this.getOpenCloseLayerActionLabel() },
+        { id: 'back', label: 'Back' },
+        { id: 'none', label: '-' },
+      ];
+    }
+    return [
+      { id: 'back', label: 'Back' },
+      { id: 'add', label: 'Add' },
+      { id: 'link_or_unlink', label: this.getLinkUnlinkLabel() },
+      { id: 'clear_picks', label: 'Clear' },
+      { id: 'open_or_close_layer', label: this.getOpenCloseLayerActionLabel() },
+      { id: 'rename', label: 'Rename' },
+      { id: 'focus', label: 'Focus' },
+      { id: 'toggle_labels', label: this.labelsVisible ? 'Labels On' : 'Labels Off' },
+    ];
+  }
+
+  private runThumbActionBySlot(slot: number) {
+    const action = this.getThumbActionsForMode()[slot];
+    if (!action) return;
+    const actionID = action.id;
+    if (actionID === 'none') return;
+    if (actionID === 'back') {
+      this.performBackAction();
+      return;
+    }
+    if (actionID === 'add') {
+      this.createChildNodeFromSelected();
+      this.syncControlState();
+      return;
+    }
+    if (actionID === 'link_or_unlink') {
+      this.performLinkOrUnlinkAction();
+      this.syncControlState();
+      return;
+    }
+    if (actionID === 'clear_picks') {
+      this.clearSelections();
+      return;
+    }
+    if (actionID === 'open_or_close_layer') {
+      this.performOpenOrCloseLayerAction();
+      this.syncControlState();
+      return;
+    }
+    if (actionID === 'rename') {
+      this.applyRenameFromInput();
+      return;
+    }
+    if (actionID === 'camera_top') {
+      this.setCameraView('top');
+      return;
+    }
+    if (actionID === 'camera_iso') {
+      this.setCameraView('iso');
+      return;
+    }
+    if (actionID === 'camera_side') {
+      this.setCameraView('side');
+      return;
+    }
+    if (actionID === 'focus') {
+      if (this.selectedNodeId) {
+        this.focusCameraOnNode(this.selectedNodeId);
+      } else {
+        this.fitCameraToLayer(this.activeLayerId);
+      }
+      this.syncControlState();
+      return;
+    }
+    if (actionID === 'toggle_labels') {
+      this.labelsVisible = !this.labelsVisible;
+      this.refreshVisualState();
+      this.syncControlState();
+    }
   }
 
   private createChildNodeFromSelected() {
@@ -420,11 +590,47 @@ class ThreeControl implements VisualizationControl {
     console.log(`[Three #three] action add node: ${nodeId} near ${source.id}`);
   }
 
-  private createNestedLayerAndEnter() {
-    if (!this.selectedNodeId) return;
-    const nestedLayerId = this.ensureNestedLayer(this.selectedNodeId);
-    if (!nestedLayerId) return;
-    this.openNestedLayer(this.selectedNodeId);
+  private performBackAction() {
+    if (this.history.length > 0) {
+      this.navigateBackToParentLayer();
+      return;
+    }
+    this.popSelectionHistoryBack();
+  }
+
+  private getLinkUnlinkLabel(): string {
+    const pair = this.getRecentLinkPairForActiveLayer();
+    if (!pair) return 'link';
+    return this.findEdgeIDBetween(pair.outputNodeId, pair.inputNodeId) ? 'unlink' : 'link';
+  }
+
+  private getOpenCloseLayerActionLabel(): string {
+    const selectedNode = this.nodes.get(this.selectedNodeId);
+    if (!selectedNode || selectedNode.layerId !== this.activeLayerId) return 'open';
+    const nestedLayerID = this.getExistingNestedLayerID(selectedNode.id);
+    if (!nestedLayerID) return 'open';
+    if (this.openedLayerIDs.has(nestedLayerID)) return 'close';
+    return 'open';
+  }
+
+  private performOpenOrCloseLayerAction() {
+    const selectedNode = this.nodes.get(this.selectedNodeId);
+    if (!selectedNode || selectedNode.layerId !== this.activeLayerId) return;
+    const existingLayerID = this.getExistingNestedLayerID(selectedNode.id);
+    const nestedLayerID = existingLayerID || this.ensureNestedLayer(selectedNode.id);
+    if (!nestedLayerID) return;
+    if (this.openedLayerIDs.has(nestedLayerID)) {
+      this.closeNestedLayerByID(nestedLayerID);
+      return;
+    }
+    this.openNestedLayer(selectedNode.id);
+  }
+
+  private getExistingNestedLayerID(nodeId: NodeID): LayerID {
+    const node = this.nodes.get(nodeId);
+    if (!node) return '';
+    const existing = node.nestedLayerIDs.filter((layerID) => this.layers.has(layerID));
+    return existing.length > 0 ? existing[existing.length - 1] : '';
   }
 
   private getRecentLinkPair(): { outputNodeId: NodeID; inputNodeId: NodeID } | null {
@@ -494,6 +700,17 @@ class ThreeControl implements VisualizationControl {
     }
   }
 
+  private performLinkOrUnlinkAction() {
+    const pair = this.getRecentLinkPairForActiveLayer();
+    if (!pair) return;
+    const edgeID = this.findEdgeIDBetween(pair.outputNodeId, pair.inputNodeId);
+    if (edgeID) {
+      this.performUnlinkAction();
+      return;
+    }
+    this.performConnectAction();
+  }
+
   private redrawNodeLabel(node: DagNode) {
     if (!node.labelCanvas || !node.labelTexture) return;
     const ctx = node.labelCanvas.getContext('2d');
@@ -529,30 +746,41 @@ class ThreeControl implements VisualizationControl {
 
   private syncControlState() {
     const pair = this.getRecentLinkPairForActiveLayer();
-    if (this.backButton) this.backButton.disabled = this.history.length === 0 && this.recentSelectedNodeIDs.length < 2;
-    if (this.connectButton) this.connectButton.disabled = !pair;
-    if (this.unlinkButton) this.unlinkButton.disabled = !pair;
-    if (this.nestButton) this.nestButton.disabled = !this.selectedNodeId;
-    if (this.clearPicksButton) {
-      this.clearPicksButton.disabled = !(this.recentSelectedNodeIDs.length > 0 || this.selectedNodeId);
-    }
     const selectedNode = this.nodes.get(this.selectedNodeId);
+    const hasPair = !!pair;
+    const canOpenLayer = !!selectedNode && selectedNode.layerId === this.activeLayerId;
+    const canRename = !!selectedNode;
+    const actions = this.getThumbActionsForMode();
+
+    for (let i = 0; i < this.thumbButtons.length; i += 1) {
+      const button = this.thumbButtons[i];
+      const action = actions[i] || { id: 'none', label: '-' };
+      let disabled = false;
+      if (action.id === 'none') disabled = true;
+      if (action.id === 'back') disabled = this.history.length === 0 && this.recentSelectedNodeIDs.length < 2;
+      if (action.id === 'link_or_unlink') disabled = !hasPair;
+      if (action.id === 'clear_picks') disabled = !(this.recentSelectedNodeIDs.length > 0 || this.selectedNodeId);
+      if (action.id === 'rename') disabled = !canRename;
+      if (action.id === 'open_or_close_layer') disabled = !canOpenLayer;
+      button.textContent = action.label;
+      button.disabled = disabled;
+      button.setAttribute('data-action', action.id);
+      const cameraActive =
+        (action.id === 'camera_top' && this.cameraView === 'top') ||
+        (action.id === 'camera_iso' && this.cameraView === 'iso') ||
+        (action.id === 'camera_side' && this.cameraView === 'side');
+      button.classList.toggle('is-active', cameraActive);
+    }
+
     if (this.renameInput) {
       this.renameInput.disabled = !selectedNode;
       this.renameInput.value = selectedNode ? selectedNode.label : '';
       this.renameInput.placeholder = selectedNode ? 'Rename selected node' : 'Select node to rename';
     }
     if (this.renameApplyButton) this.renameApplyButton.disabled = !selectedNode;
-    const cameraButtons = [
-      [this.cameraTopButton, 'top'],
-      [this.cameraIsoButton, 'iso'],
-      [this.cameraSideButton, 'side'],
-    ] as const;
-    for (const [button, view] of cameraButtons) {
-      if (!button) continue;
-      const active = this.cameraView === view;
-      button.setAttribute('aria-pressed', active ? 'true' : 'false');
-      button.classList.toggle('is-active', active);
+    if (this.modeButton) {
+      this.modeButton.textContent = this.modeLabels[this.thumbMode];
+      this.modeButton.setAttribute('data-mode', this.thumbMode);
     }
     for (let i = 0; i < this.nodeHistoryValueEls.length; i += 1) {
       this.nodeHistoryValueEls[i].textContent = this.recentSelectedNodeIDs[i] || 'none';
@@ -563,6 +791,7 @@ class ThreeControl implements VisualizationControl {
     this.canvas.setAttribute('data-labels-visible', String(this.labelsVisible));
     this.canvas.setAttribute('data-link-output', pair?.outputNodeId ?? '');
     this.canvas.setAttribute('data-link-input', pair?.inputNodeId ?? '');
+    this.canvas.setAttribute('data-thumb-mode', this.thumbMode);
   }
 
   private getCurrentLayerNumber(): number {
@@ -571,13 +800,10 @@ class ThreeControl implements VisualizationControl {
 
   private getVisibleLayerCount(): number {
     const visibleLayerIDs = new Set<LayerID>();
+    visibleLayerIDs.add('root');
     visibleLayerIDs.add(this.activeLayerId);
-    const selectedHistory = new Set(this.recentSelectedNodeIDs);
-    for (const layer of this.layers.values()) {
-      if (!layer.parentNodeId) continue;
-      if (selectedHistory.has(layer.parentNodeId)) {
-        visibleLayerIDs.add(layer.id);
-      }
+    for (const layerID of this.openedLayerIDs.values()) {
+      visibleLayerIDs.add(layerID);
     }
     return visibleLayerIDs.size;
   }
@@ -617,13 +843,10 @@ class ThreeControl implements VisualizationControl {
     this.activeLayerId = layerId;
     const activeLayer = this.layers.get(layerId);
     const visibleLayerIDs = new Set<LayerID>();
+    visibleLayerIDs.add('root');
     visibleLayerIDs.add(layerId);
-    const selectedHistory = new Set(this.recentSelectedNodeIDs);
-    for (const layer of this.layers.values()) {
-      if (!layer.parentNodeId) continue;
-      if (selectedHistory.has(layer.parentNodeId)) {
-        visibleLayerIDs.add(layer.id);
-      }
+    for (const openedLayerID of this.openedLayerIDs.values()) {
+      visibleLayerIDs.add(openedLayerID);
     }
     for (const layer of this.layers.values()) {
       const isVisible = visibleLayerIDs.has(layer.id);
@@ -667,7 +890,7 @@ class ThreeControl implements VisualizationControl {
     }
     for (const link of this.nestedLinks) {
       this.updateNestedLinkGeometry(link);
-      link.line.visible = link.childLayerId === layerId;
+      link.line.visible = visibleLayerIDs.has(link.childLayerId);
     }
     const selectedNode = this.nodes.get(this.selectedNodeId);
     if (!selectedNode || selectedNode.layerId !== layerId || !selectedNode.mesh.visible) {
@@ -704,24 +927,7 @@ class ThreeControl implements VisualizationControl {
   }
 
   private positionCameraAroundPoint(center: THREE.Vector3, maxDim: number, view: CameraView) {
-    const fov = THREE.MathUtils.degToRad(this.camera.fov);
-    const aspectScale = this.camera.aspect < 1 ? 1 / this.camera.aspect : 1;
-    const dist = ((maxDim * aspectScale) / (2 * Math.tan(fov / 2))) * 1.2 + 14;
-    const target = center.clone();
-    const verticalBias =
-      view === 'top' ? dist * 0.08 : view === 'side' || view === 'front' ? dist * 0.16 : dist * 0.14;
-    target.y -= verticalBias;
-    if (view === 'top') {
-      this.camera.position.set(center.x, center.y + dist * 1.35, center.z + 0.01);
-    } else if (view === 'side') {
-      this.camera.position.set(center.x + dist * 1.2, center.y + dist * 0.42, center.z);
-    } else if (view === 'front') {
-      this.camera.position.set(center.x, center.y + dist * 0.42, center.z + dist * 1.2);
-    } else {
-      this.camera.position.set(center.x + dist * 0.75, center.y + dist * 0.95, center.z + dist * 0.75);
-    }
-    this.camera.lookAt(target);
-    this.camera.updateProjectionMatrix();
+    this.stageCamera.framePoint(center, maxDim, view);
   }
 
   private focusCameraOnNode(nodeId: NodeID): boolean {
@@ -753,10 +959,16 @@ class ThreeControl implements VisualizationControl {
       const material = node.mesh.material as THREE.MeshStandardMaterial;
       if (node.id === mostRecent) {
         material.color.setHex(NODE_RECENT_COLOR);
+        material.emissive.setHex(0x8fb6ff);
+        material.emissiveIntensity = 0.95;
       } else if (node.id === secondRecent) {
         material.color.setHex(NODE_SECOND_RECENT_COLOR);
+        material.emissive.setHex(0x1f3e8e);
+        material.emissiveIntensity = 0.38;
       } else {
         material.color.setHex(NODE_BASE_COLOR);
+        material.emissive.setHex(0x000000);
+        material.emissiveIntensity = 0.1;
       }
     }
 
@@ -872,6 +1084,7 @@ class ThreeControl implements VisualizationControl {
     const candidateLayerIDs = targetNode.nestedLayerIDs.filter((layerID) => this.layers.has(layerID));
     if (candidateLayerIDs.length === 0) return false;
     const targetLayerID = candidateLayerIDs[candidateLayerIDs.length - 1];
+    this.openedLayerIDs.add(targetLayerID);
     this.history.push({ layerId: this.activeLayerId, selectedNodeId: this.selectedNodeId });
     this.selectedNodeId = '';
     this.applyLayerView(targetLayerID);
@@ -886,25 +1099,32 @@ class ThreeControl implements VisualizationControl {
     });
   }
 
-  private closeActiveLayer(): boolean {
-    if (this.history.length === 0 && this.popSelectionHistoryBack()) return true;
+  private navigateBackToParentLayer(): boolean {
     const prev = this.history.pop();
     if (!prev) return false;
-    const closedLayerId = this.activeLayerId;
-    const closedLayer = this.layers.get(closedLayerId);
-    const parentNodeId = closedLayer?.parentNodeId ?? '';
-
-    this.clearSelectionHistoryForLayer(closedLayerId);
-    this.selectedNodeId = prev.selectedNodeId;
+    this.selectedNodeId = prev.selectedNodeId || '';
     this.applyLayerView(prev.layerId);
-    if (parentNodeId && this.nodes.has(parentNodeId)) {
-      this.selectedNodeId = parentNodeId;
-      this.recentSelectedNodeIDs = [parentNodeId, ...this.recentSelectedNodeIDs.filter((id) => id !== parentNodeId)].slice(0, 5);
-      this.focusCameraOnNode(parentNodeId);
-      this.refreshVisualState();
-      this.syncCanvasState();
+    console.log(`[Three #three] back layer: ${prev.layerId}`);
+    return true;
+  }
+
+  private closeNestedLayerByID(layerId: LayerID): boolean {
+    if (!this.openedLayerIDs.has(layerId)) return false;
+    this.openedLayerIDs.delete(layerId);
+    this.clearSelectionHistoryForLayer(layerId);
+
+    if (this.activeLayerId === layerId) {
+      const layer = this.layers.get(layerId);
+      const parentNodeID = layer?.parentNodeId || '';
+      const parentNode = parentNodeID ? this.nodes.get(parentNodeID) : null;
+      const targetLayerID = parentNode?.layerId || 'root';
+      this.history = this.history.filter((snap) => snap.layerId !== layerId);
+      this.selectedNodeId = parentNodeID;
+      this.applyLayerView(targetLayerID);
+    } else {
+      this.applyLayerView(this.activeLayerId);
     }
-    console.log(`[Three #three] close layer: ${closedLayerId} -> ${prev.layerId}`);
+    console.log(`[Three #three] close nested layer: ${layerId}`);
     return true;
   }
 
@@ -1206,13 +1426,14 @@ class ThreeControl implements VisualizationControl {
       getLayerTransform: (layerId: LayerID) => this.getLayerTransform(layerId),
       getCameraTransform: () => this.getCameraTransform(),
       setCameraView: (view: CameraView) => this.setCameraView(view),
+      appendThought: (text: string) => this.appendThought(text),
       logLayoutSnapshot: (layerId: LayerID, nodeIDs: NodeID[]) => this.logLayoutSnapshot(layerId, nodeIDs),
       clickProjected: (nodeId: NodeID) => this.clickProjected(nodeId),
       createNodeAtClient: (layerId: LayerID, clientX: number, clientY: number) => this.createNodeAtClient(layerId, clientX, clientY),
       openNestedLayer: (nodeId?: NodeID) => this.openNestedLayer(nodeId),
-      closeActiveLayer: () => this.closeActiveLayer(),
+      closeActiveLayer: () => this.performOpenOrCloseLayerAction(),
       enterNested: (nodeId?: NodeID) => this.openNestedLayer(nodeId),
-      goBack: () => this.closeActiveLayer(),
+      goBack: () => this.performBackAction(),
       addNode: (layerId: LayerID, nodeId: NodeID, rank: number, row: number) => this.addNode(layerId, nodeId, rank, row),
       addEdge: (edgeId: EdgeID, layerId: LayerID, outputNodeId: NodeID, inputNodeId: NodeID) =>
         this.addEdge(edgeId, layerId, outputNodeId, inputNodeId),
@@ -1260,6 +1481,8 @@ class ThreeControl implements VisualizationControl {
     this.canvas.removeEventListener('dblclick', this.onDoubleClick);
     const win = window as Window & { dagHitTestDebug?: unknown };
     if (win.dagHitTestDebug) delete win.dagHitTestDebug;
+    this.chatlogTerm?.dispose();
+    this.chatlogTerm = null;
     this.renderer.dispose();
   }
 

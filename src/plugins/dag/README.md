@@ -1,10 +1,13 @@
 # Log 2026-02-16 13:36:14 -0800
 
-- Domain terms are standardized for DAG `src_v3`: `menu`, `thumb`, `legend`, and primary overlay (`stage` or `table`) are the section overlay model.
+- Domain terms are standardized for DAG `src_v3`: overlays are `menu`, `thumbs`, `legend`, optional `chatlog`; underlay is `stage` or `table`; together they compose a section.
 - `Nested` now refers to layers: a node may own many nested layers; each nested layer has exactly one parent node; each layer has many nodes.
 - Layer open/close behavior is model language, not implementation detail:
   - opening a layer shows that layer above the parent in the 3D stack
-  - closing a layer hides that layer, removes those layer nodes from history, and moves camera focus to the parent node
+  - closing a layer hides that layer, removes those layer nodes from history, and keeps parent-node context in focus
+- Thumb controls are mode-based in `src_v3`:
+  - bottom-right `DAG Mode` button is always visible and cycles `graph -> layer -> camera`
+  - thumb labels/actions update from currently selected node context
 - Dev/test language updates:
   - `dag dev src_v3` reuses existing dev server/session when possible
   - `dag test src_v3 --attach` reuses the running headed dev browser session for visible playback
@@ -37,46 +40,50 @@ Use these terms consistently in code, tests, and docs.
 - `Layer`: one DAG plane of nodes and edges. `root` is the top layer.
 - `Nested Layer`: a layer owned by a parent node in another layer.
 - `Parent Node`: node that owns/anchors nested layers.
-- `History`: stack of layer snapshots used for open/close layer transitions (`DAG Nest` / `DAG Back`).
+- `History`: stack of layer navigation snapshots used when going back to parent layers.
 - `Selection History`: recent node picks in current workflow order (most recent first).
 - `Output Node` / `Input Node`: for a directed edge `output -> input`.
 - `Rank`: horizontal column index; graph renders left-to-right by rank.
 - `Row`: vertical slot within a rank.
-- `Visible Layer Set`: active layer + nested layers whose parent nodes are still present in node selection history.
+- `Visible Layer Set`: root + active layer + nested layers explicitly marked open.
 - Model rule: a node may own many nested layers; each layer has exactly one parent node; each layer can contain many nodes.
 
 ## UI Language (Buttons + Inputs)
 
-Use this overlay language across docs/code/tests:
+Use this section language across docs/code/tests:
 
+- Overlays:
 - `menu`: global section navigation overlay.
-- `stage`: the visualization surface (for DAG, the Three.js canvas).
-- `thumb`: button/input controls (includes the rename input).
+- `thumbs`: button/input controls (includes the rename input).
 - `legend`: non-interactive helper area (history, stats, logs, status).
+- `chatlog` (optional): context thought feed above thumbs (xterm overlay, no background).
+- Underlays (exactly one per section):
+- `stage`: visualization surface (for DAG `three`, the Three.js canvas).
+- `table`: query-backed table surface (for DAG `dag-table`).
+- `docs` | `xterm` | `video`: available underlay kinds for other section types.
 
-Each section should be modeled with four overlays:
-- `menu` (global)
-- `thumb`
-- `legend`
-- one primary overlay kind (`stage` for DAG `three`, `table` for DAG `dag-table`; other UIs may use `xterm` or `docs`)
+Section formula: one underlay + overlays = one section.
 
 Menu behavior:
 
-- opening `menu` hides current-section `thumb`;
+- opening `menu` hides current-section `thumbs`;
 - `menu` is a fullscreen modal;
 - menu button layout uses CSS grid;
 - modal menu content targets minimum width `400px` (clamped to viewport);
 - menu buttons are centered vertically.
 
-Three-stage controls are driven by exact `aria-label` values.
+Three-stage controls are mode-driven, with a persistent `DAG Mode` button.
 
 Primary actions:
 
-- `DAG Back`: close current opened nested layer if layer history exists; otherwise pop node selection history.
+- `DAG Mode` (always bottom-right): cycle thumb mode between `graph`, `layer`, and `camera`.
+- `DAG Back`: go to parent layer if navigation history exists; otherwise pop node selection history.
 - `DAG Add`: create node in active layer.
-- `DAG Connect`: create edge from second-most-recent selected node to most-recent selected node.
-- `DAG Unlink`: remove that specific directed edge.
-- `DAG Nest`: create/open nested layer from selected node.
+- `DAG Link|Unlink`: one context button; links or unlinks the current selection pair based on existing edge state.
+- `DAG Open|Close Layer`: one context button bound to the selected node:
+  - shows `Close Layer` when that selected node’s nested layer is currently open
+  - shows `Open Layer` when it is currently closed
+  - expected close flow: use `DAG Back` until at parent node, then `Close Layer`
 - `DAG Clear Picks`: clear current node selection + selection history.
 
 Camera actions:
@@ -90,26 +97,38 @@ Label actions:
 - `DAG Label Input`: text for selected node label.
 - `DAG Rename`: apply label rename to selected node.
 
+Mode semantics:
+
+- `graph`: add, back, link|unlink, clear picks, open|close layer, rename, focus, label visibility.
+- `layer`: layer open|close first, plus add/back/clear/focus/rename helpers.
+- `camera`: Z/ISO/SIDE camera controls plus focus, labels, and layer open|close.
+
 Display semantics:
 
 - Legend history panel shows last 5 selected nodes (most recent first).
 - Node history title includes layer status as `current/visible`.
-- Most recent node color: light blue.
+- Most recent node color: glowing white.
 - Second-most-recent node color: blue.
 - Older nodes: gray.
+- Chatlog overlay (xterm) sits above thumbs:
+  - appends one line per test thought
+  - newest line is on bottom; older lines push upward
+  - max visible window is 5 lines
+  - older lines fade; lines beyond 5 are dropped
 
 ## Interaction Rules
 
 - Link/unlink always use selection history pair order.
 - Creating an edge enforces rank rule:
   - if input rank `<=` any output rank feeding it, input moves to `max(output_rank)+1`.
-- Nested visibility is history-driven:
-  - active layer is visible;
-  - nested layer is visible only while its parent node remains in selection history.
-- Closing a layer:
-  - hides the closed layer;
-  - removes nodes from that layer out of node selection history;
-  - moves camera focus to the closed layer's parent node.
+- Nested visibility is explicit:
+  - root layer remains visible
+  - active layer remains visible
+  - nested layers remain visible while marked open
+- Closing a nested layer:
+  - hide the selected parent node’s nested layer
+  - remove nodes from that layer out of node selection history
+  - button text for that selected parent flips from `Close Layer` to `Open Layer`
 - Selecting a node re-centers camera on that node while preserving current camera style offset.
 
 ## Folder Map (Where To Edit)

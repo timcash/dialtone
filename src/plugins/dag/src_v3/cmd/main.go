@@ -76,9 +76,11 @@ func queryDagTableRows(dbPath string) ([]tableRow, error) {
 	}
 	defer db.Close()
 
+	if err := ensureDuckPGQLoaded(db); err != nil {
+		return nil, err
+	}
+
 	statements := []string{
-		`INSTALL duckpgq FROM community;`,
-		`LOAD duckpgq;`,
 		`CREATE OR REPLACE PROPERTY GRAPH dag_pg
 			VERTEX TABLES (
 				dag_node
@@ -145,4 +147,17 @@ func queryDagTableRows(dbPath string) ([]tableRow, error) {
 	}
 
 	return rows, nil
+}
+
+func ensureDuckPGQLoaded(db *sql.DB) error {
+	if _, err := db.Exec(`LOAD duckpgq;`); err == nil {
+		return nil
+	}
+	if _, err := db.Exec(`INSTALL duckpgq FROM community;`); err != nil {
+		return fmt.Errorf("duckpgq install failed: %w", err)
+	}
+	if _, err := db.Exec(`LOAD duckpgq;`); err != nil {
+		return fmt.Errorf("duckpgq load failed: %w", err)
+	}
+	return nil
 }

@@ -47,7 +47,16 @@ menu.addButton('Hero Toy', () => loadSection('dag-hero', true), true)
 menu.addButton('How It Works', () => loadSection('dag-docs', true))
 menu.addButton('Layer Nest', () => loadSection('dag-layer-nest', true))
 
+const ACTIVE_SECTION_STORAGE_KEY = 'dag_src_v1_active_section'
+const defaultSection = 'dag-layer-nest'
 const initialHash = window.location.hash.slice(1)
+const initialStoredSection = (() => {
+  try {
+    return window.sessionStorage.getItem(ACTIVE_SECTION_STORAGE_KEY) || ''
+  } catch {
+    return ''
+  }
+})()
 let isProgrammaticScroll = false
 let programmaticScrollTimeout: number | null = null
 
@@ -63,9 +72,14 @@ const loadSection = (id: string, smooth = false) => {
         el.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' })
         programmaticScrollTimeout = window.setTimeout(() => {
           isProgrammaticScroll = false
-          programmaticScrollTimeout = null
+        programmaticScrollTimeout = null
         }, 3000)
       })
+    }
+    try {
+      window.sessionStorage.setItem(ACTIVE_SECTION_STORAGE_KEY, id)
+    } catch {
+      // noop
     }
     return true
   }
@@ -74,8 +88,8 @@ const loadSection = (id: string, smooth = false) => {
 
 ;(window as any).navigateTo = (id: string) => loadSection(id, true)
 
-if (!loadSection(initialHash)) {
-  sections.eagerLoad('dag-hero')
+if (!loadSection(initialHash || initialStoredSection || defaultSection)) {
+  sections.eagerLoad(defaultSection)
 }
 
 window.addEventListener('hashchange', () => {
@@ -100,6 +114,11 @@ const hashObserver = new IntersectionObserver(
     }
     if (best && location.hash.slice(1) !== best.id) {
       history.replaceState(null, '', '#' + best.id)
+      try {
+        window.sessionStorage.setItem(ACTIVE_SECTION_STORAGE_KEY, best.id)
+      } catch {
+        // noop
+      }
     }
   },
   { threshold: [0.5, 0.75, 1] }
