@@ -1,5 +1,21 @@
 # Robot Plugin
 
+```bash
+# QUICK START: All lifecycle commands (Must be validated)
+./dialtone.sh robot install src_v1                 # Install UI dependencies
+./dialtone.sh robot local-web-remote-robot src_v1  # Live UI with remote robot data
+./dialtone.sh robot test src_v1                    # Run automated test suite
+./dialtone.sh robot test src_v1 --attach           # Run tests and watch in browser
+./dialtone.sh robot build src_v1                   # Build UI assets
+./dialtone.sh robot build src_v1 --remote          # Sync and build on remote robot
+./dialtone.sh robot serve src_v1                   # Serve built UI locally
+./dialtone.sh robot sync-code src_v1               # Sync source code to robot
+./dialtone.sh robot deploy src_v1                  # Build and ship to remote robot
+./dialtone.sh robot deploy src_v1 --service        # Deploy as systemd service
+./dialtone.sh robot deploy src_v1 --proxy          # Deploy with Cloudflare proxy
+./dialtone.sh robot diagnostic src_v1              # Verify live robot UI/telemetry
+```
+
 The `robot` plugin is the central hub for all robot-specific logic, including MAVLink telemetry integration, NATS messaging, and the mobile-optimized 3D dashboard. 
 
 The plugin is designed to be **self-contained**, minimizing dependencies on the Dialtone `core` by encapsulating build, installation, and deployment logic within versioned source directories (`src_v1`, etc.).
@@ -40,7 +56,19 @@ Compile the UI assets and run the Go server locally.
 ./dialtone.sh robot serve src_v1
 ```
 
-### 5. Deployment
+### 5. Remote Source Sync (Optional)
+Sync the project source code to the robot to perform native builds on the hardware itself. This is useful for debugging CGO issues or if the cross-compilation environment is unavailable.
+```bash
+./dialtone.sh robot sync-code src_v1
+```
+
+### 6. Remote Build
+Build the optimized binary directly on the remote robot. This command will first synchronize the necessary source code and then execute the build process on the robot via SSH.
+```bash
+./dialtone.sh robot build src_v1 --remote
+```
+
+### 7. Deployment
 Build the optimized binary, auto-bump the UI version, and ship to the remote robot.
 ```bash
 # Standard background deployment
