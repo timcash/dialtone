@@ -354,6 +354,17 @@ class PolicySimVisualization {
   orbitSpeed = 0.08;
   private globeRadius = 3;
   private nodeRadius = 3.4;
+  private cameraZoomBias = 0;
+  private cameraTuning = {
+    mobileY: 2.5,
+    mobileZ: 16.5,
+    wideY: 2.15,
+    wideZ: 10.8,
+    wideStartAspect: 1.25,
+    wideEndAspect: 2.2,
+    minZ: 8.6,
+    maxZ: 18.5,
+  };
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -369,8 +380,8 @@ class PolicySimVisualization {
     canvas.style.height = "100%";
     this.container.appendChild(canvas);
 
-    // MOBILE OPTIMIZATION: Pull camera back (from 10 to 16.5)
-    this.camera.position.set(0, 2.5, 16.5);
+    // Keep mobile framing stable; widescreen gets progressive zoom-in via resize().
+    this.camera.position.set(0, this.cameraTuning.mobileY, this.cameraTuning.mobileZ);
     this.camera.lookAt(0, 0, 0);
 
     this.scene.add(this.camera);
@@ -396,6 +407,42 @@ class PolicySimVisualization {
     } else {
       window.addEventListener("resize", this.resize);
     }
+  }
+
+  private applyResponsiveCamera(width: number, height: number): void {
+    const aspect = width / Math.max(1, height);
+    const tBase = (aspect - this.cameraTuning.wideStartAspect) / (this.cameraTuning.wideEndAspect - this.cameraTuning.wideStartAspect);
+    const t = THREE.MathUtils.clamp(tBase, 0, 1);
+    const mobileY = this.cameraTuning.mobileY;
+    const mobileZ = this.cameraTuning.mobileZ;
+    const wideY = this.cameraTuning.wideY;
+    const wideZ = this.cameraTuning.wideZ;
+
+    const y = THREE.MathUtils.lerp(mobileY, wideY, t);
+    let z = THREE.MathUtils.lerp(mobileZ, wideZ, t);
+    z *= 1 - this.cameraZoomBias;
+    z = THREE.MathUtils.clamp(z, this.cameraTuning.minZ, this.cameraTuning.maxZ);
+
+    this.camera.position.set(0, y, z);
+    this.camera.lookAt(0, 0, 0);
+  }
+
+  getCameraZoomBias(): number {
+    return this.cameraZoomBias;
+  }
+
+  setCameraZoomBias(value: number): void {
+    this.cameraZoomBias = THREE.MathUtils.clamp(value, -0.5, 0.5);
+    this.resize();
+  }
+
+  getCameraTuning(): Readonly<typeof this.cameraTuning> {
+    return { ...this.cameraTuning };
+  }
+
+  setCameraTuning(next: Partial<typeof this.cameraTuning>): void {
+    this.cameraTuning = { ...this.cameraTuning, ...next };
+    this.resize();
   }
 
   private initGlobe() {
@@ -849,6 +896,7 @@ class PolicySimVisualization {
     const rect = this.container.getBoundingClientRect();
     const width = Math.max(1, rect.width);
     const height = Math.max(1, rect.height);
+    this.applyResponsiveCamera(width, height);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height, false);
@@ -953,6 +1001,12 @@ export function mountPolicy(container: HTMLElement, sections: SectionManager): V
 
   sections.setLoadingMessage("s-policy", "loading markov scenarios ...");
   const viz = new PolicySimVisualization(container);
+  (window as Window & { policyCamera?: unknown }).policyCamera = {
+    get: () => ({ zoomBias: viz.getCameraZoomBias(), tuning: viz.getCameraTuning() }),
+    setZoomBias: (v: number) => viz.setCameraZoomBias(v),
+    setTuning: (next: Partial<ReturnType<typeof viz.getCameraTuning>>) => viz.setCameraTuning(next),
+    apply: () => viz.resize(),
+  };
 
   if (import.meta.env.DEV) {
     const defaultScenarioDomains = POLICY_SCENARIOS[POLICY_PRESETS[0].scenarioId].domains;
@@ -970,6 +1024,7 @@ export function mountPolicy(container: HTMLElement, sections: SectionManager): V
       activePresetId: viz.getActivePreset().id,
       orbitSpeed: viz.orbitSpeed,
       volatility: viz.getVolatility(),
+      cameraZoomBias: viz.getCameraZoomBias(),
       monteCarloVisible: viz.getMonteCarloVisible(),
       summaryText: viz.getSummaryText(),
       onPresetChange: (presetId: string) => {
@@ -985,6 +1040,9 @@ export function mountPolicy(container: HTMLElement, sections: SectionManager): V
         viz.setVolatility(value);
         refreshMenu();
       },
+      onCameraZoomBiasChange: (value: number) => {
+        viz.setCameraZoomBias(value);
+      },
       onToggleMonteCarlo: () => {
         viz.setMonteCarloVisible(!viz.getMonteCarloVisible());
         refreshMenu();
@@ -994,6 +1052,8 @@ export function mountPolicy(container: HTMLElement, sections: SectionManager): V
 
   return {
     dispose: () => {
+      const win = window as Window & { policyCamera?: unknown };
+      if (win.policyCamera) delete win.policyCamera;
       viz.dispose();
       stopTyping();
       container.innerHTML = "";
