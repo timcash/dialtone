@@ -37,7 +37,11 @@ It provides:
 - `BrowserSession`
   - wraps chromedp context + Chrome plugin session metadata (`isNew`).
 - `Step`
-  - `Name`, `Run`, `SectionID`, `Screenshot`, `Screenshots`, `ScreenshotGrid`, `Timeout`.
+  - `Name`, `Run` or `RunWithContext`, `SectionID`, `Screenshot`, `Screenshots`, `ScreenshotGrid`, `Timeout`.
+- `StepContext`
+  - `Name`, `Started` (per-step metadata passed into `RunWithContext`).
+- `StepRunResult`
+  - `Report`: markdown text added to the step section in `TEST.md` as "Step Story".
 - `SuiteOptions`
   - `Version`, `ReportPath`, `LogPath`, `ErrorLogPath`.
 
@@ -62,7 +66,7 @@ Important:
 For each step:
 
 1. Starts step log capture.
-2. Runs `Step.Run()` in a goroutine with timeout (default `30s`).
+2. Runs `Step.Run()` or `Step.RunWithContext(...)` in a goroutine with timeout (default `30s`).
 3. Captures stdout/stderr and prefixes lines with elapsed tags (`[T+0001]`).
 4. Collects browser console entries during the step window.
 5. On failure: writes report + returns immediately.
@@ -78,6 +82,7 @@ Generated markdown includes:
 - Step summary table.
 - Per-step:
   - result/duration/section/error
+  - optional step story text (from `StepRunResult.Report`)
   - runner output
   - filtered browser logs (by `SectionID` token `#<section>`)
   - browser errors block when present

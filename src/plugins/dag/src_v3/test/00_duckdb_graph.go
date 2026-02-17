@@ -8,10 +8,10 @@ import (
 	_ "github.com/marcboeker/go-duckdb"
 )
 
-func Run01DuckDBGraphQueries() error {
+func Run01DuckDBGraphQueries(_ *testCtx) (string, error) {
 	db, err := sql.Open("duckdb", "")
 	if err != nil {
-		return fmt.Errorf("open duckdb: %w", err)
+		return "", fmt.Errorf("open duckdb: %w", err)
 	}
 	defer db.Close()
 
@@ -56,7 +56,7 @@ func Run01DuckDBGraphQueries() error {
 
 	for _, stmt := range statements {
 		if _, err := db.Exec(stmt); err != nil {
-			return fmt.Errorf("duckdb statement failed: %s: %w", stmt, err)
+			return "", fmt.Errorf("duckdb statement failed: %s: %w", stmt, err)
 		}
 	}
 
@@ -69,10 +69,10 @@ func Run01DuckDBGraphQueries() error {
 			COLUMNS (a.node_id AS src, b.node_id AS dst)
 		);
 	`).Scan(&edgeCount); err != nil {
-		return fmt.Errorf("graph edge match query failed: %w", err)
+		return "", fmt.Errorf("graph edge match query failed: %w", err)
 	}
 	if edgeCount != 7 {
-		return fmt.Errorf("expected 7 graph edges from GRAPH_TABLE, got %d", edgeCount)
+		return "", fmt.Errorf("expected 7 graph edges from GRAPH_TABLE, got %d", edgeCount)
 	}
 
 	var hops int
@@ -86,10 +86,10 @@ func Run01DuckDBGraphQueries() error {
 		)
 		LIMIT 1;
 	`).Scan(&hops); err != nil {
-		return fmt.Errorf("shortest-path query failed: %w", err)
+		return "", fmt.Errorf("shortest-path query failed: %w", err)
 	}
 	if hops != 2 {
-		return fmt.Errorf("expected shortest path hops=2, got %d", hops)
+		return "", fmt.Errorf("expected shortest path hops=2, got %d", hops)
 	}
 
 	var rankViolations int
@@ -101,10 +101,10 @@ func Run01DuckDBGraphQueries() error {
 		JOIN dag_node n_to ON n_to.node_id = e.to_node_id
 		WHERE n_to.rank <= n_from.rank;
 	`).Scan(&rankViolations); err != nil {
-		return fmt.Errorf("rank validation query failed: %w", err)
+		return "", fmt.Errorf("rank validation query failed: %w", err)
 	}
 	if rankViolations != 0 {
-		return fmt.Errorf("expected 0 rank violations, got %d", rankViolations)
+		return "", fmt.Errorf("expected 0 rank violations, got %d", rankViolations)
 	}
 
 	// UI action: given a node, find all nested nodes (nodes inside its nested layers, recursively).
@@ -127,10 +127,10 @@ func Run01DuckDBGraphQueries() error {
 		ORDER BY n.node_id;
 	`)
 	if err != nil {
-		return fmt.Errorf("nested-node query failed: %w", err)
+		return "", fmt.Errorf("nested-node query failed: %w", err)
 	}
 	if err := assertStringSetEquals("nested nodes for n_mid_a", nestedNodes, []string{"n_nested_1", "n_nested_2", "n_nested_3"}); err != nil {
-		return err
+		return "", err
 	}
 
 	// UI action: given a node, find all input nodes (edges pointing into the node).
@@ -145,10 +145,10 @@ func Run01DuckDBGraphQueries() error {
 		ORDER BY input_node;
 	`)
 	if err != nil {
-		return fmt.Errorf("input-node query failed: %w", err)
+		return "", fmt.Errorf("input-node query failed: %w", err)
 	}
 	if err := assertStringSetEquals("input nodes for n_leaf", inputNodes, []string{"n_mid_a", "n_mid_b"}); err != nil {
-		return err
+		return "", err
 	}
 
 	// UI action: given a node, find all output nodes (edges pointing out of the node).
@@ -163,13 +163,13 @@ func Run01DuckDBGraphQueries() error {
 		ORDER BY output_node;
 	`)
 	if err != nil {
-		return fmt.Errorf("output-node query failed: %w", err)
+		return "", fmt.Errorf("output-node query failed: %w", err)
 	}
 	if err := assertStringSetEquals("output nodes for n_root", outputNodes, []string{"n_mid_a", "n_mid_b"}); err != nil {
-		return err
+		return "", err
 	}
 
-	return nil
+	return "Validated core DAG graph queries in DuckDB/duckpgq for edge count, shortest path, rank rules, and input/output nested-node derivations.", nil
 }
 
 func queryStringList(db *sql.DB, query string) ([]string, error) {

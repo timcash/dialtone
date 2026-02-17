@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -57,7 +59,7 @@ func RunDev(versionDir string) error {
 		}
 
 		logf("   [DEV] Dev server already running at %s", devURL)
-		logf("   [DEV] Reopening/attaching debug browser...")
+		logf("   [DEV] Opening dev URL in regular browser...")
 		if _, err := startDagDevBrowser(logOut, devURL, devBrowserMetaPath); err != nil {
 			return err
 		}
@@ -85,7 +87,7 @@ func RunDev(versionDir string) error {
 		}
 
 		logf("   [DEV] Vite ready at %s", devURL)
-		logf("   [DEV] Launching debug browser (HEADED) with console capture...")
+		logf("   [DEV] Opening dev URL in regular browser...")
 
 		s, err := startDagDevBrowser(logOut, devURL, devBrowserMetaPath)
 		if err != nil {
@@ -118,9 +120,31 @@ func startDagDevBrowser(logOut io.Writer, devURL, devBrowserMetaPath string) (*t
 		fmt.Fprintf(logOut, format+"\n", args...)
 	}
 
+	browserMode := os.Getenv("DAG_DEV_BROWSER_MODE")
+	regularMode := browserMode == "regular"
+	if regularMode {
+		openErr := openInRegularChrome(devURL)
+		if openErr == nil {
+			logf("   [DEV] Opened URL in regular browser profile: %s", devURL)
+			logf("   [DEV] Skipping Dialtone-managed browser metadata/emulation in regular browser mode.")
+			return nil, nil
+		}
+		if isRegularChromeLikelyRunning() {
+			return nil, fmt.Errorf("failed to attach to your running Chrome session (%v). close Chrome and rerun `./dialtone.sh dag dev src_v3` so Dialtone can launch it directly", openErr)
+		}
+		logf("   [DEV] Could not open regular browser (%v); launching managed dev browser fallback.", openErr)
+	} else {
+		logf("   [DEV] Starting attachable debug-profile browser session (set DAG_DEV_BROWSER_MODE=regular to disable).")
+		if err := ensureAttachableDagDevBrowserForDev(logf, devURL); err != nil {
+			return nil, err
+		}
+		logf("   [DEV] Debug-profile browser flow active; skipping managed browser session attach.")
+		return nil, nil
+	}
+
 	s, err := test_v2.StartBrowser(test_v2.BrowserOptions{
 		Headless:      false,
-		Role:          "dev",
+		Role:          "dag-dev",
 		ReuseExisting: true,
 		URL:           devURL,
 		LogWriter:     logOut,
@@ -130,7 +154,7 @@ func startDagDevBrowser(logOut io.Writer, devURL, devBrowserMetaPath string) (*t
 		logf("   [DEV] Warning: reuse attach failed, launching fresh dev browser: %v", err)
 		s, err = test_v2.StartBrowser(test_v2.BrowserOptions{
 			Headless:      false,
-			Role:          "dev",
+			Role:          "dag-dev",
 			ReuseExisting: false,
 			URL:           devURL,
 			LogWriter:     logOut,
@@ -162,4 +186,59 @@ func startDagDevBrowser(logOut io.Writer, devURL, devBrowserMetaPath string) (*t
 		logf("   [DEV] Applied mobile emulation: iPhone 14 Pro (393x852 @3x)")
 	}
 	return s, nil
+}
+
+func ensureAttachableDagDevBrowserForDev(logf func(string, ...any), url string) error {
+	if hasReachableDevtoolsWebSocket(9222) {
+		logf("   [DEV] Reusing existing debug endpoint on :9222.")
+		_ = openInRegularChrome(url)
+		return nil
+	}
+	logf("   [DEV] Launching debug-profile Chrome on :9222 with dag-dev role...")
+	if err := relaunchProfileChromeDebug(url); err != nil {
+		return fmt.Errorf("failed to launch debug-profile Chrome: %w", err)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if hasReachableDevtoolsWebSocket(9222) {
+			logf("   [DEV] Debug endpoint on :9222 is ready.")
+			return nil
+		}
+		time.Sleep(400 * time.Millisecond)
+	}
+	logf("   [DEV] Warning: debug endpoint :9222 not observed after relaunch, opening URL in regular Chrome fallback.")
+	return openInRegularChrome(url)
+}
+
+func openInRegularChrome(url string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("osascript", "-e", fmt.Sprintf(`tell application "Google Chrome" to open location %q`, url)).Run()
+	case "linux":
+		return exec.Command("xdg-open", url).Run()
+	case "windows":
+		return exec.Command("cmd", "/c", "start", "", "chrome", url).Run()
+	default:
+		return fmt.Errorf("unsupported OS for regular browser open: %s", runtime.GOOS)
+	}
+}
+
+func isRegularChromeLikelyRunning() bool {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("pgrep", "-x", "Google Chrome").Run() == nil
+	case "linux":
+		if exec.Command("pgrep", "-x", "google-chrome").Run() == nil {
+			return true
+		}
+		if exec.Command("pgrep", "-x", "chrome").Run() == nil {
+			return true
+		}
+		if exec.Command("pgrep", "-x", "chromium").Run() == nil {
+			return true
+		}
+		return false
+	default:
+		return false
+	}
 }

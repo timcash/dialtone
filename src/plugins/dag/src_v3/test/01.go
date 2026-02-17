@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 )
 
-func Run01Preflight() error {
+func Run01Preflight(_ *testCtx) (string, error) {
 	repoRoot, err := os.Getwd()
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	commands := [][]string{
@@ -28,9 +28,9 @@ func Run01Preflight() error {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			return err
+			return "", err
 		}
 	}
 
-	return nil
+	return "Ran preflight pipeline (`fmt`, `vet`, `go-build`, `install`, `lint`, `format`, `build`) to verify toolchain and UI build health before browser steps.", nil
 }

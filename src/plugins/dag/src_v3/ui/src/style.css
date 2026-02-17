@@ -64,7 +64,7 @@ nav > button.thumb {
 }
 
 canvas[aria-label='Three Canvas'] {
-  width: 100%;
+  width: 100vw;
   height: 100vh;
   border: 0;
   border-radius: 0;
@@ -115,9 +115,12 @@ canvas[aria-label='Three Canvas'] {
   border: 1px solid rgba(255, 255, 255, 0.35);
 }
 
-.swatch.recent-1 { background: #7dd3fc; }
+.swatch.recent-1 {
+  background: #f3f8ff;
+  box-shadow: 0 0 10px rgba(242, 248, 255, 0.95);
+}
 .swatch.recent-2 { background: #2b78ff; }
-.swatch.history { background: #5b6873; }
+.swatch.history { background: #475261; }
 
 .dag-controls {
   position: absolute;
@@ -128,11 +131,48 @@ canvas[aria-label='Three Canvas'] {
   bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
   display: grid;
   grid-template-columns: repeat(3, minmax(56px, 1fr));
-  grid-template-rows: repeat(3, minmax(56px, auto)) 46px;
+  grid-template-rows: 86px repeat(3, minmax(56px, auto)) 46px;
   gap: 12px;
   z-index: 11;
   pointer-events: auto;
 }
+
+.dag-chatlog {
+  grid-row: 1;
+  grid-column: 1 / span 3;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  background: transparent;
+}
+
+.dag-chatlog-xterm,
+.dag-chatlog-xterm .xterm,
+.dag-chatlog-xterm .xterm-viewport,
+.dag-chatlog-xterm .xterm-screen,
+.dag-chatlog-xterm .xterm-rows {
+  width: 100%;
+  height: 100%;
+  background: transparent !important;
+}
+
+.dag-chatlog-xterm .xterm-viewport {
+  overflow: hidden !important;
+}
+
+.dag-chatlog-xterm .xterm-rows > div {
+  color: #a7adb7;
+  font-size: 12px;
+  line-height: 1.35;
+  opacity: 0.3;
+  transition: opacity 220ms ease;
+}
+
+.dag-chatlog-xterm .xterm-rows > div:nth-last-child(1) { opacity: 0.98; }
+.dag-chatlog-xterm .xterm-rows > div:nth-last-child(2) { opacity: 0.72; }
+.dag-chatlog-xterm .xterm-rows > div:nth-last-child(3) { opacity: 0.56; }
+.dag-chatlog-xterm .xterm-rows > div:nth-last-child(4) { opacity: 0.42; }
+.dag-chatlog-xterm .xterm-rows > div:nth-last-child(5) { opacity: 0.3; }
 
 .dag-controls > .dag-thumb {
   width: 100%;
@@ -149,15 +189,14 @@ canvas[aria-label='Three Canvas'] {
   touch-action: manipulation;
 }
 
-.dag-controls > .dag-thumb.dag-camera-btn[aria-pressed='true'],
-.dag-controls > .dag-thumb.dag-camera-btn.is-active {
+.dag-controls > .dag-thumb.is-active {
   border-color: rgba(125, 211, 252, 0.95);
   box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.8), inset 0 0 16px rgba(43, 120, 255, 0.42);
   background: rgba(8, 20, 34, 0.72);
 }
 
 .dag-controls > .dag-label-input {
-  grid-row: 4;
+  grid-row: 5;
   grid-column: 1 / span 2;
   width: 100%;
   height: 46px;
@@ -168,8 +207,13 @@ canvas[aria-label='Three Canvas'] {
   padding: 0 12px;
 }
 
+.dag-controls > .dag-mode-thumb {
+  border-color: rgba(147, 197, 253, 0.85);
+  background: rgba(5, 19, 42, 0.72);
+}
+
 .dag-controls > .dag-rename-btn {
-  grid-row: 4;
+  grid-row: 5;
   grid-column: 3;
   width: 100%;
   height: 46px;
