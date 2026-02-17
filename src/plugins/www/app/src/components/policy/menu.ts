@@ -6,11 +6,13 @@ type PolicyMenuOptions = {
   activePresetId: string;
   orbitSpeed: number;
   volatility: number;
+  cameraZoomBias: number;
   monteCarloVisible: boolean;
   summaryText: string;
   onPresetChange: (presetId: string) => void;
   onOrbitSpeedChange: (value: number) => void;
   onVolatilityChange: (value: number) => void;
+  onCameraZoomBiasChange: (value: number) => void;
   onToggleMonteCarlo: () => void;
 };
 
@@ -52,6 +54,16 @@ export function setupPolicyMenu(options: PolicyMenuOptions): void {
     0.05,
     options.onVolatilityChange,
     (v) => v.toFixed(2),
+  );
+
+  menu.addSlider(
+    "Camera Zoom",
+    options.cameraZoomBias,
+    -0.5,
+    0.5,
+    0.01,
+    options.onCameraZoomBiasChange,
+    (v) => (v >= 0 ? `+${v.toFixed(2)}` : v.toFixed(2)),
   );
 
   menu.addHeader("Run");

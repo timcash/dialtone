@@ -2,6 +2,14 @@ import './../style.css';
 import { SectionManager } from './components/util/section';
 import { Menu } from './components/util/menu';
 
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        void navigator.serviceWorker.register('/sw.js').catch((err) => {
+            console.error('[pwa] failed to register service worker', err);
+        });
+    });
+}
+
 // Create section manager for lazy loading Three.js components
 const sections = new SectionManager();
 (window as any).sections = sections;
