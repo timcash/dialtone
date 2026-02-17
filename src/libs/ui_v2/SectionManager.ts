@@ -134,21 +134,21 @@ export class SectionManager {
       this.overlays.set(sectionId, overlays);
       return;
     }
-    const primaryEl = section.querySelector(selectors.primary);
+    const primaryEl = selectors.primary ? section.querySelector(selectors.primary) : null;
     if (primaryEl instanceof HTMLElement) {
       primaryEl.setAttribute('data-overlay', selectors.primaryKind);
       primaryEl.setAttribute('data-overlay-role', 'primary');
       primaryEl.setAttribute('data-overlay-section', sectionId);
       overlays.primary = primaryEl;
     }
-    const thumbEl = section.querySelector(selectors.thumb);
+    const thumbEl = selectors.thumb ? section.querySelector(selectors.thumb) : null;
     if (thumbEl instanceof HTMLElement) {
       thumbEl.setAttribute('data-overlay', 'thumb');
       thumbEl.setAttribute('data-overlay-role', 'thumb');
       thumbEl.setAttribute('data-overlay-section', sectionId);
       overlays.thumb = thumbEl;
     }
-    const legendEl = section.querySelector(selectors.legend);
+    const legendEl = selectors.legend ? section.querySelector(selectors.legend) : null;
     if (legendEl instanceof HTMLElement) {
       legendEl.setAttribute('data-overlay', 'legend');
       legendEl.setAttribute('data-overlay-role', 'legend');

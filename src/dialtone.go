@@ -55,7 +55,7 @@ func printUsage() {
 	fmt.Println("Usage: dialtone <command> [options]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  start         Start the robot services (NATS, Web, Mavlink)")
-	fmt.Println("  robot         Robot plugin commands (deploy, sync-code, test)")
+	fmt.Println("  robot         Robot plugin commands (test, build, deploy, etc)")
 	fmt.Println("  vpn           VPN plugin commands")
 	fmt.Println("  nix           Nix plugin commands")
 	fmt.Println("  dag           DAG plugin commands")

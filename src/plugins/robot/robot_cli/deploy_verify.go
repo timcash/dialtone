@@ -136,6 +136,123 @@ func main() {
 		return fmt.Errorf("Step 3 failed: %w", err)
 	}
 
+	// --- STEP 4: TSNET + NATS PUB/SUB ---
+	logger.LogInfo("[DEPLOY-TEST] Step 4: Verifying NATS Messaging (Pub/Sub)...")
+	natsPubSubSrc := fmt.Sprintf(`package main
+import (
+	"context"
+	"fmt"
+	"os"
+	"time"
+	"tailscale.com/tsnet"
+	"github.com/nats-io/nats-server/v2/server"
+	"github.com/nats-io/nats.go"
+)
+func main() {
+	s := &tsnet.Server{ Hostname: "%s", AuthKey: "%s", Logf: func(string, ...any) {} }
+	if _, err := s.Up(context.Background()); err != nil { fmt.Printf("FAIL TS: %%v\n", err); os.Exit(1) }
+	
+	opts := &server.Options{ Host: "127.0.0.1", Port: 4222 }
+	ns, err := server.NewServer(opts)
+	if err != nil { fmt.Printf("FAIL NATS: %%v\n", err); os.Exit(1) }
+	go ns.Start()
+	if !ns.ReadyForConnections(10 * time.Second) { fmt.Printf("FAIL NATS TIMEOUT\n"); os.Exit(1) }
+
+	nc, err := nats.Connect("nats://127.0.0.1:4222")
+	if err != nil { fmt.Printf("FAIL NATS CONN: %%v\n", err); os.Exit(1) }
+	defer nc.Close()
+
+	sub, err := nc.SubscribeSync("test.subject")
+	if err != nil { fmt.Printf("FAIL NATS SUB: %%v\n", err); os.Exit(1) }
+
+	err = nc.Publish("test.subject", []byte("hello"))
+	if err != nil { fmt.Printf("FAIL NATS PUB: %%v\n", err); os.Exit(1) }
+
+	msg, err := sub.NextMsg(2 * time.Second)
+	if err != nil { fmt.Printf("FAIL NATS RECV: %%v\n", err); os.Exit(1) }
+
+	if string(msg.Data) != "hello" { fmt.Printf("FAIL NATS DATA MISMATCH\n"); os.Exit(1) }
+
+	fmt.Printf("PASS: NATS PUB/SUB OK\n")
+}
+`, hostname, authKey)
+
+	if err := runDebugStep(natsPubSubSrc, tmpDir, targetOS, targetArch, client, remoteDebugPath); err != nil {
+		return fmt.Errorf("Step 4 failed: %w", err)
+	}
+
+	// --- STEP 5: TSNET + WEB + WS TELEMETRY ---
+	logger.LogInfo("[DEPLOY-TEST] Step 5: Verifying WebSocket Telemetry Stream...")
+	wsTelemetrySrc := fmt.Sprintf(`package main
+import (
+	"context"
+	"fmt"
+	"os"
+	"time"
+	"net/http"
+	"strings"
+	"tailscale.com/tsnet"
+	"github.com/nats-io/nats-server/v2/server"
+	"github.com/nats-io/nats.go"
+	"github.com/coder/websocket"
+)
+func main() {
+	s := &tsnet.Server{ Hostname: "%s", AuthKey: "%s", Logf: func(string, ...any) {} }
+	if _, err := s.Up(context.Background()); err != nil { fmt.Printf("FAIL TS: %%v\n", err); os.Exit(1) }
+	
+	natsPort := 4222
+	opts := &server.Options{ Host: "127.0.0.1", Port: natsPort }
+	ns, err := server.NewServer(opts)
+	if err != nil { fmt.Printf("FAIL NATS: %%v\n", err); os.Exit(1) }
+	go ns.Start()
+	if !ns.ReadyForConnections(10 * time.Second) { fmt.Printf("FAIL NATS TIMEOUT\n"); os.Exit(1) }
+
+	// Start a simple version of the server.go WS handler
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil { return }
+		defer c.Close(websocket.StatusInternalError, "closing")
+		nc, _ := nats.Connect("nats://127.0.0.1:4222")
+		defer nc.Close()
+		nc.Subscribe("mavlink.>", func(m *nats.Msg) {
+			c.Write(r.Context(), websocket.MessageText, m.Data)
+		})
+		select { case <-r.Context().Done(): return }
+	})
+	
+	ln, _ := s.Listen("tcp", ":80")
+	go http.Serve(ln, mux)
+
+	// Now try to connect to our own WS and wait for a message
+	time.Sleep(1 * time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10 * time.Second)
+	defer cancel()
+	
+	conn, _, err := websocket.Dial(ctx, "http://localhost:80/ws", &websocket.DialOptions{
+		HTTPClient: s.HTTPClient(),
+	})
+	if err != nil { fmt.Printf("FAIL WS DIAL: %%v\n", err); os.Exit(1) }
+	defer conn.Close(websocket.StatusInternalError, "")
+
+	// Publish a mock mavlink message
+	nc, _ := nats.Connect("nats://127.0.0.1:4222")
+	nc.Publish("mavlink.attitude", []byte("{\"roll\": 0.1}"))
+	nc.Flush()
+
+	_, msg, err := conn.Read(ctx)
+	if err != nil { fmt.Printf("FAIL WS READ: %%v\n", err); os.Exit(1) }
+	
+	if !strings.Contains(string(msg), "roll") { fmt.Printf("FAIL WS DATA: %%s\n", string(msg)); os.Exit(1) }
+
+	fmt.Printf("PASS: WS TELEMETRY OK\n")
+}
+`, hostname, authKey)
+
+	if err := runDebugStep(wsTelemetrySrc, tmpDir, targetOS, targetArch, client, remoteDebugPath); err != nil {
+		return fmt.Errorf("Step 5 failed: %w", err)
+	}
+
 	logger.LogInfo("[DEPLOY-TEST] ALL STEPS PASSED. The robot is ready for full deployment.")
 	return nil
 }

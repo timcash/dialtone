@@ -9,7 +9,7 @@ import (
 	"dialtone/cli/src/core/build"
 )
 
-func Build() error {
+func Build(flags ...string) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -27,6 +27,9 @@ func Build() error {
 
 	robotBinDir := filepath.Join("src", "plugins", "robot", "bin")
 	fmt.Printf(">> [Robot] Building Dialtone Binary into %s\n", robotBinDir)
-	build.RunBuild([]string{"--output-dir", robotBinDir, "--skip-web", "--skip-www"})
+	
+	args := []string{"--output-dir", robotBinDir, "--skip-web", "--skip-www"}
+	args = append(args, flags...)
+	build.RunBuild(args)
 	return nil
 }
