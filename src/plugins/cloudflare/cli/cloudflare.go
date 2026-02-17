@@ -140,6 +140,7 @@ func printCloudflareUsage() {
 func RunSetupService(args []string) {
 	fs := flag.NewFlagSet("setup-service", flag.ExitOnError)
 	name := fs.String("name", os.Getenv("DIALTONE_DOMAIN"), "Cloudflare subdomain/robot name")
+	userMode := fs.Bool("user", false, "Install as user-level service (no sudo)")
 	fs.Parse(args)
 
 	robotName := *name
@@ -164,6 +165,46 @@ func RunSetupService(args []string) {
 	// Determine dependency dir
 	depsDir := config.GetDialtoneEnv()
 
+	// Configure based on mode
+	var servicePath, wantedBy, userLine, installCmd, reloadCmd, enableCmd, restartCmd string
+	var useSudo bool
+
+	if *userMode {
+		// Check for lingering
+		out, err := exec.Command("loginctl", "show-user", user, "--property=Linger").Output()
+		if err == nil {
+			if strings.TrimSpace(string(out)) == "Linger=no" {
+				logger.LogFatal("Error: User lingering is not enabled. Cloudflare proxy service requires lingering to run in the background.\nPlease run: loginctl enable-linger %s", user)
+			}
+		} else {
+			// If loginctl fails, warn but proceed (might be non-systemd environment or permission issue, though unlikely for user query)
+			logger.LogInfo("Warning: Could not verify user lingering status. Ensure it is enabled: loginctl enable-linger %s", user)
+		}
+
+		homeDir, _ := os.UserHomeDir()
+		userSystemdDir := filepath.Join(homeDir, ".config", "systemd", "user")
+		if err := os.MkdirAll(userSystemdDir, 0755); err != nil {
+			logger.LogFatal("Failed to create user systemd dir: %v", err)
+		}
+		servicePath = filepath.Join(userSystemdDir, fmt.Sprintf("dialtone-proxy-%s.service", robotName))
+		wantedBy = "default.target"
+		userLine = "" // User implied in user mode
+		useSudo = false
+		installCmd = fmt.Sprintf("cp %%s %s", servicePath)
+		reloadCmd = "systemctl --user daemon-reload"
+		enableCmd = fmt.Sprintf("systemctl --user enable dialtone-proxy-%s.service", robotName)
+		restartCmd = fmt.Sprintf("systemctl --user restart dialtone-proxy-%s.service", robotName)
+	} else {
+		servicePath = fmt.Sprintf("/etc/systemd/system/dialtone-proxy-%s.service", robotName)
+		wantedBy = "multi-user.target"
+		userLine = fmt.Sprintf("User=%s", user)
+		useSudo = true
+		installCmd = fmt.Sprintf("cp %%s %s", servicePath)
+		reloadCmd = "systemctl daemon-reload"
+		enableCmd = fmt.Sprintf("systemctl enable dialtone-proxy-%s.service", robotName)
+		restartCmd = fmt.Sprintf("systemctl restart dialtone-proxy-%s.service", robotName)
+	}
+
 	serviceTemplate := `[Unit]
 Description=Dialtone Cloudflare Proxy for %s
 After=network.target
@@ -171,17 +212,21 @@ After=network.target
 [Service]
 ExecStart=%s cloudflare robot %s
 WorkingDirectory=%s
-User=%s
+%s
 Environment=DIALTONE_ENV=%s
 Environment=DIALTONE_ENV_FILE=%s
 Restart=always
 RestartSec=10
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=%s
 `
-	serviceContent := fmt.Sprintf(serviceTemplate, robotName, dialtoneSh, robotName, cwd, user, depsDir, filepath.Join(cwd, "env/.env"))
-	servicePath := fmt.Sprintf("/etc/systemd/system/dialtone-proxy-%s.service", robotName)
+	serviceContent := fmt.Sprintf(serviceTemplate, robotName, dialtoneSh, robotName, cwd, userLine, depsDir, filepath.Join(cwd, "env/.env"), wantedBy)
+	
+	// Clean up empty lines if User line is empty
+	if userLine == "" {
+		serviceContent = strings.Replace(serviceContent, "\n\nEnvironment=", "\nEnvironment=", 1)
+	}
 
 	fmt.Printf("Creating systemd service at %s...\n", servicePath)
 
@@ -191,13 +236,23 @@ WantedBy=multi-user.target
 		logger.LogFatal("Failed to write temporary service file: %v", err)
 	}
 
-	config.RunSudoShell(fmt.Sprintf("cp %s %s", tmpFile, servicePath))
-	config.RunSudoShell("systemctl daemon-reload")
-	config.RunSudoShell(fmt.Sprintf("systemctl enable dialtone-proxy-%s.service", robotName))
-	config.RunSudoShell(fmt.Sprintf("systemctl restart dialtone-proxy-%s.service", robotName))
+	runShell := config.RunSimpleShell
+	if useSudo {
+		runShell = config.RunSudoShell
+	}
+
+	runShell(fmt.Sprintf(installCmd, tmpFile))
+	runShell(reloadCmd)
+	runShell(enableCmd)
+	runShell(restartCmd)
 
 	logger.LogInfo("SUCCESS: Cloudflare proxy service for '%s' installed and started.", robotName)
-	logger.LogInfo("Check status with: systemctl status dialtone-proxy-%s.service", robotName)
+	if *userMode {
+		logger.LogInfo("Check status with: systemctl --user status dialtone-proxy-%s.service", robotName)
+		logger.LogInfo("Note: Ensure linger is enabled to keep service running after logout: loginctl enable-linger %s", user)
+	} else {
+		logger.LogInfo("Check status with: systemctl status dialtone-proxy-%s.service", robotName)
+	}
 }
 
 func getLatestVersionDir() string {

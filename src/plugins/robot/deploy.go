@@ -231,9 +231,23 @@ WantedBy=multi-user.target`, remotePath, *hostname, mavlinkFlag, remoteDeployDir
 	// --- POST-DEPLOYMENT STEP-BY-STEP HEALTH CHECKS ---
 	logger.LogInfo("[DEPLOY] Starting post-deployment health checks...")
 	
-	checkPort := 8080
+	// Determine expected internal ports based on mode
+	// start.go: runWithTailscale always listens on 0.0.0.0:8080 locally
+	// start.go: runLocalOnly tries 80, falls back to 8080
+	checkWebPort := 8080
 	if *service || os.Getenv("TS_AUTHKEY") != "" {
-		checkPort = 80
+		// In Tailscale mode, start.go binds 8080 locally for Cloudflare/LAN
+		checkWebPort = 8080
+	} else {
+		// In local-only mode, it might be 80 or 8080. We'll default to 8080 for check safety
+		// or we could try both. Let's assume 8080 for now as it's the fallback.
+		checkWebPort = 8080
+	}
+
+	checkNatsPort := 4222
+	if *service || os.Getenv("TS_AUTHKEY") != "" {
+		// start.go: localNATSPort := port + 10000
+		checkNatsPort = 14222
 	}
 
 	if *service {
@@ -258,11 +272,11 @@ WantedBy=multi-user.target`, remotePath, *hostname, mavlinkFlag, remoteDeployDir
 
 	// 2. Internal Web Health Check (from robot perspective)
 	webTimeout := 20 * time.Second
-	logger.LogInfo("[DEPLOY] Step 2: Internal Web Health Check (Timeout: %v)...", webTimeout)
+	logger.LogInfo("[DEPLOY] Step 2: Internal Web Health Check (http://127.0.0.1:%d/health) (Timeout: %v)...", checkWebPort, webTimeout)
 	webOK := false
 	webStart := time.Now()
 	for time.Since(webStart) < webTimeout {
-		healthCheckCmd := fmt.Sprintf("curl -s -o /dev/null -w \"%%%%{http_code}\" http://127.0.0.1:%d/health", checkPort)
+		healthCheckCmd := fmt.Sprintf("curl -s -o /dev/null -w \"%%{http_code}\" http://127.0.0.1:%d/health", checkWebPort)
 		out, err := core_ssh.RunSSHCommand(client, healthCheckCmd)
 		if err == nil && strings.TrimSpace(out) == "200" {
 			logger.LogInfo("[DEPLOY] Check 2: Internal Web Health OK (200)")
@@ -277,14 +291,14 @@ WantedBy=multi-user.target`, remotePath, *hostname, mavlinkFlag, remoteDeployDir
 
 	// 3. Internal NATS Check (using bash native dev-tcp)
 	natsTimeout := 10 * time.Second
-	logger.LogInfo("[DEPLOY] Step 3: Internal NATS Port 4222 Check (Timeout: %v)...", natsTimeout)
+	logger.LogInfo("[DEPLOY] Step 3: Internal NATS Port %d Check (Timeout: %v)...", checkNatsPort, natsTimeout)
 	natsOK := false
 	natsStart := time.Now()
 	for time.Since(natsStart) < natsTimeout {
-		natsCheckCmd := "timeout 1 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/4222' && echo OK"
+		natsCheckCmd := fmt.Sprintf("timeout 1 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/%d' && echo OK", checkNatsPort)
 		out, err := core_ssh.RunSSHCommand(client, natsCheckCmd)
 		if err == nil && strings.Contains(out, "OK") {
-			logger.LogInfo("[DEPLOY] Check 3: Internal NATS Port 4222 OK")
+			logger.LogInfo("[DEPLOY] Check 3: Internal NATS Port %d OK", checkNatsPort)
 			natsOK = true
 			break
 		}
@@ -330,7 +344,7 @@ WantedBy=multi-user.target`, remotePath, *hostname, mavlinkFlag, remoteDeployDir
 	if *proxy {
 		logger.LogInfo("[DEPLOY] Setting up Cloudflare tunnel proxy via cloudflare plugin...")
 		cwd, _ := os.Getwd()
-		cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "cloudflare", "setup-service", "--name", *hostname)
+		cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "cloudflare", "setup-service", "--name", *hostname, "--user")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
