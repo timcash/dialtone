@@ -3,6 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#05070a" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="dialtone.dag" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <title>DAG v3</title>
     <link rel="stylesheet" href="src/style.css" />
   </head>
@@ -57,17 +64,20 @@
           </div>
         </div>
         <div class="dag-controls" aria-label="DAG Controls Grid">
-          <button type="button" class="dag-thumb" aria-label="DAG Back">Back</button>
-          <button type="button" class="dag-thumb" aria-label="DAG Add">Add</button>
-          <button type="button" class="dag-thumb" aria-label="DAG Connect">Link</button>
-          <button type="button" class="dag-thumb" aria-label="DAG Unlink">Unlink</button>
-          <button type="button" class="dag-thumb" aria-label="DAG Nest">Nest</button>
-          <button type="button" class="dag-thumb" aria-label="DAG Clear Picks">Clear</button>
-          <button type="button" class="dag-thumb dag-camera-btn" aria-label="DAG Camera Z" aria-pressed="false">Z</button>
-          <button type="button" class="dag-thumb dag-camera-btn" aria-label="DAG Camera ISO" aria-pressed="true">ISO</button>
-          <button type="button" class="dag-thumb dag-camera-btn" aria-label="DAG Camera Side" aria-pressed="false">SIDE</button>
+          <div class="dag-chatlog" aria-label="DAG Chatlog Overlay">
+            <div class="dag-chatlog-xterm" aria-label="DAG Chatlog Terminal"></div>
+          </div>
+          <button type="button" class="dag-thumb dag-action-btn" aria-label="DAG Thumb 1">Back</button>
+          <button type="button" class="dag-thumb dag-action-btn" aria-label="DAG Thumb 2">Add</button>
+          <button type="button" class="dag-thumb dag-action-btn" aria-label="DAG Thumb 3">Link</button>
+          <button type="button" class="dag-thumb dag-action-btn" aria-label="DAG Thumb 4">Clear</button>
+          <button type="button" class="dag-thumb dag-action-btn" aria-label="DAG Thumb 5">open</button>
+          <button type="button" class="dag-thumb dag-action-btn" aria-label="DAG Thumb 6">Rename</button>
+          <button type="button" class="dag-thumb dag-action-btn" aria-label="DAG Thumb 7">Focus</button>
+          <button type="button" class="dag-thumb dag-action-btn" aria-label="DAG Thumb 8">Labels On</button>
+          <button type="button" class="dag-thumb dag-mode-thumb" aria-label="DAG Mode">Mode: Graph</button>
           <input class="dag-label-input" type="text" aria-label="DAG Label Input" placeholder="Select node to rename" />
-          <button type="button" class="dag-rename-btn" aria-label="DAG Rename">Rename</button>
+          <button type="button" class="dag-rename-btn" aria-label="DAG Rename">Submit</button>
         </div>
       </section>
     </div>

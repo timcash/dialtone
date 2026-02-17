@@ -511,11 +511,21 @@ func filterLogsForStep(logs []ConsoleEntry, sectionID string, mode string) []Con
 type Step struct {
 	Name           string
 	Run            func() error
+	RunWithContext func(*StepContext) (StepRunResult, error)
 	SectionID      string
 	Screenshot     string
 	Screenshots    []string
 	ScreenshotGrid string
 	Timeout        time.Duration
+}
+
+type StepContext struct {
+	Name    string
+	Started time.Time
+}
+
+type StepRunResult struct {
+	Report string
 }
 
 type SuiteOptions struct {
@@ -537,6 +547,7 @@ type StepResult struct {
 	ScreenshotGrid string
 	Logs           []ConsoleEntry
 	Output         string
+	Report         string
 }
 
 func RunSuite(options SuiteOptions, steps []Step) error {
@@ -585,11 +596,22 @@ func RunSuite(options SuiteOptions, steps []Step) error {
 		stepStart := time.Now()
 		var output string
 		var err error
+		var stepReport string
 
 		// Run the step in a goroutine to support context cancellation
 		done := make(chan struct{})
 		go func() {
-			output, err = captureStepOutput(start, s.Run)
+			runner := s.Run
+			if s.RunWithContext != nil {
+				runner = func() error {
+					out, runErr := s.RunWithContext(&StepContext{Name: s.Name, Started: stepStart})
+					if runErr == nil {
+						stepReport = strings.TrimSpace(out.Report)
+					}
+					return runErr
+				}
+			}
+			output, err = captureStepOutput(start, runner)
 			close(done)
 		}()
 
@@ -617,6 +639,7 @@ func RunSuite(options SuiteOptions, steps []Step) error {
 			SectionID:   s.SectionID,
 			Screenshot:  s.Screenshot,
 			Screenshots: normalizedStepScreenshots(s),
+			Report:      stepReport,
 		}
 		if len(res.Screenshots) == 1 && res.Screenshot == "" {
 			res.Screenshot = res.Screenshots[0]
@@ -637,6 +660,16 @@ func RunSuite(options SuiteOptions, steps []Step) error {
 		}
 		res.Logs = endStepLogCapture()
 		res.Output = trimmedOutput
+		if trimmedStepOutput := strings.TrimSpace(output); trimmedStepOutput != "" {
+			for _, rawLine := range strings.Split(trimmedStepOutput, "\n") {
+				line := strings.TrimSpace(rawLine)
+				if line == "" {
+					continue
+				}
+				_, _ = fmt.Fprintln(logFile, line)
+				runnerLogs = append(runnerLogs, line)
+			}
+		}
 		results = append(results, res)
 		for _, entry := range res.Logs {
 			if entry.Level == "error" || entry.Level == "exception" {
@@ -730,6 +763,12 @@ func writeReport(options SuiteOptions, results []StepResult, total time.Duration
 		}
 		_, _ = fmt.Fprintln(f, "```")
 		_, _ = fmt.Fprintln(f)
+		if strings.TrimSpace(r.Report) != "" {
+			_, _ = fmt.Fprintln(f, "#### Step Story")
+			_, _ = fmt.Fprintln(f)
+			_, _ = fmt.Fprintln(f, r.Report)
+			_, _ = fmt.Fprintln(f)
+		}
 		_, _ = fmt.Fprintln(f, "#### Runner Output")
 		_, _ = fmt.Fprintln(f)
 		_, _ = fmt.Fprintln(f, "```text")
@@ -908,7 +947,20 @@ func resolveScreenshotRefPath(reportPath string, ref string) string {
 	if filepath.IsAbs(ref) {
 		return ref
 	}
-	// The screenshots are relative to the test root, and report is also in test root or subdirectory.
-	// We want to find them starting from the same base as the report.
-	return filepath.Join(filepath.Dir(reportPath), ref)
+	reportDir := filepath.Dir(reportPath)
+	primary := filepath.Join(reportDir, ref)
+	if _, err := os.Stat(primary); err == nil {
+		return primary
+	}
+	parent := filepath.Join(filepath.Dir(reportDir), ref)
+	if _, err := os.Stat(parent); err == nil {
+		return parent
+	}
+	if strings.HasPrefix(ref, "screenshots"+string(filepath.Separator)) || strings.HasPrefix(ref, "screenshots/") {
+		parentScreens := filepath.Join(filepath.Dir(reportDir), "screenshots")
+		if stat, err := os.Stat(parentScreens); err == nil && stat.IsDir() {
+			return filepath.Join(filepath.Dir(reportDir), ref)
+		}
+	}
+	return primary
 }

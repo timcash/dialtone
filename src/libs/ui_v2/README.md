@@ -8,23 +8,21 @@ Each plugin `src_vN` has one `ui`.
 
 Each `ui` can have many `section`.
 
-Each `section` uses four overlays:
+Each `section` is composed from underlays + overlays:
 
-- `menu` (global): section switcher overlay.
-- `thumb`: interactive controls (buttons, inputs).
-- `legend`: non-interactive context (stats, logs, history).
-- one primary overlay kind: `stage` or `table` or `xterm` or `docs` (more kinds can be added later).
+- underlays (exactly one per section): `stage` | `table` | `docs` | `xterm` | `video`
+- overlays (shared UI layers): `menu` (global), `thumbs`, `legend`, optional `chatlog`
 
 ## Menu Overlay Behavior
 
 - `Menu` renders a fullscreen modal.
 - Modal content uses CSS grid for menu buttons.
 - Menu grid has an effective minimum width target of `400px` (bounded by viewport width).
-- While menu is open, active-section `thumb` overlays are hidden automatically.
+- While menu is open, active-section `thumbs` overlays are hidden automatically.
 
 ## Section Registration
 
-`SectionConfig` now supports overlay selectors:
+`SectionConfig` supports section layer selectors:
 
 ```ts
 sections.register('my-section', {
@@ -33,16 +31,21 @@ sections.register('my-section', {
   overlays: {
     primaryKind: 'stage',
     primary: '.my-stage',
-    thumb: '.my-thumb',
+    thumb: '.my-thumbs',
     legend: '.my-legend',
+    chatlog: '.my-chatlog',
   },
 });
 ```
 
+Notes:
+- `primaryKind` + `primary` represent the section underlay in the runtime API.
+- `thumb` selector points to the thumbs overlay container.
+
 `SectionManager` tags matched elements with:
 
 - `data-overlay="<kind>"`
-- `data-overlay-role="primary|thumb|legend"`
+- `data-overlay-role="primary|thumb|legend|chatlog"`
 - `data-overlay-section="<section-id>"`
 - `data-overlay-active="true|false"`
 
