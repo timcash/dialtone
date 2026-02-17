@@ -21,7 +21,7 @@ func Run13TableSectionValidation() error {
 		return err
 	}
 
-	if err := session.Run(test_v2.NavigateToSection("table", "Table Section")); err != nil {
+	if err := session.Run(test_v2.NavigateToSection("table", "Telemetry Section")); err != nil {
 		return err
 	}
 	if err := session.Run(test_v2.WaitForAriaLabel("Robot Table")); err != nil {
