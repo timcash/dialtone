@@ -52,7 +52,8 @@ func RunDeployTest(versionDir string, args []string) error {
 	remoteDebugPath := path.Join(remoteHome, "dialtone_debug")
 
 	// --- STEP 1: TSNET ONLY ---
-	logger.LogInfo("[DEPLOY-TEST] Step 1: Verifying Tailscale (tsnet) connectivity...")
+	timeout1 := 20 * time.Second
+	logger.LogInfo("[DEPLOY-TEST] Step 1: Verifying Tailscale (tsnet) connectivity (Timeout: %v)...", timeout1)
 	tsnetSrc := fmt.Sprintf(`package main
 import (
 	"context"
@@ -81,7 +82,8 @@ func main() {
 	}
 
 	// --- STEP 2: TSNET + NATS ---
-	logger.LogInfo("[DEPLOY-TEST] Step 2: Verifying NATS Server start...")
+	timeout2 := 30 * time.Second
+	logger.LogInfo("[DEPLOY-TEST] Step 2: Verifying NATS Server start (Timeout: %v)...", timeout2)
 	natsSrc := fmt.Sprintf(`package main
 import (
 	"context"
@@ -109,7 +111,8 @@ func main() {
 	}
 
 	// --- STEP 3: TSNET + WEB HEALTH ---
-	logger.LogInfo("[DEPLOY-TEST] Step 3: Verifying Web Server (Health Check)...")
+	timeout3 := 30 * time.Second
+	logger.LogInfo("[DEPLOY-TEST] Step 3: Verifying Web Server (Health Check) (Timeout: %v)...", timeout3)
 	webSrc := fmt.Sprintf(`package main
 import (
 	"fmt"
@@ -137,7 +140,8 @@ func main() {
 	}
 
 	// --- STEP 4: TSNET + NATS PUB/SUB ---
-	logger.LogInfo("[DEPLOY-TEST] Step 4: Verifying NATS Messaging (Pub/Sub)...")
+	timeout4 := 30 * time.Second
+	logger.LogInfo("[DEPLOY-TEST] Step 4: Verifying NATS Messaging (Pub/Sub) (Timeout: %v)...", timeout4)
 	natsPubSubSrc := fmt.Sprintf(`package main
 import (
 	"context"
@@ -182,7 +186,8 @@ func main() {
 	}
 
 	// --- STEP 5: TSNET + WEB + WS TELEMETRY ---
-	logger.LogInfo("[DEPLOY-TEST] Step 5: Verifying WebSocket Telemetry Stream...")
+	timeout5 := 30 * time.Second
+	logger.LogInfo("[DEPLOY-TEST] Step 5: Verifying WebSocket Telemetry Stream (Timeout: %v)...", timeout5)
 	wsTelemetrySrc := fmt.Sprintf(`package main
 import (
 	"context"

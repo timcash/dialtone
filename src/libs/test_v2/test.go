@@ -573,13 +573,12 @@ func RunSuite(options SuiteOptions, steps []Step) error {
 	}
 
 	for _, s := range steps {
-		writeLine(fmt.Sprintf("[TEST] START %s", s.Name))
-		startStepLogCapture()
-
 		stepTimeout := s.Timeout
 		if stepTimeout == 0 {
 			stepTimeout = 30 * time.Second
 		}
+		writeLine(fmt.Sprintf("[TEST] START %s (Timeout: %v)", s.Name, stepTimeout))
+		startStepLogCapture()
 
 		ctx, cancel := context.WithTimeout(context.Background(), stepTimeout)
 
