@@ -1,4 +1,5 @@
 import { VisualizationControl } from '../../../../../../../libs/ui_v2/types';
+import { addMavlinkListener } from '../../data/connection';
 
 type TableRow = {
   key: string;
@@ -9,31 +10,16 @@ type TableRow = {
 class TableControl implements VisualizationControl {
   private allRows = new Map<string, TableRow>();
   private visible = false;
-  private ws: WebSocket | null = null;
+  private unsubscribe: (() => void) | null = null;
 
   constructor(private container: HTMLElement) {
-    this.connectWS();
+    this.initDataListener();
   }
 
-  private connectWS() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    this.ws = new WebSocket(`${protocol}//${host}/ws`);
-    
-    this.ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        this.updateData(data);
-      } catch (e) {
-        console.error('Failed to parse WS message', e);
-      }
-    };
-
-    this.ws.onclose = () => {
-      if (this.visible) {
-        setTimeout(() => this.connectWS(), 2000);
-      }
-    };
+  private initDataListener() {
+    this.unsubscribe = addMavlinkListener((data: any) => {
+      this.updateData(data);
+    });
   }
 
   private updateData(data: any) {
@@ -72,8 +58,8 @@ class TableControl implements VisualizationControl {
   }
 
   dispose(): void {
-    if (this.ws) {
-      this.ws.close();
+    if (this.unsubscribe) {
+      this.unsubscribe();
     }
   }
 
