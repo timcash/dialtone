@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { FpsCounter } from "../util/fps";
 import { GpuTimer } from "../util/gpu_timer";
 import { VisibilityMixin } from "../util/section";
+import { Menu } from "../util/menu";
 import { startTyping } from "../util/typing";
 import { setupPolicyMenu } from "./menu";
 import { PolicyHistogram } from "./histogram";
@@ -350,10 +351,23 @@ class PolicySimVisualization {
   private totalSimulations = 0;
   private batchStartNode = 0;
   private activeScenarioId = "";
+  private simulationRatePerSecond = 10;
 
   orbitSpeed = 0.08;
   private globeRadius = 3;
   private nodeRadius = 3.4;
+  private cameraDistanceScale = 1;
+  private screenFillPercent = 0;
+  private cameraTuning = {
+    mobileY: 2.5,
+    wideY: 2.15,
+    wideStartAspect: 1.25,
+    wideEndAspect: 2.2,
+    minZ: 8.6,
+    maxZ: 18.5,
+  };
+  private lastCameraValidationLog = 0;
+  private lastCameraValidationMessage = "";
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -369,8 +383,8 @@ class PolicySimVisualization {
     canvas.style.height = "100%";
     this.container.appendChild(canvas);
 
-    // MOBILE OPTIMIZATION: Pull camera back (from 10 to 16.5)
-    this.camera.position.set(0, 2.5, 16.5);
+    // Keep mobile framing stable; widescreen gets progressive zoom-in via resize().
+    this.camera.position.set(0, this.cameraTuning.mobileY, 16.5);
     this.camera.lookAt(0, 0, 0);
 
     this.scene.add(this.camera);
@@ -396,6 +410,137 @@ class PolicySimVisualization {
     } else {
       window.addEventListener("resize", this.resize);
     }
+  }
+
+  private applyResponsiveCamera(width: number, height: number): void {
+    const aspect = width / Math.max(1, height);
+    const tBase = (aspect - this.cameraTuning.wideStartAspect) / (this.cameraTuning.wideEndAspect - this.cameraTuning.wideStartAspect);
+    const t = THREE.MathUtils.clamp(tBase, 0, 1);
+    const mobileY = this.cameraTuning.mobileY;
+    const wideY = this.cameraTuning.wideY;
+    const y = THREE.MathUtils.lerp(mobileY, wideY, t);
+    const fit = this.computeCameraDistanceForViewportFit(aspect, t);
+    const scaledDistance = fit.distance * this.cameraDistanceScale;
+    let z = Math.sqrt(Math.max(scaledDistance * scaledDistance - y * y, 1));
+    z = THREE.MathUtils.clamp(z, this.cameraTuning.minZ, this.cameraTuning.maxZ);
+    this.camera.position.set(0, y, z);
+    this.camera.lookAt(0, 0, 0);
+  }
+
+  private getMeshWorldRadius(mesh: THREE.Mesh): number {
+    const geo = mesh.geometry as THREE.BufferGeometry;
+    if (!geo.boundingSphere) geo.computeBoundingSphere();
+    const base = geo.boundingSphere?.radius ?? 0;
+    const s = mesh.getWorldScale(new THREE.Vector3());
+    return base * Math.max(s.x, s.y, s.z);
+  }
+
+  private getGlobeFitRadius(): number {
+    if (!this.globe) return this.globeRadius;
+    return this.getMeshWorldRadius(this.globe) * 1.01;
+  }
+
+  private computeCameraDistanceForViewportFit(aspect: number, t: number): { distance: number; targetFill: number } {
+    const vfov = THREE.MathUtils.degToRad(this.camera.fov);
+    const hfov = 2 * Math.atan(Math.tan(vfov / 2) * Math.max(0.01, aspect));
+    const minTan = Math.min(Math.tan(vfov / 2), Math.tan(hfov / 2));
+    const sceneRadius = this.getGlobeFitRadius();
+    const baseFill = THREE.MathUtils.lerp(0.72, 0.98, t);
+    const targetFill = THREE.MathUtils.clamp(baseFill, 0.45, 0.99);
+    const distance = sceneRadius / Math.max(0.0001, targetFill * minTan);
+    return { distance, targetFill };
+  }
+
+  private getViewportFill(): {
+    fill: number;
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+    overflowNode: string;
+  } {
+    if (!this.globe) {
+      return { fill: 0, left: 0, right: 0, top: 0, bottom: 0, overflowNode: "" };
+    }
+    const center = this.globe.getWorldPosition(new THREE.Vector3());
+    const centerNdc = center.clone().project(this.camera);
+    const centerCam = center.clone().applyMatrix4(this.camera.matrixWorldInverse);
+    const radius = this.getGlobeFitRadius();
+    const m = this.camera.projectionMatrix.elements;
+    const rx = Math.abs((radius * m[0]) / Math.max(0.0001, -centerCam.z));
+    const ry = Math.abs((radius * m[5]) / Math.max(0.0001, -centerCam.z));
+    const left = centerNdc.x - rx;
+    const right = centerNdc.x + rx;
+    const bottom = centerNdc.y - ry;
+    const top = centerNdc.y + ry;
+    const overflowNode = left < -1 || right > 1 || bottom < -1 || top > 1 ? "globe" : "";
+
+    const fillX = (right - left) / 2;
+    const fillY = (top - bottom) / 2;
+    const fill = Math.min(fillX, fillY);
+    return { fill, left, right, top, bottom, overflowNode };
+  }
+
+  private validateCameraFraming(width: number, height: number): void {
+    if (this.nodes.length === 0) return;
+    const aspect = width / Math.max(1, height);
+    const tBase = (aspect - this.cameraTuning.wideStartAspect) / (this.cameraTuning.wideEndAspect - this.cameraTuning.wideStartAspect);
+    const t = THREE.MathUtils.clamp(tBase, 0, 1);
+    const fit = this.computeCameraDistanceForViewportFit(aspect, t);
+
+    const viewport = this.getViewportFill();
+    const fill = viewport.fill;
+    const left = viewport.left;
+    const right = viewport.right;
+    const top = viewport.top;
+    const bottom = viewport.bottom;
+    const overflow = viewport.overflowNode;
+    this.screenFillPercent = THREE.MathUtils.clamp(fill * 100, 0, 100);
+    const fillEl = document.getElementById("policy-screen-fill");
+    if (fillEl) fillEl.innerText = `${this.screenFillPercent.toFixed(1)}%`;
+    const tooSmall = fill < fit.targetFill * 0.68;
+    const tooLarge = fill > Math.min(0.99, fit.targetFill * 1.2);
+    const outside = overflow !== "";
+    if (!tooSmall && !tooLarge && !outside) return;
+
+    const msg = `[policy][camera-test] framing mismatch outside=${outside} tooSmall=${tooSmall} tooLarge=${tooLarge} targetFill=${fit.targetFill.toFixed(3)} actualFill=${fill.toFixed(3)} bounds=(${left.toFixed(3)},${right.toFixed(3)},${bottom.toFixed(3)},${top.toFixed(3)}) node=${overflow || "n/a"} cam=(${this.camera.position.x.toFixed(2)},${this.camera.position.y.toFixed(2)},${this.camera.position.z.toFixed(2)}) viewport=${width}x${height}`;
+    const now = performance.now();
+    if (msg !== this.lastCameraValidationMessage || now - this.lastCameraValidationLog > 2500) {
+      console.error(msg);
+      this.lastCameraValidationMessage = msg;
+      this.lastCameraValidationLog = now;
+    }
+  }
+
+  getCameraDistance(): number {
+    return Math.sqrt(
+      this.camera.position.x * this.camera.position.x +
+      this.camera.position.y * this.camera.position.y +
+      this.camera.position.z * this.camera.position.z
+    );
+  }
+
+  setCameraDistance(value: number): void {
+    const width = Math.max(1, this.container.clientWidth);
+    const height = Math.max(1, this.container.clientHeight);
+    const aspect = width / height;
+    const tBase =
+      (aspect - this.cameraTuning.wideStartAspect) /
+      (this.cameraTuning.wideEndAspect - this.cameraTuning.wideStartAspect);
+    const t = THREE.MathUtils.clamp(tBase, 0, 1);
+    const fit = this.computeCameraDistanceForViewportFit(aspect, t);
+    const nextScale = value / Math.max(0.0001, fit.distance);
+    this.cameraDistanceScale = THREE.MathUtils.clamp(nextScale, 0.5, 1.8);
+    this.resize();
+  }
+
+  getCameraTuning(): Readonly<typeof this.cameraTuning> {
+    return { ...this.cameraTuning };
+  }
+
+  setCameraTuning(next: Partial<typeof this.cameraTuning>): void {
+    this.cameraTuning = { ...this.cameraTuning, ...next };
+    this.resize();
   }
 
   private initGlobe() {
@@ -706,10 +851,11 @@ class PolicySimVisualization {
   }
 
   private runSimulationBatch(force = false): void {
-    if (!force && this.time - this.lastBatchSolve < 0.18) return;
+    const interval = 1 / this.simulationRatePerSecond;
+    if (!force && this.time - this.lastBatchSolve < interval) return;
     if (this.nodes.length === 0) return;
 
-    const iterations = Math.max(24, Math.min(120, Math.floor(this.simParams.iterations / 20)));
+    const iterations = 1;
     const startNode = this.batchStartNode % this.nodes.length;
     this.batchStartNode = (this.batchStartNode + 1) % this.nodes.length;
 
@@ -849,9 +995,13 @@ class PolicySimVisualization {
     const rect = this.container.getBoundingClientRect();
     const width = Math.max(1, rect.width);
     const height = Math.max(1, rect.height);
+    this.applyResponsiveCamera(width, height);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    this.camera.updateMatrixWorld(true);
     this.renderer.setSize(width, height, false);
+    this.validateCameraFraming(width, height);
+    window.dispatchEvent(new CustomEvent("policy-camera-updated"));
   };
 
   dispose() {
@@ -920,6 +1070,12 @@ class PolicySimVisualization {
     if (this.monteCarloVisible) {
       this.histogram.update(this.histogramValues, this.histogramMeta, this.totalSimulations);
     }
+    if (this.frameCount % 20 === 0) {
+      this.validateCameraFraming(
+        Math.max(1, this.container.clientWidth),
+        Math.max(1, this.container.clientHeight),
+      );
+    }
 
     const cpuStart = performance.now();
     this.gpuTimer.begin(this.gl);
@@ -936,7 +1092,7 @@ export function mountPolicy(container: HTMLElement, sections: SectionManager): V
     <div class="marketing-overlay" aria-label="Policy simulator section: interactive global policy visualization">
       <h2>Global Policy Simulator</h2>
       <p data-typing-subtitle></p>
-      <div class="sim-stats" style="margin-top: 1rem; font-family: 'Inter', monospace; font-size: 0.9rem; color: #e5e5e5; opacity: 0.8;">
+      <div class="sim-stats" style="position:fixed;left:1.25rem;bottom:1.25rem;z-index:130;font-family:'Inter',monospace;font-size:0.9rem;color:#e5e5e5;opacity:0.8;pointer-events:none;">
         SIMULATIONS: <span id="policy-sim-count">0</span>
       </div>
     </div>
@@ -953,6 +1109,12 @@ export function mountPolicy(container: HTMLElement, sections: SectionManager): V
 
   sections.setLoadingMessage("s-policy", "loading markov scenarios ...");
   const viz = new PolicySimVisualization(container);
+  (window as Window & { policyCamera?: unknown }).policyCamera = {
+    get: () => ({ distance: viz.getCameraDistance(), tuning: viz.getCameraTuning() }),
+    setDistance: (v: number) => viz.setCameraDistance(v),
+    setTuning: (next: Partial<ReturnType<typeof viz.getCameraTuning>>) => viz.setCameraTuning(next),
+    apply: () => viz.resize(),
+  };
 
   if (import.meta.env.DEV) {
     const defaultScenarioDomains = POLICY_SCENARIOS[POLICY_PRESETS[0].scenarioId].domains;
@@ -970,6 +1132,7 @@ export function mountPolicy(container: HTMLElement, sections: SectionManager): V
       activePresetId: viz.getActivePreset().id,
       orbitSpeed: viz.orbitSpeed,
       volatility: viz.getVolatility(),
+      cameraDistance: viz.getCameraDistance(),
       monteCarloVisible: viz.getMonteCarloVisible(),
       summaryText: viz.getSummaryText(),
       onPresetChange: (presetId: string) => {
@@ -985,15 +1148,25 @@ export function mountPolicy(container: HTMLElement, sections: SectionManager): V
         viz.setVolatility(value);
         refreshMenu();
       },
+      onCameraDistanceChange: (value: number) => {
+        viz.setCameraDistance(value);
+      },
       onToggleMonteCarlo: () => {
         viz.setMonteCarloVisible(!viz.getMonteCarloVisible());
         refreshMenu();
       },
     });
   };
+  const syncMenuOnCameraUpdate = () => {
+    if (Menu.getInstance().isOpen()) refreshMenu();
+  };
+  window.addEventListener("policy-camera-updated", syncMenuOnCameraUpdate);
 
   return {
     dispose: () => {
+      window.removeEventListener("policy-camera-updated", syncMenuOnCameraUpdate);
+      const win = window as Window & { policyCamera?: unknown };
+      if (win.policyCamera) delete win.policyCamera;
       viz.dispose();
       stopTyping();
       container.innerHTML = "";

@@ -17,15 +17,15 @@ export function mountMusic(container: HTMLElement, sections: SectionManager): Vi
     <style>
       .music-legend {
         position: absolute;
-        bottom: 2rem;
-        left: 2rem;
+        bottom: 0.9rem;
+        left: 0.9rem;
         z-index: 20;
         display: flex;
         flex-direction: column;
-        gap: 0.5rem;
+        gap: 0.35rem;
         background: rgba(0, 0, 0, 0.4);
-        padding: 1rem;
-        border-radius: 8px;
+        padding: 0.55rem 0.65rem;
+        border-radius: 6px;
         backdrop-filter: blur(4px);
         border: 1px solid rgba(255, 255, 255, 0.1);
         pointer-events: none;
@@ -33,15 +33,15 @@ export function mountMusic(container: HTMLElement, sections: SectionManager): Vi
       .legend-item {
         display: flex;
         align-items: center;
-        gap: 0.75rem;
+        gap: 0.45rem;
         color: rgba(255, 255, 255, 0.6);
-        font-size: 0.85rem;
+        font-size: 0.72rem;
         font-family: var(--font-family);
         text-transform: uppercase;
         letter-spacing: 0.05em;
       }
       .legend-line {
-        width: 24px;
+        width: 18px;
         height: 2px;
         display: inline-block;
         box-shadow: 0 0 8px currentColor;
