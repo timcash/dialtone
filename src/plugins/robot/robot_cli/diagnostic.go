@@ -148,7 +148,7 @@ func RunDiagnostic(versionDir string) error {
 			name:      "Telemetry Table Section",
 			sectionID: "table",
 			validation: func(ctx context.Context) error {
-				if err := session.RunWithContext(ctx, test_v2.NavigateToSection("table", "Table Section")); err != nil {
+				if err := session.RunWithContext(ctx, test_v2.NavigateToSection("table", "Telemetry Section")); err != nil {
 					return err
 				}
 				if err := session.RunWithContext(ctx, test_v2.WaitForAriaLabelAttrEquals("Robot Table", "data-ready", "true", 3*time.Second)); err != nil {
