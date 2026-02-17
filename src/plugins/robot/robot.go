@@ -48,6 +48,15 @@ func RunRobot(args []string) {
 			}
 		}
 		RunDeploy(vDir, deployArgs)
+	case "sync-code":
+		vDir := getDir()
+		var syncArgs []string
+		for _, arg := range restArgs {
+			if arg != vDir {
+				syncArgs = append(syncArgs, arg)
+			}
+		}
+		RunSyncCode(vDir, syncArgs)
 	case "deploy-test":
 		vDir := getDir()
 		cmdArgs := restArgs
@@ -126,6 +135,7 @@ func printRobotUsage() {
 	fmt.Println("\nCommands:")
 	fmt.Println("  start       Start the NATS and Web server (core robot logic)")
 	fmt.Println("  deploy      Deploy binary to remote robot via SSH")
+	fmt.Println("  sync-code   Sync source code to robot for remote building")
 	fmt.Println("  deploy-test Step-by-step remote verification using debug binaries")
 	fmt.Println("  vpn-test    Test Tailscale (tsnet) connectivity")
 	fmt.Println("\nVersioned Source Commands (src_vN):")
@@ -137,7 +147,7 @@ func printRobotUsage() {
 	fmt.Println("  lint        Run lint checks")
 	fmt.Println("  dev         Run UI in development mode")
 	fmt.Println("  local-web-remote-robot Run local UI connected to a remote robot")
-	fmt.Println("  build       Build everything needed (UI assets)")
+	fmt.Println("  build       Build everything needed (UI assets) [--remote]")
 	fmt.Println("  serve       Run the plugin Go server")
 	fmt.Println("  test        Run automated test suite")
 	fmt.Println("  diagnostic  Run UI diagnostic against a deployed robot")

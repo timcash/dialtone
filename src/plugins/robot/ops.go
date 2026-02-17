@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"dialtone/cli/src/core/logger"
+	core_ssh "dialtone/cli/src/core/ssh"
 	test_v2 "dialtone/cli/src/libs/test_v2"
 	robot_ops "dialtone/cli/src/plugins/robot/src_v1/cmd/ops"
 )
@@ -93,6 +95,12 @@ func RunLint(versionDir string) error {
 
 func RunBuild(versionDir string, flags ...string) error {
 	if versionDir == "src_v1" {
+		// Check for --remote flag
+		for _, flag := range flags {
+			if flag == "--remote" {
+				return RunRemoteBuild(versionDir, flags)
+			}
+		}
 		return robot_ops.Build(flags...)
 	}
 	fmt.Printf(">> [Robot] Build: %s\n", versionDir)
@@ -199,4 +207,43 @@ func RunVersionedTest(versionDir string, extraArgs []string) error {
 	}
 	
 	return cmd.Run()
+}
+
+func RunRemoteBuild(versionDir string, flags []string) error {
+	logger.LogInfo("[ROBOT] Remote build for %s requested.", versionDir)
+
+	// 1. Sync code to the remote robot
+	RunSyncCode(versionDir, []string{})
+
+	// 2. SSH into the robot and run the build command
+	host := os.Getenv("ROBOT_HOST")
+	user := os.Getenv("ROBOT_USER")
+	pass := os.Getenv("ROBOT_PASSWORD")
+
+	if host == "" || user == "" || pass == "" {
+		logger.LogFatal("Error: ROBOT_HOST, ROBOT_USER, ROBOT_PASSWORD must be set for remote build.")
+	}
+
+	client, err := core_ssh.DialSSH(host, "22", user, pass)
+	if err != nil {
+		logger.LogFatal("Failed to connect to robot via SSH: %v", err)
+	}
+	defer client.Close()
+
+	remoteHome := os.Getenv("REMOTE_DIR_SRC")
+	if remoteHome == "" {
+		remoteHome = fmt.Sprintf("/home/%s/dialtone_src", user)
+	}
+	
+	remoteCmd := fmt.Sprintf("cd %s && ./dialtone.sh robot build %s", remoteHome, versionDir)
+	logger.LogInfo("[ROBOT] Executing remote build: %s", remoteCmd)
+
+	output, err := core_ssh.RunSSHCommand(client, remoteCmd)
+	if err != nil {
+		logger.LogFatal("Remote build failed: %v\nOutput: %s", err, output)
+	}
+
+	logger.LogInfo("[ROBOT] Remote build successful.")
+	fmt.Print(output) // Print remote build output
+	return nil
 }
