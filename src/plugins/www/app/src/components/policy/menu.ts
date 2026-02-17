@@ -6,11 +6,13 @@ type PolicyMenuOptions = {
   activePresetId: string;
   orbitSpeed: number;
   volatility: number;
+  cameraDistance: number;
   monteCarloVisible: boolean;
   summaryText: string;
   onPresetChange: (presetId: string) => void;
   onOrbitSpeedChange: (value: number) => void;
   onVolatilityChange: (value: number) => void;
+  onCameraDistanceChange: (value: number) => void;
   onToggleMonteCarlo: () => void;
 };
 
@@ -52,6 +54,16 @@ export function setupPolicyMenu(options: PolicyMenuOptions): void {
     0.05,
     options.onVolatilityChange,
     (v) => v.toFixed(2),
+  );
+
+  menu.addSlider(
+    "Camera Distance",
+    options.cameraDistance,
+    7,
+    24,
+    0.1,
+    options.onCameraDistanceChange,
+    (v) => v.toFixed(1),
   );
 
   menu.addHeader("Run");

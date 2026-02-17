@@ -110,8 +110,6 @@ export class MusicVisualization {
     };
     window.addEventListener('mousedown', resumeOnGesture);
     window.addEventListener('keydown', resumeOnGesture);
-
-    this.enableMic();
   }
 
   async toggleDemo() {
