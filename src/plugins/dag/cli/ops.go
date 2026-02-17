@@ -92,7 +92,7 @@ func RunUIRun(versionDir string, extraArgs []string) error {
 	return cmd.Run()
 }
 
-func RunTest(versionDir string, attach bool) error {
+func RunTest(versionDir string, attach bool, cps int) error {
 	fmt.Printf(">> [DAG] Test: %s\n", versionDir)
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -122,7 +122,18 @@ func RunTest(versionDir string, attach bool) error {
 	cmd.Dir = cwd
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Env = append(os.Environ(), "DAG_TEST_ATTACH=0")
+	baseURL := "http://127.0.0.1:8080"
+	devBaseURL := fmt.Sprintf("http://127.0.0.1:%d", devSession.port)
+	if attach {
+		baseURL = devBaseURL
+	}
+	cmd.Env = append(
+		os.Environ(),
+		"DAG_TEST_ATTACH=0",
+		"DAG_TEST_BASE_URL="+baseURL,
+		"DAG_TEST_DEV_BASE_URL="+devBaseURL,
+		"DAG_TEST_CPS="+strconv.Itoa(cps),
+	)
 	if attach {
 		cmd.Env = append(cmd.Env, "DAG_TEST_ATTACH=1")
 		fmt.Printf(">> [DAG] Test: attach mode enabled (reusing headed dev browser session)\n")

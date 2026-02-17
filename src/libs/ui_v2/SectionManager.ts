@@ -68,6 +68,17 @@ export class SectionManager {
     const updateHash = options.updateHash ?? true;
     const current = this.activeSectionId;
     if (current === sectionId) {
+      await this.load(sectionId);
+      this.setSectionVisibility(sectionId);
+      this.syncOverlayActivity(sectionId);
+      this.applyHeader(this.configs.get(sectionId)?.header);
+      const ctl = this.controls.get(sectionId);
+      if (ctl && !(this.resumed.get(sectionId) ?? false)) {
+        await this.waitForLayout();
+        ctl.setVisible(true);
+        this.resumed.set(sectionId, true);
+        if (this.debug) console.log(`[SectionManager] RESUME #${sectionId}`);
+      }
       if (updateHash && window.location.hash !== `#${sectionId}`) {
         window.location.hash = `#${sectionId}`;
       }

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	test_v2 "dialtone/cli/src/libs/test_v2"
 	"github.com/chromedp/chromedp"
 )
 
@@ -19,9 +18,9 @@ type dagTableAPIResponse struct {
 	} `json:"rows"`
 }
 
-func fetchDagTableRowsFromAPI() (*dagTableAPIResponse, error) {
+func fetchDagTableRowsFromAPI(baseURL string) (*dagTableAPIResponse, error) {
 	client := &http.Client{Timeout: 6 * time.Second}
-	resp, err := client.Get("http://127.0.0.1:8080/api/dag-table")
+	resp, err := client.Get(baseURL + "/api/dag-table")
 	if err != nil {
 		return nil, fmt.Errorf("api request failed: %w", err)
 	}
@@ -69,11 +68,11 @@ func Run02DagTableSectionValidation(ctx *testCtx) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := test_v2.WaitForPort(8080, 10*time.Second); err != nil {
-		return "", fmt.Errorf("dag server port 8080 not ready before table validation: %w", err)
+	if err := ctx.waitHTTPReady(ctx.appURL("/"), 12*time.Second); err != nil {
+		return "", fmt.Errorf("dev server not ready before table validation: %w", err)
 	}
 
-	apiRows, err := fetchDagTableRowsFromAPI()
+	apiRows, err := fetchDagTableRowsFromAPI(ctx.appURL(""))
 	if err != nil {
 		return "", err
 	}
@@ -81,7 +80,7 @@ func Run02DagTableSectionValidation(ctx *testCtx) (string, error) {
 	var tableOK bool
 	var rowCount int
 	ctx.appendThought("table validation: load dag-table and wait for ready")
-	if err := ctx.navigate("http://127.0.0.1:8080/#dag-table"); err != nil {
+	if err := ctx.navigate(ctx.appURL("/#dag-table")); err != nil {
 		return "", err
 	}
 	if err := ctx.waitAria("DAG Table", "need table element for validation"); err != nil {

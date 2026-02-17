@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,13 +44,43 @@ type testCtx struct {
 	sharedBrowser       *test_v2.BrowserSession
 	attachMode          bool
 	activeAttachSession bool
+	requireBackend      bool
+	baseURL             string
+	devBaseURL          string
+	clickGap            time.Duration
 	story               storyState
 	lastClickAt         time.Time
 }
 
 func newTestCtx() *testCtx {
+	attach := os.Getenv("DAG_TEST_ATTACH") == "1"
+	base := strings.TrimSpace(os.Getenv("DAG_TEST_BASE_URL"))
+	devBase := strings.TrimSpace(os.Getenv("DAG_TEST_DEV_BASE_URL"))
+	cpsRaw := strings.TrimSpace(os.Getenv("DAG_TEST_CPS"))
+	cps := 3
+	if cpsRaw != "" {
+		if parsed, err := strconv.Atoi(cpsRaw); err == nil && parsed >= 1 {
+			cps = parsed
+		}
+	}
+	if base == "" {
+		if attach {
+			base = "http://127.0.0.1:3000"
+		} else {
+			base = "http://127.0.0.1:8080"
+		}
+	}
+	if devBase == "" {
+		devBase = "http://127.0.0.1:3000"
+	}
+	base = strings.TrimRight(base, "/")
+	devBase = strings.TrimRight(devBase, "/")
 	return &testCtx{
-		attachMode: os.Getenv("DAG_TEST_ATTACH") == "1",
+		attachMode:     attach,
+		requireBackend: true,
+		baseURL:        base,
+		devBaseURL:     devBase,
+		clickGap:       time.Second / time.Duration(cps),
 	}
 }
 
@@ -57,7 +88,6 @@ const (
 	mobileViewportWidth  = 390
 	mobileViewportHeight = 844
 	mobileScaleFactor    = 2
-	clickGap             = time.Second
 )
 
 func (t *testCtx) ensureSharedServer() error {
@@ -86,9 +116,11 @@ func (t *testCtx) ensureSharedServer() error {
 	return nil
 }
 
-func (t *testCtx) ensureSharedBrowser() (*test_v2.BrowserSession, error) {
-	if err := t.ensureSharedServer(); err != nil {
-		return nil, err
+func (t *testCtx) ensureSharedBrowser(requireBackend bool) (*test_v2.BrowserSession, error) {
+	if requireBackend {
+		if err := t.ensureSharedServer(); err != nil {
+			return nil, err
+		}
 	}
 	if t.sharedBrowser != nil {
 		return t.sharedBrowser, nil
@@ -111,10 +143,14 @@ func (t *testCtx) ensureSharedBrowser() (*test_v2.BrowserSession, error) {
 		if !hasAttachableDagDevBrowser() {
 			return nil, fmt.Errorf("DAG_TEST_ATTACH=1 requires a running Dialtone debug browser session (role=dag-dev); regular Chrome windows cannot be attached")
 		}
-		session, err = start(false, "dag-dev", true, "http://127.0.0.1:3000/#three")
+		session, err = start(false, "dag-dev", true, t.devURL("/#three"))
 		t.activeAttachSession = true
 	} else {
-		session, err = start(true, "test", false, "http://127.0.0.1:8080/#three")
+		startURL := t.appURL("/#three")
+		if !requireBackend {
+			startURL = t.devURL("/#three")
+		}
+		session, err = start(true, "test", false, startURL)
 		t.activeAttachSession = false
 	}
 	if err != nil {
@@ -187,7 +223,11 @@ func hasReachableDevtoolsWebSocket(port int) bool {
 }
 
 func (t *testCtx) browser() (*test_v2.BrowserSession, error) {
-	return t.ensureSharedBrowser()
+	return t.ensureSharedBrowser(t.requireBackend)
+}
+
+func (t *testCtx) setRequireBackend(required bool) {
+	t.requireBackend = required
 }
 
 func (t *testCtx) runEval(js string, out any) error {
@@ -217,11 +257,15 @@ func (t *testCtx) logClick(kind, target, detail string) {
 }
 
 func (t *testCtx) waitClickGap() {
+	if t.clickGap <= 0 {
+		t.lastClickAt = time.Now()
+		return
+	}
 	if t.lastClickAt.IsZero() {
 		t.lastClickAt = time.Now()
 		return
 	}
-	nextAllowed := t.lastClickAt.Add(clickGap)
+	nextAllowed := t.lastClickAt.Add(t.clickGap)
 	now := time.Now()
 	if now.Before(nextAllowed) {
 		time.Sleep(nextAllowed.Sub(now))
@@ -263,6 +307,45 @@ func (t *testCtx) navigate(url string) error {
 		return err
 	}
 	return b.Run(chromedp.Navigate(url))
+}
+
+func (t *testCtx) appURL(path string) string {
+	if path == "" {
+		return t.baseURL
+	}
+	return t.baseURL + path
+}
+
+func (t *testCtx) devURL(path string) string {
+	if path == "" {
+		return t.devBaseURL
+	}
+	return t.devBaseURL + path
+}
+
+func (t *testCtx) ensureBackendStopped() {
+	if t.sharedServer != nil {
+		_ = t.sharedServer.Process.Kill()
+		_, _ = t.sharedServer.Process.Wait()
+		t.sharedServer = nil
+	}
+	_ = browser.CleanupPort(8080)
+}
+
+func (t *testCtx) waitHTTPReady(url string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	client := &http.Client{Timeout: 900 * time.Millisecond}
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode < 500 {
+				return nil
+			}
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return fmt.Errorf("http endpoint not ready: %s", url)
 }
 
 func (t *testCtx) captureShot(file string) error {

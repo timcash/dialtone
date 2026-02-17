@@ -15,7 +15,7 @@ func Run03ThreeUserStoryStartEmpty(ctx *testCtx) (string, error) {
 	fmt.Println("[THREE]   - The user starts from an empty DAG in root layer and expects one selected node after add.")
 	fmt.Println("[THREE]   - Camera expectation: zoomed-out root framing with room for upcoming input/output nodes.")
 	ctx.appendThought("story step1: load stage and verify controls are visible")
-	if err := ctx.navigate("http://127.0.0.1:8080/#three"); err != nil {
+	if err := ctx.navigate(ctx.appURL("/#three")); err != nil {
 		return "", err
 	}
 	if err := ctx.waitAria("Three Canvas", "need stage canvas before interactions"); err != nil {
