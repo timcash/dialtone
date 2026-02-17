@@ -76,6 +76,7 @@ const NODE_SECOND_RECENT_COLOR = 0x2b78ff;
 const EDGE_BASE_COLOR = 0x6b7280;
 const EDGE_NESTED_LINK_COLOR = 0xfacc15;
 const ROOT_IO_CAMERA_VIEW: CameraView = 'iso';
+const CHATLOG_MAX_LINES = 7;
 
 class ThreeControl implements VisualizationControl {
   private scene = new THREE.Scene();
@@ -421,7 +422,7 @@ class ThreeControl implements VisualizationControl {
       disableStdin: true,
       cursorBlink: false,
       cursorStyle: 'bar',
-      rows: 5,
+      rows: CHATLOG_MAX_LINES,
       cols: 92,
       scrollback: 0,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
@@ -446,8 +447,8 @@ class ThreeControl implements VisualizationControl {
   private renderChatlog() {
     const term = this.chatlogTerm;
     if (!term) return;
-    const lines = this.chatlogLines.slice(-5);
-    const padCount = Math.max(0, 5 - lines.length);
+    const lines = this.chatlogLines.slice(-CHATLOG_MAX_LINES);
+    const padCount = Math.max(0, CHATLOG_MAX_LINES - lines.length);
     term.write('\x1b[2J\x1b[H');
     for (let i = 0; i < padCount; i += 1) term.writeln('');
     for (let i = 0; i < lines.length; i += 1) {
@@ -462,8 +463,8 @@ class ThreeControl implements VisualizationControl {
     const clean = this.normalizeThoughtText(text);
     if (!clean) return false;
     this.chatlogLines.push(clean);
-    if (this.chatlogLines.length > 5) {
-      this.chatlogLines = this.chatlogLines.slice(-5);
+    if (this.chatlogLines.length > CHATLOG_MAX_LINES) {
+      this.chatlogLines = this.chatlogLines.slice(-CHATLOG_MAX_LINES);
     }
     this.renderChatlog();
     return true;

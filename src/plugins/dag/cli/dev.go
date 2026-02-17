@@ -1,16 +1,19 @@
 package cli
 
 import (
+	"context"
 	test_v2 "dialtone/cli/src/libs/test_v2"
 	chrome_app "dialtone/cli/src/plugins/chrome/app"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/chromedp/cdproto/emulation"
@@ -67,52 +70,92 @@ func RunDev(versionDir string) error {
 		return nil
 	}
 
-	logf("   [DEV] Running vite dev...")
-	cmd := runBun(cwd, uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(devPort), "--strictPort")
-	cmd.Stdout = logOut
-	cmd.Stderr = logOut
-	if err := cmd.Start(); err != nil {
-		return err
-	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	var (
-		mu      sync.Mutex
-		session *test_v2.BrowserSession
+		mu               sync.Mutex
+		session          *test_v2.BrowserSession
+		browserBooted    bool
+		restartAttemptID int
 	)
 
-	go func() {
-		if err := test_v2.WaitForPort(devPort, 30*time.Second); err != nil {
-			logf("   [DEV] Warning: vite server not ready on port %d: %v", devPort, err)
-			return
+	for {
+		restartAttemptID++
+		logf("   [DEV] Running vite dev... (attempt %d)", restartAttemptID)
+		cmd := runBun(cwd, uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(devPort), "--strictPort")
+		cmd.Stdout = logOut
+		cmd.Stderr = logOut
+		if err := cmd.Start(); err != nil {
+			return err
 		}
 
-		logf("   [DEV] Vite ready at %s", devURL)
-		logf("   [DEV] Opening dev URL in regular browser...")
+		go func(attempt int) {
+			if err := test_v2.WaitForPort(devPort, 30*time.Second); err != nil {
+				logf("   [DEV] Warning: vite server not ready on port %d: %v", devPort, err)
+				return
+			}
 
-		s, err := startDagDevBrowser(logOut, devURL, devBrowserMetaPath)
-		if err != nil {
-			logf("   [DEV] Warning: failed to launch debug browser: %v", err)
-			return
+			mu.Lock()
+			alreadyBooted := browserBooted
+			mu.Unlock()
+			if alreadyBooted {
+				logf("   [DEV] Vite ready at %s (attempt %d); keeping existing browser session", devURL, attempt)
+				return
+			}
+
+			logf("   [DEV] Vite ready at %s", devURL)
+			logf("   [DEV] Opening dev URL in regular browser...")
+
+			s, err := startDagDevBrowser(logOut, devURL, devBrowserMetaPath)
+			if err != nil {
+				logf("   [DEV] Warning: failed to launch debug browser: %v", err)
+				return
+			}
+			mu.Lock()
+			session = s
+			browserBooted = true
+			mu.Unlock()
+		}(restartAttemptID)
+
+		waitCh := make(chan error, 1)
+		go func() { waitCh <- cmd.Wait() }()
+
+		select {
+		case waitErr := <-waitCh:
+			if ctx.Err() != nil {
+				logf("   [DEV] Stopping dev server.")
+				mu.Lock()
+				if session != nil {
+					session.Close()
+				}
+				mu.Unlock()
+				return nil
+			}
+			if waitErr != nil {
+				logf("   [DEV] Vite process exited with error: %v", waitErr)
+			} else {
+				logf("   [DEV] Vite process exited.")
+			}
+			logf("   [DEV] Restarting vite in 1s...")
+			time.Sleep(time.Second)
+		case <-ctx.Done():
+			_ = cmd.Process.Signal(os.Interrupt)
+			select {
+			case <-waitCh:
+			case <-time.After(2 * time.Second):
+				_ = cmd.Process.Kill()
+				<-waitCh
+			}
+			logf("   [DEV] Received shutdown signal. Exiting.")
+			mu.Lock()
+			if session != nil {
+				session.Close()
+			}
+			mu.Unlock()
+			return nil
 		}
-		mu.Lock()
-		session = s
-		mu.Unlock()
-	}()
-
-	err = cmd.Wait()
-	if err != nil {
-		logf("   [DEV] Vite process exited with error: %v", err)
-	} else {
-		logf("   [DEV] Vite process exited.")
 	}
-
-	mu.Lock()
-	if session != nil {
-		session.Close()
-	}
-	mu.Unlock()
-
-	return err
 }
 
 func startDagDevBrowser(logOut io.Writer, devURL, devBrowserMetaPath string) (*test_v2.BrowserSession, error) {
@@ -191,7 +234,6 @@ func startDagDevBrowser(logOut io.Writer, devURL, devBrowserMetaPath string) (*t
 func ensureAttachableDagDevBrowserForDev(logf func(string, ...any), url string) error {
 	if hasReachableDevtoolsWebSocket(9222) {
 		logf("   [DEV] Reusing existing debug endpoint on :9222.")
-		_ = openInRegularChrome(url)
 		return nil
 	}
 	logf("   [DEV] Launching debug-profile Chrome on :9222 with dag-dev role...")
