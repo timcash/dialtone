@@ -47,7 +47,7 @@ func RunStart(args []string) {
 	ephemeral := fs.Bool("ephemeral", false, "Register as ephemeral node")
 	localOnly := fs.Bool("local-only", false, "Run without Tailscale")
 	wsPort := fs.Int("ws-port", 4223, "NATS WebSocket port")
-	verbose := fs.Bool("verbose", false, "Enable verbose logging")
+	verbose := fs.Bool("verbose", true, "Enable verbose logging")
 	mavlinkAddr := fs.String("mavlink", "", "Mavlink connection string")
 	useMock := fs.Bool("mock", false, "Use mock telemetry and camera data")
 	fs.Parse(args)
@@ -225,13 +225,17 @@ func startMavlink(endpoint string, natsPort int) {
 			switch evt.Type {
 			case "HEARTBEAT":
 				if msg, ok := evt.Data.(*common.MessageHeartbeat); ok {
+					now := time.Now().UnixMilli()
 					subject = "mavlink.heartbeat"
 					data, err = json.Marshal(map[string]any{
-						"type": "HEARTBEAT",
-						"mav_type": msg.Type,
+						"type":        "HEARTBEAT",
+						"mav_type":    msg.Type,
 						"custom_mode": msg.CustomMode,
-						"timestamp": time.Now().Unix(),
+						"timestamp":   now,
+						"t_raw":       evt.ReceivedAt,
+						"t_pub":       now,
 					})
+					logger.LogInfo("[HEARTBEAT] Published to NATS at %v", now)
 				}
 			case "COMMAND_ACK":
 				if msg, ok := evt.Data.(*common.MessageCommandAck); ok {
@@ -248,6 +252,7 @@ func startMavlink(endpoint string, natsPort int) {
 				}
 			case "GLOBAL_POSITION_INT":
 				if msg, ok := evt.Data.(*common.MessageGlobalPositionInt); ok {
+					now := time.Now().UnixMilli()
 					subject = "mavlink.global_position_int"
 					data, err = json.Marshal(map[string]any{
 						"lat":          float64(msg.Lat) / 1e7,
@@ -258,18 +263,23 @@ func startMavlink(endpoint string, natsPort int) {
 						"vy":           float64(msg.Vy) / 100.0,
 						"vz":           float64(msg.Vz) / 100.0,
 						"hdg":          float64(msg.Hdg) / 100.0,
+						"t_raw":        evt.ReceivedAt,
+						"t_pub":        now,
 					})
 				}
 			case "ATTITUDE":
 				if msg, ok := evt.Data.(*common.MessageAttitude); ok {
+					now := time.Now().UnixMilli()
 					subject = "mavlink.attitude"
 					data, err = json.Marshal(map[string]any{
-						"roll":  msg.Roll,
-						"pitch": msg.Pitch,
-						"yaw":   msg.Yaw,
+						"roll":       msg.Roll,
+						"pitch":      msg.Pitch,
+						"yaw":        msg.Yaw,
 						"rollspeed":  msg.Rollspeed,
 						"pitchspeed": msg.Pitchspeed,
 						"yawspeed":   msg.Yawspeed,
+						"t_raw":      evt.ReceivedAt,
+						"t_pub":      now,
 					})
 				}
 			}

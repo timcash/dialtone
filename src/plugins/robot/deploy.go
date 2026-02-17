@@ -209,9 +209,20 @@ WantedBy=multi-user.target`, remotePath, *hostname, mavlinkFlag, remoteDeployDir
 			mavlinkFlag = fmt.Sprintf("--mavlink %s", mavlinkEndpoint)
 		}
 
+		tsAuthKey := os.Getenv("TS_AUTHKEY")
+		tsFlag := "--local-only"
+		envPrefix := ""
+		webPort := 8080
+		if tsAuthKey != "" {
+			logger.LogInfo("[DEPLOY] TS_AUTHKEY found, enabling Tailscale in background mode.")
+			tsFlag = "--ephemeral"
+			envPrefix = fmt.Sprintf("env TS_AUTHKEY=%s ", tsAuthKey)
+			webPort = 80 // tsnet allows port 80 without root
+		}
+
 		// We use nohup and redirect output to ensure it survives SSH logout
-		startCmd := fmt.Sprintf("nohup %s robot start --hostname %s --local-only --web-port 8080 --port 4222 --ws-port 4223 %s > %s/robot.log 2>&1 &", 
-			remotePath, *hostname, mavlinkFlag, remoteDeployDir)
+		startCmd := fmt.Sprintf("nohup %s%s robot start --hostname %s %s --web-port %d --port 4222 --ws-port 4223 %s > %s/robot.log 2>&1 &", 
+			envPrefix, remotePath, *hostname, tsFlag, webPort, mavlinkFlag, remoteDeployDir)
 		
 		core_ssh.RunSSHCommand(client, startCmd)
 		logger.LogInfo("[DEPLOY] Binary started in background. Logs: %s/robot.log", remoteDeployDir)
@@ -221,10 +232,11 @@ WantedBy=multi-user.target`, remotePath, *hostname, mavlinkFlag, remoteDeployDir
 	logger.LogInfo("[DEPLOY] Starting post-deployment health checks...")
 	
 	checkPort := 8080
-	if *service {
+	if *service || os.Getenv("TS_AUTHKEY") != "" {
 		checkPort = 80
-		
-		// 1. Wait for service to be active
+	}
+
+	if *service {
 		timeout := 15 * time.Second
 		logger.LogInfo("[DEPLOY] Step 1: Waiting for dialtone.service to be ACTIVE (Timeout: %v)...", timeout)
 		active := false

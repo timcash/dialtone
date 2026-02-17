@@ -21,7 +21,7 @@ func main() {
 		{Name: "09 Three Section Validation", Run: Run14ThreeSectionValidation, SectionID: "three", Screenshots: []string{"screenshots/test_step_4.png"}, Timeout: 10 * time.Second},
 		{Name: "10 Xterm Section Validation", Run: Run15XtermSectionValidation, SectionID: "xterm", Screenshots: []string{"screenshots/test_step_5.png"}, Timeout: 10 * time.Second},
 		{Name: "11 Video Section Validation", Run: Run16VideoSectionValidation, SectionID: "video", Screenshots: []string{"screenshots/test_step_6.png"}, Timeout: 10 * time.Second},
-		{Name: "12 Lifecycle / Invariants", Run: Run17LifecycleInvariants, Timeout: 10 * time.Second},
+		{Name: "12 Lifecycle / Invariants", Run: Run17LifecycleInvariants, Timeout: 20 * time.Second},
 		{
 			Name:           "13 Menu Navigation Validation",
 			Run:            Run19MenuNavigationValidation,

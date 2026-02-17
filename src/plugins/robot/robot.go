@@ -73,7 +73,14 @@ func RunRobot(args []string) {
 			os.Exit(1)
 		}
 	case "install":
-		if err := robot_ops.Install(); err != nil {
+		vDir := getDir()
+		var installArgs []string
+		for _, arg := range restArgs {
+			if arg != vDir {
+				installArgs = append(installArgs, arg)
+			}
+		}
+		if err := RunInstall(vDir, installArgs...); err != nil {
 			fmt.Printf("Robot install error: %v\n", err)
 			os.Exit(1)
 		}
@@ -122,6 +129,8 @@ func RunRobot(args []string) {
 			fmt.Printf("Robot diagnostic error: %v\n", err)
 			os.Exit(1)
 		}
+	case "telemetry":
+		RunTelemetry(restArgs)
 	case "help", "-h", "--help":
 		printRobotUsage()
 	default:
@@ -139,7 +148,7 @@ func printRobotUsage() {
 	fmt.Println("  deploy-test Step-by-step remote verification using debug binaries")
 	fmt.Println("  vpn-test    Test Tailscale (tsnet) connectivity")
 	fmt.Println("\nVersioned Source Commands (src_vN):")
-	fmt.Println("  install     Install UI dependencies")
+	fmt.Println("  install     Install UI dependencies [--remote]")
 	fmt.Println("  fmt         Run formatting checks/fixes")
 	fmt.Println("  format      Run UI format checks")
 	fmt.Println("  vet         Run go vet checks")
@@ -151,6 +160,7 @@ func printRobotUsage() {
 	fmt.Println("  serve       Run the plugin Go server")
 	fmt.Println("  test        Run automated test suite")
 	fmt.Println("  diagnostic  Run UI diagnostic against a deployed robot")
+	fmt.Println("  telemetry   Monitor MAVLink latency on local NATS")
 }
 
 func getLatestVersionDir() string {

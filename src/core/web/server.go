@@ -44,13 +44,15 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort, internalNATSPo
 	// 1. JSON init API for the frontend
 	mux.HandleFunc("/api/init", func(w http.ResponseWriter, r *http.Request) {
 		data := map[string]interface{}{
-			"version":   "v1.1.1",
-			"hostname":  hostname,
-			"nats_port": natsPort,
-			"ws_port":   wsPort,
-			"ws_path":   "/nats-ws", // Path to the proxied NATS WS
-			"web_port":  webPort,
-			"ips":       ips,
+			"version":            "v1.1.1",
+			"hostname":           hostname,
+			"nats_port":          natsPort,
+			"internal_nats_port": internalNATSPort,
+			"ws_port":            wsPort,
+			"internal_ws_port":   internalWSPort,
+			"ws_path":            "/nats-ws", // Path to the proxied NATS WS
+			"web_port":           webPort,
+			"ips":                ips,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(data)
@@ -136,6 +138,20 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort, internalNATSPo
 			nc, err := nats.Connect(fmt.Sprintf("nats://127.0.0.1:%d", internalNATSPort))
 			if err == nil {
 				nc.Subscribe("mavlink.>", func(m *nats.Msg) {
+					// Add relay timestamp
+					var raw map[string]any
+					if err := json.Unmarshal(m.Data, &raw); err == nil {
+						raw["t_relay"] = time.Now().UnixMilli()
+						if newData, err := json.Marshal(raw); err == nil {
+							select {
+							case msgChan <- newData:
+							default:
+							}
+							return
+						}
+					}
+
+					// Fallback to original data if unmarshal fails
 					select {
 					case msgChan <- m.Data:
 					default:

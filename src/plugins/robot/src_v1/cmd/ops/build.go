@@ -27,7 +27,7 @@ func Build(flags ...string) error {
 
 	robotBinDir := filepath.Join("src", "plugins", "robot", "bin")
 	fmt.Printf(">> [Robot] Building Dialtone Binary into %s\n", robotBinDir)
-	
+
 	args := []string{"--output-dir", robotBinDir, "--skip-web", "--skip-www"}
 	args = append(args, flags...)
 	build.RunBuild(args)

@@ -18,7 +18,7 @@ func Dev() error {
 	if err != nil {
 		return err
 	}
-	
+
 	// 1. Ensure UI dev server is running in the background
 	uiDir := filepath.Join(cwd, "src", "plugins", "robot", "src_v1", "ui")
 	devCmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "dev", "--host", "127.0.0.1", "--port", "3000")
