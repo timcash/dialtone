@@ -131,7 +131,7 @@ canvas[aria-label='Three Canvas'] {
   bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
   display: grid;
   grid-template-columns: repeat(3, minmax(56px, 1fr));
-  grid-template-rows: 86px repeat(3, minmax(56px, auto)) 46px;
+  grid-template-rows: 128px repeat(3, minmax(56px, auto)) 46px;
   gap: 12px;
   z-index: 11;
   pointer-events: auto;
@@ -173,6 +173,8 @@ canvas[aria-label='Three Canvas'] {
 .dag-chatlog-xterm .xterm-rows > div:nth-last-child(3) { opacity: 0.56; }
 .dag-chatlog-xterm .xterm-rows > div:nth-last-child(4) { opacity: 0.42; }
 .dag-chatlog-xterm .xterm-rows > div:nth-last-child(5) { opacity: 0.3; }
+.dag-chatlog-xterm .xterm-rows > div:nth-last-child(6) { opacity: 0.22; }
+.dag-chatlog-xterm .xterm-rows > div:nth-last-child(7) { opacity: 0.16; }
 
 .dag-controls > .dag-thumb {
   width: 100%;
