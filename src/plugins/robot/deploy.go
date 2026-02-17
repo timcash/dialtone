@@ -225,8 +225,11 @@ WantedBy=multi-user.target`, remotePath, *hostname, mavlinkFlag, remoteDeployDir
 		checkPort = 80
 		
 		// 1. Wait for service to be active
+		timeout := 15 * time.Second
+		logger.LogInfo("[DEPLOY] Step 1: Waiting for dialtone.service to be ACTIVE (Timeout: %v)...", timeout)
 		active := false
-		for i := 0; i < 15; i++ {
+		start := time.Now()
+		for time.Since(start) < timeout {
 			out, _ := core_ssh.RunSSHCommand(client, "systemctl is-active dialtone.service")
 			if strings.TrimSpace(out) == "active" {
 				active = true
@@ -242,8 +245,11 @@ WantedBy=multi-user.target`, remotePath, *hostname, mavlinkFlag, remoteDeployDir
 	}
 
 	// 2. Internal Web Health Check (from robot perspective)
+	webTimeout := 20 * time.Second
+	logger.LogInfo("[DEPLOY] Step 2: Internal Web Health Check (Timeout: %v)...", webTimeout)
 	webOK := false
-	for i := 0; i < 10; i++ {
+	webStart := time.Now()
+	for time.Since(webStart) < webTimeout {
 		healthCheckCmd := fmt.Sprintf("curl -s -o /dev/null -w \"%%%%{http_code}\" http://127.0.0.1:%d/health", checkPort)
 		out, err := core_ssh.RunSSHCommand(client, healthCheckCmd)
 		if err == nil && strings.TrimSpace(out) == "200" {
@@ -258,8 +264,11 @@ WantedBy=multi-user.target`, remotePath, *hostname, mavlinkFlag, remoteDeployDir
 	}
 
 	// 3. Internal NATS Check (using bash native dev-tcp)
+	natsTimeout := 10 * time.Second
+	logger.LogInfo("[DEPLOY] Step 3: Internal NATS Port 4222 Check (Timeout: %v)...", natsTimeout)
 	natsOK := false
-	for i := 0; i < 5; i++ {
+	natsStart := time.Now()
+	for time.Since(natsStart) < natsTimeout {
 		natsCheckCmd := "timeout 1 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/4222' && echo OK"
 		out, err := core_ssh.RunSSHCommand(client, natsCheckCmd)
 		if err == nil && strings.Contains(out, "OK") {
@@ -275,9 +284,11 @@ WantedBy=multi-user.target`, remotePath, *hostname, mavlinkFlag, remoteDeployDir
 
 	// 4. External Reachability Check
 	if *service {
-		logger.LogInfo("[DEPLOY] Check 4: Verifying Tailscale reachability (http://%s/health)...", *hostname)
+		externalTimeout := 60 * time.Second
+		logger.LogInfo("[DEPLOY] Step 4: Verifying Tailscale reachability (http://%s/health) (Timeout: %v)...", *hostname, externalTimeout)
 		externalOK := false
-		for i := 0; i < 6; i++ {
+		extStart := time.Now()
+		for time.Since(extStart) < externalTimeout {
 			externalClient := &http.Client{Timeout: 10 * time.Second}
 			resp, err := externalClient.Get(fmt.Sprintf("http://%s/health", *hostname))
 			if err == nil && resp.StatusCode == http.StatusOK {
@@ -293,8 +304,9 @@ WantedBy=multi-user.target`, remotePath, *hostname, mavlinkFlag, remoteDeployDir
 			fmt.Printf("\n--- REMOTE SERVICE LOGS ---\n%s\n--- END LOGS ---\n", logs)
 		}
 	} else {
-		logger.LogInfo("[DEPLOY] Check 4: Verifying LAN reachability (http://%s:8080/health)...", *host)
-		externalClient := &http.Client{Timeout: 5 * time.Second}
+		lanTimeout := 5 * time.Second
+		logger.LogInfo("[DEPLOY] Step 4: Verifying LAN reachability (http://%s:8080/health) (Timeout: %v)...", *host, lanTimeout)
+		externalClient := &http.Client{Timeout: lanTimeout}
 		resp, err := externalClient.Get(fmt.Sprintf("http://%s:8080/health", *host))
 		if err == nil && resp.StatusCode == http.StatusOK {
 			logger.LogInfo("[DEPLOY] Check 4: LAN Web OK (200)")

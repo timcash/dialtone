@@ -241,10 +241,11 @@ func RunDiagnostic(versionDir string) error {
 	}
 
 	for i, step := range steps {
-		logger.LogInfo("[DIAGNOSTIC] Step %d: %s...", i+1, step.name)
+		timeout := 15 * time.Second
+		logger.LogInfo("[DIAGNOSTIC] Step %d: %s (Timeout: %v)...", i+1, step.name, timeout)
 		
 		// Create a context with timeout for this step
-		stepCtx, stepCancel := context.WithTimeout(session.Context(), 15*time.Second)
+		stepCtx, stepCancel := context.WithTimeout(session.Context(), timeout)
 		err := step.validation(stepCtx)
 		stepCancel()
 
