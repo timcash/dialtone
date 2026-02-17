@@ -129,10 +129,11 @@ canvas[aria-label='Three Canvas'] {
   width: min(500px, calc(100vw - 28px));
   max-width: 500px;
   bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+  --dag-controls-gap: 12px;
   display: grid;
   grid-template-columns: repeat(3, minmax(56px, 1fr));
-  grid-template-rows: 128px repeat(3, minmax(56px, auto)) 46px;
-  gap: 12px;
+  grid-template-rows: 84px repeat(3, minmax(56px, auto)) 46px;
+  gap: var(--dag-controls-gap);
   z-index: 11;
   pointer-events: auto;
 }
@@ -142,6 +143,9 @@ canvas[aria-label='Three Canvas'] {
   grid-column: 1 / span 3;
   width: 100%;
   height: 100%;
+  display: flex;
+  align-items: flex-end;
+  margin-bottom: calc(-1 * var(--dag-controls-gap));
   pointer-events: none;
   background: transparent;
 }
@@ -152,8 +156,12 @@ canvas[aria-label='Three Canvas'] {
 .dag-chatlog-xterm .xterm-screen,
 .dag-chatlog-xterm .xterm-rows {
   width: 100%;
-  height: 100%;
+  height: auto;
   background: transparent !important;
+}
+
+.dag-chatlog-xterm {
+  align-self: end;
 }
 
 .dag-chatlog-xterm .xterm-viewport {
@@ -169,12 +177,12 @@ canvas[aria-label='Three Canvas'] {
 }
 
 .dag-chatlog-xterm .xterm-rows > div:nth-last-child(1) { opacity: 0.98; }
-.dag-chatlog-xterm .xterm-rows > div:nth-last-child(2) { opacity: 0.72; }
-.dag-chatlog-xterm .xterm-rows > div:nth-last-child(3) { opacity: 0.56; }
-.dag-chatlog-xterm .xterm-rows > div:nth-last-child(4) { opacity: 0.42; }
-.dag-chatlog-xterm .xterm-rows > div:nth-last-child(5) { opacity: 0.3; }
-.dag-chatlog-xterm .xterm-rows > div:nth-last-child(6) { opacity: 0.22; }
-.dag-chatlog-xterm .xterm-rows > div:nth-last-child(7) { opacity: 0.16; }
+.dag-chatlog-xterm .xterm-rows > div:nth-last-child(2) { opacity: 0.9; }
+.dag-chatlog-xterm .xterm-rows > div:nth-last-child(3) { opacity: 0.82; }
+.dag-chatlog-xterm .xterm-rows > div:nth-last-child(4) { opacity: 0.74; }
+.dag-chatlog-xterm .xterm-rows > div:nth-last-child(5) { opacity: 0.66; }
+.dag-chatlog-xterm .xterm-rows > div:nth-last-child(6) { opacity: 0.58; }
+.dag-chatlog-xterm .xterm-rows > div:nth-last-child(7) { opacity: 0.5; }
 
 .dag-controls > .dag-thumb {
   width: 100%;

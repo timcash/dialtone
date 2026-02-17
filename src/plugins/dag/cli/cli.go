@@ -62,6 +62,7 @@ func Run(args []string) error {
 	case "test":
 		testFlags := flag.NewFlagSet("dag test", flag.ContinueOnError)
 		attach := testFlags.Bool("attach", false, "Attach to running headed dev browser session")
+		cps := testFlags.Int("cps", 3, "Max clicks per second for UI interactions (must be >= 1)")
 		dir := getDir()
 		if len(args) > 1 && args[1] != "" && !strings.HasPrefix(args[1], "-") {
 			dir = args[1]
@@ -69,7 +70,10 @@ func Run(args []string) error {
 		} else {
 			_ = testFlags.Parse(args[1:])
 		}
-		return RunTest(dir, *attach)
+		if *cps < 1 {
+			return fmt.Errorf("--cps must be >= 1")
+		}
+		return RunTest(dir, *attach, *cps)
 	case "src":
 		n := 0
 		if len(args) > 1 && !strings.HasPrefix(args[1], "-") {
@@ -125,6 +129,7 @@ func printUsage() {
 	fmt.Println("\nExamples:")
 	fmt.Println("  ./dialtone.sh dag test src_v3")
 	fmt.Println("  ./dialtone.sh dag test src_v3 --attach")
+	fmt.Println("  ./dialtone.sh dag test src_v3 --cps 2")
 	fmt.Println("  ./dialtone.sh dag dev src_v3")
 	fmt.Println("  ./dialtone.sh dag src --n 5    # creates src/plugins/dag/src_v5")
 }
