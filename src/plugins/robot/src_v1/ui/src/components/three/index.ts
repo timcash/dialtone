@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { VisualizationControl } from '../../../../../../../libs/ui_v2/types';
+import { addMavlinkListener } from '../../data/connection';
 
 class ThreeControl implements VisualizationControl {
   private scene = new THREE.Scene();
@@ -8,7 +9,7 @@ class ThreeControl implements VisualizationControl {
   private robotGroup: THREE.Group;
   private visible = false;
   private frameId = 0;
-  private ws: WebSocket | null = null;
+  private unsubscribe: (() => void) | null = null;
   private attitude = { roll: 0, pitch: 0, yaw: 0 };
   private latencyHistory: number[] = [];
   private maxHistory = 60;
@@ -63,88 +64,72 @@ class ThreeControl implements VisualizationControl {
     // Stub debug bridge for test compatibility
     this.attachDebugBridge();
     
-    this.connectWS();
+    this.initDataListener();
     this.animate();
   }
 
-  private connectWS() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    this.ws = new WebSocket(`${protocol}//${host}/ws`);
-    
-    this.ws.onmessage = (event) => {
-      try {
-        const raw = JSON.parse(event.data);
-
-        // Track latency for any message that has timestamps
-        if (raw.t_raw !== undefined) {
-          this.updateLatency(raw);
-        }
-        
-        // Handle direct stats object (from ticker)
-        if (raw.uptime !== undefined) {
-           this.handleStats(raw);
-           return;
-        }
-
-        // Handle Mavlink messages
-        if (raw.type === 'HEARTBEAT') {
-           const modeEl = document.getElementById('hud-mode');
-           if (modeEl && raw.custom_mode !== undefined) modeEl.innerText = `MODE ${raw.custom_mode}`;
-        } else if (raw.roll !== undefined || raw.attitude !== undefined) {
-           // Attitude (Direct or Nested)
-           const att = raw.attitude || raw;
-           this.attitude.roll = att.roll ?? 0;
-           this.attitude.pitch = att.pitch ?? 0;
-           this.attitude.yaw = att.yaw ?? 0;
-           
-           const hdgEl = document.getElementById('hud-hdg');
-           if (hdgEl) {
-             let deg = this.attitude.yaw * (180 / Math.PI);
-             if (deg < 0) deg += 360;
-             hdgEl.innerText = deg.toFixed(1);
-           }
-        } else if (raw.lat !== undefined) {
-           // Global Position
-           const pos = raw.global_position_int || raw;
-           const gpsEl = document.getElementById('hud-gps');
-           const altEl = document.getElementById('hud-alt');
-           const hdgEl = document.getElementById('hud-hdg');
-           if (gpsEl) {
-             const lat = pos.lat ?? 0;
-             const lon = pos.lon ?? 0;
-             gpsEl.innerText = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
-           }
-           if (altEl) {
-             const alt = pos.relative_alt ?? 0;
-             altEl.innerText = alt.toFixed(1);
-           }
-           if (hdgEl) {
-             const hdg = pos.hdg ?? -1;
-             if (hdg !== -1) hdgEl.innerText = hdg.toFixed(1);
-           }
-        } else if (raw.severity !== undefined) {
-           // Statustext
-           const msg = raw.text ?? "";
-           const errorsEl = document.getElementById('hud-errors');
-           if (errorsEl && msg) {
-             const div = document.createElement('div');
-             div.className = 'hud-error-item';
-             div.innerText = msg;
-             errorsEl.prepend(div);
-             while (errorsEl.children.length > 3) errorsEl.removeChild(errorsEl.lastChild!);
-           }
-        }
-      } catch (e) {
-        // Silently ignore non-JSON or other message formats
+  private initDataListener() {
+    this.unsubscribe = addMavlinkListener((raw: any) => {
+      // Track latency for any message that has timestamps
+      if (raw.t_raw !== undefined) {
+        this.updateLatency(raw);
       }
-    };
-
-    this.ws.onclose = () => {
-      if (this.visible) {
-        setTimeout(() => this.connectWS(), 2000);
+      
+      // Handle direct stats object (from system status poll)
+      if (raw.uptime !== undefined) {
+         this.handleStats(raw);
+         return;
       }
-    };
+
+      // Handle Mavlink messages
+      if (raw.type === 'HEARTBEAT') {
+         const modeEl = document.getElementById('hud-mode');
+         if (modeEl && raw.custom_mode !== undefined) modeEl.innerText = `MODE ${raw.custom_mode}`;
+      } else if (raw.roll !== undefined || raw.attitude !== undefined) {
+         // Attitude (Direct or Nested)
+         const att = raw.attitude || raw;
+         this.attitude.roll = att.roll ?? 0;
+         this.attitude.pitch = att.pitch ?? 0;
+         this.attitude.yaw = att.yaw ?? 0;
+         
+         const hdgEl = document.getElementById('hud-hdg');
+         if (hdgEl) {
+           let deg = this.attitude.yaw * (180 / Math.PI);
+           if (deg < 0) deg += 360;
+           hdgEl.innerText = deg.toFixed(1);
+         }
+      } else if (raw.lat !== undefined) {
+         // Global Position
+         const pos = raw.global_position_int || raw;
+         const gpsEl = document.getElementById('hud-gps');
+         const altEl = document.getElementById('hud-alt');
+         const hdgEl = document.getElementById('hud-hdg');
+         if (gpsEl) {
+           const lat = pos.lat ?? 0;
+           const lon = pos.lon ?? 0;
+           gpsEl.innerText = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+         }
+         if (altEl) {
+           const alt = pos.relative_alt ?? 0;
+           altEl.innerText = alt.toFixed(1);
+         }
+         if (hdgEl) {
+           const hdg = pos.hdg ?? -1;
+           if (hdg !== -1) hdgEl.innerText = hdg.toFixed(1);
+         }
+      } else if (raw.severity !== undefined) {
+         // Statustext
+         const msg = raw.text ?? "";
+         const errorsEl = document.getElementById('hud-errors');
+         if (errorsEl && msg) {
+           const div = document.createElement('div');
+           div.className = 'hud-error-item';
+           div.innerText = msg;
+           errorsEl.prepend(div);
+           while (errorsEl.children.length > 3) errorsEl.removeChild(errorsEl.lastChild!);
+         }
+      }
+    });
   }
 
   private handleStats(data: any) {
@@ -191,14 +176,16 @@ class ThreeControl implements VisualizationControl {
     if (t_raw < 10000000000) t_raw *= 1000;
 
     const t_pub = raw.t_pub ? raw.t_pub : t_raw;
-    const t_relay = raw.t_relay ? raw.t_relay : t_pub;
-
+    // With direct NATS, there is no t_relay from Go.
+    // So Q (Queueing in Relay) is effectively 0 or N/A.
+    // We treat Network as now - t_pub.
+    
     const total = now - t_raw;
     const proc = t_pub - t_raw;
-    const nats = t_relay - t_pub;
-    const net = now - t_relay;
+    // nats (Queueing) bypassed in direct connection
+    const net = now - t_pub;
 
-    // Sanity check: Ignore if total latency is over 10 seconds (likely clock drift or bug)
+    // Sanity check
     if (total > 10000 || total < -1000) return;
 
     this.latencyHistory.push(total);
@@ -208,7 +195,7 @@ class ThreeControl implements VisualizationControl {
 
     const el = document.getElementById('hud-latency');
     if (el) {
-      el.innerHTML = `<span title="Total">${total}</span>ms <small style="font-size:0.6rem; opacity:0.6">(P:${proc}/Q:${nats}/N:${net})</small>`;
+      el.innerHTML = `<span title="Total">${total}</span>ms <small style="font-size:0.6rem; opacity:0.6">(P:${proc}/N:${net})</small>`;
     }
     this.drawLatencyGraph();
   }
@@ -275,15 +262,10 @@ class ThreeControl implements VisualizationControl {
     if (!this.visible) return;
 
     if (this.robotGroup) {
-      // Mapping MAVLink (NED) to Three.js (Forward: +Y, Right: +X, Up: +Z)
-      // MAVLink Roll (+ right)  -> Three.js Roll (+ around Y)
-      // MAVLink Pitch (+ down)  -> Three.js Pitch (+ around X)
-      // MAVLink Yaw (+ right)   -> Three.js Yaw (- around Z)
-      
       this.robotGroup.rotation.set(
-        this.attitude.pitch,  // Pitch around X
-        -this.attitude.roll,  // Roll around Y (negative because MAVLink roll right is positive but Three.js Y-rotation is counter-clockwise looking from +Y)
-        -this.attitude.yaw,   // Yaw around Z
+        this.attitude.pitch,
+        -this.attitude.roll,
+        -this.attitude.yaw,
         'YXZ'
       );
     }
@@ -294,8 +276,8 @@ class ThreeControl implements VisualizationControl {
   dispose(): void {
     cancelAnimationFrame(this.frameId);
     window.removeEventListener('resize', this.resize);
-    if (this.ws) {
-      this.ws.close();
+    if (this.unsubscribe) {
+      this.unsubscribe();
     }
     delete (window as any).robotThreeDebug;
     this.renderer.dispose();
@@ -313,4 +295,3 @@ export function mountThree(container: HTMLElement): VisualizationControl {
   control.setVisible(true); // Ensure visibility is set for animation
   return control;
 }
-

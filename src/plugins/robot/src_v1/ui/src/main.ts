@@ -1,9 +1,6 @@
 import { setupApp } from '../../../../../libs/ui_v2/ui';
 import './style.css';
-import { JSONCodec, connect, type NatsConnection } from 'nats.ws';
-
-export let NATS_CONNECTION: NatsConnection | null = null;
-export const NATS_JSON_CODEC = JSONCodec();
+import { initConnection, sendCommand } from './data/connection';
 
 declare const APP_VERSION: string;
 
@@ -15,50 +12,8 @@ if (versionEl) {
   versionEl.textContent = `v${APP_VERSION}`;
 }
 
-// --- NATS Connection ---
-async function initNATS() {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const hostname = window.location.hostname;
-
-  try {
-    const res = await fetch('/api/init');
-    const data = await res.json();
-    // Use internal_ws_port if available (dynamic discovery), fallback to ws_port
-    const wsPort = data.internal_ws_port || data.ws_port || 4223;
-    const wsPath = data.ws_path || '';
-
-    let server = '';
-    if (wsPath) {
-      server = `${protocol}//${window.location.host}${wsPath}`;
-    } else {
-      server = `${protocol}//${hostname}:${wsPort}`;
-    }
-
-    console.log(`[NATS] Connecting to ${server}...`);
-    NATS_CONNECTION = await connect({ servers: [server] });
-    console.log(`[NATS] Connected.`);
-
-    NATS_CONNECTION.closed().then(() => {
-      console.warn('[NATS] Connection closed, retrying...');
-      setTimeout(initNATS, 2000);
-    });
-  } catch (err) {
-    console.error('[NATS] Connection failed:', err);
-    setTimeout(initNATS, 5000);
-  }
-}
-
-initNATS();
-
-function sendCommand(cmd: string, mode?: string) {
-  if (!NATS_CONNECTION) {
-    console.warn('[NATS] Not connected, cannot send command:', cmd);
-    return;
-  }
-  const payload: any = { cmd };
-  if (mode) payload.mode = mode;
-  NATS_CONNECTION.publish('rover.command', NATS_JSON_CODEC.encode(payload));
-}
+// Initialize Connection (NATS + Polling)
+initConnection();
 
 // --- Button Listeners for Three Section ---
 document.getElementById('three-arm')?.addEventListener('click', () => sendCommand('arm'));
