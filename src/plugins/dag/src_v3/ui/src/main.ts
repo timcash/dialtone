@@ -1,8 +1,25 @@
 import { setupApp } from '../../../../../libs/ui_v2/ui';
 import './style.css';
 
+const isLocalDevHost = ['127.0.0.1', 'localhost'].includes(window.location.hostname);
+
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
+    if (isLocalDevHost) {
+      void navigator.serviceWorker.getRegistrations().then((regs) => {
+        regs.forEach((reg) => void reg.unregister());
+      });
+      if ('caches' in window) {
+        void caches.keys().then((keys) => {
+          keys.forEach((key) => {
+            if (key.includes('dag') || key.includes('dialtone') || key.includes('workbox')) {
+              void caches.delete(key);
+            }
+          });
+        });
+      }
+      return;
+    }
     void navigator.serviceWorker.register('/sw.js').catch((err) => {
       console.warn('[DAG PWA] service worker registration failed', err);
     });
@@ -61,6 +78,11 @@ const readStoredSection = (): DagSectionID | null => {
   } catch {
     return null;
   }
+};
+
+const readHashSection = (): DagSectionID | null => {
+  const hashID = window.location.hash.slice(1);
+  return sectionSet.has(hashID) ? (hashID as DagSectionID) : null;
 };
 
 const writeStoredSection = (sectionId: DagSectionID) => {
@@ -132,9 +154,9 @@ menu.addButton('Stage', 'Navigate Stage', () => {
 });
 
 const syncSectionFromURL = () => {
-  const hashID = window.location.hash.slice(1);
+  const hashID = readHashSection();
   const storedSection = readStoredSection();
-  const targetID = sectionSet.has(hashID) ? (hashID as DagSectionID) : storedSection ?? defaultSection;
+  const targetID = hashID ?? storedSection ?? defaultSection;
   const activeID = sections.getActiveSectionId();
   if (activeID === targetID && isSectionActuallyVisible(targetID)) {
     writeStoredSection(targetID);
@@ -187,3 +209,9 @@ window.addEventListener('keydown', (event) => {
 void runStartupProbe().finally(() => {
   syncSectionFromURL();
 });
+
+const initialHashSection = readHashSection();
+if (initialHashSection) {
+  defaultSection = initialHashSection;
+}
+syncSectionFromURL();

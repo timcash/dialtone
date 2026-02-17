@@ -21,8 +21,15 @@ func Run02StartupMenuToStageFresh(ctx *testCtx) (string, error) {
 		return "", fmt.Errorf("clear startup session state: %w", err)
 	}
 
-	if err := ctx.navigate("http://127.0.0.1:8080/"); err != nil {
-		return "", fmt.Errorf("fresh app navigate failed: %w", err)
+	if err := ctx.waitHTTPReady(ctx.appURL("/"), 12*time.Second); err != nil {
+		return "", fmt.Errorf("backend startup wait failed: %w", err)
+	}
+	if err := ctx.navigate(ctx.appURL("/")); err != nil {
+		ctx.appendThought("startup nav: first navigate failed, retrying once after short wait")
+		time.Sleep(500 * time.Millisecond)
+		if errRetry := ctx.navigate(ctx.appURL("/")); errRetry != nil {
+			return "", fmt.Errorf("fresh app navigate failed: %w", errRetry)
+		}
 	}
 
 	if err := ctx.waitAria("Toggle Global Menu", "fresh startup needs menu toggle"); err != nil {

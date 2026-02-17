@@ -449,14 +449,15 @@ class ThreeControl implements VisualizationControl {
     if (!term) return;
     const lines = this.chatlogLines.slice(-CHATLOG_MAX_LINES);
     const padCount = Math.max(0, CHATLOG_MAX_LINES - lines.length);
-    term.write('\x1b[2J\x1b[H');
-    for (let i = 0; i < padCount; i += 1) term.writeln('');
+    const rendered: string[] = [];
+    for (let i = 0; i < padCount; i += 1) rendered.push('');
     for (let i = 0; i < lines.length; i += 1) {
       const age = lines.length - 1 - i;
       const color =
         age === 0 ? '\x1b[97m' : age === 1 ? '\x1b[37m' : age === 2 ? '\x1b[2;37m' : age === 3 ? '\x1b[90m' : '\x1b[2;90m';
-      term.writeln(`${color}${lines[i]}\x1b[0m`);
+      rendered.push(`${color}${lines[i]}\x1b[0m`);
     }
+    term.write(`\x1b[2J\x1b[H${rendered.join('\r\n')}`);
   }
 
   private appendThought(text: string): boolean {
@@ -931,12 +932,19 @@ class ThreeControl implements VisualizationControl {
     this.stageCamera.framePoint(center, maxDim, view);
   }
 
+  private getFixedNodeCameraDistance(view: CameraView): number {
+    if (view === 'top') return 20;
+    if (view === 'side') return 18;
+    if (view === 'front') return 18;
+    return 19; // iso
+  }
+
   private focusCameraOnNode(nodeId: NodeID): boolean {
     const node = this.nodes.get(nodeId);
     if (!node) return false;
     const center = node.mesh.getWorldPosition(new THREE.Vector3());
-    const bounds = this.getLayerBounds(node.layerId);
-    this.positionCameraAroundPoint(center, bounds.ok ? Math.max(4, bounds.maxDim) : 6, this.cameraView);
+    const fixedDistance = this.getFixedNodeCameraDistance(this.cameraView);
+    this.stageCamera.framePointFixed(center, fixedDistance, this.cameraView);
     return true;
   }
 
@@ -1489,6 +1497,11 @@ class ThreeControl implements VisualizationControl {
 
   setVisible(visible: boolean): void {
     this.visible = visible;
+    if (!visible) return;
+    // When section visibility changes (especially after refresh/hash restore),
+    // container dimensions can differ from initialization. Re-sync camera/renderer.
+    this.resize();
+    requestAnimationFrame(() => this.resize());
   }
 }
 
