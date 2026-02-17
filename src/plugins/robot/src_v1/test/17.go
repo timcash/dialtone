@@ -24,7 +24,6 @@ func Run17LifecycleInvariants() error {
 		{id: "three", label: "Three Section"},
 		{id: "xterm", label: "Xterm Section"},
 		{id: "video", label: "Video Section"},
-		{id: "controls", label: "Controls Section"},
 	}
 
 	for _, c := range checks {

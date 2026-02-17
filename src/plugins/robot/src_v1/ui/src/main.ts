@@ -23,7 +23,8 @@ async function initNATS() {
   try {
     const res = await fetch('/api/init');
     const data = await res.json();
-    const wsPort = data.ws_port || 4223;
+    // Use internal_ws_port if available (dynamic discovery), fallback to ws_port
+    const wsPort = data.internal_ws_port || data.ws_port || 4223;
     const wsPath = data.ws_path || '';
 
     let server = '';

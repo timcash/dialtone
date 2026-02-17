@@ -40,20 +40,53 @@ func resolveWinBin(binName string, fallbackPath string) string {
 	return binName
 }
 
-// CleanupPort attempts to kill any process listening on the specified port.
+// CleanupPort attempts to kill any process listening on the specified port, 
+// but only if it matches Dialtone-related patterns to avoid killing unrelated tools (like Cursor/SSH).
 func CleanupPort(port int) error {
+	killIfDialtone := func(pidStr string) {
+		var pid int
+		fmt.Sscanf(pidStr, "%d", &pid)
+		if pid <= 0 {
+			return
+		}
+		p, err := process.NewProcess(int32(pid))
+		if err != nil {
+			return
+		}
+		cmdline, _ := p.Cmdline()
+		name, _ := p.Name()
+		
+		cwd, _ := os.Getwd()
+		procCwd, _ := p.Cwd()
+		
+		// Only kill if it looks like our stuff
+		isDialtone := strings.Contains(strings.ToLower(cmdline), "dialtone") || 
+		              strings.Contains(strings.ToLower(name), "dialtone") ||
+					  strings.Contains(strings.ToLower(cmdline), "vite") ||
+					  strings.Contains(strings.ToLower(cmdline), "bun") ||
+					  strings.Contains(strings.ToLower(name), "node") ||
+					  (strings.Contains(strings.ToLower(name), "main") && strings.HasPrefix(procCwd, cwd)) ||
+					  strings.Contains(strings.ToLower(cmdline), "--dialtone-origin")
+
+		if isDialtone {
+			fmt.Printf("Cleaning up Dialtone-related process on port %d (PID: %d, Name: %s)...\n", port, pid, name)
+			_ = p.Kill()
+		} else {
+			fmt.Printf("Skipping cleanup of non-Dialtone process on port %d (PID: %d, Name: %s)...\n", port, pid, name)
+		}
+	}
+
 	switch runtime.GOOS {
 	case "darwin":
-		// macOS: Use lsof to find and kill the process
 		cmd := exec.Command("lsof", "-ti", fmt.Sprintf(":%d", port))
 		out, _ := cmd.Output()
 		pids := strings.Fields(string(out))
 		for _, pid := range pids {
-			fmt.Printf("Cleaning up stale process on port %d (PID: %s)...\n", port, pid)
-			exec.Command("kill", "-9", pid).Run()
+			killIfDialtone(pid)
 		}
 	case "linux":
 		if IsWSL() {
+			// Windows side cleanup remains broad for now but we could refine it if needed
 			cmdBin := resolveWinBin("cmd.exe", "")
 			tkBin := resolveWinBin("taskkill.exe", "")
 			cmd := exec.Command(cmdBin, "/c", fmt.Sprintf("netstat -ano | findstr :%d", port))
@@ -71,18 +104,12 @@ func CleanupPort(port int) error {
 			}
 		}
 
-		// Always check native Linux processes (on both pure Linux and WSL)
+		// Check native Linux processes
 		cmd := exec.Command("lsof", "-ti", fmt.Sprintf(":%d", port))
 		out, _ := cmd.Output()
 		pids := strings.Fields(string(out))
-		if len(pids) > 0 {
-			for _, pid := range pids {
-				fmt.Printf("Cleaning up stale Linux process on port %d (PID: %s) via lsof...\n", port, pid)
-				exec.Command("kill", "-9", pid).Run()
-			}
-		} else {
-			// Fallback to fuser
-			exec.Command("fuser", "-k", fmt.Sprintf("%d/tcp", port)).Run()
+		for _, pid := range pids {
+			killIfDialtone(pid)
 		}
 	}
 	return nil

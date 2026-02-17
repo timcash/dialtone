@@ -22,12 +22,25 @@ func ProxyListener(ln net.Listener, targetAddr string) {
 func ProxyConnection(src net.Conn, targetAddr string) {
 	defer src.Close()
 
+	// Apply TCP optimizations if possible
+	if tcpSrc, ok := src.(*net.TCPConn); ok {
+		tcpSrc.SetNoDelay(true)
+		tcpSrc.SetReadBuffer(64 * 1024)
+		tcpSrc.SetWriteBuffer(64 * 1024)
+	}
+
 	dst, err := net.Dial("tcp", targetAddr)
 	if err != nil {
 		logger.LogInfo("Failed to connect to proxy backend: %v", err)
 		return
 	}
 	defer dst.Close()
+
+	if tcpDst, ok := dst.(*net.TCPConn); ok {
+		tcpDst.SetNoDelay(true)
+		tcpDst.SetReadBuffer(64 * 1024)
+		tcpDst.SetWriteBuffer(64 * 1024)
+	}
 
 	// Bidirectional copy
 	done := make(chan struct{}, 2)

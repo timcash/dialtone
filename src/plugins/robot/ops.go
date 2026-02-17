@@ -18,8 +18,14 @@ import (
 
 // Versioned Source Commands (routing to ops files)
 
-func RunInstall(versionDir string) error {
+func RunInstall(versionDir string, flags ...string) error {
 	if versionDir == "src_v1" {
+		// Check for --remote flag
+		for _, flag := range flags {
+			if flag == "--remote" {
+				return RunRemoteInstall(versionDir, flags)
+			}
+		}
 		return robot_ops.Install()
 	}
 	fmt.Printf(">> [Robot] Install: %s\n", versionDir)
@@ -29,6 +35,49 @@ func RunInstall(versionDir string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+func RunRemoteInstall(versionDir string, flags []string) error {
+	logger.LogInfo("[ROBOT] Remote install for %s requested.", versionDir)
+
+	// 1. Sync code to the remote robot (includes env/.env now)
+	RunSyncCode(versionDir, []string{})
+
+	// 2. SSH into the robot and run the install command
+	host := os.Getenv("ROBOT_HOST")
+	user := os.Getenv("ROBOT_USER")
+	pass := os.Getenv("ROBOT_PASSWORD")
+
+	if host == "" || user == "" || pass == "" {
+		logger.LogFatal("Error: ROBOT_HOST, ROBOT_USER, ROBOT_PASSWORD must be set for remote install.")
+	}
+
+	client, err := core_ssh.DialSSH(host, "22", user, pass)
+	if err != nil {
+		logger.LogFatal("Failed to connect to robot via SSH: %v", err)
+	}
+	defer client.Close()
+
+	cwd, _ := os.Getwd()
+	baseDir := filepath.Base(cwd)
+	remoteHome := os.Getenv("REMOTE_DIR_SRC")
+	if remoteHome == "" {
+		remoteHome = fmt.Sprintf("/home/%s/%s", user, baseDir)
+	}
+	
+	// Set DIALTONE_ENV explicitly for the remote command and ensure we use the same relative path
+	// MIRROR LOGIC: We assume the robot has the same directory structure.
+	remoteCmd := fmt.Sprintf("cd %s && export DIALTONE_ENV=env/.env && ./dialtone.sh install && ./dialtone.sh robot install %s", remoteHome, versionDir)
+	logger.LogInfo("[ROBOT] Executing remote install: %s", remoteCmd)
+
+	output, err := core_ssh.RunSSHCommand(client, remoteCmd)
+	if err != nil {
+		logger.LogFatal("Remote install failed: %v\nOutput: %s", err, output)
+	}
+
+	logger.LogInfo("[ROBOT] Remote install successful.")
+	fmt.Print(output)
+	return nil
 }
 
 func RunFmt(versionDir string) error {
@@ -212,7 +261,7 @@ func RunVersionedTest(versionDir string, extraArgs []string) error {
 func RunRemoteBuild(versionDir string, flags []string) error {
 	logger.LogInfo("[ROBOT] Remote build for %s requested.", versionDir)
 
-	// 1. Sync code to the remote robot
+	// 1. Sync code to the remote robot (includes env/.env now)
 	RunSyncCode(versionDir, []string{})
 
 	// 2. SSH into the robot and run the build command
@@ -230,12 +279,15 @@ func RunRemoteBuild(versionDir string, flags []string) error {
 	}
 	defer client.Close()
 
+	cwd, _ := os.Getwd()
+	baseDir := filepath.Base(cwd)
 	remoteHome := os.Getenv("REMOTE_DIR_SRC")
 	if remoteHome == "" {
-		remoteHome = fmt.Sprintf("/home/%s/dialtone_src", user)
+		remoteHome = fmt.Sprintf("/home/%s/%s", user, baseDir)
 	}
 	
-	remoteCmd := fmt.Sprintf("cd %s && ./dialtone.sh robot build %s", remoteHome, versionDir)
+	// Set DIALTONE_ENV explicitly for the remote command and ensure we use the same relative path
+	remoteCmd := fmt.Sprintf("cd %s && export DIALTONE_ENV=env/.env && ./dialtone.sh robot build %s", remoteHome, versionDir)
 	logger.LogInfo("[ROBOT] Executing remote build: %s", remoteCmd)
 
 	output, err := core_ssh.RunSSHCommand(client, remoteCmd)
