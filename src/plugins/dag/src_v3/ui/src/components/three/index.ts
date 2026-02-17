@@ -84,6 +84,7 @@ class ThreeControl implements VisualizationControl {
   private allMeshes: THREE.Mesh[] = [];
   private keyLight: THREE.DirectionalLight;
   private nestedLinks: NestedLink[] = [];
+  private cameraView: CameraView = ROOT_IO_CAMERA_VIEW;
 
   private userNodeCounter = 1;
   private edgeCounter = 1;
@@ -99,6 +100,9 @@ class ThreeControl implements VisualizationControl {
   private unlinkButton: HTMLButtonElement | null = null;
   private nestButton: HTMLButtonElement | null = null;
   private clearPicksButton: HTMLButtonElement | null = null;
+  private cameraTopButton: HTMLButtonElement | null = null;
+  private cameraIsoButton: HTMLButtonElement | null = null;
+  private cameraSideButton: HTMLButtonElement | null = null;
   private nodeHistoryLabelEl: HTMLElement | null = null;
   private nodeHistoryValueEls: HTMLElement[] = [];
 
@@ -339,6 +343,9 @@ class ThreeControl implements VisualizationControl {
     this.unlinkButton = this.container.querySelector("button[aria-label='DAG Unlink']");
     this.nestButton = this.container.querySelector("button[aria-label='DAG Nest']");
     this.clearPicksButton = this.container.querySelector("button[aria-label='DAG Clear Picks']");
+    this.cameraTopButton = this.container.querySelector("button[aria-label='DAG Camera Z']");
+    this.cameraIsoButton = this.container.querySelector("button[aria-label='DAG Camera ISO']");
+    this.cameraSideButton = this.container.querySelector("button[aria-label='DAG Camera Side']");
     this.nodeHistoryLabelEl = this.container.querySelector('.dag-history > h3');
     this.nodeHistoryValueEls = [
       this.container.querySelector("[aria-label='DAG Node History Item 1']"),
@@ -380,6 +387,9 @@ class ThreeControl implements VisualizationControl {
     this.clearPicksButton?.addEventListener('click', () => {
       this.clearSelections();
     });
+    this.cameraTopButton?.addEventListener('click', () => this.setCameraView('top'));
+    this.cameraIsoButton?.addEventListener('click', () => this.setCameraView('iso'));
+    this.cameraSideButton?.addEventListener('click', () => this.setCameraView('side'));
 
     this.renameApplyButton?.addEventListener('click', () => this.applyRenameFromInput());
     this.renameInput?.addEventListener('keydown', (event) => {
@@ -533,6 +543,17 @@ class ThreeControl implements VisualizationControl {
       this.renameInput.placeholder = selectedNode ? 'Rename selected node' : 'Select node to rename';
     }
     if (this.renameApplyButton) this.renameApplyButton.disabled = !selectedNode;
+    const cameraButtons = [
+      [this.cameraTopButton, 'top'],
+      [this.cameraIsoButton, 'iso'],
+      [this.cameraSideButton, 'side'],
+    ] as const;
+    for (const [button, view] of cameraButtons) {
+      if (!button) continue;
+      const active = this.cameraView === view;
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+      button.classList.toggle('is-active', active);
+    }
     for (let i = 0; i < this.nodeHistoryValueEls.length; i += 1) {
       this.nodeHistoryValueEls[i].textContent = this.recentSelectedNodeIDs[i] || 'none';
     }
@@ -586,6 +607,7 @@ class ThreeControl implements VisualizationControl {
       this.recentSelectedNodeIDs.unshift(nodeId);
       if (this.recentSelectedNodeIDs.length > 5) this.recentSelectedNodeIDs.length = 5;
       console.log(`[Three #three] selected node: ${nodeId}`);
+      this.focusCameraOnNode(nodeId);
     }
     this.refreshVisualState();
     this.syncCanvasState();
@@ -647,13 +669,18 @@ class ThreeControl implements VisualizationControl {
       this.updateNestedLinkGeometry(link);
       link.line.visible = link.childLayerId === layerId;
     }
-    this.fitCameraToLayer(layerId);
+    const selectedNode = this.nodes.get(this.selectedNodeId);
+    if (!selectedNode || selectedNode.layerId !== layerId || !selectedNode.mesh.visible) {
+      this.fitCameraToLayer(layerId);
+    } else {
+      this.focusCameraOnNode(selectedNode.id);
+    }
     this.refreshVisualState();
     this.syncCanvasState();
   }
 
   private fitCameraToLayer(layerId: LayerID) {
-    this.setCameraViewForLayer(layerId, ROOT_IO_CAMERA_VIEW);
+    this.setCameraViewForLayer(layerId, this.cameraView);
   }
 
   private getLayerBounds(layerId: LayerID): { ok: boolean; center: THREE.Vector3; maxDim: number } {
@@ -676,11 +703,19 @@ class ThreeControl implements VisualizationControl {
     return { ok: true, center, maxDim: Math.max(4, size.x, size.z) };
   }
 
-  private positionCameraAroundPoint(center: THREE.Vector3, maxDim: number) {
+  private positionCameraAroundPoint(center: THREE.Vector3, maxDim: number, view: CameraView) {
     const fov = THREE.MathUtils.degToRad(this.camera.fov);
     const aspectScale = this.camera.aspect < 1 ? 1 / this.camera.aspect : 1;
     const dist = ((maxDim * aspectScale) / (2 * Math.tan(fov / 2))) * 1.2 + 14;
-    this.camera.position.set(center.x + dist * 0.75, center.y + dist * 0.95, center.z + dist * 0.75);
+    if (view === 'top') {
+      this.camera.position.set(center.x, center.y + dist * 1.35, center.z + 0.01);
+    } else if (view === 'side') {
+      this.camera.position.set(center.x + dist * 1.2, center.y + dist * 0.42, center.z);
+    } else if (view === 'front') {
+      this.camera.position.set(center.x, center.y + dist * 0.42, center.z + dist * 1.2);
+    } else {
+      this.camera.position.set(center.x + dist * 0.75, center.y + dist * 0.95, center.z + dist * 0.75);
+    }
     this.camera.lookAt(center);
     this.camera.updateProjectionMatrix();
   }
@@ -690,14 +725,14 @@ class ThreeControl implements VisualizationControl {
     if (!node) return false;
     const center = node.mesh.getWorldPosition(new THREE.Vector3());
     const bounds = this.getLayerBounds(node.layerId);
-    this.positionCameraAroundPoint(center, bounds.ok ? Math.max(4, bounds.maxDim) : 6);
+    this.positionCameraAroundPoint(center, bounds.ok ? Math.max(4, bounds.maxDim) : 6, this.cameraView);
     return true;
   }
 
-  private setCameraViewForLayer(layerId: LayerID, _view: CameraView): boolean {
+  private setCameraViewForLayer(layerId: LayerID, view: CameraView): boolean {
     const bounds = this.getLayerBounds(layerId);
     if (!bounds.ok) return false;
-    this.positionCameraAroundPoint(bounds.center, bounds.maxDim);
+    this.positionCameraAroundPoint(bounds.center, bounds.maxDim, view);
     return true;
   }
 
@@ -1094,7 +1129,11 @@ class ThreeControl implements VisualizationControl {
   }
 
   private setCameraView(view: CameraView): boolean {
-    return this.setCameraViewForLayer(this.activeLayerId, view);
+    this.cameraView = view;
+    const selected = this.nodes.get(this.selectedNodeId);
+    const ok = selected && selected.layerId === this.activeLayerId ? this.focusCameraOnNode(selected.id) : this.setCameraViewForLayer(this.activeLayerId, view);
+    this.syncControlState();
+    return ok;
   }
 
   private logLayoutSnapshot(layerId: LayerID, nodeIDs: NodeID[]) {
