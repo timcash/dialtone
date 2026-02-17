@@ -213,6 +213,10 @@ section {
   align-items: center;
 }
 
+section[hidden] {
+  display: none !important;
+}
+
 h2 {
   color: var(--primary-color);
 }
