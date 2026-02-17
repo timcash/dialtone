@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"dialtone/cli/src/core/logger"
 	"github.com/bluenviron/gomavlib/v3"
@@ -18,8 +19,9 @@ type MavlinkConfig struct {
 
 // MavlinkEvent represents a simplified event from MAVLink
 type MavlinkEvent struct {
-	Type string
-	Data interface{}
+	Type       string
+	Data       interface{}
+	ReceivedAt int64
 }
 
 // MavlinkService handles MAVLink communication
@@ -88,45 +90,62 @@ func (s *MavlinkService) Start() {
 	logger.LogInfo("MavlinkService: Starting event loop on %s", s.config.Endpoint)
 
 	for evt := range s.node.Events() {
+		receivedAt := time.Now().UnixMilli()
 		switch e := evt.(type) {
 		case *gomavlib.EventFrame:
-			// logger.LogInfo("MAVLink frame received: systemID=%d componentID=%d", e.SystemID(), e.ComponentID())
+			// LOG EVERY FRAME FOR DEBUGGING
+			// logger.LogInfo("[MAVLINK-RAW] Frame from sys %d comp %d at %v", e.SystemID(), e.ComponentID(), receivedAt)
+
+			msg := e.Message()
+			msgType := fmt.Sprintf("%T", msg)
+			if strings.Contains(msgType, "Message") {
+				parts := strings.Split(msgType, "Message")
+				if len(parts) > 1 {
+					msgType = strings.ToUpper(parts[1])
+				}
+			}
+			logger.LogInfo("[MAVLINK-RAW] %s received at %v", msgType, receivedAt)
 
 			switch msg := e.Message().(type) {
 			case *common.MessageHeartbeat:
-				// logger.LogInfo("Heartbeat received from system %d", e.SystemID())
+				logger.LogInfo("[MAVLINK-RAW] HEARTBEAT received at %v", receivedAt)
 				if s.config.Callback != nil {
 					s.config.Callback(&MavlinkEvent{
-						Type: "HEARTBEAT",
-						Data: msg,
+						Type:       "HEARTBEAT",
+						Data:       msg,
+						ReceivedAt: receivedAt,
 					})
 				}
 			case *common.MessageCommandAck:
 				if s.config.Callback != nil {
 					s.config.Callback(&MavlinkEvent{
-						Type: "COMMAND_ACK",
-						Data: msg,
+						Type:       "COMMAND_ACK",
+						Data:       msg,
+						ReceivedAt: receivedAt,
 					})
 				}
 			case *common.MessageStatustext:
 				if s.config.Callback != nil {
 					s.config.Callback(&MavlinkEvent{
-						Type: "STATUSTEXT",
-						Data: msg,
+						Type:       "STATUSTEXT",
+						Data:       msg,
+						ReceivedAt: receivedAt,
 					})
 				}
 			case *common.MessageGlobalPositionInt:
 				if s.config.Callback != nil {
 					s.config.Callback(&MavlinkEvent{
-						Type: "GLOBAL_POSITION_INT",
-						Data: msg,
+						Type:       "GLOBAL_POSITION_INT",
+						Data:       msg,
+						ReceivedAt: receivedAt,
 					})
 				}
 			case *common.MessageAttitude:
 				if s.config.Callback != nil {
 					s.config.Callback(&MavlinkEvent{
-						Type: "ATTITUDE",
-						Data: msg,
+						Type:       "ATTITUDE",
+						Data:       msg,
+						ReceivedAt: receivedAt,
 					})
 				}
 			}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 )
 
 func RunSyncCode(versionDir string, args []string) {
@@ -21,14 +22,15 @@ func RunSyncCode(versionDir string, args []string) {
 		*user = os.Getenv("USER")
 	}
 
+	cwd, _ := os.Getwd()
+	baseDir := filepath.Base(cwd)
+
 	remoteHome := os.Getenv("REMOTE_DIR_SRC")
 	if remoteHome == "" {
-		remoteHome = fmt.Sprintf("/home/%s/dialtone_src", *user)
+		remoteHome = fmt.Sprintf("/home/%s/%s", *user, baseDir)
 	}
 
 	logger.LogInfo("[SYNC] Syncing code to %s:%s...", *host, remoteHome)
-
-	cwd, _ := os.Getwd()
 
 	// Ensure remote directory exists
 	mkdirCmd := exec.Command("ssh", fmt.Sprintf("%s@%s", *user, *host), "mkdir", "-p", remoteHome)
@@ -59,8 +61,8 @@ func RunSyncCode(versionDir string, args []string) {
 		// Exclude heavy dependency directories
 		"--exclude", "dialtone_dependencies/",
 		"--exclude", "dialtone_dev_dependencies/",
-		// Exclude local environment files
-		"--exclude", "env/.env",
+		// We NOW INCLUDE env/.env as requested by the user
+		// "--exclude", "env/.env", 
 		"--exclude", "*.log",
 		// Source and Destination
 		".",

@@ -10,6 +10,8 @@ class ThreeControl implements VisualizationControl {
   private frameId = 0;
   private ws: WebSocket | null = null;
   private attitude = { roll: 0, pitch: 0, yaw: 0 };
+  private latencyHistory: number[] = [];
+  private maxHistory = 60;
 
   constructor(private container: HTMLElement, canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -73,6 +75,11 @@ class ThreeControl implements VisualizationControl {
     this.ws.onmessage = (event) => {
       try {
         const raw = JSON.parse(event.data);
+
+        // Track latency for any message that has timestamps
+        if (raw.t_raw !== undefined) {
+          this.updateLatency(raw);
+        }
         
         // Handle direct stats object (from ticker)
         if (raw.uptime !== undefined) {
@@ -173,6 +180,78 @@ class ThreeControl implements VisualizationControl {
     if (errorsEl && data.errors !== undefined) {
       errorsEl.innerHTML = data.errors.map((err: string) => `<div class="hud-error-item">${err}</div>`).join('');
     }
+  }
+
+  private updateLatency(raw: any) {
+    const now = Date.now();
+    
+    // Ensure we have a valid t_raw (Ground Zero)
+    let t_raw = raw.t_raw || raw.timestamp;
+    // If t_raw is in seconds (e.g. from legacy or mock), convert to ms
+    if (t_raw < 10000000000) t_raw *= 1000;
+
+    const t_pub = raw.t_pub ? raw.t_pub : t_raw;
+    const t_relay = raw.t_relay ? raw.t_relay : t_pub;
+
+    const total = now - t_raw;
+    const proc = t_pub - t_raw;
+    const nats = t_relay - t_pub;
+    const net = now - t_relay;
+
+    // Sanity check: Ignore if total latency is over 10 seconds (likely clock drift or bug)
+    if (total > 10000 || total < -1000) return;
+
+    this.latencyHistory.push(total);
+    if (this.latencyHistory.length > this.maxHistory) {
+      this.latencyHistory.shift();
+    }
+
+    const el = document.getElementById('hud-latency');
+    if (el) {
+      el.innerHTML = `<span title="Total">${total}</span>ms <small style="font-size:0.6rem; opacity:0.6">(P:${proc}/Q:${nats}/N:${net})</small>`;
+    }
+    this.drawLatencyGraph();
+  }
+
+  private drawLatencyGraph() {
+    const canvas = document.getElementById('latency-graph') as HTMLCanvasElement | null;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    if (this.latencyHistory.length < 2) return;
+
+    const maxLatency = Math.max(...this.latencyHistory, 100);
+    const step = w / (this.maxHistory - 1);
+
+    ctx.strokeStyle = '#66fcf1';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+
+    for (let i = 0; i < this.latencyHistory.length; i++) {
+      const x = i * step;
+      const y = h - (this.latencyHistory[i] / maxLatency) * h;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Fill area
+    ctx.lineTo((this.latencyHistory.length - 1) * step, h);
+    ctx.lineTo(0, h);
+    ctx.fillStyle = 'rgba(102, 252, 241, 0.1)';
+    ctx.fill();
+
+    // Show current latency text on canvas
+    ctx.fillStyle = '#66fcf1';
+    ctx.font = '10px ui-monospace, monospace';
+    ctx.textAlign = 'right';
+    const last = this.latencyHistory[this.latencyHistory.length - 1];
+    ctx.fillText(`${last}ms`, w - 2, 10);
   }
 
   private attachDebugBridge() {
