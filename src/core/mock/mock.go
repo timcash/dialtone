@@ -59,9 +59,12 @@ func StartMockMavlink(natsPort int) {
 
 			// 3. Attitude
 			att := map[string]interface{}{
-				"roll":  math.Sin(t) * 0.1,
-				"pitch": math.Cos(t*0.5) * 0.05,
-				"yaw":   t * 0.1,
+				"roll":       math.Sin(t) * 0.1,
+				"pitch":      math.Cos(t*0.5) * 0.05,
+				"yaw":        t * 0.1,
+				"rollspeed":  0.0,
+				"pitchspeed": 0.0,
+				"yawspeed":   0.0,
 			}
 			PublishMockJSON("mavlink.attitude", att)
 		}

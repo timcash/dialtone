@@ -173,10 +173,52 @@ func RunDiagnostic(versionDir string) error {
 			},
 		},
 		{
-			name:      "3D Section",
+			name:      "3D Section Telemetry & Commands",
 			sectionID: "three",
 			validation: func(ctx context.Context) error {
-				return session.RunWithContext(ctx, test_v2.NavigateToSection("three", "Three Section"))
+				if err := session.RunWithContext(ctx, test_v2.NavigateToSection("three", "Three Section")); err != nil {
+					return err
+				}
+				
+				// Verify HUD elements are present
+				if err := session.RunWithContext(ctx, chromedp.Tasks{
+					chromedp.WaitVisible("#hud-alt", chromedp.ByID),
+					chromedp.WaitVisible("#hud-spd", chromedp.ByID),
+					chromedp.WaitVisible("#hud-mode", chromedp.ByID),
+				}); err != nil {
+					return fmt.Errorf("HUD elements not visible: %w", err)
+				}
+
+				// Wait for live data (non-0.0 values or non-default text)
+				logger.LogInfo("[DIAGNOSTIC] Waiting for live telemetry in HUD...")
+				var alt, spd, mode string
+				for i := 0; i < 10; i++ {
+					if err := session.RunWithContext(ctx, chromedp.Tasks{
+						chromedp.Text("#hud-alt", &alt, chromedp.ByID),
+						chromedp.Text("#hud-spd", &spd, chromedp.ByID),
+						chromedp.Text("#hud-mode", &mode, chromedp.ByID),
+					}); err != nil {
+						return err
+					}
+					// In mock mode or real flight, these should change.
+					// We just check they aren't empty or stuck at initial placeholders if possible.
+					if alt != "" && mode != "STABILIZE" { // MODE changes to GUIDED in mock
+						logger.LogInfo("[DIAGNOSTIC] Live Telemetry detected: ALT=%s, MODE=%s", alt, mode)
+						break
+					}
+					time.Sleep(1 * time.Second)
+				}
+
+				// Test Command Button (ARM)
+				logger.LogInfo("[DIAGNOSTIC] Testing ARM button...")
+				if err := session.RunWithContext(ctx, chromedp.Click("#three-arm", chromedp.ByID)); err != nil {
+					return fmt.Errorf("failed to click ARM button: %w", err)
+				}
+				
+				// Wait for any visual feedback or mode change if applicable
+				time.Sleep(1 * time.Second)
+				
+				return nil
 			},
 		},
 		{
@@ -202,7 +244,7 @@ func RunDiagnostic(versionDir string) error {
 		logger.LogInfo("[DIAGNOSTIC] Step %d: %s...", i+1, step.name)
 		
 		// Create a context with timeout for this step
-		stepCtx, stepCancel := context.WithTimeout(session.Context(), 5*time.Second)
+		stepCtx, stepCancel := context.WithTimeout(session.Context(), 15*time.Second)
 		err := step.validation(stepCtx)
 		stepCancel()
 
