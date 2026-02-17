@@ -276,7 +276,7 @@ WantedBy=multi-user.target`, remotePath, *hostname, mavlinkFlag, remoteDeployDir
 	webOK := false
 	webStart := time.Now()
 	for time.Since(webStart) < webTimeout {
-		healthCheckCmd := fmt.Sprintf("curl -s -o /dev/null -w \"%%%%{http_code}\" http://127.0.0.1:%d/health", checkWebPort)
+		healthCheckCmd := fmt.Sprintf("curl -s -o /dev/null -w \"%%{http_code}\" http://127.0.0.1:%d/health", checkWebPort)
 		out, err := core_ssh.RunSSHCommand(client, healthCheckCmd)
 		if err == nil && strings.TrimSpace(out) == "200" {
 			logger.LogInfo("[DEPLOY] Check 2: Internal Web Health OK (200)")
@@ -344,7 +344,7 @@ WantedBy=multi-user.target`, remotePath, *hostname, mavlinkFlag, remoteDeployDir
 	if *proxy {
 		logger.LogInfo("[DEPLOY] Setting up Cloudflare tunnel proxy via cloudflare plugin...")
 		cwd, _ := os.Getwd()
-		cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "cloudflare", "setup-service", "--name", *hostname)
+		cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "cloudflare", "setup-service", "--name", *hostname, "--user")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
