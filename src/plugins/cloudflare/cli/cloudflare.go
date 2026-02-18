@@ -141,6 +141,7 @@ func RunSetupService(args []string) {
 	fs := flag.NewFlagSet("setup-service", flag.ExitOnError)
 	name := fs.String("name", os.Getenv("DIALTONE_DOMAIN"), "Cloudflare subdomain/robot name")
 	userMode := fs.Bool("user", false, "Install as user-level service (no sudo)")
+	urlFlag := fs.String("url", "", "Target URL for the proxy (optional)")
 	fs.Parse(args)
 
 	robotName := *name
@@ -205,12 +206,17 @@ func RunSetupService(args []string) {
 		restartCmd = fmt.Sprintf("systemctl restart dialtone-proxy-%s.service", robotName)
 	}
 
+	extraArgs := ""
+	if *urlFlag != "" {
+		extraArgs = fmt.Sprintf(" --url %s", *urlFlag)
+	}
+
 	serviceTemplate := `[Unit]
 Description=Dialtone Cloudflare Proxy for %s
 After=network.target
 
 [Service]
-ExecStart=%s cloudflare robot %s
+ExecStart=%s cloudflare robot --name %s%s
 WorkingDirectory=%s
 %s
 Environment=DIALTONE_ENV=%s
@@ -221,7 +227,7 @@ RestartSec=10
 [Install]
 WantedBy=%s
 `
-	serviceContent := fmt.Sprintf(serviceTemplate, robotName, dialtoneSh, robotName, cwd, userLine, depsDir, filepath.Join(cwd, "env/.env"), wantedBy)
+	serviceContent := fmt.Sprintf(serviceTemplate, robotName, dialtoneSh, robotName, extraArgs, cwd, userLine, depsDir, filepath.Join(cwd, "env/.env"), wantedBy)
 	
 	// Clean up empty lines if User line is empty
 	if userLine == "" {
@@ -563,6 +569,7 @@ func runRobot(args []string) {
 	fs := flag.NewFlagSet("robot", flag.ExitOnError)
 	hostname := fs.String("name", "", "Robot hostname (default: DIALTONE_HOSTNAME)")
 	token := fs.String("token", "", "Cloudflare Tunnel Token (overrides .env)")
+	urlFlag := fs.String("url", "", "Target URL (overrides default http://name:80)")
 	fs.Parse(args)
 
 	name := *hostname
@@ -592,8 +599,11 @@ func runRobot(args []string) {
 		}
 	}
 
-	// 2. Determine the target URL for the robot (assuming port 80)
-	targetURL := fmt.Sprintf("http://%s:80", name)
+	// 2. Determine the target URL for the robot
+	targetURL := *urlFlag
+	if targetURL == "" {
+		targetURL = fmt.Sprintf("http://%s:80", name)
+	}
 
 	// 3. Run Cloudflare Tunnel
 	cf := findCloudflared()

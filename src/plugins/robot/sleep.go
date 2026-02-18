@@ -2,129 +2,82 @@ package robot
 
 import (
 	"dialtone/cli/src/core/logger"
-	core_ssh "dialtone/cli/src/core/ssh"
 	"fmt"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
-	"time"
 )
 
 func RunSleep(versionDir string, args []string) {
 	// Parse args/env
-	host := os.Getenv("ROBOT_HOST")
-	user := os.Getenv("ROBOT_USER")
-	pass := os.Getenv("ROBOT_PASSWORD")
 	hostname := os.Getenv("DIALTONE_HOSTNAME")
-
-	if host == "" || pass == "" {
-		logger.LogFatal("ROBOT_HOST and ROBOT_PASSWORD are required")
-	}
 	if hostname == "" {
 		hostname = "drone-1"
 	}
 
 	cwd, _ := os.Getwd()
-	// Use relative path for Podman container build
-	sleepSrcRel := filepath.Join("src", "plugins", "robot", versionDir, "cmd", "sleep", "main.go")
+	sleepSrc := filepath.Join(cwd, "src", "plugins", "robot", versionDir, "cmd", "sleep", "main.go")
 	binDir := filepath.Join(cwd, "src", "plugins", "robot", "bin")
 	localBin := filepath.Join(binDir, "dialtone-sleep")
 
-	// 1. Build Sleep Binary (ARM64)
-	logger.LogInfo("[SLEEP] Building sleep binary for ARM64...")
-	cmd := exec.Command("podman", "run", "--rm",
-		"-v", fmt.Sprintf("%s:/src:Z", cwd),
-		"-v", "dialtone-go-build-cache:/root/.cache/go-build:Z",
-		"-w", "/src",
-		"-e", "GOOS=linux",
-		"-e", "GOARCH=arm64",
-		"-e", "CGO_ENABLED=0",
-		"dialtone-builder",
-		"go", "build", "-trimpath", "-ldflags=-s -w", "-o", "src/plugins/robot/bin/dialtone-sleep", sleepSrcRel)
-	
+	// 1. Build Sleep Binary (Local Arch)
+	logger.LogInfo("[SLEEP] Building sleep binary for local machine...")
+	// We use 'go build' directly for local build, assuming go is installed or using docker for local arch if needed.
+	// For simplicity in this env, we'll use the local go if available, or the builder image matching local arch.
+	// Assuming local go is available since we are running dialtone.sh.
+	cmd := exec.Command("go", "build", "-trimpath", "-ldflags=-s -w", "-o", localBin, sleepSrc)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		logger.LogFatal("Failed to build sleep binary: %v", err)
 	}
 
-	// 2. Connect to Robot
-	logger.LogInfo("[SLEEP] Connecting to %s...", host)
-	client, err := core_ssh.DialSSH(host, "22", user, pass)
-	if err != nil {
-		logger.LogFatal("SSH connection failed: %v", err)
-	}
-	defer client.Close()
+	// 2. Setup Local Systemd Service for Sleep Server
+	logger.LogInfo("[SLEEP] Setting up local sleep service...")
+	home, _ := os.UserHomeDir()
+	stateDir := filepath.Join(home, ".config", "dialtone-sleep")
+	os.MkdirAll(stateDir, 0755)
 
-	remoteHome, _ := core_ssh.GetRemoteHome(client)
-	remoteDeployDir := path.Join(remoteHome, "dialtone_deploy")
-	remoteBin := path.Join(remoteDeployDir, "dialtone-sleep")
-
-	// 2.5 Stop existing services before upload (file busy)
-	logger.LogInfo("[SLEEP] Stopping remote services...")
-	stopCmds := []string{
-		fmt.Sprintf("echo '%s' | sudo -S systemctl stop dialtone-sleep.service", pass),
-		fmt.Sprintf("echo '%s' | sudo -S pkill -9 dialtone-sleep || true", pass),
-	}
-	for _, c := range stopCmds {
-		core_ssh.RunSSHCommand(client, c)
-	}
-
-	// 3. Upload Binary
-	logger.LogInfo("[SLEEP] Uploading binary to %s...", remoteBin)
-	if err := core_ssh.UploadFile(client, localBin, remoteBin); err != nil {
-		logger.LogFatal("Upload failed: %v", err)
-	}
-	core_ssh.RunSSHCommand(client, "chmod +x "+remoteBin)
-
-	// 4. Setup Systemd Service
 	serviceContent := fmt.Sprintf(`[Unit]
-Description=Dialtone Robot SLEEP Mode
+Description=Dialtone Robot Sleep Server (Local)
 After=network.target
 
 [Service]
-ExecStart=%s --hostname %s --state-dir %s/.config/dialtone
+ExecStart=%s --hostname %s --state-dir %s
 WorkingDirectory=%s
 Environment="TS_AUTHKEY=%s"
 Restart=always
-User=%s
 
 [Install]
-WantedBy=multi-user.target`, remoteBin, hostname, remoteHome, remoteDeployDir, os.Getenv("TS_AUTHKEY"), user)
+WantedBy=default.target`, localBin, hostname, stateDir, cwd, os.Getenv("TS_AUTHKEY"))
 
-	tempServicePath := path.Join(remoteDeployDir, fmt.Sprintf("dialtone-sleep.service.tmp.%d", time.Now().Unix()))
-	core_ssh.WriteRemoteFile(client, tempServicePath, serviceContent)
-
-	finalServicePath := "/etc/systemd/system/dialtone-sleep.service"
+	userSystemdDir := filepath.Join(home, ".config", "systemd", "user")
+	os.MkdirAll(userSystemdDir, 0755)
+	serviceFile := filepath.Join(userSystemdDir, "dialtone-sleep.service")
 	
-	// 5. Swap Services
-	logger.LogInfo("[SLEEP] Stopping dialtone.service and starting dialtone-sleep.service...")
-	cmds := []string{
-		fmt.Sprintf("echo '%s' | sudo -S mv %s %s", pass, tempServicePath, finalServicePath),
-		fmt.Sprintf("echo '%s' | sudo -S chmod 0644 %s", pass, finalServicePath),
-		fmt.Sprintf("echo '%s' | sudo -S systemctl daemon-reload", pass),
-		fmt.Sprintf("echo '%s' | sudo -S pkill -9 dialtone || true", pass), // Kill background/nohup instances
-		fmt.Sprintf("echo '%s' | sudo -S systemctl stop dialtone.service", pass),
-		fmt.Sprintf("echo '%s' | sudo -S systemctl disable dialtone.service", pass),
-		fmt.Sprintf("echo '%s' | sudo -S systemctl enable dialtone-sleep.service", pass),
-		fmt.Sprintf("echo '%s' | sudo -S systemctl restart dialtone-sleep.service", pass),
+	if err := os.WriteFile(serviceFile, []byte(serviceContent), 0644); err != nil {
+		logger.LogFatal("Failed to write service file: %v", err)
 	}
 
-	for _, c := range cmds {
-		if _, err := core_ssh.RunSSHCommand(client, c); err != nil {
-			logger.LogFatal("Remote command failed: %v", err)
-		}
+	// Reload and Start Sleep Service
+	exec.Command("systemctl", "--user", "daemon-reload").Run()
+	exec.Command("systemctl", "--user", "enable", "dialtone-sleep.service").Run()
+	if err := exec.Command("systemctl", "--user", "restart", "dialtone-sleep.service").Run(); err != nil {
+		logger.LogFatal("Failed to start dialtone-sleep.service: %v", err)
 	}
 
-	logger.LogInfo("[SLEEP] Robot is now sleeping. Access at https://%s.dialtone.earth", hostname)
-
-	// 6. Ensure local proxy is running
-	proxyService := fmt.Sprintf("dialtone-proxy-%s.service", hostname)
-	logger.LogInfo("[SLEEP] ensuring local proxy service '%s' is running...", proxyService)
-	if err := exec.Command("systemctl", "--user", "enable", "--now", proxyService).Run(); err != nil {
-		logger.LogWarn("[WARNING] Failed to start local proxy service: %v. You may need to run 'robot deploy --proxy' first.", err)
-	} else {
-		logger.LogInfo("[SLEEP] Local proxy service active.")
+	// 3. Reconfigure Proxy to point to Localhost:8080
+	logger.LogInfo("[SLEEP] Reconfiguring Cloudflare proxy to http://localhost:8080...")
+	// We call the cloudflare plugin CLI to update the service with the new --url
+	proxyCmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "cloudflare", "setup-service", "--name", hostname, "--user", "--url", "http://localhost:8080")
+	proxyCmd.Stdout = os.Stdout
+	proxyCmd.Stderr = os.Stderr
+	if err := proxyCmd.Run(); err != nil {
+		logger.LogWarn("[WARNING] Failed to update proxy service: %v", err)
 	}
+
+	logger.LogInfo("[SLEEP] Sleep mode active locally.")
+	logger.LogInfo(" - Sleep Server: http://localhost:8080")
+	logger.LogInfo(" - Public Proxy: https://%s.dialtone.earth -> localhost:8080", hostname)
+	logger.LogInfo(" - Robot: Assumed OFF (Remote)")
 }
