@@ -904,6 +904,12 @@ class ThreeControl implements VisualizationControl {
     this.selectedNodeId = nodeId;
     if (nodeId) {
       this.recentSelectedNodeIDs.unshift(nodeId);
+      // Keep history useful for link/back operations by collapsing immediate repeats.
+      for (let i = this.recentSelectedNodeIDs.length - 1; i > 0; i -= 1) {
+        if (this.recentSelectedNodeIDs[i] === this.recentSelectedNodeIDs[i - 1]) {
+          this.recentSelectedNodeIDs.splice(i, 1);
+        }
+      }
       if (this.recentSelectedNodeIDs.length > 5) this.recentSelectedNodeIDs.length = 5;
       console.log(`[Three #three] selected node: ${nodeId}`);
       this.focusCameraOnNode(nodeId);
