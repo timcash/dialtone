@@ -30,6 +30,22 @@ section {
   background: rgba(0, 0, 0, 0.4);
   backdrop-filter: blur(4px);
   border: 1px solid rgba(255, 255, 255, 0.1);
+  pointer-events: auto; /* Enable clicks */
+}
+
+/* Three Legend Minimized State */
+.three-legend {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.three-legend.legend-minimized {
+  background: rgba(0, 0, 0, 0.2);
+  border-color: rgba(255, 255, 255, 0.05);
+}
+
+.three-legend.legend-minimized .hud-stats-grid {
+  display: none;
 }
 
 /* MARKETING LEGEND OVERRIDE */
@@ -230,8 +246,9 @@ section {
   top: 0;
 }
 
-/* Calculator Layout Override for Table */
-#table .mode-form {
+/* Calculator Layout Overrides */
+#table .mode-form,
+#three .mode-form {
   position: relative;
   left: auto;
   transform: none;
@@ -239,6 +256,16 @@ section {
   margin: 0 auto;
   padding: 14px 0;
   grid-row: 2;
+}
+
+/* Three specific layout */
+#three {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+#three .overlay-primary {
+  grid-row: 1;
+  position: relative;
 }
 
 /* XTERM */
