@@ -45,6 +45,7 @@ type testCtx struct {
 	attachMode          bool
 	activeAttachSession bool
 	requireBackend      bool
+	keepViewport        bool
 	baseURL             string
 	devBaseURL          string
 	clickGap            time.Duration
@@ -54,6 +55,11 @@ type testCtx struct {
 
 func newTestCtx() *testCtx {
 	attach := os.Getenv("DAG_TEST_ATTACH") == "1"
+	keepViewport := strings.TrimSpace(os.Getenv("DAG_TEST_KEEP_VIEWPORT")) == "1"
+	if attach && !keepViewport {
+		// In attach mode, preserve the user's current browser viewport unless explicitly overridden.
+		keepViewport = true
+	}
 	base := strings.TrimSpace(os.Getenv("DAG_TEST_BASE_URL"))
 	devBase := strings.TrimSpace(os.Getenv("DAG_TEST_DEV_BASE_URL"))
 	cpsRaw := strings.TrimSpace(os.Getenv("DAG_TEST_CPS"))
@@ -78,6 +84,7 @@ func newTestCtx() *testCtx {
 	return &testCtx{
 		attachMode:     attach,
 		requireBackend: true,
+		keepViewport:   keepViewport,
 		baseURL:        base,
 		devBaseURL:     devBase,
 		clickGap:       time.Second / time.Duration(cps),
@@ -157,13 +164,18 @@ func (t *testCtx) ensureSharedBrowser(requireBackend bool) (*test_v2.BrowserSess
 		return nil, err
 	}
 	t.sharedBrowser = session
-	if err := t.sharedBrowser.Run(chromedp.Tasks{
-		chromedp.EmulateViewport(mobileViewportWidth, mobileViewportHeight, chromedp.EmulateScale(mobileScaleFactor)),
-		emulation.SetDeviceMetricsOverride(mobileViewportWidth, mobileViewportHeight, mobileScaleFactor, true),
-		emulation.SetTouchEmulationEnabled(true),
+	tasks := chromedp.Tasks{
 		chromedp.Evaluate(`window.sessionStorage.setItem('dag_test_mode', '1')`, nil),
 		chromedp.Evaluate(fmt.Sprintf(`window.sessionStorage.setItem('dag_test_attach', %q)`, map[bool]string{true: "1", false: "0"}[t.activeAttachSession]), nil),
-	}); err != nil {
+	}
+	if !t.keepViewport {
+		tasks = append(chromedp.Tasks{
+			chromedp.EmulateViewport(mobileViewportWidth, mobileViewportHeight, chromedp.EmulateScale(mobileScaleFactor)),
+			emulation.SetDeviceMetricsOverride(mobileViewportWidth, mobileViewportHeight, mobileScaleFactor, true),
+			emulation.SetTouchEmulationEnabled(true),
+		}, tasks...)
+	}
+	if err := t.sharedBrowser.Run(tasks); err != nil {
 		return nil, err
 	}
 	return t.sharedBrowser, nil
