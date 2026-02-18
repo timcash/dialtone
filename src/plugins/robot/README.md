@@ -23,7 +23,10 @@ The `robot` plugin is the central hub for all robot-specific logic, including MA
 ./dialtone.sh robot build src_v1 --remote          # Sync & build on remote robot
 ./dialtone.sh robot deploy src_v1                  # Build & ship binary to remote robot
 ./dialtone.sh robot deploy src_v1 --service        # Deploy as systemd service
-./dialtone.sh robot deploy src_v1 --proxy          # Deploy with Cloudflare proxy
+./dialtone.sh robot deploy src_v1 --proxy          # Deploy + setup local Cloudflare proxy
+
+# MAINTENANCE
+./dialtone.sh robot sleep src_v1                   # Switch robot to low-power "Sleeping" mode
 
 # UTILITIES
 ./dialtone.sh robot sync-code src_v1               # Sync source code to robot (no build)
@@ -57,6 +60,39 @@ The `--remote` flag allows you to offload the build process to the robot itself.
     ```
 
 > **Note**: These commands mirror your local project structure to `~/dialtone` on the remote robot.
+
+---
+
+## 💤 Sleep Mode & Maintenance
+
+The `sleep` command switches the robot into a lightweight maintenance mode.
+
+```bash
+./dialtone.sh robot sleep src_v1
+```
+
+*   **Mechanism**: Replaces the heavy Dialtone binary with a minimal Go web server (`dialtone-sleep`).
+*   **Behavior**: Serves a static "Sleeping..." page.
+*   **Connectivity**: Uses `tsnet` to maintain the robot's Tailscale identity (`drone-1`), ensuring the hostname remains resolvable.
+*   **Auto-Proxy**: Automatically ensures the local Cloudflare tunnel is running so the public URL remains accessible.
+*   **Wake Up**: Run `robot deploy src_v1` to restore the full application.
+
+---
+
+## 🌐 Cloudflare Proxy (`--proxy`)
+
+The `--proxy` flag establishes a public tunnel to your robot via your local machine.
+
+```bash
+./dialtone.sh robot deploy src_v1 --proxy
+```
+
+*   **Architecture**: `Public URL` -> `Cloudflare` -> `Local Machine (cloudflared)` --[Tailscale]--> `Robot`.
+*   **User Service**: The local proxy runs as a **user-level systemd service** (no sudo required).
+*   **Requirement**: You must enable lingering for your user to keep the proxy running in the background:
+    ```bash
+    loginctl enable-linger $USER
+    ```
 
 ---
 
@@ -96,12 +132,15 @@ The system uses a **Direct NATS** architecture for minimal latency.
 2.  **Browser (UI)**: Connects *directly* to NATS via WebSocket (`ws://<host>:4223`).
 3.  **Visualization**: Three.js / Table components subscribe to topics and render frames.
 
+### Why Direct NATS?
+Previous versions relayed data through a Go-based WebSocket handler (`/ws`), causing double-serialization and queueing delays. The current architecture connects the UI directly to the broker, reducing "Queueing" latency (`Q`) to effectively zero.
+
 ### Debugging Latency
 If the HUD shows high latency (>100ms):
 1.  **Check Metrics**: Look at the breakdown in the 3D HUD legend: `Total (P:Processing / N:Network)`.
-    *   **P**: Internal Go processing delay.
+    *   **P**: Internal Go processing delay (Serial -> NATS).
     *   **N**: Network transit time (Tailscale/LAN).
-2.  **Run Monitor**: SSH into the robot and run the telemetry tool to isolate internal queueing.
+2.  **Run Monitor**: SSH into the robot and run the telemetry tool to isolate internal timing.
     ```bash
     ./dialtone.sh robot telemetry
     ```
