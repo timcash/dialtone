@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sleeping</title>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#000000">
     <style>
         body {
             background-color: #000000;
@@ -20,5 +22,13 @@
 </head>
 <body>
     Sleeping ...
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                window.location.reload();
+            });
+            navigator.serviceWorker.register('/sw.js');
+        }
+    </script>
 </body>
 </html>
