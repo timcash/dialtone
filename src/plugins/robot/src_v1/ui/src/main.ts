@@ -91,7 +91,7 @@ sections.register('hero', {
   overlays: {
     primaryKind: 'stage',
     primary: '.hero-stage',
-    thumb: "form[data-mode-form='hero']",
+    thumb: '.mode-form',
     legend: '.hero-legend',
   },
 });
@@ -160,8 +160,8 @@ sections.register('table', {
   header: { visible: false, menuVisible: true, title: 'Robot Telemetry' },
   overlays: {
     primaryKind: 'table',
-    primary: '.telemetry-table',
-    thumb: "form[data-mode-form='table']", // Updated selector
+    primary: '.table-wrapper', // Updated to wrapper
+    thumb: '.mode-form',
     legend: '.telemetry-legend',
   },
 });
@@ -186,7 +186,7 @@ sections.register('three', {
   overlays: {
     primaryKind: 'stage',
     primary: '.three-stage',
-    thumb: "form[data-mode-form='three']", // Updated selector
+    thumb: '.mode-form',
     legend: '.three-legend',
     chatlog: '.three-chatlog', // Added chatlog overlay
   },
@@ -205,7 +205,7 @@ sections.register('xterm', {
   overlays: {
     primaryKind: 'xterm',
     primary: '.xterm-primary',
-    thumb: "form[data-mode-form='log']", // Updated selector
+    thumb: '.mode-form',
     legend: '.xterm-legend',
   },
 });
@@ -223,7 +223,7 @@ sections.register('video', {
   overlays: {
     primaryKind: 'stage',
     primary: '.video-stage',
-    thumb: "form[data-mode-form='video']",
+    thumb: '.mode-form',
     legend: '.video-legend',
   },
 });
