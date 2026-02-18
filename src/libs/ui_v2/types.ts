@@ -3,15 +3,17 @@ export interface VisualizationControl {
   setVisible: (visible: boolean) => void;
 }
 
-export type SectionPrimaryOverlayKind = 'stage' | 'table' | 'xterm' | 'docs' | (string & {});
-export type OverlayKind = 'menu' | 'thumb' | 'legend' | SectionPrimaryOverlayKind;
+export type SectionPrimaryOverlayKind = 'stage' | 'table' | 'xterm' | 'docs' | 'video' | (string & {});
+export type OverlayKind = 'menu' | 'mode-form' | 'status-bar' | 'chatlog' | 'legend' | 'thumb' | SectionPrimaryOverlayKind;
 
 export interface SectionOverlayConfig {
   primaryKind: SectionPrimaryOverlayKind;
   primary: string;
-  thumb: string;
-  legend: string;
+  modeForm?: string;
+  thumb?: string; // deprecated alias for modeForm
+  legend?: string;
   chatlog?: string;
+  statusBar?: string;
 }
 
 export interface HeaderConfig {

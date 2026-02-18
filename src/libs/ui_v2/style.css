@@ -178,6 +178,7 @@ nav[data-open='true'] .menu-toggle {
   font-weight: 600;
 }
 
+body.menu-open [data-overlay='mode-form'][data-overlay-active='true'],
 body.menu-open [data-overlay='thumb'][data-overlay-active='true'] {
   opacity: 0;
   visibility: hidden;

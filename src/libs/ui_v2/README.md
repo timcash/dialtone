@@ -1,59 +1,99 @@
 # UIv2 Library
 
-`src/libs/ui_v2` is the shared section shell for Dialtone plugin UIs.
+`src/libs/ui_v2` is the shared section shell used by plugin `src_vN/ui` apps.
 
-## Design Language
+This README follows DAG `src_v3` terminology as source-of-truth.
 
-Each plugin `src_vN` has one `ui`.
+## Core Model
 
-Each `ui` can have many `section`.
+- A UI has many `section`.
+- A `section` is composed as:
+  - one underlay
+  - zero or more overlays
 
-Each `section` is composed from underlays + overlays:
+Section formula: `underlay + overlays = section`.
 
-- underlays (exactly one per section): `stage` | `table` | `docs` | `xterm` | `video`
-- overlays (shared UI layers): `legend`, `chatlog`, `menu` (global), `thumbs`
+## Underlays
 
-Section formula: one underlay + overlays = one section.
+Exactly one underlay per section:
 
-Section id naming rule:
+- `stage`
+- `table`
+- `docs`
+- `xterm`
+- `video`
 
-- Use `<plugin-name>-<subname>-<underlay-type>`.
-- Examples: `dag-meta-table`, `dag-3d-stage`, `dag-log-xterm`.
+## Overlays
 
-## Menu Overlay Behavior
+Shared overlay kinds:
 
-- `Menu` renders a fullscreen modal.
-- Modal content uses CSS grid for menu buttons.
-- Menu grid has an effective minimum width target of `400px` (bounded by viewport width).
-- While menu is open, active-section `thumbs` overlays are hidden automatically.
+- `menu` (global)
+- `mode-form`
+- `legend`
+- `chatlog` (optional)
+- `status-bar` (optional)
+
+`status-bar` is a first-class overlay in `ui.ts` via `UI_OVERLAYS.statusBar`.
+
+## Section Naming Rule
+
+Use:
+
+- `<plugin-name>-<subname>-<underlay-type>`
+
+Examples:
+
+- `dag-meta-table`
+- `dag-3d-stage`
+- `dag-log-xterm`
 
 ## Section Registration
 
-`SectionConfig` supports section layer selectors:
+`SectionOverlayConfig` in `types.ts` supports:
+
+- `primaryKind` and `primary` (required underlay binding)
+- `modeForm` (preferred control overlay selector)
+- `thumb` (deprecated alias of `modeForm`, kept for compatibility)
+- `legend`
+- `chatlog`
+- `statusBar`
+
+Example:
 
 ```ts
-sections.register('dag-meta-table', {
-  containerId: 'dag-meta-table',
-  load: async () => mountMySection(),
+sections.register('dag-3d-stage', {
+  containerId: 'dag-3d-stage',
+  load: async () => mountStage(),
   overlays: {
-    primaryKind: 'table',
-    primary: '.my-table',
-    thumb: '.my-thumbs',
-    legend: '.my-legend',
-    chatlog: '.my-chatlog',
+    primaryKind: 'stage',
+    primary: "canvas[aria-label='Three Canvas']",
+    modeForm: "form[data-mode-form='dag']",
+    legend: '.dag-history',
+    chatlog: '.dag-chatlog',
+    statusBar: '.dag-status-bar',
   },
 });
 ```
 
-Notes:
-- `primaryKind` + `primary` represent the section underlay in the runtime API.
-- `thumb` selector points to the thumbs overlay container.
+## Runtime Overlay Attributes
 
-`SectionManager` tags matched elements with:
+When an overlay selector resolves, `SectionManager` applies:
 
 - `data-overlay="<kind>"`
-- `data-overlay-role="primary|thumb|legend|chatlog"`
+- `data-overlay-role="<role>"`
 - `data-overlay-section="<section-id>"`
 - `data-overlay-active="true|false"`
 
-Sections load dynamically from `load()`. If a section is not cached yet, `ui_v2` shows a quick loading overlay during first load.
+Roles tracked by `SectionManager`:
+
+- `primary`
+- `mode-form`
+- `legend`
+- `chatlog`
+- `status-bar`
+
+## Menu Behavior
+
+- `Menu` is the global overlay and uses `nav` as the modal root.
+- On open, menu hides active `mode-form` overlays (`data-overlay='mode-form'`).
+- Legacy `thumb` overlay hide rule is still supported for older sections.

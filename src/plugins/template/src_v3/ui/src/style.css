@@ -22,8 +22,8 @@ section[aria-label='Docs Section'] {
   background: #000;
 }
 
-section[aria-label='Hero Section']>div,
-section[aria-label='Docs Section']>div {
+section[aria-label='Hero Section'] > div,
+section[aria-label='Docs Section'] > div {
   position: absolute;
   top: 1.5rem;
   left: 1.5rem;
@@ -70,6 +70,7 @@ section[aria-label='Video Section'] {
 
 section[aria-label='Table Section'] {
   --table-row-height: 1.45em;
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 
 section[aria-label='Three Section'],
@@ -96,7 +97,53 @@ section[aria-label='Table Section'] td {
   text-overflow: ellipsis;
 }
 
-section#xterm {
+form[data-mode-form='table'],
+form[data-mode-form='three'] {
+  position: absolute;
+  left: 50%;
+  bottom: 1rem;
+  transform: translateX(-50%);
+  width: min(620px, calc(100% - 2rem));
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  z-index: 24;
+}
+
+form[data-mode-form='table'] > button,
+form[data-mode-form='three'] > button,
+form[data-mode-form='table'] > input,
+form[data-mode-form='three'] > input {
+  min-height: 38px;
+}
+
+.three-history {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  width: min(320px, calc(100vw - 2rem));
+  z-index: 24;
+}
+
+.three-history h3 {
+  margin-bottom: 0.35rem;
+}
+
+.three-history-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.three-chatlog {
+  grid-column: 1 / -1;
+}
+
+.three-chatlog-xterm {
+  min-height: 64px;
+}
+
+section#template-log-xterm {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   grid-template-areas:
@@ -113,7 +160,7 @@ section#xterm {
   overflow: hidden;
 }
 
-section#xterm [aria-label='Xterm Terminal'] {
+section#template-log-xterm [aria-label='Log Terminal'] {
   grid-area: terminal;
   min-height: 0;
   min-width: 0;
@@ -125,7 +172,7 @@ section#xterm [aria-label='Xterm Terminal'] {
   border: 1px solid #222;
 }
 
-section#xterm input[aria-label='Xterm Input'] {
+section#template-log-xterm input[aria-label='Log Input'] {
   grid-area: input;
   display: block;
   width: 100%;
@@ -141,9 +188,25 @@ section#xterm input[aria-label='Xterm Input'] {
   align-self: stretch;
 }
 
-section#xterm input[aria-label='Xterm Input']:focus {
+section#template-log-xterm input[aria-label='Log Input']:focus {
   border-color: rgba(255, 255, 255, 0.45);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
+.template-status-bar {
+  position: absolute;
+  left: 1rem;
+  right: 1rem;
+  bottom: 0.5rem;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  color: #9ca3af;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  z-index: 26;
+  pointer-events: none;
 }
 
 canvas[aria-label='Three Canvas'] {
@@ -155,9 +218,8 @@ canvas[aria-label='Three Canvas'] {
 }
 
 @media (max-width: 768px) {
-
-  section[aria-label='Hero Section']>div,
-  section[aria-label='Docs Section']>div {
+  section[aria-label='Hero Section'] > div,
+  section[aria-label='Docs Section'] > div {
     width: 100%;
     gap: 1rem;
   }
