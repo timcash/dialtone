@@ -40,7 +40,7 @@ sections.register('dag-meta-table', {
   overlays: {
     primaryKind: 'table',
     primary: "table[aria-label='DAG Table']",
-    thumb: "form[data-mode-form='table']",
+    modeForm: "form[data-mode-form='table']",
     legend: '.dag-table-legend',
   },
 });
@@ -57,7 +57,7 @@ sections.register('dag-3d-stage', {
   overlays: {
     primaryKind: 'stage',
     primary: "canvas[aria-label='Three Canvas']",
-    thumb: "form[data-mode-form='dag']",
+    modeForm: "form[data-mode-form='dag']",
     legend: '.dag-history',
     chatlog: '.dag-chatlog',
   },
@@ -75,7 +75,7 @@ sections.register('dag-log-xterm', {
   overlays: {
     primaryKind: 'xterm',
     primary: "[aria-label='Log Terminal']",
-    thumb: "form[data-mode-form='log']",
+    modeForm: "form[data-mode-form='log']",
     legend: '.dag-log-legend',
   },
 });
