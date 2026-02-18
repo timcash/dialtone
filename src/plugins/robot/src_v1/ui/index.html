@@ -19,9 +19,9 @@
 
       <!-- HERO SECTION -->
       <section id="hero" aria-label="Hero Section">
-        <canvas aria-label="Hero Canvas" class="hero-stage"></canvas>
-        <form data-mode-form="hero" aria-label="Hero Mode Form" hidden></form>
-        <aside class="hero-legend legend-marketing" aria-label="Hero Legend">
+        <canvas aria-label="Hero Canvas" class="hero-stage overlay-primary"></canvas>
+        <form class="mode-form" data-mode-form="hero" aria-label="Hero Mode Form" hidden></form>
+        <aside class="hero-legend overlay-legend legend-marketing" aria-label="Hero Legend">
           <h1>Dialtone Robot</h1>
           <p>Autonomous intelligence for the next generation of exploration.</p>
         </aside>
@@ -29,17 +29,17 @@
 
       <!-- DOCS SECTION -->
       <section id="docs" aria-label="Docs Section" hidden>
-        <div class="docs-primary" aria-label="Docs Content">
+        <div class="docs-primary overlay-primary" aria-label="Docs Content">
           <h2 aria-label="Docs Title">Documentation</h2>
           <p aria-label="Docs Subtitle">Robot docs placeholder content.</p>
         </div>
         <div class="docs-thumb" aria-label="Docs Controls"></div>
-        <aside class="docs-legend" aria-label="Docs Legend"></aside>
+        <aside class="docs-legend overlay-legend" aria-label="Docs Legend"></aside>
       </section>
 
       <!-- SETTINGS SECTION -->
       <section id="settings" aria-label="Settings Section" hidden>
-        <div class="settings-primary" aria-label="Settings Content">
+        <div class="settings-primary overlay-primary" aria-label="Settings Content">
           <h2>Robot Settings</h2>
           <div class="setting-item">
             <label for="toggle-chatlog">Show Chatlog</label>
@@ -47,12 +47,12 @@
           </div>
         </div>
         <div class="settings-thumb" aria-label="Settings Controls"></div>
-        <aside class="settings-legend" aria-label="Settings Legend"></aside>
+        <aside class="settings-legend overlay-legend" aria-label="Settings Legend"></aside>
       </section>
 
       <!-- TELEMETRY SECTION -->
       <section id="table" aria-label="Telemetry Section" hidden>
-        <div class="table-wrapper">
+        <div class="table-wrapper overlay-primary">
           <table aria-label="Robot Table" class="telemetry-table">
             <thead>
               <tr>
@@ -64,7 +64,7 @@
             <tbody></tbody>
           </table>
         </div>
-        <form data-mode-form="table" aria-label="Table Mode Form">
+        <form class="mode-form" data-mode-form="table" aria-label="Table Mode Form">
           <button type="button" aria-label="Table Thumb 1">1:Refresh</button>
           <button type="button" aria-label="Table Thumb 2">2:Up</button>
           <button type="button" aria-label="Table Thumb 3">3:Down</button>
@@ -77,18 +77,18 @@
           <input type="text" aria-label="Table Query Input" placeholder="Filter table rows" />
           <button type="button" aria-label="Table Submit">10:Apply</button>
         </form>
-        <aside class="telemetry-legend" aria-label="Telemetry Legend"></aside>
+        <aside class="telemetry-legend overlay-legend" aria-label="Telemetry Legend"></aside>
       </section>
 
       <!-- 3D SECTION -->
       <section id="three" aria-label="Three Section" hidden>
-        <canvas aria-label="Three Canvas" class="three-stage"></canvas>
+        <canvas aria-label="Three Canvas" class="three-stage overlay-primary"></canvas>
         
         <aside class="three-chatlog" aria-label="Three Chatlog Overlay" hidden>
           <div class="three-chatlog-xterm" aria-label="Three Chatlog Terminal"></div>
         </aside>
 
-        <form data-mode-form="three" aria-label="Three Mode Form">
+        <form class="mode-form" data-mode-form="three" aria-label="Three Mode Form">
           <button type="button" aria-label="Three Thumb 1">1:Back</button>
           <button type="button" aria-label="Three Thumb 2">2:Add</button>
           <button type="button" aria-label="Three Thumb 3">3:Link</button>
@@ -102,7 +102,7 @@
           <button type="button" aria-label="Three Submit">10:Submit</button>
         </form>
 
-        <aside class="three-legend" aria-label="Three Legend">
+        <aside class="three-legend overlay-legend" aria-label="Three Legend">
           <div class="hud-row"><span>MODE:</span> <span id="hud-mode">STABILIZE</span></div>
           <div class="hud-row"><span>BATT:</span> <span id="hud-batt">0.0</span>V</div>
           <div class="hud-row"><span>ALT:</span> <span id="hud-alt">0.0</span>m</div>
@@ -122,8 +122,8 @@
 
       <!-- TERMINAL SECTION -->
       <section id="xterm" aria-label="Xterm Section" hidden>
-        <div class="xterm-primary" aria-label="Xterm Terminal"></div>
-        <form data-mode-form="log" aria-label="Log Mode Form">
+        <div class="xterm-primary overlay-primary" aria-label="Xterm Terminal"></div>
+        <form class="mode-form" data-mode-form="log" aria-label="Log Mode Form">
           <button type="button" aria-label="Log Thumb 1">1:Left</button>
           <button type="button" aria-label="Log Thumb 2">2:Right</button>
           <button type="button" aria-label="Log Thumb 3">3:Up</button>
@@ -136,14 +136,14 @@
           <input type="text" aria-label="Log Command Input" placeholder="Type command for log terminal" />
           <button type="button" aria-label="Log Submit">10:Submit</button>
         </form>
-        <aside class="xterm-legend" aria-label="Xterm Legend"></aside>
+        <aside class="xterm-legend overlay-legend" aria-label="Xterm Legend"></aside>
       </section>
 
       <!-- CAMERA SECTION -->
       <section id="video" aria-label="Video Section" hidden>
-        <img aria-label="Video Stage" class="video-stage" src="" alt="Robot Stream" />
+        <img aria-label="Video Stage" class="video-stage overlay-primary" src="" alt="Robot Stream" />
         
-        <form data-mode-form="video" aria-label="Video Mode Form">
+        <form class="mode-form" data-mode-form="video" aria-label="Video Mode Form">
           <button type="button" aria-label="Video Thumb 1">1:Feed A</button>
           <button type="button" aria-label="Video Thumb 2">2:Feed B</button>
           <button type="button" aria-label="Video Thumb 3">3:Wide</button>
@@ -157,7 +157,7 @@
           <button type="button" aria-label="Video Submit">10:Set</button>
         </form>
 
-        <aside class="video-legend" aria-label="Video Legend">
+        <aside class="video-legend overlay-legend" aria-label="Video Legend">
           <div class="hud-row"><span>SOURCE:</span> <span id="vid-source">PRIMARY</span></div>
           <div class="hud-row"><span>RES:</span> <span id="vid-res">1280x720</span></div>
           <div class="hud-row"><span>FPS:</span> <span id="vid-fps">30</span></div>
