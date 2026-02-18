@@ -28,45 +28,62 @@ if ('serviceWorker' in navigator) {
 
 const { sections, menu } = setupApp({ title: 'dialtone.dag', debug: true });
 
-sections.register('dag-table', {
-  containerId: 'dag-table',
+sections.register('dag-meta-table', {
+  containerId: 'dag-meta-table',
   load: async () => {
     const { mountTable } = await import('./components/table/index');
-    const container = document.getElementById('dag-table');
-    if (!container) throw new Error('dag-table container not found');
+    const container = document.getElementById('dag-meta-table');
+    if (!container) throw new Error('dag-meta-table container not found');
     return mountTable(container);
   },
   header: { visible: false, menuVisible: true, title: 'DAG Table' },
   overlays: {
     primaryKind: 'table',
     primary: "table[aria-label='DAG Table']",
-    thumb: '.dag-table-thumb',
+    thumb: "form[data-mode-form='table']",
     legend: '.dag-table-legend',
   },
 });
 
-sections.register('three', {
-  containerId: 'three',
+sections.register('dag-3d-stage', {
+  containerId: 'dag-3d-stage',
   load: async () => {
     const { mountThree } = await import('./components/three/index');
-    const container = document.getElementById('three');
-    if (!container) throw new Error('three container not found');
+    const container = document.getElementById('dag-3d-stage');
+    if (!container) throw new Error('dag-3d-stage container not found');
     return mountThree(container);
   },
   header: { visible: false, menuVisible: true, title: 'DAG Stage' },
   overlays: {
     primaryKind: 'stage',
     primary: "canvas[aria-label='Three Canvas']",
-    thumb: '.dag-controls',
+    thumb: "form[data-mode-form='dag']",
     legend: '.dag-history',
     chatlog: '.dag-chatlog',
   },
 });
 
-const sectionSet = new Set(['dag-table', 'three']);
-const sectionOrder = ['dag-table', 'three'] as const;
+sections.register('dag-log-xterm', {
+  containerId: 'dag-log-xterm',
+  load: async () => {
+    const { mountLog } = await import('./components/log/index');
+    const container = document.getElementById('dag-log-xterm');
+    if (!container) throw new Error('dag-log-xterm container not found');
+    return mountLog(container);
+  },
+  header: { visible: false, menuVisible: true, title: 'DAG Log' },
+  overlays: {
+    primaryKind: 'xterm',
+    primary: "[aria-label='Log Terminal']",
+    thumb: "form[data-mode-form='log']",
+    legend: '.dag-log-legend',
+  },
+});
+
+const sectionSet = new Set(['dag-meta-table', 'dag-3d-stage', 'dag-log-xterm']);
+const sectionOrder = ['dag-meta-table', 'dag-3d-stage', 'dag-log-xterm'] as const;
 type DagSectionID = (typeof sectionOrder)[number];
-let defaultSection: DagSectionID = 'dag-table';
+let defaultSection: DagSectionID = 'dag-meta-table';
 const sectionStorageKey = 'dag.src_v3.active_section';
 const apiReadyStorageKey = 'dag.src_v3.api_ready';
 
@@ -135,7 +152,7 @@ const probeDagTableAPI = async (): Promise<boolean> => {
 
 const runStartupProbe = async () => {
   const apiReady = await probeDagTableAPI();
-  defaultSection = apiReady ? 'dag-table' : 'three';
+  defaultSection = apiReady ? 'dag-meta-table' : 'dag-3d-stage';
   try {
     window.sessionStorage.setItem(apiReadyStorageKey, apiReady ? '1' : '0');
   } catch {
@@ -147,10 +164,13 @@ const runStartupProbe = async () => {
 };
 
 menu.addButton('Table', 'Navigate Table', () => {
-  void navigateToSection('dag-table');
+  void navigateToSection('dag-meta-table');
 });
 menu.addButton('Stage', 'Navigate Stage', () => {
-  void navigateToSection('three');
+  void navigateToSection('dag-3d-stage');
+});
+menu.addButton('Log', 'Navigate Log', () => {
+  void navigateToSection('dag-log-xterm');
 });
 
 const syncSectionFromURL = () => {
@@ -167,6 +187,26 @@ const syncSectionFromURL = () => {
   });
 };
 
+const getActiveModeForm = (): HTMLFormElement | null => {
+  const activeId = sections.getActiveSectionId();
+  if (!activeId) return null;
+  const section = document.getElementById(activeId);
+  if (!section) return null;
+  const form = section.querySelector('form');
+  return form instanceof HTMLFormElement ? form : null;
+};
+
+const getModeFormButtons = (form: HTMLFormElement): HTMLButtonElement[] =>
+  Array.from(form.querySelectorAll('button')).filter((el): el is HTMLButtonElement => el instanceof HTMLButtonElement && !el.disabled);
+
+const getModeFormFocusables = (form: HTMLFormElement): HTMLElement[] =>
+  Array.from(form.querySelectorAll('button,input,select,textarea,[tabindex]')).filter((el): el is HTMLElement => {
+    if (!(el instanceof HTMLElement)) return false;
+    if ((el as HTMLButtonElement).disabled) return false;
+    if (el.getAttribute('tabindex') === '-1') return false;
+    return true;
+  });
+
 window.addEventListener('hashchange', syncSectionFromURL);
 window.addEventListener('pageshow', syncSectionFromURL);
 window.addEventListener('focus', syncSectionFromURL);
@@ -176,6 +216,35 @@ document.addEventListener('visibilitychange', () => {
 
 window.addEventListener('keydown', (event) => {
   if (event.defaultPrevented) return;
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+  const modeForm = getActiveModeForm();
+
+  if (/^[1-9]$/.test(event.key) && modeForm) {
+    const idx = Number(event.key) - 1;
+    const buttons = getModeFormButtons(modeForm);
+    const button = buttons[idx];
+    if (button) {
+      event.preventDefault();
+      button.focus();
+      button.click();
+      return;
+    }
+  }
+
+  if (event.key === 'Tab' && modeForm) {
+    const focusables = getModeFormFocusables(modeForm);
+    if (focusables.length > 0) {
+      event.preventDefault();
+      const activeEl = document.activeElement as HTMLElement | null;
+      const current = activeEl ? focusables.indexOf(activeEl) : -1;
+      const delta = event.shiftKey ? -1 : 1;
+      const next = current < 0 ? (event.shiftKey ? focusables.length - 1 : 0) : (current + delta + focusables.length) % focusables.length;
+      focusables[next]?.focus();
+      return;
+    }
+  }
+
   const target = event.target as HTMLElement | null;
   if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
 
