@@ -10,15 +10,15 @@ import (
 	test_v2 "dialtone/cli/src/libs/test_v2"
 )
 
-func Run08UIRun() error {
+func Run08UIRun(ctx *testCtx) (string, error) {
 	repoRoot, err := os.Getwd()
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	port, err := test_v2.PickFreePort()
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "robot", "ui-run", "src_v1", "--port", fmt.Sprintf("%d", port))
@@ -26,12 +26,15 @@ func Run08UIRun() error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
-		return err
+		return "", err
 	}
 	defer func() {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
 	}()
 
-	return test_v2.WaitForPort(port, 12*time.Second)
+	if err := test_v2.WaitForPort(port, 12*time.Second); err != nil {
+		return "", err
+	}
+	return "UI server check passed.", nil
 }

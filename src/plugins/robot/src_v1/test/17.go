@@ -8,12 +8,13 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-func Run17LifecycleInvariants() error {
-	session, err := ensureSharedBrowser(false)
+func Run17LifecycleInvariants(ctx *testCtx) (string, error) {
+	session, err := ctx.browser()
 	if err != nil {
-		return err
+		return "", err
 	}
 
+	fmt.Println("   [STEP] Checking section lifecycle...")
 	checks := []struct {
 		id    string
 		label string
@@ -28,10 +29,11 @@ func Run17LifecycleInvariants() error {
 
 	for _, c := range checks {
 		if err := session.Run(test_v2.NavigateToSection(c.id, c.label)); err != nil {
-			return err
+			return "", err
 		}
 	}
 
+	fmt.Println("   [STEP] Checking console logs for lifecycle tokens...")
 	entries := session.Entries()
 	required := []string{"LOADING", "LOADED", "START", "RESUME", "PAUSE", "NAVIGATE TO", "NAVIGATE AWAY"}
 	for _, token := range required {
@@ -43,27 +45,28 @@ func Run17LifecycleInvariants() error {
 			}
 		}
 		if !found {
-			return fmt.Errorf("missing lifecycle token in browser logs: %s", token)
+			return "", fmt.Errorf("missing lifecycle token in browser logs: %s", token)
 		}
 	}
 
 	for _, e := range entries {
 		if strings.Contains(e.Message, "[INVARIANT]") {
-			return fmt.Errorf("invariant violation captured: %s", e.Message)
+			return "", fmt.Errorf("invariant violation captured: %s", e.Message)
 		}
 	}
 
+	fmt.Println("   [STEP] Checking active section count...")
 	var activeCount int
 	if err := session.Run(chromedp.Evaluate(`
     (() => {
       return Array.from(document.querySelectorAll('section[data-active="true"]')).length;
     })();
   `, &activeCount)); err != nil {
-		return err
+		return "", err
 	}
 	if activeCount != 1 {
-		return fmt.Errorf("expected exactly one active section, got %d", activeCount)
+		return "", fmt.Errorf("expected exactly one active section, got %d", activeCount)
 	}
 
-	return nil
+	return "Lifecycle invariants maintained.", nil
 }
