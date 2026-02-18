@@ -6,6 +6,14 @@ import { Menu } from './Menu';
 import { SectionManager } from './SectionManager';
 import { AppOptions } from './types';
 
+export const UI_OVERLAYS = {
+  menu: 'menu',
+  modeForm: 'mode-form',
+  legend: 'legend',
+  chatlog: 'chatlog',
+  statusBar: 'status-bar',
+} as const;
+
 export function setupApp(options: AppOptions = {}) {
   const sections = new SectionManager({ debug: options.debug ?? true });
   const menu = new Menu();

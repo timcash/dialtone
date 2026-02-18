@@ -18,12 +18,12 @@ func Run17LifecycleInvariants() error {
 		id    string
 		label string
 	}{
-		{id: "hero", label: "Hero Section"},
-		{id: "docs", label: "Docs Section"},
-		{id: "table", label: "Table Section"},
-		{id: "three", label: "Three Section"},
-		{id: "xterm", label: "Xterm Section"},
-		{id: "video", label: "Video Section"},
+		{id: "template-hero-stage", label: "Hero Section"},
+		{id: "template-docs-docs", label: "Docs Section"},
+		{id: "template-meta-table", label: "Table Section"},
+		{id: "template-three-stage", label: "Three Section"},
+		{id: "template-log-xterm", label: "Log Section"},
+		{id: "template-demo-video", label: "Video Section"},
 	}
 
 	for _, c := range checks {

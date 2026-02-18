@@ -19,7 +19,7 @@ func Run16VideoSectionValidation() error {
 		return err
 	}
 
-	if err := session.Run(test_v2.NavigateToSection("video", "Video Section")); err != nil {
+	if err := session.Run(test_v2.NavigateToSection("template-demo-video", "Video Section")); err != nil {
 		return err
 	}
 	if err := session.Run(test_v2.WaitForAriaLabel("Test Video")); err != nil {
