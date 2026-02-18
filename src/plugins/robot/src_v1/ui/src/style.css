@@ -11,103 +11,21 @@ section {
   width: 100vw;
 }
 
-/* OVERLAYS */
-.overlay-primary {
-  width: 100%;
-  height: 100%;
-}
+/* OVERRIDES */
 
-.mode-form {
-  width: min(500px, calc(100vw - 28px));
-  max-width: 500px;
-  --mode-form-gap: 12px;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(56px, 1fr));
-  grid-template-rows: repeat(4, minmax(56px, auto));
-  gap: var(--mode-form-gap);
-  z-index: 11;
-  pointer-events: auto;
-  border: 0;
-  margin: 0;
-  padding: 0;
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
-}
-
-.mode-form > button {
-  width: 100%;
-  min-width: 56px;
-  height: 64px;
-  min-height: 56px;
-  border-radius: 3px;
-  border: 1px solid rgba(240, 246, 255, 0.55);
-  background: rgba(0, 0, 0, 0.5);
-  color: #f2f7ff;
-  text-align: center;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  touch-action: manipulation;
-}
-
-.mode-form > button:focus-visible,
-.mode-form > input:focus-visible {
-  border-color: rgba(125, 211, 252, 0.95);
-  box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.8), inset 0 0 16px rgba(43, 120, 255, 0.42);
-  background: rgba(8, 20, 34, 0.72);
-  outline: 0;
-}
-
-.mode-form > input {
-  width: 100%;
-  height: 64px;
-  border-radius: 8px;
-  border: 1px solid rgba(240, 246, 255, 0.45);
-  background: rgba(0, 0, 0, 0.5);
-  color: #f2f7ff;
-  padding: 0 12px;
-}
-
-.mode-form > input:focus { outline: 0; }
-
+/* Specific Button 9 (Mode) Style */
 .mode-form > button:nth-of-type(9) {
   border-color: rgba(147, 197, 253, 0.85);
   background: rgba(5, 19, 42, 0.72);
 }
 
-.mode-form > input {
-  grid-row: 4;
-  grid-column: 1 / span 2;
-}
-
-.mode-form > button:last-of-type {
-  grid-row: 4;
-  grid-column: 3;
-}
-
-/* Specific button colors for robot control */
+/* Specific colors for robot control */
 #three-arm { color: #ef4444; border-color: rgba(239, 68, 68, 0.6); }
 #three-disarm { color: #f59e0b; border-color: rgba(245, 158, 11, 0.6); }
 #three-manual { color: #10b981; border-color: rgba(16, 185, 129, 0.6); }
 #three-guided { color: #3b82f6; border-color: rgba(59, 130, 246, 0.6); }
 
-/* LEGEND */
-.overlay-legend {
-  position: absolute;
-  top: calc(env(safe-area-inset-top, 0px) + 14px);
-  left: calc(env(safe-area-inset-left, 0px) + 14px);
-  width: min(260px, calc(100vw - 104px));
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: transparent;
-  color: #f2f7ff;
-  display: grid;
-  gap: 6px;
-  z-index: 12;
-  pointer-events: none;
-}
-
+/* Legend Backgrounds */
 .three-legend, .video-legend {
   background: rgba(0, 0, 0, 0.4);
   backdrop-filter: blur(4px);
@@ -303,7 +221,7 @@ section {
   top: 0;
 }
 
-/* Form Positioning Overrides */
+/* Calculator Layout Override for Table */
 #table .mode-form {
   position: relative;
   left: auto;
@@ -313,13 +231,6 @@ section {
   max-width: none;
   padding: 14px;
   grid-row: 2;
-}
-
-#xterm .mode-form,
-#xterm .mode-form {
-  width: 100%;
-  max-width: none;
-  padding: 14px;
 }
 
 /* XTERM */
@@ -405,13 +316,6 @@ nav > .menu-toggle {
   border: none !important;
   text-shadow: 0 1px 4px rgba(0,0,0,0.8);
   font-weight: 700;
-}
-
-/* MOBILE ADJUSTMENTS */
-@media (max-width: 420px) {
-  .mode-form > button {
-    height: 60px;
-  }
 }
 
 /* APP TITLE */
