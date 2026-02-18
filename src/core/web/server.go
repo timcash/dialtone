@@ -26,7 +26,7 @@ import (
 var startTime = time.Now()
 
 // CreateWebHandler creates the HTTP handler for the unified web dashboard
-func CreateWebHandler(hostname string, natsPort, wsPort, webPort, internalNATSPort, internalWSPort int, ns *server.Server, lc *tailscale.LocalClient, ips []netip.Addr, useMock bool, staticFS fs.FS) http.Handler {
+func CreateWebHandler(hostname, version string, natsPort, wsPort, webPort, internalNATSPort, internalWSPort int, ns *server.Server, lc *tailscale.LocalClient, ips []netip.Addr, useMock bool, staticFS fs.FS) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -44,7 +44,7 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort, internalNATSPo
 	// 1. JSON init API for the frontend
 	mux.HandleFunc("/api/init", func(w http.ResponseWriter, r *http.Request) {
 		data := map[string]interface{}{
-			"version":            "v1.1.1",
+			"version":            version,
 			"hostname":           hostname,
 			"nats_port":          natsPort,
 			"internal_nats_port": internalNATSPort,
@@ -55,6 +55,8 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort, internalNATSPo
 			"ips":                ips,
 		}
 		w.Header().Set("Content-Type", "application/json")
+		// Prevent caching of init data to ensure version check is fresh
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 		json.NewEncoder(w).Encode(data)
 	})
 
@@ -76,6 +78,7 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort, internalNATSPo
 		}
 
 		status := map[string]any{
+			"version":       version,
 			"hostname":      hostname,
 			"uptime":        time.Since(startTime).String(),
 			"uptime_secs":   time.Since(startTime).Seconds(),
@@ -94,6 +97,7 @@ func CreateWebHandler(hostname string, natsPort, wsPort, webPort, internalNATSPo
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 		json.NewEncoder(w).Encode(status)
 	})
 
