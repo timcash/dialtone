@@ -108,7 +108,7 @@ func RunRobot(args []string) {
 	case "ui-run":
 		RunUIRun(getDir(), args[2:])
 	case "dev":
-		RunDev(getDir())
+		RunDev(getDir(), restArgs)
 	case "local-web-remote-robot":
 		vDir := getDir()
 		if err := RunLocalWebRemoteRobot(vDir); err != nil {
