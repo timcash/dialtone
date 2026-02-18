@@ -335,8 +335,8 @@ class ThreeControl implements VisualizationControl {
     if (this.robotGroup) {
       this.robotGroup.rotation.set(
         this.attitude.pitch,
-        -this.attitude.roll,
         -this.attitude.yaw,
+        -this.attitude.roll,
         'YXZ'
       );
     }
