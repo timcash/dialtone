@@ -3,11 +3,12 @@
 
 ![dialtone](./src/plugins/www/screenshots/summary.png)
 
-## REPL / Chat Interface (Target)
-`./dialtone.sh` should move to a simple text-chat REPL with a `DIALTONE>` prompt, following [DIALTONE.md](./DIALTONE.md) and [RLM_DIALTONE.md](./RLM_DIALTONE.md).  
-Users and agents submit role-based commands (for example `USER-1>`), and command output is streamed back as `DIALTONE:PID:>`.
+## 1. REPL / Chat Interface (Target)
+`./dialtone.sh` should change from its current behavior to instead launch a simple REPL that feels like a text chat with a `DIALTONE>` prompt, as described in [DIALTONE.md](./DIALTONE.md) and [RLM_DIALTONE.md](./RLM_DIALTONE.md).
 
-Example:
+The REPL accepts commands from user roles (e.g. `USER-1>`), such as `ps all`.
+
+**Example:**
 ```text
 USER-1> ps all
 DIALTONE> Request received. Sign with `@DIALTONE task --sign current-task` to run.
@@ -18,35 +19,25 @@ DIALTONE:4512> 4512 user  dialtone
 DIALTONE> Process 4512 exited with code 0.
 ```
 
-## `PERSONA>` Model
-Dialtone uses explicit speaking roles in the REPL so every line has a clear source.
+## 2. Code Stack
+The following components form the core architecture of Dialtone. LLM agents should treat the **DAG Plugin** as the canonical source of truth for UI and interaction patterns.
 
-- `DIALTONE>`: the core orchestrator process.
-- `DIALTONE:PID>`: a Dialtone subtone/subprocess stream (per running task/process).
-- `USER-1>` (and other `USER-*` roles): cryptographically signed user identities.
-- `LLM-*>`: dynamically created LLM agent subprocesses orchestrated by `DIALTONE>`, similar to subtones but specialized for reasoning/planning/tool use.
+### [DAG Plugin](./src/plugins/dag/README.md)
+The primary implementation of the Directed Acyclic Graph engine. It defines the standard for section lifecycle, mode-form controls, and 3D stage interactions.
 
-This makes command intent, authorization, and runtime output easy to audit in one shared session.
+### [Template Plugin](./src/plugins/template/README.md)
+A reusable starter kit for new plugins. Use this to scaffold new functionality while maintaining compatibility with the Dialtone lifecycle and test runners.
 
-## Logs (plugin: `plugins/logs/src_v1`)
-Dialtone has a logs plugin at `src/plugins/logs/src_v1` to standardize local/dev/prod logs across plugins and services.
+### [Logs Plugin](./src/plugins/logs/README.md)
+NATS-first logging across plugins and services. Producers publish to NATS; readers attach (CLI `--stdout`, file listener, browser). See [src/plugins/logs/src_v1/README.md](src/plugins/logs/src_v1/README.md) for CLI and dev flow.
 
-Planned log levels:
-- `--quiet` (minimal output)
-- `--verbose` (operator-friendly detail)
-- `--debug` (full diagnostic detail)
+### [UI Library (ui_v2)](./src/libs/ui_v2/README.md)
+The shared toolkit for building Dialtone interfaces. It handles section management, global menus, and overlay coordination.
 
-Goal: same log format everywhere, with strong defaults for command history, process lifecycle, errors, and API call summaries.
+### [Test Library (test_v2)](./src/libs/test_v2/README.md)
+A specialized browser orchestration library for deterministic UI testing. It provides ARIA-driven actions, automated reporting, and screenshot capture.
 
-## Telemetry and Trace (TODO)
-Dialtone should add telemetry/tracing so operators can follow activity across the network and inspect end-to-end latency.
-
-Planned behavior:
-- `--trace` turns on distributed tracing for requests, function calls, and API hops.
-- Trace output links events to logs so one request can be followed across services.
-- Telemetry captures live production signals like CPU stats, memory, latencies, versions, and other runtime metrics needed for analysis.
-
-## Getting Started
+## 3. Getting Started
 The easiest way to get started is `https://dialtone.earth`.
 
 ### Clone and Run
@@ -66,39 +57,14 @@ cd dialtone
 ./dialtone.sh --help
 ```
 
-## What Dialtone Is
+## 4. What Dialtone Is
 Dialtone is a small program that runs on computers, phones, and robots. It is built for small communities that need practical tools for learning, planning, and operations.
 
-- It acts like a virtual librarian for civic coordination and education.
-- It can build interactive 3D spaces to work with users.
-- Mesh radios and local networks help people and robots communicate.
-- It has a plugin system so teams can extend functionality safely.
-- It can adapt to new tasks by distilling and fine-tuning focused sub-models.
-- It combines systems like CAD, BIM, ERP, GIS, and related workflows into one pattern.
-- It includes plugins for testing, development, and deployment.
-- It supports a robotics and manufacturing marketplace for parts, services, and data.
-- It is open to contributors who want to build skills in robotics, math, manufacturing, and more.
-
-## Code Stack
-### DAG Plugin
-The DAG plugin is the main source of truth for current UI/interaction patterns, section naming, overlays, and test flow. Agents should start here to understand how the system is expected to behave at runtime.  
-README: [src/plugins/dag/README.md](src/plugins/dag/README.md)
-
-### Template Plugin
-The template plugin is the reusable starter for building new plugins with the same lifecycle, section model, and dev/test commands. It mirrors production patterns in a simpler package.  
-README: [src/plugins/template/README.md](src/plugins/template/README.md)
-
-### Logs Plugin (`logs` / `src_v1`)
-The logs plugin standardizes logging across plugins and services, unifies browser and backend logs, and supports NATS topics and xterm streaming.  
-README: [src/plugins/logs/src_v1/README.md](src/plugins/logs/src_v1/README.md)
-
-### UI Library (`ui_v2`)
-`ui_v2` provides shared primitives for section lifecycle, menu handling, overlay/underlay wiring, and URL-driven navigation. Plugin UIs should compose these building blocks instead of re-implementing them.  
-README: [src/libs/ui_v2/README.md](src/libs/ui_v2/README.md)
-
-### Test Library (`test_v2`)
-`test_v2` provides browser/session orchestration, aria-label-driven actions, logging, and screenshot/report helpers for deterministic UI tests. Use it to keep plugin validation behavior consistent across the repo.  
-README: [src/libs/test_v2/README.md](src/libs/test_v2/README.md)
+- **Coordination:** Acts like a virtual librarian for civic coordination and education.
+- **Visualization:** Builds interactive 3D spaces to work with users.
+- **Communication:** Uses mesh radios and local networks for peer-to-peer robot/human communication.
+- **Extensibility:** Robust plugin system for safely adding new skills and models.
+- **Integration:** Combines CAD, BIM, ERP, and GIS workflows into a single unified pattern.
 
 ## How the code base is organized
 - `./dialtone.sh` and `.\dialtone.ps1` start a REPL with `DIALTONE>`

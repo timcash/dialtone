@@ -1,6 +1,11 @@
 import * as THREE from 'three';
+import { Terminal } from '@xterm/xterm';
+import '@xterm/xterm/css/xterm.css';
 import { VisualizationControl } from '../../../../../../../libs/ui_v2/types';
-import { addMavlinkListener } from '../../data/connection';
+import { addMavlinkListener, sendCommand } from '../../data/connection';
+import { registerButtons, renderButtons } from '../../buttons';
+
+const CHATLOG_MAX_LINES = 7;
 
 class ThreeControl implements VisualizationControl {
   private scene = new THREE.Scene();
@@ -13,49 +18,76 @@ class ThreeControl implements VisualizationControl {
   private attitude = { roll: 0, pitch: 0, yaw: 0 };
   private latencyHistory: number[] = [];
   private maxHistory = 60;
+  
+  // Chatlog
+  private chatlogHost: HTMLElement | null = null;
+  private chatlogTerm: Terminal | null = null;
+  private chatlogLines: string[] = [];
 
   constructor(private container: HTMLElement, canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    this.renderer.setClearColor(0x000000, 1);
+    this.renderer.setClearColor(0x05070a, 1);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-    this.camera.position.set(0, 0, 15);
+    this.chatlogHost = container.querySelector('.three-chatlog-xterm');
+    this.initChatlogTerminal();
+
+    registerButtons('three', ['Control'], {
+      'Control': [
+        { label: 'Arm', action: () => sendCommand('arm') },
+        { label: 'Disarm', action: () => sendCommand('disarm') },
+        { label: 'Manual', action: () => sendCommand('mode', 'manual') },
+        { label: 'Guided', action: () => sendCommand('mode', 'guided') },
+        null, null, null, null
+      ]
+    });
+
+    this.camera.position.set(0, 5, 10);
     this.camera.lookAt(0, 0, 0);
 
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-    const keyLight = new THREE.DirectionalLight(0xffffff, 0.9);
-    keyLight.position.set(2, 2, 2);
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+    const keyLight = new THREE.DirectionalLight(0xffffff, 0.95);
+    keyLight.position.set(5, 10, 8);
     this.scene.add(keyLight);
 
     const group = new THREE.Group();
     
-    // Main Body (Triangle/Cone)
-    const geometry = new THREE.ConeGeometry(1, 3, 4); 
-    const material = new THREE.MeshPhongMaterial({ color: 0x66fcf1, wireframe: false });
-    const robotMesh = new THREE.Mesh(geometry, material);
-    robotMesh.rotation.x = Math.PI / 2;
-    group.add(robotMesh);
+    // Main Body
+    const bodyGeo = new THREE.BoxGeometry(2, 0.5, 3);
+    const bodyMat = new THREE.MeshStandardMaterial({ 
+      color: 0x475261,
+      roughness: 0.4,
+      metalness: 0.6 
+    });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    group.add(body);
 
-    // Euler Rings
-    const ringGeo = new THREE.TorusGeometry(2, 0.05, 16, 100);
-    const ringMatX = new THREE.MeshBasicMaterial({ color: 0xff4d4d }); // Pitch
-    const ringMatY = new THREE.MeshBasicMaterial({ color: 0x00ff00 }); // Roll
-    const ringMatZ = new THREE.MeshBasicMaterial({ color: 0x0000ff }); // Yaw
-    
-    const ringX = new THREE.Mesh(ringGeo, ringMatX);
-    const ringY = new THREE.Mesh(ringGeo, ringMatY);
-    ringY.rotation.x = Math.PI / 2;
-    const ringZ = new THREE.Mesh(ringGeo, ringMatZ);
+    // Front Indicator
+    const frontGeo = new THREE.BoxGeometry(1.2, 0.6, 0.5);
+    const frontMat = new THREE.MeshStandardMaterial({ 
+      color: 0x66fcf1,
+      emissive: 0x1f6dff,
+      emissiveIntensity: 0.5
+    });
+    const front = new THREE.Mesh(frontGeo, frontMat);
+    front.position.set(0, 0, -1.5);
+    group.add(front);
 
-    group.add(ringX); 
-    group.add(ringY);
-    group.add(ringZ);
+    // Axis Arrows
+    const arrowLen = 3;
+    const arrowX = new THREE.ArrowHelper(new THREE.Vector3(1,0,0), new THREE.Vector3(0,0,0), arrowLen, 0xff4d4d);
+    const arrowY = new THREE.ArrowHelper(new THREE.Vector3(0,1,0), new THREE.Vector3(0,0,0), arrowLen, 0x4dff4d);
+    const arrowZ = new THREE.ArrowHelper(new THREE.Vector3(0,0,1), new THREE.Vector3(0,0,0), arrowLen, 0x4d4dff);
+    group.add(arrowX);
+    group.add(arrowY);
+    group.add(arrowZ);
 
     this.scene.add(group);
     this.robotGroup = group;
 
-    const gridHelper = new THREE.GridHelper(50, 50, 0x333333, 0x111111);
-    gridHelper.rotation.x = Math.PI / 2;
+    // Floor Grid
+    const gridHelper = new THREE.GridHelper(40, 40, 0x444444, 0x111111);
+    gridHelper.position.y = -2;
     this.scene.add(gridHelper);
 
     this.resize();
@@ -64,11 +96,73 @@ class ThreeControl implements VisualizationControl {
     // Stub debug bridge for test compatibility
     this.attachDebugBridge();
     
-    this.initDataListener();
+    // Legend Toggle
+    const legend = document.querySelector('.three-legend');
+    if (legend) {
+        legend.addEventListener('click', () => {
+            legend.classList.toggle('legend-minimized');
+        });
+    }
+    
+    this.subscribe();
     this.animate();
   }
 
-  private initDataListener() {
+  private initChatlogTerminal() {
+    if (!this.chatlogHost) return;
+    this.chatlogTerm?.dispose();
+    this.chatlogHost.innerHTML = '';
+    this.chatlogTerm = new Terminal({
+      allowTransparency: true,
+      convertEol: true,
+      disableStdin: true,
+      cursorBlink: false,
+      cursorStyle: 'bar',
+      rows: CHATLOG_MAX_LINES,
+      cols: 92,
+      scrollback: 0,
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      fontSize: 12,
+      lineHeight: 1.35,
+      theme: {
+        background: 'rgba(0,0,0,0)',
+        foreground: '#a7adb7',
+        cursor: '#a7adb7',
+      },
+    });
+    this.chatlogTerm.open(this.chatlogHost);
+    this.renderChatlog();
+  }
+
+  private renderChatlog() {
+    const term = this.chatlogTerm;
+    if (!term) return;
+    const lines = this.chatlogLines.slice(-CHATLOG_MAX_LINES);
+    const padCount = Math.max(0, CHATLOG_MAX_LINES - lines.length);
+    const rendered: string[] = [];
+    for (let i = 0; i < padCount; i += 1) rendered.push('');
+    for (let i = 0; i < lines.length; i += 1) {
+      const age = lines.length - 1 - i;
+      const color =
+        age === 0 ? '\x1b[97m' : age === 1 ? '\x1b[37m' : age === 2 ? '\x1b[2;37m' : age === 3 ? '\x1b[90m' : '\x1b[2;90m';
+      rendered.push(`${color}${lines[i]}\x1b[0m`);
+    }
+    term.write(`\x1b[2J\x1b[H${rendered.join('\r\n')}`);
+  }
+
+  private logToChat(text: string) {
+    if (!text) return;
+    const clean = text.replace(/\s+/g, ' ').trim();
+    if (!clean) return;
+    this.chatlogLines.push(clean);
+    if (this.chatlogLines.length > CHATLOG_MAX_LINES) {
+      this.chatlogLines = this.chatlogLines.slice(-CHATLOG_MAX_LINES);
+    }
+    this.renderChatlog();
+  }
+
+  private subscribe() {
+    if (this.unsubscribe) return;
     this.unsubscribe = addMavlinkListener((raw: any) => {
       // Track latency for any message that has timestamps
       if (raw.t_raw !== undefined) {
@@ -118,16 +212,11 @@ class ThreeControl implements VisualizationControl {
            if (hdg !== -1) hdgEl.innerText = hdg.toFixed(1);
          }
       } else if (raw.severity !== undefined) {
-         // Statustext
+         // Statustext -> Chatlog
          const msg = raw.text ?? "";
-         const errorsEl = document.getElementById('hud-errors');
-         if (errorsEl && msg) {
-           const div = document.createElement('div');
-           div.className = 'hud-error-item';
-           div.innerText = msg;
-           errorsEl.prepend(div);
-           while (errorsEl.children.length > 3) errorsEl.removeChild(errorsEl.lastChild!);
-         }
+         // Format with severity?
+         // DAG implementation just logs text.
+         this.logToChat(msg);
       }
     });
   }
@@ -138,14 +227,13 @@ class ThreeControl implements VisualizationControl {
     if (data.pitch !== undefined) this.attitude.pitch = data.pitch;
     if (data.yaw !== undefined) this.attitude.yaw = data.yaw;
 
-    // Update HUD from stats ticker (mostly mock mode or basic system stats)
+    // Update HUD from stats ticker
     const modeEl = document.getElementById('hud-mode');
     const battEl = document.getElementById('hud-batt');
     const altEl = document.getElementById('hud-alt');
     const spdEl = document.getElementById('hud-spd');
     const gpsEl = document.getElementById('hud-gps');
     const hdgEl = document.getElementById('hud-hdg');
-    const errorsEl = document.getElementById('hud-errors');
 
     if (modeEl && data.mode !== undefined) modeEl.innerText = data.mode;
     if (battEl && data.battery !== undefined) battEl.innerText = data.battery.toFixed(1);
@@ -162,30 +250,21 @@ class ThreeControl implements VisualizationControl {
       hdgEl.innerText = deg.toFixed(1);
     }
 
-    if (errorsEl && data.errors !== undefined) {
-      errorsEl.innerHTML = data.errors.map((err: string) => `<div class="hud-error-item">${err}</div>`).join('');
+    if (data.errors !== undefined) {
+      data.errors.forEach((err: string) => this.logToChat(err));
     }
   }
 
   private updateLatency(raw: any) {
     const now = Date.now();
-    
-    // Ensure we have a valid t_raw (Ground Zero)
     let t_raw = raw.t_raw || raw.timestamp;
-    // If t_raw is in seconds (e.g. from legacy or mock), convert to ms
     if (t_raw < 10000000000) t_raw *= 1000;
 
     const t_pub = raw.t_pub ? raw.t_pub : t_raw;
-    // With direct NATS, there is no t_relay from Go.
-    // So Q (Queueing in Relay) is effectively 0 or N/A.
-    // We treat Network as now - t_pub.
-    
     const total = now - t_raw;
     const proc = t_pub - t_raw;
-    // nats (Queueing) bypassed in direct connection
     const net = now - t_pub;
 
-    // Sanity check
     if (total > 10000 || total < -1000) return;
 
     this.latencyHistory.push(total);
@@ -195,7 +274,7 @@ class ThreeControl implements VisualizationControl {
 
     const el = document.getElementById('hud-latency');
     if (el) {
-      el.innerHTML = `<span title="Total">${total}</span>ms <small style="font-size:0.6rem; opacity:0.6">(P:${proc}/N:${net})</small>`;
+      el.innerText = `${total}ms`;
     }
     this.drawLatencyGraph();
   }
@@ -227,18 +306,10 @@ class ThreeControl implements VisualizationControl {
     }
     ctx.stroke();
 
-    // Fill area
     ctx.lineTo((this.latencyHistory.length - 1) * step, h);
     ctx.lineTo(0, h);
     ctx.fillStyle = 'rgba(102, 252, 241, 0.1)';
     ctx.fill();
-
-    // Show current latency text on canvas
-    ctx.fillStyle = '#66fcf1';
-    ctx.font = '10px ui-monospace, monospace';
-    ctx.textAlign = 'right';
-    const last = this.latencyHistory[this.latencyHistory.length - 1];
-    ctx.fillText(`${last}ms`, w - 2, 10);
   }
 
   private attachDebugBridge() {
@@ -264,8 +335,8 @@ class ThreeControl implements VisualizationControl {
     if (this.robotGroup) {
       this.robotGroup.rotation.set(
         this.attitude.pitch,
-        -this.attitude.roll,
         -this.attitude.yaw,
+        -this.attitude.roll,
         'YXZ'
       );
     }
@@ -280,11 +351,22 @@ class ThreeControl implements VisualizationControl {
       this.unsubscribe();
     }
     delete (window as any).robotThreeDebug;
+    this.chatlogTerm?.dispose();
     this.renderer.dispose();
   }
 
   setVisible(visible: boolean): void {
     this.visible = visible;
+    if (visible) {
+      this.resize();
+      this.subscribe();
+      renderButtons('three');
+    } else {
+      if (this.unsubscribe) {
+        this.unsubscribe();
+        this.unsubscribe = null;
+      }
+    }
   }
 }
 
@@ -292,6 +374,6 @@ export function mountThree(container: HTMLElement): VisualizationControl {
   const canvas = container.querySelector("canvas[aria-label='Three Canvas']") as HTMLCanvasElement | null;
   if (!canvas) throw new Error('three canvas not found');
   const control = new ThreeControl(container, canvas);
-  control.setVisible(true); // Ensure visibility is set for animation
+  control.setVisible(true);
   return control;
 }
