@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 
 	"dialtone/cli/src/core/browser"
 	test_v2 "dialtone/cli/src/libs/test_v2"
+	chrome_app "dialtone/cli/src/plugins/chrome/app"
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/chromedp"
 )
@@ -129,8 +131,12 @@ func (t *testCtx) ensureSharedBrowser(requireBackend bool) (*test_v2.BrowserSess
 	}
 
 	if t.attachMode {
-		// In attach mode, we reuse the existing "robot-dev" browser
-		session, err = start(false, "robot-dev", true, startURL)
+		// First check for a direct tunnel on 9222 (useful for Mac -> SSH -> WSL)
+		if hasReachableDevtoolsWebSocket(9222) {
+			session, err = test_v2.ConnectToBrowser(9222, "robot-dev")
+		} else {
+			session, err = start(false, "robot-dev", true, startURL)
+		}
 		t.activeAttachSession = true
 	} else {
 		session, err = start(true, "test", false, startURL)
@@ -272,4 +278,14 @@ func (t *testCtx) captureShot(file string) error {
 		return err
 	}
 	return b.CaptureScreenshot(shot)
+}
+
+func hasReachableDevtoolsWebSocket(port int) bool {
+	client := &http.Client{Timeout: 700 * time.Millisecond}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/json/version", port))
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }

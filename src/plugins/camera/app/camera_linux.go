@@ -155,10 +155,20 @@ func StreamHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Set headers for MJPEG
 	w.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary=frame")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, pre-check=0, post-check=0, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Connection", "close")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		LogInfo("ResponseWriter does not support flushing")
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
 
 	LogInfo("Starting stream for %s", r.RemoteAddr)
+	flusher.Flush()
 
 	// Get the frame channel from the camera
 	frames := cam.GetFrames()
@@ -176,19 +186,16 @@ func StreamHandler(w http.ResponseWriter, r *http.Request) {
 			// Write the MJPEG boundary and frame metadata
 			_, err := fmt.Fprintf(w, "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n", len(frame.Data))
 			if err != nil {
-				// frame.Release() // Release logic depends on go4vl version? Old code had it.
-				// Checking old code: yes, it had frame.Release()
-				// However, GetFrames returns 'Frames' which might need release?
-				// Old code had: frame.Release()
-				// I will include it, assuming provided frame struct has Release.
+				LogInfo("Stream write error (header) for %s: %v", r.RemoteAddr, err)
 				if r, ok := interface{}(frame).(interface{ Release() }); ok {
 					r.Release()
 				}
-				return // Client disconnected
+				return
 			}
 
 			// Write the actual JPEG data
 			if _, err := w.Write(frame.Data); err != nil {
+				LogInfo("Stream write error (body) for %s: %v", r.RemoteAddr, err)
 				if r, ok := interface{}(frame).(interface{ Release() }); ok {
 					r.Release()
 				}
@@ -196,14 +203,12 @@ func StreamHandler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			_, _ = w.Write([]byte("\r\n"))
+			flusher.Flush()
 
 			// Important: Release the frame back to the pool
-			// Old code: frame.Release()
-			// I'll assume the frame object has Release.
-			// To be safe against compile errors if struct changed, I'd check type,
-			// but 'old_camera_linux.go' line 150 says 'frame.Release()'.
-			// I will write it as is.
-			frame.Release()
+			if r, ok := interface{}(frame).(interface{ Release() }); ok {
+				r.Release()
+			}
 		}
 	}
 }

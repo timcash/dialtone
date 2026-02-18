@@ -103,7 +103,7 @@ class VideoControl implements VisualizationControl {
         // Re-attach stream source when visible to save bandwidth when hidden?
         // Or keep it running. For now, keep simple.
         if (!this.img.src.includes('/stream')) {
-            this.img.src = '/stream';
+            this.img.src = '/stream?t=' + Date.now();
         }
       } else {
         // Optional: stop stream when hidden

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -31,12 +32,15 @@ func Dev(args []string) error {
 	devPort := 3000
 	devURL := fmt.Sprintf("http://127.0.0.1:%d", devPort)
 
-	// Check for --robot flag
+	// Check for flags
 	useRemoteRobot := false
-	for _, arg := range args {
+	remoteChromeHost := ""
+	for i, arg := range args {
 		if arg == "--robot" {
 			useRemoteRobot = true
-			break
+		}
+		if arg == "--chrome-debug" && i+1 < len(args) {
+			remoteChromeHost = args[i+1]
 		}
 	}
 
@@ -55,11 +59,25 @@ func Dev(args []string) error {
 
 	        logf("   [DEV] Writing logs to %s", devLogPath)
 
-	        logf("   [DEV] Writing browser metadata to %s", devBrowserMetaPath)
+	                logf("   [DEV] Writing browser metadata to %s", devBrowserMetaPath)
 
-	
+	        
 
-	        // NEW: Cleanup existing robot dev processes
+	                // NEW: Handle Remote Chrome Debug Bridge
+
+	                if remoteChromeHost != "" {
+
+	                        logf("   [DEV] Establishing bridge to remote Chrome on %s:9222...", remoteChromeHost)
+
+	                        go startRemoteChromeBridge(logf, remoteChromeHost)
+
+	                }
+
+	        
+
+	                // NEW: Cleanup existing robot dev processes
+
+	        
 
 	        logf("   [DEV] Checking for existing robot dev processes...")
 
@@ -371,5 +389,43 @@ func cleanupExistingDev(logf func(string, ...any), repoRoot string) {
 			stopCmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "proc", "stop", key)
 			_ = stopCmd.Run()
 		}
+	}
+}
+
+func startRemoteChromeBridge(logf func(string, ...any), targetHost string) {
+	// Create a TCP listener on localhost:9222
+	l, err := net.Listen("tcp", "127.0.0.1:9222")
+	if err != nil {
+		logf("   [BRIDGE] Error: Could not listen on :9222 (maybe already in use?): %v", err)
+		return
+	}
+	defer l.Close()
+
+	for {
+		localConn, err := l.Accept()
+		if err != nil {
+			return
+		}
+
+		go func(lConn net.Conn) {
+			defer lConn.Close()
+			remoteConn, err := net.DialTimeout("tcp", net.JoinHostPort(targetHost, "9222"), 5*time.Second)
+			if err != nil {
+				return
+			}
+			defer remoteConn.Close()
+
+			// Bi-directional copy
+			done := make(chan struct{}, 2)
+			go func() {
+				io.Copy(remoteConn, lConn)
+				done <- struct{}{}
+			}()
+			go func() {
+				io.Copy(lConn, remoteConn)
+				done <- struct{}{}
+			}()
+			<-done
+		}(localConn)
 	}
 }
