@@ -79,7 +79,7 @@ func ensureSharedBrowser(emitProofOfLife bool) (*test_v2.BrowserSession, error) 
 			session, err = start(false, "dev", true, "http://127.0.0.1:3000")
 			activeAttachSession = true
 		} else {
-			session, err = start(true, "test", false, "http://127.0.0.1:8080")
+			session, err = start(true, "test", false, "http://127.0.0.1:8080?test=true")
 			activeAttachSession = false
 		}
 

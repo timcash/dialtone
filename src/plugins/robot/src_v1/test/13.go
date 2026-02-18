@@ -21,16 +21,22 @@ func Run13TableSectionValidation() error {
 		return err
 	}
 
+	fmt.Println("   [STEP] Navigating to Table Section...")
 	if err := session.Run(test_v2.NavigateToSection("table", "Telemetry Section")); err != nil {
-		return err
-	}
-	if err := session.Run(test_v2.WaitForAriaLabel("Robot Table")); err != nil {
-		return err
-	}
-	if err := session.Run(test_v2.WaitForAriaLabelAttrEquals("Robot Table", "data-ready", "true", 3*time.Second)); err != nil {
-		return err
+		return fmt.Errorf("failed navigating to Table: %w", err)
 	}
 
+	fmt.Println("   [STEP] Waiting for Robot Table...")
+	if err := session.Run(test_v2.WaitForAriaLabel("Robot Table")); err != nil {
+		return fmt.Errorf("failed waiting for Robot Table: %w", err)
+	}
+
+	fmt.Println("   [STEP] Waiting for data-ready=true...")
+	if err := session.Run(test_v2.WaitForAriaLabelAttrEquals("Robot Table", "data-ready", "true", 3*time.Second)); err != nil {
+		return fmt.Errorf("failed waiting for data-ready: %w", err)
+	}
+
+	fmt.Println("   [STEP] Waiting for table rows...")
 	var rowCount int
 	start := time.Now()
 	for time.Since(start) < 5*time.Second {
