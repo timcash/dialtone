@@ -1,7 +1,11 @@
 import * as THREE from 'three';
+import { Terminal } from '@xterm/xterm';
+import '@xterm/xterm/css/xterm.css';
 import { VisualizationControl } from '../../../../../../../libs/ui_v2/types';
 import { addMavlinkListener, sendCommand } from '../../data/connection';
 import { registerButtons, renderButtons } from '../../buttons';
+
+const CHATLOG_MAX_LINES = 7;
 
 class ThreeControl implements VisualizationControl {
   private scene = new THREE.Scene();
@@ -14,11 +18,19 @@ class ThreeControl implements VisualizationControl {
   private attitude = { roll: 0, pitch: 0, yaw: 0 };
   private latencyHistory: number[] = [];
   private maxHistory = 60;
+  
+  // Chatlog
+  private chatlogHost: HTMLElement | null = null;
+  private chatlogTerm: Terminal | null = null;
+  private chatlogLines: string[] = [];
 
   constructor(private container: HTMLElement, canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setClearColor(0x05070a, 1);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+    this.chatlogHost = container.querySelector('.three-chatlog-xterm');
+    this.initChatlogTerminal();
 
     registerButtons('three', ['Control'], {
       'Control': [
@@ -96,6 +108,59 @@ class ThreeControl implements VisualizationControl {
     this.animate();
   }
 
+  private initChatlogTerminal() {
+    if (!this.chatlogHost) return;
+    this.chatlogTerm?.dispose();
+    this.chatlogHost.innerHTML = '';
+    this.chatlogTerm = new Terminal({
+      allowTransparency: true,
+      convertEol: true,
+      disableStdin: true,
+      cursorBlink: false,
+      cursorStyle: 'bar',
+      rows: CHATLOG_MAX_LINES,
+      cols: 92,
+      scrollback: 0,
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      fontSize: 12,
+      lineHeight: 1.35,
+      theme: {
+        background: 'rgba(0,0,0,0)',
+        foreground: '#a7adb7',
+        cursor: '#a7adb7',
+      },
+    });
+    this.chatlogTerm.open(this.chatlogHost);
+    this.renderChatlog();
+  }
+
+  private renderChatlog() {
+    const term = this.chatlogTerm;
+    if (!term) return;
+    const lines = this.chatlogLines.slice(-CHATLOG_MAX_LINES);
+    const padCount = Math.max(0, CHATLOG_MAX_LINES - lines.length);
+    const rendered: string[] = [];
+    for (let i = 0; i < padCount; i += 1) rendered.push('');
+    for (let i = 0; i < lines.length; i += 1) {
+      const age = lines.length - 1 - i;
+      const color =
+        age === 0 ? '\x1b[97m' : age === 1 ? '\x1b[37m' : age === 2 ? '\x1b[2;37m' : age === 3 ? '\x1b[90m' : '\x1b[2;90m';
+      rendered.push(`${color}${lines[i]}\x1b[0m`);
+    }
+    term.write(`\x1b[2J\x1b[H${rendered.join('\r\n')}`);
+  }
+
+  private logToChat(text: string) {
+    if (!text) return;
+    const clean = text.replace(/\s+/g, ' ').trim();
+    if (!clean) return;
+    this.chatlogLines.push(clean);
+    if (this.chatlogLines.length > CHATLOG_MAX_LINES) {
+      this.chatlogLines = this.chatlogLines.slice(-CHATLOG_MAX_LINES);
+    }
+    this.renderChatlog();
+  }
+
   private subscribe() {
     if (this.unsubscribe) return;
     this.unsubscribe = addMavlinkListener((raw: any) => {
@@ -149,32 +214,11 @@ class ThreeControl implements VisualizationControl {
       } else if (raw.severity !== undefined) {
          // Statustext -> Chatlog
          const msg = raw.text ?? "";
-         this.logToChat(msg, raw.severity);
+         // Format with severity?
+         // DAG implementation just logs text.
+         this.logToChat(msg);
       }
     });
-  }
-
-  private logToChat(msg: string, severity?: number) {
-      const chat = document.querySelector('.three-chatlog-xterm');
-      if (!chat) return;
-      
-      const div = document.createElement('div');
-      div.className = 'hud-error-item';
-      if (severity !== undefined) {
-          // If severity is info (6) or notice (5), maybe differ color?
-          // For now reuse 'hud-error-item' style but maybe change border color if needed
-          if (severity > 4) div.style.borderLeftColor = '#3b82f6'; // Blue for info
-      }
-      div.innerText = msg;
-      chat.appendChild(div);
-      
-      // Keep only last 20 messages
-      while (chat.children.length > 20) chat.removeChild(chat.firstElementChild!);
-      chat.scrollTop = chat.scrollHeight;
-  }
-
-  private initDataListener() {
-     // Deprecated, logic moved to subscribe
   }
 
   private handleStats(data: any) {
@@ -230,7 +274,6 @@ class ThreeControl implements VisualizationControl {
 
     const el = document.getElementById('hud-latency');
     if (el) {
-      // Just the number as requested
       el.innerText = `${total}ms`;
     }
     this.drawLatencyGraph();
@@ -267,8 +310,6 @@ class ThreeControl implements VisualizationControl {
     ctx.lineTo(0, h);
     ctx.fillStyle = 'rgba(102, 252, 241, 0.1)';
     ctx.fill();
-    
-    // No text labels
   }
 
   private attachDebugBridge() {
@@ -310,6 +351,7 @@ class ThreeControl implements VisualizationControl {
       this.unsubscribe();
     }
     delete (window as any).robotThreeDebug;
+    this.chatlogTerm?.dispose();
     this.renderer.dispose();
   }
 
