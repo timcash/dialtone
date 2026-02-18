@@ -11,7 +11,14 @@ Each `ui` can have many `section`.
 Each `section` is composed from underlays + overlays:
 
 - underlays (exactly one per section): `stage` | `table` | `docs` | `xterm` | `video`
-- overlays (shared UI layers): `menu` (global), `thumbs`, `legend`, optional `chatlog`
+- overlays (shared UI layers): `legend`, `chatlog`, `menu` (global), `thumbs`
+
+Section formula: one underlay + overlays = one section.
+
+Section id naming rule:
+
+- Use `<plugin-name>-<subname>-<underlay-type>`.
+- Examples: `dag-meta-table`, `dag-3d-stage`, `dag-log-xterm`.
 
 ## Menu Overlay Behavior
 
@@ -25,12 +32,12 @@ Each `section` is composed from underlays + overlays:
 `SectionConfig` supports section layer selectors:
 
 ```ts
-sections.register('my-section', {
-  containerId: 'my-section',
+sections.register('dag-meta-table', {
+  containerId: 'dag-meta-table',
   load: async () => mountMySection(),
   overlays: {
-    primaryKind: 'stage',
-    primary: '.my-stage',
+    primaryKind: 'table',
+    primary: '.my-table',
     thumb: '.my-thumbs',
     legend: '.my-legend',
     chatlog: '.my-chatlog',
