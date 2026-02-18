@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -20,13 +21,15 @@ func Run14ThreeSectionValidation() error {
 	}
 
 	// 1. Navigate to 3D Section
+	fmt.Println("   [STEP] Navigating to Three Section...")
 	if err := session.Run(test_v2.NavigateToSection("three", "Three Section")); err != nil {
-		return err
+		return fmt.Errorf("failed navigating to Three: %w", err)
 	}
 
 	// 2. Verify Canvas is visible
+	fmt.Println("   [STEP] Waiting for Three Canvas...")
 	if err := session.Run(chromedp.WaitVisible("[aria-label='Three Canvas']", chromedp.ByQuery)); err != nil {
-		return err
+		return fmt.Errorf("failed waiting for Three Canvas: %w", err)
 	}
 
 	// 3. Take a screenshot for visual confirmation
