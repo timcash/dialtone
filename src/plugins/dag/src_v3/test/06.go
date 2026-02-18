@@ -9,35 +9,34 @@ func Run06ThreeUserStoryRenameAndCloseLayer(ctx *testCtx) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	fmt.Println("[THREE] story step4 description:")
-	fmt.Println("[THREE]   - In order to change labels, the user selects node, types name in bottom textbox, and taps Rename.")
-	fmt.Println("[THREE]   - In order to close an opened layer, the user switches to Layer mode and taps Close Layer.")
-	fmt.Println("[THREE]   - Camera expectation: layer close moves camera to the parent node and updates history to zero.")
+	ctx.logf("STORY> step 4: build Link -> Agent B")
 
 	if err := ctx.captureShot("test_step_5_pre.png"); err != nil {
 		return "", fmt.Errorf("capture story step4 pre screenshot: %w", err)
 	}
-	if err := ctx.clickNode(ctx.story.NestedAID); err != nil {
+	if err := ctx.clickAction("graph", "add"); err != nil {
 		return "", err
 	}
-	if err := ctx.renameSelected("Nested Input"); err != nil {
+	bAgentID, err := ctx.lastCreatedNodeID()
+	if err != nil || bAgentID == "" {
+		return "", fmt.Errorf("step4 failed: missing Agent B id")
+	}
+	ctx.story.BAgentID = bAgentID
+	if err := ctx.clickAction("graph", "link_or_unlink"); err != nil {
 		return "", err
 	}
-	if err := ctx.clickAction("graph", "back"); err != nil {
+	if err := ctx.renameSelectedNoModeSwitch("Agent B"); err != nil {
 		return "", err
 	}
-	if err := ctx.clickAction("layer", "open_or_close_layer"); err != nil {
+	if err := ctx.assertProjectedInCanvas(ctx.story.BAgentID); err != nil {
 		return "", err
 	}
-	if err := ctx.clickNode(ctx.story.ProcessorID); err != nil {
-		return "", err
-	}
-	if err := ctx.renameSelected("Processor"); err != nil {
+	if err := ctx.assertNodeCameraDistance(ctx.story.BAgentID, 27, 4); err != nil {
 		return "", err
 	}
 	ctx.logClick("step_done", "story_step_4", "ok")
 	if err := ctx.captureShot("test_step_5.png"); err != nil {
 		return "", fmt.Errorf("capture story step4 screenshot: %w", err)
 	}
-	return "Renamed nested node, backed out to parent layer, closed nested layer from parent context, and renamed processor in root context.", nil
+	return "Created `Agent B`, linked `Link -> Agent B`, renamed it, and validated projection/camera logs.", nil
 }

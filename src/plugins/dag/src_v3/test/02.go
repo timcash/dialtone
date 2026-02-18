@@ -79,8 +79,8 @@ func Run02DagTableSectionValidation(ctx *testCtx) (string, error) {
 
 	var tableOK bool
 	var rowCount int
-	ctx.appendThought("table validation: load dag-table and wait for ready")
-	if err := ctx.navigate(ctx.appURL("/#dag-table")); err != nil {
+	ctx.appendThought("table validation: load dag-meta-table and wait for ready")
+	if err := ctx.navigate(ctx.appURL("/#dag-meta-table")); err != nil {
 		return "", err
 	}
 	if err := ctx.waitAria("DAG Table", "need table element for validation"); err != nil {
@@ -114,7 +114,7 @@ func Run02DagTableSectionValidation(ctx *testCtx) (string, error) {
 		return "", err
 	}
 	if !tableOK {
-		return "", fmt.Errorf("dag-table assertions failed")
+		return "", fmt.Errorf("dag-meta-table assertions failed")
 	}
 	if rowCount != len(apiRows.Rows) {
 		return "", fmt.Errorf("table row count (%d) does not match api row count (%d)", rowCount, len(apiRows.Rows))
