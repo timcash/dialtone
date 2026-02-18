@@ -7,9 +7,9 @@ import (
 	"time"
 )
 
-func Run07GoRun() error {
-	if err := ensureSharedServer(); err != nil {
-		return err
+func Run07GoRun(ctx *testCtx) (string, error) {
+	if err := ctx.ensureSharedServer(); err != nil {
+		return "", err
 	}
 
 	var resp *http.Response
@@ -27,14 +27,14 @@ func Run07GoRun() error {
 	}
 
 	if err != nil {
-		return fmt.Errorf("failed to reach /health: %w", err)
+		return "", fmt.Errorf("failed to reach /health: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("unexpected /health status: %d", resp.StatusCode)
+		return "", fmt.Errorf("unexpected /health status: %d", resp.StatusCode)
 	}
 
-	return nil
+	return "Go server running.", nil
 }
 
 func waitForPort(addr string, timeout time.Duration) error {
