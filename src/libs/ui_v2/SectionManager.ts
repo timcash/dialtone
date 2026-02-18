@@ -31,6 +31,12 @@ export class SectionManager {
     return this.activeSectionId;
   }
 
+  setLoadingMessage(sectionId: string, message: string): void {
+    if (!this.loadingEl) return;
+    const span = this.loadingEl.querySelector('span');
+    if (span) span.textContent = message;
+  }
+
   isLoaded(sectionId: string): boolean {
     return this.controls.has(sectionId);
   }

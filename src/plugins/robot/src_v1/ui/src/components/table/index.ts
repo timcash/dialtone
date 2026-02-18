@@ -1,5 +1,6 @@
 import { VisualizationControl } from '../../../../../../../libs/ui_v2/types';
 import { addMavlinkListener } from '../../data/connection';
+import { registerButtons, renderButtons } from '../../buttons';
 
 type TableRow = {
   key: string;
@@ -13,13 +14,26 @@ class TableControl implements VisualizationControl {
   private unsubscribe: (() => void) | null = null;
 
   constructor(private container: HTMLElement) {
-    this.initDataListener();
+    this.subscribe();
+    
+    registerButtons('table', ['Browse'], {
+      'Browse': [
+        { label: 'Refresh', action: () => this.renderRows() },
+        { label: 'Clear', action: () => { this.allRows.clear(); this.renderRows(); } },
+        null, null, null, null, null, null
+      ]
+    });
   }
 
-  private initDataListener() {
+  private subscribe() {
+    if (this.unsubscribe) return;
     this.unsubscribe = addMavlinkListener((data: any) => {
       this.updateData(data);
     });
+  }
+
+  private initDataListener() {
+     // Deprecated, logic moved to subscribe
   }
 
   private updateData(data: any) {
@@ -80,7 +94,14 @@ class TableControl implements VisualizationControl {
   setVisible(visible: boolean): void {
     this.visible = visible;
     if (visible) {
+      this.subscribe();
       this.renderRows();
+      renderButtons('table');
+    } else {
+      if (this.unsubscribe) {
+        this.unsubscribe();
+        this.unsubscribe = null;
+      }
     }
   }
 }

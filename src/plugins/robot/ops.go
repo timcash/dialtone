@@ -196,9 +196,9 @@ func RunLocalWebRemoteRobot(versionDir string) error {
 	return fmt.Errorf("local-web-remote-robot not implemented for %s", versionDir)
 }
 
-func RunDev(versionDir string) error {
+func RunDev(versionDir string, args []string) error {
 	if versionDir == "src_v1" {
-		return robot_ops.Dev()
+		return robot_ops.Dev(args)
 	}
 	fmt.Printf(">> [Robot] Dev: %s\n", versionDir)
 	cwd, _ := os.Getwd()

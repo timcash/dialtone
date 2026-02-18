@@ -1,47 +1,18 @@
-const CACHE_NAME = 'dialtone-robot-v1';
-const PRECACHE = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/icon-192.png',
-  '/icon-512.png'
-];
-
-self.addEventListener('install', (e) => {
-  self.skipWaiting(); // Activate immediately
-  e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE))
-  );
+// Self-destructing Service Worker to fix stale cache issues
+self.addEventListener('install', (event) => {
+  console.log('[SW] Installing cleanup worker...');
+  self.skipWaiting();
 });
 
-self.addEventListener('activate', (e) => {
-  e.waitUntil(self.clients.claim()); // Take control immediately
-});
-
-self.addEventListener('fetch', (e) => {
-  // Skip non-GET or cross-origin requests if needed, but for now cache everything same-origin
-  if (e.request.method !== 'GET') return;
-
-  e.respondWith(
-    caches.match(e.request).then((cached) => {
-      if (cached) return cached;
-
-      return fetch(e.request).then((response) => {
-        // Cache valid responses dynamically (JS, CSS, etc.)
-        if (!response || response.status !== 200 || response.type !== 'basic') {
-          return response;
-        }
-        const responseToCache = response.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(e.request, responseToCache);
-        });
-        return response;
-      }).catch(() => {
-        // Offline fallback for navigation
-        if (e.request.mode === 'navigate') {
-            return caches.match('/index.html');
-        }
-      });
+self.addEventListener('activate', (event) => {
+  console.log('[SW] Activating cleanup worker...');
+  event.waitUntil(
+    self.registration.unregister().then(() => {
+      console.log('[SW] Unregistered old worker.');
+      return self.clients.matchAll();
+    }).then((clients) => {
+      // Force reload all clients to get fresh content
+      clients.forEach((client) => client.navigate(client.url));
     })
   );
 });

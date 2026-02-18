@@ -71,6 +71,20 @@ func RunStart(args []string) {
 	runWithTailscale(*hostname, *natsPort, *wsPort, *webPort, *stateDir, *ephemeral, *verbose, *mavlinkAddr, *useMock)
 }
 
+func getUIVersion() string {
+	data, err := webFS.ReadFile("src_v1/ui/package.json")
+	if err != nil {
+		return "unknown"
+	}
+	var pkg struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return "unknown"
+	}
+	return pkg.Version
+}
+
 func runLocalOnly(port, wsPort, webPort int, verbose bool, mavlinkAddr string, useMock bool, hostname string) {
 	// Use 0.0.0.0 to ensure local access works without Tailscale
 	ns := startNATSServer("0.0.0.0", port, wsPort, verbose)
@@ -86,9 +100,12 @@ func runLocalOnly(port, wsPort, webPort int, verbose bool, mavlinkAddr string, u
 
 	startNatsPublisher(port)
 
-	webHandler := web.CreateWebHandler(hostname, port, wsPort, webPort, port, wsPort, ns, nil, nil, useMock, webFS)
+	uiVersion := getUIVersion()
+	logger.LogInfo("Starting Robot UI %s", uiVersion)
+
+	webHandler := web.CreateWebHandler(hostname, uiVersion, port, wsPort, webPort, port, wsPort, ns, nil, nil, useMock, webFS)
 	if sub, err := fs.Sub(webFS, "src_v1/ui/dist"); err == nil {
-		webHandler = web.CreateWebHandler(hostname, port, wsPort, webPort, port, wsPort, ns, nil, nil, useMock, sub)
+		webHandler = web.CreateWebHandler(hostname, uiVersion, port, wsPort, webPort, port, wsPort, ns, nil, nil, useMock, sub)
 	}
 	
 	// Local web listener
@@ -170,7 +187,10 @@ func runWithTailscale(hostname string, port, wsPort, webPort int, stateDir strin
 		staticFS = sub
 	}
 	
-	webHandler := web.CreateWebHandler(hostname, port, wsPort, webPort, localNATSPort, localWSPort, ns, lc, ips, useMock, staticFS)
+	uiVersion := getUIVersion()
+	logger.LogInfo("Starting Robot UI %s", uiVersion)
+
+	webHandler := web.CreateWebHandler(hostname, uiVersion, port, wsPort, webPort, localNATSPort, localWSPort, ns, lc, ips, useMock, staticFS)
 
 	go func() {
 		logger.LogInfo("Web UI (Tailscale): Serving at http://%s:%d", hostname, webPort)
