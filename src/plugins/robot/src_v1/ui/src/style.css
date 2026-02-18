@@ -223,9 +223,8 @@ section {
   left: auto;
   transform: none;
   bottom: auto;
-  width: 100%;
-  max-width: none;
-  padding: 14px;
+  margin: 0 auto;
+  padding: 14px 0;
   grid-row: 2;
 }
 
