@@ -19,7 +19,16 @@ export class DagStageCamera {
     }
   }
 
-  framePoint(center: THREE.Vector3, maxDim: number, view: DagCameraView) {
+  private applyPanOffset(panX: number, panY: number) {
+    if (Math.abs(panX) < 0.0001 && Math.abs(panY) < 0.0001) return;
+    this.camera.updateMatrixWorld(true);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+    const delta = right.multiplyScalar(-panX).add(up.multiplyScalar(panY));
+    this.camera.position.add(delta);
+  }
+
+  framePoint(center: THREE.Vector3, maxDim: number, view: DagCameraView, panX = 0, panY = 0) {
     const fov = THREE.MathUtils.degToRad(this.camera.fov);
     const aspectScale = this.camera.aspect < 1 ? 1 / this.camera.aspect : 1;
     const dist = ((maxDim * aspectScale) / (2 * Math.tan(fov / 2))) * 1.2 + 14;
@@ -27,14 +36,16 @@ export class DagStageCamera {
     target.y += this.lookYOffset;
     this.applyViewPosition(center, dist, view);
     this.camera.lookAt(target);
+    this.applyPanOffset(panX, panY);
     this.camera.updateProjectionMatrix();
   }
 
-  framePointFixed(center: THREE.Vector3, fixedDistance: number, view: DagCameraView) {
+  framePointFixed(center: THREE.Vector3, fixedDistance: number, view: DagCameraView, panX = 0, panY = 0) {
     const target = center.clone();
     target.y += this.lookYOffset;
     this.applyViewPosition(center, fixedDistance, view);
     this.camera.lookAt(target);
+    this.applyPanOffset(panX, panY);
     this.camera.updateProjectionMatrix();
   }
 }

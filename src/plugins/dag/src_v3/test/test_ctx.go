@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
@@ -20,17 +21,20 @@ import (
 )
 
 type storyState struct {
-	ProcessorID string
-	InputID     string
-	OutputID    string
-	NestedAID   string
-	NestedBID   string
-	Level2AID   string
-	Level2BID   string
+	AProgramID string
+	AAgentID   string
+	LinkID     string
+	BAgentID   string
+	BProgramID string
+	ProtoTxID  string
+	ProtoRxID  string
 }
 
 type dagState struct {
 	LastCreatedNodeID string `json:"lastCreatedNodeId"`
+	ActiveLayerID     string `json:"activeLayerId"`
+	SelectedNodeID    string `json:"selectedNodeId"`
+	HistoryDepth      int    `json:"historyDepth"`
 }
 
 type projectedPoint struct {
@@ -49,6 +53,9 @@ type testCtx struct {
 	baseURL             string
 	devBaseURL          string
 	clickGap            time.Duration
+	maxClicksPerStep    int
+	stepCtx             *test_v2.StepContext
+	stepClicks          int
 	story               storyState
 	lastClickAt         time.Time
 }
@@ -82,12 +89,13 @@ func newTestCtx() *testCtx {
 	base = strings.TrimRight(base, "/")
 	devBase = strings.TrimRight(devBase, "/")
 	return &testCtx{
-		attachMode:     attach,
-		requireBackend: true,
-		keepViewport:   keepViewport,
-		baseURL:        base,
-		devBaseURL:     devBase,
-		clickGap:       time.Second / time.Duration(cps),
+		attachMode:       attach,
+		requireBackend:   true,
+		keepViewport:     keepViewport,
+		baseURL:          base,
+		devBaseURL:       devBase,
+		clickGap:         time.Second / time.Duration(cps),
+		maxClicksPerStep: 4,
 	}
 }
 
@@ -150,12 +158,12 @@ func (t *testCtx) ensureSharedBrowser(requireBackend bool) (*test_v2.BrowserSess
 		if !hasAttachableDagDevBrowser() {
 			return nil, fmt.Errorf("DAG_TEST_ATTACH=1 requires a running Dialtone debug browser session (role=dag-dev); regular Chrome windows cannot be attached")
 		}
-		session, err = start(false, "dag-dev", true, t.devURL("/#three"))
+		session, err = start(false, "dag-dev", true, t.devURL("/#dag-3d-stage"))
 		t.activeAttachSession = true
 	} else {
-		startURL := t.appURL("/#three")
+		startURL := t.appURL("/#dag-3d-stage")
 		if !requireBackend {
-			startURL = t.devURL("/#three")
+			startURL = t.devURL("/#dag-3d-stage")
 		}
 		session, err = start(true, "test", false, startURL)
 		t.activeAttachSession = false
@@ -258,14 +266,53 @@ func (t *testCtx) appendThought(text string) {
 	})()`, text), nil)
 }
 
+func toSlug(label string) string {
+	v := strings.ToLower(strings.TrimSpace(label))
+	repl := strings.NewReplacer(" ", "-", "|", "-", "_", "-", ":", "", "'", "", "\"", "", "(", "", ")", "")
+	return repl.Replace(v)
+}
+
+func (t *testCtx) beginStep(sc *test_v2.StepContext) {
+	t.stepCtx = sc
+	t.stepClicks = 0
+	t.lastClickAt = time.Time{}
+	t.logf("STEP> begin %s", sc.Name)
+}
+
+func (t *testCtx) logf(format string, args ...any) {
+	fmt.Printf(format+"\n", args...)
+}
+
+func (t *testCtx) userf(format string, args ...any) {
+	line := fmt.Sprintf(format, args...)
+	t.logf("%s", line)
+	t.appendThought(line)
+}
+
 func (t *testCtx) logWait(label, detail string) {
-	fmt.Printf("[WAIT] label=%s detail=%s\n", label, detail)
-	t.appendThought(fmt.Sprintf("wait for %s (%s)", label, detail))
+	t.logf("WAIT> aria-%s (%s)", toSlug(label), detail)
 }
 
 func (t *testCtx) logClick(kind, target, detail string) {
-	fmt.Printf("[CLICK] kind=%s target=%s detail=%s\n", kind, target, detail)
-	t.appendThought(fmt.Sprintf("click %s (%s)", target, detail))
+	switch kind {
+	case "aria":
+		t.userf("USER> click aria-%s", toSlug(target))
+	case "node":
+		t.userf("USER> click node-%s", toSlug(target))
+	case "canvas":
+		t.userf("USER> click canvas-%s", toSlug(target))
+	default:
+		t.userf("USER> click %s-%s", toSlug(kind), toSlug(target))
+	}
+	t.logf("CLICK> kind=%s target=%s detail=%s", kind, target, detail)
+}
+
+func (t *testCtx) markClick() error {
+	t.stepClicks += 1
+	if t.stepCtx != nil && t.stepClicks > t.maxClicksPerStep {
+		return fmt.Errorf("step %q exceeded max clicks per step (%d)", t.stepCtx.Name, t.maxClicksPerStep)
+	}
+	return nil
 }
 
 func (t *testCtx) waitClickGap() {
@@ -308,9 +355,32 @@ func (t *testCtx) clickAria(label, detail string) error {
 	if err != nil {
 		return err
 	}
+	if err := t.markClick(); err != nil {
+		return err
+	}
 	t.waitClickGap()
 	t.logClick("aria", label, detail)
 	return b.Run(test_v2.ClickAriaLabel(label))
+}
+
+func (t *testCtx) typeAria(label, value, detail string) error {
+	b, err := t.browser()
+	if err != nil {
+		return err
+	}
+	t.userf("USER> type aria-%s %q", toSlug(label), value)
+	t.logf("TYPE> aria-%s (%s)", toSlug(label), detail)
+	return b.Run(test_v2.TypeAriaLabel(label, value))
+}
+
+func (t *testCtx) pressEnterAria(label, detail string) error {
+	b, err := t.browser()
+	if err != nil {
+		return err
+	}
+	t.userf("USER> press-enter aria-%s", toSlug(label))
+	t.logf("KEY> enter aria-%s (%s)", toSlug(label), detail)
+	return b.Run(test_v2.PressEnterAriaLabel(label))
 }
 
 func (t *testCtx) navigate(url string) error {
@@ -360,6 +430,25 @@ func (t *testCtx) waitHTTPReady(url string, timeout time.Duration) error {
 	return fmt.Errorf("http endpoint not ready: %s", url)
 }
 
+func (t *testCtx) waitLogTerminalContains(substr string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		var ok bool
+		err := t.runEval(fmt.Sprintf(`(() => {
+			const root = document.querySelector("[aria-label='Log Terminal']");
+			if (!root) return false;
+			const text = String(root.textContent || '');
+			return text.includes(%q);
+		})()`, substr), &ok)
+		if err == nil && ok {
+			t.logf("ASSERT> log-terminal contains %q", substr)
+			return nil
+		}
+		time.Sleep(120 * time.Millisecond)
+	}
+	return fmt.Errorf("log terminal did not contain %q within %s", substr, timeout)
+}
+
 func (t *testCtx) captureShot(file string) error {
 	repoRoot, err := os.Getwd()
 	if err != nil {
@@ -399,6 +488,18 @@ func (t *testCtx) ensureMode(mode string) error {
 	return fmt.Errorf("could not switch mode to %q", mode)
 }
 
+func (t *testCtx) assertMode(expected string) error {
+	mode, err := t.getMode()
+	if err != nil {
+		return err
+	}
+	if mode != expected {
+		return fmt.Errorf("thumb mode mismatch: got=%q expected=%q", mode, expected)
+	}
+	t.logf("ASSERT> mode=%s", mode)
+	return nil
+}
+
 func (t *testCtx) clickAction(mode, actionID string) error {
 	b, err := t.browser()
 	if err != nil {
@@ -409,16 +510,43 @@ func (t *testCtx) clickAction(mode, actionID string) error {
 			return err
 		}
 	}
-	detail := "mode=" + mode
-	if actionID == "open_or_close_layer" {
-		detail += "; clicking open/close to change layer"
+	label, err := t.getActionLabel(actionID)
+	if err != nil {
+		return err
+	}
+	if label == "" {
+		return fmt.Errorf("could not resolve label for action %q in mode %q", actionID, mode)
+	}
+	detail := "mode=" + mode + ";action=" + actionID + ";label=" + label
+	if err := t.waitAria(label, "action button must exist before click"); err != nil {
+		return err
+	}
+	if err := t.markClick(); err != nil {
+		return err
 	}
 	t.waitClickGap()
-	t.logClick("action", actionID, detail)
-	return b.Run(chromedp.Click(fmt.Sprintf("button.dag-action-btn[data-action='%s']", actionID), chromedp.ByQuery))
+	t.logClick("aria", label, detail)
+	return b.Run(test_v2.ClickAriaLabel(label))
+}
+
+func (t *testCtx) getActionLabel(actionID string) (string, error) {
+	var label string
+	err := t.runEval(fmt.Sprintf(`(() => {
+		const root = document.querySelector("[aria-label='DAG Mode Form']");
+		if (!root) return "";
+		const el = root.querySelector("button[data-action='%s']");
+		if (!el) return "";
+		const aria = String(el.getAttribute('aria-label') || '').trim();
+		const text = String(el.textContent || '').trim();
+		return aria || text;
+	})()`, actionID), &label)
+	return strings.TrimSpace(label), err
 }
 
 func (t *testCtx) clickCanvas(x, y int, detail string) error {
+	if err := t.markClick(); err != nil {
+		return err
+	}
 	t.waitClickGap()
 	t.logClick("canvas", "Three Canvas", fmt.Sprintf("%s;x=%d,y=%d", detail, x, y))
 	return t.runEval(fmt.Sprintf(`(() => {
@@ -447,6 +575,9 @@ func (t *testCtx) clickNode(nodeID string) error {
 	if !p.OK {
 		return fmt.Errorf("projected point not found for node %s", nodeID)
 	}
+	if err := t.markClick(); err != nil {
+		return err
+	}
 	t.waitClickGap()
 	t.logClick("node", nodeID, fmt.Sprintf("x=%d,y=%d", p.X, p.Y))
 	return t.runEval(fmt.Sprintf(`(() => {
@@ -472,6 +603,27 @@ func (t *testCtx) renameSelected(text string) error {
 	return t.clickAria("DAG Rename", "submit rename")
 }
 
+func (t *testCtx) renameSelectedNoModeSwitch(text string) error {
+	b, err := t.browser()
+	if err != nil {
+		return err
+	}
+	if err := b.Run(chromedp.SetValue("[aria-label='DAG Label Input']", text, chromedp.ByQuery)); err != nil {
+		return err
+	}
+	t.logClick("rename_submit", "DAG Rename", text)
+	return t.clickAria("DAG Rename", "submit rename")
+}
+
+func (t *testCtx) setRenameInput(text string) error {
+	b, err := t.browser()
+	if err != nil {
+		return err
+	}
+	t.logf("INPUT> dag-label-input=%q", text)
+	return b.Run(chromedp.SetValue("[aria-label='DAG Label Input']", text, chromedp.ByQuery))
+}
+
 func (t *testCtx) lastCreatedNodeID() (string, error) {
 	var st dagState
 	err := t.runEval(`(() => {
@@ -480,4 +632,120 @@ func (t *testCtx) lastCreatedNodeID() (string, error) {
 		return api.getState();
 	})()`, &st)
 	return strings.TrimSpace(st.LastCreatedNodeID), err
+}
+
+func (t *testCtx) state() (dagState, error) {
+	var st dagState
+	err := t.runEval(`(() => {
+		const api = window.dagHitTestDebug;
+		if (!api || typeof api.getState !== 'function') return { lastCreatedNodeId: '', activeLayerId: '', selectedNodeId: '', historyDepth: 0 };
+		return api.getState();
+	})()`, &st)
+	return st, err
+}
+
+type cameraNodeMetric struct {
+	OK       bool    `json:"ok"`
+	Distance float64 `json:"distance"`
+	CamY     float64 `json:"camY"`
+	NodeX    float64 `json:"nodeX"`
+	NodeY    float64 `json:"nodeY"`
+	NodeZ    float64 `json:"nodeZ"`
+}
+
+func (t *testCtx) cameraDistanceToNode(nodeID string) (cameraNodeMetric, error) {
+	var out cameraNodeMetric
+	err := t.runEval(fmt.Sprintf(`(() => {
+		const api = window.dagHitTestDebug;
+		if (!api || typeof api.getCameraTransform !== 'function' || typeof api.getNodeWorldPosition !== 'function') return { ok:false, distance:0, camY:0, nodeX:0, nodeY:0, nodeZ:0 };
+		const cam = api.getCameraTransform();
+		const node = api.getNodeWorldPosition(%q);
+		if (!node || !node.ok) return { ok:false, distance:0, camY:0, nodeX:0, nodeY:0, nodeZ:0 };
+		const dx = cam.position.x - node.x;
+		const dy = cam.position.y - node.y;
+		const dz = cam.position.z - node.z;
+		return { ok:true, distance: Math.sqrt(dx*dx+dy*dy+dz*dz), camY: cam.position.y, nodeX:node.x, nodeY:node.y, nodeZ:node.z };
+	})()`, nodeID), &out)
+	return out, err
+}
+
+func (t *testCtx) assertProjectedInCanvas(nodeID string) error {
+	var dims struct {
+		W int `json:"w"`
+		H int `json:"h"`
+	}
+	if err := t.runEval(`(() => {
+		const c = document.querySelector("[aria-label='Three Canvas']");
+		if (!c) return { w: 0, h: 0 };
+		const r = c.getBoundingClientRect();
+		return { w: Math.round(r.width), h: Math.round(r.height) };
+	})()`, &dims); err != nil {
+		return err
+	}
+	p, err := t.getProjectedPoint(nodeID)
+	if err != nil {
+		return err
+	}
+	if !p.OK {
+		return fmt.Errorf("node %s projection missing", nodeID)
+	}
+	if p.X < 0 || p.Y < 0 || p.X > dims.W || p.Y > dims.H {
+		return fmt.Errorf("node %s projected outside viewport (%d,%d) not in [0..%d,0..%d]", nodeID, p.X, p.Y, dims.W, dims.H)
+	}
+	t.logf("ASSERT> node=%s projected=(%d,%d) canvas=(%d,%d)", nodeID, p.X, p.Y, dims.W, dims.H)
+	return nil
+}
+
+func (t *testCtx) assertNodeCameraDistance(nodeID string, expected, tolerance float64) error {
+	m, err := t.cameraDistanceToNode(nodeID)
+	if err != nil {
+		return err
+	}
+	if !m.OK {
+		return fmt.Errorf("camera/node metric not available for %s", nodeID)
+	}
+	if math.Abs(m.Distance-expected) > tolerance {
+		return fmt.Errorf("camera distance for %s out of range: got %.2f expected %.2f±%.2f", nodeID, m.Distance, expected, tolerance)
+	}
+	t.logf("ASSERT> camera_distance node=%s got=%.2f expected=%.2f±%.2f", nodeID, m.Distance, expected, tolerance)
+	return nil
+}
+
+func (t *testCtx) assertActiveLayer(expected string) error {
+	st, err := t.state()
+	if err != nil {
+		return err
+	}
+	if st.ActiveLayerID != expected {
+		return fmt.Errorf("active layer mismatch: got=%q expected=%q", st.ActiveLayerID, expected)
+	}
+	t.logf("ASSERT> active_layer=%s", st.ActiveLayerID)
+	return nil
+}
+
+func (t *testCtx) assertCameraAboveNode(nodeID string, minDeltaY float64) error {
+	m, err := t.cameraDistanceToNode(nodeID)
+	if err != nil {
+		return err
+	}
+	if !m.OK {
+		return fmt.Errorf("camera/node metric not available for %s", nodeID)
+	}
+	if (m.CamY - m.NodeY) < minDeltaY {
+		return fmt.Errorf("camera Y not above node enough for %s: camY=%.2f nodeY=%.2f minDelta=%.2f", nodeID, m.CamY, m.NodeY, minDeltaY)
+	}
+	t.logf("ASSERT> camera_above node=%s camY=%.2f nodeY=%.2f delta=%.2f", nodeID, m.CamY, m.NodeY, m.CamY-m.NodeY)
+	return nil
+}
+
+func (t *testCtx) assertHistoryDepthAtLeast(min int) error {
+	st, err := t.state()
+	if err != nil {
+		return err
+	}
+	if st.HistoryDepth < min {
+		return fmt.Errorf("history depth too small: got=%d expected>=%d", st.HistoryDepth, min)
+	}
+	t.logf("ASSERT> history_depth=%d", st.HistoryDepth)
+	return nil
 }
