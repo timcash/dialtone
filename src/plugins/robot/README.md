@@ -63,7 +63,7 @@ The `--remote` flag allows you to offload the build process to the robot itself.
 
 ---
 
-## 💤 Sleep Mode & Maintenance
+## 💤 Sleep Mode & PWA
 
 The `sleep` command switches the robot into a lightweight maintenance mode.
 
@@ -71,11 +71,16 @@ The `sleep` command switches the robot into a lightweight maintenance mode.
 ./dialtone.sh robot sleep src_v1
 ```
 
-*   **Mechanism**: Replaces the heavy Dialtone binary with a minimal Go web server (`dialtone-sleep`).
+*   **Mechanism**: Builds/Runs a minimal Go web server locally (`dialtone-sleep`) on port 8080.
+*   **Proxy**: Automatically reconfigures the local Cloudflare tunnel to point to `localhost:8080` instead of the robot.
 *   **Behavior**: Serves a static "Sleeping..." page.
-*   **Connectivity**: Uses `tsnet` to maintain the robot's Tailscale identity (`drone-1`), ensuring the hostname remains resolvable.
-*   **Auto-Proxy**: Automatically ensures the local Cloudflare tunnel is running so the public URL remains accessible.
-*   **Wake Up**: Run `robot deploy src_v1` to restore the full application.
+*   **PWA**: The "Sleeping" page is a full PWA. It caches itself offline, so users see the status even if the network drops.
+*   **Wake Up**: Run `robot deploy src_v1` to restore the full application and repoint the proxy to the robot.
+
+**Both the Main UI and Sleep Server are Progressive Web Apps (PWA):**
+- **Installable**: Can be added to the home screen.
+- **Offline-First**: Assets are cached via Service Worker.
+- **Auto-Update**: Updates apply immediately on navigation/refresh (no stale cache issues).
 
 ---
 
