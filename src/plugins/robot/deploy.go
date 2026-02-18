@@ -80,6 +80,19 @@ func RunDeploy(versionDir string, args []string) {
 	logger.LogInfo("Connecting to %s to detect architecture...", *host)
 	client, err := core_ssh.DialSSH(*host, *port, *user, *pass)
 	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "timeout") || strings.Contains(msg, "no route") || strings.Contains(msg, "connection refused") {
+			logger.LogWarn("--------------------------------------------------------------------------------")
+			logger.LogWarn("[ERROR] Robot appears to be OFFLINE or unreachable.")
+			logger.LogWarn("Details: %v", err)
+			logger.LogWarn("")
+			logger.LogWarn("Suggestions:")
+			logger.LogWarn("1. Check if the robot is powered on and connected to the network.")
+			logger.LogWarn("2. If you want to enable maintenance mode (hosted locally), run:")
+			logger.LogWarn("   ./dialtone.sh robot sleep %s", versionDir)
+			logger.LogWarn("--------------------------------------------------------------------------------")
+			os.Exit(1)
+		}
 		logger.LogFatal("Failed to connect: %v", err)
 	}
 	defer client.Close()
