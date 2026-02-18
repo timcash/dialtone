@@ -105,7 +105,7 @@ func RunTest(versionDir string, attach bool, cps int) error {
 		return err
 	}
 	if attach {
-		attachURL := fmt.Sprintf("http://127.0.0.1:%d/#three", devSession.port)
+		attachURL := fmt.Sprintf("http://127.0.0.1:%d/#dag-3d-stage", devSession.port)
 		if err := ensureAttachableDagDevBrowser(attachURL); err != nil {
 			return err
 		}
@@ -202,7 +202,7 @@ func ensureDevServerAndHeadedBrowser(repoRoot, versionDir string, allowOpenBrows
 		session.startedHere = true
 		fmt.Printf(">> [DAG] Test: started dev server for %s at http://127.0.0.1:%d\n", versionDir, port)
 		if allowOpenBrowser {
-			url := fmt.Sprintf("http://127.0.0.1:%d/#three", port)
+			url := fmt.Sprintf("http://127.0.0.1:%d/#dag-3d-stage", port)
 			if err := openPersistentDevChrome(url); err != nil {
 				session.Close()
 				return nil, err
@@ -210,7 +210,7 @@ func ensureDevServerAndHeadedBrowser(repoRoot, versionDir string, allowOpenBrows
 			fmt.Printf(">> [DAG] Test: opened headed Chrome preview at %s\n", url)
 		}
 	} else if allowOpenBrowser {
-		fmt.Printf(">> [DAG] Test: keeping existing dev preview tab at http://127.0.0.1:%d/#three\n", port)
+		fmt.Printf(">> [DAG] Test: keeping existing dev preview tab at http://127.0.0.1:%d/#dag-3d-stage\n", port)
 	}
 	return session, nil
 }
