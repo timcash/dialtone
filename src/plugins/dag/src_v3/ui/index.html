@@ -23,7 +23,7 @@
         <div aria-label="Global Menu Panel" hidden></div>
       </nav>
 
-      <section id="dag-table" aria-label="DAG Table Section">
+      <section id="dag-meta-table" aria-label="DAG Table Section">
         <table aria-label="DAG Table">
           <thead>
             <tr>
@@ -34,11 +34,23 @@
           </thead>
           <tbody></tbody>
         </table>
-        <div class="dag-table-thumb" aria-hidden="true"></div>
+        <form data-mode-form="table" aria-label="Table Mode Form">
+          <button type="button" aria-label="Table Thumb 1">1:Refresh</button>
+          <button type="button" aria-label="Table Thumb 2">2:Up</button>
+          <button type="button" aria-label="Table Thumb 3">3:Down</button>
+          <button type="button" aria-label="Table Thumb 4">4:Top</button>
+          <button type="button" aria-label="Table Thumb 5">5:Bottom</button>
+          <button type="button" aria-label="Table Thumb 6">6:Stage</button>
+          <button type="button" aria-label="Table Thumb 7">7:Log</button>
+          <button type="button" aria-label="Table Thumb 8">8:Clear</button>
+          <button type="button" aria-label="Table Mode">9:Mode: Browse</button>
+          <input type="text" aria-label="Table Query Input" placeholder="Filter table rows" />
+          <button type="button" aria-label="Table Submit">10:Apply</button>
+        </form>
         <aside class="dag-table-legend" aria-hidden="true"></aside>
       </section>
 
-      <section id="three" aria-label="Three Section" hidden>
+      <section id="dag-3d-stage" aria-label="Three Section" hidden>
         <canvas aria-label="Three Canvas"></canvas>
         <div class="dag-history" aria-label="DAG Node History">
           <h3>Node History 1/1</h3>
@@ -63,22 +75,40 @@
             <code aria-label="DAG Node History Item 5">none</code>
           </div>
         </div>
-        <div class="dag-controls" aria-label="DAG Controls Grid">
-          <div class="dag-chatlog" aria-label="DAG Chatlog Overlay">
+        <form data-mode-form="dag" aria-label="DAG Mode Form">
+          <aside class="dag-chatlog" aria-label="DAG Chatlog Overlay">
             <div class="dag-chatlog-xterm" aria-label="DAG Chatlog Terminal"></div>
-          </div>
-          <button type="button" class="dag-thumb dag-action-btn" aria-label="DAG Thumb 1">Back</button>
-          <button type="button" class="dag-thumb dag-action-btn" aria-label="DAG Thumb 2">Add</button>
-          <button type="button" class="dag-thumb dag-action-btn" aria-label="DAG Thumb 3">Link</button>
-          <button type="button" class="dag-thumb dag-action-btn" aria-label="DAG Thumb 4">Clear</button>
-          <button type="button" class="dag-thumb dag-action-btn" aria-label="DAG Thumb 5">open</button>
-          <button type="button" class="dag-thumb dag-action-btn" aria-label="DAG Thumb 6">Rename</button>
-          <button type="button" class="dag-thumb dag-action-btn" aria-label="DAG Thumb 7">Focus</button>
-          <button type="button" class="dag-thumb dag-action-btn" aria-label="DAG Thumb 8">Labels On</button>
-          <button type="button" class="dag-thumb dag-mode-thumb" aria-label="DAG Mode">Mode: Graph</button>
-          <input class="dag-label-input" type="text" aria-label="DAG Label Input" placeholder="Select node to rename" />
-          <button type="button" class="dag-rename-btn" aria-label="DAG Rename">Submit</button>
-        </div>
+          </aside>
+          <button type="button" aria-label="DAG Thumb 1">1:Back</button>
+          <button type="button" aria-label="DAG Thumb 2">2:Add</button>
+          <button type="button" aria-label="DAG Thumb 3">3:Link</button>
+          <button type="button" aria-label="DAG Thumb 4">4:Clear</button>
+          <button type="button" aria-label="DAG Thumb 5">5:Open</button>
+          <button type="button" aria-label="DAG Thumb 6">6:Rename</button>
+          <button type="button" aria-label="DAG Thumb 7">7:Focus</button>
+          <button type="button" aria-label="DAG Thumb 8">8:Labels On</button>
+          <button type="button" aria-label="DAG Mode">9:Mode: Graph</button>
+          <input type="text" aria-label="DAG Label Input" placeholder="Select node to rename" />
+          <button type="button" aria-label="DAG Rename">10:Submit</button>
+        </form>
+      </section>
+
+      <section id="dag-log-xterm" aria-label="Log Section" hidden>
+        <div aria-label="Log Terminal"></div>
+        <form data-mode-form="log" aria-label="Log Mode Form">
+          <button type="button" aria-label="Log Thumb 1">1:Left</button>
+          <button type="button" aria-label="Log Thumb 2">2:Right</button>
+          <button type="button" aria-label="Log Thumb 3">3:Up</button>
+          <button type="button" aria-label="Log Thumb 4">4:Down</button>
+          <button type="button" aria-label="Log Thumb 5">5:Home</button>
+          <button type="button" aria-label="Log Thumb 6">6:End</button>
+          <button type="button" aria-label="Log Thumb 7">7:Select</button>
+          <button type="button" aria-label="Log Thumb 8">8:Copy</button>
+          <button type="button" aria-label="Log Mode">9:Mode: Cursor</button>
+          <input type="text" aria-label="Log Command Input" placeholder="Type command for log terminal" />
+          <button type="button" aria-label="Log Submit">10:Submit</button>
+        </form>
+        <aside class="dag-log-legend" aria-hidden="true"></aside>
       </section>
     </div>
     <script type="module" src="/src/main.ts"></script>

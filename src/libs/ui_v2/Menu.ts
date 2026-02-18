@@ -1,8 +1,6 @@
 export class Menu {
   private root: HTMLElement;
   private toggle: HTMLButtonElement;
-  private panel: HTMLDivElement;
-  private grid: HTMLDivElement;
   private items: HTMLButtonElement[] = [];
   private readonly onDocumentClick: (event: MouseEvent) => void;
   private readonly onEscape: (event: KeyboardEvent) => void;
@@ -14,28 +12,10 @@ export class Menu {
     this.root.setAttribute('data-overlay', 'menu');
 
     const existingPanel = this.root.querySelector('[aria-label="Global Menu Panel"]');
-    let panel: HTMLDivElement;
     if (existingPanel instanceof HTMLDivElement) {
-      panel = existingPanel;
-    } else {
-      panel = document.createElement('div');
-      panel.setAttribute('aria-label', 'Global Menu Panel');
-      panel.setAttribute('role', 'dialog');
-      panel.setAttribute('aria-modal', 'true');
-      panel.hidden = true;
-      this.root.appendChild(panel);
+      existingPanel.hidden = true;
+      existingPanel.remove();
     }
-    panel.classList.add('menu-panel');
-    panel.setAttribute('role', 'dialog');
-    panel.setAttribute('aria-modal', 'true');
-    this.panel = panel;
-    let grid: HTMLDivElement | null = this.panel.querySelector('.menu-grid');
-    if (!(grid instanceof HTMLDivElement)) {
-      grid = document.createElement('div');
-      grid.classList.add('menu-grid');
-      this.panel.appendChild(grid);
-    }
-    this.grid = grid;
 
     const toggle = document.createElement('button');
     toggle.type = 'button';
@@ -54,7 +34,7 @@ export class Menu {
       if (!this.isOpen()) return;
       const target = event.target as Node | null;
       if (!target) return;
-      if (target === this.panel) {
+      if (target === this.root) {
         this.setOpen(false);
         return;
       }
@@ -85,7 +65,7 @@ export class Menu {
       this.setOpen(false);
     });
     this.items.push(btn);
-    this.grid.appendChild(btn);
+    this.root.appendChild(btn);
   }
 
   private setItemsVisible(visible: boolean): void {
@@ -100,8 +80,10 @@ export class Menu {
 
   private setOpen(open: boolean): void {
     this.setItemsVisible(open);
-    this.panel.hidden = !open;
     this.toggle.setAttribute('aria-expanded', String(open));
+    this.root.setAttribute('data-open', open ? 'true' : 'false');
+    this.root.setAttribute('role', open ? 'dialog' : 'navigation');
+    this.root.setAttribute('aria-modal', open ? 'true' : 'false');
     document.body.classList.toggle('menu-open', open);
     document.body.style.overflow = open ? 'hidden' : '';
     document.documentElement.style.overflow = open ? 'hidden' : '';
