@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Robot v1</title>
     <link rel="stylesheet" href="src/style.css" />
+    <link rel="manifest" href="/manifest.json" />
   </head>
   <body>
     <div id="app">
@@ -95,5 +96,13 @@
       </section>
     </div>
     <script type="module" src="/src/main.ts"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          window.location.reload();
+        });
+        navigator.serviceWorker.register('/sw.js');
+      }
+    </script>
   </body>
 </html>
