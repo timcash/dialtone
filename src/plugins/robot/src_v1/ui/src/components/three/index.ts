@@ -84,6 +84,14 @@ class ThreeControl implements VisualizationControl {
     // Stub debug bridge for test compatibility
     this.attachDebugBridge();
     
+    // Legend Toggle
+    const legend = document.querySelector('.three-legend');
+    if (legend) {
+        legend.addEventListener('click', () => {
+            legend.classList.toggle('legend-minimized');
+        });
+    }
+    
     this.subscribe();
     this.animate();
   }
