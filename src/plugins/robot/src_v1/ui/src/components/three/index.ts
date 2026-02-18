@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { VisualizationControl } from '../../../../../../../libs/ui_v2/types';
-import { addMavlinkListener } from '../../data/connection';
+import { addMavlinkListener, sendCommand } from '../../data/connection';
+import { registerButtons, renderButtons } from '../../buttons';
 
 class ThreeControl implements VisualizationControl {
   private scene = new THREE.Scene();
@@ -18,6 +19,16 @@ class ThreeControl implements VisualizationControl {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setClearColor(0x05070a, 1);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+    registerButtons('three', ['Control'], {
+      'Control': [
+        { label: 'Arm', action: () => sendCommand('arm') },
+        { label: 'Disarm', action: () => sendCommand('disarm') },
+        { label: 'Manual', action: () => sendCommand('mode', 'manual') },
+        { label: 'Guided', action: () => sendCommand('mode', 'guided') },
+        null, null, null, null
+      ]
+    });
 
     this.camera.position.set(0, 5, 10);
     this.camera.lookAt(0, 0, 0);
@@ -128,18 +139,30 @@ class ThreeControl implements VisualizationControl {
            if (hdg !== -1) hdgEl.innerText = hdg.toFixed(1);
          }
       } else if (raw.severity !== undefined) {
-         // Statustext
+         // Statustext -> Chatlog
          const msg = raw.text ?? "";
-         const errorsEl = document.getElementById('hud-errors');
-         if (errorsEl && msg) {
-           const div = document.createElement('div');
-           div.className = 'hud-error-item';
-           div.innerText = msg;
-           errorsEl.prepend(div);
-           while (errorsEl.children.length > 3) errorsEl.removeChild(errorsEl.lastChild!);
-         }
+         this.logToChat(msg, raw.severity);
       }
     });
+  }
+
+  private logToChat(msg: string, severity?: number) {
+      const chat = document.querySelector('.three-chatlog-xterm');
+      if (!chat) return;
+      
+      const div = document.createElement('div');
+      div.className = 'hud-error-item';
+      if (severity !== undefined) {
+          // If severity is info (6) or notice (5), maybe differ color?
+          // For now reuse 'hud-error-item' style but maybe change border color if needed
+          if (severity > 4) div.style.borderLeftColor = '#3b82f6'; // Blue for info
+      }
+      div.innerText = msg;
+      chat.appendChild(div);
+      
+      // Keep only last 20 messages
+      while (chat.children.length > 20) chat.removeChild(chat.firstElementChild!);
+      chat.scrollTop = chat.scrollHeight;
   }
 
   private initDataListener() {
@@ -152,14 +175,13 @@ class ThreeControl implements VisualizationControl {
     if (data.pitch !== undefined) this.attitude.pitch = data.pitch;
     if (data.yaw !== undefined) this.attitude.yaw = data.yaw;
 
-    // Update HUD from stats ticker (mostly mock mode or basic system stats)
+    // Update HUD from stats ticker
     const modeEl = document.getElementById('hud-mode');
     const battEl = document.getElementById('hud-batt');
     const altEl = document.getElementById('hud-alt');
     const spdEl = document.getElementById('hud-spd');
     const gpsEl = document.getElementById('hud-gps');
     const hdgEl = document.getElementById('hud-hdg');
-    const errorsEl = document.getElementById('hud-errors');
 
     if (modeEl && data.mode !== undefined) modeEl.innerText = data.mode;
     if (battEl && data.battery !== undefined) battEl.innerText = data.battery.toFixed(1);
@@ -176,26 +198,21 @@ class ThreeControl implements VisualizationControl {
       hdgEl.innerText = deg.toFixed(1);
     }
 
-    if (errorsEl && data.errors !== undefined) {
-      errorsEl.innerHTML = data.errors.map((err: string) => `<div class="hud-error-item">${err}</div>`).join('');
+    if (data.errors !== undefined) {
+      data.errors.forEach((err: string) => this.logToChat(err));
     }
   }
 
   private updateLatency(raw: any) {
     const now = Date.now();
-    
-    // Ensure we have a valid t_raw (Ground Zero)
     let t_raw = raw.t_raw || raw.timestamp;
-    // If t_raw is in seconds (e.g. from legacy or mock), convert to ms
     if (t_raw < 10000000000) t_raw *= 1000;
 
     const t_pub = raw.t_pub ? raw.t_pub : t_raw;
-    
     const total = now - t_raw;
     const proc = t_pub - t_raw;
     const net = now - t_pub;
 
-    // Sanity check
     if (total > 10000 || total < -1000) return;
 
     this.latencyHistory.push(total);
@@ -205,7 +222,8 @@ class ThreeControl implements VisualizationControl {
 
     const el = document.getElementById('hud-latency');
     if (el) {
-      el.innerHTML = `<span title="Total">${total}</span>ms <small style="font-size:0.6rem; opacity:0.6">(P:${proc}/N:${net})</small>`;
+      // Just the number as requested
+      el.innerText = `${total}ms`;
     }
     this.drawLatencyGraph();
   }
@@ -237,18 +255,12 @@ class ThreeControl implements VisualizationControl {
     }
     ctx.stroke();
 
-    // Fill area
     ctx.lineTo((this.latencyHistory.length - 1) * step, h);
     ctx.lineTo(0, h);
     ctx.fillStyle = 'rgba(102, 252, 241, 0.1)';
     ctx.fill();
-
-    // Show current latency text on canvas
-    ctx.fillStyle = '#66fcf1';
-    ctx.font = '10px ui-monospace, monospace';
-    ctx.textAlign = 'right';
-    const last = this.latencyHistory[this.latencyHistory.length - 1];
-    ctx.fillText(`${last}ms`, w - 2, 10);
+    
+    // No text labels
   }
 
   private attachDebugBridge() {
@@ -298,6 +310,7 @@ class ThreeControl implements VisualizationControl {
     if (visible) {
       this.resize();
       this.subscribe();
+      renderButtons('three');
     } else {
       if (this.unsubscribe) {
         this.unsubscribe();
@@ -311,7 +324,6 @@ export function mountThree(container: HTMLElement): VisualizationControl {
   const canvas = container.querySelector("canvas[aria-label='Three Canvas']") as HTMLCanvasElement | null;
   if (!canvas) throw new Error('three canvas not found');
   const control = new ThreeControl(container, canvas);
-  // Default to visible if mounting
   control.setVisible(true);
   return control;
 }

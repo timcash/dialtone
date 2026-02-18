@@ -46,7 +46,19 @@
             <input type="checkbox" id="toggle-chatlog" />
           </div>
         </div>
-        <div class="settings-thumb" aria-label="Settings Controls"></div>
+        <form class="mode-form" data-mode-form="settings" aria-label="Settings Mode Form">
+          <button type="button" aria-label="Settings Thumb 1"></button>
+          <button type="button" aria-label="Settings Thumb 2"></button>
+          <button type="button" aria-label="Settings Thumb 3"></button>
+          <button type="button" aria-label="Settings Thumb 4"></button>
+          <button type="button" aria-label="Settings Thumb 5"></button>
+          <button type="button" aria-label="Settings Thumb 6"></button>
+          <button type="button" aria-label="Settings Thumb 7"></button>
+          <button type="button" aria-label="Settings Thumb 8"></button>
+          <button type="button" aria-label="Settings Mode">Mode: Config</button>
+          <input type="text" aria-label="Settings Input" placeholder="Settings..." />
+          <button type="button" aria-label="Settings Submit">Apply</button>
+        </form>
         <aside class="settings-legend overlay-legend" aria-label="Settings Legend"></aside>
       </section>
 
@@ -65,17 +77,17 @@
           </table>
         </div>
         <form class="mode-form" data-mode-form="table" aria-label="Table Mode Form">
-          <button type="button" aria-label="Table Thumb 1">1:Refresh</button>
-          <button type="button" aria-label="Table Thumb 2">2:Up</button>
-          <button type="button" aria-label="Table Thumb 3">3:Down</button>
-          <button type="button" aria-label="Table Thumb 4">4:Top</button>
-          <button type="button" aria-label="Table Thumb 5">5:Bottom</button>
-          <button type="button" aria-label="Table Thumb 6">6:Three</button>
-          <button type="button" aria-label="Table Thumb 7">7:Log</button>
-          <button type="button" aria-label="Table Thumb 8">8:Clear</button>
-          <button type="button" aria-label="Table Mode">9:Mode: Browse</button>
+          <button type="button" aria-label="Table Thumb 1">Refresh</button>
+          <button type="button" aria-label="Table Thumb 2">Up</button>
+          <button type="button" aria-label="Table Thumb 3">Down</button>
+          <button type="button" aria-label="Table Thumb 4">Top</button>
+          <button type="button" aria-label="Table Thumb 5">Bottom</button>
+          <button type="button" aria-label="Table Thumb 6">Three</button>
+          <button type="button" aria-label="Table Thumb 7">Log</button>
+          <button type="button" aria-label="Table Thumb 8">Clear</button>
+          <button type="button" aria-label="Table Mode">Mode: Browse</button>
           <input type="text" aria-label="Table Query Input" placeholder="Filter table rows" />
-          <button type="button" aria-label="Table Submit">10:Apply</button>
+          <button type="button" aria-label="Table Submit">Apply</button>
         </form>
         <aside class="telemetry-legend overlay-legend" aria-label="Telemetry Legend"></aside>
       </section>
@@ -89,34 +101,35 @@
         </aside>
 
         <form class="mode-form" data-mode-form="three" aria-label="Three Mode Form">
-          <button type="button" aria-label="Three Thumb 1">1:Back</button>
-          <button type="button" aria-label="Three Thumb 2">2:Add</button>
-          <button type="button" aria-label="Three Thumb 3">3:Link</button>
-          <button type="button" aria-label="Three Thumb 4">4:Clear</button>
-          <button type="button" aria-label="Three Thumb 5">5:Open</button>
-          <button type="button" aria-label="Three Thumb 6">6:Rename</button>
-          <button type="button" aria-label="Three Thumb 7">7:Focus</button>
-          <button type="button" aria-label="Three Thumb 8">8:Labels On</button>
-          <button type="button" aria-label="Three Mode">9:Mode: Graph</button>
+          <button type="button" aria-label="Three Thumb 1">Back</button>
+          <button type="button" aria-label="Three Thumb 2">Add</button>
+          <button type="button" aria-label="Three Thumb 3">Link</button>
+          <button type="button" aria-label="Three Thumb 4">Clear</button>
+          <button type="button" aria-label="Three Thumb 5">Open</button>
+          <button type="button" aria-label="Three Thumb 6">Rename</button>
+          <button type="button" aria-label="Three Thumb 7">Focus</button>
+          <button type="button" aria-label="Three Thumb 8">Labels On</button>
+          <button type="button" aria-label="Three Mode">Mode: Graph</button>
           <input type="text" aria-label="Three Input" placeholder="Select node to rename" />
-          <button type="button" aria-label="Three Submit">10:Submit</button>
+          <button type="button" aria-label="Three Submit">Submit</button>
         </form>
 
         <aside class="three-legend overlay-legend" aria-label="Three Legend">
-          <div class="hud-row"><span>MODE:</span> <span id="hud-mode">STABILIZE</span></div>
-          <div class="hud-row"><span>BATT:</span> <span id="hud-batt">0.0</span>V</div>
-          <div class="hud-row"><span>ALT:</span> <span id="hud-alt">0.0</span>m</div>
-          <div class="hud-row"><span>SPD:</span> <span id="hud-spd">0.0</span>m/s</div>
-          <div class="hud-row"><span>GPS:</span> <span id="hud-gps">0.0, 0.0</span></div>
-          <div class="hud-row"><span>HDG:</span> <span id="hud-hdg">0.0</span>°</div>
           <div class="hud-row latency-graph-row">
             <span>LATENCY:</span>
             <div class="latency-graph-container">
               <canvas id="latency-graph" width="120" height="24"></canvas>
-              <span id="hud-latency">0</span>ms
+              <span id="hud-latency">0ms</span>
             </div>
           </div>
-          <div class="hud-errors" id="hud-errors"></div>
+          <div class="hud-stats-grid">
+            <div class="hud-row"><span>MODE:</span> <span id="hud-mode">STABILIZE</span></div>
+            <div class="hud-row"><span>BATT:</span> <span id="hud-batt">0.0</span>V</div>
+            <div class="hud-row"><span>ALT:</span> <span id="hud-alt">0.0</span>m</div>
+            <div class="hud-row"><span>SPD:</span> <span id="hud-spd">0.0</span>m/s</div>
+            <div class="hud-row"><span>GPS:</span> <span id="hud-gps">0.0, 0.0</span></div>
+            <div class="hud-row"><span>HDG:</span> <span id="hud-hdg">0.0</span>°</div>
+          </div>
         </aside>
       </section>
 
@@ -124,17 +137,17 @@
       <section id="xterm" aria-label="Xterm Section" hidden>
         <div class="xterm-primary overlay-primary" aria-label="Xterm Terminal"></div>
         <form class="mode-form" data-mode-form="log" aria-label="Log Mode Form">
-          <button type="button" aria-label="Log Thumb 1">1:Left</button>
-          <button type="button" aria-label="Log Thumb 2">2:Right</button>
-          <button type="button" aria-label="Log Thumb 3">3:Up</button>
-          <button type="button" aria-label="Log Thumb 4">4:Down</button>
-          <button type="button" aria-label="Log Thumb 5">5:Home</button>
-          <button type="button" aria-label="Log Thumb 6">6:End</button>
-          <button type="button" aria-label="Log Thumb 7">7:Select</button>
-          <button type="button" aria-label="Log Thumb 8">8:Copy</button>
-          <button type="button" aria-label="Log Mode">9:Mode: Cursor</button>
+          <button type="button" aria-label="Log Thumb 1">Left</button>
+          <button type="button" aria-label="Log Thumb 2">Right</button>
+          <button type="button" aria-label="Log Thumb 3">Up</button>
+          <button type="button" aria-label="Log Thumb 4">Down</button>
+          <button type="button" aria-label="Log Thumb 5">Home</button>
+          <button type="button" aria-label="Log Thumb 6">End</button>
+          <button type="button" aria-label="Log Thumb 7">Select</button>
+          <button type="button" aria-label="Log Thumb 8">Copy</button>
+          <button type="button" aria-label="Log Mode">Mode: Cursor</button>
           <input type="text" aria-label="Log Command Input" placeholder="Type command for log terminal" />
-          <button type="button" aria-label="Log Submit">10:Submit</button>
+          <button type="button" aria-label="Log Submit">Submit</button>
         </form>
         <aside class="xterm-legend overlay-legend" aria-label="Xterm Legend"></aside>
       </section>
@@ -144,20 +157,21 @@
         <img aria-label="Video Stage" class="video-stage overlay-primary" src="" alt="Robot Stream" />
         
         <form class="mode-form" data-mode-form="video" aria-label="Video Mode Form">
-          <button type="button" aria-label="Video Thumb 1">1:Feed A</button>
-          <button type="button" aria-label="Video Thumb 2">2:Feed B</button>
-          <button type="button" aria-label="Video Thumb 3">3:Wide</button>
-          <button type="button" aria-label="Video Thumb 4">4:Zoom</button>
-          <button type="button" aria-label="Video Thumb 5">5:IR</button>
-          <button type="button" aria-label="Video Thumb 6">6:Map</button>
-          <button type="button" aria-label="Video Thumb 7">7:Log</button>
-          <button type="button" aria-label="Video Thumb 8">8:Bookmark</button>
-          <button type="button" aria-label="Video Mode">9:Mode: View</button>
+          <button type="button" aria-label="Video Thumb 1">Feed A</button>
+          <button type="button" aria-label="Video Thumb 2">Feed B</button>
+          <button type="button" aria-label="Video Thumb 3">Wide</button>
+          <button type="button" aria-label="Video Thumb 4">Zoom</button>
+          <button type="button" aria-label="Video Thumb 5">IR</button>
+          <button type="button" aria-label="Video Thumb 6">Map</button>
+          <button type="button" aria-label="Video Thumb 7">Log</button>
+          <button type="button" aria-label="Video Thumb 8">Bookmark</button>
+          <button type="button" aria-label="Video Mode">Mode: View</button>
           <input type="text" aria-label="Video Input" placeholder="Stream settings..." />
-          <button type="button" aria-label="Video Submit">10:Set</button>
+          <button type="button" aria-label="Video Submit">Set</button>
         </form>
 
         <aside class="video-legend overlay-legend" aria-label="Video Legend">
+          <div class="hud-row"><span>LATENCY:</span> <span id="vid-latency">0ms</span></div>
           <div class="hud-row"><span>SOURCE:</span> <span id="vid-source">PRIMARY</span></div>
           <div class="hud-row"><span>RES:</span> <span id="vid-res">1280x720</span></div>
           <div class="hud-row"><span>FPS:</span> <span id="vid-fps">30</span></div>

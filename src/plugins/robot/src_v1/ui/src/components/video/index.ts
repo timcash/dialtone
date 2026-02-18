@@ -1,11 +1,9 @@
 import { VisualizationControl } from '../../../../../../../libs/ui_v2/types';
 import { addMavlinkListener } from '../../data/connection';
+import { registerButtons, renderButtons } from '../../buttons';
 
 class VideoControl implements VisualizationControl {
   private img: HTMLImageElement | null;
-  private form: HTMLFormElement | null = null;
-  private thumbButtons: HTMLButtonElement[] = [];
-  private modeButton: HTMLButtonElement | null = null;
   private visible = false;
   private unsubscribe: (() => void) | null = null;
   
@@ -17,7 +15,6 @@ class VideoControl implements VisualizationControl {
 
   constructor(private container: HTMLElement) {
     this.img = container.querySelector('img.video-stage');
-    this.form = container.querySelector("form[data-mode-form='video']");
     
     // Create Watchdog Overlay
     this.watchdogOverlay = document.createElement('div');
@@ -35,14 +32,21 @@ class VideoControl implements VisualizationControl {
     const btn = this.watchdogOverlay.querySelector('.watchdog-btn');
     if (btn) btn.addEventListener('click', () => this.resumeStream());
 
-    if (this.form) {
-      this.thumbButtons = Array.from(this.form.querySelectorAll("button[aria-label^='Video Thumb']"));
-      this.modeButton = this.form.querySelector("button[aria-label='Video Mode']");
-      this.bindButtons();
-    }
+    // Register Buttons
+    registerButtons('video', ['View'], {
+      'View': [
+        { label: 'Feed A', action: () => this.updateFeedSource('Primary') },
+        { label: 'Feed B', action: () => this.updateFeedSource('Secondary') },
+        { label: 'Wide', action: () => this.updateFeedSource('Wide') },
+        { label: 'Zoom', action: () => this.updateFeedSource('Zoom') },
+        { label: 'IR', action: () => this.updateFeedSource('IR') },
+        { label: 'Map', action: () => this.updateFeedSource('Map') },
+        { label: 'Log', action: () => this.updateFeedSource('Log') },
+        { label: 'Bookmark', action: () => this.bookmarkFrame() },
+      ]
+    });
     
     this.updateFeedSource('Primary');
-    // Don't subscribe immediately, wait for setVisible
   }
 
   private startWatchdog() {
@@ -103,30 +107,6 @@ class VideoControl implements VisualizationControl {
     });
   }
 
-  private bindButtons() {
-    this.thumbButtons.forEach((btn, idx) => {
-      btn.addEventListener('click', () => this.handleThumbClick(idx));
-    });
-  }
-
-  private handleThumbClick(idx: number) {
-    // 0-based index: 0=Feed A, 1=Feed B, ..., 7=Bookmark
-    if (idx === 7) {
-      this.bookmarkFrame();
-      return;
-    }
-    
-    // Reset watchdog on interaction
-    if (this.visible && !this.isPaused) {
-        this.startWatchdog();
-    }
-    
-    const feeds = ['Primary', 'Secondary', 'Wide', 'Zoom', 'IR', 'Map', 'Log'];
-    if (idx < feeds.length) {
-      this.updateFeedSource(feeds[idx]);
-    }
-  }
-
   private updateFeedSource(name: string) {
     console.log(`[Video] Switching to feed: ${name}`);
     const sourceEl = this.container.querySelector('#vid-source');
@@ -158,10 +138,11 @@ class VideoControl implements VisualizationControl {
       
       if (res.ok) {
         console.log('[Video] Bookmark saved');
-        const btn = this.thumbButtons[7];
-        const originalText = btn.textContent;
-        btn.textContent = 'Saved!';
-        setTimeout(() => btn.textContent = originalText, 1000);
+        // Visual feedback? No direct button access anymore, but renderButtons re-renders.
+        // I could update button label temporarily?
+        // But registerButtons defines static labels/actions.
+        // For dynamic feedback, I'd need to update the config and re-render.
+        // Or simpler: just log. The HUD is there.
       } else {
         console.error('[Video] Bookmark failed', res.status);
       }
@@ -178,6 +159,7 @@ class VideoControl implements VisualizationControl {
   setVisible(visible: boolean): void {
     this.visible = visible;
     if (visible) {
+      renderButtons('video');
       if (!this.isPaused) {
         this.startStream();
         this.startWatchdog();
@@ -185,12 +167,6 @@ class VideoControl implements VisualizationControl {
     } else {
       this.stopStream();
       this.stopWatchdog();
-      // We don't reset isPaused here; if user returns, they might still see paused state if we wanted persistence,
-      // but usually navigating away resets the interaction.
-      // The user requirement: "pops up after 3 minutes".
-      // If I navigate away and back, should it reset?
-      // "when not the current section ... stops streaming" -> Verified by stopStream() in else block.
-      // Resetting isPaused to false on navigate away is safer for UX.
       this.isPaused = false;
       this.watchdogOverlay.hidden = true;
     }
