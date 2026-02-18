@@ -5,160 +5,122 @@ The `robot` plugin is the central hub for all robot-specific logic, including MA
 ## ⚡ Quick Reference
 
 ```bash
-# INSTALL & SETUP
-./dialtone.sh robot install src_v1                 # Install local UI dependencies
-./dialtone.sh robot install src_v1 --remote        # Sync & install on remote robot (Native Build)
+# === DEVELOPMENT ===
+# Start local UI dev server + Chrome (Mock Data)
+./dialtone.sh robot dev src_v1
 
-# DEVELOPMENT
-./dialtone.sh robot dev src_v1                     # Start local UI dev server + Chrome
-./dialtone.sh robot local-web-remote-robot src_v1  # Local UI dev server connected to Remote Robot data
-./dialtone.sh robot serve src_v1                   # Run the Go backend locally
+# Start local UI dev server + Remote Robot Data (SSH Tunnel)
+./dialtone.sh robot dev src_v1 --robot
 
-# TESTING
-./dialtone.sh robot test src_v1                    # Run automated test suite (Headless)
-./dialtone.sh robot test src_v1 --attach           # Run tests watching via local Chrome
+# Visual Debugging (Attach to existing Chrome session)
+./dialtone.sh robot dev src_v1 --attach
 
-# BUILD & DEPLOY
-./dialtone.sh robot build src_v1                   # Build UI assets locally
-./dialtone.sh robot build src_v1 --remote          # Sync & build on remote robot
-./dialtone.sh robot deploy src_v1                  # Build & ship binary to remote robot
-./dialtone.sh robot deploy src_v1 --service        # Deploy as systemd service
-./dialtone.sh robot deploy src_v1 --proxy          # Deploy + setup local Cloudflare proxy
+# === DEPLOYMENT ===
+# Build & Deploy binary to remote robot (updates service if exists)
+./dialtone.sh robot deploy src_v1
 
-# MAINTENANCE
-./dialtone.sh robot sleep src_v1                   # Switch robot to low-power "Sleeping" mode
+# Deploy + Install/Restart Systemd Service
+./dialtone.sh robot deploy src_v1 --service
 
-# UTILITIES
-./dialtone.sh robot sync-code src_v1               # Sync source code to robot (no build)
-./dialtone.sh robot diagnostic src_v1              # Verify live robot UI/telemetry
-./dialtone.sh robot telemetry                      # Monitor MAVLink latency on robot
+# Deploy + Service + Setup Cloudflare Tunnel Proxy
+./dialtone.sh robot deploy src_v1 --service --proxy
+
+# === TESTING ===
+# Run automated headless tests
+./dialtone.sh robot test src_v1
+
+# Run tests visually (watch in Chrome)
+./dialtone.sh robot test src_v1 --attach
+
+# === MAINTENANCE ===
+# Verify live robot UI/telemetry status
+./dialtone.sh robot diagnostic src_v1
+
+# Monitor MAVLink latency on robot
+./dialtone.sh robot telemetry
 ```
 
 ---
 
-## 🛠 Remote Development (Native Build)
+## 🚀 Development Workflow
 
-The `--remote` flag allows you to offload the build process to the robot itself. This is critical for ensuring native compilation (ARM64) and proper dependency resolution on the target hardware.
+Follow this step-by-step guide to add new features to the Robot UI.
 
-### prerequisites
-1.  **SSH Access**: Ensure you can SSH into the robot.
-2.  **Environment**: Set the following in your local `env/.env` file:
-    ```bash
-    ROBOT_HOST=192.168.4.36
-    ROBOT_USER=tim
-    ROBOT_PASSWORD=secret
-    ```
+### 1. Start Development Environment
+Choose your data source:
 
-### Workflow
-1.  **Sync & Install**: Copies your local source code to the robot and runs `bun install` / `go mod download` on the remote machine.
-    ```bash
-    ./dialtone.sh robot install src_v1 --remote
-    ```
-2.  **Sync & Build**: Copies code and compiles the Go binary and Vite UI on the remote machine.
-    ```bash
-    ./dialtone.sh robot build src_v1 --remote
-    ```
-
-> **Note**: These commands mirror your local project structure to `~/dialtone` on the remote robot.
-
----
-
-## 💤 Sleep Mode & PWA
-
-The `sleep` command switches the robot into a lightweight maintenance mode.
-
+**Option A: Local Mock (Fastest)**
+Ideal for UI layout and logic changes. Uses simulated telemetry.
 ```bash
-./dialtone.sh robot sleep src_v1
+./dialtone.sh robot dev src_v1
 ```
 
-*   **Mechanism**: Builds/Runs a minimal Go web server locally (`dialtone-sleep`) on port 8080.
-*   **Proxy**: Automatically reconfigures the local Cloudflare tunnel to point to `localhost:8080` instead of the robot.
-*   **Behavior**: Serves a static "Sleeping..." page.
-*   **PWA**: The "Sleeping" page is a full PWA. It caches itself offline, so users see the status even if the network drops.
-*   **Wake Up**: Run `robot deploy src_v1` to restore the full application and repoint the proxy to the robot.
-
-**Both the Main UI and Sleep Server are Progressive Web Apps (PWA):**
-- **Installable**: Can be added to the home screen.
-- **Offline-First**: Assets are cached via Service Worker.
-- **Auto-Update**: Updates apply immediately on navigation/refresh (no stale cache issues).
-
----
-
-## 🌐 Cloudflare Proxy (`--proxy`)
-
-The `--proxy` flag establishes a public tunnel to your robot via your local machine.
-
+**Option B: Remote Robot (Real Data)**
+Ideal for tuning 3D visualization or testing hardware integration. Tunnels data from the robot via SSH.
 ```bash
-./dialtone.sh robot deploy src_v1 --proxy
+./dialtone.sh robot dev src_v1 --robot
 ```
+*   **Prerequisite**: Ensure `ROBOT_HOST`, `ROBOT_USER`, and `ROBOT_PASSWORD` are set in `env/.env`.
 
-*   **Architecture**: `Public URL` -> `Cloudflare` -> `Local Machine (cloudflared)` --[Tailscale]--> `Robot`.
-*   **User Service**: The local proxy runs as a **user-level systemd service** (no sudo required).
-*   **Requirement**: You must enable lingering for your user to keep the proxy running in the background:
-    ```bash
-    loginctl enable-linger $USER
-    ```
+### 2. Make Changes
+*   **UI Code**: `src/plugins/robot/src_v1/ui/src/`
+    *   **Components**: `components/` (Three.js, Video, Xterm, etc.)
+    *   **Layout**: `style.css` (UI V2 architecture)
+    *   **Logic**: `main.ts` and `buttons.ts` (Button configurations)
+*   **Backend Code**: `src/plugins/robot/src_v1/cmd/`
 
----
+### 3. Verify Changes
+The dev server (Vite) hot-reloads automatically.
+*   **Mode Switching**: Use the `9:Mode` button or keys `1-9` to test interactions.
+*   **Watchdog**: Verify video pauses after 3 minutes of inactivity.
 
-## 🧪 Testing Strategy
-
-We use a "Bottom-Up" testing approach managed by `test_v2`.
-
-### 1. Local Automated Tests
-Always run this before deploying. It spins up a local mock server and checks all UI sections.
+### 4. Run Tests
+Ensure you haven't broken existing functionality.
 ```bash
 ./dialtone.sh robot test src_v1
 ```
-*   **Artifacts**: Generates `TEST.md`, `test.log`, and screenshots in `src/plugins/robot/src_v1/test/screenshots/`.
 
-### 2. Visual Debugging (`--attach`)
-If a test fails, watch the browser execution live:
+### 5. Deploy
+Ship your changes to the robot. The deploy script handles version bumping, building (native ARM64), and service restarts.
 ```bash
-./dialtone.sh robot test src_v1 --attach
+./dialtone.sh robot deploy src_v1 --service --proxy
 ```
-
-### 3. Live Data Verification
-To test your local UI changes against *real* data from the robot:
-```bash
-./dialtone.sh robot local-web-remote-robot src_v1
-```
-*   This proxies your local Vite server to the robot's NATS bus.
-*   Great for tuning 3D visualizations or HUD latency without deploying.
+*   **--service**: Ensures the systemd service (`dialtone.service`) is installed/restarted.
+*   **--proxy**: Ensures the Cloudflare tunnel (`drone-1.dialtone.earth`) is active.
 
 ---
 
-## 📡 Latency & Architecture
+## 🏗 Architecture & UI V2
 
-The system uses a **Direct NATS** architecture for minimal latency.
+The Robot UI is built on the **UI V2** shared library, ensuring consistent behavior across plugins.
 
-### Data Path
-1.  **Robot (Go)**: Reads MAVLink → Publishes to NATS (`mavlink.>`).
-2.  **Browser (UI)**: Connects *directly* to NATS via WebSocket (`ws://<host>:4223`).
-3.  **Visualization**: Three.js / Table components subscribe to topics and render frames.
+### Layout System
+*   **Overlay Primary**: The main content (3D Canvas, Video, Table). Fills the screen or split area.
+*   **Mode Form**: The 3x4 grid of thumb-accessible controls at the bottom.
+*   **Legend**: The top-left HUD overlay. Click to minimize.
 
-### Why Direct NATS?
-Previous versions relayed data through a Go-based WebSocket handler (`/ws`), causing double-serialization and queueing delays. The current architecture connects the UI directly to the broker, reducing "Queueing" latency (`Q`) to effectively zero.
-
-### Debugging Latency
-If the HUD shows high latency (>100ms):
-1.  **Check Metrics**: Look at the breakdown in the 3D HUD legend: `Total (P:Processing / N:Network)`.
-    *   **P**: Internal Go processing delay (Serial -> NATS).
-    *   **N**: Network transit time (Tailscale/LAN).
-2.  **Run Monitor**: SSH into the robot and run the telemetry tool to isolate internal timing.
-    ```bash
-    ./dialtone.sh robot telemetry
-    ```
+### Feature Highlights
+*   **3D Hero**: Interactive Inverse Kinematics (IK) robot arm visualization using Three.js.
+*   **Video Watchdog**: Automatically pauses high-bandwidth MJPEG streams after 3 minutes of inactivity to save data.
+*   **Chatlog**: Integrated xterm.js console in the 3D view for viewing MAVLink status messages.
+*   **Latency HUD**: Real-time visualization of telemetry latency (Processing vs Network).
+*   **Smart Updates**: The UI polls for version updates and prompts the user to reload, ensuring no stale cache issues.
 
 ---
 
-## 📂 Versioning (`src_vN`)
+## 📡 Connectivity
 
-The robot plugin supports side-by-side versions.
-*   **Current**: `src_v1`
-*   **Structure**:
-    *   `cmd/`: Go entrypoint
-    *   `ui/`: Vite/TypeScript frontend
-    *   `test/`: Automated test harness
+The system uses a hybrid architecture for low latency and accessibility:
 
-Always specify the version when running commands (e.g., `robot deploy src_v1`).
+1.  **Direct NATS (Telemetry)**:
+    *   Robot publishes MAVLink -> NATS (`mavlink.>`).
+    *   UI connects via WebSocket (`ws://<host>:4223`).
+    *   **Latency**: < 20ms typically.
+
+2.  **MJPEG Stream (Video)**:
+    *   Go backend captures frames -> HTTP Stream (`/stream`).
+    *   **Optimization**: Explicit flushing and aggressive cache-control headers ensure smooth playback over Cloudflare Tunnels.
+
+3.  **Cloudflare Tunnel**:
+    *   Secure public access via `https://drone-1.dialtone.earth`.
+    *   Managed via user-level systemd service (`dialtone-proxy-drone-1`).
