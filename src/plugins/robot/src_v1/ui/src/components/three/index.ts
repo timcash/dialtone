@@ -16,46 +16,55 @@ class ThreeControl implements VisualizationControl {
 
   constructor(private container: HTMLElement, canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    this.renderer.setClearColor(0x000000, 1);
+    this.renderer.setClearColor(0x05070a, 1);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-    this.camera.position.set(0, 0, 15);
+    this.camera.position.set(0, 5, 10);
     this.camera.lookAt(0, 0, 0);
 
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-    const keyLight = new THREE.DirectionalLight(0xffffff, 0.9);
-    keyLight.position.set(2, 2, 2);
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+    const keyLight = new THREE.DirectionalLight(0xffffff, 0.95);
+    keyLight.position.set(5, 10, 8);
     this.scene.add(keyLight);
 
     const group = new THREE.Group();
     
-    // Main Body (Triangle/Cone)
-    const geometry = new THREE.ConeGeometry(1, 3, 4); 
-    const material = new THREE.MeshPhongMaterial({ color: 0x66fcf1, wireframe: false });
-    const robotMesh = new THREE.Mesh(geometry, material);
-    robotMesh.rotation.x = Math.PI / 2;
-    group.add(robotMesh);
+    // Main Body
+    const bodyGeo = new THREE.BoxGeometry(2, 0.5, 3);
+    const bodyMat = new THREE.MeshStandardMaterial({ 
+      color: 0x475261,
+      roughness: 0.4,
+      metalness: 0.6 
+    });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    group.add(body);
 
-    // Euler Rings
-    const ringGeo = new THREE.TorusGeometry(2, 0.05, 16, 100);
-    const ringMatX = new THREE.MeshBasicMaterial({ color: 0xff4d4d }); // Pitch
-    const ringMatY = new THREE.MeshBasicMaterial({ color: 0x00ff00 }); // Roll
-    const ringMatZ = new THREE.MeshBasicMaterial({ color: 0x0000ff }); // Yaw
-    
-    const ringX = new THREE.Mesh(ringGeo, ringMatX);
-    const ringY = new THREE.Mesh(ringGeo, ringMatY);
-    ringY.rotation.x = Math.PI / 2;
-    const ringZ = new THREE.Mesh(ringGeo, ringMatZ);
+    // Front Indicator
+    const frontGeo = new THREE.BoxGeometry(1.2, 0.6, 0.5);
+    const frontMat = new THREE.MeshStandardMaterial({ 
+      color: 0x66fcf1,
+      emissive: 0x1f6dff,
+      emissiveIntensity: 0.5
+    });
+    const front = new THREE.Mesh(frontGeo, frontMat);
+    front.position.set(0, 0, -1.5);
+    group.add(front);
 
-    group.add(ringX); 
-    group.add(ringY);
-    group.add(ringZ);
+    // Axis Arrows
+    const arrowLen = 3;
+    const arrowX = new THREE.ArrowHelper(new THREE.Vector3(1,0,0), new THREE.Vector3(0,0,0), arrowLen, 0xff4d4d);
+    const arrowY = new THREE.ArrowHelper(new THREE.Vector3(0,1,0), new THREE.Vector3(0,0,0), arrowLen, 0x4dff4d);
+    const arrowZ = new THREE.ArrowHelper(new THREE.Vector3(0,0,1), new THREE.Vector3(0,0,0), arrowLen, 0x4d4dff);
+    group.add(arrowX);
+    group.add(arrowY);
+    group.add(arrowZ);
 
     this.scene.add(group);
     this.robotGroup = group;
 
-    const gridHelper = new THREE.GridHelper(50, 50, 0x333333, 0x111111);
-    gridHelper.rotation.x = Math.PI / 2;
+    // Floor Grid
+    const gridHelper = new THREE.GridHelper(40, 40, 0x444444, 0x111111);
+    gridHelper.position.y = -2;
     this.scene.add(gridHelper);
 
     this.resize();
@@ -64,11 +73,12 @@ class ThreeControl implements VisualizationControl {
     // Stub debug bridge for test compatibility
     this.attachDebugBridge();
     
-    this.initDataListener();
+    this.subscribe();
     this.animate();
   }
 
-  private initDataListener() {
+  private subscribe() {
+    if (this.unsubscribe) return;
     this.unsubscribe = addMavlinkListener((raw: any) => {
       // Track latency for any message that has timestamps
       if (raw.t_raw !== undefined) {
@@ -132,6 +142,10 @@ class ThreeControl implements VisualizationControl {
     });
   }
 
+  private initDataListener() {
+     // Deprecated, logic moved to subscribe
+  }
+
   private handleStats(data: any) {
     // Update internal attitude state for the 3D model
     if (data.roll !== undefined) this.attitude.roll = data.roll;
@@ -176,13 +190,9 @@ class ThreeControl implements VisualizationControl {
     if (t_raw < 10000000000) t_raw *= 1000;
 
     const t_pub = raw.t_pub ? raw.t_pub : t_raw;
-    // With direct NATS, there is no t_relay from Go.
-    // So Q (Queueing in Relay) is effectively 0 or N/A.
-    // We treat Network as now - t_pub.
     
     const total = now - t_raw;
     const proc = t_pub - t_raw;
-    // nats (Queueing) bypassed in direct connection
     const net = now - t_pub;
 
     // Sanity check
@@ -285,6 +295,15 @@ class ThreeControl implements VisualizationControl {
 
   setVisible(visible: boolean): void {
     this.visible = visible;
+    if (visible) {
+      this.resize();
+      this.subscribe();
+    } else {
+      if (this.unsubscribe) {
+        this.unsubscribe();
+        this.unsubscribe = null;
+      }
+    }
   }
 }
 
@@ -292,6 +311,7 @@ export function mountThree(container: HTMLElement): VisualizationControl {
   const canvas = container.querySelector("canvas[aria-label='Three Canvas']") as HTMLCanvasElement | null;
   if (!canvas) throw new Error('three canvas not found');
   const control = new ThreeControl(container, canvas);
-  control.setVisible(true); // Ensure visibility is set for animation
+  // Default to visible if mounting
+  control.setVisible(true);
   return control;
 }

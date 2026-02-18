@@ -6,24 +6,43 @@ declare const APP_VERSION: string;
 
 const { sections, menu } = setupApp({ title: 'dialtone.robot', debug: true });
 
+const isLocalDevHost = ['127.0.0.1', 'localhost'].includes(window.location.hostname);
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    if (isLocalDevHost) {
+      void navigator.serviceWorker.getRegistrations().then((regs) => {
+        regs.forEach((reg) => void reg.unregister());
+      });
+      if ('caches' in window) {
+        void caches.keys().then((keys) => {
+          keys.forEach((key) => {
+            if (key.includes('robot') || key.includes('dialtone') || key.includes('workbox')) {
+              void caches.delete(key);
+            }
+          });
+        });
+      }
+      return;
+    }
+    // Production service worker registration can go here if needed
+  });
+}
+
 // Display version
 const versionEl = document.getElementById('app-version');
 if (versionEl) {
-  versionEl.textContent = `v${APP_VERSION}`;
+  const stamp = isLocalDevHost ? ` (dev-${new Date().toLocaleTimeString()})` : '';
+  versionEl.textContent = `v${APP_VERSION}${stamp}`;
 }
 
 // Initialize Connection (NATS + Polling)
 initConnection();
 
-// --- Button Listeners for Three Section ---
-document.getElementById('three-arm')?.addEventListener('click', () => sendCommand('arm'));
-document.getElementById('three-disarm')?.addEventListener('click', () => sendCommand('disarm'));
-document.getElementById('three-manual')?.addEventListener('click', () => sendCommand('mode', 'manual'));
-document.getElementById('three-guided')?.addEventListener('click', () => sendCommand('mode', 'guided'));
-
 sections.register('hero', {
   containerId: 'hero',
   load: async () => {
+    sections.setLoadingMessage('hero', 'loading hero ...');
     const { mountHero } = await import('./components/hero/index');
     const container = document.getElementById('hero');
     if (!container) throw new Error('hero container not found');
@@ -33,14 +52,15 @@ sections.register('hero', {
   overlays: {
     primaryKind: 'stage',
     primary: '.hero-stage',
-    thumb: '', // No thumb for hero
-    legend: '', // No legend for hero
+    thumb: "form[data-mode-form='hero']",
+    legend: '.hero-legend',
   },
 });
 
 sections.register('docs', {
   containerId: 'docs',
   load: async () => {
+    sections.setLoadingMessage('docs', 'loading documentation ...');
     const { mountDocs } = await import('./components/docs/index');
     const container = document.getElementById('docs');
     if (!container) throw new Error('docs container not found');
@@ -55,9 +75,44 @@ sections.register('docs', {
   },
 });
 
+sections.register('settings', {
+  containerId: 'settings',
+  load: async () => {
+    sections.setLoadingMessage('settings', 'loading settings ...');
+    // Basic settings logic inline for now, can move to component later
+    const container = document.getElementById('settings');
+    if (!container) throw new Error('settings container not found');
+    
+    // Bind chatlog toggle
+    const toggle = container.querySelector('#toggle-chatlog') as HTMLInputElement;
+    if (toggle) {
+        toggle.checked = localStorage.getItem('robot.chatlog.enabled') === 'true';
+        toggle.addEventListener('change', () => {
+            localStorage.setItem('robot.chatlog.enabled', String(toggle.checked));
+            // Apply setting immediately
+            const chatlog = document.querySelector('.three-chatlog') as HTMLElement;
+            if (chatlog) chatlog.hidden = !toggle.checked;
+        });
+    }
+    
+    return {
+        dispose: () => {},
+        setVisible: (v) => {},
+    };
+  },
+  header: { visible: false, menuVisible: true, title: 'Settings' },
+  overlays: {
+    primaryKind: 'docs', // Reuse docs layout logic
+    primary: '.settings-primary',
+    thumb: '.settings-thumb',
+    legend: '.settings-legend',
+  },
+});
+
 sections.register('table', {
   containerId: 'table',
   load: async () => {
+    sections.setLoadingMessage('table', 'loading telemetry ...');
     const { mountTable } = await import('./components/table/index');
     const container = document.getElementById('table');
     if (!container) throw new Error('table container not found');
@@ -67,7 +122,7 @@ sections.register('table', {
   overlays: {
     primaryKind: 'table',
     primary: '.telemetry-table',
-    thumb: '.telemetry-thumb',
+    thumb: "form[data-mode-form='table']", // Updated selector
     legend: '.telemetry-legend',
   },
 });
@@ -75,23 +130,33 @@ sections.register('table', {
 sections.register('three', {
   containerId: 'three',
   load: async () => {
+    sections.setLoadingMessage('three', 'loading 3d environment ...');
     const { mountThree } = await import('./components/three/index');
     const container = document.getElementById('three');
     if (!container) throw new Error('three container not found');
+    
+    // Apply chatlog setting on load
+    const chatlog = container.querySelector('.three-chatlog') as HTMLElement;
+    if (chatlog) {
+        chatlog.hidden = localStorage.getItem('robot.chatlog.enabled') !== 'true';
+    }
+    
     return mountThree(container);
   },
   header: { visible: false, menuVisible: true, title: 'Robot 3D' },
   overlays: {
     primaryKind: 'stage',
     primary: '.three-stage',
-    thumb: '.three-thumb',
+    thumb: "form[data-mode-form='three']", // Updated selector
     legend: '.three-legend',
+    chatlog: '.three-chatlog', // Added chatlog overlay
   },
 });
 
 sections.register('xterm', {
   containerId: 'xterm',
   load: async () => {
+    sections.setLoadingMessage('xterm', 'loading terminal ...');
     const { mountXterm } = await import('./components/xterm/index');
     const container = document.getElementById('xterm');
     if (!container) throw new Error('xterm container not found');
@@ -101,7 +166,7 @@ sections.register('xterm', {
   overlays: {
     primaryKind: 'xterm',
     primary: '.xterm-primary',
-    thumb: '.xterm-thumb',
+    thumb: "form[data-mode-form='log']", // Updated selector
     legend: '.xterm-legend',
   },
 });
@@ -109,6 +174,7 @@ sections.register('xterm', {
 sections.register('video', {
   containerId: 'video',
   load: async () => {
+    sections.setLoadingMessage('video', 'loading camera stream ...');
     const { mountVideo } = await import('./components/video/index');
     const container = document.getElementById('video');
     if (!container) throw new Error('video container not found');
@@ -116,9 +182,9 @@ sections.register('video', {
   },
   header: { visible: false, menuVisible: true, title: 'Robot Camera' },
   overlays: {
-    primaryKind: 'stage', // using stage for video canvas or primaryKind: 'video' could be added
-    primary: '.video-primary',
-    thumb: '.video-thumb',
+    primaryKind: 'stage',
+    primary: '.video-stage',
+    thumb: "form[data-mode-form='video']",
     legend: '.video-legend',
   },
 });
@@ -128,6 +194,9 @@ menu.addButton('Hero', 'Navigate Hero', () => {
 });
 menu.addButton('Docs', 'Navigate Docs', () => {
   void sections.navigateTo('docs');
+});
+menu.addButton('Settings', 'Navigate Settings', () => {
+  void sections.navigateTo('settings');
 });
 menu.addButton('Telemetry', 'Navigate Telemetry', () => {
   void sections.navigateTo('table');
@@ -142,7 +211,7 @@ menu.addButton('Camera', 'Navigate Camera', () => {
   void sections.navigateTo('video');
 });
 
-const sectionOrder = ['hero', 'docs', 'table', 'three', 'xterm', 'video'] as const;
+const sectionOrder = ['hero', 'docs', 'settings', 'table', 'three', 'xterm', 'video'] as const;
 const sectionSet = new Set(sectionOrder);
 const defaultSection = sectionOrder[0];
 

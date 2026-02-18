@@ -13,13 +13,18 @@ class TableControl implements VisualizationControl {
   private unsubscribe: (() => void) | null = null;
 
   constructor(private container: HTMLElement) {
-    this.initDataListener();
+    this.subscribe();
   }
 
-  private initDataListener() {
+  private subscribe() {
+    if (this.unsubscribe) return;
     this.unsubscribe = addMavlinkListener((data: any) => {
       this.updateData(data);
     });
+  }
+
+  private initDataListener() {
+     // Deprecated, logic moved to subscribe
   }
 
   private updateData(data: any) {
@@ -80,7 +85,13 @@ class TableControl implements VisualizationControl {
   setVisible(visible: boolean): void {
     this.visible = visible;
     if (visible) {
+      this.subscribe();
       this.renderRows();
+    } else {
+      if (this.unsubscribe) {
+        this.unsubscribe();
+        this.unsubscribe = null;
+      }
     }
   }
 }

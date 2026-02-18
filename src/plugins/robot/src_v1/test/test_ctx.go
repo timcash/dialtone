@@ -129,8 +129,8 @@ func (t *testCtx) ensureSharedBrowser(requireBackend bool) (*test_v2.BrowserSess
 	}
 
 	if t.attachMode {
-		// In attach mode, we reuse the existing "dev" browser
-		session, err = start(false, "dev", true, startURL)
+		// In attach mode, we reuse the existing "robot-dev" browser
+		session, err = start(false, "robot-dev", true, startURL)
 		t.activeAttachSession = true
 	} else {
 		session, err = start(true, "test", false, startURL)
@@ -141,7 +141,10 @@ func (t *testCtx) ensureSharedBrowser(requireBackend bool) (*test_v2.BrowserSess
 	}
 	t.sharedBrowser = session
 
-	tasks := chromedp.Tasks{}
+	tasks := chromedp.Tasks{
+		chromedp.Evaluate(`window.sessionStorage.setItem('robot_test_mode', '1')`, nil),
+		chromedp.Evaluate(fmt.Sprintf(`window.sessionStorage.setItem('robot_test_attach', %q)`, map[bool]string{true: "1", false: "0"}[t.activeAttachSession]), nil),
+	}
 	if !t.keepViewport {
 		tasks = append(chromedp.Tasks{
 			chromedp.EmulateViewport(mobileViewportWidth, mobileViewportHeight, chromedp.EmulateScale(mobileScaleFactor)),
