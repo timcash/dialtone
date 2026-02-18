@@ -1,6 +1,7 @@
 import { setupApp } from '../../../../../libs/ui_v2/ui';
 import './style.css';
 import { initConnection, sendCommand } from './data/connection';
+import { handleButtonKey } from './buttons';
 
 declare const APP_VERSION: string;
 
@@ -118,26 +119,10 @@ sections.register('settings', {
   containerId: 'settings',
   load: async () => {
     sections.setLoadingMessage('settings', 'loading settings ...');
-    // Basic settings logic inline for now, can move to component later
+    const { mountSettings } = await import('./components/settings/index');
     const container = document.getElementById('settings');
     if (!container) throw new Error('settings container not found');
-    
-    // Bind chatlog toggle
-    const toggle = container.querySelector('#toggle-chatlog') as HTMLInputElement;
-    if (toggle) {
-        toggle.checked = localStorage.getItem('robot.chatlog.enabled') === 'true';
-        toggle.addEventListener('change', () => {
-            localStorage.setItem('robot.chatlog.enabled', String(toggle.checked));
-            // Apply setting immediately
-            const chatlog = document.querySelector('.three-chatlog') as HTMLElement;
-            if (chatlog) chatlog.hidden = !toggle.checked;
-        });
-    }
-    
-    return {
-        dispose: () => {},
-        setVisible: (v) => {},
-    };
+    return mountSettings(container);
   },
   header: { visible: false, menuVisible: true, title: 'Settings' },
   overlays: {
@@ -277,6 +262,14 @@ window.addEventListener('keydown', (event) => {
   if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
 
   const active = sections.getActiveSectionId() ?? defaultSection;
+  
+  // Handle Number Keys 1-9
+  if (event.key >= '1' && event.key <= '9') {
+    event.preventDefault();
+    handleButtonKey(active, parseInt(event.key) - 1);
+    return;
+  }
+
   const idx = sectionOrder.indexOf(active as (typeof sectionOrder)[number]);
   if (idx < 0) return;
 

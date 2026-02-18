@@ -3,25 +3,11 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { VisualizationControl } from '../../../../../../../libs/ui_v2/types';
 import { addMavlinkListener, sendCommand } from '../../data/connection';
-
-type LogThumbMode = 'cursor' | 'select' | 'command';
+import { registerButtons, renderButtons, setMode } from '../../buttons';
 
 type CursorPos = {
   row: number;
   col: number;
-};
-
-type ThumbAction = {
-  label: string;
-  aria: string;
-  run: () => void | Promise<void>;
-};
-
-const modeOrder: LogThumbMode[] = ['cursor', 'select', 'command'];
-const modeLabel: Record<LogThumbMode, string> = {
-  cursor: 'Mode: Cursor',
-  select: 'Mode: Select',
-  command: 'Mode: Command',
 };
 
 export function mountXterm(container: HTMLElement): VisualizationControl {
@@ -29,10 +15,8 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
   const controlsEl = container.querySelector("[aria-label='Log Mode Form']") as HTMLFormElement | null;
   const inputEl = container.querySelector("input[aria-label='Log Command Input']") as HTMLInputElement | null;
   const submitBtn = container.querySelector("button[aria-label='Log Submit']") as HTMLButtonElement | null;
-  const modeBtn = container.querySelector("button[aria-label='Log Mode']") as HTMLButtonElement | null;
-  const thumbButtons = Array.from(container.querySelectorAll("button[aria-label^='Log Thumb']")) as HTMLButtonElement[];
   
-  if (!terminalEl || !controlsEl || !inputEl || !submitBtn || !modeBtn || thumbButtons.length !== 8) {
+  if (!terminalEl || !controlsEl || !inputEl || !submitBtn) {
     throw new Error('xterm terminal controls not found');
   }
 
@@ -56,7 +40,6 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
   term.writeln('[ROBOT TERM] listening to mavlink...');
 
   let disposed = false;
-  let mode: LogThumbMode = 'cursor';
   let cursor: CursorPos = { row: 0, col: 0 };
   let selectionAnchor: CursorPos | null = null;
   let unsubscribeMav: (() => void) | null = null;
@@ -87,7 +70,6 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
   const applyCursorAttrs = () => {
     terminalEl.setAttribute('data-cursor-row', String(cursor.row));
     terminalEl.setAttribute('data-cursor-col', String(cursor.col));
-    terminalEl.setAttribute('data-thumb-mode', mode);
     terminalEl.setAttribute('data-selecting', selectionAnchor ? 'true' : 'false');
   };
 
@@ -111,12 +93,6 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
     applyCursorAttrs();
   };
 
-  const clearSelection = () => {
-    selectionAnchor = null;
-    term.clearSelection();
-    paintCursor();
-  };
-
   const moveCursor = (dx: number, dy: number, extendSelection: boolean) => {
     const next: CursorPos = { row: cursor.row + dy, col: cursor.col + dx };
     if (dy !== 0 && dx === 0) {
@@ -127,8 +103,11 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
       paintSelection();
       return;
     }
-    if (mode !== 'select') {
+    // Auto-clear selection if moving without extend
+    if (selectionAnchor) {
       selectionAnchor = null;
+      term.clearSelection();
+      setMode('xterm', 'Cursor'); // Fallback to cursor mode if we were selecting
     }
     paintCursor();
   };
@@ -153,9 +132,8 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
 
   const startSelection = () => {
     selectionAnchor = { ...cursor };
-    mode = 'select';
     paintSelection();
-    renderThumbs();
+    setMode('xterm', 'Select');
   };
 
   const copySelection = async () => {
@@ -176,24 +154,12 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
     }
   };
 
-  const cycleMode = () => {
-    const idx = modeOrder.indexOf(mode);
-    mode = modeOrder[(idx + 1) % modeOrder.length];
-    if (mode !== 'select') {
-      selectionAnchor = null;
-      term.clearSelection();
-    }
-    renderThumbs();
-    paintCursor();
-  };
-
   const submitInput = () => {
     const value = inputEl.value.trim();
     if (!value) return;
     
     term.writeln(`$ ${value}`);
     
-    // Simple command handling
     if (value.startsWith('mode ')) {
         const parts = value.split(' ');
         if (parts.length > 1) sendCommand('mode', parts[1]);
@@ -202,7 +168,6 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
     } else if (value === 'disarm') {
         sendCommand('disarm');
     } else {
-        // Echo or send custom command
         sendCommand(value);
     }
 
@@ -211,78 +176,50 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
     paintCursor();
   };
 
-  const renderThumbs = () => {
-    const actionsByMode: Record<LogThumbMode, ThumbAction[]> = {
-      cursor: [
-        { label: 'Left', aria: 'Log Left', run: () => moveCursor(-1, 0, false) },
-        { label: 'Right', aria: 'Log Right', run: () => moveCursor(1, 0, false) },
-        { label: 'Up', aria: 'Log Up', run: () => moveCursor(0, -1, false) },
-        { label: 'Down', aria: 'Log Down', run: () => moveCursor(0, 1, false) },
-        { label: 'Home', aria: 'Log Home', run: () => moveHome(false) },
-        { label: 'End', aria: 'Log End', run: () => moveEnd(false) },
-        { label: 'Select', aria: 'Log Select', run: startSelection },
-        { label: 'Copy', aria: 'Log Copy', run: () => void copySelection() },
-      ],
-      select: [
-        { label: 'Left', aria: 'Log Left', run: () => moveCursor(-1, 0, true) },
-        { label: 'Right', aria: 'Log Right', run: () => moveCursor(1, 0, true) },
-        { label: 'Up', aria: 'Log Up', run: () => moveCursor(0, -1, true) },
-        { label: 'Down', aria: 'Log Down', run: () => moveCursor(0, 1, true) },
-        { label: 'Start', aria: 'Log Start', run: startSelection },
-        {
-          label: 'Clear',
-          aria: 'Log Clear Selection',
-          run: () => {
-            mode = 'cursor';
-            clearSelection();
-            renderThumbs();
-          },
-        },
-        { label: 'Copy', aria: 'Log Copy', run: () => void copySelection() },
-        {
-          label: 'Done',
-          aria: 'Log Select Done',
-          run: () => {
-            mode = 'cursor';
-            clearSelection();
-            renderThumbs();
-          },
-        },
-      ],
-      command: [
-        { label: 'Send', aria: 'Log Send', run: submitInput },
-        {
-          label: 'Clear',
-          aria: 'Log Clear Input',
-          run: () => {
-            inputEl.value = '';
-            inputEl.focus();
-          },
-        },
-        { label: 'Left', aria: 'Log Left', run: () => moveCursor(-1, 0, false) },
-        { label: 'Right', aria: 'Log Right', run: () => moveCursor(1, 0, false) },
-        { label: 'Up', aria: 'Log Up', run: () => moveCursor(0, -1, false) },
-        { label: 'Down', aria: 'Log Down', run: () => moveCursor(0, 1, false) },
-        { label: 'Select', aria: 'Log Select', run: startSelection },
-        { label: 'Copy', aria: 'Log Copy', run: () => void copySelection() },
-      ],
-    };
+  // Register Buttons
+  registerButtons('xterm', ['Cursor', 'Select', 'Command'], {
+    'Cursor': [
+      { label: 'Left', action: () => moveCursor(-1, 0, false) },
+      { label: 'Right', action: () => moveCursor(1, 0, false) },
+      { label: 'Up', action: () => moveCursor(0, -1, false) },
+      { label: 'Down', action: () => moveCursor(0, 1, false) },
+      { label: 'Home', action: () => moveHome(false) },
+      { label: 'End', action: () => moveEnd(false) },
+      { label: 'Select', action: () => startSelection() },
+      { label: 'Copy', action: () => copySelection() },
+    ],
+    'Select': [
+      { label: 'Left', action: () => moveCursor(-1, 0, true) },
+      { label: 'Right', action: () => moveCursor(1, 0, true) },
+      { label: 'Up', action: () => moveCursor(0, -1, true) },
+      { label: 'Down', action: () => moveCursor(0, 1, true) },
+      { label: 'Start', action: () => startSelection() }, // Restart anchor?
+      { label: 'Clear', action: () => {
+          selectionAnchor = null;
+          term.clearSelection();
+          paintCursor();
+          setMode('xterm', 'Cursor');
+      }},
+      { label: 'Copy', action: () => copySelection() },
+      { label: 'Done', action: () => {
+          selectionAnchor = null;
+          term.clearSelection();
+          paintCursor();
+          setMode('xterm', 'Cursor');
+      }},
+    ],
+    'Command': [
+      { label: 'Send', action: () => submitInput() },
+      { label: 'Clear', action: () => { inputEl.value = ''; inputEl.focus(); } },
+      { label: 'Left', action: () => moveCursor(-1, 0, false) },
+      { label: 'Right', action: () => moveCursor(1, 0, false) },
+      { label: 'Up', action: () => moveCursor(0, -1, false) },
+      { label: 'Down', action: () => moveCursor(0, 1, false) },
+      { label: 'Select', action: () => startSelection() },
+      { label: 'Copy', action: () => copySelection() },
+    ]
+  });
 
-    const actions = actionsByMode[mode];
-    for (let i = 0; i < thumbButtons.length; i += 1) {
-      const action = actions[i];
-      const button = thumbButtons[i];
-      button.textContent = `${i + 1}:${action.label}`;
-      button.setAttribute('aria-label', action.aria);
-      button.onclick = () => {
-        void action.run();
-      };
-    }
-    modeBtn.textContent = `9:${modeLabel[mode]}`;
-    modeBtn.setAttribute('data-mode', mode);
-  };
-
-  modeBtn.addEventListener('click', cycleMode);
   submitBtn.addEventListener('click', submitInput);
   const onFormSubmit = (event: SubmitEvent) => {
     event.preventDefault();
@@ -337,7 +274,6 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
   const onResize = () => safeFit();
   window.addEventListener('resize', onResize);
 
-  renderThumbs();
   cursor = clampPos({ row: maxRow(), col: lineLength(maxRow()) });
   paintCursor();
   queueMicrotask(safeFit);
@@ -346,13 +282,9 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
     dispose: () => {
       disposed = true;
       window.removeEventListener('resize', onResize);
-      modeBtn.removeEventListener('click', cycleMode);
       submitBtn.removeEventListener('click', submitInput);
       controlsEl.removeEventListener('submit', onFormSubmit);
       inputEl.removeEventListener('keydown', onInputKeyDown);
-      for (const button of thumbButtons) {
-        button.onclick = null;
-      }
       if (unsubscribeMav) unsubscribeMav();
       term.dispose();
     },
@@ -363,6 +295,7 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
         terminalEl.setAttribute('data-ready', 'true');
         controlsEl.setAttribute('data-ready', 'true');
         subscribeToMavlink();
+        renderButtons('xterm');
       } else {
         if (unsubscribeMav) {
             unsubscribeMav();
