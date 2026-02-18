@@ -13,7 +13,7 @@ import (
 	"tailscale.com/tsnet"
 )
 
-//go:embed index.html
+//go:embed *
 var content embed.FS
 
 func main() {
@@ -63,7 +63,36 @@ func main() {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	data, _ := content.ReadFile("index.html")
-	w.Header().Set("Content-Type", "text/html")
+	path := r.URL.Path
+	if path == "/" {
+		path = "/index.html"
+	}
+	
+	// Remove leading slash for FS lookup
+	fsPath := path
+	if len(fsPath) > 0 && fsPath[0] == '/' {
+		fsPath = fsPath[1:]
+	}
+
+	data, err := content.ReadFile(fsPath)
+	if err != nil {
+		// Fallback to index.html for SPA-like behavior or unknown files
+		data, _ = content.ReadFile("index.html")
+		w.Header().Set("Content-Type", "text/html")
+		w.Write(data)
+		return
+	}
+
+	switch filepath.Ext(path) {
+	case ".html":
+		w.Header().Set("Content-Type", "text/html")
+	case ".js":
+		w.Header().Set("Content-Type", "application/javascript")
+	case ".json":
+		w.Header().Set("Content-Type", "application/json")
+	case ".png":
+		w.Header().Set("Content-Type", "image/png")
+	}
+
 	w.Write(data)
 }
