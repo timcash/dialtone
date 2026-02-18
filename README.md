@@ -28,6 +28,9 @@ The primary implementation of the Directed Acyclic Graph engine. It defines the 
 ### [Template Plugin](./src/plugins/template/README.md)
 A reusable starter kit for new plugins. Use this to scaffold new functionality while maintaining compatibility with the Dialtone lifecycle and test runners.
 
+### [Logs Plugin](./src/plugins/logs/README.md)
+NATS-first logging across plugins and services. Producers publish to NATS; readers attach (CLI `--stdout`, file listener, browser). See [src/plugins/logs/src_v1/README.md](src/plugins/logs/src_v1/README.md) for CLI and dev flow.
+
 ### [UI Library (ui_v2)](./src/libs/ui_v2/README.md)
 The shared toolkit for building Dialtone interfaces. It handles section management, global menus, and overlay coordination.
 
