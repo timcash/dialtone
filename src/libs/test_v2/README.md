@@ -93,6 +93,7 @@ Generated markdown includes:
 
 Common helpers:
 
+- `ComposeSectionID` (`<plugin>-<subname>-<underlay>`)
 - `NavigateToSection`
 - `WaitForAriaLabel`
 - `ClickAriaLabel`
@@ -106,6 +107,19 @@ Common helpers:
 - `AssertAriaLabelInsideViewport`
 
 Pattern: test UIs should expose stable `aria-label` hooks.
+
+## Section + Overlay Conventions (From DAG `src_v3`)
+
+`test_v2` assumes section UIs follow shared UIv2 conventions:
+
+- Section id naming: `<plugin-name>-<subname>-<underlay-type>`
+- Underlay kinds: `stage | table | docs | xterm | video`
+- Overlay kinds: `menu | mode-form | legend | chatlog | status-bar`
+
+Practical testing rule:
+
+- Prefer `aria-label` selectors for all major UI elements (section controls, buttons, inputs, legends, tables, terminals).
+- Keep section id stable in URL hash and pass section ids directly to `NavigateToSection(...)`.
 
 ## DevSession Helper (`dev_server.go`)
 

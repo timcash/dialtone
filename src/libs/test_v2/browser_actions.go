@@ -10,6 +10,16 @@ import (
 	"github.com/chromedp/chromedp/kb"
 )
 
+func ComposeSectionID(pluginName string, subName string, underlayKind string) string {
+	p := strings.TrimSpace(strings.ToLower(pluginName))
+	s := strings.TrimSpace(strings.ToLower(subName))
+	u := strings.TrimSpace(strings.ToLower(underlayKind))
+	if p == "" || s == "" || u == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s-%s-%s", p, s, u)
+}
+
 func NavigateToSection(id string, ariaLabel string) chromedp.Action {
 	return chromedp.Tasks{
 		chromedp.ActionFunc(func(ctx context.Context) error {

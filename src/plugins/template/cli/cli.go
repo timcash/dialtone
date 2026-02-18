@@ -2,13 +2,18 @@ package cli
 
 import (
 	test_v2 "dialtone/cli/src/libs/test_v2"
+	chrome_app "dialtone/cli/src/plugins/chrome/app"
 	"fmt"
+	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func runBun(repoRoot, uiDir string, args ...string) *exec.Cmd {
@@ -63,17 +68,13 @@ func Run(args []string) error {
 		return RunServe(getDir())
 	case "test":
 		dir := getDir()
-		cwd, _ := os.Getwd()
-		testPkg := "./" + filepath.ToSlash(filepath.Join("src", "plugins", "template", dir, "test"))
-		if _, err := os.Stat(filepath.Join(cwd, "src", "plugins", "template", dir, "test", "main.go")); os.IsNotExist(err) {
-			return fmt.Errorf("test runner not found: %s/main.go", testPkg)
+		attach := false
+		for _, arg := range args[2:] {
+			if arg == "--attach" {
+				attach = true
+			}
 		}
-		fmt.Printf(">> [TEMPLATE] Running Test Suite for %s...\n", dir)
-		cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "run", testPkg)
-		cmd.Dir = cwd
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		return cmd.Run()
+		return RunTest(dir, attach)
 	case "build":
 		return RunBuild(getDir())
 	case "copy":
@@ -84,6 +85,40 @@ func Run(args []string) error {
 	default:
 		return fmt.Errorf("unknown command: %s", command)
 	}
+}
+
+func RunTest(versionDir string, attach bool) error {
+	cwd, _ := os.Getwd()
+	testPkg := "./" + filepath.ToSlash(filepath.Join("src", "plugins", "template", versionDir, "test"))
+	if _, err := os.Stat(filepath.Join(cwd, "src", "plugins", "template", versionDir, "test", "main.go")); os.IsNotExist(err) {
+		return fmt.Errorf("test runner not found: %s/main.go", testPkg)
+	}
+
+	baseURL := "http://127.0.0.1:8080"
+	if attach {
+		devSession, err := ensureTemplateDevServerAndHeadedBrowser(cwd, versionDir)
+		if err != nil {
+			return err
+		}
+		fmt.Printf(">> [TEMPLATE] Test: attach mode enabled (reusing headed dev browser session)\n")
+		fmt.Printf(">> [TEMPLATE] Test: leaving dev preview running at http://127.0.0.1:%d after test completion\n", devSession.port)
+		baseURL = fmt.Sprintf("http://127.0.0.1:%d", devSession.port)
+	}
+
+	fmt.Printf(">> [TEMPLATE] Running Test Suite for %s...\n", versionDir)
+	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "run", testPkg)
+	cmd.Dir = cwd
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = append(
+		os.Environ(),
+		"TEMPLATE_TEST_ATTACH=0",
+		"TEMPLATE_TEST_BASE_URL="+baseURL,
+	)
+	if attach {
+		cmd.Env = append(cmd.Env, "TEMPLATE_TEST_ATTACH=1")
+	}
+	return cmd.Run()
 }
 
 func getLatestVersionDir() string {
@@ -242,6 +277,14 @@ func RunDev(versionDir string) error {
 	cwd, _ := os.Getwd()
 	versionDirPath, uiDir := resolvePaths(versionDir)
 	devPort := 3000
+	if err := test_v2.WaitForPort(devPort, 400*time.Millisecond); err == nil {
+		freePort, pickErr := test_v2.PickFreePort()
+		if pickErr != nil {
+			return fmt.Errorf("port %d is already in use and no free port could be picked: %w", devPort, pickErr)
+		}
+		fmt.Printf("   [DEV] Port %d is in use; using %d instead\n", devPort, freePort)
+		devPort = freePort
+	}
 	devURL := fmt.Sprintf("http://127.0.0.1:%d", devPort)
 
 	devSession, err := test_v2.NewDevSession(test_v2.DevSessionOptions{
@@ -249,6 +292,7 @@ func RunDev(versionDir string) error {
 		Port:           devPort,
 		URL:            devURL,
 		ConsoleWriter:  os.Stdout,
+		BrowserRole:    "template-dev",
 	})
 	if err != nil {
 		return err
@@ -256,7 +300,7 @@ func RunDev(versionDir string) error {
 	defer devSession.Close()
 
 	fmt.Println("   [DEV] Running vite dev...")
-	cmd := runBun(cwd, uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(devPort))
+	cmd := runBun(cwd, uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(devPort), "--strictPort")
 	cmd.Stdout = devSession.Writer()
 	cmd.Stderr = devSession.Writer()
 	if err := cmd.Start(); err != nil {
@@ -266,6 +310,133 @@ func RunDev(versionDir string) error {
 
 	waitErr := cmd.Wait()
 	return waitErr
+}
+
+type templateDevPreviewSession struct {
+	port int
+}
+
+func ensureTemplateDevServerAndHeadedBrowser(repoRoot, versionDir string) (*templateDevPreviewSession, error) {
+	_, uiDir := resolvePaths(versionDir)
+	targetTitle, err := readHTMLTitle(filepath.Join(uiDir, "index.html"))
+	if err != nil {
+		return nil, err
+	}
+
+	port := 3000
+	reuse := false
+	if err := test_v2.WaitForPort(port, 800*time.Millisecond); err == nil {
+		matched, probeErr := devServerMatchesVersion(port, targetTitle)
+		if probeErr == nil && matched {
+			reuse = true
+			fmt.Printf(">> [TEMPLATE] Test: dev server already running for %s at http://127.0.0.1:%d\n", versionDir, port)
+		} else {
+			freePort, pickErr := test_v2.PickFreePort()
+			if pickErr != nil {
+				return nil, fmt.Errorf("dev server on %d is not %s and no free port could be picked: %w", port, versionDir, pickErr)
+			}
+			fmt.Printf(">> [TEMPLATE] Test: existing dev server on :%d is not %s; starting %s on :%d\n", port, versionDir, versionDir, freePort)
+			port = freePort
+		}
+	}
+
+	if !reuse {
+		if err := startDetachedTemplateDevServer(repoRoot, versionDir, port); err != nil {
+			return nil, err
+		}
+		if err := test_v2.WaitForPort(port, 30*time.Second); err != nil {
+			return nil, fmt.Errorf("template dev server for %s did not become ready on :%d: %w", versionDir, port, err)
+		}
+		fmt.Printf(">> [TEMPLATE] Test: started dev server for %s at http://127.0.0.1:%d\n", versionDir, port)
+	}
+
+	previewURL := fmt.Sprintf("http://127.0.0.1:%d/#template-hero-stage", port)
+	if err := openPersistentTemplateDevChrome(previewURL); err != nil {
+		return nil, err
+	}
+	return &templateDevPreviewSession{port: port}, nil
+}
+
+func readHTMLTitle(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("failed reading %s: %w", path, err)
+	}
+	re := regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+	m := re.FindSubmatch(raw)
+	if len(m) < 2 {
+		return "", fmt.Errorf("missing <title> in %s", path)
+	}
+	title := strings.TrimSpace(string(m[1]))
+	if title == "" {
+		return "", fmt.Errorf("empty <title> in %s", path)
+	}
+	return title, nil
+}
+
+func devServerMatchesVersion(port int, targetTitle string) (bool, error) {
+	client := &http.Client{Timeout: 1200 * time.Millisecond}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d", port))
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return false, err
+	}
+	html := string(body)
+	if strings.Contains(html, "<title>"+targetTitle+"</title>") || strings.Contains(html, targetTitle) {
+		return true, nil
+	}
+	return false, nil
+}
+
+func startDetachedTemplateDevServer(repoRoot, versionDir string, port int) error {
+	logDir := filepath.Join(repoRoot, ".dialtone", "run")
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return err
+	}
+	logPath := filepath.Join(logDir, "template_dev_"+versionDir+".log")
+	logf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(
+		filepath.Join(repoRoot, "dialtone.sh"),
+		"template",
+		"ui-run",
+		versionDir,
+		"--port",
+		strconv.Itoa(port),
+	)
+	cmd.Dir = repoRoot
+	cmd.Stdout = logf
+	cmd.Stderr = logf
+	if err := cmd.Start(); err != nil {
+		_ = logf.Close()
+		return err
+	}
+	_ = cmd.Process.Release()
+	_ = logf.Close()
+	return nil
+}
+
+func openPersistentTemplateDevChrome(url string) error {
+	_, err := chrome_app.StartSession(chrome_app.SessionOptions{
+		GPU:           true,
+		Headless:      false,
+		TargetURL:     url,
+		Role:          "template-dev",
+		ReuseExisting: true,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to open template dev chrome preview at %s: %w", url, err)
+	}
+	return nil
 }
 
 func RunBuild(versionDir string) error {
@@ -470,6 +641,6 @@ func printUsage() {
 	fmt.Println("  ui-run <dir>   Run UI dev server")
 	fmt.Println("  serve <dir>    Run plugin Go server")
 	fmt.Println("  build <dir>    Build everything needed (UI assets)")
-	fmt.Println("  test <dir>     Run automated tests and write TEST.md artifacts")
+	fmt.Println("  test <dir> [--attach] Run automated tests and write TEST.md artifacts")
 	fmt.Println("  copy <src_vN> <target_dir> Copy template version to target directory")
 }

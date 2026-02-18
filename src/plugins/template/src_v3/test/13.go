@@ -19,7 +19,7 @@ func Run13TableSectionValidation() error {
 		return err
 	}
 
-	if err := session.Run(test_v2.NavigateToSection("table", "Table Section")); err != nil {
+	if err := session.Run(test_v2.NavigateToSection("template-meta-table", "Table Section")); err != nil {
 		return err
 	}
 	if err := session.Run(test_v2.WaitForAriaLabel("Template Table")); err != nil {
