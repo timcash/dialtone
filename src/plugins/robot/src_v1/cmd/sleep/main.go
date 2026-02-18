@@ -32,7 +32,7 @@ func main() {
 	s := &tsnet.Server{
 		Hostname: *hostname,
 		Dir:      *stateDir,
-		AuthKey:  os.Getenv("TS_AUTHKEY"), // In case we need to re-auth (unlikely if state exists)
+		AuthKey:  os.Getenv("TS_AUTHKEY"),             // In case we need to re-auth (unlikely if state exists)
 		Logf:     func(format string, args ...any) {}, // Quiet logs
 	}
 	defer s.Close()
@@ -49,7 +49,7 @@ func main() {
 	log.Printf("Sleep server running on %s (Tailscale:80, Local:8080)\n", *hostname)
 
 	srv := &http.Server{Handler: http.HandlerFunc(handler)}
-	
+
 	go func() {
 		if err := srv.Serve(ln); err != nil {
 			log.Fatalf("Serve failed: %v", err)
@@ -67,7 +67,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	if path == "/" {
 		path = "/index.html"
 	}
-	
+
 	// Remove leading slash for FS lookup
 	fsPath := path
 	if len(fsPath) > 0 && fsPath[0] == '/' {
