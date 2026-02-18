@@ -3,93 +3,134 @@ import './style.css';
 
 const { sections, menu } = setupApp({ title: 'dialtone.template', debug: true });
 
-sections.register('hero', {
-  containerId: 'hero',
+sections.register('template-hero-stage', {
+  containerId: 'template-hero-stage',
   load: async () => {
     const { mountHero } = await import('./components/hero/index');
-    const container = document.getElementById('hero');
-    if (!container) throw new Error('hero container not found');
+    const container = document.getElementById('template-hero-stage');
+    if (!container) throw new Error('template-hero-stage container not found');
     return mountHero(container);
   },
-  header: { visible: false, menuVisible: true, title: 'Template v3' },
+  header: { visible: false, menuVisible: true, title: 'Template Hero Stage' },
+  overlays: {
+    primaryKind: 'stage',
+    primary: "canvas[aria-label='Hero Canvas']",
+    statusBar: '.template-status-bar',
+  },
 });
 
-sections.register('docs', {
-  containerId: 'docs',
+sections.register('template-docs-docs', {
+  containerId: 'template-docs-docs',
   load: async () => {
     const { mountDocs } = await import('./components/docs/index');
-    const container = document.getElementById('docs');
-    if (!container) throw new Error('docs container not found');
+    const container = document.getElementById('template-docs-docs');
+    if (!container) throw new Error('template-docs-docs container not found');
     return mountDocs(container);
   },
-  header: { visible: false, menuVisible: true, title: 'Template v3 Docs' },
+  header: { visible: false, menuVisible: true, title: 'Template Docs' },
+  overlays: {
+    primaryKind: 'docs',
+    primary: "[aria-label='Docs Title']",
+    statusBar: '.template-status-bar',
+  },
 });
 
-sections.register('table', {
-  containerId: 'table',
+sections.register('template-meta-table', {
+  containerId: 'template-meta-table',
   load: async () => {
     const { mountTable } = await import('./components/table/index');
-    const container = document.getElementById('table');
-    if (!container) throw new Error('table container not found');
+    const container = document.getElementById('template-meta-table');
+    if (!container) throw new Error('template-meta-table container not found');
     return mountTable(container);
   },
-  header: { visible: false, menuVisible: true, title: 'Template v3 Table' },
+  header: { visible: false, menuVisible: true, title: 'Template Meta Table' },
+  overlays: {
+    primaryKind: 'table',
+    primary: "table[aria-label='Template Table']",
+    modeForm: "form[data-mode-form='table']",
+    statusBar: '.template-status-bar',
+  },
 });
 
-sections.register('three', {
-  containerId: 'three',
+sections.register('template-three-stage', {
+  containerId: 'template-three-stage',
   load: async () => {
     const { mountThree } = await import('./components/three/index');
-    const container = document.getElementById('three');
-    if (!container) throw new Error('three container not found');
+    const container = document.getElementById('template-three-stage');
+    if (!container) throw new Error('template-three-stage container not found');
     return mountThree(container);
   },
-  header: { visible: false, menuVisible: true, title: 'Template v3 Three' },
-});
-
-sections.register('xterm', {
-  containerId: 'xterm',
-  load: async () => {
-    const { mountXterm } = await import('./components/xterm/index');
-    const container = document.getElementById('xterm');
-    if (!container) throw new Error('xterm container not found');
-    return mountXterm(container);
+  header: { visible: false, menuVisible: true, title: 'Template Three Stage' },
+  overlays: {
+    primaryKind: 'stage',
+    primary: "canvas[aria-label='Three Canvas']",
+    modeForm: "form[data-mode-form='three']",
+    legend: '.three-history',
+    chatlog: '.three-chatlog',
+    statusBar: '.template-status-bar',
   },
-  header: { visible: false, menuVisible: true, title: 'Template v3 Xterm' },
 });
 
-sections.register('video', {
-  containerId: 'video',
+sections.register('template-log-xterm', {
+  containerId: 'template-log-xterm',
+  load: async () => {
+    const { mountLog } = await import('./components/log/index');
+    const container = document.getElementById('template-log-xterm');
+    if (!container) throw new Error('template-log-xterm container not found');
+    return mountLog(container);
+  },
+  header: { visible: false, menuVisible: true, title: 'Template Log Xterm' },
+  overlays: {
+    primaryKind: 'xterm',
+    primary: "[aria-label='Log Terminal']",
+    statusBar: '.template-status-bar',
+  },
+});
+
+sections.register('template-demo-video', {
+  containerId: 'template-demo-video',
   load: async () => {
     const { mountVideo } = await import('./components/video/index');
-    const container = document.getElementById('video');
-    if (!container) throw new Error('video container not found');
+    const container = document.getElementById('template-demo-video');
+    if (!container) throw new Error('template-demo-video container not found');
     return mountVideo(container);
   },
-  header: { visible: false, menuVisible: true, title: 'Template v3 Video' },
+  header: { visible: false, menuVisible: true, title: 'Template Demo Video' },
+  overlays: {
+    primaryKind: 'video',
+    primary: "video[aria-label='Test Video']",
+    statusBar: '.template-status-bar',
+  },
 });
 
 menu.addButton('Hero', 'Navigate Hero', () => {
-  void sections.navigateTo('hero');
+  void sections.navigateTo('template-hero-stage');
 });
 menu.addButton('Docs', 'Navigate Docs', () => {
-  void sections.navigateTo('docs');
+  void sections.navigateTo('template-docs-docs');
 });
 menu.addButton('Table', 'Navigate Table', () => {
-  void sections.navigateTo('table');
+  void sections.navigateTo('template-meta-table');
 });
-menu.addButton('Three', 'Navigate Three', () => {
-  void sections.navigateTo('three');
+menu.addButton('Stage', 'Navigate Stage', () => {
+  void sections.navigateTo('template-three-stage');
 });
-menu.addButton('Xterm', 'Navigate Xterm', () => {
-  void sections.navigateTo('xterm');
+menu.addButton('Log', 'Navigate Log', () => {
+  void sections.navigateTo('template-log-xterm');
 });
 menu.addButton('Video', 'Navigate Video', () => {
-  void sections.navigateTo('video');
+  void sections.navigateTo('template-demo-video');
 });
 
-const sectionOrder = ['hero', 'docs', 'table', 'three', 'xterm', 'video'] as const;
-const wheelLockedSections = new Set(['table', 'three', 'xterm', 'video']);
+const sectionOrder = [
+  'template-hero-stage',
+  'template-docs-docs',
+  'template-meta-table',
+  'template-three-stage',
+  'template-log-xterm',
+  'template-demo-video',
+] as const;
+const wheelLockedSections = new Set(['template-meta-table', 'template-three-stage', 'template-log-xterm', 'template-demo-video']);
 let wheelGestureActive = false;
 let wheelNavInFlight = false;
 let wheelGestureTimer = 0;
@@ -166,17 +207,6 @@ window.addEventListener('keydown', (event) => {
     navigateByDelta(-1);
   }
 });
-
-if (import.meta.hot) {
-  window.addEventListener('hashchange', () => {
-    const id = window.location.hash.slice(1);
-    if (id !== 'xterm') return;
-    const xtermEl = document.querySelector('#xterm [aria-label="Xterm Terminal"]') as HTMLElement | null;
-    if (xtermEl) {
-      xtermEl.removeAttribute('data-ready');
-    }
-  });
-}
 
 const syncSectionFromURL = (reason = 'event') => {
   const currentURL = window.location.href;

@@ -14,6 +14,17 @@ import (
 var sharedServer *exec.Cmd
 var sharedBrowser *test_v2.BrowserSession
 
+var (
+	templateTestAttach  = os.Getenv("TEMPLATE_TEST_ATTACH") == "1"
+	templateTestBaseURL = func() string {
+		v := os.Getenv("TEMPLATE_TEST_BASE_URL")
+		if v == "" {
+			return "http://127.0.0.1:8080"
+		}
+		return v
+	}()
+)
+
 const (
 	testViewportWidth  = 390
 	testViewportHeight = 844
@@ -56,10 +67,15 @@ func ensureSharedBrowser(emitProofOfLife bool) (*test_v2.BrowserSession, error) 
 
 	if sharedBrowser == nil {
 		session, err := test_v2.StartBrowser(test_v2.BrowserOptions{
-			Headless:      true,
-			Role:          "test",
-			ReuseExisting: false,
-			URL:           "http://127.0.0.1:8080",
+			Headless: !templateTestAttach,
+			Role: func() string {
+				if templateTestAttach {
+					return "template-dev"
+				}
+				return "test"
+			}(),
+			ReuseExisting: templateTestAttach,
+			URL:           templateTestBaseURL,
 			LogWriter:     os.Stdout,
 			LogPrefix:     "[BROWSER]",
 		})

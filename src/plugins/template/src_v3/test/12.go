@@ -18,7 +18,7 @@ func Run12DocsSectionValidation() error {
 		return err
 	}
 
-	if err := session.Run(test_v2.NavigateToSection("docs", "Docs Section")); err != nil {
+	if err := session.Run(test_v2.NavigateToSection("template-docs-docs", "Docs Section")); err != nil {
 		return err
 	}
 	if err := session.Run(test_v2.WaitForAriaLabel("Docs Title")); err != nil {

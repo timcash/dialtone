@@ -1,196 +1,294 @@
 import * as THREE from 'three';
+import { Terminal } from '@xterm/xterm';
+import '@xterm/xterm/css/xterm.css';
 import { VisualizationControl } from '../../../../../../../libs/ui_v2/types';
 
-type HoveredCubeID = 'cube_left' | 'cube_right' | '';
+type ThumbMode = 'graph' | 'view';
+type ThreeNode = { id: string; mesh: THREE.Mesh };
 
 class ThreeControl implements VisualizationControl {
-  private scene = new THREE.Scene();
-  private camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
-  private renderer: THREE.WebGLRenderer;
-  private raycaster = new THREE.Raycaster();
-  private pointer = new THREE.Vector2(2, 2);
-  private cubes: Array<{ id: Exclude<HoveredCubeID, ''>; mesh: THREE.Mesh; material: THREE.MeshStandardMaterial }> = [];
-  private selectedCubeId: HoveredCubeID = '';
-  private keyLight: THREE.DirectionalLight;
+  private readonly scene = new THREE.Scene();
+  private readonly camera = new THREE.PerspectiveCamera(50, 1, 0.1, 400);
+  private readonly renderer: THREE.WebGLRenderer;
+  private readonly nodes: ThreeNode[] = [];
+  private selectedNodeId = '';
+  private frameID = 0;
   private visible = false;
-  private frameId = 0;
-  private time = 0;
-  private spinSpeed = 0.4;
-  private wheelCount = 0;
+  private nodeCounter = 1;
+  private mode: ThumbMode = 'graph';
+  private history: string[] = [];
+  private labelsVisible = true;
 
-  constructor(private container: HTMLElement, private canvas: HTMLCanvasElement) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    this.renderer.setClearColor(0x000000, 1);
+  private buttons: HTMLButtonElement[] = [];
+  private modeButton: HTMLButtonElement | null = null;
+  private inputEl: HTMLInputElement | null = null;
+  private submitEl: HTMLButtonElement | null = null;
+  private historyTitle: HTMLElement | null = null;
+  private historyEls: HTMLElement[] = [];
+  private chatlogHost: HTMLElement | null = null;
+  private chatlogTerm: Terminal | null = null;
+  private chatlogLines: string[] = [];
+
+  constructor(private readonly container: HTMLElement, private readonly canvas: HTMLCanvasElement) {
+    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-
-    this.camera.position.set(0, 0, 6.5);
+    this.renderer.setClearColor(0x05070a, 1);
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    const key = new THREE.DirectionalLight(0xffffff, 0.9);
+    key.position.set(12, 16, 10);
+    this.scene.add(key);
+    this.camera.position.set(0, 12, 22);
     this.camera.lookAt(0, 0, 0);
 
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-    this.keyLight = new THREE.DirectionalLight(0xffffff, 0.9);
-    this.keyLight.position.set(2, 2, 2);
-    this.scene.add(this.keyLight);
-
-    const cubeGeometry = new THREE.BoxGeometry(0.9, 0.9, 0.9);
-    this.addCube('cube_left', cubeGeometry, -0.8);
-    this.addCube('cube_right', cubeGeometry, 0.8);
-
+    this.initUI();
+    this.seedNodes();
     this.resize();
-    window.addEventListener('resize', this.resize);
-    this.canvas.addEventListener('wheel', this.onWheel);
-    this.canvas.addEventListener('touchstart', this.onTouchStart, { passive: true });
-    this.canvas.style.touchAction = 'manipulation';
-    this.canvas.setAttribute('data-selected-cube', '');
-    this.canvas.setAttribute('data-hovered-cube', '');
-    this.attachDebugBridge();
+    this.attachEvents();
     this.animate();
+    this.canvas.setAttribute('data-ready', 'true');
   }
 
-  private addCube(id: Exclude<HoveredCubeID, ''>, geometry: THREE.BoxGeometry, x: number) {
-    const material = new THREE.MeshStandardMaterial({
-      color: 0x444444,
-      emissive: 0x000000,
-      emissiveIntensity: 1.0,
-      roughness: 0.45,
-      metalness: 0.2,
+  private initUI() {
+    this.buttons = [
+      this.container.querySelector("button[aria-label='Three Back']"),
+      this.container.querySelector("button[aria-label='Three Add']"),
+      this.container.querySelector("button[aria-label='Three Link']"),
+      this.container.querySelector("button[aria-label='Three Clear']"),
+      this.container.querySelector("button[aria-label='Three Open']"),
+      this.container.querySelector("button[aria-label='Three Rename']"),
+      this.container.querySelector("button[aria-label='Three Focus']"),
+      this.container.querySelector("button[aria-label='Three Labels']"),
+    ].filter((el): el is HTMLButtonElement => !!el);
+    this.modeButton = this.container.querySelector("button[aria-label='Three Mode']");
+    this.inputEl = this.container.querySelector("input[aria-label='Three Label Input']");
+    this.submitEl = this.container.querySelector("button[aria-label='Three Submit']");
+    this.historyTitle = this.container.querySelector('.three-history > h3');
+    this.historyEls = [
+      this.container.querySelector("[aria-label='Three Node History Item 1']"),
+      this.container.querySelector("[aria-label='Three Node History Item 2']"),
+      this.container.querySelector("[aria-label='Three Node History Item 3']"),
+      this.container.querySelector("[aria-label='Three Node History Item 4']"),
+      this.container.querySelector("[aria-label='Three Node History Item 5']"),
+    ].filter((el): el is HTMLElement => !!el);
+    this.chatlogHost = this.container.querySelector('.three-chatlog-xterm');
+    this.initChatlog();
+
+    this.buttons[0]?.addEventListener('click', () => this.selectFromHistory(1));
+    this.buttons[1]?.addEventListener('click', () => this.addNodeFromSelection());
+    this.buttons[2]?.addEventListener('click', () => this.selectNext());
+    this.buttons[3]?.addEventListener('click', () => this.clearSelection());
+    this.buttons[4]?.addEventListener('click', () => this.selectFirst());
+    this.buttons[5]?.addEventListener('click', () => this.renameSelectedFromInput());
+    this.buttons[6]?.addEventListener('click', () => this.focusSelection());
+    this.buttons[7]?.addEventListener('click', () => this.toggleLabels());
+    this.modeButton?.addEventListener('click', () => this.toggleMode());
+    this.submitEl?.addEventListener('click', () => this.renameSelectedFromInput());
+    this.inputEl?.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      this.renameSelectedFromInput();
     });
+    this.syncButtons();
+  }
+
+  private initChatlog() {
+    if (!this.chatlogHost) return;
+    this.chatlogTerm?.dispose();
+    this.chatlogHost.innerHTML = '';
+    this.chatlogTerm = new Terminal({
+      allowTransparency: true,
+      convertEol: true,
+      disableStdin: true,
+      cursorBlink: false,
+      rows: 7,
+      cols: 90,
+      scrollback: 0,
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      fontSize: 12,
+      lineHeight: 1.25,
+      theme: { background: 'rgba(0,0,0,0)', foreground: '#a7adb7', cursor: '#a7adb7' },
+    });
+    this.chatlogTerm.open(this.chatlogHost);
+  }
+
+  private appendLog(line: string) {
+    const clean = line.replace(/\s+/g, ' ').trim();
+    if (!clean) return;
+    this.chatlogLines.push(clean);
+    if (this.chatlogLines.length > 7) this.chatlogLines = this.chatlogLines.slice(-7);
+    this.chatlogTerm?.write(`\x1b[2J\x1b[H${this.chatlogLines.join('\r\n')}`);
+  }
+
+  private seedNodes() {
+    this.addNodeAt('N1', new THREE.Vector3(-4, 0, 0));
+    this.addNodeAt('N2', new THREE.Vector3(0, 0, 0));
+    this.addNodeAt('N3', new THREE.Vector3(4, 0, 0));
+    this.selectNode('N2');
+  }
+
+  private addNodeAt(id: string, position: THREE.Vector3) {
+    const geometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+    const material = new THREE.MeshStandardMaterial({ color: 0x4f8df8, roughness: 0.45, metalness: 0.2 });
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(x, 0, 0);
-    mesh.userData = { id };
+    mesh.position.copy(position);
+    mesh.userData = { nodeId: id };
     this.scene.add(mesh);
-    this.cubes.push({ id, mesh, material });
+    this.nodes.push({ id, mesh });
   }
 
-  private setSelectedCube(id: HoveredCubeID) {
-    if (this.selectedCubeId === id) {
-      return;
+  private selectNode(nodeId: string) {
+    this.selectedNodeId = nodeId;
+    this.canvas.setAttribute('data-selected-node', nodeId);
+    if (nodeId) {
+      this.history = [nodeId, ...this.history.filter((id) => id !== nodeId)].slice(0, 5);
+      this.appendLog(`USER> Selected ${nodeId}`);
     }
-    this.selectedCubeId = id;
-    this.canvas.setAttribute('data-selected-cube', id);
-    // Backward compatibility for existing selectors/tests.
-    this.canvas.setAttribute('data-hovered-cube', id);
-    for (const cube of this.cubes) {
-      if (cube.id === id) {
-        cube.material.emissive.setHex(0x1f6dff);
-      } else {
-        cube.material.emissive.setHex(0x000000);
-      }
-    }
-    console.log(`[Three #three] touch cube: ${id || 'none'}`);
+    this.paintSelection();
+    this.renderHistory();
+    this.syncButtons();
   }
 
-  private onWheel = () => {
-    this.wheelCount += 1;
-    this.canvas.setAttribute('data-wheel-count', String(this.wheelCount));
-  };
-
-  private hitTestClientPoint = (clientX: number, clientY: number): HoveredCubeID => {
-    const rect = this.canvas.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
-    if (x < 0 || y < 0 || x > rect.width || y > rect.height) {
-      this.setSelectedCube('');
-      return '';
+  private paintSelection() {
+    for (const node of this.nodes) {
+      const mat = node.mesh.material as THREE.MeshStandardMaterial;
+      const selected = node.id === this.selectedNodeId;
+      mat.color.setHex(selected ? 0xf3f8ff : 0x4f8df8);
+      mat.emissive.setHex(selected ? 0x355ca8 : 0x000000);
+      mat.emissiveIntensity = selected ? 0.75 : 0.15;
     }
-    this.pointer.x = (x / rect.width) * 2 - 1;
-    this.pointer.y = -(y / rect.height) * 2 + 1;
-    this.raycaster.setFromCamera(this.pointer, this.camera);
-    const intersects = this.raycaster.intersectObjects(
-      this.cubes.map((c) => c.mesh),
-      false
-    );
-    const id = (intersects[0]?.object.userData?.id ?? '') as HoveredCubeID;
-    this.setSelectedCube(id);
-    return id;
-  };
-
-  private onTouchStart = (event: TouchEvent) => {
-    const t = event.changedTouches[0];
-    if (!t) return;
-    this.hitTestClientPoint(t.clientX, t.clientY);
-  };
-
-  private getProjectedPoint = (id: Exclude<HoveredCubeID, ''>): { ok: boolean; x: number; y: number } => {
-    const cube = this.cubes.find((c) => c.id === id);
-    if (!cube) return { ok: false, x: 0, y: 0 };
-    const rect = this.canvas.getBoundingClientRect();
-    this.scene.updateMatrixWorld(true);
-    this.camera.updateMatrixWorld(true);
-    const projected = cube.mesh.position.clone().project(this.camera);
-    const x = Math.round((projected.x * 0.5 + 0.5) * rect.width + rect.left);
-    const y = Math.round((-projected.y * 0.5 + 0.5) * rect.height + rect.top);
-    return { ok: true, x, y };
-  };
-
-  private touchProjected = (id: Exclude<HoveredCubeID, ''>): boolean => {
-    const cube = this.cubes.find((c) => c.id === id);
-    if (!cube) return false;
-    const rect = this.canvas.getBoundingClientRect();
-    this.scene.updateMatrixWorld(true);
-    this.camera.updateMatrixWorld(true);
-    const projected = cube.mesh.position.clone().project(this.camera);
-    const clientX = (projected.x * 0.5 + 0.5) * rect.width + rect.left;
-    const clientY = (-projected.y * 0.5 + 0.5) * rect.height + rect.top;
-    const hitId = this.hitTestClientPoint(clientX, clientY);
-    return hitId === id;
-  };
-
-  private attachDebugBridge() {
-    (window as Window & {
-      templateThreeDebug?: {
-        getProjectedPoint: (id: Exclude<HoveredCubeID, ''>) => { ok: boolean; x: number; y: number };
-        touchProjected: (id: Exclude<HoveredCubeID, ''>) => boolean;
-      };
-    }).templateThreeDebug = {
-      getProjectedPoint: this.getProjectedPoint,
-      touchProjected: this.touchProjected,
-    };
   }
+
+  private renderHistory() {
+    if (this.historyTitle) this.historyTitle.textContent = `Node History ${this.history.length}/5`;
+    for (let i = 0; i < this.historyEls.length; i += 1) {
+      this.historyEls[i].textContent = this.history[i] ?? 'none';
+    }
+  }
+
+  private addNodeFromSelection() {
+    const anchor = this.nodes.find((n) => n.id === this.selectedNodeId) ?? this.nodes[this.nodes.length - 1];
+    const id = `N${this.nodeCounter + 3}`;
+    this.nodeCounter += 1;
+    const next = anchor ? anchor.mesh.position.clone().add(new THREE.Vector3(3.2, 0, 0)) : new THREE.Vector3(0, 0, 0);
+    this.addNodeAt(id, next);
+    this.selectNode(id);
+    this.appendLog(`USER> Click Three Add`);
+  }
+
+  private selectFromHistory(index: number) {
+    const id = this.history[index];
+    if (id) this.selectNode(id);
+  }
+
+  private selectNext() {
+    if (this.nodes.length === 0) return;
+    const currentIndex = this.nodes.findIndex((n) => n.id === this.selectedNodeId);
+    const next = this.nodes[(currentIndex + 1 + this.nodes.length) % this.nodes.length];
+    this.selectNode(next.id);
+    this.appendLog(`USER> Click Three Link`);
+  }
+
+  private clearSelection() {
+    this.selectedNodeId = '';
+    this.canvas.setAttribute('data-selected-node', '');
+    this.paintSelection();
+    this.appendLog(`USER> Click Three Clear`);
+  }
+
+  private selectFirst() {
+    const first = this.nodes[0];
+    if (first) this.selectNode(first.id);
+    this.appendLog(`USER> Click Three Open`);
+  }
+
+  private renameSelectedFromInput() {
+    const id = this.selectedNodeId;
+    const next = (this.inputEl?.value ?? '').trim();
+    if (!id || !next) return;
+    this.history = this.history.map((item) => (item === id ? next : item));
+    this.selectedNodeId = next;
+    this.canvas.setAttribute('data-selected-node', next);
+    this.inputEl!.value = '';
+    this.renderHistory();
+    this.appendLog(`USER> Rename ${id} -> ${next}`);
+  }
+
+  private focusSelection() {
+    const node = this.nodes.find((n) => n.id === this.selectedNodeId);
+    if (!node) return;
+    this.camera.position.set(node.mesh.position.x, 10, node.mesh.position.z + 16);
+    this.camera.lookAt(node.mesh.position.x, 0, node.mesh.position.z);
+    this.appendLog(`USER> Click Three Focus`);
+  }
+
+  private toggleLabels() {
+    this.labelsVisible = !this.labelsVisible;
+    this.appendLog(`USER> Labels ${this.labelsVisible ? 'On' : 'Off'}`);
+    this.syncButtons();
+  }
+
+  private toggleMode() {
+    this.mode = this.mode === 'graph' ? 'view' : 'graph';
+    this.appendLog(`USER> Mode ${this.mode}`);
+    this.syncButtons();
+  }
+
+  private syncButtons() {
+    if (this.modeButton) this.modeButton.textContent = this.mode === 'graph' ? '9:Mode: Build' : '9:Mode: View';
+    const labels = this.mode === 'graph' ? ['1:Back', '2:Add', '3:Link', '4:Clear', '5:Open', '6:Rename', '7:Focus', '8:Labels On'] : ['1:Back', '2:Add', '3:Link', '4:Clear', '5:Open', '6:Rename', '7:Focus', '8:Labels Off'];
+    for (let i = 0; i < this.buttons.length; i += 1) this.buttons[i].textContent = labels[i];
+  }
+
+  private attachEvents() {
+    window.addEventListener('resize', this.resize);
+    this.canvas.addEventListener('click', this.onCanvasClick);
+  }
+
+  private onCanvasClick = (event: MouseEvent) => {
+    const rect = this.canvas.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(x, y), this.camera);
+    const hits = raycaster.intersectObjects(this.nodes.map((n) => n.mesh), false);
+    const hit = hits[0]?.object?.userData?.nodeId;
+    if (typeof hit === 'string') this.selectNode(hit);
+  };
+
+  private animate = () => {
+    this.frameID = window.requestAnimationFrame(this.animate);
+    if (!this.visible) return;
+    this.renderer.render(this.scene, this.camera);
+  };
 
   private resize = () => {
-    const rect = this.container.getBoundingClientRect();
-    const width = Math.max(1, rect.width);
-    const height = Math.max(1, rect.height);
+    const width = this.canvas.clientWidth || this.container.clientWidth || window.innerWidth;
+    const height = this.canvas.clientHeight || this.container.clientHeight || window.innerHeight;
+    if (width <= 0 || height <= 0) return;
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height, false);
   };
 
-  private animate = () => {
-    this.frameId = requestAnimationFrame(this.animate);
-    if (!this.visible) return;
-
-    this.time += 0.016;
-    for (let i = 0; i < this.cubes.length; i += 1) {
-      const mesh = this.cubes[i].mesh;
-      const dir = i === 0 ? 1 : -1;
-      mesh.rotation.x = this.time * this.spinSpeed * 0.8;
-      mesh.rotation.y = this.time * this.spinSpeed * dir;
-    }
-
-    this.renderer.render(this.scene, this.camera);
-  };
-
-  dispose(): void {
-    cancelAnimationFrame(this.frameId);
-    window.removeEventListener('resize', this.resize);
-    this.canvas.removeEventListener('wheel', this.onWheel);
-    this.canvas.removeEventListener('touchstart', this.onTouchStart);
-    const win = window as Window & { templateThreeDebug?: unknown };
-    if (win.templateThreeDebug) {
-      delete win.templateThreeDebug;
-    }
-    this.renderer.dispose();
+  setVisible(visible: boolean) {
+    this.visible = visible;
+    this.canvas.style.visibility = visible ? 'visible' : 'hidden';
+    if (visible) this.resize();
   }
 
-  setVisible(visible: boolean): void {
-    this.visible = visible;
+  dispose() {
+    window.cancelAnimationFrame(this.frameID);
+    window.removeEventListener('resize', this.resize);
+    this.canvas.removeEventListener('click', this.onCanvasClick);
+    this.chatlogTerm?.dispose();
+    this.renderer.dispose();
   }
 }
 
 export function mountThree(container: HTMLElement): VisualizationControl {
-  const canvas = container.querySelector("canvas[aria-label='Three Canvas']") as HTMLCanvasElement | null;
-  if (!canvas) throw new Error('three canvas not found');
-  canvas.setAttribute('data-wheel-count', '0');
+  const canvas = container.querySelector("canvas[aria-label='Three Canvas']");
+  if (!canvas || !(canvas instanceof HTMLCanvasElement)) {
+    throw new Error('Three Canvas not found');
+  }
   return new ThreeControl(container, canvas);
 }

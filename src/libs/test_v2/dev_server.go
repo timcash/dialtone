@@ -13,12 +13,17 @@ type DevBrowserOptions struct {
 	URL       string
 	LogWriter io.Writer
 	LogPrefix string
+	Role      string
 }
 
 func StartDevBrowser(opts DevBrowserOptions) (*BrowserSession, error) {
+	role := opts.Role
+	if role == "" {
+		role = "dev"
+	}
 	return StartBrowser(BrowserOptions{
 		Headless:      false,
-		Role:          "dev",
+		Role:          role,
 		ReuseExisting: true,
 		URL:           opts.URL,
 		LogWriter:     opts.LogWriter,
@@ -31,13 +36,15 @@ type DevSessionOptions struct {
 	Port           int
 	URL            string
 	ConsoleWriter  io.Writer
+	BrowserRole    string
 }
 
 type DevSession struct {
-	logFile   *os.File
-	logWriter io.Writer
-	url       string
-	port      int
+	logFile     *os.File
+	logWriter   io.Writer
+	url         string
+	port        int
+	browserRole string
 
 	mu      sync.Mutex
 	browser *BrowserSession
@@ -58,6 +65,12 @@ func NewDevSession(opts DevSessionOptions) (*DevSession, error) {
 		logWriter: io.MultiWriter(opts.ConsoleWriter, logFile),
 		url:       opts.URL,
 		port:      opts.Port,
+		browserRole: func() string {
+			if opts.BrowserRole != "" {
+				return opts.BrowserRole
+			}
+			return "dev"
+		}(),
 	}, nil
 }
 
@@ -79,6 +92,7 @@ func (d *DevSession) StartBrowserAttach() {
 			URL:       d.url,
 			LogWriter: d.logWriter,
 			LogPrefix: "   [BROWSER]",
+			Role:      d.browserRole,
 		})
 		if err != nil {
 			fmt.Fprintf(d.logWriter, "   [DEV] Warning: failed to attach debug browser: %v\n", err)

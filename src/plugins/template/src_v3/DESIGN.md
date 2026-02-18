@@ -33,7 +33,6 @@ Expected structure for v3:
 - `src/plugins/template/src_v3/build.go` (v3-local build workflow)
 - `src/plugins/template/src_v3/DESIGN.md`
 - `src/plugins/template/src_v3/TEST_PLAN.md`
-- `src/plugins/template/src_v3/DAG.md`
 
 This preserves:
 - Side-by-side versions.
@@ -76,13 +75,23 @@ Naming changes:
 The v3 UI implements the same scope of template sections, but with simpler code and faster swaps.
 
 ### Required Section Types (UI Templates)
-Each section must have a dedicated UI template in `src_v3/ui`:
-- `hero` with Three.js background viz.
-- `docs` (static documentation)
-- `table` (with pagination)
-- `three` (full screen Three.js app that can take over mouse scroll)
-- `xterm` (full screen app using xterm.js)
-- `video` (section with a test video playing)
+Each section must have a dedicated UI template in `src_v3/ui` using the shared naming rule:
+
+- `<plugin-name>-<subname>-<underlay-type>`
+
+Template `src_v3` section ids:
+
+- `template-hero-stage` (hero stage underlay)
+- `template-docs-docs` (docs underlay)
+- `template-meta-table` (table underlay)
+- `template-three-stage` (three scene stage underlay)
+- `template-log-xterm` (log xterm underlay)
+- `template-demo-video` (video underlay)
+
+Overlay terminology follows the shared `ui_v2` section model:
+
+- overlays: `menu`, `mode-form`, `legend`, `chatlog` (optional), `status-bar` (optional)
+- underlays: `stage`, `table`, `docs`, `xterm`, `video`
 
 ### Shared Section Behaviors
 - Each section can optionally show/hide:
@@ -171,7 +180,7 @@ Order:
 - Each test run should trigger a UI rebuild or refresh so the dev server reflects the latest code.
 
 ### Dev Server (Debug + Chromedp Attach)
-Modeled after the DAG plugin dev flow, v3 adds a dedicated dev server experience that is compatible with testing:
+v3 adds a dedicated dev server experience that is compatible with testing:
 
 CLI example:
 ```bash
