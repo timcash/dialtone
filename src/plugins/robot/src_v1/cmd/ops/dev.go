@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -52,95 +51,43 @@ func Dev(args []string) error {
 
 	logOut := io.MultiWriter(os.Stdout, logFile)
 	logf := func(format string, args ...any) {
-		fmt.Fprintf(logOut, format+"\n", args...)
+		msg := fmt.Sprintf(format, args...)
+		fmt.Fprintln(logOut, msg)
 	}
 
-	        logf(">> [ROBOT] Dev: src_v1")
+	logf(">> [ROBOT] Dev: src_v1")
+	logf("   [DEV] Writing logs to %s", devLogPath)
+	logf("   [DEV] Writing browser metadata to %s", devBrowserMetaPath)
 
-	        logf("   [DEV] Writing logs to %s", devLogPath)
+	logf("   [DEV] Checking for existing robot dev processes...")
+	cleanupExistingDev(logf, cwd)
 
-	                logf("   [DEV] Writing browser metadata to %s", devBrowserMetaPath)
-
-	        
-
-	                // NEW: Handle Remote Chrome Debug Bridge
-
-	                if remoteChromeHost != "" {
-
-	                        logf("   [DEV] Establishing bridge to remote Chrome on %s:9222...", remoteChromeHost)
-
-	                        go startRemoteChromeBridge(logf, remoteChromeHost)
-
-	                }
-
-	        
-
-	                // NEW: Cleanup existing robot dev processes
-
-	        
-
-	        logf("   [DEV] Checking for existing robot dev processes...")
-
-	        cleanupExistingDev(logf, cwd)
-
-	
-
-	        ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-
-	
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Handle Remote Robot Tunnel or Local Backend
-	var backendCmd *exec.Cmd
-	var tunnelCmd *exec.Cmd
-
-	if useRemoteRobot {
-		host := os.Getenv("ROBOT_HOST")
-		user := os.Getenv("ROBOT_USER")
-		if host == "" {
-			host = "drone-1"
-		}
-		
-		target := host
-		if user != "" {
-			target = fmt.Sprintf("%s@%s", user, host)
-		}
-
-		logf("   [DEV] Remote Robot mode enabled. Connecting to %s...", host)
-		
-		// Start SSH Tunnel
-		// -L 8080:localhost:8080 for API
-		// -L 4223:localhost:4223 for NATS WS
-		tunnelCmd = exec.CommandContext(ctx, "ssh", "-N", "-L", "8080:localhost:8080", "-L", "4223:localhost:4223", target)
-		tunnelCmd.Stdout = logOut
-		tunnelCmd.Stderr = logOut
-		if err := tunnelCmd.Start(); err != nil {
-			return fmt.Errorf("failed to start ssh tunnel: %w", err)
-		}
-		logf("   [DEV] SSH tunnel started (pid %d)", tunnelCmd.Process.Pid)
-		
-		go func() {
-			if err := tunnelCmd.Wait(); err != nil {
-				if ctx.Err() == nil {
-					logf("   [DEV] Warning: SSH tunnel exited unexpectedly: %v", err)
-					stop()
-				}
-			}
-		}()
-		
-		time.Sleep(2 * time.Second)
-
-	} else {
-		logf("   [DEV] Starting local mock backend...")
-		backendCmd = exec.CommandContext(ctx, filepath.Join(cwd, "dialtone.sh"), "go", "exec", "run", "src/plugins/robot/src_v1/cmd/main.go")
-		backendCmd.Dir = cwd
-		backendCmd.Stdout = logOut
-		backendCmd.Stderr = logOut
-		if err := backendCmd.Start(); err != nil {
-			return fmt.Errorf("failed to start local backend: %w", err)
-		}
-		logf("   [DEV] Local backend started (pid %d)", backendCmd.Process.Pid)
+	// Handle Remote Chrome Debug Bridge
+	if remoteChromeHost != "" {
+		logf("   [DEV] Establishing bridge to remote Chrome on %s:9222...", remoteChromeHost)
+		go startRemoteChromeBridge(logf, remoteChromeHost)
 	}
+
+	// Manage Remote vs Local Backend dynamically
+	bm := &BackendManager{
+		ctx:            ctx,
+		logf:           logf,
+		logOut:         logOut,
+		cwd:            cwd,
+		useRemote:      useRemoteRobot,
+		remoteHost:     os.Getenv("ROBOT_HOST"),
+		remoteUser:     os.Getenv("ROBOT_USER"),
+		failoverToMock: true,
+	}
+
+	if bm.remoteHost == "" {
+		bm.remoteHost = "drone-1"
+	}
+
+	go bm.Start()
 
 	if _, err := os.Stat(uiDir); os.IsNotExist(err) {
 		return fmt.Errorf("UI directory not found: %s", uiDir)
@@ -151,91 +98,121 @@ func Dev(args []string) error {
 		session          *test_v2.BrowserSession
 		browserBooted    bool
 		restartAttemptID int
+		lastRestartAt    time.Time
+		backoffDuration  = 1 * time.Second
 	)
 
-	        // Vite Dev Server Loop
+	// Vite Dev Server Loop
+	go func() {
+		for {
+			if ctx.Err() != nil {
+				return
+			}
+			restartAttemptID++
 
-	        go func() {
+			// Exponential Backoff / Rate Limit
+			if !lastRestartAt.IsZero() {
+				elapsed := time.Since(lastRestartAt)
+				if elapsed < 10*time.Second {
+					logf("   [DEV] Restarting... (Cooldown: %v)", backoffDuration)
+					time.Sleep(backoffDuration)
+					// Increase backoff for next time, max 30s
+					backoffDuration *= 2
+					if backoffDuration > 30*time.Second {
+						backoffDuration = 30 * time.Second
+					}
+				} else {
+					// Reset backoff if it has been running well for > 10s
+					backoffDuration = 1 * time.Second
+				}
+			}
+			lastRestartAt = time.Now()
 
-	                for {
+			logf("   [DEV] Cleaning up port %d...", devPort)
+			_ = browser.CleanupPort(devPort)
 
-	                        if ctx.Err() != nil {
+			logf("   [DEV] Launching Vite (Attempt %d)...", restartAttemptID)
 
-	                                return
+			cmd := exec.CommandContext(ctx, filepath.Join(cwd, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(devPort), "--strictPort", "--force")
 
-	                        }
+			// Create a pipe to monitor output for CRITICAL errors
+			pr, pw := io.Pipe()
+			
+			var (
+				errorCount int
+				errorMu    sync.Mutex
+				lastErrorAt time.Time
+			)
 
-	                        restartAttemptID++
+			// Custom multi-writer that filters common noise
+			logFilter := func(p []byte) (n int, err error) {
+				line := string(p)
+				lower := strings.ToLower(line)
+				
+				// Identify common noise
+				isNoise := strings.Contains(lower, "econnreset") || 
+				           strings.Contains(lower, "epipe") || 
+						   strings.Contains(lower, "ws proxy socket error")
 
-	                        logf("   [DEV] Cleaning up port %d...", devPort)
+				if isNoise {
+					errorMu.Lock()
+					errorCount++
+					now := time.Now()
+					// Only print heartbeat if it's been more than 10s since the last one
+					if now.Sub(lastErrorAt) > 10*time.Second {
+						lastErrorAt = now
+						msg := fmt.Sprintf("   [DEV] Heartbeat: Background connection issues detected (%d errors). Suppressing spam...\n", errorCount)
+						logOut.Write([]byte(msg))
+					}
+					errorMu.Unlock()
+					return len(p), nil // Suppress the actual noise
+				}
 
-	                        _ = browser.CleanupPort(devPort)
+				if len(line) > 1000 {
+					line = line[:1000] + "... [TRUNCATED]"
+				}
+				return logOut.Write([]byte(line))
+			}
+			
+			multiOut := io.MultiWriter(writerFunc(logFilter), pw)
+			cmd.Stdout = multiOut
+			cmd.Stderr = multiOut
 
-	
+			if err := cmd.Start(); err != nil {
+				logf("   [DEV] Failed to start vite: %v", err)
+				continue
+			}
 
-	                        logf("   [DEV] Running vite dev... (attempt %d)", restartAttemptID)
+			// Monitor for "CRITICAL ERROR" in output or high error volume
+			go func() {
+				scanner := bufio.NewScanner(pr)
+				for scanner.Scan() {
+					line := scanner.Text()
+					lower := strings.ToLower(line)
+					
+					errorMu.Lock()
+					currentCount := errorCount
+					errorMu.Unlock()
 
-	
+					// Auto-restart if we hit 100 background errors (likely a hung tunnel/proxy)
+					if currentCount > 100 {
+						logf("   [DEV] High error volume detected (%d). Triggering graceful restart...", currentCount)
+						_ = cmd.Process.Signal(os.Interrupt)
+						break
+					}
 
-	                        cmd := exec.CommandContext(ctx, filepath.Join(cwd, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(devPort), "--strictPort", "--force")
+					if strings.Contains(lower, "failed to load config") ||
+						strings.Contains(lower, "error during build") ||
+						strings.Contains(lower, "syntax error") {
+						logf("   [DEV] CRITICAL Vite error detected: %s", line)
+						logf("   [DEV] Action required: Fix the code error above or check vite.config.ts")
+						_ = cmd.Process.Signal(os.Interrupt)
+						break
+					}
+				}
+			}()
 
-	                        
-
-	                        // Create a pipe to monitor output for errors
-
-	                        pr, pw := io.Pipe()
-
-	                        multiOut := io.MultiWriter(logOut, pw)
-
-	                        cmd.Stdout = multiOut
-
-	                        cmd.Stderr = multiOut
-
-	
-
-	                        if err := cmd.Start(); err != nil {
-
-	                                logf("   [DEV] Failed to start vite: %v", err)
-
-	                                time.Sleep(2 * time.Second)
-
-	                                continue
-
-	                        }
-
-	
-
-	                        // Monitor for "error" in output to trigger restart
-
-	                        go func() {
-
-	                                scanner := bufio.NewScanner(pr)
-
-	                                for scanner.Scan() {
-
-	                                        line := scanner.Text()
-
-	                                        if strings.Contains(strings.ToLower(line), "error") && 
-
-	                                           !strings.Contains(line, "node_modules") { // Ignore some noise
-
-	                                                logf("   [DEV] Vite error detected, triggering restart...")
-
-	                                                _ = cmd.Process.Signal(os.Interrupt)
-
-	                                                break
-
-	                                        }
-
-	                                }
-
-	                        }()
-
-	
-
-	                        go func(attempt int) {
-
-	
+			go func(attempt int) {
 				if err := test_v2.WaitForPort(devPort, 30*time.Second); err != nil {
 					logf("   [DEV] Warning: vite server not ready on port %d: %v", devPort, err)
 					return
@@ -281,12 +258,7 @@ func Dev(args []string) error {
 	}
 	mu.Unlock()
 	
-	if backendCmd != nil && backendCmd.Process != nil {
-		_ = backendCmd.Process.Kill()
-	}
-	if tunnelCmd != nil && tunnelCmd.Process != nil {
-		_ = tunnelCmd.Process.Kill()
-	}
+	bm.stopCurrent()
 
 	return nil
 }
@@ -294,21 +266,16 @@ func Dev(args []string) error {
 func startRobotDevBrowser(logf func(string, ...any), devURL, devBrowserMetaPath string) (*test_v2.BrowserSession, error) {
 	logf("   [DEV] Starting browser session (role=robot-dev)...")
 	
-	// We use test_v2.StartBrowser which handles finding or launching Chrome
-	// and connecting via CDP.
 	s, err := test_v2.StartBrowser(test_v2.BrowserOptions{
 		Headless:      false,
 		Role:          "robot-dev",
 		ReuseExisting: true,
 		URL:           devURL,
-		LogWriter:     nil, // Clean dev logs
+		LogWriter:     nil, 
 		LogPrefix:     "",
 	})
 	
 	if err != nil {
-		// Fallback to regular chrome if managed fails?
-		// But StartBrowser usually tries pretty hard.
-		// If it fails, maybe we just try to open regular chrome as last resort.
 		logf("   [DEV] Warning: managed browser start failed: %v", err)
 		if openErr := openInRegularChrome(devURL); openErr != nil {
 			return nil, fmt.Errorf("failed to open regular chrome fallback: %v", openErr)
@@ -316,7 +283,6 @@ func startRobotDevBrowser(logf func(string, ...any), devURL, devBrowserMetaPath 
 		return nil, nil
 	}
 	
-	// Write metadata for attach support
 	if err := chrome_app.WriteSessionMetadata(devBrowserMetaPath, s.ChromeSession()); err != nil {
 		logf("   [DEV] Warning: failed to write browser metadata: %v", err)
 	}
@@ -337,30 +303,7 @@ func openInRegularChrome(url string) error {
 	}
 }
 
-func hasReachableDevtoolsWebSocket(port int) bool {
-	client := &http.Client{Timeout: 500 * time.Millisecond}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/json/version", port))
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode == 200
-}
-
-func isRegularChromeLikelyRunning() bool {
-	if runtime.GOOS == "darwin" {
-		return exec.Command("pgrep", "-x", "Google Chrome").Run() == nil
-	}
-	if runtime.GOOS == "linux" {
-		// Simple check
-		out, _ := exec.Command("pgrep", "-x", "chrome").Output()
-		return len(out) > 0
-	}
-	return false
-}
-
 func cleanupExistingDev(logf func(string, ...any), repoRoot string) {
-	// Use dialtone.sh ps tracked to find existing robot_dev processes
 	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "ps", "tracked")
 	out, err := cmd.Output()
 	if err != nil {
@@ -380,7 +323,6 @@ func cleanupExistingDev(logf func(string, ...any), repoRoot string) {
 			pidStr := fields[1]
 			pid, _ := strconv.Atoi(pidStr)
 
-			// Don't kill ourselves or our parent shell
 			if pid == myPID || pid == os.Getppid() {
 				continue
 			}
@@ -393,7 +335,6 @@ func cleanupExistingDev(logf func(string, ...any), repoRoot string) {
 }
 
 func startRemoteChromeBridge(logf func(string, ...any), targetHost string) {
-	// Create a TCP listener on localhost:9222
 	l, err := net.Listen("tcp", "127.0.0.1:9222")
 	if err != nil {
 		logf("   [BRIDGE] Error: Could not listen on :9222 (maybe already in use?): %v", err)
@@ -415,7 +356,6 @@ func startRemoteChromeBridge(logf func(string, ...any), targetHost string) {
 			}
 			defer remoteConn.Close()
 
-			// Bi-directional copy
 			done := make(chan struct{}, 2)
 			go func() {
 				io.Copy(remoteConn, lConn)
@@ -427,5 +367,153 @@ func startRemoteChromeBridge(logf func(string, ...any), targetHost string) {
 			}()
 			<-done
 		}(localConn)
+	}
+}
+
+type writerFunc func([]byte) (int, error)
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
+
+type BackendManager struct {
+	ctx            context.Context
+	logf           func(string, ...any)
+	logOut         io.Writer
+	cwd            string
+	useRemote      bool
+	remoteHost     string
+	remoteUser     string
+	failoverToMock bool
+
+	mu             sync.Mutex
+	activeCmd      *exec.Cmd
+	isMockActive   bool
+	isFailover     bool
+}
+
+func (bm *BackendManager) Start() {
+	if bm.useRemote {
+		bm.logf("   [DEV] Remote Robot mode enabled. Attempting to connect to %s...", bm.remoteHost)
+		if err := bm.startRemote(); err != nil {
+			bm.logf("   [DEV] Initial remote connection failed: %v", err)
+			if bm.failoverToMock {
+				bm.TriggerFailover("Initial connection failure")
+			}
+		}
+	} else {
+		bm.startMock()
+	}
+
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-bm.ctx.Done():
+				return
+			case <-ticker.C:
+				bm.mu.Lock()
+				failoverActive := bm.isFailover
+				bm.mu.Unlock()
+
+				if failoverActive {
+					bm.logf("   [DEV] Recovery Probe: Checking if remote robot %s is back online...", bm.remoteHost)
+					if bm.probeRemote() {
+						bm.logf("   [DEV] Recovery: Remote robot is healthy. Swapping back to tunnel...")
+						bm.restoreRemote()
+					}
+				}
+			}
+		}
+	}()
+}
+
+func (bm *BackendManager) TriggerFailover(reason string) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	if bm.isFailover || !bm.useRemote {
+		return
+	}
+
+	bm.logf("   [DEV] ALERT: %s", reason)
+	bm.logf("   [DEV] FAILING OVER: Stopping remote tunnel and starting local mock server.")
+	
+	bm.stopCurrent()
+	bm.isFailover = true
+	bm.startMockInternal()
+}
+
+func (bm *BackendManager) startRemote() error {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	return bm.startRemoteInternal()
+}
+
+func (bm *BackendManager) startRemoteInternal() error {
+	target := bm.remoteHost
+	if bm.remoteUser != "" {
+		target = fmt.Sprintf("%s@%s", bm.remoteUser, bm.remoteHost)
+	}
+
+	cmd := exec.CommandContext(bm.ctx, "ssh", "-N", "-o", "ConnectTimeout=5", "-L", "8080:localhost:8080", "-L", "4223:localhost:4223", target)
+	cmd.Stdout = bm.logOut
+	cmd.Stderr = bm.logOut
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	bm.activeCmd = cmd
+	bm.isMockActive = false
+	bm.logf("   [DEV] SSH tunnel started (pid %d)", cmd.Process.Pid)
+	return nil
+}
+
+func (bm *BackendManager) startMock() {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	bm.startMockInternal()
+}
+
+func (bm *BackendManager) startMockInternal() {
+	bm.logf("   [DEV] Starting local mock backend...")
+	cmd := exec.CommandContext(bm.ctx, filepath.Join(bm.cwd, "dialtone.sh"), "go", "exec", "run", "src/plugins/robot/src_v1/cmd/main.go")
+	cmd.Dir = bm.cwd
+	cmd.Stdout = bm.logOut
+	cmd.Stderr = bm.logOut
+	if err := cmd.Start(); err != nil {
+		bm.logf("   [DEV] Error: Failed to start local backend: %v", err)
+		return
+	}
+	bm.activeCmd = cmd
+	bm.isMockActive = true
+	bm.logf("   [DEV] Local mock backend started (pid %d)", cmd.Process.Pid)
+}
+
+func (bm *BackendManager) stopCurrent() {
+	if bm.activeCmd != nil && bm.activeCmd.Process != nil {
+		_ = bm.activeCmd.Process.Kill()
+		_, _ = bm.activeCmd.Process.Wait()
+	}
+}
+
+func (bm *BackendManager) probeRemote() bool {
+	target := bm.remoteHost
+	if bm.remoteUser != "" {
+		target = fmt.Sprintf("%s@%s", bm.remoteUser, bm.remoteHost)
+	}
+	cmd := exec.Command("ssh", "-o", "ConnectTimeout=3", "-o", "BatchMode=yes", target, "true")
+	err := cmd.Run()
+	return err == nil
+}
+
+func (bm *BackendManager) restoreRemote() {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	bm.logf("   [DEV] RESTORING: Remote robot %s is back. Stopping mock and restarting tunnel.", bm.remoteHost)
+	bm.stopCurrent()
+	bm.isFailover = false
+	if err := bm.startRemoteInternal(); err != nil {
+		bm.logf("   [DEV] Restoration failed: %v. Falling back to mock again.", err)
+		bm.isFailover = true
+		bm.startMockInternal()
 	}
 }
