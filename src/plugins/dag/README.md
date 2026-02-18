@@ -1,12 +1,12 @@
 # Log 2026-02-16 13:36:14 -0800
 
-- Domain terms are standardized for DAG `src_v3`: overlays are `menu`, `thumbs`, `legend`, optional `chatlog`; underlay is `stage` or `table`; together they compose a section.
+- Domain terms are standardized for DAG `src_v3`: overlays are `menu`, `mode-form`, `legend`, optional `chatlog`; underlay is `stage` or `table`; together they compose a section.
 - `Nested` now refers to layers: a node may own many nested layers; each nested layer has exactly one parent node; each layer has many nodes.
 - Layer open/close behavior is model language, not implementation detail:
   - opening a layer shows that layer above the parent in the 3D stack
   - closing a layer hides that layer, removes those layer nodes from history, and keeps parent-node context in focus
-- Thumb controls are mode-based in `src_v3`:
-  - bottom-right `DAG Mode` button is always visible and cycles `graph -> layer -> camera`
+- Mode-form controls are mode-based in `src_v3`:
+  - bottom-right `DAG Mode` button is always visible and cycles `Build -> Layer -> View` (internal mode ids: `graph -> layer -> camera`)
   - thumb labels/actions update from currently selected node context
 - Dev/test language updates:
   - `dag dev src_v3` reuses existing dev server/session when possible
@@ -28,10 +28,16 @@ Versioned DAG plugin development lives under `src/plugins/dag/src_vN`.
 
 Current active version is `src_v3`.
 
-The plugin has two UI sections:
+The plugin has three UI sections:
 
-- `dag-table`: query-backed table view (DuckDB + DuckPGQ).
-- `three`: interactive DAG stage (mobile-first thumbs, legend history, rename flow, camera modes).
+- `dag-meta-table`: query-backed table view (DuckDB + DuckPGQ).
+- `dag-3d-stage`: interactive DAG stage (mobile-first mode-form controls, legend history, rename flow, camera modes).
+- `dag-log-xterm`: xterm log section with mode-form overlay for cursor/select/command actions.
+
+Section id naming rule:
+
+- Always use `<plugin-name>-<subname>-<underlay-type>`.
+- Examples in DAG `src_v3`: `dag-meta-table`, `dag-3d-stage`, `dag-log-xterm`.
 
 ## Domain Language (DAG)
 
@@ -54,36 +60,48 @@ Use this section language across docs/code/tests:
 
 - Overlays:
 - `menu`: global section navigation overlay.
-- `thumbs`: button/input controls (includes the rename input).
+- `mode-form`: button/input controls (includes the rename input).
 - `legend`: non-interactive helper area (history, stats, logs, status).
 - `chatlog` (optional): context thought feed above thumbs (xterm overlay, no background).
 - Underlays (exactly one per section):
-- `stage`: visualization surface (for DAG `three`, the Three.js canvas).
-- `table`: query-backed table surface (for DAG `dag-table`).
+- `stage`: visualization surface (for DAG `dag-3d-stage`, the Three.js canvas).
+- `table`: query-backed table surface (for DAG `dag-meta-table`).
 - `docs` | `xterm` | `video`: available underlay kinds for other section types.
 
 Section formula: one underlay + overlays = one section.
 
 Menu behavior:
 
-- opening `menu` hides current-section `thumbs`;
-- `menu` is a fullscreen modal;
-- menu button layout uses CSS grid;
-- modal menu content targets minimum width `400px` (clamped to viewport);
+- opening `menu` hides current-section `mode-form`;
+- `menu` is a fullscreen modal and the modal root is `nav`;
+- `nav` uses CSS grid directly for menu actions;
 - menu buttons are centered vertically.
 
 Three-stage controls are mode-driven, with a persistent `DAG Mode` button.
 
+Layer + DAG calculator layout:
+
+- 8 mode action buttons per mode
+- 1 always-visible `DAG Mode` button
+- 1 `DAG Label Input` text box
+- 1 `DAG Rename` apply button
+
+Table section also uses a mode-form layout:
+
+- 8 mode action buttons
+- 1 `Table Mode` button
+- 1 `Table Query Input`
+- 1 `Table Submit` apply button
+- table section layout is two-row grid: table on top, form below
+
 Primary actions:
 
-- `DAG Mode` (always bottom-right): cycle thumb mode between `graph`, `layer`, and `camera`.
+- `DAG Mode` (always bottom-right): cycle thumb mode between `Build`, `Layer`, and `View`.
 - `DAG Back`: go to parent layer if navigation history exists; otherwise pop node selection history.
 - `DAG Add`: create node in active layer.
-- `DAG Link|Unlink`: one context button; links or unlinks the current selection pair based on existing edge state.
-- `DAG Open|Close Layer`: one context button bound to the selected node:
-  - shows `Close Layer` when that selected node’s nested layer is currently open
-  - shows `Open Layer` when it is currently closed
-  - expected close flow: use `DAG Back` until at parent node, then `Close Layer`
+- `DAG Link|Unlink`: one context button label (`Link` or `Unlink`) based on current pair edge state.
+- `DAG Open|Close Layer`: one context button label (`Open` or `Close`) bound to selected-node nested-layer state.
+  - expected close flow: use `Back` until at the parent node, then press `Close`
 - `DAG Clear Picks`: clear current node selection + selection history.
 
 Camera actions:
@@ -97,11 +115,25 @@ Label actions:
 - `DAG Label Input`: text for selected node label.
 - `DAG Rename`: apply label rename to selected node.
 
-Mode semantics:
+Mode semantics (8 buttons each):
 
-- `graph`: add, back, link|unlink, clear picks, open|close layer, rename, focus, label visibility.
-- `layer`: layer open|close first, plus add/back/clear/focus/rename helpers.
-- `camera`: Z/ISO/SIDE camera controls plus focus, labels, and layer open|close.
+- `Build` (`graph`): `Back`, `Add`, `Link|Unlink`, `Open|Close`, `Clear`, `Rename`, `Focus`, `Labels On|Off`
+- `Layer` (`layer`): `Open|Close`, `Add`, `Link|Unlink`, `Back`, `Clear`, `Rename`, `Focus`, `Labels On|Off`
+- `View` (`camera`): `Top`, `Iso`, `Side`, `Focus`, `Labels On|Off`, `Back`, `Add`, `Open|Close`
+
+Log section controls are also mode-driven, with a persistent `Log Mode` button:
+
+- `Cursor`: arrow/home/end cursor movement + `Select` + `Copy`
+- `Select`: start/extend selection with arrows, then `Copy`
+- `Command`: `Send`/`Clear` for `Log Command Input` plus cursor/select/copy helpers
+- `Log Command Input` submits to xterm on Enter
+- `Log Submit` submits `Log Command Input` to xterm
+
+Section hash ids:
+
+- `#dag-meta-table`
+- `#dag-3d-stage`
+- `#dag-log-xterm`
 
 Display semantics:
 
@@ -113,8 +145,16 @@ Display semantics:
 - Chatlog overlay (xterm) sits above thumbs:
   - appends one line per test thought
   - newest line is on bottom; older lines push upward
-  - max visible window is 5 lines
-  - older lines fade; lines beyond 5 are dropped
+  - max visible window is 7 lines
+  - older lines fade; lines beyond 7 are dropped
+  - click logs use concise aria-form lines, e.g. `USER> click aria-open`
+
+Styling semantics:
+
+- default `button` style is shared across forms and menu:
+  - black background
+  - blue highlight on hover/focus/press
+  - square-ish corners
 
 ## Interaction Rules
 
