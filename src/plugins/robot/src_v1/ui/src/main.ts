@@ -10,22 +10,25 @@ const isLocalDevHost = ['127.0.0.1', 'localhost'].includes(window.location.hostn
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    if (isLocalDevHost) {
-      void navigator.serviceWorker.getRegistrations().then((regs) => {
-        regs.forEach((reg) => void reg.unregister());
-      });
-      if ('caches' in window) {
-        void caches.keys().then((keys) => {
-          keys.forEach((key) => {
-            if (key.includes('robot') || key.includes('dialtone') || key.includes('workbox')) {
-              void caches.delete(key);
-            }
-          });
+    // Aggressively unregister any service workers to prevent stale app shell
+    void navigator.serviceWorker.getRegistrations().then((regs) => {
+        regs.forEach((reg) => {
+            console.log('[SW] Unregistering stale worker:', reg.scope);
+            void reg.unregister();
         });
-      }
-      return;
+    });
+    
+    // Clear caches that might be holding stale assets
+    if ('caches' in window) {
+        void caches.keys().then((keys) => {
+            keys.forEach((key) => {
+            if (key.includes('robot') || key.includes('dialtone') || key.includes('workbox')) {
+                console.log('[Cache] Deleting stale cache:', key);
+                void caches.delete(key);
+            }
+            });
+        });
     }
-    // Production service worker registration can go here if needed
   });
 }
 
