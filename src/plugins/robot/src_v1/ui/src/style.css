@@ -34,10 +34,6 @@ section {
 
 /* MARKETING LEGEND OVERRIDE */
 .legend-marketing {
-  top: 48px;
-  left: 48px;
-  width: auto;
-  max-width: 400px;
   background: transparent;
   border: none;
   padding: 0;
