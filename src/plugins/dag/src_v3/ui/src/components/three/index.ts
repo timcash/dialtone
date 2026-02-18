@@ -1474,10 +1474,17 @@ class ThreeControl implements VisualizationControl {
 
     const gizmoSize = Math.max(76, Math.round(Math.min(width, height) * 0.14));
     const pad = 12;
+    const menuRight = 14;
+    const menuTop = 14;
+    const menuSize = 64;
+    const menuGap = 10;
+    const gizmoX = Math.max(pad, width - menuRight - gizmoSize);
+    const gizmoTop = menuTop + menuSize + menuGap;
+    const gizmoY = Math.max(pad, height - gizmoTop - gizmoSize);
     this.gizmoAxes.quaternion.copy(this.camera.quaternion).invert();
     this.renderer.clearDepth();
-    this.renderer.setScissor(pad, pad, gizmoSize, gizmoSize);
-    this.renderer.setViewport(pad, pad, gizmoSize, gizmoSize);
+    this.renderer.setScissor(gizmoX, gizmoY, gizmoSize, gizmoSize);
+    this.renderer.setViewport(gizmoX, gizmoY, gizmoSize, gizmoSize);
     this.renderer.setScissorTest(true);
     this.renderer.render(this.gizmoScene, this.gizmoCamera);
     this.renderer.setScissorTest(false);
