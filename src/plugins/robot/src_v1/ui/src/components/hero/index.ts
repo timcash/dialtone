@@ -380,19 +380,6 @@ export function mountHero(container: HTMLElement): VisualizationControl {
       btn.target = "_blank";
       btn.rel = "noopener noreferrer";
       btn.textContent = "Get the Robot Kit";
-      btn.style.cssText = `
-        display: inline-block;
-        margin-top: 16px;
-        padding: 12px 24px;
-        background: #3b82f6;
-        color: white;
-        text-decoration: none;
-        border-radius: 6px;
-        font-weight: bold;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        pointer-events: auto;
-      `;
       legend.appendChild(btn);
   }
 
