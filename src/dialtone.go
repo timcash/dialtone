@@ -6,6 +6,7 @@ import (
 
 	"dialtone/cli/src/core/config"
 	dag_cli "dialtone/cli/src/plugins/dag/cli"
+	logs_cli "dialtone/cli/src/plugins/logs/cli"
 	nix_cli "dialtone/cli/src/plugins/nix/cli"
 	template_cli "dialtone/cli/src/plugins/template/cli"
 	"dialtone/cli/src/plugins/robot"
@@ -45,6 +46,11 @@ func Execute() {
 			fmt.Printf("Template command error: %v\n", err)
 			os.Exit(1)
 		}
+	case "logs":
+		if err := logs_cli.Run(args); err != nil {
+			fmt.Printf("Logs command error: %v\n", err)
+			os.Exit(1)
+		}
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
 		printUsage()
@@ -60,4 +66,5 @@ func printUsage() {
 	fmt.Println("  nix           Nix plugin commands")
 	fmt.Println("  dag           DAG plugin commands")
 	fmt.Println("  template      Template plugin commands")
+	fmt.Println("  logs          Logs plugin commands (install, dev, test, serve, stream)")
 }
