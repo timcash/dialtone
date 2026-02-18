@@ -87,8 +87,10 @@ func ExecuteDev() {
 	                        vpn.RunVPN(append([]string{command}, args...))
 
 	                case "logs":
-
-	                        logs_cli.RunLogs(args)
+	                        if err := logs_cli.Run(args); err != nil {
+	                                fmt.Printf("Logs command error: %v\n", err)
+	                                os.Exit(1)
+	                        }
 
 	                case "diagnostic":
 

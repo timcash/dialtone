@@ -28,8 +28,8 @@ Dialtone uses explicit speaking roles in the REPL so every line has a clear sour
 
 This makes command intent, authorization, and runtime output easy to audit in one shared session.
 
-## Logs (TODO: `libs/logs_v1`)
-Dialtone should add a shared logging library at `src/libs/logs_v1` to standardize local/dev/prod logs across plugins and services.
+## Logs (plugin: `plugins/logs/src_v1`)
+Dialtone has a logs plugin at `src/plugins/logs/src_v1` to standardize local/dev/prod logs across plugins and services.
 
 Planned log levels:
 - `--quiet` (minimal output)
@@ -87,6 +87,10 @@ README: [src/plugins/dag/README.md](src/plugins/dag/README.md)
 ### Template Plugin
 The template plugin is the reusable starter for building new plugins with the same lifecycle, section model, and dev/test commands. It mirrors production patterns in a simpler package.  
 README: [src/plugins/template/README.md](src/plugins/template/README.md)
+
+### Logs Plugin (`logs` / `src_v1`)
+The logs plugin standardizes logging across plugins and services, unifies browser and backend logs, and supports NATS topics and xterm streaming.  
+README: [src/plugins/logs/src_v1/README.md](src/plugins/logs/src_v1/README.md)
 
 ### UI Library (`ui_v2`)
 `ui_v2` provides shared primitives for section lifecycle, menu handling, overlay/underlay wiring, and URL-driven navigation. Plugin UIs should compose these building blocks instead of re-implementing them.  
