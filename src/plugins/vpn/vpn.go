@@ -427,7 +427,7 @@ func RunLocalVPN(args []string) {
 	// Pass 0 for ports since NATS isn't running
 	// Pass nil for NATS server
 	lc, _ := ts.LocalClient()
-	webHandler := web.CreateWebHandler(*hostname, 0, 0, 80, 0, 0, nil, lc, status.TailscaleIPs, false, webFS)
+	webHandler := web.CreateWebHandler(*hostname, "vpn-v1", 0, 0, 80, 0, 0, nil, lc, status.TailscaleIPs, false, webFS)
 
 	server := &http.Server{
 		Handler: webHandler,

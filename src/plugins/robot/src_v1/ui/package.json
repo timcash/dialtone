@@ -20,5 +20,5 @@
     "lint": "tsc --noEmit"
   },
   "type": "module",
-  "version": "0.0.41"
+  "version": "0.0.42"
 }

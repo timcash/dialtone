@@ -42,6 +42,42 @@ if (versionEl) {
 // Initialize Connection (NATS + Polling)
 initConnection();
 
+const checkForUpdate = async () => {
+  try {
+    const res = await fetch('/api/init');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.version && data.version !== APP_VERSION) {
+      showUpdateToast(data.version);
+    }
+  } catch (err) {
+    // Ignore offline errors
+  }
+};
+
+const showUpdateToast = (newVersion: string) => {
+  if (document.getElementById('update-toast')) return;
+  const toast = document.createElement('button');
+  toast.id = 'update-toast';
+  toast.style.cssText = `
+    position: fixed; top: 80px; right: 20px; z-index: 2000;
+    background: var(--theme-primary, #7bf2d8); color: #000;
+    padding: 12px 20px; border-radius: 8px; border: none;
+    font-weight: 700; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    animation: slideIn 0.3s ease-out;
+  `;
+  toast.textContent = `Update Available: v${newVersion} (Click to Reload)`;
+  toast.onclick = () => {
+    // Force reload bypassing cache
+    window.location.reload();
+  };
+  document.body.appendChild(toast);
+};
+
+// Check for updates on load and periodically
+checkForUpdate();
+setInterval(checkForUpdate, 60000);
+
 sections.register('hero', {
   containerId: 'hero',
   load: async () => {
