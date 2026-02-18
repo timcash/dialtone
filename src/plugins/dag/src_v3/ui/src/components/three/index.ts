@@ -59,6 +59,10 @@ type ThumbActionID =
   | 'camera_top'
   | 'camera_iso'
   | 'camera_side'
+  | 'camera_left'
+  | 'camera_up'
+  | 'camera_right'
+  | 'camera_down'
   | 'toggle_labels'
   | 'focus'
   | 'none';
@@ -77,6 +81,7 @@ const EDGE_BASE_COLOR = 0x6b7280;
 const EDGE_NESTED_LINK_COLOR = 0xfacc15;
 const ROOT_IO_CAMERA_VIEW: CameraView = 'iso';
 const CHATLOG_MAX_LINES = 7;
+const SELECTED_GLOW_COLOR = new THREE.Color(0xd8e9ff);
 
 class ThreeControl implements VisualizationControl {
   private scene = new THREE.Scene();
@@ -90,6 +95,8 @@ class ThreeControl implements VisualizationControl {
   private pointer = new THREE.Vector2(2, 2);
   private frameID = 0;
   private visible = false;
+  private selectedGlow: THREE.Mesh | null = null;
+  private selectedGlowMaterial: THREE.ShaderMaterial | null = null;
 
   private rankXSpacing = 8;
   private rowZSpacing = 5.5;
@@ -106,6 +113,8 @@ class ThreeControl implements VisualizationControl {
   private keyLight: THREE.DirectionalLight;
   private nestedLinks: NestedLink[] = [];
   private cameraView: CameraView = ROOT_IO_CAMERA_VIEW;
+  private cameraPanOffset = new THREE.Vector2(0, 0);
+  private readonly cameraPanStep = 1.5;
 
   private userNodeCounter = 1;
   private edgeCounter = 1;
@@ -122,9 +131,9 @@ class ThreeControl implements VisualizationControl {
   private chatlogLines: string[] = [];
   private readonly modeOrder: ThumbMode[] = ['graph', 'layer', 'camera'];
   private readonly modeLabels: Record<ThumbMode, string> = {
-    graph: 'Mode: Graph',
+    graph: 'Mode: Build',
     layer: 'Mode: Layer',
-    camera: 'Mode: Camera',
+    camera: 'Mode: View',
   };
   private nodeHistoryLabelEl: HTMLElement | null = null;
   private nodeHistoryValueEls: HTMLElement[] = [];
@@ -143,6 +152,7 @@ class ThreeControl implements VisualizationControl {
     this.keyLight.position.set(16, 22, 18);
     this.scene.add(this.keyLight);
     this.initGizmo();
+    this.initSelectedGlow();
 
     this.bootstrapGraph();
     this.applyLayerView('root');
@@ -152,6 +162,50 @@ class ThreeControl implements VisualizationControl {
     this.resize();
     this.animate();
     this.canvas.setAttribute('data-ready', 'true');
+  }
+
+  private initSelectedGlow() {
+    const geometry = new THREE.SphereGeometry(1.25, 20, 20);
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uColor: { value: SELECTED_GLOW_COLOR.clone() },
+        uCameraWorldPos: { value: new THREE.Vector3() },
+      },
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.BackSide,
+      vertexShader: `
+        varying vec3 vNormalW;
+        varying vec3 vWorldPos;
+        void main() {
+          vec4 worldPos = modelMatrix * vec4(position, 1.0);
+          vWorldPos = worldPos.xyz;
+          vNormalW = normalize(mat3(modelMatrix) * normal);
+          gl_Position = projectionMatrix * viewMatrix * worldPos;
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime;
+        uniform vec3 uColor;
+        uniform vec3 uCameraWorldPos;
+        varying vec3 vNormalW;
+        varying vec3 vWorldPos;
+        void main() {
+          vec3 viewDir = normalize(uCameraWorldPos - vWorldPos);
+          float fresnel = pow(1.0 - max(dot(normalize(vNormalW), viewDir), 0.0), 2.0);
+          float pulse = 0.65 + 0.35 * sin(uTime * 4.0);
+          float alpha = fresnel * pulse * 0.75;
+          gl_FragColor = vec4(uColor, alpha);
+        }
+      `,
+    });
+    const glow = new THREE.Mesh(geometry, material);
+    glow.visible = false;
+    this.scene.add(glow);
+    this.selectedGlow = glow;
+    this.selectedGlowMaterial = material;
   }
 
   private initGizmo() {
@@ -482,32 +536,32 @@ class ThreeControl implements VisualizationControl {
       return [
         { id: 'open_or_close_layer', label: this.getOpenCloseLayerActionLabel() },
         { id: 'add', label: 'Add' },
+        { id: 'link_or_unlink', label: this.getLinkUnlinkLabel() },
         { id: 'back', label: 'Back' },
         { id: 'clear_picks', label: 'Clear' },
-        { id: 'link_or_unlink', label: this.getLinkUnlinkLabel() },
-        { id: 'focus', label: 'Focus' },
         { id: 'rename', label: 'Rename' },
-        { id: 'none', label: '-' },
+        { id: 'focus', label: 'Focus' },
+        { id: 'toggle_labels', label: this.labelsVisible ? 'Labels On' : 'Labels Off' },
       ];
     }
     if (this.thumbMode === 'camera') {
       return [
-        { id: 'camera_top', label: 'Z' },
-        { id: 'camera_iso', label: 'ISO' },
-        { id: 'camera_side', label: 'SIDE' },
+        { id: 'camera_top', label: 'Top' },
+        { id: 'camera_iso', label: 'Iso' },
+        { id: 'camera_side', label: 'Side' },
+        { id: 'camera_left', label: 'Left' },
+        { id: 'camera_up', label: 'Up' },
+        { id: 'camera_right', label: 'Right' },
         { id: 'focus', label: 'Focus' },
-        { id: 'toggle_labels', label: this.labelsVisible ? 'Labels On' : 'Labels Off' },
-        { id: 'open_or_close_layer', label: this.getOpenCloseLayerActionLabel() },
-        { id: 'back', label: 'Back' },
-        { id: 'none', label: '-' },
+        { id: 'camera_down', label: 'Down' },
       ];
     }
     return [
       { id: 'back', label: 'Back' },
       { id: 'add', label: 'Add' },
       { id: 'link_or_unlink', label: this.getLinkUnlinkLabel() },
-      { id: 'clear_picks', label: 'Clear' },
       { id: 'open_or_close_layer', label: this.getOpenCloseLayerActionLabel() },
+      { id: 'clear_picks', label: 'Clear' },
       { id: 'rename', label: 'Rename' },
       { id: 'focus', label: 'Focus' },
       { id: 'toggle_labels', label: this.labelsVisible ? 'Labels On' : 'Labels Off' },
@@ -558,6 +612,22 @@ class ThreeControl implements VisualizationControl {
       this.setCameraView('side');
       return;
     }
+    if (actionID === 'camera_left') {
+      this.nudgeCameraPan(-this.cameraPanStep, 0);
+      return;
+    }
+    if (actionID === 'camera_up') {
+      this.nudgeCameraPan(0, this.cameraPanStep);
+      return;
+    }
+    if (actionID === 'camera_right') {
+      this.nudgeCameraPan(this.cameraPanStep, 0);
+      return;
+    }
+    if (actionID === 'camera_down') {
+      this.nudgeCameraPan(0, -this.cameraPanStep);
+      return;
+    }
     if (actionID === 'focus') {
       if (this.selectedNodeId) {
         this.focusCameraOnNode(this.selectedNodeId);
@@ -602,17 +672,17 @@ class ThreeControl implements VisualizationControl {
 
   private getLinkUnlinkLabel(): string {
     const pair = this.getRecentLinkPairForActiveLayer();
-    if (!pair) return 'link';
-    return this.findEdgeIDBetween(pair.outputNodeId, pair.inputNodeId) ? 'unlink' : 'link';
+    if (!pair) return 'Link';
+    return this.findEdgeIDBetween(pair.outputNodeId, pair.inputNodeId) ? 'Unlink' : 'Link';
   }
 
   private getOpenCloseLayerActionLabel(): string {
     const selectedNode = this.nodes.get(this.selectedNodeId);
-    if (!selectedNode || selectedNode.layerId !== this.activeLayerId) return 'open';
+    if (!selectedNode || selectedNode.layerId !== this.activeLayerId) return 'Open';
     const nestedLayerID = this.getExistingNestedLayerID(selectedNode.id);
-    if (!nestedLayerID) return 'open';
-    if (this.openedLayerIDs.has(nestedLayerID)) return 'close';
-    return 'open';
+    if (!nestedLayerID) return 'Open';
+    if (this.openedLayerIDs.has(nestedLayerID)) return 'Close';
+    return 'Open';
   }
 
   private performOpenOrCloseLayerAction() {
@@ -764,7 +834,8 @@ class ThreeControl implements VisualizationControl {
       if (action.id === 'clear_picks') disabled = !(this.recentSelectedNodeIDs.length > 0 || this.selectedNodeId);
       if (action.id === 'rename') disabled = !canRename;
       if (action.id === 'open_or_close_layer') disabled = !canOpenLayer;
-      button.textContent = action.label;
+      button.textContent = `${i + 1}:${action.label}`;
+      button.setAttribute('aria-label', `DAG ${action.label}`);
       button.disabled = disabled;
       button.setAttribute('data-action', action.id);
       const cameraActive =
@@ -781,7 +852,7 @@ class ThreeControl implements VisualizationControl {
     }
     if (this.renameApplyButton) this.renameApplyButton.disabled = !selectedNode;
     if (this.modeButton) {
-      this.modeButton.textContent = this.modeLabels[this.thumbMode];
+      this.modeButton.textContent = `9:${this.modeLabels[this.thumbMode]}`;
       this.modeButton.setAttribute('data-mode', this.thumbMode);
     }
     for (let i = 0; i < this.nodeHistoryValueEls.length; i += 1) {
@@ -929,7 +1000,7 @@ class ThreeControl implements VisualizationControl {
   }
 
   private positionCameraAroundPoint(center: THREE.Vector3, maxDim: number, view: CameraView) {
-    this.stageCamera.framePoint(center, maxDim, view);
+    this.stageCamera.framePoint(center, maxDim, view, this.cameraPanOffset.x, this.cameraPanOffset.y);
   }
 
   private getFixedNodeCameraDistance(view: CameraView): number {
@@ -944,7 +1015,7 @@ class ThreeControl implements VisualizationControl {
     if (!node) return false;
     const center = node.mesh.getWorldPosition(new THREE.Vector3());
     const fixedDistance = this.getFixedNodeCameraDistance(this.cameraView);
-    this.stageCamera.framePointFixed(center, fixedDistance, this.cameraView);
+    this.stageCamera.framePointFixed(center, fixedDistance, this.cameraView, this.cameraPanOffset.x, this.cameraPanOffset.y);
     return true;
   }
 
@@ -1369,6 +1440,18 @@ class ThreeControl implements VisualizationControl {
     return ok;
   }
 
+  private nudgeCameraPan(dx: number, dy: number) {
+    this.cameraPanOffset.x += dx;
+    this.cameraPanOffset.y += dy;
+    const selected = this.nodes.get(this.selectedNodeId);
+    if (selected && selected.layerId === this.activeLayerId) {
+      this.focusCameraOnNode(selected.id);
+    } else {
+      this.fitCameraToLayer(this.activeLayerId);
+    }
+    this.syncControlState();
+  }
+
   private logLayoutSnapshot(layerId: LayerID, nodeIDs: NodeID[]) {
     const layer = this.getLayerTransform(layerId);
     const camera = this.getCameraTransform();
@@ -1463,6 +1546,7 @@ class ThreeControl implements VisualizationControl {
   private animate = () => {
     this.frameID = requestAnimationFrame(this.animate);
     if (!this.visible) return;
+    this.updateSelectedGlow(performance.now() * 0.001);
 
     const width = Math.max(1, this.container.clientWidth);
     const height = Math.max(1, this.container.clientHeight);
@@ -1490,6 +1574,22 @@ class ThreeControl implements VisualizationControl {
     this.renderer.setScissorTest(false);
   };
 
+  private updateSelectedGlow(timeSec: number) {
+    if (!this.selectedGlow || !this.selectedGlowMaterial) return;
+    const node = this.nodes.get(this.selectedNodeId);
+    if (!node || !node.mesh.visible || node.layerId !== this.activeLayerId) {
+      this.selectedGlow.visible = false;
+      return;
+    }
+    const worldPos = node.mesh.getWorldPosition(new THREE.Vector3());
+    this.selectedGlow.position.copy(worldPos);
+    const pulseScale = 1.0 + 0.05 * Math.sin(timeSec * 4.0);
+    this.selectedGlow.scale.setScalar(pulseScale);
+    this.selectedGlow.visible = true;
+    this.selectedGlowMaterial.uniforms.uTime.value = timeSec;
+    this.selectedGlowMaterial.uniforms.uCameraWorldPos.value.copy(this.camera.position);
+  }
+
   dispose(): void {
     cancelAnimationFrame(this.frameID);
     window.removeEventListener('resize', this.resize);
@@ -1499,6 +1599,15 @@ class ThreeControl implements VisualizationControl {
     if (win.dagHitTestDebug) delete win.dagHitTestDebug;
     this.chatlogTerm?.dispose();
     this.chatlogTerm = null;
+    if (this.selectedGlow) {
+      this.scene.remove(this.selectedGlow);
+      this.selectedGlow.geometry.dispose();
+      this.selectedGlow = null;
+    }
+    if (this.selectedGlowMaterial) {
+      this.selectedGlowMaterial.dispose();
+      this.selectedGlowMaterial = null;
+    }
     this.renderer.dispose();
   }
 

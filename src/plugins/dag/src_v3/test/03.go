@@ -10,12 +10,9 @@ func Run03ThreeUserStoryStartEmpty(ctx *testCtx) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	fmt.Println("[THREE] story step1 description:")
-	fmt.Println("[THREE]   - In order to create a new node, the user taps Add.")
-	fmt.Println("[THREE]   - The user starts from an empty DAG in root layer and expects one selected node after add.")
-	fmt.Println("[THREE]   - Camera expectation: zoomed-out root framing with room for upcoming input/output nodes.")
-	ctx.appendThought("story step1: load stage and verify controls are visible")
-	if err := ctx.navigate(ctx.appURL("/#three")); err != nil {
+	ctx.logf("STORY> step 1: computer A program node")
+	ctx.logf("STORY> user opens stage, adds first node, and names it Program A")
+	if err := ctx.navigate(ctx.appURL("/#dag-3d-stage")); err != nil {
 		return "", err
 	}
 	if err := ctx.waitAria("Three Canvas", "need stage canvas before interactions"); err != nil {
@@ -27,13 +24,7 @@ func Run03ThreeUserStoryStartEmpty(ctx *testCtx) (string, error) {
 	if err := ctx.waitAria("DAG Mode", "need mode button"); err != nil {
 		return "", err
 	}
-	if err := ctx.waitAria("DAG Thumb 1", "need thumb 1"); err != nil {
-		return "", err
-	}
-	if err := ctx.waitAria("DAG Thumb 2", "need thumb 2"); err != nil {
-		return "", err
-	}
-	if err := ctx.waitAria("DAG Thumb 3", "need thumb 3"); err != nil {
+	if err := ctx.waitAria("DAG Add", "need add thumb action"); err != nil {
 		return "", err
 	}
 	if err := ctx.waitAria("DAG Label Input", "need rename input"); err != nil {
@@ -47,24 +38,21 @@ func Run03ThreeUserStoryStartEmpty(ctx *testCtx) (string, error) {
 	}
 	id, err := ctx.lastCreatedNodeID()
 	if err != nil || id == "" {
-		return "", fmt.Errorf("story step1 failed: missing processor id")
+		return "", fmt.Errorf("step1 failed: missing node id")
 	}
-	ctx.story.ProcessorID = id
-	if err := ctx.clickAction("camera", "camera_top"); err != nil {
+	ctx.story.AProgramID = id
+	if err := ctx.renameSelectedNoModeSwitch("Program A"); err != nil {
 		return "", err
 	}
-	if err := ctx.clickAction("camera", "camera_side"); err != nil {
+	if err := ctx.assertProjectedInCanvas(ctx.story.AProgramID); err != nil {
 		return "", err
 	}
-	if err := ctx.clickAction("camera", "camera_iso"); err != nil {
-		return "", err
-	}
-	if err := ctx.clickNode(ctx.story.ProcessorID); err != nil {
+	if err := ctx.assertNodeCameraDistance(ctx.story.AProgramID, 27, 4); err != nil {
 		return "", err
 	}
 	ctx.logClick("step_done", "story_step_1", "ok")
 	if err := ctx.captureShot("test_step_2.png"); err != nil {
 		return "", fmt.Errorf("capture story step1 screenshot: %w", err)
 	}
-	return "Loaded the stage controls, added the first node, cycled camera modes (top/side/iso), and reselected the new node to verify interaction readiness.", nil
+	return "Created and labeled the root `Program A` node, then validated camera/node projection from unified logs.", nil
 }
