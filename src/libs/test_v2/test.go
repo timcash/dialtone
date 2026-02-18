@@ -255,10 +255,10 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 
 	tasks := chromedp.Tasks{}
 	if opts.URL != "" {
-		tasks = append(tasks,
-			chromedp.EmulateViewport(1280, 800),
-			chromedp.Navigate(opts.URL),
-		)
+		if !opts.ReuseExisting {
+			tasks = append(tasks, chromedp.EmulateViewport(1280, 800))
+		}
+		tasks = append(tasks, chromedp.Navigate(opts.URL))
 	}
 	if opts.EmitProofOfLife {
 		tasks = append(tasks, chromedp.Evaluate(`console.error('[PROOFOFLIFE] Intentional Browser Test Error')`, nil))

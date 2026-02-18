@@ -11,7 +11,7 @@ func Run03MenuNavSectionSwitch(ctx *testCtx) (string, error) {
 		return "", err
 	}
 
-	if err := ctx.navigate(ctx.appURL("/#dag-table")); err != nil {
+	if err := ctx.navigate(ctx.appURL("/#dag-meta-table")); err != nil {
 		return "", fmt.Errorf("menu nav section switch failed: %w", err)
 	}
 	ctx.appendThought("menu nav: wait for table and open menu")
