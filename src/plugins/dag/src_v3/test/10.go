@@ -9,47 +9,45 @@ func Run10ThreeUserStoryUnlinkAndRelabel(ctx *testCtx) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	fmt.Println("[THREE] story step7 description:")
-	fmt.Println("[THREE]   - In order to remove edges, user selects output/input nodes and taps the context Link/Unlink button.")
-	fmt.Println("[THREE]   - User clears selections between unlink actions.")
-	fmt.Println("[THREE]   - User then renames processor again and expects camera to stay zoomed-out for full root readability.")
+	ctx.logf("STORY> step 7: nested protocol Tx/Rx inside Link layer")
 
 	if err := ctx.captureShot("test_step_8_pre.png"); err != nil {
 		return "", fmt.Errorf("capture story step7 pre screenshot: %w", err)
 	}
-	if err := ctx.clickAction("graph", "clear_picks"); err != nil {
+	if err := ctx.clickAction("layer", "add"); err != nil {
 		return "", err
 	}
-	if err := ctx.clickNode(ctx.story.InputID); err != nil {
+	txID, err := ctx.lastCreatedNodeID()
+	if err != nil || txID == "" {
+		return "", fmt.Errorf("step7 failed: missing proto tx node")
+	}
+	ctx.story.ProtoTxID = txID
+	if err := ctx.setRenameInput("Proto Tx"); err != nil {
 		return "", err
 	}
-	if err := ctx.clickNode(ctx.story.ProcessorID); err != nil {
+	if err := ctx.clickAction("layer", "rename"); err != nil {
 		return "", err
 	}
-	if err := ctx.clickAction("graph", "link_or_unlink"); err != nil {
+	if err := ctx.clickAction("layer", "add"); err != nil {
 		return "", err
 	}
-	if err := ctx.clickAction("graph", "clear_picks"); err != nil {
+	rxID, err := ctx.lastCreatedNodeID()
+	if err != nil || rxID == "" {
+		return "", fmt.Errorf("step7 failed: missing proto rx node")
+	}
+	ctx.story.ProtoRxID = rxID
+	if err := ctx.clickAction("layer", "link_or_unlink"); err != nil {
 		return "", err
 	}
-	if err := ctx.clickNode(ctx.story.ProcessorID); err != nil {
+	if err := ctx.assertProjectedInCanvas(ctx.story.ProtoTxID); err != nil {
 		return "", err
 	}
-	if err := ctx.clickNode(ctx.story.OutputID); err != nil {
-		return "", err
-	}
-	if err := ctx.clickAction("graph", "link_or_unlink"); err != nil {
-		return "", err
-	}
-	if err := ctx.clickNode(ctx.story.ProcessorID); err != nil {
-		return "", err
-	}
-	if err := ctx.renameSelected("Processor Final"); err != nil {
+	if err := ctx.assertProjectedInCanvas(ctx.story.ProtoRxID); err != nil {
 		return "", err
 	}
 	ctx.logClick("step_done", "story_step_7", "ok")
 	if err := ctx.captureShot("test_step_8.png"); err != nil {
 		return "", fmt.Errorf("capture story step7 screenshot: %w", err)
 	}
-	return "Unlinked input->processor and processor->output edges using context link/unlink action, then relabeled processor to final state.", nil
+	return "Inside nested `Link` layer, created `Proto Tx` and `Proto Rx`, linked them, and validated projected node positions in viewport.", nil
 }
