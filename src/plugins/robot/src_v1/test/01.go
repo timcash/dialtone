@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-func Run01Preflight() error {
+func Run01Preflight(ctx *testCtx) (string, error) {
 	steps := []struct {
 		name string
 		run  func() error
@@ -23,10 +23,10 @@ func Run01Preflight() error {
 
 	for _, step := range steps {
 		if err := step.run(); err != nil {
-			return fmt.Errorf("%s failed: %w", step.name, err)
+			return "", fmt.Errorf("%s failed: %w", step.name, err)
 		}
 	}
-	return nil
+	return "Preflight checks passed.", nil
 }
 
 func Run00Install() error {

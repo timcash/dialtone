@@ -13,15 +13,15 @@ import (
 	test_v2 "dialtone/cli/src/libs/test_v2"
 )
 
-func Run10DevServerRunningLatestUI() error {
+func Run10DevServerRunningLatestUI(ctx *testCtx) (string, error) {
 	repoRoot, err := os.Getwd()
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	port, err := test_v2.PickFreePort()
 	if err != nil {
-		return err
+		return "", err
 	}
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	url := fmt.Sprintf("http://%s", addr)
@@ -31,7 +31,7 @@ func Run10DevServerRunningLatestUI() error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
-		return err
+		return "", err
 	}
 	defer func() {
 		_ = cmd.Process.Kill()
@@ -39,26 +39,26 @@ func Run10DevServerRunningLatestUI() error {
 	}()
 
 	if err := test_v2.WaitForPort(port, 12*time.Second); err != nil {
-		return err
+		return "", err
 	}
 
 	resp, err := http.Get(url)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected dev server status: %d", resp.StatusCode)
+		return "", fmt.Errorf("unexpected dev server status: %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return err
+		return "", err
 	}
 	html := string(body)
 	if !strings.Contains(html, "Hero Section") {
-		return fmt.Errorf("dev server did not serve expected latest UI content")
+		return "", fmt.Errorf("dev server did not serve expected latest UI content")
 	}
 
-	return nil
+	return "Dev server serves latest UI.", nil
 }
