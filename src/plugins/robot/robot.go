@@ -48,6 +48,15 @@ func RunRobot(args []string) {
 			}
 		}
 		RunDeploy(vDir, deployArgs)
+	case "sleep":
+		vDir := getDir()
+		var sleepArgs []string
+		for _, arg := range restArgs {
+			if arg != vDir {
+				sleepArgs = append(sleepArgs, arg)
+			}
+		}
+		RunSleep(vDir, sleepArgs)
 	case "sync-code":
 		vDir := getDir()
 		var syncArgs []string
@@ -144,6 +153,7 @@ func printRobotUsage() {
 	fmt.Println("\nCommands:")
 	fmt.Println("  start       Start the NATS and Web server (core robot logic)")
 	fmt.Println("  deploy      Deploy binary to remote robot via SSH")
+	fmt.Println("  sleep       Replace robot binary with lightweight sleep server")
 	fmt.Println("  sync-code   Sync source code to robot for remote building")
 	fmt.Println("  deploy-test Step-by-step remote verification using debug binaries")
 	fmt.Println("  vpn-test    Test Tailscale (tsnet) connectivity")
