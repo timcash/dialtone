@@ -9,12 +9,12 @@ class HeroControl implements VisualizationControl {
     const ctx = this.canvas.getContext('2d');
     if (!ctx) throw new Error('2d context not available');
 
-    const resize = () => {
+    this.resize = () => {
       this.canvas.width = this.canvas.clientWidth;
       this.canvas.height = this.canvas.clientHeight;
     };
-    resize();
-    window.addEventListener('resize', resize);
+    this.resize();
+    window.addEventListener('resize', this.resize);
 
     const frame = () => {
       this.raf = window.requestAnimationFrame(frame);
@@ -38,14 +38,19 @@ class HeroControl implements VisualizationControl {
 
     this.dispose = () => {
       window.cancelAnimationFrame(this.raf);
-      window.removeEventListener('resize', resize);
+      window.removeEventListener('resize', this.resize);
     };
   }
+
+  private resize: () => void;
 
   dispose(): void {}
 
   setVisible(visible: boolean): void {
     this.visible = visible;
+    if (visible) {
+      this.resize();
+    }
   }
 }
 

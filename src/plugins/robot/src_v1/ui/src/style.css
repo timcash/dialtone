@@ -445,3 +445,81 @@ nav > .menu-toggle {
 header h1 {
   display: none;
 }
+
+/* DOCS SECTION */
+.docs-primary {
+  padding: 80px 24px 120px 24px;
+  overflow-y: auto;
+  font-size: 1rem;
+  line-height: 1.6;
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
+  height: 100%;
+}
+
+.docs-primary h1 {
+  font-size: 2.2rem;
+  margin-bottom: 1rem;
+  color: #fff;
+}
+
+.docs-primary h2 {
+  font-size: 1.5rem;
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+  color: var(--theme-primary);
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  padding-bottom: 0.5rem;
+}
+
+.docs-primary p {
+  margin-bottom: 1rem;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.docs-primary a {
+  color: var(--theme-primary);
+  text-decoration: none;
+}
+
+.docs-primary pre {
+  background: rgba(0,0,0,0.3);
+  padding: 1rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.1);
+  overflow-x: auto;
+  margin-bottom: 1.5rem;
+}
+
+.docs-primary code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+  background: rgba(255,255,255,0.1);
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+}
+
+.docs-primary pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.docs-primary ul, .docs-primary ol {
+  margin-bottom: 1rem;
+  padding-left: 1.5rem;
+}
+
+.docs-primary li {
+  margin-bottom: 0.5rem;
+}
+
+@media (max-width: 600px) {
+  .docs-primary {
+    font-size: 0.9rem;
+    padding: 70px 20px 100px 20px;
+  }
+  .docs-primary h1 { font-size: 1.6rem; }
+  .docs-primary h2 { font-size: 1.3rem; }
+  .docs-primary pre { font-size: 0.8rem; }
+}
