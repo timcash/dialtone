@@ -98,10 +98,15 @@
     <script type="module" src="/src/main.ts"></script>
     <script>
       if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.addEventListener('controllerchange', () => {
-          window.location.reload();
-        });
-        navigator.serviceWorker.register('/sw.js');
+        const isTest = new URLSearchParams(window.location.search).has('test');
+        if (!isTest) {
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            window.location.reload();
+          });
+          navigator.serviceWorker.register('/sw.js');
+        } else {
+          console.log("Skipping PWA registration (test mode)");
+        }
       }
     </script>
   </body>
