@@ -234,9 +234,6 @@ menu.addButton('Hero', 'Navigate Hero', () => {
 menu.addButton('Docs', 'Navigate Docs', () => {
   void sections.navigateTo('docs');
 });
-menu.addButton('Settings', 'Navigate Settings', () => {
-  void sections.navigateTo('settings');
-});
 menu.addButton('Telemetry', 'Navigate Telemetry', () => {
   void sections.navigateTo('table');
 });
@@ -249,8 +246,11 @@ menu.addButton('Terminal', 'Navigate Terminal', () => {
 menu.addButton('Camera', 'Navigate Camera', () => {
   void sections.navigateTo('video');
 });
+menu.addButton('Settings', 'Navigate Settings', () => {
+  void sections.navigateTo('settings');
+});
 
-const sectionOrder = ['hero', 'docs', 'settings', 'table', 'three', 'xterm', 'video'] as const;
+const sectionOrder = ['hero', 'docs', 'table', 'three', 'xterm', 'video', 'settings'] as const;
 const sectionSet = new Set(sectionOrder);
 const defaultSection = sectionOrder[0];
 
