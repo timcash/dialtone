@@ -1,7 +1,7 @@
 package main
 
 import (
-	dialtone "dialtone/cli/src"
+	dialtone "dialtone/dev"
 )
 
 func main() {

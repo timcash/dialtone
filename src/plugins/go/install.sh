@@ -74,7 +74,7 @@ if [ "$INSTALL_LATEST" -eq 1 ]; then
     exit 1
   fi
 else
-  GO_VERSION="$(grep "^go " "$REPO_ROOT/go.mod" | awk '{print $2}')"
+  GO_VERSION="$(grep "^go " "$REPO_ROOT/src/go.mod" | awk '{print $2}')"
 fi
 
 if [ -z "${GO_VERSION:-}" ]; then
