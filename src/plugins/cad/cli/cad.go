@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"dialtone/cli/src/plugins/cad/app"
+	"dialtone/dev/plugins/cad/app"
 	"fmt"
 	"net/http"
 	"os"

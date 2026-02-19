@@ -13,18 +13,22 @@ import (
 )
 
 // RunInstallWorkflow executes a deterministic REPL script and validates
-// request -> sign -> subtone stream behavior for robot install.
+// request -> subtone stream behavior for robot install.
 func RunInstallWorkflow(timeoutSec int) error {
-	repoRoot, err := os.Getwd()
+	cwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
 
+	// Assuming cwd is src/plugins/repl, repo root is 3 levels up
+	repoRoot := filepath.Join(cwd, "..", "..", "..")
 	dialtoneSh := filepath.Join(repoRoot, "dialtone.sh")
-	testTaskID := "robot-install-testid"
+	if _, err := os.Stat(dialtoneSh); err != nil {
+		return fmt.Errorf("dialtone.sh not found at expected path: %s (cwd=%s)", dialtoneSh, cwd)
+	}
+
 	script := strings.Join([]string{
 		"@DIALTONE robot install src_v1",
-		"@DIALTONE task --sign " + testTaskID,
 		"exit",
 		"",
 	}, "\n")
@@ -32,7 +36,8 @@ func RunInstallWorkflow(timeoutSec int) error {
 	cmd := exec.Command(dialtoneSh)
 	cmd.Dir = repoRoot
 	cmd.Stdin = strings.NewReader(script)
-	cmd.Env = append(os.Environ(), "DIALTONE_TEST_TASK_ID="+testTaskID)
+	// cmd.Env no longer needs DIALTONE_TEST_TASK_ID, inherit system env
+	cmd.Env = os.Environ()
 
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -53,7 +58,7 @@ func RunInstallWorkflow(timeoutSec int) error {
 		if err != nil {
 			return fmt.Errorf("repl workflow failed: %w\noutput:\n%s", err, output)
 		}
-		return validateOutput(output, testTaskID)
+		return validateOutput(output)
 	case <-time.After(time.Duration(timeoutSec) * time.Second):
 		_ = cmd.Process.Kill()
 		<-done
@@ -61,12 +66,10 @@ func RunInstallWorkflow(timeoutSec int) error {
 	}
 }
 
-func validateOutput(output, taskID string) error {
+func validateOutput(output string) error {
 	required := []string{
 		"DIALTONE> Virtual Librarian online.",
-		"DIALTONE> Request received. Task created: `" + taskID + "`.",
-		"DIALTONE> Sign with `@DIALTONE task --sign " + taskID + "` to run.",
-		"DIALTONE> Signatures verified. Spawning subtone subprocess via PID",
+		"DIALTONE> Request received. Spawning subtone for robot install...",
 		"DIALTONE> Streaming stdout/stderr from subtone PID",
 		"DIALTONE> Process ",
 		"DIALTONE> Goodbye.",

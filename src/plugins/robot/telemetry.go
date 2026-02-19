@@ -1,7 +1,7 @@
 package robot
 
 import (
-	"dialtone/cli/src/core/logger"
+	"dialtone/dev/core/logger"
 	"encoding/json"
 	"fmt"
 	"net/http"

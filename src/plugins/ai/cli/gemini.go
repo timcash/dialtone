@@ -2,7 +2,7 @@ package cli
 
 import (
 	"bufio"
-	"dialtone/cli/src/core/logger"
+	"dialtone/dev/core/logger"
 	"io"
 	"os"
 	"os/exec"

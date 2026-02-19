@@ -1,7 +1,7 @@
 package main
 
 import (
-	"dialtone/cli/src/plugins/wsl/src_v2"
+	"dialtone/dev/plugins/wsl/src_v2"
 	"log"
 )
 

@@ -1,7 +1,7 @@
 package util
 
 import (
-	"dialtone/cli/src/core/logger"
+	"dialtone/dev/core/logger"
 	"net"
 )
 

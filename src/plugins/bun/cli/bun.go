@@ -6,9 +6,9 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"dialtone/cli/src/core/config"
-	"dialtone/cli/src/core/logger"
-	bun_test "dialtone/cli/src/plugins/bun/test"
+	"dialtone/dev/core/config"
+	"dialtone/dev/core/logger"
+	bun_test "dialtone/dev/plugins/bun/test"
 )
 
 func RunBun(args []string) {

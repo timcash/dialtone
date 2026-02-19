@@ -10,10 +10,10 @@ import (
 	"syscall"
 	"time"
 
-	"dialtone/cli/src/core/logger"
-	core_ssh "dialtone/cli/src/core/ssh"
-	test_v2 "dialtone/cli/src/libs/test_v2"
-	robot_ops "dialtone/cli/src/plugins/robot/src_v1/cmd/ops"
+	"dialtone/dev/core/logger"
+	core_ssh "dialtone/dev/core/ssh"
+	test_v2 "dialtone/dev/libs/test_v2"
+	robot_ops "dialtone/dev/plugins/robot/src_v1/cmd/ops"
 )
 
 // Versioned Source Commands (routing to ops files)

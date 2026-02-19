@@ -2,8 +2,8 @@ package cli
 
 import (
 	"context"
-	"dialtone/cli/src/core/browser"
-	chrome_app "dialtone/cli/src/plugins/chrome/app"
+	"dialtone/dev/core/browser"
+	chrome_app "dialtone/dev/plugins/chrome/app"
 	"fmt"
 	cdruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"

@@ -1,9 +1,9 @@
 package robot
 
 import (
-	"dialtone/cli/src/core/logger"
-	core_ssh "dialtone/cli/src/core/ssh"
-	rcli "dialtone/cli/src/plugins/robot/robot_cli"
+	"dialtone/dev/core/logger"
+	core_ssh "dialtone/dev/core/ssh"
+	rcli "dialtone/dev/plugins/robot/robot_cli"
 	"encoding/json"
 	"flag"
 	"fmt"

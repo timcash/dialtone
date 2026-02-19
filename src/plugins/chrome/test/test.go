@@ -3,8 +3,8 @@ package test
 import (
 	"fmt"
 
-	corebrowser "dialtone/cli/src/core/browser"
-	chrome "dialtone/cli/src/plugins/chrome/app"
+	corebrowser "dialtone/dev/core/browser"
+	chrome "dialtone/dev/plugins/chrome/app"
 )
 
 func Run() error {

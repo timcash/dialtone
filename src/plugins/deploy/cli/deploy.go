@@ -13,9 +13,9 @@ import (
 	"syscall"
 	"time"
 
-	"dialtone/cli/src/core/build"
-	"dialtone/cli/src/core/logger"
-	"dialtone/cli/src/core/ssh"
+	"dialtone/dev/core/build"
+	"dialtone/dev/core/logger"
+	"dialtone/dev/core/ssh"
 
 	sshlib "golang.org/x/crypto/ssh"
 )

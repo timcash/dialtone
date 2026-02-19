@@ -10,7 +10,7 @@ import (
 	"runtime"
 	"strings"
 
-	"dialtone/cli/src/core/logger"
+	"dialtone/dev/core/logger"
 )
 
 // RunBuild handles building for different platforms

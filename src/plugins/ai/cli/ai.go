@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"dialtone/cli/src/core/logger"
-	test_cli "dialtone/cli/src/core/test/cli"
-	github_cli "dialtone/cli/src/plugins/github/cli"
+	"dialtone/dev/core/logger"
+	test_cli "dialtone/dev/core/test/cli"
+	github_cli "dialtone/dev/plugins/github/cli"
 )
 
 // RunAI is the entry point for the AI plugin

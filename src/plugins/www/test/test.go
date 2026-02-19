@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	chrome "dialtone/cli/src/plugins/chrome/app"
+	chrome "dialtone/dev/plugins/chrome/app"
 
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"

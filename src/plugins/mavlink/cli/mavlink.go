@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	mavlink "dialtone/cli/src/plugins/mavlink/app"
+	mavlink "dialtone/dev/plugins/mavlink/app"
 )
 
 func RunMavlink(args []string) {

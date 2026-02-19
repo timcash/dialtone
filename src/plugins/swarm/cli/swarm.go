@@ -2,7 +2,7 @@ package cli
 
 import (
 	"bufio"
-	"dialtone/cli/src/core/config"
+	"dialtone/dev/core/config"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	swarm_test "dialtone/cli/src/plugins/swarm/test"
+	swarm_test "dialtone/dev/plugins/swarm/test"
 )
 
 func RunSwarm(args []string) {

@@ -1,8 +1,8 @@
 package cli
 
 import (
-	"dialtone/cli/src/core/config"
-	core_install "dialtone/cli/src/core/install"
+	"dialtone/dev/core/config"
+	core_install "dialtone/dev/core/install"
 	"fmt"
 	"os"
 	"path/filepath"

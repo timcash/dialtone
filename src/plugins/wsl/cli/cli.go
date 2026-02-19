@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"dialtone/cli/src/plugins/wsl/test"
+	"dialtone/dev/plugins/wsl/test"
 	"flag"
 	"fmt"
 )

@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	rcli "dialtone/cli/src/plugins/robot/robot_cli"
-	robot_ops "dialtone/cli/src/plugins/robot/src_v1/cmd/ops"
+	rcli "dialtone/dev/plugins/robot/robot_cli"
+	robot_ops "dialtone/dev/plugins/robot/src_v1/cmd/ops"
 )
 
 // RunRobot handles 'robot <subcommand>'

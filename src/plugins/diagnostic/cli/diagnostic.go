@@ -6,8 +6,8 @@ import (
 	"os"
 	"runtime"
 
-	"dialtone/cli/src/core/logger"
-	app "dialtone/cli/src/plugins/diagnostic/app"
+	"dialtone/dev/core/logger"
+	app "dialtone/dev/plugins/diagnostic/app"
 )
 
 // RunDiagnostic handles the 'diagnostic' command

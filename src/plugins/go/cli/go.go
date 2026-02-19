@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"dialtone/cli/src/core/config"
-	"dialtone/cli/src/core/logger"
-	go_test "dialtone/cli/src/plugins/go/test"
+	"dialtone/dev/core/config"
+	"dialtone/dev/core/logger"
+	go_test "dialtone/dev/plugins/go/test"
 )
 
 // RunGo handles 'go <subcommand>'

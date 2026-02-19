@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"dialtone/cli/src/core/logger"
+	"dialtone/dev/core/logger"
 	"github.com/vladimirvivien/go4vl/device"
 	"github.com/vladimirvivien/go4vl/v4l2"
 )

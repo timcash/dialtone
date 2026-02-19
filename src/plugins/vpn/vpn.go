@@ -3,9 +3,9 @@ package vpn
 import (
 	"bytes"
 	"context"
-	"dialtone/cli/src/core/logger"
-	"dialtone/cli/src/core/util"
-	"dialtone/cli/src/core/web"
+	"dialtone/dev/core/logger"
+	"dialtone/dev/core/util"
+	"dialtone/dev/core/web"
 	"encoding/json"
 	"flag"
 	"fmt"

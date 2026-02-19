@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	chrome "dialtone/cli/src/plugins/chrome/app"
+	chrome "dialtone/dev/plugins/chrome/app"
 
 	"github.com/chromedp/chromedp"
 )

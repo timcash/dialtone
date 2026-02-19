@@ -6,9 +6,9 @@ import (
 
 	"strings"
 
-	"dialtone/cli/src/core/logger"
-	chrome "dialtone/cli/src/plugins/chrome/app"
-	chrome_test "dialtone/cli/src/plugins/chrome/test"
+	"dialtone/dev/core/logger"
+	chrome "dialtone/dev/plugins/chrome/app"
+	chrome_test "dialtone/dev/plugins/chrome/test"
 )
 
 // RunChrome handles the 'chrome' command

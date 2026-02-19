@@ -1,8 +1,8 @@
 package cli
 
 import (
-	"dialtone/cli/src/core/logger"
-	"dialtone/cli/src/core/ssh"
+	"dialtone/dev/core/logger"
+	"dialtone/dev/core/ssh"
 	"flag"
 	"fmt"
 	"os"

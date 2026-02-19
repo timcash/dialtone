@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"dialtone/cli/src/core/logger"
-	"dialtone/cli/src/core/mock"
-	camera "dialtone/cli/src/plugins/camera/app"
+	"dialtone/dev/core/logger"
+	"dialtone/dev/core/mock"
+	camera "dialtone/dev/plugins/camera/app"
 
 	"github.com/coder/websocket"
 	"github.com/nats-io/nats-server/v2/server"

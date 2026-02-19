@@ -5,7 +5,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"dialtone/cli/src/core/logger"
+	"dialtone/dev/core/logger"
 )
 
 // WaitForShutdown blocks until SIGINT or SIGTERM is received

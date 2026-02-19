@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	app "dialtone/cli/src/plugins/camera/app"
+	app "dialtone/dev/plugins/camera/app"
 )
 
 func RunCamera(args []string) {
