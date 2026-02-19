@@ -30,218 +30,11 @@ print_help() {
         return
     fi
     echo "Usage: ./dialtone.sh <command> [options]"
-    echo "Usage: ./dialtone.sh --env env/test.env"
-    echo "Usage: ./dialtone.sh repl --env env/test.env"
-    echo "Usage: ./dialtone.sh repl install"
     echo "Run './dialtone.sh install' to install managed Go."
 }
 
 dialtone_say() {
-    local line="DIALTONE> $*"
-    echo "$line"
-    if [ -n "${REPL_SESSION_ID:-}" ]; then
-        repl_log_event "$REPL_SESSION_ID" "DIALTONE" "$line" "OUTPUT"
-    fi
-}
-
-dialtone_block() {
-    printf "DIALTONE> %s\n" "$1"
-    if [ -n "${REPL_SESSION_ID:-}" ]; then
-        while IFS= read -r _line; do
-            [ -z "$_line" ] && continue
-            repl_log_event "$REPL_SESSION_ID" "DIALTONE" "$_line" "OUTPUT"
-        done <<< "DIALTONE> $1"
-    fi
-}
-
-role_say() {
-    local role="${1:-USER-1}"
-    shift
-    local line="${role}> $*"
-    echo "$line"
-    if [ -n "${REPL_SESSION_ID:-}" ]; then
-        repl_log_event "$REPL_SESSION_ID" "$role" "$line" "OUTPUT"
-    fi
-}
-
-repl_async_emit() {
-    local line="$1"
-    # Async REPL output can arrive while the prompt is on screen; redraw cleanly.
-    if [ "${REPL_AGENT_MODE:-0}" -eq 0 ]; then
-        printf "\r\033[K%s\n" "$line"
-        printf "%s> " "${REPL_ROLE:-USER-1}"
-    else
-        echo "$line"
-    fi
-}
-
-llm_role_reply() {
-    local role="$1"
-    local text="$2"
-    while IFS= read -r line; do
-        [ -z "$line" ] && continue
-        role_say "$role" "$line"
-    done <<< "$text"
-}
-
-repl_log_event() {
-    local session_id="$1"
-    local role="$2"
-    local text="$3"
-    local kind="${4:-INPUT}"
-    local safe_text="$text"
-    safe_text="${safe_text//$'\t'/ }"
-    safe_text="${safe_text//$'\n'/ }"
-    mkdir -p "$RUNTIME_DIR"
-    printf "%s\t%s\t%s\t%s\t%s\n" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$session_id" "$kind" "$role" "$safe_text" >> "$RUNTIME_DIR/repl-events.log"
-}
-
-run_llm_ops_bridge() {
-    local question="$1"
-    local bridge_bin="${DIALTONE_LLM_OPS_BIN:-}"
-    local output
-
-    if [ -z "$question" ]; then
-        dialtone_say "Usage: @LLM-OPS <question>"
-        return 1
-    fi
-    if [ -z "$bridge_bin" ]; then
-        if [ -x "$SCRIPT_DIR/scripts/llm_ops_demo_bridge.sh" ]; then
-            bridge_bin="$SCRIPT_DIR/scripts/llm_ops_demo_bridge.sh"
-        else
-            dialtone_say "No LLM-OPS bridge configured. Set DIALTONE_LLM_OPS_BIN in your env file."
-            return 1
-        fi
-    fi
-    if [[ "$bridge_bin" != /* ]]; then
-        bridge_bin="$SCRIPT_DIR/$bridge_bin"
-    fi
-    if [ ! -x "$bridge_bin" ]; then
-        dialtone_say "LLM-OPS bridge is not executable: $bridge_bin"
-        return 1
-    fi
-
-    set +e
-    output="$("$bridge_bin" "$question" 2>&1)"
-    bridge_exit=$?
-    set -e
-    if [ $bridge_exit -ne 0 ]; then
-        dialtone_say "LLM-OPS bridge failed (exit $bridge_exit)."
-        dialtone_say "$output"
-        return $bridge_exit
-    fi
-    llm_role_reply "LLM-OPS" "$output"
-    return 0
-}
-
-is_external_llm_ops_active() {
-    local marker_file="$RUNTIME_DIR/repl-llm-ops.external"
-    [ -f "$marker_file" ]
-}
-
-normalize_dialtone_env() {
-    local env_path="$1"
-    if [[ "$env_path" == "~"* ]]; then
-        env_path="${env_path/#\~/$HOME}"
-    fi
-    if [ -n "$env_path" ] && [[ "$env_path" != /* ]]; then
-        env_path="$SCRIPT_DIR/$env_path"
-    fi
-    echo "$env_path"
-}
-
-count_tracked_processes() {
-    local count=0 pid_file pid
-    mkdir -p "$RUNTIME_DIR"
-    shopt -s nullglob
-    for pid_file in "$RUNTIME_DIR"/*.pid; do
-        pid="$(cat "$pid_file" 2>/dev/null || true)"
-        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-            count=$((count + 1))
-        fi
-    done
-    shopt -u nullglob
-    echo "$count"
-}
-
-is_repl_session_alive() {
-    local session_id="$1"
-    local cmd
-    if [[ ! "$session_id" =~ ^[0-9]+$ ]]; then
-        return 1
-    fi
-    cmd="$(ps -p "$session_id" -o args= 2>/dev/null || true)"
-    [[ "$cmd" == *"dialtone.sh"* ]]
-}
-
-count_repl_sessions() {
-    local repl_fifos=() fifo session_id count=0
-    mkdir -p "$RUNTIME_DIR"
-    shopt -s nullglob
-    repl_fifos=("$RUNTIME_DIR"/repl-control-*.fifo)
-    shopt -u nullglob
-    for fifo in "${repl_fifos[@]}"; do
-        session_id="${fifo##*/repl-control-}"
-        session_id="${session_id%.fifo}"
-        if is_repl_session_alive "$session_id"; then
-            count=$((count + 1))
-        else
-            rm -f "$fifo"
-        fi
-    done
-    echo "$count"
-}
-
-list_repl_sessions() {
-    local repl_fifos=() fifo session_id active_session="" count=0 output_lines=()
-    mkdir -p "$RUNTIME_DIR"
-    if [ -f "$RUNTIME_DIR/repl-active.session" ]; then
-        active_session="$(cat "$RUNTIME_DIR/repl-active.session" 2>/dev/null || true)"
-    fi
-
-    shopt -s nullglob
-    repl_fifos=("$RUNTIME_DIR"/repl-control-*.fifo)
-    shopt -u nullglob
-
-    for fifo in "${repl_fifos[@]}"; do
-        session_id="${fifo##*/repl-control-}"
-        session_id="${session_id%.fifo}"
-        if is_repl_session_alive "$session_id"; then
-            count=$((count + 1))
-            if [ -n "$active_session" ] && [ "$session_id" = "$active_session" ]; then
-                output_lines+=("- $session_id (active)")
-            else
-                output_lines+=("- $session_id")
-            fi
-        else
-            rm -f "$fifo"
-        fi
-    done
-
-    echo "Running REPL sessions: $count"
-    if [ "$count" -eq 0 ]; then
-        return 0
-    fi
-    for line in "${output_lines[@]}"; do
-        echo "$line"
-    done
-}
-
-repl_plugin_install() {
-    local plugin_dir="$SCRIPT_DIR/src/plugins/repl"
-    if [ ! -d "$plugin_dir" ]; then
-        echo "REPL plugin directory not found: $plugin_dir"
-        return 1
-    fi
-    if [ ! -f "$plugin_dir/pixi.toml" ]; then
-        echo "REPL plugin pixi config not found: $plugin_dir/pixi.toml"
-        return 1
-    fi
-    if ! command -v pixi >/dev/null 2>&1; then
-        echo "pixi is not installed. Install pixi first, then re-run: ./dialtone.sh repl install"
-        return 1
-    fi
-    (cd "$plugin_dir" && pixi install "$@")
+    echo "DIALTONE> $*"
 }
 
 generate_random_task_id() {
@@ -268,14 +61,10 @@ run_subtone_stream() {
     "$SCRIPT_DIR/dialtone.sh" "${subtone_cmd[@]}" >"$fifo" 2>&1 &
     subtone_pid=$!
 
-    dialtone_say "Spawning subtone subprocess via PID $subtone_pid..."
+    dialtone_say "Signatures verified. Spawning subtone subprocess via PID $subtone_pid..."
     dialtone_say "Streaming stdout/stderr from subtone PID $subtone_pid."
     while IFS= read -r line; do
-        stream_line="DIALTONE:${subtone_pid}:> $line"
-        echo "$stream_line"
-        if [ -n "${REPL_SESSION_ID:-}" ]; then
-            repl_log_event "$REPL_SESSION_ID" "DIALTONE" "$stream_line" "OUTPUT"
-        fi
+        echo "DIALTONE:${subtone_pid}:> $line"
     done <"$fifo"
 
     set +e
@@ -289,62 +78,23 @@ run_subtone_stream() {
 }
 
 start_repl() {
-    [ -z "${REPL_ROLE:-}" ] && REPL_ROLE="USER-1"
-    local repl_session_id="$$"
-    REPL_SESSION_ID="$repl_session_id"
-    export REPL_SESSION_ID
     local pending_task_id=""
     local -a pending_subtone_cmd=()
-    local env_path_display="$DIALTONE_ENV_FILE"
-    local subtone_count=0
 
-    if command -v realpath >/dev/null 2>&1; then
-        env_path_display="$(realpath "$DIALTONE_ENV_FILE" 2>/dev/null || echo "$DIALTONE_ENV_FILE")"
-    fi
-
-    dialtone_block "$(cat <<'EOF'
-Virtual Librarian online.
-I can bootstrap dev tools, route commands through dev.go, and help install plugins.
-EOF
-)"
-    repl_control_start "$repl_session_id"
-    repl_bus_start "$repl_session_id"
-    trap repl_runtime_cleanup EXIT
-    if [ -f "$DIALTONE_ENV_FILE" ]; then
-        dialtone_say "Using .env file: $(basename "$DIALTONE_ENV_FILE")"
-        dialtone_say "Env path: $env_path_display"
-    else
-        dialtone_say "No .env file found at: $env_path_display"
-    fi
-    dialtone_block "$(cat <<EOF
-Runtime report:
-  Active REPL sessions: $(count_repl_sessions)
-  Active tracked processes: $(count_tracked_processes)
-EOF
-)"
+    dialtone_say "Virtual Librarian online."
+    dialtone_say "I can bootstrap dev tools, route commands through dev.go, and help install plugins."
     dialtone_say "Type 'help' for commands, or 'exit' to quit."
 
     while true; do
-        if [ "${REPL_AGENT_MODE:-0}" -eq 0 ]; then
-            printf "%s> " "$REPL_ROLE"
-            if ! IFS= read -r user_input; then
-                echo
-                dialtone_say "Session closed."
-                break
-            fi
-        else
-            if ! IFS= read -r user_input; then
-                dialtone_say "Session closed."
-                break
-            fi
-            if [ "${REPL_ECHO_INPUT:-0}" -eq 1 ]; then
-                echo "$REPL_ROLE> $user_input"
-            fi
+        printf "USER-1> "
+        if ! IFS= read -r user_input; then
+            echo
+            dialtone_say "Session closed."
+            break
         fi
 
         user_input="$(echo "$user_input" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
         [ -z "$user_input" ] && continue
-        repl_log_event "$repl_session_id" "$REPL_ROLE" "$user_input" "INPUT"
 
         case "$user_input" in
             exit|quit)
@@ -352,70 +102,23 @@ EOF
                 break
                 ;;
             help)
-                dialtone_block "$(cat <<'EOF'
-Commands:
-- `@DIALTONE dev install` - install latest Go via a monitored subtone process
-- `@DIALTONE repl install` - install REPL plugin Python env with pixi
-- `@DIALTONE robot install src_v1` - queue robot install and return a random task id
-- `@DIALTONE task --sign <task-id>` - sign the queued task and run it in a subtone
-- `status` - show REPL process-monitor state
-- `repls` - list active REPL sessions
-- `role <name>` - switch speaker role (example: `role LLM-OPS`)
-- `whoami` - show current speaker role
-- `ps`, `proc ps`, `kill <pid|all>` - process monitor commands available immediately
-- `<any command>` - forward to `./dialtone.sh <command>`
-EOF
-)"
+                dialtone_say "Commands:"
+                dialtone_say "  dev install           Install latest Go and bootstrap dev.go command scaffold"
+                dialtone_say "  @DIALTONE robot install src_v1"
+                dialtone_say "                        Queue robot install and return a random task id"
+                dialtone_say "  @DIALTONE task --sign <task-id>"
+                dialtone_say "                        Sign the queued task and run it in a subtone"
+                dialtone_say "  <any command>         Forward to ./dialtone.sh <command>"
                 continue
                 ;;
-            status)
-                dialtone_block "$(cat <<EOF
-Session state:
-  Active speaker role: $REPL_ROLE
-  Subtones created this REPL session: $subtone_count
-  Active tracked processes: $(count_tracked_processes)
-  Active REPL sessions: $(count_repl_sessions)
-  Pending sign task: ${pending_task_id:-none}
-EOF
-)"
-                continue
-                ;;
-            repls)
-                dialtone_block "$(list_repl_sessions)"
-                continue
-                ;;
-            role\ *)
-                new_role="${user_input#role }"
-                new_role="$(echo "$new_role" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
-                if [ -z "$new_role" ]; then
-                    dialtone_say "Usage: role <name>"
-                    continue
-                fi
-                REPL_ROLE="$new_role"
-                export REPL_ROLE
-                dialtone_say "Speaker role set to ${REPL_ROLE}>"
-                role_say "$REPL_ROLE" "Joined REPL session."
-                continue
-                ;;
-            whoami)
-                dialtone_say "Current speaker role: ${REPL_ROLE}>"
-                continue
-                ;;
-        esac
-
-        if [[ "$user_input" == "@DIALTONE "* ]]; then
-            dialtone_cmd="${user_input#@DIALTONE }"
-            read -r -a dialtone_parts <<< "$dialtone_cmd"
-
-            if [ "${dialtone_parts[0]:-}" = "dev" ] && [ "${dialtone_parts[1]:-}" = "install" ]; then
-                dialtone_say "Starting monitored subtone for dev install (latest Go runtime)..."
+            "dev install")
+                dialtone_say "Installing latest Go runtime for managed ./dialtone.sh go commands..."
                 installer="$SCRIPT_DIR/src/plugins/go/install.sh"
                 if [ ! -f "$installer" ]; then
                     dialtone_say "Installer missing: $installer"
                     continue
                 fi
-                subtone_count=$((subtone_count + 1))
-                if ! run_subtone_stream install --latest; then
+                if ! bash "$installer" --latest; then
                     dialtone_say "Install failed."
                     continue
                 fi
@@ -425,28 +128,19 @@ EOF
                 fi
                 GO_BIN="${DIALTONE_ENV:-}/go/bin/go"
                 if [ -x "$GO_BIN" ]; then
-                    dialtone_say "Bootstrap complete. Verifying dev.go command routing..."
-                    subtone_count=$((subtone_count + 1))
-                    run_subtone_stream go exec version || true
+                    dialtone_say "Bootstrap complete. Initializing dev.go scaffold..."
+                    "$GO_BIN" run "$SCRIPT_DIR/src/cmd/dev/main.go" help || true
                     dialtone_say "Ready. You can now run plugin commands (install/build/test) via DIALTONE."
-                    dialtone_say "Session subtone count: $subtone_count | Active tracked processes: $(count_tracked_processes)"
                 else
                     dialtone_say "Go runtime installed, but DIALTONE_ENV/go/bin/go was not found."
                 fi
                 continue
-            fi
+                ;;
+        esac
 
-            if [ "${dialtone_parts[0]:-}" = "repl" ] && [ "${dialtone_parts[1]:-}" = "install" ]; then
-                dialtone_say "Starting monitored subtone for REPL plugin pixi install..."
-                subtone_count=$((subtone_count + 1))
-                if run_subtone_stream repl install; then
-                    dialtone_say "REPL plugin pixi install completed."
-                else
-                    dialtone_say "REPL plugin pixi install failed."
-                fi
-                dialtone_say "Session subtone count: $subtone_count | Active tracked processes: $(count_tracked_processes)"
-                continue
-            fi
+        if [[ "$user_input" == "@DIALTONE "* ]]; then
+            dialtone_cmd="${user_input#@DIALTONE }"
+            read -r -a dialtone_parts <<< "$dialtone_cmd"
 
             if [ "${dialtone_parts[0]:-}" = "task" ] && [ "${dialtone_parts[1]:-}" = "--sign" ]; then
                 sign_id="${dialtone_parts[2]:-}"
@@ -463,14 +157,7 @@ EOF
                     continue
                 fi
 
-                dialtone_say "Signatures verified."
-                subtone_count=$((subtone_count + 1))
-                if run_subtone_stream "${pending_subtone_cmd[@]}"; then
-                    dialtone_say "Subtone completed successfully."
-                else
-                    dialtone_say "Subtone reported a non-zero exit code."
-                fi
-                dialtone_say "Session subtone count: $subtone_count | Active tracked processes: $(count_tracked_processes)"
+                run_subtone_stream "${pending_subtone_cmd[@]}"
                 pending_task_id=""
                 pending_subtone_cmd=()
                 continue
@@ -488,24 +175,9 @@ EOF
             continue
         fi
 
-        if [[ "$user_input" == "@LLM-OPS "* ]]; then
-            continue
-        fi
-
-        if [ "$user_input" = "dev install" ]; then
-            dialtone_say "Use \`@DIALTONE dev install\` to run this command."
-            continue
-        fi
-
         read -r -a cmd_parts <<< "$user_input"
         dialtone_say "Running: ${cmd_parts[*]}"
-        if "$SCRIPT_DIR/dialtone.sh" "${cmd_parts[@]}" > >(while IFS= read -r cmd_line; do
-            echo "$cmd_line"
-            repl_log_event "$repl_session_id" "DIALTONE" "$cmd_line" "OUTPUT"
-        done) 2> >(while IFS= read -r cmd_err; do
-            echo "$cmd_err" >&2
-            repl_log_event "$repl_session_id" "DIALTONE" "$cmd_err" "OUTPUT"
-        done); then
+        if "$SCRIPT_DIR/dialtone.sh" "${cmd_parts[@]}"; then
             dialtone_say "Done."
         else
             dialtone_say "Command failed (exit $?)."
@@ -522,167 +194,6 @@ Subcommands:
   stop <key>         Stop tracked process by key
   logs <key>         Tail tracked log for key
 EOF_PROC
-}
-
-repl_usage() {
-    cat <<EOF_REPL
-Usage: ./dialtone.sh repl [options]
-
-Options:
-  --stdin            Read commands from stdin without interactive prompt.
-  --script <file>    Read commands from a script file.
-  --echo-input       Echo stdin/script lines as "USER-1> <line>".
-  --role <name>      Set initial speaker role label (default: USER-1).
-  -h, --help         Show this help.
-
-Examples:
-  ./dialtone.sh repl --env env/test.env
-  ./dialtone.sh repl --stdin --env env/test.env <<'EOF'
-@DIALTONE dev install
-@DIALTONE robot install src_v1
-EOF
-  ./dialtone.sh repl --script ./scripts/repl-smoke.txt --echo-input
-  ./dialtone.sh repl --role LLM-OPS
-EOF_REPL
-}
-
-repl_send_usage() {
-    cat <<EOF_REPL_SEND
-Usage: ./dialtone.sh repl-send [options] <message>
-
-Options:
-  --role <name>       Speaker role label (default: LLM-OPS)
-  --session <id>      Target specific REPL session id
-  -h, --help          Show this help
-
-Examples:
-  ./dialtone.sh repl-send --role LLM-OPS "Hello from external controller."
-  ./dialtone.sh repl-send --session 531583 "status check"
-EOF_REPL_SEND
-}
-
-repl_control_start() {
-    local session_id="$1"
-    REPL_CONTROL_FIFO="$RUNTIME_DIR/repl-control-${session_id}.fifo"
-    REPL_ACTIVE_FILE="$RUNTIME_DIR/repl-active.session"
-    mkdir -p "$RUNTIME_DIR"
-    rm -f "$REPL_CONTROL_FIFO"
-    mkfifo "$REPL_CONTROL_FIFO"
-    echo "$session_id" > "$REPL_ACTIVE_FILE"
-
-    (
-        while true; do
-            if IFS= read -r control_line < "$REPL_CONTROL_FIFO"; then
-                [ -z "$control_line" ] && continue
-                repl_async_emit "$control_line"
-            fi
-        done
-    ) &
-    REPL_CONTROL_PID=$!
-}
-
-repl_control_stop() {
-    if [ -n "${REPL_CONTROL_PID:-}" ]; then
-        kill "$REPL_CONTROL_PID" 2>/dev/null || true
-    fi
-    if [ -n "${REPL_CONTROL_FIFO:-}" ]; then
-        rm -f "$REPL_CONTROL_FIFO"
-    fi
-}
-
-repl_bus_start() {
-    local session_id="$1"
-    local events_file="$RUNTIME_DIR/repl-events.log"
-    local start_bytes
-    mkdir -p "$RUNTIME_DIR"
-    touch "$events_file"
-    start_bytes="$(wc -c < "$events_file" 2>/dev/null || echo 0)"
-    start_bytes="${start_bytes//[[:space:]]/}"
-    [ -z "$start_bytes" ] && start_bytes=0
-
-    (
-        tail -c "+$((start_bytes + 1))" -F "$events_file" 2>/dev/null | while IFS=$'\t' read -r ts sid kind role text; do
-            [ "$sid" = "$session_id" ] && continue
-            [ -z "$text" ] && continue
-            case "$kind" in
-                INPUT)
-                    [ -z "$role" ] && role="USER-1"
-                    repl_async_emit "${role}> ${text}"
-                    ;;
-                OUTPUT)
-                    repl_async_emit "$text"
-                    ;;
-            esac
-        done
-    ) &
-    REPL_BUS_PID=$!
-}
-
-repl_bus_stop() {
-    if [ -n "${REPL_BUS_PID:-}" ]; then
-        kill "$REPL_BUS_PID" 2>/dev/null || true
-    fi
-}
-
-repl_runtime_cleanup() {
-    repl_control_stop
-    repl_bus_stop
-}
-
-repl_send_message() {
-    local role="LLM-OPS"
-    local session_id=""
-    local message=""
-    local i=0
-    while [ $i -lt ${#CMD_ARGS[@]} ]; do
-        case "${CMD_ARGS[$i]}" in
-            --role)
-                i=$((i + 1))
-                role="${CMD_ARGS[$i]:-}"
-                ;;
-            --session)
-                i=$((i + 1))
-                session_id="${CMD_ARGS[$i]:-}"
-                ;;
-            -h|--help|help)
-                repl_send_usage
-                return 0
-                ;;
-            *)
-                if [ -n "$message" ]; then
-                    message="$message ${CMD_ARGS[$i]}"
-                else
-                    message="${CMD_ARGS[$i]}"
-                fi
-                ;;
-        esac
-        i=$((i + 1))
-    done
-
-    if [ -z "$message" ]; then
-        echo "Error: repl-send requires a message."
-        repl_send_usage
-        return 1
-    fi
-
-    if [ -z "$session_id" ]; then
-        if [ -f "$RUNTIME_DIR/repl-active.session" ]; then
-            session_id="$(cat "$RUNTIME_DIR/repl-active.session" 2>/dev/null || true)"
-        fi
-    fi
-    if [ -z "$session_id" ]; then
-        echo "Error: no active REPL session found. Start ./dialtone.sh first."
-        return 1
-    fi
-
-    fifo="$RUNTIME_DIR/repl-control-${session_id}.fifo"
-    if [ ! -p "$fifo" ]; then
-        echo "Error: REPL control channel not found for session $session_id."
-        echo "Restart REPL with latest dialtone.sh and try again."
-        return 1
-    fi
-
-    printf "%s> %s\n" "$role" "$message" > "$fifo"
 }
 
 ps_usage() {
@@ -894,8 +405,7 @@ kill_all_dialtone() {
 mkdir -p "$SCRIPT_DIR/src/core/web/dist"
 
 # First pass: find --env flag so we can source env before dispatching.
-# Preserve inherited selection so subtones can reuse the same env file.
-DIALTONE_ENV_FILE="${DIALTONE_ENV_FILE:-}"
+DIALTONE_ENV_FILE=""
 for arg in "$@"; do
     if [[ "$arg" == --env=* ]]; then
         DIALTONE_ENV_FILE="${arg#*=}"
@@ -915,12 +425,6 @@ if [ -f "$DIALTONE_ENV_FILE" ]; then
     source "$DIALTONE_ENV_FILE"
     set +a
 fi
-
-DIALTONE_ENV="$(normalize_dialtone_env "${DIALTONE_ENV:-}")"
-
-# Ensure nested dialtone.sh invocations (subtones) inherit selected env config.
-export DIALTONE_ENV_FILE
-export DIALTONE_ENV
 
 # Parse global flags + command.
 CMD=""
@@ -976,79 +480,6 @@ done
 if [ -z "$CMD" ]; then
     start_repl
     exit 0
-fi
-
-if [ "$CMD" = "repl" ]; then
-    if [ "${CMD_ARGS[0]:-}" = "install" ]; then
-        repl_plugin_install "${CMD_ARGS[@]:1}"
-        exit $?
-    fi
-
-    REPL_AGENT_MODE=0
-    REPL_ECHO_INPUT=0
-    REPL_SCRIPT_FILE=""
-    REPL_ROLE="${REPL_ROLE:-USER-1}"
-
-    idx=0
-    while [ $idx -lt ${#CMD_ARGS[@]} ]; do
-        arg="${CMD_ARGS[$idx]}"
-        case "$arg" in
-            --stdin|--agent)
-                REPL_AGENT_MODE=1
-                ;;
-            --echo-input)
-                REPL_ECHO_INPUT=1
-                ;;
-            --role)
-                idx=$((idx + 1))
-                REPL_ROLE="${CMD_ARGS[$idx]:-}"
-                if [ -z "$REPL_ROLE" ]; then
-                    echo "Error: --role requires a role name"
-                    exit 1
-                fi
-                ;;
-            --script)
-                idx=$((idx + 1))
-                REPL_SCRIPT_FILE="${CMD_ARGS[$idx]:-}"
-                if [ -z "$REPL_SCRIPT_FILE" ]; then
-                    echo "Error: --script requires a file path"
-                    exit 1
-                fi
-                ;;
-            -h|--help|help)
-                repl_usage
-                exit 0
-                ;;
-            *)
-                echo "Unknown repl option: $arg"
-                repl_usage
-                exit 1
-                ;;
-        esac
-        idx=$((idx + 1))
-    done
-
-    if [ -n "$REPL_SCRIPT_FILE" ]; then
-        REPL_AGENT_MODE=1
-        if [ ! -f "$REPL_SCRIPT_FILE" ]; then
-            echo "Error: repl script not found: $REPL_SCRIPT_FILE"
-            exit 1
-        fi
-        start_repl < "$REPL_SCRIPT_FILE"
-    else
-        start_repl
-    fi
-    exit 0
-fi
-
-if [ "$CMD" = "repl-send" ]; then
-    repl_send_message
-    exit $?
-fi
-
-if [ "$CMD" = "repls" ]; then
-    list_repl_sessions
-    exit $?
 fi
 
 # Command families handled entirely by shell.
@@ -1113,7 +544,9 @@ if [ "$CMD" = "install" ]; then
 fi
 
 # Everything else runs through managed Go toolchain.
-DIALTONE_ENV="$(normalize_dialtone_env "${DIALTONE_ENV:-}")"
+if [[ "${DIALTONE_ENV:-}" == "~"* ]]; then
+    DIALTONE_ENV="${DIALTONE_ENV/#\~/$HOME}"
+fi
 
 export DIALTONE_ENV
 export DIALTONE_ENV_FILE
@@ -1157,10 +590,9 @@ LOG=$log_file
 STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF_META
 
-    (
-        cd "$SCRIPT_DIR/src" && "$go_cmd" run ./cmd/dev/main.go "$@"
-    ) > >(tee -a "$log_file") \
-      2> >(tee -a "$log_file" >&2) &
+    "$go_cmd" run "$SCRIPT_DIR/src/cmd/dev/main.go" "$@" \
+        > >(tee -a "$log_file") \
+        2> >(tee -a "$log_file" >&2) &
     child_pid=$!
     echo "$child_pid" > "$pid_file"
 
