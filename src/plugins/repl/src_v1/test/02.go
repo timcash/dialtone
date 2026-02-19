@@ -13,10 +13,10 @@ func Run02DevInstall(ctx *testCtx) (string, error) {
 	}
 
 	required := []string{
-		"DIALTONE> Installing latest Go runtime for managed ./dialtone.sh go commands...",
+		"Installing latest Go runtime for managed ./dialtone.sh go commands...",
 		"Go", // From "Go 1.26.0 already installed" or "Installing Go..."
-		"DIALTONE> Bootstrap complete. Initializing dev.go scaffold...",
-		"DIALTONE> Ready. You can now run plugin commands (install/build/test) via DIALTONE.",
+		"Bootstrap complete. Initializing dev.go scaffold...",
+		"Ready. You can now run plugin commands (install/build/test) via DIALTONE.",
 	}
 
 	for _, s := range required {

@@ -71,7 +71,7 @@ run_subtone_stream() {
     dialtone_say "Signatures verified. Spawning subtone subprocess via PID $subtone_pid..."
     dialtone_say "Streaming stdout/stderr from subtone PID $subtone_pid."
     while IFS= read -r line; do
-        local log_line="DIALTONE:subtone:> $line"
+        local log_line="DIALTONE:${subtone_pid}:> $line"
         echo "$log_line"
         echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ") | INFO | REPL] $log_line" >> "$LOG_FILE"
     done <"$fifo"
@@ -517,14 +517,14 @@ if [ "$CMD" = "install" ]; then
 fi
 
 if [ "$CMD" = "__bootstrap_dev" ]; then
-    dialtone_say "Installing latest Go runtime for managed ./dialtone.sh go commands..."
+    echo "Installing latest Go runtime for managed ./dialtone.sh go commands..."
     installer="$SCRIPT_DIR/src/plugins/go/install.sh"
     if [ ! -f "$installer" ]; then
-        dialtone_say "Installer missing: $installer"
+        echo "Installer missing: $installer"
         exit 1
     fi
     if ! bash "$installer" --latest; then
-        dialtone_say "Install failed."
+        echo "Install failed."
         exit 1
     fi
 
@@ -533,11 +533,11 @@ if [ "$CMD" = "__bootstrap_dev" ]; then
     fi
     GO_BIN="${DIALTONE_ENV:-}/go/bin/go"
     if [ -x "$GO_BIN" ]; then
-        dialtone_say "Bootstrap complete. Initializing dev.go scaffold..."
+        echo "Bootstrap complete. Initializing dev.go scaffold..."
         (cd "$SCRIPT_DIR/src" && "$GO_BIN" run cmd/dev/main.go help) >/dev/null 2>&1 || true
-        dialtone_say "Ready. You can now run plugin commands (install/build/test) via DIALTONE."
+        echo "Ready. You can now run plugin commands (install/build/test) via DIALTONE."
     else
-        dialtone_say "Go runtime installed, but DIALTONE_ENV/go/bin/go was not found."
+        echo "Go runtime installed, but DIALTONE_ENV/go/bin/go was not found."
         exit 1
     fi
     exit 0
