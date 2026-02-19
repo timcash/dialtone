@@ -6,17 +6,18 @@
 ## 1. REPL / Chat Interface (Target)
 `./dialtone.sh` should change from its current behavior to instead launch a simple REPL that feels like a text chat with a `DIALTONE>` prompt, as described in [DIALTONE.md](./DIALTONE.md) and [RLM_DIALTONE.md](./RLM_DIALTONE.md).
 
-The REPL accepts commands from user roles (e.g. `USER-1>`), such as `ps all`.
+The REPL accepts commands from user roles (e.g. `USER-1>`), including plugin commands such as the [robot plugin](src/plugins/robot/README.md) for dev, deploy, and telemetry.
 
-**Example:**
+**Example (robot plugin):**
 ```text
-USER-1> ps all
-DIALTONE> Request received. Sign with `@DIALTONE task --sign current-task` to run.
-USER-1> @DIALTONE task --sign current-task
-DIALTONE> Signatures verified. Running command via PID 4512...
-DIALTONE:4512> PID  USER  CMD
-DIALTONE:4512> 4512 user  dialtone
-DIALTONE> Process 4512 exited with code 0.
+USER-1> robot dev src_v1
+DIALTONE> Starting robot dev (mock data)...
+DIALTONE:robot> Vite at http://127.0.0.1:3000
+DIALTONE:robot> Chrome launched. Use 9:Mode to switch views.
+USER-1> robot test src_v1
+DIALTONE> Running robot tests...
+DIALTONE:robot> [PASS] headless tests complete.
+DIALTONE> Process exited with code 0.
 ```
 
 ## 2. Code Stack
