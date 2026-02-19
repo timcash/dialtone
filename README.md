@@ -13,33 +13,52 @@ Dialtone is a small program that runs on computers, phones, and robots. It is bu
 ![dialtone](./src/plugins/www/screenshots/summary.png)
 
 ## 1. REPL / Chat Interface (Target)
-- `./dialtone.sh` starts a REPL with a `DIALTONE>` 
+- `./dialtone.sh` and `./dialtone.ps1` start a simple `DIALTONE>` dialog.
+- First-run flow: `DIALTONE>` asks for consent before installing only the minimum Go runtime + bootstrap files needed for `dev.go`.
+- After bootstrap, `DIALTONE>` can install plugins and connect to swarm, VPN, and NATS.
 - see [DIALTONE.md](./docs/dialtone/DIALTONE.md).
 
 The REPL accepts commands from user roles (e.g. `USER-1>`), including robot development and deployment tasks.
 
 **Example:**
 ```text
+USER-1> ./dialtone.sh
+DIALTONE> I can bootstrap dev mode. Install minimal Go runtime + bootstrap files now? [yes/no]
+USER-1> yes
+DIALTONE> Installing minimal runtime and loading `src/dev.go`...
+DIALTONE> Bootstrap complete. New capabilities available: plugin install, swarm, vpn, nats, task DAG.
+USER-1> @DIALTONE plugin install robot
+USER-1> @DIALTONE swarm connect
+USER-1> @DIALTONE vpn up
 USER-1> @DIALTONE task start robot-nav-update-v3
-DIALTONE> Task selected: [robot-nav-update-v3]. Next step: implement and test the navigation patch.
+DIALTONE> Task selected: [robot-nav-update-v3]. Invite roles `LLM-CODE`, `LLM-TEST`, `LLM-OPS`?
+USER-1> yes
 LLM-CODE> [Edit src/plugins/robot/nav_controller.py: improve obstacle avoidance near loading docks]
-LLM-CODE> @DIALTONE pytest src/plugins/robot/tests/test_nav_controller.py
+LLM-TEST> @DIALTONE pytest src/plugins/robot/tests/test_nav_controller.py
 DIALTONE> Request received. Sign with `@DIALTONE task --sign robot-nav-update-v3` to run.
 USER-1> @DIALTONE task --sign robot-nav-update-v3
-LLM-TEST> @DIALTONE task --sign robot-nav-update-v3
+LLM-OPS> @DIALTONE task --sign robot-nav-update-v3
 DIALTONE> Signatures verified. Running command via PID 4512...
 DIALTONE:4512> [PASS] test_nav_controller.py::test_dock_approach
 DIALTONE:4512> [PASS] test_nav_controller.py::test_obstacle_recovery
 DIALTONE> Process 4512 exited with code 0.
-USER-1> @DIALTONE robot deploy --fleet warehouse-bots --version nav-v3
-DIALTONE> Request received. Sign with `@DIALTONE task --sign robot-nav-update-v3` to deploy.
-USER-1> @DIALTONE task --sign robot-nav-update-v3 --done
-LLM-OPS> @DIALTONE task --sign robot-nav-update-v3 --done
-DIALTONE> Deployment approved. Rolling update started for fleet [warehouse-bots].
+DIALTONE> DAG updated. Logs and artifacts published over swarm + VPN + NATS.
 ```
 
 ## 2. Code Stack
 The following components form the core architecture of Dialtone. LLM agents should treat the **DAG Plugin** as the canonical source of truth for UI and interaction patterns.
+
+### Three-Layer Tech Stack
+1. **Shell Layer**: `./dialtone.sh` is designed to stay simple, run from anywhere, and start `DIALTONE>` (the virtual librarian interface).
+2. **Dev Layer**: `src/dev.go` provides scaffolding that adds structure around a heterogeneous codebase that can include many languages.
+3. **Plugin Layer**: the plugin system is designed to make complexity composable by linking plugin behaviors back to `src/dev.go`.
+
+### Bootstrap to Collaboration Flow
+1. Start from `./dialtone.sh` or `./dialtone.ps1`.
+2. Confirm minimal bootstrap install (runtime + basic Go files only).
+3. Activate `dev.go` command routing.
+4. Install only needed plugins and connect transport layers (swarm, VPN, NATS).
+5. Collaborate in `DIALTONE>` with `USER-*` and `LLM-*` roles on a shared DAG of tasks and logs.
 
 ### [DAG Plugin](./src/plugins/dag/README.md)
 The primary implementation of the Directed Acyclic Graph engine. It defines the standard for section lifecycle, mode-form controls, and 3D stage interactions.
@@ -79,22 +98,32 @@ cd dialtone
 
 
 ## How the code base is organized
-- `./dialtone.sh` and `.\dialtone.ps1` start a REPL with `DIALTONE>`
-- `src/dev.go` is the main entry for the Command Line Interface (CLI)
-- golang is used to scaffold the rest of the code base
-- `src/plugins/` contains the plugins for the program
-- plugins are the main way to extend `DIALTONE>`
-- `env/.env` contains the environment variables for the program
+### Entry points
+- `./dialtone.sh`, `./dialtone.ps1`, and `./dialtone.cmd` are thin wrappers that start the `DIALTONE>` workflow.
+- `src/dev.go` is the main CLI scaffold/dispatcher for command routing.
 
-- `src/libs/` contains the shared libraries for the program
-- `src/plugins/` contains the plugins for the program
-- `src/skills/` contains the skills for the program
-- `src/tools/` contains the tools for the program
-- `src/tests/` contains the tests for the program
-- `src/examples/` contains the examples for the program
-- `src/docs/` contains the documentation for the program
-- `src/examples/` contains the examples for the program
-- writing code with `DIALTONE>`
+### Core source layout
+- `src/core/`: shared core CLI/runtime packages.
+- `src/plugins/`: plugin modules and plugin CLIs (primary extension surface).
+- `src/libs/`: reusable libraries used across plugins and CLI flows.
+- `src/cmd/`: command-oriented packages and support entrypoints.
+- `docs/`: project docs, protocol docs, and examples/transcripts.
+- `skills/`: skill definitions used by the system.
+- `env/.env`: environment configuration for local/runtime setup.
+
+### Three-layer mental model
+1. **Shell Layer**: wrapper scripts (`./dialtone.sh` etc.) keep startup simple from anywhere.
+2. **Dev Layer**: `src/dev.go` provides structure across a heterogeneous, multi-language codebase.
+3. **Plugin Layer**: plugins compose higher-level behavior and link back through the `src/dev.go` command router.
+
+### Suggested format to document the codebase
+Use the same mini-template for each top-level folder or plugin:
+- **Purpose**: what this area is responsible for.
+- **Entrypoint**: the main command/file to start from.
+- **Key files**: 3-5 important files/directories.
+- **How to run/test**: exact commands for development and verification.
+- **Dependencies**: external services, env vars, and related plugins.
+- **Ownership/status**: who maintains it and current maturity (alpha/beta/stable).
 
 
 

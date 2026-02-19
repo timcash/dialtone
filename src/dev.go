@@ -19,27 +19,28 @@ import (
 	test_cli "dialtone/cli/src/core/test/cli"
 	ai_cli "dialtone/cli/src/plugins/ai/cli"
 	bun_cli "dialtone/cli/src/plugins/bun/cli"
-	        cad_cli "dialtone/cli/src/plugins/cad/cli"
-	        camera_cli "dialtone/cli/src/plugins/camera/cli"
-	        chrome_cli "dialtone/cli/src/plugins/chrome/cli"
-	        cloudflare_cli "dialtone/cli/src/plugins/cloudflare/cli"
-	        dag_cli "dialtone/cli/src/plugins/dag/cli"
-	                          // deploy_cli "dialtone/cli/src/plugins/deploy/cli" // Removed
-	                        diagnostic_cli "dialtone/cli/src/plugins/diagnostic/cli"
-	                github_cli "dialtone/cli/src/plugins/github/cli"
+	cad_cli "dialtone/cli/src/plugins/cad/cli"
+	camera_cli "dialtone/cli/src/plugins/camera/cli"
+	chrome_cli "dialtone/cli/src/plugins/chrome/cli"
+	cloudflare_cli "dialtone/cli/src/plugins/cloudflare/cli"
+	dag_cli "dialtone/cli/src/plugins/dag/cli"
+	// deploy_cli "dialtone/cli/src/plugins/deploy/cli" // Removed
+	diagnostic_cli "dialtone/cli/src/plugins/diagnostic/cli"
+	github_cli "dialtone/cli/src/plugins/github/cli"
 	go_cli "dialtone/cli/src/plugins/go/cli"
 	ide_cli "dialtone/cli/src/plugins/ide/cli"
 	logs_cli "dialtone/cli/src/plugins/logs/cli"
 	mavlink_cli "dialtone/cli/src/plugins/mavlink/cli"
 	nix_cli "dialtone/cli/src/plugins/nix/cli"
+	repl_cli "dialtone/cli/src/plugins/repl/cli"
+	"dialtone/cli/src/plugins/robot"
 	swarm_cli "dialtone/cli/src/plugins/swarm/cli"
-	                template_cli "dialtone/cli/src/plugins/template/cli"
-	                ui_cli "dialtone/cli/src/plugins/ui/cli"
-	                "dialtone/cli/src/plugins/vpn"
-	                "dialtone/cli/src/plugins/robot"
-	                wsl_cli "dialtone/cli/src/plugins/wsl/cli"
-	        
-		task_cli "dialtone/cli/src/plugins/task/cli"
+	template_cli "dialtone/cli/src/plugins/template/cli"
+	ui_cli "dialtone/cli/src/plugins/ui/cli"
+	"dialtone/cli/src/plugins/vpn"
+	wsl_cli "dialtone/cli/src/plugins/wsl/cli"
+
+	task_cli "dialtone/cli/src/plugins/task/cli"
 	www_cli "dialtone/cli/src/plugins/www/cli"
 )
 
@@ -56,51 +57,51 @@ func ExecuteDev() {
 	command := os.Args[1]
 	args := os.Args[2:]
 
-	                switch command {
+	switch command {
 
-	                case "start":
+	case "start":
 
-	                        robot.RunRobot(append([]string{"start"}, args...))
+		robot.RunRobot(append([]string{"start"}, args...))
 
-	                case "robot":
+	case "robot":
 
-	                        robot.RunRobot(args)
+		robot.RunRobot(args)
 
-	                case "build":
+	case "build":
 
-	                        build_cli.Run(args)
+		build_cli.Run(args)
 
-	                case "deploy":
+	case "deploy":
 
-	                        robot.RunRobot(append([]string{"deploy"}, args...))
+		robot.RunRobot(append([]string{"deploy"}, args...))
 
-	                case "format":
+	case "format":
 
-	                        format_cli.Run(args)
+		format_cli.Run(args)
 
-	                case "ssh":
+	case "ssh":
 
-	                        ssh.RunSSH(args)
+		ssh.RunSSH(args)
 
-	                case "vpn", "vpn-provision", "provision", "vpn-test":
+	case "vpn", "vpn-provision", "provision", "vpn-test":
 
-	                        vpn.RunVPN(append([]string{command}, args...))
+		vpn.RunVPN(append([]string{command}, args...))
 
-	                case "logs":
-	                        if err := logs_cli.Run(args); err != nil {
-	                                fmt.Printf("Logs command error: %v\n", err)
-	                                os.Exit(1)
-	                        }
+	case "logs":
+		if err := logs_cli.Run(args); err != nil {
+			fmt.Printf("Logs command error: %v\n", err)
+			os.Exit(1)
+		}
 
-	                case "diagnostic":
+	case "diagnostic":
 
-	                        diagnostic_cli.RunDiagnostic(args)
+		diagnostic_cli.RunDiagnostic(args)
 
-	                case "install":
+	case "install":
 
-	                        install.RunInstall(args)
+		install.RunInstall(args)
 
-	                case "branch":
+	case "branch":
 		runBranch(args)
 	case "test":
 		test_cli.RunTest(args)
@@ -152,6 +153,11 @@ func ExecuteDev() {
 	case "go":
 
 		go_cli.RunGo(args)
+	case "repl":
+		if err := repl_cli.Run(args); err != nil {
+			fmt.Printf("REPL command error: %v\n", err)
+			os.Exit(1)
+		}
 	case "cad":
 		cad_cli.RunCad(args)
 
@@ -202,6 +208,7 @@ func printDevUsage() {
 
 	fmt.Println("  ai <subcmd>        AI tools (opencode, developer, subagent)")
 	fmt.Println("  go <subcmd>        Go toolchain tools (install, lint)")
+	fmt.Println("  repl <subcmd>      REPL workflow tools (test)")
 	fmt.Println("  help               Show this help message")
 }
 

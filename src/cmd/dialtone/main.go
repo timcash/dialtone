@@ -5,5 +5,5 @@ import (
 )
 
 func main() {
-	dialtone.Execute()
+	dialtone.ExecuteDev()
 }
