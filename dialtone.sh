@@ -90,7 +90,6 @@ start_repl() {
     [ ! -f "$LOG_FILE" ] && touch "$LOG_FILE"
     cat <<EOF | dialtone_block
 Virtual Librarian online.
-I can bootstrap dev tools, route commands through dev.go, and help install plugins.
 Type 'help' for commands, or 'exit' to quit.
 EOF
 
