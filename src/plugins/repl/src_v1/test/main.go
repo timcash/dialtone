@@ -8,6 +8,7 @@ import (
 
 type Step struct {
 	Name       string
+	Files      []string
 	Conditions string
 	Run        func() (string, error)
 }
@@ -17,6 +18,10 @@ func main() {
 	steps := []Step{
 		{
 			Name: "Test 1: REPL Startup",
+			Files: []string{
+				"src/plugins/repl/src_v1/test/01.go",
+				"dialtone.sh",
+			},
 			Conditions: "1. `DIALTONE>` should introduce itself and print the help command",
 			Run: func() (string, error) {
 				return Run01Startup(ctx)
@@ -24,6 +29,11 @@ func main() {
 		},
 		{
 			Name: "Test 2: dev install",
+			Files: []string{
+				"src/plugins/repl/src_v1/test/02.go",
+				"src/plugins/go/install.sh",
+				"dialtone.sh",
+			},
 			Conditions: "1. `USER-1>` should request the install of the latest stable Go runtime at the `env/.env` DIALTONE_ENV path... \n2. `DIALTONE>` should run that command on a subtone",
 			Run: func() (string, error) {
 				return Run02DevInstall(ctx)
@@ -31,6 +41,11 @@ func main() {
 		},
 		{
 			Name: "Test 3: robot install src_v1",
+			Files: []string{
+				"src/plugins/repl/src_v1/test/03.go",
+				"src/plugins/robot/ops.go",
+				"dialtone.sh",
+			},
 			Conditions: "1. `USER-1>` should request robot install... \n2. `DIALTONE>` should run that command on a subtone",
 			Run: func() (string, error) {
 				return Run03RobotInstall(ctx)
@@ -50,8 +65,17 @@ func main() {
 		fmt.Printf("Running %s...\n", s.Name)
 		output, err := s.Run()
 		
-		fmt.Fprintf(f, "# %s\n", s.Name)
+		fmt.Fprintf(f, "# %s\n\n", s.Name)
+		
+		fmt.Fprintf(f, "### Files\n")
+		for _, file := range s.Files {
+			fmt.Fprintf(f, "- `%s`\n", file)
+		}
+		fmt.Fprintf(f, "\n")
+
+		fmt.Fprintf(f, "### Conditions\n")
 		fmt.Fprintf(f, "%s\n\n", s.Conditions)
+
 		fmt.Fprintf(f, "### Results\n")
 		fmt.Fprintf(f, "```text\n")
 		if output != "" {
