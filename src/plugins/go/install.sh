@@ -7,21 +7,38 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 usage() {
   cat <<EOF
 Usage: ./dialtone.sh install [path]
+       ./dialtone.sh install --latest [path]
 
 Installs the Go toolchain into DIALTONE_ENV/go.
 
 Arguments:
   [path]    Optional install root. Overrides DIALTONE_ENV from env/.env.
+Flags:
+  --latest  Install the latest stable Go version from go.dev.
 EOF
 }
 
-if [[ "${1:-}" == "help" || "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-  usage
-  exit 0
-fi
+INSTALL_LATEST=0
+POSITIONAL_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --latest)
+      INSTALL_LATEST=1
+      shift
+      ;;
+    help|--help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      POSITIONAL_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
 
-if [ -n "${1:-}" ]; then
-  export DIALTONE_ENV="$1"
+if [ -n "${POSITIONAL_ARGS[0]:-}" ]; then
+  export DIALTONE_ENV="${POSITIONAL_ARGS[0]}"
 fi
 
 if [ -z "${DIALTONE_ENV:-}" ]; then
@@ -47,7 +64,24 @@ fi
 
 mkdir -p "$DIALTONE_ENV"
 
-GO_VERSION="$(grep "^go " "$REPO_ROOT/go.mod" | awk '{print $2}')"
+if [ "$INSTALL_LATEST" -eq 1 ]; then
+  if command -v curl >/dev/null 2>&1; then
+    GO_VERSION="$(curl -fsSL https://go.dev/VERSION?m=text | awk 'NR==1{gsub(/^go/, "", $1); print $1}')"
+  elif command -v wget >/dev/null 2>&1; then
+    GO_VERSION="$(wget -qO- https://go.dev/VERSION?m=text | awk 'NR==1{gsub(/^go/, "", $1); print $1}')"
+  else
+    echo "Error: need curl or wget to resolve latest Go version"
+    exit 1
+  fi
+else
+  GO_VERSION="$(grep "^go " "$REPO_ROOT/go.mod" | awk '{print $2}')"
+fi
+
+if [ -z "${GO_VERSION:-}" ]; then
+  echo "Error: failed to resolve Go version"
+  exit 1
+fi
+
 OS="$(uname | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
 if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; fi
@@ -61,8 +95,12 @@ fi
 GO_DIR="$DIALTONE_ENV/go"
 GO_BIN="$GO_DIR/bin/go"
 if [ -x "$GO_BIN" ]; then
-  echo "Go $GO_VERSION already installed at $GO_BIN"
-  exit 0
+  INSTALLED_GO_VERSION="$("$GO_BIN" version 2>/dev/null | awk '{gsub(/^go/, "", $3); print $3}')"
+  if [ "$INSTALLED_GO_VERSION" = "$GO_VERSION" ]; then
+    echo "Go $GO_VERSION already installed at $GO_BIN"
+    exit 0
+  fi
+  echo "Upgrading Go from ${INSTALLED_GO_VERSION:-unknown} to $GO_VERSION"
 fi
 
 TARBALL="go${GO_VERSION}.${OS}-${ARCH}.tar.gz"

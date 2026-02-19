@@ -14,6 +14,7 @@ import (
 	diagnostic_test "dialtone/cli/src/plugins/diagnostic/test"
 	go_test "dialtone/cli/src/plugins/go/test"
 	ide_test "dialtone/cli/src/plugins/ide/test"
+	repl_test "dialtone/cli/src/plugins/repl/test"
 
 	// ticket_test "dialtone/cli/src/plugins/ticket/test"
 	_ "dialtone/cli/src/plugins/cloudflare/test"
@@ -238,6 +239,8 @@ func runPluginTest(pluginName string, showList bool) {
 		runWwwCadTests()
 	case "github":
 		runGithubTests()
+	case "repl":
+		runReplTests()
 	default:
 		logger.LogFatal("Unknown plugin: %s", pluginName)
 	}
@@ -283,7 +286,7 @@ func printTestUsage() {
 	fmt.Println("Note: For ticket-specific verification, use: ./dialtone.sh ticket test <ticket-name>")
 	fmt.Println()
 	fmt.Println("Available Plugins:")
-	fmt.Println("  ticket, ui, ai, ide, diagnostic, www, cad, go, bun, chrome, github")
+	fmt.Println("  ticket, ui, ai, ide, diagnostic, www, cad, go, bun, chrome, github, repl")
 }
 
 func runAllTests(showList bool) {
@@ -404,4 +407,12 @@ func runGithubTests() {
 		logger.LogFatal("GitHub tests failed: %v", err)
 	}
 	logger.LogInfo("GitHub Plugin Integration Tests passed!")
+}
+
+func runReplTests() {
+	logger.LogInfo("Running REPL Plugin Workflow Tests...")
+	if err := repl_test.RunInstallWorkflow(180); err != nil {
+		logger.LogFatal("REPL workflow test failed: %v", err)
+	}
+	logger.LogInfo("REPL Plugin Workflow Tests passed!")
 }
