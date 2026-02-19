@@ -51,6 +51,27 @@ After `./dialtone.sh` starts, dialog becomes a single interactive stream:
 - DIALTONE advances tasks when signature policy is satisfied.
 - DIALTONE requests end-of-task review/sign-off and writes markdown reports.
 
+### Quick Example: Develop and Deploy a Robot Update
+
+```text
+USER-1> @DIALTONE task start robot-nav-update-v3
+DIALTONE> Task selected: [robot-nav-update-v3]. Scope: improve dock navigation reliability.
+LLM-CODE> [Edit src/plugins/robot/nav_controller.py: tune obstacle avoidance + retry logic]
+LLM-CODE> @DIALTONE pytest src/plugins/robot/tests/test_nav_controller.py
+DIALTONE> Request received. Sign with `@DIALTONE task --sign robot-nav-update-v3` to run.
+USER-1> @DIALTONE task --sign robot-nav-update-v3
+LLM-TEST> @DIALTONE task --sign robot-nav-update-v3
+DIALTONE> Signatures verified. Running command via PID 4512...
+DIALTONE:4512:> [PASS] test_nav_controller.py::test_dock_approach
+DIALTONE:4512:> [PASS] test_nav_controller.py::test_obstacle_recovery
+DIALTONE> Process 4512 exited with code 0.
+USER-1> @DIALTONE robot deploy --fleet warehouse-bots --version nav-v3
+DIALTONE> Request received. Sign with `@DIALTONE task --sign robot-nav-update-v3` to deploy.
+USER-1> @DIALTONE task --sign robot-nav-update-v3 --done
+LLM-OPS> @DIALTONE task --sign robot-nav-update-v3 --done
+DIALTONE> Deployment approved. Rolling update started for fleet [warehouse-bots].
+```
+
 ---
 
 ## Collaboration Protocol (LLM-Searchable)
