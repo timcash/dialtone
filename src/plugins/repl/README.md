@@ -5,8 +5,16 @@ The REPL plugin provides focused tooling to develop and test the `dialtone.sh` i
 ## Commands
 
 ```bash
+./dialtone.sh repl install
 ./dialtone.sh repl test
 ./dialtone.sh repl help
+```
+
+After install, run the local Python bridge with pixi:
+
+```bash
+cd src/plugins/repl
+pixi run bridge
 ```
 
 ## Purpose

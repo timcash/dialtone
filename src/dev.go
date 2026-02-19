@@ -1,5 +1,3 @@
-//go:build !no_duckdb
-
 package dialtone
 
 import (
@@ -9,170 +7,33 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-
-	build_cli "dialtone/cli/src/core/build/cli"
-	"dialtone/cli/src/core/config"
-	format_cli "dialtone/cli/src/core/format/cli"
-	"dialtone/cli/src/core/install"
-	"dialtone/cli/src/core/logger"
-	"dialtone/cli/src/core/ssh"
-	test_cli "dialtone/cli/src/core/test/cli"
-	ai_cli "dialtone/cli/src/plugins/ai/cli"
-	bun_cli "dialtone/cli/src/plugins/bun/cli"
-	cad_cli "dialtone/cli/src/plugins/cad/cli"
-	camera_cli "dialtone/cli/src/plugins/camera/cli"
-	chrome_cli "dialtone/cli/src/plugins/chrome/cli"
-	cloudflare_cli "dialtone/cli/src/plugins/cloudflare/cli"
-	dag_cli "dialtone/cli/src/plugins/dag/cli"
-	// deploy_cli "dialtone/cli/src/plugins/deploy/cli" // Removed
-	diagnostic_cli "dialtone/cli/src/plugins/diagnostic/cli"
-	github_cli "dialtone/cli/src/plugins/github/cli"
-	go_cli "dialtone/cli/src/plugins/go/cli"
-	ide_cli "dialtone/cli/src/plugins/ide/cli"
-	logs_cli "dialtone/cli/src/plugins/logs/cli"
-	mavlink_cli "dialtone/cli/src/plugins/mavlink/cli"
-	nix_cli "dialtone/cli/src/plugins/nix/cli"
-	repl_cli "dialtone/cli/src/plugins/repl/cli"
-	"dialtone/cli/src/plugins/robot"
-	swarm_cli "dialtone/cli/src/plugins/swarm/cli"
-	template_cli "dialtone/cli/src/plugins/template/cli"
-	ui_cli "dialtone/cli/src/plugins/ui/cli"
-	"dialtone/cli/src/plugins/vpn"
-	wsl_cli "dialtone/cli/src/plugins/wsl/cli"
-
-	task_cli "dialtone/cli/src/plugins/task/cli"
-	www_cli "dialtone/cli/src/plugins/www/cli"
 )
 
-// ExecuteDev is the entry point for the dialtone CLI
+// ExecuteDev routes commands to plugin scaffolds.
 func ExecuteDev() {
 	if len(os.Args) < 2 {
 		printDevUsage()
 		return
 	}
 
-	// Load configuration
-	config.LoadConfig()
-
 	command := os.Args[1]
 	args := os.Args[2:]
 
 	switch command {
-
-	case "start":
-
-		robot.RunRobot(append([]string{"start"}, args...))
-
-	case "robot":
-
-		robot.RunRobot(args)
-
-	case "build":
-
-		build_cli.Run(args)
-
-	case "deploy":
-
-		robot.RunRobot(append([]string{"deploy"}, args...))
-
-	case "format":
-
-		format_cli.Run(args)
-
-	case "ssh":
-
-		ssh.RunSSH(args)
-
-	case "vpn", "vpn-provision", "provision", "vpn-test":
-
-		vpn.RunVPN(append([]string{command}, args...))
-
-	case "logs":
-		if err := logs_cli.Run(args); err != nil {
-			fmt.Printf("Logs command error: %v\n", err)
-			os.Exit(1)
-		}
-
-	case "diagnostic":
-
-		diagnostic_cli.RunDiagnostic(args)
-
-	case "install":
-
-		install.RunInstall(args)
-
-	case "branch":
-		runBranch(args)
-	case "test":
-		test_cli.RunTest(args)
-	case "pull-request", "pr":
-		// Delegate to github plugin
-		github_cli.RunGithub(append([]string{"pull-request"}, args...))
-	case "github":
-		github_cli.RunGithub(args)
-	case "swarm":
-		swarm_cli.RunSwarm(args)
-	case "cloudflare":
-		cloudflare_cli.RunCloudflare(args)
-	case "ide":
-		ide_cli.Run(args)
-	case "camera":
-		camera_cli.RunCamera(args)
-	case "bun":
-		bun_cli.RunBun(args)
-	case "chrome":
-		chrome_cli.RunChrome(args)
-	case "mavlink":
-		mavlink_cli.RunMavlink(args)
-	case "www":
-		www_cli.RunWww(args)
-	case "ui":
-		ui_cli.Run(args)
-	case "task":
-		task_cli.Run(args)
-	case "nix":
-		if err := nix_cli.Run(args); err != nil {
-			fmt.Printf("Nix command error: %v\n", err)
-			os.Exit(1)
-		}
-	case "dag":
-		if err := dag_cli.Run(args); err != nil {
-			fmt.Printf("DAG command error: %v\n", err)
-			os.Exit(1)
-		}
-	case "wsl":
-		if err := wsl_cli.Run(args); err != nil {
-			fmt.Printf("WSL command error: %v\n", err)
-			os.Exit(1)
-		}
-	case "template":
-		if err := template_cli.Run(args); err != nil {
-			fmt.Printf("Template command error: %v\n", err)
-			os.Exit(1)
-		}
-	case "go":
-
-		go_cli.RunGo(args)
-	case "repl":
-		if err := repl_cli.Run(args); err != nil {
-			fmt.Printf("REPL command error: %v\n", err)
-			os.Exit(1)
-		}
-	case "cad":
-		cad_cli.RunCad(args)
-
-	case "ai", "opencode", "developer", "subagent":
-		if command == "ai" {
-			ai_cli.RunAI(args)
-		} else {
-			ai_cli.RunAI(append([]string{command}, args...))
-		}
 	case "help", "-h", "--help":
 		printDevUsage()
+		return
+	case "branch":
+		runBranch(args)
+		return
+	case "plugins":
+		listPlugins()
+		return
 	default:
-		fmt.Printf("Unknown command: %s\n", command)
-		printDevUsage()
-		os.Exit(1)
+		if err := runPluginScaffold(command, args); err != nil {
+			fmt.Printf("Orchestrator error: %v\n", err)
+			os.Exit(1)
+		}
 	}
 }
 
@@ -182,75 +43,105 @@ func printDevUsage() {
 		script = ".\\dialtone.cmd"
 	}
 	fmt.Printf("Usage: %s <command> [options]\n", script)
-	fmt.Println("\nCommands:")
-	fmt.Println("  start         Start the NATS and Web server")
-	fmt.Println("  install [path] Install dependencies (--linux-wsl for WSL, --macos-arm for Apple Silicon)")
-	fmt.Println("  build         Build web UI and binary (--local, --full, --remote, --podman, --linux-arm, --linux-arm64, --linux-amd64)")
-	fmt.Println("  deploy        Deploy to remote robot")
-	fmt.Println("  format        Format Go code across the repo")
-	fmt.Println("  camera        Camera tools (snapshot, stream)")
-	fmt.Println("  bun <subcmd>       Bun toolchain tools (exec, run, x)")
-	fmt.Println("  ssh           SSH tools (upload, download, cmd)")
-	fmt.Println("  provision     Generate Tailscale Auth Key")
-	fmt.Println("  logs          Tail remote logs")
-	fmt.Println("  diagnostic    Run system diagnostics (local or remote)")
-	fmt.Println("  branch <name>      Create or checkout a feature branch")
-	fmt.Println("  swarm <topic>      Join a Hyperswarm topic")
-	fmt.Println("  ide <subcmd>       IDE tools (setup-workflows)")
-	fmt.Println("  github <subcmd>    Manage GitHub interactions (pr, check-deploy)")
-	fmt.Println("  www <subcmd>       Manage public webpage (Vercel wrapper)")
-	fmt.Println("  ui <subcmd>        Manage web UI (dev, build, install)")
-	fmt.Println("  test <subcmd>      Run tests (legacy)")
-	fmt.Println("  nix <subcmd>       Nix plugin tools (smoke)")
-	fmt.Println("  dag <subcmd>       DAG plugin tools (install, dev, build, test, src)")
-	fmt.Println("  wsl <subcmd>       WSL plugin tools (smoke)")
-	fmt.Println("  template <subcmd>  Template plugin tools (install, dev, build, test, src)")
-
-	fmt.Println("  ai <subcmd>        AI tools (opencode, developer, subagent)")
-	fmt.Println("  go <subcmd>        Go toolchain tools (install, lint)")
-	fmt.Println("  repl <subcmd>      REPL workflow tools (test)")
-	fmt.Println("  help               Show this help message")
+	fmt.Println()
+	fmt.Println("Dev orchestrator commands:")
+	fmt.Println("  plugins              List available plugin scaffolds")
+	fmt.Println("  branch <name>        Create or checkout a feature branch")
+	fmt.Println("  help                 Show this help")
+	fmt.Println()
+	fmt.Println("Plugin routing:")
+	fmt.Println("  <plugin> <args...>   Run src/plugins/<plugin>/scaffold/main.go (or scaffold.sh)")
+	fmt.Println()
+	fmt.Println("Examples:")
+	fmt.Println("  ./dialtone.sh go install --latest")
+	fmt.Println("  ./dialtone.sh go exec version")
+	fmt.Println("  ./dialtone.sh robot install src_v1")
 }
 
-// isPlugin checks if a directory exists in src/plugins
-func isPlugin(name string) bool {
-	path := filepath.Join("src", "plugins", name)
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
+func listPlugins() {
+	root := "plugins"
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		fmt.Printf("Failed to read plugins directory: %v\n", err)
+		return
+	}
+	fmt.Println("Available plugins with scaffold:")
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		goScaffold := filepath.Join(root, name, "scaffold", "main.go")
+		shScaffold := filepath.Join(root, name, "scaffold.sh")
+		if fileExists(goScaffold) || fileExists(shScaffold) {
+			fmt.Printf("  - %s\n", name)
+		}
+	}
 }
 
-// runBranch handles the branch command
+func runPluginScaffold(plugin string, args []string) error {
+	pluginDir := filepath.Join("plugins", plugin)
+	info, err := os.Stat(pluginDir)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("unknown plugin: %s", plugin)
+	}
+
+	goScaffold := filepath.Join(pluginDir, "scaffold", "main.go")
+	if fileExists(goScaffold) {
+		cmd := exec.Command("go", append([]string{"run", "./scaffold/main.go"}, args...)...)
+		cmd.Dir = pluginDir
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		return cmd.Run()
+	}
+
+	shScaffold := filepath.Join(pluginDir, "scaffold.sh")
+	if fileExists(shScaffold) {
+		cmd := exec.Command("bash", append([]string{shScaffold}, args...)...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		return cmd.Run()
+	}
+
+	return fmt.Errorf("plugin %s has no scaffold/main.go or scaffold.sh", plugin)
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 func runBranch(args []string) {
 	if len(args) == 0 {
 		fmt.Println("Usage: ./dialtone.sh branch <name>")
-		fmt.Println("\nThis command creates or checks out a feature branch.")
 		os.Exit(1)
 	}
 
 	branchName := args[0]
-
-	// Check if branch exists
-	cmd := exec.Command("git", "branch", "--list", branchName)
-	output, err := cmd.Output()
+	check := exec.Command("git", "branch", "--list", branchName)
+	output, err := check.Output()
 	if err != nil {
-		logger.LogFatal("Failed to check branches: %v", err)
+		fmt.Printf("Failed to check branches: %v\n", err)
+		os.Exit(1)
 	}
 
+	var cmd *exec.Cmd
 	if strings.TrimSpace(string(output)) != "" {
-		// Branch exists, checkout
-		logger.LogInfo("Branch '%s' exists, checking out...", branchName)
+		fmt.Printf("Branch '%s' exists, checking out...\n", branchName)
 		cmd = exec.Command("git", "checkout", branchName)
 	} else {
-		// Branch doesn't exist, create
-		logger.LogInfo("Creating new branch '%s'...", branchName)
+		fmt.Printf("Creating new branch '%s'...\n", branchName)
 		cmd = exec.Command("git", "checkout", "-b", branchName)
 	}
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		logger.LogFatal("Git operation failed: %v", err)
+		fmt.Printf("Git operation failed: %v\n", err)
+		os.Exit(1)
 	}
 
-	logger.LogInfo("Now on branch: %s", branchName)
+	fmt.Printf("Now on branch: %s\n", branchName)
 }

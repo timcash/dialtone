@@ -95,6 +95,81 @@ cd dialtone
 ./dialtone.sh --help
 ```
 
+## 4. LLM Agent Usage (`./dialtone.sh` + REPL)
+Yes. Tools like Claude Code, Codex CLI, and Gemini CLI can use Dialtone in two ways:
+
+### A) Direct command mode (non-REPL)
+Run plugin/orchestrator commands directly:
+
+```bash
+./dialtone.sh go version
+./dialtone.sh robot install src_v1
+./dialtone.sh ps tracked
+```
+
+### B) REPL mode (interactive or scripted)
+Start an interactive session:
+
+```bash
+./dialtone.sh repl
+```
+
+Use agent-style command routing in REPL:
+- `USER-1>` enters commands.
+- `@DIALTONE ...` tells Dialtone to run managed commands/subtones.
+- `DIALTONE:PID:>` streams subprocess output.
+
+### C) REPL automation for LLM agents (no extra tools required)
+For deterministic automation, run REPL from stdin:
+
+```bash
+./dialtone.sh repl --stdin --echo-input --env env/test.env <<'EOF'
+@DIALTONE dev install
+@DIALTONE robot install src_v1
+@DIALTONE task --sign robot-install-testid
+status
+exit
+EOF
+```
+
+Or run from a script file:
+
+```bash
+./dialtone.sh repl --script ./scripts/repl-smoke.txt --echo-input --env env/test.env
+```
+
+### D) Interactive human workflow (error -> fix -> rerun in one session)
+This is what a real interactive session looks like when a user makes an error, corrects it, and asks DIALTONE to run again without leaving the REPL:
+
+```text
+USER-1> @DIALTONE robot install src_v1
+DIALTONE> Request received. Task created: `robot-install-a7f3k2`.
+DIALTONE> Sign with `@DIALTONE task --sign robot-install-a7f3k2` to run.
+USER-1> @DIALTONE task --sign wrong-task-id
+DIALTONE> Signature id mismatch. Expected: robot-install-a7f3k2
+USER-1> @DIALTONE task --sign robot-install-a7f3k2
+DIALTONE> Signatures verified.
+DIALTONE> Spawning subtone subprocess via PID 530013...
+DIALTONE> Streaming stdout/stderr from subtone PID 530013.
+DIALTONE:530013:> >> [Robot] Install: src_v1
+DIALTONE:530013:> >> [Robot] Install complete: src_v1
+DIALTONE> Process 530013 exited with code 0.
+DIALTONE> Subtone completed successfully.
+USER-1> @DIALTONE robot install src_v1
+DIALTONE> Request received. Task created: `robot-install-b9k2xm`.
+DIALTONE> Sign with `@DIALTONE task --sign robot-install-b9k2xm` to run.
+USER-1> @DIALTONE task --sign robot-install-b9k2xm
+DIALTONE> Signatures verified.
+DIALTONE> Spawning subtone subprocess via PID 530135...
+DIALTONE:530135:> >> [Robot] Install: src_v1
+DIALTONE> Process 530135 exited with code 0.
+```
+
+### Recommended agent pattern
+1. Use direct commands for simple checks (`go version`, `ps`, `status`).
+2. Use REPL for task-sign workflows and subtone monitoring.
+3. Use `env/test.env` for isolated runs so test dependencies install outside the repo (for example under `/tmp`).
+
 
 
 ## How the code base is organized
