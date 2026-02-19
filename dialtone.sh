@@ -15,6 +15,7 @@ fi
 GRACEFUL_TIMEOUT=${GRACEFUL_TIMEOUT:-5}
 PROCESS_TIMEOUT=${PROCESS_TIMEOUT:-0}
 RUNTIME_DIR="$SCRIPT_DIR/.dialtone/run"
+LOG_FILE="$SCRIPT_DIR/dialtone.log"
 
 # Track wrapper nesting depth; nested wrappers are tracked with unique keys.
 if [[ "${DIALTONE_WRAPPER_DEPTH:-0}" =~ ^[0-9]+$ ]]; then
@@ -34,7 +35,25 @@ print_help() {
 }
 
 dialtone_say() {
-    echo "DIALTONE> $*"
+    local msg="DIALTONE> $*"
+    echo "$msg"
+    echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ") | INFO | REPL] $msg" >> "$LOG_FILE"
+}
+
+dialtone_block() {
+    local first=1
+    local timestamp
+    timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    while IFS= read -r line; do
+        if [ "$first" -eq 1 ]; then
+            echo "DIALTONE> $line"
+            echo "[$timestamp | INFO | REPL] DIALTONE> $line" >> "$LOG_FILE"
+            first=0
+        else
+            echo "$line"
+            echo "[$timestamp | INFO | REPL] $line" >> "$LOG_FILE"
+        fi
+    done
 }
 
 run_subtone_stream() {
@@ -52,7 +71,9 @@ run_subtone_stream() {
     dialtone_say "Signatures verified. Spawning subtone subprocess via PID $subtone_pid..."
     dialtone_say "Streaming stdout/stderr from subtone PID $subtone_pid."
     while IFS= read -r line; do
-        echo "DIALTONE:${subtone_pid}:> $line"
+        local log_line="DIALTONE:subtone:> $line"
+        echo "$log_line"
+        echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ") | INFO | REPL] $log_line" >> "$LOG_FILE"
     done <"$fifo"
 
     set +e
@@ -66,9 +87,12 @@ run_subtone_stream() {
 }
 
 start_repl() {
-    dialtone_say "Virtual Librarian online."
-    dialtone_say "I can bootstrap dev tools, route commands through dev.go, and help install plugins."
-    dialtone_say "Type 'help' for commands, or 'exit' to quit."
+    [ ! -f "$LOG_FILE" ] && touch "$LOG_FILE"
+    cat <<EOF | dialtone_block
+Virtual Librarian online.
+I can bootstrap dev tools, route commands through dev.go, and help install plugins.
+Type 'help' for commands, or 'exit' to quit.
+EOF
 
     while true; do
         printf "USER-1> "
@@ -78,6 +102,7 @@ start_repl() {
             break
         fi
 
+        echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ") | INFO | REPL] USER-1> $user_input" >> "$LOG_FILE"
         user_input="$(echo "$user_input" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
         [ -z "$user_input" ] && continue
 
@@ -94,35 +119,26 @@ start_repl() {
                 break
                 ;;
             help)
-                dialtone_say "Commands:"
-                dialtone_say "  dev install           Install latest Go and bootstrap dev.go command scaffold"
-                dialtone_say "  robot install src_v1  Install robot src_v1 dependencies"
-                dialtone_say "  <any command>         Forward to ./dialtone.sh <command>"
+                cat <<EOF | dialtone_block
+Help
+
+### Bootstrap
+\`dev install\`
+Install latest Go and bootstrap dev.go command scaffold
+
+### Plugins
+\`robot install src_v1\`
+Install robot src_v1 dependencies
+
+### System
+\`<any command>\`
+Forward to @./dialtone.sh <command>
+EOF
                 continue
                 ;;
             "dev install")
-                dialtone_say "Installing latest Go runtime for managed ./dialtone.sh go commands..."
-                installer="$SCRIPT_DIR/src/plugins/go/install.sh"
-                if [ ! -f "$installer" ]; then
-                    dialtone_say "Installer missing: $installer"
-                    continue
-                fi
-                if ! bash "$installer" --latest; then
-                    dialtone_say "Install failed."
-                    continue
-                fi
-
-                if [[ "${DIALTONE_ENV:-}" == "~"* ]]; then
-                    DIALTONE_ENV="${DIALTONE_ENV/#\~/$HOME}"
-                fi
-                GO_BIN="${DIALTONE_ENV:-}/go/bin/go"
-                if [ -x "$GO_BIN" ]; then
-                    dialtone_say "Bootstrap complete. Initializing dev.go scaffold..."
-                    (cd "$SCRIPT_DIR/src" && "$GO_BIN" run cmd/dev/main.go help) || true
-                    dialtone_say "Ready. You can now run plugin commands (install/build/test) via DIALTONE."
-                else
-                    dialtone_say "Go runtime installed, but DIALTONE_ENV/go/bin/go was not found."
-                fi
+                dialtone_say "dev install"
+                run_subtone_stream "__bootstrap_dev"
                 continue
                 ;;
             "robot install src_v1")
@@ -500,6 +516,33 @@ if [ "$CMD" = "install" ]; then
     exit $?
 fi
 
+if [ "$CMD" = "__bootstrap_dev" ]; then
+    dialtone_say "Installing latest Go runtime for managed ./dialtone.sh go commands..."
+    installer="$SCRIPT_DIR/src/plugins/go/install.sh"
+    if [ ! -f "$installer" ]; then
+        dialtone_say "Installer missing: $installer"
+        exit 1
+    fi
+    if ! bash "$installer" --latest; then
+        dialtone_say "Install failed."
+        exit 1
+    fi
+
+    if [[ "${DIALTONE_ENV:-}" == "~"* ]]; then
+        DIALTONE_ENV="${DIALTONE_ENV/#\~/$HOME}"
+    fi
+    GO_BIN="${DIALTONE_ENV:-}/go/bin/go"
+    if [ -x "$GO_BIN" ]; then
+        dialtone_say "Bootstrap complete. Initializing dev.go scaffold..."
+        (cd "$SCRIPT_DIR/src" && "$GO_BIN" run cmd/dev/main.go help) >/dev/null 2>&1 || true
+        dialtone_say "Ready. You can now run plugin commands (install/build/test) via DIALTONE."
+    else
+        dialtone_say "Go runtime installed, but DIALTONE_ENV/go/bin/go was not found."
+        exit 1
+    fi
+    exit 0
+fi
+
 # Everything else runs through managed Go toolchain.
 if [[ "${DIALTONE_ENV:-}" == "~"* ]]; then
     DIALTONE_ENV="${DIALTONE_ENV/#\~/$HOME}"
@@ -547,6 +590,8 @@ LOG=$log_file
 STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF_META
 
+    echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ") | INFO | EXEC] Start: $cmdline" >> "$LOG_FILE"
+
     (cd "$SCRIPT_DIR/src" && "$go_cmd" run cmd/dev/main.go "$@") \
         > >(tee -a "$log_file") \
         2> >(tee -a "$log_file" >&2) &
@@ -574,6 +619,7 @@ EOF_META
         kill "$watchdog_pid" 2>/dev/null || true
     fi
 
+    echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ") | INFO | EXEC] Exit $exit_code: $cmdline" >> "$LOG_FILE"
     rm -f "$pid_file" "$meta_file"
     return "$exit_code"
 }
