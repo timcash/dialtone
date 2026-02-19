@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"dialtone/cli/src/core/build"
+	"dialtone/dev/core/build"
 	"fmt"
 )
 

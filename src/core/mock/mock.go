@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"dialtone/cli/src/core/logger"
+	"dialtone/dev/core/logger"
 )
 
 type MavlinkNatsMsg struct {

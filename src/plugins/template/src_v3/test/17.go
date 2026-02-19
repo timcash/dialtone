@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	test_v2 "dialtone/cli/src/libs/test_v2"
+	test_v2 "dialtone/dev/libs/test_v2"
 	"github.com/chromedp/chromedp"
 )
 

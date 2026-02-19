@@ -5,7 +5,7 @@ import (
 	"net"
 	"time"
 
-	"dialtone/cli/src/core/browser"
+	"dialtone/dev/core/browser"
 )
 
 func Run18CleanupVerification(ctx *testCtx) (string, error) {

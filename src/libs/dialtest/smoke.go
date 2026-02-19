@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"dialtone/cli/src/core/browser"
+	"dialtone/dev/core/browser"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"dialtone/cli/src/core/logger"
+	"dialtone/dev/core/logger"
 	"flag"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"

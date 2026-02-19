@@ -4,7 +4,7 @@ import (
 	"os"
 	"os/exec"
 
-	"dialtone/cli/src/core/logger"
+	"dialtone/dev/core/logger"
 )
 
 func runBuildTests() {

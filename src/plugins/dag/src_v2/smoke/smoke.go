@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"dialtone/cli/src/libs/dialtest"
+	"dialtone/dev/libs/dialtest"
 	"github.com/chromedp/chromedp"
 )
 

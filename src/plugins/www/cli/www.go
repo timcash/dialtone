@@ -17,9 +17,9 @@ import (
 	"syscall"
 	"time"
 
-	"dialtone/cli/src/core/browser"
-	chrome "dialtone/cli/src/plugins/chrome/app"
-	wwwtest "dialtone/cli/src/plugins/www/test"
+	"dialtone/dev/core/browser"
+	chrome "dialtone/dev/plugins/chrome/app"
+	wwwtest "dialtone/dev/plugins/www/test"
 
 	"github.com/chromedp/chromedp"
 	stdruntime "runtime"

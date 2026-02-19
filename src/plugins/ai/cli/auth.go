@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"dialtone/cli/src/core/logger"
+	"dialtone/dev/core/logger"
 	"os"
 
 	"github.com/joho/godotenv"

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	chrome_app "dialtone/cli/src/plugins/chrome/app"
+	chrome_app "dialtone/dev/plugins/chrome/app"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )

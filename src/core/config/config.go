@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"dialtone/cli/src/core/logger"
+	"dialtone/dev/core/logger"
 
 	"github.com/joho/godotenv"
 )

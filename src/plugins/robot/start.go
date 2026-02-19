@@ -2,11 +2,11 @@ package robot
 
 import (
 	"context"
-	"dialtone/cli/src/core/logger"
-	"dialtone/cli/src/core/util"
-	"dialtone/cli/src/core/web"
-	"dialtone/cli/src/core/mock"
-	mavlink_app "dialtone/cli/src/plugins/mavlink/app"
+	"dialtone/dev/core/logger"
+	"dialtone/dev/core/util"
+	"dialtone/dev/core/web"
+	"dialtone/dev/core/mock"
+	mavlink_app "dialtone/dev/plugins/mavlink/app"
 	"encoding/json"
 	"flag"
 	"fmt"

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"dialtone/cli/src/core/logger"
-	"dialtone/cli/src/core/util"
-	"dialtone/cli/src/plugins/vpn"
+	"dialtone/dev/core/logger"
+	"dialtone/dev/core/util"
+	"dialtone/dev/plugins/vpn"
 )
 
 func init() {

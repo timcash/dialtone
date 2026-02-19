@@ -32,15 +32,12 @@ Implement a top-level bootstrap experience where `./dialtone.sh` and `./dialtone
 ### Plugin Path
 - `USER-1> @DIALTONE robot install src_v1` should execute from REPL through standard command routing.
 - Plugin install should prepare local dependencies for that plugin version.
-- After receiving the request, `DIALTONE>` should generate a random task ID and require signatures against that ID.
+- Commands are executed directly via subtone streaming.
 
 **Example dialog (`robot install src_v1` via subtone):**
 ```text
 USER-1> @DIALTONE robot install src_v1
-DIALTONE> Request received. Task created: `robot-install-a7f3k2`.
-DIALTONE> Sign with `@DIALTONE task --sign robot-install-a7f3k2` to run.
-USER-1> @DIALTONE task --sign robot-install-a7f3k2
-LLM-OPS> @DIALTONE task --sign robot-install-a7f3k2
+DIALTONE> Request received. Spawning subtone for robot install...
 DIALTONE> Signatures verified. Spawning subtone subprocess via PID 5821...
 DIALTONE> Streaming stdout/stderr from subtone PID 5821.
 DIALTONE:5821:> >> [Robot] Install: src_v1
@@ -49,7 +46,6 @@ DIALTONE:5821:> >> [Robot] Installing UI dependencies (bun install)
 DIALTONE:5821:> >> [Robot] Installing Go dependencies for src_v1
 DIALTONE:5821:> >> [Robot] Install complete: src_v1
 DIALTONE> Process 5821 exited with code 0.
-DIALTONE> Artifacts/logs linked to task `robot-install-a7f3k2` and published to DAG.
 ```
 
 ---
@@ -95,7 +91,7 @@ DIALTONE> Artifacts/logs linked to task `robot-install-a7f3k2` and published to 
 - Confirm `help` and `exit` work.
 
 ### B. Latest Go Install
-- In REPL: run `dev install`.
+- In REPL: run `@DIALTONE dev install` or just `dev install`.
 - Verify:
   - Installer resolves latest stable version.
   - `DIALTONE_ENV/go/bin/go version` is available.
@@ -103,8 +99,7 @@ DIALTONE> Artifacts/logs linked to task `robot-install-a7f3k2` and published to 
 
 ### C. Plugin Command Path
 - In REPL: run `@DIALTONE robot install src_v1`.
-- Verify command is accepted and mapped to a generated task ID.
-- Verify signing (`@DIALTONE task --sign <generated-id>`) is required before execution.
+- Verify command is accepted and run immediately.
 - Verify subtone output streams as `DIALTONE:PID:>`.
 - Verify expected dependency artifacts exist for robot plugin.
 

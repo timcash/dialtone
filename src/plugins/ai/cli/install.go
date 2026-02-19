@@ -1,8 +1,8 @@
 package cli
 
 import (
-	"dialtone/cli/src/core/config"
-	"dialtone/cli/src/core/logger"
+	"dialtone/dev/core/config"
+	"dialtone/dev/core/logger"
 	"os"
 	"os/exec"
 	"path/filepath"

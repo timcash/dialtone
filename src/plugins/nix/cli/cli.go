@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"dialtone/cli/src/plugins/nix/test"
+	"dialtone/dev/plugins/nix/test"
 	"flag"
 	"fmt"
 )

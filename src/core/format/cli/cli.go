@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"dialtone/cli/src/core/config"
-	"dialtone/cli/src/core/logger"
+	"dialtone/dev/core/config"
+	"dialtone/dev/core/logger"
 )
 
 const gofmtBatchSize = 200

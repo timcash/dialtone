@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"dialtone/cli/src/libs/dialtest"
+	"dialtone/dev/libs/dialtest"
 )
 
 func main() {

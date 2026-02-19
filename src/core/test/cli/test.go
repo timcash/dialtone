@@ -6,20 +6,20 @@ import (
 	"os/exec"
 	"strings"
 
-	"dialtone/cli/src/core/logger"
-	core_test "dialtone/cli/src/core/test"
-	ai_test "dialtone/cli/src/plugins/ai/test"
-	bun_test "dialtone/cli/src/plugins/bun/test"
-	cad_test "dialtone/cli/src/plugins/cad/test"
-	diagnostic_test "dialtone/cli/src/plugins/diagnostic/test"
-	go_test "dialtone/cli/src/plugins/go/test"
-	ide_test "dialtone/cli/src/plugins/ide/test"
-	repl_test "dialtone/cli/src/plugins/repl/test"
+	"dialtone/dev/core/logger"
+	core_test "dialtone/dev/core/test"
+	ai_test "dialtone/dev/plugins/ai/test"
+	bun_test "dialtone/dev/plugins/bun/test"
+	cad_test "dialtone/dev/plugins/cad/test"
+	diagnostic_test "dialtone/dev/plugins/diagnostic/test"
+	go_test "dialtone/dev/plugins/go/test"
+	ide_test "dialtone/dev/plugins/ide/test"
+	repl_test "dialtone/dev/plugins/repl/test"
 
-	// ticket_test "dialtone/cli/src/plugins/ticket/test"
-	_ "dialtone/cli/src/plugins/cloudflare/test"
-	ui_test "dialtone/cli/src/plugins/ui/test"
-	www_test "dialtone/cli/src/plugins/www/test"
+	// ticket_test "dialtone/dev/plugins/ticket/test"
+	_ "dialtone/dev/plugins/cloudflare/test"
+	ui_test "dialtone/dev/plugins/ui/test"
+	www_test "dialtone/dev/plugins/www/test"
 )
 
 // RunTest handles the 'test' command

@@ -2,9 +2,9 @@ package test
 
 import (
 	"bytes"
-	"dialtone/cli/src/core/logger"
-	"dialtone/cli/src/core/test"
-	"dialtone/cli/src/plugins/cad/app"
+	"dialtone/dev/core/logger"
+	"dialtone/dev/core/test"
+	"dialtone/dev/plugins/cad/app"
 	"encoding/json"
 	"fmt"
 	"net/http"

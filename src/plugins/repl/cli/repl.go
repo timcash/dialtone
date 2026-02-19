@@ -4,7 +4,7 @@ import (
 	"flag"
 	"fmt"
 
-	repl_test "dialtone/cli/src/plugins/repl/test"
+	repl_test "dialtone/dev/plugins/repl/test"
 )
 
 func Run(args []string) error {

@@ -16,8 +16,8 @@ import (
 	"net"
 	"net/http"
 
-	"dialtone/cli/src/core/browser"
-	"dialtone/cli/src/core/logger"
+	"dialtone/dev/core/browser"
+	"dialtone/dev/core/logger"
 	"github.com/chromedp/chromedp"
 )
 

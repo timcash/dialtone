@@ -37,18 +37,6 @@ dialtone_say() {
     echo "DIALTONE> $*"
 }
 
-generate_random_task_id() {
-    local prefix="$1"
-    if [ -n "${DIALTONE_TEST_TASK_ID:-}" ]; then
-        echo "$DIALTONE_TEST_TASK_ID"
-        return
-    fi
-    local suffix
-    suffix="$(LC_ALL=C tr -dc 'a-z0-9' </dev/urandom | head -c 6)"
-    [ -z "$suffix" ] && suffix="000000"
-    echo "${prefix}-${suffix}"
-}
-
 run_subtone_stream() {
     local subtone_pid fifo line exit_code
     local -a subtone_cmd=("$@")
@@ -78,9 +66,6 @@ run_subtone_stream() {
 }
 
 start_repl() {
-    local pending_task_id=""
-    local -a pending_subtone_cmd=()
-
     dialtone_say "Virtual Librarian online."
     dialtone_say "I can bootstrap dev tools, route commands through dev.go, and help install plugins."
     dialtone_say "Type 'help' for commands, or 'exit' to quit."
@@ -96,6 +81,13 @@ start_repl() {
         user_input="$(echo "$user_input" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
         [ -z "$user_input" ] && continue
 
+        # Normalize prefix: handle @DIALTONE and @dialtone.sh
+        if [[ "$user_input" == "@DIALTONE "* ]]; then
+            user_input="${user_input#@DIALTONE }"
+        elif [[ "$user_input" == "@dialtone.sh "* ]]; then
+            user_input="${user_input#@dialtone.sh }"
+        fi
+
         case "$user_input" in
             exit|quit)
                 dialtone_say "Goodbye."
@@ -104,10 +96,7 @@ start_repl() {
             help)
                 dialtone_say "Commands:"
                 dialtone_say "  dev install           Install latest Go and bootstrap dev.go command scaffold"
-                dialtone_say "  @DIALTONE robot install src_v1"
-                dialtone_say "                        Queue robot install and return a random task id"
-                dialtone_say "  @DIALTONE task --sign <task-id>"
-                dialtone_say "                        Sign the queued task and run it in a subtone"
+                dialtone_say "  robot install src_v1  Install robot src_v1 dependencies"
                 dialtone_say "  <any command>         Forward to ./dialtone.sh <command>"
                 continue
                 ;;
@@ -129,51 +118,19 @@ start_repl() {
                 GO_BIN="${DIALTONE_ENV:-}/go/bin/go"
                 if [ -x "$GO_BIN" ]; then
                     dialtone_say "Bootstrap complete. Initializing dev.go scaffold..."
-                    "$GO_BIN" run "$SCRIPT_DIR/src/cmd/dev/main.go" help || true
+                    (cd "$SCRIPT_DIR/src" && "$GO_BIN" run cmd/dev/main.go help) || true
                     dialtone_say "Ready. You can now run plugin commands (install/build/test) via DIALTONE."
                 else
                     dialtone_say "Go runtime installed, but DIALTONE_ENV/go/bin/go was not found."
                 fi
                 continue
                 ;;
+            "robot install src_v1")
+                dialtone_say "Request received. Spawning subtone for robot install..."
+                run_subtone_stream "robot" "install" "src_v1"
+                continue
+                ;;
         esac
-
-        if [[ "$user_input" == "@DIALTONE "* ]]; then
-            dialtone_cmd="${user_input#@DIALTONE }"
-            read -r -a dialtone_parts <<< "$dialtone_cmd"
-
-            if [ "${dialtone_parts[0]:-}" = "task" ] && [ "${dialtone_parts[1]:-}" = "--sign" ]; then
-                sign_id="${dialtone_parts[2]:-}"
-                if [ -z "$pending_task_id" ]; then
-                    dialtone_say "No pending request to sign."
-                    continue
-                fi
-                if [ -z "$sign_id" ]; then
-                    dialtone_say "Missing task id. Use: @DIALTONE task --sign $pending_task_id"
-                    continue
-                fi
-                if [ "$sign_id" != "$pending_task_id" ]; then
-                    dialtone_say "Signature id mismatch. Expected: $pending_task_id"
-                    continue
-                fi
-
-                run_subtone_stream "${pending_subtone_cmd[@]}"
-                pending_task_id=""
-                pending_subtone_cmd=()
-                continue
-            fi
-
-            if [ "${dialtone_parts[0]:-}" = "robot" ] && [ "${dialtone_parts[1]:-}" = "install" ] && [ "${dialtone_parts[2]:-}" = "src_v1" ]; then
-                pending_task_id="$(generate_random_task_id "robot-install")"
-                pending_subtone_cmd=("robot" "install" "src_v1")
-                dialtone_say "Request received. Task created: \`$pending_task_id\`."
-                dialtone_say "Sign with \`@DIALTONE task --sign $pending_task_id\` to run."
-                continue
-            fi
-
-            dialtone_say "Unknown @DIALTONE request: $dialtone_cmd"
-            continue
-        fi
 
         read -r -a cmd_parts <<< "$user_input"
         dialtone_say "Running: ${cmd_parts[*]}"
@@ -590,7 +547,7 @@ LOG=$log_file
 STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF_META
 
-    "$go_cmd" run "$SCRIPT_DIR/src/cmd/dev/main.go" "$@" \
+    (cd "$SCRIPT_DIR/src" && "$go_cmd" run cmd/dev/main.go "$@") \
         > >(tee -a "$log_file") \
         2> >(tee -a "$log_file" >&2) &
     child_pid=$!

@@ -3,7 +3,7 @@ package util
 import (
 	"io"
 	"net"
-	"dialtone/cli/src/core/logger"
+	"dialtone/dev/core/logger"
 )
 
 // ProxyListener accepts connections and proxies them to the target address

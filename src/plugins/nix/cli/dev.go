@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"dialtone/cli/src/core/browser"
+	"dialtone/dev/core/browser"
 	"fmt"
 	"os"
 	"os/exec"

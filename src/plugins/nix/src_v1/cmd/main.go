@@ -1,7 +1,7 @@
 package main
 
 import (
-	"dialtone/cli/src/plugins/nix/src_v1"
+	"dialtone/dev/plugins/nix/src_v1"
 	"log"
 )
 

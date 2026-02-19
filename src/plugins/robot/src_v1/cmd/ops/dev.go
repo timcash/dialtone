@@ -17,9 +17,9 @@ import (
 	"syscall"
 	"time"
 
-	"dialtone/cli/src/core/browser"
-	test_v2 "dialtone/cli/src/libs/test_v2"
-	chrome_app "dialtone/cli/src/plugins/chrome/app"
+	"dialtone/dev/core/browser"
+	test_v2 "dialtone/dev/libs/test_v2"
+	chrome_app "dialtone/dev/plugins/chrome/app"
 )
 
 func Dev(args []string) error {
