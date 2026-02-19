@@ -1,10 +1,20 @@
 # [`DIALTONE`](https://dialtone.earth) `https://dialtone.earth`
-> A shared software system for learning, coordination, and real-world community work.
+> A Virtual Librarian for learning, and civic coordination.
+
+## What is Dialtone?
+Dialtone is a small program that runs on computers, phones, and robots. It is built for small communities that need practical tools for learning, planning, and operations.
+
+- **Coordination:** Starts a virtual librarian for civic coordination and education.
+- **Visualization:** Builds interactive 3D spaces to work with users.
+- **Communication:** Uses mesh radios and local networks for peer-to-peer robot/human communication.
+- **Extensibility:** Robust plugin system for safely adding new skills and models.
+- **Integration:** Combines CAD, BIM, ERP, and GIS workflows into a single unified pattern.
 
 ![dialtone](./src/plugins/www/screenshots/summary.png)
 
 ## 1. REPL / Chat Interface (Target)
-`./dialtone.sh` should change from its current behavior to instead launch a simple REPL that feels like a text chat with a `DIALTONE>` prompt, as described in [DIALTONE.md](./DIALTONE.md) and [RLM_DIALTONE.md](./RLM_DIALTONE.md).
+- `./dialtone.sh` starts a REPL with a `DIALTONE>` 
+- see [DIALTONE.md](./docs/dialtone/DIALTONE.md).
 
 The REPL accepts commands from user roles (e.g. `USER-1>`), including plugin commands such as the [robot plugin](src/plugins/robot/README.md) for dev, deploy, and telemetry.
 
@@ -58,14 +68,7 @@ cd dialtone
 ./dialtone.sh --help
 ```
 
-## 4. What Dialtone Is
-Dialtone is a small program that runs on computers, phones, and robots. It is built for small communities that need practical tools for learning, planning, and operations.
 
-- **Coordination:** Acts like a virtual librarian for civic coordination and education.
-- **Visualization:** Builds interactive 3D spaces to work with users.
-- **Communication:** Uses mesh radios and local networks for peer-to-peer robot/human communication.
-- **Extensibility:** Robust plugin system for safely adding new skills and models.
-- **Integration:** Combines CAD, BIM, ERP, and GIS workflows into a single unified pattern.
 
 ## How the code base is organized
 - `./dialtone.sh` and `.\dialtone.ps1` start a REPL with `DIALTONE>`
@@ -85,31 +88,30 @@ Dialtone is a small program that runs on computers, phones, and robots. It is bu
 - `src/examples/` contains the examples for the program
 - writing code with `DIALTONE>`
 
-## Who uses Dialtone
-- Manufacturers building production and sensor systems.
-- Students learning math, physics, and engineering with real examples.
-- Civic teams planning public projects and tracking progress.
-- Builders and operators assembling kits and running field work.
-- Developers writing code, docs, and tests.
-- Researchers running experiments and monitoring live data.
 
-### README.md
+
+## Plugin README.md
 Every plugin must include a `README.md` at its plugin root (`src/plugins/<plugin>/README.md`).
 
 Use the shared template:
 
-- [README_TEMPLATE.md](./README_TEMPLATE.md)
+- [README_TEMPLATE.md](./docs/templates/README_TEMPLATE.md)
 
-## DIALTONE example session log
-```text
-USER-1> @DIALTONE npm run test
-DIALTONE> Request received. Sign with `@DIALTONE task --sign test-task`...
-USER-1> @DIALTONE task --sign test-task
-DIALTONE> Signatures verified. Running command via PID 4512...
 
-DIALTONE:4512> > dialtone@1.0.0 test
-DIALTONE:4512> > tap "test/*.js"
-DIALTONE:4512> [PASS] test/basic.js
-DIALTONE:4512> Tests completed successfully.
-DIALTONE:4512> [EXIT] Process exited with code 0.
-```
+## TODO
+
+### build DIALTONE> cli 
+- start with a simple dailtone.sh scripted interatcion
+- update core with the new dialtone process manager to spawn subtones
+- log all interactions in swarm autolog
+- integrate with swarm for the dag task database
+- show a workflow of starting on a new computer for the first time and getting things installed
+
+### add key management tools
+- allow USER> and LLM-*> to send a password and get authed with DIALTONE>
+
+### integrate nix as the package manager
+- show a full ./dialtone.sh workflow as a starting point
+- start with install from just the `dialtone.sh` or `dialtone.ps1` wrapper
+- get nix installed via the `./dialtone.sh nix install` command
+- show a plugin install via `./dialtone.sh plugin install <plugin-name>`
