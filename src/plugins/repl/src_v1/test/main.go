@@ -29,6 +29,13 @@ func main() {
 				return Run02DevInstall(ctx)
 			},
 		},
+		{
+			Name: "Test 3: robot install src_v1",
+			Conditions: "1. `USER-1>` should request robot install... \n2. `DIALTONE>` should run that command on a subtone",
+			Run: func() (string, error) {
+				return Run03RobotInstall(ctx)
+			},
+		},
 	}
 
 	reportPath := filepath.Join(ctx.repoRoot, "src/plugins/repl/src_v1/test/TEST.md")
@@ -57,7 +64,6 @@ func main() {
 		
 		if err != nil {
 			fmt.Printf("%s FAILED: %v\n", s.Name, err)
-			// We continue to run all steps to see results in TEST.md
 		} else {
 			fmt.Printf("%s PASSED\n", s.Name)
 		}
