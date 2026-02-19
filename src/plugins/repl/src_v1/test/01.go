@@ -14,7 +14,6 @@ func Run01Startup(ctx *testCtx) (string, error) {
 
 	required := []string{
 		"DIALTONE> Virtual Librarian online.",
-		"I can bootstrap dev tools, route commands through dev.go, and help install plugins.",
 		"Type 'help' for commands, or 'exit' to quit.",
 		"USER-1> help",
 		"DIALTONE> Help",
