@@ -102,6 +102,11 @@ EOF
             break
         fi
 
+        # If stdin is not a TTY (e.g. a pipe or script), echo the input so it appears after the prompt
+        if [ ! -t 0 ]; then
+            echo "$user_input"
+        fi
+
         echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ") | INFO | REPL] USER-1> $user_input" >> "$LOG_FILE"
         user_input="$(echo "$user_input" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
         [ -z "$user_input" ] && continue

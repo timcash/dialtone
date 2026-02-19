@@ -15,7 +15,8 @@ func Run01Startup(ctx *testCtx) (string, error) {
 		"DIALTONE> Virtual Librarian online.",
 		"I can bootstrap dev tools, route commands through dev.go, and help install plugins.",
 		"Type 'help' for commands, or 'exit' to quit.",
-		"USER-1> DIALTONE> Goodbye.",
+		"USER-1> exit",
+		"DIALTONE> Goodbye.",
 	}
 
 	for _, s := range required {
