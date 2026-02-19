@@ -68,7 +68,7 @@ run_subtone_stream() {
     "$SCRIPT_DIR/dialtone.sh" "${subtone_cmd[@]}" >"$fifo" 2>&1 &
     subtone_pid=$!
 
-    dialtone_say "Signatures verified. Spawning subtone subprocess via PID $subtone_pid..."
+    dialtone_say "Spawning subtone subprocess via PID $subtone_pid..."
     dialtone_say "Streaming stdout/stderr from subtone PID $subtone_pid."
     while IFS= read -r line; do
         local log_line="DIALTONE:${subtone_pid}:> $line"
@@ -128,11 +128,11 @@ EOF
 Help
 
 ### Bootstrap
-\`dev install\`
+\`@DIALTONE dev install\`
 Install latest Go and bootstrap dev.go command scaffold
 
 ### Plugins
-\`robot install src_v1\`
+\`@DIALTONE robot install src_v1\`
 Install robot src_v1 dependencies
 
 ### System
@@ -142,7 +142,7 @@ EOF
                 continue
                 ;;
             "dev install")
-                dialtone_say "dev install"
+                dialtone_say "Request received. Spawning subtone for dev install..."
                 run_subtone_stream "__bootstrap_dev"
                 continue
                 ;;
@@ -154,7 +154,7 @@ EOF
         esac
 
         read -r -a cmd_parts <<< "$user_input"
-        dialtone_say "Running: ${cmd_parts[*]}"
+        dialtone_say "Request received. Running: ${cmd_parts[*]}"
         if "$SCRIPT_DIR/dialtone.sh" "${cmd_parts[@]}"; then
             dialtone_say "Done."
         else
