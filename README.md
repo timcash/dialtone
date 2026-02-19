@@ -18,31 +18,18 @@ Dialtone is a small program that runs on computers, phones, and robots. It is bu
 - After bootstrap, `DIALTONE>` can install plugins and connect to swarm, VPN, and NATS.
 - see [DIALTONE.md](./docs/dialtone/DIALTONE.md).
 
-The REPL accepts commands from user roles (e.g. `USER-1>`), including robot development and deployment tasks.
+The REPL accepts commands from user roles (e.g. `USER-1>`), including plugin commands such as the [robot plugin](src/plugins/robot/README.md) for dev, deploy, and telemetry.
 
-**Example:**
+**Example (robot plugin):**
 ```text
-USER-1> ./dialtone.sh
-DIALTONE> I can bootstrap dev mode. Install minimal Go runtime + bootstrap files now? [yes/no]
-USER-1> yes
-DIALTONE> Installing minimal runtime and loading `src/dev.go`...
-DIALTONE> Bootstrap complete. New capabilities available: plugin install, swarm, vpn, nats, task DAG.
-USER-1> @DIALTONE plugin install robot
-USER-1> @DIALTONE swarm connect
-USER-1> @DIALTONE vpn up
-USER-1> @DIALTONE task start robot-nav-update-v3
-DIALTONE> Task selected: [robot-nav-update-v3]. Invite roles `LLM-CODE`, `LLM-TEST`, `LLM-OPS`?
-USER-1> yes
-LLM-CODE> [Edit src/plugins/robot/nav_controller.py: improve obstacle avoidance near loading docks]
-LLM-TEST> @DIALTONE pytest src/plugins/robot/tests/test_nav_controller.py
-DIALTONE> Request received. Sign with `@DIALTONE task --sign robot-nav-update-v3` to run.
-USER-1> @DIALTONE task --sign robot-nav-update-v3
-LLM-OPS> @DIALTONE task --sign robot-nav-update-v3
-DIALTONE> Signatures verified. Running command via PID 4512...
-DIALTONE:4512> [PASS] test_nav_controller.py::test_dock_approach
-DIALTONE:4512> [PASS] test_nav_controller.py::test_obstacle_recovery
-DIALTONE> Process 4512 exited with code 0.
-DIALTONE> DAG updated. Logs and artifacts published over swarm + VPN + NATS.
+USER-1> robot dev src_v1
+DIALTONE> Starting robot dev (mock data)...
+DIALTONE:robot> Vite at http://127.0.0.1:3000
+DIALTONE:robot> Chrome launched. Use 9:Mode to switch views.
+USER-1> robot test src_v1
+DIALTONE> Running robot tests...
+DIALTONE:robot> [PASS] headless tests complete.
+DIALTONE> Process exited with code 0.
 ```
 
 ## 2. Code Stack
