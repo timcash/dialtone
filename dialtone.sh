@@ -71,7 +71,7 @@ run_subtone_stream() {
     dialtone_say "Spawning subtone subprocess via PID $subtone_pid..."
     dialtone_say "Streaming stdout/stderr from subtone PID $subtone_pid."
     while IFS= read -r line; do
-        local log_line="DIALTONE:${subtone_pid}:> $line"
+        local log_line="DIALTONE:${subtone_pid}> $line"
         echo "$log_line"
         echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ") | INFO | REPL] $log_line" >> "$LOG_FILE"
     done <"$fifo"
