@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 func main() {
@@ -67,8 +68,27 @@ func runExec(args []string) {
 		os.Exit(1)
 	}
 
+	// Find main module root (the one with dialtone/dev)
+	cwd, _ := os.Getwd()
+	moduleRoot := cwd
+	for {
+		goMod := filepath.Join(moduleRoot, "go.mod")
+		if data, err := os.ReadFile(goMod); err == nil {
+			if strings.Contains(string(data), "module dialtone/dev") {
+				break
+			}
+		}
+		parent := filepath.Dir(moduleRoot)
+		if parent == moduleRoot {
+			moduleRoot = cwd // Fallback
+			break
+		}
+		moduleRoot = parent
+	}
+
 	goBin := filepath.Join(dialtoneEnv, "go", "bin", "go")
 	cmd := exec.Command(goBin, args...)
+	cmd.Dir = moduleRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
