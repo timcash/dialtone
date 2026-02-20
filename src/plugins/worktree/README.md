@@ -54,6 +54,7 @@ Managed worktree base directory:
 - `test src_v1`
   - runs idempotent E2E: `add -> start -> tmux-logs -> verify-done -> remove`
   - prints token usage + estimated cost
+  - emits a structured `[COST] ...` line for REPL/subtone forwarding
   - appends one test record line to this README each run
 
 ## REPL Usage
@@ -70,3 +71,4 @@ From REPL (`./dialtone.sh`):
 - 2026-02-20T20:00:28Z | result=PASS | model=gemini-2.5-flash | input=0 output=0 total=0 | estimated_cost_usd=0.000000 | note=ok
 - 2026-02-20T20:02:21Z | result=PASS | model=gemini-2.5-flash | input=0 output=0 total=0 | estimated_cost_usd=0.000000 | note=ok
 - 2026-02-20T20:04:09Z | result=PASS | model=gemini-2.5-flash | input=111139 output=855 total=112676 | estimated_cost_usd=0.035479 | note=ok
+- 2026-02-20T20:54:58Z | result=PASS | model=gemini-2.5-flash | input=87798 output=700 total=89289 | estimated_cost_usd=0.028089 | note=ok

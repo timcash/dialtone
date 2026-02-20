@@ -10,6 +10,7 @@ The REPL plugin tests interactive `dialtone.sh` behavior (`USER-1>` / `DIALTONE>
 ./dialtone.sh repl test src_v1 worktree
 ./dialtone.sh repl test src_v1 ps
 ./dialtone.sh repl test src_v1 robot
+./dialtone.sh repl test src_v1 cost
 ```
 
 ## Subtest Filtering
@@ -27,6 +28,8 @@ Examples:
   - validates `worktree add`, `worktree list`, `worktree remove`
 - `Test 7: worktree start`
   - validates `worktree add` + `worktree start` launch behavior and cleanup
+- `Test 8: subtone cost logs`
+  - validates `[COST] ...` lines from a subtone are surfaced to root REPL (`DIALTONE:PID> [COST] ...`)
 
 ## Notes
 - REPL tests inspect subtone logs in `.dialtone/logs`.
