@@ -4,13 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Simple Test UI</title>
-    <style>
-      body { margin: 0; background: #05070a; color: #fff; font-family: sans-serif; }
-      canvas { display: block; width: 100vw; height: 100vh; }
-      .ui-overlay { position: absolute; top: 60px; left: 20px; z-index: 10; pointer-events: none; }
-      button { pointer-events: auto; padding: 10px 20px; background: #1a1d23; color: #fff; border: 1px solid #30363d; border-radius: 6px; cursor: pointer; }
-      button:hover { background: #30363d; }
-    </style>
+    <link rel="stylesheet" href="src/style.css" />
   </head>
   <body>
     <div id="app">
@@ -23,10 +17,25 @@
       </nav>
 
       <section id="simple-three-stage" aria-label="Simple Three Section" data-ready="false" data-interacted="false">
-        <canvas aria-label="Simple Canvas"></canvas>
-        <div class="ui-overlay">
+        <canvas aria-label="Simple Canvas" class="overlay-primary"></canvas>
+        
+        <aside class="overlay-chatlog" aria-label="Simple Chatlog">
+          <div class="simple-chatlog-xterm" aria-label="Simple Chatlog Terminal"></div>
+        </aside>
+
+        <form class="overlay-form" aria-label="Simple Mode Form">
           <button type="button" aria-label="Simple Interaction Button">Interact</button>
-        </div>
+          <input type="text" placeholder="Type message..." aria-label="Simple Input" />
+        </form>
+
+        <aside class="overlay-legend" aria-label="Simple Legend">
+          <h3>Stats</h3>
+          <div>Status: <span id="simple-status">Ready</span></div>
+        </aside>
+
+        <footer class="overlay-status-bar" aria-label="Simple Status Bar">
+          <span>Connected</span>
+        </footer>
       </section>
     </div>
     <script type="module" src="/src/main.ts"></script>
