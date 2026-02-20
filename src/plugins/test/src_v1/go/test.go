@@ -2,11 +2,14 @@ package test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"dialtone/dev/plugins/chrome/app"
@@ -43,10 +46,18 @@ type SuiteOptions struct {
 	BrowserLogMode string
 }
 
+type ConsoleMessage struct {
+	Type string
+	Text string
+	Time time.Time
+}
+
 type BrowserSession struct {
-	ctx     context.Context
-	cancel  context.CancelFunc
-	Session *chrome.Session
+	ctx      context.Context
+	cancel   context.CancelFunc
+	Session  *chrome.Session
+	mu       sync.Mutex
+	messages []ConsoleMessage
 }
 
 func (s *BrowserSession) Context() context.Context {
@@ -86,6 +97,97 @@ type BrowserOptions struct {
 	LogPrefix     string
 }
 
+func (s *BrowserSession) HasConsoleMessage(substr string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, m := range s.messages {
+		if strings.Contains(m.Text, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *BrowserSession) Entries() []ConsoleMessage {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]ConsoleMessage(nil), s.messages...)
+}
+
+func ConnectToBrowser(port int, role string) (*BrowserSession, error) {
+	wsURL, err := getWebsocketURL(port)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get websocket URL for port %d: %w", port, err)
+	}
+
+	session := &chrome.Session{
+		PID:          0, // Unknown
+		Port:         port,
+		WebSocketURL: wsURL,
+		IsNew:        false,
+	}
+
+	return initSession(session, role)
+}
+
+func getWebsocketURL(port int) (string, error) {
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/json/version", port))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var data struct {
+		WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return "", err
+	}
+
+	return data.WebSocketDebuggerURL, nil
+}
+
+func initSession(session *chrome.Session, role string) (*BrowserSession, error) {
+	logs.Info("   [BROWSER] Connecting to WebSocket: %s", session.WebSocketURL)
+	// Connect to the browser via websocket
+	allocCtx, cancelAlloc := chromedp.NewRemoteAllocator(context.Background(), session.WebSocketURL)
+	
+	// Create context
+	ctx, cancelCtx := chromedp.NewContext(allocCtx)
+
+	s := &BrowserSession{
+		ctx:     ctx,
+		cancel:  func() { cancelCtx(); cancelAlloc() },
+		Session: session,
+	}
+
+	chromedp.ListenTarget(ctx, func(ev interface{}) {
+		switch ev := ev.(type) {
+		case *runtime.EventConsoleAPICalled:
+			var text strings.Builder
+			for i, arg := range ev.Args {
+				if i > 0 {
+					text.WriteString(" ")
+				}
+				text.WriteString(string(arg.Value))
+			}
+			msg := ConsoleMessage{
+				Type: string(ev.Type),
+				Text: text.String(),
+				Time: time.Now(),
+			}
+			s.mu.Lock()
+			s.messages = append(s.messages, msg)
+			s.mu.Unlock()
+			logs.Info("   [BROWSER CONSOLE | PID %d] %s: %s", session.PID, ev.Type, msg.Text)
+		case *runtime.EventExceptionThrown:
+			logs.Error("   [BROWSER EXCEPTION | PID %d] %s", session.PID, ev.ExceptionDetails.Text)
+		}
+	})
+
+	return s, nil
+}
+
 func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 	logs.Info("   [BROWSER] Starting session (role=%s, reuse=%v, gpu=%v)...", opts.Role, opts.ReuseExisting, opts.GPU)
 	session, err := chrome.StartSession(chrome.SessionOptions{
@@ -99,38 +201,20 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 		return nil, fmt.Errorf("failed to start chrome session: %w", err)
 	}
 
-	logs.Info("   [BROWSER] Connecting to WebSocket: %s", session.WebSocketURL)
-	// Connect to the browser via websocket
-	allocCtx, cancelAlloc := chromedp.NewRemoteAllocator(context.Background(), session.WebSocketURL)
-	
-	// Create context
-	ctx, cancelCtx := chromedp.NewContext(allocCtx)
-	
-	chromedp.ListenTarget(ctx, func(ev interface{}) {
-		switch ev := ev.(type) {
-		case *runtime.EventConsoleAPICalled:
-			for _, arg := range ev.Args {
-				logs.Info("   [BROWSER CONSOLE | PID %d] %s: %s", session.PID, ev.Type, arg.Value)
-			}
-		case *runtime.EventExceptionThrown:
-			logs.Error("   [BROWSER EXCEPTION | PID %d] %s", session.PID, ev.ExceptionDetails.Text)
-		}
-	})
-	
+	s, err := initSession(session, opts.Role)
+	if err != nil {
+		return nil, err
+	}
+
 	if opts.URL != "" {
 		logs.Info("   [BROWSER] Navigating to: %s", opts.URL)
-		if err := chromedp.Run(ctx, chromedp.Navigate(opts.URL)); err != nil {
-			cancelCtx()
-			cancelAlloc()
+		if err := chromedp.Run(s.ctx, chromedp.Navigate(opts.URL)); err != nil {
+			s.Close()
 			return nil, err
 		}
 	}
 
-	return &BrowserSession{
-		ctx:     ctx,
-		cancel:  func() { cancelCtx(); cancelAlloc() },
-		Session: session,
-	}, nil
+	return s, nil
 }
 
 type StepResult struct {

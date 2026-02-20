@@ -1,4 +1,4 @@
-package main
+package test
 
 import (
 	"fmt"
@@ -10,7 +10,7 @@ import (
 func Run01Preflight(ctx *testCtx) (string, error) {
 	steps := []struct {
 		name string
-		run  func() error
+		run  func(string) error
 	}{
 		{name: "UI Install", run: Run00Install},
 		{name: "Go Format", run: Run01GoFormat},
@@ -22,19 +22,14 @@ func Run01Preflight(ctx *testCtx) (string, error) {
 	}
 
 	for _, step := range steps {
-		if err := step.run(); err != nil {
+		if err := step.run(ctx.repoRoot); err != nil {
 			return "", fmt.Errorf("%s failed: %w", step.name, err)
 		}
 	}
 	return "Preflight checks passed.", nil
 }
 
-func Run00Install() error {
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-
+func Run00Install(repoRoot string) error {
 	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "robot", "install", "src_v1")
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
@@ -42,12 +37,7 @@ func Run00Install() error {
 	return cmd.Run()
 }
 
-func Run01GoFormat() error {
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-
+func Run01GoFormat(repoRoot string) error {
 	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "robot", "fmt", "src_v1")
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout

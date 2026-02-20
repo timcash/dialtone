@@ -1,4 +1,4 @@
-package main
+package test
 
 import (
 	"fmt"
@@ -14,7 +14,7 @@ func Run16VideoSectionValidation(ctx *testCtx) (string, error) {
 	}
 
 	fmt.Println("   [STEP] Navigating to Video Section...")
-	if err := session.Run(test_v2.NavigateToSection("video", "Video Section")); err != nil {
+	if err := session.Run(test_v2.NavigateToSection("robot", "video", "Video Section")); err != nil {
 		return "", fmt.Errorf("failed navigating to Video: %w", err)
 	}
 

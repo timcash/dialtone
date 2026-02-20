@@ -1,4 +1,4 @@
-package main
+package test
 
 import (
 	"os"
@@ -6,12 +6,7 @@ import (
 	"path/filepath"
 )
 
-func Run02GoVet() error {
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-
+func Run02GoVet(repoRoot string) error {
 	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "robot", "vet", "src_v1")
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout

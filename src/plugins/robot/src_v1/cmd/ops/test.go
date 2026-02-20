@@ -6,17 +6,13 @@ import (
 	"path/filepath"
 )
 
-func Test(extraArgs []string) error {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	testPkg := "./" + filepath.Join("src", "plugins", "robot", "src_v1", "test")
+func Test(repoRoot string, extraArgs []string) error {
+	testPkg := "./" + filepath.Join("plugins", "robot", "src_v1", "test", "cmd")
 
 	args := []string{"go", "exec", "run", testPkg}
 	args = append(args, extraArgs...)
 
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), args...)
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 

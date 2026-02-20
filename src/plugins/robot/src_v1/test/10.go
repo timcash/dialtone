@@ -1,4 +1,4 @@
-package main
+package test
 
 import (
 	"fmt"
@@ -14,10 +14,7 @@ import (
 )
 
 func Run10DevServerRunningLatestUI(ctx *testCtx) (string, error) {
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
+	repoRoot := ctx.repoRoot
 
 	port, err := test_v2.PickFreePort()
 	if err != nil {

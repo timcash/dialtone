@@ -1,4 +1,4 @@
-import { VisualizationControl } from '../../../../../../../libs/ui_v2/types';
+import { VisualizationControl } from '@ui/types';
 import { addMavlinkListener } from '../../data/connection';
 import { registerButtons, renderButtons } from '../../buttons';
 

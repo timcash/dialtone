@@ -1,4 +1,4 @@
-import { setupApp } from '../../../../../plugins/ui/src_v1/ui/ui';
+import { setupApp } from '@ui/ui';
 import './style.css';
 
 const isLocalDevHost = ['127.0.0.1', 'localhost'].includes(window.location.hostname);

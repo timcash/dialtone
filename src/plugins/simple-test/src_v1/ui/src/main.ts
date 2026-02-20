@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-import { setupApp } from '../../../../../plugins/ui/src_v1/ui/ui';
-import { VisualizationControl } from '../../../../../plugins/ui/src_v1/ui/types';
+import { setupApp } from '@ui/ui';
+import { VisualizationControl } from '@ui/types';
 
 class ThreeControl implements VisualizationControl {
   private scene = new THREE.Scene();

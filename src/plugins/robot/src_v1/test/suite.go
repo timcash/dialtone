@@ -1,4 +1,4 @@
-package main
+package test
 
 import (
 	"fmt"
@@ -8,9 +8,11 @@ import (
 	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 )
 
-func main() {
+func RunSuiteV1() {
 	ctx := newTestCtx()
+	defer ctx.teardown()
 	steps := []test_v2.Step{
+		{Name: "00 Reset Workspace", RunWithContext: wrapRun(ctx, Run00Reset)},
 		{Name: "01 Preflight (Go/UI)", RunWithContext: wrapRun(ctx, Run01Preflight), Timeout: 60 * time.Second},
 		{Name: "02 Go Run (Mock Server Check)", RunWithContext: wrapRun(ctx, Run07GoRun), Timeout: 10 * time.Second},
 		{Name: "03 UI Run", RunWithContext: wrapRun(ctx, Run08UIRun), Timeout: 10 * time.Second},
@@ -35,9 +37,9 @@ func main() {
 
 	if err := test_v2.RunSuite(test_v2.SuiteOptions{
 		Version:        "src_v1",
-		ReportPath:     "src/plugins/robot/src_v1/test/TEST.md",
-		LogPath:        "src/plugins/robot/src_v1/test/test.log",
-		ErrorLogPath:   "src/plugins/robot/src_v1/test/error.log",
+		ReportPath:     "plugins/robot/src_v1/test/TEST.md",
+		LogPath:        "plugins/robot/src_v1/test/test.log",
+		ErrorLogPath:   "plugins/robot/src_v1/test/error.log",
 		BrowserLogMode: "errors_only",
 	}, steps); err != nil {
 		fmt.Printf("[TEST] SUITE ERROR: %v\n", err)

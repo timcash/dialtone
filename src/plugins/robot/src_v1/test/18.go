@@ -1,16 +1,16 @@
-package main
+package test
 
 import (
 	"fmt"
 	"net"
 	"time"
 
-	"dialtone/dev/browser"
+	chrome_app "dialtone/dev/plugins/chrome/app"
 )
 
 func Run18CleanupVerification(ctx *testCtx) (string, error) {
 	ctx.teardown()
-	_ = browser.CleanupPort(8080)
+	_ = chrome_app.CleanupPort(8080)
 
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

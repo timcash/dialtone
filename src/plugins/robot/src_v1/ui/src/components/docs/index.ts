@@ -1,4 +1,4 @@
-import { VisualizationControl } from '../../../../../../../libs/ui_v2/types';
+import { VisualizationControl } from '@ui/types';
 import { marked } from 'marked';
 
 export function mountDocs(container: HTMLElement): VisualizationControl {
