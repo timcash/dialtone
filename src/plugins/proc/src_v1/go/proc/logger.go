@@ -31,9 +31,13 @@ func NewSubtoneLogger(pid int, args []string, logDir string) (*SubtoneLogger, er
 	logPath := filepath.Join(logDir, logName)
 	
 	// Create/truncate log file
-	if err := os.WriteFile(logPath, []byte{}, 0644); err != nil {
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
 		return nil, err
 	}
+	fmt.Fprintf(f, "Command: %v\n", args)
+	fmt.Fprintf(f, "Started at: %s\n", time.Now().Format(time.RFC3339))
+	f.Close()
 
 	logger := &SubtoneLogger{
 		PID:        pid,

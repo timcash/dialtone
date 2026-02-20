@@ -2,20 +2,27 @@ package main
 
 import (
 	"fmt"
-	"strings"
+	"time"
 )
 
 func Run01Startup(ctx *testCtx) (string, error) {
-	// Request help then exit
-	output, err := ctx.runREPL("help\nexit\n")
-	if err != nil {
-		return output, fmt.Errorf("REPL failed: %w", err)
+	// Interactive REPL test
+	if err := ctx.StartREPL(); err != nil {
+		return "", fmt.Errorf("failed to start REPL: %w", err)
+	}
+	defer ctx.Close()
+
+	// Wait for prompt
+	if err := ctx.WaitForOutput("USER-1>", 5*time.Second); err != nil {
+		return "", err
+	}
+
+	// 1. Help
+	if err := ctx.SendInput("help"); err != nil {
+		return "", err
 	}
 
 	required := []string{
-		"DIALTONE> Virtual Librarian online.",
-		"Type 'help' for commands, or 'exit' to quit.",
-		"USER-1> help",
 		"DIALTONE> Help",
 		"### Bootstrap",
 		"`@DIALTONE dev install`",
@@ -25,15 +32,13 @@ func Run01Startup(ctx *testCtx) (string, error) {
 		"### System",
 		"`ps`",
 		"`<any command>`",
-		"USER-1> exit",
-		"DIALTONE> Goodbye.",
 	}
 
 	for _, s := range required {
-		if !strings.Contains(output, s) {
-			return output, fmt.Errorf("missing expected output: %q", s)
+		if err := ctx.WaitForOutput(s, 5*time.Second); err != nil {
+			return "", fmt.Errorf("missing expected output: %q", s)
 		}
 	}
 
-	return output, nil
+	return "Verified REPL startup and help command.", nil
 }

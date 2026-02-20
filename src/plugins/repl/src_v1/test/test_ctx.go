@@ -10,14 +10,17 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 )
 
 type testCtx struct {
 	repoRoot string
 	cmd      *exec.Cmd
 	stdin    io.WriteCloser
-	stdout   bytes.Buffer // Stores cumulative output
+	stdout   *bytes.Buffer
 	mu       sync.Mutex
+	timeout  time.Duration
 }
 
 func newTestCtx() *testCtx {
@@ -34,7 +37,18 @@ func newTestCtx() *testCtx {
 		}
 		root = parent
 	}
-	return &testCtx{repoRoot: root}
+	return &testCtx{repoRoot: root, timeout: 30 * time.Second}
+}
+
+func (ctx *testCtx) SetTimeout(d time.Duration) {
+	ctx.timeout = d
+}
+
+// Cleanup ensures REPL process is killed and subtones are waited for/killed.
+func (ctx *testCtx) Cleanup() {
+	ctx.Close()
+	// Best effort cleanup of any lingering dialtone processes
+	_ = test_v2.WaitForAllProcessesToComplete(ctx.repoRoot, 5*time.Second)
 }
 
 // runREPL runs the REPL in one-shot mode (legacy)
@@ -64,6 +78,10 @@ func (ctx *testCtx) runREPL(input string) (string, error) {
 
 // StartREPL launches the REPL in background for interactive testing
 func (ctx *testCtx) StartREPL() error {
+	ctx.mu.Lock()
+	ctx.stdout = new(bytes.Buffer)
+	ctx.mu.Unlock()
+
 	ctx.cmd = exec.Command(filepath.Join(ctx.repoRoot, "dialtone.sh"))
 	ctx.cmd.Dir = ctx.repoRoot
 	
@@ -74,8 +92,8 @@ func (ctx *testCtx) StartREPL() error {
 	}
 	
 	// Capture stdout/stderr to buffer
-	ctx.cmd.Stdout = &ctx.stdout
-	ctx.cmd.Stderr = &ctx.stdout
+	ctx.cmd.Stdout = ctx.stdout
+	ctx.cmd.Stderr = ctx.stdout
 	
 	return ctx.cmd.Start()
 }
@@ -119,6 +137,28 @@ func (ctx *testCtx) WaitForOutput(pattern string, timeout time.Duration) error {
 	return fmt.Errorf("timeout waiting for %q. Output ends with: %q", pattern, out)
 }
 
+func (ctx *testCtx) WaitForLogEntry(logPattern, contentPattern string, timeout time.Duration) error {
+	logsDir := filepath.Join(ctx.repoRoot, ".dialtone", "logs")
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		entries, err := os.ReadDir(logsDir)
+		if err == nil {
+			for _, entry := range entries {
+				if strings.Contains(entry.Name(), logPattern) {
+					path := filepath.Join(logsDir, entry.Name())
+					content, err := os.ReadFile(path)
+					if err == nil && strings.Contains(string(content), contentPattern) {
+						return nil
+					}
+				}
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout waiting for log pattern %q containing %q", logPattern, contentPattern)
+}
+
 func (ctx *testCtx) runDirect(args ...string) (string, error) {
 	cmd := exec.Command(filepath.Join(ctx.repoRoot, "dialtone.sh"), args...)
 	cmd.Dir = ctx.repoRoot
@@ -129,4 +169,8 @@ func (ctx *testCtx) runDirect(args ...string) (string, error) {
 	
 	err := cmd.Run()
 	return stdout.String(), err
+}
+
+func (ctx *testCtx) WaitProcesses(timeout time.Duration) error {
+	return test_v2.WaitForAllProcessesToComplete(ctx.repoRoot, timeout)
 }
