@@ -1,13 +1,10 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-
-	repl_test "dialtone/dev/plugins/repl/test"
 )
 
 func main() {
@@ -19,20 +16,11 @@ func main() {
 
 	switch args[0] {
 	case "test":
-		if len(args) > 1 && args[1] == "src_v1" {
-			if err := runVersionedTest("src_v1"); err != nil {
-				fmt.Printf("REPL test error: %v\n", err)
-				os.Exit(1)
-			}
-			return
+		version := "src_v1"
+		if len(args) > 1 && args[1] != "" {
+			version = args[1]
 		}
-		testFlags := flag.NewFlagSet("repl test", flag.ContinueOnError)
-		timeout := testFlags.Int("timeout", 180, "Timeout in seconds for REPL workflow test")
-		if err := testFlags.Parse(args[1:]); err != nil {
-			fmt.Printf("REPL test error: %v\n", err)
-			os.Exit(1)
-		}
-		if err := repl_test.RunInstallWorkflow(*timeout); err != nil {
+		if err := runVersionedTest(version); err != nil {
 			fmt.Printf("REPL test error: %v\n", err)
 			os.Exit(1)
 		}
