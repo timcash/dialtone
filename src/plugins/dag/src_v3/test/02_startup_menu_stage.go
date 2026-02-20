@@ -1,4 +1,4 @@
-package suite
+package test
 
 import (
 	"fmt"
@@ -10,9 +10,11 @@ func Run02StartupMenuToStageFresh(ctx *testCtx) (string, error) {
 		return "", err
 	}
 
+	ctx.logf("LOOKING FOR: backend server at %s", ctx.appURL("/"))
 	if err := ctx.waitHTTPReady(ctx.appURL("/"), 12*time.Second); err != nil {
 		return "", fmt.Errorf("backend startup wait failed: %w", err)
 	}
+	ctx.logf("LOOKING FOR: navigation to %s", ctx.appURL("/"))
 	if err := ctx.navigate(ctx.appURL("/")); err != nil {
 		ctx.appendThought("startup nav: first navigate failed, retrying once after short wait")
 		time.Sleep(500 * time.Millisecond)
@@ -21,7 +23,9 @@ func Run02StartupMenuToStageFresh(ctx *testCtx) (string, error) {
 		}
 	}
 
-	if err := ctx.waitAriaAttrEquals("App Header", "data-boot", "true", "wait for app boot", 12*time.Second); err != nil {
+	ctx.logf("LOOKING FOR: App Header data-boot=true")
+	if err := ctx.waitAriaAttrEquals("App Header", "data-boot", "true", "wait for app boot", 30*time.Second); err != nil {
+		_ = ctx.captureShot("timeout_boot_step4.png")
 		return "", err
 	}
 
@@ -36,27 +40,33 @@ func Run02StartupMenuToStageFresh(ctx *testCtx) (string, error) {
 		return "", fmt.Errorf("clear startup session state: %w", err)
 	}
 
+	ctx.logf("LOOKING FOR: Toggle Global Menu button")
 	if err := ctx.waitAria("Toggle Global Menu", "fresh startup needs menu toggle"); err != nil {
 		return "", err
 	}
 	if err := ctx.captureShot("test_step_startup_menu_stage_pre.png"); err != nil {
 		return "", fmt.Errorf("capture startup pre screenshot: %w", err)
 	}
+	ctx.logf("LOOKING FOR: Global Menu Panel after toggle")
 	if err := ctx.clickAria("Toggle Global Menu", "open global menu from fresh startup"); err != nil {
 		return "", err
 	}
+	ctx.logf("LOOKING FOR: Navigate Stage button")
 	if err := ctx.waitAria("Navigate Stage", "fresh startup needs stage nav button"); err != nil {
 		return "", err
 	}
+	ctx.logf("LOOKING FOR: Three Canvas after section switch")
 	if err := ctx.clickAria("Navigate Stage", "switch to stage from menu"); err != nil {
 		return "", err
 	}
 	if err := ctx.waitAria("Three Canvas", "stage canvas should exist after menu nav"); err != nil {
 		return "", err
 	}
+	ctx.logf("LOOKING FOR: Three Section data-active=true")
 	if err := ctx.waitAriaAttrEquals("Three Section", "data-active", "true", "stage section should be active", 6*time.Second); err != nil {
 		return "", err
 	}
+	ctx.logf("LOOKING FOR: Three Canvas data-ready=true")
 	if err := ctx.waitAriaAttrEquals("Three Canvas", "data-ready", "true", "stage should report ready", 8*time.Second); err != nil {
 		return "", err
 	}

@@ -1,4 +1,4 @@
-package suite
+package test
 
 import (
 	"os"
@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 )
 
-func Run01Preflight(_ *testCtx) (string, error) {
+func Run01Preflight(ctx *testCtx) (string, error) {
 	repoRoot, err := findRepoRoot()
 	if err != nil {
 		return "", err
@@ -23,6 +23,7 @@ func Run01Preflight(_ *testCtx) (string, error) {
 	}
 
 	for _, args := range commands {
+		ctx.logf("LOOKING FOR: %v", args)
 		cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), args...)
 		cmd.Dir = repoRoot
 		cmd.Stdout = os.Stdout

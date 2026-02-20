@@ -1,8 +1,9 @@
-package suite
+package test
 
 import (
 	"fmt"
 	"os"
+	"time"
 
 	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 )
@@ -13,10 +14,10 @@ func RunSuiteV3() {
 	steps := []test_v2.Step{
 		{Name: "01 DuckDB Graph Query Validation", RunWithContext: wrapRun(ctx, Run01DuckDBGraphQueries)},
 		{Name: "02 Preflight (Go/UI)", RunWithContext: wrapRun(ctx, Run01Preflight)},
-		{Name: "03 Startup: No Backend Menu -> Stage", RunWithContext: wrapRun(ctx, Run02NoBackendMenuToStage), SectionID: "dag-3d-stage", Screenshots: []string{"screenshots/test_step_no_backend_menu_stage_pre.png", "screenshots/test_step_no_backend_menu_stage.png"}, ScreenshotGrid: "screenshots/test_step_no_backend_menu_stage_grid.png"},
-		{Name: "04 Startup: Menu -> Stage Fresh Load", RunWithContext: wrapRun(ctx, Run02StartupMenuToStageFresh), SectionID: "dag-3d-stage", Screenshots: []string{"screenshots/test_step_startup_menu_stage_pre.png", "screenshots/test_step_startup_menu_stage.png"}, ScreenshotGrid: "screenshots/test_step_startup_menu_stage_grid.png"},
-		{Name: "05 DAG Table Section Validation", RunWithContext: wrapRun(ctx, Run02DagTableSectionValidation), SectionID: "dag-meta-table", Screenshots: []string{"screenshots/test_step_1_pre.png", "screenshots/test_step_1.png"}, ScreenshotGrid: "screenshots/test_step_1_grid.png"},
-		{Name: "06 Menu/Nav Section Switch Validation", RunWithContext: wrapRun(ctx, Run03MenuNavSectionSwitch), SectionID: "dag-3d-stage", Screenshots: []string{"screenshots/test_step_menu_nav_pre.png", "screenshots/test_step_menu_nav.png"}, ScreenshotGrid: "screenshots/test_step_menu_nav_grid.png"},
+		{Name: "03 Startup: No Backend Menu -> Stage", RunWithContext: wrapRun(ctx, Run02NoBackendMenuToStage), SectionID: "dag-3d-stage", Screenshots: []string{"screenshots/test_step_no_backend_menu_stage_pre.png", "screenshots/test_step_no_backend_menu_stage.png"}, ScreenshotGrid: "screenshots/test_step_no_backend_menu_stage_grid.png", Timeout: 40 * time.Second},
+		{Name: "04 Startup: Menu -> Stage Fresh Load", RunWithContext: wrapRun(ctx, Run02StartupMenuToStageFresh), SectionID: "dag-3d-stage", Screenshots: []string{"screenshots/test_step_startup_menu_stage_pre.png", "screenshots/test_step_startup_menu_stage.png"}, ScreenshotGrid: "screenshots/test_step_startup_menu_stage_grid.png", Timeout: 40 * time.Second},
+		{Name: "05 DAG Table Section Validation", RunWithContext: wrapRun(ctx, Run02DagTableSectionValidation), SectionID: "dag-meta-table", Screenshots: []string{"screenshots/test_step_1_pre.png", "screenshots/test_step_1.png"}, ScreenshotGrid: "screenshots/test_step_1_grid.png", Timeout: 30 * time.Second},
+		{Name: "06 Menu/Nav Section Switch Validation", RunWithContext: wrapRun(ctx, Run03MenuNavSectionSwitch), SectionID: "dag-3d-stage", Screenshots: []string{"screenshots/test_step_menu_nav_pre.png", "screenshots/test_step_menu_nav.png"}, ScreenshotGrid: "screenshots/test_step_menu_nav_grid.png", Timeout: 30 * time.Second},
 		{Name: "07 Log Section Echo Command", RunWithContext: wrapRun(ctx, Run03LogSectionEcho), SectionID: "dag-log-xterm"},
 		{Name: "07 Test-DAG: Program A Node", RunWithContext: wrapRun(ctx, Run03ThreeUserStoryStartEmpty), SectionID: "dag-3d-stage", Screenshots: []string{"screenshots/test_step_2_pre.png", "screenshots/test_step_2.png"}, ScreenshotGrid: "screenshots/test_step_2_grid.png"},
 		{Name: "08 Test-DAG: Program A -> Agent A", RunWithContext: wrapRun(ctx, Run04ThreeUserStoryBuildIO), SectionID: "dag-3d-stage", Screenshots: []string{"screenshots/test_step_3_pre.png", "screenshots/test_step_3.png"}, ScreenshotGrid: "screenshots/test_step_3_grid.png"},
@@ -40,9 +41,9 @@ func RunSuiteV3() {
 
 	if err := test_v2.RunSuite(test_v2.SuiteOptions{
 		Version:        "src_v3",
-		ReportPath:     "src/plugins/dag/src_v3/suite/TEST.md",
-		LogPath:        "src/plugins/dag/src_v3/suite/test.log",
-		ErrorLogPath:   "src/plugins/dag/src_v3/suite/error.log",
+		ReportPath:     "plugins/dag/src_v3/test/TEST.md",
+		LogPath:        "plugins/dag/src_v3/test/test.log",
+		ErrorLogPath:   "plugins/dag/src_v3/test/error.log",
 		BrowserLogMode: "errors_only",
 	}, steps); err != nil {
 		fmt.Printf("[TEST] SUITE ERROR: %v\n", err)

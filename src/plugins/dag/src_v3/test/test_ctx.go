@@ -1,4 +1,4 @@
-package suite
+package test
 
 import (
 	"fmt"
@@ -172,7 +172,7 @@ func (t *testCtx) ensureDevServer() error {
 	cmd := exec.Command(bunBin, "run", "dev", "--host", "127.0.0.1", "--port", "3000", "--strictPort")
 	cmd.Dir = uiDir
 	// We should probably redirect output to a log file
-	logFile, _ := os.Create(filepath.Join(repoRoot, "src", "plugins", "dag", "src_v3", "suite", "dev_server.log"))
+	logFile, _ := os.Create(filepath.Join(repoRoot, "src", "plugins", "dag", "src_v3", "test", "dev_server.log"))
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 
@@ -515,7 +515,7 @@ func (t *testCtx) captureShot(file string) error {
 	if err != nil {
 		return err
 	}
-	shot := filepath.Join(repoRoot, "src", "plugins", "dag", "src_v3", "suite", "screenshots", file)
+	shot := filepath.Join(repoRoot, "src", "plugins", "dag", "src_v3", "test", "screenshots", file)
 	b, err := t.browser()
 	if err != nil {
 		return err

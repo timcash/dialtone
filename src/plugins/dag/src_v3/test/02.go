@@ -1,4 +1,4 @@
-package suite
+package test
 
 import (
 	"encoding/json"
@@ -68,10 +68,12 @@ func Run02DagTableSectionValidation(ctx *testCtx) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	ctx.logf("LOOKING FOR: dev server at %s", ctx.appURL(""))
 	if err := ctx.waitHTTPReady(ctx.appURL(""), 12*time.Second); err != nil {
 		return "", fmt.Errorf("dev server not ready before table validation: %w", err)
 	}
 
+	ctx.logf("LOOKING FOR: API rows from %s/api/dag-table", ctx.baseURL)
 	apiRows, err := fetchDagTableRowsFromAPI(ctx.baseURL)
 	if err != nil {
 		return "", err
@@ -79,13 +81,16 @@ func Run02DagTableSectionValidation(ctx *testCtx) (string, error) {
 
 	var tableOK bool
 	var rowCount int
+	ctx.logf("LOOKING FOR: navigation to #dag-meta-table")
 	ctx.appendThought("table validation: load dag-meta-table and wait for ready")
 	if err := ctx.navigate(ctx.appURL("/#dag-meta-table")); err != nil {
 		return "", err
 	}
+	ctx.logf("LOOKING FOR: DAG Table aria label")
 	if err := ctx.waitAria("DAG Table", "need table element for validation"); err != nil {
 		return "", err
 	}
+	ctx.logf("LOOKING FOR: DAG Table data-ready=true")
 	if err := ctx.waitAriaAttrEquals("DAG Table", "data-ready", "true", "wait for table ready flag", 8*time.Second); err != nil {
 		return "", err
 	}

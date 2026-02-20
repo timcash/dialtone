@@ -1,4 +1,4 @@
-package suite
+package test
 
 import (
 	"fmt"
@@ -11,6 +11,7 @@ func Run04ThreeUserStoryBuildIO(ctx *testCtx) (string, error) {
 	}
 	ctx.logf("STORY> step 2: build Program A -> Agent A")
 
+	ctx.logf("LOOKING FOR: Three Canvas")
 	if err := ctx.waitAria("Three Canvas", "need canvas before story step2 actions"); err != nil {
 		return "", err
 	}

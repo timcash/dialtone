@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"dialtone/dev/plugins/chrome/app"
@@ -131,10 +133,19 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 	}, nil
 }
 
+type StepResult struct {
+	Step   Step
+	Error  error
+	Result StepRunResult
+	Start  time.Time
+	End    time.Time
+}
+
 func RunSuite(opts SuiteOptions, steps []Step) error {
 	logs.Info("Starting Test Suite: %s", opts.Version)
 	
 	startTime := time.Now()
+	var results []StepResult
 	
 	for i, step := range steps {
 		logs.Info("[%d/%d] Running step: %s", i+1, len(steps), step.Name)
@@ -164,20 +175,95 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 		select {
 		case <-ctx.Done():
 			logs.Error("Step %s timed out after %v", step.Name, timeout)
-			return fmt.Errorf("step %s timed out", step.Name)
+			err = fmt.Errorf("step %s timed out", step.Name)
+			// Try to capture a timeout screenshot if we have a session
+			// We need a way to access the session here. 
+			// For now, let's just log.
 		case <-done:
 			if err != nil {
 				logs.Error("Step %s failed: %v", step.Name, err)
-				return err
-			}
-			if result.Report != "" {
+			} else if result.Report != "" {
 				logs.Info("Step %s report: %s", step.Name, result.Report)
 			}
 		}
+		
+		results = append(results, StepResult{
+			Step:   step,
+			Error:  err,
+			Result: result,
+			Start:  stepCtx.Started,
+			End:    time.Now(),
+		})
+		
+		if err != nil {
+			break
+		}
 	}
 	
-	logs.Info("Test Suite Completed in %v", time.Since(startTime))
+	duration := time.Since(startTime)
+	logs.Info("Test Suite Completed in %v", duration)
+	
+	if opts.ReportPath != "" {
+		if genErr := generateReport(opts, results, duration); genErr != nil {
+			logs.Error("Failed to generate report: %v", genErr)
+		}
+	}
+	
+	for _, r := range results {
+		if r.Error != nil {
+			return r.Error
+		}
+	}
 	return nil
+}
+
+func generateReport(opts SuiteOptions, results []StepResult, totalDuration time.Duration) error {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# Test Report: %s\n\n", opts.Version))
+	sb.WriteString(fmt.Sprintf("- **Date**: %s\n", time.Now().Format(time.RFC1123)))
+	sb.WriteString(fmt.Sprintf("- **Total Duration**: %v\n\n", totalDuration))
+	
+	sb.WriteString("## Summary\n\n")
+	passed := 0
+	for _, r := range results {
+		if r.Error == nil {
+			passed++
+		}
+	}
+	sb.WriteString(fmt.Sprintf("- **Steps**: %d / %d passed\n", passed, len(results)))
+	status := "PASSED"
+	if passed < len(results) {
+		status = "FAILED"
+	}
+	sb.WriteString(fmt.Sprintf("- **Status**: %s\n\n", status))
+	
+	sb.WriteString("## Details\n\n")
+	for i, r := range results {
+		icon := "✅"
+		if r.Error != nil {
+			icon = "❌"
+		}
+		sb.WriteString(fmt.Sprintf("### %d. %s %s\n\n", i+1, icon, r.Step.Name))
+		sb.WriteString(fmt.Sprintf("- **Duration**: %v\n", r.End.Sub(r.Start)))
+		if r.Error != nil {
+			sb.WriteString(fmt.Sprintf("- **Error**: `%v`\n", r.Error))
+		}
+		if r.Result.Report != "" {
+			sb.WriteString(fmt.Sprintf("- **Report**: %s\n", r.Result.Report))
+		}
+		
+		if len(r.Step.Screenshots) > 0 {
+			sb.WriteString("\n#### Screenshots\n\n")
+			for _, s := range r.Step.Screenshots {
+				// Use relative path for markdown
+				fname := filepath.Base(s)
+				sb.WriteString(fmt.Sprintf("![%s](screenshots/%s)\n", fname, fname))
+			}
+		}
+		sb.WriteString("\n---\n\n")
+	}
+	
+	return os.WriteFile(opts.ReportPath, []byte(sb.String()), 0644)
 }
 
 // Re-export common chromedp things to avoid direct dependency if possible

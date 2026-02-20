@@ -1,4 +1,4 @@
-package suite
+package test
 
 import (
 	"fmt"
@@ -15,18 +15,23 @@ func Run03ThreeUserStoryStartEmpty(ctx *testCtx) (string, error) {
 	if err := ctx.navigate(ctx.appURL("/#dag-3d-stage")); err != nil {
 		return "", err
 	}
+	ctx.logf("LOOKING FOR: Three Canvas")
 	if err := ctx.waitAria("Three Canvas", "need stage canvas before interactions"); err != nil {
 		return "", err
 	}
+	ctx.logf("LOOKING FOR: Three Canvas data-ready=true")
 	if err := ctx.waitAriaAttrEquals("Three Canvas", "data-ready", "true", "wait for stage ready flag", 3*time.Second); err != nil {
 		return "", err
 	}
+	ctx.logf("LOOKING FOR: DAG Mode aria label")
 	if err := ctx.waitAria("DAG Mode", "need mode button"); err != nil {
 		return "", err
 	}
+	ctx.logf("LOOKING FOR: DAG Add aria label")
 	if err := ctx.waitAria("DAG Add", "need add form action"); err != nil {
 		return "", err
 	}
+	ctx.logf("LOOKING FOR: DAG Label Input aria label")
 	if err := ctx.waitAria("DAG Label Input", "need rename input"); err != nil {
 		return "", err
 	}

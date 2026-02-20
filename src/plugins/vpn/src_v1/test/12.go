@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
-	test_v2 "dialtone/dev/plugins/dag/src_v3/suite"
+	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 )
 
 func Run12DocsSectionValidation() error {

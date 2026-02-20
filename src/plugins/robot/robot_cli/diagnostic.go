@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"dialtone/dev/plugins/logs/src_v1/go"
-	test_v2 "dialtone/dev/plugins/dag/src_v3/suite"
+	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 	"github.com/chromedp/chromedp"
 )
 

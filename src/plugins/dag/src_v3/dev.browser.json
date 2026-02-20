@@ -1,8 +1,8 @@
 {
-  "pid": 50537,
-  "debug_port": 60087,
-  "websocket_url": "ws://127.0.0.1:60087/devtools/browser/7d1ab476-ada9-405b-94de-4b7060ac4aa3",
-  "debug_url": "http://127.0.0.1:60087/devtools/browser/7d1ab476-ada9-405b-94de-4b7060ac4aa3",
-  "is_new": true,
-  "generated_at_rfc3339": "2026-02-17T11:59:49-08:00"
+  "pid": 58116,
+  "debug_port": 9222,
+  "websocket_url": "ws://127.0.0.1:9222/devtools/browser/71aa2539-df19-4490-a1b0-9e1d8960b3ad",
+  "debug_url": "http://127.0.0.1:9222/devtools/browser/71aa2539-df19-4490-a1b0-9e1d8960b3ad",
+  "is_new": false,
+  "generated_at_rfc3339": "2026-02-19T18:58:40-08:00"
 }

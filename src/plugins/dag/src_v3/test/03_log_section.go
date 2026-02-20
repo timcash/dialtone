@@ -1,4 +1,4 @@
-package suite
+package test
 
 import "time"
 
@@ -10,9 +10,11 @@ func Run03LogSectionEcho(ctx *testCtx) (string, error) {
 	if err := ctx.navigate(ctx.appURL("/#dag-log-xterm")); err != nil {
 		return "", err
 	}
+	ctx.logf("LOOKING FOR: Log Terminal aria label")
 	if err := ctx.waitAria("Log Terminal", "log section terminal should be visible"); err != nil {
 		return "", err
 	}
+	ctx.logf("LOOKING FOR: Log Command Input aria label")
 	if err := ctx.waitAria("Log Command Input", "log forms command input should be visible"); err != nil {
 		return "", err
 	}
@@ -23,6 +25,7 @@ func Run03LogSectionEcho(ctx *testCtx) (string, error) {
 	if err := ctx.pressEnterAria("Log Command Input", "submit log command"); err != nil {
 		return "", err
 	}
+	ctx.logf("LOOKING FOR: command echo %q in terminal", cmd)
 	if err := ctx.waitLogTerminalContains("USER> "+cmd, 3*time.Second); err != nil {
 		return "", err
 	}

@@ -1,4 +1,4 @@
-package suite
+package test
 
 func Run11CleanupVerification(ctx *testCtx) (string, error) {
 	if err := ctx.clickAction("layer", "back"); err != nil {
