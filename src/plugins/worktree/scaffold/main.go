@@ -41,22 +41,18 @@ func main() {
 		}
 	case "start":
 		if len(args) == 0 {
-			fmt.Println("Usage: worktree start <name> --task <file>")
+			fmt.Println("Usage: worktree start <name> [--prompt <text>]")
 			return
 		}
 		name := args[0]
-		var task string
+		var prompt string
 		for i := 1; i < len(args); i++ {
-			if args[i] == "--task" && i+1 < len(args) {
-				task = args[i+1]
+			if args[i] == "--prompt" && i+1 < len(args) {
+				prompt = args[i+1]
 				i++
 			}
 		}
-		if task == "" {
-			fmt.Println("Error: --task <file> is required for start")
-			os.Exit(1)
-		}
-		if err := worktree.Start(name, task); err != nil {
+		if err := worktree.Start(name, prompt); err != nil {
 			fmt.Printf("Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -71,6 +67,35 @@ func main() {
 		}
 	case "list":
 		if err := worktree.List(); err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
+	case "attach":
+		if len(args) == 0 {
+			fmt.Println("Usage: worktree attach <worktree-name|list-index>")
+			return
+		}
+		if err := worktree.Attach(args[0]); err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
+	case "tmux-logs":
+		if len(args) == 0 {
+			fmt.Println("Usage: worktree tmux-logs <worktree-name|list-index> [-n N]")
+			return
+		}
+		selector := args[0]
+		n := 10
+		for i := 1; i < len(args); i++ {
+			if args[i] == "-n" && i+1 < len(args) {
+				var parsed int
+				if _, err := fmt.Sscanf(args[i+1], "%d", &parsed); err == nil {
+					n = parsed
+				}
+				i++
+			}
+		}
+		if err := worktree.TmuxLogs(selector, n); err != nil {
 			fmt.Printf("Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -103,6 +128,7 @@ func runTests(args []string) {
 	
 	cmd := exec.Command("go", "run", "./plugins/worktree/src_v1/test/cmd/main.go")
 	cmd.Dir = filepath.Join(root, "src")
+	cmd.Env = append(os.Environ(), "GOCACHE=/tmp/gocache")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -126,8 +152,10 @@ func findRepoRoot(cwd string) string {
 func printUsage() {
 	fmt.Println("Usage: worktree <command> [args]")
 	fmt.Println("  add <name> ...   Create worktree & tmux session")
-	fmt.Println("  start <name> ... Create worktree & start Agent")
+	fmt.Println("  start <name> ... Start Agent in existing worktree (uses TASK.md)")
 	fmt.Println("  remove <name>    Remove worktree & tmux session")
-	fmt.Println("  list             List active worktrees")
+	fmt.Println("  list             List worktrees + task status")
+	fmt.Println("  attach <id>      Attach tmux by worktree name or list index")
+	fmt.Println("  tmux-logs <id>   Show last tmux lines (-n N, default 10)")
 	fmt.Println("  test [src_v1]    Run tests")
 }
