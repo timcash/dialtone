@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"dialtone/dev/plugins/logs/src_v1/go"
 	"dialtone/dev/plugins/ssh/src_v1/go"
@@ -15,7 +16,9 @@ func RunLogs(versionDir string, args []string) {
 	fs := flag.NewFlagSet("logs", flag.ExitOnError)
 	remote := fs.Bool("remote", false, "Stream logs from remote robot")
 	streamTopic := fs.String("stream", "logs.>", "NATS subject to subscribe to (supports wildcards)")
+	topic := fs.String("topic", "", "Alias for --stream; use '*' for all logs")
 	natsURL := fs.String("nats-url", "nats://127.0.0.1:4222", "NATS server URL")
+	embedded := fs.Bool("embedded", false, "Start embedded NATS server for local stream")
 	stdout := fs.Bool("stdout", true, "Print streamed messages to stdout")
 	host := fs.String("host", os.Getenv("ROBOT_HOST"), "SSH host")
 	port := fs.String("port", "22", "SSH port")
@@ -30,8 +33,10 @@ func RunLogs(versionDir string, args []string) {
 		fmt.Println("Stream logs from Dialtone.")
 		fmt.Println()
 		fmt.Println("Options:")
+		fmt.Println("  --topic       Topic alias for --stream (use '*' for all logs)")
 		fmt.Println("  --stream      NATS subject to subscribe to (default: logs.>)")
 		fmt.Println("  --nats-url    NATS server URL (default: nats://127.0.0.1:4222)")
+		fmt.Println("  --embedded    Start embedded NATS server for local stream")
 		fmt.Println("  --stdout      Print streamed messages (default: true)")
 		fmt.Println("  --remote      Stream logs from remote robot")
 		fmt.Println("  --lines       Number of lines to show (if set, does not stream)")
@@ -60,16 +65,47 @@ func RunLogs(versionDir string, args []string) {
 		if !*stdout {
 			logs.Fatal("Error: local stream requires --stdout=true")
 		}
-		runLocalNATSStream(versionDir, *natsURL, *streamTopic)
+		if err := runLocalNATSStream(versionDir, *natsURL, resolveTopic(*topic, *streamTopic), *embedded); err != nil {
+			logs.Fatal("%v", err)
+		}
 	}
 }
 
-func runLocalNATSStream(versionDir, natsURL, subject string) {
+func resolveTopic(topic, streamTopic string) string {
+	t := strings.TrimSpace(topic)
+	if t == "" {
+		t = strings.TrimSpace(streamTopic)
+	}
+	if t == "" {
+		return "logs.>"
+	}
+	if t == "*" || strings.EqualFold(t, "all") {
+		return "logs.>"
+	}
+	return t
+}
+
+func runLocalNATSStream(versionDir, natsURL, subject string, embedded bool) error {
+	var (
+		nc     *nats.Conn
+		broker *logs.EmbeddedNATS
+		err    error
+	)
+	if embedded {
+		broker, err = logs.StartEmbeddedNATS()
+		if err != nil {
+			return fmt.Errorf("embedded NATS start failed: %w", err)
+		}
+		defer broker.Close()
+		natsURL = broker.URL()
+		logs.Info("Started embedded NATS for local stream (%s): %s", versionDir, natsURL)
+	}
+
 	logs.Info("Streaming local NATS logs (%s): subject=%s via %s", versionDir, subject, natsURL)
 
-	nc, err := nats.Connect(natsURL)
+	nc, err = nats.Connect(natsURL)
 	if err != nil {
-		logs.Fatal("NATS connection failed: %v", err)
+		return fmt.Errorf("NATS connection failed: %w", err)
 	}
 	defer nc.Close()
 
@@ -77,17 +113,18 @@ func runLocalNATSStream(versionDir, natsURL, subject string) {
 		fmt.Println(string(msg.Data))
 	})
 	if err != nil {
-		logs.Fatal("NATS subscribe failed for subject %q: %v", subject, err)
+		return fmt.Errorf("NATS subscribe failed for subject %q: %w", subject, err)
 	}
 
 	if err := nc.Flush(); err != nil {
-		logs.Fatal("NATS flush failed: %v", err)
+		return fmt.Errorf("NATS flush failed: %w", err)
 	}
 	if err := nc.LastError(); err != nil {
-		logs.Fatal("NATS subscription error: %v", err)
+		return fmt.Errorf("NATS subscription error: %w", err)
 	}
 
 	select {}
+	return nil
 }
 
 func runRemoteLogs(host, port, user, pass string, lines int) {
