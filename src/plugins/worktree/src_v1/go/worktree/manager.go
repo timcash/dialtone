@@ -19,7 +19,10 @@ func Add(name, taskFile, branch string) error {
 		return err
 	}
 
-	worktreePath := filepath.Join(filepath.Dir(repoRoot), name)
+	worktreePath := managedWorktreePath(repoRoot, name)
+	if err := os.MkdirAll(managedWorktreeBase(repoRoot), 0755); err != nil {
+		return fmt.Errorf("failed to create managed worktree base dir: %w", err)
+	}
 	
 	// 2. Create git worktree
 	fmt.Printf("[Worktree] Creating worktree at %s...\n", worktreePath)
@@ -82,7 +85,10 @@ func Start(name, prompt string) error {
 	if err != nil {
 		return err
 	}
-	worktreePath := filepath.Join(filepath.Dir(repoRoot), name)
+	worktreePath, err := findWorktreePathByName(repoRoot, name)
+	if err != nil {
+		worktreePath = managedWorktreePath(repoRoot, name)
+	}
 
 	// Start requires a pre-existing worktree created by `worktree add`.
 	info, err := os.Stat(worktreePath)
@@ -181,7 +187,10 @@ func Remove(name string) error {
 	if err != nil {
 		return err
 	}
-	worktreePath := filepath.Join(filepath.Dir(repoRoot), name)
+	worktreePath, err := findWorktreePathByName(repoRoot, name)
+	if err != nil {
+		worktreePath = managedWorktreePath(repoRoot, name)
+	}
 
 	// Kill tmux session
 	if err := killTmuxSession(name); err != nil {
@@ -190,7 +199,7 @@ func Remove(name string) error {
 
 	// Remove worktree
 	fmt.Printf("[Worktree] Removing worktree %s...\n", worktreePath)
-	cmd := exec.Command("git", "worktree", "remove", "--force", worktreePath)
+	cmd := exec.Command("git", "worktree", "remove", "-f", "-f", worktreePath)
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -230,6 +239,7 @@ func List() error {
 		}
 		fmt.Printf("%-4d %-20s %-9s %-8s %-17s %s\n", i+1, e.Name, e.TaskStatus, tmux, e.Branch, e.Path)
 	}
+	fmt.Printf("\nManaged base dir: %s\n", managedWorktreeBase(repoRoot))
 
 	return nil
 }
@@ -304,6 +314,64 @@ func TmuxLogs(selector string, n int) error {
 	for _, line := range lines[start:end] {
 		fmt.Println(line)
 	}
+	return nil
+}
+
+func Cleanup(all bool) error {
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return err
+	}
+	base := managedWorktreeBase(repoRoot)
+	entries, err := loadWorktreeEntries(repoRoot)
+	if err != nil {
+		return err
+	}
+
+	if all {
+		for _, e := range entries {
+			if e.Path == repoRoot {
+				continue
+			}
+			if err := Remove(e.Name); err != nil {
+				return err
+			}
+		}
+	} else {
+		managed := []worktreeEntry{}
+		for _, e := range entries {
+			if strings.HasPrefix(e.Path, base+string(filepath.Separator)) {
+				managed = append(managed, e)
+			}
+		}
+		for _, e := range managed {
+			if !e.Session && e.TaskStatus != "working" && e.TaskStatus != "work" {
+				if err := Remove(e.Name); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	// Remove orphan directories in managed base that are no longer registered.
+	remaining, _ := loadWorktreeEntries(repoRoot)
+	activePaths := map[string]bool{}
+	for _, e := range remaining {
+		activePaths[e.Path] = true
+	}
+	if dirs, err := os.ReadDir(base); err == nil {
+		for _, d := range dirs {
+			if !d.IsDir() {
+				continue
+			}
+			p := filepath.Join(base, d.Name())
+			if !activePaths[p] {
+				_ = os.RemoveAll(p)
+			}
+		}
+	}
+
+	fmt.Printf("[Worktree] Cleanup complete in %s\n", base)
 	return nil
 }
 
@@ -508,6 +576,27 @@ func resolveWorktreeSelector(entries []worktreeEntry, selector string) (worktree
 		}
 	}
 	return worktreeEntry{}, fmt.Errorf("worktree not found: %s", selector)
+}
+
+func findWorktreePathByName(repoRoot, name string) (string, error) {
+	entries, err := loadWorktreeEntries(repoRoot)
+	if err != nil {
+		return "", err
+	}
+	for _, e := range entries {
+		if e.Name == name {
+			return e.Path, nil
+		}
+	}
+	return "", fmt.Errorf("worktree not found: %s", name)
+}
+
+func managedWorktreeBase(repoRoot string) string {
+	return filepath.Join(filepath.Dir(repoRoot), "dialtone_worktree")
+}
+
+func managedWorktreePath(repoRoot, name string) string {
+	return filepath.Join(managedWorktreeBase(repoRoot), name)
 }
 
 func parseTaskSignatureStatus(content string) string {
