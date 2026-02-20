@@ -36,31 +36,28 @@ DIALTONE> Process exited with code 0.
 The following components form the core architecture of Dialtone. LLM agents should treat the **DAG Plugin** as the canonical source of truth for UI and interaction patterns.
 
 ### Three-Layer Tech Stack
-1. **Shell Layer**: `./dialtone.sh` is designed to stay simple, run from anywhere, and start `DIALTONE>` (the virtual librarian interface).
-2. **Dev Layer**: `src/dev.go` provides scaffolding that adds structure around a heterogeneous codebase that can include many languages.
-3. **Plugin Layer**: the plugin system is designed to make complexity composable by linking plugin behaviors back to `src/dev.go`.
+1. **Shell Layer**: `./dialtone.sh` is a thin bootstrap script that ensures Go is installed and hands over execution to `src/dev.go`.
+2. **Dev Layer**: `src/dev.go` is the main orchestrator and REPL engine. It routes commands to plugins and manages subtone processes.
+3. **Plugin Layer**: plugins compose higher-level behavior and link back through the `src/dev.go` command router.
 
 ### Bootstrap to Collaboration Flow
 1. Start from `./dialtone.sh` or `./dialtone.ps1`.
 2. Confirm minimal bootstrap install (runtime + basic Go files only).
-3. Activate `dev.go` command routing.
+3. Activate `dev.go` command routing and interactive REPL.
 4. Install only needed plugins and connect transport layers (swarm, VPN, NATS).
 5. Collaborate in `DIALTONE>` with `USER-*` and `LLM-*` roles on a shared DAG of tasks and logs.
 
 ### [DAG Plugin](./src/plugins/dag/README.md)
 The primary implementation of the Directed Acyclic Graph engine. It defines the standard for section lifecycle, mode-form controls, and 3D stage interactions.
 
-### [Template Plugin](./src/plugins/template/README.md)
-A reusable starter kit for new plugins. Use this to scaffold new functionality while maintaining compatibility with the Dialtone lifecycle and test runners.
+### [Test Plugin](./src/plugins/test/README.md)
+A specialized browser orchestration library for deterministic UI testing. It provides ARIA-driven actions, automated reporting, and screenshot capture.
 
-### [Logs Plugin](./src/plugins/logs/README.md)
-NATS-first logging across plugins and services. Producers publish to NATS; readers attach (CLI `--stdout`, file listener, browser). See [src/plugins/logs/src_v1/README.md](src/plugins/logs/src_v1/README.md) for CLI and dev flow.
-
-### [UI Library (ui_v2)](./src/libs/ui_v2/README.md)
+### [UI Plugin](./src/plugins/ui/README.md)
 The shared toolkit for building Dialtone interfaces. It handles section management, global menus, and overlay coordination.
 
-### [Test Library (test_v2)](./src/libs/test_v2/README.md)
-A specialized browser orchestration library for deterministic UI testing. It provides ARIA-driven actions, automated reporting, and screenshot capture.
+### [Logs Plugin](./src/plugins/logs/README.md)
+NATS-first logging across plugins and services. Producers publish to NATS; readers attach (CLI `--stdout`, file listener, browser).
 
 ## 3. Getting Started
 The easiest way to get started is `https://dialtone.earth`.
@@ -104,7 +101,7 @@ Start an interactive session:
 Use agent-style command routing in REPL:
 - `USER-1>` enters commands.
 - `@DIALTONE ...` tells Dialtone to run managed commands/subtones.
-- `DIALTONE:PID:>` streams subprocess output.
+- `DIALTONE:PID> ` streams subprocess output.
 
 ### C) REPL automation for LLM agents (no extra tools required)
 For deterministic automation, run REPL from stdin:
@@ -126,8 +123,8 @@ USER-1> @DIALTONE robot install src_v1
 DIALTONE> Request received. Spawning subtone for robot install...
 DIALTONE> Spawning subtone subprocess via PID 530013...
 DIALTONE> Streaming stdout/stderr from subtone PID 530013.
-DIALTONE:530013:> >> [Robot] Install: src_v1
-DIALTONE:530013:> >> [Robot] Install complete: src_v1
+DIALTONE:530013> >> [Robot] Install: src_v1
+DIALTONE:530013> >> [Robot] Install complete: src_v1
 DIALTONE> Process 530013 exited with code 0.
 USER-1> status
 USER-1> exit
@@ -144,30 +141,20 @@ DIALTONE> Goodbye.
 ## How the code base is organized
 ### Entry points
 - `./dialtone.sh`, `./dialtone.ps1`, and `./dialtone.cmd` are thin wrappers that start the `DIALTONE>` workflow.
-- `src/dev.go` is the main CLI scaffold/dispatcher for command routing.
+- `src/dev.go` is the main CLI orchestrator and REPL engine.
 
 ### Core source layout
-- `src/core/`: shared core CLI/runtime packages.
+- `src/`: core orchestrator logic and shared Go packages.
 - `src/plugins/`: plugin modules and plugin CLIs (primary extension surface).
-- `src/libs/`: reusable libraries used across plugins and CLI flows.
-- `src/cmd/`: command-oriented packages and support entrypoints.
 - `docs/`: project docs, protocol docs, and examples/transcripts.
 - `skills/`: skill definitions used by the system.
 - `env/.env`: environment configuration for local/runtime setup.
 
 ### Three-layer mental model
-1. **Shell Layer**: wrapper scripts (`./dialtone.sh` etc.) keep startup simple from anywhere.
-2. **Dev Layer**: `src/dev.go` provides structure across a heterogeneous, multi-language codebase.
+1. **Shell Layer**: wrapper scripts (`./dialtone.sh` etc.) keep startup simple and ensure Go is present.
+2. **Dev Layer**: `src/dev.go` provides structure and routes commands to plugins.
 3. **Plugin Layer**: plugins compose higher-level behavior and link back through the `src/dev.go` command router.
 
-### Suggested format to document the codebase
-Use the same mini-template for each top-level folder or plugin:
-- **Purpose**: what this area is responsible for.
-- **Entrypoint**: the main command/file to start from.
-- **Key files**: 3-5 important files/directories.
-- **How to run/test**: exact commands for development and verification.
-- **Dependencies**: external services, env vars, and related plugins.
-- **Ownership/status**: who maintains it and current maturity (alpha/beta/stable).
 
 
 
@@ -178,21 +165,3 @@ Use the shared template:
 
 - [README_TEMPLATE.md](./docs/templates/README_TEMPLATE.md)
 
-
-## TODO
-
-### build DIALTONE> cli 
-- start with a simple dailtone.sh scripted interatcion
-- update core with the new dialtone process manager to spawn subtones
-- log all interactions in swarm autolog
-- integrate with swarm for the dag task database
-- show a workflow of starting on a new computer for the first time and getting things installed
-
-### add key management tools
-- allow USER> and LLM-*> to send a password and get authed with DIALTONE>
-
-### integrate nix as the package manager
-- show a full ./dialtone.sh workflow as a starting point
-- start with install from just the `dialtone.sh` or `dialtone.ps1` wrapper
-- get nix installed via the `./dialtone.sh nix install` command
-- show a plugin install via `./dialtone.sh plugin install <plugin-name>`
