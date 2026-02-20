@@ -8,20 +8,26 @@
 
 #dag-meta-table {
   --table-row-height: 1.45em;
-  grid-template-rows: minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
   overflow: hidden;
   -webkit-overflow-scrolling: touch;
   padding: 0;
 }
 
+#dag-meta-table .table-wrapper {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 #dag-meta-table table {
-  grid-row: 1;
-  display: table;
   width: 100%;
   height: auto;
   background: #000;
-  align-self: stretch;
   table-layout: fixed;
+  border-collapse: collapse;
 }
 
 #dag-meta-table th,
@@ -159,14 +165,12 @@ form {
 }
 
 #dag-meta-table form {
-  grid-row: 2;
   position: relative;
-  left: auto;
-  transform: none;
-  bottom: auto;
-  width: 100%;
-  max-width: none;
-  padding: 14px;
+  flex-shrink: 0;
+  width: min(500px, calc(100vw - 28px));
+  max-width: 500px;
+  margin: 0 auto calc(env(safe-area-inset-bottom, 0px) + 14px);
+  padding: 0;
 }
 
 form[data-mode-form='log'] {
