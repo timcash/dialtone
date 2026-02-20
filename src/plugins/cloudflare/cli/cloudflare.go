@@ -3,7 +3,7 @@ package cli
 import (
 	"bytes"
 	"crypto/rand"
-	"dialtone/dev/plugins/dag/src_v3/suite"
+	"dialtone/dev/plugins/test/src_v1/go"
 	"encoding/base64"
 	"encoding/json"
 	"flag"

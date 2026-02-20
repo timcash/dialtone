@@ -43,8 +43,7 @@ func RunDev(opts DevOptions) error {
 
 	logOut := io.MultiWriter(os.Stdout, logFile)
 	logf := func(format string, args ...any) {
-		fmt.Fprintf(logOut, format+"
-", args...)
+		fmt.Fprintf(logOut, format+"\n", args...)
 	}
 
 	if _, err := os.Stat(opts.UIDir); os.IsNotExist(err) {
@@ -171,8 +170,7 @@ func RunDev(opts DevOptions) error {
 
 func StartDevBrowser(opts DevOptions, logOut io.Writer, devURL string) (*BrowserSession, error) {
 	logf := func(format string, args ...any) {
-		fmt.Fprintf(logOut, format+"
-", args...)
+		fmt.Fprintf(logOut, format+"\n", args...)
 	}
 
 	browserMode := os.Getenv(opts.BrowserModeEnvVar)

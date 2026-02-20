@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"dialtone/dev/browser"
-	test_v2 "dialtone/dev/plugins/dag/src_v3/suite"
+	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 	chrome_app "dialtone/dev/plugins/chrome/app"
 )
 

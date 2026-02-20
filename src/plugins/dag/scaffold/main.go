@@ -97,7 +97,7 @@ func main() {
 
 		repoRoot, _ := findRepoRoot()
 		pluginDir := filepath.Join(repoRoot, "src", "plugins", "dag", versionDir)
-		testPkg := "./plugins/dag/" + versionDir + "/suite/cmd"
+		testPkg := "./plugins/dag/" + versionDir + "/test/cmd"
 		
 		opts := test_plugin.TestOptions{
 			RepoRoot:   repoRoot,

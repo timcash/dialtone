@@ -40,7 +40,10 @@ try {
   sections.register('dag-meta-table', {
     containerId: 'dag-meta-table',
     load: async () => {
-      const { mountTable } = await import('./components/table/index');
+      const { mountTable } = await import('./components/table/index').catch((err) => {
+        console.error('[DAG] Failed to import table component', err);
+        throw err;
+      });
       const container = document.getElementById('dag-meta-table');
       if (!container) throw new Error('dag-meta-table container not found');
       return mountTable(container);
@@ -57,7 +60,10 @@ try {
   sections.register('dag-3d-stage', {
     containerId: 'dag-3d-stage',
     load: async () => {
-      const { mountThree } = await import('./components/three/index');
+      const { mountThree } = await import('./components/three/index').catch((err) => {
+        console.error('[DAG] Failed to import three component', err);
+        throw err;
+      });
       const container = document.getElementById('dag-3d-stage');
       if (!container) throw new Error('dag-3d-stage container not found');
       return mountThree(container);
@@ -75,7 +81,10 @@ try {
   sections.register('dag-log-xterm', {
     containerId: 'dag-log-xterm',
     load: async () => {
-      const { mountLog } = await import('./components/log/index');
+      const { mountLog } = await import('./components/log/index').catch((err) => {
+        console.error('[DAG] Failed to import log component', err);
+        throw err;
+      });
       const container = document.getElementById('dag-log-xterm');
       if (!container) throw new Error('dag-log-xterm container not found');
       return mountLog(container);
@@ -287,16 +296,22 @@ try {
   }
   syncSectionFromURL();
   
+  console.log('[DAG] App setup complete, starting boot signal interval');
   // Mark app as booted after a short delay to allow layout to settle
   setInterval(() => {
+    const labels = Array.from(document.querySelectorAll('[aria-label]')).map(el => el.getAttribute('aria-label'));
+    console.log('[DAG] Current aria-labels in DOM:', labels);
+    
     const header = document.querySelector('[aria-label="App Header"]');
     if (header) {
       if (header.getAttribute('data-boot') !== 'true') {
-        console.log('[DAG] Setting App Header data-boot=true');
+        console.log('[DAG] Setting App Header data-boot=true. Current boot val:', header.getAttribute('data-boot'));
         header.setAttribute('data-boot', 'true');
       }
+    } else {
+      console.warn('[DAG] App Header element NOT FOUND in interval');
     }
-  }, 1000);
+  }, 2000);
 } catch (err) {
   console.error('[DAG] Critical app setup failure:', err);
 }
