@@ -12,8 +12,16 @@ func RunGo(args ...string) error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), append([]string{"go", "exec"}, args...)...)
-	cmd.Dir = repoRoot
+	
+	dialtoneEnv := os.Getenv("DIALTONE_ENV")
+	if dialtoneEnv == "" {
+		home, _ := os.UserHomeDir()
+		dialtoneEnv = filepath.Join(home, ".dialtone_env")
+	}
+	goBin := filepath.Join(dialtoneEnv, "go", "bin", "go")
+
+	cmd := exec.Command(goBin, args...)
+	cmd.Dir = filepath.Join(repoRoot, "src")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

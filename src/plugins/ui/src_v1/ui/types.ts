@@ -10,6 +10,7 @@ export interface SectionOverlayConfig {
   primaryKind: SectionPrimaryOverlayKind;
   primary: string;
   modeForm?: string;
+  form?: string; // modern alias for modeForm
   thumb?: string; // deprecated alias for modeForm
   legend?: string;
   chatlog?: string;

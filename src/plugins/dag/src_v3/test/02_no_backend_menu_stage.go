@@ -38,6 +38,11 @@ func Run02NoBackendMenuToStage(ctx *testCtx) (string, error) {
 		return "", err
 	}
 
+	ctx.logf("LOOKING FOR: dag-3d-stage data-ready=true")
+	if err := ctx.waitAriaAttrEquals("Three Section", "data-ready", "true", "wait for stage section ready", 10*time.Second); err != nil {
+		return "", err
+	}
+
 	ctx.logf("LOOKING FOR: Toggle Global Menu button")
 	if err := ctx.waitAria("Toggle Global Menu", "no-backend startup needs menu toggle"); err != nil {
 		return "", err

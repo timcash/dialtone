@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 type TestOptions struct {
@@ -29,8 +30,20 @@ func RunPluginTests(opts TestOptions) error {
 		}
 	}
 
-	cmd := exec.Command(filepath.Join(opts.RepoRoot, "dialtone.sh"), "go", "exec", "run", opts.TestPkg)
-	cmd.Dir = opts.RepoRoot
+	dialtoneEnv := os.Getenv("DIALTONE_ENV")
+	if dialtoneEnv == "" {
+		home, _ := os.UserHomeDir()
+		dialtoneEnv = filepath.Join(home, ".dialtone_env")
+	}
+	goBin := filepath.Join(dialtoneEnv, "go", "bin", "go")
+
+	target := opts.TestPkg
+	if !strings.HasPrefix(target, "./") && !strings.Contains(target, ".") {
+		target = "./" + target
+	}
+
+	cmd := exec.Command(goBin, "run", target)
+	cmd.Dir = filepath.Join(opts.RepoRoot, "src")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	

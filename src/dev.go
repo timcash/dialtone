@@ -187,6 +187,9 @@ func main() {
 		fmt.Printf("Unknown dev command: %v\n", args)
 	default:
 		if err := runPluginScaffold(command, args); err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				os.Exit(exitErr.ExitCode())
+			}
 			fmt.Printf("Orchestrator error: %v\n", err)
 			os.Exit(1)
 		}

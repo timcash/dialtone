@@ -299,17 +299,16 @@ try {
   console.log('[DAG] App setup complete, starting boot signal interval');
   // Mark app as booted after a short delay to allow layout to settle
   setInterval(() => {
-    const labels = Array.from(document.querySelectorAll('[aria-label]')).map(el => el.getAttribute('aria-label'));
-    console.log('[DAG] Current aria-labels in DOM:', labels);
-    
+    const now = new Date().toISOString();
     const header = document.querySelector('[aria-label="App Header"]');
     if (header) {
-      if (header.getAttribute('data-boot') !== 'true') {
-        console.log('[DAG] Setting App Header data-boot=true. Current boot val:', header.getAttribute('data-boot'));
+      const currentBoot = header.getAttribute('data-boot');
+      if (currentBoot !== 'true') {
+        console.log(`[DAG | ${now}] Setting App Header data-boot=true. Previous:`, currentBoot);
         header.setAttribute('data-boot', 'true');
       }
     } else {
-      console.warn('[DAG] App Header element NOT FOUND in interval');
+      console.warn(`[DAG | ${now}] App Header element NOT FOUND in interval`);
     }
   }, 2000);
 } catch (err) {

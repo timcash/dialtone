@@ -12,6 +12,7 @@ import (
 	"time"
 
 	chrome_app "dialtone/dev/plugins/chrome/app"
+	"dialtone/dev/plugins/logs/src_v1/go"
 	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/chromedp"
@@ -99,7 +100,7 @@ func newTestCtx() *testCtx {
 const (
 	mobileViewportWidth  = 390
 	mobileViewportHeight = 844
-	mobileScaleFactor    = 2
+	mobileScaleFactor    = 1
 )
 
 func findRepoRoot() (string, error) {
@@ -136,7 +137,7 @@ func (t *testCtx) ensureSharedServer() error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	if err := test_v2.WaitForPort(8080, 12*time.Second); err != nil {
+	if err := t.waitHTTPReady("http://127.0.0.1:8080/health", 12*time.Second); err != nil {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
 		return err
@@ -323,7 +324,7 @@ func (t *testCtx) beginStep(sc *test_v2.StepContext) {
 }
 
 func (t *testCtx) logf(format string, args ...any) {
-	fmt.Printf(format+"\n", args...)
+	logs.Info(format, args...)
 }
 
 func (t *testCtx) userf(format string, args ...any) {
