@@ -74,6 +74,18 @@ func main() {
 				return Run04DagInstall(ctx)
 			},
 		},
+		{
+			Name: "Test 6: worktree",
+			Files: []string{
+				"src/plugins/repl/src_v1/test/06_worktree.go",
+				"src/plugins/worktree/src_v1/go/worktree/manager.go",
+				"dialtone.sh",
+			},
+			Conditions: "1. `USER-1>` should request worktree add/list/remove... \n2. `DIALTONE>` should execute commands.",
+			Run: func() (string, error) {
+				return Run06Worktree(ctx)
+			},
+		},
 	}
 
 	reportPath := filepath.Join(ctx.repoRoot, "src/plugins/repl/src_v1/test/TEST.md")
@@ -87,6 +99,13 @@ func main() {
 	for _, s := range steps {
 		fmt.Printf("Running %s...\n", s.Name)
 		output, err := s.Run()
+		
+		if err != nil {
+			fmt.Printf("%s FAILED: %v\n", s.Name, err)
+			ctx.Cleanup()
+		} else {
+			fmt.Printf("%s PASSED\n", s.Name)
+		}
 		
 		fmt.Fprintf(f, "# %s\n\n", s.Name)
 		
@@ -108,12 +127,6 @@ func main() {
 			fmt.Fprintf(f, "ERROR: %v\n", err)
 		}
 		fmt.Fprintf(f, "```\n\n")
-		
-		if err != nil {
-			fmt.Printf("%s FAILED: %v\n", s.Name, err)
-		} else {
-			fmt.Printf("%s PASSED\n", s.Name)
-		}
 	}
 	
 	fmt.Printf("Report written to %s\n", reportPath)
