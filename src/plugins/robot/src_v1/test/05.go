@@ -1,4 +1,4 @@
-package main
+package test
 
 import (
 	"os"
@@ -6,12 +6,7 @@ import (
 	"path/filepath"
 )
 
-func Run05UIFormat() error {
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-
+func Run05UIFormat(repoRoot string) error {
 	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "robot", "format", "src_v1")
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout

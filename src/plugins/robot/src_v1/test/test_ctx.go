@@ -1,4 +1,4 @@
-package main
+package test
 
 import (
 	"fmt"
@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"dialtone/dev/browser"
 	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 	chrome_app "dialtone/dev/plugins/chrome/app"
 	"github.com/chromedp/cdproto/emulation"
@@ -18,6 +17,7 @@ import (
 )
 
 type testCtx struct {
+	repoRoot            string
 	sharedServer        *exec.Cmd
 	sharedBrowser       *test_v2.BrowserSession
 	attachMode          bool
@@ -31,6 +31,8 @@ type testCtx struct {
 }
 
 func newTestCtx() *testCtx {
+	repoRoot, _ := findRepoRoot()
+	fmt.Printf("[DEBUG] newTestCtx: repoRoot=%q\n", repoRoot)
 	attach := os.Getenv("ROBOT_TEST_ATTACH") == "1"
 	keepViewport := strings.TrimSpace(os.Getenv("ROBOT_TEST_KEEP_VIEWPORT")) == "1"
 	if attach && !keepViewport {
@@ -58,6 +60,7 @@ func newTestCtx() *testCtx {
 	base = strings.TrimRight(base, "/")
 	devBase = strings.TrimRight(devBase, "/")
 	return &testCtx{
+		repoRoot:       repoRoot,
 		attachMode:     attach,
 		requireBackend: true,
 		keepViewport:   keepViewport,
@@ -78,20 +81,16 @@ func (t *testCtx) ensureSharedServer() error {
 		return nil
 	}
 
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	_ = browser.CleanupPort(8080)
+	_ = chrome_app.CleanupPort(8080)
 	// Launch the robot mock server
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "robot", "start", "--mock", "--local-only", "--web-port", "8080", "--hostname", "robot-test-client")
-	cmd.Dir = repoRoot
+	cmd := exec.Command(filepath.Join(t.repoRoot, "dialtone.sh"), "robot", "serve", "src_v1")
+	cmd.Dir = t.repoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	if err := test_v2.WaitForPort(8080, 12*time.Second); err != nil {
+	if err := t.waitHTTPReady("http://127.0.0.1:8080/health", 12*time.Second); err != nil {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
 		return err
@@ -132,11 +131,11 @@ func (t *testCtx) ensureSharedBrowser(requireBackend bool) (*test_v2.BrowserSess
 
 	if t.attachMode {
 		// First check for a direct tunnel on 9222 (useful for Mac -> SSH -> WSL)
-		if hasReachableDevtoolsWebSocket(9222) {
-			session, err = test_v2.ConnectToBrowser(9222, "robot-dev")
-		} else {
-			session, err = start(false, "robot-dev", true, startURL)
-		}
+		session, err = test_v2.StartBrowser(test_v2.BrowserOptions{
+			Role:          "robot-dev",
+			ReuseExisting: true,
+			URL:           startURL,
+		})
 		t.activeAttachSession = true
 	} else {
 		session, err = start(true, "test", false, startURL)
@@ -267,12 +266,43 @@ func (t *testCtx) devURL(path string) string {
 	return t.devBaseURL + path
 }
 
-func (t *testCtx) captureShot(file string) error {
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		return err
+func (t *testCtx) waitHTTPReady(url string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	client := &http.Client{Timeout: 900 * time.Millisecond}
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode < 500 {
+				return nil
+			}
+		}
+		time.Sleep(250 * time.Millisecond)
 	}
-	shot := filepath.Join(repoRoot, "src", "plugins", "robot", "src_v1", "test", "screenshots", file)
+	return fmt.Errorf("http endpoint not ready: %s", url)
+}
+
+func findRepoRoot() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		path := filepath.Join(cwd, "dialtone.sh")
+		if _, err := os.Stat(path); err == nil {
+			fmt.Printf("[DEBUG] findRepoRoot found %s at %s\n", path, cwd)
+			return cwd, nil
+		}
+		parent := filepath.Dir(cwd)
+		if parent == cwd {
+			return "", fmt.Errorf("repo root not found")
+		}
+		cwd = parent
+	}
+}
+
+func (t *testCtx) captureShot(file string) error {
+	shot := filepath.Join(t.repoRoot, "src", "plugins", "robot", "src_v1", "test", "screenshots", file)
 	b, err := t.browser()
 	if err != nil {
 		return err

@@ -9,6 +9,11 @@ const wsProxyTarget = proxyTarget.replace('http', 'ws');
 
 export default defineConfig({
   root: '.',
+  resolve: {
+    alias: {
+      '@ui': resolve(__dirname, '../../../ui/src_v1/ui'),
+    },
+  },
   define: {
     APP_VERSION: JSON.stringify(pkg.version),
   },

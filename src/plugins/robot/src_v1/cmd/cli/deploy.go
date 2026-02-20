@@ -1,4 +1,4 @@
-package robot_cli
+package cli
 
 import (
 	"fmt"
@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"dialtone/dev/plugins/logs/src_v1/go"
-	"dialtone/dev/ssh"
+	ssh_plugin "dialtone/dev/plugins/ssh/src_v1/go"
 	sshlib "golang.org/x/crypto/ssh"
 )
 
@@ -28,13 +28,13 @@ func RunDeployTest(versionDir string, args []string) error {
 	}
 
 	logs.Info("[DEPLOY-TEST] Step 0: Connecting to %s...", host)
-	client, err := ssh.DialSSH(host, "22", user, pass)
+	client, err := ssh_plugin.DialSSH(host, "22", user, pass)
 	if err != nil {
 		return fmt.Errorf("SSH connection failed: %w", err)
 	}
 	defer client.Close()
 
-	remoteArch, _ := ssh.RunSSHCommand(client, "uname -m")
+	remoteArch, _ := ssh_plugin.RunSSHCommand(client, "uname -m")
 	remoteArch = strings.TrimSpace(remoteArch)
 	logs.Info("[DEPLOY-TEST] Remote architecture: %s", remoteArch)
 
@@ -48,7 +48,7 @@ func RunDeployTest(versionDir string, args []string) error {
 	tmpDir := filepath.Join(cwd, ".dialtone", "deploy_test")
 	_ = os.MkdirAll(tmpDir, 0755)
 
-	remoteHome, _ := ssh.GetRemoteHome(client)
+	remoteHome, _ := ssh_plugin.GetRemoteHome(client)
 	remoteDebugPath := path.Join(remoteHome, "dialtone_debug")
 
 	// --- STEP 1: TSNET ONLY ---
@@ -280,12 +280,12 @@ func runDebugStep(source, tmpDir, osStr, archStr string, client *sshlib.Client, 
 
 	logs.Info("   Uploading to robot...")
 	// Kill existing debug process if any
-	_, _ = ssh.RunSSHCommand(client, "pkill -9 dialtone_debug")
+	_, _ = ssh_plugin.RunSSHCommand(client, "pkill -9 dialtone_debug")
 	
-	if err := ssh.UploadFile(client, localBin, remotePath); err != nil {
+	if err := ssh_plugin.UploadFile(client, localBin, remotePath); err != nil {
 		return err
 	}
-	_, _ = ssh.RunSSHCommand(client, "chmod +x "+remotePath)
+	_, _ = ssh_plugin.RunSSHCommand(client, "chmod +x "+remotePath)
 
 	logs.Info("   Executing remotely...")
 	// We run with a timeout
@@ -293,7 +293,7 @@ func runDebugStep(source, tmpDir, osStr, archStr string, client *sshlib.Client, 
 	errChan := make(chan error, 1)
 
 	go func() {
-		out, err := ssh.RunSSHCommand(client, remotePath)
+		out, err := ssh_plugin.RunSSHCommand(client, remotePath)
 		if err != nil {
 			errChan <- err
 		} else {
@@ -310,7 +310,7 @@ func runDebugStep(source, tmpDir, osStr, archStr string, client *sshlib.Client, 
 	case err := <-errChan:
 		return err
 	case <-time.After(30 * time.Second):
-		_, _ = ssh.RunSSHCommand(client, "pkill -9 dialtone_debug")
+		_, _ = ssh_plugin.RunSSHCommand(client, "pkill -9 dialtone_debug")
 		return fmt.Errorf("remote execution timed out")
 	}
 

@@ -1,4 +1,4 @@
-package main
+package test
 
 import (
 	"fmt"
@@ -28,7 +28,7 @@ func Run17LifecycleInvariants(ctx *testCtx) (string, error) {
 	}
 
 	for _, c := range checks {
-		if err := session.Run(test_v2.NavigateToSection(c.id, c.label)); err != nil {
+		if err := session.Run(test_v2.NavigateToSection("robot", c.id, c.label)); err != nil {
 			return "", err
 		}
 	}
@@ -39,7 +39,7 @@ func Run17LifecycleInvariants(ctx *testCtx) (string, error) {
 	for _, token := range required {
 		found := false
 		for _, e := range entries {
-			if strings.Contains(e.Message, token) {
+			if strings.Contains(e.Text, token) {
 				found = true
 				break
 			}
@@ -50,8 +50,8 @@ func Run17LifecycleInvariants(ctx *testCtx) (string, error) {
 	}
 
 	for _, e := range entries {
-		if strings.Contains(e.Message, "[INVARIANT]") {
-			return "", fmt.Errorf("invariant violation captured: %s", e.Message)
+		if strings.Contains(e.Text, "[INVARIANT]") {
+			return "", fmt.Errorf("invariant violation captured: %s", e.Text)
 		}
 	}
 

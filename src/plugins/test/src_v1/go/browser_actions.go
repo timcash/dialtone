@@ -22,6 +22,13 @@ func TypeAriaLabel(label, value string) Action {
 	return chromedp.SendKeys(fmt.Sprintf(`[aria-label="%s"]`, label), value, chromedp.ByQuery)
 }
 
+func TypeAndSubmitAriaLabel(label, value string) Action {
+	return chromedp.Tasks{
+		chromedp.SetValue(fmt.Sprintf(`[aria-label="%s"]`, label), value, chromedp.ByQuery),
+		chromedp.SendKeys(fmt.Sprintf(`[aria-label="%s"]`, label), "\r", chromedp.ByQuery),
+	}
+}
+
 func PressEnterAriaLabel(label string) Action {
 	return chromedp.SendKeys(fmt.Sprintf(`[aria-label="%s"]`, label), "\r", chromedp.ByQuery)
 }

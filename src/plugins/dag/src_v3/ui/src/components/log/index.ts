@@ -1,7 +1,7 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-import { VisualizationControl } from '../../../../../../../plugins/ui/src_v1/ui/types';
+import { VisualizationControl } from '@ui/types';
 
 type LogFormMode = 'cursor' | 'select' | 'command';
 

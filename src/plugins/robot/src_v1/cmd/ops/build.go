@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"dialtone/dev/build"
+	"dialtone/dev/plugins/go/src_v1/go"
 )
 
 func Build(flags ...string) error {
@@ -14,11 +14,15 @@ func Build(flags ...string) error {
 	if err != nil {
 		return err
 	}
-	uiDir := filepath.Join(cwd, "src", "plugins", "robot", "src_v1", "ui")
+	repoRoot := cwd
+	if filepath.Base(cwd) == "src" {
+		repoRoot = filepath.Dir(cwd)
+	}
+	uiDir := filepath.Join(repoRoot, "src", "plugins", "robot", "src_v1", "ui")
 
 	fmt.Printf(">> [Robot] Building UI: src_v1\n")
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "build")
-	cmd.Dir = cwd
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "build")
+	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -28,8 +32,7 @@ func Build(flags ...string) error {
 	robotBinDir := filepath.Join("src", "plugins", "robot", "bin")
 	fmt.Printf(">> [Robot] Building Dialtone Binary into %s\n", robotBinDir)
 
-	args := []string{"--output-dir", robotBinDir, "--skip-web", "--skip-www"}
+	args := []string{"build", "--output-dir", robotBinDir, "--skip-web", "--skip-www"}
 	args = append(args, flags...)
-	build.RunBuild(args)
-	return nil
+	return go_plugin.RunGo(args...)
 }

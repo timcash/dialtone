@@ -1,4 +1,4 @@
-@import '../../../../../plugins/ui/src_v1/ui/style.css';
+@import '@ui/style.css';
 
 #simple-three-stage {
   display: grid;

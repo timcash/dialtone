@@ -17,14 +17,15 @@ import (
 	"syscall"
 	"time"
 
-	"dialtone/dev/browser"
+	"dialtone/dev/plugins/chrome/app"
 	test_v2 "dialtone/dev/plugins/test/src_v1/go"
-	chrome_app "dialtone/dev/plugins/chrome/app"
+	ssh_plugin "dialtone/dev/plugins/ssh/src_v1/go"
+	sshlib "golang.org/x/crypto/ssh"
 )
 
-func Dev(args []string) error {
+func Dev(repoRoot string, args []string) error {
 	cwd, _ := os.Getwd()
-	pluginDir := filepath.Join(cwd, "src", "plugins", "robot", "src_v1")
+	pluginDir := filepath.Join(repoRoot, "src", "plugins", "robot", "src_v1")
 	uiDir := filepath.Join(pluginDir, "ui")
 	devLogPath := filepath.Join(pluginDir, "dev.log")
 	devBrowserMetaPath := filepath.Join(pluginDir, "dev.browser.json")
@@ -77,6 +78,7 @@ func Dev(args []string) error {
 		logf:           logf,
 		logOut:         logOut,
 		cwd:            cwd,
+		repoRoot:       repoRoot,
 		useRemote:      useRemoteRobot,
 		remoteHost:     os.Getenv("ROBOT_HOST"),
 		remoteUser:     os.Getenv("ROBOT_USER"),
@@ -129,11 +131,11 @@ func Dev(args []string) error {
 			lastRestartAt = time.Now()
 
 			logf("   [DEV] Cleaning up port %d...", devPort)
-			_ = browser.CleanupPort(devPort)
+			_ = chrome.CleanupPort(devPort)
 
 			logf("   [DEV] Launching Vite (Attempt %d)...", restartAttemptID)
 
-			cmd := exec.CommandContext(ctx, filepath.Join(cwd, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(devPort), "--strictPort", "--force")
+			cmd := exec.CommandContext(ctx, filepath.Join(repoRoot, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(devPort), "--strictPort", "--force")
 
 			// Create a pipe to monitor output for CRITICAL errors
 			pr, pw := io.Pipe()
@@ -268,6 +270,7 @@ func startRobotDevBrowser(logf func(string, ...any), devURL, devBrowserMetaPath 
 	
 	s, err := test_v2.StartBrowser(test_v2.BrowserOptions{
 		Headless:      false,
+		GPU:           true,
 		Role:          "robot-dev",
 		ReuseExisting: true,
 		URL:           devURL,
@@ -283,7 +286,7 @@ func startRobotDevBrowser(logf func(string, ...any), devURL, devBrowserMetaPath 
 		return nil, nil
 	}
 	
-	if err := chrome_app.WriteSessionMetadata(devBrowserMetaPath, s.ChromeSession()); err != nil {
+	if err := chrome.WriteSessionMetadata(devBrowserMetaPath, s.ChromeSession()); err != nil {
 		logf("   [DEV] Warning: failed to write browser metadata: %v", err)
 	}
 
@@ -378,18 +381,22 @@ type BackendManager struct {
 	logf           func(string, ...any)
 	logOut         io.Writer
 	cwd            string
+	repoRoot       string
 	useRemote      bool
 	remoteHost     string
 	remoteUser     string
+	remotePass     string
 	failoverToMock bool
 
 	mu             sync.Mutex
 	activeCmd      *exec.Cmd
+	sshClient      *sshlib.Client
 	isMockActive   bool
 	isFailover     bool
 }
 
 func (bm *BackendManager) Start() {
+	bm.remotePass = os.Getenv("ROBOT_PASSWORD")
 	if bm.useRemote {
 		bm.logf("   [DEV] Remote Robot mode enabled. Attempting to connect to %s...", bm.remoteHost)
 		if err := bm.startRemote(); err != nil {
@@ -449,20 +456,23 @@ func (bm *BackendManager) startRemote() error {
 }
 
 func (bm *BackendManager) startRemoteInternal() error {
-	target := bm.remoteHost
-	if bm.remoteUser != "" {
-		target = fmt.Sprintf("%s@%s", bm.remoteUser, bm.remoteHost)
-	}
-
-	cmd := exec.CommandContext(bm.ctx, "ssh", "-N", "-o", "ConnectTimeout=5", "-L", "8080:localhost:8080", "-L", "4223:localhost:4223", target)
-	cmd.Stdout = bm.logOut
-	cmd.Stderr = bm.logOut
-	if err := cmd.Start(); err != nil {
+	client, err := ssh_plugin.DialSSH(bm.remoteHost, "22", bm.remoteUser, bm.remotePass)
+	if err != nil {
 		return err
 	}
-	bm.activeCmd = cmd
+
+	if err := ssh_plugin.ForwardRemoteToLocal(client, "localhost:8080", "127.0.0.1:8080"); err != nil {
+		client.Close()
+		return err
+	}
+	if err := ssh_plugin.ForwardRemoteToLocal(client, "localhost:4223", "127.0.0.1:4223"); err != nil {
+		client.Close()
+		return err
+	}
+
+	bm.sshClient = client
 	bm.isMockActive = false
-	bm.logf("   [DEV] SSH tunnel started (pid %d)", cmd.Process.Pid)
+	bm.logf("   [DEV] Go-based SSH tunnel started")
 	return nil
 }
 
@@ -474,8 +484,8 @@ func (bm *BackendManager) startMock() {
 
 func (bm *BackendManager) startMockInternal() {
 	bm.logf("   [DEV] Starting local mock backend...")
-	cmd := exec.CommandContext(bm.ctx, filepath.Join(bm.cwd, "dialtone.sh"), "go", "exec", "run", "src/plugins/robot/src_v1/cmd/main.go")
-	cmd.Dir = bm.cwd
+	cmd := exec.CommandContext(bm.ctx, filepath.Join(bm.repoRoot, "dialtone.sh"), "go", "exec", "run", "plugins/robot/src_v1/cmd/server/main.go")
+	cmd.Dir = bm.repoRoot
 	cmd.Stdout = bm.logOut
 	cmd.Stderr = bm.logOut
 	if err := cmd.Start(); err != nil {
@@ -491,17 +501,21 @@ func (bm *BackendManager) stopCurrent() {
 	if bm.activeCmd != nil && bm.activeCmd.Process != nil {
 		_ = bm.activeCmd.Process.Kill()
 		_, _ = bm.activeCmd.Process.Wait()
+		bm.activeCmd = nil
+	}
+	if bm.sshClient != nil {
+		_ = bm.sshClient.Close()
+		bm.sshClient = nil
 	}
 }
 
 func (bm *BackendManager) probeRemote() bool {
-	target := bm.remoteHost
-	if bm.remoteUser != "" {
-		target = fmt.Sprintf("%s@%s", bm.remoteUser, bm.remoteHost)
+	client, err := ssh_plugin.DialSSH(bm.remoteHost, "22", bm.remoteUser, bm.remotePass)
+	if err != nil {
+		return false
 	}
-	cmd := exec.Command("ssh", "-o", "ConnectTimeout=3", "-o", "BatchMode=yes", target, "true")
-	err := cmd.Run()
-	return err == nil
+	client.Close()
+	return true
 }
 
 func (bm *BackendManager) restoreRemote() {

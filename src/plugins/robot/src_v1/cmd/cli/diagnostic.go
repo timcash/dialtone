@@ -1,4 +1,4 @@
-package robot_cli
+package cli
 
 import (
 	"context"
@@ -131,7 +131,7 @@ func RunDiagnostic(versionDir string) error {
 			name:      "Hero Section",
 			sectionID: "hero",
 			validation: func(ctx context.Context) error {
-				return session.RunWithContext(ctx, chromedp.Tasks{
+				return chromedp.Run(ctx, chromedp.Tasks{
 					chromedp.WaitVisible("[aria-label='Hero Section']", chromedp.ByQuery),
 					chromedp.WaitVisible("[aria-label='Hero Canvas']", chromedp.ByQuery),
 				})
@@ -141,23 +141,23 @@ func RunDiagnostic(versionDir string) error {
 			name:      "Docs Section",
 			sectionID: "docs",
 			validation: func(ctx context.Context) error {
-				return session.RunWithContext(ctx, test_v2.NavigateToSection("docs", "Docs Section"))
+				return chromedp.Run(ctx, test_v2.NavigateToSection("robot", "docs", "Docs Section"))
 			},
 		},
 		{
 			name:      "Telemetry Table Section",
 			sectionID: "table",
 			validation: func(ctx context.Context) error {
-				if err := session.RunWithContext(ctx, test_v2.NavigateToSection("table", "Telemetry Section")); err != nil {
+				if err := chromedp.Run(ctx, test_v2.NavigateToSection("robot", "table", "Telemetry Section")); err != nil {
 					return err
 				}
-				if err := session.RunWithContext(ctx, test_v2.WaitForAriaLabelAttrEquals("Robot Table", "data-ready", "true", 3*time.Second)); err != nil {
+				if err := chromedp.Run(ctx, test_v2.WaitForAriaLabelAttrEquals("Robot Table", "data-ready", "true", 3*time.Second)); err != nil {
 					return err
 				}
 				var rowCount int
 				// Use a shorter loop since the context itself has a timeout
 				for {
-					if err := session.RunWithContext(ctx, chromedp.Evaluate(`document.querySelectorAll("table[aria-label='Robot Table'] tbody tr").length`, &rowCount)); err != nil {
+					if err := chromedp.Run(ctx, chromedp.Evaluate(`document.querySelectorAll("table[aria-label='Robot Table'] tbody tr").length`, &rowCount)); err != nil {
 						return err
 					}
 					if rowCount > 0 {
@@ -176,12 +176,12 @@ func RunDiagnostic(versionDir string) error {
 			name:      "3D Section Telemetry & Commands",
 			sectionID: "three",
 			validation: func(ctx context.Context) error {
-				if err := session.RunWithContext(ctx, test_v2.NavigateToSection("three", "Three Section")); err != nil {
+				if err := chromedp.Run(ctx, test_v2.NavigateToSection("robot", "three", "Three Section")); err != nil {
 					return err
 				}
 				
 				// Verify HUD elements are present
-				if err := session.RunWithContext(ctx, chromedp.Tasks{
+				if err := chromedp.Run(ctx, chromedp.Tasks{
 					chromedp.WaitVisible("#hud-alt", chromedp.ByID),
 					chromedp.WaitVisible("#hud-spd", chromedp.ByID),
 					chromedp.WaitVisible("#hud-mode", chromedp.ByID),
@@ -193,7 +193,7 @@ func RunDiagnostic(versionDir string) error {
 				logs.Info("[DIAGNOSTIC] Waiting for live telemetry in HUD...")
 				var alt, spd, mode string
 				for i := 0; i < 10; i++ {
-					if err := session.RunWithContext(ctx, chromedp.Tasks{
+					if err := chromedp.Run(ctx, chromedp.Tasks{
 						chromedp.Text("#hud-alt", &alt, chromedp.ByID),
 						chromedp.Text("#hud-spd", &spd, chromedp.ByID),
 						chromedp.Text("#hud-mode", &mode, chromedp.ByID),
@@ -211,7 +211,7 @@ func RunDiagnostic(versionDir string) error {
 
 				// Test Command Button (ARM)
 				logs.Info("[DIAGNOSTIC] Testing ARM button...")
-				if err := session.RunWithContext(ctx, chromedp.Click("#three-arm", chromedp.ByID)); err != nil {
+				if err := chromedp.Run(ctx, chromedp.Click("#three-arm", chromedp.ByID)); err != nil {
 					return fmt.Errorf("failed to click ARM button: %w", err)
 				}
 				
@@ -225,17 +225,17 @@ func RunDiagnostic(versionDir string) error {
 			name:      "Terminal Section",
 			sectionID: "xterm",
 			validation: func(ctx context.Context) error {
-				return session.RunWithContext(ctx, test_v2.NavigateToSection("xterm", "Xterm Section"))
+				return chromedp.Run(ctx, test_v2.NavigateToSection("robot", "xterm", "Xterm Section"))
 			},
 		},
 		{
 			name:      "Video Section",
 			sectionID: "video",
 			validation: func(ctx context.Context) error {
-				if err := session.RunWithContext(ctx, test_v2.NavigateToSection("video", "Video Section")); err != nil {
+				if err := chromedp.Run(ctx, test_v2.NavigateToSection("robot", "video", "Video Section")); err != nil {
 					return err
 				}
-				return session.RunWithContext(ctx, test_v2.WaitForAriaLabelAttrEquals("Video Section", "data-playing", "true", 4*time.Second))
+				return chromedp.Run(ctx, test_v2.WaitForAriaLabelAttrEquals("Video Section", "data-playing", "true", 4*time.Second))
 			},
 		},
 	}

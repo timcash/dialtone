@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import { VisualizationControl } from '../../../../../../../libs/ui_v2/types';
+import { VisualizationControl } from '@ui/types';
 import { addMavlinkListener, sendCommand } from '../../data/connection';
 import { registerButtons, renderButtons } from '../../buttons';
 

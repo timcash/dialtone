@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import { VisualizationControl } from '../../../../../../../plugins/ui/src_v1/ui/types';
+import { VisualizationControl } from '@ui/types';
 import { DagStageCamera, DagCameraView } from './camera';
 
 type NodeID = string;

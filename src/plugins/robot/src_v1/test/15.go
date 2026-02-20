@@ -1,4 +1,4 @@
-package main
+package test
 
 import (
 	"fmt"
@@ -14,7 +14,7 @@ func Run15XtermSectionValidation(ctx *testCtx) (string, error) {
 	}
 
 	fmt.Println("   [STEP] Navigating to Xterm Section...")
-	if err := session.Run(test_v2.NavigateToSection("xterm", "Xterm Section")); err != nil {
+	if err := session.Run(test_v2.NavigateToSection("robot", "xterm", "Xterm Section")); err != nil {
 		return "", fmt.Errorf("failed navigating to Xterm: %w", err)
 	}
 

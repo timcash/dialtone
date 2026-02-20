@@ -1,4 +1,4 @@
-package main
+package test
 
 import (
 	"fmt"
@@ -14,7 +14,7 @@ func Run14ThreeSectionValidation(ctx *testCtx) (string, error) {
 
 	// 1. Navigate to 3D Section
 	fmt.Println("   [STEP] Navigating to Three Section...")
-	if err := session.Run(test_v2.NavigateToSection("three", "Three Section")); err != nil {
+	if err := session.Run(test_v2.NavigateToSection("robot", "three", "Three Section")); err != nil {
 		return "", fmt.Errorf("failed navigating to Three: %w", err)
 	}
 

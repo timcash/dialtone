@@ -1,4 +1,4 @@
-import { VisualizationControl } from '../../../../../../../libs/ui_v2/types';
+import { VisualizationControl } from '@ui/types';
 import * as THREE from "three";
 import { IKSolver, IKJoint, IKChain } from "./ik";
 

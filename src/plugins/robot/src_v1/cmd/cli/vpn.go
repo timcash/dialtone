@@ -1,4 +1,4 @@
-package robot_cli
+package cli
 
 import (
 	"context"
