@@ -86,6 +86,17 @@ func main() {
 				return Run06Worktree(ctx)
 			},
 		},
+		{
+			Name: "Test 7: worktree start",
+			Files: []string{
+				"src/plugins/repl/src_v1/test/07_worktree_start.go",
+				"dialtone.sh",
+			},
+			Conditions: "1. `worktree start` should create tree and launch agent",
+			Run: func() (string, error) {
+				return Run07WorktreeStart(ctx)
+			},
+		},
 	}
 
 	reportPath := filepath.Join(ctx.repoRoot, "src/plugins/repl/src_v1/test/TEST.md")

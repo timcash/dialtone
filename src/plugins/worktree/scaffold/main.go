@@ -39,6 +39,27 @@ func main() {
 			fmt.Printf("Error: %v\n", err)
 			os.Exit(1)
 		}
+	case "start":
+		if len(args) == 0 {
+			fmt.Println("Usage: worktree start <name> --task <file>")
+			return
+		}
+		name := args[0]
+		var task string
+		for i := 1; i < len(args); i++ {
+			if args[i] == "--task" && i+1 < len(args) {
+				task = args[i+1]
+				i++
+			}
+		}
+		if task == "" {
+			fmt.Println("Error: --task <file> is required for start")
+			os.Exit(1)
+		}
+		if err := worktree.Start(name, task); err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
 	case "remove":
 		if len(args) == 0 {
 			fmt.Println("Usage: worktree remove <name>")
@@ -105,6 +126,7 @@ func findRepoRoot(cwd string) string {
 func printUsage() {
 	fmt.Println("Usage: worktree <command> [args]")
 	fmt.Println("  add <name> ...   Create worktree & tmux session")
+	fmt.Println("  start <name> ... Create worktree & start Agent")
 	fmt.Println("  remove <name>    Remove worktree & tmux session")
 	fmt.Println("  list             List active worktrees")
 	fmt.Println("  test [src_v1]    Run tests")
