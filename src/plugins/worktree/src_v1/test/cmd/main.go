@@ -17,6 +17,10 @@ func main() {
 	
 	// Ensure cleanup
 	_ = worktree.Remove(name)
+	defer func() {
+		fmt.Printf("Cleanup: removing worktree '%s'...\n", name)
+		_ = worktree.Remove(name)
+	}()
 	
 	err := worktree.Add(name, "README.md", "") // Use README as dummy task
 	if err != nil {
