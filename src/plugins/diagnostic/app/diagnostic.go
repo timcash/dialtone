@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"dialtone/dev/core/config"
-	"dialtone/dev/core/logger"
-	"dialtone/dev/core/ssh"
+	"dialtone/dev/config"
+	"dialtone/dev/logger"
+	"dialtone/dev/ssh"
 
 	cdplog "github.com/chromedp/cdproto/log"
 	cdpruntime "github.com/chromedp/cdproto/runtime"

@@ -2,7 +2,7 @@ package cli
 
 import (
 	"bufio"
-	"dialtone/dev/core/config"
+	"dialtone/dev/config"
 	"encoding/json"
 	"fmt"
 	"os"

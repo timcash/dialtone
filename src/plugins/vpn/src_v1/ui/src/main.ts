@@ -1,4 +1,4 @@
-import { setupApp } from '../../../../../libs/ui_v2/ui';
+import { setupApp } from '../../../../../plugins/ui/ui';
 import './style.css';
 
 const { sections, menu } = setupApp({ title: 'dialtone.vpn', debug: true });

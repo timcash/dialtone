@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"dialtone/dev/core/logger"
-	"dialtone/dev/core/ssh"
+	"dialtone/dev/logger"
+	"dialtone/dev/ssh"
 )
 
 // RunLogs handles the logs command

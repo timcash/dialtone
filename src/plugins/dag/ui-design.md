@@ -42,7 +42,7 @@
 ## Recommended Next Steps
 
 - Replace remaining DAG-prefixed spacing token names with generic UI tokens.
-- Move shared `mode-form` styles to `src/libs/ui_v2/style.css` once another plugin adopts it.
+- Move shared `mode-form` styles to `src/plugins/ui/style.css` once another plugin adopts it.
 - Normalize underlay section aria labels to include section ID for easier debugging.
 - Add a tiny section-style checklist to PR template:
   - semantic wrapper tag

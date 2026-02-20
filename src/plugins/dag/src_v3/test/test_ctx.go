@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"dialtone/dev/core/browser"
-	test_v2 "dialtone/dev/libs/test_v2"
+	"dialtone/dev/browser"
+	test_v2 "dialtone/dev/plugins/test"
 	chrome_app "dialtone/dev/plugins/chrome/app"
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/chromedp"

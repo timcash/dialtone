@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"dialtone/dev/core/logger"
+	"dialtone/dev/logger"
 	"github.com/bluenviron/gomavlib/v3"
 	"github.com/bluenviron/gomavlib/v3/pkg/dialects/common"
 )

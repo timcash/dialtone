@@ -1,9 +1,9 @@
 package test
 
 import (
-	"dialtone/dev/core/config"
-	"dialtone/dev/core/logger"
-	"dialtone/dev/core/test"
+	"dialtone/dev/config"
+	"dialtone/dev/logger"
+	"dialtone/dev/test_core"
 	"fmt"
 	"os"
 	"path/filepath"

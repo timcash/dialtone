@@ -2,8 +2,8 @@ package test
 
 import (
 	"bytes"
-	"dialtone/dev/core/logger"
-	"dialtone/dev/core/test"
+	"dialtone/dev/logger"
+	"dialtone/dev/test_core"
 	"dialtone/dev/plugins/cad/app"
 	"encoding/json"
 	"fmt"

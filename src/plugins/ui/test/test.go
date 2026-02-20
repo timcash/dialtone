@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"dialtone/dev/core/browser"
-	"dialtone/dev/core/test"
+	"dialtone/dev/browser"
+	"dialtone/dev/test_core"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/chromedp"
 )

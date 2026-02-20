@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"dialtone/dev/core/config"
-	"dialtone/dev/core/logger"
+	"dialtone/dev/config"
+	"dialtone/dev/logger"
 )
 
 const (

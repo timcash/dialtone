@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"dialtone/dev/core/logger"
+	"dialtone/dev/logger"
 )
 
 // Build handles the build steps for the AI plugin

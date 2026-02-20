@@ -3,7 +3,7 @@ package test
 import (
 	"fmt"
 
-	corebrowser "dialtone/dev/core/browser"
+	corebrowser "dialtone/dev/browser"
 	chrome "dialtone/dev/plugins/chrome/app"
 )
 

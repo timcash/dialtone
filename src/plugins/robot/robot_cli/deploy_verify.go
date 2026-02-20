@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"dialtone/dev/core/logger"
-	"dialtone/dev/core/ssh"
+	"dialtone/dev/logger"
+	"dialtone/dev/ssh"
 	sshlib "golang.org/x/crypto/ssh"
 )
 

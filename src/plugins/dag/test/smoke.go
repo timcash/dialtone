@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"dialtone/dev/core/browser"
-	"dialtone/dev/libs/dialtest"
+	"dialtone/dev/browser"
+	"dialtone/dev/plugins/dialtest"
 	chrome_app "dialtone/dev/plugins/chrome/app"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"

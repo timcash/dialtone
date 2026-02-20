@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"dialtone/dev/core/browser"
+	"dialtone/dev/browser"
 	chrome_app "dialtone/dev/plugins/chrome/app"
 	"github.com/chromedp/cdproto/page"
 	cdruntime "github.com/chromedp/cdproto/runtime"

@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"dialtone/dev/core/logger"
-	test_v2 "dialtone/dev/libs/test_v2"
+	"dialtone/dev/logger"
+	test_v2 "dialtone/dev/plugins/test"
 	"github.com/chromedp/chromedp"
 )
 

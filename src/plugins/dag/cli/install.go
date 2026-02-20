@@ -2,8 +2,8 @@ package cli
 
 import (
 	"archive/zip"
-	"dialtone/dev/core/config"
-	core_install "dialtone/dev/core/install"
+	"dialtone/dev/config"
+	core_install "dialtone/dev/install"
 	"fmt"
 	"io"
 	"net/http"

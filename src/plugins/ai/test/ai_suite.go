@@ -5,8 +5,8 @@ import (
 	"os"
 	"os/exec"
 
-	"dialtone/dev/core/logger"
-	"dialtone/dev/core/test"
+	"dialtone/dev/logger"
+	"dialtone/dev/test_core"
 )
 
 func init() {

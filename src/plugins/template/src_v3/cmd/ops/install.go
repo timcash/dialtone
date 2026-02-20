@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	core_install "dialtone/dev/core/install"
+	core_install "dialtone/dev/install"
 )
 
 var installRequirements = []core_install.Requirement{

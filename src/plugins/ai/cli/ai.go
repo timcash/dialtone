@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"dialtone/dev/core/logger"
-	test_cli "dialtone/dev/core/test/cli"
+	"dialtone/dev/logger"
+	test_cli "dialtone/dev/test_core/cli"
 	github_cli "dialtone/dev/plugins/github/cli"
 )
 

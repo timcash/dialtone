@@ -1,7 +1,7 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-import { VisualizationControl } from '../../../../../../../libs/ui_v2/types';
+import { VisualizationControl } from '../../../../../../../plugins/ui/types';
 
 type LogThumbMode = 'cursor' | 'select' | 'command';
 

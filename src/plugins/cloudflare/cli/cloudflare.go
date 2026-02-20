@@ -3,7 +3,7 @@ package cli
 import (
 	"bytes"
 	"crypto/rand"
-	"dialtone/dev/libs/test_v2"
+	"dialtone/dev/plugins/test"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
@@ -17,9 +17,9 @@ import (
 	"strings"
 	"syscall"
 
-	"dialtone/dev/core/config"
-	"dialtone/dev/core/logger"
-	"dialtone/dev/core/util"
+	"dialtone/dev/config"
+	"dialtone/dev/logger"
+	"dialtone/dev/util"
 )
 
 func findCloudflared() string {

@@ -3,7 +3,7 @@ package cli
 import (
 	"bufio"
 	"context"
-	"dialtone/dev/core/logger"
+	"dialtone/dev/logger"
 	"fmt"
 	"os"
 	"os/exec"

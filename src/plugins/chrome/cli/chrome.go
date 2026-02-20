@@ -6,7 +6,7 @@ import (
 
 	"strings"
 
-	"dialtone/dev/core/logger"
+	"dialtone/dev/logger"
 	chrome "dialtone/dev/plugins/chrome/app"
 	chrome_test "dialtone/dev/plugins/chrome/test"
 )

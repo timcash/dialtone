@@ -1,4 +1,4 @@
-import { VisualizationControl } from '../../../../../../../libs/ui_v2/types';
+import { VisualizationControl } from '../../../../../../../plugins/ui/types';
 
 type TableRow = {
   key: string;

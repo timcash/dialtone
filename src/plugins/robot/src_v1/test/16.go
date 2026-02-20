@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	test_v2 "dialtone/dev/libs/test_v2"
+	test_v2 "dialtone/dev/plugins/test"
 )
 
 func Run16VideoSectionValidation(ctx *testCtx) (string, error) {

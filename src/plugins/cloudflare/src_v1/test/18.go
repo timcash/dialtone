@@ -5,7 +5,7 @@ import (
 	"net"
 	"time"
 
-	"dialtone/dev/core/browser"
+	"dialtone/dev/browser"
 )
 
 func Run18CleanupVerification() error {
