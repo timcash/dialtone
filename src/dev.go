@@ -3,13 +3,14 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
+
+	"dialtone/dev/plugins/proc/src_v1/go/proc"
 
 	"github.com/joho/godotenv"
 )
@@ -267,7 +268,12 @@ func startREPL() {
 			continue
 		}
 
-		// Handle @DIALTONE or @dialtone.sh prefix
+		if line == "ps" {
+			proc.ListProcesses()
+			continue
+		}
+
+		// Handle @DIALTONE or @dialtone.sh prefix (optional now)
 		cmdStr := line
 		if strings.HasPrefix(line, "@DIALTONE ") {
 			cmdStr = line[len("@DIALTONE "):]
@@ -284,8 +290,25 @@ func startREPL() {
 		if len(args) > 1 {
 			cmdName += " " + args[1]
 		}
+
+		if strings.Join(args, " ") == "proc test src_v1" {
+			proc.RunTestSrcV1()
+			continue
+		}
+
+		isBackground := false
+		if len(args) > 0 && args[len(args)-1] == "&" {
+			isBackground = true
+			args = args[:len(args)-1]
+			cmdName = strings.TrimSuffix(cmdName, " &")
+		}
+
 		say(fmt.Sprintf("Request received. Spawning subtone for %s...", cmdName))
-		runSubtone(args)
+		if isBackground {
+			go proc.RunSubtone(args)
+		} else {
+			proc.RunSubtone(args)
+		}
 	}
 }
 
@@ -297,13 +320,16 @@ func printREPLHelp() {
 Install latest Go and bootstrap dev.go command scaffold
 
 ### Plugins
-` + "`" + `@DIALTONE robot install src_v1` + "`" + `
+` + "`" + `robot install src_v1` + "`" + `
 Install robot src_v1 dependencies
 
-` + "`" + `@DIALTONE dag install src_v3` + "`" + `
+` + "`" + `dag install src_v3` + "`" + `
 Install dag src_v3 dependencies
 
 ### System
+` + "`" + `ps` + "`" + `
+List active subtones
+
 ` + "`" + `<any command>` + "`" + `
 Forward to @./dialtone.sh <command>`
 
@@ -317,60 +343,6 @@ Forward to @./dialtone.sh <command>`
 			logLine("REPL", line)
 		}
 	}
-}
-
-func runSubtone(args []string) {
-	cwd, _ := os.Getwd()
-	repoRoot := cwd
-	if filepath.Base(cwd) == "src" {
-		repoRoot = filepath.Dir(cwd)
-	}
-	dialtoneSh := filepath.Join(repoRoot, "dialtone.sh")
-
-	cmd := exec.Command(dialtoneSh, args...)
-	cmd.Dir = repoRoot
-
-	stdout, _ := cmd.StdoutPipe()
-	stderr, _ := cmd.StderrPipe()
-
-	if err := cmd.Start(); err != nil {
-		fmt.Printf("DIALTONE> Failed to start subtone: %v\n", err)
-		logLine("REPL", fmt.Sprintf("Failed to start subtone: %v", err))
-		return
-	}
-
-	pid := cmd.Process.Pid
-	fmt.Printf("DIALTONE> Spawning subtone subprocess via PID %d...\n", pid)
-	fmt.Printf("DIALTONE> Streaming stdout/stderr from subtone PID %d.\n", pid)
-	logLine("REPL", fmt.Sprintf("Spawning subtone subprocess via PID %d...", pid))
-
-	// Combine stdout and stderr
-	reader := io.MultiReader(stdout, stderr)
-	scanner := bufio.NewScanner(reader)
-	for scanner.Scan() {
-		line := scanner.Text()
-		// If the line already starts with DIALTONE>, strip it to avoid double prefixing
-		// when streaming subtone output that was produced by another dev.go instance.
-		displayLine := line
-		if strings.HasPrefix(line, "DIALTONE> ") {
-			displayLine = line[len("DIALTONE> "):]
-		}
-		prefix := fmt.Sprintf("DIALTONE:%d> ", pid)
-		fmt.Printf("%s%s\n", prefix, displayLine)
-		logLine("REPL", prefix+displayLine)
-	}
-
-	err := cmd.Wait()
-	exitCode := 0
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			exitCode = 1
-		}
-	}
-	fmt.Printf("DIALTONE> Process %d exited with code %d.\n", pid, exitCode)
-	logLine("REPL", fmt.Sprintf("Process %d exited with code %d.", pid, exitCode))
 }
 
 func printDevUsage() {

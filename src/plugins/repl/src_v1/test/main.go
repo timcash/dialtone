@@ -28,7 +28,18 @@ func main() {
 			},
 		},
 		{
-			Name: "Test 2: dev install",
+			Name: "Test 2: ps",
+			Files: []string{
+				"src/plugins/repl/src_v1/test/02_ps.go",
+				"dialtone.sh",
+			},
+			Conditions: "1. `USER-1>` should request ps... \n2. `DIALTONE>` should list processes (or none)",
+			Run: func() (string, error) {
+				return Run02Ps(ctx)
+			},
+		},
+		{
+			Name: "Test 3: dev install",
 			Files: []string{
 				"src/plugins/repl/src_v1/test/02.go",
 				"src/plugins/go/install.sh",
@@ -40,7 +51,7 @@ func main() {
 			},
 		},
 		{
-			Name: "Test 3: robot install src_v1",
+			Name: "Test 4: robot install src_v1",
 			Files: []string{
 				"src/plugins/repl/src_v1/test/03.go",
 				"src/plugins/robot/ops.go",
@@ -52,7 +63,7 @@ func main() {
 			},
 		},
 		{
-			Name: "Test 4: dag install src_v3",
+			Name: "Test 5: dag install src_v3",
 			Files: []string{
 				"src/plugins/repl/src_v1/test/04.go",
 				"src/plugins/dag/cli/install.go",
