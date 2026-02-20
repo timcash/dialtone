@@ -258,6 +258,11 @@ func runPullRequest(args []string) {
 		logs.Fatal("Cannot create PR from main/master branch. Create a feature branch first.")
 	}
 
+	baseBranch := detectBaseBranch()
+	if err := ensureBranchReadyForPR(branch, baseBranch); err != nil {
+		logs.Fatal("Failed preparing branch for PR: %v", err)
+	}
+
 	// Check if PR already exists
 	checkCmd := exec.Command(gh, "pr", "view", "--json", "number,title,url")
 	prOutput, prErr := checkCmd.Output()
@@ -364,6 +369,61 @@ func runPullRequest(args []string) {
 			cmd.Run()
 		}
 	}
+}
+
+func detectBaseBranch() string {
+	if err := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/remotes/origin/main").Run(); err == nil {
+		return "main"
+	}
+	if err := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/remotes/origin/master").Run(); err == nil {
+		return "master"
+	}
+	return "main"
+}
+
+func ensureBranchReadyForPR(branch, base string) error {
+	_ = exec.Command("git", "fetch", "origin", base).Run()
+
+	// Ensure branch has at least one commit ahead of base. If not, bootstrap with an empty commit.
+	if !hasCommitsAhead(base) {
+		if hasUncommittedChanges() {
+			return fmt.Errorf("branch %s has no commits ahead of origin/%s and has uncommitted changes; commit or stash first", branch, base)
+		}
+		msg := fmt.Sprintf("chore: bootstrap %s PR", branch)
+		if out, err := exec.Command("git", "commit", "--allow-empty", "-m", msg).CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to create empty bootstrap commit: %v (%s)", err, strings.TrimSpace(string(out)))
+		}
+		logs.Info("Created empty bootstrap commit because branch had no commits ahead of origin/%s", base)
+	}
+
+	// Ensure branch is pushed before creating/updating PR.
+	pushArgs := []string{"push", "-u", "origin", branch}
+	if out, err := exec.Command("git", pushArgs...).CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to push branch %s: %v (%s)", branch, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func hasCommitsAhead(base string) bool {
+	cmd := exec.Command("git", "rev-list", "--count", "origin/"+base+"..HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return false
+	}
+	return count > 0
+}
+
+func hasUncommittedChanges() bool {
+	cmd := exec.Command("git", "status", "--porcelain")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) != ""
 }
 
 func runIssue(args []string) {

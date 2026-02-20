@@ -13,7 +13,7 @@ func Run07WorktreeStart(ctx *testCtx) (string, error) {
 
 	// Clean up potential leftovers
 	worktreeName := "agent-worktree-test"
-	worktreePath := filepath.Join(filepath.Dir(ctx.repoRoot), worktreeName)
+	worktreePath := filepath.Join(filepath.Dir(ctx.repoRoot), "dialtone_worktree", worktreeName)
 	_ = os.RemoveAll(worktreePath)
 	exec.Command("git", "-C", ctx.repoRoot, "worktree", "prune").Run()
 	// Also ensure tmux session is killed if exists (from previous fail)
@@ -35,15 +35,32 @@ func Run07WorktreeStart(ctx *testCtx) (string, error) {
 	time.Sleep(1 * time.Second)
 	ctx.ClearOutput()
 
-	// 1. Run worktree start
-	// We use the agent_test task file we created.
+	// 1. Add worktree first (start no longer creates it).
 	taskPath := "src/plugins/worktree/src_v1/agent_test/task.md"
-	cmd := fmt.Sprintf("worktree start %s --task %s", worktreeName, taskPath)
-	if err := ctx.SendInput(cmd); err != nil {
+	addCmd := fmt.Sprintf("worktree add %s --task %s", worktreeName, taskPath)
+	if err := ctx.SendInput(addCmd); err != nil {
+		return "", err
+	}
+	if err := ctx.WaitForOutput("Started at", 5*time.Second); err != nil {
+		return "", err
+	}
+	pid, err := ctx.ExtractLastSubtonePID()
+	if err != nil {
+		return "", fmt.Errorf("failed to get add pid: %w", err)
+	}
+	logPattern := fmt.Sprintf("subtone-%s-", pid)
+	if err := ctx.WaitForLogEntry(logPattern, "[Worktree] Creating worktree", 20*time.Second); err != nil {
+		return "", fmt.Errorf("add log missing: %w", err)
+	}
+	ctx.ClearOutput()
+
+	// 2. Run worktree start
+	startCmd := fmt.Sprintf("worktree start %s", worktreeName)
+	if err := ctx.SendInput(startCmd); err != nil {
 		return "", err
 	}
 
-	// 2. Verify logs
+	// 3. Verify logs
 	// We expect:
 	// - Worktree creation (Add) -> suppressed in REPL, check log?
 	// - Launching Agent -> printed by Start -> check log?
@@ -61,19 +78,18 @@ func Run07WorktreeStart(ctx *testCtx) (string, error) {
 	if err := ctx.WaitForOutput("Started at", 5*time.Second); err != nil {
 		return "", err
 	}
-	
-	pid, err := ctx.ExtractLastSubtonePID()
+	pid, err = ctx.ExtractLastSubtonePID()
 	if err != nil {
 		return "", fmt.Errorf("failed to get pid: %w", err)
 	}
-	logPattern := fmt.Sprintf("subtone-%s-", pid)
+	logPattern = fmt.Sprintf("subtone-%s-", pid)
 
 	// So we can check the logs for "[Worktree] Launching Gemini Agent".
 	if err := ctx.WaitForLogEntry(logPattern, "[Worktree] Launching Gemini Agent", 20*time.Second); err != nil {
 		return "", fmt.Errorf("failed to find agent launch log in %s: %w", logPattern, err)
 	}
 
-	// 3. Verify side effects
+	// 4. Verify side effects
 	// Worktree directory should exist.
 	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
 		return "", fmt.Errorf("worktree directory not created: %s", worktreePath)
@@ -84,13 +100,18 @@ func Run07WorktreeStart(ctx *testCtx) (string, error) {
 		return "", fmt.Errorf("TASK.md not copied to worktree")
 	}
 
-	// 4. Cleanup
+	// 5. Cleanup
+	ctx.ClearOutput()
 	if err := ctx.SendInput("worktree remove " + worktreeName); err != nil {
 		return "", err
 	}
-	if err := ctx.WaitForLogEntry("subtone-", "[Worktree] Removing worktree", 10*time.Second); err != nil {
-		return "", fmt.Errorf("cleanup failed: %w", err)
-	}
 
-	return "Verified worktree start command (creation + agent launch trigger).", nil
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+			return "Verified worktree start command (creation + agent launch trigger).", nil
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	return "", fmt.Errorf("cleanup failed: worktree path still exists: %s", worktreePath)
 }
