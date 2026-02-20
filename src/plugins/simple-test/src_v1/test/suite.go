@@ -13,7 +13,16 @@ func RunSuiteV1() {
 
 	steps := []test_v2.Step{
 		{Name: "00 Reset Workspace", RunWithContext: wrapRun(ctx, Run00Reset)},
-		{Name: "01 UI Section Load Test", RunWithContext: wrapRun(ctx, Run01UITest)},
+		{
+			Name:           "01 UI Section Load Test",
+			RunWithContext: wrapRun(ctx, Run01UITest),
+			Screenshots:    []string{"screenshots/01_ui_loaded.png"},
+		},
+		{
+			Name:           "02 Interaction Test",
+			RunWithContext: wrapRun(ctx, Run02InteractionTest),
+			Screenshots:    []string{"screenshots/02_interacted.png"},
+		},
 	}
 
 	opts := test_v2.SuiteOptions{
