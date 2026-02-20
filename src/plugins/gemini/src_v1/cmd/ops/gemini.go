@@ -30,7 +30,14 @@ func Run(taskFile, model, promptOverride string) error {
 	if strings.TrimSpace(prompt) == "" {
 		prompt = buildPrompt(cwd, absTask, string(taskBytes))
 	}
-	cmd := exec.Command("gemini", "-m", model, "-p", prompt)
+	workspaceRoot := filepath.Dir(cwd)
+	cmd := exec.Command(
+		"gemini",
+		"-m", model,
+		"-p", prompt,
+		"--approval-mode", "yolo",
+		"--include-directories", workspaceRoot,
+	)
 	cmd.Dir = cwd
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
