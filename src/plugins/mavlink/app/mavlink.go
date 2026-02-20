@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 	"github.com/bluenviron/gomavlib/v3"
 	"github.com/bluenviron/gomavlib/v3/pkg/dialects/common"
 )
@@ -87,14 +87,14 @@ func NewMavlinkService(config MavlinkConfig) (*MavlinkService, error) {
 // Start starts the MAVLink event loop
 func (s *MavlinkService) Start() {
 	// defer s.node.Close() // handled by Close()
-	logger.LogInfo("MavlinkService: Starting event loop on %s", s.config.Endpoint)
+	logs.Info("MavlinkService: Starting event loop on %s", s.config.Endpoint)
 
 	for evt := range s.node.Events() {
 		receivedAt := time.Now().UnixMilli()
 		switch e := evt.(type) {
 		case *gomavlib.EventFrame:
 			// LOG EVERY FRAME FOR DEBUGGING
-			// logger.LogInfo("[MAVLINK-RAW] Frame from sys %d comp %d at %v", e.SystemID(), e.ComponentID(), receivedAt)
+			// logs.Info("[MAVLINK-RAW] Frame from sys %d comp %d at %v", e.SystemID(), e.ComponentID(), receivedAt)
 
 			msg := e.Message()
 			msgType := fmt.Sprintf("%T", msg)
@@ -104,11 +104,11 @@ func (s *MavlinkService) Start() {
 					msgType = strings.ToUpper(parts[1])
 				}
 			}
-			logger.LogInfo("[MAVLINK-RAW] %s received at %v", msgType, receivedAt)
+			logs.Info("[MAVLINK-RAW] %s received at %v", msgType, receivedAt)
 
 			switch msg := e.Message().(type) {
 			case *common.MessageHeartbeat:
-				logger.LogInfo("[MAVLINK-RAW] HEARTBEAT received at %v", receivedAt)
+				logs.Info("[MAVLINK-RAW] HEARTBEAT received at %v", receivedAt)
 				if s.config.Callback != nil {
 					s.config.Callback(&MavlinkEvent{
 						Type:       "HEARTBEAT",
@@ -150,13 +150,13 @@ func (s *MavlinkService) Start() {
 				}
 			}
 		case *gomavlib.EventParseError:
-			// logger.LogInfo("MAVLink parse error: %v", e.Error)
+			// logs.Info("MAVLink parse error: %v", e.Error)
 		case *gomavlib.EventStreamRequested:
-			logger.LogInfo("MAVLink stream requested")
+			logs.Info("MAVLink stream requested")
 		case *gomavlib.EventChannelOpen:
-			logger.LogInfo("MAVLink channel open")
+			logs.Info("MAVLink channel open")
 		case *gomavlib.EventChannelClose:
-			logger.LogInfo("MAVLink channel close")
+			logs.Info("MAVLink channel close")
 		}
 	}
 }
@@ -168,7 +168,7 @@ func (s *MavlinkService) Close() {
 
 // Arm sends the arm command to the rover
 func (s *MavlinkService) Arm() error {
-	logger.LogInfo("MavlinkService: Sending ARM command")
+	logs.Info("MavlinkService: Sending ARM command")
 	return s.node.WriteMessageAll(&common.MessageCommandLong{
 		TargetSystem:    0, // Broadcast
 		TargetComponent: 0, // Broadcast
@@ -180,7 +180,7 @@ func (s *MavlinkService) Arm() error {
 
 // Disarm sends the disarm command to the rover
 func (s *MavlinkService) Disarm() error {
-	logger.LogInfo("MavlinkService: Sending DISARM command")
+	logs.Info("MavlinkService: Sending DISARM command")
 	return s.node.WriteMessageAll(&common.MessageCommandLong{
 		TargetSystem:    0,
 		TargetComponent: 0,
@@ -203,7 +203,7 @@ func (s *MavlinkService) SetMode(mode string) error {
 		return fmt.Errorf("unsupported mode: %s", mode)
 	}
 
-	logger.LogInfo("MavlinkService: Setting mode to %s (custom_mode=%d)", mode, customMode)
+	logs.Info("MavlinkService: Setting mode to %s (custom_mode=%d)", mode, customMode)
 
 	return s.node.WriteMessageAll(&common.MessageCommandLong{
 		TargetSystem:    0,

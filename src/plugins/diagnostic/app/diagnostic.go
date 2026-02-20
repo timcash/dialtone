@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"dialtone/dev/config"
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 	"dialtone/dev/ssh"
 
 	cdplog "github.com/chromedp/cdproto/log"
@@ -25,13 +25,13 @@ import (
 // CheckLocalDependencies checks if Go, Node.js, and Tailscale are installed.
 func CheckLocalDependencies() {
 	if _, err := exec.LookPath("go"); err != nil {
-		logger.LogFatal("Go is not installed.")
+		logs.Fatal("Go is not installed.")
 	}
 	if _, err := exec.LookPath("node"); err != nil {
-		logger.LogInfo("Node.js is not installed (warning).")
+		logs.Info("Node.js is not installed (warning).")
 	}
 	if _, err := exec.LookPath("tailscale"); err != nil {
-		logger.LogFatal("Tailscale is not installed.")
+		logs.Fatal("Tailscale is not installed.")
 	}
 }
 
@@ -40,16 +40,16 @@ func RunRemoteDiagnostics(host, port, user, pass string) {
 	config.LoadConfig()
 
 	if pass == "" {
-		logger.LogFatal("Error: -pass is required for remote diagnostics")
+		logs.Fatal("Error: -pass is required for remote diagnostics")
 	}
 
 	client, err := ssh.DialSSH(host, port, user, pass)
 	if err != nil {
-		logger.LogFatal("SSH connection failed: %v", err)
+		logs.Fatal("SSH connection failed: %v", err)
 	}
 	defer client.Close()
 
-	logger.LogInfo("Running diagnostics on %s...", host)
+	logs.Info("Running diagnostics on %s...", host)
 
 	commands := []struct {
 		name string
@@ -88,11 +88,11 @@ func RunRemoteDiagnostics(host, port, user, pass string) {
 
 	// Web UI Check via Chromedp
 	if err := checkWebUI(url); err != nil {
-		logger.LogFatal("Web UI Check FAILED: %v", err)
+		logs.Fatal("Web UI Check FAILED: %v", err)
 	}
 	fmt.Printf("[chromedp] Web UI Check SUCCESS: %s is reachable\n", url)
 
-	logger.LogInfo("Diagnostics Passed.")
+	logs.Info("Diagnostics Passed.")
 }
 
 func checkAppStatus(url string) error {

@@ -2,7 +2,7 @@ package cli
 
 import (
 	"bufio"
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 	"io"
 	"os"
 	"os/exec"
@@ -26,22 +26,22 @@ func RunGemini(args []string) {
 
 	// Load env/.env
 	if err := godotenv.Load("env/.env"); err != nil {
-		logger.LogDebug("AI Plugin: No env/.env file found")
+		logs.Debug("AI Plugin: No env/.env file found")
 	}
 
 	dialtoneEnv := os.Getenv("DIALTONE_ENV")
 	if dialtoneEnv == "" {
-		logger.LogFatal("DIALTONE_ENV is not set. Please add it to your .env file.")
+		logs.Fatal("DIALTONE_ENV is not set. Please add it to your .env file.")
 	}
 
 	// Check for API Key
 	googleKey := os.Getenv("GOOGLE_API_KEY")
 	if googleKey != "" {
-		logger.LogInfo("AI Plugin: Authentication key (GOOGLE_API_KEY) found in env/.env")
+		logs.Info("AI Plugin: Authentication key (GOOGLE_API_KEY) found in env/.env")
 	} else {
-		logger.LogInfo("AI Plugin: No GOOGLE_API_KEY found in env/.env.")
-		logger.LogError("AI Plugin: Authentication failed. No GOOGLE_API_KEY found.")
-		logger.LogInfo("Please run 'dialtone ai auth' for instructions on how to set up your API key.")
+		logs.Info("AI Plugin: No GOOGLE_API_KEY found in env/.env.")
+		logs.Error("AI Plugin: Authentication failed. No GOOGLE_API_KEY found.")
+		logs.Info("Please run 'dialtone ai auth' for instructions on how to set up your API key.")
 		return
 	}
 
@@ -53,20 +53,20 @@ func RunGemini(args []string) {
 	geminiPath := filepath.Join(dialtoneEnv, "node_modules", ".bin", "gemini")
 
 	if _, err := os.Stat(localGemini); err == nil {
-		logger.LogDebug("Gemini: Using local binary at %s", localGemini)
+		logs.Debug("Gemini: Using local binary at %s", localGemini)
 		geminiPath = localGemini
 	} else if _, err := os.Stat(geminiPath); os.IsNotExist(err) {
-		logger.LogDebug("Gemini: CLI not found in %s or %s, checking PATH...", localGemini, geminiPath)
+		logs.Debug("Gemini: CLI not found in %s or %s, checking PATH...", localGemini, geminiPath)
 		p, err := exec.LookPath("gemini")
 		if err != nil {
-			logger.LogError("Gemini: CLI not found. Please run 'dialtone ai install' first.")
+			logs.Error("Gemini: CLI not found. Please run 'dialtone ai install' first.")
 			return
 		}
 		geminiPath = p
 	}
 
 	prompt := strings.Join(args, " ")
-	logger.LogInfo("Gemini: Sending prompt '%s' to CLI...", prompt)
+	logs.Info("Gemini: Sending prompt '%s' to CLI...", prompt)
 
 	// Execute gemini CLI
 	// gemini takes the prompt as arguments
@@ -85,14 +85,14 @@ func RunGemini(args []string) {
 	go func() {
 		scanner := bufio.NewScanner(prOut)
 		for scanner.Scan() {
-			logger.LogInfo("[Gemini] %s", scanner.Text())
+			logs.Info("[Gemini] %s", scanner.Text())
 		}
 	}()
 
 	go func() {
 		scanner := bufio.NewScanner(prErr)
 		for scanner.Scan() {
-			logger.LogError("[Gemini] %s", scanner.Text())
+			logs.Error("[Gemini] %s", scanner.Text())
 		}
 	}()
 
@@ -101,7 +101,7 @@ func RunGemini(args []string) {
 	defer pwErr.Close()
 
 	if err := cmd.Run(); err != nil {
-		logger.LogError("Gemini: CLI execution failed: %v", err)
+		logs.Error("Gemini: CLI execution failed: %v", err)
 		return
 	}
 }

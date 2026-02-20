@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	test_v2 "dialtone/dev/plugins/test"
+	test_v2 "dialtone/dev/plugins/dag/src_v3/suite"
 )
 
 func main() {

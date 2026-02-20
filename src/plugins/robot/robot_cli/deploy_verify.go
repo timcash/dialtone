@@ -9,13 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 	"dialtone/dev/ssh"
 	sshlib "golang.org/x/crypto/ssh"
 )
 
 func RunDeployTest(versionDir string, args []string) error {
-	logger.LogInfo("[DEPLOY-TEST] Starting step-by-step verification using %s...", versionDir)
+	logs.Info("[DEPLOY-TEST] Starting step-by-step verification using %s...", versionDir)
 
 	host := os.Getenv("ROBOT_HOST")
 	user := os.Getenv("ROBOT_USER")
@@ -24,10 +24,10 @@ func RunDeployTest(versionDir string, args []string) error {
 	authKey := os.Getenv("TS_AUTHKEY")
 
 	if host == "" || user == "" || pass == "" || hostname == "" || authKey == "" {
-		logger.LogFatal("Missing required environment variables (ROBOT_HOST, ROBOT_USER, ROBOT_PASSWORD, DIALTONE_HOSTNAME, TS_AUTHKEY)")
+		logs.Fatal("Missing required environment variables (ROBOT_HOST, ROBOT_USER, ROBOT_PASSWORD, DIALTONE_HOSTNAME, TS_AUTHKEY)")
 	}
 
-	logger.LogInfo("[DEPLOY-TEST] Step 0: Connecting to %s...", host)
+	logs.Info("[DEPLOY-TEST] Step 0: Connecting to %s...", host)
 	client, err := ssh.DialSSH(host, "22", user, pass)
 	if err != nil {
 		return fmt.Errorf("SSH connection failed: %w", err)
@@ -36,7 +36,7 @@ func RunDeployTest(versionDir string, args []string) error {
 
 	remoteArch, _ := ssh.RunSSHCommand(client, "uname -m")
 	remoteArch = strings.TrimSpace(remoteArch)
-	logger.LogInfo("[DEPLOY-TEST] Remote architecture: %s", remoteArch)
+	logs.Info("[DEPLOY-TEST] Remote architecture: %s", remoteArch)
 
 	targetOS := "linux"
 	targetArch := "arm64"
@@ -53,7 +53,7 @@ func RunDeployTest(versionDir string, args []string) error {
 
 	// --- STEP 1: TSNET ONLY ---
 	timeout1 := 20 * time.Second
-	logger.LogInfo("[DEPLOY-TEST] Step 1: Verifying Tailscale (tsnet) connectivity (Timeout: %v)...", timeout1)
+	logs.Info("[DEPLOY-TEST] Step 1: Verifying Tailscale (tsnet) connectivity (Timeout: %v)...", timeout1)
 	tsnetSrc := fmt.Sprintf(`package main
 import (
 	"context"
@@ -83,7 +83,7 @@ func main() {
 
 	// --- STEP 2: TSNET + NATS ---
 	timeout2 := 30 * time.Second
-	logger.LogInfo("[DEPLOY-TEST] Step 2: Verifying NATS Server start (Timeout: %v)...", timeout2)
+	logs.Info("[DEPLOY-TEST] Step 2: Verifying NATS Server start (Timeout: %v)...", timeout2)
 	natsSrc := fmt.Sprintf(`package main
 import (
 	"context"
@@ -112,7 +112,7 @@ func main() {
 
 	// --- STEP 3: TSNET + WEB HEALTH ---
 	timeout3 := 30 * time.Second
-	logger.LogInfo("[DEPLOY-TEST] Step 3: Verifying Web Server (Health Check) (Timeout: %v)...", timeout3)
+	logs.Info("[DEPLOY-TEST] Step 3: Verifying Web Server (Health Check) (Timeout: %v)...", timeout3)
 	webSrc := fmt.Sprintf(`package main
 import (
 	"fmt"
@@ -141,7 +141,7 @@ func main() {
 
 	// --- STEP 4: TSNET + NATS PUB/SUB ---
 	timeout4 := 30 * time.Second
-	logger.LogInfo("[DEPLOY-TEST] Step 4: Verifying NATS Messaging (Pub/Sub) (Timeout: %v)...", timeout4)
+	logs.Info("[DEPLOY-TEST] Step 4: Verifying NATS Messaging (Pub/Sub) (Timeout: %v)...", timeout4)
 	natsPubSubSrc := fmt.Sprintf(`package main
 import (
 	"context"
@@ -187,7 +187,7 @@ func main() {
 
 	// --- STEP 5: TSNET + WEB + WS TELEMETRY ---
 	timeout5 := 30 * time.Second
-	logger.LogInfo("[DEPLOY-TEST] Step 5: Verifying WebSocket Telemetry Stream (Timeout: %v)...", timeout5)
+	logs.Info("[DEPLOY-TEST] Step 5: Verifying WebSocket Telemetry Stream (Timeout: %v)...", timeout5)
 	wsTelemetrySrc := fmt.Sprintf(`package main
 import (
 	"context"
@@ -258,7 +258,7 @@ func main() {
 		return fmt.Errorf("Step 5 failed: %w", err)
 	}
 
-	logger.LogInfo("[DEPLOY-TEST] ALL STEPS PASSED. The robot is ready for full deployment.")
+	logs.Info("[DEPLOY-TEST] ALL STEPS PASSED. The robot is ready for full deployment.")
 	return nil
 }
 
@@ -271,14 +271,14 @@ func runDebugStep(source, tmpDir, osStr, archStr string, client *sshlib.Client, 
 	localBin := filepath.Join(tmpDir, "dialtone_debug")
 	_ = os.Remove(localBin)
 
-	logger.LogInfo("   Compiling debug binary for %s/%s...", osStr, archStr)
+	logs.Info("   Compiling debug binary for %s/%s...", osStr, archStr)
 	cmd := exec.Command("go", "build", "-o", localBin, srcPath)
 	cmd.Env = append(os.Environ(), "GOOS="+osStr, "GOARCH="+archStr, "CGO_ENABLED=0")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("compilation failed: %v\n%s", err, output)
 	}
 
-	logger.LogInfo("   Uploading to robot...")
+	logs.Info("   Uploading to robot...")
 	// Kill existing debug process if any
 	_, _ = ssh.RunSSHCommand(client, "pkill -9 dialtone_debug")
 	
@@ -287,7 +287,7 @@ func runDebugStep(source, tmpDir, osStr, archStr string, client *sshlib.Client, 
 	}
 	_, _ = ssh.RunSSHCommand(client, "chmod +x "+remotePath)
 
-	logger.LogInfo("   Executing remotely...")
+	logs.Info("   Executing remotely...")
 	// We run with a timeout
 	done := make(chan string, 1)
 	errChan := make(chan error, 1)
@@ -303,7 +303,7 @@ func runDebugStep(source, tmpDir, osStr, archStr string, client *sshlib.Client, 
 
 	select {
 	case out := <-done:
-		logger.LogInfo("   Remote Output: %s", strings.TrimSpace(out))
+		logs.Info("   Remote Output: %s", strings.TrimSpace(out))
 		if !strings.Contains(out, "PASS:") {
 			return fmt.Errorf("remote execution did not indicate success")
 		}

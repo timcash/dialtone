@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"dialtone/dev/build"
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 	"dialtone/dev/ssh"
 
 	sshlib "golang.org/x/crypto/ssh"
@@ -58,7 +58,7 @@ func RunDeploy(args []string) {
 	}
 
 	if *host == "" || *pass == "" {
-		logger.LogFatal("Error: --host (user@host) and --pass are required for deployment")
+		logs.Fatal("Error: --host (user@host) and --pass are required for deployment")
 	}
 
 	// Validate required environment variables
@@ -68,12 +68,12 @@ func RunDeploy(args []string) {
 }
 
 func deployDialtone(host, port, user, pass string, ephemeral bool, proxy bool, service bool) {
-	logger.LogInfo("Starting deployment to %s...", host)
+	logs.Info("Starting deployment to %s...", host)
 
 	// 1. Connect to Remote
 	client, err := ssh.DialSSH(host, port, user, pass)
 	if err != nil {
-		logger.LogFatal("Failed to connect: %v", err)
+		logs.Fatal("Failed to connect: %v", err)
 	}
 	defer client.Close()
 
@@ -82,13 +82,13 @@ func deployDialtone(host, port, user, pass string, ephemeral bool, proxy bool, s
 	setupSSHKey(client)
 
 	// 3. Detect Architecture
-	logger.LogInfo("Detecting remote architecture...")
+	logs.Info("Detecting remote architecture...")
 	remoteArch, err := ssh.RunSSHCommand(client, "uname -m")
 	if err != nil {
-		logger.LogFatal("Failed to run uname -m: %v", err)
+		logs.Fatal("Failed to run uname -m: %v", err)
 	}
 	remoteArch = strings.TrimSpace(remoteArch)
-	logger.LogInfo("Remote architecture: %s", remoteArch)
+	logs.Info("Remote architecture: %s", remoteArch)
 
 	var buildFlag string
 	var binaryName string
@@ -104,19 +104,19 @@ func deployDialtone(host, port, user, pass string, ephemeral bool, proxy bool, s
 		buildFlag = "--linux-amd64"
 		binaryName = "dialtone-amd64"
 	default:
-		logger.LogFatal("Unsupported remote architecture: %s", remoteArch)
+		logs.Fatal("Unsupported remote architecture: %s", remoteArch)
 	}
 
 	// 3. Run Build (Cross-Compile)
 	// We remove --local to allow Podman-based builds (e.g. on WSL)
-	logger.LogInfo("Cross-compiling for %s...", remoteArch)
+	logs.Info("Cross-compiling for %s...", remoteArch)
 	// Skip public WWW build during deploy (not required for robot binary)
 	_ = os.Setenv("DIALTONE_SKIP_WWW", "1")
 	build.RunBuild([]string{buildFlag})
 
 	localBinaryPath := filepath.Join("bin", binaryName)
 	if _, err := os.Stat(localBinaryPath); os.IsNotExist(err) {
-		logger.LogFatal("Build failed: binary %s not found", localBinaryPath)
+		logs.Fatal("Build failed: binary %s not found", localBinaryPath)
 	}
 
 	// 4. Prepare Remote Directory
@@ -124,29 +124,29 @@ func deployDialtone(host, port, user, pass string, ephemeral bool, proxy bool, s
 	if remoteDir == "" {
 		home, err := ssh.GetRemoteHome(client)
 		if err != nil {
-			logger.LogFatal("Failed to get remote home: %v", err)
+			logs.Fatal("Failed to get remote home: %v", err)
 		}
 		remoteDir = path.Join(home, "dialtone_deploy")
 	}
 
-	logger.LogInfo("Preparing remote directory %s...", remoteDir)
+	logs.Info("Preparing remote directory %s...", remoteDir)
 	_, _ = ssh.RunSSHCommand(client, "pkill dialtone || true")
 	// Use rm -rf to ensure we can create a directory even if a file exists with the same name
 	if _, err := ssh.RunSSHCommand(client, fmt.Sprintf("rm -rf %s && mkdir -p %s", remoteDir, remoteDir)); err != nil {
-		logger.LogFatal("Failed to create remote directory: %v", err)
+		logs.Fatal("Failed to create remote directory: %v", err)
 	}
 
 	// 5. Upload Binary
-	logger.LogInfo("Uploading binary %s...", localBinaryPath)
+	logs.Info("Uploading binary %s...", localBinaryPath)
 	remoteBinaryPath := path.Join(remoteDir, "dialtone")
 	// Use ToSlash for cross-platform local path handling in SFTP
 	if err := ssh.UploadFile(client, filepath.ToSlash(localBinaryPath), remoteBinaryPath); err != nil {
-		logger.LogFatal("Failed to upload binary: %v", err)
+		logs.Fatal("Failed to upload binary: %v", err)
 	}
 	_, _ = ssh.RunSSHCommand(client, fmt.Sprintf("chmod +x %s", remoteBinaryPath))
 
 	// 6. Restart Service
-	logger.LogInfo("Starting service...")
+	logs.Info("Starting service...")
 
 	hostnameParam := os.Getenv("DIALTONE_DOMAIN")
 	if hostnameParam == "" {
@@ -174,64 +174,64 @@ func deployDialtone(host, port, user, pass string, ephemeral bool, proxy bool, s
 		startCmd := fmt.Sprintf("rm -rf ~/dialtone && cp %s ~/dialtone && chmod +x ~/dialtone && nohup sh -c 'TS_AUTHKEY=%s ~/dialtone start -hostname %s %s %s' > ~/nats.log 2>&1 < /dev/null &", remoteBinaryPath, tsAuthKey, hostnameParam, ephemeralFlag, mavlinkFlag)
 
 		if err := ssh.RunSSHCommandNoWait(client, startCmd); err != nil {
-			logger.LogFatal("Failed to start: %v", err)
+			logs.Fatal("Failed to start: %v", err)
 		}
 	}
 
 	verifyTailscaleAuth(client)
 
-	logger.LogInfo("Deployment complete!")
-	logger.LogInfo("Run './dialtone.sh logs --remote' to verify startup.")
+	logs.Info("Deployment complete!")
+	logs.Info("Run './dialtone.sh logs --remote' to verify startup.")
 
 	if proxy {
 		if service {
-			logger.LogInfo("Setting up local Cloudflare proxy service for %s.dialtone.earth...", hostnameParam)
+			logs.Info("Setting up local Cloudflare proxy service for %s.dialtone.earth...", hostnameParam)
 			cwd, _ := os.Getwd()
 			setupCmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "cloudflare", "setup-service", "--name", hostnameParam)
 			setupCmd.Stdout = os.Stdout
 			setupCmd.Stderr = os.Stderr
 			if err := setupCmd.Run(); err != nil {
-				logger.LogWarn("Failed to set up local proxy service: %v", err)
+				logs.Warn("Failed to set up local proxy service: %v", err)
 			}
 		} else {
-			logger.LogInfo("Starting background Cloudflare proxy for %s.dialtone.earth...", hostnameParam)
+			logs.Info("Starting background Cloudflare proxy for %s.dialtone.earth...", hostnameParam)
 			cwd, _ := os.Getwd()
 			cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "cloudflare", "robot", hostnameParam)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 			if err := cmd.Start(); err != nil {
-				logger.LogWarn("Failed to start Cloudflare proxy: %v", err)
+				logs.Warn("Failed to start Cloudflare proxy: %v", err)
 			} else {
-				logger.LogInfo("Cloudflare proxy started (PID: %d)", cmd.Process.Pid)
+				logs.Info("Cloudflare proxy started (PID: %d)", cmd.Process.Pid)
 			}
 		}
 	} else {
-		logger.LogInfo("")
-		logger.LogInfo("To expose this robot's Web UI via Cloudflare subdomain, run:")
-		logger.LogInfo("  ./dialtone.sh cloudflare robot %s", hostnameParam)
+		logs.Info("")
+		logs.Info("To expose this robot's Web UI via Cloudflare subdomain, run:")
+		logs.Info("  ./dialtone.sh cloudflare robot %s", hostnameParam)
 	}
 
 	// 7. Verification
 	if err := verifyDeployment(client, hostnameParam, proxy, service); err != nil {
-		logger.LogFatal("Deployment verification FAILED: %v", err)
+		logs.Fatal("Deployment verification FAILED: %v", err)
 	}
-	logger.LogInfo("Deployment verification SUCCESS.")
+	logs.Info("Deployment verification SUCCESS.")
 }
 
 func verifyDeployment(client *sshlib.Client, hostname string, proxy, service bool) error {
-	logger.LogInfo("--- VERIFICATION ---")
+	logs.Info("--- VERIFICATION ---")
 
 	// 1. Remote Service Check
 	if service {
-		logger.LogInfo("Verifying remote dialtone.service...")
+		logs.Info("Verifying remote dialtone.service...")
 		success := false
 		var lastOut string
 		for i := 0; i < 5; i++ {
 			out, err := ssh.RunSSHCommand(client, "systemctl is-active dialtone.service")
 			lastOut = strings.TrimSpace(out)
 			if err == nil && lastOut == "active" {
-				logger.LogInfo("[VERIFY] Remote dialtone.service is ACTIVE")
+				logs.Info("[VERIFY] Remote dialtone.service is ACTIVE")
 				success = true
 				break
 			}
@@ -245,7 +245,7 @@ func verifyDeployment(client *sshlib.Client, hostname string, proxy, service boo
 	// 2. Local Service Check
 	if service && proxy {
 		serviceName := fmt.Sprintf("dialtone-proxy-%s.service", hostname)
-		logger.LogInfo("Verifying local %s...", serviceName)
+		logs.Info("Verifying local %s...", serviceName)
 		success := false
 		var lastOut string
 		for i := 0; i < 5; i++ {
@@ -253,7 +253,7 @@ func verifyDeployment(client *sshlib.Client, hostname string, proxy, service boo
 			out, err := cmd.Output()
 			lastOut = strings.TrimSpace(string(out))
 			if err == nil && lastOut == "active" {
-				logger.LogInfo("[VERIFY] Local %s is ACTIVE", serviceName)
+				logs.Info("[VERIFY] Local %s is ACTIVE", serviceName)
 				success = true
 				break
 			}
@@ -267,7 +267,7 @@ func verifyDeployment(client *sshlib.Client, hostname string, proxy, service boo
 	// 3. Web UI Check
 	if proxy {
 		url := fmt.Sprintf("https://%s.dialtone.earth", hostname)
-		logger.LogInfo("Checking Web UI at %s...", url)
+		logs.Info("Checking Web UI at %s...", url)
 
 		success := false
 		var lastErr error
@@ -281,7 +281,7 @@ func verifyDeployment(client *sshlib.Client, hostname string, proxy, service boo
 				body, _ := io.ReadAll(resp.Body)
 				bodyStr := string(body)
 				if strings.Contains(bodyStr, "v1.1.1") {
-					logger.LogInfo("[VERIFY] Web UI is LIVE and running v1.1.1")
+					logs.Info("[VERIFY] Web UI is LIVE and running v1.1.1")
 					success = true
 					break
 				} else {
@@ -299,7 +299,7 @@ func verifyDeployment(client *sshlib.Client, hostname string, proxy, service boo
 }
 
 func setupRemoteService(client *sshlib.Client, hostname, tsAuthKey, ephemeralFlag, mavlinkFlag, binaryPath, user string) {
-	logger.LogInfo("Setting up systemd service on robot...")
+	logs.Info("Setting up systemd service on robot...")
 
 	remoteDialtonePath := "/home/" + user + "/dialtone"
 	_, _ = ssh.RunSSHCommand(client, fmt.Sprintf("cp %s %s && chmod +x %s", binaryPath, remoteDialtonePath, remoteDialtonePath))
@@ -325,7 +325,7 @@ WantedBy=multi-user.target
 
 	err := ssh.WriteRemoteFile(client, tmpPath, serviceContent)
 	if err != nil {
-		logger.LogFatal("Failed to write remote service file: %v", err)
+		logs.Fatal("Failed to write remote service file: %v", err)
 	}
 
 	commands := []string{
@@ -338,11 +338,11 @@ WantedBy=multi-user.target
 	for _, cmd := range commands {
 		_, err := ssh.RunSSHCommand(client, cmd)
 		if err != nil {
-			logger.LogFatal("Failed to execute command on robot: %s, error: %v", cmd, err)
+			logs.Fatal("Failed to execute command on robot: %s, error: %v", cmd, err)
 		}
 	}
 
-	logger.LogInfo("SUCCESS: Systemd service installed and started on robot.")
+	logs.Info("SUCCESS: Systemd service installed and started on robot.")
 }
 
 func validateRequiredVars(vars []string) {
@@ -353,19 +353,19 @@ func validateRequiredVars(vars []string) {
 		}
 	}
 	if len(missing) > 0 {
-		logger.LogFatal("Missing required environment variables: %s. Please check your env/.env file.", strings.Join(missing, ", "))
+		logs.Fatal("Missing required environment variables: %s. Please check your env/.env file.", strings.Join(missing, ", "))
 	}
 }
 
 func validateSudo(client *sshlib.Client, pass string) {
-	logger.LogInfo("Validating sudo access on robot...")
+	logs.Info("Validating sudo access on robot...")
 
 	// 1. Try to run a simple sudo command using the password
 	// We use sudo -S to read from stdin
 	sudoCmd := fmt.Sprintf("echo '%s' | sudo -S true", pass)
 	_, err := ssh.RunSSHCommand(client, sudoCmd)
 	if err != nil {
-		logger.LogFatal("Sudo validation FAILED: User does not have sudo rights or password is incorrect. Error: %v", err)
+		logs.Fatal("Sudo validation FAILED: User does not have sudo rights or password is incorrect. Error: %v", err)
 	}
 
 	// 2. Automatically configure passwordless sudo for this user to make automation smoother
@@ -373,24 +373,24 @@ func validateSudo(client *sshlib.Client, pass string) {
 	user, _ := ssh.RunSSHCommand(client, "whoami")
 	user = strings.TrimSpace(user)
 
-	logger.LogInfo("Configuring passwordless sudo for user '%s'...", user)
+	logs.Info("Configuring passwordless sudo for user '%s'...", user)
 	sudoersLine := fmt.Sprintf("%s ALL=(ALL) NOPASSWD:ALL", user)
 	// Append to a new file in /etc/sudoers.d/
 	setupSudoers := fmt.Sprintf("echo '%s' | sudo -S sh -c \"echo '%s' > /etc/sudoers.d/dialtone-%s && chmod 0440 /etc/sudoers.d/dialtone-%s\"", pass, sudoersLine, user, user)
 	_, err = ssh.RunSSHCommand(client, setupSudoers)
 	if err != nil {
-		logger.LogWarn("Warning: Failed to configure passwordless sudo: %v", err)
+		logs.Warn("Warning: Failed to configure passwordless sudo: %v", err)
 	} else {
-		logger.LogInfo("Passwordless sudo configured.")
+		logs.Info("Passwordless sudo configured.")
 	}
 }
 
 func setupSSHKey(client *sshlib.Client) {
-	logger.LogInfo("Ensuring SSH key access on robot...")
+	logs.Info("Ensuring SSH key access on robot...")
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		logger.LogWarn("Could not find local home directory: %v", err)
+		logs.Warn("Could not find local home directory: %v", err)
 		return
 	}
 
@@ -410,45 +410,45 @@ func setupSSHKey(client *sshlib.Client) {
 	}
 
 	if len(pubKey) == 0 {
-		logger.LogWarn("No local SSH public key found (checked id_ed25519 and id_rsa). Skipping key setup.")
+		logs.Warn("No local SSH public key found (checked id_ed25519 and id_rsa). Skipping key setup.")
 		return
 	}
 
 	pubKeyStr := strings.TrimSpace(string(pubKey))
-	logger.LogInfo("Uploading public key to robot...")
+	logs.Info("Uploading public key to robot...")
 
 	setupKeyCmd := fmt.Sprintf("mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '%s' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys", pubKeyStr)
 	_, err = ssh.RunSSHCommand(client, setupKeyCmd)
 	if err != nil {
-		logger.LogWarn("Failed to upload SSH key: %v", err)
+		logs.Warn("Failed to upload SSH key: %v", err)
 	} else {
-		logger.LogInfo("SSH key successfully added to robot.")
+		logs.Info("SSH key successfully added to robot.")
 	}
 }
 
 func verifyTailscaleAuth(client *sshlib.Client) {
-	logger.LogInfo("Verifying Tailscale auth key...")
+	logs.Info("Verifying Tailscale auth key...")
 
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		logOutput, err := ssh.RunSSHCommand(client, "tail -n 200 ~/nats.log")
 		if err != nil {
-			logger.LogFatal("Failed to read remote logs for Tailscale verification: %v", err)
+			logs.Fatal("Failed to read remote logs for Tailscale verification: %v", err)
 		}
 
 		if reason := tsnetFailureReason(logOutput); reason != "" {
-			logger.LogFatal("Tailscale auth failed: %s\nRecent log output:\n%s", reason, tailLines(logOutput, 30))
+			logs.Fatal("Tailscale auth failed: %s\nRecent log output:\n%s", reason, tailLines(logOutput, 30))
 		}
 		if tsnetSuccess(logOutput) {
-			logger.LogInfo("Tailscale auth key verified.")
+			logs.Info("Tailscale auth key verified.")
 			return
 		}
 
 		time.Sleep(2 * time.Second)
 	}
 
-	logger.LogInfo("Tailscale auth key verification pending (no failures detected yet).")
-	logger.LogInfo("If startup looks stalled, check logs with './dialtone.sh logs --remote'.")
+	logs.Info("Tailscale auth key verification pending (no failures detected yet).")
+	logs.Info("If startup looks stalled, check logs with './dialtone.sh logs --remote'.")
 }
 
 func tsnetFailureReason(logOutput string) string {

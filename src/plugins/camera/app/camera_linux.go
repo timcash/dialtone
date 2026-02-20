@@ -12,14 +12,14 @@ import (
 	"sync"
 	"time"
 
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 	"github.com/vladimirvivien/go4vl/device"
 	"github.com/vladimirvivien/go4vl/v4l2"
 )
 
 // Log wrappers to match dialtone logger
 func LogInfo(format string, args ...interface{}) {
-	logger.LogInfo(format, args...)
+	logs.Info(format, args...)
 }
 
 // Camera info structure

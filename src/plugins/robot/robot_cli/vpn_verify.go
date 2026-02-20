@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 	"tailscale.com/tsnet"
 )
 
@@ -16,7 +16,7 @@ func RunVPNTest(args []string) error {
 		hostname = args[0]
 	}
 
-	logger.LogInfo("[VPN-TEST] Starting tsnet connectivity test as %s...", hostname)
+	logs.Info("[VPN-TEST] Starting tsnet connectivity test as %s...", hostname)
 
 	authKey := os.Getenv("TS_AUTHKEY")
 	if authKey == "" {
@@ -27,7 +27,7 @@ func RunVPNTest(args []string) error {
 		Hostname: hostname,
 		AuthKey:  authKey,
 		Logf: func(format string, args ...any) {
-			logger.LogDebug(fmt.Sprintf("tsnet: "+format, args...))
+			logs.Debug(fmt.Sprintf("tsnet: "+format, args...))
 		},
 	}
 	defer s.Close()
@@ -35,15 +35,15 @@ func RunVPNTest(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	logger.LogInfo("[VPN-TEST] Waiting for Tailscale to come up (timeout 60s)...")
+	logs.Info("[VPN-TEST] Waiting for Tailscale to come up (timeout 60s)...")
 	status, err := s.Up(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to start tsnet server: %w", err)
 	}
 
-	logger.LogInfo("[VPN-TEST] SUCCESS: tsnet is UP")
-	logger.LogInfo("[VPN-TEST] Hostname: %s", status.Self.HostName)
-	logger.LogInfo("[VPN-TEST] Tailscale IPs: %v", status.TailscaleIPs)
+	logs.Info("[VPN-TEST] SUCCESS: tsnet is UP")
+	logs.Info("[VPN-TEST] Hostname: %s", status.Self.HostName)
+	logs.Info("[VPN-TEST] Tailscale IPs: %v", status.TailscaleIPs)
 
 	return nil
 }

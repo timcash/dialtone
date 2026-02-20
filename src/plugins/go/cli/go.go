@@ -8,7 +8,7 @@ import (
 	"runtime"
 
 	"dialtone/dev/config"
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 	go_test "dialtone/dev/plugins/go/test"
 )
 
@@ -56,17 +56,17 @@ func printGoUsage() {
 
 func runTest(args []string) {
 	if len(args) > 0 {
-		logger.LogFatal("Usage: ./dialtone.sh go test")
+		logs.Fatal("Usage: ./dialtone.sh go test")
 	}
 
 	if err := go_test.RunAll(); err != nil {
-		logger.LogFatal("Go tests failed: %v", err)
+		logs.Fatal("Go tests failed: %v", err)
 	}
 }
 
 func runExec(args []string) {
 	if len(args) == 0 {
-		logger.LogFatal("Usage: dialtone go exec <args...>")
+		logs.Fatal("Usage: dialtone go exec <args...>")
 	}
 
 	depsDir := config.GetDialtoneEnv()
@@ -74,7 +74,7 @@ func runExec(args []string) {
 	goBin := filepath.Join(goDir, "bin", "go")
 
 	if _, err := os.Stat(goBin); os.IsNotExist(err) {
-		logger.LogFatal("Go toolchain not found. Run 'dialtone go install' first.")
+		logs.Fatal("Go toolchain not found. Run 'dialtone go install' first.")
 	}
 
 	// Set GOROOT to ensure the toolchain uses its own libraries
@@ -84,7 +84,7 @@ func runExec(args []string) {
 	newPath := filepath.Join(goDir, "bin") + string(os.PathListSeparator) + os.Getenv("PATH")
 	os.Setenv("PATH", newPath)
 
-	logger.LogInfo("Running: go %s", fmt.Sprintf("%v", args))
+	logs.Info("Running: go %s", fmt.Sprintf("%v", args))
 
 	cmd := exec.Command(goBin, args...)
 	cmd.Stdout = os.Stdout
@@ -96,13 +96,13 @@ func runExec(args []string) {
 		if exitError, ok := err.(*exec.ExitError); ok {
 			os.Exit(exitError.ExitCode())
 		}
-		logger.LogFatal("Command failed: %v", err)
+		logs.Fatal("Command failed: %v", err)
 	}
 }
 
 func runPbDump(args []string) {
 	if len(args) < 1 {
-		logger.LogFatal("Usage: dialtone go pb-dump <file.pb>")
+		logs.Fatal("Usage: dialtone go pb-dump <file.pb>")
 	}
 
 	toolPath := "src/plugins/go/tools/pb-dump/main.go"
@@ -113,15 +113,15 @@ func runPbDump(args []string) {
 }
 
 func runInstall(args []string) {
-	logger.LogInfo("Installing Go toolchain...")
+	logs.Info("Installing Go toolchain...")
 
 	depsDir := config.GetDialtoneEnv()
 	if depsDir == "" {
-		logger.LogFatal("DIALTONE_ENV not set in env/.env or environment")
+		logs.Fatal("DIALTONE_ENV not set in env/.env or environment")
 	}
 
 	if err := os.MkdirAll(depsDir, 0755); err != nil {
-		logger.LogFatal("Failed to create DIALTONE_ENV directory: %v", err)
+		logs.Fatal("Failed to create DIALTONE_ENV directory: %v", err)
 	}
 
 	goVersion := "1.25.5"
@@ -129,7 +129,7 @@ func runInstall(args []string) {
 	goBin := filepath.Join(goDir, "bin", "go")
 
 	if _, err := os.Stat(goBin); err == nil {
-		logger.LogInfo("Go %s is already installed at %s", goVersion, goBin)
+		logs.Info("Go %s is already installed at %s", goVersion, goBin)
 		return
 	}
 
@@ -142,7 +142,7 @@ func runInstall(args []string) {
 
 	destTar := filepath.Join(depsDir, tarball)
 
-	logger.LogInfo("Downloading %s to %s...", downloadUrl, destTar)
+	logs.Info("Downloading %s to %s...", downloadUrl, destTar)
 
 	var downloadCmd *exec.Cmd
 	if _, err := exec.LookPath("curl"); err == nil {
@@ -150,32 +150,32 @@ func runInstall(args []string) {
 	} else if _, err := exec.LookPath("wget"); err == nil {
 		downloadCmd = exec.Command("wget", "-O", destTar, downloadUrl)
 	} else {
-		logger.LogFatal("Neither curl nor wget found in PATH")
+		logs.Fatal("Neither curl nor wget found in PATH")
 	}
 
 	downloadCmd.Stdout = os.Stdout
 	downloadCmd.Stderr = os.Stderr
 	if err := downloadCmd.Run(); err != nil {
-		logger.LogFatal("Failed to download Go: %v", err)
+		logs.Fatal("Failed to download Go: %v", err)
 	}
 
-	logger.LogInfo("Extracting %s...", destTar)
+	logs.Info("Extracting %s...", destTar)
 	extractCmd := exec.Command("tar", "-C", depsDir, "-xzf", destTar)
 	extractCmd.Stdout = os.Stdout
 	extractCmd.Stderr = os.Stderr
 	if err := extractCmd.Run(); err != nil {
-		logger.LogFatal("Failed to extract Go: %v", err)
+		logs.Fatal("Failed to extract Go: %v", err)
 	}
 
 	if err := os.Remove(destTar); err != nil {
-		logger.LogInfo("Warning: Failed to remove temporary tarball %s: %v", destTar, err)
+		logs.Info("Warning: Failed to remove temporary tarball %s: %v", destTar, err)
 	}
 
-	logger.LogInfo("Go toolchain installed successfully at %s", goDir)
+	logs.Info("Go toolchain installed successfully at %s", goDir)
 }
 
 func runLint(args []string) {
-	logger.LogInfo("Running Go lint (vet)...")
+	logs.Info("Running Go lint (vet)...")
 
 	depsDir := config.GetDialtoneEnv()
 	goBin := filepath.Join(depsDir, "go", "bin", "go")
@@ -185,7 +185,7 @@ func runLint(args []string) {
 		if p, err := exec.LookPath("go"); err == nil {
 			goBin = p
 		} else {
-			logger.LogFatal("Go toolchain not found. Run 'dialtone go install' first.")
+			logs.Fatal("Go toolchain not found. Run 'dialtone go install' first.")
 		}
 	}
 
@@ -193,9 +193,9 @@ func runLint(args []string) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	logger.LogInfo("Executing: %s vet ./...", goBin)
+	logs.Info("Executing: %s vet ./...", goBin)
 	if err := cmd.Run(); err != nil {
-		logger.LogFatal("Lint failed: %v", err)
+		logs.Fatal("Lint failed: %v", err)
 	}
-	logger.LogInfo("Lint passed.")
+	logs.Info("Lint passed.")
 }

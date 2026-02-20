@@ -8,7 +8,7 @@ import (
 	"runtime"
 
 	"dialtone/dev/config"
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 )
 
 const (
@@ -20,7 +20,7 @@ func logItemStatus(name, version, path string, alreadyInstalled bool) {
 	if alreadyInstalled {
 		status = "is already installed"
 	}
-	logger.LogInfo("%s (%s) %s at %s", name, version, status, path)
+	logs.Info("%s (%s) %s at %s", name, version, status, path)
 }
 
 func runSimpleShell(command string) {
@@ -28,7 +28,7 @@ func runSimpleShell(command string) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		logger.LogFatal("Command failed: %s: %v", command, err)
+		logs.Fatal("Command failed: %s: %v", command, err)
 	}
 }
 
@@ -42,7 +42,7 @@ func RunCloudflaredInstall(depsDir string) {
 		return
 	}
 
-	logger.LogInfo("Installing Cloudflared %s for %s/%s...", CloudflaredVersion, runtime.GOOS, runtime.GOARCH)
+	logs.Info("Installing Cloudflared %s for %s/%s...", CloudflaredVersion, runtime.GOOS, runtime.GOARCH)
 
 	downloadUrl := ""
 	switch {
@@ -55,7 +55,7 @@ func RunCloudflaredInstall(depsDir string) {
 	case runtime.GOOS == "darwin" && runtime.GOARCH == "arm64":
 		downloadUrl = fmt.Sprintf("https://github.com/cloudflare/cloudflared/releases/download/%s/cloudflared-darwin-arm64.tgz", CloudflaredVersion)
 	default:
-		logger.LogFatal("Unsupported platform for Cloudflared: %s/%s", runtime.GOOS, runtime.GOARCH)
+		logs.Fatal("Unsupported platform for Cloudflared: %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 
 	runSimpleShell(fmt.Sprintf("mkdir -p %s", cfDir))
@@ -70,7 +70,7 @@ func RunCloudflaredInstall(depsDir string) {
 
 
 	if _, err := os.Stat(cfBin); err != nil {
-		logger.LogFatal("Failed to install Cloudflared at %s: %v", cfBin, err)
+		logs.Fatal("Failed to install Cloudflared at %s: %v", cfBin, err)
 	} else {
 		logItemStatus("Cloudflared", CloudflaredVersion, cfBin, false)
 	}

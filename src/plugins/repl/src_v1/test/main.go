@@ -51,6 +51,18 @@ func main() {
 				return Run03RobotInstall(ctx)
 			},
 		},
+		{
+			Name: "Test 4: dag install src_v3",
+			Files: []string{
+				"src/plugins/repl/src_v1/test/04.go",
+				"src/plugins/dag/cli/install.go",
+				"dialtone.sh",
+			},
+			Conditions: "1. `USER-1>` should request dag install... \n2. `DIALTONE>` should run that command on a subtone",
+			Run: func() (string, error) {
+				return Run04DagInstall(ctx)
+			},
+		},
 	}
 
 	reportPath := filepath.Join(ctx.repoRoot, "src/plugins/repl/src_v1/test/TEST.md")

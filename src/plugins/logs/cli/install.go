@@ -1,26 +1,13 @@
 package cli
 
 import (
-	"dialtone/dev/config"
-	core_install "dialtone/dev/install"
 	"fmt"
 	"os"
 	"path/filepath"
 )
 
-var installRequirements = []core_install.Requirement{
-	{Tool: core_install.ToolGo, Version: core_install.GoVersion},
-	{Tool: core_install.ToolBun, Version: core_install.BunVersion},
-}
-
 func RunInstall(versionDir string) error {
 	fmt.Printf(">> [LOGS] Install: %s\n", versionDir)
-
-	if err := core_install.EnsureRequirements(installRequirements); err != nil {
-		return err
-	}
-
-	_ = config.GetDialtoneEnv() // ensure env is loadable
 
 	cwd, err := os.Getwd()
 	if err != nil {

@@ -183,8 +183,8 @@ Styling semantics:
   - `src/plugins/dag/src_v3/ui/src/style.css`
   - `src/plugins/dag/src_v3/ui/index.html`
 - Tests:
-  - `src/plugins/dag/src_v3/test/`
-  - `src/plugins/dag/src_v3/test/TEST.md`
+  - `src/plugins/dag/src_v3/suite/`
+  - `src/plugins/dag/src_v3/suite/TEST.md`
 - Test screenshots:
   - `src/plugins/dag/src_v3/screenshots/`
 - Domain SQL/model docs:
@@ -228,19 +228,19 @@ When adding/changing DAG behavior, use this sequence.
 4. Run full test command:
    - `./dialtone.sh dag test src_v3`
 5. Inspect and commit generated artifacts when behavior changed:
-   - `src/plugins/dag/src_v3/test/TEST.md`
+   - `src/plugins/dag/src_v3/suite/TEST.md`
    - `src/plugins/dag/src_v3/screenshots/test_step_*.png`
-   - `src/plugins/dag/src_v3/test/test.duckdb` (if changed by suite)
-6. Update tests in `src/plugins/dag/src_v3/test/*.go` when behavior expectations change.
+   - `src/plugins/dag/src_v3/suite/test.duckdb` (if changed by suite)
+6. Update tests in `src/plugins/dag/src_v3/suite/*.go` when behavior expectations change.
 7. Re-run `./dialtone.sh dag test src_v3` and ensure all steps pass.
 
 ## Test Outputs
 
 Running DAG tests produces:
 
-- `src/plugins/dag/src_v3/test/TEST.md`
-- `src/plugins/dag/src_v3/test/test.log`
-- `src/plugins/dag/src_v3/test/error.log`
+- `src/plugins/dag/src_v3/suite/TEST.md`
+- `src/plugins/dag/src_v3/suite/test.log`
+- `src/plugins/dag/src_v3/suite/error.log`
 - `src/plugins/dag/src_v3/screenshots/test_step_*.png`
 
 Always review `TEST.md` before finalizing changes.

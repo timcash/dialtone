@@ -6,13 +6,13 @@ import (
 	"os"
 	"runtime"
 
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 	app "dialtone/dev/plugins/diagnostic/app"
 )
 
 // RunDiagnostic handles the 'diagnostic' command
 func RunDiagnostic(args []string) {
-	logger.LogInfo("Running System Diagnostics...")
+	logs.Info("Running System Diagnostics...")
 
 	// 1. Check OS/Arch
 	fmt.Printf("OS: %s\n", runtime.GOOS)
@@ -30,8 +30,8 @@ func RunDiagnostic(args []string) {
 		// 2. Check dependencies (Go, Node, Tailscale)
 		app.CheckLocalDependencies()
 
-		logger.LogInfo("No host specified. Skipping remote diagnostics.")
-		logger.LogInfo("Diagnostics Passed.")
+		logs.Info("No host specified. Skipping remote diagnostics.")
+		logs.Info("Diagnostics Passed.")
 		return
 	}
 

@@ -1,8 +1,8 @@
 package test
 
 import (
-	"dialtone/dev/logger"
-	"dialtone/dev/test_core"
+	"dialtone/dev/plugins/logs/src_v1/go"
+	test_registry "dialtone/dev/plugins/test/src_v1/go"
 	"errors"
 	"fmt"
 	"os"
@@ -12,13 +12,13 @@ import (
 )
 
 func init() {
-	test.Register("bun-cli-stdout-propagates", "bun", []string{"plugin", "bun", "integration"}, RunStdoutPropagation)
-	test.Register("bun-cli-stderr-exit-propagates", "bun", []string{"plugin", "bun", "integration"}, RunStderrAndExitPropagation)
+	test_registry.Register("bun-cli-stdout-propagates", "bun", []string{"plugin", "bun", "integration"}, RunStdoutPropagation)
+	test_registry.Register("bun-cli-stderr-exit-propagates", "bun", []string{"plugin", "bun", "integration"}, RunStderrAndExitPropagation)
 }
 
 func RunAll() error {
-	logger.LogInfo("Running bun plugin suite...")
-	return test.RunPlugin("bun")
+	logs.Info("Running bun plugin suite...")
+	return test_registry.RunPlugin("bun")
 }
 
 func RunStdoutPropagation() error {

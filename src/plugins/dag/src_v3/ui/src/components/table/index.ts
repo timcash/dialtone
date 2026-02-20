@@ -1,4 +1,4 @@
-import { VisualizationControl } from '../../../../../../../plugins/ui/types';
+import { VisualizationControl } from '../../../../../../../plugins/ui/src_v1/ui/types';
 
 type TableRow = {
   key: string;
@@ -184,14 +184,14 @@ class TableControl implements VisualizationControl {
     this.input = this.form.querySelector("input[aria-label='Table Query Input']") as HTMLInputElement | null;
     this.submitButton = this.form.querySelector("button[aria-label='Table Submit']") as HTMLButtonElement | null;
     this.actionButtons = [
-      this.form.querySelector("button[aria-label='Table Thumb 1']"),
-      this.form.querySelector("button[aria-label='Table Thumb 2']"),
-      this.form.querySelector("button[aria-label='Table Thumb 3']"),
-      this.form.querySelector("button[aria-label='Table Thumb 4']"),
-      this.form.querySelector("button[aria-label='Table Thumb 5']"),
-      this.form.querySelector("button[aria-label='Table Thumb 6']"),
-      this.form.querySelector("button[aria-label='Table Thumb 7']"),
-      this.form.querySelector("button[aria-label='Table Thumb 8']"),
+      this.form.querySelector("button[aria-label='Table Form 1']"),
+      this.form.querySelector("button[aria-label='Table Form 2']"),
+      this.form.querySelector("button[aria-label='Table Form 3']"),
+      this.form.querySelector("button[aria-label='Table Form 4']"),
+      this.form.querySelector("button[aria-label='Table Form 5']"),
+      this.form.querySelector("button[aria-label='Table Form 6']"),
+      this.form.querySelector("button[aria-label='Table Form 7']"),
+      this.form.querySelector("button[aria-label='Table Form 8']"),
     ].filter((el): el is HTMLButtonElement => !!el);
 
     this.modeButton?.addEventListener('click', () => this.cycleMode());
