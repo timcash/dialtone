@@ -61,6 +61,31 @@ func Add(name, taskFile, branch string) error {
 	return nil
 }
 
+func Start(name, taskFile string) error {
+	// 1. Create worktree (and tmux session)
+	if err := Add(name, taskFile, ""); err != nil {
+		// If add failed, maybe it already exists?
+		// We can try to continue if it's just "already exists" but Add returns generic error.
+		// For now, abort on error unless we want to handle resume.
+		return err
+	}
+
+	// 2. Launch Agent in Tmux
+	fmt.Printf("[Worktree] Launching Gemini Agent in session '%s'...\n", name)
+	// We assume TASK.md is at the root of worktree (Add copies it there)
+	// Command: ./dialtone.sh gemini run --task TASK.md
+	// Note: inside the worktree, we are at the repo root (it's a checkout).
+	// So ./dialtone.sh exists.
+	cmd := fmt.Sprintf("./dialtone.sh gemini run --task TASK.md")
+	
+	tmuxCmd := exec.Command("tmux", "send-keys", "-t", name, cmd, "C-m")
+	if err := tmuxCmd.Run(); err != nil {
+		return fmt.Errorf("failed to send keys to tmux: %w", err)
+	}
+	
+	return nil
+}
+
 func Remove(name string) error {
 	repoRoot, err := findRepoRoot()
 	if err != nil {

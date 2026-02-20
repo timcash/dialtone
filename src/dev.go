@@ -365,6 +365,7 @@ func printDevUsage() {
 	fmt.Println("  ./dialtone.sh go exec version")
 	fmt.Println("  ./dialtone.sh robot install src_v1")
 	fmt.Println("  ./dialtone.sh dag install src_v3")
+	fmt.Println("  ./dialtone.sh gemini run --task task.md")
 }
 
 func listPlugins() {
