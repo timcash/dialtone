@@ -4,7 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+func matchesFilter(name, filter string) bool {
+	return strings.Contains(strings.ToLower(name), strings.ToLower(filter))
+}
 
 type Step struct {
 	Name       string
@@ -107,7 +112,15 @@ func main() {
 	}
 	defer f.Close()
 
+	filter := ""
+	if len(os.Args) > 1 {
+		filter = os.Args[1]
+	}
+
 	for _, s := range steps {
+		if filter != "" && !matchesFilter(s.Name, filter) {
+			continue
+		}
 		fmt.Printf("Running %s...\n", s.Name)
 		output, err := s.Run()
 		

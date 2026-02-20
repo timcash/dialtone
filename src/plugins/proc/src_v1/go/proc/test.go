@@ -16,8 +16,8 @@ func RunTestSrcV1() {
 		go func(id int) {
 			defer wg.Done()
 			// Stagger start slightly
-			time.Sleep(time.Duration(id*500) * time.Millisecond)
-			args := []string{"proc", "sleep", "10"}
+			time.Sleep(time.Duration(id*100) * time.Millisecond)
+			args := []string{"proc", "sleep", "2"}
 			RunSubtone(args)
 		}(i)
 	}

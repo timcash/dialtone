@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 func main() {
@@ -17,10 +18,20 @@ func main() {
 	switch args[0] {
 	case "test":
 		version := "src_v1"
-		if len(args) > 1 && args[1] != "" {
-			version = args[1]
+		var extraArgs []string
+		if len(args) > 1 {
+			// Check if arg 1 is version or subtest
+			if strings.HasPrefix(args[1], "src_v") {
+				version = args[1]
+				if len(args) > 2 {
+					extraArgs = args[2:]
+				}
+			} else {
+				// Arg 1 is subtest, assume default version
+				extraArgs = args[1:]
+			}
 		}
-		if err := runVersionedTest(version); err != nil {
+		if err := runVersionedTest(version, extraArgs); err != nil {
 			fmt.Printf("REPL test error: %v\n", err)
 			os.Exit(1)
 		}
@@ -33,7 +44,7 @@ func main() {
 	}
 }
 
-func runVersionedTest(versionDir string) error {
+func runVersionedTest(versionDir string, args []string) error {
 	cwd, _ := os.Getwd()
 	root := cwd
 	for {
@@ -49,7 +60,10 @@ func runVersionedTest(versionDir string) error {
 	}
 	
 	testPkg := "./plugins/repl/" + versionDir + "/test"
-	cmd := exec.Command(filepath.Join(root, "dialtone.sh"), "go", "exec", "run", testPkg)
+	// Pass remaining args to the test runner
+	goArgs := append([]string{"exec", "run", testPkg}, args...)
+	fullArgs := append([]string{"go"}, goArgs...)
+	cmd := exec.Command(filepath.Join(root, "dialtone.sh"), fullArgs...)
 	cmd.Dir = root
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
