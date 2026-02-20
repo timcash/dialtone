@@ -41,7 +41,6 @@ func Run(taskFile, model, promptOverride string) error {
 	cmd.Dir = cwd
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
 	return cmd.Run()
 }
 
