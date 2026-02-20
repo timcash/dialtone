@@ -99,6 +99,15 @@ func main() {
 			fmt.Printf("Error: %v\n", err)
 			os.Exit(1)
 		}
+	case "verify-done":
+		if len(args) == 0 {
+			fmt.Println("Usage: worktree verify-done <worktree-name|list-index>")
+			return
+		}
+		if err := worktree.VerifyDone(args[0]); err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
 	case "test":
 		runTests(args)
 	default:
@@ -157,5 +166,6 @@ func printUsage() {
 	fmt.Println("  list             List worktrees + task status")
 	fmt.Println("  attach <id>      Attach tmux by worktree name or list index")
 	fmt.Println("  tmux-logs <id>   Show last tmux lines (-n N, default 10)")
+	fmt.Println("  verify-done <id> Verify TASK.md done signature (+agent_test check)")
 	fmt.Println("  test [src_v1]    Run tests")
 }
