@@ -74,6 +74,18 @@ func main() {
 				return Run04DagInstall(ctx)
 			},
 		},
+		{
+			Name: "Test 6: worktree",
+			Files: []string{
+				"src/plugins/repl/src_v1/test/06_worktree.go",
+				"src/plugins/worktree/src_v1/go/worktree/manager.go",
+				"dialtone.sh",
+			},
+			Conditions: "1. `USER-1>` should request worktree add/list/remove... \n2. `DIALTONE>` should execute commands.",
+			Run: func() (string, error) {
+				return Run06Worktree(ctx)
+			},
+		},
 	}
 
 	reportPath := filepath.Join(ctx.repoRoot, "src/plugins/repl/src_v1/test/TEST.md")
