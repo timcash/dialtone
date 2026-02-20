@@ -12,7 +12,7 @@ Use this file as the contract for how you work.
 1. Immediately update the signature block:
    `status: work`
 2. Open only this folder:
-   `src/plugins/worktree/src_v1/agent_test`
+   `plugins/worktree/src_v1/agent_test`
 3. Inspect files:
    `calc.go` and `test.go`
 4. Fix the bug in `calc.go`.

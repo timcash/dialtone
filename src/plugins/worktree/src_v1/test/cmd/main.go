@@ -12,100 +12,92 @@ import (
 )
 
 func main() {
-	fmt.Println("Running Worktree Plugin Agent Test...")
+	fmt.Println("Running Worktree Plugin E2E Test (src_v1)...")
 
 	repoRoot, err := findRepoRoot()
 	if err != nil {
-		fmt.Printf("FAIL: %v\n", err)
-		os.Exit(1)
+		fail("repo root", err)
 	}
 
-	name := "test-worktree-agent"
-	taskRel := filepath.Join("src", "plugins", "worktree", "src_v1", "agent_test", "task.md")
-	worktreePath := filepath.Join(filepath.Dir(repoRoot), name)
-	taskInWorktree := filepath.Join(worktreePath, "TASK.md")
-	agentTestDir := filepath.Join(worktreePath, "src", "plugins", "worktree", "src_v1", "agent_test")
-	testLogPath := filepath.Join(worktreePath, "test.log")
+	if err := preflight(repoRoot); err != nil {
+		fail("preflight", err)
+	}
 
+	name := "test-worktree-e2e"
+	taskRel := filepath.Join("src", "plugins", "worktree", "src_v1", "agent_test", "task.md")
+	worktreePath := filepath.Join(filepath.Dir(repoRoot), "dialtone_worktree", name)
+	taskPath := filepath.Join(worktreePath, "TASK.md")
+	logPath := filepath.Join(worktreePath, "tmux.log")
+
+	// Idempotent setup: remove any leftovers from previous runs.
 	_ = worktree.Remove(name)
 	defer func() {
-		fmt.Printf("Cleanup: removing worktree '%s'...\n", name)
+		fmt.Printf("Cleanup: remove '%s' (first pass)\n", name)
+		_ = worktree.Remove(name)
+		fmt.Printf("Cleanup: remove '%s' (second pass, idempotency check)\n", name)
 		_ = worktree.Remove(name)
 	}()
 
-	fmt.Printf("Step 1: add '%s' with task fixture...\n", name)
+	fmt.Printf("Step 1: add %s\n", name)
 	if err := worktree.Add(name, taskRel, ""); err != nil {
-		fmt.Printf("FAIL: add failed: %v\n", err)
-		os.Exit(1)
+		fail("add", err)
 	}
+	mustPathExists("worktree path", worktreePath)
+	mustPathExists("task path", taskPath)
 
-	fmt.Printf("Step 2: start '%s' (launch gemini-cli in tmux)...\n", name)
+	fmt.Printf("Step 2: start %s\n", name)
 	if err := worktree.Start(name, ""); err != nil {
-		fmt.Printf("FAIL: start failed: %v\n", err)
-		os.Exit(1)
+		fail("start", err)
 	}
-	if err := startTmuxLogPipe(name, testLogPath); err != nil {
-		fmt.Printf("FAIL: failed to start tmux log piping: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("Tmux output is being logged to %s\n", testLogPath)
+	mustPathExists("tmux log", logPath)
 
-	deadline := time.Now().Add(3 * time.Minute)
+	deadline := time.Now().Add(4 * time.Minute)
 
-	fmt.Println("Step 3: waiting for agent to set TASK.md status to work...")
-	if err := waitForStatus(taskInWorktree, "work", deadline); err != nil {
-		fmt.Printf("FAIL: did not observe status: work: %v\n", err)
-		printTmuxPane(name)
-		fmt.Printf("See log: %s\n", testLogPath)
-		os.Exit(1)
+	fmt.Println("Step 3: wait for TASK.md status=work")
+	if err := waitForStatus(taskPath, "work", deadline); err != nil {
+		printDebug(name, taskPath, logPath)
+		fail("wait work status", err)
 	}
 
-	fmt.Println("Step 4: polling agent_test verification (go run test.go calc.go) ...")
-	if err := waitForVerificationPass(agentTestDir, deadline); err != nil {
-		fmt.Printf("FAIL: verification did not pass: %v\n", err)
-		printTmuxPane(name)
-		fmt.Printf("See log: %s\n", testLogPath)
-		os.Exit(1)
+	fmt.Println("Step 4: tmux-logs command")
+	if err := worktree.TmuxLogs(name, 10); err != nil {
+		fail("tmux-logs", err)
 	}
 
-	fmt.Println("Step 5: waiting for TASK.md signature after pass...")
-	if err := waitForDoneSignature(taskInWorktree, deadline); err != nil {
-		fmt.Printf("FAIL: done signature not found before deadline: %v\n", err)
-		printTmuxPane(name)
-		fmt.Printf("See log: %s\n", testLogPath)
-		os.Exit(1)
+	fmt.Println("Step 5: wait for TASK.md status=done")
+	if err := waitForStatus(taskPath, "done", deadline); err != nil {
+		printDebug(name, taskPath, logPath)
+		fail("wait done status", err)
 	}
-	fmt.Println("Done signature detected in TASK.md")
 
-	fmt.Println("PASS: worktree test completed with gemini-cli, verification pass, and task signature.")
-	fmt.Printf("Log file: %s\n", testLogPath)
+	fmt.Println("Step 6: verify-done")
+	if err := worktree.VerifyDone(name); err != nil {
+		printDebug(name, taskPath, logPath)
+		fail("verify-done", err)
+	}
+
+	fmt.Println("Step 7: remove")
+	if err := worktree.Remove(name); err != nil {
+		fail("remove", err)
+	}
+
+	if _, err := os.Stat(worktreePath); err == nil {
+		fail("remove", fmt.Errorf("worktree path still exists: %s", worktreePath))
+	}
+
+	fmt.Println("PASS: add -> start -> tmux-logs -> verify-done -> remove")
 }
 
-func waitForVerificationPass(agentTestDir string, deadline time.Time) error {
-	for time.Now().Before(deadline) {
-		cmd := exec.Command("go", "run", "test.go", "calc.go")
-		cmd.Dir = agentTestDir
-		cmd.Env = append(os.Environ(), "GOCACHE=/tmp/gocache")
-		if err := cmd.Run(); err == nil {
-			return nil
+func preflight(repoRoot string) error {
+	for _, bin := range []string{"git", "tmux", "gemini", "go"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			return fmt.Errorf("missing dependency in PATH: %s", bin)
 		}
-		time.Sleep(3 * time.Second)
 	}
-	return fmt.Errorf("timed out at %s", deadline.Format(time.RFC3339))
-}
-
-func waitForDoneSignature(taskPath string, deadline time.Time) error {
-	for time.Now().Before(deadline) {
-		status, err := readTaskStatus(taskPath)
-		if err == nil && status == "done" {
-			return nil
-		}
-		if err == nil && status == "fail" {
-			return fmt.Errorf("agent reported status: fail")
-		}
-		time.Sleep(2 * time.Second)
+	if _, err := os.Stat(filepath.Join(repoRoot, "dialtone.sh")); err != nil {
+		return fmt.Errorf("dialtone.sh not found at repo root: %w", err)
 	}
-	return fmt.Errorf("timed out waiting for status: done in %s (deadline %s)", taskPath, deadline.Format(time.RFC3339))
+	return nil
 }
 
 func waitForStatus(taskPath, want string, deadline time.Time) error {
@@ -116,29 +108,12 @@ func waitForStatus(taskPath, want string, deadline time.Time) error {
 				return nil
 			}
 			if status == "fail" {
-				return fmt.Errorf("agent reported status: fail")
+				return fmt.Errorf("agent reported status=fail")
 			}
 		}
 		time.Sleep(2 * time.Second)
 	}
-	return fmt.Errorf("timed out waiting for status: %s in %s (deadline %s)", want, taskPath, deadline.Format(time.RFC3339))
-}
-
-func printTmuxPane(session string) {
-	fmt.Printf("Tmux pane snapshot for '%s':\n", session)
-	cmd := exec.Command("tmux", "capture-pane", "-pt", session, "-S", "-200")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	_ = cmd.Run()
-}
-
-func startTmuxLogPipe(session, logPath string) error {
-	header := fmt.Sprintf("=== worktree test log (%s) ===\n", time.Now().UTC().Format(time.RFC3339))
-	if err := os.WriteFile(logPath, []byte(header), 0644); err != nil {
-		return err
-	}
-	cmd := exec.Command("tmux", "pipe-pane", "-o", "-t", session, fmt.Sprintf("cat >> %s", logPath))
-	return cmd.Run()
+	return fmt.Errorf("timeout waiting for status=%s", want)
 }
 
 func readTaskStatus(taskPath string) (string, error) {
@@ -165,6 +140,46 @@ func readTaskStatus(taskPath string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("signature status not found")
+}
+
+func printDebug(name, taskPath, logPath string) {
+	fmt.Printf("[debug] TASK.md status block (%s):\n", taskPath)
+	if data, err := os.ReadFile(taskPath); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			t := strings.TrimSpace(line)
+			if strings.HasPrefix(t, "status:") || strings.HasPrefix(t, "note:") || strings.HasPrefix(t, "updated_at:") {
+				fmt.Println(line)
+			}
+		}
+	}
+	fmt.Printf("[debug] tmux log tail (%s):\n", logPath)
+	if data, err := os.ReadFile(logPath); err == nil {
+		lines := strings.Split(string(data), "\n")
+		start := len(lines) - 40
+		if start < 0 {
+			start = 0
+		}
+		for _, line := range lines[start:] {
+			fmt.Println(line)
+		}
+	}
+
+	fmt.Printf("[debug] tmux pane tail (%s):\n", name)
+	cmd := exec.Command("tmux", "capture-pane", "-pt", name, "-S", "-120")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	_ = cmd.Run()
+}
+
+func mustPathExists(label, path string) {
+	if _, err := os.Stat(path); err != nil {
+		fail(label, fmt.Errorf("expected path missing: %s (%w)", path, err))
+	}
+}
+
+func fail(step string, err error) {
+	fmt.Printf("FAIL [%s]: %v\n", step, err)
+	os.Exit(1)
 }
 
 func findRepoRoot() (string, error) {

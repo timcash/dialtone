@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func Add(name, taskFile, branch string) error {
@@ -18,7 +19,10 @@ func Add(name, taskFile, branch string) error {
 		return err
 	}
 
-	worktreePath := filepath.Join(filepath.Dir(repoRoot), name)
+	worktreePath := managedWorktreePath(repoRoot, name)
+	if err := os.MkdirAll(managedWorktreeBase(repoRoot), 0755); err != nil {
+		return fmt.Errorf("failed to create managed worktree base dir: %w", err)
+	}
 	
 	// 2. Create git worktree
 	fmt.Printf("[Worktree] Creating worktree at %s...\n", worktreePath)
@@ -81,7 +85,10 @@ func Start(name, prompt string) error {
 	if err != nil {
 		return err
 	}
-	worktreePath := filepath.Join(filepath.Dir(repoRoot), name)
+	worktreePath, err := findWorktreePathByName(repoRoot, name)
+	if err != nil {
+		worktreePath = managedWorktreePath(repoRoot, name)
+	}
 
 	// Start requires a pre-existing worktree created by `worktree add`.
 	info, err := os.Stat(worktreePath)
@@ -118,6 +125,11 @@ func Start(name, prompt string) error {
 	if strings.TrimSpace(prompt) == "" {
 		prompt = fmt.Sprintf("use software development skills and finish %s ... make sure to sign before you start work", taskPath)
 	}
+	logPath := filepath.Join(worktreePath, "tmux.log")
+	if err := startTmuxLogPipe(name, logPath); err != nil {
+		return fmt.Errorf("failed to start tmux log pipe: %w", err)
+	}
+	fmt.Printf("[Worktree] Streaming tmux output to %s\n", logPath)
 
 	fmt.Printf("[Worktree] Launching Gemini Agent in session '%s'...\n", name)
 	cmd := fmt.Sprintf("./dialtone.sh gemini run --task TASK.md --prompt %s", strconv.Quote(prompt))
@@ -130,12 +142,55 @@ func Start(name, prompt string) error {
 	return nil
 }
 
+func VerifyDone(selector string) error {
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return err
+	}
+	entries, err := loadWorktreeEntries(repoRoot)
+	if err != nil {
+		return err
+	}
+	entry, err := resolveWorktreeSelector(entries, selector)
+	if err != nil {
+		return err
+	}
+	taskPath := filepath.Join(entry.Path, "TASK.md")
+	status, err := readTaskStatus(taskPath)
+	if err != nil {
+		return fmt.Errorf("failed reading TASK.md signature: %w", err)
+	}
+	if status != "done" {
+		return fmt.Errorf("task is not done (status=%s)", status)
+	}
+
+	agentTestDir := filepath.Join(entry.Path, "src", "plugins", "worktree", "src_v1", "agent_test")
+	if _, err := os.Stat(filepath.Join(agentTestDir, "test.go")); err == nil {
+		cmd := exec.Command("go", "run", "test.go", "calc.go")
+		cmd.Dir = agentTestDir
+		cmd.Env = append(os.Environ(), "GOCACHE=/tmp/gocache")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("agent_test verification failed: %w", err)
+		}
+		fmt.Println("[Worktree] verify-done: signature is done and agent_test passes.")
+		return nil
+	}
+
+	fmt.Println("[Worktree] verify-done: signature is done.")
+	return nil
+}
+
 func Remove(name string) error {
 	repoRoot, err := findRepoRoot()
 	if err != nil {
 		return err
 	}
-	worktreePath := filepath.Join(filepath.Dir(repoRoot), name)
+	worktreePath, err := findWorktreePathByName(repoRoot, name)
+	if err != nil {
+		worktreePath = managedWorktreePath(repoRoot, name)
+	}
 
 	// Kill tmux session
 	if err := killTmuxSession(name); err != nil {
@@ -144,7 +199,7 @@ func Remove(name string) error {
 
 	// Remove worktree
 	fmt.Printf("[Worktree] Removing worktree %s...\n", worktreePath)
-	cmd := exec.Command("git", "worktree", "remove", "--force", worktreePath)
+	cmd := exec.Command("git", "worktree", "remove", "-f", "-f", worktreePath)
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -184,6 +239,7 @@ func List() error {
 		}
 		fmt.Printf("%-4d %-20s %-9s %-8s %-17s %s\n", i+1, e.Name, e.TaskStatus, tmux, e.Branch, e.Path)
 	}
+	fmt.Printf("\nManaged base dir: %s\n", managedWorktreeBase(repoRoot))
 
 	return nil
 }
@@ -258,6 +314,64 @@ func TmuxLogs(selector string, n int) error {
 	for _, line := range lines[start:end] {
 		fmt.Println(line)
 	}
+	return nil
+}
+
+func Cleanup(all bool) error {
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return err
+	}
+	base := managedWorktreeBase(repoRoot)
+	entries, err := loadWorktreeEntries(repoRoot)
+	if err != nil {
+		return err
+	}
+
+	if all {
+		for _, e := range entries {
+			if e.Path == repoRoot {
+				continue
+			}
+			if err := Remove(e.Name); err != nil {
+				return err
+			}
+		}
+	} else {
+		managed := []worktreeEntry{}
+		for _, e := range entries {
+			if strings.HasPrefix(e.Path, base+string(filepath.Separator)) {
+				managed = append(managed, e)
+			}
+		}
+		for _, e := range managed {
+			if !e.Session && e.TaskStatus != "working" && e.TaskStatus != "work" {
+				if err := Remove(e.Name); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	// Remove orphan directories in managed base that are no longer registered.
+	remaining, _ := loadWorktreeEntries(repoRoot)
+	activePaths := map[string]bool{}
+	for _, e := range remaining {
+		activePaths[e.Path] = true
+	}
+	if dirs, err := os.ReadDir(base); err == nil {
+		for _, d := range dirs {
+			if !d.IsDir() {
+				continue
+			}
+			p := filepath.Join(base, d.Name())
+			if !activePaths[p] {
+				_ = os.RemoveAll(p)
+			}
+		}
+	}
+
+	fmt.Printf("[Worktree] Cleanup complete in %s\n", base)
 	return nil
 }
 
@@ -464,6 +578,27 @@ func resolveWorktreeSelector(entries []worktreeEntry, selector string) (worktree
 	return worktreeEntry{}, fmt.Errorf("worktree not found: %s", selector)
 }
 
+func findWorktreePathByName(repoRoot, name string) (string, error) {
+	entries, err := loadWorktreeEntries(repoRoot)
+	if err != nil {
+		return "", err
+	}
+	for _, e := range entries {
+		if e.Name == name {
+			return e.Path, nil
+		}
+	}
+	return "", fmt.Errorf("worktree not found: %s", name)
+}
+
+func managedWorktreeBase(repoRoot string) string {
+	return filepath.Join(filepath.Dir(repoRoot), "dialtone_worktree")
+}
+
+func managedWorktreePath(repoRoot, name string) string {
+	return filepath.Join(managedWorktreeBase(repoRoot), name)
+}
+
 func parseTaskSignatureStatus(content string) string {
 	lines := strings.Split(content, "\n")
 	inBlock := false
@@ -491,6 +626,18 @@ func parseTaskSignatureStatus(content string) string {
 	return ""
 }
 
+func readTaskStatus(taskPath string) (string, error) {
+	data, err := os.ReadFile(taskPath)
+	if err != nil {
+		return "", err
+	}
+	status := parseTaskSignatureStatus(string(data))
+	if status == "" {
+		return "", fmt.Errorf("signature status not found in %s", taskPath)
+	}
+	return status, nil
+}
+
 func killTmuxSession(name string) error {
 	if !tmuxSessionExists(name) {
 		return nil
@@ -503,4 +650,24 @@ func killTmuxSession(name string) error {
 		return fmt.Errorf("tmux session '%s' still exists after kill-session", name)
 	}
 	return nil
+}
+
+func startTmuxLogPipe(session, logPath string) error {
+	header := fmt.Sprintf("\n=== %s start %s ===\n", session, time.Now().UTC().Format(time.RFC3339))
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.WriteString(header); err != nil {
+		_ = f.Close()
+		return err
+	}
+	_ = f.Close()
+
+	cmd := exec.Command("tmux", "pipe-pane", "-o", "-t", session, fmt.Sprintf("cat >> %s", shellQuote(logPath)))
+	return cmd.Run()
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
