@@ -3,11 +3,10 @@ package proc
 import (
 	"bufio"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
+	"time"
 )
 
 func RunSubtone(args []string) {
@@ -33,25 +32,35 @@ func RunSubtone(args []string) {
 	TrackProcess(pid, args)
 	defer UntrackProcess(pid)
 
-	fmt.Printf("\nDIALTONE> Spawning subtone subprocess via PID %d...\n", pid)
-	fmt.Printf("DIALTONE> Streaming stdout/stderr from subtone PID %d.\n", pid)
-
-	// Combine stdout and stderr
-	reader := io.MultiReader(stdout, stderr)
-	scanner := bufio.NewScanner(reader)
-	for scanner.Scan() {
-		line := scanner.Text()
-		// If the line already starts with DIALTONE>, strip it to avoid double prefixing
-		// when streaming subtone output that was produced by another dev.go instance.
-		displayLine := line
-		if strings.HasPrefix(line, "DIALTONE> ") {
-			displayLine = line[len("DIALTONE> "):]
-		}
-		prefix := fmt.Sprintf("DIALTONE:%d> ", pid)
-		fmt.Printf("%s%s\n", prefix, displayLine)
+	logDir := filepath.Join(repoRoot, ".dialtone", "logs")
+	logger, err := NewSubtoneLogger(pid, args, logDir)
+	if err != nil {
+		fmt.Printf("DIALTONE> Failed to init logger: %v\n", err)
+	} else {
+		logger.StartHeartbeat(3 * time.Second)
+		defer logger.Stop()
 	}
 
-	err := cmd.Wait()
+	// Stream stdout (info) and stderr (errors) separately
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if logger != nil {
+				logger.LogLine(line)
+			}
+		}
+	}()
+
+	scanner := bufio.NewScanner(stderr)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if logger != nil {
+			logger.LogError(line)
+		}
+	}
+
+	err = cmd.Wait()
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
