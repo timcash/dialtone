@@ -28,7 +28,7 @@ func Run02Ps(ctx *testCtx) (string, error) {
 	}
 
 	// 3. Wait for subtones to actually start (look for first subtone output)
-	if err := ctx.WaitForOutput("Streaming stdout/stderr", 5*time.Second); err != nil {
+	if err := ctx.WaitForOutput("Started at", 5*time.Second); err != nil {
 		return "", err
 	}
 
@@ -42,5 +42,11 @@ func Run02Ps(ctx *testCtx) (string, error) {
 		return "", err
 	}
 
-	return "Verified ps listed active subtones from proc test src_v1", nil
+	// 6. Verify logs exist for the sleep command
+	// We expect logs with "subtone-" prefix containing "Command: [proc sleep 10]"
+	if err := ctx.WaitForLogEntry("subtone-", "Command: [proc sleep 10]", 10*time.Second); err != nil {
+		return "", fmt.Errorf("failed to find sleep command in logs: %w", err)
+	}
+
+	return "Verified ps listed active subtones and confirmed logs.", nil
 }
