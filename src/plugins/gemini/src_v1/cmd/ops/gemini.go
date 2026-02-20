@@ -13,29 +13,34 @@ func Run(taskFile, model, promptOverride string) error {
 		return fmt.Errorf("gemini CLI not found in PATH")
 	}
 
-	taskBytes, err := os.ReadFile(taskFile)
-	if err != nil {
-		return fmt.Errorf("failed to read task file %s: %w", taskFile, err)
-	}
-
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
-	absTask := taskFile
-	if !filepath.IsAbs(taskFile) {
-		absTask = filepath.Join(cwd, taskFile)
+	absTask, err := resolveTaskPath(cwd, taskFile)
+	if err != nil {
+		return err
+	}
+	taskBytes, err := os.ReadFile(absTask)
+	if err != nil {
+		return fmt.Errorf("failed to read task file %s: %w", absTask, err)
 	}
 
 	prompt := promptOverride
 	if strings.TrimSpace(prompt) == "" {
 		prompt = buildPrompt(cwd, absTask, string(taskBytes))
 	}
-	cmd := exec.Command("gemini", "-m", model, "-p", prompt)
+	workspaceRoot := filepath.Dir(cwd)
+	cmd := exec.Command(
+		"gemini",
+		"-m", model,
+		"-p", prompt,
+		"--approval-mode", "yolo",
+		"--include-directories", workspaceRoot,
+	)
 	cmd.Dir = cwd
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
 	return cmd.Run()
 }
 
@@ -76,4 +81,21 @@ Instructions:
 3) Keep changes minimal and focused.
 4) Print a short completion summary and test results.
 `, cwd, taskPath, strings.TrimSpace(taskBody)))
+}
+
+func resolveTaskPath(cwd, taskFile string) (string, error) {
+	if filepath.IsAbs(taskFile) {
+		return taskFile, nil
+	}
+	candidate := filepath.Join(cwd, taskFile)
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate, nil
+	}
+	// dialtone.sh runs plugins from repoRoot/src. If task lives at repo root,
+	// resolve one level up.
+	parentCandidate := filepath.Join(filepath.Dir(cwd), taskFile)
+	if _, err := os.Stat(parentCandidate); err == nil {
+		return parentCandidate, nil
+	}
+	return "", fmt.Errorf("failed to read task file %s: not found in %s or %s", taskFile, candidate, parentCandidate)
 }
