@@ -12,7 +12,7 @@ func Run06Worktree(ctx *testCtx) (string, error) {
 	ctx.SetTimeout(30 * time.Second)
 
 	// Clean up potential leftovers from previous runs
-	worktreePath := filepath.Join(filepath.Dir(ctx.repoRoot), "test-agent")
+	worktreePath := filepath.Join(filepath.Dir(ctx.repoRoot), "dialtone_worktree", "test-agent")
 	_ = os.RemoveAll(worktreePath)
 	exec.Command("git", "-C", ctx.repoRoot, "worktree", "prune").Run()
 
@@ -65,7 +65,7 @@ func Run06Worktree(ctx *testCtx) (string, error) {
 
 	// List output is also suppressed? 
 	// Yes, `worktree list` runs in subtone.
-	if err := ctx.WaitForLogEntry(logPattern, "Git Worktrees:", 10*time.Second); err != nil {
+	if err := ctx.WaitForLogEntry(logPattern, "Worktrees:", 10*time.Second); err != nil {
 		return "", fmt.Errorf("worktree list log not found: %w", err)
 	}
 	ctx.ClearOutput()
