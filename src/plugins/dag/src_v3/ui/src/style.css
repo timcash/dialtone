@@ -1,4 +1,4 @@
-@import '../../../../../plugins/ui/style.css';
+@import '../../../../../plugins/ui/src_v1/ui/style.css';
 
 #dag-meta-table,
 #dag-3d-stage {
@@ -62,7 +62,7 @@ nav {
   z-index: 1300;
 }
 
-nav > button.thumb {
+nav > button.form {
   width: 64px;
   height: 64px;
   min-width: 56px;

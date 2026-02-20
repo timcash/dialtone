@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 	"google.golang.org/protobuf/encoding/protowire"
 )
 
@@ -24,14 +24,14 @@ func StreamChatLogs(ctx context.Context, pbPath string, out io.Writer) {
 		pbPath = findRecentConversationProto()
 	}
 	if pbPath == "" {
-		logger.LogFatal("No active conversation found in ~/.gemini/antigravity/conversations/")
+		logs.Fatal("No active conversation found in ~/.gemini/antigravity/conversations/")
 	}
 
-	logger.LogInfo("Tailing conversation: %s", pbPath)
+	logs.Info("Tailing conversation: %s", pbPath)
 
 	f, err := os.Open(pbPath)
 	if err != nil {
-		logger.LogFatal("Failed to open pb file: %v", err)
+		logs.Fatal("Failed to open pb file: %v", err)
 	}
 	defer f.Close()
 

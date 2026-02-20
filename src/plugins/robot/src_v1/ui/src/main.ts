@@ -1,4 +1,4 @@
-import { setupApp } from '../../../../../libs/ui_v2/ui';
+import { setupApp } from '../../../../../plugins/ui/src_v1/ui/ui';
 import './style.css';
 import { initConnection, sendCommand } from './data/connection';
 import { handleButtonKey } from './buttons';

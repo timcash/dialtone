@@ -23,10 +23,24 @@ type tableRow struct {
 func main() {
 	port := "8080"
 	cwd, _ := os.Getwd()
-	uiPath := filepath.Join(cwd, "ui", "dist")
-	if _, err := os.Stat(uiPath); err != nil {
-		uiPath = filepath.Join(cwd, "src", "plugins", "dag", "src_v3", "ui", "dist")
+
+	// Try a few locations for UI dist
+	candidates := []string{
+		filepath.Join(cwd, "ui", "dist"),
+		filepath.Join(cwd, "src", "plugins", "dag", "src_v3", "ui", "dist"),
+		filepath.Join(cwd, "plugins", "dag", "src_v3", "ui", "dist"),
 	}
+	uiPath := ""
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			uiPath = c
+			break
+		}
+	}
+	if uiPath == "" {
+		uiPath = filepath.Join(cwd, "ui", "dist") // default fallback
+	}
+
 	dbPath := resolveDBPath(cwd)
 	logPath := resolveTestLogPath(cwd)
 
@@ -84,19 +98,31 @@ func main() {
 }
 
 func resolveDBPath(cwd string) string {
-	local := filepath.Join(cwd, "test", "test.duckdb")
-	if _, err := os.Stat(local); err == nil {
-		return local
+	candidates := []string{
+		filepath.Join(cwd, "test", "test.duckdb"),
+		filepath.Join(cwd, "plugins", "dag", "src_v3", "suite", "test.duckdb"),
+		filepath.Join(cwd, "src", "plugins", "dag", "src_v3", "suite", "test.duckdb"),
 	}
-	return filepath.Join(cwd, "src", "plugins", "dag", "src_v3", "test", "test.duckdb")
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return filepath.Join(cwd, "test.duckdb")
 }
 
 func resolveTestLogPath(cwd string) string {
-	local := filepath.Join(cwd, "test", "test.log")
-	if _, err := os.Stat(local); err == nil {
-		return local
+	candidates := []string{
+		filepath.Join(cwd, "test", "test.log"),
+		filepath.Join(cwd, "plugins", "dag", "src_v3", "suite", "test.log"),
+		filepath.Join(cwd, "src", "plugins", "dag", "src_v3", "suite", "test.log"),
 	}
-	return filepath.Join(cwd, "src", "plugins", "dag", "src_v3", "test", "test.log")
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return filepath.Join(cwd, "test.log")
 }
 
 func readLogDelta(path string, offset int64) (int64, []string, error) {

@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 var logFile *os.File
@@ -36,8 +38,126 @@ func logLine(category, msg string) {
 	fmt.Fprintf(logFile, "[%s | INFO | %s] %s\n", ts, category, msg)
 }
 
+// LoadConfig loads environment variables from a custom file or defaults to .env
+func LoadConfig() {
+	envFile := os.Getenv("DIALTONE_ENV_FILE")
+	if envFile == "" {
+		envFile = "env/.env"
+	}
+
+	// Try to find the env file by looking up from current dir
+	cwd, _ := os.Getwd()
+	repoRoot := cwd
+	if filepath.Base(cwd) == "src" {
+		repoRoot = filepath.Dir(cwd)
+	}
+	envPath := filepath.Join(repoRoot, envFile)
+
+	if err := godotenv.Load(envPath); err != nil {
+		logLine("CONFIG", fmt.Sprintf("Warning: godotenv.Load(%s) failed: %v", envPath, err))
+	}
+}
+
+// GetDialtoneEnv returns the directory where dependencies are installed.
+func GetDialtoneEnv() string {
+	env := os.Getenv("DIALTONE_ENV")
+	if env != "" {
+		if strings.HasPrefix(env, "~") {
+			home, _ := os.UserHomeDir()
+			env = filepath.Join(home, env[1:])
+		}
+		absEnv, _ := filepath.Abs(env)
+		return absEnv
+	}
+	// Fallback to default
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".dialtone_env")
+}
+
+type Requirement struct {
+	Tool    string
+	Version string
+}
+
+func EnsureRequirements(reqs []Requirement) error {
+	for _, req := range reqs {
+		if err := EnsureRequirement(req); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func EnsureRequirement(req Requirement) error {
+	switch req.Tool {
+	case "go":
+		return ensureGoRequirement(req.Version)
+	case "bun":
+		return ensureBunRequirement(req.Version)
+	default:
+		return fmt.Errorf("unsupported install requirement tool: %s", req.Tool)
+	}
+}
+
+func ensureGoRequirement(version string) error {
+	depsDir := GetDialtoneEnv()
+	goBin := filepath.Join(depsDir, "go", "bin", "go")
+	if _, err := os.Stat(goBin); os.IsNotExist(err) {
+		fmt.Printf("[install] Go missing; running ./dialtone.sh go install\n")
+		cmd := exec.Command("./dialtone.sh", "go", "install")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to install Go: %w", err)
+		}
+	}
+
+	if version == "" {
+		return nil
+	}
+
+	out, err := exec.Command(goBin, "version").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed checking go version: %w", err)
+	}
+	want := "go" + version
+	if !strings.Contains(string(out), want) {
+		return fmt.Errorf("go version mismatch: want %s, got %s", want, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func ensureBunRequirement(version string) error {
+	depsDir := GetDialtoneEnv()
+	bunBin := filepath.Join(depsDir, "bun", "bin", "bun")
+	if _, err := os.Stat(bunBin); os.IsNotExist(err) {
+		fmt.Printf("[install] Bun missing; installing via ./dialtone.sh bun install\n")
+		cmd := exec.Command("./dialtone.sh", "bun", "install")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to install Bun: %w", err)
+		}
+	}
+
+	if version == "" || version == "latest" {
+		return nil
+	}
+
+	out, err := exec.Command(bunBin, "--version").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed checking bun version: %w", err)
+	}
+	got := strings.TrimSpace(string(out))
+	if got != version {
+		return fmt.Errorf("bun version mismatch: want %s, got %s", version, got)
+	}
+	return nil
+}
+
 func main() {
 	initLogger()
+	LoadConfig()
 	defer func() {
 		if logFile != nil {
 			logFile.Close()
@@ -177,6 +297,9 @@ Install latest Go and bootstrap dev.go command scaffold
 ` + "`" + `@DIALTONE robot install src_v1` + "`" + `
 Install robot src_v1 dependencies
 
+` + "`" + `@DIALTONE dag install src_v3` + "`" + `
+Install dag src_v3 dependencies
+
 ### System
 ` + "`" + `<any command>` + "`" + `
 Forward to @./dialtone.sh <command>`
@@ -266,6 +389,7 @@ func printDevUsage() {
 	fmt.Println("  ./dialtone.sh go install --latest")
 	fmt.Println("  ./dialtone.sh go exec version")
 	fmt.Println("  ./dialtone.sh robot install src_v1")
+	fmt.Println("  ./dialtone.sh dag install src_v3")
 }
 
 func listPlugins() {
@@ -298,8 +422,15 @@ func runPluginScaffold(plugin string, args []string) error {
 
 	goScaffold := filepath.Join(pluginDir, "scaffold", "main.go")
 	if fileExists(goScaffold) {
-		cmd := exec.Command("go", append([]string{"run", "./scaffold/main.go"}, args...)...)
-		cmd.Dir = pluginDir
+		var cmd *exec.Cmd
+		if fileExists(filepath.Join(pluginDir, "go.mod")) {
+			// Plugin has its own module, run from plugin dir
+			cmd = exec.Command("go", append([]string{"run", "./scaffold/main.go"}, args...)...)
+			cmd.Dir = pluginDir
+		} else {
+			// Plugin is part of main module, run from 'src'
+			cmd = exec.Command("go", append([]string{"run", "./" + filepath.ToSlash(goScaffold)}, args...)...)
+		}
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin

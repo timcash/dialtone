@@ -21,15 +21,19 @@ Dialtone is a small program that runs on computers, phones, and robots. It is bu
 The REPL accepts commands from user roles (e.g. `USER-1>`), including plugin commands such as the [robot plugin](src/plugins/robot/README.md) for dev, deploy, and telemetry.
 
 **Example (robot plugin):**
-```text
+```shell
+$ ./dialtone.sh
+DIALTONE> Virtual Librarian online. Type 'help' for commands, or 'exit' to quit.
 USER-1> robot dev src_v1
 DIALTONE> Starting robot dev (mock data)...
-DIALTONE:robot> Vite at http://127.0.0.1:3000
-DIALTONE:robot> Chrome launched. Use 9:Mode to switch views.
+DIALTONE:41146> Vite at http://127.0.0.1:3000
+DIALTONE:41146> Chrome launched
 USER-1> robot test src_v1
 DIALTONE> Running robot tests...
-DIALTONE:robot> [PASS] headless tests complete.
-DIALTONE> Process exited with code 0.
+DIALTONE:41146> [PASS] headless tests complete.
+DIALTONE> Process exited with code 0
+USER-1> exit
+DIALTONE> Goodbye
 ```
 
 ## 2. Code Stack

@@ -3,7 +3,7 @@ package cli
 import (
 	"bufio"
 	"context"
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 	"fmt"
 	"os"
 	"os/exec"
@@ -101,7 +101,7 @@ func runAntigravityLogs(chat, commands bool) {
 	// Stream 1: Chat Logs (Proprietary .pb format)
 	if chat {
 		go func() {
-			logger.LogInfo("Starting chat log stream...")
+			logs.Info("Starting chat log stream...")
 			StreamChatLogs(ctx, "", os.Stdout)
 			done <- true
 		}()
@@ -112,10 +112,10 @@ func runAntigravityLogs(chat, commands bool) {
 		go func() {
 			logPath := findRecentAntigravityLog()
 			if logPath == "" {
-				logger.LogFatal("Could not find Antigravity log file.")
+				logs.Fatal("Could not find Antigravity log file.")
 			}
 
-			logger.LogInfo("Tailing system log: %s", logPath)
+			logs.Info("Tailing system log: %s", logPath)
 
 			// If we are showing only commands, filter for them
 			// If showing all, we still want to filter out the noise mentioned in docs
@@ -124,11 +124,11 @@ func runAntigravityLogs(chat, commands bool) {
 			cmd := exec.Command("tail", "-f", logPath)
 			stdout, err := cmd.StdoutPipe()
 			if err != nil {
-				logger.LogFatal("Failed to create stdout pipe: %v", err)
+				logs.Fatal("Failed to create stdout pipe: %v", err)
 			}
 
 			if err := cmd.Start(); err != nil {
-				logger.LogFatal("Failed to start tail: %v", err)
+				logs.Fatal("Failed to start tail: %v", err)
 			}
 
 			scanner := bufio.NewScanner(stdout)
@@ -169,7 +169,7 @@ func runAntigravityLogs(chat, commands bool) {
 						return
 					}
 				}
-				logger.LogInfo("Log tail ended.")
+				logs.Info("Log tail ended.")
 			}
 			done <- true
 		}()
@@ -225,7 +225,7 @@ func findRecentAntigravityLog() string {
 }
 
 func runSetupWorkflows(args []string) {
-	logger.LogInfo("Setting up IDE agent files (soft links only)...")
+	logs.Info("Setting up IDE agent files (soft links only)...")
 
 	// Setup Workflows
 	setupDir("docs/workflows", ".agent/workflows")
@@ -233,23 +233,23 @@ func runSetupWorkflows(args []string) {
 	// Setup Rules
 	setupDir("docs/rules", ".agent/rules")
 
-	logger.LogInfo("IDE setup complete.")
+	logs.Info("IDE setup complete.")
 }
 
 func setupDir(srcDir, destDir string) {
-	logger.LogInfo("Processing %s -> %s", srcDir, destDir)
+	logs.Info("Processing %s -> %s", srcDir, destDir)
 
 	// Ensure destination directory exists
 	if _, err := os.Stat(destDir); os.IsNotExist(err) {
 		if err := os.MkdirAll(destDir, 0755); err != nil {
-			logger.LogFatal("Failed to create destination directory %s: %v", destDir, err)
+			logs.Fatal("Failed to create destination directory %s: %v", destDir, err)
 		}
 	}
 
 	// Read files from source directory
 	files, err := os.ReadDir(srcDir)
 	if err != nil {
-		logger.LogFatal("Failed to read source directory %s: %v", srcDir, err)
+		logs.Fatal("Failed to read source directory %s: %v", srcDir, err)
 	}
 
 	for _, file := range files {
@@ -262,12 +262,12 @@ func setupDir(srcDir, destDir string) {
 
 		// Fail if destination exists
 		if _, err := os.Lstat(destPath); err == nil {
-			logger.LogFatal("File already exists: %s. Refusing to overwrite.", destPath)
+			logs.Fatal("File already exists: %s. Refusing to overwrite.", destPath)
 		}
 
-		logger.LogInfo("Linking %s", file.Name())
+		logs.Info("Linking %s", file.Name())
 		if err := os.Symlink(srcPath, destPath); err != nil {
-			logger.LogFatal("Failed to create symlink for %s: %v", file.Name(), err)
+			logs.Fatal("Failed to create symlink for %s: %v", file.Name(), err)
 		}
 	}
 }

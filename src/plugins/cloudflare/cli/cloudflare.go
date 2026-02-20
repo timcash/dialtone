@@ -3,7 +3,7 @@ package cli
 import (
 	"bytes"
 	"crypto/rand"
-	"dialtone/dev/plugins/test"
+	"dialtone/dev/plugins/dag/src_v3/suite"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
@@ -18,7 +18,7 @@ import (
 	"syscall"
 
 	"dialtone/dev/config"
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 	"dialtone/dev/util"
 )
 
@@ -153,7 +153,7 @@ func RunSetupService(args []string) {
 	}
 
 	if robotName == "" {
-		logger.LogFatal("Error: robot name is required for setup-service (pass as arg or set DIALTONE_DOMAIN/DIALTONE_HOSTNAME in .env)")
+		logs.Fatal("Error: robot name is required for setup-service (pass as arg or set DIALTONE_DOMAIN/DIALTONE_HOSTNAME in .env)")
 	}
 
 	cwd, _ := os.Getwd()
@@ -175,17 +175,17 @@ func RunSetupService(args []string) {
 		out, err := exec.Command("loginctl", "show-user", user, "--property=Linger").Output()
 		if err == nil {
 			if strings.TrimSpace(string(out)) == "Linger=no" {
-				logger.LogFatal("Error: User lingering is not enabled. Cloudflare proxy service requires lingering to run in the background.\nPlease run: loginctl enable-linger %s", user)
+				logs.Fatal("Error: User lingering is not enabled. Cloudflare proxy service requires lingering to run in the background.\nPlease run: loginctl enable-linger %s", user)
 			}
 		} else {
 			// If loginctl fails, warn but proceed (might be non-systemd environment or permission issue, though unlikely for user query)
-			logger.LogInfo("Warning: Could not verify user lingering status. Ensure it is enabled: loginctl enable-linger %s", user)
+			logs.Info("Warning: Could not verify user lingering status. Ensure it is enabled: loginctl enable-linger %s", user)
 		}
 
 		homeDir, _ := os.UserHomeDir()
 		userSystemdDir := filepath.Join(homeDir, ".config", "systemd", "user")
 		if err := os.MkdirAll(userSystemdDir, 0755); err != nil {
-			logger.LogFatal("Failed to create user systemd dir: %v", err)
+			logs.Fatal("Failed to create user systemd dir: %v", err)
 		}
 		servicePath = filepath.Join(userSystemdDir, fmt.Sprintf("dialtone-proxy-%s.service", robotName))
 		wantedBy = "default.target"
@@ -239,7 +239,7 @@ WantedBy=%s
 	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("dialtone-proxy-%s.service", robotName))
 	err := os.WriteFile(tmpFile, []byte(serviceContent), 0644)
 	if err != nil {
-		logger.LogFatal("Failed to write temporary service file: %v", err)
+		logs.Fatal("Failed to write temporary service file: %v", err)
 	}
 
 	runShell := config.RunSimpleShell
@@ -252,12 +252,12 @@ WantedBy=%s
 	runShell(enableCmd)
 	runShell(restartCmd)
 
-	logger.LogInfo("SUCCESS: Cloudflare proxy service for '%s' installed and started.", robotName)
+	logs.Info("SUCCESS: Cloudflare proxy service for '%s' installed and started.", robotName)
 	if *userMode {
-		logger.LogInfo("Check status with: systemctl --user status dialtone-proxy-%s.service", robotName)
-		logger.LogInfo("Note: Ensure linger is enabled to keep service running after logout: loginctl enable-linger %s", user)
+		logs.Info("Check status with: systemctl --user status dialtone-proxy-%s.service", robotName)
+		logs.Info("Note: Ensure linger is enabled to keep service running after logout: loginctl enable-linger %s", user)
 	} else {
-		logger.LogInfo("Check status with: systemctl status dialtone-proxy-%s.service", robotName)
+		logs.Info("Check status with: systemctl status dialtone-proxy-%s.service", robotName)
 	}
 }
 
@@ -436,7 +436,7 @@ func RunTest(versionDir string) error {
 
 func runLogin(args []string) {
 	cf := findCloudflared()
-	logger.LogInfo("Logging into Cloudflare...")
+	logs.Info("Logging into Cloudflare...")
 
 	cmd := exec.Command(cf, "tunnel", "login")
 	cmd.Stdout = os.Stdout
@@ -444,9 +444,9 @@ func runLogin(args []string) {
 	cmd.Stdin = os.Stdin
 
 	if err := cmd.Run(); err != nil {
-		logger.LogFatal("Cloudflare login failed: %v", err)
+		logs.Fatal("Cloudflare login failed: %v", err)
 	}
-	logger.LogInfo("Cloudflare login complete.")
+	logs.Info("Cloudflare login complete.")
 }
 
 func runTunnel(args []string) {
@@ -487,7 +487,7 @@ func runTunnel(args []string) {
 		runFs.Parse(subArgs[1:])
 
 		if *urlFlag == "" {
-			logger.LogFatal("Error: --url is required for 'cloudflare tunnel run'")
+			logs.Fatal("Error: --url is required for 'cloudflare tunnel run'")
 		}
 		if *tokenFlag != "" {
 			cmdArgs = append(cmdArgs, "run", "--token", *tokenFlag)
@@ -509,11 +509,11 @@ func runTunnel(args []string) {
 			dh := os.Getenv("DIALTONE_HOSTNAME")
 			if dh != "" {
 				hostname = fmt.Sprintf("%s.dialtone.earth", dh)
-				logger.LogInfo("Using DIALTONE_HOSTNAME for subdomain: %s", hostname)
+				logs.Info("Using DIALTONE_HOSTNAME for subdomain: %s", hostname)
 			}
 		}
 		if hostname == "" {
-			logger.LogFatal("No hostname provided and DIALTONE_HOSTNAME not set in env/.env")
+			logs.Fatal("No hostname provided and DIALTONE_HOSTNAME not set in env/.env")
 		}
 		cmdArgs = append(cmdArgs, "route", "dns", tunnelName, hostname)
 	case "cleanup":
@@ -528,7 +528,7 @@ func runTunnel(args []string) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		logger.LogFatal("Cloudflare tunnel %s failed: %v", sub, err)
+		logs.Fatal("Cloudflare tunnel %s failed: %v", sub, err)
 	}
 }
 
@@ -540,7 +540,7 @@ func runServe(args []string) {
 	}
 
 	target := args[0]
-	logger.LogInfo("Starting Cloudflare tunnel to serve %s...", target)
+	logs.Info("Starting Cloudflare tunnel to serve %s...", target)
 
 	// cloudflared tunnel --url http://localhost:PORT
 	// Or just cloudflared tunnel --url target
@@ -551,18 +551,18 @@ func runServe(args []string) {
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		logger.LogFatal("Cloudflare serve failed: %v", err)
+		logs.Fatal("Cloudflare serve failed: %v", err)
 	}
 }
 
 func runCleanup() {
-	logger.LogInfo("Cleaning up local Cloudflare tunnels...")
+	logs.Info("Cleaning up local Cloudflare tunnels...")
 	// We'll use pkill if available, otherwise fallback to a manual process check
 	// For simplicity and speed in a CLI context:
 	cmd := exec.Command("pkill", "-f", "cloudflared")
 	// Ignore error as it fails if no processes are found
 	_ = cmd.Run()
-	logger.LogInfo("Tunnel cleanup complete.")
+	logs.Info("Tunnel cleanup complete.")
 }
 
 func runRobot(args []string) {
@@ -584,7 +584,7 @@ func runRobot(args []string) {
 	}
 
 	if name == "" {
-		logger.LogFatal("Error: robot name is required (pass as arg or set DIALTONE_HOSTNAME in .env)")
+		logs.Fatal("Error: robot name is required (pass as arg or set DIALTONE_HOSTNAME in .env)")
 	}
 
 	// 1. Determine the Tunnel Token
@@ -611,25 +611,25 @@ func runRobot(args []string) {
 	cmdArgs = append(cmdArgs, "tunnel")
 
 	if runToken != "" {
-		logger.LogInfo("Using Tunnel Token for %s...", name)
+		logs.Info("Using Tunnel Token for %s...", name)
 		cmdArgs = append(cmdArgs, "run", "--token", runToken)
 	} else {
-		logger.LogInfo("No token found, attempting to run by name (requires 'cloudflare login')...")
+		logs.Info("No token found, attempting to run by name (requires 'cloudflare login')...")
 		cmdArgs = append(cmdArgs, "run", name)
 	}
 
 	cmdArgs = append(cmdArgs, "--url", targetURL)
 
-	logger.LogInfo("Starting Cloudflare tunnel for %s.dialtone.earth, directly targeting %s...", name, targetURL)
+	logs.Info("Starting Cloudflare tunnel for %s.dialtone.earth, directly targeting %s...", name, targetURL)
 	cmd := exec.Command(cf, cmdArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // Run in new process group
 
 	if err := cmd.Start(); err != nil {
-		logger.LogFatal("Cloudflare tunnel failed to start: %v", err)
+		logs.Fatal("Cloudflare tunnel failed to start: %v", err)
 	}
-	logger.LogInfo("Cloudflare tunnel process started with PID: %d", cmd.Process.Pid)
+	logs.Info("Cloudflare tunnel process started with PID: %d", cmd.Process.Pid)
 
 	// Keep the dialtone process alive to track the cloudflared process
 	util.WaitForShutdown()
@@ -647,16 +647,16 @@ func runProxy(args []string) {
 	}
 
 	if targetAddr == "" {
-		logger.LogFatal("Usage: dialtone cloudflare proxy <target> [--port <local-port>]")
+		logs.Fatal("Usage: dialtone cloudflare proxy <target> [--port <local-port>]")
 	}
 
 	addr := fmt.Sprintf("127.0.0.1:%d", *localPort)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		logger.LogFatal("Failed to listen on %s: %v", addr, err)
+		logs.Fatal("Failed to listen on %s: %v", addr, err)
 	}
 
-	logger.LogInfo("TCP Proxy started: %s -> %s", addr, targetAddr)
+	logs.Info("TCP Proxy started: %s -> %s", addr, targetAddr)
 	util.ProxyListener(ln, targetAddr)
 }
 
@@ -678,15 +678,15 @@ func runProvision(args []string) {
 	}
 
 	if tunnelName == "" {
-		logger.LogFatal("Usage: dialtone cloudflare provision <name> [--domain <domain>]")
+		logs.Fatal("Usage: dialtone cloudflare provision <name> [--domain <domain>]")
 	}
 
 	if *apiToken == "" || *accountID == "" {
-		logger.LogFatal("Error: CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be set in .env")
+		logs.Fatal("Error: CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be set in .env")
 	}
 
 	fullHostname := fmt.Sprintf("%s.%s", tunnelName, *domain)
-	logger.LogInfo("Provisioning Cloudflare Tunnel and DNS for: %s", fullHostname)
+	logs.Info("Provisioning Cloudflare Tunnel and DNS for: %s", fullHostname)
 
 	client := &http.Client{}
 
@@ -702,14 +702,14 @@ func runProvision(args []string) {
 	zoneReq.Header.Set("Authorization", "Bearer "+*apiToken)
 	zoneResp, err := client.Do(zoneReq)
 	if err != nil {
-		logger.LogFatal("Failed to fetch zone: %v", err)
+		logs.Fatal("Failed to fetch zone: %v", err)
 	}
 	defer zoneResp.Body.Close()
 
 	var zr ZoneResponse
 	json.NewDecoder(zoneResp.Body).Decode(&zr)
 	if !zr.Success || len(zr.Result) == 0 {
-		logger.LogFatal("Could not find Cloudflare zone for %s. Check your API Token permissions.", *domain)
+		logs.Fatal("Could not find Cloudflare zone for %s. Check your API Token permissions.", *domain)
 	}
 	zoneID := zr.Result[0].ID
 
@@ -734,12 +734,12 @@ func runProvision(args []string) {
 
 	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
-		logger.LogFatal("Tunnel creation failed. (Already exists? Use a different name)")
+		logs.Fatal("Tunnel creation failed. (Already exists? Use a different name)")
 	}
 	var cr CreateResponse
 	json.NewDecoder(resp.Body).Decode(&cr)
 	tunnelID := cr.Result.ID
-	logger.LogInfo("Tunnel created: %s", tunnelID)
+	logs.Info("Tunnel created: %s", tunnelID)
 
 	// 3. Create DNS CNAME Record
 	dnsPayload := map[string]any{
@@ -757,9 +757,9 @@ func runProvision(args []string) {
 
 	dnsResp, err := client.Do(dnsReq)
 	if err != nil || dnsResp.StatusCode != http.StatusOK {
-		logger.LogInfo("Warning: Failed to create DNS record (it might already exist).")
+		logs.Info("Warning: Failed to create DNS record (it might already exist).")
 	} else {
-		logger.LogInfo("DNS record created: %s -> %s.cfargotunnel.com", fullHostname, tunnelID)
+		logs.Info("DNS record created: %s -> %s.cfargotunnel.com", fullHostname, tunnelID)
 	}
 
 	// 4. Generate the Run Token and Save to .env
@@ -775,6 +775,6 @@ func runProvision(args []string) {
 	defer f.Close()
 	f.WriteString(fmt.Sprintf("\n# CF Token for %s\nCF_TUNNEL_TOKEN_%s=%s\n", tunnelName, strings.ToUpper(strings.ReplaceAll(tunnelName, "-", "_")), runToken))
 
-	logger.LogInfo("SUCCESS: Token saved as CF_TUNNEL_TOKEN_%s", strings.ToUpper(strings.ReplaceAll(tunnelName, "-", "_")))
-	logger.LogInfo("Access your robot at: https://%s", fullHostname)
+	logs.Info("SUCCESS: Token saved as CF_TUNNEL_TOKEN_%s", strings.ToUpper(strings.ReplaceAll(tunnelName, "-", "_")))
+	logs.Info("Access your robot at: https://%s", fullHostname)
 }

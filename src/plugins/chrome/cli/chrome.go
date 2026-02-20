@@ -6,7 +6,7 @@ import (
 
 	"strings"
 
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 	chrome "dialtone/dev/plugins/chrome/app"
 	chrome_test "dialtone/dev/plugins/chrome/test"
 )
@@ -112,9 +112,9 @@ func RunChrome(args []string) {
 		handleNew(*port, *gpu, *headless, targetURL, *role, *reuseExisting, *debug)
 	case "test":
 		if err := chrome_test.Run(); err != nil {
-			logger.LogFatal("Chrome self-test failed: %v", err)
+			logs.Fatal("Chrome self-test failed: %v", err)
 		}
-		logger.LogInfo("Chrome self-test passed")
+		logs.Info("Chrome self-test passed")
 	case "verify":
 		verifyFlags := flag.NewFlagSet("chrome verify", flag.ExitOnError)
 		port := verifyFlags.Int("port", 9222, "Remote debugging port")
@@ -133,30 +133,30 @@ func RunChrome(args []string) {
 		verifyFlags.Parse(args[1:])
 		verifyChrome(*port, *debug)
 	case "install":
-		logger.LogInfo("Chrome plugin: No specific dependencies to install (detects local Chrome).")
+		logs.Info("Chrome plugin: No specific dependencies to install (detects local Chrome).")
 	default:
 		printChromeUsage()
 	}
 }
 
 func verifyChrome(port int, debug bool) {
-	logger.LogInfo("Verifying Chrome/Chromium connectivity (Target Port: %d)...", port)
+	logs.Info("Verifying Chrome/Chromium connectivity (Target Port: %d)...", port)
 	if err := chrome.VerifyChrome(port, debug); err != nil {
-		logger.LogFatal("Chrome verification FAILED: %v", err)
+		logs.Fatal("Chrome verification FAILED: %v", err)
 	}
-	logger.LogInfo("Chrome verification SUCCESS")
+	logs.Info("Chrome verification SUCCESS")
 }
 
 func handleList(headedOnly, headlessOnly, verbose bool) {
-	logger.LogInfo("Scanning for Chrome/Chromium resources...")
+	logs.Info("Scanning for Chrome/Chromium resources...")
 	// We always get all and filter/categorize here
 	procs, err := chrome.ListResources(true)
 	if err != nil {
-		logger.LogFatal("Failed to list resources: %v", err)
+		logs.Fatal("Failed to list resources: %v", err)
 	}
 
 	if len(procs) == 0 {
-		logger.LogInfo("No Chrome processes detected.")
+		logs.Info("No Chrome processes detected.")
 		return
 	}
 
@@ -230,26 +230,26 @@ func handleList(headedOnly, headlessOnly, verbose bool) {
 		count++
 	}
 	fmt.Println()
-	logger.LogInfo("Total: %d processes (displayed: %d)", len(procs), count)
+	logs.Info("Total: %d processes (displayed: %d)", len(procs), count)
 	if !verbose {
-		logger.LogInfo("Use --verbose to see the full command line report.")
+		logs.Info("Use --verbose to see the full command line report.")
 	}
 }
 
 func handleKill(arg string, isWindows, totalAll bool) {
 	if arg == "all" {
 		if totalAll {
-			logger.LogInfo("Killing ALL Chrome processes system-wide...")
+			logs.Info("Killing ALL Chrome processes system-wide...")
 			if err := chrome.KillAllResources(); err != nil {
-				logger.LogFatal("Failed to kill all resources: %v", err)
+				logs.Fatal("Failed to kill all resources: %v", err)
 			}
-			logger.LogInfo("Successfully killed all Chrome processes")
+			logs.Info("Successfully killed all Chrome processes")
 		} else {
-			logger.LogInfo("Killing all Dialtone Chrome instances...")
+			logs.Info("Killing all Dialtone Chrome instances...")
 			if err := chrome.KillDialtoneResources(); err != nil {
-				logger.LogFatal("Failed to kill Dialtone resources: %v", err)
+				logs.Fatal("Failed to kill Dialtone resources: %v", err)
 			}
-			logger.LogInfo("Successfully killed Dialtone Chrome processes")
+			logs.Info("Successfully killed Dialtone Chrome processes")
 		}
 		return
 	}
@@ -257,10 +257,10 @@ func handleKill(arg string, isWindows, totalAll bool) {
 	var pid int
 	fmt.Sscanf(arg, "%d", &pid)
 	if pid == 0 {
-		logger.LogFatal("Invalid PID: %s", arg)
+		logs.Fatal("Invalid PID: %s", arg)
 	}
 
-	logger.LogInfo("Killing Chrome process PID %d...", pid)
+	logs.Info("Killing Chrome process PID %d...", pid)
 
 	// Auto-detect isWindows if not provided
 	if !isWindows {
@@ -274,13 +274,13 @@ func handleKill(arg string, isWindows, totalAll bool) {
 	}
 
 	if err := chrome.KillResource(pid, isWindows); err != nil {
-		logger.LogFatal("Failed to kill resource: %v", err)
+		logs.Fatal("Failed to kill resource: %v", err)
 	}
-	logger.LogInfo("Successfully killed process %d", pid)
+	logs.Info("Successfully killed process %d", pid)
 }
 
 func handleNew(port int, gpu bool, headless bool, targetURL, role string, reuseExisting, debug bool) {
-	logger.LogInfo("Launching new %s Chrome instance...", func() string {
+	logs.Info("Launching new %s Chrome instance...", func() string {
 		if headless {
 			return "headless"
 		}
@@ -300,7 +300,7 @@ func handleNew(port int, gpu bool, headless bool, targetURL, role string, reuseE
 		ReuseExisting: reuseExisting,
 	})
 	if err != nil {
-		logger.LogFatal("Failed to launch Chrome: %v", err)
+		logs.Fatal("Failed to launch Chrome: %v", err)
 	}
 
 	fmt.Println("\n🚀 Chrome started successfully!")
@@ -309,7 +309,7 @@ func handleNew(port int, gpu bool, headless bool, targetURL, role string, reuseE
 	fmt.Printf("%-15s: %s\n", "WebSocket URL", res.WebSocketURL)
 	fmt.Printf("%-15s: %t\n", "Reused", !res.IsNew)
 	fmt.Println()
-	logger.LogInfo("You can now connect to this instance using the WebSocket URL.")
+	logs.Info("You can now connect to this instance using the WebSocket URL.")
 }
 
 func printChromeUsage() {

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import { VisualizationControl } from '../../../../../../../plugins/ui/types';
+import { VisualizationControl } from '../../../../../../../plugins/ui/src_v1/ui/types';
 import { DagStageCamera, DagCameraView } from './camera';
 
 type NodeID = string;
@@ -48,8 +48,8 @@ type LayerSnapshot = {
 
 type ProjectedPoint = { ok: boolean; x: number; y: number };
 type CameraView = DagCameraView;
-type ThumbMode = 'graph' | 'layer' | 'camera';
-type ThumbActionID =
+type FormMode = 'graph' | 'layer' | 'camera';
+type FormActionID =
   | 'back'
   | 'add'
   | 'link_or_unlink'
@@ -66,7 +66,7 @@ type ThumbActionID =
   | 'toggle_labels'
   | 'focus'
   | 'none';
-type ThumbActionDef = { id: ThumbActionID; label: string };
+type FormActionDef = { id: FormActionID; label: string };
 type NestedLink = {
   parentNodeId: NodeID;
   childNodeId: NodeID;
@@ -124,13 +124,13 @@ class ThreeControl implements VisualizationControl {
   private renameInput: HTMLInputElement | null = null;
   private renameApplyButton: HTMLButtonElement | null = null;
   private modeButton: HTMLButtonElement | null = null;
-  private thumbButtons: HTMLButtonElement[] = [];
-  private thumbMode: ThumbMode = 'graph';
+  private formButtons: HTMLButtonElement[] = [];
+  private formMode: FormMode = 'graph';
   private chatlogHost: HTMLElement | null = null;
   private chatlogTerm: Terminal | null = null;
   private chatlogLines: string[] = [];
-  private readonly modeOrder: ThumbMode[] = ['graph', 'layer', 'camera'];
-  private readonly modeLabels: Record<ThumbMode, string> = {
+  private readonly modeOrder: FormMode[] = ['graph', 'layer', 'camera'];
+  private readonly modeLabels: Record<FormMode, string> = {
     graph: 'Mode: Build',
     layer: 'Mode: Layer',
     camera: 'Mode: View',
@@ -414,15 +414,15 @@ class ThreeControl implements VisualizationControl {
   };
 
   private initMobileUI() {
-    this.thumbButtons = [
-      this.container.querySelector("button[aria-label='DAG Thumb 1']"),
-      this.container.querySelector("button[aria-label='DAG Thumb 2']"),
-      this.container.querySelector("button[aria-label='DAG Thumb 3']"),
-      this.container.querySelector("button[aria-label='DAG Thumb 4']"),
-      this.container.querySelector("button[aria-label='DAG Thumb 5']"),
-      this.container.querySelector("button[aria-label='DAG Thumb 6']"),
-      this.container.querySelector("button[aria-label='DAG Thumb 7']"),
-      this.container.querySelector("button[aria-label='DAG Thumb 8']"),
+    this.formButtons = [
+      this.container.querySelector("button[aria-label='DAG Form 1']"),
+      this.container.querySelector("button[aria-label='DAG Form 2']"),
+      this.container.querySelector("button[aria-label='DAG Form 3']"),
+      this.container.querySelector("button[aria-label='DAG Form 4']"),
+      this.container.querySelector("button[aria-label='DAG Form 5']"),
+      this.container.querySelector("button[aria-label='DAG Form 6']"),
+      this.container.querySelector("button[aria-label='DAG Form 7']"),
+      this.container.querySelector("button[aria-label='DAG Form 8']"),
     ].filter((el): el is HTMLButtonElement => !!el);
     this.modeButton = this.container.querySelector("button[aria-label='DAG Mode']");
     this.nodeHistoryLabelEl = this.container.querySelector('.dag-history > h3');
@@ -445,14 +445,14 @@ class ThreeControl implements VisualizationControl {
       }
     })();
 
-    for (let i = 0; i < this.thumbButtons.length; i += 1) {
-      const button = this.thumbButtons[i];
+    for (let i = 0; i < this.formButtons.length; i += 1) {
+      const button = this.formButtons[i];
       button.addEventListener('click', () => {
-        this.runThumbActionBySlot(i);
+        this.runFormActionBySlot(i);
       });
     }
     this.modeButton?.addEventListener('click', () => {
-      this.cycleThumbMode();
+      this.cycleFormMode();
       this.syncControlState();
     });
     this.renameApplyButton?.addEventListener('click', () => this.applyRenameFromInput());
@@ -525,14 +525,14 @@ class ThreeControl implements VisualizationControl {
     return true;
   }
 
-  private cycleThumbMode() {
-    const idx = this.modeOrder.indexOf(this.thumbMode);
+  private cycleFormMode() {
+    const idx = this.modeOrder.indexOf(this.formMode);
     const next = this.modeOrder[(idx + 1) % this.modeOrder.length];
-    this.thumbMode = next;
+    this.formMode = next;
   }
 
-  private getThumbActionsForMode(): ThumbActionDef[] {
-    if (this.thumbMode === 'layer') {
+  private getFormActionsForMode(): FormActionDef[] {
+    if (this.formMode === 'layer') {
       return [
         { id: 'open_or_close_layer', label: this.getOpenCloseLayerActionLabel() },
         { id: 'add', label: 'Add' },
@@ -544,7 +544,7 @@ class ThreeControl implements VisualizationControl {
         { id: 'toggle_labels', label: this.labelsVisible ? 'Labels On' : 'Labels Off' },
       ];
     }
-    if (this.thumbMode === 'camera') {
+    if (this.formMode === 'camera') {
       return [
         { id: 'camera_top', label: 'Top' },
         { id: 'camera_iso', label: 'Iso' },
@@ -568,8 +568,8 @@ class ThreeControl implements VisualizationControl {
     ];
   }
 
-  private runThumbActionBySlot(slot: number) {
-    const action = this.getThumbActionsForMode()[slot];
+  private runFormActionBySlot(slot: number) {
+    const action = this.getFormActionsForMode()[slot];
     if (!action) return;
     const actionID = action.id;
     if (actionID === 'none') return;
@@ -822,10 +822,10 @@ class ThreeControl implements VisualizationControl {
     const hasPair = !!pair;
     const canOpenLayer = !!selectedNode && selectedNode.layerId === this.activeLayerId;
     const canRename = !!selectedNode;
-    const actions = this.getThumbActionsForMode();
+    const actions = this.getFormActionsForMode();
 
-    for (let i = 0; i < this.thumbButtons.length; i += 1) {
-      const button = this.thumbButtons[i];
+    for (let i = 0; i < this.formButtons.length; i += 1) {
+      const button = this.formButtons[i];
       const action = actions[i] || { id: 'none', label: '-' };
       let disabled = false;
       if (action.id === 'none') disabled = true;
@@ -852,8 +852,8 @@ class ThreeControl implements VisualizationControl {
     }
     if (this.renameApplyButton) this.renameApplyButton.disabled = !selectedNode;
     if (this.modeButton) {
-      this.modeButton.textContent = `9:${this.modeLabels[this.thumbMode]}`;
-      this.modeButton.setAttribute('data-mode', this.thumbMode);
+      this.modeButton.textContent = `9:${this.modeLabels[this.formMode]}`;
+      this.modeButton.setAttribute('data-mode', this.formMode);
     }
     for (let i = 0; i < this.nodeHistoryValueEls.length; i += 1) {
       this.nodeHistoryValueEls[i].textContent = this.recentSelectedNodeIDs[i] || 'none';
@@ -864,7 +864,7 @@ class ThreeControl implements VisualizationControl {
     this.canvas.setAttribute('data-labels-visible', String(this.labelsVisible));
     this.canvas.setAttribute('data-link-output', pair?.outputNodeId ?? '');
     this.canvas.setAttribute('data-link-input', pair?.inputNodeId ?? '');
-    this.canvas.setAttribute('data-thumb-mode', this.thumbMode);
+    this.canvas.setAttribute('data-form-mode', this.formMode);
   }
 
   private getCurrentLayerNumber(): number {

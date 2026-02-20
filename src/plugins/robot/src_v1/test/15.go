@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	test_v2 "dialtone/dev/plugins/test"
+	test_v2 "dialtone/dev/plugins/dag/src_v3/suite"
 )
 
 func Run15XtermSectionValidation(ctx *testCtx) (string, error) {

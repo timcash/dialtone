@@ -1,12 +1,12 @@
 package cli
 
 import (
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 )
 
 // Build handles the build steps for the AI plugin
 func Build() {
-	logger.LogInfo("AI Plugin: Building components...")
+	logs.Info("AI Plugin: Building components...")
 	// Future: build specific AI binaries if distinct from main build
-	logger.LogInfo("AI Plugin: Build complete.")
+	logs.Info("AI Plugin: Build complete.")
 }

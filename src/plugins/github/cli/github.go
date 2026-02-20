@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"dialtone/dev/config"
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 )
 
 var labelFlags = map[string]string{
@@ -46,7 +46,7 @@ func findGH() string {
 		return p
 	}
 
-	logger.LogFatal("GitHub CLI ('gh') not found. Please run './dialtone.sh github install' to install it.")
+	logs.Fatal("GitHub CLI ('gh') not found. Please run './dialtone.sh github install' to install it.")
 	return ""
 }
 
@@ -82,11 +82,11 @@ func runGithubInstall(args []string) {
 	ghBin := filepath.Join(ghDir, "bin", "gh")
 
 	if _, err := os.Stat(ghBin); err == nil {
-		logger.LogInfo("GitHub CLI is already installed at %s", ghBin)
+		logs.Info("GitHub CLI is already installed at %s", ghBin)
 		return
 	}
 
-	logger.LogInfo("Installing GitHub CLI...")
+	logs.Info("Installing GitHub CLI...")
 
 	// Use the core installer logic (abstracted via dialtone.sh for now)
 	// In a real scenario, we might want to call the internal go functions,
@@ -97,7 +97,7 @@ func runGithubInstall(args []string) {
 		return
 	}
 
-	logger.LogInfo("Triggering core installer for GitHub CLI...")
+	logs.Info("Triggering core installer for GitHub CLI...")
 	// We call the main install command but we could also implement minimal wget/tar here.
 	// For Dialtone, the standard is to let the core installer handle it to avoid fragmentation.
 	cmd = exec.Command("./dialtone.sh", "install")
@@ -105,10 +105,10 @@ func runGithubInstall(args []string) {
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		logger.LogFatal("Failed to install GitHub CLI: %v", err)
+		logs.Fatal("Failed to install GitHub CLI: %v", err)
 	}
 
-	logger.LogInfo("GitHub CLI installed successfully.")
+	logs.Info("GitHub CLI installed successfully.")
 }
 
 func printGithubUsage() {
@@ -123,7 +123,7 @@ func printGithubUsage() {
 // runMerge merges the current pull request
 func runMerge(args []string) {
 	gh := findGH()
-	logger.LogInfo("Merging pull request...")
+	logs.Info("Merging pull request...")
 
 	// Default args: merge current PR, use merge commit, delete branch
 	// We allow user args to override or append?
@@ -145,14 +145,14 @@ func runMerge(args []string) {
 	// gh pr merge might be interactive if not enough info/flags, but we inherit proper stdio so it should be fine.
 
 	if err := cmd.Run(); err != nil {
-		logger.LogFatal("Failed to merge PR: %v", err)
+		logs.Fatal("Failed to merge PR: %v", err)
 	}
-	logger.LogInfo("Pull request merged successfully.")
+	logs.Info("Pull request merged successfully.")
 }
 
 func runClose(args []string) {
 	gh := findGH()
-	logger.LogInfo("Closing pull request...")
+	logs.Info("Closing pull request...")
 
 	cmdArgs := []string{"pr", "close"}
 
@@ -172,9 +172,9 @@ func runClose(args []string) {
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		logger.LogFatal("Failed to close PR: %v", err)
+		logs.Fatal("Failed to close PR: %v", err)
 	}
-	logger.LogInfo("Pull request closed successfully.")
+	logs.Info("Pull request closed successfully.")
 }
 
 // runPullRequest handles the pull-request command
@@ -250,12 +250,12 @@ func runPullRequest(args []string) {
 	cmd := exec.Command("git", "branch", "--show-current")
 	output, err := cmd.Output()
 	if err != nil {
-		logger.LogFatal("Failed to get current branch: %v", err)
+		logs.Fatal("Failed to get current branch: %v", err)
 	}
 	branch := strings.TrimSpace(string(output))
 
 	if branch == "main" || branch == "master" {
-		logger.LogFatal("Cannot create PR from main/master branch. Create a feature branch first.")
+		logs.Fatal("Cannot create PR from main/master branch. Create a feature branch first.")
 	}
 
 	// Check if PR already exists
@@ -265,7 +265,7 @@ func runPullRequest(args []string) {
 
 	if !prExists {
 		// PR doesn't exist, create it
-		logger.LogInfo("Creating new pull request for branch: %s", branch)
+		logs.Info("Creating new pull request for branch: %s", branch)
 
 		var createArgs []string
 		createArgs = append(createArgs, "pr", "create")
@@ -298,11 +298,11 @@ func runPullRequest(args []string) {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			logger.LogFatal("Failed to create PR: %v", err)
+			logs.Fatal("Failed to create PR: %v", err)
 		}
 	} else {
 		// PR exists
-		logger.LogInfo("Pull request exists for branch: %s", branch)
+		logs.Info("Pull request exists for branch: %s", branch)
 
 		// If title or body provided, OR if ticket exists (to sync), update the PR
 		ticketFile := filepath.Join("tickets", branch, "ticket.md")
@@ -312,7 +312,7 @@ func runPullRequest(args []string) {
 		}
 
 		if title != "" || body != "" || (hasTicket && body == "") {
-			logger.LogInfo("Updating pull request...")
+			logs.Info("Updating pull request...")
 
 			var editArgs []string
 			editArgs = append(editArgs, "pr", "edit")
@@ -329,7 +329,7 @@ func runPullRequest(args []string) {
 				if err == nil {
 					editArgs = append(editArgs, "--body", string(content))
 				} else {
-					logger.LogInfo("Failed to read ticket file: %v", err)
+					logs.Info("Failed to read ticket file: %v", err)
 				}
 			}
 
@@ -337,21 +337,21 @@ func runPullRequest(args []string) {
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			if err := cmd.Run(); err != nil {
-				logger.LogFatal("Failed to update PR: %v", err)
+				logs.Fatal("Failed to update PR: %v", err)
 			}
-			logger.LogInfo("Pull request updated successfully")
+			logs.Info("Pull request updated successfully")
 		}
 
 		// Mark as ready for review if --ready flag
 		if ready {
-			logger.LogInfo("Marking pull request as ready for review...")
+			logs.Info("Marking pull request as ready for review...")
 			cmd = exec.Command(gh, "pr", "ready")
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			if err := cmd.Run(); err != nil {
-				logger.LogFatal("Failed to mark PR as ready: %v", err)
+				logs.Fatal("Failed to mark PR as ready: %v", err)
 			}
-			logger.LogInfo("Pull request is now ready for review")
+			logs.Info("Pull request is now ready for review")
 		}
 
 		// Show PR info
@@ -359,7 +359,7 @@ func runPullRequest(args []string) {
 
 		// Open in browser if --view flag
 		if view {
-			logger.LogInfo("Opening in browser...")
+			logs.Info("Opening in browser...")
 			cmd = exec.Command(gh, "pr", "view", "--web")
 			cmd.Run()
 		}
@@ -433,7 +433,7 @@ type GHLabel struct {
 
 func runIssueList(args []string) {
 	gh := findGH()
-	logger.LogInfo("Listing open issues...")
+	logs.Info("Listing open issues...")
 
 	useMarkdown := false
 	limit := 10
@@ -470,12 +470,12 @@ func runIssueList(args []string) {
 	cmd := exec.Command(gh, cmdArgs...)
 	output, err := cmd.Output()
 	if err != nil {
-		logger.LogFatal("Failed to list issues: %v", err)
+		logs.Fatal("Failed to list issues: %v", err)
 	}
 
 	var issues []GHInfo
 	if err := json.Unmarshal(output, &issues); err != nil {
-		logger.LogFatal("Failed to parse issues: %v", err)
+		logs.Fatal("Failed to parse issues: %v", err)
 	}
 
 	// Apply offset
@@ -519,7 +519,7 @@ func runIssueList(args []string) {
 
 func runIssueView(args []string) {
 	if len(args) < 1 {
-		logger.LogFatal("Usage: github issue view <issue-id>")
+		logs.Fatal("Usage: github issue view <issue-id>")
 
 	}
 	handleIssueDirect(args[0], args[1:])
@@ -536,7 +536,7 @@ func handleIssueDirect(issueNum string, args []string) {
 	}
 
 	if len(labelsToAdd) > 0 {
-		logger.LogInfo("Updating labels for issue #%s: %s", issueNum, strings.Join(labelsToAdd, ", "))
+		logs.Info("Updating labels for issue #%s: %s", issueNum, strings.Join(labelsToAdd, ", "))
 		cmdArgs := []string{"issue", "edit", issueNum}
 		for _, l := range labelsToAdd {
 			cmdArgs = append(cmdArgs, "--add-label", l)
@@ -545,7 +545,7 @@ func handleIssueDirect(issueNum string, args []string) {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			logger.LogFatal("Failed to update labels: %v", err)
+			logs.Fatal("Failed to update labels: %v", err)
 		}
 		return
 	}
@@ -555,13 +555,13 @@ func handleIssueDirect(issueNum string, args []string) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		logger.LogFatal("Failed to view issue: %v", err)
+		logs.Fatal("Failed to view issue: %v", err)
 	}
 }
 
 func runIssueEdit(args []string) {
 	if len(args) < 1 {
-		logger.LogFatal("Usage: ./dialtone.sh github issue edit <issue-id> [options]")
+		logs.Fatal("Usage: ./dialtone.sh github issue edit <issue-id> [options]")
 
 	}
 	issueNum := args[0]
@@ -595,20 +595,20 @@ func runIssueEdit(args []string) {
 	}
 
 	if !hasAction {
-		logger.LogFatal("No action provided for issue edit. Use --add-label, --remove-label, or a shortcut flag (--p0, --bug, etc.)")
+		logs.Fatal("No action provided for issue edit. Use --add-label, --remove-label, or a shortcut flag (--p0, --bug, etc.)")
 	}
 
 	cmd := exec.Command(gh, editArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		logger.LogFatal("Failed to edit issue: %v", err)
+		logs.Fatal("Failed to edit issue: %v", err)
 	}
 }
 
 func runIssueComment(args []string) {
 	if len(args) < 2 {
-		logger.LogFatal("Usage: github issue comment <issue-id> <message>")
+		logs.Fatal("Usage: github issue comment <issue-id> <message>")
 
 	}
 	gh := findGH()
@@ -616,59 +616,59 @@ func runIssueComment(args []string) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		logger.LogFatal("Failed to add comment: %v", err)
+		logs.Fatal("Failed to add comment: %v", err)
 	}
 }
 
 func runIssueClose(args []string) {
 	if len(args) == 0 {
-		logger.LogFatal("Usage: ./dialtone.sh github issue close <issue-id>...")
+		logs.Fatal("Usage: ./dialtone.sh github issue close <issue-id>...")
 
 	}
 
 	gh := findGH()
 	for _, num := range args {
-		logger.LogInfo("Closing issue #%s...", num)
+		logs.Info("Closing issue #%s...", num)
 		cmd := exec.Command(gh, "issue", "close", num)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			logger.LogError("Failed to close issue #%s: %v", num, err)
+			logs.Error("Failed to close issue #%s: %v", num, err)
 		}
 	}
 }
 
 func runIssueCloseAll(args []string) {
 	gh := findGH()
-	logger.LogInfo("Fetching all open issues...")
+	logs.Info("Fetching all open issues...")
 
 	cmd := exec.Command(gh, "issue", "list", "--json", "number", "--limit", "100")
 	output, err := cmd.Output()
 	if err != nil {
-		logger.LogFatal("Failed to fetch issues: %v", err)
+		logs.Fatal("Failed to fetch issues: %v", err)
 	}
 
 	var issues []GHInfo
 	if err := json.Unmarshal(output, &issues); err != nil {
-		logger.LogFatal("Failed to parse issues: %v", err)
+		logs.Fatal("Failed to parse issues: %v", err)
 	}
 
 	if len(issues) == 0 {
-		logger.LogInfo("No open issues found.")
+		logs.Info("No open issues found.")
 		return
 	}
 
-	logger.LogInfo("Closing %d open issues...", len(issues))
+	logs.Info("Closing %d open issues...", len(issues))
 	for _, issue := range issues {
-		logger.LogInfo("Closing issue #%d...", issue.Number)
+		logs.Info("Closing issue #%d...", issue.Number)
 		closeCmd := exec.Command(gh, "issue", "close", fmt.Sprintf("%d", issue.Number))
 		closeCmd.Stdout = os.Stdout
 		closeCmd.Stderr = os.Stderr
 		if err := closeCmd.Run(); err != nil {
-			logger.LogError("Failed to close issue #%d: %v", issue.Number, err)
+			logs.Error("Failed to close issue #%d: %v", issue.Number, err)
 		}
 	}
-	logger.LogInfo("All open issues closed.")
+	logs.Info("All open issues closed.")
 }
 
 func generateSlug(title string) string {

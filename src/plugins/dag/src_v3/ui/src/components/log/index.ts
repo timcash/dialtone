@@ -1,23 +1,23 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-import { VisualizationControl } from '../../../../../../../plugins/ui/types';
+import { VisualizationControl } from '../../../../../../../plugins/ui/src_v1/ui/types';
 
-type LogThumbMode = 'cursor' | 'select' | 'command';
+type LogFormMode = 'cursor' | 'select' | 'command';
 
 type CursorPos = {
   row: number;
   col: number;
 };
 
-type ThumbAction = {
+type FormAction = {
   label: string;
   aria: string;
   run: () => void | Promise<void>;
 };
 
-const modeOrder: LogThumbMode[] = ['cursor', 'select', 'command'];
-const modeLabel: Record<LogThumbMode, string> = {
+const modeOrder: LogFormMode[] = ['cursor', 'select', 'command'];
+const modeLabel: Record<LogFormMode, string> = {
   cursor: 'Mode: Cursor',
   select: 'Mode: Select',
   command: 'Mode: Command',
@@ -29,8 +29,8 @@ export function mountLog(container: HTMLElement): VisualizationControl {
   const inputEl = container.querySelector("input[aria-label='Log Command Input']") as HTMLInputElement | null;
   const submitBtn = container.querySelector("button[aria-label='Log Submit']") as HTMLButtonElement | null;
   const modeBtn = container.querySelector("button[aria-label='Log Mode']") as HTMLButtonElement | null;
-  const thumbButtons = Array.from(container.querySelectorAll("button[aria-label^='Log Thumb']")) as HTMLButtonElement[];
-  if (!terminalEl || !controlsEl || !inputEl || !submitBtn || !modeBtn || thumbButtons.length !== 8) {
+  const formButtons = Array.from(container.querySelectorAll("button[aria-label^='Log Form']")) as HTMLButtonElement[];
+  if (!terminalEl || !controlsEl || !inputEl || !submitBtn || !modeBtn || formButtons.length !== 8) {
     throw new Error('log terminal controls not found');
   }
 
@@ -58,7 +58,7 @@ export function mountLog(container: HTMLElement): VisualizationControl {
   let offset = 0;
   let polling = false;
   let backendState: 'unknown' | 'waiting' | 'connected' = 'unknown';
-  let mode: LogThumbMode = 'cursor';
+  let mode: LogFormMode = 'cursor';
   let cursor: CursorPos = { row: 0, col: 0 };
   let selectionAnchor: CursorPos | null = null;
 
@@ -88,7 +88,7 @@ export function mountLog(container: HTMLElement): VisualizationControl {
   const applyCursorAttrs = () => {
     terminalEl.setAttribute('data-cursor-row', String(cursor.row));
     terminalEl.setAttribute('data-cursor-col', String(cursor.col));
-    terminalEl.setAttribute('data-thumb-mode', mode);
+    terminalEl.setAttribute('data-form-mode', mode);
     terminalEl.setAttribute('data-selecting', selectionAnchor ? 'true' : 'false');
   };
 
@@ -156,7 +156,7 @@ export function mountLog(container: HTMLElement): VisualizationControl {
     selectionAnchor = { ...cursor };
     mode = 'select';
     paintSelection();
-    renderThumbs();
+    renderForms();
   };
 
   const copySelection = async () => {
@@ -184,7 +184,7 @@ export function mountLog(container: HTMLElement): VisualizationControl {
       selectionAnchor = null;
       term.clearSelection();
     }
-    renderThumbs();
+    renderForms();
     paintCursor();
   };
 
@@ -201,8 +201,8 @@ export function mountLog(container: HTMLElement): VisualizationControl {
     paintCursor();
   };
 
-  const renderThumbs = () => {
-    const actionsByMode: Record<LogThumbMode, ThumbAction[]> = {
+  const renderForms = () => {
+    const actionsByMode: Record<LogFormMode, FormAction[]> = {
       cursor: [
         { label: 'Left', aria: 'Log Left', run: () => moveCursor(-1, 0, false) },
         { label: 'Right', aria: 'Log Right', run: () => moveCursor(1, 0, false) },
@@ -225,7 +225,7 @@ export function mountLog(container: HTMLElement): VisualizationControl {
           run: () => {
             mode = 'cursor';
             clearSelection();
-            renderThumbs();
+            renderForms();
           },
         },
         { label: 'Copy', aria: 'Log Copy', run: () => void copySelection() },
@@ -235,7 +235,7 @@ export function mountLog(container: HTMLElement): VisualizationControl {
           run: () => {
             mode = 'cursor';
             clearSelection();
-            renderThumbs();
+            renderForms();
           },
         },
       ],
@@ -259,9 +259,9 @@ export function mountLog(container: HTMLElement): VisualizationControl {
     };
 
     const actions = actionsByMode[mode];
-    for (let i = 0; i < thumbButtons.length; i += 1) {
+    for (let i = 0; i < formButtons.length; i += 1) {
       const action = actions[i];
-      const button = thumbButtons[i];
+      const button = formButtons[i];
       button.textContent = `${i + 1}:${action.label}`;
       button.setAttribute('aria-label', action.aria);
       button.onclick = () => {
@@ -344,7 +344,7 @@ export function mountLog(container: HTMLElement): VisualizationControl {
   const onResize = () => safeFit();
   window.addEventListener('resize', onResize);
 
-  renderThumbs();
+  renderForms();
   cursor = clampPos({ row: maxRow(), col: lineLength(maxRow()) });
   paintCursor();
   queueMicrotask(safeFit);
@@ -358,7 +358,7 @@ export function mountLog(container: HTMLElement): VisualizationControl {
       submitBtn.removeEventListener('click', submitInput);
       controlsEl.removeEventListener('submit', onFormSubmit);
       inputEl.removeEventListener('keydown', onInputKeyDown);
-      for (const button of thumbButtons) {
+      for (const button of formButtons) {
         button.onclick = null;
       }
       term.dispose();

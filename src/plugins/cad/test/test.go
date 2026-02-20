@@ -2,7 +2,7 @@ package test
 
 import (
 	"bytes"
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 	"dialtone/dev/test_core"
 	"dialtone/dev/plugins/cad/app"
 	"encoding/json"
@@ -18,7 +18,7 @@ func init() {
 
 // RunAll is the standard entry point required by project rules.
 func RunAll() error {
-	logger.LogInfo("Running cad plugin suite...")
+	logs.Info("Running cad plugin suite...")
 	return test.RunPlugin("cad")
 }
 

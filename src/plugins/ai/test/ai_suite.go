@@ -5,7 +5,7 @@ import (
 	"os"
 	"os/exec"
 
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 	"dialtone/dev/test_core"
 )
 
@@ -16,7 +16,7 @@ func init() {
 
 // RunAll is the standard entry point required by project rules.
 func RunAll() error {
-	logger.LogInfo("Running AI Plugin suite...")
+	logs.Info("Running AI Plugin suite...")
 	return test.RunTicket("ai")
 }
 

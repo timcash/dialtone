@@ -1,7 +1,7 @@
 package test
 
 import (
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 	"dialtone/dev/test_core"
 	"fmt"
 )
@@ -14,7 +14,7 @@ func init() {
 // RunAll is the standard entry point required by project rules.
 // It uses the registry to find and run all tests for this plugin.
 func RunAll() error {
-	logger.LogInfo("Running diagnostic plugin suite...")
+	logs.Info("Running diagnostic plugin suite...")
 	return test.RunPlugin("diagnostic")
 }
 

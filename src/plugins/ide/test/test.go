@@ -1,7 +1,7 @@
 package test
 
 import (
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 	"dialtone/dev/test_core"
 	"fmt"
 	"os"
@@ -15,13 +15,13 @@ func init() {
 
 // RunAll is the standard entry point required by project rules.
 func RunAll() error {
-	logger.LogInfo("Running ide plugin suite...")
+	logs.Info("Running ide plugin suite...")
 	return test.RunPlugin("ide")
 }
 
 func RunIDESetupModeVerify() error {
 	// 1. Verify Symlink Mode
-	logger.LogInfo("Testing symlink mode...")
+	logs.Info("Testing symlink mode...")
 	cmd := exec.Command("./dialtone.sh", "ide", "setup-workflows", "--symlink")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("FAIL: setup-workflows --symlink failed: %v", err)
@@ -31,7 +31,7 @@ func RunIDESetupModeVerify() error {
 	}
 
 	// 2. Verify Copy Mode
-	logger.LogInfo("Testing copy mode...")
+	logs.Info("Testing copy mode...")
 	cmd = exec.Command("./dialtone.sh", "ide", "setup-workflows", "--copy")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("FAIL: setup-workflows --copy failed: %v", err)

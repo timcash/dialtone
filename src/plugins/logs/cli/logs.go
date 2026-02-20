@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 	"dialtone/dev/ssh"
 )
 
@@ -45,24 +45,24 @@ func RunLogs(args []string) {
 
 	if *remote {
 		if *host == "" || *pass == "" {
-			logger.LogFatal("Error: --host and --pass are required for remote logs")
+			logs.Fatal("Error: --host and --pass are required for remote logs")
 		}
 
 		runRemoteLogs(*host, *port, *user, *pass, *lines)
 	} else {
 		// Local logs (placeholder for now, or maybe just tell user to check locally)
-		logger.LogInfo("Looking for local logs...")
+		logs.Info("Looking for local logs...")
 		// Assuming local logs might be in a standard place or stdout if running locally
 		fmt.Println("Local log streaming is not yet implemented. Use --remote to view robot logs.")
 	}
 }
 
 func runRemoteLogs(host, port, user, pass string, lines int) {
-	logger.LogInfo("Connecting to %s to stream logs...", host)
+	logs.Info("Connecting to %s to stream logs...", host)
 
 	client, err := ssh.DialSSH(host, port, user, pass)
 	if err != nil {
-		logger.LogFatal("SSH connection failed: %v", err)
+		logs.Fatal("SSH connection failed: %v", err)
 	}
 	defer client.Close()
 
@@ -71,10 +71,10 @@ func runRemoteLogs(host, port, user, pass string, lines int) {
 	var cmd string
 	if lines > 0 {
 		cmd = fmt.Sprintf("tail -n %d ~/nats.log", lines)
-		logger.LogInfo("Getting last %d lines from ~/nats.log...", lines)
+		logs.Info("Getting last %d lines from ~/nats.log...", lines)
 	} else {
 		cmd = "tail -f ~/nats.log"
-		logger.LogInfo("Streaming logs from ~/nats.log...")
+		logs.Info("Streaming logs from ~/nats.log...")
 	}
 
 	// Use RunSSHCommand but we actually want to stream it.
@@ -83,7 +83,7 @@ func runRemoteLogs(host, port, user, pass string, lines int) {
 
 	session, err := client.NewSession()
 	if err != nil {
-		logger.LogFatal("Failed to create SSH session: %v", err)
+		logs.Fatal("Failed to create SSH session: %v", err)
 	}
 	defer session.Close()
 
@@ -94,7 +94,7 @@ func runRemoteLogs(host, port, user, pass string, lines int) {
 		// Ignore error if it's just a signal kill (which happens when user Ctrl+C)
 		// But for -n, it should exit cleanly.
 		if lines > 0 {
-			logger.LogFatal("Command failed: %v", err)
+			logs.Fatal("Command failed: %v", err)
 		}
 	}
 }

@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"dialtone/dev/logger"
-	test_v2 "dialtone/dev/plugins/test"
+	"dialtone/dev/plugins/logs/src_v1/go"
+	test_v2 "dialtone/dev/plugins/dag/src_v3/suite"
 	"github.com/chromedp/chromedp"
 )
 
@@ -20,7 +20,7 @@ const (
 )
 
 func RunDiagnostic(versionDir string) error {
-	logger.LogInfo("Running diagnostic for Robot UI on %s...", versionDir)
+	logs.Info("Running diagnostic for Robot UI on %s...", versionDir)
 
 	hostname := os.Getenv("DIALTONE_HOSTNAME")
 	robotIP := os.Getenv("ROBOT_HOST")
@@ -30,7 +30,7 @@ func RunDiagnostic(versionDir string) error {
 	}
 	
 	if hostname == "" {
-		logger.LogFatal("Neither DIALTONE_HOSTNAME nor ROBOT_HOST environment variable is set. Cannot run diagnostic.")
+		logs.Fatal("Neither DIALTONE_HOSTNAME nor ROBOT_HOST environment variable is set. Cannot run diagnostic.")
 	}
 
 	// Use IP for diagnostic if provided, to avoid DNS/MagicDNS issues during testing
@@ -40,41 +40,41 @@ func RunDiagnostic(versionDir string) error {
 	// Perform connectivity checks
 	// 1. Basic Ping Check (LAN IP)
 	if robotIP != "" {
-		logger.LogInfo("[DIAGNOSTIC] Step 1: Pinging LAN IP %s...", robotIP)
+		logs.Info("[DIAGNOSTIC] Step 1: Pinging LAN IP %s...", robotIP)
 		pingCmd := exec.Command("ping", "-c", "2", "-W", "1", robotIP)
 		if err := pingCmd.Run(); err != nil {
-			logger.LogWarn("Ping to LAN IP %s failed.", robotIP)
+			logs.Warn("Ping to LAN IP %s failed.", robotIP)
 		} else {
-			logger.LogInfo("Ping to LAN IP %s successful.", robotIP)
+			logs.Info("Ping to LAN IP %s successful.", robotIP)
 		}
 	}
 
 	// 2. HTTP Health Check (LAN IP on port 8080)
 	if robotIP != "" {
 		lanURL := fmt.Sprintf("http://%s:8080", robotIP)
-		logger.LogInfo("[DIAGNOSTIC] Step 2: Verifying LAN Web Server on %s...", lanURL)
+		logs.Info("[DIAGNOSTIC] Step 2: Verifying LAN Web Server on %s...", lanURL)
 		if err := checkHealth(lanURL); err != nil {
-			logger.LogWarn("LAN health check failed (port 8080): %v", err)
+			logs.Warn("LAN health check failed (port 8080): %v", err)
 		} else {
-			logger.LogInfo("LAN health check PASSED (port 8080).")
+			logs.Info("LAN health check PASSED (port 8080).")
 		}
 	}
 
 	// 3. HTTP Health Check (Tailscale Hostname on port 80)
 	tsURL := fmt.Sprintf("http://%s", hostname)
-	logger.LogInfo("[DIAGNOSTIC] Step 3: Verifying Tailscale Web Server on %s...", tsURL)
+	logs.Info("[DIAGNOSTIC] Step 3: Verifying Tailscale Web Server on %s...", tsURL)
 	if err := checkHealth(tsURL); err != nil {
-		logger.LogWarn("Tailscale health check failed (port 80): %v. (MagicDNS might still be propagating)", err)
+		logs.Warn("Tailscale health check failed (port 80): %v. (MagicDNS might still be propagating)", err)
 		// If we have an IP and LAN check passed, we can proceed using the LAN URL for UI tests
 		if robotIP != "" {
 			diagTarget = robotIP
 			diagPort = "8080"
-			logger.LogInfo("[DIAGNOSTIC] Proceeding with UI tests via LAN IP: %s:8080", robotIP)
+			logs.Info("[DIAGNOSTIC] Proceeding with UI tests via LAN IP: %s:8080", robotIP)
 		} else {
 			return fmt.Errorf("Tailscale health check failed and no LAN IP available: %w", err)
 		}
 	} else {
-		logger.LogInfo("Tailscale health check PASSED (port 80).")
+		logs.Info("Tailscale health check PASSED (port 80).")
 		diagTarget = hostname
 		diagPort = "80"
 	}
@@ -82,7 +82,7 @@ func RunDiagnostic(versionDir string) error {
 	targetURL := fmt.Sprintf("http://%s:%s", diagTarget, diagPort)
 	
 	// 4. Browser-based UI Validation
-	logger.LogInfo("[DIAGNOSTIC] Step 4: Starting browser for UI validation on %s...", targetURL)
+	logs.Info("[DIAGNOSTIC] Step 4: Starting browser for UI validation on %s...", targetURL)
 	session, err := test_v2.StartBrowser(test_v2.BrowserOptions{
 		Headless:      true,
 		Role:          "diagnostic",
@@ -107,14 +107,14 @@ func RunDiagnostic(versionDir string) error {
 		chromedp.Title(&title),
 		chromedp.OuterHTML("html", &html),
 	}); err == nil {
-		logger.LogInfo("[DIAGNOSTIC] Page Title: %s", title)
+		logs.Info("[DIAGNOSTIC] Page Title: %s", title)
 		if len(html) > 500 {
-			logger.LogDebug("[DIAGNOSTIC] HTML Sample: %s", html[:500])
+			logs.Debug("[DIAGNOSTIC] HTML Sample: %s", html[:500])
 		} else {
-			logger.LogDebug("[DIAGNOSTIC] HTML: %s", html)
+			logs.Debug("[DIAGNOSTIC] HTML: %s", html)
 		}
 	} else {
-		logger.LogWarn("[DIAGNOSTIC] Failed to get page content: %v", err)
+		logs.Warn("[DIAGNOSTIC] Failed to get page content: %v", err)
 	}
 
 	repoRoot, _ := os.Getwd()
@@ -190,7 +190,7 @@ func RunDiagnostic(versionDir string) error {
 				}
 
 				// Wait for live data (non-0.0 values or non-default text)
-				logger.LogInfo("[DIAGNOSTIC] Waiting for live telemetry in HUD...")
+				logs.Info("[DIAGNOSTIC] Waiting for live telemetry in HUD...")
 				var alt, spd, mode string
 				for i := 0; i < 10; i++ {
 					if err := session.RunWithContext(ctx, chromedp.Tasks{
@@ -203,14 +203,14 @@ func RunDiagnostic(versionDir string) error {
 					// In mock mode or real flight, these should change.
 					// We just check they aren't empty or stuck at initial placeholders if possible.
 					if alt != "" && mode != "STABILIZE" { // MODE changes to GUIDED in mock
-						logger.LogInfo("[DIAGNOSTIC] Live Telemetry detected: ALT=%s, MODE=%s", alt, mode)
+						logs.Info("[DIAGNOSTIC] Live Telemetry detected: ALT=%s, MODE=%s", alt, mode)
 						break
 					}
 					time.Sleep(1 * time.Second)
 				}
 
 				// Test Command Button (ARM)
-				logger.LogInfo("[DIAGNOSTIC] Testing ARM button...")
+				logs.Info("[DIAGNOSTIC] Testing ARM button...")
 				if err := session.RunWithContext(ctx, chromedp.Click("#three-arm", chromedp.ByID)); err != nil {
 					return fmt.Errorf("failed to click ARM button: %w", err)
 				}
@@ -242,7 +242,7 @@ func RunDiagnostic(versionDir string) error {
 
 	for i, step := range steps {
 		timeout := 15 * time.Second
-		logger.LogInfo("[DIAGNOSTIC] Step %d: %s (Timeout: %v)...", i+1, step.name, timeout)
+		logs.Info("[DIAGNOSTIC] Step %d: %s (Timeout: %v)...", i+1, step.name, timeout)
 		
 		// Create a context with timeout for this step
 		stepCtx, stepCancel := context.WithTimeout(session.Context(), timeout)
@@ -252,26 +252,26 @@ func RunDiagnostic(versionDir string) error {
 		screenshotPath := filepath.Join(screenshotsDir, fmt.Sprintf("diagnostic_step_%d_%s.png", i+1, step.sectionID))
 
 		if err != nil {
-			logger.LogError("Diagnostic step '%s' FAILED: %v", step.name, err)
+			logs.Error("Diagnostic step '%s' FAILED: %v", step.name, err)
 			// Capture a screenshot of the failure state before exiting
 			if shotErr := session.CaptureScreenshot(screenshotPath); shotErr != nil {
-				logger.LogWarn("Failed to capture failure screenshot for '%s': %v", step.name, shotErr)
+				logs.Warn("Failed to capture failure screenshot for '%s': %v", step.name, shotErr)
 			} else {
-				logger.LogInfo("Failure screenshot saved: %s", screenshotPath)
+				logs.Info("Failure screenshot saved: %s", screenshotPath)
 			}
 			return fmt.Errorf("diagnostic step '%s' failed: %w", step.name, err)
 		}
 
-		logger.LogInfo("Diagnostic step '%s' PASSED.", step.name)
+		logs.Info("Diagnostic step '%s' PASSED.", step.name)
 
 		if shotErr := session.CaptureScreenshot(screenshotPath); shotErr != nil {
-			logger.LogWarn("Failed to capture screenshot for '%s': %v", step.name, shotErr)
+			logs.Warn("Failed to capture screenshot for '%s': %v", step.name, shotErr)
 		} else {
-			logger.LogInfo("Screenshot saved: %s", screenshotPath)
+			logs.Info("Screenshot saved: %s", screenshotPath)
 		}
 	}
 
-	logger.LogInfo("Robot UI diagnostic completed successfully.")
+	logs.Info("Robot UI diagnostic completed successfully.")
 	return nil
 }
 

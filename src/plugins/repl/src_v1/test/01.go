@@ -21,6 +21,7 @@ func Run01Startup(ctx *testCtx) (string, error) {
 		"`@DIALTONE dev install`",
 		"### Plugins",
 		"`@DIALTONE robot install src_v1`",
+		"`@DIALTONE dag install src_v3`",
 		"### System",
 		"`<any command>`",
 		"USER-1> exit",

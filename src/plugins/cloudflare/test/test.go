@@ -2,7 +2,7 @@ package test
 
 import (
 	"dialtone/dev/config"
-	"dialtone/dev/logger"
+	"dialtone/dev/plugins/logs/src_v1/go"
 	"dialtone/dev/test_core"
 	"fmt"
 	"os"
@@ -18,7 +18,7 @@ func init() {
 
 // RunAll is the standard entry point required by project rules.
 func RunAll() error {
-	logger.LogInfo("Running cloudflare plugin suite...")
+	logs.Info("Running cloudflare plugin suite...")
 	return test.RunPlugin("cloudflare")
 }
 
