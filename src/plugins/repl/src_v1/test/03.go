@@ -7,7 +7,7 @@ import (
 
 func Run03RobotInstall(ctx *testCtx) (string, error) {
 	// Send robot install and exit
-	input := "@DIALTONE robot install src_v1\nexit\n"
+	input := "robot install src_v1\nexit\n"
 	output, err := ctx.runREPL(input)
 	if err != nil {
 		return output, fmt.Errorf("robot install failed: %w", err)
@@ -15,8 +15,9 @@ func Run03RobotInstall(ctx *testCtx) (string, error) {
 
 	required := []string{
 		"Request received. Spawning subtone for robot install...",
-		">> [Robot] Install: src_v1",
-		">> [Robot] Install complete: src_v1",
+		"bun install",
+		"Process", // ensure process exit is logged
+		"exited with code 0",
 	}
 
 	for _, s := range required {

@@ -2,14 +2,22 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
+	"time"
 )
 
 type testCtx struct {
 	repoRoot string
+	cmd      *exec.Cmd
+	stdin    io.WriteCloser
+	stdout   bytes.Buffer // Stores cumulative output
+	mu       sync.Mutex
 }
 
 func newTestCtx() *testCtx {
@@ -29,6 +37,7 @@ func newTestCtx() *testCtx {
 	return &testCtx{repoRoot: root}
 }
 
+// runREPL runs the REPL in one-shot mode (legacy)
 func (ctx *testCtx) runREPL(input string) (string, error) {
 	cmd := exec.Command(filepath.Join(ctx.repoRoot, "dialtone.sh"))
 	cmd.Dir = ctx.repoRoot
@@ -51,6 +60,63 @@ func (ctx *testCtx) runREPL(input string) (string, error) {
 	
 	err = cmd.Wait()
 	return stdout.String(), err
+}
+
+// StartREPL launches the REPL in background for interactive testing
+func (ctx *testCtx) StartREPL() error {
+	ctx.cmd = exec.Command(filepath.Join(ctx.repoRoot, "dialtone.sh"))
+	ctx.cmd.Dir = ctx.repoRoot
+	
+	var err error
+	ctx.stdin, err = ctx.cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	
+	// Capture stdout/stderr to buffer
+	ctx.cmd.Stdout = &ctx.stdout
+	ctx.cmd.Stderr = &ctx.stdout
+	
+	return ctx.cmd.Start()
+}
+
+func (ctx *testCtx) SendInput(input string) error {
+	if ctx.stdin == nil {
+		return fmt.Errorf("REPL not started")
+	}
+	_, err := io.WriteString(ctx.stdin, input+"\n")
+	return err
+}
+
+func (ctx *testCtx) Close() error {
+	if ctx.cmd != nil && ctx.cmd.Process != nil {
+		_ = ctx.cmd.Process.Kill()
+	}
+	return nil
+}
+
+func (ctx *testCtx) WaitForOutput(pattern string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		ctx.mu.Lock()
+		output := ctx.stdout.String()
+		ctx.mu.Unlock()
+		
+		if strings.Contains(output, pattern) {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	
+	// Helper for debug: print last 200 chars
+	ctx.mu.Lock()
+	out := ctx.stdout.String()
+	ctx.mu.Unlock()
+	if len(out) > 500 {
+		out = "..." + out[len(out)-500:]
+	}
+	
+	return fmt.Errorf("timeout waiting for %q. Output ends with: %q", pattern, out)
 }
 
 func (ctx *testCtx) runDirect(args ...string) (string, error) {
