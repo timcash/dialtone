@@ -17,7 +17,62 @@ To start an LLM agent on a specific task without interrupting your current works
     - It launches the LLM agent inside that `tmux` session, pointed at the specific task file.
 4.  **Monitor/Attach**: You can continue working in your main directory. To check on the agent, run `tmux attach -t fix-navigation`.
 
-## Implementation Research
+## Usage
+
+### Interactive REPL
+
+Start the REPL with `./dialtone.sh` and use the following commands:
+
+-   **Add Worktree**:
+    ```bash
+    USER-1> worktree add <name> [--task <file>] [--branch <branch>]
+    ```
+    *Creates a new worktree at `../<name>` and a detached tmux session named `<name>`.*
+
+-   **List Worktrees**:
+    ```bash
+    USER-1> worktree list
+    ```
+    *Lists active git worktrees and tmux sessions. Check the generated log file for output.*
+
+-   **Remove Worktree**:
+    ```bash
+    USER-1> worktree remove <name>
+    ```
+    *Removes the worktree directory and kills the associated tmux session.*
+
+### Command Line Interface (CLI)
+
+You can also use the plugin directly from the shell:
+
+```bash
+./dialtone.sh worktree <command> [args...]
+```
+
+#### Commands
+
+*   `add <name> [--task <file>] [--branch <branch>]`
+    Creates a worktree and tmux session.
+    *   `--task`: Path to a markdown file describing the task (copied to worktree root).
+    *   `--branch`: Specify a custom branch name (defaults to worktree name).
+
+*   `remove <name>`
+    Cleans up the worktree folder and kills the tmux session.
+
+*   `list`
+    Displays active worktrees and sessions.
+
+*   `test`
+    Runs the plugin verification suite.
+
+#### Example
+
+```bash
+./dialtone.sh worktree add feature-login --task ticket-123.md
+tmux attach -t feature-login
+```
+
+## Implementation Details
 
 ### Tmux Orchestration
 The repository already contains a `.tmux.conf`, indicating that `tmux` is a standard part of the environment. 
@@ -33,9 +88,3 @@ Following the pattern in `src/plugins/test/src_v1`:
 - **CLI/REPL Integration**: Implement a command handler that parses `--task` and the worktree name.
 - **Process Management**: Use `context` and `os/exec` to manage the lifecycle of the worktree creation and the initial `tmux` launch.
 - **Task Isolation**: The `task.md` should be either copied into the worktree root or symlinked to ensure the agent has a clear, isolated source of truth for its objectives.
-
-## Proposed REPL Commands
-
-- `worktree add <name> [--task <file>] [--branch <branch>]`: Create a new worktree and start an agent session.
-- `worktree list`: Show active agent worktrees and their tmux session status.
-- `worktree remove <name>`: Clean up the worktree and kill the associated tmux session.
