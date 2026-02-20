@@ -21,7 +21,7 @@ func RunSuiteV1() {
 		{
 			Name:           "02 Interaction Test",
 			RunWithContext: wrapRun(ctx, Run02InteractionTest),
-			Screenshots:    []string{"screenshots/02_interacted.png"},
+			Screenshots:    []string{"screenshots/02_pre_interaction.png", "screenshots/02_interacted.png"},
 		},
 	}
 

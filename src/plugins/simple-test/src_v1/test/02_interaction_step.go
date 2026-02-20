@@ -12,6 +12,11 @@ func Run02InteractionTest(ctx *testCtx) (string, error) {
 		return "", err
 	}
 
+	// Capture pre-interaction state
+	if err := ctx.captureShot("02_pre_interaction.png"); err != nil {
+		return "", err
+	}
+
 	// Click the interaction button
 	if err := b.Run(test_v2.ClickAriaLabel("Simple Interaction Button")); err != nil {
 		return "", err
