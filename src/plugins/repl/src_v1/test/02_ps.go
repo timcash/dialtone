@@ -6,11 +6,14 @@ import (
 )
 
 func Run02Ps(ctx *testCtx) (string, error) {
+	ctx.SetTimeout(30 * time.Second)
+	
 	// Interactive REPL test
 	if err := ctx.StartREPL(); err != nil {
 		return "", fmt.Errorf("failed to start REPL: %w", err)
 	}
-	defer ctx.Close()
+	// Cleanup on exit (kills REPL)
+	defer ctx.Cleanup()
 
 	// Wait for prompt
 	if err := ctx.WaitForOutput("USER-1>", 5*time.Second); err != nil {
@@ -43,10 +46,21 @@ func Run02Ps(ctx *testCtx) (string, error) {
 	}
 
 	// 6. Verify logs exist for the sleep command
-	// We expect logs with "subtone-" prefix containing "Command: [proc sleep 10]"
 	if err := ctx.WaitForLogEntry("subtone-", "Command: [proc sleep 10]", 10*time.Second); err != nil {
 		return "", fmt.Errorf("failed to find sleep command in logs: %w", err)
 	}
+	
+	// 7. Poll ps for cleanup
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := ctx.SendInput("ps"); err != nil {
+			return "", err
+		}
+		if err := ctx.WaitForOutput("No active subtones", 2*time.Second); err == nil {
+			return "Verified ps listed active subtones and confirmed cleanup.", nil
+		}
+		time.Sleep(1 * time.Second)
+	}
 
-	return "Verified ps listed active subtones and confirmed logs.", nil
+	return "", fmt.Errorf("timed out waiting for subtones to cleanup")
 }
