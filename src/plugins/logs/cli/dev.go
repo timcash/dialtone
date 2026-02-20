@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 	chrome_app "dialtone/dev/plugins/chrome/app"
 	"fmt"
 	"io"
@@ -15,9 +14,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"github.com/chromedp/cdproto/emulation"
-	"github.com/chromedp/chromedp"
 )
 
 func RunDev(versionDir string) error {
@@ -52,7 +48,7 @@ func RunDev(versionDir string) error {
 		return err
 	}
 
-	if err := test_v2.WaitForPort(devPort, 600*time.Millisecond); err == nil {
+	if err := waitForPort(devPort, 600*time.Millisecond); err == nil {
 		matched, probeErr := devServerMatchesVersion(devPort, uiTitle)
 		if probeErr != nil {
 			return fmt.Errorf("port %d is in use and could not verify existing dev server: %w", devPort, probeErr)
@@ -75,7 +71,7 @@ func RunDev(versionDir string) error {
 
 	var (
 		mu            sync.Mutex
-		session       *test_v2.BrowserSession
+		session       *logsDevBrowserSession
 		browserBooted bool
 		restartID     int
 	)
@@ -91,7 +87,7 @@ func RunDev(versionDir string) error {
 		}
 
 		go func(attempt int) {
-			if err := test_v2.WaitForPort(devPort, 30*time.Second); err != nil {
+			if err := waitForPort(devPort, 30*time.Second); err != nil {
 				logf("   [DEV] Warning: vite server not ready on port %d: %v", devPort, err)
 				return
 			}
@@ -158,7 +154,18 @@ func RunDev(versionDir string) error {
 	}
 }
 
-func startLogsDevBrowser(logOut io.Writer, devURL, devBrowserMetaPath string) (*test_v2.BrowserSession, error) {
+type logsDevBrowserSession struct {
+	session *chrome_app.Session
+}
+
+func (s *logsDevBrowserSession) Close() {
+	if s == nil || s.session == nil {
+		return
+	}
+	_ = chrome_app.CleanupSession(s.session)
+}
+
+func startLogsDevBrowser(logOut io.Writer, devURL, devBrowserMetaPath string) (*logsDevBrowserSession, error) {
 	logf := func(format string, args ...any) {
 		fmt.Fprintf(logOut, format+"\n", args...)
 	}
@@ -177,44 +184,33 @@ func startLogsDevBrowser(logOut io.Writer, devURL, devBrowserMetaPath string) (*
 		logf("   [DEV] Starting attachable debug-profile browser session (set LOGS_DEV_BROWSER_MODE=regular to disable).")
 	}
 
-	s, err := test_v2.StartBrowser(test_v2.BrowserOptions{
+	s, err := chrome_app.StartSession(chrome_app.SessionOptions{
 		Headless:      false,
 		Role:          "logs-dev",
 		ReuseExisting: true,
-		URL:           devURL,
-		LogWriter:     logOut,
-		LogPrefix:     "   [BROWSER]",
+		TargetURL:     devURL,
+		GPU:           true,
 	})
 	if err != nil {
 		logf("   [DEV] Warning: reuse attach failed, launching fresh dev browser: %v", err)
-		s, err = test_v2.StartBrowser(test_v2.BrowserOptions{
+		s, err = chrome_app.StartSession(chrome_app.SessionOptions{
 			Headless:      false,
 			Role:          "logs-dev",
 			ReuseExisting: false,
-			URL:           devURL,
-			LogWriter:     logOut,
-			LogPrefix:     "   [BROWSER]",
+			TargetURL:     devURL,
+			GPU:           true,
 		})
 		if err != nil {
 			return nil, err
 		}
 	}
-	if err := chrome_app.WriteSessionMetadata(devBrowserMetaPath, s.ChromeSession()); err != nil {
+	if err := chrome_app.WriteSessionMetadata(devBrowserMetaPath, s); err != nil {
 		logf("   [DEV] Warning: failed to write browser metadata: %v", err)
-	} else if meta := chrome_app.BuildSessionMetadata(s.ChromeSession()); meta != nil {
+	} else if meta := chrome_app.BuildSessionMetadata(s); meta != nil {
 		logf("   [DEV] Browser PID=%d", meta.PID)
 	}
-	// Optional: mobile emulation like DAG
-	if err := chromedp.Run(s.Context(), chromedp.Tasks{
-		chromedp.EmulateViewport(393, 852, chromedp.EmulateScale(3)),
-		emulation.SetDeviceMetricsOverride(393, 852, 3, true),
-		emulation.SetTouchEmulationEnabled(true),
-	}); err != nil {
-		logf("   [DEV] Warning: failed to apply mobile emulation: %v", err)
-	} else {
-		logf("   [DEV] Applied mobile emulation: iPhone 14 Pro (393x852 @3x)")
-	}
-	return s, nil
+	logf("   [DEV] Browser session ready (PID=%d).", s.PID)
+	return &logsDevBrowserSession{session: s}, nil
 }
 
 func openInRegularChrome(url string) error {
@@ -229,4 +225,3 @@ func openInRegularChrome(url string) error {
 		return fmt.Errorf("unsupported OS for regular browser open: %s", runtime.GOOS)
 	}
 }
-

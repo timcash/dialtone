@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"dialtone/dev/plugins/logs/src_v1/go"
-	"dialtone/dev/ssh"
+	"dialtone/dev/plugins/ssh/src_v1/go"
 )
 
 // RunLogs handles the logs command
