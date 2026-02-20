@@ -41,12 +41,12 @@ func Run02Ps(ctx *testCtx) (string, error) {
 	}
 
 	// 5. Verify ps lists the processes
-	if err := ctx.WaitForOutput("[proc sleep 10]", 5*time.Second); err != nil {
+	if err := ctx.WaitForOutput("[proc sleep 2]", 5*time.Second); err != nil {
 		return "", err
 	}
 
 	// 6. Verify logs exist for the sleep command
-	if err := ctx.WaitForLogEntry("subtone-", "Command: [proc sleep 10]", 10*time.Second); err != nil {
+	if err := ctx.WaitForLogEntry("subtone-", "Command: [proc sleep 2]", 10*time.Second); err != nil {
 		return "", fmt.Errorf("failed to find sleep command in logs: %w", err)
 	}
 	

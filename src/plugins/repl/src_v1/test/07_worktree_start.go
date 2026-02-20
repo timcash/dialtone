@@ -32,6 +32,8 @@ func Run07WorktreeStart(ctx *testCtx) (string, error) {
 	// 0. Ensure clean state via REPL
 	ctx.SendInput("worktree remove " + worktreeName)
 	// Ignore output/error, just best effort.
+	time.Sleep(1 * time.Second)
+	ctx.ClearOutput()
 
 	// 1. Run worktree start
 	// We use the agent_test task file we created.
@@ -54,10 +56,21 @@ func Run07WorktreeStart(ctx *testCtx) (string, error) {
 	
 	// However, `worktree start` itself prints "[Worktree] Launching Gemini Agent..." to stdout.
 	// This stdout is captured by `RunSubtone` and logged to file.
-	// So we can check the logs for "[Worktree] Launching Gemini Agent".
+	
+	// Wait for start to ensure PID is available
+	if err := ctx.WaitForOutput("Started at", 5*time.Second); err != nil {
+		return "", err
+	}
+	
+	pid, err := ctx.ExtractLastSubtonePID()
+	if err != nil {
+		return "", fmt.Errorf("failed to get pid: %w", err)
+	}
+	logPattern := fmt.Sprintf("subtone-%s-", pid)
 
-	if err := ctx.WaitForLogEntry("subtone-", "[Worktree] Launching Gemini Agent", 20*time.Second); err != nil {
-		return "", fmt.Errorf("failed to find agent launch log: %w", err)
+	// So we can check the logs for "[Worktree] Launching Gemini Agent".
+	if err := ctx.WaitForLogEntry(logPattern, "[Worktree] Launching Gemini Agent", 20*time.Second); err != nil {
+		return "", fmt.Errorf("failed to find agent launch log in %s: %w", logPattern, err)
 	}
 
 	// 3. Verify side effects

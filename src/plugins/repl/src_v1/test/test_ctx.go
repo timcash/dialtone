@@ -159,6 +159,36 @@ func (ctx *testCtx) WaitForLogEntry(logPattern, contentPattern string, timeout t
 	return fmt.Errorf("timeout waiting for log pattern %q containing %q", logPattern, contentPattern)
 }
 
+func (ctx *testCtx) ExtractLastSubtonePID() (string, error) {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	output := ctx.stdout.String()
+	
+	// Look for DIALTONE:(\d+)> Started
+	// We want the last one
+	lines := strings.Split(output, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		if strings.Contains(line, "> Started at") {
+			// Format: DIALTONE:12345> Started at ...
+			parts := strings.Split(line, ">")
+			if len(parts) > 0 {
+				prefix := parts[0] // DIALTONE:12345
+				if strings.HasPrefix(prefix, "DIALTONE:") {
+					return strings.TrimPrefix(prefix, "DIALTONE:"), nil
+				}
+			}
+		}
+	}
+	return "", fmt.Errorf("no subtone start found")
+}
+
+func (ctx *testCtx) ClearOutput() {
+	ctx.mu.Lock()
+	ctx.stdout.Reset()
+	ctx.mu.Unlock()
+}
+
 func (ctx *testCtx) runDirect(args ...string) (string, error) {
 	cmd := exec.Command(filepath.Join(ctx.repoRoot, "dialtone.sh"), args...)
 	cmd.Dir = ctx.repoRoot
