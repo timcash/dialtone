@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -29,6 +30,12 @@ func main() {
 		fmt.Printf("Sleeping for %v...\n", duration)
 		time.Sleep(duration)
 		fmt.Println("Sleep complete.")
+	case "emit":
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: proc emit <line>")
+			return
+		}
+		fmt.Println(strings.Join(os.Args[2:], " "))
 	default:
 		fmt.Printf("Unknown proc command: %s\n", cmd)
 	}
