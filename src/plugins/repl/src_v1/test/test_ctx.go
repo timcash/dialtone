@@ -20,6 +20,7 @@ type testCtx struct {
 	stdin    io.WriteCloser
 	stdout   *bytes.Buffer
 	mu       sync.Mutex
+	timeout  time.Duration
 }
 
 func newTestCtx() *testCtx {
@@ -36,7 +37,18 @@ func newTestCtx() *testCtx {
 		}
 		root = parent
 	}
-	return &testCtx{repoRoot: root}
+	return &testCtx{repoRoot: root, timeout: 30 * time.Second}
+}
+
+func (ctx *testCtx) SetTimeout(d time.Duration) {
+	ctx.timeout = d
+}
+
+// Cleanup ensures REPL process is killed and subtones are waited for/killed.
+func (ctx *testCtx) Cleanup() {
+	ctx.Close()
+	// Best effort cleanup of any lingering dialtone processes
+	_ = test_v2.WaitForAllProcessesToComplete(ctx.repoRoot, 5*time.Second)
 }
 
 // runREPL runs the REPL in one-shot mode (legacy)

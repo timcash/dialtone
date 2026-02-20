@@ -9,19 +9,18 @@ import (
 )
 
 func Run06Worktree(ctx *testCtx) (string, error) {
+	ctx.SetTimeout(30 * time.Second)
+
 	// Clean up potential leftovers from previous runs
 	worktreePath := filepath.Join(filepath.Dir(ctx.repoRoot), "test-agent")
 	_ = os.RemoveAll(worktreePath)
-	// Also prune git worktree metadata if needed?
-	// If the folder is gone, 'git worktree add' might still complain if git thinks it exists.
-	// We should run 'git worktree prune' too.
 	exec.Command("git", "-C", ctx.repoRoot, "worktree", "prune").Run()
 
 	// Interactive REPL test for Worktree plugin
 	if err := ctx.StartREPL(); err != nil {
 		return "", fmt.Errorf("failed to start REPL: %w", err)
 	}
-	defer ctx.Close()
+	defer ctx.Cleanup()
 
 	// Wait for prompt
 	if err := ctx.WaitForOutput("USER-1>", 5*time.Second); err != nil {

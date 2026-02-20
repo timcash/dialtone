@@ -100,6 +100,13 @@ func main() {
 		fmt.Printf("Running %s...\n", s.Name)
 		output, err := s.Run()
 		
+		if err != nil {
+			fmt.Printf("%s FAILED: %v\n", s.Name, err)
+			ctx.Cleanup()
+		} else {
+			fmt.Printf("%s PASSED\n", s.Name)
+		}
+		
 		fmt.Fprintf(f, "# %s\n\n", s.Name)
 		
 		fmt.Fprintf(f, "### Files\n")
@@ -120,12 +127,6 @@ func main() {
 			fmt.Fprintf(f, "ERROR: %v\n", err)
 		}
 		fmt.Fprintf(f, "```\n\n")
-		
-		if err != nil {
-			fmt.Printf("%s FAILED: %v\n", s.Name, err)
-		} else {
-			fmt.Printf("%s PASSED\n", s.Name)
-		}
 	}
 	
 	fmt.Printf("Report written to %s\n", reportPath)
