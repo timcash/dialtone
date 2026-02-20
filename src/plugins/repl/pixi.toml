@@ -1,8 +1,0 @@
-[workspace]
-name = "dialtone-repl-plugin"
-channels = ["conda-forge"]
-platforms = ["linux-64"]
-
-[dependencies]
-
-[tasks]
