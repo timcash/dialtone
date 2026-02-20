@@ -67,8 +67,10 @@ Use versioned stream syntax:
 `./dialtone.sh logs stream src_v1 --stream logs.>`
 
 Examples:
+- `./dialtone.sh logs stream src_v1 --topic '*'`
 - `./dialtone.sh logs stream src_v1 --stream logs.error.topic`
 - `./dialtone.sh logs stream src_v1 --stream logs.> --nats-url nats://127.0.0.1:4222`
+- `./dialtone.sh logs stream src_v1 --topic '*' --embedded`
 
 ### 6. File writing via listener
 
