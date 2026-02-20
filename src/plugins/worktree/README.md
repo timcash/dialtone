@@ -68,3 +68,5 @@ From REPL (`./dialtone.sh`):
 ## Test
 - 2026-02-20T19:59:26Z | result=PASS | model=gemini-2.5-flash | input=0 output=0 total=0 | estimated_cost_usd=0.000000 | note=ok
 - 2026-02-20T20:00:28Z | result=PASS | model=gemini-2.5-flash | input=0 output=0 total=0 | estimated_cost_usd=0.000000 | note=ok
+- 2026-02-20T20:02:21Z | result=PASS | model=gemini-2.5-flash | input=0 output=0 total=0 | estimated_cost_usd=0.000000 | note=ok
+- 2026-02-20T20:04:09Z | result=PASS | model=gemini-2.5-flash | input=111139 output=855 total=112676 | estimated_cost_usd=0.035479 | note=ok

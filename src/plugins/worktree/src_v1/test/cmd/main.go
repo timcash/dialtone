@@ -133,6 +133,7 @@ func runE2E(repoRoot string) (runResult, error) {
 		return runResult{}, fmt.Errorf("verify-done: %w", err)
 	}
 
+	_ = waitForUsageStats(logPath, 20*time.Second)
 	usage := parseUsageStats(logPath)
 
 	fmt.Println("Step 7: remove")
@@ -213,6 +214,21 @@ func parseUsageStats(logPath string) usageStats {
 		total = input + output
 	}
 	return usageStats{InputTokens: input, OutputTokens: output, TotalTokens: total}
+}
+
+func waitForUsageStats(logPath string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(logPath)
+		if err == nil {
+			text := string(data)
+			if strings.Contains(text, `"input_tokens"`) || strings.Contains(text, `"output_tokens"`) || strings.Contains(text, `"total_tokens"`) {
+				return nil
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout waiting for usage stats in %s", logPath)
 }
 
 func lastIntMatch(text string, re *regexp.Regexp) int {
