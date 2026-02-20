@@ -31,7 +31,7 @@ export class SectionManager {
     return this.activeSectionId;
   }
 
-  setLoadingMessage(sectionId: string, message: string): void {
+  setLoadingMessage(_sectionId: string, message: string): void {
     if (!this.loadingEl) return;
     const span = this.loadingEl.querySelector('span');
     if (span) span.textContent = message;
@@ -94,7 +94,8 @@ export class SectionManager {
       this.syncOverlayActivity(sectionId);
       this.applyHeader(this.configs.get(sectionId)?.header);
       const ctl = this.controls.get(sectionId);
-      if (ctl && !(this.resumed.get(sectionId) ?? false)) {
+      const alreadyResumed = this.resumed.get(sectionId) ?? false;
+      if (ctl && !alreadyResumed) {
         await this.waitForLayout();
         ctl.setVisible(true);
         this.resumed.set(sectionId, true);
@@ -181,7 +182,7 @@ export class SectionManager {
       primaryEl.setAttribute('data-overlay-section', sectionId);
       overlays.primary = primaryEl;
     }
-    const modeFormSelector = selectors.modeForm ?? selectors.thumb;
+    const modeFormSelector = selectors.form ?? selectors.modeForm ?? selectors.thumb;
     const modeFormEl = modeFormSelector ? section.querySelector(modeFormSelector) : null;
     if (modeFormEl instanceof HTMLElement) {
       modeFormEl.setAttribute('data-overlay', 'mode-form');

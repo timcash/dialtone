@@ -70,7 +70,7 @@ func newTestCtx() *testCtx {
 const (
 	mobileViewportWidth  = 390
 	mobileViewportHeight = 844
-	mobileScaleFactor    = 2
+	mobileScaleFactor    = 1
 )
 
 func (t *testCtx) ensureSharedServer() error {

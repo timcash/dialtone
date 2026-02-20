@@ -12,6 +12,7 @@ func RunSuiteV3() {
 	ctx := newTestCtx()
 	defer ctx.teardown()
 	steps := []test_v2.Step{
+		{Name: "00 Reset Workspace", RunWithContext: wrapRun(ctx, Run00Reset)},
 		{Name: "01 DuckDB Graph Query Validation", RunWithContext: wrapRun(ctx, Run01DuckDBGraphQueries)},
 		{Name: "02 Preflight (Go/UI)", RunWithContext: wrapRun(ctx, Run01Preflight)},
 		{Name: "03 Startup: No Backend Menu -> Stage", RunWithContext: wrapRun(ctx, Run02NoBackendMenuToStage), SectionID: "dag-3d-stage", Screenshots: []string{"screenshots/test_step_no_backend_menu_stage_pre.png", "screenshots/test_step_no_backend_menu_stage.png"}, ScreenshotGrid: "screenshots/test_step_no_backend_menu_stage_grid.png", Timeout: 40 * time.Second},

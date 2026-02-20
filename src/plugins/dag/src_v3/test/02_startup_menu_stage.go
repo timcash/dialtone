@@ -15,6 +15,16 @@ func Run02StartupMenuToStageFresh(ctx *testCtx) (string, error) {
 		return "", fmt.Errorf("backend startup wait failed: %w", err)
 	}
 	ctx.logf("LOOKING FOR: navigation to %s", ctx.appURL("/"))
+
+	_ = ctx.runEval(`(() => {
+		const h = document.querySelector('[aria-label="App Header"]');
+		if (h) h.setAttribute('data-boot', 'false');
+		window.sessionStorage.clear();
+		return true;
+	})()`, nil)
+
+	_ = ctx.navigate("about:blank")
+	time.Sleep(500 * time.Millisecond)
 	if err := ctx.navigate(ctx.appURL("/")); err != nil {
 		ctx.appendThought("startup nav: first navigate failed, retrying once after short wait")
 		time.Sleep(500 * time.Millisecond)
@@ -26,6 +36,11 @@ func Run02StartupMenuToStageFresh(ctx *testCtx) (string, error) {
 	ctx.logf("LOOKING FOR: App Header data-boot=true")
 	if err := ctx.waitAriaAttrEquals("App Header", "data-boot", "true", "wait for app boot", 30*time.Second); err != nil {
 		_ = ctx.captureShot("timeout_boot_step4.png")
+		return "", err
+	}
+
+	ctx.logf("LOOKING FOR: dag-meta-table data-ready=true")
+	if err := ctx.waitAriaAttrEquals("DAG Table Section", "data-ready", "true", "wait for initial section ready", 10*time.Second); err != nil {
 		return "", err
 	}
 

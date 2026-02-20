@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,10 +10,62 @@ import (
 )
 
 func RunBun(args []string) {
-	// ... (no changes to RunBun)
+	if len(args) == 0 {
+		printUsage()
+		return
+	}
+
+	command := args[0]
+	switch command {
+	case "help", "-h", "--help":
+		printUsage()
+	case "install":
+		runInstall(args[1:])
+	case "exec":
+		runExec(args[1:])
+	case "version":
+		runVersion()
+	default:
+		// Default to exec if command is unknown? 
+		// Actually, let's just use exec for everything else if it looks like a bun arg
+		runExec(args)
+	}
 }
 
-// ... (no changes to other functions until runExec)
+func printUsage() {
+	fmt.Println("Usage: ./dialtone.sh bun <command> [args]")
+	fmt.Println()
+	fmt.Println("Commands:")
+	fmt.Println("  install              Install dependencies (bun install)")
+	fmt.Println("  exec [--cwd <dir>]   Run bun command in directory")
+	fmt.Println("  version              Print bun version")
+}
+
+func runInstall(args []string) {
+	depsDir := logs.GetDialtoneEnv()
+	bunBin := filepath.Join(depsDir, "bun", "bin", "bun")
+	
+	cwd, bunArgs := extractCwd(args)
+	
+	cmd := exec.Command(bunBin, append([]string{"install"}, bunArgs...)...)
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func runVersion() {
+	depsDir := logs.GetDialtoneEnv()
+	bunBin := filepath.Join(depsDir, "bun", "bin", "bun")
+	cmd := exec.Command(bunBin, "--version")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	_ = cmd.Run()
+}
 
 func runExec(args []string) {
 	if len(args) == 0 {

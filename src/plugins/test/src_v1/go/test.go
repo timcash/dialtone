@@ -110,10 +110,10 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 		switch ev := ev.(type) {
 		case *runtime.EventConsoleAPICalled:
 			for _, arg := range ev.Args {
-				logs.Info("   [BROWSER CONSOLE] %s: %s", ev.Type, arg.Value)
+				logs.Info("   [BROWSER CONSOLE | PID %d] %s: %s", session.PID, ev.Type, arg.Value)
 			}
 		case *runtime.EventExceptionThrown:
-			logs.Error("   [BROWSER EXCEPTION] %s", ev.ExceptionDetails.Text)
+			logs.Error("   [BROWSER EXCEPTION | PID %d] %s", session.PID, ev.ExceptionDetails.Text)
 		}
 	})
 	
@@ -142,6 +142,20 @@ type StepResult struct {
 }
 
 func RunSuite(opts SuiteOptions, steps []Step) error {
+	if opts.LogPath != "" {
+		// Truncate and open log file
+		f, err := os.OpenFile(opts.LogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		if err == nil {
+			mw := io.MultiWriter(os.Stdout, f)
+			logs.SetOutput(mw)
+			defer f.Close()
+		}
+	}
+	if opts.ErrorLogPath != "" {
+		// Truncate error log
+		_ = os.WriteFile(opts.ErrorLogPath, []byte(""), 0644)
+	}
+
 	logs.Info("Starting Test Suite: %s", opts.Version)
 	
 	startTime := time.Now()

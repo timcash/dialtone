@@ -29,6 +29,7 @@ func main() {
 		filepath.Join(cwd, "ui", "dist"),
 		filepath.Join(cwd, "src", "plugins", "dag", "src_v3", "ui", "dist"),
 		filepath.Join(cwd, "plugins", "dag", "src_v3", "ui", "dist"),
+		filepath.Join(cwd, "..", "ui", "dist"),
 	}
 	uiPath := ""
 	for _, c := range candidates {
@@ -38,7 +39,12 @@ func main() {
 		}
 	}
 	if uiPath == "" {
-		uiPath = filepath.Join(cwd, "ui", "dist") // default fallback
+		// Try one more if we are running from src
+		if filepath.Base(cwd) == "src" {
+			uiPath = filepath.Join(cwd, "plugins", "dag", "src_v3", "ui", "dist")
+		} else {
+			uiPath = filepath.Join(cwd, "ui", "dist")
+		}
 	}
 
 	dbPath := resolveDBPath(cwd)
@@ -100,13 +106,17 @@ func main() {
 func resolveDBPath(cwd string) string {
 	candidates := []string{
 		filepath.Join(cwd, "test", "test.duckdb"),
-		filepath.Join(cwd, "plugins", "dag", "src_v3", "suite", "test.duckdb"),
-		filepath.Join(cwd, "src", "plugins", "dag", "src_v3", "suite", "test.duckdb"),
+		filepath.Join(cwd, "plugins", "dag", "src_v3", "test", "test.duckdb"),
+		filepath.Join(cwd, "src", "plugins", "dag", "src_v3", "test", "test.duckdb"),
 	}
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {
 			return c
 		}
+	}
+	// Try relative from cmd
+	if base := filepath.Dir(cwd); strings.HasSuffix(base, "src_v3") {
+		return filepath.Join(base, "test", "test.duckdb")
 	}
 	return filepath.Join(cwd, "test.duckdb")
 }
@@ -114,13 +124,17 @@ func resolveDBPath(cwd string) string {
 func resolveTestLogPath(cwd string) string {
 	candidates := []string{
 		filepath.Join(cwd, "test", "test.log"),
-		filepath.Join(cwd, "plugins", "dag", "src_v3", "suite", "test.log"),
-		filepath.Join(cwd, "src", "plugins", "dag", "src_v3", "suite", "test.log"),
+		filepath.Join(cwd, "plugins", "dag", "src_v3", "test", "test.log"),
+		filepath.Join(cwd, "src", "plugins", "dag", "src_v3", "test", "test.log"),
 	}
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {
 			return c
 		}
+	}
+	// Try relative from cmd
+	if base := filepath.Dir(cwd); strings.HasSuffix(base, "src_v3") {
+		return filepath.Join(base, "test", "test.log")
 	}
 	return filepath.Join(cwd, "test.log")
 }
