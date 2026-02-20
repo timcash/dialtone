@@ -22,5 +22,9 @@ func Run01UITest(ctx *testCtx) (string, error) {
 		return "", err
 	}
 
+	if err := ctx.captureShot("01_ui_loaded.png"); err != nil {
+		return "", err
+	}
+
 	return "Verified 'Simple Three Section' loaded and became data-ready=true.", nil
 }

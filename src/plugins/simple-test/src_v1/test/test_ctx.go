@@ -94,3 +94,18 @@ func (t *testCtx) teardown() {
 		t.sharedBrowser = nil
 	}
 }
+
+func (t *testCtx) captureShot(file string) error {
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return err
+	}
+	shot := filepath.Join(repoRoot, "src", "plugins", "simple-test", "src_v1", "test", "screenshots", file)
+	// Ensure screenshots dir exists
+	_ = os.MkdirAll(filepath.Dir(shot), 0755)
+	
+	if t.sharedBrowser == nil {
+		return fmt.Errorf("no browser session")
+	}
+	return t.sharedBrowser.CaptureScreenshot(shot)
+}
