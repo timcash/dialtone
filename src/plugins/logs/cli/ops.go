@@ -1,7 +1,6 @@
 package cli
 
 import (
-	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 	chrome_app "dialtone/dev/plugins/chrome/app"
 	"encoding/json"
 	"fmt"
@@ -98,56 +97,29 @@ func RunTest(versionDir string, attach bool, cps int) error {
 	if err != nil {
 		return err
 	}
-
-	allowOpenBrowser := !attach
-	devSession, err := ensureDevServerAndHeadedBrowser(cwd, versionDir, allowOpenBrowser)
-	if err != nil {
-		return err
+	repoRoot := cwd
+	if filepath.Base(repoRoot) == "src" {
+		repoRoot = filepath.Dir(repoRoot)
 	}
-	if attach {
-		attachURL := fmt.Sprintf("http://127.0.0.1:%d/#logs-log-xterm", devSession.port)
-		if err := ensureAttachableLogsDevBrowser(attachURL); err != nil {
-			return err
-		}
-	}
-	fmt.Printf(">> [LOGS] Test: leaving dev preview running at http://127.0.0.1:%d after test completion\n", devSession.port)
-
-	testPkg := "./" + filepath.ToSlash(filepath.Join("src", "plugins", "logs", versionDir, "test"))
-	testMain := filepath.Join(cwd, "src", "plugins", "logs", versionDir, "test", "main.go")
+	testPkg := "./" + filepath.ToSlash(filepath.Join("plugins", "logs", versionDir, "test"))
+	testMain := filepath.Join(repoRoot, "src", "plugins", "logs", versionDir, "test", "main.go")
 	if _, err := os.Stat(testMain); os.IsNotExist(err) {
 		return fmt.Errorf("test runner not found: %s/main.go", testPkg)
 	}
 
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "run", testPkg)
-	cmd.Dir = cwd
+	if attach {
+		fmt.Println(">> [LOGS] Test: --attach is ignored for infra tests.")
+	}
+	if cps != 3 {
+		fmt.Printf(">> [LOGS] Test: --cps=%d ignored for infra tests.\n", cps)
+	}
+
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "go", "exec", "run", testPkg)
+	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	baseURL := "http://127.0.0.1:8080"
-	devBaseURL := fmt.Sprintf("http://127.0.0.1:%d", devSession.port)
-	if attach {
-		baseURL = devBaseURL
-	}
-	cmd.Env = append(
-		os.Environ(),
-		"LOGS_TEST_ATTACH=0",
-		"LOGS_TEST_BASE_URL="+baseURL,
-		"LOGS_TEST_DEV_BASE_URL="+devBaseURL,
-		"LOGS_TEST_CPS="+strconv.Itoa(cps),
-	)
-	if attach {
-		cmd.Env = append(cmd.Env, "LOGS_TEST_ATTACH=1")
-		fmt.Printf(">> [LOGS] Test: attach mode enabled (reusing headed dev browser session)\n")
-	}
-	testErr := cmd.Run()
-
-	if _, err := ensureDevServerAndHeadedBrowser(cwd, versionDir, false); err != nil {
-		if testErr == nil {
-			return fmt.Errorf("tests finished, but failed to keep dev preview running: %w", err)
-		}
-		fmt.Printf(">> [LOGS] Test: warning: failed to restore dev preview after test error: %v\n", err)
-	}
-
-	return testErr
+	cmd.Env = os.Environ()
+	return cmd.Run()
 }
 
 type logsDevPreviewSession struct {
@@ -170,13 +142,13 @@ func ensureDevServerAndHeadedBrowser(repoRoot, versionDir string, allowOpenBrows
 
 	port := 3000
 	reuse := false
-	if err := test_v2.WaitForPort(port, 600*time.Millisecond); err == nil {
+	if err := waitForPort(port, 600*time.Millisecond); err == nil {
 		matched, probeErr := devServerMatchesVersion(port, targetTitle)
 		if probeErr == nil && matched {
 			reuse = true
 			fmt.Printf(">> [LOGS] Test: dev server already running for %s at http://127.0.0.1:%d\n", versionDir, port)
 		} else {
-			freePort, pickErr := test_v2.PickFreePort()
+			freePort, pickErr := pickFreePort()
 			if pickErr != nil {
 				return nil, fmt.Errorf("dev server on %d is not %s and no free port could be picked: %w", port, versionDir, pickErr)
 			}
@@ -190,7 +162,7 @@ func ensureDevServerAndHeadedBrowser(repoRoot, versionDir string, allowOpenBrows
 		if err := startDetachedLogsDevServer(repoRoot, versionDir, port); err != nil {
 			return nil, err
 		}
-		if err := test_v2.WaitForPort(port, 30*time.Second); err != nil {
+		if err := waitForPort(port, 30*time.Second); err != nil {
 			return nil, fmt.Errorf("logs dev server for %s did not become ready on :%d: %w", versionDir, port, err)
 		}
 		session.startedHere = true
