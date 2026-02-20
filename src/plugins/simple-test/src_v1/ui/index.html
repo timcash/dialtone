@@ -17,23 +17,31 @@
       </nav>
 
       <section id="simple-three-stage" aria-label="Simple Three Section" data-ready="false" data-interacted="false">
-        <canvas aria-label="Simple Canvas" class="overlay-primary"></canvas>
+        <canvas aria-label="Simple Canvas"></canvas>
         
-        <aside class="overlay-chatlog" aria-label="Simple Chatlog">
-          <div class="simple-chatlog-xterm" aria-label="Simple Chatlog Terminal"></div>
-        </aside>
-
-        <form class="overlay-form" aria-label="Simple Mode Form">
-          <button type="button" aria-label="Simple Interaction Button">Interact</button>
-          <input type="text" placeholder="Type message..." aria-label="Simple Input" />
-        </form>
-
-        <aside class="overlay-legend" aria-label="Simple Legend">
+        <aside class="simple-legend" aria-label="Simple Legend">
           <h3>Stats</h3>
           <div>Status: <span id="simple-status">Ready</span></div>
         </aside>
 
-        <footer class="overlay-status-bar" aria-label="Simple Status Bar">
+        <form aria-label="Simple Mode Form">
+          <div class="simple-chatlog" aria-label="Simple Chatlog">
+            <div class="simple-chatlog-xterm" aria-label="Simple Chatlog Terminal"></div>
+          </div>
+          <button type="button" aria-label="Simple Form 1">1:Reset</button>
+          <button type="button" aria-label="Simple Form 2">2:Add</button>
+          <button type="button" aria-label="Simple Form 3">3:Action</button>
+          <button type="button" aria-label="Simple Form 4">4:-</button>
+          <button type="button" aria-label="Simple Form 5">5:-</button>
+          <button type="button" aria-label="Simple Form 6">6:-</button>
+          <button type="button" aria-label="Simple Form 7">7:-</button>
+          <button type="button" aria-label="Simple Form 8">8:-</button>
+          <button type="button" aria-label="Simple Mode">9:Mode: Demo</button>
+          <input type="text" placeholder="Type message..." aria-label="Simple Input" />
+          <button type="button" aria-label="Simple Interaction Button">10:Interact</button>
+        </form>
+
+        <footer class="simple-status-bar" aria-label="Simple Status Bar">
           <span>Connected</span>
         </footer>
       </section>
