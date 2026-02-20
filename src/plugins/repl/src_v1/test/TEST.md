@@ -47,13 +47,13 @@ DIALTONE> Virtual Librarian online.
 Type 'help' for commands, or 'exit' to quit.
 USER-1> @DIALTONE dev install
 DIALTONE> Request received. Spawning subtone for dev install...
-DIALTONE> Spawning subtone subprocess via PID 53449...
-DIALTONE> Streaming stdout/stderr from subtone PID 53449.
-DIALTONE:53449> Installing latest Go runtime for managed ./dialtone.sh go commands...
-DIALTONE:53449> Go 1.26.0 already installed at /Users/dev/dialtone_dependencies/go/bin/go
-DIALTONE:53449> Bootstrap complete. Initializing dev.go scaffold...
-DIALTONE:53449> Ready. You can now run plugin commands (install/build/test) via DIALTONE.
-DIALTONE> Process 53449 exited with code 0.
+DIALTONE> Spawning subtone subprocess via PID 54346...
+DIALTONE> Streaming stdout/stderr from subtone PID 54346.
+DIALTONE:54346> Installing latest Go runtime for managed ./dialtone.sh go commands...
+DIALTONE:54346> Go 1.26.0 already installed at /Users/dev/dialtone_dependencies/go/bin/go
+DIALTONE:54346> Bootstrap complete. Initializing dev.go scaffold...
+DIALTONE:54346> Ready. You can now run plugin commands (install/build/test) via DIALTONE.
+DIALTONE> Process 54346 exited with code 0.
 USER-1> exit
 DIALTONE> Goodbye.
 
@@ -76,16 +76,16 @@ DIALTONE> Virtual Librarian online.
 Type 'help' for commands, or 'exit' to quit.
 USER-1> @DIALTONE robot install src_v1
 DIALTONE> Request received. Spawning subtone for robot install...
-DIALTONE> Spawning subtone subprocess via PID 53506...
-DIALTONE> Streaming stdout/stderr from subtone PID 53506.
-DIALTONE:53506> >> [Robot] Install: src_v1
-DIALTONE:53506> >> [Robot] Checking local prerequisites...
-DIALTONE:53506> >> [Robot] Installing UI dependencies (bun install)
-DIALTONE:53506> bun install v1.2.22 (6bafe260)
-DIALTONE:53506> 
-DIALTONE:53506> Checked 27 installs across 74 packages (no changes) [33.00ms]
-DIALTONE:53506> >> [Robot] Install complete: src_v1
-DIALTONE> Process 53506 exited with code 0.
+DIALTONE> Spawning subtone subprocess via PID 54404...
+DIALTONE> Streaming stdout/stderr from subtone PID 54404.
+DIALTONE:54404> >> [Robot] Install: src_v1
+DIALTONE:54404> >> [Robot] Checking local prerequisites...
+DIALTONE:54404> >> [Robot] Installing UI dependencies (bun install)
+DIALTONE:54404> bun install v1.2.22 (6bafe260)
+DIALTONE:54404> 
+DIALTONE:54404> Checked 27 installs across 74 packages (no changes) [29.00ms]
+DIALTONE:54404> >> [Robot] Install complete: src_v1
+DIALTONE> Process 54404 exited with code 0.
 USER-1> exit
 DIALTONE> Goodbye.
 
