@@ -23,126 +23,26 @@ A plugin node must be testable.
 | **3. Feature Plugins** | <span style="color:blue">█</span> Blue | Product/task-specific plugins |
 | **4. Artifacts** | <span style="color:green">█</span> Green | Build/runtime output artifacts |
 
-```mermaid
----
-config:
-  theme: dark
----
-flowchart LR
-    R0_DIALTONE[dialtone.sh]
-    R0_LOGS[logs]
-    R1_DEV[dev.go]
-    R1_TEST[test]
-    R2_PROC[proc]
-    R2_REPL[repl]
-    R2_UI[ui]
-    R2_SSH[ssh]
-    R2_GITHUB[github]
-    R2_GEMINI[gemini]
-    R2_WORKTREE[worktree]
-    R3_DAG[dag]
-    R3_ROBOT[robot]
-    R3_VPN[vpn]
-    R3_TEMPLATE[template]
-    R3_CLOUDFLARE[cloudflare]
-    R4_ROBOT_BIN[./robot]
+## Next DAG (Target)
 
-    %% Required foundation edges
-    R0_DIALTONE --> R1_DEV
-    R0_LOGS --> R1_DEV
-    R0_LOGS --> R1_TEST
+The target plugin dependency structure is maintained in a separate Mermaid file for planning and future state visualization.
 
-    %% Core plugin dependency expectations
-    R1_DEV --> R2_PROC
-    R1_DEV --> R2_REPL
-    R1_DEV --> R2_UI
-    R1_DEV --> R2_SSH
-    R1_DEV --> R2_GITHUB
-    R1_DEV --> R2_GEMINI
-    R1_DEV --> R2_WORKTREE
+- [Target DAG (Mermaid Source)](target.mermaid)
 
-    R0_LOGS --> R2_PROC
-    R0_LOGS --> R2_REPL
-    R0_LOGS --> R2_UI
-    R0_LOGS --> R2_SSH
-    R0_LOGS --> R2_GITHUB
-    R0_LOGS --> R2_GEMINI
-    R0_LOGS --> R2_WORKTREE
+## Current DAG (As Implemented)
 
-    R1_TEST --> R2_PROC
-    R1_TEST --> R2_REPL
-    R1_TEST --> R2_UI
-    R1_TEST --> R2_SSH
-    R1_TEST --> R2_GITHUB
-    R1_TEST --> R2_GEMINI
-    R1_TEST --> R2_WORKTREE
+The current plugin dependency structure is maintained in a separate Mermaid file for better version control and visualization.
 
-    %% Worktree runtime dependency
-    R2_GEMINI --> R2_WORKTREE
-
-    %% Feature plugin dependency expectations
-    R2_PROC --> R3_DAG
-    R2_UI --> R3_DAG
-    R2_REPL --> R3_DAG
-
-    R2_PROC --> R3_ROBOT
-    R2_UI --> R3_ROBOT
-    R2_SSH --> R3_ROBOT
-    R2_REPL --> R3_ROBOT
-
-    R2_PROC --> R3_VPN
-    R2_UI --> R3_VPN
-    R2_REPL --> R3_VPN
-
-    R2_PROC --> R3_TEMPLATE
-    R2_UI --> R3_TEMPLATE
-    R2_REPL --> R3_TEMPLATE
-
-    R2_PROC --> R3_CLOUDFLARE
-    R2_UI --> R3_CLOUDFLARE
-    R2_REPL --> R3_CLOUDFLARE
-
-    %% Artifact outputs
-    R3_ROBOT --> R4_ROBOT_BIN
-
-    %% Styling
-    classDef rank0 stroke:#FF0000,stroke-width:2px;
-    classDef rank1 stroke:#FFA500,stroke-width:2px;
-    classDef rank2 stroke:#FFFF00,stroke-width:2px;
-    classDef rank3 stroke:#0000FF,stroke-width:2px;
-    classDef rank4 stroke:#008000,stroke-width:2px;
-
-    %% Click-through links
-    click R0_DIALTONE "../dialtone.sh" "Open dialtone.sh"
-    click R0_LOGS "../src/plugins/logs/README.md" "Open logs README"
-    click R1_DEV "../src/dev.go" "Open src/dev.go"
-    click R1_TEST "../src/plugins/test/README.md" "Open test README"
-    click R2_PROC "../src/plugins/proc/README.md" "Open proc README"
-    click R2_REPL "../src/plugins/repl/README.md" "Open repl README"
-    click R2_UI "../src/plugins/ui/README.md" "Open ui README"
-    click R2_SSH "../src/plugins/ssh/README.md" "Open ssh README"
-    click R2_GITHUB "../src/plugins/github/README.md" "Open github README"
-    click R2_GEMINI "../src/plugins/gemini/README.md" "Open gemini README"
-    click R2_WORKTREE "../src/plugins/worktree/README.md" "Open worktree README"
-    click R3_DAG "../src/plugins/dag/README.md" "Open dag README"
-    click R3_ROBOT "../src/plugins/robot/README.md" "Open robot README"
-    click R3_VPN "../src/plugins/vpn/README.md" "Open vpn README"
-    click R3_TEMPLATE "../src/plugins/template/README.md" "Open template README"
-    click R3_CLOUDFLARE "../src/plugins/cloudflare/README.md" "Open cloudflare README"
-    click R4_ROBOT_BIN "../robot" "Open robot artifact path"
-
-    class R0_DIALTONE,R0_LOGS rank0;
-    class R1_DEV,R1_TEST rank1;
-    class R2_PROC,R2_REPL,R2_UI,R2_SSH,R2_GITHUB,R2_GEMINI,R2_WORKTREE rank2;
-    class R3_DAG,R3_ROBOT,R3_VPN,R3_TEMPLATE,R3_CLOUDFLARE rank3;
-    class R4_ROBOT_BIN rank4;
-```
+- [Current DAG (Mermaid Source)](current.mermaid)
 
 ## Plugin Links
 - [dialtone.sh](../dialtone.sh)
 - [src/dev.go](../src/dev.go)
 - [logs](../src/plugins/logs/README.md)
 - [test](../src/plugins/test/README.md)
+- [chrome](../src/plugins/chrome/README.md)
+- [go](../src/plugins/go/README.md)
+- [bun](../src/plugins/bun/README.md)
 - [proc](../src/plugins/proc/README.md)
 - [repl](../src/plugins/repl/README.md)
 - [ui](../src/plugins/ui/README.md)
@@ -153,8 +53,24 @@ flowchart LR
 - [dag](../src/plugins/dag/README.md)
 - [robot](../src/plugins/robot/README.md)
 - [vpn](../src/plugins/vpn/README.md)
-- [template](../src/plugins/template/README.md)
+- [ai](../src/plugins/ai/README.md)
+- [cad](../src/plugins/cad/README.md)
+- [www](../src/plugins/www/README.md)
 - [cloudflare](../src/plugins/cloudflare/README.md)
+- [swarm](../src/plugins/swarm/README.md)
+- [diagnostic](../src/plugins/diagnostic/README.md)
+- [camera](../src/plugins/camera/README.md)
+- [mavlink](../src/plugins/mavlink/README.md)
+- [ide](../src/plugins/ide/README.md)
+- [task](../src/plugins/task/README.md)
+- [template](../src/plugins/template/README.md)
+- [wsl](../src/plugins/wsl/README.md)
+- [jax-demo](../src/plugins/jax-demo/README.md)
+- [deploy](../src/plugins/deploy/README.md)
+- [install](../src/plugins/install/README.md)
+- [nix](../src/plugins/nix/README.md)
+- [plugin](../src/plugins/plugin/README.md)
+- [simple-test](../src/plugins/simple-test/README.md)
 - [./robot](../robot)
 
 ## Structure Contract (Per Plugin)
