@@ -35,6 +35,7 @@ func Run(taskFile, model, promptOverride string) error {
 		"gemini",
 		"-m", model,
 		"-p", prompt,
+		"--output-format", "stream-json",
 		"--approval-mode", "yolo",
 		"--include-directories", workspaceRoot,
 	)

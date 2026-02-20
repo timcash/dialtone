@@ -1,90 +1,70 @@
 # Worktree Plugin
 
-The `worktree` plugin facilitates parallel development environments for LLM agents by combining Git worktrees, `tmux` sessions, and task-based isolation.
+## Cost Estimate (Gemini 2.5 Flash)
+For the default `worktree start`/`worktree test` flow, estimated cost uses:
+- input: `$0.30 / 1M` tokens
+- output: `$2.50 / 1M` tokens
 
-## Workflow: LLM Agent Parallelism
+`worktree test src_v1` now reports and logs actual token counts from Gemini CLI JSON stats and computes:
+`estimated_cost_usd = input_tokens*0.30/1e6 + output_tokens*2.50/1e6`
 
-To start an LLM agent on a specific task without interrupting your current workspace:
+## Purpose
+The `worktree` plugin runs isolated agent workflows using:
+- Git worktrees
+- detached tmux sessions
+- task-signature status in `TASK.md`
 
-1.  **Define the Task**: Create a task file in the repository root (e.g., `task_14.md`) describing the goal.
-2.  **Provision Worktree**: Use the REPL to create a new worktree dedicated to this task.
-    ```bash
-    worktree add fix-navigation --task task_14.md
-    ```
-3.  **Automatic Orchestration**:
-    - The plugin creates a new directory `../fix-navigation`.
-    - It initializes a new `tmux` session named `fix-navigation`.
-    - It launches the LLM agent inside that `tmux` session, pointed at the specific task file.
-4.  **Monitor/Attach**: You can continue working in your main directory. To check on the agent, run `tmux attach -t fix-navigation`.
+Managed worktree base directory:
+- `/home/user/dialtone_worktree`
 
-## Usage
+## Workflow
+1. `add`: create worktree + tmux session + copy task to `TASK.md`
+2. `start`: launch Gemini CLI in tmux and stream pane output to `<worktree>/tmux.log`
+3. `tmux-logs`: inspect latest session output
+4. `verify-done`: validate `TASK.md` signature is `done` and (for agent_test) verify command passes
+5. `remove`: kill tmux session and remove worktree folder
 
-### Interactive REPL
-
-Start the REPL with `./dialtone.sh` and use the following commands:
-
--   **Add Worktree**:
-    ```bash
-    USER-1> worktree add <name> [--task <file>] [--branch <branch>]
-    ```
-    *Creates a new worktree at `../<name>` and a detached tmux session named `<name>`.*
-
--   **List Worktrees**:
-    ```bash
-    USER-1> worktree list
-    ```
-    *Lists active git worktrees and tmux sessions. Check the generated log file for output.*
-
--   **Remove Worktree**:
-    ```bash
-    USER-1> worktree remove <name>
-    ```
-    *Removes the worktree directory and kills the associated tmux session.*
-
-### Command Line Interface (CLI)
-
-You can also use the plugin directly from the shell:
-
+## CLI
 ```bash
-./dialtone.sh worktree <command> [args...]
+./dialtone.sh worktree add <name> --task <file> [--branch <branch>]
+./dialtone.sh worktree start <name> [--prompt <text>]
+./dialtone.sh worktree tmux-logs <name|index> [-n 10]
+./dialtone.sh worktree verify-done <name|index>
+./dialtone.sh worktree list
+./dialtone.sh worktree attach <name|index>
+./dialtone.sh worktree remove <name>
+./dialtone.sh worktree cleanup [--all]
+./dialtone.sh worktree test src_v1
 ```
 
-#### Commands
+## Command Notes
+- `add`
+  - creates worktree at `/home/user/dialtone_worktree/<name>`
+  - starts tmux session `<name>`
+  - copies full `env/.env` and normalizes `DIALTONE_ENV`
+- `start`
+  - requires existing worktree + tmux session + `TASK.md`
+  - default prompt tells agent to complete `TASK.md` and sign before work
+  - writes tmux stream to `<worktree>/tmux.log`
+- `list`
+  - shows index, name, task status (`wait|work|done|fail`), tmux state, branch, path
+- `cleanup`
+  - `cleanup`: removes stale managed worktrees
+  - `cleanup --all`: removes all non-root worktrees (including legacy locations)
+- `test src_v1`
+  - runs idempotent E2E: `add -> start -> tmux-logs -> verify-done -> remove`
+  - prints token usage + estimated cost
+  - appends one test record line to this README each run
 
-*   `add <name> [--task <file>] [--branch <branch>]`
-    Creates a worktree and tmux session.
-    *   `--task`: Path to a markdown file describing the task (copied to worktree root).
-    *   `--branch`: Specify a custom branch name (defaults to worktree name).
+## REPL Usage
+From REPL (`./dialtone.sh`):
+- `worktree add ...`
+- `worktree start ...`
+- `worktree list`
+- `worktree tmux-logs ...`
+- `worktree verify-done ...`
+- `worktree remove ...`
 
-*   `remove <name>`
-    Cleans up the worktree folder and kills the tmux session.
-
-*   `list`
-    Displays active worktrees and sessions.
-
-*   `test`
-    Runs the plugin verification suite.
-
-#### Example
-
-```bash
-./dialtone.sh worktree add feature-login --task ticket-123.md
-tmux attach -t feature-login
-```
-
-## Implementation Details
-
-### Tmux Orchestration
-The repository already contains a `.tmux.conf`, indicating that `tmux` is a standard part of the environment. 
-
-- **Tmux vs. Go Libraries**: While Go libraries like `github.com/creack/pty` allow for terminal emulation, they do not provide the persistent session management (attach/detach) that `tmux` offers. For LLM agents that may run for extended periods, `tmux` is the superior choice for visibility and recovery.
-- **Orchestration**: We will use Go's `os/exec` to control `tmux`.
-  - Create session: `tmux new-session -d -s <name> -c <path>`
-  - Send commands: `tmux send-keys -t <name> "command" C-m`
-- **Installation**: The plugin should check for `tmux` in the PATH. If missing, it can suggest installation via the system package manager or a `dialtone` setup script.
-
-### Plugin Structure (src_v1)
-Following the pattern in `src/plugins/test/src_v1`:
-- **CLI/REPL Integration**: Implement a command handler that parses `--task` and the worktree name.
-- **Process Management**: Use `context` and `os/exec` to manage the lifecycle of the worktree creation and the initial `tmux` launch.
-- **Task Isolation**: The `task.md` should be either copied into the worktree root or symlinked to ensure the agent has a clear, isolated source of truth for its objectives.
+## Test
+- 2026-02-20T19:59:26Z | result=PASS | model=gemini-2.5-flash | input=0 output=0 total=0 | estimated_cost_usd=0.000000 | note=ok
+- 2026-02-20T20:00:28Z | result=PASS | model=gemini-2.5-flash | input=0 output=0 total=0 | estimated_cost_usd=0.000000 | note=ok
