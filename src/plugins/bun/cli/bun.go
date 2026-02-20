@@ -6,8 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"dialtone/dev/core/config"
-	"dialtone/dev/core/logger"
+	"dialtone/dev/config"
+	"dialtone/dev/logger"
 	bun_test "dialtone/dev/plugins/bun/test"
 )
 

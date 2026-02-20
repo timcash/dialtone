@@ -49,12 +49,12 @@ Every versioned plugin implementation lives in its own `src_vN` directory within
 ### Required Structure
 A compliant `src_vN` directory MUST contain:
 - `cmd/`: Go entrypoint (usually a simple HTTP server for the UI).
-- `ui/`: Vite-based TypeScript UI using `@src/libs/ui_v2`.
+- `ui/`: Vite-based TypeScript UI using `@src/plugins/ui`.
 - `test/`: Go-based test suite using `@src/libs/test_v2`.
 - `DESIGN.md`: Architecture and implementation details for this specific version.
 
 ### Shared Dependencies
-- **UI:** Powered by `@src/libs/ui_v2` for unified styling, section management, and navigation.
+- **UI:** Powered by `@src/plugins/ui` for unified styling, section management, and navigation.
 - **Tests:** Powered by `@src/libs/test_v2` for automated browser validation, screenshots, and `TEST.md` reporting.
 
 ---
@@ -97,7 +97,7 @@ The UI is built using a "Section-based" architecture.
 Use `setupApp` to initialize the layout and `sections.register` to define your views.
 
 ```typescript
-import { setupApp } from '../../../../../libs/ui_v2/ui';
+import { setupApp } from '../../../../../plugins/ui/ui';
 
 // Initialize the app with a title
 const { sections, menu } = setupApp({ title: 'My Plugin', debug: true });
@@ -122,7 +122,7 @@ menu.addButton('Overview', 'Navigate Overview', () => {
 Import the global theme for consistent Dialtone aesthetics:
 ```css
 /* ui/src/style.css */
-@import '../../../../../libs/ui_v2/style.css';
+@import '../../../../../plugins/ui/style.css';
 ```
 
 ---

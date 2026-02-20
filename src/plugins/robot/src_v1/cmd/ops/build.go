@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"dialtone/dev/core/build"
+	"dialtone/dev/build"
 )
 
 func Build(flags ...string) error {

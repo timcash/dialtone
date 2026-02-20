@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"dialtone/dev/core/browser"
+	"dialtone/dev/browser"
 	"dialtone/dev/dialtest"
 	"github.com/chromedp/chromedp"
 )

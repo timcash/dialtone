@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	"dialtone/dev/core/browser"
+	"dialtone/dev/browser"
 	chrome "dialtone/dev/plugins/chrome/app"
 	wwwtest "dialtone/dev/plugins/www/test"
 

@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"dialtone/dev/core/browser"
+	"dialtone/dev/browser"
 
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"

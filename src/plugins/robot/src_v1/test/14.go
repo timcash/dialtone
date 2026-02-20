@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	test_v2 "dialtone/dev/libs/test_v2"
+	test_v2 "dialtone/dev/plugins/test"
 )
 
 func Run14ThreeSectionValidation(ctx *testCtx) (string, error) {

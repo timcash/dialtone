@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	test_v2 "dialtone/dev/libs/test_v2"
+	test_v2 "dialtone/dev/plugins/test"
 )
 
 func Run08UIRun() error {

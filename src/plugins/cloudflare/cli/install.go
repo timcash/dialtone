@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"dialtone/dev/core/install"
+	"dialtone/dev/install"
 	"fmt"
 	"os"
 	"path/filepath"

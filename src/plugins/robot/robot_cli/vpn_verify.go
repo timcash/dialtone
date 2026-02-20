@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"dialtone/dev/core/logger"
+	"dialtone/dev/logger"
 	"tailscale.com/tsnet"
 )
 

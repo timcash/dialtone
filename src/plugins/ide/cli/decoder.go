@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"dialtone/dev/core/logger"
+	"dialtone/dev/logger"
 	"google.golang.org/protobuf/encoding/protowire"
 )
 

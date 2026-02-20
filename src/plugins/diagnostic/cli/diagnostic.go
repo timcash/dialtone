@@ -6,7 +6,7 @@ import (
 	"os"
 	"runtime"
 
-	"dialtone/dev/core/logger"
+	"dialtone/dev/logger"
 	app "dialtone/dev/plugins/diagnostic/app"
 )
 

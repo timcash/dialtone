@@ -5,7 +5,7 @@ import (
 	"os"
 	"os/exec"
 
-	"dialtone/dev/core/logger"
+	"dialtone/dev/logger"
 )
 
 // RunOpencodeServer starts the opencode AI assistant server

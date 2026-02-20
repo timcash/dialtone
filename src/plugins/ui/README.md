@@ -1,6 +1,6 @@
 # UIv2 Library
 
-`src/libs/ui_v2` is the shared section shell used by plugin `src_vN/ui` apps.
+`src/plugins/ui` is the shared section shell used by plugin `src_vN/ui` apps.
 
 This README follows DAG `src_v3` terminology as source-of-truth.
 

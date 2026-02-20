@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"dialtone/dev/core/browser"
-	"dialtone/dev/core/config"
-	"dialtone/dev/core/test"
+	"dialtone/dev/browser"
+	"dialtone/dev/config"
+	"dialtone/dev/test_core"
 
 	cdpRuntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"

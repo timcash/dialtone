@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"dialtone/dev/core/config"
-	"dialtone/dev/core/logger"
+	"dialtone/dev/config"
+	"dialtone/dev/logger"
 )
 
 var labelFlags = map[string]string{

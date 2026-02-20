@@ -1,8 +1,8 @@
 package test
 
 import (
-	"dialtone/dev/core/logger"
-	"dialtone/dev/core/test"
+	"dialtone/dev/logger"
+	"dialtone/dev/test_core"
 	"fmt"
 )
 

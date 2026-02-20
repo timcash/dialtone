@@ -42,7 +42,7 @@ This preserves:
 ## 2. Shared Library Layer (v3 uses new libs only)
 We keep the same architectural intent as the original template README, but use new libraries instead of modifying old ones.
 
-### UI Library (`src/libs/ui_v2`)
+### UI Library (`src/plugins/ui`)
 Replaces `src/libs/ui` in v3.
 
 Core capabilities retained:

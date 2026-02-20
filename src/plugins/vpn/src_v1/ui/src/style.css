@@ -1,4 +1,4 @@
-@import '../../../../../libs/ui_v2/style.css';
+@import '../../../../../plugins/ui/style.css';
 
 section[aria-label='Hero Section'] {
   position: relative;
