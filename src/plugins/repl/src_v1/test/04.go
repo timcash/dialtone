@@ -7,7 +7,7 @@ import (
 
 func Run04DagInstall(ctx *testCtx) (string, error) {
 	// Send dag install and exit
-	input := `@DIALTONE dag install src_v3
+	input := `dag install src_v3
 exit
 `
 	output, err := ctx.runREPL(input)
@@ -17,8 +17,10 @@ exit
 
 	required := []string{
 		"Request received. Spawning subtone for dag install...",
-		">> [DAG] Install: src_v3",
-		">> [DAG] Install complete: src_v3",
+		"[DAG] Install: src_v3",
+		"bun install",
+		"Process", // ensure process exit is logged
+		"exited with code 0",
 	}
 
 	for _, s := range required {
