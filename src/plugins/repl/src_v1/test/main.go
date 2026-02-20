@@ -102,6 +102,18 @@ func main() {
 				return Run07WorktreeStart(ctx)
 			},
 		},
+		{
+			Name: "Test 8: subtone cost logs",
+			Files: []string{
+				"src/plugins/repl/src_v1/test/08_cost.go",
+				"src/plugins/proc/src_v1/go/proc/logger.go",
+				"src/plugins/proc/scaffold/main.go",
+			},
+			Conditions: "1. Subtone stdout with `[COST] ...` should surface to root REPL as `DIALTONE:PID> [COST] ...`",
+			Run: func() (string, error) {
+				return Run08CostLogs(ctx)
+			},
+		},
 	}
 
 	reportPath := filepath.Join(ctx.repoRoot, "src/plugins/repl/src_v1/test/TEST.md")
@@ -123,16 +135,16 @@ func main() {
 		}
 		fmt.Printf("Running %s...\n", s.Name)
 		output, err := s.Run()
-		
+
 		if err != nil {
 			fmt.Printf("%s FAILED: %v\n", s.Name, err)
 			ctx.Cleanup()
 		} else {
 			fmt.Printf("%s PASSED\n", s.Name)
 		}
-		
+
 		fmt.Fprintf(f, "# %s\n\n", s.Name)
-		
+
 		fmt.Fprintf(f, "### Files\n")
 		for _, file := range s.Files {
 			fmt.Fprintf(f, "- `%s`\n", file)
@@ -152,6 +164,6 @@ func main() {
 		}
 		fmt.Fprintf(f, "```\n\n")
 	}
-	
+
 	fmt.Printf("Report written to %s\n", reportPath)
 }

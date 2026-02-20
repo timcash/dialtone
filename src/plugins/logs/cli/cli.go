@@ -75,7 +75,13 @@ func Run(args []string) error {
 		}
 		return RunTest(dir, *attach, *cps)
 	case "stream", "tail":
-		RunLogs(args[1:])
+		dir := getDir()
+		streamArgs := args[1:]
+		if len(args) > 1 && args[1] != "" && !strings.HasPrefix(args[1], "-") {
+			dir = args[1]
+			streamArgs = args[2:]
+		}
+		RunLogs(dir, streamArgs)
 		return nil
 	case "help", "-h", "--help":
 		printUsage()

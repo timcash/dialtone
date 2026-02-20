@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,11 +26,11 @@ func NewSubtoneLogger(pid int, args []string, logDir string) (*SubtoneLogger, er
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return nil, err
 	}
-	
+
 	timestamp := time.Now().Format("20060102-150405")
 	logName := fmt.Sprintf("subtone-%d-%s.log", pid, timestamp)
 	logPath := filepath.Join(logDir, logName)
-	
+
 	// Create/truncate log file
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
@@ -85,12 +86,9 @@ func (l *SubtoneLogger) LogLine(line string) {
 		f.Close()
 	}
 
-	// 3. Check for errors and throttle output to REPL
-	// Simple heuristic: lines starting with "Error" or containing "panic"
-	// Or maybe the caller tells us if it's stderr?
-	// For now, assume stderr lines are passed here? 
-	// No, dev.go passes all output here.
-	// We'll treat all lines as info unless they look like errors.
+	if hasStructuredLevel(line) {
+		fmt.Printf("DIALTONE:%d> %s\n", l.PID, line)
+	}
 }
 
 func (l *SubtoneLogger) LogError(line string) {
@@ -98,14 +96,24 @@ func (l *SubtoneLogger) LogError(line string) {
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	
+
 	if l.ErrorCount < l.ErrorLimit {
-		fmt.Printf("DIALTONE:%d> ERROR: %s\n", l.PID, line)
+		fmt.Printf("DIALTONE:%d> [ERROR] %s\n", l.PID, line)
 		l.ErrorCount++
 		if l.ErrorCount == l.ErrorLimit {
 			fmt.Printf("DIALTONE:%d> (Suppressed further errors)\n", l.PID)
 		}
 	}
+}
+
+func hasStructuredLevel(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	for _, prefix := range []string{"[INFO]", "[WARN]", "[ERROR]", "[COST]"} {
+		if strings.HasPrefix(trimmed, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (l *SubtoneLogger) logHeartbeat() {
@@ -116,7 +124,7 @@ func (l *SubtoneLogger) logHeartbeat() {
 
 	cpu, _ := p.CPUPercent()
 	mem, _ := p.MemoryInfo()
-	
+
 	// Network connections
 	conns, _ := net.ConnectionsPid("tcp", int32(l.PID))
 	ports := len(conns)
@@ -126,7 +134,7 @@ func (l *SubtoneLogger) logHeartbeat() {
 		memUsage = mem.RSS
 	}
 
-	fmt.Printf("DIALTONE:%d> [Heartbeat] CPU: %.1f%% | Mem: %s | Ports: %d\n", 
+	fmt.Printf("DIALTONE:%d> [Heartbeat] CPU: %.1f%% | Mem: %s | Ports: %d\n",
 		l.PID, cpu, formatBytes(memUsage), ports)
 }
 

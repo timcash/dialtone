@@ -3,34 +3,43 @@ package main
 import (
 	"fmt"
 	"os"
-
-	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 )
 
+type step struct {
+	Name       string
+	Conditions string
+	Run        func(*testCtx) (string, error)
+}
+
 func main() {
-	ctx := newTestCtx()
-	steps := []test_v2.Step{
-		{Name: "01 Preflight (Go/UI)", RunWithContext: wrapRun(ctx, Run01Preflight)},
-		{Name: "02 Log section load", RunWithContext: wrapRun(ctx, Run02LogSectionLoad), SectionID: "logs-log-xterm"},
-		{Name: "03 Finalize", RunWithContext: wrapRun(ctx, Run03Finalize)},
+	ctx, err := newTestCtx()
+	if err != nil {
+		fmt.Printf("[TEST] init failed: %v\n", err)
+		os.Exit(1)
+	}
+	defer ctx.cleanup()
+
+	steps := []step{
+		{
+			Name:       "01 Embedded NATS + topic publish",
+			Conditions: "Embedded broker starts and wildcard listener captures topic logs.",
+			Run:        Run01EmbeddedNATSAndPublish,
+		},
+		{
+			Name:       "02 Listener filtering (error.topic)",
+			Conditions: "Listener on logs.error.topic only receives error topic messages.",
+			Run:        Run02ErrorTopicFiltering,
+		},
+		{
+			Name:       "03 Finalize artifacts",
+			Conditions: "Artifacts exist and include captured topic lines.",
+			Run:        Run03Finalize,
+		},
 	}
 
-	if err := test_v2.RunSuite(test_v2.SuiteOptions{
-		Version:        "src_v1",
-		ReportPath:     "src/plugins/logs/src_v1/test/TEST.md",
-		LogPath:        "src/plugins/logs/src_v1/test/test.log",
-		ErrorLogPath:   "src/plugins/logs/src_v1/test/error.log",
-		BrowserLogMode: "errors_only",
-	}, steps); err != nil {
+	if err := ctx.run(steps); err != nil {
 		fmt.Printf("[TEST] SUITE ERROR: %v\n", err)
 		os.Exit(1)
 	}
-}
-
-func wrapRun(ctx *testCtx, fn func(*testCtx) (string, error)) func(*test_v2.StepContext) (test_v2.StepRunResult, error) {
-	return func(sc *test_v2.StepContext) (test_v2.StepRunResult, error) {
-		ctx.beginStep(sc)
-		report, err := fn(ctx)
-		return test_v2.StepRunResult{Report: report}, err
-	}
+	fmt.Printf("[TEST] Report written to %s\n", ctx.reportPath)
 }

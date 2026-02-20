@@ -6,13 +6,17 @@ import (
 	"os"
 
 	"dialtone/dev/plugins/logs/src_v1/go"
-	"dialtone/dev/ssh"
+	"dialtone/dev/plugins/ssh/src_v1/go"
+	"github.com/nats-io/nats.go"
 )
 
 // RunLogs handles the logs command
-func RunLogs(args []string) {
+func RunLogs(versionDir string, args []string) {
 	fs := flag.NewFlagSet("logs", flag.ExitOnError)
 	remote := fs.Bool("remote", false, "Stream logs from remote robot")
+	streamTopic := fs.String("stream", "logs.>", "NATS subject to subscribe to (supports wildcards)")
+	natsURL := fs.String("nats-url", "nats://127.0.0.1:4222", "NATS server URL")
+	stdout := fs.Bool("stdout", true, "Print streamed messages to stdout")
 	host := fs.String("host", os.Getenv("ROBOT_HOST"), "SSH host")
 	port := fs.String("port", "22", "SSH port")
 	user := fs.String("user", os.Getenv("ROBOT_USER"), "SSH user")
@@ -21,11 +25,14 @@ func RunLogs(args []string) {
 	showHelp := fs.Bool("help", false, "Show help for logs command")
 
 	fs.Usage = func() {
-		fmt.Println("Usage: dialtone logs [options]")
+		fmt.Println("Usage: ./dialtone.sh logs stream [src_vN] [options]")
 		fmt.Println()
-		fmt.Println("Stream logs from the Dialtone service.")
+		fmt.Println("Stream logs from Dialtone.")
 		fmt.Println()
 		fmt.Println("Options:")
+		fmt.Println("  --stream      NATS subject to subscribe to (default: logs.>)")
+		fmt.Println("  --nats-url    NATS server URL (default: nats://127.0.0.1:4222)")
+		fmt.Println("  --stdout      Print streamed messages (default: true)")
 		fmt.Println("  --remote      Stream logs from remote robot")
 		fmt.Println("  --lines       Number of lines to show (if set, does not stream)")
 		fmt.Println("  --host        SSH host (user@host) [env: ROBOT_HOST]")
@@ -50,11 +57,37 @@ func RunLogs(args []string) {
 
 		runRemoteLogs(*host, *port, *user, *pass, *lines)
 	} else {
-		// Local logs (placeholder for now, or maybe just tell user to check locally)
-		logs.Info("Looking for local logs...")
-		// Assuming local logs might be in a standard place or stdout if running locally
-		fmt.Println("Local log streaming is not yet implemented. Use --remote to view robot logs.")
+		if !*stdout {
+			logs.Fatal("Error: local stream requires --stdout=true")
+		}
+		runLocalNATSStream(versionDir, *natsURL, *streamTopic)
 	}
+}
+
+func runLocalNATSStream(versionDir, natsURL, subject string) {
+	logs.Info("Streaming local NATS logs (%s): subject=%s via %s", versionDir, subject, natsURL)
+
+	nc, err := nats.Connect(natsURL)
+	if err != nil {
+		logs.Fatal("NATS connection failed: %v", err)
+	}
+	defer nc.Close()
+
+	_, err = nc.Subscribe(subject, func(msg *nats.Msg) {
+		fmt.Println(string(msg.Data))
+	})
+	if err != nil {
+		logs.Fatal("NATS subscribe failed for subject %q: %v", subject, err)
+	}
+
+	if err := nc.Flush(); err != nil {
+		logs.Fatal("NATS flush failed: %v", err)
+	}
+	if err := nc.LastError(); err != nil {
+		logs.Fatal("NATS subscription error: %v", err)
+	}
+
+	select {}
 }
 
 func runRemoteLogs(host, port, user, pass string, lines int) {

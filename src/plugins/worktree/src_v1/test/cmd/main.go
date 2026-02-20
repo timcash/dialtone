@@ -54,6 +54,8 @@ func main() {
 	cost := estimateCostUSD(res.Usage)
 	fmt.Printf("[Worktree] %s token summary model=%s input=%d output=%d total=%d est_cost_usd=%.6f\n",
 		resultLabel, modelName, res.Usage.InputTokens, res.Usage.OutputTokens, res.Usage.TotalTokens, cost)
+	fmt.Printf("[COST] model=%s input_tokens=%d output_tokens=%d total_tokens=%d est_cost_usd=%.6f\n",
+		modelName, res.Usage.InputTokens, res.Usage.OutputTokens, res.Usage.TotalTokens, cost)
 
 	if appendErr := appendTestRecord(repoRoot, startAt, resultLabel, reason, res.Usage, cost); appendErr != nil {
 		fmt.Printf("WARN: failed to append test record: %v\n", appendErr)
