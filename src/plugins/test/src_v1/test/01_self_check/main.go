@@ -79,7 +79,7 @@ func runTemplateExample(repoRoot, natsURL, baseSubject, logPath string) error {
 	binPath := filepath.Join(repoRoot, "src", "plugins", "test", "src_v1", "test", "template_example_bin")
 	_ = os.Remove(binPath)
 
-	build := exec.Command("go", "build", "-o", binPath, "./plugins/test/src_v1/test/example_plugin_template")
+	build := exec.Command("go", "build", "-o", binPath, "./plugins/test/src_v1/test/02_example_plugin_template")
 	build.Dir = filepath.Join(repoRoot, "src")
 	var buildOut bytes.Buffer
 	build.Stdout = &buildOut

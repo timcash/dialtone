@@ -104,7 +104,7 @@ For process-level topic verification:
 
 ### Example "Other Plugin" Pattern (in logs test folder)
 
-`src/plugins/logs/src_v1/test/example_plugin/main.go` is a buildable example binary that imports the logs library and demonstrates:
+`src/plugins/logs/src_v1/test/05_example_plugin/main.go` is a buildable example binary that imports the logs library and demonstrates:
 - connect to an existing NATS server if available
 - otherwise start embedded NATS automatically
 - publish messages on a topic with `NewNATSLogger`

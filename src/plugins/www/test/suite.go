@@ -9,11 +9,10 @@ import (
 	"path/filepath"
 	"time"
 
-	chrome "dialtone/dev/plugins/chrome/app"
+	chrome "dialtone/dev/plugins/chrome/src_v1/go"
 
 	"github.com/chromedp/chromedp"
 )
-
 
 func RunComprehensiveSmoke() error {
 	fmt.Println(">> [WWW] Comprehensive Smoke Suite: start")
@@ -28,12 +27,16 @@ func RunComprehensiveSmoke() error {
 	if !isPortOpenSuite(4173) {
 		fmt.Println(">> [WWW] Starting Preview Server on port 4173...")
 		devCmd := exec.Command("npm", "run", "preview", "--", "--host", "127.0.0.1")
-		devCmd.Dir = wwwDir; devCmd.Start(); defer devCmd.Process.Kill()
+		devCmd.Dir = wwwDir
+		devCmd.Start()
+		defer devCmd.Process.Kill()
 	}
 	if !isPortOpenSuite(8081) {
 		fmt.Println(">> [WWW] Starting CAD Server on port 8081...")
 		cadCmd := exec.Command("./dialtone.sh", "cad", "server")
-		cadCmd.Dir = cwd; cadCmd.Start(); defer cadCmd.Process.Kill()
+		cadCmd.Dir = cwd
+		cadCmd.Start()
+		defer cadCmd.Process.Kill()
 	}
 	waitForPortLocalSuite(4173, 60*time.Second)
 	waitForPortLocalSuite(8081, 60*time.Second)
@@ -82,7 +85,8 @@ func waitForPortLocalSuite(port int, timeout time.Duration) {
 	start := time.Now()
 	for time.Since(start) < timeout {
 		if conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), time.Second); err == nil {
-			conn.Close(); return
+			conn.Close()
+			return
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
@@ -90,6 +94,9 @@ func waitForPortLocalSuite(port int, timeout time.Duration) {
 
 func isPortOpenSuite(port int) bool {
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 300*time.Millisecond)
-	if err == nil { conn.Close(); return true }
+	if err == nil {
+		conn.Close()
+		return true
+	}
 	return false
 }

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"dialtone/dev/plugins/chrome/app"
+	"dialtone/dev/plugins/chrome/src_v1/go"
 	"dialtone/dev/plugins/logs/src_v1/go"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"

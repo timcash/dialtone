@@ -17,9 +17,9 @@ import (
 	"syscall"
 	"time"
 
-	"dialtone/dev/plugins/chrome/app"
-	test_v2 "dialtone/dev/plugins/test/src_v1/go"
+	"dialtone/dev/plugins/chrome/src_v1/go"
 	ssh_plugin "dialtone/dev/plugins/ssh/src_v1/go"
+	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 	sshlib "golang.org/x/crypto/ssh"
 )
 
@@ -139,10 +139,10 @@ func Dev(repoRoot string, args []string) error {
 
 			// Create a pipe to monitor output for CRITICAL errors
 			pr, pw := io.Pipe()
-			
+
 			var (
-				errorCount int
-				errorMu    sync.Mutex
+				errorCount  int
+				errorMu     sync.Mutex
 				lastErrorAt time.Time
 			)
 
@@ -150,11 +150,11 @@ func Dev(repoRoot string, args []string) error {
 			logFilter := func(p []byte) (n int, err error) {
 				line := string(p)
 				lower := strings.ToLower(line)
-				
+
 				// Identify common noise
-				isNoise := strings.Contains(lower, "econnreset") || 
-				           strings.Contains(lower, "epipe") || 
-						   strings.Contains(lower, "ws proxy socket error")
+				isNoise := strings.Contains(lower, "econnreset") ||
+					strings.Contains(lower, "epipe") ||
+					strings.Contains(lower, "ws proxy socket error")
 
 				if isNoise {
 					errorMu.Lock()
@@ -175,7 +175,7 @@ func Dev(repoRoot string, args []string) error {
 				}
 				return logOut.Write([]byte(line))
 			}
-			
+
 			multiOut := io.MultiWriter(writerFunc(logFilter), pw)
 			cmd.Stdout = multiOut
 			cmd.Stderr = multiOut
@@ -191,7 +191,7 @@ func Dev(repoRoot string, args []string) error {
 				for scanner.Scan() {
 					line := scanner.Text()
 					lower := strings.ToLower(line)
-					
+
 					errorMu.Lock()
 					currentCount := errorCount
 					errorMu.Unlock()
@@ -253,13 +253,13 @@ func Dev(repoRoot string, args []string) error {
 
 	<-ctx.Done()
 	logf("   [DEV] Shutting down...")
-	
+
 	mu.Lock()
 	if session != nil {
 		session.Close()
 	}
 	mu.Unlock()
-	
+
 	bm.stopCurrent()
 
 	return nil
@@ -267,17 +267,17 @@ func Dev(repoRoot string, args []string) error {
 
 func startRobotDevBrowser(logf func(string, ...any), devURL, devBrowserMetaPath string) (*test_v2.BrowserSession, error) {
 	logf("   [DEV] Starting browser session (role=robot-dev)...")
-	
+
 	s, err := test_v2.StartBrowser(test_v2.BrowserOptions{
 		Headless:      false,
 		GPU:           true,
 		Role:          "robot-dev",
 		ReuseExisting: true,
 		URL:           devURL,
-		LogWriter:     nil, 
+		LogWriter:     nil,
 		LogPrefix:     "",
 	})
-	
+
 	if err != nil {
 		logf("   [DEV] Warning: managed browser start failed: %v", err)
 		if openErr := openInRegularChrome(devURL); openErr != nil {
@@ -285,7 +285,7 @@ func startRobotDevBrowser(logf func(string, ...any), devURL, devBrowserMetaPath 
 		}
 		return nil, nil
 	}
-	
+
 	if err := chrome.WriteSessionMetadata(devBrowserMetaPath, s.ChromeSession()); err != nil {
 		logf("   [DEV] Warning: failed to write browser metadata: %v", err)
 	}
@@ -374,6 +374,7 @@ func startRemoteChromeBridge(logf func(string, ...any), targetHost string) {
 }
 
 type writerFunc func([]byte) (int, error)
+
 func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 
 type BackendManager struct {
@@ -388,11 +389,11 @@ type BackendManager struct {
 	remotePass     string
 	failoverToMock bool
 
-	mu             sync.Mutex
-	activeCmd      *exec.Cmd
-	sshClient      *sshlib.Client
-	isMockActive   bool
-	isFailover     bool
+	mu           sync.Mutex
+	activeCmd    *exec.Cmd
+	sshClient    *sshlib.Client
+	isMockActive bool
+	isFailover   bool
 }
 
 func (bm *BackendManager) Start() {
@@ -443,7 +444,7 @@ func (bm *BackendManager) TriggerFailover(reason string) {
 
 	bm.logf("   [DEV] ALERT: %s", reason)
 	bm.logf("   [DEV] FAILING OVER: Stopping remote tunnel and starting local mock server.")
-	
+
 	bm.stopCurrent()
 	bm.isFailover = true
 	bm.startMockInternal()
