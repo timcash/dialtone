@@ -39,8 +39,8 @@ One log line = one NATS message. Payload can be a single line (same format as to
 
 | Consumer | How | Option / API |
 |----------|-----|----------------|
-| **CLI (stream/tail)** | Subscribe to NATS subject(s), print each message. | `--stdout` (default when running `logs stream` locally). Optional `--subject logs.dag.>` etc. |
-| **File** | Logs lib starts a **NATS listener** that subscribes to the subject and writes each message to the given path. | e.g. `logs.ListenToFile("logs.dag.my-test", "/path/to/file.log")` or CLI `--file /path/to/file.log` that starts the listener and then runs the app. |
+| **CLI (stream/tail)** | Subscribe to NATS subject(s), print each message. | `--topic` / `--stream` + `--stdout` (default). |
+| **File listener** | Logs lib starts a **NATS listener** and writes each message to a file path. | `logs.ListenToFile(conn, subject, filePath)` |
 | **Browser** | UI subscribes to NATS (e.g. WebSocket), receives messages, appends to xterm or other widget. | Use `logger.ts` `createLogStream('nats', { subject, natsUrl })` and `attachToTerminal(term, stream)`. |
 
 So: **readers** attach to NATS; the library can help by running a listener that writes to a file or by exposing a stream for stdout/UI.
@@ -49,16 +49,19 @@ So: **readers** attach to NATS; the library can help by running a listener that 
 
 - **`logs stream`** / **`logs tail`**  
   - Subscribe to NATS and show logs.  
+  - **`--topic <topic>`**: topic alias (e.g. `logs.error.topic`, `*` for all logs).  
+  - **`--stream <subject>`**: raw NATS subject (same purpose as `--topic`).  
+  - **`--nats-url <url>`**: NATS URL (default `nats://127.0.0.1:4222`).  
   - **`--stdout`** (default for local): print each message to stdout.  
-  - **`--file <path>`**: start a listener that subscribes to the chosen subject and writes to `<path>`; the CLI can also print to stdout if you pass both.  
-  - **`--subject <subject>`**: e.g. `logs.dag.>`, `logs.>` (default can be `logs.>` or from env).  
+  - **Auto start behavior**: if local NATS is unreachable, `logs stream` auto-starts an embedded NATS daemon and connects.  
+  - **`--embedded`**: force an in-process embedded broker for this stream process.  
   - **`--remote`**: same as today (SSH to robot and tail there); on the robot, logs still go through NATS; remote tail is a consumer on that host.
 
-- **Other CLI commands** (install, dev, test, serve, etc.)  
-  - Can support **`--stdout`** so that when they run, their own log output is also printed to stdout (i.e. the process subscribes to its own subject and prints, or the lib can tee to stdout when `--stdout` is set).  
-  - **`--file <path>`**: before starting the app, start a listener that subscribes to this run’s subject and writes to `<path>`.
+- **`logs pingpong`**  
+  - Process-level topic verification utility.  
+  - Intended for integration tests and manual topic round-trip validation.
 
-So: by default logs only go to NATS; if you want stdout or a file, you explicitly ask for it via CLI flags or the lib’s listener API.
+So: by default logs go to NATS; consumers subscribe explicitly (CLI stream, listener-to-file, browser stream).
 
 ### Stream from a topic (CLI)
 
@@ -72,6 +75,44 @@ Examples:
 - `./dialtone.sh logs stream src_v1 --stream logs.> --nats-url nats://127.0.0.1:4222`
 - `./dialtone.sh logs stream src_v1 --topic '*' --embedded`
 
+Behavior:
+- `logs stream` now auto-starts a local embedded NATS daemon if none is reachable at `--nats-url` (default `nats://127.0.0.1:4222`).
+
+### Command Cookbook (`src_v1`)
+
+- Start local daemon:
+  - `./dialtone.sh logs nats-start src_v1`
+- Check daemon status:
+  - `./dialtone.sh logs nats-status src_v1`
+- Stop tracked daemon:
+  - `./dialtone.sh logs nats-stop src_v1`
+- Stream all logs:
+  - `./dialtone.sh logs stream src_v1 --topic '*'`
+- Stream specific topic:
+  - `./dialtone.sh logs stream src_v1 --topic logs.error.topic`
+- Force in-process embedded server for this stream process:
+  - `./dialtone.sh logs stream src_v1 --topic '*' --embedded`
+- Two-process ping/pong verification:
+  - Terminal A: `./dialtone.sh logs pingpong src_v1 --id alpha --peer beta --topic logs.pingpong --rounds 3`
+  - Terminal B: `./dialtone.sh logs pingpong src_v1 --id beta --peer alpha --topic logs.pingpong --rounds 3`
+
+### Ping/Pong Utility
+
+For process-level topic verification:
+
+`./dialtone.sh logs pingpong src_v1 --id alpha --peer beta --topic logs.pingpong --rounds 3`
+
+### Example "Other Plugin" Pattern (in logs test folder)
+
+`src/plugins/logs/src_v1/test/example_plugin/main.go` is a buildable example binary that imports the logs library and demonstrates:
+- connect to an existing NATS server if available
+- otherwise start embedded NATS automatically
+- publish messages on a topic with `NewNATSLogger`
+- subscribe/write messages to file with `ListenToFile`
+
+This is verified by `./dialtone.sh logs test src_v1` step:
+- `05 Example plugin binary imports logs library`
+
 ### 6. File writing via listener
 
 - **If you want logs in a file**, you don’t configure the producer to write to that file.  
@@ -79,8 +120,7 @@ Examples:
 - One listener per file (or one listener per subject that writes to one file).  
 - The producer stays NATS-only; the listener is a separate consumer that happens to write to disk.
 
-API idea (Go): `logs.ListenToFile(ctx, subject, filePath)` that subscribes to `subject` and appends each message to `filePath`.  
-CLI: `logs stream --file /var/log/myapp.log --subject logs.myplugin.>` runs the listener (and optionally also prints to stdout).
+Go API: `logs.ListenToFile(conn, subject, filePath)` subscribes to `subject` and appends each message to `filePath`.
 
 ---
 
@@ -95,8 +135,8 @@ The **src_v1** libs are built so other plugin authors can rely on NATS-only logg
    - `logger := logs.New(pluginName, runID)`  
    - This sets the NATS subject to `logs.<pluginName>.<runID>`.
 3. **Log**: Call `logger.Info()`, `logger.Warn()`, `logger.Error()`, etc. Each call **publishes one message to NATS**. No file, no stdout, unless you add them.
-4. **Optional – stdout for local dev**: Either use the CLI with `--stdout` when you run your plugin, or call `logger.AlsoStdout(true)` (or equivalent) so the lib tees to stdout in addition to NATS.
-5. **Optional – file**: Don’t write from the producer. Run a listener: `logs.ListenToFile(ctx, "logs.<plugin>.<run>", path)` in a goroutine or separate process, or use the CLI `--file` to start the listener.
+4. **Optional – stdout for local dev**: use `./dialtone.sh logs stream src_v1 --topic ...`.
+5. **Optional – file**: run a listener: `logs.ListenToFile(conn, "logs.<plugin>.<run>", path)`.
 
 ### TypeScript (Node / browser)
 
@@ -118,8 +158,21 @@ The **src_v1** libs are built so other plugin authors can rely on NATS-only logg
 
 - **One producer, many consumers**: One process publishes to one (or a few) subjects; many processes can subscribe (stdout, file listener, browser, metrics, etc.).
 - **Subject hierarchy**: Use `logs.<plugin>.<run>` so subscribers can use wildcards (`logs.>`, `logs.dag.>`).
-- **No direct file write from app**: Prefer “NATS only” from the app; add files only via listeners or CLI `--file`.
-- **CLI for humans**: Use `--stdout` when you want to watch logs in the terminal; use `--file` when you want a persistent file, with the lib running the listener.
+- **No direct file write from app**: Prefer “NATS only” from the app; add files only via listeners.
+- **CLI for humans**: Use `logs stream` with `--topic`/`--stream` to watch logs in the terminal.
+
+## Troubleshooting
+
+- NATS not reachable:
+  - Run `./dialtone.sh logs nats-status src_v1`
+  - Start it explicitly: `./dialtone.sh logs nats-start src_v1`
+- Stream exits with connection errors:
+  - Retry with force-embedded mode: `./dialtone.sh logs stream src_v1 --topic '*' --embedded`
+- Stop local tracked daemon:
+  - `./dialtone.sh logs nats-stop src_v1`
+  - Note: if status still shows UP, another NATS process is likely bound to the same URL.
+- Inspect daemon logs:
+  - `tail -f .dialtone/logs/logs-nats-daemon.log`
 
 ---
 
@@ -128,8 +181,8 @@ The **src_v1** libs are built so other plugin authors can rely on NATS-only logg
 | Role | Action | Default |
 |------|--------|--------|
 | **Producer (plugin)** | Publish log lines to NATS | NATS only (no file, no stdout) |
-| **CLI stream** | Subscribe, show logs | `--stdout` to print; `--file <path>` to run listener writing to file |
-| **File** | Get logs into a file | Logs lib starts listener: subscribe to subject, write to file |
+| **CLI stream** | Subscribe, show logs | `--topic` / `--stream`; `*` maps to `logs.>` |
+| **File** | Get logs into a file | `logs.ListenToFile(conn, subject, filePath)` |
 | **Browser** | Show logs in UI | Subscribe via NATS WS, attach stream to xterm |
 
 **Subject**: `logs.<plugin>.<run>`  

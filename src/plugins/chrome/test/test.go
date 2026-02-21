@@ -3,7 +3,6 @@ package test
 import (
 	"fmt"
 
-	corebrowser "dialtone/dev/browser"
 	chrome "dialtone/dev/plugins/chrome/app"
 )
 
@@ -113,13 +112,13 @@ func Run() error {
 	return nil
 }
 
-func findProc(procs []corebrowser.ChromeProcess, pid int) (corebrowser.ChromeProcess, bool) {
+func findProc(procs []chrome.ChromeProcess, pid int) (chrome.ChromeProcess, bool) {
 	for _, p := range procs {
 		if p.PID == pid {
 			return p, true
 		}
 	}
-	return corebrowser.ChromeProcess{}, false
+	return chrome.ChromeProcess{}, false
 }
 
 func logLine(level, message string) {

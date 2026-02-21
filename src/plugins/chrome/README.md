@@ -1,50 +1,54 @@
-# Plugin: chrome
+# Chrome Plugin
 
-The `chrome` plugin manages local Chrome/Chromium instances for Dialtone. It can verify connectivity, list running browser processes, launch new instances, and clean up Dialtone-started processes. It has full support for **WSL 2**, allowing you to manage Chrome instances running on the Windows host directly from your Linux terminal.
+`src/plugins/chrome` manages local Chrome/Chromium/Edge instances for Dialtone.
 
-## Usage
-```shell
-./dialtone.sh chrome <command> [arguments]
+It supports:
+- verifying debug connectivity
+- listing browser processes
+- launching tagged browser sessions
+- killing Dialtone-only (or all) browser processes
+- running chrome plugin self-test
+
+## CLI
+
+Use scaffold-style commands:
+
+```bash
+./dialtone.sh chrome help
+./dialtone.sh chrome verify src_v1 --port 9222
+./dialtone.sh chrome list src_v1 --headed
+./dialtone.sh chrome new src_v1 https://example.com --gpu --role dev
+./dialtone.sh chrome kill src_v1 all
+./dialtone.sh chrome test src_v1
 ```
+
+Notes:
+- `src_v1` is accepted as an optional version argument for all commands.
+- Current runtime behavior is version-agnostic (single implementation path), but command shape is normalized to the versioned style.
 
 ## Commands
-```shell
-./dialtone.sh chrome verify    # Verify Chrome/Chromium connectivity on a remote debugging port.
-./dialtone.sh chrome list      # List detected Chrome/Chromium processes with optional filters.
-./dialtone.sh chrome new       # Launch a new headed Chrome instance linked to Dialtone.
-./dialtone.sh chrome kill      # Kill Dialtone-originated processes (or all with --all).
-./dialtone.sh chrome install   # No-op (Chrome is detected locally).
-```
 
-## Flags for `list`
-- `--headed`: Filter for headed instances only.
-- `--headless`: Filter for headless instances only.
-- `--verbose`, `-v`: Show full command line report, including PPID and platform.
+- `verify [src_v1] [--port N] [--debug]`
+- `list [src_v1] [--headed|--headless] [--verbose|-v]`
+- `new [src_v1] [URL] [--port N] [--gpu] [--headless] [--role NAME] [--reuse-existing] [--debug]`
+- `kill [src_v1] [PID|all] [--all] [--windows]`
+- `test [src_v1]`
+- `install`
 
-## Flags for `kill`
-- `all`: (Position) Target all Dialtone-originated browsers.
-- `<PID>`: (Position) Target a specific process ID.
-- `--all`: Kill EVERY Chrome/Edge process on the system (use with caution).
-- `--windows`: Force use of Windows `taskkill` (usually auto-detected in WSL).
+## WSL / Windows Host Support
 
-## WSL 2 Support
-When running in WSL, Dialtone automatically detects if a Chrome process is running on the Windows host. 
-- `chrome list` will show Windows processes with the platform marked as `Windows`.
-- `chrome kill` will use `taskkill.exe` via interop to terminate Windows-side browsers.
-- `chrome new` will launch the Windows version of Chrome if no native Linux Chrome is found.
+When running under WSL:
+- `chrome list` can show Windows-host browser processes.
+- `chrome kill` auto-detects Windows process handling (or force via `--windows`).
+- `chrome new` can launch host browser when needed.
 
 ## Examples
-```shell
-./dialtone.sh chrome verify --port 9222
-./dialtone.sh chrome list --headed
-./dialtone.sh chrome list --verbose
-./dialtone.sh chrome new https://example.com --gpu
-./dialtone.sh chrome kill all
-./dialtone.sh chrome kill 12345
-./dialtone.sh chrome kill all --all
-```
 
-## Tests
-```shell
-./dialtone.sh chrome test
+```bash
+./dialtone.sh chrome verify src_v1 --port 9222
+./dialtone.sh chrome list src_v1 --verbose
+./dialtone.sh chrome new src_v1 --headless --role smoke
+./dialtone.sh chrome kill src_v1 12345
+./dialtone.sh chrome kill src_v1 all --all
+./dialtone.sh chrome test src_v1
 ```

@@ -3,7 +3,10 @@ package logs
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,6 +42,46 @@ func StartEmbeddedNATS() (*EmbeddedNATS, error) {
 		return nil, fmt.Errorf("embedded nats server did not become ready")
 	}
 
+	nc, err := nats.Connect(srv.ClientURL())
+	if err != nil {
+		srv.Shutdown()
+		return nil, err
+	}
+	return &EmbeddedNATS{server: srv, conn: nc}, nil
+}
+
+func StartEmbeddedNATSOnURL(natsURL string) (*EmbeddedNATS, error) {
+	u, err := url.Parse(strings.TrimSpace(natsURL))
+	if err != nil {
+		return nil, fmt.Errorf("invalid nats url %q: %w", natsURL, err)
+	}
+	host := u.Hostname()
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	port := 4222
+	if p := u.Port(); p != "" {
+		parsed, perr := strconv.Atoi(p)
+		if perr != nil {
+			return nil, fmt.Errorf("invalid nats port %q: %w", p, perr)
+		}
+		port = parsed
+	}
+
+	opts := &nserver.Options{
+		Host:   host,
+		Port:   port,
+		NoLog:  true,
+		NoSigs: true,
+	}
+	srv, err := nserver.NewServer(opts)
+	if err != nil {
+		return nil, err
+	}
+	go srv.Start()
+	if !srv.ReadyForConnections(5 * time.Second) {
+		return nil, fmt.Errorf("embedded nats server did not become ready")
+	}
 	nc, err := nats.Connect(srv.ClientURL())
 	if err != nil {
 		srv.Shutdown()

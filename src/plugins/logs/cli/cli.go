@@ -83,6 +83,46 @@ func Run(args []string) error {
 		}
 		RunLogs(dir, streamArgs)
 		return nil
+	case "pingpong":
+		dir := getDir()
+		ppArgs := args[1:]
+		if len(args) > 1 && args[1] != "" && !strings.HasPrefix(args[1], "-") {
+			dir = args[1]
+			ppArgs = args[2:]
+		}
+		return RunPingPong(dir, ppArgs)
+	case "nats-daemon":
+		dir := getDir()
+		daemonArgs := args[1:]
+		if len(args) > 1 && args[1] != "" && !strings.HasPrefix(args[1], "-") {
+			dir = args[1]
+			daemonArgs = args[2:]
+		}
+		return RunNATSDaemon(dir, daemonArgs)
+	case "nats-start":
+		dir := getDir()
+		startArgs := args[1:]
+		if len(args) > 1 && args[1] != "" && !strings.HasPrefix(args[1], "-") {
+			dir = args[1]
+			startArgs = args[2:]
+		}
+		return RunNATSStart(dir, startArgs)
+	case "nats-status":
+		dir := getDir()
+		statusArgs := args[1:]
+		if len(args) > 1 && args[1] != "" && !strings.HasPrefix(args[1], "-") {
+			dir = args[1]
+			statusArgs = args[2:]
+		}
+		return RunNATSStatus(dir, statusArgs)
+	case "nats-stop":
+		dir := getDir()
+		stopArgs := args[1:]
+		if len(args) > 1 && args[1] != "" && !strings.HasPrefix(args[1], "-") {
+			dir = args[1]
+			stopArgs = args[2:]
+		}
+		return RunNATSStop(dir, stopArgs)
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
@@ -107,6 +147,10 @@ func printUsage() {
 	fmt.Println("  test <dir>    Run automated tests and write TEST.md artifacts")
 	fmt.Println("  stream        Stream logs (local or --remote from robot)")
 	fmt.Println("  tail          Alias for stream")
+	fmt.Println("  pingpong      Ping/pong test participant for NATS topic")
+	fmt.Println("  nats-start    Start local embedded NATS daemon")
+	fmt.Println("  nats-status   Check local NATS daemon status")
+	fmt.Println("  nats-stop     Stop local NATS daemon")
 	fmt.Println("\nDefault <dir> is the latest src_vN folder.")
 	fmt.Println("\nExamples:")
 	fmt.Println("  ./dialtone.sh logs test src_v1")
