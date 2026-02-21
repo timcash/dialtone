@@ -2,7 +2,7 @@
 
 This folder includes a copyable example for plugin authors (and LLM agents):
 
-- `example_plugin_template/main.go`
+- `02_example_plugin_template/main.go`
 
 Pattern:
 1. Import `dialtone/dev/plugins/test/src_v1/go`.

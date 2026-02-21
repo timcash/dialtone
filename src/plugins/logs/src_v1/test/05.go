@@ -23,7 +23,7 @@ func Run05ExamplePluginImport(ctx *testCtx) (string, error) {
 	_ = os.Remove(outPath)
 	_ = os.Remove(binPath)
 
-	build := exec.Command("go", "build", "-o", binPath, "./plugins/logs/src_v1/test/example_plugin")
+	build := exec.Command("go", "build", "-o", binPath, "./plugins/logs/src_v1/test/05_example_plugin")
 	build.Dir = filepath.Join(ctx.repoRoot, "src")
 	var buildOut bytes.Buffer
 	build.Stdout = &buildOut

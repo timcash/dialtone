@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	chrome "dialtone/dev/plugins/chrome/app"
+	chrome "dialtone/dev/plugins/chrome/src_v1/go"
 
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
@@ -52,7 +52,9 @@ func RunWwwIntegration() error {
 	session, err := chrome.StartSession(chrome.SessionOptions{
 		Role: "integration", Headless: true, GPU: true,
 	})
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer chrome.CleanupSession(session)
 
 	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), session.WebSocketURL)
@@ -76,7 +78,9 @@ func RunStandaloneSmoke(name string) error {
 	session, err := chrome.StartSession(chrome.SessionOptions{
 		Role: "smoke", Headless: true, GPU: true,
 	})
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer chrome.CleanupSession(session)
 
 	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), session.WebSocketURL)
@@ -92,7 +96,9 @@ func RunStandaloneSmoke(name string) error {
 }
 
 func formatRemoteObject(o *runtime.RemoteObject) string {
-	if o == nil { return "" }
+	if o == nil {
+		return ""
+	}
 	if len(o.Value) > 0 {
 		var v interface{}
 		if err := json.Unmarshal(o.Value, &v); err == nil {
@@ -101,9 +107,15 @@ func formatRemoteObject(o *runtime.RemoteObject) string {
 		}
 		return string(o.Value)
 	}
-	if o.UnserializableValue != "" { return string(o.UnserializableValue) }
-	if o.Description != "" { return o.Description }
-	if o.Type != "" { return string(o.Type) }
+	if o.UnserializableValue != "" {
+		return string(o.UnserializableValue)
+	}
+	if o.Description != "" {
+		return o.Description
+	}
+	if o.Type != "" {
+		return string(o.Type)
+	}
 	return ""
 }
 
@@ -113,16 +125,20 @@ func verifyHomePage(ctx context.Context) error {
 		chromedp.Navigate("http://127.0.0.1:5173"),
 		chromedp.WaitReady("#earth-container"),
 	)
-	if err != nil { return fmt.Errorf("initial load failed: %v", err) }
+	if err != nil {
+		return fmt.Errorf("initial load failed: %v", err)
+	}
 
 	sections := []string{"s-home", "s-robot", "s-neural", "s-math", "s-cad", "s-about", "s-policy"}
 	for i, s := range sections {
 		fmt.Printf("   [%d/%d] Verifying section: %s\n", i+1, len(sections), s)
-		err := chromedp.Run(ctx, 
+		err := chromedp.Run(ctx,
 			chromedp.Evaluate(fmt.Sprintf("window.location.hash='%s'", s), nil),
 			chromedp.WaitVisible(fmt.Sprintf("#%s.is-ready", s)),
 		)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -159,7 +175,9 @@ func RunWwwCadHeaded() error {
 	session, err := chrome.StartSession(chrome.SessionOptions{
 		Role: "cad-test", Headless: false, GPU: true, TargetURL: "http://127.0.0.1:5173/#s-cad",
 	})
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer chrome.CleanupSession(session)
 
 	fmt.Println(">> [WWW] CAD Headed session active. Press Ctrl+C to close.")
@@ -210,8 +228,10 @@ func performMinimalLifecycle() error {
 	session, err := chrome.StartSession(chrome.SessionOptions{
 		Role: "lifecycle-test", Headless: true, GPU: true,
 	})
-	if err != nil { return err }
-	
+	if err != nil {
+		return err
+	}
+
 	defer func() {
 		fmt.Println("   [DEBUG] Calling chrome.CleanupSession...")
 		chrome.CleanupSession(session)

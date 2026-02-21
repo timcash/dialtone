@@ -3,7 +3,7 @@ package cli
 import (
 	"context"
 	"dialtone/dev/browser"
-	chrome_app "dialtone/dev/plugins/chrome/app"
+	chrome_app "dialtone/dev/plugins/chrome/src_v1/go"
 	"fmt"
 	cdruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
