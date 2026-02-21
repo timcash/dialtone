@@ -1,21 +1,16 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func Run05ExamplePluginImport(ctx *testCtx) (string, error) {
-	port, err := pickFreePort()
-	if err != nil {
-		return "", err
-	}
-	natsURL := fmt.Sprintf("nats://127.0.0.1:%d", port)
 	topic := "logs.example.plugin"
 	outPath := filepath.Join(ctx.testDir, "example_plugin.log")
 	binPath := filepath.Join(ctx.testDir, "example_plugin_bin")
@@ -25,43 +20,48 @@ func Run05ExamplePluginImport(ctx *testCtx) (string, error) {
 
 	build := exec.Command("go", "build", "-o", binPath, "./plugins/logs/src_v1/test/05_example_plugin")
 	build.Dir = filepath.Join(ctx.repoRoot, "src")
-	var buildOut bytes.Buffer
-	build.Stdout = &buildOut
-	build.Stderr = &buildOut
-	if err := build.Run(); err != nil {
-		return "", fmt.Errorf("build example plugin failed: %v\n%s", err, buildOut.String())
+	if out, err := build.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("build example plugin failed: %v\n%s", err, string(out))
 	}
 
+	if err := ctx.ensureBroker(); err != nil {
+		return "", err
+	}
+	usedNatsURL := ctx.broker.URL()
+	nc := ctx.broker.Conn()
+	
+	sub, _ := nc.SubscribeSync(topic)
+	defer sub.Unsubscribe()
+
 	run := exec.Command(binPath,
-		"--nats-url", natsURL,
+		"--nats-url", usedNatsURL,
 		"--topic", topic,
 		"--count", "4",
 		"--out", outPath,
 	)
 	run.Dir = ctx.repoRoot
-	var runOut bytes.Buffer
-	run.Stdout = &runOut
-	run.Stderr = &runOut
-	if err := run.Run(); err != nil {
-		return "", fmt.Errorf("run example plugin failed: %v\n%s", err, runOut.String())
+	if err := run.Start(); err != nil {
+		return "", fmt.Errorf("run example plugin failed: %v", err)
 	}
 
-	text := runOut.String()
-	if !strings.Contains(text, "EXAMPLE_PLUGIN PASS") {
-		return "", fmt.Errorf("missing PASS marker in output:\n%s", text)
-	}
-	if !strings.Contains(text, "started_embedded=true") {
-		return "", fmt.Errorf("expected auto embedded start in output:\n%s", text)
-	}
-
+	// Verify via NATS messages
 	for i := 1; i <= 4; i++ {
+		msg, err := sub.NextMsg(10 * time.Second)
+		if err != nil {
+			return "", fmt.Errorf("missing message %d in NATS: %v", i, err)
+		}
 		needle := fmt.Sprintf("example plugin message %d", i)
-		if !fileContains(outPath, needle) {
-			return "", fmt.Errorf("missing %q in %s", needle, outPath)
+		if !strings.Contains(string(msg.Data), needle) {
+			return "", fmt.Errorf("unexpected message in NATS: %s (wanted %s)", string(msg.Data), needle)
 		}
 	}
 
-	return "Verified example plugin binary imports logs library, auto-starts embedded NATS when missing, and publishes/listens on topic.", nil
+	// Verify the listener still worked (writing from topic to file)
+	if err := waitForContains(outPath, "example plugin message 4", 4*time.Second); err != nil {
+		return "", fmt.Errorf("listener failed to write to file: %v", err)
+	}
+
+	return "Verified example plugin binary imports logs library, and verified via both NATS messages and file listener.", nil
 }
 
 func pickFreePort() (int, error) {

@@ -1,13 +1,11 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	repl "dialtone/dev/plugins/repl/src_v1/go/repl"
@@ -27,17 +25,12 @@ func initLogger() {
 	var err error
 	logFile, err = os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		fmt.Printf("Warning: failed to open dialtone.log: %v\n", err)
+		// Silent failure for logger init to avoid fmt dependency
 	}
 }
 
 func logLine(category, msg string) {
 	logs.Info("[%s] %s", category, msg)
-	if logFile == nil {
-		return
-	}
-	ts := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
-	fmt.Fprintf(logFile, "[%s | INFO | %s] %s\n", ts, category, msg)
 }
 
 // LoadConfig loads environment variables from a custom file or defaults to .env
@@ -56,7 +49,7 @@ func LoadConfig() {
 	envPath := filepath.Join(repoRoot, envFile)
 
 	if err := godotenv.Load(envPath); err != nil {
-		logLine("CONFIG", fmt.Sprintf("Warning: godotenv.Load(%s) failed: %v", envPath, err))
+		logLine("CONFIG", "Warning: godotenv.Load failed: "+envPath)
 	}
 }
 
@@ -97,7 +90,7 @@ func EnsureRequirement(req Requirement) error {
 	case "bun":
 		return ensureBunRequirement(req.Version)
 	default:
-		return fmt.Errorf("unsupported install requirement tool: %s", req.Tool)
+		return logs.Errorf("unsupported install requirement tool: %s", req.Tool)
 	}
 }
 
@@ -105,12 +98,12 @@ func ensureGoRequirement(version string) error {
 	depsDir := GetDialtoneEnv()
 	goBin := filepath.Join(depsDir, "go", "bin", "go")
 	if _, err := os.Stat(goBin); os.IsNotExist(err) {
-		fmt.Printf("[install] Go missing; running ./dialtone.sh go install\n")
+		logs.Info("[install] Go missing; running ./dialtone.sh go install")
 		cmd := exec.Command("./dialtone.sh", "go", "install")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to install Go: %w", err)
+			return logs.Errorf("failed to install Go: %w", err)
 		}
 	}
 
@@ -120,11 +113,11 @@ func ensureGoRequirement(version string) error {
 
 	out, err := exec.Command(goBin, "version").CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed checking go version: %w", err)
+		return logs.Errorf("failed checking go version: %w", err)
 	}
 	want := "go" + version
 	if !strings.Contains(string(out), want) {
-		return fmt.Errorf("go version mismatch: want %s, got %s", want, strings.TrimSpace(string(out)))
+		return logs.Errorf("go version mismatch: want %s, got %s", want, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -133,12 +126,12 @@ func ensureBunRequirement(version string) error {
 	depsDir := GetDialtoneEnv()
 	bunBin := filepath.Join(depsDir, "bun", "bin", "bun")
 	if _, err := os.Stat(bunBin); os.IsNotExist(err) {
-		fmt.Printf("[install] Bun missing; installing via ./dialtone.sh bun install\n")
+		logs.Info("[install] Bun missing; installing via ./dialtone.sh bun install")
 		cmd := exec.Command("./dialtone.sh", "bun", "install")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to install Bun: %w", err)
+			return logs.Errorf("failed to install Bun: %w", err)
 		}
 	}
 
@@ -148,11 +141,11 @@ func ensureBunRequirement(version string) error {
 
 	out, err := exec.Command(bunBin, "--version").CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed checking bun version: %w", err)
+		return logs.Errorf("failed checking bun version: %w", err)
 	}
 	got := strings.TrimSpace(string(out))
 	if got != version {
-		return fmt.Errorf("bun version mismatch: want %s, got %s", version, got)
+		return logs.Errorf("bun version mismatch: want %s, got %s", version, got)
 	}
 	return nil
 }
@@ -168,7 +161,7 @@ func main() {
 
 	if len(os.Args) < 2 {
 		if err := repl.Start(logLine); err != nil {
-			fmt.Printf("REPL error: %v\n", err)
+			logs.Error("REPL error: %v", err)
 			os.Exit(1)
 		}
 		return
@@ -189,30 +182,24 @@ func main() {
 			runDevInstall()
 			return
 		}
-		fmt.Printf("Unknown dev command: %v\n", args)
+		logs.Error("Unknown dev command: %v", args)
 	default:
 		if err := runPluginScaffold(command, args); err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				os.Exit(exitErr.ExitCode())
 			}
-			fmt.Printf("Orchestrator error: %v\n", err)
+			logs.Error("Orchestrator error: %v", err)
 			os.Exit(1)
 		}
 	}
 }
 
 func runDevInstall() {
-	output := func(msg string) {
-		fmt.Println(msg)
-		logLine("EXEC", msg)
-	}
-
-	output("Installing latest Go runtime for managed ./dialtone.sh go commands...")
+	logs.Info("Installing latest Go runtime for managed ./dialtone.sh go commands...")
 	cwd, _ := os.Getwd()
-	// Since we are in 'src', installer is at plugins/go/install.sh
 	installer := filepath.Join(cwd, "plugins/go/install.sh")
 	if !fileExists(installer) {
-		output("Installer missing: " + installer)
+		logs.Error("Installer missing: %s", installer)
 		return
 	}
 
@@ -220,12 +207,12 @@ func runDevInstall() {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		output("Install failed.")
+		logs.Error("Install failed.")
 		return
 	}
 
-	output("Bootstrap complete. Initializing dev.go scaffold...")
-	output("Ready. You can now run plugin commands (install/build/test) via DIALTONE.")
+	logs.Info("Bootstrap complete. Initializing dev.go scaffold...")
+	logs.Info("Ready. You can now run plugin commands (install/build/test) via DIALTONE.")
 }
 
 func printDevUsage() {
@@ -233,32 +220,32 @@ func printDevUsage() {
 	if runtime.GOOS == "windows" {
 		script = ".\\dialtone.cmd"
 	}
-	fmt.Printf("Usage: %s <command> [options]\n", script)
-	fmt.Println()
-	fmt.Println("Dev orchestrator commands:")
-	fmt.Println("  plugins              List available plugin scaffolds")
-	fmt.Println("  branch <name>        Create or checkout a feature branch")
-	fmt.Println("  help                 Show this help")
-	fmt.Println()
-	fmt.Println("Plugin routing:")
-	fmt.Println("  <plugin> <args...>   Run src/plugins/<plugin>/scaffold/main.go (or scaffold.sh)")
-	fmt.Println()
-	fmt.Println("Examples:")
-	fmt.Println("  ./dialtone.sh go install --latest")
-	fmt.Println("  ./dialtone.sh go exec version")
-	fmt.Println("  ./dialtone.sh robot install src_v1")
-	fmt.Println("  ./dialtone.sh dag install src_v3")
-	fmt.Println("  ./dialtone.sh gemini run --task task.md")
+	logs.Info("Usage: %s <command> [options]", script)
+	logs.Info("")
+	logs.Info("Dev orchestrator commands:")
+	logs.Info("  plugins              List available plugin scaffolds")
+	logs.Info("  branch <name>        Create or checkout a feature branch")
+	logs.Info("  help                 Show this help")
+	logs.Info("")
+	logs.Info("Plugin routing:")
+	logs.Info("  <plugin> <args...>   Run src/plugins/<plugin>/scaffold/main.go (or scaffold.sh)")
+	logs.Info("")
+	logs.Info("Examples:")
+	logs.Info("  ./dialtone.sh go install --latest")
+	logs.Info("  ./dialtone.sh go exec version")
+	logs.Info("  ./dialtone.sh robot install src_v1")
+	logs.Info("  ./dialtone.sh dag install src_v3")
+	logs.Info("  ./dialtone.sh gemini run --task task.md")
 }
 
 func listPlugins() {
 	root := "plugins"
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		fmt.Printf("Failed to read plugins directory: %v\n", err)
+		logs.Error("Failed to read plugins directory: %v", err)
 		return
 	}
-	fmt.Println("Available plugins with scaffold:")
+	logs.Info("Available plugins with scaffold:")
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -267,7 +254,7 @@ func listPlugins() {
 		goScaffold := filepath.Join(root, name, "scaffold", "main.go")
 		shScaffold := filepath.Join(root, name, "scaffold.sh")
 		if fileExists(goScaffold) || fileExists(shScaffold) {
-			fmt.Printf("  - %s\n", name)
+			logs.Info("  - %s", name)
 		}
 	}
 }
@@ -276,18 +263,16 @@ func runPluginScaffold(plugin string, args []string) error {
 	pluginDir := filepath.Join("plugins", plugin)
 	info, err := os.Stat(pluginDir)
 	if err != nil || !info.IsDir() {
-		return fmt.Errorf("unknown plugin: %s", plugin)
+		return logs.Errorf("unknown plugin: %s", plugin)
 	}
 
 	goScaffold := filepath.Join(pluginDir, "scaffold", "main.go")
 	if fileExists(goScaffold) {
 		var cmd *exec.Cmd
 		if fileExists(filepath.Join(pluginDir, "go.mod")) {
-			// Plugin has its own module, run from plugin dir
 			cmd = exec.Command("go", append([]string{"run", "./scaffold/main.go"}, args...)...)
 			cmd.Dir = pluginDir
 		} else {
-			// Plugin is part of main module, run from 'src'
 			cmd = exec.Command("go", append([]string{"run", "./" + filepath.ToSlash(goScaffold)}, args...)...)
 		}
 		cmd.Stdout = os.Stdout
@@ -305,7 +290,7 @@ func runPluginScaffold(plugin string, args []string) error {
 		return cmd.Run()
 	}
 
-	return fmt.Errorf("plugin %s has no scaffold/main.go or scaffold.sh", plugin)
+	return logs.Errorf("plugin %s has no scaffold/main.go or scaffold.sh", plugin)
 }
 
 func fileExists(path string) bool {
@@ -315,7 +300,7 @@ func fileExists(path string) bool {
 
 func runBranch(args []string) {
 	if len(args) == 0 {
-		fmt.Println("Usage: ./dialtone.sh branch <name>")
+		logs.Error("Usage: ./dialtone.sh branch <name>")
 		os.Exit(1)
 	}
 
@@ -323,25 +308,25 @@ func runBranch(args []string) {
 	check := exec.Command("git", "branch", "--list", branchName)
 	output, err := check.Output()
 	if err != nil {
-		fmt.Printf("Failed to check branches: %v\n", err)
+		logs.Error("Failed to check branches: %v", err)
 		os.Exit(1)
 	}
 
 	var cmd *exec.Cmd
 	if strings.TrimSpace(string(output)) != "" {
-		fmt.Printf("Branch '%s' exists, checking out...\n", branchName)
+		logs.Info("Branch '%s' exists, checking out...", branchName)
 		cmd = exec.Command("git", "checkout", branchName)
 	} else {
-		fmt.Printf("Creating new branch '%s'...\n", branchName)
+		logs.Info("Creating new branch '%s'...", branchName)
 		cmd = exec.Command("git", "checkout", "-b", branchName)
 	}
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		fmt.Printf("Git operation failed: %v\n", err)
+		logs.Error("Git operation failed: %v", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("Now on branch: %s\n", branchName)
+	logs.Info("Now on branch: %s", branchName)
 }

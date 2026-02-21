@@ -163,7 +163,7 @@ func runIssue(args []string) error {
 		opts := SyncIssuesOptions{
 			State:  "open",
 			Limit:  500,
-			OutDir: filepath.Join("plugins", "github", "src_v1", "issues"),
+			OutDir: filepath.Join("src", "plugins", "github", "src_v1", "issues"),
 		}
 		for i := 1; i < len(args); i++ {
 			switch args[i] {
@@ -194,7 +194,7 @@ func runIssue(args []string) error {
 		logs.Info("Synced %d issues to %s", count, opts.OutDir)
 		return nil
 	case "delete-closed":
-		outDir := filepath.Join("plugins", "github", "src_v1", "issues")
+		outDir := filepath.Join("src", "plugins", "github", "src_v1", "issues")
 		limit := 500
 		dryRun := false
 		for i := 1; i < len(args); i++ {
@@ -230,7 +230,7 @@ func runIssue(args []string) error {
 		if len(args) < 2 {
 			return fmt.Errorf("usage: ./dialtone.sh github issue print <issue-id> [--out DIR]")
 		}
-		outDir := filepath.Join("plugins", "github", "src_v1", "issues")
+		outDir := filepath.Join("src", "plugins", "github", "src_v1", "issues")
 		issueID := strings.TrimSpace(args[1])
 		for i := 2; i < len(args); i++ {
 			switch args[i] {
@@ -243,7 +243,7 @@ func runIssue(args []string) error {
 		}
 		return PrintIssue(issueID, outDir)
 	case "push":
-		opts := PushIssuesOptions{OutDir: filepath.Join("plugins", "github", "src_v1", "issues")}
+		opts := PushIssuesOptions{OutDir: filepath.Join("src", "plugins", "github", "src_v1", "issues")}
 		for i := 1; i < len(args); i++ {
 			switch args[i] {
 			case "--out":
@@ -303,7 +303,7 @@ func PrintIssue(issueID, outDir string) error {
 		return errors.New("missing issue id")
 	}
 	if outDir == "" {
-		outDir = filepath.Join("plugins", "github", "src_v1", "issues")
+		outDir = filepath.Join("src", "plugins", "github", "src_v1", "issues")
 	}
 	path := filepath.Join(outDir, issueID+".md")
 	raw, err := os.ReadFile(path)
@@ -410,7 +410,7 @@ func allBlank(lines []string) bool {
 func DeleteClosedIssueFiles(outDir string, limit int, dryRun bool) (int, int, error) {
 	gh := findGH()
 	if strings.TrimSpace(outDir) == "" {
-		outDir = filepath.Join("plugins", "github", "src_v1", "issues")
+		outDir = filepath.Join("src", "plugins", "github", "src_v1", "issues")
 	}
 	if limit <= 0 {
 		limit = 500
@@ -467,7 +467,7 @@ func runPR(args []string) error {
 	case "sync":
 		opts := SyncPROptions{
 			Limit:  200,
-			OutDir: filepath.Join("plugins", "github", "src_v1", "prs"),
+			OutDir: filepath.Join("src", "plugins", "github", "src_v1", "prs"),
 		}
 		for i := 1; i < len(args); i++ {
 			switch args[i] {
@@ -494,7 +494,7 @@ func runPR(args []string) error {
 		return nil
 	case "push":
 		opts := PushPROptions{
-			OutDir: filepath.Join("plugins", "github", "src_v1", "prs"),
+			OutDir: filepath.Join("src", "plugins", "github", "src_v1", "prs"),
 		}
 		for i := 1; i < len(args); i++ {
 			switch args[i] {
@@ -517,7 +517,7 @@ func runPR(args []string) error {
 		if len(args) < 2 {
 			return fmt.Errorf("usage: ./dialtone.sh github pr print <pr-id> [--out DIR]")
 		}
-		outDir := filepath.Join("plugins", "github", "src_v1", "prs")
+		outDir := filepath.Join("src", "plugins", "github", "src_v1", "prs")
 		for i := 2; i < len(args); i++ {
 			if args[i] == "--out" && i+1 < len(args) {
 				outDir = args[i+1]
@@ -545,7 +545,7 @@ func runPR(args []string) error {
 			return err
 		}
 		if prNum > 0 {
-			if err := refreshSinglePRMarkdown(prNum, filepath.Join("plugins", "github", "src_v1", "prs")); err != nil {
+			if err := refreshSinglePRMarkdown(prNum, filepath.Join("src", "plugins", "github", "src_v1", "prs")); err != nil {
 				logs.Warn("Merged PR but failed to refresh local PR markdown for #%d: %v", prNum, err)
 			}
 		}
@@ -614,7 +614,7 @@ func SyncPRs(opts SyncPROptions) (int, error) {
 		opts.Limit = 200
 	}
 	if strings.TrimSpace(opts.OutDir) == "" {
-		opts.OutDir = filepath.Join("plugins", "github", "src_v1", "prs")
+		opts.OutDir = filepath.Join("src", "plugins", "github", "src_v1", "prs")
 	}
 	if err := os.MkdirAll(opts.OutDir, 0o755); err != nil {
 		return 0, err
@@ -651,7 +651,7 @@ func SyncPRs(opts SyncPROptions) (int, error) {
 
 func PushPRs(opts PushPROptions) (int, int, int, error) {
 	if strings.TrimSpace(opts.OutDir) == "" {
-		opts.OutDir = filepath.Join("plugins", "github", "src_v1", "prs")
+		opts.OutDir = filepath.Join("src", "plugins", "github", "src_v1", "prs")
 	}
 	files, err := filepath.Glob(filepath.Join(opts.OutDir, "*.md"))
 	if err != nil {
@@ -746,7 +746,7 @@ func PrintPR(prID, outDir string) error {
 		return errors.New("missing pr id")
 	}
 	if outDir == "" {
-		outDir = filepath.Join("plugins", "github", "src_v1", "prs")
+		outDir = filepath.Join("src", "plugins", "github", "src_v1", "prs")
 	}
 	path := filepath.Join(outDir, prID+".md")
 	raw, err := os.ReadFile(path)
@@ -1100,7 +1100,7 @@ func refreshSinglePRMarkdown(prNum int, outDir string) error {
 		return err
 	}
 	if outDir == "" {
-		outDir = filepath.Join("plugins", "github", "src_v1", "prs")
+		outDir = filepath.Join("src", "plugins", "github", "src_v1", "prs")
 	}
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
@@ -1165,7 +1165,7 @@ func SyncIssues(opts SyncIssuesOptions) (int, error) {
 		opts.Limit = 500
 	}
 	if opts.OutDir == "" {
-		opts.OutDir = filepath.Join("plugins", "github", "src_v1", "issues")
+		opts.OutDir = filepath.Join("src", "plugins", "github", "src_v1", "issues")
 	}
 	if err := os.MkdirAll(opts.OutDir, 0o755); err != nil {
 		return 0, err
@@ -1214,7 +1214,7 @@ func SyncIssues(opts SyncIssuesOptions) (int, error) {
 
 func PushIssues(opts PushIssuesOptions) (int, int, error) {
 	if opts.OutDir == "" {
-		opts.OutDir = filepath.Join("plugins", "github", "src_v1", "issues")
+		opts.OutDir = filepath.Join("src", "plugins", "github", "src_v1", "issues")
 	}
 	files, err := filepath.Glob(filepath.Join(opts.OutDir, "*.md"))
 	if err != nil {

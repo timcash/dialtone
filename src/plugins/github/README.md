@@ -35,9 +35,9 @@ Core issue commands:
 ./dialtone.sh github issue view src_v1 313
 ./dialtone.sh github issue print src_v1 313
 ./dialtone.sh github issue sync src_v1                        # default: open only
-./dialtone.sh github issue sync src_v1 --out plugins/github/src_v1/issues
-./dialtone.sh github issue push src_v1 --out plugins/github/src_v1/issues
-./dialtone.sh github issue delete-closed src_v1 --out plugins/github/src_v1/issues
+./dialtone.sh github issue sync src_v1 --out src/plugins/github/src_v1/issues
+./dialtone.sh github issue push src_v1 --out src/plugins/github/src_v1/issues
+./dialtone.sh github issue delete-closed src_v1 --out src/plugins/github/src_v1/issues
 ```
 
 Notes:
