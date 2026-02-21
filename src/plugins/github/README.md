@@ -34,18 +34,19 @@ Core issue commands:
 ./dialtone.sh github issue list src_v1 --state open --limit 30
 ./dialtone.sh github issue view src_v1 313
 ./dialtone.sh github issue print src_v1 313
+./dialtone.sh github issue verify src_v1
 ./dialtone.sh github issue sync src_v1                        # default: open only
-./dialtone.sh github issue sync src_v1 --out src/plugins/github/src_v1/issues
-./dialtone.sh github issue push src_v1 --out src/plugins/github/src_v1/issues
-./dialtone.sh github issue delete-closed src_v1 --out src/plugins/github/src_v1/issues
+./dialtone.sh github issue push src_v1
+./dialtone.sh github issue delete-closed src_v1
 ```
 
 Notes:
 - `issue sync` defaults to `--state open` (closed issues are not downloaded unless you explicitly set `--state all` or `--state closed`).
 - `issue delete-closed` removes local markdown files for closed GitHub issues.
+- default local dir is `plugins/github/src_v1/issues` (run from `src/` via `./dialtone.sh`); `--out` is optional override.
 
 Each generated issue file:
-- lives at `src/plugins/github/src_v1/issues/<issue_id>.md`
+- lives at `plugins/github/src_v1/issues/<issue_id>.md`
 - starts with a `signature` block
 - always starts with `- status: wait`
 
@@ -61,6 +62,7 @@ Conflict safety:
 - each issue markdown has `### sync:` metadata with `github-updated-at`
 - `issue push` fetches live issue metadata first
 - if GitHub changed since the last sync, push warns and skips that issue unless `--force`
+- `issue push` fails if `### tags:` contains any label that does not exist in repo labels
 
 ### Pull Request Commands
 
@@ -88,11 +90,12 @@ Additional PR actions:
 ```
 
 PR markdown workflow:
-- local files are in `src/plugins/github/src_v1/prs/<pr_id>.md`
+- local files are in `plugins/github/src_v1/prs/<pr_id>.md`
 - `pr sync` writes open PR metadata, labels, and comments to markdown
 - edit `### comments-outbound:` to queue comments to post
 - edit `### tags:` to desired PR labels; `pr push` reconciles labels on GitHub
 - `pr push` warns/skips on GitHub update conflicts unless `--force`
+- `pr push` fails if `### tags:` contains any label that does not exist in repo labels
 - after `pr merge`, plugin refreshes that PR markdown so merged status is reflected locally
 
 ## Example Workflows
@@ -104,7 +107,7 @@ PR markdown workflow:
 ./dialtone.sh github issue sync src_v1
 
 # 2) Agent edits a file:
-#    src/plugins/github/src_v1/issues/<id>.md
+#    plugins/github/src_v1/issues/<id>.md
 #    - add/update fields
 #    - add bullets under `### comments-outbound:`
 
@@ -128,7 +131,7 @@ PR markdown workflow:
 ./dialtone.sh github pr sync src_v1
 
 # 3) Agent edits:
-#    src/plugins/github/src_v1/prs/<id>.md
+#    plugins/github/src_v1/prs/<id>.md
 #    - set `### tags:` labels
 #    - add bullets under `### comments-outbound:`
 
