@@ -98,6 +98,50 @@ PR markdown workflow:
 - `pr push` fails if `### tags:` contains any label that does not exist in repo labels
 - after `pr merge`, plugin refreshes that PR markdown so merged status is reflected locally
 
+## Allowed Labels
+
+Use only labels that already exist in the repo label set. `issue push` and `pr push` reject unknown tags.
+
+Check current labels at any time:
+
+```bash
+gh label list --limit 500
+```
+
+### Workflow Labels
+
+Use workflow labels first. They control planning, priority, and readiness state for issues/PRs:
+
+- `p0`: Highest urgency/importance.
+- `p1`: Important, not urgent.
+- `ready`: Ready for coding.
+- `task`: Ready to be used as an LLM task.
+- `bug`: Something is broken.
+- `enhancement`: New feature/request.
+- `refactor`: Code structure cleanup/simplification.
+- `test`: Test-related work.
+- `documentation`: Docs update/addition.
+- `security`: Security-related work.
+- `performance`: Speed/efficiency work.
+- `help-wanted`: Needs extra contributors.
+- `good-first-issue`: Good starter issue.
+- `question`: Needs clarification.
+- `duplicate`: Already tracked elsewhere.
+- `invalid`: Not actionable as written.
+- `wontfix`: Intentionally not planned.
+
+Suggested use:
+- pick 1 priority label: `p0` or `p1`
+- pick readiness labels as status changes: `ready` -> `task`
+- pick 1 or more work-type labels: `bug` / `enhancement` / `refactor` / `test` / `documentation`
+- add `security` or `performance` when applicable
+
+### Tech Labels
+
+Tech labels are domain tags for routing and filtering. Pattern: `dialtone topic: <label>`.
+
+- `3d`, `3dgs`, `agent`, `ai`, `api`, `architecture`, `bare`, `blender`, `caching`, `cad`, `camera`, `canbus`, `code`, `code-gen`, `codex`, `cv`, `detection`, `devops`, `discord`, `dspy`, `duckdb`, `electronics`, `environment`, `firmware`, `flakes`, `gemini`, `geometry`, `geospatial`, `go`, `graph`, `hardware`, `headscale`, `holepunch`, `install`, `kv-cache`, `long-context`, `manifold`, `maps`, `memory`, `mjpeg`, `ml`, `mocap`, `modeling`, `mujoco`, `navigation`, `network`, `nix`, `opencode`, `optimization`, `p2p`, `persistence`, `raspberry-pi`, `rendering`, `research`, `rlm`, `roboflow`, `robot`, `robotics`, `scaping`, `sdk`, `sim2real`, `simulation`, `sourcing`, `splatting`, `sql`, `streaming`, `supply-chain`, `tailscale`, `threejs`, `tui`, `ui`, `upgrade`, `urdf`, `vpn`, `wasm`, `web`
+
 ## Example Workflows
 
 ### Issue Markdown Workflow
