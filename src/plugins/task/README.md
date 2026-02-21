@@ -111,3 +111,9 @@ Promotes `v2` to `v1` to set a new baseline.
 
 The task system itself is verified via:
 - `./dialtone.sh task test src_v1`
+
+Test wiring (src_v1):
+- orchestrator: `src/plugins/task/src_v1/test/cmd/main.go`
+- step registration: `src/plugins/task/src_v1/test/01_smoke/suite.go`
+- single-process execution through `testv1.RunSuite`
+- no plugin-local `test_ctx` type; tests use `testv1.StepContext`

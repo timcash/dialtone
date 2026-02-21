@@ -29,16 +29,41 @@ type Step struct {
 }
 
 type StepContext struct {
-	Name      string
-	Started   time.Time
-	Session   *BrowserSession
-	LogWriter io.Writer
-	logger    *logs.NATSLogger
+	Name         string
+	Started      time.Time
+	Session      *BrowserSession
+	LogWriter    io.Writer
+	SuiteSubject string
+	StepSubject  string
+	ErrorSubject string
+	natsURL      string
+	logger       *logs.NATSLogger
+	errorLogger  *logs.NATSLogger
 }
 
 func (sc *StepContext) Logf(format string, args ...any) {
+	sc.Infof(format, args...)
+}
+
+func (sc *StepContext) Infof(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	logs.Info("[STEP:%s] %s", sc.Name, msg)
+	if sc.logger != nil {
+		_ = sc.logger.Infof("%s", msg)
+	}
+}
+
+func (sc *StepContext) Warnf(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	logs.Warn("[STEP:%s] %s", sc.Name, msg)
+	if sc.logger != nil {
+		_ = sc.logger.Warnf("%s", msg)
+	}
+}
+
+func (sc *StepContext) Debugf(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	logs.Debug("[STEP:%s] %s", sc.Name, msg)
 	if sc.logger != nil {
 		_ = sc.logger.Infof("%s", msg)
 	}
@@ -50,6 +75,9 @@ func (sc *StepContext) Errorf(format string, args ...any) {
 	if sc.logger != nil {
 		_ = sc.logger.Errorf("%s", msg)
 	}
+	if sc.errorLogger != nil {
+		_ = sc.errorLogger.Errorf("[STEP:%s] %s", sc.Name, msg)
+	}
 }
 
 func (sc *StepContext) WaitForMessage(subject string, pattern string, timeout time.Duration) error {
@@ -60,7 +88,7 @@ func (sc *StepContext) WaitForMessage(subject string, pattern string, timeout ti
 
 	msgCh := make(chan string, 100)
 	sub, err := nc.Subscribe(subject, func(m *nats.Msg) {
-		msgCh <- string(m.Data)
+		msgCh <- logs.FormatMessage(m.Subject, m.Data)
 	})
 	if err != nil {
 		return err
@@ -78,6 +106,137 @@ func (sc *StepContext) WaitForMessage(subject string, pattern string, timeout ti
 			return fmt.Errorf("timeout waiting for %q on %s", pattern, subject)
 		}
 	}
+}
+
+func (sc *StepContext) NATSConn() *nats.Conn {
+	if sc.logger == nil {
+		return nil
+	}
+	return sc.logger.Conn()
+}
+
+func (sc *StepContext) NATSURL() string {
+	return strings.TrimSpace(sc.natsURL)
+}
+
+func (sc *StepContext) NewTopicLogger(subject string) (*logs.NATSLogger, error) {
+	nc := sc.NATSConn()
+	if nc == nil {
+		return nil, fmt.Errorf("NATS not available in this test context")
+	}
+	return logs.NewNATSLogger(nc, subject)
+}
+
+func (sc *StepContext) WaitForMessageAfterAction(subject, pattern string, timeout time.Duration, action func() error) error {
+	if sc.logger == nil || sc.logger.Conn() == nil {
+		return fmt.Errorf("NATS not available in this test context")
+	}
+	nc := sc.logger.Conn()
+	msgCh := make(chan string, 100)
+	sub, err := nc.Subscribe(subject, func(m *nats.Msg) {
+		msgCh <- logs.FormatMessage(m.Subject, m.Data)
+	})
+	if err != nil {
+		return err
+	}
+	defer sub.Unsubscribe()
+	if err := nc.Flush(); err != nil {
+		return err
+	}
+	if err := action(); err != nil {
+		return err
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		select {
+		case data := <-msgCh:
+			if strings.Contains(data, pattern) {
+				return nil
+			}
+		case <-time.After(time.Until(deadline)):
+			return fmt.Errorf("timeout waiting for %q on %s", pattern, subject)
+		}
+	}
+}
+
+func (sc *StepContext) WaitForAllMessagesAfterAction(subject string, patterns []string, timeout time.Duration, action func() error) error {
+	if sc.logger == nil || sc.logger.Conn() == nil {
+		return fmt.Errorf("NATS not available in this test context")
+	}
+	if len(patterns) == 0 {
+		return fmt.Errorf("no patterns provided")
+	}
+	nc := sc.logger.Conn()
+	msgCh := make(chan string, 100)
+	sub, err := nc.Subscribe(subject, func(m *nats.Msg) {
+		msgCh <- logs.FormatMessage(m.Subject, m.Data)
+	})
+	if err != nil {
+		return err
+	}
+	defer sub.Unsubscribe()
+	if err := nc.Flush(); err != nil {
+		return err
+	}
+	if err := action(); err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	deadline := time.Now().Add(timeout)
+	for len(seen) < len(patterns) {
+		select {
+		case data := <-msgCh:
+			for _, p := range patterns {
+				if !seen[p] && strings.Contains(data, p) {
+					seen[p] = true
+				}
+			}
+		case <-time.After(time.Until(deadline)):
+			missing := []string{}
+			for _, p := range patterns {
+				if !seen[p] {
+					missing = append(missing, p)
+				}
+			}
+			return fmt.Errorf("timeout waiting for patterns on %s: %s", subject, strings.Join(missing, ", "))
+		}
+	}
+	return nil
+}
+
+func (sc *StepContext) WaitForStepMessage(pattern string, timeout time.Duration) error {
+	if strings.TrimSpace(sc.StepSubject) == "" {
+		return fmt.Errorf("step subject not available in this test context")
+	}
+	return sc.WaitForMessage(sc.StepSubject, pattern, timeout)
+}
+
+func (sc *StepContext) WaitForErrorMessage(pattern string, timeout time.Duration) error {
+	if strings.TrimSpace(sc.ErrorSubject) == "" {
+		return fmt.Errorf("error subject not available in this test context")
+	}
+	return sc.WaitForMessage(sc.ErrorSubject, pattern, timeout)
+}
+
+func (sc *StepContext) WaitForErrorMessageAfterAction(pattern string, timeout time.Duration, action func() error) error {
+	if strings.TrimSpace(sc.ErrorSubject) == "" {
+		return fmt.Errorf("error subject not available in this test context")
+	}
+	return sc.WaitForMessageAfterAction(sc.ErrorSubject, pattern, timeout, action)
+}
+
+func (sc *StepContext) WaitForStepMessageAfterAction(pattern string, timeout time.Duration, action func() error) error {
+	if strings.TrimSpace(sc.StepSubject) == "" {
+		return fmt.Errorf("step subject not available in this test context")
+	}
+	return sc.WaitForMessageAfterAction(sc.StepSubject, pattern, timeout, action)
+}
+
+func (sc *StepContext) ResetStepLogClock() {
+	if strings.TrimSpace(sc.StepSubject) == "" {
+		return
+	}
+	logs.ResetTopicClock(sc.StepSubject)
 }
 
 type StepRunResult struct {
@@ -324,13 +483,20 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 		defer cancel()
 
 		stepCtx := &StepContext{
-			Name:    step.Name,
-			Started: time.Now(),
+			Name:         step.Name,
+			Started:      time.Now(),
+			SuiteSubject: baseSubject,
+			ErrorSubject: baseSubject + ".error",
+			natsURL:      natsURL,
 		}
 		if nc != nil {
 			stepSubject := baseSubject + "." + sanitizeSubjectToken(step.Name)
 			if stepLogger, err := logs.NewNATSLogger(nc, stepSubject); err == nil {
 				stepCtx.logger = stepLogger
+				stepCtx.StepSubject = stepSubject
+				if errLogger, eerr := logs.NewNATSLogger(nc, stepCtx.ErrorSubject); eerr == nil {
+					stepCtx.errorLogger = errLogger
+				}
 				stepCtx.Logf("step started")
 			}
 		}

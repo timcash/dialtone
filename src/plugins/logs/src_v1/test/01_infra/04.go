@@ -1,26 +1,23 @@
-package main
+package infra
 
 import (
 	"fmt"
 	"os/exec"
-	"strings"
 	"time"
+
+	testv1 "dialtone/dev/plugins/test/src_v1/go"
 )
 
-func Run04TwoProcessPingPong(ctx *testCtx) (string, error) {
-	if err := ctx.ensureBroker(); err != nil {
-		return "", err
+func Run04TwoProcessPingPong(sc *testv1.StepContext) (testv1.StepRunResult, error) {
+	natsURL := sc.NATSURL()
+	if natsURL == "" {
+		natsURL = "nats://127.0.0.1:4222"
 	}
-	nc := ctx.broker.Conn()
-	natsURL := ctx.broker.URL()
 	topic := "logs.pingpong.test"
-
-	// Pre-subscribe to results
-	resSub, err := nc.SubscribeSync("logs.pingpong.results")
+	repoRoot, err := findRepoRoot()
 	if err != nil {
-		return "", err
+		return testv1.StepRunResult{}, err
 	}
-	defer resSub.Unsubscribe()
 
 	cmdA := exec.Command("./dialtone.sh", "logs", "pingpong", "src_v1",
 		"--id", "alpha",
@@ -29,12 +26,7 @@ func Run04TwoProcessPingPong(ctx *testCtx) (string, error) {
 		"--rounds", "3",
 		"--nats-url", natsURL,
 	)
-	cmdA.Dir = ctx.repoRoot
-	if err := cmdA.Start(); err != nil {
-		return "", fmt.Errorf("start alpha pingpong: %w", err)
-	}
-
-	time.Sleep(500 * time.Millisecond)
+	cmdA.Dir = repoRoot
 
 	cmdB := exec.Command("./dialtone.sh", "logs", "pingpong", "src_v1",
 		"--id", "beta",
@@ -43,39 +35,34 @@ func Run04TwoProcessPingPong(ctx *testCtx) (string, error) {
 		"--rounds", "3",
 		"--nats-url", natsURL,
 	)
-	cmdB.Dir = ctx.repoRoot
-	if err := cmdB.Start(); err != nil {
-		_ = cmdA.Process.Kill()
-		return "", fmt.Errorf("start beta pingpong: %w", err)
-	}
+	cmdB.Dir = repoRoot
 
-	// Verify via NATS messages
-	alphaPassed := false
-	betaPassed := false
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) && (!alphaPassed || !betaPassed) {
-		msg, err := resSub.NextMsg(time.Until(deadline))
-		if err != nil {
-			break
-		}
-		data := string(msg.Data)
-		if strings.Contains(data, "[alpha] PINGPONG PASS") {
-			alphaPassed = true
-		}
-		if strings.Contains(data, "[beta] PINGPONG PASS") {
-			betaPassed = true
-		}
-	}
-
-	if !alphaPassed || !betaPassed {
+	// Verify via "act then wait" with one subscription and both expected messages.
+	err = sc.WaitForAllMessagesAfterAction(
+		"logs.pingpong.results",
+		[]string{"[alpha] PINGPONG PASS", "[beta] PINGPONG PASS"},
+		30*time.Second,
+		func() error {
+			if err := cmdA.Start(); err != nil {
+				return fmt.Errorf("start alpha pingpong: %w", err)
+			}
+			time.Sleep(500 * time.Millisecond)
+			if err := cmdB.Start(); err != nil {
+				_ = cmdA.Process.Kill()
+				return fmt.Errorf("start beta pingpong: %w", err)
+			}
+			return nil
+		},
+	)
+	if err != nil {
 		_ = cmdA.Process.Kill()
 		_ = cmdB.Process.Kill()
-		return "", fmt.Errorf("verification failed (alpha=%v, beta=%v)", alphaPassed, betaPassed)
+		return testv1.StepRunResult{}, fmt.Errorf("verification failed: %w", err)
 	}
 
 	// Wait for processes to exit
 	_ = cmdA.Wait()
 	_ = cmdB.Wait()
 
-	return "Verified two dialtone logs processes exchanged 3 ping/pong rounds on one topic (verified via NATS).", nil
+	return testv1.StepRunResult{Report: "Verified two dialtone logs processes exchanged 3 ping/pong rounds on one topic."}, nil
 }

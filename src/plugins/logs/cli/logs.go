@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -26,6 +27,7 @@ func RunLogs(versionDir string, args []string) {
 	natsURL := fs.String("nats-url", "nats://127.0.0.1:4222", "NATS server URL")
 	embedded := fs.Bool("embedded", false, "Start embedded NATS server for local stream")
 	stdout := fs.Bool("stdout", true, "Print streamed messages to stdout")
+	outFile := fs.String("file", "", "Append streamed messages to file path")
 	host := fs.String("host", os.Getenv("ROBOT_HOST"), "SSH host")
 	port := fs.String("port", "22", "SSH port")
 	user := fs.String("user", os.Getenv("ROBOT_USER"), "SSH user")
@@ -45,6 +47,7 @@ func RunLogs(versionDir string, args []string) {
 		fmt.Println("  --nats-url <url>   NATS server URL (default: nats://127.0.0.1:4222)")
 		fmt.Println("  --embedded         Start embedded NATS server for local stream")
 		fmt.Println("  --stdout           Print streamed messages (default: true)")
+		fmt.Println("  --file <path>      Append streamed messages to file")
 		fmt.Println("  --remote           Stream logs from remote robot")
 		fmt.Println("  --lines            Number of lines to show (if set, does not stream)")
 		fmt.Println("  --host             SSH host (user@host) [env: ROBOT_HOST]")
@@ -58,6 +61,7 @@ func RunLogs(versionDir string, args []string) {
 		fmt.Println("  ./dialtone.sh logs stream --topic 'logs.task.>'     # All task plugin logs")
 		fmt.Println("  ./dialtone.sh logs stream --topic 'logs.*.smoke'    # Smoke test logs for any plugin")
 		fmt.Println("  ./dialtone.sh logs stream --topic 'logs.dag.v1'     # Specific dag v1 log stream")
+		fmt.Println("  ./dialtone.sh logs stream --topic 'logs.>' --file ./logs.txt")
 		fmt.Println()
 	}
 
@@ -75,10 +79,10 @@ func RunLogs(versionDir string, args []string) {
 
 		runRemoteLogs(*host, *port, *user, *pass, *lines)
 	} else {
-		if !*stdout {
-			logs.Fatal("Error: local stream requires --stdout=true")
+		if !*stdout && strings.TrimSpace(*outFile) == "" {
+			logs.Fatal("Error: local stream requires at least one output sink (--stdout or --file)")
 		}
-		if err := runLocalNATSStream(versionDir, *natsURL, resolveTopic(*topic), *embedded); err != nil {
+		if err := runLocalNATSStream(versionDir, *natsURL, resolveTopic(*topic), *embedded, *stdout, *outFile); err != nil {
 			logs.Fatal("%v", err)
 		}
 	}
@@ -92,7 +96,7 @@ func resolveTopic(topic string) string {
 	return t
 }
 
-func runLocalNATSStream(versionDir, natsURL, subject string, embedded bool) error {
+func runLocalNATSStream(versionDir, natsURL, subject string, embedded, toStdout bool, filePath string) error {
 	nc, broker, usedURL, err := connectLocalNATS(versionDir, natsURL, embedded)
 	if err != nil {
 		return err
@@ -102,10 +106,31 @@ func runLocalNATSStream(versionDir, natsURL, subject string, embedded bool) erro
 		defer broker.Close()
 	}
 
+	var sinks []io.Writer
+	if toStdout {
+		sinks = append(sinks, os.Stdout)
+	}
+	if strings.TrimSpace(filePath) != "" {
+		clean := strings.TrimSpace(filePath)
+		if err := os.MkdirAll(filepath.Dir(clean), 0755); err != nil {
+			return fmt.Errorf("failed creating stream file directory: %w", err)
+		}
+		f, err := os.OpenFile(clean, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			return fmt.Errorf("failed opening stream file: %w", err)
+		}
+		defer f.Close()
+		sinks = append(sinks, f)
+	}
+	if len(sinks) == 0 {
+		return fmt.Errorf("no output sink configured")
+	}
+	out := io.MultiWriter(sinks...)
+
 	logs.Info("Streaming local NATS logs (%s): subject=%s via %s", versionDir, subject, usedURL)
 
 	_, err = nc.Subscribe(subject, func(msg *nats.Msg) {
-		fmt.Println(string(msg.Data))
+		fmt.Fprintln(out, logs.FormatMessage(msg.Subject, msg.Data))
 	})
 	if err != nil {
 		return fmt.Errorf("NATS subscribe failed for subject %q: %w", subject, err)
