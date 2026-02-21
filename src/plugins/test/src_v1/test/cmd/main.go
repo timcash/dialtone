@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
+	testv1 "dialtone/dev/plugins/test/src_v1/go"
 )
 
 func main() {
@@ -28,39 +31,82 @@ func main() {
 	logPath := filepath.Join(repoRoot, "src", "plugins", "test", "src_v1", "test", "test.log")
 	_ = os.Remove(logPath)
 
-	subject := "logs.test.src_v1"
-	stop, err := logs.ListenToFile(broker.Conn(), subject, logPath)
+	baseSubject := "logs.test.src_v1_ctx"
+	stop, err := logs.ListenToFile(broker.Conn(), baseSubject+".>", logPath)
 	if err != nil {
 		fmt.Printf("FAIL: listen to file failed: %v\n", err)
 		os.Exit(1)
 	}
 	defer func() { _ = stop() }()
 
-	logger, err := logs.NewNATSLogger(broker.Conn(), subject)
-	if err != nil {
-		fmt.Printf("FAIL: new nats logger failed: %v\n", err)
+	steps := []testv1.Step{
+		{
+			Name: "ctx-log-smoke",
+			RunWithContext: func(sc *testv1.StepContext) (testv1.StepRunResult, error) {
+				sc.Logf("ctx log info message")
+				sc.Errorf("ctx log error message")
+				return testv1.StepRunResult{Report: "ctx.Logf + ctx.Errorf emitted"}, nil
+			},
+		},
+	}
+	if err := testv1.RunSuite(testv1.SuiteOptions{
+		Version:     "src_v1",
+		NATSURL:     broker.URL(),
+		NATSSubject: baseSubject,
+	}, steps); err != nil {
+		fmt.Printf("FAIL: RunSuite failed: %v\n", err)
 		os.Exit(1)
 	}
 
-	if err := logger.Infof("test plugin info message"); err != nil {
-		fmt.Printf("FAIL: info publish failed: %v\n", err)
-		os.Exit(1)
-	}
-	if err := logger.Errorf("test plugin error message"); err != nil {
-		fmt.Printf("FAIL: error publish failed: %v\n", err)
-		os.Exit(1)
-	}
-
-	if err := waitForContains(logPath, "test plugin info message", 4*time.Second); err != nil {
+	if err := waitForContains(logPath, "ctx log info message", 4*time.Second); err != nil {
 		fmt.Printf("FAIL: %v\n", err)
 		os.Exit(1)
 	}
-	if err := waitForContains(logPath, "test plugin error message", 4*time.Second); err != nil {
+	if err := waitForContains(logPath, "ctx log error message", 4*time.Second); err != nil {
+		fmt.Printf("FAIL: %v\n", err)
+		os.Exit(1)
+	}
+	if err := runTemplateExample(repoRoot, broker.URL(), baseSubject, logPath); err != nil {
 		fmt.Printf("FAIL: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("PASS: logs library integration verified (subject=%s, file=%s)\n", subject, logPath)
+	fmt.Printf("PASS: test StepContext logging verified via NATS (subject_prefix=%s, file=%s)\n", baseSubject, logPath)
+}
+
+func runTemplateExample(repoRoot, natsURL, baseSubject, logPath string) error {
+	subject := baseSubject + ".template"
+	binPath := filepath.Join(repoRoot, "src", "plugins", "test", "src_v1", "test", "template_example_bin")
+	_ = os.Remove(binPath)
+
+	build := exec.Command("go", "build", "-o", binPath, "./plugins/test/src_v1/test/example_plugin_template")
+	build.Dir = filepath.Join(repoRoot, "src")
+	var buildOut bytes.Buffer
+	build.Stdout = &buildOut
+	build.Stderr = &buildOut
+	if err := build.Run(); err != nil {
+		return fmt.Errorf("template example build failed: %v\n%s", err, buildOut.String())
+	}
+	defer os.Remove(binPath)
+
+	run := exec.Command(binPath, "--nats-url", natsURL, "--subject", subject)
+	run.Dir = repoRoot
+	var runOut bytes.Buffer
+	run.Stdout = &runOut
+	run.Stderr = &runOut
+	if err := run.Run(); err != nil {
+		return fmt.Errorf("template example run failed: %v\n%s", err, runOut.String())
+	}
+	if !strings.Contains(runOut.String(), "TEMPLATE_PLUGIN_PASS") {
+		return fmt.Errorf("template pass marker missing:\n%s", runOut.String())
+	}
+	if err := waitForContains(logPath, "template plugin info", 4*time.Second); err != nil {
+		return err
+	}
+	if err := waitForContains(logPath, "template plugin error", 4*time.Second); err != nil {
+		return err
+	}
+	return nil
 }
 
 func waitForContains(path, pattern string, timeout time.Duration) error {

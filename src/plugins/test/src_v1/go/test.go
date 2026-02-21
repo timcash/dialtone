@@ -16,15 +16,16 @@ import (
 	"dialtone/dev/plugins/logs/src_v1/go"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
+	"github.com/nats-io/nats.go"
 )
 
 type Step struct {
-	Name            string
-	RunWithContext  func(*StepContext) (StepRunResult, error)
-	SectionID       string
-	Screenshots     []string
-	ScreenshotGrid  string
-	Timeout         time.Duration
+	Name           string
+	RunWithContext func(*StepContext) (StepRunResult, error)
+	SectionID      string
+	Screenshots    []string
+	ScreenshotGrid string
+	Timeout        time.Duration
 }
 
 type StepContext struct {
@@ -32,6 +33,23 @@ type StepContext struct {
 	Started   time.Time
 	Session   *BrowserSession
 	LogWriter io.Writer
+	logger    *logs.NATSLogger
+}
+
+func (sc *StepContext) Logf(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	logs.Info("[STEP:%s] %s", sc.Name, msg)
+	if sc.logger != nil {
+		_ = sc.logger.Infof("%s", msg)
+	}
+}
+
+func (sc *StepContext) Errorf(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	logs.Error("[STEP:%s] %s", sc.Name, msg)
+	if sc.logger != nil {
+		_ = sc.logger.Errorf("%s", msg)
+	}
 }
 
 type StepRunResult struct {
@@ -44,6 +62,9 @@ type SuiteOptions struct {
 	LogPath        string
 	ErrorLogPath   string
 	BrowserLogMode string
+	NATSURL        string
+	NATSSubject    string
+	AutoStartNATS  bool
 }
 
 type ConsoleMessage struct {
@@ -151,7 +172,7 @@ func initSession(session *chrome.Session, role string) (*BrowserSession, error) 
 	logs.Info("   [BROWSER] Connecting to WebSocket: %s", session.WebSocketURL)
 	// Connect to the browser via websocket
 	allocCtx, cancelAlloc := chromedp.NewRemoteAllocator(context.Background(), session.WebSocketURL)
-	
+
 	// Create context
 	ctx, cancelCtx := chromedp.NewContext(allocCtx)
 
@@ -241,50 +262,79 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 	}
 
 	logs.Info("Starting Test Suite: %s", opts.Version)
-	
+
+	natsURL := strings.TrimSpace(opts.NATSURL)
+	if natsURL == "" {
+		natsURL = "nats://127.0.0.1:4222"
+	}
+	autoStart := true
+	if opts.AutoStartNATS {
+		autoStart = true
+	}
+	nc, broker, baseSubject, natsErr := setupSuiteNATS(opts, natsURL, autoStart)
+	if natsErr != nil {
+		logs.Warn("NATS suite logging disabled: %v", natsErr)
+	}
+	if nc != nil {
+		defer nc.Close()
+	}
+	if broker != nil {
+		defer broker.Close()
+	}
+
 	startTime := time.Now()
 	var results []StepResult
-	
+
 	for i, step := range steps {
 		logs.Info("[%d/%d] Running step: %s", i+1, len(steps), step.Name)
-		
+
 		timeout := step.Timeout
 		if timeout == 0 {
 			timeout = 30 * time.Second
 		}
-		
+
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-		
+
 		stepCtx := &StepContext{
 			Name:    step.Name,
 			Started: time.Now(),
 		}
-		
+		if nc != nil {
+			stepSubject := baseSubject + "." + sanitizeSubjectToken(step.Name)
+			if stepLogger, err := logs.NewNATSLogger(nc, stepSubject); err == nil {
+				stepCtx.logger = stepLogger
+				stepCtx.Logf("step started")
+			}
+		}
+
 		done := make(chan struct{})
 		var result StepRunResult
 		var err error
-		
+
 		go func() {
 			result, err = step.RunWithContext(stepCtx)
 			close(done)
 		}()
-		
+
 		select {
 		case <-ctx.Done():
 			logs.Error("Step %s timed out after %v", step.Name, timeout)
 			err = fmt.Errorf("step %s timed out", step.Name)
+			stepCtx.Errorf("step timed out after %v", timeout)
 			// Try to capture a timeout screenshot if we have a session
-			// We need a way to access the session here. 
+			// We need a way to access the session here.
 			// For now, let's just log.
 		case <-done:
 			if err != nil {
 				logs.Error("Step %s failed: %v", step.Name, err)
+				stepCtx.Errorf("step failed: %v", err)
 			} else if result.Report != "" {
 				logs.Info("Step %s report: %s", step.Name, result.Report)
+				stepCtx.Logf("report: %s", result.Report)
 			}
 		}
-		
+
 		results = append(results, StepResult{
 			Step:   step,
 			Error:  err,
@@ -292,21 +342,21 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 			Start:  stepCtx.Started,
 			End:    time.Now(),
 		})
-		
+
 		if err != nil {
 			break
 		}
 	}
-	
+
 	duration := time.Since(startTime)
 	logs.Info("Test Suite Completed in %v", duration)
-	
+
 	if opts.ReportPath != "" {
 		if genErr := generateReport(opts, results, duration); genErr != nil {
 			logs.Error("Failed to generate report: %v", genErr)
 		}
 	}
-	
+
 	for _, r := range results {
 		if r.Error != nil {
 			return r.Error
@@ -315,12 +365,59 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 	return nil
 }
 
+func setupSuiteNATS(opts SuiteOptions, natsURL string, autoStart bool) (*nats.Conn, *logs.EmbeddedNATS, string, error) {
+	tryConnect := func(url string) (*nats.Conn, error) {
+		return nats.Connect(url, nats.Timeout(1200*time.Millisecond))
+	}
+	nc, err := tryConnect(natsURL)
+	if err != nil && autoStart {
+		broker, berr := logs.StartEmbeddedNATSOnURL(natsURL)
+		if berr != nil {
+			return nil, nil, "", berr
+		}
+		nc = broker.Conn()
+		if nc == nil {
+			broker.Close()
+			return nil, nil, "", fmt.Errorf("embedded nats connection not available")
+		}
+		subj := strings.TrimSpace(opts.NATSSubject)
+		if subj == "" {
+			subj = "logs.test." + sanitizeSubjectToken(opts.Version)
+		}
+		logs.Info("Suite NATS logging active at %s subject=%s (embedded=true)", broker.URL(), subj)
+		return nc, broker, subj, nil
+	}
+	if err != nil {
+		return nil, nil, "", err
+	}
+	subj := strings.TrimSpace(opts.NATSSubject)
+	if subj == "" {
+		subj = "logs.test." + sanitizeSubjectToken(opts.Version)
+	}
+	logs.Info("Suite NATS logging active at %s subject=%s", natsURL, subj)
+	return nc, nil, subj, nil
+}
+
+func sanitizeSubjectToken(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	repl := strings.NewReplacer(" ", "-", "/", "-", "\\", "-", "|", "-", ":", "-", ".", "-", "_", "-", "(", "", ")", "", "'", "", "\"", "")
+	s = repl.Replace(s)
+	for strings.Contains(s, "--") {
+		s = strings.ReplaceAll(s, "--", "-")
+	}
+	s = strings.Trim(s, "-")
+	if s == "" {
+		return "default"
+	}
+	return s
+}
+
 func generateReport(opts SuiteOptions, results []StepResult, totalDuration time.Duration) error {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("# Test Report: %s\n\n", opts.Version))
 	sb.WriteString(fmt.Sprintf("- **Date**: %s\n", time.Now().Format(time.RFC1123)))
 	sb.WriteString(fmt.Sprintf("- **Total Duration**: %v\n\n", totalDuration))
-	
+
 	sb.WriteString("## Summary\n\n")
 	passed := 0
 	for _, r := range results {
@@ -334,7 +431,7 @@ func generateReport(opts SuiteOptions, results []StepResult, totalDuration time.
 		status = "FAILED"
 	}
 	sb.WriteString(fmt.Sprintf("- **Status**: %s\n\n", status))
-	
+
 	sb.WriteString("## Details\n\n")
 	for i, r := range results {
 		icon := "✅"
@@ -349,7 +446,7 @@ func generateReport(opts SuiteOptions, results []StepResult, totalDuration time.
 		if r.Result.Report != "" {
 			sb.WriteString(fmt.Sprintf("- **Report**: %s\n", r.Result.Report))
 		}
-		
+
 		if len(r.Step.Screenshots) > 0 {
 			sb.WriteString("\n#### Screenshots\n\n")
 			for _, s := range r.Step.Screenshots {
@@ -360,7 +457,7 @@ func generateReport(opts SuiteOptions, results []StepResult, totalDuration time.
 		}
 		sb.WriteString("\n---\n\n")
 	}
-	
+
 	return os.WriteFile(opts.ReportPath, []byte(sb.String()), 0644)
 }
 

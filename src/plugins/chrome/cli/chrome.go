@@ -6,9 +6,9 @@ import (
 
 	"strings"
 
-	"dialtone/dev/plugins/logs/src_v1/go"
 	chrome "dialtone/dev/plugins/chrome/app"
 	chrome_test "dialtone/dev/plugins/chrome/test"
+	"dialtone/dev/plugins/logs/src_v1/go"
 )
 
 // RunChrome handles the 'chrome' command
@@ -17,6 +17,7 @@ func RunChrome(args []string) {
 		printChromeUsage()
 		return
 	}
+	args = stripVersionArg(args)
 
 	switch args[0] {
 	case "help", "--help", "-h":
@@ -30,7 +31,7 @@ func RunChrome(args []string) {
 
 		for _, arg := range args[1:] {
 			if arg == "--help" || arg == "-h" {
-				fmt.Println("Usage: dialtone chrome list [flags]")
+				fmt.Println("Usage: ./dialtone.sh chrome list [src_v1] [flags]")
 				fmt.Println("\nLists all detected Chrome/Edge processes on the system.")
 				fmt.Println("\nFlags:")
 				listFlags.PrintDefaults()
@@ -47,14 +48,14 @@ func RunChrome(args []string) {
 
 		for _, arg := range args[1:] {
 			if arg == "--help" || arg == "-h" {
-				fmt.Println("Usage: dialtone chrome kill [PID|all] [flags]")
+				fmt.Println("Usage: ./dialtone.sh chrome kill [src_v1] [PID|all] [flags]")
 				fmt.Println("\nTerminates Chrome processes. Default behavior is to only kill Dialtone-originated instances.")
 				fmt.Println("\nFlags:")
 				killFlags.PrintDefaults()
 				fmt.Println("\nExamples:")
-				fmt.Println("  dialtone chrome kill all        # Kill only Dialtone-started browsers")
-				fmt.Println("  dialtone chrome kill all --all  # Kill EVERY Chrome process on the PC")
-				fmt.Println("  dialtone chrome kill 1234       # Kill specific process by PID")
+				fmt.Println("  ./dialtone.sh chrome kill all        # Kill only Dialtone-started browsers")
+				fmt.Println("  ./dialtone.sh chrome kill all --all  # Kill EVERY Chrome process on the PC")
+				fmt.Println("  ./dialtone.sh chrome kill 1234       # Kill specific process by PID")
 				return
 			}
 		}
@@ -78,7 +79,7 @@ func RunChrome(args []string) {
 
 		for _, arg := range args[1:] {
 			if arg == "--help" || arg == "-h" {
-				fmt.Println("Usage: dialtone chrome new [URL] [flags]")
+				fmt.Println("Usage: ./dialtone.sh chrome new [src_v1] [URL] [flags]")
 				fmt.Println("\nLaunches a new headed Chrome instance linked to Dialtone.")
 				fmt.Println("\nFlags:")
 				newFlags.PrintDefaults()
@@ -122,7 +123,7 @@ func RunChrome(args []string) {
 
 		for _, arg := range args[1:] {
 			if arg == "--help" || arg == "-h" {
-				fmt.Println("Usage: dialtone chrome verify [flags]")
+				fmt.Println("Usage: ./dialtone.sh chrome verify [src_v1] [flags]")
 				fmt.Println("\nChecks if application is reachable via remote debugging port.")
 				fmt.Println("\nFlags:")
 				verifyFlags.PrintDefaults()
@@ -313,12 +314,12 @@ func handleNew(port int, gpu bool, headless bool, targetURL, role string, reuseE
 }
 
 func printChromeUsage() {
-	fmt.Println("Usage: dialtone chrome <command> [arguments]")
+	fmt.Println("Usage: ./dialtone.sh chrome <command> [src_v1] [arguments]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  verify [--port N]   Verify chrome connectivity")
 	fmt.Println("  list [flags]        List detected chrome processes")
 	fmt.Println("  new [URL] [flags]   Launch a new Chrome instance")
-	fmt.Println("  test                Run chrome plugin self-test (dev vs smoke roles)")
+	fmt.Println("  test [src_v1]       Run chrome plugin self-test (dev vs smoke roles)")
 	fmt.Println("  kill [PID|all] [--all] Kill Dialtone processes (default) or all processes")
 	fmt.Println("  install             Install chrome dependencies")
 	fmt.Println("\nFlags for list:")
@@ -336,4 +337,11 @@ func printChromeUsage() {
 	fmt.Println("\nGeneral Options:")
 	fmt.Println("  --port 9222         Remote debugging port")
 	fmt.Println("  --debug             Enable verbose logging")
+}
+
+func stripVersionArg(args []string) []string {
+	if len(args) >= 2 && strings.HasPrefix(args[1], "src_v") {
+		return append([]string{args[0]}, args[2:]...)
+	}
+	return args
 }

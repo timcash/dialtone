@@ -31,6 +31,16 @@ func main() {
 			Run:        Run02ErrorTopicFiltering,
 		},
 		{
+			Name:       "04 Two-process pingpong via dialtone logs",
+			Conditions: "Two ./dialtone.sh logs pingpong processes exchange at least 3 ping/pong rounds on one topic.",
+			Run:        Run04TwoProcessPingPong,
+		},
+		{
+			Name:       "05 Example plugin binary imports logs library",
+			Conditions: "A built binary under logs/src_v1/test imports logs library, auto-starts embedded NATS when missing, and publishes topic messages.",
+			Run:        Run05ExamplePluginImport,
+		},
+		{
 			Name:       "03 Finalize artifacts",
 			Conditions: "Artifacts exist and include captured topic lines.",
 			Run:        Run03Finalize,
