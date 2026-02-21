@@ -45,9 +45,11 @@ func main() {
 EOF
 
 # 3) Implement runtime library in src_v1/go using logs
+# Add this to your imports:
 # import logs "dialtone/dev/plugins/logs/src_v1/go"
 
 # 4) Write tests in src_v1/test using the test library
+# Add this to your imports:
 # import testv1 "dialtone/dev/plugins/test/src_v1/go"
 
 # 5) Document commands in src/plugins/my-plugin/README.md
@@ -57,40 +59,63 @@ EOF
 ./dialtone.sh my-plugin test src_v1
 ```
 
-### Import + Use `logs` (library example)
+## Foundation Library Integration
+
+To maintain Rank 2+ status, plugins **must** import and use the foundation libraries located in `src/plugins/logs` and `src/plugins/test`.
+
+### 1. Using the `logs` Library (Rank 0)
+**Core Mandate:** Always use the `logs` library instead of `fmt` for ALL operational output in plugin code, scaffolds, orchestrators, and `dev.go`. 
+
+- **Silence by Default:** Logs are redirected to `io.Discard` by default. Output is only visible via NATS subscription or explicit listeners.
+- **No `fmt`:** Direct usage of the `fmt` package for printing to stdout/stderr is prohibited in the core dev loop.
+
+**Import Path:** `dialtone/dev/plugins/logs/src_v1/go`
 
 ```go
 package main
 
-import logs "dialtone/dev/plugins/logs/src_v1/go"
+import (
+	logs "dialtone/dev/plugins/logs/src_v1/go"
+)
 
 func main() {
-	logs.Info("my-plugin started")
-	logs.Warn("example warning")
+	logs.Info("Plugin initialized successfully") // Flows to NATS, silent on stdout
 }
 ```
 
-### Import + Use `test` (library example)
+### 2. Using the `test` Library (Rank 1)
+All plugin verification must be implemented as a test suite using the `test` library.
+
+- **NATS Verification:** Use `ctx.WaitForMessage` to verify system behavior via NATS topics instead of inspecting stdout or log files.
+
+**Import Path:** `dialtone/dev/plugins/test/src_v1/go`
 
 ```go
 package main
 
-import testv1 "dialtone/dev/plugins/test/src_v1/go"
+import (
+	"time"
+	testv1 "dialtone/dev/plugins/test/src_v1/go"
+)
 
 func main() {
 	steps := []testv1.Step{
 		{
-			Name: "smoke",
+			Name: "message-verify",
 			RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
-				ctx.Logf("step running")
-				return testv1.StepRunResult{Report: "ok"}, nil
+				ctx.Logf("Triggering action...")
+				
+				// Verify success via NATS topic
+				err := ctx.WaitForMessage("logs.my-plugin.audit", "action-complete", 5*time.Second)
+				if err != nil {
+					return testv1.StepRunResult{}, err
+				}
+				return testv1.StepRunResult{Report: "Verified via NATS!"}, nil
 			},
 		},
 	}
 
-	_ = testv1.RunSuite(testv1.SuiteOptions{
-		Version: "src_v1",
-	}, steps)
+	_ = testv1.RunSuite(testv1.SuiteOptions{Version: "src_v1"}, steps)
 }
 ```
 

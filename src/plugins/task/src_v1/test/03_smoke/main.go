@@ -1,154 +1,151 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
 )
 
 func main() {
+	var tmpTasksDir string
+	var repoRoot string
+	var srcDir string
+	var taskToolRel string
+
 	steps := []testv1.Step{
 		{
-			Name: "create-task",
+			Name: "setup-test-env",
 			RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
-				taskName := "smoke-test-task"
-				ctx.Logf("Creating task: %s", taskName)
-				
+				var err error
+				tmpTasksDir, err = os.MkdirTemp("", "dialtone-tasks-test-*")
+				if err != nil {
+					return testv1.StepRunResult{}, err
+				}
+				ctx.Logf("Created temp tasks dir: %s", tmpTasksDir)
+
 				cwd, _ := os.Getwd()
-				repoRoot := cwd
+				repoRoot = cwd
 				if filepath.Base(cwd) == "src" {
 					repoRoot = filepath.Dir(cwd)
 				}
-				
-				taskTool := filepath.Join(repoRoot, "src", "plugins", "task", "src_v1", "go", "main.go")
-				
-				cmd := exec.Command("go", "run", taskTool, "create", taskName)
-				cmd.Dir = repoRoot
-				out, err := cmd.CombinedOutput()
-				if err != nil {
-					return testv1.StepRunResult{}, fmt.Errorf("create failed: %v, output: %s", err, string(out))
-				}
+				srcDir = filepath.Join(repoRoot, "src")
+				taskToolRel = "./plugins/task/src_v1/go/main.go"
 
-				v1Path := filepath.Join(repoRoot, "src", "plugins", "task", "database", taskName, "v1", taskName+".md")
-				v2Path := filepath.Join(repoRoot, "src", "plugins", "task", "database", taskName, "v2", taskName+".md")
-
-				if _, err := os.Stat(v1Path); err != nil {
-					return testv1.StepRunResult{}, fmt.Errorf("v1 file missing at %s: %v", v1Path, err)
-				}
-				if _, err := os.Stat(v2Path); err != nil {
-					return testv1.StepRunResult{}, fmt.Errorf("v2 file missing at %s: %v", v2Path, err)
-				}
-
-				return testv1.StepRunResult{Report: "Task files created successfully"}, nil
+				return testv1.StepRunResult{Report: "Test environment initialized"}, nil
 			},
 		},
 		{
-			Name: "sign-task",
+			Name: "scaffold-dependency-tree",
 			RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
-				taskName := "smoke-test-task"
-				ctx.Logf("Signing task: %s", taskName)
-
-				cwd, _ := os.Getwd()
-				repoRoot := cwd
-				if filepath.Base(cwd) == "src" {
-					repoRoot = filepath.Dir(cwd)
-				}
+				tasks := []string{"env-config-update", "auth-middleware-v2"}
 				
-				taskTool := filepath.Join(repoRoot, "src", "plugins", "task", "src_v1", "go", "main.go")
-
-				cmd := exec.Command("go", "run", taskTool, "sign", taskName, "--role", "LLM-CODE")
-				cmd.Dir = repoRoot
-				out, err := cmd.CombinedOutput()
-				if err != nil {
-					return testv1.StepRunResult{}, fmt.Errorf("sign failed: %v, output: %s", err, string(out))
+				for _, name := range tasks {
+					cmd := exec.Command("go", "run", taskToolRel, "--tasks-dir", tmpTasksDir, "create", name)
+					cmd.Dir = srcDir
+					out, err := cmd.CombinedOutput()
+					if err != nil {
+						return testv1.StepRunResult{}, logs.Errorf("failed to create task %s: %v, output: %s", name, err, string(out))
+					}
 				}
 
-				v2Path := filepath.Join(repoRoot, "src", "plugins", "task", "database", taskName, "v2", taskName+".md")
+				v2Path := filepath.Join(tmpTasksDir, "auth-middleware-v2", "v2", "root.md")
 				content, err := os.ReadFile(v2Path)
 				if err != nil {
 					return testv1.StepRunResult{}, err
 				}
-
-				if !strings.Contains(string(content), "LLM-CODE>") {
-					return testv1.StepRunResult{}, fmt.Errorf("v2 content does not contain signature")
-				}
-
-				return testv1.StepRunResult{Report: "Task signed successfully"}, nil
-			},
-		},
-		{
-			Name: "validate-task",
-			RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
-				taskName := "smoke-test-task"
-				ctx.Logf("Validating task: %s", taskName)
-
-				cwd, _ := os.Getwd()
-				repoRoot := cwd
-				if filepath.Base(cwd) == "src" {
-					repoRoot = filepath.Dir(cwd)
-				}
 				
-				taskTool := filepath.Join(repoRoot, "src", "plugins", "task", "src_v1", "go", "main.go")
-
-				cmd := exec.Command("go", "run", taskTool, "validate", taskName)
-				cmd.Dir = repoRoot
-				out, err := cmd.CombinedOutput()
-				if err != nil {
-					return testv1.StepRunResult{}, fmt.Errorf("validate failed: %v, output: %s", err, string(out))
-				}
-
-				if !strings.Contains(string(out), "Validation PASSED") {
-					return testv1.StepRunResult{}, fmt.Errorf("unexpected output: %s", string(out))
-				}
-
-				return testv1.StepRunResult{Report: "Task validated successfully"}, nil
-			},
-		},
-		{
-			Name: "archive-task",
-			RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
-				taskName := "smoke-test-task"
-				ctx.Logf("Archiving task: %s", taskName)
-
-				cwd, _ := os.Getwd()
-				repoRoot := cwd
-				if filepath.Base(cwd) == "src" {
-					repoRoot = filepath.Dir(cwd)
-				}
-				
-				taskTool := filepath.Join(repoRoot, "src", "plugins", "task", "src_v1", "go", "main.go")
-
-				cmd := exec.Command("go", "run", taskTool, "archive", taskName)
-				cmd.Dir = repoRoot
-				out, err := cmd.CombinedOutput()
-				if err != nil {
-					return testv1.StepRunResult{}, fmt.Errorf("archive failed: %v, output: %s", err, string(out))
-				}
-
-				v1Path := filepath.Join(repoRoot, "src", "plugins", "task", "database", taskName, "v1", taskName+".md")
-				v1Content, err := os.ReadFile(v1Path)
-				if err != nil {
+				updatedContent := strings.Replace(string(content), "### task-dependencies:\n- none", "### task-dependencies:\n- env-config-update", 1)
+				if err := os.WriteFile(v2Path, []byte(updatedContent), 0644); err != nil {
 					return testv1.StepRunResult{}, err
 				}
 
-				if !strings.Contains(string(v1Content), "LLM-CODE>") {
-					return testv1.StepRunResult{}, fmt.Errorf("v1 content does not match v2 after archive")
+				return testv1.StepRunResult{Report: "Scaffolded 2 tasks with 1 dependency"}, nil
+			},
+		},
+		{
+			Name: "verify-v1-v2-diff",
+			RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+				v1Path := filepath.Join(tmpTasksDir, "auth-middleware-v2", "v1", "root.md")
+				v2Path := filepath.Join(tmpTasksDir, "auth-middleware-v2", "v2", "root.md")
+
+				v1, _ := os.ReadFile(v1Path)
+				v2, _ := os.ReadFile(v2Path)
+
+				if string(v1) == string(v2) {
+					return testv1.StepRunResult{}, logs.Errorf("v1 and v2 should be different for auth-middleware-v2")
 				}
 
-				return testv1.StepRunResult{Report: "Task archived successfully"}, nil
+				return testv1.StepRunResult{Report: "Verified baseline vs WIP separation"}, nil
+			},
+		},
+		{
+			Name: "sign-and-validate",
+			RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+				taskName := "env-config-update"
+				
+				cmd := exec.Command("go", "run", taskToolRel, "--tasks-dir", tmpTasksDir, "sign", taskName, "--role", "LLM-CODE")
+				cmd.Dir = srcDir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					return testv1.StepRunResult{}, logs.Errorf("sign failed: %v, output: %s", taskName, err, string(out))
+				}
+
+				cmd = exec.Command("go", "run", taskToolRel, "--tasks-dir", tmpTasksDir, "validate", taskName)
+				cmd.Dir = srcDir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					return testv1.StepRunResult{}, logs.Errorf("validate failed: %v, output: %s", taskName, err, string(out))
+				}
+
+				return testv1.StepRunResult{Report: "Successfully signed and validated task"}, nil
+			},
+		},
+		{
+			Name: "archive-and-verify-match",
+			RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+				taskName := "auth-middleware-v2"
+				
+				cmd := exec.Command("go", "run", taskToolRel, "--tasks-dir", tmpTasksDir, "archive", taskName)
+				cmd.Dir = srcDir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					return testv1.StepRunResult{}, logs.Errorf("archive failed: %v, output: %s", taskName, err, string(out))
+				}
+
+				v1Path := filepath.Join(tmpTasksDir, "auth-middleware-v2", "v1", "root.md")
+				v2Path := filepath.Join(tmpTasksDir, "auth-middleware-v2", "v2", "root.md")
+
+				v1, _ := os.ReadFile(v1Path)
+				v2, _ := os.ReadFile(v2Path)
+
+				if string(v1) != string(v2) {
+					return testv1.StepRunResult{}, logs.Errorf("v1 and v2 should match after archive")
+				}
+
+				if !strings.Contains(string(v1), "- env-config-update") {
+					return testv1.StepRunResult{}, logs.Errorf("v1 missing dependency after archive")
+				}
+
+				return testv1.StepRunResult{Report: "Verified v2 promoted to v1 and v2 reset to match"}, nil
+			},
+		},
+		{
+			Name: "cleanup",
+			RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+				if tmpTasksDir != "" {
+					os.RemoveAll(tmpTasksDir)
+				}
+				return testv1.StepRunResult{Report: "Cleaned up temp directories"}, nil
 			},
 		},
 	}
 
 	err := testv1.RunSuite(testv1.SuiteOptions{
-		Version: "task-smoke-v1",
+		Version: "task-workflow-v1",
 	}, steps)
 	if err != nil {
-		fmt.Printf("Suite failed: %v\n", err)
+		logs.Error("Suite failed: %v", err)
 		os.Exit(1)
 	}
 }

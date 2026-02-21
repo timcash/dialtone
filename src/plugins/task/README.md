@@ -10,11 +10,17 @@ To ensure clarity between "where we started" and "what we changed," each task ex
 - **`v2` (WIP):** The current working state. All updates, signatures, and status changes are recorded here.
 
 ### 2. Task Markdown Format
-Tasks are defined in `.md` files with a specific structure:
+Tasks are defined in `.md` files with a specific structure. There is exactly one H1 header (`#`) per file for the task title.
+
+Required sections:
+- **`### description:`** Actionable summary of the goal.
+- **`### tags:`** Metadata for categorization.
 - **`### task-dependencies:`** List of other task IDs this task depends on.
-- **`### reviewed:`** Signatures from reviewers.
-- **`### tested:`** Signatures from testers.
+- **`### documentation:`** Reference URLs or local file paths.
+- **`### test-condition-1:`** Verifiable criteria for success.
 - **`### test-command:`** The command to run to verify the task.
+- **`### reviewed:`** Signatures from reviewers (managed via CLI).
+- **`### tested:`** Signatures from testers (managed via CLI).
 
 ## CLI Commands
 
@@ -22,23 +28,30 @@ Manage tasks via `./dialtone.sh task <command>`:
 
 ### `create <task-name>`
 Scaffolds a new task in `src/plugins/task/database/<task-name>/v1/`.
-Copies `v1` to `v2` to initialize the working state.
+Initializes `v1` and `v2` as baseline and working copies.
 
-### `validate <task-name> <version>`
-Validates the format of the task markdown file (e.g., `src_v1` or `src_v2`).
+### `validate <task-name>`
+Validates the format of the task markdown file in `v2`.
 
-### `sign <task-name> <version> --role <role>`
-Adds a signature to the `reviewed` or `tested` section of the task.
-
-### `status <task-name>`
-Shows the current status, dependencies, and diff between `v1` and `v2`.
+### `sign <task-name> --role <role>`
+Adds a signature to the `reviewed` or `tested` section of the task in `v2`.
 
 ### `archive <task-name>`
-Promotes `v2` to `v1` to prepare for the next work cycle:
-1. `rm -rf v1`
-2. `mv v2 v1`
-3. `cp -r v1 v2`
-After this, `v1` and `v2` match, providing a clean baseline for the next agent.
+Promotes `v2` to `v1` to prepare for the next work cycle. After this, `v1` and `v2` match.
+
+## How to Build a Task
+
+While you can use `./dialtone.sh task create`, you can also build tasks manually or via automation:
+
+1. **Define the ID:** Choose a slugified ID (e.g., `my-feature-fix`).
+2. **Create the Folder:** `mkdir -p src/plugins/task/database/my-feature-fix/{v1,v2}`.
+3. **Draft the Markdown:** Create `my-feature-fix.md` in both `v1/` and `v2/`.
+4. **Populate Sections:**
+   - Ensure you use `### section-name:` for all headers.
+   - Use `- none` instead of comments for empty lists.
+   - Avoid multiple H1 headers; only the title uses `#`.
+5. **Set the Baseline:** If you are migrating an issue, `v1` and `v2` should start as identical copies of the task.
+6. **Link Dependencies:** Reference other task folders by their ID.
 
 ## Implementation Details
 
@@ -65,8 +78,8 @@ src/plugins/task/
 
 3. **Verify and Sign:**
    ```sh
-   ./dialtone.sh task sign auth-fix v2 --role LLM-CODE
-   ./dialtone.sh task sign auth-fix v2 --role LLM-TEST
+   ./dialtone.sh task sign auth-fix --role LLM-CODE
+   ./dialtone.sh task sign auth-fix --role LLM-TEST
    ```
 
 4. **Prepare for handoff:**

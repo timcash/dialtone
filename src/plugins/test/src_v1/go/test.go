@@ -52,6 +52,34 @@ func (sc *StepContext) Errorf(format string, args ...any) {
 	}
 }
 
+func (sc *StepContext) WaitForMessage(subject string, pattern string, timeout time.Duration) error {
+	if sc.logger == nil || sc.logger.Conn() == nil {
+		return fmt.Errorf("NATS not available in this test context")
+	}
+	nc := sc.logger.Conn()
+
+	msgCh := make(chan string, 100)
+	sub, err := nc.Subscribe(subject, func(m *nats.Msg) {
+		msgCh <- string(m.Data)
+	})
+	if err != nil {
+		return err
+	}
+	defer sub.Unsubscribe()
+
+	deadline := time.Now().Add(timeout)
+	for {
+		select {
+		case data := <-msgCh:
+			if strings.Contains(data, pattern) {
+				return nil
+			}
+		case <-time.After(time.Until(deadline)):
+			return fmt.Errorf("timeout waiting for %q on %s", pattern, subject)
+		}
+	}
+}
+
 type StepRunResult struct {
 	Report string
 }
@@ -251,8 +279,7 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 		// Truncate and open log file
 		f, err := os.OpenFile(opts.LogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 		if err == nil {
-			mw := io.MultiWriter(os.Stdout, f)
-			logs.SetOutput(mw)
+			logs.SetOutput(f)
 			defer f.Close()
 		}
 	}

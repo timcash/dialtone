@@ -22,8 +22,7 @@ import (
 func RunLogs(versionDir string, args []string) {
 	fs := flag.NewFlagSet("logs", flag.ExitOnError)
 	remote := fs.Bool("remote", false, "Stream logs from remote robot")
-	streamTopic := fs.String("stream", "logs.>", "NATS subject to subscribe to (supports wildcards)")
-	topic := fs.String("topic", "", "Alias for --stream; use '*' for all logs")
+	topic := fs.String("topic", "logs.>", "NATS subject to subscribe to (supports wildcards '*' and '>')")
 	natsURL := fs.String("nats-url", "nats://127.0.0.1:4222", "NATS server URL")
 	embedded := fs.Bool("embedded", false, "Start embedded NATS server for local stream")
 	stdout := fs.Bool("stdout", true, "Print streamed messages to stdout")
@@ -37,21 +36,28 @@ func RunLogs(versionDir string, args []string) {
 	fs.Usage = func() {
 		fmt.Println("Usage: ./dialtone.sh logs stream [src_vN] [options]")
 		fmt.Println()
-		fmt.Println("Stream logs from Dialtone.")
+		fmt.Println("Stream logs from Dialtone via NATS subjects.")
 		fmt.Println()
 		fmt.Println("Options:")
-		fmt.Println("  --topic       Topic alias for --stream (use '*' for all logs)")
-		fmt.Println("  --stream      NATS subject to subscribe to (default: logs.>)")
-		fmt.Println("  --nats-url    NATS server URL (default: nats://127.0.0.1:4222)")
-		fmt.Println("  --embedded    Start embedded NATS server for local stream")
-		fmt.Println("  --stdout      Print streamed messages (default: true)")
-		fmt.Println("  --remote      Stream logs from remote robot")
-		fmt.Println("  --lines       Number of lines to show (if set, does not stream)")
-		fmt.Println("  --host        SSH host (user@host) [env: ROBOT_HOST]")
-		fmt.Println("  --port        SSH port (default: 22)")
-		fmt.Println("  --user        SSH username [env: ROBOT_USER]")
-		fmt.Println("  --pass        SSH password [env: ROBOT_PASSWORD]")
-		fmt.Println("  --help        Show this help message")
+		fmt.Println("  --topic <subject>  NATS subject filter (default: 'logs.>')")
+		fmt.Println("                     - use '>' to match all tokens (e.g., 'logs.>')")
+		fmt.Println("                     - use '*' to match a single token (e.g., 'logs.*.smoke')")
+		fmt.Println("  --nats-url <url>   NATS server URL (default: nats://127.0.0.1:4222)")
+		fmt.Println("  --embedded         Start embedded NATS server for local stream")
+		fmt.Println("  --stdout           Print streamed messages (default: true)")
+		fmt.Println("  --remote           Stream logs from remote robot")
+		fmt.Println("  --lines            Number of lines to show (if set, does not stream)")
+		fmt.Println("  --host             SSH host (user@host) [env: ROBOT_HOST]")
+		fmt.Println("  --port             SSH port (default: 22)")
+		fmt.Println("  --user             SSH username [env: ROBOT_USER]")
+		fmt.Println("  --pass             SSH password [env: ROBOT_PASSWORD]")
+		fmt.Println("  --help             Show this help message")
+		fmt.Println()
+		fmt.Println("Examples:")
+		fmt.Println("  ./dialtone.sh logs stream --topic 'logs.>'          # All logs")
+		fmt.Println("  ./dialtone.sh logs stream --topic 'logs.task.>'     # All task plugin logs")
+		fmt.Println("  ./dialtone.sh logs stream --topic 'logs.*.smoke'    # Smoke test logs for any plugin")
+		fmt.Println("  ./dialtone.sh logs stream --topic 'logs.dag.v1'     # Specific dag v1 log stream")
 		fmt.Println()
 	}
 
@@ -72,21 +78,15 @@ func RunLogs(versionDir string, args []string) {
 		if !*stdout {
 			logs.Fatal("Error: local stream requires --stdout=true")
 		}
-		if err := runLocalNATSStream(versionDir, *natsURL, resolveTopic(*topic, *streamTopic), *embedded); err != nil {
+		if err := runLocalNATSStream(versionDir, *natsURL, resolveTopic(*topic), *embedded); err != nil {
 			logs.Fatal("%v", err)
 		}
 	}
 }
 
-func resolveTopic(topic, streamTopic string) string {
+func resolveTopic(topic string) string {
 	t := strings.TrimSpace(topic)
-	if t == "" {
-		t = strings.TrimSpace(streamTopic)
-	}
-	if t == "" {
-		return "logs.>"
-	}
-	if t == "*" || strings.EqualFold(t, "all") {
+	if t == "" || t == "*" || strings.EqualFold(t, "all") {
 		return "logs.>"
 	}
 	return t
@@ -271,6 +271,8 @@ func RunPingPong(versionDir string, args []string) error {
 		return err
 	}
 
+	logger, _ := logs.NewNATSLogger(nc, "logs.pingpong.results")
+
 	isInitiator := *id < *peer
 	publish := func(kind string, seq int) error {
 		m := pingPongMessage{Kind: kind, From: *id, To: *peer, Seq: seq}
@@ -296,7 +298,7 @@ func RunPingPong(versionDir string, args []string) error {
 				return fmt.Errorf("[%s] timeout waiting pong seq=%d", *id, seq)
 			}
 		}
-		logs.Info("[%s] PINGPONG PASS rounds=%d", *id, *rounds)
+		logger.Infof("[%s] PINGPONG PASS rounds=%d", *id, *rounds)
 		return nil
 	}
 
@@ -319,7 +321,7 @@ func RunPingPong(versionDir string, args []string) error {
 			return err
 		}
 	}
-	logs.Info("[%s] PINGPONG PASS rounds=%d", *id, *rounds)
+	logger.Infof("[%s] PINGPONG PASS rounds=%d", *id, *rounds)
 	return nil
 }
 

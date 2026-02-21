@@ -134,6 +134,8 @@ func NewNATSLogger(conn *nats.Conn, subject string) (*NATSLogger, error) {
 
 func (l *NATSLogger) Subject() string { return l.subject }
 
+func (l *NATSLogger) Conn() *nats.Conn { return l.conn }
+
 func (l *NATSLogger) Infof(format string, args ...any) error {
 	return l.publish("INFO", fmt.Sprintf(format, args...))
 }

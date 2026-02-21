@@ -9,7 +9,11 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
+
+var globalTasksDir string
 
 func main() {
 	if len(os.Args) < 2 {
@@ -17,8 +21,28 @@ func main() {
 		return
 	}
 
-	command := os.Args[1]
-	args := os.Args[2:]
+	// Default tasks directory
+	globalTasksDir = filepath.Join("src", "plugins", "task", "src_v1", "tasks")
+
+	// Simple global flag parsing
+	var filteredArgs []string
+	for i := 1; i < len(os.Args); i++ {
+		arg := os.Args[i]
+		if arg == "--tasks-dir" && i+1 < len(os.Args) {
+			globalTasksDir = os.Args[i+1]
+			i++
+			continue
+		}
+		filteredArgs = append(filteredArgs, arg)
+	}
+
+	if len(filteredArgs) < 1 {
+		printUsage()
+		return
+	}
+
+	command := filteredArgs[0]
+	args := filteredArgs[1:]
 
 	switch command {
 	case "create":
@@ -29,46 +53,84 @@ func main() {
 		runArchive(args)
 	case "sign":
 		runSign(args)
+	case "sync":
+		runSync(args)
 	case "help":
 		printUsage()
 	default:
-		fmt.Printf("Unknown task command: %s\n", command)
+		logs.Error("Unknown task command: %s", command)
 		printUsage()
 	}
 }
 
 func printUsage() {
-	fmt.Println("Usage: task <command> [arguments]")
+	fmt.Println("Usage: task [global-options] <command> [arguments]")
+	fmt.Println("\nGlobal Options:")
+	fmt.Println("  --tasks-dir <path>   Override default tasks directory")
 	fmt.Println("\nCommands:")
-	fmt.Println("  create <task-name>   Create a new task in database/<name>/v1")
+	fmt.Println("  create <task-name>   Create a new task in tasks/<name>/v1/root.md")
 	fmt.Println("  validate <task-name> Validate a task markdown file")
 	fmt.Println("  archive <task-name>  Promote v2 to v1 and prepare for next cycle")
 	fmt.Println("  sign <task-name> --role <role>  Sign a task in v2")
+	fmt.Println("  sync [issue-id]      Sync GitHub issues into tasks/ folder")
+}
+
+func getTasksDir() string {
+	if envDir := os.Getenv("DIALTONE_TASKS_DIR"); envDir != "" {
+		return envDir
+	}
+	// If it's not the default, it means it was set via flag
+	defaultDir := filepath.Join("src", "plugins", "task", "src_v1", "tasks")
+	if globalTasksDir != defaultDir {
+		return globalTasksDir
+	}
+	root, err := findRepoRoot()
+	if err != nil {
+		return globalTasksDir // Fallback
+	}
+	return filepath.Join(root, "src", "plugins", "task", "src_v1", "tasks")
+}
+
+func findRepoRoot() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
+			return cwd, nil
+		}
+		parent := filepath.Dir(cwd)
+		if parent == cwd {
+			return "", fmt.Errorf("repo root not found")
+		}
+		cwd = parent
+	}
 }
 
 func runCreate(args []string) {
 	if len(args) < 1 {
-		fmt.Println("Usage: task create <task-name>")
+		logs.Error("Usage: task create <task-name>")
 		return
 	}
 	taskName := args[0]
 
-	baseDir := filepath.Join("src", "plugins", "task", "database", taskName, "v1")
-	v2Dir := filepath.Join("src", "plugins", "task", "database", taskName, "v2")
+	baseDir := filepath.Join(getTasksDir(), taskName, "v1")
+	v2Dir := filepath.Join(getTasksDir(), taskName, "v2")
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
-		fmt.Printf("Error creating directory %s: %v\n", baseDir, err)
+		logs.Error("Error creating directory %s: %v", baseDir, err)
 		return
 	}
 	if err := os.MkdirAll(v2Dir, 0755); err != nil {
-		fmt.Printf("Error creating directory %s: %v\n", v2Dir, err)
+		logs.Error("Error creating directory %s: %v", v2Dir, err)
 		return
 	}
 
-	filename := filepath.Join(baseDir, taskName+".md")
-	v2filename := filepath.Join(v2Dir, taskName+".md")
+	filename := filepath.Join(baseDir, "root.md")
+	v2filename := filepath.Join(v2Dir, "root.md")
 
 	if _, err := os.Stat(filename); err == nil {
-		fmt.Printf("Error: Task file already exists at %s\n", filename)
+		logs.Error("Error: Task file already exists at %s", filename)
 		return
 	}
 
@@ -78,59 +140,59 @@ TODO: Add description here.
 ### tags:
 - todo
 ### task-dependencies:
-# None
+- none
 ### documentation:
-# None
+- none
 ### test-condition-1:
 - TODO: Add test condition
 ### test-command:
 - TODO: Add test command
 ### reviewed:
-# [Waiting for signatures]
+- none
 ### tested:
-# [Waiting for tests]
+- none
 ### last-error-types:
-# None
+- none
 ### last-error-times:
-# None
+- none
 ### log-stream-command:
 - TODO: Add log command
 ### last-error-loglines:
-# None
+- none
 ### notes:
 `, taskName)
 
 	if err := os.WriteFile(filename, []byte(content), 0644); err != nil {
-		fmt.Printf("Error writing file %s: %v\n", filename, err)
+		logs.Error("Error writing file %s: %v", filename, err)
 		return
 	}
 	if err := os.WriteFile(v2filename, []byte(content), 0644); err != nil {
-		fmt.Printf("Error writing file %s: %v\n", v2filename, err)
+		logs.Error("Error writing file %s: %v", v2filename, err)
 		return
 	}
 
-	fmt.Printf("Created new task: %s and %s\n", filename, v2filename)
+	logs.Info("Created new task: %s and %s", filename, v2filename)
 }
 
 func runValidate(args []string) {
 	if len(args) < 1 {
-		fmt.Println("Usage: task validate <task-name>")
+		logs.Error("Usage: task validate <task-name>")
 		return
 	}
 	taskName := args[0]
-	path := filepath.Join("src", "plugins", "task", "database", taskName, "v2", taskName+".md")
+	path := filepath.Join(getTasksDir(), taskName, "v2", "root.md")
 	if _, err := os.Stat(path); err != nil {
-		path = filepath.Join("src", "plugins", "task", "database", taskName, "v1", taskName+".md")
+		path = filepath.Join(getTasksDir(), taskName, "v1", "root.md")
 	}
 
 	if _, err := os.Stat(path); err != nil {
-		fmt.Printf("Task %s not found in v1 or v2\n", taskName)
+		logs.Error("Task %s not found in v1 or v2 (searched %s)", taskName, getTasksDir())
 		return
 	}
 
 	file, err := os.Open(path)
 	if err != nil {
-		fmt.Printf("Error opening file %s: %v\n", path, err)
+		logs.Error("Error opening file %s: %v", path, err)
 		return
 	}
 	defer file.Close()
@@ -145,17 +207,23 @@ func runValidate(args []string) {
 	sigRegex := regexp.MustCompile(`^- [A-Z0-9:-]+> .+ :: .+`)
 	foundHeader := false
 
+	h1Count := 0
 	for scanner.Scan() {
 		lineNum++
 		line := scanner.Text()
 		trimmed := strings.TrimSpace(line)
-		if lineNum == 1 {
-			if strings.HasPrefix(line, "# ") {
-				foundHeader = true
-				continue
-			} else {
-				errors = append(errors, fmt.Sprintf("Line 1: Must be a header '# task-name' (found: '%s')", line))
+
+		if strings.HasPrefix(line, "# ") {
+			h1Count++
+			if lineNum != 1 {
+				errors = append(errors, fmt.Sprintf("Line %d: H1 header ('# ') is only allowed on line 1", lineNum))
 			}
+			foundHeader = true
+			continue
+		}
+
+		if lineNum == 1 && !strings.HasPrefix(line, "# ") {
+			errors = append(errors, fmt.Sprintf("Line 1: Must be a header '# task-name' (found: '%s')", line))
 		}
 		if trimmed == "" { continue }
 		if matches := sectionRegex.FindStringSubmatch(line); len(matches) > 0 {
@@ -165,6 +233,7 @@ func runValidate(args []string) {
 		if currentSection == "description" || currentSection == "notes" { continue }
 		if currentSection == "reviewed" || currentSection == "tested" {
 			if commentRegex.MatchString(line) { continue }
+			if line == "- none" { continue }
 			if listRegex.MatchString(line) {
 				if !sigRegex.MatchString(line) {
 					errors = append(errors, fmt.Sprintf("Line %d: Invalid signature format in '%s'. Expected '- ACTOR> timestamp :: key'", lineNum, currentSection))
@@ -180,52 +249,55 @@ func runValidate(args []string) {
 			errors = append(errors, fmt.Sprintf("Line %d: Invalid line in section '%s'. Must be bullet point ('- ') or comment ('# '). Found: '%s'", lineNum, currentSection, line))
 		}
 	}
-	if !foundHeader { errors = append(errors, "Missing Task Name header on line 1") }
+	if !foundHeader || h1Count != 1 {
+		errors = append(errors, fmt.Sprintf("Missing or multiple H1 headers (found %d, expected 1)", h1Count))
+	}
+
 	if len(errors) > 0 {
-		fmt.Println("Validation FAILED:")
-		for _, e := range errors { fmt.Printf("  - %s\n", e) }
+		logs.Error("Validation FAILED:")
+		for _, e := range errors { logs.Error("  - %s", e) }
 		os.Exit(1)
 	}
-	fmt.Printf("Validation PASSED: %s\n", path)
+	logs.Info("Validation PASSED: %s", path)
 }
 
 func runArchive(args []string) {
 	if len(args) < 1 {
-		fmt.Println("Usage: task archive <task-name>")
+		logs.Error("Usage: task archive <task-name>")
 		return
 	}
 	taskName := args[0]
-	basePath := filepath.Join("src", "plugins", "task", "database", taskName)
+	basePath := filepath.Join(getTasksDir(), taskName)
 	v1Dir := filepath.Join(basePath, "v1")
 	v2Dir := filepath.Join(basePath, "v2")
 
 	if _, err := os.Stat(v2Dir); err != nil {
-		fmt.Printf("Error: v2 directory for task %s not found\n", taskName)
+		logs.Error("Error: v2 directory for task %s not found in %s", taskName, getTasksDir())
 		return
 	}
 
-	fmt.Printf("Promoting %s/v2 to v1...\n", taskName)
+	logs.Info("Promoting %s/v2 to v1...", taskName)
 	if err := os.RemoveAll(v1Dir); err != nil {
-		fmt.Printf("Error removing v1: %v\n", err)
+		logs.Error("Error removing v1: %v", err)
 		return
 	}
 
 	if err := os.Rename(v2Dir, v1Dir); err != nil {
-		fmt.Printf("Error renaming v2 to v1: %v\n", err)
+		logs.Error("Error renaming v2 to v1: %v", err)
 		return
 	}
 
 	if err := copyDir(v1Dir, v2Dir); err != nil {
-		fmt.Printf("Error copying v1 to v2: %v\n", err)
+		logs.Error("Error copying v1 to v2: %v", err)
 		return
 	}
 
-	fmt.Printf("Successfully archived task %s. v1 and v2 now match.\n", taskName)
+	logs.Info("Successfully archived task %s. v1 and v2 now match.", taskName)
 }
 
 func runSign(args []string) {
 	if len(args) < 3 {
-		fmt.Println("Usage: task sign <task-name> --role <role>")
+		logs.Error("Usage: task sign <task-name> --role <role>")
 		return
 	}
 	taskName := args[0]
@@ -237,28 +309,23 @@ func runSign(args []string) {
 		}
 	}
 	if role == "" {
-		fmt.Println("Error: --role <role> is required")
+		logs.Error("Error: --role <role> is required")
 		return
 	}
 
-	v2Path := filepath.Join("src", "plugins", "task", "database", taskName, "v2", taskName+".md")
+	v2Path := filepath.Join(getTasksDir(), taskName, "v2", "root.md")
 	if _, err := os.Stat(v2Path); err != nil {
-		fmt.Printf("Error: v2 task file not found at %s\n", v2Path)
+		logs.Error("Error: v2 task file not found at %s", v2Path)
 		return
 	}
 
 	content, err := os.ReadFile(v2Path)
 	if err != nil {
-		fmt.Printf("Error reading file: %v\n", err)
+		logs.Error("Error reading file: %v", err)
 		return
 	}
 
 	lines := strings.Split(string(content), "\n")
-	newLines := []string{}
-	section := ""
-	signed := false
-
-	// Target section based on role
 	targetSection := "reviewed"
 	if strings.Contains(strings.ToLower(role), "test") {
 		targetSection = "tested"
@@ -267,42 +334,91 @@ func runSign(args []string) {
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 	signature := fmt.Sprintf("- %s> %s :: sig-%d", strings.ToUpper(role), timestamp, time.Now().UnixNano())
 
-	for _, line := range lines {
-		newLines = append(newLines, line)
-		if strings.HasPrefix(line, "### ") {
-			section = strings.TrimSuffix(strings.TrimPrefix(line, "### "), ":")
-		}
-		if section == targetSection && !signed {
-			// Add signature after the section header or after existing signatures
-			// For simplicity, we'll just append it if the next line is a comment or empty
-			// Actually, let's look for the next section header or end of file
-		}
-	}
-	
-	// Real implementation should be more precise.
-	// Let's do a simple insertion.
 	finalLines := []string{}
 	sectionFound := false
 	for _, line := range lines {
 		finalLines = append(finalLines, line)
 		if line == "### "+targetSection+":" {
 			finalLines = append(finalLines, signature)
-			signed = true
 			sectionFound = true
 		}
 	}
 
 	if !sectionFound {
-		fmt.Printf("Error: section ### %s: not found in %s\n", targetSection, v2Path)
+		logs.Error("Error: section ### %s: not found in %s", targetSection, v2Path)
 		return
 	}
 
 	if err := os.WriteFile(v2Path, []byte(strings.Join(finalLines, "\n")), 0644); err != nil {
-		fmt.Printf("Error writing file: %v\n", err)
+		logs.Error("Error writing file: %v", err)
 		return
 	}
 
-	fmt.Printf("Successfully signed task %s as %s in v2\n", taskName, role)
+	logs.Info("Successfully signed task %s as %s in v2", taskName, role)
+}
+
+func runSync(args []string) {
+	issueID := ""
+	if len(args) > 0 {
+		issueID = args[0]
+	}
+
+	issuesDir := filepath.Join("src", "plugins", "github", "src_v1", "issues")
+	entries, err := os.ReadDir(issuesDir)
+	if err != nil {
+		logs.Error("Error reading issues: %v", err)
+		return
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") || entry.Name() == ".gitkeep" {
+			continue
+		}
+
+		if issueID != "" && !strings.HasPrefix(entry.Name(), issueID) {
+			continue
+		}
+
+		issuePath := filepath.Join(issuesDir, entry.Name())
+		content, err := os.ReadFile(issuePath)
+		if err != nil {
+			logs.Error("Error reading issue %s: %v", entry.Name(), err)
+			continue
+		}
+
+		// Use filename (minus .md) as task ID
+		taskID := strings.TrimSuffix(entry.Name(), ".md")
+		
+		v1Dir := filepath.Join(getTasksDir(), taskID, "v1")
+		v2Dir := filepath.Join(getTasksDir(), taskID, "v2")
+		
+		if err := os.MkdirAll(v1Dir, 0755); err != nil {
+			logs.Error("Error creating v1 dir for %s: %v", taskID, err)
+			continue
+		}
+		if err := os.MkdirAll(v2Dir, 0755); err != nil {
+			logs.Error("Error creating v2 dir for %s: %v", taskID, err)
+			continue
+		}
+
+		v1Path := filepath.Join(v1Dir, "root.md")
+		v2Path := filepath.Join(v2Dir, "root.md")
+
+		if err := os.WriteFile(v1Path, content, 0644); err != nil {
+			logs.Error("Error writing v1 root.md for %s: %v", taskID, err)
+			continue
+		}
+		if err := os.WriteFile(v2Path, content, 0644); err != nil {
+			logs.Error("Error writing v2 root.md for %s: %v", taskID, err)
+			continue
+		}
+
+		logs.Info("Synced issue %s to task %s/v1/root.md", entry.Name(), taskID)
+		
+		if issueID != "" {
+			break 
+		}
+	}
 }
 
 func copyDir(src string, dst string) error {

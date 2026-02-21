@@ -1,15 +1,15 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"dialtone/dev/plugins/logs/cli"
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
 func main() {
 	if err := cli.Run(os.Args[1:]); err != nil {
-		fmt.Printf("logs error: %v\n", err)
+		logs.Error("logs error: %v", err)
 		os.Exit(1)
 	}
 }

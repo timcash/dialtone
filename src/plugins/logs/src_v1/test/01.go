@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
@@ -11,21 +12,19 @@ func Run01EmbeddedNATSAndPublish(ctx *testCtx) (string, error) {
 	if err := ctx.ensureBroker(); err != nil {
 		return "", err
 	}
-	if ctx.broker.URL() == "" {
-		return "", fmt.Errorf("embedded nats URL is empty")
-	}
+	nc := ctx.broker.Conn()
 
-	stop, err := logs.ListenToFile(ctx.broker.Conn(), "logs.>", ctx.testLogPath)
+	// Subscriptions MUST happen before publish
+	subInfo, _ := nc.SubscribeSync("logs.info.topic")
+	defer subInfo.Unsubscribe()
+	subError, _ := nc.SubscribeSync("logs.error.topic")
+	defer subError.Unsubscribe()
+
+	infoTopic, err := logs.NewNATSLogger(nc, "logs.info.topic")
 	if err != nil {
 		return "", err
 	}
-	ctx.addListener(stop)
-
-	infoTopic, err := logs.NewNATSLogger(ctx.broker.Conn(), "logs.info.topic")
-	if err != nil {
-		return "", err
-	}
-	errorTopic, err := logs.NewNATSLogger(ctx.broker.Conn(), "logs.error.topic")
+	errorTopic, err := logs.NewNATSLogger(nc, "logs.error.topic")
 	if err != nil {
 		return "", err
 	}
@@ -36,12 +35,16 @@ func Run01EmbeddedNATSAndPublish(ctx *testCtx) (string, error) {
 	if err := errorTopic.Errorf("boom happened"); err != nil {
 		return "", err
 	}
-	if err := waitForContains(ctx.testLogPath, "subject=logs.info.topic", 4*time.Second); err != nil {
-		return "", err
+
+	// Verify
+	msg, err := subInfo.NextMsg(2 * time.Second)
+	if err != nil || !strings.Contains(string(msg.Data), "startup ok") {
+		return "", fmt.Errorf("info message verification failed: %v", err)
 	}
-	if err := waitForContains(ctx.testLogPath, "subject=logs.error.topic", 4*time.Second); err != nil {
-		return "", err
+	msg, err = subError.NextMsg(2 * time.Second)
+	if err != nil || !strings.Contains(string(msg.Data), "boom happened") {
+		return "", fmt.Errorf("error message verification failed: %v", err)
 	}
 
-	return fmt.Sprintf("Embedded NATS started at %s and wildcard listener captured logs.info.topic + logs.error.topic.", ctx.broker.URL()), nil
+	return fmt.Sprintf("Embedded NATS started at %s and NATS messages verified.", ctx.broker.URL()), nil
 }

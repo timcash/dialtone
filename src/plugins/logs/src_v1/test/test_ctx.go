@@ -8,6 +8,7 @@ import (
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
+	"github.com/nats-io/nats.go"
 )
 
 type testCtx struct {
@@ -112,6 +113,31 @@ func (t *testCtx) run(steps []step) error {
 		}
 	}
 	return nil
+}
+
+func (t *testCtx) waitForMessage(subject string, pattern string, timeout time.Duration) error {
+	if t.broker == nil {
+		return fmt.Errorf("no NATS broker available")
+	}
+	nc := t.broker.Conn()
+	msgCh := make(chan string, 100)
+	sub, err := nc.Subscribe(subject, func(m *nats.Msg) {
+		msgCh <- string(m.Data)
+	})
+	if err != nil { return err }
+	defer sub.Unsubscribe()
+
+	deadline := time.Now().Add(timeout)
+	for {
+		select {
+		case data := <-msgCh:
+			if strings.Contains(data, pattern) {
+				return nil
+			}
+		case <-time.After(time.Until(deadline)):
+			return fmt.Errorf("timeout waiting for %q on %s", pattern, subject)
+		}
+	}
 }
 
 func waitForContains(path, pattern string, timeout time.Duration) error {

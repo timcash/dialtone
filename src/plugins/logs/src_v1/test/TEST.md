@@ -5,7 +5,7 @@ Embedded broker starts and wildcard listener captures topic logs.
 
 ### Results
 ```text
-Embedded NATS started at nats://127.0.0.1:43376 and wildcard listener captured logs.info.topic + logs.error.topic.
+Embedded NATS started at nats://127.0.0.1:44522 and NATS messages verified.
 ```
 
 # 02 Listener filtering (error.topic)
@@ -15,7 +15,7 @@ Listener on logs.error.topic only receives error topic messages.
 
 ### Results
 ```text
-Verified error-topic listener filtering: error.log only contains logs.error.topic records.
+Verified error-topic filtering via NATS: logs.error.topic received the message.
 ```
 
 # 04 Two-process pingpong via dialtone logs
@@ -25,7 +25,7 @@ Two ./dialtone.sh logs pingpong processes exchange at least 3 ping/pong rounds o
 
 ### Results
 ```text
-Verified two dialtone logs processes exchanged 3 ping/pong rounds on one topic.
+Verified two dialtone logs processes exchanged 3 ping/pong rounds on one topic (verified via NATS).
 ```
 
 # 05 Example plugin binary imports logs library
@@ -35,7 +35,7 @@ A built binary under logs/src_v1/test imports logs library, auto-starts embedded
 
 ### Results
 ```text
-Verified example plugin binary imports logs library, auto-starts embedded NATS when missing, and publishes/listens on topic.
+Verified example plugin binary imports logs library, and verified via both NATS messages and file listener.
 ```
 
 # 03 Finalize artifacts
@@ -45,6 +45,6 @@ Artifacts exist and include captured topic lines.
 
 ### Results
 ```text
-Artifacts ready: test.log=4 lines, error.log=1 lines.
+Suite finalized. Verification transitioned to NATS topics.
 ```
 
