@@ -20,6 +20,43 @@ Recommended command shape:
 - `./dialtone.sh <plugin> help`
 - `./dialtone.sh <plugin> test src_v1`
 
+## New Plugin Workflow (Shell)
+
+```sh
+# 1) Create plugin skeleton
+mkdir -p src/plugins/my-plugin/{scaffold,src_v1/go,src_v1/test/01_setup,src_v1/test/02_example_library,src_v1/test/03_smoke}
+
+# 2) Add scaffold entrypoint
+cat > src/plugins/my-plugin/scaffold/main.go <<'EOF'
+package main
+
+import (
+  "fmt"
+  "os"
+)
+
+func main() {
+  if len(os.Args) < 2 {
+    fmt.Println("Usage: my-plugin <command> [args]")
+    return
+  }
+  // route help/test/run commands to src_v1 code
+}
+EOF
+
+# 3) Implement runtime library in src_v1/go using logs
+# import logs "dialtone/dev/plugins/logs/src_v1/go"
+
+# 4) Write tests in src_v1/test using the test library
+# import testv1 "dialtone/dev/plugins/test/src_v1/go"
+
+# 5) Document commands in src/plugins/my-plugin/README.md
+
+# 6) Run plugin test workflow
+./dialtone.sh my-plugin help
+./dialtone.sh my-plugin test src_v1
+```
+
 ### Import + Use `logs` (library example)
 
 ```go

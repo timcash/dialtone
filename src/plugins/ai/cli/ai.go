@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
+	githubv1 "dialtone/dev/plugins/github/src_v1/go"
 	"dialtone/dev/plugins/logs/src_v1/go"
 	test_cli "dialtone/dev/test_core/cli"
-	github_cli "dialtone/dev/plugins/github/cli"
 )
 
 // RunAI is the entry point for the AI plugin
@@ -269,7 +269,9 @@ verification:
 	test_cli.RunTest([]string{})
 
 	logs.Info("Tests passed. Creating pull request...")
-	github_cli.RunGithub([]string{"pull-request", "--title", fmt.Sprintf("%s: autonomous fix", branchName), "--body", fmt.Sprintf("Autonomous fix for ticket #%d\n\nSee %s for details.", selectedTicket.Number, taskPath)})
+	if err := githubv1.Run([]string{"pr", fmt.Sprintf("%s: autonomous fix", branchName), fmt.Sprintf("Autonomous fix for ticket #%d\n\nSee %s for details.", selectedTicket.Number, taskPath)}); err != nil {
+		logs.Fatal("Failed to create/update PR: %v", err)
+	}
 
 	logs.Info("Autonomous developer loop completed for ticket #%d", selectedTicket.Number)
 }
