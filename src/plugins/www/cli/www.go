@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"dialtone/dev/browser"
-	chrome "dialtone/dev/plugins/chrome/app"
+	chrome "dialtone/dev/plugins/chrome/src_v1/go"
 	wwwtest "dialtone/dev/plugins/www/test"
 
 	"github.com/chromedp/chromedp"
@@ -397,16 +397,26 @@ func RunWww(args []string) {
 		}
 	case "dev":
 		logInfo("Starting local development server...")
-		cmd := exec.Command("npm", "run", "dev"); cmd.Dir = webDir
-		cmd.Stdout = os.Stdout; cmd.Stderr = os.Stderr; cmd.Stdin = os.Stdin
-		if err := cmd.Run(); err != nil { logFatal("Dev server failed: %v", err) }
+		cmd := exec.Command("npm", "run", "dev")
+		cmd.Dir = webDir
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			logFatal("Dev server failed: %v", err)
+		}
 	default:
 		// Pass-through to Vercel...
 		vArgs := append([]string{subcommand}, args[1:]...)
-		cmd := exec.Command(getVercel(), vArgs...); cmd.Dir = webDir
+		cmd := exec.Command(getVercel(), vArgs...)
+		cmd.Dir = webDir
 		cmd.Env = append(os.Environ(), vercelEnv...)
-		cmd.Stdout = os.Stdout; cmd.Stderr = os.Stderr; cmd.Stdin = os.Stdin
-		if err := cmd.Run(); err != nil { logFatal("Vercel command failed: %v", err) }
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			logFatal("Vercel command failed: %v", err)
+		}
 	}
 }
 
@@ -417,8 +427,11 @@ func handleDemo(webDir, name, anchor string) {
 
 	devCmd := exec.Command("npm", "run", "dev", "--", "--host", "127.0.0.1")
 	devCmd.Dir = webDir
-	stdout, _ := devCmd.StdoutPipe(); stderr, _ := devCmd.StderrPipe()
-	if err := devCmd.Start(); err != nil { logFatal("Failed to start dev server: %v", err) }
+	stdout, _ := devCmd.StdoutPipe()
+	stderr, _ := devCmd.StderrPipe()
+	if err := devCmd.Start(); err != nil {
+		logFatal("Failed to start dev server: %v", err)
+	}
 
 	port := 5173
 	portCh := make(chan int, 1)
@@ -427,51 +440,70 @@ func handleDemo(webDir, name, anchor string) {
 		scanner := bufio.NewScanner(reader)
 		re := regexp.MustCompile(`http://127\.0\.0\.1:(\d+)/`)
 		for scanner.Scan() {
-			line := scanner.Text(); fmt.Println(line)
+			line := scanner.Text()
+			fmt.Println(line)
 			if match := re.FindStringSubmatch(line); len(match) == 2 {
-				if p, _ := strconv.Atoi(match[1]); p > 0 { select { case portCh <- p: default: } }
+				if p, _ := strconv.Atoi(match[1]); p > 0 {
+					select {
+					case portCh <- p:
+					default:
+					}
+				}
 			}
 		}
 	}()
 
 	select {
-	case detected := <-portCh: port = detected
-	case <-time.After(10 * time.Second): logInfo("Timeout detecting port, using default %d", port)
+	case detected := <-portCh:
+		port = detected
+	case <-time.After(10 * time.Second):
+		logInfo("Timeout detecting port, using default %d", port)
 	}
 
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d/%s", port, anchor)
 	session, err := chrome.StartSession(chrome.SessionOptions{Role: "demo", Headless: false, GPU: true, TargetURL: baseURL})
-	if err != nil { logFatal("Failed to start chrome: %v", err) }
+	if err != nil {
+		logFatal("Failed to start chrome: %v", err)
+	}
 	defer chrome.CleanupSession(session)
 
 	logInfo("%s Demo is LIVE at %s", strings.ToUpper(name), baseURL)
-	sigChan := make(chan os.Signal, 1); signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
 	logInfo("Shutting down...")
 }
 
 func handleCadDemo(webDir string) {
 	logInfo("Setting up CAD Demo Environment...")
-	_ = browser.CleanupPort(5173); _ = browser.CleanupPort(8081)
+	_ = browser.CleanupPort(5173)
+	_ = browser.CleanupPort(8081)
 	chrome.KillDialtoneResources()
 
 	cadCmd := getDialtoneCmd("cad", "server")
-	if err := cadCmd.Start(); err != nil { logFatal("Failed to start CAD server: %v", err) }
+	if err := cadCmd.Start(); err != nil {
+		logFatal("Failed to start CAD server: %v", err)
+	}
 
 	devCmd := exec.Command("npm", "run", "dev", "--", "--host", "127.0.0.1")
 	devCmd.Dir = webDir
-	if err := devCmd.Start(); err != nil { logFatal("Failed to start dev server: %v", err) }
+	if err := devCmd.Start(); err != nil {
+		logFatal("Failed to start dev server: %v", err)
+	}
 
 	// Wait for servers
 	time.Sleep(5 * time.Second)
 
 	baseURL := "http://127.0.0.1:5173/#s-cad"
 	session, err := chrome.StartSession(chrome.SessionOptions{Role: "demo", Headless: false, GPU: true, TargetURL: baseURL})
-	if err != nil { logFatal("Failed to start chrome: %v", err) }
+	if err != nil {
+		logFatal("Failed to start chrome: %v", err)
+	}
 	defer chrome.CleanupSession(session)
 
 	logInfo("CAD Demo is LIVE at %s", baseURL)
-	sigChan := make(chan os.Signal, 1); signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
 }
 
@@ -482,7 +514,9 @@ func handleWebgpuDebug(webDir string) {
 
 	devCmd := exec.Command("npm", "run", "dev", "--", "--host", "127.0.0.1")
 	devCmd.Dir = webDir
-	if err := devCmd.Start(); err != nil { logFatal("Failed to start dev server: %v", err) }
+	if err := devCmd.Start(); err != nil {
+		logFatal("Failed to start dev server: %v", err)
+	}
 	time.Sleep(5 * time.Second)
 
 	chromePath := browser.FindChromePath()
@@ -506,5 +540,7 @@ func handleWebgpuDebug(webDir string) {
 		chromedp.WaitReady("#webgpu-template-container"),
 		chromedp.Sleep(5*time.Second),
 	)
-	if err != nil { logInfo("Debug failed: %v", err) }
+	if err != nil {
+		logInfo("Debug failed: %v", err)
+	}
 }

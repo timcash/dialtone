@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"dialtone/dev/browser"
-	chrome_app "dialtone/dev/plugins/chrome/app"
+	chrome_app "dialtone/dev/plugins/chrome/src_v1/go"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"

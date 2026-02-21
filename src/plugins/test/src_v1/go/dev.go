@@ -13,19 +13,19 @@ import (
 	"syscall"
 	"time"
 
-	"dialtone/dev/plugins/chrome/app"
+	"dialtone/dev/plugins/chrome/src_v1/go"
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/chromedp"
 )
 
 type DevOptions struct {
-	RepoRoot           string
-	PluginDir          string
-	UIDir              string
-	DevPort            int
-	Role               string
-	BrowserMetaPath    string
-	BrowserModeEnvVar  string // e.g. "DAG_DEV_BROWSER_MODE"
+	RepoRoot          string
+	PluginDir         string
+	UIDir             string
+	DevPort           int
+	Role              string
+	BrowserMetaPath   string
+	BrowserModeEnvVar string // e.g. "DAG_DEV_BROWSER_MODE"
 }
 
 func RunDev(opts DevOptions) error {
@@ -85,7 +85,7 @@ func RunDev(opts DevOptions) error {
 	for {
 		restartAttemptID++
 		logf("   [DEV] Running vite dev... (attempt %d)", restartAttemptID)
-		
+
 		// Find bun from environment
 		bunBin := filepath.Join(os.Getenv("DIALTONE_ENV"), "bun", "bin", "bun")
 		if _, err := os.Stat(bunBin); err != nil {

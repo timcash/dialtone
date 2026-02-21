@@ -6,8 +6,8 @@ import (
 
 	"strings"
 
-	chrome "dialtone/dev/plugins/chrome/app"
-	chrome_test "dialtone/dev/plugins/chrome/test"
+	chrome "dialtone/dev/plugins/chrome/src_v1/go"
+	chrome_test "dialtone/dev/plugins/chrome/src_v1/test"
 	"dialtone/dev/plugins/logs/src_v1/go"
 )
 

@@ -2,7 +2,7 @@ package cli
 
 import (
 	"context"
-	chrome_app "dialtone/dev/plugins/chrome/app"
+	chrome_app "dialtone/dev/plugins/chrome/src_v1/go"
 	"fmt"
 	"io"
 	"os"

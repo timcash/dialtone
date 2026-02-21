@@ -44,7 +44,7 @@ func runTests(args []string) {
 		os.Exit(1)
 	}
 
-	cmd := exec.Command("go", "run", "./plugins/test/src_v1/test/cmd/main.go")
+	cmd := exec.Command("go", "run", "./plugins/test/src_v1/test/01_self_check/main.go")
 	cmd.Dir = filepath.Join(repoRoot, "src")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	chrome_app "dialtone/dev/plugins/chrome/app"
+	chrome_app "dialtone/dev/plugins/chrome/src_v1/go"
 	"dialtone/dev/plugins/logs/src_v1/go"
 	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 	"github.com/chromedp/cdproto/emulation"

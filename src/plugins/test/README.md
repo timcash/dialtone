@@ -16,7 +16,19 @@ It provides:
 ```
 
 `./dialtone.sh test test src_v1` runs the test plugin self-check suite at:
-- `src/plugins/test/src_v1/test/cmd/main.go`
+- `src/plugins/test/src_v1/test/01_self_check/main.go`
+
+## Test Folder Naming
+
+Use numbered entries under each plugin's `src_vN/test/` folder:
+- format: `NN_name` (two-digit prefix)
+- examples: `01_self_check`, `02_example_plugin_template`, `03_browser_smoke`
+- keep shared docs/files at top-level only when they are not executable test cases
+
+`src/plugins/test/src_v1/test/` is the reference layout for how to test a plugin that imports this test library:
+- `src/plugins/test/src_v1/test/01_self_check/main.go`: test plugin self-check runner
+- `src/plugins/test/src_v1/test/02_example_plugin_template/main.go`: copyable plugin example using `RunSuite(...)` + `StepContext`
+- `src/plugins/test/src_v1/test/TEMPLATE.md`: template instructions for other plugins
 
 ## Library Entry
 
@@ -66,7 +78,7 @@ Inside step code, use:
 ## Template For Other Plugins / Agents
 
 Copyable example:
-- `src/plugins/test/src_v1/test/example_plugin_template/main.go`
+- `src/plugins/test/src_v1/test/02_example_plugin_template/main.go`
 - `src/plugins/test/src_v1/test/TEMPLATE.md`
 
 This template shows how another plugin can:

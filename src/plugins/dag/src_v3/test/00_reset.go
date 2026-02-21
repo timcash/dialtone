@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"time"
 
-	chrome_app "dialtone/dev/plugins/chrome/app"
+	chrome_app "dialtone/dev/plugins/chrome/src_v1/go"
 )
 
 func Run00Reset(ctx *testCtx) (string, error) {
