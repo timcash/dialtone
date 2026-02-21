@@ -1,50 +1,42 @@
-package main
+package infra
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
-	logs "dialtone/dev/plugins/logs/src_v1/go"
+	testv1 "dialtone/dev/plugins/test/src_v1/go"
 )
 
-func Run01EmbeddedNATSAndPublish(ctx *testCtx) (string, error) {
-	if err := ctx.ensureBroker(); err != nil {
-		return "", err
-	}
-	nc := ctx.broker.Conn()
-
-	// Subscriptions MUST happen before publish
-	subInfo, _ := nc.SubscribeSync("logs.info.topic")
-	defer subInfo.Unsubscribe()
-	subError, _ := nc.SubscribeSync("logs.error.topic")
-	defer subError.Unsubscribe()
-
-	infoTopic, err := logs.NewNATSLogger(nc, "logs.info.topic")
+func Run01EmbeddedNATSAndPublish(sc *testv1.StepContext) (testv1.StepRunResult, error) {
+	infoTopic, err := sc.NewTopicLogger("logs.info.topic")
 	if err != nil {
-		return "", err
+		return testv1.StepRunResult{}, err
 	}
-	errorTopic, err := logs.NewNATSLogger(nc, "logs.error.topic")
+	errorTopic, err := sc.NewTopicLogger("logs.error.topic")
 	if err != nil {
-		return "", err
+		return testv1.StepRunResult{}, err
 	}
 
-	if err := infoTopic.Infof("startup ok"); err != nil {
-		return "", err
+	if err := sc.WaitForMessageAfterAction("logs.info.topic", "startup ok", 2*time.Second, func() error {
+		return infoTopic.Infof("startup ok")
+	}); err != nil {
+		return testv1.StepRunResult{}, fmt.Errorf("info message verification failed: %v", err)
 	}
-	if err := errorTopic.Errorf("boom happened"); err != nil {
-		return "", err
+	if err := sc.WaitForMessageAfterAction("logs.info.topic", "|INFO|", 2*time.Second, func() error {
+		return infoTopic.Infof("info level check")
+	}); err != nil {
+		return testv1.StepRunResult{}, fmt.Errorf("info level prefix missing: %v", err)
+	}
+	if err := sc.WaitForMessageAfterAction("logs.error.topic", "boom happened", 2*time.Second, func() error {
+		return errorTopic.Errorf("boom happened")
+	}); err != nil {
+		return testv1.StepRunResult{}, fmt.Errorf("error message verification failed: %v", err)
+	}
+	if err := sc.WaitForMessageAfterAction("logs.error.topic", "|ERROR|", 2*time.Second, func() error {
+		return errorTopic.Errorf("error level check")
+	}); err != nil {
+		return testv1.StepRunResult{}, fmt.Errorf("error level prefix missing: %v", err)
 	}
 
-	// Verify
-	msg, err := subInfo.NextMsg(2 * time.Second)
-	if err != nil || !strings.Contains(string(msg.Data), "startup ok") {
-		return "", fmt.Errorf("info message verification failed: %v", err)
-	}
-	msg, err = subError.NextMsg(2 * time.Second)
-	if err != nil || !strings.Contains(string(msg.Data), "boom happened") {
-		return "", fmt.Errorf("error message verification failed: %v", err)
-	}
-
-	return fmt.Sprintf("Embedded NATS started at %s and NATS messages verified.", ctx.broker.URL()), nil
+	return testv1.StepRunResult{Report: fmt.Sprintf("NATS messages verified at %s.", sc.NATSURL())}, nil
 }

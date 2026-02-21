@@ -27,10 +27,20 @@ All logs go through **NATS** by default. Producers (plugins, services) publish o
 - **Pattern**: `logs.<plugin-name>.<run-or-test-name>`
 - **Examples**: `logs.dag.my-test`, `logs.task.smoke`, `logs.robot.telemetry`
 
-### 3. CLI Commands
+### 3. Default line format
+
+Every rendered log line starts with:
+
+`[T+0000s|LEVEL|source-file.go] message`
+
+- `T+0000s`: elapsed seconds since topic clock start (or reset)
+- `LEVEL`: INFO/WARN/ERROR/DEBUG/FATAL
+- `source-file.go`: caller file name
+
+### 4. CLI Commands
 
 - **`./dialtone.sh logs test src_v1`** – Run the logs plugin verification suite.
-- **`./dialtone.sh logs stream --topic <subject>`** – Stream logs to stdout.
+- **`./dialtone.sh logs stream --topic <subject>`** – Stream logs to stdout and/or `--file`.
 - **`./dialtone.sh logs nats-start`** – Start the local NATS daemon.
 
 #### Topic Filtering Examples (NATS Wildcards)
@@ -45,6 +55,7 @@ The `--topic` flag supports standard NATS subject wildcards:
 | `./dialtone.sh logs stream --topic 'logs.task.>'` | Stream all logs for the **task** plugin. |
 | `./dialtone.sh logs stream --topic 'logs.*.smoke'` | Stream **smoke test** logs for any plugin. |
 | `./dialtone.sh logs stream --topic 'logs.dag.v1'` | Stream a **specific** DAG v1 log run. |
+| `./dialtone.sh logs stream --topic 'logs.>' --file ./dialtone.log` | Append all streamed logs to a local file. |
 
 
 ---
@@ -62,9 +73,10 @@ When writing tests, use the `test` plugin's `StepContext` to verify behavior via
 
 ```go
 func RunMyStep(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
-    ctx.Logf("Triggering action...")
-    // Wait for a specific message on a NATS topic
-    err := ctx.WaitForMessage("logs.my-plugin.results", "success-marker", 5*time.Second)
+    err := ctx.WaitForStepMessageAfterAction("success-marker", 5*time.Second, func() error {
+        ctx.Infof("success-marker")
+        return nil
+    })
     if err != nil {
         return testv1.StepRunResult{}, err
     }
@@ -72,9 +84,27 @@ func RunMyStep(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 }
 ```
 
+`StepContext` also provides an error topic (`ErrorSubject`):
+- `ctx.Errorf(...)` publishes to both the step topic and the suite error topic.
+- `ctx.WaitForErrorMessage(...)` / `ctx.WaitForErrorMessageAfterAction(...)` can assert error logs.
+
 ---
 
 ## Verification
 
 The logs system itself is verified via:
 - `./dialtone.sh logs test src_v1`
+
+Test wiring:
+- orchestrator: `src/plugins/logs/src_v1/test/cmd/main.go`
+- step registration: `src/plugins/logs/src_v1/test/01_infra/register.go`
+- helper/example code: `src/plugins/logs/src_v1/test/02_example`
+- all steps run in one process via the shared test library (`testv1.RunSuite`)
+- no plugin-local `test_ctx` type is used; tests rely on `testv1.StepContext`
+
+Test contract:
+- each step must do: `1) take action` then `2) wait for expected log message`
+
+Dependency note:
+- the `logs` library does **not** import the `test` library
+- only `logs` plugin test code imports test helpers where needed

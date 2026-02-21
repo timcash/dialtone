@@ -5,9 +5,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
 func main() {
+	logs.SetOutput(os.Stdout)
 	if len(os.Args) < 2 {
 		printUsage()
 		return
@@ -22,7 +25,7 @@ func main() {
 	case "help", "-h", "--help":
 		printUsage()
 	default:
-		fmt.Printf("Unknown test command: %s\n", cmd)
+		logs.Error("Unknown test command: %s", cmd)
 		printUsage()
 		os.Exit(1)
 	}
@@ -34,17 +37,17 @@ func runTests(args []string) {
 		version = args[0]
 	}
 	if version != "src_v1" {
-		fmt.Printf("Error: unsupported version %s\n", version)
+		logs.Error("Unsupported version %s", version)
 		os.Exit(1)
 	}
 
 	repoRoot, err := findRepoRoot()
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
+		logs.Error("%v", err)
 		os.Exit(1)
 	}
 
-	cmd := exec.Command("go", "run", "./plugins/test/src_v1/test/01_self_check/main.go")
+	cmd := exec.Command("go", "run", "./plugins/test/src_v1/test/cmd/main.go")
 	cmd.Dir = filepath.Join(repoRoot, "src")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -71,6 +74,6 @@ func findRepoRoot() (string, error) {
 }
 
 func printUsage() {
-	fmt.Println("Usage: test <command> [args]")
-	fmt.Println("  test [src_v1]   Run test plugin verification suite")
+	logs.Info("Usage: test <command> [args]")
+	logs.Info("  test [src_v1]   Run test plugin verification suite")
 }

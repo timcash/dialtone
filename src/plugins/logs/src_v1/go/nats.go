@@ -18,6 +18,8 @@ type Record struct {
 	Subject   string `json:"subject"`
 	Level     string `json:"level"`
 	Message   string `json:"message"`
+	Source    string `json:"source,omitempty"`
+	ElapsedS  int    `json:"elapsed_s,omitempty"`
 	Timestamp string `json:"timestamp"`
 }
 
@@ -149,10 +151,16 @@ func (l *NATSLogger) Errorf(format string, args ...any) error {
 }
 
 func (l *NATSLogger) publish(level, message string) error {
+	level = strings.ToUpper(strings.TrimSpace(level))
+	subject := strings.TrimSpace(l.subject)
+	src := callerSourceFile()
+	elapsed := elapsedSeconds(subject)
 	rec := Record{
-		Subject:   l.subject,
+		Subject:   subject,
 		Level:     level,
 		Message:   message,
+		Source:    src,
+		ElapsedS:  elapsed,
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	data, err := json.Marshal(rec)
@@ -201,14 +209,34 @@ func ListenToFile(conn *nats.Conn, subject, filePath string) (func() error, erro
 	return stop, nil
 }
 
-func formatMessage(subject string, payload []byte) string {
+func FormatMessage(subject string, payload []byte) string {
 	var rec Record
 	if err := json.Unmarshal(payload, &rec); err == nil {
-		msgSubject := rec.Subject
-		if msgSubject == "" {
-			msgSubject = subject
+		level := strings.ToUpper(strings.TrimSpace(rec.Level))
+		if level == "" {
+			level = "INFO"
 		}
-		return fmt.Sprintf("subject=%s level=%s message=%s", msgSubject, rec.Level, rec.Message)
+		src := strings.TrimSpace(rec.Source)
+		if src == "" {
+			src = "unknown"
+		}
+		elapsed := rec.ElapsedS
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		msg := strings.TrimSpace(rec.Message)
+		if msg == "" {
+			msg = string(payload)
+		}
+		return fmt.Sprintf("[T+%04ds|%s|%s] %s", elapsed, level, src, msg)
 	}
-	return fmt.Sprintf("subject=%s message=%s", subject, string(payload))
+	return fmt.Sprintf("[T+%04ds|INFO|unknown] subject=%s message=%s", elapsedSeconds(subject), subject, string(payload))
+}
+
+func formatMessage(subject string, payload []byte) string {
+	return FormatMessage(subject, payload)
+}
+
+func ResetTopicClock(subject string) {
+	ResetClock(subject)
 }
