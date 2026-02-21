@@ -1,18 +1,32 @@
-package main
+package infra
 
 import (
 	"fmt"
 	"os"
+	"time"
+
+	testv1 "dialtone/dev/plugins/test/src_v1/go"
 )
 
-func Run03Finalize(ctx *testCtx) (string, error) {
-	// Since we moved to NATS-based verification, we don't necessarily need the files to be populated 
-	// unless specifically testing the listener. 
-	// But let's verify the report exists at least.
-	
-	if _, err := os.Stat(ctx.reportPath); err != nil {
-		return "", fmt.Errorf("expected report at %s, but missing", ctx.reportPath)
+func Run03Finalize(sc *testv1.StepContext) (testv1.StepRunResult, error) {
+	finalTopic, err := sc.NewTopicLogger("logs.test.finalize")
+	if err != nil {
+		return testv1.StepRunResult{}, err
+	}
+	if err := sc.WaitForMessageAfterAction("logs.test.finalize", "finalize-check", 2*time.Second, func() error {
+		return finalTopic.Infof("finalize-check")
+	}); err != nil {
+		return testv1.StepRunResult{}, err
 	}
 
-	return "Suite finalized. Verification transitioned to NATS topics.", nil
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return testv1.StepRunResult{}, err
+	}
+	reportPath := testReportPath(repoRoot)
+	if _, err := os.Stat(reportPath); err != nil {
+		return testv1.StepRunResult{}, fmt.Errorf("expected report at %s, but missing", reportPath)
+	}
+
+	return testv1.StepRunResult{Report: "Suite finalized. Verification transitioned to NATS topics."}, nil
 }

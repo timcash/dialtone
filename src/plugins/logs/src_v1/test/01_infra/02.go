@@ -1,35 +1,28 @@
-package main
+package infra
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
-	logs "dialtone/dev/plugins/logs/src_v1/go"
+	testv1 "dialtone/dev/plugins/test/src_v1/go"
 )
 
-func Run02ErrorTopicFiltering(ctx *testCtx) (string, error) {
-	if err := ctx.ensureBroker(); err != nil {
-		return "", err
-	}
-	nc := ctx.broker.Conn()
-
-	sub, _ := nc.SubscribeSync("logs.error.topic")
-	defer sub.Unsubscribe()
-
-	errorTopic, err := logs.NewNATSLogger(nc, "logs.error.topic")
+func Run02ErrorTopicFiltering(sc *testv1.StepContext) (testv1.StepRunResult, error) {
+	errorTopic, err := sc.NewTopicLogger("logs.error.topic")
 	if err != nil {
-		return "", err
+		return testv1.StepRunResult{}, err
 	}
 
-	if err := errorTopic.Errorf("filtered error captured"); err != nil {
-		return "", err
+	if err := sc.WaitForMessageAfterAction("logs.error.topic", "filtered error captured", 2*time.Second, func() error {
+		return errorTopic.Errorf("filtered error captured")
+	}); err != nil {
+		return testv1.StepRunResult{}, fmt.Errorf("filtered error verification failed: %v", err)
+	}
+	if err := sc.WaitForMessageAfterAction("logs.error.topic", "|ERROR|", 2*time.Second, func() error {
+		return errorTopic.Errorf("error-level-filter-check")
+	}); err != nil {
+		return testv1.StepRunResult{}, fmt.Errorf("error level prefix missing: %v", err)
 	}
 
-	msg, err := sub.NextMsg(2 * time.Second)
-	if err != nil || !strings.Contains(string(msg.Data), "filtered error captured") {
-		return "", fmt.Errorf("filtered error verification failed: %v", err)
-	}
-
-	return "Verified error-topic filtering via NATS: logs.error.topic received the message.", nil
+	return testv1.StepRunResult{Report: "Verified error-topic filtering via NATS"}, nil
 }

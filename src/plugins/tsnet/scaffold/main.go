@@ -1,15 +1,16 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 	tsnetv1 "dialtone/dev/plugins/tsnet/src_v1/go"
 )
 
 func main() {
+	logs.SetOutput(os.Stdout)
 	if len(os.Args) < 2 {
 		tsnetv1.PrintUsage()
 		return
@@ -25,7 +26,7 @@ func main() {
 		tsnetv1.PrintUsage()
 	default:
 		if err := tsnetv1.Run(append([]string{cmd}, args...)); err != nil {
-			fmt.Printf("Error: %v\n", err)
+			logs.Error("tsnet command failed: %v", err)
 			os.Exit(1)
 		}
 	}
@@ -37,17 +38,17 @@ func runTests(args []string) {
 		version = args[0]
 	}
 	if version != "src_v1" {
-		fmt.Printf("Error: unsupported version %s\n", version)
+		logs.Error("unsupported version %s", version)
 		os.Exit(1)
 	}
 
 	repoRoot, err := findRepoRoot()
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
+		logs.Error("%v", err)
 		os.Exit(1)
 	}
 
-	cmd := exec.Command("go", "run", "./plugins/tsnet/src_v1/test/01_self_check/main.go")
+	cmd := exec.Command("go", "run", "./plugins/tsnet/src_v1/test/cmd/main.go")
 	cmd.Dir = filepath.Join(repoRoot, "src")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -67,7 +68,7 @@ func findRepoRoot() (string, error) {
 		}
 		parent := filepath.Dir(cwd)
 		if parent == cwd {
-			return "", fmt.Errorf("repo root not found")
+			return "", logs.Errorf("repo root not found")
 		}
 		cwd = parent
 	}

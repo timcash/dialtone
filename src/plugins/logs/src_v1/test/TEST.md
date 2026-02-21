@@ -1,50 +1,47 @@
-# 01 Embedded NATS + topic publish
+# Test Report: logs-src-v1
 
-### Conditions
-Embedded broker starts and wildcard listener captures topic logs.
+- **Date**: Sat, 21 Feb 2026 15:41:50 PST
+- **Total Duration**: 2.075232601s
 
-### Results
-```text
-Embedded NATS started at nats://127.0.0.1:43312 and NATS messages verified.
-```
+## Summary
 
-# 02 Listener filtering (error.topic)
+- **Steps**: 5 / 5 passed
+- **Status**: PASSED
 
-### Conditions
-Listener on logs.error.topic only receives error topic messages.
+## Details
 
-### Results
-```text
-Verified error-topic filtering via NATS: logs.error.topic received the message.
-```
+### 1. ✅ 01 Embedded NATS + topic publish
 
-# 04 Two-process pingpong via dialtone logs
+- **Duration**: 2.836581ms
+- **Report**: NATS messages verified at nats://127.0.0.1:4222.
 
-### Conditions
-Two ./dialtone.sh logs pingpong processes exchange at least 3 ping/pong rounds on one topic.
+---
 
-### Results
-```text
-Verified two dialtone logs processes exchanged 3 ping/pong rounds on one topic (verified via NATS).
-```
+### 2. ✅ 02 Listener filtering (error.topic)
 
-# 05 Example plugin binary imports logs library
+- **Duration**: 811.361µs
+- **Report**: Verified error-topic filtering via NATS
 
-### Conditions
-A built binary under logs/src_v1/test imports logs library, auto-starts embedded NATS when missing, and publishes topic messages.
+---
 
-### Results
-```text
-Verified example plugin binary imports logs library, and verified via both NATS messages and file listener.
-```
+### 3. ✅ 04 Two-process pingpong via dialtone logs
 
-# 03 Finalize artifacts
+- **Duration**: 1.12572863s
+- **Report**: Verified two dialtone logs processes exchanged 3 ping/pong rounds on one topic.
 
-### Conditions
-Artifacts exist and include captured topic lines.
+---
 
-### Results
-```text
-Suite finalized. Verification transitioned to NATS topics.
-```
+### 4. ✅ 05 Example plugin binary imports logs library
+
+- **Duration**: 944.836535ms
+- **Report**: Verified example plugin binary imports logs library and publishes expected messages.
+
+---
+
+### 5. ✅ 03 Finalize artifacts
+
+- **Duration**: 980.895µs
+- **Report**: Suite finalized. Verification transitioned to NATS topics.
+
+---
 
