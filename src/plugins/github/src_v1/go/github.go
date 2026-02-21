@@ -127,6 +127,7 @@ func PrintUsage() {
 	fmt.Println("  issue sync [src_v1] [--state all|open|closed] [--limit N] [--out DIR]   # default state=open")
 	fmt.Println("  issue push [src_v1] [--out DIR] [--force]")
 	fmt.Println("  issue delete-closed [src_v1] [--out DIR] [--limit N] [--dry-run]")
+	fmt.Println("  issue verify [src_v1] [--out DIR] [--strict]")
 	fmt.Println("  issue print [src_v1] <issue-id> [--out DIR]")
 	fmt.Println("  issue list [src_v1] [--state all|open|closed] [--limit N]")
 	fmt.Println("  issue view [src_v1] <issue-id>")
@@ -154,7 +155,7 @@ func runInstall() error {
 
 func runIssue(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: ./dialtone.sh github issue <sync|push|delete-closed|print|list|view> ...")
+		return fmt.Errorf("usage: ./dialtone.sh github issue <sync|push|delete-closed|verify|print|list|view> ...")
 	}
 	args = stripVersionArg(args)
 
@@ -163,7 +164,7 @@ func runIssue(args []string) error {
 		opts := SyncIssuesOptions{
 			State:  "open",
 			Limit:  500,
-			OutDir: filepath.Join("src", "plugins", "github", "src_v1", "issues"),
+			OutDir: filepath.Join("plugins", "github", "src_v1", "issues"),
 		}
 		for i := 1; i < len(args); i++ {
 			switch args[i] {
@@ -187,6 +188,7 @@ func runIssue(args []string) error {
 				}
 			}
 		}
+		opts.OutDir = resolveOutDir(opts.OutDir)
 		count, err := SyncIssues(opts)
 		if err != nil {
 			return err
@@ -194,7 +196,7 @@ func runIssue(args []string) error {
 		logs.Info("Synced %d issues to %s", count, opts.OutDir)
 		return nil
 	case "delete-closed":
-		outDir := filepath.Join("src", "plugins", "github", "src_v1", "issues")
+		outDir := filepath.Join("plugins", "github", "src_v1", "issues")
 		limit := 500
 		dryRun := false
 		for i := 1; i < len(args); i++ {
@@ -216,6 +218,7 @@ func runIssue(args []string) error {
 				dryRun = true
 			}
 		}
+		outDir = resolveOutDir(outDir)
 		deleted, missing, err := DeleteClosedIssueFiles(outDir, limit, dryRun)
 		if err != nil {
 			return err
@@ -230,7 +233,7 @@ func runIssue(args []string) error {
 		if len(args) < 2 {
 			return fmt.Errorf("usage: ./dialtone.sh github issue print <issue-id> [--out DIR]")
 		}
-		outDir := filepath.Join("src", "plugins", "github", "src_v1", "issues")
+		outDir := filepath.Join("plugins", "github", "src_v1", "issues")
 		issueID := strings.TrimSpace(args[1])
 		for i := 2; i < len(args); i++ {
 			switch args[i] {
@@ -241,9 +244,34 @@ func runIssue(args []string) error {
 				}
 			}
 		}
+		outDir = resolveOutDir(outDir)
 		return PrintIssue(issueID, outDir)
+	case "verify":
+		outDir := filepath.Join("plugins", "github", "src_v1", "issues")
+		strict := false
+		for i := 1; i < len(args); i++ {
+			switch args[i] {
+			case "--out":
+				if i+1 < len(args) {
+					outDir = args[i+1]
+					i++
+				}
+			case "--strict":
+				strict = true
+			}
+		}
+		outDir = resolveOutDir(outDir)
+		failed, total, err := VerifyIssues(outDir, strict)
+		if err != nil {
+			return err
+		}
+		if failed > 0 {
+			return fmt.Errorf("issue verify failed: %d/%d files invalid", failed, total)
+		}
+		logs.Info("Issue verify passed: %d/%d files valid", total-failed, total)
+		return nil
 	case "push":
-		opts := PushIssuesOptions{OutDir: filepath.Join("src", "plugins", "github", "src_v1", "issues")}
+		opts := PushIssuesOptions{OutDir: filepath.Join("plugins", "github", "src_v1", "issues")}
 		for i := 1; i < len(args); i++ {
 			switch args[i] {
 			case "--out":
@@ -255,6 +283,7 @@ func runIssue(args []string) error {
 				opts.Force = true
 			}
 		}
+		opts.OutDir = resolveOutDir(opts.OutDir)
 		sent, skipped, err := PushIssues(opts)
 		if err != nil {
 			return err
@@ -297,13 +326,117 @@ func runIssue(args []string) error {
 	}
 }
 
+func VerifyIssues(outDir string, strict bool) (int, int, error) {
+	files, err := filepath.Glob(filepath.Join(outDir, "*.md"))
+	if err != nil {
+		return 0, 0, err
+	}
+	sort.Strings(files)
+	if len(files) == 0 {
+		logs.Warn("No issue markdown files found in %s", outDir)
+		return 0, 0, nil
+	}
+
+	requiredSections := []string{
+		"signature", "sync", "description", "tags", "comments-github", "comments-outbound",
+		"task-dependencies", "documentation", "test-condition-1", "test-command", "reviewed", "tested",
+		"last-error-types", "last-error-times", "log-stream-command", "last-error-loglines", "notes",
+	}
+	validStatuses := map[string]struct{}{"wait": {}, "work": {}, "done": {}, "fail": {}}
+
+	failed := 0
+	for _, path := range files {
+		rawBytes, err := os.ReadFile(path)
+		if err != nil {
+			logs.Error("%s: read failed: %v", path, err)
+			failed++
+			continue
+		}
+		raw := string(rawBytes)
+		sections := parseSections(raw)
+		fileID := strings.TrimSuffix(filepath.Base(path), ".md")
+
+		issues := []string{}
+
+		title := ""
+		for _, line := range strings.Split(raw, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "# ") {
+				title = strings.TrimSpace(strings.TrimPrefix(line, "# "))
+				break
+			}
+		}
+		if title == "" {
+			issues = append(issues, "missing top-level '# ' title")
+		} else if strict {
+			prefix := fileID + "-"
+			if !strings.HasPrefix(strings.ToLower(title), strings.ToLower(prefix)) {
+				issues = append(issues, "title should start with '<issue-id>-' in strict mode")
+			}
+		}
+
+		for _, sec := range requiredSections {
+			if _, ok := sections[sec]; !ok {
+				issues = append(issues, "missing section: "+sec)
+			}
+		}
+
+		sig := sections["signature"]
+		if v := valueFromBullet(sig, "issue"); v == "" {
+			issues = append(issues, "signature missing issue field")
+		} else if strings.TrimSpace(v) != fileID {
+			issues = append(issues, fmt.Sprintf("signature issue (%s) != filename id (%s)", strings.TrimSpace(v), fileID))
+		}
+		if v := strings.ToLower(strings.TrimSpace(valueFromBullet(sig, "status"))); v == "" {
+			issues = append(issues, "signature missing status field")
+		} else if _, ok := validStatuses[v]; !ok {
+			issues = append(issues, "signature status invalid: "+v)
+		}
+		if v := strings.TrimSpace(valueFromBullet(sig, "source")); v == "" {
+			issues = append(issues, "signature missing source field")
+		}
+		if strict {
+			if v := strings.TrimSpace(valueFromBullet(sig, "url")); v == "" {
+				issues = append(issues, "signature missing url field")
+			}
+			if v := strings.TrimSpace(valueFromBullet(sig, "synced-at")); v == "" {
+				issues = append(issues, "signature missing synced-at field")
+			}
+		}
+
+		syncSec := sections["sync"]
+		if v := strings.TrimSpace(valueFromBullet(syncSec, "github-updated-at")); v == "" {
+			issues = append(issues, "sync missing github-updated-at")
+		}
+		if v := strings.TrimSpace(valueFromBullet(syncSec, "last-pulled-at")); v == "" {
+			issues = append(issues, "sync missing last-pulled-at")
+		}
+		if strict {
+			if v := strings.TrimSpace(valueFromBullet(syncSec, "github-labels-hash")); v == "" {
+				issues = append(issues, "sync missing github-labels-hash")
+			}
+		}
+
+		if len(issues) > 0 {
+			failed++
+			logs.Error("%s invalid:", path)
+			for _, msg := range issues {
+				logs.Error("  - %s", msg)
+			}
+		}
+	}
+
+	logs.Info("Issue verify summary: total=%d failed=%d", len(files), failed)
+	return failed, len(files), nil
+}
+
 func PrintIssue(issueID, outDir string) error {
 	issueID = strings.TrimSpace(issueID)
 	if issueID == "" {
 		return errors.New("missing issue id")
 	}
 	if outDir == "" {
-		outDir = filepath.Join("src", "plugins", "github", "src_v1", "issues")
+		outDir = filepath.Join("plugins", "github", "src_v1", "issues")
 	}
 	path := filepath.Join(outDir, issueID+".md")
 	raw, err := os.ReadFile(path)
@@ -410,7 +543,7 @@ func allBlank(lines []string) bool {
 func DeleteClosedIssueFiles(outDir string, limit int, dryRun bool) (int, int, error) {
 	gh := findGH()
 	if strings.TrimSpace(outDir) == "" {
-		outDir = filepath.Join("src", "plugins", "github", "src_v1", "issues")
+		outDir = filepath.Join("plugins", "github", "src_v1", "issues")
 	}
 	if limit <= 0 {
 		limit = 500
@@ -467,7 +600,7 @@ func runPR(args []string) error {
 	case "sync":
 		opts := SyncPROptions{
 			Limit:  200,
-			OutDir: filepath.Join("src", "plugins", "github", "src_v1", "prs"),
+			OutDir: filepath.Join("plugins", "github", "src_v1", "prs"),
 		}
 		for i := 1; i < len(args); i++ {
 			switch args[i] {
@@ -486,6 +619,7 @@ func runPR(args []string) error {
 				}
 			}
 		}
+		opts.OutDir = resolveOutDir(opts.OutDir)
 		count, err := SyncPRs(opts)
 		if err != nil {
 			return err
@@ -494,7 +628,7 @@ func runPR(args []string) error {
 		return nil
 	case "push":
 		opts := PushPROptions{
-			OutDir: filepath.Join("src", "plugins", "github", "src_v1", "prs"),
+			OutDir: filepath.Join("plugins", "github", "src_v1", "prs"),
 		}
 		for i := 1; i < len(args); i++ {
 			switch args[i] {
@@ -507,6 +641,7 @@ func runPR(args []string) error {
 				opts.Force = true
 			}
 		}
+		opts.OutDir = resolveOutDir(opts.OutDir)
 		sent, labelUpdated, skipped, err := PushPRs(opts)
 		if err != nil {
 			return err
@@ -517,13 +652,14 @@ func runPR(args []string) error {
 		if len(args) < 2 {
 			return fmt.Errorf("usage: ./dialtone.sh github pr print <pr-id> [--out DIR]")
 		}
-		outDir := filepath.Join("src", "plugins", "github", "src_v1", "prs")
+		outDir := filepath.Join("plugins", "github", "src_v1", "prs")
 		for i := 2; i < len(args); i++ {
 			if args[i] == "--out" && i+1 < len(args) {
 				outDir = args[i+1]
 				i++
 			}
 		}
+		outDir = resolveOutDir(outDir)
 		return PrintPR(args[1], outDir)
 	case "create":
 		return prCreateOrUpdate("", "")
@@ -545,7 +681,7 @@ func runPR(args []string) error {
 			return err
 		}
 		if prNum > 0 {
-			if err := refreshSinglePRMarkdown(prNum, filepath.Join("src", "plugins", "github", "src_v1", "prs")); err != nil {
+			if err := refreshSinglePRMarkdown(prNum, resolveOutDir(filepath.Join("plugins", "github", "src_v1", "prs"))); err != nil {
 				logs.Warn("Merged PR but failed to refresh local PR markdown for #%d: %v", prNum, err)
 			}
 		}
@@ -614,7 +750,7 @@ func SyncPRs(opts SyncPROptions) (int, error) {
 		opts.Limit = 200
 	}
 	if strings.TrimSpace(opts.OutDir) == "" {
-		opts.OutDir = filepath.Join("src", "plugins", "github", "src_v1", "prs")
+		opts.OutDir = filepath.Join("plugins", "github", "src_v1", "prs")
 	}
 	if err := os.MkdirAll(opts.OutDir, 0o755); err != nil {
 		return 0, err
@@ -651,7 +787,7 @@ func SyncPRs(opts SyncPROptions) (int, error) {
 
 func PushPRs(opts PushPROptions) (int, int, int, error) {
 	if strings.TrimSpace(opts.OutDir) == "" {
-		opts.OutDir = filepath.Join("src", "plugins", "github", "src_v1", "prs")
+		opts.OutDir = filepath.Join("plugins", "github", "src_v1", "prs")
 	}
 	files, err := filepath.Glob(filepath.Join(opts.OutDir, "*.md"))
 	if err != nil {
@@ -694,11 +830,13 @@ func PushPRs(opts PushPROptions) (int, int, int, error) {
 
 		desiredLabels := parseTagBullets(sections["tags"])
 		if err := syncPRLabels(prID, live.Labels, desiredLabels); err != nil {
-			logs.Warn("Skipping PR #%d label sync due to error: %v", prID, err)
-			skipped++
-			continue
+			return commentSent, labelsUpdated, skipped, fmt.Errorf("PR #%d label sync failed: %w", prID, err)
 		}
-		if !sameStringSet(labelsToNames(live.Labels), desiredLabels) {
+		filteredDesired, _, err := filterToExistingRepoLabels(desiredLabels)
+		if err != nil {
+			return commentSent, labelsUpdated, skipped, err
+		}
+		if !sameStringSet(labelsToNames(live.Labels), filteredDesired) {
 			labelsUpdated++
 		}
 
@@ -746,7 +884,7 @@ func PrintPR(prID, outDir string) error {
 		return errors.New("missing pr id")
 	}
 	if outDir == "" {
-		outDir = filepath.Join("src", "plugins", "github", "src_v1", "prs")
+		outDir = filepath.Join("plugins", "github", "src_v1", "prs")
 	}
 	path := filepath.Join(outDir, prID+".md")
 	raw, err := os.ReadFile(path)
@@ -946,8 +1084,16 @@ func postPRComment(prID int, body string) error {
 }
 
 func syncPRLabels(prID int, current []GHLabel, desired []string) error {
+	filteredDesired, unknown, err := filterToExistingRepoLabels(desired)
+	if err != nil {
+		return err
+	}
+	if len(unknown) > 0 {
+		return fmt.Errorf("PR #%d has unknown labels in markdown: %s", prID, strings.Join(unknown, ", "))
+	}
+
 	cur := labelsToNames(current)
-	add, remove := diffLabelSets(cur, desired)
+	add, remove := diffLabelSets(cur, filteredDesired)
 	if len(add) == 0 && len(remove) == 0 {
 		return nil
 	}
@@ -1100,7 +1246,7 @@ func refreshSinglePRMarkdown(prNum int, outDir string) error {
 		return err
 	}
 	if outDir == "" {
-		outDir = filepath.Join("src", "plugins", "github", "src_v1", "prs")
+		outDir = filepath.Join("plugins", "github", "src_v1", "prs")
 	}
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
@@ -1165,7 +1311,7 @@ func SyncIssues(opts SyncIssuesOptions) (int, error) {
 		opts.Limit = 500
 	}
 	if opts.OutDir == "" {
-		opts.OutDir = filepath.Join("src", "plugins", "github", "src_v1", "issues")
+		opts.OutDir = filepath.Join("plugins", "github", "src_v1", "issues")
 	}
 	if err := os.MkdirAll(opts.OutDir, 0o755); err != nil {
 		return 0, err
@@ -1214,8 +1360,9 @@ func SyncIssues(opts SyncIssuesOptions) (int, error) {
 
 func PushIssues(opts PushIssuesOptions) (int, int, error) {
 	if opts.OutDir == "" {
-		opts.OutDir = filepath.Join("src", "plugins", "github", "src_v1", "issues")
+		opts.OutDir = filepath.Join("plugins", "github", "src_v1", "issues")
 	}
+	opts.OutDir = resolveOutDir(opts.OutDir)
 	files, err := filepath.Glob(filepath.Join(opts.OutDir, "*.md"))
 	if err != nil {
 		return 0, 0, err
@@ -1254,10 +1401,20 @@ func PushIssues(opts PushIssuesOptions) (int, int, error) {
 			continue
 		}
 
-		pending, idxs := pendingOutboundComments(sections["comments-outbound"])
-		if len(pending) == 0 {
+		desiredTitle := issueTitleForGitHub(raw, sections["notes"], issueID)
+		desiredBody := strings.TrimSpace(raw)
+		desiredLabels := parseTagBullets(sections["tags"])
+
+		if err := syncIssueContent(issueID, desiredTitle, desiredBody); err != nil {
+			logs.Warn("Skipping #%d content sync due to error: %v", issueID, err)
+			skipped++
 			continue
 		}
+		if err := syncIssueLabels(issueID, live.Labels, desiredLabels); err != nil {
+			return sent, skipped, fmt.Errorf("Issue #%d label sync failed: %w", issueID, err)
+		}
+
+		pending, idxs := pendingOutboundComments(sections["comments-outbound"])
 
 		postFailed := false
 		for _, c := range pending {
@@ -1591,6 +1748,109 @@ func postIssueComment(issueID int, body string) error {
 	return cmd.Run()
 }
 
+func syncIssueContent(issueID int, title, body string) error {
+	gh := findGH()
+	if strings.TrimSpace(title) == "" {
+		return fmt.Errorf("empty issue title for #%d", issueID)
+	}
+	if strings.TrimSpace(body) == "" {
+		return fmt.Errorf("empty issue body for #%d", issueID)
+	}
+	cmd := exec.Command(
+		gh,
+		"issue", "edit", strconv.Itoa(issueID),
+		"--title", title,
+		"--body", body,
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func syncIssueLabels(issueID int, current []GHLabel, desired []string) error {
+	filteredDesired, unknown, err := filterToExistingRepoLabels(desired)
+	if err != nil {
+		return err
+	}
+	if len(unknown) > 0 {
+		return fmt.Errorf("Issue #%d has unknown labels in markdown: %s", issueID, strings.Join(unknown, ", "))
+	}
+
+	cur := labelsToNames(current)
+	add, remove := diffLabelSets(cur, filteredDesired)
+	if len(add) == 0 && len(remove) == 0 {
+		return nil
+	}
+	gh := findGH()
+	args := []string{"issue", "edit", strconv.Itoa(issueID)}
+	for _, l := range add {
+		args = append(args, "--add-label", l)
+	}
+	for _, l := range remove {
+		args = append(args, "--remove-label", l)
+	}
+	cmd := exec.Command(gh, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func filterToExistingRepoLabels(desired []string) ([]string, []string, error) {
+	existing, err := listRepoLabelSet()
+	if err != nil {
+		return nil, nil, err
+	}
+	filtered := []string{}
+	unknown := []string{}
+	for _, d := range desired {
+		norm := strings.ToLower(strings.TrimSpace(d))
+		if norm == "" {
+			continue
+		}
+		if canonical, ok := existing[norm]; ok {
+			filtered = append(filtered, canonical)
+		} else {
+			unknown = append(unknown, d)
+		}
+	}
+	return uniqueStrings(filtered), uniqueStrings(unknown), nil
+}
+
+func listRepoLabelSet() (map[string]string, error) {
+	gh := findGH()
+	cmd := exec.Command(gh, "label", "list", "--limit", "500", "--json", "name")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	var labels []GHLabel
+	if err := json.Unmarshal(out, &labels); err != nil {
+		return nil, err
+	}
+	m := map[string]string{}
+	for _, l := range labels {
+		name := strings.TrimSpace(l.Name)
+		if name == "" {
+			continue
+		}
+		m[strings.ToLower(name)] = name
+	}
+	return m, nil
+}
+
+func issueTitleForGitHub(raw string, notes []string, issueID int) string {
+	if t := strings.TrimSpace(valueFromBullet(notes, "title")); t != "" {
+		return t
+	}
+	lineTitle := issueTitleFromMarkdown(raw, notes, strconv.Itoa(issueID))
+	lineTitle = strings.TrimSpace(lineTitle)
+	prefix := strconv.Itoa(issueID) + "-"
+	if strings.HasPrefix(strings.ToLower(lineTitle), strings.ToLower(prefix)) {
+		lineTitle = strings.TrimSpace(strings.TrimPrefix(lineTitle, prefix))
+	}
+	return lineTitle
+}
+
 func fetchIssueByNumber(issueID int) (Issue, error) {
 	gh := findGH()
 	cmd := exec.Command(gh, "issue", "view", strconv.Itoa(issueID), "--json", "number,title,body,state,url,createdAt,updatedAt,author,labels,comments")
@@ -1722,4 +1982,18 @@ func getDialtoneEnv() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".dialtone_env")
+}
+
+func resolveOutDir(outDir string) string {
+	outDir = strings.TrimSpace(outDir)
+	if outDir == "" {
+		return outDir
+	}
+	if filepath.IsAbs(outDir) {
+		return outDir
+	}
+	if strings.HasPrefix(outDir, "src"+string(filepath.Separator)) {
+		return strings.TrimPrefix(outDir, "src"+string(filepath.Separator))
+	}
+	return outDir
 }
