@@ -2,12 +2,19 @@ package test
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 
-	chrome "dialtone/dev/plugins/chrome/app"
+	chrome "dialtone/dev/plugins/chrome/src_v1/go"
 )
 
 func Run() error {
 	logLine("info", "Starting Chrome plugin self-test")
+	if err := runLibraryExample(); err != nil {
+		return err
+	}
 	if err := chrome.KillDialtoneResources(); err != nil {
 		return fmt.Errorf("pre-cleanup failed: %w", err)
 	}
@@ -123,4 +130,33 @@ func findProc(procs []chrome.ChromeProcess, pid int) (chrome.ChromeProcess, bool
 
 func logLine(level, message string) {
 	fmt.Printf("[%s] %s\n", level, message)
+}
+
+func runLibraryExample() error {
+	logLine("info", "Running chrome library usage example")
+
+	srcDir := findSrcDir()
+	cmd := exec.Command("go", "run", "./plugins/chrome/src_v1/test/02_example_library/main.go")
+	cmd.Dir = srcDir
+	out, err := cmd.CombinedOutput()
+	output := strings.TrimSpace(string(out))
+	if output != "" {
+		logLine("info", output)
+	}
+	if err != nil {
+		return fmt.Errorf("library usage example failed: %w", err)
+	}
+	logLine("pass", "Library usage example ran successfully")
+	return nil
+}
+
+func findSrcDir() string {
+	cwd, _ := os.Getwd()
+	if _, err := os.Stat(filepath.Join(cwd, "plugins")); err == nil {
+		return cwd
+	}
+	if _, err := os.Stat(filepath.Join(cwd, "src", "plugins")); err == nil {
+		return filepath.Join(cwd, "src")
+	}
+	return cwd
 }

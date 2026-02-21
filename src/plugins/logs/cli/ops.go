@@ -1,7 +1,7 @@
 package cli
 
 import (
-	chrome_app "dialtone/dev/plugins/chrome/app"
+	chrome_app "dialtone/dev/plugins/chrome/src_v1/go"
 	"encoding/json"
 	"fmt"
 	"io"

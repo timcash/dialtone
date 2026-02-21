@@ -1,6 +1,7 @@
 # Chrome Plugin
 
 `src/plugins/chrome` manages local Chrome/Chromium/Edge instances for Dialtone.
+The plugin runtime library lives in `src/plugins/chrome/src_v1/go` and emits logs via `src/plugins/logs/src_v1/go`.
 
 It supports:
 - verifying debug connectivity
@@ -8,6 +9,34 @@ It supports:
 - launching tagged browser sessions
 - killing Dialtone-only (or all) browser processes
 - running chrome plugin self-test
+
+## Library Usage (`src_v1/go`)
+
+Import:
+
+```go
+import chrome "dialtone/dev/plugins/chrome/src_v1/go"
+```
+
+Typical usage:
+
+```go
+session, err := chrome.StartSession(chrome.SessionOptions{
+	RequestedPort: 0,
+	Headless:      true,
+	Role:          "smoke",
+	ReuseExisting: true,
+})
+if err != nil {
+	return err
+}
+defer chrome.CleanupSession(session)
+```
+
+Self-test coverage:
+- `./dialtone.sh chrome test src_v1` first runs `src/plugins/chrome/src_v1/test/02_example_library/main.go`.
+- That example imports `src/plugins/chrome/src_v1/go` directly and validates core library calls.
+- Then it runs the full browser lifecycle self-test.
 
 ## CLI
 
@@ -24,7 +53,7 @@ Use scaffold-style commands:
 
 Notes:
 - `src_v1` is accepted as an optional version argument for all commands.
-- Current runtime behavior is version-agnostic (single implementation path), but command shape is normalized to the versioned style.
+- `chrome test src_v1` runs the self-test in `src/plugins/chrome/src_v1/test/test.go`, which imports the chrome library from `src/plugins/chrome/src_v1/go`.
 
 ## Commands
 
