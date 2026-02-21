@@ -55,6 +55,35 @@ type PushIssuesOptions struct {
 	Force  bool
 }
 
+type SyncPROptions struct {
+	Limit  int
+	OutDir string
+}
+
+type PushPROptions struct {
+	OutDir string
+	Force  bool
+}
+
+type PR struct {
+	Number           int         `json:"number"`
+	Title            string      `json:"title"`
+	Body             string      `json:"body"`
+	State            string      `json:"state"`
+	URL              string      `json:"url"`
+	CreatedAt        string      `json:"createdAt"`
+	UpdatedAt        string      `json:"updatedAt"`
+	MergedAt         string      `json:"mergedAt"`
+	IsDraft          bool        `json:"isDraft"`
+	MergeStateStatus string      `json:"mergeStateStatus"`
+	ReviewDecision   string      `json:"reviewDecision"`
+	BaseRefName      string      `json:"baseRefName"`
+	HeadRefName      string      `json:"headRefName"`
+	Author           GHAuthor    `json:"author"`
+	Labels           []GHLabel   `json:"labels"`
+	Comments         []GHComment `json:"comments"`
+}
+
 type RenderOptions struct {
 	SyncMeta         SyncMeta
 	CommentsGitHub   []string
@@ -101,6 +130,9 @@ func PrintUsage() {
 	fmt.Println("  issue print [src_v1] <issue-id> [--out DIR]")
 	fmt.Println("  issue list [src_v1] [--state all|open|closed] [--limit N]")
 	fmt.Println("  issue view [src_v1] <issue-id>")
+	fmt.Println("  pr sync [src_v1] [--limit N] [--out DIR]     # sync open PRs only")
+	fmt.Println("  pr push [src_v1] [--out DIR] [--force]")
+	fmt.Println("  pr print [src_v1] <pr-id> [--out DIR]")
 	fmt.Println("  pr [src_v1] [create|view|merge|close|review] [args]")
 	fmt.Println("  test [src_v1]")
 	fmt.Println("  install")
@@ -432,6 +464,67 @@ func runPR(args []string) error {
 	}
 
 	switch args[0] {
+	case "sync":
+		opts := SyncPROptions{
+			Limit:  200,
+			OutDir: filepath.Join("plugins", "github", "src_v1", "prs"),
+		}
+		for i := 1; i < len(args); i++ {
+			switch args[i] {
+			case "--limit":
+				if i+1 < len(args) {
+					n, err := strconv.Atoi(args[i+1])
+					if err == nil && n > 0 {
+						opts.Limit = n
+					}
+					i++
+				}
+			case "--out":
+				if i+1 < len(args) {
+					opts.OutDir = args[i+1]
+					i++
+				}
+			}
+		}
+		count, err := SyncPRs(opts)
+		if err != nil {
+			return err
+		}
+		logs.Info("Synced %d open PRs to %s", count, opts.OutDir)
+		return nil
+	case "push":
+		opts := PushPROptions{
+			OutDir: filepath.Join("plugins", "github", "src_v1", "prs"),
+		}
+		for i := 1; i < len(args); i++ {
+			switch args[i] {
+			case "--out":
+				if i+1 < len(args) {
+					opts.OutDir = args[i+1]
+					i++
+				}
+			case "--force":
+				opts.Force = true
+			}
+		}
+		sent, labelUpdated, skipped, err := PushPRs(opts)
+		if err != nil {
+			return err
+		}
+		logs.Info("PR push complete: comments_sent=%d labels_updated=%d skipped=%d", sent, labelUpdated, skipped)
+		return nil
+	case "print":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: ./dialtone.sh github pr print <pr-id> [--out DIR]")
+		}
+		outDir := filepath.Join("plugins", "github", "src_v1", "prs")
+		for i := 2; i < len(args); i++ {
+			if args[i] == "--out" && i+1 < len(args) {
+				outDir = args[i+1]
+				i++
+			}
+		}
+		return PrintPR(args[1], outDir)
 	case "create":
 		return prCreateOrUpdate("", "")
 	case "view":
@@ -441,7 +534,22 @@ func runPR(args []string) error {
 		if len(extra) == 0 {
 			extra = []string{"--merge", "--delete-branch"}
 		}
-		return runGHPassthrough(append([]string{"pr", "merge"}, extra...))
+		prNum := detectPRNumberArg(extra)
+		if prNum == 0 {
+			n, err := currentPRNumber()
+			if err == nil {
+				prNum = n
+			}
+		}
+		if err := runGHPassthrough(append([]string{"pr", "merge"}, extra...)); err != nil {
+			return err
+		}
+		if prNum > 0 {
+			if err := refreshSinglePRMarkdown(prNum, filepath.Join("plugins", "github", "src_v1", "prs")); err != nil {
+				logs.Warn("Merged PR but failed to refresh local PR markdown for #%d: %v", prNum, err)
+			}
+		}
+		return nil
 	case "close":
 		return runGHPassthrough(append([]string{"pr", "close"}, args[1:]...))
 	case "review":
@@ -501,10 +609,557 @@ func prCreateOrUpdate(title, body string) error {
 	return runGHPassthrough(args)
 }
 
+func SyncPRs(opts SyncPROptions) (int, error) {
+	if opts.Limit <= 0 {
+		opts.Limit = 200
+	}
+	if strings.TrimSpace(opts.OutDir) == "" {
+		opts.OutDir = filepath.Join("plugins", "github", "src_v1", "prs")
+	}
+	if err := os.MkdirAll(opts.OutDir, 0o755); err != nil {
+		return 0, err
+	}
+
+	prs, err := listOpenPRs(opts.Limit)
+	if err != nil {
+		return 0, err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	for _, pr := range prs {
+		path := filepath.Join(opts.OutDir, fmt.Sprintf("%d.md", pr.Number))
+		existingRaw, _ := os.ReadFile(path)
+		existingSections := parseSections(string(existingRaw))
+		existingSync := parseSyncMeta(existingSections["sync"])
+		outbound := normalizeOutbound(existingSections["comments-outbound"])
+		render := RenderOptions{
+			SyncMeta: SyncMeta{
+				GitHubUpdatedAt:  pr.UpdatedAt,
+				LastPulledAt:     now,
+				LastPushedAt:     existingSync.LastPushedAt,
+				GitHubLabelsHash: labelsHash(pr.Labels),
+			},
+			CommentsGitHub:   formatGitHubComments(pr.Comments),
+			CommentsOutbound: outbound,
+		}
+		if err := os.WriteFile(path, []byte(RenderPRTaskMarkdown(pr, render)), 0o644); err != nil {
+			return 0, err
+		}
+	}
+	return len(prs), nil
+}
+
+func PushPRs(opts PushPROptions) (int, int, int, error) {
+	if strings.TrimSpace(opts.OutDir) == "" {
+		opts.OutDir = filepath.Join("plugins", "github", "src_v1", "prs")
+	}
+	files, err := filepath.Glob(filepath.Join(opts.OutDir, "*.md"))
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	sort.Strings(files)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	commentSent := 0
+	labelsUpdated := 0
+	skipped := 0
+
+	for _, path := range files {
+		rawBytes, err := os.ReadFile(path)
+		if err != nil {
+			return commentSent, labelsUpdated, skipped, err
+		}
+		raw := string(rawBytes)
+		sections := parseSections(raw)
+
+		prID, err := detectPRID(path, sections["signature"])
+		if err != nil {
+			logs.Warn("Skipping %s: %v", path, err)
+			skipped++
+			continue
+		}
+		live, err := fetchPRByNumber(prID)
+		if err != nil {
+			logs.Warn("Skipping PR #%d (%s): failed to fetch live PR: %v", prID, path, err)
+			skipped++
+			continue
+		}
+
+		syncMeta := parseSyncMeta(sections["sync"])
+		if needsConflictWarning(syncMeta.GitHubUpdatedAt, live.UpdatedAt) && !opts.Force {
+			logs.Warn("Skipping PR #%d (%s): GitHub updated at %s (local known %s). Run pr sync first or use --force.", prID, path, live.UpdatedAt, syncMeta.GitHubUpdatedAt)
+			skipped++
+			continue
+		}
+
+		desiredLabels := parseTagBullets(sections["tags"])
+		if err := syncPRLabels(prID, live.Labels, desiredLabels); err != nil {
+			logs.Warn("Skipping PR #%d label sync due to error: %v", prID, err)
+			skipped++
+			continue
+		}
+		if !sameStringSet(labelsToNames(live.Labels), desiredLabels) {
+			labelsUpdated++
+		}
+
+		pending, idxs := pendingOutboundComments(sections["comments-outbound"])
+		postFailed := false
+		for _, c := range pending {
+			if err := postPRComment(prID, c); err != nil {
+				logs.Warn("Skipping PR #%d comment push due to error: %v", prID, err)
+				skipped++
+				postFailed = true
+				break
+			}
+			commentSent++
+		}
+		if postFailed {
+			continue
+		}
+
+		sections["comments-outbound"] = markOutboundSent(sections["comments-outbound"], idxs, now)
+		updatedLive, err := fetchPRByNumber(prID)
+		if err == nil {
+			sections["comments-github"] = formatGitHubComments(updatedLive.Comments)
+			sections["tags"] = labelsToBullets(updatedLive.Labels)
+			syncMeta.GitHubUpdatedAt = updatedLive.UpdatedAt
+			syncMeta.GitHubLabelsHash = labelsHash(updatedLive.Labels)
+		}
+		syncMeta.LastPushedAt = now
+		if syncMeta.LastPulledAt == "" {
+			syncMeta.LastPulledAt = now
+		}
+		sections["sync"] = formatSyncMeta(syncMeta)
+		sections["notes"] = mergePRNotes(sections["notes"], live)
+
+		if err := os.WriteFile(path, []byte(rebuildMarkdown(raw, sections)), 0o644); err != nil {
+			return commentSent, labelsUpdated, skipped, err
+		}
+	}
+
+	return commentSent, labelsUpdated, skipped, nil
+}
+
+func PrintPR(prID, outDir string) error {
+	prID = strings.TrimSpace(prID)
+	if prID == "" {
+		return errors.New("missing pr id")
+	}
+	if outDir == "" {
+		outDir = filepath.Join("plugins", "github", "src_v1", "prs")
+	}
+	path := filepath.Join(outDir, prID+".md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("failed reading pr file %s: %w", path, err)
+	}
+
+	text := string(raw)
+	sections := parseSections(text)
+	title := issueTitleFromMarkdown(text, sections["notes"], prID)
+	status := valueFromBullet(sections["signature"], "status")
+	url := valueFromBullet(sections["signature"], "url")
+	ghUpdated := valueFromBullet(sections["sync"], "github-updated-at")
+	lastPulled := valueFromBullet(sections["sync"], "last-pulled-at")
+	lastPushed := valueFromBullet(sections["sync"], "last-pushed-at")
+	state := valueFromBullet(sections["notes"], "state")
+	mergedAt := valueFromBullet(sections["notes"], "merged-at")
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("# PR %s: %s\n\n", prID, title))
+	if status != "" {
+		b.WriteString(fmt.Sprintf("- Status: `%s`\n", status))
+	}
+	if state != "" {
+		b.WriteString(fmt.Sprintf("- PR State: `%s`\n", state))
+	}
+	if mergedAt != "" {
+		b.WriteString(fmt.Sprintf("- Merged At: `%s`\n", mergedAt))
+	}
+	if url != "" {
+		b.WriteString(fmt.Sprintf("- URL: %s\n", url))
+	}
+	if ghUpdated != "" {
+		b.WriteString(fmt.Sprintf("- GitHub Updated: `%s`\n", ghUpdated))
+	}
+	if lastPulled != "" {
+		b.WriteString(fmt.Sprintf("- Last Pulled: `%s`\n", lastPulled))
+	}
+	if lastPushed != "" {
+		b.WriteString(fmt.Sprintf("- Last Pushed: `%s`\n", lastPushed))
+	}
+
+	writeSection := func(name string, lines []string) {
+		if len(lines) == 0 || allBlank(lines) {
+			return
+		}
+		b.WriteString("\n")
+		b.WriteString("## " + name + "\n")
+		for _, l := range lines {
+			if strings.TrimSpace(l) == "" {
+				continue
+			}
+			b.WriteString(l + "\n")
+		}
+	}
+
+	writeSection("Description", sections["description"])
+	writeSection("Tags", sections["tags"])
+	writeSection("Comments (GitHub)", sections["comments-github"])
+	writeSection("Comments (Outbound)", sections["comments-outbound"])
+	writeSection("Notes", sections["notes"])
+	fmt.Print(strings.TrimRight(b.String(), "\n") + "\n")
+	return nil
+}
+
+func RenderPRTaskMarkdown(pr PR, opts RenderOptions) string {
+	titleSlug := slug(pr.Title)
+	if titleSlug == "" {
+		titleSlug = fmt.Sprintf("pr-%d", pr.Number)
+	}
+	var b strings.Builder
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	if opts.SyncMeta.LastPulledAt == "" {
+		opts.SyncMeta.LastPulledAt = now
+	}
+	if opts.SyncMeta.GitHubUpdatedAt == "" {
+		opts.SyncMeta.GitHubUpdatedAt = pr.UpdatedAt
+	}
+	if opts.SyncMeta.GitHubLabelsHash == "" {
+		opts.SyncMeta.GitHubLabelsHash = labelsHash(pr.Labels)
+	}
+	if len(opts.CommentsGitHub) == 0 {
+		opts.CommentsGitHub = formatGitHubComments(pr.Comments)
+	}
+	if len(opts.CommentsOutbound) == 0 {
+		opts.CommentsOutbound = normalizeOutbound(nil)
+	}
+
+	b.WriteString(fmt.Sprintf("# %d-%s\n", pr.Number, titleSlug))
+	b.WriteString("### signature:\n")
+	b.WriteString("- status: wait\n")
+	b.WriteString(fmt.Sprintf("- pr: %d\n", pr.Number))
+	b.WriteString("- source: github\n")
+	if pr.URL != "" {
+		b.WriteString(fmt.Sprintf("- url: %s\n", pr.URL))
+	}
+	b.WriteString(fmt.Sprintf("- synced-at: %s\n", now))
+	b.WriteString("### sync:\n")
+	for _, line := range formatSyncMeta(opts.SyncMeta) {
+		b.WriteString(line + "\n")
+	}
+	b.WriteString("### description:\n")
+	if strings.TrimSpace(pr.Body) == "" {
+		b.WriteString("- TODO: fill from PR body/context\n")
+	} else {
+		for _, line := range strings.Split(strings.TrimSpace(pr.Body), "\n") {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			b.WriteString("- " + line + "\n")
+		}
+	}
+	b.WriteString("### tags:\n")
+	for _, line := range labelsToBullets(pr.Labels) {
+		b.WriteString(line + "\n")
+	}
+	b.WriteString("### comments-github:\n")
+	for _, line := range opts.CommentsGitHub {
+		b.WriteString(line + "\n")
+	}
+	b.WriteString("### comments-outbound:\n")
+	for _, line := range opts.CommentsOutbound {
+		b.WriteString(line + "\n")
+	}
+	b.WriteString("### notes:\n")
+	for _, line := range mergePRNotes(nil, pr) {
+		b.WriteString(line + "\n")
+	}
+	return b.String()
+}
+
+func listOpenPRs(limit int) ([]PR, error) {
+	gh := findGH()
+	cmd := exec.Command(
+		gh,
+		"pr", "list",
+		"--state", "open",
+		"--limit", strconv.Itoa(limit),
+		"--json", "number,title,body,state,url,createdAt,updatedAt,mergedAt,isDraft,mergeStateStatus,reviewDecision,baseRefName,headRefName,author,labels,comments",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	var prs []PR
+	if err := json.Unmarshal(out, &prs); err != nil {
+		return nil, err
+	}
+	return prs, nil
+}
+
+func fetchPRByNumber(prID int) (PR, error) {
+	gh := findGH()
+	cmd := exec.Command(
+		gh,
+		"pr", "view", strconv.Itoa(prID),
+		"--json", "number,title,body,state,url,createdAt,updatedAt,mergedAt,isDraft,mergeStateStatus,reviewDecision,baseRefName,headRefName,author,labels,comments",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return PR{}, err
+	}
+	var pr PR
+	if err := json.Unmarshal(out, &pr); err != nil {
+		return PR{}, err
+	}
+	return pr, nil
+}
+
+func detectPRID(path string, signature []string) (int, error) {
+	for _, line := range signature {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "- pr:") {
+			continue
+		}
+		v := strings.TrimSpace(strings.TrimPrefix(line, "- pr:"))
+		n, err := strconv.Atoi(v)
+		if err == nil && n > 0 {
+			return n, nil
+		}
+	}
+	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	n, err := strconv.Atoi(base)
+	if err == nil && n > 0 {
+		return n, nil
+	}
+	return 0, fmt.Errorf("cannot detect pr id")
+}
+
+func postPRComment(prID int, body string) error {
+	gh := findGH()
+	cmd := exec.Command(gh, "pr", "comment", strconv.Itoa(prID), "--body", body)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func syncPRLabels(prID int, current []GHLabel, desired []string) error {
+	cur := labelsToNames(current)
+	add, remove := diffLabelSets(cur, desired)
+	if len(add) == 0 && len(remove) == 0 {
+		return nil
+	}
+	gh := findGH()
+	args := []string{"pr", "edit", strconv.Itoa(prID)}
+	for _, l := range add {
+		args = append(args, "--add-label", l)
+	}
+	for _, l := range remove {
+		args = append(args, "--remove-label", l)
+	}
+	cmd := exec.Command(gh, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func labelsToNames(labels []GHLabel) []string {
+	out := make([]string, 0, len(labels))
+	for _, l := range labels {
+		name := strings.TrimSpace(l.Name)
+		if name != "" {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func labelsToBullets(labels []GHLabel) []string {
+	names := labelsToNames(labels)
+	if len(names) == 0 {
+		return []string{"- todo"}
+	}
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		out = append(out, "- "+n)
+	}
+	return out
+}
+
+func parseTagBullets(lines []string) []string {
+	out := []string{}
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "- ") {
+			continue
+		}
+		v := strings.TrimSpace(strings.TrimPrefix(line, "- "))
+		if v == "" || strings.EqualFold(v, "todo") {
+			continue
+		}
+		out = append(out, v)
+	}
+	sort.Strings(out)
+	return uniqueStrings(out)
+}
+
+func diffLabelSets(current, desired []string) ([]string, []string) {
+	curSet := map[string]struct{}{}
+	desSet := map[string]struct{}{}
+	for _, c := range current {
+		curSet[strings.ToLower(strings.TrimSpace(c))] = struct{}{}
+	}
+	for _, d := range desired {
+		desSet[strings.ToLower(strings.TrimSpace(d))] = struct{}{}
+	}
+	add := []string{}
+	remove := []string{}
+	for _, d := range desired {
+		if _, ok := curSet[strings.ToLower(strings.TrimSpace(d))]; !ok {
+			add = append(add, d)
+		}
+	}
+	for _, c := range current {
+		if _, ok := desSet[strings.ToLower(strings.TrimSpace(c))]; !ok {
+			remove = append(remove, c)
+		}
+	}
+	return uniqueStrings(add), uniqueStrings(remove)
+}
+
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	a2 := append([]string{}, a...)
+	b2 := append([]string{}, b...)
+	for i := range a2 {
+		a2[i] = strings.ToLower(strings.TrimSpace(a2[i]))
+	}
+	for i := range b2 {
+		b2[i] = strings.ToLower(strings.TrimSpace(b2[i]))
+	}
+	sort.Strings(a2)
+	sort.Strings(b2)
+	for i := range a2 {
+		if a2[i] != b2[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func uniqueStrings(in []string) []string {
+	seen := map[string]struct{}{}
+	out := []string{}
+	for _, v := range in {
+		k := strings.ToLower(strings.TrimSpace(v))
+		if k == "" {
+			continue
+		}
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, strings.TrimSpace(v))
+	}
+	sort.Strings(out)
+	return out
+}
+
+func mergePRNotes(existing []string, pr PR) []string {
+	_ = existing
+	out := []string{
+		"- title: " + strings.TrimSpace(pr.Title),
+		"- state: " + strings.TrimSpace(pr.State),
+		"- draft: " + strconv.FormatBool(pr.IsDraft),
+		"- review-decision: " + strings.TrimSpace(pr.ReviewDecision),
+		"- merge-state-status: " + strings.TrimSpace(pr.MergeStateStatus),
+		"- base-ref: " + strings.TrimSpace(pr.BaseRefName),
+		"- head-ref: " + strings.TrimSpace(pr.HeadRefName),
+	}
+	if strings.TrimSpace(pr.Author.Login) != "" {
+		out = append(out, "- author: "+strings.TrimSpace(pr.Author.Login))
+	}
+	if strings.TrimSpace(pr.CreatedAt) != "" {
+		out = append(out, "- created-at: "+strings.TrimSpace(pr.CreatedAt))
+	}
+	if strings.TrimSpace(pr.UpdatedAt) != "" {
+		out = append(out, "- updated-at: "+strings.TrimSpace(pr.UpdatedAt))
+	}
+	out = append(out, "- merged-at: "+strings.TrimSpace(pr.MergedAt))
+	return out
+}
+
+func refreshSinglePRMarkdown(prNum int, outDir string) error {
+	pr, err := fetchPRByNumber(prNum)
+	if err != nil {
+		return err
+	}
+	if outDir == "" {
+		outDir = filepath.Join("plugins", "github", "src_v1", "prs")
+	}
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
+	path := filepath.Join(outDir, fmt.Sprintf("%d.md", prNum))
+	existingRaw, _ := os.ReadFile(path)
+	existingSections := parseSections(string(existingRaw))
+	existingSync := parseSyncMeta(existingSections["sync"])
+	outbound := normalizeOutbound(existingSections["comments-outbound"])
+	now := time.Now().UTC().Format(time.RFC3339)
+	render := RenderOptions{
+		SyncMeta: SyncMeta{
+			GitHubUpdatedAt:  pr.UpdatedAt,
+			LastPulledAt:     now,
+			LastPushedAt:     existingSync.LastPushedAt,
+			GitHubLabelsHash: labelsHash(pr.Labels),
+		},
+		CommentsGitHub:   formatGitHubComments(pr.Comments),
+		CommentsOutbound: outbound,
+	}
+	return os.WriteFile(path, []byte(RenderPRTaskMarkdown(pr, render)), 0o644)
+}
+
+func detectPRNumberArg(args []string) int {
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(a))
+		if err == nil && n > 0 {
+			return n
+		}
+	}
+	return 0
+}
+
+func currentPRNumber() (int, error) {
+	gh := findGH()
+	cmd := exec.Command(gh, "pr", "view", "--json", "number")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+	var payload struct {
+		Number int `json:"number"`
+	}
+	if err := json.Unmarshal(out, &payload); err != nil {
+		return 0, err
+	}
+	if payload.Number <= 0 {
+		return 0, errors.New("current PR number not found")
+	}
+	return payload.Number, nil
+}
+
 func SyncIssues(opts SyncIssuesOptions) (int, error) {
 	gh := findGH()
 	if opts.State == "" {
-		opts.State = "all"
+		opts.State = "open"
 	}
 	if opts.Limit <= 0 {
 		opts.Limit = 500

@@ -22,20 +22,22 @@ src/plugins/github/
 
 ```bash
 ./dialtone.sh github help
+./dialtone.sh github install
 ./dialtone.sh github test src_v1
 ```
 
 ### Issue Commands
 
-Download repository issues into task-style markdown files:
+Core issue commands:
 
 ```bash
-./dialtone.sh github issue sync src_v1
-./dialtone.sh github issue sync src_v1 --state all --limit 500
+./dialtone.sh github issue list src_v1 --state open --limit 30
+./dialtone.sh github issue view src_v1 313
+./dialtone.sh github issue print src_v1 313
+./dialtone.sh github issue sync src_v1                        # default: open only
 ./dialtone.sh github issue sync src_v1 --out plugins/github/src_v1/issues
 ./dialtone.sh github issue push src_v1 --out plugins/github/src_v1/issues
 ./dialtone.sh github issue delete-closed src_v1 --out plugins/github/src_v1/issues
-./dialtone.sh github issue print src_v1 313
 ```
 
 Notes:
@@ -60,13 +62,6 @@ Conflict safety:
 - `issue push` fetches live issue metadata first
 - if GitHub changed since the last sync, push warns and skips that issue unless `--force`
 
-Quick issue passthrough commands:
-
-```bash
-./dialtone.sh github issue list src_v1 --state open --limit 30
-./dialtone.sh github issue view src_v1 123
-```
-
 ### Pull Request Commands
 
 Simple PR flow:
@@ -83,10 +78,66 @@ Behavior:
 Additional PR actions:
 
 ```bash
+./dialtone.sh github pr sync src_v1                # sync OPEN PRs to markdown files
+./dialtone.sh github pr push src_v1                # push outbound comments + label edits from markdown
+./dialtone.sh github pr print src_v1 315           # pretty local markdown view
 ./dialtone.sh github pr src_v1 review   # mark PR ready for review
 ./dialtone.sh github pr src_v1 view
 ./dialtone.sh github pr src_v1 merge
 ./dialtone.sh github pr src_v1 close
+```
+
+PR markdown workflow:
+- local files are in `src/plugins/github/src_v1/prs/<pr_id>.md`
+- `pr sync` writes open PR metadata, labels, and comments to markdown
+- edit `### comments-outbound:` to queue comments to post
+- edit `### tags:` to desired PR labels; `pr push` reconciles labels on GitHub
+- `pr push` warns/skips on GitHub update conflicts unless `--force`
+- after `pr merge`, plugin refreshes that PR markdown so merged status is reflected locally
+
+## Example Workflows
+
+### Issue Markdown Workflow
+
+```bash
+# 1) Pull open issues from GitHub into markdown files
+./dialtone.sh github issue sync src_v1
+
+# 2) Agent edits a file:
+#    src/plugins/github/src_v1/issues/<id>.md
+#    - add/update fields
+#    - add bullets under `### comments-outbound:`
+
+# 3) Human pushes outbound comments/label edits to GitHub
+./dialtone.sh github issue push src_v1
+
+# 4) Refresh local mirror after push
+./dialtone.sh github issue sync src_v1
+
+# 5) Optional cleanup of local closed issue files
+./dialtone.sh github issue delete-closed src_v1
+```
+
+### PR Markdown Workflow
+
+```bash
+# 1) Create/update PR for current branch
+./dialtone.sh github pr src_v1
+
+# 2) Sync open PRs into markdown
+./dialtone.sh github pr sync src_v1
+
+# 3) Agent edits:
+#    src/plugins/github/src_v1/prs/<id>.md
+#    - set `### tags:` labels
+#    - add bullets under `### comments-outbound:`
+
+# 4) Human pushes markdown changes to GitHub
+./dialtone.sh github pr push src_v1
+
+# 5) Mark ready for review and merge when ready
+./dialtone.sh github pr src_v1 review
+./dialtone.sh github pr src_v1 merge
 ```
 
 ## Tests
