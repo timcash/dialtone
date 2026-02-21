@@ -1,5 +1,62 @@
 # Plugin Dependency DAG
 
+## New Plugin Layout (`src_vN`)
+
+When creating a new plugin, use a versioned source layout so code/tests can evolve safely:
+
+```text
+src/plugins/<plugin-name>/
+  README.md
+  scaffold/main.go
+  src_v1/
+    go/           # library/runtime code
+    test/
+      01_setup/                 # bootstrap env, fixtures, preconditions
+      02_example_library/       # shows library import/use from another binary
+      03_smoke/                 # end-to-end plugin smoke flow
+```
+
+Recommended command shape:
+- `./dialtone.sh <plugin> help`
+- `./dialtone.sh <plugin> test src_v1`
+
+### Import + Use `logs` (library example)
+
+```go
+package main
+
+import logs "dialtone/dev/plugins/logs/src_v1/go"
+
+func main() {
+	logs.Info("my-plugin started")
+	logs.Warn("example warning")
+}
+```
+
+### Import + Use `test` (library example)
+
+```go
+package main
+
+import testv1 "dialtone/dev/plugins/test/src_v1/go"
+
+func main() {
+	steps := []testv1.Step{
+		{
+			Name: "smoke",
+			RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+				ctx.Logf("step running")
+				return testv1.StepRunResult{Report: "ok"}, nil
+			},
+		},
+	}
+
+	_ = testv1.RunSuite(testv1.SuiteOptions{
+		Version: "src_v1",
+	}, steps)
+}
+```
+
 This document defines the core dependency contract for plugin structure in this repo.
 
 ## The Golden Rule
