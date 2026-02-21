@@ -15,7 +15,7 @@ func main() {
 		State:  "open",
 		URL:    "https://github.com/example/repo/issues/42",
 		Labels: []githubv1.GHLabel{{Name: "automation"}},
-	})
+	}, githubv1.RenderOptions{})
 	if !strings.Contains(doc, "- status: wait") {
 		panic("missing wait status")
 	}

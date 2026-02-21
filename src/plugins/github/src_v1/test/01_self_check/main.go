@@ -33,7 +33,7 @@ func main() {
 					Title:  "Fix CI flake",
 					Body:   "CI flakes on linux",
 					State:  "open",
-				})
+				}, githubv1.RenderOptions{})
 				if !strings.Contains(doc, "- status: wait") {
 					return testv1.StepRunResult{}, fmt.Errorf("task markdown missing wait status")
 				}
@@ -68,7 +68,7 @@ func main() {
 					Title:  "Downloaded issue",
 					Body:   "Task body",
 					State:  "open",
-				})
+				}, githubv1.RenderOptions{})
 				if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 					return testv1.StepRunResult{}, err
 				}
