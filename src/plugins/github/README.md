@@ -33,7 +33,14 @@ Download repository issues into task-style markdown files:
 ./dialtone.sh github issue sync src_v1
 ./dialtone.sh github issue sync src_v1 --state all --limit 500
 ./dialtone.sh github issue sync src_v1 --out plugins/github/src_v1/issues
+./dialtone.sh github issue push src_v1 --out plugins/github/src_v1/issues
+./dialtone.sh github issue delete-closed src_v1 --out plugins/github/src_v1/issues
+./dialtone.sh github issue print src_v1 313
 ```
+
+Notes:
+- `issue sync` defaults to `--state open` (closed issues are not downloaded unless you explicitly set `--state all` or `--state closed`).
+- `issue delete-closed` removes local markdown files for closed GitHub issues.
 
 Each generated issue file:
 - lives at `src/plugins/github/src_v1/issues/<issue_id>.md`
@@ -41,6 +48,17 @@ Each generated issue file:
 - always starts with `- status: wait`
 
 This is intended for a later LLM pass that upgrades each issue into full task format and flips status to `ready`.
+
+Markdown workflow for agents/humans:
+- agents write new outbound comments in `### comments-outbound:` (one `- ...` bullet per comment)
+- humans run `./dialtone.sh github issue push src_v1` to post pending outbound comments
+- posted outbound lines are marked as sent (`[sent <timestamp>]`)
+- `### comments-github:` mirrors GitHub comments on `issue sync`
+
+Conflict safety:
+- each issue markdown has `### sync:` metadata with `github-updated-at`
+- `issue push` fetches live issue metadata first
+- if GitHub changed since the last sync, push warns and skips that issue unless `--force`
 
 Quick issue passthrough commands:
 
