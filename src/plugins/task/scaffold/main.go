@@ -1,15 +1,16 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: task <command> [args]")
+		logs.Info("Usage: task <command> [args]")
 		return
 	}
 
@@ -39,15 +40,16 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println("Usage: ./dialtone.sh task <command> [src_vN] [args]")
-	fmt.Println("\nCommands:")
-	fmt.Println("  create <task-name>   Create a new task in tasks/<name>/v1/root.md")
-	fmt.Println("  validate <task-name> Validate a task markdown file")
-	fmt.Println("  sign <task-name> --role <role>  Sign a task in v2")
-	fmt.Println("  archive <task-name>  Promote v2 to v1 and prepare for next cycle")
-	fmt.Println("  sync [issue-id]      Sync GitHub issues into tasks/ folder")
-	fmt.Println("  test                 Run plugin tests")
-	fmt.Println("  help                 Show this help")
+	logs.Info("Usage: ./dialtone.sh task <command> [src_vN] [args]")
+	logs.Info("")
+	logs.Info("Commands:")
+	logs.Info("  create <task-name>   Create a new task in tasks/<name>/v1/root.md")
+	logs.Info("  validate <task-name> Validate a task markdown file")
+	logs.Info("  sign <task-name> --role <role>  Sign a task in v2")
+	logs.Info("  archive <task-name>  Promote v2 to v1 and prepare for next cycle")
+	logs.Info("  sync [issue-id]      Sync GitHub issues into tasks/ folder")
+	logs.Info("  test                 Run plugin tests")
+	logs.Info("  help                 Show this help")
 }
 
 func runTest(version string, args []string) {
@@ -57,13 +59,13 @@ func runTest(version string, args []string) {
 		repoRoot = filepath.Dir(cwd)
 	}
 	
-	testPath := filepath.Join(repoRoot, "src", "plugins", "task", version, "test", "03_smoke", "main.go")
+	testPath := filepath.Join(repoRoot, "src", "plugins", "task", version, "test", "01_smoke", "main.go")
 	cmd := exec.Command("go", "run", testPath)
 	cmd.Dir = filepath.Join(repoRoot, "src")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		fmt.Printf("Test execution failed: %v\n", err)
+		logs.Error("Test execution failed: %v", err)
 		os.Exit(1)
 	}
 }
@@ -77,7 +79,7 @@ func runVersionedCommand(version, command string, args []string) {
 
 	sourcePath := filepath.Join(repoRoot, "src", "plugins", "task", version, "go", "main.go")
 	if _, err := os.Stat(sourcePath); err != nil {
-		fmt.Printf("Version %s not implemented or main.go missing at %s\n", version, sourcePath)
+		logs.Error("Version %s not implemented or main.go missing at %s", version, sourcePath)
 		return
 	}
 
@@ -92,7 +94,7 @@ func runVersionedCommand(version, command string, args []string) {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			os.Exit(exitErr.ExitCode())
 		}
-		fmt.Printf("Error running %s: %v\n", version, err)
+		logs.Error("Error running %s: %v", version, err)
 	}
 }
 

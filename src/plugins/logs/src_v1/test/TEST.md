@@ -5,7 +5,7 @@ Embedded broker starts and wildcard listener captures topic logs.
 
 ### Results
 ```text
-Embedded NATS started at nats://127.0.0.1:44522 and NATS messages verified.
+Embedded NATS started at nats://127.0.0.1:43312 and NATS messages verified.
 ```
 
 # 02 Listener filtering (error.topic)
