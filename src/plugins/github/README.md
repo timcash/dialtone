@@ -14,8 +14,9 @@ src/plugins/github/
     go/github.go
     issues/
     test/
-      01_self_check/main.go
-      02_example_library/main.go
+      cmd/main.go
+      01_self_check/suite.go
+      02_example_library/suite.go
 ```
 
 ## Commands

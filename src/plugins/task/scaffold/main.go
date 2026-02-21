@@ -58,8 +58,8 @@ func runTest(version string, args []string) {
 	if filepath.Base(cwd) == "src" {
 		repoRoot = filepath.Dir(cwd)
 	}
-	
-	testPath := filepath.Join(repoRoot, "src", "plugins", "task", version, "test", "01_smoke", "main.go")
+
+	testPath := filepath.Join(repoRoot, "src", "plugins", "task", version, "test", "cmd", "main.go")
 	cmd := exec.Command("go", "run", testPath)
 	cmd.Dir = filepath.Join(repoRoot, "src")
 	cmd.Stdout = os.Stdout

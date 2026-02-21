@@ -86,3 +86,4 @@ src/plugins/swarm/test/node_modules
 src/plugins/template/src_v3/error.log
 nul
 dag_viz
+src/plugins/logs/src_v1/test/example_plugin_bin
