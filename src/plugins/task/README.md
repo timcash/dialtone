@@ -2,90 +2,110 @@
 
 The `task` plugin provides a structured system for managing and tracking engineering tasks using Markdown-based data and a versioned workflow (`v1` vs `v2`).
 
+## The Engineer's Path: From Discovery to Completion
+
+```sh
+# 1) A new issue arrives (#104: "Improve install plugin"). 
+./dialtone.sh github issue sync src_v1
+
+# 2) Promote to a versioned task. This creates task folder `104` with `v1/root.md` and `v2/root.md`.
+./dialtone.sh task sync 104
+
+# 3) DECOMPOSITION: We discover task 104 is too big. 
+#    We create specialized input tasks.
+./dialtone.sh task create 104-mock-server
+./dialtone.sh task create 104-test-folder
+
+# 4) LINKING: Use arrow syntax to define the flow.
+#    "104 depends on 104-mock-server" (Input direction)
+./dialtone.sh task link 104<--104-mock-server
+
+#    "104 depends on 104-test-folder"
+./dialtone.sh task link 104<--104-test-folder
+
+# 5) Bidirectional Logic: 
+#    - '104' now has '104-mock-server' as an INPUT.
+#    - '104-mock-server' now has '104' as an OUTPUT.
+#    Clickable Markdown links are added to both root.md files.
+
+# 6) Visual Confirmation.
+./dialtone.sh task tree 104
+# Output:
+# - 104
+#   - 104-mock-server
+#   - 104-test-folder
+
+# 7) ESTIMATION MANDATE: Before starting work, the LLM MUST fill in 
+#    'time_est' and 'token_est' in v2/root.md.
+#    Example:
+#    ### token_est:
+#    - 40,000 tokens
+#    ### time_est:
+#    - 1.5 hours
+
+# 8) EXECUTION: Fix a bug discovered during work.
+./dialtone.sh task create 104-fix-compile-error
+./dialtone.sh task link 104-mock-server<--104-fix-compile-error
+
+# 9) Tree update:
+# - 104-root
+#   - 104-mock-server
+#     - 104-fix-compile-error
+#   - 104-test-folder
+
+# 10) SIGN-OFF: Work from the leaves (inputs) up to the root.
+./dialtone.sh task sign 104-fix-compile-error --role LLM-CODE
+./dialtone.sh task sign 104 --role LLM-CODE
+
+# 11) Archive and PR.
+./dialtone.sh task resolve 104 --pr-url https://github.com/<org>/<repo>/pull/<id>
+./dialtone.sh task archive 104
+./dialtone.sh github pr src_v1
+```
+
+---
+
 ## Core Concepts
 
-### 1. The v1/v2 Workflow
-To ensure clarity between "where we started" and "what we changed," each task exists in two versions:
-- **`v1` (Baseline):** The state of the task at the beginning of the current work cycle (e.g., at the start of a git commit or LLM session).
-- **`v2` (WIP):** The current working state. All updates, signatures, and status changes are recorded here.
+### 1. Inputs and Outputs
+- **`### inputs:`** Tasks that **must** be completed before this task can be finished.
+- **`### outputs:`** Tasks that are waiting for **this** task to be completed.
+- Linking is **bidirectional** and uses relative Markdown paths for easy navigation.
 
-### 2. Task Markdown Format
-Tasks are defined in `.md` files with a specific structure. There is exactly one H1 header (`#`) per file for the task title.
-
-Required sections:
-- **`### description:`** Actionable summary of the goal.
-- **`### tags:`** Metadata for categorization.
-- **`### task-dependencies:`** List of other task IDs this task depends on.
-- **`### documentation:`** Reference URLs or local file paths.
-- **`### test-condition-1:`** Verifiable criteria for success.
-- **`### test-command:`** The command to run to verify the task.
-- **`### reviewed:`** Signatures from reviewers (managed via CLI).
-- **`### tested:`** Signatures from testers (managed via CLI).
+### 2. The v1/v2 Workflow
+- **`v1` (Baseline):** The state of the task at the beginning of the work cycle.
+- **`v2` (WIP):** The current working state. All updates are recorded here.
 
 ## CLI Commands
 
-Manage tasks via `./dialtone.sh task <command>`:
+### `sync [issue-id]`
+Migrates GitHub issues as task folders `<id>/v1/root.md` and `<id>/v2/root.md`.
 
-### `create <task-name>`
-Scaffolds a new task in `src/plugins/task/database/<task-name>/v1/`.
-Initializes `v1` and `v2` as baseline and working copies.
+Sync behavior:
+- creates root task markdown from GitHub issue markdown
+- keeps root task `### outputs:` as `- none`
+- writes `### issue:` link back to the source issue
+- writes `### pr:` placeholder (`- none`) for later PR link
+- auto-creates dependency input tasks from `### task-dependencies:` and links bidirectionally
 
-### `validate <task-name>`
-Validates the format of the task markdown file in `v2`.
+### `link <a<--b> or <a-->b>`
+- `a<--b`: Links `b` as an **input** to `a`.
+- `a-->b`: Links `b` as an **output** of `a`.
+- `a-->b-->c`: Chain syntax in one command.
+- `a-->b,b-->c`: Comma-separated multiple links in one command.
 
-### `sign <task-name> --role <role>`
-Adds a signature to the `reviewed` or `tested` section of the task in `v2`.
+### `tree [id]`
+Prints the recursive **input** dependency tree.
 
 ### `archive <task-name>`
-Promotes `v2` to `v1` to prepare for the next work cycle. After this, `v1` and `v2` match.
+Promotes `v2` to `v1` to set a new baseline.
 
-## How to Build a Task
-
-While you can use `./dialtone.sh task create`, you can also build tasks manually or via automation:
-
-1. **Define the ID:** Choose a slugified ID (e.g., `my-feature-fix`).
-2. **Create the Folder:** `mkdir -p src/plugins/task/database/my-feature-fix/{v1,v2}`.
-3. **Draft the Markdown:** Create `my-feature-fix.md` in both `v1/` and `v2/`.
-4. **Populate Sections:**
-   - Ensure you use `### section-name:` for all headers.
-   - Use `- none` instead of comments for empty lists.
-   - Avoid multiple H1 headers; only the title uses `#`.
-5. **Set the Baseline:** If you are migrating an issue, `v1` and `v2` should start as identical copies of the task.
-6. **Link Dependencies:** Reference other task folders by their ID.
-
-## Implementation Details
-
-### Directory Structure
-```text
-src/plugins/task/
-  database/
-    <task-name>/
-      v1/
-        <task-name>.md
-      v2/
-        <task-name>.md
-```
-
-## Example Workflow
-
-1. **Start a new task:**
-   ```sh
-   ./dialtone.sh task create auth-fix
-   ```
-
-2. **Work on the task:**
-   Edit `src/plugins/task/database/auth-fix/v2/auth-fix.md` or use CLI to update it.
-
-3. **Verify and Sign:**
-   ```sh
-   ./dialtone.sh task sign auth-fix --role LLM-CODE
-   ./dialtone.sh task sign auth-fix --role LLM-TEST
-   ```
-
-4. **Prepare for handoff:**
-   ```sh
-   ./dialtone.sh task archive auth-fix
-   ```
+### `resolve <root-id> [--pr-url URL]`
+- verifies the full input tree for `<root-id>` is done
+- requires `reviewed` + `tested` signatures on all input tasks and the root task
+- signs final root review and sets root signature status to `done`
+- updates source issue markdown status to `done` and appends completion comment
+- stores PR link in root `### pr:` when `--pr-url` is passed
 
 ## Verification
 

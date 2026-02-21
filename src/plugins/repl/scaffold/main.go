@@ -59,7 +59,7 @@ func runVersionedTest(versionDir string, args []string) error {
 		root = parent
 	}
 	
-	testPkg := "./plugins/repl/" + versionDir + "/test"
+	testPkg := "./plugins/repl/" + versionDir + "/test/01_bootstrap"
 	// Pass remaining args to the test runner
 	goArgs := append([]string{"exec", "run", testPkg}, args...)
 	fullArgs := append([]string{"go"}, goArgs...)

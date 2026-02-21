@@ -16,6 +16,10 @@ func Info(format string, args ...any) {
 	fmt.Fprintf(logOutput, "[INFO] "+format+"\n", args...)
 }
 
+func Raw(format string, args ...any) {
+	fmt.Fprintf(logOutput, format+"\n", args...)
+}
+
 func Error(format string, args ...any) {
 	fmt.Fprintf(logOutput, "[ERROR] "+format+"\n", args...)
 }

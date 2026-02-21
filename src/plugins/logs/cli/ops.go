@@ -101,8 +101,8 @@ func RunTest(versionDir string, attach bool, cps int) error {
 	if filepath.Base(repoRoot) == "src" {
 		repoRoot = filepath.Dir(repoRoot)
 	}
-	testPkg := "./" + filepath.ToSlash(filepath.Join("plugins", "logs", versionDir, "test"))
-	testMain := filepath.Join(repoRoot, "src", "plugins", "logs", versionDir, "test", "main.go")
+	testPkg := "./" + filepath.ToSlash(filepath.Join("plugins", "logs", versionDir, "test", "01_infra"))
+	testMain := filepath.Join(repoRoot, "src", "plugins", "logs", versionDir, "test", "01_infra", "main.go")
 	if _, err := os.Stat(testMain); os.IsNotExist(err) {
 		return fmt.Errorf("test runner not found: %s/main.go", testPkg)
 	}
