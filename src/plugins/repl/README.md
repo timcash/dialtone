@@ -1,13 +1,61 @@
 # REPL Plugin
 
-The REPL plugin tests interactive `dialtone.sh` behavior (`USER-1>` / `DIALTONE>` flow).
+The REPL plugin provides:
+- local interactive REPL (`run`)
+- shared multi-client REPL over NATS (`serve`/`join`)
+- update-aware service supervisor (`service`)
+- release build/publish tooling for per-architecture binaries (`release`)
+
+Prompts default to host identity (`<hostname>`) instead of `USER-1`.
 
 ## CLI
 ```bash
 ./dialtone.sh repl src_v1 help
+./dialtone.sh repl src_v1 run
+./dialtone.sh repl src_v1 status
+./dialtone.sh repl src_v1 serve --nats-url nats://0.0.0.0:4222 --room main --embedded-nats
+./dialtone.sh repl src_v1 join --nats-url nats://<server-ip>:4222 --room main --name <hostname>
+./dialtone.sh repl src_v1 service --mode run --repo timcash/dialtone --nats-url nats://0.0.0.0:4222 --room main --check-interval 3m
+./dialtone.sh repl src_v1 build
+./dialtone.sh repl src_v1 release build v0.1.0
+./dialtone.sh repl src_v1 release publish v0.1.0 timcash/dialtone
 ./dialtone.sh repl src_v1 test
 ```
 
+## NATS Model
+- REPL bus uses one subject per room: `repl.<room>`.
+- User input is published as NATS `input` frames first.
+- Server (`DIALTONE`) listens on that same subject and executes input frames.
+- REPL stdout is replay from NATS `line`/`server` frames.
+- Clients can detect an already-running server via probe/heartbeat frames on the same subject.
+
+## Standalone Binary
+```bash
+./dialtone.sh repl src_v1 build
+.dialtone/bin/repl-src_v1 serve --nats-url nats://0.0.0.0:4222 --room main --embedded-nats
+.dialtone/bin/repl-src_v1 join --nats-url nats://<server-ip>:4222 --room main --name <hostname>
+.dialtone/bin/repl-src_v1 service --mode run --repo timcash/dialtone --nats-url nats://0.0.0.0:4222 --room main
+```
+
+## Release Artifacts
+`release build <version>` creates:
+- `repl-src_v1-linux-amd64`
+- `repl-src_v1-linux-arm64`
+- `repl-src_v1-darwin-amd64`
+- `repl-src_v1-darwin-arm64`
+- `repl-src_v1-windows-amd64.exe`
+
+`release publish` uploads those binaries to a GitHub release tag.
+
+## Service Hot-Swap
+`service --mode run` acts as a stable supervisor daemon:
+- checks GitHub Releases every interval
+- downloads newer architecture-matched worker binary
+- stops old worker subprocess
+- starts new worker subprocess
+- keeps supervisor process alive during swap
+
+## Tests
 `repl src_v1 test` runs:
 - `src/plugins/repl/src_v1/test/cmd/main.go`
 - `src/plugins/repl/src_v1/test/01_repl_core/suite.go`
@@ -16,22 +64,3 @@ The REPL plugin tests interactive `dialtone.sh` behavior (`USER-1>` / `DIALTONE>
 - `src/plugins/repl/src_v1/test/04_test_plugin/suite.go`
 - `src/plugins/repl/src_v1/test/05_chrome_plugin/suite.go`
 - `src/plugins/repl/src_v1/test/06_go_bun_plugins/suite.go`
-
-Current suite coverage:
-- `01_repl_core`
-  - verifies REPL-only behavior: help text correctness, input handling, `USER-1>`/`DIALTONE>` line formatting
-- `02_proc_plugin`
-  - runs `proc src_v1 test` through REPL subtone flow
-- `03_logs_plugin`
-  - runs `logs src_v1 test` through REPL subtone flow
-- `04_test_plugin`
-  - runs `test src_v1 test` through REPL subtone flow
-- `05_chrome_plugin`
-  - runs `chrome src_v1 list` through REPL subtone flow
-- `06_go_bun_plugins`
-  - runs `go src_v1 test` then `bun src_v1 test` through REPL subtone flow
-
-## Notes
-- REPL tests are implemented with shared `test` plugin (`testv1.StepContext`) and `logs` plugin (`logs/src_v1/go`) patterns.
-- Suites are arranged bottom-up and execute foundational plugin checks via REPL-managed subtones.
-- REPL commands are entered directly (for example `logs src_v1 test`); no `@DIALTONE` prefix is used.
