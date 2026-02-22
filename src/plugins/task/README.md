@@ -71,6 +71,7 @@ The `task` plugin provides a structured system for managing and tracking enginee
 - **`### inputs:`** Tasks that **must** be completed before this task can be finished.
 - **`### outputs:`** Tasks that are waiting for **this** task to be completed.
 - Linking is **bidirectional** and uses relative Markdown paths for easy navigation.
+- **`### signatures:`** All role signatures (e.g. `TEST`, `REVIEW`, `DOCS`) are appended here.
 
 ### 2. The v1/v2 Workflow
 - **`v1` (Baseline):** The state of the task at the beginning of the work cycle.
