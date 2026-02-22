@@ -51,6 +51,32 @@ func Register(r *testv1.Registry) {
 	})
 
 	r.Add(testv1.Step{
+		Name: "parse-tailnet-from-status-json",
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			raw := []byte(`{
+  "CurrentTailnet": {
+    "Name": "example-team.github",
+    "MagicDNSSuffix": "example-team.ts.net"
+  },
+  "Self": {
+    "DNSName": "robot.example-team.ts.net."
+  }
+}`)
+			got := tsnetv1.ParseTailnetFromStatusJSON(raw)
+			if got != "example-team.ts.net" {
+				return testv1.StepRunResult{}, fmt.Errorf("expected example-team.ts.net, got %q", got)
+			}
+			if err := ctx.WaitForStepMessageAfterAction("parse-tailnet-from-status-json-ok", 3*time.Second, func() error {
+				ctx.Infof("parse-tailnet-from-status-json-ok")
+				return nil
+			}); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			return testv1.StepRunResult{Report: "tailnet status json parsing pass"}, nil
+		},
+	})
+
+	r.Add(testv1.Step{
 		Name: "build-create-key-request",
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			req := tsnetv1.BuildCreateKeyRequest(tsnetv1.ProvisionOptions{
