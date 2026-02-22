@@ -324,7 +324,11 @@ func (t *testCtx) beginStep(sc *test_v2.StepContext) {
 }
 
 func (t *testCtx) logf(format string, args ...any) {
-	logs.Info(format, args...)
+	if t.stepCtx != nil {
+		t.stepCtx.Infof(format, args...)
+		return
+	}
+	logs.InfoFromTest("src/plugins/dag/src_v3/test/test_ctx.go", format, args...)
 }
 
 func (t *testCtx) userf(format string, args ...any) {

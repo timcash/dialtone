@@ -24,12 +24,13 @@ func Run02NoBackendMenuToStage(ctx *testCtx) (string, error) {
 		return "", fmt.Errorf("clear no-backend startup session state: %w", err)
 	}
 
+	targetURL := ctx.devURL("/#dag-3d-stage")
 	ctx.logf("LOOKING FOR: dev server at %s", ctx.devURL("/"))
 	if err := ctx.waitHTTPReady(ctx.devURL("/"), 12*time.Second); err != nil {
 		return "", fmt.Errorf("dev startup wait failed: %w", err)
 	}
-	ctx.logf("LOOKING FOR: navigation to %s", ctx.devURL("/"))
-	if err := ctx.navigate(ctx.devURL("/")); err != nil {
+	ctx.logf("LOOKING FOR: navigation to %s", targetURL)
+	if err := ctx.navigate(targetURL); err != nil {
 		return "", fmt.Errorf("no-backend app navigate failed: %w", err)
 	}
 
