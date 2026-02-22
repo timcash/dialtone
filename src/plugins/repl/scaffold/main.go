@@ -6,45 +6,67 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
 func main() {
+	logs.SetOutput(os.Stdout)
 	args := os.Args[1:]
 	if len(args) == 0 {
 		printUsage()
 		return
 	}
 
-	switch args[0] {
+	version, command, warnedOldOrder, err := parseArgs(args)
+	if err != nil {
+		logs.Error("%v", err)
+		printUsage()
+		os.Exit(1)
+	}
+	if warnedOldOrder {
+		logs.Warn("old repl CLI order is deprecated. Use: ./dialtone.sh repl src_v1 <command> [args]")
+	}
+
+	switch command {
 	case "test":
-		version := "src_v1"
-		var extraArgs []string
-		if len(args) > 1 {
-			// Check if arg 1 is version or subtest
-			if strings.HasPrefix(args[1], "src_v") {
-				version = args[1]
-				if len(args) > 2 {
-					extraArgs = args[2:]
-				}
-			} else {
-				// Arg 1 is subtest, assume default version
-				extraArgs = args[1:]
-			}
-		}
-		if err := runVersionedTest(version, extraArgs); err != nil {
-			fmt.Printf("REPL test error: %v\n", err)
+		if err := runVersionedTest(version); err != nil {
+			logs.Error("REPL test error: %v", err)
 			os.Exit(1)
 		}
 	case "help", "-h", "--help":
 		printUsage()
 	default:
-		fmt.Printf("Unknown repl command: %s\n", args[0])
+		logs.Error("Unknown repl command: %s", command)
 		printUsage()
 		os.Exit(1)
 	}
 }
 
-func runVersionedTest(versionDir string, args []string) error {
+func parseArgs(args []string) (version, command string, warnedOldOrder bool, err error) {
+	if len(args) == 0 {
+		return "", "", false, fmt.Errorf("missing arguments")
+	}
+	if isHelp(args[0]) {
+		return "src_v1", "help", false, nil
+	}
+	if strings.HasPrefix(args[0], "src_v") {
+		if len(args) < 2 {
+			return "", "", false, fmt.Errorf("missing command (usage: ./dialtone.sh repl src_v1 <command> [args])")
+		}
+		return args[0], args[1], false, nil
+	}
+	if len(args) >= 2 && strings.HasPrefix(args[1], "src_v") {
+		return args[1], args[0], true, nil
+	}
+	return "", "", false, fmt.Errorf("expected version as first repl argument (usage: ./dialtone.sh repl src_v1 <command> [args])")
+}
+
+func isHelp(s string) bool {
+	return s == "help" || s == "-h" || s == "--help"
+}
+
+func runVersionedTest(versionDir string) error {
 	cwd, _ := os.Getwd()
 	root := cwd
 	for {
@@ -58,10 +80,9 @@ func runVersionedTest(versionDir string, args []string) error {
 		}
 		root = parent
 	}
-	
-	testPkg := "./plugins/repl/" + versionDir + "/test/01_bootstrap"
-	// Pass remaining args to the test runner
-	goArgs := append([]string{"exec", "run", testPkg}, args...)
+
+	testPkg := "./plugins/repl/" + versionDir + "/test/cmd/main.go"
+	goArgs := []string{"src_v1", "exec", "run", testPkg}
 	fullArgs := append([]string{"go"}, goArgs...)
 	cmd := exec.Command(filepath.Join(root, "dialtone.sh"), fullArgs...)
 	cmd.Dir = root
@@ -71,9 +92,9 @@ func runVersionedTest(versionDir string, args []string) error {
 }
 
 func printUsage() {
-	fmt.Println("Usage: ./dialtone.sh repl <command> [args]")
-	fmt.Println()
-	fmt.Println("Commands:")
-	fmt.Println("  test [src_v1]            Run REPL workflow tests")
-	fmt.Println("  help                     Show this help")
+	logs.Raw("Usage: ./dialtone.sh repl src_v1 <command> [args]")
+	logs.Raw("")
+	logs.Raw("Commands:")
+	logs.Raw("  test                     Run REPL src_v1 tests")
+	logs.Raw("  help                     Show this help")
 }

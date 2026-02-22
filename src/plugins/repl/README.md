@@ -4,33 +4,34 @@ The REPL plugin tests interactive `dialtone.sh` behavior (`USER-1>` / `DIALTONE>
 
 ## CLI
 ```bash
-./dialtone.sh repl help
-./dialtone.sh repl test
-./dialtone.sh repl test src_v1
-./dialtone.sh repl test src_v1 worktree
-./dialtone.sh repl test src_v1 ps
-./dialtone.sh repl test src_v1 robot
-./dialtone.sh repl test src_v1 cost
+./dialtone.sh repl src_v1 help
+./dialtone.sh repl src_v1 test
 ```
 
-## Subtest Filtering
-`repl test` accepts an optional filter argument after version.
-It matches test names case-insensitively.
+`repl src_v1 test` runs:
+- `src/plugins/repl/src_v1/test/cmd/main.go`
+- `src/plugins/repl/src_v1/test/01_repl_core/suite.go`
+- `src/plugins/repl/src_v1/test/02_proc_plugin/suite.go`
+- `src/plugins/repl/src_v1/test/03_logs_plugin/suite.go`
+- `src/plugins/repl/src_v1/test/04_test_plugin/suite.go`
+- `src/plugins/repl/src_v1/test/05_chrome_plugin/suite.go`
+- `src/plugins/repl/src_v1/test/06_go_bun_plugins/suite.go`
 
-Examples:
-- Run only worktree REPL tests:
-  - `./dialtone.sh repl test src_v1 worktree`
-- Run only `ps` REPL test:
-  - `./dialtone.sh repl test src_v1 ps`
-
-## Current Worktree REPL Subtests
-- `Test 6: worktree`
-  - validates `worktree add`, `worktree list`, `worktree remove`
-- `Test 7: worktree start`
-  - validates `worktree add` + `worktree start` launch behavior and cleanup
-- `Test 8: subtone cost logs`
-  - validates `[COST] ...` lines from a subtone are surfaced to root REPL (`DIALTONE:PID> [COST] ...`)
+Current suite coverage:
+- `01_repl_core`
+  - verifies REPL-only behavior: help text correctness, input handling, `USER-1>`/`DIALTONE>` line formatting
+- `02_proc_plugin`
+  - runs `proc src_v1 test` through REPL subtone flow
+- `03_logs_plugin`
+  - runs `logs src_v1 test` through REPL subtone flow
+- `04_test_plugin`
+  - runs `test src_v1 test` through REPL subtone flow
+- `05_chrome_plugin`
+  - runs `chrome src_v1 list` through REPL subtone flow
+- `06_go_bun_plugins`
+  - runs `go src_v1 test` then `bun src_v1 test` through REPL subtone flow
 
 ## Notes
-- REPL tests inspect subtone logs in `.dialtone/logs`.
-- Tests are designed to verify `DIALTONE>` orchestration behavior, not just direct CLI output.
+- REPL tests are implemented with shared `test` plugin (`testv1.StepContext`) and `logs` plugin (`logs/src_v1/go`) patterns.
+- Suites are arranged bottom-up and execute foundational plugin checks via REPL-managed subtones.
+- REPL commands are entered directly (for example `logs src_v1 test`); no `@DIALTONE` prefix is used.

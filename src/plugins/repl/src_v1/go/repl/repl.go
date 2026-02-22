@@ -10,6 +10,40 @@ import (
 	"dialtone/dev/plugins/proc/src_v1/go/proc"
 )
 
+type Hooks struct {
+	RunSubtone         func(args []string) int
+	ListManaged        func() []proc.ManagedProcessSnapshot
+	KillManagedProcess func(pid int) error
+}
+
+var (
+	runSubtoneFn         = proc.RunSubtone
+	listManagedFn        = proc.ListManagedProcesses
+	killManagedProcessFn = proc.KillManagedProcess
+)
+
+// SetHooksForTest overrides REPL side-effect functions and returns a restore function.
+func SetHooksForTest(h Hooks) func() {
+	prevRunSubtone := runSubtoneFn
+	prevListManaged := listManagedFn
+	prevKillManaged := killManagedProcessFn
+
+	if h.RunSubtone != nil {
+		runSubtoneFn = h.RunSubtone
+	}
+	if h.ListManaged != nil {
+		listManagedFn = h.ListManaged
+	}
+	if h.KillManagedProcess != nil {
+		killManagedProcessFn = h.KillManagedProcess
+	}
+	return func() {
+		runSubtoneFn = prevRunSubtone
+		listManagedFn = prevListManaged
+		killManagedProcessFn = prevKillManaged
+	}
+}
+
 func Start(logFn func(category, msg string)) error {
 	if logFn == nil {
 		logFn = func(string, string) {}
@@ -52,18 +86,25 @@ func Start(logFn func(category, msg string)) error {
 			continue
 		}
 		if line == "ps" {
-			proc.ListProcesses()
+			printManagedProcesses(say)
+			continue
+		}
+		if strings.HasPrefix(line, "kill ") {
+			pidText := strings.TrimSpace(strings.TrimPrefix(line, "kill"))
+			pid := 0
+			if _, err := fmt.Sscanf(pidText, "%d", &pid); err != nil || pid <= 0 {
+				say("Usage: kill <pid>")
+				continue
+			}
+			if err := killManagedProcessFn(pid); err != nil {
+				say(fmt.Sprintf("Failed to kill process %d: %v", pid, err))
+			} else {
+				say(fmt.Sprintf("Killed managed process %d.", pid))
+			}
 			continue
 		}
 
-		cmdStr := line
-		if strings.HasPrefix(line, "@DIALTONE ") {
-			cmdStr = line[len("@DIALTONE "):]
-		} else if strings.HasPrefix(line, "@dialtone.sh ") {
-			cmdStr = line[len("@dialtone.sh "):]
-		}
-
-		args := strings.Fields(cmdStr)
+		args := strings.Fields(line)
 		if len(args) == 0 {
 			continue
 		}
@@ -71,11 +112,6 @@ func Start(logFn func(category, msg string)) error {
 		cmdName := args[0]
 		if len(args) > 1 {
 			cmdName += " " + args[1]
-		}
-
-		if strings.Join(args, " ") == "proc test src_v1" {
-			proc.RunTestSrcV1()
-			continue
 		}
 
 		isBackground := false
@@ -87,9 +123,10 @@ func Start(logFn func(category, msg string)) error {
 
 		say(fmt.Sprintf("Request received. Spawning subtone for %s...", cmdName))
 		if isBackground {
-			go proc.RunSubtone(args)
+			go runSubtoneFn(args)
 		} else {
-			proc.RunSubtone(args)
+			exitCode := runSubtoneFn(args)
+			say(fmt.Sprintf("Subtone for %s exited with code %d.", cmdName, exitCode))
 		}
 	}
 	return scanner.Err()
@@ -104,22 +141,28 @@ func printHelp(logFn func(category, msg string)) {
 	content := `Help
 
 ### Bootstrap
-` + "`" + `@DIALTONE dev install` + "`" + `
+` + "`" + `dev install` + "`" + `
 Install latest Go and bootstrap dev.go command scaffold
 
 ### Plugins
-` + "`" + `robot install src_v1` + "`" + `
+` + "`" + `robot src_v1 install` + "`" + `
 Install robot src_v1 dependencies
 
-` + "`" + `dag install src_v3` + "`" + `
+` + "`" + `dag src_v3 install` + "`" + `
 Install dag src_v3 dependencies
+
+` + "`" + `logs src_v1 test` + "`" + `
+Run logs plugin tests on a subtone
 
 ### System
 ` + "`" + `ps` + "`" + `
 List active subtones
 
+` + "`" + `kill <pid>` + "`" + `
+Kill a managed subtone process by PID
+
 ` + "`" + `<any command>` + "`" + `
-Forward to @./dialtone.sh <command>`
+Run any dialtone command on a managed subtone`
 
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
@@ -130,5 +173,18 @@ Forward to @./dialtone.sh <command>`
 			fmt.Println(line)
 			logFn("REPL", line)
 		}
+	}
+}
+
+func printManagedProcesses(say func(msg string)) {
+	procs := listManagedFn()
+	if len(procs) == 0 {
+		say("No active subtones.")
+		return
+	}
+	say("Active Subtones:")
+	say(fmt.Sprintf("%-8s %-8s %-10s %-8s %s", "PID", "UPTIME", "CPU%", "PORTS", "COMMAND"))
+	for _, p := range procs {
+		say(fmt.Sprintf("%-8d %-8s %-10.1f %-8d %s", p.PID, p.StartedAgo, p.CPUPercent, p.PortCount, p.Command))
 	}
 }
