@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 func Run(args []string) error {
@@ -12,11 +13,15 @@ func Run(args []string) error {
 		printUsage()
 		return fmt.Errorf("no command provided")
 	}
+	args = stripVersionArg(args)
 
 	command := args[0]
 	cmdArgs := args[1:]
 
 	switch command {
+	case "help", "--help", "-h":
+		printUsage()
+		return nil
 	case "dev":
 		return runNpm("dev", cmdArgs)
 	case "build":
@@ -26,6 +31,8 @@ func Run(args []string) error {
 	case "mock-data":
 		RunMockData(cmdArgs)
 		return nil
+	case "test":
+		return runUITests()
 	case "kill":
 		runKill()
 		return nil
@@ -41,6 +48,7 @@ func printUsage() {
 	fmt.Println("  dev       Run the dev server (npm run dev)")
 	fmt.Println("  build     Build the web UI (npm run build)")
 	fmt.Println("  install   Install dependencies (npm install)")
+	fmt.Println("  test      Run ui src_v1 test suite")
 	fmt.Println("  mock-data Start mock data server for testing")
 	fmt.Println("  kill      Kill running UI processes (dev, mock-data)")
 }
@@ -106,4 +114,41 @@ func runNpm(script string, args []string) error {
 		return fmt.Errorf("ui command failed: %w", err)
 	}
 	return nil
+}
+
+func stripVersionArg(args []string) []string {
+	if len(args) >= 2 && strings.HasPrefix(args[1], "src_v") {
+		return append([]string{args[0]}, args[2:]...)
+	}
+	return args
+}
+
+func runUITests() error {
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command("go", "run", "./plugins/ui/src_v1/test/cmd/main.go")
+	cmd.Dir = filepath.Join(repoRoot, "src")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	return cmd.Run()
+}
+
+func findRepoRoot() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
+			return cwd, nil
+		}
+		parent := filepath.Dir(cwd)
+		if parent == cwd {
+			return "", fmt.Errorf("repo root not found")
+		}
+		cwd = parent
+	}
 }

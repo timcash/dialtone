@@ -1,0 +1,36 @@
+#app {
+  background: radial-gradient(circle at 20% 10%, #1a2d40, #0a0f16 55%, #06090d 100%);
+}
+
+section {
+  padding: 16px;
+}
+
+[aria-label='Hero Section'] [aria-label='Hero Status'],
+[aria-label='Table Section'] [aria-label='Table Status'],
+[aria-label='Three Section'] [aria-label='Three Count'] {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  background: rgba(0, 0, 0, 0.62);
+  border: 1px solid rgba(130, 210, 255, 0.5);
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+
+[aria-label='Log Terminal'] {
+  width: min(860px, 95vw);
+  min-height: 180px;
+  border: 1px solid rgba(130, 210, 255, 0.5);
+  background: rgba(0, 0, 0, 0.6);
+  color: #d6f3ff;
+  padding: 12px;
+}
+
+[aria-label='Log Input'] {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  padding: 10px;
+}

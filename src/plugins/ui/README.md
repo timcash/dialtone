@@ -2,7 +2,40 @@
 
 `src/plugins/ui` is the shared section shell used by plugin `src_vN/ui` apps.
 
+```sh
+# Run the canonical ui src_v1 suite (build fixture + Go backend + chromedp steps)
+./dialtone.sh ui test src_v1
+
+# Stream suite logs
+./dialtone.sh logs stream --topic 'logs.test.ui.src-v1.>'
+./dialtone.sh logs stream --topic 'logfilter.tag.pass.test'
+./dialtone.sh logs stream --topic 'logfilter.tag.fail.test'
+```
+
 This README follows DAG `src_v3` terminology as source-of-truth.
+
+## CLI
+
+```sh
+./dialtone.sh ui help
+./dialtone.sh ui test src_v1
+./dialtone.sh ui dev
+./dialtone.sh ui build
+./dialtone.sh ui install
+```
+
+`ui test src_v1` runs:
+- `src/plugins/ui/src_v1/test/cmd/main.go`
+
+The suite uses:
+- `src/plugins/test/src_v1/go` (`StepContext`, suite orchestration, waits)
+- `src/plugins/logs/src_v1/go` (structured logs + NATS topics)
+- `chromedp` via test plugin browser helpers
+
+Test folders:
+- `src/plugins/ui/src_v1/test/01_build_and_serve`: Bun build + Go static backend + initial section readiness
+- `src/plugins/ui/src_v1/test/02_sections_navigation`: menu-driven section navigation checks
+- `src/plugins/ui/src_v1/test/03_component_actions`: table refresh, stage add, log input/enter interaction checks
 
 ## CSS Guide
 
