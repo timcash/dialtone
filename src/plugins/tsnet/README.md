@@ -11,7 +11,8 @@ Minimal tsnet plugin in `src_v1` layout.
 ./dialtone.sh tsnet src_v1 up --dry-run
 ./dialtone.sh tsnet src_v1 up
 ./dialtone.sh tsnet src_v1 devices list --tailnet your-tailnet.ts.net --api-key tskey-api-...
-./dialtone.sh tsnet src_v1 devices list --tailnet your-tailnet.ts.net --api-key tskey-api-... --format table
+./dialtone.sh tsnet src_v1 devices list --tailnet your-tailnet.ts.net --api-key tskey-api-... --all
+./dialtone.sh tsnet src_v1 devices list --tailnet your-tailnet.ts.net --api-key tskey-api-... --format json
 ./dialtone.sh tsnet src_v1 devices prune --name-contains drone-1 --dry-run
 ./dialtone.sh tsnet src_v1 devices prune --name-contains drone-1 --yes
 ./dialtone.sh tsnet src_v1 computers list --tailnet your-tailnet.ts.net --api-key tskey-api-...
@@ -41,7 +42,8 @@ src/plugins/tsnet/
 - CLI entrypoint matches the shared plugin pattern (`scaffold/main.go` delegates to `cli.Run`).
 - Uses `test` library for self-check suite.
 - Tests run in one process via `src_v1/test/cmd/main.go` and `testv1.StepContext`.
-- `devices list` (and aliases `computers list`, `list`) lists all computers/devices on the tailnet.
+- `devices list` (and aliases `computers list`, `list`) lists computers/devices on the tailnet in a report format by default.
+  By default it shows active nodes only; use `--all` to include inactive nodes.
   It uses control-plane API (`TS_API_KEY` + tailnet) when configured, and falls back to local tailscaled status if API creds are missing.
 - `devices prune` removes matching devices by substring (`--name-contains`, default `drone-1`); safe by default with `--dry-run`, requires `--yes` to delete.
 - If local tailscaled is unavailable (common in WSL), `devices list` can fall back to a temporary embedded ephemeral `tsnet` instance.
