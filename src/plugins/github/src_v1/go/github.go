@@ -110,6 +110,8 @@ func Run(args []string) error {
 		return nil
 	case "install":
 		return runInstall()
+	case "release":
+		return runRelease(args[1:])
 	case "issue", "issues":
 		return runIssue(args[1:])
 	case "pr":
@@ -135,6 +137,7 @@ func PrintUsage() {
 	fmt.Println("  pr push [src_v1] [--out DIR] [--force]")
 	fmt.Println("  pr print [src_v1] <pr-id> [--out DIR]")
 	fmt.Println("  pr [src_v1] [create|view|merge|close|review] [args]")
+	fmt.Println("  release upsert [src_v1] --tag vX.Y.Z [--repo owner/repo] [--title TEXT] [--notes TEXT] --asset PATH [--asset PATH...]")
 	fmt.Println("  test [src_v1]")
 	fmt.Println("  install")
 }
@@ -151,6 +154,94 @@ func runInstall() error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+func runRelease(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: ./dialtone.sh github release upsert --tag <version> [--repo owner/repo] [--title text] [--notes text] --asset <path> [--asset <path>...]")
+	}
+	args = stripVersionArg(args)
+	if len(args) == 0 {
+		return fmt.Errorf("usage: ./dialtone.sh github release upsert --tag <version> [--repo owner/repo] [--title text] [--notes text] --asset <path> [--asset <path>...]")
+	}
+	if args[0] != "upsert" {
+		return fmt.Errorf("unknown release command: %s", args[0])
+	}
+
+	tag := ""
+	repo := "timcash/dialtone"
+	title := ""
+	notes := ""
+	assets := make([]string, 0, 8)
+
+	for i := 1; i < len(args); i++ {
+		switch args[i] {
+		case "--tag":
+			if i+1 < len(args) {
+				tag = strings.TrimSpace(args[i+1])
+				i++
+			}
+		case "--repo":
+			if i+1 < len(args) {
+				repo = strings.TrimSpace(args[i+1])
+				i++
+			}
+		case "--title":
+			if i+1 < len(args) {
+				title = args[i+1]
+				i++
+			}
+		case "--notes":
+			if i+1 < len(args) {
+				notes = args[i+1]
+				i++
+			}
+		case "--asset":
+			if i+1 < len(args) {
+				assets = append(assets, args[i+1])
+				i++
+			}
+		}
+	}
+	if tag == "" {
+		return fmt.Errorf("missing --tag")
+	}
+	if len(assets) == 0 {
+		return fmt.Errorf("at least one --asset is required")
+	}
+	if title == "" {
+		title = "Release " + tag
+	}
+	if notes == "" {
+		notes = "Automated release " + tag
+	}
+	for _, a := range assets {
+		if _, err := os.Stat(a); err != nil {
+			return fmt.Errorf("missing asset %s: %w", a, err)
+		}
+	}
+
+	gh := findGH()
+	createArgs := []string{"release", "create", tag, "--repo", repo, "--title", title, "--notes", notes}
+	createArgs = append(createArgs, assets...)
+	create := exec.Command(gh, createArgs...)
+	create.Stdout = os.Stdout
+	create.Stderr = os.Stderr
+	if err := create.Run(); err == nil {
+		logs.Info("Created release %s on %s", tag, repo)
+		return nil
+	}
+
+	uploadArgs := []string{"release", "upload", tag, "--repo", repo, "--clobber"}
+	uploadArgs = append(uploadArgs, assets...)
+	upload := exec.Command(gh, uploadArgs...)
+	upload.Stdout = os.Stdout
+	upload.Stderr = os.Stderr
+	if err := upload.Run(); err != nil {
+		return fmt.Errorf("release create failed and upload fallback failed: %w", err)
+	}
+	logs.Info("Updated existing release %s on %s", tag, repo)
+	return nil
 }
 
 func runIssue(args []string) error {

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	repl "dialtone/dev/plugins/repl/src_v1/go/repl"
 	support "dialtone/dev/plugins/repl/src_v1/test/support"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
 )
@@ -13,6 +14,7 @@ func Register(r *testv1.Registry) {
 	r.Add(testv1.Step{
 		Name: "repl-help-and-format",
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			prompt := repl.DefaultPromptName()
 			out, relayed, err := support.RunSessionWithInput(ctx, "help\nexit\n")
 			if err != nil {
 				return testv1.StepRunResult{}, err
@@ -21,7 +23,7 @@ func Register(r *testv1.Registry) {
 			if err := support.RequireContainsAll(out, []string{
 				"DIALTONE> Virtual Librarian online.",
 				"DIALTONE> Type 'help' for commands, or 'exit' to quit.",
-				"USER-1> help",
+				fmt.Sprintf("%s> help", prompt),
 				"DIALTONE> Help",
 				"`dev install`",
 				"`robot src_v1 install`",
@@ -43,8 +45,8 @@ func Register(r *testv1.Registry) {
 			if !support.ContainsAny(relayed, "DIALTONE> Help") {
 				return testv1.StepRunResult{}, fmt.Errorf("expected help output in REPL relay log")
 			}
-			if !support.ContainsAny(relayed, "USER-1> help") {
-				return testv1.StepRunResult{}, fmt.Errorf("expected USER-1 input in REPL relay log")
+			if !support.ContainsAny(relayed, fmt.Sprintf("%s> help", prompt)) {
+				return testv1.StepRunResult{}, fmt.Errorf("expected prompt input in REPL relay log")
 			}
 
 			if err := ctx.WaitForStepMessageAfterAction("repl-core-help-format-ok", 3*time.Second, func() error {
