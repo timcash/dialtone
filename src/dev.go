@@ -74,6 +74,12 @@ type Requirement struct {
 	Version string
 }
 
+type MissingInstall struct {
+	Tool    string
+	Command string
+	Why     string
+}
+
 func EnsureRequirements(reqs []Requirement) error {
 	for _, req := range reqs {
 		if err := EnsureRequirement(req); err != nil {
@@ -160,6 +166,16 @@ func main() {
 	}()
 
 	if len(os.Args) < 2 {
+		missing := detectMissingForREPL()
+		if len(missing) > 0 {
+			logs.Info("DIALTONE> REPL prerequisites are missing.")
+			for _, m := range missing {
+				logs.Info("DIALTONE> - %s: %s", m.Tool, m.Why)
+				logs.Info("DIALTONE>   install: %s", m.Command)
+			}
+			logs.Info("DIALTONE> After installing, run ./dialtone.sh again.")
+			return
+		}
 		if err := repl.Start(logLine); err != nil {
 			logs.Error("REPL error: %v", err)
 			os.Exit(1)
@@ -192,6 +208,28 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+func detectMissingForREPL() []MissingInstall {
+	missing := []MissingInstall{}
+	envDir := GetDialtoneEnv()
+	goBin := filepath.Join(envDir, "go", "bin", "go")
+	if _, err := os.Stat(goBin); err != nil {
+		missing = append(missing, MissingInstall{
+			Tool:    "Go runtime",
+			Command: "./dialtone.sh go src_v1 install",
+			Why:     "required to run plugin scaffolds and subtones",
+		})
+	}
+	bunBin := filepath.Join(envDir, "bun", "bin", "bun")
+	if _, err := os.Stat(bunBin); err != nil {
+		missing = append(missing, MissingInstall{
+			Tool:    "Bun runtime",
+			Command: "./dialtone.sh bun src_v1 install",
+			Why:     "required for plugins that build or run JS/TS UIs",
+		})
+	}
+	return missing
 }
 
 func runDevInstall() {
