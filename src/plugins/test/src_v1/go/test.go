@@ -15,7 +15,9 @@ import (
 
 	"dialtone/dev/plugins/chrome/src_v1/go"
 	"dialtone/dev/plugins/logs/src_v1/go"
+	"github.com/chromedp/cdproto/cdp"
 	cdruntime "github.com/chromedp/cdproto/runtime"
+	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 	"github.com/nats-io/nats.go"
 )
@@ -32,18 +34,22 @@ type Step struct {
 }
 
 type StepContext struct {
-	Name         string
-	Started      time.Time
-	Session      *BrowserSession
-	LogWriter    io.Writer
-	SuiteSubject string
-	StepSubject  string
-	ErrorSubject string
-	natsURL      string
-	logger       *logs.NATSLogger
-	errorLogger  *logs.NATSLogger
-	passLogger   *logs.NATSLogger
-	failLogger   *logs.NATSLogger
+	Name            string
+	Started         time.Time
+	Session         *BrowserSession
+	LogWriter       io.Writer
+	SuiteSubject    string
+	StepSubject     string
+	BrowserSubject  string
+	ErrorSubject    string
+	natsURL         string
+	logger          *logs.NATSLogger
+	browserLogger   *logs.NATSLogger
+	errorLogger     *logs.NATSLogger
+	passLogger      *logs.NATSLogger
+	failLogger      *logs.NATSLogger
+	suiteBrowser    *BrowserSession
+	setSuiteBrowser func(*BrowserSession)
 }
 
 func (sc *StepContext) Logf(format string, args ...any) {
@@ -258,6 +264,13 @@ func (sc *StepContext) WaitForStepMessage(pattern string, timeout time.Duration)
 	return sc.WaitForMessage(sc.StepSubject, pattern, timeout)
 }
 
+func (sc *StepContext) WaitForBrowserMessage(pattern string, timeout time.Duration) error {
+	if strings.TrimSpace(sc.BrowserSubject) == "" {
+		return fmt.Errorf("browser subject not available in this test context")
+	}
+	return sc.WaitForMessage(sc.BrowserSubject, pattern, timeout)
+}
+
 func (sc *StepContext) WaitForErrorMessage(pattern string, timeout time.Duration) error {
 	if strings.TrimSpace(sc.ErrorSubject) == "" {
 		return fmt.Errorf("error subject not available in this test context")
@@ -277,6 +290,13 @@ func (sc *StepContext) WaitForStepMessageAfterAction(pattern string, timeout tim
 		return fmt.Errorf("step subject not available in this test context")
 	}
 	return sc.WaitForMessageAfterAction(sc.StepSubject, pattern, timeout, action)
+}
+
+func (sc *StepContext) WaitForBrowserMessageAfterAction(pattern string, timeout time.Duration, action func() error) error {
+	if strings.TrimSpace(sc.BrowserSubject) == "" {
+		return fmt.Errorf("browser subject not available in this test context")
+	}
+	return sc.WaitForMessageAfterAction(sc.BrowserSubject, pattern, timeout, action)
 }
 
 func (sc *StepContext) ResetStepLogClock() {
@@ -333,11 +353,14 @@ type ConsoleMessage struct {
 }
 
 type BrowserSession struct {
-	ctx      context.Context
-	cancel   context.CancelFunc
-	Session  *chrome.Session
-	mu       sync.Mutex
-	messages []ConsoleMessage
+	ctx          context.Context
+	cancel       context.CancelFunc
+	Session      *chrome.Session
+	mu           sync.Mutex
+	messages     []ConsoleMessage
+	onConsole    func(ConsoleMessage)
+	onError      func(ConsoleMessage)
+	mainTargetID target.ID
 }
 
 func (s *BrowserSession) Context() context.Context {
@@ -359,6 +382,63 @@ func (s *BrowserSession) Run(tasks ...chromedp.Action) error {
 	return chromedp.Run(s.ctx, tasks...)
 }
 
+func (s *BrowserSession) RunWithTimeout(timeout time.Duration, tasks ...chromedp.Action) error {
+	if timeout <= 0 {
+		return s.Run(tasks...)
+	}
+	ctx, cancel := context.WithTimeout(s.ctx, timeout)
+	defer cancel()
+	return chromedp.Run(ctx, tasks...)
+}
+
+func (s *BrowserSession) ensureMainTargetID() error {
+	s.mu.Lock()
+	if s.mainTargetID != "" {
+		s.mu.Unlock()
+		return nil
+	}
+	s.mu.Unlock()
+	if err := chromedp.Run(s.ctx); err != nil {
+		return err
+	}
+	chromeCtx := chromedp.FromContext(s.ctx)
+	if chromeCtx == nil || chromeCtx.Target == nil {
+		return fmt.Errorf("unable to resolve current browser target")
+	}
+	s.mu.Lock()
+	s.mainTargetID = chromeCtx.Target.TargetID
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *BrowserSession) CloseExtraTabsKeepMain() error {
+	if err := s.ensureMainTargetID(); err != nil {
+		return err
+	}
+	chromeCtx := chromedp.FromContext(s.ctx)
+	if chromeCtx == nil || chromeCtx.Browser == nil {
+		return fmt.Errorf("browser executor unavailable for tab cleanup")
+	}
+	browserExecCtx := cdp.WithExecutor(s.ctx, chromeCtx.Browser)
+	s.mu.Lock()
+	mainID := s.mainTargetID
+	s.mu.Unlock()
+	targets, err := target.GetTargets().Do(browserExecCtx)
+	if err != nil {
+		return err
+	}
+	for _, t := range targets {
+		if t == nil || t.Type != "page" {
+			continue
+		}
+		if t.TargetID == mainID {
+			continue
+		}
+		_ = target.CloseTarget(t.TargetID).Do(browserExecCtx)
+	}
+	return nil
+}
+
 func (s *BrowserSession) CaptureScreenshot(path string) error {
 	var buf []byte
 	if err := chromedp.Run(s.ctx, chromedp.CaptureScreenshot(&buf)); err != nil {
@@ -372,6 +452,7 @@ type BrowserOptions struct {
 	GPU           bool
 	Role          string
 	ReuseExisting bool
+	UserDataDir   string
 	URL           string
 	LogWriter     io.Writer
 	LogPrefix     string
@@ -459,8 +540,22 @@ func initSession(session *chrome.Session, role string) (*BrowserSession, error) 
 			s.mu.Lock()
 			s.messages = append(s.messages, msg)
 			s.mu.Unlock()
+			if s.onConsole != nil {
+				s.onConsole(msg)
+			}
 			logs.Info("   [BROWSER CONSOLE | PID %d] %s: %s", session.PID, ev.Type, msg.Text)
 		case *cdruntime.EventExceptionThrown:
+			exMsg := ConsoleMessage{
+				Type: "exception",
+				Text: ev.ExceptionDetails.Text,
+				Time: time.Now(),
+			}
+			s.mu.Lock()
+			s.messages = append(s.messages, exMsg)
+			s.mu.Unlock()
+			if s.onError != nil {
+				s.onError(exMsg)
+			}
 			logs.Error("   [BROWSER EXCEPTION | PID %d] %s", session.PID, ev.ExceptionDetails.Text)
 		}
 	})
@@ -475,6 +570,7 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 		GPU:           opts.GPU,
 		Role:          opts.Role,
 		ReuseExisting: opts.ReuseExisting,
+		UserDataDir:   opts.UserDataDir,
 		TargetURL:     opts.URL,
 	})
 	if err != nil {
@@ -495,6 +591,228 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 	}
 
 	return s, nil
+}
+
+func (sc *StepContext) EnsureBrowser(opts BrowserOptions) (*BrowserSession, error) {
+	if sc.Session != nil {
+		sc.bindBrowserSession(sc.Session)
+		if strings.TrimSpace(opts.URL) != "" {
+			if err := sc.Session.Run(chromedp.Navigate(opts.URL)); err != nil {
+				return nil, err
+			}
+		}
+		return sc.Session, nil
+	}
+	if sc.suiteBrowser != nil {
+		sc.bindBrowserSession(sc.suiteBrowser)
+		if strings.TrimSpace(opts.URL) != "" {
+			if err := sc.Session.Run(chromedp.Navigate(opts.URL)); err != nil {
+				return nil, err
+			}
+		}
+		return sc.Session, nil
+	}
+	s, err := StartBrowser(opts)
+	if err != nil {
+		return nil, err
+	}
+	sc.bindBrowserSession(s)
+	if sc.setSuiteBrowser != nil {
+		sc.setSuiteBrowser(s)
+		sc.suiteBrowser = s
+	}
+	return s, nil
+}
+
+func (sc *StepContext) AttachBrowserByPort(port int, role string) (*BrowserSession, error) {
+	if sc.Session != nil {
+		return sc.Session, nil
+	}
+	s, err := ConnectToBrowser(port, role)
+	if err != nil {
+		return nil, err
+	}
+	sc.bindBrowserSession(s)
+	if sc.setSuiteBrowser != nil {
+		sc.setSuiteBrowser(s)
+		sc.suiteBrowser = s
+	}
+	return s, nil
+}
+
+func (sc *StepContext) AttachBrowserByWebSocket(webSocketURL string, role string) (*BrowserSession, error) {
+	if sc.Session != nil {
+		return sc.Session, nil
+	}
+	session := &chrome.Session{
+		PID:          0,
+		Port:         0,
+		WebSocketURL: strings.TrimSpace(webSocketURL),
+		IsNew:        false,
+	}
+	s, err := initSession(session, role)
+	if err != nil {
+		return nil, err
+	}
+	sc.bindBrowserSession(s)
+	if sc.setSuiteBrowser != nil {
+		sc.setSuiteBrowser(s)
+		sc.suiteBrowser = s
+	}
+	return s, nil
+}
+
+func (sc *StepContext) Browser() (*BrowserSession, error) {
+	if sc.Session == nil {
+		return nil, fmt.Errorf("browser not initialized; call EnsureBrowser or AttachBrowser first")
+	}
+	return sc.Session, nil
+}
+
+func (sc *StepContext) CloseBrowser() {
+	if sc.Session == nil {
+		return
+	}
+	if sc.suiteBrowser != nil && sc.Session == sc.suiteBrowser {
+		return
+	}
+	sc.Session.Close()
+	sc.Session = nil
+}
+
+func (sc *StepContext) WaitForConsoleContains(substr string, timeout time.Duration) error {
+	b, err := sc.Browser()
+	if err != nil {
+		return err
+	}
+	needle := strings.TrimSpace(substr)
+	if needle == "" {
+		return fmt.Errorf("console needle is required")
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		for _, entry := range b.Entries() {
+			if strings.Contains(entry.Text, needle) {
+				return nil
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout waiting for browser console message containing %q", needle)
+}
+
+func (sc *StepContext) WaitForAriaLabel(label string, timeout time.Duration) error {
+	b, err := sc.Browser()
+	if err != nil {
+		return err
+	}
+	return b.RunWithTimeout(timeout, WaitForAriaLabel(label))
+}
+
+func (sc *StepContext) ClickAriaLabel(label string) error {
+	b, err := sc.Browser()
+	if err != nil {
+		return err
+	}
+	return b.Run(ClickAriaLabel(label))
+}
+
+func (sc *StepContext) TypeAriaLabel(label, value string) error {
+	b, err := sc.Browser()
+	if err != nil {
+		return err
+	}
+	return b.Run(TypeAriaLabel(label, value))
+}
+
+func (sc *StepContext) PressEnterAriaLabel(label string) error {
+	b, err := sc.Browser()
+	if err != nil {
+		return err
+	}
+	return b.Run(PressEnterAriaLabel(label))
+}
+
+func (sc *StepContext) WaitForAriaLabelAttrEquals(label, attr, expected string, timeout time.Duration) error {
+	b, err := sc.Browser()
+	if err != nil {
+		return err
+	}
+	return b.RunWithTimeout(timeout, WaitForAriaLabelAttrEquals(label, attr, expected, timeout))
+}
+
+func (sc *StepContext) ClickAriaLabelAfterWait(label string, timeout time.Duration) error {
+	if err := sc.WaitForAriaLabel(label, timeout); err != nil {
+		return err
+	}
+	return sc.ClickAriaLabel(label)
+}
+
+func (sc *StepContext) ClickAt(x, y float64) error {
+	b, err := sc.Browser()
+	if err != nil {
+		return err
+	}
+	return b.Run(chromedp.MouseClickXY(x, y))
+}
+
+// TapAt uses a click event as the cross-platform tap primitive for test automation.
+func (sc *StepContext) TapAt(x, y float64) error {
+	return sc.ClickAt(x, y)
+}
+
+func (sc *StepContext) RunBrowser(actions ...chromedp.Action) error {
+	b, err := sc.Browser()
+	if err != nil {
+		return err
+	}
+	return b.Run(actions...)
+}
+
+func (sc *StepContext) RunBrowserWithTimeout(timeout time.Duration, actions ...chromedp.Action) error {
+	b, err := sc.Browser()
+	if err != nil {
+		return err
+	}
+	return b.RunWithTimeout(timeout, actions...)
+}
+
+func (sc *StepContext) publishBrowserEvent(isError bool, kind, text string) {
+	source := "browser"
+	line := fmt.Sprintf("[STEP:%s] [BROWSER][%s] %s", sc.Name, strings.TrimSpace(kind), strings.TrimSpace(text))
+	if isError {
+		logs.ErrorFromTest(source, "%s", line)
+		if sc.logger != nil {
+			_ = sc.logger.ErrorfFromTest(source, "%s", line)
+		}
+		if sc.browserLogger != nil {
+			_ = sc.browserLogger.ErrorfFromTest(source, "%s", line)
+		}
+		if sc.errorLogger != nil {
+			_ = sc.errorLogger.ErrorfFromTest(source, "%s", line)
+		}
+		return
+	}
+	logs.InfoFromTest(source, "%s", line)
+	if sc.logger != nil {
+		_ = sc.logger.InfofFromTest(source, "%s", line)
+	}
+	if sc.browserLogger != nil {
+		_ = sc.browserLogger.InfofFromTest(source, "%s", line)
+	}
+}
+
+func (sc *StepContext) bindBrowserSession(s *BrowserSession) {
+	if s == nil {
+		return
+	}
+	s.onConsole = func(msg ConsoleMessage) {
+		sc.publishBrowserEvent(false, "CONSOLE:"+msg.Type, msg.Text)
+	}
+	s.onError = func(msg ConsoleMessage) {
+		sc.publishBrowserEvent(true, "ERROR", msg.Text)
+	}
+	sc.Session = s
 }
 
 type StepResult struct {
@@ -549,6 +867,12 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 
 	startTime := time.Now()
 	var results []StepResult
+	var sharedBrowser *BrowserSession
+	defer func() {
+		if sharedBrowser != nil {
+			sharedBrowser.Close()
+		}
+	}()
 
 	for _, step := range steps {
 		timeout := step.Timeout
@@ -560,17 +884,30 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 		defer cancel()
 
 		stepCtx := &StepContext{
-			Name:         step.Name,
-			Started:      time.Now(),
-			SuiteSubject: baseSubject,
-			ErrorSubject: baseSubject + ".error",
-			natsURL:      natsURL,
+			Name:            step.Name,
+			Started:         time.Now(),
+			SuiteSubject:    baseSubject,
+			ErrorSubject:    baseSubject + ".error",
+			natsURL:         natsURL,
+			suiteBrowser:    sharedBrowser,
+			setSuiteBrowser: func(s *BrowserSession) { sharedBrowser = s },
+		}
+		if sharedBrowser != nil {
+			stepCtx.bindBrowserSession(sharedBrowser)
+			if cerr := sharedBrowser.CloseExtraTabsKeepMain(); cerr != nil {
+				logs.Warn("%s unable to cleanup extra browser tabs before step %s: %v", testTag, step.Name, cerr)
+			}
 		}
 		if nc != nil {
 			stepSubject := baseSubject + "." + sanitizeSubjectToken(step.Name)
+			browserSubject := stepSubject + ".browser"
 			if stepLogger, err := logs.NewNATSLogger(nc, stepSubject); err == nil {
 				stepCtx.logger = stepLogger
 				stepCtx.StepSubject = stepSubject
+				stepCtx.BrowserSubject = browserSubject
+				if browserLogger, berr := logs.NewNATSLogger(nc, browserSubject); berr == nil {
+					stepCtx.browserLogger = browserLogger
+				}
 				if errLogger, eerr := logs.NewNATSLogger(nc, stepCtx.ErrorSubject); eerr == nil {
 					stepCtx.errorLogger = errLogger
 				}
@@ -632,6 +969,11 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 
 		if err != nil {
 			break
+		}
+		if sharedBrowser != nil {
+			if cerr := sharedBrowser.CloseExtraTabsKeepMain(); cerr != nil {
+				logs.Warn("%s unable to cleanup extra browser tabs after step %s: %v", testTag, step.Name, cerr)
+			}
 		}
 	}
 

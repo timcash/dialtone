@@ -1,7 +1,7 @@
 # Test Report: task-io-linking-v1
 
-- **Date**: Sat, 21 Feb 2026 15:52:10 PST
-- **Total Duration**: 1.241710895s
+- **Date**: Sat, 21 Feb 2026 16:45:03 PST
+- **Total Duration**: 1.071392955s
 
 ## Summary
 
@@ -12,49 +12,49 @@
 
 ### 1. ✅ setup-test-env
 
-- **Duration**: 1.382555ms
+- **Duration**: 2.226758ms
 - **Report**: Test environment initialized
 
 ---
 
 ### 2. ✅ sync-issue-to-root-and-input-tree
 
-- **Duration**: 242.325794ms
+- **Duration**: 58.317557ms
 - **Report**: Issue sync created root links and dependency tree
 
 ---
 
 ### 3. ✅ resolve-root-after-inputs-done
 
-- **Duration**: 349.473944ms
+- **Duration**: 351.597154ms
 - **Report**: Resolve flow completed and synced back to issue markdown
 
 ---
 
 ### 4. ✅ multi-link-syntax-chain-and-list
 
-- **Duration**: 249.728525ms
+- **Duration**: 252.770903ms
 - **Report**: Multi-link syntax works for chain/list
 
 ---
 
 ### 5. ✅ link-and-unlink-roundtrip
 
-- **Duration**: 197.907587ms
+- **Duration**: 200.396191ms
 - **Report**: link/unlink roundtrip verified
 
 ---
 
 ### 6. ✅ signing-roles-review-test-docs
 
-- **Duration**: 200.083331ms
+- **Duration**: 205.19215ms
 - **Report**: REVIEW/TEST/DOCS signing behavior verified
 
 ---
 
 ### 7. ✅ cleanup
 
-- **Duration**: 761.122µs
+- **Duration**: 871.644µs
 - **Report**: Cleaned up temp directories
 
 ---

@@ -10,10 +10,12 @@ src/plugins/<plugin-name>/
   scaffold/main.go
   src_v1/
     go/           # library/runtime code
+    cmd/          # optional service/runtime command entrypoint
     test/
-      01_setup/                 # bootstrap env, fixtures, preconditions
-      02_example_library/       # shows library import/use from another binary
-      03_smoke/                 # end-to-end plugin smoke flow
+      cmd/main.go               # single-process suite orchestrator
+      01_setup/suite.go         # bootstrap env, fixtures, preconditions
+      02_example_library/suite.go
+      03_smoke/suite.go         # end-to-end plugin smoke flow
 ```
 
 Recommended command shape:
@@ -26,18 +28,19 @@ Recommended command shape:
 # 1) Create plugin skeleton
 mkdir -p src/plugins/my-plugin/{scaffold,src_v1/go,src_v1/test/01_setup,src_v1/test/02_example_library,src_v1/test/03_smoke}
 
-# 2) Add scaffold entrypoint
+# 2) Add scaffold entrypoint (logs-backed)
 cat > src/plugins/my-plugin/scaffold/main.go <<'EOF'
 package main
 
 import (
-  "fmt"
   "os"
+  logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
 func main() {
+  logs.SetOutput(os.Stdout)
   if len(os.Args) < 2 {
-    fmt.Println("Usage: my-plugin <command> [args]")
+    logs.Info("Usage: my-plugin <command> [args]")
     return
   }
   // route help/test/run commands to src_v1 code
@@ -51,6 +54,8 @@ EOF
 # 4) Write tests in src_v1/test using the test library
 # Add this to your imports:
 # import testv1 "dialtone/dev/plugins/test/src_v1/go"
+# Register steps from 01_*/02_*/03_* folders into test/cmd/main.go
+# (single process; no main.go inside subfolders)
 
 # 5) Document commands in src/plugins/my-plugin/README.md
 
@@ -83,10 +88,21 @@ func main() {
 }
 ```
 
+Rendered lines use:
+- `[T+0000s|LEVEL|src/path/file.go:line] message`
+
+Topic filtering:
+- raw stream: `logs.>`
+- level filters: `logfilter.level.error.>`
+- tag filters: `logfilter.tag.pass.>`, `logfilter.tag.fail.>`, `logfilter.tag.test.>`
+- combined level+tag: `logfilter.level.error.tag.fail.>`
+
 ### 2. Using the `test` Library (Rank 1)
 All plugin verification must be implemented as a test suite using the `test` library.
 
 - **NATS Verification:** Use `ctx.WaitForMessage` to verify system behavior via NATS topics instead of inspecting stdout or log files.
+- **Action -> Wait Contract:** every step should trigger an action, then wait for expected log output.
+- **Status Tags:** framework emits `[TEST][PASS]` and `[TEST][FAIL]` status lines for each step.
 
 **Import Path:** `dialtone/dev/plugins/test/src_v1/go`
 
@@ -118,6 +134,10 @@ func main() {
 	_ = testv1.RunSuite(testv1.SuiteOptions{Version: "src_v1"}, steps)
 }
 ```
+
+Status stream examples:
+- `./dialtone.sh logs stream --topic 'logfilter.tag.pass.>'`
+- `./dialtone.sh logs stream --topic 'logfilter.tag.fail.>'`
 
 This document defines the core dependency contract for plugin structure in this repo.
 

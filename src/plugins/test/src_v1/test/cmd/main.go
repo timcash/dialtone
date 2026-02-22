@@ -7,6 +7,9 @@ import (
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
 	selfcheck "dialtone/dev/plugins/test/src_v1/test/01_self_check"
 	example "dialtone/dev/plugins/test/src_v1/test/02_example_plugin_template"
+	browserctx "dialtone/dev/plugins/test/src_v1/test/03_browser_ctx"
+	natswait "dialtone/dev/plugins/test/src_v1/test/04_nats_wait_patterns"
+	browseropts "dialtone/dev/plugins/test/src_v1/test/05_browser_lifecycle_options"
 )
 
 func main() {
@@ -15,6 +18,9 @@ func main() {
 	reg := testv1.NewRegistry()
 	selfcheck.Register(reg)
 	example.Register(reg)
+	browserctx.Register(reg)
+	natswait.Register(reg)
+	browseropts.Register(reg)
 
 	logs.Info("Starting test plugin suite in single process with %d registered steps", len(reg.Steps))
 	err := reg.Run(testv1.SuiteOptions{

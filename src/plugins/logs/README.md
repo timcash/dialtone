@@ -31,11 +31,11 @@ All logs go through **NATS** by default. Producers (plugins, services) publish o
 
 Every rendered log line starts with:
 
-`[T+0000s|LEVEL|source-file.go] message`
+`[T+0000s|LEVEL|src/path/file.go:line] message`
 
 - `T+0000s`: elapsed seconds since topic clock start (or reset)
 - `LEVEL`: INFO/WARN/ERROR/DEBUG/FATAL
-- `source-file.go`: caller file name
+- `src/path/file.go:line`: caller source location
 
 ### 4. CLI Commands
 
@@ -69,6 +69,73 @@ The `--topic` flag supports standard NATS subject wildcards:
 
 1.  **Import:** `import logs "dialtone/dev/plugins/logs/src_v1/go"`
 2.  **Log:** Call `logs.Info("message")`. The message is published to NATS and silent on stdout.
+
+### Minimal Integration Example
+
+```go
+package main
+
+import (
+	"os"
+
+	logs "dialtone/dev/plugins/logs/src_v1/go"
+)
+
+func main() {
+	logs.SetOutput(os.Stdout) // optional in CLIs; keep default-discard in libraries/services
+	logs.Info("[PLUGIN][START] plugin boot")
+	logs.Warn("[PLUGIN][CONFIG] using default config")
+	logs.Error("[PLUGIN][ERROR] failed to open optional file: %v", os.ErrNotExist)
+}
+```
+
+### Subject-Based Logging Example
+
+```go
+package main
+
+import (
+	"time"
+
+	logs "dialtone/dev/plugins/logs/src_v1/go"
+	"github.com/nats-io/nats.go"
+)
+
+func publish() error {
+	nc, err := nats.Connect("nats://127.0.0.1:4222")
+	if err != nil {
+		return err
+	}
+	defer nc.Close()
+
+	logger, err := logs.NewNATSLogger(nc, "logs.myplugin.smoke")
+	if err != nil {
+		return err
+	}
+	if err := logger.Infof("[SMOKE][PASS] started at %s", time.Now().UTC().Format(time.RFC3339)); err != nil {
+		return err
+	}
+	return logger.Errorf("[SMOKE][FAIL] sample failure marker")
+}
+```
+
+### Stream Filters You Can Use Today
+
+```bash
+# all raw log subjects
+./dialtone.sh logs stream --topic 'logs.>'
+
+# all ERROR lines
+./dialtone.sh logs stream --topic 'logfilter.level.error.>'
+
+# tagged pass/fail lines
+./dialtone.sh logs stream --topic 'logfilter.tag.pass.>'
+./dialtone.sh logs stream --topic 'logfilter.tag.fail.>'
+
+# plugin-specific tagged lines (example: task)
+./dialtone.sh logs stream --topic 'logfilter.tag.pass.task'
+./dialtone.sh logs stream --topic 'logfilter.tag.fail.task'
+```
 
 ### NATS Verification in Tests
 

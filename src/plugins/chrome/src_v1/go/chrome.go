@@ -20,7 +20,7 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// VerifyChrome attempts to find and connect to a Chrome/Chromium 
+// VerifyChrome attempts to find and connect to a Chrome/Chromium
 func VerifyChrome(port int, debug bool) error {
 	path := FindChromePath()
 	if path == "" {
@@ -108,7 +108,7 @@ func KillDialtoneResources() error {
 	return KillDialtoneChromeProcesses()
 }
 
-// LaunchResult contains the details of a launched 
+// LaunchResult contains the details of a launched
 type LaunchResult struct {
 	PID          int
 	Port         int
@@ -122,6 +122,7 @@ type SessionOptions struct {
 	TargetURL     string
 	Role          string
 	ReuseExisting bool
+	UserDataDir   string
 }
 
 type Session struct {
@@ -175,7 +176,7 @@ func StartSession(opts SessionOptions) (*Session, error) {
 		}
 	}
 
-	res, err := LaunchChromeWithRole(opts.RequestedPort, opts.GPU, opts.Headless, opts.TargetURL, opts.Role)
+	res, err := LaunchChromeWithRoleAndUserDataDir(opts.RequestedPort, opts.GPU, opts.Headless, opts.TargetURL, opts.Role, opts.UserDataDir)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +185,7 @@ func StartSession(opts SessionOptions) (*Session, error) {
 	// We need the Windows PID to correctly kill the process tree later.
 	finalPID := res.PID
 	isWindows := false
-	
+
 	// Wait a moment for Windows process listing to reflect the new instance
 	if runtime.GOOS == "linux" && IsWSL() {
 		time.Sleep(3 * time.Second)
@@ -286,6 +287,10 @@ func LaunchChrome(port int, gpu bool, headless bool, targetURL string) (*LaunchR
 
 // LaunchChromeWithRole starts a new Chrome instance and tags it with a dialtone role (e.g. "dev", "smoke").
 func LaunchChromeWithRole(port int, gpu bool, headless bool, targetURL, role string) (*LaunchResult, error) {
+	return LaunchChromeWithRoleAndUserDataDir(port, gpu, headless, targetURL, role, "")
+}
+
+func LaunchChromeWithRoleAndUserDataDir(port int, gpu bool, headless bool, targetURL, role, requestedUserDataDir string) (*LaunchResult, error) {
 	path := FindChromePath()
 	if path == "" {
 		return nil, fmt.Errorf("chrome not found")
@@ -317,7 +322,10 @@ func LaunchChromeWithRole(port int, gpu bool, headless bool, targetURL, role str
 
 	// Use a local user data dir in the workspace, segregated by port to allow multiple instances
 	var userDataDir string
-	if runtime.GOOS == "linux" && IsWSL() {
+	if strings.TrimSpace(requestedUserDataDir) != "" {
+		userDataDir = strings.TrimSpace(requestedUserDataDir)
+	}
+	if runtime.GOOS == "linux" && IsWSL() && userDataDir == "" {
 		// Detect if we are in an SSH session where cmd.exe might have issues with UNC paths
 		// We MUST use a local Windows drive (e.g. C:\) for Chrome profiles.
 		cmdPath := "cmd.exe"
@@ -363,6 +371,9 @@ func LaunchChromeWithRole(port int, gpu bool, headless bool, targetURL, role str
 	if userDataDir == "" {
 		cwd, _ := os.Getwd()
 		userDataDir = filepath.Join(cwd, ".chrome_data", profileDirName)
+	}
+	// Ensure local path exists when it's a filesystem path (skip obvious windows cmd paths).
+	if !strings.Contains(userDataDir, "\\") || strings.HasPrefix(userDataDir, "/") {
 		_ = os.MkdirAll(userDataDir, 0755)
 	}
 
@@ -466,6 +477,38 @@ func LaunchChromeWithRole(port int, gpu bool, headless bool, targetURL, role str
 		Port:         assignedPort,
 		WebsocketURL: wsURL,
 	}, nil
+}
+
+func WaitForDebugPort(port int, timeout time.Duration) error {
+	if port <= 0 {
+		return fmt.Errorf("invalid debug port: %d", port)
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := getWebsocketURL(port); err == nil {
+			return nil
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout waiting for debug port %d", port)
+}
+
+func AttachToWebSocket(websocketURL string) (context.Context, context.CancelFunc, error) {
+	ws := strings.TrimSpace(websocketURL)
+	if ws == "" {
+		return nil, nil, fmt.Errorf("websocket url is required")
+	}
+	allocCtx, cancelAlloc := chromedp.NewRemoteAllocator(context.Background(), ws)
+	tabCtx, cancelTab := chromedp.NewContext(allocCtx)
+	cancel := func() {
+		cancelTab()
+		cancelAlloc()
+	}
+	return tabCtx, cancel, nil
+}
+
+func NewTabContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return chromedp.NewContext(parent)
 }
 
 func getWebsocketURL(port int) (string, error) {
