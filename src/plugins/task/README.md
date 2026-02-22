@@ -113,6 +113,15 @@ Promotes `v2` to `v1` to set a new baseline.
 The task system itself is verified via:
 - `./dialtone.sh task test src_v1`
 
+Useful log filters while tests run:
+
+```bash
+./dialtone.sh logs stream --topic 'logfilter.level.error.>'   # all ERROR lines
+./dialtone.sh logs stream --topic 'logfilter.tag.pass.>'      # all [PASS] tagged lines
+./dialtone.sh logs stream --topic 'logfilter.tag.fail.>'      # all [FAIL] tagged lines
+./dialtone.sh logs stream --topic 'logfilter.tag.fail.task'   # task plugin fail tags
+```
+
 Test wiring (src_v1):
 - orchestrator: `src/plugins/task/src_v1/test/cmd/main.go`
 - step registration: `src/plugins/task/src_v1/test/01_smoke/suite.go`
