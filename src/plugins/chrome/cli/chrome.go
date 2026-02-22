@@ -3,11 +3,13 @@ package cli
 import (
 	"flag"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 
 	"strings"
 
 	chrome "dialtone/dev/plugins/chrome/src_v1/go"
-	chrome_test "dialtone/dev/plugins/chrome/src_v1/test"
 	"dialtone/dev/plugins/logs/src_v1/go"
 )
 
@@ -75,6 +77,7 @@ func RunChrome(args []string) {
 		headless := newFlags.Bool("headless", false, "Launch in headless mode")
 		role := newFlags.String("role", "", "Dialtone role tag (e.g. dev, smoke)")
 		reuseExisting := newFlags.Bool("reuse-existing", false, "Attach to existing matching role/headless instance")
+		userDataDir := newFlags.String("user-data-dir", "", "Explicit Chrome user data dir")
 		debug := newFlags.Bool("debug", false, "Enable verbose logging")
 
 		for _, arg := range args[1:] {
@@ -110,9 +113,9 @@ func RunChrome(args []string) {
 		if len(positional) > 0 {
 			targetURL = positional[0]
 		}
-		handleNew(*port, *gpu, *headless, targetURL, *role, *reuseExisting, *debug)
+		handleNew(*port, *gpu, *headless, targetURL, *role, *reuseExisting, *userDataDir, *debug)
 	case "test":
-		if err := chrome_test.Run(); err != nil {
+		if err := runChromeTests(); err != nil {
 			logs.Fatal("Chrome self-test failed: %v", err)
 		}
 		logs.Info("Chrome self-test passed")
@@ -280,7 +283,7 @@ func handleKill(arg string, isWindows, totalAll bool) {
 	logs.Info("Successfully killed process %d", pid)
 }
 
-func handleNew(port int, gpu bool, headless bool, targetURL, role string, reuseExisting, debug bool) {
+func handleNew(port int, gpu bool, headless bool, targetURL, role string, reuseExisting bool, userDataDir string, debug bool) {
 	logs.Info("Launching new %s Chrome instance...", func() string {
 		if headless {
 			return "headless"
@@ -299,6 +302,7 @@ func handleNew(port int, gpu bool, headless bool, targetURL, role string, reuseE
 		TargetURL:     targetURL,
 		Role:          role,
 		ReuseExisting: reuseExisting,
+		UserDataDir:   userDataDir,
 	})
 	if err != nil {
 		logs.Fatal("Failed to launch Chrome: %v", err)
@@ -331,6 +335,7 @@ func printChromeUsage() {
 	fmt.Println("  --headless          Enable headless mode")
 	fmt.Println("  --role <name>       Tag launched browser role (dev, smoke, etc.)")
 	fmt.Println("  --reuse-existing    Reuse existing matching role/headless instance")
+	fmt.Println("  --user-data-dir     Set explicit profile directory")
 	fmt.Println("\nFlags for kill:")
 	fmt.Println("  --all               Kill ALL Chrome/Edge processes system-wide")
 	fmt.Println("  --windows           Use with 'kill' for WSL host processes (auto-detected usually)")
@@ -344,4 +349,33 @@ func stripVersionArg(args []string) []string {
 		return append([]string{args[0]}, args[2:]...)
 	}
 	return args
+}
+
+func runChromeTests() error {
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command("go", "run", "./plugins/chrome/src_v1/test/cmd/main.go")
+	cmd.Dir = filepath.Join(repoRoot, "src")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func findRepoRoot() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
+			return cwd, nil
+		}
+		parent := filepath.Dir(cwd)
+		if parent == cwd {
+			return "", fmt.Errorf("repo root not found")
+		}
+		cwd = parent
+	}
 }

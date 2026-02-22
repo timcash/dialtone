@@ -1,14 +1,36 @@
 # Chrome Plugin
 
-`src/plugins/chrome` manages local Chrome/Chromium/Edge instances for Dialtone.
-The plugin runtime library lives in `src/plugins/chrome/src_v1/go` and emits logs via `src/plugins/logs/src_v1/go`.
+`src/plugins/chrome` manages local Chrome/Chromium/Edge instances for Dialtone and follows the shared `logs` + `test` patterns.
 
-It supports:
-- verifying debug connectivity
-- listing browser processes
-- launching tagged browser sessions
-- killing Dialtone-only (or all) browser processes
-- running chrome plugin self-test
+## What It Supports
+
+- detect existing Chrome processes and debug ports
+- start headed/headless sessions with role tags (`dev`, `test`, etc.)
+- reuse existing matching role/headless sessions
+- configure GPU on/off
+- set explicit `--user-data-dir`
+- attach to existing browser via websocket and open new tabs
+- clean up Dialtone-owned sessions
+
+## CLI
+
+```bash
+./dialtone.sh chrome help
+./dialtone.sh chrome verify src_v1 --port 9222
+./dialtone.sh chrome list src_v1 --verbose
+./dialtone.sh chrome new src_v1 https://example.com --role dev --gpu
+./dialtone.sh chrome new src_v1 --headless --role test --user-data-dir ./.chrome_data/test-profile
+./dialtone.sh chrome kill src_v1 all
+./dialtone.sh chrome test src_v1
+```
+
+Commands:
+- `verify [src_v1] [--port N] [--debug]`
+- `list [src_v1] [--headed|--headless] [--verbose|-v]`
+- `new [src_v1] [URL] [--port N] [--gpu] [--headless] [--role NAME] [--reuse-existing] [--user-data-dir PATH] [--debug]`
+- `kill [src_v1] [PID|all] [--all] [--windows]`
+- `test [src_v1]`
+- `install`
 
 ## Library Usage (`src_v1/go`)
 
@@ -18,14 +40,16 @@ Import:
 import chrome "dialtone/dev/plugins/chrome/src_v1/go"
 ```
 
-Typical usage:
+Start session:
 
 ```go
 session, err := chrome.StartSession(chrome.SessionOptions{
 	RequestedPort: 0,
-	Headless:      true,
-	Role:          "smoke",
+	GPU:           true,
+	Headless:      false,
+	Role:          "dev",
 	ReuseExisting: true,
+	UserDataDir:   ".chrome_data/dev-profile",
 })
 if err != nil {
 	return err
@@ -33,51 +57,59 @@ if err != nil {
 defer chrome.CleanupSession(session)
 ```
 
-Self-test coverage:
-- `./dialtone.sh chrome test src_v1` first runs `src/plugins/chrome/src_v1/test/02_example_library/main.go`.
-- That example imports `src/plugins/chrome/src_v1/go` directly and validates core library calls.
-- Then it runs the full browser lifecycle self-test.
+Attach and create a new tab:
 
-## CLI
+```go
+ctx, cancel, err := chrome.AttachToWebSocket(session.WebSocketURL)
+if err != nil {
+	return err
+}
+defer cancel()
 
-Use scaffold-style commands:
+tabCtx, tabCancel := chrome.NewTabContext(ctx)
+defer tabCancel()
+```
+
+Wait for debug readiness:
+
+```go
+if err := chrome.WaitForDebugPort(session.Port, 20*time.Second); err != nil {
+	return err
+}
+```
+
+## Tests (`src_v1`)
+
+Run:
 
 ```bash
-./dialtone.sh chrome help
-./dialtone.sh chrome verify src_v1 --port 9222
-./dialtone.sh chrome list src_v1 --headed
-./dialtone.sh chrome new src_v1 https://example.com --gpu --role dev
-./dialtone.sh chrome kill src_v1 all
 ./dialtone.sh chrome test src_v1
 ```
 
-Notes:
-- `src_v1` is accepted as an optional version argument for all commands.
-- `chrome test src_v1` runs the self-test in `src/plugins/chrome/src_v1/test/test.go`, which imports the chrome library from `src/plugins/chrome/src_v1/go`.
+Layout:
+- `src/plugins/chrome/src_v1/test/cmd/main.go`
+- `src/plugins/chrome/src_v1/test/01_session_lifecycle/suite.go`
+- `src/plugins/chrome/src_v1/test/02_example_library/suite.go`
 
-## Commands
+Coverage includes:
+- detect chrome binary/path
+- launch headed `dev` role (GPU on) and verify debug port
+- reuse running `dev` role session
+- attach via websocket and open/navigate a new tab with chromedp
+- launch headless `test` role (GPU off) with explicit `user-data-dir`
+- verify process listing metadata: role/headless/gpu/debug port/command
+- cleanup headless while preserving dev, then full cleanup
 
-- `verify [src_v1] [--port N] [--debug]`
-- `list [src_v1] [--headed|--headless] [--verbose|-v]`
-- `new [src_v1] [URL] [--port N] [--gpu] [--headless] [--role NAME] [--reuse-existing] [--debug]`
-- `kill [src_v1] [PID|all] [--all] [--windows]`
-- `test [src_v1]`
-- `install`
+## Logs + Filters
 
-## WSL / Windows Host Support
+Logs use the shared format:
+- `[T+0000s|LEVEL|src/...:line] message`
 
-When running under WSL:
-- `chrome list` can show Windows-host browser processes.
-- `chrome kill` auto-detects Windows process handling (or force via `--windows`).
-- `chrome new` can launch host browser when needed.
-
-## Examples
+Useful filters while running chrome tests:
 
 ```bash
-./dialtone.sh chrome verify src_v1 --port 9222
-./dialtone.sh chrome list src_v1 --verbose
-./dialtone.sh chrome new src_v1 --headless --role smoke
-./dialtone.sh chrome kill src_v1 12345
-./dialtone.sh chrome kill src_v1 all --all
-./dialtone.sh chrome test src_v1
+./dialtone.sh logs stream --topic 'logs.test.chrome-src-v1.>'
+./dialtone.sh logs stream --topic 'logfilter.level.error.chrome.>'
+./dialtone.sh logs stream --topic 'logfilter.tag.pass.chrome'
+./dialtone.sh logs stream --topic 'logfilter.tag.fail.chrome'
 ```
