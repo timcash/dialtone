@@ -1,16 +1,16 @@
 # Go Plugin
 
-The Go plugin manages the managed Go toolchain and Go-related workflows through `./dialtone.sh go ...`.
+The Go plugin manages the managed Go toolchain and Go-related workflows through `./dialtone.sh go src_v1 ...`.
 
 ## Commands
 
 ```bash
-./dialtone.sh go install
-./dialtone.sh go lint
-./dialtone.sh go exec <go-args...>
-./dialtone.sh go run <go-args...>      # alias for exec
-./dialtone.sh go pb-dump <file.pb>
-./dialtone.sh go test
+./dialtone.sh go src_v1 install
+./dialtone.sh go src_v1 lint
+./dialtone.sh go src_v1 exec <go-args...>
+./dialtone.sh go src_v1 run <go-args...>      # alias for exec
+./dialtone.sh go src_v1 pb-dump <file.pb>
+./dialtone.sh go src_v1 test
 ```
 
 ## Usage
@@ -18,7 +18,7 @@ The Go plugin manages the managed Go toolchain and Go-related workflows through 
 ### Install managed Go toolchain
 
 ```bash
-./dialtone.sh go install
+./dialtone.sh go src_v1 install
 ```
 
 Installs Go into `DIALTONE_ENV/go`.
@@ -26,7 +26,7 @@ Installs Go into `DIALTONE_ENV/go`.
 ### Run lint
 
 ```bash
-./dialtone.sh go lint
+./dialtone.sh go src_v1 lint
 ```
 
 Runs `go vet ./...` using the managed toolchain when available.
@@ -34,20 +34,20 @@ Runs `go vet ./...` using the managed toolchain when available.
 ### Run arbitrary Go commands
 
 ```bash
-./dialtone.sh go exec run ./src/cmd/dev/main.go
-./dialtone.sh go exec build ./src/...
+./dialtone.sh go src_v1 exec run ./src/cmd/dev/main.go
+./dialtone.sh go src_v1 exec build ./src/...
 ```
 
 `go run` is an alias:
 
 ```bash
-./dialtone.sh go run ./src/cmd/dev/main.go
+./dialtone.sh go src_v1 run ./src/cmd/dev/main.go
 ```
 
 ### Inspect protobuf binaries
 
 ```bash
-./dialtone.sh go pb-dump path/to/file.pb
+./dialtone.sh go src_v1 pb-dump path/to/file.pb
 ```
 
 ## Testing
@@ -55,7 +55,7 @@ Runs `go vet ./...` using the managed toolchain when available.
 Run Go plugin integration tests:
 
 ```bash
-./dialtone.sh go test
+./dialtone.sh go src_v1 test
 ```
 
 Current test coverage verifies:

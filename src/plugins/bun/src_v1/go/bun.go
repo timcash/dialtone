@@ -12,7 +12,7 @@ func RunBun(uiDir string, args ...string) error {
 	if err != nil {
 		return err
 	}
-	bunArgs := append([]string{"bun", "exec", "--cwd", uiDir}, args...)
+	bunArgs := append([]string{"bun", "src_v1", "exec", "--cwd", uiDir}, args...)
 	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), bunArgs...)
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
