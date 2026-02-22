@@ -16,20 +16,20 @@
 
 ```bash
 ./dialtone.sh chrome help
-./dialtone.sh chrome verify src_v1 --port 9222
-./dialtone.sh chrome list src_v1 --verbose
-./dialtone.sh chrome new src_v1 https://example.com --role dev --gpu
-./dialtone.sh chrome new src_v1 --headless --role test --user-data-dir ./.chrome_data/test-profile
-./dialtone.sh chrome kill src_v1 all
-./dialtone.sh chrome test src_v1
+./dialtone.sh chrome src_v1 verify --port 9222
+./dialtone.sh chrome src_v1 list --verbose
+./dialtone.sh chrome src_v1 new https://example.com --role dev --gpu
+./dialtone.sh chrome src_v1 new --headless --role test --user-data-dir ./.chrome_data/test-profile
+./dialtone.sh chrome src_v1 kill all
+./dialtone.sh chrome src_v1 test
 ```
 
 Commands:
-- `verify [src_v1] [--port N] [--debug]`
-- `list [src_v1] [--headed|--headless] [--verbose|-v]`
-- `new [src_v1] [URL] [--port N] [--gpu] [--headless] [--role NAME] [--reuse-existing] [--user-data-dir PATH] [--debug]`
-- `kill [src_v1] [PID|all] [--all] [--windows]`
-- `test [src_v1]`
+- `verify [--port N] [--debug]`
+- `list [--headed|--headless] [--verbose|-v]`
+- `new [URL] [--port N] [--gpu] [--headless] [--role NAME] [--reuse-existing] [--user-data-dir PATH] [--debug]`
+- `kill [PID|all] [--all] [--windows]`
+- `test`
 - `install`
 
 ## Library Usage (`src_v1/go`)
@@ -83,7 +83,7 @@ if err := chrome.WaitForDebugPort(session.Port, 20*time.Second); err != nil {
 Run:
 
 ```bash
-./dialtone.sh chrome test src_v1
+./dialtone.sh chrome src_v1 test
 ```
 
 Layout:
@@ -108,8 +108,8 @@ Logs use the shared format:
 Useful filters while running chrome tests:
 
 ```bash
-./dialtone.sh logs stream --topic 'logs.test.chrome-src-v1.>'
-./dialtone.sh logs stream --topic 'logfilter.level.error.chrome.>'
-./dialtone.sh logs stream --topic 'logfilter.tag.pass.chrome'
-./dialtone.sh logs stream --topic 'logfilter.tag.fail.chrome'
+./dialtone.sh logs src_v1 stream --topic 'logs.test.chrome-src-v1.>'
+./dialtone.sh logs src_v1 stream --topic 'logfilter.level.error.chrome.>'
+./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.pass.chrome'
+./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.fail.chrome'
 ```

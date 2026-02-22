@@ -4,12 +4,12 @@
 
 ```sh
 # Run the canonical ui src_v1 suite (build fixture + Go backend + chromedp steps)
-./dialtone.sh ui test src_v1
+./dialtone.sh ui src_v1 test
 
 # Stream suite logs
-./dialtone.sh logs stream --topic 'logs.test.ui.src-v1.>'
-./dialtone.sh logs stream --topic 'logfilter.tag.pass.test'
-./dialtone.sh logs stream --topic 'logfilter.tag.fail.test'
+./dialtone.sh logs src_v1 stream --topic 'logs.test.ui.src-v1.>'
+./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.pass.test'
+./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.fail.test'
 ```
 
 This README follows DAG `src_v3` terminology as source-of-truth.
@@ -18,13 +18,13 @@ This README follows DAG `src_v3` terminology as source-of-truth.
 
 ```sh
 ./dialtone.sh ui help
-./dialtone.sh ui test src_v1
-./dialtone.sh ui dev
-./dialtone.sh ui build
-./dialtone.sh ui install
+./dialtone.sh ui src_v1 test
+./dialtone.sh ui src_v1 dev
+./dialtone.sh ui src_v1 build
+./dialtone.sh ui src_v1 install
 ```
 
-`ui test src_v1` runs:
+`ui src_v1 test` runs:
 - `src/plugins/ui/src_v1/test/cmd/main.go`
 
 The suite uses:

@@ -13,7 +13,16 @@ func Run(args []string) error {
 		printUsage()
 		return fmt.Errorf("no command provided")
 	}
-	args = stripVersionArg(args)
+
+	normalized, warnedOldOrder, err := normalizeUIArgs(args)
+	if err != nil {
+		printUsage()
+		return err
+	}
+	if warnedOldOrder {
+		fmt.Println("[WARN] old ui CLI order is deprecated. Use: ./dialtone.sh ui src_v1 <command> [args]")
+	}
+	args = normalized
 
 	command := args[0]
 	cmdArgs := args[1:]
@@ -43,7 +52,7 @@ func Run(args []string) error {
 }
 
 func printUsage() {
-	fmt.Println("Usage: dialtone ui <command> [args]")
+	fmt.Println("Usage: ./dialtone.sh ui src_v1 <command> [args]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  dev       Run the dev server (npm run dev)")
 	fmt.Println("  build     Build the web UI (npm run build)")
@@ -116,11 +125,38 @@ func runNpm(script string, args []string) error {
 	return nil
 }
 
-func stripVersionArg(args []string) []string {
-	if len(args) >= 2 && strings.HasPrefix(args[1], "src_v") {
-		return append([]string{args[0]}, args[2:]...)
+func normalizeUIArgs(args []string) ([]string, bool, error) {
+	if len(args) == 0 {
+		return nil, false, fmt.Errorf("no command provided")
 	}
-	return args
+	if isHelp(args[0]) {
+		return []string{"help"}, false, nil
+	}
+	if strings.HasPrefix(args[0], "src_v") {
+		if args[0] != "src_v1" {
+			return nil, false, fmt.Errorf("unsupported version %s", args[0])
+		}
+		if len(args) < 2 {
+			return nil, false, fmt.Errorf("missing command (usage: ./dialtone.sh ui src_v1 <command> [args])")
+		}
+		return append([]string{args[1]}, args[2:]...), false, nil
+	}
+	if len(args) >= 2 && strings.HasPrefix(args[1], "src_v") {
+		if args[1] != "src_v1" {
+			return nil, false, fmt.Errorf("unsupported version %s", args[1])
+		}
+		return append([]string{args[0]}, args[2:]...), true, nil
+	}
+	return nil, false, fmt.Errorf("expected version as first ui argument (usage: ./dialtone.sh ui src_v1 <command> [args])")
+}
+
+func isHelp(s string) bool {
+	switch strings.TrimSpace(s) {
+	case "help", "-h", "--help":
+		return true
+	default:
+		return false
+	}
 }
 
 func runUITests() error {
