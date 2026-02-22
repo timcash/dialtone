@@ -1,14 +1,14 @@
 # Bun Plugin
 
-The Bun plugin runs managed Bun/Node tooling through `./dialtone.sh bun ...`.
+The Bun plugin runs managed Bun/Node tooling through `./dialtone.sh bun src_v1 ...`.
 
 ## Commands
 
 ```bash
-./dialtone.sh bun exec <bun-args...>
-./dialtone.sh bun run <script-and-args...>   # alias for exec run
-./dialtone.sh bun x <tool-and-args...>       # alias for exec x
-./dialtone.sh bun test
+./dialtone.sh bun src_v1 exec <bun-args...>
+./dialtone.sh bun src_v1 run <script-and-args...>   # alias for exec run
+./dialtone.sh bun src_v1 x <tool-and-args...>       # alias for exec x
+./dialtone.sh bun src_v1 test
 ```
 
 ## Usage
@@ -16,21 +16,21 @@ The Bun plugin runs managed Bun/Node tooling through `./dialtone.sh bun ...`.
 ### Run arbitrary Bun commands
 
 ```bash
-./dialtone.sh bun exec --version
-./dialtone.sh bun exec install
+./dialtone.sh bun src_v1 exec --version
+./dialtone.sh bun src_v1 exec install
 ```
 
 ### Run project scripts
 
 ```bash
-./dialtone.sh bun run lint
-./dialtone.sh bun run build
+./dialtone.sh bun src_v1 run lint
+./dialtone.sh bun src_v1 run build
 ```
 
 ### Run one-off tools
 
 ```bash
-./dialtone.sh bun x prettier --check .
+./dialtone.sh bun src_v1 x prettier --check .
 ```
 
 ### Run in a specific directory
@@ -38,8 +38,8 @@ The Bun plugin runs managed Bun/Node tooling through `./dialtone.sh bun ...`.
 Use `--cwd` with `exec`:
 
 ```bash
-./dialtone.sh bun exec --cwd src/plugins/dag/src_v2/ui run build
-./dialtone.sh bun exec --cwd src/plugins/dag/src_v2/ui install --force
+./dialtone.sh bun src_v1 exec --cwd src/plugins/dag/src_v2/ui run build
+./dialtone.sh bun src_v1 exec --cwd src/plugins/dag/src_v2/ui install --force
 ```
 
 ## Testing
@@ -47,7 +47,7 @@ Use `--cwd` with `exec`:
 Run Bun plugin integration tests:
 
 ```bash
-./dialtone.sh bun test
+./dialtone.sh bun src_v1 test
 ```
 
 Current test coverage verifies:
