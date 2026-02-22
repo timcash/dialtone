@@ -19,7 +19,17 @@ func RunChrome(args []string) {
 		printChromeUsage()
 		return
 	}
-	args = stripVersionArg(args)
+
+	normalized, warnedOldOrder, err := normalizeChromeArgs(args)
+	if err != nil {
+		logs.Error("%v", err)
+		printChromeUsage()
+		return
+	}
+	if warnedOldOrder {
+		logs.Warn("old chrome CLI order is deprecated. Use: ./dialtone.sh chrome src_v1 <command> [args]")
+	}
+	args = normalized
 
 	switch args[0] {
 	case "help", "--help", "-h":
@@ -33,7 +43,7 @@ func RunChrome(args []string) {
 
 		for _, arg := range args[1:] {
 			if arg == "--help" || arg == "-h" {
-				fmt.Println("Usage: ./dialtone.sh chrome list [src_v1] [flags]")
+				fmt.Println("Usage: ./dialtone.sh chrome src_v1 list [flags]")
 				fmt.Println("\nLists all detected Chrome/Edge processes on the system.")
 				fmt.Println("\nFlags:")
 				listFlags.PrintDefaults()
@@ -50,14 +60,14 @@ func RunChrome(args []string) {
 
 		for _, arg := range args[1:] {
 			if arg == "--help" || arg == "-h" {
-				fmt.Println("Usage: ./dialtone.sh chrome kill [src_v1] [PID|all] [flags]")
+				fmt.Println("Usage: ./dialtone.sh chrome src_v1 kill [PID|all] [flags]")
 				fmt.Println("\nTerminates Chrome processes. Default behavior is to only kill Dialtone-originated instances.")
 				fmt.Println("\nFlags:")
 				killFlags.PrintDefaults()
 				fmt.Println("\nExamples:")
-				fmt.Println("  ./dialtone.sh chrome kill all        # Kill only Dialtone-started browsers")
-				fmt.Println("  ./dialtone.sh chrome kill all --all  # Kill EVERY Chrome process on the PC")
-				fmt.Println("  ./dialtone.sh chrome kill 1234       # Kill specific process by PID")
+				fmt.Println("  ./dialtone.sh chrome src_v1 kill all        # Kill only Dialtone-started browsers")
+				fmt.Println("  ./dialtone.sh chrome src_v1 kill all --all  # Kill EVERY Chrome process on the PC")
+				fmt.Println("  ./dialtone.sh chrome src_v1 kill 1234       # Kill specific process by PID")
 				return
 			}
 		}
@@ -82,7 +92,7 @@ func RunChrome(args []string) {
 
 		for _, arg := range args[1:] {
 			if arg == "--help" || arg == "-h" {
-				fmt.Println("Usage: ./dialtone.sh chrome new [src_v1] [URL] [flags]")
+				fmt.Println("Usage: ./dialtone.sh chrome src_v1 new [URL] [flags]")
 				fmt.Println("\nLaunches a new headed Chrome instance linked to Dialtone.")
 				fmt.Println("\nFlags:")
 				newFlags.PrintDefaults()
@@ -126,7 +136,7 @@ func RunChrome(args []string) {
 
 		for _, arg := range args[1:] {
 			if arg == "--help" || arg == "-h" {
-				fmt.Println("Usage: ./dialtone.sh chrome verify [src_v1] [flags]")
+				fmt.Println("Usage: ./dialtone.sh chrome src_v1 verify [flags]")
 				fmt.Println("\nChecks if application is reachable via remote debugging port.")
 				fmt.Println("\nFlags:")
 				verifyFlags.PrintDefaults()
@@ -318,12 +328,12 @@ func handleNew(port int, gpu bool, headless bool, targetURL, role string, reuseE
 }
 
 func printChromeUsage() {
-	fmt.Println("Usage: ./dialtone.sh chrome <command> [src_v1] [arguments]")
+	fmt.Println("Usage: ./dialtone.sh chrome src_v1 <command> [arguments]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  verify [--port N]   Verify chrome connectivity")
 	fmt.Println("  list [flags]        List detected chrome processes")
 	fmt.Println("  new [URL] [flags]   Launch a new Chrome instance")
-	fmt.Println("  test [src_v1]       Run chrome plugin self-test (dev vs smoke roles)")
+	fmt.Println("  test                Run chrome plugin self-test (dev vs smoke roles)")
 	fmt.Println("  kill [PID|all] [--all] Kill Dialtone processes (default) or all processes")
 	fmt.Println("  install             Install chrome dependencies")
 	fmt.Println("\nFlags for list:")
@@ -344,11 +354,41 @@ func printChromeUsage() {
 	fmt.Println("  --debug             Enable verbose logging")
 }
 
-func stripVersionArg(args []string) []string {
-	if len(args) >= 2 && strings.HasPrefix(args[1], "src_v") {
-		return append([]string{args[0]}, args[2:]...)
+func normalizeChromeArgs(args []string) ([]string, bool, error) {
+	if len(args) == 0 {
+		return nil, false, fmt.Errorf("missing arguments")
 	}
-	return args
+	if isHelpArg(args[0]) {
+		return []string{"help"}, false, nil
+	}
+	if strings.HasPrefix(args[0], "src_v") {
+		if args[0] != "src_v1" {
+			return nil, false, fmt.Errorf("unsupported version %s", args[0])
+		}
+		if len(args) < 2 {
+			return nil, false, fmt.Errorf("missing command (usage: ./dialtone.sh chrome src_v1 <command> [args])")
+		}
+		return append([]string{args[1]}, args[2:]...), false, nil
+	}
+	if len(args) >= 2 && strings.HasPrefix(args[1], "src_v") {
+		if args[1] != "src_v1" {
+			return nil, false, fmt.Errorf("unsupported version %s", args[1])
+		}
+		return append([]string{args[0]}, args[2:]...), true, nil
+	}
+	if isHelpArg(args[0]) {
+		return []string{"help"}, false, nil
+	}
+	return nil, false, fmt.Errorf("expected version as first chrome argument (usage: ./dialtone.sh chrome src_v1 <command> [args])")
+}
+
+func isHelpArg(s string) bool {
+	switch strings.TrimSpace(s) {
+	case "help", "--help", "-h":
+		return true
+	default:
+		return false
+	}
 }
 
 func runChromeTests() error {
