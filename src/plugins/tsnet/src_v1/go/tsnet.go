@@ -89,10 +89,10 @@ func PrintUsage() {
 	logs.Raw("  config                               Show resolved tsnet config")
 	logs.Raw("  status                               Show tsnet prereq status")
 	logs.Raw("  up [--dry-run]                       Start embedded tsnet (ephemeral); auto-provision TS_AUTHKEY when needed")
-	logs.Raw("  devices list [--tailnet N] [--api-key K] [--format json|table]")
+	logs.Raw("  devices list [--tailnet N] [--api-key K] [--format report|json] [--all]")
 	logs.Raw("  devices prune --name-contains S [--tailnet N] [--api-key K] [--dry-run] [--yes]")
-	logs.Raw("  computers list [--tailnet N] [--api-key K] [--format json|table]")
-	logs.Raw("  list [--tailnet N] [--api-key K] [--format json|table]  Alias for devices list")
+	logs.Raw("  computers list [--tailnet N] [--api-key K] [--format report|json] [--all]")
+	logs.Raw("  list [--tailnet N] [--api-key K] [--format report|json] [--all]  Alias for devices list")
 	logs.Raw("  keys provision [--tailnet N] [--api-key K] [--description D] [--tags t1,t2] [--ephemeral] [--preauthorized] [--reusable] [--expiry-hours N] [--write-env env/.env]")
 	logs.Raw("  keys list [--tailnet N] [--api-key K]")
 	logs.Raw("  keys revoke <key-id> [--tailnet N] [--api-key K]")
@@ -379,6 +379,7 @@ type Device struct {
 	User      string   `json:"user"`
 	Created   string   `json:"created"`
 	LastSeen  string   `json:"lastSeen"`
+	Online    bool     `json:"online"`
 	Addresses []string `json:"addresses"`
 	Tags      []string `json:"tags"`
 }
@@ -439,14 +440,19 @@ func runDevices(args []string) error {
 }
 
 func runDevicesList(args []string) error {
-	format := "json"
+	format := "report"
+	activeOnly := true
 	for i := 0; i < len(args); i++ {
-		if args[i] != "--format" {
-			continue
-		}
-		if i+1 < len(args) {
-			format = strings.ToLower(strings.TrimSpace(args[i+1]))
-			i++
+		switch args[i] {
+		case "--format":
+			if i+1 < len(args) {
+				format = strings.ToLower(strings.TrimSpace(args[i+1]))
+				i++
+			}
+		case "--all":
+			activeOnly = false
+		case "--active-only":
+			activeOnly = true
 		}
 	}
 
@@ -472,14 +478,15 @@ func runDevicesList(args []string) error {
 	} else {
 		return err
 	}
+	devices = filterActiveDevices(devices, activeOnly)
 
 	switch format {
 	case "json":
 		return printJSON(devices)
-	case "table":
-		return printDevicesTable(devices)
+	case "table", "report":
+		return printDevicesReport(devices, activeOnly)
 	default:
-		return fmt.Errorf("unsupported --format %q (expected json or table)", format)
+		return fmt.Errorf("unsupported --format %q (expected report or json)", format)
 	}
 }
 
@@ -694,6 +701,7 @@ func deviceFromPeerStatus(ps *ipnstate.PeerStatus, users map[tailcfg.UserID]tail
 		User:      user,
 		Created:   formatTime(ps.Created),
 		LastSeen:  formatTime(ps.LastSeen),
+		Online:    ps.Online,
 		Addresses: addrs,
 		Tags:      tags,
 	}
@@ -1185,23 +1193,67 @@ func printJSON(v any) error {
 	return nil
 }
 
-func printDevicesTable(devices []Device) error {
+func printDevicesReport(devices []Device, activeOnly bool) error {
 	if len(devices) == 0 {
-		logs.Raw("No devices found.")
+		if activeOnly {
+			logs.Raw("No active devices found.")
+		} else {
+			logs.Raw("No devices found.")
+		}
 		return nil
 	}
-	logs.Raw("NAME\tHOSTNAME\tUSER\tTAILSCALE_IPS\tTAGS\tLAST_SEEN")
+	mode := "active-only"
+	if !activeOnly {
+		mode = "all"
+	}
+	logs.Raw("Tailnet Device Report (%s, count=%d)", mode, len(devices))
+	logs.Raw("STATUS\tNAME\tHOSTNAME\tUSER\tTAILSCALE_IPS\tLAST_SEEN\tTAGS")
 	for _, d := range devices {
-		logs.Raw("%s\t%s\t%s\t%s\t%s\t%s",
+		status := "offline"
+		if isDeviceActive(d) {
+			status = "active"
+		}
+		logs.Raw("%s\t%s\t%s\t%s\t%s\t%s\t%s",
+			status,
 			chooseNonEmpty(d.Name, d.ID),
 			chooseNonEmpty(d.Hostname, "-"),
 			chooseNonEmpty(d.User, "-"),
 			joinOrDash(d.Addresses),
-			joinOrDash(d.Tags),
 			chooseNonEmpty(d.LastSeen, "-"),
+			joinOrDash(d.Tags),
 		)
 	}
 	return nil
+}
+
+func filterActiveDevices(devices []Device, activeOnly bool) []Device {
+	if !activeOnly {
+		return devices
+	}
+	out := make([]Device, 0, len(devices))
+	for _, d := range devices {
+		if isDeviceActive(d) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+func isDeviceActive(d Device) bool {
+	if d.Online {
+		return true
+	}
+	lastSeen := strings.TrimSpace(d.LastSeen)
+	if lastSeen == "" {
+		return false
+	}
+	t, err := time.Parse(time.RFC3339, lastSeen)
+	if err != nil {
+		return false
+	}
+	// API payloads are not always explicit about online state; recent
+	// lastSeen is treated as active for report defaults.
+	return time.Since(t) <= 10*time.Minute
 }
 
 func stripVersionArg(args []string) []string {
