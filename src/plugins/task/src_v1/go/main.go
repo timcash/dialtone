@@ -199,6 +199,8 @@ TODO: Add description here.
 - none
 ### tested:
 - none
+### signatures:
+- none
 ### last-error-types:
 - none
 ### last-error-times:
@@ -384,28 +386,13 @@ func runSign(args []string) {
 	}
 
 	lines := strings.Split(string(content), "\n")
-	targetSection := "reviewed"
-	if strings.Contains(strings.ToLower(role), "test") {
-		targetSection = "tested"
-	}
+	targetSection := targetSectionForRole(role)
 
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 	signature := "- " + strings.ToUpper(role) + "> " + timestamp + " :: sig-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 
-	finalLines := []string{}
-	sectionFound := false
-	for _, line := range lines {
-		finalLines = append(finalLines, line)
-		if line == "### "+targetSection+":" {
-			finalLines = append(finalLines, signature)
-			sectionFound = true
-		}
-	}
-
-	if !sectionFound {
-		logs.Error("Error: section ### %s: not found in %s", targetSection, v2Path)
-		return
-	}
+	finalLines, _ := appendSignatureToSection(lines, targetSection, signature)
+	finalLines, _ = appendSignatureToSection(finalLines, "signatures", signature)
 
 	if err := os.WriteFile(v2Path, []byte(strings.Join(finalLines, "\n")), 0644); err != nil {
 		logs.Error("Error writing file: %v", err)
@@ -413,6 +400,48 @@ func runSign(args []string) {
 	}
 
 	logs.Info("Successfully signed task %s as %s in v2", taskName, role)
+}
+
+func targetSectionForRole(role string) string {
+	normalized := strings.ToLower(strings.TrimSpace(role))
+	switch {
+	case strings.Contains(normalized, "test"):
+		return "tested"
+	case strings.Contains(normalized, "review"), strings.Contains(normalized, "doc"):
+		return "reviewed"
+	default:
+		return "reviewed"
+	}
+}
+
+func appendSignatureToSection(lines []string, section, signature string) ([]string, bool) {
+	finalLines := []string{}
+	sectionFound := false
+	for i, line := range lines {
+		finalLines = append(finalLines, line)
+		if strings.TrimSpace(line) != "### "+section+":" {
+			continue
+		}
+		sectionFound = true
+		// Replace placeholder with first signature.
+		if i+1 < len(lines) && strings.TrimSpace(lines[i+1]) == "- none" {
+			continue
+		}
+		finalLines = append(finalLines, signature)
+	}
+	if !sectionFound {
+		finalLines = append(finalLines, "### "+section+":")
+		finalLines = append(finalLines, signature)
+		return finalLines, false
+	}
+	// Handle "- none" placeholders after building output.
+	for i := 0; i < len(finalLines)-1; i++ {
+		if strings.TrimSpace(finalLines[i]) == "### "+section+":" && strings.TrimSpace(finalLines[i+1]) == "- none" {
+			finalLines[i+1] = signature
+			break
+		}
+	}
+	return finalLines, true
 }
 
 func runSync(args []string) {
@@ -543,6 +572,9 @@ func normalizeIssueAsTask(taskID, md string) string {
 	if !strings.Contains(md, "### pr:") {
 		md += "### pr:\n- none\n"
 	}
+	if !strings.Contains(md, "### signatures:") {
+		md += "### signatures:\n- none\n"
+	}
 	return md
 }
 
@@ -649,6 +681,8 @@ func ensureTaskExists(taskID string) error {
 ### reviewed:
 - none
 ### tested:
+- none
+### signatures:
 - none
 ### last-error-types:
 - none

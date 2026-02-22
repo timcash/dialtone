@@ -115,6 +115,9 @@ func Register(r *testv1.Registry) {
 			if !strings.Contains(rootStr, "### pr:\n- none") {
 				return testv1.StepRunResult{}, fmt.Errorf("root missing pr placeholder")
 			}
+			if !strings.Contains(rootStr, "### signatures:\n- none") {
+				return testv1.StepRunResult{}, fmt.Errorf("root missing signatures placeholder")
+			}
 			if !strings.Contains(rootStr, "### outputs:\n- none") {
 				return testv1.StepRunResult{}, fmt.Errorf("root outputs must be none")
 			}
@@ -225,6 +228,105 @@ func Register(r *testv1.Registry) {
 				return testv1.StepRunResult{}, err
 			}
 			return testv1.StepRunResult{Report: "Multi-link syntax works for chain/list"}, nil
+		},
+	})
+
+	r.Add(testv1.Step{
+		Name: "link-and-unlink-roundtrip",
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			for _, name := range []string{"u1", "u2"} {
+				cmd := exec.Command("go", "run", taskToolRel, "--tasks-dir", tmpTasksDir, "create", name)
+				cmd.Dir = srcDir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					return testv1.StepRunResult{}, fmt.Errorf("create %s failed: %v, output: %s", name, err, string(out))
+				}
+			}
+
+			if err := ctx.WaitForStepMessageAfterAction("task-link-unlink-linked", 3*time.Second, func() error {
+				cmd := exec.Command("go", "run", taskToolRel, "--tasks-dir", tmpTasksDir, "link", "u1<--u2")
+				cmd.Dir = srcDir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					return fmt.Errorf("link failed: %v, output: %s", err, string(out))
+				}
+				ctx.Infof("task-link-unlink-linked")
+				return nil
+			}); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+
+			u1Path := filepath.Join(tmpTasksDir, "u1", "v2", "root.md")
+			u2Path := filepath.Join(tmpTasksDir, "u2", "v2", "root.md")
+			u1Text, _ := os.ReadFile(u1Path)
+			u2Text, _ := os.ReadFile(u2Path)
+			if !strings.Contains(string(u1Text), "- [u2](../../u2/v2/root.md)") {
+				return testv1.StepRunResult{}, fmt.Errorf("u1 missing input link to u2")
+			}
+			if !strings.Contains(string(u2Text), "- [u1](../../u1/v2/root.md)") {
+				return testv1.StepRunResult{}, fmt.Errorf("u2 missing output link to u1")
+			}
+
+			if err := ctx.WaitForStepMessageAfterAction("task-link-unlink-unlinked", 3*time.Second, func() error {
+				cmd := exec.Command("go", "run", taskToolRel, "--tasks-dir", tmpTasksDir, "unlink", "u1", "u2")
+				cmd.Dir = srcDir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					return fmt.Errorf("unlink failed: %v, output: %s", err, string(out))
+				}
+				ctx.Infof("task-link-unlink-unlinked")
+				return nil
+			}); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+
+			u1Text, _ = os.ReadFile(u1Path)
+			u2Text, _ = os.ReadFile(u2Path)
+			if !strings.Contains(string(u1Text), "### inputs:\n- none") {
+				return testv1.StepRunResult{}, fmt.Errorf("u1 inputs did not reset to none after unlink")
+			}
+			if !strings.Contains(string(u2Text), "### outputs:\n- none") {
+				return testv1.StepRunResult{}, fmt.Errorf("u2 outputs did not reset to none after unlink")
+			}
+			return testv1.StepRunResult{Report: "link/unlink roundtrip verified"}, nil
+		},
+	})
+
+	r.Add(testv1.Step{
+		Name: "signing-roles-review-test-docs",
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			roleTask := "role-demo"
+			cmd := exec.Command("go", "run", taskToolRel, "--tasks-dir", tmpTasksDir, "create", roleTask)
+			cmd.Dir = srcDir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("create %s failed: %v, output: %s", roleTask, err, string(out))
+			}
+
+			for _, role := range []string{"TEST", "REVIEW", "DOCS"} {
+				role := role
+				if err := ctx.WaitForStepMessageAfterAction("task-sign-role-"+strings.ToLower(role), 3*time.Second, func() error {
+					cmd := exec.Command("go", "run", taskToolRel, "--tasks-dir", tmpTasksDir, "sign", roleTask, "--role", role)
+					cmd.Dir = srcDir
+					if out, err := cmd.CombinedOutput(); err != nil {
+						return fmt.Errorf("sign role %s failed: %v, output: %s", role, err, string(out))
+					}
+					ctx.Infof("task-sign-role-%s", strings.ToLower(role))
+					return nil
+				}); err != nil {
+					return testv1.StepRunResult{}, err
+				}
+			}
+
+			rolePath := filepath.Join(tmpTasksDir, roleTask, "v2", "root.md")
+			roleMD, _ := os.ReadFile(rolePath)
+			text := string(roleMD)
+			if !strings.Contains(text, "### tested:") || !strings.Contains(text, "TEST>") {
+				return testv1.StepRunResult{}, fmt.Errorf("TEST signature missing from tested section")
+			}
+			if !strings.Contains(text, "### reviewed:") || !strings.Contains(text, "REVIEW>") {
+				return testv1.StepRunResult{}, fmt.Errorf("REVIEW signature missing from reviewed section")
+			}
+			if !strings.Contains(text, "### signatures:") || !strings.Contains(text, "TEST>") || !strings.Contains(text, "REVIEW>") || !strings.Contains(text, "DOCS>") {
+				return testv1.StepRunResult{}, fmt.Errorf("signatures section missing required role signatures")
+			}
+			return testv1.StepRunResult{Report: "REVIEW/TEST/DOCS signing behavior verified"}, nil
 		},
 	})
 
