@@ -2,6 +2,7 @@ package tsnet
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,9 @@ import (
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
+	"tailscale.com/client/local"
+	"tailscale.com/ipn/ipnstate"
+	"tailscale.com/tailcfg"
 	"tailscale.com/tsnet"
 )
 
@@ -64,6 +68,10 @@ func Run(args []string) error {
 		return printJSON(st)
 	case "up":
 		return runUp(args[1:])
+	case "devices", "computers", "hosts":
+		return runDevices(args[1:])
+	case "list":
+		return runDevices(append([]string{"list"}, args[1:]...))
 	case "keys":
 		return runKeys(args[1:])
 	default:
@@ -73,17 +81,20 @@ func Run(args []string) error {
 }
 
 func PrintUsage() {
-	fmt.Println("Usage: ./dialtone.sh tsnet <command> [src_v1] [args]")
-	fmt.Println()
-	fmt.Println("Commands:")
-	fmt.Println("  config               Show resolved tsnet config")
-	fmt.Println("  status               Show tsnet prereq status")
-	fmt.Println("  up [--dry-run]       Build/validate tsnet server config")
-	fmt.Println("  keys provision [--tailnet N] [--api-key K] [--description D] [--tags t1,t2] [--ephemeral] [--preauthorized] [--reusable] [--expiry-hours N] [--write-env env/.env]")
-	fmt.Println("  keys list [--tailnet N] [--api-key K]")
-	fmt.Println("  keys revoke <key-id> [--tailnet N] [--api-key K]")
-	fmt.Println("  keys usage [--tailnet N] [--api-key K]")
-	fmt.Println("  test [src_v1]        Run tsnet plugin self-check")
+	logs.Raw("Usage: ./dialtone.sh tsnet <command> [src_v1] [args]")
+	logs.Raw("")
+	logs.Raw("Commands:")
+	logs.Raw("  config                               Show resolved tsnet config")
+	logs.Raw("  status                               Show tsnet prereq status")
+	logs.Raw("  up [--dry-run]                       Build/validate tsnet server config")
+	logs.Raw("  devices list [--tailnet N] [--api-key K] [--format json|table]")
+	logs.Raw("  computers list [--tailnet N] [--api-key K] [--format json|table]")
+	logs.Raw("  list [--tailnet N] [--api-key K] [--format json|table]  Alias for devices list")
+	logs.Raw("  keys provision [--tailnet N] [--api-key K] [--description D] [--tags t1,t2] [--ephemeral] [--preauthorized] [--reusable] [--expiry-hours N] [--write-env env/.env]")
+	logs.Raw("  keys list [--tailnet N] [--api-key K]")
+	logs.Raw("  keys revoke <key-id> [--tailnet N] [--api-key K]")
+	logs.Raw("  keys usage [--tailnet N] [--api-key K]")
+	logs.Raw("  test [src_v1]                        Run tsnet plugin self-check")
 }
 
 func ResolveConfig(hostname, stateDir string) (Config, error) {
@@ -125,6 +136,13 @@ func ResolveConfig(hostname, stateDir string) (Config, error) {
 	tailnet := strings.TrimSpace(os.Getenv("TS_TAILNET"))
 	if tailnet == "" {
 		tailnet = strings.TrimSpace(os.Getenv("TAILSCALE_TAILNET"))
+	}
+	if tailnet == "" {
+		detected, err := DetectTailnetFromLocalStatus()
+		if err == nil {
+			tailnet = detected
+			logs.Debug("tsnet auto-detected tailnet from local tailscale status: %s", tailnet)
+		}
 	}
 
 	return Config{
@@ -176,6 +194,104 @@ func NormalizeHostname(s string) string {
 		s = strings.ReplaceAll(s, "--", "-")
 	}
 	return strings.Trim(s, "-")
+}
+
+func DetectTailnetFromLocalStatus() (string, error) {
+	if tailnet, err := detectTailnetFromLocalAPI(); err == nil && strings.TrimSpace(tailnet) != "" {
+		return tailnet, nil
+	}
+
+	path, err := exec.LookPath("tailscale")
+	if err != nil {
+		return "", err
+	}
+	out, err := exec.Command(path, "status", "--json").Output()
+	if err != nil {
+		return "", err
+	}
+	tailnet := ParseTailnetFromStatusJSON(out)
+	if tailnet == "" {
+		return "", errors.New("tailnet not found in tailscale status")
+	}
+	return tailnet, nil
+}
+
+func detectTailnetFromLocalAPI() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	st, err := (&local.Client{}).Status(ctx)
+	if err != nil {
+		return "", err
+	}
+	if st == nil {
+		return "", errors.New("local tailscale status is nil")
+	}
+	if st.CurrentTailnet != nil {
+		if suffix := sanitizeTailnet(st.CurrentTailnet.MagicDNSSuffix); suffix != "" {
+			return suffix, nil
+		}
+		if name := sanitizeTailnet(st.CurrentTailnet.Name); name != "" {
+			return name, nil
+		}
+	}
+	if suffix := sanitizeTailnet(st.MagicDNSSuffix); suffix != "" {
+		return suffix, nil
+	}
+	if st.Self != nil {
+		if inferred := inferTailnetFromDNSName(st.Self.DNSName); inferred != "" {
+			return inferred, nil
+		}
+	}
+	return "", errors.New("tailnet not found in local tailscale status")
+}
+
+func ParseTailnetFromStatusJSON(raw []byte) string {
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return ""
+	}
+
+	if current, ok := doc["CurrentTailnet"].(map[string]any); ok {
+		if suffix := sanitizeTailnet(anyToString(current["MagicDNSSuffix"])); suffix != "" {
+			return suffix
+		}
+		if name := sanitizeTailnet(anyToString(current["Name"])); name != "" {
+			return name
+		}
+	}
+	if suffix := sanitizeTailnet(anyToString(doc["MagicDNSSuffix"])); suffix != "" {
+		return suffix
+	}
+	if self, ok := doc["Self"].(map[string]any); ok {
+		if dnsName := sanitizeTailnet(anyToString(self["DNSName"])); dnsName != "" {
+			if inferred := inferTailnetFromDNSName(dnsName); inferred != "" {
+				return inferred
+			}
+		}
+	}
+	return ""
+}
+
+func inferTailnetFromDNSName(dnsName string) string {
+	dnsName = sanitizeTailnet(dnsName)
+	if dnsName == "" {
+		return ""
+	}
+	parts := strings.Split(dnsName, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	return sanitizeTailnet(strings.Join(parts[1:], "."))
+}
+
+func sanitizeTailnet(s string) string {
+	return strings.Trim(strings.TrimSpace(s), ".")
+}
+
+func anyToString(v any) string {
+	s, _ := v.(string)
+	return s
 }
 
 func runUp(args []string) error {
@@ -272,6 +388,158 @@ func runKeys(args []string) error {
 	default:
 		return fmt.Errorf("unknown keys subcommand: %s", sub)
 	}
+}
+
+func runDevices(args []string) error {
+	args = stripAllVersionArgs(args)
+	if len(args) == 0 {
+		args = []string{"list"}
+	}
+
+	sub := args[0]
+	switch sub {
+	case "list":
+		return runDevicesList(args[1:])
+	default:
+		return fmt.Errorf("unknown devices subcommand: %s", sub)
+	}
+}
+
+func runDevicesList(args []string) error {
+	format := "json"
+	for i := 0; i < len(args); i++ {
+		if args[i] != "--format" {
+			continue
+		}
+		if i+1 < len(args) {
+			format = strings.ToLower(strings.TrimSpace(args[i+1]))
+			i++
+		}
+	}
+
+	client, err := clientFromArgs(args)
+	devices := []Device{}
+	if err == nil {
+		devices, err = client.ListDevices()
+		if err != nil {
+			return err
+		}
+	} else if isControlAPICredsError(err) {
+		// Fallback to local daemon status when control-plane credentials are
+		// not configured.
+		devices, err = listDevicesFromLocalStatus()
+		if err != nil {
+			return err
+		}
+	} else {
+		return err
+	}
+
+	switch format {
+	case "json":
+		return printJSON(devices)
+	case "table":
+		return printDevicesTable(devices)
+	default:
+		return fmt.Errorf("unsupported --format %q (expected json or table)", format)
+	}
+}
+
+func isControlAPICredsError(err error) bool {
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(msg, "missing tailscale api key") || strings.Contains(msg, "missing tailnet")
+}
+
+func listDevicesFromLocalStatus() ([]Device, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	st, err := (&local.Client{}).Status(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if st == nil {
+		return nil, errors.New("local tailscale status is nil")
+	}
+
+	devices := make([]Device, 0, len(st.Peer)+1)
+	seen := map[string]struct{}{}
+	add := func(ps *ipnstate.PeerStatus) {
+		if ps == nil {
+			return
+		}
+		d := deviceFromPeerStatus(ps, st.User)
+		key := chooseNonEmpty(d.ID, d.Name, d.Hostname)
+		if key == "" {
+			return
+		}
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		devices = append(devices, d)
+	}
+
+	add(st.Self)
+	for _, ps := range st.Peer {
+		add(ps)
+	}
+	sort.Slice(devices, func(i, j int) bool {
+		return chooseNonEmpty(devices[i].Name, devices[i].Hostname, devices[i].ID) <
+			chooseNonEmpty(devices[j].Name, devices[j].Hostname, devices[j].ID)
+	})
+	return devices, nil
+}
+
+func deviceFromPeerStatus(ps *ipnstate.PeerStatus, users map[tailcfg.UserID]tailcfg.UserProfile) Device {
+	addrs := make([]string, 0, len(ps.TailscaleIPs))
+	for _, ip := range ps.TailscaleIPs {
+		addrs = append(addrs, ip.String())
+	}
+
+	user := ""
+	if profile, ok := users[ps.UserID]; ok {
+		user = chooseNonEmpty(profile.LoginName, profile.DisplayName)
+	}
+	if user == "" {
+		user = fmt.Sprintf("%d", ps.UserID)
+	}
+
+	tags := []string{}
+	if ps.Tags != nil {
+		tags = ps.Tags.AppendTo(tags)
+	}
+
+	hostname := chooseNonEmpty(ps.HostName, hostnameFromDNSName(ps.DNSName))
+	return Device{
+		ID:        string(ps.ID),
+		Name:      chooseNonEmpty(hostnameFromDNSName(ps.DNSName), ps.HostName, string(ps.ID)),
+		Hostname:  hostname,
+		User:      user,
+		Created:   formatTime(ps.Created),
+		LastSeen:  formatTime(ps.LastSeen),
+		Addresses: addrs,
+		Tags:      tags,
+	}
+}
+
+func hostnameFromDNSName(dnsName string) string {
+	dnsName = strings.Trim(strings.TrimSpace(dnsName), ".")
+	if dnsName == "" {
+		return ""
+	}
+	parts := strings.Split(dnsName, ".")
+	if len(parts) == 0 {
+		return ""
+	}
+	return parts[0]
+}
+
+func formatTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 func runKeysProvision(args []string) error {
@@ -691,12 +959,48 @@ func chooseNonEmpty(values ...string) string {
 	return ""
 }
 
+func joinOrDash(values []string) string {
+	if len(values) == 0 {
+		return "-"
+	}
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	if len(out) == 0 {
+		return "-"
+	}
+	return strings.Join(out, ",")
+}
+
 func printJSON(v any) error {
 	out, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
-	fmt.Println(string(out))
+	logs.Raw("%s", string(out))
+	return nil
+}
+
+func printDevicesTable(devices []Device) error {
+	if len(devices) == 0 {
+		logs.Raw("No devices found.")
+		return nil
+	}
+	logs.Raw("NAME\tHOSTNAME\tUSER\tTAILSCALE_IPS\tTAGS\tLAST_SEEN")
+	for _, d := range devices {
+		logs.Raw("%s\t%s\t%s\t%s\t%s\t%s",
+			chooseNonEmpty(d.Name, d.ID),
+			chooseNonEmpty(d.Hostname, "-"),
+			chooseNonEmpty(d.User, "-"),
+			joinOrDash(d.Addresses),
+			joinOrDash(d.Tags),
+			chooseNonEmpty(d.LastSeen, "-"),
+		)
+	}
 	return nil
 }
 
