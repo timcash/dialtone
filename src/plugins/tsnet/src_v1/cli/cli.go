@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
@@ -18,29 +17,36 @@ func Run(args []string) error {
 		return nil
 	}
 
-	command := args[0]
-	rest := args[1:]
+	if isHelpArg(args[0]) {
+		tsnetv1.PrintUsage()
+		return nil
+	}
 
+	version := strings.TrimSpace(args[0])
+	if !strings.HasPrefix(version, "src_v") {
+		return fmt.Errorf("expected version as first tsnet argument (for example: ./dialtone.sh tsnet src_v1 <command>)")
+	}
+	if version != "src_v1" {
+		return fmt.Errorf("unsupported version %s", version)
+	}
+	if len(args) < 2 {
+		return fmt.Errorf("missing command (usage: ./dialtone.sh tsnet %s <command> [args])", version)
+	}
+
+	command := args[1]
+	rest := args[2:]
 	switch command {
 	case "help", "-h", "--help":
 		tsnetv1.PrintUsage()
 		return nil
 	case "test":
-		return runTests(rest)
+		return runTests(version)
 	default:
-		return tsnetv1.Run(args)
+		return tsnetv1.Run(append([]string{command}, rest...))
 	}
 }
 
-func runTests(args []string) error {
-	version := getLatestVersionDir()
-	if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
-		version = args[0]
-	}
-	if version != "src_v1" {
-		return fmt.Errorf("unsupported version %s", version)
-	}
-
+func runTests(version string) error {
 	repoRoot, err := findRepoRoot()
 	if err != nil {
 		return err
@@ -54,6 +60,15 @@ func runTests(args []string) error {
 		return err
 	}
 	return nil
+}
+
+func isHelpArg(s string) bool {
+	switch strings.TrimSpace(s) {
+	case "help", "-h", "--help":
+		return true
+	default:
+		return false
+	}
 }
 
 func findRepoRoot() (string, error) {
@@ -71,34 +86,4 @@ func findRepoRoot() (string, error) {
 		}
 		cwd = parent
 	}
-}
-
-func getLatestVersionDir() string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "src_v1"
-	}
-	pluginDir := filepath.Join(cwd, "src", "plugins", "tsnet")
-	entries, err := os.ReadDir(pluginDir)
-	if err != nil {
-		return "src_v1"
-	}
-	maxVer := 0
-	for _, entry := range entries {
-		name := entry.Name()
-		if !strings.HasPrefix(name, "src_v") {
-			continue
-		}
-		version, err := strconv.Atoi(strings.TrimPrefix(name, "src_v"))
-		if err != nil {
-			continue
-		}
-		if version > maxVer {
-			maxVer = version
-		}
-	}
-	if maxVer == 0 {
-		return "src_v1"
-	}
-	return fmt.Sprintf("src_v%d", maxVer)
 }

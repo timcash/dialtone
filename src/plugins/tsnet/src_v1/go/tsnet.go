@@ -11,11 +11,13 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
@@ -81,20 +83,21 @@ func Run(args []string) error {
 }
 
 func PrintUsage() {
-	logs.Raw("Usage: ./dialtone.sh tsnet <command> [src_v1] [args]")
+	logs.Raw("Usage: ./dialtone.sh tsnet src_v1 <command> [args]")
 	logs.Raw("")
 	logs.Raw("Commands:")
 	logs.Raw("  config                               Show resolved tsnet config")
 	logs.Raw("  status                               Show tsnet prereq status")
-	logs.Raw("  up [--dry-run]                       Build/validate tsnet server config")
+	logs.Raw("  up [--dry-run]                       Start embedded tsnet (ephemeral); auto-provision TS_AUTHKEY when needed")
 	logs.Raw("  devices list [--tailnet N] [--api-key K] [--format json|table]")
+	logs.Raw("  devices prune --name-contains S [--tailnet N] [--api-key K] [--dry-run] [--yes]")
 	logs.Raw("  computers list [--tailnet N] [--api-key K] [--format json|table]")
 	logs.Raw("  list [--tailnet N] [--api-key K] [--format json|table]  Alias for devices list")
 	logs.Raw("  keys provision [--tailnet N] [--api-key K] [--description D] [--tags t1,t2] [--ephemeral] [--preauthorized] [--reusable] [--expiry-hours N] [--write-env env/.env]")
 	logs.Raw("  keys list [--tailnet N] [--api-key K]")
 	logs.Raw("  keys revoke <key-id> [--tailnet N] [--api-key K]")
 	logs.Raw("  keys usage [--tailnet N] [--api-key K]")
-	logs.Raw("  test [src_v1]                        Run tsnet plugin self-check")
+	logs.Raw("  test                                 Run tsnet plugin self-check")
 }
 
 func ResolveConfig(hostname, stateDir string) (Config, error) {
@@ -135,14 +138,14 @@ func ResolveConfig(hostname, stateDir string) (Config, error) {
 	}
 	tailnet := strings.TrimSpace(os.Getenv("TS_TAILNET"))
 	if tailnet == "" {
-		tailnet = strings.TrimSpace(os.Getenv("TAILSCALE_TAILNET"))
-	}
-	if tailnet == "" {
 		detected, err := DetectTailnetFromLocalStatus()
 		if err == nil {
 			tailnet = detected
 			logs.Debug("tsnet auto-detected tailnet from local tailscale status: %s", tailnet)
 		}
+	}
+	if tailnet == "" {
+		tailnet = "shad-artichoke.ts.net"
 	}
 
 	return Config{
@@ -312,7 +315,35 @@ func runUp(args []string) error {
 			srv.Hostname, srv.Dir, cfg.AuthKeyEnv, cfg.AuthKeyPresent)
 		return nil
 	}
-	return errors.New("tsnet up without --dry-run is not enabled yet")
+
+	if err := ensureAuthKeyForEmbedded(&cfg); err != nil {
+		return err
+	}
+	srv = BuildServer(cfg)
+	srv.Ephemeral = true
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	st, err := srv.Up(ctx)
+	if err != nil {
+		return fmt.Errorf("embedded tsnet up failed: %w", err)
+	}
+
+	ip4, ip6 := srv.TailscaleIPs()
+	logs.Info("embedded tsnet started: backend=%s self=%s ips=%s,%s tailnet=%s ephemeral=true",
+		chooseNonEmpty(st.BackendState, "-"),
+		chooseNonEmpty(hostnameFromDNSName(statusSelfDNSName(st)), "-"),
+		chooseNonEmpty(ip4.String(), "-"),
+		chooseNonEmpty(ip6.String(), "-"),
+		chooseNonEmpty(cfg.Tailnet, "-"),
+	)
+	logs.Info("embedded tsnet running; press Ctrl+C to stop")
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	<-sigCh
+	logs.Info("stopping embedded tsnet")
+	return srv.Close()
 }
 
 type ProvisionOptions struct {
@@ -400,6 +431,8 @@ func runDevices(args []string) error {
 	switch sub {
 	case "list":
 		return runDevicesList(args[1:])
+	case "prune":
+		return runDevicesPrune(args[1:])
 	default:
 		return fmt.Errorf("unknown devices subcommand: %s", sub)
 	}
@@ -429,7 +462,12 @@ func runDevicesList(args []string) error {
 		// not configured.
 		devices, err = listDevicesFromLocalStatus()
 		if err != nil {
-			return err
+			// Last fallback for WSL/no-host-daemon scenarios:
+			// bring up an embedded ephemeral tsnet and inspect its view.
+			devices, err = listDevicesFromEmbeddedTSNet()
+			if err != nil {
+				return err
+			}
 		}
 	} else {
 		return err
@@ -443,6 +481,117 @@ func runDevicesList(args []string) error {
 	default:
 		return fmt.Errorf("unsupported --format %q (expected json or table)", format)
 	}
+}
+
+func runDevicesPrune(args []string) error {
+	nameContains := ""
+	dryRun := true
+	yes := false
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--name-contains":
+			if i+1 < len(args) {
+				nameContains = strings.TrimSpace(args[i+1])
+				i++
+			}
+		case "--dry-run":
+			dryRun = true
+		case "--yes":
+			yes = true
+			dryRun = false
+		}
+	}
+	if nameContains == "" {
+		nameContains = "drone-1"
+	}
+
+	client, err := clientFromArgs(args)
+	if err != nil {
+		return err
+	}
+	devices, err := client.ListDevices()
+	if err != nil {
+		return err
+	}
+
+	matches := make([]Device, 0)
+	for _, d := range devices {
+		if containsFold(d.Name, nameContains) || containsFold(d.Hostname, nameContains) {
+			matches = append(matches, d)
+		}
+	}
+	if len(matches) == 0 {
+		logs.Info("No devices matched substring %q", nameContains)
+		return nil
+	}
+
+	for _, d := range matches {
+		logs.Info("Matched device id=%s name=%s hostname=%s user=%s",
+			chooseNonEmpty(d.ID, "-"), chooseNonEmpty(d.Name, "-"), chooseNonEmpty(d.Hostname, "-"), chooseNonEmpty(d.User, "-"))
+	}
+
+	if dryRun || !yes {
+		logs.Warn("Dry run only: %d device(s) matched. Re-run with --yes to delete.", len(matches))
+		return nil
+	}
+
+	deleted := 0
+	for _, d := range matches {
+		if err := client.DeleteDevice(d.ID); err != nil {
+			return fmt.Errorf("delete device %s failed: %w", d.ID, err)
+		}
+		deleted++
+		logs.Info("Deleted device id=%s name=%s", d.ID, chooseNonEmpty(d.Name, d.Hostname, d.ID))
+	}
+	logs.Info("Prune complete: deleted %d device(s) matching %q", deleted, nameContains)
+	return nil
+}
+
+func ensureAuthKeyForEmbedded(cfg *Config) error {
+	if cfg == nil {
+		return errors.New("nil config")
+	}
+	if cfg.AuthKeyPresent {
+		return nil
+	}
+
+	apiKey := strings.TrimSpace(os.Getenv(cfg.APIKeyEnv))
+	if apiKey == "" {
+		apiKey = strings.TrimSpace(os.Getenv("TS_API_KEY"))
+	}
+	if apiKey == "" {
+		return errors.New("missing TS_AUTHKEY and cannot auto-provision: set TS_API_KEY (or pass --api-key to keys provision)")
+	}
+	if strings.TrimSpace(cfg.Tailnet) == "" {
+		return errors.New("missing tailnet for auto-provision (set TS_TAILNET)")
+	}
+
+	opts := ProvisionOptions{
+		APIToken:      apiKey,
+		Tailnet:       cfg.Tailnet,
+		Description:   fmt.Sprintf("dialtone-tsnet-embedded-%s", cfg.Hostname),
+		Tags:          []string{"dialtone", "embedded", "ephemeral"},
+		Reusable:      false,
+		Ephemeral:     true,
+		Preauthorized: true,
+		ExpiryHours:   24,
+		WriteEnvPath:  "env/.env",
+		EnvKeyName:    "TS_AUTHKEY",
+	}
+	key, err := ProvisionAuthKey(opts)
+	if err != nil {
+		return fmt.Errorf("auto-provision auth key failed: %w", err)
+	}
+	if err := UpsertEnvVar(opts.WriteEnvPath, opts.EnvKeyName, key.Key); err != nil {
+		return fmt.Errorf("write %s failed: %w", opts.WriteEnvPath, err)
+	}
+	_ = os.Setenv(opts.EnvKeyName, key.Key)
+
+	cfg.AuthKeyPresent = true
+	cfg.AuthKeyEnv = opts.EnvKeyName
+	cfg.APIKeyPresent = true
+	logs.Info("Auto-provisioned ephemeral TS_AUTHKEY for embedded tsnet and saved to %s", opts.WriteEnvPath)
+	return nil
 }
 
 func isControlAPICredsError(err error) bool {
@@ -461,7 +610,34 @@ func listDevicesFromLocalStatus() ([]Device, error) {
 	if st == nil {
 		return nil, errors.New("local tailscale status is nil")
 	}
+	return devicesFromIPNStatus(st), nil
+}
 
+func listDevicesFromEmbeddedTSNet() ([]Device, error) {
+	cfg, err := ResolveConfig("", "")
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureAuthKeyForEmbedded(&cfg); err != nil {
+		return nil, err
+	}
+	srv := BuildServer(cfg)
+	srv.Ephemeral = true
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	st, err := srv.Up(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("embedded tsnet fallback failed: %w", err)
+	}
+	if st == nil {
+		return nil, errors.New("embedded tsnet returned nil status")
+	}
+	return devicesFromIPNStatus(st), nil
+}
+
+func devicesFromIPNStatus(st *ipnstate.Status) []Device {
 	devices := make([]Device, 0, len(st.Peer)+1)
 	seen := map[string]struct{}{}
 	add := func(ps *ipnstate.PeerStatus) {
@@ -488,7 +664,7 @@ func listDevicesFromLocalStatus() ([]Device, error) {
 		return chooseNonEmpty(devices[i].Name, devices[i].Hostname, devices[i].ID) <
 			chooseNonEmpty(devices[j].Name, devices[j].Hostname, devices[j].ID)
 	})
-	return devices, nil
+	return devices
 }
 
 func deviceFromPeerStatus(ps *ipnstate.PeerStatus, users map[tailcfg.UserID]tailcfg.UserProfile) Device {
@@ -540,6 +716,13 @@ func formatTime(t time.Time) string {
 		return ""
 	}
 	return t.UTC().Format(time.RFC3339)
+}
+
+func statusSelfDNSName(st *ipnstate.Status) string {
+	if st == nil || st.Self == nil {
+		return ""
+	}
+	return st.Self.DNSName
 }
 
 func runKeysProvision(args []string) error {
@@ -835,6 +1018,14 @@ func (c *tailscaleClient) ListDevices() ([]Device, error) {
 	return resp.Devices, nil
 }
 
+func (c *tailscaleClient) DeleteDevice(deviceID string) error {
+	deviceID = strings.TrimSpace(deviceID)
+	if deviceID == "" {
+		return errors.New("missing device id")
+	}
+	return c.do("DELETE", "device/"+url.PathEscape(deviceID), nil, nil)
+}
+
 func (c *tailscaleClient) do(method, path string, body any, out any) error {
 	path = strings.TrimPrefix(path, "/")
 	endpoint := fmt.Sprintf("%s/api/v2/tailnet/%s/%s", strings.TrimSuffix(c.BaseURL, "/"), url.PathEscape(c.Tailnet), path)
@@ -957,6 +1148,15 @@ func chooseNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func containsFold(s, part string) bool {
+	s = strings.TrimSpace(strings.ToLower(s))
+	part = strings.TrimSpace(strings.ToLower(part))
+	if s == "" || part == "" {
+		return false
+	}
+	return strings.Contains(s, part)
 }
 
 func joinOrDash(values []string) string {

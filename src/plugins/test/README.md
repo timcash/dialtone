@@ -4,17 +4,17 @@ The test plugin is a reusable Go test runtime for plugin-level integration tests
 
 ```sh
 # 1) Run the canonical source-of-truth suite
-./dialtone.sh test test src_v1
+./dialtone.sh test src_v1 test
 
 # 2) Stream all test logs (raw)
-./dialtone.sh logs stream --topic 'logs.test.src-v1-self-check.>'
+./dialtone.sh logs src_v1 stream --topic 'logs.test.src-v1-self-check.>'
 
 # 3) Stream only pass/fail status lines
-./dialtone.sh logs stream --topic 'logfilter.tag.pass.test'
-./dialtone.sh logs stream --topic 'logfilter.tag.fail.test'
+./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.pass.test'
+./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.fail.test'
 
 # 4) Stream browser console/error events from test steps
-./dialtone.sh logs stream --topic 'logs.test.src-v1-self-check.*.browser'
+./dialtone.sh logs src_v1 stream --topic 'logs.test.src-v1-self-check.*.browser'
 ```
 
 It provides:
@@ -27,13 +27,13 @@ It provides:
 
 ```bash
 ./dialtone.sh test help
-./dialtone.sh test test src_v1
+./dialtone.sh test src_v1 test
 ```
 
-`./dialtone.sh test test src_v1` runs the test plugin self-check suite at:
+`./dialtone.sh test src_v1 test` runs the test plugin self-check suite at:
 - `src/plugins/test/src_v1/test/cmd/main.go`
 
-`test test src_v1` is the source-of-truth template suite for other plugins and LLM agents.
+`test src_v1 test` is the source-of-truth template suite for other plugins and LLM agents.
 Each numbered test folder demonstrates one integration area:
 - `01_self_check`: StepContext logging + NATS waits (`step`, `error`, format)
 - `02_example_plugin_template`: minimal plugin template + browser helper entry path
@@ -112,7 +112,7 @@ func Register(reg *testv1.Registry) {
 Run:
 
 ```bash
-./dialtone.sh <plugin> test src_v1
+./dialtone.sh <plugin> src_v1 test
 ```
 
 ## Test Folder Naming
@@ -213,8 +213,8 @@ Status tags:
 - framework emits `[TEST][PASS]` for successful step completion
 - framework emits `[TEST][FAIL]` for failed/timed-out/panic steps
 - these can be streamed via:
-  - `./dialtone.sh logs stream --topic 'logfilter.tag.pass.>'`
-  - `./dialtone.sh logs stream --topic 'logfilter.tag.fail.>'`
+  - `./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.pass.>'`
+  - `./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.fail.>'`
 
 ## Template For Other Plugins / Agents
 
@@ -387,7 +387,7 @@ Reference implementation in this repo:
 - `src/plugins/test/src_v1/test/03_browser_ctx/suite.go`
 
 The self-check command verifies this template path end-to-end:
-- `./dialtone.sh test test src_v1`
+- `./dialtone.sh test src_v1 test`
 
 ## Notes
 

@@ -39,9 +39,9 @@ Every rendered log line starts with:
 
 ### 4. CLI Commands
 
-- **`./dialtone.sh logs test src_v1`** – Run the logs plugin verification suite.
-- **`./dialtone.sh logs stream --topic <subject>`** – Stream logs to stdout and/or `--file`.
-- **`./dialtone.sh logs nats-start`** – Start the local NATS daemon.
+- **`./dialtone.sh logs src_v1 test`** – Run the logs plugin verification suite.
+- **`./dialtone.sh logs src_v1 stream --topic <subject>`** – Stream logs to stdout and/or `--file`.
+- **`./dialtone.sh logs src_v1 nats-start`** – Start the local NATS daemon.
 
 #### Topic Filtering Examples (NATS Wildcards)
 
@@ -51,14 +51,14 @@ The `--topic` flag supports standard NATS subject wildcards:
 
 | Command | Description |
 |---------|-------------|
-| `./dialtone.sh logs stream --topic 'logs.>'` | Stream **all** logs from all plugins. |
-| `./dialtone.sh logs stream --topic 'logs.task.>'` | Stream all logs for the **task** plugin. |
-| `./dialtone.sh logs stream --topic 'logs.*.smoke'` | Stream **smoke test** logs for any plugin. |
-| `./dialtone.sh logs stream --topic 'logs.dag.v1'` | Stream a **specific** DAG v1 log run. |
-| `./dialtone.sh logs stream --topic 'logfilter.level.error.>'` | Stream only **ERROR** level logs. |
-| `./dialtone.sh logs stream --topic 'logfilter.tag.fail.>'` | Stream only logs tagged with **[FAIL]**. |
-| `./dialtone.sh logs stream --topic 'logfilter.tag.test.>'` | Stream only logs tagged with **[TEST]**. |
-| `./dialtone.sh logs stream --topic 'logs.>' --file ./dialtone.log` | Append all streamed logs to a local file. |
+| `./dialtone.sh logs src_v1 stream --topic 'logs.>'` | Stream **all** logs from all plugins. |
+| `./dialtone.sh logs src_v1 stream --topic 'logs.task.>'` | Stream all logs for the **task** plugin. |
+| `./dialtone.sh logs src_v1 stream --topic 'logs.*.smoke'` | Stream **smoke test** logs for any plugin. |
+| `./dialtone.sh logs src_v1 stream --topic 'logs.dag.v1'` | Stream a **specific** DAG v1 log run. |
+| `./dialtone.sh logs src_v1 stream --topic 'logfilter.level.error.>'` | Stream only **ERROR** level logs. |
+| `./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.fail.>'` | Stream only logs tagged with **[FAIL]**. |
+| `./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.test.>'` | Stream only logs tagged with **[TEST]**. |
+| `./dialtone.sh logs src_v1 stream --topic 'logs.>' --file ./dialtone.log` | Append all streamed logs to a local file. |
 
 
 ---
@@ -123,18 +123,18 @@ func publish() error {
 
 ```bash
 # all raw log subjects
-./dialtone.sh logs stream --topic 'logs.>'
+./dialtone.sh logs src_v1 stream --topic 'logs.>'
 
 # all ERROR lines
-./dialtone.sh logs stream --topic 'logfilter.level.error.>'
+./dialtone.sh logs src_v1 stream --topic 'logfilter.level.error.>'
 
 # tagged pass/fail lines
-./dialtone.sh logs stream --topic 'logfilter.tag.pass.>'
-./dialtone.sh logs stream --topic 'logfilter.tag.fail.>'
+./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.pass.>'
+./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.fail.>'
 
 # plugin-specific tagged lines (example: task)
-./dialtone.sh logs stream --topic 'logfilter.tag.pass.task'
-./dialtone.sh logs stream --topic 'logfilter.tag.fail.task'
+./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.pass.task'
+./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.fail.task'
 ```
 
 ### NATS Verification in Tests
@@ -163,7 +163,7 @@ func RunMyStep(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 ## Verification
 
 The logs system itself is verified via:
-- `./dialtone.sh logs test src_v1`
+- `./dialtone.sh logs src_v1 test`
 
 Test wiring:
 - orchestrator: `src/plugins/logs/src_v1/test/cmd/main.go`
