@@ -142,7 +142,7 @@ Status stream examples:
 ## REPL Foundation Order
 
 `repl src_v1 test` is organized bottom-up so foundational plugins validate first via real REPL subtone execution:
-- `01_repl_core`: REPL-only behavior (help, input handling, line format)
+- `01_repl_core`: REPL-only behavior (help, hostname prompt input handling, line format)
 - `02_proc_plugin`: `proc src_v1 test`
 - `03_logs_plugin`: `logs src_v1 test`
 - `04_test_plugin`: `test src_v1 test`
