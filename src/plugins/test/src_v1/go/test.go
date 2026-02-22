@@ -8,16 +8,19 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	stdruntime "runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"dialtone/dev/plugins/chrome/src_v1/go"
 	"dialtone/dev/plugins/logs/src_v1/go"
-	"github.com/chromedp/cdproto/runtime"
+	cdruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 	"github.com/nats-io/nats.go"
 )
+
+const testTag = "[TEST]"
 
 type Step struct {
 	Name           string
@@ -39,6 +42,8 @@ type StepContext struct {
 	natsURL      string
 	logger       *logs.NATSLogger
 	errorLogger  *logs.NATSLogger
+	passLogger   *logs.NATSLogger
+	failLogger   *logs.NATSLogger
 }
 
 func (sc *StepContext) Logf(format string, args ...any) {
@@ -47,36 +52,78 @@ func (sc *StepContext) Logf(format string, args ...any) {
 
 func (sc *StepContext) Infof(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
-	logs.Info("[STEP:%s] %s", sc.Name, msg)
+	source := sc.callerLocation()
+	logs.InfoFromTest(source, "[STEP:%s] %s", sc.Name, msg)
 	if sc.logger != nil {
-		_ = sc.logger.Infof("%s", msg)
+		_ = sc.logger.InfofFromTest(source, "[STEP:%s] %s", sc.Name, msg)
 	}
 }
 
 func (sc *StepContext) Warnf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
-	logs.Warn("[STEP:%s] %s", sc.Name, msg)
+	source := sc.callerLocation()
+	logs.WarnFromTest(source, "[STEP:%s] %s", sc.Name, msg)
 	if sc.logger != nil {
-		_ = sc.logger.Warnf("%s", msg)
+		_ = sc.logger.WarnfFromTest(source, "[STEP:%s] %s", sc.Name, msg)
 	}
 }
 
 func (sc *StepContext) Debugf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
-	logs.Debug("[STEP:%s] %s", sc.Name, msg)
+	source := sc.callerLocation()
+	logs.DebugFromTest(source, "[STEP:%s] %s", sc.Name, msg)
 	if sc.logger != nil {
-		_ = sc.logger.Infof("%s", msg)
+		_ = sc.logger.InfofFromTest(source, "[STEP:%s] %s", sc.Name, msg)
 	}
 }
 
 func (sc *StepContext) Errorf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
-	logs.Error("[STEP:%s] %s", sc.Name, msg)
+	source := sc.callerLocation()
+	logs.ErrorFromTest(source, "[STEP:%s] %s", sc.Name, msg)
 	if sc.logger != nil {
-		_ = sc.logger.Errorf("%s", msg)
+		_ = sc.logger.ErrorfFromTest(source, "[STEP:%s] %s", sc.Name, msg)
 	}
 	if sc.errorLogger != nil {
-		_ = sc.errorLogger.Errorf("[STEP:%s] %s", sc.Name, msg)
+		_ = sc.errorLogger.ErrorfFromTest(source, "[STEP:%s] %s", sc.Name, msg)
+	}
+}
+
+func (sc *StepContext) TestPassf(format string, args ...any) {
+	msg := strings.TrimSpace(fmt.Sprintf(format, args...))
+	if msg == "" {
+		msg = "step passed"
+	}
+	source := sc.callerLocation()
+	line := fmt.Sprintf("[TEST][PASS] [STEP:%s] %s", sc.Name, msg)
+	logs.InfoFromTest(source, "%s", line)
+	if sc.passLogger != nil {
+		_ = sc.passLogger.InfofFromTest(source, "%s", line)
+		return
+	}
+	if sc.logger != nil {
+		_ = sc.logger.InfofFromTest(source, "%s", line)
+	}
+}
+
+func (sc *StepContext) TestFailf(format string, args ...any) {
+	msg := strings.TrimSpace(fmt.Sprintf(format, args...))
+	if msg == "" {
+		msg = "step failed"
+	}
+	source := sc.callerLocation()
+	line := fmt.Sprintf("[TEST][FAIL] [STEP:%s] %s", sc.Name, msg)
+	logs.ErrorFromTest(source, "%s", line)
+	if sc.failLogger != nil {
+		_ = sc.failLogger.ErrorfFromTest(source, "%s", line)
+		return
+	}
+	if sc.errorLogger != nil {
+		_ = sc.errorLogger.ErrorfFromTest(source, "%s", line)
+		return
+	}
+	if sc.logger != nil {
+		_ = sc.logger.ErrorfFromTest(source, "%s", line)
 	}
 }
 
@@ -239,6 +286,31 @@ func (sc *StepContext) ResetStepLogClock() {
 	logs.ResetTopicClock(sc.StepSubject)
 }
 
+func (sc *StepContext) callerLocation() string {
+	for i := 2; i < 14; i++ {
+		_, file, line, ok := stdruntime.Caller(i)
+		if !ok {
+			break
+		}
+		norm := filepath.ToSlash(file)
+		if strings.Contains(norm, "/plugins/test/src_v1/go/test.go") {
+			continue
+		}
+		if idx := strings.Index(norm, "/src/"); idx >= 0 {
+			if line > 0 {
+				return fmt.Sprintf("%s:%d", norm[idx+1:], line)
+			}
+			return norm[idx+1:]
+		}
+		base := filepath.Base(file)
+		if line > 0 {
+			return fmt.Sprintf("%s:%d", base, line)
+		}
+		return base
+	}
+	return "unknown"
+}
+
 type StepRunResult struct {
 	Report string
 }
@@ -371,7 +443,7 @@ func initSession(session *chrome.Session, role string) (*BrowserSession, error) 
 
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
-		case *runtime.EventConsoleAPICalled:
+		case *cdruntime.EventConsoleAPICalled:
 			var text strings.Builder
 			for i, arg := range ev.Args {
 				if i > 0 {
@@ -388,7 +460,7 @@ func initSession(session *chrome.Session, role string) (*BrowserSession, error) 
 			s.messages = append(s.messages, msg)
 			s.mu.Unlock()
 			logs.Info("   [BROWSER CONSOLE | PID %d] %s: %s", session.PID, ev.Type, msg.Text)
-		case *runtime.EventExceptionThrown:
+		case *cdruntime.EventExceptionThrown:
 			logs.Error("   [BROWSER EXCEPTION | PID %d] %s", session.PID, ev.ExceptionDetails.Text)
 		}
 	})
@@ -433,6 +505,12 @@ type StepResult struct {
 	End    time.Time
 }
 
+type stackFrame struct {
+	file string
+	line int
+	fn   string
+}
+
 func RunSuite(opts SuiteOptions, steps []Step) error {
 	if opts.LogPath != "" {
 		// Truncate and open log file
@@ -447,7 +525,7 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 		_ = os.WriteFile(opts.ErrorLogPath, []byte(""), 0644)
 	}
 
-	logs.Info("Starting Test Suite: %s", opts.Version)
+	logs.Info("%s Starting Test Suite: %s", testTag, opts.Version)
 
 	natsURL := strings.TrimSpace(opts.NATSURL)
 	if natsURL == "" {
@@ -459,7 +537,7 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 	}
 	nc, broker, baseSubject, natsErr := setupSuiteNATS(opts, natsURL, autoStart)
 	if natsErr != nil {
-		logs.Warn("NATS suite logging disabled: %v", natsErr)
+		logs.Warn("%s NATS suite logging disabled: %v", testTag, natsErr)
 	}
 	if nc != nil {
 		defer nc.Close()
@@ -467,13 +545,12 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 	if broker != nil {
 		defer broker.Close()
 	}
+	passLogger, failLogger := buildStatusLoggers(nc, baseSubject)
 
 	startTime := time.Now()
 	var results []StepResult
 
-	for i, step := range steps {
-		logs.Info("[%d/%d] Running step: %s", i+1, len(steps), step.Name)
-
+	for _, step := range steps {
 		timeout := step.Timeout
 		if timeout == 0 {
 			timeout = 30 * time.Second
@@ -497,7 +574,8 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 				if errLogger, eerr := logs.NewNATSLogger(nc, stepCtx.ErrorSubject); eerr == nil {
 					stepCtx.errorLogger = errLogger
 				}
-				stepCtx.Logf("step started")
+				stepCtx.passLogger = passLogger
+				stepCtx.failLogger = failLogger
 			}
 		}
 
@@ -506,25 +584,41 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 		var err error
 
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					frame := firstExternalFrame(3)
+					if frame.file != "" {
+						logs.ErrorFrom(frame.file, "%s [PROCESS][PANIC] Step %s panic: %v (%s:%d %s)", testTag, step.Name, r, frame.file, frame.line, frame.fn)
+						stepCtx.TestFailf("panic: %v (%s:%d %s)", r, frame.file, frame.line, frame.fn)
+					} else {
+						logs.Error("%s [PROCESS][PANIC] Step %s panic: %v", testTag, step.Name, r)
+						stepCtx.TestFailf("panic: %v", r)
+					}
+					err = fmt.Errorf("step %s panicked: %v", step.Name, r)
+				}
+			}()
 			result, err = step.RunWithContext(stepCtx)
 			close(done)
 		}()
 
 		select {
 		case <-ctx.Done():
-			logs.Error("Step %s timed out after %v", step.Name, timeout)
+			logs.Error("%s Step %s timed out after %v", testTag, step.Name, timeout)
 			err = fmt.Errorf("step %s timed out", step.Name)
-			stepCtx.Errorf("step timed out after %v", timeout)
+			stepCtx.TestFailf("timed out after %v", timeout)
 			// Try to capture a timeout screenshot if we have a session
 			// We need a way to access the session here.
 			// For now, let's just log.
 		case <-done:
 			if err != nil {
-				logs.Error("Step %s failed: %v", step.Name, err)
-				stepCtx.Errorf("step failed: %v", err)
+				logs.Error("%s Step %s failed: %v", testTag, step.Name, err)
+				stepCtx.TestFailf("failed: %v", err)
 			} else if result.Report != "" {
-				logs.Info("Step %s report: %s", step.Name, result.Report)
+				logs.Info("%s Step %s report: %s", testTag, step.Name, result.Report)
 				stepCtx.Logf("report: %s", result.Report)
+				stepCtx.TestPassf("report: %s", result.Report)
+			} else {
+				stepCtx.TestPassf("completed")
 			}
 		}
 
@@ -542,7 +636,7 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 	}
 
 	duration := time.Since(startTime)
-	logs.Info("Test Suite Completed in %v", duration)
+	logs.Info("%s Test Suite Completed in %v", testTag, duration)
 
 	if opts.ReportPath != "" {
 		if genErr := generateReport(opts, results, duration); genErr != nil {
@@ -556,6 +650,38 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 		}
 	}
 	return nil
+}
+
+func firstExternalFrame(skip int) stackFrame {
+	pcs := make([]uintptr, 32)
+	n := stdruntime.Callers(skip, pcs)
+	if n <= 0 {
+		return stackFrame{}
+	}
+	frames := stdruntime.CallersFrames(pcs[:n])
+	for {
+		frame, more := frames.Next()
+		file := filepath.ToSlash(frame.File)
+		if file != "" &&
+			!strings.Contains(file, "/runtime/") &&
+			!strings.Contains(file, "/plugins/test/src_v1/go/test.go") &&
+			!strings.Contains(file, "/plugins/logs/src_v1/go/logger.go") &&
+			!strings.Contains(file, "/plugins/logs/src_v1/go/nats.go") {
+			rel := file
+			if idx := strings.Index(file, "/src/"); idx >= 0 {
+				rel = file[idx+1:]
+			}
+			return stackFrame{
+				file: rel,
+				line: frame.Line,
+				fn:   frame.Function,
+			}
+		}
+		if !more {
+			break
+		}
+	}
+	return stackFrame{}
 }
 
 func setupSuiteNATS(opts SuiteOptions, natsURL string, autoStart bool) (*nats.Conn, *logs.EmbeddedNATS, string, error) {
@@ -577,7 +703,7 @@ func setupSuiteNATS(opts SuiteOptions, natsURL string, autoStart bool) (*nats.Co
 		if subj == "" {
 			subj = "logs.test." + sanitizeSubjectToken(opts.Version)
 		}
-		logs.Info("Suite NATS logging active at %s subject=%s (embedded=true)", broker.URL(), subj)
+		logs.Info("%s Suite NATS logging active at %s subject=%s (embedded=true)", testTag, broker.URL(), subj)
 		return nc, broker, subj, nil
 	}
 	if err != nil {
@@ -587,8 +713,17 @@ func setupSuiteNATS(opts SuiteOptions, natsURL string, autoStart bool) (*nats.Co
 	if subj == "" {
 		subj = "logs.test." + sanitizeSubjectToken(opts.Version)
 	}
-	logs.Info("Suite NATS logging active at %s subject=%s", natsURL, subj)
+	logs.Info("%s Suite NATS logging active at %s subject=%s", testTag, natsURL, subj)
 	return nc, nil, subj, nil
+}
+
+func buildStatusLoggers(nc *nats.Conn, baseSubject string) (pass *logs.NATSLogger, fail *logs.NATSLogger) {
+	if nc == nil || strings.TrimSpace(baseSubject) == "" {
+		return nil, nil
+	}
+	pass, _ = logs.NewNATSLogger(nc, baseSubject+".status.pass")
+	fail, _ = logs.NewNATSLogger(nc, baseSubject+".status.fail")
+	return pass, fail
 }
 
 func sanitizeSubjectToken(s string) string {

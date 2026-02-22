@@ -139,35 +139,170 @@ func (l *NATSLogger) Subject() string { return l.subject }
 func (l *NATSLogger) Conn() *nats.Conn { return l.conn }
 
 func (l *NATSLogger) Infof(format string, args ...any) error {
-	return l.publish("INFO", fmt.Sprintf(format, args...))
+	return l.publishWithSource("INFO", fmt.Sprintf(format, args...), "", false)
 }
 
 func (l *NATSLogger) Warnf(format string, args ...any) error {
-	return l.publish("WARN", fmt.Sprintf(format, args...))
+	return l.publishWithSource("WARN", fmt.Sprintf(format, args...), "", false)
 }
 
 func (l *NATSLogger) Errorf(format string, args ...any) error {
-	return l.publish("ERROR", fmt.Sprintf(format, args...))
+	return l.publishWithSource("ERROR", fmt.Sprintf(format, args...), "", false)
 }
 
 func (l *NATSLogger) publish(level, message string) error {
+	return l.publishWithSource(level, message, "", false)
+}
+
+func (l *NATSLogger) InfofFrom(source, format string, args ...any) error {
+	return l.publishWithSource("INFO", fmt.Sprintf(format, args...), source, false)
+}
+
+func (l *NATSLogger) WarnfFrom(source, format string, args ...any) error {
+	return l.publishWithSource("WARN", fmt.Sprintf(format, args...), source, false)
+}
+
+func (l *NATSLogger) ErrorfFrom(source, format string, args ...any) error {
+	return l.publishWithSource("ERROR", fmt.Sprintf(format, args...), source, false)
+}
+
+func (l *NATSLogger) InfofFromTest(source, format string, args ...any) error {
+	return l.publishWithSource("INFO", fmt.Sprintf(format, args...), source, true)
+}
+
+func (l *NATSLogger) WarnfFromTest(source, format string, args ...any) error {
+	return l.publishWithSource("WARN", fmt.Sprintf(format, args...), source, true)
+}
+
+func (l *NATSLogger) ErrorfFromTest(source, format string, args ...any) error {
+	return l.publishWithSource("ERROR", fmt.Sprintf(format, args...), source, true)
+}
+
+func (l *NATSLogger) publishWithSource(level, message, source string, isTest bool) error {
 	level = strings.ToUpper(strings.TrimSpace(level))
 	subject := strings.TrimSpace(l.subject)
-	src := callerSourceFile()
+	src := strings.TrimSpace(source)
+	if src == "" {
+		src = callerSourceLocation()
+	}
+	if isTest {
+		message = TestPrefix(message)
+	}
 	elapsed := elapsedSeconds(subject)
-	rec := Record{
-		Subject:   subject,
-		Level:     level,
-		Message:   message,
-		Source:    src,
-		ElapsedS:  elapsed,
-		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+	ts := time.Now().UTC().Format(time.RFC3339Nano)
+	targets := buildFanoutSubjects(subject, level, message)
+	for _, target := range targets {
+		rec := Record{
+			Subject:   target,
+			Level:     level,
+			Message:   message,
+			Source:    src,
+			ElapsedS:  elapsed,
+			Timestamp: ts,
+		}
+		data, err := json.Marshal(rec)
+		if err != nil {
+			return err
+		}
+		if err := l.conn.Publish(target, data); err != nil {
+			return err
+		}
 	}
-	data, err := json.Marshal(rec)
-	if err != nil {
-		return err
+	return nil
+}
+
+func buildFanoutSubjects(subject, level, message string) []string {
+	subject = strings.TrimSpace(subject)
+	level = strings.ToLower(strings.TrimSpace(level))
+	if level == "" {
+		level = "info"
 	}
-	return l.conn.Publish(l.subject, data)
+	plugin := pluginToken(subject)
+	seen := map[string]bool{}
+	out := make([]string, 0, 8)
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			return
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+
+	add(subject)
+	add("logfilter.level." + level)
+	if plugin != "" {
+		add("logfilter.level." + level + "." + plugin)
+	}
+
+	tags := extractBracketTags(message)
+	for _, tag := range tags {
+		add("logfilter.tag." + tag)
+		if plugin != "" {
+			add("logfilter.tag." + tag + "." + plugin)
+		}
+		add("logfilter.level." + level + ".tag." + tag)
+		if plugin != "" {
+			add("logfilter.level." + level + "." + plugin + ".tag." + tag)
+		}
+	}
+	return out
+}
+
+func pluginToken(subject string) string {
+	parts := strings.Split(strings.TrimSpace(subject), ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	if parts[0] != "logs" {
+		return ""
+	}
+	if parts[1] == "test" && len(parts) >= 3 {
+		suite := sanitizeSubjectFragment(parts[2])
+		if suite == "" {
+			return "test"
+		}
+		if idx := strings.Index(suite, "-"); idx > 0 {
+			return suite[:idx]
+		}
+		return suite
+	}
+	return sanitizeSubjectFragment(parts[1])
+}
+
+func extractBracketTags(message string) []string {
+	rest := strings.TrimSpace(message)
+	out := []string{}
+	seen := map[string]bool{}
+	for strings.HasPrefix(rest, "[") {
+		end := strings.Index(rest, "]")
+		if end <= 1 {
+			break
+		}
+		raw := strings.TrimSpace(rest[1:end])
+		rest = strings.TrimSpace(rest[end+1:])
+		if raw == "" {
+			continue
+		}
+		tag := sanitizeSubjectFragment(strings.ReplaceAll(strings.ToLower(raw), " ", "-"))
+		if tag == "" || seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		out = append(out, tag)
+	}
+	return out
+}
+
+func sanitizeSubjectFragment(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	repl := strings.NewReplacer(" ", "-", "/", "-", "\\", "-", "|", "-", ":", "-", ".", "-", "_", "-", "(", "", ")", "", "'", "", "\"", "")
+	s = repl.Replace(s)
+	for strings.Contains(s, "--") {
+		s = strings.ReplaceAll(s, "--", "-")
+	}
+	s = strings.Trim(s, "-")
+	return s
 }
 
 func ListenToFile(conn *nats.Conn, subject, filePath string) (func() error, error) {

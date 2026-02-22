@@ -196,6 +196,15 @@ Run:
 ./dialtone.sh github test src_v1
 ```
 
+Useful log filters while tests run:
+
+```bash
+./dialtone.sh logs stream --topic 'logfilter.level.error.>'     # all ERROR lines
+./dialtone.sh logs stream --topic 'logfilter.tag.pass.>'        # all [PASS] tagged lines
+./dialtone.sh logs stream --topic 'logfilter.tag.fail.>'        # all [FAIL] tagged lines
+./dialtone.sh logs stream --topic 'logfilter.tag.fail.github'   # github plugin fail tags
+```
+
 Covers:
 - issue markdown render includes `status: wait`
 - library example runs and prints pass marker

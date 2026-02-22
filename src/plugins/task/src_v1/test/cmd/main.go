@@ -11,6 +11,12 @@ import (
 
 func main() {
 	logs.SetOutput(os.Stdout)
+	defer func() {
+		if r := recover(); r != nil {
+			logs.Error("[PROCESS][PANIC] task src_v1 test runner panic: %v", r)
+			os.Exit(1)
+		}
+	}()
 
 	repoRoot, err := findRepoRoot()
 	if err != nil {
@@ -32,6 +38,7 @@ func main() {
 		AutoStartNATS: true,
 	})
 	if err != nil {
+		logs.Error("[PROCESS][ERROR] task src_v1 tests failed: %v", err)
 		logs.Error("task src_v1 tests failed: %v", err)
 		os.Exit(1)
 	}

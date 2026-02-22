@@ -11,6 +11,12 @@ import (
 
 func main() {
 	logs.SetOutput(os.Stdout)
+	defer func() {
+		if r := recover(); r != nil {
+			logs.Error("[PROCESS][PANIC] github src_v1 test runner panic: %v", r)
+			os.Exit(1)
+		}
+	}()
 
 	reg := testv1.NewRegistry()
 	selfcheck.Register(reg)
@@ -24,6 +30,7 @@ func main() {
 		AutoStartNATS: true,
 	})
 	if err != nil {
+		logs.Error("[PROCESS][ERROR] github src_v1 tests failed: %v", err)
 		logs.Error("github src_v1 tests failed: %v", err)
 		os.Exit(1)
 	}

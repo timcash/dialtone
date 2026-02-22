@@ -61,6 +61,9 @@ func RunLogs(versionDir string, args []string) {
 		fmt.Println("  ./dialtone.sh logs stream --topic 'logs.task.>'     # All task plugin logs")
 		fmt.Println("  ./dialtone.sh logs stream --topic 'logs.*.smoke'    # Smoke test logs for any plugin")
 		fmt.Println("  ./dialtone.sh logs stream --topic 'logs.dag.v1'     # Specific dag v1 log stream")
+		fmt.Println("  ./dialtone.sh logs stream --topic 'logfilter.level.error.>'   # Errors only")
+		fmt.Println("  ./dialtone.sh logs stream --topic 'logfilter.tag.fail.>'      # [FAIL] tagged logs")
+		fmt.Println("  ./dialtone.sh logs stream --topic 'logfilter.tag.test.>'      # [TEST] tagged logs")
 		fmt.Println("  ./dialtone.sh logs stream --topic 'logs.>' --file ./logs.txt")
 		fmt.Println()
 	}

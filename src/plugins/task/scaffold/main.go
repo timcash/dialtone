@@ -9,6 +9,7 @@ import (
 )
 
 func main() {
+	logs.SetOutput(os.Stdout)
 	if len(os.Args) < 2 {
 		logs.Info("Usage: task <command> [args]")
 		return

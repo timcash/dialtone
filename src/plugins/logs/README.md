@@ -55,6 +55,9 @@ The `--topic` flag supports standard NATS subject wildcards:
 | `./dialtone.sh logs stream --topic 'logs.task.>'` | Stream all logs for the **task** plugin. |
 | `./dialtone.sh logs stream --topic 'logs.*.smoke'` | Stream **smoke test** logs for any plugin. |
 | `./dialtone.sh logs stream --topic 'logs.dag.v1'` | Stream a **specific** DAG v1 log run. |
+| `./dialtone.sh logs stream --topic 'logfilter.level.error.>'` | Stream only **ERROR** level logs. |
+| `./dialtone.sh logs stream --topic 'logfilter.tag.fail.>'` | Stream only logs tagged with **[FAIL]**. |
+| `./dialtone.sh logs stream --topic 'logfilter.tag.test.>'` | Stream only logs tagged with **[TEST]**. |
 | `./dialtone.sh logs stream --topic 'logs.>' --file ./dialtone.log` | Append all streamed logs to a local file. |
 
 
