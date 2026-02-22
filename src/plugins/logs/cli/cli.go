@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -26,103 +25,62 @@ func Run(args []string) error {
 		return nil
 	}
 
-	command := args[0]
-	getDir := func() string {
-		if len(args) > 1 && !strings.HasPrefix(args[1], "-") {
-			return args[1]
-		}
-		return getLatestVersionDir()
+	if isHelpArg(args[0]) {
+		printUsage()
+		return nil
+	}
+
+	version, command, rest, warnedOldOrder, err := parseArgs(args)
+	if err != nil {
+		return err
+	}
+	if warnedOldOrder {
+		fmt.Println("[WARN] old logs CLI order is deprecated. Use: ./dialtone.sh logs src_v1 <command> [args]")
 	}
 
 	switch command {
 	case "install":
-		return RunInstall(getDir())
+		return RunInstall(version)
 	case "fmt":
-		return RunFmt(getDir())
+		return RunFmt(version)
 	case "format":
-		return RunFormat(getDir())
+		return RunFormat(version)
 	case "vet":
-		return RunVet(getDir())
+		return RunVet(version)
 	case "go-build":
-		return RunGoBuild(getDir())
+		return RunGoBuild(version)
 	case "lint":
-		return RunLint(getDir())
+		return RunLint(version)
 	case "dev":
-		return RunDev(getDir())
+		return RunDev(version)
 	case "ui-run":
-		extraArgs := []string{}
-		if len(args) > 2 {
-			extraArgs = args[2:]
-		}
-		return RunUIRun(getDir(), extraArgs)
+		return RunUIRun(version, rest)
 	case "serve":
-		return RunServe(getDir())
+		return RunServe(version)
 	case "build":
-		return RunBuild(getDir())
+		return RunBuild(version)
 	case "test":
 		testFlags := flag.NewFlagSet("logs test", flag.ContinueOnError)
 		attach := testFlags.Bool("attach", false, "Attach to running headed dev browser session")
 		cps := testFlags.Int("cps", 3, "Max clicks per second for UI interactions (must be >= 1)")
-		dir := getDir()
-		if len(args) > 1 && args[1] != "" && !strings.HasPrefix(args[1], "-") {
-			dir = args[1]
-			_ = testFlags.Parse(args[2:])
-		} else {
-			_ = testFlags.Parse(args[1:])
-		}
+		_ = testFlags.Parse(rest)
 		if *cps < 1 {
 			return fmt.Errorf("--cps must be >= 1")
 		}
-		return RunTest(dir, *attach, *cps)
+		return RunTest(version, *attach, *cps)
 	case "stream", "tail":
-		dir := getDir()
-		streamArgs := args[1:]
-		if len(args) > 1 && args[1] != "" && !strings.HasPrefix(args[1], "-") {
-			dir = args[1]
-			streamArgs = args[2:]
-		}
-		RunLogs(dir, streamArgs)
+		RunLogs(version, rest)
 		return nil
 	case "pingpong":
-		dir := getDir()
-		ppArgs := args[1:]
-		if len(args) > 1 && args[1] != "" && !strings.HasPrefix(args[1], "-") {
-			dir = args[1]
-			ppArgs = args[2:]
-		}
-		return RunPingPong(dir, ppArgs)
+		return RunPingPong(version, rest)
 	case "nats-daemon":
-		dir := getDir()
-		daemonArgs := args[1:]
-		if len(args) > 1 && args[1] != "" && !strings.HasPrefix(args[1], "-") {
-			dir = args[1]
-			daemonArgs = args[2:]
-		}
-		return RunNATSDaemon(dir, daemonArgs)
+		return RunNATSDaemon(version, rest)
 	case "nats-start":
-		dir := getDir()
-		startArgs := args[1:]
-		if len(args) > 1 && args[1] != "" && !strings.HasPrefix(args[1], "-") {
-			dir = args[1]
-			startArgs = args[2:]
-		}
-		return RunNATSStart(dir, startArgs)
+		return RunNATSStart(version, rest)
 	case "nats-status":
-		dir := getDir()
-		statusArgs := args[1:]
-		if len(args) > 1 && args[1] != "" && !strings.HasPrefix(args[1], "-") {
-			dir = args[1]
-			statusArgs = args[2:]
-		}
-		return RunNATSStatus(dir, statusArgs)
+		return RunNATSStatus(version, rest)
 	case "nats-stop":
-		dir := getDir()
-		stopArgs := args[1:]
-		if len(args) > 1 && args[1] != "" && !strings.HasPrefix(args[1], "-") {
-			dir = args[1]
-			stopArgs = args[2:]
-		}
-		return RunNATSStop(dir, stopArgs)
+		return RunNATSStop(version, rest)
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
@@ -131,8 +89,42 @@ func Run(args []string) error {
 	}
 }
 
+func parseArgs(args []string) (version string, command string, rest []string, warnedOldOrder bool, err error) {
+	if len(args) == 0 {
+		return "", "", nil, false, fmt.Errorf("missing arguments")
+	}
+
+	if strings.HasPrefix(strings.TrimSpace(args[0]), "src_v") {
+		version = strings.TrimSpace(args[0])
+		if len(args) < 2 {
+			return "", "", nil, false, fmt.Errorf("missing command (usage: ./dialtone.sh logs %s <command> [args])", version)
+		}
+		command = strings.TrimSpace(args[1])
+		rest = args[2:]
+		return version, command, rest, false, nil
+	}
+
+	if len(args) >= 2 && strings.HasPrefix(strings.TrimSpace(args[1]), "src_v") {
+		version = strings.TrimSpace(args[1])
+		command = strings.TrimSpace(args[0])
+		rest = args[2:]
+		return version, command, rest, true, nil
+	}
+
+	return "", "", nil, false, fmt.Errorf("expected version as first logs argument (usage: ./dialtone.sh logs src_v1 <command> [args])")
+}
+
+func isHelpArg(s string) bool {
+	switch strings.TrimSpace(s) {
+	case "help", "-h", "--help":
+		return true
+	default:
+		return false
+	}
+}
+
 func printUsage() {
-	fmt.Println("Usage: ./dialtone.sh logs <command> [args]")
+	fmt.Println("Usage: ./dialtone.sh logs src_v1 <command> [args]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  install <dir>  Install Go/Bun and UI deps")
 	fmt.Println("  fmt <dir>      Run go fmt")
@@ -151,40 +143,9 @@ func printUsage() {
 	fmt.Println("  nats-start    Start local embedded NATS daemon")
 	fmt.Println("  nats-status   Check local NATS daemon status")
 	fmt.Println("  nats-stop     Stop local NATS daemon")
-	fmt.Println("\nDefault <dir> is the latest src_vN folder.")
 	fmt.Println("\nExamples:")
-	fmt.Println("  ./dialtone.sh logs test src_v1")
-	fmt.Println("  ./dialtone.sh logs test src_v1 --attach")
-	fmt.Println("  ./dialtone.sh logs dev src_v1")
-	fmt.Println("  ./dialtone.sh logs stream --remote")
-}
-
-func getLatestVersionDir() string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "src_v1"
-	}
-	pluginDir := filepath.Join(cwd, "src", "plugins", "logs")
-	entries, err := os.ReadDir(pluginDir)
-	if err != nil {
-		return "src_v1"
-	}
-	maxVer := 0
-	for _, entry := range entries {
-		name := entry.Name()
-		if !strings.HasPrefix(name, "src_v") {
-			continue
-		}
-		version, err := strconv.Atoi(strings.TrimPrefix(name, "src_v"))
-		if err != nil {
-			continue
-		}
-		if version > maxVer {
-			maxVer = version
-		}
-	}
-	if maxVer == 0 {
-		return "src_v1"
-	}
-	return fmt.Sprintf("src_v%d", maxVer)
+	fmt.Println("  ./dialtone.sh logs src_v1 test")
+	fmt.Println("  ./dialtone.sh logs src_v1 test --attach")
+	fmt.Println("  ./dialtone.sh logs src_v1 dev")
+	fmt.Println("  ./dialtone.sh logs src_v1 stream --remote")
 }

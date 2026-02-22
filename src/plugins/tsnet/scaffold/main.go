@@ -4,7 +4,7 @@ import (
 	"os"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
-	"dialtone/dev/plugins/tsnet/cli"
+	"dialtone/dev/plugins/tsnet/src_v1/cli"
 )
 
 func main() {
