@@ -5,31 +5,32 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	"dialtone/dev/plugins/proc/src_v1/go/proc"
 )
 
 type Hooks struct {
-	RunSubtone         func(args []string) int
-	ListManaged        func() []proc.ManagedProcessSnapshot
-	KillManagedProcess func(pid int) error
+	RunSubtoneWithEvents func(args []string, onEvent proc.SubtoneEventHandler) int
+	ListManaged          func() []proc.ManagedProcessSnapshot
+	KillManagedProcess   func(pid int) error
 }
 
 var (
-	runSubtoneFn         = proc.RunSubtone
-	listManagedFn        = proc.ListManagedProcesses
-	killManagedProcessFn = proc.KillManagedProcess
+	runSubtoneWithEventsFn = proc.RunSubtoneWithEvents
+	listManagedFn          = proc.ListManagedProcesses
+	killManagedProcessFn   = proc.KillManagedProcess
 )
 
 // SetHooksForTest overrides REPL side-effect functions and returns a restore function.
 func SetHooksForTest(h Hooks) func() {
-	prevRunSubtone := runSubtoneFn
+	prevRunSubtoneWithEvents := runSubtoneWithEventsFn
 	prevListManaged := listManagedFn
 	prevKillManaged := killManagedProcessFn
 
-	if h.RunSubtone != nil {
-		runSubtoneFn = h.RunSubtone
+	if h.RunSubtoneWithEvents != nil {
+		runSubtoneWithEventsFn = h.RunSubtoneWithEvents
 	}
 	if h.ListManaged != nil {
 		listManagedFn = h.ListManaged
@@ -38,7 +39,7 @@ func SetHooksForTest(h Hooks) func() {
 		killManagedProcessFn = h.KillManagedProcess
 	}
 	return func() {
-		runSubtoneFn = prevRunSubtone
+		runSubtoneWithEventsFn = prevRunSubtoneWithEvents
 		listManagedFn = prevListManaged
 		killManagedProcessFn = prevKillManaged
 	}
@@ -53,6 +54,12 @@ func Start(logFn func(category, msg string)) error {
 		fmt.Println("DIALTONE> " + msg)
 		logs.Info("[REPL] DIALTONE> %s", msg)
 		logFn("REPL", "DIALTONE> "+msg)
+	}
+	saySubtone := func(pid int, msg string) {
+		line := fmt.Sprintf("DIALTONE:%d> %s", pid, msg)
+		fmt.Println(line)
+		logs.Info("[REPL] %s", line)
+		logFn("REPL", line)
 	}
 
 	say("Virtual Librarian online.")
@@ -122,10 +129,39 @@ func Start(logFn func(category, msg string)) error {
 		}
 
 		say(fmt.Sprintf("Request received. Spawning subtone for %s...", cmdName))
+		onEvent := func(ev proc.SubtoneEvent) {
+			switch ev.Type {
+			case proc.SubtoneEventStarted:
+				if ev.PID <= 0 {
+					return
+				}
+				saySubtone(ev.PID, fmt.Sprintf("Started at %s", ev.StartedAt.Format(time.RFC3339)))
+				saySubtone(ev.PID, fmt.Sprintf("Command: %v", ev.Args))
+				if strings.TrimSpace(ev.LogPath) != "" {
+					saySubtone(ev.PID, fmt.Sprintf("Log: %s", ev.LogPath))
+				}
+			case proc.SubtoneEventStdout:
+				if ev.PID <= 0 {
+					return
+				}
+				if hasStructuredLevel(ev.Line) {
+					saySubtone(ev.PID, ev.Line)
+				}
+			case proc.SubtoneEventStderr:
+				if ev.PID <= 0 {
+					return
+				}
+				line := strings.TrimSpace(ev.Line)
+				if line == "" {
+					return
+				}
+				saySubtone(ev.PID, "[ERROR] "+line)
+			}
+		}
 		if isBackground {
-			go runSubtoneFn(args)
+			go runSubtoneWithEventsFn(args, onEvent)
 		} else {
-			exitCode := runSubtoneFn(args)
+			exitCode := runSubtoneWithEventsFn(args, onEvent)
 			say(fmt.Sprintf("Subtone for %s exited with code %d.", cmdName, exitCode))
 		}
 	}
@@ -187,4 +223,14 @@ func printManagedProcesses(say func(msg string)) {
 	for _, p := range procs {
 		say(fmt.Sprintf("%-8d %-8s %-10.1f %-8d %s", p.PID, p.StartedAgo, p.CPUPercent, p.PortCount, p.Command))
 	}
+}
+
+func hasStructuredLevel(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	for _, prefix := range []string{"[INFO]", "[WARN]", "[ERROR]", "[COST]", "[T+"} {
+		if strings.HasPrefix(trimmed, prefix) {
+			return true
+		}
+	}
+	return false
 }
