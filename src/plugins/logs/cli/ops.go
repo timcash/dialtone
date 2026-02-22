@@ -22,7 +22,7 @@ func RunFmt(versionDir string) error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "fmt", "./src/plugins/logs/"+versionDir+"/...")
+	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "src_v1", "exec", "fmt", "./src/plugins/logs/"+versionDir+"/...")
 	cmd.Dir = cwd
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -46,7 +46,7 @@ func RunVet(versionDir string) error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "vet", "./src/plugins/logs/"+versionDir+"/...")
+	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "src_v1", "exec", "vet", "./src/plugins/logs/"+versionDir+"/...")
 	cmd.Dir = cwd
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -59,7 +59,7 @@ func RunGoBuild(versionDir string) error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "build", "./src/plugins/logs/"+versionDir+"/...")
+	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "src_v1", "exec", "build", "./src/plugins/logs/"+versionDir+"/...")
 	cmd.Dir = cwd
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -69,7 +69,7 @@ func RunGoBuild(versionDir string) error {
 func RunServe(versionDir string) error {
 	fmt.Printf(">> [LOGS] Serve: %s\n", versionDir)
 	cwd, _ := os.Getwd()
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "run", filepath.ToSlash(filepath.Join("src", "plugins", "logs", versionDir, "cmd", "main.go")))
+	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "src_v1", "exec", "run", filepath.ToSlash(filepath.Join("src", "plugins", "logs", versionDir, "cmd", "main.go")))
 	cmd.Dir = cwd
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -114,7 +114,7 @@ func RunTest(versionDir string, attach bool, cps int) error {
 		fmt.Printf(">> [LOGS] Test: --cps=%d ignored for infra tests.\n", cps)
 	}
 
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "go", "exec", "run", testPkg)
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "go", "src_v1", "exec", "run", testPkg)
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

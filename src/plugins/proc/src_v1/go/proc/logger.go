@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -48,11 +47,6 @@ func NewSubtoneLogger(pid int, args []string, logDir string) (*SubtoneLogger, er
 		done:       make(chan struct{}),
 	}
 
-	// 1. Log start info to REPL
-	fmt.Printf("DIALTONE:%d> Started at %s\n", pid, logger.StartTime.Format(time.RFC3339))
-	fmt.Printf("DIALTONE:%d> Command: %v\n", pid, args)
-	fmt.Printf("DIALTONE:%d> Log: %s\n", pid, logPath)
-
 	return logger, nil
 }
 
@@ -73,8 +67,6 @@ func (l *SubtoneLogger) StartHeartbeat(interval time.Duration) {
 
 func (l *SubtoneLogger) Stop() {
 	close(l.done)
-	// 4. Log cleanup
-	fmt.Printf("DIALTONE:%d> Cleaning up...\n", l.PID)
 }
 
 func (l *SubtoneLogger) LogLine(line string) {
@@ -85,10 +77,6 @@ func (l *SubtoneLogger) LogLine(line string) {
 		fmt.Fprintf(f, "[%s] %s\n", ts, line)
 		f.Close()
 	}
-
-	if hasStructuredLevel(line) {
-		fmt.Printf("DIALTONE:%d> %s\n", l.PID, line)
-	}
 }
 
 func (l *SubtoneLogger) LogError(line string) {
@@ -98,22 +86,8 @@ func (l *SubtoneLogger) LogError(line string) {
 	defer l.mu.Unlock()
 
 	if l.ErrorCount < l.ErrorLimit {
-		fmt.Printf("DIALTONE:%d> [ERROR] %s\n", l.PID, line)
 		l.ErrorCount++
-		if l.ErrorCount == l.ErrorLimit {
-			fmt.Printf("DIALTONE:%d> (Suppressed further errors)\n", l.PID)
-		}
 	}
-}
-
-func hasStructuredLevel(line string) bool {
-	trimmed := strings.TrimSpace(line)
-	for _, prefix := range []string{"[INFO]", "[WARN]", "[ERROR]", "[COST]"} {
-		if strings.HasPrefix(trimmed, prefix) {
-			return true
-		}
-	}
-	return false
 }
 
 func (l *SubtoneLogger) logHeartbeat() {
@@ -134,19 +108,7 @@ func (l *SubtoneLogger) logHeartbeat() {
 		memUsage = mem.RSS
 	}
 
-	fmt.Printf("DIALTONE:%d> [Heartbeat] CPU: %.1f%% | Mem: %s | Ports: %d\n",
-		l.PID, cpu, formatBytes(memUsage), ports)
-}
-
-func formatBytes(b uint64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
+	_ = cpu
+	_ = memUsage
+	_ = ports
 }

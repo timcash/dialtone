@@ -2,14 +2,13 @@ package proc
 
 import (
 	"bufio"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
 )
 
-func RunSubtone(args []string) {
+func RunSubtone(args []string) int {
 	cwd, _ := os.Getwd()
 	repoRoot := cwd
 	if filepath.Base(cwd) == "src" {
@@ -24,8 +23,7 @@ func RunSubtone(args []string) {
 	stderr, _ := cmd.StderrPipe()
 
 	if err := cmd.Start(); err != nil {
-		fmt.Printf("DIALTONE> Failed to start subtone: %v\n", err)
-		return
+		return 1
 	}
 
 	pid := cmd.Process.Pid
@@ -34,9 +32,7 @@ func RunSubtone(args []string) {
 
 	logDir := filepath.Join(repoRoot, ".dialtone", "logs")
 	logger, err := NewSubtoneLogger(pid, args, logDir)
-	if err != nil {
-		fmt.Printf("DIALTONE> Failed to init logger: %v\n", err)
-	} else {
+	if err == nil {
 		logger.StartHeartbeat(3 * time.Second)
 		defer logger.Stop()
 	}
@@ -69,5 +65,5 @@ func RunSubtone(args []string) {
 			exitCode = 1
 		}
 	}
-	fmt.Printf("DIALTONE> Process %d exited with code %d.\n", pid, exitCode)
+	return exitCode
 }

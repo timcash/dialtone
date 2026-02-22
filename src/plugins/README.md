@@ -19,8 +19,8 @@ src/plugins/<plugin-name>/
 ```
 
 Recommended command shape:
-- `./dialtone.sh <plugin> help`
-- `./dialtone.sh <plugin> test src_v1`
+- `./dialtone.sh <plugin> src_v1 help`
+- `./dialtone.sh <plugin> src_v1 test`
 
 ## New Plugin Workflow (Shell)
 
@@ -60,8 +60,8 @@ EOF
 # 5) Document commands in src/plugins/my-plugin/README.md
 
 # 6) Run plugin test workflow
-./dialtone.sh my-plugin help
-./dialtone.sh my-plugin test src_v1
+./dialtone.sh my-plugin src_v1 help
+./dialtone.sh my-plugin src_v1 test
 ```
 
 ## Foundation Library Integration
@@ -136,8 +136,20 @@ func main() {
 ```
 
 Status stream examples:
-- `./dialtone.sh logs stream --topic 'logfilter.tag.pass.>'`
-- `./dialtone.sh logs stream --topic 'logfilter.tag.fail.>'`
+- `./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.pass.>'`
+- `./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.fail.>'`
+
+## REPL Foundation Order
+
+`repl src_v1 test` is organized bottom-up so foundational plugins validate first via real REPL subtone execution:
+- `01_repl_core`: REPL-only behavior (help, input handling, line format)
+- `02_proc_plugin`: `proc src_v1 test`
+- `03_logs_plugin`: `logs src_v1 test`
+- `04_test_plugin`: `test src_v1 test`
+- `05_chrome_plugin`: `chrome src_v1 list`
+- `06_go_bun_plugins`: `go src_v1 test` then `bun src_v1 test`
+
+REPL commands are entered directly (for example `logs src_v1 test`), without any `@DIALTONE` prefix.
 
 This document defines the core dependency contract for plugin structure in this repo.
 

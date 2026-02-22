@@ -92,9 +92,9 @@ DIALTONE> task next
 DIALTONE> NEXT: 104-docs (inputs satisfied)
 
 LLM-DOCS> Updated documentation links and acceptance notes in 104-docs.
-LLM-DOCS> @DIALTONE task sign 104-docs --role DOCS
-LLM-REVIEW> @DIALTONE task sign 104-docs --role REVIEW
-LLM-TEST> @DIALTONE task sign 104-docs --role TEST
+LLM-DOCS> task sign 104-docs --role DOCS
+LLM-REVIEW> task sign 104-docs --role REVIEW
+LLM-TEST> task sign 104-docs --role TEST
 
 DIALTONE> task validate 104-docs
 DIALTONE> PASS
@@ -104,9 +104,9 @@ DIALTONE> task next
 DIALTONE> NEXT: 104-tests (inputs satisfied)
 
 LLM-TEST> Ran test-command and updated test-condition evidence.
-LLM-TEST> @DIALTONE task sign 104-tests --role TEST
-LLM-REVIEW> @DIALTONE task sign 104-tests --role REVIEW
-USER-1> @DIALTONE task sign 104-tests --role USER-1
+LLM-TEST> task sign 104-tests --role TEST
+LLM-REVIEW> task sign 104-tests --role REVIEW
+USER-1> task sign 104-tests --role USER-1
 
 DIALTONE> task validate 104-tests
 DIALTONE> PASS
@@ -116,9 +116,9 @@ DIALTONE> task next
 DIALTONE> NEXT: 104-impl (inputs satisfied)
 
 LLM-CODE> Implemented changes and linked artifacts.
-LLM-CODE> @DIALTONE task sign 104-impl --role CODE
-LLM-TEST> @DIALTONE task sign 104-impl --role TEST
-LLM-REVIEW> @DIALTONE task sign 104-impl --role REVIEW
+LLM-CODE> task sign 104-impl --role CODE
+LLM-TEST> task sign 104-impl --role TEST
+LLM-REVIEW> task sign 104-impl --role REVIEW
 
 DIALTONE> task validate 104-impl
 DIALTONE> PASS
@@ -129,9 +129,9 @@ DIALTONE> NEXT: 104 (all inputs done)
 
 LLM-REVIEW> Reviewed root fields: description/docs/tests/inputs/outputs/signatures.
 LLM-TEST> Verified root test-condition and test-command evidence.
-LLM-REVIEW> @DIALTONE task sign 104 --role REVIEW
-LLM-TEST> @DIALTONE task sign 104 --role TEST
-USER-1> @DIALTONE task sign 104 --role USER-1
+LLM-REVIEW> task sign 104 --role REVIEW
+LLM-TEST> task sign 104 --role TEST
+USER-1> task sign 104 --role USER-1
 
 DIALTONE> task validate 104
 DIALTONE> PASS
@@ -153,4 +153,3 @@ You can work on multiple tasks at once while keeping one deterministic coordinat
 - `USER-*` roles provide approvals/signatures
 
 `DIALTONE>` still advances one deterministic step at a time via `task next`, so progress is auditable and reproducible.
-
