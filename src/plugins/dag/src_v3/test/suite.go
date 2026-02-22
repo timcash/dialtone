@@ -1,14 +1,13 @@
 package test
 
 import (
-	"fmt"
-	"os"
 	"time"
 
+	"dialtone/dev/plugins/logs/src_v1/go"
 	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 )
 
-func RunSuiteV3() {
+func RunSuiteV3() error {
 	ctx := newTestCtx()
 	defer ctx.teardown()
 	steps := []test_v2.Step{
@@ -40,22 +39,25 @@ func RunSuiteV3() {
 		{Name: "24 Finalize + Teardown", RunWithContext: wrapRun(ctx, Run18FinalizeAndTeardown)},
 	}
 
-	if err := test_v2.RunSuite(test_v2.SuiteOptions{
+	return test_v2.RunSuite(test_v2.SuiteOptions{
 		Version:        "src_v3",
 		ReportPath:     "plugins/dag/src_v3/test/TEST.md",
 		LogPath:        "plugins/dag/src_v3/test/test.log",
 		ErrorLogPath:   "plugins/dag/src_v3/test/error.log",
 		BrowserLogMode: "errors_only",
-	}, steps); err != nil {
-		fmt.Printf("[TEST] SUITE ERROR: %v\n", err)
-		os.Exit(1)
-	}
+		NATSURL:        "nats://127.0.0.1:4222",
+		NATSSubject:    "logs.test.dag.src-v3",
+		AutoStartNATS:  true,
+	}, steps)
 }
 
 func wrapRun(ctx *testCtx, fn func(*testCtx) (string, error)) func(*test_v2.StepContext) (test_v2.StepRunResult, error) {
 	return func(sc *test_v2.StepContext) (test_v2.StepRunResult, error) {
 		ctx.beginStep(sc)
 		report, err := fn(ctx)
+		if err != nil {
+			logs.ErrorFromTest("src/plugins/dag/src_v3/test/suite.go", "[STEP:%s] %v", sc.Name, err)
+		}
 		return test_v2.StepRunResult{Report: report}, err
 	}
 }

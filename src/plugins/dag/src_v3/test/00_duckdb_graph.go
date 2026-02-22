@@ -8,7 +8,7 @@ import (
 	_ "github.com/marcboeker/go-duckdb"
 )
 
-func Run01DuckDBGraphQueries(_ *testCtx) (string, error) {
+func Run01DuckDBGraphQueries(ctx *testCtx) (string, error) {
 	db, err := sql.Open("duckdb", "")
 	if err != nil {
 		return "", fmt.Errorf("open duckdb: %w", err)
@@ -61,8 +61,8 @@ func Run01DuckDBGraphQueries(_ *testCtx) (string, error) {
 	}
 
 	var edgeCount int
-	fmt.Println("LOOKING FOR: graph_edge_match_count")
-	fmt.Println("[GRAPH] running: graph_edge_match_count")
+	ctx.logf("LOOKING FOR: graph_edge_match_count")
+	ctx.logf("[GRAPH] running: graph_edge_match_count")
 	if err := db.QueryRow(`
 		SELECT COUNT(*)
 		FROM GRAPH_TABLE (dag_pg
@@ -77,8 +77,8 @@ func Run01DuckDBGraphQueries(_ *testCtx) (string, error) {
 	}
 
 	var hops int
-	fmt.Println("LOOKING FOR: shortest_path_hops_root_to_leaf")
-	fmt.Println("[GRAPH] running: shortest_path_hops_root_to_leaf")
+	ctx.logf("LOOKING FOR: shortest_path_hops_root_to_leaf")
+	ctx.logf("[GRAPH] running: shortest_path_hops_root_to_leaf")
 	if err := db.QueryRow(`
 		SELECT hops
 		FROM GRAPH_TABLE (dag_pg
@@ -95,8 +95,8 @@ func Run01DuckDBGraphQueries(_ *testCtx) (string, error) {
 	}
 
 	var rankViolations int
-	fmt.Println("LOOKING FOR: rank_violation_count")
-	fmt.Println("[GRAPH] running: rank_violation_count")
+	ctx.logf("LOOKING FOR: rank_violation_count")
+	ctx.logf("[GRAPH] running: rank_violation_count")
 	if err := db.QueryRow(`
 		SELECT COUNT(*)
 		FROM dag_edge e
@@ -111,8 +111,8 @@ func Run01DuckDBGraphQueries(_ *testCtx) (string, error) {
 	}
 
 	// UI action: given a node, find all nested nodes (nodes inside its nested layers, recursively).
-	fmt.Println("LOOKING FOR: nested_nodes_for_n_mid_a")
-	fmt.Println("[GRAPH] running: nested_nodes_for_n_mid_a")
+	ctx.logf("LOOKING FOR: nested_nodes_for_n_mid_a")
+	ctx.logf("[GRAPH] running: nested_nodes_for_n_mid_a")
 	nestedNodes, err := queryStringList(db, `
 		WITH RECURSIVE nested_layers(layer_id) AS (
 			SELECT l.layer_id
@@ -138,8 +138,8 @@ func Run01DuckDBGraphQueries(_ *testCtx) (string, error) {
 	}
 
 	// UI action: given a node, find all input nodes (edges pointing into the node).
-	fmt.Println("LOOKING FOR: input_nodes_for_n_leaf")
-	fmt.Println("[GRAPH] running: input_nodes_for_n_leaf")
+	ctx.logf("LOOKING FOR: input_nodes_for_n_leaf")
+	ctx.logf("[GRAPH] running: input_nodes_for_n_leaf")
 	inputNodes, err := queryStringList(db, `
 		SELECT input_node
 		FROM GRAPH_TABLE (dag_pg
@@ -157,8 +157,8 @@ func Run01DuckDBGraphQueries(_ *testCtx) (string, error) {
 	}
 
 	// UI action: given a node, find all output nodes (edges pointing out of the node).
-	fmt.Println("LOOKING FOR: output_nodes_for_n_root")
-	fmt.Println("[GRAPH] running: output_nodes_for_n_root")
+	ctx.logf("LOOKING FOR: output_nodes_for_n_root")
+	ctx.logf("[GRAPH] running: output_nodes_for_n_root")
 	outputNodes, err := queryStringList(db, `
 		SELECT output_node
 		FROM GRAPH_TABLE (dag_pg
