@@ -1,13 +1,5 @@
 # Worktree Plugin
 
-## Cost Estimate (Gemini 2.5 Flash)
-For the default `worktree start`/`worktree test` flow, estimated cost uses:
-- input: `$0.30 / 1M` tokens
-- output: `$2.50 / 1M` tokens
-
-`worktree test src_v1` now reports and logs actual token counts from Gemini CLI JSON stats and computes:
-`estimated_cost_usd = input_tokens*0.30/1e6 + output_tokens*2.50/1e6`
-
 ## Purpose
 The `worktree` plugin runs isolated agent workflows using:
 - Git worktrees
@@ -26,15 +18,15 @@ Managed worktree base directory:
 
 ## CLI
 ```bash
-./dialtone.sh worktree add <name> --task <file> [--branch <branch>]
-./dialtone.sh worktree start <name> [--prompt <text>]
-./dialtone.sh worktree tmux-logs <name|index> [-n 10]
-./dialtone.sh worktree verify-done <name|index>
-./dialtone.sh worktree list
-./dialtone.sh worktree attach <name|index>
-./dialtone.sh worktree remove <name>
-./dialtone.sh worktree cleanup [--all]
-./dialtone.sh worktree test src_v1
+./dialtone.sh worktree src_v1 add <name> --task <file> [--branch <branch>]
+./dialtone.sh worktree src_v1 start <name> [--prompt <text>]
+./dialtone.sh worktree src_v1 tmux-logs <name|index> [-n 10]
+./dialtone.sh worktree src_v1 verify-done <name|index>
+./dialtone.sh worktree src_v1 list
+./dialtone.sh worktree src_v1 attach <name|index>
+./dialtone.sh worktree src_v1 remove <name>
+./dialtone.sh worktree src_v1 cleanup [--all]
+./dialtone.sh worktree src_v1 test
 ```
 
 ## Command Notes
@@ -51,24 +43,16 @@ Managed worktree base directory:
 - `cleanup`
   - `cleanup`: removes stale managed worktrees
   - `cleanup --all`: removes all non-root worktrees (including legacy locations)
-- `test src_v1`
-  - runs idempotent E2E: `add -> start -> tmux-logs -> verify-done -> remove`
-  - prints token usage + estimated cost
-  - emits a structured `[COST] ...` line for REPL/subtone forwarding
-  - appends one test record line to this README each run
+- `test`
+  - runs `src/plugins/worktree/src_v1/test/cmd/main.go`
+  - uses shared `testv1` registry with numbered suite folders
+  - currently verifies CLI order/help and old-order warning behavior
 
 ## REPL Usage
 From REPL (`./dialtone.sh`):
-- `worktree add ...`
-- `worktree start ...`
-- `worktree list`
-- `worktree tmux-logs ...`
-- `worktree verify-done ...`
-- `worktree remove ...`
-
-## Test
-- 2026-02-20T19:59:26Z | result=PASS | model=gemini-2.5-flash | input=0 output=0 total=0 | estimated_cost_usd=0.000000 | note=ok
-- 2026-02-20T20:00:28Z | result=PASS | model=gemini-2.5-flash | input=0 output=0 total=0 | estimated_cost_usd=0.000000 | note=ok
-- 2026-02-20T20:02:21Z | result=PASS | model=gemini-2.5-flash | input=0 output=0 total=0 | estimated_cost_usd=0.000000 | note=ok
-- 2026-02-20T20:04:09Z | result=PASS | model=gemini-2.5-flash | input=111139 output=855 total=112676 | estimated_cost_usd=0.035479 | note=ok
-- 2026-02-20T20:54:58Z | result=PASS | model=gemini-2.5-flash | input=87798 output=700 total=89289 | estimated_cost_usd=0.028089 | note=ok
+- `worktree src_v1 add ...`
+- `worktree src_v1 start ...`
+- `worktree src_v1 list`
+- `worktree src_v1 tmux-logs ...`
+- `worktree src_v1 verify-done ...`
+- `worktree src_v1 remove ...`
