@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UI src_v1 fixture</title>
+  </head>
+  <body>
+    <div id="app">
+      <header aria-label="App Header"><h1>UI src_v1 Fixture</h1></header>
+      <nav aria-label="Global Menu"><div aria-label="Global Menu Panel" hidden></div></nav>
+
+      <section id="ui-hero-stage" aria-label="Hero Section">
+        <div class="overlay-legend" aria-label="Hero Status" data-ready="booting">hero</div>
+        <canvas class="overlay-primary" aria-label="Hero Canvas"></canvas>
+      </section>
+
+      <section id="ui-docs-docs" aria-label="Docs Section" hidden>
+        <article class="overlay-primary" aria-label="Docs Content">Docs body</article>
+      </section>
+
+      <section id="ui-meta-table" aria-label="Table Section" hidden>
+        <table class="overlay-primary" aria-label="UI Table">
+          <tbody><tr><td>row-a</td></tr></tbody>
+        </table>
+        <form class="mode-form" data-mode-form="table" aria-label="Table Mode Form">
+          <button type="button" aria-label="Table Thumb 1">Refresh</button>
+          <button type="button" aria-label="Table Thumb 2">Two</button>
+          <button type="button" aria-label="Table Thumb 3">Three</button>
+          <button type="button" aria-label="Table Thumb 4">Four</button>
+          <button type="button" aria-label="Table Thumb 5">Five</button>
+          <button type="button" aria-label="Table Thumb 6">Six</button>
+          <button type="button" aria-label="Table Thumb 7">Seven</button>
+          <button type="button" aria-label="Table Thumb 8">Eight</button>
+          <button type="button" aria-label="Table Mode">Mode</button>
+          <input type="text" aria-label="Table Query Input" placeholder="query" />
+          <button type="button" aria-label="Table Submit">Submit</button>
+        </form>
+        <aside aria-label="Table Status" data-state="idle">idle</aside>
+      </section>
+
+      <section id="ui-three-stage" aria-label="Three Section" hidden>
+        <canvas class="overlay-primary" aria-label="Three Canvas"></canvas>
+        <form class="mode-form" data-mode-form="three" aria-label="Three Mode Form">
+          <button type="button" aria-label="Three Back">Back</button>
+          <button type="button" aria-label="Three Add">Add</button>
+          <button type="button" aria-label="Three Link">Link</button>
+          <button type="button" aria-label="Three Clear">Clear</button>
+          <button type="button" aria-label="Three Open">Open</button>
+          <button type="button" aria-label="Three Rename">Rename</button>
+          <button type="button" aria-label="Three Focus">Focus</button>
+          <button type="button" aria-label="Three Labels">Labels</button>
+          <button type="button" aria-label="Three Mode">Mode</button>
+          <input type="text" aria-label="Three Label Input" placeholder="name" />
+          <button type="button" aria-label="Three Submit">Submit</button>
+        </form>
+        <aside aria-label="Three Count" data-count="0">0</aside>
+      </section>
+
+      <section id="ui-log-xterm" aria-label="Log Section" hidden>
+        <div class="overlay-primary" aria-label="Log Terminal" data-last=""></div>
+        <input aria-label="Log Input" type="text" value="" placeholder="command" />
+      </section>
+
+      <section id="ui-demo-video" aria-label="Video Section" hidden>
+        <video class="overlay-primary" aria-label="Test Video" muted playsinline></video>
+      </section>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
