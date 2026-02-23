@@ -1,9 +1,7 @@
 package main
 
 import (
-	"fmt"
 	"os"
-	"path/filepath"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	infra "dialtone/dev/plugins/logs/src_v1/test/01_infra"
@@ -13,14 +11,14 @@ import (
 func main() {
 	logs.SetOutput(os.Stdout)
 
-	repoRoot, err := findRepoRoot()
+	paths, err := logs.ResolvePaths("", "src_v1")
 	if err != nil {
 		logs.Error("logs test init failed: %v", err)
 		os.Exit(1)
 	}
-	reportPath := filepath.Join(repoRoot, "src", "plugins", "logs", "src_v1", "test", "TEST.md")
-	logPath := filepath.Join(repoRoot, "src", "plugins", "logs", "src_v1", "test", "test.log")
-	errorLogPath := filepath.Join(repoRoot, "src", "plugins", "logs", "src_v1", "test", "error.log")
+	reportPath := paths.TestReport
+	logPath := paths.TestLog
+	errorLogPath := paths.TestErrorLog
 
 	reg := testv1.NewRegistry()
 	infra.Register(reg)
@@ -39,21 +37,4 @@ func main() {
 		os.Exit(1)
 	}
 	logs.Info("logs src_v1 tests passed")
-}
-
-func findRepoRoot() (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
-			return cwd, nil
-		}
-		parent := filepath.Dir(cwd)
-		if parent == cwd {
-			return "", fmt.Errorf("repo root not found")
-		}
-		cwd = parent
-	}
 }

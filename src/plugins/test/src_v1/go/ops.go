@@ -9,18 +9,18 @@ import (
 )
 
 type TestOptions struct {
-	RepoRoot           string
-	PluginDir          string
-	VersionDir         string
-	Attach             bool
-	CPS                int
-	BaseURL            string
-	DevBaseURL         string
-	DevPort            int
-	AttachURL          string
-	TestPkg            string // relative to RepoRoot
-	EnvPrefix          string // e.g. "DAG"
-	EnsurePreviewFunc  func() error
+	RepoRoot          string
+	PluginDir         string
+	VersionDir        string
+	Attach            bool
+	CPS               int
+	BaseURL           string
+	DevBaseURL        string
+	DevPort           int
+	AttachURL         string
+	TestPkg           string // relative to RepoRoot
+	EnvPrefix         string // e.g. "DAG"
+	EnsurePreviewFunc func() error
 }
 
 func RunPluginTests(opts TestOptions) error {
@@ -42,11 +42,15 @@ func RunPluginTests(opts TestOptions) error {
 		target = "./" + target
 	}
 
+	paths, err := ResolvePaths(opts.RepoRoot)
+	if err != nil {
+		return err
+	}
 	cmd := exec.Command(goBin, "run", target)
-	cmd.Dir = filepath.Join(opts.RepoRoot, "src")
+	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	cmd.Env = append(
 		os.Environ(),
 		opts.EnvPrefix+"_TEST_ATTACH=0",
@@ -57,13 +61,13 @@ func RunPluginTests(opts TestOptions) error {
 	if opts.Attach {
 		cmd.Env = append(cmd.Env, opts.EnvPrefix+"_TEST_ATTACH=1")
 	}
-	
-	err := cmd.Run()
-	
+
+	err = cmd.Run()
+
 	// Post-test: Re-ensure preview if possible
 	if opts.EnsurePreviewFunc != nil {
 		_ = opts.EnsurePreviewFunc()
 	}
-	
+
 	return err
 }

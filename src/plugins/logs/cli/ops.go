@@ -18,12 +18,12 @@ import (
 
 func RunFmt(versionDir string) error {
 	fmt.Printf(">> [LOGS] Fmt: %s\n", versionDir)
-	cwd, err := os.Getwd()
+	paths, err := resolveLogsPaths(versionDir)
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "src_v1", "exec", "fmt", "./src/plugins/logs/"+versionDir+"/...")
-	cmd.Dir = cwd
+	cmd := exec.Command(filepath.Join(paths.Runtime.RepoRoot, "dialtone.sh"), "go", "src_v1", "exec", "fmt", "./plugins/logs/"+versionDir+"/...")
+	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -31,23 +31,23 @@ func RunFmt(versionDir string) error {
 
 func RunFormat(versionDir string) error {
 	fmt.Printf(">> [LOGS] Format: %s\n", versionDir)
-	cwd, err := os.Getwd()
+	paths, err := resolveLogsPaths(versionDir)
 	if err != nil {
 		return err
 	}
-	uiDir := filepath.Join(cwd, "src", "plugins", "logs", versionDir, "ui")
-	cmd := runBun(cwd, uiDir, "run", "format")
+	uiDir := paths.Preset.UI
+	cmd := runBun(paths.Runtime.RepoRoot, uiDir, "run", "format")
 	return cmd.Run()
 }
 
 func RunVet(versionDir string) error {
 	fmt.Printf(">> [LOGS] Vet: %s\n", versionDir)
-	cwd, err := os.Getwd()
+	paths, err := resolveLogsPaths(versionDir)
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "src_v1", "exec", "vet", "./src/plugins/logs/"+versionDir+"/...")
-	cmd.Dir = cwd
+	cmd := exec.Command(filepath.Join(paths.Runtime.RepoRoot, "dialtone.sh"), "go", "src_v1", "exec", "vet", "./plugins/logs/"+versionDir+"/...")
+	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -55,12 +55,12 @@ func RunVet(versionDir string) error {
 
 func RunGoBuild(versionDir string) error {
 	fmt.Printf(">> [LOGS] Go Build: %s\n", versionDir)
-	cwd, err := os.Getwd()
+	paths, err := resolveLogsPaths(versionDir)
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "src_v1", "exec", "build", "./src/plugins/logs/"+versionDir+"/...")
-	cmd.Dir = cwd
+	cmd := exec.Command(filepath.Join(paths.Runtime.RepoRoot, "dialtone.sh"), "go", "src_v1", "exec", "build", "./plugins/logs/"+versionDir+"/...")
+	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -68,9 +68,12 @@ func RunGoBuild(versionDir string) error {
 
 func RunServe(versionDir string) error {
 	fmt.Printf(">> [LOGS] Serve: %s\n", versionDir)
-	cwd, _ := os.Getwd()
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "src_v1", "exec", "run", filepath.ToSlash(filepath.Join("src", "plugins", "logs", versionDir, "cmd", "main.go")))
-	cmd.Dir = cwd
+	paths, err := resolveLogsPaths(versionDir)
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(filepath.Join(paths.Runtime.RepoRoot, "dialtone.sh"), "go", "src_v1", "exec", "run", filepath.ToSlash(filepath.Join("plugins", "logs", versionDir, "cmd", "main.go")))
+	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -85,24 +88,24 @@ func RunUIRun(versionDir string, extraArgs []string) error {
 		}
 	}
 
-	cwd, _ := os.Getwd()
-	uiDir := filepath.Join(cwd, "src", "plugins", "logs", versionDir, "ui")
-	cmd := runBun(cwd, uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(port))
+	paths, err := resolveLogsPaths(versionDir)
+	if err != nil {
+		return err
+	}
+	uiDir := paths.Preset.UI
+	cmd := runBun(paths.Runtime.RepoRoot, uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(port))
 	return cmd.Run()
 }
 
 func RunTest(versionDir string, attach bool, cps int) error {
 	fmt.Printf(">> [LOGS] Test: %s\n", versionDir)
-	cwd, err := os.Getwd()
+	paths, err := resolveLogsPaths(versionDir)
 	if err != nil {
 		return err
 	}
-	repoRoot := cwd
-	if filepath.Base(repoRoot) == "src" {
-		repoRoot = filepath.Dir(repoRoot)
-	}
+	repoRoot := paths.Runtime.RepoRoot
 	testPkg := "./" + filepath.ToSlash(filepath.Join("plugins", "logs", versionDir, "test", "cmd"))
-	testMain := filepath.Join(repoRoot, "src", "plugins", "logs", versionDir, "test", "cmd", "main.go")
+	testMain := filepath.Join(paths.Preset.TestCmd, "main.go")
 	if _, err := os.Stat(testMain); os.IsNotExist(err) {
 		return fmt.Errorf("test runner not found: %s/main.go", testPkg)
 	}
@@ -130,7 +133,11 @@ type logsDevPreviewSession struct {
 func (s *logsDevPreviewSession) Close() {}
 
 func ensureDevServerAndHeadedBrowser(repoRoot, versionDir string, allowOpenBrowser bool) (*logsDevPreviewSession, error) {
-	uiDir := filepath.Join(repoRoot, "src", "plugins", "logs", versionDir, "ui")
+	paths, err := resolveLogsPaths(versionDir)
+	if err != nil {
+		return nil, err
+	}
+	uiDir := paths.Preset.UI
 	if _, err := os.Stat(filepath.Join(uiDir, "index.html")); err != nil {
 		return nil, fmt.Errorf("logs ui entry not found for %s: %w", versionDir, err)
 	}
@@ -243,8 +250,12 @@ func hasReachableDevtoolsWebSocket(port int) bool {
 }
 
 func startDetachedLogsDevServer(repoRoot, versionDir string, port int) error {
-	logPath := filepath.Join(repoRoot, "src", "plugins", "logs", versionDir, "test", "dev_preview.log")
-	uiDir := filepath.Join(repoRoot, "src", "plugins", "logs", versionDir, "ui")
+	paths, err := resolveLogsPaths(versionDir)
+	if err != nil {
+		return err
+	}
+	logPath := paths.DevPreviewLog
+	uiDir := paths.Preset.UI
 	if _, err := os.Stat(filepath.Join(uiDir, "package.json")); err != nil {
 		return fmt.Errorf("logs ui package.json not found for %s: %w", versionDir, err)
 	}

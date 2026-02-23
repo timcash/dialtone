@@ -3,30 +3,30 @@ package infra
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
+
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
 func findRepoRoot() (string, error) {
-	cwd, err := os.Getwd()
+	rt, err := configv1.ResolveRuntime("")
 	if err != nil {
 		return "", err
 	}
-	for {
-		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
-			return cwd, nil
-		}
-		parent := filepath.Dir(cwd)
-		if parent == cwd {
-			return "", fmt.Errorf("repo root not found")
-		}
-		cwd = parent
+	if rt.RepoRoot == "" {
+		return "", fmt.Errorf("repo root not found")
 	}
+	return rt.RepoRoot, nil
 }
 
 func testReportPath(repoRoot string) string {
-	return filepath.Join(repoRoot, "src", "plugins", "logs", "src_v1", "test", "TEST.md")
+	paths, err := logs.ResolvePaths(repoRoot, "src_v1")
+	if err != nil {
+		return ""
+	}
+	return paths.TestReport
 }
 
 func waitForContains(path, pattern string, timeout time.Duration) error {

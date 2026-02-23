@@ -11,14 +11,11 @@ import (
 )
 
 func LocalWebRemoteRobot() error {
-	cwd, err := os.Getwd()
+	paths, err := resolveRobotPathsPreset()
 	if err != nil {
 		return err
 	}
-	repoRoot := cwd
-	if filepath.Base(cwd) == "src" {
-		repoRoot = filepath.Dir(cwd)
-	}
+	repoRoot := paths.Runtime.RepoRoot
 
 	hostname := os.Getenv("DIALTONE_HOSTNAME")
 	if hostname == "" {
@@ -27,7 +24,7 @@ func LocalWebRemoteRobot() error {
 
 	fmt.Printf(">> [Robot] Starting Local UI connected to Remote Robot: %s\n", hostname)
 
-	uiDir := filepath.Join(repoRoot, "src", "plugins", "robot", "src_v1", "ui")
+	uiDir := paths.Preset.UI
 
 	// Set environment variable for Vite to use as proxy target
 	// We'll proxy through Vite to the remote Tailscale IP/Hostname

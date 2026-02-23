@@ -2,10 +2,12 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	ssh_plugin "dialtone/dev/plugins/ssh/src_v1/go"
 	tsnetv1 "dialtone/dev/plugins/tsnet/src_v1/go"
@@ -31,6 +34,7 @@ type deployOptions struct {
 	Ephemeral bool
 	Proxy     bool
 	Service   bool
+	SmokeTest bool
 }
 
 func RunSyncCode(versionDir string, args []string) error {
@@ -53,30 +57,40 @@ func RunSyncCode(versionDir string, args []string) error {
 		return fmt.Errorf("sync-code requires --user (or ROBOT_USER in env/.env)")
 	}
 	if strings.TrimSpace(*remoteDir) == "" {
-		*remoteDir = path.Join("/home", strings.TrimSpace(*user), "dialtone_src")
+		*remoteDir = path.Join("/home", strings.TrimSpace(*user), "dialtone", "src")
 	}
 
-	repoRoot, err := findRepoRootFromWD()
+	rt, err := configv1.ResolveRuntime("")
 	if err != nil {
 		return err
 	}
+	repoRoot := rt.RepoRoot
 	client, err := ssh_plugin.DialSSH(strings.TrimSpace(*host), strings.TrimSpace(*port), strings.TrimSpace(*user), *pass)
 	if err != nil {
 		return fmt.Errorf("failed to connect: %w", err)
 	}
 	defer client.Close()
 
+	remoteRoot := path.Dir(*remoteDir)
 	if _, err := ssh_plugin.RunSSHCommand(client, "mkdir -p "+shellQuote(*remoteDir)); err != nil {
 		return fmt.Errorf("failed creating remote dir: %w", err)
 	}
 
-	localSrc := filepath.Join(repoRoot, "src")
+	localSrc := rt.SrcRoot
 	if err := syncPath(client, localSrc, *remoteDir, "go.mod"); err != nil {
 		return err
 	}
 	if err := syncPath(client, localSrc, *remoteDir, "go.sum"); err != nil {
 		return err
 	}
+	// Sync dialtone.sh to the remote root (parent of src)
+	if err := ssh_plugin.UploadFile(client, filepath.Join(repoRoot, "dialtone.sh"), path.Join(remoteRoot, "dialtone.sh")); err != nil {
+		return fmt.Errorf("failed to sync dialtone.sh: %w", err)
+	}
+	if _, err := ssh_plugin.RunSSHCommand(client, "chmod +x "+shellQuote(path.Join(remoteRoot, "dialtone.sh"))); err != nil {
+		return fmt.Errorf("failed to chmod dialtone.sh: %w", err)
+	}
+
 	robotBase := path.Join("plugins", "robot", versionDir)
 	robotSyncPaths := []string{
 		path.Join(robotBase, "cmd"),
@@ -124,6 +138,7 @@ func RunDeploy(versionDir string, args []string) error {
 	ephemeral := fs.Bool("ephemeral", false, "Register as ephemeral node on Tailscale")
 	proxy := fs.Bool("proxy", false, "Expose Web UI via Cloudflare proxy from this host")
 	service := fs.Bool("service", false, "Install/restart dialtone-robot.service on the robot")
+	smoke := fs.Bool("smoke-test", false, "Run UI smoke test against drone-1.dialtone.earth after deploy")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -136,6 +151,7 @@ func RunDeploy(versionDir string, args []string) error {
 		Ephemeral: *ephemeral,
 		Proxy:     *proxy,
 		Service:   *service,
+		SmokeTest: *smoke,
 	}
 	if opts.Port == "" {
 		opts.Port = "22"
@@ -148,10 +164,12 @@ func RunDeploy(versionDir string, args []string) error {
 }
 
 func deployRobot(versionDir string, opts deployOptions) error {
-	repoRoot, err := findRepoRootFromWD()
+	rt, err := configv1.ResolveRuntime("")
 	if err != nil {
 		return err
 	}
+	repoRoot := rt.RepoRoot
+	preset := configv1.NewPluginPreset(rt, "robot", versionDir)
 	if err := ensureRobotAuthKey(repoRoot); err != nil {
 		return err
 	}
@@ -164,6 +182,12 @@ func deployRobot(versionDir string, opts deployOptions) error {
 	defer client.Close()
 
 	if err := validateSudo(client); err != nil {
+		return err
+	}
+
+	// NEW: Pre-deployment checks
+	logs.Info("[DEPLOY] Running pre-deployment resource checks...")
+	if err := checkRemoteResources(client); err != nil {
 		return err
 	}
 
@@ -201,9 +225,18 @@ func deployRobot(versionDir string, opts deployOptions) error {
 	}
 
 	logs.Info("[DEPLOY] Uploading UI dist...")
-	localDist := filepath.Join(repoRoot, "src", "plugins", "robot", versionDir, "ui", "dist")
+	localDist := preset.UIDist
 	if err := uploadDir(client, localDist, remoteUIDir); err != nil {
 		return fmt.Errorf("failed to upload UI dist: %w", err)
+	}
+
+	hostname := strings.TrimSpace(os.Getenv("DIALTONE_HOSTNAME"))
+	if hostname == "" {
+		hostname = "drone-1"
+	}
+	logs.Info("[DEPLOY] Pruning existing Tailscale nodes for %s to ensure clean takeover...", hostname)
+	if err := pruneTailscaleNodes(hostname); err != nil {
+		return fmt.Errorf("DEPLOY FAILED: Cannot prune old Tailscale nodes. Is TS_API_KEY correct and valid? Error: %w", err)
 	}
 
 	if opts.Service {
@@ -241,12 +274,26 @@ func deployRobot(versionDir string, opts deployOptions) error {
 		}
 	}
 
+	if opts.SmokeTest {
+		logs.Info("[DEPLOY] Running post-deployment UI smoke test...")
+		if err := RunPostDeployUIValidation(); err != nil {
+			logs.Error("[DEPLOY] UI smoke test FAILED: %v", err)
+			return err
+		}
+		logs.Info("   [VERIFY] UI smoke test OK")
+	}
+
 	logs.Info("[DEPLOY] Deployment complete")
 	return nil
 }
 
 func buildRobotUI(repoRoot, versionDir string) error {
-	uiDir := filepath.Join(repoRoot, "src", "plugins", "robot", versionDir, "ui")
+	rt, err := configv1.ResolveRuntime(repoRoot)
+	if err != nil {
+		return err
+	}
+	preset := configv1.NewPluginPreset(rt, "robot", versionDir)
+	uiDir := preset.UI
 	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "bun", "src_v1", "exec", "--cwd", uiDir, "run", "build")
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
@@ -264,26 +311,124 @@ func buildRobotBinary(repoRoot, versionDir, goos, goarch string) (string, error)
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return "", err
 	}
-	out := filepath.Join(outDir, fmt.Sprintf("robot-src_v1-%s-%s", goos, goarch))
+	binaryName := fmt.Sprintf("robot-src_v1-%s-%s", goos, goarch)
+	out := filepath.Join(outDir, binaryName)
 
-	goBin := filepath.Join(logs.GetDialtoneEnv(), "go", "bin", "go")
-	if _, err := os.Stat(goBin); err != nil {
-		fallback, lookErr := exec.LookPath("go")
-		if lookErr != nil {
-			return "", fmt.Errorf("go binary not found (managed and PATH)")
+	// Check if we need Podman for cross-compilation
+	// If current arch matches target, we can build locally
+	if goos == runtime.GOOS && (goarch == runtime.GOARCH || (runtime.GOARCH == "amd64" && goarch == "x86_64")) {
+		dialtoneEnv := logs.GetDialtoneEnv()
+		goBin := filepath.Join(dialtoneEnv, "go", "bin", "go")
+		if _, err := os.Stat(goBin); err != nil {
+			fallback, lookErr := exec.LookPath("go")
+			if lookErr != nil {
+				return "", fmt.Errorf("go binary not found (managed and PATH)")
+			}
+			goBin = fallback
 		}
-		goBin = fallback
+
+		cmd := exec.Command(goBin, "build", "-o", out, "./plugins/robot/src_v1/cmd/server/main.go")
+		rt, rtErr := configv1.ResolveRuntime(repoRoot)
+		if rtErr != nil {
+			return "", rtErr
+		}
+		cmd.Dir = rt.SrcRoot
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Env = os.Environ()
+		cmd.Env = append(cmd.Env, "CGO_ENABLED=0", "GOOS="+goos, "GOARCH="+goarch, "GOROOT="+filepath.Join(dialtoneEnv, "go"))
+		logs.Info("[DEPLOY] Cross-compiling robot server for %s/%s (Local)...", goos, goarch)
+		if err := cmd.Run(); err != nil {
+			return "", fmt.Errorf("local build failed: %w", err)
+		}
+		return out, nil
 	}
 
-	cmd := exec.Command(goBin, "build", "-o", out, "./plugins/robot/src_v1/cmd/server/main.go")
-	cmd.Dir = filepath.Join(repoRoot, "src")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS="+goos, "GOARCH="+goarch)
-	logs.Info("[DEPLOY] Cross-compiling robot server for %s/%s...", goos, goarch)
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("build failed: %w", err)
+	// Cross-compilation: use Podman
+	logs.Info("[DEPLOY] Cross-compiling robot server for %s/%s (Podman)...", goos, goarch)
+
+	// Check if podman is available
+	if _, err := exec.LookPath("podman"); err != nil {
+		return "", fmt.Errorf("podman is required for cross-compilation but not found in PATH")
 	}
+
+	// Use Dockerfile.arm for cross-compiling to arm/arm64
+	dockerfilePath := filepath.Join(repoRoot, "containers", "Dockerfile.arm")
+	imageName := "dialtone-builder-arm"
+
+	buildImg := exec.Command("podman", "build", "-t", imageName, "-f", dockerfilePath, ".")
+	buildImg.Dir = repoRoot
+	buildImg.Stdout = os.Stdout
+	buildImg.Stderr = os.Stderr
+	if err := buildImg.Run(); err != nil {
+		return "", fmt.Errorf("podman build failed: %w", err)
+	}
+
+	rt, err := configv1.ResolveRuntime(repoRoot)
+	if err != nil {
+		return "", err
+	}
+	srcDir := rt.SrcRoot
+	remoteBinPath := "/src/plugins/robot/bin/" + binaryName
+	var gcc string
+	if goarch == "arm64" || goarch == "aarch64" {
+		gcc = "aarch64-linux-gnu-gcc"
+	} else {
+		gcc = "arm-linux-gnueabihf-gcc"
+	}
+
+	dialtoneEnv := logs.GetDialtoneEnv()
+	// Use host's go mod cache to avoid re-downloading
+	goModCache := filepath.Join(os.Getenv("HOME"), "go", "pkg", "mod")
+	if _, err := os.Stat(goModCache); os.IsNotExist(err) {
+		// Fallback to DIALTONE_ENV/go/pkg/mod if exists
+		altCache := filepath.Join(dialtoneEnv, "go", "pkg", "mod")
+		if _, err := os.Stat(altCache); err == nil {
+			goModCache = altCache
+		}
+	}
+
+	podmanArgs := []string{"run", "--rm",
+		"-v", srcDir + ":/src:z",
+		"-w", "/src",
+		"-e", "CGO_ENABLED=1",
+		"-e", "GOOS=" + goos,
+		"-e", "GOARCH=" + goarch,
+		"-e", "CC=" + gcc,
+		"-e", "GOPATH=/go",
+	}
+
+	if _, err := os.Stat(goModCache); err == nil {
+		podmanArgs = append(podmanArgs, "-v", goModCache+":/go/pkg/mod:z")
+	}
+
+	podmanArgs = append(podmanArgs, imageName,
+		"go", "build", "-o", remoteBinPath, "./plugins/robot/src_v1/cmd/server/main.go")
+
+	runCmd := exec.Command("podman", podmanArgs...)
+	runCmd.Dir = repoRoot
+	runCmd.Stdout = os.Stdout
+	runCmd.Stderr = os.Stderr
+	if err := runCmd.Run(); err != nil {
+		return "", fmt.Errorf("podman run build failed: %w", err)
+	}
+
+	// Move the built binary to the expected out path
+	builtBin := filepath.Join(srcDir, "plugins", "robot", "bin", binaryName)
+	if err := os.MkdirAll(filepath.Dir(out), 0755); err != nil {
+		return "", err
+	}
+	if err := os.Rename(builtBin, out); err != nil {
+		// Fallback to copy if rename across filesystems fails
+		input, err := os.ReadFile(builtBin)
+		if err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(out, input, 0755); err != nil {
+			return "", err
+		}
+	}
+
 	return out, nil
 }
 
@@ -369,10 +514,43 @@ WantedBy=multi-user.target
 	return nil
 }
 
+func checkRemoteResources(client *sshlib.Client) error {
+	// Check disk space (need at least 100MB free in /home)
+	out, err := ssh_plugin.RunSSHCommand(client, "df -m /home | tail -n 1 | awk '{print $4}'")
+	if err == nil {
+		freeMB := 0
+		fmt.Sscanf(strings.TrimSpace(out), "%d", &freeMB)
+		if freeMB < 100 {
+			return fmt.Errorf("insufficient disk space on remote: %d MB free (need at least 100MB)", freeMB)
+		}
+		logs.Info("   [CHECK] Disk space: %d MB free (OK)", freeMB)
+	}
+
+	// Check MAVLink endpoint if configured
+	mavEP := strings.TrimSpace(os.Getenv("ROBOT_MAVLINK_ENDPOINT"))
+	if mavEP == "" {
+		mavEP = strings.TrimSpace(os.Getenv("MAVLINK_ENDPOINT"))
+	}
+	if strings.HasPrefix(mavEP, "serial:") {
+		parts := strings.Split(mavEP, ":")
+		if len(parts) >= 2 {
+			dev := parts[1]
+			_, err := ssh_plugin.RunSSHCommand(client, "ls "+shellQuote(dev))
+			if err != nil {
+				logs.Warn("   [CHECK] MAVLink serial device %s not found or inaccessible", dev)
+			} else {
+				logs.Info("   [CHECK] MAVLink serial device %s found (OK)", dev)
+			}
+		}
+	}
+
+	return nil
+}
+
 func verifyDeployment(client *sshlib.Client, opts deployOptions) error {
 	if opts.Service {
 		ok := false
-		for i := 0; i < 10; i++ {
+		for i := 0; i < 15; i++ {
 			out, err := sudoRun(client, "systemctl is-active dialtone-robot.service")
 			if err == nil && strings.TrimSpace(out) == "active" {
 				ok = true
@@ -384,18 +562,51 @@ func verifyDeployment(client *sshlib.Client, opts deployOptions) error {
 			status, _ := sudoRun(client, "systemctl --no-pager --full status dialtone-robot.service | head -n 60")
 			return fmt.Errorf("remote dialtone-robot.service is not active\n%s", strings.TrimSpace(status))
 		}
+		logs.Info("   [VERIFY] Service dialtone-robot.service is active (OK)")
 	}
 
+	logs.Info("   [VERIFY] Waiting for health check http://127.0.0.1:8080/health ...")
 	var last string
+	var healthy bool
 	for i := 0; i < 90; i++ {
 		out, err := ssh_plugin.RunSSHCommand(client, "curl -fsS --max-time 5 http://127.0.0.1:8080/health || true")
 		if err == nil && strings.TrimSpace(out) == "ok" {
-			return nil
+			healthy = true
+			break
 		}
 		last = strings.TrimSpace(out)
 		time.Sleep(1 * time.Second)
 	}
-	return fmt.Errorf("remote health check failed, expected ok got %q", last)
+	if !healthy {
+		return fmt.Errorf("remote health check failed, expected ok got %q", last)
+	}
+	logs.Info("   [VERIFY] Local health check OK")
+
+	// Verify NATS WebSocket reachability via /natsws
+	logs.Info("   [VERIFY] Checking NATS WebSocket (/natsws) ...")
+	wsOut, err := ssh_plugin.RunSSHCommand(client, "curl -is --max-time 5 http://127.0.0.1:8080/natsws | head -n 1")
+	if err == nil && (strings.Contains(wsOut, "101") || strings.Contains(wsOut, "400") || strings.Contains(wsOut, "Upgrade Required")) {
+		// HTTP 101 Switching Protocols or 400 Bad Request (if not a proper WS handshake) indicates the endpoint exists
+		logs.Info("   [VERIFY] NATS WebSocket (/natsws) reachable (OK)")
+	} else {
+		logs.Warn("   [VERIFY] NATS WebSocket (/natsws) check unexpected response: %q", strings.TrimSpace(wsOut))
+	}
+
+	// Verify TSNet if DIALTONE_HOSTNAME is set
+	tsHost := os.Getenv("DIALTONE_HOSTNAME")
+	if tsHost == "" {
+		tsHost = "drone-1"
+	}
+	logs.Info("   [VERIFY] Checking Tailscale reachability for %s ...", tsHost)
+	// We check if the process is listening on port 80 via tsnet (if configured)
+	// This is harder to verify from within the robot via localhost if it's strictly tsnet-bound,
+	// but we can check the process list for the listener.
+	out, _ := ssh_plugin.RunSSHCommand(client, "ss -ltnp | grep ':80 ' || true")
+	if strings.Contains(out, "robot-src_v1") {
+		logs.Info("   [VERIFY] TSNet Web (80) listener found (OK)")
+	}
+
+	return nil
 }
 
 func setupLocalCloudflareProxyService(hostname, robotHost string) error {
@@ -614,23 +825,6 @@ func sudoRun(client *sshlib.Client, command string) (string, error) {
 	return ssh_plugin.RunSSHCommand(client, "sudo -n "+command)
 }
 
-func findRepoRootFromWD() (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
-			return cwd, nil
-		}
-		parent := filepath.Dir(cwd)
-		if parent == cwd {
-			return "", fmt.Errorf("repo root not found")
-		}
-		cwd = parent
-	}
-}
-
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
@@ -736,8 +930,8 @@ func provisionRobotAuthKeyWithAPI(apiKey, tailnet, description string, tags []st
 		"capabilities": map[string]any{
 			"devices": map[string]any{
 				"create": map[string]any{
-					"reusable":      false,
-					"ephemeral":     false,
+					"reusable":      true,
+					"ephemeral":     true,
 					"preauthorized": true,
 					"tags":          tagValues,
 				},
@@ -781,6 +975,267 @@ func provisionRobotAuthKeyWithAPI(apiKey, tailnet, description string, tags []st
 		return "", fmt.Errorf("tailscale api returned empty auth key payload")
 	}
 	return keyVal, nil
+}
+
+func RunPostDeployUIValidation() error {
+	hostname := os.Getenv("DIALTONE_HOSTNAME")
+	if hostname == "" {
+		hostname = "drone-1"
+	}
+	url := fmt.Sprintf("http://%s", hostname)
+
+	logs.Info("   [SMOKE] Strictly verifying robot UI at %s (via embedded tsnet)...", url)
+
+	// Use tsnet to join the network for verification
+	tsHost := "dialtone-deployer-" + hostname
+	cfg, err := tsnetv1.ResolveConfig(tsHost, "")
+	if err != nil {
+		return err
+	}
+
+	// Ensure we have an auth key for this ephemeral node
+	if !cfg.AuthKeyPresent {
+		apiKey := strings.TrimSpace(os.Getenv("TS_API_KEY"))
+		if apiKey == "" {
+			apiKey = strings.TrimSpace(os.Getenv("TAILSCALE_API_KEY"))
+		}
+		if apiKey != "" {
+			logs.Info("   [SMOKE] Provisioning ephemeral auth key for deployer...")
+			key, perr := provisionRobotAuthKeyWithAPI(apiKey, cfg.Tailnet, "dialtone-deployer-"+hostname, []string{"dialtone", "deployer", "ephemeral"})
+			if perr != nil && strings.Contains(strings.ToLower(perr.Error()), "requested tags") {
+				logs.Warn("   [SMOKE] Tailnet does not allow requested tags; retrying without tags")
+				key, perr = provisionRobotAuthKeyWithAPI(apiKey, cfg.Tailnet, "dialtone-deployer-"+hostname, nil)
+			}
+			if perr == nil {
+				_ = os.Setenv("TS_AUTHKEY", key)
+				cfg.AuthKeyPresent = true
+				cfg.AuthKeyEnv = "TS_AUTHKEY"
+				logs.Info("   [SMOKE] Successfully provisioned ephemeral auth key.")
+			} else {
+				logs.Error("   [SMOKE] Failed to provision auth key: %v", perr)
+			}
+		} else {
+			logs.Warn("   [SMOKE] TS_API_KEY missing; cannot auto-provision auth key for verification")
+		}
+	}
+
+	srv := tsnetv1.BuildServer(cfg)
+	// We make it ephemeral so it doesn't leave junk nodes
+	srv.Ephemeral = true
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	logs.Info("   [SMOKE] Joining Tailnet as %s ...", tsHost)
+	if _, err := srv.Up(ctx); err != nil {
+		return fmt.Errorf("failed to join Tailnet for verification: %w", err)
+	}
+
+	// Give DNS/Network map a moment to propagate
+	time.Sleep(3 * time.Second)
+
+	// Now we use the tsnet HTTP client to check the robot
+	client := srv.HTTPClient()
+
+	logs.Info("   [SMOKE] Probing %s ...", url)
+
+	var bodyStr string
+	var lastErr error
+	for attempt := 1; attempt <= 15; attempt++ {
+		targetURL := url
+		if attempt > 5 {
+			// If hostname resolution keeps failing, try to find the IP via API
+			ip, iperr := getTailscaleIP(hostname)
+			if iperr == nil && ip != "" {
+				if attempt == 6 {
+					logs.Info("   [SMOKE] Hostname resolution sluggish; switching to IP probe: http://%s", ip)
+				}
+				targetURL = "http://" + ip
+			} else if attempt == 6 {
+				logs.Warn("   [SMOKE] Could not resolve IP via API: %v", iperr)
+			}
+		}
+
+		resp, err := client.Get(targetURL)
+		if err != nil {
+			lastErr = err
+			if attempt%3 == 0 {
+				logs.Warn("   [SMOKE] Probe attempt %d failed: %v", attempt, err)
+			}
+			time.Sleep(3 * time.Second)
+			continue
+		}
+
+		body, rerr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if rerr != nil {
+			lastErr = rerr
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		bodyStr = string(body)
+		lastErr = nil
+		break
+	}
+
+	if lastErr != nil {
+		return fmt.Errorf("failed to reach robot at %s via Tailscale after retries: %w", url, lastErr)
+	}
+
+	if strings.Contains(strings.ToLower(bodyStr), "sleeping ...") {
+		return fmt.Errorf("VERIFICATION FAILED: Reached the relay sleep page instead of the robot UI at %s", url)
+	}
+
+	if !strings.Contains(strings.ToLower(bodyStr), "dialtone.robot") {
+		return fmt.Errorf("VERIFICATION FAILED: Robot UI content not found at %s. (Response length: %d)", url, len(bodyStr))
+	}
+
+	logs.Info("   [SMOKE] Verification SUCCESS: Robot UI is reachable and active at %s", url)
+	return nil
+}
+
+func getTailscaleIP(hostname string) (string, error) {
+	apiKey := strings.TrimSpace(os.Getenv("TS_API_KEY"))
+	if apiKey == "" {
+		apiKey = strings.TrimSpace(os.Getenv("TAILSCALE_API_KEY"))
+	}
+	if apiKey == "" {
+		return "", fmt.Errorf("TS_API_KEY not set")
+	}
+	tailnet := resolveRobotTailnet()
+
+	endpoint := fmt.Sprintf("https://api.tailscale.com/api/v2/tailnet/%s/devices", url.PathEscape(tailnet))
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return "", err
+	}
+	req.SetBasicAuth(apiKey, "")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to list devices: %s", resp.Status)
+	}
+
+	var data struct {
+		Devices []struct {
+			Hostname  string   `json:"hostname"`
+			Name      string   `json:"name"`
+			Addresses []string `json:"addresses"`
+		} `json:"devices"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return "", err
+	}
+
+	for _, d := range data.Devices {
+		if d.Hostname == hostname || strings.HasPrefix(d.Name, hostname+".") {
+			if len(d.Addresses) > 0 {
+				return d.Addresses[0], nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("device not found")
+}
+
+func pruneTailscaleNodes(hostname string) error {
+	apiKey := strings.TrimSpace(os.Getenv("TS_API_KEY"))
+	if apiKey == "" {
+		apiKey = strings.TrimSpace(os.Getenv("TAILSCALE_API_KEY"))
+	}
+	if apiKey == "" {
+		return fmt.Errorf("TS_API_KEY not set; cannot prune nodes")
+	}
+	tailnet := resolveRobotTailnet()
+
+	// Use tsnet plugin's internal client-from-args logic if possible,
+	// or replicate simple list/delete.
+	// We'll use the API directly since we have the apiKey and tailnet.
+
+	endpoint := fmt.Sprintf("https://api.tailscale.com/api/v2/tailnet/%s/devices", url.PathEscape(tailnet))
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.SetBasicAuth(apiKey, "")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		return fmt.Errorf("TS_API_KEY is invalid or expired. Please update it in env/.env (HTTP 401)")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to list devices: %s", resp.Status)
+	}
+
+	var data struct {
+		Devices []struct {
+			ID       string   `json:"id"`
+			Hostname string   `json:"hostname"`
+			Name     string   `json:"name"`
+			Tags     []string `json:"tags"`
+		} `json:"devices"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return err
+	}
+
+	for _, d := range data.Devices {
+		// Tailscale hostname might be 'drone-1' or 'drone-1.shad-artichoke.ts.net'
+		if d.Hostname == hostname || strings.HasPrefix(d.Name, hostname+".") {
+			isDialtone := false
+			for _, t := range d.Tags {
+				if t == "tag:dialtone" {
+					isDialtone = true
+					break
+				}
+			}
+			if !isDialtone {
+				logs.Warn("   [PRUNE] Skipping node %s (id=%s) because it lacks tag:dialtone (could be OS node)", d.Name, d.ID)
+				continue
+			}
+
+			logs.Info("   [PRUNE] Deleting conflicting node: %s (id=%s)", d.Name, d.ID)
+			deleteURL := fmt.Sprintf("https://api.tailscale.com/api/v2/device/%s", url.PathEscape(d.ID))
+			delReq, _ := http.NewRequest("DELETE", deleteURL, nil)
+			delReq.SetBasicAuth(apiKey, "")
+			delResp, err := client.Do(delReq)
+			if err != nil {
+				logs.Warn("   [PRUNE] Failed to delete %s: %v", d.ID, err)
+				continue
+			}
+			delResp.Body.Close()
+			if delResp.StatusCode != http.StatusOK && delResp.StatusCode != http.StatusNoContent {
+				logs.Warn("   [PRUNE] Unexpected status deleting %s: %s", d.ID, delResp.Status)
+			} else {
+				logs.Info("   [PRUNE] Successfully deleted %s", d.ID)
+			}
+		}
+	}
+
+	return nil
+}
+
+func isHostReachable(host, port string) bool {
+	timeout := 2 * time.Second
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), timeout)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 func extractAuthKey(payload map[string]any) string {

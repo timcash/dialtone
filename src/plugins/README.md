@@ -191,6 +191,7 @@ The current plugin dependency structure is maintained in a separate Mermaid file
 - [src/dev.go](../src/dev.go)
 - [logs](../src/plugins/logs/README.md)
 - [test](../src/plugins/test/README.md)
+- [config](../src/plugins/config/README.md)
 - [chrome](../src/plugins/chrome/README.md)
 - [go](../src/plugins/go/README.md)
 - [bun](../src/plugins/bun/README.md)

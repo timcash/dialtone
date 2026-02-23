@@ -3,7 +3,6 @@ package selfcheck
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"time"
@@ -114,11 +113,11 @@ func Register(r *testv1.Registry) {
 	r.Add(testv1.Step{
 		Name: "upsert-env-var",
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
-			repoRoot, err := findRepoRoot()
+			paths, err := tsnetv1.ResolvePaths("")
 			if err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			tmp := filepath.Join(repoRoot, "src", "plugins", "tsnet", "src_v1", "test", "tmp.env")
+			tmp := paths.TestTmpEnv
 			defer os.Remove(tmp)
 			if err := os.WriteFile(tmp, []byte("A=1\nTS_AUTHKEY=old\n"), 0o644); err != nil {
 				return testv1.StepRunResult{}, err
@@ -143,21 +142,4 @@ func Register(r *testv1.Registry) {
 			return testv1.StepRunResult{Report: "env upsert pass"}, nil
 		},
 	})
-}
-
-func findRepoRoot() (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
-			return cwd, nil
-		}
-		parent := filepath.Dir(cwd)
-		if parent == cwd {
-			return "", fmt.Errorf("repo root not found")
-		}
-		cwd = parent
-	}
 }
