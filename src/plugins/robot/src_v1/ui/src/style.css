@@ -264,7 +264,8 @@ section {
 
 /* XTERM */
 #xterm {
-  display: block;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
   position: relative;
   width: 100vw;
   height: 100vh;
@@ -275,9 +276,8 @@ section {
 }
 
 .xterm-primary {
-  /* Absolute fill */
-  position: absolute;
-  inset: 0;
+  grid-row: 1;
+  position: relative;
   border: 0;
   margin: 0;
   padding: 0;
