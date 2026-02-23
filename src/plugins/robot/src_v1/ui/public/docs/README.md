@@ -23,7 +23,8 @@ The `robot` plugin is the central hub for all robot-specific logic, including MA
 ./dialtone.sh robot src_v1 build --remote          # Sync & build on remote robot
 ./dialtone.sh robot src_v1 deploy                  # Build & ship binary to remote robot
 ./dialtone.sh robot src_v1 deploy --service        # Deploy as systemd service
-./dialtone.sh robot src_v1 deploy --proxy          # Deploy + setup local Cloudflare proxy
+./dialtone.sh robot src_v1 deploy --relay          # Deploy + setup local Cloudflare relay
+./dialtone.sh robot src_v1 wake                    # Repoint Cloudflare relay back to robot
 
 # MAINTENANCE
 ./dialtone.sh robot src_v1 sleep                   # Switch robot to low-power "Sleeping" mode
@@ -76,6 +77,7 @@ The `sleep` command switches the robot into a lightweight maintenance mode.
 *   **Behavior**: Serves a static "Sleeping..." page.
 *   **PWA**: The "Sleeping" page is a full PWA. It caches itself offline, so users see the status even if the network drops.
 *   **Wake Up**: Run `robot deploy src_v1` to restore the full application and repoint the proxy to the robot.
+*   **Relay-only Wake**: Run `robot src_v1 wake` to repoint Cloudflare to robot without deploying.
 
 **Both the Main UI and Sleep Server are Progressive Web Apps (PWA):**
 - **Installable**: Can be added to the home screen.
@@ -84,12 +86,12 @@ The `sleep` command switches the robot into a lightweight maintenance mode.
 
 ---
 
-## 🌐 Cloudflare Proxy (`--proxy`)
+## 🌐 Cloudflare Relay (`--relay`)
 
-The `--proxy` flag establishes a public tunnel to your robot via your local machine.
+The `--relay` flag establishes a public tunnel to your robot via your local machine.
 
 ```bash
-./dialtone.sh robot src_v1 deploy --proxy
+./dialtone.sh robot src_v1 deploy --relay
 ```
 
 *   **Architecture**: `Public URL` -> `Cloudflare` -> `Local Machine (cloudflared)` --[Tailscale]--> `Robot`.
