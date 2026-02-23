@@ -96,7 +96,13 @@ func RunSyncCode(versionDir string, args []string) error {
 	if err := syncPath(client, localSrc, *remoteDir, path.Join("plugins", "mavlink")); err != nil {
 		return err
 	}
+	if err := syncPath(client, localSrc, *remoteDir, path.Join("plugins", "camera")); err != nil {
+		return err
+	}
 	if err := syncPath(client, localSrc, *remoteDir, path.Join("plugins", "logs")); err != nil {
+		return err
+	}
+	if err := syncPath(client, localSrc, *remoteDir, path.Join("plugins", "ui", "src_v1", "ui")); err != nil {
 		return err
 	}
 

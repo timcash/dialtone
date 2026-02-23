@@ -17,7 +17,7 @@ func Lint() error {
 	}
 	uiDir := filepath.Join(repoRoot, "src", "plugins", "robot", "src_v1", "ui")
 
-	uiLint := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "lint")
+	uiLint := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "bun", "src_v1", "exec", "--cwd", uiDir, "run", "lint")
 	uiLint.Dir = repoRoot
 	uiLint.Stdout = os.Stdout
 	uiLint.Stderr = os.Stderr

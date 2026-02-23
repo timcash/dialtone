@@ -11,6 +11,13 @@ section {
   width: 100vw;
 }
 
+canvas.overlay-primary,
+img.overlay-primary {
+  display: block;
+  border: 0;
+  outline: 0;
+}
+
 /* OVERRIDES */
 
 /* Specific Button 9 (Mode) Style */
@@ -242,12 +249,8 @@ section {
 
 /* Calculator Layout Overrides */
 #table .mode-form,
-#three .mode-form {
-  position: relative;
-  left: auto;
-  transform: none;
-  bottom: auto;
-  margin: 0 auto;
+#three .mode-form,
+#xterm .mode-form {
   padding: 14px 0;
   grid-row: 2;
 }
@@ -303,6 +306,8 @@ section {
   object-fit: cover;
   background: #000;
   display: block;
+  border: 0;
+  outline: 0;
 }
 
 /* MENU OVERRIDES */

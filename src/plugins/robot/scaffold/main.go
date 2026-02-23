@@ -80,7 +80,7 @@ func runSrcV1(command, repoRoot string, args []string) error {
 		printUsage()
 		return nil
 	case "install":
-		return robot_ops.Install()
+		return robot_ops.Install(args...)
 	case "fmt":
 		return robot_ops.Fmt()
 	case "vet":
@@ -98,7 +98,7 @@ func runSrcV1(command, repoRoot string, args []string) error {
 	case "test":
 		return robot_ops.Test(repoRoot, args)
 	case "serve":
-		return robot_ops.Serve(repoRoot)
+		return robot_ops.Serve(repoRoot, args...)
 	case "ui-run":
 		port := 0
 		for i, arg := range args {

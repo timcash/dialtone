@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	cameraapp "dialtone/dev/plugins/camera/app"
 	mavlinkapp "dialtone/dev/plugins/mavlink/app"
 
 	"github.com/bluenviron/gomavlib/v3/pkg/dialects/common"
@@ -165,6 +166,10 @@ func buildMux(cfg config) *http.ServeMux {
 	mux.HandleFunc("/natsws", func(w http.ResponseWriter, r *http.Request) {
 		proxyNATSWS(w, r, fmt.Sprintf("ws://127.0.0.1:%d", cfg.natsWSPort))
 	})
+	mux.HandleFunc("/stream", func(w http.ResponseWriter, r *http.Request) {
+		cameraapp.StreamHandler(w, r)
+	})
+	mux.HandleFunc("/api/bookmark", bookmarkHandler)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		rel := strings.TrimPrefix(r.URL.Path, "/")
 		target := filepath.Join(cfg.uiPath, rel)
@@ -177,6 +182,61 @@ func buildMux(cfg config) *http.ServeMux {
 		http.ServeFile(w, r, target)
 	})
 	return mux
+}
+
+func bookmarkHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	file, header, err := r.FormFile("image")
+	if err != nil {
+		http.Error(w, "missing image upload", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		home = "."
+	}
+	dir := filepath.Join(home, ".dialtone", "robot", "bookmarks")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		http.Error(w, "failed to create bookmark dir", http.StatusInternalServerError)
+		return
+	}
+	name := sanitizeFilename(header.Filename)
+	if name == "" {
+		name = fmt.Sprintf("bookmark_%d.jpg", time.Now().UnixMilli())
+	}
+	dstPath := filepath.Join(dir, name)
+	dst, err := os.Create(dstPath)
+	if err != nil {
+		http.Error(w, "failed to create bookmark file", http.StatusInternalServerError)
+		return
+	}
+	defer dst.Close()
+	if _, err := io.Copy(dst, file); err != nil {
+		http.Error(w, "failed to save bookmark", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]any{
+		"ok":   true,
+		"path": dstPath,
+		"name": name,
+	})
+}
+
+func sanitizeFilename(name string) string {
+	name = filepath.Base(strings.TrimSpace(name))
+	if name == "" || name == "." || name == "/" {
+		return ""
+	}
+	name = strings.ReplaceAll(name, "..", "")
+	name = strings.ReplaceAll(name, "/", "_")
+	name = strings.ReplaceAll(name, "\\", "_")
+	return name
 }
 
 func maybeStartTSNet(cfg config, handler http.Handler) func() {

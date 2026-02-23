@@ -9,7 +9,7 @@ import (
 func Test(repoRoot string, extraArgs []string) error {
 	testPkg := "./" + filepath.Join("plugins", "robot", "src_v1", "test", "cmd")
 
-	args := []string{"go", "exec", "run", testPkg}
+	args := []string{"go", "src_v1", "exec", "run", testPkg}
 	args = append(args, extraArgs...)
 
 	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), args...)

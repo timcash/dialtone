@@ -35,6 +35,10 @@ export default defineConfig({
         target: wsProxyTarget,
         ws: true,
       },
+      '/natsws': {
+        target: wsProxyTarget,
+        ws: true,
+      },
       '/api': proxyTarget,
       '/stream': proxyTarget,
     }

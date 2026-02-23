@@ -230,6 +230,33 @@ section {
   align-items: stretch;
 }
 
+/* Section layout modes:
+   fullscreen = underlay fills section, controls float over content
+   calculator = underlay + controls split rows */
+section.fullscreen {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+section.fullscreen .mode-form {
+  position: absolute;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+  transform: translateX(-50%);
+  margin: 0;
+}
+
+section.calculator {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+section.calculator .mode-form {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  transform: none;
+  margin: 0 auto calc(env(safe-area-inset-bottom, 0px) + 14px);
+}
+
 section[hidden] {
   display: none !important;
 }
