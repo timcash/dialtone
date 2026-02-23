@@ -111,9 +111,10 @@ func runVersionedTest(versionDir string) error {
 	if err != nil {
 		return err
 	}
-
-	testPkg := "./plugins/repl/" + versionDir + "/test/cmd/main.go"
-	goArgs := []string{"src_v1", "exec", "run", testPkg}
+	if versionDir != "src_v1" {
+		return fmt.Errorf("unsupported repl version for tests: %s", versionDir)
+	}
+	goArgs := []string{"src_v1", "exec", "run", paths.TestCmdMain}
 	fullArgs := append([]string{"go"}, goArgs...)
 	cmd := exec.Command(filepath.Join(paths.Runtime.RepoRoot, "dialtone.sh"), fullArgs...)
 	cmd.Dir = paths.Runtime.RepoRoot
@@ -140,7 +141,7 @@ func buildStandaloneBinary(version, goos, goarch string) error {
 		}
 	}
 	out := filepath.Join(binDir, name)
-	pkg := "./plugins/repl/src_v1/cmd/repld/main.go"
+	pkg := filepath.Join(paths.Preset.Cmd, "repld", "main.go")
 	ld := ""
 	if strings.TrimSpace(version) != "" {
 		ld = "-X dialtone/dev/plugins/repl/src_v1/go/repl.BuildVersion=" + version
@@ -240,7 +241,7 @@ func releasePublish(args []string) error {
 		}
 	}
 
-	githubArgs := []string{"github", "release", "upsert", "src_v1", "--tag", version, "--repo", repo, "--title", "REPL " + version, "--notes", "Automated REPL release " + version}
+	githubArgs := []string{"github", "src_v1", "release", "upsert", "--tag", version, "--repo", repo, "--title", "REPL " + version, "--notes", "Automated REPL release " + version}
 	for _, a := range assets {
 		githubArgs = append(githubArgs, "--asset", filepath.Join(binDir, a))
 	}
