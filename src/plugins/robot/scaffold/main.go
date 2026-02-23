@@ -99,6 +99,8 @@ func runSrcV1(command, repoRoot string, args []string) error {
 		return robot_ops.Test(repoRoot, args)
 	case "serve":
 		return robot_ops.Serve(repoRoot, args...)
+	case "sleep":
+		return robot_ops.Sleep(repoRoot, args)
 	case "ui-run":
 		port := 0
 		for i, arg := range args {
@@ -224,6 +226,7 @@ func printUsage() {
 	logs.Raw("  dev          Start dev server")
 	logs.Raw("  test         Run tests")
 	logs.Raw("  serve        Start backend server")
+	logs.Raw("  sleep        Run lightweight sleep server")
 	logs.Raw("  ui-run       Start UI server")
 	logs.Raw("  deploy       Build and deploy robot service to ROBOT_HOST")
 	logs.Raw("  sync-code    Sync minimal robot source tree to remote host for on-device build/test")

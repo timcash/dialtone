@@ -27,7 +27,7 @@ func RunVPNTest(args []string) error {
 		Hostname: hostname,
 		AuthKey:  authKey,
 		Logf: func(format string, args ...any) {
-			logs.Debug(fmt.Sprintf("tsnet: "+format, args...))
+			logs.Debug("tsnet: %s", fmt.Sprintf(format, args...))
 		},
 	}
 	defer s.Close()

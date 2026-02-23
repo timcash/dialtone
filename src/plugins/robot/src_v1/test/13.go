@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 	"github.com/chromedp/chromedp"
 )
 
@@ -15,7 +14,7 @@ func Run13TableSectionValidation(ctx *testCtx) (string, error) {
 	}
 
 	fmt.Println("   [STEP] Navigating to Table Section...")
-	if err := session.Run(test_v2.NavigateToSection("robot", "table", "Telemetry Section")); err != nil {
+	if err := ctx.navigateSection("table"); err != nil {
 		return "", fmt.Errorf("failed navigating to Table: %w", err)
 	}
 

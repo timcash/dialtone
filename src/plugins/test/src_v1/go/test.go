@@ -513,8 +513,14 @@ func initSession(session *chrome.Session, role string) (*BrowserSession, error) 
 	// Connect to the browser via websocket
 	allocCtx, cancelAlloc := chromedp.NewRemoteAllocator(context.Background(), session.WebSocketURL)
 
-	// Create context
-	ctx, cancelCtx := chromedp.NewContext(allocCtx)
+	// Reuse an existing page target when possible to avoid opening additional tabs.
+	ctxOpts := []chromedp.ContextOption{}
+	if session.Port > 0 {
+		if targetID, err := getFirstPageTargetID(session.Port); err == nil && targetID != "" {
+			ctxOpts = append(ctxOpts, chromedp.WithTargetID(target.ID(targetID)))
+		}
+	}
+	ctx, cancelCtx := chromedp.NewContext(allocCtx, ctxOpts...)
 
 	s := &BrowserSession{
 		ctx:     ctx,
@@ -561,6 +567,32 @@ func initSession(session *chrome.Session, role string) (*BrowserSession, error) 
 	})
 
 	return s, nil
+}
+
+func getFirstPageTargetID(port int) (string, error) {
+	if port <= 0 {
+		return "", fmt.Errorf("invalid port")
+	}
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/json/list", port))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	type pageTarget struct {
+		ID   string `json:"id"`
+		Type string `json:"type"`
+	}
+	var targets []pageTarget
+	if err := json.NewDecoder(resp.Body).Decode(&targets); err != nil {
+		return "", err
+	}
+	for _, t := range targets {
+		if t.Type == "page" && strings.TrimSpace(t.ID) != "" {
+			return t.ID, nil
+		}
+	}
+	return "", fmt.Errorf("no page target found")
 }
 
 func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {

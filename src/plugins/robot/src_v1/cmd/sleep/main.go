@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"tailscale.com/tsnet"
@@ -17,12 +18,16 @@ import (
 var content embed.FS
 
 func main() {
-	hostname := flag.String("hostname", os.Getenv("DIALTONE_HOSTNAME"), "Tailscale hostname")
+	hostname := flag.String("hostname", strings.TrimSpace(os.Getenv("ROBOT_SLEEP_HOSTNAME")), "Tailscale hostname")
 	stateDir := flag.String("state-dir", "", "Directory to store Tailscale state")
 	flag.Parse()
 
 	if *hostname == "" {
-		*hostname = "dialtone-sleep"
+		if h, err := os.Hostname(); err == nil && strings.TrimSpace(h) != "" {
+			*hostname = h
+		} else {
+			*hostname = "dialtone-sleep"
+		}
 	}
 	if *stateDir == "" {
 		home, _ := os.UserHomeDir()

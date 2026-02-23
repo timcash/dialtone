@@ -3,18 +3,11 @@ package test
 import (
 	"fmt"
 	"time"
-
-	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 )
 
 func Run15XtermSectionValidation(ctx *testCtx) (string, error) {
-	session, err := ctx.browser()
-	if err != nil {
-		return "", err
-	}
-
 	fmt.Println("   [STEP] Navigating to Xterm Section...")
-	if err := session.Run(test_v2.NavigateToSection("robot", "xterm", "Xterm Section")); err != nil {
+	if err := ctx.navigateSection("xterm"); err != nil {
 		return "", fmt.Errorf("failed navigating to Xterm: %w", err)
 	}
 
@@ -28,13 +21,13 @@ func Run15XtermSectionValidation(ctx *testCtx) (string, error) {
 		return "", fmt.Errorf("failed waiting for data-ready: %w", err)
 	}
 
-	fmt.Println("   [STEP] Waiting for Xterm Input...")
-	if err := ctx.waitAria("Xterm Input", "input visibility"); err != nil {
-		return "", fmt.Errorf("failed waiting for Xterm Input: %w", err)
+	fmt.Println("   [STEP] Waiting for Log Command Input...")
+	if err := ctx.waitAria("Log Command Input", "input visibility"); err != nil {
+		return "", fmt.Errorf("failed waiting for Log Command Input: %w", err)
 	}
 
 	const cmd = "status --verbose"
-	if err := ctx.typeAndSubmitAria("Xterm Input", cmd, "typing command"); err != nil {
+	if err := ctx.typeAndSubmitAria("Log Command Input", cmd, "typing command"); err != nil {
 		return "", fmt.Errorf("failed typing command: %w", err)
 	}
 
