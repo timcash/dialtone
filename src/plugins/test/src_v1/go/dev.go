@@ -33,15 +33,7 @@ func RunDev(opts DevOptions) error {
 		opts.DevPort = 3000
 	}
 	devURL := fmt.Sprintf("http://127.0.0.1:%d", opts.DevPort)
-	devLogPath := filepath.Join(opts.PluginDir, "dev.log")
-
-	logFile, err := os.OpenFile(devLogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to open dev log at %s: %w", devLogPath, err)
-	}
-	defer logFile.Close()
-
-	logOut := io.MultiWriter(os.Stdout, logFile)
+	logOut := os.Stdout
 	logf := func(format string, args ...any) {
 		fmt.Fprintf(logOut, format+"\n", args...)
 	}

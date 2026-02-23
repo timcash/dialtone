@@ -35,7 +35,7 @@ func LocalWebRemoteRobot() error {
 	os.Setenv("VITE_PROXY_TARGET", proxyTarget)
 
 	// 1. Start UI dev server
-	devCmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "dev", "--host", "127.0.0.1", "--port", "3000")
+	devCmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "bun", "src_v1", "exec", "--cwd", uiDir, "run", "dev", "--host", "127.0.0.1", "--port", "3000")
 	devCmd.Stdout = os.Stdout
 	devCmd.Stderr = os.Stderr
 	if err := devCmd.Start(); err != nil {

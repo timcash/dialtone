@@ -28,6 +28,12 @@ type EmbeddedNATS struct {
 	conn   *nats.Conn
 }
 
+var primaryNATS struct {
+	once   sync.Once
+	conn   *nats.Conn
+	logger *NATSLogger
+}
+
 func StartEmbeddedNATS() (*EmbeddedNATS, error) {
 	opts := &nserver.Options{
 		Host:   "127.0.0.1",
@@ -374,4 +380,43 @@ func formatMessage(subject string, payload []byte) string {
 
 func ResetTopicClock(subject string) {
 	ResetClock(subject)
+}
+
+func publishPrimary(level, message, source string, isTest bool) {
+	ensurePrimaryLogger()
+	if primaryNATS.logger == nil {
+		return
+	}
+	_ = primaryNATS.logger.publishWithSource(level, message, source, isTest)
+}
+
+func ensurePrimaryLogger() {
+	primaryNATS.once.Do(func() {
+		if strings.TrimSpace(os.Getenv("DIALTONE_LOG_NATS")) == "0" {
+			return
+		}
+		natsURL := strings.TrimSpace(os.Getenv("DIALTONE_NATS_URL"))
+		if natsURL == "" {
+			natsURL = strings.TrimSpace(os.Getenv("NATS_URL"))
+		}
+		if natsURL == "" {
+			natsURL = "nats://127.0.0.1:4222"
+		}
+		subject := strings.TrimSpace(os.Getenv("DIALTONE_LOG_SUBJECT"))
+		if subject == "" {
+			subject = "logs.runtime"
+		}
+
+		nc, err := nats.Connect(natsURL, nats.Timeout(300*time.Millisecond), nats.Name("dialtone-logs-primary"))
+		if err != nil {
+			return
+		}
+		logger, err := NewNATSLogger(nc, subject)
+		if err != nil {
+			nc.Close()
+			return
+		}
+		primaryNATS.conn = nc
+		primaryNATS.logger = logger
+	})
 }

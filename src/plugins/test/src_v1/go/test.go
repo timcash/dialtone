@@ -831,16 +831,10 @@ type stackFrame struct {
 
 func RunSuite(opts SuiteOptions, steps []Step) error {
 	if opts.LogPath != "" {
-		// Truncate and open log file
-		f, err := os.OpenFile(opts.LogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-		if err == nil {
-			logs.SetOutput(f)
-			defer f.Close()
-		}
+		logs.Warn("%s file log path is deprecated and ignored: %s", testTag, opts.LogPath)
 	}
 	if opts.ErrorLogPath != "" {
-		// Truncate error log
-		_ = os.WriteFile(opts.ErrorLogPath, []byte(""), 0644)
+		logs.Warn("%s error log path is deprecated and ignored: %s", testTag, opts.ErrorLogPath)
 	}
 
 	logs.Info("%s Starting Test Suite: %s", testTag, opts.Version)

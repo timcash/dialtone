@@ -1,9 +1,6 @@
 package proc
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -22,31 +19,15 @@ type SubtoneLogger struct {
 }
 
 func NewSubtoneLogger(pid int, args []string, logDir string) (*SubtoneLogger, error) {
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		return nil, err
-	}
-
-	timestamp := time.Now().Format("20060102-150405")
-	logName := fmt.Sprintf("subtone-%d-%s.log", pid, timestamp)
-	logPath := filepath.Join(logDir, logName)
-
-	// Create/truncate log file
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Fprintf(f, "Command: %v\n", args)
-	fmt.Fprintf(f, "Started at: %s\n", time.Now().Format(time.RFC3339))
-	f.Close()
-
 	logger := &SubtoneLogger{
 		PID:        pid,
-		LogPath:    logPath,
+		LogPath:    "",
 		StartTime:  time.Now(),
 		ErrorLimit: 2,
 		done:       make(chan struct{}),
 	}
-
+	_ = args
+	_ = logDir
 	return logger, nil
 }
 
@@ -70,13 +51,7 @@ func (l *SubtoneLogger) Stop() {
 }
 
 func (l *SubtoneLogger) LogLine(line string) {
-	// Append to file
-	f, err := os.OpenFile(l.LogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err == nil {
-		ts := time.Now().Format(time.RFC3339)
-		fmt.Fprintf(f, "[%s] %s\n", ts, line)
-		f.Close()
-	}
+	_ = line
 }
 
 func (l *SubtoneLogger) LogError(line string) {
