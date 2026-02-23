@@ -6,7 +6,7 @@ type deployOptions struct {
 	User      string
 	Pass      string
 	Ephemeral bool
-	Proxy     bool
+	Relay     bool
 	Service   bool
 	SmokeTest bool
 }
