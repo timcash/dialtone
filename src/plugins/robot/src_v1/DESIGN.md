@@ -8,13 +8,13 @@ All v3 workflows are invoked via `./dialtone.sh` and remain consistent with exis
 Examples (v3 target):
 ```bash
 # Build UI assets
-./dialtone.sh robot build src_v1
+./dialtone.sh robot src_v1 build
 
 # Run the test suite
-./dialtone.sh robot test src_v1
+./dialtone.sh robot src_v1 test
 
 # Start dev server
-./dialtone.sh robot dev src_v1
+./dialtone.sh robot src_v1 dev
 
 # Scaffold a new version
 ./dialtone.sh robot src --n 4
@@ -175,7 +175,7 @@ Modeled after the DAG plugin dev flow, v3 adds a dedicated dev server experience
 
 CLI example:
 ```bash
-./dialtone.sh robot dev src_v1
+./dialtone.sh robot src_v1 dev
 ```
 
 Requirements:

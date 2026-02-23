@@ -65,7 +65,7 @@ Apply visual language and structure from `ui_v2` library, but keep these explici
 2. Update `src_v1` section markup/classes only where needed to adopt shared style conventions.
 3. Avoid adding any transitions/animations affecting navigation or text reveal.
 4. Run:
-- `./dialtone.sh robot test src_v1`
+- `./dialtone.sh robot src_v1 test`
 5. Confirm all 18 steps still pass and screenshots still generate under `src_v1/screenshots/`.
 
 ## Known Gotchas
@@ -74,5 +74,5 @@ Apply visual language and structure from `ui_v2` library, but keep these explici
 - Do not move ARIA labels without updating tests.
 
 ## Current Validation State
-- `./dialtone.sh robot test src_v1` passes end-to-end after current changes.
-- `./dialtone.sh robot dev src_v1` starts Vite, opens dev Chrome session, and writes `dev.log`.
+- `./dialtone.sh robot src_v1 test` passes end-to-end after current changes.
+- `./dialtone.sh robot src_v1 dev` starts Vite, opens dev Chrome session, and writes `dev.log`.

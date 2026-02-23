@@ -7,124 +7,153 @@ import (
 	"strconv"
 	"strings"
 
-	robot_ops "dialtone/dev/plugins/robot/src_v1/cmd/ops"
-	robot_cli "dialtone/dev/plugins/robot/src_v1/cmd/cli"
-	go_plugin "dialtone/dev/plugins/go/src_v1/go"
 	bun_plugin "dialtone/dev/plugins/bun/src_v1/go"
+	go_plugin "dialtone/dev/plugins/go/src_v1/go"
+	logs "dialtone/dev/plugins/logs/src_v1/go"
+	robot_cli "dialtone/dev/plugins/robot/src_v1/cmd/cli"
+	robot_ops "dialtone/dev/plugins/robot/src_v1/cmd/ops"
 	test_plugin "dialtone/dev/plugins/test/src_v1/go"
 )
 
 func main() {
+	logs.SetOutput(os.Stdout)
 	if len(os.Args) < 2 {
 		printUsage()
 		return
 	}
 
-	command := os.Args[1]
-	args := os.Args[2:]
+	version, command, args, warnedOldOrder, err := parseArgs(os.Args[1:])
+	if err != nil {
+		logs.Error("%v", err)
+		printUsage()
+		os.Exit(1)
+	}
+	if warnedOldOrder {
+		logs.Warn("old robot CLI order is deprecated. Use: ./dialtone.sh robot src_v1 <command> [args]")
+	}
 
 	repoRoot, err := findRepoRoot()
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
+		logs.Error("robot error: %v", err)
 		os.Exit(1)
 	}
 
-	versionDir := ""
-	if len(args) > 0 && strings.HasPrefix(args[0], "src_v") {
-		versionDir = args[0]
-		args = args[1:]
+	if version == "src_v1" {
+		err = runSrcV1(command, repoRoot, args)
 	} else {
-		versionDir = getLatestVersionDir(repoRoot)
+		err = runGeneric(version, command, repoRoot, args)
+	}
+	if err != nil {
+		logs.Error("robot error: %v", err)
+		os.Exit(1)
+	}
+}
+
+func parseArgs(args []string) (version, command string, rest []string, warnedOldOrder bool, err error) {
+	if len(args) == 0 {
+		return "", "", nil, false, fmt.Errorf("missing arguments")
+	}
+	if isHelp(args[0]) {
+		return "src_v1", "help", nil, false, nil
+	}
+	if strings.HasPrefix(args[0], "src_v") {
+		if len(args) < 2 {
+			return "", "", nil, false, fmt.Errorf("missing command (usage: ./dialtone.sh robot src_v1 <command> [args])")
+		}
+		return args[0], args[1], args[2:], false, nil
+	}
+	if len(args) >= 2 && strings.HasPrefix(args[1], "src_v") {
+		return args[1], args[0], args[2:], true, nil
 	}
 
-	// For src_v1, we use the specialized logic in cmd/ops
-	if versionDir == "src_v1" {
-		switch command {
-		case "install":
-			err = robot_ops.Install()
-		case "fmt":
-			err = robot_ops.Fmt()
-		case "vet":
-			err = robot_ops.Vet()
-		case "go-build":
-			err = robot_ops.GoBuild()
-		case "lint":
-			err = robot_ops.Lint()
-		case "format":
-			err = robot_ops.Format()
-		case "build":
-			err = robot_ops.Build(args...)
-		case "dev":
-			err = robot_ops.Dev(repoRoot, args)
-		case "test":
-			err = robot_ops.Test(repoRoot, args)
-		case "serve":
-			err = robot_ops.Serve(repoRoot)
-		case "ui-run":
-			port := 0
-			for i, arg := range args {
-				if arg == "--port" && i+1 < len(args) {
-					port, _ = strconv.Atoi(args[i+1])
-				}
-			}
-			err = robot_ops.UIRun(port)
-		case "deploy-test":
-			err = robot_cli.RunDeployTest(versionDir, args)
-		case "diagnostic":
-			err = robot_cli.RunDiagnostic(versionDir)
-		case "vpn-test":
-			err = robot_cli.RunVPNTest(args)
-		default:
-			fmt.Printf("Unknown command: %s\n", command)
-			printUsage()
-			os.Exit(1)
-		}
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-			os.Exit(1)
-		}
-		return
-	}
+	// Fallback: no explicit version provided, use latest version and first arg as command.
+	return "", args[0], args[1:], false, nil
+}
 
-	// Generic fallback for other versions (if any)
+func isHelp(s string) bool {
+	return s == "help" || s == "-h" || s == "--help"
+}
+
+func runSrcV1(command, repoRoot string, args []string) error {
 	switch command {
+	case "help", "-h", "--help":
+		printUsage()
+		return nil
 	case "install":
-		uiDir := filepath.Join(repoRoot, "src", "plugins", "robot", versionDir, "ui")
-		if err := bun_plugin.RunBun(uiDir, "install", "--force"); err != nil {
-			os.Exit(1)
-		}
+		return robot_ops.Install()
 	case "fmt":
-		pkg := "./plugins/robot/" + versionDir + "/..."
-		if err := go_plugin.RunGo("fmt", pkg); err != nil {
-			os.Exit(1)
-		}
+		return robot_ops.Fmt()
 	case "vet":
-		pkg := "./plugins/robot/" + versionDir + "/..."
-		if err := go_plugin.RunGo("vet", pkg); err != nil {
-			os.Exit(1)
-		}
+		return robot_ops.Vet()
 	case "go-build":
-		pkg := "./plugins/robot/" + versionDir + "/..."
-		if err := go_plugin.RunGo("build", pkg); err != nil {
-			os.Exit(1)
-		}
+		return robot_ops.GoBuild()
 	case "lint":
-		uiDir := filepath.Join(repoRoot, "src", "plugins", "robot", versionDir, "ui")
-		if err := bun_plugin.RunBun(uiDir, "run", "lint"); err != nil {
-			os.Exit(1)
-		}
+		return robot_ops.Lint()
 	case "format":
-		uiDir := filepath.Join(repoRoot, "src", "plugins", "robot", versionDir, "ui")
-		if err := bun_plugin.RunBun(uiDir, "run", "format"); err != nil {
-			os.Exit(1)
-		}
+		return robot_ops.Format()
 	case "build":
-		uiDir := filepath.Join(repoRoot, "src", "plugins", "robot", versionDir, "ui")
-		if err := bun_plugin.RunBun(uiDir, "run", "build"); err != nil {
-			os.Exit(1)
-		}
+		return robot_ops.Build(args...)
 	case "dev":
-		pluginDir := filepath.Join(repoRoot, "src", "plugins", "robot", versionDir)
+		return robot_ops.Dev(repoRoot, args)
+	case "test":
+		return robot_ops.Test(repoRoot, args)
+	case "serve":
+		return robot_ops.Serve(repoRoot)
+	case "ui-run":
+		port := 0
+		for i, arg := range args {
+			if arg == "--port" && i+1 < len(args) {
+				port, _ = strconv.Atoi(args[i+1])
+			}
+		}
+		return robot_ops.UIRun(port)
+	case "deploy-test":
+		return robot_cli.RunDeployTest("src_v1", args)
+	case "deploy":
+		return robot_cli.RunDeploy("src_v1", args)
+	case "sync-code":
+		return robot_cli.RunSyncCode("src_v1", args)
+	case "diagnostic":
+		return robot_cli.RunDiagnostic("src_v1")
+	case "vpn-test":
+		return robot_cli.RunVPNTest(args)
+	default:
+		return fmt.Errorf("unknown robot command: %s", command)
+	}
+}
+
+func runGeneric(version, command, repoRoot string, args []string) error {
+	if version == "" {
+		version = getLatestVersionDir(repoRoot)
+	}
+
+	switch command {
+	case "help", "-h", "--help":
+		printUsage()
+		return nil
+	case "install":
+		uiDir := filepath.Join(repoRoot, "src", "plugins", "robot", version, "ui")
+		return bun_plugin.RunBun(uiDir, "install", "--force")
+	case "fmt":
+		pkg := "./plugins/robot/" + version + "/..."
+		return go_plugin.RunGo("fmt", pkg)
+	case "vet":
+		pkg := "./plugins/robot/" + version + "/..."
+		return go_plugin.RunGo("vet", pkg)
+	case "go-build":
+		pkg := "./plugins/robot/" + version + "/..."
+		return go_plugin.RunGo("build", pkg)
+	case "lint":
+		uiDir := filepath.Join(repoRoot, "src", "plugins", "robot", version, "ui")
+		return bun_plugin.RunBun(uiDir, "run", "lint")
+	case "format":
+		uiDir := filepath.Join(repoRoot, "src", "plugins", "robot", version, "ui")
+		return bun_plugin.RunBun(uiDir, "run", "format")
+	case "build":
+		uiDir := filepath.Join(repoRoot, "src", "plugins", "robot", version, "ui")
+		return bun_plugin.RunBun(uiDir, "run", "build")
+	case "dev":
+		pluginDir := filepath.Join(repoRoot, "src", "plugins", "robot", version)
 		uiDir := filepath.Join(pluginDir, "ui")
 		opts := test_plugin.DevOptions{
 			RepoRoot:          repoRoot,
@@ -135,18 +164,11 @@ func main() {
 			BrowserMetaPath:   filepath.Join(pluginDir, "dev.browser.json"),
 			BrowserModeEnvVar: "ROBOT_DEV_BROWSER_MODE",
 		}
-		if err := test_plugin.RunDev(opts); err != nil {
-			fmt.Printf("Dev failed: %v\n", err)
-			os.Exit(1)
-		}
+		return test_plugin.RunDev(opts)
 	case "test":
-		// Standard test plugin logic...
-		fmt.Println("Standard test logic not yet implemented for Robot generic fallback")
-		os.Exit(1)
+		return fmt.Errorf("standard test logic not yet implemented for robot generic fallback")
 	default:
-		fmt.Printf("Unknown command: %s\n", command)
-		printUsage()
-		os.Exit(1)
+		return fmt.Errorf("unknown robot command: %s", command)
 	}
 }
 
@@ -189,18 +211,23 @@ func getLatestVersionDir(repoRoot string) string {
 }
 
 func printUsage() {
-	fmt.Println("Usage: ./dialtone.sh robot <command> [src_vN] [options]")
-	fmt.Println("\nCommands:")
-	fmt.Println("  install    Install dependencies")
-	fmt.Println("  fmt        Run go fmt")
-	fmt.Println("  vet        Run go vet")
-	fmt.Println("  go-build   Run go build")
-	fmt.Println("  lint       Run TS lint")
-	fmt.Println("  format     Run TS format")
-	fmt.Println("  build      Build UI")
-	fmt.Println("  dev        Start dev server")
-	fmt.Println("  test       Run tests")
-	fmt.Println("  deploy-test Run step-by-step verification on remote robot")
-	fmt.Println("  diagnostic Run UI and connectivity diagnostics")
-	fmt.Println("  vpn-test   Test Tailscale connectivity")
+	logs.Raw("Usage: ./dialtone.sh robot src_v1 <command> [args]")
+	logs.Raw("")
+	logs.Raw("Commands:")
+	logs.Raw("  install      Install dependencies")
+	logs.Raw("  fmt          Run go fmt")
+	logs.Raw("  vet          Run go vet")
+	logs.Raw("  go-build     Run go build")
+	logs.Raw("  lint         Run TS lint")
+	logs.Raw("  format       Run TS format")
+	logs.Raw("  build        Build UI")
+	logs.Raw("  dev          Start dev server")
+	logs.Raw("  test         Run tests")
+	logs.Raw("  serve        Start backend server")
+	logs.Raw("  ui-run       Start UI server")
+	logs.Raw("  deploy       Build and deploy robot service to ROBOT_HOST")
+	logs.Raw("  sync-code    Sync minimal robot source tree to remote host for on-device build/test")
+	logs.Raw("  deploy-test  Run step-by-step verification on remote robot")
+	logs.Raw("  diagnostic   Run UI and connectivity diagnostics")
+	logs.Raw("  vpn-test     Test Tailscale connectivity")
 }

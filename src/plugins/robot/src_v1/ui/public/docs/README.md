@@ -6,31 +6,31 @@ The `robot` plugin is the central hub for all robot-specific logic, including MA
 
 ```bash
 # INSTALL & SETUP
-./dialtone.sh robot install src_v1                 # Install local UI dependencies
-./dialtone.sh robot install src_v1 --remote        # Sync & install on remote robot (Native Build)
+./dialtone.sh robot src_v1 install                 # Install local UI dependencies
+./dialtone.sh robot src_v1 install --remote        # Sync & install on remote robot (Native Build)
 
 # DEVELOPMENT
-./dialtone.sh robot dev src_v1                     # Start local UI dev server + Chrome
-./dialtone.sh robot local-web-remote-robot src_v1  # Local UI dev server connected to Remote Robot data
-./dialtone.sh robot serve src_v1                   # Run the Go backend locally
+./dialtone.sh robot src_v1 dev                     # Start local UI dev server + Chrome
+./dialtone.sh robot src_v1 local-web-remote-robot  # Local UI dev server connected to Remote Robot data
+./dialtone.sh robot src_v1 serve                   # Run the Go backend locally
 
 # TESTING
-./dialtone.sh robot test src_v1                    # Run automated test suite (Headless)
-./dialtone.sh robot test src_v1 --attach           # Run tests watching via local Chrome
+./dialtone.sh robot src_v1 test                    # Run automated test suite (Headless)
+./dialtone.sh robot src_v1 test --attach           # Run tests watching via local Chrome
 
 # BUILD & DEPLOY
-./dialtone.sh robot build src_v1                   # Build UI assets locally
-./dialtone.sh robot build src_v1 --remote          # Sync & build on remote robot
-./dialtone.sh robot deploy src_v1                  # Build & ship binary to remote robot
-./dialtone.sh robot deploy src_v1 --service        # Deploy as systemd service
-./dialtone.sh robot deploy src_v1 --proxy          # Deploy + setup local Cloudflare proxy
+./dialtone.sh robot src_v1 build                   # Build UI assets locally
+./dialtone.sh robot src_v1 build --remote          # Sync & build on remote robot
+./dialtone.sh robot src_v1 deploy                  # Build & ship binary to remote robot
+./dialtone.sh robot src_v1 deploy --service        # Deploy as systemd service
+./dialtone.sh robot src_v1 deploy --proxy          # Deploy + setup local Cloudflare proxy
 
 # MAINTENANCE
-./dialtone.sh robot sleep src_v1                   # Switch robot to low-power "Sleeping" mode
+./dialtone.sh robot src_v1 sleep                   # Switch robot to low-power "Sleeping" mode
 
 # UTILITIES
-./dialtone.sh robot sync-code src_v1               # Sync source code to robot (no build)
-./dialtone.sh robot diagnostic src_v1              # Verify live robot UI/telemetry
+./dialtone.sh robot src_v1 sync-code               # Sync source code to robot (no build)
+./dialtone.sh robot src_v1 diagnostic              # Verify live robot UI/telemetry
 ./dialtone.sh robot telemetry                      # Monitor MAVLink latency on local NATS
 ```
 
@@ -52,11 +52,11 @@ The `--remote` flag allows you to offload the build process to the robot itself.
 ### Workflow
 1.  **Sync & Install**: Copies your local source code to the robot and runs `bun install` / `go mod download` on the remote machine.
     ```bash
-    ./dialtone.sh robot install src_v1 --remote
+    ./dialtone.sh robot src_v1 install --remote
     ```
 2.  **Sync & Build**: Copies code and compiles the Go binary and Vite UI on the remote machine.
     ```bash
-    ./dialtone.sh robot build src_v1 --remote
+    ./dialtone.sh robot src_v1 build --remote
     ```
 
 > **Note**: These commands mirror your local project structure to `~/dialtone` on the remote robot.
@@ -68,7 +68,7 @@ The `--remote` flag allows you to offload the build process to the robot itself.
 The `sleep` command switches the robot into a lightweight maintenance mode.
 
 ```bash
-./dialtone.sh robot sleep src_v1
+./dialtone.sh robot src_v1 sleep
 ```
 
 *   **Mechanism**: Builds/Runs a minimal Go web server locally (`dialtone-sleep`) on port 8080.
@@ -89,7 +89,7 @@ The `sleep` command switches the robot into a lightweight maintenance mode.
 The `--proxy` flag establishes a public tunnel to your robot via your local machine.
 
 ```bash
-./dialtone.sh robot deploy src_v1 --proxy
+./dialtone.sh robot src_v1 deploy --proxy
 ```
 
 *   **Architecture**: `Public URL` -> `Cloudflare` -> `Local Machine (cloudflared)` --[Tailscale]--> `Robot`.
@@ -108,20 +108,20 @@ We use a "Bottom-Up" testing approach managed by `test_v2`.
 ### 1. Local Automated Tests
 Always run this before deploying. It spins up a local mock server and checks all UI sections.
 ```bash
-./dialtone.sh robot test src_v1
+./dialtone.sh robot src_v1 test
 ```
 *   **Artifacts**: Generates `TEST.md`, `test.log`, and screenshots in `src/plugins/robot/src_v1/test/screenshots/`.
 
 ### 2. Visual Debugging (`--attach`)
 If a test fails, watch the browser execution live:
 ```bash
-./dialtone.sh robot test src_v1 --attach
+./dialtone.sh robot src_v1 test --attach
 ```
 
 ### 3. Live Data Verification
 To test your local UI changes against *real* data from the robot:
 ```bash
-./dialtone.sh robot local-web-remote-robot src_v1
+./dialtone.sh robot src_v1 local-web-remote-robot
 ```
 *   This proxies your local Vite server to the robot's NATS bus.
 *   Great for tuning 3D visualizations or HUD latency without deploying.

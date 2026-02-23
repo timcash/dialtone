@@ -7,37 +7,37 @@ The `robot` plugin is the central hub for all robot-specific logic, including MA
 ```bash
 # === DEVELOPMENT ===
 # Start local UI dev server + Chrome (Mock Data)
-./dialtone.sh robot dev src_v1
+./dialtone.sh robot src_v1 dev
 
 # Start local UI dev server + Remote Robot Data (SSH Tunnel)
-./dialtone.sh robot dev src_v1 --robot
+./dialtone.sh robot src_v1 dev --robot
 
 # Visual Debugging (Attach to existing Chrome session)
-./dialtone.sh robot dev src_v1 --attach
+./dialtone.sh robot src_v1 dev --attach
 
 # === DEPLOYMENT ===
-# Build & Deploy binary to remote robot (updates service if exists)
-./dialtone.sh robot deploy src_v1
+# Build + deploy to robot
+./dialtone.sh robot src_v1 deploy
 
-# Deploy + Install/Restart Systemd Service
-./dialtone.sh robot deploy src_v1 --service
+# Deploy + install/restart robot systemd service
+./dialtone.sh robot src_v1 deploy --service
 
-# Deploy + Service + Setup Cloudflare Tunnel Proxy
-./dialtone.sh robot deploy src_v1 --service --proxy
+# Deploy + service + relay-side Cloudflare proxy
+./dialtone.sh robot src_v1 deploy --service --proxy
 
 # === TESTING ===
 # Run automated headless tests
-./dialtone.sh robot test src_v1
+./dialtone.sh robot src_v1 test
 
 # Run tests visually (watch in Chrome)
-./dialtone.sh robot test src_v1 --attach
+./dialtone.sh robot src_v1 test --attach
 
 # === MAINTENANCE ===
 # Verify live robot UI/telemetry status
-./dialtone.sh robot diagnostic src_v1
+./dialtone.sh robot src_v1 diagnostic
 
-# Monitor MAVLink latency on robot
-./dialtone.sh robot telemetry
+# Verify embedded tsnet connectivity
+./dialtone.sh robot src_v1 vpn-test
 ```
 
 ---
@@ -52,13 +52,13 @@ Choose your data source:
 **Option A: Local Mock (Fastest)**
 Ideal for UI layout and logic changes. Uses simulated telemetry.
 ```bash
-./dialtone.sh robot dev src_v1
+./dialtone.sh robot src_v1 dev
 ```
 
 **Option B: Remote Robot (Real Data)**
 Ideal for tuning 3D visualization or testing hardware integration. Tunnels data from the robot via SSH.
 ```bash
-./dialtone.sh robot dev src_v1 --robot
+./dialtone.sh robot src_v1 dev --robot
 ```
 *   **Prerequisite**: Ensure `ROBOT_HOST`, `ROBOT_USER`, and `ROBOT_PASSWORD` are set in `env/.env`.
 
@@ -77,16 +77,16 @@ The dev server (Vite) hot-reloads automatically.
 ### 4. Run Tests
 Ensure you haven't broken existing functionality.
 ```bash
-./dialtone.sh robot test src_v1
+./dialtone.sh robot src_v1 test
 ```
 
 ### 5. Deploy
-Ship your changes to the robot. The deploy script handles version bumping, building (native ARM64), and service restarts.
+Ship your changes to the robot and restart service when needed.
 ```bash
-./dialtone.sh robot deploy src_v1 --service --proxy
+./dialtone.sh robot src_v1 deploy --service --proxy
 ```
-*   **--service**: Ensures the systemd service (`dialtone.service`) is installed/restarted.
-*   **--proxy**: Ensures the Cloudflare tunnel (`drone-1.dialtone.earth`) is active.
+*   `--service`: installs/restarts `dialtone-robot.service` on the robot.
+*   `--proxy`: configures relay-side Cloudflare proxy for `<hostname>.dialtone.earth`.
 
 ---
 
@@ -114,7 +114,8 @@ The system uses a hybrid architecture for low latency and accessibility:
 
 1.  **Direct NATS (Telemetry)**:
     *   Robot publishes MAVLink -> NATS (`mavlink.>`).
-    *   UI connects via WebSocket (`ws://<host>:4223`).
+    *   UI connects through `nats.ws` at `ws(s)://<host>/natsws` (same external web port).
+    *   Embedded NATS still runs locally on `127.0.0.1:4222` + `127.0.0.1:4223`.
     *   **Latency**: < 20ms typically.
 
 2.  **MJPEG Stream (Video)**:
@@ -124,3 +125,9 @@ The system uses a hybrid architecture for low latency and accessibility:
 3.  **Cloudflare Tunnel**:
     *   Secure public access via `https://drone-1.dialtone.earth`.
     *   Managed via user-level systemd service (`dialtone-proxy-drone-1`).
+
+### Runtime Environment
+The deployed `robot-src_v1` service reads:
+* `DIALTONE_HOSTNAME` (default `drone-1`) for tsnet hostname.
+* `TS_AUTHKEY` to join tailnet from embedded tsnet.
+* `ROBOT_MAVLINK_ENDPOINT` (or `MAVLINK_ENDPOINT`) for MAVLink ingest.
