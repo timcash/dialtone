@@ -1,12 +1,14 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
 
-	"dialtone/dev/browser"
+	chrome "dialtone/dev/plugins/chrome/src_v1/go"
+	cloudflarev1 "dialtone/dev/plugins/cloudflare/src_v1/go"
 	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 	"github.com/chromedp/chromedp"
 )
@@ -17,6 +19,7 @@ var sharedBrowser *test_v2.BrowserSession
 const (
 	testViewportWidth  = 390
 	testViewportHeight = 844
+	testServerPort     = 18080
 )
 
 func ensureSharedServer() error {
@@ -24,22 +27,23 @@ func ensureSharedServer() error {
 		return nil
 	}
 
-	repoRoot, err := os.Getwd()
+	paths, err := cloudflarev1.ResolvePaths("", "src_v1")
 	if err != nil {
 		return err
 	}
 
-	_ = browser.CleanupPort(8080)
+	_ = chrome.CleanupPort(testServerPort)
 
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "cloudflare", "serve", "src_v1")
-	cmd.Dir = repoRoot
+	cmd := exec.Command(filepath.Join(paths.Runtime.RepoRoot, "dialtone.sh"), "cloudflare", "src_v1", "serve")
+	cmd.Dir = paths.Runtime.RepoRoot
+	cmd.Env = append(os.Environ(), fmt.Sprintf("CLOUDFLARE_PORT=%d", testServerPort))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 
-	if err := waitForPort("127.0.0.1:8080", 12*time.Second); err != nil {
+	if err := waitForPort(fmt.Sprintf("127.0.0.1:%d", testServerPort), 12*time.Second); err != nil {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
 		return err
@@ -59,7 +63,7 @@ func ensureSharedBrowser(emitProofOfLife bool) (*test_v2.BrowserSession, error) 
 			Headless:      true,
 			Role:          "test",
 			ReuseExisting: false,
-			URL:           "http://127.0.0.1:8080",
+			URL:           fmt.Sprintf("http://127.0.0.1:%d", testServerPort),
 			LogWriter:     os.Stdout,
 			LogPrefix:     "[BROWSER]",
 		})
@@ -90,5 +94,25 @@ func teardownSharedEnv() {
 		_, _ = sharedServer.Process.Wait()
 		sharedServer = nil
 	}
-	_ = browser.CleanupPort(8080)
+	_ = chrome.CleanupPort(testServerPort)
+}
+
+func testRepoRoot() (string, error) {
+	paths, err := cloudflarev1.ResolvePaths("", "src_v1")
+	if err != nil {
+		return "", err
+	}
+	return paths.Runtime.RepoRoot, nil
+}
+
+func screenshotPath(name string) (string, error) {
+	paths, err := cloudflarev1.ResolvePaths("", "src_v1")
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(paths.PluginVersionRoot, "screenshots", name), nil
+}
+
+func navigateToSection(session *test_v2.BrowserSession, sectionID string) error {
+	return session.Run(chromedp.Evaluate(fmt.Sprintf(`window.location.hash = %q;`, sectionID), nil))
 }

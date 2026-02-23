@@ -12,7 +12,7 @@ func Run07GoRun() error {
 		return err
 	}
 
-	resp, err := http.Get("http://127.0.0.1:8080/health")
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/health", testServerPort))
 	if err != nil {
 		return err
 	}

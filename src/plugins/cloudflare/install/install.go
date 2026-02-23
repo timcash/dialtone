@@ -6,8 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 
-	"dialtone/dev/config"
 	"dialtone/dev/plugins/logs/src_v1/go"
 )
 
@@ -67,7 +67,6 @@ func RunCloudflaredInstall(depsDir string) {
 		runSimpleShell(fmt.Sprintf("tar -xzf %s -C %s", cfBin, cfDir))
 		runSimpleShell(fmt.Sprintf("mv %s/cloudflared %s", cfDir, cfBin)) // cloudflared binary is inside the tar.gz
 	}
-
 
 	if _, err := os.Stat(cfBin); err != nil {
 		logs.Fatal("Failed to install Cloudflared at %s: %v", cfBin, err)

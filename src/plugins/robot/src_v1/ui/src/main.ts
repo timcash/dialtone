@@ -1,6 +1,7 @@
 import { setupApp } from '@ui/ui';
 import './style.css';
 import { initConnection } from './data/connection';
+import { logError, logInfo } from './data/logging';
 import { handleButtonKey } from './buttons';
 
 declare const APP_VERSION: string;
@@ -14,7 +15,7 @@ if ('serviceWorker' in navigator) {
     // Aggressively unregister any service workers to prevent stale app shell
     void navigator.serviceWorker.getRegistrations().then((regs) => {
         regs.forEach((reg) => {
-            console.log('[SW] Unregistering stale worker:', reg.scope);
+            logInfo('ui/main', `[SW] Unregistering stale worker: ${reg.scope}`);
             void reg.unregister();
         });
     });
@@ -24,7 +25,7 @@ if ('serviceWorker' in navigator) {
         void caches.keys().then((keys) => {
             keys.forEach((key) => {
             if (key.includes('robot') || key.includes('dialtone') || key.includes('workbox')) {
-                console.log('[Cache] Deleting stale cache:', key);
+                logInfo('ui/main', `[Cache] Deleting stale cache: ${key}`);
                 void caches.delete(key);
             }
             });
@@ -261,8 +262,8 @@ const syncSectionFromURL = () => {
   const targetId = sectionSet.has(hashId as (typeof sectionOrder)[number]) ? hashId : defaultSection;
   const activeId = sections.getActiveSectionId();
   if (activeId === targetId) return;
-  void sections.navigateTo(targetId, { updateHash: hashId !== targetId }).catch((err) => {
-    console.error('[SectionManager] URL sync failed', err);
+  void sections.navigateTo(targetId, { updateHash: hashId !== targetId }).catch((err: unknown) => {
+    logError('ui/main', '[SectionManager] URL sync failed', err);
   });
 };
 

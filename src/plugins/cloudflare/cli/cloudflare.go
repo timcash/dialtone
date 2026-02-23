@@ -3,27 +3,31 @@ package cli
 import (
 	"bytes"
 	"crypto/rand"
-	"dialtone/dev/plugins/test/src_v1/go"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 
-	"dialtone/dev/config"
+	cloudflarev1 "dialtone/dev/plugins/cloudflare/src_v1/go"
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"dialtone/dev/plugins/logs/src_v1/go"
-	"dialtone/dev/util"
 )
 
 func findCloudflared() string {
-	depsDir := config.GetDialtoneEnv()
+	depsDir := strings.TrimSpace(os.Getenv("DIALTONE_ENV"))
+	if depsDir == "" {
+		depsDir = configv1.DefaultDialtoneEnv()
+	}
 
 	cfPath := filepath.Join(depsDir, "cloudflare", "cloudflared")
 	if _, err := os.Stat(cfPath); err == nil {
@@ -39,7 +43,7 @@ func findCloudflared() string {
 }
 
 func runBun(repoRoot, uiDir string, args ...string) *exec.Cmd {
-	bunArgs := append([]string{"bun", "exec", "--cwd", uiDir}, args...)
+	bunArgs := append([]string{"bun", "src_v1", "exec", "--cwd", uiDir}, args...)
 	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), bunArgs...)
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
@@ -47,22 +51,84 @@ func runBun(repoRoot, uiDir string, args ...string) *exec.Cmd {
 	return cmd
 }
 
-// RunCloudflare handles 'cloudflare <subcommand>'
+func waitForShutdown() {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	<-sigCh
+}
+
+func proxyListener(ln net.Listener, targetAddr string) {
+	defer ln.Close()
+	for {
+		clientConn, err := ln.Accept()
+		if err != nil {
+			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+				continue
+			}
+			return
+		}
+		go func(c net.Conn) {
+			defer c.Close()
+			targetConn, err := net.Dial("tcp", targetAddr)
+			if err != nil {
+				logs.Error("proxy dial failed: %v", err)
+				return
+			}
+			defer targetConn.Close()
+			go func() { _, _ = io.Copy(targetConn, c) }()
+			_, _ = io.Copy(c, targetConn)
+		}(clientConn)
+	}
+}
+
+func resolveCloudflarePaths(versionDir string) (cloudflarev1.Paths, error) {
+	return cloudflarev1.ResolvePaths("", versionDir)
+}
+
+func parseCloudflareArgs(args []string) (version, command string, rest []string, warnedOldOrder bool, err error) {
+	if len(args) == 0 {
+		return "", "", nil, false, fmt.Errorf("missing arguments")
+	}
+	if strings.HasPrefix(args[0], "src_v") {
+		if len(args) < 2 {
+			return "", "", nil, false, fmt.Errorf("missing command (usage: ./dialtone.sh cloudflare src_v1 <command> [args])")
+		}
+		return args[0], args[1], args[2:], false, nil
+	}
+	if len(args) >= 2 && strings.HasPrefix(args[1], "src_v") {
+		return args[1], args[0], args[2:], true, nil
+	}
+	return "", args[0], args[1:], false, nil
+}
+
+func isVersionedCloudflareCommand(command string) bool {
+	switch command {
+	case "install", "fmt", "format", "vet", "go-build", "lint", "dev", "ui-run", "test", "build":
+		return true
+	default:
+		return false
+	}
+}
+
+// RunCloudflare handles `cloudflare` commands.
 func RunCloudflare(args []string) {
 	if len(args) == 0 {
 		printCloudflareUsage()
 		return
 	}
 
-	subcommand := args[0]
-	restArgs := args[1:]
-
-	// Helper to get directory with latest default
-	getDir := func() string {
-		if len(args) > 1 && strings.HasPrefix(args[1], "src_v") {
-			return args[1]
-		}
-		return getLatestVersionDir()
+	version, subcommand, restArgs, warnedOldOrder, err := parseCloudflareArgs(args)
+	if err != nil {
+		logs.Error("%v", err)
+		printCloudflareUsage()
+		return
+	}
+	if warnedOldOrder {
+		logs.Warn("old cloudflare CLI order is deprecated. Use: ./dialtone.sh cloudflare src_v1 <command> [args]")
+	}
+	if version == "" && isVersionedCloudflareCommand(subcommand) {
+		version = "src_v1"
+		logs.Warn("cloudflare version not provided; defaulting to src_v1. Use: ./dialtone.sh cloudflare src_v1 %s", subcommand)
 	}
 
 	switch subcommand {
@@ -71,8 +137,10 @@ func RunCloudflare(args []string) {
 	case "tunnel":
 		runTunnel(restArgs)
 	case "serve":
-		if len(restArgs) > 0 && strings.HasPrefix(restArgs[0], "src_v") {
-			RunServe(restArgs[0])
+		if version != "" {
+			if err := RunServe(version); err != nil {
+				logs.Fatal("%v", err)
+			}
 		} else {
 			runServe(restArgs)
 		}
@@ -83,38 +151,59 @@ func RunCloudflare(args []string) {
 	case "provision":
 		runProvision(restArgs)
 	case "install":
-		RunInstall(getDir())
+		if err := RunInstall(version); err != nil {
+			logs.Fatal("%v", err)
+		}
 	case "fmt":
-		RunFmt(getDir())
+		if err := RunFmt(version); err != nil {
+			logs.Fatal("%v", err)
+		}
 	case "format":
-		RunFormat(getDir())
+		if err := RunFormat(version); err != nil {
+			logs.Fatal("%v", err)
+		}
 	case "vet":
-		RunVet(getDir())
+		if err := RunVet(version); err != nil {
+			logs.Fatal("%v", err)
+		}
 	case "go-build":
-		RunGoBuild(getDir())
+		if err := RunGoBuild(version); err != nil {
+			logs.Fatal("%v", err)
+		}
 	case "lint":
-		RunLint(getDir())
+		if err := RunLint(version); err != nil {
+			logs.Fatal("%v", err)
+		}
 	case "dev":
-		RunDev(getDir())
+		if err := RunDev(version); err != nil {
+			logs.Fatal("%v", err)
+		}
 	case "ui-run":
-		RunUIRun(getDir(), args[2:])
+		if err := RunUIRun(version, restArgs); err != nil {
+			logs.Fatal("%v", err)
+		}
 	case "test":
-		RunTest(getDir())
+		if err := RunTest(version); err != nil {
+			logs.Fatal("%v", err)
+		}
 	case "build":
-		RunBuild(getDir())
+		if err := RunBuild(version); err != nil {
+			logs.Fatal("%v", err)
+		}
 	case "setup-service":
 		RunSetupService(restArgs)
 	case "help", "-h", "--help":
 		printCloudflareUsage()
 	default:
-		fmt.Printf("Unknown cloudflare command: %s\n", subcommand)
+		logs.Error("Unknown cloudflare command: %s", subcommand)
 		printCloudflareUsage()
 		os.Exit(1)
 	}
 }
 
 func printCloudflareUsage() {
-	fmt.Println("Usage: dialtone cloudflare <command> [options]")
+	fmt.Println("Usage: ./dialtone.sh cloudflare src_v1 <command> [options]")
+	fmt.Println("       ./dialtone.sh cloudflare <command> [options]  # non-versioned commands")
 	fmt.Println("\nCommands:")
 	fmt.Println("  login       Authenticate with Cloudflare")
 	fmt.Println("  tunnel      Manage Cloudflare tunnels (create, list, etc.)")
@@ -156,15 +245,22 @@ func RunSetupService(args []string) {
 		logs.Fatal("Error: robot name is required for setup-service (pass as arg or set DIALTONE_DOMAIN/DIALTONE_HOSTNAME in .env)")
 	}
 
-	cwd, _ := os.Getwd()
-	dialtoneSh := filepath.Join(cwd, "dialtone.sh")
+	rt, err := configv1.ResolveRuntime("")
+	if err != nil {
+		logs.Fatal("runtime resolution failed: %v", err)
+	}
+	cwd := rt.RepoRoot
+	dialtoneSh := filepath.Join(rt.RepoRoot, "dialtone.sh")
 	user := os.Getenv("USER")
 	if user == "" {
 		user = "user"
 	}
 
 	// Determine dependency dir
-	depsDir := config.GetDialtoneEnv()
+	depsDir := strings.TrimSpace(os.Getenv("DIALTONE_ENV"))
+	if depsDir == "" {
+		depsDir = configv1.DefaultDialtoneEnv()
+	}
 
 	// Configure based on mode
 	var servicePath, wantedBy, userLine, installCmd, reloadCmd, enableCmd, restartCmd string
@@ -228,7 +324,7 @@ RestartSec=10
 WantedBy=%s
 `
 	serviceContent := fmt.Sprintf(serviceTemplate, robotName, dialtoneSh, robotName, extraArgs, cwd, userLine, depsDir, filepath.Join(cwd, "env/.env"), wantedBy)
-	
+
 	// Clean up empty lines if User line is empty
 	if userLine == "" {
 		serviceContent = strings.Replace(serviceContent, "\n\nEnvironment=", "\nEnvironment=", 1)
@@ -237,14 +333,23 @@ WantedBy=%s
 	fmt.Printf("Creating systemd service at %s...\n", servicePath)
 
 	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("dialtone-proxy-%s.service", robotName))
-	err := os.WriteFile(tmpFile, []byte(serviceContent), 0644)
+	err = os.WriteFile(tmpFile, []byte(serviceContent), 0644)
 	if err != nil {
 		logs.Fatal("Failed to write temporary service file: %v", err)
 	}
 
-	runShell := config.RunSimpleShell
-	if useSudo {
-		runShell = config.RunSudoShell
+	runShell := func(command string) {
+		var cmd *exec.Cmd
+		if useSudo {
+			cmd = exec.Command("sudo", "bash", "-lc", command)
+		} else {
+			cmd = exec.Command("bash", "-lc", command)
+		}
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if runErr := cmd.Run(); runErr != nil {
+			logs.Fatal("setup-service command failed: %s (%v)", command, runErr)
+		}
 	}
 
 	runShell(fmt.Sprintf(installCmd, tmpFile))
@@ -261,33 +366,14 @@ WantedBy=%s
 	}
 }
 
-func getLatestVersionDir() string {
-	cwd, _ := os.Getwd()
-	pluginDir := filepath.Join(cwd, "src", "plugins", "cloudflare")
-	entries, _ := os.ReadDir(pluginDir)
-	maxVer := 0
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "src_v") {
-			ver, _ := strconv.Atoi(e.Name()[5:])
-			if ver > maxVer {
-				maxVer = ver
-			}
-		}
-	}
-	if maxVer == 0 {
-		return "src_v1"
-	}
-	return fmt.Sprintf("src_v%d", maxVer)
-}
-
 func RunFmt(versionDir string) error {
 	fmt.Printf(">> [CLOUDFLARE] Fmt: %s\n", versionDir)
-	cwd, err := os.Getwd()
+	paths, err := resolveCloudflarePaths(versionDir)
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "fmt", "./src/plugins/cloudflare/"+versionDir+"/...")
-	cmd.Dir = cwd
+	cmd := exec.Command(filepath.Join(paths.Runtime.RepoRoot, "dialtone.sh"), "go", "src_v1", "exec", "fmt", "./plugins/cloudflare/"+versionDir+"/...")
+	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -295,23 +381,23 @@ func RunFmt(versionDir string) error {
 
 func RunFormat(versionDir string) error {
 	fmt.Printf(">> [CLOUDFLARE] Format: %s\n", versionDir)
-	cwd, err := os.Getwd()
+	paths, err := resolveCloudflarePaths(versionDir)
 	if err != nil {
 		return err
 	}
-	uiDir := filepath.Join(cwd, "src", "plugins", "cloudflare", versionDir, "ui")
-	cmd := runBun(cwd, uiDir, "run", "format")
+	uiDir := paths.Preset.UI
+	cmd := runBun(paths.Runtime.RepoRoot, uiDir, "run", "format")
 	return cmd.Run()
 }
 
 func RunVet(versionDir string) error {
 	fmt.Printf(">> [CLOUDFLARE] Vet: %s\n", versionDir)
-	cwd, err := os.Getwd()
+	paths, err := resolveCloudflarePaths(versionDir)
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "vet", "./src/plugins/cloudflare/"+versionDir+"/...")
-	cmd.Dir = cwd
+	cmd := exec.Command(filepath.Join(paths.Runtime.RepoRoot, "dialtone.sh"), "go", "src_v1", "exec", "vet", "./plugins/cloudflare/"+versionDir+"/...")
+	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -319,12 +405,12 @@ func RunVet(versionDir string) error {
 
 func RunGoBuild(versionDir string) error {
 	fmt.Printf(">> [CLOUDFLARE] Go Build: %s\n", versionDir)
-	cwd, err := os.Getwd()
+	paths, err := resolveCloudflarePaths(versionDir)
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "build", "./src/plugins/cloudflare/"+versionDir+"/...")
-	cmd.Dir = cwd
+	cmd := exec.Command(filepath.Join(paths.Runtime.RepoRoot, "dialtone.sh"), "go", "src_v1", "exec", "build", "./plugins/cloudflare/"+versionDir+"/...")
+	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -332,21 +418,25 @@ func RunGoBuild(versionDir string) error {
 
 func RunLint(versionDir string) error {
 	fmt.Printf(">> [CLOUDFLARE] Lint: %s\n", versionDir)
-
-	cwd, _ := os.Getwd()
-	uiDir := filepath.Join(cwd, "src", "plugins", "cloudflare", versionDir, "ui")
+	paths, err := resolveCloudflarePaths(versionDir)
+	if err != nil {
+		return err
+	}
+	uiDir := paths.Preset.UI
 
 	fmt.Println("   [LINT] Running tsc...")
-	cmd := runBun(cwd, uiDir, "run", "lint")
+	cmd := runBun(paths.Runtime.RepoRoot, uiDir, "run", "lint")
 	return cmd.Run()
 }
 
 func RunServe(versionDir string) error {
 	fmt.Printf(">> [CLOUDFLARE] Serve: %s\n", versionDir)
-
-	cwd, _ := os.Getwd()
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "run", filepath.ToSlash(filepath.Join("src", "plugins", "cloudflare", versionDir, "cmd", "main.go")))
-	cmd.Dir = cwd
+	paths, err := resolveCloudflarePaths(versionDir)
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(filepath.Join(paths.Runtime.RepoRoot, "dialtone.sh"), "go", "src_v1", "exec", "run", filepath.ToSlash(filepath.Join("plugins", "cloudflare", versionDir, "cmd", "main.go")))
+	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -361,55 +451,44 @@ func RunUIRun(versionDir string, extraArgs []string) error {
 		}
 	}
 
-	cwd, _ := os.Getwd()
-	uiDir := filepath.Join(cwd, "src", "plugins", "cloudflare", versionDir, "ui")
-	cmd := runBun(cwd, uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(port))
+	paths, err := resolveCloudflarePaths(versionDir)
+	if err != nil {
+		return err
+	}
+	uiDir := paths.Preset.UI
+	cmd := runBun(paths.Runtime.RepoRoot, uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(port))
 	return cmd.Run()
 }
 
 func RunDev(versionDir string) error {
 	fmt.Printf(">> [CLOUDFLARE] Dev: %s\n", versionDir)
-	cwd, _ := os.Getwd()
-	uiDir := filepath.Join(cwd, "src", "plugins", "cloudflare", versionDir, "ui")
-	versionDirPath := filepath.Join(cwd, "src", "plugins", "cloudflare", versionDir)
-	devPort := 3000
-	devURL := fmt.Sprintf("http://127.0.0.1:%d", devPort)
-
-	devSession, err := test_v2.NewDevSession(test_v2.DevSessionOptions{
-		VersionDirPath: versionDirPath,
-		Port:           devPort,
-		URL:            devURL,
-		ConsoleWriter:  os.Stdout,
-	})
+	paths, err := resolveCloudflarePaths(versionDir)
 	if err != nil {
 		return err
 	}
-	defer devSession.Close()
-
+	uiDir := paths.Preset.UI
+	devPort := 3000
 	fmt.Println("   [DEV] Running vite dev...")
-	cmd := runBun(cwd, uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(devPort))
-	cmd.Stdout = devSession.Writer()
-	cmd.Stderr = devSession.Writer()
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	devSession.StartBrowserAttach()
-
-	waitErr := cmd.Wait()
-	return waitErr
+	cmd := runBun(paths.Runtime.RepoRoot, uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(devPort))
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 func RunBuild(versionDir string) error {
 	fmt.Printf(">> [CLOUDFLARE] Build: %s\n", versionDir)
-	cwd, _ := os.Getwd()
-	uiDir := filepath.Join(cwd, "src", "plugins", "cloudflare", versionDir, "ui")
+	paths, err := resolveCloudflarePaths(versionDir)
+	if err != nil {
+		return err
+	}
+	uiDir := paths.Preset.UI
 
 	if err := RunInstall(versionDir); err != nil {
 		return err
 	}
 
 	fmt.Println("   [BUILD] Running UI build...")
-	cmd := runBun(cwd, uiDir, "run", "build")
+	cmd := runBun(paths.Runtime.RepoRoot, uiDir, "run", "build")
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("build failed: %v", err)
@@ -421,14 +500,17 @@ func RunBuild(versionDir string) error {
 
 func RunTest(versionDir string) error {
 	dir := versionDir
-	cwd, _ := os.Getwd()
-	testPkg := "./" + filepath.ToSlash(filepath.Join("src", "plugins", "cloudflare", dir, "test"))
-	if _, err := os.Stat(filepath.Join(cwd, "src", "plugins", "cloudflare", dir, "test", "main.go")); os.IsNotExist(err) {
+	paths, err := resolveCloudflarePaths(dir)
+	if err != nil {
+		return err
+	}
+	testPkg := "./" + filepath.ToSlash(filepath.Join("plugins", "cloudflare", dir, "test"))
+	if _, err := os.Stat(paths.TestMain); os.IsNotExist(err) {
 		return fmt.Errorf("test runner not found: %s/main.go", testPkg)
 	}
 	fmt.Printf(">> [CLOUDFLARE] Running Test Suite for %s...\n", dir)
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "run", testPkg)
-	cmd.Dir = cwd
+	cmd := exec.Command(filepath.Join(paths.Runtime.RepoRoot, "dialtone.sh"), "go", "src_v1", "exec", "run", testPkg)
+	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -452,7 +534,7 @@ func runLogin(args []string) {
 func runTunnel(args []string) {
 	cf := findCloudflared()
 	if len(args) == 0 {
-		fmt.Println("Usage: dialtone cloudflare tunnel <subcommand>")
+		fmt.Println("Usage: ./dialtone.sh cloudflare tunnel <subcommand>")
 		fmt.Println("\nSubcommands:")
 		fmt.Println("  create <name>   Create a new tunnel")
 		fmt.Println("  list            List existing tunnels")
@@ -477,7 +559,7 @@ func runTunnel(args []string) {
 		cmdArgs = append(cmdArgs, subArgs...)
 	case "run":
 		if len(subArgs) < 1 {
-			fmt.Println("Usage: dialtone cloudflare tunnel run <name> [options]")
+			fmt.Println("Usage: ./dialtone.sh cloudflare tunnel run <name> [options]")
 			return
 		}
 		tunnelName := subArgs[0]
@@ -497,7 +579,7 @@ func runTunnel(args []string) {
 		cmdArgs = append(cmdArgs, "--url", *urlFlag)
 	case "route":
 		if len(subArgs) == 0 {
-			fmt.Println("Usage: dialtone cloudflare tunnel route <tunnel-name> [hostname]")
+			fmt.Println("Usage: ./dialtone.sh cloudflare tunnel route <tunnel-name> [hostname]")
 			return
 		}
 		tunnelName := subArgs[0]
@@ -505,7 +587,6 @@ func runTunnel(args []string) {
 		if len(subArgs) > 1 {
 			hostname = subArgs[1]
 		} else {
-			config.LoadConfig()
 			dh := os.Getenv("DIALTONE_HOSTNAME")
 			if dh != "" {
 				hostname = fmt.Sprintf("%s.dialtone.earth", dh)
@@ -535,7 +616,7 @@ func runTunnel(args []string) {
 func runServe(args []string) {
 	cf := findCloudflared()
 	if len(args) < 1 {
-		fmt.Println("Usage: dialtone cloudflare serve <port-or-url>")
+		fmt.Println("Usage: ./dialtone.sh cloudflare serve <port-or-url>")
 		return
 	}
 
@@ -643,7 +724,7 @@ func runRobot(args []string) {
 	logs.Info("Cloudflare tunnel process started with PID: %d", cmd.Process.Pid)
 
 	// Keep the dialtone process alive to track the cloudflared process
-	util.WaitForShutdown()
+	waitForShutdown()
 }
 
 func runProxy(args []string) {
@@ -658,7 +739,7 @@ func runProxy(args []string) {
 	}
 
 	if targetAddr == "" {
-		logs.Fatal("Usage: dialtone cloudflare proxy <target> [--port <local-port>]")
+		logs.Fatal("Usage: ./dialtone.sh cloudflare proxy <target> [--port <local-port>]")
 	}
 
 	addr := fmt.Sprintf("127.0.0.1:%d", *localPort)
@@ -668,7 +749,7 @@ func runProxy(args []string) {
 	}
 
 	logs.Info("TCP Proxy started: %s -> %s", addr, targetAddr)
-	util.ProxyListener(ln, targetAddr)
+	proxyListener(ln, targetAddr)
 }
 
 func runProvision(args []string) {
@@ -689,7 +770,7 @@ func runProvision(args []string) {
 	}
 
 	if tunnelName == "" {
-		logs.Fatal("Usage: dialtone cloudflare provision <name> [--domain <domain>]")
+		logs.Fatal("Usage: ./dialtone.sh cloudflare provision <name> [--domain <domain>]")
 	}
 
 	if *apiToken == "" || *accountID == "" {

@@ -38,10 +38,10 @@ The `cloudflare` plugin integrates Cloudflare Tunnels into Dialtone, enabling se
 These commands are used for developing and testing the versioned Cloudflare plugin implementations (e.g., `src_v1`).
 
 ```bash
-./dialtone.sh cloudflare install [src_vN]  # Install UI dependencies
-./dialtone.sh cloudflare build   [src_vN]  # Build UI assets
-./dialtone.sh cloudflare test    [src_vN]  # Run automated test suite
-./dialtone.sh cloudflare dev     [src_vN]  # Run UI in dev mode with browser sync
+./dialtone.sh cloudflare src_v1 install  # Install UI dependencies
+./dialtone.sh cloudflare src_v1 build    # Build UI assets
+./dialtone.sh cloudflare src_v1 test     # Run automated test suite
+./dialtone.sh cloudflare src_v1 dev      # Run UI in dev mode with browser sync
 ```
 
 ## Workflow: Full Production Deployment (The "One Command" Workflow)

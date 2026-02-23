@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VisualizationControl } from '../../../../../../../plugins/ui/types';
+import { VisualizationControl } from '@ui/types';
 
 type HoveredCubeID = 'cube_left' | 'cube_right' | '';
 
@@ -71,8 +71,10 @@ class ThreeControl implements VisualizationControl {
     this.canvas.setAttribute('data-hovered-cube', id);
     for (const cube of this.cubes) {
       if (cube.id === id) {
+        cube.material.color.setHex(0x4678dc);
         cube.material.emissive.setHex(0x1f6dff);
       } else {
+        cube.material.color.setHex(0x444444);
         cube.material.emissive.setHex(0x000000);
       }
     }

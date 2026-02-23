@@ -1,25 +1,15 @@
 package ops
 
-import (
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strconv"
-)
+import "strconv"
 
 func UIRun(port int) error {
-	cwd, err := os.Getwd()
+	paths, err := resolveCloudflarePaths()
 	if err != nil {
 		return err
 	}
 	if port == 0 {
 		port = 3000
 	}
-	uiDir := filepath.Join(cwd, "src", "plugins", "cloudflare", "src_v1", "ui")
-
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(port))
-	cmd.Dir = cwd
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd := runDialtone(paths.Runtime.RepoRoot, "bun", "src_v1", "exec", "--cwd", paths.Preset.UI, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(port))
 	return cmd.Run()
 }

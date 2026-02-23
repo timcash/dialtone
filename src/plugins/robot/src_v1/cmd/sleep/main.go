@@ -3,7 +3,6 @@ package main
 import (
 	"embed"
 	"flag"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 	"tailscale.com/tsnet"
 )
 
@@ -18,6 +18,7 @@ import (
 var content embed.FS
 
 func main() {
+	logs.SetOutput(os.Stdout)
 	hostname := flag.String("hostname", strings.TrimSpace(os.Getenv("ROBOT_SLEEP_HOSTNAME")), "Tailscale hostname")
 	stateDir := flag.String("state-dir", "", "Directory to store Tailscale state")
 	flag.Parse()
@@ -45,19 +46,19 @@ func main() {
 	// Listen on Tailscale port 80
 	ln, err := s.Listen("tcp", ":80")
 	if err != nil {
-		log.Fatalf("Failed to listen on Tailscale: %v", err)
+		logs.Fatal("Failed to listen on Tailscale: %v", err)
 	}
 
 	// Also listen on local 8080 for LAN/debug
 	go http.ListenAndServe(":8080", http.HandlerFunc(handler))
 
-	log.Printf("Sleep server running on %s (Tailscale:80, Local:8080)\n", *hostname)
+	logs.Info("Sleep server running on %s (Tailscale:80, Local:8080)", *hostname)
 
 	srv := &http.Server{Handler: http.HandlerFunc(handler)}
 
 	go func() {
 		if err := srv.Serve(ln); err != nil {
-			log.Fatalf("Serve failed: %v", err)
+			logs.Fatal("Serve failed: %v", err)
 		}
 	}()
 

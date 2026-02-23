@@ -1,25 +1,18 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"time"
 
 	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 )
 
 func Run13TableSectionValidation() error {
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-
 	session, err := ensureSharedBrowser(false)
 	if err != nil {
 		return err
 	}
 
-	if err := session.Run(test_v2.NavigateToSection("status", "Status Section")); err != nil {
+	if err := navigateToSection(session, "status"); err != nil {
 		return err
 	}
 	if err := session.Run(test_v2.WaitForAriaLabel("Tunnel Table")); err != nil {
@@ -29,6 +22,9 @@ func Run13TableSectionValidation() error {
 		return err
 	}
 
-	shot := filepath.Join(repoRoot, "src", "plugins", "cloudflare", "src_v1", "screenshots", "test_step_3.png")
+	shot, err := screenshotPath("test_step_3.png")
+	if err != nil {
+		return err
+	}
 	return session.CaptureScreenshot(shot)
 }

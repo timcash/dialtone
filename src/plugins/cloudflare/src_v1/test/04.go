@@ -7,12 +7,12 @@ import (
 )
 
 func Run04UILint() error {
-	repoRoot, err := os.Getwd()
+	repoRoot, err := testRepoRoot()
 	if err != nil {
 		return err
 	}
 
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "cloudflare", "lint", "src_v1")
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "cloudflare", "src_v1", "lint")
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

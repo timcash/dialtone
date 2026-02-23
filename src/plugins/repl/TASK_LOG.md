@@ -83,18 +83,18 @@ Assume root `104` with inputs:
 
 ```text
 DIALTONE> task tree 104
-DIALTONE> - 104
-DIALTONE>   - 104-docs
-DIALTONE>   - 104-tests
-DIALTONE>   - 104-impl
+- 104
+  - 104-docs
+  - 104-tests
+  - 104-impl
 
-DIALTONE> task next
+USER-1> task next
 DIALTONE> NEXT: 104-docs (inputs satisfied)
 
 LLM-DOCS> Updated documentation links and acceptance notes in 104-docs.
 LLM-DOCS> task sign 104-docs --role DOCS
-LLM-REVIEW> task sign 104-docs --role REVIEW
 LLM-TEST> task sign 104-docs --role TEST
+LLM-REVIEW> task sign 104-docs --role REVIEW
 
 DIALTONE> task validate 104-docs
 DIALTONE> PASS

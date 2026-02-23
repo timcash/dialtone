@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 	"github.com/chromedp/chromedp"
 )
 
@@ -26,7 +25,7 @@ func Run17LifecycleInvariants() error {
 	}
 
 	for _, c := range checks {
-		if err := session.Run(test_v2.NavigateToSection(c.id, c.label)); err != nil {
+		if err := navigateToSection(session, c.id); err != nil {
 			return err
 		}
 	}
@@ -36,7 +35,7 @@ func Run17LifecycleInvariants() error {
 	for _, token := range required {
 		found := false
 		for _, e := range entries {
-			if strings.Contains(e.Message, token) {
+			if strings.Contains(e.Text, token) {
 				found = true
 				break
 			}
@@ -47,8 +46,8 @@ func Run17LifecycleInvariants() error {
 	}
 
 	for _, e := range entries {
-		if strings.Contains(e.Message, "[INVARIANT]") {
-			return fmt.Errorf("invariant violation captured: %s", e.Message)
+		if strings.Contains(e.Text, "[INVARIANT]") {
+			return fmt.Errorf("invariant violation captured: %s", e.Text)
 		}
 	}
 

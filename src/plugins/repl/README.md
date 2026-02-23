@@ -3,8 +3,9 @@
 The REPL plugin provides:
 - local interactive REPL (`run`)
 - shared multi-client REPL over NATS (`serve`/`join`)
-- update-aware service supervisor (`service`)
+- update-aware service supervisor and OS persistence (`service`)
 - release build/publish tooling for per-architecture binaries (`release`)
+- environment discovery and bus health checks (`status`)
 
 Prompts default to host identity (`<hostname>`) instead of `USER-1`.
 
@@ -13,21 +14,30 @@ Prompts default to host identity (`<hostname>`) instead of `USER-1`.
 ./dialtone.sh repl src_v1 help
 ./dialtone.sh repl src_v1 run
 ./dialtone.sh repl src_v1 status
-./dialtone.sh repl src_v1 serve --nats-url nats://0.0.0.0:4222 --room main --embedded-nats
+./dialtone.sh repl src_v1 serve --nats-url nats://0.0.0.0:4222 --room main --embedded-nats --tsnet
 ./dialtone.sh repl src_v1 join --nats-url nats://<server-ip>:4222 --room main --name <hostname>
-./dialtone.sh repl src_v1 service --mode run --repo timcash/dialtone --nats-url nats://0.0.0.0:4222 --room main --check-interval 3m
+./dialtone.sh repl src_v1 service --mode install --repo timcash/dialtone --room main
+./dialtone.sh repl src_v1 service --mode run --repo timcash/dialtone --check-interval 3m
 ./dialtone.sh repl src_v1 build
 ./dialtone.sh repl src_v1 release build v0.1.0
 ./dialtone.sh repl src_v1 release publish v0.1.0 timcash/dialtone
 ./dialtone.sh repl src_v1 test
 ```
 
+## Interactive Commands
+When running `run`, `serve`, or `join`, the REPL session supports internal management:
+- `ps`: List active subtones (background processes)
+- `kill <pid>`: Terminate a managed process
+- `<command> &`: Spawn a command in the background
+- `exit` / `quit`: Close the session
+
 ## NATS Model
 - REPL bus uses one subject per room: `repl.<room>`.
-- User input is published as NATS `input` frames first.
-- Server (`DIALTONE`) listens on that same subject and executes input frames.
-- REPL stdout is replay from NATS `line`/`server` frames.
-- Clients can detect an already-running server via probe/heartbeat frames on the same subject.
+- User input is published as NATS `input` frames.
+- Server (`DIALTONE`) listens on that subject and executes input frames.
+- REPL stdout/stderr is broadcast via `line` and `server` frames.
+- Clients detect server presence via `probe` / `heartbeat` frames.
+- Session lifecycle is tracked via `join` and `left` frames.
 
 ## Standalone Binary
 ```bash
@@ -47,13 +57,23 @@ Prompts default to host identity (`<hostname>`) instead of `USER-1`.
 
 `release publish` uploads those binaries to a GitHub release tag.
 
-## Service Hot-Swap
-`service --mode run` acts as a stable supervisor daemon:
-- checks GitHub Releases every interval
-- downloads newer architecture-matched worker binary
-- stops old worker subprocess
-- starts new worker subprocess
-- keeps supervisor process alive during swap
+## Service & OS Persistence
+The `service` command provides both a supervisor and automatic OS-level registration:
+- `--mode install`: Registers the REPL supervisor as a **systemd user service** (Linux) or **launchd agent** (macOS).
+- `--mode run`: Starts the supervisor in the foreground for log monitoring.
+- `--mode status`: Checks the OS-level service status.
+
+The supervisor maintains stability by:
+- Polling GitHub Releases for newer architecture-matched binaries.
+- Downloads new worker binaries to `~/.dialtone/repl/releases/`.
+- Updates a `current` symlink and hot-swaps the worker via `SIGTERM`.
+- Keeping the management layer alive even if the worker or network fails.
+
+## Environment Discovery (`status`)
+`repl src_v1 status` provides a comprehensive view of the local environment:
+- **Networking**: NATS reachability and server presence probe.
+- **VPN**: Tailscale (`tsnet`) configuration and authentication status.
+- **Platform**: Chrome/Chromium installation path and version.
 
 ## Tests
 `repl src_v1 test` runs:

@@ -3,25 +3,27 @@ package test
 import (
 	"fmt"
 	"time"
+
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
 func Run15XtermSectionValidation(ctx *testCtx) (string, error) {
-	fmt.Println("   [STEP] Navigating to Xterm Section...")
+	logs.InfoFromTest("robot-test", "[STEP] Navigating to Xterm Section...")
 	if err := ctx.navigateSection("xterm"); err != nil {
 		return "", fmt.Errorf("failed navigating to Xterm: %w", err)
 	}
 
-	fmt.Println("   [STEP] Waiting for Xterm Terminal...")
+	logs.InfoFromTest("robot-test", "[STEP] Waiting for Xterm Terminal...")
 	if err := ctx.waitAria("Xterm Terminal", "terminal visibility"); err != nil {
 		return "", fmt.Errorf("failed waiting for Xterm Terminal: %w", err)
 	}
 
-	fmt.Println("   [STEP] Waiting for data-ready=true...")
+	logs.InfoFromTest("robot-test", "[STEP] Waiting for data-ready=true...")
 	if err := ctx.waitAriaAttrEquals("Xterm Terminal", "data-ready", "true", "terminal ready", 3*time.Second); err != nil {
 		return "", fmt.Errorf("failed waiting for data-ready: %w", err)
 	}
 
-	fmt.Println("   [STEP] Waiting for Log Command Input...")
+	logs.InfoFromTest("robot-test", "[STEP] Waiting for Log Command Input...")
 	if err := ctx.waitAria("Log Command Input", "input visibility"); err != nil {
 		return "", fmt.Errorf("failed waiting for Log Command Input: %w", err)
 	}
@@ -31,7 +33,7 @@ func Run15XtermSectionValidation(ctx *testCtx) (string, error) {
 		return "", fmt.Errorf("failed typing command: %w", err)
 	}
 
-	fmt.Println("   [STEP] Waiting for command echo...")
+	logs.InfoFromTest("robot-test", "[STEP] Waiting for command echo...")
 	if err := ctx.waitAriaAttrEquals("Xterm Terminal", "data-last-command", cmd, "command echo check", 3*time.Second); err != nil {
 		return "", fmt.Errorf("failed waiting for command echo: %w", err)
 	}
