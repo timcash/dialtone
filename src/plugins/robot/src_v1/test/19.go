@@ -3,6 +3,7 @@ package test
 import (
 	"fmt"
 
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 	"github.com/chromedp/chromedp"
 )
 
@@ -34,7 +35,7 @@ func Run19MenuNavigationValidation(ctx *testCtx) (string, error) {
 		return "", fmt.Errorf("failed to navigate to Telemetry: %w", err)
 	}
 
-	fmt.Println("   [STEP] Waiting for menu to close and Telemetry to activate...")
+	logs.InfoFromTest("robot-test", "[STEP] Waiting for menu to close and Telemetry to activate...")
 	if err := session.Run(chromedp.WaitNotVisible("[aria-label='Global Menu Panel']", chromedp.ByQuery)); err != nil {
 		return "", fmt.Errorf("menu did not close: %w", err)
 	}

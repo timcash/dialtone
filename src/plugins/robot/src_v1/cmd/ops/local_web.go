@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 )
 
@@ -22,7 +23,7 @@ func LocalWebRemoteRobot() error {
 		hostname = "drone-1"
 	}
 
-	fmt.Printf(">> [Robot] Starting Local UI connected to Remote Robot: %s\n", hostname)
+	logs.Info(">> [Robot] Starting Local UI connected to Remote Robot: %s", hostname)
 
 	uiDir := paths.Preset.UI
 
@@ -54,6 +55,6 @@ func LocalWebRemoteRobot() error {
 	}
 
 	// Keep alive
-	fmt.Println(">> Local UI running. Press Ctrl+C to stop.")
+	logs.Info(">> Local UI running. Press Ctrl+C to stop.")
 	select {}
 }

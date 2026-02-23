@@ -11,7 +11,7 @@ import (
 )
 
 func Run08UIRun() error {
-	repoRoot, err := os.Getwd()
+	repoRoot, err := testRepoRoot()
 	if err != nil {
 		return err
 	}
@@ -21,7 +21,7 @@ func Run08UIRun() error {
 		return err
 	}
 
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "cloudflare", "ui-run", "src_v1", "--port", fmt.Sprintf("%d", port))
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "cloudflare", "src_v1", "ui-run", "--port", fmt.Sprintf("%d", port))
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

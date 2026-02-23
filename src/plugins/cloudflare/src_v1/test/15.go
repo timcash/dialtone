@@ -1,25 +1,18 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"time"
 
 	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 )
 
 func Run15XtermSectionValidation() error {
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-
 	session, err := ensureSharedBrowser(false)
 	if err != nil {
 		return err
 	}
 
-	if err := session.Run(test_v2.NavigateToSection("xterm", "Xterm Section")); err != nil {
+	if err := navigateToSection(session, "xterm"); err != nil {
 		return err
 	}
 	if err := session.Run(test_v2.WaitForAriaLabel("Xterm Terminal")); err != nil {
@@ -39,6 +32,9 @@ func Run15XtermSectionValidation() error {
 		return err
 	}
 
-	shot := filepath.Join(repoRoot, "src", "plugins", "cloudflare", "src_v1", "screenshots", "test_step_5.png")
+	shot, err := screenshotPath("test_step_5.png")
+	if err != nil {
+		return err
+	}
 	return session.CaptureScreenshot(shot)
 }

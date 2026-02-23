@@ -1,10 +1,10 @@
 package test
 
 import (
-	"fmt"
 	"os"
 	"time"
 
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 )
 
@@ -42,7 +42,7 @@ func RunSuiteV1() {
 		ErrorLogPath:   "plugins/robot/src_v1/test/error.log",
 		BrowserLogMode: "errors_only",
 	}, steps); err != nil {
-		fmt.Printf("[TEST] SUITE ERROR: %v\n", err)
+		logs.ErrorFromTest("robot-test", "SUITE ERROR: %v", err)
 		os.Exit(1)
 	}
 }
