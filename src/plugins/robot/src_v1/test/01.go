@@ -30,7 +30,7 @@ func Run01Preflight(ctx *testCtx) (string, error) {
 }
 
 func Run00Install(repoRoot string) error {
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "robot", "install", "src_v1")
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "robot", "src_v1", "install")
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -38,7 +38,7 @@ func Run00Install(repoRoot string) error {
 }
 
 func Run01GoFormat(repoRoot string) error {
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "robot", "fmt", "src_v1")
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "robot", "src_v1", "fmt")
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

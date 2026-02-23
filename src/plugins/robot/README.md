@@ -22,6 +22,7 @@ All commands use the current CLI order:
 # Run
 ./dialtone.sh robot src_v1 serve
 ./dialtone.sh robot src_v1 serve --remote
+./dialtone.sh robot src_v1 sleep
 ./dialtone.sh robot src_v1 dev
 ./dialtone.sh robot src_v1 dev --robot
 
@@ -59,6 +60,44 @@ What it does:
 - Builds UI + server on robot.
 - Starts remote binary from `plugins/robot/src_v1` (so `/` serves UI correctly).
 
+## LLM Dev Workflow
+
+Use this exact loop when an LLM is iterating on robot code.
+
+```sh
+# 0) Start at repo root
+cd /home/user/dialtone
+
+# 1) Install local dependencies once (cached by plugin install state)
+./dialtone.sh robot src_v1 install
+
+# 2) Fast correctness gate before behavior changes
+./dialtone.sh robot src_v1 fmt
+./dialtone.sh robot src_v1 vet
+./dialtone.sh robot src_v1 build
+./dialtone.sh robot src_v1 test
+
+# 3) Local UI/dev loop (WSL relay machine)
+./dialtone.sh robot src_v1 dev
+
+# 4) Remote robot loop without full deploy (preferred for rapid iteration)
+./dialtone.sh robot src_v1 install --remote
+./dialtone.sh robot src_v1 build --remote
+./dialtone.sh robot src_v1 serve --remote
+
+# 5) If binary/service swap is required on robot host
+./dialtone.sh robot src_v1 deploy --service
+
+# 6) Relay fallback page when robot is unplugged (run on relay/WSL host)
+./dialtone.sh robot src_v1 sleep
+```
+
+LLM guardrails:
+- Use `./dialtone.sh robot src_v1 <command>` argument order only.
+- Use `sync-code` + `build --remote` + `serve --remote` for most remote validation; avoid `deploy` unless service/binary replacement is needed.
+- Keep runtime/log validation through NATS topics; avoid adding file-log-only paths.
+- For UI automation/tests: use ARIA selectors and wait for browser/NATS message confirmation after actions.
+
 ## Environment
 
 Set in `env/.env`:
@@ -71,6 +110,10 @@ ROBOT_PASSWORD=...
 
 # Robot network identity
 DIALTONE_HOSTNAME=drone-1
+
+# Optional: override relay sleep server tsnet hostname.
+# Default is local machine hostname (recommended on relay/WSL host).
+ROBOT_SLEEP_HOSTNAME=legion
 
 # Tailscale auth (robot/tsnet)
 ROBOT_TS_AUTHKEY=tskey-auth-...

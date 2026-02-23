@@ -2,19 +2,12 @@ package test
 
 import (
 	"fmt"
-
-	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 )
 
 func Run14ThreeSectionValidation(ctx *testCtx) (string, error) {
-	session, err := ctx.browser()
-	if err != nil {
-		return "", err
-	}
-
 	// 1. Navigate to 3D Section
 	fmt.Println("   [STEP] Navigating to Three Section...")
-	if err := session.Run(test_v2.NavigateToSection("robot", "three", "Three Section")); err != nil {
+	if err := ctx.navigateSection("three"); err != nil {
 		return "", fmt.Errorf("failed navigating to Three: %w", err)
 	}
 

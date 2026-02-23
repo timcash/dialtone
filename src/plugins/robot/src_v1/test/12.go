@@ -2,18 +2,11 @@ package test
 
 import (
 	"fmt"
-
-	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 )
 
 func Run12DocsSectionValidation(ctx *testCtx) (string, error) {
-	session, err := ctx.browser()
-	if err != nil {
-		return "", err
-	}
-
 	fmt.Println("   [STEP] Navigating to Docs Section...")
-	if err := session.Run(test_v2.NavigateToSection("robot", "docs", "Docs Section")); err != nil {
+	if err := ctx.navigateSection("docs"); err != nil {
 		return "", fmt.Errorf("failed navigating to Docs: %w", err)
 	}
 

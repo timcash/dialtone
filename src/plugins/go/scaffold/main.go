@@ -84,12 +84,11 @@ func printUsage() {
 }
 
 func runInstall(args []string) {
-	pluginDir, err := os.Getwd()
+	installer, err := resolveInstallerPath()
 	if err != nil {
-		logs.Error("Failed to resolve go plugin directory: %v", err)
+		logs.Error("Failed to resolve go installer: %v", err)
 		os.Exit(1)
 	}
-	installer := filepath.Join(pluginDir, "install.sh")
 	cmd := exec.Command("bash", append([]string{installer}, args...)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -97,6 +96,27 @@ func runInstall(args []string) {
 	if err := cmd.Run(); err != nil {
 		os.Exit(1)
 	}
+}
+
+func resolveInstallerPath() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	candidates := []string{
+		filepath.Join(cwd, "install.sh"),
+		filepath.Join(cwd, "plugins", "go", "install.sh"),
+		filepath.Join(cwd, "src", "plugins", "go", "install.sh"),
+	}
+	if repoRoot, err := findRepoRoot(); err == nil {
+		candidates = append(candidates, filepath.Join(repoRoot, "src", "plugins", "go", "install.sh"))
+	}
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("go installer not found in expected locations")
 }
 
 func runExec(args []string) {
