@@ -38,8 +38,9 @@ All commands use the current CLI order:
 ./dialtone.sh robot src_v1 sync-code
 ./dialtone.sh robot src_v1 deploy
 ./dialtone.sh robot src_v1 deploy --service
-./dialtone.sh robot src_v1 deploy --service --proxy
-./dialtone.sh robot src_v1 deploy --service --proxy --smoke-test
+./dialtone.sh robot src_v1 deploy --service --relay
+./dialtone.sh robot src_v1 deploy --service --relay --smoke-test
+./dialtone.sh robot src_v1 wake
 ./dialtone.sh robot src_v1 deploy-test
 ./dialtone.sh robot src_v1 diagnostic
 ./dialtone.sh robot src_v1 vpn-test
@@ -99,6 +100,9 @@ cd /home/user/dialtone
 
 # 6) Relay fallback page when robot is unplugged (run on relay/WSL host)
 ./dialtone.sh robot src_v1 sleep
+
+# 7) Repoint public tunnel back to robot after wake/reconnect (no deploy)
+./dialtone.sh robot src_v1 wake
 ```
 
 LLM guardrails:
@@ -112,6 +116,11 @@ Sleep command behavior:
 - `robot src_v1 sleep` starts/updates `dialtone-robot-sleep.service` (user systemd daemon) by default.
 - Use `robot src_v1 sleep --foreground` to run sleep server in the current terminal instead of daemon mode.
 - If system service setup fails (for example no sudo), it falls back to user-mode service setup.
+
+Wake command behavior:
+- `robot src_v1 wake` repoints Cloudflare relay tunnel back to robot URL from `ROBOT_HOST` (`http://<ROBOT_HOST>:8080`).
+- Use `robot src_v1 wake --host <ip-or-host> --port <port>` to override target host/port.
+- Use `robot src_v1 wake --url <full-url>` to set an explicit relay target URL.
 
 ## Environment
 

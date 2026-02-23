@@ -1,14 +1,13 @@
 package ops
 
 import (
+	"flag"
 	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
 // Sleep starts the lightweight sleep server (local process) for src_v1.
@@ -22,7 +21,7 @@ func Sleep(repoRoot string, args []string) error {
 			if requireSleepProxyConfig() {
 				return err
 			}
-			logs.Warn("[ROBOT SLEEP] warning: %v; continuing without proxy reconfiguration", err)
+			fmt.Fprintf(os.Stderr, "[ROBOT SLEEP] warning: %v; continuing without proxy reconfiguration\n", err)
 		}
 	}
 
@@ -91,24 +90,64 @@ func filterFlags(args []string, values ...string) []string {
 }
 
 func configureSleepProxy(repoRoot string) error {
-	name := chooseNonEmpty(getenvTrim("DIALTONE_DOMAIN"), getenvTrim("DIALTONE_HOSTNAME"), "drone-1")
 	targetURL := chooseNonEmpty(getenvTrim("ROBOT_SLEEP_PROXY_URL"), "http://127.0.0.1:8080")
+	serviceName, err := configureCloudflareProxyTarget(repoRoot, targetURL)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "[ROBOT SLEEP] relay active: %s -> %s\n", serviceName, targetURL)
+	return nil
+}
+
+// Wake repoints the Cloudflare relay tunnel back to the robot host URL without deploying.
+func Wake(repoRoot string, args []string) error {
+	fs := flag.NewFlagSet("robot-wake", flag.ContinueOnError)
+	host := fs.String("host", strings.TrimSpace(os.Getenv("ROBOT_HOST")), "Robot host/IP for relay target")
+	port := fs.String("port", "8080", "Robot web port for relay target")
+	target := fs.String("url", "", "Explicit relay target URL (overrides --host/--port)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	targetURL := strings.TrimSpace(*target)
+	if targetURL == "" {
+		h := strings.TrimSpace(*host)
+		p := strings.TrimSpace(*port)
+		if h == "" {
+			return fmt.Errorf("wake requires --host (or ROBOT_HOST in env/.env) unless --url is provided")
+		}
+		if p == "" {
+			p = "8080"
+		}
+		targetURL = fmt.Sprintf("http://%s:%s", h, p)
+	}
+
+	serviceName, err := configureCloudflareProxyTarget(repoRoot, targetURL)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "[ROBOT WAKE] relay active: %s -> %s\n", serviceName, targetURL)
+	return nil
+}
+
+func configureCloudflareProxyTarget(repoRoot, targetURL string) (string, error) {
+	name := chooseNonEmpty(getenvTrim("DIALTONE_DOMAIN"), getenvTrim("DIALTONE_HOSTNAME"), "drone-1")
 	token := resolveCloudflareTunnelToken(name)
 	if token == "" {
-		return fmt.Errorf("missing Cloudflare tunnel token for %s (set CF_TUNNEL_TOKEN_%s or CF_TUNNEL_TOKEN)", name, strings.ToUpper(strings.ReplaceAll(name, "-", "_")))
+		return "", fmt.Errorf("missing Cloudflare tunnel token for %s (set CF_TUNNEL_TOKEN_%s or CF_TUNNEL_TOKEN)", name, strings.ToUpper(strings.ReplaceAll(name, "-", "_")))
 	}
 	cfBin := resolveCloudflaredPath(repoRoot)
 	if cfBin == "" {
-		return fmt.Errorf("cloudflared binary not found (expected in DIALTONE_ENV/cloudflare or PATH)")
+		return "", fmt.Errorf("cloudflared binary not found (expected in DIALTONE_ENV/cloudflare or PATH)")
 	}
 	serviceName := fmt.Sprintf("dialtone-proxy-%s.service", name)
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return err
+		return "", err
 	}
 	serviceDir := filepath.Join(home, ".config", "systemd", "user")
 	if err := os.MkdirAll(serviceDir, 0755); err != nil {
-		return err
+		return "", err
 	}
 	servicePath := filepath.Join(serviceDir, serviceName)
 	serviceContent := fmt.Sprintf(`[Unit]
@@ -125,21 +164,20 @@ RestartSec=2
 WantedBy=default.target
 `, name, cfBin, token, targetURL)
 	if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
-		return err
+		return "", err
 	}
 	if err := runSystemctlUser("daemon-reload"); err != nil {
-		return err
+		return "", err
 	}
 	if err := runSystemctlUser("enable", serviceName); err != nil {
-		return err
+		return "", err
 	}
 	if err := runSystemctlUser("restart", serviceName); err != nil {
 		if err := runSystemctlUser("start", serviceName); err != nil {
-			return err
+			return "", err
 		}
 	}
-	logs.Info("[ROBOT SLEEP] proxy active: %s -> %s", serviceName, targetURL)
-	return nil
+	return serviceName, nil
 }
 
 func startSleepDaemon(repoRoot string) error {
@@ -194,8 +232,8 @@ WantedBy=default.target
 		}
 	}
 
-	logs.Info("[ROBOT SLEEP] daemon active: %s", serviceName)
-	logs.Info("[ROBOT SLEEP] status: systemctl --user status %s", serviceName)
+	fmt.Fprintf(os.Stdout, "[ROBOT SLEEP] daemon active: %s\n", serviceName)
+	fmt.Fprintf(os.Stdout, "[ROBOT SLEEP] status: systemctl --user status %s\n", serviceName)
 	return nil
 }
 
