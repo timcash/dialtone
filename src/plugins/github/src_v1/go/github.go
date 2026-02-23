@@ -102,7 +102,6 @@ func Run(args []string) error {
 		PrintUsage()
 		return nil
 	}
-	args = stripVersionArg(args)
 
 	switch args[0] {
 	case "help", "-h", "--help":
@@ -123,23 +122,23 @@ func Run(args []string) error {
 }
 
 func PrintUsage() {
-	fmt.Println("Usage: ./dialtone.sh github <command> [args]")
-	fmt.Println()
-	fmt.Println("Commands:")
-	fmt.Println("  issue sync [src_v1] [--state all|open|closed] [--limit N] [--out DIR]   # default state=open")
-	fmt.Println("  issue push [src_v1] [--out DIR] [--force]")
-	fmt.Println("  issue delete-closed [src_v1] [--out DIR] [--limit N] [--dry-run]")
-	fmt.Println("  issue verify [src_v1] [--out DIR] [--strict]")
-	fmt.Println("  issue print [src_v1] <issue-id> [--out DIR]")
-	fmt.Println("  issue list [src_v1] [--state all|open|closed] [--limit N]")
-	fmt.Println("  issue view [src_v1] <issue-id>")
-	fmt.Println("  pr sync [src_v1] [--limit N] [--out DIR]     # sync open PRs only")
-	fmt.Println("  pr push [src_v1] [--out DIR] [--force]")
-	fmt.Println("  pr print [src_v1] <pr-id> [--out DIR]")
-	fmt.Println("  pr [src_v1] [create|view|merge|close|review] [args]")
-	fmt.Println("  release upsert [src_v1] --tag vX.Y.Z [--repo owner/repo] [--title TEXT] [--notes TEXT] --asset PATH [--asset PATH...]")
-	fmt.Println("  test [src_v1]")
-	fmt.Println("  install")
+	logs.Raw("Usage: ./dialtone.sh github src_v1 <command> [args]")
+	logs.Raw("")
+	logs.Raw("Commands:")
+	logs.Raw("  issue sync [--state all|open|closed] [--limit N] [--out DIR]   # default state=open")
+	logs.Raw("  issue push [--out DIR] [--force]")
+	logs.Raw("  issue delete-closed [--out DIR] [--limit N] [--dry-run]")
+	logs.Raw("  issue verify [--out DIR] [--strict]")
+	logs.Raw("  issue print <issue-id> [--out DIR]")
+	logs.Raw("  issue list [--state all|open|closed] [--limit N]")
+	logs.Raw("  issue view <issue-id>")
+	logs.Raw("  pr sync [--limit N] [--out DIR]     # sync open PRs only")
+	logs.Raw("  pr push [--out DIR] [--force]")
+	logs.Raw("  pr print <pr-id> [--out DIR]")
+	logs.Raw("  pr [create|view|merge|close|review] [args]")
+	logs.Raw("  release upsert --tag vX.Y.Z [--repo owner/repo] [--title TEXT] [--notes TEXT] --asset PATH [--asset PATH...]")
+	logs.Raw("  test")
+	logs.Raw("  install")
 }
 
 func runInstall() error {
@@ -149,8 +148,13 @@ func runInstall() error {
 		logs.Info("GitHub CLI already installed at %s", ghBin)
 		return nil
 	}
+	rt, err := ResolvePaths()
+	if err != nil {
+		return err
+	}
 	logs.Info("Installing GitHub CLI via core installer")
-	cmd := exec.Command("./dialtone.sh", "install")
+	cmd := exec.Command(filepath.Join(rt.Preset.Runtime.RepoRoot, "dialtone.sh"), "install")
+	cmd.Dir = rt.Preset.Runtime.RepoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -158,11 +162,7 @@ func runInstall() error {
 
 func runRelease(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: ./dialtone.sh github release upsert --tag <version> [--repo owner/repo] [--title text] [--notes text] --asset <path> [--asset <path>...]")
-	}
-	args = stripVersionArg(args)
-	if len(args) == 0 {
-		return fmt.Errorf("usage: ./dialtone.sh github release upsert --tag <version> [--repo owner/repo] [--title text] [--notes text] --asset <path> [--asset <path>...]")
+		return fmt.Errorf("usage: ./dialtone.sh github src_v1 release upsert --tag <version> [--repo owner/repo] [--title text] [--notes text] --asset <path> [--asset <path>...]")
 	}
 	if args[0] != "upsert" {
 		return fmt.Errorf("unknown release command: %s", args[0])
@@ -246,16 +246,15 @@ func runRelease(args []string) error {
 
 func runIssue(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: ./dialtone.sh github issue <sync|push|delete-closed|verify|print|list|view> ...")
+		return fmt.Errorf("usage: ./dialtone.sh github src_v1 issue <sync|push|delete-closed|verify|print|list|view> ...")
 	}
-	args = stripVersionArg(args)
 
 	switch args[0] {
 	case "sync":
 		opts := SyncIssuesOptions{
 			State:  "open",
 			Limit:  500,
-			OutDir: filepath.Join("plugins", "github", "src_v1", "issues"),
+			OutDir: defaultIssuesDir(),
 		}
 		for i := 1; i < len(args); i++ {
 			switch args[i] {
@@ -287,7 +286,7 @@ func runIssue(args []string) error {
 		logs.Info("Synced %d issues to %s", count, opts.OutDir)
 		return nil
 	case "delete-closed":
-		outDir := filepath.Join("plugins", "github", "src_v1", "issues")
+		outDir := defaultIssuesDir()
 		limit := 500
 		dryRun := false
 		for i := 1; i < len(args); i++ {
@@ -322,9 +321,9 @@ func runIssue(args []string) error {
 		return nil
 	case "print":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: ./dialtone.sh github issue print <issue-id> [--out DIR]")
+			return fmt.Errorf("usage: ./dialtone.sh github src_v1 issue print <issue-id> [--out DIR]")
 		}
-		outDir := filepath.Join("plugins", "github", "src_v1", "issues")
+		outDir := defaultIssuesDir()
 		issueID := strings.TrimSpace(args[1])
 		for i := 2; i < len(args); i++ {
 			switch args[i] {
@@ -338,7 +337,7 @@ func runIssue(args []string) error {
 		outDir = resolveOutDir(outDir)
 		return PrintIssue(issueID, outDir)
 	case "verify":
-		outDir := filepath.Join("plugins", "github", "src_v1", "issues")
+		outDir := defaultIssuesDir()
 		strict := false
 		for i := 1; i < len(args); i++ {
 			switch args[i] {
@@ -362,7 +361,7 @@ func runIssue(args []string) error {
 		logs.Info("Issue verify passed: %d/%d files valid", total-failed, total)
 		return nil
 	case "push":
-		opts := PushIssuesOptions{OutDir: filepath.Join("plugins", "github", "src_v1", "issues")}
+		opts := PushIssuesOptions{OutDir: defaultIssuesDir()}
 		for i := 1; i < len(args); i++ {
 			switch args[i] {
 			case "--out":
@@ -405,7 +404,7 @@ func runIssue(args []string) error {
 		return cmd.Run()
 	case "view":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: ./dialtone.sh github issue view <issue-id>")
+			return fmt.Errorf("usage: ./dialtone.sh github src_v1 issue view <issue-id>")
 		}
 		gh := findGH()
 		cmd := exec.Command(gh, "issue", "view", args[1])
@@ -527,7 +526,7 @@ func PrintIssue(issueID, outDir string) error {
 		return errors.New("missing issue id")
 	}
 	if outDir == "" {
-		outDir = filepath.Join("plugins", "github", "src_v1", "issues")
+		outDir = defaultIssuesDir()
 	}
 	path := filepath.Join(outDir, issueID+".md")
 	raw, err := os.ReadFile(path)
@@ -583,7 +582,7 @@ func PrintIssue(issueID, outDir string) error {
 	writeSection("Comments (Outbound)", sections["comments-outbound"])
 	writeSection("Notes", sections["notes"])
 
-	fmt.Print(strings.TrimRight(b.String(), "\n") + "\n")
+	logs.Raw(strings.TrimRight(b.String(), "\n"))
 	return nil
 }
 
@@ -634,7 +633,7 @@ func allBlank(lines []string) bool {
 func DeleteClosedIssueFiles(outDir string, limit int, dryRun bool) (int, int, error) {
 	gh := findGH()
 	if strings.TrimSpace(outDir) == "" {
-		outDir = filepath.Join("plugins", "github", "src_v1", "issues")
+		outDir = defaultIssuesDir()
 	}
 	if limit <= 0 {
 		limit = 500
@@ -682,7 +681,6 @@ func DeleteClosedIssueFiles(outDir string, limit int, dryRun bool) (int, int, er
 }
 
 func runPR(args []string) error {
-	args = stripVersionArg(args)
 	if len(args) == 0 {
 		return prCreateOrUpdate("", "")
 	}
@@ -691,7 +689,7 @@ func runPR(args []string) error {
 	case "sync":
 		opts := SyncPROptions{
 			Limit:  200,
-			OutDir: filepath.Join("plugins", "github", "src_v1", "prs"),
+			OutDir: defaultPRsDir(),
 		}
 		for i := 1; i < len(args); i++ {
 			switch args[i] {
@@ -719,7 +717,7 @@ func runPR(args []string) error {
 		return nil
 	case "push":
 		opts := PushPROptions{
-			OutDir: filepath.Join("plugins", "github", "src_v1", "prs"),
+			OutDir: defaultPRsDir(),
 		}
 		for i := 1; i < len(args); i++ {
 			switch args[i] {
@@ -741,9 +739,9 @@ func runPR(args []string) error {
 		return nil
 	case "print":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: ./dialtone.sh github pr print <pr-id> [--out DIR]")
+			return fmt.Errorf("usage: ./dialtone.sh github src_v1 pr print <pr-id> [--out DIR]")
 		}
-		outDir := filepath.Join("plugins", "github", "src_v1", "prs")
+		outDir := defaultPRsDir()
 		for i := 2; i < len(args); i++ {
 			if args[i] == "--out" && i+1 < len(args) {
 				outDir = args[i+1]
@@ -772,7 +770,7 @@ func runPR(args []string) error {
 			return err
 		}
 		if prNum > 0 {
-			if err := refreshSinglePRMarkdown(prNum, resolveOutDir(filepath.Join("plugins", "github", "src_v1", "prs"))); err != nil {
+			if err := refreshSinglePRMarkdown(prNum, resolveOutDir(defaultPRsDir())); err != nil {
 				logs.Warn("Merged PR but failed to refresh local PR markdown for #%d: %v", prNum, err)
 			}
 		}
@@ -821,7 +819,7 @@ func prCreateOrUpdate(title, body string) error {
 				return err
 			}
 		}
-		fmt.Printf("%s\n", strings.TrimSpace(string(viewOut)))
+		logs.Raw(strings.TrimSpace(string(viewOut)))
 		return nil
 	}
 
@@ -841,7 +839,7 @@ func SyncPRs(opts SyncPROptions) (int, error) {
 		opts.Limit = 200
 	}
 	if strings.TrimSpace(opts.OutDir) == "" {
-		opts.OutDir = filepath.Join("plugins", "github", "src_v1", "prs")
+		opts.OutDir = defaultPRsDir()
 	}
 	if err := os.MkdirAll(opts.OutDir, 0o755); err != nil {
 		return 0, err
@@ -878,7 +876,7 @@ func SyncPRs(opts SyncPROptions) (int, error) {
 
 func PushPRs(opts PushPROptions) (int, int, int, error) {
 	if strings.TrimSpace(opts.OutDir) == "" {
-		opts.OutDir = filepath.Join("plugins", "github", "src_v1", "prs")
+		opts.OutDir = defaultPRsDir()
 	}
 	files, err := filepath.Glob(filepath.Join(opts.OutDir, "*.md"))
 	if err != nil {
@@ -975,7 +973,7 @@ func PrintPR(prID, outDir string) error {
 		return errors.New("missing pr id")
 	}
 	if outDir == "" {
-		outDir = filepath.Join("plugins", "github", "src_v1", "prs")
+		outDir = defaultPRsDir()
 	}
 	path := filepath.Join(outDir, prID+".md")
 	raw, err := os.ReadFile(path)
@@ -1037,7 +1035,7 @@ func PrintPR(prID, outDir string) error {
 	writeSection("Comments (GitHub)", sections["comments-github"])
 	writeSection("Comments (Outbound)", sections["comments-outbound"])
 	writeSection("Notes", sections["notes"])
-	fmt.Print(strings.TrimRight(b.String(), "\n") + "\n")
+	logs.Raw(strings.TrimRight(b.String(), "\n"))
 	return nil
 }
 
@@ -1337,7 +1335,7 @@ func refreshSinglePRMarkdown(prNum int, outDir string) error {
 		return err
 	}
 	if outDir == "" {
-		outDir = filepath.Join("plugins", "github", "src_v1", "prs")
+		outDir = defaultPRsDir()
 	}
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
@@ -1402,7 +1400,7 @@ func SyncIssues(opts SyncIssuesOptions) (int, error) {
 		opts.Limit = 500
 	}
 	if opts.OutDir == "" {
-		opts.OutDir = filepath.Join("plugins", "github", "src_v1", "issues")
+		opts.OutDir = defaultIssuesDir()
 	}
 	if err := os.MkdirAll(opts.OutDir, 0o755); err != nil {
 		return 0, err
@@ -1451,7 +1449,7 @@ func SyncIssues(opts SyncIssuesOptions) (int, error) {
 
 func PushIssues(opts PushIssuesOptions) (int, int, error) {
 	if opts.OutDir == "" {
-		opts.OutDir = filepath.Join("plugins", "github", "src_v1", "issues")
+		opts.OutDir = defaultIssuesDir()
 	}
 	opts.OutDir = resolveOutDir(opts.OutDir)
 	files, err := filepath.Glob(filepath.Join(opts.OutDir, "*.md"))
@@ -2002,13 +2000,6 @@ func labelsHash(labels []GHLabel) string {
 	return strings.Join(vals, ",")
 }
 
-func stripVersionArg(args []string) []string {
-	if len(args) >= 2 && strings.HasPrefix(args[1], "src_v") {
-		return append([]string{args[0]}, args[2:]...)
-	}
-	return args
-}
-
 func ensureBranchPushed(branch string) error {
 	cmd := exec.Command("git", "push", "-u", "origin", branch)
 	cmd.Stdout = os.Stdout
@@ -2045,8 +2036,26 @@ func findGH() string {
 	if p, err := exec.LookPath("gh"); err == nil {
 		return p
 	}
-	logs.Fatal("GitHub CLI ('gh') not found. Run './dialtone.sh github install'.")
+	logs.Fatal("GitHub CLI ('gh') not found. Run './dialtone.sh github src_v1 install'.")
 	return ""
+}
+
+func defaultIssuesDir() string {
+	paths, err := ResolvePaths()
+	if err != nil {
+		logs.Fatal("failed to resolve github paths: %v", err)
+		return ""
+	}
+	return paths.IssuesDir
+}
+
+func defaultPRsDir() string {
+	paths, err := ResolvePaths()
+	if err != nil {
+		logs.Fatal("failed to resolve github paths: %v", err)
+		return ""
+	}
+	return paths.PRsDir
 }
 
 func slug(s string) string {

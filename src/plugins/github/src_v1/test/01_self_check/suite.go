@@ -37,12 +37,15 @@ func Register(r *testv1.Registry) {
 	r.Add(testv1.Step{
 		Name: "write-task-file-shape",
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
-			repoRoot, err := findRepoRoot()
+			paths, err := githubv1.ResolvePaths()
 			if err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			tmpDir := filepath.Join(repoRoot, "src", "plugins", "github", "src_v1", "test", "tmp")
-			_ = os.MkdirAll(tmpDir, 0o755)
+			tmpDir := filepath.Join(paths.Preset.Test, "tmp")
+			if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			defer func() { _ = os.RemoveAll(tmpDir) }()
 			path := filepath.Join(tmpDir, "999.md")
 
 			doc := githubv1.RenderIssueTaskMarkdown(githubv1.Issue{
@@ -71,21 +74,4 @@ func Register(r *testv1.Registry) {
 			return testv1.StepRunResult{Report: "task file shape verified"}, nil
 		},
 	})
-}
-
-func findRepoRoot() (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
-			return cwd, nil
-		}
-		parent := filepath.Dir(cwd)
-		if parent == cwd {
-			return "", fmt.Errorf("repo root not found")
-		}
-		cwd = parent
-	}
 }

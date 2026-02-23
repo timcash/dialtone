@@ -22,9 +22,9 @@ src/plugins/github/
 ## Commands
 
 ```bash
-./dialtone.sh github help
-./dialtone.sh github install
-./dialtone.sh github test src_v1
+./dialtone.sh github src_v1 help
+./dialtone.sh github src_v1 install
+./dialtone.sh github src_v1 test
 ```
 
 ### Issue Commands
@@ -32,22 +32,22 @@ src/plugins/github/
 Core issue commands:
 
 ```bash
-./dialtone.sh github issue list src_v1 --state open --limit 30
-./dialtone.sh github issue view src_v1 313
-./dialtone.sh github issue print src_v1 313
-./dialtone.sh github issue verify src_v1
-./dialtone.sh github issue sync src_v1                        # default: open only
-./dialtone.sh github issue push src_v1
-./dialtone.sh github issue delete-closed src_v1
+./dialtone.sh github src_v1 issue list --state open --limit 30
+./dialtone.sh github src_v1 issue view 313
+./dialtone.sh github src_v1 issue print 313
+./dialtone.sh github src_v1 issue verify
+./dialtone.sh github src_v1 issue sync                        # default: open only
+./dialtone.sh github src_v1 issue push
+./dialtone.sh github src_v1 issue delete-closed
 ```
 
 Notes:
 - `issue sync` defaults to `--state open` (closed issues are not downloaded unless you explicitly set `--state all` or `--state closed`).
 - `issue delete-closed` removes local markdown files for closed GitHub issues.
-- default local dir is `plugins/github/src_v1/issues` (run from `src/` via `./dialtone.sh`); `--out` is optional override.
+- default local dir is `src/plugins/github/src_v1/issues` (run from `src/` via `./dialtone.sh`); `--out` is optional override.
 
 Each generated issue file:
-- lives at `plugins/github/src_v1/issues/<issue_id>.md`
+- lives at `src/src/plugins/github/src_v1/issues/<issue_id>.md`
 - starts with a `signature` block
 - always starts with `- status: wait`
 
@@ -55,7 +55,7 @@ This is intended for a later LLM pass that upgrades each issue into full task fo
 
 Markdown workflow for agents/humans:
 - agents write new outbound comments in `### comments-outbound:` (one `- ...` bullet per comment)
-- humans run `./dialtone.sh github issue push src_v1` to post pending outbound comments
+- humans run `./dialtone.sh github src_v1 issue push` to post pending outbound comments
 - posted outbound lines are marked as sent (`[sent <timestamp>]`)
 - `### comments-github:` mirrors GitHub comments on `issue sync`
 
@@ -70,7 +70,7 @@ Conflict safety:
 Simple PR flow:
 
 ```bash
-./dialtone.sh github pr src_v1
+./dialtone.sh github src_v1 pr
 ```
 
 Behavior:
@@ -81,17 +81,17 @@ Behavior:
 Additional PR actions:
 
 ```bash
-./dialtone.sh github pr sync src_v1                # sync OPEN PRs to markdown files
-./dialtone.sh github pr push src_v1                # push outbound comments + label edits from markdown
-./dialtone.sh github pr print src_v1 315           # pretty local markdown view
-./dialtone.sh github pr src_v1 review   # mark PR ready for review
-./dialtone.sh github pr src_v1 view
-./dialtone.sh github pr src_v1 merge
-./dialtone.sh github pr src_v1 close
+./dialtone.sh github src_v1 pr sync                # sync OPEN PRs to markdown files
+./dialtone.sh github src_v1 pr push                # push outbound comments + label edits from markdown
+./dialtone.sh github src_v1 pr print 315           # pretty local markdown view
+./dialtone.sh github src_v1 pr review   # mark PR ready for review
+./dialtone.sh github src_v1 pr view
+./dialtone.sh github src_v1 pr merge
+./dialtone.sh github src_v1 pr close
 ```
 
 PR markdown workflow:
-- local files are in `plugins/github/src_v1/prs/<pr_id>.md`
+- local files are in `src/plugins/github/src_v1/prs/<pr_id>.md`
 - `pr sync` writes open PR metadata, labels, and comments to markdown
 - edit `### comments-outbound:` to queue comments to post
 - edit `### tags:` to desired PR labels; `pr push` reconciles labels on GitHub
@@ -149,43 +149,43 @@ Tech labels are domain tags for routing and filtering. Pattern: `dialtone topic:
 
 ```bash
 # 1) Pull open issues from GitHub into markdown files
-./dialtone.sh github issue sync src_v1
+./dialtone.sh github src_v1 issue sync
 
 # 2) Agent edits a file:
-#    plugins/github/src_v1/issues/<id>.md
+#    src/plugins/github/src_v1/issues/<id>.md
 #    - add/update fields
 #    - add bullets under `### comments-outbound:`
 
 # 3) Human pushes outbound comments/label edits to GitHub
-./dialtone.sh github issue push src_v1
+./dialtone.sh github src_v1 issue push
 
 # 4) Refresh local mirror after push
-./dialtone.sh github issue sync src_v1
+./dialtone.sh github src_v1 issue sync
 
 # 5) Optional cleanup of local closed issue files
-./dialtone.sh github issue delete-closed src_v1
+./dialtone.sh github src_v1 issue delete-closed
 ```
 
 ### PR Markdown Workflow
 
 ```bash
 # 1) Create/update PR for current branch
-./dialtone.sh github pr src_v1
+./dialtone.sh github src_v1 pr
 
 # 2) Sync open PRs into markdown
-./dialtone.sh github pr sync src_v1
+./dialtone.sh github src_v1 pr sync
 
 # 3) Agent edits:
-#    plugins/github/src_v1/prs/<id>.md
+#    src/plugins/github/src_v1/prs/<id>.md
 #    - set `### tags:` labels
 #    - add bullets under `### comments-outbound:`
 
 # 4) Human pushes markdown changes to GitHub
-./dialtone.sh github pr push src_v1
+./dialtone.sh github src_v1 pr push
 
 # 5) Mark ready for review and merge when ready
-./dialtone.sh github pr src_v1 review
-./dialtone.sh github pr src_v1 merge
+./dialtone.sh github src_v1 pr review
+./dialtone.sh github src_v1 pr merge
 ```
 
 ## Tests
@@ -193,7 +193,7 @@ Tech labels are domain tags for routing and filtering. Pattern: `dialtone topic:
 Run:
 
 ```bash
-./dialtone.sh github test src_v1
+./dialtone.sh github src_v1 test
 ```
 
 Useful log filters while tests run:
