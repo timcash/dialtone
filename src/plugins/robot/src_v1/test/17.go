@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 	"github.com/chromedp/chromedp"
 )
 
@@ -13,7 +14,7 @@ func Run17LifecycleInvariants(ctx *testCtx) (string, error) {
 		return "", err
 	}
 
-	fmt.Println("   [STEP] Checking section lifecycle...")
+	logs.InfoFromTest("robot-test", "[STEP] Checking section lifecycle...")
 	checks := []struct {
 		id    string
 		label string
@@ -32,7 +33,7 @@ func Run17LifecycleInvariants(ctx *testCtx) (string, error) {
 		}
 	}
 
-	fmt.Println("   [STEP] Checking console logs for lifecycle tokens...")
+	logs.InfoFromTest("robot-test", "[STEP] Checking console logs for lifecycle tokens...")
 	entries := session.Entries()
 	required := []string{"LOADING", "LOADED", "START", "RESUME", "PAUSE", "NAVIGATE TO", "NAVIGATE AWAY"}
 	for _, token := range required {
@@ -54,7 +55,7 @@ func Run17LifecycleInvariants(ctx *testCtx) (string, error) {
 		}
 	}
 
-	fmt.Println("   [STEP] Checking active section count...")
+	logs.InfoFromTest("robot-test", "[STEP] Checking active section count...")
 	var activeCount int
 	if err := session.Run(chromedp.Evaluate(`
     (() => {

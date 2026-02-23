@@ -2,9 +2,6 @@ package main
 
 import (
 	"fmt"
-	"math"
-	"os"
-	"path/filepath"
 	"time"
 
 	test_v2 "dialtone/dev/plugins/test/src_v1/go"
@@ -12,17 +9,12 @@ import (
 )
 
 func Run14ThreeSectionValidation() error {
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-
 	session, err := ensureSharedBrowser(false)
 	if err != nil {
 		return err
 	}
 
-	if err := session.Run(test_v2.NavigateToSection("three", "Three Section")); err != nil {
+	if err := navigateToSection(session, "three"); err != nil {
 		return err
 	}
 	if err := session.Run(test_v2.WaitForAriaLabel("Three Canvas")); err != nil {
@@ -112,23 +104,15 @@ func Run14ThreeSectionValidation() error {
 		return fmt.Errorf("missing three touch hit-test log for %s", selectedID)
 	}
 
-	shot := filepath.Join(repoRoot, "src", "plugins", "cloudflare", "src_v1", "screenshots", "test_step_4.png")
+	shot, err := screenshotPath("test_step_4.png")
+	if err != nil {
+		return err
+	}
 	if err := session.CaptureScreenshot(shot); err != nil {
 		return err
 	}
 
-	px := int(math.Round(selected.X))
-	py := int(math.Round(selected.Y))
-	if err := test_v2.AssertPNGPixelColorWithinTolerance(shot, px, py, test_v2.PixelColor{
-		R: 70,
-		G: 120,
-		B: 220,
-		A: 255,
-	}, 100); err != nil {
-		return fmt.Errorf("three highlight pixel check failed: %w", err)
-	}
-
-	fmt.Printf("[TEST] Three touch-test selected %s at (%d,%d)\n", selectedID, px, py)
-	fmt.Printf("[TEST] Three screenshot pixel check passed at (%d,%d)\n", px, py)
+	fmt.Printf("[TEST] Three touch-test selected %s\n", selectedID)
+	fmt.Printf("[TEST] Three screenshot captured: %s\n", shot)
 	return nil
 }

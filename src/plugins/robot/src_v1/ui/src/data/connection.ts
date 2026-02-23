@@ -1,4 +1,5 @@
 import { JSONCodec, connect, type NatsConnection } from 'nats.ws';
+import { logError, logInfo, logWarn, setNATSPublisher } from './logging';
 
 let nc: NatsConnection | null = null;
 const jc = JSONCodec();
@@ -16,9 +17,12 @@ export async function initConnection() {
     const server = wsPath
       ? `${protocol}//${window.location.host}${wsPath}`
       : `${protocol}//${hostname}:${wsPort}`;
-    console.log(`[NATS] Connecting to ${server}...`);
+    logInfo('ui/connection', `[NATS] Connecting to ${server}...`);
     nc = await connect({ servers: [server] });
-    console.log(`[NATS] Connected.`);
+    setNATSPublisher((subject, payload) => {
+      if (nc) nc.publish(subject, payload);
+    });
+    logInfo('ui/connection', `[NATS] Connected.`);
 
     // Subscribe to Mavlink
     const sub = nc.subscribe('mavlink.>');
@@ -28,17 +32,19 @@ export async function initConnection() {
           const payload = jc.decode(m.data);
           emit(payload);
         } catch (err) {
-          console.error('[NATS] Decode error:', err);
+          logError('ui/connection', '[NATS] Decode error', err);
         }
       }
     })();
 
     nc.closed().then(() => {
-      console.warn('[NATS] Connection closed, retrying...');
+      setNATSPublisher(null);
+      logWarn('ui/connection', '[NATS] Connection closed, retrying...');
       setTimeout(initConnection, 2000);
     });
   } catch (err) {
-    console.error('[NATS] Connection failed:', err);
+    setNATSPublisher(null);
+    logError('ui/connection', '[NATS] Connection failed', err);
     setTimeout(initConnection, 5000);
   }
 }
@@ -49,7 +55,7 @@ function emit(data: any) {
 
 export function sendCommand(cmd: string, mode?: string) {
   if (!nc) {
-    console.warn('[NATS] Not connected, cannot send command:', cmd);
+    logWarn('ui/connection', `[NATS] Not connected, cannot send command: ${cmd}`);
     return;
   }
   const payload: any = { cmd };

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	chrome_app "dialtone/dev/plugins/chrome/src_v1/go"
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 	robotv1 "dialtone/dev/plugins/robot/src_v1/go"
 	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 	"github.com/chromedp/cdproto/emulation"
@@ -42,7 +43,7 @@ type testCtx struct {
 func newTestCtx() *testCtx {
 	paths, _ := robotv1.ResolvePaths("")
 	repoRoot := paths.Runtime.RepoRoot
-	fmt.Printf("[DEBUG] newTestCtx: repoRoot=%q\n", repoRoot)
+	logs.InfoFromTest("robot-test", "newTestCtx: repoRoot=%q", repoRoot)
 	attach := os.Getenv("ROBOT_TEST_ATTACH") == "1"
 	keepViewport := strings.TrimSpace(os.Getenv("ROBOT_TEST_KEEP_VIEWPORT")) == "1"
 	if attach && !keepViewport {
@@ -212,11 +213,11 @@ func (t *testCtx) browser() (*test_v2.BrowserSession, error) {
 }
 
 func (t *testCtx) logWait(label, detail string) {
-	fmt.Printf("[WAIT] label=%s detail=%s\n", label, detail)
+	logs.InfoFromTest("robot-test", "[WAIT] label=%s detail=%s", label, detail)
 }
 
 func (t *testCtx) logClick(kind, target, detail string) {
-	fmt.Printf("[CLICK] kind=%s target=%s detail=%s\n", kind, target, detail)
+	logs.InfoFromTest("robot-test", "[CLICK] kind=%s target=%s detail=%s", kind, target, detail)
 }
 
 func (t *testCtx) waitClickGap() {

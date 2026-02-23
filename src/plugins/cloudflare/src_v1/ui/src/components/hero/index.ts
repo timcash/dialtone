@@ -1,4 +1,4 @@
-import { VisualizationControl } from '../../../../../../../plugins/ui/types';
+import { VisualizationControl } from '@ui/types';
 
 class HeroControl implements VisualizationControl {
   private raf = 0;

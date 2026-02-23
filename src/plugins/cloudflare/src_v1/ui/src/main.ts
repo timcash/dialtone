@@ -1,4 +1,4 @@
-import { setupApp } from '../../../../../plugins/ui/ui';
+import { setupApp } from '@ui/ui';
 import './style.css';
 
 const { sections, menu } = setupApp({ title: 'dialtone.cloudflare', debug: true });
@@ -89,7 +89,7 @@ const navigateByDelta = (delta: 1 | -1) => {
   const nextIndex = Math.max(0, Math.min(sectionOrder.length - 1, currentIndex + delta));
   const nextId = sectionOrder[nextIndex];
   if (nextId === current) return;
-  void sections.navigateTo(nextId).catch((err) => {
+  void sections.navigateTo(nextId).catch((err: unknown) => {
     console.error('[SectionManager] keyboard navigation failed', err);
   });
 };
@@ -125,7 +125,7 @@ window.addEventListener(
           )
         ]
       )
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error('[SectionManager] wheel navigation failed', err);
       })
       .finally(() => {
@@ -181,7 +181,7 @@ const syncSectionFromURL = (reason = 'event') => {
         window.setTimeout(() => syncSectionFromURL('retry'), 120);
       }
     })
-    .catch((err) => {
+    .catch((err: unknown) => {
       console.error(`[SectionManager] URL SYNC FAILED #${targetId}`, err);
       window.setTimeout(() => syncSectionFromURL('retry-error'), 250);
     });

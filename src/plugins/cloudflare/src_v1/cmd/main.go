@@ -1,19 +1,27 @@
 package main
 
 import (
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+
+	cloudflarev1 "dialtone/dev/plugins/cloudflare/src_v1/go"
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
 func main() {
-	port := "8080"
+	logs.SetOutput(os.Stdout)
+	port := strings.TrimSpace(os.Getenv("CLOUDFLARE_PORT"))
+	if port == "" {
+		port = "8080"
+	}
+	paths, _ := cloudflarev1.ResolvePaths("", "src_v1")
 	cwd, _ := os.Getwd()
 	uiPath := filepath.Join(cwd, "ui", "dist")
-	if _, err := os.Stat(uiPath); err != nil {
+	if _, err := os.Stat(uiPath); err != nil && paths.Runtime.RepoRoot != "" {
 		// When launched via "./dialtone.sh cloudflare serve src_v1", cwd is repo root.
-		uiPath = filepath.Join(cwd, "src", "plugins", "cloudflare", "src_v1", "ui", "dist")
+		uiPath = paths.Preset.UIDist
 	}
 
 	http.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -35,9 +43,9 @@ func main() {
 		http.ServeFile(w, r, path)
 	})
 
-	fmt.Printf("Cloudflare Server starting on http://localhost:%s\n", port)
+	logs.Info("Cloudflare Server starting on http://localhost:%s", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
-		fmt.Printf("Error starting server: %v\n", err)
+		logs.Error("Error starting server: %v", err)
 		os.Exit(1)
 	}
 }

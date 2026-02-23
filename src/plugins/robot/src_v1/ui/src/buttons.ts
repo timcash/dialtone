@@ -1,3 +1,5 @@
+import { logInfo } from './data/logging';
+
 export type ButtonAction = () => void | Promise<void>;
 
 export interface ButtonDef {
@@ -75,7 +77,7 @@ export function renderButtons(sectionId: string) {
       btn.onclick = (e) => {
         e.preventDefault();
         const aria = btn.getAttribute('aria-label') || def.label;
-        console.log(`[TEST_ACTION] click aria=${aria}`);
+        logInfo('ui/buttons', `[TEST_ACTION] click aria=${aria}`);
         def.action();
         // Re-render to update active state if needed
         if (def.active !== undefined) renderButtons(sectionId);
@@ -105,7 +107,7 @@ export function renderButtons(sectionId: string) {
     modeBtn.onclick = (e) => {
       e.preventDefault();
       const aria = modeBtn.getAttribute('aria-label') || `Mode: ${cfg.currentMode}`;
-      console.log(`[TEST_ACTION] click aria=${aria}`);
+      logInfo('ui/buttons', `[TEST_ACTION] click aria=${aria}`);
       toggleMode(sectionId);
     };
   }
