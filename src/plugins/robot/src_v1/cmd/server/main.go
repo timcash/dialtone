@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	cameraapp "dialtone/dev/plugins/camera/app"
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 	mavlinkapp "dialtone/dev/plugins/mavlink/app"
 	robotv1 "dialtone/dev/plugins/robot/src_v1/go"
 
@@ -56,18 +56,19 @@ type roverCommand struct {
 }
 
 func main() {
+	logs.SetOutput(os.Stdout)
 	cfg := loadConfig()
-	log.Printf("Robot server config: web=:%d nats=127.0.0.1:%d ws=127.0.0.1:%d tsnet=%t hostname=%s", cfg.webPort, cfg.natsPort, cfg.natsWSPort, cfg.tsEnabled, cfg.tsHostname)
+	logs.Info("Robot server config: web=:%d nats=127.0.0.1:%d ws=127.0.0.1:%d tsnet=%t hostname=%s", cfg.webPort, cfg.natsPort, cfg.natsWSPort, cfg.tsEnabled, cfg.tsHostname)
 
 	ns, err := startEmbeddedNATS(cfg.natsPort, cfg.natsWSPort)
 	if err != nil {
-		log.Fatalf("embedded NATS failed: %v", err)
+		logs.Fatal("embedded NATS failed: %v", err)
 	}
 	defer ns.Shutdown()
 
 	nc, err := nats.Connect(fmt.Sprintf("nats://127.0.0.1:%d", cfg.natsPort))
 	if err != nil {
-		log.Fatalf("nats local connect failed: %v", err)
+		logs.Fatal("nats local connect failed: %v", err)
 	}
 	defer nc.Close()
 
@@ -87,7 +88,7 @@ func main() {
 	}
 	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("Robot web UI on http://0.0.0.0:%d", cfg.webPort)
+		logs.Info("Robot web UI on http://0.0.0.0:%d", cfg.webPort)
 		err := localSrv.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
@@ -98,7 +99,7 @@ func main() {
 	defer cleanupTS()
 
 	if err := <-errCh; err != nil {
-		log.Printf("robot web server exited: %v", err)
+		logs.Error("robot web server exited: %v", err)
 		os.Exit(1)
 	}
 }
@@ -268,7 +269,7 @@ func maybeStartTSNet(cfg config, handler http.Handler) func() {
 		return func() {}
 	}
 	if err := os.MkdirAll(cfg.tsStateDir, 0o700); err != nil {
-		log.Printf("TSNET disabled: cannot create state dir %s: %v", cfg.tsStateDir, err)
+		logs.Warn("TSNET disabled: cannot create state dir %s: %v", cfg.tsStateDir, err)
 		return func() {}
 	}
 
@@ -278,7 +279,7 @@ func maybeStartTSNet(cfg config, handler http.Handler) func() {
 		Ephemeral: cfg.tsEphemeral,
 		AuthKey:   cfg.tsAuthKey,
 		Logf: func(format string, args ...any) {
-			log.Printf("tsnet: "+format, args...)
+			logs.Info("tsnet: "+format, args...)
 		},
 	}
 
@@ -286,35 +287,35 @@ func maybeStartTSNet(cfg config, handler http.Handler) func() {
 	status, err := ts.Up(ctx)
 	cancel()
 	if err != nil {
-		log.Printf("TSNET disabled: up failed: %v", err)
+		logs.Warn("TSNET disabled: up failed: %v", err)
 		_ = ts.Close()
 		return func() {}
 	}
-	log.Printf("TSNET up hostname=%s ips=%v", status.Self.HostName, status.TailscaleIPs)
+	logs.Info("TSNET up hostname=%s ips=%v", status.Self.HostName, status.TailscaleIPs)
 
 	webLn, err := ts.Listen("tcp", fmt.Sprintf(":%d", cfg.tsWebPort))
 	if err != nil {
-		log.Printf("TSNET web listener disabled: %v", err)
+		logs.Warn("TSNET web listener disabled: %v", err)
 		_ = ts.Close()
 		return func() {}
 	}
 	go func() {
-		log.Printf("TSNET web UI on http://%s:%d", cfg.tsHostname, cfg.tsWebPort)
+		logs.Info("TSNET web UI on http://%s:%d", cfg.tsHostname, cfg.tsWebPort)
 		if err := http.Serve(webLn, withCommonHeaders(handler)); err != nil && !errors.Is(err, net.ErrClosed) {
-			log.Printf("TSNET web serve error: %v", err)
+			logs.Error("TSNET web serve error: %v", err)
 		}
 	}()
 
 	natsLn, err := ts.Listen("tcp", fmt.Sprintf(":%d", cfg.tsNATSPort))
 	if err != nil {
-		log.Printf("TSNET nats listener disabled: %v", err)
+		logs.Warn("TSNET nats listener disabled: %v", err)
 	} else {
 		go tcpProxyLoop(natsLn, fmt.Sprintf("127.0.0.1:%d", cfg.natsPort), "nats")
 	}
 
 	wsLn, err := ts.Listen("tcp", fmt.Sprintf(":%d", cfg.tsWSPort))
 	if err != nil {
-		log.Printf("TSNET ws listener disabled: %v", err)
+		logs.Warn("TSNET ws listener disabled: %v", err)
 	} else {
 		go tcpProxyLoop(wsLn, fmt.Sprintf("127.0.0.1:%d", cfg.natsWSPort), "nats-ws")
 	}
@@ -338,7 +339,7 @@ func tcpProxyLoop(ln net.Listener, targetAddr, tag string) {
 			if errors.Is(err, net.ErrClosed) {
 				return
 			}
-			log.Printf("TSNET proxy(%s) accept error: %v", tag, err)
+			logs.Error("TSNET proxy(%s) accept error: %v", tag, err)
 			continue
 		}
 		go proxyConn(conn, targetAddr, tag)
@@ -349,7 +350,7 @@ func proxyConn(in net.Conn, targetAddr, tag string) {
 	defer in.Close()
 	out, err := net.Dial("tcp", targetAddr)
 	if err != nil {
-		log.Printf("TSNET proxy(%s) dial %s failed: %v", tag, targetAddr, err)
+		logs.Error("TSNET proxy(%s) dial %s failed: %v", tag, targetAddr, err)
 		return
 	}
 	defer out.Close()
@@ -385,7 +386,7 @@ func startEmbeddedNATS(port, wsPort int) (*natsserver.Server, error) {
 	if !ns.ReadyForConnections(10 * time.Second) {
 		return nil, fmt.Errorf("nats server did not become ready on %d/%d", port, wsPort)
 	}
-	log.Printf("Embedded NATS ready on nats://127.0.0.1:%d and ws://127.0.0.1:%d", port, wsPort)
+	logs.Info("Embedded NATS ready on nats://127.0.0.1:%d and ws://127.0.0.1:%d", port, wsPort)
 	return ns, nil
 }
 
@@ -418,10 +419,10 @@ func startStatsPublisher(nc *nats.Conn, ns *natsserver.Server, enabled bool) {
 
 func startMAVLinkBridge(cfg config, nc *nats.Conn) *mavlinkapp.MavlinkService {
 	if cfg.mavlinkEP == "" {
-		log.Printf("MAVLink bridge disabled (set ROBOT_MAVLINK_ENDPOINT or MAVLINK_ENDPOINT)")
+		logs.Warn("MAVLink bridge disabled (set ROBOT_MAVLINK_ENDPOINT or MAVLINK_ENDPOINT)")
 		return nil
 	}
-	log.Printf("MAVLink bridge: connecting to %s", cfg.mavlinkEP)
+	logs.Info("MAVLink bridge: connecting to %s", cfg.mavlinkEP)
 
 	svc, err := mavlinkapp.NewMavlinkService(mavlinkapp.MavlinkConfig{
 		Endpoint: cfg.mavlinkEP,
@@ -438,7 +439,7 @@ func startMAVLinkBridge(cfg config, nc *nats.Conn) *mavlinkapp.MavlinkService {
 		},
 	})
 	if err != nil {
-		log.Printf("MAVLink bridge disabled: %v", err)
+		logs.Warn("MAVLink bridge disabled: %v", err)
 		return nil
 	}
 	go svc.Start()
@@ -449,28 +450,28 @@ func startRoverCommandConsumer(nc *nats.Conn, svc *mavlinkapp.MavlinkService) {
 	_, err := nc.Subscribe("rover.command", func(msg *nats.Msg) {
 		var cmd roverCommand
 		if err := json.Unmarshal(msg.Data, &cmd); err != nil {
-			log.Printf("rover.command decode error: %v", err)
+			logs.Error("rover.command decode error: %v", err)
 			return
 		}
 		switch strings.ToLower(strings.TrimSpace(cmd.Cmd)) {
 		case "arm":
 			if err := svc.Arm(); err != nil {
-				log.Printf("rover.command arm failed: %v", err)
+				logs.Error("rover.command arm failed: %v", err)
 			}
 		case "disarm":
 			if err := svc.Disarm(); err != nil {
-				log.Printf("rover.command disarm failed: %v", err)
+				logs.Error("rover.command disarm failed: %v", err)
 			}
 		case "mode":
 			if err := svc.SetMode(strings.TrimSpace(cmd.Mode)); err != nil {
-				log.Printf("rover.command mode failed: %v", err)
+				logs.Error("rover.command mode failed: %v", err)
 			}
 		default:
-			log.Printf("rover.command unknown cmd=%q", cmd.Cmd)
+			logs.Warn("rover.command unknown cmd=%q", cmd.Cmd)
 		}
 	})
 	if err != nil {
-		log.Printf("rover.command subscription failed: %v", err)
+		logs.Error("rover.command subscription failed: %v", err)
 		return
 	}
 	_ = nc.Flush()

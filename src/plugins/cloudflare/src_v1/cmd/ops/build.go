@@ -1,21 +1,10 @@
 package ops
 
-import (
-	"os"
-	"os/exec"
-	"path/filepath"
-)
-
 func Build() error {
-	cwd, err := os.Getwd()
+	paths, err := resolveCloudflarePaths()
 	if err != nil {
 		return err
 	}
-	uiDir := filepath.Join(cwd, "src", "plugins", "cloudflare", "src_v1", "ui")
-
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "build")
-	cmd.Dir = cwd
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd := runDialtone(paths.Runtime.RepoRoot, "bun", "src_v1", "exec", "--cwd", paths.Preset.UI, "run", "build")
 	return cmd.Run()
 }

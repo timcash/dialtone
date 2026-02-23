@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
 // Sleep starts the lightweight sleep server (local process) for src_v1.
@@ -20,7 +22,7 @@ func Sleep(repoRoot string, args []string) error {
 			if requireSleepProxyConfig() {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "[ROBOT SLEEP] warning: %v; continuing without proxy reconfiguration\n", err)
+			logs.Warn("[ROBOT SLEEP] warning: %v; continuing without proxy reconfiguration", err)
 		}
 	}
 
@@ -136,7 +138,7 @@ WantedBy=default.target
 			return err
 		}
 	}
-	fmt.Fprintf(os.Stdout, "[ROBOT SLEEP] proxy active: %s -> %s\n", serviceName, targetURL)
+	logs.Info("[ROBOT SLEEP] proxy active: %s -> %s", serviceName, targetURL)
 	return nil
 }
 
@@ -192,8 +194,8 @@ WantedBy=default.target
 		}
 	}
 
-	fmt.Fprintf(os.Stdout, "[ROBOT SLEEP] daemon active: %s\n", serviceName)
-	fmt.Fprintf(os.Stdout, "[ROBOT SLEEP] status: systemctl --user status %s\n", serviceName)
+	logs.Info("[ROBOT SLEEP] daemon active: %s", serviceName)
+	logs.Info("[ROBOT SLEEP] status: systemctl --user status %s", serviceName)
 	return nil
 }
 

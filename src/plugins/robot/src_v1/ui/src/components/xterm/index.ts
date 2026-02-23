@@ -3,6 +3,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { VisualizationControl } from '@ui/types';
 import { addMavlinkListener, sendCommand } from '../../data/connection';
+import { logInfo } from '../../data/logging';
 import { registerButtons, renderButtons, setMode } from '../../buttons';
 
 type CursorPos = {
@@ -158,7 +159,7 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
     const value = inputEl.value.trim();
     if (!value) return;
     const inputAria = inputEl.getAttribute('aria-label') || 'Log Command Input';
-    console.log(`[TEST_ACTION] input aria=${inputAria} value=${value}`);
+    logInfo('ui/xterm', `[TEST_ACTION] input aria=${inputAria} value=${value}`);
     terminalEl.setAttribute('data-last-command', value);
     
     term.writeln(`$ ${value}`);

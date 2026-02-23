@@ -1,6 +1,7 @@
 import { VisualizationControl } from '@ui/types';
 import { addMavlinkListener } from '../../data/connection';
 import { LatencyEstimator } from '../../data/latency';
+import { logError, logInfo } from '../../data/logging';
 import { registerButtons, renderButtons } from '../../buttons';
 
 class VideoControl implements VisualizationControl {
@@ -106,7 +107,7 @@ class VideoControl implements VisualizationControl {
   }
 
   private updateFeedSource(name: string) {
-    console.log(`[Video] Switching to feed: ${name}`);
+    logInfo('ui/video', `[Video] Switching to feed: ${name}`);
     const sourceEl = this.container.querySelector('#vid-source');
     if (sourceEl) sourceEl.textContent = name.toUpperCase();
   }
@@ -135,17 +136,17 @@ class VideoControl implements VisualizationControl {
       });
       
       if (res.ok) {
-        console.log('[Video] Bookmark saved');
+        logInfo('ui/video', '[Video] Bookmark saved');
         // Visual feedback? No direct button access anymore, but renderButtons re-renders.
         // I could update button label temporarily?
         // But registerButtons defines static labels/actions.
         // For dynamic feedback, I'd need to update the config and re-render.
         // Or simpler: just log. The HUD is there.
       } else {
-        console.error('[Video] Bookmark failed', res.status);
+        logError('ui/video', `[Video] Bookmark failed: ${res.status}`);
       }
     } catch (err) {
-      console.error('[Video] Bookmark error', err);
+      logError('ui/video', '[Video] Bookmark error', err);
     }
   }
 

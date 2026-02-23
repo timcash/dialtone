@@ -1,10 +1,11 @@
 package ops
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
 func Build(flags ...string) error {
@@ -23,7 +24,7 @@ func Build(flags ...string) error {
 	repoRoot := paths.Runtime.RepoRoot
 	uiDir := paths.Preset.UI
 
-	fmt.Printf(">> [Robot] Building UI: src_v1\n")
+	logs.Info(">> [Robot] Building UI: src_v1")
 	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "bun", "src_v1", "exec", "--cwd", uiDir, "run", "build")
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
@@ -36,7 +37,7 @@ func Build(flags ...string) error {
 	if err := os.MkdirAll(robotBinDir, 0755); err != nil {
 		return err
 	}
-	fmt.Printf(">> [Robot] Building server: src_v1\n")
+	logs.Info(">> [Robot] Building server: src_v1")
 	// Use dialtone.sh go src_v1 exec build
 	buildArgs := []string{"go", "src_v1", "exec", "build", "-o", filepath.Join(robotBinDir, "robot-src_v1"), "./plugins/robot/src_v1/cmd/server/main.go"}
 	buildArgs = append(buildArgs, localFlags...)

@@ -1,4 +1,4 @@
-@import '../../../../../plugins/ui/style.css';
+@import '@ui/style.css';
 
 section[aria-label='Hero Section'] {
   position: relative;
@@ -98,8 +98,8 @@ section[aria-label='Table Section'] td {
 
 section#xterm {
   display: grid;
-  grid-cloudflare-rows: minmax(0, 1fr) auto;
-  grid-cloudflare-areas:
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas:
     'terminal'
     'input';
   width: 100%;

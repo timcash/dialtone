@@ -1,18 +1,10 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
-
 	"github.com/chromedp/chromedp"
 )
 
 func Run11HeroSectionValidation() error {
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-
 	session, err := ensureSharedBrowser(false)
 	if err != nil {
 		return err
@@ -25,6 +17,9 @@ func Run11HeroSectionValidation() error {
 		return err
 	}
 
-	shot := filepath.Join(repoRoot, "src", "plugins", "cloudflare", "src_v1", "screenshots", "test_step_1.png")
+	shot, err := screenshotPath("test_step_1.png")
+	if err != nil {
+		return err
+	}
 	return session.CaptureScreenshot(shot)
 }

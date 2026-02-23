@@ -2,20 +2,22 @@ package test
 
 import (
 	"fmt"
+
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
 func Run11HeroSectionValidation(ctx *testCtx) (string, error) {
-	fmt.Println("   [STEP] Navigating to Hero Section...")
+	logs.InfoFromTest("robot-test", "[STEP] Navigating to Hero Section...")
 	if err := ctx.navigateSection("hero"); err != nil {
 		return "", fmt.Errorf("failed navigating to Hero: %w", err)
 	}
 
-	fmt.Println("   [STEP] Waiting for Hero Section...")
+	logs.InfoFromTest("robot-test", "[STEP] Waiting for Hero Section...")
 	if err := ctx.waitAria("Hero Section", "Hero section visibility"); err != nil {
 		return "", fmt.Errorf("failed waiting for Hero Section: %w", err)
 	}
 
-	fmt.Println("   [STEP] Waiting for Hero Canvas...")
+	logs.InfoFromTest("robot-test", "[STEP] Waiting for Hero Canvas...")
 	if err := ctx.waitAria("Hero Canvas", "Hero canvas visibility"); err != nil {
 		return "", fmt.Errorf("failed waiting for Hero Canvas: %w", err)
 	}

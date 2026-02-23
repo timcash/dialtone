@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 	"github.com/chromedp/chromedp"
 )
 
@@ -13,22 +14,22 @@ func Run13TableSectionValidation(ctx *testCtx) (string, error) {
 		return "", err
 	}
 
-	fmt.Println("   [STEP] Navigating to Table Section...")
+	logs.InfoFromTest("robot-test", "[STEP] Navigating to Table Section...")
 	if err := ctx.navigateSection("table"); err != nil {
 		return "", fmt.Errorf("failed navigating to Table: %w", err)
 	}
 
-	fmt.Println("   [STEP] Waiting for Robot Table...")
+	logs.InfoFromTest("robot-test", "[STEP] Waiting for Robot Table...")
 	if err := ctx.waitAria("Robot Table", "table visibility"); err != nil {
 		return "", fmt.Errorf("failed waiting for Robot Table: %w", err)
 	}
 
-	fmt.Println("   [STEP] Waiting for data-ready=true...")
+	logs.InfoFromTest("robot-test", "[STEP] Waiting for data-ready=true...")
 	if err := ctx.waitAriaAttrEquals("Robot Table", "data-ready", "true", "table ready", 3*time.Second); err != nil {
 		return "", fmt.Errorf("failed waiting for data-ready: %w", err)
 	}
 
-	fmt.Println("   [STEP] Waiting for table rows...")
+	logs.InfoFromTest("robot-test", "[STEP] Waiting for table rows...")
 	var rowCount int
 	start := time.Now()
 	for time.Since(start) < 5*time.Second {

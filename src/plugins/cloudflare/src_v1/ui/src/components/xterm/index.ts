@@ -1,4 +1,4 @@
-import { VisualizationControl } from '../../../../../../../plugins/ui/types';
+import { VisualizationControl } from '@ui/types';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
