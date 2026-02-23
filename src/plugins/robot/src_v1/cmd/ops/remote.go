@@ -81,7 +81,19 @@ func runRemoteServe(opts remoteOptions) error {
 	if err := validateRemoteOptions(opts); err != nil {
 		return err
 	}
-	cmd := remoteServeCommand(opts.RemoteDir)
+	hostname := strings.TrimSpace(os.Getenv("DIALTONE_HOSTNAME"))
+	if hostname == "" {
+		hostname = "drone-1"
+	}
+	authKey := strings.TrimSpace(os.Getenv("ROBOT_TS_AUTHKEY"))
+	if authKey == "" {
+		authKey = strings.TrimSpace(os.Getenv("TS_AUTHKEY"))
+	}
+	mavEndpoint := strings.TrimSpace(os.Getenv("ROBOT_MAVLINK_ENDPOINT"))
+	if mavEndpoint == "" {
+		mavEndpoint = strings.TrimSpace(os.Getenv("MAVLINK_ENDPOINT"))
+	}
+	cmd := remoteServeCommand(opts.RemoteDir, hostname, authKey, mavEndpoint)
 	logs.Info("[ROBOT SERVE] starting remote server on host %s", opts.Host)
 	_, err := runRemoteCommand(opts, cmd)
 	return err
@@ -207,11 +219,15 @@ func remoteBuildCommand(remoteDir string) string {
 	}, "\n")
 }
 
-func remoteServeCommand(remoteDir string) string {
-	return strings.Join([]string{
+func remoteServeCommand(remoteDir, hostname, authKey, mavEndpoint string) string {
+	lines := []string{
 		"set -euo pipefail",
 		"REMOTE_DIR=" + shellQuote(remoteDir),
+		`APP_DIR="$REMOTE_DIR/plugins/robot/src_v1"`,
 		`BIN="$REMOTE_DIR/plugins/robot/src_v1/bin/robot-src_v1"`,
+		`HOSTNAME=` + shellQuote(hostname),
+		`AUTHKEY=` + shellQuote(authKey),
+		`MAV_ENDPOINT=` + shellQuote(mavEndpoint),
 		`if [ ! -x "$BIN" ]; then`,
 		`  echo "missing remote binary: $BIN" >&2`,
 		`  echo "run: ./dialtone.sh robot src_v1 build --remote" >&2`,
@@ -219,7 +235,11 @@ func remoteServeCommand(remoteDir string) string {
 		`fi`,
 		`pkill -x robot-src_v1 || true`,
 		`sleep 1`,
-		`nohup "$BIN" >/dev/null 2>&1 < /dev/null &`,
+		`if [ -n "$AUTHKEY" ]; then`,
+		`  (cd "$APP_DIR" && ROBOT_TSNET=1 DIALTONE_HOSTNAME="$HOSTNAME" ROBOT_TS_AUTHKEY="$AUTHKEY" ROBOT_MAVLINK_ENDPOINT="$MAV_ENDPOINT" nohup "$BIN" >/dev/null 2>&1 < /dev/null &)`,
+		`else`,
+		`  (cd "$APP_DIR" && ROBOT_MAVLINK_ENDPOINT="$MAV_ENDPOINT" nohup "$BIN" >/dev/null 2>&1 < /dev/null &)`,
+		`fi`,
 		`sleep 1`,
 		`echo "pids:"`,
 		`pgrep -af "robot-src_v1" || true`,
@@ -228,7 +248,8 @@ func remoteServeCommand(remoteDir string) string {
 		`echo "health:"`,
 		`curl -fsS --max-time 5 http://127.0.0.1:8080/health || true`,
 		`echo`,
-	}, "\n")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func shellQuote(s string) string {

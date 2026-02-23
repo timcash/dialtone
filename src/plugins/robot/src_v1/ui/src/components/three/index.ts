@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { VisualizationControl } from '@ui/types';
 import { addMavlinkListener, sendCommand } from '../../data/connection';
+import { LatencyEstimator } from '../../data/latency';
 import { registerButtons, renderButtons } from '../../buttons';
 
 const CHATLOG_MAX_LINES = 7;
@@ -18,6 +19,7 @@ class ThreeControl implements VisualizationControl {
   private attitude = { roll: 0, pitch: 0, yaw: 0 };
   private latencyHistory: number[] = [];
   private maxHistory = 60;
+  private latencyEstimator = new LatencyEstimator();
   
   // Chatlog
   private chatlogHost: HTMLElement | null = null;
@@ -256,16 +258,8 @@ class ThreeControl implements VisualizationControl {
   }
 
   private updateLatency(raw: any) {
-    const now = Date.now();
-    let t_raw = raw.t_raw || raw.timestamp;
-    if (t_raw < 10000000000) t_raw *= 1000;
-
-    const t_pub = raw.t_pub ? raw.t_pub : t_raw;
-    const total = now - t_raw;
-    const proc = t_pub - t_raw;
-    const net = now - t_pub;
-
-    if (total > 10000 || total < -1000) return;
+    const total = this.latencyEstimator.estimate(raw);
+    if (total == null) return;
 
     this.latencyHistory.push(total);
     if (this.latencyHistory.length > this.maxHistory) {
@@ -274,7 +268,7 @@ class ThreeControl implements VisualizationControl {
 
     const el = document.getElementById('hud-latency');
     if (el) {
-      el.innerText = `${total}ms`;
+      el.innerText = `${Math.round(total)}ms`;
     }
     this.drawLatencyGraph();
   }
