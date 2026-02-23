@@ -9,16 +9,19 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	logsv1 "dialtone/dev/plugins/logs/src_v1/go"
 )
 
 func main() {
 	port := "8080"
+	paths, _ := logsv1.ResolvePaths("", "src_v1")
 	cwd, _ := os.Getwd()
 	uiPath := filepath.Join(cwd, "ui", "dist")
-	if _, err := os.Stat(uiPath); err != nil {
-		uiPath = filepath.Join(cwd, "src", "plugins", "logs", "src_v1", "ui", "dist")
+	if _, err := os.Stat(uiPath); err != nil && paths.Runtime.RepoRoot != "" {
+		uiPath = paths.Preset.UIDist
 	}
-	logPath := resolveTestLogPath(cwd)
+	logPath := resolveTestLogPath(cwd, paths)
 
 	http.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
@@ -64,12 +67,15 @@ func main() {
 	}
 }
 
-func resolveTestLogPath(cwd string) string {
+func resolveTestLogPath(cwd string, paths logsv1.Paths) string {
 	local := filepath.Join(cwd, "test", "test.log")
 	if _, err := os.Stat(local); err == nil {
 		return local
 	}
-	return filepath.Join(cwd, "src", "plugins", "logs", "src_v1", "test", "test.log")
+	if paths.Runtime.RepoRoot != "" {
+		return paths.TestLog
+	}
+	return filepath.Join(cwd, "test", "test.log")
 }
 
 func readLogDelta(path string, offset int64) (int64, []string, error) {

@@ -7,7 +7,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	logsv1 "dialtone/dev/plugins/logs/src_v1/go"
 )
+
+func resolveLogsPaths(versionDir string) (logsv1.Paths, error) {
+	return logsv1.ResolvePaths("", versionDir)
+}
 
 func runBun(repoRoot, uiDir string, args ...string) *exec.Cmd {
 	bunArgs := append([]string{"bun", "exec", "--cwd", uiDir}, args...)

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	uiv1 "dialtone/dev/plugins/ui/src_v1/go"
 )
 
 type TestContext struct {
@@ -91,12 +93,12 @@ func (t *TestContext) ensurePathsLocked() error {
 	if t.repoRoot != "" {
 		return nil
 	}
-	root, err := findRepoRoot()
+	paths, err := uiv1.ResolvePaths("")
 	if err != nil {
 		return err
 	}
-	t.repoRoot = root
-	t.appDir = filepath.Join(root, "src", "plugins", "ui", "src_v1", "test", "fixtures", "app")
+	t.repoRoot = paths.Runtime.RepoRoot
+	t.appDir = paths.FixtureApp
 	t.distDir = filepath.Join(t.appDir, "dist")
 	return nil
 }
@@ -178,21 +180,4 @@ func bunBin() string {
 		return candidate
 	}
 	return "bun"
-}
-
-func findRepoRoot() (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
-			return cwd, nil
-		}
-		parent := filepath.Dir(cwd)
-		if parent == cwd {
-			return "", fmt.Errorf("repo root not found")
-		}
-		cwd = parent
-	}
 }

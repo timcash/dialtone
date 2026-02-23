@@ -107,7 +107,7 @@ func isHelp(s string) bool {
 }
 
 func runVersionedTest(versionDir string) error {
-	root, err := findRepoRoot()
+	paths, err := repl.ResolvePaths("")
 	if err != nil {
 		return err
 	}
@@ -115,8 +115,8 @@ func runVersionedTest(versionDir string) error {
 	testPkg := "./plugins/repl/" + versionDir + "/test/cmd/main.go"
 	goArgs := []string{"src_v1", "exec", "run", testPkg}
 	fullArgs := append([]string{"go"}, goArgs...)
-	cmd := exec.Command(filepath.Join(root, "dialtone.sh"), fullArgs...)
-	cmd.Dir = root
+	cmd := exec.Command(filepath.Join(paths.Runtime.RepoRoot, "dialtone.sh"), fullArgs...)
+	cmd.Dir = paths.Runtime.RepoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -124,11 +124,11 @@ func runVersionedTest(versionDir string) error {
 }
 
 func buildStandaloneBinary(version, goos, goarch string) error {
-	root, err := findRepoRoot()
+	paths, err := repl.ResolvePaths("")
 	if err != nil {
 		return err
 	}
-	binDir := filepath.Join(root, ".dialtone", "bin")
+	binDir := paths.StandaloneBinDir
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return err
 	}
@@ -161,7 +161,7 @@ func buildStandaloneBinary(version, goos, goarch string) error {
 	args = append(args, "-o", out, pkg)
 
 	cmd := exec.Command(goBin, args...)
-	cmd.Dir = filepath.Join(root, "src")
+	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = os.Environ()
@@ -222,11 +222,11 @@ func releasePublish(args []string) error {
 	if len(args) > 1 && strings.TrimSpace(args[1]) != "" {
 		repo = strings.TrimSpace(args[1])
 	}
-	root, err := findRepoRoot()
+	paths, err := repl.ResolvePaths("")
 	if err != nil {
 		return err
 	}
-	binDir := filepath.Join(root, ".dialtone", "bin")
+	binDir := paths.StandaloneBinDir
 	assets := []string{
 		"repl-src_v1-linux-amd64",
 		"repl-src_v1-linux-arm64",
@@ -244,8 +244,8 @@ func releasePublish(args []string) error {
 	for _, a := range assets {
 		githubArgs = append(githubArgs, "--asset", filepath.Join(binDir, a))
 	}
-	cmd := exec.Command(filepath.Join(root, "dialtone.sh"), githubArgs...)
-	cmd.Dir = root
+	cmd := exec.Command(filepath.Join(paths.Runtime.RepoRoot, "dialtone.sh"), githubArgs...)
+	cmd.Dir = paths.Runtime.RepoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -253,23 +253,6 @@ func releasePublish(args []string) error {
 	}
 	logs.Info("Published release %s to %s", version, repo)
 	return nil
-}
-
-func findRepoRoot() (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
-			return cwd, nil
-		}
-		parent := filepath.Dir(cwd)
-		if parent == cwd {
-			return "", fmt.Errorf("repo root not found")
-		}
-		cwd = parent
-	}
 }
 
 func printUsage() {

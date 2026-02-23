@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
-	logs "dialtone/dev/plugins/logs/src_v1/go"
 	tsnetv1 "dialtone/dev/plugins/tsnet/src_v1/go"
 )
 
@@ -47,13 +45,17 @@ func Run(args []string) error {
 }
 
 func runTests(version string) error {
-	repoRoot, err := findRepoRoot()
+	paths, err := tsnetv1.ResolvePaths("")
 	if err != nil {
 		return err
 	}
 
-	cmd := exec.Command("go", "run", "./plugins/tsnet/src_v1/test/cmd/main.go")
-	cmd.Dir = filepath.Join(repoRoot, "src")
+	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
+	if goBin == "" {
+		goBin = "go"
+	}
+	cmd := exec.Command(goBin, "run", "./plugins/tsnet/src_v1/test/cmd/main.go")
+	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -68,22 +70,5 @@ func isHelpArg(s string) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-func findRepoRoot() (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
-			return cwd, nil
-		}
-		parent := filepath.Dir(cwd)
-		if parent == cwd {
-			return "", logs.Errorf("repo root not found")
-		}
-		cwd = parent
 	}
 }
