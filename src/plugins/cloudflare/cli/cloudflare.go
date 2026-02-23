@@ -602,6 +602,17 @@ func runRobot(args []string) {
 	// 2. Determine the target URL for the robot
 	targetURL := *urlFlag
 	if targetURL == "" {
+		// Allow env override for relay/sleep scenarios without requiring service file edits.
+		nameKey := fmt.Sprintf("CLOUDFLARE_ROBOT_URL_%s", strings.ToUpper(strings.ReplaceAll(name, "-", "_")))
+		targetURL = strings.TrimSpace(os.Getenv(nameKey))
+	}
+	if targetURL == "" {
+		targetURL = strings.TrimSpace(os.Getenv("CLOUDFLARE_ROBOT_URL"))
+	}
+	if targetURL == "" {
+		targetURL = strings.TrimSpace(os.Getenv("ROBOT_SLEEP_PROXY_URL"))
+	}
+	if targetURL == "" {
 		targetURL = fmt.Sprintf("http://%s:80", name)
 	}
 
