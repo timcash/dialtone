@@ -123,8 +123,8 @@ func deployRobot(versionDir string, opts deployOptions) error {
 		{name: "verify deployment health", run: func() error { return verifyDeployment(client, ctx.opts) }},
 	}
 
-	if ctx.opts.Proxy {
-		steps = append(steps, deployStep{name: "configure local cloudflare proxy service", run: func() error {
+	if ctx.opts.Relay {
+		steps = append(steps, deployStep{name: "configure local cloudflare relay service", run: func() error {
 			hostname := strings.TrimSpace(os.Getenv("DIALTONE_DOMAIN"))
 			if hostname == "" {
 				hostname = strings.TrimSpace(os.Getenv("DIALTONE_HOSTNAME"))
