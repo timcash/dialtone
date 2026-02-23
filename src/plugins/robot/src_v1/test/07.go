@@ -16,7 +16,7 @@ func Run07GoRun(ctx *testCtx) (string, error) {
 	var err error
 	start := time.Now()
 	for time.Since(start) < 5*time.Second {
-		resp, err = http.Get("http://127.0.0.1:8080/health")
+		resp, err = http.Get(ctx.backendURL("/health"))
 		if err == nil && resp.StatusCode == 200 {
 			break
 		}

@@ -3,18 +3,11 @@ package test
 import (
 	"fmt"
 	"time"
-
-	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 )
 
 func Run16VideoSectionValidation(ctx *testCtx) (string, error) {
-	session, err := ctx.browser()
-	if err != nil {
-		return "", err
-	}
-
 	fmt.Println("   [STEP] Navigating to Video Section...")
-	if err := session.Run(test_v2.NavigateToSection("robot", "video", "Video Section")); err != nil {
+	if err := ctx.navigateSection("video"); err != nil {
 		return "", fmt.Errorf("failed navigating to Video: %w", err)
 	}
 

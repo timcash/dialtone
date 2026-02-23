@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 	"github.com/chromedp/chromedp"
 )
 
@@ -28,7 +27,7 @@ func Run17LifecycleInvariants(ctx *testCtx) (string, error) {
 	}
 
 	for _, c := range checks {
-		if err := session.Run(test_v2.NavigateToSection("robot", c.id, c.label)); err != nil {
+		if err := ctx.navigateSection(c.id); err != nil {
 			return "", err
 		}
 	}

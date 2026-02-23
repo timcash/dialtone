@@ -24,11 +24,11 @@ func RunDiagnostic(versionDir string) error {
 
 	hostname := os.Getenv("DIALTONE_HOSTNAME")
 	robotIP := os.Getenv("ROBOT_HOST")
-	
+
 	if hostname == "" {
 		hostname = robotIP
 	}
-	
+
 	if hostname == "" {
 		logs.Fatal("Neither DIALTONE_HOSTNAME nor ROBOT_HOST environment variable is set. Cannot run diagnostic.")
 	}
@@ -36,7 +36,7 @@ func RunDiagnostic(versionDir string) error {
 	// Use IP for diagnostic if provided, to avoid DNS/MagicDNS issues during testing
 	diagTarget := hostname
 	diagPort := "80"
-	
+
 	// Perform connectivity checks
 	// 1. Basic Ping Check (LAN IP)
 	if robotIP != "" {
@@ -80,7 +80,7 @@ func RunDiagnostic(versionDir string) error {
 	}
 
 	targetURL := fmt.Sprintf("http://%s:%s", diagTarget, diagPort)
-	
+
 	// 4. Browser-based UI Validation
 	logs.Info("[DIAGNOSTIC] Step 4: Starting browser for UI validation on %s...", targetURL)
 	session, err := test_v2.StartBrowser(test_v2.BrowserOptions{
@@ -179,7 +179,7 @@ func RunDiagnostic(versionDir string) error {
 				if err := chromedp.Run(ctx, test_v2.NavigateToSection("robot", "three", "Three Section")); err != nil {
 					return err
 				}
-				
+
 				// Verify HUD elements are present
 				if err := chromedp.Run(ctx, chromedp.Tasks{
 					chromedp.WaitVisible("#hud-alt", chromedp.ByID),
@@ -214,10 +214,10 @@ func RunDiagnostic(versionDir string) error {
 				if err := chromedp.Run(ctx, chromedp.Click("#three-arm", chromedp.ByID)); err != nil {
 					return fmt.Errorf("failed to click ARM button: %w", err)
 				}
-				
+
 				// Wait for any visual feedback or mode change if applicable
 				time.Sleep(1 * time.Second)
-				
+
 				return nil
 			},
 		},
@@ -243,7 +243,7 @@ func RunDiagnostic(versionDir string) error {
 	for i, step := range steps {
 		timeout := 15 * time.Second
 		logs.Info("[DIAGNOSTIC] Step %d: %s (Timeout: %v)...", i+1, step.name, timeout)
-		
+
 		// Create a context with timeout for this step
 		stepCtx, stepCancel := context.WithTimeout(session.Context(), timeout)
 		err := step.validation(stepCtx)

@@ -108,7 +108,7 @@ func RunSyncCode(versionDir string, args []string) error {
 
 	buildHint := "cd " + shellQuote(*remoteDir) + " && go build ./plugins/robot/" + versionDir + "/cmd/server/main.go"
 	logs.Info("[SYNC-CODE] Complete. Remote build command:")
-	logs.Raw("  " + buildHint)
+	logs.Raw("  %s", buildHint)
 	return nil
 }
 

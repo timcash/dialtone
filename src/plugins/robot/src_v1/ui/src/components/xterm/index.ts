@@ -157,6 +157,9 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
   const submitInput = () => {
     const value = inputEl.value.trim();
     if (!value) return;
+    const inputAria = inputEl.getAttribute('aria-label') || 'Log Command Input';
+    console.log(`[TEST_ACTION] input aria=${inputAria} value=${value}`);
+    terminalEl.setAttribute('data-last-command', value);
     
     term.writeln(`$ ${value}`);
     
@@ -171,7 +174,7 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
         sendCommand(value);
     }
 
-    input.value = '';
+    inputEl.value = '';
     cursor = clampPos({ row: maxRow(), col: lineLength(maxRow()) });
     paintCursor();
   };

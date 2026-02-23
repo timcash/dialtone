@@ -7,7 +7,7 @@ import (
 )
 
 func Run03GoBuild(repoRoot string) error {
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "robot", "go-build", "src_v1")
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "robot", "src_v1", "go-build")
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
