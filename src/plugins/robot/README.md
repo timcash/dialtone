@@ -39,10 +39,19 @@ All commands use the current CLI order:
 ./dialtone.sh robot src_v1 deploy
 ./dialtone.sh robot src_v1 deploy --service
 ./dialtone.sh robot src_v1 deploy --service --proxy
+./dialtone.sh robot src_v1 deploy --service --proxy --smoke-test
 ./dialtone.sh robot src_v1 deploy-test
 ./dialtone.sh robot src_v1 diagnostic
 ./dialtone.sh robot src_v1 vpn-test
 ```
+
+## Deployment Verification
+
+The `deploy` command performs several checks to ensure reliability:
+- **Pre-deployment**: Checks for sufficient remote disk space (100MB+) and accessibility of the MAVLink serial device.
+- **Service**: Verifies `dialtone-robot.service` is active and running.
+- **Health**: Polls `http://127.0.0.1:8080/health` on the robot until it returns "ok".
+- **Smoke Test**: (Optional via `--smoke-test`) Uses a headless browser to verify the UI loads at `drone-1.dialtone.earth`.
 
 ## Remote Native Workflow (recommended)
 

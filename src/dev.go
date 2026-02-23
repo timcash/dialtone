@@ -15,6 +15,93 @@ import (
 
 var logFile *os.File
 
+func findRepoRootFromPath(start string) (string, error) {
+	cwd := start
+	if cwd == "" {
+		var err error
+		cwd, err = os.Getwd()
+		if err != nil {
+			return "", err
+		}
+	}
+	cwd, _ = filepath.Abs(cwd)
+	for {
+		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
+			return cwd, nil
+		}
+		parent := filepath.Dir(cwd)
+		if parent == cwd {
+			break
+		}
+		cwd = parent
+	}
+	return "", os.ErrNotExist
+}
+
+func prependPathEntries(entries ...string) {
+	current := strings.TrimSpace(os.Getenv("PATH"))
+	parts := []string{}
+	seen := map[string]struct{}{}
+	for _, e := range entries {
+		e = strings.TrimSpace(e)
+		if e == "" {
+			continue
+		}
+		if _, err := os.Stat(e); err != nil {
+			continue
+		}
+		if _, ok := seen[e]; !ok {
+			parts = append(parts, e)
+			seen[e] = struct{}{}
+		}
+	}
+	for _, p := range strings.Split(current, string(os.PathListSeparator)) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if _, ok := seen[p]; !ok {
+			parts = append(parts, p)
+			seen[p] = struct{}{}
+		}
+	}
+	_ = os.Setenv("PATH", strings.Join(parts, string(os.PathListSeparator)))
+}
+
+func bootstrapDialtoneRuntimeEnv() {
+	cwd, _ := os.Getwd()
+	repoRoot := strings.TrimSpace(os.Getenv("DIALTONE_REPO_ROOT"))
+	if repoRoot == "" {
+		if found, err := findRepoRootFromPath(cwd); err == nil {
+			repoRoot = found
+		}
+	}
+	if repoRoot != "" {
+		repoRoot, _ = filepath.Abs(repoRoot)
+		_ = os.Setenv("DIALTONE_REPO_ROOT", repoRoot)
+		_ = os.Setenv("DIALTONE_SRC_ROOT", filepath.Join(repoRoot, "src"))
+		if strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE")) == "" {
+			_ = os.Setenv("DIALTONE_ENV_FILE", filepath.Join(repoRoot, "env", ".env"))
+		}
+	}
+
+	depsDir := GetDialtoneEnv()
+	if depsDir != "" {
+		goBinDir := filepath.Join(depsDir, "go", "bin")
+		bunBinDir := filepath.Join(depsDir, "bun", "bin")
+		prependPathEntries(goBinDir, bunBinDir)
+
+		goBin := filepath.Join(goBinDir, "go")
+		if _, err := os.Stat(goBin); err == nil {
+			_ = os.Setenv("DIALTONE_GO_BIN", goBin)
+		}
+		bunBin := filepath.Join(bunBinDir, "bun")
+		if _, err := os.Stat(bunBin); err == nil {
+			_ = os.Setenv("DIALTONE_BUN_BIN", bunBin)
+		}
+	}
+}
+
 func initLogger() {
 	cwd, _ := os.Getwd()
 	repoRoot := cwd
@@ -157,6 +244,7 @@ func ensureBunRequirement(version string) error {
 }
 
 func main() {
+	bootstrapDialtoneRuntimeEnv()
 	initLogger()
 	LoadConfig()
 	defer func() {

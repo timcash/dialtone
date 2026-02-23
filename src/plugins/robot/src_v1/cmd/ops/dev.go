@@ -24,10 +24,14 @@ import (
 )
 
 func Dev(repoRoot string, args []string) error {
-	cwd, _ := os.Getwd()
-	pluginDir := filepath.Join(repoRoot, "src", "plugins", "robot", "src_v1")
+	paths, err := resolveRobotPathsPreset()
+	if err != nil {
+		return err
+	}
+	cwd := paths.Runtime.RepoRoot
+	pluginDir := paths.PluginVersionRoot
 	uiDir := filepath.Join(pluginDir, "ui")
-	devBrowserMetaPath := filepath.Join(pluginDir, "dev.browser.json")
+	devBrowserMetaPath := paths.DevBrowserMeta
 	devPort := 3000
 	devURL := fmt.Sprintf("http://127.0.0.1:%d", devPort)
 

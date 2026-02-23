@@ -16,15 +16,12 @@ func Build(flags ...string) error {
 		return runRemoteBuild(remoteOpts)
 	}
 
-	cwd, err := os.Getwd()
+	paths, err := resolveRobotPathsPreset()
 	if err != nil {
 		return err
 	}
-	repoRoot := cwd
-	if filepath.Base(cwd) == "src" {
-		repoRoot = filepath.Dir(cwd)
-	}
-	uiDir := filepath.Join(repoRoot, "src", "plugins", "robot", "src_v1", "ui")
+	repoRoot := paths.Runtime.RepoRoot
+	uiDir := paths.Preset.UI
 
 	fmt.Printf(">> [Robot] Building UI: src_v1\n")
 	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "bun", "src_v1", "exec", "--cwd", uiDir, "run", "build")
@@ -35,6 +32,17 @@ func Build(flags ...string) error {
 		return err
 	}
 
-	_ = localFlags
-	return nil
+	robotBinDir := paths.Preset.Bin
+	if err := os.MkdirAll(robotBinDir, 0755); err != nil {
+		return err
+	}
+	fmt.Printf(">> [Robot] Building server: src_v1\n")
+	// Use dialtone.sh go src_v1 exec build
+	buildArgs := []string{"go", "src_v1", "exec", "build", "-o", filepath.Join(robotBinDir, "robot-src_v1"), "./plugins/robot/src_v1/cmd/server/main.go"}
+	buildArgs = append(buildArgs, localFlags...)
+	buildCmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), buildArgs...)
+	buildCmd.Dir = repoRoot
+	buildCmd.Stdout = os.Stdout
+	buildCmd.Stderr = os.Stderr
+	return buildCmd.Run()
 }

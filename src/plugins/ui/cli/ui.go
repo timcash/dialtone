@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	uiv1 "dialtone/dev/plugins/ui/src_v1/go"
 )
 
 func Run(args []string) error {
@@ -81,6 +83,10 @@ func runKill() {
 }
 
 func runNpm(script string, args []string) error {
+	paths, err := uiv1.ResolvePaths("")
+	if err != nil {
+		return err
+	}
 	// Locate npm in DIALTONE_ENV
 	envDir := os.Getenv("DIALTONE_ENV")
 	if envDir == "" {
@@ -101,7 +107,7 @@ func runNpm(script string, args []string) error {
 	}
 
 	nodeBin := filepath.Join(nodePath, "node")
-	webDir := filepath.Join("src", "core", "web")
+	webDir := filepath.Join(paths.Runtime.SrcRoot, "core", "web")
 
 	var cmd *exec.Cmd
 	if script == "install" {
@@ -160,31 +166,18 @@ func isHelp(s string) bool {
 }
 
 func runUITests() error {
-	repoRoot, err := findRepoRoot()
+	paths, err := uiv1.ResolvePaths("")
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command("go", "run", "./plugins/ui/src_v1/test/cmd/main.go")
-	cmd.Dir = filepath.Join(repoRoot, "src")
+	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
+	if goBin == "" {
+		goBin = "go"
+	}
+	cmd := exec.Command(goBin, "run", "./plugins/ui/src_v1/test/cmd/main.go")
+	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	return cmd.Run()
-}
-
-func findRepoRoot() (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
-			return cwd, nil
-		}
-		parent := filepath.Dir(cwd)
-		if parent == cwd {
-			return "", fmt.Errorf("repo root not found")
-		}
-		cwd = parent
-	}
 }

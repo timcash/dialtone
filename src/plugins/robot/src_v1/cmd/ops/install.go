@@ -2,6 +2,7 @@ package ops
 
 import (
 	"crypto/sha256"
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -73,15 +74,12 @@ func Install(args ...string) error {
 }
 
 func resolveRobotPaths() (repoRoot, uiDir string, err error) {
-	cwd, err := os.Getwd()
+	paths, err := resolveRobotPathsPreset()
 	if err != nil {
 		return "", "", err
 	}
-	repoRoot = cwd
-	if filepath.Base(cwd) == "src" {
-		repoRoot = filepath.Dir(cwd)
-	}
-	uiDir = filepath.Join(repoRoot, "src", "plugins", "robot", "src_v1", "ui")
+	repoRoot = paths.Runtime.RepoRoot
+	uiDir = paths.Preset.UI
 	return repoRoot, uiDir, nil
 }
 
@@ -128,7 +126,11 @@ func currentInstallState(repoRoot, uiDir string) (string, installState, error) {
 		return "", installState{}, err
 	}
 
-	goRequired, err := requiredGoVersion(filepath.Join(repoRoot, "src", "go.mod"))
+	rt, err := configv1.ResolveRuntime(repoRoot)
+	if err != nil {
+		return "", installState{}, err
+	}
+	goRequired, err := requiredGoVersion(configv1.SrcPath(rt, "go.mod"))
 	if err != nil {
 		return "", installState{}, err
 	}

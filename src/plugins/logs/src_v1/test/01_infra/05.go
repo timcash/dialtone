@@ -16,7 +16,11 @@ func Run05ExamplePluginImport(sc *testv1.StepContext) (testv1.StepRunResult, err
 	if err != nil {
 		return testv1.StepRunResult{}, err
 	}
-	testDir := filepath.Join(repoRoot, "src", "plugins", "logs", "src_v1", "test")
+	paths, err := logs.ResolvePaths(repoRoot, "src_v1")
+	if err != nil {
+		return testv1.StepRunResult{}, err
+	}
+	testDir := paths.Preset.Test
 
 	topic := "logs.example.plugin"
 	outPath := filepath.Join(testDir, "example_plugin.log")
@@ -26,7 +30,7 @@ func Run05ExamplePluginImport(sc *testv1.StepContext) (testv1.StepRunResult, err
 	_ = os.Remove(binPath)
 
 	build := exec.Command("go", "build", "-o", binPath, "./plugins/logs/src_v1/test/02_example")
-	build.Dir = filepath.Join(repoRoot, "src")
+	build.Dir = paths.Runtime.SrcRoot
 	if out, err := build.CombinedOutput(); err != nil {
 		return testv1.StepRunResult{}, fmt.Errorf("build example plugin failed: %v\n%s", err, string(out))
 	}
