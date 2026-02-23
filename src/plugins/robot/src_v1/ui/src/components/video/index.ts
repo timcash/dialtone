@@ -1,11 +1,13 @@
 import { VisualizationControl } from '@ui/types';
 import { addMavlinkListener } from '../../data/connection';
+import { LatencyEstimator } from '../../data/latency';
 import { registerButtons, renderButtons } from '../../buttons';
 
 class VideoControl implements VisualizationControl {
   private img: HTMLImageElement | null;
   private visible = false;
   private unsubscribe: (() => void) | null = null;
+  private latencyEstimator = new LatencyEstimator();
   
   // Watchdog
   private watchdogTimer: ReturnType<typeof setTimeout> | null = null;
@@ -92,18 +94,10 @@ class VideoControl implements VisualizationControl {
   private subscribe() {
     if (this.unsubscribe) return;
     this.unsubscribe = addMavlinkListener((raw: any) => {
-        // Latency calculation
-        if (raw.t_raw !== undefined) {
-            const now = Date.now();
-            let t_raw = raw.t_raw || raw.timestamp;
-            if (t_raw < 10000000000) t_raw *= 1000;
-            
-            const total = now - t_raw;
-            if (total > 10000 || total < -1000) return;
-
-            const el = document.getElementById('vid-latency');
-            if (el) el.textContent = `${total}ms`;
-        }
+        const total = this.latencyEstimator.estimate(raw);
+        if (total == null) return;
+        const el = document.getElementById('vid-latency');
+        if (el) el.textContent = `${Math.round(total)}ms`;
     });
   }
 

@@ -237,8 +237,6 @@ func installSystemdUserService(exe string, runArgs []string) error {
 		return err
 	}
 	unitPath := filepath.Join(unitDir, "repl-src_v1.service")
-	logPath := filepath.Join(home, ".dialtone", "logs", "repl-service.log")
-	_ = os.MkdirAll(filepath.Dir(logPath), 0o755)
 
 	execStart := exe + " " + strings.Join(runArgs, " ")
 	unit := strings.Join([]string{
@@ -251,8 +249,8 @@ func installSystemdUserService(exe string, runArgs []string) error {
 		"ExecStart=" + execStart,
 		"Restart=always",
 		"RestartSec=2",
-		"StandardOutput=append:" + logPath,
-		"StandardError=append:" + logPath,
+		"StandardOutput=journal",
+		"StandardError=journal",
 		"",
 		"[Install]",
 		"WantedBy=default.target",
@@ -284,7 +282,6 @@ func installLaunchdUserService(exe string, runArgs []string) error {
 	}
 	label := "dev.dialtone.repl-src_v1"
 	plistPath := filepath.Join(plistDir, label+".plist")
-	logPath := filepath.Join(home, "Library", "Logs", "dialtone-repl-service.log")
 
 	argsXML := "<string>" + xmlEscape(exe) + "</string>\n"
 	for _, a := range runArgs {
@@ -305,10 +302,6 @@ func installLaunchdUserService(exe string, runArgs []string) error {
 	<true/>
 	<key>KeepAlive</key>
 	<true/>
-	<key>StandardOutPath</key>
-	<string>` + xmlEscape(logPath) + `</string>
-	<key>StandardErrorPath</key>
-	<string>` + xmlEscape(logPath) + `</string>
 </dict>
 </plist>
 `

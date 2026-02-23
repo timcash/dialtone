@@ -12,7 +12,7 @@ func GoBuild() error {
 		return err
 	}
 
-	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "exec", "build", "./src/plugins/robot/src_v1/...")
+	cmd := exec.Command(filepath.Join(cwd, "dialtone.sh"), "go", "src_v1", "exec", "build", "./src/plugins/robot/src_v1/...")
 	cmd.Dir = cwd
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
