@@ -281,7 +281,7 @@ func runDebugStep(source, tmpDir, osStr, archStr string, client *sshlib.Client, 
 	logs.Info("   Uploading to robot...")
 	// Kill existing debug process if any
 	_, _ = ssh_plugin.RunSSHCommand(client, "pkill -9 dialtone_debug")
-	
+
 	if err := ssh_plugin.UploadFile(client, localBin, remotePath); err != nil {
 		return err
 	}

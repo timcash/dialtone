@@ -5,7 +5,7 @@ import { registerButtons, renderButtons } from '../../buttons';
 
 class VideoControl implements VisualizationControl {
   private img: HTMLImageElement | null;
-  private visible = false;
+  private sectionEl: HTMLElement;
   private unsubscribe: (() => void) | null = null;
   private latencyEstimator = new LatencyEstimator();
   
@@ -16,6 +16,7 @@ class VideoControl implements VisualizationControl {
   private readonly WATCHDOG_TIMEOUT = 3 * 60 * 1000; // 3 minutes
 
   constructor(private container: HTMLElement) {
+    this.sectionEl = container;
     this.img = container.querySelector('img.video-stage');
     
     // Create Watchdog Overlay
@@ -66,6 +67,7 @@ class VideoControl implements VisualizationControl {
   private pauseStream() {
     this.isPaused = true;
     this.stopStream();
+    this.sectionEl.setAttribute('data-playing', 'false');
     this.watchdogOverlay.hidden = false;
   }
 
@@ -80,11 +82,13 @@ class VideoControl implements VisualizationControl {
     if (this.img && !this.img.src.includes('/stream')) {
         this.img.src = '/stream?t=' + Date.now();
     }
+    this.sectionEl.setAttribute('data-playing', 'true');
     this.subscribe();
   }
 
   private stopStream() {
     if (this.img) this.img.src = ''; // Stop network request
+    this.sectionEl.setAttribute('data-playing', 'false');
     if (this.unsubscribe) {
         this.unsubscribe();
         this.unsubscribe = null;
@@ -151,7 +155,6 @@ class VideoControl implements VisualizationControl {
   }
 
   setVisible(visible: boolean): void {
-    this.visible = visible;
     if (visible) {
       renderButtons('video');
       if (!this.isPaused) {

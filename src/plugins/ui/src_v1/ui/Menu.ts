@@ -29,6 +29,8 @@ export class Menu {
     toggle.setAttribute('aria-expanded', 'false');
     toggle.classList.add('menu-toggle');
     toggle.addEventListener('click', () => {
+      const aria = toggle.getAttribute('aria-label') ?? 'Toggle Global Menu';
+      console.log(`[TEST_ACTION] click aria=${aria}`);
       this.setOpen(!this.isOpen());
     });
     this.root.appendChild(toggle);
@@ -66,6 +68,8 @@ export class Menu {
     btn.setAttribute('data-menu-item', 'true');
     btn.hidden = true;
     btn.addEventListener('click', () => {
+      const aria = btn.getAttribute('aria-label') ?? label;
+      console.log(`[TEST_ACTION] click aria=${aria}`);
       onClick();
       this.setOpen(false);
     });

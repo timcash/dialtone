@@ -5,6 +5,11 @@ import (
 )
 
 func Run11HeroSectionValidation(ctx *testCtx) (string, error) {
+	fmt.Println("   [STEP] Navigating to Hero Section...")
+	if err := ctx.navigateSection("hero"); err != nil {
+		return "", fmt.Errorf("failed navigating to Hero: %w", err)
+	}
+
 	fmt.Println("   [STEP] Waiting for Hero Section...")
 	if err := ctx.waitAria("Hero Section", "Hero section visibility"); err != nil {
 		return "", fmt.Errorf("failed waiting for Hero Section: %w", err)

@@ -1,6 +1,6 @@
 import { setupApp } from '@ui/ui';
 import './style.css';
-import { initConnection, sendCommand } from './data/connection';
+import { initConnection } from './data/connection';
 import { handleButtonKey } from './buttons';
 
 declare const APP_VERSION: string;

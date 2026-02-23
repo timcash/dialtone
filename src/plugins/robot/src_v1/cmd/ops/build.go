@@ -5,8 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-
-	"dialtone/dev/plugins/go/src_v1/go"
 )
 
 func Build(flags ...string) error {
@@ -37,10 +35,6 @@ func Build(flags ...string) error {
 		return err
 	}
 
-	robotBinDir := filepath.Join("src", "plugins", "robot", "bin")
-	fmt.Printf(">> [Robot] Building Dialtone Binary into %s\n", robotBinDir)
-
-	args := []string{"build", "--output-dir", robotBinDir, "--skip-web", "--skip-www"}
-	args = append(args, localFlags...)
-	return go_plugin.RunGo(args...)
+	_ = localFlags
+	return nil
 }

@@ -32,10 +32,6 @@ class TableControl implements VisualizationControl {
     });
   }
 
-  private initDataListener() {
-     // Deprecated, logic moved to subscribe
-  }
-
   private updateData(data: any) {
     // Core System Stats (from server ticker, merged with Mavlink if present)
     if (data.uptime) this.allRows.set('uptime', { key: 'uptime', value: data.uptime, status: 'LIVE' });

@@ -588,11 +588,24 @@ func withCommonHeaders(next http.Handler) http.Handler {
 
 func resolveUIPath() string {
 	cwd, _ := os.Getwd()
-	uiPath := filepath.Join(cwd, "ui", "dist")
-	if _, err := os.Stat(uiPath); err == nil {
-		return uiPath
+	if override := strings.TrimSpace(os.Getenv("ROBOT_UI_DIST")); override != "" {
+		if _, err := os.Stat(override); err == nil {
+			return override
+		}
 	}
-	return filepath.Join(cwd, "src", "plugins", "robot", "src_v1", "ui", "dist")
+	candidates := []string{
+		filepath.Join(cwd, "ui", "dist"),
+		filepath.Join(cwd, "src", "plugins", "robot", "src_v1", "ui", "dist"),
+	}
+	if filepath.Base(cwd) == "src" {
+		candidates = append(candidates, filepath.Join(cwd, "plugins", "robot", "src_v1", "ui", "dist"))
+	}
+	for _, uiPath := range candidates {
+		if _, err := os.Stat(uiPath); err == nil {
+			return uiPath
+		}
+	}
+	return candidates[len(candidates)-1]
 }
 
 func envDefault(key, fallback string) string {
