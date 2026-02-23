@@ -106,6 +106,7 @@ func loadConfig() config {
 	webPort := envInt("ROBOT_WEB_PORT", 8080)
 	natsPort := envInt("NATS_PORT", 4222)
 	natsWSPort := envInt("NATS_WS_PORT", 4223)
+	uiPath := resolveUIPath()
 	tsAuthKey := strings.TrimSpace(os.Getenv("ROBOT_TS_AUTHKEY"))
 	if tsAuthKey == "" {
 		tsAuthKey = strings.TrimSpace(os.Getenv("TS_AUTHKEY"))
@@ -134,8 +135,8 @@ func loadConfig() config {
 		webPort:      webPort,
 		natsPort:     natsPort,
 		natsWSPort:   natsWSPort,
-		uiPath:       resolveUIPath(),
-		appVersion:   envDefault("APP_VERSION", "dev"),
+		uiPath:       uiPath,
+		appVersion:   resolveAppVersion(uiPath),
 		tsEnabled:    tsEnabled,
 		tsHostname:   tsHost,
 		tsWebPort:    envInt("ROBOT_TSNET_WEB_PORT", 80),
@@ -147,6 +148,28 @@ func loadConfig() config {
 		mavlinkEP:    mavlinkEP,
 		publishStats: envBool("ROBOT_PUBLISH_STATS", true),
 	}
+}
+
+func resolveAppVersion(uiPath string) string {
+	if v := strings.TrimSpace(os.Getenv("APP_VERSION")); v != "" {
+		return v
+	}
+	pkgPath := filepath.Join(filepath.Dir(uiPath), "package.json")
+	raw, err := os.ReadFile(pkgPath)
+	if err != nil {
+		return "dev"
+	}
+	var pkg struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &pkg); err != nil {
+		return "dev"
+	}
+	v := strings.TrimSpace(pkg.Version)
+	if v == "" {
+		return "dev"
+	}
+	return v
 }
 
 func buildMux(cfg config) *http.ServeMux {

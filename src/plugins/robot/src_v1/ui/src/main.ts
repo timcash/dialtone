@@ -35,9 +35,11 @@ if ('serviceWorker' in navigator) {
 
 // Display version
 const versionEl = document.getElementById('app-version');
+const currentAppVersion = String(APP_VERSION ?? '').trim();
 if (versionEl) {
   const stamp = isLocalDevHost ? ` (dev-${new Date().toLocaleTimeString()})` : '';
-  versionEl.textContent = `v${APP_VERSION}${stamp}`;
+  const shown = currentAppVersion || 'dev';
+  versionEl.textContent = `v${shown}${stamp}`;
 }
 
 // Initialize Connection (NATS + Polling)
@@ -45,11 +47,26 @@ initConnection();
 
 const checkForUpdate = async () => {
   try {
-    const res = await fetch('/api/init');
+    const res = await fetch('/api/init', { cache: 'no-store' });
     if (!res.ok) return;
     const data = await res.json();
-    if (data.version && data.version !== APP_VERSION) {
-      showUpdateToast(data.version);
+    const nextVersion = String(data.version ?? '').trim();
+    const currentVersion = String(currentAppVersion ?? '').trim();
+    const normalize = (v: string) => v.replace(/^v/i, '').trim();
+    const nextNorm = normalize(nextVersion);
+    const currentNorm = normalize(currentVersion);
+    const toast = document.getElementById('update-toast');
+    if (toast && nextNorm === currentNorm) {
+      toast.remove();
+    }
+    // Ignore dev/sentinel versions to avoid false-positive update loops.
+    if (
+      nextNorm &&
+      !/^dev$/i.test(nextNorm) &&
+      !/^dev$/i.test(currentNorm) &&
+      nextNorm !== currentNorm
+    ) {
+      showUpdateToast(nextVersion);
     }
   } catch (err) {
     // Ignore offline errors

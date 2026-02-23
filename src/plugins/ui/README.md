@@ -1,175 +1,137 @@
-# UIv2 Library
+# UI v1 Shared Library
 
-`src/plugins/ui` is the shared section shell used by plugin `src_vN/ui` apps.
-
-```sh
-# Run the canonical ui src_v1 suite (build fixture + Go backend + chromedp steps)
-./dialtone.sh ui src_v1 test
-
-# Stream suite logs
-./dialtone.sh logs src_v1 stream --topic 'logs.test.ui.src-v1.>'
-./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.pass.test'
-./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.fail.test'
-```
-
-This README follows DAG `src_v3` terminology as source-of-truth.
+`src/plugins/ui` is the shared UI shell for plugin web apps (`src_vN/ui`).
 
 ## CLI
 
 ```sh
-./dialtone.sh ui help
-./dialtone.sh ui src_v1 test
-./dialtone.sh ui src_v1 dev
-./dialtone.sh ui src_v1 build
 ./dialtone.sh ui src_v1 install
+./dialtone.sh ui src_v1 build
+./dialtone.sh ui src_v1 dev
+./dialtone.sh ui src_v1 test
 ```
-
-`ui src_v1 test` runs:
-- `src/plugins/ui/src_v1/test/cmd/main.go`
-
-The suite uses:
-- `src/plugins/test/src_v1/go` (`StepContext`, suite orchestration, waits)
-- `src/plugins/logs/src_v1/go` (structured logs + NATS topics)
-- `chromedp` via test plugin browser helpers
-
-Test folders:
-- `src/plugins/ui/src_v1/test/01_build_and_serve`: Bun build + Go static backend + initial section readiness
-- `src/plugins/ui/src_v1/test/02_sections_navigation`: menu-driven section navigation checks
-- `src/plugins/ui/src_v1/test/03_component_actions`: table refresh, stage add, log input/enter interaction checks
-
-## CSS Guide
-
-This guide defines the standard structural classes and layout patterns for UI V2 sections.
-
-### Structural Classes
-
-UI V2 provides standard classes in `style.css` to ensure consistent layout across plugins:
-
-- **`.overlay-primary`** (Underlay):
-  - Fills the entire section (`width: 100%`, `height: 100%`).
-  - Used for the main content: 3D Canvas, Video, Map, etc.
-  - Usage: `<canvas class="hero-stage overlay-primary"></canvas>`
-
-- **`.mode-form`** (Controls):
-  - Defines the 3x4 grid of thumb controls.
-  - Positioned absolutely at the bottom-center of the screen by default.
-  - Usage: `<form class="mode-form" data-mode-form="...">`
-
-- **`.overlay-legend`** (Info):
-  - Positioned absolutely at the top-left (safe-area aware).
-  - Used for HUDs, status text, and legends.
-  - Usage: `<aside class="overlay-legend">...</aside>`
-
-### Layout Modes
-
-1.  **Fullscreen (Default)**:
-    - The `.overlay-primary` fills the screen.
-    - The `.mode-form` and `.overlay-legend` float on top (z-index).
-    - Best for: 3D scenes, Maps, Video feeds.
-
-2.  **Calculator (Split)**:
-    - The screen is split vertically.
-    - The `.mode-form` sits at the bottom (relative positioning).
-    - The content (`.overlay-primary`) fills the remaining space above.
-    - **Implementation**: Requires a specific CSS override for the section to change `.mode-form` to `position: relative` or `grid-row: 2`.
-    - Best for: Data tables, Lists, Terminal logs where content shouldn't be obscured.
-
-### Best Practices
-
-- **Minimal Nesting**: Avoid deep selector chains. Use structural classes.
-- **No Aria Selectors**: Do not use `[aria-label="..."]` for CSS styling. Use classes. Keep aria-labels for accessibility and testing only.
-- **Mobile First**: All standard classes include mobile-responsive adjustments (e.g. larger touch targets).
 
 ## Core Model
 
-- A UI has many `section`.
-- A `section` is composed as:
-  - one underlay
-  - zero or more overlays
+A section is composed as:
 
-Section formula: `underlay + overlays = section`.
+- one **underlay** (main content surface)
+- zero or more **overlays** (controls and HUD layers)
+
+Formula:
+
+`section = underlay + overlays`
 
 ## Underlays
 
-Exactly one underlay per section:
+Underlays are the primary interaction/view surfaces. Typical underlays:
 
-- `stage`
-- `table`
-- `docs`
-- `xterm`
-- `video`
+- `three-stage` (3D canvas)
+- `table` (telemetry/data grid)
+- `video-stage` (camera/media)
+- `xterm` (terminal)
+- `docs` (scrollable text/docs)
+
+Shared classes (in `src/plugins/ui/src_v1/ui/style.css`):
+
+- `.overlay-primary` (base underlay fill class)
+- `.underlay-docs` / `.docs-primary`
+- `.underlay-table` / `.table-wrapper` / `.telemetry-table`
+- `.underlay-xterm` / `.xterm-primary`
+- `.underlay-video` / `.video-stage`
 
 ## Overlays
 
-Shared overlay kinds:
+Overlays are floating/control layers above underlays:
 
-- `menu` (global)
-- `mode-form`
-- `legend`
-- `chatlog` (optional)
+- `menu` (global nav)
+- `mode-form` (thumb/control form)
+- `legend` (HUD/information)
 - `status-bar` (optional)
+- `chatlog` (optional)
+- `watchdog` (optional)
 
-`status-bar` is a first-class overlay in `ui.ts` via `UI_OVERLAYS.statusBar`.
+Shared classes/roles:
 
-## Section Naming Rule
+- `.mode-form`
+- `.overlay-legend`
+- `.overlay-chatlog` or `[data-overlay='chatlog']`
+- `.overlay-status-bar` or `[data-overlay='status-bar']`
+- `.overlay-watchdog`
 
-Use:
+## Layout Modes
 
-- `<plugin-name>-<subname>-<underlay-type>`
+UI sections support two layout modes:
 
-Examples:
+1. `fullscreen`
+- Underlay fills the full section.
+- Overlays float on top.
+- Use for 3D/video hero views.
 
-- `dag-meta-table`
-- `dag-3d-stage`
-- `dag-log-xterm`
+2. `calculator`
+- Underlay occupies row 1.
+- Mode form/control overlay stays in row 2 (bottom control strip).
+- Use for table/xterm/docs-like flows where content should remain visible above controls.
+
+These are implemented in shared CSS via:
+
+- `section.fullscreen`
+- `section.calculator`
 
 ## Section Registration
 
-`SectionOverlayConfig` in `types.ts` supports:
-
-- `primaryKind` and `primary` (required underlay binding)
-- `modeForm` (preferred control overlay selector)
-- `thumb` (deprecated alias of `modeForm`, kept for compatibility)
-- `legend`
-- `chatlog`
-- `statusBar`
-
-Example:
+Use `SectionManager` overlay config to bind underlay + overlays.
 
 ```ts
-sections.register('dag-3d-stage', {
-  containerId: 'dag-3d-stage',
-  load: async () => mountStage(),
+sections.register('robot-three-stage', {
+  containerId: 'three',
+  load: async () => mountThree(),
   overlays: {
     primaryKind: 'stage',
     primary: "canvas[aria-label='Three Canvas']",
-    modeForm: "form[data-mode-form='dag']",
-    legend: '.dag-history',
-    chatlog: '.dag-chatlog',
-    statusBar: '.dag-status-bar',
+    modeForm: "form[data-mode-form='three']",
+    legend: '.three-legend',
+    chatlog: '.three-chatlog',
+    statusBar: '.three-status',
   },
 });
 ```
 
-## Runtime Overlay Attributes
-
-When an overlay selector resolves, `SectionManager` applies:
+Runtime attributes added by `SectionManager`:
 
 - `data-overlay="<kind>"`
 - `data-overlay-role="<role>"`
 - `data-overlay-section="<section-id>"`
 - `data-overlay-active="true|false"`
 
-Roles tracked by `SectionManager`:
+## ARIA Labels (Testing Contract)
 
-- `primary`
-- `mode-form`
-- `legend`
-- `chatlog`
-- `status-bar`
+Use `aria-label` consistently for stable automation selectors.
+
+Rules:
+
+- Every section root gets an `aria-label` (e.g. `"Three Section"`).
+- Every primary underlay gets an `aria-label` (e.g. `"Three Canvas"`, `"Video Stage"`, `"Xterm Terminal"`).
+- Every mode-form button/input gets explicit `aria-label`.
+- Keep ARIA labels stable across refactors; tests depend on them.
+
+Style with classes, not ARIA selectors.
+ARIA is for accessibility + test targeting only.
 
 ## Menu Behavior
 
-- `Menu` is the global overlay and uses `nav` as the modal root.
-- On open, menu hides active `mode-form` overlays (`data-overlay='mode-form'`).
-- Legacy `thumb` overlay hide rule is still supported for older sections.
+- Menu is a global overlay.
+- When menu is open, mode-form overlays are hidden (`data-overlay='mode-form'`, legacy `thumb` alias supported).
+
+## Testing
+
+Canonical suite:
+
+- `src/plugins/ui/src_v1/test/cmd/main.go`
+
+Run:
+
+```sh
+./dialtone.sh ui src_v1 test
+./dialtone.sh logs src_v1 stream --topic 'logs.test.ui.src-v1.>'
+```
