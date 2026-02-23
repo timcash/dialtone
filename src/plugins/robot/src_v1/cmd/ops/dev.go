@@ -27,7 +27,6 @@ func Dev(repoRoot string, args []string) error {
 	cwd, _ := os.Getwd()
 	pluginDir := filepath.Join(repoRoot, "src", "plugins", "robot", "src_v1")
 	uiDir := filepath.Join(pluginDir, "ui")
-	devLogPath := filepath.Join(pluginDir, "dev.log")
 	devBrowserMetaPath := filepath.Join(pluginDir, "dev.browser.json")
 	devPort := 3000
 	devURL := fmt.Sprintf("http://127.0.0.1:%d", devPort)
@@ -44,20 +43,13 @@ func Dev(repoRoot string, args []string) error {
 		}
 	}
 
-	logFile, err := os.OpenFile(devLogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to open dev log at %s: %w", devLogPath, err)
-	}
-	defer logFile.Close()
-
-	logOut := io.MultiWriter(os.Stdout, logFile)
+	logOut := os.Stdout
 	logf := func(format string, args ...any) {
 		msg := fmt.Sprintf(format, args...)
 		fmt.Fprintln(logOut, msg)
 	}
 
 	logf(">> [ROBOT] Dev: src_v1")
-	logf("   [DEV] Writing logs to %s", devLogPath)
 	logf("   [DEV] Writing browser metadata to %s", devBrowserMetaPath)
 
 	logf("   [DEV] Checking for existing robot dev processes...")
@@ -135,7 +127,7 @@ func Dev(repoRoot string, args []string) error {
 
 			logf("   [DEV] Launching Vite (Attempt %d)...", restartAttemptID)
 
-			cmd := exec.CommandContext(ctx, filepath.Join(repoRoot, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(devPort), "--strictPort", "--force")
+			cmd := exec.CommandContext(ctx, filepath.Join(repoRoot, "dialtone.sh"), "bun", "src_v1", "exec", "--cwd", uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(devPort), "--strictPort", "--force")
 
 			// Create a pipe to monitor output for CRITICAL errors
 			pr, pw := io.Pipe()
@@ -309,32 +301,79 @@ func openInRegularChrome(url string) error {
 func cleanupExistingDev(logf func(string, ...any), repoRoot string) {
 	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "ps", "tracked")
 	out, err := cmd.Output()
+	myPID := os.Getpid()
+	ancestorPIDs := collectAncestorPIDs(myPID, 6)
+	if err == nil {
+		lines := strings.Split(string(out), "\n")
+		for _, line := range lines {
+			if strings.Contains(line, "robot_dev") && strings.Contains(line, "running") {
+				fields := strings.Fields(line)
+				if len(fields) < 2 {
+					continue
+				}
+				key := fields[0]
+				pidStr := fields[1]
+				pid, _ := strconv.Atoi(pidStr)
+
+				if _, skip := ancestorPIDs[pid]; skip {
+					continue
+				}
+
+				logf("   [DEV] Stopping conflicting process: %s (pid %d)", key, pid)
+				stopCmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "proc", "stop", key)
+				_ = stopCmd.Run()
+			}
+		}
+	}
+
+	// Fallback cleanup: tracked metadata can be stale/missing.
+	// Kill older robot dev sessions directly by command signature.
+	pgrep := exec.Command("pgrep", "-f", "robot src_v1 dev")
+	raw, err := pgrep.Output()
 	if err != nil {
 		return
 	}
-
-	lines := strings.Split(string(out), "\n")
-	myPID := os.Getpid()
-
-	for _, line := range lines {
-		if strings.Contains(line, "robot_dev") && strings.Contains(line, "running") {
-			fields := strings.Fields(line)
-			if len(fields) < 2 {
-				continue
-			}
-			key := fields[0]
-			pidStr := fields[1]
-			pid, _ := strconv.Atoi(pidStr)
-
-			if pid == myPID || pid == os.Getppid() {
-				continue
-			}
-
-			logf("   [DEV] Stopping conflicting process: %s (pid %d)", key, pid)
-			stopCmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "proc", "stop", key)
-			_ = stopCmd.Run()
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
 		}
+		pid, convErr := strconv.Atoi(strings.TrimSpace(line))
+		if convErr != nil {
+			continue
+		}
+		if _, skip := ancestorPIDs[pid]; skip {
+			continue
+		}
+		logf("   [DEV] Killing stale robot dev process pid %d", pid)
+		_ = syscall.Kill(pid, syscall.SIGTERM)
 	}
+}
+
+func collectAncestorPIDs(startPID, maxDepth int) map[int]struct{} {
+	out := map[int]struct{}{}
+	pid := startPID
+	for i := 0; i < maxDepth && pid > 0; i++ {
+		out[pid] = struct{}{}
+		ppid, err := parentPID(pid)
+		if err != nil || ppid <= 0 || ppid == pid {
+			break
+		}
+		pid = ppid
+	}
+	return out
+}
+
+func parentPID(pid int) (int, error) {
+	cmd := exec.Command("ps", "-o", "ppid=", "-p", strconv.Itoa(pid))
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+	ppid, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0, err
+	}
+	return ppid, nil
 }
 
 func startRemoteChromeBridge(logf func(string, ...any), targetHost string) {
@@ -392,6 +431,7 @@ type BackendManager struct {
 	mu           sync.Mutex
 	activeCmd    *exec.Cmd
 	sshClient    *sshlib.Client
+	tunnels      []net.Listener
 	isMockActive bool
 	isFailover   bool
 }
@@ -462,18 +502,17 @@ func (bm *BackendManager) startRemoteInternal() error {
 		return err
 	}
 
-	if err := ssh_plugin.ForwardRemoteToLocal(client, "localhost:8080", "127.0.0.1:8080"); err != nil {
-		client.Close()
-		return err
-	}
-	if err := ssh_plugin.ForwardRemoteToLocal(client, "localhost:4223", "127.0.0.1:4223"); err != nil {
+	localWebPort, webLn, err := startForwardWithFallback(client, "localhost:8080", []int{8080, 18080, 28080})
+	if err != nil {
 		client.Close()
 		return err
 	}
 
+	os.Setenv("VITE_PROXY_TARGET", fmt.Sprintf("http://127.0.0.1:%d", localWebPort))
 	bm.sshClient = client
+	bm.tunnels = []net.Listener{webLn}
 	bm.isMockActive = false
-	bm.logf("   [DEV] Go-based SSH tunnel started")
+	bm.logf("   [DEV] Go-based SSH tunnel started (remote localhost:8080 -> local 127.0.0.1:%d)", localWebPort)
 	return nil
 }
 
@@ -485,7 +524,8 @@ func (bm *BackendManager) startMock() {
 
 func (bm *BackendManager) startMockInternal() {
 	bm.logf("   [DEV] Starting local mock backend...")
-	cmd := exec.CommandContext(bm.ctx, filepath.Join(bm.repoRoot, "dialtone.sh"), "go", "exec", "run", "plugins/robot/src_v1/cmd/server/main.go")
+	os.Setenv("VITE_PROXY_TARGET", "http://127.0.0.1:8080")
+	cmd := exec.CommandContext(bm.ctx, filepath.Join(bm.repoRoot, "dialtone.sh"), "go", "src_v1", "exec", "run", "plugins/robot/src_v1/cmd/server/main.go")
 	cmd.Dir = bm.repoRoot
 	cmd.Stdout = bm.logOut
 	cmd.Stderr = bm.logOut
@@ -499,6 +539,11 @@ func (bm *BackendManager) startMockInternal() {
 }
 
 func (bm *BackendManager) stopCurrent() {
+	for _, ln := range bm.tunnels {
+		_ = ln.Close()
+	}
+	bm.tunnels = nil
+
 	if bm.activeCmd != nil && bm.activeCmd.Process != nil {
 		_ = bm.activeCmd.Process.Kill()
 		_, _ = bm.activeCmd.Process.Wait()
@@ -508,6 +553,50 @@ func (bm *BackendManager) stopCurrent() {
 		_ = bm.sshClient.Close()
 		bm.sshClient = nil
 	}
+}
+
+func startForwardWithFallback(client *sshlib.Client, remoteAddr string, candidateLocalPorts []int) (int, net.Listener, error) {
+	var lastErr error
+	for _, p := range candidateLocalPorts {
+		localAddr := fmt.Sprintf("127.0.0.1:%d", p)
+		ln, err := net.Listen("tcp", localAddr)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		go func(listener net.Listener) {
+			for {
+				localConn, err := listener.Accept()
+				if err != nil {
+					return
+				}
+				go func() {
+					defer localConn.Close()
+					remoteConn, err := client.Dial("tcp", remoteAddr)
+					if err != nil {
+						return
+					}
+					defer remoteConn.Close()
+
+					done := make(chan struct{}, 2)
+					go func() {
+						_, _ = io.Copy(remoteConn, localConn)
+						done <- struct{}{}
+					}()
+					go func() {
+						_, _ = io.Copy(localConn, remoteConn)
+						done <- struct{}{}
+					}()
+					<-done
+				}()
+			}
+		}(ln)
+		return p, ln, nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no local ports available")
+	}
+	return 0, nil, lastErr
 }
 
 func (bm *BackendManager) probeRemote() bool {

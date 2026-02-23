@@ -17,7 +17,7 @@ func Format() error {
 	}
 	uiDir := filepath.Join(repoRoot, "src", "plugins", "robot", "src_v1", "ui")
 
-	uiFmt := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "bun", "exec", "--cwd", uiDir, "run", "format")
+	uiFmt := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "bun", "src_v1", "exec", "--cwd", uiDir, "run", "format")
 	uiFmt.Dir = repoRoot
 	uiFmt.Stdout = os.Stdout
 	uiFmt.Stderr = os.Stderr

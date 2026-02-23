@@ -1,133 +1,118 @@
 # Robot Plugin
 
-The `robot` plugin is the central hub for all robot-specific logic, including MAVLink telemetry integration, NATS messaging, and the mobile-optimized 3D dashboard.
+The `robot` plugin runs the robot web UI, MAVLink bridge, and embedded NATS runtime.
 
-## ⚡ Quick Reference
+All commands use the current CLI order:
 
 ```bash
-# === DEVELOPMENT ===
-# Start local UI dev server + Chrome (Mock Data)
-./dialtone.sh robot src_v1 dev
+./dialtone.sh robot src_v1 <command> [args]
+```
 
-# Start local UI dev server + Remote Robot Data (SSH Tunnel)
+## Commands
+
+```bash
+# Setup
+./dialtone.sh robot src_v1 install
+./dialtone.sh robot src_v1 install --remote
+
+# Build
+./dialtone.sh robot src_v1 build
+./dialtone.sh robot src_v1 build --remote
+
+# Run
+./dialtone.sh robot src_v1 serve
+./dialtone.sh robot src_v1 serve --remote
+./dialtone.sh robot src_v1 dev
 ./dialtone.sh robot src_v1 dev --robot
 
-# Visual Debugging (Attach to existing Chrome session)
-./dialtone.sh robot src_v1 dev --attach
-
-# === DEPLOYMENT ===
-# Build + deploy to robot
-./dialtone.sh robot src_v1 deploy
-
-# Deploy + install/restart robot systemd service
-./dialtone.sh robot src_v1 deploy --service
-
-# Deploy + service + relay-side Cloudflare proxy
-./dialtone.sh robot src_v1 deploy --service --proxy
-
-# === TESTING ===
-# Run automated headless tests
+# Quality
 ./dialtone.sh robot src_v1 test
+./dialtone.sh robot src_v1 lint
+./dialtone.sh robot src_v1 format
+./dialtone.sh robot src_v1 fmt
+./dialtone.sh robot src_v1 vet
+./dialtone.sh robot src_v1 go-build
 
-# Run tests visually (watch in Chrome)
-./dialtone.sh robot src_v1 test --attach
-
-# === MAINTENANCE ===
-# Verify live robot UI/telemetry status
+# Remote/deploy tools
+./dialtone.sh robot src_v1 sync-code
+./dialtone.sh robot src_v1 deploy
+./dialtone.sh robot src_v1 deploy --service
+./dialtone.sh robot src_v1 deploy --service --proxy
+./dialtone.sh robot src_v1 deploy-test
 ./dialtone.sh robot src_v1 diagnostic
-
-# Verify embedded tsnet connectivity
 ./dialtone.sh robot src_v1 vpn-test
 ```
 
----
+## Remote Native Workflow (recommended)
 
-## 🚀 Development Workflow
+Use this for fast robot iteration without full deploy:
 
-Follow this step-by-step guide to add new features to the Robot UI.
-
-### 1. Start Development Environment
-Choose your data source:
-
-**Option A: Local Mock (Fastest)**
-Ideal for UI layout and logic changes. Uses simulated telemetry.
 ```bash
-./dialtone.sh robot src_v1 dev
+./dialtone.sh robot src_v1 install --remote
+./dialtone.sh robot src_v1 build --remote
+./dialtone.sh robot src_v1 serve --remote
 ```
 
-**Option B: Remote Robot (Real Data)**
-Ideal for tuning 3D visualization or testing hardware integration. Tunnels data from the robot via SSH.
+What it does:
+- Syncs source-only tree to the robot (no `node_modules`/tool cache sync).
+- Bootstraps Go/Bun on robot under `DIALTONE_ENV` if missing.
+- Builds UI + server on robot.
+- Starts remote binary from `plugins/robot/src_v1` (so `/` serves UI correctly).
+
+## Environment
+
+Set in `env/.env`:
+
 ```bash
-./dialtone.sh robot src_v1 dev --robot
+# SSH used by --remote and deploy/sync-code
+ROBOT_HOST=192.168.4.36
+ROBOT_USER=tim
+ROBOT_PASSWORD=...
+
+# Robot network identity
+DIALTONE_HOSTNAME=drone-1
+
+# Tailscale auth (robot/tsnet)
+ROBOT_TS_AUTHKEY=tskey-auth-...
+# fallback if ROBOT_TS_AUTHKEY is unset
+TS_AUTHKEY=tskey-auth-...
+
+# MAVLink ingress endpoint
+ROBOT_MAVLINK_ENDPOINT=serial:/dev/ttyAMA0:57600
+# fallback if ROBOT_MAVLINK_ENDPOINT is unset
+MAVLINK_ENDPOINT=serial:/dev/ttyAMA0:57600
 ```
-*   **Prerequisite**: Ensure `ROBOT_HOST`, `ROBOT_USER`, and `ROBOT_PASSWORD` are set in `env/.env`.
 
-### 2. Make Changes
-*   **UI Code**: `src/plugins/robot/src_v1/ui/src/`
-    *   **Components**: `components/` (Three.js, Video, Xterm, etc.)
-    *   **Layout**: `style.css` (UI V2 architecture)
-    *   **Logic**: `main.ts` and `buttons.ts` (Button configurations)
-*   **Backend Code**: `src/plugins/robot/src_v1/cmd/`
+## Runtime Architecture
 
-### 3. Verify Changes
-The dev server (Vite) hot-reloads automatically.
-*   **Mode Switching**: Use the `9:Mode` button or keys `1-9` to test interactions.
-*   **Watchdog**: Verify video pauses after 3 minutes of inactivity.
+- Browser uses NATS WebSocket on same HTTP origin via `/natsws`.
+- Robot server exposes:
+  - `GET /` UI
+  - `GET /health`
+  - `GET /api/init`
+  - `GET /stream` (camera MJPEG)
+  - `POST /api/bookmark`
+- Embedded NATS runs locally on robot server process.
+- MAVLink is ingested by server and published to `mavlink.>` topics.
 
-### 4. Run Tests
-Ensure you haven't broken existing functionality.
+## TSNet / Tailnet Behavior
+
+When `ROBOT_TSNET=1` and auth key is present, robot starts embedded tsnet listeners and can serve on tailnet hostnames (for example `http://drone-1`).
+
+If stale `drone-1*` devices accumulate, use tsnet prune:
+
 ```bash
-./dialtone.sh robot src_v1 test
+./dialtone.sh tsnet src_v1 devices prune --name-contains drone-1 --yes
 ```
 
-### 5. Deploy
-Ship your changes to the robot and restart service when needed.
-```bash
-./dialtone.sh robot src_v1 deploy --service --proxy
-```
-*   `--service`: installs/restarts `dialtone-robot.service` on the robot.
-*   `--proxy`: configures relay-side Cloudflare proxy for `<hostname>.dialtone.earth`.
+## Version / Update Behavior
 
----
+UI update checks are automatic and build-based:
+- UI runtime version derives from built asset identity.
+- Server `api/init.version` derives from built UI assets (or `APP_VERSION` override).
+- This avoids false update prompts from `dev` sentinel versions.
 
-## 🏗 Architecture & UI V2
+## Notes
 
-The Robot UI is built on the **UI V2** shared library, ensuring consistent behavior across plugins.
-
-### Layout System
-*   **Overlay Primary**: The main content (3D Canvas, Video, Table). Fills the screen or split area.
-*   **Mode Form**: The 3x4 grid of thumb-accessible controls at the bottom.
-*   **Legend**: The top-left HUD overlay. Click to minimize.
-
-### Feature Highlights
-*   **3D Hero**: Interactive Inverse Kinematics (IK) robot arm visualization using Three.js.
-*   **Video Watchdog**: Automatically pauses high-bandwidth MJPEG streams after 3 minutes of inactivity to save data.
-*   **Chatlog**: Integrated xterm.js console in the 3D view for viewing MAVLink status messages.
-*   **Latency HUD**: Real-time visualization of telemetry latency (Processing vs Network).
-*   **Smart Updates**: The UI polls for version updates and prompts the user to reload, ensuring no stale cache issues.
-
----
-
-## 📡 Connectivity
-
-The system uses a hybrid architecture for low latency and accessibility:
-
-1.  **Direct NATS (Telemetry)**:
-    *   Robot publishes MAVLink -> NATS (`mavlink.>`).
-    *   UI connects through `nats.ws` at `ws(s)://<host>/natsws` (same external web port).
-    *   Embedded NATS still runs locally on `127.0.0.1:4222` + `127.0.0.1:4223`.
-    *   **Latency**: < 20ms typically.
-
-2.  **MJPEG Stream (Video)**:
-    *   Go backend captures frames -> HTTP Stream (`/stream`).
-    *   **Optimization**: Explicit flushing and aggressive cache-control headers ensure smooth playback over Cloudflare Tunnels.
-
-3.  **Cloudflare Tunnel**:
-    *   Secure public access via `https://drone-1.dialtone.earth`.
-    *   Managed via user-level systemd service (`dialtone-proxy-drone-1`).
-
-### Runtime Environment
-The deployed `robot-src_v1` service reads:
-* `DIALTONE_HOSTNAME` (default `drone-1`) for tsnet hostname.
-* `TS_AUTHKEY` to join tailnet from embedded tsnet.
-* `ROBOT_MAVLINK_ENDPOINT` (or `MAVLINK_ENDPOINT`) for MAVLink ingest.
+- `diagnostic` checks LAN first and then tailnet hostname reachability.
+- `serve --remote` forwards TSNet and MAVLink environment values from local env into remote startup.

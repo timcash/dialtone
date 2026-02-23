@@ -875,16 +875,32 @@ func ProvisionAuthKey(opts ProvisionOptions) (*AuthKey, error) {
 	}
 
 	reqBody := BuildCreateKeyRequest(opts)
-	var resp struct {
-		Key AuthKey `json:"key"`
-	}
-	if err := client.do("POST", "/keys", reqBody, &resp); err != nil {
+	var raw map[string]any
+	if err := client.do("POST", "/keys", reqBody, &raw); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(resp.Key.Key) == "" {
+
+	var out AuthKey
+	// Newer/alternate API shape: key object is nested under "key".
+	if nested, ok := raw["key"]; ok {
+		switch v := nested.(type) {
+		case map[string]any:
+			buf, _ := json.Marshal(v)
+			_ = json.Unmarshal(buf, &out)
+		case string:
+			// Legacy/simple shape may put secret directly in "key".
+			out.Key = strings.TrimSpace(v)
+		}
+	}
+	// Fallback shape: top-level fields include id/key/etc.
+	if strings.TrimSpace(out.Key) == "" {
+		buf, _ := json.Marshal(raw)
+		_ = json.Unmarshal(buf, &out)
+	}
+	if strings.TrimSpace(out.Key) == "" {
 		return nil, errors.New("tailscale API returned empty key")
 	}
-	return &resp.Key, nil
+	return &out, nil
 }
 
 func BuildCreateKeyRequest(opts ProvisionOptions) map[string]any {
@@ -1031,7 +1047,27 @@ func (c *tailscaleClient) DeleteDevice(deviceID string) error {
 	if deviceID == "" {
 		return errors.New("missing device id")
 	}
-	return c.do("DELETE", "device/"+url.PathEscape(deviceID), nil, nil)
+	endpoint := fmt.Sprintf("%s/api/v2/device/%s", strings.TrimSuffix(c.BaseURL, "/"), url.PathEscape(deviceID))
+	req, err := http.NewRequest("DELETE", endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.SetBasicAuth(c.APIKey, "")
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(resp.Body)
+		msg := strings.TrimSpace(string(raw))
+		if msg == "" {
+			msg = resp.Status
+		}
+		return fmt.Errorf("tailscale api DELETE %s failed: %s", endpoint, msg)
+	}
+	return nil
 }
 
 func (c *tailscaleClient) do(method, path string, body any, out any) error {

@@ -111,31 +111,45 @@ func normalizeSourcePath(source string) string {
 }
 
 func Info(format string, args ...any) {
-	fmt.Fprintf(logOutput, "%s\n", formatPlain("INFO", fmt.Sprintf(format, args...)))
+	msg := fmt.Sprintf(format, args...)
+	publishPrimary("INFO", msg, callerSourceLocation(), false)
+	fmt.Fprintf(logOutput, "%s\n", formatPlain("INFO", msg))
 }
 
 func InfoFrom(source, format string, args ...any) {
-	fmt.Fprintf(logOutput, "%s\n", formatPlainWithSource("INFO", source, fmt.Sprintf(format, args...), false))
+	msg := fmt.Sprintf(format, args...)
+	publishPrimary("INFO", msg, source, false)
+	fmt.Fprintf(logOutput, "%s\n", formatPlainWithSource("INFO", source, msg, false))
 }
 
 func InfoFromTest(source, format string, args ...any) {
-	fmt.Fprintf(logOutput, "%s\n", formatPlainWithSource("INFO", source, fmt.Sprintf(format, args...), true))
+	msg := fmt.Sprintf(format, args...)
+	publishPrimary("INFO", msg, source, true)
+	fmt.Fprintf(logOutput, "%s\n", formatPlainWithSource("INFO", source, msg, true))
 }
 
 func Raw(format string, args ...any) {
-	fmt.Fprintf(logOutput, format+"\n", args...)
+	msg := fmt.Sprintf(format, args...)
+	publishPrimary("INFO", msg, callerSourceLocation(), false)
+	fmt.Fprintf(logOutput, "%s\n", msg)
 }
 
 func Error(format string, args ...any) {
-	fmt.Fprintf(logOutput, "%s\n", formatPlain("ERROR", fmt.Sprintf(format, args...)))
+	msg := fmt.Sprintf(format, args...)
+	publishPrimary("ERROR", msg, callerSourceLocation(), false)
+	fmt.Fprintf(logOutput, "%s\n", formatPlain("ERROR", msg))
 }
 
 func ErrorFrom(source, format string, args ...any) {
-	fmt.Fprintf(logOutput, "%s\n", formatPlainWithSource("ERROR", source, fmt.Sprintf(format, args...), false))
+	msg := fmt.Sprintf(format, args...)
+	publishPrimary("ERROR", msg, source, false)
+	fmt.Fprintf(logOutput, "%s\n", formatPlainWithSource("ERROR", source, msg, false))
 }
 
 func ErrorFromTest(source, format string, args ...any) {
-	fmt.Fprintf(logOutput, "%s\n", formatPlainWithSource("ERROR", source, fmt.Sprintf(format, args...), true))
+	msg := fmt.Sprintf(format, args...)
+	publishPrimary("ERROR", msg, source, true)
+	fmt.Fprintf(logOutput, "%s\n", formatPlainWithSource("ERROR", source, msg, true))
 }
 
 func Errorf(format string, args ...any) error {
@@ -145,30 +159,44 @@ func Errorf(format string, args ...any) error {
 }
 
 func Warn(format string, args ...any) {
-	fmt.Fprintf(logOutput, "%s\n", formatPlain("WARN", fmt.Sprintf(format, args...)))
+	msg := fmt.Sprintf(format, args...)
+	publishPrimary("WARN", msg, callerSourceLocation(), false)
+	fmt.Fprintf(logOutput, "%s\n", formatPlain("WARN", msg))
 }
 
 func WarnFrom(source, format string, args ...any) {
-	fmt.Fprintf(logOutput, "%s\n", formatPlainWithSource("WARN", source, fmt.Sprintf(format, args...), false))
+	msg := fmt.Sprintf(format, args...)
+	publishPrimary("WARN", msg, source, false)
+	fmt.Fprintf(logOutput, "%s\n", formatPlainWithSource("WARN", source, msg, false))
 }
 
 func WarnFromTest(source, format string, args ...any) {
-	fmt.Fprintf(logOutput, "%s\n", formatPlainWithSource("WARN", source, fmt.Sprintf(format, args...), true))
+	msg := fmt.Sprintf(format, args...)
+	publishPrimary("WARN", msg, source, true)
+	fmt.Fprintf(logOutput, "%s\n", formatPlainWithSource("WARN", source, msg, true))
 }
 
 func Debug(format string, args ...any) {
-	fmt.Fprintf(logOutput, "%s\n", formatPlain("DEBUG", fmt.Sprintf(format, args...)))
+	msg := fmt.Sprintf(format, args...)
+	publishPrimary("DEBUG", msg, callerSourceLocation(), false)
+	fmt.Fprintf(logOutput, "%s\n", formatPlain("DEBUG", msg))
 }
 
 func DebugFrom(source, format string, args ...any) {
-	fmt.Fprintf(logOutput, "%s\n", formatPlainWithSource("DEBUG", source, fmt.Sprintf(format, args...), false))
+	msg := fmt.Sprintf(format, args...)
+	publishPrimary("DEBUG", msg, source, false)
+	fmt.Fprintf(logOutput, "%s\n", formatPlainWithSource("DEBUG", source, msg, false))
 }
 
 func DebugFromTest(source, format string, args ...any) {
-	fmt.Fprintf(logOutput, "%s\n", formatPlainWithSource("DEBUG", source, fmt.Sprintf(format, args...), true))
+	msg := fmt.Sprintf(format, args...)
+	publishPrimary("DEBUG", msg, source, true)
+	fmt.Fprintf(logOutput, "%s\n", formatPlainWithSource("DEBUG", source, msg, true))
 }
 
 func Fatal(format string, args ...any) {
-	fmt.Fprintf(logOutput, "%s\n", formatPlain("FATAL", fmt.Sprintf(format, args...)))
+	msg := fmt.Sprintf(format, args...)
+	publishPrimary("FATAL", msg, callerSourceLocation(), false)
+	fmt.Fprintf(logOutput, "%s\n", formatPlain("FATAL", msg))
 	os.Exit(1)
 }
