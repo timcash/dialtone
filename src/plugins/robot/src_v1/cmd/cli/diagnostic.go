@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"dialtone/dev/plugins/logs/src_v1/go"
+	robotv1 "dialtone/dev/plugins/robot/src_v1/go"
 	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 	"github.com/chromedp/chromedp"
 )
@@ -20,6 +21,7 @@ const (
 )
 
 func RunDiagnostic(versionDir string) error {
+	_ = versionDir
 	logs.Info("Running diagnostic for Robot UI on %s...", versionDir)
 
 	hostname := os.Getenv("DIALTONE_HOSTNAME")
@@ -117,8 +119,8 @@ func RunDiagnostic(versionDir string) error {
 		logs.Warn("[DIAGNOSTIC] Failed to get page content: %v", err)
 	}
 
-	repoRoot, _ := os.Getwd()
-	screenshotsDir := filepath.Join(repoRoot, "src", "plugins", "robot", versionDir, "diagnostic_screenshots")
+	paths, _ := robotv1.ResolvePaths("")
+	screenshotsDir := paths.DiagnosticShots
 	_ = os.MkdirAll(screenshotsDir, 0755)
 
 	// Define diagnostic steps

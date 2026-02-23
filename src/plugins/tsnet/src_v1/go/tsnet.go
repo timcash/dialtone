@@ -582,7 +582,7 @@ func ensureAuthKeyForEmbedded(cfg *Config) error {
 		Ephemeral:     true,
 		Preauthorized: true,
 		ExpiryHours:   24,
-		WriteEnvPath:  "env/.env",
+		WriteEnvPath:  chooseNonEmpty(strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE")), "env/.env"),
 		EnvKeyName:    "TS_AUTHKEY",
 	}
 	key, err := ProvisionAuthKey(opts)
@@ -747,7 +747,7 @@ func runKeysProvision(args []string) error {
 		Ephemeral:     true,
 		Preauthorized: true,
 		ExpiryHours:   24,
-		WriteEnvPath:  "env/.env",
+		WriteEnvPath:  chooseNonEmpty(strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE")), "env/.env"),
 		EnvKeyName:    "TS_AUTHKEY",
 	}
 	if opts.APIToken == "" {

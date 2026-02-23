@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
-
 	"strings"
 
 	chrome "dialtone/dev/plugins/chrome/src_v1/go"
@@ -392,30 +390,17 @@ func isHelpArg(s string) bool {
 }
 
 func runChromeTests() error {
-	repoRoot, err := findRepoRoot()
+	paths, err := chrome.ResolvePaths("")
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command("go", "run", "./plugins/chrome/src_v1/test/cmd/main.go")
-	cmd.Dir = filepath.Join(repoRoot, "src")
+	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
+	if goBin == "" {
+		goBin = "go"
+	}
+	cmd := exec.Command(goBin, "run", "./plugins/chrome/src_v1/test/cmd/main.go")
+	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
-}
-
-func findRepoRoot() (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
-			return cwd, nil
-		}
-		parent := filepath.Dir(cwd)
-		if parent == cwd {
-			return "", fmt.Errorf("repo root not found")
-		}
-		cwd = parent
-	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,11 +33,12 @@ func main() {
 		logs.Warn("old robot CLI order is deprecated. Use: ./dialtone.sh robot src_v1 <command> [args]")
 	}
 
-	repoRoot, err := findRepoRoot()
+	rt, err := configv1.ResolveRuntime("")
 	if err != nil {
 		logs.Error("robot error: %v", err)
 		os.Exit(1)
 	}
+	repoRoot := rt.RepoRoot
 
 	if version == "src_v1" {
 		err = runSrcV1(command, repoRoot, args)
@@ -128,14 +130,18 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 	if version == "" {
 		version = getLatestVersionDir(repoRoot)
 	}
+	rt, err := configv1.ResolveRuntime(repoRoot)
+	if err != nil {
+		return err
+	}
+	preset := configv1.NewPluginPreset(rt, "robot", version)
 
 	switch command {
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
 	case "install":
-		uiDir := filepath.Join(repoRoot, "src", "plugins", "robot", version, "ui")
-		return bun_plugin.RunBun(uiDir, "install", "--force")
+		return bun_plugin.RunBun(preset.UI, "install", "--force")
 	case "fmt":
 		pkg := "./plugins/robot/" + version + "/..."
 		return go_plugin.RunGo("fmt", pkg)
@@ -146,16 +152,13 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 		pkg := "./plugins/robot/" + version + "/..."
 		return go_plugin.RunGo("build", pkg)
 	case "lint":
-		uiDir := filepath.Join(repoRoot, "src", "plugins", "robot", version, "ui")
-		return bun_plugin.RunBun(uiDir, "run", "lint")
+		return bun_plugin.RunBun(preset.UI, "run", "lint")
 	case "format":
-		uiDir := filepath.Join(repoRoot, "src", "plugins", "robot", version, "ui")
-		return bun_plugin.RunBun(uiDir, "run", "format")
+		return bun_plugin.RunBun(preset.UI, "run", "format")
 	case "build":
-		uiDir := filepath.Join(repoRoot, "src", "plugins", "robot", version, "ui")
-		return bun_plugin.RunBun(uiDir, "run", "build")
+		return bun_plugin.RunBun(preset.UI, "run", "build")
 	case "dev":
-		pluginDir := filepath.Join(repoRoot, "src", "plugins", "robot", version)
+		pluginDir := preset.PluginVersionRoot
 		uiDir := filepath.Join(pluginDir, "ui")
 		opts := test_plugin.DevOptions{
 			RepoRoot:          repoRoot,
@@ -174,25 +177,12 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 	}
 }
 
-func findRepoRoot() (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
-			return cwd, nil
-		}
-		parent := filepath.Dir(cwd)
-		if parent == cwd {
-			return "", fmt.Errorf("repo root not found")
-		}
-		cwd = parent
-	}
-}
-
 func getLatestVersionDir(repoRoot string) string {
-	pluginDir := filepath.Join(repoRoot, "src", "plugins", "robot")
+	rt, err := configv1.ResolveRuntime(repoRoot)
+	if err != nil {
+		return "src_v1"
+	}
+	pluginDir := configv1.NewPluginPreset(rt, "robot", "src_v1").PluginBase
 	entries, err := os.ReadDir(pluginDir)
 	if err != nil {
 		return "src_v1"

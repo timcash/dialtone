@@ -17,11 +17,13 @@ import (
 )
 
 func RunDev(versionDir string) error {
-	cwd, _ := os.Getwd()
-	pluginDir := filepath.Join(cwd, "src", "plugins", "logs", versionDir)
-	uiDir := filepath.Join(cwd, "src", "plugins", "logs", versionDir, "ui")
-	devLogPath := filepath.Join(pluginDir, "dev.log")
-	devBrowserMetaPath := filepath.Join(pluginDir, "dev.browser.json")
+	paths, err := resolveLogsPaths(versionDir)
+	if err != nil {
+		return err
+	}
+	uiDir := paths.Preset.UI
+	devLogPath := paths.DevLog
+	devBrowserMetaPath := paths.DevBrowserMeta
 	devPort := 3000
 	devURL := fmt.Sprintf("http://127.0.0.1:%d", devPort)
 
@@ -79,7 +81,7 @@ func RunDev(versionDir string) error {
 	for {
 		restartID++
 		logf("   [DEV] Running vite dev... (attempt %d)", restartID)
-		cmd := runBun(cwd, uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(devPort), "--strictPort")
+		cmd := runBun(paths.Runtime.RepoRoot, uiDir, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(devPort), "--strictPort")
 		cmd.Stdout = logOut
 		cmd.Stderr = logOut
 		if err := cmd.Start(); err != nil {

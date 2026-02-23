@@ -7,15 +7,12 @@ import (
 )
 
 func Lint() error {
-	cwd, err := os.Getwd()
+	paths, err := resolveRobotPathsPreset()
 	if err != nil {
 		return err
 	}
-	repoRoot := cwd
-	if filepath.Base(cwd) == "src" {
-		repoRoot = filepath.Dir(cwd)
-	}
-	uiDir := filepath.Join(repoRoot, "src", "plugins", "robot", "src_v1", "ui")
+	repoRoot := paths.Runtime.RepoRoot
+	uiDir := paths.Preset.UI
 
 	uiLint := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "bun", "src_v1", "exec", "--cwd", uiDir, "run", "lint")
 	uiLint.Dir = repoRoot

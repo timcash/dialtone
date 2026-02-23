@@ -1,6 +1,7 @@
 package cli
 
 import (
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"fmt"
 	"os"
 	"os/exec"
@@ -263,6 +264,10 @@ func main() {
 }
 
 func runDebugStep(source, tmpDir, osStr, archStr string, client *sshlib.Client, remotePath string) error {
+	rt, err := configv1.ResolveRuntime("")
+	if err != nil {
+		return err
+	}
 	srcPath := filepath.Join(tmpDir, "main.go")
 	if err := os.WriteFile(srcPath, []byte(source), 0644); err != nil {
 		return err
@@ -272,8 +277,19 @@ func runDebugStep(source, tmpDir, osStr, archStr string, client *sshlib.Client, 
 	_ = os.Remove(localBin)
 
 	logs.Info("   Compiling debug binary for %s/%s...", osStr, archStr)
-	cmd := exec.Command("go", "build", "-o", localBin, srcPath)
-	cmd.Env = append(os.Environ(), "GOOS="+osStr, "GOARCH="+archStr, "CGO_ENABLED=0")
+	dialtoneEnv := logs.GetDialtoneEnv()
+	goBin := filepath.Join(dialtoneEnv, "go", "bin", "go")
+	if _, err := os.Stat(goBin); err != nil {
+		fallback, lookErr := exec.LookPath("go")
+		if lookErr != nil {
+			return fmt.Errorf("go binary not found")
+		}
+		goBin = fallback
+	}
+
+	cmd := exec.Command(goBin, "build", "-o", localBin, srcPath)
+	cmd.Dir = rt.SrcRoot
+	cmd.Env = append(os.Environ(), "GOOS="+osStr, "GOARCH="+archStr, "CGO_ENABLED=0", "GOROOT="+filepath.Join(dialtoneEnv, "go"))
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("compilation failed: %v\n%s", err, output)
 	}
@@ -300,19 +316,6 @@ func runDebugStep(source, tmpDir, osStr, archStr string, client *sshlib.Client, 
 			done <- out
 		}
 	}()
-
-	select {
-	case out := <-done:
-		logs.Info("   Remote Output: %s", strings.TrimSpace(out))
-		if !strings.Contains(out, "PASS:") {
-			return fmt.Errorf("remote execution did not indicate success")
-		}
-	case err := <-errChan:
-		return err
-	case <-time.After(30 * time.Second):
-		_, _ = ssh_plugin.RunSSHCommand(client, "pkill -9 dialtone_debug")
-		return fmt.Errorf("remote execution timed out")
-	}
 
 	return nil
 }

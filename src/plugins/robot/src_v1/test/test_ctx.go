@@ -11,6 +11,7 @@ import (
 	"time"
 
 	chrome_app "dialtone/dev/plugins/chrome/src_v1/go"
+	robotv1 "dialtone/dev/plugins/robot/src_v1/go"
 	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/chromedp"
@@ -39,7 +40,8 @@ type testCtx struct {
 }
 
 func newTestCtx() *testCtx {
-	repoRoot, _ := findRepoRoot()
+	paths, _ := robotv1.ResolvePaths("")
+	repoRoot := paths.Runtime.RepoRoot
 	fmt.Printf("[DEBUG] newTestCtx: repoRoot=%q\n", repoRoot)
 	attach := os.Getenv("ROBOT_TEST_ATTACH") == "1"
 	keepViewport := strings.TrimSpace(os.Getenv("ROBOT_TEST_KEEP_VIEWPORT")) == "1"
@@ -414,27 +416,12 @@ func (t *testCtx) waitHTTPReady(url string, timeout time.Duration) error {
 	return fmt.Errorf("http endpoint not ready: %s", url)
 }
 
-func findRepoRoot() (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		path := filepath.Join(cwd, "dialtone.sh")
-		if _, err := os.Stat(path); err == nil {
-			fmt.Printf("[DEBUG] findRepoRoot found %s at %s\n", path, cwd)
-			return cwd, nil
-		}
-		parent := filepath.Dir(cwd)
-		if parent == cwd {
-			return "", fmt.Errorf("repo root not found")
-		}
-		cwd = parent
-	}
-}
-
 func (t *testCtx) captureShot(file string) error {
-	shot := filepath.Join(t.repoRoot, "src", "plugins", "robot", "src_v1", "test", "screenshots", file)
+	paths, err := robotv1.ResolvePaths(t.repoRoot)
+	if err != nil {
+		return err
+	}
+	shot := filepath.Join(paths.TestShots, file)
 	b, err := t.browser()
 	if err != nil {
 		return err

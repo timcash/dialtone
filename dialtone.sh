@@ -2,9 +2,14 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export DIALTONE_REPO_ROOT="$SCRIPT_DIR"
+export DIALTONE_SRC_ROOT="$SCRIPT_DIR/src"
 
 # 1. Load Environment
 ENV_FILE="$SCRIPT_DIR/env/.env"
+if [ -z "${DIALTONE_ENV_FILE:-}" ]; then
+    export DIALTONE_ENV_FILE="$ENV_FILE"
+fi
 if [ -f "$ENV_FILE" ]; then
     set -a
     # shellcheck disable=SC1090
@@ -22,6 +27,7 @@ if [[ "$DIALTONE_ENV" == "~"* ]]; then
 fi
 
 GO_BIN="$DIALTONE_ENV/go/bin/go"
+BUN_BIN="$DIALTONE_ENV/bun/bin/bun"
 
 # 2. Check for Go
 if [ ! -x "$GO_BIN" ]; then
@@ -40,9 +46,17 @@ fi
 
 # 3. Setup PATH and GOROOT
 export GOROOT="$DIALTONE_ENV/go"
-export PATH="$DIALTONE_ENV/go/bin:$PATH"
+if [ -x "$BUN_BIN" ]; then
+    export PATH="$DIALTONE_ENV/go/bin:$DIALTONE_ENV/bun/bin:$PATH"
+else
+    export PATH="$DIALTONE_ENV/go/bin:$PATH"
+fi
+export DIALTONE_GO_BIN="$GO_BIN"
+if [ -x "$BUN_BIN" ]; then
+    export DIALTONE_BUN_BIN="$BUN_BIN"
+fi
 
 # 4. Hand over to Go-based orchestrator
 # Current working directory should be 'src' for Go imports to work correctly.
-cd "$SCRIPT_DIR/src"
-exec go run dev.go "$@"
+cd "$DIALTONE_SRC_ROOT"
+exec "$GO_BIN" run dev.go "$@"

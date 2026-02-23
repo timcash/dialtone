@@ -192,16 +192,17 @@ func connectLocalNATS(versionDir, natsURL string, forceEmbedded bool) (*nats.Con
 }
 
 func startNATSDaemon(versionDir, natsURL string) error {
-	repoRoot, err := findRepoRoot()
+	paths, err := resolveLogsPaths(versionDir)
 	if err != nil {
 		return err
 	}
+	repoRoot := paths.Runtime.RepoRoot
 	if _, err := nats.Connect(natsURL, nats.Timeout(600*time.Millisecond)); err == nil {
 		return nil
 	}
 
-	logPath := filepath.Join(repoRoot, ".dialtone", "logs", "logs-nats-daemon.log")
-	pidPath := natsDaemonPIDPath(repoRoot)
+	logPath := paths.NATSDaemonLog
+	pidPath := paths.NATSDaemonPID
 	_ = os.MkdirAll(filepath.Dir(logPath), 0755)
 	cmdLine := fmt.Sprintf(
 		"nohup %s logs nats-daemon %s --nats-url %s >> %s 2>&1 < /dev/null & echo $! > %s",
@@ -214,27 +215,6 @@ func startNATSDaemon(versionDir, natsURL string) error {
 	cmd := exec.Command("bash", "-c", cmdLine)
 	cmd.Dir = repoRoot
 	return cmd.Run()
-}
-
-func natsDaemonPIDPath(repoRoot string) string {
-	return filepath.Join(repoRoot, ".dialtone", "logs", "logs-nats-daemon.pid")
-}
-
-func findRepoRoot() (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
-			return cwd, nil
-		}
-		parent := filepath.Dir(cwd)
-		if parent == cwd {
-			return "", fmt.Errorf("repo root not found")
-		}
-		cwd = parent
-	}
 }
 
 func shellQuote(s string) string {
@@ -408,11 +388,11 @@ func RunNATSStatus(versionDir string, args []string) error {
 		return err
 	}
 
-	repoRoot, err := findRepoRoot()
+	paths, err := resolveLogsPaths(versionDir)
 	if err != nil {
 		return err
 	}
-	pidPath := natsDaemonPIDPath(repoRoot)
+	pidPath := paths.NATSDaemonPID
 	pidText, _ := os.ReadFile(pidPath)
 	pid := strings.TrimSpace(string(pidText))
 
@@ -441,11 +421,11 @@ func RunNATSStop(versionDir string, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	repoRoot, err := findRepoRoot()
+	paths, err := resolveLogsPaths(versionDir)
 	if err != nil {
 		return err
 	}
-	pidPath := natsDaemonPIDPath(repoRoot)
+	pidPath := paths.NATSDaemonPID
 	data, err := os.ReadFile(pidPath)
 	if err != nil {
 		fmt.Println("[INFO] No tracked daemon pid file found.")
