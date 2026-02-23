@@ -98,6 +98,12 @@ LLM guardrails:
 - Keep runtime/log validation through NATS topics; avoid adding file-log-only paths.
 - For UI automation/tests: use ARIA selectors and wait for browser/NATS message confirmation after actions.
 
+Sleep command behavior:
+- `robot src_v1 sleep` auto-configures Cloudflare proxy service to target local relay sleep URL (`http://127.0.0.1:8080` by default) before starting sleep.
+- `robot src_v1 sleep` starts/updates `dialtone-robot-sleep.service` (user systemd daemon) by default.
+- Use `robot src_v1 sleep --foreground` to run sleep server in the current terminal instead of daemon mode.
+- If system service setup fails (for example no sudo), it falls back to user-mode service setup.
+
 ## Environment
 
 Set in `env/.env`:
@@ -114,6 +120,17 @@ DIALTONE_HOSTNAME=drone-1
 # Optional: override relay sleep server tsnet hostname.
 # Default is local machine hostname (recommended on relay/WSL host).
 ROBOT_SLEEP_HOSTNAME=legion
+
+# Optional: disable automatic Cloudflare proxy retarget when running
+# `./dialtone.sh robot src_v1 sleep` (enabled by default).
+ROBOT_SLEEP_CONFIGURE_PROXY=1
+
+# Optional: override proxy target URL for sleep mode.
+ROBOT_SLEEP_PROXY_URL=http://127.0.0.1:8080
+
+# Optional: fail sleep command if proxy reconfiguration fails.
+# Default behavior is warning + continue.
+ROBOT_SLEEP_REQUIRE_PROXY=0
 
 # Tailscale auth (robot/tsnet)
 ROBOT_TS_AUTHKEY=tskey-auth-...
