@@ -79,6 +79,8 @@ func main() {
 			logs.Error("repl release failed: %v", err)
 			os.Exit(1)
 		}
+	case "version":
+		logs.Raw("%s", repl.BuildVersion)
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -281,5 +283,6 @@ func printUsage() {
 	logs.Raw("  release build <version>                              Build per-architecture release binaries")
 	logs.Raw("  release publish <version> [owner/repo]              Publish binaries to GitHub release")
 	logs.Raw("  test [multiplayer]                                   Run REPL src_v1 tests")
+	logs.Raw("  version                                              Print repl build version")
 	logs.Raw("  help                                                 Show this help")
 }
