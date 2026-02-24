@@ -55,7 +55,7 @@ func printUsage() {
 	logs.Raw("  leader [--nats-url URL] [--room NAME] [--embedded-nats] [--tsnet] [--tsnet-nats-port PORT] [--hostname HOST]")
 	logs.Raw("  join [room-name] [--nats-url URL] [--name HOST] [--room NAME]")
 	logs.Raw("  status [--nats-url URL] [--room NAME]")
-	logs.Raw("  service [--mode install|run|status] [--repo owner/repo] [--nats-url URL] [--room NAME] [--check-interval 3m]")
+	logs.Raw("  service [--mode install|run|status] [--repo owner/repo] [--nats-url URL] [--room NAME] [--hostname HOST] [--check-interval 3m] [--embedded-nats] [--tsnet] [--tsnet-nats-port PORT]")
 	logs.Raw("  version")
 	logs.Raw("  help")
 }

@@ -273,7 +273,7 @@ func printUsage() {
 	logs.Raw("                                                       Start shared REPL leader/service")
 	logs.Raw("  join [room-name] [--nats-url URL] [--name HOST]     Join a shared REPL host (default room: index)")
 	logs.Raw("  status [--nats-url URL] [--room NAME]               Show NATS/tsnet/chrome status")
-	logs.Raw("  service [--mode install|run|status] [--repo owner/repo] [--nats-url URL] [--room NAME] [--check-interval 3m]")
+	logs.Raw("  service [--mode install|run|status] [--repo owner/repo] [--nats-url URL] [--room NAME] [--hostname HOST] [--check-interval 3m] [--embedded-nats] [--tsnet] [--tsnet-nats-port PORT]")
 	logs.Raw("                                                       install: register persistent OS service (default)")
 	logs.Raw("                                                       run: start supervisor in foreground")
 	logs.Raw("                                                       status: print OS service status")
