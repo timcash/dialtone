@@ -3,10 +3,10 @@ package repl
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -21,6 +21,7 @@ import (
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
+	"github.com/nats-io/nats.go"
 )
 
 var BuildVersion = "dev"
@@ -64,7 +65,7 @@ func RunService(args []string) error {
 	natsURL := fs.String("nats-url", defaultNATSURL, "NATS URL for worker leader")
 	room := fs.String("room", defaultRoom, "REPL room for worker leader")
 	hostname := fs.String("hostname", DefaultPromptName(), "Host name used by worker leader")
-	checkInterval := fs.Duration("check-interval", 3*time.Minute, "Update check interval")
+	checkInterval := fs.Duration("check-interval", 5*time.Minute, "Update check interval")
 	installDir := fs.String("install-dir", filepath.Join(userHomeDir(), ".dialtone", "repl"), "Service install directory")
 	tokenEnv := fs.String("token-env", "GITHUB_TOKEN", "Token env var used for GitHub API")
 	embeddedNATS := fs.Bool("embedded-nats", true, "Pass --embedded-nats to worker")
@@ -118,21 +119,32 @@ func runServiceSupervisor(opts serviceOptions) error {
 	token := strings.TrimSpace(os.Getenv(opts.TokenEnv))
 
 	rel, asset, err := latestRelease(opts.Repo, token, assetName)
-	if err != nil {
-		return fmt.Errorf("query latest release: %w", err)
-	}
-	if rel.TagName == "" {
-		return errors.New("latest release has empty tag")
-	}
-	workerPath, err := ensureReleaseBinary(opts.InstallDir, rel.TagName, assetName, asset.BrowserDownloadURL, token)
-	if err != nil {
-		return err
+	workerVersion := ""
+	workerPath := ""
+	if err != nil || strings.TrimSpace(rel.TagName) == "" {
+		if err != nil {
+			logs.Warn("initial release lookup failed, starting local worker and retrying updates: %v", err)
+		} else {
+			logs.Warn("latest release has empty tag; starting local worker and retrying updates")
+		}
+		localPath, localErr := ensureLocalWorkerBinary(opts.InstallDir, assetName)
+		if localErr != nil {
+			return fmt.Errorf("query latest release failed (%v), and local worker seed failed: %w", err, localErr)
+		}
+		workerVersion = BuildVersion
+		workerPath = localPath
+	} else {
+		workerPath, err = ensureReleaseBinary(opts.InstallDir, rel.TagName, assetName, asset.BrowserDownloadURL, token)
+		if err != nil {
+			return err
+		}
+		workerVersion = rel.TagName
 	}
 	if err := switchCurrentLink(currentLink, workerPath); err != nil {
 		return err
 	}
 
-	mgr := &serviceManager{version: rel.TagName, path: workerPath}
+	mgr := &serviceManager{version: workerVersion, path: workerPath}
 	if err := mgr.startWorker(currentLink, opts); err != nil {
 		return err
 	}
@@ -143,6 +155,8 @@ func runServiceSupervisor(opts serviceOptions) error {
 	defer ticker.Stop()
 
 	logs.Info("REPL service active: repo=%s room=%s nats=%s version=%s asset=%s", opts.Repo, opts.Room, opts.NATSURL, mgr.version, assetName)
+	stopPresence := startDaemonPresenceLoop(ctx, opts, mgr)
+	defer stopPresence()
 
 	for {
 		select {
@@ -181,6 +195,29 @@ func runServiceSupervisor(opts serviceOptions) error {
 	}
 }
 
+func ensureLocalWorkerBinary(installDir, assetName string) (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	exe, err = filepath.Abs(exe)
+	if err != nil {
+		return "", err
+	}
+	dstDir := filepath.Join(installDir, "releases", sanitizeTag("local-"+BuildVersion))
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		return "", err
+	}
+	dstPath := filepath.Join(dstDir, assetName)
+	if _, err := os.Stat(dstPath); err == nil {
+		return dstPath, nil
+	}
+	if err := copyFile(exe, dstPath, 0o755); err != nil {
+		return "", err
+	}
+	return dstPath, nil
+}
+
 func installService(opts serviceOptions) error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -202,13 +239,13 @@ func installService(opts serviceOptions) error {
 func serviceStatus(opts serviceOptions) error {
 	switch runtime.GOOS {
 	case "linux":
-		cmd := exec.Command("systemctl", "--user", "status", "--no-pager", "repl-src_v1.service")
+		cmd := exec.Command("systemctl", "--user", "status", "--no-pager", "dialtone_repl.service")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
 	case "darwin":
 		uid := os.Getuid()
-		label := "dev.dialtone.repl-src_v1"
+		label := "dev.dialtone.dialtone_repl"
 		cmd := exec.Command("launchctl", "print", fmt.Sprintf("gui/%d/%s", uid, label))
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -252,7 +289,7 @@ func installSystemdUserService(exe string, runArgs []string) error {
 	if err := os.MkdirAll(unitDir, 0o755); err != nil {
 		return err
 	}
-	unitPath := filepath.Join(unitDir, "repl-src_v1.service")
+	unitPath := filepath.Join(unitDir, "dialtone_repl.service")
 
 	execStart := exe + " " + strings.Join(runArgs, " ")
 	unit := strings.Join([]string{
@@ -277,7 +314,7 @@ func installSystemdUserService(exe string, runArgs []string) error {
 	}
 	for _, args := range [][]string{
 		{"--user", "daemon-reload"},
-		{"--user", "enable", "--now", "repl-src_v1.service"},
+		{"--user", "enable", "--now", "dialtone_repl.service"},
 	} {
 		cmd := exec.Command("systemctl", args...)
 		cmd.Stdout = os.Stdout
@@ -296,7 +333,7 @@ func installLaunchdUserService(exe string, runArgs []string) error {
 	if err := os.MkdirAll(plistDir, 0o755); err != nil {
 		return err
 	}
-	label := "dev.dialtone.repl-src_v1"
+	label := "dev.dialtone.dialtone_repl"
 	plistPath := filepath.Join(plistDir, label+".plist")
 
 	argsXML := "<string>" + xmlEscape(exe) + "</string>\n"
@@ -360,9 +397,24 @@ func (m *serviceManager) startWorker(currentPath string, opts serviceOptions) er
 	if m.worker != nil && m.worker.Process != nil {
 		return nil
 	}
+	workerPath := currentPath
+	if runtime.GOOS == "windows" {
+		if strings.HasSuffix(strings.ToLower(workerPath), ".exe") {
+			// no-op
+		} else if _, exErr := os.Stat(workerPath + ".exe"); exErr == nil {
+			workerPath = workerPath + ".exe"
+		} else if _, err := os.Stat(workerPath); err == nil {
+			// On Windows, executable paths generally require a .exe suffix.
+			if cpErr := copyFile(workerPath, workerPath+".exe", 0o755); cpErr == nil {
+				workerPath = workerPath + ".exe"
+			}
+		}
+	}
 	args := []string{"leader", "--nats-url", opts.NATSURL, "--room", opts.Room}
 	if opts.EmbeddedNATS {
 		args = append(args, "--embedded-nats")
+	} else {
+		args = append(args, "--embedded-nats=false")
 	}
 	if strings.TrimSpace(opts.HostName) != "" {
 		args = append(args, "--hostname", opts.HostName)
@@ -373,7 +425,7 @@ func (m *serviceManager) startWorker(currentPath string, opts serviceOptions) er
 	if opts.TSNetNATSPort > 0 {
 		args = append(args, "--tsnet-nats-port", strconv.Itoa(opts.TSNetNATSPort))
 	}
-	cmd := exec.Command(currentPath, args...)
+	cmd := exec.Command(workerPath, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = nil
@@ -421,6 +473,65 @@ func (m *serviceManager) stopWorker(timeout time.Duration) {
 		m.worker = nil
 	}
 	m.mu.Unlock()
+}
+
+func (m *serviceManager) workerVersion() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return strings.TrimSpace(m.version)
+}
+
+func startDaemonPresenceLoop(ctx context.Context, opts serviceOptions, mgr *serviceManager) func() {
+	stop := make(chan struct{})
+	go func() {
+		t := time.NewTicker(5 * time.Second)
+		defer t.Stop()
+		dialURL := serviceDialNATSURL(opts.NATSURL)
+		publish := func() {
+			nc, err := nats.Connect(dialURL, nats.Timeout(1200*time.Millisecond))
+			if err != nil {
+				return
+			}
+			defer nc.Close()
+			_ = publishFrame(nc, replRoomSubject(opts.Room), BusFrame{
+				Type:      frameTypeDaemon,
+				From:      opts.HostName,
+				Room:      sanitizeRoom(opts.Room),
+				DaemonVer: BuildVersion,
+				ReplVer:   mgr.workerVersion(),
+				OS:        runtime.GOOS,
+				Arch:      runtime.GOARCH,
+				Message:   "alive",
+			})
+			_ = nc.FlushTimeout(700 * time.Millisecond)
+		}
+		publish()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-stop:
+				return
+			case <-t.C:
+				publish()
+			}
+		}
+	}()
+	return func() {
+		close(stop)
+	}
+}
+
+func serviceDialNATSURL(raw string) string {
+	targetAddr, port, err := natsProxyTarget(strings.TrimSpace(raw))
+	if err != nil {
+		return raw
+	}
+	host, _, splitErr := net.SplitHostPort(targetAddr)
+	if splitErr != nil || strings.TrimSpace(host) == "" {
+		host = "127.0.0.1"
+	}
+	return fmt.Sprintf("nats://%s:%d", host, port)
 }
 
 func ensureReleaseBinary(installDir, tag, assetName, downloadURL, token string) (string, error) {
@@ -511,7 +622,7 @@ func latestRelease(repo, token, assetName string) (releaseInfo, releaseAsset, er
 }
 
 func localAssetName() string {
-	name := fmt.Sprintf("repl-src_v1-%s-%s", runtime.GOOS, runtime.GOARCH)
+	name := fmt.Sprintf("dialtone_repl-%s-%s", runtime.GOOS, runtime.GOARCH)
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
@@ -604,4 +715,21 @@ func switchCurrentLink(currentLink, target string) error {
 		return err
 	}
 	return os.Chmod(currentLink, 0o755)
+}
+
+func copyFile(src, dst string, perm os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return os.Chmod(dst, perm)
 }
