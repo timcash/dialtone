@@ -19,6 +19,7 @@ Prompts default to host identity (`<hostname>`) instead of `USER-1`.
 ./dialtone.sh repl src_v1 service --mode install --repo timcash/dialtone --room index
 ./dialtone.sh repl src_v1 service --mode run --repo timcash/dialtone --check-interval 3m
 ./dialtone.sh repl src_v1 build
+./dialtone.sh repl src_v1 deploy --host <robot-host> --user <robot-user> --pass <robot-pass> --service --embedded-nats=false
 ./dialtone.sh repl src_v1 release build v0.1.0
 ./dialtone.sh repl src_v1 release publish v0.1.0 timcash/dialtone
 ./dialtone.sh repl src_v1 test
@@ -81,6 +82,13 @@ The supervisor maintains stability by:
 - Downloads new worker binaries to `~/.dialtone/repl/releases/`.
 - Updates a `current` symlink and hot-swaps the worker via `SIGTERM`.
 - Keeping the management layer alive even if the worker or network fails.
+
+## Remote Deploy (Robot)
+`deploy` pushes a platform-matched `repl-src_v1` binary to a remote host over SSH.
+
+- Defaults to `ROBOT_HOST`, `ROBOT_USER`, and `ROBOT_PASSWORD` from `env/.env`.
+- `--service` installs/restarts `dialtone-repl.service` on the remote host.
+- Remote service runs `repl-src_v1 service --mode run`, so updates are pulled automatically from GitHub Releases.
 
 ## Environment Discovery (`status`)
 `repl src_v1 status` provides a comprehensive view of the local environment:

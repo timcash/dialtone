@@ -69,6 +69,11 @@ func main() {
 			logs.Error("repl build failed: %v", err)
 			os.Exit(1)
 		}
+	case "deploy":
+		if err := repl.RunDeploy(rest); err != nil {
+			logs.Error("repl deploy failed: %v", err)
+			os.Exit(1)
+		}
 	case "release":
 		if err := runRelease(rest); err != nil {
 			logs.Error("repl release failed: %v", err)
@@ -271,6 +276,8 @@ func printUsage() {
 	logs.Raw("                                                       run: start supervisor in foreground")
 	logs.Raw("                                                       status: print OS service status")
 	logs.Raw("  build                                                Build standalone repl-src_v1 binary")
+	logs.Raw("  deploy [--host HOST] [--user USER] [--pass PASS] [--service] [--repo owner/repo]")
+	logs.Raw("                                                       Build local binary and deploy to remote host")
 	logs.Raw("  release build <version>                              Build per-architecture release binaries")
 	logs.Raw("  release publish <version> [owner/repo]              Publish binaries to GitHub release")
 	logs.Raw("  test [multiplayer]                                   Run REPL src_v1 tests")
