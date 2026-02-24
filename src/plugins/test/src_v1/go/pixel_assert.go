@@ -22,7 +22,7 @@ func AssertPNGPixelColorWithinTolerance(path string, x, y int, expected color.RG
 
 	actual := img.At(x, y)
 	r, g, b, a := actual.RGBA()
-	
+
 	// RGBA() returns values in range [0, 65535]
 	ar := uint8(r >> 8)
 	ag := uint8(g >> 8)

@@ -141,9 +141,9 @@ func buildStandaloneBinary(version, goos, goarch string) error {
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return err
 	}
-	name := "repl-src_v1"
+	name := "dialtone_repl"
 	if goos != "" && goarch != "" {
-		name = fmt.Sprintf("repl-src_v1-%s-%s", goos, goarch)
+		name = fmt.Sprintf("dialtone_repl-%s-%s", goos, goarch)
 		if goos == "windows" {
 			name += ".exe"
 		}
@@ -237,11 +237,11 @@ func releasePublish(args []string) error {
 	}
 	binDir := paths.StandaloneBinDir
 	assets := []string{
-		"repl-src_v1-linux-amd64",
-		"repl-src_v1-linux-arm64",
-		"repl-src_v1-darwin-amd64",
-		"repl-src_v1-darwin-arm64",
-		"repl-src_v1-windows-amd64.exe",
+		"dialtone_repl-linux-amd64",
+		"dialtone_repl-linux-arm64",
+		"dialtone_repl-darwin-amd64",
+		"dialtone_repl-darwin-arm64",
+		"dialtone_repl-windows-amd64.exe",
 	}
 	for _, a := range assets {
 		if _, err := os.Stat(filepath.Join(binDir, a)); err != nil {
@@ -273,11 +273,11 @@ func printUsage() {
 	logs.Raw("                                                       Start shared REPL leader/service")
 	logs.Raw("  join [room-name] [--nats-url URL] [--name HOST]     Join a shared REPL host (default room: index)")
 	logs.Raw("  status [--nats-url URL] [--room NAME]               Show NATS/tsnet/chrome status")
-	logs.Raw("  service [--mode install|run|status] [--repo owner/repo] [--nats-url URL] [--room NAME] [--hostname HOST] [--check-interval 3m] [--embedded-nats] [--tsnet] [--tsnet-nats-port PORT]")
+	logs.Raw("  service [--mode install|run|status] [--repo owner/repo] [--nats-url URL] [--room NAME] [--hostname HOST] [--check-interval 5m] [--embedded-nats] [--tsnet] [--tsnet-nats-port PORT]")
 	logs.Raw("                                                       install: register persistent OS service (default)")
 	logs.Raw("                                                       run: start supervisor in foreground")
 	logs.Raw("                                                       status: print OS service status")
-	logs.Raw("  build                                                Build standalone repl-src_v1 binary")
+	logs.Raw("  build                                                Build standalone dialtone_repl binary")
 	logs.Raw("  deploy [--host HOST] [--user USER] [--pass PASS] [--service] [--repo owner/repo]")
 	logs.Raw("                                                       Build local binary and deploy to remote host")
 	logs.Raw("  release build <version>                              Build per-architecture release binaries")

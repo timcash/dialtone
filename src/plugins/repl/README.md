@@ -1,127 +1,152 @@
 # REPL Plugin
 
-The REPL plugin provides:
-- local interactive REPL (`run`)
-- shared multi-client REPL over NATS (`leader`/`join`)
-- update-aware service supervisor and OS persistence (`service`)
-- release build/publish tooling for per-architecture binaries (`release`)
-- environment discovery and bus health checks (`status`)
+`repl src_v1` is the shared multiplayer command bus for Dialtone.
 
-Prompts default to host identity (`<hostname>`) instead of `USER-1`.
+- One host is the **leader** and is the only host that executes subtone commands.
+- All hosts (including leader) publish/subscribe over NATS first, then print to stdout.
+- Room traffic is topic-based: `repl.room.<room>`.
+- Command traffic is global: `repl.cmd`.
 
-## CLI
+Current deployment intent:
+- `legion-wsl` runs leader.
+- Other hosts (`legion`, `darkmac`, `chroma`, `drone-1`) run join clients and/or autoswap service.
+
+## Architecture
+```mermaid
+flowchart LR
+  subgraph Tailnet["Tailscale Tailnet (hostname-based routing)"]
+    L["legion-wsl\nleader + embedded NATS\nroom=index"]
+    W["legion (windows)\njoin client"]
+    M1["darkmac\njoin client"]
+    M2["chroma\njoin client"]
+    R["drone-1 (robot)\njoin client"]
+  end
+
+  subgraph GH["GitHub Releases"]
+    REL["dialtone_repl-* assets"]
+  end
+
+  subgraph HostSvc["Each host service layer"]
+    AUTO["dialtone_autoswap\n(service supervisor)\ncheck every 5m"]
+    REPL["dialtone_repl\n(worker process)"]
+  end
+
+  AUTO -->|start/swap| REPL
+  AUTO -->|poll latest release| REL
+  REL -->|download| AUTO
+
+  W -->|NATS join/chat/cmd| L
+  M1 -->|NATS join/chat/cmd| L
+  M2 -->|NATS join/chat/cmd| L
+  R -->|NATS join/chat/cmd| L
+
+  L -->|subtone exec + DIALTONE output frames| W
+  L -->|subtone exec + DIALTONE output frames| M1
+  L -->|subtone exec + DIALTONE output frames| M2
+  L -->|subtone exec + DIALTONE output frames| R
+```
+
+## CLI Commands
+Always use:
+```bash
+./dialtone.sh repl src_v1 <command> [args]
+```
+
+Commands:
 ```bash
 ./dialtone.sh repl src_v1 help
+./dialtone.sh repl src_v1 version
 ./dialtone.sh repl src_v1 run
-./dialtone.sh repl src_v1 status
 ./dialtone.sh repl src_v1 leader --nats-url nats://0.0.0.0:4222 --room index --embedded-nats --tsnet --tsnet-nats-port 4222
-./dialtone.sh repl src_v1 join --nats-url nats://<server-host>:4222 --name <hostname> index
-./dialtone.sh repl src_v1 service --mode install --repo timcash/dialtone --room index
-./dialtone.sh repl src_v1 service --mode run --repo timcash/dialtone --check-interval 3m
+./dialtone.sh repl src_v1 join --nats-url nats://<leader-tailnet-host>:4222 --name <hostname> index
+./dialtone.sh repl src_v1 status
+
+./dialtone.sh repl src_v1 service --mode install --repo timcash/dialtone --room index --check-interval 5m
+./dialtone.sh repl src_v1 service --mode run --repo timcash/dialtone --room index --check-interval 5m
+./dialtone.sh repl src_v1 service --mode status
+
 ./dialtone.sh repl src_v1 build
-./dialtone.sh repl src_v1 deploy --host <robot-host> --user <robot-user> --pass <robot-pass> --service --embedded-nats=false
+./dialtone.sh repl src_v1 deploy --host <host> --user <user> --pass <pass> --service
 ./dialtone.sh repl src_v1 release build v0.1.0
 ./dialtone.sh repl src_v1 release publish v0.1.0 timcash/dialtone
+
 ./dialtone.sh repl src_v1 test
 ./dialtone.sh repl src_v1 test multiplayer
-./dialtone.sh repl src_v1 test multiplayer-robot
 ```
 
-## Interactive Commands
-When running `run`, `leader`, or `join`, the REPL session supports internal management:
-- `/ps`: List active subtones (background processes)
-- `/kill <pid>`: Terminate a managed process
-- `/repl src_v1 join <room-name>`: Leave current room and join another room
-- `/repl src_v1 who`: List connected users, room, and REPL version
-- `/repl src_v1 versions`: List connected users with REPL version by room
-- `/<command>` or `/plugin src_vN command ...`: Send command to DIALTONE leader
-- `exit` / `quit`: Close the session
+## In-Session Commands
+When inside a REPL prompt:
 
-## NATS Model
-- One host runs `leader` and acts as the REPL **leader**.
-- The leader is the only process that executes commands (`DIALTONE>` command handler).
-- Clients run `join` and publish all input to NATS first.
-- Global command subject: `repl.cmd`.
-- Room event subjects: `repl.room.<room>`.
-- Slash commands are published as `command` frames to `repl.cmd`.
-- Non-slash text is published as `chat` frames to the current room.
-- Leader (`DIALTONE`) is the single command executor and publishes `line`/`server` output.
-- Session lifecycle is tracked via `join` and `left` frames.
+- `/repl src_v1 join <room-name>` switch rooms (single active room per client).
+- `/repl src_v1 who` show connected clients plus daemon presence/version.
+- `/repl src_v1 versions` show client versions by room.
+- `/ps` list leader-managed subtones.
+- `/kill <pid>` kill a subtone.
+- `@<hostname> <command>` run command on a specific host REPL client as a host subtone (example: `@chroma ls` or `@legion dir`).
+- `/<plugin> src_vN <command> ...` send command to leader for execution.
+- `exit` or `quit` leave session.
 
-### Leader Offline Behavior
-- If the leader process stops but NATS stays online:
-- Chat events can still be published to room subjects.
-- Slash commands (`/...`) are not executed because no leader is subscribed to `repl.cmd`.
-- `status` probes will report no active server heartbeat for that room.
-- If the shared NATS broker goes offline:
-- Clients cannot publish/subscribe; room updates and commands both stop.
-- Existing `join` sessions disconnect from transport and must reconnect once NATS is reachable.
-- Recovery:
-- Start a leader again with `leader` against the shared NATS URL.
-- Clients re-`join` (or reconnect) and command execution resumes.
-- There is no NATS clustering or leaf-node topology in the current implementation.
+## NATS Topics
+- `repl.cmd`:
+  - receives command/control frames.
+  - consumed by leader command handler.
+- `repl.room.<room>`:
+  - receives `join`, `left`, `chat`, `line`, `server`, `control`, `daemon` frames.
+  - consumed by all members of that room.
 
-## Standalone Binary
-```bash
-./dialtone.sh repl src_v1 build
-.dialtone/bin/repl-src_v1 leader --nats-url nats://0.0.0.0:4222 --room index --embedded-nats --tsnet --tsnet-nats-port 4222
-.dialtone/bin/repl-src_v1 join --nats-url nats://<server-host>:4222 --name <hostname> index
-.dialtone/bin/repl-src_v1 service --mode run --repo timcash/dialtone --nats-url nats://0.0.0.0:4222 --room index
-```
+Behavior:
+- Clients never execute Dialtone commands directly in multiplayer mode.
+- Leader executes and publishes output lines back to room topics.
+- `DIALTONE:PID>` lines are leader-formatted subtone output frames.
+- Both `/...` and `@host ...` are sent to leader first over `repl.cmd`.
+- Targeted host commands publish to `repl.cmd` as message text (`@<hostname> <command>`).
+- Leader dispatches `@host ...` as a targeted control frame to the room.
+- Only that host executes the command in its native shell (`sh -lc` on POSIX, `powershell -Command` on Windows).
+- The host publishes compact lifecycle lines only: start, command, log path, and exit code.
+- Full stdout/stderr stays in the subtone log file; it is not streamed to room output.
 
-### WSL + Embedded Tsnet
-To avoid relying on Windows host networking, run the REPL leader with embedded `tsnet`:
+## Leader and Failure Model
+- Exactly one active leader is intended for a shared room/domain.
+- If leader goes down but NATS is up:
+  - chat still flows in room topics.
+  - command execution stops until leader returns.
+- If NATS goes down:
+  - no room traffic and no command execution.
+  - clients must reconnect after broker recovers.
 
-```bash
-./dialtone.sh repl src_v1 leader --embedded-nats --nats-url nats://0.0.0.0:4222 --tsnet --tsnet-nats-port 4222
-```
+## Standalone Binary Names
+`repl src_v1 build` outputs:
 
-- This creates a dedicated tsnet node for the WSL leader.
-- The leader logs a tailnet NATS endpoint (`nats://<tsnet-dns>:<port>`).
-- Other hosts should join using that tsnet endpoint.
-- In WSL, the tsnet hostname is auto-suffixed with `-wsl` unless explicitly set.
+- `dialtone_repl`
+- `dialtone_repl-linux-amd64`
+- `dialtone_repl-linux-arm64`
+- `dialtone_repl-darwin-amd64`
+- `dialtone_repl-darwin-arm64`
+- `dialtone_repl-windows-amd64.exe`
 
-## REPL Release
-`release build <version>` creates:
-- `repl-src_v1-linux-amd64`
-- `repl-src_v1-linux-arm64`
-- `repl-src_v1-darwin-amd64`
-- `repl-src_v1-darwin-arm64`
-- `repl-src_v1-windows-amd64.exe`
+## Auto-Swap Service
+`service` mode is the autoswap supervisor path.
 
-`release publish` uploads those binaries to a GitHub release tag.
-This is the **REPL Release** command path.
+- `--mode install` installs persistent OS service:
+  - Linux: `dialtone_repl.service` (user systemd).
+  - macOS: `dev.dialtone.dialtone_repl` (launchd agent).
+- Poll interval defaults to `5m`.
+- Supervisor downloads matching release assets into `~/.dialtone/repl/releases/`.
+- Worker is hot-swapped through the `current` target.
 
-## REPL Auto-Swap Updater
-The `service` command provides both a supervisor and automatic OS-level registration:
-- `--mode install`: Registers the REPL supervisor as a **systemd user service** (Linux) or **launchd agent** (macOS).
-- `--mode run`: Starts the supervisor in the foreground for log monitoring.
-- `--mode status`: Checks the OS-level service status.
+Operational naming:
+- Supervisor process/binary name: `dialtone_autoswap`.
+- Worker process/binary name: `dialtone_repl`.
 
-The supervisor maintains stability by:
-- Polling GitHub Releases for newer architecture-matched binaries.
-- Downloads new worker binaries to `~/.dialtone/repl/releases/`.
-- Updates a `current` symlink and hot-swaps the worker via `SIGTERM`.
-- Keeping the management layer alive even if the worker or network fails.
+## Remote Deploy
+`deploy` pushes `dialtone_repl` to remote host over SSH and can install service.
 
-This is the **REPL Auto-Swap Updater** path.
+- Default env keys: `ROBOT_HOST`, `ROBOT_USER`, `ROBOT_PASSWORD`.
+- Use hostname-based endpoints on tailnet; do not hardcode IPs.
 
-## Remote Deploy (Robot)
-`deploy` pushes a platform-matched `repl-src_v1` binary to a remote host over SSH.
+## Test Suites
+`./dialtone.sh repl src_v1 test` runs foundational suites then multiplayer:
 
-- Defaults to `ROBOT_HOST`, `ROBOT_USER`, and `ROBOT_PASSWORD` from `env/.env`.
-- `--service` installs/restarts `dialtone-repl.service` on the remote host.
-- Remote service runs `repl-src_v1 service --mode run`, so updates are pulled automatically from GitHub Releases.
-
-## Environment Discovery (`status`)
-`repl src_v1 status` provides a comprehensive view of the local environment:
-- **Networking**: NATS reachability and leader presence probe.
-- **VPN**: Tailscale (`tsnet`) configuration and authentication status.
-- **Platform**: Chrome/Chromium installation path and version.
-
-## Tests
-`repl src_v1 test` runs:
-- `src/plugins/repl/src_v1/test/cmd/main.go`
 - `src/plugins/repl/src_v1/test/01_repl_core/suite.go`
 - `src/plugins/repl/src_v1/test/02_proc_plugin/suite.go`
 - `src/plugins/repl/src_v1/test/03_logs_plugin/suite.go`
@@ -129,8 +154,8 @@ This is the **REPL Auto-Swap Updater** path.
 - `src/plugins/repl/src_v1/test/05_chrome_plugin/suite.go`
 - `src/plugins/repl/src_v1/test/06_go_bun_plugins/suite.go`
 - `src/plugins/repl/src_v1/test/99_multiplayer/suite.go`
-- `src/plugins/repl/src_v1/test/100_multiplayer_robot/suite.go`
 
-Extra modes:
-- `repl src_v1 test multiplayer`: runs only NATS-driven multiplayer suite.
-- `repl src_v1 test multiplayer-robot`: runs multiplayer + live robot SSH join/chat/left verification.
+`./dialtone.sh repl src_v1 test multiplayer`:
+
+- runs deterministic multiplayer room/command flow.
+- includes live robot join/chat/left verification when robot SSH/env is available.

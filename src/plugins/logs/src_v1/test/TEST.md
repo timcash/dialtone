@@ -1,7 +1,7 @@
 # Test Report: logs-src-v1
 
-- **Date**: Mon, 23 Feb 2026 21:32:03 PST
-- **Total Duration**: 2.309137039s
+- **Date**: Tue, 24 Feb 2026 10:56:51 PST
+- **Total Duration**: 2.192940907s
 
 ## Summary
 
@@ -12,35 +12,35 @@
 
 ### 1. ✅ 01 Embedded NATS + topic publish
 
-- **Duration**: 2.167412ms
+- **Duration**: 2.331796ms
 - **Report**: NATS messages verified at nats://127.0.0.1:4222.
 
 ---
 
 ### 2. ✅ 02 Listener filtering (error.topic)
 
-- **Duration**: 1.244271ms
+- **Duration**: 1.286168ms
 - **Report**: Verified error-topic filtering via NATS
 
 ---
 
 ### 3. ✅ 04 Two-process pingpong via dialtone logs
 
-- **Duration**: 1.199787059s
+- **Duration**: 1.202808916s
 - **Report**: Verified two dialtone logs processes exchanged 3 ping/pong rounds on one topic.
 
 ---
 
 ### 4. ✅ 05 Example plugin binary imports logs library
 
-- **Duration**: 1.104239335s
+- **Duration**: 985.511501ms
 - **Report**: Verified example plugin binary imports logs library and publishes expected messages.
 
 ---
 
 ### 5. ✅ 03 Finalize artifacts
 
-- **Duration**: 1.683528ms
+- **Duration**: 990.127µs
 - **Report**: Suite finalized. Verification transitioned to NATS topics.
 
 ---
