@@ -1,16 +1,11 @@
 package test
 
 import (
-	"os"
 	"os/exec"
-	"path/filepath"
+
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 )
 
 func getDialtoneCmd(repoRoot string) *exec.Cmd {
-	script := filepath.Join(repoRoot, "dialtone.sh")
-	if os.Getenv("OS") == "Windows_NT" || os.PathSeparator == '\\' {
-		script = filepath.Join(repoRoot, "dialtone.ps1")
-		return exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script)
-	}
-	return exec.Command(script)
+	return configv1.DialtoneCommand(repoRoot)
 }

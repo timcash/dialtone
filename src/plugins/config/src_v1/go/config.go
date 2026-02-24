@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/joho/godotenv"
@@ -98,7 +99,7 @@ func FindRepoRoot(start string) (string, error) {
 	}
 	cwd, _ = filepath.Abs(cwd)
 	for {
-		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
+		if HasDialtoneScript(cwd) {
 			return cwd, nil
 		}
 		parent := filepath.Dir(cwd)
@@ -107,6 +108,36 @@ func FindRepoRoot(start string) (string, error) {
 		}
 		cwd = parent
 	}
+}
+
+func DialtoneScriptName() string {
+	if runtime.GOOS == "windows" {
+		return "dialtone.ps1"
+	}
+	return "dialtone.sh"
+}
+
+func DialtoneScriptPath(repoRoot string) string {
+	return filepath.Join(repoRoot, DialtoneScriptName())
+}
+
+func HasDialtoneScript(dir string) bool {
+	if _, err := os.Stat(filepath.Join(dir, "dialtone.sh")); err == nil {
+		return true
+	}
+	if _, err := os.Stat(filepath.Join(dir, "dialtone.ps1")); err == nil {
+		return true
+	}
+	return false
+}
+
+func DialtoneCommand(repoRoot string, args ...string) *exec.Cmd {
+	if runtime.GOOS == "windows" {
+		all := []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", DialtoneScriptPath(repoRoot)}
+		all = append(all, args...)
+		return exec.Command("powershell.exe", all...)
+	}
+	return exec.Command(DialtoneScriptPath(repoRoot), args...)
 }
 
 func DefaultDialtoneEnv() string {
