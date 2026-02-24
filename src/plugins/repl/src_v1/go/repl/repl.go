@@ -7,8 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -23,7 +26,8 @@ import (
 
 const (
 	defaultNATSURL = "nats://127.0.0.1:4222"
-	defaultRoom    = "main"
+	defaultRoom    = "index"
+	commandSubject = "repl.cmd"
 )
 
 const (
@@ -34,7 +38,13 @@ const (
 	frameTypeHeartbeat = "heartbeat"
 	frameTypeJoin      = "join"
 	frameTypeLeft      = "left"
+	frameTypeChat      = "chat"
+	frameTypeCommand   = "command"
+	frameTypeControl   = "control"
+	frameTypeError     = "error"
 )
+
+const controlJoinRoom = "join_room"
 
 type Hooks struct {
 	RunSubtoneWithEvents func(args []string, onEvent proc.SubtoneEventHandler) int
@@ -71,12 +81,16 @@ func SetHooksForTest(h Hooks) func() {
 }
 
 type BusFrame struct {
-	Type      string `json:"type"`
-	From      string `json:"from,omitempty"`
-	Prefix    string `json:"prefix,omitempty"`
-	Message   string `json:"message,omitempty"`
-	ServerID  string `json:"server_id,omitempty"`
-	Timestamp string `json:"timestamp"`
+	Type      string   `json:"type"`
+	From      string   `json:"from,omitempty"`
+	Target    string   `json:"target,omitempty"`
+	Room      string   `json:"room,omitempty"`
+	Command   string   `json:"command,omitempty"`
+	Args      []string `json:"args,omitempty"`
+	Prefix    string   `json:"prefix,omitempty"`
+	Message   string   `json:"message,omitempty"`
+	ServerID  string   `json:"server_id,omitempty"`
+	Timestamp string   `json:"timestamp"`
 }
 
 type HostStatus struct {
@@ -112,9 +126,10 @@ func RunLocal(logFn func(category, msg string), args []string) error {
 func RunServe(args []string) error {
 	fs := flag.NewFlagSet("repl-serve", flag.ContinueOnError)
 	natsURL := fs.String("nats-url", defaultNATSURL, "NATS URL")
-	room := fs.String("room", defaultRoom, "Shared REPL room")
+	room := fs.String("room", defaultRoom, "Primary REPL room")
 	embedded := fs.Bool("embedded-nats", true, "Start embedded NATS on --nats-url")
 	enableTSNet := fs.Bool("tsnet", false, "Start embedded tsnet identity on host")
+	tsnetNATSPort := fs.Int("tsnet-nats-port", 0, "Expose NATS over tsnet on this port (default: port from --nats-url)")
 	hostname := fs.String("hostname", DefaultPromptName(), "Host name used in prompts")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -130,55 +145,155 @@ func RunServe(args []string) error {
 	}
 
 	stopTSNet := func() {}
+	var tsRuntime *tsnetRuntime
 	if *enableTSNet {
-		cleanup, upErr := startTSNetInstance(normalizePromptName(*hostname))
+		cleanup, upErr := startTSNetInstance(normalizeTSNetHostname(normalizePromptName(*hostname)))
 		if upErr != nil {
 			logs.Warn("REPL tsnet startup failed: %v", upErr)
 		} else {
-			stopTSNet = cleanup
+			tsRuntime = cleanup
+			stopTSNet = func() {
+				_ = tsRuntime.Close()
+			}
 		}
 	}
 	defer stopTSNet()
 
 	h := normalizePromptName(*hostname)
 	roomName := sanitizeRoom(*room)
-	subject := replSubject(roomName)
 	serverID := h + "@" + roomName
 
-	publish := func(f BusFrame) {
+	publishRoom := func(targetRoom string, f BusFrame) {
+		targetRoom = sanitizeRoom(targetRoom)
 		f.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
 		f.ServerID = serverID
-		_ = publishFrame(nc, subject, f)
+		if strings.TrimSpace(f.Room) == "" {
+			f.Room = targetRoom
+		}
+		_ = publishFrame(nc, replRoomSubject(targetRoom), f)
 	}
 
 	// Publish initial presence line to NATS so every connected client sees it.
-	publish(BusFrame{Type: frameTypeServer, Message: fmt.Sprintf("DIALTONE server online on %s (subject=%s nats=%s)", h, subject, usedURL)})
-	logs.Info("REPL host serving: hostname=%s room=%s subject=%s nats=%s", h, roomName, subject, usedURL)
+	publishRoom(roomName, BusFrame{Type: frameTypeServer, Message: fmt.Sprintf("DIALTONE server online on %s (subject=%s nats=%s)", h, replRoomSubject(roomName), usedURL)})
+	logs.Info("REPL host serving: hostname=%s room=%s cmd_subject=%s nats=%s", h, roomName, commandSubject, usedURL)
+	var tsnetListener net.Listener
+	if tsRuntime != nil {
+		targetAddr, parsedPort, parseErr := natsProxyTarget(usedURL)
+		if parseErr != nil {
+			logs.Warn("REPL tsnet NATS proxy parse failed: %v", parseErr)
+		} else {
+			exposePort := parsedPort
+			if *tsnetNATSPort > 0 {
+				exposePort = *tsnetNATSPort
+			}
+			ln, lnErr := tsRuntime.Listen("tcp", fmt.Sprintf(":%d", exposePort))
+			if lnErr != nil {
+				logs.Warn("REPL tsnet NATS proxy listen failed: %v", lnErr)
+			} else {
+				tsnetListener = ln
+				go serveTCPProxy(tsnetListener, targetAddr)
+				tsURL := fmt.Sprintf("nats://%s:%d", tsRuntime.DNSName, exposePort)
+				logs.Info("REPL tsnet NATS endpoint active: %s -> %s", tsURL, targetAddr)
+				publishRoom(roomName, BusFrame{Type: frameTypeServer, Message: fmt.Sprintf("DIALTONE tsnet NATS endpoint: %s", tsURL)})
+			}
+		}
+	}
+	defer func() {
+		if tsnetListener != nil {
+			_ = tsnetListener.Close()
+		}
+	}()
 
+	var roomMu sync.RWMutex
+	userRoom := map[string]string{}
 	var runMu sync.Mutex
-	sub, err := nc.Subscribe(subject, func(msg *nats.Msg) {
+	cmdSub, err := nc.Subscribe(commandSubject, func(msg *nats.Msg) {
 		frame, ok := decodeFrame(msg.Data)
 		if !ok {
 			return
 		}
-		printFrame(os.Stdout, frame)
 		switch frame.Type {
 		case frameTypeProbe:
-			publish(BusFrame{Type: frameTypeServer, Message: fmt.Sprintf("DIALTONE server active on %s", h)})
-		case frameTypeInput:
+			targetRoom := sanitizeRoom(frame.Room)
+			publishRoom(targetRoom, BusFrame{Type: frameTypeServer, Message: fmt.Sprintf("DIALTONE server active on %s", h)})
+		case frameTypeCommand:
+			sender := normalizePromptName(frame.From)
+			currentRoom := sanitizeRoom(frame.Room)
+			if sender == "" {
+				return
+			}
+			roomMu.RLock()
+			if currentRoom == "" {
+				currentRoom = sanitizeRoom(userRoom[sender])
+			}
+			roomMu.RUnlock()
+			if currentRoom == "" {
+				currentRoom = defaultRoom
+			}
+
+			raw := strings.TrimSpace(frame.Message)
+			if strings.HasPrefix(raw, "/") {
+				raw = strings.TrimSpace(strings.TrimPrefix(raw, "/"))
+			}
+			args := strings.Fields(raw)
+			if len(args) == 0 {
+				return
+			}
+
+			roomMu.Lock()
+			userRoom[sender] = currentRoom
+			roomMu.Unlock()
+			publishRoom(currentRoom, BusFrame{Type: frameTypeInput, From: sender, Message: "/" + raw})
+
+			if len(args) >= 4 && args[0] == "repl" && args[1] == "src_v1" && args[2] == "join" {
+				targetRoom := sanitizeRoom(args[3])
+				if targetRoom == "" {
+					publishRoom(currentRoom, BusFrame{Type: frameTypeError, Message: "Usage: /repl src_v1 join <room-name>"})
+					return
+				}
+				if targetRoom == currentRoom {
+					publishRoom(currentRoom, BusFrame{Type: frameTypeLine, Prefix: "DIALTONE", Message: fmt.Sprintf("%s is already in room %s", sender, targetRoom)})
+					return
+				}
+				publishRoom(currentRoom, BusFrame{Type: frameTypeLeft, From: sender})
+				publishRoom(currentRoom, BusFrame{
+					Type:    frameTypeControl,
+					Target:  sender,
+					Command: controlJoinRoom,
+					Room:    targetRoom,
+					Message: fmt.Sprintf("switching %s to room %s", sender, targetRoom),
+				})
+				roomMu.Lock()
+				userRoom[sender] = targetRoom
+				roomMu.Unlock()
+				return
+			}
+
 			go func(in BusFrame) {
 				runMu.Lock()
 				defer runMu.Unlock()
 				executeCommand(strings.TrimSpace(in.Message), func(prefix, msg string) {
-					publish(BusFrame{Type: frameTypeLine, Prefix: prefix, Message: msg})
+					publishRoom(currentRoom, BusFrame{Type: frameTypeLine, Prefix: prefix, Message: msg})
 				})
-			}(frame)
+			}(BusFrame{Message: raw})
 		}
 	})
 	if err != nil {
 		return err
 	}
-	defer sub.Unsubscribe()
+	defer cmdSub.Unsubscribe()
+
+	roomSub, err := nc.Subscribe("repl.room.*", func(msg *nats.Msg) {
+		frame, ok := decodeFrame(msg.Data)
+		if !ok {
+			return
+		}
+		printFrame(os.Stdout, frame)
+	})
+	if err != nil {
+		return err
+	}
+	defer roomSub.Unsubscribe()
 	if err := nc.Flush(); err != nil {
 		return err
 	}
@@ -191,9 +306,21 @@ func RunServe(args []string) error {
 	for {
 		select {
 		case <-heartbeat.C:
-			publish(BusFrame{Type: frameTypeHeartbeat, Message: "alive"})
+			seen := map[string]struct{}{roomName: {}}
+			roomMu.RLock()
+			for _, r := range userRoom {
+				r = sanitizeRoom(r)
+				if r == "" {
+					continue
+				}
+				seen[r] = struct{}{}
+			}
+			roomMu.RUnlock()
+			for r := range seen {
+				publishRoom(r, BusFrame{Type: frameTypeHeartbeat, Message: "alive"})
+			}
 		case <-sig:
-			publish(BusFrame{Type: frameTypeServer, Message: "DIALTONE server shutting down."})
+			publishRoom(roomName, BusFrame{Type: frameTypeServer, Message: "DIALTONE server shutting down."})
 			return nil
 		}
 	}
@@ -207,6 +334,12 @@ func RunJoin(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if fs.NArg() > 1 {
+		return fmt.Errorf("usage: join [room-name] [--nats-url URL] [--name HOST]")
+	}
+	if fs.NArg() == 1 {
+		*room = fs.Arg(0)
+	}
 
 	nc, err := nats.Connect(strings.TrimSpace(*natsURL), nats.Timeout(1500*time.Millisecond))
 	if err != nil {
@@ -216,27 +349,79 @@ func RunJoin(args []string) error {
 
 	prompt := normalizePromptName(*name)
 	roomName := sanitizeRoom(*room)
-	subject := replSubject(roomName)
+	currentRoom := roomName
+	currentSubj := replRoomSubject(currentRoom)
+	natsAddr := strings.TrimSpace(*natsURL)
 
-	sub, err := nc.Subscribe(subject, func(msg *nats.Msg) {
+	var subMu sync.Mutex
+	var sub *nats.Subscription
+	var switchRoom func(string, bool) error
+
+	onRoomFrame := func(msg *nats.Msg) {
 		frame, ok := decodeFrame(msg.Data)
 		if !ok {
 			return
 		}
 		printFrame(os.Stdout, frame)
-	})
+		if frame.Type == frameTypeControl && frame.Target == prompt && frame.Command == controlJoinRoom {
+			nextRoom := sanitizeRoom(frame.Room)
+			_ = switchRoom(nextRoom, true)
+		}
+	}
+
+	switchRoom = func(targetRoom string, announce bool) error {
+		targetRoom = sanitizeRoom(targetRoom)
+		if targetRoom == "" {
+			targetRoom = defaultRoom
+		}
+		subMu.Lock()
+		if targetRoom == currentRoom {
+			subMu.Unlock()
+			return nil
+		}
+		targetSubj := replRoomSubject(targetRoom)
+		nextSub, err := nc.Subscribe(targetSubj, onRoomFrame)
+		if err != nil {
+			subMu.Unlock()
+			return err
+		}
+		prevSub := sub
+		sub = nextSub
+		currentRoom = targetRoom
+		currentSubj = targetSubj
+		subMu.Unlock()
+
+		if prevSub != nil {
+			_ = prevSub.Unsubscribe()
+		}
+		_ = publishFrame(nc, targetSubj, BusFrame{Type: frameTypeJoin, From: prompt, Room: targetRoom})
+		_ = nc.Flush()
+		if announce {
+			fmt.Fprintf(os.Stdout, "DIALTONE> Connected to %s via %s\n", targetSubj, natsAddr)
+		}
+		return nil
+	}
+
+	initialSub, err := nc.Subscribe(currentSubj, onRoomFrame)
 	if err != nil {
 		return err
 	}
-	defer sub.Unsubscribe()
+	sub = initialSub
+	defer func() {
+		subMu.Lock()
+		defer subMu.Unlock()
+		if sub != nil {
+			_ = sub.Unsubscribe()
+		}
+	}()
 	if err := nc.Flush(); err != nil {
 		return err
 	}
 
-	_ = publishFrame(nc, subject, BusFrame{Type: frameTypeProbe, From: prompt, Message: "probe"})
-	_ = publishFrame(nc, subject, BusFrame{Type: frameTypeJoin, From: prompt, Message: prompt})
+	_ = publishFrame(nc, commandSubject, BusFrame{Type: frameTypeProbe, From: prompt, Room: currentRoom, Message: "probe"})
+	_ = publishFrame(nc, currentSubj, BusFrame{Type: frameTypeJoin, From: prompt, Room: currentRoom})
 	_ = nc.Flush()
-	fmt.Fprintf(os.Stdout, "DIALTONE> Connected to %s via %s\n", subject, strings.TrimSpace(*natsURL))
+	fmt.Fprintf(os.Stdout, "DIALTONE> Connected to %s via %s\n", currentSubj, natsAddr)
 
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
@@ -251,14 +436,39 @@ func RunJoin(args []string) error {
 		if line == "exit" || line == "quit" {
 			break
 		}
-		if err := publishFrame(nc, subject, BusFrame{Type: frameTypeInput, From: prompt, Message: line}); err != nil {
-			return err
+
+		subMu.Lock()
+		roomNow := currentRoom
+		subjectNow := currentSubj
+		subMu.Unlock()
+		if strings.HasPrefix(line, "/") {
+			if err := publishFrame(nc, commandSubject, BusFrame{
+				Type:    frameTypeCommand,
+				From:    prompt,
+				Room:    roomNow,
+				Message: line,
+			}); err != nil {
+				return err
+			}
+		} else {
+			if err := publishFrame(nc, subjectNow, BusFrame{
+				Type:    frameTypeChat,
+				From:    prompt,
+				Room:    roomNow,
+				Message: line,
+			}); err != nil {
+				return err
+			}
 		}
 		if err := nc.Flush(); err != nil {
 			return err
 		}
 	}
-	_ = publishFrame(nc, subject, BusFrame{Type: frameTypeLeft, From: prompt, Message: prompt})
+	subMu.Lock()
+	roomNow := currentRoom
+	subjectNow := currentSubj
+	subMu.Unlock()
+	_ = publishFrame(nc, subjectNow, BusFrame{Type: frameTypeLeft, From: prompt, Room: roomNow})
 	_ = nc.Flush()
 	if err := scanner.Err(); err != nil {
 		return err
@@ -275,7 +485,7 @@ func RunStatus(args []string) error {
 	}
 
 	roomName := sanitizeRoom(*room)
-	subject := replSubject(roomName)
+	subject := replRoomSubject(roomName)
 	st := HostStatus{
 		HostName: normalizePromptName(DefaultPromptName()),
 		NATSURL:  strings.TrimSpace(*natsURL),
@@ -301,7 +511,7 @@ func RunStatus(args []string) error {
 		})
 		if subErr == nil {
 			_ = nc.Flush()
-			_ = publishFrame(nc, subject, BusFrame{Type: frameTypeProbe, From: st.HostName, Message: "status-probe"})
+			_ = publishFrame(nc, commandSubject, BusFrame{Type: frameTypeProbe, From: st.HostName, Room: roomName, Message: "status-probe"})
 			select {
 			case <-serverSeen:
 				st.ServerSeen = true
@@ -575,8 +785,8 @@ func sanitizeRoom(room string) string {
 	return room
 }
 
-func replSubject(room string) string {
-	return "repl." + sanitizeRoom(room)
+func replRoomSubject(room string) string {
+	return "repl.room." + sanitizeRoom(room)
 }
 
 func connectNATS(natsURL string, embedded bool) (*nats.Conn, *logs.EmbeddedNATS, string, error) {
@@ -635,6 +845,12 @@ func printFrame(w io.Writer, frame BusFrame) {
 			name = "USER"
 		}
 		fmt.Fprintf(w, "%s> %s\n", name, strings.TrimSpace(frame.Message))
+	case frameTypeChat:
+		name := normalizePromptName(frame.From)
+		if name == "" {
+			name = "USER"
+		}
+		fmt.Fprintf(w, "DIALTONE> [CHAT] %s: %s\n", name, strings.TrimSpace(frame.Message))
 	case frameTypeLine:
 		prefix := strings.TrimSpace(frame.Prefix)
 		if prefix == "" {
@@ -651,7 +867,11 @@ func printFrame(w io.Writer, frame BusFrame) {
 		if name == "" {
 			name = "unknown"
 		}
-		fmt.Fprintf(w, "DIALTONE> [JOIN] %s\n", name)
+		if strings.TrimSpace(frame.Room) == "" {
+			fmt.Fprintf(w, "DIALTONE> [JOIN] %s\n", name)
+		} else {
+			fmt.Fprintf(w, "DIALTONE> [JOIN] %s (room=%s)\n", name, sanitizeRoom(frame.Room))
+		}
 	case frameTypeLeft:
 		name := normalizePromptName(frame.From)
 		if name == "" {
@@ -660,11 +880,29 @@ func printFrame(w io.Writer, frame BusFrame) {
 		if name == "" {
 			name = "unknown"
 		}
-		fmt.Fprintf(w, "DIALTONE> [LEFT] %s\n", name)
+		if strings.TrimSpace(frame.Room) == "" {
+			fmt.Fprintf(w, "DIALTONE> [LEFT] %s\n", name)
+		} else {
+			fmt.Fprintf(w, "DIALTONE> [LEFT] %s (room=%s)\n", name, sanitizeRoom(frame.Room))
+		}
+	case frameTypeControl:
+		text := strings.TrimSpace(frame.Message)
+		if text == "" {
+			text = fmt.Sprintf("%s %s", strings.TrimSpace(frame.Command), strings.TrimSpace(frame.Room))
+		}
+		fmt.Fprintf(w, "DIALTONE> [CONTROL] %s\n", strings.TrimSpace(text))
+	case frameTypeError:
+		fmt.Fprintf(w, "DIALTONE> [ERROR] %s\n", strings.TrimSpace(frame.Message))
 	}
 }
 
-func startTSNetInstance(hostname string) (func(), error) {
+type tsnetRuntime struct {
+	DNSName string
+	Listen  func(network, addr string) (net.Listener, error)
+	Close   func() error
+}
+
+func startTSNetInstance(hostname string) (*tsnetRuntime, error) {
 	cfg, err := tsnetlib.ResolveConfig(hostname, "")
 	if err != nil {
 		return nil, err
@@ -677,8 +915,92 @@ func startTSNetInstance(hostname string) (func(), error) {
 		_ = srv.Close()
 		return nil, err
 	}
-	logs.Info("REPL tsnet identity online: hostname=%s tailnet=%s ips=%v", status.Self.HostName, cfg.Tailnet, status.TailscaleIPs)
-	return func() {
-		_ = srv.Close()
+	dnsName := strings.TrimSpace(status.Self.DNSName)
+	dnsName = strings.TrimSuffix(dnsName, ".")
+	if dnsName == "" {
+		dnsName = strings.TrimSpace(status.Self.HostName)
+	}
+	logs.Info("REPL tsnet identity online: hostname=%s tailnet=%s dns=%s ips=%v", status.Self.HostName, cfg.Tailnet, dnsName, status.TailscaleIPs)
+	return &tsnetRuntime{
+		DNSName: dnsName,
+		Listen:  srv.Listen,
+		Close:   srv.Close,
 	}, nil
+}
+
+func natsProxyTarget(natsURL string) (string, int, error) {
+	raw := strings.TrimSpace(natsURL)
+	if raw == "" {
+		raw = defaultNATSURL
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", 0, err
+	}
+	host := strings.TrimSpace(u.Hostname())
+	portText := strings.TrimSpace(u.Port())
+	port := 4222
+	if portText != "" {
+		p, pErr := strconv.Atoi(portText)
+		if pErr != nil {
+			return "", 0, pErr
+		}
+		port = p
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, strconv.Itoa(port)), port, nil
+}
+
+func serveTCPProxy(ln net.Listener, targetAddr string) {
+	for {
+		srcConn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		go proxyConn(srcConn, targetAddr)
+	}
+}
+
+func proxyConn(src net.Conn, targetAddr string) {
+	defer src.Close()
+	dst, err := net.DialTimeout("tcp", targetAddr, 4*time.Second)
+	if err != nil {
+		return
+	}
+	defer dst.Close()
+
+	done := make(chan struct{}, 2)
+	go func() {
+		_, _ = io.Copy(dst, src)
+		done <- struct{}{}
+	}()
+	go func() {
+		_, _ = io.Copy(src, dst)
+		done <- struct{}{}
+	}()
+	<-done
+}
+
+func normalizeTSNetHostname(host string) string {
+	host = normalizePromptName(host)
+	if host == "" {
+		host = "dialtone-node"
+	}
+	if runningInWSL() && !strings.Contains(host, "wsl") {
+		host += "-wsl"
+	}
+	return host
+}
+
+func runningInWSL() bool {
+	if strings.TrimSpace(os.Getenv("WSL_DISTRO_NAME")) != "" {
+		return true
+	}
+	data, err := os.ReadFile("/proc/sys/kernel/osrelease")
+	if err != nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(string(data)), "microsoft")
 }

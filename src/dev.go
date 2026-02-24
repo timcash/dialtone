@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -103,6 +104,12 @@ func bootstrapDialtoneRuntimeEnv() {
 }
 
 func initLogger() {
+	if strings.TrimSpace(os.Getenv("DIALTONE_LOG_STDOUT")) == "1" {
+		logs.SetOutput(os.Stdout)
+	} else {
+		logs.SetOutput(io.Discard)
+	}
+
 	cwd, _ := os.Getwd()
 	repoRoot := cwd
 	if filepath.Base(cwd) == "src" {
@@ -133,7 +140,10 @@ func LoadConfig() {
 	if filepath.Base(cwd) == "src" {
 		repoRoot = filepath.Dir(cwd)
 	}
-	envPath := filepath.Join(repoRoot, envFile)
+	envPath := envFile
+	if !filepath.IsAbs(envPath) {
+		envPath = filepath.Join(repoRoot, envPath)
+	}
 
 	if err := godotenv.Load(envPath); err != nil {
 		logLine("CONFIG", "Warning: godotenv.Load failed: "+envPath)
@@ -347,6 +357,8 @@ func printDevUsage() {
 		script = ".\\dialtone.cmd"
 	}
 	logs.Info("Usage: %s <command> [options]", script)
+	logs.Info("Global flags:")
+	logs.Info("  --stdout             Mirror logs to stdout (logs still publish to NATS)")
 	logs.Info("")
 	logs.Info("Dev orchestrator commands:")
 	logs.Info("  plugins              List available plugin scaffolds")

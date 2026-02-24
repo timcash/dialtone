@@ -35,7 +35,7 @@ func main() {
 
 	switch command {
 	case "test":
-		if err := runVersionedTest(version); err != nil {
+		if err := runVersionedTest(version, rest); err != nil {
 			logs.Error("REPL test error: %v", err)
 			os.Exit(1)
 		}
@@ -106,7 +106,7 @@ func isHelp(s string) bool {
 	return s == "help" || s == "-h" || s == "--help"
 }
 
-func runVersionedTest(versionDir string) error {
+func runVersionedTest(versionDir string, args []string) error {
 	paths, err := repl.ResolvePaths("")
 	if err != nil {
 		return err
@@ -115,6 +115,7 @@ func runVersionedTest(versionDir string) error {
 		return fmt.Errorf("unsupported repl version for tests: %s", versionDir)
 	}
 	goArgs := []string{"src_v1", "exec", "run", paths.TestCmdMain}
+	goArgs = append(goArgs, args...)
 	fullArgs := append([]string{"go"}, goArgs...)
 	cmd := exec.Command(filepath.Join(paths.Runtime.RepoRoot, "dialtone.sh"), fullArgs...)
 	cmd.Dir = paths.Runtime.RepoRoot
@@ -261,9 +262,9 @@ func printUsage() {
 	logs.Raw("")
 	logs.Raw("Commands:")
 	logs.Raw("  run [--name HOST]                                    Run local REPL session")
-	logs.Raw("  serve [--nats-url URL] [--room NAME] [--embedded-nats] [--tsnet] [--hostname HOST]")
+	logs.Raw("  serve [--nats-url URL] [--room NAME] [--embedded-nats] [--tsnet] [--tsnet-nats-port PORT] [--hostname HOST]")
 	logs.Raw("                                                       Start shared REPL host/service")
-	logs.Raw("  join [--nats-url URL] [--room NAME] [--name HOST]   Join a shared REPL host")
+	logs.Raw("  join [room-name] [--nats-url URL] [--name HOST]     Join a shared REPL host (default room: index)")
 	logs.Raw("  status [--nats-url URL] [--room NAME]               Show NATS/tsnet/chrome status")
 	logs.Raw("  service [--mode install|run|status] [--repo owner/repo] [--nats-url URL] [--room NAME] [--check-interval 3m]")
 	logs.Raw("                                                       install: register persistent OS service (default)")
@@ -272,6 +273,6 @@ func printUsage() {
 	logs.Raw("  build                                                Build standalone repl-src_v1 binary")
 	logs.Raw("  release build <version>                              Build per-architecture release binaries")
 	logs.Raw("  release publish <version> [owner/repo]              Publish binaries to GitHub release")
-	logs.Raw("  test                                                 Run REPL src_v1 tests")
+	logs.Raw("  test [multiplayer]                                   Run REPL src_v1 tests")
 	logs.Raw("  help                                                 Show this help")
 }
