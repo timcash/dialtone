@@ -22,8 +22,11 @@ func main() {
 	switch cmd {
 	case "run":
 		err = repl.RunLocal(nil, args)
+	case "leader":
+		err = repl.RunLeader(args)
 	case "serve":
-		err = repl.RunServe(args)
+		logs.Warn("repld serve is deprecated; use: repl-src_v1 leader [args]")
+		err = repl.RunLeader(args)
 	case "join":
 		err = repl.RunJoin(args)
 	case "status":
@@ -52,7 +55,7 @@ func printUsage() {
 	logs.Raw("")
 	logs.Raw("Commands:")
 	logs.Raw("  run [--name HOST]")
-	logs.Raw("  serve [--nats-url URL] [--room NAME] [--embedded-nats] [--tsnet] [--tsnet-nats-port PORT] [--hostname HOST]")
+	logs.Raw("  leader [--nats-url URL] [--room NAME] [--embedded-nats] [--tsnet] [--tsnet-nats-port PORT] [--hostname HOST]")
 	logs.Raw("  join [room-name] [--nats-url URL] [--name HOST] [--room NAME]")
 	logs.Raw("  status [--nats-url URL] [--room NAME]")
 	logs.Raw("  service [--mode install|run|status] [--repo owner/repo] [--nats-url URL] [--room NAME] [--check-interval 3m]")
