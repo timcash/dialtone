@@ -11,6 +11,7 @@ import (
 	testplugin "dialtone/dev/plugins/repl/src_v1/test/04_test_plugin"
 	chromeplugin "dialtone/dev/plugins/repl/src_v1/test/05_chrome_plugin"
 	gobunplugins "dialtone/dev/plugins/repl/src_v1/test/06_go_bun_plugins"
+	multiplayerrobot "dialtone/dev/plugins/repl/src_v1/test/100_multiplayer_robot"
 	multiplayer "dialtone/dev/plugins/repl/src_v1/test/99_multiplayer"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
 )
@@ -26,6 +27,9 @@ func main() {
 	switch mode {
 	case "multiplayer":
 		multiplayer.Register(reg)
+	case "multiplayer-robot":
+		multiplayer.Register(reg)
+		multiplayerrobot.Register(reg)
 	default:
 		replcore.Register(reg)
 		procplugin.Register(reg)
@@ -34,6 +38,7 @@ func main() {
 		chromeplugin.Register(reg)
 		gobunplugins.Register(reg)
 		multiplayer.Register(reg)
+		multiplayerrobot.Register(reg)
 	}
 
 	logs.Info("Running repl src_v1 tests in single process (%d steps, mode=%s)", len(reg.Steps), mode)
