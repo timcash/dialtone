@@ -11,7 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"sort"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,6 +38,7 @@ const (
 	frameTypeProbe     = "probe"
 	frameTypeServer    = "server"
 	frameTypeHeartbeat = "heartbeat"
+	frameTypeDaemon    = "daemon"
 	frameTypeJoin      = "join"
 	frameTypeLeft      = "left"
 	frameTypeChat      = "chat"
@@ -47,6 +48,7 @@ const (
 )
 
 const controlJoinRoom = "join_room"
+const controlRunHostSubtone = "run_host_subtone"
 
 type Hooks struct {
 	RunSubtoneWithEvents func(args []string, onEvent proc.SubtoneEventHandler) int
@@ -88,6 +90,10 @@ type BusFrame struct {
 	Target    string   `json:"target,omitempty"`
 	Room      string   `json:"room,omitempty"`
 	Version   string   `json:"version,omitempty"`
+	OS        string   `json:"os,omitempty"`
+	Arch      string   `json:"arch,omitempty"`
+	ReplVer   string   `json:"repl_version,omitempty"`
+	DaemonVer string   `json:"daemon_version,omitempty"`
 	Command   string   `json:"command,omitempty"`
 	Args      []string `json:"args,omitempty"`
 	Prefix    string   `json:"prefix,omitempty"`
@@ -207,61 +213,8 @@ func RunLeader(args []string) error {
 		}
 	}()
 
-	var roomMu sync.RWMutex
-	userRoom := map[string]string{}
-	type userPresence struct {
-		Room    string
-		Version string
-	}
-	var presenceMu sync.RWMutex
-	presence := map[string]userPresence{}
-	upsertPresence := func(user, room, version string) {
-		user = normalizePromptName(user)
-		if user == "" {
-			return
-		}
-		room = sanitizeRoom(room)
-		presenceMu.Lock()
-		prev := presence[user]
-		if strings.TrimSpace(version) == "" {
-			version = prev.Version
-		}
-		presence[user] = userPresence{Room: room, Version: strings.TrimSpace(version)}
-		presenceMu.Unlock()
-	}
-	removePresence := func(user string) {
-		user = normalizePromptName(user)
-		if user == "" {
-			return
-		}
-		presenceMu.Lock()
-		delete(presence, user)
-		presenceMu.Unlock()
-	}
-	listPresence := func() []struct {
-		Name    string
-		Room    string
-		Version string
-	} {
-		presenceMu.RLock()
-		rows := make([]struct {
-			Name    string
-			Room    string
-			Version string
-		}, 0, len(presence))
-		for k, v := range presence {
-			rows = append(rows, struct {
-				Name    string
-				Room    string
-				Version string
-			}{Name: k, Room: sanitizeRoom(v.Room), Version: strings.TrimSpace(v.Version)})
-		}
-		presenceMu.RUnlock()
-		sort.Slice(rows, func(i, j int) bool {
-			return rows[i].Name < rows[j].Name
-		})
-		return rows
-	}
+	presence := newPresenceTracker()
+	daemonTTL := 20 * time.Second
 	var runMu sync.Mutex
 	cmdSub, err := nc.QueueSubscribe(commandSubject, commandQueue, func(msg *nats.Msg) {
 		frame, ok := decodeFrame(msg.Data)
@@ -278,11 +231,9 @@ func RunLeader(args []string) error {
 			if sender == "" {
 				return
 			}
-			roomMu.RLock()
 			if currentRoom == "" {
-				currentRoom = sanitizeRoom(userRoom[sender])
+				currentRoom = presence.ClientRoom(sender)
 			}
-			roomMu.RUnlock()
 			if currentRoom == "" {
 				currentRoom = defaultRoom
 			}
@@ -291,55 +242,36 @@ func RunLeader(args []string) error {
 			if strings.HasPrefix(raw, "/") {
 				raw = strings.TrimSpace(strings.TrimPrefix(raw, "/"))
 			}
+			if targetHost, targetCommand, ok := parseTargetCommand(raw); ok {
+				publishRoom(currentRoom, BusFrame{
+					Type:    frameTypeControl,
+					Target:  targetHost,
+					Command: controlRunHostSubtone,
+					Room:    currentRoom,
+					Message: targetCommand,
+				})
+				publishRoom(currentRoom, BusFrame{
+					Type:    frameTypeLine,
+					Prefix:  "DIALTONE",
+					Room:    currentRoom,
+					Message: fmt.Sprintf("Dispatching host subtone on %s.", targetHost),
+				})
+				return
+			}
 			args := strings.Fields(raw)
 			if len(args) == 0 {
 				return
 			}
 
-			roomMu.Lock()
-			userRoom[sender] = currentRoom
-			roomMu.Unlock()
-			upsertPresence(sender, currentRoom, frame.Version)
+			presence.UpsertClient(sender, currentRoom, frame.Version, frame.OS, frame.Arch)
 			publishRoom(currentRoom, BusFrame{Type: frameTypeInput, From: sender, Message: "/" + raw})
 
 			if len(args) >= 3 && args[0] == "repl" && args[1] == "src_v1" && args[2] == "who" {
-				rows := listPresence()
-				if len(rows) == 0 {
-					publishRoom(currentRoom, BusFrame{Type: frameTypeLine, Prefix: "DIALTONE", Message: "No connected users."})
-					return
-				}
-				publishRoom(currentRoom, BusFrame{Type: frameTypeLine, Prefix: "DIALTONE", Message: "Connected users:"})
-				for _, row := range rows {
-					version := row.Version
-					if version == "" {
-						version = "unknown"
-					}
-					publishRoom(currentRoom, BusFrame{
-						Type:    frameTypeLine,
-						Prefix:  "DIALTONE",
-						Message: fmt.Sprintf("- %s (room=%s version=%s)", row.Name, sanitizeRoom(row.Room), version),
-					})
-				}
+				publishPresenceReport(currentRoom, "who", presence.Snapshot(time.Now(), daemonTTL), publishRoom)
 				return
 			}
 			if len(args) >= 3 && args[0] == "repl" && args[1] == "src_v1" && args[2] == "versions" {
-				rows := listPresence()
-				if len(rows) == 0 {
-					publishRoom(currentRoom, BusFrame{Type: frameTypeLine, Prefix: "DIALTONE", Message: "No connected users."})
-					return
-				}
-				publishRoom(currentRoom, BusFrame{Type: frameTypeLine, Prefix: "DIALTONE", Message: "Connected REPL versions:"})
-				for _, row := range rows {
-					version := row.Version
-					if version == "" {
-						version = "unknown"
-					}
-					publishRoom(currentRoom, BusFrame{
-						Type:    frameTypeLine,
-						Prefix:  "DIALTONE",
-						Message: fmt.Sprintf("- %s version=%s room=%s", row.Name, version, sanitizeRoom(row.Room)),
-					})
-				}
+				publishPresenceReport(currentRoom, "versions", presence.Snapshot(time.Now(), daemonTTL), publishRoom)
 				return
 			}
 
@@ -361,9 +293,7 @@ func RunLeader(args []string) error {
 					Room:    targetRoom,
 					Message: fmt.Sprintf("switching %s to room %s", sender, targetRoom),
 				})
-				roomMu.Lock()
-				userRoom[sender] = targetRoom
-				roomMu.Unlock()
+				presence.UpsertClient(sender, targetRoom, frame.Version, frame.OS, frame.Arch)
 				return
 			}
 
@@ -388,9 +318,14 @@ func RunLeader(args []string) error {
 		}
 		switch frame.Type {
 		case frameTypeJoin:
-			upsertPresence(frame.From, frame.Room, frame.Version)
+			presence.UpsertClient(frame.From, frame.Room, frame.Version, frame.OS, frame.Arch)
 		case frameTypeLeft:
-			removePresence(frame.From)
+			presence.RemoveClient(frame.From)
+		case frameTypeDaemon:
+			presence.UpsertDaemon(frame.From, frame.Room, frame.DaemonVer, frame.ReplVer, frame.OS, frame.Arch, time.Now())
+		}
+		if frame.Type == frameTypeDaemon {
+			return
 		}
 		printFrame(os.Stdout, frame)
 	})
@@ -410,17 +345,7 @@ func RunLeader(args []string) error {
 	for {
 		select {
 		case <-heartbeat.C:
-			seen := map[string]struct{}{roomName: {}}
-			roomMu.RLock()
-			for _, r := range userRoom {
-				r = sanitizeRoom(r)
-				if r == "" {
-					continue
-				}
-				seen[r] = struct{}{}
-			}
-			roomMu.RUnlock()
-			for r := range seen {
+			for _, r := range presence.Rooms(roomName, time.Now(), daemonTTL) {
 				publishRoom(r, BusFrame{Type: frameTypeHeartbeat, Message: "alive"})
 			}
 		case <-sig:
@@ -459,44 +384,68 @@ func RunJoin(args []string) error {
 
 	var subMu sync.Mutex
 	var sub *nats.Subscription
+	var hostRunMu sync.Mutex
 	var switchRoom func(string, bool) error
-	var outMu sync.Mutex
 	interactive := isInputTTY(os.Stdin)
-
-	writeFrame := func(frame BusFrame) {
-		outMu.Lock()
-		defer outMu.Unlock()
-		if interactive {
-			// Clear active prompt/input line before printing async frame output.
-			fmt.Fprint(os.Stdout, "\r\033[K")
-		}
-		printFrame(os.Stdout, frame)
-		if interactive {
-			fmt.Fprintf(os.Stdout, "%s> ", prompt)
-		}
-	}
-
-	writeLine := func(msg string) {
-		outMu.Lock()
-		defer outMu.Unlock()
-		if interactive {
-			fmt.Fprint(os.Stdout, "\r\033[K")
-		}
-		fmt.Fprintln(os.Stdout, msg)
-		if interactive {
-			fmt.Fprintf(os.Stdout, "%s> ", prompt)
-		}
-	}
+	console := newJoinConsole(os.Stdout, prompt, interactive)
 
 	onRoomFrame := func(msg *nats.Msg) {
 		frame, ok := decodeFrame(msg.Data)
 		if !ok {
 			return
 		}
-		writeFrame(frame)
+		console.PrintFrame(frame)
 		if frame.Type == frameTypeControl && frame.Target == prompt && frame.Command == controlJoinRoom {
 			nextRoom := sanitizeRoom(frame.Room)
 			_ = switchRoom(nextRoom, true)
+			return
+		}
+		if frame.Type == frameTypeControl && frame.Target == prompt && frame.Command == controlRunHostSubtone {
+			command := strings.TrimSpace(frame.Message)
+			targetRoom := sanitizeRoom(frame.Room)
+			if targetRoom == "" {
+				targetRoom = currentRoom
+			}
+			if command == "" {
+				return
+			}
+			go func(room, host, cmdText string) {
+				hostRunMu.Lock()
+				defer hostRunMu.Unlock()
+				exitCode := proc.RunHostCommandWithEvents(cmdText, func(ev proc.SubtoneEvent) {
+					switch ev.Type {
+					case proc.SubtoneEventStarted:
+						prefix := fmt.Sprintf("DIALTONE:%d:%s", ev.PID, host)
+						_ = publishFrame(nc, replRoomSubject(room), BusFrame{
+							Type:    frameTypeLine,
+							Room:    room,
+							Prefix:  prefix,
+							Message: fmt.Sprintf("Started at %s", ev.StartedAt.Format(time.RFC3339)),
+						})
+						_ = publishFrame(nc, replRoomSubject(room), BusFrame{
+							Type:    frameTypeLine,
+							Room:    room,
+							Prefix:  prefix,
+							Message: fmt.Sprintf("Command: %s", cmdText),
+						})
+						if strings.TrimSpace(ev.LogPath) != "" {
+							_ = publishFrame(nc, replRoomSubject(room), BusFrame{
+								Type:    frameTypeLine,
+								Room:    room,
+								Prefix:  prefix,
+								Message: fmt.Sprintf("Log: %s", strings.TrimSpace(ev.LogPath)),
+							})
+						}
+					}
+				})
+				_ = publishFrame(nc, replRoomSubject(room), BusFrame{
+					Type:    frameTypeLine,
+					Room:    room,
+					Prefix:  "DIALTONE",
+					Message: fmt.Sprintf("Subtone on %s exited with code %d.", host, exitCode),
+				})
+				_ = nc.FlushTimeout(1200 * time.Millisecond)
+			}(targetRoom, prompt, command)
 		}
 	}
 
@@ -525,10 +474,10 @@ func RunJoin(args []string) error {
 		if prevSub != nil {
 			_ = prevSub.Unsubscribe()
 		}
-		_ = publishFrame(nc, targetSubj, BusFrame{Type: frameTypeJoin, From: prompt, Room: targetRoom})
+		_ = publishFrame(nc, targetSubj, BusFrame{Type: frameTypeJoin, From: prompt, Room: targetRoom, Version: BuildVersion, OS: runtime.GOOS, Arch: runtime.GOARCH})
 		_ = nc.Flush()
 		if announce {
-			writeLine(fmt.Sprintf("DIALTONE> Connected to %s via %s", targetSubj, natsAddr))
+			console.PrintLine(fmt.Sprintf("DIALTONE> Connected to %s via %s", targetSubj, natsAddr))
 		}
 		return nil
 	}
@@ -550,15 +499,13 @@ func RunJoin(args []string) error {
 	}
 
 	_ = publishFrame(nc, commandSubject, BusFrame{Type: frameTypeProbe, From: prompt, Room: currentRoom, Message: "probe"})
-	_ = publishFrame(nc, currentSubj, BusFrame{Type: frameTypeJoin, From: prompt, Room: currentRoom, Version: BuildVersion})
+	_ = publishFrame(nc, currentSubj, BusFrame{Type: frameTypeJoin, From: prompt, Room: currentRoom, Version: BuildVersion, OS: runtime.GOOS, Arch: runtime.GOARCH})
 	_ = nc.Flush()
-	writeLine(fmt.Sprintf("DIALTONE> Connected to %s via %s", currentSubj, natsAddr))
+	console.PrintLine(fmt.Sprintf("DIALTONE> Connected to %s via %s", currentSubj, natsAddr))
 
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
-		outMu.Lock()
-		fmt.Fprintf(os.Stdout, "%s> ", prompt)
-		outMu.Unlock()
+		console.Prompt()
 		if !scanner.Scan() {
 			break
 		}
@@ -574,12 +521,31 @@ func RunJoin(args []string) error {
 		roomNow := currentRoom
 		subjectNow := currentSubj
 		subMu.Unlock()
+		if targetHost, targetCommand, ok := parseTargetCommand(line); ok {
+			if err := publishFrame(nc, commandSubject, BusFrame{
+				Type:    frameTypeCommand,
+				From:    prompt,
+				Room:    roomNow,
+				Version: BuildVersion,
+				OS:      runtime.GOOS,
+				Arch:    runtime.GOARCH,
+				Message: fmt.Sprintf("@%s %s", targetHost, targetCommand),
+			}); err != nil {
+				return err
+			}
+			if err := nc.Flush(); err != nil {
+				return err
+			}
+			continue
+		}
 		if strings.HasPrefix(line, "/") {
 			if err := publishFrame(nc, commandSubject, BusFrame{
 				Type:    frameTypeCommand,
 				From:    prompt,
 				Room:    roomNow,
 				Version: BuildVersion,
+				OS:      runtime.GOOS,
+				Arch:    runtime.GOARCH,
 				Message: line,
 			}); err != nil {
 				return err
@@ -891,6 +857,116 @@ func printManagedProcesses(emit func(prefix, msg string)) {
 	}
 }
 
+func publishPresenceReport(
+	room string,
+	mode string,
+	rows []presenceRow,
+	publishRoom func(targetRoom string, f BusFrame),
+) {
+	if len(rows) == 0 {
+		publishRoom(room, BusFrame{Type: frameTypeLine, Prefix: "DIALTONE", Message: "No connected users."})
+		return
+	}
+	switch mode {
+	case "versions":
+		publishRoom(room, BusFrame{Type: frameTypeLine, Prefix: "DIALTONE", Message: "Connected versions:"})
+		for _, row := range rows {
+			if row.Kind == "daemon" {
+				daemonVer := strings.TrimSpace(row.DaemonVersion)
+				replVer := strings.TrimSpace(row.ReplVersion)
+				if daemonVer == "" {
+					daemonVer = "unknown"
+				}
+				if replVer == "" {
+					replVer = "unknown"
+				}
+				publishRoom(room, BusFrame{
+					Type:   frameTypeLine,
+					Prefix: "DIALTONE",
+					Message: fmt.Sprintf(
+						"- [daemon] %s daemon=%s repl=%s room=%s os=%s arch=%s",
+						row.Name,
+						daemonVer,
+						replVer,
+						sanitizeRoom(row.Room),
+						fallbackUnknown(row.OS),
+						fallbackUnknown(row.Arch),
+					),
+				})
+				continue
+			}
+			version := strings.TrimSpace(row.Version)
+			if version == "" {
+				version = "unknown"
+			}
+			publishRoom(room, BusFrame{
+				Type:   frameTypeLine,
+				Prefix: "DIALTONE",
+				Message: fmt.Sprintf(
+					"- [client] %s repl=%s room=%s os=%s arch=%s",
+					row.Name,
+					version,
+					sanitizeRoom(row.Room),
+					fallbackUnknown(row.OS),
+					fallbackUnknown(row.Arch),
+				),
+			})
+		}
+	default:
+		publishRoom(room, BusFrame{Type: frameTypeLine, Prefix: "DIALTONE", Message: "Connected sessions:"})
+		for _, row := range rows {
+			if row.Kind == "daemon" {
+				daemonVer := strings.TrimSpace(row.DaemonVersion)
+				replVer := strings.TrimSpace(row.ReplVersion)
+				if daemonVer == "" {
+					daemonVer = "unknown"
+				}
+				if replVer == "" {
+					replVer = "unknown"
+				}
+				publishRoom(room, BusFrame{
+					Type:   frameTypeLine,
+					Prefix: "DIALTONE",
+					Message: fmt.Sprintf(
+						"- [daemon] %s room=%s daemon=%s repl=%s os=%s arch=%s",
+						row.Name,
+						sanitizeRoom(row.Room),
+						daemonVer,
+						replVer,
+						fallbackUnknown(row.OS),
+						fallbackUnknown(row.Arch),
+					),
+				})
+				continue
+			}
+			version := strings.TrimSpace(row.Version)
+			if version == "" {
+				version = "unknown"
+			}
+			publishRoom(room, BusFrame{
+				Type:   frameTypeLine,
+				Prefix: "DIALTONE",
+				Message: fmt.Sprintf(
+					"- [client] %s room=%s repl=%s os=%s arch=%s",
+					row.Name,
+					sanitizeRoom(row.Room),
+					version,
+					fallbackUnknown(row.OS),
+					fallbackUnknown(row.Arch),
+				),
+			})
+		}
+	}
+}
+
+func fallbackUnknown(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "unknown"
+	}
+	return v
+}
+
 func hasStructuredLevel(line string) bool {
 	trimmed := strings.TrimSpace(line)
 	for _, prefix := range []string{"[INFO]", "[WARN]", "[ERROR]", "[COST]", "[T+"} {
@@ -921,6 +997,35 @@ func sanitizeRoom(room string) string {
 
 func replRoomSubject(room string) string {
 	return "repl.room." + sanitizeRoom(room)
+}
+
+func parseTargetCommand(line string) (targetHost, command string, ok bool) {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "@") {
+		return "", "", false
+	}
+	fields := strings.Fields(line)
+	if len(fields) < 2 {
+		return "", "", false
+	}
+	target := strings.TrimSpace(strings.TrimPrefix(fields[0], "@"))
+	target = normalizePromptName(target)
+	if target == "" {
+		return "", "", false
+	}
+	command = strings.TrimSpace(strings.TrimPrefix(strings.Join(fields[1:], " "), "/"))
+	if command == "" {
+		return "", "", false
+	}
+	return target, command, true
+}
+
+func normalizeTargetHost(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	return normalizePromptName(raw)
 }
 
 func connectNATS(natsURL string, embedded bool) (*nats.Conn, *logs.EmbeddedNATS, string, error) {

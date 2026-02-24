@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 )
 
@@ -35,12 +37,6 @@ func RunSubtone(args []string) int {
 }
 
 func RunSubtoneWithEvents(args []string, onEvent SubtoneEventHandler) int {
-	emit := func(ev SubtoneEvent) {
-		if onEvent != nil {
-			onEvent(ev)
-		}
-	}
-
 	cwd, _ := os.Getwd()
 	repoRoot := cwd
 	if filepath.Base(cwd) == "src" {
@@ -50,6 +46,42 @@ func RunSubtoneWithEvents(args []string, onEvent SubtoneEventHandler) int {
 
 	cmd := exec.Command(dialtoneSh, args...)
 	cmd.Dir = repoRoot
+	logDir := filepath.Join(repoRoot, ".dialtone", "logs")
+	return runCommandWithEvents(cmd, args, logDir, onEvent)
+}
+
+func RunHostCommandWithEvents(command string, onEvent SubtoneEventHandler) int {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		if onEvent != nil {
+			onEvent(SubtoneEvent{
+				Type:     SubtoneEventExited,
+				ExitCode: 1,
+				Line:     "empty host command",
+			})
+		}
+		return 1
+	}
+	var cmd *exec.Cmd
+	trackArgs := []string{"host", command}
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command)
+	} else {
+		cmd = exec.Command("sh", "-lc", command)
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		cmd.Dir = home
+	}
+	logDir := filepath.Join(defaultDialtoneHome(), "logs")
+	return runCommandWithEvents(cmd, trackArgs, logDir, onEvent)
+}
+
+func runCommandWithEvents(cmd *exec.Cmd, trackArgs []string, logDir string, onEvent SubtoneEventHandler) int {
+	emit := func(ev SubtoneEvent) {
+		if onEvent != nil {
+			onEvent(ev)
+		}
+	}
 
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
@@ -58,7 +90,7 @@ func RunSubtoneWithEvents(args []string, onEvent SubtoneEventHandler) int {
 		emit(SubtoneEvent{
 			Type:     SubtoneEventExited,
 			PID:      0,
-			Args:     append([]string(nil), args...),
+			Args:     append([]string(nil), trackArgs...),
 			ExitCode: 1,
 			Line:     fmt.Sprintf("failed to start subtone: %v", err),
 		})
@@ -66,11 +98,10 @@ func RunSubtoneWithEvents(args []string, onEvent SubtoneEventHandler) int {
 	}
 
 	pid := cmd.Process.Pid
-	TrackProcess(pid, args)
+	TrackProcess(pid, trackArgs)
 	defer UntrackProcess(pid)
 
-	logDir := filepath.Join(repoRoot, ".dialtone", "logs")
-	logger, err := NewSubtoneLogger(pid, args, logDir)
+	logger, err := NewSubtoneLogger(pid, trackArgs, logDir)
 	if err == nil {
 		logger.StartHeartbeat(3 * time.Second)
 		defer logger.Stop()
@@ -84,7 +115,7 @@ func RunSubtoneWithEvents(args []string, onEvent SubtoneEventHandler) int {
 	emit(SubtoneEvent{
 		Type:      SubtoneEventStarted,
 		PID:       pid,
-		Args:      append([]string(nil), args...),
+		Args:      append([]string(nil), trackArgs...),
 		LogPath:   logPath,
 		StartedAt: startedAt,
 	})
@@ -130,8 +161,15 @@ func RunSubtoneWithEvents(args []string, onEvent SubtoneEventHandler) int {
 	emit(SubtoneEvent{
 		Type:     SubtoneEventExited,
 		PID:      pid,
-		Args:     append([]string(nil), args...),
+		Args:     append([]string(nil), trackArgs...),
 		ExitCode: exitCode,
 	})
 	return exitCode
+}
+
+func defaultDialtoneHome() string {
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		return filepath.Join(home, ".dialtone")
+	}
+	return ".dialtone"
 }

@@ -35,7 +35,7 @@ func RunDeploy(args []string) error {
 	user := fs.String("user", strings.TrimSpace(os.Getenv("ROBOT_USER")), "SSH user")
 	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password")
 	remoteDir := fs.String("remote-dir", "", "Remote install root (default: /home/<user>/.dialtone/repl/src_v1)")
-	service := fs.Bool("service", false, "Install/restart dialtone-repl.service on remote host")
+	service := fs.Bool("service", false, "Install/restart dialtone_repl.service on remote host")
 	repo := fs.String("repo", "timcash/dialtone", "GitHub repo owner/name for auto-update")
 	natsURL := fs.String("nats-url", defaultNATSURL, "NATS URL for service worker")
 	room := fs.String("room", defaultRoom, "REPL room for worker")
@@ -91,8 +91,8 @@ func RunDeploy(args []string) error {
 	}
 
 	remoteBinDir := path.Join(opts.RemoteDir, "bin")
-	remoteBin := path.Join(remoteBinDir, "repl-src_v1")
-	remoteTmpBin := path.Join(remoteBinDir, fmt.Sprintf("repl-src_v1.upload-%d", time.Now().UnixNano()))
+	remoteBin := path.Join(remoteBinDir, "dialtone_repl")
+	remoteTmpBin := path.Join(remoteBinDir, fmt.Sprintf("dialtone_repl.upload-%d", time.Now().UnixNano()))
 	remoteEnv := path.Join(opts.RemoteDir, "repl.env")
 	if _, err := sshplugin.RunSSHCommand(client, "mkdir -p "+shellQuote(remoteBinDir)); err != nil {
 		return fmt.Errorf("failed to create remote bin dir: %w", err)
@@ -139,7 +139,7 @@ func buildDeployBinary(goos, goarch string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	out := filepath.Join(paths.StandaloneBinDir, fmt.Sprintf("repl-src_v1-%s-%s", goos, goarch))
+	out := filepath.Join(paths.StandaloneBinDir, fmt.Sprintf("dialtone_repl-%s-%s", goos, goarch))
 	if goos == "windows" {
 		out += ".exe"
 	}
@@ -173,7 +173,7 @@ func setupRemoteReplService(client *sshlib.Client, opts deployOptions, remoteBin
 	if _, err := sshplugin.RunSSHCommand(client, "sudo -n true"); err != nil {
 		return fmt.Errorf("remote sudo validation failed (needs passwordless sudo): %w", err)
 	}
-	serviceName := "dialtone-repl.service"
+	serviceName := "dialtone_repl.service"
 	serviceTemplate := `[Unit]
 Description=Dialtone REPL Service
 After=network.target
@@ -182,7 +182,7 @@ After=network.target
 Type=simple
 User=%s
 WorkingDirectory=%s
-ExecStart=%s service --mode run --repo %s --nats-url %s --room %s --check-interval 1m --embedded-nats=%s
+ExecStart=%s service --mode run --repo %s --nats-url %s --room %s --check-interval 5m --embedded-nats=%s
 Restart=always
 RestartSec=2
 %s
@@ -226,7 +226,7 @@ WantedBy=multi-user.target
 func verifyRemoteReplService(client *sshlib.Client) error {
 	ok := false
 	for i := 0; i < 20; i++ {
-		out, err := sshplugin.RunSSHCommand(client, "sudo -n systemctl is-active dialtone-repl.service")
+		out, err := sshplugin.RunSSHCommand(client, "sudo -n systemctl is-active dialtone_repl.service")
 		if err == nil && strings.TrimSpace(out) == "active" {
 			ok = true
 			break
@@ -236,8 +236,8 @@ func verifyRemoteReplService(client *sshlib.Client) error {
 	if ok {
 		return nil
 	}
-	status, _ := sshplugin.RunSSHCommand(client, "sudo -n systemctl --no-pager --full status dialtone-repl.service | head -n 80")
-	return fmt.Errorf("remote dialtone-repl.service is not active\n%s", strings.TrimSpace(status))
+	status, _ := sshplugin.RunSSHCommand(client, "sudo -n systemctl --no-pager --full status dialtone_repl.service | head -n 80")
+	return fmt.Errorf("remote dialtone_repl.service is not active\n%s", strings.TrimSpace(status))
 }
 
 func detectRemoteTarget(client *sshlib.Client) (string, string, error) {
