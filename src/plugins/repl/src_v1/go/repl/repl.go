@@ -356,13 +356,40 @@ func RunJoin(args []string) error {
 	var subMu sync.Mutex
 	var sub *nats.Subscription
 	var switchRoom func(string, bool) error
+	var outMu sync.Mutex
+	interactive := isInputTTY(os.Stdin)
+
+	writeFrame := func(frame BusFrame) {
+		outMu.Lock()
+		defer outMu.Unlock()
+		if interactive {
+			// Clear active prompt/input line before printing async frame output.
+			fmt.Fprint(os.Stdout, "\r\033[K")
+		}
+		printFrame(os.Stdout, frame)
+		if interactive {
+			fmt.Fprintf(os.Stdout, "%s> ", prompt)
+		}
+	}
+
+	writeLine := func(msg string) {
+		outMu.Lock()
+		defer outMu.Unlock()
+		if interactive {
+			fmt.Fprint(os.Stdout, "\r\033[K")
+		}
+		fmt.Fprintln(os.Stdout, msg)
+		if interactive {
+			fmt.Fprintf(os.Stdout, "%s> ", prompt)
+		}
+	}
 
 	onRoomFrame := func(msg *nats.Msg) {
 		frame, ok := decodeFrame(msg.Data)
 		if !ok {
 			return
 		}
-		printFrame(os.Stdout, frame)
+		writeFrame(frame)
 		if frame.Type == frameTypeControl && frame.Target == prompt && frame.Command == controlJoinRoom {
 			nextRoom := sanitizeRoom(frame.Room)
 			_ = switchRoom(nextRoom, true)
@@ -397,7 +424,7 @@ func RunJoin(args []string) error {
 		_ = publishFrame(nc, targetSubj, BusFrame{Type: frameTypeJoin, From: prompt, Room: targetRoom})
 		_ = nc.Flush()
 		if announce {
-			fmt.Fprintf(os.Stdout, "DIALTONE> Connected to %s via %s\n", targetSubj, natsAddr)
+			writeLine(fmt.Sprintf("DIALTONE> Connected to %s via %s", targetSubj, natsAddr))
 		}
 		return nil
 	}
@@ -421,11 +448,13 @@ func RunJoin(args []string) error {
 	_ = publishFrame(nc, commandSubject, BusFrame{Type: frameTypeProbe, From: prompt, Room: currentRoom, Message: "probe"})
 	_ = publishFrame(nc, currentSubj, BusFrame{Type: frameTypeJoin, From: prompt, Room: currentRoom})
 	_ = nc.Flush()
-	fmt.Fprintf(os.Stdout, "DIALTONE> Connected to %s via %s\n", currentSubj, natsAddr)
+	writeLine(fmt.Sprintf("DIALTONE> Connected to %s via %s", currentSubj, natsAddr))
 
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
+		outMu.Lock()
 		fmt.Fprintf(os.Stdout, "%s> ", prompt)
+		outMu.Unlock()
 		if !scanner.Scan() {
 			break
 		}
