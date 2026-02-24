@@ -47,10 +47,13 @@ type serviceOptions struct {
 	Repo           string
 	NATSURL        string
 	Room           string
+	HostName       string
 	CheckInterval  time.Duration
 	InstallDir     string
 	TokenEnv       string
 	EmbeddedNATS   bool
+	TSNet          bool
+	TSNetNATSPort  int
 	AllowDowngrade bool
 }
 
@@ -60,10 +63,13 @@ func RunService(args []string) error {
 	repo := fs.String("repo", "timcash/dialtone", "GitHub repo owner/name")
 	natsURL := fs.String("nats-url", defaultNATSURL, "NATS URL for worker leader")
 	room := fs.String("room", defaultRoom, "REPL room for worker leader")
+	hostname := fs.String("hostname", DefaultPromptName(), "Host name used by worker leader")
 	checkInterval := fs.Duration("check-interval", 3*time.Minute, "Update check interval")
 	installDir := fs.String("install-dir", filepath.Join(userHomeDir(), ".dialtone", "repl"), "Service install directory")
 	tokenEnv := fs.String("token-env", "GITHUB_TOKEN", "Token env var used for GitHub API")
 	embeddedNATS := fs.Bool("embedded-nats", true, "Pass --embedded-nats to worker")
+	enableTSNet := fs.Bool("tsnet", false, "Pass --tsnet to worker leader")
+	tsnetNATSPort := fs.Int("tsnet-nats-port", 0, "Pass --tsnet-nats-port to worker leader")
 	allowDowngrade := fs.Bool("allow-downgrade", false, "Allow replacing worker with older version")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -73,10 +79,13 @@ func RunService(args []string) error {
 		Repo:           strings.TrimSpace(*repo),
 		NATSURL:        strings.TrimSpace(*natsURL),
 		Room:           sanitizeRoom(*room),
+		HostName:       normalizePromptName(*hostname),
 		CheckInterval:  *checkInterval,
 		InstallDir:     strings.TrimSpace(*installDir),
 		TokenEnv:       strings.TrimSpace(*tokenEnv),
 		EmbeddedNATS:   *embeddedNATS,
+		TSNet:          *enableTSNet,
+		TSNetNATSPort:  *tsnetNATSPort,
 		AllowDowngrade: *allowDowngrade,
 	}
 	if opts.Mode == "" {
@@ -124,7 +133,7 @@ func runServiceSupervisor(opts serviceOptions) error {
 	}
 
 	mgr := &serviceManager{version: rel.TagName, path: workerPath}
-	if err := mgr.startWorker(currentLink, opts.NATSURL, opts.Room, opts.EmbeddedNATS); err != nil {
+	if err := mgr.startWorker(currentLink, opts); err != nil {
 		return err
 	}
 
@@ -165,7 +174,7 @@ func runServiceSupervisor(opts serviceOptions) error {
 			}
 			mgr.version = latest.TagName
 			mgr.path = newPath
-			if serr := mgr.startWorker(currentLink, opts.NATSURL, opts.Room, opts.EmbeddedNATS); serr != nil {
+			if serr := mgr.startWorker(currentLink, opts); serr != nil {
 				logs.Error("restart updated worker failed: %v", serr)
 			}
 		}
@@ -215,6 +224,7 @@ func serviceRunArgs(opts serviceOptions) []string {
 		"--repo", opts.Repo,
 		"--nats-url", opts.NATSURL,
 		"--room", opts.Room,
+		"--hostname", opts.HostName,
 		"--check-interval", opts.CheckInterval.String(),
 		"--install-dir", opts.InstallDir,
 		"--token-env", opts.TokenEnv,
@@ -226,6 +236,12 @@ func serviceRunArgs(opts serviceOptions) []string {
 	}
 	if opts.AllowDowngrade {
 		args = append(args, "--allow-downgrade")
+	}
+	if opts.TSNet {
+		args = append(args, "--tsnet")
+	}
+	if opts.TSNetNATSPort > 0 {
+		args = append(args, "--tsnet-nats-port", strconv.Itoa(opts.TSNetNATSPort))
 	}
 	return args
 }
@@ -338,15 +354,24 @@ func xmlEscape(s string) string {
 	return r.Replace(s)
 }
 
-func (m *serviceManager) startWorker(currentPath, natsURL, room string, embeddedNATS bool) error {
+func (m *serviceManager) startWorker(currentPath string, opts serviceOptions) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.worker != nil && m.worker.Process != nil {
 		return nil
 	}
-	args := []string{"leader", "--nats-url", natsURL, "--room", room}
-	if embeddedNATS {
+	args := []string{"leader", "--nats-url", opts.NATSURL, "--room", opts.Room}
+	if opts.EmbeddedNATS {
 		args = append(args, "--embedded-nats")
+	}
+	if strings.TrimSpace(opts.HostName) != "" {
+		args = append(args, "--hostname", opts.HostName)
+	}
+	if opts.TSNet {
+		args = append(args, "--tsnet")
+	}
+	if opts.TSNetNATSPort > 0 {
+		args = append(args, "--tsnet-nats-port", strconv.Itoa(opts.TSNetNATSPort))
 	}
 	cmd := exec.Command(currentPath, args...)
 	cmd.Stdout = os.Stdout
