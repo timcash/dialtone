@@ -12,14 +12,14 @@ import (
 // or the timeout is reached.
 func WaitForAllProcessesToComplete(repoRoot string, timeout time.Duration) error {
 	dialtoneSh := filepath.Join(repoRoot, "dialtone.sh")
-	
+
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		cmd := exec.Command(dialtoneSh, "ps")
 		cmd.Dir = repoRoot
 		out, err := cmd.CombinedOutput()
 		output := string(out)
-		
+
 		if err == nil {
 			// Check for "No active subtones" or equivalent empty state
 			// Current implementation prints "DIALTONE> No active subtones." or just headers if none?
@@ -28,9 +28,9 @@ func WaitForAllProcessesToComplete(repoRoot string, timeout time.Duration) error
 				return nil
 			}
 		}
-		
+
 		time.Sleep(500 * time.Millisecond)
 	}
-	
+
 	return fmt.Errorf("timed out waiting for processes to complete after %v", timeout)
 }

@@ -172,6 +172,27 @@ func (sc *StepContext) NATSURL() string {
 	return strings.TrimSpace(sc.natsURL)
 }
 
+func (sc *StepContext) NATSURLForHost(host string) (string, error) {
+	base := strings.TrimSpace(sc.natsURL)
+	host = strings.TrimSpace(host)
+	if base == "" {
+		return "", fmt.Errorf("NATS not configured in this test context")
+	}
+	if host == "" {
+		return "", fmt.Errorf("host is required")
+	}
+	trimmed := strings.TrimSpace(strings.TrimPrefix(base, "nats://"))
+	parts := strings.Split(trimmed, ":")
+	port := "4222"
+	if len(parts) > 1 {
+		port = strings.TrimSpace(parts[len(parts)-1])
+	}
+	if port == "" {
+		port = "4222"
+	}
+	return fmt.Sprintf("nats://%s:%s", host, port), nil
+}
+
 func (sc *StepContext) NewTopicLogger(subject string) (*logs.NATSLogger, error) {
 	nc := sc.NATSConn()
 	if nc == nil {
@@ -342,6 +363,7 @@ type SuiteOptions struct {
 	ErrorLogPath   string
 	BrowserLogMode string
 	NATSURL        string
+	NATSListenURL  string
 	NATSSubject    string
 	AutoStartNATS  bool
 }
@@ -875,11 +897,9 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 	if natsURL == "" {
 		natsURL = "nats://127.0.0.1:4222"
 	}
-	autoStart := true
-	if opts.AutoStartNATS {
-		autoStart = true
-	}
-	nc, broker, baseSubject, natsErr := setupSuiteNATS(opts, natsURL, autoStart)
+	natsListenURL := strings.TrimSpace(opts.NATSListenURL)
+	autoStart := opts.AutoStartNATS
+	nc, broker, baseSubject, natsErr := setupSuiteNATS(opts, natsURL, natsListenURL, autoStart)
 	if natsErr != nil {
 		logs.Warn("%s NATS suite logging disabled: %v", testTag, natsErr)
 	}
@@ -1052,26 +1072,30 @@ func firstExternalFrame(skip int) stackFrame {
 	return stackFrame{}
 }
 
-func setupSuiteNATS(opts SuiteOptions, natsURL string, autoStart bool) (*nats.Conn, *logs.EmbeddedNATS, string, error) {
+func setupSuiteNATS(opts SuiteOptions, natsURL, natsListenURL string, autoStart bool) (*nats.Conn, *logs.EmbeddedNATS, string, error) {
 	tryConnect := func(url string) (*nats.Conn, error) {
 		return nats.Connect(url, nats.Timeout(1200*time.Millisecond))
 	}
 	nc, err := tryConnect(natsURL)
 	if err != nil && autoStart {
-		broker, berr := logs.StartEmbeddedNATSOnURL(natsURL)
+		listenURL := strings.TrimSpace(natsListenURL)
+		if listenURL == "" {
+			listenURL = natsURL
+		}
+		broker, berr := logs.StartEmbeddedNATSOnURL(listenURL)
 		if berr != nil {
 			return nil, nil, "", berr
 		}
-		nc = broker.Conn()
-		if nc == nil {
+		nc, err = tryConnect(natsURL)
+		if err != nil {
 			broker.Close()
-			return nil, nil, "", fmt.Errorf("embedded nats connection not available")
+			return nil, nil, "", fmt.Errorf("embedded nats started on %s but connect to %s failed: %w", listenURL, natsURL, err)
 		}
 		subj := strings.TrimSpace(opts.NATSSubject)
 		if subj == "" {
 			subj = "logs.test." + sanitizeSubjectToken(opts.Version)
 		}
-		logs.Info("%s Suite NATS logging active at %s subject=%s (embedded=true)", testTag, broker.URL(), subj)
+		logs.Info("%s Suite NATS logging active at %s subject=%s (embedded=true listen=%s)", testTag, natsURL, subj, listenURL)
 		return nc, broker, subj, nil
 	}
 	if err != nil {
