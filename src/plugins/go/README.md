@@ -36,6 +36,7 @@ Runs `go vet ./...` using the managed toolchain when available.
 ```bash
 ./dialtone.sh go src_v1 exec run ./src/cmd/dev/main.go
 ./dialtone.sh go src_v1 exec build ./src/...
+./dialtone.sh go src_v1 exec build ./plugins/repl/src_v1/cmd/repld
 ```
 
 `go run` is an alias:
@@ -43,6 +44,14 @@ Runs `go vet ./...` using the managed toolchain when available.
 ```bash
 ./dialtone.sh go src_v1 run ./src/cmd/dev/main.go
 ```
+
+`go build` auto-output behavior:
+- If you run `./dialtone.sh go src_v1 exec build <single-target>` without `-o`,
+  Dialtone writes binaries under gitignored `.dialtone/bin/`:
+  - plugin targets: `.dialtone/bin/plugins/<plugin>/<src_vN>/<binary>`
+  - `dev.go`: `.dialtone/bin/dev/dev`
+  - other single targets: `.dialtone/bin/misc/<binary>`
+- If `-o` is provided, your explicit output path is preserved.
 
 ### Inspect protobuf binaries
 
