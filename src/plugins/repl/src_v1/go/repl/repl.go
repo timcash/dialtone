@@ -28,6 +28,7 @@ const (
 	defaultNATSURL = "nats://127.0.0.1:4222"
 	defaultRoom    = "index"
 	commandSubject = "repl.cmd"
+	commandQueue   = "repl.leader"
 )
 
 const (
@@ -207,7 +208,7 @@ func RunLeader(args []string) error {
 	var roomMu sync.RWMutex
 	userRoom := map[string]string{}
 	var runMu sync.Mutex
-	cmdSub, err := nc.Subscribe(commandSubject, func(msg *nats.Msg) {
+	cmdSub, err := nc.QueueSubscribe(commandSubject, commandQueue, func(msg *nats.Msg) {
 		frame, ok := decodeFrame(msg.Data)
 		if !ok {
 			return
