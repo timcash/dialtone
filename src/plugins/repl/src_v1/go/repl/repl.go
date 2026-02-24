@@ -123,8 +123,8 @@ func RunLocal(logFn func(category, msg string), args []string) error {
 	return runLocalSession(os.Stdin, os.Stdout, normalizePromptName(*promptName), logFn)
 }
 
-func RunServe(args []string) error {
-	fs := flag.NewFlagSet("repl-serve", flag.ContinueOnError)
+func RunLeader(args []string) error {
+	fs := flag.NewFlagSet("repl-leader", flag.ContinueOnError)
 	natsURL := fs.String("nats-url", defaultNATSURL, "NATS URL")
 	room := fs.String("room", defaultRoom, "Primary REPL room")
 	embedded := fs.Bool("embedded-nats", true, "Start embedded NATS on --nats-url")
@@ -174,7 +174,7 @@ func RunServe(args []string) error {
 	}
 
 	// Publish initial presence line to NATS so every connected client sees it.
-	publishRoom(roomName, BusFrame{Type: frameTypeServer, Message: fmt.Sprintf("DIALTONE server online on %s (subject=%s nats=%s)", h, replRoomSubject(roomName), usedURL)})
+	publishRoom(roomName, BusFrame{Type: frameTypeServer, Message: fmt.Sprintf("DIALTONE leader online on %s (subject=%s nats=%s)", h, replRoomSubject(roomName), usedURL)})
 	logs.Info("REPL host serving: hostname=%s room=%s cmd_subject=%s nats=%s", h, roomName, commandSubject, usedURL)
 	var tsnetListener net.Listener
 	if tsRuntime != nil {
@@ -215,7 +215,7 @@ func RunServe(args []string) error {
 		switch frame.Type {
 		case frameTypeProbe:
 			targetRoom := sanitizeRoom(frame.Room)
-			publishRoom(targetRoom, BusFrame{Type: frameTypeServer, Message: fmt.Sprintf("DIALTONE server active on %s", h)})
+			publishRoom(targetRoom, BusFrame{Type: frameTypeServer, Message: fmt.Sprintf("DIALTONE leader active on %s", h)})
 		case frameTypeCommand:
 			sender := normalizePromptName(frame.From)
 			currentRoom := sanitizeRoom(frame.Room)
@@ -320,10 +320,15 @@ func RunServe(args []string) error {
 				publishRoom(r, BusFrame{Type: frameTypeHeartbeat, Message: "alive"})
 			}
 		case <-sig:
-			publishRoom(roomName, BusFrame{Type: frameTypeServer, Message: "DIALTONE server shutting down."})
+			publishRoom(roomName, BusFrame{Type: frameTypeServer, Message: "DIALTONE leader shutting down."})
 			return nil
 		}
 	}
+}
+
+// RunServe is kept as a compatibility alias. Prefer RunLeader.
+func RunServe(args []string) error {
+	return RunLeader(args)
 }
 
 func RunJoin(args []string) error {

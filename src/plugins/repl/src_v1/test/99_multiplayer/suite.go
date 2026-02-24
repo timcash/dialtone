@@ -80,28 +80,28 @@ func Register(r *testv1.Registry) {
 			defer sub.Unsubscribe()
 			_ = nc.Flush()
 
-			serverCtx, cancelServer := context.WithCancel(context.Background())
-			defer cancelServer()
-			serverCmd := exec.CommandContext(
-				serverCtx,
+			leaderCtx, cancelLeader := context.WithCancel(context.Background())
+			defer cancelLeader()
+			leaderCmd := exec.CommandContext(
+				leaderCtx,
 				dialtoneBin,
-				"repl", "src_v1", "serve",
+				"repl", "src_v1", "leader",
 				"--embedded-nats=false",
 				"--nats-url", natsURL,
 				"--room", "index",
 				"--hostname", "DIALTONE-SERVER",
 			)
-			serverCmd.Dir = paths.Runtime.RepoRoot
-			var serverOut bytes.Buffer
-			serverCmd.Stdout = &serverOut
-			serverCmd.Stderr = &serverOut
-			if err := serverCmd.Start(); err != nil {
+			leaderCmd.Dir = paths.Runtime.RepoRoot
+			var leaderOut bytes.Buffer
+			leaderCmd.Stdout = &leaderOut
+			leaderCmd.Stderr = &leaderOut
+			if err := leaderCmd.Start(); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 			defer func() {
-				cancelServer()
-				if serverCmd.Process != nil {
-					_ = serverCmd.Process.Kill()
+				cancelLeader()
+				if leaderCmd.Process != nil {
+					_ = leaderCmd.Process.Kill()
 				}
 			}()
 
@@ -110,9 +110,9 @@ func Register(r *testv1.Registry) {
 					return of.Subject == "repl.room.index" && of.Frame.Type == "server"
 				})
 			}); err != nil {
-				return testv1.StepRunResult{}, fmt.Errorf("server did not publish ready frame: %w\nframes:\n%s\nserver:\n%s", err, snapshotFrames(&obsMu, &obs, 40), serverOut.String())
+				return testv1.StepRunResult{}, fmt.Errorf("leader did not publish ready frame: %w\nframes:\n%s\nleader:\n%s", err, snapshotFrames(&obsMu, &obs, 40), leaderOut.String())
 			}
-			ctx.Infof("server ready")
+			ctx.Infof("leader ready")
 
 			stage.Store("seed-joins")
 			users := []string{"user-1", "user-2", "user-3"}
@@ -212,7 +212,7 @@ func Register(r *testv1.Registry) {
 			stage.Store("done")
 
 			return testv1.StepRunResult{
-				Report: "multiplayer REPL verified over NATS with 3 users, room switch command, and server subtone execution",
+				Report: "multiplayer REPL verified over NATS with 3 users, room switch command, and leader subtone execution",
 			}, nil
 		},
 	})

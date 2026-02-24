@@ -58,8 +58,8 @@ func RunService(args []string) error {
 	fs := flag.NewFlagSet("repl-service", flag.ContinueOnError)
 	mode := fs.String("mode", "install", "Service mode: install|run|status")
 	repo := fs.String("repo", "timcash/dialtone", "GitHub repo owner/name")
-	natsURL := fs.String("nats-url", defaultNATSURL, "NATS URL for worker serve")
-	room := fs.String("room", defaultRoom, "REPL room for worker serve")
+	natsURL := fs.String("nats-url", defaultNATSURL, "NATS URL for worker leader")
+	room := fs.String("room", defaultRoom, "REPL room for worker leader")
 	checkInterval := fs.Duration("check-interval", 3*time.Minute, "Update check interval")
 	installDir := fs.String("install-dir", filepath.Join(userHomeDir(), ".dialtone", "repl"), "Service install directory")
 	tokenEnv := fs.String("token-env", "GITHUB_TOKEN", "Token env var used for GitHub API")
@@ -344,7 +344,7 @@ func (m *serviceManager) startWorker(currentPath, natsURL, room string, embedded
 	if m.worker != nil && m.worker.Process != nil {
 		return nil
 	}
-	args := []string{"serve", "--nats-url", natsURL, "--room", room}
+	args := []string{"leader", "--nats-url", natsURL, "--room", room}
 	if embeddedNATS {
 		args = append(args, "--embedded-nats")
 	}

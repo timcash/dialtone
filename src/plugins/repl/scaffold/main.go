@@ -44,9 +44,15 @@ func main() {
 			logs.Error("repl run failed: %v", err)
 			os.Exit(1)
 		}
+	case "leader":
+		if err := repl.RunLeader(rest); err != nil {
+			logs.Error("repl leader failed: %v", err)
+			os.Exit(1)
+		}
 	case "serve":
-		if err := repl.RunServe(rest); err != nil {
-			logs.Error("repl serve failed: %v", err)
+		logs.Warn("repl serve is deprecated; use: ./dialtone.sh repl src_v1 leader [args]")
+		if err := repl.RunLeader(rest); err != nil {
+			logs.Error("repl leader failed: %v", err)
 			os.Exit(1)
 		}
 	case "join":
@@ -267,8 +273,8 @@ func printUsage() {
 	logs.Raw("")
 	logs.Raw("Commands:")
 	logs.Raw("  run [--name HOST]                                    Run local REPL session")
-	logs.Raw("  serve [--nats-url URL] [--room NAME] [--embedded-nats] [--tsnet] [--tsnet-nats-port PORT] [--hostname HOST]")
-	logs.Raw("                                                       Start shared REPL host/service")
+	logs.Raw("  leader [--nats-url URL] [--room NAME] [--embedded-nats] [--tsnet] [--tsnet-nats-port PORT] [--hostname HOST]")
+	logs.Raw("                                                       Start shared REPL leader/service")
 	logs.Raw("  join [room-name] [--nats-url URL] [--name HOST]     Join a shared REPL host (default room: index)")
 	logs.Raw("  status [--nats-url URL] [--room NAME]               Show NATS/tsnet/chrome status")
 	logs.Raw("  service [--mode install|run|status] [--repo owner/repo] [--nats-url URL] [--room NAME] [--check-interval 3m]")
