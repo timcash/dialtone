@@ -208,10 +208,14 @@ func EnsureRequirement(req Requirement) error {
 
 func ensureGoRequirement(version string) error {
 	depsDir := GetDialtoneEnv()
-	goBin := filepath.Join(depsDir, "go", "bin", "go")
+	goBinName := "go"
+	if runtime.GOOS == "windows" {
+		goBinName = "go.exe"
+	}
+	goBin := filepath.Join(depsDir, "go", "bin", goBinName)
 	if _, err := os.Stat(goBin); os.IsNotExist(err) {
-		logs.Info("[install] Go missing; running ./dialtone.sh go install")
-		cmd := exec.Command("./dialtone.sh", "go", "install")
+		logs.Info("[install] Go missing; running ./dialtone.sh go src_v1 install")
+		cmd := exec.Command("./dialtone.sh", "go", "src_v1", "install")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
@@ -236,10 +240,14 @@ func ensureGoRequirement(version string) error {
 
 func ensureBunRequirement(version string) error {
 	depsDir := GetDialtoneEnv()
-	bunBin := filepath.Join(depsDir, "bun", "bin", "bun")
+	bunBinName := "bun"
+	if runtime.GOOS == "windows" {
+		bunBinName = "bun.exe"
+	}
+	bunBin := filepath.Join(depsDir, "bun", "bin", bunBinName)
 	if _, err := os.Stat(bunBin); os.IsNotExist(err) {
-		logs.Info("[install] Bun missing; installing via ./dialtone.sh bun install")
-		cmd := exec.Command("./dialtone.sh", "bun", "install")
+		logs.Info("[install] Bun missing; installing via ./dialtone.sh bun src_v1 install")
+		cmd := exec.Command("./dialtone.sh", "bun", "src_v1", "install")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
@@ -320,19 +328,27 @@ func main() {
 func detectMissingForREPL() []MissingInstall {
 	missing := []MissingInstall{}
 	envDir := GetDialtoneEnv()
-	goBin := filepath.Join(envDir, "go", "bin", "go")
+	goBinName := "go"
+	bunBinName := "bun"
+	installPrefix := "./dialtone.sh"
+	if runtime.GOOS == "windows" {
+		goBinName = "go.exe"
+		bunBinName = "bun.exe"
+		installPrefix = ".\\dialtone.ps1"
+	}
+	goBin := filepath.Join(envDir, "go", "bin", goBinName)
 	if _, err := os.Stat(goBin); err != nil {
 		missing = append(missing, MissingInstall{
 			Tool:    "Go runtime",
-			Command: "./dialtone.sh go src_v1 install",
+			Command: installPrefix + " go src_v1 install",
 			Why:     "required to run plugin scaffolds and subtones",
 		})
 	}
-	bunBin := filepath.Join(envDir, "bun", "bin", "bun")
+	bunBin := filepath.Join(envDir, "bun", "bin", bunBinName)
 	if _, err := os.Stat(bunBin); err != nil {
 		missing = append(missing, MissingInstall{
 			Tool:    "Bun runtime",
-			Command: "./dialtone.sh bun src_v1 install",
+			Command: installPrefix + " bun src_v1 install",
 			Why:     "required for plugins that build or run JS/TS UIs",
 		})
 	}
@@ -340,19 +356,14 @@ func detectMissingForREPL() []MissingInstall {
 }
 
 func runDevInstall() {
-	logs.Info("Installing latest Go runtime for managed ./dialtone.sh go commands...")
-	cwd, _ := os.Getwd()
-	installer := filepath.Join(cwd, "plugins/go/install.sh")
-	if !fileExists(installer) {
-		logs.Error("Installer missing: %s", installer)
+	logs.Info("Installing managed Go runtime...")
+	if err := runPluginScaffold("go", []string{"src_v1", "install", "--latest"}); err != nil {
+		logs.Error("Go install failed: %v", err)
 		return
 	}
-
-	cmd := exec.Command("bash", installer, "--latest")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		logs.Error("Install failed.")
+	logs.Info("Installing managed Bun runtime...")
+	if err := runPluginScaffold("bun", []string{"src_v1", "install"}); err != nil {
+		logs.Error("Bun install failed: %v", err)
 		return
 	}
 
