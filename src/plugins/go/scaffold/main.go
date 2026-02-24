@@ -151,7 +151,12 @@ func runExec(args []string) {
 		moduleRoot = parent
 	}
 
-	goBin := filepath.Join(dialtoneEnv, "go", "bin", "go")
+	args = maybeInjectBuildOutput(args, moduleRoot)
+	goBinName := "go"
+	if os.Getenv("OS") == "Windows_NT" || filepath.Separator == '\\' {
+		goBinName = "go.exe"
+	}
+	goBin := filepath.Join(dialtoneEnv, "go", "bin", goBinName)
 	args = maybeInjectBuildOutput(args, moduleRoot)
 	cmd := exec.Command(goBin, args...)
 	cmd.Dir = moduleRoot
@@ -293,7 +298,7 @@ func findRepoRoot() (string, error) {
 		return "", err
 	}
 	for {
-		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
+		if configv1.HasDialtoneScript(cwd) {
 			return cwd, nil
 		}
 		parent := filepath.Dir(cwd)
