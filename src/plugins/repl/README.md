@@ -14,9 +14,9 @@ Prompts default to host identity (`<hostname>`) instead of `USER-1`.
 ./dialtone.sh repl src_v1 help
 ./dialtone.sh repl src_v1 run
 ./dialtone.sh repl src_v1 status
-./dialtone.sh repl src_v1 serve --nats-url nats://0.0.0.0:4222 --room main --embedded-nats --tsnet
-./dialtone.sh repl src_v1 join --nats-url nats://<server-ip>:4222 --room main --name <hostname>
-./dialtone.sh repl src_v1 service --mode install --repo timcash/dialtone --room main
+./dialtone.sh repl src_v1 serve --nats-url nats://0.0.0.0:4222 --room index --embedded-nats --tsnet --tsnet-nats-port 4222
+./dialtone.sh repl src_v1 join --nats-url nats://<server-host>:4222 --name <hostname> index
+./dialtone.sh repl src_v1 service --mode install --repo timcash/dialtone --room index
 ./dialtone.sh repl src_v1 service --mode run --repo timcash/dialtone --check-interval 3m
 ./dialtone.sh repl src_v1 build
 ./dialtone.sh repl src_v1 release build v0.1.0
@@ -26,26 +26,39 @@ Prompts default to host identity (`<hostname>`) instead of `USER-1`.
 
 ## Interactive Commands
 When running `run`, `serve`, or `join`, the REPL session supports internal management:
-- `ps`: List active subtones (background processes)
-- `kill <pid>`: Terminate a managed process
-- `<command> &`: Spawn a command in the background
+- `/ps`: List active subtones (background processes)
+- `/kill <pid>`: Terminate a managed process
+- `/repl src_v1 join <room-name>`: Leave current room and join another room
+- `/<command>` or `/plugin src_vN command ...`: Send command to DIALTONE server
 - `exit` / `quit`: Close the session
 
 ## NATS Model
-- REPL bus uses one subject per room: `repl.<room>`.
-- User input is published as NATS `input` frames.
-- Server (`DIALTONE`) listens on that subject and executes input frames.
-- REPL stdout/stderr is broadcast via `line` and `server` frames.
-- Clients detect server presence via `probe` / `heartbeat` frames.
+- Global command subject: `repl.cmd`.
+- Room event subjects: `repl.room.<room>`.
+- Slash commands are published as `command` frames to `repl.cmd`.
+- Non-slash text is published as `chat` frames to the current room.
+- Server (`DIALTONE`) is the single command executor and publishes `line`/`server` output.
 - Session lifecycle is tracked via `join` and `left` frames.
 
 ## Standalone Binary
 ```bash
 ./dialtone.sh repl src_v1 build
-.dialtone/bin/repl-src_v1 serve --nats-url nats://0.0.0.0:4222 --room main --embedded-nats
-.dialtone/bin/repl-src_v1 join --nats-url nats://<server-ip>:4222 --room main --name <hostname>
-.dialtone/bin/repl-src_v1 service --mode run --repo timcash/dialtone --nats-url nats://0.0.0.0:4222 --room main
+.dialtone/bin/repl-src_v1 serve --nats-url nats://0.0.0.0:4222 --room index --embedded-nats --tsnet --tsnet-nats-port 4222
+.dialtone/bin/repl-src_v1 join --nats-url nats://<server-host>:4222 --name <hostname> index
+.dialtone/bin/repl-src_v1 service --mode run --repo timcash/dialtone --nats-url nats://0.0.0.0:4222 --room index
 ```
+
+### WSL + Embedded Tsnet
+To avoid relying on Windows host networking, run the REPL server with embedded `tsnet`:
+
+```bash
+./dialtone.sh repl src_v1 serve --embedded-nats --nats-url nats://0.0.0.0:4222 --tsnet --tsnet-nats-port 4222
+```
+
+- This creates a dedicated tsnet node for the WSL server.
+- The server logs a tailnet NATS endpoint (`nats://<tsnet-dns>:<port>`).
+- Other hosts should join using that tsnet endpoint.
+- In WSL, the tsnet hostname is auto-suffixed with `-wsl` unless explicitly set.
 
 ## Release Artifacts
 `release build <version>` creates:

@@ -29,6 +29,16 @@ fi
 GO_BIN="$DIALTONE_ENV/go/bin/go"
 BUN_BIN="$DIALTONE_ENV/bun/bin/bun"
 
+# Optional global log mirror: pass --stdout anywhere to mirror logs to stdout
+PASSTHRU_ARGS=()
+for arg in "$@"; do
+    if [ "$arg" = "--stdout" ]; then
+        export DIALTONE_LOG_STDOUT=1
+        continue
+    fi
+    PASSTHRU_ARGS+=("$arg")
+done
+
 # 2. Check for Go
 if [ ! -x "$GO_BIN" ]; then
     echo "DIALTONE> Go runtime missing at $DIALTONE_ENV/go"
@@ -59,4 +69,4 @@ fi
 # 4. Hand over to Go-based orchestrator
 # Current working directory should be 'src' for Go imports to work correctly.
 cd "$DIALTONE_SRC_ROOT"
-exec "$GO_BIN" run dev.go "$@"
+exec "$GO_BIN" run dev.go "${PASSTHRU_ARGS[@]}"
