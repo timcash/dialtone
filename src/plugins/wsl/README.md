@@ -2,46 +2,50 @@
 
 A robust Go-based plugin for managing WSL 2 instances with a modern, component-based Web UI. This plugin migrates the original `wsl-tools` functionality into the Dialtone ecosystem.
 
-## 🚀 Status: MVP Complete
+## 🚀 Status: src_v3 Modernization In Progress
 
-We have successfully migrated the core orchestration and visualization logic from the standalone Bun/PowerShell prototype into a production-grade Go plugin.
+We are currently migrating to `src_v3`, which aligns the plugin with the latest Dialtone standards (versioned scaffolds, shared `@ui` library, and `test_v2` harness).
 
-### What Works
-- [x] **Go Backend:** High-performance HTTP and WebSocket server handles all WSL orchestration.
-- [x] **Real-time Telemetry:** Live memory and disk usage updates delivered via WebSocket (no more polling).
-- [x] **Component Architecture:** UI refactored into encapsulated TypeScript components (`Home`, `Table`, `Settings`) with proper mount/unmount lifecycles.
-- [x] **3D Hero Visualization:** Hero section features a Three.js-powered glowing cluster visual.
-- [x] **Robust Smoke Testing:**
-    - Level 0: Verifies Go standards (Vet) and TypeScript standards (Lint).
-    - Level 1: Verifies UI build integrity (Vite).
-    - Level 2: Verifies REST API health and logic before browser tests.
-    - Level 3: Automated UI verification using headed Chrome, capturing console logs and screenshots for every action.
-- [x] **Snappy Navigation:** CSS scroll-snapping and intelligent header/menu hiding based on active section.
-- [x] **Windows Security Compatibility:** `dialtone.ps1` automatically resolves relative dependency paths to absolute ones to satisfy Go security requirements.
+### What Has Been Done (src_v3)
+- [x] **Versioned Scaffold:** Implemented `scaffold/main.go` to route commands to `src_v3` specifically.
+- [x] **Standardized Layout:** Migrated code into `cmd/server`, `cmd/ops`, `go/`, and `test/` subdirectories.
+- [x] **Modern UI Library:** Rebuilt the UI using the shared `@ui` library, adopting `SectionManager` and `setupApp`.
+- [x] **Layout Parity:** Implemented the "calculator" layout for the WSL Spreadsheet, integrating the standardized `mode-form` button system.
+- [x] **Path Resolution:** Added `go/paths.go` for centralized, predictable path management.
+- [x] **Cross-Platform CLI:** Synchronized `dialtone.ps1` with `dialtone.sh` and implemented cross-platform command execution in `ops`.
+- [x] **Modern Test Harness:** Ported the `robot` plugin's test structure to `src_v3/test`, including preflight and section validation.
 
 ### What's In Progress / Not Working Yet
-- [ ] **Windows Task Scheduler Integration:** The "Daemon" persistence logic (Scheduled Tasks) is still handled by legacy PowerShell wrappers. We need to migrate this logic natively into Go.
-- [ ] **WSL Distro Variety:** Currently optimized for Alpine Linux. Support for Ubuntu and other distros is planned.
-- [ ] **Advanced Telemetry:** History sparklines for CPU/Memory are currently UI placeholders.
-- [ ] **Terminal Integration:** One-click "Open Terminal" button is not yet implemented in the new UI.
+- [ ] **WSL Timeout Issues:** Debugging `HCS_E_CONNECTION_TIMEOUT` errors during instance creation on Windows hosts.
+- [ ] **Test Validation:** Complete end-to-end run of the `src_v3` test suite (currently blocked by WSL timeouts).
+- [ ] **Windows Task Scheduler Integration:** Migration of "Daemon" persistence logic natively into Go.
+- [ ] **Advanced Telemetry:** CPU/Memory sparklines are still UI placeholders.
+- [ ] **Terminal Integration:** One-click "Open Terminal" button integration in the new UI.
 
 ## CLI Commands
 
-Use the `./dialtone.cmd` (Windows) or `./dialtone.sh` (Linux/WSL) wrapper:
+Use the `./dialtone.ps1` (Windows) or `./dialtone.sh` (Linux/WSL) wrapper:
 
 ```bash
-# 🛠️ Development: Start host and UI in dev mode (Headed Debug Browser)
-.\dialtone wsl dev src_v1
+# 🛠️ Development: Start host and UI in dev mode (Managed Debug Browser)
+.\dialtone wsl src_v3 dev
 
-# 🏗️ Build: Compile UI assets (TypeScript -> dist/)
-.\dialtone wsl build src_v1
+# 🏗️ Build: Compile UI assets and Go server
+.\dialtone wsl src_v3 build
 
-# 💨 Smoke Test: Full verification suite (Generates SMOKE.md)
-.\dialtone wsl smoke src_v1
+# 💨 Test: Modernized verification suite
+.\dialtone wsl src_v3 test
 
 # 🧹 Lint: Check Go and TypeScript standards
-.\dialtone wsl lint
+.\dialtone wsl src_v3 lint
 ```
+
+## Technical Architecture
+
+1. **Scaffold Routing:** The root `scaffold/main.go` provides a version-aware entrypoint for all plugin operations.
+2. **Operations (Ops):** Logic for `install`, `build`, and `dev` is encapsulated in `src_v3/cmd/ops` for maintainability.
+3. **Shared UI:** The frontend imports the Dialtone shared UI library via the `@ui` alias, ensuring consistent styling and lifecycle management.
+4. **Direct NATS/WS:** (Future) Move from standard REST polling to the NATS-based telemetry pattern used in the robot plugin.
 
 ## Technical Architecture
 
