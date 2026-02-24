@@ -1,12 +1,16 @@
 package main
 
 import (
+	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	repl "dialtone/dev/plugins/repl/src_v1/go/repl"
@@ -274,7 +278,7 @@ func main() {
 			logs.Info("DIALTONE> After installing, run ./dialtone.sh again.")
 			return
 		}
-		if err := repl.Start(logLine); err != nil {
+		if err := startDefaultMultiplayerREPL(); err != nil {
 			logs.Error("REPL error: %v", err)
 			os.Exit(1)
 		}
@@ -467,4 +471,88 @@ func runBranch(args []string) {
 	}
 
 	logs.Info("Now on branch: %s", branchName)
+}
+
+func startDefaultMultiplayerREPL() error {
+	room := strings.TrimSpace(os.Getenv("DIALTONE_REPL_ROOM"))
+	if room == "" {
+		room = "index"
+	}
+	clientURL := strings.TrimSpace(os.Getenv("DIALTONE_REPL_NATS_URL"))
+	if clientURL == "" {
+		clientURL = "nats://127.0.0.1:4222"
+	}
+	leaderURL := strings.TrimSpace(os.Getenv("DIALTONE_REPL_LEADER_NATS_URL"))
+	if leaderURL == "" {
+		leaderURL = "nats://0.0.0.0:4222"
+	}
+
+	joinArgs := []string{"--nats-url", clientURL, room}
+	if endpointReachable(clientURL, 700*time.Millisecond) {
+		return repl.RunJoin(joinArgs)
+	}
+
+	logs.Info("DIALTONE> No REPL leader detected on %s; starting leader for room %s", clientURL, room)
+	cmd, err := startLocalLeaderProcess(leaderURL, room)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+	}()
+
+	if !waitForEndpoint(clientURL, 6*time.Second) {
+		return fmt.Errorf("leader started but nats endpoint did not become reachable: %s", clientURL)
+	}
+	return repl.RunJoin(joinArgs)
+}
+
+func startLocalLeaderProcess(natsURL, room string) (*exec.Cmd, error) {
+	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
+	if goBin == "" {
+		goBin = "go"
+	}
+	cmd := exec.Command(goBin, "run", "./plugins/repl/scaffold/main.go", "src_v1", "leader", "--embedded-nats", "--nats-url", natsURL, "--room", room)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = nil
+	cmd.Dir, _ = os.Getwd()
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	return cmd, nil
+}
+
+func waitForEndpoint(natsURL string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if endpointReachable(natsURL, 500*time.Millisecond) {
+			return true
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	return false
+}
+
+func endpointReachable(natsURL string, timeout time.Duration) bool {
+	u, err := url.Parse(strings.TrimSpace(natsURL))
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	port := u.Port()
+	if port == "" {
+		port = "4222"
+	}
+	if host == "" || host == "0.0.0.0" {
+		host = "127.0.0.1"
+	}
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), timeout)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
