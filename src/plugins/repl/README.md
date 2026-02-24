@@ -77,7 +77,7 @@ To avoid relying on Windows host networking, run the REPL leader with embedded `
 - Other hosts should join using that tsnet endpoint.
 - In WSL, the tsnet hostname is auto-suffixed with `-wsl` unless explicitly set.
 
-## Release Artifacts
+## REPL Release
 `release build <version>` creates:
 - `repl-src_v1-linux-amd64`
 - `repl-src_v1-linux-arm64`
@@ -86,8 +86,9 @@ To avoid relying on Windows host networking, run the REPL leader with embedded `
 - `repl-src_v1-windows-amd64.exe`
 
 `release publish` uploads those binaries to a GitHub release tag.
+This is the **REPL Release** command path.
 
-## Service & OS Persistence
+## REPL Auto-Swap Updater
 The `service` command provides both a supervisor and automatic OS-level registration:
 - `--mode install`: Registers the REPL supervisor as a **systemd user service** (Linux) or **launchd agent** (macOS).
 - `--mode run`: Starts the supervisor in the foreground for log monitoring.
@@ -98,6 +99,8 @@ The supervisor maintains stability by:
 - Downloads new worker binaries to `~/.dialtone/repl/releases/`.
 - Updates a `current` symlink and hot-swaps the worker via `SIGTERM`.
 - Keeping the management layer alive even if the worker or network fails.
+
+This is the **REPL Auto-Swap Updater** path.
 
 ## Remote Deploy (Robot)
 `deploy` pushes a platform-matched `repl-src_v1` binary to a remote host over SSH.

@@ -40,6 +40,16 @@ $env:GOROOT = Join-Path $env:DIALTONE_ENV "go"
 $GoBin = Join-Path $env:GOROOT "bin/go.exe"
 $BunBin = Join-Path $env:DIALTONE_ENV "bun/bin/bun.exe"
 
+# Optional global log mirror: pass --stdout anywhere to mirror logs to stdout
+$PassThruArgs = New-Object System.Collections.Generic.List[string]
+foreach ($arg in $args) {
+    if ($arg -eq "--stdout") {
+        $env:DIALTONE_LOG_STDOUT = "1"
+        continue
+    }
+    $PassThruArgs.Add($arg)
+}
+
 # 2. Check for Go
 if (!(Test-Path $GoBin)) {
     Write-Host "DIALTONE> Go runtime missing at $env:GOROOT"
@@ -69,6 +79,12 @@ if (Test-Path $BunBin) {
 $env:DIALTONE_GO_BIN = $GoBin
 
 # 4. Hand over to Go-based orchestrator
-Set-Location -Path $env:DIALTONE_SRC_ROOT
-& "$GoBin" run dev.go $args
-exit $LASTEXITCODE
+Push-Location -Path $env:DIALTONE_SRC_ROOT
+try {
+    & "$GoBin" run dev.go $PassThruArgs
+    $code = $LASTEXITCODE
+}
+finally {
+    Pop-Location
+}
+exit $code
