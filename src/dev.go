@@ -529,6 +529,9 @@ func startDefaultMultiplayerREPL() error {
 	if endpointReachable(clientURL, 700*time.Millisecond) {
 		return repl.RunJoin(joinArgs)
 	}
+	if !replAutostartEnabled() {
+		return fmt.Errorf("no REPL daemon detected on %s (autostart disabled). start daemon with: ./dialtone.sh repl src_v1 service --mode run --room %s", clientURL, room)
+	}
 
 	logs.Info("DIALTONE> No REPL leader detected on %s; starting leader for room %s", clientURL, room)
 	cmd, err := startLocalLeaderProcess(leaderURL, room)
@@ -545,6 +548,16 @@ func startDefaultMultiplayerREPL() error {
 		return fmt.Errorf("leader started but nats endpoint did not become reachable: %s", clientURL)
 	}
 	return repl.RunJoin(joinArgs)
+}
+
+func replAutostartEnabled() bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("DIALTONE_REPL_AUTOSTART")))
+	switch v {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
 }
 
 func startLocalLeaderProcess(natsURL, room string) (*exec.Cmd, error) {
