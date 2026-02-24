@@ -356,15 +356,37 @@ func detectMissingForREPL() []MissingInstall {
 }
 
 func runDevInstall() {
-	logs.Info("Installing managed Go runtime...")
-	if err := runPluginScaffold("go", []string{"src_v1", "install", "--latest"}); err != nil {
-		logs.Error("Go install failed: %v", err)
+	missing := detectMissingForREPL()
+	if len(missing) == 0 {
+		logs.Info("Managed runtimes already installed.")
+		logs.Info("Ready. You can now run plugin commands (install/build/test) via DIALTONE.")
 		return
 	}
-	logs.Info("Installing managed Bun runtime...")
-	if err := runPluginScaffold("bun", []string{"src_v1", "install"}); err != nil {
-		logs.Error("Bun install failed: %v", err)
-		return
+
+	needGo := false
+	needBun := false
+	for _, m := range missing {
+		switch m.Tool {
+		case "Go runtime":
+			needGo = true
+		case "Bun runtime":
+			needBun = true
+		}
+	}
+
+	if needGo {
+		logs.Info("Installing managed Go runtime...")
+		if err := runPluginScaffold("go", []string{"src_v1", "install", "--latest"}); err != nil {
+			logs.Error("Go install failed: %v", err)
+			return
+		}
+	}
+	if needBun {
+		logs.Info("Installing managed Bun runtime...")
+		if err := runPluginScaffold("bun", []string{"src_v1", "install"}); err != nil {
+			logs.Error("Bun install failed: %v", err)
+			return
+		}
 	}
 
 	logs.Info("Bootstrap complete. Initializing dev.go scaffold...")
