@@ -108,7 +108,12 @@ func bootstrapDialtoneRuntimeEnv() {
 }
 
 func initLogger() {
-	if strings.TrimSpace(os.Getenv("DIALTONE_LOG_STDOUT")) == "1" {
+	mirrorStdout := strings.TrimSpace(os.Getenv("DIALTONE_LOG_STDOUT")) == "1"
+	// No-arg invocation is interactive entry; always surface logs to stdout.
+	if !mirrorStdout && len(os.Args) < 2 {
+		mirrorStdout = true
+	}
+	if mirrorStdout {
 		logs.SetOutput(os.Stdout)
 	} else {
 		logs.SetOutput(io.Discard)
