@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 )
 
 func RunGo(args ...string) error {
@@ -40,7 +42,7 @@ func findRepoRoot() (string, error) {
 		return "", err
 	}
 	for {
-		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
+		if configv1.HasDialtoneScript(cwd) {
 			return cwd, nil
 		}
 		parent := filepath.Dir(cwd)
