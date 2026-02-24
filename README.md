@@ -13,7 +13,7 @@ Dialtone is a small program that runs on computers, phones, and robots. It is bu
 ![dialtone](./src/plugins/www/screenshots/summary.png)
 
 ## 1. REPL / Chat Interface (Target)
-- `./dialtone.sh` and `./dialtone.ps1` start a simple `DIALTONE>` dialog.
+- `./dialtone.sh` and `./dialtone.ps1` default to multiplayer REPL: join `index` room, or auto-start a local leader if none is running.
 - First-run flow: `DIALTONE>` asks for consent before installing only the minimum Go runtime + bootstrap files needed for `dev.go`.
 - After bootstrap, `DIALTONE>` can install plugins and connect to swarm, VPN, and NATS.
 - see [DIALTONE.md](./docs/dialtone/DIALTONE.md).
@@ -168,4 +168,3 @@ Every plugin must include a `README.md` at its plugin root (`src/plugins/<plugin
 Use the shared template:
 
 - [README_TEMPLATE.md](./docs/templates/README_TEMPLATE.md)
-
