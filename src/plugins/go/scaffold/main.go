@@ -149,7 +149,11 @@ func runExec(args []string) {
 		moduleRoot = parent
 	}
 
-	goBin := filepath.Join(dialtoneEnv, "go", "bin", "go")
+	goBinName := "go"
+	if os.Getenv("OS") == "Windows_NT" || filepath.Separator == '\\' {
+		goBinName = "go.exe"
+	}
+	goBin := filepath.Join(dialtoneEnv, "go", "bin", goBinName)
 	cmd := exec.Command(goBin, args...)
 	cmd.Dir = moduleRoot
 	cmd.Stdout = os.Stdout

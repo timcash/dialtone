@@ -13,12 +13,19 @@ func RunGo(args ...string) error {
 		return err
 	}
 	
-	dialtoneEnv := os.Getenv("DIALTONE_ENV")
-	if dialtoneEnv == "" {
-		home, _ := os.UserHomeDir()
-		dialtoneEnv = filepath.Join(home, ".dialtone_env")
+	goBin := os.Getenv("DIALTONE_GO_BIN")
+	if goBin == "" {
+		dialtoneEnv := os.Getenv("DIALTONE_ENV")
+		if dialtoneEnv == "" {
+			home, _ := os.UserHomeDir()
+			dialtoneEnv = filepath.Join(home, ".dialtone_env")
+		}
+		goBinName := "go"
+		if os.Getenv("OS") == "Windows_NT" || filepath.Separator == '\\' {
+			goBinName = "go.exe"
+		}
+		goBin = filepath.Join(dialtoneEnv, "go", "bin", goBinName)
 	}
-	goBin := filepath.Join(dialtoneEnv, "go", "bin", "go")
 
 	cmd := exec.Command(goBin, args...)
 	cmd.Dir = filepath.Join(repoRoot, "src")
