@@ -49,12 +49,6 @@ func main() {
 			logs.Error("repl leader failed: %v", err)
 			os.Exit(1)
 		}
-	case "serve":
-		logs.Warn("repl serve is deprecated; use: ./dialtone.sh repl src_v1 leader [args]")
-		if err := repl.RunLeader(rest); err != nil {
-			logs.Error("repl leader failed: %v", err)
-			os.Exit(1)
-		}
 	case "join":
 		if err := repl.RunJoin(rest); err != nil {
 			logs.Error("repl join failed: %v", err)

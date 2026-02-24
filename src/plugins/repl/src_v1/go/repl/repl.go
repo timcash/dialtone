@@ -326,11 +326,6 @@ func RunLeader(args []string) error {
 	}
 }
 
-// RunServe is kept as a compatibility alias. Prefer RunLeader.
-func RunServe(args []string) error {
-	return RunLeader(args)
-}
-
 func RunJoin(args []string) error {
 	fs := flag.NewFlagSet("repl-join", flag.ContinueOnError)
 	natsURL := fs.String("nats-url", defaultNATSURL, "NATS URL")

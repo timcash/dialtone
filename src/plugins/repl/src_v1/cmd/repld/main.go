@@ -24,9 +24,6 @@ func main() {
 		err = repl.RunLocal(nil, args)
 	case "leader":
 		err = repl.RunLeader(args)
-	case "serve":
-		logs.Warn("repld serve is deprecated; use: repl-src_v1 leader [args]")
-		err = repl.RunLeader(args)
 	case "join":
 		err = repl.RunJoin(args)
 	case "status":
