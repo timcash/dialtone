@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -86,6 +87,7 @@ type BusFrame struct {
 	From      string   `json:"from,omitempty"`
 	Target    string   `json:"target,omitempty"`
 	Room      string   `json:"room,omitempty"`
+	Version   string   `json:"version,omitempty"`
 	Command   string   `json:"command,omitempty"`
 	Args      []string `json:"args,omitempty"`
 	Prefix    string   `json:"prefix,omitempty"`
@@ -207,6 +209,59 @@ func RunLeader(args []string) error {
 
 	var roomMu sync.RWMutex
 	userRoom := map[string]string{}
+	type userPresence struct {
+		Room    string
+		Version string
+	}
+	var presenceMu sync.RWMutex
+	presence := map[string]userPresence{}
+	upsertPresence := func(user, room, version string) {
+		user = normalizePromptName(user)
+		if user == "" {
+			return
+		}
+		room = sanitizeRoom(room)
+		presenceMu.Lock()
+		prev := presence[user]
+		if strings.TrimSpace(version) == "" {
+			version = prev.Version
+		}
+		presence[user] = userPresence{Room: room, Version: strings.TrimSpace(version)}
+		presenceMu.Unlock()
+	}
+	removePresence := func(user string) {
+		user = normalizePromptName(user)
+		if user == "" {
+			return
+		}
+		presenceMu.Lock()
+		delete(presence, user)
+		presenceMu.Unlock()
+	}
+	listPresence := func() []struct {
+		Name    string
+		Room    string
+		Version string
+	} {
+		presenceMu.RLock()
+		rows := make([]struct {
+			Name    string
+			Room    string
+			Version string
+		}, 0, len(presence))
+		for k, v := range presence {
+			rows = append(rows, struct {
+				Name    string
+				Room    string
+				Version string
+			}{Name: k, Room: sanitizeRoom(v.Room), Version: strings.TrimSpace(v.Version)})
+		}
+		presenceMu.RUnlock()
+		sort.Slice(rows, func(i, j int) bool {
+			return rows[i].Name < rows[j].Name
+		})
+		return rows
+	}
 	var runMu sync.Mutex
 	cmdSub, err := nc.QueueSubscribe(commandSubject, commandQueue, func(msg *nats.Msg) {
 		frame, ok := decodeFrame(msg.Data)
@@ -244,12 +299,54 @@ func RunLeader(args []string) error {
 			roomMu.Lock()
 			userRoom[sender] = currentRoom
 			roomMu.Unlock()
+			upsertPresence(sender, currentRoom, frame.Version)
 			publishRoom(currentRoom, BusFrame{Type: frameTypeInput, From: sender, Message: "/" + raw})
+
+			if len(args) >= 3 && args[0] == "repl" && args[1] == "src_v1" && args[2] == "who" {
+				rows := listPresence()
+				if len(rows) == 0 {
+					publishRoom(currentRoom, BusFrame{Type: frameTypeLine, Prefix: "DIALTONE", Message: "No connected users."})
+					return
+				}
+				publishRoom(currentRoom, BusFrame{Type: frameTypeLine, Prefix: "DIALTONE", Message: "Connected users:"})
+				for _, row := range rows {
+					version := row.Version
+					if version == "" {
+						version = "unknown"
+					}
+					publishRoom(currentRoom, BusFrame{
+						Type:    frameTypeLine,
+						Prefix:  "DIALTONE",
+						Message: fmt.Sprintf("- %s (room=%s version=%s)", row.Name, sanitizeRoom(row.Room), version),
+					})
+				}
+				return
+			}
+			if len(args) >= 3 && args[0] == "repl" && args[1] == "src_v1" && args[2] == "versions" {
+				rows := listPresence()
+				if len(rows) == 0 {
+					publishRoom(currentRoom, BusFrame{Type: frameTypeLine, Prefix: "DIALTONE", Message: "No connected users."})
+					return
+				}
+				publishRoom(currentRoom, BusFrame{Type: frameTypeLine, Prefix: "DIALTONE", Message: "Connected REPL versions:"})
+				for _, row := range rows {
+					version := row.Version
+					if version == "" {
+						version = "unknown"
+					}
+					publishRoom(currentRoom, BusFrame{
+						Type:    frameTypeLine,
+						Prefix:  "DIALTONE",
+						Message: fmt.Sprintf("- %s version=%s room=%s", row.Name, version, sanitizeRoom(row.Room)),
+					})
+				}
+				return
+			}
 
 			if len(args) >= 4 && args[0] == "repl" && args[1] == "src_v1" && args[2] == "join" {
 				targetRoom := sanitizeRoom(args[3])
 				if targetRoom == "" {
-					publishRoom(currentRoom, BusFrame{Type: frameTypeError, Message: "Usage: /repl src_v1 join <room-name>"})
+					publishRoom(currentRoom, BusFrame{Type: frameTypeError, Message: "Usage: /repl src_v1 join <room-name> | /repl src_v1 who | /repl src_v1 versions"})
 					return
 				}
 				if targetRoom == currentRoom {
@@ -288,6 +385,12 @@ func RunLeader(args []string) error {
 		frame, ok := decodeFrame(msg.Data)
 		if !ok {
 			return
+		}
+		switch frame.Type {
+		case frameTypeJoin:
+			upsertPresence(frame.From, frame.Room, frame.Version)
+		case frameTypeLeft:
+			removePresence(frame.From)
 		}
 		printFrame(os.Stdout, frame)
 	})
@@ -447,7 +550,7 @@ func RunJoin(args []string) error {
 	}
 
 	_ = publishFrame(nc, commandSubject, BusFrame{Type: frameTypeProbe, From: prompt, Room: currentRoom, Message: "probe"})
-	_ = publishFrame(nc, currentSubj, BusFrame{Type: frameTypeJoin, From: prompt, Room: currentRoom})
+	_ = publishFrame(nc, currentSubj, BusFrame{Type: frameTypeJoin, From: prompt, Room: currentRoom, Version: BuildVersion})
 	_ = nc.Flush()
 	writeLine(fmt.Sprintf("DIALTONE> Connected to %s via %s", currentSubj, natsAddr))
 
@@ -476,6 +579,7 @@ func RunJoin(args []string) error {
 				Type:    frameTypeCommand,
 				From:    prompt,
 				Room:    roomNow,
+				Version: BuildVersion,
 				Message: line,
 			}); err != nil {
 				return err
@@ -900,7 +1004,11 @@ func printFrame(w io.Writer, frame BusFrame) {
 		if strings.TrimSpace(frame.Room) == "" {
 			fmt.Fprintf(w, "DIALTONE> [JOIN] %s\n", name)
 		} else {
-			fmt.Fprintf(w, "DIALTONE> [JOIN] %s (room=%s)\n", name, sanitizeRoom(frame.Room))
+			if strings.TrimSpace(frame.Version) == "" {
+				fmt.Fprintf(w, "DIALTONE> [JOIN] %s (room=%s)\n", name, sanitizeRoom(frame.Room))
+			} else {
+				fmt.Fprintf(w, "DIALTONE> [JOIN] %s (room=%s version=%s)\n", name, sanitizeRoom(frame.Room), strings.TrimSpace(frame.Version))
+			}
 		}
 	case frameTypeLeft:
 		name := normalizePromptName(frame.From)

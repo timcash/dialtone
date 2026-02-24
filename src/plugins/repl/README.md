@@ -23,6 +23,8 @@ Prompts default to host identity (`<hostname>`) instead of `USER-1`.
 ./dialtone.sh repl src_v1 release build v0.1.0
 ./dialtone.sh repl src_v1 release publish v0.1.0 timcash/dialtone
 ./dialtone.sh repl src_v1 test
+./dialtone.sh repl src_v1 test multiplayer
+./dialtone.sh repl src_v1 test multiplayer-robot
 ```
 
 ## Interactive Commands
@@ -30,6 +32,8 @@ When running `run`, `leader`, or `join`, the REPL session supports internal mana
 - `/ps`: List active subtones (background processes)
 - `/kill <pid>`: Terminate a managed process
 - `/repl src_v1 join <room-name>`: Leave current room and join another room
+- `/repl src_v1 who`: List connected users, room, and REPL version
+- `/repl src_v1 versions`: List connected users with REPL version by room
 - `/<command>` or `/plugin src_vN command ...`: Send command to DIALTONE leader
 - `exit` / `quit`: Close the session
 
@@ -124,3 +128,9 @@ This is the **REPL Auto-Swap Updater** path.
 - `src/plugins/repl/src_v1/test/04_test_plugin/suite.go`
 - `src/plugins/repl/src_v1/test/05_chrome_plugin/suite.go`
 - `src/plugins/repl/src_v1/test/06_go_bun_plugins/suite.go`
+- `src/plugins/repl/src_v1/test/99_multiplayer/suite.go`
+- `src/plugins/repl/src_v1/test/100_multiplayer_robot/suite.go`
+
+Extra modes:
+- `repl src_v1 test multiplayer`: runs only NATS-driven multiplayer suite.
+- `repl src_v1 test multiplayer-robot`: runs multiplayer + live robot SSH join/chat/left verification.

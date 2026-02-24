@@ -128,6 +128,31 @@ func Register(r *testv1.Registry) {
 			}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("expected three join events: %w\n%s", err, snapshotFrames(&obsMu, &obs, 60))
 			}
+			stage.Store("command-who-versions")
+			if err := publish(nc, "repl.cmd", repl.BusFrame{Type: "command", From: "user-1", Room: "index", Version: "v1.2.3", Message: "/repl src_v1 who"}); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := waitFor(8*time.Second, func() bool {
+				return hasFrame(&obsMu, &obs, func(of observedFrame) bool {
+					return of.Subject == "repl.room.index" &&
+						of.Frame.Type == "line" &&
+						strings.Contains(of.Frame.Message, "- user-1 (room=index version=v1.2.3)")
+				})
+			}); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("who output with version not observed: %w\n%s", err, snapshotFrames(&obsMu, &obs, 80))
+			}
+			if err := publish(nc, "repl.cmd", repl.BusFrame{Type: "command", From: "user-1", Room: "index", Version: "v1.2.3", Message: "/repl src_v1 versions"}); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := waitFor(8*time.Second, func() bool {
+				return hasFrame(&obsMu, &obs, func(of observedFrame) bool {
+					return of.Subject == "repl.room.index" &&
+						of.Frame.Type == "line" &&
+						strings.Contains(of.Frame.Message, "- user-1 version=v1.2.3 room=index")
+				})
+			}); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("versions output not observed: %w\n%s", err, snapshotFrames(&obsMu, &obs, 80))
+			}
 
 			stage.Store("chat-index")
 			if err := publish(nc, "repl.room.index", repl.BusFrame{Type: "chat", From: "user-1", Room: "index", Message: "hello from user-1"}); err != nil {
