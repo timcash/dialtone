@@ -27,8 +27,11 @@ Primary interface:
 - Build/deploy/test logic lives in Go:
   - `src/plugins/swarm/scaffold/main.go`
   - `src/plugins/swarm/src_v3/go/`
+- Test runner follows `test/src_v1` registry pattern:
+  - `src/plugins/swarm/src_v3/test/cmd/main.go`
+  - `src/plugins/swarm/src_v3/test/01_local/suite.go`
+  - `src/plugins/swarm/src_v3/test/02_rendezvous/suite.go`
 - `libudx` is tracked as a submodule:
   - `src/plugins/swarm/src_v3/libudx`
 
 Legacy swarm CLI code under `src/plugins/swarm/cli` is not the source of truth for `src_v3`.
-
