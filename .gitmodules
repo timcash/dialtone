@@ -1,0 +1,3 @@
+[submodule "src/plugins/swarm/src_v3/libudx"]
+	path = src/plugins/swarm/src_v3/libudx
+	url = https://github.com/holepunchto/libudx.git

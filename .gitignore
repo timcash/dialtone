@@ -89,3 +89,9 @@ dag_viz
 src/plugins/logs/src_v1/test/example_plugin_bin
 src/main
 src/server
+
+# Local swarm v3 build artifacts / vendored deps
+tmp/
+src/plugins/swarm/src_v3/libudx/
+src/plugins/swarm/src_v3/dialtone_swarm_v3_x86_64
+src/plugins/swarm/src_v3/dialtone_swarm_v3_arm64
