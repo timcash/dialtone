@@ -203,35 +203,15 @@ func runTest(paths Paths, args []string) error {
 		return err
 	}
 
-	hostArch := hostArch()
-	if hostArch == "arm64" {
-		if _, err := os.Stat(paths.BinARM64); err != nil {
-			if err := runBuild(paths, []string{"--arch", "arm64"}); err != nil {
-				return err
-			}
-		}
-	} else {
-		if _, err := os.Stat(paths.BinAMD64); err != nil {
-			if err := runBuild(paths, []string{"--arch", "x86_64"}); err != nil {
-				return err
-			}
-		}
-	}
-	bin := binaryForHost(paths)
-
-	switch strings.ToLower(strings.TrimSpace(*mode)) {
-	case "local":
-		return runLocalTest(bin)
-	case "rendezvous":
-		return runRendezvousTest(bin, strings.TrimSpace(*rendezvousURL))
-	case "all":
-		if err := runLocalTest(bin); err != nil {
-			return err
-		}
-		return runRendezvousTest(bin, strings.TrimSpace(*rendezvousURL))
-	default:
-		return fmt.Errorf("unsupported test mode %s", *mode)
-	}
+	cmd := exec.Command(goBin(paths.Runtime), "run", "./plugins/swarm/src_v3/test/cmd/main.go",
+		"--mode", strings.TrimSpace(*mode),
+		"--rendezvous-url", strings.TrimSpace(*rendezvousURL),
+	)
+	cmd.Dir = paths.Runtime.SrcRoot
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	return cmd.Run()
 }
 
 func runDeploy(paths Paths, args []string) error {
@@ -397,7 +377,7 @@ func buildARM64(paths Paths) error {
 	return runCmd(paths.VersionDir, "aarch64-linux-gnu-gcc", args...)
 }
 
-func runLocalTest(bin string) error {
+func RunLocalSelfTest(bin string) error {
 	helpOut, err := runCapture(bin, []string{"--help"}, 5*time.Second)
 	if err != nil {
 		return err
@@ -454,7 +434,7 @@ func runLocalTest(bin string) error {
 	return nil
 }
 
-func runRendezvousTest(bin, rendezvousURL string) error {
+func RunRendezvousSelfTest(bin, rendezvousURL string) error {
 	if rendezvousURL == "" {
 		return fmt.Errorf("rendezvous URL is required")
 	}
@@ -622,6 +602,24 @@ func binaryForHost(paths Paths) string {
 		return paths.BinARM64
 	}
 	return paths.BinAMD64
+}
+
+func EnsureHostBinary(paths Paths) (string, error) {
+	host := hostArch()
+	if host == "arm64" {
+		if _, err := os.Stat(paths.BinARM64); err != nil {
+			if err := runBuild(paths, []string{"--arch", "arm64"}); err != nil {
+				return "", err
+			}
+		}
+		return paths.BinARM64, nil
+	}
+	if _, err := os.Stat(paths.BinAMD64); err != nil {
+		if err := runBuild(paths, []string{"--arch", "x86_64"}); err != nil {
+			return "", err
+		}
+	}
+	return paths.BinAMD64, nil
 }
 
 func hostArch() string {
