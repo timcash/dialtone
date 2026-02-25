@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "$SCRIPT_DIR/test_dialtone_swarm_v3.sh" "$@"
