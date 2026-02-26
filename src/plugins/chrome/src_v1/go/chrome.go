@@ -15,6 +15,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 
 	"dialtone/dev/plugins/logs/src_v1/go"
 	"github.com/chromedp/chromedp"
@@ -380,7 +381,12 @@ func LaunchChromeWithRoleAndUserDataDir(port int, gpu bool, headless bool, targe
 
 	debugAddress = strings.TrimSpace(debugAddress)
 	if debugAddress == "" {
-		debugAddress = "127.0.0.1"
+		// WSL NAT mode cannot reliably access Windows loopback; bind debug socket on all interfaces.
+		if runtime.GOOS == "linux" && IsWSL() {
+			debugAddress = "0.0.0.0"
+		} else {
+			debugAddress = "127.0.0.1"
+		}
 	}
 
 	args := []string{
@@ -459,7 +465,12 @@ func LaunchChromeWithRoleAndUserDataDir(port int, gpu bool, headless bool, targe
 			if len(lines) >= 2 {
 				fmt.Sscanf(lines[0], "%d", &assignedPort)
 				// Second line is the browser websocket path part (e.g. /devtools/browser/...)
-				wsURL = fmt.Sprintf("ws://127.0.0.1:%d%s", assignedPort, strings.TrimSpace(lines[1]))
+				wsPath := strings.TrimSpace(lines[1])
+				if resolvedWS, err := getWebsocketURL(assignedPort); err == nil && strings.TrimSpace(resolvedWS) != "" {
+					wsURL = resolvedWS
+				} else {
+					wsURL = fmt.Sprintf("ws://127.0.0.1:%d%s", assignedPort, wsPath)
+				}
 				break
 			}
 		}
@@ -518,7 +529,26 @@ func NewTabContext(parent context.Context) (context.Context, context.CancelFunc)
 }
 
 func getWebsocketURL(port int) (string, error) {
-	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/json/version", port))
+	var lastErr error
+	for _, host := range debugProbeHosts() {
+		wsURL, err := getWebsocketURLForHost(host, port)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if normalized := normalizeWebSocketURLHost(wsURL, host, port); normalized != "" {
+			return normalized, nil
+		}
+		return wsURL, nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("unable to resolve websocket url")
+	}
+	return "", lastErr
+}
+
+func getWebsocketURLForHost(host string, port int) (string, error) {
+	resp, err := http.Get(fmt.Sprintf("http://%s:%d/json/version", host, port))
 	if err != nil {
 		return "", err
 	}
@@ -535,6 +565,62 @@ func getWebsocketURL(port int) (string, error) {
 	if err := json.Unmarshal(body, &data); err != nil {
 		return "", err
 	}
+	return strings.TrimSpace(data.WebSocketDebuggerURL), nil
+}
 
-	return data.WebSocketDebuggerURL, nil
+func debugProbeHosts() []string {
+	seen := map[string]struct{}{}
+	add := func(dst *[]string, v string) {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return
+		}
+		if _, ok := seen[v]; ok {
+			return
+		}
+		seen[v] = struct{}{}
+		*dst = append(*dst, v)
+	}
+	hosts := make([]string, 0, 4)
+	add(&hosts, os.Getenv("DIALTONE_CHROME_DEBUG_HOST"))
+	add(&hosts, "127.0.0.1")
+	if runtime.GOOS == "linux" && IsWSL() {
+		add(&hosts, detectWSLHostGatewayIP())
+	}
+	return hosts
+}
+
+func detectWSLHostGatewayIP() string {
+	raw, err := os.ReadFile("/etc/resolv.conf")
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "nameserver ") {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		return strings.TrimSpace(parts[1])
+	}
+	return ""
+}
+
+func normalizeWebSocketURLHost(raw, host string, port int) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	u.Scheme = "ws"
+	if strings.TrimSpace(host) != "" && port > 0 {
+		u.Host = fmt.Sprintf("%s:%d", host, port)
+	}
+	return u.String()
 }

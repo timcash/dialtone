@@ -1,12 +1,16 @@
 package test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	stdruntime "runtime"
 	"strings"
@@ -379,6 +383,7 @@ type BrowserSession struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	Session      *chrome.Session
+	closers      []io.Closer
 	mu           sync.Mutex
 	messages     []ConsoleMessage
 	onConsole    func(ConsoleMessage)
@@ -396,6 +401,11 @@ func (s *BrowserSession) ChromeSession() *chrome.Session {
 
 func (s *BrowserSession) Close() {
 	s.cancel()
+	for _, c := range s.closers {
+		if c != nil {
+			_ = c.Close()
+		}
+	}
 	if s.Session != nil && s.Session.IsNew {
 		chrome.CleanupSession(s.Session)
 	}
@@ -547,7 +557,8 @@ func initSession(session *chrome.Session, role string) (*BrowserSession, error) 
 
 	// Reuse an existing page target when possible to avoid opening additional tabs.
 	ctxOpts := []chromedp.ContextOption{}
-	if session.Port > 0 {
+	remoteAttach := strings.Contains(strings.TrimSpace(session.WebSocketURL), "ws://127.0.0.1:")
+	if session.Port > 0 && !remoteAttach {
 		if targetID, err := getFirstPageTargetID(session.Port); err == nil && targetID != "" {
 			ctxOpts = append(ctxOpts, chromedp.WithTargetID(target.ID(targetID)))
 		}
@@ -628,6 +639,20 @@ func getFirstPageTargetID(port int) (string, error) {
 }
 
 func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
+	if remoteNode := resolveRemoteBrowserNode(opts); remoteNode != "" {
+		logs.Info("   [BROWSER] Remote node configured; trying remote-first on %s", remoteNode)
+		if rs, rerr := startRemoteBrowser(remoteNode, opts); rerr == nil {
+			if strings.TrimSpace(opts.URL) != "" {
+				if err := chromedp.Run(rs.ctx, chromedp.Navigate(opts.URL)); err != nil {
+					rs.Close()
+					return nil, err
+				}
+			}
+			return rs, nil
+		}
+		logs.Warn("   [BROWSER] remote-first failed on %s; falling back to local start", remoteNode)
+	}
+
 	logs.Info("   [BROWSER] Starting session (role=%s, reuse=%v, gpu=%v)...", opts.Role, opts.ReuseExisting, opts.GPU)
 	session, err := chrome.StartSession(chrome.SessionOptions{
 		Headless:      opts.Headless,
@@ -663,8 +688,15 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 		})
 		if err != nil {
 			if remoteNode := resolveRemoteBrowserNode(opts); remoteNode != "" {
+				logs.Warn("   [BROWSER] local launch failed; trying remote node %s", remoteNode)
 				rs, rerr := startRemoteBrowser(remoteNode, opts)
 				if rerr == nil {
+					if strings.TrimSpace(opts.URL) != "" {
+						if err := chromedp.Run(rs.ctx, chromedp.Navigate(opts.URL)); err != nil {
+							rs.Close()
+							return nil, err
+						}
+					}
 					return rs, nil
 				}
 				return nil, fmt.Errorf("failed local start (%v), remote fallback failed on %s (%v)", err, remoteNode, rerr)
@@ -675,6 +707,20 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 
 	s, err := initSession(session, opts.Role)
 	if err != nil {
+		if remoteNode := resolveRemoteBrowserNode(opts); remoteNode != "" {
+			logs.Warn("   [BROWSER] local session attach failed; trying remote node %s", remoteNode)
+			rs, rerr := startRemoteBrowser(remoteNode, opts)
+			if rerr == nil {
+				if strings.TrimSpace(opts.URL) != "" {
+					if err := chromedp.Run(rs.ctx, chromedp.Navigate(opts.URL)); err != nil {
+						rs.Close()
+						return nil, err
+					}
+				}
+				return rs, nil
+			}
+			return nil, fmt.Errorf("local session init failed (%v), remote fallback failed on %s (%v)", err, remoteNode, rerr)
+		}
 		return nil, err
 	}
 
@@ -682,6 +728,20 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 		logs.Info("   [BROWSER] Navigating to: %s", opts.URL)
 		if err := chromedp.Run(s.ctx, chromedp.Navigate(opts.URL)); err != nil {
 			s.Close()
+			if remoteNode := resolveRemoteBrowserNode(opts); remoteNode != "" {
+				logs.Warn("   [BROWSER] local navigate failed; trying remote node %s", remoteNode)
+				rs, rerr := startRemoteBrowser(remoteNode, opts)
+				if rerr == nil {
+					if strings.TrimSpace(opts.URL) != "" {
+						if nerr := chromedp.Run(rs.ctx, chromedp.Navigate(opts.URL)); nerr != nil {
+							rs.Close()
+							return nil, nerr
+						}
+					}
+					return rs, nil
+				}
+				return nil, fmt.Errorf("local navigate failed (%v), remote fallback failed on %s (%v)", err, remoteNode, rerr)
+			}
 			return nil, err
 		}
 	}
@@ -701,6 +761,9 @@ func startRemoteBrowser(node string, opts BrowserOptions) (*BrowserSession, erro
 	if err != nil {
 		return nil, err
 	}
+	if strings.EqualFold(nodeInfo.OS, "windows") {
+		return startRemoteBrowserWindows(nodeInfo, opts)
+	}
 	role := strings.TrimSpace(opts.Role)
 	if role == "" {
 		role = "test"
@@ -713,7 +776,7 @@ func startRemoteBrowser(node string, opts BrowserOptions) (*BrowserSession, erro
 		shellQuote(role), opts.Headless, opts.GPU, opts.ReuseExisting, shellQuote(url))
 	out, err := sshv1.RunNodeCommand(nodeInfo.Name, cmd, sshv1.CommandOptions{})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("remote command on %s failed: %v output=%s", nodeInfo.Name, err, strings.TrimSpace(out))
 	}
 	raw := extractChromeSessionJSON(out)
 	if raw == "" {
@@ -733,13 +796,161 @@ func startRemoteBrowser(node string, opts BrowserOptions) (*BrowserSession, erro
 	if wsPath == "" {
 		return nil, fmt.Errorf("remote websocket path is empty")
 	}
+	attachHost := strings.TrimSpace(nodeInfo.Host)
+	attachPort := meta.DebugPort
+	var tunnelCloser io.Closer
+	if attachHost == "" || !canDialHostPort(attachHost, attachPort, 1500*time.Millisecond) {
+		if closer, lport, err := openSSHDebugTunnel(nodeInfo, meta.DebugPort); err == nil {
+			attachHost = "127.0.0.1"
+			attachPort = lport
+			tunnelCloser = closer
+			if localWS, werr := getWebsocketURL(attachPort); werr == nil && strings.TrimSpace(localWS) != "" {
+				if p := chrome.WebSocketPathFromURL(localWS); strings.TrimSpace(p) != "" {
+					wsPath = p
+				}
+			}
+		}
+	}
+	if strings.TrimSpace(attachHost) == "" {
+		return nil, fmt.Errorf("remote attach host is empty")
+	}
 	session := &chrome.Session{
 		PID:          meta.PID,
-		Port:         meta.DebugPort,
-		WebSocketURL: fmt.Sprintf("ws://%s:%d%s", nodeInfo.Host, meta.DebugPort, wsPath),
+		Port:         attachPort,
+		WebSocketURL: fmt.Sprintf("ws://%s:%d%s", attachHost, attachPort, wsPath),
 		IsNew:        false,
 	}
-	return initSession(session, role)
+	s, err := initSession(session, role)
+	if err != nil {
+		if tunnelCloser != nil {
+			_ = tunnelCloser.Close()
+		}
+		return nil, err
+	}
+	if tunnelCloser != nil {
+		s.closers = append(s.closers, tunnelCloser)
+	}
+	return s, nil
+}
+
+func startRemoteBrowserWindows(nodeInfo sshv1.MeshNode, opts BrowserOptions) (*BrowserSession, error) {
+	role := strings.TrimSpace(opts.Role)
+	if role == "" {
+		role = "test"
+	}
+	headless := "$true"
+	if !opts.Headless {
+		headless = "$false"
+	}
+	gpuDisabled := "$true"
+	if opts.GPU {
+		gpuDisabled = "$false"
+	}
+	url := strings.TrimSpace(opts.URL)
+	if url == "" {
+		url = "about:blank"
+	}
+	ps := fmt.Sprintf(`$ErrorActionPreference='Stop'
+$paths=@("$env:ProgramFiles\Google\Chrome\Application\chrome.exe","$env:ProgramFiles(x86)\Google\Chrome\Application\chrome.exe","$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe")
+$exe=$null
+foreach($p in $paths){ if(Test-Path $p){ $exe=$p; break } }
+if(-not $exe){ Write-Error "chrome executable not found"; exit 1 }
+$listener=[System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Parse('127.0.0.1'),0)
+$listener.Start(); $port=([System.Net.IPEndPoint]$listener.LocalEndpoint).Port; $listener.Stop()
+$profile=Join-Path $env:TEMP ("dialtone-remote-%s")
+$args=@("--remote-debugging-port=$port","--remote-debugging-address=0.0.0.0","--remote-allow-origins=*","--user-data-dir=$profile","--new-window","--dialtone-origin=true","--dialtone-role=%s")
+if(%s){ $args += "--headless=new" }
+if(%s){ $args += "--disable-gpu" }
+$args += %s
+$proc=Start-Process -FilePath $exe -ArgumentList $args -PassThru
+$ws=$null
+for($i=0;$i -lt 60;$i++){
+  try{
+    $v=Invoke-RestMethod -Uri ("http://127.0.0.1:{0}/json/version" -f $port) -TimeoutSec 2
+    if($v.webSocketDebuggerUrl){ $ws=$v.webSocketDebuggerUrl; break }
+  }catch{}
+  Start-Sleep -Milliseconds 200
+}
+if(-not $ws){ Write-Error "debug websocket not ready"; exit 1 }
+$stable=$true
+for($j=0;$j -lt 6;$j++){
+  Start-Sleep -Milliseconds 300
+  try{
+    $null=Invoke-RestMethod -Uri ("http://127.0.0.1:{0}/json/version" -f $port) -TimeoutSec 2
+  }catch{
+    $stable=$false
+    break
+  }
+}
+if(-not $stable){ Write-Error "debug websocket became unstable"; exit 1 }
+$path=([Uri]$ws).PathAndQuery
+$obj=[PSCustomObject]@{ pid=$proc.Id; debug_port=$port; websocket_url=$ws; websocket_path=$path; debug_url=("http://127.0.0.1:{0}{1}" -f $port,$path); is_new=$true; generated_at_rfc3339=(Get-Date).ToUniversalTime().ToString("o") }
+$json=$obj | ConvertTo-Json -Compress
+Write-Output ("DIALTONE_CHROME_SESSION_JSON="+$json)`, role, role, headless, gpuDisabled, psLiteral(url))
+
+	out, err := sshv1.RunNodeCommand(nodeInfo.Name, ps, sshv1.CommandOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("remote windows command on %s failed: %v output=%s", nodeInfo.Name, err, strings.TrimSpace(out))
+	}
+	raw := extractChromeSessionJSON(out)
+	if raw == "" {
+		return nil, fmt.Errorf("remote windows chrome session output missing metadata marker")
+	}
+	var meta chrome.SessionMetadata
+	if err := json.Unmarshal([]byte(raw), &meta); err != nil {
+		return nil, fmt.Errorf("decode remote windows chrome session metadata: %w", err)
+	}
+	if meta.DebugPort <= 0 {
+		return nil, fmt.Errorf("invalid remote debug port %d", meta.DebugPort)
+	}
+	wsPath := strings.TrimSpace(meta.WebSocketPath)
+	if wsPath == "" {
+		wsPath = chrome.WebSocketPathFromURL(meta.WebSocketURL)
+	}
+	if wsPath == "" {
+		return nil, fmt.Errorf("remote windows websocket path is empty")
+	}
+	attachHost := ""
+	attachPort := meta.DebugPort
+	var tunnelCloser io.Closer
+
+	// Prefer direct TCP on host/tailnet before SSH forwarding; tunnel is fallback.
+	if h := resolveReachableDebugHost(meta.DebugPort, nodeInfo); h != "" {
+		attachHost = h
+	} else {
+		if client, lport, err := openSSHDebugTunnel(nodeInfo, meta.DebugPort); err == nil {
+			attachHost = "127.0.0.1"
+			attachPort = lport
+			tunnelCloser = client
+		}
+		if attachHost == "" {
+			return nil, fmt.Errorf("remote windows debug port %d is not reachable from this node", meta.DebugPort)
+		}
+	}
+	if attachHost == "127.0.0.1" && attachPort > 0 {
+		if localWS, err := getWebsocketURL(attachPort); err == nil && strings.TrimSpace(localWS) != "" {
+			if p := chrome.WebSocketPathFromURL(localWS); strings.TrimSpace(p) != "" {
+				wsPath = p
+			}
+		}
+	}
+	session := &chrome.Session{
+		PID:          meta.PID,
+		Port:         attachPort,
+		WebSocketURL: fmt.Sprintf("ws://%s:%d%s", attachHost, attachPort, wsPath),
+		IsNew:        false,
+	}
+	s, err := initSession(session, role)
+	if err != nil {
+		if tunnelCloser != nil {
+			_ = tunnelCloser.Close()
+		}
+		return nil, err
+	}
+	if tunnelCloser != nil {
+		s.closers = append(s.closers, tunnelCloser)
+	}
+	return s, nil
 }
 
 func extractChromeSessionJSON(output string) string {
@@ -757,6 +968,166 @@ func shellQuote(v string) string {
 	v = strings.TrimSpace(v)
 	v = strings.ReplaceAll(v, `'`, `'\''`)
 	return "'" + v + "'"
+}
+
+func psLiteral(v string) string {
+	v = strings.TrimSpace(v)
+	v = strings.ReplaceAll(v, `'`, `''`)
+	return "'" + v + "'"
+}
+
+func resolveReachableDebugHost(port int, nodeInfo sshv1.MeshNode) string {
+	hosts := []string{"127.0.0.1"}
+	if gw := detectWSLHostGatewayIP(); gw != "" {
+		hosts = append(hosts, gw)
+	}
+	if h := strings.TrimSpace(nodeInfo.Host); h != "" {
+		hosts = append(hosts, h)
+	}
+	for _, h := range hosts {
+		if canDialHostPort(h, port, 1200*time.Millisecond) {
+			return h
+		}
+	}
+	return ""
+}
+
+func detectWSLHostGatewayIP() string {
+	raw, err := os.ReadFile("/etc/resolv.conf")
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "nameserver ") {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		return strings.TrimSpace(parts[1])
+	}
+	return ""
+}
+
+func canDialHostPort(host string, port int, timeout time.Duration) bool {
+	host = strings.TrimSpace(host)
+	if host == "" || port <= 0 {
+		return false
+	}
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", host, port), timeout)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+func openSSHDebugTunnel(nodeInfo sshv1.MeshNode, remotePort int) (io.Closer, int, error) {
+	client, err := sshv1.DialSSH(nodeInfo.Host, nodeInfo.Port, nodeInfo.User, "")
+	if err != nil {
+		if closer, port, xerr := openExternalSSHTunnel(nodeInfo, remotePort); xerr == nil {
+			return closer, port, nil
+		}
+		return nil, 0, err
+	}
+	localPort, err := allocateLocalPort()
+	if err != nil {
+		_ = client.Close()
+		return nil, 0, err
+	}
+	localAddr := fmt.Sprintf("127.0.0.1:%d", localPort)
+	remoteAddr := fmt.Sprintf("127.0.0.1:%d", remotePort)
+	if err := sshv1.ForwardRemoteToLocal(client, remoteAddr, localAddr); err != nil {
+		_ = client.Close()
+		return nil, 0, err
+	}
+	// Wait briefly for listener startup.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if canDialHostPort("127.0.0.1", localPort, 150*time.Millisecond) {
+			return client, localPort, nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	_ = client.Close()
+	return nil, 0, fmt.Errorf("local tunnel %s did not become ready", localAddr)
+}
+
+type processCloser struct {
+	cmd *exec.Cmd
+}
+
+func (p *processCloser) Close() error {
+	if p == nil || p.cmd == nil || p.cmd.Process == nil {
+		return nil
+	}
+	_ = p.cmd.Process.Kill()
+	_, _ = p.cmd.Process.Wait()
+	return nil
+}
+
+func openExternalSSHTunnel(nodeInfo sshv1.MeshNode, remotePort int) (io.Closer, int, error) {
+	sshPath, err := exec.LookPath("ssh")
+	if err != nil {
+		return nil, 0, err
+	}
+	localPort, err := allocateLocalPort()
+	if err != nil {
+		return nil, 0, err
+	}
+	target := fmt.Sprintf("%s@%s", nodeInfo.User, nodeInfo.Host)
+	localSpec := fmt.Sprintf("127.0.0.1:%d:127.0.0.1:%d", localPort, remotePort)
+	args := []string{
+		"-o", "BatchMode=yes",
+		"-o", "ExitOnForwardFailure=yes",
+		"-o", "ConnectTimeout=6",
+		"-p", nodeInfo.Port,
+		"-N",
+		"-L", localSpec,
+		target,
+	}
+	cmd := exec.Command(sshPath, args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return nil, 0, err
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+			msg := strings.TrimSpace(stderr.String())
+			if msg == "" {
+				msg = "ssh tunnel exited early"
+			}
+			return nil, 0, errors.New(msg)
+		}
+		if canDialHostPort("127.0.0.1", localPort, 150*time.Millisecond) {
+			return &processCloser{cmd: cmd}, localPort, nil
+		}
+		time.Sleep(60 * time.Millisecond)
+	}
+	_ = cmd.Process.Kill()
+	_, _ = cmd.Process.Wait()
+	msg := strings.TrimSpace(stderr.String())
+	if msg == "" {
+		msg = "ssh tunnel did not become ready"
+	}
+	return nil, 0, errors.New(msg)
+}
+
+func allocateLocalPort() (int, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	defer l.Close()
+	addr, ok := l.Addr().(*net.TCPAddr)
+	if !ok || addr.Port <= 0 {
+		return 0, fmt.Errorf("failed to allocate local port")
+	}
+	return addr.Port, nil
 }
 
 func findAttachableDialtoneSession(role string, headless bool) *chrome.Session {
@@ -794,6 +1165,12 @@ func findAttachableDialtoneSession(role string, headless bool) *chrome.Session {
 
 func (sc *StepContext) EnsureBrowser(opts BrowserOptions) (*BrowserSession, error) {
 	if sc.Session != nil {
+		if !isBrowserSessionAlive(sc.Session) {
+			sc.Session.Close()
+			sc.Session = nil
+		}
+	}
+	if sc.Session != nil {
 		sc.bindBrowserSession(sc.Session)
 		if strings.TrimSpace(opts.URL) != "" {
 			if err := sc.Session.Run(chromedp.Navigate(opts.URL)); err != nil {
@@ -801,6 +1178,12 @@ func (sc *StepContext) EnsureBrowser(opts BrowserOptions) (*BrowserSession, erro
 			}
 		}
 		return sc.Session, nil
+	}
+	if sc.suiteBrowser != nil {
+		if !isBrowserSessionAlive(sc.suiteBrowser) {
+			sc.suiteBrowser.Close()
+			sc.suiteBrowser = nil
+		}
 	}
 	if sc.suiteBrowser != nil {
 		sc.bindBrowserSession(sc.suiteBrowser)
@@ -821,6 +1204,19 @@ func (sc *StepContext) EnsureBrowser(opts BrowserOptions) (*BrowserSession, erro
 		sc.suiteBrowser = s
 	}
 	return s, nil
+}
+
+func isBrowserSessionAlive(s *BrowserSession) bool {
+	if s == nil || s.ctx == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(s.ctx, 1200*time.Millisecond)
+	defer cancel()
+	var n int
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`1+1`, &n)); err != nil {
+		return false
+	}
+	return n == 2
 }
 
 func (sc *StepContext) AttachBrowserByPort(port int, role string) (*BrowserSession, error) {
@@ -1089,8 +1485,10 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 		}
 		if sharedBrowser != nil {
 			stepCtx.bindBrowserSession(sharedBrowser)
-			if cerr := sharedBrowser.CloseExtraTabsKeepMain(); cerr != nil {
-				logs.Warn("%s unable to cleanup extra browser tabs before step %s: %v", testTag, step.Name, cerr)
+			if !RemoteBrowserConfigured() {
+				if cerr := sharedBrowser.CloseExtraTabsKeepMain(); cerr != nil {
+					logs.Warn("%s unable to cleanup extra browser tabs before step %s: %v", testTag, step.Name, cerr)
+				}
 			}
 		}
 		if nc != nil {
@@ -1166,8 +1564,10 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 			break
 		}
 		if sharedBrowser != nil {
-			if cerr := sharedBrowser.CloseExtraTabsKeepMain(); cerr != nil {
-				logs.Warn("%s unable to cleanup extra browser tabs after step %s: %v", testTag, step.Name, cerr)
+			if !RemoteBrowserConfigured() {
+				if cerr := sharedBrowser.CloseExtraTabsKeepMain(); cerr != nil {
+					logs.Warn("%s unable to cleanup extra browser tabs after step %s: %v", testTag, step.Name, cerr)
+				}
 			}
 		}
 	}
