@@ -6,7 +6,73 @@
     "binary": "<repo_root>/bin/dialtone_robot_v2",
     "http_listen": ":8080",
     "nats_listen": "nats://127.0.0.1:4222",
-    "nats_ws_listen": "ws://127.0.0.1:4223"
+    "nats_ws_listen": "ws://127.0.0.1:4223",
+    "processes": [
+      {
+        "name": "robot",
+        "artifact": "robot",
+        "args": [
+          "--listen",
+          "${listen}",
+          "--nats-port",
+          "${nats_port}",
+          "--nats-ws-port",
+          "${nats_ws_port}",
+          "--ui-dist",
+          "${artifact:ui_dist}"
+        ],
+        "env": {
+          "ROBOT_V2_CAMERA_STREAM_URL": "http://127.0.0.1:19090",
+          "ROBOT_V2_MAVLINK_ENABLED": "1"
+        }
+      },
+      {
+        "name": "camera",
+        "artifact": "camera",
+        "depends_on": ["robot"],
+        "args": [
+          "run",
+          "--nats-url",
+          "${nats_url}",
+          "--subject",
+          "camera.heartbeat",
+          "--interval",
+          "250ms",
+          "--listen",
+          ":19090",
+          "--serve-stream=true"
+        ]
+      },
+      {
+        "name": "mavlink",
+        "artifact": "mavlink",
+        "depends_on": ["robot"],
+        "args": [
+          "run",
+          "--nats-url",
+          "${nats_url}",
+          "--mock-if-no-endpoint=true"
+        ],
+        "env": {
+          "MAVLINK_ENDPOINT": "${env:MAVLINK_ENDPOINT}"
+        }
+      },
+      {
+        "name": "repl",
+        "artifact": "repl",
+        "depends_on": ["robot"],
+        "args": [
+          "leader",
+          "--nats-url",
+          "${nats_url}",
+          "--room",
+          "robot",
+          "--embedded-nats=false",
+          "--hostname",
+          "robot-v2"
+        ]
+      }
+    ]
   },
   "artifacts": {
     "sync": {
@@ -17,6 +83,33 @@
       "mavlink": "<repo_root>/bin/dialtone_mavlink_v1",
       "wlan": "<repo_root>/src/plugins/wlan/src_v1",
       "ui_dist": "<repo_root>/src/plugins/robot/src_v2/ui/dist"
+    },
+    "release": {
+      "autoswap": {
+        "asset": "dialtone_autoswap-${goos}-${goarch}",
+        "type": "file"
+      },
+      "robot": {
+        "asset": "dialtone_robot_v2-${goos}-${goarch}",
+        "type": "file"
+      },
+      "repl": {
+        "asset": "dialtone_repl-${goos}-${goarch}",
+        "type": "file"
+      },
+      "camera": {
+        "asset": "dialtone_camera_v1-${goos}-${goarch}",
+        "type": "file"
+      },
+      "mavlink": {
+        "asset": "dialtone_mavlink_v1-${goos}-${goarch}",
+        "type": "file"
+      },
+      "ui_dist": {
+        "asset": "robot_src_v2_ui_dist-${goos}-${goarch}.tar.gz",
+        "type": "dir",
+        "extract": "tar.gz"
+      }
     }
   },
   "capabilities": {

@@ -82,6 +82,10 @@ func RunSyncCode(versionDir string, args []string) error {
 		path.Join(robotBase, "ui", "vite.config.ts"),
 		path.Join("plugins", "mavlink"),
 		path.Join("plugins", "camera"),
+		path.Join("plugins", "autoswap"),
+		path.Join("plugins", "repl", "src_v1"),
+		path.Join("plugins", "config"),
+		path.Join("plugins", "test"),
 		path.Join("plugins", "logs"),
 		path.Join("plugins", "ui", "src_v1", "ui"),
 	}

@@ -14,12 +14,18 @@ var defaultSyncExcludes = []string{
 	".git/",
 	"bin/",
 	"node_modules/",
+	"**/node_modules/",
 	".pixi/",
+	"**/.pixi/",
 	".direnv/",
+	"**/.direnv/",
 	".DS_Store",
 	"dist/",
+	"**/dist/",
 	"tmp/",
+	"**/tmp/",
 	".dialtone/",
+	"**/.dialtone/",
 }
 
 type SyncCodeOptions struct {
@@ -159,9 +165,9 @@ func runRemoteRsync(src string, node MeshNode, dest string, del bool, excludes [
 		args = append(args, "--exclude", e)
 	}
 	sshTarget := fmt.Sprintf("%s@%s", node.User, node.Host)
-	sshCmd := "ssh"
+	sshCmd := "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
 	if strings.TrimSpace(node.Port) != "" && node.Port != "22" {
-		sshCmd = fmt.Sprintf("ssh -p %s", node.Port)
+		sshCmd = fmt.Sprintf("%s -p %s", sshCmd, node.Port)
 	}
 	args = append(args, "-e", sshCmd, src+"/", fmt.Sprintf("%s:%s/", sshTarget, dest))
 	logs.Raw("rsync remote: %s -> %s:%s", src, sshTarget, dest)

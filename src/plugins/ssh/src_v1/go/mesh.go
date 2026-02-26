@@ -172,6 +172,34 @@ func RunNodeCommand(target string, command string, opts CommandOptions) (string,
 	return out, nil
 }
 
+func UploadNodeFile(target, localPath, remotePath string, opts CommandOptions) error {
+	node, err := ResolveMeshNode(target)
+	if err != nil {
+		return err
+	}
+	if shouldUseLocalPowerShell(node) {
+		return fmt.Errorf("mesh upload for %s via powershell transport is not supported", node.Name)
+	}
+	user := strings.TrimSpace(opts.User)
+	if user == "" {
+		user = node.User
+	}
+	port := strings.TrimSpace(opts.Port)
+	if port == "" {
+		port = node.Port
+	}
+	host := resolvePreferredHost(node, port)
+	client, err := dialSSHFunc(host, port, user, opts.Password)
+	if err != nil {
+		return fmt.Errorf("ssh dial %s@%s:%s failed: %w", user, host, port, err)
+	}
+	defer client.Close()
+	if err := UploadFile(client, localPath, remotePath); err != nil {
+		return fmt.Errorf("upload failed on %s: %w", node.Name, err)
+	}
+	return nil
+}
+
 func resolvePreferredHost(node MeshNode, port string) string {
 	seen := map[string]struct{}{}
 	candidates := make([]string, 0, len(node.HostCandidates)+1)
