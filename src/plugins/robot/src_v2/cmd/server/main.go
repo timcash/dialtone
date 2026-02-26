@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
@@ -17,6 +18,20 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
+	})
+	mux.HandleFunc("/api/init", func(w http.ResponseWriter, _ *http.Request) {
+		payload := map[string]any{
+			"status": "scaffold",
+			"wsPath": "/natsws",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(payload)
+	})
+	mux.HandleFunc("/stream", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "camera stream not configured in scaffold", http.StatusServiceUnavailable)
+	})
+	mux.HandleFunc("/natsws", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "nats websocket bridge not configured in scaffold", http.StatusServiceUnavailable)
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(*uiDist) == "" {

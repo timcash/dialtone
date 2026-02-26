@@ -15,14 +15,19 @@ Each field must include evidence:
 ## Task A - robot src_v2 runtime/webserver + embedded NATS updates
 - `local-test`: done (scaffold phase 1)
   - commands:
-    - `./dialtone.sh go src_v1 exec build -o bin/dialtone_robot_v2 ./plugins/robot/src_v2/cmd/server/main.go`
-    - `./src/bin/dialtone_robot_v2 --listen :18082`
+    - `./dialtone.sh go src_v1 exec build -o ../bin/dialtone_robot_v2 ./plugins/robot/src_v2/cmd/server/main.go`
+    - `./bin/dialtone_robot_v2 --listen :18082`
     - `curl http://127.0.0.1:18082/health`
     - `curl -o /tmp/robot_v2_root.out -w '%{http_code}' http://127.0.0.1:18082/`
+    - `curl http://127.0.0.1:18082/api/init`
+    - `curl -i http://127.0.0.1:18082/natsws`
+    - `curl -i http://127.0.0.1:18082/stream`
     - `./dialtone.sh robot src_v2 test`
   - result summary:
     - `/health` returned `ok`
     - `/` returned `503` as expected when `ui/dist` is not configured yet
+    - `/api/init` returned scaffold JSON with `wsPath=/natsws`
+    - `/natsws` and `/stream` returned scaffold `503` (expected until bridge/camera wiring lands)
     - `robot src_v2 test` passed with `src/plugins/test/src_v1` registry orchestration
     - steps use `WaitForStepMessageAfterAction` for action -> wait assertions
   - artifacts:

@@ -18,7 +18,7 @@ func Register(reg *testv1.Registry) {
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			if err := ctx.WaitForStepMessageAfterAction("build complete", 20*time.Second, func() error {
 				ctx.Infof("[ACTION] build robot src_v2 server binary")
-				cmd := exec.Command("./dialtone.sh", "go", "src_v1", "exec", "build", "-o", "src/bin/dialtone_robot_v2", "./plugins/robot/src_v2/cmd/server/main.go")
+				cmd := exec.Command("./dialtone.sh", "go", "src_v1", "exec", "build", "-o", "../bin/dialtone_robot_v2", "./plugins/robot/src_v2/cmd/server/main.go")
 				cmd.Dir = repoRoot()
 				out, err := cmd.CombinedOutput()
 				if err != nil {
@@ -38,7 +38,7 @@ func Register(reg *testv1.Registry) {
 		Name: "02-server-health-and-root-behavior",
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			repo := repoRoot()
-			binPath := filepath.Join(repo, "src", "bin", "dialtone_robot_v2")
+			binPath := filepath.Join(repo, "bin", "dialtone_robot_v2")
 			port := "18082"
 			baseURL := "http://127.0.0.1:" + port
 
@@ -85,6 +85,67 @@ func Register(reg *testv1.Registry) {
 					return fmt.Errorf("expected 503, got %d", resp.StatusCode)
 				}
 				ctx.Infof("root returned 503")
+				return nil
+			}); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+
+			if err := ctx.WaitForStepMessageAfterAction("api init returned wsPath", 5*time.Second, func() error {
+				ctx.Infof("[ACTION] probe /api/init scaffold payload")
+				resp, err := http.Get(baseURL + "/api/init")
+				if err != nil {
+					ctx.Errorf("api/init probe failed: %v", err)
+					return err
+				}
+				defer resp.Body.Close()
+				if resp.StatusCode != http.StatusOK {
+					ctx.Errorf("unexpected /api/init status: %d", resp.StatusCode)
+					return fmt.Errorf("expected 200 from /api/init, got %d", resp.StatusCode)
+				}
+				buf := make([]byte, 4096)
+				n, _ := resp.Body.Read(buf)
+				body := string(buf[:n])
+				if !strings.Contains(body, "\"wsPath\":\"/natsws\"") {
+					ctx.Errorf("missing wsPath in /api/init payload: %s", body)
+					return fmt.Errorf("missing wsPath in /api/init payload")
+				}
+				ctx.Infof("api init returned wsPath")
+				return nil
+			}); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+
+			if err := ctx.WaitForStepMessageAfterAction("natsws returned 503", 5*time.Second, func() error {
+				ctx.Infof("[ACTION] probe /natsws scaffold behavior")
+				resp, err := http.Get(baseURL + "/natsws")
+				if err != nil {
+					ctx.Errorf("natsws probe failed: %v", err)
+					return err
+				}
+				defer resp.Body.Close()
+				if resp.StatusCode != http.StatusServiceUnavailable {
+					ctx.Errorf("unexpected /natsws status: %d", resp.StatusCode)
+					return fmt.Errorf("expected 503 from /natsws, got %d", resp.StatusCode)
+				}
+				ctx.Infof("natsws returned 503")
+				return nil
+			}); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+
+			if err := ctx.WaitForStepMessageAfterAction("stream returned 503", 5*time.Second, func() error {
+				ctx.Infof("[ACTION] probe /stream scaffold behavior")
+				resp, err := http.Get(baseURL + "/stream")
+				if err != nil {
+					ctx.Errorf("stream probe failed: %v", err)
+					return err
+				}
+				defer resp.Body.Close()
+				if resp.StatusCode != http.StatusServiceUnavailable {
+					ctx.Errorf("unexpected /stream status: %d", resp.StatusCode)
+					return fmt.Errorf("expected 503 from /stream, got %d", resp.StatusCode)
+				}
+				ctx.Infof("stream returned 503")
 				return nil
 			}); err != nil {
 				return testv1.StepRunResult{}, err
