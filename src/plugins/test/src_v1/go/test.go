@@ -709,7 +709,7 @@ func startRemoteBrowser(node string, opts BrowserOptions) (*BrowserSession, erro
 	if url == "" {
 		url = "about:blank"
 	}
-	cmd := fmt.Sprintf("cd ~/dialtone && ./dialtone.sh chrome src_v1 session --role %s --headless=%t --gpu=%t --reuse-existing=%t --debug-address 0.0.0.0 --url %s",
+	cmd := fmt.Sprintf("repo=''; for d in \"$HOME/dialtone\" /home/user/dialtone /home/tim/dialtone /mnt/c/Users/tim/dialtone /mnt/c/Users/timca/dialtone; do if [ -d \"$d\" ]; then repo=\"$d\"; break; fi; done; if [ -z \"$repo\" ]; then echo 'dialtone repo not found on remote node'; exit 1; fi; cd \"$repo\" && ./dialtone.sh chrome src_v1 session --role %s --headless=%t --gpu=%t --reuse-existing=%t --debug-address 0.0.0.0 --url %s",
 		shellQuote(role), opts.Headless, opts.GPU, opts.ReuseExisting, shellQuote(url))
 	out, err := sshv1.RunNodeCommand(nodeInfo.Name, cmd, sshv1.CommandOptions{})
 	if err != nil {

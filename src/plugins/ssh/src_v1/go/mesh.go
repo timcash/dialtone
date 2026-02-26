@@ -18,6 +18,7 @@ type MeshNode struct {
 	Port                string
 	OS                  string
 	PreferWSLPowerShell bool
+	RepoCandidates      []string
 }
 
 type CommandOptions struct {
@@ -34,6 +35,9 @@ var defaultMeshNodes = []MeshNode{
 		Host:    "legion-wsl-1.shad-artichoke.ts.net",
 		Port:    "22",
 		OS:      "linux",
+		RepoCandidates: []string{
+			"/home/user/dialtone",
+		},
 	},
 	{
 		Name:    "chroma",
@@ -42,6 +46,11 @@ var defaultMeshNodes = []MeshNode{
 		Host:    "chroma-1.shad-artichoke.ts.net",
 		Port:    "22",
 		OS:      "macos",
+		RepoCandidates: []string{
+			"/Users/dev/dialtone",
+			"/Users/dev/dialtone",
+			"/Users/dev/Documents/dialtone",
+		},
 	},
 	{
 		Name:    "darkmac",
@@ -50,6 +59,11 @@ var defaultMeshNodes = []MeshNode{
 		Host:    "darkmac.shad-artichoke.ts.net",
 		Port:    "22",
 		OS:      "macos",
+		RepoCandidates: []string{
+			"/Users/tim/dialtone",
+			"/Users/tim/dialtone",
+			"/Users/tim/Documents/dialtone",
+		},
 	},
 	{
 		Name:    "rover",
@@ -58,6 +72,10 @@ var defaultMeshNodes = []MeshNode{
 		Host:    "rover-1.shad-artichoke.ts.net",
 		Port:    "22",
 		OS:      "linux",
+		RepoCandidates: []string{
+			"/home/tim/dialtone",
+			"/home/user/dialtone",
+		},
 	},
 	{
 		Name:                "legion",
@@ -67,6 +85,14 @@ var defaultMeshNodes = []MeshNode{
 		Port:                "2223",
 		OS:                  "windows",
 		PreferWSLPowerShell: true,
+		RepoCandidates: []string{
+			"/home/user/dialtone",
+			"/home/user/dialtone",
+			"/home/tim/dialtone",
+			"/mnt/c/Users/tim/dialtone",
+			"/mnt/c/Users/timca/dialtone",
+			"/mnt/c/Users/timca/code3/dialtone",
+		},
 	},
 }
 
@@ -167,7 +193,7 @@ func runPowerShellCommand(command string) (string, error) {
 	psCommand := command
 	// Most callers provide POSIX shell command strings; route those through WSL bash.
 	if looksLikePosixShell(command) {
-		psCommand = "wsl.exe -e bash -lc '" + strings.ReplaceAll(command, "'", "''") + "'"
+		psCommand = "Set-Location C:\\; wsl.exe -e bash -lc '" + strings.ReplaceAll(command, "'", "''") + "'"
 	}
 	cmd := execCommandFunc(powerShellPath, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psCommand)
 	out, err := cmd.CombinedOutput()
@@ -180,7 +206,11 @@ func runPowerShellCommand(command string) (string, error) {
 func looksLikePosixShell(command string) bool {
 	c := strings.TrimSpace(command)
 	return strings.Contains(c, "&&") ||
+		strings.Contains(c, "|") ||
+		strings.Contains(c, ";") ||
 		strings.Contains(c, "./") ||
+		strings.Contains(c, "/home/") ||
+		strings.Contains(c, "/mnt/") ||
 		strings.Contains(c, "cd ~/") ||
 		strings.Contains(c, "export ")
 }
