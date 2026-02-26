@@ -24,6 +24,8 @@ func Run(args []string) error {
 		return runCommand(args[1:])
 	case "run-all":
 		return runCommandAll(args[1:])
+	case "sync-repos":
+		return runSyncRepos(args[1:])
 	default:
 		PrintUsage()
 		return fmt.Errorf("unknown ssh command: %s", args[0])
@@ -39,6 +41,9 @@ func PrintUsage() {
 	logs.Raw("                                        Run command on a mesh node")
 	logs.Raw("  run-all --cmd C [--user U --port P --password X]")
 	logs.Raw("                                        Run command on every mesh node")
+	logs.Raw("  sync-repos [--branch B] [--allow-dirty]")
+	logs.Raw("                                        Sync dialtone repo on every mesh node to one branch")
+	logs.Raw("                                        Per-node repo override: --repo-<node> /path/to/repo")
 	logs.Raw("  test                                  Run ssh plugin self-check suite")
 }
 
@@ -115,6 +120,56 @@ func runCommandAll(args []string) error {
 	}
 	if failures > 0 {
 		return fmt.Errorf("run-all finished with %d node failures", failures)
+	}
+	return nil
+}
+
+func runSyncRepos(args []string) error {
+	fs := flag.NewFlagSet("ssh sync-repos", flag.ContinueOnError)
+	fs.SetOutput(nil)
+	branch := fs.String("branch", "main", "Branch to sync")
+	allowDirty := fs.Bool("allow-dirty", false, "Allow sync even if node repo has local changes")
+	repoByNode := map[string]*string{}
+	for _, node := range ListMeshNodes() {
+		key := "repo-" + node.Name
+		repoByNode[node.Name] = fs.String(key, "", "Repo path override for "+node.Name)
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	repoPaths := map[string]string{}
+	for k, v := range repoByNode {
+		if strings.TrimSpace(*v) != "" {
+			repoPaths[k] = strings.TrimSpace(*v)
+		}
+	}
+
+	results := SyncReposAll(RepoSyncOptions{
+		Branch:        *branch,
+		AllowDirty:    *allowDirty,
+		NodeRepoPaths: repoPaths,
+	})
+	failed := 0
+	skipped := 0
+	for _, r := range results {
+		logs.Raw("== %s ==", r.Node)
+		logs.Raw("repo=%s branch=%s", r.Repo, r.Branch)
+		if strings.TrimSpace(r.Output) != "" {
+			logs.Raw("%s", r.Output)
+		}
+		if r.Skipped {
+			skipped++
+		}
+		if r.Err != nil {
+			failed++
+			logs.Raw("ERROR: %v", r.Err)
+		}
+	}
+	if failed > 0 {
+		return fmt.Errorf("sync-repos finished with %d failures (%d skipped dirty)", failed, skipped)
+	}
+	if skipped > 0 {
+		logs.Warn("sync-repos completed with %d dirty-skip node(s)", skipped)
 	}
 	return nil
 }
