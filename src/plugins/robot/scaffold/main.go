@@ -175,6 +175,8 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 	case "test":
 		testPkg := "./plugins/robot/" + version + "/test/cmd"
 		return go_plugin.RunGo("run", testPkg)
+	case "sync-code":
+		return robot_cli.RunSyncCode(version, args)
 	default:
 		return fmt.Errorf("unknown robot command: %s", command)
 	}

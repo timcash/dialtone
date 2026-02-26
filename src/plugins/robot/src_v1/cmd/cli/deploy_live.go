@@ -26,8 +26,8 @@ func RunSyncCode(versionDir string, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if strings.TrimSpace(*host) == "" || strings.TrimSpace(*pass) == "" {
-		return fmt.Errorf("sync-code requires --host and --pass (or ROBOT_HOST/ROBOT_PASSWORD in env/.env)")
+	if strings.TrimSpace(*host) == "" {
+		return fmt.Errorf("sync-code requires --host (or ROBOT_HOST in env/.env)")
 	}
 	if strings.TrimSpace(*user) == "" {
 		return fmt.Errorf("sync-code requires --user (or ROBOT_USER in env/.env)")
@@ -67,8 +67,11 @@ func RunSyncCode(versionDir string, args []string) error {
 	}
 
 	robotBase := path.Join("plugins", "robot", versionDir)
-	robotSyncPaths := []string{
+	robotSyncCandidates := []string{
 		path.Join(robotBase, "cmd"),
+		path.Join(robotBase, "go"),
+		path.Join(robotBase, "config"),
+		path.Join(robotBase, "test"),
 		path.Join(robotBase, "ui", "src"),
 		path.Join(robotBase, "ui", "public"),
 		path.Join(robotBase, "ui", "index.html"),
@@ -80,6 +83,12 @@ func RunSyncCode(versionDir string, args []string) error {
 		path.Join("plugins", "camera"),
 		path.Join("plugins", "logs"),
 		path.Join("plugins", "ui", "src_v1", "ui"),
+	}
+	robotSyncPaths := make([]string, 0, len(robotSyncCandidates))
+	for _, p := range robotSyncCandidates {
+		if _, statErr := os.Stat(filepath.Join(localSrc, filepath.FromSlash(p))); statErr == nil {
+			robotSyncPaths = append(robotSyncPaths, p)
+		}
 	}
 	for _, p := range robotSyncPaths {
 		if err := syncPath(client, localSrc, *remoteDir, p); err != nil {
