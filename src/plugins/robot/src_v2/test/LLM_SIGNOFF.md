@@ -13,9 +13,25 @@ Each field must include evidence:
 - links/paths to artifacts (logs/screenshots)
 
 ## Task A - robot src_v2 runtime/webserver + embedded NATS updates
-- `local-test`:
-- `on-robot-test`:
-- `documents-update`:
+- `local-test`: done (scaffold phase 1)
+  - commands:
+    - `./dialtone.sh go src_v1 exec build -o bin/dialtone_robot_v2 ./plugins/robot/src_v2/cmd/server/main.go`
+    - `./src/bin/dialtone_robot_v2 --listen :18082`
+    - `curl http://127.0.0.1:18082/health`
+    - `curl -o /tmp/robot_v2_root.out -w '%{http_code}' http://127.0.0.1:18082/`
+  - result summary:
+    - `/health` returned `ok`
+    - `/` returned `503` as expected when `ui/dist` is not configured yet
+  - artifacts:
+    - `/tmp/robot_v2_server.log`
+    - `/tmp/robot_v2_root.out`
+- `on-robot-test`: not-done
+  - reason:
+    - Task A currently at local scaffold stage; remote robot validation deferred until `/natsws` and robot-specific endpoints are implemented.
+- `documents-update`: done
+  - changed docs:
+    - `src/plugins/robot/src_v2/v2.md`
+    - `src/plugins/robot/src_v2/test/LLM_SIGNOFF.md`
 
 ## Task B - robot src_v2 UI/module shape
 - `local-test`:
