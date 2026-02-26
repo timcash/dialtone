@@ -10,6 +10,14 @@
       "mavlink": "<repo_root>/bin/dialtone_mavlink_v1",
       "wlan": "<repo_root>/src/plugins/wlan/src_v1",
       "ui_dist": "<repo_root>/src/plugins/robot/src_v2/ui/dist"
+    },
+    "release": {
+      "autoswap": {"asset": "dialtone_autoswap-${goos}-${goarch}", "type": "file"},
+      "robot": {"asset": "dialtone_robot_v2-${goos}-${goarch}", "type": "file"},
+      "repl": {"asset": "dialtone_repl-${goos}-${goarch}", "type": "file"},
+      "camera": {"asset": "dialtone_camera_v1-${goos}-${goarch}", "type": "file"},
+      "mavlink": {"asset": "dialtone_mavlink_v1-${goos}-${goarch}", "type": "file"},
+      "ui_dist": {"asset": "robot_src_v2_ui_dist-${goos}-${goarch}.tar.gz", "type": "dir", "extract": "tar.gz"}
     }
   },
   "http": {

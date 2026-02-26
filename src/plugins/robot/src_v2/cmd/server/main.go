@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -34,6 +36,8 @@ func main() {
 	natsPort := flag.Int("nats-port", envIntOrDefault("ROBOT_V2_NATS_PORT", 4222), "Embedded NATS TCP port")
 	natsWSPort := flag.Int("nats-ws-port", envIntOrDefault("ROBOT_V2_NATS_WS_PORT", 4223), "Embedded NATS websocket port")
 	flag.Parse()
+	cameraStreamURL := strings.TrimSpace(envOrDefault("ROBOT_V2_CAMERA_STREAM_URL", ""))
+	mavlinkEnabled := strings.TrimSpace(envOrDefault("ROBOT_V2_MAVLINK_ENABLED", "0")) == "1"
 
 	resolvedUIDist := strings.TrimSpace(*uiDist)
 	if resolvedUIDist == "" {
@@ -66,6 +70,14 @@ func main() {
 		writeJSON(w, payload)
 	})
 	mux.HandleFunc("/api/integration-health", func(w http.ResponseWriter, _ *http.Request) {
+		cameraStatus := "not-configured"
+		if cameraStreamURL != "" {
+			cameraStatus = "configured"
+		}
+		mavlinkStatus := "not-configured"
+		if mavlinkEnabled {
+			mavlinkStatus = "configured"
+		}
 		payload := map[string]any{
 			"status": "degraded",
 			"natsws": map[string]any{
@@ -80,10 +92,10 @@ func main() {
 				}(),
 			},
 			"camera": map[string]any{
-				"status": "not-configured",
+				"status": cameraStatus,
 			},
 			"mavlink": map[string]any{
-				"status": "not-configured",
+				"status": mavlinkStatus,
 			},
 		}
 		writeJSON(w, payload)
@@ -91,8 +103,15 @@ func main() {
 	mux.HandleFunc("/api/bookmark", func(w http.ResponseWriter, r *http.Request) {
 		bookmarkHandler(w, r)
 	})
-	mux.HandleFunc("/stream", func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "camera stream not configured in scaffold", http.StatusServiceUnavailable)
+	mux.HandleFunc("/stream", func(w http.ResponseWriter, r *http.Request) {
+		if cameraStreamURL == "" {
+			http.Error(w, "camera stream not configured in scaffold", http.StatusServiceUnavailable)
+			return
+		}
+		if err := proxyStream(w, r, cameraStreamURL); err != nil {
+			http.Error(w, "camera stream upstream unavailable", http.StatusBadGateway)
+			return
+		}
 	})
 	mux.HandleFunc("/natsws", func(w http.ResponseWriter, r *http.Request) {
 		proxyNATSWS(w, r, fmt.Sprintf("ws://127.0.0.1:%d", *natsWSPort))
@@ -310,4 +329,23 @@ func sanitizeFilename(name string) string {
 func writeJSON(w http.ResponseWriter, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func proxyStream(w http.ResponseWriter, r *http.Request, upstreamBase string) error {
+	u, err := url.Parse(strings.TrimSpace(upstreamBase))
+	if err != nil {
+		return err
+	}
+	proxy := httputil.NewSingleHostReverseProxy(u)
+	originalDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		originalDirector(req)
+		req.URL.Path = "/stream"
+		req.Host = u.Host
+	}
+	proxy.ErrorHandler = func(rw http.ResponseWriter, _ *http.Request, _ error) {
+		http.Error(rw, "camera stream upstream unavailable", http.StatusBadGateway)
+	}
+	proxy.ServeHTTP(w, r)
+	return nil
 }
