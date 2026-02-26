@@ -19,9 +19,12 @@ Each field must include evidence:
     - `./src/bin/dialtone_robot_v2 --listen :18082`
     - `curl http://127.0.0.1:18082/health`
     - `curl -o /tmp/robot_v2_root.out -w '%{http_code}' http://127.0.0.1:18082/`
+    - `./dialtone.sh robot src_v2 test`
   - result summary:
     - `/health` returned `ok`
     - `/` returned `503` as expected when `ui/dist` is not configured yet
+    - `robot src_v2 test` passed with `src/plugins/test/src_v1` registry orchestration
+    - steps use `WaitForStepMessageAfterAction` for action -> wait assertions
   - artifacts:
     - `/tmp/robot_v2_server.log`
     - `/tmp/robot_v2_root.out`
