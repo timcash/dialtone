@@ -173,7 +173,8 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 		}
 		return test_plugin.RunDev(opts)
 	case "test":
-		return fmt.Errorf("standard test logic not yet implemented for robot generic fallback")
+		testPkg := "./plugins/robot/" + version + "/test/cmd"
+		return go_plugin.RunGo("run", testPkg)
 	default:
 		return fmt.Errorf("unknown robot command: %s", command)
 	}
