@@ -20,6 +20,7 @@ import (
 	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	sshplugin "dialtone/dev/plugins/ssh/src_v1/go"
+	sshlib "golang.org/x/crypto/ssh"
 )
 
 const defaultVersion = "src_v3"
@@ -66,6 +67,8 @@ func Run(args []string) error {
 		return runTest(paths, rest)
 	case "deploy":
 		return runDeploy(paths, rest)
+	case "verify-host-builds":
+		return runVerifyHostBuilds(paths, rest)
 	case "relay":
 		return runRelay(paths, rest)
 	default:
@@ -113,6 +116,9 @@ func printUsage() {
 	logs.Raw("                                Run local and/or rendezvous tests")
 	logs.Raw("  deploy --host H --user U --pass P [--port 22] [--remote-path PATH]")
 	logs.Raw("                                Build for remote arch and upload via SSH")
+	logs.Raw("  verify-host-builds [--hosts chroma,darkmac,legion] [--repo-dir ~/dialtone]")
+	logs.Raw("                     [--host H --user U --pass P --port 22 --name custom]")
+	logs.Raw("                                SSH each host and run native host build")
 	logs.Raw("  relay serve [--listen :8080]  Run local rendezvous web server")
 	logs.Raw("  help                          Show this help")
 }
@@ -274,6 +280,109 @@ func runDeploy(paths Paths, args []string) error {
 		}
 	}
 	logs.Info("deployed %s -> %s (%s)", localBin, rp, targetArch)
+	return nil
+}
+
+type buildHostSpec struct {
+	Name string
+	Host string
+	Port string
+	User string
+	Pass string
+}
+
+func runVerifyHostBuilds(paths Paths, args []string) error {
+	fs := flag.NewFlagSet("swarm-verify-host-builds", flag.ContinueOnError)
+	hostsFlag := fs.String("hosts", firstNonEmpty(os.Getenv("SWARM_BUILD_HOSTS"), "chroma,darkmac,legion"), "Comma-separated host names: robot,chroma,darkmac,legion")
+	host := fs.String("host", "", "Single SSH host override")
+	port := fs.String("port", "22", "Single SSH port override")
+	user := fs.String("user", "", "Single SSH user override")
+	pass := fs.String("pass", "", "Single SSH password override")
+	name := fs.String("name", "custom", "Single host display name")
+	repoDir := fs.String("repo-dir", "~/dialtone", "Remote repo directory")
+	install := fs.Bool("install", false, "Run install before build on remote hosts")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	specs := []buildHostSpec{}
+	if strings.TrimSpace(*host) != "" {
+		if strings.TrimSpace(*user) == "" || strings.TrimSpace(*pass) == "" {
+			return fmt.Errorf("single-host mode requires --user and --pass")
+		}
+		specs = append(specs, buildHostSpec{
+			Name: strings.TrimSpace(*name),
+			Host: strings.TrimSpace(*host),
+			Port: strings.TrimSpace(*port),
+			User: strings.TrimSpace(*user),
+			Pass: strings.TrimSpace(*pass),
+		})
+	} else {
+		var err error
+		specs, err = resolveBuildHostSpecs(*hostsFlag)
+		if err != nil {
+			return err
+		}
+	}
+	remoteRepo := strings.TrimSpace(*repoDir)
+	if remoteRepo == "" {
+		remoteRepo = "~/dialtone"
+	}
+	var failed []string
+	for _, spec := range specs {
+		logs.Info("verify host build: %s (%s@%s:%s)", spec.Name, spec.User, spec.Host, spec.Port)
+		if err := verifySingleHostBuild(spec, remoteRepo, *install); err != nil {
+			logs.Error("host %s failed: %v", spec.Name, err)
+			failed = append(failed, spec.Name)
+			continue
+		}
+		logs.Info("host %s build verification passed", spec.Name)
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("verify-host-builds failed for: %s", strings.Join(failed, ", "))
+	}
+	return nil
+}
+
+func verifySingleHostBuild(spec buildHostSpec, repoDir string, install bool) error {
+	client, err := sshplugin.DialSSH(spec.Host, spec.Port, spec.User, spec.Pass)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	osName, archName, err := detectRemoteTarget(client)
+	if err != nil {
+		return err
+	}
+	logs.Info("remote target %s: %s/%s", spec.Name, osName, archName)
+
+	installCmd := ""
+	if install {
+		switch osName {
+		case "linux":
+			installCmd = "./dialtone.sh swarm src_v3 install"
+		case "darwin":
+			installCmd = "./dialtone.sh swarm src_v3 install --skip-apt"
+		default:
+			return fmt.Errorf("unsupported remote OS %q", osName)
+		}
+	}
+	cmdParts := []string{
+		"cd " + shellQuote(repoDir),
+	}
+	if installCmd != "" {
+		cmdParts = append(cmdParts, installCmd)
+	}
+	cmdParts = append(cmdParts,
+		"./dialtone.sh swarm src_v3 build --arch host",
+		"ls -lh src/plugins/swarm/src_v3/dialtone_swarm_v3_*",
+	)
+	out, err := sshplugin.RunSSHCommand(client, strings.Join(cmdParts, " && "))
+	if err != nil {
+		return err
+	}
+	logs.Info("remote build output (%s):\n%s", spec.Name, strings.TrimSpace(out))
 	return nil
 }
 
@@ -656,6 +765,117 @@ func normalizeRemoteArch(raw string) string {
 	default:
 		return ""
 	}
+}
+
+func detectRemoteTarget(client *sshlib.Client) (string, string, error) {
+	osOut, err := sshplugin.RunSSHCommand(client, "uname -s")
+	if err != nil {
+		return "", "", fmt.Errorf("detect remote os failed: %w", err)
+	}
+	archOut, err := sshplugin.RunSSHCommand(client, "uname -m")
+	if err != nil {
+		return "", "", fmt.Errorf("detect remote arch failed: %w", err)
+	}
+	osName := strings.ToLower(strings.TrimSpace(osOut))
+	archName := strings.ToLower(strings.TrimSpace(archOut))
+
+	goos := "linux"
+	switch osName {
+	case "linux":
+		goos = "linux"
+	case "darwin":
+		goos = "darwin"
+	default:
+		return "", "", fmt.Errorf("unsupported remote OS %q", osName)
+	}
+
+	goarch := "arm64"
+	switch archName {
+	case "aarch64", "arm64":
+		goarch = "arm64"
+	case "x86_64", "amd64":
+		goarch = "amd64"
+	default:
+		return "", "", fmt.Errorf("unsupported remote arch %q", archName)
+	}
+	return goos, goarch, nil
+}
+
+func resolveBuildHostSpecs(raw string) ([]buildHostSpec, error) {
+	names := strings.Split(strings.TrimSpace(raw), ",")
+	out := make([]buildHostSpec, 0, len(names))
+	for _, name := range names {
+		n := strings.ToLower(strings.TrimSpace(name))
+		if n == "" {
+			continue
+		}
+		switch n {
+		case "robot":
+			spec := buildHostSpec{
+				Name: "robot",
+				Host: strings.TrimSpace(os.Getenv("ROBOT_HOST")),
+				Port: firstNonEmpty(os.Getenv("ROBOT_PORT"), "22"),
+				User: strings.TrimSpace(os.Getenv("ROBOT_USER")),
+				Pass: strings.TrimSpace(os.Getenv("ROBOT_PASSWORD")),
+			}
+			if spec.Host == "" || spec.User == "" || spec.Pass == "" {
+				return nil, fmt.Errorf("robot host credentials missing (ROBOT_HOST/ROBOT_USER/ROBOT_PASSWORD)")
+			}
+			out = append(out, spec)
+		case "chroma":
+			spec := buildHostSpec{
+				Name: "chroma",
+				Host: firstNonEmpty(os.Getenv("CHROMA_HOST"), "chroma"),
+				Port: firstNonEmpty(os.Getenv("CHROMA_PORT"), "22"),
+				User: firstNonEmpty(os.Getenv("CHROMA_USER"), "dev"),
+				Pass: strings.TrimSpace(os.Getenv("CHROMA_PASSWORD")),
+			}
+			if spec.Pass == "" {
+				return nil, fmt.Errorf("chroma password missing (CHROMA_PASSWORD)")
+			}
+			out = append(out, spec)
+		case "darkmac":
+			spec := buildHostSpec{
+				Name: "darkmac",
+				Host: firstNonEmpty(os.Getenv("DARKMAC_HOST"), "darkmac"),
+				Port: firstNonEmpty(os.Getenv("DARKMAC_PORT"), "22"),
+				User: firstNonEmpty(os.Getenv("DARKMAC_USER"), "tim"),
+				Pass: strings.TrimSpace(os.Getenv("DARKMAC_PASSWORD")),
+			}
+			if spec.Pass == "" {
+				return nil, fmt.Errorf("darkmac password missing (DARKMAC_PASSWORD)")
+			}
+			out = append(out, spec)
+		case "legion":
+			spec := buildHostSpec{
+				Name: "legion",
+				Host: firstNonEmpty(os.Getenv("LEGION_HOST"), "legion"),
+				Port: firstNonEmpty(os.Getenv("LEGION_PORT"), "22"),
+				User: firstNonEmpty(os.Getenv("LEGION_USER"), "tim"),
+				Pass: strings.TrimSpace(os.Getenv("LEGION_PASSWORD")),
+			}
+			if spec.Pass == "" {
+				return nil, fmt.Errorf("legion password missing (LEGION_PASSWORD)")
+			}
+			out = append(out, spec)
+		default:
+			return nil, fmt.Errorf("unsupported host name %q", n)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no hosts configured")
+	}
+	return out, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func goBin(rt configv1.Runtime) string {
