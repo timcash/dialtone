@@ -5,26 +5,48 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 	"github.com/coder/websocket"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 )
 
+type initResponse struct {
+	Version        string `json:"version"`
+	WSPort         int    `json:"ws_port"`
+	InternalWSPort int    `json:"internal_ws_port"`
+	WSPath         string `json:"ws_path"`
+	WSPathCompat   string `json:"wsPath"`
+}
+
 func main() {
+	logs.SetOutput(os.Stdout)
+
 	listen := flag.String("listen", envOrDefault("ROBOT_V2_LISTEN", ":8080"), "HTTP listen address")
 	uiDist := flag.String("ui-dist", envOrDefault("ROBOT_V2_UI_DIST", ""), "Path to robot src_v2 ui/dist")
 	natsPort := flag.Int("nats-port", envIntOrDefault("ROBOT_V2_NATS_PORT", 4222), "Embedded NATS TCP port")
 	natsWSPort := flag.Int("nats-ws-port", envIntOrDefault("ROBOT_V2_NATS_WS_PORT", 4223), "Embedded NATS websocket port")
 	flag.Parse()
 
+	resolvedUIDist := strings.TrimSpace(*uiDist)
+	if resolvedUIDist == "" {
+		if auto, ok := resolveDefaultUIDist(); ok {
+			resolvedUIDist = auto
+			logs.Info("robot src_v2 using inferred ui/dist path: %s", resolvedUIDist)
+		}
+	}
+	appVersion := resolveAppVersion(resolvedUIDist)
+
 	ns, err := startEmbeddedNATS(*natsPort, *natsWSPort)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "robot src_v2 nats startup failed: %v\n", err)
+		logs.Error("robot src_v2 nats startup failed: %v", err)
 		os.Exit(1)
 	}
 	defer ns.Shutdown()
@@ -34,18 +56,28 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("/api/init", func(w http.ResponseWriter, _ *http.Request) {
-		payload := map[string]any{
-			"status": "scaffold",
-			"wsPath": "/natsws",
+		payload := initResponse{
+			Version:        appVersion,
+			WSPort:         *natsWSPort,
+			InternalWSPort: *natsWSPort,
+			WSPath:         "/natsws",
+			WSPathCompat:   "/natsws",
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(payload)
+		writeJSON(w, payload)
 	})
 	mux.HandleFunc("/api/integration-health", func(w http.ResponseWriter, _ *http.Request) {
 		payload := map[string]any{
 			"status": "degraded",
 			"natsws": map[string]any{
 				"status": "ok",
+			},
+			"ui": map[string]any{
+				"status": func() string {
+					if uiDistReady(resolvedUIDist) {
+						return "ok"
+					}
+					return "not-configured"
+				}(),
 			},
 			"camera": map[string]any{
 				"status": "not-configured",
@@ -54,8 +86,10 @@ func main() {
 				"status": "not-configured",
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(payload)
+		writeJSON(w, payload)
+	})
+	mux.HandleFunc("/api/bookmark", func(w http.ResponseWriter, r *http.Request) {
+		bookmarkHandler(w, r)
 	})
 	mux.HandleFunc("/stream", func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "camera stream not configured in scaffold", http.StatusServiceUnavailable)
@@ -64,21 +98,16 @@ func main() {
 		proxyNATSWS(w, r, fmt.Sprintf("ws://127.0.0.1:%d", *natsWSPort))
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if strings.TrimSpace(*uiDist) == "" {
+		if !uiDistReady(resolvedUIDist) {
 			http.Error(w, "robot src_v2 server scaffold active; ui/dist not configured", http.StatusServiceUnavailable)
 			return
 		}
-		index := filepath.Join(*uiDist, "index.html")
-		if _, err := os.Stat(index); err != nil {
-			http.Error(w, fmt.Sprintf("ui index missing at %s", index), http.StatusServiceUnavailable)
-			return
-		}
-		http.FileServer(http.Dir(*uiDist)).ServeHTTP(w, r)
+		serveUISPA(w, r, resolvedUIDist)
 	})
 
-	fmt.Printf("robot src_v2 scaffold server listening on %s\n", *listen)
+	logs.Info("robot src_v2 server listening on %s (nats=%d ws=%d)", *listen, *natsPort, *natsWSPort)
 	if err := http.ListenAndServe(*listen, mux); err != nil {
-		fmt.Fprintf(os.Stderr, "robot src_v2 server failed: %v\n", err)
+		logs.Error("robot src_v2 server failed: %v", err)
 		os.Exit(1)
 	}
 }
@@ -153,9 +182,132 @@ func envIntOrDefault(key string, fallback int) int {
 	if raw == "" {
 		return fallback
 	}
-	var out int
-	if _, err := fmt.Sscanf(raw, "%d", &out); err != nil || out <= 0 {
+	out, err := strconv.Atoi(raw)
+	if err != nil || out <= 0 {
 		return fallback
 	}
 	return out
+}
+
+func resolveDefaultUIDist() (string, bool) {
+	cwd, _ := os.Getwd()
+	exe, _ := os.Executable()
+	exeDir := filepath.Dir(exe)
+	candidates := []string{
+		filepath.Join(cwd, "src", "plugins", "robot", "src_v2", "ui", "dist"),
+		filepath.Join(exeDir, "..", "src", "plugins", "robot", "src_v2", "ui", "dist"),
+	}
+	for _, candidate := range candidates {
+		p := filepath.Clean(candidate)
+		if uiDistReady(p) {
+			return p, true
+		}
+	}
+	return "", false
+}
+
+func uiDistReady(uiDist string) bool {
+	uiDist = strings.TrimSpace(uiDist)
+	if uiDist == "" {
+		return false
+	}
+	index := filepath.Join(uiDist, "index.html")
+	if _, err := os.Stat(index); err != nil {
+		return false
+	}
+	return true
+}
+
+func resolveAppVersion(uiDist string) string {
+	if v := strings.TrimSpace(os.Getenv("APP_VERSION")); v != "" {
+		return v
+	}
+	if strings.TrimSpace(uiDist) == "" {
+		return "src_v2-dev"
+	}
+	pkgPath := filepath.Join(filepath.Dir(uiDist), "package.json")
+	raw, err := os.ReadFile(pkgPath)
+	if err != nil {
+		return "src_v2-dev"
+	}
+	var pkg struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &pkg); err != nil {
+		return "src_v2-dev"
+	}
+	v := strings.TrimSpace(pkg.Version)
+	if v == "" {
+		return "src_v2-dev"
+	}
+	return v
+}
+
+func serveUISPA(w http.ResponseWriter, r *http.Request, uiDist string) {
+	rel := strings.TrimPrefix(r.URL.Path, "/")
+	target := filepath.Join(uiDist, rel)
+	if r.URL.Path == "/" {
+		target = filepath.Join(uiDist, "index.html")
+	}
+	if _, err := os.Stat(target); err != nil {
+		target = filepath.Join(uiDist, "index.html")
+	}
+	http.ServeFile(w, r, target)
+}
+
+func bookmarkHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	file, header, err := r.FormFile("image")
+	if err != nil {
+		http.Error(w, "missing image upload", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		home = "."
+	}
+	dir := filepath.Join(home, ".dialtone", "robot", "bookmarks")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		http.Error(w, "failed to create bookmark dir", http.StatusInternalServerError)
+		return
+	}
+	name := sanitizeFilename(header.Filename)
+	if name == "" {
+		name = fmt.Sprintf("bookmark_%d.jpg", time.Now().UnixMilli())
+	}
+	dstPath := filepath.Join(dir, name)
+	dst, err := os.Create(dstPath)
+	if err != nil {
+		http.Error(w, "failed to create bookmark file", http.StatusInternalServerError)
+		return
+	}
+	defer dst.Close()
+	if _, err := io.Copy(dst, file); err != nil {
+		http.Error(w, "failed to save bookmark", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]any{
+		"ok":   true,
+		"path": dstPath,
+		"name": name,
+	})
+}
+
+func sanitizeFilename(name string) string {
+	name = filepath.Base(strings.TrimSpace(name))
+	if name == "" || name == "." || name == "/" {
+		return ""
+	}
+	return strings.ReplaceAll(name, "..", "_")
+}
+
+func writeJSON(w http.ResponseWriter, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(payload)
 }

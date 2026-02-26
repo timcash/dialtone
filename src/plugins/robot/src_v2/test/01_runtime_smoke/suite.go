@@ -19,7 +19,8 @@ import (
 
 func Register(reg *testv1.Registry) {
 	reg.Add(testv1.Step{
-		Name: "01-build-robot-v2-binary",
+		Name:    "01-build-robot-v2-binary",
+		Timeout: 30 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			if err := ctx.WaitForStepMessageAfterAction("build complete", 20*time.Second, func() error {
 				ctx.Infof("[ACTION] build robot src_v2 server binary")
@@ -40,7 +41,8 @@ func Register(reg *testv1.Registry) {
 	})
 
 	reg.Add(testv1.Step{
-		Name: "02-server-health-and-root-behavior",
+		Name:    "02-server-health-and-root-behavior",
+		Timeout: 25 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			repo := repoRoot()
 			binPath := filepath.Join(repo, "bin", "dialtone_robot_v2")
@@ -82,19 +84,19 @@ func Register(reg *testv1.Registry) {
 				return testv1.StepRunResult{}, err
 			}
 
-			if err := ctx.WaitForStepMessageAfterAction("root returned 503", 5*time.Second, func() error {
-				ctx.Infof("[ACTION] probe / expecting 503 before ui/dist wiring")
+			if err := ctx.WaitForStepMessageAfterAction("root behavior verified", 5*time.Second, func() error {
+				ctx.Infof("[ACTION] probe / expecting 200 (ui dist present) or 503 (scaffold)")
 				resp, err := http.Get(baseURL + "/")
 				if err != nil {
 					ctx.Errorf("root probe failed: %v", err)
 					return err
 				}
 				defer resp.Body.Close()
-				if resp.StatusCode != http.StatusServiceUnavailable {
+				if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusServiceUnavailable {
 					ctx.Errorf("unexpected root status: %d", resp.StatusCode)
-					return fmt.Errorf("expected 503, got %d", resp.StatusCode)
+					return fmt.Errorf("expected 200 or 503, got %d", resp.StatusCode)
 				}
-				ctx.Infof("root returned 503")
+				ctx.Infof("root behavior verified")
 				return nil
 			}); err != nil {
 				return testv1.StepRunResult{}, err
@@ -117,6 +119,10 @@ func Register(reg *testv1.Registry) {
 				if !strings.Contains(body, "\"wsPath\":\"/natsws\"") {
 					ctx.Errorf("missing wsPath in /api/init payload: %s", body)
 					return fmt.Errorf("missing wsPath in /api/init payload")
+				}
+				if !strings.Contains(body, "\"ws_path\":\"/natsws\"") {
+					ctx.Errorf("missing ws_path in /api/init payload: %s", body)
+					return fmt.Errorf("missing ws_path in /api/init payload")
 				}
 				ctx.Infof("api init returned wsPath")
 				return nil
@@ -194,7 +200,8 @@ func Register(reg *testv1.Registry) {
 	})
 
 	reg.Add(testv1.Step{
-		Name: "03-manifest-has-required-sync-artifacts",
+		Name:    "03-manifest-has-required-sync-artifacts",
+		Timeout: 10 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			if err := ctx.WaitForStepMessageAfterAction("manifest contains required artifact keys", 5*time.Second, func() error {
 				repo := repoRoot()
