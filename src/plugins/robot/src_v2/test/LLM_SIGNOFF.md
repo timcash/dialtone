@@ -67,9 +67,22 @@ Each field must include evidence:
     - `src/plugins/robot/src_v2/test/LLM_SIGNOFF.md`
 
 ## Task C - camera/mavlink integration
-- `local-test`:
-- `on-robot-test`:
-- `documents-update`:
+- `local-test`: done (integration-health scaffold phase 1)
+  - commands:
+    - `./dialtone.sh robot src_v2 test`
+  - result summary:
+    - `robot src_v2` smoke suite passed locally with `/api/integration-health` assertion
+    - response includes scaffold degraded status with `camera` and `mavlink` marked `not-configured`
+- `on-robot-test`: done
+  - commands:
+    - `./dialtone.sh robot src_v2 sync-code --host rover-1.shad-artichoke.ts.net --user tim`
+    - `ssh tim@rover-1.shad-artichoke.ts.net 'cd ~/dialtone && ./dialtone.sh robot src_v2 test'`
+  - result summary:
+    - rover smoke suite passed with `/api/integration-health` assertion
+    - `/natsws` websocket connect still passes in rover environment
+- `documents-update`: done
+  - changed docs:
+    - `src/plugins/robot/src_v2/test/LLM_SIGNOFF.md`
 
 ## Task D - autoswap + composition
 - `local-test`:
