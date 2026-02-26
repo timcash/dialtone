@@ -155,6 +155,39 @@ func Register(reg *testv1.Registry) {
 				return testv1.StepRunResult{}, err
 			}
 
+			if err := ctx.WaitForStepMessageAfterAction("integration health reported degraded", 5*time.Second, func() error {
+				ctx.Infof("[ACTION] probe /api/integration-health scaffold payload")
+				resp, err := http.Get(baseURL + "/api/integration-health")
+				if err != nil {
+					ctx.Errorf("integration-health probe failed: %v", err)
+					return err
+				}
+				defer resp.Body.Close()
+				if resp.StatusCode != http.StatusOK {
+					ctx.Errorf("unexpected /api/integration-health status: %d", resp.StatusCode)
+					return fmt.Errorf("expected 200 from /api/integration-health, got %d", resp.StatusCode)
+				}
+				buf := make([]byte, 4096)
+				n, _ := resp.Body.Read(buf)
+				body := string(buf[:n])
+				if !strings.Contains(body, "\"status\":\"degraded\"") {
+					ctx.Errorf("integration health missing degraded status: %s", body)
+					return fmt.Errorf("integration health missing degraded status")
+				}
+				if !strings.Contains(body, "\"camera\":{\"status\":\"not-configured\"}") {
+					ctx.Errorf("integration health missing camera scaffold status: %s", body)
+					return fmt.Errorf("integration health missing camera scaffold status")
+				}
+				if !strings.Contains(body, "\"mavlink\":{\"status\":\"not-configured\"}") {
+					ctx.Errorf("integration health missing mavlink scaffold status: %s", body)
+					return fmt.Errorf("integration health missing mavlink scaffold status")
+				}
+				ctx.Infof("integration health reported degraded")
+				return nil
+			}); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+
 			return testv1.StepRunResult{Report: "server runtime smoke verified"}, nil
 		},
 	})
