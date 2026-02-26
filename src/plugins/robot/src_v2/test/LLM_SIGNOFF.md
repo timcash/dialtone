@@ -85,9 +85,21 @@ Each field must include evidence:
     - `src/plugins/robot/src_v2/test/LLM_SIGNOFF.md`
 
 ## Task D - autoswap + composition
-- `local-test`:
-- `on-robot-test`:
-- `documents-update`:
+- `local-test`: done (manifest contract phase 1)
+  - commands:
+    - `./dialtone.sh robot src_v2 test`
+  - result summary:
+    - local smoke suite passed including `03-manifest-has-required-sync-artifacts`
+    - manifest asserts required sync keys: autoswap, robot, repl, camera, mavlink, wlan, ui_dist
+- `on-robot-test`: done
+  - commands:
+    - `./dialtone.sh robot src_v2 sync-code --host rover-1.shad-artichoke.ts.net --user tim`
+    - `ssh tim@rover-1.shad-artichoke.ts.net 'cd ~/dialtone && ./dialtone.sh robot src_v2 test'`
+  - result summary:
+    - rover smoke suite passed including manifest sync-artifact contract step
+- `documents-update`: done
+  - changed docs:
+    - `src/plugins/robot/src_v2/test/LLM_SIGNOFF.md`
 
 ## Final Mandatory UI E2E
 
