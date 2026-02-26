@@ -1,6 +1,7 @@
 package runtimesmoke
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
+	"github.com/coder/websocket"
 )
 
 func Register(reg *testv1.Registry) {
@@ -42,7 +44,12 @@ func Register(reg *testv1.Registry) {
 			port := "18082"
 			baseURL := "http://127.0.0.1:" + port
 
-			cmd := exec.Command(binPath, "--listen", ":"+port)
+			cmd := exec.Command(
+				binPath,
+				"--listen", ":"+port,
+				"--nats-port", "18222",
+				"--nats-ws-port", "18223",
+			)
 			cmd.Dir = repo
 			if err := cmd.Start(); err != nil {
 				return testv1.StepRunResult{}, err
@@ -115,19 +122,16 @@ func Register(reg *testv1.Registry) {
 				return testv1.StepRunResult{}, err
 			}
 
-			if err := ctx.WaitForStepMessageAfterAction("natsws returned 503", 5*time.Second, func() error {
-				ctx.Infof("[ACTION] probe /natsws scaffold behavior")
-				resp, err := http.Get(baseURL + "/natsws")
+			if err := ctx.WaitForStepMessageAfterAction("natsws websocket connected", 5*time.Second, func() error {
+				ctx.Infof("[ACTION] websocket dial /natsws")
+				wsURL := strings.Replace(baseURL, "http://", "ws://", 1) + "/natsws"
+				conn, _, err := websocket.Dial(context.Background(), wsURL, nil)
 				if err != nil {
-					ctx.Errorf("natsws probe failed: %v", err)
+					ctx.Errorf("natsws websocket dial failed: %v", err)
 					return err
 				}
-				defer resp.Body.Close()
-				if resp.StatusCode != http.StatusServiceUnavailable {
-					ctx.Errorf("unexpected /natsws status: %d", resp.StatusCode)
-					return fmt.Errorf("expected 503 from /natsws, got %d", resp.StatusCode)
-				}
-				ctx.Infof("natsws returned 503")
+				_ = conn.Close(websocket.StatusNormalClosure, "test done")
+				ctx.Infof("natsws websocket connected")
 				return nil
 			}); err != nil {
 				return testv1.StepRunResult{}, err

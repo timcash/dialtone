@@ -27,7 +27,8 @@ Each field must include evidence:
     - `/health` returned `ok`
     - `/` returned `503` as expected when `ui/dist` is not configured yet
     - `/api/init` returned scaffold JSON with `wsPath=/natsws`
-    - `/natsws` and `/stream` returned scaffold `503` (expected until bridge/camera wiring lands)
+    - `/natsws` websocket dial succeeds against robot `src_v2` embedded NATS WS bridge
+    - `/stream` returned scaffold `503` (expected until camera wiring lands)
     - `robot src_v2 test` passed with `src/plugins/test/src_v1` registry orchestration
     - steps use `WaitForStepMessageAfterAction` for action -> wait assertions
   - artifacts:
@@ -35,7 +36,7 @@ Each field must include evidence:
     - `/tmp/robot_v2_root.out`
 - `on-robot-test`: not-done
   - reason:
-    - Task A currently at local scaffold stage; remote robot validation deferred until `/natsws` and robot-specific endpoints are implemented.
+    - Task A currently at local validation stage; remote robot validation pending once branch is deployed on rover runtime.
 - `documents-update`: done
   - changed docs:
     - `src/plugins/robot/src_v2/v2.md`
