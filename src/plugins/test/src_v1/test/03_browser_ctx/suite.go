@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	chrome "dialtone/dev/plugins/chrome/src_v1/go"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
 	"github.com/chromedp/chromedp"
 )
@@ -23,8 +22,8 @@ func Register(r *testv1.Registry) {
 }
 
 func runBrowserCtxSmoke(sc *testv1.StepContext) (testv1.StepRunResult, error) {
-	if chrome.FindChromePath() == "" {
-		sc.Warnf("chrome not found; skipping browser ctx smoke")
+	if !testv1.BrowserProviderAvailable() {
+		sc.Warnf("browser provider not available; set DIALTONE_TEST_BROWSER_NODE for remote mode")
 		return testv1.StepRunResult{Report: "skipped browser ctx smoke (chrome not installed)"}, nil
 	}
 

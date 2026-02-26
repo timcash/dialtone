@@ -27,10 +27,8 @@ func DialSSH(host, port, user, pass string) (*ssh.Client, error) {
 	}
 
 	config := &ssh.ClientConfig{
-		User: username,
-		Auth: []ssh.AuthMethod{
-			ssh.Password(pass),
-		},
+		User:            username,
+		Auth:            []ssh.AuthMethod{},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         10 * time.Second,
 	}
@@ -42,9 +40,15 @@ func DialSSH(host, port, user, pass string) (*ssh.Client, error) {
 		if err == nil {
 			signer, err := ssh.ParsePrivateKey(key)
 			if err == nil {
-				config.Auth = append([]ssh.AuthMethod{ssh.PublicKeys(signer)}, config.Auth...)
+				config.Auth = append(config.Auth, ssh.PublicKeys(signer))
 			}
 		}
+	}
+	if strings.TrimSpace(pass) != "" {
+		config.Auth = append(config.Auth, ssh.Password(pass))
+	}
+	if len(config.Auth) == 0 {
+		return nil, fmt.Errorf("no SSH auth methods available (missing key and password)")
 	}
 
 	addr := fmt.Sprintf("%s:%s", hostname, port)

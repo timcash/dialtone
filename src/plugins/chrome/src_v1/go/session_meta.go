@@ -13,6 +13,7 @@ type SessionMetadata struct {
 	PID                int    `json:"pid"`
 	DebugPort          int    `json:"debug_port"`
 	WebSocketURL       string `json:"websocket_url"`
+	WebSocketPath      string `json:"websocket_path"`
 	DebugURL           string `json:"debug_url"`
 	IsNew              bool   `json:"is_new"`
 	GeneratedAtRFC3339 string `json:"generated_at_rfc3339"`
@@ -26,6 +27,7 @@ func BuildSessionMetadata(s *Session) *SessionMetadata {
 		PID:                s.PID,
 		DebugPort:          s.Port,
 		WebSocketURL:       s.WebSocketURL,
+		WebSocketPath:      WebSocketPathFromURL(s.WebSocketURL),
 		DebugURL:           DebugURLFromWebSocket(s.WebSocketURL),
 		IsNew:              s.IsNew,
 		GeneratedAtRFC3339: time.Now().Format(time.RFC3339),
@@ -59,4 +61,16 @@ func DebugURLFromWebSocket(wsURL string) string {
 		return "https://" + strings.TrimPrefix(wsURL, "wss://")
 	}
 	return wsURL
+}
+
+func WebSocketPathFromURL(wsURL string) string {
+	wsURL = strings.TrimSpace(wsURL)
+	if wsURL == "" {
+		return ""
+	}
+	idx := strings.Index(wsURL, "/devtools/")
+	if idx < 0 {
+		return ""
+	}
+	return wsURL[idx:]
 }

@@ -15,6 +15,7 @@ import (
 
 	"dialtone/dev/plugins/chrome/src_v1/go"
 	"dialtone/dev/plugins/logs/src_v1/go"
+	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 	"github.com/chromedp/cdproto/cdp"
 	cdruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/cdproto/target"
@@ -476,8 +477,17 @@ type BrowserOptions struct {
 	ReuseExisting bool
 	UserDataDir   string
 	URL           string
+	RemoteNode    string
 	LogWriter     io.Writer
 	LogPrefix     string
+}
+
+func RemoteBrowserConfigured() bool {
+	return strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_NODE")) != ""
+}
+
+func BrowserProviderAvailable() bool {
+	return chrome.FindChromePath() != "" || RemoteBrowserConfigured()
 }
 
 func (s *BrowserSession) HasConsoleMessage(substr string) bool {
@@ -628,7 +638,39 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 		TargetURL:     opts.URL,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to start chrome session: %w", err)
+		// First fallback: attach to an already-running Dialtone browser for this role/headless mode.
+		if attach := findAttachableDialtoneSession(opts.Role, opts.Headless); attach != nil {
+			s, aerr := initSession(attach, opts.Role)
+			if aerr == nil {
+				if opts.URL != "" {
+					if navErr := chromedp.Run(s.ctx, chromedp.Navigate(opts.URL)); navErr != nil {
+						s.Close()
+						return nil, navErr
+					}
+				}
+				return s, nil
+			}
+		}
+		// Second fallback: force a fresh launch (disable reuse) after a short settle delay.
+		time.Sleep(300 * time.Millisecond)
+		session, err = chrome.StartSession(chrome.SessionOptions{
+			Headless:      opts.Headless,
+			GPU:           opts.GPU,
+			Role:          opts.Role,
+			ReuseExisting: false,
+			UserDataDir:   opts.UserDataDir,
+			TargetURL:     opts.URL,
+		})
+		if err != nil {
+			if remoteNode := resolveRemoteBrowserNode(opts); remoteNode != "" {
+				rs, rerr := startRemoteBrowser(remoteNode, opts)
+				if rerr == nil {
+					return rs, nil
+				}
+				return nil, fmt.Errorf("failed local start (%v), remote fallback failed on %s (%v)", err, remoteNode, rerr)
+			}
+			return nil, fmt.Errorf("failed to start chrome session: %w", err)
+		}
 	}
 
 	s, err := initSession(session, opts.Role)
@@ -645,6 +687,109 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 	}
 
 	return s, nil
+}
+
+func resolveRemoteBrowserNode(opts BrowserOptions) string {
+	if n := strings.TrimSpace(opts.RemoteNode); n != "" {
+		return n
+	}
+	return strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_NODE"))
+}
+
+func startRemoteBrowser(node string, opts BrowserOptions) (*BrowserSession, error) {
+	nodeInfo, err := sshv1.ResolveMeshNode(node)
+	if err != nil {
+		return nil, err
+	}
+	role := strings.TrimSpace(opts.Role)
+	if role == "" {
+		role = "test"
+	}
+	url := strings.TrimSpace(opts.URL)
+	if url == "" {
+		url = "about:blank"
+	}
+	cmd := fmt.Sprintf("cd ~/dialtone && ./dialtone.sh chrome src_v1 session --role %s --headless=%t --gpu=%t --reuse-existing=%t --debug-address 0.0.0.0 --url %s",
+		shellQuote(role), opts.Headless, opts.GPU, opts.ReuseExisting, shellQuote(url))
+	out, err := sshv1.RunNodeCommand(nodeInfo.Name, cmd, sshv1.CommandOptions{})
+	if err != nil {
+		return nil, err
+	}
+	raw := extractChromeSessionJSON(out)
+	if raw == "" {
+		return nil, fmt.Errorf("remote chrome session output missing metadata marker")
+	}
+	var meta chrome.SessionMetadata
+	if err := json.Unmarshal([]byte(raw), &meta); err != nil {
+		return nil, fmt.Errorf("decode remote chrome session metadata: %w", err)
+	}
+	if meta.DebugPort <= 0 {
+		return nil, fmt.Errorf("invalid remote debug port %d", meta.DebugPort)
+	}
+	wsPath := strings.TrimSpace(meta.WebSocketPath)
+	if wsPath == "" {
+		wsPath = chrome.WebSocketPathFromURL(meta.WebSocketURL)
+	}
+	if wsPath == "" {
+		return nil, fmt.Errorf("remote websocket path is empty")
+	}
+	session := &chrome.Session{
+		PID:          meta.PID,
+		Port:         meta.DebugPort,
+		WebSocketURL: fmt.Sprintf("ws://%s:%d%s", nodeInfo.Host, meta.DebugPort, wsPath),
+		IsNew:        false,
+	}
+	return initSession(session, role)
+}
+
+func extractChromeSessionJSON(output string) string {
+	const marker = "DIALTONE_CHROME_SESSION_JSON="
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, marker) {
+			return strings.TrimSpace(strings.TrimPrefix(line, marker))
+		}
+	}
+	return ""
+}
+
+func shellQuote(v string) string {
+	v = strings.TrimSpace(v)
+	v = strings.ReplaceAll(v, `'`, `'\''`)
+	return "'" + v + "'"
+}
+
+func findAttachableDialtoneSession(role string, headless bool) *chrome.Session {
+	procs, err := chrome.ListResources(true)
+	if err != nil {
+		return nil
+	}
+	for _, p := range procs {
+		if p.Origin != "Dialtone" {
+			continue
+		}
+		if strings.TrimSpace(role) != "" && p.Role != role {
+			continue
+		}
+		if p.IsHeadless != headless {
+			continue
+		}
+		if p.DebugPort <= 0 {
+			continue
+		}
+		wsURL, err := getWebsocketURL(p.DebugPort)
+		if err != nil || strings.TrimSpace(wsURL) == "" {
+			continue
+		}
+		return &chrome.Session{
+			PID:          p.PID,
+			Port:         p.DebugPort,
+			WebSocketURL: wsURL,
+			IsNew:        false,
+			IsWindows:    p.IsWindows,
+		}
+	}
+	return nil
 }
 
 func (sc *StepContext) EnsureBrowser(opts BrowserOptions) (*BrowserSession, error) {
@@ -917,6 +1062,10 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 	defer func() {
 		if sharedBrowser != nil {
 			sharedBrowser.Close()
+		}
+		// Enforce suite-end cleanup for all Dialtone-tagged browser instances.
+		if err := chrome.KillDialtoneResources(); err != nil {
+			logs.Warn("%s browser cleanup warning: %v", testTag, err)
 		}
 	}()
 

@@ -2,7 +2,7 @@ package main
 
 import (
 	"flag"
-	"fmt"
+	"os"
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
@@ -10,6 +10,8 @@ import (
 )
 
 func main() {
+	logs.SetOutput(os.Stdout)
+
 	natsURL := flag.String("nats-url", "nats://127.0.0.1:4222", "NATS URL")
 	topic := flag.String("topic", "logs.example.plugin", "publish topic")
 	count := flag.Int("count", 3, "message count")
@@ -17,7 +19,7 @@ func main() {
 	flag.Parse()
 
 	if *outPath == "" {
-		fmt.Println("ERROR: --out is required")
+		logs.Error("--out is required")
 		return
 	}
 
@@ -27,7 +29,7 @@ func main() {
 	if err != nil {
 		broker, err = logs.StartEmbeddedNATSOnURL(*natsURL)
 		if err != nil {
-			fmt.Printf("ERROR: connect/start failed: %v\n", err)
+			logs.Error("connect/start failed: %v", err)
 			return
 		}
 		startedEmbedded = true
@@ -40,20 +42,20 @@ func main() {
 
 	stop, err := logs.ListenToFile(nc, *topic, *outPath)
 	if err != nil {
-		fmt.Printf("ERROR: listener failed: %v\n", err)
+		logs.Error("listener failed: %v", err)
 		return
 	}
 	defer func() { _ = stop() }()
 
 	logger, err := logs.NewNATSLogger(nc, *topic)
 	if err != nil {
-		fmt.Printf("ERROR: logger init failed: %v\n", err)
+		logs.Error("logger init failed: %v", err)
 		return
 	}
 
 	for i := 1; i <= *count; i++ {
 		if err := logger.Infof("example plugin message %d", i); err != nil {
-			fmt.Printf("ERROR: publish failed at %d: %v\n", i, err)
+			logs.Error("publish failed at %d: %v", i, err)
 			return
 		}
 		time.Sleep(80 * time.Millisecond)
@@ -61,5 +63,5 @@ func main() {
 	_ = nc.Flush()
 	time.Sleep(200 * time.Millisecond)
 
-	fmt.Printf("EXAMPLE_PLUGIN PASS started_embedded=%v nats_url=%s topic=%s count=%d out=%s\n", startedEmbedded, *natsURL, *topic, *count, *outPath)
+	logs.Info("EXAMPLE_PLUGIN PASS started_embedded=%v nats_url=%s topic=%s count=%d out=%s", startedEmbedded, *natsURL, *topic, *count, *outPath)
 }

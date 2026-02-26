@@ -123,6 +123,7 @@ type SessionOptions struct {
 	Role          string
 	ReuseExisting bool
 	UserDataDir   string
+	DebugAddress  string
 }
 
 type Session struct {
@@ -176,7 +177,7 @@ func StartSession(opts SessionOptions) (*Session, error) {
 		}
 	}
 
-	res, err := LaunchChromeWithRoleAndUserDataDir(opts.RequestedPort, opts.GPU, opts.Headless, opts.TargetURL, opts.Role, opts.UserDataDir)
+	res, err := LaunchChromeWithRoleAndUserDataDir(opts.RequestedPort, opts.GPU, opts.Headless, opts.TargetURL, opts.Role, opts.UserDataDir, opts.DebugAddress)
 	if err != nil {
 		return nil, err
 	}
@@ -287,10 +288,10 @@ func LaunchChrome(port int, gpu bool, headless bool, targetURL string) (*LaunchR
 
 // LaunchChromeWithRole starts a new Chrome instance and tags it with a dialtone role (e.g. "dev", "smoke").
 func LaunchChromeWithRole(port int, gpu bool, headless bool, targetURL, role string) (*LaunchResult, error) {
-	return LaunchChromeWithRoleAndUserDataDir(port, gpu, headless, targetURL, role, "")
+	return LaunchChromeWithRoleAndUserDataDir(port, gpu, headless, targetURL, role, "", "")
 }
 
-func LaunchChromeWithRoleAndUserDataDir(port int, gpu bool, headless bool, targetURL, role, requestedUserDataDir string) (*LaunchResult, error) {
+func LaunchChromeWithRoleAndUserDataDir(port int, gpu bool, headless bool, targetURL, role, requestedUserDataDir, debugAddress string) (*LaunchResult, error) {
 	path := FindChromePath()
 	if path == "" {
 		return nil, fmt.Errorf("chrome not found")
@@ -377,9 +378,14 @@ func LaunchChromeWithRoleAndUserDataDir(port int, gpu bool, headless bool, targe
 		_ = os.MkdirAll(userDataDir, 0755)
 	}
 
+	debugAddress = strings.TrimSpace(debugAddress)
+	if debugAddress == "" {
+		debugAddress = "127.0.0.1"
+	}
+
 	args := []string{
 		"--remote-debugging-port=0",
-		"--remote-debugging-address=127.0.0.1",
+		"--remote-debugging-address=" + debugAddress,
 		"--remote-allow-origins=*",
 		"--no-first-run",
 		"--no-default-browser-check",
