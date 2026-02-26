@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -86,6 +87,7 @@ func RunChrome(args []string) {
 		role := newFlags.String("role", "", "Dialtone role tag (e.g. dev, smoke)")
 		reuseExisting := newFlags.Bool("reuse-existing", false, "Attach to existing matching role/headless instance")
 		userDataDir := newFlags.String("user-data-dir", "", "Explicit Chrome user data dir")
+		debugAddress := newFlags.String("debug-address", "127.0.0.1", "Remote debug bind address")
 		debug := newFlags.Bool("debug", false, "Enable verbose logging")
 
 		for _, arg := range args[1:] {
@@ -98,30 +100,29 @@ func RunChrome(args []string) {
 			}
 		}
 
-		// Pre-process arguments to separate flags from the positional URL
-		var flags []string
-		var positional []string
-		for i := 1; i < len(args); i++ {
-			arg := args[i]
-			if strings.HasPrefix(arg, "-") {
-				flags = append(flags, arg)
-				// Handle flags that take values
-				if (arg == "--port" || arg == "-port") && i+1 < len(args) {
-					flags = append(flags, args[i+1])
-					i++
-				}
-			} else {
-				positional = append(positional, arg)
-			}
+		if err := newFlags.Parse(args[1:]); err != nil {
+			logs.Fatal("new parse failed: %v", err)
 		}
-
-		newFlags.Parse(flags)
 
 		targetURL := ""
-		if len(positional) > 0 {
-			targetURL = positional[0]
+		if rest := newFlags.Args(); len(rest) > 0 {
+			targetURL = rest[0]
 		}
-		handleNew(*port, *gpu, *headless, targetURL, *role, *reuseExisting, *userDataDir, *debug)
+		handleNew(*port, *gpu, *headless, targetURL, *role, *reuseExisting, *userDataDir, *debugAddress, *debug)
+	case "session":
+		sessionFlags := flag.NewFlagSet("chrome session", flag.ExitOnError)
+		port := sessionFlags.Int("port", 0, "Remote debugging port (0 for auto)")
+		gpu := sessionFlags.Bool("gpu", false, "Enable GPU acceleration")
+		headless := sessionFlags.Bool("headless", true, "Launch in headless mode")
+		role := sessionFlags.String("role", "", "Dialtone role tag (e.g. dev, smoke)")
+		reuseExisting := sessionFlags.Bool("reuse-existing", true, "Attach to existing matching role/headless instance")
+		userDataDir := sessionFlags.String("user-data-dir", "", "Explicit Chrome user data dir")
+		debugAddress := sessionFlags.String("debug-address", "127.0.0.1", "Remote debug bind address")
+		url := sessionFlags.String("url", "about:blank", "Initial URL")
+		if err := sessionFlags.Parse(args[1:]); err != nil {
+			logs.Fatal("session parse failed: %v", err)
+		}
+		handleSession(*port, *gpu, *headless, *url, *role, *reuseExisting, *userDataDir, *debugAddress)
 	case "test":
 		if err := runChromeTests(); err != nil {
 			logs.Fatal("Chrome self-test failed: %v", err)
@@ -291,7 +292,7 @@ func handleKill(arg string, isWindows, totalAll bool) {
 	logs.Info("Successfully killed process %d", pid)
 }
 
-func handleNew(port int, gpu bool, headless bool, targetURL, role string, reuseExisting bool, userDataDir string, debug bool) {
+func handleNew(port int, gpu bool, headless bool, targetURL, role string, reuseExisting bool, userDataDir string, debugAddress string, debug bool) {
 	logs.Info("Launching new %s Chrome instance...", func() string {
 		if headless {
 			return "headless"
@@ -311,6 +312,7 @@ func handleNew(port int, gpu bool, headless bool, targetURL, role string, reuseE
 		Role:          role,
 		ReuseExisting: reuseExisting,
 		UserDataDir:   userDataDir,
+		DebugAddress:  debugAddress,
 	})
 	if err != nil {
 		logs.Fatal("Failed to launch Chrome: %v", err)
@@ -325,12 +327,35 @@ func handleNew(port int, gpu bool, headless bool, targetURL, role string, reuseE
 	logs.Info("You can now connect to this instance using the WebSocket URL.")
 }
 
+func handleSession(port int, gpu bool, headless bool, targetURL, role string, reuseExisting bool, userDataDir string, debugAddress string) {
+	res, err := chrome.StartSession(chrome.SessionOptions{
+		RequestedPort: port,
+		GPU:           gpu,
+		Headless:      headless,
+		TargetURL:     targetURL,
+		Role:          role,
+		ReuseExisting: reuseExisting,
+		UserDataDir:   userDataDir,
+		DebugAddress:  debugAddress,
+	})
+	if err != nil {
+		logs.Fatal("Failed to create session: %v", err)
+	}
+	meta := chrome.BuildSessionMetadata(res)
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		logs.Fatal("Failed to encode session metadata: %v", err)
+	}
+	fmt.Printf("DIALTONE_CHROME_SESSION_JSON=%s\n", string(raw))
+}
+
 func printChromeUsage() {
 	fmt.Println("Usage: ./dialtone.sh chrome src_v1 <command> [arguments]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  verify [--port N]   Verify chrome connectivity")
 	fmt.Println("  list [flags]        List detected chrome processes")
 	fmt.Println("  new [URL] [flags]   Launch a new Chrome instance")
+	fmt.Println("  session [flags]     Launch/reuse and emit machine-readable session metadata")
 	fmt.Println("  test                Run chrome plugin self-test (dev vs smoke roles)")
 	fmt.Println("  kill [PID|all] [--all] Kill Dialtone processes (default) or all processes")
 	fmt.Println("  install             Install chrome dependencies")
@@ -344,6 +369,7 @@ func printChromeUsage() {
 	fmt.Println("  --role <name>       Tag launched browser role (dev, smoke, etc.)")
 	fmt.Println("  --reuse-existing    Reuse existing matching role/headless instance")
 	fmt.Println("  --user-data-dir     Set explicit profile directory")
+	fmt.Println("  --debug-address     Set remote debug bind address (127.0.0.1 or 0.0.0.0)")
 	fmt.Println("\nFlags for kill:")
 	fmt.Println("  --all               Kill ALL Chrome/Edge processes system-wide")
 	fmt.Println("  --windows           Use with 'kill' for WSL host processes (auto-detected usually)")

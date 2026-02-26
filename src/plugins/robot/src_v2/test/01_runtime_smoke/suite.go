@@ -12,7 +12,9 @@ import (
 	"time"
 
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
+	"github.com/chromedp/chromedp"
 	"github.com/coder/websocket"
+	"github.com/nats-io/nats.go"
 )
 
 func Register(reg *testv1.Registry) {
@@ -226,6 +228,119 @@ func Register(reg *testv1.Registry) {
 			}
 			return testv1.StepRunResult{Report: "manifest sync artifact contract verified"}, nil
 		},
+	})
+
+	reg.Add(testv1.Step{
+		Name: "04-local-ui-mock-e2e-smoke",
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			repo := repoRoot()
+			uiDist := filepath.Join(repo, "src", "plugins", "robot", "src_v2", "ui", "dist")
+
+			if err := ctx.WaitForStepMessageAfterAction("ui build complete", 60*time.Second, func() error {
+				cmd := exec.Command("./dialtone.sh", "robot", "src_v2", "build")
+				cmd.Dir = repo
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					ctx.Errorf("ui build failed: %s", strings.TrimSpace(string(out)))
+					return err
+				}
+				ctx.Infof("ui build complete")
+				return nil
+			}); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+
+			binPath := filepath.Join(repo, "bin", "dialtone_robot_v2")
+			port := "18083"
+			baseURL := "http://127.0.0.1:" + port
+			cmd := exec.Command(
+				binPath,
+				"--listen", ":"+port,
+				"--nats-port", "18224",
+				"--nats-ws-port", "18225",
+				"--ui-dist", uiDist,
+			)
+			cmd.Dir = repo
+			if err := cmd.Start(); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			defer func() {
+				_ = cmd.Process.Kill()
+				_, _ = cmd.Process.Wait()
+			}()
+
+			if err := ctx.WaitForStepMessageAfterAction("ui root returned 200", 10*time.Second, func() error {
+				deadline := time.Now().Add(8 * time.Second)
+				for time.Now().Before(deadline) {
+					resp, err := http.Get(baseURL + "/")
+					if err == nil {
+						_ = resp.Body.Close()
+						if resp.StatusCode == http.StatusOK {
+							ctx.Infof("ui root returned 200")
+							return nil
+						}
+					}
+					time.Sleep(200 * time.Millisecond)
+				}
+				return fmt.Errorf("ui root did not return 200")
+			}); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+
+			if strings.TrimSpace(os.Getenv("ROBOT_SRC_V2_E2E_BROWSER")) == "1" {
+				if err := ctx.WaitForStepMessageAfterAction("browser title loaded", 15*time.Second, func() error {
+					_, err := ctx.EnsureBrowser(testv1.BrowserOptions{
+						Headless: true,
+						GPU:      false,
+						Role:     "robot-src-v2-e2e",
+						URL:      baseURL,
+					})
+					if err != nil {
+						return err
+					}
+					var title string
+					if err := ctx.RunBrowser(chromedp.Title(&title)); err != nil {
+						return err
+					}
+					if strings.TrimSpace(title) == "" {
+						return fmt.Errorf("empty page title")
+					}
+					ctx.Infof("browser title loaded")
+					return nil
+				}); err != nil {
+					return testv1.StepRunResult{}, err
+				}
+			} else {
+				if err := ctx.WaitForStepMessageAfterAction("browser step skipped", 2*time.Second, func() error {
+					ctx.Infof("browser step skipped")
+					return nil
+				}); err != nil {
+					return testv1.StepRunResult{}, err
+				}
+			}
+
+			if err := ctx.WaitForStepMessageAfterAction("mock nats publish ok", 5*time.Second, func() error {
+				nc, err := nats.Connect("nats://127.0.0.1:18224", nats.Timeout(2*time.Second))
+				if err != nil {
+					return err
+				}
+				defer nc.Close()
+				msg := `{"type":"HEARTBEAT","timestamp":12345}`
+				if err := nc.Publish("mavlink.heartbeat", []byte(msg)); err != nil {
+					return err
+				}
+				if err := nc.Flush(); err != nil {
+					return err
+				}
+				ctx.Infof("mock nats publish ok")
+				return nil
+			}); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+
+			return testv1.StepRunResult{Report: "local UI mock E2E smoke verified"}, nil
+		},
+		Timeout: 90 * time.Second,
 	})
 }
 
