@@ -47,9 +47,24 @@ Each field must include evidence:
     - `src/plugins/robot/src_v2/test/LLM_SIGNOFF.md`
 
 ## Task B - robot src_v2 UI/module shape
-- `local-test`:
-- `on-robot-test`:
-- `documents-update`:
+- `local-test`: done (parity scaffold phase 1)
+  - commands:
+    - `rsync -a --delete --exclude node_modules --exclude dist src/plugins/robot/src_v1/ui/ src/plugins/robot/src_v2/ui/`
+    - `./dialtone.sh robot src_v2 install`
+    - `./dialtone.sh robot src_v2 build`
+  - result summary:
+    - `src_v2/ui` scaffolded from `src_v1/ui` for parity-first baseline
+    - local Vite production build succeeded for `src_v2/ui`
+- `on-robot-test`: done
+  - commands:
+    - `./dialtone.sh robot src_v2 sync-code --host rover-1.shad-artichoke.ts.net --user tim`
+    - `ssh tim@rover-1.shad-artichoke.ts.net 'cd ~/dialtone && ./dialtone.sh robot src_v2 install && ./dialtone.sh robot src_v2 build'`
+  - result summary:
+    - rover `src_v2` UI dependency install succeeded
+    - rover `src_v2` Vite production build succeeded
+- `documents-update`: done
+  - changed docs:
+    - `src/plugins/robot/src_v2/test/LLM_SIGNOFF.md`
 
 ## Task C - camera/mavlink integration
 - `local-test`:
