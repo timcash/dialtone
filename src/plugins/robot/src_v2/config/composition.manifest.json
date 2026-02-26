@@ -15,7 +15,7 @@
       "repl": "<repo_root>/bin/dialtone_repl_v1",
       "camera": "<repo_root>/bin/dialtone_camera_v1",
       "mavlink": "<repo_root>/bin/dialtone_mavlink_v1",
-      "wlan": "<repo_root>/bin/dialtone_wlan_v1",
+      "wlan": "<repo_root>/src/plugins/wlan/src_v1",
       "ui_dist": "<repo_root>/src/plugins/robot/src_v2/ui/dist"
     }
   },
