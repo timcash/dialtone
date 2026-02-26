@@ -1,11 +1,14 @@
 package browserlifecycleoptions
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
@@ -28,9 +31,18 @@ func runSetup(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 	if !ok {
 		return testv1.StepRunResult{}, fmt.Errorf("unable to resolve caller path")
 	}
-	srv := httptest.NewServer(http.FileServer(http.Dir(filepath.Dir(thisFile))))
-	pageURL = srv.URL + "/index.html"
-	defer srv.Close()
+	pageDir := filepath.Dir(thisFile)
+	if strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_NODE")) != "" {
+		raw, err := os.ReadFile(filepath.Join(pageDir, "index.html"))
+		if err != nil {
+			return testv1.StepRunResult{}, fmt.Errorf("read browser lifecycle fixture: %w", err)
+		}
+		pageURL = "data:text/html;base64," + base64.StdEncoding.EncodeToString(raw)
+	} else {
+		srv := httptest.NewServer(http.FileServer(http.Dir(pageDir)))
+		pageURL = srv.URL + "/index.html"
+		defer srv.Close()
+	}
 
 	_, err := sc.EnsureBrowser(testv1.BrowserOptions{
 		Headless:      true,

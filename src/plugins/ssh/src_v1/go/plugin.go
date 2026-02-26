@@ -26,6 +26,8 @@ func Run(args []string) error {
 		return runCommandAll(args[1:])
 	case "sync-repos":
 		return runSyncRepos(args[1:])
+	case "sync-code":
+		return runSyncCode(args[1:])
 	default:
 		PrintUsage()
 		return fmt.Errorf("unknown ssh command: %s", args[0])
@@ -44,6 +46,8 @@ func PrintUsage() {
 	logs.Raw("  sync-repos [--branch B] [--allow-dirty]")
 	logs.Raw("                                        Sync dialtone repo on every mesh node to one branch")
 	logs.Raw("                                        Per-node repo override: --repo-<node> /path/to/repo")
+	logs.Raw("  sync-code --node <name|all> [--src P] [--dest P] [--delete] [--exclude PATTERN]")
+	logs.Raw("                                        Rsync code without git, excludes node_modules/.pixi by default")
 	logs.Raw("  test                                  Run ssh plugin self-check suite")
 }
 
@@ -171,5 +175,39 @@ func runSyncRepos(args []string) error {
 	if skipped > 0 {
 		logs.Warn("sync-repos completed with %d dirty-skip node(s)", skipped)
 	}
+	return nil
+}
+
+func runSyncCode(args []string) error {
+	fs := flag.NewFlagSet("ssh sync-code", flag.ContinueOnError)
+	fs.SetOutput(nil)
+	node := fs.String("node", "", "Target mesh node or 'all'")
+	src := fs.String("src", "", "Source path (defaults to current working directory)")
+	dest := fs.String("dest", "", "Destination path on target")
+	del := fs.Bool("delete", false, "Delete files on dest that are missing in src")
+	var excludes multiValueFlag
+	fs.Var(&excludes, "exclude", "Extra exclude pattern (repeatable)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	return SyncCode(SyncCodeOptions{
+		Node:     *node,
+		Source:   *src,
+		Dest:     *dest,
+		Delete:   *del,
+		Excludes: excludes.values,
+	})
+}
+
+type multiValueFlag struct {
+	values []string
+}
+
+func (m *multiValueFlag) String() string {
+	return strings.Join(m.values, ",")
+}
+
+func (m *multiValueFlag) Set(value string) error {
+	m.values = append(m.values, value)
 	return nil
 }

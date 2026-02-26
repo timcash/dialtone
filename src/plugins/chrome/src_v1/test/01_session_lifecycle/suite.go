@@ -2,6 +2,7 @@ package sessionlifecycle
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -17,6 +18,7 @@ var state struct {
 	baseDir      string
 	devUserData  string
 	testUserData string
+	remoteNode   string
 	devSession   *chrome.Session
 	testSession  *chrome.Session
 }
@@ -50,6 +52,30 @@ func Register(reg *testv1.Registry) {
 }
 
 func runSetupAndLaunchDev(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+	state.remoteNode = strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_NODE"))
+	if state.remoteNode != "" {
+		b, err := ctx.EnsureBrowser(testv1.BrowserOptions{
+			Headless:      false,
+			GPU:           true,
+			Role:          "dev",
+			ReuseExisting: false,
+			RemoteNode:    state.remoteNode,
+			URL:           "data:text/html,<title>dialtone-remote-dev</title><h1>ok</h1>",
+		})
+		if err != nil {
+			return testv1.StepRunResult{}, fmt.Errorf("start remote dev session on %s: %w", state.remoteNode, err)
+		}
+		var title string
+		if err := b.RunWithTimeout(8*time.Second, chromedp.Title(&title)); err != nil {
+			return testv1.StepRunResult{}, fmt.Errorf("verify remote dev title: %w", err)
+		}
+		if title != "dialtone-remote-dev" {
+			return testv1.StepRunResult{}, fmt.Errorf("unexpected remote dev title: %q", title)
+		}
+		ctx.Infof("launched remote dev session on %s", state.remoteNode)
+		return testv1.StepRunResult{Report: "launched remote dev session with chromedp attach ready"}, nil
+	}
+
 	if chrome.FindChromePath() == "" {
 		return testv1.StepRunResult{}, fmt.Errorf("chrome binary not found")
 	}
@@ -95,6 +121,22 @@ func runSetupAndLaunchDev(ctx *testv1.StepContext) (testv1.StepRunResult, error)
 }
 
 func runReuseAndAttach(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+	if state.remoteNode != "" {
+		_, err := ctx.EnsureBrowser(testv1.BrowserOptions{
+			Headless:      false,
+			GPU:           true,
+			Role:          "dev",
+			ReuseExisting: true,
+			RemoteNode:    state.remoteNode,
+			URL:           "about:blank",
+		})
+		if err != nil {
+			return testv1.StepRunResult{}, fmt.Errorf("reuse remote dev session on %s: %w", state.remoteNode, err)
+		}
+		ctx.Infof("reused remote dev session on %s", state.remoteNode)
+		return testv1.StepRunResult{Report: "reused remote dev session attach on remote node"}, nil
+	}
+
 	if state.devSession == nil {
 		return testv1.StepRunResult{}, fmt.Errorf("missing dev session from previous step")
 	}
@@ -141,6 +183,22 @@ func runReuseAndAttach(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 }
 
 func runLaunchTestAndList(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+	if state.remoteNode != "" {
+		_, err := ctx.EnsureBrowser(testv1.BrowserOptions{
+			Headless:      true,
+			GPU:           false,
+			Role:          "test",
+			ReuseExisting: false,
+			RemoteNode:    state.remoteNode,
+			URL:           "about:blank",
+		})
+		if err != nil {
+			return testv1.StepRunResult{}, fmt.Errorf("start remote test session on %s: %w", state.remoteNode, err)
+		}
+		ctx.Infof("verified remote test session on %s", state.remoteNode)
+		return testv1.StepRunResult{Report: "launched remote test session and verified remote attach path"}, nil
+	}
+
 	testSession, err := chrome.StartSession(chrome.SessionOptions{
 		RequestedPort: 0,
 		GPU:           false,
@@ -186,6 +244,11 @@ func runLaunchTestAndList(ctx *testv1.StepContext) (testv1.StepRunResult, error)
 }
 
 func runCleanupTestOnly(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+	if state.remoteNode != "" {
+		ctx.Infof("remote mode enabled; skipping local pid/resource assertions")
+		return testv1.StepRunResult{Report: "remote mode cleanup: local PID checks skipped"}, nil
+	}
+
 	if state.testSession == nil || state.devSession == nil {
 		return testv1.StepRunResult{}, fmt.Errorf("missing sessions for cleanup step")
 	}
@@ -210,6 +273,13 @@ func runCleanupTestOnly(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 }
 
 func runCleanupAll(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+	if state.remoteNode != "" {
+		if state.baseDir != "" {
+			ctx.Infof("cleanup complete (remote mode) node=%s", state.remoteNode)
+		}
+		return testv1.StepRunResult{Report: "cleanup complete for remote chrome test mode"}, nil
+	}
+
 	if state.devSession != nil {
 		if err := chrome.CleanupSession(state.devSession); err != nil {
 			ctx.Warnf("dev cleanup warning: %v", err)

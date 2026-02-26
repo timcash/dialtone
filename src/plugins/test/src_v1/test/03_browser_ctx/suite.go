@@ -1,9 +1,11 @@
 package browserctx
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -32,9 +34,18 @@ func runBrowserCtxSmoke(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 		return testv1.StepRunResult{}, fmt.Errorf("unable to resolve caller path")
 	}
 	pageDir := filepath.Dir(thisFile)
-	srv := httptest.NewServer(http.FileServer(http.Dir(pageDir)))
-	defer srv.Close()
-	pageURL := srv.URL + "/index.html"
+	pageURL := ""
+	if strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_NODE")) != "" {
+		raw, err := os.ReadFile(filepath.Join(pageDir, "index.html"))
+		if err != nil {
+			return testv1.StepRunResult{}, fmt.Errorf("read browser ctx fixture: %w", err)
+		}
+		pageURL = "data:text/html;base64," + base64.StdEncoding.EncodeToString(raw)
+	} else {
+		srv := httptest.NewServer(http.FileServer(http.Dir(pageDir)))
+		defer srv.Close()
+		pageURL = srv.URL + "/index.html"
+	}
 
 	_, err := sc.EnsureBrowser(testv1.BrowserOptions{
 		Headless:      true,

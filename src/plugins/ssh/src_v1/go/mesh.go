@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"runtime"
@@ -15,6 +16,7 @@ type MeshNode struct {
 	Aliases             []string
 	User                string
 	Host                string
+	HostCandidates      []string
 	Port                string
 	OS                  string
 	PreferWSLPowerShell bool
@@ -70,8 +72,11 @@ var defaultMeshNodes = []MeshNode{
 		Aliases: []string{"rover", "rover-1", "rover-1.shad-artichoke.ts.net"},
 		User:    "tim",
 		Host:    "rover-1.shad-artichoke.ts.net",
-		Port:    "22",
-		OS:      "linux",
+		HostCandidates: []string{
+			"169.254.217.151", // Rover direct ethernet on the Legion switch
+		},
+		Port: "22",
+		OS:   "linux",
 		RepoCandidates: []string{
 			"/home/tim/dialtone",
 			"/home/user/dialtone",
@@ -84,13 +89,13 @@ var defaultMeshNodes = []MeshNode{
 		Host:                "legion.shad-artichoke.ts.net",
 		Port:                "2223",
 		OS:                  "windows",
-		PreferWSLPowerShell: true,
+		PreferWSLPowerShell: false,
 		RepoCandidates: []string{
 			"/home/user/dialtone",
 			"/home/user/dialtone",
 			"/home/tim/dialtone",
-			"/mnt/c/Users/tim/dialtone",
 			"/mnt/c/Users/timca/dialtone",
+			"/mnt/c/Users/tim/dialtone",
 			"/mnt/c/Users/timca/code3/dialtone",
 		},
 	},
@@ -101,6 +106,7 @@ var (
 	execCommandFunc = exec.Command
 	dialSSHFunc     = DialSSH
 	runSSHFunc      = RunSSHCommand
+	canReachHostFn  = canReachHostPort
 )
 
 func ListMeshNodes() []MeshNode {
@@ -152,9 +158,10 @@ func RunNodeCommand(target string, command string, opts CommandOptions) (string,
 	if port == "" {
 		port = node.Port
 	}
-	client, err := dialSSHFunc(node.Host, port, user, opts.Password)
+	host := resolvePreferredHost(node, port)
+	client, err := dialSSHFunc(host, port, user, opts.Password)
 	if err != nil {
-		return "", fmt.Errorf("ssh dial %s@%s:%s failed: %w", user, node.Host, port, err)
+		return "", fmt.Errorf("ssh dial %s@%s:%s failed: %w", user, host, port, err)
 	}
 	defer client.Close()
 
@@ -163,6 +170,50 @@ func RunNodeCommand(target string, command string, opts CommandOptions) (string,
 		return out, fmt.Errorf("ssh command failed on %s: %w", node.Name, err)
 	}
 	return out, nil
+}
+
+func resolvePreferredHost(node MeshNode, port string) string {
+	seen := map[string]struct{}{}
+	candidates := make([]string, 0, len(node.HostCandidates)+1)
+	for _, h := range node.HostCandidates {
+		h = strings.TrimSpace(h)
+		if h == "" {
+			continue
+		}
+		if _, ok := seen[h]; ok {
+			continue
+		}
+		seen[h] = struct{}{}
+		candidates = append(candidates, h)
+	}
+	if strings.TrimSpace(node.Host) != "" {
+		if _, ok := seen[node.Host]; !ok {
+			candidates = append(candidates, node.Host)
+		}
+	}
+	if len(candidates) == 0 {
+		return strings.TrimSpace(node.Host)
+	}
+	for _, h := range candidates {
+		if canReachHostFn(h, port, 450*time.Millisecond) {
+			return h
+		}
+	}
+	return strings.TrimSpace(node.Host)
+}
+
+func canReachHostPort(host, port string, timeout time.Duration) bool {
+	host = strings.TrimSpace(host)
+	port = strings.TrimSpace(port)
+	if host == "" || port == "" {
+		return false
+	}
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), timeout)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 func shouldUseLocalPowerShell(node MeshNode) bool {
@@ -206,8 +257,6 @@ func runPowerShellCommand(command string) (string, error) {
 func looksLikePosixShell(command string) bool {
 	c := strings.TrimSpace(command)
 	return strings.Contains(c, "&&") ||
-		strings.Contains(c, "|") ||
-		strings.Contains(c, ";") ||
 		strings.Contains(c, "./") ||
 		strings.Contains(c, "/home/") ||
 		strings.Contains(c, "/mnt/") ||
