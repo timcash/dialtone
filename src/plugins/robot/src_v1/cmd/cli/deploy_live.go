@@ -68,6 +68,7 @@ func RunSyncCode(versionDir string, args []string) error {
 
 	robotBase := path.Join("plugins", "robot", versionDir)
 	robotSyncCandidates := []string{
+		path.Join("plugins", "robot", "src_v1", "cmd", "cli"),
 		path.Join(robotBase, "cmd"),
 		path.Join(robotBase, "go"),
 		path.Join(robotBase, "config"),
