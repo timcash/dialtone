@@ -119,6 +119,8 @@ func runSrcV1(command, repoRoot string, args []string) error {
 		return robot_cli.RunDeploy("src_v1", args)
 	case "sync-code":
 		return robot_cli.RunSyncCode("src_v1", args)
+	case "sync-watch":
+		return robot_cli.RunSyncWatch("src_v1", args)
 	case "diagnostic":
 		return robot_cli.RunDiagnostic("src_v1")
 	case "vpn-test":
@@ -177,6 +179,8 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 		return go_plugin.RunGo("run", testPkg)
 	case "sync-code":
 		return robot_cli.RunSyncCode(version, args)
+	case "sync-watch":
+		return robot_cli.RunSyncWatch(version, args)
 	default:
 		return fmt.Errorf("unknown robot command: %s", command)
 	}
@@ -226,6 +230,7 @@ func printUsage() {
 	logs.Raw("  ui-run       Start UI server")
 	logs.Raw("  deploy       Build and deploy robot service to ROBOT_HOST")
 	logs.Raw("  sync-code    Sync minimal robot source tree to remote host for on-device build/test")
+	logs.Raw("  sync-watch   Start/stop/status continuous source sync loop to remote host")
 	logs.Raw("  deploy-test  Run step-by-step verification on remote robot")
 	logs.Raw("  diagnostic   Run UI and connectivity diagnostics")
 	logs.Raw("  vpn-test     Test Tailscale connectivity")
