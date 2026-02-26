@@ -3,6 +3,7 @@ package runtimesmoke
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -109,9 +110,8 @@ func Register(reg *testv1.Registry) {
 					ctx.Errorf("unexpected /api/init status: %d", resp.StatusCode)
 					return fmt.Errorf("expected 200 from /api/init, got %d", resp.StatusCode)
 				}
-				buf := make([]byte, 4096)
-				n, _ := resp.Body.Read(buf)
-				body := string(buf[:n])
+				bodyBytes, _ := io.ReadAll(resp.Body)
+				body := string(bodyBytes)
 				if !strings.Contains(body, "\"wsPath\":\"/natsws\"") {
 					ctx.Errorf("missing wsPath in /api/init payload: %s", body)
 					return fmt.Errorf("missing wsPath in /api/init payload")
@@ -167,9 +167,8 @@ func Register(reg *testv1.Registry) {
 					ctx.Errorf("unexpected /api/integration-health status: %d", resp.StatusCode)
 					return fmt.Errorf("expected 200 from /api/integration-health, got %d", resp.StatusCode)
 				}
-				buf := make([]byte, 4096)
-				n, _ := resp.Body.Read(buf)
-				body := string(buf[:n])
+				bodyBytes, _ := io.ReadAll(resp.Body)
+				body := string(bodyBytes)
 				if !strings.Contains(body, "\"status\":\"degraded\"") {
 					ctx.Errorf("integration health missing degraded status: %s", body)
 					return fmt.Errorf("integration health missing degraded status")
@@ -189,6 +188,43 @@ func Register(reg *testv1.Registry) {
 			}
 
 			return testv1.StepRunResult{Report: "server runtime smoke verified"}, nil
+		},
+	})
+
+	reg.Add(testv1.Step{
+		Name: "03-manifest-has-required-sync-artifacts",
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			if err := ctx.WaitForStepMessageAfterAction("manifest contains required artifact keys", 5*time.Second, func() error {
+				repo := repoRoot()
+				manifestPath := filepath.Join(repo, "src", "plugins", "robot", "src_v2", "config", "composition.manifest.json")
+				data, err := os.ReadFile(manifestPath)
+				if err != nil {
+					ctx.Errorf("manifest read failed: %v", err)
+					return err
+				}
+				body := string(data)
+				required := []string{
+					"\"autoswap\"",
+					"\"robot\"",
+					"\"repl\"",
+					"\"camera\"",
+					"\"mavlink\"",
+					"\"wlan\"",
+					"\"ui_dist\"",
+					"dialtone_robot_v2",
+				}
+				for _, token := range required {
+					if !strings.Contains(body, token) {
+						ctx.Errorf("manifest missing token %s", token)
+						return fmt.Errorf("manifest missing token %s", token)
+					}
+				}
+				ctx.Infof("manifest contains required artifact keys")
+				return nil
+			}); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			return testv1.StepRunResult{Report: "manifest sync artifact contract verified"}, nil
 		},
 	})
 }

@@ -1,0 +1,25 @@
+{
+  "name": "robot",
+  "composition_version": "v1",
+  "version": "src_v2",
+  "runtime": {
+    "binary": "<repo_root>/bin/dialtone_robot_v2",
+    "http_listen": ":8080",
+    "nats_listen": "nats://127.0.0.1:4222",
+    "nats_ws_listen": "ws://127.0.0.1:4223"
+  },
+  "artifacts": {
+    "sync": {
+      "autoswap": "<repo_root>/bin/dialtone_autoswap_v1",
+      "robot": "<repo_root>/bin/dialtone_robot_v2",
+      "repl": "<repo_root>/bin/dialtone_repl_v1",
+      "camera": "<repo_root>/bin/dialtone_camera_v1",
+      "mavlink": "<repo_root>/bin/dialtone_mavlink_v1",
+      "wlan": "<repo_root>/bin/dialtone_wlan_v1",
+      "ui_dist": "<repo_root>/src/plugins/robot/src_v2/ui/dist"
+    }
+  },
+  "capabilities": {
+    "requires": ["natsws", "camera", "mavlink", "wlan"]
+  }
+}
