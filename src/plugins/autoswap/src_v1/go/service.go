@@ -178,6 +178,7 @@ func runServiceSupervisor(opts serviceOptions) error {
 	}
 	runOpts := opts
 	runOpts.ManifestPath = resolvedManifestPath
+	lastManifestFingerprint, _ := sha256File(runOpts.ManifestPath)
 
 	rel, asset, err := latestRelease(opts.Repo, token, assetName)
 	workerVersion := ""
@@ -202,9 +203,12 @@ func runServiceSupervisor(opts serviceOptions) error {
 	if err := switchCurrentLink(currentLink, workerPath); err != nil {
 		return err
 	}
+	lastManifestAssetsFingerprint := ""
 	if strings.TrimSpace(rel.TagName) != "" {
 		if err := syncManifestReleaseArtifacts(runOpts, rel, token); err != nil {
 			logs.Warn("initial manifest artifact sync failed: %v", err)
+		} else {
+			lastManifestAssetsFingerprint = releaseAssetsFingerprint(rel.Assets)
 		}
 	}
 
@@ -279,7 +283,90 @@ func runServiceSupervisor(opts serviceOptions) error {
 				})
 				continue
 			}
-			if !opts.AllowDowngrade && compareVersions(latest.TagName, mgr.version) <= 0 {
+			manifestChanged := false
+			if strings.TrimSpace(opts.ManifestURL) != "" {
+				updatedManifestPath, changed, merr := refreshManifestFromURL(runOpts.ManifestPath, opts.ManifestURL, token)
+				if merr != nil {
+					logs.Warn("manifest refresh failed: %v", merr)
+					_ = writeSupervisorState(supervisorPath, supervisorState{
+						UpdatedAt:      time.Now().UTC().Format(time.RFC3339),
+						Status:         "active",
+						Repo:           opts.Repo,
+						ManifestPath:   runOpts.ManifestPath,
+						ManifestURL:    opts.ManifestURL,
+						RepoRoot:       opts.RepoRoot,
+						WorkerVersion:  mgr.version,
+						WorkerPID:      mgr.workerPID(),
+						LastCheckAt:    checkAt,
+						LastError:      merr.Error(),
+						LastReleaseTag: latest.TagName,
+					})
+					continue
+				}
+				runOpts.ManifestPath = updatedManifestPath
+				if changed {
+					manifestChanged = true
+				}
+			}
+			if nextManifestFingerprint, ferr := sha256File(runOpts.ManifestPath); ferr == nil && strings.TrimSpace(nextManifestFingerprint) != "" {
+				if strings.TrimSpace(lastManifestFingerprint) == "" {
+					lastManifestFingerprint = nextManifestFingerprint
+				} else if !strings.EqualFold(nextManifestFingerprint, lastManifestFingerprint) {
+					manifestChanged = true
+					lastManifestFingerprint = nextManifestFingerprint
+				}
+			}
+
+			artifactsChanged := false
+			nextManifestAssetsFingerprint := releaseAssetsFingerprint(latest.Assets)
+			if manifestChanged || (nextManifestAssetsFingerprint != "" && nextManifestAssetsFingerprint != lastManifestAssetsFingerprint) {
+				// Sync manifest artifacts when manifest content changes or release
+				// assets changed, even if the autoswap worker release tag is unchanged.
+				if syncErr := syncManifestReleaseArtifacts(runOpts, latest, token); syncErr != nil {
+					logs.Warn("manifest artifact sync failed: %v", syncErr)
+					_ = writeSupervisorState(supervisorPath, supervisorState{
+						UpdatedAt:      time.Now().UTC().Format(time.RFC3339),
+						Status:         "active",
+						Repo:           opts.Repo,
+						ManifestPath:   runOpts.ManifestPath,
+						ManifestURL:    opts.ManifestURL,
+						RepoRoot:       opts.RepoRoot,
+						WorkerVersion:  mgr.version,
+						WorkerPID:      mgr.workerPID(),
+						LastCheckAt:    checkAt,
+						LastError:      syncErr.Error(),
+						LastReleaseTag: latest.TagName,
+					})
+					continue
+				}
+				if nextManifestAssetsFingerprint != "" && nextManifestAssetsFingerprint != lastManifestAssetsFingerprint {
+					lastManifestAssetsFingerprint = nextManifestAssetsFingerprint
+					artifactsChanged = true
+				}
+			}
+			cmp := compareVersions(latest.TagName, mgr.version)
+			needsWorkerVersionUpdate := cmp > 0 || (opts.AllowDowngrade && cmp != 0)
+			if !needsWorkerVersionUpdate {
+				if manifestChanged || artifactsChanged {
+					logs.Info("service refresh: manifest_changed=%t artifacts_changed=%t release=%s", manifestChanged, artifactsChanged, latest.TagName)
+					mgr.stopWorker(10 * time.Second)
+					if serr := mgr.startWorker(currentLink, runOpts, runtimeStatePath); serr != nil {
+						logs.Error("restart refreshed worker failed: %v", serr)
+						_ = writeSupervisorState(supervisorPath, supervisorState{
+							UpdatedAt:      time.Now().UTC().Format(time.RFC3339),
+							Status:         "degraded",
+							Repo:           opts.Repo,
+							ManifestPath:   runOpts.ManifestPath,
+							ManifestURL:    opts.ManifestURL,
+							RepoRoot:       opts.RepoRoot,
+							WorkerVersion:  mgr.version,
+							LastCheckAt:    checkAt,
+							LastError:      serr.Error(),
+							LastReleaseTag: latest.TagName,
+						})
+						continue
+					}
+				}
 				_ = writeSupervisorState(supervisorPath, supervisorState{
 					UpdatedAt:      time.Now().UTC().Format(time.RFC3339),
 					Status:         "active",
@@ -307,23 +394,6 @@ func runServiceSupervisor(opts serviceOptions) error {
 					WorkerPID:      mgr.workerPID(),
 					LastCheckAt:    checkAt,
 					LastError:      derr.Error(),
-					LastReleaseTag: latest.TagName,
-				})
-				continue
-			}
-			if syncErr := syncManifestReleaseArtifacts(runOpts, latest, token); syncErr != nil {
-				logs.Warn("manifest artifact sync failed: %v", syncErr)
-				_ = writeSupervisorState(supervisorPath, supervisorState{
-					UpdatedAt:      time.Now().UTC().Format(time.RFC3339),
-					Status:         "active",
-					Repo:           opts.Repo,
-					ManifestPath:   runOpts.ManifestPath,
-					ManifestURL:    opts.ManifestURL,
-					RepoRoot:       opts.RepoRoot,
-					WorkerVersion:  mgr.version,
-					WorkerPID:      mgr.workerPID(),
-					LastCheckAt:    checkAt,
-					LastError:      syncErr.Error(),
 					LastReleaseTag: latest.TagName,
 				})
 				continue
@@ -379,6 +449,55 @@ func runServiceSupervisor(opts serviceOptions) error {
 	}
 }
 
+func releaseAssetsFingerprint(assets []releaseAsset) string {
+	if len(assets) == 0 {
+		return ""
+	}
+	rows := make([]string, 0, len(assets))
+	for _, a := range assets {
+		name := strings.TrimSpace(a.Name)
+		if name == "" {
+			continue
+		}
+		digest := strings.TrimSpace(strings.ToLower(a.Digest))
+		rows = append(rows, name+"|"+digest)
+	}
+	if len(rows) == 0 {
+		return ""
+	}
+	sort.Strings(rows)
+	sum := sha256.Sum256([]byte(strings.Join(rows, "\n")))
+	return hex.EncodeToString(sum[:])
+}
+
+func refreshManifestFromURL(currentPath, manifestURL, token string) (string, bool, error) {
+	manifestURL = strings.TrimSpace(manifestURL)
+	if manifestURL == "" {
+		return strings.TrimSpace(currentPath), false, nil
+	}
+	prevPath := strings.TrimSpace(currentPath)
+	prevSum := ""
+	if prevPath != "" {
+		if sum, err := sha256File(prevPath); err == nil {
+			prevSum = sum
+		}
+	}
+	manifestDir := filepath.Dir(prevPath)
+	if strings.TrimSpace(manifestDir) == "" || manifestDir == "." {
+		manifestDir = filepath.Join(userHomeDir(), ".dialtone", "autoswap", "manifests")
+	}
+	nextPath, err := resolveManifestPath(prevPath, manifestURL, manifestDir, token)
+	if err != nil {
+		return "", false, err
+	}
+	nextSum, err := sha256File(nextPath)
+	if err != nil {
+		return "", false, err
+	}
+	changed := strings.TrimSpace(prevSum) == "" || !strings.EqualFold(prevSum, nextSum)
+	return nextPath, changed, nil
+}
+
 func syncManifestReleaseArtifacts(opts serviceOptions, rel releaseInfo, token string) error {
 	if strings.TrimSpace(opts.ManifestPath) == "" || strings.TrimSpace(opts.RepoRoot) == "" {
 		// Repo root is optional; allow manifests that do not use <repo_root>.
@@ -404,7 +523,7 @@ func syncManifestReleaseArtifacts(opts serviceOptions, rel releaseInfo, token st
 			if !ok {
 				return fmt.Errorf("release %s missing asset for manifest key=%s target=%s", strings.TrimSpace(rel.TagName), key, target)
 			}
-			if err := placeReleaseFile(asset, rel.Assets, target, token); err != nil {
+			if err := placeReleaseFile(asset, rel.Assets, target, token, ""); err != nil {
 				return err
 			}
 			logs.Info("synced manifest artifact %s <- %s", key, asset.Name)
@@ -497,7 +616,16 @@ func findReleaseAssetByName(assets []releaseAsset, name string) (releaseAsset, b
 	return releaseAsset{}, false
 }
 
-func placeReleaseFile(asset releaseAsset, allAssets []releaseAsset, target, token string) error {
+func placeReleaseFile(asset releaseAsset, allAssets []releaseAsset, target, token, expectedDigest string) error {
+	expectedDigest = normalizeSHA256(expectedDigest)
+	if expectedDigest == "" {
+		expectedDigest = releaseAssetDigest(asset)
+	}
+	if expectedDigest != "" {
+		if sum, err := sha256File(target); err == nil && strings.EqualFold(strings.TrimSpace(sum), expectedDigest) {
+			return nil
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
@@ -519,17 +647,32 @@ func placeReleaseArtifact(asset releaseAsset, allAssets []releaseAsset, target s
 	if t == "" {
 		t = "file"
 	}
+	expectedDigest := bindingExpectedDigest(binding)
 	switch t {
 	case "file", "bin", "binary":
-		return placeReleaseFile(asset, allAssets, target, token)
+		return placeReleaseFile(asset, allAssets, target, token, expectedDigest)
 	case "dir", "directory":
-		return placeReleaseDir(asset, allAssets, target, binding, token)
+		return placeReleaseDir(asset, allAssets, target, binding, token, expectedDigest)
 	default:
 		return fmt.Errorf("unsupported release artifact type %q for asset %s", binding.Type, asset.Name)
 	}
 }
 
-func placeReleaseDir(asset releaseAsset, allAssets []releaseAsset, target string, binding releaseBinding, token string) error {
+func placeReleaseDir(asset releaseAsset, allAssets []releaseAsset, target string, binding releaseBinding, token, expectedDigest string) error {
+	expectedDigest = normalizeSHA256(expectedDigest)
+	if expectedDigest == "" {
+		expectedDigest = releaseAssetDigest(asset)
+	}
+	if expectedDigest != "" {
+		stampPath := target + ".asset.sha256"
+		if raw, err := os.ReadFile(stampPath); err == nil {
+			if strings.EqualFold(strings.TrimSpace(string(raw)), expectedDigest) {
+				if info, statErr := os.Stat(target); statErr == nil && info.IsDir() {
+					return nil
+				}
+			}
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
@@ -573,7 +716,39 @@ func placeReleaseDir(asset releaseAsset, allAssets []releaseAsset, target string
 	}
 
 	_ = os.RemoveAll(target)
-	return os.Rename(target+".tmpdir", target)
+	if err := os.Rename(target+".tmpdir", target); err != nil {
+		return err
+	}
+	if expectedDigest != "" {
+		_ = os.WriteFile(target+".asset.sha256", []byte(expectedDigest+"\n"), 0o644)
+	}
+	return nil
+}
+
+func releaseAssetDigest(asset releaseAsset) string {
+	return normalizeSHA256(asset.Digest)
+}
+
+func normalizeSHA256(v string) string {
+	digest := strings.TrimSpace(v)
+	if digest == "" {
+		return ""
+	}
+	digest = strings.TrimSpace(strings.TrimPrefix(strings.ToLower(digest), "sha256:"))
+	if !isHexDigest(digest) {
+		return ""
+	}
+	return digest
+}
+
+func bindingExpectedDigest(binding releaseBinding) string {
+	key := runtime.GOOS + "-" + runtime.GOARCH
+	if v, ok := binding.SHA256ByTarget[key]; ok {
+		if d := normalizeSHA256(v); d != "" {
+			return d
+		}
+	}
+	return normalizeSHA256(binding.SHA256)
 }
 
 func extractTarGz(src, dest string) error {

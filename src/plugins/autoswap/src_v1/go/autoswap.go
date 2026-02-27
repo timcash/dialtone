@@ -43,9 +43,11 @@ type manifestProcess struct {
 }
 
 type releaseBinding struct {
-	Asset   string `json:"asset"`
-	Type    string `json:"type"`
-	Extract string `json:"extract"`
+	Asset          string            `json:"asset"`
+	Type           string            `json:"type"`
+	Extract        string            `json:"extract"`
+	SHA256         string            `json:"sha256,omitempty"`
+	SHA256ByTarget map[string]string `json:"sha256_by_target,omitempty"`
 }
 
 type composeConfig struct {
