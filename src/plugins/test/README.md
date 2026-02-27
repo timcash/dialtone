@@ -170,9 +170,14 @@ Core files:
   - `WaitForBrowserMessageAfterAction(pattern, timeout, action)`
   - `EnsureBrowser(BrowserOptions)` / `AttachBrowserByPort(...)` / `AttachBrowserByWebSocket(...)`
   - `Browser()` / `CloseBrowser()`
-  - `RunBrowser(actions...)` / `RunBrowserWithTimeout(timeout, actions...)`
+- `RunBrowser(actions...)` / `RunBrowserWithTimeout(timeout, actions...)`
   - `WaitForAriaLabel(...)` / `ClickAriaLabel(...)` / `TypeAriaLabel(...)` / `PressEnterAriaLabel(...)`
-  - `ClickAriaLabelAfterWait(label, timeout)`
+- `ClickAriaLabelAfterWait(label, timeout)`
+
+Remote browser fallback:
+- set `DIALTONE_TEST_BROWSER_NODE=<mesh-node>` (for example `chroma`, `darkmac`, `legion`)
+- when local Chrome launch fails, `EnsureBrowser` will use `ssh src_v1` mesh routing to start/reuse remote Chrome and attach over tailnet
+- on WSL targeting `legion`, transport fallback uses local `powershell.exe` automatically through the `ssh` plugin
   - `ClickAt(x, y)` / `TapAt(x, y)` (coordinate interactions)
   - `WaitForAriaLabelAttrEquals(...)`
   - `WaitForConsoleContains(...)`
