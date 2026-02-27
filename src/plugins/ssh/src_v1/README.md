@@ -13,6 +13,9 @@ Current usage includes:
 - `./dialtone.sh ssh src_v1 run-all --cmd "hostname"`
 - `./dialtone.sh ssh src_v1 sync-repos --branch feat/robot-src-v4-split-runtime`
 - `./dialtone.sh ssh src_v1 sync-code --node rover --src /home/user/dialtone --dest /home/tim/dialtone --delete`
+- `./dialtone.sh ssh src_v1 sync-code --node all --src /home/user/dialtone --delete --service --interval 30s`
+- `./dialtone.sh ssh src_v1 sync-code --service-status`
+- `./dialtone.sh ssh src_v1 sync-code --service-stop`
 - `./dialtone.sh ssh src_v1 bootstrap --node darkmac --src /home/user/dialtone --dest /Users/tim/dialtone --delete`
 - `./dialtone.sh ssh src_v1 test`
 
@@ -36,10 +39,60 @@ Defaults:
 - install command: `printf 'y\n' | ./dialtone.sh go src_v1 install`
 - verify command: `./dialtone.sh go src_v1 exec version`
 
+## Sync Code
+
+`sync-code` mirrors a working tree to one mesh node or all mesh nodes using `rsync`.
+
+Common flags:
+- `--node <name|all>` required target
+- `--src <path>` source path on local node (default: cwd)
+- `--dest <path>` destination path on target node (default: node-specific repo path)
+- `--delete` remove destination files that do not exist in source
+- `--exclude <pattern>` extra rsync exclude (repeatable)
+
+Service flags (local machine only):
+- `--service` install/start local user systemd loop service
+- `--interval <duration>` loop interval when `--service` is set (default: `30s`)
+- `--service-status` show local service status
+- `--service-stop` stop/disable local service
+
+Notes:
+- Service unit name: `dialtone-ssh-sync-code.service`
+- Service mode runs on the machine where you execute the command (for example WSL), then syncs remote mesh targets from there.
+- Service mode requires user `systemd` availability.
+
+```bash
+# One-time sync to chroma
+./dialtone.sh ssh src_v1 sync-code \
+  --node chroma \
+  --src /home/user/dialtone \
+  --delete
+
+# One-time sync to all mesh nodes
+./dialtone.sh ssh src_v1 sync-code \
+  --node all \
+  --src /home/user/dialtone \
+  --delete
+
+# Start continuous sync service (runs on this local machine)
+./dialtone.sh ssh src_v1 sync-code \
+  --node all \
+  --src /home/user/dialtone \
+  --delete \
+  --service \
+  --interval 30s
+
+# Check service status
+./dialtone.sh ssh src_v1 sync-code --service-status
+
+# Stop/disable service
+./dialtone.sh ssh src_v1 sync-code --service-stop
+```
+
 ## Mesh behavior
 
 - Node aliases are centralized in `src_v1/go/mesh.go`.
-- Darkmac default mesh account is `dialtone` (home: `/Users/dialtone`).
+- Darkmac default mesh account is `tim` (home: `/Users/tim`).
 - Default transport is Go SSH (`golang.org/x/crypto/ssh`).
 - On WSL, commands targeting `legion` automatically use local `powershell.exe` transport so callers do not need WSL-specific branching.
 - Chroma host selection is adaptive: plugin prefers LAN `192.168.4.53` when reachable, then falls back to `chroma-1.shad-artichoke.ts.net`.
@@ -50,6 +103,9 @@ Defaults:
 - Per-node repo overrides are supported with flags like `--repo-legion /path/to/dialtone`.
 - `sync-code` uses `rsync` to mirror working tree changes without requiring commits.
 - `sync-code` excludes `node_modules`, `.pixi`, `.git`, and `bin` by default.
+- `sync-code --service` installs a local user `systemd` loop service (`dialtone-ssh-sync-code.service`) that reruns sync at the requested interval.
+- `sync-code --service-status` shows service status.
+- `sync-code --service-stop` stops/disables the service.
 
 ## New machine from scratch
 
