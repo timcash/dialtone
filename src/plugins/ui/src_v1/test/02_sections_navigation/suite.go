@@ -18,7 +18,11 @@ func runNavigation(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 	if err := ctx.EnsureBuiltAndServed(); err != nil {
 		return testv1.StepRunResult{}, err
 	}
-	if _, err := sc.EnsureBrowser(testv1.BrowserOptions{Headless: true, GPU: false, Role: "test", URL: ctx.AppURL("/#ui-hero-stage")}); err != nil {
+	browserOpts, _, err := uitest.BrowserOptionsFor(ctx.AppURL("/#ui-hero-stage"))
+	if err != nil {
+		return testv1.StepRunResult{}, err
+	}
+	if _, err := sc.EnsureBrowser(browserOpts); err != nil {
 		return testv1.StepRunResult{}, err
 	}
 

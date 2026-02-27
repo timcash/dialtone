@@ -1,0 +1,19 @@
+{
+  "name": "@dialtone/earth-src-v1-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bunx vite",
+    "build": "bunx vite build",
+    "preview": "bunx vite preview"
+  },
+  "dependencies": {
+    "h3-js": "^4.2.1",
+    "three": "^0.179.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "vite": "^7.1.3"
+  }
+}

@@ -3,7 +3,7 @@ export interface VisualizationControl {
   setVisible: (visible: boolean) => void;
 }
 
-export type SectionPrimaryOverlayKind = 'stage' | 'table' | 'xterm' | 'docs' | 'video' | (string & {});
+export type SectionPrimaryOverlayKind = 'stage' | 'table' | 'xterm' | 'docs' | 'video' | 'button-list' | (string & {});
 export type OverlayKind = 'menu' | 'mode-form' | 'status-bar' | 'chatlog' | 'legend' | 'thumb' | SectionPrimaryOverlayKind;
 
 export interface SectionOverlayConfig {

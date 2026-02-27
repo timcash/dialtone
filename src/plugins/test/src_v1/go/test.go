@@ -367,16 +367,19 @@ type StepRunResult struct {
 }
 
 type SuiteOptions struct {
-	Version        string
-	RepoRoot       string
-	ReportPath     string
-	LogPath        string
-	ErrorLogPath   string
-	BrowserLogMode string
-	NATSURL        string
-	NATSListenURL  string
-	NATSSubject    string
-	AutoStartNATS  bool
+	Version               string
+	RepoRoot              string
+	ReportPath            string
+	LogPath               string
+	ErrorLogPath          string
+	BrowserLogMode        string
+	PreserveSharedBrowser bool
+	SkipBrowserCleanup    bool
+	BrowserCleanupRole    string
+	NATSURL               string
+	NATSListenURL         string
+	NATSSubject           string
+	AutoStartNATS         bool
 }
 
 type ConsoleMessage struct {
@@ -562,9 +565,9 @@ func initSession(session *chrome.Session, role string) (*BrowserSession, error) 
 	allocCtx, cancelAlloc := chromedp.NewRemoteAllocator(context.Background(), session.WebSocketURL)
 
 	// Reuse an existing page target when possible to avoid opening additional tabs.
+	// This also applies to remote/tunneled sessions because the debug port is exposed locally.
 	ctxOpts := []chromedp.ContextOption{}
-	remoteAttach := strings.Contains(strings.TrimSpace(session.WebSocketURL), "ws://127.0.0.1:")
-	if session.Port > 0 && !remoteAttach {
+	if session.Port > 0 {
 		if targetID, err := getFirstPageTargetID(session.Port); err == nil && targetID != "" {
 			ctxOpts = append(ctxOpts, chromedp.WithTargetID(target.ID(targetID)))
 		}
@@ -651,7 +654,19 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 			if strings.TrimSpace(opts.URL) != "" {
 				if err := chromedp.Run(rs.ctx, chromedp.Navigate(opts.URL)); err != nil {
 					rs.Close()
-					return nil, err
+					// Reused remote sessions can go stale. Retry once with a fresh session.
+					retryOpts := opts
+					retryOpts.ReuseExisting = false
+					logs.Warn("   [BROWSER] remote reused session navigate failed; retrying fresh session on %s", remoteNode)
+					rs2, rerr2 := startRemoteBrowser(remoteNode, retryOpts)
+					if rerr2 != nil {
+						return nil, err
+					}
+					if nerr := chromedp.Run(rs2.ctx, chromedp.Navigate(opts.URL)); nerr != nil {
+						rs2.Close()
+						return nil, nerr
+					}
+					return rs2, nil
 				}
 			}
 			return rs, nil
@@ -1468,12 +1483,21 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 	var results []StepResult
 	var sharedBrowser *BrowserSession
 	defer func() {
-		if sharedBrowser != nil {
+		if sharedBrowser != nil && !opts.PreserveSharedBrowser {
 			sharedBrowser.Close()
 		}
-		// Enforce suite-end cleanup for all Dialtone-tagged browser instances.
-		if err := chrome.KillDialtoneResources(); err != nil {
-			logs.Warn("%s browser cleanup warning: %v", testTag, err)
+		// Enforce suite-end cleanup for Dialtone browser instances unless disabled by caller.
+		if !opts.SkipBrowserCleanup {
+			role := strings.TrimSpace(opts.BrowserCleanupRole)
+			if role == "" {
+				if err := chrome.KillDialtoneResources(); err != nil {
+					logs.Warn("%s browser cleanup warning: %v", testTag, err)
+				}
+			} else {
+				if err := cleanupDialtoneResourcesByRole(role); err != nil {
+					logs.Warn("%s browser cleanup warning (role=%s): %v", testTag, role, err)
+				}
+			}
 		}
 	}()
 
@@ -1692,6 +1716,25 @@ func sanitizeSubjectToken(s string) string {
 		return "default"
 	}
 	return s
+}
+
+func cleanupDialtoneResourcesByRole(role string) error {
+	procs, err := chrome.ListResources(true)
+	if err != nil {
+		return err
+	}
+	for _, p := range procs {
+		if p.Origin != "Dialtone" {
+			continue
+		}
+		if strings.TrimSpace(p.Role) != strings.TrimSpace(role) {
+			continue
+		}
+		if killErr := chrome.KillResource(p.PID, p.IsWindows); killErr != nil {
+			return killErr
+		}
+	}
+	return nil
 }
 
 func generateReport(opts SuiteOptions, results []StepResult, totalDuration time.Duration) error {
