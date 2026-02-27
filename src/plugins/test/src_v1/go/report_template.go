@@ -87,6 +87,24 @@ func RenderTemplateReport(rawPath, outPath string, opts TemplateReportOptions) e
 			sb.WriteString(fmt.Sprintf("error: %s\n", st.Error))
 		}
 		sb.WriteString("```\n\n")
+		if overlapLines := extractOverlapLines(st.Logs); len(overlapLines) > 0 {
+			sb.WriteString("### Overlap\n\n")
+			sb.WriteString("```text\n")
+			for _, line := range overlapLines {
+				sb.WriteString(line)
+				sb.WriteString("\n")
+			}
+			sb.WriteString("```\n\n")
+		}
+		if injectedLines := extractInjectedBrowserCheckLines(st.Logs); len(injectedLines) > 0 {
+			sb.WriteString("### Injected Browser Error Check\n\n")
+			sb.WriteString("```text\n")
+			for _, line := range injectedLines {
+				sb.WriteString(line)
+				sb.WriteString("\n")
+			}
+			sb.WriteString("```\n\n")
+		}
 		if len(st.Logs) > 0 {
 			sb.WriteString("### Logs\n\n")
 			sb.WriteString("```text\n")
@@ -166,6 +184,36 @@ func screenshotMarkdownLink(reportPath, shot string) string {
 		return norm[idx:]
 	}
 	return "screenshots/" + base
+}
+
+func extractOverlapLines(lines []string) []string {
+	out := make([]string, 0)
+	for _, line := range lines {
+		if !strings.Contains(line, "OVERLAP:") {
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func extractInjectedBrowserCheckLines(lines []string) []string {
+	out := make([]string, 0)
+	for _, line := range lines {
+		if !strings.Contains(line, "INJECTED_BROWSER_CHECK:") {
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	return out
 }
 
 func parseRawReportMarkdown(raw string) (string, string, []parsedTemplateStep) {

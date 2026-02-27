@@ -35,7 +35,7 @@ func main() {
 	})
 	if attach != "" {
 		_ = os.Setenv("DIALTONE_TEST_BROWSER_NODE", attach)
-		logs.Info("ui test attach mode node=%s url=%s", attach, url)
+		logs.Info("ui test remote headless mode node=%s url=%s", attach, url)
 	} else {
 		_ = os.Unsetenv("DIALTONE_TEST_BROWSER_NODE")
 	}
@@ -47,7 +47,6 @@ func main() {
 	components.Register(reg)
 
 	logs.Info("Starting UI src_v1 suite with %d registered steps", len(reg.Steps))
-	preserveAttachBrowser := attach != ""
 	runErr := reg.Run(testv1.SuiteOptions{
 		Version:               "ui-src-v1",
 		ReportPath:            "plugins/ui/src_v1/test/TEST.md",
@@ -61,8 +60,8 @@ func main() {
 		NATSSubject:           "logs.test.ui.src-v1",
 		AutoStartNATS:         true,
 		BrowserCleanupRole:    "ui-test",
-		PreserveSharedBrowser: preserveAttachBrowser,
-		SkipBrowserCleanup:    preserveAttachBrowser,
+		PreserveSharedBrowser: false,
+		SkipBrowserCleanup:    false,
 	})
 	if runErr != nil {
 		logs.Error("UI src_v1 suite failed: %v", runErr)

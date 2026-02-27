@@ -28,6 +28,7 @@ import (
 )
 
 const testTag = "[TEST]"
+const defaultStepTimeout = 10 * time.Second
 
 type Step struct {
 	Name           string
@@ -661,9 +662,23 @@ func initSession(session *chrome.Session, role string) (*BrowserSession, error) 
 			}
 			logs.Info("   [BROWSER CONSOLE | PID %d] %s: %s", session.PID, ev.Type, msg.Text)
 		case *cdruntime.EventExceptionThrown:
+			msgText := strings.TrimSpace(ev.ExceptionDetails.Text)
+			if ev.ExceptionDetails.Exception != nil {
+				desc := strings.TrimSpace(ev.ExceptionDetails.Exception.Description)
+				if desc != "" {
+					if msgText == "" {
+						msgText = desc
+					} else if !strings.Contains(msgText, desc) {
+						msgText = msgText + " " + desc
+					}
+				}
+			}
+			if msgText == "" {
+				msgText = "javascript exception"
+			}
 			exMsg := ConsoleMessage{
 				Type: "exception",
-				Text: ev.ExceptionDetails.Text,
+				Text: msgText,
 				Time: time.Now(),
 			}
 			s.mu.Lock()
@@ -711,20 +726,29 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 		if rs, rerr := startRemoteBrowser(remoteNode, opts); rerr == nil {
 			if strings.TrimSpace(opts.URL) != "" {
 				if err := chromedp.Run(rs.ctx, chromedp.Navigate(opts.URL)); err != nil {
+					if opts.ReuseExisting {
+						errText := strings.ToLower(err.Error())
+						if strings.Contains(errText, "no browser is open") || strings.Contains(errText, "failed to open new tab") {
+							rs.Close()
+							retryOpts := opts
+							retryOpts.ReuseExisting = false
+							logs.Warn("   [BROWSER] remote reused session has no open page on %s; launching one fresh headed window", remoteNode)
+							rs2, rerr2 := startRemoteBrowser(remoteNode, retryOpts)
+							if rerr2 != nil {
+								return nil, err
+							}
+							if nerr := chromedp.Run(rs2.ctx, chromedp.Navigate(opts.URL)); nerr != nil {
+								rs2.Close()
+								return nil, nerr
+							}
+							return rs2, nil
+						}
+						// Keep the currently attached headed browser; do not spawn/attach again.
+						logs.Warn("   [BROWSER] remote reused session navigate failed on %s; continuing with existing attached session", remoteNode)
+						return rs, nil
+					}
 					rs.Close()
-					// Reused remote sessions can go stale. Retry once with a fresh session.
-					retryOpts := opts
-					retryOpts.ReuseExisting = false
-					logs.Warn("   [BROWSER] remote reused session navigate failed; retrying fresh session on %s", remoteNode)
-					rs2, rerr2 := startRemoteBrowser(remoteNode, retryOpts)
-					if rerr2 != nil {
-						return nil, err
-					}
-					if nerr := chromedp.Run(rs2.ctx, chromedp.Navigate(opts.URL)); nerr != nil {
-						rs2.Close()
-						return nil, nerr
-					}
-					return rs2, nil
+					return nil, err
 				}
 			}
 			return rs, nil
@@ -851,8 +875,30 @@ func startRemoteBrowser(node string, opts BrowserOptions) (*BrowserSession, erro
 	if url == "" {
 		url = "about:blank"
 	}
-	cmd := fmt.Sprintf("repo=''; for d in \"$HOME/dialtone\" /home/user/dialtone /home/tim/dialtone /mnt/c/Users/tim/dialtone /mnt/c/Users/timca/dialtone; do if [ -d \"$d\" ]; then repo=\"$d\"; break; fi; done; if [ -z \"$repo\" ]; then echo 'dialtone repo not found on remote node'; exit 1; fi; cd \"$repo\" && ./dialtone.sh chrome src_v1 session --role %s --headless=%t --gpu=%t --reuse-existing=%t --debug-address 0.0.0.0 --url %s",
-		shellQuote(role), opts.Headless, opts.GPU, opts.ReuseExisting, shellQuote(url))
+	candidates := make([]string, 0, len(nodeInfo.RepoCandidates)+5)
+	seen := map[string]struct{}{}
+	addCandidate := func(v string) {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return
+		}
+		if _, ok := seen[v]; ok {
+			return
+		}
+		seen[v] = struct{}{}
+		candidates = append(candidates, v)
+	}
+	addCandidate("$HOME/dialtone")
+	for _, c := range nodeInfo.RepoCandidates {
+		addCandidate(c)
+	}
+	addCandidate("/home/user/dialtone")
+	addCandidate("/home/tim/dialtone")
+	addCandidate("/mnt/c/Users/tim/dialtone")
+	addCandidate("/mnt/c/Users/timca/dialtone")
+	candidateExpr := strings.Join(candidates, " ")
+	cmd := fmt.Sprintf("repo=''; for d in %s; do if [ -d \"$d\" ]; then repo=\"$d\"; break; fi; done; if [ -z \"$repo\" ]; then echo 'dialtone repo not found on remote node'; exit 1; fi; cd \"$repo\" && ./dialtone.sh chrome src_v1 session --role %s --headless=%t --gpu=%t --reuse-existing=%t --debug-address 0.0.0.0 --url %s",
+		candidateExpr, shellQuote(role), opts.Headless, opts.GPU, opts.ReuseExisting, shellQuote(url))
 	out, err := sshv1.RunNodeCommand(nodeInfo.Name, cmd, sshv1.CommandOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("remote command on %s failed: %v output=%s", nodeInfo.Name, err, strings.TrimSpace(out))
@@ -1256,6 +1302,9 @@ func (sc *StepContext) EnsureBrowser(opts BrowserOptions) (*BrowserSession, erro
 				return nil, err
 			}
 		}
+		if err := sc.runInjectedBrowserErrorCheckOnce(); err != nil {
+			return nil, err
+		}
 		return sc.Session, nil
 	}
 	if sc.suiteBrowser != nil {
@@ -1271,6 +1320,9 @@ func (sc *StepContext) EnsureBrowser(opts BrowserOptions) (*BrowserSession, erro
 				return nil, err
 			}
 		}
+		if err := sc.runInjectedBrowserErrorCheckOnce(); err != nil {
+			return nil, err
+		}
 		return sc.Session, nil
 	}
 	s, err := StartBrowser(opts)
@@ -1281,6 +1333,9 @@ func (sc *StepContext) EnsureBrowser(opts BrowserOptions) (*BrowserSession, erro
 	if sc.setSuiteBrowser != nil {
 		sc.setSuiteBrowser(s)
 		sc.suiteBrowser = s
+	}
+	if err := sc.runInjectedBrowserErrorCheckOnce(); err != nil {
+		return nil, err
 	}
 	return s, nil
 }
@@ -1490,17 +1545,6 @@ func (sc *StepContext) bindBrowserSession(s *BrowserSession) {
 	sc.Session = s
 }
 
-type StepResult struct {
-	Step        Step
-	Error       error
-	Result      StepRunResult
-	Start       time.Time
-	End         time.Time
-	Logs        []string
-	Errors      []string
-	BrowserLogs []string
-}
-
 type stackFrame struct {
 	file string
 	line int
@@ -1566,7 +1610,7 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 	for _, step := range steps {
 		timeout := step.Timeout
 		if timeout == 0 {
-			timeout = 30 * time.Second
+			timeout = defaultStepTimeout
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -1801,114 +1845,6 @@ func cleanupDialtoneResourcesByRole(role string) error {
 		}
 	}
 	return nil
-}
-
-func generateReport(opts SuiteOptions, results []StepResult, totalDuration time.Duration) error {
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# Test Report: %s\n\n", opts.Version))
-	sb.WriteString(fmt.Sprintf("- **Date**: %s\n", time.Now().Format(time.RFC1123)))
-	sb.WriteString(fmt.Sprintf("- **Total Duration**: %v\n\n", totalDuration))
-
-	sb.WriteString("## Summary\n\n")
-	passed := 0
-	for _, r := range results {
-		if r.Error == nil {
-			passed++
-		}
-	}
-	sb.WriteString(fmt.Sprintf("- **Steps**: %d / %d passed\n", passed, len(results)))
-	status := "PASSED"
-	if passed < len(results) {
-		status = "FAILED"
-	}
-	sb.WriteString(fmt.Sprintf("- **Status**: %s\n\n", status))
-
-	sb.WriteString("## Details\n\n")
-	for i, r := range results {
-		icon := "✅"
-		if r.Error != nil {
-			icon = "❌"
-		}
-		sb.WriteString(fmt.Sprintf("### %d. %s %s\n\n", i+1, icon, r.Step.Name))
-		sb.WriteString(fmt.Sprintf("- **Duration**: %v\n", r.End.Sub(r.Start)))
-		if r.Error != nil {
-			sb.WriteString(fmt.Sprintf("- **Error**: `%v`\n", r.Error))
-		}
-		if r.Result.Report != "" {
-			sb.WriteString(fmt.Sprintf("- **Report**: %s\n", r.Result.Report))
-		}
-		if len(r.Logs) > 0 {
-			sb.WriteString("\n#### Logs\n\n```text\n")
-			for _, line := range r.Logs {
-				sb.WriteString(line)
-				sb.WriteString("\n")
-			}
-			sb.WriteString("```\n")
-		}
-		if len(r.Errors) > 0 {
-			sb.WriteString("\n#### Errors\n\n```text\n")
-			for _, line := range r.Errors {
-				sb.WriteString(line)
-				sb.WriteString("\n")
-			}
-			sb.WriteString("```\n")
-		}
-		sb.WriteString("\n#### Browser Logs\n\n```text\n")
-		if len(r.BrowserLogs) == 0 {
-			sb.WriteString("<empty>\n")
-		} else {
-			for _, line := range r.BrowserLogs {
-				sb.WriteString(line)
-				sb.WriteString("\n")
-			}
-		}
-		sb.WriteString("```\n")
-
-		if len(r.Step.Screenshots) > 0 {
-			sb.WriteString("\n#### Screenshots\n\n")
-			for _, s := range r.Step.Screenshots {
-				// Use relative path for markdown
-				fname := filepath.Base(s)
-				sb.WriteString(fmt.Sprintf("![%s](screenshots/%s)\n", fname, fname))
-			}
-		}
-		sb.WriteString("\n---\n\n")
-	}
-
-	return os.WriteFile(opts.ReportPath, []byte(sb.String()), 0644)
-}
-
-func generateReports(opts SuiteOptions, results []StepResult, totalDuration time.Duration) error {
-	format := strings.ToLower(strings.TrimSpace(opts.ReportFormat))
-	if format != "template" {
-		return generateReport(opts, results, totalDuration)
-	}
-	reportPath := strings.TrimSpace(opts.ReportPath)
-	if reportPath == "" {
-		return nil
-	}
-	rawPath := strings.TrimSpace(opts.RawReportPath)
-	if rawPath == "" {
-		ext := filepath.Ext(reportPath)
-		base := strings.TrimSuffix(reportPath, ext)
-		if ext == "" {
-			rawPath = reportPath + "_RAW.md"
-		} else {
-			rawPath = base + "_RAW" + ext
-		}
-	}
-	rawOpts := opts
-	rawOpts.ReportPath = rawPath
-	rawOpts.ReportFormat = ""
-	rawOpts.RawReportPath = ""
-	if err := generateReport(rawOpts, results, totalDuration); err != nil {
-		return err
-	}
-	return RenderTemplateReport(rawPath, reportPath, TemplateReportOptions{
-		Title:   strings.TrimSpace(opts.ReportTitle),
-		Version: strings.TrimSpace(opts.Version),
-		Runner:  strings.TrimSpace(opts.ReportRunner),
-	})
 }
 
 // Re-export common chromedp things to avoid direct dependency if possible

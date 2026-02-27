@@ -29,7 +29,8 @@ func Register(r *testv1.Registry) {
 	})
 
 	r.Add(testv1.Step{
-		Name: "example-browser-stepcontext-api",
+		Name:    "example-browser-stepcontext-api",
+		Timeout: 20 * time.Second,
 		RunWithContext: func(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 			if !testv1.BrowserProviderAvailable() {
 				sc.Warnf("browser provider not available; set DIALTONE_TEST_BROWSER_NODE for remote mode")
