@@ -55,9 +55,11 @@ The `task` plugin provides a structured system for managing and tracking enginee
 
 # 10) SIGN-OFF: Work from the leaves (inputs) up to the root.
 ./dialtone.sh task sign 104-fix-compile-error --role LLM-CODE
-./dialtone.sh task sign 104 --role LLM-CODE
 
-# 11) Archive and PR.
+# 11) REVIEW: Check DAG and completion readiness before resolve.
+./dialtone.sh task review 104
+
+# 12) Archive and PR.
 ./dialtone.sh task resolve 104 --pr-url https://github.com/<org>/<repo>/pull/<id>
 ./dialtone.sh task archive 104
 ./dialtone.sh github pr src_v1
@@ -72,6 +74,9 @@ The `task` plugin provides a structured system for managing and tracking enginee
 - **`### outputs:`** Tasks that are waiting for **this** task to be completed.
 - Linking is **bidirectional** and uses relative Markdown paths for easy navigation.
 - **`### signatures:`** All role signatures (e.g. `TEST`, `REVIEW`, `DOCS`) are appended here.
+- Link operations are cycle-checked; edges that would create a DAG cycle are rejected.
+- Task completion is dependency-aware: a task is only complete when it has its own `reviewed` + `tested` signatures **and** all its input tasks are complete.
+- Root completion rule: root task must have `### outputs: - none`, so it is terminal and resolves last.
 
 ### 2. The v1/v2 Workflow
 - **`v1` (Baseline):** The state of the task at the beginning of the work cycle.
@@ -98,12 +103,22 @@ Sync behavior:
 ### `tree [id]`
 Prints the recursive **input** dependency tree.
 
+### `review <root-id>`
+- walks the full input DAG for `<root-id>`
+- reports per-task readiness:
+  - own signatures complete (`reviewed` + `tested`)
+  - all inputs complete
+  - final complete state
+- verifies root is terminal (`outputs: none`)
+- fails when a cycle is detected
+
 ### `archive <task-name>`
 Promotes `v2` to `v1` to set a new baseline.
 
 ### `resolve <root-id> [--pr-url URL]`
 - verifies the full input tree for `<root-id>` is done
 - requires `reviewed` + `tested` signatures on all input tasks and the root task
+- enforces dependency-aware completion semantics (root cannot be complete before inputs)
 - signs final root review and sets root signature status to `done`
 - updates source issue markdown status to `done` and appends completion comment
 - stores PR link in root `### pr:` when `--pr-url` is passed
