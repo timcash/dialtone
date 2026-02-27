@@ -64,7 +64,7 @@ This is the required check list for `./dialtone.sh robot src_v2 diagnostic --hos
 - Settings
 4. For each section, verify destination aria label exists and `data-active="true"`.
 5. Docs section must include version token:
-- `ROBOT_UI_DOCS_VERSION: robot-src_v2-docs-v3`
+- `ROBOT_UI_DOCS_VERSION: robot-src_v2-docs-v4`
 6. Telemetry section check includes `aria-label="Robot Table"`.
 
 ## 7) Optional Flags for Diagnostic

@@ -61,7 +61,7 @@ DIALTONE_TEST_BROWSER_NODE=chroma ./dialtone.sh robot src_v2 test
 
 ## 4) Publish Artifacts (No Deploy Side Effects)
 
-`publish` only builds and uploads missing release assets; it should not deploy remote hosts.
+`publish` only builds and uploads changed/missing release assets; it does not deploy remote hosts.
 
 ```bash
 ./dialtone.sh robot src_v2 publish --repo timcash/dialtone
@@ -117,7 +117,7 @@ Common variants:
 ```bash
 ./dialtone.sh robot src_v2 diagnostic --host rover --user tim --skip-ui
 ./dialtone.sh robot src_v2 diagnostic --host rover --user tim --ui-url https://rover-1.dialtone.earth --browser-node chroma
-./dialtone.sh robot src_v2 diagnostic --host rover --user tim --manifest /home/tim/.dialtone/autoswap/manifests/robot-src_v2.manifest.json
+./dialtone.sh robot src_v2 diagnostic --host rover --user tim --manifest /home/tim/.dialtone/autoswap/manifests/manifest-<hash>.json
 ```
 
 Diagnostic checklist details:

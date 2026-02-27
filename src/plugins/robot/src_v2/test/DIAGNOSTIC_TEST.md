@@ -1,7 +1,7 @@
 # Test Report: robot-src-v2-diagnostic-ui
 
-- **Date**: Thu, 26 Feb 2026 18:30:06 PST
-- **Total Duration**: 20.209633686s
+- **Date**: Fri, 27 Feb 2026 09:39:48 PST
+- **Total Duration**: 13.347223187s
 
 ## Summary
 
@@ -12,7 +12,7 @@
 
 ### 1. ✅ robot-src-v2-diagnostic-ui-menu
 
-- **Duration**: 20.186837585s
+- **Duration**: 13.332479946s
 - **Report**: diagnostic UI menu passed
 
 ---

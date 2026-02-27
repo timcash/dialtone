@@ -1,6 +1,6 @@
 # Robot src_v2 Docs
 
-ROBOT_UI_DOCS_VERSION: robot-src_v2-docs-v3
+ROBOT_UI_DOCS_VERSION: robot-src_v2-docs-v4
 
 This page documents the `robot src_v2` runtime and operator workflow.
 
