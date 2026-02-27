@@ -2,6 +2,7 @@ package autoswap
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -49,6 +50,7 @@ type releaseBinding struct {
 
 type composeConfig struct {
 	ManifestPath  string
+	ManifestURL   string
 	RepoRoot      string
 	Listen        string
 	NATSPort      int
@@ -79,7 +81,11 @@ func Stage(args []string) error {
 	if err != nil {
 		return err
 	}
-	art, err := loadAndValidateManifest(cfg.ManifestPath, cfg.RepoRoot)
+	manifestPath, err := materializeManifestForCompose(cfg)
+	if err != nil {
+		return err
+	}
+	art, err := loadAndValidateManifest(manifestPath, cfg.RepoRoot)
 	if err != nil {
 		return err
 	}
@@ -93,13 +99,19 @@ func Run(args []string) error {
 	if err != nil {
 		return err
 	}
-	art, err := loadAndValidateManifest(cfg.ManifestPath, cfg.RepoRoot)
+	manifestPath, err := materializeManifestForCompose(cfg)
+	if err != nil {
+		return err
+	}
+	art, err := loadAndValidateManifest(manifestPath, cfg.RepoRoot)
 	if err != nil {
 		return err
 	}
 	if len(art.Manifest.Runtime.Processes) > 0 {
+		cfg.ManifestPath = manifestPath
 		return runManifestProcesses(cfg, art)
 	}
+	cfg.ManifestPath = manifestPath
 
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
 	defer cancel()
@@ -157,7 +169,7 @@ func Run(args []string) error {
 			ctx,
 			art.MavlinkBin, "run",
 			"--nats-url", natsURL,
-			"--mock-if-no-endpoint=true",
+			"--mock-if-no-endpoint=false",
 		)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -571,6 +583,7 @@ func parseComposeFlags(name string, args []string) (composeConfig, error) {
 
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	manifest := fs.String("manifest", defaultManifest, "Path to composition manifest")
+	manifestURL := fs.String("manifest-url", "", "Manifest URL (if set, overrides --manifest)")
 	repoRoot := fs.String("repo-root", defaultRepoRoot, "Optional repo root for <repo_root> substitutions")
 	listen := fs.String("listen", ":18084", "Runtime listen address")
 	natsPort := fs.Int("nats-port", 18226, "Embedded NATS port")
@@ -583,6 +596,7 @@ func parseComposeFlags(name string, args []string) (composeConfig, error) {
 	}
 	return composeConfig{
 		ManifestPath:  strings.TrimSpace(*manifest),
+		ManifestURL:   strings.TrimSpace(*manifestURL),
 		RepoRoot:      strings.TrimSpace(*repoRoot),
 		Listen:        strings.TrimSpace(*listen),
 		NATSPort:      *natsPort,
@@ -591,6 +605,55 @@ func parseComposeFlags(name string, args []string) (composeConfig, error) {
 		RequireStream: *requireStream,
 		StayRunning:   *stayRunning,
 	}, nil
+}
+
+func materializeManifestForCompose(cfg composeConfig) (string, error) {
+	token := strings.TrimSpace(os.Getenv("AUTOSWAP_MANIFEST_TOKEN"))
+	if token == "" {
+		token = strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
+	}
+	return resolveManifestPath(
+		cfg.ManifestPath,
+		cfg.ManifestURL,
+		filepath.Join(userHomeDir(), ".dialtone", "autoswap", "manifests"),
+		token,
+	)
+}
+
+func resolveManifestPath(manifestPath, manifestURL, manifestDir, token string) (string, error) {
+	url := strings.TrimSpace(manifestURL)
+	if url == "" {
+		if strings.TrimSpace(manifestPath) == "" {
+			return "", fmt.Errorf("manifest source required: set --manifest or --manifest-url")
+		}
+		return strings.TrimSpace(manifestPath), nil
+	}
+	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(url))
+	fileName := fmt.Sprintf("manifest-%x.json", sum[:8])
+	finalPath := filepath.Join(manifestDir, fileName)
+	tmpPath := finalPath + ".tmp"
+	if err := downloadFile(url, token, tmpPath); err != nil {
+		return "", fmt.Errorf("download manifest failed: %w", err)
+	}
+	raw, err := os.ReadFile(tmpPath)
+	if err != nil {
+		_ = os.Remove(tmpPath)
+		return "", err
+	}
+	var mf runtimeManifest
+	if err := json.Unmarshal(raw, &mf); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("manifest parse failed: %w", err)
+	}
+	if err := os.WriteFile(finalPath, raw, 0o644); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", err
+	}
+	_ = os.Remove(tmpPath)
+	return finalPath, nil
 }
 
 func loadManifestResolved(manifestPath, repoRoot string, requireExisting bool) (resolvedArtifacts, error) {

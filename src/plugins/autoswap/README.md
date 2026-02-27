@@ -6,7 +6,7 @@
 
 # 2) On target (standalone usage, no dialtone.sh needed):
 ./dialtone_autoswap_v1 service --mode install \
-  --manifest /opt/manifests/robot.composition.json \
+  --manifest-url https://raw.githubusercontent.com/timcash/dialtone/main/src/plugins/robot/src_v2/config/composition.manifest.json \
   --repo timcash/dialtone \
   --check-interval 5m
 
@@ -52,10 +52,11 @@ Validates manifest and resolved artifact paths.
 ### `run`
 Runs manifest composition directly (foreground). With `--stay-running`, autoswap supervises child processes.
 If manifest defines `runtime.processes`, autoswap starts exactly those processes using manifest dependency order.
+Use `--manifest-url` to fetch the manifest from GitHub/HTTP at startup.
 
 ```bash
 ./dialtone.sh autoswap src_v1 run \
-  --manifest src/plugins/robot/src_v2/config/composition.manifest.json \
+  --manifest-url https://raw.githubusercontent.com/timcash/dialtone/main/src/plugins/robot/src_v2/config/composition.manifest.json \
   --listen :18086 --nats-port 18236 --nats-ws-port 18237 \
   --require-stream=true --stay-running=true
 ```
@@ -65,7 +66,8 @@ Builds autoswap for target OS/arch and deploys via SSH mesh node routing.
 
 ```bash
 ./dialtone.sh autoswap src_v1 deploy \
-  --host rover --user tim --pass password1 --service
+  --host rover --user tim --pass password1 --service \
+  --manifest-url https://raw.githubusercontent.com/timcash/dialtone/main/src/plugins/robot/src_v2/config/composition.manifest.json
 ```
 
 ### `service`
@@ -95,6 +97,9 @@ Examples:
 - Source: GitHub latest release of `--repo`
 - Swapped artifacts: from `manifest.artifacts.release` mapping (generic), or legacy fallback keys.
 - Supports file artifacts and directory artifacts (`type=dir`, e.g. UI dist archive extraction).
+- Downloaded artifacts are checksum-verified before activation:
+  - preferred: GitHub release asset `digest` metadata (`sha256:...`)
+  - fallback: companion checksum assets (`<asset>.sha256`, `.sha256sum`, `.sha256.txt`) when present
 - After sync:
 1. stop current autoswap worker
 2. switch current worker pointer

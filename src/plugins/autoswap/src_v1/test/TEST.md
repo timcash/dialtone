@@ -1,7 +1,7 @@
 # Test Report: autoswap-src-v1
 
-- **Date**: Thu, 26 Feb 2026 15:40:26 PST
-- **Total Duration**: 3.50086333s
+- **Date**: Thu, 26 Feb 2026 17:08:01 PST
+- **Total Duration**: 3.226052197s
 
 ## Summary
 
@@ -12,21 +12,21 @@
 
 ### 1. ✅ 01-build-compose-artifacts
 
-- **Duration**: 3.016795147s
+- **Duration**: 2.748025763s
 - **Report**: compose artifacts built
 
 ---
 
 ### 2. ✅ 02-stage-manifest-artifacts
 
-- **Duration**: 145.550534ms
+- **Duration**: 142.54732ms
 - **Report**: manifest stage smoke verified
 
 ---
 
 ### 3. ✅ 03-run-compose-stack
 
-- **Duration**: 338.511775ms
+- **Duration**: 335.471561ms
 - **Report**: autoswap compose run verified
 
 ---

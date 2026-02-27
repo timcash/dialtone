@@ -5,6 +5,8 @@ import (
 	"archive/zip"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -31,6 +33,7 @@ var BuildVersion = "dev"
 type releaseAsset struct {
 	Name               string `json:"name"`
 	BrowserDownloadURL string `json:"browser_download_url"`
+	Digest             string `json:"digest"`
 }
 
 type releaseInfo struct {
@@ -53,6 +56,7 @@ type serviceOptions struct {
 	AllowDowngrade bool
 
 	ManifestPath  string
+	ManifestURL   string
 	RepoRoot      string
 	Listen        string
 	NATSPort      int
@@ -67,6 +71,7 @@ type supervisorState struct {
 	Status         string `json:"status"`
 	Repo           string `json:"repo"`
 	ManifestPath   string `json:"manifest_path"`
+	ManifestURL    string `json:"manifest_url,omitempty"`
 	RepoRoot       string `json:"repo_root"`
 	WorkerVersion  string `json:"worker_version"`
 	WorkerPID      int    `json:"worker_pid,omitempty"`
@@ -92,6 +97,7 @@ func RunService(args []string) error {
 	allowDowngrade := fs.Bool("allow-downgrade", false, "Allow replacing worker with older version")
 
 	manifest := fs.String("manifest", defaultManifest, "Path to composition manifest")
+	manifestURL := fs.String("manifest-url", "", "Manifest URL (if set, overrides --manifest)")
 	repoRoot := fs.String("repo-root", defaultRepoRoot, "Optional repo root for <repo_root> substitutions")
 	listen := fs.String("listen", ":18086", "Runtime listen address for compose run")
 	natsPort := fs.Int("nats-port", 18236, "Embedded NATS port for compose run")
@@ -111,6 +117,7 @@ func RunService(args []string) error {
 		TokenEnv:       strings.TrimSpace(*tokenEnv),
 		AllowDowngrade: *allowDowngrade,
 		ManifestPath:   strings.TrimSpace(*manifest),
+		ManifestURL:    strings.TrimSpace(*manifestURL),
 		RepoRoot:       strings.TrimSpace(*repoRoot),
 		Listen:         strings.TrimSpace(*listen),
 		NATSPort:       *natsPort,
@@ -160,6 +167,17 @@ func runServiceSupervisor(opts serviceOptions) error {
 	currentLink := filepath.Join(opts.InstallDir, "current")
 	assetName := localAssetName()
 	token := strings.TrimSpace(os.Getenv(opts.TokenEnv))
+	resolvedManifestPath, err := resolveManifestPath(
+		opts.ManifestPath,
+		opts.ManifestURL,
+		filepath.Join(opts.InstallDir, "manifests"),
+		token,
+	)
+	if err != nil {
+		return err
+	}
+	runOpts := opts
+	runOpts.ManifestPath = resolvedManifestPath
 
 	rel, asset, err := latestRelease(opts.Repo, token, assetName)
 	workerVersion := ""
@@ -175,7 +193,7 @@ func runServiceSupervisor(opts serviceOptions) error {
 		workerVersion = BuildVersion
 		workerPath = localPath
 	} else {
-		workerPath, err = ensureReleaseBinary(opts.InstallDir, rel.TagName, assetName, asset.BrowserDownloadURL, token)
+		workerPath, err = ensureReleaseBinary(opts.InstallDir, rel.TagName, asset, rel.Assets, token)
 		if err != nil {
 			return err
 		}
@@ -185,21 +203,22 @@ func runServiceSupervisor(opts serviceOptions) error {
 		return err
 	}
 	if strings.TrimSpace(rel.TagName) != "" {
-		if err := syncManifestReleaseArtifacts(opts, rel, token); err != nil {
+		if err := syncManifestReleaseArtifacts(runOpts, rel, token); err != nil {
 			logs.Warn("initial manifest artifact sync failed: %v", err)
 		}
 	}
 
 	mgr := &serviceManager{version: workerVersion}
 	runtimeStatePath := filepath.Join(stateDir, "runtime.json")
-	if err := mgr.startWorker(currentLink, opts, runtimeStatePath); err != nil {
+	if err := mgr.startWorker(currentLink, runOpts, runtimeStatePath); err != nil {
 		return err
 	}
 	_ = writeSupervisorState(supervisorPath, supervisorState{
 		UpdatedAt:      time.Now().UTC().Format(time.RFC3339),
 		Status:         "active",
 		Repo:           opts.Repo,
-		ManifestPath:   opts.ManifestPath,
+		ManifestPath:   runOpts.ManifestPath,
+		ManifestURL:    opts.ManifestURL,
 		RepoRoot:       opts.RepoRoot,
 		WorkerVersion:  mgr.version,
 		WorkerPID:      mgr.workerPID(),
@@ -220,7 +239,8 @@ func runServiceSupervisor(opts serviceOptions) error {
 				UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
 				Status:        "stopped",
 				Repo:          opts.Repo,
-				ManifestPath:  opts.ManifestPath,
+				ManifestPath:  runOpts.ManifestPath,
+				ManifestURL:   opts.ManifestURL,
 				RepoRoot:      opts.RepoRoot,
 				WorkerVersion: mgr.version,
 			})
@@ -234,7 +254,8 @@ func runServiceSupervisor(opts serviceOptions) error {
 					UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
 					Status:        "active",
 					Repo:          opts.Repo,
-					ManifestPath:  opts.ManifestPath,
+					ManifestPath:  runOpts.ManifestPath,
+					ManifestURL:   opts.ManifestURL,
 					RepoRoot:      opts.RepoRoot,
 					WorkerVersion: mgr.version,
 					WorkerPID:     mgr.workerPID(),
@@ -248,7 +269,8 @@ func runServiceSupervisor(opts serviceOptions) error {
 					UpdatedAt:      time.Now().UTC().Format(time.RFC3339),
 					Status:         "active",
 					Repo:           opts.Repo,
-					ManifestPath:   opts.ManifestPath,
+					ManifestPath:   runOpts.ManifestPath,
+					ManifestURL:    opts.ManifestURL,
 					RepoRoot:       opts.RepoRoot,
 					WorkerVersion:  mgr.version,
 					WorkerPID:      mgr.workerPID(),
@@ -262,7 +284,8 @@ func runServiceSupervisor(opts serviceOptions) error {
 					UpdatedAt:      time.Now().UTC().Format(time.RFC3339),
 					Status:         "active",
 					Repo:           opts.Repo,
-					ManifestPath:   opts.ManifestPath,
+					ManifestPath:   runOpts.ManifestPath,
+					ManifestURL:    opts.ManifestURL,
 					RepoRoot:       opts.RepoRoot,
 					WorkerVersion:  mgr.version,
 					WorkerPID:      mgr.workerPID(),
@@ -271,7 +294,7 @@ func runServiceSupervisor(opts serviceOptions) error {
 				})
 				continue
 			}
-			newPath, derr := ensureReleaseBinary(opts.InstallDir, latest.TagName, assetName, latestAsset.BrowserDownloadURL, token)
+			newPath, derr := ensureReleaseBinary(opts.InstallDir, latest.TagName, latestAsset, latest.Assets, token)
 			if derr != nil {
 				logs.Warn("service download failed: %v", derr)
 				_ = writeSupervisorState(supervisorPath, supervisorState{
@@ -288,13 +311,14 @@ func runServiceSupervisor(opts serviceOptions) error {
 				})
 				continue
 			}
-			if syncErr := syncManifestReleaseArtifacts(opts, latest, token); syncErr != nil {
+			if syncErr := syncManifestReleaseArtifacts(runOpts, latest, token); syncErr != nil {
 				logs.Warn("manifest artifact sync failed: %v", syncErr)
 				_ = writeSupervisorState(supervisorPath, supervisorState{
 					UpdatedAt:      time.Now().UTC().Format(time.RFC3339),
 					Status:         "active",
 					Repo:           opts.Repo,
-					ManifestPath:   opts.ManifestPath,
+					ManifestPath:   runOpts.ManifestPath,
+					ManifestURL:    opts.ManifestURL,
 					RepoRoot:       opts.RepoRoot,
 					WorkerVersion:  mgr.version,
 					WorkerPID:      mgr.workerPID(),
@@ -312,7 +336,8 @@ func runServiceSupervisor(opts serviceOptions) error {
 					UpdatedAt:      time.Now().UTC().Format(time.RFC3339),
 					Status:         "degraded",
 					Repo:           opts.Repo,
-					ManifestPath:   opts.ManifestPath,
+					ManifestPath:   runOpts.ManifestPath,
+					ManifestURL:    opts.ManifestURL,
 					RepoRoot:       opts.RepoRoot,
 					WorkerVersion:  mgr.version,
 					LastCheckAt:    checkAt,
@@ -322,13 +347,14 @@ func runServiceSupervisor(opts serviceOptions) error {
 				continue
 			}
 			mgr.version = latest.TagName
-			if serr := mgr.startWorker(currentLink, opts, runtimeStatePath); serr != nil {
+			if serr := mgr.startWorker(currentLink, runOpts, runtimeStatePath); serr != nil {
 				logs.Error("restart updated worker failed: %v", serr)
 				_ = writeSupervisorState(supervisorPath, supervisorState{
 					UpdatedAt:      time.Now().UTC().Format(time.RFC3339),
 					Status:         "degraded",
 					Repo:           opts.Repo,
-					ManifestPath:   opts.ManifestPath,
+					ManifestPath:   runOpts.ManifestPath,
+					ManifestURL:    opts.ManifestURL,
 					RepoRoot:       opts.RepoRoot,
 					WorkerVersion:  mgr.version,
 					LastCheckAt:    checkAt,
@@ -341,7 +367,8 @@ func runServiceSupervisor(opts serviceOptions) error {
 				UpdatedAt:      time.Now().UTC().Format(time.RFC3339),
 				Status:         "active",
 				Repo:           opts.Repo,
-				ManifestPath:   opts.ManifestPath,
+				ManifestPath:   runOpts.ManifestPath,
+				ManifestURL:    opts.ManifestURL,
 				RepoRoot:       opts.RepoRoot,
 				WorkerVersion:  mgr.version,
 				WorkerPID:      mgr.workerPID(),
@@ -377,7 +404,7 @@ func syncManifestReleaseArtifacts(opts serviceOptions, rel releaseInfo, token st
 			if !ok {
 				return fmt.Errorf("release %s missing asset for manifest key=%s target=%s", strings.TrimSpace(rel.TagName), key, target)
 			}
-			if err := placeReleaseFile(asset, target, token); err != nil {
+			if err := placeReleaseFile(asset, rel.Assets, target, token); err != nil {
 				return err
 			}
 			logs.Info("synced manifest artifact %s <- %s", key, asset.Name)
@@ -398,7 +425,7 @@ func syncManifestReleaseArtifacts(opts serviceOptions, rel releaseInfo, token st
 		if !ok {
 			return fmt.Errorf("release %s missing asset %s for key=%s", strings.TrimSpace(rel.TagName), assetName, key)
 		}
-		if err := placeReleaseArtifact(asset, target, binding, token); err != nil {
+		if err := placeReleaseArtifact(asset, rel.Assets, target, binding, token); err != nil {
 			return err
 		}
 		logs.Info("synced manifest artifact %s <- %s", key, asset.Name)
@@ -470,41 +497,48 @@ func findReleaseAssetByName(assets []releaseAsset, name string) (releaseAsset, b
 	return releaseAsset{}, false
 }
 
-func placeReleaseFile(asset releaseAsset, target, token string) error {
+func placeReleaseFile(asset releaseAsset, allAssets []releaseAsset, target, token string) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
-	if err := downloadFile(asset.BrowserDownloadURL, token, target+".tmp"); err != nil {
+	tmpPath := target + ".tmp"
+	if err := downloadFile(asset.BrowserDownloadURL, token, tmpPath); err != nil {
 		return fmt.Errorf("download %s failed: %w", asset.Name, err)
 	}
-	if err := os.Chmod(target+".tmp", 0o755); err != nil {
+	if err := verifyReleaseAssetChecksum(asset, allAssets, tmpPath, token); err != nil {
 		return err
 	}
-	return os.Rename(target+".tmp", target)
+	if err := os.Chmod(tmpPath, 0o755); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, target)
 }
 
-func placeReleaseArtifact(asset releaseAsset, target string, binding releaseBinding, token string) error {
+func placeReleaseArtifact(asset releaseAsset, allAssets []releaseAsset, target string, binding releaseBinding, token string) error {
 	t := strings.ToLower(strings.TrimSpace(binding.Type))
 	if t == "" {
 		t = "file"
 	}
 	switch t {
 	case "file", "bin", "binary":
-		return placeReleaseFile(asset, target, token)
+		return placeReleaseFile(asset, allAssets, target, token)
 	case "dir", "directory":
-		return placeReleaseDir(asset, target, binding, token)
+		return placeReleaseDir(asset, allAssets, target, binding, token)
 	default:
 		return fmt.Errorf("unsupported release artifact type %q for asset %s", binding.Type, asset.Name)
 	}
 }
 
-func placeReleaseDir(asset releaseAsset, target string, binding releaseBinding, token string) error {
+func placeReleaseDir(asset releaseAsset, allAssets []releaseAsset, target string, binding releaseBinding, token string) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
 	tmp := target + ".artifact.tmp"
 	if err := downloadFile(asset.BrowserDownloadURL, token, tmp); err != nil {
 		return fmt.Errorf("download %s failed: %w", asset.Name, err)
+	}
+	if err := verifyReleaseAssetChecksum(asset, allAssets, tmp, token); err != nil {
+		return err
 	}
 	defer os.Remove(tmp)
 
@@ -864,6 +898,9 @@ func serviceRunArgs(opts serviceOptions) []string {
 	if strings.TrimSpace(opts.ManifestPath) != "" {
 		args = append(args, "--manifest", opts.ManifestPath)
 	}
+	if strings.TrimSpace(opts.ManifestURL) != "" {
+		args = append(args, "--manifest-url", opts.ManifestURL)
+	}
 	if strings.TrimSpace(opts.RepoRoot) != "" {
 		args = append(args, "--repo-root", opts.RepoRoot)
 	}
@@ -992,7 +1029,8 @@ func ensureLocalWorkerBinary(installDir, assetName string) (string, error) {
 	return dstPath, nil
 }
 
-func ensureReleaseBinary(installDir, tag, assetName, downloadURL, token string) (string, error) {
+func ensureReleaseBinary(installDir, tag string, asset releaseAsset, allAssets []releaseAsset, token string) (string, error) {
+	assetName := strings.TrimSpace(asset.Name)
 	dstDir := filepath.Join(installDir, "releases", sanitizeTag(tag))
 	if err := os.MkdirAll(dstDir, 0o755); err != nil {
 		return "", err
@@ -1001,19 +1039,127 @@ func ensureReleaseBinary(installDir, tag, assetName, downloadURL, token string) 
 	if _, err := os.Stat(dstPath); err == nil {
 		return dstPath, nil
 	}
-	if strings.TrimSpace(downloadURL) == "" {
+	if strings.TrimSpace(asset.BrowserDownloadURL) == "" {
 		return "", fmt.Errorf("release asset %s has empty download URL", assetName)
 	}
-	if err := downloadFile(downloadURL, token, dstPath+".tmp"); err != nil {
+	tmpPath := dstPath + ".tmp"
+	if err := downloadFile(asset.BrowserDownloadURL, token, tmpPath); err != nil {
 		return "", err
 	}
-	if err := os.Chmod(dstPath+".tmp", 0o755); err != nil {
+	if err := verifyReleaseAssetChecksum(asset, allAssets, tmpPath, token); err != nil {
 		return "", err
 	}
-	if err := os.Rename(dstPath+".tmp", dstPath); err != nil {
+	if err := os.Chmod(tmpPath, 0o755); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmpPath, dstPath); err != nil {
 		return "", err
 	}
 	return dstPath, nil
+}
+
+func verifyReleaseAssetChecksum(asset releaseAsset, allAssets []releaseAsset, localPath, token string) error {
+	sum, err := sha256File(localPath)
+	if err != nil {
+		return err
+	}
+	digest := strings.TrimSpace(asset.Digest)
+	if strings.HasPrefix(strings.ToLower(digest), "sha256:") {
+		expected := strings.TrimSpace(strings.TrimPrefix(strings.ToLower(digest), "sha256:"))
+		if expected == "" {
+			return fmt.Errorf("asset %s has empty sha256 digest", asset.Name)
+		}
+		if !strings.EqualFold(sum, expected) {
+			return fmt.Errorf("checksum mismatch for %s: got=%s expected=%s", asset.Name, sum, expected)
+		}
+		return nil
+	}
+
+	checksumAsset, ok := findChecksumAssetFor(allAssets, asset.Name)
+	if !ok {
+		logs.Warn("release checksum metadata not found for %s; skipping checksum verification", asset.Name)
+		return nil
+	}
+	tmp := localPath + ".checksum.tmp"
+	if err := downloadFile(checksumAsset.BrowserDownloadURL, token, tmp); err != nil {
+		return fmt.Errorf("download checksum asset %s failed: %w", checksumAsset.Name, err)
+	}
+	defer os.Remove(tmp)
+	raw, err := os.ReadFile(tmp)
+	if err != nil {
+		return err
+	}
+	expected, err := parseChecksumFile(string(raw), asset.Name)
+	if err != nil {
+		return fmt.Errorf("checksum parse failed for %s using %s: %w", asset.Name, checksumAsset.Name, err)
+	}
+	if !strings.EqualFold(sum, expected) {
+		return fmt.Errorf("checksum mismatch for %s: got=%s expected=%s", asset.Name, sum, expected)
+	}
+	return nil
+}
+
+func findChecksumAssetFor(assets []releaseAsset, assetName string) (releaseAsset, bool) {
+	candidates := []string{
+		assetName + ".sha256",
+		assetName + ".sha256sum",
+		assetName + ".sha256.txt",
+	}
+	for _, c := range candidates {
+		if a, ok := findReleaseAssetByName(assets, c); ok {
+			return a, true
+		}
+	}
+	return releaseAsset{}, false
+}
+
+func parseChecksumFile(content, assetName string) (string, error) {
+	lines := strings.Split(content, "\n")
+	assetName = strings.TrimSpace(assetName)
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 1 && isHexDigest(fields[0]) {
+			return strings.ToLower(fields[0]), nil
+		}
+		if len(fields) >= 2 && isHexDigest(fields[0]) {
+			fileField := strings.TrimLeft(strings.TrimSpace(fields[len(fields)-1]), "*")
+			fileField = filepath.Base(fileField)
+			if assetName == "" || strings.EqualFold(fileField, filepath.Base(assetName)) {
+				return strings.ToLower(fields[0]), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("no checksum entry found for %s", assetName)
+}
+
+func isHexDigest(v string) bool {
+	v = strings.TrimSpace(v)
+	if len(v) != 64 {
+		return false
+	}
+	for _, r := range v {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+			return false
+		}
+	}
+	return true
+}
+
+func sha256File(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func downloadFile(url, token, outPath string) error {
