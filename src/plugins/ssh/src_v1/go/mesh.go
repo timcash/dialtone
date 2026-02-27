@@ -46,6 +46,9 @@ var defaultMeshNodes = []MeshNode{
 		Aliases: []string{"chroma", "chroma-1", "chroma-1.shad-artichoke.ts.net"},
 		User:    "dev",
 		Host:    "chroma-1.shad-artichoke.ts.net",
+		HostCandidates: []string{
+			"192.168.4.53", // Chroma LAN IP
+		},
 		Port:    "22",
 		OS:      "macos",
 		RepoCandidates: []string{
@@ -57,11 +60,15 @@ var defaultMeshNodes = []MeshNode{
 	{
 		Name:    "darkmac",
 		Aliases: []string{"darkmac", "darkmac.shad-artichoke.ts.net"},
-		User:    "tim",
+		User:    "dialtone",
 		Host:    "darkmac.shad-artichoke.ts.net",
+		HostCandidates: []string{
+			"192.168.4.31", // Darkmac LAN IP
+		},
 		Port:    "22",
 		OS:      "macos",
 		RepoCandidates: []string{
+			"/Users/dialtone/dialtone",
 			"/Users/tim/dialtone",
 			"/Users/tim/dialtone",
 			"/Users/tim/Documents/dialtone",
@@ -74,6 +81,7 @@ var defaultMeshNodes = []MeshNode{
 		Host:    "rover-1.shad-artichoke.ts.net",
 		HostCandidates: []string{
 			"169.254.217.151", // Rover direct ethernet on the Legion switch
+			"192.168.4.36",    // Rover WLAN LAN IP
 		},
 		Port: "22",
 		OS:   "linux",
