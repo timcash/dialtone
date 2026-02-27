@@ -1,7 +1,7 @@
 # Test Report: ui-src-v1
 
-- **Date**: Fri, 27 Feb 2026 13:54:58 PST
-- **Total Duration**: 17.035057518s
+- **Date**: Fri, 27 Feb 2026 14:11:19 PST
+- **Total Duration**: 18.605581512s
 
 ## Summary
 
@@ -12,7 +12,7 @@
 
 ### 1. ✅ ui-quality-fmt-lint-build
 
-- **Duration**: 2.194752507s
+- **Duration**: 2.370704628s
 - **Report**: fmt-check, lint, and build passed
 
 #### Logs
@@ -21,7 +21,7 @@
 INFO: running command: /home/user/dialtone/dialtone.sh ui src_v1 install
 INFO: stdout: >> Running: /home/user/dialtone_dependencies/bun/bin/bun install (in /home/user/dialtone/src/plugins/ui/src_v1/test/fixtures/app)
 INFO: stdout: bun install v1.3.9 (cf6cdbbb)
-INFO: stdout: Checked 22 installs across 69 packages (no changes) [2.00ms]
+INFO: stdout: Checked 22 installs across 69 packages (no changes) [25.00ms]
 INFO: stderr: <empty>
 INFO: running command: /home/user/dialtone/dialtone.sh ui src_v1 fmt-check
 INFO: stdout: >> Running: /home/user/dialtone_dependencies/bun/bin/bun run fmt:check (in /home/user/dialtone/src/plugins/ui/src_v1/test/fixtures/app)
@@ -41,7 +41,7 @@ INFO: stdout: computing gzip size...
 INFO: stdout: dist/index.html                   1.56 kB │ gzip:   0.47 kB
 INFO: stdout: dist/assets/index-DajVPu_L.css   13.19 kB │ gzip:   3.53 kB
 INFO: stdout: dist/assets/index-BXDP4L3t.js   511.08 kB │ gzip: 130.40 kB
-INFO: stdout: ✓ built in 649ms
+INFO: stdout: ✓ built in 657ms
 INFO: stderr: $ vite build
 INFO: stderr: (!) Some chunks are larger than 500 kB after minification. Consider:
 INFO: stderr: - Using dynamic import() to code-split the application
@@ -61,7 +61,7 @@ PASS: [TEST][PASS] [STEP:ui-quality-fmt-lint-build] report: fmt-check, lint, and
 
 ### 2. ✅ ui-build-and-go-serve
 
-- **Duration**: 8.632649728s
+- **Duration**: 10.17173865s
 - **Report**: fixture built, hero section loaded, legend header verified (attach=true)
 
 #### Logs
@@ -71,7 +71,7 @@ INFO: STEP> begin ui-build-and-go-serve
 INFO: LOOKING FOR: ui fixture build at /home/user/dialtone/src/plugins/ui/src_v1/test/fixtures/app
 INFO: LOOKING FOR: [/home/user/dialtone_dependencies/bun/bin/bun install --silent]
 INFO: LOOKING FOR: [/home/user/dialtone_dependencies/bun/bin/bun run build]
-INFO: LOOKING FOR: go ui backend at http://127.0.0.1:41879
+INFO: LOOKING FOR: go ui backend at http://127.0.0.1:42621
 INFO: report: fixture built, hero section loaded, legend header verified (attach=true)
 PASS: [TEST][PASS] [STEP:ui-build-and-go-serve] report: fixture built, hero section loaded, legend header verified (attach=true)
 ```
@@ -90,7 +90,7 @@ PASS: [TEST][PASS] [STEP:ui-build-and-go-serve] report: fixture built, hero sect
 
 ### 3. ✅ ui-section-navigation-via-menu
 
-- **Duration**: 3.519554121s
+- **Duration**: 3.429950589s
 - **Report**: menu navigation verified for docs/table/three-fullscreen/camera/settings with screenshots
 
 #### Logs
@@ -178,7 +178,7 @@ INFO: CONSOLE:log: "[SectionManager] RESUME #settings"
 
 ### 4. ✅ ui-component-actions-and-modes
 
-- **Duration**: 2.68808145s
+- **Duration**: 2.633170236s
 - **Report**: component actions verified (mode toggle, table refresh, terminal send, three add) with mobile screenshots
 
 #### Logs

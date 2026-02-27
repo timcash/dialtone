@@ -42,6 +42,9 @@ func CaptureScreenshot(sc *StepContext, filename string) error {
 	if err := b.CaptureScreenshot(path); err != nil {
 		return err
 	}
+	if err := downscalePNGHalf(path); err != nil {
+		return err
+	}
 	return downscalePNGHalf(path)
 }
 

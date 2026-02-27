@@ -133,15 +133,18 @@ func RenderTemplateReport(rawPath, outPath string, opts TemplateReportOptions) e
 		if len(links) == 1 {
 			sb.WriteString(fmt.Sprintf("![%s](%s)\n", labels[0], links[0]))
 		} else if len(links) > 1 {
-			sb.WriteString("|  |  |\n")
-			sb.WriteString("|---|---|\n")
-			for i := 0; i < len(links); i += 2 {
-				left := fmt.Sprintf("![%s](%s)", labels[i], links[i])
-				right := ""
-				if i+1 < len(links) {
-					right = fmt.Sprintf("![%s](%s)", labels[i+1], links[i+1])
+			sb.WriteString("|  |  |  |  |\n")
+			sb.WriteString("|---|---|---|---|\n")
+			for i := 0; i < len(links); i += 4 {
+				cells := []string{"", "", "", ""}
+				for j := 0; j < 4; j++ {
+					idx := i + j
+					if idx >= len(links) {
+						break
+					}
+					cells[j] = fmt.Sprintf("![%s](%s)", labels[idx], links[idx])
 				}
-				sb.WriteString(fmt.Sprintf("| %s | %s |\n", left, right))
+				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n", cells[0], cells[1], cells[2], cells[3]))
 			}
 		}
 		if len(st.Screenshots) > 0 {

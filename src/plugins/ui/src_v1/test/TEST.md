@@ -1,19 +1,19 @@
 # UI Plugin src_v1 Test Report
 
-**Generated at:** Fri, 27 Feb 2026 13:54:58 -0800
+**Generated at:** Fri, 27 Feb 2026 14:11:19 -0800
 **Version:** `ui-src-v1`
 **Runner:** `test/src_v1`
 **Status:** ✅ PASS
-**Total Time:** `17.035057518s`
+**Total Time:** `18.605581512s`
 
 ## Test Steps
 
 | Step | Result | Duration |
 |---|---|---|
-| ui-quality-fmt-lint-build | ✅ PASS | `2.194752507s` |
-| ui-build-and-go-serve | ✅ PASS | `8.632649728s` |
-| ui-section-navigation-via-menu | ✅ PASS | `3.519554121s` |
-| ui-component-actions-and-modes | ✅ PASS | `2.68808145s` |
+| ui-quality-fmt-lint-build | ✅ PASS | `2.370704628s` |
+| ui-build-and-go-serve | ✅ PASS | `10.17173865s` |
+| ui-section-navigation-via-menu | ✅ PASS | `3.429950589s` |
+| ui-component-actions-and-modes | ✅ PASS | `2.633170236s` |
 
 ## Step Details
 
@@ -23,7 +23,7 @@
 
 ```text
 result: PASS
-duration: 2.194752507s
+duration: 2.370704628s
 report: fmt-check, lint, and build passed
 ```
 
@@ -34,7 +34,7 @@ logs:
 INFO: running command: /home/user/dialtone/dialtone.sh ui src_v1 install
 INFO: stdout: >> Running: /home/user/dialtone_dependencies/bun/bin/bun install (in /home/user/dialtone/src/plugins/ui/src_v1/test/fixtures/app)
 INFO: stdout: bun install v1.3.9 (cf6cdbbb)
-INFO: stdout: Checked 22 installs across 69 packages (no changes) [2.00ms]
+INFO: stdout: Checked 22 installs across 69 packages (no changes) [25.00ms]
 INFO: stderr: <empty>
 INFO: running command: /home/user/dialtone/dialtone.sh ui src_v1 fmt-check
 INFO: stdout: >> Running: /home/user/dialtone_dependencies/bun/bin/bun run fmt:check (in /home/user/dialtone/src/plugins/ui/src_v1/test/fixtures/app)
@@ -54,7 +54,7 @@ INFO: stdout: computing gzip size...
 INFO: stdout: dist/index.html                   1.56 kB │ gzip:   0.47 kB
 INFO: stdout: dist/assets/index-DajVPu_L.css   13.19 kB │ gzip:   3.53 kB
 INFO: stdout: dist/assets/index-BXDP4L3t.js   511.08 kB │ gzip: 130.40 kB
-INFO: stdout: ✓ built in 649ms
+INFO: stdout: ✓ built in 657ms
 INFO: stderr: $ vite build
 INFO: stderr: (!) Some chunks are larger than 500 kB after minification. Consider:
 INFO: stderr: - Using dynamic import() to code-split the application
@@ -77,7 +77,7 @@ browser_logs:
 
 ```text
 result: PASS
-duration: 8.632649728s
+duration: 10.17173865s
 report: fixture built, hero section loaded, legend header verified (attach=true)
 ```
 
@@ -89,7 +89,7 @@ INFO: STEP> begin ui-build-and-go-serve
 INFO: LOOKING FOR: ui fixture build at /home/user/dialtone/src/plugins/ui/src_v1/test/fixtures/app
 INFO: LOOKING FOR: [/home/user/dialtone_dependencies/bun/bin/bun install --silent]
 INFO: LOOKING FOR: [/home/user/dialtone_dependencies/bun/bin/bun run build]
-INFO: LOOKING FOR: go ui backend at http://127.0.0.1:41879
+INFO: LOOKING FOR: go ui backend at http://127.0.0.1:42621
 INFO: report: fixture built, hero section loaded, legend header verified (attach=true)
 PASS: [TEST][PASS] [STEP:ui-build-and-go-serve] report: fixture built, hero section loaded, legend header verified (attach=true)
 ```
@@ -111,7 +111,7 @@ browser_logs:
 
 ```text
 result: PASS
-duration: 3.519554121s
+duration: 3.429950589s
 report: menu navigation verified for docs/table/three-fullscreen/camera/settings with screenshots
 ```
 
@@ -192,11 +192,10 @@ INFO: CONSOLE:log: "[SectionManager] RESUME #settings"
 
 ### Screenshots
 
-|  |  |
-|---|---|
-| ![ui_docs.png](screenshots/ui_docs.png) | ![ui_table.png](screenshots/ui_table.png) |
-| ![ui_three_fullscreen.png](screenshots/ui_three_fullscreen.png) | ![ui_camera.png](screenshots/ui_camera.png) |
-| ![ui_settings.png](screenshots/ui_settings.png) |  |
+|  |  |  |  |
+|---|---|---|---|
+| ![ui_docs.png](screenshots/ui_docs.png) | ![ui_table.png](screenshots/ui_table.png) | ![ui_three_fullscreen.png](screenshots/ui_three_fullscreen.png) | ![ui_camera.png](screenshots/ui_camera.png) |
+| ![ui_settings.png](screenshots/ui_settings.png) |  |  |  |
 
 ## ui-component-actions-and-modes
 
@@ -204,7 +203,7 @@ INFO: CONSOLE:log: "[SectionManager] RESUME #settings"
 
 ```text
 result: PASS
-duration: 2.68808145s
+duration: 2.633170236s
 report: component actions verified (mode toggle, table refresh, terminal send, three add) with mobile screenshots
 ```
 
@@ -258,8 +257,7 @@ INFO: CONSOLE:log: "three-add:1"
 
 ### Screenshots
 
-|  |  |
-|---|---|
-| ![ui_table_fullscreen.png](screenshots/ui_table_fullscreen.png) | ![ui_terminal.png](screenshots/ui_terminal.png) |
-| ![ui_three_calculator.png](screenshots/ui_three_calculator.png) |  |
+|  |  |  |  |
+|---|---|---|---|
+| ![ui_table_fullscreen.png](screenshots/ui_table_fullscreen.png) | ![ui_terminal.png](screenshots/ui_terminal.png) | ![ui_three_calculator.png](screenshots/ui_three_calculator.png) |  |
 
