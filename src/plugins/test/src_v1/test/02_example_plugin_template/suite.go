@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	chrome "dialtone/dev/plugins/chrome/src_v1/go"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
 	"github.com/chromedp/chromedp"
 )
@@ -32,8 +31,8 @@ func Register(r *testv1.Registry) {
 	r.Add(testv1.Step{
 		Name: "example-browser-stepcontext-api",
 		RunWithContext: func(sc *testv1.StepContext) (testv1.StepRunResult, error) {
-			if chrome.FindChromePath() == "" {
-				sc.Warnf("chrome not found; skipping browser helper example")
+			if !testv1.BrowserProviderAvailable() {
+				sc.Warnf("browser provider not available; set DIALTONE_TEST_BROWSER_NODE for remote mode")
 				return testv1.StepRunResult{Report: "skipped browser helper example (chrome not installed)"}, nil
 			}
 			b, err := sc.EnsureBrowser(testv1.BrowserOptions{

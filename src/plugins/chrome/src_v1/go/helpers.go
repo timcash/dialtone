@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 	"github.com/shirou/gopsutil/v3/process"
 )
 
@@ -42,7 +43,7 @@ func resolveWinBin(binName string, fallbackPath string) string {
 	return binName
 }
 
-// CleanupPort attempts to kill any process listening on the specified port, 
+// CleanupPort attempts to kill any process listening on the specified port,
 // but only if it matches Dialtone-related patterns to avoid killing unrelated tools (like Cursor/SSH).
 func CleanupPort(port int) error {
 	killIfDialtone := func(pidStr string) {
@@ -57,24 +58,24 @@ func CleanupPort(port int) error {
 		}
 		cmdline, _ := p.Cmdline()
 		name, _ := p.Name()
-		
+
 		cwd, _ := os.Getwd()
 		procCwd, _ := p.Cwd()
-		
+
 		// Only kill if it looks like our stuff
-		isDialtone := strings.Contains(strings.ToLower(cmdline), "dialtone") || 
-		              strings.Contains(strings.ToLower(name), "dialtone") ||
-					  strings.Contains(strings.ToLower(cmdline), "vite") ||
-					  strings.Contains(strings.ToLower(cmdline), "bun") ||
-					  strings.Contains(strings.ToLower(name), "node") ||
-					  (strings.Contains(strings.ToLower(name), "main") && strings.HasPrefix(procCwd, cwd)) ||
-					  strings.Contains(strings.ToLower(cmdline), "--dialtone-origin")
+		isDialtone := strings.Contains(strings.ToLower(cmdline), "dialtone") ||
+			strings.Contains(strings.ToLower(name), "dialtone") ||
+			strings.Contains(strings.ToLower(cmdline), "vite") ||
+			strings.Contains(strings.ToLower(cmdline), "bun") ||
+			strings.Contains(strings.ToLower(name), "node") ||
+			(strings.Contains(strings.ToLower(name), "main") && strings.HasPrefix(procCwd, cwd)) ||
+			strings.Contains(strings.ToLower(cmdline), "--dialtone-origin")
 
 		if isDialtone {
-			fmt.Printf("Cleaning up Dialtone-related process on port %d (PID: %d, Name: %s)...\n", port, pid, name)
+			logs.Info("Cleaning up Dialtone-related process on port %d (PID: %d, Name: %s)...", port, pid, name)
 			_ = p.Kill()
 		} else {
-			fmt.Printf("Skipping cleanup of non-Dialtone process on port %d (PID: %d, Name: %s)...\n", port, pid, name)
+			logs.Info("Skipping cleanup of non-Dialtone process on port %d (PID: %d, Name: %s)...", port, pid, name)
 		}
 	}
 
@@ -99,7 +100,7 @@ func CleanupPort(port int) error {
 					parts := strings.Fields(line)
 					if len(parts) > 0 {
 						pid := parts[len(parts)-1]
-						fmt.Printf("Cleaning up stale Windows process on port %d (PID: %s)...\n", port, pid)
+						logs.Info("Cleaning up stale Windows process on port %d (PID: %s)...", port, pid)
 						exec.Command(tkBin, "/F", "/PID", pid).Run()
 					}
 				}
