@@ -4,9 +4,11 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
+    "dev": "vite",
     "build": "vite build"
   },
   "devDependencies": {
+    "three": "^0.182.0",
     "typescript": "5.9.3",
     "vite": "5.4.21"
   }

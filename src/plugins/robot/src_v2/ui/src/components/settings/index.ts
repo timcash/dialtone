@@ -1,13 +1,19 @@
 import { VisualizationControl } from '@ui/types';
-import { registerButtons, renderButtons } from '../../buttons';
 
 export function mountSettings(container: HTMLElement): VisualizationControl {
+  type UpdateStatus = {
+    currentVersion?: string;
+    latestVersion?: string;
+    available?: boolean;
+    checkedAt?: string;
+  };
+
   const content = container.querySelector('.settings-primary');
   if (content) {
     content.innerHTML = `
       <h2>Robot Settings</h2>
       <p>Configure interface preferences.</p>
-      <div id="settings-list" style="display: flex; flex-direction: column; gap: 12px; margin-top: 20px;"></div>
+      <div class="settings-button-list" id="settings-list"></div>
     `;
   }
 
@@ -22,43 +28,57 @@ export function mountSettings(container: HTMLElement): VisualizationControl {
     // Apply chatlog
     const chatlog = document.querySelector('.three-chatlog') as HTMLElement;
     if (chatlog) chatlog.hidden = !get('robot.chatlog.enabled');
-    
-    // Re-render buttons to update labels/state
-    renderButtons('settings');
   };
 
-  // Register Buttons
-  registerButtons('settings', ['Config'], {
-    'Config': [
-      {
-        label: `Chatlog: ${get('robot.chatlog.enabled') ? 'ON' : 'OFF'}`,
-        action: () => set('robot.chatlog.enabled', !get('robot.chatlog.enabled')),
-        active: get('robot.chatlog.enabled')
-      },
-      null, null, null, null, null, null, null // Fill empty slots
-    ]
-  });
-
   // Also render list in primary area
-  const list = document.getElementById('settings-list');
+  const list = content?.querySelector('#settings-list') as HTMLElement | null;
+  let updateBtn: HTMLButtonElement | null = null;
   if (list) {
-    const btn = document.createElement('button');
-    btn.className = 'menu-button';
-    btn.textContent = `Toggle Chatlog`;
-    btn.onclick = () => {
+    const chatlogBtn = document.createElement('button');
+    chatlogBtn.className = 'menu-button';
+    chatlogBtn.textContent = 'Toggle Chatlog';
+    chatlogBtn.onclick = () => {
         set('robot.chatlog.enabled', !get('robot.chatlog.enabled'));
-        btn.textContent = `Toggle Chatlog: ${get('robot.chatlog.enabled') ? 'ON' : 'OFF'}`;
+        chatlogBtn.textContent = `Toggle Chatlog: ${get('robot.chatlog.enabled') ? 'ON' : 'OFF'}`;
     };
-    list.appendChild(btn);
+    list.appendChild(chatlogBtn);
+
+    updateBtn = document.createElement('button');
+    updateBtn.className = 'menu-button';
+    updateBtn.type = 'button';
+    updateBtn.textContent = 'version:dev';
+    list.appendChild(updateBtn);
   }
 
-  renderButtons('settings');
+  const applyUpdateStatus = (status: UpdateStatus) => {
+    const current = String(status.currentVersion ?? (window as any).__robotCurrentVersion ?? 'dev');
+    const available = status.available === true;
+    if (updateBtn) {
+      updateBtn.textContent = available ? `version:${current}:update` : `version:${current}`;
+      updateBtn.onclick = available
+        ? () => {
+            const reload = (window as any).robotReloadForUpdate;
+            if (typeof reload === 'function') {
+              reload();
+            }
+          }
+        : null;
+    }
+  };
+
+  const statusListener = (event: Event) => {
+    const custom = event as CustomEvent<UpdateStatus>;
+    applyUpdateStatus(custom.detail ?? {});
+  };
+  window.addEventListener('robot-update-status', statusListener as EventListener);
+  applyUpdateStatus((window as any).__robotUpdateStatus ?? {});
+
   applySettings(); // Initial apply
 
   return {
-    dispose: () => {},
-    setVisible: (v) => {
-        if (v) renderButtons('settings');
-    }
+    dispose: () => {
+      window.removeEventListener('robot-update-status', statusListener as EventListener);
+    },
+    setVisible: (_v) => {}
   };
 }

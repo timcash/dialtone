@@ -9,6 +9,16 @@ declare const APP_VERSION: string;
 const { sections, menu } = setupApp({ title: 'dialtone.robot', debug: true });
 
 const isLocalDevHost = ['127.0.0.1', 'localhost'].includes(window.location.hostname);
+const normalizeVersion = (v: string) => v.replace(/^v/i, '').trim();
+
+type RobotUpdateStatus = {
+  currentVersion: string;
+  currentNorm: string;
+  latestVersion: string;
+  latestNorm: string;
+  available: boolean;
+  checkedAt: string;
+};
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -42,6 +52,31 @@ if (versionEl) {
   const shown = currentAppVersion || 'dev';
   versionEl.textContent = `v${shown}${stamp}`;
 }
+(window as any).__robotCurrentVersion = currentAppVersion;
+
+const setMenuUpdateState = (available: boolean) => {
+  document.body.setAttribute('data-update-available', available ? 'true' : 'false');
+};
+
+const broadcastUpdateStatus = (latestVersion: string, available: boolean) => {
+  const status: RobotUpdateStatus = {
+    currentVersion: currentAppVersion || 'dev',
+    currentNorm: normalizeVersion(currentAppVersion || 'dev'),
+    latestVersion: latestVersion || currentAppVersion || 'dev',
+    latestNorm: normalizeVersion(latestVersion || currentAppVersion || 'dev'),
+    available,
+    checkedAt: new Date().toISOString(),
+  };
+  (window as any).__robotUpdateStatus = status;
+  window.dispatchEvent(new CustomEvent('robot-update-status', { detail: status }));
+};
+
+const reloadForUpdate = () => {
+  const url = new URL(window.location.href);
+  url.searchParams.set('refresh', Date.now().toString());
+  window.location.replace(url.toString());
+};
+(window as any).robotReloadForUpdate = reloadForUpdate;
 
 // Initialize Connection (NATS + Polling)
 initConnection();
@@ -52,45 +87,18 @@ const checkForUpdate = async () => {
     if (!res.ok) return;
     const data = await res.json();
     const nextVersion = String(data.version ?? '').trim();
-    const currentVersion = String(currentAppVersion ?? '').trim();
-    const normalize = (v: string) => v.replace(/^v/i, '').trim();
-    const nextNorm = normalize(nextVersion);
-    const currentNorm = normalize(currentVersion);
-    const toast = document.getElementById('update-toast');
-    if (toast && nextNorm === currentNorm) {
-      toast.remove();
-    }
-    // Ignore dev/sentinel versions to avoid false-positive update loops.
-    if (
-      nextNorm &&
+    const nextNorm = normalizeVersion(nextVersion);
+    const currentNorm = normalizeVersion(String(currentAppVersion ?? '').trim());
+    const available =
+      !!nextNorm &&
       !/^dev$/i.test(nextNorm) &&
       !/^dev$/i.test(currentNorm) &&
-      nextNorm !== currentNorm
-    ) {
-      showUpdateToast(nextVersion);
-    }
+      nextNorm !== currentNorm;
+    setMenuUpdateState(available);
+    broadcastUpdateStatus(nextVersion, available);
   } catch (err) {
     // Ignore offline errors
   }
-};
-
-const showUpdateToast = (newVersion: string) => {
-  if (document.getElementById('update-toast')) return;
-  const toast = document.createElement('button');
-  toast.id = 'update-toast';
-  toast.style.cssText = `
-    position: fixed; top: 80px; right: 20px; z-index: 2000;
-    background: var(--theme-primary, #7bf2d8); color: #000;
-    padding: 12px 20px; border-radius: 8px; border: none;
-    font-weight: 700; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-    animation: slideIn 0.3s ease-out;
-  `;
-  toast.textContent = `Update Available: v${newVersion} (Click to Reload)`;
-  toast.onclick = () => {
-    // Force reload bypassing cache
-    window.location.reload();
-  };
-  document.body.appendChild(toast);
 };
 
 // Check for updates on load and periodically
@@ -144,9 +152,8 @@ sections.register('settings', {
   },
   header: { visible: false, menuVisible: true, title: 'Settings' },
   overlays: {
-    primaryKind: 'docs', // Reuse docs layout logic
-    primary: '.settings-primary',
-    thumb: '.settings-thumb',
+    primaryKind: 'button-list',
+    primary: '.button-list',
     legend: '.settings-legend',
   },
 });

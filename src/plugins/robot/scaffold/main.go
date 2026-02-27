@@ -264,7 +264,7 @@ func printUsage() {
 	logs.Raw("  sync-code    Sync minimal robot source tree to remote host for on-device build/test")
 	logs.Raw("  sync-watch   Start/stop/status continuous source sync loop to remote host")
 	logs.Raw("  relay       Configure local Cloudflare relay for robot src_v2 UI (rover-1.dialtone.earth)")
-	logs.Raw("  publish      Build/publish robot src_v2 composition artifacts to GitHub release only")
+	logs.Raw("  publish      Build/publish robot src_v2 composition artifacts to GitHub release only (default target: linux-arm64)")
 	logs.Raw("  diagnostic   Verify robot src_v2 composition binaries/processes/endpoints")
 	logs.Raw("  clean        Remove remote dialtone source/runtime (use --keep-autoswap to preserve autoswap service/bin)")
 	logs.Raw("  deploy-test  Run step-by-step verification on remote robot")
@@ -492,30 +492,43 @@ func runSrcV2Publish(repoRoot string, args []string) error {
 	repo := fs.String("repo", "timcash/dialtone", "GitHub repo owner/name")
 	version := fs.String("version", "", "Release version/tag (default: current git tag or robot-src-v2-<sha>)")
 	skipRelease := fs.Bool("skip-release", false, "Skip GitHub release publish check/upload")
+	targetFlag := fs.String("target", "linux-arm64", "Release target GOOS-GOARCH (default: linux-arm64)")
+	allTargets := fs.Bool("all-targets", false, "Build/publish all release targets (linux/darwin/windows variants)")
+	uiOnly := fs.Bool("ui", false, "Publish only robot src_v2 UI dist artifacts (and manifest); skip binary builds")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	builds := [][]string{
-		{"go", "src_v1", "exec", "build", "-o", "../bin/dialtone_autoswap_v1", "./plugins/autoswap/src_v1/cmd/main.go"},
-		{"go", "src_v1", "exec", "build", "-o", "../bin/dialtone_robot_v2", "./plugins/robot/src_v2/cmd/server/main.go"},
-		{"go", "src_v1", "exec", "build", "-o", "../bin/dialtone_camera_v1", "./plugins/camera/src_v1/cmd/main.go"},
-		{"go", "src_v1", "exec", "build", "-o", "../bin/dialtone_mavlink_v1", "./plugins/mavlink/src_v1/cmd/main.go"},
-		{"go", "src_v1", "exec", "build", "-o", "../bin/dialtone_repl_v1", "./plugins/repl/src_v1/cmd/repld/main.go"},
-		{"robot", "src_v2", "build"},
+	builds := [][]string{{"robot", "src_v2", "build"}}
+	if !*uiOnly {
+		builds = append([][]string{
+			{"go", "src_v1", "exec", "build", "-o", "../bin/dialtone_autoswap_v1", "./plugins/autoswap/src_v1/cmd/main.go"},
+			{"go", "src_v1", "exec", "build", "-o", "../bin/dialtone_robot_v2", "./plugins/robot/src_v2/cmd/server/main.go"},
+			{"go", "src_v1", "exec", "build", "-o", "../bin/dialtone_camera_v1", "./plugins/camera/src_v1/cmd/main.go"},
+			{"go", "src_v1", "exec", "build", "-o", "../bin/dialtone_mavlink_v1", "./plugins/mavlink/src_v1/cmd/main.go"},
+			{"go", "src_v1", "exec", "build", "-o", "../bin/dialtone_repl_v1", "./plugins/repl/src_v1/cmd/repld/main.go"},
+		}, builds...)
 	}
 	for _, cmdArgs := range builds {
 		if err := runDialtone(repoRoot, cmdArgs...); err != nil {
 			return err
 		}
 	}
-	logs.Info("robot src_v2 publish: local artifacts built")
+	if *uiOnly {
+		logs.Info("robot src_v2 publish: local UI artifacts built (--ui mode)")
+	} else {
+		logs.Info("robot src_v2 publish: local artifacts built")
+	}
 	if !*skipRelease {
 		resolvedVersion, err := resolveRobotPublishVersion(repoRoot, strings.TrimSpace(*version))
 		if err != nil {
 			return err
 		}
-		if err := publishRobotSrcV2Release(repoRoot, strings.TrimSpace(*repo), resolvedVersion); err != nil {
+		targets, err := resolvePublishTargets(strings.TrimSpace(*targetFlag), *allTargets)
+		if err != nil {
+			return err
+		}
+		if err := publishRobotSrcV2Release(repoRoot, strings.TrimSpace(*repo), resolvedVersion, targets, *uiOnly); err != nil {
 			return err
 		}
 		logs.Info("robot src_v2 publish: release assets up to date version=%s repo=%s", resolvedVersion, strings.TrimSpace(*repo))
@@ -538,16 +551,12 @@ type buildTarget struct {
 	GOARCH string
 }
 
-func publishRobotSrcV2Release(repoRoot, repo, version string) error {
+func publishRobotSrcV2Release(repoRoot, repo, version string, targets []buildTarget, uiOnly bool) error {
 	if strings.TrimSpace(repo) == "" {
 		return fmt.Errorf("repo is required (owner/name)")
 	}
-	targets := []buildTarget{
-		{GOOS: "linux", GOARCH: "amd64"},
-		{GOOS: "linux", GOARCH: "arm64"},
-		{GOOS: "darwin", GOARCH: "amd64"},
-		{GOOS: "darwin", GOARCH: "arm64"},
-		{GOOS: "windows", GOARCH: "amd64"},
+	if len(targets) == 0 {
+		return fmt.Errorf("robot src_v2 publish: no release targets selected")
 	}
 	srcRoot := filepath.Join(repoRoot, "src")
 	outDir := filepath.Join(repoRoot, "bin", "releases", "robot_src_v2", sanitizeVersion(version))
@@ -575,26 +584,33 @@ func publishRobotSrcV2Release(repoRoot, repo, version string) error {
 		{AssetPrefix: "dialtone_repl", MainPath: "./plugins/repl/src_v1/cmd/repld/main.go"},
 	}
 
+	existing, exists, err := githubReleaseAssets(repo, version)
+	if err != nil {
+		return err
+	}
+
 	assetPathByName := map[string]string{}
 	for _, t := range targets {
-		for _, s := range specs {
-			name := s.AssetPrefix + "-" + t.GOOS + "-" + t.GOARCH
-			if t.GOOS == "windows" {
-				name += ".exe"
-			}
-			out := filepath.Join(outDir, name)
-			if err := buildGoBinary(goBin, srcRoot, s.MainPath, out, t.GOOS, t.GOARCH); err != nil {
-				if s.AssetPrefix == "dialtone_camera_v1" && t.GOOS == "linux" && t.GOARCH == "arm64" {
-					logs.Warn("robot src_v2 publish: camera cross-build failed for %s; trying camera plugin podman build fallback", name)
-					if ferr := runDialtone(repoRoot, "camera", "src_v1", "build", "--goos", t.GOOS, "--goarch", t.GOARCH, "--out", out, "--podman"); ferr == nil {
-						assetPathByName[name] = out
-						continue
-					}
+		if !uiOnly {
+			for _, s := range specs {
+				name := s.AssetPrefix + "-" + t.GOOS + "-" + t.GOARCH
+				if t.GOOS == "windows" {
+					name += ".exe"
 				}
-				logs.Warn("robot src_v2 publish: skip asset %s (%s/%s build failed: %v)", name, t.GOOS, t.GOARCH, err)
-				continue
+				out := filepath.Join(outDir, name)
+				if err := buildGoBinary(goBin, srcRoot, s.MainPath, out, t.GOOS, t.GOARCH); err != nil {
+					if s.AssetPrefix == "dialtone_camera_v1" && t.GOOS == "linux" && t.GOARCH == "arm64" {
+						logs.Warn("robot src_v2 publish: camera cross-build failed for %s; trying camera plugin podman build fallback", name)
+						if ferr := runDialtone(repoRoot, "camera", "src_v1", "build", "--goos", t.GOOS, "--goarch", t.GOARCH, "--out", out, "--podman"); ferr == nil {
+							assetPathByName[name] = out
+							continue
+						}
+					}
+					logs.Warn("robot src_v2 publish: skip asset %s (%s/%s build failed: %v)", name, t.GOOS, t.GOARCH, err)
+					continue
+				}
+				assetPathByName[name] = out
 			}
-			assetPathByName[name] = out
 		}
 		uiName := "robot_src_v2_ui_dist-" + t.GOOS + "-" + t.GOARCH + ".tar.gz"
 		uiArchive := filepath.Join(outDir, uiName)
@@ -614,6 +630,12 @@ func publishRobotSrcV2Release(repoRoot, repo, version string) error {
 		return fmt.Errorf("robot src_v2 publish: parse manifest failed: %w", err)
 	}
 	assetSHA := map[string]string{}
+	for name, digest := range existing {
+		d := strings.TrimSpace(strings.TrimPrefix(digest, "sha256:"))
+		if d != "" {
+			assetSHA[name] = d
+		}
+	}
 	for name, p := range assetPathByName {
 		sum, serr := fileSHA256(p)
 		if serr != nil {
@@ -672,10 +694,6 @@ func publishRobotSrcV2Release(repoRoot, repo, version string) error {
 		return fmt.Errorf("robot src_v2 publish: no release assets were built")
 	}
 
-	existing, exists, err := githubReleaseAssets(repo, version)
-	if err != nil {
-		return err
-	}
 	needsUpload := make([]string, 0, len(assetPathByName))
 	for name, localPath := range assetPathByName {
 		remoteDigest, ok := existing[name]
@@ -729,6 +747,27 @@ func publishRobotSrcV2Release(repoRoot, repo, version string) error {
 	}
 	logs.Info("robot src_v2 publish: uploaded %d changed/missing assets to %s", len(assetPaths), version)
 	return nil
+}
+
+func resolvePublishTargets(target string, all bool) ([]buildTarget, error) {
+	if all {
+		return []buildTarget{
+			{GOOS: "linux", GOARCH: "amd64"},
+			{GOOS: "linux", GOARCH: "arm64"},
+			{GOOS: "darwin", GOARCH: "amd64"},
+			{GOOS: "darwin", GOARCH: "arm64"},
+			{GOOS: "windows", GOARCH: "amd64"},
+		}, nil
+	}
+	v := strings.TrimSpace(strings.ToLower(target))
+	if v == "" {
+		v = "linux-arm64"
+	}
+	parts := strings.Split(v, "-")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return nil, fmt.Errorf("invalid --target %q (expected <goos>-<goarch>, e.g. linux-arm64)", target)
+	}
+	return []buildTarget{{GOOS: strings.TrimSpace(parts[0]), GOARCH: strings.TrimSpace(parts[1])}}, nil
 }
 
 func resolveRobotPublishVersion(repoRoot, requested string) (string, error) {

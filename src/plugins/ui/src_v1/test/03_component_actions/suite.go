@@ -19,7 +19,11 @@ func runComponents(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 	if err := ctx.EnsureBuiltAndServed(); err != nil {
 		return testv1.StepRunResult{}, err
 	}
-	if _, err := sc.EnsureBrowser(testv1.BrowserOptions{Headless: true, GPU: false, Role: "test", URL: ctx.AppURL("/#ui-meta-table")}); err != nil {
+	browserOpts, attach, err := uitest.BrowserOptionsFor(ctx.AppURL("/#ui-meta-table"))
+	if err != nil {
+		return testv1.StepRunResult{}, err
+	}
+	if _, err := sc.EnsureBrowser(browserOpts); err != nil {
 		return testv1.StepRunResult{}, err
 	}
 	if err := sc.WaitForAriaLabel("Table Section", 8*time.Second); err != nil {
@@ -71,6 +75,8 @@ func runComponents(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 		return testv1.StepRunResult{}, err
 	}
 
-	ctx.Close()
+	if !attach {
+		ctx.Close()
+	}
 	return testv1.StepRunResult{Report: "component interactions verified (table refresh, three add, log input enter)"}, nil
 }
