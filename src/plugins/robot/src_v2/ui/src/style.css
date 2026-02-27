@@ -158,8 +158,15 @@
 }
 
 .settings-primary {
-  max-width: 600px;
+  max-width: 720px;
   margin: 0 auto;
+}
+
+.settings-button-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 20px;
 }
 
 .setting-item {
@@ -208,6 +215,27 @@ nav > .menu-toggle {
   color: #fff;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
   transition: all 0.2s ease;
+}
+
+body[data-update-available='true'] nav > .menu-toggle {
+  border-color: rgba(123, 242, 216, 0.95);
+  box-shadow: 0 0 0 0 rgba(123, 242, 216, 0.45), 0 4px 15px rgba(0, 0, 0, 0.5);
+  animation: menu-update-pulse 3.8s ease-in-out infinite;
+}
+
+@keyframes menu-update-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(123, 242, 216, 0.1), 0 4px 15px rgba(0, 0, 0, 0.5);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(123, 242, 216, 0.02), 0 4px 18px rgba(0, 0, 0, 0.55);
+    transform: scale(1.03);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(123, 242, 216, 0.1), 0 4px 15px rgba(0, 0, 0, 0.5);
+    transform: scale(1);
+  }
 }
 
 /* Robot loading/title overrides */

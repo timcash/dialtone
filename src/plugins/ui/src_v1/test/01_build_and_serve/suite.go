@@ -11,26 +11,51 @@ import (
 var ctx = uitest.SharedContext()
 
 func Register(reg *testv1.Registry) {
-	reg.Add(testv1.Step{Name: "ui-build-and-go-serve", Timeout: 60 * time.Second, RunWithContext: runBuildAndServe})
+	reg.Add(testv1.Step{
+		Name:           "ui-build-and-go-serve",
+		Timeout:        60 * time.Second,
+		Screenshots:    []string{"plugins/ui/src_v1/test/screenshots/ui_hero.png"},
+		RunWithContext: runBuildAndServe,
+	})
 }
 
 func runBuildAndServe(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 	ctx.BeginStep(sc)
+	defaultURL := ""
 	if err := ctx.EnsureBuiltAndServed(); err != nil {
 		return testv1.StepRunResult{}, err
 	}
-	url := ctx.AppURL("/#ui-hero-stage")
-	if _, err := sc.EnsureBrowser(testv1.BrowserOptions{Headless: true, GPU: false, Role: "test", URL: url}); err != nil {
+	defaultURL = ctx.AppURL("/#hero")
+
+	browserOpts, attach, err := uitest.BrowserOptionsFor(defaultURL)
+	if err != nil {
+		return testv1.StepRunResult{}, err
+	}
+	if _, err := sc.EnsureBrowser(browserOpts); err != nil {
 		return testv1.StepRunResult{}, fmt.Errorf("ensure browser: %w", err)
 	}
-	if err := sc.WaitForAriaLabel("App Header", 10*time.Second); err != nil {
+	if err := uitest.ApplyMobileViewport(sc); err != nil {
 		return testv1.StepRunResult{}, err
 	}
 	if err := sc.WaitForAriaLabel("Hero Section", 10*time.Second); err != nil {
 		return testv1.StepRunResult{}, err
 	}
-	if err := sc.WaitForAriaLabelAttrEquals("Hero Section", "data-ready", "true", 10*time.Second); err != nil {
+	if err := sc.WaitForAriaLabelAttrEquals("Hero Section", "data-active", "true", 10*time.Second); err != nil {
 		return testv1.StepRunResult{}, err
 	}
-	return testv1.StepRunResult{Report: "fixture UI built, Go backend served dist, and hero section loaded"}, nil
+	if err := sc.WaitForAriaLabel("Hero Canvas", 10*time.Second); err != nil {
+		return testv1.StepRunResult{}, err
+	}
+	if err := uitest.AssertJS(sc, 5*time.Second, `(() => {
+		const s = document.getElementById('hero');
+		if (!s) return false;
+		const h = s.querySelector('header');
+		return !!h && h.classList.contains('legend');
+	})()`, "hero should use legend header mode"); err != nil {
+		return testv1.StepRunResult{}, err
+	}
+	if err := uitest.CaptureScreenshot(sc, "ui_hero.png"); err != nil {
+		return testv1.StepRunResult{}, err
+	}
+	return testv1.StepRunResult{Report: fmt.Sprintf("fixture built, hero section loaded, legend header verified (attach=%t)", attach)}, nil
 }

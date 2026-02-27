@@ -3,16 +3,21 @@ export interface VisualizationControl {
   setVisible: (visible: boolean) => void;
 }
 
-export type SectionPrimaryOverlayKind = 'stage' | 'table' | 'xterm' | 'docs' | 'video' | (string & {});
-export type OverlayKind = 'menu' | 'mode-form' | 'status-bar' | 'chatlog' | 'legend' | 'thumb' | SectionPrimaryOverlayKind;
+// Exactly one underlay per section.
+export type SectionPrimaryOverlayKind = 'stage' | 'table' | 'xterm' | 'docs' | 'video' | 'button-list' | (string & {});
+// Optional overlays layered above the underlay.
+export type OverlayKind = 'menu' | 'mode-form' | 'status-bar' | 'chatlog' | 'legend' | SectionPrimaryOverlayKind;
 
 export interface SectionOverlayConfig {
+  // Underlay selector and kind (one per section).
   primaryKind: SectionPrimaryOverlayKind;
   primary: string;
+  // Form overlay selector.
   modeForm?: string;
   form?: string; // modern alias for modeForm
-  thumb?: string; // deprecated alias for modeForm
+  // Header overlay selector (legacy name kept for compatibility).
   legend?: string;
+  // Optional stream/log overlays.
   chatlog?: string;
   statusBar?: string;
 }

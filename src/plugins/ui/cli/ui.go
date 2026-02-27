@@ -1,12 +1,18 @@
 package cli
 
 import (
+	"errors"
+	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
+	logs "dialtone/dev/plugins/logs/src_v1/go"
+	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
+	testv1 "dialtone/dev/plugins/test/src_v1/go"
 	uiv1 "dialtone/dev/plugins/ui/src_v1/go"
 )
 
@@ -34,16 +40,22 @@ func Run(args []string) error {
 		printUsage()
 		return nil
 	case "dev":
-		return runNpm("dev", cmdArgs)
+		return runUIDev(cmdArgs)
 	case "build":
-		return runNpm("build", cmdArgs)
+		return runUIFixtureScript("build", cmdArgs)
+	case "lint":
+		return runUIFixtureScript("lint", cmdArgs)
+	case "fmt":
+		return runUIFixtureScript("fmt", cmdArgs)
+	case "fmt-check":
+		return runUIFixtureScript("fmt:check", cmdArgs)
 	case "install":
-		return runNpm("install", cmdArgs)
+		return runUIFixtureScript("install", cmdArgs)
 	case "mock-data":
 		RunMockData(cmdArgs)
 		return nil
 	case "test":
-		return runUITests()
+		return runUITests(cmdArgs)
 	case "kill":
 		runKill()
 		return nil
@@ -56,10 +68,13 @@ func Run(args []string) error {
 func printUsage() {
 	fmt.Println("Usage: ./dialtone.sh ui src_v1 <command> [args]")
 	fmt.Println("\nCommands:")
-	fmt.Println("  dev       Run the dev server (npm run dev)")
-	fmt.Println("  build     Build the web UI (npm run build)")
-	fmt.Println("  install   Install dependencies (npm install)")
-	fmt.Println("  test      Run ui src_v1 test suite")
+	fmt.Println("  dev       Run fixture dev server + attachable browser session")
+	fmt.Println("  build     Build fixture UI dist (bun run build)")
+	fmt.Println("  lint      Lint/type-check fixture UI (bun run lint)")
+	fmt.Println("  fmt       Format fixture UI sources (bun run fmt)")
+	fmt.Println("  fmt-check Check fixture formatting (bun run fmt:check)")
+	fmt.Println("  install   Install fixture dependencies (bun install)")
+	fmt.Println("  test      Run ui src_v1 test suite (supports --attach <mesh-node>)")
 	fmt.Println("  mock-data Start mock data server for testing")
 	fmt.Println("  kill      Kill running UI processes (dev, mock-data)")
 }
@@ -67,64 +82,43 @@ func printUsage() {
 func runKill() {
 	fmt.Println(">> Killing UI processes...")
 
-	// 1. Process Name Kill
 	exec.Command("pkill", "-f", "vite").Run()
 	exec.Command("pkill", "-f", "dialtone ui mock-data").Run()
 	exec.Command("pkill", "-f", "dialtone ui dev").Run()
 
-	// 2. Port Kill (Force cleanup of ports)
-	ports := []string{"4222", "4223", "8080", "5173", "5174"}
+	ports := []string{"4222", "4223", "8080", "5173", "5174", "5177"}
 	for _, p := range ports {
-		// fuser -k -n tcp PORT
 		exec.Command("fuser", "-k", "-n", "tcp", p).Run()
 	}
 
 	fmt.Println(">> UI processes terminated.")
 }
 
-func runNpm(script string, args []string) error {
+func runUIFixtureScript(script string, args []string) error {
 	paths, err := uiv1.ResolvePaths("")
 	if err != nil {
 		return err
 	}
-	// Locate npm in DIALTONE_ENV
-	envDir := os.Getenv("DIALTONE_ENV")
-	if envDir == "" {
-		return fmt.Errorf("DIALTONE_ENV not set")
+	bunBin := filepath.Join(os.Getenv("DIALTONE_ENV"), "bun", "bin", "bun")
+	if _, err := os.Stat(bunBin); os.IsNotExist(err) {
+		bunBin = "bun"
 	}
-
-	envDir, _ = filepath.Abs(envDir)
-
-	npmPath := filepath.Join(envDir, "node", "bin", "npm")
-	nodePath := filepath.Join(envDir, "node", "bin")
-
-	if _, err := os.Stat(npmPath); os.IsNotExist(err) {
-		fmt.Printf("WARNING: npm not found at %s. Falling back to system npm.\n", npmPath)
-		npmPath = "npm"
-	} else {
-		currentPath := os.Getenv("PATH")
-		os.Setenv("PATH", nodePath+string(os.PathListSeparator)+currentPath)
-	}
-
-	nodeBin := filepath.Join(nodePath, "node")
-	webDir := filepath.Join(paths.Runtime.SrcRoot, "core", "web")
-
-	var cmd *exec.Cmd
+	var cmdArgsRun []string
 	if script == "install" {
-		cmd = exec.Command(nodeBin, npmPath, "install")
-		cmd.Args = append(cmd.Args, args...)
+		cmdArgsRun = []string{"install"}
 	} else {
-		cmd = exec.Command(nodeBin, npmPath, "run", script, "--")
-		cmd.Args = append(cmd.Args, args...)
+		cmdArgsRun = []string{"run", script}
 	}
+	cmdArgsRun = append(cmdArgsRun, args...)
 
-	cmd.Dir = webDir
+	cmd := exec.Command(bunBin, cmdArgsRun...)
+	cmd.Dir = paths.FixtureApp
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	cmd.Env = os.Environ()
 
-	fmt.Printf(">> Running: %s %s run %s (in %s)\n", nodeBin, npmPath, script, webDir)
+	fmt.Printf(">> Running: %s %s (in %s)\n", bunBin, strings.Join(cmdArgsRun, " "), paths.FixtureApp)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("ui command failed: %w", err)
 	}
@@ -165,7 +159,7 @@ func isHelp(s string) bool {
 	}
 }
 
-func runUITests() error {
+func runUITests(extraArgs []string) error {
 	paths, err := uiv1.ResolvePaths("")
 	if err != nil {
 		return err
@@ -174,10 +168,99 @@ func runUITests() error {
 	if goBin == "" {
 		goBin = "go"
 	}
-	cmd := exec.Command(goBin, "run", "./plugins/ui/src_v1/test/cmd/main.go")
+	runArgs := []string{"run", "./plugins/ui/src_v1/test/cmd/main.go"}
+	runArgs = append(runArgs, extraArgs...)
+	cmd := exec.Command(goBin, runArgs...)
 	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	return cmd.Run()
+}
+
+func runUIDev(args []string) error {
+	paths, err := uiv1.ResolvePaths("")
+	if err != nil {
+		return err
+	}
+	fs := flag.NewFlagSet("ui dev", flag.ContinueOnError)
+	fs.SetOutput(nil)
+	port := fs.Int("port", 5177, "Dev server port")
+	host := fs.String("host", "0.0.0.0", "Vite bind host")
+	browserNode := fs.String("browser-node", "", "Optional mesh node for headed browser session (example: chroma)")
+	publicURL := fs.String("public-url", "", "Public URL that remote browser should open")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+
+	devURL := strings.TrimSpace(*publicURL)
+	node := strings.TrimSpace(*browserNode)
+	if node == "" {
+		node = defaultDevBrowserNode()
+	}
+	if node != "" && devURL == "" {
+		u, err := inferPublicDevURL(*port)
+		if err != nil {
+			return err
+		}
+		devURL = u
+	}
+	if node != "" {
+		_ = os.Setenv("DIALTONE_TEST_BROWSER_NODE", node)
+		logs.Info("ui dev remote browser node=%s url=%s", node, devURL)
+	} else {
+		_ = os.Unsetenv("DIALTONE_TEST_BROWSER_NODE")
+	}
+
+	return testv1.RunDev(testv1.DevOptions{
+		RepoRoot:          paths.Runtime.RepoRoot,
+		PluginDir:         paths.PluginVersionRoot,
+		UIDir:             paths.FixtureApp,
+		DevPort:           *port,
+		DevHost:           strings.TrimSpace(*host),
+		DevPublicURL:      devURL,
+		Role:              "ui-dev",
+		BrowserMetaPath:   filepath.Join(paths.PluginVersionRoot, "dev.browser.json"),
+		BrowserModeEnvVar: "UI_DEV_BROWSER_MODE",
+		NATSURL:           "nats://127.0.0.1:4222",
+		NATSSubject:       "logs.dev.ui.src-v1",
+	})
+}
+
+func defaultDevBrowserNode() string {
+	if envNode := strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_NODE")); envNode != "" {
+		return envNode
+	}
+	if isWSL() {
+		return "chroma"
+	}
+	return ""
+}
+
+func isWSL() bool {
+	if strings.Contains(strings.ToLower(strings.TrimSpace(os.Getenv("WSL_DISTRO_NAME"))), "ubuntu") ||
+		strings.TrimSpace(os.Getenv("WSL_DISTRO_NAME")) != "" {
+		return true
+	}
+	data, err := os.ReadFile("/proc/version")
+	if err != nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(string(data)), "microsoft")
+}
+
+func inferPublicDevURL(port int) (string, error) {
+	wsl, err := sshv1.ResolveMeshNode("wsl")
+	if err != nil {
+		return "", fmt.Errorf("resolve wsl mesh node for public url: %w", err)
+	}
+	host := strings.TrimSpace(wsl.Host)
+	if host == "" {
+		return "", fmt.Errorf("wsl mesh host is empty")
+	}
+	u := &url.URL{Scheme: "http", Host: fmt.Sprintf("%s:%d", host, port)}
+	return u.String(), nil
 }

@@ -62,6 +62,7 @@ DIALTONE_TEST_BROWSER_NODE=chroma ./dialtone.sh robot src_v2 test
 ## 4) Publish Artifacts (No Deploy Side Effects)
 
 `publish` only builds and uploads changed/missing release assets; it does not deploy remote hosts.
+By default it publishes only the real robot target (`linux-arm64`).
 
 ```bash
 ./dialtone.sh robot src_v2 publish --repo timcash/dialtone
@@ -70,6 +71,16 @@ DIALTONE_TEST_BROWSER_NODE=chroma ./dialtone.sh robot src_v2 test
 Optional fixed version tag:
 ```bash
 ./dialtone.sh robot src_v2 publish --repo timcash/dialtone --version <tag>
+```
+
+UI-only fast publish (skip binary builds, upload UI dist + refreshed manifest):
+```bash
+./dialtone.sh robot src_v2 publish --repo timcash/dialtone --ui
+```
+
+Publish all OS/arch assets (legacy/full matrix):
+```bash
+./dialtone.sh robot src_v2 publish --repo timcash/dialtone --all-targets
 ```
 
 ## 5) Bring Robot Up With Autoswap

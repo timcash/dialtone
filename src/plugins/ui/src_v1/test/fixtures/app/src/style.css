@@ -1,36 +1,167 @@
-#app {
-  background: radial-gradient(circle at 20% 10%, #1a2d40, #0a0f16 55%, #06090d 100%);
-}
-
 section {
-  padding: 16px;
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  padding: 0;
 }
 
-[aria-label='Hero Section'] [aria-label='Hero Status'],
-[aria-label='Table Section'] [aria-label='Table Status'],
-[aria-label='Three Section'] [aria-label='Three Count'] {
+section > canvas,
+section > video,
+section > article,
+section > table,
+section > pre {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+section > canvas,
+section > video {
+  display: block;
+  background: #000;
+}
+
+section > article,
+section > pre,
+section > table {
+  background: rgba(0, 0, 0, 0.55);
+  color: #d6f3ff;
+}
+
+section > article {
+  padding: 24px;
+  overflow: auto;
+}
+
+section > pre {
+  padding: 14px;
+  white-space: pre-wrap;
+  overflow: auto;
+}
+
+section > table {
+  border-collapse: collapse;
+}
+
+section > table th,
+section > table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(130, 210, 255, 0.24);
+}
+
+section > header {
   position: absolute;
   top: 12px;
   left: 12px;
-  background: rgba(0, 0, 0, 0.62);
-  border: 1px solid rgba(130, 210, 255, 0.5);
-  padding: 6px 10px;
-  border-radius: 6px;
+  max-width: min(920px, calc(100% - 24px));
+  border-radius: 8px;
+  padding: 10px 12px;
 }
 
-[aria-label='Log Terminal'] {
-  width: min(860px, 95vw);
-  min-height: 180px;
-  border: 1px solid rgba(130, 210, 255, 0.5);
-  background: rgba(0, 0, 0, 0.6);
-  color: #d6f3ff;
-  padding: 12px;
+section > header.legend {
+  background: rgba(6, 10, 16, 0.74);
+  border: 1px solid rgba(143, 205, 255, 0.35);
 }
 
-[aria-label='Log Input'] {
+section > header.text {
+  background: rgba(6, 10, 16, 0.3);
+  border: 0;
+  padding: 4px 0;
+}
+
+section > header h1 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+section > header h3 {
+  margin: 6px 0 0;
+  color: #c5d6eb;
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+section > header.legend > dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  align-items: stretch;
+}
+
+section > header.legend > dl > div {
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 2px;
+}
+
+section > header.legend dt,
+section > header.legend dd {
+  margin: 0;
+  font-size: 0.78rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+section > header.legend dt {
+  color: rgba(179, 218, 255, 0.8);
+  text-transform: lowercase;
+}
+
+section > header.legend dd {
+  color: #f3f9ff;
+}
+
+section > form {
   position: absolute;
-  left: 16px;
-  right: 16px;
-  bottom: 16px;
-  padding: 10px;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  width: min(760px, calc(100% - 24px));
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(4, minmax(40px, auto));
+  gap: 8px;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(8, 12, 18, 0.88);
+  border: 1px solid rgba(143, 205, 255, 0.22);
+}
+
+section > form > button,
+section > form > input {
+  min-height: 40px;
+}
+
+section > form > input {
+  grid-column: 1 / span 2;
+}
+
+section > form > button:last-of-type {
+  grid-column: 3;
+}
+
+section.calculator {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+section.calculator > form {
+  position: static;
+  transform: none;
+  width: 100%;
+  margin-top: 10px;
+}
+
+section#settings > article {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+section#settings > article > button {
+  min-height: 42px;
 }
