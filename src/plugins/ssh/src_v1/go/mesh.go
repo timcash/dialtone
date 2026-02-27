@@ -49,8 +49,8 @@ var defaultMeshNodes = []MeshNode{
 		HostCandidates: []string{
 			"192.168.4.53", // Chroma LAN IP
 		},
-		Port:    "22",
-		OS:      "macos",
+		Port: "22",
+		OS:   "macos",
 		RepoCandidates: []string{
 			"/Users/dev/dialtone",
 			"/Users/dev/dialtone",
@@ -60,18 +60,18 @@ var defaultMeshNodes = []MeshNode{
 	{
 		Name:    "darkmac",
 		Aliases: []string{"darkmac", "darkmac.shad-artichoke.ts.net"},
-		User:    "dialtone",
+		User:    "tim",
 		Host:    "darkmac.shad-artichoke.ts.net",
 		HostCandidates: []string{
 			"192.168.4.31", // Darkmac LAN IP
 		},
-		Port:    "22",
-		OS:      "macos",
+		Port: "22",
+		OS:   "macos",
 		RepoCandidates: []string{
-			"/Users/dialtone/dialtone",
 			"/Users/tim/dialtone",
 			"/Users/tim/dialtone",
 			"/Users/tim/Documents/dialtone",
+			"/Users/dialtone/dialtone",
 		},
 	},
 	{

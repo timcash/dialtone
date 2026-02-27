@@ -58,6 +58,7 @@ Common methods:
 - browser: `EnsureBrowser`, `RunBrowser`, `RunBrowserWithTimeout`
 - aria helpers: `WaitForAriaLabel`, `ClickAriaLabel`, `TypeAriaLabel`, `PressEnterAriaLabel`
 - misc: `WaitForConsoleContains`, `ClickAt`, `TapAt`, `ResetStepLogClock`, `RepoRoot`
+- default step timeout: `10s` when `Step.Timeout` is not set
 
 UI-style step pattern:
 

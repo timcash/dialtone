@@ -87,6 +87,24 @@ func RenderTemplateReport(rawPath, outPath string, opts TemplateReportOptions) e
 			sb.WriteString(fmt.Sprintf("error: %s\n", st.Error))
 		}
 		sb.WriteString("```\n\n")
+		if overlapLines := extractOverlapLines(st.Logs); len(overlapLines) > 0 {
+			sb.WriteString("### Overlap\n\n")
+			sb.WriteString("```text\n")
+			for _, line := range overlapLines {
+				sb.WriteString(line)
+				sb.WriteString("\n")
+			}
+			sb.WriteString("```\n\n")
+		}
+		if injectedLines := extractInjectedBrowserCheckLines(st.Logs); len(injectedLines) > 0 {
+			sb.WriteString("### Injected Browser Error Check\n\n")
+			sb.WriteString("```text\n")
+			for _, line := range injectedLines {
+				sb.WriteString(line)
+				sb.WriteString("\n")
+			}
+			sb.WriteString("```\n\n")
+		}
 		if len(st.Logs) > 0 {
 			sb.WriteString("### Logs\n\n")
 			sb.WriteString("```text\n")
@@ -133,15 +151,18 @@ func RenderTemplateReport(rawPath, outPath string, opts TemplateReportOptions) e
 		if len(links) == 1 {
 			sb.WriteString(fmt.Sprintf("![%s](%s)\n", labels[0], links[0]))
 		} else if len(links) > 1 {
-			sb.WriteString("|  |  |\n")
-			sb.WriteString("|---|---|\n")
-			for i := 0; i < len(links); i += 2 {
-				left := fmt.Sprintf("![%s](%s)", labels[i], links[i])
-				right := ""
-				if i+1 < len(links) {
-					right = fmt.Sprintf("![%s](%s)", labels[i+1], links[i+1])
+			sb.WriteString("|  |  |  |  |\n")
+			sb.WriteString("|---|---|---|---|\n")
+			for i := 0; i < len(links); i += 4 {
+				cells := []string{"", "", "", ""}
+				for j := 0; j < 4; j++ {
+					idx := i + j
+					if idx >= len(links) {
+						break
+					}
+					cells[j] = fmt.Sprintf("![%s](%s)", labels[idx], links[idx])
 				}
-				sb.WriteString(fmt.Sprintf("| %s | %s |\n", left, right))
+				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n", cells[0], cells[1], cells[2], cells[3]))
 			}
 		}
 		if len(st.Screenshots) > 0 {
@@ -163,6 +184,36 @@ func screenshotMarkdownLink(reportPath, shot string) string {
 		return norm[idx:]
 	}
 	return "screenshots/" + base
+}
+
+func extractOverlapLines(lines []string) []string {
+	out := make([]string, 0)
+	for _, line := range lines {
+		if !strings.Contains(line, "OVERLAP:") {
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func extractInjectedBrowserCheckLines(lines []string) []string {
+	out := make([]string, 0)
+	for _, line := range lines {
+		if !strings.Contains(line, "INJECTED_BROWSER_CHECK:") {
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	return out
 }
 
 func parseRawReportMarkdown(raw string) (string, string, []parsedTemplateStep) {
