@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"strings"
+	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
@@ -49,6 +50,7 @@ func PrintUsage() {
 	logs.Raw("                                        Sync dialtone repo on every mesh node to one branch")
 	logs.Raw("                                        Per-node repo override: --repo-<node> /path/to/repo")
 	logs.Raw("  sync-code --node <name|all> [--src P] [--dest P] [--delete] [--exclude PATTERN]")
+	logs.Raw("            [--service] [--interval 30s] [--service-stop] [--service-status]")
 	logs.Raw("                                        Rsync code without git, excludes node_modules/.pixi by default")
 	logs.Raw("  bootstrap --node <name|all> [--src P] [--dest P] [--delete] [--install-cmd C]")
 	logs.Raw("                                        Sync code + run install command(s) on target node(s)")
@@ -189,18 +191,35 @@ func runSyncCode(args []string) error {
 	src := fs.String("src", "", "Source path (defaults to current working directory)")
 	dest := fs.String("dest", "", "Destination path on target")
 	del := fs.Bool("delete", false, "Delete files on dest that are missing in src")
+	service := fs.Bool("service", false, "Install/start persistent user systemd sync service")
+	serviceStop := fs.Bool("service-stop", false, "Stop/disable persistent user systemd sync service")
+	serviceStatus := fs.Bool("service-status", false, "Show persistent user systemd sync service status")
+	interval := fs.Duration("interval", 30*time.Second, "Sync interval used with --service")
 	var excludes multiValueFlag
 	fs.Var(&excludes, "exclude", "Extra exclude pattern (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	return SyncCode(SyncCodeOptions{
+	opts := SyncCodeOptions{
 		Node:     *node,
 		Source:   *src,
 		Dest:     *dest,
 		Delete:   *del,
 		Excludes: excludes.values,
-	})
+	}
+	if *serviceStop {
+		return StopSyncCodeService()
+	}
+	if *serviceStatus {
+		return StatusSyncCodeService()
+	}
+	if *service {
+		if *interval <= 0 {
+			return fmt.Errorf("--interval must be greater than 0")
+		}
+		return InstallSyncCodeService(opts, *interval)
+	}
+	return SyncCode(opts)
 }
 
 func runBootstrap(args []string) error {

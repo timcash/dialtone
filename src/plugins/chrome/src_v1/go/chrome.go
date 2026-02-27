@@ -21,6 +21,8 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
+var devtoolsHTTPClient = &http.Client{Timeout: 900 * time.Millisecond}
+
 // VerifyChrome attempts to find and connect to a Chrome/Chromium
 func VerifyChrome(port int, debug bool) error {
 	path := FindChromePath()
@@ -141,7 +143,7 @@ func StartSession(opts SessionOptions) (*Session, error) {
 	}
 
 	if opts.ReuseExisting {
-		procs, err := ListResources(true)
+		procs, err := listResourcesWithTimeout(true, 2*time.Second)
 		if err == nil {
 			for _, p := range procs {
 				if p.Origin != "Dialtone" || p.Role != opts.Role {
@@ -193,7 +195,7 @@ func StartSession(opts SessionOptions) (*Session, error) {
 		time.Sleep(3 * time.Second)
 	}
 
-	procs, err := ListResources(true)
+	procs, err := listResourcesWithTimeout(true, 2*time.Second)
 	if err == nil {
 		for _, p := range procs {
 			// In WSL, we match the Windows process by its debug port or role
@@ -218,6 +220,24 @@ func StartSession(opts SessionOptions) (*Session, error) {
 		IsNew:        true,
 		IsWindows:    isWindows,
 	}, nil
+}
+
+func listResourcesWithTimeout(includeSystem bool, timeout time.Duration) ([]ChromeProcess, error) {
+	type result struct {
+		procs []ChromeProcess
+		err   error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		procs, err := ListResources(includeSystem)
+		ch <- result{procs: procs, err: err}
+	}()
+	select {
+	case res := <-ch:
+		return res.procs, res.err
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("list resources timed out after %s", timeout)
+	}
 }
 
 func CleanupSession(session *Session) error {
@@ -469,7 +489,25 @@ func LaunchChromeWithRoleAndUserDataDir(port int, gpu bool, headless bool, targe
 				if resolvedWS, err := getWebsocketURL(assignedPort); err == nil && strings.TrimSpace(resolvedWS) != "" {
 					wsURL = resolvedWS
 				} else {
-					wsURL = fmt.Sprintf("ws://127.0.0.1:%d%s", assignedPort, wsPath)
+					// Keep polling until DevTools endpoint becomes reachable.
+					// Falling back to localhost too early is unreliable in WSL NAT mode.
+					waitErr := WaitForDebugPort(assignedPort, 4*time.Second)
+					if waitErr == nil {
+						if resolvedWS, err := getWebsocketURL(assignedPort); err == nil && strings.TrimSpace(resolvedWS) != "" {
+							wsURL = resolvedWS
+						}
+					}
+					if wsURL == "" {
+						fallbackHost := "127.0.0.1"
+						for _, h := range debugProbeHosts() {
+							h = strings.TrimSpace(h)
+							if h != "" && h != "0.0.0.0" {
+								fallbackHost = h
+								break
+							}
+						}
+						wsURL = fmt.Sprintf("ws://%s:%d%s", fallbackHost, assignedPort, wsPath)
+					}
 				}
 				break
 			}
@@ -548,7 +586,7 @@ func getWebsocketURL(port int) (string, error) {
 }
 
 func getWebsocketURLForHost(host string, port int) (string, error) {
-	resp, err := http.Get(fmt.Sprintf("http://%s:%d/json/version", host, port))
+	resp, err := devtoolsHTTPClient.Get(fmt.Sprintf("http://%s:%d/json/version", host, port))
 	if err != nil {
 		return "", err
 	}
@@ -583,14 +621,20 @@ func debugProbeHosts() []string {
 	}
 	hosts := make([]string, 0, 4)
 	add(&hosts, os.Getenv("DIALTONE_CHROME_DEBUG_HOST"))
-	add(&hosts, "127.0.0.1")
 	if runtime.GOOS == "linux" && IsWSL() {
+		// In WSL NAT mode, Chrome usually runs on Windows and is reachable via host gateway.
 		add(&hosts, detectWSLHostGatewayIP())
 	}
+	add(&hosts, "127.0.0.1")
 	return hosts
 }
 
 func detectWSLHostGatewayIP() string {
+	if out, err := exec.Command("sh", "-lc", "ip route | awk '/^default / {print $3; exit}'").Output(); err == nil {
+		if ip := strings.TrimSpace(string(out)); ip != "" && ip != "100.100.100.100" {
+			return ip
+		}
+	}
 	raw, err := os.ReadFile("/etc/resolv.conf")
 	if err != nil {
 		return ""
@@ -604,7 +648,11 @@ func detectWSLHostGatewayIP() string {
 		if len(parts) < 2 {
 			continue
 		}
-		return strings.TrimSpace(parts[1])
+		ip := strings.TrimSpace(parts[1])
+		if ip == "100.100.100.100" {
+			continue
+		}
+		return ip
 	}
 	return ""
 }
