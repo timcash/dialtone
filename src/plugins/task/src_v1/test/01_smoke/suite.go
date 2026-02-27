@@ -19,7 +19,8 @@ func Register(r *testv1.Registry) {
 	var taskToolRel string
 
 	r.Add(testv1.Step{
-		Name: "setup-test-env",
+		Name:    "setup-test-env",
+		Timeout: 5 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			var err error
 			tmpTasksDir, err = os.MkdirTemp("", "dialtone-tasks-test-*")
@@ -50,7 +51,8 @@ func Register(r *testv1.Registry) {
 	})
 
 	r.Add(testv1.Step{
-		Name: "sync-issue-to-root-and-input-tree",
+		Name:    "sync-issue-to-root-and-input-tree",
+		Timeout: 10 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			issueMD := `# mock-issue-title
 ### signature:
@@ -100,10 +102,14 @@ func Register(r *testv1.Registry) {
 				return testv1.StepRunResult{}, err
 			}
 
-			cmd := exec.Command("go", "run", taskToolRel, "--tasks-dir", tmpTasksDir, "--issues-dir", tmpIssuesDir, "sync", "777")
-			cmd.Dir = srcDir
-			if out, err := cmd.CombinedOutput(); err != nil {
-				return testv1.StepRunResult{}, fmt.Errorf("sync failed: %v, output: %s", err, string(out))
+			if err := ctx.WaitForStepMessageAfterAction("task-sync-ran", 3*time.Second, func() error {
+				if _, err := runTaskCommand(srcDir, taskToolRel, "--tasks-dir", tmpTasksDir, "--issues-dir", tmpIssuesDir, "sync", "777"); err != nil {
+					return err
+				}
+				ctx.Infof("task-sync-ran")
+				return nil
+			}); err != nil {
+				return testv1.StepRunResult{}, err
 			}
 
 			rootPath := filepath.Join(tmpTasksDir, "777", "v2", "root.md")
@@ -144,9 +150,39 @@ func Register(r *testv1.Registry) {
 	})
 
 	r.Add(testv1.Step{
-		Name: "resolve-root-after-inputs-done",
+		Name:    "resolve-blocks-when-root-signed-before-inputs",
+		Timeout: 10 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
-			for _, task := range []string{"dep-a", "dep-b", "777"} {
+			for _, role := range []string{"TEST", "REVIEW"} {
+				cmd := exec.Command("go", "run", taskToolRel, "--tasks-dir", tmpTasksDir, "sign", "777", "--role", role)
+				cmd.Dir = srcDir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					return testv1.StepRunResult{}, fmt.Errorf("sign %s failed for root: %v, output: %s", role, err, string(out))
+				}
+			}
+
+			if err := ctx.WaitForStepMessageAfterAction("task-resolve-blocked-expected", 3*time.Second, func() error {
+				out, err := runTaskCommand(srcDir, taskToolRel, "--tasks-dir", tmpTasksDir, "--issues-dir", tmpIssuesDir, "resolve", "777")
+				if err == nil {
+					return fmt.Errorf("resolve unexpectedly passed before inputs were complete, output: %s", out)
+				}
+				if !strings.Contains(out, "Resolve blocked: inputs not complete") {
+					return fmt.Errorf("resolve failed for wrong reason, output: %s", out)
+				}
+				ctx.Infof("task-resolve-blocked-expected")
+				return nil
+			}); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			return testv1.StepRunResult{Report: "Resolve correctly blocked until input tasks complete"}, nil
+		},
+	})
+
+	r.Add(testv1.Step{
+		Name:    "resolve-root-after-inputs-done",
+		Timeout: 15 * time.Second,
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			for _, task := range []string{"dep-a", "dep-b"} {
 				cmd := exec.Command("go", "run", taskToolRel, "--tasks-dir", tmpTasksDir, "sign", task, "--role", "TEST")
 				cmd.Dir = srcDir
 				if out, err := cmd.CombinedOutput(); err != nil {
@@ -159,10 +195,14 @@ func Register(r *testv1.Registry) {
 				}
 			}
 
-			cmd := exec.Command("go", "run", taskToolRel, "--tasks-dir", tmpTasksDir, "--issues-dir", tmpIssuesDir, "resolve", "777", "--pr-url", "https://github.com/example/repo/pull/999")
-			cmd.Dir = srcDir
-			if out, err := cmd.CombinedOutput(); err != nil {
-				return testv1.StepRunResult{}, fmt.Errorf("resolve failed: %v, output: %s", err, string(out))
+			if err := ctx.WaitForStepMessageAfterAction("task-resolve-ran", 3*time.Second, func() error {
+				if _, err := runTaskCommand(srcDir, taskToolRel, "--tasks-dir", tmpTasksDir, "--issues-dir", tmpIssuesDir, "resolve", "777", "--pr-url", "https://github.com/example/repo/pull/999"); err != nil {
+					return fmt.Errorf("resolve failed: %v", err)
+				}
+				ctx.Infof("task-resolve-ran")
+				return nil
+			}); err != nil {
+				return testv1.StepRunResult{}, err
 			}
 
 			rootPath := filepath.Join(tmpTasksDir, "777", "v2", "root.md")
@@ -196,7 +236,41 @@ func Register(r *testv1.Registry) {
 	})
 
 	r.Add(testv1.Step{
-		Name: "multi-link-syntax-chain-and-list",
+		Name:    "link-cycle-is-rejected",
+		Timeout: 10 * time.Second,
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			for _, name := range []string{"cy-a", "cy-b"} {
+				cmd := exec.Command("go", "run", taskToolRel, "--tasks-dir", tmpTasksDir, "create", name)
+				cmd.Dir = srcDir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					return testv1.StepRunResult{}, fmt.Errorf("create %s failed: %v, output: %s", name, err, string(out))
+				}
+			}
+			cmd := exec.Command("go", "run", taskToolRel, "--tasks-dir", tmpTasksDir, "link", "cy-a<--cy-b")
+			cmd.Dir = srcDir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("first link failed: %v, output: %s", err, string(out))
+			}
+			if err := ctx.WaitForStepMessageAfterAction("task-link-cycle-rejected", 3*time.Second, func() error {
+				out, err := runTaskCommand(srcDir, taskToolRel, "--tasks-dir", tmpTasksDir, "link", "cy-b<--cy-a")
+				if err == nil {
+					return fmt.Errorf("cycle link unexpectedly succeeded: %s", out)
+				}
+				if !strings.Contains(out, "would create a cycle") {
+					return fmt.Errorf("cycle rejection missing expected error, output: %s", out)
+				}
+				ctx.Infof("task-link-cycle-rejected")
+				return nil
+			}); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			return testv1.StepRunResult{Report: "Cycle link rejected by DAG guard"}, nil
+		},
+	})
+
+	r.Add(testv1.Step{
+		Name:    "multi-link-syntax-chain-and-list",
+		Timeout: 10 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			for _, name := range []string{"n1", "n2", "n3", "n4"} {
 				cmd := exec.Command("go", "run", taskToolRel, "--tasks-dir", tmpTasksDir, "create", name)
@@ -206,10 +280,14 @@ func Register(r *testv1.Registry) {
 				}
 			}
 
-			cmd := exec.Command("go", "run", taskToolRel, "--tasks-dir", tmpTasksDir, "link", "n1-->n2-->n3,n3-->n4")
-			cmd.Dir = srcDir
-			if out, err := cmd.CombinedOutput(); err != nil {
-				return testv1.StepRunResult{}, fmt.Errorf("multi-link failed: %v, output: %s", err, string(out))
+			if err := ctx.WaitForStepMessageAfterAction("task-multilink-ran", 3*time.Second, func() error {
+				if _, err := runTaskCommand(srcDir, taskToolRel, "--tasks-dir", tmpTasksDir, "link", "n1-->n2-->n3,n3-->n4"); err != nil {
+					return fmt.Errorf("multi-link failed: %v", err)
+				}
+				ctx.Infof("task-multilink-ran")
+				return nil
+			}); err != nil {
+				return testv1.StepRunResult{}, err
 			}
 
 			n3Path := filepath.Join(tmpTasksDir, "n3", "v2", "root.md")
@@ -232,7 +310,8 @@ func Register(r *testv1.Registry) {
 	})
 
 	r.Add(testv1.Step{
-		Name: "link-and-unlink-roundtrip",
+		Name:    "link-and-unlink-roundtrip",
+		Timeout: 10 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			for _, name := range []string{"u1", "u2"} {
 				cmd := exec.Command("go", "run", taskToolRel, "--tasks-dir", tmpTasksDir, "create", name)
@@ -290,7 +369,8 @@ func Register(r *testv1.Registry) {
 	})
 
 	r.Add(testv1.Step{
-		Name: "signing-roles-review-test-docs",
+		Name:    "signing-roles-review-test-docs",
+		Timeout: 10 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			roleTask := "role-demo"
 			cmd := exec.Command("go", "run", taskToolRel, "--tasks-dir", tmpTasksDir, "create", roleTask)
@@ -331,7 +411,8 @@ func Register(r *testv1.Registry) {
 	})
 
 	r.Add(testv1.Step{
-		Name: "cleanup",
+		Name:    "cleanup",
+		Timeout: 3 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			if tmpTasksDir != "" {
 				_ = os.RemoveAll(tmpTasksDir)
@@ -342,4 +423,15 @@ func Register(r *testv1.Registry) {
 			return testv1.StepRunResult{Report: "Cleaned up temp directories"}, nil
 		},
 	})
+}
+
+func runTaskCommand(srcDir, taskToolRel string, args ...string) (string, error) {
+	cmdArgs := append([]string{"run", taskToolRel}, args...)
+	cmd := exec.Command("go", cmdArgs...)
+	cmd.Dir = srcDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("%v, output: %s", err, string(out))
+	}
+	return string(out), nil
 }
