@@ -66,7 +66,7 @@ Builds autoswap for target OS/arch and deploys via SSH mesh node routing.
 
 ```bash
 ./dialtone.sh autoswap src_v1 deploy \
-  --host rover --user tim --pass password1 --service \
+  --host rover --user tim --pass '<PASSWORD>' --service \
   --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_composition_manifest.json
 ```
 
