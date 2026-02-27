@@ -49,6 +49,11 @@ func printUsage() {
 	logs.Info("  sign <task-name> --role <role>  Sign a task in v2")
 	logs.Info("  archive <task-name>  Promote v2 to v1 and prepare for next cycle")
 	logs.Info("  sync [issue-id]      Sync GitHub issues into tasks/ folder")
+	logs.Info("  link <a<--b|a-->b>   Link tasks as DAG dependencies")
+	logs.Info("  unlink <a> <b>       Remove dependency links between tasks")
+	logs.Info("  tree [root-id]       Print recursive input tree")
+	logs.Info("  review <root-id>     Show DAG completion readiness for root task")
+	logs.Info("  resolve <root-id>    Resolve root after all inputs are complete")
 	logs.Info("  test                 Run plugin tests")
 	logs.Info("  help                 Show this help")
 }

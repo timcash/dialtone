@@ -71,6 +71,8 @@ func main() {
 		runUnlink(args)
 	case "tree":
 		runTree(args)
+	case "review":
+		runReview(args)
 	case "resolve":
 		runResolve(args)
 	case "help":
@@ -100,6 +102,7 @@ func printUsage() {
 	logs.Info("  link <a-->b,b-->c>   Comma-separated link expressions")
 	logs.Info("  unlink <id> <dep-id> Remove link between <id> and <dep-id>")
 	logs.Info("  tree [id]            Show input dependency tree for a task")
+	logs.Info("  review <root-id>     Review DAG shape + completion readiness for root task")
 	logs.Info("  resolve <root-id> [--pr-url URL]  Verify input tree, sign root review, and sync completion")
 }
 
@@ -709,34 +712,85 @@ func runLink(args []string) {
 	specs, err := parseLinkSpecs(args)
 	if err != nil {
 		logs.Error("%v", err)
+		os.Exit(1)
 		return
 	}
 	for _, spec := range specs {
+		if spec.from == spec.to {
+			logs.Error("Cannot link task %s to itself", spec.from)
+			os.Exit(1)
+			return
+		}
 		if spec.direction == "input" {
+			if createsInputCycle(spec.from, spec.to) {
+				logs.Error("Link blocked: adding input %s -> %s would create a cycle", spec.from, spec.to)
+				os.Exit(1)
+				return
+			}
 			// 'to' is INPUT to 'from'; reverse OUTPUT on dependency.
 			if err := updateSection(spec.from, "inputs", spec.to, "../../"+spec.to+"/v2/root.md"); err != nil {
 				logs.Error("Failed to update inputs for %s: %v", spec.from, err)
+				os.Exit(1)
 				return
 			}
 			if err := updateSection(spec.to, "outputs", spec.from, "../../"+spec.from+"/v2/root.md"); err != nil {
 				logs.Error("Failed to update outputs for %s: %v", spec.to, err)
+				os.Exit(1)
 				return
 			}
 			logs.Info("Linked %s as input to %s", spec.to, spec.from)
 			continue
 		}
 
+		// output link a-->b means b depends on a (b input includes a).
+		if createsInputCycle(spec.to, spec.from) {
+			logs.Error("Link blocked: adding output %s -> %s would create a cycle", spec.from, spec.to)
+			os.Exit(1)
+			return
+		}
 		// 'to' is OUTPUT of 'from'; reverse INPUT on destination.
 		if err := updateSection(spec.from, "outputs", spec.to, "../../"+spec.to+"/v2/root.md"); err != nil {
 			logs.Error("Failed to update outputs for %s: %v", spec.from, err)
+			os.Exit(1)
 			return
 		}
 		if err := updateSection(spec.to, "inputs", spec.from, "../../"+spec.from+"/v2/root.md"); err != nil {
 			logs.Error("Failed to update inputs for %s: %v", spec.to, err)
+			os.Exit(1)
 			return
 		}
 		logs.Info("Linked %s as output of %s", spec.to, spec.from)
 	}
+}
+
+func createsInputCycle(taskID, newInput string) bool {
+	if taskID == newInput {
+		return true
+	}
+	return taskDependsOn(newInput, taskID, map[string]bool{})
+}
+
+func taskDependsOn(taskID, target string, visited map[string]bool) bool {
+	if taskID == target {
+		return true
+	}
+	if visited[taskID] {
+		return false
+	}
+	visited[taskID] = true
+	inputs, err := readLinkedTaskIDs(taskID, "inputs")
+	if err != nil {
+		return false
+	}
+	for _, in := range inputs {
+		if in == "none" || strings.TrimSpace(in) == "" {
+			continue
+		}
+		if taskDependsOn(in, target, visited) {
+			return true
+		}
+	}
+	return false
 }
 
 type linkSpec struct {
@@ -932,7 +986,12 @@ func runResolve(args []string) {
 		}
 	}
 
-	incomplete, err := collectIncompleteInputs(rootID, map[string]bool{})
+	review := buildCompletionReview(rootID)
+	if review.cycleDetected {
+		logs.Error("Resolve blocked: DAG for root %s contains a cycle", rootID)
+		os.Exit(1)
+	}
+	incomplete, err := collectIncompleteInputs(rootID, map[string]bool{}, map[string]completionState{})
 	if err != nil {
 		logs.Error("Resolve failed: %v", err)
 		return
@@ -941,8 +1000,8 @@ func runResolve(args []string) {
 		logs.Error("Resolve blocked: inputs not complete for root %s: %s", rootID, strings.Join(incomplete, ", "))
 		os.Exit(1)
 	}
-	if !isTaskDone(rootID) {
-		logs.Error("Resolve blocked: root task %s is not done (needs reviewed+tested signatures)", rootID)
+	if !review.rootCanComplete {
+		logs.Error("Resolve blocked: root task %s is not complete (needs own reviewed+tested signatures and all input tasks complete)", rootID)
 		os.Exit(1)
 	}
 
@@ -960,6 +1019,31 @@ func runResolve(args []string) {
 		logs.Warn("Failed syncing completion back to issue markdown: %v", err)
 	}
 	logs.Info("Resolved root task %s: dependency tree done, review signed, issue sync updated", rootID)
+}
+
+func runReview(args []string) {
+	if len(args) < 1 {
+		logs.Error("Usage: task review <root-id>")
+		return
+	}
+	rootID := strings.TrimSpace(args[0])
+	review := buildCompletionReview(rootID)
+	if review.cycleDetected {
+		logs.Error("DAG review failed: cycle detected for root %s", rootID)
+		os.Exit(1)
+	}
+	for _, id := range review.order {
+		st := review.states[id]
+		logs.Raw("- %s | own_done=%t inputs_done=%t complete=%t", id, st.ownDone, st.inputsDone, st.complete)
+	}
+	if !review.rootHasNoOutputs {
+		logs.Warn("Root %s has outputs linked; root should be terminal (outputs: none)", rootID)
+	}
+	if review.rootCanComplete {
+		logs.Info("Review OK: root %s is complete and can be resolved", rootID)
+		return
+	}
+	logs.Warn("Review pending: root %s is not yet complete", rootID)
 }
 
 func printTaskTree(id string, indent int, visited map[string]bool) {
@@ -1009,7 +1093,7 @@ func printTaskTree(id string, indent int, visited map[string]bool) {
 	delete(visited, id)
 }
 
-func collectIncompleteInputs(taskID string, visited map[string]bool) ([]string, error) {
+func collectIncompleteInputs(taskID string, visited map[string]bool, memo map[string]completionState) ([]string, error) {
 	if visited[taskID] {
 		return nil, nil
 	}
@@ -1023,10 +1107,11 @@ func collectIncompleteInputs(taskID string, visited map[string]bool) ([]string, 
 		if in == "none" {
 			continue
 		}
-		if !isTaskDone(in) {
+		st := completionForTask(in, map[string]bool{}, memo)
+		if !st.complete {
 			out = append(out, in)
 		}
-		sub, err := collectIncompleteInputs(in, visited)
+		sub, err := collectIncompleteInputs(in, visited, memo)
 		if err != nil {
 			return nil, err
 		}
@@ -1074,13 +1159,116 @@ func readLinkedTaskIDs(taskID, section string) ([]string, error) {
 }
 
 func isTaskDone(taskID string) bool {
+	return completionForTask(taskID, map[string]bool{}, map[string]completionState{}).complete
+}
+
+type completionState struct {
+	ownDone    bool
+	inputsDone bool
+	complete   bool
+	cycle      bool
+}
+
+type completionReview struct {
+	rootID           string
+	rootHasNoOutputs bool
+	rootCanComplete  bool
+	cycleDetected    bool
+	states           map[string]completionState
+	order            []string
+}
+
+func buildCompletionReview(rootID string) completionReview {
+	seen := map[string]bool{}
+	order := []string{}
+	collectInputTree(rootID, seen, &order)
+
+	memo := map[string]completionState{}
+	cycleDetected := false
+	for _, id := range order {
+		st := completionForTask(id, map[string]bool{}, memo)
+		if st.cycle {
+			cycleDetected = true
+		}
+	}
+
+	rootOutputs, err := readLinkedTaskIDs(rootID, "outputs")
+	rootHasNoOutputs := err == nil && (len(rootOutputs) == 0 || (len(rootOutputs) == 1 && rootOutputs[0] == "none"))
+
+	rootState := memo[rootID]
+	return completionReview{
+		rootID:           rootID,
+		rootHasNoOutputs: rootHasNoOutputs,
+		rootCanComplete:  rootState.complete && rootHasNoOutputs && !cycleDetected,
+		cycleDetected:    cycleDetected,
+		states:           memo,
+		order:            order,
+	}
+}
+
+func collectInputTree(taskID string, visited map[string]bool, order *[]string) {
+	if visited[taskID] {
+		return
+	}
+	visited[taskID] = true
+	*order = append(*order, taskID)
+	inputs, err := readLinkedTaskIDs(taskID, "inputs")
+	if err != nil {
+		return
+	}
+	for _, in := range inputs {
+		if in == "none" || strings.TrimSpace(in) == "" {
+			continue
+		}
+		collectInputTree(in, visited, order)
+	}
+}
+
+func completionForTask(taskID string, stack map[string]bool, memo map[string]completionState) completionState {
+	if st, ok := memo[taskID]; ok {
+		return st
+	}
+	if stack[taskID] {
+		return completionState{cycle: true}
+	}
+	stack[taskID] = true
 	md, err := readTaskMarkdown(taskID)
 	if err != nil {
-		return false
+		delete(stack, taskID)
+		return completionState{}
 	}
-	reviewed := sectionHasSignature(md, "reviewed")
-	tested := sectionHasSignature(md, "tested")
-	return reviewed && tested
+	ownDone := sectionHasSignature(md, "reviewed") && sectionHasSignature(md, "tested")
+
+	inputs, err := readLinkedTaskIDs(taskID, "inputs")
+	if err != nil {
+		delete(stack, taskID)
+		st := completionState{ownDone: ownDone}
+		memo[taskID] = st
+		return st
+	}
+	inputsDone := true
+	cycleDetected := false
+	for _, in := range inputs {
+		if in == "none" || strings.TrimSpace(in) == "" {
+			continue
+		}
+		sub := completionForTask(in, stack, memo)
+		if sub.cycle {
+			cycleDetected = true
+		}
+		if !sub.complete {
+			inputsDone = false
+		}
+	}
+	delete(stack, taskID)
+	st := completionState{
+		ownDone:    ownDone,
+		inputsDone: inputsDone,
+		complete:   ownDone && inputsDone && !cycleDetected,
+		cycle:      cycleDetected,
+	}
+	memo[taskID] = st
+	return st
 }
 
 func sectionHasSignature(md, section string) bool {
