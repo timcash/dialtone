@@ -28,6 +28,8 @@ func Run(args []string) error {
 		return runSyncRepos(args[1:])
 	case "sync-code":
 		return runSyncCode(args[1:])
+	case "bootstrap":
+		return runBootstrap(args[1:])
 	default:
 		PrintUsage()
 		return fmt.Errorf("unknown ssh command: %s", args[0])
@@ -48,6 +50,8 @@ func PrintUsage() {
 	logs.Raw("                                        Per-node repo override: --repo-<node> /path/to/repo")
 	logs.Raw("  sync-code --node <name|all> [--src P] [--dest P] [--delete] [--exclude PATTERN]")
 	logs.Raw("                                        Rsync code without git, excludes node_modules/.pixi by default")
+	logs.Raw("  bootstrap --node <name|all> [--src P] [--dest P] [--delete] [--install-cmd C]")
+	logs.Raw("                                        Sync code + run install command(s) on target node(s)")
 	logs.Raw("  test                                  Run ssh plugin self-check suite")
 }
 
@@ -196,6 +200,36 @@ func runSyncCode(args []string) error {
 		Dest:     *dest,
 		Delete:   *del,
 		Excludes: excludes.values,
+	})
+}
+
+func runBootstrap(args []string) error {
+	fs := flag.NewFlagSet("ssh bootstrap", flag.ContinueOnError)
+	fs.SetOutput(nil)
+	node := fs.String("node", "", "Target mesh node or 'all'")
+	src := fs.String("src", "", "Source path (defaults to current working directory)")
+	dest := fs.String("dest", "", "Destination path on target")
+	del := fs.Bool("delete", false, "Delete files on dest that are missing in src")
+	noSync := fs.Bool("no-sync", false, "Skip rsync and run install/verify only")
+	verifyCmd := fs.String("verify-cmd", "./dialtone.sh go src_v1 exec version", "Post-install verify command")
+	var installCmds multiValueFlag
+	fs.Var(&installCmds, "install-cmd", "Install command to run on target (repeatable)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	cmds := installCmds.values
+	if len(cmds) == 0 {
+		cmds = []string{"printf 'y\\n' | ./dialtone.sh go src_v1 install"}
+	}
+	return Bootstrap(BootstrapOptions{
+		Node:        *node,
+		Source:      *src,
+		Dest:        *dest,
+		Delete:      *del,
+		NoSync:      *noSync,
+		InstallCmds: cmds,
+		VerifyCmd:   *verifyCmd,
 	})
 }
 

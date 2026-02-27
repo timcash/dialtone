@@ -31,8 +31,6 @@ func main() {
 	err = reg.Run(testv1.SuiteOptions{
 		Version:       "task-io-linking-v1",
 		ReportPath:    filepath.Join(repoRoot, "src", "plugins", "task", "src_v1", "test", "TEST.md"),
-		LogPath:       filepath.Join(repoRoot, "src", "plugins", "task", "src_v1", "test", "test.log"),
-		ErrorLogPath:  filepath.Join(repoRoot, "src", "plugins", "task", "src_v1", "test", "error.log"),
 		NATSURL:       "nats://127.0.0.1:4222",
 		NATSSubject:   "logs.test.task-io-linking-v1",
 		AutoStartNATS: true,
