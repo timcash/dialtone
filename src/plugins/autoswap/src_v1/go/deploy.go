@@ -103,6 +103,10 @@ func RunDeploy(args []string) error {
 	if strings.TrimSpace(opts.User) == "" {
 		return fmt.Errorf("deploy requires --user or a mesh node with a default user")
 	}
+	if opts.Service && strings.TrimSpace(opts.ManifestURL) == "" {
+		opts.ManifestURL = fmt.Sprintf("https://github.com/%s/releases/latest/download/robot_src_v2_composition_manifest.json", opts.Repo)
+		logs.Info("[DEPLOY] manifest-url not provided; using latest release URL: %s", opts.ManifestURL)
+	}
 
 	cmdOpts := sshplugin.CommandOptions{
 		User:     opts.User,

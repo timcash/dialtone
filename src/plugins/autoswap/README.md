@@ -6,7 +6,7 @@
 
 # 2) On target (standalone usage, no dialtone.sh needed):
 ./dialtone_autoswap_v1 service --mode install \
-  --manifest-url https://raw.githubusercontent.com/timcash/dialtone/main/src/plugins/robot/src_v2/config/composition.manifest.json \
+  --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_composition_manifest.json \
   --repo timcash/dialtone \
   --check-interval 5m
 
@@ -52,11 +52,11 @@ Validates manifest and resolved artifact paths.
 ### `run`
 Runs manifest composition directly (foreground). With `--stay-running`, autoswap supervises child processes.
 If manifest defines `runtime.processes`, autoswap starts exactly those processes using manifest dependency order.
-Use `--manifest-url` to fetch the manifest from GitHub/HTTP at startup.
+Use `--manifest-url` to fetch the manifest from GitHub/HTTP and re-check it on each poll interval.
 
 ```bash
 ./dialtone.sh autoswap src_v1 run \
-  --manifest-url https://raw.githubusercontent.com/timcash/dialtone/main/src/plugins/robot/src_v2/config/composition.manifest.json \
+  --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_composition_manifest.json \
   --listen :18086 --nats-port 18236 --nats-ws-port 18237 \
   --require-stream=true --stay-running=true
 ```
@@ -67,7 +67,7 @@ Builds autoswap for target OS/arch and deploys via SSH mesh node routing.
 ```bash
 ./dialtone.sh autoswap src_v1 deploy \
   --host rover --user tim --pass password1 --service \
-  --manifest-url https://raw.githubusercontent.com/timcash/dialtone/main/src/plugins/robot/src_v2/config/composition.manifest.json
+  --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_composition_manifest.json
 ```
 
 ### `service`
