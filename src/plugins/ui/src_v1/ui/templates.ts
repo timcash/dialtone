@@ -20,7 +20,7 @@ export type UISharedTemplate = {
 
 function textHeader(title: string, subtitle: string): string {
   return `
-    <header class="overlay text">
+    <header class="overlay text" aria-label="Text Header">
       <h1>${title}</h1>
       <h3>${subtitle}</h3>
     </header>
@@ -30,16 +30,16 @@ function textHeader(title: string, subtitle: string): string {
 function legendHeader(pairs: Array<[string, string, string?]>): string {
   const cells = pairs
     .map(
-      ([label, value, key]) => `
+      ([label, value, className]) => `
         <div>
           <dt>${label}</dt>
-          <dd${key ? ` data-field="${key}"` : ''}>${value}</dd>
+          <dd${className ? ` class="${className}"` : ''}>${value}</dd>
         </div>
       `
     )
     .join('');
   return `
-    <header class="overlay legend">
+    <header class="overlay legend" aria-label="Legend Header">
       <dl>${cells}</dl>
     </header>
   `;
@@ -57,7 +57,7 @@ const templateMap: Record<UISharedTemplateID, UISharedTemplate> = {
       legend: 'header.overlay'
     },
     render: () => `
-      <canvas></canvas>
+      <canvas aria-label="Hero Canvas"></canvas>
       ${legendHeader([
         ['mode', 'guided'],
         ['armed', 'false'],
@@ -69,17 +69,17 @@ const templateMap: Record<UISharedTemplateID, UISharedTemplate> = {
         ['profile', 'dev']
       ])}
       <form>
-        <button type="button">Arm</button>
-        <button type="button">Disarm</button>
-        <button type="button">Manual</button>
-        <button type="button">Guided</button>
-        <button type="button">Pause</button>
-        <button type="button">Resume</button>
-        <button type="button">Home</button>
-        <button type="button">Land</button>
-        <button type="button">Mode</button>
-        <input type="text" placeholder="command" />
-        <button type="button">Send</button>
+        <button type="button" aria-label="Hero Arm">Arm</button>
+        <button type="button" aria-label="Hero Disarm">Disarm</button>
+        <button type="button" aria-label="Hero Manual">Manual</button>
+        <button type="button" aria-label="Hero Guided">Guided</button>
+        <button type="button" aria-label="Hero Pause">Pause</button>
+        <button type="button" aria-label="Hero Resume">Resume</button>
+        <button type="button" aria-label="Hero Home">Home</button>
+        <button type="button" aria-label="Hero Land">Land</button>
+        <button type="button" aria-label="Hero Mode">Mode</button>
+        <input type="text" aria-label="Hero Command Input" placeholder="command" />
+        <button type="button" aria-label="Hero Send">Send</button>
       </form>
     `
   },
@@ -93,7 +93,7 @@ const templateMap: Record<UISharedTemplateID, UISharedTemplate> = {
       legend: 'header.overlay'
     },
     render: () => `
-      <canvas></canvas>
+      <canvas aria-label="Three Fullscreen Canvas"></canvas>
       ${legendHeader([
         ['scene', 'earth'],
         ['camera', 'orbit'],
@@ -117,7 +117,7 @@ const templateMap: Record<UISharedTemplateID, UISharedTemplate> = {
       legend: 'header.overlay'
     },
     render: () => `
-      <canvas></canvas>
+      <canvas aria-label="Three Calculator Canvas"></canvas>
       ${legendHeader([
         ['scene', 'graph'],
         ['select', 'none'],
@@ -129,17 +129,17 @@ const templateMap: Record<UISharedTemplateID, UISharedTemplate> = {
         ['mode', 'edit']
       ])}
       <form>
-        <button type="button">Select</button>
-        <button type="button" data-action="three-add">Add</button>
-        <button type="button">Link</button>
-        <button type="button">Delete</button>
-        <button type="button">Group</button>
-        <button type="button">Split</button>
-        <button type="button">Frame</button>
-        <button type="button">Labels</button>
-        <button type="button">Mode</button>
-        <input type="text" placeholder="label" />
-        <button type="button">Apply</button>
+        <button type="button" aria-label="Three Select">Select</button>
+        <button type="button" aria-label="Three Add" class="three-add">Add</button>
+        <button type="button" aria-label="Three Link">Link</button>
+        <button type="button" aria-label="Three Delete">Delete</button>
+        <button type="button" aria-label="Three Group">Group</button>
+        <button type="button" aria-label="Three Split">Split</button>
+        <button type="button" aria-label="Three Frame">Frame</button>
+        <button type="button" aria-label="Three Labels">Labels</button>
+        <button type="button" aria-label="Three Mode">Mode</button>
+        <input type="text" aria-label="Three Input" placeholder="label" />
+        <button type="button" aria-label="Three Apply">Apply</button>
       </form>
     `
   },
@@ -154,7 +154,7 @@ const templateMap: Record<UISharedTemplateID, UISharedTemplate> = {
       legend: 'header.overlay'
     },
     render: () => `
-      <table>
+      <table aria-label="Table Underlay">
         <thead><tr><th>Node</th><th>Status</th><th>Latency</th></tr></thead>
         <tbody>
           <tr><td>camera</td><td>running</td><td>17ms</td></tr>
@@ -173,17 +173,17 @@ const templateMap: Record<UISharedTemplateID, UISharedTemplate> = {
         ['filter', 'none']
       ])}
       <form>
-        <button type="button" data-action="table-refresh">Refresh</button>
-        <button type="button">Filter</button>
-        <button type="button">Export</button>
-        <button type="button">Sort</button>
-        <button type="button">Focus</button>
-        <button type="button">Details</button>
-        <button type="button">Diff</button>
-        <button type="button">Tail</button>
-        <button type="button">Mode</button>
-        <input type="text" placeholder="query" />
-        <button type="button">Run</button>
+        <button type="button" aria-label="Table Refresh" class="table-refresh">Refresh</button>
+        <button type="button" aria-label="Table Filter">Filter</button>
+        <button type="button" aria-label="Table Export">Export</button>
+        <button type="button" aria-label="Table Sort">Sort</button>
+        <button type="button" aria-label="Table Focus">Focus</button>
+        <button type="button" aria-label="Table Details">Details</button>
+        <button type="button" aria-label="Table Diff">Diff</button>
+        <button type="button" aria-label="Table Tail">Tail</button>
+        <button type="button" aria-label="Table Mode">Mode</button>
+        <input type="text" aria-label="Table Query Input" placeholder="query" />
+        <button type="button" aria-label="Table Run">Run</button>
       </form>
     `
   },
@@ -197,7 +197,7 @@ const templateMap: Record<UISharedTemplateID, UISharedTemplate> = {
       legend: 'header.overlay'
     },
     render: () => `
-      <video muted playsinline controls></video>
+      <video aria-label="Camera Video" muted playsinline controls></video>
       ${legendHeader([
         ['stream', 'demo'],
         ['codec', 'h264'],
@@ -220,7 +220,7 @@ const templateMap: Record<UISharedTemplateID, UISharedTemplate> = {
       legend: 'header.overlay'
     },
     render: () => `
-      <article>
+      <article aria-label="Docs Underlay">
         <h2>Docs</h2>
         <p>This section is for guide text and onboarding notes.</p>
         <p>Switch layout mode at runtime to validate both shells.</p>
@@ -239,7 +239,7 @@ const templateMap: Record<UISharedTemplateID, UISharedTemplate> = {
       legend: 'header.overlay'
     },
     render: () => `
-      <pre>log> ready\n</pre>
+      <pre aria-label="Terminal Underlay">log> ready\n</pre>
       ${legendHeader([
         ['source', 'robot'],
         ['status', 'idle', 'terminal-status'],
@@ -251,17 +251,17 @@ const templateMap: Record<UISharedTemplateID, UISharedTemplate> = {
         ['mode', 'live']
       ])}
       <form>
-        <button type="button">Clear</button>
-        <button type="button">Tail</button>
-        <button type="button">Retry</button>
-        <button type="button">Pause</button>
-        <button type="button">Resume</button>
-        <button type="button">Errors</button>
-        <button type="button">Info</button>
-        <button type="button">Warn</button>
-        <button type="button">Mode</button>
-        <input type="text" placeholder="command" />
-        <button type="button" data-action="terminal-send">Send</button>
+        <button type="button" aria-label="Terminal Clear">Clear</button>
+        <button type="button" aria-label="Terminal Tail">Tail</button>
+        <button type="button" aria-label="Terminal Retry">Retry</button>
+        <button type="button" aria-label="Terminal Pause">Pause</button>
+        <button type="button" aria-label="Terminal Resume">Resume</button>
+        <button type="button" aria-label="Terminal Errors">Errors</button>
+        <button type="button" aria-label="Terminal Info">Info</button>
+        <button type="button" aria-label="Terminal Warn">Warn</button>
+        <button type="button" aria-label="Terminal Mode">Mode</button>
+        <input type="text" aria-label="Terminal Input" placeholder="command" />
+        <button type="button" aria-label="Terminal Send" class="terminal-send">Send</button>
       </form>
     `
   },
@@ -275,11 +275,11 @@ const templateMap: Record<UISharedTemplateID, UISharedTemplate> = {
       legend: 'header.overlay'
     },
     render: () => `
-      <article>
-        <button type="button">Toggle Chatlog</button>
-        <button type="button">Use GPU</button>
-        <button type="button">Reset Layout</button>
-        <button type="button">Version:v1</button>
+      <article aria-label="Settings Underlay">
+        <button type="button" aria-label="Settings Toggle Chatlog">Toggle Chatlog</button>
+        <button type="button" aria-label="Settings Use GPU">Use GPU</button>
+        <button type="button" aria-label="Settings Reset Layout">Reset Layout</button>
+        <button type="button" aria-label="Settings Version">Version:v1</button>
       </article>
       ${textHeader('Settings', 'Session and runtime controls')}
     `

@@ -2,6 +2,7 @@ package test
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -38,6 +39,14 @@ func BrowserOptionsFor(defaultURL string) (testv1.BrowserOptions, bool, error) {
 			return b, true, err
 		}
 		b.URL = inferred
+		return b, true, nil
+	}
+	rewritten, err := rewriteLocalURLToWSLHost(b.URL)
+	if err != nil {
+		return b, true, err
+	}
+	if rewritten != "" {
+		b.URL = rewritten
 	}
 	return b, true, nil
 }
@@ -60,4 +69,32 @@ func inferWSLURL(port int) (string, error) {
 		return "", fmt.Errorf("wsl mesh host empty")
 	}
 	return fmt.Sprintf("http://%s:%d", host, port), nil
+}
+
+func rewriteLocalURLToWSLHost(raw string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", err
+	}
+	if u == nil {
+		return "", nil
+	}
+	host := strings.TrimSpace(u.Hostname())
+	if host != "127.0.0.1" && host != "localhost" {
+		return "", nil
+	}
+	wsl, err := sshv1.ResolveMeshNode("wsl")
+	if err != nil {
+		return "", err
+	}
+	meshHost := strings.TrimSpace(wsl.Host)
+	if meshHost == "" {
+		return "", fmt.Errorf("wsl mesh host empty")
+	}
+	if p := u.Port(); p != "" {
+		u.Host = fmt.Sprintf("%s:%s", meshHost, p)
+	} else {
+		u.Host = meshHost
+	}
+	return u.String(), nil
 }

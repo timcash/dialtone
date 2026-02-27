@@ -43,6 +43,12 @@ func Run(args []string) error {
 		return runUIDev(cmdArgs)
 	case "build":
 		return runUIFixtureScript("build", cmdArgs)
+	case "lint":
+		return runUIFixtureScript("lint", cmdArgs)
+	case "fmt":
+		return runUIFixtureScript("fmt", cmdArgs)
+	case "fmt-check":
+		return runUIFixtureScript("fmt:check", cmdArgs)
 	case "install":
 		return runUIFixtureScript("install", cmdArgs)
 	case "mock-data":
@@ -64,6 +70,9 @@ func printUsage() {
 	fmt.Println("\nCommands:")
 	fmt.Println("  dev       Run fixture dev server + attachable browser session")
 	fmt.Println("  build     Build fixture UI dist (bun run build)")
+	fmt.Println("  lint      Lint/type-check fixture UI (bun run lint)")
+	fmt.Println("  fmt       Format fixture UI sources (bun run fmt)")
+	fmt.Println("  fmt-check Check fixture formatting (bun run fmt:check)")
 	fmt.Println("  install   Install fixture dependencies (bun install)")
 	fmt.Println("  test      Run ui src_v1 test suite (supports --attach <mesh-node>)")
 	fmt.Println("  mock-data Start mock data server for testing")

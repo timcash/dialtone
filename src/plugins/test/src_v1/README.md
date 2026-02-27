@@ -21,6 +21,7 @@ It provides:
 - suite/step orchestration (`RunSuite`)
 - browser helpers used by UI plugin tests
 - process/dev helpers
+- centralized `TEST.md` generation (default + template format)
 - built-in logging via the `logs` plugin
 
 ## CLI
@@ -187,8 +188,16 @@ Remote browser fallback:
 - `StepRunResult`
   - `Report string`
 - `SuiteOptions`
-  - `Version`, `ReportPath`, `LogPath`, `ErrorLogPath`
+  - `Version`, `ReportPath`, `RawReportPath`
+  - `ReportFormat` (`template` or default raw)
+  - `ReportTitle`, `ReportRunner`
+  - `LogPath`, `ErrorLogPath`
   - `NATSURL`, `NATSSubject`, `AutoStartNATS`
+
+For template-style reports, plugin test commands should only configure `SuiteOptions` and call `RunSuite(...)`.
+Do not render `TEST.md` in plugin-local code. `test/src_v1` handles:
+- raw suite report generation
+- optional template conversion to final `TEST.md`
 
 ## Logging + NATS Behavior
 

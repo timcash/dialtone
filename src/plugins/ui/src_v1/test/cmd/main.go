@@ -9,6 +9,7 @@ import (
 	"dialtone/dev/plugins/logs/src_v1/go"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
 	"dialtone/dev/plugins/ui/src_v1/test"
+	qualitychecks "dialtone/dev/plugins/ui/src_v1/test/00_quality_checks"
 	buildserve "dialtone/dev/plugins/ui/src_v1/test/01_build_and_serve"
 	navigation "dialtone/dev/plugins/ui/src_v1/test/02_sections_navigation"
 	components "dialtone/dev/plugins/ui/src_v1/test/03_component_actions"
@@ -40,15 +41,20 @@ func main() {
 	}
 
 	reg := test.NewRegistry()
+	qualitychecks.Register(reg)
 	buildserve.Register(reg)
 	navigation.Register(reg)
 	components.Register(reg)
 
 	logs.Info("Starting UI src_v1 suite with %d registered steps", len(reg.Steps))
 	preserveAttachBrowser := attach != ""
-	if err := reg.Run(testv1.SuiteOptions{
+	runErr := reg.Run(testv1.SuiteOptions{
 		Version:               "ui-src-v1",
 		ReportPath:            "plugins/ui/src_v1/test/TEST.md",
+		RawReportPath:         "plugins/ui/src_v1/test/TEST_RAW.md",
+		ReportFormat:          "template",
+		ReportTitle:           "UI Plugin src_v1 Test Report",
+		ReportRunner:          "test/src_v1",
 		LogPath:               "plugins/ui/src_v1/test/test.log",
 		ErrorLogPath:          "plugins/ui/src_v1/test/error.log",
 		NATSURL:               "nats://127.0.0.1:4222",
@@ -57,8 +63,9 @@ func main() {
 		BrowserCleanupRole:    "ui-test",
 		PreserveSharedBrowser: preserveAttachBrowser,
 		SkipBrowserCleanup:    preserveAttachBrowser,
-	}); err != nil {
-		logs.Error("UI src_v1 suite failed: %v", err)
+	})
+	if runErr != nil {
+		logs.Error("UI src_v1 suite failed: %v", runErr)
 		os.Exit(1)
 	}
 	logs.Info("UI src_v1 suite passed")

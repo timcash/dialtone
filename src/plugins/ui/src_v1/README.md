@@ -7,6 +7,15 @@
 # build fixture UI dist
 ./dialtone.sh ui src_v1 build
 
+# check formatting
+./dialtone.sh ui src_v1 fmt-check
+
+# type/lint checks
+./dialtone.sh ui src_v1 lint
+
+# format fixture sources
+./dialtone.sh ui src_v1 fmt
+
 # run fixture dev server (local)
 ./dialtone.sh ui src_v1 dev
 
@@ -24,8 +33,17 @@
 Shared template presets now live in:
 - `src/plugins/ui/src_v1/ui/templates.ts`
 
-For full reference see:
-- `src/plugins/ui/README.md`
+## Section Model
+
+- each section has exactly one `underlay` (the primary surface)
+- each section can optionally define overlays:
+  - `menu` (global nav)
+  - `header` (text or legend mode)
+  - `form` (control grid + input)
+  - `chatlog`
+  - `statusbar`
+
+In `SectionOverlayConfig`, the `legend` field maps to the header overlay selector (name kept for backward compatibility).
 
 ## Settings Button List Pattern
 
@@ -54,7 +72,7 @@ sections.register('settings', {
   overlays: {
     primaryKind: 'button-list',
     primary: '.button-list',
-    legend: '.settings-legend',
+    legend: '.settings-header',
   },
 });
 ```
@@ -63,4 +81,4 @@ sections.register('settings', {
 
 - `button-list` is an underlay and can be used in both `section.fullscreen` and `section.calculator`.
 - In `fullscreen`, the list occupies the full section body.
-- In `calculator`, the list stays in row 1 while row 2 can still host a `mode-form` for sections that use it.
+- In `calculator`, the list stays in row 1 while row 2 can still host a `form` overlay for sections that use it.
