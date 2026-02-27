@@ -5,9 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "lint": "tsc --noEmit",
+    "fmt": "prettier --write .",
+    "fmt:check": "prettier --check ."
   },
   "devDependencies": {
+    "@types/three": "0.182.0",
+    "prettier": "3.6.2",
     "three": "^0.182.0",
     "typescript": "5.9.3",
     "vite": "5.4.21"

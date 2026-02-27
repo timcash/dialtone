@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -125,12 +126,22 @@ func (t *TestContext) startServerLocked() error {
 	})
 	mux.Handle("/", http.FileServer(http.Dir(t.distDir)))
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {
 		return err
 	}
 	t.server = &http.Server{Handler: mux}
-	t.serverURL = "http://" + ln.Addr().String()
+	port := ""
+	if tcpAddr, ok := ln.Addr().(*net.TCPAddr); ok && tcpAddr.Port > 0 {
+		port = fmt.Sprintf("%d", tcpAddr.Port)
+	}
+	if port == "" {
+		parsed, parseErr := url.Parse("http://" + ln.Addr().String())
+		if parseErr == nil {
+			port = parsed.Port()
+		}
+	}
+	t.serverURL = "http://127.0.0.1:" + port
 	t.logf("LOOKING FOR: go ui backend at %s", t.serverURL)
 	go func() {
 		_ = t.server.Serve(ln)

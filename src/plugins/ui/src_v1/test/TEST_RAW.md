@@ -1,36 +1,23 @@
-# UI Plugin src_v1 Test Report
+# Test Report: ui-src-v1
 
-**Generated at:** Fri, 27 Feb 2026 13:54:58 -0800
-**Version:** `ui-src-v1`
-**Runner:** `test/src_v1`
-**Status:** ✅ PASS
-**Total Time:** `17.035057518s`
+- **Date**: Fri, 27 Feb 2026 13:54:58 PST
+- **Total Duration**: 17.035057518s
 
-## Test Steps
+## Summary
 
-| Step | Result | Duration |
-|---|---|---|
-| ui-quality-fmt-lint-build | ✅ PASS | `2.194752507s` |
-| ui-build-and-go-serve | ✅ PASS | `8.632649728s` |
-| ui-section-navigation-via-menu | ✅ PASS | `3.519554121s` |
-| ui-component-actions-and-modes | ✅ PASS | `2.68808145s` |
+- **Steps**: 4 / 4 passed
+- **Status**: PASSED
 
-## Step Details
+## Details
 
-## ui-quality-fmt-lint-build
+### 1. ✅ ui-quality-fmt-lint-build
 
-### Results
+- **Duration**: 2.194752507s
+- **Report**: fmt-check, lint, and build passed
+
+#### Logs
 
 ```text
-result: PASS
-duration: 2.194752507s
-report: fmt-check, lint, and build passed
-```
-
-### Logs
-
-```text
-logs:
 INFO: running command: /home/user/dialtone/dialtone.sh ui src_v1 install
 INFO: stdout: >> Running: /home/user/dialtone_dependencies/bun/bin/bun install (in /home/user/dialtone/src/plugins/ui/src_v1/test/fixtures/app)
 INFO: stdout: bun install v1.3.9 (cf6cdbbb)
@@ -64,27 +51,22 @@ INFO: report: fmt-check, lint, and build passed
 PASS: [TEST][PASS] [STEP:ui-quality-fmt-lint-build] report: fmt-check, lint, and build passed
 ```
 
-### Browser Logs
+#### Browser Logs
 
 ```text
-browser_logs:
 <empty>
 ```
 
-## ui-build-and-go-serve
+---
 
-### Results
+### 2. ✅ ui-build-and-go-serve
 
-```text
-result: PASS
-duration: 8.632649728s
-report: fixture built, hero section loaded, legend header verified (attach=true)
-```
+- **Duration**: 8.632649728s
+- **Report**: fixture built, hero section loaded, legend header verified (attach=true)
 
-### Logs
+#### Logs
 
 ```text
-logs:
 INFO: STEP> begin ui-build-and-go-serve
 INFO: LOOKING FOR: ui fixture build at /home/user/dialtone/src/plugins/ui/src_v1/test/fixtures/app
 INFO: LOOKING FOR: [/home/user/dialtone_dependencies/bun/bin/bun install --silent]
@@ -94,40 +76,34 @@ INFO: report: fixture built, hero section loaded, legend header verified (attach
 PASS: [TEST][PASS] [STEP:ui-build-and-go-serve] report: fixture built, hero section loaded, legend header verified (attach=true)
 ```
 
-### Browser Logs
+#### Browser Logs
 
 ```text
-browser_logs:
 <empty>
 ```
 
-### Screenshots
+#### Screenshots
 
 ![ui_hero.png](screenshots/ui_hero.png)
 
-## ui-section-navigation-via-menu
+---
 
-### Results
+### 3. ✅ ui-section-navigation-via-menu
 
-```text
-result: PASS
-duration: 3.519554121s
-report: menu navigation verified for docs/table/three-fullscreen/camera/settings with screenshots
-```
+- **Duration**: 3.519554121s
+- **Report**: menu navigation verified for docs/table/three-fullscreen/camera/settings with screenshots
 
-### Logs
+#### Logs
 
 ```text
-logs:
 INFO: STEP> begin ui-section-navigation-via-menu
 INFO: report: menu navigation verified for docs/table/three-fullscreen/camera/settings with screenshots
 PASS: [TEST][PASS] [STEP:ui-section-navigation-via-menu] report: menu navigation verified for docs/table/three-fullscreen/camera/settings with screenshots
 ```
 
-### Browser Logs
+#### Browser Logs
 
 ```text
-browser_logs:
 INFO: CONSOLE:log: "[TEST_ACTION] click aria=Toggle Global Menu"
 INFO: CONSOLE:log: "[TEST_ACTION] click aria=Navigate Docs"
 INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #docs"
@@ -190,37 +166,32 @@ INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #settings"
 INFO: CONSOLE:log: "[SectionManager] RESUME #settings"
 ```
 
-### Screenshots
+#### Screenshots
 
-|  |  |
-|---|---|
-| ![ui_docs.png](screenshots/ui_docs.png) | ![ui_table.png](screenshots/ui_table.png) |
-| ![ui_three_fullscreen.png](screenshots/ui_three_fullscreen.png) | ![ui_camera.png](screenshots/ui_camera.png) |
-| ![ui_settings.png](screenshots/ui_settings.png) |  |
+![ui_docs.png](screenshots/ui_docs.png)
+![ui_table.png](screenshots/ui_table.png)
+![ui_three_fullscreen.png](screenshots/ui_three_fullscreen.png)
+![ui_camera.png](screenshots/ui_camera.png)
+![ui_settings.png](screenshots/ui_settings.png)
 
-## ui-component-actions-and-modes
+---
 
-### Results
+### 4. ✅ ui-component-actions-and-modes
 
-```text
-result: PASS
-duration: 2.68808145s
-report: component actions verified (mode toggle, table refresh, terminal send, three add) with mobile screenshots
-```
+- **Duration**: 2.68808145s
+- **Report**: component actions verified (mode toggle, table refresh, terminal send, three add) with mobile screenshots
 
-### Logs
+#### Logs
 
 ```text
-logs:
 INFO: STEP> begin ui-component-actions-and-modes
 INFO: report: component actions verified (mode toggle, table refresh, terminal send, three add) with mobile screenshots
 PASS: [TEST][PASS] [STEP:ui-component-actions-and-modes] report: component actions verified (mode toggle, table refresh, terminal send, three add) with mobile screenshots
 ```
 
-### Browser Logs
+#### Browser Logs
 
 ```text
-browser_logs:
 INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #table"
 INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #settings"
 INFO: CONSOLE:log: "[SectionManager] PAUSE #settings"
@@ -256,10 +227,11 @@ INFO: CONSOLE:log: "[SectionManager] RESUME #three-calculator"
 INFO: CONSOLE:log: "three-add:1"
 ```
 
-### Screenshots
+#### Screenshots
 
-|  |  |
-|---|---|
-| ![ui_table_fullscreen.png](screenshots/ui_table_fullscreen.png) | ![ui_terminal.png](screenshots/ui_terminal.png) |
-| ![ui_three_calculator.png](screenshots/ui_three_calculator.png) |  |
+![ui_table_fullscreen.png](screenshots/ui_table_fullscreen.png)
+![ui_terminal.png](screenshots/ui_terminal.png)
+![ui_three_calculator.png](screenshots/ui_three_calculator.png)
+
+---
 

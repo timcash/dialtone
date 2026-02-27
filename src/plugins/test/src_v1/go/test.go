@@ -56,6 +56,10 @@ type StepContext struct {
 	suiteBrowser    *BrowserSession
 	setSuiteBrowser func(*BrowserSession)
 	repoRoot        string
+	stepLogs        []string
+	stepErrors      []string
+	browserLogs     []string
+	logMu           sync.Mutex
 }
 
 func (sc *StepContext) Logf(format string, args ...any) {
@@ -64,6 +68,7 @@ func (sc *StepContext) Logf(format string, args ...any) {
 
 func (sc *StepContext) Infof(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
+	sc.appendStepLog("INFO", msg)
 	source := sc.callerLocation()
 	logs.InfoFromTest(source, "[STEP:%s] %s", sc.Name, msg)
 	if sc.logger != nil {
@@ -73,6 +78,7 @@ func (sc *StepContext) Infof(format string, args ...any) {
 
 func (sc *StepContext) Warnf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
+	sc.appendStepLog("WARN", msg)
 	source := sc.callerLocation()
 	logs.WarnFromTest(source, "[STEP:%s] %s", sc.Name, msg)
 	if sc.logger != nil {
@@ -82,6 +88,7 @@ func (sc *StepContext) Warnf(format string, args ...any) {
 
 func (sc *StepContext) Debugf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
+	sc.appendStepLog("DEBUG", msg)
 	source := sc.callerLocation()
 	logs.DebugFromTest(source, "[STEP:%s] %s", sc.Name, msg)
 	if sc.logger != nil {
@@ -91,6 +98,7 @@ func (sc *StepContext) Debugf(format string, args ...any) {
 
 func (sc *StepContext) Errorf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
+	sc.appendStepError("ERROR", msg)
 	source := sc.callerLocation()
 	logs.ErrorFromTest(source, "[STEP:%s] %s", sc.Name, msg)
 	if sc.logger != nil {
@@ -108,6 +116,7 @@ func (sc *StepContext) TestPassf(format string, args ...any) {
 	}
 	source := sc.callerLocation()
 	line := fmt.Sprintf("[TEST][PASS] [STEP:%s] %s", sc.Name, msg)
+	sc.appendStepLog("PASS", line)
 	logs.InfoFromTest(source, "%s", line)
 	if sc.passLogger != nil {
 		_ = sc.passLogger.InfofFromTest(source, "%s", line)
@@ -125,6 +134,7 @@ func (sc *StepContext) TestFailf(format string, args ...any) {
 	}
 	source := sc.callerLocation()
 	line := fmt.Sprintf("[TEST][FAIL] [STEP:%s] %s", sc.Name, msg)
+	sc.appendStepError("FAIL", line)
 	logs.ErrorFromTest(source, "%s", line)
 	if sc.failLogger != nil {
 		_ = sc.failLogger.ErrorfFromTest(source, "%s", line)
@@ -362,6 +372,50 @@ func (sc *StepContext) callerLocation() string {
 	return "unknown"
 }
 
+func (sc *StepContext) appendStepLog(level, msg string) {
+	line := strings.TrimSpace(fmt.Sprintf("%s: %s", strings.TrimSpace(level), strings.TrimSpace(msg)))
+	if line == "" {
+		return
+	}
+	sc.logMu.Lock()
+	sc.stepLogs = append(sc.stepLogs, line)
+	sc.logMu.Unlock()
+}
+
+func (sc *StepContext) appendStepError(level, msg string) {
+	line := strings.TrimSpace(fmt.Sprintf("%s: %s", strings.TrimSpace(level), strings.TrimSpace(msg)))
+	if line == "" {
+		return
+	}
+	sc.logMu.Lock()
+	sc.stepErrors = append(sc.stepErrors, line)
+	sc.logMu.Unlock()
+}
+
+func (sc *StepContext) snapshotStepLogs() ([]string, []string, []string) {
+	sc.logMu.Lock()
+	defer sc.logMu.Unlock()
+	logCopy := append([]string(nil), sc.stepLogs...)
+	errCopy := append([]string(nil), sc.stepErrors...)
+	browserCopy := append([]string(nil), sc.browserLogs...)
+	return logCopy, errCopy, browserCopy
+}
+
+func (sc *StepContext) appendBrowserLog(kind, msg string, isError bool) {
+	line := strings.TrimSpace(fmt.Sprintf("%s: %s", strings.TrimSpace(kind), strings.TrimSpace(msg)))
+	if line == "" {
+		return
+	}
+	if isError {
+		line = "ERROR: " + line
+	} else {
+		line = "INFO: " + line
+	}
+	sc.logMu.Lock()
+	sc.browserLogs = append(sc.browserLogs, line)
+	sc.logMu.Unlock()
+}
+
 type StepRunResult struct {
 	Report string
 }
@@ -370,6 +424,10 @@ type SuiteOptions struct {
 	Version               string
 	RepoRoot              string
 	ReportPath            string
+	RawReportPath         string
+	ReportFormat          string
+	ReportTitle           string
+	ReportRunner          string
 	LogPath               string
 	ErrorLogPath          string
 	BrowserLogMode        string
@@ -1395,6 +1453,7 @@ func (sc *StepContext) RunBrowserWithTimeout(timeout time.Duration, actions ...c
 
 func (sc *StepContext) publishBrowserEvent(isError bool, kind, text string) {
 	source := "browser"
+	sc.appendBrowserLog(kind, text, isError)
 	line := fmt.Sprintf("[STEP:%s] [BROWSER][%s] %s", sc.Name, strings.TrimSpace(kind), strings.TrimSpace(text))
 	if isError {
 		logs.ErrorFromTest(source, "%s", line)
@@ -1432,11 +1491,14 @@ func (sc *StepContext) bindBrowserSession(s *BrowserSession) {
 }
 
 type StepResult struct {
-	Step   Step
-	Error  error
-	Result StepRunResult
-	Start  time.Time
-	End    time.Time
+	Step        Step
+	Error       error
+	Result      StepRunResult
+	Start       time.Time
+	End         time.Time
+	Logs        []string
+	Errors      []string
+	BrowserLogs []string
 }
 
 type stackFrame struct {
@@ -1589,12 +1651,16 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 			}
 		}
 
+		stepLogs, stepErrors, browserLogs := stepCtx.snapshotStepLogs()
 		results = append(results, StepResult{
-			Step:   step,
-			Error:  err,
-			Result: result,
-			Start:  stepCtx.Started,
-			End:    time.Now(),
+			Step:        step,
+			Error:       err,
+			Result:      result,
+			Start:       stepCtx.Started,
+			End:         time.Now(),
+			Logs:        stepLogs,
+			Errors:      stepErrors,
+			BrowserLogs: browserLogs,
 		})
 
 		if err != nil {
@@ -1613,7 +1679,7 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 	logs.Info("%s Test Suite Completed in %v", testTag, duration)
 
 	if opts.ReportPath != "" {
-		if genErr := generateReport(opts, results, duration); genErr != nil {
+		if genErr := generateReports(opts, results, duration); genErr != nil {
 			logs.Error("Failed to generate report: %v", genErr)
 		}
 	}
@@ -1771,6 +1837,32 @@ func generateReport(opts SuiteOptions, results []StepResult, totalDuration time.
 		if r.Result.Report != "" {
 			sb.WriteString(fmt.Sprintf("- **Report**: %s\n", r.Result.Report))
 		}
+		if len(r.Logs) > 0 {
+			sb.WriteString("\n#### Logs\n\n```text\n")
+			for _, line := range r.Logs {
+				sb.WriteString(line)
+				sb.WriteString("\n")
+			}
+			sb.WriteString("```\n")
+		}
+		if len(r.Errors) > 0 {
+			sb.WriteString("\n#### Errors\n\n```text\n")
+			for _, line := range r.Errors {
+				sb.WriteString(line)
+				sb.WriteString("\n")
+			}
+			sb.WriteString("```\n")
+		}
+		sb.WriteString("\n#### Browser Logs\n\n```text\n")
+		if len(r.BrowserLogs) == 0 {
+			sb.WriteString("<empty>\n")
+		} else {
+			for _, line := range r.BrowserLogs {
+				sb.WriteString(line)
+				sb.WriteString("\n")
+			}
+		}
+		sb.WriteString("```\n")
 
 		if len(r.Step.Screenshots) > 0 {
 			sb.WriteString("\n#### Screenshots\n\n")
@@ -1784,6 +1876,39 @@ func generateReport(opts SuiteOptions, results []StepResult, totalDuration time.
 	}
 
 	return os.WriteFile(opts.ReportPath, []byte(sb.String()), 0644)
+}
+
+func generateReports(opts SuiteOptions, results []StepResult, totalDuration time.Duration) error {
+	format := strings.ToLower(strings.TrimSpace(opts.ReportFormat))
+	if format != "template" {
+		return generateReport(opts, results, totalDuration)
+	}
+	reportPath := strings.TrimSpace(opts.ReportPath)
+	if reportPath == "" {
+		return nil
+	}
+	rawPath := strings.TrimSpace(opts.RawReportPath)
+	if rawPath == "" {
+		ext := filepath.Ext(reportPath)
+		base := strings.TrimSuffix(reportPath, ext)
+		if ext == "" {
+			rawPath = reportPath + "_RAW.md"
+		} else {
+			rawPath = base + "_RAW" + ext
+		}
+	}
+	rawOpts := opts
+	rawOpts.ReportPath = rawPath
+	rawOpts.ReportFormat = ""
+	rawOpts.RawReportPath = ""
+	if err := generateReport(rawOpts, results, totalDuration); err != nil {
+		return err
+	}
+	return RenderTemplateReport(rawPath, reportPath, TemplateReportOptions{
+		Title:   strings.TrimSpace(opts.ReportTitle),
+		Version: strings.TrimSpace(opts.Version),
+		Runner:  strings.TrimSpace(opts.ReportRunner),
+	})
 }
 
 // Re-export common chromedp things to avoid direct dependency if possible

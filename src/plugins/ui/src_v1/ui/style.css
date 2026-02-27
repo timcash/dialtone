@@ -32,6 +32,12 @@ body {
   -ms-overflow-style: none;
 }
 
+#app {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
 body {
   min-height: 100vh;
 }
@@ -178,8 +184,7 @@ nav > [aria-label='Global Menu Panel'][hidden] {
   visibility: visible;
 }
 
-body.menu-open [data-overlay='mode-form'][data-overlay-active='true'],
-body.menu-open [data-overlay='thumb'][data-overlay-active='true'] {
+body.menu-open [data-overlay='mode-form'][data-overlay-active='true'] {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
@@ -350,9 +355,11 @@ td {
   color: #fff;
 }
 
-/* --- UI V2 STANDARD CLASSES --- */
+/* --- Section Model ---
+   Each section has exactly one underlay (the primary surface),
+   plus optional overlays (menu, header, form, chatlog, statusbar). */
 
-/* Primary Overlay (Underlay) - Fills the section */
+/* Underlay surface (one per section) */
 .overlay-primary,
 .underlay-stage {
   grid-row: 1;
@@ -369,7 +376,7 @@ img.overlay-primary {
   outline: 0;
 }
 
-/* Mode Form - The grid of thumb controls */
+/* Form overlay: 3x3 controls + input/submit row */
 section > form {
   width: min(500px, calc(100vw - 28px));
   max-width: 500px;
@@ -427,7 +434,7 @@ section > form > button:last-of-type {
   grid-column: 3;
 }
 
-/* Legend Overlay - Top Left Info Box */
+/* Header overlay (legend/text styles usually applied by section CSS) */
 .overlay-legend {
   position: absolute;
   top: calc(env(safe-area-inset-top, 0px) + 14px);
