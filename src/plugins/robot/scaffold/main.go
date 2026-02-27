@@ -1173,7 +1173,7 @@ func runRobotSrcV2MenuDiagnostic(uiURL, browserNode, repoRoot string) error {
 	if urlBase == "" {
 		return fmt.Errorf("ui url is empty")
 	}
-	const docsVersionToken = "ROBOT_UI_DOCS_VERSION: robot-src_v2-docs-v3"
+	const docsVersionToken = "ROBOT_UI_DOCS_VERSION: robot-src_v2-docs-v4"
 	reg.Add(test_plugin.Step{
 		Name:    "robot-src-v2-diagnostic-ui-menu",
 		Timeout: 45 * time.Second,
