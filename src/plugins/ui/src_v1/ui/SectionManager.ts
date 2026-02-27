@@ -182,7 +182,7 @@ export class SectionManager {
       primaryEl.setAttribute('data-overlay-section', sectionId);
       overlays.primary = primaryEl;
     }
-    const modeFormSelector = selectors.form ?? selectors.modeForm ?? selectors.thumb;
+    const modeFormSelector = selectors.form ?? selectors.modeForm;
     const modeFormEl = modeFormSelector ? section.querySelector(modeFormSelector) : null;
     if (modeFormEl instanceof HTMLElement) {
       modeFormEl.setAttribute('data-overlay', 'mode-form');

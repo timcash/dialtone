@@ -9,13 +9,16 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"dialtone/dev/plugins/chrome/src_v1/go"
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/chromedp"
+	"github.com/nats-io/nats.go"
 )
 
 type DevOptions struct {
@@ -23,19 +26,40 @@ type DevOptions struct {
 	PluginDir         string
 	UIDir             string
 	DevPort           int
+	DevHost           string
+	DevPublicURL      string
 	Role              string
 	BrowserMetaPath   string
 	BrowserModeEnvVar string // e.g. "DAG_DEV_BROWSER_MODE"
+	NATSURL           string
+	NATSSubject       string
 }
 
 func RunDev(opts DevOptions) error {
 	if opts.DevPort == 0 {
 		opts.DevPort = 3000
 	}
-	devURL := fmt.Sprintf("http://127.0.0.1:%d", opts.DevPort)
+	if strings.TrimSpace(opts.DevHost) == "" {
+		opts.DevHost = "127.0.0.1"
+	}
+	localURL := fmt.Sprintf("http://127.0.0.1:%d", opts.DevPort)
+	devURL := strings.TrimSpace(opts.DevPublicURL)
+	if devURL == "" {
+		devURL = localURL
+	}
 	logOut := os.Stdout
+	devLogger, _ := newDevNATSLogger(opts)
+	defer func() {
+		if devLogger != nil {
+			devLogger.Close()
+		}
+	}()
 	logf := func(format string, args ...any) {
-		fmt.Fprintf(logOut, format+"\n", args...)
+		line := fmt.Sprintf(format, args...)
+		fmt.Fprintf(logOut, "%s\n", line)
+		if devLogger != nil {
+			_ = devLogger.Infof("%s", line)
+		}
 	}
 
 	if _, err := os.Stat(opts.UIDir); os.IsNotExist(err) {
@@ -55,7 +79,7 @@ func RunDev(opts DevOptions) error {
 			return fmt.Errorf("port %d is already in use by a different app; stop it or choose another port", opts.DevPort)
 		}
 
-		logf("   [DEV] Dev server already running at %s", devURL)
+		logf("   [DEV] Dev server already running at %s", localURL)
 		logf("   [DEV] Opening dev URL in regular browser...")
 		if _, err := StartDevBrowser(opts, logOut, devURL); err != nil {
 			return err
@@ -84,7 +108,7 @@ func RunDev(opts DevOptions) error {
 			bunBin = "bun" // Fallback
 		}
 
-		cmd := exec.Command(bunBin, "run", "dev", "--host", "127.0.0.1", "--port", strconv.Itoa(opts.DevPort), "--strictPort")
+		cmd := exec.Command(bunBin, "run", "dev", "--host", opts.DevHost, "--port", strconv.Itoa(opts.DevPort), "--strictPort")
 		cmd.Dir = opts.UIDir
 		cmd.Stdout = logOut
 		cmd.Stderr = logOut
@@ -106,7 +130,7 @@ func RunDev(opts DevOptions) error {
 				return
 			}
 
-			logf("   [DEV] Vite ready at %s", devURL)
+			logf("   [DEV] Vite ready at %s", localURL)
 			logf("   [DEV] Opening dev URL in regular browser...")
 
 			s, err := StartDevBrowser(opts, logOut, devURL)
@@ -174,8 +198,12 @@ func StartDevBrowser(opts DevOptions, logOut io.Writer, devURL string) (*Browser
 	}
 
 	logf("   [DEV] Starting attachable debug-profile browser session.")
-	if err := EnsureAttachableBrowser(opts, logf, devURL); err != nil {
-		return nil, err
+	if strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_NODE")) == "" {
+		if err := EnsureAttachableBrowser(opts, logf, devURL); err != nil {
+			return nil, err
+		}
+	} else {
+		logf("   [DEV] Remote browser node configured; skipping local debug-profile bootstrap.")
 	}
 
 	s, err := StartBrowser(BrowserOptions{
@@ -235,4 +263,45 @@ func EnsureAttachableBrowser(opts DevOptions, logf func(string, ...any), url str
 		time.Sleep(500 * time.Millisecond)
 	}
 	return fmt.Errorf("timed out waiting for debug browser on :9222")
+}
+
+type devNATSLogger struct {
+	conn   *nats.Conn
+	logger *logs.NATSLogger
+}
+
+func newDevNATSLogger(opts DevOptions) (*devNATSLogger, error) {
+	natsURL := strings.TrimSpace(opts.NATSURL)
+	if natsURL == "" {
+		natsURL = "nats://127.0.0.1:4222"
+	}
+	subject := strings.TrimSpace(opts.NATSSubject)
+	if subject == "" {
+		return nil, nil
+	}
+	nc, err := nats.Connect(natsURL, nats.Timeout(600*time.Millisecond), nats.Name("dialtone-test-dev-logger"))
+	if err != nil {
+		return nil, err
+	}
+	logger, err := logs.NewNATSLogger(nc, subject)
+	if err != nil {
+		nc.Close()
+		return nil, err
+	}
+	return &devNATSLogger{conn: nc, logger: logger}, nil
+}
+
+func (d *devNATSLogger) Infof(format string, args ...any) error {
+	if d == nil || d.logger == nil {
+		return nil
+	}
+	return d.logger.InfofFrom("plugins/test/src_v1/go/dev.go", format, args...)
+}
+
+func (d *devNATSLogger) Close() {
+	if d == nil || d.conn == nil {
+		return
+	}
+	_ = d.conn.Drain()
+	d.conn.Close()
 }

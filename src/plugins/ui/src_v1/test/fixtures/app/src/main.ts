@@ -1,133 +1,280 @@
-import { setupApp } from '../../../../ui/ui';
-import '../../../../ui/style.css';
-import './style.css';
+import { setupApp } from "../../../../ui/ui";
+import {
+  getUISharedTemplate,
+  renderUISharedTemplate,
+  type UISharedTemplateID,
+} from "../../../../ui/templates";
+import * as THREE from "three";
+import "../../../../ui/style.css";
+import "./style.css";
 
-function ctl(): { dispose: () => void; setVisible: (visible: boolean) => void } {
+function ctl(): {
+  dispose: () => void;
+  setVisible: (visible: boolean) => void;
+} {
   return {
     dispose: () => {},
-    setVisible: (_visible: boolean) => {}
+    setVisible: (_visible: boolean) => {},
   };
 }
 
-const { sections, menu } = setupApp({ title: 'UI src_v1 Fixture', debug: true });
+function mountSphereScene(canvas: HTMLCanvasElement): {
+  dispose: () => void;
+  setVisible: (visible: boolean) => void;
+} {
+  const renderer = new THREE.WebGLRenderer({
+    canvas,
+    antialias: true,
+    alpha: true,
+  });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setClearColor(0x000000, 1);
 
-sections.register('ui-hero-stage', {
-  containerId: 'ui-hero-stage',
-  load: async () => {
-    const status = document.querySelector("[aria-label='Hero Status']") as HTMLElement | null;
-    if (status) status.setAttribute('data-ready', 'true');
-    return ctl();
-  },
-  overlays: {
-    primaryKind: 'stage',
-    primary: "canvas[aria-label='Hero Canvas']",
-    legend: "[aria-label='Hero Status']"
-  }
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+  camera.position.set(0, 0.3, 3.2);
+
+  const sphere = new THREE.Mesh(
+    new THREE.SphereGeometry(0.95, 48, 32),
+    new THREE.MeshStandardMaterial({
+      color: 0x6fa8ff,
+      roughness: 0.35,
+      metalness: 0.08,
+    }),
+  );
+  scene.add(sphere);
+
+  const ground = new THREE.Mesh(
+    new THREE.CircleGeometry(2.2, 48),
+    new THREE.MeshStandardMaterial({
+      color: 0x0d1522,
+      roughness: 0.9,
+      metalness: 0.02,
+    }),
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -1.12;
+  scene.add(ground);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+  const key = new THREE.DirectionalLight(0xffffff, 1.2);
+  key.position.set(2.2, 2.8, 2.4);
+  scene.add(key);
+
+  const rim = new THREE.PointLight(0x89b8ff, 0.8, 12);
+  rim.position.set(-2.2, 0.8, -1.8);
+  scene.add(rim);
+
+  const clock = new THREE.Clock();
+  let raf = 0;
+  let active = true;
+
+  const resize = () => {
+    const width = Math.max(
+      1,
+      canvas.clientWidth || canvas.parentElement?.clientWidth || 1,
+    );
+    const height = Math.max(
+      1,
+      canvas.clientHeight || canvas.parentElement?.clientHeight || 1,
+    );
+    renderer.setSize(width, height, false);
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+  };
+
+  const tick = () => {
+    if (!active) return;
+    raf = window.requestAnimationFrame(tick);
+    const t = clock.getElapsedTime();
+    sphere.rotation.y = t * 0.45;
+    sphere.rotation.x = Math.sin(t * 0.25) * 0.06;
+    renderer.render(scene, camera);
+  };
+
+  const ro = new ResizeObserver(() => resize());
+  ro.observe(canvas);
+  resize();
+  tick();
+
+  return {
+    dispose: () => {
+      active = false;
+      if (raf) window.cancelAnimationFrame(raf);
+      ro.disconnect();
+      sphere.geometry.dispose();
+      (sphere.material as THREE.Material).dispose();
+      ground.geometry.dispose();
+      (ground.material as THREE.Material).dispose();
+      renderer.dispose();
+    },
+    setVisible: (visible: boolean) => {
+      if (visible) {
+        if (active) return;
+        active = true;
+        resize();
+        tick();
+      } else {
+        active = false;
+        if (raf) window.cancelAnimationFrame(raf);
+      }
+    },
+  };
+}
+
+const { sections, menu } = setupApp({
+  title: "UI src_v1 Fixture",
+  debug: true,
 });
 
-sections.register('ui-docs-docs', {
-  containerId: 'ui-docs-docs',
-  load: async () => ctl(),
-  overlays: {
-    primaryKind: 'docs',
-    primary: "[aria-label='Docs Content']"
-  }
-});
+const sectionIDs: UISharedTemplateID[] = [
+  "hero",
+  "three-fullscreen",
+  "three-calculator",
+  "table",
+  "camera",
+  "docs",
+  "terminal",
+  "settings",
+];
 
-sections.register('ui-meta-table', {
-  containerId: 'ui-meta-table',
-  load: async () => {
-    const status = document.querySelector("[aria-label='Table Status']") as HTMLElement | null;
-    const refresh = document.querySelector("button[aria-label='Table Thumb 1']") as HTMLButtonElement | null;
-    if (refresh && !refresh.dataset.bound) {
-      refresh.dataset.bound = '1';
-      refresh.addEventListener('click', () => {
-        if (status) {
-          status.setAttribute('data-state', 'refreshed');
-          status.textContent = 'refreshed';
-        }
-        console.log('table-refreshed');
+const sectionModes = new Map<UISharedTemplateID, "fullscreen" | "calculator">();
+
+function applyMode(
+  sectionId: UISharedTemplateID,
+  mode: "fullscreen" | "calculator",
+): void {
+  const section = document.getElementById(sectionId);
+  if (!section) return;
+  section.classList.remove("fullscreen", "calculator");
+  section.classList.add(mode);
+  sectionModes.set(sectionId, mode);
+}
+
+function toggleModeFor(sectionId: UISharedTemplateID): void {
+  const current =
+    sectionModes.get(sectionId) ?? getUISharedTemplate(sectionId).defaultMode;
+  const next = current === "fullscreen" ? "calculator" : "fullscreen";
+  applyMode(sectionId, next);
+  console.log(`mode-toggle:${sectionId}:${next}`);
+}
+
+function activeSectionId(): UISharedTemplateID {
+  const id = sections.getActiveSectionId() as UISharedTemplateID | null;
+  if (id && sectionIDs.includes(id)) return id;
+  return "hero";
+}
+
+function bindInteractions(
+  sectionId: UISharedTemplateID,
+  container: HTMLElement,
+): void {
+  if (container.dataset.bound === "1") return;
+  container.dataset.bound = "1";
+
+  const modeButton = Array.from(container.querySelectorAll("button")).find(
+    (b) => b.textContent?.trim().toLowerCase() === "mode",
+  );
+  if (modeButton) {
+    modeButton.addEventListener("click", () => toggleModeFor(sectionId));
+  }
+
+  if (sectionId === "table") {
+    const refresh = container.querySelector(
+      "button.table-refresh",
+    ) as HTMLButtonElement | null;
+    const status = container.querySelector(
+      "dd.table-status",
+    ) as HTMLElement | null;
+    if (refresh && status) {
+      refresh.addEventListener("click", () => {
+        status.textContent = "refreshed";
+        console.log("table-refreshed");
       });
     }
-    return ctl();
-  },
-  overlays: {
-    primaryKind: 'table',
-    primary: "table[aria-label='UI Table']",
-    modeForm: "form[data-mode-form='table']",
-    statusBar: "[aria-label='Table Status']"
   }
-});
 
-sections.register('ui-three-stage', {
-  containerId: 'ui-three-stage',
-  load: async () => {
-    const countEl = document.querySelector("[aria-label='Three Count']") as HTMLElement | null;
-    const add = document.querySelector("button[aria-label='Three Add']") as HTMLButtonElement | null;
-    if (add && !add.dataset.bound) {
-      add.dataset.bound = '1';
-      add.addEventListener('click', () => {
-        const curr = Number(countEl?.getAttribute('data-count') || '0');
-        const next = curr + 1;
-        if (countEl) {
-          countEl.setAttribute('data-count', String(next));
-          countEl.textContent = String(next);
+  if (sectionId === "three-calculator") {
+    const add = container.querySelector(
+      "button.three-add",
+    ) as HTMLButtonElement | null;
+    if (add) {
+      add.addEventListener("click", () => console.log("three-add:1"));
+    }
+  }
+
+  if (sectionId === "terminal") {
+    const send = container.querySelector(
+      "button.terminal-send",
+    ) as HTMLButtonElement | null;
+    const input = container.querySelector("input") as HTMLInputElement | null;
+    const pre = container.querySelector("pre") as HTMLElement | null;
+    const status = container.querySelector(
+      "dd.terminal-status",
+    ) as HTMLElement | null;
+    const run = () => {
+      const value = (input?.value || "").trim();
+      if (!value || !pre) return;
+      pre.textContent += `log> ${value}\n`;
+      if (status) status.textContent = value;
+      console.log(`log-submit:${value}`);
+      if (input) input.value = "";
+    };
+    if (send) send.addEventListener("click", run);
+    if (input) {
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          run();
         }
-        console.log(`three-add:${next}`);
       });
     }
-    return ctl();
-  },
-  overlays: {
-    primaryKind: 'stage',
-    primary: "canvas[aria-label='Three Canvas']",
-    modeForm: "form[data-mode-form='three']",
-    statusBar: "[aria-label='Three Count']"
   }
+}
+
+for (const sectionId of sectionIDs) {
+  const template = getUISharedTemplate(sectionId);
+  sections.register(sectionId, {
+    containerId: sectionId,
+    load: async () => {
+      const container = document.getElementById(sectionId);
+      if (!container) throw new Error(`${sectionId} container not found`);
+      renderUISharedTemplate(container, sectionId);
+      applyMode(sectionId, template.defaultMode);
+      bindInteractions(sectionId, container);
+      const canvas = container.querySelector("canvas");
+      if (canvas instanceof HTMLCanvasElement) {
+        return mountSphereScene(canvas);
+      }
+      return ctl();
+    },
+    overlays: template.overlays,
+  });
+
+  menu.addButton(template.title, `Navigate ${template.title}`, () =>
+    sections.navigateTo(sectionId),
+  );
+}
+
+menu.addButton("Layout", "Toggle Layout Mode", () => {
+  toggleModeFor(activeSectionId());
 });
 
-sections.register('ui-log-xterm', {
-  containerId: 'ui-log-xterm',
-  load: async () => {
-    const terminal = document.querySelector("[aria-label='Log Terminal']") as HTMLElement | null;
-    const input = document.querySelector("input[aria-label='Log Input']") as HTMLInputElement | null;
-    if (input && !input.dataset.bound) {
-      input.dataset.bound = '1';
-      input.addEventListener('keydown', (event) => {
-        if (event.key !== 'Enter') return;
-        const val = (input.value || '').trim();
-        if (terminal) {
-          terminal.setAttribute('data-last', val);
-          terminal.textContent = val;
-        }
-        console.log(`log-submit:${val}`);
-      });
-    }
-    return ctl();
-  },
-  overlays: {
-    primaryKind: 'xterm',
-    primary: "[aria-label='Log Terminal']"
-  }
+window.addEventListener("keydown", (event) => {
+  if (event.defaultPrevented) return;
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  if (event.key.toLowerCase() !== "m") return;
+  const target = event.target as HTMLElement | null;
+  if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
+    return;
+  event.preventDefault();
+  toggleModeFor(activeSectionId());
 });
 
-sections.register('ui-demo-video', {
-  containerId: 'ui-demo-video',
-  load: async () => ctl(),
-  overlays: {
-    primaryKind: 'video',
-    primary: "video[aria-label='Test Video']"
-  }
-});
-
-menu.addButton('Hero', 'Navigate Hero', () => sections.navigateTo('ui-hero-stage'));
-menu.addButton('Docs', 'Navigate Docs', () => sections.navigateTo('ui-docs-docs'));
-menu.addButton('Table', 'Navigate Table', () => sections.navigateTo('ui-meta-table'));
-menu.addButton('Stage', 'Navigate Stage', () => sections.navigateTo('ui-three-stage'));
-menu.addButton('Log', 'Navigate Log', () => sections.navigateTo('ui-log-xterm'));
-menu.addButton('Video', 'Navigate Video', () => sections.navigateTo('ui-demo-video'));
-
-const initial = (window.location.hash || '#ui-hero-stage').slice(1);
-sections.navigateTo(initial || 'ui-hero-stage').catch((err) => {
-  console.error('[ui-fixture] initial navigation failed', err);
+const initialRaw = (window.location.hash || "#hero").slice(1);
+const initial = sectionIDs.includes(initialRaw as UISharedTemplateID)
+  ? (initialRaw as UISharedTemplateID)
+  : "hero";
+void sections.navigateTo(initial).catch((err) => {
+  console.error("[ui-fixture] initial navigation failed", err);
 });

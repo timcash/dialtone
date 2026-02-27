@@ -1,314 +1,160 @@
 # Test Plugin (`src/plugins/test`)
 
-The test plugin is a reusable Go test runtime for plugin-level integration tests.
+Reusable test runtime for plugin integration tests.
 
-```sh
-# 1) Run the canonical source-of-truth suite
-./dialtone.sh test src_v1 test
-
-# 2) Stream all test logs (raw)
-./dialtone.sh logs src_v1 stream --topic 'logs.test.src-v1-self-check.>'
-
-# 3) Stream only pass/fail status lines
-./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.pass.test'
-./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.fail.test'
-
-# 4) Stream browser console/error events from test steps
-./dialtone.sh logs src_v1 stream --topic 'logs.test.src-v1-self-check.*.browser'
-```
-
-It provides:
-- suite/step orchestration (`RunSuite`)
-- browser helpers used by UI plugin tests
-- process/dev helpers
-- built-in logging via the `logs` plugin
-
-## CLI
+## Bash Workflows
 
 ```bash
-./dialtone.sh test help
+# Run test plugin self-check suite (reference implementation)
 ./dialtone.sh test src_v1 test
+
+# Run UI suite local/headless
+./dialtone.sh ui src_v1 test
+
+# Run UI suite attached to a remote headed browser
+./dialtone.sh ui src_v1 test --attach chroma
+
+# Stream all suite logs for one plugin
+./dialtone.sh logs src_v1 stream --topic 'logs.test.ui.src-v1.>'
+
+# Stream browser-only events for one suite
+./dialtone.sh logs src_v1 stream --topic 'logs.test.ui.src-v1.*.browser'
+
+# Stream pass/fail tags across suites
+./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.pass.>'
+./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.fail.>'
 ```
 
-`./dialtone.sh test src_v1 test` runs the test plugin self-check suite at:
-- `src/plugins/test/src_v1/test/cmd/main.go`
-
-`test src_v1 test` is the source-of-truth template suite for other plugins and LLM agents.
-Each numbered test folder demonstrates one integration area:
-- `01_self_check`: StepContext logging + NATS waits (`step`, `error`, format)
-- `02_example_plugin_template`: minimal plugin template + browser helper entry path
-- `03_browser_ctx`: local UI flow, aria waits, aria clicks, input type+enter, coordinate click/tap, browser-log waits via NATS
-- `04_nats_wait_patterns`: `NATSConn/NATSURL`, `ResetStepLogClock`, `WaitForMessage`, `WaitForMessageAfterAction`, `WaitForAllMessagesAfterAction`, custom topics
-- `05_browser_lifecycle_options`: browser options + shared suite browser lifecycle across steps
-
-## Quick Integration For Another Plugin
-
-Use this pattern in your plugin's `src_vN/test/`:
+Minimal plugin layout:
 
 ```text
 src/plugins/<plugin>/src_v1/test/
   cmd/main.go
   01_smoke/suite.go
+  02_browser/suite.go
 ```
 
-`cmd/main.go` (single process orchestrator):
+Minimal orchestrator:
 
 ```go
-package main
-
-import (
-	"os"
-
-	logs "dialtone/dev/plugins/logs/src_v1/go"
-	testv1 "dialtone/dev/plugins/test/src_v1/go"
-	smoke "dialtone/dev/plugins/<plugin>/src_v1/test/01_smoke"
-)
-
-func main() {
-	logs.SetOutput(os.Stdout)
-	reg := testv1.NewRegistry()
-	smoke.Register(reg)
-
-	err := reg.Run(testv1.SuiteOptions{
-		Version:       "<plugin>-src-v1",
-		NATSURL:       "nats://127.0.0.1:4222",
-		NATSSubject:   "logs.test.<plugin>-src-v1",
-		AutoStartNATS: true,
-	})
-	if err != nil {
-		logs.Error("suite failed: %v", err)
-		os.Exit(1)
-	}
-}
+reg := testv1.NewRegistry()
+smoke.Register(reg)
+browser.Register(reg)
+err := reg.Run(testv1.SuiteOptions{
+  Version:       "<plugin>-src-v1",
+  NATSURL:       "nats://127.0.0.1:4222",
+  NATSSubject:   "logs.test.<plugin>-src-v1",
+  AutoStartNATS: true,
+})
 ```
 
-`01_smoke/suite.go` (action -> wait):
+## StepContext
+
+Use `StepContext` only; avoid plugin-local test context wrappers.
+
+Common methods:
+- logging: `Infof`, `Warnf`, `Errorf`, `TestPassf`, `TestFailf`
+- wait helpers: `WaitForStepMessage*`, `WaitForBrowserMessage*`, `WaitForErrorMessage*`
+- browser: `EnsureBrowser`, `RunBrowser`, `RunBrowserWithTimeout`
+- aria helpers: `WaitForAriaLabel`, `ClickAriaLabel`, `TypeAriaLabel`, `PressEnterAriaLabel`
+- misc: `WaitForConsoleContains`, `ClickAt`, `TapAt`, `ResetStepLogClock`, `RepoRoot`
+
+UI-style step pattern:
 
 ```go
-package smoke
-
-import (
-	"time"
-
-	testv1 "dialtone/dev/plugins/test/src_v1/go"
-)
-
-func Register(reg *testv1.Registry) {
-	reg.Add(testv1.Step{
-		Name: "smoke-action-wait",
-		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
-			if err := ctx.WaitForStepMessageAfterAction("did-action", 5*time.Second, func() error {
-				ctx.Infof("[SMOKE] did-action")
-				return nil
-			}); err != nil {
-				return testv1.StepRunResult{}, err
-			}
-			return testv1.StepRunResult{Report: "smoke verified"}, nil
-		},
-	})
-}
-```
-
-Run:
-
-```bash
-./dialtone.sh <plugin> src_v1 test
-```
-
-## Test Folder Naming
-
-Use numbered entries under each plugin's `src_vN/test/` folder:
-- format: `NN_name` (two-digit prefix)
-- examples: `01_self_check`, `02_example_plugin_template`, `03_browser_smoke`
-- keep shared docs/files at top-level only when they are not executable test cases
-
-`src/plugins/test/src_v1/test/` is the reference layout for how to test a plugin that imports this test library:
-- `src/plugins/test/src_v1/test/cmd/main.go`: single-process suite orchestrator
-- `src/plugins/test/src_v1/test/01_self_check/suite.go`: self-check step registration
-- `src/plugins/test/src_v1/test/02_example_plugin_template/suite.go`: copyable step registration template
-- `src/plugins/test/src_v1/test/03_browser_ctx/suite.go`: browser ctx + aria + console/NATS waits
-- `src/plugins/test/src_v1/test/04_nats_wait_patterns/suite.go`: wait-pattern coverage
-- `src/plugins/test/src_v1/test/05_browser_lifecycle_options/suite.go`: shared browser + options coverage
-- `src/plugins/test/src_v1/test/TEMPLATE.md`: template instructions for other plugins
-
-Pattern:
-- each `NN_name` folder exports registration functions (no `main.go` required in subfolders)
-- one orchestrator in `test/cmd/main.go` imports each folder and runs all registered steps in one process
-- plugin tests should not define their own `test_ctx` type; use `testv1.StepContext` from the test library
-
-## Library Entry
-
-Import path:
-- `dialtone/dev/plugins/test/src_v1/go`
-
-Core files:
-- `src/plugins/test/src_v1/go/test.go`
-- `src/plugins/test/src_v1/go/dev.go`
-- `src/plugins/test/src_v1/go/ops.go`
-- `src/plugins/test/src_v1/go/browser_actions.go`
-
-## Core Types
-
-- `Step`
-  - `Name`
-  - `RunWithContext func(*StepContext) (StepRunResult, error)`
-  - `Timeout`
-  - optional screenshot/section fields
-- `StepContext`
-  - `Name`, `Started`, `Session`, `LogWriter`
-  - `SuiteSubject`, `StepSubject`, `ErrorSubject`
-  - `Logf(format, ...)` (alias of `Infof`)
-  - `Infof(format, ...)`
-  - `Warnf(format, ...)`
-  - `Debugf(format, ...)`
-  - `Errorf(format, ...)`
-  - `WaitForMessage(subject, pattern, timeout)`
-  - `WaitForStepMessage(pattern, timeout)`
-  - `WaitForBrowserMessage(pattern, timeout)`
-  - `WaitForErrorMessage(pattern, timeout)`
-  - `WaitForErrorMessageAfterAction(pattern, timeout, action)`
-  - `WaitForBrowserMessageAfterAction(pattern, timeout, action)`
-  - `EnsureBrowser(BrowserOptions)` / `AttachBrowserByPort(...)` / `AttachBrowserByWebSocket(...)`
-  - `Browser()` / `CloseBrowser()`
-- `RunBrowser(actions...)` / `RunBrowserWithTimeout(timeout, actions...)`
-  - `WaitForAriaLabel(...)` / `ClickAriaLabel(...)` / `TypeAriaLabel(...)` / `PressEnterAriaLabel(...)`
-- `ClickAriaLabelAfterWait(label, timeout)`
-
-Remote browser fallback:
-- set `DIALTONE_TEST_BROWSER_NODE=<mesh-node>` (for example `chroma`, `darkmac`, `legion`)
-- when local Chrome launch fails, `EnsureBrowser` will use `ssh src_v1` mesh routing to start/reuse remote Chrome and attach over tailnet
-- on WSL targeting `legion`, transport fallback uses local `powershell.exe` automatically through the `ssh` plugin
-  - `ClickAt(x, y)` / `TapAt(x, y)` (coordinate interactions)
-  - `WaitForAriaLabelAttrEquals(...)`
-  - `WaitForConsoleContains(...)`
-  - `TestPassf(format, ...)`
-  - `TestFailf(format, ...)`
-  - `ResetStepLogClock()`
-- `StepRunResult`
-  - `Report string`
-- `SuiteOptions`
-  - `Version`, `ReportPath`, `LogPath`, `ErrorLogPath`
-  - `NATSURL`, `NATSSubject`, `AutoStartNATS`
-
-## Logging + NATS Behavior
-
-The test plugin now uses `logs` plugin (`src/plugins/logs/src_v1/go`) as its logging backend.
-
-`RunSuite(...)` behavior:
-- emits suite and step logs through `logs`
-- sets up NATS-backed suite logging
-- auto-starts embedded NATS when needed
-- creates step-scoped topic publishing via `StepContext`
-
-Topic pattern used by step context logs:
-- `logs.test.<suite-version>.<step-name-token>`
-
-Inside step code, use only `ctx` methods (no direct `logs` import needed in test step files):
-- `ctx.Infof("...")` / `ctx.Logf("...")`
-- `ctx.Warnf("...")`
-- `ctx.Errorf("...")`
-- `ctx.WaitForStepMessage("expected text", 5*time.Second)`
-- `ctx.Errorf(...)` also emits to `ctx.ErrorSubject` for suite-level error monitoring
-- `ctx.WaitForErrorMessage("expected error", 5*time.Second)` to assert error-topic behavior
-
-Rendered log lines follow the shared logs format:
-- `[T+0000s|LEVEL|src/path/file.go:line] message`
-
-Status tags:
-- framework emits `[TEST][PASS]` for successful step completion
-- framework emits `[TEST][FAIL]` for failed/timed-out/panic steps
-- these can be streamed via:
-  - `./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.pass.>'`
-  - `./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.fail.>'`
-
-## Template For Other Plugins / Agents
-
-Copyable example:
-- `src/plugins/test/src_v1/test/02_example_plugin_template/suite.go`
-- `src/plugins/test/src_v1/test/TEMPLATE.md`
-
-This template shows how another plugin can:
-1. import the test library
-2. define steps
-3. use `ctx` logging methods (`Infof/Warnf/Errorf`) and wait helpers
-4. run `RunSuite(...)` with NATS settings
-
-Example step pattern (no `logs` import needed inside step files):
-
-```go
-{
-  Name: "my-step",
+reg.Add(testv1.Step{
+  Name:    "ui-menu-nav",
+  Timeout: 20 * time.Second,
   RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
-    err := ctx.WaitForStepMessageAfterAction("did-action", 5*time.Second, func() error {
-      ctx.Infof("did-action")
-      return nil
+    _, err := ctx.EnsureBrowser(testv1.BrowserOptions{
+      Headless: true,
+      GPU:      false,
+      Role:     "ui-test",
+      URL:      "http://127.0.0.1:5177/#hero",
     })
     if err != nil {
       return testv1.StepRunResult{}, err
     }
-    return testv1.StepRunResult{Report: "verified"}, nil
+    if err := ctx.ClickAriaLabelAfterWait("Toggle Global Menu", 8*time.Second); err != nil {
+      return testv1.StepRunResult{}, err
+    }
+    if err := ctx.ClickAriaLabelAfterWait("Navigate Docs", 8*time.Second); err != nil {
+      return testv1.StepRunResult{}, err
+    }
+    return testv1.StepRunResult{Report: "menu navigation verified"}, nil
   },
-}
-```
-
-Browser-ready pattern (no plugin-local browser context needed):
-
-```go
-b, err := ctx.EnsureBrowser(testv1.BrowserOptions{
-  Headless: true,
-  GPU:      false,
-  Role:     "test",
-  URL:      "data:text/html,<button aria-label='Go' onclick=\"console.log('ok')\">Go</button>",
 })
-if err != nil {
-  return testv1.StepRunResult{}, err
-}
-
-if err := ctx.WaitForAriaLabel("Go", 10*time.Second); err != nil {
-  return testv1.StepRunResult{}, err
-}
-if err := ctx.ClickAriaLabel("Go"); err != nil {
-  return testv1.StepRunResult{}, err
-}
-if err := ctx.WaitForConsoleContains("ok", 5*time.Second); err != nil {
-  return testv1.StepRunResult{}, err
-}
-_ = b // direct chromedp access still available when needed
 ```
 
-Browser lifecycle model:
-- the test orchestrator owns one shared main browser tab for the full suite
-- each step receives that browser via `StepContext`
-- if a step opens extra tabs, the orchestrator closes extra tabs before/after the next step
-- individual steps should not call `CloseBrowser()` for suite-owned sessions
-- orchestrator closes the shared browser at suite end
+Remote browser behavior:
+- default is local/headless unless caller passes explicit attach options
+- set `DIALTONE_TEST_BROWSER_NODE=<node>` or pass plugin-level `--attach <node>`
+- when attach is active, browser console/error events are still routed through test logger + NATS
 
-Timeout behavior (fails step when aria-label is not found in time):
+## Logs + NATS
+
+`RunSuite(...)` wires `logs/src_v1` and NATS topics automatically.
+
+Topic shape:
+- suite base: `logs.test.<version-token>`
+- step logs: `logs.test.<version-token>.<step-token>`
+- step browser logs: `logs.test.<version-token>.<step-token>.browser`
+- suite error topic: `logs.test.<version-token>.error`
+
+Notes:
+- `Infof/Warnf/Errorf` publish to step topic and are included in final report
+- browser console/exception hooks publish to `.browser` topic and are included in final report
+- pass/fail status tags emit for each step and can be streamed via `logfilter.tag.pass.*` / `logfilter.tag.fail.*`
+
+Small wait pattern:
 
 ```go
-if err := ctx.WaitForAriaLabel("Missing Button", 2*time.Second); err != nil {
-  return testv1.StepRunResult{}, err // test step fails here
-}
+err := ctx.WaitForStepMessageAfterAction("did-action", 5*time.Second, func() error {
+  ctx.Infof("did-action")
+  return nil
+})
 ```
 
-Coordinate click/tap pattern:
+## TEST.md
+
+`test/src_v1` owns report generation. Plugin tests should not hand-roll markdown.
+
+Recommended `SuiteOptions` for template reports:
+- `ReportPath`: final markdown path (for example `plugins/ui/src_v1/test/TEST.md`)
+- `RawReportPath`: intermediate raw markdown path
+- `ReportFormat`: `template`
+- `ReportTitle`: report title
+- `ReportRunner`: runner label
+
+Generation flow:
+1. suite run writes raw step status data
+2. template renderer converts raw markdown to final `TEST.md`
+3. each step includes:
+- `### Results`
+- `### Logs`
+- `### Errors`
+- `### Browser Logs`
+- `### Screenshots`
+
+Screenshot behavior (as used by UI tests):
+- screenshot paths come from each step's `Screenshots` list
+- when multiple screenshots are present for one step, they are rendered in a grid-style table
+- links are normalized relative to the report file location
+
+Example config:
 
 ```go
-var pt []float64
-err := ctx.RunBrowser(chromedp.Evaluate(`(() => {
-  const el = document.querySelector("[aria-label='Tap Area']");
-  const r = el.getBoundingClientRect();
-  return [Math.floor(r.left + r.width/2), Math.floor(r.top + r.height/2)];
-})()`, &pt))
-if err != nil {
-  return testv1.StepRunResult{}, err
-}
-if err := ctx.ClickAt(pt[0], pt[1]); err != nil {
-  return testv1.StepRunResult{}, err
-}
-if err := ctx.TapAt(pt[0], pt[1]); err != nil {
-  return testv1.StepRunResult{}, err
-}
+err := reg.Run(testv1.SuiteOptions{
+  Version:       "ui-src-v1",
+  ReportPath:    "plugins/ui/src_v1/test/TEST.md",
+  RawReportPath: "plugins/ui/src_v1/test/TEST_RAW.md",
+  ReportFormat:  "template",
+  ReportTitle:   "UI Plugin src_v1 Test Report",
+  ReportRunner:  "test/src_v1",
+  NATSURL:       "nats://127.0.0.1:4222",
+  NATSSubject:   "logs.test.ui.src-v1",
+  AutoStartNATS: true,
+})
 ```
 
 Browser console logs through NATS (and wait for them):

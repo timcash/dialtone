@@ -20,7 +20,6 @@ export class Menu {
       this.panel.setAttribute('aria-label', 'Global Menu Panel');
       this.root.appendChild(this.panel);
     }
-    this.panel.classList.add('menu-grid');
 
     const toggle = document.createElement('button');
     toggle.type = 'button';
