@@ -110,17 +110,30 @@ Each field must include evidence:
 - Run UI locally with mock server and mock `/natsws` data.
 - Validate critical UI paths and state updates.
 - Record result:
-  - status:
+  - status: done
   - commands:
+    - `DIALTONE_TEST_BROWSER_NODE=chroma ./dialtone.sh robot src_v2 test`
   - artifacts:
+    - `src/plugins/robot/src_v2/test/TEST.md` (all 5 steps passed)
+    - Browser console evidence in test output includes:
+      - `Connecting to ws://legion-wsl-1.shad-artichoke.ts.net:18083/natsws...`
+      - `Connected.`
+      - menu navigation actions + section activation checks
+      - `mock nats publish ok`
 
 ### E2E-2 Local UI + Remote Robot `/natsws`
 - Run UI locally, connect to remote robot/repl `/natsws` feed.
 - Validate live camera + mavlink data rendering from remote source.
 - Record result:
-  - status:
+  - status: done
   - commands:
+    - `DIALTONE_TEST_BROWSER_NODE=chroma DIALTONE_TEST_BROWSER_BASE_URL=https://rover-1.dialtone.earth ./dialtone.sh robot src_v2 test`
   - artifacts:
+    - `src/plugins/robot/src_v2/test/TEST.md` (all 5 steps passed)
+    - Browser console evidence in test output includes:
+      - `Connecting to wss://rover-1.dialtone.earth/natsws...`
+      - `Connected.`
+      - full section/menu traversal + aria checks passed
 
 ## Release Gate
 `src_v2` is not ready unless all task sign-offs are complete and both mandatory UI E2E scenarios pass.

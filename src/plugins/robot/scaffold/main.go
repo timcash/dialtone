@@ -1,15 +1,21 @@
 package main
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	ssh_plugin "dialtone/dev/plugins/ssh/src_v1/go"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	bun_plugin "dialtone/dev/plugins/bun/src_v1/go"
 	go_plugin "dialtone/dev/plugins/go/src_v1/go"
@@ -17,6 +23,7 @@ import (
 	robot_cli "dialtone/dev/plugins/robot/src_v1/cmd/cli"
 	robot_ops "dialtone/dev/plugins/robot/src_v1/cmd/ops"
 	test_plugin "dialtone/dev/plugins/test/src_v1/go"
+	"github.com/chromedp/chromedp"
 )
 
 func main() {
@@ -184,6 +191,11 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 		return robot_cli.RunSyncCode(version, args)
 	case "sync-watch":
 		return robot_cli.RunSyncWatch(version, args)
+	case "relay":
+		if version != "src_v2" {
+			return fmt.Errorf("relay is currently supported only for robot src_v2")
+		}
+		return runSrcV2Relay(repoRoot, args)
 	case "publish":
 		if version != "src_v2" {
 			return fmt.Errorf("publish is currently supported only for robot src_v2")
@@ -194,6 +206,11 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 			return fmt.Errorf("diagnostic is currently supported only for robot src_v2")
 		}
 		return runSrcV2Diagnostic(repoRoot, args)
+	case "clean":
+		if version != "src_v2" {
+			return fmt.Errorf("clean is currently supported only for robot src_v2")
+		}
+		return runSrcV2Clean(args)
 	default:
 		return fmt.Errorf("unknown robot command: %s", command)
 	}
@@ -244,20 +261,189 @@ func printUsage() {
 	logs.Raw("  deploy       Build and deploy robot service to ROBOT_HOST")
 	logs.Raw("  sync-code    Sync minimal robot source tree to remote host for on-device build/test")
 	logs.Raw("  sync-watch   Start/stop/status continuous source sync loop to remote host")
-	logs.Raw("  publish      Build/publish robot src_v2 composition artifacts and optionally start on robot")
+	logs.Raw("  relay       Configure local Cloudflare relay for robot src_v2 UI (rover-1.dialtone.earth)")
+	logs.Raw("  publish      Build/publish robot src_v2 composition artifacts to GitHub release only")
 	logs.Raw("  diagnostic   Verify robot src_v2 composition binaries/processes/endpoints")
+	logs.Raw("  clean        Remove remote dialtone source + autoswap services/artifacts/manifests")
 	logs.Raw("  deploy-test  Run step-by-step verification on remote robot")
 	logs.Raw("  diagnostic   Run UI and connectivity diagnostics")
 	logs.Raw("  vpn-test     Test Tailscale connectivity")
 }
 
+func runSrcV2Relay(repoRoot string, args []string) error {
+	fs := flag.NewFlagSet("robot-src-v2-relay", flag.ContinueOnError)
+	subdomain := fs.String("subdomain", "", "Cloudflare relay subdomain (default: DIALTONE_DOMAIN/DIALTONE_HOSTNAME/rover-1)")
+	robotUIURL := fs.String("robot-ui-url", "", "Robot UI URL target for relay (overrides --host/--port)")
+	// Backward-compatible aliases.
+	name := fs.String("name", "", "Deprecated alias for --subdomain")
+	url := fs.String("url", "", "Deprecated alias for --robot-ui-url")
+	host := fs.String("host", "rover-1", "Robot host for relay target")
+	port := fs.String("port", "18086", "Robot web port for relay target")
+	service := fs.Bool("service", true, "Install/restart local systemd user relay service")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	targetURL := strings.TrimSpace(*robotUIURL)
+	if targetURL == "" {
+		targetURL = strings.TrimSpace(*url)
+	}
+	if targetURL == "" {
+		h := strings.TrimSpace(*host)
+		p := strings.TrimSpace(*port)
+		if h == "" {
+			return fmt.Errorf("relay requires --host unless --url is provided")
+		}
+		if p == "" {
+			p = "18086"
+		}
+		targetURL = fmt.Sprintf("http://%s:%s", h, p)
+	}
+
+	relayName := strings.TrimSpace(*subdomain)
+	if relayName == "" {
+		relayName = strings.TrimSpace(*name)
+	}
+	if relayName == "" {
+		relayName = strings.TrimSpace(os.Getenv("DIALTONE_DOMAIN"))
+	}
+	if relayName == "" {
+		relayName = strings.TrimSpace(os.Getenv("DIALTONE_HOSTNAME"))
+	}
+	if relayName == "" {
+		relayName = "rover-1"
+	}
+
+	prevDomain, hadDomain := os.LookupEnv("DIALTONE_DOMAIN")
+	if err := os.Setenv("DIALTONE_DOMAIN", relayName); err != nil {
+		return err
+	}
+	defer func() {
+		if hadDomain {
+			_ = os.Setenv("DIALTONE_DOMAIN", prevDomain)
+		} else {
+			_ = os.Unsetenv("DIALTONE_DOMAIN")
+		}
+	}()
+
+	if *service {
+		if err := robot_ops.Wake(repoRoot, []string{"--url", targetURL}); err != nil {
+			return err
+		}
+		logs.Info("robot src_v2 relay service active: dialtone-proxy-%s.service", relayName)
+	} else {
+		if err := runDialtone(repoRoot, "cloudflare", "robot", "--name", relayName, "--url", targetURL); err != nil {
+			return err
+		}
+	}
+	logs.Info("robot src_v2 relay active: https://%s.dialtone.earth -> %s", relayName, targetURL)
+	return nil
+}
+
+func runSrcV2Clean(args []string) error {
+	fs := flag.NewFlagSet("robot-src-v2-clean", flag.ContinueOnError)
+	host := fs.String("host", "", "Mesh node alias/hostname to clean")
+	user := fs.String("user", "", "SSH user override (defaults to mesh user)")
+	port := fs.String("port", "", "SSH port override (defaults to mesh port)")
+	password := fs.String("pass", "", "SSH password (optional; key auth preferred)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	target := strings.TrimSpace(*host)
+	if target == "" {
+		return fmt.Errorf("clean requires --host")
+	}
+	node, err := ssh_plugin.ResolveMeshNode(target)
+	if err != nil {
+		return fmt.Errorf("clean requires mesh --host value: %w", err)
+	}
+	if node.OS == "windows" {
+		return fmt.Errorf("clean currently supports linux/macos targets only; got windows node %q", node.Name)
+	}
+	opts := ssh_plugin.CommandOptions{
+		User:     strings.TrimSpace(*user),
+		Port:     strings.TrimSpace(*port),
+		Password: *password,
+	}
+	cleanupCmd := `set -e
+if [ -d "$HOME/dialtone" ]; then rm -rf "$HOME/dialtone"; fi
+for unit in $(systemctl --user list-unit-files --type=service --no-pager | awk '{print $1}' | grep -Ei 'dialtone|robot|rover' || true); do
+  [ -z "$unit" ] && continue
+  systemctl --user stop "$unit" 2>/dev/null || true
+  systemctl --user disable "$unit" 2>/dev/null || true
+  systemctl --user reset-failed "$unit" 2>/dev/null || true
+done
+rm -f "$HOME/.config/systemd/user"/dialtone_*.service "$HOME/.config/systemd/user"/dialtone-*.service "$HOME/.config/systemd/user"/robot*.service "$HOME/.config/systemd/user"/rover*.service 2>/dev/null || true
+rm -rf "$HOME/.config/systemd/user"/dialtone*.service.d "$HOME/.config/systemd/user"/robot*.service.d "$HOME/.config/systemd/user"/rover*.service.d 2>/dev/null || true
+rm -f "$HOME/.config/systemd/user/default.target.wants"/dialtone*.service "$HOME/.config/systemd/user/default.target.wants"/robot*.service "$HOME/.config/systemd/user/default.target.wants"/rover*.service 2>/dev/null || true
+systemctl --user daemon-reload || true
+rm -f "$HOME/.dialtone/autoswap/current" 2>/dev/null || true
+rm -rf "$HOME/.dialtone/autoswap/bin" "$HOME/.dialtone/autoswap/artifacts" "$HOME/.dialtone/autoswap/releases" "$HOME/.dialtone/autoswap/manifests" 2>/dev/null || true
+echo CLEAN_DONE`
+	out, err := ssh_plugin.RunNodeCommand(node.Name, cleanupCmd, opts)
+	if err != nil {
+		return fmt.Errorf("remote clean failed on %s: %w", node.Name, err)
+	}
+	if trimmed := strings.TrimSpace(out); trimmed != "" {
+		logs.Debug("robot src_v2 clean output: %s", trimmed)
+	}
+
+	verifyCmd := `echo -n "dialtone_repo="; [ -e "$HOME/dialtone" ] && echo present || echo removed
+echo -n "autoswap_service_active="; systemctl --user is-active dialtone_autoswap.service 2>/dev/null || echo inactive
+echo -n "autoswap_service_enabled="; systemctl --user is-enabled dialtone_autoswap.service 2>/dev/null || echo disabled
+echo -n "matching_unit_files_count="; systemctl --user list-unit-files --type=service --no-pager | awk '{print $1}' | grep -Ei 'dialtone|robot|rover' | wc -l
+echo -n "matching_active_units_count="; systemctl --user list-units --type=service --all --no-pager | awk '{print $1}' | grep -Ei 'dialtone|robot|rover' | wc -l
+echo -n "dialtone_process_count="; ps -eo args | grep -E '/dialtone_(autoswap|robot|camera|mavlink|repl)( |$)' | grep -v grep | wc -l
+echo -n "autoswap_manifests="; [ -d "$HOME/.dialtone/autoswap/manifests" ] && echo present || echo removed
+echo -n "autoswap_artifacts="; [ -d "$HOME/.dialtone/autoswap/artifacts" ] && echo present || echo removed
+echo -n "autoswap_bin="; [ -d "$HOME/.dialtone/autoswap/bin" ] && echo present || echo removed
+echo -n "autoswap_releases="; [ -d "$HOME/.dialtone/autoswap/releases" ] && echo present || echo removed
+echo -n "autoswap_current="; [ -L "$HOME/.dialtone/autoswap/current" ] && echo present || echo removed`
+	verifyOut, err := ssh_plugin.RunNodeCommand(node.Name, verifyCmd, opts)
+	if err != nil {
+		return fmt.Errorf("remote clean verification failed on %s: %w", node.Name, err)
+	}
+	verifyMap := map[string]string{}
+	for _, line := range strings.Split(verifyOut, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		verifyMap[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+	}
+	required := map[string]string{
+		"dialtone_repo":              "removed",
+		"autoswap_service_active":    "inactive",
+		"autoswap_service_enabled":   "disabled",
+		"matching_unit_files_count":  "0",
+		"matching_active_units_count": "0",
+		"dialtone_process_count":     "0",
+		"autoswap_manifests":         "removed",
+		"autoswap_artifacts":         "removed",
+		"autoswap_bin":               "removed",
+		"autoswap_releases":          "removed",
+		"autoswap_current":           "removed",
+	}
+	for k, want := range required {
+		got := strings.TrimSpace(verifyMap[k])
+		if got != want {
+			return fmt.Errorf("remote clean verification failed on %s: %s=%q (want %q)", node.Name, k, got, want)
+		}
+	}
+	logs.Info("robot src_v2 clean completed on %s", node.Name)
+	logs.Info("%s", strings.TrimSpace(verifyOut))
+	return nil
+}
+
 func runSrcV2Publish(repoRoot string, args []string) error {
 	fs := flag.NewFlagSet("robot-src-v2-publish", flag.ContinueOnError)
-	host := fs.String("host", strings.TrimSpace(os.Getenv("ROBOT_HOST")), "Robot SSH host")
-	port := fs.String("port", "22", "Robot SSH port")
-	user := fs.String("user", strings.TrimSpace(os.Getenv("ROBOT_USER")), "Robot SSH user")
-	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "Robot SSH password")
-	start := fs.Bool("start", true, "Start autoswap composition on robot after publish")
+	repo := fs.String("repo", "timcash/dialtone", "GitHub repo owner/name")
+	version := fs.String("version", "", "Release version/tag (default: current git tag or robot-src-v2-<sha>)")
+	skipRelease := fs.Bool("skip-release", false, "Skip GitHub release publish check/upload")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -276,53 +462,283 @@ func runSrcV2Publish(repoRoot string, args []string) error {
 		}
 	}
 	logs.Info("robot src_v2 publish: local artifacts built")
-
-	if strings.TrimSpace(*host) == "" || strings.TrimSpace(*user) == "" {
-		logs.Warn("robot src_v2 publish: no --host/--user provided; local publish only")
-		return nil
+	if !*skipRelease {
+		resolvedVersion, err := resolveRobotPublishVersion(repoRoot, strings.TrimSpace(*version))
+		if err != nil {
+			return err
+		}
+		if err := publishRobotSrcV2Release(repoRoot, strings.TrimSpace(*repo), resolvedVersion); err != nil {
+			return err
+		}
+		logs.Info("robot src_v2 publish: release assets up to date version=%s repo=%s", resolvedVersion, strings.TrimSpace(*repo))
 	}
+	return nil
+}
 
-	if err := robot_cli.RunSyncCode("src_v2", []string{
-		"--host", strings.TrimSpace(*host),
-		"--port", strings.TrimSpace(*port),
-		"--user", strings.TrimSpace(*user),
-		"--pass", *pass,
-	}); err != nil {
+type releaseAssetInfo struct {
+	Name string `json:"name"`
+}
+
+type releaseView struct {
+	TagName string             `json:"tagName"`
+	Assets  []releaseAssetInfo `json:"assets"`
+}
+
+type buildTarget struct {
+	GOOS   string
+	GOARCH string
+}
+
+func publishRobotSrcV2Release(repoRoot, repo, version string) error {
+	if strings.TrimSpace(repo) == "" {
+		return fmt.Errorf("repo is required (owner/name)")
+	}
+	targets := []buildTarget{
+		{GOOS: "linux", GOARCH: "amd64"},
+		{GOOS: "linux", GOARCH: "arm64"},
+		{GOOS: "darwin", GOARCH: "amd64"},
+		{GOOS: "darwin", GOARCH: "arm64"},
+		{GOOS: "windows", GOARCH: "amd64"},
+	}
+	srcRoot := filepath.Join(repoRoot, "src")
+	outDir := filepath.Join(repoRoot, "bin", "releases", "robot_src_v2", sanitizeVersion(version))
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
-
-	client, err := ssh_plugin.DialSSH(strings.TrimSpace(*host), strings.TrimSpace(*port), strings.TrimSpace(*user), *pass)
+	goBin, err := resolveGoBinary()
 	if err != nil {
 		return err
 	}
-	defer client.Close()
-
-	remoteBuild := "cd ~/dialtone/src && " +
-		"../dialtone.sh go src_v1 exec build -o ../bin/dialtone_autoswap_v1 ./plugins/autoswap/src_v1/cmd/main.go && " +
-		"../dialtone.sh go src_v1 exec build -o ../bin/dialtone_robot_v2 ./plugins/robot/src_v2/cmd/server/main.go && " +
-		"../dialtone.sh go src_v1 exec build -o ../bin/dialtone_camera_v1 ./plugins/camera/src_v1/cmd/main.go && " +
-		"../dialtone.sh go src_v1 exec build -o ../bin/dialtone_mavlink_v1 ./plugins/mavlink/src_v1/cmd/main.go && " +
-		"../dialtone.sh go src_v1 exec build -o ../bin/dialtone_repl_v1 ./plugins/repl/src_v1/cmd/repld/main.go && " +
-		"../dialtone.sh robot src_v2 build"
-	if _, err := ssh_plugin.RunSSHCommand(client, remoteBuild); err != nil {
+	if err := runDialtone(repoRoot, "robot", "src_v2", "build"); err != nil {
 		return err
 	}
-	logs.Info("robot src_v2 publish: remote artifacts built")
+	uiDist := filepath.Join(repoRoot, "src", "plugins", "robot", "src_v2", "ui", "dist")
 
-	if *start {
-		startCmd := "cd ~/dialtone/src && " +
-			"nohup ../dialtone.sh autoswap src_v1 run " +
-			"--manifest plugins/robot/src_v2/config/composition.manifest.json " +
-			"--repo-root ~/dialtone --listen :18086 --nats-port 18236 --nats-ws-port 18237 " +
-			"--timeout 168h --require-stream=true --stay-running=true > ~/robot_src_v2_publish.log 2>&1 & echo started"
-		if out, err := ssh_plugin.RunSSHCommand(client, startCmd); err != nil {
-			return err
-		} else if strings.TrimSpace(out) != "" {
-			logs.Raw(strings.TrimSpace(out))
-		}
+	specs := []struct {
+		AssetPrefix string
+		MainPath    string
+	}{
+		{AssetPrefix: "dialtone_autoswap", MainPath: "./plugins/autoswap/src_v1/cmd/main.go"},
+		{AssetPrefix: "dialtone_robot_v2", MainPath: "./plugins/robot/src_v2/cmd/server/main.go"},
+		{AssetPrefix: "dialtone_camera_v1", MainPath: "./plugins/camera/src_v1/cmd/main.go"},
+		{AssetPrefix: "dialtone_mavlink_v1", MainPath: "./plugins/mavlink/src_v1/cmd/main.go"},
+		{AssetPrefix: "dialtone_repl", MainPath: "./plugins/repl/src_v1/cmd/repld/main.go"},
 	}
 
+	assetPathByName := map[string]string{}
+	for _, t := range targets {
+		for _, s := range specs {
+			name := s.AssetPrefix + "-" + t.GOOS + "-" + t.GOARCH
+			if t.GOOS == "windows" {
+				name += ".exe"
+			}
+			out := filepath.Join(outDir, name)
+			if err := buildGoBinary(goBin, srcRoot, s.MainPath, out, t.GOOS, t.GOARCH); err != nil {
+				logs.Warn("robot src_v2 publish: skip asset %s (%s/%s build failed: %v)", name, t.GOOS, t.GOARCH, err)
+				continue
+			}
+			assetPathByName[name] = out
+		}
+		uiName := "robot_src_v2_ui_dist-" + t.GOOS + "-" + t.GOARCH + ".tar.gz"
+		uiArchive := filepath.Join(outDir, uiName)
+		if err := createTarGzFromDir(uiArchive, uiDist); err != nil {
+			return err
+		}
+		assetPathByName[uiName] = uiArchive
+	}
+	if len(assetPathByName) == 0 {
+		return fmt.Errorf("robot src_v2 publish: no release assets were built")
+	}
+
+	existing, exists, err := githubReleaseAssets(repo, version)
+	if err != nil {
+		return err
+	}
+	missing := make([]string, 0, len(assetPathByName))
+	for name := range assetPathByName {
+		if !existing[name] {
+			missing = append(missing, name)
+		}
+	}
+	sort.Strings(missing)
+	if len(missing) == 0 {
+		logs.Info("robot src_v2 publish: release %s already has all required assets; skipping upload", version)
+		return nil
+	}
+
+	gh, err := resolveGHCli()
+	if err != nil {
+		return err
+	}
+	assetPaths := make([]string, 0, len(missing))
+	for _, name := range missing {
+		assetPaths = append(assetPaths, assetPathByName[name])
+	}
+	if !exists {
+		args := []string{"release", "create", version, "--repo", repo, "--title", "Robot src_v2 " + version, "--notes", "Automated robot src_v2 publish " + version}
+		args = append(args, assetPaths...)
+		cmd := exec.Command(gh, args...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return err
+		}
+		logs.Info("robot src_v2 publish: created release %s with %d assets", version, len(assetPaths))
+		return nil
+	}
+
+	args := []string{"release", "upload", version, "--repo", repo, "--clobber"}
+	args = append(args, assetPaths...)
+	cmd := exec.Command(gh, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	logs.Info("robot src_v2 publish: uploaded %d missing assets to %s", len(assetPaths), version)
 	return nil
+}
+
+func resolveRobotPublishVersion(repoRoot, requested string) (string, error) {
+	if strings.TrimSpace(requested) != "" {
+		return strings.TrimSpace(requested), nil
+	}
+	if v := strings.TrimSpace(os.Getenv("ROBOT_SRC_V2_PUBLISH_VERSION")); v != "" {
+		return v, nil
+	}
+	tagCmd := exec.Command("git", "describe", "--tags", "--exact-match")
+	tagCmd.Dir = repoRoot
+	if out, err := tagCmd.CombinedOutput(); err == nil {
+		v := strings.TrimSpace(string(out))
+		if v != "" {
+			return v, nil
+		}
+	}
+	shaCmd := exec.Command("git", "rev-parse", "--short", "HEAD")
+	shaCmd.Dir = repoRoot
+	out, err := shaCmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("resolve publish version failed: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	sha := strings.TrimSpace(string(out))
+	if sha == "" {
+		return "", fmt.Errorf("resolve publish version failed: empty git sha")
+	}
+	return "robot-src-v2-" + sha, nil
+}
+
+func resolveGoBinary() (string, error) {
+	candidate := filepath.Join(logs.GetDialtoneEnv(), "go", "bin", "go")
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate, nil
+	}
+	return exec.LookPath("go")
+}
+
+func buildGoBinary(goBin, srcRoot, mainPath, out, goos, goarch string) error {
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		return err
+	}
+	cmd := exec.Command(goBin, "build", "-o", out, mainPath)
+	cmd.Dir = srcRoot
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS="+goos, "GOARCH="+goarch)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func createTarGzFromDir(outFile, srcDir string) error {
+	if err := os.MkdirAll(filepath.Dir(outFile), 0o755); err != nil {
+		return err
+	}
+	f, err := os.Create(outFile)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	gzw := gzip.NewWriter(f)
+	defer gzw.Close()
+	tw := tar.NewWriter(gzw)
+	defer tw.Close()
+
+	return filepath.Walk(srcDir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(srcDir, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "." {
+			return nil
+		}
+		h, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		h.Name = rel
+		if err := tw.WriteHeader(h); err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		in, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		_, err = io.Copy(tw, in)
+		return err
+	})
+}
+
+func githubReleaseAssets(repo, version string) (map[string]bool, bool, error) {
+	gh, err := resolveGHCli()
+	if err != nil {
+		return nil, false, err
+	}
+	cmd := exec.Command(gh, "release", "view", version, "--repo", repo, "--json", "tagName,assets")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		lower := strings.ToLower(string(out))
+		if strings.Contains(lower, "not found") || strings.Contains(lower, "no release found") {
+			return map[string]bool{}, false, nil
+		}
+		return nil, false, fmt.Errorf("gh release view failed: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	var rv releaseView
+	if err := json.Unmarshal(out, &rv); err != nil {
+		return nil, false, err
+	}
+	m := map[string]bool{}
+	for _, a := range rv.Assets {
+		m[strings.TrimSpace(a.Name)] = true
+	}
+	return m, true, nil
+}
+
+func resolveGHCli() (string, error) {
+	if p, err := exec.LookPath("gh"); err == nil {
+		return p, nil
+	}
+	candidate := filepath.Join(logs.GetDialtoneEnv(), "gh", "bin", "gh")
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate, nil
+	}
+	return "", fmt.Errorf("gh cli not found; run ./dialtone.sh github src_v1 install")
+}
+
+func sanitizeVersion(v string) string {
+	v = strings.TrimSpace(v)
+	v = strings.ReplaceAll(v, "/", "-")
+	v = strings.ReplaceAll(v, "\\", "-")
+	v = strings.ReplaceAll(v, " ", "-")
+	if v == "" {
+		return time.Now().UTC().Format("20060102-150405")
+	}
+	return v
 }
 
 func runSrcV2Diagnostic(repoRoot string, args []string) error {
@@ -331,6 +747,11 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 	port := fs.String("port", "22", "Robot SSH port")
 	user := fs.String("user", strings.TrimSpace(os.Getenv("ROBOT_USER")), "Robot SSH user")
 	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "Robot SSH password")
+	remoteRepo := fs.String("remote-repo", "", "Remote repo root (default: <remote-home>/dialtone)")
+	manifest := fs.String("manifest", "src/plugins/robot/src_v2/config/composition.manifest.json", "Remote manifest path (absolute or repo-relative)")
+	uiURL := fs.String("ui-url", "", "Robot UI URL for browser checks (default: http://<host>:18086)")
+	browserNode := fs.String("browser-node", strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_NODE")), "Mesh node for remote browser (for example chroma)")
+	skipUI := fs.Bool("skip-ui", false, "Skip chromedp UI menu checks")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -354,37 +775,324 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 		logs.Warn("robot src_v2 diagnostic: no --host/--user provided; skipped remote checks")
 		return nil
 	}
+
 	client, err := ssh_plugin.DialSSH(strings.TrimSpace(*host), strings.TrimSpace(*port), strings.TrimSpace(*user), *pass)
 	if err != nil {
 		return err
 	}
 	defer client.Close()
 
+	remoteHomeOut, err := ssh_plugin.RunSSHCommand(client, "printf '%s' \"$HOME\"")
+	if err != nil {
+		return fmt.Errorf("remote home lookup failed: %w", err)
+	}
+	remoteHome := strings.TrimSpace(remoteHomeOut)
+	if remoteHome == "" {
+		return fmt.Errorf("remote home lookup returned empty value")
+	}
+	resolvedRemoteRepo := strings.TrimSpace(*remoteRepo)
+	if resolvedRemoteRepo == "" {
+		resolvedRemoteRepo = filepath.ToSlash(filepath.Join(remoteHome, "dialtone"))
+	}
+	manifestAbs := resolveRemoteManifestPath(resolvedRemoteRepo, strings.TrimSpace(*manifest))
+	autoswapBin := filepath.ToSlash(filepath.Join(resolvedRemoteRepo, "bin", "dialtone_autoswap_v1"))
+
 	checks := []string{
-		"test -x ~/dialtone/bin/dialtone_autoswap_v1",
-		"test -x ~/dialtone/bin/dialtone_robot_v2",
-		"test -x ~/dialtone/bin/dialtone_camera_v1",
-		"test -x ~/dialtone/bin/dialtone_mavlink_v1",
-		"test -x ~/dialtone/bin/dialtone_repl_v1",
-		"test -f ~/dialtone/src/plugins/robot/src_v2/ui/dist/index.html",
+		"test -x " + shellSingleQuote(autoswapBin),
+		"test -x " + shellSingleQuote(filepath.ToSlash(filepath.Join(resolvedRemoteRepo, "bin", "dialtone_robot_v2"))),
+		"test -x " + shellSingleQuote(filepath.ToSlash(filepath.Join(resolvedRemoteRepo, "bin", "dialtone_camera_v1"))),
+		"test -x " + shellSingleQuote(filepath.ToSlash(filepath.Join(resolvedRemoteRepo, "bin", "dialtone_mavlink_v1"))),
+		"test -x " + shellSingleQuote(filepath.ToSlash(filepath.Join(resolvedRemoteRepo, "bin", "dialtone_repl_v1"))),
+		"test -f " + shellSingleQuote(filepath.ToSlash(filepath.Join(resolvedRemoteRepo, "src", "plugins", "robot", "src_v2", "ui", "dist", "index.html"))),
+		"test -f " + shellSingleQuote(manifestAbs),
 	}
 	for _, c := range checks {
 		if _, err := ssh_plugin.RunSSHCommand(client, c); err != nil {
 			return fmt.Errorf("diagnostic remote check failed: %s", c)
 		}
 	}
+	logs.Info("robot src_v2 diagnostic: remote artifact check passed")
 
-	statusCmd := "pgrep -af 'dialtone_(autoswap_v1|robot_v2|camera_v1|mavlink_v1|repl_v1)' || true; " +
-		"curl -fsS http://127.0.0.1:18086/health; echo; " +
-		"curl -fsS http://127.0.0.1:18086/api/init; echo; " +
-		"curl -s --max-time 3 -o /dev/null -w 'stream_http=%{http_code}\\n' http://127.0.0.1:18086/stream || true"
-	out, err := ssh_plugin.RunSSHCommand(client, statusCmd)
+	activeOut, err := ssh_plugin.RunSSHCommand(client, "systemctl --user is-active dialtone_autoswap.service")
 	if err != nil {
-		return err
+		return fmt.Errorf("autoswap service active check failed: %w", err)
 	}
-	logs.Raw(strings.TrimSpace(out))
+	if strings.TrimSpace(activeOut) != "active" {
+		return fmt.Errorf("autoswap service is not active: %s", strings.TrimSpace(activeOut))
+	}
+
+	execOut, err := ssh_plugin.RunSSHCommand(client, "systemctl --user show dialtone_autoswap.service --property=ExecStart --no-pager")
+	if err != nil {
+		return fmt.Errorf("autoswap service ExecStart check failed: %w", err)
+	}
+	if !strings.Contains(execOut, "dialtone_autoswap_v1") {
+		return fmt.Errorf("autoswap service ExecStart does not reference dialtone_autoswap_v1")
+	}
+	if !strings.Contains(execOut, manifestAbs) {
+		return fmt.Errorf("autoswap service ExecStart does not reference manifest path %s", manifestAbs)
+	}
+	logs.Info("robot src_v2 diagnostic: autoswap service is active and uses expected manifest")
+
+	listCmd := shellSingleQuote(autoswapBin) + " service --mode list --manifest " + shellSingleQuote(manifestAbs) + " --repo-root " + shellSingleQuote(resolvedRemoteRepo)
+	listOut, err := ssh_plugin.RunSSHCommand(client, listCmd)
+	if err != nil {
+		return fmt.Errorf("autoswap service --mode list failed: %w", err)
+	}
+	for _, token := range []string{"runtime", "supervisor"} {
+		if !strings.Contains(strings.ToLower(listOut), token) {
+			return fmt.Errorf("autoswap list output missing expected token %q", token)
+		}
+	}
+	logs.Info("robot src_v2 diagnostic: autoswap list output looks valid")
+
+	runtimePath := filepath.ToSlash(filepath.Join(remoteHome, ".dialtone", "autoswap", "state", "runtime.json"))
+	runtimeRaw, err := ssh_plugin.RunSSHCommand(client, "cat "+shellSingleQuote(runtimePath))
+	if err != nil {
+		return fmt.Errorf("autoswap runtime state read failed: %w", err)
+	}
+	var runtimeState struct {
+		ManifestPath string `json:"manifest_path"`
+		Processes    []struct {
+			Name   string `json:"name"`
+			PID    int    `json:"pid"`
+			Status string `json:"status"`
+		} `json:"processes"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(runtimeRaw)), &runtimeState); err != nil {
+		return fmt.Errorf("autoswap runtime state parse failed: %w", err)
+	}
+	if filepath.Clean(runtimeState.ManifestPath) != filepath.Clean(manifestAbs) {
+		return fmt.Errorf("active autoswap manifest mismatch: got=%s expected=%s", runtimeState.ManifestPath, manifestAbs)
+	}
+	requiredProc := map[string]bool{"robot": false, "camera": false, "mavlink": false, "repl": false}
+	for _, p := range runtimeState.Processes {
+		if _, ok := requiredProc[p.Name]; !ok {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(p.Status), "running") && p.PID > 0 {
+			requiredProc[p.Name] = true
+		}
+	}
+	for name, ok := range requiredProc {
+		if !ok {
+			return fmt.Errorf("autoswap runtime state process is not running: %s", name)
+		}
+	}
+	logs.Info("robot src_v2 diagnostic: autoswap runtime reports required processes running")
+
+	procsOut, err := ssh_plugin.RunSSHCommand(client, "pgrep -af 'dialtone_(robot_v2|camera_v1|mavlink_v1|repl_v1)' || true")
+	if err != nil {
+		return fmt.Errorf("remote process list failed: %w", err)
+	}
+	for _, token := range []string{"dialtone_robot_v2", "dialtone_camera_v1", "dialtone_mavlink_v1", "dialtone_repl_v1"} {
+		if !strings.Contains(procsOut, token) {
+			return fmt.Errorf("remote process list missing %s", token)
+		}
+	}
+
+	healthOut, err := ssh_plugin.RunSSHCommand(client, "curl -fsS http://127.0.0.1:18086/health")
+	if err != nil {
+		return fmt.Errorf("remote /health check failed: %w", err)
+	}
+	if strings.TrimSpace(healthOut) != "ok" {
+		return fmt.Errorf("remote /health expected ok, got %q", strings.TrimSpace(healthOut))
+	}
+	initOut, err := ssh_plugin.RunSSHCommand(client, "curl -fsS http://127.0.0.1:18086/api/init")
+	if err != nil {
+		return fmt.Errorf("remote /api/init check failed: %w", err)
+	}
+	if !strings.Contains(initOut, "/natsws") {
+		return fmt.Errorf("remote /api/init missing /natsws")
+	}
+	integOut, err := ssh_plugin.RunSSHCommand(client, "curl -fsS http://127.0.0.1:18086/api/integration-health")
+	if err != nil {
+		return fmt.Errorf("remote /api/integration-health check failed: %w", err)
+	}
+	if !strings.Contains(integOut, "\"camera\":{\"status\":\"configured\"}") || !strings.Contains(integOut, "\"mavlink\":{\"status\":\"configured\"}") {
+		return fmt.Errorf("remote /api/integration-health missing configured camera/mavlink")
+	}
+	streamCodeOut, err := ssh_plugin.RunSSHCommand(client, "curl -sS -I --max-time 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:18086/stream")
+	if err != nil {
+		return fmt.Errorf("remote /stream status check failed: %w", err)
+	}
+	if strings.TrimSpace(streamCodeOut) != "200" {
+		return fmt.Errorf("remote /stream expected HTTP 200, got %s", strings.TrimSpace(streamCodeOut))
+	}
+	logs.Info("robot src_v2 diagnostic: remote endpoints passed (/health, /api/init, /api/integration-health, /stream)")
+
+	if !*skipUI {
+		resolvedUIURL := strings.TrimSpace(*uiURL)
+		if resolvedUIURL == "" {
+			resolvedUIURL = "http://" + strings.TrimSpace(*host) + ":18086"
+		}
+		if !strings.Contains(resolvedUIURL, "://") {
+			resolvedUIURL = "http://" + resolvedUIURL
+		}
+		if err := runRobotSrcV2MenuDiagnostic(resolvedUIURL, strings.TrimSpace(*browserNode), repoRoot); err != nil {
+			return err
+		}
+		logs.Info("robot src_v2 diagnostic: UI menu checks passed (%s)", resolvedUIURL)
+	}
+
 	logs.Info("robot src_v2 diagnostic: remote checks completed")
 	return nil
+}
+
+func runRobotSrcV2MenuDiagnostic(uiURL, browserNode, repoRoot string) error {
+	reg := test_plugin.NewRegistry()
+	urlBase := strings.TrimRight(strings.TrimSpace(uiURL), "/")
+	if urlBase == "" {
+		return fmt.Errorf("ui url is empty")
+	}
+	reg.Add(test_plugin.Step{
+		Name:    "robot-src-v2-diagnostic-ui-menu",
+		Timeout: 45 * time.Second,
+		RunWithContext: func(ctx *test_plugin.StepContext) (test_plugin.StepRunResult, error) {
+			opts := test_plugin.BrowserOptions{
+				Headless:   true,
+				GPU:        true,
+				Role:       "robot-src-v2-diagnostic",
+				RemoteNode: strings.TrimSpace(browserNode),
+				URL:        urlBase + "/#hero",
+			}
+			if _, err := ctx.EnsureBrowser(opts); err != nil {
+				return test_plugin.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabel("Hero Section", 8*time.Second); err != nil {
+				return test_plugin.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Hero Section", "data-active", "true", 8*time.Second); err != nil {
+				return test_plugin.StepRunResult{}, err
+			}
+
+			sections := []struct {
+				Menu  string
+				Aria  string
+				Extra string
+			}{
+				{Menu: "Navigate Docs", Aria: "Docs Section"},
+				{Menu: "Navigate Telemetry", Aria: "Telemetry Section", Extra: "Robot Table"},
+				{Menu: "Navigate Three", Aria: "Three Section"},
+				{Menu: "Navigate Terminal", Aria: "Xterm Section"},
+				{Menu: "Navigate Camera", Aria: "Video Section"},
+				{Menu: "Navigate Settings", Aria: "Settings Section"},
+			}
+			for _, s := range sections {
+				if err := ctx.WaitForAriaLabel("Toggle Global Menu", 8*time.Second); err != nil {
+					return test_plugin.StepRunResult{}, err
+				}
+				if err := ctx.ClickAriaLabel("Toggle Global Menu"); err != nil {
+					return test_plugin.StepRunResult{}, err
+				}
+				if err := ctx.WaitForAriaLabel(s.Menu, 8*time.Second); err != nil {
+					return test_plugin.StepRunResult{}, err
+				}
+				if err := ctx.ClickAriaLabel(s.Menu); err != nil {
+					return test_plugin.StepRunResult{}, err
+				}
+				if err := ctx.WaitForAriaLabel(s.Aria, 8*time.Second); err != nil {
+					return test_plugin.StepRunResult{}, err
+				}
+				if s.Extra != "" {
+					if err := ctx.WaitForAriaLabel(s.Extra, 8*time.Second); err != nil {
+						return test_plugin.StepRunResult{}, err
+					}
+				}
+				if err := ctx.WaitForAriaLabelAttrEquals(s.Aria, "data-active", "true", 8*time.Second); err != nil {
+					return test_plugin.StepRunResult{}, err
+				}
+				if s.Aria == "Telemetry Section" {
+					if err := waitForBrowserJSCondition(
+						ctx,
+						20*time.Second,
+						`(() => {
+						  const rows = Array.from(document.querySelectorAll("table[aria-label='Robot Table'] tbody tr"));
+						  if (rows.length === 0) return false;
+						  const keys = rows.map((r) => ((r.children[0]?.textContent) || "").trim());
+						  return keys.includes("heartbeat_ts") ||
+						         keys.includes("gps_lat") ||
+						         keys.includes("roll") ||
+						         keys.includes("pitch") ||
+						         keys.includes("yaw") ||
+						         keys.includes("mav_type");
+						})()`,
+						"telemetry section did not receive mavlink telemetry rows",
+					); err != nil {
+						return test_plugin.StepRunResult{}, err
+					}
+				}
+				if s.Aria == "Three Section" {
+					if err := waitForBrowserJSCondition(
+						ctx,
+						20*time.Second,
+						`(() => {
+						  const el = document.getElementById("hud-latency");
+						  const text = (el?.textContent || "").trim();
+						  const m = text.match(/(\d+)/);
+						  if (m && Number(m[1]) > 0) return true;
+						  const canvas = document.getElementById("latency-graph");
+						  if (!(canvas instanceof HTMLCanvasElement)) return false;
+						  const ctx = canvas.getContext("2d");
+						  if (!ctx) return false;
+						  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+						  for (let i = 3; i < data.length; i += 4) {
+						    if (data[i] > 0) return true;
+						  }
+						  return false;
+						})()`,
+						"three section latency/graph did not update (no telemetry rendered)",
+					); err != nil {
+						return test_plugin.StepRunResult{}, err
+					}
+				}
+			}
+			return test_plugin.StepRunResult{Report: "diagnostic UI menu passed"}, nil
+		},
+	})
+	return reg.Run(test_plugin.SuiteOptions{
+		Version:       "robot-src-v2-diagnostic-ui",
+		RepoRoot:      repoRoot,
+		ReportPath:    "plugins/robot/src_v2/test/DIAGNOSTIC_TEST.md",
+		NATSURL:       "nats://127.0.0.1:4222",
+		NATSSubject:   "logs.test.robot-src-v2-diagnostic-ui",
+		AutoStartNATS: true,
+	})
+}
+
+func waitForBrowserJSCondition(ctx *test_plugin.StepContext, timeout time.Duration, expr string, timeoutMsg string) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		var ok bool
+		if err := ctx.RunBrowser(chromedp.Evaluate(expr, &ok)); err == nil && ok {
+			return nil
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	if strings.TrimSpace(timeoutMsg) == "" {
+		timeoutMsg = "browser condition timed out"
+	}
+	return fmt.Errorf("%s", timeoutMsg)
+}
+
+func resolveRemoteManifestPath(remoteRepo, manifest string) string {
+	m := strings.TrimSpace(manifest)
+	if m == "" {
+		return filepath.ToSlash(filepath.Join(remoteRepo, "src", "plugins", "robot", "src_v2", "config", "composition.manifest.json"))
+	}
+	if strings.HasPrefix(m, "/") {
+		return filepath.ToSlash(filepath.Clean(m))
+	}
+	if strings.HasPrefix(m, "src/") {
+		return filepath.ToSlash(filepath.Join(remoteRepo, m))
+	}
+	if strings.HasPrefix(m, "plugins/") {
+		return filepath.ToSlash(filepath.Join(remoteRepo, "src", m))
+	}
+	return filepath.ToSlash(filepath.Join(remoteRepo, m))
+}
+
+func shellSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(strings.TrimSpace(s), "'", "'\\''") + "'"
 }
 
 func runDialtone(repoRoot string, args ...string) error {

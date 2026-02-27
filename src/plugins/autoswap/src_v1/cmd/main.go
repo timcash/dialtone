@@ -23,6 +23,8 @@ func main() {
 		err = autoswap.Stage(args)
 	case "service":
 		err = autoswap.RunService(args)
+	case "update":
+		err = autoswap.RunUpdate(args)
 	case "help", "-h", "--help":
 		usage()
 		return
@@ -43,4 +45,5 @@ func usage() {
 	logs.Raw("  stage [--manifest PATH] [--repo-root PATH]")
 	logs.Raw("  run [--manifest PATH] [--repo-root PATH] [--listen :18084] [--nats-port 18226] [--nats-ws-port 18227]")
 	logs.Raw("  service [--mode install|run|start|stop|restart|status|is-active|list] [--repo owner/repo] [--check-interval 5m]")
+	logs.Raw("  update [--host rover] [--user tim] [--pass ****]  # force refresh via ssh mesh")
 }

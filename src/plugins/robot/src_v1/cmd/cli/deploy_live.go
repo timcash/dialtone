@@ -29,11 +29,33 @@ func RunSyncCode(versionDir string, args []string) error {
 	if strings.TrimSpace(*host) == "" {
 		return fmt.Errorf("sync-code requires --host (or ROBOT_HOST in env/.env)")
 	}
+	node, err := ssh_plugin.ResolveMeshNode(strings.TrimSpace(*host))
+	if err != nil {
+		return fmt.Errorf("sync-code requires a mesh node alias/hostname for --host: %w", err)
+	}
 	if strings.TrimSpace(*user) == "" {
-		return fmt.Errorf("sync-code requires --user (or ROBOT_USER in env/.env)")
+		*user = node.User
+	}
+	if strings.TrimSpace(*port) == "" {
+		*port = node.Port
 	}
 	if strings.TrimSpace(*remoteDir) == "" {
-		*remoteDir = path.Join("/home", strings.TrimSpace(*user), "dialtone", "src")
+		remoteRepo := ""
+		if len(node.RepoCandidates) > 0 {
+			remoteRepo = strings.TrimSpace(node.RepoCandidates[0])
+		}
+		if remoteRepo == "" {
+			switch strings.ToLower(strings.TrimSpace(node.OS)) {
+			case "macos":
+				remoteRepo = path.Join("/Users", strings.TrimSpace(*user), "dialtone")
+			default:
+				remoteRepo = path.Join("/home", strings.TrimSpace(*user), "dialtone")
+			}
+		}
+		*remoteDir = path.Join(remoteRepo, "src")
+	}
+	if strings.TrimSpace(*user) == "" {
+		return fmt.Errorf("sync-code requires --user or a mesh node with default user")
 	}
 
 	rt, err := configv1.ResolveRuntime("")
@@ -41,28 +63,29 @@ func RunSyncCode(versionDir string, args []string) error {
 		return err
 	}
 	repoRoot := rt.RepoRoot
-	client, err := ssh_plugin.DialSSH(strings.TrimSpace(*host), strings.TrimSpace(*port), strings.TrimSpace(*user), *pass)
-	if err != nil {
-		return fmt.Errorf("failed to connect: %w", err)
+	cmdOpts := ssh_plugin.CommandOptions{
+		User:     strings.TrimSpace(*user),
+		Port:     strings.TrimSpace(*port),
+		Password: *pass,
 	}
-	defer client.Close()
+	targetNode := node.Name
 
 	remoteRoot := path.Dir(*remoteDir)
-	if _, err := ssh_plugin.RunSSHCommand(client, "mkdir -p "+shellQuote(*remoteDir)); err != nil {
+	if _, err := ssh_plugin.RunNodeCommand(targetNode, "mkdir -p "+shellQuote(*remoteDir), cmdOpts); err != nil {
 		return fmt.Errorf("failed creating remote dir: %w", err)
 	}
 
 	localSrc := rt.SrcRoot
 	for _, p := range []string{"go.mod", "go.sum"} {
-		if err := syncPath(client, localSrc, *remoteDir, p); err != nil {
+		if err := syncPathMesh(targetNode, cmdOpts, localSrc, *remoteDir, p); err != nil {
 			return err
 		}
 	}
 
-	if err := ssh_plugin.UploadFile(client, filepath.Join(repoRoot, "dialtone.sh"), path.Join(remoteRoot, "dialtone.sh")); err != nil {
+	if err := ssh_plugin.UploadNodeFile(targetNode, filepath.Join(repoRoot, "dialtone.sh"), path.Join(remoteRoot, "dialtone.sh"), cmdOpts); err != nil {
 		return fmt.Errorf("failed to sync dialtone.sh: %w", err)
 	}
-	if _, err := ssh_plugin.RunSSHCommand(client, "chmod +x "+shellQuote(path.Join(remoteRoot, "dialtone.sh"))); err != nil {
+	if _, err := ssh_plugin.RunNodeCommand(targetNode, "chmod +x "+shellQuote(path.Join(remoteRoot, "dialtone.sh")), cmdOpts); err != nil {
 		return fmt.Errorf("failed to chmod dialtone.sh: %w", err)
 	}
 
@@ -96,7 +119,7 @@ func RunSyncCode(versionDir string, args []string) error {
 		}
 	}
 	for _, p := range robotSyncPaths {
-		if err := syncPath(client, localSrc, *remoteDir, p); err != nil {
+		if err := syncPathMesh(targetNode, cmdOpts, localSrc, *remoteDir, p); err != nil {
 			return err
 		}
 	}
@@ -105,6 +128,50 @@ func RunSyncCode(versionDir string, args []string) error {
 	logs.Info("[SYNC-CODE] Complete. Remote build command:")
 	logs.Raw("  %s", buildHint)
 	return nil
+}
+
+func syncPathMesh(node string, opts ssh_plugin.CommandOptions, localSrcRoot, remoteSrcRoot, rel string) error {
+	localPath := filepath.Join(localSrcRoot, filepath.FromSlash(rel))
+	remotePath := path.Join(remoteSrcRoot, rel)
+	fi, err := os.Stat(localPath)
+	if err != nil {
+		return fmt.Errorf("sync missing local path %s: %w", localPath, err)
+	}
+	logs.Info("[SYNC-CODE] Sync %s", rel)
+	if !fi.IsDir() {
+		if _, err := ssh_plugin.RunNodeCommand(node, "mkdir -p "+shellQuote(path.Dir(remotePath)), opts); err != nil {
+			return fmt.Errorf("failed preparing remote dir %s: %w", path.Dir(remotePath), err)
+		}
+		if err := ssh_plugin.UploadNodeFile(node, localPath, remotePath, opts); err != nil {
+			return fmt.Errorf("failed syncing file %s: %w", rel, err)
+		}
+		return nil
+	}
+	if _, err := ssh_plugin.RunNodeCommand(node, "mkdir -p "+shellQuote(remotePath), opts); err != nil {
+		return fmt.Errorf("failed preparing remote dir %s: %w", remotePath, err)
+	}
+	return filepath.WalkDir(localPath, func(lp string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rp, err := filepath.Rel(localPath, lp)
+		if err != nil {
+			return err
+		}
+		rp = filepath.ToSlash(rp)
+		remoteChild := remotePath
+		if rp != "." {
+			remoteChild = path.Join(remotePath, rp)
+		}
+		if d.IsDir() {
+			_, err := ssh_plugin.RunNodeCommand(node, "mkdir -p "+shellQuote(remoteChild), opts)
+			return err
+		}
+		if _, err := ssh_plugin.RunNodeCommand(node, "mkdir -p "+shellQuote(path.Dir(remoteChild)), opts); err != nil {
+			return err
+		}
+		return ssh_plugin.UploadNodeFile(node, lp, remoteChild, opts)
+	})
 }
 
 func RunDeploy(versionDir string, args []string) error {

@@ -20,10 +20,12 @@ type deployOptions struct {
 	User          string
 	Pass          string
 	RemoteRepo    string
+	InstallDir    string
 	Service       bool
 	Repo          string
 	CheckInterval time.Duration
 	ManifestPath  string
+	ManifestURL   string
 	Listen        string
 	NATSPort      int
 	NATSWSPort    int
@@ -36,10 +38,12 @@ func RunDeploy(args []string) error {
 	user := fs.String("user", strings.TrimSpace(os.Getenv("ROBOT_USER")), "SSH user")
 	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password")
 	remoteRepo := fs.String("remote-repo", "", "Remote repo root (default: /home/<user>/dialtone)")
+	installDir := fs.String("install-dir", "", "Remote autoswap install dir (default: /home/<user>/.dialtone/autoswap)")
 	service := fs.Bool("service", false, "Install/start autoswap service on remote host")
 	repo := fs.String("repo", "timcash/dialtone", "GitHub repo owner/name for update polling")
 	checkInterval := fs.Duration("check-interval", 5*time.Minute, "GitHub poll interval")
 	manifest := fs.String("manifest", "src/plugins/robot/src_v2/config/composition.manifest.json", "Manifest path relative to remote repo src/")
+	manifestURL := fs.String("manifest-url", "", "Manifest URL for autoswap service (overrides --manifest)")
 	listen := fs.String("listen", ":18086", "Robot listen address used by autoswap run")
 	natsPort := fs.Int("nats-port", 18236, "Robot embedded NATS port used by autoswap run")
 	natsWSPort := fs.Int("nats-ws-port", 18237, "Robot embedded NATS websocket port used by autoswap run")
@@ -53,10 +57,12 @@ func RunDeploy(args []string) error {
 		User:          strings.TrimSpace(*user),
 		Pass:          *pass,
 		RemoteRepo:    strings.TrimSpace(*remoteRepo),
+		InstallDir:    strings.TrimSpace(*installDir),
 		Service:       *service,
 		Repo:          strings.TrimSpace(*repo),
 		CheckInterval: *checkInterval,
 		ManifestPath:  strings.TrimSpace(*manifest),
+		ManifestURL:   strings.TrimSpace(*manifestURL),
 		Listen:        strings.TrimSpace(*listen),
 		NATSPort:      *natsPort,
 		NATSWSPort:    *natsWSPort,
@@ -86,6 +92,14 @@ func RunDeploy(args []string) error {
 			opts.RemoteRepo = filepath.ToSlash(filepath.Join("/home", opts.User, "dialtone"))
 		}
 	}
+	if opts.InstallDir == "" {
+		switch strings.ToLower(node.OS) {
+		case "macos":
+			opts.InstallDir = filepath.ToSlash(filepath.Join("/Users", opts.User, ".dialtone", "autoswap"))
+		default:
+			opts.InstallDir = filepath.ToSlash(filepath.Join("/home", opts.User, ".dialtone", "autoswap"))
+		}
+	}
 	if strings.TrimSpace(opts.User) == "" {
 		return fmt.Errorf("deploy requires --user or a mesh node with a default user")
 	}
@@ -107,7 +121,7 @@ func RunDeploy(args []string) error {
 	if err != nil {
 		return err
 	}
-	remoteBinDir := filepath.ToSlash(filepath.Join(opts.RemoteRepo, "bin"))
+	remoteBinDir := filepath.ToSlash(filepath.Join(opts.InstallDir, "bin"))
 	remoteBin := filepath.ToSlash(filepath.Join(remoteBinDir, "dialtone_autoswap_v1"))
 	remoteTmpBin := filepath.ToSlash(filepath.Join(remoteBinDir, fmt.Sprintf("dialtone_autoswap_v1.upload-%d", time.Now().UnixNano())))
 	if _, err := sshplugin.RunNodeCommand(node.Name, "mkdir -p "+shellQuote(remoteBinDir), cmdOpts); err != nil {
@@ -126,26 +140,41 @@ func RunDeploy(args []string) error {
 	}
 
 	remoteSrc := filepath.ToSlash(filepath.Join(opts.RemoteRepo, "src"))
-	remoteManifest := filepath.ToSlash(filepath.Join("plugins", strings.TrimPrefix(strings.TrimSpace(opts.ManifestPath), "src/plugins/")))
-	if strings.HasPrefix(opts.ManifestPath, "plugins/") {
-		remoteManifest = opts.ManifestPath
+	manifestFlag := ""
+	repoRootFlag := ""
+	if strings.TrimSpace(opts.ManifestURL) != "" {
+		manifestFlag = "--manifest-url " + shellQuoteArg(opts.ManifestURL)
+		// In manifest-url mode, runtime should not require repo-root.
+	} else {
+		remoteManifest := filepath.ToSlash(filepath.Join("plugins", strings.TrimPrefix(strings.TrimSpace(opts.ManifestPath), "src/plugins/")))
+		if strings.HasPrefix(opts.ManifestPath, "plugins/") {
+			remoteManifest = opts.ManifestPath
+		}
+		if strings.HasPrefix(opts.ManifestPath, "src/") {
+			remoteManifest = strings.TrimPrefix(opts.ManifestPath, "src/")
+		}
+		remoteManifestAbs := filepath.ToSlash(filepath.Join(remoteSrc, remoteManifest))
+		manifestFlag = "--manifest " + shellQuoteArg(remoteManifestAbs)
+		repoRootFlag = "--repo-root " + shellQuoteArg(opts.RemoteRepo)
 	}
-	if strings.HasPrefix(opts.ManifestPath, "src/") {
-		remoteManifest = strings.TrimPrefix(opts.ManifestPath, "src/")
+	if repoRootFlag == "" && strings.TrimSpace(opts.RemoteRepo) != "" && strings.TrimSpace(opts.ManifestURL) == "" {
+		repoRootFlag = "--repo-root " + shellQuoteArg(opts.RemoteRepo)
 	}
 
-	serviceCmd := strings.Join([]string{
-		"cd " + shellQuote(remoteSrc),
-		shellQuote(remoteBin) + " service --mode install",
-		"--repo " + shellQuoteArg(opts.Repo),
-		"--check-interval " + shellQuoteArg(opts.CheckInterval.String()),
-		"--manifest " + shellQuoteArg(remoteManifest),
-		"--repo-root " + shellQuoteArg(opts.RemoteRepo),
-		"--listen " + shellQuoteArg(opts.Listen),
-		fmt.Sprintf("--nats-port %d", opts.NATSPort),
-		fmt.Sprintf("--nats-ws-port %d", opts.NATSWSPort),
-		"--require-stream=true",
-	}, " ")
+	serviceCmdParts := []string{
+		"mkdir -p " + shellQuote(opts.InstallDir),
+		shellQuote(remoteBin) + " service --mode install " +
+			"--repo " + shellQuoteArg(opts.Repo) + " " +
+			"--check-interval " + shellQuoteArg(opts.CheckInterval.String()) + " " +
+			"--install-dir " + shellQuoteArg(opts.InstallDir) + " " +
+			manifestFlag + " " +
+			repoRootFlag + " " +
+			"--listen " + shellQuoteArg(opts.Listen) + " " +
+			fmt.Sprintf("--nats-port %d ", opts.NATSPort) +
+			fmt.Sprintf("--nats-ws-port %d ", opts.NATSWSPort) +
+			"--require-stream=true",
+	}
+	serviceCmd := strings.Join(serviceCmdParts, " && ")
 	if _, err := sshplugin.RunNodeCommand(node.Name, serviceCmd, cmdOpts); err != nil {
 		return fmt.Errorf("remote service install failed: %w", err)
 	}

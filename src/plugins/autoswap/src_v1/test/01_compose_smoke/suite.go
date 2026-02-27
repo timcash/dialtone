@@ -32,6 +32,41 @@ func Register(reg *testv1.Registry) {
 						return err
 					}
 				}
+				// Stage built artifacts into autoswap-managed paths so compose manifest
+				// can run without relying on src repo paths.
+				autoswapRoot := filepath.Join(os.Getenv("HOME"), ".dialtone", "autoswap")
+				artifactDir := filepath.Join(autoswapRoot, "artifacts")
+				if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+					ctx.Errorf("artifact dir create failed: %v", err)
+					return err
+				}
+				copies := [][2]string{
+					{filepath.Join(repo, "bin", "dialtone_autoswap_v1"), filepath.Join(artifactDir, "dialtone_autoswap_v1")},
+					{filepath.Join(repo, "bin", "dialtone_robot_v2"), filepath.Join(artifactDir, "dialtone_robot_v2")},
+					{filepath.Join(repo, "bin", "dialtone_camera_v1"), filepath.Join(artifactDir, "dialtone_camera_v1")},
+					{filepath.Join(repo, "bin", "dialtone_mavlink_v1"), filepath.Join(artifactDir, "dialtone_mavlink_v1")},
+					{filepath.Join(repo, "bin", "dialtone_repl_v1"), filepath.Join(artifactDir, "dialtone_repl_v1")},
+				}
+				for _, cp := range copies {
+					if err := runCmd(repo, "cp", "-f", cp[0], cp[1]); err != nil {
+						ctx.Errorf("artifact copy failed: %s -> %s (%v)", cp[0], cp[1], err)
+						return err
+					}
+					if err := runCmd(repo, "chmod", "+x", cp[1]); err != nil {
+						ctx.Errorf("artifact chmod failed: %s (%v)", cp[1], err)
+						return err
+					}
+				}
+				uiSrc := filepath.Join(repo, "src", "plugins", "robot", "src_v2", "ui", "dist")
+				uiDst := filepath.Join(artifactDir, "robot_src_v2_ui_dist")
+				if err := runCmd(repo, "rm", "-rf", uiDst); err != nil {
+					ctx.Errorf("ui artifact reset failed: %v", err)
+					return err
+				}
+				if err := runCmd(repo, "cp", "-a", uiSrc, uiDst); err != nil {
+					ctx.Errorf("ui artifact copy failed: %v", err)
+					return err
+				}
 				ctx.Infof("compose artifacts built")
 				return nil
 			}); err != nil {

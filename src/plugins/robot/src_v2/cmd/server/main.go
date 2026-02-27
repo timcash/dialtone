@@ -13,11 +13,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	"github.com/coder/websocket"
 	natsserver "github.com/nats-io/nats-server/v2/server"
+	"github.com/nats-io/nats.go"
 )
 
 type initResponse struct {
@@ -54,6 +56,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer ns.Shutdown()
+	startStatsPublisher(*natsPort, ns, mavlinkEnabled)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -151,6 +154,61 @@ func startEmbeddedNATS(port, wsPort int) (*natsserver.Server, error) {
 		return nil, fmt.Errorf("nats server did not become ready on %d/%d", port, wsPort)
 	}
 	return ns, nil
+}
+
+func startStatsPublisher(natsPort int, ns *natsserver.Server, mavlinkEnabled bool) {
+	natsURL := fmt.Sprintf("nats://127.0.0.1:%d", natsPort)
+	nc, err := nats.Connect(natsURL, nats.Timeout(2*time.Second))
+	if err != nil {
+		logs.Warn("robot src_v2 stats publisher disabled (nats connect failed): %v", err)
+		return
+	}
+	started := time.Now()
+	var lastMavlinkTelemetryAt atomic.Int64
+	_, _ = nc.Subscribe("mavlink.>", func(msg *nats.Msg) {
+		subj := strings.TrimSpace(msg.Subject)
+		switch subj {
+		case "mavlink.heartbeat", "mavlink.attitude", "mavlink.global_position_int", "mavlink.statustext", "mavlink.command_ack":
+			lastMavlinkTelemetryAt.Store(time.Now().UnixMilli())
+		}
+	})
+	_ = nc.Flush()
+
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			varz, err := ns.Varz(nil)
+			if err != nil {
+				continue
+			}
+			errors := make([]string, 0, 2)
+			if mavlinkEnabled {
+				last := lastMavlinkTelemetryAt.Load()
+				if last == 0 {
+					errors = append(errors, "mavlink telemetry not received yet")
+				} else {
+					since := time.Since(time.UnixMilli(last))
+					if since > 3*time.Second {
+						errors = append(errors, fmt.Sprintf("mavlink telemetry stale (%s ago)", since.Round(time.Second)))
+					}
+				}
+			} else {
+				errors = append(errors, "mavlink disabled")
+			}
+			payload := map[string]any{
+				"type":        "STATS",
+				"uptime":      time.Since(started).Round(time.Second).String(),
+				"nats_total":  varz.InMsgs,
+				"connections": varz.Connections,
+				"timestamp":   time.Now().UnixMilli(),
+				"errors":      errors,
+			}
+			if b, err := json.Marshal(payload); err == nil {
+				_ = nc.Publish("mavlink.stats", b)
+			}
+		}
+	}()
 }
 
 func proxyNATSWS(w http.ResponseWriter, r *http.Request, upstreamURL string) {

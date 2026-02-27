@@ -42,6 +42,8 @@ func main() {
 		err = autoswap.RunService(rest)
 	case "deploy":
 		err = autoswap.RunDeploy(rest)
+	case "update":
+		err = autoswap.RunUpdate(rest)
 	case "test":
 		err = runTests()
 	case "help", "-h", "--help":
@@ -87,6 +89,7 @@ func printUsage() {
 	logs.Raw("  run     Stage + start composition smoke flow")
 	logs.Raw("  service Run/install/start/stop/restart/status/is-active/list autoswap supervisor service")
 	logs.Raw("  deploy  Build and deploy autoswap to remote host via ssh mesh")
+	logs.Raw("  update  Force immediate autoswap refresh on remote mesh host (restart service + check state)")
 	logs.Raw("  test    Run autoswap src_v1 tests")
 	logs.Raw("  help    Show this help")
 }

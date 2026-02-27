@@ -37,6 +37,11 @@ class TableControl implements VisualizationControl {
     if (data.uptime) this.allRows.set('uptime', { key: 'uptime', value: data.uptime, status: 'LIVE' });
     if (data.nats_total !== undefined) this.allRows.set('nats_messages', { key: 'nats_messages', value: String(data.nats_total), status: 'LIVE' });
     if (data.connections !== undefined) this.allRows.set('nats_clients', { key: 'nats_clients', value: String(data.connections), status: 'LIVE' });
+    if (Array.isArray(data.errors) && data.errors.length > 0) {
+      this.allRows.set('mavlink_error', { key: 'mavlink_error', value: String(data.errors[0]), status: 'ERROR' });
+    } else if (data.errors !== undefined) {
+      this.allRows.delete('mavlink_error');
+    }
 
     // Handle Mavlink messages
     if (data.type === 'HEARTBEAT') {

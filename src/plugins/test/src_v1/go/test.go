@@ -55,6 +55,7 @@ type StepContext struct {
 	failLogger      *logs.NATSLogger
 	suiteBrowser    *BrowserSession
 	setSuiteBrowser func(*BrowserSession)
+	repoRoot        string
 }
 
 func (sc *StepContext) Logf(format string, args ...any) {
@@ -196,6 +197,10 @@ func (sc *StepContext) NATSURLForHost(host string) (string, error) {
 		port = "4222"
 	}
 	return fmt.Sprintf("nats://%s:%s", host, port), nil
+}
+
+func (sc *StepContext) RepoRoot() string {
+	return strings.TrimSpace(sc.repoRoot)
 }
 
 func (sc *StepContext) NewTopicLogger(subject string) (*logs.NATSLogger, error) {
@@ -363,6 +368,7 @@ type StepRunResult struct {
 
 type SuiteOptions struct {
 	Version        string
+	RepoRoot       string
 	ReportPath     string
 	LogPath        string
 	ErrorLogPath   string
@@ -1433,6 +1439,12 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 	}
 
 	logs.Info("%s Starting Test Suite: %s", testTag, opts.Version)
+	repoRoot := strings.TrimSpace(opts.RepoRoot)
+	if repoRoot == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			repoRoot = cwd
+		}
+	}
 
 	natsURL := strings.TrimSpace(opts.NATSURL)
 	if natsURL == "" {
@@ -1480,6 +1492,7 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 			SuiteSubject:    baseSubject,
 			ErrorSubject:    baseSubject + ".error",
 			natsURL:         natsURL,
+			repoRoot:        repoRoot,
 			suiteBrowser:    sharedBrowser,
 			setSuiteBrowser: func(s *BrowserSession) { sharedBrowser = s },
 		}
