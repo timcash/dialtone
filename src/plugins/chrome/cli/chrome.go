@@ -124,13 +124,13 @@ func RunChrome(args []string) {
 		}
 		handleSession(*port, *gpu, *headless, *url, *role, *reuseExisting, *userDataDir, *debugAddress)
 	case "test":
-		if err := runChromeTests(); err != nil {
+		if err := runChromeTests(args[1:]); err != nil {
 			logs.Fatal("Chrome self-test failed: %v", err)
 		}
 		logs.Info("Chrome self-test passed")
 	case "verify":
 		verifyFlags := flag.NewFlagSet("chrome verify", flag.ExitOnError)
-		port := verifyFlags.Int("port", 9222, "Remote debugging port")
+		port := verifyFlags.Int("port", chrome.DefaultDebugPort, "Remote debugging port")
 		debug := verifyFlags.Bool("debug", false, "Enable verbose logging")
 
 		for _, arg := range args[1:] {
@@ -147,6 +147,20 @@ func RunChrome(args []string) {
 		verifyChrome(*port, *debug)
 	case "install":
 		logs.Info("Chrome plugin: No specific dependencies to install (detects local Chrome).")
+	case "remote-list":
+		handleRemoteListCmd(args[1:])
+	case "remote-new":
+		handleRemoteNewCmd(args[1:])
+	case "remote-probe":
+		handleRemoteProbeCmd(args[1:])
+	case "remote-relay":
+		handleRemoteRelayCmd(args[1:])
+	case "remote-doctor":
+		handleRemoteDoctorCmd(args[1:])
+	case "remote-kill":
+		handleRemoteKillCmd(args[1:])
+	case "remote-wsl-forward":
+		handleRemoteWSLForwardCmd(args[1:])
 	default:
 		printChromeUsage()
 	}
@@ -299,8 +313,8 @@ func handleNew(port int, gpu bool, headless bool, targetURL, role string, reuseE
 		}
 		return "headed"
 	}())
-	// If port is the default 9222, let's try to find a free one to avoid conflicts if 9222 is taken
-	if port == 9222 {
+	// If port is the default debug port, find a free one to avoid conflicts.
+	if port == chrome.DefaultDebugPort {
 		port = 0 // app.LaunchChrome will find one
 	}
 
@@ -356,8 +370,15 @@ func printChromeUsage() {
 	fmt.Println("  list [flags]        List detected chrome processes")
 	fmt.Println("  new [URL] [flags]   Launch a new Chrome instance")
 	fmt.Println("  session [flags]     Launch/reuse and emit machine-readable session metadata")
-	fmt.Println("  test                Run chrome plugin self-test (dev vs smoke roles)")
+	fmt.Println("  test                Run chrome plugin self-test (dev/test roles)")
 	fmt.Println("  kill [PID|all] [--all] Kill Dialtone processes (default) or all processes")
+	fmt.Println("  remote-list [flags] List Chrome processes across mesh nodes")
+	fmt.Println("  remote-new [flags]  Start or reuse Chrome on a mesh node with role tag")
+	fmt.Println("  remote-probe [flags] Probe debug ports/listeners across mesh nodes")
+	fmt.Println("  remote-relay [flags] Start remote TCP relay for debug port exposure")
+	fmt.Println("  remote-doctor [flags] Diagnose remote debug reachability/listener issues")
+	fmt.Println("  remote-kill [flags] Kill remote Chrome processes by role/origin")
+	fmt.Println("  remote-wsl-forward [flags] Configure Windows WSL devtools portproxy/firewall")
 	fmt.Println("  install             Install chrome dependencies")
 	fmt.Println("\nFlags for list:")
 	fmt.Println("  --headed            Filter for headed instances only")
@@ -366,16 +387,20 @@ func printChromeUsage() {
 	fmt.Println("\nFlags for new:")
 	fmt.Println("  --gpu               Enable GPU acceleration")
 	fmt.Println("  --headless          Enable headless mode")
-	fmt.Println("  --role <name>       Tag launched browser role (dev, smoke, etc.)")
+	fmt.Println("  --role <name>       Tag launched browser role (dev|test)")
 	fmt.Println("  --reuse-existing    Reuse existing matching role/headless instance")
 	fmt.Println("  --user-data-dir     Set explicit profile directory")
 	fmt.Println("  --debug-address     Set remote debug bind address (127.0.0.1 or 0.0.0.0)")
 	fmt.Println("\nFlags for kill:")
 	fmt.Println("  --all               Kill ALL Chrome/Edge processes system-wide")
 	fmt.Println("  --windows           Use with 'kill' for WSL host processes (auto-detected usually)")
+	fmt.Println("\nMesh Flags:")
+	fmt.Println("  --nodes <csv|all>   Node filter (ex: chroma,darkmac,legion)")
+	fmt.Println("  --node <name>       Single node for remote-new/remote-relay")
 	fmt.Println("\nGeneral Options:")
-	fmt.Println("  --port 9222         Remote debugging port")
+	fmt.Printf("  --port %d         Remote debugging port\n", chrome.DefaultDebugPort)
 	fmt.Println("  --debug             Enable verbose logging")
+	fmt.Println("  --filter <expr>     Test step filter (for chrome test)")
 }
 
 func normalizeChromeArgs(args []string) ([]string, bool, error) {
@@ -415,7 +440,7 @@ func isHelpArg(s string) bool {
 	}
 }
 
-func runChromeTests() error {
+func runChromeTests(args []string) error {
 	paths, err := chrome.ResolvePaths("")
 	if err != nil {
 		return err
@@ -424,7 +449,9 @@ func runChromeTests() error {
 	if goBin == "" {
 		goBin = "go"
 	}
-	cmd := exec.Command(goBin, "run", "./plugins/chrome/src_v1/test/cmd/main.go")
+	runArgs := []string{"run", "./plugins/chrome/src_v1/test/cmd/main.go"}
+	runArgs = append(runArgs, args...)
+	cmd := exec.Command(goBin, runArgs...)
 	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

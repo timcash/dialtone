@@ -68,8 +68,8 @@ func BrowserOptionsFor(defaultURL string) (testv1.BrowserOptions, bool, error) {
 	// Attach mode targets a headed browser session on the remote mesh node.
 	b.Headless = false
 	b.GPU = true
-	// Reuse the long-lived dev browser when attaching to remote nodes.
-	b.Role = "ui-dev"
+	// Reuse the long-lived test browser when attaching to remote nodes.
+	b.Role = "test"
 	b.ReuseExisting = true
 	b.RemoteNode = strings.TrimSpace(opts.AttachNode)
 	if strings.TrimSpace(b.URL) == "" {

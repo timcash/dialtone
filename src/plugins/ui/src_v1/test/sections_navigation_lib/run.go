@@ -22,20 +22,17 @@ type SectionCase struct {
 
 func RunSectionFromMenu(sc *testv1.StepContext, c SectionCase, startAtHero bool) (testv1.StepRunResult, error) {
 	ctx.BeginStep(sc)
-	attach := strings.TrimSpace(uitest.GetOptions().AttachNode) != ""
 	waitSection := 8 * time.Second
 	waitClick := 5 * time.Second
 	waitAssert := 5 * time.Second
-	if attach {
-		waitSection = 1200 * time.Millisecond
-		waitClick = 900 * time.Millisecond
-		waitAssert = 1200 * time.Millisecond
-	}
 	if err := ctx.EnsureBuiltAndServed(); err != nil {
 		return testv1.StepRunResult{}, err
 	}
 
 	defaultURL := ctx.AppURL("/#hero")
+	testv1.UpdateRuntimeConfig(func(cfg *testv1.RuntimeConfig) {
+		cfg.BrowserNewTargetURL = defaultURL
+	})
 	browserOpts, _, err := uitest.BrowserOptionsFor(defaultURL)
 	if err != nil {
 		return testv1.StepRunResult{}, err
@@ -45,9 +42,6 @@ func RunSectionFromMenu(sc *testv1.StepContext, c SectionCase, startAtHero bool)
 	}
 	if _, err := sc.EnsureBrowser(browserOpts); err != nil {
 		return testv1.StepRunResult{}, err
-	}
-	if attach {
-		return testv1.StepRunResult{Report: fmt.Sprintf("section %s attach setup verified", c.ID)}, nil
 	}
 	if startAtHero {
 		if err := sc.WaitForAriaLabelAttrEquals("Hero Section", "data-active", "true", waitSection); err != nil {

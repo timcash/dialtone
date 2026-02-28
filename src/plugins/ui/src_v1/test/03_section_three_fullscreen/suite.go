@@ -15,9 +15,8 @@ func Register(reg *testv1.Registry) {
 		Screenshot:  "ui_three_fullscreen.png",
 	}
 	reg.Add(testv1.Step{
-		Name:        "ui-section-three-fullscreen-via-menu",
-		Timeout:     5 * time.Second,
-		Screenshots: []string{"plugins/ui/src_v1/test/screenshots/ui_three_fullscreen.png"},
+		Name:    "ui-section-three-fullscreen-via-menu",
+		Timeout: 5 * time.Second,
 		RunWithContext: func(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 			return sectionsnav.RunSectionFromMenu(sc, tc, false)
 		},

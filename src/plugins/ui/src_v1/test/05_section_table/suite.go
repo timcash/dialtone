@@ -20,9 +20,8 @@ func Register(reg *testv1.Registry) {
 		AssertFail: "table should be fullscreen with legend header",
 	}
 	reg.Add(testv1.Step{
-		Name:        "ui-section-table-via-menu",
-		Timeout:     5 * time.Second,
-		Screenshots: []string{"plugins/ui/src_v1/test/screenshots/ui_table.png"},
+		Name:    "ui-section-table-via-menu",
+		Timeout: 5 * time.Second,
 		RunWithContext: func(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 			return sectionsnav.RunSectionFromMenu(sc, tc, false)
 		},

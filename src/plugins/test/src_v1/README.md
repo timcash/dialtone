@@ -121,7 +121,7 @@ err := ctx.WaitForStepMessageAfterAction("did-action", 5*time.Second, func() err
 `test/src_v1` owns report generation. Plugin tests should not hand-roll markdown.
 
 Recommended `SuiteOptions` for template reports:
-- `ReportPath`: final markdown path (for example `plugins/ui/src_v1/test/TEST.md`)
+- `ReportPath`: final markdown path (for example `plugins/ui/src_v1/TEST.md`)
 - `RawReportPath`: intermediate raw markdown path
 - `ReportFormat`: `template`
 - `ReportTitle`: report title
@@ -147,8 +147,8 @@ Example config:
 ```go
 err := reg.Run(testv1.SuiteOptions{
   Version:       "ui-src-v1",
-  ReportPath:    "plugins/ui/src_v1/test/TEST.md",
-  RawReportPath: "plugins/ui/src_v1/test/TEST_RAW.md",
+  ReportPath:    "plugins/ui/src_v1/TEST.md",
+  RawReportPath: "plugins/ui/src_v1/TEST_RAW.md",
   ReportFormat:  "template",
   ReportTitle:   "UI Plugin src_v1 Test Report",
   ReportRunner:  "test/src_v1",

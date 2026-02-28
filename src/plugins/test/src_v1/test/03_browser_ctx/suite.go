@@ -25,7 +25,7 @@ func Register(r *testv1.Registry) {
 
 func runBrowserCtxSmoke(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 	if !testv1.BrowserProviderAvailable() {
-		sc.Warnf("browser provider not available; set DIALTONE_TEST_BROWSER_NODE for remote mode")
+		sc.Warnf("browser provider not available; use --attach <node> for remote mode")
 		return testv1.StepRunResult{Report: "skipped browser ctx smoke (chrome not installed)"}, nil
 	}
 
@@ -35,7 +35,7 @@ func runBrowserCtxSmoke(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 	}
 	pageDir := filepath.Dir(thisFile)
 	pageURL := ""
-	if strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_NODE")) != "" {
+	if strings.TrimSpace(testv1.RuntimeConfigSnapshot().BrowserNode) != "" {
 		raw, err := os.ReadFile(filepath.Join(pageDir, "index.html"))
 		if err != nil {
 			return testv1.StepRunResult{}, fmt.Errorf("read browser ctx fixture: %w", err)

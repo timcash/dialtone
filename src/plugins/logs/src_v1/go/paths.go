@@ -8,17 +8,17 @@ import (
 )
 
 type Paths struct {
-	Runtime         configv1.Runtime
-	Preset          configv1.PluginPreset
+	Runtime           configv1.Runtime
+	Preset            configv1.PluginPreset
 	PluginVersionRoot string
-	DevLog          string
-	DevBrowserMeta  string
-	DevPreviewLog   string
-	NATSDaemonPID   string
-	NATSDaemonLog   string
-	TestReport      string
-	TestLog         string
-	TestErrorLog    string
+	DevLog            string
+	DevBrowserMeta    string
+	DevPreviewLog     string
+	NATSDaemonPID     string
+	NATSDaemonLog     string
+	TestReport        string
+	TestLog           string
+	TestErrorLog      string
 }
 
 func ResolvePaths(start, version string) (Paths, error) {
@@ -40,8 +40,8 @@ func ResolvePaths(start, version string) (Paths, error) {
 		DevPreviewLog:     filepath.Join(preset.Test, "dev_preview.log"),
 		NATSDaemonPID:     configv1.RepoPath(rt, ".dialtone", "logs", "logs-nats-daemon.pid"),
 		NATSDaemonLog:     configv1.RepoPath(rt, ".dialtone", "logs", "logs-nats-daemon.log"),
-		TestReport:        filepath.Join(preset.Test, "TEST.md"),
-		TestLog:           filepath.Join(preset.Test, "test.log"),
-		TestErrorLog:      filepath.Join(preset.Test, "error.log"),
+		TestReport:        filepath.Join(preset.PluginVersionRoot, "TEST.md"),
+		TestLog:           filepath.Join(preset.PluginVersionRoot, "test.log"),
+		TestErrorLog:      filepath.Join(preset.PluginVersionRoot, "error.log"),
 	}, nil
 }

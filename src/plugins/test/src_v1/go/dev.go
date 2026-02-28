@@ -206,7 +206,7 @@ func StartDevBrowser(opts DevOptions, logOut io.Writer, devURL string) (*Browser
 	}
 
 	logf("   [DEV] Starting attachable debug-profile browser session.")
-	if strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_NODE")) == "" {
+	if strings.TrimSpace(RuntimeConfigSnapshot().BrowserNode) == "" {
 		if err := EnsureAttachableBrowser(opts, logf, devURL); err != nil {
 			return nil, err
 		}
@@ -255,8 +255,8 @@ func StartDevBrowser(opts DevOptions, logOut io.Writer, devURL string) (*Browser
 }
 
 func EnsureAttachableBrowser(opts DevOptions, logf func(string, ...any), url string) error {
-	// Standard port 9222 for profile-based debug
-	if chrome.HasReachableDevtoolsWebSocket(9222) {
+	// Standard profile debug port.
+	if chrome.HasReachableDevtoolsWebSocket(chrome.DefaultDebugPort) {
 		return nil
 	}
 	if err := chrome.RelaunchProfileChromeDebug(url, opts.Role); err != nil {
@@ -264,12 +264,12 @@ func EnsureAttachableBrowser(opts DevOptions, logf func(string, ...any), url str
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if chrome.HasReachableDevtoolsWebSocket(9222) {
+		if chrome.HasReachableDevtoolsWebSocket(chrome.DefaultDebugPort) {
 			return nil
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	return fmt.Errorf("timed out waiting for debug browser on :9222")
+	return fmt.Errorf("timed out waiting for debug browser on :%d", chrome.DefaultDebugPort)
 }
 
 type devNATSLogger struct {

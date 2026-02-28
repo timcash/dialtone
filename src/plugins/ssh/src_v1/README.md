@@ -6,6 +6,52 @@ Current usage includes:
 - robot deploy/dev SSH operations
 - logs remote stream mode
 
+## Complete Shell Workflow
+
+```bash
+# Discover mesh nodes and transport mode
+./dialtone.sh ssh src_v1 mesh
+./dialtone.sh ssh src_v1 nodes
+./dialtone.sh ssh src_v1 list
+
+# Run one command on one node
+./dialtone.sh ssh src_v1 run --node rover --cmd "hostname"
+./dialtone.sh ssh src_v1 run --node darkmac --cmd "pwd" --user tim --port 22
+./dialtone.sh ssh src_v1 run --node legion --cmd "whoami"
+./dialtone.sh ssh src_v1 run --node chroma --cmd "uname -a" --password '...'
+
+# Run one command on all nodes
+./dialtone.sh ssh src_v1 run-all --cmd "hostname"
+./dialtone.sh ssh src_v1 run-all --cmd "pwd" --user tim
+
+# Git-based repo sync across mesh
+./dialtone.sh ssh src_v1 sync-repos
+./dialtone.sh ssh src_v1 sync-repos --branch main
+./dialtone.sh ssh src_v1 sync-repos --branch feat/my-branch --allow-dirty
+./dialtone.sh ssh src_v1 sync-repos --branch feat/my-branch --repo-rover /home/tim/dialtone
+
+# Rsync code sync (single run)
+./dialtone.sh ssh src_v1 sync-code --node chroma --src /home/user/dialtone
+./dialtone.sh ssh src_v1 sync-code --node darkmac --src /home/user/dialtone --dest /Users/tim/dialtone --delete
+./dialtone.sh ssh src_v1 sync-code --node all --src /home/user/dialtone --delete
+./dialtone.sh ssh src_v1 sync-code --node rover --src /home/user/dialtone --exclude '.env.local'
+
+# Rsync code sync (persistent service mode on local machine)
+./dialtone.sh ssh src_v1 sync-code --node all --src /home/user/dialtone --delete --service --interval 30s
+./dialtone.sh ssh src_v1 sync-code --service-status
+./dialtone.sh ssh src_v1 sync-code --service-stop
+
+# Bootstrap a node (sync + install + verify)
+./dialtone.sh ssh src_v1 bootstrap --node chroma --src /home/user/dialtone --dest /Users/dev/dialtone --delete
+./dialtone.sh ssh src_v1 bootstrap --node darkmac --src /home/user/dialtone --dest /Users/tim/dialtone --delete
+./dialtone.sh ssh src_v1 bootstrap --node all --src /home/user/dialtone --delete
+./dialtone.sh ssh src_v1 bootstrap --node legion --no-sync --install-cmd "./dialtone.sh go src_v1 install"
+./dialtone.sh ssh src_v1 bootstrap --node rover --install-cmd "./dialtone.sh go src_v1 install" --verify-cmd "./dialtone.sh go src_v1 exec version"
+
+# Plugin verification suite
+./dialtone.sh ssh src_v1 test
+```
+
 ## CLI
 
 - `./dialtone.sh ssh src_v1 mesh`

@@ -24,7 +24,7 @@ func Register(r *testv1.Registry) {
 
 func runSetup(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 	if !testv1.BrowserProviderAvailable() {
-		sc.Warnf("browser provider not available; set DIALTONE_TEST_BROWSER_NODE for remote mode")
+		sc.Warnf("browser provider not available; use --attach <node> for remote mode")
 		return testv1.StepRunResult{Report: "skipped browser lifecycle options (chrome not installed)"}, nil
 	}
 	_, thisFile, _, ok := runtime.Caller(0)
@@ -32,7 +32,7 @@ func runSetup(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 		return testv1.StepRunResult{}, fmt.Errorf("unable to resolve caller path")
 	}
 	pageDir := filepath.Dir(thisFile)
-	if strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_NODE")) != "" {
+	if strings.TrimSpace(testv1.RuntimeConfigSnapshot().BrowserNode) != "" {
 		raw, err := os.ReadFile(filepath.Join(pageDir, "index.html"))
 		if err != nil {
 			return testv1.StepRunResult{}, fmt.Errorf("read browser lifecycle fixture: %w", err)
@@ -73,6 +73,7 @@ func runReuse(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 	if !testv1.BrowserProviderAvailable() {
 		return testv1.StepRunResult{Report: "skipped browser lifecycle reuse (chrome not installed)"}, nil
 	}
+	remoteMode := strings.TrimSpace(testv1.RuntimeConfigSnapshot().BrowserNode) != ""
 	b, err := sc.EnsureBrowser(testv1.BrowserOptions{})
 	if err != nil {
 		return testv1.StepRunResult{}, err
@@ -80,6 +81,22 @@ func runReuse(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 	var marker string
 	if err := b.Run(chromedp.Evaluate(`window.__suiteMarker || ''`, &marker)); err != nil {
 		return testv1.StepRunResult{}, err
+	}
+	if marker != "alive" && remoteMode {
+		// Remote attach can rebind to a fresh page target while preserving the
+		// shared browser process/session. Re-open the fixture page and re-check.
+		if pageURL == "" {
+			return testv1.StepRunResult{}, fmt.Errorf("missing page URL for remote lifecycle reuse check")
+		}
+		if err := sc.RunBrowserWithTimeout(8*time.Second, chromedp.Navigate(pageURL)); err != nil {
+			return testv1.StepRunResult{}, fmt.Errorf("rehydrate shared page on remote attach: %w", err)
+		}
+		if err := sc.WaitForAriaLabel("Option Button", 8*time.Second); err != nil {
+			return testv1.StepRunResult{}, fmt.Errorf("rehydrated page did not load: %w", err)
+		}
+		if err := b.Run(chromedp.Evaluate(`window.__suiteMarker || ''`, &marker)); err != nil {
+			return testv1.StepRunResult{}, err
+		}
 	}
 	if marker != "alive" {
 		return testv1.StepRunResult{}, fmt.Errorf("expected shared browser marker 'alive', got %q", marker)

@@ -15,9 +15,8 @@ func Register(reg *testv1.Registry) {
 		Screenshot:  "ui_camera.png",
 	}
 	reg.Add(testv1.Step{
-		Name:        "ui-section-camera-via-menu",
-		Timeout:     5 * time.Second,
-		Screenshots: []string{"plugins/ui/src_v1/test/screenshots/ui_camera.png"},
+		Name:    "ui-section-camera-via-menu",
+		Timeout: 5 * time.Second,
 		RunWithContext: func(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 			return sectionsnav.RunSectionFromMenu(sc, tc, false)
 		},

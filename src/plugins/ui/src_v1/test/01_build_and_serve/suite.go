@@ -14,7 +14,6 @@ func Register(reg *testv1.Registry) {
 	reg.Add(testv1.Step{
 		Name:           "ui-build-and-go-serve",
 		Timeout:        60 * time.Second,
-		Screenshots:    []string{"plugins/ui/src_v1/test/screenshots/ui_hero.png"},
 		RunWithContext: runBuildAndServe,
 	})
 }
@@ -26,6 +25,9 @@ func runBuildAndServe(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 		return testv1.StepRunResult{}, err
 	}
 	defaultURL = ctx.AppURL("/#hero")
+	testv1.UpdateRuntimeConfig(func(cfg *testv1.RuntimeConfig) {
+		cfg.BrowserNewTargetURL = defaultURL
+	})
 
 	browserOpts, attach, err := uitest.BrowserOptionsFor(defaultURL)
 	if err != nil {
@@ -34,21 +36,21 @@ func runBuildAndServe(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 	if _, err := sc.EnsureBrowser(browserOpts); err != nil {
 		return testv1.StepRunResult{}, fmt.Errorf("ensure browser: %w", err)
 	}
-	if !attach {
-		if err := sc.RunBrowserWithTimeout(8*time.Second, testv1.Navigate(defaultURL)); err != nil {
-			return testv1.StepRunResult{}, fmt.Errorf("navigate attached browser: %w", err)
-		}
+	if err := sc.RunBrowserWithTimeout(8*time.Second, testv1.Navigate(defaultURL)); err != nil {
+		return testv1.StepRunResult{}, fmt.Errorf("navigate attached browser: %w", err)
 	}
 	if err := uitest.SaveBrowserDebugConfig(sc); err != nil {
 		return testv1.StepRunResult{}, fmt.Errorf("save browser debug config: %w", err)
-	}
-	if attach {
-		return testv1.StepRunResult{Report: "fixture served and attached browser session is ready"}, nil
 	}
 	if !attach {
 		if err := uitest.ApplyMobileViewport(sc); err != nil {
 			return testv1.StepRunResult{}, fmt.Errorf("apply mobile viewport: %w", err)
 		}
+	}
+	// Attached sessions can recover onto a blank target after tab churn;
+	// enforce a final navigate to the fixture URL before DOM assertions.
+	if err := sc.RunBrowserWithTimeout(8*time.Second, testv1.Navigate(defaultURL)); err != nil {
+		return testv1.StepRunResult{}, fmt.Errorf("re-navigate before hero assertions: %w", err)
 	}
 	if err := sc.WaitForAriaLabel("Hero Section", 10*time.Second); err != nil {
 		return testv1.StepRunResult{}, fmt.Errorf("wait hero section: %w", err)
