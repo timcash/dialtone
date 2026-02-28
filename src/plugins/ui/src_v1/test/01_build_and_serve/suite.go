@@ -34,17 +34,30 @@ func runBuildAndServe(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 	if _, err := sc.EnsureBrowser(browserOpts); err != nil {
 		return testv1.StepRunResult{}, fmt.Errorf("ensure browser: %w", err)
 	}
-	if err := uitest.ApplyMobileViewport(sc); err != nil {
-		return testv1.StepRunResult{}, err
+	if !attach {
+		if err := sc.RunBrowserWithTimeout(8*time.Second, testv1.Navigate(defaultURL)); err != nil {
+			return testv1.StepRunResult{}, fmt.Errorf("navigate attached browser: %w", err)
+		}
+	}
+	if err := uitest.SaveBrowserDebugConfig(sc); err != nil {
+		return testv1.StepRunResult{}, fmt.Errorf("save browser debug config: %w", err)
+	}
+	if attach {
+		return testv1.StepRunResult{Report: "fixture served and attached browser session is ready"}, nil
+	}
+	if !attach {
+		if err := uitest.ApplyMobileViewport(sc); err != nil {
+			return testv1.StepRunResult{}, fmt.Errorf("apply mobile viewport: %w", err)
+		}
 	}
 	if err := sc.WaitForAriaLabel("Hero Section", 10*time.Second); err != nil {
-		return testv1.StepRunResult{}, err
+		return testv1.StepRunResult{}, fmt.Errorf("wait hero section: %w", err)
 	}
 	if err := sc.WaitForAriaLabelAttrEquals("Hero Section", "data-active", "true", 10*time.Second); err != nil {
-		return testv1.StepRunResult{}, err
+		return testv1.StepRunResult{}, fmt.Errorf("wait hero section active attr: %w", err)
 	}
 	if err := sc.WaitForAriaLabel("Hero Canvas", 10*time.Second); err != nil {
-		return testv1.StepRunResult{}, err
+		return testv1.StepRunResult{}, fmt.Errorf("wait hero canvas: %w", err)
 	}
 	if err := uitest.AssertJS(sc, 5*time.Second, `(() => {
 		const s = document.getElementById('hero');
@@ -52,10 +65,10 @@ func runBuildAndServe(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 		const h = s.querySelector('header');
 		return !!h && h.classList.contains('legend');
 	})()`, "hero should use legend header mode"); err != nil {
-		return testv1.StepRunResult{}, err
+		return testv1.StepRunResult{}, fmt.Errorf("assert hero legend mode: %w", err)
 	}
 	if err := uitest.CaptureScreenshot(sc, "ui_hero.png"); err != nil {
-		return testv1.StepRunResult{}, err
+		return testv1.StepRunResult{}, fmt.Errorf("capture screenshot ui_hero.png: %w", err)
 	}
 	return testv1.StepRunResult{Report: fmt.Sprintf("fixture built, hero section loaded, legend header verified (attach=%t)", attach)}, nil
 }

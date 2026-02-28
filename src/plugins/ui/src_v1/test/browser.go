@@ -24,6 +24,9 @@ func BrowserOptionsFor(defaultURL string) (testv1.BrowserOptions, bool, error) {
 		GPU:      false,
 		Role:     "ui-test",
 		URL:      targetURL,
+		// Keep a single attached tab and stable viewport for the full suite run.
+		SkipNavigateOnReuse: true,
+		PreserveTabAndSize:  true,
 	}
 	if !attach {
 		// WSL local -> Windows local Chrome attach is unreliable in NAT mode.
@@ -62,10 +65,11 @@ func BrowserOptionsFor(defaultURL string) (testv1.BrowserOptions, bool, error) {
 		return b, false, nil
 	}
 
-	// Attach mode still runs headless; browser process is hosted on remote mesh node.
-	b.Headless = true
+	// Attach mode targets a headed browser session on the remote mesh node.
+	b.Headless = false
 	b.GPU = true
-	b.Role = "ui-test"
+	// Reuse the long-lived dev browser when attaching to remote nodes.
+	b.Role = "ui-dev"
 	b.ReuseExisting = true
 	b.RemoteNode = strings.TrimSpace(opts.AttachNode)
 	if strings.TrimSpace(b.URL) == "" {

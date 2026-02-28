@@ -64,7 +64,7 @@ section > header {
 
 section > header.legend {
   background: rgba(6, 10, 16, 0.74);
-  border: 1px solid rgba(143, 205, 255, 0.35);
+  border: 0;
 }
 
 section > header.text {
@@ -128,7 +128,7 @@ section > form {
   padding: 8px;
   border-radius: 10px;
   background: rgba(8, 12, 18, 0.88);
-  border: 1px solid rgba(143, 205, 255, 0.22);
+  border: 0;
 }
 
 section > form > button,

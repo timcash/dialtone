@@ -1,6 +1,7 @@
 package test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -9,10 +10,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	stdruntime "runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +25,7 @@ import (
 	"dialtone/dev/plugins/logs/src_v1/go"
 	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 	"github.com/chromedp/cdproto/cdp"
+	"github.com/chromedp/cdproto/page"
 	cdruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
@@ -480,7 +485,42 @@ func (s *BrowserSession) Close() {
 }
 
 func (s *BrowserSession) Run(tasks ...chromedp.Action) error {
-	return chromedp.Run(s.ctx, tasks...)
+	if err := chromedp.Run(s.ctx, tasks...); err != nil {
+		if isRecoverableBrowserRunError(err) {
+			logs.Warn("   [BROWSER] recoverable run error; attempting rebind: %v", err)
+			if rerr := s.EnsureOpenPage(); rerr == nil {
+				if err2 := chromedp.Run(s.ctx, tasks...); err2 == nil {
+					return nil
+				} else if isNoTargetIDError(err2) {
+					logs.Warn("   [BROWSER] rebind retry hit stale target; retrying with allocator-default target")
+					if rbErr := s.rebindToTarget(""); rbErr == nil {
+						if err3 := chromedp.Run(s.ctx, tasks...); err3 == nil {
+							return nil
+						} else if isNoBrowserOpenError(err3) {
+							logs.Warn("   [BROWSER] allocator-default target run reported no open page; ensuring page and retrying")
+							if epErr := s.EnsureOpenPage(); epErr == nil {
+								return chromedp.Run(s.ctx, tasks...)
+							} else {
+								logs.Warn("   [BROWSER] ensure open page after allocator-default target failed: %v", epErr)
+							}
+							return err3
+						} else {
+							return err3
+						}
+					} else {
+						logs.Warn("   [BROWSER] default-target rebind failed: %v", rbErr)
+					}
+				} else {
+					logs.Warn("   [BROWSER] rebind retry failed: %v", err2)
+					return err2
+				}
+			} else {
+				logs.Warn("   [BROWSER] recoverable run error but rebind failed: %v", rerr)
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *BrowserSession) RunWithTimeout(timeout time.Duration, tasks ...chromedp.Action) error {
@@ -489,7 +529,171 @@ func (s *BrowserSession) RunWithTimeout(timeout time.Duration, tasks ...chromedp
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, timeout)
 	defer cancel()
-	return chromedp.Run(ctx, tasks...)
+	if err := chromedp.Run(ctx, tasks...); err != nil {
+		if isRecoverableBrowserRunError(err) {
+			logs.Warn("   [BROWSER] recoverable run-with-timeout error; attempting rebind: %v", err)
+			if rerr := s.EnsureOpenPage(); rerr == nil {
+				ctx2, cancel2 := context.WithTimeout(s.ctx, timeout)
+				defer cancel2()
+				if err2 := chromedp.Run(ctx2, tasks...); err2 == nil {
+					return nil
+				} else if isNoTargetIDError(err2) {
+					logs.Warn("   [BROWSER] rebind retry (timeout) hit stale target; retrying with allocator-default target")
+					if rbErr := s.rebindToTarget(""); rbErr == nil {
+						ctx3, cancel3 := context.WithTimeout(s.ctx, timeout)
+						defer cancel3()
+						if err3 := chromedp.Run(ctx3, tasks...); err3 == nil {
+							return nil
+						} else if isNoBrowserOpenError(err3) {
+							logs.Warn("   [BROWSER] allocator-default target run (timeout) reported no open page; ensuring page and retrying")
+							if epErr := s.EnsureOpenPage(); epErr == nil {
+								ctx4, cancel4 := context.WithTimeout(s.ctx, timeout)
+								defer cancel4()
+								return chromedp.Run(ctx4, tasks...)
+							} else {
+								logs.Warn("   [BROWSER] ensure open page after allocator-default target (timeout) failed: %v", epErr)
+							}
+							return err3
+						} else {
+							return err3
+						}
+					} else {
+						logs.Warn("   [BROWSER] default-target rebind (timeout) failed: %v", rbErr)
+					}
+				} else {
+					logs.Warn("   [BROWSER] rebind retry (timeout) failed: %v", err2)
+					return err2
+				}
+			} else {
+				logs.Warn("   [BROWSER] recoverable run-with-timeout error but rebind failed: %v", rerr)
+			}
+		}
+		return err
+	}
+	return nil
+}
+
+func isNoBrowserOpenError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(text, "no browser is open") || strings.Contains(text, "failed to open new tab")
+}
+
+func isRecoverableBrowserRunError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if isNoBrowserOpenError(err) {
+		return true
+	}
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(text, "target closed") ||
+		strings.Contains(text, "no target with given id found") ||
+		strings.Contains(text, "(-32602)")
+}
+
+func isNoTargetIDError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(text, "no target with given id found") || strings.Contains(text, "(-32602)")
+}
+
+func (s *BrowserSession) EnsureOpenPage() error {
+	if s == nil || s.Session == nil {
+		return fmt.Errorf("browser session unavailable")
+	}
+	ports := candidateDebugPortsForSession(s.Session)
+	if len(ports) == 0 {
+		return fmt.Errorf("browser session debug port unavailable")
+	}
+	var lastErr error
+	for _, p := range ports {
+		targetID, err := ensureFirstPageTargetID(p)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return s.rebindToTarget(targetID)
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no usable debug port")
+	}
+	return lastErr
+}
+
+func candidateDebugPortsForSession(session *chrome.Session) []int {
+	if session == nil {
+		return nil
+	}
+	seen := map[int]struct{}{}
+	out := make([]int, 0, 2)
+	add := func(p int) {
+		if p <= 0 {
+			return
+		}
+		if _, ok := seen[p]; ok {
+			return
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	if p := debugPortFromWebSocketURL(session.WebSocketURL); p > 0 {
+		add(p)
+	}
+	add(session.Port)
+	return out
+}
+
+func debugPortFromWebSocketURL(raw string) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return 0
+	}
+	host := strings.TrimSpace(u.Host)
+	if host == "" {
+		return 0
+	}
+	_, portStr, err := net.SplitHostPort(host)
+	if err != nil {
+		// Handle host:port without brackets for some malformed values.
+		if idx := strings.LastIndex(host, ":"); idx > -1 && idx+1 < len(host) {
+			portStr = host[idx+1:]
+		} else {
+			return 0
+		}
+	}
+	port, err := strconv.Atoi(strings.TrimSpace(portStr))
+	if err != nil || port <= 0 {
+		return 0
+	}
+	return port
+}
+
+func (s *BrowserSession) rebindToTarget(targetID string) error {
+	targetID = strings.TrimSpace(targetID)
+	allocCtx, cancelAlloc := chromedp.NewRemoteAllocator(context.Background(), s.Session.WebSocketURL)
+	ctxOpts := []chromedp.ContextOption{}
+	if targetID != "" {
+		ctxOpts = append(ctxOpts, chromedp.WithTargetID(target.ID(targetID)))
+	}
+	ctx, cancelCtx := chromedp.NewContext(allocCtx, ctxOpts...)
+	oldCancel := s.cancel
+	s.ctx = ctx
+	s.cancel = func() { cancelCtx(); cancelAlloc() }
+	s.mainTargetID = target.ID(targetID)
+	s.attachTargetListener(ctx)
+	if oldCancel != nil {
+		oldCancel()
+	}
+	return nil
 }
 
 func (s *BrowserSession) ensureMainTargetID() error {
@@ -542,22 +746,34 @@ func (s *BrowserSession) CloseExtraTabsKeepMain() error {
 
 func (s *BrowserSession) CaptureScreenshot(path string) error {
 	var buf []byte
-	if err := chromedp.Run(s.ctx, chromedp.CaptureScreenshot(&buf)); err != nil {
+	if err := chromedp.Run(s.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		data, err := page.CaptureScreenshot().
+			WithCaptureBeyondViewport(false).
+			WithFromSurface(false).
+			Do(ctx)
+		if err != nil {
+			return err
+		}
+		buf = data
+		return nil
+	})); err != nil {
 		return err
 	}
 	return os.WriteFile(path, buf, 0644)
 }
 
 type BrowserOptions struct {
-	Headless      bool
-	GPU           bool
-	Role          string
-	ReuseExisting bool
-	UserDataDir   string
-	URL           string
-	RemoteNode    string
-	LogWriter     io.Writer
-	LogPrefix     string
+	Headless            bool
+	GPU                 bool
+	Role                string
+	ReuseExisting       bool
+	UserDataDir         string
+	URL                 string
+	SkipNavigateOnReuse bool
+	PreserveTabAndSize  bool
+	RemoteNode          string
+	LogWriter           io.Writer
+	LogPrefix           string
 }
 
 func RemoteBrowserConfigured() bool {
@@ -619,6 +835,23 @@ func getWebsocketURL(port int) (string, error) {
 }
 
 func initSession(session *chrome.Session, role string) (*BrowserSession, error) {
+	if session != nil {
+		if session.Port <= 0 {
+			if p := debugPortFromWebSocketURL(session.WebSocketURL); p > 0 {
+				session.Port = p
+			}
+		}
+		if strings.TrimSpace(session.WebSocketURL) != "" {
+			if fixed := forceLocalWebSocketHost(session.WebSocketURL); strings.TrimSpace(fixed) != "" {
+				session.WebSocketURL = fixed
+			}
+		}
+	}
+	if session != nil && session.Port > 0 {
+		if ws, err := getWebsocketURL(session.Port); err == nil && strings.TrimSpace(ws) != "" {
+			session.WebSocketURL = strings.TrimSpace(ws)
+		}
+	}
 	logs.Info("   [BROWSER] Connecting to WebSocket: %s", session.WebSocketURL)
 	// Connect to the browser via websocket
 	allocCtx, cancelAlloc := chromedp.NewRemoteAllocator(context.Background(), session.WebSocketURL)
@@ -627,7 +860,7 @@ func initSession(session *chrome.Session, role string) (*BrowserSession, error) 
 	// This also applies to remote/tunneled sessions because the debug port is exposed locally.
 	ctxOpts := []chromedp.ContextOption{}
 	if session.Port > 0 {
-		if targetID, err := getFirstPageTargetID(session.Port); err == nil && targetID != "" {
+		if targetID, err := ensureFirstPageTargetID(session.Port); err == nil && targetID != "" {
 			ctxOpts = append(ctxOpts, chromedp.WithTargetID(target.ID(targetID)))
 		}
 	}
@@ -638,7 +871,31 @@ func initSession(session *chrome.Session, role string) (*BrowserSession, error) 
 		cancel:  func() { cancelCtx(); cancelAlloc() },
 		Session: session,
 	}
+	s.attachTargetListener(ctx)
+	return s, nil
+}
 
+func forceLocalWebSocketHost(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u == nil {
+		return raw
+	}
+	if !strings.EqualFold(u.Scheme, "ws") && !strings.EqualFold(u.Scheme, "wss") {
+		return raw
+	}
+	host := strings.TrimSpace(u.Hostname())
+	if host == "" || host == "127.0.0.1" || strings.EqualFold(host, "localhost") {
+		return raw
+	}
+	port := strings.TrimSpace(u.Port())
+	if port == "" {
+		return raw
+	}
+	u.Host = net.JoinHostPort("127.0.0.1", port)
+	return u.String()
+}
+
+func (s *BrowserSession) attachTargetListener(ctx context.Context) {
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
 		case *cdruntime.EventConsoleAPICalled:
@@ -660,7 +917,11 @@ func initSession(session *chrome.Session, role string) (*BrowserSession, error) 
 			if s.onConsole != nil {
 				s.onConsole(msg)
 			}
-			logs.Info("   [BROWSER CONSOLE | PID %d] %s: %s", session.PID, ev.Type, msg.Text)
+			pid := 0
+			if s.Session != nil {
+				pid = s.Session.PID
+			}
+			logs.Info("   [BROWSER CONSOLE | PID %d] %s: %s", pid, ev.Type, msg.Text)
 		case *cdruntime.EventExceptionThrown:
 			msgText := strings.TrimSpace(ev.ExceptionDetails.Text)
 			if ev.ExceptionDetails.Exception != nil {
@@ -687,11 +948,13 @@ func initSession(session *chrome.Session, role string) (*BrowserSession, error) 
 			if s.onError != nil {
 				s.onError(exMsg)
 			}
-			logs.Error("   [BROWSER EXCEPTION | PID %d] %s", session.PID, ev.ExceptionDetails.Text)
+			pid := 0
+			if s.Session != nil {
+				pid = s.Session.PID
+			}
+			logs.Error("   [BROWSER EXCEPTION | PID %d] %s", pid, ev.ExceptionDetails.Text)
 		}
 	})
-
-	return s, nil
 }
 
 func getFirstPageTargetID(port int) (string, error) {
@@ -720,11 +983,57 @@ func getFirstPageTargetID(port int) (string, error) {
 	return "", fmt.Errorf("no page target found")
 }
 
+func createTargetAtPort(port int, url string) error {
+	if port <= 0 {
+		return fmt.Errorf("invalid port")
+	}
+	u := fmt.Sprintf("http://127.0.0.1:%d/json/new?%s", port, url)
+	req, err := http.NewRequest(http.MethodPut, u, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err == nil {
+		_ = resp.Body.Close()
+		if resp.StatusCode < 400 {
+			return nil
+		}
+	}
+	// Fallback for older endpoints that allow GET.
+	resp, err = http.Get(u)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("create target status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func ensureFirstPageTargetID(port int) (string, error) {
+	if targetID, err := getFirstPageTargetID(port); err == nil && strings.TrimSpace(targetID) != "" {
+		return targetID, nil
+	}
+	if err := createTargetAtPort(port, "about:blank"); err != nil {
+		return "", err
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if targetID, err := getFirstPageTargetID(port); err == nil && strings.TrimSpace(targetID) != "" {
+			return targetID, nil
+		}
+		time.Sleep(120 * time.Millisecond)
+	}
+	return "", fmt.Errorf("no page target found after creating about:blank")
+}
+
 func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
+	navigateOnStart := strings.TrimSpace(opts.URL) != "" && !opts.SkipNavigateOnReuse && !opts.PreserveTabAndSize
 	if remoteNode := resolveRemoteBrowserNode(opts); remoteNode != "" {
 		logs.Info("   [BROWSER] Remote node configured; trying remote-first on %s", remoteNode)
 		if rs, rerr := startRemoteBrowser(remoteNode, opts); rerr == nil {
-			if strings.TrimSpace(opts.URL) != "" {
+			if navigateOnStart {
 				if err := chromedp.Run(rs.ctx, chromedp.Navigate(opts.URL)); err != nil {
 					if opts.ReuseExisting {
 						errText := strings.ToLower(err.Error())
@@ -770,7 +1079,7 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 		if attach := findAttachableDialtoneSession(opts.Role, opts.Headless); attach != nil {
 			s, aerr := initSession(attach, opts.Role)
 			if aerr == nil {
-				if opts.URL != "" {
+				if navigateOnStart {
 					if navErr := chromedp.Run(s.ctx, chromedp.Navigate(opts.URL)); navErr != nil {
 						s.Close()
 						return nil, navErr
@@ -794,7 +1103,7 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 				logs.Warn("   [BROWSER] local launch failed; trying remote node %s", remoteNode)
 				rs, rerr := startRemoteBrowser(remoteNode, opts)
 				if rerr == nil {
-					if strings.TrimSpace(opts.URL) != "" {
+					if navigateOnStart {
 						if err := chromedp.Run(rs.ctx, chromedp.Navigate(opts.URL)); err != nil {
 							rs.Close()
 							return nil, err
@@ -814,7 +1123,7 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 			logs.Warn("   [BROWSER] local session attach failed; trying remote node %s", remoteNode)
 			rs, rerr := startRemoteBrowser(remoteNode, opts)
 			if rerr == nil {
-				if strings.TrimSpace(opts.URL) != "" {
+				if navigateOnStart {
 					if err := chromedp.Run(rs.ctx, chromedp.Navigate(opts.URL)); err != nil {
 						rs.Close()
 						return nil, err
@@ -827,7 +1136,7 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 		return nil, err
 	}
 
-	if opts.URL != "" {
+	if navigateOnStart {
 		logs.Info("   [BROWSER] Navigating to: %s", opts.URL)
 		if err := chromedp.Run(s.ctx, chromedp.Navigate(opts.URL)); err != nil {
 			s.Close()
@@ -835,7 +1144,7 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 				logs.Warn("   [BROWSER] local navigate failed; trying remote node %s", remoteNode)
 				rs, rerr := startRemoteBrowser(remoteNode, opts)
 				if rerr == nil {
-					if strings.TrimSpace(opts.URL) != "" {
+					if navigateOnStart {
 						if nerr := chromedp.Run(rs.ctx, chromedp.Navigate(opts.URL)); nerr != nil {
 							rs.Close()
 							return nil, nerr
@@ -866,6 +1175,13 @@ func startRemoteBrowser(node string, opts BrowserOptions) (*BrowserSession, erro
 	}
 	if strings.EqualFold(nodeInfo.OS, "windows") {
 		return startRemoteBrowserWindows(nodeInfo, opts)
+	}
+	// Prefer a no-repo SSH flow: reuse an already-debuggable browser on the remote host,
+	// or launch one directly there if needed. This avoids requiring Dialtone source on node.
+	if s, err := startRemoteBrowserUnixNoRepo(nodeInfo, opts); err == nil {
+		return s, nil
+	} else {
+		logs.Warn("   [BROWSER] remote no-repo attach path failed on %s: %v", nodeInfo.Name, err)
 	}
 	role := strings.TrimSpace(opts.Role)
 	if role == "" {
@@ -914,6 +1230,320 @@ func startRemoteBrowser(node string, opts BrowserOptions) (*BrowserSession, erro
 	if meta.DebugPort <= 0 {
 		return nil, fmt.Errorf("invalid remote debug port %d", meta.DebugPort)
 	}
+	wsPath := strings.TrimSpace(meta.WebSocketPath)
+	if wsPath == "" {
+		wsPath = chrome.WebSocketPathFromURL(meta.WebSocketURL)
+	}
+	if wsPath == "" {
+		return nil, fmt.Errorf("remote websocket path is empty")
+	}
+	attachHost := strings.TrimSpace(nodeInfo.Host)
+	attachPort := meta.DebugPort
+	var tunnelCloser io.Closer
+	if attachHost == "" || !canDialHostPort(attachHost, attachPort, 1500*time.Millisecond) {
+		if closer, lport, err := openSSHDebugTunnel(nodeInfo, meta.DebugPort); err == nil {
+			attachHost = "127.0.0.1"
+			attachPort = lport
+			tunnelCloser = closer
+			if localWS, werr := getWebsocketURL(attachPort); werr == nil && strings.TrimSpace(localWS) != "" {
+				if p := chrome.WebSocketPathFromURL(localWS); strings.TrimSpace(p) != "" {
+					wsPath = p
+				}
+			}
+		}
+	}
+	if strings.TrimSpace(attachHost) == "" {
+		return nil, fmt.Errorf("remote attach host is empty")
+	}
+	session := &chrome.Session{
+		PID:          meta.PID,
+		Port:         attachPort,
+		WebSocketURL: fmt.Sprintf("ws://%s:%d%s", attachHost, attachPort, wsPath),
+		IsNew:        false,
+	}
+	s, err := initSession(session, role)
+	if err != nil {
+		if tunnelCloser != nil {
+			_ = tunnelCloser.Close()
+		}
+		return nil, err
+	}
+	if tunnelCloser != nil {
+		s.closers = append(s.closers, tunnelCloser)
+	}
+	return s, nil
+}
+
+func startRemoteBrowserUnixNoRepo(nodeInfo sshv1.MeshNode, opts BrowserOptions) (*BrowserSession, error) {
+	url := strings.TrimSpace(opts.URL)
+	if url == "" {
+		url = "about:blank"
+	}
+	role := strings.TrimSpace(opts.Role)
+	if role == "" {
+		role = "test"
+	}
+	roleToken := strings.NewReplacer(" ", "-", "/", "-", "\\", "-", ":", "-", "'", "", "\"", "").Replace(role)
+	roleToken = strings.Trim(roleToken, "-")
+	if roleToken == "" {
+		roleToken = "test"
+	}
+	preferredPID := 0
+	if raw := strings.TrimSpace(os.Getenv("DIALTONE_TEST_REMOTE_BROWSER_PID")); raw != "" {
+		if p, err := strconv.Atoi(raw); err == nil && p > 0 {
+			preferredPID = p
+		}
+	}
+
+	// 1) Probe existing remote debug endpoints from Chrome/Chromium listeners.
+	probeScript := `
+set -eu
+procs="$(ps axww -o pid= -o command= | grep -Ei 'Google Chrome|google-chrome|chromium|msedge|microsoft edge' | grep -Ev 'grep|Crashpad|--type=|Helper \(Plugin\)|Helper \(Renderer\)|Helper \(GPU\)|Helper \(Alerts\)|Helper \(EH\)' || true)"
+if [ -n "$procs" ]; then
+  printf '%s\n' "$procs" | while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    pid="$(printf '%s' "$line" | awk '{print $1}')"
+    cmd="$(printf '%s' "$line" | cut -d' ' -f2-)"
+    echo "DIALTONE_REMOTE_CHROME_PID=${pid}|${cmd}"
+    arg_port="$(printf '%s' "$cmd" | sed -n 's/.*--remote-debugging-port=\([0-9][0-9]*\).*/\1/p' | head -n1)"
+    listen_ports="$(lsof -nP -a -p "$pid" -iTCP -sTCP:LISTEN 2>/dev/null | awk 'NR>1 {print $9}' | sed -n 's/.*:\([0-9][0-9]*\)$/\1/p' || true)"
+    ports="$(printf '%s\n%s\n' "$arg_port" "$listen_ports" | sed '/^[[:space:]]*$/d' | sort -u || true)"
+    if [ -z "$ports" ]; then
+      continue
+    fi
+    printf '%s\n' "$ports" | while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      resp="$(curl -fsS --max-time 1 "http://127.0.0.1:${p}/json/version" 2>/dev/null || true)"
+      if [ -n "$resp" ] && printf '%s' "$resp" | grep -q "webSocketDebuggerUrl"; then
+        ws="$(printf '%s' "$resp" | tr -d '\n' | sed -n 's/.*"webSocketDebuggerUrl"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+        echo "DIALTONE_REMOTE_DEBUG=${pid}|${p}|${ws}"
+      fi
+    done
+  done
+fi
+`
+	if out, err := sshv1.RunNodeCommand(nodeInfo.Name, probeScript, sshv1.CommandOptions{}); err == nil {
+		type candidate struct {
+			meta chrome.SessionMetadata
+			cmd  string
+		}
+		cmdByPID := make(map[int]string)
+		candidates := make([]candidate, 0)
+		procCount := 0
+		debugCount := 0
+		seen := make(map[string]struct{})
+		sc := bufio.NewScanner(strings.NewReader(out))
+		for sc.Scan() {
+			line := strings.TrimSpace(sc.Text())
+			if strings.HasPrefix(line, "DIALTONE_REMOTE_CHROME_PID=") {
+				procCount++
+				raw := strings.TrimPrefix(line, "DIALTONE_REMOTE_CHROME_PID=")
+				parts := strings.SplitN(raw, "|", 2)
+				if len(parts) == 2 {
+					if pid, perr := strconv.Atoi(strings.TrimSpace(parts[0])); perr == nil && pid > 0 {
+						cmdByPID[pid] = strings.TrimSpace(parts[1])
+					}
+				}
+				continue
+			}
+			if !strings.HasPrefix(line, "DIALTONE_REMOTE_DEBUG=") {
+				continue
+			}
+			debugCount++
+			raw := strings.TrimPrefix(line, "DIALTONE_REMOTE_DEBUG=")
+			parts := strings.SplitN(raw, "|", 3)
+			if len(parts) < 3 {
+				continue
+			}
+			pid, _ := strconv.Atoi(strings.TrimSpace(parts[0]))
+			port, _ := strconv.Atoi(strings.TrimSpace(parts[1]))
+			ws := strings.TrimSpace(parts[2])
+			if port <= 0 || ws == "" {
+				continue
+			}
+			key := fmt.Sprintf("%d|%d|%s", pid, port, ws)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			candidates = append(candidates, candidate{
+				meta: chrome.SessionMetadata{
+					PID:           pid,
+					DebugPort:     port,
+					WebSocketURL:  ws,
+					WebSocketPath: chrome.WebSocketPathFromURL(ws),
+					IsNew:         false,
+				},
+				cmd: strings.ToLower(strings.TrimSpace(cmdByPID[pid])),
+			})
+		}
+		logs.Info("   [BROWSER] remote no-repo probe on %s proc_lines=%d debug_lines=%d candidates=%d", nodeInfo.Name, procCount, debugCount, len(candidates))
+		candidateMatchesMode := func(c candidate) bool {
+			cmd := strings.ToLower(strings.TrimSpace(c.cmd))
+			if !opts.Headless && strings.Contains(cmd, "--headless") {
+				return false
+			}
+			if opts.GPU && strings.Contains(cmd, "--disable-gpu") {
+				return false
+			}
+			return true
+		}
+		tryAttach := func(label string, filter func(candidate) bool) (*BrowserSession, bool) {
+			attempts := 0
+			filtered := make([]candidate, 0, len(candidates))
+			for _, c := range candidates {
+				if !candidateMatchesMode(c) {
+					continue
+				}
+				if filter != nil && !filter(c) {
+					continue
+				}
+				filtered = append(filtered, c)
+			}
+			sort.SliceStable(filtered, func(i, j int) bool {
+				score := func(c candidate) int {
+					s := 0
+					if preferredPID > 0 && c.meta.PID == preferredPID {
+						s += 200
+					}
+					if strings.Contains(c.cmd, "--dialtone-role="+strings.ToLower(roleToken)) {
+						s += 100
+					}
+					if !strings.Contains(c.cmd, "--headless") {
+						s += 20
+					}
+					if !strings.Contains(c.cmd, "--disable-gpu") {
+						s += 10
+					}
+					if strings.Contains(c.cmd, ":5177") || strings.Contains(c.cmd, "/#hero") {
+						s += 5
+					}
+					return s
+				}
+				return score(filtered[i]) > score(filtered[j])
+			})
+			for _, c := range filtered {
+				attempts++
+				if s, aerr := attachRemoteSession(nodeInfo, role, c.meta); aerr == nil {
+					if opts.GPU && !opts.Headless {
+						if ok := browserSupportsWebGL(s); !ok {
+							logs.Warn("   [BROWSER] remote no-repo candidate lacks WebGL; skipping pid=%d port=%d", c.meta.PID, c.meta.DebugPort)
+							s.Close()
+							continue
+						}
+					}
+					logs.Info("   [BROWSER] remote no-repo attached on %s via %s candidate pid=%d port=%d", nodeInfo.Name, label, c.meta.PID, c.meta.DebugPort)
+					return s, true
+				} else if attempts <= 3 {
+					logs.Warn("   [BROWSER] remote no-repo attach candidate failed on %s via %s pid=%d port=%d err=%v", nodeInfo.Name, label, c.meta.PID, c.meta.DebugPort, aerr)
+				}
+			}
+			return nil, false
+		}
+		if preferredPID > 0 {
+			if s, ok := tryAttach("preferred-pid", func(c candidate) bool { return c.meta.PID == preferredPID }); ok {
+				return s, nil
+			}
+		}
+		roleNeedle := "--dialtone-role=" + strings.ToLower(roleToken)
+		if s, ok := tryAttach("role", func(c candidate) bool { return strings.Contains(c.cmd, roleNeedle) }); ok {
+			return s, nil
+		}
+		if s, ok := tryAttach("any", nil); ok {
+			return s, nil
+		}
+		logs.Warn("   [BROWSER] remote no-repo probe found no attachable endpoint on %s", nodeInfo.Name)
+	} else {
+		logs.Warn("   [BROWSER] remote no-repo probe failed on %s: %v", nodeInfo.Name, err)
+	}
+
+	// 2) If none found, launch a fresh remote browser with debug enabled (no Dialtone dependency).
+	launchScript := fmt.Sprintf(`
+set -eu
+url=%s
+profile="$HOME/.dialtone-remote-%s-profile"
+bin=""
+for c in "google-chrome" "google-chrome-stable" "chromium-browser" "chromium" "microsoft-edge" "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"; do
+  if [ -x "$c" ] || command -v "$c" >/dev/null 2>&1; then
+    bin="$c"
+    break
+  fi
+done
+if [ -z "$bin" ]; then
+  echo "no supported Chrome/Chromium executable found"
+  exit 2
+fi
+port=9222
+pid=0
+if curl -fsS --max-time 1 "http://127.0.0.1:${port}/json/version" >/dev/null 2>&1; then
+  # If 9222 is already in use and debuggable, reuse it.
+  pid="$(lsof -nP -iTCP:${port} -sTCP:LISTEN -t 2>/dev/null | head -n1 || true)"
+  if [ -z "$pid" ]; then pid=0; fi
+else
+  if command -v "$bin" >/dev/null 2>&1; then
+    cmd="$bin"
+  else
+    cmd="$bin"
+  fi
+  nohup "$cmd" --remote-debugging-port=${port} --remote-debugging-address=0.0.0.0 --remote-allow-origins=* --user-data-dir="$profile" --new-window "$url" >/tmp/dialtone_remote_browser.log 2>&1 < /dev/null &
+  pid=$!
+  # wait for debugger endpoint
+  ok=0
+  for _ in $(seq 1 60); do
+    if curl -fsS --max-time 1 "http://127.0.0.1:${port}/json/version" >/dev/null 2>&1; then
+      ok=1
+      break
+    fi
+    sleep 0.2
+  done
+  if [ "$ok" != "1" ]; then
+    echo "remote browser debugger not ready"
+    exit 4
+  fi
+fi
+resp="$(curl -fsS --max-time 1 "http://127.0.0.1:${port}/json/version")"
+ws="$(printf '%s' "$resp" | sed -n 's/.*"webSocketDebuggerUrl":"\([^"]*\)".*/\1/p' | head -n1)"
+path="$(printf '%s' "$ws" | sed -n 's#^ws://[^/]*/\(.*\)$#/\1#p' | head -n1)"
+printf 'DIALTONE_CHROME_SESSION_JSON={"pid":%s,"debug_port":%s,"websocket_url":"%s","websocket_path":"%s","is_new":true}' "$pid" "$port" "$ws" "${path:-}"
+`, shellQuote(url), roleToken)
+	out, err := sshv1.RunNodeCommand(nodeInfo.Name, launchScript, sshv1.CommandOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("remote no-repo browser launch on %s failed: %v output=%s", nodeInfo.Name, err, strings.TrimSpace(out))
+	}
+	raw := extractChromeSessionJSON(out)
+	if raw == "" {
+		return nil, fmt.Errorf("remote no-repo browser launch missing metadata marker")
+	}
+	var meta chrome.SessionMetadata
+	if err := json.Unmarshal([]byte(raw), &meta); err != nil {
+		return nil, fmt.Errorf("decode remote no-repo browser metadata: %w", err)
+	}
+	if meta.DebugPort <= 0 {
+		return nil, fmt.Errorf("invalid remote no-repo debug port %d", meta.DebugPort)
+	}
+	return attachRemoteSession(nodeInfo, role, meta)
+}
+
+func browserSupportsWebGL(s *BrowserSession) bool {
+	if s == nil {
+		return false
+	}
+	var ok bool
+	js := `(() => {
+		try {
+			const c = document.createElement("canvas");
+			return !!(c.getContext("webgl2") || c.getContext("webgl") || c.getContext("experimental-webgl"));
+		} catch (_) {
+			return false;
+		}
+	})()`
+	if err := s.RunWithTimeout(2500*time.Millisecond, chromedp.Evaluate(js, &ok)); err != nil {
+		return false
+	}
+	return ok
+}
+
+func attachRemoteSession(nodeInfo sshv1.MeshNode, role string, meta chrome.SessionMetadata) (*BrowserSession, error) {
 	wsPath := strings.TrimSpace(meta.WebSocketPath)
 	if wsPath == "" {
 		wsPath = chrome.WebSocketPathFromURL(meta.WebSocketURL)
@@ -1290,14 +1920,14 @@ func findAttachableDialtoneSession(role string, headless bool) *chrome.Session {
 
 func (sc *StepContext) EnsureBrowser(opts BrowserOptions) (*BrowserSession, error) {
 	if sc.Session != nil {
-		if !isBrowserSessionAlive(sc.Session) {
+		if !opts.PreserveTabAndSize && !isBrowserSessionAlive(sc.Session) {
 			sc.Session.Close()
 			sc.Session = nil
 		}
 	}
 	if sc.Session != nil {
 		sc.bindBrowserSession(sc.Session)
-		if strings.TrimSpace(opts.URL) != "" {
+		if strings.TrimSpace(opts.URL) != "" && !opts.SkipNavigateOnReuse && !opts.PreserveTabAndSize {
 			if err := sc.Session.Run(chromedp.Navigate(opts.URL)); err != nil {
 				return nil, err
 			}
@@ -1308,14 +1938,14 @@ func (sc *StepContext) EnsureBrowser(opts BrowserOptions) (*BrowserSession, erro
 		return sc.Session, nil
 	}
 	if sc.suiteBrowser != nil {
-		if !isBrowserSessionAlive(sc.suiteBrowser) {
+		if !opts.PreserveTabAndSize && !isBrowserSessionAlive(sc.suiteBrowser) {
 			sc.suiteBrowser.Close()
 			sc.suiteBrowser = nil
 		}
 	}
 	if sc.suiteBrowser != nil {
 		sc.bindBrowserSession(sc.suiteBrowser)
-		if strings.TrimSpace(opts.URL) != "" {
+		if strings.TrimSpace(opts.URL) != "" && !opts.SkipNavigateOnReuse && !opts.PreserveTabAndSize {
 			if err := sc.Session.Run(chromedp.Navigate(opts.URL)); err != nil {
 				return nil, err
 			}
@@ -1435,7 +2065,28 @@ func (sc *StepContext) WaitForAriaLabel(label string, timeout time.Duration) err
 	if err != nil {
 		return err
 	}
-	return b.RunWithTimeout(timeout, WaitForAriaLabel(label))
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	selector := fmt.Sprintf(`[aria-label=%q]`, label)
+	js := fmt.Sprintf(`(() => !!document.querySelector(%q))()`, selector)
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		var ok bool
+		if err := b.Run(chromedp.Evaluate(js, &ok)); err == nil {
+			if ok {
+				return nil
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(140 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("timed out waiting for aria-label %q after %v (last error: %w)", label, timeout, lastErr)
+	}
+	return fmt.Errorf("timed out waiting for aria-label %q after %v", label, timeout)
 }
 
 func (sc *StepContext) ClickAriaLabel(label string) error {
@@ -1467,7 +2118,32 @@ func (sc *StepContext) WaitForAriaLabelAttrEquals(label, attr, expected string, 
 	if err != nil {
 		return err
 	}
-	return b.RunWithTimeout(timeout, WaitForAriaLabelAttrEquals(label, attr, expected, timeout))
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	selector := fmt.Sprintf(`[aria-label=%q]`, label)
+	js := fmt.Sprintf(`(() => {
+		const el = document.querySelector(%q);
+		if (!el) return false;
+		return el.getAttribute(%q) === %q;
+	})()`, selector, attr, expected)
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		var ok bool
+		if err := b.Run(chromedp.Evaluate(js, &ok)); err == nil {
+			if ok {
+				return nil
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(160 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("timed out waiting for aria-label %q attr %q=%q after %v (last error: %w)", label, attr, expected, timeout, lastErr)
+	}
+	return fmt.Errorf("timed out waiting for aria-label %q attr %q=%q after %v", label, attr, expected, timeout)
 }
 
 func (sc *StepContext) ClickAriaLabelAfterWait(label string, timeout time.Duration) error {
@@ -1482,7 +2158,7 @@ func (sc *StepContext) ClickAt(x, y float64) error {
 	if err != nil {
 		return err
 	}
-	return b.Run(chromedp.MouseClickXY(x, y))
+	return b.Run(ClickAt(x, y))
 }
 
 // TapAt uses a click event as the cross-platform tap primitive for test automation.
@@ -1537,7 +2213,9 @@ func (sc *StepContext) bindBrowserSession(s *BrowserSession) {
 		return
 	}
 	s.onConsole = func(msg ConsoleMessage) {
-		sc.publishBrowserEvent(false, "CONSOLE:"+msg.Type, msg.Text)
+		msgType := strings.ToLower(strings.TrimSpace(msg.Type))
+		isErr := msgType == "error" || msgType == "assert"
+		sc.publishBrowserEvent(isErr, "CONSOLE:"+msg.Type, msg.Text)
 	}
 	s.onError = func(msg ConsoleMessage) {
 		sc.publishBrowserEvent(true, "ERROR", msg.Text)
