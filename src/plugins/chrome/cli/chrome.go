@@ -87,7 +87,7 @@ func RunChrome(args []string) {
 		role := newFlags.String("role", "", "Dialtone role tag (e.g. dev, smoke)")
 		reuseExisting := newFlags.Bool("reuse-existing", false, "Attach to existing matching role/headless instance")
 		userDataDir := newFlags.String("user-data-dir", "", "Explicit Chrome user data dir")
-		debugAddress := newFlags.String("debug-address", "127.0.0.1", "Remote debug bind address")
+		debugAddress := newFlags.String("debug-address", "", "Remote debug bind address (empty=auto)")
 		debug := newFlags.Bool("debug", false, "Enable verbose logging")
 
 		for _, arg := range args[1:] {
@@ -117,7 +117,7 @@ func RunChrome(args []string) {
 		role := sessionFlags.String("role", "", "Dialtone role tag (e.g. dev, smoke)")
 		reuseExisting := sessionFlags.Bool("reuse-existing", true, "Attach to existing matching role/headless instance")
 		userDataDir := sessionFlags.String("user-data-dir", "", "Explicit Chrome user data dir")
-		debugAddress := sessionFlags.String("debug-address", "127.0.0.1", "Remote debug bind address")
+		debugAddress := sessionFlags.String("debug-address", "", "Remote debug bind address (empty=auto)")
 		url := sessionFlags.String("url", "about:blank", "Initial URL")
 		if err := sessionFlags.Parse(args[1:]); err != nil {
 			logs.Fatal("session parse failed: %v", err)
@@ -390,7 +390,7 @@ func printChromeUsage() {
 	fmt.Println("  --role <name>       Tag launched browser role (dev|test)")
 	fmt.Println("  --reuse-existing    Reuse existing matching role/headless instance")
 	fmt.Println("  --user-data-dir     Set explicit profile directory")
-	fmt.Println("  --debug-address     Set remote debug bind address (127.0.0.1 or 0.0.0.0)")
+	fmt.Println("  --debug-address     Set remote debug bind address (empty=auto, or 127.0.0.1/0.0.0.0)")
 	fmt.Println("\nFlags for kill:")
 	fmt.Println("  --all               Kill ALL Chrome/Edge processes system-wide")
 	fmt.Println("  --windows           Use with 'kill' for WSL host processes (auto-detected usually)")

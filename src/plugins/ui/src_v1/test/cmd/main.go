@@ -53,6 +53,12 @@ func main() {
 	})
 	common.ApplyRuntimeConfig()
 	if attach != "" {
+		if meshNode, err := sshv1.ResolveMeshNode(attach); err == nil && strings.EqualFold(strings.TrimSpace(meshNode.OS), "windows") {
+			testv1.UpdateRuntimeConfig(func(cfg *testv1.RuntimeConfig) {
+				cfg.NoSSH = true
+			})
+			logs.Info("ui test auto-enabled --no-ssh for windows attach node=%s", attach)
+		}
 		logs.Info("ui test remote attach mode (headed) node=%s url=%s cps=%.3f", attach, url, common.ClicksPerSecond)
 		if err := ensureAttachBrowser(attach, url); err != nil {
 			logs.Error("ui test attach preflight failed: %v", err)

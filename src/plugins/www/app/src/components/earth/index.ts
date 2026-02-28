@@ -225,7 +225,7 @@ export class ProceduralOrbit {
   }
 
   private buildLandLayer(cells: string[], resolution: number) {
-    const landLayer = new HexLayer(this.earthRadius, { radiusOffset: 0.6, count: cells.length, resolution, ratePerSecond: 1, durationSeconds: 9999, opacity: 0.95, palette: [new THREE.Color(0.2, 0.35, 0.2), new THREE.Color(0.25, 0.45, 0.25), new THREE.Color(0.4, 0.5, 0.3)], cells, animate: false });
+    const landLayer = new HexLayer(this.earthRadius, { radiusOffset: 1.1, count: cells.length, resolution, ratePerSecond: 1, durationSeconds: 9999, opacity: 0.95, palette: [new THREE.Color(0.2, 0.35, 0.2), new THREE.Color(0.25, 0.45, 0.25), new THREE.Color(0.4, 0.5, 0.3)], cells, animate: false });
     landLayer.material.depthWrite = false;
     landLayer.material.polygonOffset = true;
     landLayer.material.polygonOffsetFactor = landLayer.material.polygonOffsetUnits = -1;
@@ -343,7 +343,7 @@ export class ProceduralOrbit {
 
   setSunOrbitAngleRad(a: number) { this.sunOrbitAngleDeg = (a - this.sunTimeMs * this.sunOrbitSpeed) / DEG_TO_RAD; }
   setLandRadius(r: number) { this.landLayer?.setRadius(this.earthRadius, r - this.earthRadius); }
-  getLandRadius() { return this.earthRadius + 0.6; }
+  getLandRadius() { return this.earthRadius + 1.1; }
   setCloud1Radius(r: number) { this.cloud1.scale.setScalar(r / (this.earthRadius + 1.2)); }
   getCloud1Radius() { return (this.earthRadius + 1.2) * this.cloud1.scale.x; }
   setCloud2Radius(r: number) { this.cloud2.scale.setScalar(r / (this.earthRadius + 1.5)); }

@@ -39,8 +39,10 @@ class ThreeControl implements VisualizationControl {
         { label: 'Arm', action: () => sendCommand('arm') },
         { label: 'Disarm', action: () => sendCommand('disarm') },
         { label: 'Manual', action: () => sendCommand('mode', 'manual') },
+        { label: 'Steering', action: () => sendCommand('mode', 'steering') },
         { label: 'Guided', action: () => sendCommand('mode', 'guided') },
-        null, null, null, null
+        { label: 'Pulse Fwd', action: () => sendCommand('pulse_fwd') },
+        null, null
       ]
     });
 
