@@ -45,6 +45,12 @@ Here are some high-quality prompts structured according to the Lyria pillars:
 ### 4. Epic Orchestral
 > **Prompt:** "Modern cinematic orchestral theme, epic and heroic. High-energy tempo with staccato strings, powerful brass fanfares, and thunderous taiko drums. Starts with a quiet, mysterious woodwind solo and builds into a massive, explosive orchestral climax."
 
+### 5. Ambient Robot Factory (Industrial Scifi)
+> **Prompt:** "Minimalist industrial ambient for a robot-themed puzzle game. Slow and rhythmic, 90 BPM. Features pulsing analog sub-bass, rhythmic mechanical clicks, and shimmering digital 'bleeps and bloops' echoing in a vast space. Subdued dynamics with a cold, metallic, yet curious atmosphere."
+
+### 6. World Simulator (Nature & Evolution)
+> **Prompt:** "Serene and expansive ambient for a planetary evolution simulator. Very slow tempo, 60 BPM. Featuring a gentle, resonant grand piano, soft flute melodies, and shimmering wind chimes. Layered with subtle field recordings of wind and distant birds. The dynamics are spacious and gradually evolving, creating a sense of timelessness and natural wonder."
+
 ## CLI Usage
 
 ```sh
@@ -80,7 +86,7 @@ func generate(ctx context.Context, projectID, prompt string) error {
 		Backend:  genai.BackendVertexAI,
 	})
 
-	model := "lyria-002"
+	model := "lyria-003"
 	resp, err := client.Models.GenerateContent(ctx, model, genai.Text(prompt), nil)
 	if err != nil {
 		return err
