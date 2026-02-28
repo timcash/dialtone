@@ -18,7 +18,7 @@ func TestResolveMeshNodeAlias(t *testing.T) {
 	}
 }
 
-func TestResolveCommandTransportLegionUsesSSHInWSL(t *testing.T) {
+func TestResolveCommandTransportLegionUsesPowerShellInWSL(t *testing.T) {
 	prev := isWSLFunc
 	isWSLFunc = func() bool { return true }
 	defer func() { isWSLFunc = prev }()
@@ -27,8 +27,8 @@ func TestResolveCommandTransportLegionUsesSSHInWSL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveCommandTransport failed: %v", err)
 	}
-	if transport != "ssh" {
-		t.Fatalf("expected ssh transport, got %s", transport)
+	if transport != "powershell" {
+		t.Fatalf("expected powershell transport, got %s", transport)
 	}
 }
 

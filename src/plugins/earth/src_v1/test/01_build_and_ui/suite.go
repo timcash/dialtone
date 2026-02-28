@@ -67,11 +67,14 @@ func Register(reg *testv1.Registry, opts Options) {
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			attachNode := strings.TrimSpace(opts.AttachNode)
 			targetURL := strings.TrimSpace(opts.TargetURL)
-			if attachNode == "" {
-				if targetURL == "" {
-					targetURL = "http://127.0.0.1:8891"
-				}
-				srv := exec.Command("bash", "-lc", "if [ -x ./dialtone.sh ]; then ./dialtone.sh earth src_v1 serve --addr :8891; elif [ -x ../dialtone.sh ]; then ../dialtone.sh earth src_v1 serve --addr :8891; else echo 'dialtone.sh not found'; exit 1; fi")
+			localURL := "http://127.0.0.1:8891"
+			if targetURL == "" {
+				targetURL = localURL
+			}
+
+			var srv *exec.Cmd
+			if err := waitHTTPReady(localURL, 1200*time.Millisecond); err != nil {
+				srv = exec.Command("bash", "-lc", "if [ -x ./dialtone.sh ]; then ./dialtone.sh earth src_v1 serve --addr :8891; elif [ -x ../dialtone.sh ]; then ../dialtone.sh earth src_v1 serve --addr :8891; else echo 'dialtone.sh not found'; exit 1; fi")
 				srv.Dir = ctx.RepoRoot()
 				if err := srv.Start(); err != nil {
 					return testv1.StepRunResult{}, fmt.Errorf("start earth serve failed: %w", err)
@@ -80,8 +83,16 @@ func Register(reg *testv1.Registry, opts Options) {
 					_ = srv.Process.Kill()
 					_, _ = srv.Process.Wait()
 				}()
-				if err := waitHTTPReady(targetURL, 8*time.Second); err != nil {
+				if err := waitHTTPReady(localURL, 8*time.Second); err != nil {
 					return testv1.StepRunResult{}, fmt.Errorf("earth serve not ready: %w", err)
+				}
+			}
+
+			if attachNode != "" {
+				if strings.Contains(targetURL, "127.0.0.1:8891") || strings.Contains(targetURL, "localhost:8891") {
+					if inferred, err := inferWSLURL(8891); err == nil {
+						targetURL = inferred
+					}
 				}
 			}
 
@@ -90,15 +101,12 @@ func Register(reg *testv1.Registry, opts Options) {
 			reuse := false
 			remoteNode := ""
 			if attachNode != "" {
-				role = "earth-dev"
+				role = "test"
 				headless = false
 				reuse = true
 				remoteNode = attachNode
 			} else {
-				remoteNode = strings.TrimSpace(os.Getenv("EARTH_TEST_BROWSER_NODE"))
-				if remoteNode == "" && isWSL() {
-					remoteNode = "chroma"
-				}
+				remoteNode = ""
 				if remoteNode != "" {
 					// Robot hero requires a real WebGL context; use headed mode on remote hosts.
 					headless = false

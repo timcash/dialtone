@@ -2,6 +2,53 @@
 
 All logs go through **NATS** by default. Producers (plugins, services) publish only to NATS; no file, no stdout from the app. Readers (CLI, file writer, browser) subscribe to NATS and can attach stdout, files, or UIs as they want. 
 
+## Complete Shell Workflow
+
+```bash
+# Core lifecycle
+./dialtone.sh logs src_v1 nats-start
+./dialtone.sh logs src_v1 nats-status
+./dialtone.sh logs src_v1 nats-stop
+
+# Plugin verification + artifacts
+./dialtone.sh logs src_v1 test
+
+# Local stream modes
+./dialtone.sh logs src_v1 stream
+./dialtone.sh logs src_v1 tail
+./dialtone.sh logs src_v1 stream --topic 'logs.>'
+./dialtone.sh logs src_v1 stream --topic 'logs.task.>'
+./dialtone.sh logs src_v1 stream --topic 'logs.*.smoke'
+./dialtone.sh logs src_v1 stream --topic 'logfilter.level.error.>'
+./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.fail.>'
+./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.test.>'
+./dialtone.sh logs src_v1 stream --topic 'logs.>' --file ./dialtone.log
+./dialtone.sh logs src_v1 stream --topic 'logs.>' --lines 200
+./dialtone.sh logs src_v1 stream --embedded
+./dialtone.sh logs src_v1 stream --nats-url nats://127.0.0.1:4222
+
+# Remote stream mode (robot over SSH)
+./dialtone.sh logs src_v1 stream --remote --topic 'logs.>'
+./dialtone.sh logs src_v1 stream --remote --topic 'logs.robot.>' --host user@robot-host --port 22
+./dialtone.sh logs src_v1 stream --remote --topic 'logs.robot.>' --user tim --pass '...'
+
+# Ping/pong participant test mode
+./dialtone.sh logs src_v1 pingpong --id a --peer b --topic logs.pingpong --rounds 3
+./dialtone.sh logs src_v1 pingpong --id b --peer a --topic logs.pingpong --rounds 3
+
+# Dev/build/tooling commands exposed by the plugin scaffold
+./dialtone.sh logs src_v1 install
+./dialtone.sh logs src_v1 fmt
+./dialtone.sh logs src_v1 format
+./dialtone.sh logs src_v1 vet
+./dialtone.sh logs src_v1 go-build
+./dialtone.sh logs src_v1 lint
+./dialtone.sh logs src_v1 build
+./dialtone.sh logs src_v1 dev
+./dialtone.sh logs src_v1 ui-run
+./dialtone.sh logs src_v1 serve
+```
+
 ---
 
 ## Core Mandates

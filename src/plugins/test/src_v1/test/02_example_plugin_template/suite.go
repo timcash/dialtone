@@ -33,7 +33,7 @@ func Register(r *testv1.Registry) {
 		Timeout: 20 * time.Second,
 		RunWithContext: func(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 			if !testv1.BrowserProviderAvailable() {
-				sc.Warnf("browser provider not available; set DIALTONE_TEST_BROWSER_NODE for remote mode")
+				sc.Warnf("browser provider not available; use --attach <node> for remote mode")
 				return testv1.StepRunResult{Report: "skipped browser helper example (chrome not installed)"}, nil
 			}
 			b, err := sc.EnsureBrowser(testv1.BrowserOptions{

@@ -17,6 +17,11 @@ func main() {
 	logs.Info("Running ssh src_v1 tests in single process (%d steps)", len(reg.Steps))
 	err := reg.Run(testv1.SuiteOptions{
 		Version:       "ssh-src-v1",
+		ReportPath:    "plugins/ssh/src_v1/TEST.md",
+		RawReportPath: "plugins/ssh/src_v1/TEST_RAW.md",
+		ReportFormat:  "template",
+		ReportTitle:   "SSH Plugin src_v1 Test Report",
+		ReportRunner:  "test/src_v1",
 		NATSURL:       "nats://127.0.0.1:4222",
 		NATSSubject:   "logs.test.ssh-src-v1",
 		AutoStartNATS: true,

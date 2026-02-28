@@ -142,6 +142,7 @@ func ForwardRemoteToLocal(client *ssh.Client, remoteAddr, localAddr string) erro
 					done <- struct{}{}
 				}()
 				<-done
+				<-done
 			}()
 		}
 	}()

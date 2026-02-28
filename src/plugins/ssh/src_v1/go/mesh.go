@@ -91,13 +91,15 @@ var defaultMeshNodes = []MeshNode{
 		},
 	},
 	{
-		Name:                "legion",
-		Aliases:             []string{"legion", "legion.shad-artichoke.ts.net"},
-		User:                "timca",
-		Host:                "legion.shad-artichoke.ts.net",
-		Port:                "2223",
-		OS:                  "windows",
-		PreferWSLPowerShell: false,
+		Name:    "legion",
+		Aliases: []string{"legion", "legion.shad-artichoke.ts.net"},
+		User:    "timca",
+		Host:    "legion.shad-artichoke.ts.net",
+		Port:    "2223",
+		OS:      "windows",
+		// When invoked from this repo's WSL environment, execute directly via
+		// Windows PowerShell instead of mesh SSH.
+		PreferWSLPowerShell: true,
 		RepoCandidates: []string{
 			"/home/user/dialtone",
 			"/home/user/dialtone",

@@ -511,8 +511,8 @@ func RelaunchProfileChromeDebug(url, role string) error {
 		}
 		logPath := filepath.Join(os.TempDir(), role+"_profile_debug_chrome.log")
 		cmdLine := fmt.Sprintf(
-			"nohup %q --remote-debugging-port=9222 --remote-debugging-address=127.0.0.1 --user-data-dir=%q --profile-directory=Default --dialtone-origin=true --dialtone-role=%s --new-window %q >> %q 2>&1 < /dev/null & disown",
-			chromeBin, userDataDir, role, url, logPath,
+			"nohup %q --remote-debugging-port=%d --remote-debugging-address=127.0.0.1 --user-data-dir=%q --profile-directory=Default --dialtone-origin=true --dialtone-role=%s --new-window %q >> %q 2>&1 < /dev/null & disown",
+			chromeBin, DefaultDebugPort, userDataDir, role, url, logPath,
 		)
 		return exec.Command("bash", "-lc", cmdLine).Run()
 	case "linux":
@@ -520,7 +520,7 @@ func RelaunchProfileChromeDebug(url, role string) error {
 		time.Sleep(1200 * time.Millisecond)
 		return exec.Command(
 			"google-chrome",
-			"--remote-debugging-port=9222",
+			fmt.Sprintf("--remote-debugging-port=%d", DefaultDebugPort),
 			"--remote-debugging-address=127.0.0.1",
 			"--user-data-dir="+userDataDir,
 			"--dialtone-origin=true",
@@ -533,7 +533,7 @@ func RelaunchProfileChromeDebug(url, role string) error {
 		time.Sleep(1200 * time.Millisecond)
 		return exec.Command(
 			"cmd", "/c", "start", "", "chrome",
-			"--remote-debugging-port=9222",
+			fmt.Sprintf("--remote-debugging-port=%d", DefaultDebugPort),
 			"--remote-debugging-address=127.0.0.1",
 			"--user-data-dir="+userDataDir,
 			"--dialtone-origin=true",

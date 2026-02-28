@@ -13,45 +13,44 @@ import (
 
 var injectedBrowserCheckBySuite sync.Map
 
-func (sc *StepContext) runInjectedBrowserErrorCheckOnce() error {
-	suiteKey := strings.TrimSpace(sc.SuiteSubject)
-	if suiteKey == "" {
+func (sc *StepContext) runErrorPingCheckOnce() error {
+	checkKey := strings.TrimSpace(sc.SuiteSubject)
+	if checkKey == "" {
+		checkKey = "__dialtone_error_ping_global__"
+	}
+	if _, loaded := injectedBrowserCheckBySuite.LoadOrStore(checkKey, true); loaded {
 		return nil
 	}
-	if _, loaded := injectedBrowserCheckBySuite.LoadOrStore(suiteKey, true); loaded {
-		return nil
-	}
-	if err := sc.runInjectedBrowserErrorCheck(); err != nil {
-		injectedBrowserCheckBySuite.Delete(suiteKey)
+	if err := sc.runErrorPingCheck(); err != nil {
+		injectedBrowserCheckBySuite.Delete(checkKey)
 		return err
 	}
 	return nil
 }
 
-func (sc *StepContext) runInjectedBrowserErrorCheck() error {
-	if RemoteBrowserConfigured() {
-		sc.Warnf("INJECTED_BROWSER_CHECK: skipped (remote browser mode)")
-		return nil
-	}
+func (sc *StepContext) runErrorPingCheck() error {
 	nc := sc.NATSConn()
 	if nc == nil {
-		sc.Warnf("INJECTED_BROWSER_CHECK: skipped (no nats connection)")
+		sc.Warnf("ERROR_PING: skipped (no nats connection)")
 		return nil
 	}
 	browserSubject := strings.TrimSpace(sc.BrowserSubject)
 	errorSubject := strings.TrimSpace(sc.ErrorSubject)
 	if browserSubject == "" || errorSubject == "" {
-		sc.Warnf("INJECTED_BROWSER_CHECK: skipped (subjects missing browser=%q error=%q)", browserSubject, errorSubject)
+		sc.Warnf("ERROR_PING: skipped (subjects missing browser=%q error=%q)", browserSubject, errorSubject)
 		return nil
 	}
-	b, err := sc.Browser()
-	if err != nil {
-		return err
+	b := sc.Session
+	if b == nil {
+		return fmt.Errorf("error-ping requires an initialized browser session")
+	}
+	if err := waitForBrowserSessionReady(b, 12*time.Second); err != nil {
+		return fmt.Errorf("error-ping browser readiness: %w", err)
 	}
 
-	markerBrowser := fmt.Sprintf("__DIALTONE_INJECTED_BROWSER_TOPIC__:%d", time.Now().UnixNano())
+	markerBrowser := fmt.Sprintf("__DIALTONE_ERROR_PING__:%d", time.Now().UnixNano())
 	markerError := markerBrowser + ":error"
-	sc.Infof("INJECTED_BROWSER_CHECK: start browser_subject=%s error_subject=%s", browserSubject, errorSubject)
+	sc.Infof("ERROR_PING: start browser_subject=%s error_subject=%s", browserSubject, errorSubject)
 
 	browserCh := make(chan string, 32)
 	errorCh := make(chan string, 32)
@@ -79,24 +78,28 @@ func (sc *StepContext) runInjectedBrowserErrorCheck() error {
   return true;
 })()`, markerBrowser, markerError)
 	var ok bool
-	if err := b.RunWithTimeout(5*time.Second, chromedp.Evaluate(js, &ok)); err != nil {
-		if isNoBrowserOpenError(err) {
-			sc.Warnf("INJECTED_BROWSER_CHECK: no open page; creating page and retrying evaluate")
-			if rerr := b.EnsureOpenPage(); rerr != nil {
-				return fmt.Errorf("injected browser check recover page: %w", rerr)
-			}
-			if err2 := b.RunWithTimeout(5*time.Second, chromedp.Evaluate(js, &ok)); err2 != nil {
-				return fmt.Errorf("injected browser check evaluate after recover: %w", err2)
-			}
-		} else if strings.Contains(strings.ToLower(err.Error()), "context canceled") {
-			sc.Warnf("INJECTED_BROWSER_CHECK: context canceled; retrying evaluate once")
-			time.Sleep(150 * time.Millisecond)
-			if err2 := b.RunWithTimeout(5*time.Second, chromedp.Evaluate(js, &ok)); err2 != nil {
-				return fmt.Errorf("injected browser check evaluate after context-canceled retry: %w", err2)
-			}
-		} else {
-			return fmt.Errorf("injected browser check evaluate: %w", err)
+	var evalErr error
+	for attempt := 1; attempt <= 4; attempt++ {
+		evalErr = b.RunWithTimeout(7*time.Second, chromedp.Evaluate(js, &ok))
+		if evalErr == nil {
+			break
 		}
+		lower := strings.ToLower(evalErr.Error())
+		recoverable := isNoBrowserOpenError(evalErr) ||
+			isNoTargetIDError(evalErr) ||
+			strings.Contains(lower, "context canceled") ||
+			strings.Contains(lower, "context deadline exceeded")
+		if !recoverable {
+			return fmt.Errorf("error-ping evaluate: %w", evalErr)
+		}
+		sc.Warnf("ERROR_PING: recoverable evaluate error (attempt %d/4): %v", attempt, evalErr)
+		if rerr := b.EnsureOpenPage(); rerr != nil {
+			sc.Warnf("ERROR_PING: ensure page after recoverable error failed: %v", rerr)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	if evalErr != nil {
+		return fmt.Errorf("error-ping evaluate failed after retries: %w", evalErr)
 	}
 
 	deadline := time.Now().Add(5 * time.Second)
@@ -107,19 +110,19 @@ func (sc *StepContext) runInjectedBrowserErrorCheck() error {
 		case line := <-browserCh:
 			if strings.Contains(line, markerBrowser) {
 				gotBrowser = true
-				sc.Infof("INJECTED_BROWSER_CHECK: browser-topic-ok marker=%s", markerBrowser)
+				sc.Infof("ERROR_PING: browser-topic-ok marker=%s", markerBrowser)
 			}
 		case line := <-errorCh:
 			if strings.Contains(line, markerError) {
 				gotError = true
-				sc.Infof("INJECTED_BROWSER_CHECK: error-topic-ok marker=%s", markerError)
+				sc.Infof("ERROR_PING: error-topic-ok marker=%s", markerError)
 			}
 		case <-time.After(120 * time.Millisecond):
 		}
 	}
 	if !gotBrowser || !gotError {
-		return fmt.Errorf("injected browser check failed: browser_topic=%t error_topic=%t", gotBrowser, gotError)
+		return fmt.Errorf("error-ping failed: browser_topic=%t error_topic=%t", gotBrowser, gotError)
 	}
-	sc.Infof("INJECTED_BROWSER_CHECK: pass browser_topic=%t error_topic=%t", gotBrowser, gotError)
+	sc.Infof("ERROR_PING: pass browser_topic=%t error_topic=%t", gotBrowser, gotError)
 	return nil
 }

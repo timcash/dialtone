@@ -16,13 +16,11 @@ func NewRegistry() *Registry {
 func RunSuiteV1(reg *Registry) error {
 	return reg.Run(testv1.SuiteOptions{
 		Version:               "ui-src-v1",
-		ReportPath:            "plugins/ui/src_v1/test/TEST.md",
-		RawReportPath:         "plugins/ui/src_v1/test/TEST_RAW.md",
+		ReportPath:            "plugins/ui/src_v1/TEST.md",
+		RawReportPath:         "plugins/ui/src_v1/TEST_RAW.md",
 		ReportFormat:          "template",
 		ReportTitle:           "UI Plugin src_v1 Test Report",
 		ReportRunner:          "test/src_v1",
-		LogPath:               "plugins/ui/src_v1/test/test.log",
-		ErrorLogPath:          "plugins/ui/src_v1/test/error.log",
 		NATSURL:               "nats://127.0.0.1:4222",
 		NATSSubject:           "logs.test.ui.src-v1",
 		AutoStartNATS:         true,

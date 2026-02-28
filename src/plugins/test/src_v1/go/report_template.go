@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -49,6 +50,18 @@ func RenderTemplateReport(rawPath, outPath string, opts TemplateReportOptions) e
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("# %s\n\n", title))
+	sb.WriteString("## Test Environment\n\n")
+	sb.WriteString("```text\n")
+	envLines := collectTestEnvLines()
+	if len(envLines) == 0 {
+		sb.WriteString("<empty>\n")
+	} else {
+		for _, line := range envLines {
+			sb.WriteString(line)
+			sb.WriteString("\n")
+		}
+	}
+	sb.WriteString("```\n\n")
 	sb.WriteString(fmt.Sprintf("**Generated at:** %s\n", time.Now().Format(time.RFC1123Z)))
 	sb.WriteString(fmt.Sprintf("**Version:** `%s`\n", version))
 	sb.WriteString(fmt.Sprintf("**Runner:** `%s`\n", runner))
@@ -96,8 +109,8 @@ func RenderTemplateReport(rawPath, outPath string, opts TemplateReportOptions) e
 			}
 			sb.WriteString("```\n\n")
 		}
-		if injectedLines := extractInjectedBrowserCheckLines(st.Logs); len(injectedLines) > 0 {
-			sb.WriteString("### Injected Browser Error Check\n\n")
+		if injectedLines := extractErrorPingLines(st.Logs); len(injectedLines) > 0 {
+			sb.WriteString("### Error-Ping Check\n\n")
 			sb.WriteString("```text\n")
 			for _, line := range injectedLines {
 				sb.WriteString(line)
@@ -115,16 +128,18 @@ func RenderTemplateReport(rawPath, outPath string, opts TemplateReportOptions) e
 			}
 			sb.WriteString("```\n\n")
 		}
-		if len(st.Errors) > 0 {
-			sb.WriteString("### Errors\n\n")
-			sb.WriteString("```text\n")
-			sb.WriteString("errors:\n")
+		sb.WriteString("### Errors\n\n")
+		sb.WriteString("```text\n")
+		sb.WriteString("errors:\n")
+		if len(st.Errors) == 0 {
+			sb.WriteString("<empty>\n")
+		} else {
 			for _, line := range st.Errors {
 				sb.WriteString(line)
 				sb.WriteString("\n")
 			}
-			sb.WriteString("```\n\n")
 		}
+		sb.WriteString("```\n\n")
 		sb.WriteString("### Browser Logs\n\n")
 		sb.WriteString("```text\n")
 		sb.WriteString("browser_logs:\n")
@@ -173,6 +188,28 @@ func RenderTemplateReport(rawPath, outPath string, opts TemplateReportOptions) e
 	return os.WriteFile(outPath, []byte(sb.String()), 0644)
 }
 
+func collectTestEnvLines() []string {
+	env := os.Environ()
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		key := kv
+		if idx := strings.Index(kv, "="); idx >= 0 {
+			key = kv[:idx]
+		}
+		u := strings.ToUpper(strings.TrimSpace(key))
+		if u == "" {
+			continue
+		}
+		// Keep report env output scoped to explicit test runtime controls.
+		// Other *_TEST vars should be configured via CLI flags per-plugin.
+		if strings.HasPrefix(u, "DIALTONE_TEST_") {
+			out = append(out, kv)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 func screenshotMarkdownLink(reportPath, shot string) string {
 	base := filepath.Base(strings.TrimSpace(shot))
 	if base == "" {
@@ -201,11 +238,13 @@ func extractOverlapLines(lines []string) []string {
 	return out
 }
 
-func extractInjectedBrowserCheckLines(lines []string) []string {
+func extractErrorPingLines(lines []string) []string {
 	out := make([]string, 0)
 	for _, line := range lines {
-		if !strings.Contains(line, "INJECTED_BROWSER_CHECK:") {
-			continue
+		if !strings.Contains(line, "ERROR_PING:") {
+			if !strings.Contains(line, "INJECTED_BROWSER_CHECK:") {
+				continue
+			}
 		}
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {

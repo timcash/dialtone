@@ -99,7 +99,10 @@ func generateReports(opts SuiteOptions, results []StepResult, totalDuration time
 		if err := generateReport(opts, results, totalDuration); err != nil {
 			return err
 		}
-		return generateErrorsReport(opts, results, totalDuration)
+		if err := generateErrorsReport(opts, results, totalDuration); err != nil {
+			return err
+		}
+		return appendSuiteChromeReport(opts)
 	}
 	reportPath := strings.TrimSpace(opts.ReportPath)
 	if reportPath == "" {
@@ -129,7 +132,10 @@ func generateReports(opts SuiteOptions, results []StepResult, totalDuration time
 	}); err != nil {
 		return err
 	}
-	return generateErrorsReport(opts, results, totalDuration)
+	if err := generateErrorsReport(opts, results, totalDuration); err != nil {
+		return err
+	}
+	return appendSuiteChromeReport(opts)
 }
 
 func generateErrorsReport(opts SuiteOptions, results []StepResult, totalDuration time.Duration) error {
@@ -225,6 +231,12 @@ func extractBrowserErrorLines(lines []string) []string {
 			continue
 		}
 		lower := strings.ToLower(trimmed)
+		if strings.Contains(lower, "__dialtone_injected_browser_topic__") {
+			continue
+		}
+		if strings.Contains(lower, "__dialtone_error_ping__") {
+			continue
+		}
 		if strings.Contains(lower, "exception") || strings.Contains(lower, "error") || strings.Contains(lower, "fail") {
 			out = append(out, trimmed)
 		}

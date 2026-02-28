@@ -2,6 +2,29 @@
 
 This file is the short, LLM-first contract for working in `src/plugins`.
 
+## Generic Shell Workflow
+```bash
+# Generic command shape
+./dialtone.sh <plugin> <src_vN> <command> [args] [--flags]
+
+# Standard command set most plugins should expose
+./dialtone.sh <plugin> <src_vN> install
+./dialtone.sh <plugin> <src_vN> format
+./dialtone.sh <plugin> <src_vN> lint
+./dialtone.sh <plugin> <src_vN> build
+./dialtone.sh <plugin> <src_vN> test
+
+# Typical filtered/flagged test run
+./dialtone.sh <plugin> <src_vN> test --filter <expr>
+```
+
+## Core Plugins
+- `logs`: [src/plugins/logs/src_v1/README.md](/home/user/dialtone/src/plugins/logs/src_v1/README.md)
+- `test`: [src/plugins/test/src_v1/README.md](/home/user/dialtone/src/plugins/test/src_v1/README.md)
+- `chrome`: [src/plugins/chrome/src_v1/README.md](/home/user/dialtone/src/plugins/chrome/src_v1/README.md)
+- `ssh`: [src/plugins/ssh/src_v1/README.md](/home/user/dialtone/src/plugins/ssh/src_v1/README.md)
+- `ui`: [src/plugins/ui/src_v1/README.md](/home/user/dialtone/src/plugins/ui/src_v1/README.md)
+
 ## Core Rules
 1. Use versioned commands: `./dialtone.sh <plugin> src_vN <command> [args]`.
 2. Keep `scaffold/main.go` thin; put real logic in `src_vN`.

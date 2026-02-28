@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -410,7 +411,7 @@ func LaunchChromeWithRoleAndUserDataDir(port int, gpu bool, headless bool, targe
 	}
 
 	args := []string{
-		"--remote-debugging-port=0",
+		fmt.Sprintf("--remote-debugging-port=%d", port),
 		"--remote-debugging-address=" + debugAddress,
 		"--remote-allow-origins=*",
 		"--no-first-run",
@@ -425,10 +426,6 @@ func LaunchChromeWithRoleAndUserDataDir(port int, gpu bool, headless bool, targe
 	if role == "dev" && !headless {
 		if os.Getenv("DIALTONE_DEVTOOLS_AUTO_OPEN") == "1" {
 			args = append(args, "--auto-open-devtools-for-tabs")
-		}
-		if targetURL != "" {
-			args = append(args, "--app="+targetURL)
-			targetURL = ""
 		}
 	}
 
@@ -448,14 +445,11 @@ func LaunchChromeWithRoleAndUserDataDir(port int, gpu bool, headless bool, targe
 	cmd := exec.Command(path, args...)
 
 	// Capture output to a log file for debugging
-	logFile, err := os.Create("chrome_launch.log")
+	logPath := "chrome_launch.log"
+	logFile, err := os.Create(logPath)
 	if err == nil {
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
-	}
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start chrome: %v", err)
 	}
 
 	// Wait for the browser to create the DevToolsActivePort file
@@ -468,12 +462,19 @@ func LaunchChromeWithRoleAndUserDataDir(port int, gpu bool, headless bool, targe
 		}
 	}
 	activePortFile := filepath.Join(linuxUserDataDir, "DevToolsActivePort")
+	// Avoid stale port/path data from previous runs on reused profiles.
+	_ = os.Remove(activePortFile)
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start chrome: %v", err)
+	}
+	launchStart := time.Now()
 
 	var wsURL string
 	var assignedPort int
 
-	for i := 0; i < 60; i++ {
-		time.Sleep(300 * time.Millisecond)
+	for i := 0; i < 120; i++ {
+		time.Sleep(250 * time.Millisecond)
 
 		// If on WSL, the file is in winTemp folder which is usually /mnt/c/Users/.../AppData/Local/Temp/...
 		// We need to make sure we can read it.
@@ -481,23 +482,22 @@ func LaunchChromeWithRoleAndUserDataDir(port int, gpu bool, headless bool, targe
 
 		data, err := os.ReadFile(activePortFile)
 		if err == nil {
+			if fi, serr := os.Stat(activePortFile); serr == nil && fi.ModTime().Before(launchStart) {
+				continue
+			}
 			lines := strings.Split(string(data), "\n")
 			if len(lines) >= 2 {
 				fmt.Sscanf(lines[0], "%d", &assignedPort)
-				// Second line is the browser websocket path part (e.g. /devtools/browser/...)
 				wsPath := strings.TrimSpace(lines[1])
-				if resolvedWS, err := getWebsocketURL(assignedPort); err == nil && strings.TrimSpace(resolvedWS) != "" {
-					wsURL = resolvedWS
-				} else {
-					// Keep polling until DevTools endpoint becomes reachable.
-					// Falling back to localhost too early is unreliable in WSL NAT mode.
-					waitErr := WaitForDebugPort(assignedPort, 4*time.Second)
-					if waitErr == nil {
-						if resolvedWS, err := getWebsocketURL(assignedPort); err == nil && strings.TrimSpace(resolvedWS) != "" {
+				// Second line is the browser websocket path part (e.g. /devtools/browser/...)
+				if assignedPort > 0 {
+					if waitErr := WaitForDebugPort(assignedPort, 2*time.Second); waitErr == nil {
+						if resolvedWS, rerr := getWebsocketURL(assignedPort); rerr == nil && strings.TrimSpace(resolvedWS) != "" {
 							wsURL = resolvedWS
+							break
 						}
 					}
-					if wsURL == "" {
+					if runtime.GOOS == "linux" && IsWSL() && wsPath != "" {
 						fallbackHost := "127.0.0.1"
 						for _, h := range debugProbeHosts() {
 							h = strings.TrimSpace(h)
@@ -507,14 +507,40 @@ func LaunchChromeWithRoleAndUserDataDir(port int, gpu bool, headless bool, targe
 							}
 						}
 						wsURL = fmt.Sprintf("ws://%s:%d%s", fallbackHost, assignedPort, wsPath)
+						logs.Warn("DEBUG: WSL fallback using DevToolsActivePort endpoint without confirmed reachability (port=%d)", assignedPort)
+						break
 					}
 				}
+			}
+		}
+		if wsFromLog, portFromLog := readDevToolsURLFromLog(logPath); wsFromLog != "" && portFromLog > 0 {
+			assignedPort = portFromLog
+			if waitErr := WaitForDebugPort(assignedPort, 1200*time.Millisecond); waitErr == nil {
+				if resolvedWS, rerr := getWebsocketURL(assignedPort); rerr == nil && strings.TrimSpace(resolvedWS) != "" {
+					wsURL = resolvedWS
+					break
+				}
+			}
+			if runtime.GOOS == "linux" && IsWSL() {
+				fallbackHost := "127.0.0.1"
+				for _, h := range debugProbeHosts() {
+					h = strings.TrimSpace(h)
+					if h != "" && h != "0.0.0.0" {
+						fallbackHost = h
+						break
+					}
+				}
+				wsURL = normalizeWebSocketURLHost(wsFromLog, fallbackHost, assignedPort)
+				if wsURL == "" {
+					wsURL = wsFromLog
+				}
+				logs.Warn("DEBUG: WSL fallback using DevTools URL from launch log without confirmed reachability (port=%d)", assignedPort)
 				break
 			}
 		}
 
 		if i%20 == 0 {
-			logs.Info("DEBUG: Waiting for Chrome to initialize... (attempt %d/60)", i)
+			logs.Info("DEBUG: Waiting for Chrome to initialize... (attempt %d/120)", i)
 		}
 
 		// Check if process finished already (crashed)
@@ -524,6 +550,9 @@ func LaunchChromeWithRoleAndUserDataDir(port int, gpu bool, headless bool, targe
 	}
 
 	if wsURL == "" {
+		if assignedPort > 0 {
+			return nil, fmt.Errorf("timed out waiting for reachable DevTools endpoint on port %d", assignedPort)
+		}
 		return nil, fmt.Errorf("timed out waiting for DevToolsActivePort file")
 	}
 
@@ -671,4 +700,40 @@ func normalizeWebSocketURLHost(raw, host string, port int) string {
 		u.Host = fmt.Sprintf("%s:%d", host, port)
 	}
 	return u.String()
+}
+
+func readDevToolsURLFromLog(logPath string) (string, int) {
+	if strings.TrimSpace(logPath) == "" {
+		return "", 0
+	}
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		return "", 0
+	}
+	lines := strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		const marker = "DevTools listening on "
+		idx := strings.Index(line, marker)
+		if idx < 0 {
+			continue
+		}
+		ws := strings.TrimSpace(line[idx+len(marker):])
+		if !strings.HasPrefix(strings.ToLower(ws), "ws://") {
+			continue
+		}
+		u, err := url.Parse(ws)
+		if err != nil {
+			continue
+		}
+		p, err := strconv.Atoi(strings.TrimSpace(u.Port()))
+		if err != nil || p <= 0 {
+			continue
+		}
+		return ws, p
+	}
+	return "", 0
 }

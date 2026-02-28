@@ -57,7 +57,7 @@ func SaveBrowserDebugConfig(sc *StepContext) error {
 		UpdatedAtUTC: time.Now().UTC().Format(time.RFC3339),
 	}
 	if strings.TrimSpace(GetOptions().AttachNode) != "" {
-		payload.Role = "ui-dev"
+		payload.Role = "test"
 	}
 	raw, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
