@@ -29,6 +29,22 @@ When using images to set the mood, Lyria analyzes:
 - **Vocal Patterns:** Describe the "groove" (e.g., "fast-paced" or "laid-back").
 - **Visual Variety:** Try historical paintings, cartoons, or scientific diagrams.
 
+## Example Prompts
+
+Here are some high-quality prompts structured according to the Lyria pillars:
+
+### 1. SimCity-Style Urban Jazz (Ambient Game Music)
+> **Prompt:** "Urban Jazz city-builder soundtrack, late 90s style. Smooth and sophisticated. Featuring a melodic electric piano (Rhodes), a walking upright bass line, and a subtle jazz flute. Light acoustic drum kit with brushed snare and crisp hi-hats. Steady moderate tempo, 115 BPM. The dynamics are even and soothing, perfect for a construction and management simulation background loop."
+
+### 2. Cyberpunk / Synthwave
+> **Prompt:** "Aggressive 80s cyberpunk synth-wave, driving tempo. Featuring heavy analog bass synths, gated reverb drums, and a soaring lead synthesizer melody. Intense and cinematic dynamics with a feeling of high-speed motion. No vocals."
+
+### 3. Lo-Fi Hip-Hop (Chill Study)
+> **Prompt:** "Early 2020s lo-fi hip-hop beat, laid-back and chill. Soft sampled acoustic guitar loops, crackly vinyl textures, and a dusty boom-bap drum pattern. Slow tempo, 85 BPM. Mellow and consistent dynamics for focused work."
+
+### 4. Epic Orchestral
+> **Prompt:** "Modern cinematic orchestral theme, epic and heroic. High-energy tempo with staccato strings, powerful brass fanfares, and thunderous taiko drums. Starts with a quiet, mysterious woodwind solo and builds into a massive, explosive orchestral climax."
+
 ## CLI Usage
 
 ```sh
