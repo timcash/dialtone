@@ -86,6 +86,15 @@ class HeroControl implements VisualizationControl {
   ambientLight!: THREE.AmbientLight;
   sunGlow!: THREE.Mesh;
 
+  roverMarker!: THREE.Mesh;
+  roverLine!: THREE.Line;
+  groundAnchor!: THREE.Object3D;
+  markerAltitude = 10;
+  mockRoverLocation = { lat: 37.7749, lng: -122.4194 }; // San Francisco
+  isZooming = false;
+  raycaster = new THREE.Raycaster();
+  mouse = new THREE.Vector2();
+
   cloud1Axis = new THREE.Vector3(0, 1, 0);
   cloud2Axis = new THREE.Vector3(0.2, 1, -0.1).normalize();
 
@@ -100,7 +109,7 @@ class HeroControl implements VisualizationControl {
   cloudBrightness = 5.0;
 
   cameraDistance = 23.5;
-  cameraOrbit = 5.74;
+  cameraOrbit = Math.PI; // Start on the other side
   cameraOrbitSpeed = 0.1;
   cameraFarOffset = 40;
   cameraOrbitYOffset = -10;
@@ -145,8 +154,33 @@ class HeroControl implements VisualizationControl {
     this.updateCamera();
     this.camera.layers.enable(MOON_LIGHT_LAYER);
 
+    this.canvas.addEventListener('click', (e) => this.onCanvasClick(e));
+
     void this.loadLandLayer();
     this.animate();
+  }
+
+  private onCanvasClick(event: MouseEvent) {
+    const rect = this.canvas.getBoundingClientRect();
+    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+    const intersects = this.raycaster.intersectObject(this.roverMarker);
+
+    if (intersects.length > 0) {
+      this.isZooming = !this.isZooming;
+    }
+  }
+
+  private latLngToVector(lat: number, lng: number, radius: number) {
+    const latRad = lat * DEG_TO_RAD;
+    const lngRad = lng * DEG_TO_RAD;
+    return new THREE.Vector3(
+      radius * Math.cos(latRad) * Math.sin(lngRad),
+      radius * Math.sin(latRad),
+      radius * Math.cos(latRad) * Math.cos(lngRad),
+    );
   }
 
   private initLayers() {
@@ -241,6 +275,28 @@ class HeroControl implements VisualizationControl {
     );
     this.moon.layers.set(MOON_LIGHT_LAYER);
     this.scene.add(this.moon);
+
+    // Ground and Hover positions
+    const groundPos = this.latLngToVector(this.mockRoverLocation.lat, this.mockRoverLocation.lng, this.earthRadius);
+    const hoverPos = this.latLngToVector(this.mockRoverLocation.lat, this.mockRoverLocation.lng, this.earthRadius + this.markerAltitude);
+
+    // Ground Anchor
+    this.groundAnchor = new THREE.Object3D();
+    this.groundAnchor.position.copy(groundPos);
+    this.earth.add(this.groundAnchor);
+
+    // Rover Marker
+    const roverGeo = new THREE.SphereGeometry(0.8, 16, 16);
+    const roverMat = new THREE.MeshBasicMaterial({ color: 0x7bf2d8 });
+    this.roverMarker = new THREE.Mesh(roverGeo, roverMat);
+    this.roverMarker.position.copy(hoverPos);
+    this.earth.add(this.roverMarker);
+
+    // Rover Line
+    const lineGeo = new THREE.BufferGeometry().setFromPoints([groundPos, hoverPos]);
+    const lineMat = new THREE.LineBasicMaterial({ color: 0x7bf2d8, transparent: true, opacity: 0.5 });
+    this.roverLine = new THREE.Line(lineGeo, lineMat);
+    this.earth.add(this.roverLine);
   }
 
   private createCloudMaterial(scale: number, opacity: number) {
@@ -316,7 +372,7 @@ class HeroControl implements VisualizationControl {
 
   private buildLandLayer(cells: string[], resolution: number) {
     const landLayer = new HexLayer(this.earthRadius, {
-      radiusOffset: 0.6,
+      radiusOffset: 1.1,
       count: cells.length,
       resolution,
       ratePerSecond: 1,
@@ -385,11 +441,33 @@ class HeroControl implements VisualizationControl {
     this.cloud1.rotateOnAxis(this.cloud1Axis, this.cloud1RotSpeed * delta);
     this.cloud2.rotateOnAxis(this.cloud2Axis, this.cloud2RotSpeed * delta);
 
+    // Rover Blinking
+    const blink = 1.0 + Math.sin(now * 0.01) * 0.4;
+    this.roverMarker.scale.setScalar(blink);
+
+    // Zoom Logic
+    const targetDist = this.isZooming ? 8.0 : 23.5;
+    this.cameraDistance = THREE.MathUtils.lerp(this.cameraDistance, targetDist, 0.05);
+
     this.cloud1Material.uniforms.uTime.value = ct;
     this.cloud2Material.uniforms.uTime.value = ct;
 
-    this.cameraOrbit += this.cameraOrbitSpeed * ds;
-    this.updateCamera();
+    if (this.isZooming) {
+      const targetPos = new THREE.Vector3();
+      const targetLookAt = new THREE.Vector3();
+      this.roverMarker.getWorldPosition(targetPos);
+      this.groundAnchor.getWorldPosition(targetLookAt);
+
+      // Offset camera slightly back from the marker so we aren't inside it
+      const viewDir = targetPos.clone().sub(targetLookAt).normalize();
+      targetPos.add(viewDir.multiplyScalar(10));
+
+      this.camera.position.lerp(targetPos, 0.05);
+      this.camera.lookAt(targetLookAt);
+    } else {
+      this.cameraOrbit += this.cameraOrbitSpeed * ds;
+      this.updateCamera();
+    }
 
     const sunRad = this.earthRadius + this.sunOrbitHeight;
     const sunA = now * this.sunOrbitSpeed + this.sunOrbitAngleDeg * DEG_TO_RAD;

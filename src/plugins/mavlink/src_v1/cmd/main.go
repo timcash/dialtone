@@ -114,6 +114,12 @@ func startRoverCommandConsumer(nc *nats.Conn, svc *mavlinkapp.MavlinkService) {
 			if err := svc.SetMode(strings.TrimSpace(cmd.Mode)); err != nil {
 				logs.Error("rover.command mode failed: %v", err)
 			}
+		case "pulse_fwd":
+			go func() {
+				if err := svc.PulseForward(); err != nil {
+					logs.Error("rover.command pulse_fwd failed: %v", err)
+				}
+			}()
 		default:
 			logs.Warn("rover.command unknown cmd=%q", cmd.Cmd)
 		}

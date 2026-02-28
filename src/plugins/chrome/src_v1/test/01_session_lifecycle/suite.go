@@ -33,7 +33,7 @@ type roleCounts struct {
 func Register(reg *testv1.Registry) {
 	reg.Add(testv1.Step{
 		Name:           "setup-and-launch-dev-headed-gpu",
-		Timeout:        90 * time.Second,
+		Timeout:        60 * time.Second,
 		RunWithContext: runSetupAndLaunchDev,
 	})
 	reg.Add(testv1.Step{
@@ -402,6 +402,9 @@ func runCleanupTestOnly(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 	if err := chrome.CleanupSession(state.testSession); err != nil {
 		return testv1.StepRunResult{}, fmt.Errorf("cleanup test session: %w", err)
 	}
+	if err := localKillDialtoneRole("test", 3, 350*time.Millisecond); err != nil {
+		return testv1.StepRunResult{}, fmt.Errorf("cleanup residual local test role: %w", err)
+	}
 
 	procs, err := chrome.ListResources(true)
 	if err != nil {
@@ -514,8 +517,64 @@ func dialtoneRoleCounts() (roleCounts, error) {
 	return out, nil
 }
 
+func localKillDialtoneRole(role string, maxPasses int, sleepBetween time.Duration) error {
+	role = strings.ToLower(strings.TrimSpace(role))
+	if role != "dev" && role != "test" {
+		return fmt.Errorf("invalid role %q", role)
+	}
+	if maxPasses < 1 {
+		maxPasses = 1
+	}
+	isWindows := runtime.GOOS == "windows" || chrome.IsWSL()
+	var lastErr error
+	for pass := 0; pass < maxPasses; pass++ {
+		procs, err := chrome.ListResources(true)
+		if err != nil {
+			return err
+		}
+		found := false
+		for _, p := range procs {
+			if !strings.EqualFold(strings.TrimSpace(p.Origin), "Dialtone") {
+				continue
+			}
+			if strings.ToLower(strings.TrimSpace(p.Role)) != role {
+				continue
+			}
+			found = true
+			if err := chrome.KillResource(p.PID, isWindows); err != nil {
+				lastErr = err
+			}
+		}
+		if !found {
+			return nil
+		}
+		time.Sleep(sleepBetween)
+	}
+	remaining, err := dialtoneRoleCounts()
+	if err != nil {
+		return err
+	}
+	if role == "test" && remaining.Test == 0 {
+		return nil
+	}
+	if role == "dev" && remaining.Dev == 0 {
+		return nil
+	}
+	if lastErr != nil {
+		return fmt.Errorf("role=%s still present after kill passes (dev=%d test=%d): last error: %w", role, remaining.Dev, remaining.Test, lastErr)
+	}
+	return fmt.Errorf("role=%s still present after kill passes (dev=%d test=%d)", role, remaining.Dev, remaining.Test)
+}
+
 func tryAutoRemoteFallback(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 	_ = chrome.KillDialtoneResources()
+	prevNoSSH := testv1.RuntimeConfigSnapshot().NoSSH
+	testv1.UpdateRuntimeConfig(func(cfg *testv1.RuntimeConfig) {
+		cfg.NoSSH = true
+	})
+	defer testv1.UpdateRuntimeConfig(func(cfg *testv1.RuntimeConfig) {
+		cfg.NoSSH = prevNoSSH
+	})
 	candidates := []string{"legion", "darkmac", "chroma"}
 	lastErr := error(nil)
 	for _, node := range candidates {

@@ -1,14 +1,14 @@
 # Error Report
 
-- **Date**: Sat, 28 Feb 2026 09:05:54 PST
+- **Date**: Sat, 28 Feb 2026 12:43:26 PST
 - **Suite**: src-v1-self-check
-- **Total Duration**: 32.216219171s
+- **Total Duration**: 5m34.547522305s
 
-- **Error Steps**: 3 / 10
+- **Error Steps**: 3 / 4
 
 ## 1. ctx-logging-and-waits
 
-- **Duration**: 4.67781ms
+- **Duration**: 4.419079ms
 
 ### Step Errors
 
@@ -22,7 +22,7 @@ ERROR: ctx error format check
 
 ## 3. example-template-step
 
-- **Duration**: 1.131155ms
+- **Duration**: 1.84966ms
 
 ### Step Errors
 
@@ -32,14 +32,15 @@ ERROR: template plugin error
 
 ---
 
-## 6. nats-step-wait-patterns
+## 4. example-browser-stepcontext-api
 
-- **Duration**: 2.722517ms
+- **Duration**: 5m31.213793177s
+- **Step Error**: `step example-browser-stepcontext-api timed out`
 
 ### Step Errors
 
 ```text
-ERROR: expected-step-error
+FAIL: [TEST][FAIL] [STEP:example-browser-stepcontext-api] timed out after 20s
 ```
 
 ---

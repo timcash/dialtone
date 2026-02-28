@@ -491,6 +491,7 @@ func LaunchChromeWithRoleAndUserDataDir(port int, gpu bool, headless bool, targe
 				wsPath := strings.TrimSpace(lines[1])
 				// Second line is the browser websocket path part (e.g. /devtools/browser/...)
 				if assignedPort > 0 {
+					ensureWindowsDebugFirewallRule(assignedPort)
 					if waitErr := WaitForDebugPort(assignedPort, 2*time.Second); waitErr == nil {
 						if resolvedWS, rerr := getWebsocketURL(assignedPort); rerr == nil && strings.TrimSpace(resolvedWS) != "" {
 							wsURL = resolvedWS
@@ -515,6 +516,7 @@ func LaunchChromeWithRoleAndUserDataDir(port int, gpu bool, headless bool, targe
 		}
 		if wsFromLog, portFromLog := readDevToolsURLFromLog(logPath); wsFromLog != "" && portFromLog > 0 {
 			assignedPort = portFromLog
+			ensureWindowsDebugFirewallRule(assignedPort)
 			if waitErr := WaitForDebugPort(assignedPort, 1200*time.Millisecond); waitErr == nil {
 				if resolvedWS, rerr := getWebsocketURL(assignedPort); rerr == nil && strings.TrimSpace(resolvedWS) != "" {
 					wsURL = resolvedWS
@@ -597,21 +599,44 @@ func NewTabContext(parent context.Context) (context.Context, context.CancelFunc)
 
 func getWebsocketURL(port int) (string, error) {
 	var lastErr error
-	for _, host := range debugProbeHosts() {
-		wsURL, err := getWebsocketURLForHost(host, port)
-		if err != nil {
-			lastErr = err
-			continue
+	for _, probePort := range debugProbePorts(port) {
+		for _, host := range debugProbeHosts() {
+			wsURL, err := getWebsocketURLForHost(host, probePort)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			if normalized := normalizeWebSocketURLHost(wsURL, host, probePort); normalized != "" {
+				return normalized, nil
+			}
+			return wsURL, nil
 		}
-		if normalized := normalizeWebSocketURLHost(wsURL, host, port); normalized != "" {
-			return normalized, nil
-		}
-		return wsURL, nil
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("unable to resolve websocket url")
 	}
 	return "", lastErr
+}
+
+func debugProbePorts(port int) []int {
+	out := make([]int, 0, 2)
+	seen := map[int]struct{}{}
+	add := func(p int) {
+		if p <= 0 {
+			return
+		}
+		if _, ok := seen[p]; ok {
+			return
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	add(port)
+	if runtime.GOOS == "linux" && IsWSL() {
+		// Optional Windows relay port convention (listen=target+10000).
+		add(port + 10000)
+	}
+	return out
 }
 
 func getWebsocketURLForHost(host string, port int) (string, error) {
@@ -700,6 +725,23 @@ func normalizeWebSocketURLHost(raw, host string, port int) string {
 		u.Host = fmt.Sprintf("%s:%d", host, port)
 	}
 	return u.String()
+}
+
+func ensureWindowsDebugFirewallRule(port int) {
+	if port <= 0 || runtime.GOOS != "linux" || !IsWSL() {
+		return
+	}
+	ps := fmt.Sprintf(`$ErrorActionPreference='SilentlyContinue'
+$rule=("Dialtone Chrome DevTools "+%d)
+if(-not (Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue)){
+  New-NetFirewallRule -DisplayName $rule -Direction Inbound -Action Allow -Protocol TCP -LocalPort %d -Profile Any | Out-Null
+}
+`, port, port)
+	powershell := "powershell.exe"
+	if _, err := exec.LookPath(powershell); err != nil {
+		powershell = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+	}
+	_ = exec.Command(powershell, "-NoProfile", "-NonInteractive", "-Command", ps).Run()
 }
 
 func readDevToolsURLFromLog(logPath string) (string, int) {

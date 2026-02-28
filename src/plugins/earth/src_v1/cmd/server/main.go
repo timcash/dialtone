@@ -41,7 +41,7 @@ func main() {
 		http.ServeFile(w, r, filepath.Join(dist, "index.html"))
 	}))
 
-	logs.Info("earth src_v1 serving %s on http://127.0.0.1%s", dist, *addr)
+	logs.Info("earth src_v1 serving %s on %s", dist, *addr)
 	if err := http.ListenAndServe(*addr, mux); err != nil {
 		fmt.Fprintf(os.Stderr, "serve failed: %v\n", err)
 		os.Exit(1)

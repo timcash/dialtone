@@ -117,6 +117,7 @@ func (s *MavlinkService) Start() {
 					})
 				}
 			case *common.MessageCommandAck:
+				logs.Info("[MAVLINK-RAW] COMMAND_ACK: cmd=%v res=%v", msg.Command, msg.Result)
 				if s.config.Callback != nil {
 					s.config.Callback(&MavlinkEvent{
 						Type:       "COMMAND_ACK",
@@ -125,6 +126,8 @@ func (s *MavlinkService) Start() {
 					})
 				}
 			case *common.MessageStatustext:
+				text := strings.TrimRight(string(msg.Text[:]), "\x00")
+				logs.Info("[MAVLINK-RAW] STATUSTEXT: sev=%v text=%q", msg.Severity, text)
 				if s.config.Callback != nil {
 					s.config.Callback(&MavlinkEvent{
 						Type:       "STATUSTEXT",
@@ -150,7 +153,7 @@ func (s *MavlinkService) Start() {
 				}
 			}
 		case *gomavlib.EventParseError:
-			// logs.Info("MAVLink parse error: %v", e.Error)
+			logs.Warn("MAVLink parse error: %v", e.Error)
 		case *gomavlib.EventStreamRequested:
 			logs.Info("MAVLink stream requested")
 		case *gomavlib.EventChannelOpen:
@@ -164,6 +167,30 @@ func (s *MavlinkService) Start() {
 // Close closes the MAVLink service
 func (s *MavlinkService) Close() {
 	s.node.Close()
+}
+
+// PulseForward sends half-forward throttle for 1 second via RC override (Channel 3)
+func (s *MavlinkService) PulseForward() error {
+	logs.Info("MavlinkService: PulseForward 1s (PWM 1750)")
+	// Ch3 = Throttle (default for ArduRover)
+	// 1750 is roughly half forward (neutral 1500)
+	err := s.node.WriteMessageAll(&common.MessageRcChannelsOverride{
+		TargetSystem:    0,
+		TargetComponent: 0,
+		Chan3Raw:        1750,
+	})
+	if err != nil {
+		return err
+	}
+
+	time.Sleep(1 * time.Second)
+
+	// Return to Neutral (1500)
+	return s.node.WriteMessageAll(&common.MessageRcChannelsOverride{
+		TargetSystem:    0,
+		TargetComponent: 0,
+		Chan3Raw:        1500,
+	})
 }
 
 // Arm sends the arm command to the rover
@@ -190,7 +217,7 @@ func (s *MavlinkService) Disarm() error {
 	})
 }
 
-// SetMode sets the rover mode (e.g., MANUAL, GUIDED)
+// SetMode sets the rover mode (e.g., MANUAL, GUIDED, STEERING)
 func (s *MavlinkService) SetMode(mode string) error {
 	var customMode uint32
 
@@ -199,6 +226,8 @@ func (s *MavlinkService) SetMode(mode string) error {
 		customMode = 0 // ArduRover MANUAL
 	case "GUIDED":
 		customMode = 15 // ArduRover GUIDED
+	case "STEERING":
+		customMode = 3 // ArduRover STEERING
 	default:
 		return fmt.Errorf("unsupported mode: %s", mode)
 	}

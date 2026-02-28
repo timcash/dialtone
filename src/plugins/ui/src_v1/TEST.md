@@ -6,27 +6,27 @@
 <empty>
 ```
 
-**Generated at:** Sat, 28 Feb 2026 09:00:39 -0800
+**Generated at:** Sat, 28 Feb 2026 12:39:03 -0800
 **Version:** `ui-src-v1`
 **Runner:** `test/src_v1`
 **Status:** ✅ PASS
-**Total Time:** `44.180031752s`
+**Total Time:** `50.549334866s`
 
 ## Test Steps
 
 | Step | Result | Duration |
 |---|---|---|
-| ui-quality-fmt-lint-build | ✅ PASS | `2.326560461s` |
-| ui-build-and-go-serve | ✅ PASS | `10.508882499s` |
-| ui-attach-context-cancel-diagnose | ✅ PASS | `4.706433271s` |
-| ui-section-hero-via-menu | ✅ PASS | `3.302931356s` |
-| ui-section-three-fullscreen-via-menu | ✅ PASS | `3.240550384s` |
-| ui-section-three-calculator-via-menu | ✅ PASS | `3.265826046s` |
-| ui-section-table-via-menu | ✅ PASS | `3.287630324s` |
-| ui-section-camera-via-menu | ✅ PASS | `3.06850225s` |
-| ui-section-docs-via-menu | ✅ PASS | `3.236330637s` |
-| ui-section-terminal-via-menu | ✅ PASS | `3.26680749s` |
-| ui-section-settings-via-menu | ✅ PASS | `3.334108323s` |
+| ui-quality-fmt-lint-build | ✅ PASS | `2.392194648s` |
+| ui-build-and-go-serve | ✅ PASS | `17.105007221s` |
+| ui-attach-context-cancel-diagnose | ✅ PASS | `4.629027491s` |
+| ui-section-hero-via-menu | ✅ PASS | `3.221700274s` |
+| ui-section-three-fullscreen-via-menu | ✅ PASS | `3.2661157s` |
+| ui-section-three-calculator-via-menu | ✅ PASS | `3.308861344s` |
+| ui-section-table-via-menu | ✅ PASS | `3.201927705s` |
+| ui-section-camera-via-menu | ✅ PASS | `3.186385443s` |
+| ui-section-docs-via-menu | ✅ PASS | `3.248709617s` |
+| ui-section-terminal-via-menu | ✅ PASS | `3.248361946s` |
+| ui-section-settings-via-menu | ✅ PASS | `3.207340924s` |
 
 ## Step Details
 
@@ -36,7 +36,7 @@
 
 ```text
 result: PASS
-duration: 2.326560461s
+duration: 2.392194648s
 report: fmt-check, lint, and build passed
 ```
 
@@ -47,7 +47,7 @@ logs:
 INFO: running command: /home/user/dialtone/dialtone.sh ui src_v1 install
 INFO: stdout: >> Running: /home/user/dialtone_dependencies/bun/bin/bun install (in /home/user/dialtone/src/plugins/ui/src_v1/test/fixtures/app)
 INFO: stdout: bun install v1.3.9 (cf6cdbbb)
-INFO: stdout: Checked 22 installs across 69 packages (no changes) [1.00ms]
+INFO: stdout: Checked 22 installs across 69 packages (no changes) [2.00ms]
 INFO: stderr: <empty>
 INFO: running command: /home/user/dialtone/dialtone.sh ui src_v1 fmt-check
 INFO: stdout: >> Running: /home/user/dialtone_dependencies/bun/bin/bun run fmt:check (in /home/user/dialtone/src/plugins/ui/src_v1/test/fixtures/app)
@@ -67,7 +67,7 @@ INFO: stdout: computing gzip size...
 INFO: stdout: dist/index.html                   1.56 kB │ gzip:   0.47 kB
 INFO: stdout: dist/assets/index-DU0jfcrJ.css   13.13 kB │ gzip:   3.51 kB
 INFO: stdout: dist/assets/index-ZGf0pex0.js   510.71 kB │ gzip: 130.26 kB
-INFO: stdout: ✓ built in 652ms
+INFO: stdout: ✓ built in 668ms
 INFO: stderr: $ vite build
 INFO: stderr: (!) Some chunks are larger than 500 kB after minification. Consider:
 INFO: stderr: - Using dynamic import() to code-split the application
@@ -97,7 +97,7 @@ browser_logs:
 
 ```text
 result: PASS
-duration: 10.508882499s
+duration: 17.105007221s
 report: fixture built, hero section loaded, legend header verified (attach=true)
 ```
 
@@ -105,8 +105,10 @@ report: fixture built, hero section loaded, legend header verified (attach=true)
 
 ```text
 INFO: ERROR_PING: start browser_subject=logs.test.ui.src-v1.ui-build-and-go-serve.browser error_subject=logs.test.ui.src-v1.error
-INFO: ERROR_PING: browser-topic-ok marker=__DIALTONE_ERROR_PING__:1772298000187384170
-INFO: ERROR_PING: error-topic-ok marker=__DIALTONE_ERROR_PING__:1772298000187384170:error
+WARN: ERROR_PING: recoverable evaluate error (attempt 1/4): context deadline exceeded
+INFO: ERROR_PING: browser-topic-ok marker=__DIALTONE_ERROR_PING__:1772311098525688207
+INFO: ERROR_PING: browser-topic-ok marker=__DIALTONE_ERROR_PING__:1772311098525688207
+INFO: ERROR_PING: error-topic-ok marker=__DIALTONE_ERROR_PING__:1772311098525688207:error
 INFO: ERROR_PING: pass browser_topic=true error_topic=true
 ```
 
@@ -117,8 +119,10 @@ logs:
 INFO: STEP> begin ui-build-and-go-serve
 INFO: LOOKING FOR: persistent ui dev server already running at http://127.0.0.1:5177
 INFO: ERROR_PING: start browser_subject=logs.test.ui.src-v1.ui-build-and-go-serve.browser error_subject=logs.test.ui.src-v1.error
-INFO: ERROR_PING: browser-topic-ok marker=__DIALTONE_ERROR_PING__:1772298000187384170
-INFO: ERROR_PING: error-topic-ok marker=__DIALTONE_ERROR_PING__:1772298000187384170:error
+WARN: ERROR_PING: recoverable evaluate error (attempt 1/4): context deadline exceeded
+INFO: ERROR_PING: browser-topic-ok marker=__DIALTONE_ERROR_PING__:1772311098525688207
+INFO: ERROR_PING: browser-topic-ok marker=__DIALTONE_ERROR_PING__:1772311098525688207
+INFO: ERROR_PING: error-topic-ok marker=__DIALTONE_ERROR_PING__:1772311098525688207:error
 INFO: ERROR_PING: pass browser_topic=true error_topic=true
 INFO: saved browser debug config: /home/user/dialtone/src/plugins/ui/src_v1/test/browser.debug.json
 INFO: report: fixture built, hero section loaded, legend header verified (attach=true)
@@ -146,18 +150,8 @@ INFO: CONSOLE:log: "[SectionManager] START #hero"
 INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #hero"
 INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #hero"
 INFO: CONSOLE:log: "[SectionManager] RESUME #hero"
-INFO: CONSOLE:debug: "[vite] connecting..."
-INFO: CONSOLE:debug: "[vite] connected."
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #hero"
-INFO: CONSOLE:log: "[SectionManager] LOADING #hero"
-INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #hero"
-INFO: CONSOLE:log: "[SectionManager] LOADED #hero"
-INFO: CONSOLE:log: "[SectionManager] START #hero"
-INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #hero"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #hero"
-INFO: CONSOLE:log: "[SectionManager] RESUME #hero"
-INFO: CONSOLE:log: "__DIALTONE_ERROR_PING__:1772298000187384170"
-ERROR: CONSOLE:error: "__DIALTONE_ERROR_PING__:1772298000187384170:error"
+INFO: CONSOLE:log: "__DIALTONE_ERROR_PING__:1772311098525688207"
+ERROR: CONSOLE:error: "__DIALTONE_ERROR_PING__:1772311098525688207:error"
 INFO: CONSOLE:debug: "[vite] connecting..."
 INFO: CONSOLE:debug: "[vite] connected."
 INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #hero"
@@ -200,7 +194,7 @@ INFO: CONSOLE:log: "[SectionManager] RESUME #hero"
 
 ```text
 result: PASS
-duration: 4.706433271s
+duration: 4.629027491s
 report: attach diagnostic passed: no context canceled across repeated browser evals
 ```
 
@@ -247,7 +241,7 @@ INFO: CONSOLE:log: "[SectionManager] RESUME #hero"
 
 ```text
 result: PASS
-duration: 3.302931356s
+duration: 3.221700274s
 report: section hero navigation verified
 ```
 
@@ -304,7 +298,7 @@ INFO: CONSOLE:log: "[TEST_ACTION] click aria=Toggle Global Menu"
 
 ```text
 result: PASS
-duration: 3.240550384s
+duration: 3.2661157s
 report: section three-fullscreen navigation verified
 ```
 
@@ -372,7 +366,7 @@ INFO: CONSOLE:log: "[SectionManager] RESUME #three-fullscreen"
 
 ```text
 result: PASS
-duration: 3.265826046s
+duration: 3.308861344s
 report: section three-calculator navigation verified
 ```
 
@@ -440,7 +434,7 @@ INFO: CONSOLE:log: "[SectionManager] RESUME #three-calculator"
 
 ```text
 result: PASS
-duration: 3.287630324s
+duration: 3.201927705s
 report: section table navigation verified
 ```
 
@@ -508,7 +502,7 @@ INFO: CONSOLE:log: "[SectionManager] RESUME #table"
 
 ```text
 result: PASS
-duration: 3.06850225s
+duration: 3.186385443s
 report: section camera navigation verified
 ```
 
@@ -576,7 +570,7 @@ INFO: CONSOLE:log: "[SectionManager] RESUME #camera"
 
 ```text
 result: PASS
-duration: 3.236330637s
+duration: 3.248709617s
 report: section docs navigation verified
 ```
 
@@ -644,7 +638,7 @@ INFO: CONSOLE:log: "[SectionManager] RESUME #docs"
 
 ```text
 result: PASS
-duration: 3.26680749s
+duration: 3.248361946s
 report: section terminal navigation verified
 ```
 
@@ -712,7 +706,7 @@ INFO: CONSOLE:log: "[SectionManager] RESUME #terminal"
 
 ```text
 result: PASS
-duration: 3.334108323s
+duration: 3.207340924s
 report: section settings navigation verified
 ```
 
@@ -720,8 +714,8 @@ report: section settings navigation verified
 
 ```text
 INFO: OVERLAP: section=settings check=start
-INFO: OVERLAP: section=settings overlay:menu/-(-) <-> button:-/-(-) area=2268.0px a=55.37%!b(MISSING)=7.40%!a(MISSING)llowedByMenu=true
-INFO: OVERLAP: section=settings overlay:menu/-(-) <-> button:-/-(-) area=108.0px a=2.64%!b(MISSING)=0.35%!a(MISSING)llowedByMenu=true
+INFO: OVERLAP: section=settings overlay:menu/-(-) <-> button:-/-(-) area=2268.0px a=55.37%!b(MISSING)=7.61%!a(MISSING)llowedByMenu=true
+INFO: OVERLAP: section=settings overlay:menu/-(-) <-> button:-/-(-) area=108.0px a=2.64%!b(MISSING)=0.36%!a(MISSING)llowedByMenu=true
 ```
 
 ### Logs
@@ -731,8 +725,8 @@ logs:
 INFO: STEP> begin ui-section-settings-via-menu
 INFO: LOOKING FOR: persistent ui dev server already running at http://127.0.0.1:5177
 INFO: OVERLAP: section=settings check=start
-INFO: OVERLAP: section=settings overlay:menu/-(-) <-> button:-/-(-) area=2268.0px a=55.37%!b(MISSING)=7.40%!a(MISSING)llowedByMenu=true
-INFO: OVERLAP: section=settings overlay:menu/-(-) <-> button:-/-(-) area=108.0px a=2.64%!b(MISSING)=0.35%!a(MISSING)llowedByMenu=true
+INFO: OVERLAP: section=settings overlay:menu/-(-) <-> button:-/-(-) area=2268.0px a=55.37%!b(MISSING)=7.61%!a(MISSING)llowedByMenu=true
+INFO: OVERLAP: section=settings overlay:menu/-(-) <-> button:-/-(-) area=108.0px a=2.64%!b(MISSING)=0.36%!a(MISSING)llowedByMenu=true
 INFO: report: section settings navigation verified
 PASS: [TEST][PASS] [STEP:ui-section-settings-via-menu] report: section settings navigation verified
 ```

@@ -6,22 +6,22 @@
 <empty>
 ```
 
-**Generated at:** Sat, 28 Feb 2026 08:59:21 -0800
+**Generated at:** Sat, 28 Feb 2026 12:43:47 -0800
 **Version:** `chrome-src-v1`
 **Runner:** `test/src_v1`
 **Status:** ✅ PASS
-**Total Time:** `24.368740363s`
+**Total Time:** `27.904093279s`
 
 ## Test Steps
 
 | Step | Result | Duration |
 |---|---|---|
-| example-library-metadata-and-helpers | ✅ PASS | `2.330951ms` |
-| setup-and-launch-dev-headed-gpu | ✅ PASS | `10.291753543s` |
-| reuse-dev-and-attach-new-tab | ✅ PASS | `6.079005379s` |
-| launch-test-headless-and-list-processes | ✅ PASS | `3.721041618s` |
-| cleanup-test-preserve-dev | ✅ PASS | `1.778035208s` |
-| cleanup-all | ✅ PASS | `2.028013938s` |
+| example-library-metadata-and-helpers | ✅ PASS | `4.109473ms` |
+| setup-and-launch-dev-headed-gpu | ✅ PASS | `10.314511748s` |
+| reuse-dev-and-attach-new-tab | ✅ PASS | `3.132499892s` |
+| launch-test-headless-and-list-processes | ✅ PASS | `6.183450156s` |
+| cleanup-test-preserve-dev | ✅ PASS | `3.210537398s` |
+| cleanup-all | ✅ PASS | `5.05896293s` |
 
 ## Step Details
 
@@ -31,7 +31,7 @@
 
 ```text
 result: PASS
-duration: 2.330951ms
+duration: 4.109473ms
 report: library metadata helpers validated
 ```
 
@@ -39,7 +39,7 @@ report: library metadata helpers validated
 
 ```text
 logs:
-INFO: wrote metadata file: .chrome_data/meta-1772297939020798928.json
+INFO: wrote metadata file: .chrome_data/meta-1772311401305303634.json
 INFO: report: library metadata helpers validated
 PASS: [TEST][PASS] [STEP:example-library-metadata-and-helpers] report: library metadata helpers validated
 ```
@@ -64,31 +64,20 @@ browser_logs:
 
 ```text
 result: PASS
-duration: 10.291753543s
-report: remote dev session attach succeeded; title mismatch tolerated
-```
-
-### Error-Ping Check
-
-```text
-INFO: ERROR_PING: start browser_subject=logs.test.chrome-src-v1.setup-and-launch-dev-headed-gpu.browser error_subject=logs.test.chrome-src-v1.error
-INFO: ERROR_PING: browser-topic-ok marker=__DIALTONE_ERROR_PING__:1772297944433155620
-INFO: ERROR_PING: error-topic-ok marker=__DIALTONE_ERROR_PING__:1772297944433155620:error
-INFO: ERROR_PING: pass browser_topic=true error_topic=true
+duration: 10.314511748s
+report: launched headed dev session with gpu and debug port ready
 ```
 
 ### Logs
 
 ```text
 logs:
-INFO: remote pre-launch role counts on legion: dev=0 test=0
-INFO: ERROR_PING: start browser_subject=logs.test.chrome-src-v1.setup-and-launch-dev-headed-gpu.browser error_subject=logs.test.chrome-src-v1.error
-INFO: ERROR_PING: browser-topic-ok marker=__DIALTONE_ERROR_PING__:1772297944433155620
-INFO: ERROR_PING: error-topic-ok marker=__DIALTONE_ERROR_PING__:1772297944433155620:error
-INFO: ERROR_PING: pass browser_topic=true error_topic=true
-WARN: unexpected remote dev title on legion: "" (continuing)
-INFO: report: remote dev session attach succeeded; title mismatch tolerated
-PASS: [TEST][PASS] [STEP:setup-and-launch-dev-headed-gpu] report: remote dev session attach succeeded; title mismatch tolerated
+INFO: pre-launch role counts: dev=0 test=8
+INFO: post-precleanup role counts: dev=0 test=0
+INFO: post-dev-launch role counts: dev=2 test=0
+INFO: launched dev session pid=1759749 port=9333 user_data_dir=C:\Users\timca\AppData\Local\Temp\dialtone-chrome-test-1772311406209575706-dev
+INFO: report: launched headed dev session with gpu and debug port ready
+PASS: [TEST][PASS] [STEP:setup-and-launch-dev-headed-gpu] report: launched headed dev session with gpu and debug port ready
 ```
 
 ### Errors
@@ -102,28 +91,7 @@ errors:
 
 ```text
 browser_logs:
-INFO: CONSOLE:debug: "[vite] connecting..."
-INFO: CONSOLE:debug: "[vite] connected."
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #hero"
-INFO: CONSOLE:log: "[SectionManager] LOADING #hero"
-INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #hero"
-INFO: CONSOLE:log: "[SectionManager] LOADED #hero"
-INFO: CONSOLE:log: "[SectionManager] START #hero"
-INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #hero"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #hero"
-INFO: CONSOLE:log: "[SectionManager] RESUME #hero"
-INFO: CONSOLE:debug: "[vite] connecting..."
-INFO: CONSOLE:debug: "[vite] connected."
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #hero"
-INFO: CONSOLE:log: "[SectionManager] LOADING #hero"
-INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #hero"
-INFO: CONSOLE:log: "[SectionManager] LOADED #hero"
-INFO: CONSOLE:log: "[SectionManager] START #hero"
-INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #hero"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #hero"
-INFO: CONSOLE:log: "[SectionManager] RESUME #hero"
-INFO: CONSOLE:log: "__DIALTONE_ERROR_PING__:1772297944433155620"
-ERROR: CONSOLE:error: "__DIALTONE_ERROR_PING__:1772297944433155620:error"
+<empty>
 ```
 
 ## reuse-dev-and-attach-new-tab
@@ -132,19 +100,17 @@ ERROR: CONSOLE:error: "__DIALTONE_ERROR_PING__:1772297944433155620:error"
 
 ```text
 result: PASS
-duration: 6.079005379s
-report: reused remote dev session attach on remote node
+duration: 3.132499892s
+report: reused dev session, reattached after disconnect, and confirmed no extra dev spawn
 ```
 
 ### Logs
 
 ```text
 logs:
-INFO: remote pre-reuse role counts on legion: dev=0 test=0
-INFO: remote post-reuse role counts on legion: dev=0 test=0
-INFO: reused remote dev session on legion
-INFO: report: reused remote dev session attach on remote node
-PASS: [TEST][PASS] [STEP:reuse-dev-and-attach-new-tab] report: reused remote dev session attach on remote node
+INFO: reused dev session and created new tab via chromedp
+INFO: report: reused dev session, reattached after disconnect, and confirmed no extra dev spawn
+PASS: [TEST][PASS] [STEP:reuse-dev-and-attach-new-tab] report: reused dev session, reattached after disconnect, and confirmed no extra dev spawn
 ```
 
 ### Errors
@@ -160,10 +126,6 @@ errors:
 browser_logs:
 <empty>
 ```
-
-### Screenshots
-
-![auto_reuse-dev-and-attach-new-tab.png](screenshots/auto_reuse-dev-and-attach-new-tab.png)
 
 ## launch-test-headless-and-list-processes
 
@@ -171,20 +133,18 @@ browser_logs:
 
 ```text
 result: PASS
-duration: 3.721041618s
-report: launched remote test session and verified remote attach path
+duration: 6.183450156s
+report: launched headless test session and validated process listing metadata
 ```
 
 ### Logs
 
 ```text
 logs:
-INFO: remote pre-test-launch role counts on legion: dev=0 test=0
-INFO: remote post-test-launch role counts on legion: dev=0 test=0
-WARN: remote test role count did not increase on legion after launch (dev=0 test=0); continuing due cross-shell process visibility limits
-INFO: verified remote test session on legion
-INFO: report: launched remote test session and verified remote attach path
-PASS: [TEST][PASS] [STEP:launch-test-headless-and-list-processes] report: launched remote test session and verified remote attach path
+INFO: post-test-launch role counts: dev=2 test=2
+INFO: verified list shows dev/test roles, headed/headless, gpu and user-data-dir
+INFO: report: launched headless test session and validated process listing metadata
+PASS: [TEST][PASS] [STEP:launch-test-headless-and-list-processes] report: launched headless test session and validated process listing metadata
 ```
 
 ### Errors
@@ -201,28 +161,24 @@ browser_logs:
 <empty>
 ```
 
-### Screenshots
-
-![auto_launch-test-headless-and-list-processes.png](screenshots/auto_launch-test-headless-and-list-processes.png)
-
 ## cleanup-test-preserve-dev
 
 ### Results
 
 ```text
 result: PASS
-duration: 1.778035208s
-report: remote mode cleanup removed test role while preserving dev role
+duration: 3.210537398s
+report: cleaned test session while preserving dev session
 ```
 
 ### Logs
 
 ```text
 logs:
-INFO: remote pre-cleanup-test role counts on legion: dev=0 test=0
-INFO: remote post-cleanup-test role counts on legion: dev=0 test=0
-INFO: report: remote mode cleanup removed test role while preserving dev role
-PASS: [TEST][PASS] [STEP:cleanup-test-preserve-dev] report: remote mode cleanup removed test role while preserving dev role
+INFO: post-cleanup-test role counts: dev=2 test=0
+INFO: cleaned test role and preserved dev role
+INFO: report: cleaned test session while preserving dev session
+PASS: [TEST][PASS] [STEP:cleanup-test-preserve-dev] report: cleaned test session while preserving dev session
 ```
 
 ### Errors
@@ -245,18 +201,18 @@ browser_logs:
 
 ```text
 result: PASS
-duration: 2.028013938s
-report: cleanup complete for remote chrome test mode
+duration: 5.05896293s
+report: cleanup complete for chrome role sessions
 ```
 
 ### Logs
 
 ```text
 logs:
-INFO: remote pre-cleanup-all role counts on legion: dev=0 test=0
-INFO: remote final role counts on legion: dev=0 test=0
-INFO: report: cleanup complete for remote chrome test mode
-PASS: [TEST][PASS] [STEP:cleanup-all] report: cleanup complete for remote chrome test mode
+INFO: final role counts: dev=0 test=0 (pre-launch dev=0 test=8)
+INFO: cleanup complete
+INFO: report: cleanup complete for chrome role sessions
+PASS: [TEST][PASS] [STEP:cleanup-all] report: cleanup complete for chrome role sessions
 ```
 
 ### Errors
@@ -273,12 +229,3 @@ browser_logs:
 <empty>
 ```
 
-<!-- DIALTONE_CHROME_REPORT_START -->
-
-## Chrome Report
-
-- hostnode: `legion`
-- chrome_count: `unknown`
-- error: `remote browser inventory on legion failed: powershell command failed: exit status 1`
-
-<!-- DIALTONE_CHROME_REPORT_END -->
