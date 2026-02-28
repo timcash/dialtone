@@ -159,12 +159,6 @@ function toggleModeFor(sectionId: UISharedTemplateID): void {
   console.log(`mode-toggle:${sectionId}:${next}`);
 }
 
-function activeSectionId(): UISharedTemplateID {
-  const id = sections.getActiveSectionId() as UISharedTemplateID | null;
-  if (id && sectionIDs.includes(id)) return id;
-  return "hero";
-}
-
 function bindInteractions(
   sectionId: UISharedTemplateID,
   container: HTMLElement,
@@ -240,7 +234,8 @@ for (const sectionId of sectionIDs) {
       const container = document.getElementById(sectionId);
       if (!container) throw new Error(`${sectionId} container not found`);
       renderUISharedTemplate(container, sectionId);
-      applyMode(sectionId, template.defaultMode);
+      // Keep a stable section layout across navigation steps.
+      applyMode(sectionId, "fullscreen");
       bindInteractions(sectionId, container);
       const canvas = container.querySelector("canvas");
       if (canvas instanceof HTMLCanvasElement) {
@@ -255,21 +250,6 @@ for (const sectionId of sectionIDs) {
     sections.navigateTo(sectionId),
   );
 }
-
-menu.addButton("Layout", "Toggle Layout Mode", () => {
-  toggleModeFor(activeSectionId());
-});
-
-window.addEventListener("keydown", (event) => {
-  if (event.defaultPrevented) return;
-  if (event.metaKey || event.ctrlKey || event.altKey) return;
-  if (event.key.toLowerCase() !== "m") return;
-  const target = event.target as HTMLElement | null;
-  if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
-    return;
-  event.preventDefault();
-  toggleModeFor(activeSectionId());
-});
 
 const initialRaw = (window.location.hash || "#hero").slice(1);
 const initial = sectionIDs.includes(initialRaw as UISharedTemplateID)

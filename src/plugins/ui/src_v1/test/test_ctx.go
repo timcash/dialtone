@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	uiv1 "dialtone/dev/plugins/ui/src_v1/go"
@@ -75,6 +76,10 @@ func (t *TestContext) AppURL(path string) string {
 func (t *TestContext) EnsureBuiltAndServed() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	opts := GetOptions()
+	if strings.TrimSpace(opts.AttachNode) != "" {
+		return t.ensureAttachDevServerLocked()
+	}
 	if err := t.ensurePathsLocked(); err != nil {
 		return err
 	}
@@ -88,6 +93,44 @@ func (t *TestContext) EnsureBuiltAndServed() error {
 		return nil
 	}
 	return t.startServerLocked()
+}
+
+func (t *TestContext) ensureAttachDevServerLocked() error {
+	if err := t.ensurePathsLocked(); err != nil {
+		return err
+	}
+	const localDevURL = "http://127.0.0.1:5177"
+	t.serverURL = localDevURL
+
+	if err := waitHTTP(localDevURL, 1500*time.Millisecond); err == nil {
+		t.logf("LOOKING FOR: persistent ui dev server already running at %s", localDevURL)
+		return nil
+	}
+
+	t.logf("LOOKING FOR: starting persistent ui dev server in background at %s", localDevURL)
+	logFile, err := os.OpenFile("/tmp/ui_src_v1_dev.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return fmt.Errorf("open dev log file: %w", err)
+	}
+	defer logFile.Close()
+
+	cmd := exec.Command("./dialtone.sh", "ui", "src_v1", "dev")
+	cmd.Dir = t.repoRoot
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	env := append([]string{}, os.Environ()...)
+	env = append(env, "UI_DEV_BROWSER_MODE=none")
+	cmd.Env = env
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start detached ui dev server: %w", err)
+	}
+	_ = cmd.Process.Release()
+	if err := waitHTTP(localDevURL, 45*time.Second); err != nil {
+		return fmt.Errorf("background ui dev server did not become ready at %s: %w", localDevURL, err)
+	}
+	t.logf("LOOKING FOR: persistent ui dev server ready at %s", localDevURL)
+	return nil
 }
 
 func (t *TestContext) ensurePathsLocked() error {

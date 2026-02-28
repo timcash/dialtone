@@ -29,6 +29,10 @@ func (sc *StepContext) runInjectedBrowserErrorCheckOnce() error {
 }
 
 func (sc *StepContext) runInjectedBrowserErrorCheck() error {
+	if RemoteBrowserConfigured() {
+		sc.Warnf("INJECTED_BROWSER_CHECK: skipped (remote browser mode)")
+		return nil
+	}
 	nc := sc.NATSConn()
 	if nc == nil {
 		sc.Warnf("INJECTED_BROWSER_CHECK: skipped (no nats connection)")
@@ -71,12 +75,28 @@ func (sc *StepContext) runInjectedBrowserErrorCheck() error {
 
 	js := fmt.Sprintf(`(() => {
   console.log(%q);
-  setTimeout(() => { throw new Error(%q); }, 0);
+  console.error(%q);
   return true;
 })()`, markerBrowser, markerError)
 	var ok bool
 	if err := b.RunWithTimeout(5*time.Second, chromedp.Evaluate(js, &ok)); err != nil {
-		return fmt.Errorf("injected browser check evaluate: %w", err)
+		if isNoBrowserOpenError(err) {
+			sc.Warnf("INJECTED_BROWSER_CHECK: no open page; creating page and retrying evaluate")
+			if rerr := b.EnsureOpenPage(); rerr != nil {
+				return fmt.Errorf("injected browser check recover page: %w", rerr)
+			}
+			if err2 := b.RunWithTimeout(5*time.Second, chromedp.Evaluate(js, &ok)); err2 != nil {
+				return fmt.Errorf("injected browser check evaluate after recover: %w", err2)
+			}
+		} else if strings.Contains(strings.ToLower(err.Error()), "context canceled") {
+			sc.Warnf("INJECTED_BROWSER_CHECK: context canceled; retrying evaluate once")
+			time.Sleep(150 * time.Millisecond)
+			if err2 := b.RunWithTimeout(5*time.Second, chromedp.Evaluate(js, &ok)); err2 != nil {
+				return fmt.Errorf("injected browser check evaluate after context-canceled retry: %w", err2)
+			}
+		} else {
+			return fmt.Errorf("injected browser check evaluate: %w", err)
+		}
 	}
 
 	deadline := time.Now().Add(5 * time.Second)

@@ -42,41 +42,45 @@ func CaptureScreenshot(sc *StepContext, filename string) error {
 	if err := b.CaptureScreenshot(path); err != nil {
 		return err
 	}
-	if err := downscalePNGHalf(path); err != nil {
+	if err := ResizeScreenshotHalf(path); err != nil {
 		return err
 	}
-	return downscalePNGHalf(path)
+	return nil
 }
 
 func resolvePaths() (uiv1.Paths, error) {
 	return uiv1.ResolvePaths("")
 }
 
-func downscalePNGHalf(path string) error {
-	f, err := os.Open(path)
+// ResizeScreenshotHalf rewrites a PNG on disk to 50% width/height.
+func ResizeScreenshotHalf(path string) error {
+	in, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	src, err := png.Decode(f)
+	defer in.Close()
+
+	src, err := png.Decode(in)
 	if err != nil {
 		return err
 	}
 	b := src.Bounds()
-	w := b.Dx() / 2
-	h := b.Dy() / 2
-	if w < 1 || h < 1 {
+	outW := b.Dx() / 2
+	outH := b.Dy() / 2
+	if outW < 1 || outH < 1 {
 		return nil
 	}
-	dst := image.NewRGBA(image.Rect(0, 0, w, h))
-	for y := 0; y < h; y++ {
-		sy := b.Min.Y + y*2
-		for x := 0; x < w; x++ {
-			sx := b.Min.X + x*2
-			c := color.RGBAModel.Convert(src.At(sx, sy)).(color.RGBA)
+
+	dst := image.NewRGBA(image.Rect(0, 0, outW, outH))
+	for y := 0; y < outH; y++ {
+		srcY := b.Min.Y + (y * 2)
+		for x := 0; x < outW; x++ {
+			srcX := b.Min.X + (x * 2)
+			c := color.RGBAModel.Convert(src.At(srcX, srcY)).(color.RGBA)
 			dst.SetRGBA(x, y, c)
 		}
 	}
+
 	out, err := os.Create(path)
 	if err != nil {
 		return err

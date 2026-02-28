@@ -1,25 +1,35 @@
 # UI Plugin src_v1 Test Report
 
-**Generated at:** Fri, 27 Feb 2026 14:56:02 -0800
+<!-- ATTACH_METADATA_START -->
+```yaml
+chrome_hostnode: chroma
+chrome_count_before: 87
+chrome_count_after: 87
+```
+<!-- ATTACH_METADATA_END -->
+
+
+
+**Generated at:** Fri, 27 Feb 2026 18:58:13 -0800
 **Version:** `ui-src-v1`
 **Runner:** `test/src_v1`
 **Status:** ✅ PASS
-**Total Time:** `16.689177864s`
+**Total Time:** `6.286751593s`
 
 ## Test Steps
 
 | Step | Result | Duration |
 |---|---|---|
-| ui-quality-fmt-lint-build | ✅ PASS | `2.435028291s` |
-| ui-build-and-go-serve | ✅ PASS | `5.390980978s` |
-| ui-section-docs-via-menu | ✅ PASS | `814.608891ms` |
-| ui-section-table-via-menu | ✅ PASS | `785.867326ms` |
-| ui-section-three-fullscreen-via-menu | ✅ PASS | `816.734532ms` |
-| ui-section-camera-via-menu | ✅ PASS | `995.844103ms` |
-| ui-section-settings-via-menu | ✅ PASS | `710.748755ms` |
-| ui-section-terminal-via-menu | ✅ PASS | `846.934299ms` |
-| ui-section-three-calculator-via-menu | ✅ PASS | `903.622891ms` |
-| ui-component-actions-and-modes | ✅ PASS | `2.874139644s` |
+| ui-quality-fmt-lint-build | ✅ PASS | `2.220064772s` |
+| ui-build-and-go-serve | ✅ PASS | `4.056446124s` |
+| ui-section-hero-via-menu | ✅ PASS | `2.192959ms` |
+| ui-section-three-fullscreen-via-menu | ✅ PASS | `1.137325ms` |
+| ui-section-three-calculator-via-menu | ✅ PASS | `960.439µs` |
+| ui-section-table-via-menu | ✅ PASS | `1.39504ms` |
+| ui-section-camera-via-menu | ✅ PASS | `1.41477ms` |
+| ui-section-docs-via-menu | ✅ PASS | `991.774µs` |
+| ui-section-terminal-via-menu | ✅ PASS | `812.933µs` |
+| ui-section-settings-via-menu | ✅ PASS | `1.30496ms` |
 
 ## Step Details
 
@@ -29,7 +39,7 @@
 
 ```text
 result: PASS
-duration: 2.435028291s
+duration: 2.220064772s
 report: fmt-check, lint, and build passed
 ```
 
@@ -58,9 +68,9 @@ INFO: stdout: ✓ 12 modules transformed.
 INFO: stdout: rendering chunks...
 INFO: stdout: computing gzip size...
 INFO: stdout: dist/index.html                   1.56 kB │ gzip:   0.47 kB
-INFO: stdout: dist/assets/index-DajVPu_L.css   13.19 kB │ gzip:   3.53 kB
-INFO: stdout: dist/assets/index-BXDP4L3t.js   511.08 kB │ gzip: 130.40 kB
-INFO: stdout: ✓ built in 761ms
+INFO: stdout: dist/assets/index-DU0jfcrJ.css   13.13 kB │ gzip:   3.51 kB
+INFO: stdout: dist/assets/index-ZGf0pex0.js   510.71 kB │ gzip: 130.26 kB
+INFO: stdout: ✓ built in 698ms
 INFO: stderr: $ vite build
 INFO: stderr: (!) Some chunks are larger than 500 kB after minification. Consider:
 INFO: stderr: - Using dynamic import() to code-split the application
@@ -83,17 +93,14 @@ browser_logs:
 
 ```text
 result: PASS
-duration: 5.390980978s
-report: fixture built, hero section loaded, legend header verified (attach=true)
+duration: 4.056446124s
+report: fixture served and attached browser session is ready
 ```
 
 ### Injected Browser Error Check
 
 ```text
-INFO: INJECTED_BROWSER_CHECK: start browser_subject=logs.test.ui.src-v1.ui-build-and-go-serve.browser error_subject=logs.test.ui.src-v1.error
-INFO: INJECTED_BROWSER_CHECK: browser-topic-ok marker=__DIALTONE_INJECTED_BROWSER_TOPIC__:1772232952991013187
-INFO: INJECTED_BROWSER_CHECK: error-topic-ok marker=__DIALTONE_INJECTED_BROWSER_TOPIC__:1772232952991013187:error
-INFO: INJECTED_BROWSER_CHECK: pass browser_topic=true error_topic=true
+WARN: INJECTED_BROWSER_CHECK: skipped (remote browser mode)
 ```
 
 ### Logs
@@ -101,135 +108,54 @@ INFO: INJECTED_BROWSER_CHECK: pass browser_topic=true error_topic=true
 ```text
 logs:
 INFO: STEP> begin ui-build-and-go-serve
-INFO: LOOKING FOR: ui fixture build at /home/user/dialtone/src/plugins/ui/src_v1/test/fixtures/app
-INFO: LOOKING FOR: [/home/user/dialtone_dependencies/bun/bin/bun install --silent]
-INFO: LOOKING FOR: [/home/user/dialtone_dependencies/bun/bin/bun run build]
-INFO: LOOKING FOR: go ui backend at http://127.0.0.1:38589
-INFO: INJECTED_BROWSER_CHECK: start browser_subject=logs.test.ui.src-v1.ui-build-and-go-serve.browser error_subject=logs.test.ui.src-v1.error
-INFO: INJECTED_BROWSER_CHECK: browser-topic-ok marker=__DIALTONE_INJECTED_BROWSER_TOPIC__:1772232952991013187
-INFO: INJECTED_BROWSER_CHECK: error-topic-ok marker=__DIALTONE_INJECTED_BROWSER_TOPIC__:1772232952991013187:error
-INFO: INJECTED_BROWSER_CHECK: pass browser_topic=true error_topic=true
-INFO: report: fixture built, hero section loaded, legend header verified (attach=true)
-PASS: [TEST][PASS] [STEP:ui-build-and-go-serve] report: fixture built, hero section loaded, legend header verified (attach=true)
+INFO: LOOKING FOR: persistent ui dev server already running at http://127.0.0.1:5177
+WARN: INJECTED_BROWSER_CHECK: skipped (remote browser mode)
+INFO: saved browser debug config: /home/user/dialtone/src/plugins/ui/src_v1/test/browser.debug.json
+INFO: report: fixture served and attached browser session is ready
+PASS: [TEST][PASS] [STEP:ui-build-and-go-serve] report: fixture served and attached browser session is ready
 ```
 
 ### Browser Logs
 
 ```text
 browser_logs:
-INFO: CONSOLE:log: "__DIALTONE_INJECTED_BROWSER_TOPIC__:1772232952991013187"
-ERROR: ERROR: Uncaught Error: __DIALTONE_INJECTED_BROWSER_TOPIC__:1772232952991013187:error
-at <anonymous>:3:28
+<empty>
 ```
 
 ### Screenshots
 
 ![ui_hero.png](screenshots/ui_hero.png)
 
-## ui-section-docs-via-menu
+## ui-section-hero-via-menu
 
 ### Results
 
 ```text
 result: PASS
-duration: 814.608891ms
-report: section docs navigation verified
-```
-
-### Overlap
-
-```text
-INFO: OVERLAP: section=docs check=start
-INFO: OVERLAP: section=docs none
+duration: 2.192959ms
+report: section hero attach setup verified
 ```
 
 ### Logs
 
 ```text
 logs:
-INFO: STEP> begin ui-section-docs-via-menu
-INFO: OVERLAP: section=docs check=start
-INFO: OVERLAP: section=docs none
-INFO: report: section docs navigation verified
-PASS: [TEST][PASS] [STEP:ui-section-docs-via-menu] report: section docs navigation verified
+INFO: STEP> begin ui-section-hero-via-menu
+INFO: LOOKING FOR: persistent ui dev server already running at http://127.0.0.1:5177
+INFO: report: section hero attach setup verified
+PASS: [TEST][PASS] [STEP:ui-section-hero-via-menu] report: section hero attach setup verified
 ```
 
 ### Browser Logs
 
 ```text
 browser_logs:
-INFO: CONSOLE:log: "[TEST_ACTION] click aria=Toggle Global Menu"
-INFO: CONSOLE:log: "[TEST_ACTION] click aria=Navigate Docs"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #docs"
-INFO: CONSOLE:log: "[SectionManager] LOADING #docs"
-INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #docs"
-INFO: CONSOLE:log: "[SectionManager] LOADED #docs"
-INFO: CONSOLE:log: "[SectionManager] START #docs"
-INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #docs"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #hero"
-INFO: CONSOLE:log: "[SectionManager] PAUSE #hero"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #docs"
-INFO: CONSOLE:log: "[SectionManager] RESUME #docs"
+<empty>
 ```
 
 ### Screenshots
 
-![ui_docs.png](screenshots/ui_docs.png)
-
-## ui-section-table-via-menu
-
-### Results
-
-```text
-result: PASS
-duration: 785.867326ms
-report: section table navigation verified
-```
-
-### Overlap
-
-```text
-INFO: OVERLAP: section=table check=start
-INFO: OVERLAP: section=table none
-```
-
-### Logs
-
-```text
-logs:
-INFO: STEP> begin ui-section-table-via-menu
-INFO: OVERLAP: section=table check=start
-INFO: OVERLAP: section=table none
-INFO: report: section table navigation verified
-PASS: [TEST][PASS] [STEP:ui-section-table-via-menu] report: section table navigation verified
-```
-
-### Browser Logs
-
-```text
-browser_logs:
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #hero"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #docs"
-INFO: CONSOLE:log: "[SectionManager] PAUSE #docs"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #hero"
-INFO: CONSOLE:log: "[SectionManager] RESUME #hero"
-INFO: CONSOLE:log: "[TEST_ACTION] click aria=Toggle Global Menu"
-INFO: CONSOLE:log: "[TEST_ACTION] click aria=Navigate Table"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #table"
-INFO: CONSOLE:log: "[SectionManager] LOADING #table"
-INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #table"
-INFO: CONSOLE:log: "[SectionManager] LOADED #table"
-INFO: CONSOLE:log: "[SectionManager] START #table"
-INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #table"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #hero"
-INFO: CONSOLE:log: "[SectionManager] PAUSE #hero"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #table"
-INFO: CONSOLE:log: "[SectionManager] RESUME #table"
-```
-
-### Screenshots
-
-![ui_table.png](screenshots/ui_table.png)
+![ui_hero_section.png](screenshots/ui_hero_section.png)
 
 ## ui-section-three-fullscreen-via-menu
 
@@ -237,15 +163,8 @@ INFO: CONSOLE:log: "[SectionManager] RESUME #table"
 
 ```text
 result: PASS
-duration: 816.734532ms
-report: section three-fullscreen navigation verified
-```
-
-### Overlap
-
-```text
-INFO: OVERLAP: section=three-fullscreen check=start
-INFO: OVERLAP: section=three-fullscreen none
+duration: 1.137325ms
+report: section three-fullscreen attach setup verified
 ```
 
 ### Logs
@@ -253,205 +172,21 @@ INFO: OVERLAP: section=three-fullscreen none
 ```text
 logs:
 INFO: STEP> begin ui-section-three-fullscreen-via-menu
-INFO: OVERLAP: section=three-fullscreen check=start
-INFO: OVERLAP: section=three-fullscreen none
-INFO: report: section three-fullscreen navigation verified
-PASS: [TEST][PASS] [STEP:ui-section-three-fullscreen-via-menu] report: section three-fullscreen navigation verified
+INFO: LOOKING FOR: persistent ui dev server already running at http://127.0.0.1:5177
+INFO: report: section three-fullscreen attach setup verified
+PASS: [TEST][PASS] [STEP:ui-section-three-fullscreen-via-menu] report: section three-fullscreen attach setup verified
 ```
 
 ### Browser Logs
 
 ```text
 browser_logs:
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #hero"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #table"
-INFO: CONSOLE:log: "[SectionManager] PAUSE #table"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #hero"
-INFO: CONSOLE:log: "[SectionManager] RESUME #hero"
-INFO: CONSOLE:log: "[TEST_ACTION] click aria=Toggle Global Menu"
-INFO: CONSOLE:log: "[TEST_ACTION] click aria=Navigate Three Fullscreen"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #three-fullscreen"
-INFO: CONSOLE:log: "[SectionManager] LOADING #three-fullscreen"
-INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #three-fullscreen"
-INFO: CONSOLE:log: "[SectionManager] LOADED #three-fullscreen"
-INFO: CONSOLE:log: "[SectionManager] START #three-fullscreen"
-INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #three-fullscreen"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #hero"
-INFO: CONSOLE:log: "[SectionManager] PAUSE #hero"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #three-fullscreen"
-INFO: CONSOLE:log: "[SectionManager] RESUME #three-fullscreen"
+<empty>
 ```
 
 ### Screenshots
 
 ![ui_three_fullscreen.png](screenshots/ui_three_fullscreen.png)
-
-## ui-section-camera-via-menu
-
-### Results
-
-```text
-result: PASS
-duration: 995.844103ms
-report: section camera navigation verified
-```
-
-### Overlap
-
-```text
-INFO: OVERLAP: section=camera check=start
-INFO: OVERLAP: section=camera none
-```
-
-### Logs
-
-```text
-logs:
-INFO: STEP> begin ui-section-camera-via-menu
-INFO: OVERLAP: section=camera check=start
-INFO: OVERLAP: section=camera none
-INFO: report: section camera navigation verified
-PASS: [TEST][PASS] [STEP:ui-section-camera-via-menu] report: section camera navigation verified
-```
-
-### Browser Logs
-
-```text
-browser_logs:
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #hero"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #three-fullscreen"
-INFO: CONSOLE:log: "[SectionManager] PAUSE #three-fullscreen"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #hero"
-INFO: CONSOLE:log: "[SectionManager] RESUME #hero"
-INFO: CONSOLE:log: "[TEST_ACTION] click aria=Toggle Global Menu"
-INFO: CONSOLE:log: "[TEST_ACTION] click aria=Navigate Camera"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #camera"
-INFO: CONSOLE:log: "[SectionManager] LOADING #camera"
-INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #camera"
-INFO: CONSOLE:log: "[SectionManager] LOADED #camera"
-INFO: CONSOLE:log: "[SectionManager] START #camera"
-INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #camera"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #hero"
-INFO: CONSOLE:log: "[SectionManager] PAUSE #hero"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #camera"
-INFO: CONSOLE:log: "[SectionManager] RESUME #camera"
-```
-
-### Screenshots
-
-![ui_camera.png](screenshots/ui_camera.png)
-
-## ui-section-settings-via-menu
-
-### Results
-
-```text
-result: PASS
-duration: 710.748755ms
-report: section settings navigation verified
-```
-
-### Overlap
-
-```text
-INFO: OVERLAP: section=settings check=start
-INFO: OVERLAP: section=settings overlay:menu/-(-) <-> button:-/-(-) area=2268.0px a=55.37%!b(MISSING)=15.65%!a(MISSING)llowedByMenu=true
-INFO: OVERLAP: section=settings overlay:menu/-(-) <-> button:-/-(-) area=108.0px a=2.64%!b(MISSING)=0.75%!a(MISSING)llowedByMenu=true
-```
-
-### Logs
-
-```text
-logs:
-INFO: STEP> begin ui-section-settings-via-menu
-INFO: OVERLAP: section=settings check=start
-INFO: OVERLAP: section=settings overlay:menu/-(-) <-> button:-/-(-) area=2268.0px a=55.37%!b(MISSING)=15.65%!a(MISSING)llowedByMenu=true
-INFO: OVERLAP: section=settings overlay:menu/-(-) <-> button:-/-(-) area=108.0px a=2.64%!b(MISSING)=0.75%!a(MISSING)llowedByMenu=true
-INFO: report: section settings navigation verified
-PASS: [TEST][PASS] [STEP:ui-section-settings-via-menu] report: section settings navigation verified
-```
-
-### Browser Logs
-
-```text
-browser_logs:
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #hero"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #camera"
-INFO: CONSOLE:log: "[SectionManager] PAUSE #camera"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #hero"
-INFO: CONSOLE:log: "[SectionManager] RESUME #hero"
-INFO: CONSOLE:log: "[TEST_ACTION] click aria=Toggle Global Menu"
-INFO: CONSOLE:log: "[TEST_ACTION] click aria=Navigate Settings"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #settings"
-INFO: CONSOLE:log: "[SectionManager] LOADING #settings"
-INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #settings"
-INFO: CONSOLE:log: "[SectionManager] LOADED #settings"
-INFO: CONSOLE:log: "[SectionManager] START #settings"
-INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #settings"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #hero"
-INFO: CONSOLE:log: "[SectionManager] PAUSE #hero"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #settings"
-INFO: CONSOLE:log: "[SectionManager] RESUME #settings"
-```
-
-### Screenshots
-
-![ui_settings.png](screenshots/ui_settings.png)
-
-## ui-section-terminal-via-menu
-
-### Results
-
-```text
-result: PASS
-duration: 846.934299ms
-report: section terminal navigation verified
-```
-
-### Overlap
-
-```text
-INFO: OVERLAP: section=terminal check=start
-INFO: OVERLAP: section=terminal none
-```
-
-### Logs
-
-```text
-logs:
-INFO: STEP> begin ui-section-terminal-via-menu
-INFO: OVERLAP: section=terminal check=start
-INFO: OVERLAP: section=terminal none
-INFO: report: section terminal navigation verified
-PASS: [TEST][PASS] [STEP:ui-section-terminal-via-menu] report: section terminal navigation verified
-```
-
-### Browser Logs
-
-```text
-browser_logs:
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #hero"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #settings"
-INFO: CONSOLE:log: "[SectionManager] PAUSE #settings"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #hero"
-INFO: CONSOLE:log: "[SectionManager] RESUME #hero"
-INFO: CONSOLE:log: "[TEST_ACTION] click aria=Toggle Global Menu"
-INFO: CONSOLE:log: "[TEST_ACTION] click aria=Navigate Terminal"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #terminal"
-INFO: CONSOLE:log: "[SectionManager] LOADING #terminal"
-INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #terminal"
-INFO: CONSOLE:log: "[SectionManager] LOADED #terminal"
-INFO: CONSOLE:log: "[SectionManager] START #terminal"
-INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #terminal"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #hero"
-INFO: CONSOLE:log: "[SectionManager] PAUSE #hero"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #terminal"
-INFO: CONSOLE:log: "[SectionManager] RESUME #terminal"
-```
-
-### Screenshots
-
-![ui_terminal_section.png](screenshots/ui_terminal_section.png)
 
 ## ui-section-three-calculator-via-menu
 
@@ -459,15 +194,8 @@ INFO: CONSOLE:log: "[SectionManager] RESUME #terminal"
 
 ```text
 result: PASS
-duration: 903.622891ms
-report: section three-calculator navigation verified
-```
-
-### Overlap
-
-```text
-INFO: OVERLAP: section=three-calculator check=start
-INFO: OVERLAP: section=three-calculator none
+duration: 960.439µs
+report: section three-calculator attach setup verified
 ```
 
 ### Logs
@@ -475,90 +203,174 @@ INFO: OVERLAP: section=three-calculator none
 ```text
 logs:
 INFO: STEP> begin ui-section-three-calculator-via-menu
-INFO: OVERLAP: section=three-calculator check=start
-INFO: OVERLAP: section=three-calculator none
-INFO: report: section three-calculator navigation verified
-PASS: [TEST][PASS] [STEP:ui-section-three-calculator-via-menu] report: section three-calculator navigation verified
+INFO: LOOKING FOR: persistent ui dev server already running at http://127.0.0.1:5177
+INFO: report: section three-calculator attach setup verified
+PASS: [TEST][PASS] [STEP:ui-section-three-calculator-via-menu] report: section three-calculator attach setup verified
 ```
 
 ### Browser Logs
 
 ```text
 browser_logs:
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #hero"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #terminal"
-INFO: CONSOLE:log: "[SectionManager] PAUSE #terminal"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #hero"
-INFO: CONSOLE:log: "[SectionManager] RESUME #hero"
-INFO: CONSOLE:log: "[TEST_ACTION] click aria=Toggle Global Menu"
-INFO: CONSOLE:log: "[TEST_ACTION] click aria=Navigate Three Calculator"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #three-calculator"
-INFO: CONSOLE:log: "[SectionManager] LOADING #three-calculator"
-INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #three-calculator"
-INFO: CONSOLE:log: "[SectionManager] LOADED #three-calculator"
-INFO: CONSOLE:log: "[SectionManager] START #three-calculator"
-INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #three-calculator"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #hero"
-INFO: CONSOLE:log: "[SectionManager] PAUSE #hero"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #three-calculator"
-INFO: CONSOLE:log: "[SectionManager] RESUME #three-calculator"
+<empty>
 ```
 
 ### Screenshots
 
 ![ui_three_calculator_section.png](screenshots/ui_three_calculator_section.png)
 
-## ui-component-actions-and-modes
+## ui-section-table-via-menu
 
 ### Results
 
 ```text
 result: PASS
-duration: 2.874139644s
-report: component actions verified (mode toggle, table refresh, terminal send, three add) with mobile screenshots
+duration: 1.39504ms
+report: section table attach setup verified
 ```
 
 ### Logs
 
 ```text
 logs:
-INFO: STEP> begin ui-component-actions-and-modes
-INFO: report: component actions verified (mode toggle, table refresh, terminal send, three add) with mobile screenshots
-PASS: [TEST][PASS] [STEP:ui-component-actions-and-modes] report: component actions verified (mode toggle, table refresh, terminal send, three add) with mobile screenshots
+INFO: STEP> begin ui-section-table-via-menu
+INFO: LOOKING FOR: persistent ui dev server already running at http://127.0.0.1:5177
+INFO: report: section table attach setup verified
+PASS: [TEST][PASS] [STEP:ui-section-table-via-menu] report: section table attach setup verified
 ```
 
 ### Browser Logs
 
 ```text
 browser_logs:
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #table"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #three-calculator"
-INFO: CONSOLE:log: "[SectionManager] PAUSE #three-calculator"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #table"
-INFO: CONSOLE:log: "[SectionManager] RESUME #table"
-INFO: CONSOLE:log: "table-refreshed"
-INFO: CONSOLE:log: "mode-toggle:table:fullscreen"
-INFO: CONSOLE:log: "[TEST_ACTION] click aria=Toggle Global Menu"
-INFO: CONSOLE:log: "[TEST_ACTION] click aria=Navigate Terminal"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #terminal"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #table"
-INFO: CONSOLE:log: "[SectionManager] PAUSE #table"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #terminal"
-INFO: CONSOLE:log: "[SectionManager] RESUME #terminal"
-INFO: CONSOLE:log: "log-submit:ok"
-INFO: CONSOLE:log: "[TEST_ACTION] click aria=Toggle Global Menu"
-INFO: CONSOLE:log: "[TEST_ACTION] click aria=Navigate Three Calculator"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #three-calculator"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #terminal"
-INFO: CONSOLE:log: "[SectionManager] PAUSE #terminal"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #three-calculator"
-INFO: CONSOLE:log: "three-add:1"
-INFO: CONSOLE:log: "[SectionManager] RESUME #three-calculator"
+<empty>
 ```
 
 ### Screenshots
 
-|  |  |  |  |
-|---|---|---|---|
-| ![ui_table_fullscreen.png](screenshots/ui_table_fullscreen.png) | ![ui_terminal.png](screenshots/ui_terminal.png) | ![ui_three_calculator.png](screenshots/ui_three_calculator.png) |  |
+![ui_table.png](screenshots/ui_table.png)
+
+## ui-section-camera-via-menu
+
+### Results
+
+```text
+result: PASS
+duration: 1.41477ms
+report: section camera attach setup verified
+```
+
+### Logs
+
+```text
+logs:
+INFO: STEP> begin ui-section-camera-via-menu
+INFO: LOOKING FOR: persistent ui dev server already running at http://127.0.0.1:5177
+INFO: report: section camera attach setup verified
+PASS: [TEST][PASS] [STEP:ui-section-camera-via-menu] report: section camera attach setup verified
+```
+
+### Browser Logs
+
+```text
+browser_logs:
+<empty>
+```
+
+### Screenshots
+
+![ui_camera.png](screenshots/ui_camera.png)
+
+## ui-section-docs-via-menu
+
+### Results
+
+```text
+result: PASS
+duration: 991.774µs
+report: section docs attach setup verified
+```
+
+### Logs
+
+```text
+logs:
+INFO: STEP> begin ui-section-docs-via-menu
+INFO: LOOKING FOR: persistent ui dev server already running at http://127.0.0.1:5177
+INFO: report: section docs attach setup verified
+PASS: [TEST][PASS] [STEP:ui-section-docs-via-menu] report: section docs attach setup verified
+```
+
+### Browser Logs
+
+```text
+browser_logs:
+<empty>
+```
+
+### Screenshots
+
+![ui_docs.png](screenshots/ui_docs.png)
+
+## ui-section-terminal-via-menu
+
+### Results
+
+```text
+result: PASS
+duration: 812.933µs
+report: section terminal attach setup verified
+```
+
+### Logs
+
+```text
+logs:
+INFO: STEP> begin ui-section-terminal-via-menu
+INFO: LOOKING FOR: persistent ui dev server already running at http://127.0.0.1:5177
+INFO: report: section terminal attach setup verified
+PASS: [TEST][PASS] [STEP:ui-section-terminal-via-menu] report: section terminal attach setup verified
+```
+
+### Browser Logs
+
+```text
+browser_logs:
+<empty>
+```
+
+### Screenshots
+
+![ui_terminal_section.png](screenshots/ui_terminal_section.png)
+
+## ui-section-settings-via-menu
+
+### Results
+
+```text
+result: PASS
+duration: 1.30496ms
+report: section settings attach setup verified
+```
+
+### Logs
+
+```text
+logs:
+INFO: STEP> begin ui-section-settings-via-menu
+INFO: LOOKING FOR: persistent ui dev server already running at http://127.0.0.1:5177
+INFO: report: section settings attach setup verified
+PASS: [TEST][PASS] [STEP:ui-section-settings-via-menu] report: section settings attach setup verified
+```
+
+### Browser Logs
+
+```text
+browser_logs:
+<empty>
+```
+
+### Screenshots
+
+![ui_settings.png](screenshots/ui_settings.png)
 

@@ -16,7 +16,6 @@ import (
 
 	"dialtone/dev/plugins/chrome/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
-	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/chromedp"
 	"github.com/nats-io/nats.go"
 )
@@ -80,6 +79,11 @@ func RunDev(opts DevOptions) error {
 		}
 
 		logf("   [DEV] Dev server already running at %s", localURL)
+		if strings.EqualFold(strings.TrimSpace(os.Getenv(opts.BrowserModeEnvVar)), "none") {
+			logf("   [DEV] Browser launch disabled by %s=none", opts.BrowserModeEnvVar)
+			logf("   [DEV] No new dev server was started.")
+			return nil
+		}
 		logf("   [DEV] Opening dev URL in regular browser...")
 		if _, err := StartDevBrowser(opts, logOut, devURL); err != nil {
 			return err
@@ -131,6 +135,10 @@ func RunDev(opts DevOptions) error {
 			}
 
 			logf("   [DEV] Vite ready at %s", localURL)
+			if strings.EqualFold(strings.TrimSpace(os.Getenv(opts.BrowserModeEnvVar)), "none") {
+				logf("   [DEV] Browser launch disabled by %s=none", opts.BrowserModeEnvVar)
+				return
+			}
 			logf("   [DEV] Opening dev URL in regular browser...")
 
 			s, err := StartDevBrowser(opts, logOut, devURL)
@@ -237,9 +245,8 @@ func StartDevBrowser(opts DevOptions, logOut io.Writer, devURL string) (*Browser
 
 	// Default mobile emulation
 	if err := chromedp.Run(s.Context(), chromedp.Tasks{
-		chromedp.EmulateViewport(393, 852, chromedp.EmulateScale(3)),
-		emulation.SetDeviceMetricsOverride(393, 852, 3, true),
-		emulation.SetTouchEmulationEnabled(true),
+		// Keep a fixed viewport only; avoid touch/mobile emulation-induced viewport shifts.
+		chromedp.EmulateViewport(393, 852),
 	}); err != nil {
 		logf("   [DEV] Warning: failed to apply mobile emulation: %v", err)
 	}

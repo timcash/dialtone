@@ -15,7 +15,7 @@ func WaitForAriaLabel(label string) Action {
 }
 
 func ClickAriaLabel(label string) Action {
-	return chromedp.Click(fmt.Sprintf(`[aria-label="%s"]`, label), chromedp.ByQuery)
+	return clickThrottleAction(chromedp.Click(fmt.Sprintf(`[aria-label="%s"]`, label), chromedp.ByQuery))
 }
 
 func TypeAriaLabel(label, value string) Action {
@@ -94,4 +94,14 @@ func AssertElementHidden(selector string) Action {
 func NavigateToSection(plugin, subname, underlay string) Action {
 	id := fmt.Sprintf("%s-%s-%s", plugin, subname, underlay)
 	return chromedp.Navigate(fmt.Sprintf("#%s", id))
+}
+
+func ClickAt(x, y float64) Action {
+	return clickThrottleAction(chromedp.MouseClickXY(x, y))
+}
+
+func clickThrottleAction(click Action) Action {
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		return runThrottledClick(ctx, click)
+	})
 }
