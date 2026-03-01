@@ -36,7 +36,7 @@ class ThreeControl implements VisualizationControl {
     this.chatlogHost = container.querySelector('.three-chatlog-xterm');
     this.initChatlogTerminal();
 
-	    registerButtons(ROBOT_SECTION_IDS.three, ['Drive', 'System'], {
+	    registerButtons(ROBOT_SECTION_IDS.three, ['Drive', 'System', 'Guided'], {
 	      'Drive': [
 	        { label: 'Up-L', action: () => sendDriveLeft() },
 	        { label: 'Up', action: () => sendDriveUp() },
@@ -55,6 +55,16 @@ class ThreeControl implements VisualizationControl {
         { label: 'Guided', action: () => sendCommand('mode', 'guided') },
         { label: 'Pulse Fwd', action: () => sendCommand('pulse_fwd') },
         { label: 'Stop', action: () => sendCommand('stop') },
+        null,
+      ],
+      'Guided': [
+        { label: 'Guided On', action: () => sendCommand('mode', 'guided') },
+        { label: 'Fwd 1m', action: () => sendCommand('guided_forward_1m') },
+        { label: 'Square 5m', action: () => sendCommand('guided_square_5m') },
+        { label: 'Hold', action: () => sendCommand('guided_hold') },
+        { label: 'Manual', action: () => sendCommand('mode', 'manual') },
+        { label: 'Stop', action: () => sendCommand('stop') },
+        null,
         null,
       ],
     });

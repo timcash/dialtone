@@ -1,5 +1,5 @@
 import { VisualizationControl } from '@ui/types';
-import { addMavlinkListener } from '../../data/connection';
+import { addMavlinkListener, sendCommand } from '../../data/connection';
 import { LatencyEstimator } from '../../data/latency';
 import { logError, logInfo } from '../../data/logging';
 import { registerButtons, renderButtons } from '../../buttons';
@@ -39,7 +39,7 @@ class VideoControl implements VisualizationControl {
     if (btn) btn.addEventListener('click', () => this.resumeStream());
 
     // Register Buttons
-    registerButtons(ROBOT_SECTION_IDS.video, ['View', 'Drive'], {
+    registerButtons(ROBOT_SECTION_IDS.video, ['View', 'Drive', 'Guided'], {
       'View': [
         { label: 'Feed A', action: () => this.updateFeedSource('Primary') },
         { label: 'Feed B', action: () => this.updateFeedSource('Secondary') },
@@ -57,6 +57,16 @@ class VideoControl implements VisualizationControl {
         { label: 'Down-L', action: () => sendDriveDownLeft() },
         { label: 'Down', action: () => sendDriveDown() },
         { label: 'Down-R', action: () => sendDriveDownRight() },
+        null,
+        null,
+      ],
+      'Guided': [
+        { label: 'Guided On', action: () => sendCommand('mode', 'guided') },
+        { label: 'Fwd 1m', action: () => sendCommand('guided_forward_1m') },
+        { label: 'Square 5m', action: () => sendCommand('guided_square_5m') },
+        { label: 'Hold', action: () => sendCommand('guided_hold') },
+        { label: 'Manual', action: () => sendCommand('mode', 'manual') },
+        { label: 'Stop', action: () => sendCommand('stop') },
         null,
         null,
       ],

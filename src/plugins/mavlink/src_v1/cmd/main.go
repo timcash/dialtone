@@ -434,6 +434,47 @@ func startRoverCommandConsumer(nc *nats.Conn, svc *mavlinkapp.MavlinkService) {
 					logs.Error("rover.command stop failed: %v", err)
 				}
 			}()
+		case "guided_hold":
+			go func() {
+				if err := svc.StopMotion(); err != nil {
+					logs.Error("rover.command guided_hold failed: %v", err)
+				}
+			}()
+		case "guided_forward_1m":
+			go func() {
+				// Current implementation is an RC-override approximation while in GUIDED.
+				if err := svc.SetMode("GUIDED"); err != nil {
+					logs.Error("rover.command guided_forward_1m mode set failed: %v", err)
+					return
+				}
+				if err := svc.PulseCustom(1700, 1500, 1100*time.Millisecond, "GuidedForward1mApprox"); err != nil {
+					logs.Error("rover.command guided_forward_1m failed: %v", err)
+				}
+			}()
+		case "guided_square_5m":
+			go func() {
+				// Current implementation is an RC-override approximation while in GUIDED.
+				if err := svc.SetMode("GUIDED"); err != nil {
+					logs.Error("rover.command guided_square_5m mode set failed: %v", err)
+					return
+				}
+				// 4 edges + right turns; tuned as a coarse first pass.
+				for i := 0; i < 4; i++ {
+					if err := svc.PulseCustom(1750, 1500, 2600*time.Millisecond, "GuidedSquare5mEdgeApprox"); err != nil {
+						logs.Error("rover.command guided_square_5m edge %d failed: %v", i+1, err)
+						return
+					}
+					time.Sleep(200 * time.Millisecond)
+					if err := svc.PulseCustom(1650, 2000, 900*time.Millisecond, "GuidedSquare5mTurnApprox"); err != nil {
+						logs.Error("rover.command guided_square_5m turn %d failed: %v", i+1, err)
+						return
+					}
+					time.Sleep(200 * time.Millisecond)
+				}
+				if err := svc.StopMotion(); err != nil {
+					logs.Error("rover.command guided_square_5m final stop failed: %v", err)
+				}
+			}()
 		default:
 			logs.Warn("rover.command unknown cmd=%q", cmd.Cmd)
 		}
