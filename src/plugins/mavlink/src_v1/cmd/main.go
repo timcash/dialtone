@@ -23,6 +23,7 @@ type roverCommand struct {
 	ThrottlePWM int    `json:"throttlePwm,omitempty"`
 	SteeringPWM int    `json:"steeringPwm,omitempty"`
 	NoStop      bool   `json:"noStop,omitempty"`
+	SteeringOnly bool  `json:"steeringOnly,omitempty"`
 }
 
 const defaultRoverKeyParamsCSV = "RCMAP_STEERING,RCMAP_THROTTLE,RCMAP_ROLL,RCMAP_PITCH,RCMAP_YAW,RC1_MIN,RC1_TRIM,RC1_MAX,RC3_MIN,RC3_TRIM,RC3_MAX,SERVO1_FUNCTION,SERVO1_MIN,SERVO1_TRIM,SERVO1_MAX,SERVO3_FUNCTION,SERVO3_MIN,SERVO3_TRIM,SERVO3_MAX,CRUISE_SPEED,CRUISE_THROTTLE,WP_SPEED"
@@ -379,6 +380,12 @@ func startRoverCommandConsumer(nc *nats.Conn, svc *mavlinkapp.MavlinkService) {
 					throttle := resolvePWM(cmd.ThrottlePWM, 1800)
 					steering := resolvePWM(cmd.SteeringPWM, 1000)
 					dur := resolveDuration(cmd.DurationMs, 1200)
+					if cmd.NoStop && cmd.SteeringOnly {
+						if err := svc.PulseSteeringNoStop(steering, dur, "PulseLeftSteeringOnlyNoStop"); err != nil {
+							logs.Error("rover.command drive_left steering-only (noStop) failed: %v", err)
+						}
+						return
+					}
 					if cmd.NoStop {
 						if err := svc.PulseCustomNoStop(throttle, steering, dur, "PulseLeftCustomNoStop"); err != nil {
 							logs.Error("rover.command drive_left custom (noStop) failed: %v", err)
@@ -400,6 +407,12 @@ func startRoverCommandConsumer(nc *nats.Conn, svc *mavlinkapp.MavlinkService) {
 					throttle := resolvePWM(cmd.ThrottlePWM, 1800)
 					steering := resolvePWM(cmd.SteeringPWM, 2000)
 					dur := resolveDuration(cmd.DurationMs, 1200)
+					if cmd.NoStop && cmd.SteeringOnly {
+						if err := svc.PulseSteeringNoStop(steering, dur, "PulseRightSteeringOnlyNoStop"); err != nil {
+							logs.Error("rover.command drive_right steering-only (noStop) failed: %v", err)
+						}
+						return
+					}
 					if cmd.NoStop {
 						if err := svc.PulseCustomNoStop(throttle, steering, dur, "PulseRightCustomNoStop"); err != nil {
 							logs.Error("rover.command drive_right custom (noStop) failed: %v", err)

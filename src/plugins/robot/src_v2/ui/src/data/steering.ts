@@ -24,20 +24,22 @@ export function sendDriveDown(): void {
 export function sendDriveLeft(): void {
   const s = loadSteeringSettings();
   sendCommand('drive_left', undefined, {
-    throttlePwm: s.turnThrottlePwm,
+    throttlePwm: 0,
     steeringPwm: s.leftSteeringPwm,
     durationMs: s.turnDurationMs,
     noStop: true,
+    steeringOnly: true,
   });
 }
 
 export function sendDriveRight(): void {
   const s = loadSteeringSettings();
   sendCommand('drive_right', undefined, {
-    throttlePwm: s.turnThrottlePwm,
+    throttlePwm: 0,
     steeringPwm: s.rightSteeringPwm,
     durationMs: s.turnDurationMs,
     noStop: true,
+    steeringOnly: true,
   });
 }
 
