@@ -447,7 +447,7 @@ func (s *BrowserSession) CaptureScreenshot(path string) (err error) {
 	if err := chromedp.Run(s.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 		data, err := page.CaptureScreenshot().
 			WithCaptureBeyondViewport(false).
-			WithFromSurface(false).
+			WithFromSurface(true).
 			Do(ctx)
 		if err != nil {
 			return err
@@ -956,7 +956,7 @@ func preflightRemoteSharedBrowser(opts SuiteOptions) (*BrowserSession, error) {
 		logs.Info("%s preflight browser attach on node=%s role=%q", testTag, remoteNode, role)
 		s, err := StartBrowser(BrowserOptions{
 			Headless:            true,
-			GPU:                 false,
+			GPU:                 true,
 			Role:                role,
 			ReuseExisting:       true,
 			PreserveTabAndSize:  true,

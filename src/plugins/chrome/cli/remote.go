@@ -366,6 +366,8 @@ func startRemoteChrome(node sshv1.MeshNode, opts remoteStartOptions) error {
 	if opts.Port <= 0 {
 		opts.Port = chrome.DefaultDebugPort
 	}
+	// Keep remote launches consistent with Dialtone policy: always GPU-enabled.
+	opts.GPU = true
 	if opts.URL == "" {
 		opts.URL = "about:blank"
 	}

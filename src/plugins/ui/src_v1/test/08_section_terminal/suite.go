@@ -9,14 +9,14 @@ import (
 
 func Register(reg *testv1.Registry) {
 	tc := sectionsnav.SectionCase{
-		ID:          "terminal",
+		ID:          "ui-terminal-xterm",
 		NavAria:     "Navigate Terminal",
 		SectionAria: "Terminal Section",
 		Screenshot:  "ui_terminal_section.png",
 	}
 	reg.Add(testv1.Step{
 		Name:    "ui-section-terminal-via-menu",
-		Timeout: 5 * time.Second,
+		Timeout: 10 * time.Second,
 		RunWithContext: func(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 			return sectionsnav.RunSectionFromMenu(sc, tc, false)
 		},

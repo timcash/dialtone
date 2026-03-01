@@ -40,7 +40,13 @@ func CaptureScreenshot(sc *StepContext, filename string) error {
 		return err
 	}
 	if err := b.CaptureScreenshot(path); err != nil {
-		return err
+		// Remote/reused sessions can transiently lose the active target.
+		if recErr := b.EnsureOpenPage(); recErr != nil {
+			return err
+		}
+		if retryErr := b.CaptureScreenshot(path); retryErr != nil {
+			return err
+		}
 	}
 	if err := ResizeScreenshotHalf(path); err != nil {
 		return err

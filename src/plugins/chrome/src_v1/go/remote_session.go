@@ -33,6 +33,8 @@ type RemoteSessionResult struct {
 }
 
 func StartRemoteSession(node string, opts RemoteSessionOptions) (*RemoteSessionResult, error) {
+	// Dialtone remote browser sessions should always run with GPU enabled.
+	opts.GPU = true
 	nodeInfo, err := sshv1.ResolveMeshNode(strings.TrimSpace(node))
 	if err != nil {
 		return nil, err

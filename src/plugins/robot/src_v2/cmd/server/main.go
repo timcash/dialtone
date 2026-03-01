@@ -10,6 +10,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -105,6 +106,17 @@ func main() {
 	})
 	mux.HandleFunc("/api/bookmark", func(w http.ResponseWriter, r *http.Request) {
 		bookmarkHandler(w, r)
+	})
+	mux.HandleFunc("/api/key-params", func(w http.ResponseWriter, _ *http.Request) {
+		params, source, err := readRobotKeyParams()
+		payload := map[string]any{
+			"params": params,
+			"source": source,
+		}
+		if err != nil {
+			payload["error"] = err.Error()
+		}
+		writeJSON(w, payload)
 	})
 	mux.HandleFunc("/stream", func(w http.ResponseWriter, r *http.Request) {
 		if cameraStreamURL == "" {
@@ -406,4 +418,72 @@ func proxyStream(w http.ResponseWriter, r *http.Request, upstreamBase string) er
 	}
 	proxy.ServeHTTP(w, r)
 	return nil
+}
+
+func readRobotKeyParams() (map[string]string, string, error) {
+	defaults := map[string]string{
+		"RCMAP_STEERING":  "1",
+		"RCMAP_THROTTLE":  "3",
+		"RCMAP_ROLL":      "1",
+		"RCMAP_PITCH":     "2",
+		"RCMAP_YAW":       "4",
+		"SERVO1_FUNCTION": "26",
+		"SERVO3_FUNCTION": "70",
+		"CRUISE_SPEED":    "2",
+		"CRUISE_THROTTLE": "30",
+		"WP_SPEED":        "2",
+	}
+	bin := resolveMavlinkBin()
+	if strings.TrimSpace(bin) == "" {
+		return defaults, "default", fmt.Errorf("dialtone_mavlink_v1 binary not found")
+	}
+	endpoint := strings.TrimSpace(envOrDefault("MAVLINK_ENDPOINT", "serial:/dev/ttyAMA0:57600"))
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "key-params", "--endpoint", endpoint, "--timeout", "4s", "--json")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return defaults, "default", fmt.Errorf("key-params command failed: %w output=%s", err, strings.TrimSpace(string(out)))
+	}
+	var payload struct {
+		Params map[string]float64 `json:"params"`
+	}
+	if err := json.Unmarshal(out, &payload); err != nil {
+		return defaults, "default", fmt.Errorf("invalid key-params json: %w", err)
+	}
+	if len(payload.Params) == 0 {
+		return defaults, "default", fmt.Errorf("key-params returned no values")
+	}
+	outParams := make(map[string]string, len(defaults))
+	for k, v := range defaults {
+		outParams[k] = v
+	}
+	for k, v := range payload.Params {
+		outParams[strings.ToUpper(strings.TrimSpace(k))] = strconv.FormatFloat(v, 'f', 0, 64)
+	}
+	return outParams, "live", nil
+}
+
+func resolveMavlinkBin() string {
+	if v := strings.TrimSpace(os.Getenv("ROBOT_V2_MAVLINK_BIN")); v != "" {
+		return v
+	}
+	exe, _ := os.Executable()
+	exeDir := filepath.Dir(exe)
+	candidates := []string{
+		filepath.Join(exeDir, "dialtone_mavlink_v1"),
+		filepath.Join(exeDir, "..", "dialtone_mavlink_v1"),
+		"/home/tim/.dialtone/autoswap/artifacts/dialtone_mavlink_v1",
+		"/usr/local/bin/dialtone_mavlink_v1",
+	}
+	for _, candidate := range candidates {
+		p := filepath.Clean(strings.TrimSpace(candidate))
+		if p == "" {
+			continue
+		}
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p
+		}
+	}
+	return ""
 }

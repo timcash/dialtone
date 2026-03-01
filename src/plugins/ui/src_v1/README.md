@@ -1,84 +1,94 @@
-# UI src_v1 Patterns
+# UI src_v1 Library
 
 ```sh
-# install fixture UI deps
+# generic plugin workflow
 ./dialtone.sh ui src_v1 install
-
-# build fixture UI dist
-./dialtone.sh ui src_v1 build
-
-# check formatting
-./dialtone.sh ui src_v1 fmt-check
-
-# type/lint checks
-./dialtone.sh ui src_v1 lint
-
-# format fixture sources
 ./dialtone.sh ui src_v1 fmt
-
-# run fixture dev server (local)
+./dialtone.sh ui src_v1 fmt-check
+./dialtone.sh ui src_v1 lint
+./dialtone.sh ui src_v1 build
 ./dialtone.sh ui src_v1 dev
-
-# run fixture dev server and open headed browser on mesh node
-./dialtone.sh ui src_v1 dev --browser-node chroma
-
-# run UI src_v1 tests
 ./dialtone.sh ui src_v1 test
 
-# run tests attached to remote headed browser
-./dialtone.sh ui src_v1 test --attach chroma
+# useful variants
+./dialtone.sh ui src_v1 dev --browser-node legion
+./dialtone.sh ui src_v1 test --attach legion
+./dialtone.sh ui src_v1 test --filter ui-section-hero-via-menu
 ```
 
-`src/plugins/ui/src_v1/ui` is the shared section shell used by plugin UIs.
-Shared template presets now live in:
-- `src/plugins/ui/src_v1/ui/templates.ts`
+`src/plugins/ui/src_v1/ui` is the shared section shell used by plugin UIs (robot, earth, fixture apps).
 
-## Section Model
+## Getting Started
 
-- each section has exactly one `underlay` (the primary surface)
-- each section can optionally define overlays:
-  - `menu` (global nav)
-  - `header` (text or legend mode)
-  - `form` (control grid + input)
-  - `chatlog`
-  - `statusbar`
-
-In `SectionOverlayConfig`, the `legend` field maps to the header overlay selector (name kept for backward compatibility).
-
-## Settings Button List Pattern
-
-Use a `button-list` underlay when a section is primarily a vertical list of controls (for example a Settings section).
-
-### HTML
-
-```html
-<section id="settings" class="fullscreen" aria-label="Settings Section" hidden>
-  <div class="button-list settings-primary overlay-primary" aria-label="Settings Content"></div>
-  <aside class="settings-legend overlay-legend" aria-label="Settings Legend"></aside>
-</section>
-```
-
-### SectionManager registration
+1. Import the shared app shell:
 
 ```ts
-sections.register('settings', {
-  containerId: 'settings',
+import { setupApp } from '@ui/ui';
+```
+
+2. Create the app:
+
+```ts
+const { sections, menu } = setupApp({ title: 'dialtone.myplugin', debug: true });
+```
+
+3. Register sections with the shared `SectionManager`:
+
+```ts
+sections.register('myplugin-hero-stage', {
+  containerId: 'myplugin-hero-stage',
+  canonicalName: 'myplugin-hero-stage',
   load: async () => {
-    const { mountSettings } = await import('./components/settings/index');
-    const container = document.getElementById('settings');
-    if (!container) throw new Error('settings container not found');
-    return mountSettings(container);
+    const container = document.getElementById('myplugin-hero-stage');
+    if (!container) throw new Error('hero container not found');
+    return mountHero(container);
   },
   overlays: {
-    primaryKind: 'button-list',
-    primary: '.button-list',
-    legend: '.settings-header',
+    primaryKind: 'stage',
+    primary: '.underlay-stage',
+    form: '.mode-form',
+    legend: '.overlay-legend',
   },
 });
 ```
 
-### CSS behavior
+4. Add menu navigation:
 
-- `button-list` is an underlay and can be used in both `section.fullscreen` and `section.calculator`.
-- In `fullscreen`, the list occupies the full section body.
-- In `calculator`, the list stays in row 1 while row 2 can still host a `form` overlay for sections that use it.
+```ts
+menu.addButton('Hero', 'Navigate Hero', () => {
+  void sections.navigateTo('myplugin-hero-stage');
+});
+```
+
+## Naming Contract
+
+Use these names consistently across all plugins.
+
+- Section ID format:
+  - `<plugin>-<subname>-<underlay-type>`
+  - examples: `robot-hero-stage`, `robot-table-table`, `earth-hero-stage`
+- Underlay terminology:
+  - exactly one underlay per section
+  - set `primaryKind` to one of: `stage | table | xterm | docs | video | button-list`
+- Overlay terminology:
+  - `form` (preferred key in config; `modeForm` still supported)
+  - `legend` (header/legend overlay selector)
+  - optional: `chatlog`, `statusBar`
+- CSS class conventions:
+  - underlay classes: `underlay-stage`, `underlay-table`, `underlay-xterm`, `underlay-docs`, `underlay-video`, `underlay-button-list`
+  - overlay classes: `mode-form`, `overlay-legend`, optional `overlay-chatlog`, `overlay-status-bar`
+- `data-mode-form`:
+  - use the full section ID (not legacy aliases like `log`)
+
+## Underlay/Overlay Rules
+
+- One section = one primary underlay.
+- Keep control grids in `form` overlays, not mixed into underlay markup.
+- Keep legend/status/chatlog layers in overlays so visibility and active state are managed uniformly by `SectionManager`.
+
+## Shared Templates
+
+Shared test/demo templates live in:
+- `src/plugins/ui/src_v1/ui/templates.ts`
+
+They follow the same underlay/overlay model and should be used as reference for new sections.

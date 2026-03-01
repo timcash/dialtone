@@ -142,6 +142,8 @@ func StartSession(opts SessionOptions) (*Session, error) {
 	if opts.Role == "" {
 		opts.Role = "default"
 	}
+	// Dialtone browser sessions should always run with GPU enabled.
+	opts.GPU = true
 
 	if opts.ReuseExisting {
 		procs, err := listResourcesWithTimeout(true, 2*time.Second)

@@ -7,17 +7,24 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/bluenviron/gomavlib/v3"
 	"github.com/bluenviron/gomavlib/v3/pkg/dialects/common"
 	"github.com/nats-io/nats.go"
 )
 
 type roverCommand struct {
-	Cmd  string `json:"cmd"`
-	Mode string `json:"mode"`
+	Cmd         string `json:"cmd"`
+	Mode        string `json:"mode"`
+	DurationMs  int    `json:"durationMs,omitempty"`
+	ThrottlePWM int    `json:"throttlePwm,omitempty"`
+	SteeringPWM int    `json:"steeringPwm,omitempty"`
 }
+
+const defaultRoverKeyParamsCSV = "RCMAP_STEERING,RCMAP_THROTTLE,RCMAP_ROLL,RCMAP_PITCH,RCMAP_YAW,RC1_MIN,RC1_TRIM,RC1_MAX,RC3_MIN,RC3_TRIM,RC3_MAX,SERVO1_FUNCTION,SERVO1_MIN,SERVO1_TRIM,SERVO1_MAX,SERVO3_FUNCTION,SERVO3_MIN,SERVO3_TRIM,SERVO3_MAX,CRUISE_SPEED,CRUISE_THROTTLE,WP_SPEED"
 
 func main() {
 	logs.SetOutput(os.Stdout)
@@ -33,6 +40,16 @@ func main() {
 			logs.Error("mavlink run failed: %v", err)
 			os.Exit(1)
 		}
+	case "params":
+		if err := params(os.Args[2:]); err != nil {
+			logs.Error("mavlink params failed: %v", err)
+			os.Exit(1)
+		}
+	case "key-params":
+		if err := keyParams(os.Args[2:]); err != nil {
+			logs.Error("mavlink key-params failed: %v", err)
+			os.Exit(1)
+		}
 	case "help", "-h", "--help":
 		usage()
 	default:
@@ -40,6 +57,172 @@ func main() {
 		usage()
 		os.Exit(1)
 	}
+}
+
+func params(args []string) error {
+	return runParams(args, "")
+}
+
+func keyParams(args []string) error {
+	return runParams(args, defaultRoverKeyParamsCSV)
+}
+
+func runParams(args []string, defaultNamesCSV string) error {
+	fs := flag.NewFlagSet("params", flag.ContinueOnError)
+	endpoint := fs.String("endpoint", envOrDefault("MAVLINK_ENDPOINT", ""), "MAVLink endpoint (serial:/dev/...:baud or udp:host:port)")
+	defaultNames := strings.TrimSpace(defaultNamesCSV)
+	if defaultNames == "" {
+		defaultNames = "RCMAP_STEERING,RCMAP_THROTTLE,RCMAP_ROLL,RCMAP_PITCH,RCMAP_YAW"
+	}
+	namesCSV := fs.String("names", defaultNames, "CSV parameter names to query")
+	timeout := fs.Duration("timeout", 10*time.Second, "Total wait timeout")
+	targetSystem := fs.Int("target-system", 0, "Target autopilot system ID (0=broadcast)")
+	targetComponent := fs.Int("target-component", 0, "Target autopilot component ID (0=broadcast)")
+	asJSON := fs.Bool("json", false, "Emit JSON output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	ep := strings.TrimSpace(*endpoint)
+	if ep == "" {
+		return fmt.Errorf("mavlink endpoint is required (set --endpoint or MAVLINK_ENDPOINT)")
+	}
+	names := splitParamNames(*namesCSV)
+	if len(names) == 0 {
+		return fmt.Errorf("no parameter names specified")
+	}
+
+	endpointConf, err := parseMAVLinkEndpoint(ep)
+	if err != nil {
+		return err
+	}
+	node := &gomavlib.Node{
+		Endpoints:   []gomavlib.EndpointConf{endpointConf},
+		Dialect:     common.Dialect,
+		OutVersion:  gomavlib.V2,
+		OutSystemID: 255,
+	}
+	if err := node.Initialize(); err != nil {
+		return err
+	}
+	defer node.Close()
+
+	want := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		want[name] = struct{}{}
+	}
+	values := make(map[string]float32, len(names))
+
+	sendRequests := func() {
+		for _, name := range names {
+			_ = node.WriteMessageAll(&common.MessageParamRequestRead{
+				TargetSystem:    uint8(*targetSystem),
+				TargetComponent: uint8(*targetComponent),
+				ParamId:         name,
+				ParamIndex:      -1,
+			})
+			time.Sleep(30 * time.Millisecond)
+		}
+	}
+	sendRequests()
+	sendRequests()
+
+	deadline := time.Now().Add(*timeout)
+	for time.Now().Before(deadline) {
+		if len(values) == len(want) {
+			break
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		select {
+		case evt := <-node.Events():
+			frame, ok := evt.(*gomavlib.EventFrame)
+			if !ok {
+				continue
+			}
+			paramValue, ok := frame.Message().(*common.MessageParamValue)
+			if !ok {
+				continue
+			}
+			paramID := strings.TrimSpace(strings.TrimRight(paramValue.ParamId, "\x00"))
+			if _, ok := want[paramID]; ok {
+				values[paramID] = paramValue.ParamValue
+			}
+		case <-time.After(minDuration(150*time.Millisecond, remaining)):
+		}
+	}
+
+	if *asJSON {
+		missing := make([]string, 0, len(names))
+		for _, name := range names {
+			if _, ok := values[name]; !ok {
+				missing = append(missing, name)
+			}
+		}
+		out := map[string]any{
+			"endpoint": ep,
+			"params":   values,
+			"missing":  missing,
+		}
+		raw, _ := json.MarshalIndent(out, "", "  ")
+		logs.Raw(string(raw))
+	} else {
+		logs.Raw("endpoint=%s", ep)
+		for _, name := range names {
+			if v, ok := values[name]; ok {
+				logs.Raw("%s=%.0f", name, v)
+			} else {
+				logs.Raw("%s=<no-response>", name)
+			}
+		}
+	}
+
+	if len(values) == 0 {
+		return fmt.Errorf("no PARAM_VALUE responses received (endpoint busy or autopilot not responding)")
+	}
+	return nil
+}
+
+func parseMAVLinkEndpoint(endpoint string) (gomavlib.EndpointConf, error) {
+	switch {
+	case strings.HasPrefix(endpoint, "serial:"):
+		parts := strings.Split(endpoint, ":")
+		if len(parts) != 3 {
+			return nil, fmt.Errorf("invalid serial endpoint format. expected serial:/dev/ttyXXX:baud, got %q", endpoint)
+		}
+		baud, err := strconv.Atoi(strings.TrimSpace(parts[2]))
+		if err != nil {
+			return nil, fmt.Errorf("invalid serial baud in endpoint %q: %w", endpoint, err)
+		}
+		return gomavlib.EndpointSerial{Device: strings.TrimSpace(parts[1]), Baud: baud}, nil
+	case strings.HasPrefix(endpoint, "udp:"):
+		return gomavlib.EndpointUDPServer{Address: strings.TrimSpace(strings.TrimPrefix(endpoint, "udp:"))}, nil
+	case strings.HasPrefix(endpoint, "tcp:"):
+		return gomavlib.EndpointTCPClient{Address: strings.TrimSpace(strings.TrimPrefix(endpoint, "tcp:"))}, nil
+	default:
+		return nil, fmt.Errorf("unsupported MAVLINK_ENDPOINT %q", endpoint)
+	}
+}
+
+func splitParamNames(csv string) []string {
+	parts := strings.Split(strings.TrimSpace(csv), ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		v := strings.ToUpper(strings.TrimSpace(p))
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func run(args []string) error {
@@ -101,6 +284,33 @@ func startRoverCommandConsumer(nc *nats.Conn, svc *mavlinkapp.MavlinkService) {
 			logs.Error("rover.command decode error: %v", err)
 			return
 		}
+		logs.Info("rover.command received cmd=%q mode=%q", strings.TrimSpace(cmd.Cmd), strings.TrimSpace(cmd.Mode))
+		resolvePWM := func(value, fallback int) uint16 {
+			v := value
+			if v == 0 {
+				v = fallback
+			}
+			if v < 1000 {
+				v = 1000
+			}
+			if v > 2000 {
+				v = 2000
+			}
+			return uint16(v)
+		}
+		resolveDuration := func(value, fallback int) time.Duration {
+			v := value
+			if v == 0 {
+				v = fallback
+			}
+			if v < 200 {
+				v = 200
+			}
+			if v > 5000 {
+				v = 5000
+			}
+			return time.Duration(v) * time.Millisecond
+		}
 		switch strings.ToLower(strings.TrimSpace(cmd.Cmd)) {
 		case "arm":
 			if err := svc.Arm(); err != nil {
@@ -118,6 +328,72 @@ func startRoverCommandConsumer(nc *nats.Conn, svc *mavlinkapp.MavlinkService) {
 			go func() {
 				if err := svc.PulseForward(); err != nil {
 					logs.Error("rover.command pulse_fwd failed: %v", err)
+				}
+			}()
+		case "drive_up":
+			go func() {
+				if cmd.DurationMs != 0 || cmd.ThrottlePWM != 0 || cmd.SteeringPWM != 0 {
+					throttle := resolvePWM(cmd.ThrottlePWM, 2000)
+					steering := resolvePWM(cmd.SteeringPWM, 1500)
+					dur := resolveDuration(cmd.DurationMs, 2000)
+					if err := svc.PulseCustom(throttle, steering, dur, "PulseForwardCustom"); err != nil {
+						logs.Error("rover.command drive_up custom failed: %v", err)
+					}
+					return
+				}
+				if err := svc.PulseForward(); err != nil {
+					logs.Error("rover.command drive_up failed: %v", err)
+				}
+			}()
+		case "drive_down":
+			go func() {
+				if cmd.DurationMs != 0 || cmd.ThrottlePWM != 0 || cmd.SteeringPWM != 0 {
+					throttle := resolvePWM(cmd.ThrottlePWM, 1000)
+					steering := resolvePWM(cmd.SteeringPWM, 1500)
+					dur := resolveDuration(cmd.DurationMs, 2000)
+					if err := svc.PulseCustom(throttle, steering, dur, "PulseReverseCustom"); err != nil {
+						logs.Error("rover.command drive_down custom failed: %v", err)
+					}
+					return
+				}
+				if err := svc.PulseReverse(); err != nil {
+					logs.Error("rover.command drive_down failed: %v", err)
+				}
+			}()
+		case "drive_left":
+			go func() {
+				if cmd.DurationMs != 0 || cmd.ThrottlePWM != 0 || cmd.SteeringPWM != 0 {
+					throttle := resolvePWM(cmd.ThrottlePWM, 1800)
+					steering := resolvePWM(cmd.SteeringPWM, 1000)
+					dur := resolveDuration(cmd.DurationMs, 1200)
+					if err := svc.PulseCustom(throttle, steering, dur, "PulseLeftCustom"); err != nil {
+						logs.Error("rover.command drive_left custom failed: %v", err)
+					}
+					return
+				}
+				if err := svc.PulseLeft(); err != nil {
+					logs.Error("rover.command drive_left failed: %v", err)
+				}
+			}()
+		case "drive_right":
+			go func() {
+				if cmd.DurationMs != 0 || cmd.ThrottlePWM != 0 || cmd.SteeringPWM != 0 {
+					throttle := resolvePWM(cmd.ThrottlePWM, 1800)
+					steering := resolvePWM(cmd.SteeringPWM, 2000)
+					dur := resolveDuration(cmd.DurationMs, 1200)
+					if err := svc.PulseCustom(throttle, steering, dur, "PulseRightCustom"); err != nil {
+						logs.Error("rover.command drive_right custom failed: %v", err)
+					}
+					return
+				}
+				if err := svc.PulseRight(); err != nil {
+					logs.Error("rover.command drive_right failed: %v", err)
+				}
+			}()
+		case "stop", "stop_motion", "halt":
+			go func() {
+				if err := svc.StopMotion(); err != nil {
+					logs.Error("rover.command stop failed: %v", err)
 				}
 			}()
 		default:
@@ -204,5 +480,7 @@ func usage() {
 	logs.Raw("Usage: dialtone_mavlink_v1 <command>")
 	logs.Raw("Commands:")
 	logs.Raw("  run [--endpoint MAVLINK_ENDPOINT] [--nats-url URL] [--mock-if-no-endpoint]")
+	logs.Raw("  params [--endpoint MAVLINK_ENDPOINT] [--names CSV] [--timeout 10s] [--target-system 0] [--target-component 0] [--json]")
+	logs.Raw("  key-params [--endpoint MAVLINK_ENDPOINT] [--timeout 10s] [--target-system 0] [--target-component 0] [--json]")
 	logs.Raw("  version")
 }

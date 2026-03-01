@@ -85,7 +85,7 @@ func RunDev(opts DevOptions) error {
 			return nil
 		}
 		logf("   [DEV] Opening dev URL in regular browser...")
-		if _, err := StartDevBrowser(opts, logOut, devURL); err != nil {
+		if _, err := StartDevBrowser(opts, logOut, devURL, devLogger); err != nil {
 			return err
 		}
 		logf("   [DEV] Browser ready. No new dev server was started.")
@@ -141,7 +141,7 @@ func RunDev(opts DevOptions) error {
 			}
 			logf("   [DEV] Opening dev URL in regular browser...")
 
-			s, err := StartDevBrowser(opts, logOut, devURL)
+			s, err := StartDevBrowser(opts, logOut, devURL, devLogger)
 			if err != nil {
 				logf("   [DEV] Warning: failed to launch debug browser: %v", err)
 				return
@@ -192,7 +192,7 @@ func RunDev(opts DevOptions) error {
 	}
 }
 
-func StartDevBrowser(opts DevOptions, logOut io.Writer, devURL string) (*BrowserSession, error) {
+func StartDevBrowser(opts DevOptions, logOut io.Writer, devURL string, devLogger *devNATSLogger) (*BrowserSession, error) {
 	logf := func(format string, args ...any) {
 		fmt.Fprintf(logOut, format+"\n", args...)
 	}
@@ -216,6 +216,7 @@ func StartDevBrowser(opts DevOptions, logOut io.Writer, devURL string) (*Browser
 
 	s, err := StartBrowser(BrowserOptions{
 		Headless:      false,
+		GPU:           true,
 		Role:          opts.Role,
 		ReuseExisting: true,
 		URL:           devURL,
@@ -226,6 +227,7 @@ func StartDevBrowser(opts DevOptions, logOut io.Writer, devURL string) (*Browser
 		logf("   [DEV] Warning: reuse attach failed, launching fresh dev browser: %v", err)
 		s, err = StartBrowser(BrowserOptions{
 			Headless:      false,
+			GPU:           true,
 			Role:          opts.Role,
 			ReuseExisting: false,
 			URL:           devURL,
@@ -236,6 +238,7 @@ func StartDevBrowser(opts DevOptions, logOut io.Writer, devURL string) (*Browser
 			return nil, err
 		}
 	}
+	wireDevBrowserLogForwarding(s, devLogger, logf)
 
 	if opts.BrowserMetaPath != "" {
 		if err := chrome.WriteSessionMetadata(opts.BrowserMetaPath, s.ChromeSession()); err != nil {
@@ -273,8 +276,10 @@ func EnsureAttachableBrowser(opts DevOptions, logf func(string, ...any), url str
 }
 
 type devNATSLogger struct {
-	conn   *nats.Conn
-	logger *logs.NATSLogger
+	conn          *nats.Conn
+	logger        *logs.NATSLogger
+	browserLogger *logs.NATSLogger
+	errorLogger   *logs.NATSLogger
 }
 
 func newDevNATSLogger(opts DevOptions) (*devNATSLogger, error) {
@@ -295,7 +300,14 @@ func newDevNATSLogger(opts DevOptions) (*devNATSLogger, error) {
 		nc.Close()
 		return nil, err
 	}
-	return &devNATSLogger{conn: nc, logger: logger}, nil
+	browserLogger, _ := logs.NewNATSLogger(nc, subject+".browser")
+	errorLogger, _ := logs.NewNATSLogger(nc, subject+".error")
+	return &devNATSLogger{
+		conn:          nc,
+		logger:        logger,
+		browserLogger: browserLogger,
+		errorLogger:   errorLogger,
+	}, nil
 }
 
 func (d *devNATSLogger) Infof(format string, args ...any) error {
@@ -305,10 +317,61 @@ func (d *devNATSLogger) Infof(format string, args ...any) error {
 	return d.logger.InfofFrom("plugins/test/src_v1/go/dev.go", format, args...)
 }
 
+func (d *devNATSLogger) Browserf(format string, args ...any) error {
+	if d == nil {
+		return nil
+	}
+	line := fmt.Sprintf(format, args...)
+	if d.logger != nil {
+		_ = d.logger.InfofFrom("plugins/test/src_v1/go/dev.go", "%s", line)
+	}
+	if d.browserLogger == nil {
+		return nil
+	}
+	return d.browserLogger.InfofFrom("plugins/test/src_v1/go/dev.go", "%s", line)
+}
+
+func (d *devNATSLogger) Errorf(format string, args ...any) error {
+	if d == nil {
+		return nil
+	}
+	line := fmt.Sprintf(format, args...)
+	if d.logger != nil {
+		_ = d.logger.ErrorfFrom("plugins/test/src_v1/go/dev.go", "%s", line)
+	}
+	if d.errorLogger == nil {
+		return nil
+	}
+	return d.errorLogger.ErrorfFrom("plugins/test/src_v1/go/dev.go", "%s", line)
+}
+
 func (d *devNATSLogger) Close() {
 	if d == nil || d.conn == nil {
 		return
 	}
 	_ = d.conn.Drain()
 	d.conn.Close()
+}
+
+func wireDevBrowserLogForwarding(s *BrowserSession, devLogger *devNATSLogger, logf func(string, ...any)) {
+	if s == nil || devLogger == nil {
+		return
+	}
+	s.onConsole = func(msg ConsoleMessage) {
+		kind := strings.ToUpper(strings.TrimSpace(msg.Type))
+		if kind == "" {
+			kind = "LOG"
+		}
+		line := fmt.Sprintf("[BROWSER][CONSOLE:%s] %s", kind, strings.TrimSpace(msg.Text))
+		_ = devLogger.Browserf("%s", line)
+		if kind == "ERROR" || kind == "ASSERT" {
+			_ = devLogger.Errorf("%s", line)
+		}
+	}
+	s.onError = func(msg ConsoleMessage) {
+		line := fmt.Sprintf("[BROWSER][ERROR] %s", strings.TrimSpace(msg.Text))
+		_ = devLogger.Browserf("%s", line)
+		_ = devLogger.Errorf("%s", line)
+	}
+	logf("   [DEV] Browser log forwarding enabled: %s + %s + %s", "base", "browser", "error")
 }
