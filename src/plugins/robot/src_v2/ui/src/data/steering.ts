@@ -1,6 +1,12 @@
 import { sendCommand } from './connection';
 import { loadSteeringSettings } from './steering_settings';
 
+export function sendStopNow(): void {
+  // Send immediate stop, then a short follow-up hold to make stop reliable across modes.
+  sendCommand('stop');
+  window.setTimeout(() => sendCommand('guided_hold'), 120);
+}
+
 export function sendDriveUp(): void {
   const s = loadSteeringSettings();
   sendCommand('drive_up', undefined, {

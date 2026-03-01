@@ -1,7 +1,7 @@
 # Test Report: ssh-src-v1
 
-- **Date**: Sat, 28 Feb 2026 12:36:51 PST
-- **Total Duration**: 1.833157ms
+- **Date**: Sun, 01 Mar 2026 09:34:55 PST
+- **Total Duration**: 1.310656ms
 
 ## Summary
 
@@ -12,7 +12,7 @@
 
 ### 1. ✅ mesh-nodes-known
 
-- **Duration**: 710.017µs
+- **Duration**: 645.314µs
 - **Report**: mesh node list populated
 
 #### Logs
@@ -33,7 +33,7 @@ PASS: [TEST][PASS] [STEP:mesh-nodes-known] report: mesh node list populated
 
 ### 2. ✅ resolve-node-aliases
 
-- **Duration**: 293.848µs
+- **Duration**: 156.324µs
 - **Report**: mesh alias resolution verified
 
 #### Logs
@@ -53,7 +53,7 @@ PASS: [TEST][PASS] [STEP:resolve-node-aliases] report: mesh alias resolution ver
 
 ### 3. ✅ transport-resolution
 
-- **Duration**: 812.261µs
+- **Duration**: 498.97µs
 - **Report**: default transport resolution verified
 
 #### Logs

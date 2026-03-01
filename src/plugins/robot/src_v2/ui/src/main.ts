@@ -48,26 +48,29 @@ if ('serviceWorker' in navigator) {
 // Display version
 const versionEl = document.getElementById('app-version');
 const currentAppVersion = String(APP_VERSION ?? '').trim();
+let runtimeReportedVersion = currentAppVersion || 'dev';
 if (versionEl) {
   const stamp = isLocalDevHost ? ` (dev-${new Date().toLocaleTimeString()})` : '';
-  const shown = currentAppVersion || 'dev';
+  const shown = runtimeReportedVersion || 'dev';
   versionEl.textContent = `v${shown}${stamp}`;
 }
-(window as any).__robotCurrentVersion = currentAppVersion;
+(window as any).__robotCurrentVersion = runtimeReportedVersion;
 
 const setMenuUpdateState = (available: boolean) => {
   document.body.setAttribute('data-update-available', available ? 'true' : 'false');
 };
 
 const broadcastUpdateStatus = (latestVersion: string, available: boolean) => {
+  const currentShown = runtimeReportedVersion || currentAppVersion || 'dev';
   const status: RobotUpdateStatus = {
-    currentVersion: currentAppVersion || 'dev',
-    currentNorm: normalizeVersion(currentAppVersion || 'dev'),
-    latestVersion: latestVersion || currentAppVersion || 'dev',
-    latestNorm: normalizeVersion(latestVersion || currentAppVersion || 'dev'),
+    currentVersion: currentShown,
+    currentNorm: normalizeVersion(currentShown),
+    latestVersion: latestVersion || currentShown,
+    latestNorm: normalizeVersion(latestVersion || currentShown),
     available,
     checkedAt: new Date().toISOString(),
   };
+  (window as any).__robotCurrentVersion = currentShown;
   (window as any).__robotUpdateStatus = status;
   window.dispatchEvent(new CustomEvent('robot-update-status', { detail: status }));
 };
@@ -88,8 +91,14 @@ const checkForUpdate = async () => {
     if (!res.ok) return;
     const data = await res.json();
     const nextVersion = String(data.version ?? '').trim();
-    const nextNorm = normalizeVersion(nextVersion);
-    const currentNorm = normalizeVersion(String(currentAppVersion ?? '').trim());
+    runtimeReportedVersion = nextVersion || runtimeReportedVersion || 'dev';
+    if (versionEl) {
+      const stamp = isLocalDevHost ? ` (dev-${new Date().toLocaleTimeString()})` : '';
+      const shown = runtimeReportedVersion || 'dev';
+      versionEl.textContent = `v${shown}${stamp}`;
+    }
+    const nextNorm = normalizeVersion(nextVersion || runtimeReportedVersion || 'dev');
+    const currentNorm = normalizeVersion(runtimeReportedVersion || currentAppVersion || 'dev');
     const available =
       !!nextNorm &&
       !/^dev$/i.test(nextNorm) &&

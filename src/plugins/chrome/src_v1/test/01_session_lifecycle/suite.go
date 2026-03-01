@@ -283,7 +283,7 @@ func runLaunchTestAndList(ctx *testv1.StepContext) (testv1.StepRunResult, error)
 		}
 		_, err := ctx.EnsureBrowser(testv1.BrowserOptions{
 			Headless:      true,
-			GPU:           false,
+			GPU:           true,
 			Role:          "test",
 			ReuseExisting: false,
 			RemoteNode:    state.remoteNode,
@@ -326,7 +326,7 @@ func runLaunchTestAndList(ctx *testv1.StepContext) (testv1.StepRunResult, error)
 
 	testSession, err := chrome.StartSession(chrome.SessionOptions{
 		RequestedPort: 9223,
-		GPU:           false,
+		GPU:           true,
 		Headless:      true,
 		Role:          "test",
 		ReuseExisting: false,
@@ -362,8 +362,8 @@ func runLaunchTestAndList(ctx *testv1.StepContext) (testv1.StepRunResult, error)
 	if testProc.Role != "test" || !testProc.IsHeadless {
 		return testv1.StepRunResult{}, fmt.Errorf("test process metadata mismatch role=%s headless=%t", testProc.Role, testProc.IsHeadless)
 	}
-	if testProc.GPUEnabled {
-		return testv1.StepRunResult{}, fmt.Errorf("expected headless test process GPU disabled")
+	if !testProc.GPUEnabled {
+		return testv1.StepRunResult{}, fmt.Errorf("expected headless test process GPU enabled")
 	}
 	if state.testUserData != "" && !strings.Contains(testProc.Command, state.testUserData) {
 		return testv1.StepRunResult{}, fmt.Errorf("expected command to contain user-data-dir %q", state.testUserData)

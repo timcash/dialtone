@@ -2,6 +2,7 @@ package mavlink
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,6 +45,11 @@ type MavlinkService struct {
 	targetMu        sync.RWMutex
 	targetSystem    uint8
 	targetComponent uint8
+	posMu           sync.RWMutex
+	latestLatDeg    float64
+	latestLonDeg    float64
+	latestRelAltM   float32
+	havePosition    bool
 }
 
 // NewMavlinkService creates a new MAVLink service
@@ -212,6 +218,12 @@ func (s *MavlinkService) Start() {
 					})
 				}
 			case *common.MessageGlobalPositionInt:
+				s.posMu.Lock()
+				s.latestLatDeg = float64(msg.Lat) / 1e7
+				s.latestLonDeg = float64(msg.Lon) / 1e7
+				s.latestRelAltM = float32(msg.RelativeAlt) / 1000.0
+				s.havePosition = true
+				s.posMu.Unlock()
 				if s.config.Callback != nil {
 					s.config.Callback(&MavlinkEvent{
 						Type:       "GLOBAL_POSITION_INT",
@@ -219,19 +231,19 @@ func (s *MavlinkService) Start() {
 						ReceivedAt: receivedAt,
 					})
 				}
-				case *common.MessageAttitude:
-					if s.config.Callback != nil {
-						s.config.Callback(&MavlinkEvent{
-							Type:       "ATTITUDE",
-							Data:       msg,
-							ReceivedAt: receivedAt,
-						})
-					}
+			case *common.MessageAttitude:
+				if s.config.Callback != nil {
+					s.config.Callback(&MavlinkEvent{
+						Type:       "ATTITUDE",
+						Data:       msg,
+						ReceivedAt: receivedAt,
+					})
 				}
-			case *gomavlib.EventParseError:
-				logs.Warn("MAVLink parse error: %v", e.Error)
-			case *gomavlib.EventStreamRequested:
-				logs.Info("MAVLink stream requested")
+			}
+		case *gomavlib.EventParseError:
+			logs.Warn("MAVLink parse error: %v", e.Error)
+		case *gomavlib.EventStreamRequested:
+			logs.Info("MAVLink stream requested")
 		case *gomavlib.EventChannelOpen:
 			logs.Info("MAVLink channel open")
 		case *gomavlib.EventChannelClose:
@@ -451,6 +463,12 @@ func (s *MavlinkService) getTargetIDs() (uint8, uint8) {
 	return s.targetSystem, s.targetComponent
 }
 
+func (s *MavlinkService) latestPosition() (float64, float64, float32, bool) {
+	s.posMu.RLock()
+	defer s.posMu.RUnlock()
+	return s.latestLatDeg, s.latestLonDeg, s.latestRelAltM, s.havePosition
+}
+
 func (s *MavlinkService) readRCChannel(msg *common.MessageRcChannels, channel uint8) uint16 {
 	switch channel {
 	case 1:
@@ -548,4 +566,83 @@ func (s *MavlinkService) SetMode(mode string) error {
 		Param1:          1, // MAV_MODE_FLAG_CUSTOM_MODE_ENABLED
 		Param2:          float32(customMode),
 	})
+}
+
+// GuidedForwardMeters moves rover forward by an approximate north-relative offset in GUIDED mode
+// using position targets derived from current GPS fix.
+func (s *MavlinkService) GuidedForwardMeters(distanceM float64) error {
+	lat, lon, alt, ok := s.latestPosition()
+	if !ok {
+		return fmt.Errorf("no recent GLOBAL_POSITION_INT fix available")
+	}
+	goalLat, goalLon := offsetMeters(lat, lon, distanceM, 0)
+	logs.Info("MavlinkService: GuidedForwardMeters start=(%.7f,%.7f) goal=(%.7f,%.7f) dist=%.2fm", lat, lon, goalLat, goalLon, distanceM)
+	return s.sendGuidedTarget(goalLat, goalLon, alt, 4*time.Second)
+}
+
+// GuidedSquareMeters sends four position targets forming a square from the current position.
+func (s *MavlinkService) GuidedSquareMeters(edgeM float64) error {
+	lat0, lon0, alt, ok := s.latestPosition()
+	if !ok {
+		return fmt.Errorf("no recent GLOBAL_POSITION_INT fix available")
+	}
+	p1Lat, p1Lon := offsetMeters(lat0, lon0, edgeM, 0)    // north
+	p2Lat, p2Lon := offsetMeters(p1Lat, p1Lon, 0, edgeM)  // east
+	p3Lat, p3Lon := offsetMeters(p2Lat, p2Lon, -edgeM, 0) // south
+	p4Lat, p4Lon := offsetMeters(p3Lat, p3Lon, 0, -edgeM) // west back near start
+	pts := [][2]float64{{p1Lat, p1Lon}, {p2Lat, p2Lon}, {p3Lat, p3Lon}, {p4Lat, p4Lon}}
+	for i, pt := range pts {
+		logs.Info("MavlinkService: GuidedSquare edge=%d goal=(%.7f,%.7f) edge=%.2fm", i+1, pt[0], pt[1], edgeM)
+		if err := s.sendGuidedTarget(pt[0], pt[1], alt, 5*time.Second); err != nil {
+			return err
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return nil
+}
+
+func (s *MavlinkService) sendGuidedTarget(latDeg, lonDeg float64, relAltM float32, duration time.Duration) error {
+	sys, comp := s.getTargetIDs()
+	typeMask := common.POSITION_TARGET_TYPEMASK_VX_IGNORE |
+		common.POSITION_TARGET_TYPEMASK_VY_IGNORE |
+		common.POSITION_TARGET_TYPEMASK_VZ_IGNORE |
+		common.POSITION_TARGET_TYPEMASK_AX_IGNORE |
+		common.POSITION_TARGET_TYPEMASK_AY_IGNORE |
+		common.POSITION_TARGET_TYPEMASK_AZ_IGNORE |
+		common.POSITION_TARGET_TYPEMASK_YAW_IGNORE |
+		common.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
+	msg := &common.MessageSetPositionTargetGlobalInt{
+		TimeBootMs:      uint32(time.Now().UnixMilli() & 0xffffffff),
+		TargetSystem:    sys,
+		TargetComponent: comp,
+		CoordinateFrame: common.MAV_FRAME_GLOBAL_RELATIVE_ALT,
+		TypeMask:        typeMask,
+		LatInt:          int32(math.Round(latDeg * 1e7)),
+		LonInt:          int32(math.Round(lonDeg * 1e7)),
+		Alt:             relAltM,
+	}
+	ticker := time.NewTicker(200 * time.Millisecond) // 5Hz setpoint refresh
+	defer ticker.Stop()
+	deadline := time.Now().Add(duration)
+	for {
+		msg.TimeBootMs = uint32(time.Now().UnixMilli() & 0xffffffff)
+		if err := s.node.WriteMessageAll(msg); err != nil {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return nil
+		}
+		<-ticker.C
+	}
+}
+
+func offsetMeters(latDeg, lonDeg, northM, eastM float64) (float64, float64) {
+	const earthRadius = 6378137.0
+	dLat := northM / earthRadius
+	cosLat := math.Cos(latDeg * math.Pi / 180.0)
+	if math.Abs(cosLat) < 1e-6 {
+		cosLat = 1e-6
+	}
+	dLon := eastM / (earthRadius * cosLat)
+	return latDeg + dLat*180.0/math.Pi, lonDeg + dLon*180.0/math.Pi
 }

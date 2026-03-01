@@ -1,7 +1,7 @@
 # Test Report: robot-src-v2
 
-- **Date**: Sat, 28 Feb 2026 15:51:51 PST
-- **Total Duration**: 3.454937471s
+- **Date**: Sun, 01 Mar 2026 12:21:12 PST
+- **Total Duration**: 28.752958266s
 
 ## Summary
 
@@ -12,7 +12,7 @@
 
 ### 1. ✅ 01-build-robot-v2-binary
 
-- **Duration**: 316.296344ms
+- **Duration**: 290.105277ms
 - **Report**: binary build verified
 
 #### Logs
@@ -34,7 +34,7 @@ PASS: [TEST][PASS] [STEP:01-build-robot-v2-binary] report: binary build verified
 
 ### 2. ✅ 02-server-health-and-root-behavior
 
-- **Duration**: 160.493508ms
+- **Duration**: 165.420585ms
 - **Report**: server runtime smoke verified
 
 #### Logs
@@ -66,7 +66,7 @@ PASS: [TEST][PASS] [STEP:02-server-health-and-root-behavior] report: server runt
 
 ### 3. ✅ 03-manifest-has-required-sync-artifacts
 
-- **Duration**: 740.369µs
+- **Duration**: 583.557µs
 - **Report**: manifest sync artifact contract verified
 
 #### Logs
@@ -87,8 +87,8 @@ PASS: [TEST][PASS] [STEP:03-manifest-has-required-sync-artifacts] report: manife
 
 ### 4. ❌ 04-local-ui-mock-e2e-smoke
 
-- **Duration**: 2.977395333s
-- **Error**: `page load error net::ERR_CONNECTION_REFUSED`
+- **Duration**: 28.29683801s
+- **Error**: `error-ping browser readiness: Get "http://172.27.80.1:19334/json/new?about:blank": read tcp 172.27.88.249:36144->172.27.80.1:19334: read: connection reset by peer`
 
 #### Logs
 
@@ -100,7 +100,7 @@ INFO: ui root returned 200
 #### Errors
 
 ```text
-FAIL: [TEST][FAIL] [STEP:04-local-ui-mock-e2e-smoke] failed: page load error net::ERR_CONNECTION_REFUSED
+FAIL: [TEST][FAIL] [STEP:04-local-ui-mock-e2e-smoke] failed: error-ping browser readiness: Get "http://172.27.80.1:19334/json/new?about:blank": read tcp 172.27.88.249:36144->172.27.80.1:19334: read: connection reset by peer
 ```
 
 #### Browser Logs

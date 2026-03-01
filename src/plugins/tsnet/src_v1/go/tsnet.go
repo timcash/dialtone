@@ -76,6 +76,8 @@ func Run(args []string) error {
 		return runDevices(append([]string{"list"}, args[1:]...))
 	case "keys":
 		return runKeys(args[1:])
+	case "acl":
+		return runACL(args[1:])
 	default:
 		PrintUsage()
 		return fmt.Errorf("unknown tsnet command: %s", args[0])
@@ -97,6 +99,7 @@ func PrintUsage() {
 	logs.Raw("  keys list [--tailnet N] [--api-key K]")
 	logs.Raw("  keys revoke <key-id> [--tailnet N] [--api-key K]")
 	logs.Raw("  keys usage [--tailnet N] [--api-key K]")
+	logs.Raw("  acl get [--tailnet N] [--api-key K]")
 	logs.Raw("  test                                 Run tsnet plugin self-check")
 }
 
@@ -437,6 +440,31 @@ func runDevices(args []string) error {
 	default:
 		return fmt.Errorf("unknown devices subcommand: %s", sub)
 	}
+}
+
+func runACL(args []string) error {
+	args = stripAllVersionArgs(args)
+	if len(args) == 0 {
+		return fmt.Errorf("usage: ./dialtone.sh tsnet acl <get> [--tailnet N] [--api-key K]")
+	}
+	switch args[0] {
+	case "get":
+		return runACLGet(args[1:])
+	default:
+		return fmt.Errorf("unknown acl subcommand: %s", args[0])
+	}
+}
+
+func runACLGet(args []string) error {
+	client, err := clientFromArgs(args)
+	if err != nil {
+		return err
+	}
+	acl, err := client.GetACL()
+	if err != nil {
+		return err
+	}
+	return printJSON(acl)
 }
 
 func runDevicesList(args []string) error {
@@ -1068,6 +1096,14 @@ func (c *tailscaleClient) DeleteDevice(deviceID string) error {
 		return fmt.Errorf("tailscale api DELETE %s failed: %s", endpoint, msg)
 	}
 	return nil
+}
+
+func (c *tailscaleClient) GetACL() (map[string]any, error) {
+	var acl map[string]any
+	if err := c.do("GET", "/acl", nil, &acl); err != nil {
+		return nil, err
+	}
+	return acl, nil
 }
 
 func (c *tailscaleClient) do(method, path string, body any, out any) error {

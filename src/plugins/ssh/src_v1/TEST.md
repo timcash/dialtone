@@ -6,19 +6,19 @@
 <empty>
 ```
 
-**Generated at:** Sat, 28 Feb 2026 12:36:51 -0800
+**Generated at:** Sun, 01 Mar 2026 09:34:55 -0800
 **Version:** `ssh-src-v1`
 **Runner:** `test/src_v1`
 **Status:** ✅ PASS
-**Total Time:** `1.833157ms`
+**Total Time:** `1.310656ms`
 
 ## Test Steps
 
 | Step | Result | Duration |
 |---|---|---|
-| mesh-nodes-known | ✅ PASS | `710.017µs` |
-| resolve-node-aliases | ✅ PASS | `293.848µs` |
-| transport-resolution | ✅ PASS | `812.261µs` |
+| mesh-nodes-known | ✅ PASS | `645.314µs` |
+| resolve-node-aliases | ✅ PASS | `156.324µs` |
+| transport-resolution | ✅ PASS | `498.97µs` |
 
 ## Step Details
 
@@ -28,7 +28,7 @@
 
 ```text
 result: PASS
-duration: 710.017µs
+duration: 645.314µs
 report: mesh node list populated
 ```
 
@@ -61,7 +61,7 @@ browser_logs:
 
 ```text
 result: PASS
-duration: 293.848µs
+duration: 156.324µs
 report: mesh alias resolution verified
 ```
 
@@ -93,7 +93,7 @@ browser_logs:
 
 ```text
 result: PASS
-duration: 812.261µs
+duration: 498.97µs
 report: default transport resolution verified
 ```
 

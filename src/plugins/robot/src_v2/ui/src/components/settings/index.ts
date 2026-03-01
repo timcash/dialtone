@@ -46,6 +46,7 @@ export function mountSettings(container: HTMLElement): VisualizationControl {
     updateBtn = document.createElement('button');
     updateBtn.className = 'menu-button';
     updateBtn.type = 'button';
+    updateBtn.setAttribute('aria-label', 'Robot Version Button');
     updateBtn.textContent = 'version:dev';
     list.appendChild(updateBtn);
   }

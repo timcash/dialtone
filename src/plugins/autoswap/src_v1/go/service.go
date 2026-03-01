@@ -1391,6 +1391,8 @@ func downloadFile(url, token, outPath string) error {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	req.Header.Set("Accept", "application/octet-stream")
+	req.Header.Set("Cache-Control", "no-cache")
+	req.Header.Set("Pragma", "no-cache")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err

@@ -1,57 +1,193 @@
-# Tsnet Plugin (`src/plugins/tsnet`)
-
-Minimal tsnet plugin in `src_v1` layout.
-
-## Commands
+# Tsnet Plugin (`src/plugins/tsnet/src_v1`)
 
 ```bash
-./dialtone.sh tsnet help
+# Generic plugin workflow
+./dialtone.sh tsnet src_v1 install
+./dialtone.sh tsnet src_v1 format
+./dialtone.sh tsnet src_v1 lint
+./dialtone.sh tsnet src_v1 build
+./dialtone.sh tsnet src_v1 test
+
+# Help + introspection
+./dialtone.sh tsnet src_v1 help
 ./dialtone.sh tsnet src_v1 config
 ./dialtone.sh tsnet src_v1 status
+
+# Embedded tsnet node
 ./dialtone.sh tsnet src_v1 up --dry-run
 ./dialtone.sh tsnet src_v1 up
-./dialtone.sh tsnet src_v1 devices list --tailnet your-tailnet.ts.net --api-key tskey-api-...
-./dialtone.sh tsnet src_v1 devices list --tailnet your-tailnet.ts.net --api-key tskey-api-... --all
-./dialtone.sh tsnet src_v1 devices list --tailnet your-tailnet.ts.net --api-key tskey-api-... --format json
-./dialtone.sh tsnet src_v1 devices prune --name-contains drone-1 --dry-run
-./dialtone.sh tsnet src_v1 devices prune --name-contains drone-1 --yes
-./dialtone.sh tsnet src_v1 computers list --tailnet your-tailnet.ts.net --api-key tskey-api-...
-./dialtone.sh tsnet src_v1 list --tailnet your-tailnet.ts.net --api-key tskey-api-...
-./dialtone.sh tsnet src_v1 keys provision --tailnet your-tailnet.ts.net --api-key tskey-api-... --description "dialtone robot key" --tags robot,prod --write-env env/.env
-./dialtone.sh tsnet src_v1 keys list --tailnet your-tailnet.ts.net --api-key tskey-api-...
-./dialtone.sh tsnet src_v1 keys usage --tailnet your-tailnet.ts.net --api-key tskey-api-...
-./dialtone.sh tsnet src_v1 keys revoke <key-id> --tailnet your-tailnet.ts.net --api-key tskey-api-...
-./dialtone.sh tsnet src_v1 test
+
+# Devices/computers (same list path)
+./dialtone.sh tsnet src_v1 devices list --tailnet <tailnet> --api-key <ts_api_key>
+./dialtone.sh tsnet src_v1 devices list --tailnet <tailnet> --api-key <ts_api_key> --all
+./dialtone.sh tsnet src_v1 devices list --tailnet <tailnet> --api-key <ts_api_key> --format json
+./dialtone.sh tsnet src_v1 computers list --tailnet <tailnet> --api-key <ts_api_key>
+./dialtone.sh tsnet src_v1 list --tailnet <tailnet> --api-key <ts_api_key>
+
+# Device cleanup (safe by default)
+./dialtone.sh tsnet src_v1 devices prune --name-contains rover --dry-run
+./dialtone.sh tsnet src_v1 devices prune --name-contains rover --yes
+
+# Auth key lifecycle
+./dialtone.sh tsnet src_v1 keys provision --tailnet <tailnet> --api-key <ts_api_key> --description "dialtone key" --tags dialtone,robot --write-env env/.env
+./dialtone.sh tsnet src_v1 keys list --tailnet <tailnet> --api-key <ts_api_key>
+./dialtone.sh tsnet src_v1 keys usage --tailnet <tailnet> --api-key <ts_api_key>
+./dialtone.sh tsnet src_v1 keys revoke <key_id> --tailnet <tailnet> --api-key <ts_api_key>
+
+# ACL policy
+./dialtone.sh tsnet src_v1 acl get --tailnet <tailnet> --api-key <ts_api_key>
 ```
 
-## Layout
+## What this plugin does
 
-```text
-src/plugins/tsnet/
-  scaffold/main.go
-  src_v1/cli/cli.go
-  src_v1/go/tsnet.go
-  src_v1/test/cmd/main.go
-  src_v1/test/01_self_check/suite.go
-  src_v1/test/02_example_library/suite.go
+- Runs an embedded `tsnet` node (`up`) for local/agent workflows.
+- Lists or prunes devices in your tailnet.
+- Provisions/revokes/list auth keys through Tailscale API v2.
+- Fetches tailnet ACL policy via Tailscale API v2.
+- Falls back to local tailscale status (and then embedded tsnet) when control-plane credentials are missing.
+
+## Environment
+
+- `TS_API_KEY` or `TAILSCALE_API_KEY`: Tailscale API key (needed for control-plane operations).
+- `TS_TAILNET`: Tailnet name like `example.ts.net`.
+- `TS_AUTHKEY` or `TAILSCALE_AUTHKEY`: auth key used by embedded `tsnet up`.
+- `DIALTONE_HOSTNAME`: optional hostname override for embedded node.
+- `DIALTONE_TSNET_STATE_DIR`: optional state directory override.
+- `DIALTONE_ENV_FILE`: optional env file path used by `keys provision` and auto-provision flow.
+
+Defaults:
+
+- If `TS_TAILNET` is unset, plugin attempts auto-detection from local tailscale status.
+- If not detected, tailnet falls back to `shad-artichoke.ts.net`.
+- If `TS_AUTHKEY` is missing and `TS_API_KEY` exists, `up` auto-provisions an ephemeral auth key and writes it to `env/.env` (or `DIALTONE_ENV_FILE`).
+
+## Command Reference
+
+### `config`
+Prints resolved runtime config.
+
+```bash
+./dialtone.sh tsnet src_v1 config
+```
+
+### `status`
+Prints config plus whether `tailscale` CLI is available.
+
+```bash
+./dialtone.sh tsnet src_v1 status
+```
+
+### `up [--dry-run]`
+Starts embedded tsnet in ephemeral mode and blocks until Ctrl+C.
+
+```bash
+./dialtone.sh tsnet src_v1 up --dry-run
+./dialtone.sh tsnet src_v1 up
+```
+
+### `devices list`
+Flags:
+
+- `--tailnet <name>`
+- `--api-key <key>`
+- `--format report|json` (default `report`)
+- `--all` (include inactive)
+- `--active-only` (default behavior)
+
+```bash
+./dialtone.sh tsnet src_v1 devices list --tailnet shad-artichoke.ts.net --api-key "$TS_API_KEY"
+./dialtone.sh tsnet src_v1 devices list --format json --all
+```
+
+Aliases:
+
+- `computers list`
+- `list`
+
+### `devices prune`
+Safeguards:
+
+- defaults to dry-run behavior
+- requires `--yes` to actually delete
+
+Flags:
+
+- `--name-contains <substring>` (default `drone-1`)
+- `--tailnet <name>`
+- `--api-key <key>`
+- `--dry-run`
+- `--yes`
+
+```bash
+./dialtone.sh tsnet src_v1 devices prune --name-contains rover --dry-run
+./dialtone.sh tsnet src_v1 devices prune --name-contains rover --yes
+```
+
+### `acl get`
+Prints the current ACL policy JSON for the target tailnet.
+
+Flags:
+
+- `--tailnet <name>`
+- `--api-key <key>`
+
+```bash
+./dialtone.sh tsnet src_v1 acl get --tailnet shad-artichoke.ts.net --api-key "$TS_API_KEY"
+```
+
+### `keys provision`
+Creates auth key and writes it to env file.
+
+Flags:
+
+- `--tailnet <name>`
+- `--api-key <key>`
+- `--description <text>`
+- `--tags t1,t2` (auto-prefixed as `tag:<name>`)
+- `--ephemeral` / `--no-ephemeral`
+- `--reusable`
+- `--preauthorized`
+- `--expiry-hours <int>`
+- `--write-env <path>`
+- `--env-key <name>` (default `TS_AUTHKEY`)
+
+```bash
+./dialtone.sh tsnet src_v1 keys provision \
+  --tailnet shad-artichoke.ts.net \
+  --api-key "$TS_API_KEY" \
+  --description "dialtone-tsnet" \
+  --tags dialtone,robot \
+  --expiry-hours 24 \
+  --write-env env/.env
+```
+
+### `keys list`
+
+```bash
+./dialtone.sh tsnet src_v1 keys list --tailnet shad-artichoke.ts.net --api-key "$TS_API_KEY"
+```
+
+### `keys usage`
+Returns inferred key-to-device usage (best effort; Tailscale API does not expose direct attribution).
+
+```bash
+./dialtone.sh tsnet src_v1 keys usage --tailnet shad-artichoke.ts.net --api-key "$TS_API_KEY"
+```
+
+### `keys revoke <key-id>`
+
+```bash
+./dialtone.sh tsnet src_v1 keys revoke tskey-abc123 --tailnet shad-artichoke.ts.net --api-key "$TS_API_KEY"
+```
+
+## Testing
+
+```bash
+./dialtone.sh tsnet src_v1 test
 ```
 
 ## Notes
 
-- Uses `logs` library for plugin logging.
-- CLI entrypoint matches the shared plugin pattern (`scaffold/main.go` delegates to `cli.Run`).
-- Uses `test` library for self-check suite.
-- Tests run in one process via `src_v1/test/cmd/main.go` and `testv1.StepContext`.
-- `devices list` (and aliases `computers list`, `list`) lists computers/devices on the tailnet in a report format by default.
-  By default it shows active nodes only; use `--all` to include inactive nodes.
-  It uses control-plane API (`TS_API_KEY` + tailnet) when configured, and falls back to local tailscaled status if API creds are missing.
-- `devices prune` removes matching devices by substring (`--name-contains`, default `drone-1`); safe by default with `--dry-run`, requires `--yes` to delete.
-- If local tailscaled is unavailable (common in WSL), `devices list` can fall back to a temporary embedded ephemeral `tsnet` instance.
-- Tailnet defaults to `TS_TAILNET`; if unset, tsnet auto-detects from local tailscaled status (LocalAPI first, then `tailscale status --json` fallback), then falls back to `shad-artichoke.ts.net`.
-- `up` starts embedded `tsnet` in ephemeral mode and keeps running until Ctrl+C. If `TS_AUTHKEY` is missing, it auto-provisions one from `TS_API_KEY` and writes it to `env/.env`.
-- Key lifecycle commands use Tailscale API v2.
-- `keys usage` is an inferred mapping (tags/description/user overlap) because Tailscale does not provide a direct auth-key-to-device attribution field.
-- Recommended env vars:
-  - `TS_API_KEY` (or `TAILSCALE_API_KEY`)
-  - `TS_TAILNET`
-  - `TS_AUTHKEY` (set automatically by `keys provision` when `--write-env` is used)
+- `devices list` prefers control-plane API when credentials are present.
+- Without API credentials, it falls back to local tailscaled status.
+- In environments where local tailscaled is unavailable (common in WSL), fallback can spin up embedded ephemeral tsnet to inspect peers.
