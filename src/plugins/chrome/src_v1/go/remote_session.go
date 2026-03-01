@@ -470,6 +470,16 @@ Write-Output ("DIALTONE_CHROME_SESSION_JSON="+$json)`, portCandidatesPS, allowPo
 			attachHost = "127.0.0.1"
 			attachPort = lport
 			tunnelCloser = client
+		} else {
+			// On WSL with local PowerShell transport (for example node "legion"),
+			// SSH tunnels may be unavailable. Try configuring a Windows relay.
+			relayPort := meta.DebugPort + 10000
+			if rerr := ensureWindowsDebugRelay(nodeInfo, relayPort, meta.DebugPort); rerr == nil {
+				if h := resolveReachableDebugHost(relayPort, nodeInfo); h != "" {
+					attachHost = h
+					attachPort = relayPort
+				}
+			}
 		}
 		if attachHost == "" {
 			return nil, fmt.Errorf("remote windows debug port %d is not reachable from this node", meta.DebugPort)
@@ -524,10 +534,23 @@ func attachRemoteSession(nodeInfo sshv1.MeshNode, meta SessionMetadata, noSSH bo
 	attachPort := meta.DebugPort
 	var tunnelCloser io.Closer
 	if attachHost == "" || !canDialHostPort(attachHost, attachPort, 1500*time.Millisecond) {
+		// Prefer relay convention (listen=debug+10000) before SSH fallback.
+		if attachHost != "" {
+			relayPort := meta.DebugPort + 10000
+			if relayPort > 0 && canDialHostPort(attachHost, relayPort, 1500*time.Millisecond) {
+				attachPort = relayPort
+			}
+		}
+	}
+	if attachHost == "" || !canDialHostPort(attachHost, attachPort, 1500*time.Millisecond) {
 		if noSSH {
 			return nil, fmt.Errorf("tailnet direct attach to %s:%d unavailable (no-ssh mode)", attachHost, attachPort)
 		}
-		if closer, lport, err := openSSHDebugTunnel(nodeInfo, meta.DebugPort); err == nil {
+		tunnelTargetPort := meta.DebugPort
+		if attachPort > 0 && attachPort != meta.DebugPort {
+			tunnelTargetPort = attachPort
+		}
+		if closer, lport, err := openSSHDebugTunnel(nodeInfo, tunnelTargetPort); err == nil {
 			attachHost = "127.0.0.1"
 			attachPort = lport
 			tunnelCloser = closer

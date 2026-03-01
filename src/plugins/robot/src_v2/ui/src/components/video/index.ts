@@ -4,7 +4,7 @@ import { LatencyEstimator } from '../../data/latency';
 import { logError, logInfo } from '../../data/logging';
 import { registerButtons, renderButtons } from '../../buttons';
 import { ROBOT_SECTION_IDS } from '../../section_ids';
-import { sendDriveDown, sendDriveDownLeft, sendDriveDownRight, sendDriveLeft, sendDriveRight, sendDriveUp } from '../../data/steering';
+import { sendDriveDown, sendDriveDownLeft, sendDriveDownRight, sendDriveLeft, sendDriveRight, sendDriveUp, sendStopNow } from '../../data/steering';
 
 class VideoControl implements VisualizationControl {
   private img: HTMLImageElement | null;
@@ -57,7 +57,7 @@ class VideoControl implements VisualizationControl {
         { label: 'Down-L', action: () => sendDriveDownLeft() },
         { label: 'Down', action: () => sendDriveDown() },
         { label: 'Down-R', action: () => sendDriveDownRight() },
-        null,
+        { label: 'Stop', action: () => sendStopNow() },
         null,
       ],
       'Guided': [
@@ -66,7 +66,7 @@ class VideoControl implements VisualizationControl {
         { label: 'Square 5m', action: () => sendCommand('guided_square_5m') },
         { label: 'Hold', action: () => sendCommand('guided_hold') },
         { label: 'Manual', action: () => sendCommand('mode', 'manual') },
-        { label: 'Stop', action: () => sendCommand('stop') },
+        { label: 'Stop', action: () => sendStopNow() },
         null,
         null,
       ],

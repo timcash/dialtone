@@ -23,7 +23,7 @@ func RunUpdate(args []string) error {
 	host := fs.String("host", strings.TrimSpace(os.Getenv("ROBOT_HOST")), "SSH mesh host (for example rover/chroma/darkmac/legion)")
 	port := fs.String("port", "22", "SSH port")
 	user := fs.String("user", strings.TrimSpace(os.Getenv("ROBOT_USER")), "SSH user")
-	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password")
+	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password (optional when SSH key auth is configured)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -37,8 +37,8 @@ func RunUpdate(args []string) error {
 	if opts.Port == "" {
 		opts.Port = "22"
 	}
-	if opts.Host == "" || opts.Pass == "" {
-		return fmt.Errorf("update requires --host and --pass (or ROBOT_HOST/ROBOT_PASSWORD env)")
+	if opts.Host == "" {
+		return fmt.Errorf("update requires --host (or ROBOT_HOST env)")
 	}
 
 	node, err := sshplugin.ResolveMeshNode(opts.Host)

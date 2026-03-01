@@ -4,10 +4,8 @@ import (
 	"errors"
 	"flag"
 	"os"
-	"runtime"
 	"strings"
 
-	chromev1 "dialtone/dev/plugins/chrome/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
@@ -35,17 +33,12 @@ func main() {
 		logs.Error("test src_v1 parse failed: %v", err)
 		os.Exit(1)
 	}
-	// In WSL, local Windows-launched DevTools often binds in ways that are not
-	// reachable from Linux sockets. Default to the known-good remote Windows node.
-	if strings.TrimSpace(common.AttachNode) == "" && runtime.GOOS == "linux" && chromev1.IsWSL() {
-		common.AttachNode = "legion"
-		logs.Info("test src_v1 auto-enabled remote attach node=%s on WSL", common.AttachNode)
-	}
+	// Keep attach-node opt-in. In WSL, local browser start should work and is
+	// more reliable than depending on remote node reachability.
 	common.ApplyRuntimeConfig()
 	if attachNode := strings.TrimSpace(common.AttachNode); attachNode != "" && !common.NoSSH {
 		if node, nerr := sshv1.ResolveMeshNode(attachNode); nerr == nil && strings.EqualFold(strings.TrimSpace(node.OS), "windows") && node.PreferWSLPowerShell {
 			testv1.UpdateRuntimeConfig(func(cfg *testv1.RuntimeConfig) {
-				cfg.NoSSH = true
 				if cfg.RemoteDebugPort <= 0 {
 					cfg.RemoteDebugPort = 9333
 				}
@@ -53,7 +46,7 @@ func main() {
 					cfg.RemoteDebugPorts = []int{9333, 9334, 9335}
 				}
 			})
-			logs.Info("test src_v1 auto-enabled --no-ssh for windows powershell node=%s", attachNode)
+			logs.Info("test src_v1 enabled windows debug port defaults for node=%s (SSH fallback allowed)", attachNode)
 		}
 	}
 

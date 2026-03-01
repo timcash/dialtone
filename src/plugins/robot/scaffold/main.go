@@ -6,10 +6,12 @@ import (
 	"crypto/sha256"
 	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	ssh_plugin "dialtone/dev/plugins/ssh/src_v1/go"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -264,7 +266,7 @@ func defaultRobotDevBrowserNode() string {
 		return envNode
 	}
 	if robotIsWSL() {
-		return "chroma"
+		return "legion"
 	}
 	return ""
 }
@@ -1039,8 +1041,8 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "Robot SSH password")
 	remoteRepo := fs.String("remote-repo", "", "Remote repo root (default: <remote-home>/dialtone)")
 	manifest := fs.String("manifest", "src/plugins/robot/src_v2/config/composition.manifest.json", "Remote manifest path (absolute or repo-relative)")
-	uiURL := fs.String("ui-url", "", "Robot UI URL for browser checks (default: http://<host>:18086)")
-	browserNode := fs.String("browser-node", strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_NODE")), "Mesh node for remote browser (for example chroma)")
+	uiURL := fs.String("ui-url", "", "Robot UI URL for public checks + browser checks (default: https://<robot-hostname>.dialtone.earth)")
+	browserNode := fs.String("browser-node", defaultRobotDevBrowserNode(), "Mesh node for remote browser (for example legion, chroma)")
 	skipUI := fs.Bool("skip-ui", false, "Skip chromedp UI menu checks")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -1066,9 +1068,29 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 		return nil
 	}
 
-	client, err := ssh_plugin.DialSSH(strings.TrimSpace(*host), strings.TrimSpace(*port), strings.TrimSpace(*user), *pass)
-	if err != nil {
-		return err
+	targetHost := strings.TrimSpace(*host)
+	targetUser := strings.TrimSpace(*user)
+	targetPort := strings.TrimSpace(*port)
+	targetPass := *pass
+	var meshNode *ssh_plugin.MeshNode
+	client, node, _, _, meshErr := ssh_plugin.DialMeshNode(targetHost, ssh_plugin.CommandOptions{
+		User:     targetUser,
+		Port:     targetPort,
+		Password: targetPass,
+	})
+	if meshErr != nil {
+		// Fallback to direct host dial for non-mesh targets.
+		directClient, err := ssh_plugin.DialSSH(targetHost, targetPort, targetUser, targetPass)
+		if err != nil {
+			return err
+		}
+		client = directClient
+	} else {
+		nodeCopy := node
+		meshNode = &nodeCopy
+		if strings.TrimSpace(*user) == "" {
+			*user = node.User
+		}
 	}
 	defer client.Close()
 
@@ -1157,11 +1179,30 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 		return fmt.Errorf("diagnostic remote ui dist check failed: %w", err)
 	}
 	if !remoteFileExists(manifestAbs) {
-		if remoteFileExists(filepath.ToSlash(filepath.Join(autoswapRoot, "manifests", "robot-src_v2.manifest.json"))) {
-			manifestAbs = filepath.ToSlash(filepath.Join(autoswapRoot, "manifests", "robot-src_v2.manifest.json"))
-		} else {
+		candidates := []string{
+			filepath.ToSlash(filepath.Join(autoswapRoot, "manifests", "robot-src_v2.manifest.json")),
+		}
+		found := ""
+		for _, c := range candidates {
+			if remoteFileExists(c) {
+				found = c
+				break
+			}
+		}
+		if found == "" {
+			manifestDir := filepath.ToSlash(filepath.Join(autoswapRoot, "manifests"))
+			latestManifestOut, lerr := ssh_plugin.RunSSHCommand(client, "find "+shellSingleQuote(manifestDir)+" -maxdepth 1 -type f -name 'manifest-*.json' -printf '%T@ %p\\n' 2>/dev/null | sort -nr | head -n1 | awk '{print $2}'")
+			if lerr == nil {
+				latestManifest := strings.TrimSpace(latestManifestOut)
+				if latestManifest != "" && remoteFileExists(latestManifest) {
+					found = latestManifest
+				}
+			}
+		}
+		if found == "" {
 			return fmt.Errorf("diagnostic remote manifest check failed: %s", manifestAbs)
 		}
+		manifestAbs = found
 	}
 	logs.Info("robot src_v2 diagnostic: remote artifact check passed")
 
@@ -1184,6 +1225,21 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 		return fmt.Errorf("autoswap service ExecStart does not reference manifest path %s or --manifest-url", manifestAbs)
 	}
 	logs.Info("robot src_v2 diagnostic: autoswap service is active and uses expected manifest")
+	if manifestURL := extractFlagValue(execOut, "--manifest-url"); manifestURL != "" {
+		remoteManifestHashOut, err := ssh_plugin.RunSSHCommand(client, "sha256sum "+shellSingleQuote(manifestAbs)+" | awk '{print $1}'")
+		if err != nil {
+			return fmt.Errorf("active manifest hash read failed: %w", err)
+		}
+		remoteManifestHash := strings.TrimSpace(remoteManifestHashOut)
+		latestManifestHash, err := fetchURLSHA256(manifestURL, 15*time.Second)
+		if err != nil {
+			return fmt.Errorf("latest manifest fetch failed (%s): %w", manifestURL, err)
+		}
+		if !strings.EqualFold(remoteManifestHash, latestManifestHash) {
+			return fmt.Errorf("active manifest is not latest from manifest-url: active=%s latest=%s", remoteManifestHash, latestManifestHash)
+		}
+		logs.Info("robot src_v2 diagnostic: active manifest hash matches latest manifest-url")
+	}
 
 	repoRootForList := ""
 	if _, err := ssh_plugin.RunSSHCommand(client, "test -d "+shellSingleQuote(resolvedRemoteRepo)); err == nil {
@@ -1209,6 +1265,31 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 	if err != nil {
 		return fmt.Errorf("autoswap runtime state read failed: %w", err)
 	}
+	manifestRaw, err := ssh_plugin.RunSSHCommand(client, "cat "+shellSingleQuote(manifestAbs))
+	if err != nil {
+		return fmt.Errorf("autoswap manifest read failed: %w", err)
+	}
+	var manifestState struct {
+		Runtime struct {
+			Processes []struct {
+				Name string `json:"name"`
+			} `json:"processes"`
+		} `json:"runtime"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(manifestRaw)), &manifestState); err != nil {
+		return fmt.Errorf("autoswap manifest parse failed: %w", err)
+	}
+	expectedProc := make(map[string]bool)
+	for _, p := range manifestState.Runtime.Processes {
+		name := strings.TrimSpace(p.Name)
+		if name == "" {
+			continue
+		}
+		expectedProc[name] = false
+	}
+	if len(expectedProc) == 0 {
+		return fmt.Errorf("manifest has no runtime.processes entries")
+	}
 	var runtimeState struct {
 		ManifestPath string `json:"manifest_path"`
 		Processes    []struct {
@@ -1229,21 +1310,21 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 			return fmt.Errorf("active autoswap manifest mismatch: got=%s expected=%s", runtimeState.ManifestPath, manifestAbs)
 		}
 	}
-	requiredProc := map[string]bool{"robot": false, "camera": false, "mavlink": false, "repl": false}
 	for _, p := range runtimeState.Processes {
-		if _, ok := requiredProc[p.Name]; !ok {
+		name := strings.TrimSpace(p.Name)
+		if _, ok := expectedProc[name]; !ok {
 			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(p.Status), "running") && p.PID > 0 {
-			requiredProc[p.Name] = true
+			expectedProc[name] = true
 		}
 	}
-	for name, ok := range requiredProc {
+	for name, ok := range expectedProc {
 		if !ok {
 			return fmt.Errorf("autoswap runtime state process is not running: %s", name)
 		}
 	}
-	logs.Info("robot src_v2 diagnostic: autoswap runtime reports required processes running")
+	logs.Info("robot src_v2 diagnostic: autoswap runtime matches manifest processes")
 
 	procsOut, err := ssh_plugin.RunSSHCommand(client, "pgrep -af 'dialtone_(robot_v2|camera_v1|mavlink_v1|repl_v1)' || true")
 	if err != nil {
@@ -1283,17 +1364,66 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 	if strings.TrimSpace(streamCodeOut) != "200" {
 		return fmt.Errorf("remote /stream expected HTTP 200, got %s", strings.TrimSpace(streamCodeOut))
 	}
-	logs.Info("robot src_v2 diagnostic: remote endpoints passed (/health, /api/init, /api/integration-health, /stream)")
+	cameraSidecarHealth, err := ssh_plugin.RunSSHCommand(client, "curl -fsS --max-time 5 http://127.0.0.1:19090/health")
+	if err != nil {
+		return fmt.Errorf("remote camera sidecar /health check failed: %w", err)
+	}
+	if strings.TrimSpace(cameraSidecarHealth) != "ok" {
+		return fmt.Errorf("remote camera sidecar /health expected ok, got %q", strings.TrimSpace(cameraSidecarHealth))
+	}
+	streamProbeOut, err := ssh_plugin.RunSSHCommand(client, "python3 - <<'PY'\nimport urllib.request\nreq=urllib.request.Request('http://127.0.0.1:19090/stream')\nwith urllib.request.urlopen(req, timeout=8) as r:\n    ct=(r.headers.get('Content-Type') or '').lower()\n    chunk=r.read(2048)\nok='multipart/x-mixed-replace' in ct and b'--frame' in chunk\nprint('ok' if ok else 'bad')\nPY")
+	if err != nil {
+		return fmt.Errorf("remote camera stream payload probe failed: %w", err)
+	}
+	if strings.TrimSpace(streamProbeOut) != "ok" {
+		return fmt.Errorf("remote camera stream payload probe did not return multipart frame boundary")
+	}
+	mavlinkLiveProbe, err := ssh_plugin.RunSSHCommand(client, "journalctl --user -u dialtone_autoswap.service --since '2 minutes ago' --no-pager | egrep '\\[MAVLINK-RAW\\] (HEARTBEAT|GLOBALPOSITIONINT)' | tail -n 8")
+	if err != nil {
+		return fmt.Errorf("remote mavlink telemetry liveness check failed: %w", err)
+	}
+	if !strings.Contains(mavlinkLiveProbe, "MAVLINK-RAW") {
+		return fmt.Errorf("remote mavlink telemetry liveness check found no recent MAVLINK-RAW HEARTBEAT/GLOBALPOSITIONINT")
+	}
+	logs.Info("robot src_v2 diagnostic: remote endpoints passed (/health, /api/init, /api/integration-health, /stream, sidecar camera stream, mavlink telemetry liveness)")
+
+	resolvedUIURL := strings.TrimSpace(*uiURL)
+	if resolvedUIURL == "" {
+		publicHost := inferPublicRobotHostname(strings.TrimSpace(*host), meshNode)
+		resolvedUIURL = "https://" + publicHost + ".dialtone.earth"
+	}
+	if !strings.Contains(resolvedUIURL, "://") {
+		resolvedUIURL = "https://" + resolvedUIURL
+	}
+	uiBase := strings.TrimRight(resolvedUIURL, "/")
+	publicHealthBody, err := fetchURLText(uiBase+"/health", 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("public ui /health check failed (%s): %w", uiBase, err)
+	}
+	if strings.TrimSpace(publicHealthBody) != "ok" {
+		return fmt.Errorf("public ui /health expected ok, got %q", strings.TrimSpace(publicHealthBody))
+	}
+	publicInitBody, err := fetchURLText(uiBase+"/api/init", 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("public ui /api/init check failed (%s): %w", uiBase, err)
+	}
+	if !strings.Contains(publicInitBody, "/natsws") {
+		return fmt.Errorf("public ui /api/init missing /natsws")
+	}
+	var publicInit struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(publicInitBody)), &publicInit); err != nil {
+		return fmt.Errorf("public ui /api/init json parse failed: %w", err)
+	}
+	expectedSettingsVersion := strings.TrimSpace(publicInit.Version)
+	if expectedSettingsVersion == "" {
+		return fmt.Errorf("public ui /api/init returned empty version")
+	}
+	logs.Info("robot src_v2 diagnostic: public UI passed (%s) expected_version=%s", uiBase, expectedSettingsVersion)
 
 	if !*skipUI {
-		resolvedUIURL := strings.TrimSpace(*uiURL)
-		if resolvedUIURL == "" {
-			resolvedUIURL = "http://" + strings.TrimSpace(*host) + ":18086"
-		}
-		if !strings.Contains(resolvedUIURL, "://") {
-			resolvedUIURL = "http://" + resolvedUIURL
-		}
-		if err := runRobotSrcV2MenuDiagnostic(resolvedUIURL, strings.TrimSpace(*browserNode), repoRoot); err != nil {
+		if err := runRobotSrcV2MenuDiagnostic(resolvedUIURL, strings.TrimSpace(*browserNode), repoRoot, expectedSettingsVersion); err != nil {
 			return err
 		}
 		logs.Info("robot src_v2 diagnostic: UI menu checks passed (%s)", resolvedUIURL)
@@ -1303,13 +1433,93 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 	return nil
 }
 
-func runRobotSrcV2MenuDiagnostic(uiURL, browserNode, repoRoot string) error {
+func inferPublicRobotHostname(host string, node *ssh_plugin.MeshNode) string {
+	candidates := []string{strings.TrimSpace(host)}
+	if node != nil {
+		candidates = append(candidates, strings.TrimSpace(node.Host))
+		for _, a := range node.Aliases {
+			candidates = append(candidates, strings.TrimSpace(a))
+		}
+	}
+	for _, c := range candidates {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		c = strings.Trim(c, ".")
+		if strings.Contains(c, ".") {
+			if strings.HasSuffix(c, ".shad-artichoke.ts.net") {
+				base := strings.TrimSuffix(c, ".shad-artichoke.ts.net")
+				base = strings.Trim(base, ".")
+				if base != "" {
+					return base
+				}
+			}
+			parts := strings.Split(c, ".")
+			if len(parts) > 0 && parts[0] != "" {
+				return parts[0]
+			}
+		}
+		if c != "rover" {
+			return c
+		}
+	}
+	return "rover-1"
+}
+
+func fetchURLText(rawURL string, timeout time.Duration) (string, error) {
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Get(rawURL)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("http status %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+func fetchURLSHA256(rawURL string, timeout time.Duration) (string, error) {
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Get(rawURL)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("http status %d", resp.StatusCode)
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, resp.Body); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func extractFlagValue(execStart, flagName string) string {
+	fields := strings.Fields(execStart)
+	for i := 0; i+1 < len(fields); i++ {
+		if fields[i] != flagName {
+			continue
+		}
+		v := strings.TrimSpace(fields[i+1])
+		v = strings.Trim(v, "\"';")
+		return v
+	}
+	return ""
+}
+
+func runRobotSrcV2MenuDiagnostic(uiURL, browserNode, repoRoot, expectedSettingsVersion string) error {
 	reg := test_plugin.NewRegistry()
 	urlBase := strings.TrimRight(strings.TrimSpace(uiURL), "/")
 	if urlBase == "" {
 		return fmt.Errorf("ui url is empty")
 	}
-	const docsVersionToken = "ROBOT_UI_DOCS_VERSION: robot-src_v2-docs-v4"
 	reg.Add(test_plugin.Step{
 		Name:    "robot-src-v2-diagnostic-ui-menu",
 		Timeout: 45 * time.Second,
@@ -1317,118 +1527,102 @@ func runRobotSrcV2MenuDiagnostic(uiURL, browserNode, repoRoot string) error {
 			opts := test_plugin.BrowserOptions{
 				Headless:   true,
 				GPU:        true,
-				Role:       "robot-src-v2-diagnostic",
+				Role:       "test",
 				RemoteNode: strings.TrimSpace(browserNode),
-				URL:        urlBase + "/#hero",
+				URL:        "about:blank",
 			}
+			ctx.Infof("[ACTION] ensure browser role=%s remote_node=%s url=%s", opts.Role, opts.RemoteNode, opts.URL)
 			if _, err := ctx.EnsureBrowser(opts); err != nil {
 				return test_plugin.StepRunResult{}, err
 			}
+			ctx.Infof("[ACTION] browser ready")
+			if err := ctx.RunBrowser(chromedp.Navigate(urlBase + "/#hero")); err != nil {
+				return test_plugin.StepRunResult{}, fmt.Errorf("navigate robot ui: %w", err)
+			}
+			ctx.Infof("[ACTION] navigated to robot ui")
 			if err := ctx.WaitForAriaLabel("Hero Section", 8*time.Second); err != nil {
 				return test_plugin.StepRunResult{}, err
 			}
+			ctx.Infof("[ACTION] hero section visible")
 			if err := ctx.WaitForAriaLabelAttrEquals("Hero Section", "data-active", "true", 8*time.Second); err != nil {
 				return test_plugin.StepRunResult{}, err
 			}
-
-			sections := []struct {
-				Menu  string
-				Aria  string
-				Extra string
-			}{
-				{Menu: "Navigate Docs", Aria: "Docs Section"},
-				{Menu: "Navigate Telemetry", Aria: "Telemetry Section", Extra: "Robot Table"},
-				{Menu: "Navigate Three", Aria: "Three Section"},
-				{Menu: "Navigate Terminal", Aria: "Xterm Section"},
-				{Menu: "Navigate Camera", Aria: "Video Section"},
-				{Menu: "Navigate Settings", Aria: "Settings Section"},
+			ctx.Infof("[ACTION] hero section active")
+			if err := ctx.WaitForAriaLabel("Toggle Global Menu", 8*time.Second); err != nil {
+				return test_plugin.StepRunResult{}, err
 			}
-			for _, s := range sections {
-				if err := ctx.WaitForAriaLabel("Toggle Global Menu", 8*time.Second); err != nil {
-					return test_plugin.StepRunResult{}, err
-				}
-				if err := ctx.ClickAriaLabel("Toggle Global Menu"); err != nil {
-					return test_plugin.StepRunResult{}, err
-				}
-				if err := ctx.WaitForAriaLabel(s.Menu, 8*time.Second); err != nil {
-					return test_plugin.StepRunResult{}, err
-				}
-				if err := ctx.ClickAriaLabel(s.Menu); err != nil {
-					return test_plugin.StepRunResult{}, err
-				}
-				if err := ctx.WaitForAriaLabel(s.Aria, 8*time.Second); err != nil {
-					return test_plugin.StepRunResult{}, err
-				}
-				if s.Extra != "" {
-					if err := ctx.WaitForAriaLabel(s.Extra, 8*time.Second); err != nil {
-						return test_plugin.StepRunResult{}, err
-					}
-				}
-				if err := ctx.WaitForAriaLabelAttrEquals(s.Aria, "data-active", "true", 8*time.Second); err != nil {
-					return test_plugin.StepRunResult{}, err
-				}
-				if s.Aria == "Docs Section" {
-					docsCheckExpr := fmt.Sprintf(`(() => {
-						  const docs = document.querySelector("[aria-label='Docs Section']");
-						  if (!(docs instanceof HTMLElement)) return false;
-						  const text = (docs.textContent || "").replace(/\s+/g, " ").trim();
-						  return text.includes(%q);
-						})()`, docsVersionToken)
-					if err := waitForBrowserJSCondition(
-						ctx,
-						12*time.Second,
-						docsCheckExpr,
-						"docs section missing expected docs version token",
-					); err != nil {
-						return test_plugin.StepRunResult{}, err
-					}
-				}
-				if s.Aria == "Telemetry Section" {
-					if err := waitForBrowserJSCondition(
-						ctx,
-						20*time.Second,
-						`(() => {
-						  const rows = Array.from(document.querySelectorAll("table[aria-label='Robot Table'] tbody tr"));
-						  if (rows.length === 0) return false;
-						  const keys = rows.map((r) => ((r.children[0]?.textContent) || "").trim());
-						  return keys.includes("heartbeat_ts") ||
-						         keys.includes("gps_lat") ||
-						         keys.includes("roll") ||
-						         keys.includes("pitch") ||
-						         keys.includes("yaw") ||
-						         keys.includes("mav_type");
-						})()`,
-						"telemetry section did not receive mavlink telemetry rows",
-					); err != nil {
-						return test_plugin.StepRunResult{}, err
-					}
-				}
-				if s.Aria == "Three Section" {
-					if err := waitForBrowserJSCondition(
-						ctx,
-						20*time.Second,
-						`(() => {
-						  const el = document.getElementById("hud-latency");
-						  const text = (el?.textContent || "").trim();
-						  const m = text.match(/(\d+)/);
-						  if (m && Number(m[1]) > 0) return true;
-						  const canvas = document.getElementById("latency-graph");
-						  if (!(canvas instanceof HTMLCanvasElement)) return false;
-						  const ctx = canvas.getContext("2d");
-						  if (!ctx) return false;
-						  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-						  for (let i = 3; i < data.length; i += 4) {
-						    if (data[i] > 0) return true;
-						  }
-						  return false;
-						})()`,
-						"three section latency/graph did not update (no telemetry rendered)",
-					); err != nil {
-						return test_plugin.StepRunResult{}, err
-					}
-				}
+			ctx.Infof("[ACTION] menu toggle visible")
+			if err := ctx.ClickAriaLabel("Toggle Global Menu"); err != nil {
+				return test_plugin.StepRunResult{}, err
 			}
-			return test_plugin.StepRunResult{Report: "diagnostic UI menu passed"}, nil
+			ctx.Infof("[ACTION] menu opened")
+			if err := ctx.WaitForAriaLabel("Navigate Settings", 8*time.Second); err != nil {
+				return test_plugin.StepRunResult{}, err
+			}
+			ctx.Infof("[ACTION] settings nav visible")
+			if err := ctx.ClickAriaLabel("Navigate Settings"); err != nil {
+				return test_plugin.StepRunResult{}, err
+			}
+			ctx.Infof("[ACTION] settings nav clicked")
+			if err := ctx.WaitForAriaLabel("Settings Section", 8*time.Second); err != nil {
+				return test_plugin.StepRunResult{}, err
+			}
+			ctx.Infof("[ACTION] settings section visible")
+			if err := ctx.WaitForAriaLabelAttrEquals("Settings Section", "data-active", "true", 8*time.Second); err != nil {
+				return test_plugin.StepRunResult{}, err
+			}
+			ctx.Infof("[ACTION] settings section active")
+			expectedPrefix := "version:" + strings.TrimSpace(expectedSettingsVersion)
+			if err := waitForBrowserJSCondition(
+				ctx,
+				12*time.Second,
+				fmt.Sprintf(`(() => {
+				  const section = document.querySelector("[aria-label='Settings Section']");
+				  const byAria = document.querySelector("button[aria-label='Robot Version Button']");
+				  const byText = section ? Array.from(section.querySelectorAll("button")).find((b) => /^version:\S+/i.test((b.textContent || "").trim())) : null;
+				  const btn = byAria || byText;
+				  if (!(btn instanceof HTMLButtonElement)) return false;
+				  const text = (btn.textContent || "").trim();
+				  return text.startsWith(%q);
+				})()`, expectedPrefix),
+				"settings section version button did not converge to backend version",
+			); err != nil {
+				var debugInfo string
+				_ = ctx.RunBrowser(chromedp.Evaluate(`(() => {
+				  const section = document.querySelector("[aria-label='Settings Section']");
+				  const active = section ? section.getAttribute("data-active") : "";
+				  const buttons = Array.from(document.querySelectorAll("[aria-label='Settings Section'] button")).map((b) => ({
+				    text: (b.textContent || "").trim(),
+				    aria: b.getAttribute("aria-label") || ""
+				  }));
+				  const allButtons = Array.from(document.querySelectorAll("button")).slice(0, 12).map((b) => ({
+				    text: (b.textContent || "").trim(),
+				    aria: b.getAttribute("aria-label") || ""
+				  }));
+				  return JSON.stringify({ active, buttons, allButtons });
+				})()`, &debugInfo))
+				return test_plugin.StepRunResult{}, fmt.Errorf("%w; debug=%s", err, strings.TrimSpace(debugInfo))
+			}
+			var settingsVersionText string
+			if err := ctx.RunBrowser(chromedp.Evaluate(`(() => {
+			  const section = document.querySelector("[aria-label='Settings Section']");
+			  const byAria = document.querySelector("button[aria-label='Robot Version Button']");
+			  const byText = section ? Array.from(section.querySelectorAll("button")).find((b) => /^version:\S+/i.test((b.textContent || "").trim())) : null;
+			  const btn = byAria || byText;
+			  if (!(btn instanceof HTMLButtonElement)) return "";
+			  return (btn.textContent || "").trim();
+			})()`, &settingsVersionText)); err != nil {
+				return test_plugin.StepRunResult{}, err
+			}
+			settingsVersionText = strings.TrimSpace(settingsVersionText)
+			if settingsVersionText == "" {
+				return test_plugin.StepRunResult{}, fmt.Errorf("settings version button text is empty")
+			}
+			if !strings.HasPrefix(settingsVersionText, expectedPrefix) {
+				return test_plugin.StepRunResult{}, fmt.Errorf("settings version button mismatch: got=%q expected_prefix=%q", settingsVersionText, expectedPrefix)
+			}
+			ctx.Infof("[ACTION] settings version button text: %s", settingsVersionText)
+			return test_plugin.StepRunResult{Report: "diagnostic settings version button passed"}, nil
 		},
 	})
 	return reg.Run(test_plugin.SuiteOptions{

@@ -4,9 +4,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 
 	chrome "dialtone/dev/plugins/chrome/src_v1/go"
 	"dialtone/dev/plugins/logs/src_v1/go"
@@ -123,6 +127,16 @@ func RunChrome(args []string) {
 			logs.Fatal("session parse failed: %v", err)
 		}
 		handleSession(*port, *gpu, *headless, *url, *role, *reuseExisting, *userDataDir, *debugAddress)
+	case "debug-url":
+		handleDebugURLCmd(args[1:])
+	case "service-start":
+		handleServiceStartCmd(args[1:])
+	case "service-daemon":
+		handleServiceDaemonCmd(args[1:])
+	case "service-stop":
+		handleServiceStopCmd(args[1:])
+	case "service-status":
+		handleServiceStatusCmd(args[1:])
 	case "test":
 		if err := runChromeTests(args[1:]); err != nil {
 			logs.Fatal("Chrome self-test failed: %v", err)
@@ -161,6 +175,8 @@ func RunChrome(args []string) {
 		handleRemoteKillCmd(args[1:])
 	case "remote-wsl-forward":
 		handleRemoteWSLForwardCmd(args[1:])
+	case "deploy":
+		handleDeployCmd(args[1:])
 	default:
 		printChromeUsage()
 	}
@@ -363,6 +379,240 @@ func handleSession(port int, gpu bool, headless bool, targetURL, role string, re
 	fmt.Printf("DIALTONE_CHROME_SESSION_JSON=%s\n", string(raw))
 }
 
+func handleDebugURLCmd(args []string) {
+	fs := flag.NewFlagSet("chrome debug-url", flag.ExitOnError)
+	host := fs.String("host", "", "Optional mesh node name (example: darkmac)")
+	servicePort := fs.Int("service-port", defaultChromeServicePort, "Remote chrome service command port")
+	role := fs.String("role", "dev", "Dialtone role tag")
+	headless := fs.Bool("headless", false, "Request headless session when launching")
+	url := fs.String("url", "about:blank", "Initial URL when launching")
+	reuse := fs.Bool("reuse-existing", true, "Reuse an existing matching session")
+	port := fs.Int("port", 0, "Preferred debugging port")
+	userDataDir := fs.String("user-data-dir", "", "Explicit Chrome user data dir")
+	debugAddress := fs.String("debug-address", "0.0.0.0", "Remote debug bind address")
+	_ = fs.Parse(args)
+
+	if strings.TrimSpace(*host) != "" {
+		if ws, err := requestRemoteServiceDebugURL(strings.TrimSpace(*host), *servicePort, debugURLRequest{
+			Role:         strings.TrimSpace(*role),
+			Headless:     *headless,
+			URL:          strings.TrimSpace(*url),
+			Port:         *port,
+			Reuse:        *reuse,
+			UserDataDir:  strings.TrimSpace(*userDataDir),
+			DebugAddress: strings.TrimSpace(*debugAddress),
+		}); err == nil && strings.TrimSpace(ws) != "" {
+			fmt.Println(strings.TrimSpace(ws))
+			return
+		} else if err != nil {
+			logs.Warn("debug-url service fallback host=%s port=%d reason=%v", strings.TrimSpace(*host), *servicePort, err)
+		}
+		remoteRes, err := chrome.StartRemoteSession(strings.TrimSpace(*host), chrome.RemoteSessionOptions{
+			Role:               strings.TrimSpace(*role),
+			URL:                strings.TrimSpace(*url),
+			Headless:           *headless,
+			GPU:                true,
+			PreferredDebugPort: *port,
+			NoSSH:              false,
+		})
+		if err != nil {
+			logs.Fatal("debug-url --host %s failed: %v", strings.TrimSpace(*host), err)
+		}
+		fmt.Println(strings.TrimSpace(remoteRes.Session.WebSocketURL))
+		return
+	}
+
+	sess, err := chrome.StartSession(chrome.SessionOptions{
+		RequestedPort: *port,
+		GPU:           true,
+		Headless:      *headless,
+		TargetURL:     strings.TrimSpace(*url),
+		Role:          strings.TrimSpace(*role),
+		ReuseExisting: *reuse,
+		UserDataDir:   strings.TrimSpace(*userDataDir),
+		DebugAddress:  strings.TrimSpace(*debugAddress),
+	})
+	if err != nil {
+		logs.Fatal("debug-url failed: %v", err)
+	}
+	fmt.Println(strings.TrimSpace(sess.WebSocketURL))
+}
+
+func handleServiceDaemonCmd(args []string) {
+	fs := flag.NewFlagSet("chrome service-daemon", flag.ExitOnError)
+	listenAddr := fs.String("listen-address", "0.0.0.0", "Service listen address")
+	listenPort := fs.Int("listen-port", defaultChromeServicePort, "Service listen port")
+	defaultRole := fs.String("role", "dev", "Default role when request omits role")
+	defaultDebugAddress := fs.String("debug-address", "0.0.0.0", "Default debug bind address")
+	_ = fs.Parse(args)
+	var proxyPort int64
+
+	mux := http.NewServeMux()
+	buildProxy := func(port int) *httputil.ReverseProxy {
+		target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
+		proxy := httputil.NewSingleHostReverseProxy(target)
+		origDirector := proxy.Director
+		proxy.Director = func(req *http.Request) {
+			origDirector(req)
+			req.Host = target.Host
+		}
+		return proxy
+	}
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})
+	mux.HandleFunc("/debug-url", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost && r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+			return
+		}
+		req := debugURLRequest{
+			Role:         strings.TrimSpace(*defaultRole),
+			URL:          "about:blank",
+			Reuse:        true,
+			DebugAddress: strings.TrimSpace(*defaultDebugAddress),
+		}
+		if r.Method == http.MethodPost && r.Body != nil {
+			dec := json.NewDecoder(r.Body)
+			_ = dec.Decode(&req)
+		}
+		q := r.URL.Query()
+		if v := strings.TrimSpace(q.Get("role")); v != "" {
+			req.Role = v
+		}
+		if v := strings.TrimSpace(q.Get("url")); v != "" {
+			req.URL = v
+		}
+		req.Headless = parseBoolQuery(q.Get("headless"), req.Headless)
+		req.Reuse = parseBoolQuery(q.Get("reuse_existing"), req.Reuse)
+		req.Port = parseIntQuery(q.Get("port"), req.Port)
+		if v := strings.TrimSpace(q.Get("user_data_dir")); v != "" {
+			req.UserDataDir = v
+		}
+		if v := strings.TrimSpace(q.Get("debug_address")); v != "" {
+			req.DebugAddress = v
+		}
+		if req.Role == "" {
+			req.Role = strings.TrimSpace(*defaultRole)
+		}
+		if req.URL == "" {
+			req.URL = "about:blank"
+		}
+		if req.DebugAddress == "" {
+			req.DebugAddress = strings.TrimSpace(*defaultDebugAddress)
+		}
+		sess, err := chrome.StartSession(chrome.SessionOptions{
+			RequestedPort: req.Port,
+			GPU:           true,
+			Headless:      req.Headless,
+			TargetURL:     req.URL,
+			Role:          req.Role,
+			ReuseExisting: req.Reuse,
+			UserDataDir:   req.UserDataDir,
+			DebugAddress:  req.DebugAddress,
+		})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		atomic.StoreInt64(&proxyPort, int64(sess.Port))
+		wsPath := chrome.WebSocketPathFromURL(strings.TrimSpace(sess.WebSocketURL))
+		if wsPath == "" {
+			wsPath = "/devtools/browser"
+		}
+		// Return a daemon-proxied websocket URL so all traffic can traverse this service.
+		proxyWS := fmt.Sprintf("ws://127.0.0.1:%d%s", *listenPort, wsPath)
+		writeJSON(w, http.StatusOK, debugURLResponse{
+			WebSocketURL: proxyWS,
+			PID:          sess.PID,
+			Port:         sess.Port,
+			IsNew:        sess.IsNew,
+		})
+	})
+	mux.HandleFunc("/json/", func(w http.ResponseWriter, r *http.Request) {
+		p := int(atomic.LoadInt64(&proxyPort))
+		if p <= 0 {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "chrome proxy port unavailable; call /debug-url first"})
+			return
+		}
+		proxy := buildProxy(p)
+		proxy.ServeHTTP(w, r)
+	})
+	mux.HandleFunc("/devtools/", func(w http.ResponseWriter, r *http.Request) {
+		p := int(atomic.LoadInt64(&proxyPort))
+		if p <= 0 {
+			http.Error(w, "chrome proxy port unavailable; call /debug-url first", http.StatusServiceUnavailable)
+			return
+		}
+		proxy := buildProxy(p)
+		proxy.ServeHTTP(w, r)
+	})
+
+	addr := fmt.Sprintf("%s:%d", strings.TrimSpace(*listenAddr), *listenPort)
+	logs.Info("chrome service daemon listening on %s", addr)
+	logs.Fatal("chrome service daemon stopped: %v", http.ListenAndServe(addr, mux))
+}
+
+func handleServiceStartCmd(args []string) {
+	fs := flag.NewFlagSet("chrome service-start", flag.ExitOnError)
+	role := fs.String("role", "dev", "Service role tag")
+	headless := fs.Bool("headless", false, "Run service browser headless")
+	url := fs.String("url", "about:blank", "Initial URL")
+	port := fs.Int("port", 0, "Preferred debug port")
+	debugAddress := fs.String("debug-address", "", "Remote debug bind address (empty=auto)")
+	_ = fs.Parse(args)
+	sess, err := chrome.StartSession(chrome.SessionOptions{
+		RequestedPort: *port,
+		GPU:           true,
+		Headless:      *headless,
+		TargetURL:     strings.TrimSpace(*url),
+		Role:          strings.TrimSpace(*role),
+		ReuseExisting: true,
+		DebugAddress:  strings.TrimSpace(*debugAddress),
+	})
+	if err != nil {
+		logs.Fatal("service-start failed: %v", err)
+	}
+	logs.Info("chrome service running role=%s pid=%d port=%d ws=%s", strings.TrimSpace(*role), sess.PID, sess.Port, strings.TrimSpace(sess.WebSocketURL))
+}
+
+func handleServiceStopCmd(args []string) {
+	fs := flag.NewFlagSet("chrome service-stop", flag.ExitOnError)
+	role := fs.String("role", "dev", "Service role tag")
+	_ = fs.Parse(args)
+	procs, err := chrome.ListResources(true)
+	if err != nil {
+		logs.Fatal("service-stop list failed: %v", err)
+	}
+	stopped := 0
+	for _, p := range procs {
+		if p.Origin != "Dialtone" || strings.TrimSpace(p.Role) != strings.TrimSpace(*role) {
+			continue
+		}
+		if err := chrome.KillResource(p.PID, p.IsWindows); err == nil {
+			stopped++
+		}
+	}
+	logs.Info("chrome service stopped role=%s count=%d", strings.TrimSpace(*role), stopped)
+}
+
+func handleServiceStatusCmd(args []string) {
+	fs := flag.NewFlagSet("chrome service-status", flag.ExitOnError)
+	role := fs.String("role", "dev", "Service role tag")
+	_ = fs.Parse(args)
+	procs, err := chrome.ListResources(true)
+	if err != nil {
+		logs.Fatal("service-status list failed: %v", err)
+	}
+	count := 0
+	for _, p := range procs {
+		if p.Origin == "Dialtone" && strings.TrimSpace(p.Role) == strings.TrimSpace(*role) {
+			count++
+		}
+	}
+	fmt.Printf("role=%s count=%d\n", strings.TrimSpace(*role), count)
+}
+
 func printChromeUsage() {
 	fmt.Println("Usage: ./dialtone.sh chrome src_v1 <command> [arguments]")
 	fmt.Println("\nCommands:")
@@ -370,6 +620,11 @@ func printChromeUsage() {
 	fmt.Println("  list [flags]        List detected chrome processes")
 	fmt.Println("  new [URL] [flags]   Launch a new Chrome instance")
 	fmt.Println("  session [flags]     Launch/reuse and emit machine-readable session metadata")
+	fmt.Println("  debug-url [flags]   Ensure/reuse debug session and print websocket URL")
+	fmt.Println("  service-start       Start/reuse background chrome service session")
+	fmt.Println("  service-daemon      Run command server for remote chrome session control")
+	fmt.Println("  service-stop        Stop background chrome service session")
+	fmt.Println("  service-status      Show background chrome service process count")
 	fmt.Println("  test                Run chrome plugin self-test (dev/test roles)")
 	fmt.Println("  kill [PID|all] [--all] Kill Dialtone processes (default) or all processes")
 	fmt.Println("  remote-list [flags] List Chrome processes across mesh nodes")
@@ -379,6 +634,7 @@ func printChromeUsage() {
 	fmt.Println("  remote-doctor [flags] Diagnose remote debug reachability/listener issues")
 	fmt.Println("  remote-kill [flags] Kill remote Chrome processes by role/origin")
 	fmt.Println("  remote-wsl-forward [flags] Configure Windows WSL devtools portproxy/firewall")
+	fmt.Println("  deploy [flags]      Build and deploy chrome plugin binary to mesh host")
 	fmt.Println("  install             Install chrome dependencies")
 	fmt.Println("\nFlags for list:")
 	fmt.Println("  --headed            Filter for headed instances only")

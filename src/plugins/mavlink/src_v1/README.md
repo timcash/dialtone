@@ -2,8 +2,9 @@
 
 ```bash
 # Generic workflow
-./dialtone.sh mavlink src_v1 install
-./dialtone.sh mavlink src_v1 build
+./dialtone.sh mavlink src_v1 run --endpoint serial:/dev/ttyAMA0:57600 --nats-url nats://127.0.0.1:4222
+./dialtone.sh mavlink src_v1 params --endpoint serial:/dev/ttyAMA0:57600
+./dialtone.sh mavlink src_v1 key-params --endpoint serial:/dev/ttyAMA0:57600 --json
 ./dialtone.sh mavlink src_v1 test
 
 # Run bridge (publishes MAVLink to NATS and consumes rover.command)
@@ -11,6 +12,10 @@
 
 # Query key Rover params for RC mapping / tuning
 ./dialtone.sh mavlink src_v1 key-params --endpoint serial:/dev/ttyAMA0:57600 --json
+
+# Remote stream + command smoke test over ssh mesh (no publish/UI required)
+./dialtone.sh mavlink src_v1 stream --host rover --duration 5s --cmd stop
+./dialtone.sh mavlink src_v1 stream --host rover --duration 5s --cmd mode --mode STEERING
 ```
 
 ## Purpose

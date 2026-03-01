@@ -6,7 +6,7 @@ import { addMavlinkListener, sendCommand } from '../../data/connection';
 import { LatencyEstimator } from '../../data/latency';
 import { registerButtons, renderButtons } from '../../buttons';
 import { ROBOT_SECTION_IDS } from '../../section_ids';
-import { sendDriveDown, sendDriveDownLeft, sendDriveDownRight, sendDriveLeft, sendDriveRight, sendDriveUp } from '../../data/steering';
+import { sendDriveDown, sendDriveDownLeft, sendDriveDownRight, sendDriveLeft, sendDriveRight, sendDriveUp, sendStopNow } from '../../data/steering';
 
 const CHATLOG_MAX_LINES = 7;
 
@@ -40,13 +40,13 @@ class ThreeControl implements VisualizationControl {
 	      'Drive': [
 	        { label: 'Up-L', action: () => sendDriveLeft() },
 	        { label: 'Up', action: () => sendDriveUp() },
-	        { label: 'Up-R', action: () => sendDriveRight() },
-	        { label: 'Down-L', action: () => sendDriveDownLeft() },
-	        { label: 'Down', action: () => sendDriveDown() },
-	        { label: 'Down-R', action: () => sendDriveDownRight() },
-	        null,
-	        null,
-	      ],
+        { label: 'Up-R', action: () => sendDriveRight() },
+        { label: 'Down-L', action: () => sendDriveDownLeft() },
+        { label: 'Down', action: () => sendDriveDown() },
+        { label: 'Down-R', action: () => sendDriveDownRight() },
+        { label: 'Stop', action: () => sendStopNow() },
+        null,
+      ],
       'System': [
         { label: 'Arm', action: () => sendCommand('arm') },
         { label: 'Disarm', action: () => sendCommand('disarm') },
@@ -54,7 +54,7 @@ class ThreeControl implements VisualizationControl {
         { label: 'Steering', action: () => sendCommand('mode', 'steering') },
         { label: 'Guided', action: () => sendCommand('mode', 'guided') },
         { label: 'Pulse Fwd', action: () => sendCommand('pulse_fwd') },
-        { label: 'Stop', action: () => sendCommand('stop') },
+        { label: 'Stop', action: () => sendStopNow() },
         null,
       ],
       'Guided': [
@@ -63,7 +63,7 @@ class ThreeControl implements VisualizationControl {
         { label: 'Square 5m', action: () => sendCommand('guided_square_5m') },
         { label: 'Hold', action: () => sendCommand('guided_hold') },
         { label: 'Manual', action: () => sendCommand('mode', 'manual') },
-        { label: 'Stop', action: () => sendCommand('stop') },
+        { label: 'Stop', action: () => sendStopNow() },
         null,
         null,
       ],
