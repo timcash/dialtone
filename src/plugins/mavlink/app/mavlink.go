@@ -250,7 +250,7 @@ func (s *MavlinkService) pulseRCOverride(throttlePWM, steeringPWM uint16, durati
 	defer ticker.Stop()
 	deadline := time.Now().Add(duration)
 	for {
-		if err := s.node.WriteMessageAll(s.overrideMessage(steeringPWM, throttlePWM, false)); err != nil {
+		if err := s.node.WriteMessageAll(s.overrideMessageSelective(&steeringPWM, &throttlePWM, false)); err != nil {
 			return err
 		}
 		if time.Now().After(deadline) {
@@ -275,6 +275,24 @@ func (s *MavlinkService) PulseCustom(throttlePWM, steeringPWM uint16, duration t
 func (s *MavlinkService) PulseCustomNoStop(throttlePWM, steeringPWM uint16, duration time.Duration, label string) error {
 	logs.Info("MavlinkService: %s (%dms throttle=%d steering=%d @ 20Hz, no-stop)", label, duration.Milliseconds(), throttlePWM, steeringPWM)
 	return s.pulseRCOverride(throttlePWM, steeringPWM, duration)
+}
+
+// PulseSteeringNoStop sends steering-only RC override pulses and leaves throttle untouched.
+func (s *MavlinkService) PulseSteeringNoStop(steeringPWM uint16, duration time.Duration, label string) error {
+	logs.Info("MavlinkService: %s (%dms steering=%d @ 20Hz, steering-only no-stop)", label, duration.Milliseconds(), steeringPWM)
+	ticker := time.NewTicker(50 * time.Millisecond) // 20Hz
+	defer ticker.Stop()
+	deadline := time.Now().Add(duration)
+	for {
+		if err := s.node.WriteMessageAll(s.overrideMessageSelective(&steeringPWM, nil, false)); err != nil {
+			return err
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		<-ticker.C
+	}
+	return nil
 }
 
 // PulseForward streams full-forward throttle for 1 second via RC override (Channel 3),
@@ -321,7 +339,8 @@ func (s *MavlinkService) StopMotion() error {
 	defer ticker.Stop()
 	deadline := time.Now().Add(600 * time.Millisecond)
 	for {
-		if err := s.node.WriteMessageAll(s.overrideMessage(1500, 1500, false)); err != nil {
+		neutral := uint16(1500)
+		if err := s.node.WriteMessageAll(s.overrideMessageSelective(&neutral, &neutral, false)); err != nil {
 			return err
 		}
 		if time.Now().After(deadline) {
@@ -330,7 +349,7 @@ func (s *MavlinkService) StopMotion() error {
 		<-ticker.C
 	}
 
-	return s.node.WriteMessageAll(s.overrideMessage(0, 0, true))
+	return s.node.WriteMessageAll(s.overrideMessageSelective(nil, nil, true))
 }
 
 func (s *MavlinkService) requestRCMap() {
@@ -361,6 +380,10 @@ func (s *MavlinkService) requestRCMap() {
 }
 
 func (s *MavlinkService) overrideMessage(steeringPWM, throttlePWM uint16, release bool) *common.MessageRcChannelsOverride {
+	return s.overrideMessageSelective(&steeringPWM, &throttlePWM, release)
+}
+
+func (s *MavlinkService) overrideMessageSelective(steeringPWM *uint16, throttlePWM *uint16, release bool) *common.MessageRcChannelsOverride {
 	sys, comp := s.getTargetIDs()
 	msg := &common.MessageRcChannelsOverride{
 		TargetSystem:    sys,
@@ -399,8 +422,12 @@ func (s *MavlinkService) overrideMessage(steeringPWM, throttlePWM uint16, releas
 		setChannel(s.throttleChannel, 0)
 		return msg
 	}
-	setChannel(s.steeringChannel, steeringPWM)
-	setChannel(s.throttleChannel, throttlePWM)
+	if steeringPWM != nil {
+		setChannel(s.steeringChannel, *steeringPWM)
+	}
+	if throttlePWM != nil {
+		setChannel(s.throttleChannel, *throttlePWM)
+	}
 	return msg
 }
 
