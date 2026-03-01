@@ -107,6 +107,12 @@ func RunDeploy(args []string) error {
 		opts.ManifestURL = fmt.Sprintf("https://github.com/%s/releases/latest/download/robot_src_v2_composition_manifest.json", opts.Repo)
 		logs.Info("[DEPLOY] manifest-url not provided; using latest release URL: %s", opts.ManifestURL)
 	}
+	if opts.Service {
+		if normalized, changed := normalizeManifestURLForAutoUpdate(opts.ManifestURL, opts.Repo); changed {
+			logs.Info("[DEPLOY] normalized manifest-url to auto-update latest: %s -> %s", opts.ManifestURL, normalized)
+			opts.ManifestURL = normalized
+		}
+	}
 
 	cmdOpts := sshplugin.CommandOptions{
 		User:     opts.User,

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -741,6 +742,46 @@ func normalizeSHA256(v string) string {
 	return digest
 }
 
+func normalizeManifestURLForAutoUpdate(rawURL, repo string) (string, bool) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return "", false
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL, false
+	}
+	if !strings.EqualFold(strings.TrimSpace(u.Hostname()), "github.com") {
+		return rawURL, false
+	}
+	parts := strings.Split(strings.Trim(strings.TrimSpace(u.Path), "/"), "/")
+	if len(parts) < 6 {
+		return rawURL, false
+	}
+	owner := strings.TrimSpace(parts[0])
+	repoName := strings.TrimSpace(parts[1])
+	if owner == "" || repoName == "" {
+		return rawURL, false
+	}
+	pathRepo := owner + "/" + repoName
+	if strings.TrimSpace(repo) != "" && !strings.EqualFold(pathRepo, strings.TrimSpace(repo)) {
+		return rawURL, false
+	}
+	if parts[2] != "releases" || parts[3] != "download" {
+		return rawURL, false
+	}
+	if parts[len(parts)-1] != "robot_src_v2_composition_manifest.json" {
+		return rawURL, false
+	}
+	if parts[4] == "latest" {
+		return rawURL, false
+	}
+	u.Path = "/" + owner + "/" + repoName + "/releases/latest/download/robot_src_v2_composition_manifest.json"
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String(), true
+}
+
 func bindingExpectedDigest(binding releaseBinding) string {
 	key := runtime.GOOS + "-" + runtime.GOARCH
 	if v, ok := binding.SHA256ByTarget[key]; ok {
@@ -938,6 +979,10 @@ func (m *serviceManager) stopWorker(timeout time.Duration) {
 }
 
 func installService(opts serviceOptions) error {
+	if normalized, changed := normalizeManifestURLForAutoUpdate(opts.ManifestURL, opts.Repo); changed {
+		logs.Info("service install: normalized manifest-url to auto-update latest: %s -> %s", opts.ManifestURL, normalized)
+		opts.ManifestURL = normalized
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return err
