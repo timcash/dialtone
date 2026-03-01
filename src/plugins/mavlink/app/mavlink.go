@@ -25,6 +25,15 @@ type MavlinkEvent struct {
 	ReceivedAt int64
 }
 
+// ControlFeedback reports observed steering/throttle values from MAVLink telemetry.
+type ControlFeedback struct {
+	Source          string
+	SteeringChannel uint8
+	ThrottleChannel uint8
+	SteeringRaw     uint16
+	ThrottleRaw     uint16
+}
+
 // MavlinkService handles MAVLink communication
 type MavlinkService struct {
 	node            *gomavlib.Node
@@ -147,6 +156,42 @@ func (s *MavlinkService) Start() {
 						logs.Info("MavlinkService: learned RCMAP_THROTTLE=ch%d", s.throttleChannel)
 					}
 				}
+			case *common.MessageRcChannels:
+				if time.Since(s.lastDiagLog) > 800*time.Millisecond {
+					logs.Info("[MAVLINK-DIAG] RC ch1=%d ch2=%d ch3=%d ch4=%d rssi=%d", msg.Chan1Raw, msg.Chan2Raw, msg.Chan3Raw, msg.Chan4Raw, msg.Rssi)
+					s.lastDiagLog = time.Now()
+				}
+				if s.config.Callback != nil {
+					s.config.Callback(&MavlinkEvent{
+						Type: "CONTROL_FEEDBACK",
+						Data: &ControlFeedback{
+							Source:          "RC_CHANNELS",
+							SteeringChannel: s.steeringChannel,
+							ThrottleChannel: s.throttleChannel,
+							SteeringRaw:     s.readRCChannel(msg, s.steeringChannel),
+							ThrottleRaw:     s.readRCChannel(msg, s.throttleChannel),
+						},
+						ReceivedAt: receivedAt,
+					})
+				}
+			case *common.MessageServoOutputRaw:
+				if time.Since(s.lastDiagLog) > 800*time.Millisecond {
+					logs.Info("[MAVLINK-DIAG] SERVO port=%d s1=%d s2=%d s3=%d s4=%d", msg.Port, msg.Servo1Raw, msg.Servo2Raw, msg.Servo3Raw, msg.Servo4Raw)
+					s.lastDiagLog = time.Now()
+				}
+				if s.config.Callback != nil {
+					s.config.Callback(&MavlinkEvent{
+						Type: "CONTROL_FEEDBACK",
+						Data: &ControlFeedback{
+							Source:          "SERVO_OUTPUT_RAW",
+							SteeringChannel: s.steeringChannel,
+							ThrottleChannel: s.throttleChannel,
+							SteeringRaw:     s.readServoChannel(msg, s.steeringChannel),
+							ThrottleRaw:     s.readServoChannel(msg, s.throttleChannel),
+						},
+						ReceivedAt: receivedAt,
+					})
+				}
 			case *common.MessageCommandAck:
 				logs.Info("[MAVLINK-RAW] COMMAND_ACK: cmd=%v res=%v", msg.Command, msg.Result)
 				if s.config.Callback != nil {
@@ -181,16 +226,6 @@ func (s *MavlinkService) Start() {
 							Data:       msg,
 							ReceivedAt: receivedAt,
 						})
-					}
-				case *common.MessageRcChannels:
-					if time.Since(s.lastDiagLog) > 800*time.Millisecond {
-						logs.Info("[MAVLINK-DIAG] RC ch1=%d ch2=%d ch3=%d ch4=%d rssi=%d", msg.Chan1Raw, msg.Chan2Raw, msg.Chan3Raw, msg.Chan4Raw, msg.Rssi)
-						s.lastDiagLog = time.Now()
-					}
-				case *common.MessageServoOutputRaw:
-					if time.Since(s.lastDiagLog) > 800*time.Millisecond {
-						logs.Info("[MAVLINK-DIAG] SERVO port=%d s1=%d s2=%d s3=%d s4=%d", msg.Port, msg.Servo1Raw, msg.Servo2Raw, msg.Servo3Raw, msg.Servo4Raw)
-						s.lastDiagLog = time.Now()
 					}
 				}
 			case *gomavlib.EventParseError:
@@ -233,6 +268,13 @@ func (s *MavlinkService) PulseCustom(throttlePWM, steeringPWM uint16, duration t
 		return err
 	}
 	return s.StopMotion()
+}
+
+// PulseCustomNoStop sends a timed RC override pulse with caller-supplied values and does not auto-stop.
+// Rover UI can chain these pulses to maintain steering+throttle continuously.
+func (s *MavlinkService) PulseCustomNoStop(throttlePWM, steeringPWM uint16, duration time.Duration, label string) error {
+	logs.Info("MavlinkService: %s (%dms throttle=%d steering=%d @ 20Hz, no-stop)", label, duration.Milliseconds(), throttlePWM, steeringPWM)
+	return s.pulseRCOverride(throttlePWM, steeringPWM, duration)
 }
 
 // PulseForward streams full-forward throttle for 1 second via RC override (Channel 3),
@@ -380,6 +422,52 @@ func (s *MavlinkService) getTargetIDs() (uint8, uint8) {
 	s.targetMu.RLock()
 	defer s.targetMu.RUnlock()
 	return s.targetSystem, s.targetComponent
+}
+
+func (s *MavlinkService) readRCChannel(msg *common.MessageRcChannels, channel uint8) uint16 {
+	switch channel {
+	case 1:
+		return msg.Chan1Raw
+	case 2:
+		return msg.Chan2Raw
+	case 3:
+		return msg.Chan3Raw
+	case 4:
+		return msg.Chan4Raw
+	case 5:
+		return msg.Chan5Raw
+	case 6:
+		return msg.Chan6Raw
+	case 7:
+		return msg.Chan7Raw
+	case 8:
+		return msg.Chan8Raw
+	default:
+		return 0
+	}
+}
+
+func (s *MavlinkService) readServoChannel(msg *common.MessageServoOutputRaw, channel uint8) uint16 {
+	switch channel {
+	case 1:
+		return msg.Servo1Raw
+	case 2:
+		return msg.Servo2Raw
+	case 3:
+		return msg.Servo3Raw
+	case 4:
+		return msg.Servo4Raw
+	case 5:
+		return msg.Servo5Raw
+	case 6:
+		return msg.Servo6Raw
+	case 7:
+		return msg.Servo7Raw
+	case 8:
+		return msg.Servo8Raw
+	default:
+		return 0
+	}
 }
 
 // Arm sends the arm command to the rover

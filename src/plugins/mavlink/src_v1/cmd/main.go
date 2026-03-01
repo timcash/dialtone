@@ -22,6 +22,7 @@ type roverCommand struct {
 	DurationMs  int    `json:"durationMs,omitempty"`
 	ThrottlePWM int    `json:"throttlePwm,omitempty"`
 	SteeringPWM int    `json:"steeringPwm,omitempty"`
+	NoStop      bool   `json:"noStop,omitempty"`
 }
 
 const defaultRoverKeyParamsCSV = "RCMAP_STEERING,RCMAP_THROTTLE,RCMAP_ROLL,RCMAP_PITCH,RCMAP_YAW,RC1_MIN,RC1_TRIM,RC1_MAX,RC3_MIN,RC3_TRIM,RC3_MAX,SERVO1_FUNCTION,SERVO1_MIN,SERVO1_TRIM,SERVO1_MAX,SERVO3_FUNCTION,SERVO3_MIN,SERVO3_TRIM,SERVO3_MAX,CRUISE_SPEED,CRUISE_THROTTLE,WP_SPEED"
@@ -336,6 +337,12 @@ func startRoverCommandConsumer(nc *nats.Conn, svc *mavlinkapp.MavlinkService) {
 					throttle := resolvePWM(cmd.ThrottlePWM, 2000)
 					steering := resolvePWM(cmd.SteeringPWM, 1500)
 					dur := resolveDuration(cmd.DurationMs, 2000)
+					if cmd.NoStop {
+						if err := svc.PulseCustomNoStop(throttle, steering, dur, "PulseForwardCustomNoStop"); err != nil {
+							logs.Error("rover.command drive_up custom (noStop) failed: %v", err)
+						}
+						return
+					}
 					if err := svc.PulseCustom(throttle, steering, dur, "PulseForwardCustom"); err != nil {
 						logs.Error("rover.command drive_up custom failed: %v", err)
 					}
@@ -351,6 +358,12 @@ func startRoverCommandConsumer(nc *nats.Conn, svc *mavlinkapp.MavlinkService) {
 					throttle := resolvePWM(cmd.ThrottlePWM, 1000)
 					steering := resolvePWM(cmd.SteeringPWM, 1500)
 					dur := resolveDuration(cmd.DurationMs, 2000)
+					if cmd.NoStop {
+						if err := svc.PulseCustomNoStop(throttle, steering, dur, "PulseReverseCustomNoStop"); err != nil {
+							logs.Error("rover.command drive_down custom (noStop) failed: %v", err)
+						}
+						return
+					}
 					if err := svc.PulseCustom(throttle, steering, dur, "PulseReverseCustom"); err != nil {
 						logs.Error("rover.command drive_down custom failed: %v", err)
 					}
@@ -366,6 +379,12 @@ func startRoverCommandConsumer(nc *nats.Conn, svc *mavlinkapp.MavlinkService) {
 					throttle := resolvePWM(cmd.ThrottlePWM, 1800)
 					steering := resolvePWM(cmd.SteeringPWM, 1000)
 					dur := resolveDuration(cmd.DurationMs, 1200)
+					if cmd.NoStop {
+						if err := svc.PulseCustomNoStop(throttle, steering, dur, "PulseLeftCustomNoStop"); err != nil {
+							logs.Error("rover.command drive_left custom (noStop) failed: %v", err)
+						}
+						return
+					}
 					if err := svc.PulseCustom(throttle, steering, dur, "PulseLeftCustom"); err != nil {
 						logs.Error("rover.command drive_left custom failed: %v", err)
 					}
@@ -381,6 +400,12 @@ func startRoverCommandConsumer(nc *nats.Conn, svc *mavlinkapp.MavlinkService) {
 					throttle := resolvePWM(cmd.ThrottlePWM, 1800)
 					steering := resolvePWM(cmd.SteeringPWM, 2000)
 					dur := resolveDuration(cmd.DurationMs, 1200)
+					if cmd.NoStop {
+						if err := svc.PulseCustomNoStop(throttle, steering, dur, "PulseRightCustomNoStop"); err != nil {
+							logs.Error("rover.command drive_right custom (noStop) failed: %v", err)
+						}
+						return
+					}
 					if err := svc.PulseCustom(throttle, steering, dur, "PulseRightCustom"); err != nil {
 						logs.Error("rover.command drive_right custom failed: %v", err)
 					}
@@ -463,6 +488,17 @@ func toNATSPayload(evt *mavlinkapp.MavlinkEvent) (string, map[string]any) {
 		return "mavlink.statustext", map[string]any{"type": "STATUSTEXT", "severity": msg.Severity, "text": text, "timestamp": now, "t_raw": now}
 	case *common.MessageCommandAck:
 		return "mavlink.command_ack", map[string]any{"type": "COMMAND_ACK", "command": msg.Command, "result": msg.Result, "timestamp": now, "t_raw": now}
+	case *mavlinkapp.ControlFeedback:
+		return "mavlink.control_feedback", map[string]any{
+			"type":             "CONTROL_FEEDBACK",
+			"source":           msg.Source,
+			"steering_channel": msg.SteeringChannel,
+			"throttle_channel": msg.ThrottleChannel,
+			"steering_raw":     msg.SteeringRaw,
+			"throttle_raw":     msg.ThrottleRaw,
+			"timestamp":        now,
+			"t_raw":            now,
+		}
 	default:
 		return "", nil
 	}
