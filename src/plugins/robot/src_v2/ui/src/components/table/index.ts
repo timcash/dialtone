@@ -66,6 +66,13 @@ class TableControl implements VisualizationControl {
       this.allRows.set('status_text', { key: 'status_text', value: data.text, status: `MAV_SEV_${data.severity}` });
     } else if (data.command !== undefined && data.result !== undefined) {
       this.allRows.set('command_ack_cmd', { key: 'command_ack_cmd', value: String(data.command), status: `MAV_ACK_${data.result}` });
+    } else if (data.type === 'CONTROL_FEEDBACK') {
+      if (data.source !== undefined) this.allRows.set('control_source', { key: 'control_source', value: String(data.source), status: 'MAV' });
+      if (data.steering_channel !== undefined) this.allRows.set('steering_channel', { key: 'steering_channel', value: String(data.steering_channel), status: 'MAV' });
+      if (data.throttle_channel !== undefined) this.allRows.set('throttle_channel', { key: 'throttle_channel', value: String(data.throttle_channel), status: 'MAV' });
+      if (data.steering_raw !== undefined) this.allRows.set('steering_raw', { key: 'steering_raw', value: String(data.steering_raw), status: 'MAV' });
+      if (data.throttle_raw !== undefined) this.allRows.set('throttle_raw', { key: 'throttle_raw', value: String(data.throttle_raw), status: 'MAV' });
+      if (data.timestamp !== undefined) this.allRows.set('control_feedback_ts', { key: 'control_feedback_ts', value: String(data.timestamp), status: 'MAV' });
     }
     
     if (this.visible) {
