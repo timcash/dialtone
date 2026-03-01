@@ -36,11 +36,18 @@ func run(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 		return testv1.StepRunResult{}, err
 	}
 
-	defaultURL := ctx.AppURL("/#hero")
+	defaultURL := ctx.AppURL("/#ui-hero-stage")
 	browserOpts, _, err := uitest.BrowserOptionsFor(defaultURL)
 	if err != nil {
 		return testv1.StepRunResult{}, err
 	}
+	navigateURL := strings.TrimSpace(browserOpts.URL)
+	if navigateURL == "" {
+		navigateURL = defaultURL
+	}
+	testv1.UpdateRuntimeConfig(func(cfg *testv1.RuntimeConfig) {
+		cfg.BrowserNewTargetURL = navigateURL
+	})
 	if _, err := sc.EnsureBrowser(browserOpts); err != nil {
 		return testv1.StepRunResult{}, fmt.Errorf("ensure browser: %w", err)
 	}

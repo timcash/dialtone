@@ -156,12 +156,12 @@ section.calculator > form {
   margin-top: 10px;
 }
 
-section#settings > article {
+section#ui-settings-button-list > article {
   display: grid;
   align-content: start;
   gap: 10px;
 }
 
-section#settings > article > button {
+section#ui-settings-button-list > article > button {
   min-height: 42px;
 }

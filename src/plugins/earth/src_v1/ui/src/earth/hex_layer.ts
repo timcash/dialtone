@@ -168,7 +168,7 @@ export class HexLayer {
     const material = new THREE.ShaderMaterial({
       transparent: true,
       vertexColors: true,
-      side: THREE.DoubleSide,
+      side: THREE.FrontSide,
       uniforms: {
         uTime: { value: 0 },
         uDuration: { value: durationSeconds },

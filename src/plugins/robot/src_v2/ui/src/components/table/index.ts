@@ -1,6 +1,7 @@
 import { VisualizationControl } from '@ui/types';
 import { addMavlinkListener } from '../../data/connection';
 import { registerButtons, renderButtons } from '../../buttons';
+import { ROBOT_SECTION_IDS } from '../../section_ids';
 
 type TableRow = {
   key: string;
@@ -16,7 +17,7 @@ class TableControl implements VisualizationControl {
   constructor(private container: HTMLElement) {
     this.subscribe();
     
-    registerButtons('table', ['Browse'], {
+    registerButtons(ROBOT_SECTION_IDS.table, ['Browse'], {
       'Browse': [
         { label: 'Refresh', action: () => this.renderRows() },
         { label: 'Clear', action: () => { this.allRows.clear(); this.renderRows(); } },
@@ -97,7 +98,7 @@ class TableControl implements VisualizationControl {
     if (visible) {
       this.subscribe();
       this.renderRows();
-      renderButtons('table');
+      renderButtons(ROBOT_SECTION_IDS.table);
     } else {
       if (this.unsubscribe) {
         this.unsubscribe();

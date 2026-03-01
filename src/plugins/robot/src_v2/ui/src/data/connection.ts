@@ -53,13 +53,15 @@ function emit(data: any) {
   listeners.forEach(l => l(data));
 }
 
-export function sendCommand(cmd: string, mode?: string) {
+export function sendCommand(cmd: string, mode?: string, extra?: Record<string, unknown>) {
   if (!nc) {
     logWarn('ui/connection', `[NATS] Not connected, cannot send command: ${cmd}`);
     return;
   }
   const payload: any = { cmd };
   if (mode) payload.mode = mode;
+  if (extra && typeof extra === 'object') Object.assign(payload, extra);
+  logInfo('ui/connection', `[NATS] Publishing rover.command cmd=${cmd}${mode ? ` mode=${mode}` : ''}`);
   nc.publish('rover.command', jc.encode(payload));
 }
 

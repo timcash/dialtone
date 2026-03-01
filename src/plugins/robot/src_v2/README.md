@@ -8,6 +8,39 @@ This document is the end-to-end operating workflow for `robot src_v2`:
 - verify with diagnostics
 - expose UI through local WSL relay
 
+```bash
+# From repo root: /home/user/dialtone
+
+# Core local workflow
+./dialtone.sh robot src_v2 install
+./dialtone.sh robot src_v2 format
+./dialtone.sh robot src_v2 lint
+./dialtone.sh robot src_v2 build
+./dialtone.sh robot src_v2 test
+
+# Dev server (local)
+./dialtone.sh robot src_v2 dev
+
+# Dev server + headed browser on mesh node + rover backend proxy routes
+./dialtone.sh robot src_v2 dev --browser-node chroma --backend-url http://rover-1:18086
+
+# Publish release artifacts
+./dialtone.sh robot src_v2 publish --repo timcash/dialtone
+
+# Deploy/update autoswap runtime on robot
+./dialtone.sh autoswap src_v1 deploy --host rover --user tim --service --repo timcash/dialtone --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_composition_manifest.json
+./dialtone.sh autoswap src_v1 update --host rover --user tim
+
+# Validate runtime and UI integration
+./dialtone.sh robot src_v2 diagnostic --host rover --user tim --browser-node chroma
+
+# Public relay from WSL to robot UI
+./dialtone.sh robot src_v2 relay --subdomain rover-1 --robot-ui-url http://rover-1:18086 --service
+
+# Cleanup/reset robot host
+./dialtone.sh robot src_v2 clean --host rover --user tim
+```
+
 ## 1) Architecture Contract
 
 `robot src_v2` runtime is manifest-driven by autoswap:
@@ -37,7 +70,51 @@ Required tools:
 Useful mesh host aliases are documented in:
 - `plan/SSH_MESH_NODES.md`
 
-## 3) Local Dev + Test Loop
+## 3) Dev Server (`robot src_v2 dev`)
+
+Use `dev` to run the Vite UI on this WSL node, optionally open a headed browser on a mesh node, and optionally proxy backend routes to rover.
+
+Command shape:
+```bash
+./dialtone.sh robot src_v2 dev \
+  [--host 0.0.0.0] \
+  [--port 3000] \
+  [--browser-node chroma] \
+  [--public-url http://legion-wsl-1.shad-artichoke.ts.net:3000] \
+  [--backend-url http://rover-1:18086]
+```
+
+Flags:
+- `--host`: Vite bind host (default `0.0.0.0`)
+- `--port`: Vite bind port (default `3000`)
+- `--browser-node`: mesh node for headed browser (example `chroma`)
+- `--public-url`: URL opened by remote browser (auto-inferred if omitted)
+- `--backend-url`: shared proxy target for `/api`, `/stream`, `/natsws`, `/ws`
+
+Environment:
+- `ROBOT_DEV_BACKEND_URL`: optional default for `--backend-url`
+
+Common dev flows:
+```bash
+# Local dev only
+./dialtone.sh robot src_v2 dev
+
+# Dev + browser on chroma (default browser node is chroma if available)
+./dialtone.sh robot src_v2 dev --browser-node chroma
+
+# Dev + browser on chroma + backend routes proxied to rover
+./dialtone.sh robot src_v2 dev --browser-node chroma --backend-url http://rover-1:18086
+
+# Same backend proxy via env var
+ROBOT_DEV_BACKEND_URL=http://rover-1:18086 ./dialtone.sh robot src_v2 dev --browser-node chroma
+```
+
+Notes:
+- If `--backend-url` omits a port (example `http://rover-1`), it targets port `80`.
+- For rover runtime, use `http://rover-1:18086` to avoid `ECONNREFUSED` on proxied API/NATS routes.
+- Stop dev with `Ctrl+C`.
+
+## 4) Local Dev + Test Loop
 
 1. Build UI and binaries (local):
 ```bash
@@ -59,7 +136,7 @@ Useful mesh host aliases are documented in:
 DIALTONE_TEST_BROWSER_NODE=chroma ./dialtone.sh robot src_v2 test
 ```
 
-## 4) Publish Artifacts (No Deploy Side Effects)
+## 5) Publish Artifacts (No Deploy Side Effects)
 
 `publish` only builds and uploads changed/missing release assets; it does not deploy remote hosts.
 By default it publishes only the real robot target (`linux-arm64`).
@@ -83,7 +160,7 @@ Publish all OS/arch assets (legacy/full matrix):
 ./dialtone.sh robot src_v2 publish --repo timcash/dialtone --all-targets
 ```
 
-## 5) Bring Robot Up With Autoswap
+## 6) Bring Robot Up With Autoswap
 
 Set token drop-in once on robot host:
 ```bash
@@ -117,7 +194,7 @@ Force immediate update check (instead of waiting poll interval):
 ./dialtone.sh autoswap src_v1 update --host rover --user tim
 ```
 
-## 6) Robot Diagnostic (Mandatory)
+## 7) Robot Diagnostic (Mandatory)
 
 Run full diagnostic against robot host:
 ```bash
@@ -134,7 +211,7 @@ Common variants:
 Diagnostic checklist details:
 - `src/plugins/robot/src_v2/diagnostic.md`
 
-## 7) WSL Relay for Public UI
+## 8) WSL Relay for Public UI
 
 Run on WSL host to point tunnel to robot UI:
 ```bash
@@ -149,7 +226,7 @@ Verify local relay service:
 systemctl --user status dialtone-proxy-rover-1.service --no-pager
 ```
 
-## 8) Clean Remote Robot State (Reset)
+## 9) Clean Remote Robot State (Reset)
 
 If robot needs full teardown before re-bootstrap:
 ```bash
@@ -162,7 +239,7 @@ If robot needs full teardown before re-bootstrap:
 - dialtone runtime processes gone
 - autoswap binaries/artifacts/releases/manifests removed
 
-## 9) Expected Working State
+## 10) Expected Working State
 
 After publish + autoswap update + diagnostic:
 - autoswap service is active on robot
@@ -173,7 +250,7 @@ After publish + autoswap update + diagnostic:
 - telemetry + latency render from real MAVLink flow over `/natsws`
 - WSL relay service is active and public URL serves robot UI
 
-## 10) Troubleshooting Order
+## 11) Troubleshooting Order
 
 1. Mesh reachability:
 ```bash

@@ -1,8 +1,10 @@
 import { VisualizationControl } from '@ui/types';
-import { addMavlinkListener } from '../../data/connection';
+import { addMavlinkListener, sendCommand } from '../../data/connection';
 import { LatencyEstimator } from '../../data/latency';
 import { logError, logInfo } from '../../data/logging';
 import { registerButtons, renderButtons } from '../../buttons';
+import { ROBOT_SECTION_IDS } from '../../section_ids';
+import { loadSteeringSettings } from '../../data/steering_settings';
 
 class VideoControl implements VisualizationControl {
   private img: HTMLImageElement | null;
@@ -37,7 +39,7 @@ class VideoControl implements VisualizationControl {
     if (btn) btn.addEventListener('click', () => this.resumeStream());
 
     // Register Buttons
-    registerButtons('video', ['View'], {
+    registerButtons(ROBOT_SECTION_IDS.video, ['View', 'Drive'], {
       'View': [
         { label: 'Feed A', action: () => this.updateFeedSource('Primary') },
         { label: 'Feed B', action: () => this.updateFeedSource('Secondary') },
@@ -47,7 +49,57 @@ class VideoControl implements VisualizationControl {
         { label: 'Map', action: () => this.updateFeedSource('Map') },
         { label: 'Log', action: () => this.updateFeedSource('Log') },
         { label: 'Bookmark', action: () => this.bookmarkFrame() },
-      ]
+      ],
+      'Drive': [
+        null,
+        {
+          label: 'Up',
+          action: () => {
+            const s = loadSteeringSettings();
+            sendCommand('drive_up', undefined, {
+              throttlePwm: s.forwardThrottlePwm,
+              steeringPwm: 1500,
+              durationMs: s.forwardDurationMs,
+            });
+          },
+        },
+        null,
+        {
+          label: 'Left',
+          action: () => {
+            const s = loadSteeringSettings();
+            sendCommand('drive_left', undefined, {
+              throttlePwm: s.turnThrottlePwm,
+              steeringPwm: s.leftSteeringPwm,
+              durationMs: s.turnDurationMs,
+            });
+          },
+        },
+        { label: 'Stop', action: () => sendCommand('stop') },
+        {
+          label: 'Right',
+          action: () => {
+            const s = loadSteeringSettings();
+            sendCommand('drive_right', undefined, {
+              throttlePwm: s.turnThrottlePwm,
+              steeringPwm: s.rightSteeringPwm,
+              durationMs: s.turnDurationMs,
+            });
+          },
+        },
+        null,
+        {
+          label: 'Down',
+          action: () => {
+            const s = loadSteeringSettings();
+            sendCommand('drive_down', undefined, {
+              throttlePwm: s.reverseThrottlePwm,
+              steeringPwm: 1500,
+              durationMs: s.reverseDurationMs,
+            });
+          },
+        },
+      ],
     });
     
     this.updateFeedSource('Primary');
@@ -157,7 +209,7 @@ class VideoControl implements VisualizationControl {
 
   setVisible(visible: boolean): void {
     if (visible) {
-      renderButtons('video');
+      renderButtons(ROBOT_SECTION_IDS.video);
       if (!this.isPaused) {
         this.startStream();
         this.startWatchdog();

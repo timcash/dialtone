@@ -5,6 +5,8 @@ import { VisualizationControl } from '@ui/types';
 import { addMavlinkListener, sendCommand } from '../../data/connection';
 import { LatencyEstimator } from '../../data/latency';
 import { registerButtons, renderButtons } from '../../buttons';
+import { ROBOT_SECTION_IDS } from '../../section_ids';
+import { loadSteeringSettings } from '../../data/steering_settings';
 
 const CHATLOG_MAX_LINES = 7;
 
@@ -34,16 +36,67 @@ class ThreeControl implements VisualizationControl {
     this.chatlogHost = container.querySelector('.three-chatlog-xterm');
     this.initChatlogTerminal();
 
-    registerButtons('three', ['Control'], {
-      'Control': [
+	    registerButtons(ROBOT_SECTION_IDS.three, ['Drive', 'System'], {
+	      'Drive': [
+	        null,
+	        {
+	          label: 'Up',
+	          action: () => {
+	            const s = loadSteeringSettings();
+	            sendCommand('drive_up', undefined, {
+	              throttlePwm: s.forwardThrottlePwm,
+	              steeringPwm: 1500,
+	              durationMs: s.forwardDurationMs,
+	            });
+	          },
+	        },
+	        null,
+	        {
+	          label: 'Left',
+	          action: () => {
+	            const s = loadSteeringSettings();
+	            sendCommand('drive_left', undefined, {
+	              throttlePwm: s.turnThrottlePwm,
+	              steeringPwm: s.leftSteeringPwm,
+	              durationMs: s.turnDurationMs,
+	            });
+	          },
+	        },
+	        { label: 'Stop', action: () => sendCommand('stop') },
+	        {
+	          label: 'Right',
+	          action: () => {
+	            const s = loadSteeringSettings();
+	            sendCommand('drive_right', undefined, {
+	              throttlePwm: s.turnThrottlePwm,
+	              steeringPwm: s.rightSteeringPwm,
+	              durationMs: s.turnDurationMs,
+	            });
+	          },
+	        },
+	        null,
+	        {
+	          label: 'Down',
+	          action: () => {
+	            const s = loadSteeringSettings();
+	            sendCommand('drive_down', undefined, {
+	              throttlePwm: s.reverseThrottlePwm,
+	              steeringPwm: 1500,
+	              durationMs: s.reverseDurationMs,
+	            });
+	          },
+	        },
+	      ],
+      'System': [
         { label: 'Arm', action: () => sendCommand('arm') },
         { label: 'Disarm', action: () => sendCommand('disarm') },
         { label: 'Manual', action: () => sendCommand('mode', 'manual') },
         { label: 'Steering', action: () => sendCommand('mode', 'steering') },
         { label: 'Guided', action: () => sendCommand('mode', 'guided') },
         { label: 'Pulse Fwd', action: () => sendCommand('pulse_fwd') },
-        null, null
-      ]
+        { label: 'Stop', action: () => sendCommand('stop') },
+        null,
+      ],
     });
 
     this.camera.position.set(0, 5, 10);
@@ -316,7 +369,7 @@ class ThreeControl implements VisualizationControl {
   }
 
   private resize = () => {
-    const rect = this.container.getBoundingClientRect();
+    const rect = this.renderer.domElement.getBoundingClientRect();
     const width = Math.max(1, rect.width);
     const height = Math.max(1, rect.height);
     this.camera.aspect = width / height;
@@ -356,7 +409,7 @@ class ThreeControl implements VisualizationControl {
     if (visible) {
       this.resize();
       this.subscribe();
-      renderButtons('three');
+      renderButtons(ROBOT_SECTION_IDS.three);
     } else {
       if (this.unsubscribe) {
         this.unsubscribe();

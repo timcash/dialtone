@@ -82,7 +82,7 @@ func RunChrome(args []string) {
 	case "new":
 		newFlags := flag.NewFlagSet("chrome new", flag.ExitOnError)
 		port := newFlags.Int("port", 0, "Remote debugging port (0 for auto)")
-		gpu := newFlags.Bool("gpu", false, "Enable GPU acceleration")
+		gpu := newFlags.Bool("gpu", true, "Enable GPU acceleration")
 		headless := newFlags.Bool("headless", false, "Launch in headless mode")
 		role := newFlags.String("role", "", "Dialtone role tag (e.g. dev, smoke)")
 		reuseExisting := newFlags.Bool("reuse-existing", false, "Attach to existing matching role/headless instance")
@@ -112,7 +112,7 @@ func RunChrome(args []string) {
 	case "session":
 		sessionFlags := flag.NewFlagSet("chrome session", flag.ExitOnError)
 		port := sessionFlags.Int("port", 0, "Remote debugging port (0 for auto)")
-		gpu := sessionFlags.Bool("gpu", false, "Enable GPU acceleration")
+		gpu := sessionFlags.Bool("gpu", true, "Enable GPU acceleration")
 		headless := sessionFlags.Bool("headless", true, "Launch in headless mode")
 		role := sessionFlags.String("role", "", "Dialtone role tag (e.g. dev, smoke)")
 		reuseExisting := sessionFlags.Bool("reuse-existing", true, "Attach to existing matching role/headless instance")

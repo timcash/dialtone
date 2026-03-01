@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -174,16 +175,56 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 	case "build":
 		return bun_plugin.RunBun(preset.UI, "run", "build")
 	case "dev":
+		fs := flag.NewFlagSet("robot-dev", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		port := fs.Int("port", 3000, "Dev server port")
+		host := fs.String("host", "0.0.0.0", "Vite bind host")
+		browserNode := fs.String("browser-node", "", "Optional mesh node for headed browser session (example: chroma)")
+		publicURL := fs.String("public-url", "", "Public URL that remote browser should open")
+		backendURL := fs.String("backend-url", strings.TrimSpace(os.Getenv("ROBOT_DEV_BACKEND_URL")), "Backend base URL for Vite proxy routes (/api, /stream, /natsws, /ws)")
+		if err := fs.Parse(args); err != nil {
+			return err
+		}
+
+		node := strings.TrimSpace(*browserNode)
+		if node == "" {
+			node = defaultRobotDevBrowserNode()
+		}
+		devURL := strings.TrimSpace(*publicURL)
+		if node != "" && devURL == "" {
+			u, err := inferRobotDevPublicURL(*port)
+			if err != nil {
+				return err
+			}
+			devURL = u
+		}
+		test_plugin.SetRuntimeConfig(test_plugin.RuntimeConfig{BrowserNode: node})
+		if node != "" {
+			logs.Info("robot src_v2 dev remote browser node=%s url=%s", node, devURL)
+		}
+		if raw := strings.TrimSpace(*backendURL); raw != "" {
+			normalized, err := normalizeRobotBackendURL(raw)
+			if err != nil {
+				return err
+			}
+			_ = os.Setenv("VITE_PROXY_TARGET", normalized)
+			logs.Info("robot src_v2 dev backend proxy target=%s (input=%s)", normalized, raw)
+		}
+
 		pluginDir := preset.PluginVersionRoot
 		uiDir := filepath.Join(pluginDir, "ui")
 		opts := test_plugin.DevOptions{
 			RepoRoot:          repoRoot,
 			PluginDir:         pluginDir,
 			UIDir:             uiDir,
-			DevPort:           3000,
+			DevPort:           *port,
+			DevHost:           strings.TrimSpace(*host),
+			DevPublicURL:      devURL,
 			Role:              "robot-dev",
 			BrowserMetaPath:   filepath.Join(pluginDir, "dev.browser.json"),
 			BrowserModeEnvVar: "ROBOT_DEV_BROWSER_MODE",
+			NATSURL:           "nats://127.0.0.1:4222",
+			NATSSubject:       "logs.dev.robot." + strings.ReplaceAll(version, "_", "-"),
 		}
 		return test_plugin.RunDev(opts)
 	case "test":
@@ -216,6 +257,62 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 	default:
 		return fmt.Errorf("unknown robot command: %s", command)
 	}
+}
+
+func defaultRobotDevBrowserNode() string {
+	if envNode := strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_NODE")); envNode != "" {
+		return envNode
+	}
+	if robotIsWSL() {
+		return "chroma"
+	}
+	return ""
+}
+
+func robotIsWSL() bool {
+	if strings.TrimSpace(os.Getenv("WSL_DISTRO_NAME")) != "" {
+		return true
+	}
+	data, err := os.ReadFile("/proc/version")
+	if err != nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(string(data)), "microsoft")
+}
+
+func inferRobotDevPublicURL(port int) (string, error) {
+	wsl, err := ssh_plugin.ResolveMeshNode("wsl")
+	if err != nil {
+		return "", fmt.Errorf("resolve wsl mesh node for public url: %w", err)
+	}
+	host := strings.TrimSpace(wsl.Host)
+	if host == "" {
+		return "", fmt.Errorf("wsl mesh host is empty")
+	}
+	u := &url.URL{Scheme: "http", Host: fmt.Sprintf("%s:%d", host, port)}
+	return u.String(), nil
+}
+
+func normalizeRobotBackendURL(raw string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", fmt.Errorf("invalid --backend-url %q: %w", raw, err)
+	}
+	if u.Scheme == "" {
+		u, err = url.Parse("http://" + strings.TrimSpace(raw))
+		if err != nil {
+			return "", fmt.Errorf("invalid --backend-url %q: %w", raw, err)
+		}
+	}
+	if strings.TrimSpace(u.Host) == "" {
+		return "", fmt.Errorf("invalid --backend-url %q: missing host", raw)
+	}
+	// Use host-root as shared proxy target so /api, /stream, /ws, /natsws stay correct.
+	u.Path = ""
+	u.RawPath = ""
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String(), nil
 }
 
 func getLatestVersionDir(repoRoot string) string {
