@@ -4,7 +4,7 @@ import { LatencyEstimator } from '../../data/latency';
 import { logError, logInfo } from '../../data/logging';
 import { registerButtons, renderButtons } from '../../buttons';
 import { ROBOT_SECTION_IDS } from '../../section_ids';
-import { SteeringHoldController } from '../../data/steering';
+import { sendDriveDown, sendDriveDownLeft, sendDriveDownRight, sendDriveLeft, sendDriveRight, sendDriveUp } from '../../data/steering';
 
 class VideoControl implements VisualizationControl {
   private img: HTMLImageElement | null;
@@ -17,26 +17,6 @@ class VideoControl implements VisualizationControl {
   private isPaused = false;
   private watchdogOverlay: HTMLElement;
   private readonly WATCHDOG_TIMEOUT = 3 * 60 * 1000; // 3 minutes
-  private steeringHold = new SteeringHoldController(() => {
-    this.syncDriveToggleState();
-    renderButtons(ROBOT_SECTION_IDS.video);
-  });
-  private leftDriveButton = {
-    label: 'Left',
-    active: false,
-    action: () => {
-      this.steeringHold.toggle('left');
-      this.syncDriveToggleState();
-    },
-  };
-  private rightDriveButton = {
-    label: 'Right',
-    active: false,
-    action: () => {
-      this.steeringHold.toggle('right');
-      this.syncDriveToggleState();
-    },
-  };
 
   constructor(private container: HTMLElement) {
     this.sectionEl = container;
@@ -71,36 +51,18 @@ class VideoControl implements VisualizationControl {
         { label: 'Bookmark', action: () => this.bookmarkFrame() },
       ],
       'Drive': [
+        { label: 'Up-L', action: () => sendDriveLeft() },
+        { label: 'Up', action: () => sendDriveUp() },
+        { label: 'Up-R', action: () => sendDriveRight() },
+        { label: 'Down-L', action: () => sendDriveDownLeft() },
+        { label: 'Down', action: () => sendDriveDown() },
+        { label: 'Down-R', action: () => sendDriveDownRight() },
         null,
-        {
-          label: 'Up',
-          action: () => this.steeringHold.sendDriveUpWithCurrentSteering(),
-        },
         null,
-        this.leftDriveButton,
-        {
-          label: 'Stop',
-          action: () => {
-            this.steeringHold.stop(true);
-            this.syncDriveToggleState();
-            renderButtons(ROBOT_SECTION_IDS.video);
-          },
-        },
-        this.rightDriveButton,
-        null,
-        {
-          label: 'Down',
-          action: () => this.steeringHold.sendDriveDownWithCurrentSteering(),
-        },
       ],
     });
     
     this.updateFeedSource('Primary');
-  }
-
-  private syncDriveToggleState() {
-    this.leftDriveButton.active = this.steeringHold.isActive('left');
-    this.rightDriveButton.active = this.steeringHold.isActive('right');
   }
 
   private startWatchdog() {
@@ -149,8 +111,6 @@ class VideoControl implements VisualizationControl {
   private subscribe() {
     if (this.unsubscribe) return;
     this.unsubscribe = addMavlinkListener((raw: any) => {
-        this.steeringHold.handleTelemetry(raw);
-        this.syncDriveToggleState();
         const total = this.latencyEstimator.estimate(raw);
         if (total == null) return;
         const el = document.getElementById('vid-latency');
@@ -203,22 +163,18 @@ class VideoControl implements VisualizationControl {
   }
 
   dispose(): void {
-    this.steeringHold.stop(true);
     this.stopWatchdog();
     this.stopStream();
   }
 
   setVisible(visible: boolean): void {
     if (visible) {
-      this.syncDriveToggleState();
       renderButtons(ROBOT_SECTION_IDS.video);
       if (!this.isPaused) {
         this.startStream();
         this.startWatchdog();
       }
     } else {
-      this.steeringHold.stop(true);
-      this.syncDriveToggleState();
       this.stopStream();
       this.stopWatchdog();
       this.isPaused = false;

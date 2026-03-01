@@ -6,7 +6,7 @@ import { addMavlinkListener, sendCommand } from '../../data/connection';
 import { LatencyEstimator } from '../../data/latency';
 import { registerButtons, renderButtons } from '../../buttons';
 import { ROBOT_SECTION_IDS } from '../../section_ids';
-import { SteeringHoldController, sendDriveStop } from '../../data/steering';
+import { sendDriveDown, sendDriveDownLeft, sendDriveDownRight, sendDriveLeft, sendDriveRight, sendDriveUp } from '../../data/steering';
 
 const CHATLOG_MAX_LINES = 7;
 
@@ -27,26 +27,6 @@ class ThreeControl implements VisualizationControl {
   private chatlogHost: HTMLElement | null = null;
   private chatlogTerm: Terminal | null = null;
   private chatlogLines: string[] = [];
-  private steeringHold = new SteeringHoldController(() => {
-    this.syncDriveToggleState();
-    renderButtons(ROBOT_SECTION_IDS.three);
-  });
-  private leftDriveButton = {
-    label: 'Left',
-    active: false,
-    action: () => {
-      this.steeringHold.toggle('left');
-      this.syncDriveToggleState();
-    },
-  };
-  private rightDriveButton = {
-    label: 'Right',
-    active: false,
-    action: () => {
-      this.steeringHold.toggle('right');
-      this.syncDriveToggleState();
-    },
-  };
 
   constructor(private container: HTMLElement, canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -58,27 +38,14 @@ class ThreeControl implements VisualizationControl {
 
 	    registerButtons(ROBOT_SECTION_IDS.three, ['Drive', 'System'], {
 	      'Drive': [
+	        { label: 'Up-L', action: () => sendDriveLeft() },
+	        { label: 'Up', action: () => sendDriveUp() },
+	        { label: 'Up-R', action: () => sendDriveRight() },
+	        { label: 'Down-L', action: () => sendDriveDownLeft() },
+	        { label: 'Down', action: () => sendDriveDown() },
+	        { label: 'Down-R', action: () => sendDriveDownRight() },
 	        null,
-	        {
-	          label: 'Up',
-	          action: () => this.steeringHold.sendDriveUpWithCurrentSteering(),
-	        },
 	        null,
-	        this.leftDriveButton,
-	        {
-            label: 'Stop',
-            action: () => {
-              this.steeringHold.stop(true);
-              this.syncDriveToggleState();
-              renderButtons(ROBOT_SECTION_IDS.three);
-            },
-          },
-	        this.rightDriveButton,
-	        null,
-	        {
-	          label: 'Down',
-	          action: () => this.steeringHold.sendDriveDownWithCurrentSteering(),
-	        },
 	      ],
       'System': [
         { label: 'Arm', action: () => sendCommand('arm') },
@@ -87,7 +54,7 @@ class ThreeControl implements VisualizationControl {
         { label: 'Steering', action: () => sendCommand('mode', 'steering') },
         { label: 'Guided', action: () => sendCommand('mode', 'guided') },
         { label: 'Pulse Fwd', action: () => sendCommand('pulse_fwd') },
-        { label: 'Stop', action: () => sendDriveStop() },
+        { label: 'Stop', action: () => sendCommand('stop') },
         null,
       ],
     });
@@ -158,11 +125,6 @@ class ThreeControl implements VisualizationControl {
     this.animate();
   }
 
-  private syncDriveToggleState() {
-    this.leftDriveButton.active = this.steeringHold.isActive('left');
-    this.rightDriveButton.active = this.steeringHold.isActive('right');
-  }
-
   private initChatlogTerminal() {
     if (!this.chatlogHost) return;
     this.chatlogTerm?.dispose();
@@ -219,8 +181,6 @@ class ThreeControl implements VisualizationControl {
   private subscribe() {
     if (this.unsubscribe) return;
     this.unsubscribe = addMavlinkListener((raw: any) => {
-      this.steeringHold.handleTelemetry(raw);
-      this.syncDriveToggleState();
       // Track latency for any message that has timestamps
       if (raw.t_raw !== undefined) {
         this.updateLatency(raw);
@@ -394,7 +354,6 @@ class ThreeControl implements VisualizationControl {
   };
 
   dispose(): void {
-    this.steeringHold.stop(true);
     cancelAnimationFrame(this.frameId);
     window.removeEventListener('resize', this.resize);
     if (this.unsubscribe) {
@@ -410,11 +369,8 @@ class ThreeControl implements VisualizationControl {
     if (visible) {
       this.resize();
       this.subscribe();
-      this.syncDriveToggleState();
       renderButtons(ROBOT_SECTION_IDS.three);
     } else {
-      this.steeringHold.stop(true);
-      this.syncDriveToggleState();
       if (this.unsubscribe) {
         this.unsubscribe();
         this.unsubscribe = null;
