@@ -50,7 +50,7 @@ var defaultMeshNodes = []MeshNode{
 		Name:    "gold",
 		Aliases: []string{"gold", "gold.shad-artichoke.ts.net"},
 		User:    "user",
-		Host:    "192.168.4.53",
+		Host:    "192.168.4.55",
 		Port:    "22",
 		OS:      "macos",
 		RepoCandidates: []string{
