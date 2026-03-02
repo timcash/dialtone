@@ -41,6 +41,16 @@ export class MusicVisualization {
   private bloomPass!: UnrealBloomPass;
   
   private time = 0;
+  private energyMemory = new Float32Array(12).fill(0);
+  private driftGroup = new THREE.Group();
+  private driftTexture!: THREE.CanvasTexture;
+  private driftNotes: Array<{
+    sprite: THREE.Sprite;
+    velocity: THREE.Vector3;
+    life: number;
+    ttl: number;
+  }> = [];
+  private driftSpawnCooldown = 0;
   
   sensitivity = 2.0;
   floor = -60;
@@ -74,12 +84,14 @@ export class MusicVisualization {
     this.scene.add(pointLight);
 
     this.scene.add(this.circleGroup);
+    this.scene.add(this.driftGroup);
     this.histogram.group.position.set(0, -6.5, -2);
     this.scene.add(this.histogram.group);
     
     this.createCircle();
     this.createHarmonicLines();
     this.createCenterLabel();
+    this.createDriftTexture();
     
     // Post-processing for intense glow
     this.composer = new EffectComposer(this.renderer);
@@ -351,6 +363,7 @@ export class MusicVisualization {
     this.resizeObserver?.disconnect();
     this.renderer.dispose();
     this.stopDemoLoop();
+    this.driftTexture?.dispose();
   }
 
   setVisible(visible: boolean) {
@@ -367,6 +380,7 @@ export class MusicVisualization {
     if (!this.isVisible) return;
 
     this.time += 0.016;
+    const dt = 0.016;
     this.frameCount++;
     
     this.circleGroup.rotation.z = THREE.MathUtils.lerp(this.circleGroup.rotation.z, this.rotation + this.time * this.autoRotationSpeed, 0.1);
@@ -379,6 +393,16 @@ export class MusicVisualization {
         chroma[semitone] = 1.0; 
     } else {
         chroma = this.analyzer.getChromagram(this.sensitivity, this.floor);
+    }
+
+    for (let i = 0; i < 12; i++) {
+      const target = chroma[i];
+      const current = this.energyMemory[i];
+      if (target >= current) {
+        this.energyMemory[i] = THREE.MathUtils.lerp(current, target, 0.12);
+      } else {
+        this.energyMemory[i] = THREE.MathUtils.lerp(current, target, 0.035);
+      }
     }
     
     this.histogram.update(
@@ -393,21 +417,34 @@ export class MusicVisualization {
 
     this.noteMeshes.forEach((mesh, i) => {
       const { noteIndex } = mesh.userData;
-      const energy = chroma[noteIndex];
+      let energy = Math.max(chroma[noteIndex], this.energyMemory[noteIndex]);
       
       if (energy > maxEnergy) {
         maxEnergy = energy;
         strongestIndex = i;
       }
 
+      if (strongestIndex >= 0 && maxEnergy > 0.08) {
+        const strongestSemitone = this.noteMeshes[strongestIndex].userData.noteIndex as number;
+        const distance = this.wrapSemitoneDistance(noteIndex, strongestSemitone);
+        const aura = Math.exp(-(distance * distance) / 3) * maxEnergy * 0.45;
+        energy = Math.max(energy, aura);
+      }
+
       // Scale pulse
-      const targetScale = 1.0 + energy * 2.0;
-      mesh.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.2);
+      const targetScale = 1.0 + energy * 2.2;
+      mesh.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.1);
 
       const mat = mesh.material as THREE.MeshStandardMaterial;
-      mat.emissiveIntensity = 0.1 + energy * 2.0;
+      mat.emissiveIntensity = 0.12 + energy * 2.4;
       
       mesh.position.z = Math.sin(this.time + mesh.userData.angle * 2) * 0.1;
+
+      const label = this.labelSprites[i];
+      if (label) {
+        const labelMat = label.material as THREE.SpriteMaterial;
+        labelMat.opacity = THREE.MathUtils.lerp(labelMat.opacity, 0.45 + energy * 0.75, 0.08);
+      }
     });
 
     if (strongestIndex >= 0 && maxEnergy > 0.1) {
@@ -428,7 +465,7 @@ export class MusicVisualization {
           ];
           line.geometry.setPositions(points);
           const mat = line.material as LineMaterial;
-          mat.opacity = THREE.MathUtils.lerp(mat.opacity, maxEnergy * 0.8, 0.2);
+          mat.opacity = THREE.MathUtils.lerp(mat.opacity, maxEnergy * 0.8, 0.08);
         }
       };
 
@@ -439,9 +476,11 @@ export class MusicVisualization {
       this.updateCenterLabel(0, "", 0);
       [this.majorLine, this.minorLine, this.fifthLine].forEach(line => {
         const mat = line.material as LineMaterial;
-        mat.opacity = THREE.MathUtils.lerp(mat.opacity, 0, 0.1);
+        mat.opacity = THREE.MathUtils.lerp(mat.opacity, 0, 0.04);
       });
     }
+
+    this.updateDriftNotes(dt, chroma);
 
     const cpuStart = performance.now();
     this.gpuTimer.begin(this.gl);
@@ -451,4 +490,97 @@ export class MusicVisualization {
     const cpuMs = performance.now() - cpuStart;
     this.fpsCounter.tick(cpuMs, this.gpuTimer.lastMs);
   };
+
+  private createDriftTexture() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 96;
+    canvas.height = 96;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      this.driftTexture = new THREE.CanvasTexture(canvas);
+      return;
+    }
+    const gradient = ctx.createRadialGradient(48, 48, 2, 48, 48, 46);
+    gradient.addColorStop(0, "rgba(255,255,255,0.95)");
+    gradient.addColorStop(0.35, "rgba(180,255,255,0.75)");
+    gradient.addColorStop(1, "rgba(0,255,255,0)");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 96, 96);
+    this.driftTexture = new THREE.CanvasTexture(canvas);
+  }
+
+  private updateDriftNotes(dt: number, chroma: Float32Array) {
+    this.driftSpawnCooldown -= dt;
+    if (this.driftSpawnCooldown <= 0) {
+      for (const mesh of this.noteMeshes) {
+        const noteIndex = mesh.userData.noteIndex as number;
+        const energy = Math.max(chroma[noteIndex], this.energyMemory[noteIndex]);
+        // Treat upper semitones as "high notes" for the drifting effect.
+        if (noteIndex < 7 || energy < 0.55) continue;
+        this.spawnDriftNote(mesh, noteIndex, energy);
+      }
+      this.driftSpawnCooldown = 0.08;
+    }
+
+    const alive: typeof this.driftNotes = [];
+    for (const note of this.driftNotes) {
+      note.life += dt;
+      note.sprite.position.addScaledVector(note.velocity, dt);
+      note.velocity.y += 0.08 * dt;
+      note.velocity.x *= 0.99;
+      const t = 1 - note.life / note.ttl;
+      const mat = note.sprite.material as THREE.SpriteMaterial;
+      mat.opacity = Math.max(0, t * t * 0.9);
+      const s = 0.3 + (1 - t) * 0.35;
+      note.sprite.scale.setScalar(s);
+
+      if (note.life < note.ttl) {
+        alive.push(note);
+      } else {
+        this.driftGroup.remove(note.sprite);
+        mat.dispose();
+      }
+    }
+    this.driftNotes = alive;
+  }
+
+  private spawnDriftNote(mesh: THREE.Mesh, noteIndex: number, energy: number) {
+    if (this.driftNotes.length > 140) return;
+    const hue = noteIndex / 12;
+    const color = new THREE.Color().setHSL(hue, 0.9, 0.65);
+    const material = new THREE.SpriteMaterial({
+      map: this.driftTexture,
+      color,
+      transparent: true,
+      opacity: 0.75,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+    const sprite = new THREE.Sprite(material);
+    const jitterX = (Math.random() - 0.5) * 0.35;
+    const jitterY = (Math.random() - 0.5) * 0.2;
+    sprite.position.set(
+      mesh.position.x + jitterX,
+      mesh.position.y + jitterY,
+      0.4 + Math.random() * 0.35
+    );
+    const base = 0.7 + energy * 0.9;
+    const velocity = new THREE.Vector3(
+      (Math.random() - 0.5) * 0.2,
+      base,
+      0.06 + Math.random() * 0.08
+    );
+    this.driftGroup.add(sprite);
+    this.driftNotes.push({
+      sprite,
+      velocity,
+      life: 0,
+      ttl: 1.4 + Math.random() * 1.1
+    });
+  }
+
+  private wrapSemitoneDistance(a: number, b: number): number {
+    const diff = Math.abs(a - b) % 12;
+    return Math.min(diff, 12 - diff);
+  }
 }

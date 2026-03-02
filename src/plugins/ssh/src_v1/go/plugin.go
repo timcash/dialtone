@@ -25,6 +25,8 @@ func Run(args []string) error {
 		return runCommand(args[1:])
 	case "run-all":
 		return runCommandAll(args[1:])
+	case "status":
+		return runStatus(args[1:])
 	case "sync-repos":
 		return runSyncRepos(args[1:])
 	case "sync-code":
@@ -42,17 +44,19 @@ func PrintUsage() {
 	logs.Raw("")
 	logs.Raw("Commands:")
 	logs.Raw("  mesh|nodes|list                       List canonical mesh nodes and transport mode")
-	logs.Raw("  run --node N --cmd C [--user U --port P --password X]")
-	logs.Raw("                                        Run command on a mesh node")
+	logs.Raw("  run --host H --cmd C [--user U --port P --password X] [--node N]")
+	logs.Raw("                                        Run command on a mesh host (preferred flag: --host)")
 	logs.Raw("  run-all --cmd C [--user U --port P --password X]")
 	logs.Raw("                                        Run command on every mesh node")
+	logs.Raw("  status [--host H|all] [--json]")
+	logs.Raw("                                        Show cpu/mem-free/network/disk-free/battery for mesh nodes")
 	logs.Raw("  sync-repos [--branch B] [--allow-dirty]")
 	logs.Raw("                                        Sync dialtone repo on every mesh node to one branch")
 	logs.Raw("                                        Per-node repo override: --repo-<node> /path/to/repo")
-	logs.Raw("  sync-code --node <name|all> [--src P] [--dest P] [--delete] [--exclude PATTERN]")
+	logs.Raw("  sync-code --host <name|all> [--src P] [--dest P] [--delete] [--exclude PATTERN] [--node <name|all>]")
 	logs.Raw("            [--service] [--interval 30s] [--service-stop] [--service-status]")
 	logs.Raw("                                        Rsync code without git, excludes node_modules/.pixi by default")
-	logs.Raw("  bootstrap --node <name|all> [--src P] [--dest P] [--delete] [--install-cmd C]")
+	logs.Raw("  bootstrap --host <name|all> [--src P] [--dest P] [--delete] [--install-cmd C] [--node <name|all>]")
 	logs.Raw("                                        Sync code + run install command(s) on target node(s)")
 	logs.Raw("  test                                  Run ssh plugin self-check suite")
 }
@@ -73,7 +77,8 @@ func runMeshList(_ []string) error {
 func runCommand(args []string) error {
 	fs := flag.NewFlagSet("ssh run", flag.ContinueOnError)
 	fs.SetOutput(nil)
-	node := fs.String("node", "", "Mesh node name or alias")
+	host := fs.String("host", "", "Mesh host name or alias")
+	node := fs.String("node", "", "Alias for --host (deprecated)")
 	cmd := fs.String("cmd", "", "Command to execute")
 	user := fs.String("user", "", "Override remote user")
 	port := fs.String("port", "", "Override remote port")
@@ -81,13 +86,17 @@ func runCommand(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if strings.TrimSpace(*node) == "" {
-		return errors.New("--node is required")
+	target := strings.TrimSpace(*host)
+	if target == "" {
+		target = strings.TrimSpace(*node)
+	}
+	if target == "" {
+		return errors.New("--host is required")
 	}
 	if strings.TrimSpace(*cmd) == "" {
 		return errors.New("--cmd is required")
 	}
-	out, err := RunNodeCommand(*node, *cmd, CommandOptions{
+	out, err := RunNodeCommand(target, *cmd, CommandOptions{
 		User:     *user,
 		Port:     *port,
 		Password: *pass,
@@ -187,7 +196,8 @@ func runSyncRepos(args []string) error {
 func runSyncCode(args []string) error {
 	fs := flag.NewFlagSet("ssh sync-code", flag.ContinueOnError)
 	fs.SetOutput(nil)
-	node := fs.String("node", "", "Target mesh node or 'all'")
+	host := fs.String("host", "", "Target mesh host or 'all'")
+	node := fs.String("node", "", "Alias for --host (deprecated)")
 	src := fs.String("src", "", "Source path (defaults to current working directory)")
 	dest := fs.String("dest", "", "Destination path on target")
 	del := fs.Bool("delete", false, "Delete files on dest that are missing in src")
@@ -200,8 +210,12 @@ func runSyncCode(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	target := strings.TrimSpace(*host)
+	if target == "" {
+		target = strings.TrimSpace(*node)
+	}
 	opts := SyncCodeOptions{
-		Node:     *node,
+		Node:     target,
 		Source:   *src,
 		Dest:     *dest,
 		Delete:   *del,
@@ -225,7 +239,8 @@ func runSyncCode(args []string) error {
 func runBootstrap(args []string) error {
 	fs := flag.NewFlagSet("ssh bootstrap", flag.ContinueOnError)
 	fs.SetOutput(nil)
-	node := fs.String("node", "", "Target mesh node or 'all'")
+	host := fs.String("host", "", "Target mesh host or 'all'")
+	node := fs.String("node", "", "Alias for --host (deprecated)")
 	src := fs.String("src", "", "Source path (defaults to current working directory)")
 	dest := fs.String("dest", "", "Destination path on target")
 	del := fs.Bool("delete", false, "Delete files on dest that are missing in src")
@@ -237,12 +252,16 @@ func runBootstrap(args []string) error {
 		return err
 	}
 
+	target := strings.TrimSpace(*host)
+	if target == "" {
+		target = strings.TrimSpace(*node)
+	}
 	cmds := installCmds.values
 	if len(cmds) == 0 {
 		cmds = []string{"printf 'y\\n' | ./dialtone.sh go src_v1 install"}
 	}
 	return Bootstrap(BootstrapOptions{
-		Node:        *node,
+		Node:        target,
 		Source:      *src,
 		Dest:        *dest,
 		Delete:      *del,

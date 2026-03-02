@@ -52,7 +52,7 @@ func SyncCode(opts SyncCodeOptions) error {
 
 	node := strings.TrimSpace(opts.Node)
 	if node == "" {
-		return fmt.Errorf("node is required")
+		return fmt.Errorf("host is required")
 	}
 	if node == "all" {
 		return syncCodeAll(opts, src)
