@@ -1,17 +1,14 @@
 import { setupApp } from '@ui/ui';
 import './style.css';
 
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    void navigator.serviceWorker.register('/sw.js').catch((err) => {
-      console.error('[pwa] failed to register service worker', err);
-    });
-  });
-}
-
 const { sections, menu } = setupApp({
   title: 'Dialtone Earth',
   debug: true,
+  pwa: {
+    enabled: true,
+    serviceWorkerPath: '/sw.js',
+    disableInDev: false,
+  },
 });
 
 const SECTION_ID_HERO = 'earth-hero-stage';

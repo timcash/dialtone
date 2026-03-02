@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -114,8 +115,11 @@ func printUsage() {
 	logs.Raw("                                Build static binaries")
 	logs.Raw("  test [--mode local|rendezvous|all] [--rendezvous-url URL]")
 	logs.Raw("                                Run local and/or rendezvous tests")
-	logs.Raw("  deploy --host H --user U --pass P [--port 22] [--remote-path PATH]")
-	logs.Raw("                                Build for remote arch and upload via SSH")
+	logs.Raw("  deploy --host <name|csv|all|ip> [--user U] [--pass P] [--port P]")
+	logs.Raw("         [--remote-path PATH] [--service=true|false]")
+	logs.Raw("         [--service-bind-ip 0.0.0.0] [--service-bind-port 19001]")
+	logs.Raw("         [--service-args '...']")
+	logs.Raw("                                Build/upload to remote host(s) and optionally run as service")
 	logs.Raw("  verify-host-builds [--hosts chroma,darkmac,legion] [--repo-dir ~/dialtone]")
 	logs.Raw("                     [--host H --user U --pass P --port 22 --name custom]")
 	logs.Raw("                                SSH each host and run native host build")
@@ -223,48 +227,185 @@ func runTest(paths Paths, args []string) error {
 func runDeploy(paths Paths, args []string) error {
 	fs := flag.NewFlagSet("swarm-deploy", flag.ContinueOnError)
 	host := fs.String("host", strings.TrimSpace(os.Getenv("ROBOT_HOST")), "SSH host")
-	port := fs.String("port", "22", "SSH port")
+	port := fs.String("port", strings.TrimSpace(os.Getenv("ROBOT_PORT")), "SSH port override (default uses mesh node port)")
 	user := fs.String("user", strings.TrimSpace(os.Getenv("ROBOT_USER")), "SSH user")
 	pass := fs.String("pass", strings.TrimSpace(os.Getenv("ROBOT_PASSWORD")), "SSH password")
 	remotePath := fs.String("remote-path", "", "Remote binary path")
 	aliasPath := fs.String("alias-path", "", "Optional remote symlink path")
+	service := fs.Bool("service", true, "Start swarm_v3 service after deploy")
+	serviceBindIP := fs.String("service-bind-ip", "0.0.0.0", "Service bind IP when --service-args is empty")
+	serviceBindPort := fs.Int("service-bind-port", 19001, "Service bind UDP port when --service-args is empty")
+	serviceArgs := fs.String("service-args", "", "Raw args for service command (overrides --service-bind-*)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if strings.TrimSpace(*host) == "" || strings.TrimSpace(*user) == "" || strings.TrimSpace(*pass) == "" {
-		return errors.New("deploy requires --host, --user, and --pass (or ROBOT_* env vars)")
+	if strings.TrimSpace(*host) == "" {
+		return errors.New("deploy requires --host")
+	}
+	if *serviceBindPort <= 0 || *serviceBindPort > 65535 {
+		return fmt.Errorf("invalid --service-bind-port %d", *serviceBindPort)
 	}
 
-	client, err := sshplugin.DialSSH(strings.TrimSpace(*host), strings.TrimSpace(*port), strings.TrimSpace(*user), strings.TrimSpace(*pass))
+	specs, err := resolveDeployHostSpecs(strings.TrimSpace(*host), strings.TrimSpace(*port), strings.TrimSpace(*user), strings.TrimSpace(*pass))
+	if err != nil {
+		return err
+	}
+
+	builtByArch := map[string]string{}
+	var failed []string
+	for _, spec := range specs {
+		if err := deployOne(paths, spec, strings.TrimSpace(*remotePath), strings.TrimSpace(*aliasPath), *service, strings.TrimSpace(*serviceBindIP), *serviceBindPort, strings.TrimSpace(*serviceArgs), builtByArch); err != nil {
+			logs.Error("deploy failed target=%s: %v", spec.Name, err)
+			failed = append(failed, spec.Name)
+			continue
+		}
+		logs.Info("deploy ok target=%s", spec.Name)
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("deploy failed for: %s", strings.Join(failed, ", "))
+	}
+	return nil
+}
+
+type deployHostSpec struct {
+	Name string
+	Host string
+	Port string
+	User string
+	Pass string
+	Mesh bool
+}
+
+func resolveDeployHostSpecs(rawHost, portOverride, userOverride, passOverride string) ([]deployHostSpec, error) {
+	if strings.EqualFold(strings.TrimSpace(rawHost), "all") {
+		nodes := sshplugin.ListMeshNodes()
+		specs := make([]deployHostSpec, 0, len(nodes))
+		for _, node := range nodes {
+			if strings.EqualFold(strings.TrimSpace(node.OS), "macos") || strings.EqualFold(strings.TrimSpace(node.OS), "darwin") {
+				logs.Warn("deploy --host all: skipping %s (os=%s not supported for swarm binary deploy)", node.Name, node.OS)
+				continue
+			}
+			specs = append(specs, deployHostSpec{
+				Name: node.Name,
+				Host: node.Host,
+				Port: firstNonEmpty(portOverride, node.Port, "22"),
+				User: firstNonEmpty(userOverride, node.User),
+				Pass: passOverride,
+				Mesh: true,
+			})
+		}
+		if len(specs) == 0 {
+			return nil, fmt.Errorf("no deploy targets resolved from mesh for --host all")
+		}
+		sort.SliceStable(specs, func(i, j int) bool { return specs[i].Name < specs[j].Name })
+		return specs, nil
+	}
+
+	parts := strings.Split(strings.TrimSpace(rawHost), ",")
+	specs := make([]deployHostSpec, 0, len(parts))
+	for _, part := range parts {
+		target := strings.TrimSpace(part)
+		if target == "" {
+			continue
+		}
+		if node, err := sshplugin.ResolveMeshNode(target); err == nil {
+			specs = append(specs, deployHostSpec{
+				Name: node.Name,
+				Host: node.Host,
+				Port: firstNonEmpty(portOverride, node.Port, "22"),
+				User: firstNonEmpty(userOverride, node.User),
+				Pass: passOverride,
+				Mesh: true,
+			})
+			continue
+		}
+		if len(parts) > 1 {
+			return nil, fmt.Errorf("non-mesh target %q unsupported in csv mode", target)
+		}
+		specs = append(specs, deployHostSpec{
+			Name: target,
+			Host: target,
+			Port: firstNonEmpty(portOverride, "22"),
+			User: userOverride,
+			Pass: passOverride,
+			Mesh: false,
+		})
+	}
+	if len(specs) == 0 {
+		return nil, fmt.Errorf("no deploy targets resolved")
+	}
+	for _, spec := range specs {
+		if strings.TrimSpace(spec.User) == "" {
+			return nil, fmt.Errorf("deploy target %s missing user (use --user or mesh defaults)", spec.Name)
+		}
+		if !spec.Mesh && strings.TrimSpace(spec.Pass) == "" {
+			return nil, fmt.Errorf("deploy target %s missing password (use --pass or ROBOT_PASSWORD)", spec.Name)
+		}
+	}
+	return specs, nil
+}
+
+func deployOne(paths Paths, spec deployHostSpec, remotePath, aliasPath string, service bool, serviceBindIP string, serviceBindPort int, serviceArgs string, builtByArch map[string]string) error {
+	var (
+		client *sshlib.Client
+		err    error
+	)
+	if spec.Mesh {
+		client, _, _, _, err = sshplugin.DialMeshNode(spec.Name, sshplugin.CommandOptions{
+			User:     strings.TrimSpace(spec.User),
+			Port:     strings.TrimSpace(spec.Port),
+			Password: strings.TrimSpace(spec.Pass),
+		})
+	} else {
+		client, err = sshplugin.DialSSH(strings.TrimSpace(spec.Host), strings.TrimSpace(spec.Port), strings.TrimSpace(spec.User), strings.TrimSpace(spec.Pass))
+	}
 	if err != nil {
 		return err
 	}
 	defer client.Close()
 
-	archOut, err := sshplugin.RunSSHCommand(client, "uname -m")
+	remoteOS, remoteGOARCH, err := detectRemoteTarget(client)
 	if err != nil {
 		return err
 	}
-	targetArch := normalizeRemoteArch(archOut)
-	if targetArch == "" {
-		return fmt.Errorf("unsupported remote arch output: %s", strings.TrimSpace(archOut))
-	}
-	if err := runBuild(paths, []string{"--arch", targetArch}); err != nil {
-		return err
+	if remoteOS != "linux" {
+		return fmt.Errorf("unsupported remote OS for deploy: %s (target=%s)", remoteOS, spec.Name)
 	}
 
-	localBin := paths.BinAMD64
-	if targetArch == "arm64" {
-		localBin = paths.BinARM64
+	targetArch := "x86_64"
+	switch remoteGOARCH {
+	case "arm64":
+		targetArch = "arm64"
+	case "amd64":
+		targetArch = "x86_64"
+	default:
+		return fmt.Errorf("unsupported remote arch %s (target=%s)", remoteGOARCH, spec.Name)
 	}
-	rp := strings.TrimSpace(*remotePath)
+
+	localBin := builtByArch[targetArch]
+	if strings.TrimSpace(localBin) == "" {
+		if err := runBuild(paths, []string{"--arch", targetArch}); err != nil {
+			return err
+		}
+		if targetArch == "arm64" {
+			localBin = paths.BinARM64
+		} else {
+			localBin = paths.BinAMD64
+		}
+		builtByArch[targetArch] = localBin
+	}
+
+	remoteHome, err := sshplugin.GetRemoteHome(client)
+	if err != nil {
+		return fmt.Errorf("remote home lookup failed: %w", err)
+	}
+	rp := strings.TrimSpace(remotePath)
 	if rp == "" {
-		rp = fmt.Sprintf("/home/%s/dialtone_swarm_v3_%s", strings.TrimSpace(*user), targetArch)
+		rp = filepath.ToSlash(filepath.Join(remoteHome, ".dialtone", "bin", "dialtone_swarm_v3"))
 	}
 	if _, err := sshplugin.RunSSHCommand(client, "mkdir -p "+shellQuote(filepath.Dir(rp))); err != nil {
 		return err
 	}
-
 	tmpRemote := rp + ".upload-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	if err := sshplugin.UploadFile(client, localBin, tmpRemote); err != nil {
 		return err
@@ -272,14 +413,39 @@ func runDeploy(paths Paths, args []string) error {
 	if _, err := sshplugin.RunSSHCommand(client, "chmod +x "+shellQuote(tmpRemote)+" && mv -f "+shellQuote(tmpRemote)+" "+shellQuote(rp)); err != nil {
 		return err
 	}
-
-	ap := strings.TrimSpace(*aliasPath)
-	if ap != "" {
-		if _, err := sshplugin.RunSSHCommand(client, "ln -sfn "+shellQuote(rp)+" "+shellQuote(ap)); err != nil {
+	if strings.TrimSpace(aliasPath) != "" {
+		if _, err := sshplugin.RunSSHCommand(client, "ln -sfn "+shellQuote(rp)+" "+shellQuote(strings.TrimSpace(aliasPath))); err != nil {
 			return err
 		}
 	}
+
+	if service {
+		if err := startRemoteSwarmService(client, rp, serviceBindIP, serviceBindPort, serviceArgs); err != nil {
+			return err
+		}
+		logs.Info("service started target=%s bind=%s:%d", spec.Name, serviceBindIP, serviceBindPort)
+	}
 	logs.Info("deployed %s -> %s (%s)", localBin, rp, targetArch)
+	return nil
+}
+
+func startRemoteSwarmService(client *sshlib.Client, remoteBin, bindIP string, bindPort int, rawArgs string) error {
+	args := strings.TrimSpace(rawArgs)
+	if args == "" {
+		args = "--bind-ip " + shellQuote(firstNonEmpty(bindIP, "0.0.0.0")) +
+			" --bind-port " + strconv.Itoa(bindPort) +
+			" --no-send"
+	}
+	cmd := strings.Join([]string{
+		"mkdir -p \"$HOME/.dialtone\" \"$HOME/.dialtone/logs\"",
+		"pkill -f " + shellQuote(remoteBin) + " >/dev/null 2>&1 || true",
+		"nohup " + shellQuote(remoteBin) + " " + args + " >>\"$HOME/.dialtone/logs/swarm_v3.log\" 2>&1 < /dev/null &",
+		"sleep 0.25",
+		"pgrep -f " + shellQuote(remoteBin) + " >/dev/null",
+	}, " && ")
+	if _, err := sshplugin.RunSSHCommand(client, cmd); err != nil {
+		return fmt.Errorf("remote swarm service start failed: %w", err)
+	}
 	return nil
 }
 

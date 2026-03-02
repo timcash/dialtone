@@ -53,7 +53,7 @@ func PrintUsage() {
 	logs.Raw("  sync-repos [--branch B] [--allow-dirty]")
 	logs.Raw("                                        Sync dialtone repo on every mesh node to one branch")
 	logs.Raw("                                        Per-node repo override: --repo-<node> /path/to/repo")
-	logs.Raw("  sync-code --host <name|all> [--src P] [--dest P] [--delete] [--exclude PATTERN] [--node <name|all>]")
+	logs.Raw("  sync-code --host <name|all> [--src P] [--dest P] [--delete] [--exclude PATTERN] [--skip-self=true|false] [--node <name|all>]")
 	logs.Raw("            [--service] [--interval 30s] [--service-stop] [--service-status]")
 	logs.Raw("                                        Rsync code without git, excludes node_modules/.pixi by default")
 	logs.Raw("  bootstrap --host <name|all> [--src P] [--dest P] [--delete] [--install-cmd C] [--node <name|all>]")
@@ -201,6 +201,7 @@ func runSyncCode(args []string) error {
 	src := fs.String("src", "", "Source path (defaults to current working directory)")
 	dest := fs.String("dest", "", "Destination path on target")
 	del := fs.Bool("delete", false, "Delete files on dest that are missing in src")
+	skipSelf := fs.Bool("skip-self", true, "When --host all, skip syncing the current node")
 	service := fs.Bool("service", false, "Install/start persistent user systemd sync service")
 	serviceStop := fs.Bool("service-stop", false, "Stop/disable persistent user systemd sync service")
 	serviceStatus := fs.Bool("service-status", false, "Show persistent user systemd sync service status")
@@ -219,6 +220,7 @@ func runSyncCode(args []string) error {
 		Source:   *src,
 		Dest:     *dest,
 		Delete:   *del,
+		SkipSelf: *skipSelf,
 		Excludes: excludes.values,
 	}
 	if *serviceStop {

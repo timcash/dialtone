@@ -1,10 +1,12 @@
 export * from './types';
 export * from './SectionManager';
 export * from './Menu';
+export * from './pwa';
 
 import { Menu } from './Menu';
 import { SectionManager } from './SectionManager';
 import { AppOptions } from './types';
+import { setupPWA } from './pwa';
 
 export const UI_OVERLAYS = {
   menu: 'menu',
@@ -15,6 +17,8 @@ export const UI_OVERLAYS = {
 } as const;
 
 export function setupApp(options: AppOptions = {}) {
+  setupPWA(options.pwa);
+
   const sections = new SectionManager({ debug: options.debug ?? true });
   const menu = new Menu();
 

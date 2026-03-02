@@ -40,4 +40,13 @@ export interface SectionConfig {
 export interface AppOptions {
   title?: string;
   debug?: boolean;
+  pwa?: boolean | PWAOptions;
+}
+
+export interface PWAOptions {
+  enabled?: boolean;
+  serviceWorkerPath?: string;
+  registerOnLoad?: boolean;
+  disableInDev?: boolean;
+  log?: boolean;
 }
