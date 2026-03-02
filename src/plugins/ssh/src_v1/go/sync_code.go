@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,6 +35,7 @@ type SyncCodeOptions struct {
 	Dest     string
 	Delete   bool
 	Excludes []string
+	SkipSelf bool
 }
 
 func SyncCode(opts SyncCodeOptions) error {
@@ -71,7 +73,15 @@ func SyncCode(opts SyncCodeOptions) error {
 
 func syncCodeAll(opts SyncCodeOptions, src string) error {
 	failed := 0
+	skipped := 0
+	selfNodes := detectSelfMeshNodes()
 	for _, node := range ListMeshNodes() {
+		if opts.SkipSelf && selfNodes[node.Name] {
+			skipped++
+			logs.Raw("== %s ==", node.Name)
+			logs.Raw("SKIP self node")
+			continue
+		}
 		dest := strings.TrimSpace(opts.Dest)
 		if dest == "" {
 			dest = defaultSyncDestForNode(node)
@@ -85,7 +95,78 @@ func syncCodeAll(opts SyncCodeOptions, src string) error {
 	if failed > 0 {
 		return fmt.Errorf("sync-code finished with %d failures", failed)
 	}
+	if skipped > 0 {
+		logs.Raw("sync-code skipped %d self node(s)", skipped)
+	}
 	return nil
+}
+
+func detectSelfMeshNodes() map[string]bool {
+	out := map[string]bool{}
+	if isWSLFunc() {
+		out["wsl"] = true
+		return out
+	}
+
+	localHosts := localHostNames()
+	for _, node := range ListMeshNodes() {
+		if hostMatchAny(node.Name, localHosts) {
+			out[node.Name] = true
+			continue
+		}
+		for _, alias := range node.Aliases {
+			if hostMatchAny(alias, localHosts) {
+				out[node.Name] = true
+				break
+			}
+		}
+	}
+	return out
+}
+
+func localHostNames() map[string]struct{} {
+	out := map[string]struct{}{}
+	if h, err := os.Hostname(); err == nil {
+		addHostVariants(out, h)
+	}
+	if ips, err := net.LookupHost("localhost"); err == nil {
+		for _, h := range ips {
+			addHostVariants(out, h)
+		}
+	}
+	return out
+}
+
+func addHostVariants(out map[string]struct{}, raw string) {
+	v := normalizeHost(raw)
+	if v == "" {
+		return
+	}
+	out[v] = struct{}{}
+	if i := strings.IndexByte(v, '.'); i > 0 {
+		out[v[:i]] = struct{}{}
+	}
+}
+
+func hostMatchAny(candidate string, set map[string]struct{}) bool {
+	v := normalizeHost(candidate)
+	if v == "" {
+		return false
+	}
+	if _, ok := set[v]; ok {
+		return true
+	}
+	if i := strings.IndexByte(v, '.'); i > 0 {
+		_, ok := set[v[:i]]
+		return ok
+	}
+	return false
+}
+
+func normalizeHost(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	v = strings.TrimSuffix(v, ".")
+	return v
 }
 
 func normalizeExcludes(ex []string) []string {

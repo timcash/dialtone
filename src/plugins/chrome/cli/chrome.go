@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -451,6 +452,35 @@ func handleServiceDaemonCmd(args []string) {
 	_ = fs.Parse(args)
 	var proxyPort int64
 
+	// Keep at least one page tab alive for the managed headed role.
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			procs, err := chrome.ListResources(true)
+			if err != nil {
+				continue
+			}
+			for _, p := range procs {
+				if p.DebugPort <= 0 {
+					continue
+				}
+				if p.IsHeadless {
+					continue
+				}
+				if !strings.EqualFold(strings.TrimSpace(p.Origin), "dialtone") {
+					continue
+				}
+				if !strings.EqualFold(strings.TrimSpace(p.Role), strings.TrimSpace(*defaultRole)) {
+					continue
+				}
+				_ = ensureSinglePageTab(p.DebugPort)
+				atomic.StoreInt64(&proxyPort, int64(p.DebugPort))
+				break
+			}
+		}
+	}()
+
 	mux := http.NewServeMux()
 	buildProxy := func(port int) *httputil.ReverseProxy {
 		target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
@@ -561,7 +591,18 @@ func handleServiceDaemonCmd(args []string) {
 			return
 		}
 		atomic.StoreInt64(&proxyPort, int64(sess.Port))
-		_ = serviceNavigateAndFullscreen(sess.WebSocketURL, req.URL, req.Fullscreen || req.Kiosk)
+		if u := strings.TrimSpace(req.URL); u != "" && !strings.EqualFold(u, "about:blank") {
+			navReq := actionRequest{
+				debugURLRequest: req.debugURLRequest,
+				Action:          "navigate",
+			}
+			navReq.debugURLRequest.URL = u
+			_, navErr := serviceRunAction(sess.Port, sess.WebSocketURL, navReq)
+			if navErr != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fmt.Sprintf("navigate failed: %v", navErr)})
+				return
+			}
+		}
 		wsPath := chrome.WebSocketPathFromURL(strings.TrimSpace(sess.WebSocketURL))
 		if wsPath == "" {
 			wsPath = "/devtools/browser"
@@ -648,12 +689,23 @@ func handleServiceDaemonCmd(args []string) {
 }
 
 func serviceNavigateAndFullscreen(wsURL, targetURL string, fullscreen bool) error {
-	ctx, cancel, err := chrome.AttachToWebSocket(strings.TrimSpace(wsURL))
+	attachWS := strings.TrimSpace(wsURL)
+	if u, err := url.Parse(attachWS); err == nil {
+		if p, perr := strconv.Atoi(strings.TrimSpace(u.Port())); perr == nil && p > 0 {
+			if resolved, rerr := resolveLocalPageWebSocket(p, true); rerr == nil && strings.TrimSpace(resolved) != "" {
+				attachWS = strings.TrimSpace(resolved)
+			}
+		}
+	}
+	if resolved, err := resolveExistingPageWebSocket(attachWS); err == nil && strings.TrimSpace(resolved) != "" {
+		attachWS = strings.TrimSpace(resolved)
+	}
+	baseCtx, cancel, err := chrome.AttachToWebSocket(attachWS)
 	if err != nil {
 		return err
 	}
-	defer cancel()
-	runCtx, runCancel := context.WithTimeout(ctx, 20*time.Second)
+	_ = cancel
+	runCtx, runCancel := context.WithTimeout(baseCtx, 20*time.Second)
 	defer runCancel()
 	if err := chromedp.Run(runCtx, chromedp.Navigate(strings.TrimSpace(targetURL))); err != nil {
 		return err
@@ -663,9 +715,14 @@ func serviceNavigateAndFullscreen(wsURL, targetURL string, fullscreen bool) erro
 	}
 	winID, _, err := browser.GetWindowForTarget().Do(runCtx)
 	if err != nil {
-		return err
+		logs.Warn("open fullscreen skipped: %v", err)
+		return nil
 	}
-	return browser.SetWindowBounds(winID, &browser.Bounds{WindowState: browser.WindowStateFullscreen}).Do(runCtx)
+	if err := browser.SetWindowBounds(winID, &browser.Bounds{WindowState: browser.WindowStateFullscreen}).Do(runCtx); err != nil {
+		logs.Warn("open fullscreen skipped: %v", err)
+		return nil
+	}
+	return nil
 }
 
 func enforceSingleRoleInstance(role string, headless bool, keepPID int) {
@@ -723,14 +780,15 @@ func ensureSinglePageTab(port int) error {
 			pageCount++
 		}
 	}
-	if pageCount == 1 {
+	if pageCount >= 1 {
 		return nil
 	}
-	if pageCount > 1 {
-		return fmt.Errorf("chrome tab guard failed: expected 1 page tab, found %d", pageCount)
-	}
 	createURL := fmt.Sprintf("http://127.0.0.1:%d/json/new?about:blank", port)
-	r, err := client.Get(createURL)
+	req, reqErr := http.NewRequest(http.MethodPut, createURL, nil)
+	if reqErr != nil {
+		return fmt.Errorf("chrome tab guard failed: create request build failed: %w", reqErr)
+	}
+	r, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("chrome tab guard failed: no page tab and create failed: %w", err)
 	}
@@ -742,6 +800,9 @@ func ensureSinglePageTab(port int) error {
 }
 
 func serviceRunAction(port int, wsURL string, req actionRequest) ([]string, error) {
+	defer func() {
+		_ = ensureSinglePageTab(port)
+	}()
 	attachWS := strings.TrimSpace(wsURL)
 	if resolved, err := resolveLocalPageWebSocket(port, true); err == nil && strings.TrimSpace(resolved) != "" {
 		attachWS = strings.TrimSpace(resolved)
@@ -750,7 +811,7 @@ func serviceRunAction(port int, wsURL string, req actionRequest) ([]string, erro
 	if err != nil {
 		return nil, err
 	}
-	defer cancel()
+	_ = cancel
 
 	logsOut := make([]string, 0)
 	chromedp.ListenTarget(ctx, func(ev any) {
@@ -844,7 +905,11 @@ func resolveLocalPageWebSocket(port int, createIfMissing bool) (string, error) {
 	}
 	if createIfMissing {
 		newURL := fmt.Sprintf("http://127.0.0.1:%d/json/new?about:blank", port)
-		r, err := client.Get(newURL)
+		req, reqErr := http.NewRequest(http.MethodPut, newURL, nil)
+		if reqErr != nil {
+			return "", reqErr
+		}
+		r, err := client.Do(req)
 		if err == nil && r != nil {
 			_ = r.Body.Close()
 		}

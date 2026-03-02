@@ -604,8 +604,10 @@ func AttachToWebSocket(websocketURL string) (context.Context, context.CancelFunc
 	allocCtx, cancelAlloc := chromedp.NewRemoteAllocator(context.Background(), ws)
 	tabCtx, cancelTab := chromedp.NewContext(allocCtx, attachContextOptionsFromWS(ws)...)
 	cancel := func() {
-		cancelTab()
+		// Keep existing browser tabs alive across CLI calls.
+		// Canceling only the allocator detaches the client without closing targets.
 		cancelAlloc()
+		_ = cancelTab
 	}
 	return tabCtx, cancel, nil
 }

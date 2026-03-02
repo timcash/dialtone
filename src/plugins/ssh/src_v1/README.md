@@ -40,6 +40,8 @@ Current usage includes:
 ./dialtone.sh ssh src_v1 sync-code --host gold --src /home/user/dialtone
 ./dialtone.sh ssh src_v1 sync-code --host darkmac --src /home/user/dialtone --dest /Users/tim/dialtone --delete
 ./dialtone.sh ssh src_v1 sync-code --host all --src /home/user/dialtone --delete
+# skip-self is true by default for --host all; set false to include current node
+./dialtone.sh ssh src_v1 sync-code --host all --src /home/user/dialtone --delete --skip-self=false
 ./dialtone.sh ssh src_v1 sync-code --host rover --src /home/user/dialtone --exclude '.env.local'
 
 # Rsync code sync (persistent service mode on local machine)

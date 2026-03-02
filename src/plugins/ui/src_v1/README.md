@@ -32,6 +32,22 @@ import { setupApp } from '@ui/ui';
 const { sections, menu } = setupApp({ title: 'dialtone.myplugin', debug: true });
 ```
 
+PWA support (from the UI library):
+
+```ts
+const { sections, menu } = setupApp({
+  title: 'dialtone.myplugin',
+  debug: true,
+  pwa: {
+    enabled: true,
+    serviceWorkerPath: '/sw.js',
+    disableInDev: false,
+  },
+});
+```
+
+`setupApp` registers the service worker when enabled. Keep your plugin `index.html` linking `manifest.webmanifest`.
+
 3. Register sections with the shared `SectionManager`:
 
 ```ts

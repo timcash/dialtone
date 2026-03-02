@@ -105,10 +105,26 @@ func requestRemoteServiceDebugURL(nodeName string, servicePort int, req debugURL
 		break
 	}
 	if resp == nil {
+		// Fallback to SSH relay when direct host:port is unavailable.
+		body, sshErr := postRemoteServiceViaSSH(node, servicePort, "/debug-url", req, 20)
+		if sshErr == nil {
+			var out debugURLResponse
+			if err := json.Unmarshal(body, &out); err != nil {
+				return "", err
+			}
+			ws := strings.TrimSpace(out.WebSocketURL)
+			if ws == "" {
+				return "", fmt.Errorf("remote chrome service returned empty websocket url")
+			}
+			if hostWS := normalizeRemoteServiceWebSocket(ws, primaryHost); hostWS != "" {
+				return hostWS, nil
+			}
+			return ws, nil
+		}
 		if lastErr != nil {
 			return "", lastErr
 		}
-		return "", fmt.Errorf("remote chrome service request failed")
+		return "", sshErr
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
@@ -180,10 +196,26 @@ func requestRemoteServiceOpen(nodeName string, servicePort int, req openRequest)
 		break
 	}
 	if resp == nil {
+		// Fallback to SSH relay when direct host:port is unavailable.
+		body, sshErr := postRemoteServiceViaSSH(node, servicePort, "/open", req, 25)
+		if sshErr == nil {
+			var out debugURLResponse
+			if err := json.Unmarshal(body, &out); err != nil {
+				return "", err
+			}
+			ws := strings.TrimSpace(out.WebSocketURL)
+			if ws == "" {
+				return "", fmt.Errorf("remote chrome service returned empty websocket url")
+			}
+			if hostWS := normalizeRemoteServiceWebSocket(ws, primaryHost); hostWS != "" {
+				return hostWS, nil
+			}
+			return ws, nil
+		}
 		if lastErr != nil {
 			return "", lastErr
 		}
-		return "", fmt.Errorf("remote chrome open request failed")
+		return "", sshErr
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
@@ -257,10 +289,30 @@ func requestRemoteServiceAction(nodeName string, servicePort int, req actionRequ
 		break
 	}
 	if resp == nil {
+		// Fallback to SSH relay when direct host:port is unavailable.
+		body, sshErr := postRemoteServiceViaSSH(node, servicePort, "/action", req, 35)
+		if sshErr == nil {
+			var out actionResponse
+			if err := json.Unmarshal(body, &out); err != nil {
+				msg := strings.TrimSpace(string(body))
+				if msg == "" {
+					msg = err.Error()
+				}
+				return nil, fmt.Errorf("remote chrome action invalid response: %s", msg)
+			}
+			if !out.OK {
+				msg := strings.TrimSpace(out.Error)
+				if msg == "" {
+					msg = "remote chrome action failed"
+				}
+				return nil, fmt.Errorf("remote chrome action failed: %s", msg)
+			}
+			return &out, nil
+		}
 		if lastErr != nil {
 			return nil, lastErr
 		}
-		return nil, fmt.Errorf("remote chrome action request failed")
+		return nil, sshErr
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
