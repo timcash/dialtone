@@ -1,19 +1,25 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	chrome "dialtone/dev/plugins/chrome/src_v1/go"
 	"dialtone/dev/plugins/logs/src_v1/go"
+	"github.com/chromedp/cdproto/browser"
+	cdpruntime "github.com/chromedp/cdproto/runtime"
+	"github.com/chromedp/chromedp"
 )
 
 // RunChrome handles the 'chrome' command
@@ -42,6 +48,7 @@ func RunChrome(args []string) {
 		headed := listFlags.Bool("headed", false, "Show only headed processes")
 		headless := listFlags.Bool("headless", false, "Show only headless processes")
 		verbose := listFlags.Bool("verbose", false, "Show full command line report")
+		host := listFlags.String("host", "", "List instances on a host or 'all' (remote)")
 		listFlags.BoolVar(verbose, "v", false, "Alias for --verbose")
 
 		for _, arg := range args[1:] {
@@ -55,7 +62,7 @@ func RunChrome(args []string) {
 		}
 
 		listFlags.Parse(args[1:])
-		handleList(*headed, *headless, *verbose)
+		handleListWithHost(strings.TrimSpace(*host), *headed, *headless, *verbose)
 	case "kill":
 		killFlags := flag.NewFlagSet("chrome kill", flag.ExitOnError)
 		isWindows := killFlags.Bool("windows", false, "Use for WSL 2 host processes")
@@ -113,6 +120,12 @@ func RunChrome(args []string) {
 			targetURL = rest[0]
 		}
 		handleNew(*port, *gpu, *headless, targetURL, *role, *reuseExisting, *userDataDir, *debugAddress, *debug)
+	case "open":
+		handleOpenCmd(args[1:])
+	case "dashboard":
+		handleDashboardCmd(args[1:])
+	case "click":
+		handleClickCmd(args[1:])
 	case "session":
 		sessionFlags := flag.NewFlagSet("chrome session", flag.ExitOnError)
 		port := sessionFlags.Int("port", 0, "Remote debugging port (0 for auto)")
@@ -405,21 +418,8 @@ func handleDebugURLCmd(args []string) {
 			fmt.Println(strings.TrimSpace(ws))
 			return
 		} else if err != nil {
-			logs.Warn("debug-url service fallback host=%s port=%d reason=%v", strings.TrimSpace(*host), *servicePort, err)
-		}
-		remoteRes, err := chrome.StartRemoteSession(strings.TrimSpace(*host), chrome.RemoteSessionOptions{
-			Role:               strings.TrimSpace(*role),
-			URL:                strings.TrimSpace(*url),
-			Headless:           *headless,
-			GPU:                true,
-			PreferredDebugPort: *port,
-			NoSSH:              false,
-		})
-		if err != nil {
 			logs.Fatal("debug-url --host %s failed: %v", strings.TrimSpace(*host), err)
 		}
-		fmt.Println(strings.TrimSpace(remoteRes.Session.WebSocketURL))
-		return
 	}
 
 	sess, err := chrome.StartSession(chrome.SessionOptions{
@@ -461,6 +461,9 @@ func handleServiceDaemonCmd(args []string) {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
+	mux.HandleFunc("/processes", handleProcessStats)
+	mux.HandleFunc("/process-ui", handleProcessUI)
+	mux.HandleFunc("/ws/processes", handleProcessStatsWS)
 	mux.HandleFunc("/debug-url", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost && r.Method != http.MethodGet {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
@@ -501,6 +504,9 @@ func handleServiceDaemonCmd(args []string) {
 		if req.DebugAddress == "" {
 			req.DebugAddress = strings.TrimSpace(*defaultDebugAddress)
 		}
+		if strings.TrimSpace(req.UserDataDir) == "" {
+			req.UserDataDir = defaultServiceUserDataDir(req.Role, req.Headless)
+		}
 		sess, err := chrome.StartSession(chrome.SessionOptions{
 			RequestedPort: req.Port,
 			GPU:           true,
@@ -515,6 +521,9 @@ func handleServiceDaemonCmd(args []string) {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
 		}
+		sess = ensureSessionPageReady(req, sess)
+		enforceSingleRoleInstance(req.Role, req.Headless, sess.PID)
+		_ = ensureSinglePageTab(sess.Port)
 		atomic.StoreInt64(&proxyPort, int64(sess.Port))
 		wsPath := chrome.WebSocketPathFromURL(strings.TrimSpace(sess.WebSocketURL))
 		if wsPath == "" {
@@ -527,6 +536,155 @@ func handleServiceDaemonCmd(args []string) {
 			PID:          sess.PID,
 			Port:         sess.Port,
 			IsNew:        sess.IsNew,
+		})
+	})
+	mux.HandleFunc("/open", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost && r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+			return
+		}
+		req := openRequest{
+			debugURLRequest: debugURLRequest{
+				Role:         strings.TrimSpace(*defaultRole),
+				URL:          "about:blank",
+				Reuse:        true,
+				DebugAddress: strings.TrimSpace(*defaultDebugAddress),
+			},
+		}
+		if r.Method == http.MethodPost && r.Body != nil {
+			dec := json.NewDecoder(r.Body)
+			_ = dec.Decode(&req)
+		}
+		q := r.URL.Query()
+		if v := strings.TrimSpace(q.Get("role")); v != "" {
+			req.Role = v
+		}
+		if v := strings.TrimSpace(q.Get("url")); v != "" {
+			req.URL = v
+		}
+		req.Headless = parseBoolQuery(q.Get("headless"), req.Headless)
+		req.Reuse = parseBoolQuery(q.Get("reuse_existing"), req.Reuse)
+		req.Port = parseIntQuery(q.Get("port"), req.Port)
+		req.Fullscreen = parseBoolQuery(q.Get("fullscreen"), req.Fullscreen)
+		if v := strings.TrimSpace(q.Get("user_data_dir")); v != "" {
+			req.UserDataDir = v
+		}
+		if v := strings.TrimSpace(q.Get("debug_address")); v != "" {
+			req.DebugAddress = v
+		}
+		if req.Role == "" {
+			req.Role = strings.TrimSpace(*defaultRole)
+		}
+		if req.URL == "" {
+			req.URL = "about:blank"
+		}
+		if req.DebugAddress == "" {
+			req.DebugAddress = strings.TrimSpace(*defaultDebugAddress)
+		}
+		if strings.TrimSpace(req.UserDataDir) == "" {
+			req.UserDataDir = defaultServiceUserDataDir(req.Role, req.Headless)
+		}
+		sess, err := chrome.StartSession(chrome.SessionOptions{
+			RequestedPort: req.Port,
+			GPU:           true,
+			Headless:      req.Headless,
+			TargetURL:     req.URL,
+			Role:          req.Role,
+			ReuseExisting: req.Reuse,
+			UserDataDir:   req.UserDataDir,
+			DebugAddress:  req.DebugAddress,
+		})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		sess = ensureSessionPageReady(req.debugURLRequest, sess)
+		enforceSingleRoleInstance(req.Role, req.Headless, sess.PID)
+		_ = ensureSinglePageTab(sess.Port)
+		atomic.StoreInt64(&proxyPort, int64(sess.Port))
+		_ = serviceNavigateAndFullscreen(sess.WebSocketURL, req.URL, req.Fullscreen)
+		wsPath := chrome.WebSocketPathFromURL(strings.TrimSpace(sess.WebSocketURL))
+		if wsPath == "" {
+			wsPath = "/devtools/browser"
+		}
+		proxyWS := fmt.Sprintf("ws://127.0.0.1:%d%s", *listenPort, wsPath)
+		writeJSON(w, http.StatusOK, debugURLResponse{
+			WebSocketURL: proxyWS,
+			PID:          sess.PID,
+			Port:         sess.Port,
+			IsNew:        sess.IsNew,
+		})
+	})
+	mux.HandleFunc("/action", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, actionResponse{OK: false, Error: "method not allowed"})
+			return
+		}
+		req := actionRequest{
+			debugURLRequest: debugURLRequest{
+				Role:         strings.TrimSpace(*defaultRole),
+				URL:          "about:blank",
+				Reuse:        true,
+				DebugAddress: strings.TrimSpace(*defaultDebugAddress),
+			},
+			Action: "click",
+		}
+		if r.Body != nil {
+			dec := json.NewDecoder(r.Body)
+			_ = dec.Decode(&req)
+		}
+		req.Action = strings.ToLower(strings.TrimSpace(req.Action))
+		if req.Action == "" {
+			req.Action = "click"
+		}
+		if req.Role == "" {
+			req.Role = strings.TrimSpace(*defaultRole)
+		}
+		if req.URL == "" {
+			req.URL = "about:blank"
+		}
+		if req.DebugAddress == "" {
+			req.DebugAddress = strings.TrimSpace(*defaultDebugAddress)
+		}
+		if strings.TrimSpace(req.UserDataDir) == "" {
+			req.UserDataDir = defaultServiceUserDataDir(req.Role, req.Headless)
+		}
+		sess, err := chrome.StartSession(chrome.SessionOptions{
+			RequestedPort: req.Port,
+			GPU:           true,
+			Headless:      req.Headless,
+			TargetURL:     req.URL,
+			Role:          req.Role,
+			ReuseExisting: req.Reuse,
+			UserDataDir:   req.UserDataDir,
+			DebugAddress:  req.DebugAddress,
+		})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, actionResponse{OK: false, Error: err.Error()})
+			return
+		}
+		sess = ensureSessionPageReady(req.debugURLRequest, sess)
+		enforceSingleRoleInstance(req.Role, req.Headless, sess.PID)
+		_ = ensureSinglePageTab(sess.Port)
+		atomic.StoreInt64(&proxyPort, int64(sess.Port))
+		actionLogs, actionErr := serviceRunAction(sess.Port, sess.WebSocketURL, req)
+		if actionErr != nil {
+			writeJSON(w, http.StatusBadRequest, actionResponse{
+				OK:           false,
+				Error:        actionErr.Error(),
+				WebSocketURL: strings.TrimSpace(sess.WebSocketURL),
+				PID:          sess.PID,
+				Port:         sess.Port,
+				Logs:         actionLogs,
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, actionResponse{
+			OK:           true,
+			WebSocketURL: strings.TrimSpace(sess.WebSocketURL),
+			PID:          sess.PID,
+			Port:         sess.Port,
+			Logs:         actionLogs,
 		})
 	})
 	mux.HandleFunc("/json/", func(w http.ResponseWriter, r *http.Request) {
@@ -551,6 +709,289 @@ func handleServiceDaemonCmd(args []string) {
 	addr := fmt.Sprintf("%s:%d", strings.TrimSpace(*listenAddr), *listenPort)
 	logs.Info("chrome service daemon listening on %s", addr)
 	logs.Fatal("chrome service daemon stopped: %v", http.ListenAndServe(addr, mux))
+}
+
+func serviceNavigateAndFullscreen(wsURL, targetURL string, fullscreen bool) error {
+	ctx, cancel, err := chrome.AttachToWebSocket(strings.TrimSpace(wsURL))
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	runCtx, runCancel := context.WithTimeout(ctx, 20*time.Second)
+	defer runCancel()
+	if err := chromedp.Run(runCtx, chromedp.Navigate(strings.TrimSpace(targetURL))); err != nil {
+		return err
+	}
+	if !fullscreen {
+		return nil
+	}
+	winID, _, err := browser.GetWindowForTarget().Do(runCtx)
+	if err != nil {
+		return err
+	}
+	return browser.SetWindowBounds(winID, &browser.Bounds{WindowState: browser.WindowStateFullscreen}).Do(runCtx)
+}
+
+func enforceSingleRoleInstance(role string, headless bool, keepPID int) {
+	role = strings.TrimSpace(role)
+	if role == "" || keepPID <= 0 {
+		return
+	}
+	procs, err := chrome.ListResources(true)
+	if err != nil {
+		return
+	}
+	for _, p := range procs {
+		if p.PID <= 0 || p.PID == keepPID {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(p.Origin), "dialtone") {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(p.Role), role) {
+			continue
+		}
+		if p.IsHeadless != headless {
+			continue
+		}
+		_ = chrome.KillResource(p.PID, p.IsWindows)
+	}
+}
+
+func ensureSinglePageTab(port int) error {
+	if port <= 0 {
+		return nil
+	}
+	client := &http.Client{Timeout: 1200 * time.Millisecond}
+	listURL := fmt.Sprintf("http://127.0.0.1:%d/json/list", port)
+	resp, err := client.Get(listURL)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	type targetInfo struct {
+		ID   string `json:"id"`
+		Type string `json:"type"`
+	}
+	var targets []targetInfo
+	if err := json.Unmarshal(body, &targets); err != nil {
+		return err
+	}
+	first := ""
+	for _, t := range targets {
+		if strings.EqualFold(strings.TrimSpace(t.Type), "page") {
+			if first == "" {
+				first = strings.TrimSpace(t.ID)
+				continue
+			}
+			closeURL := fmt.Sprintf("http://127.0.0.1:%d/json/close/%s", port, strings.TrimSpace(t.ID))
+			r, e := client.Get(closeURL)
+			if e == nil && r != nil {
+				_ = r.Body.Close()
+			}
+		}
+	}
+	return nil
+}
+
+func serviceRunAction(port int, wsURL string, req actionRequest) ([]string, error) {
+	attachWS := strings.TrimSpace(wsURL)
+	if resolved, err := resolveLocalPageWebSocket(port, true); err == nil && strings.TrimSpace(resolved) != "" {
+		attachWS = strings.TrimSpace(resolved)
+	}
+	ctx, cancel, err := chrome.AttachToWebSocket(attachWS)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+
+	logsOut := make([]string, 0)
+	chromedp.ListenTarget(ctx, func(ev any) {
+		switch e := ev.(type) {
+		case *cdpruntime.EventConsoleAPICalled:
+			parts := make([]string, 0, len(e.Args))
+			for _, a := range e.Args {
+				val := strings.TrimSpace(fmt.Sprintf("%v", a.Value))
+				if val != "" {
+					parts = append(parts, val)
+				}
+			}
+			if len(parts) > 0 {
+				logsOut = append(logsOut, "console: "+strings.Join(parts, " "))
+			}
+		case *cdpruntime.EventExceptionThrown:
+			if e.ExceptionDetails.Exception != nil && strings.TrimSpace(e.ExceptionDetails.Exception.Description) != "" {
+				logsOut = append(logsOut, "exception: "+strings.TrimSpace(e.ExceptionDetails.Exception.Description))
+			}
+		}
+	})
+
+	runCtx, runCancel := context.WithTimeout(ctx, 20*time.Second)
+	defer runCancel()
+	if err := chromedp.Run(runCtx, cdpruntime.Enable()); err != nil {
+		return logsOut, err
+	}
+
+	switch req.Action {
+	case "click", "tap":
+		sel := normalizeActionSelector(req.Selector)
+		if sel == "" {
+			return logsOut, fmt.Errorf("selector is required for click")
+		}
+		actions := make([]chromedp.Action, 0, 2)
+		if strings.TrimSpace(req.URL) != "" {
+			actions = append(actions, chromedp.Navigate(strings.TrimSpace(req.URL)))
+		}
+		actions = append(actions, chromedp.Click(sel, chromedp.ByQuery))
+		if err := chromedp.Run(runCtx, actions...); err != nil {
+			return logsOut, err
+		}
+	case "navigate", "open":
+		if strings.TrimSpace(req.URL) == "" {
+			return logsOut, fmt.Errorf("url is required for navigate")
+		}
+		if err := chromedp.Run(runCtx, chromedp.Navigate(strings.TrimSpace(req.URL))); err != nil {
+			return logsOut, err
+		}
+	case "type":
+		sel := normalizeActionSelector(req.Selector)
+		if sel == "" {
+			return logsOut, fmt.Errorf("selector is required for type")
+		}
+		if err := chromedp.Run(runCtx, chromedp.SetValue(sel, strings.TrimSpace(req.Text), chromedp.ByQuery)); err != nil {
+			return logsOut, err
+		}
+	default:
+		return logsOut, fmt.Errorf("unsupported action: %s", req.Action)
+	}
+	return logsOut, nil
+}
+
+func resolveLocalPageWebSocket(port int, createIfMissing bool) (string, error) {
+	if port <= 0 {
+		return "", fmt.Errorf("invalid debug port")
+	}
+	client := &http.Client{Timeout: 1200 * time.Millisecond}
+	listURL := fmt.Sprintf("http://127.0.0.1:%d/json/list", port)
+	resp, err := client.Get(listURL)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	type targetInfo struct {
+		Type string `json:"type"`
+		WS   string `json:"webSocketDebuggerUrl"`
+	}
+	var targets []targetInfo
+	if err := json.Unmarshal(body, &targets); err != nil {
+		return "", err
+	}
+	for _, t := range targets {
+		if strings.EqualFold(strings.TrimSpace(t.Type), "page") && strings.TrimSpace(t.WS) != "" {
+			return strings.TrimSpace(t.WS), nil
+		}
+	}
+	if createIfMissing {
+		newURL := fmt.Sprintf("http://127.0.0.1:%d/json/new?about:blank", port)
+		r, err := client.Get(newURL)
+		if err == nil && r != nil {
+			_ = r.Body.Close()
+		}
+		resp2, err := client.Get(listURL)
+		if err != nil {
+			return "", err
+		}
+		defer resp2.Body.Close()
+		body2, err := io.ReadAll(resp2.Body)
+		if err != nil {
+			return "", err
+		}
+		var targets2 []targetInfo
+		if err := json.Unmarshal(body2, &targets2); err != nil {
+			return "", err
+		}
+		for _, t := range targets2 {
+			if strings.EqualFold(strings.TrimSpace(t.Type), "page") && strings.TrimSpace(t.WS) != "" {
+				return strings.TrimSpace(t.WS), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("no page websocket found")
+}
+
+func defaultServiceUserDataDir(role string, headless bool) string {
+	role = strings.ToLower(strings.TrimSpace(role))
+	if role == "" {
+		role = "dev"
+	}
+	suffix := role
+	if headless {
+		suffix += "-headless"
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return ""
+	}
+	return filepath.ToSlash(filepath.Join(home, ".dialtone", "chrome", suffix+"-profile"))
+}
+
+func ensureSessionPageReady(req debugURLRequest, sess *chrome.Session) *chrome.Session {
+	if sess == nil || sess.Port <= 0 {
+		return sess
+	}
+	if _, err := resolveLocalPageWebSocket(sess.Port, true); err == nil {
+		return sess
+	}
+	if !req.Reuse {
+		return sess
+	}
+	_ = chrome.KillResource(sess.PID, sess.IsWindows)
+	fresh, err := chrome.StartSession(chrome.SessionOptions{
+		RequestedPort: sess.Port,
+		GPU:           true,
+		Headless:      req.Headless,
+		TargetURL:     req.URL,
+		Role:          req.Role,
+		ReuseExisting: false,
+		UserDataDir:   req.UserDataDir,
+		DebugAddress:  req.DebugAddress,
+	})
+	if err != nil || fresh == nil {
+		return sess
+	}
+	return fresh
+}
+
+func normalizeActionSelector(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "#") || strings.HasPrefix(raw, ".") || strings.HasPrefix(raw, "[") || strings.Contains(raw, " ") || strings.Contains(raw, ">") {
+		return raw
+	}
+	if isLikelyHTMLTag(raw) {
+		return strings.ToLower(raw)
+	}
+	return "#" + raw
+}
+
+func isLikelyHTMLTag(raw string) bool {
+	v := strings.ToLower(strings.TrimSpace(raw))
+	switch v {
+	case "html", "body", "main", "header", "footer", "nav", "section", "article", "div", "span", "button", "input", "textarea", "select", "a", "img", "canvas", "video":
+		return true
+	default:
+		return false
+	}
 }
 
 func handleServiceStartCmd(args []string) {
@@ -619,6 +1060,9 @@ func printChromeUsage() {
 	fmt.Println("  verify [--port N]   Verify chrome connectivity")
 	fmt.Println("  list [flags]        List detected chrome processes")
 	fmt.Println("  new [URL] [flags]   Launch a new Chrome instance")
+	fmt.Println("  open [flags]        Open URL on host(s) and optionally fullscreen it")
+	fmt.Println("  dashboard [flags]   Open daemon process-monitor dashboard on host(s)")
+	fmt.Println("  click <selector>    Click/tap selector via remote chrome service")
 	fmt.Println("  session [flags]     Launch/reuse and emit machine-readable session metadata")
 	fmt.Println("  debug-url [flags]   Ensure/reuse debug session and print websocket URL")
 	fmt.Println("  service-start       Start/reuse background chrome service session")
@@ -652,7 +1096,8 @@ func printChromeUsage() {
 	fmt.Println("  --windows           Use with 'kill' for WSL host processes (auto-detected usually)")
 	fmt.Println("\nMesh Flags:")
 	fmt.Println("  --nodes <csv|all>   Node filter (ex: chroma,darkmac,legion)")
-	fmt.Println("  --node <name>       Single node for remote-new/remote-relay")
+	fmt.Println("  --host <name>       Single host for remote-new/remote-relay (preferred)")
+	fmt.Println("  --node <name>       Alias for --host (deprecated)")
 	fmt.Println("\nGeneral Options:")
 	fmt.Printf("  --port %d         Remote debugging port\n", chrome.DefaultDebugPort)
 	fmt.Println("  --debug             Enable verbose logging")
@@ -694,22 +1139,4 @@ func isHelpArg(s string) bool {
 	default:
 		return false
 	}
-}
-
-func runChromeTests(args []string) error {
-	paths, err := chrome.ResolvePaths("")
-	if err != nil {
-		return err
-	}
-	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
-	if goBin == "" {
-		goBin = "go"
-	}
-	runArgs := []string{"run", "./plugins/chrome/src_v1/test/cmd/main.go"}
-	runArgs = append(runArgs, args...)
-	cmd := exec.Command(goBin, runArgs...)
-	cmd.Dir = paths.Runtime.SrcRoot
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
 }
