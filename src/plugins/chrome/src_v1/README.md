@@ -71,6 +71,9 @@ Daemon-first Chrome control for local and mesh hosts.
 
 # policy: required hosts running + gold non-kiosk
 ./dialtone.sh chrome src_v1 test --filter policy --role dev --host darkmac,gold,legion
+
+# gold health: verifies gold vite/daemon/url + non-kiosk + single-tab
+./dialtone.sh chrome src_v1 test --host gold --role dev --required-hosts gold --filter gold
 ```
 
 Test artifacts:

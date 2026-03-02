@@ -127,6 +127,8 @@ func RunChrome(args []string) {
 		handleDashboardCmd(args[1:])
 	case "click":
 		handleClickCmd(args[1:])
+	case "assert-url":
+		handleAssertURLCmd(args[1:])
 	case "session":
 		sessionFlags := flag.NewFlagSet("chrome session", flag.ExitOnError)
 		port := sessionFlags.Int("port", 0, "Remote debugging port (0 for auto)")
@@ -174,7 +176,7 @@ func RunChrome(args []string) {
 		verifyFlags.Parse(args[1:])
 		verifyChrome(*port, *debug)
 	case "install":
-		logs.Info("Chrome plugin: No specific dependencies to install (detects local Chrome).")
+		handleInstallCmd(args[1:])
 	case "remote-list":
 		handleRemoteListCmd(args[1:])
 	case "remote-new":
@@ -497,36 +499,10 @@ func handleServiceDaemonCmd(args []string) {
 		if v := strings.TrimSpace(q.Get("debug_address")); v != "" {
 			req.DebugAddress = v
 		}
-		if req.Role == "" {
-			req.Role = strings.TrimSpace(*defaultRole)
-		}
-		if req.URL == "" {
-			req.URL = "about:blank"
-		}
-		if req.DebugAddress == "" {
-			req.DebugAddress = strings.TrimSpace(*defaultDebugAddress)
-		}
-		if strings.TrimSpace(req.UserDataDir) == "" {
-			req.UserDataDir = defaultServiceUserDataDir(req.Role, req.Headless)
-		}
-		sess, err := chrome.StartSession(chrome.SessionOptions{
-			RequestedPort: req.Port,
-			GPU:           true,
-			Headless:      req.Headless,
-			TargetURL:     req.URL,
-			Role:          req.Role,
-			ReuseExisting: req.Reuse,
-			UserDataDir:   req.UserDataDir,
-			DebugAddress:  req.DebugAddress,
-		})
+		normalizeDebugRequestDefaults(&req, strings.TrimSpace(*defaultRole), strings.TrimSpace(*defaultDebugAddress))
+		sess, err := startDaemonManagedSession(req, false)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
-			return
-		}
-		sess = ensureSessionPageReady(req, sess)
-		enforceSingleRoleInstance(req.Role, req.Headless, sess.PID)
-		if err := ensureSinglePageTab(sess.Port); err != nil {
-			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error()})
 			return
 		}
 		atomic.StoreInt64(&proxyPort, int64(sess.Port))
@@ -578,37 +554,10 @@ func handleServiceDaemonCmd(args []string) {
 		if v := strings.TrimSpace(q.Get("debug_address")); v != "" {
 			req.DebugAddress = v
 		}
-		if req.Role == "" {
-			req.Role = strings.TrimSpace(*defaultRole)
-		}
-		if req.URL == "" {
-			req.URL = "about:blank"
-		}
-		if req.DebugAddress == "" {
-			req.DebugAddress = strings.TrimSpace(*defaultDebugAddress)
-		}
-		if strings.TrimSpace(req.UserDataDir) == "" {
-			req.UserDataDir = defaultServiceUserDataDir(req.Role, req.Headless)
-		}
-		sess, err := chrome.StartSession(chrome.SessionOptions{
-			RequestedPort: req.Port,
-			GPU:           true,
-			Headless:      req.Headless,
-			Kiosk:         req.Kiosk,
-			TargetURL:     req.URL,
-			Role:          req.Role,
-			ReuseExisting: req.Reuse,
-			UserDataDir:   req.UserDataDir,
-			DebugAddress:  req.DebugAddress,
-		})
+		normalizeDebugRequestDefaults(&req.debugURLRequest, strings.TrimSpace(*defaultRole), strings.TrimSpace(*defaultDebugAddress))
+		sess, err := startDaemonManagedSession(req.debugURLRequest, req.Kiosk)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
-			return
-		}
-		sess = ensureSessionPageReady(req.debugURLRequest, sess)
-		enforceSingleRoleInstance(req.Role, req.Headless, sess.PID)
-		if err := ensureSinglePageTab(sess.Port); err != nil {
-			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error()})
 			return
 		}
 		atomic.StoreInt64(&proxyPort, int64(sess.Port))
@@ -647,36 +596,10 @@ func handleServiceDaemonCmd(args []string) {
 		if req.Action == "" {
 			req.Action = "click"
 		}
-		if req.Role == "" {
-			req.Role = strings.TrimSpace(*defaultRole)
-		}
-		if req.URL == "" {
-			req.URL = "about:blank"
-		}
-		if req.DebugAddress == "" {
-			req.DebugAddress = strings.TrimSpace(*defaultDebugAddress)
-		}
-		if strings.TrimSpace(req.UserDataDir) == "" {
-			req.UserDataDir = defaultServiceUserDataDir(req.Role, req.Headless)
-		}
-		sess, err := chrome.StartSession(chrome.SessionOptions{
-			RequestedPort: req.Port,
-			GPU:           true,
-			Headless:      req.Headless,
-			TargetURL:     req.URL,
-			Role:          req.Role,
-			ReuseExisting: req.Reuse,
-			UserDataDir:   req.UserDataDir,
-			DebugAddress:  req.DebugAddress,
-		})
+		normalizeDebugRequestDefaults(&req.debugURLRequest, strings.TrimSpace(*defaultRole), strings.TrimSpace(*defaultDebugAddress))
+		sess, err := startDaemonManagedSession(req.debugURLRequest, false)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, actionResponse{OK: false, Error: err.Error()})
-			return
-		}
-		sess = ensureSessionPageReady(req.debugURLRequest, sess)
-		enforceSingleRoleInstance(req.Role, req.Headless, sess.PID)
-		if err := ensureSinglePageTab(sess.Port); err != nil {
-			writeJSON(w, http.StatusConflict, actionResponse{OK: false, Error: err.Error()})
 			return
 		}
 		atomic.StoreInt64(&proxyPort, int64(sess.Port))
@@ -1083,6 +1006,7 @@ func printChromeUsage() {
 	fmt.Println("  open [flags]        Open URL on host(s) and optionally fullscreen/kiosk it")
 	fmt.Println("  dashboard [flags]   Open daemon process-monitor dashboard on host(s)")
 	fmt.Println("  click <selector>    Click/tap selector via remote chrome service")
+	fmt.Println("  assert-url [flags]  Verify host page URL matches expected")
 	fmt.Println("  session [flags]     Launch/reuse and emit machine-readable session metadata")
 	fmt.Println("  debug-url [flags]   Ensure/reuse debug session and print websocket URL")
 	fmt.Println("  service-start       Start/reuse background chrome service session")

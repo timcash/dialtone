@@ -134,6 +134,32 @@ func main() {
 				if goldCmd, ok := cmdByNode["gold"]; ok && strings.Contains(strings.ToLower(goldCmd), "--kiosk") {
 					err = fmt.Errorf("gold chrome must not run in kiosk mode")
 				}
+			case strings.Contains(step.Name, "gold vite endpoint check"):
+				code, parseErr := parseKVInt(out, "VITE")
+				if parseErr != nil {
+					err = parseErr
+				} else if code != 200 {
+					err = fmt.Errorf("expected gold vite endpoint http 200, got %d", code)
+				}
+			case strings.Contains(step.Name, "gold daemon endpoint check"):
+				code, parseErr := parseKVInt(out, "DAEMON")
+				if parseErr != nil {
+					err = parseErr
+				} else if code != 200 {
+					err = fmt.Errorf("expected gold daemon endpoint http 200, got %d", code)
+				}
+			case strings.Contains(step.Name, "gold single tab check"):
+				tabsByHost, parseErr := parseListTabsForRole(out, targetRole)
+				if parseErr != nil {
+					err = parseErr
+				} else {
+					tabs, ok := tabsByHost["gold"]
+					if !ok {
+						err = fmt.Errorf("expected gold row in list output")
+					} else if tabs != 1 {
+						err = fmt.Errorf("expected gold to have exactly 1 tab, got %d", tabs)
+					}
+				}
 			}
 		}
 
@@ -181,7 +207,12 @@ func buildWorkflowSteps(host, role, url string, attach bool) []workflowStep {
 		{Name: "start again and expect reuse", Args: reuseCmd},
 		{Name: "list after reuse start", Args: []string{"chrome", "src_v1", "list", "--host", host}},
 		{Name: "count role after reuse start", Args: []string{"chrome", "src_v1", "remote-list", "--nodes", host, "--origin", "dialtone", "--role", role, "--json"}},
+		{Name: "gold ensure browser running", Args: []string{"chrome", "src_v1", "remote-new", "--host", "gold", "--role", role, "--url", "http://127.0.0.1:5177", "--reuse-existing=true"}},
 		{Name: "policy hosts running and gold non-kiosk", Args: []string{"chrome", "src_v1", "remote-list", "--nodes", host, "--origin", "dialtone", "--role", role, "--verbose"}},
+		{Name: "gold vite endpoint check", Args: []string{"ssh", "src_v1", "run", "--host", "gold", "--cmd", `v=$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:5177 || true); echo VITE=$v`}},
+		{Name: "gold daemon endpoint check", Args: []string{"ssh", "src_v1", "run", "--host", "gold", "--cmd", `d=$(curl -sS -o /dev/null -w "%{http_code}" "http://127.0.0.1:19444/processes?limit=1" || true); echo DAEMON=$d`}},
+		{Name: "gold page url assert", Args: []string{"chrome", "src_v1", "assert-url", "--host", "gold", "--role", role, "--url", "http://127.0.0.1:5177"}},
+		{Name: "gold single tab check", Args: []string{"chrome", "src_v1", "list", "--host", "gold"}},
 		{Name: "stop role on all hosts", Args: []string{"chrome", "src_v1", "remote-kill", "--nodes", host, "--role", role}},
 		{Name: "count role after cleanup", Args: []string{"chrome", "src_v1", "remote-list", "--nodes", host, "--origin", "dialtone", "--role", role, "--json"}},
 	}
@@ -240,6 +271,33 @@ func missingHosts(required []string, cmdByNode map[string]string) []string {
 		}
 	}
 	return missing
+}
+
+func parseKVInt(raw, key string) (int, error) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return 0, fmt.Errorf("empty key")
+	}
+	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
+	for _, ln := range lines {
+		line := strings.TrimSpace(ln)
+		if line == "" || strings.HasPrefix(line, "[T+") {
+			continue
+		}
+		fields := strings.Fields(line)
+		for _, f := range fields {
+			if !strings.HasPrefix(f, key+"=") {
+				continue
+			}
+			value := strings.TrimSpace(strings.TrimPrefix(f, key+"="))
+			n, err := strconv.Atoi(value)
+			if err != nil {
+				return 0, fmt.Errorf("parse %s value failed: %w", key, err)
+			}
+			return n, nil
+		}
+	}
+	return 0, fmt.Errorf("missing %s=... token in output", key)
 }
 
 func parseRemoteRoleState(raw string, expectedRole string) (map[string]remoteProc, error) {

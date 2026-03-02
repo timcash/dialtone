@@ -27,6 +27,7 @@ Three.js earth hero visualization packaged as a versioned Dialtone plugin.
 - `install` installs deps and then starts Vite dev with HMR by default.
 - `install --no-dev` keeps install-only behavior.
 - `open-dev` points browser hosts to each host's local Vite URL (`http://127.0.0.1:<port>` by default).
+- Earth UI is PWA-enabled (`manifest.webmanifest` + `sw.js` service worker registration).
 - `dev` auto-starts a headed remote browser on `chroma` when running in WSL.
 - `dev --browser-node <mesh-node>` overrides the remote browser node.
 - `dev` publishes lifecycle logs to NATS subject `logs.dev.earth-src-v1`.
