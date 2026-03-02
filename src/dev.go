@@ -107,6 +107,42 @@ func bootstrapDialtoneRuntimeEnv() {
 	}
 }
 
+func maybeReexecInNixShell() {
+	if v := strings.TrimSpace(strings.ToLower(os.Getenv("DIALTONE_USE_NIX"))); v == "0" || v == "false" || v == "no" || v == "off" {
+		return
+	}
+	if strings.TrimSpace(os.Getenv("IN_NIX_SHELL")) != "" {
+		return
+	}
+	repoRoot := strings.TrimSpace(os.Getenv("DIALTONE_REPO_ROOT"))
+	if repoRoot == "" {
+		if found, err := findRepoRootFromPath(""); err == nil {
+			repoRoot = found
+		}
+	}
+	if strings.TrimSpace(repoRoot) == "" {
+		return
+	}
+	flakePath := filepath.Join(repoRoot, "flake.nix")
+	if _, err := os.Stat(flakePath); err != nil {
+		return
+	}
+	if _, err := exec.LookPath("nix"); err != nil {
+		return
+	}
+	script := filepath.Join(repoRoot, "dialtone.sh")
+	args := append([]string{"--extra-experimental-features", "nix-command flakes", "develop", "path:" + repoRoot, "--command", script}, os.Args[1:]...)
+	cmd := exec.Command("nix", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	if err := cmd.Run(); err != nil {
+		logs.Error("failed to enter nix shell: %v", err)
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
 func initLogger() {
 	mirrorStdout := strings.TrimSpace(os.Getenv("DIALTONE_LOG_STDOUT")) == "1"
 	// No-arg invocation is interactive entry; always surface logs to stdout.
@@ -272,6 +308,7 @@ func ensureBunRequirement(version string) error {
 
 func main() {
 	bootstrapDialtoneRuntimeEnv()
+	maybeReexecInNixShell()
 	initLogger()
 	LoadConfig()
 	defer func() {
@@ -308,6 +345,14 @@ func main() {
 		runBranch(args)
 	case "plugins":
 		listPlugins()
+	case "mods":
+		if err := runMods(args); err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				os.Exit(exitErr.ExitCode())
+			}
+			logs.Error("mods command failed: %v", err)
+			os.Exit(1)
+		}
 	case "dev":
 		if len(args) > 0 && args[0] == "install" {
 			runDevInstall()
@@ -415,34 +460,48 @@ func printDevUsage() {
 	logs.Info("  ./dialtone.sh go exec version")
 	logs.Info("  ./dialtone.sh robot install src_v1")
 	logs.Info("  ./dialtone.sh dag install src_v3")
+	logs.Info("  ./dialtone.sh mods help")
 	logs.Info("  ./dialtone.sh gemini run --task task.md")
 }
 
 func listPlugins() {
-	root := "plugins"
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		logs.Error("Failed to read plugins directory: %v", err)
-		return
-	}
-	logs.Info("Available plugins with scaffold:")
-	for _, entry := range entries {
-		if !entry.IsDir() {
+	roots := []string{"mods", "plugins"}
+	seen := map[string]struct{}{}
+	logs.Info("Available commands with scaffold:")
+	for _, root := range roots {
+		entries, err := os.ReadDir(root)
+		if err != nil {
 			continue
 		}
-		name := entry.Name()
-		goScaffold := filepath.Join(root, name, "scaffold", "main.go")
-		shScaffold := filepath.Join(root, name, "scaffold.sh")
-		if fileExists(goScaffold) || fileExists(shScaffold) {
-			logs.Info("  - %s", name)
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			name := entry.Name()
+			if _, exists := seen[name]; exists {
+				continue
+			}
+			goScaffold := filepath.Join(root, name, "scaffold", "main.go")
+			shScaffold := filepath.Join(root, name, "scaffold.sh")
+			if fileExists(goScaffold) || fileExists(shScaffold) {
+				logs.Info("  - %s (%s)", name, root)
+				seen[name] = struct{}{}
+			}
 		}
 	}
 }
 
 func runPluginScaffold(plugin string, args []string) error {
-	pluginDir := filepath.Join("plugins", plugin)
-	info, err := os.Stat(pluginDir)
-	if err != nil || !info.IsDir() {
+	roots := []string{"mods", "plugins"}
+	pluginDir := ""
+	for _, root := range roots {
+		candidate := filepath.Join(root, plugin)
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			pluginDir = candidate
+			break
+		}
+	}
+	if pluginDir == "" {
 		return logs.Errorf("unknown plugin: %s", plugin)
 	}
 
@@ -471,6 +530,18 @@ func runPluginScaffold(plugin string, args []string) error {
 	}
 
 	return logs.Errorf("plugin %s has no scaffold/main.go or scaffold.sh", plugin)
+}
+
+func runMods(args []string) error {
+	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
+	if goBin == "" {
+		goBin = "go"
+	}
+	cmd := exec.Command(goBin, append([]string{"run", "./mods/main.go"}, args...)...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	return cmd.Run()
 }
 
 func fileExists(path string) bool {
