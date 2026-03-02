@@ -42,4 +42,3 @@ func TestBuildBootstrapCommand(t *testing.T) {
 		}
 	}
 }
-

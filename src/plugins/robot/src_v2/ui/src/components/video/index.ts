@@ -1,8 +1,10 @@
 import { VisualizationControl } from '@ui/types';
-import { addMavlinkListener } from '../../data/connection';
+import { addMavlinkListener, sendCommand } from '../../data/connection';
 import { LatencyEstimator } from '../../data/latency';
 import { logError, logInfo } from '../../data/logging';
 import { registerButtons, renderButtons } from '../../buttons';
+import { ROBOT_SECTION_IDS } from '../../section_ids';
+import { sendDriveDown, sendDriveDownLeft, sendDriveDownRight, sendDriveLeft, sendDriveRight, sendDriveUp, sendStopNow } from '../../data/steering';
 
 class VideoControl implements VisualizationControl {
   private img: HTMLImageElement | null;
@@ -37,7 +39,7 @@ class VideoControl implements VisualizationControl {
     if (btn) btn.addEventListener('click', () => this.resumeStream());
 
     // Register Buttons
-    registerButtons('video', ['View'], {
+    registerButtons(ROBOT_SECTION_IDS.video, ['View', 'Drive', 'Guided'], {
       'View': [
         { label: 'Feed A', action: () => this.updateFeedSource('Primary') },
         { label: 'Feed B', action: () => this.updateFeedSource('Secondary') },
@@ -47,7 +49,27 @@ class VideoControl implements VisualizationControl {
         { label: 'Map', action: () => this.updateFeedSource('Map') },
         { label: 'Log', action: () => this.updateFeedSource('Log') },
         { label: 'Bookmark', action: () => this.bookmarkFrame() },
-      ]
+      ],
+      'Drive': [
+        { label: 'Up-L', action: () => sendDriveLeft() },
+        { label: 'Up', action: () => sendDriveUp() },
+        { label: 'Up-R', action: () => sendDriveRight() },
+        { label: 'Down-L', action: () => sendDriveDownLeft() },
+        { label: 'Down', action: () => sendDriveDown() },
+        { label: 'Down-R', action: () => sendDriveDownRight() },
+        { label: 'Stop', action: () => sendStopNow() },
+        null,
+      ],
+      'Guided': [
+        { label: 'Guided On', action: () => sendCommand('mode', 'guided') },
+        { label: 'Fwd 1m', action: () => sendCommand('guided_forward_1m') },
+        { label: 'Square 5m', action: () => sendCommand('guided_square_5m') },
+        { label: 'Hold', action: () => sendCommand('guided_hold') },
+        { label: 'Manual', action: () => sendCommand('mode', 'manual') },
+        { label: 'Stop', action: () => sendStopNow() },
+        null,
+        null,
+      ],
     });
     
     this.updateFeedSource('Primary');
@@ -157,7 +179,7 @@ class VideoControl implements VisualizationControl {
 
   setVisible(visible: boolean): void {
     if (visible) {
-      renderButtons('video');
+      renderButtons(ROBOT_SECTION_IDS.video);
       if (!this.isPaused) {
         this.startStream();
         this.startWatchdog();

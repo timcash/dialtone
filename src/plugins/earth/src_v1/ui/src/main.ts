@@ -6,12 +6,15 @@ const { sections, menu } = setupApp({
   debug: true,
 });
 
-sections.register('hero', {
-  containerId: 'hero',
+const SECTION_ID_HERO = 'earth-hero-stage';
+
+sections.register(SECTION_ID_HERO, {
+  containerId: SECTION_ID_HERO,
+  canonicalName: SECTION_ID_HERO,
   load: async () => {
-    sections.setLoadingMessage('hero', 'loading hero ...');
+    sections.setLoadingMessage(SECTION_ID_HERO, 'loading hero ...');
     const { mountHero } = await import('./components/hero/index');
-    const container = document.getElementById('hero');
+    const container = document.getElementById(SECTION_ID_HERO);
     if (!container) throw new Error('hero container not found');
     return mountHero(container);
   },
@@ -19,13 +22,15 @@ sections.register('hero', {
   overlays: {
     primaryKind: 'stage',
     primary: '.hero-stage',
-    thumb: '.mode-form',
+    form: '.mode-form',
     legend: '.hero-legend',
   },
 });
 
 menu.addButton('Hero', 'Navigate Hero', () => {
-  void sections.navigateTo('hero');
+  void sections.navigateTo(SECTION_ID_HERO);
 });
 
-void sections.navigateTo(window.location.hash.slice(1) || 'hero');
+const hash = window.location.hash.slice(1).trim();
+const initial = hash === '' || hash === 'hero' ? SECTION_ID_HERO : hash;
+void sections.navigateTo(initial);

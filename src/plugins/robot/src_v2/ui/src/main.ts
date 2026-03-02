@@ -3,6 +3,7 @@ import './style.css';
 import { initConnection } from './data/connection';
 import { logError, logInfo } from './data/logging';
 import { handleButtonKey } from './buttons';
+import { ROBOT_SECTION_HASH_ALIASES, ROBOT_SECTION_IDS, ROBOT_SECTION_ORDER, type RobotSectionID } from './section_ids';
 
 declare const APP_VERSION: string;
 
@@ -47,26 +48,29 @@ if ('serviceWorker' in navigator) {
 // Display version
 const versionEl = document.getElementById('app-version');
 const currentAppVersion = String(APP_VERSION ?? '').trim();
+let runtimeReportedVersion = currentAppVersion || 'dev';
 if (versionEl) {
   const stamp = isLocalDevHost ? ` (dev-${new Date().toLocaleTimeString()})` : '';
-  const shown = currentAppVersion || 'dev';
+  const shown = runtimeReportedVersion || 'dev';
   versionEl.textContent = `v${shown}${stamp}`;
 }
-(window as any).__robotCurrentVersion = currentAppVersion;
+(window as any).__robotCurrentVersion = runtimeReportedVersion;
 
 const setMenuUpdateState = (available: boolean) => {
   document.body.setAttribute('data-update-available', available ? 'true' : 'false');
 };
 
 const broadcastUpdateStatus = (latestVersion: string, available: boolean) => {
+  const currentShown = runtimeReportedVersion || currentAppVersion || 'dev';
   const status: RobotUpdateStatus = {
-    currentVersion: currentAppVersion || 'dev',
-    currentNorm: normalizeVersion(currentAppVersion || 'dev'),
-    latestVersion: latestVersion || currentAppVersion || 'dev',
-    latestNorm: normalizeVersion(latestVersion || currentAppVersion || 'dev'),
+    currentVersion: currentShown,
+    currentNorm: normalizeVersion(currentShown),
+    latestVersion: latestVersion || currentShown,
+    latestNorm: normalizeVersion(latestVersion || currentShown),
     available,
     checkedAt: new Date().toISOString(),
   };
+  (window as any).__robotCurrentVersion = currentShown;
   (window as any).__robotUpdateStatus = status;
   window.dispatchEvent(new CustomEvent('robot-update-status', { detail: status }));
 };
@@ -87,8 +91,14 @@ const checkForUpdate = async () => {
     if (!res.ok) return;
     const data = await res.json();
     const nextVersion = String(data.version ?? '').trim();
-    const nextNorm = normalizeVersion(nextVersion);
-    const currentNorm = normalizeVersion(String(currentAppVersion ?? '').trim());
+    runtimeReportedVersion = nextVersion || runtimeReportedVersion || 'dev';
+    if (versionEl) {
+      const stamp = isLocalDevHost ? ` (dev-${new Date().toLocaleTimeString()})` : '';
+      const shown = runtimeReportedVersion || 'dev';
+      versionEl.textContent = `v${shown}${stamp}`;
+    }
+    const nextNorm = normalizeVersion(nextVersion || runtimeReportedVersion || 'dev');
+    const currentNorm = normalizeVersion(runtimeReportedVersion || currentAppVersion || 'dev');
     const available =
       !!nextNorm &&
       !/^dev$/i.test(nextNorm) &&
@@ -105,12 +115,13 @@ const checkForUpdate = async () => {
 checkForUpdate();
 setInterval(checkForUpdate, 60000);
 
-sections.register('hero', {
-  containerId: 'hero',
+sections.register(ROBOT_SECTION_IDS.hero, {
+  containerId: ROBOT_SECTION_IDS.hero,
+  canonicalName: ROBOT_SECTION_IDS.hero,
   load: async () => {
-    sections.setLoadingMessage('hero', 'loading hero ...');
+    sections.setLoadingMessage(ROBOT_SECTION_IDS.hero, 'loading hero ...');
     const { mountHero } = await import('./components/hero/index');
-    const container = document.getElementById('hero');
+    const container = document.getElementById(ROBOT_SECTION_IDS.hero);
     if (!container) throw new Error('hero container not found');
     return mountHero(container);
   },
@@ -118,17 +129,18 @@ sections.register('hero', {
   overlays: {
     primaryKind: 'stage',
     primary: '.hero-stage',
-    thumb: '.mode-form',
+    form: '.mode-form',
     legend: '.hero-legend',
   },
 });
 
-sections.register('docs', {
-  containerId: 'docs',
+sections.register(ROBOT_SECTION_IDS.docs, {
+  containerId: ROBOT_SECTION_IDS.docs,
+  canonicalName: ROBOT_SECTION_IDS.docs,
   load: async () => {
-    sections.setLoadingMessage('docs', 'loading documentation ...');
+    sections.setLoadingMessage(ROBOT_SECTION_IDS.docs, 'loading documentation ...');
     const { mountDocs } = await import('./components/docs/index');
-    const container = document.getElementById('docs');
+    const container = document.getElementById(ROBOT_SECTION_IDS.docs);
     if (!container) throw new Error('docs container not found');
     return mountDocs(container);
   },
@@ -136,17 +148,18 @@ sections.register('docs', {
   overlays: {
     primaryKind: 'docs',
     primary: '.docs-primary',
-    thumb: '.docs-thumb',
+    form: '.docs-thumb',
     legend: '.docs-legend',
   },
 });
 
-sections.register('settings', {
-  containerId: 'settings',
+sections.register(ROBOT_SECTION_IDS.settings, {
+  containerId: ROBOT_SECTION_IDS.settings,
+  canonicalName: ROBOT_SECTION_IDS.settings,
   load: async () => {
-    sections.setLoadingMessage('settings', 'loading settings ...');
+    sections.setLoadingMessage(ROBOT_SECTION_IDS.settings, 'loading settings ...');
     const { mountSettings } = await import('./components/settings/index');
-    const container = document.getElementById('settings');
+    const container = document.getElementById(ROBOT_SECTION_IDS.settings);
     if (!container) throw new Error('settings container not found');
     return mountSettings(container);
   },
@@ -158,12 +171,13 @@ sections.register('settings', {
   },
 });
 
-sections.register('table', {
-  containerId: 'table',
+sections.register(ROBOT_SECTION_IDS.table, {
+  containerId: ROBOT_SECTION_IDS.table,
+  canonicalName: ROBOT_SECTION_IDS.table,
   load: async () => {
-    sections.setLoadingMessage('table', 'loading telemetry ...');
+    sections.setLoadingMessage(ROBOT_SECTION_IDS.table, 'loading telemetry ...');
     const { mountTable } = await import('./components/table/index');
-    const container = document.getElementById('table');
+    const container = document.getElementById(ROBOT_SECTION_IDS.table);
     if (!container) throw new Error('table container not found');
     return mountTable(container);
   },
@@ -171,43 +185,102 @@ sections.register('table', {
   overlays: {
     primaryKind: 'table',
     primary: '.table-wrapper', // Updated to wrapper
-    thumb: '.mode-form',
+    form: '.mode-form',
     legend: '.telemetry-legend',
   },
 });
 
-sections.register('three', {
-  containerId: 'three',
+sections.register(ROBOT_SECTION_IDS.steeringSettings, {
+  containerId: ROBOT_SECTION_IDS.steeringSettings,
+  canonicalName: ROBOT_SECTION_IDS.steeringSettings,
   load: async () => {
-    sections.setLoadingMessage('three', 'loading 3d environment ...');
-    const { mountThree } = await import('./components/three/index');
-    const container = document.getElementById('three');
+    sections.setLoadingMessage(ROBOT_SECTION_IDS.steeringSettings, 'loading steering settings ...');
+    const { mountSteeringSettings } = await import('./components/steering_settings/index');
+    const container = document.getElementById(ROBOT_SECTION_IDS.steeringSettings);
+    if (!container) throw new Error('steering settings container not found');
+    return mountSteeringSettings(container);
+  },
+  header: { visible: false, menuVisible: true, title: 'Steering Settings' },
+  overlays: {
+    primaryKind: 'table',
+    primary: '.table-wrapper',
+    form: '.mode-form',
+  },
+});
+
+sections.register(ROBOT_SECTION_IDS.keyParams, {
+  containerId: ROBOT_SECTION_IDS.keyParams,
+  canonicalName: ROBOT_SECTION_IDS.keyParams,
+  load: async () => {
+    sections.setLoadingMessage(ROBOT_SECTION_IDS.keyParams, 'loading key params ...');
+    const { mountKeyParams } = await import('./components/key_params/index');
+    const container = document.getElementById(ROBOT_SECTION_IDS.keyParams);
+    if (!container) throw new Error('key params container not found');
+    return mountKeyParams(container);
+  },
+  header: { visible: false, menuVisible: true, title: 'Robot Key Params' },
+  overlays: {
+    primaryKind: 'table',
+    primary: '.table-wrapper',
+    legend: '.key-params-legend',
+  },
+});
+
+sections.register(ROBOT_SECTION_IDS.three, {
+  containerId: ROBOT_SECTION_IDS.three,
+  canonicalName: ROBOT_SECTION_IDS.three,
+  load: async () => {
+    sections.setLoadingMessage(ROBOT_SECTION_IDS.three, 'loading 3d environment ...');
+    const container = document.getElementById(ROBOT_SECTION_IDS.three);
     if (!container) throw new Error('three container not found');
-    
+
     // Apply chatlog setting on load
     const chatlog = container.querySelector('.three-chatlog') as HTMLElement;
     if (chatlog) {
-        chatlog.hidden = localStorage.getItem('robot.chatlog.enabled') !== 'true';
+      chatlog.hidden = localStorage.getItem('robot.chatlog.enabled') !== 'true';
     }
-    
-    return mountThree(container);
+
+    try {
+      const { mountThree } = await import('./components/three/index');
+      return mountThree(container);
+    } catch (err) {
+      logError('ui/main', '[Three] mount failed; showing fallback', err);
+      const fallbackClass = 'section-load-fallback';
+      const fallbackAria = 'Three Unavailable';
+      let fallback = container.querySelector(`.${fallbackClass}`) as HTMLDivElement | null;
+      if (!fallback) {
+        fallback = document.createElement('div');
+        fallback.className = fallbackClass;
+        fallback.setAttribute('aria-label', fallbackAria);
+        container.appendChild(fallback);
+      }
+      fallback.textContent = '3D view unavailable on this browser session. Check WebGL/GPU and refresh.';
+      fallback.hidden = false;
+      return {
+        dispose: () => {},
+        setVisible: (visible: boolean) => {
+          if (fallback) fallback.hidden = !visible;
+        },
+      };
+    }
   },
   header: { visible: false, menuVisible: true, title: 'Robot 3D' },
   overlays: {
     primaryKind: 'stage',
     primary: '.three-stage',
-    thumb: '.mode-form',
+    form: '.mode-form',
     legend: '.three-legend',
     chatlog: '.three-chatlog', // Added chatlog overlay
   },
 });
 
-sections.register('xterm', {
-  containerId: 'xterm',
+sections.register(ROBOT_SECTION_IDS.xterm, {
+  containerId: ROBOT_SECTION_IDS.xterm,
+  canonicalName: ROBOT_SECTION_IDS.xterm,
   load: async () => {
-    sections.setLoadingMessage('xterm', 'loading terminal ...');
+    sections.setLoadingMessage(ROBOT_SECTION_IDS.xterm, 'loading terminal ...');
     const { mountXterm } = await import('./components/xterm/index');
-    const container = document.getElementById('xterm');
+    const container = document.getElementById(ROBOT_SECTION_IDS.xterm);
     if (!container) throw new Error('xterm container not found');
     return mountXterm(container);
   },
@@ -215,58 +288,66 @@ sections.register('xterm', {
   overlays: {
     primaryKind: 'xterm',
     primary: '.xterm-primary',
-    thumb: '.mode-form',
+    form: '.mode-form',
     legend: '.xterm-legend',
   },
 });
 
-sections.register('video', {
-  containerId: 'video',
+sections.register(ROBOT_SECTION_IDS.video, {
+  containerId: ROBOT_SECTION_IDS.video,
+  canonicalName: ROBOT_SECTION_IDS.video,
   load: async () => {
-    sections.setLoadingMessage('video', 'loading camera stream ...');
+    sections.setLoadingMessage(ROBOT_SECTION_IDS.video, 'loading camera stream ...');
     const { mountVideo } = await import('./components/video/index');
-    const container = document.getElementById('video');
+    const container = document.getElementById(ROBOT_SECTION_IDS.video);
     if (!container) throw new Error('video container not found');
     return mountVideo(container);
   },
   header: { visible: false, menuVisible: true, title: 'Robot Camera' },
   overlays: {
-    primaryKind: 'stage',
+    primaryKind: 'video',
     primary: '.video-stage',
-    thumb: '.mode-form',
+    form: '.mode-form',
     legend: '.video-legend',
   },
 });
 
 menu.addButton('Hero', 'Navigate Hero', () => {
-  void sections.navigateTo('hero');
+  void sections.navigateTo(ROBOT_SECTION_IDS.hero);
 });
 menu.addButton('Docs', 'Navigate Docs', () => {
-  void sections.navigateTo('docs');
+  void sections.navigateTo(ROBOT_SECTION_IDS.docs);
 });
 menu.addButton('Telemetry', 'Navigate Telemetry', () => {
-  void sections.navigateTo('table');
+  void sections.navigateTo(ROBOT_SECTION_IDS.table);
+});
+menu.addButton('Steering', 'Navigate Steering Settings', () => {
+  void sections.navigateTo(ROBOT_SECTION_IDS.steeringSettings);
+});
+menu.addButton('Key Params', 'Navigate Key Params', () => {
+  void sections.navigateTo(ROBOT_SECTION_IDS.keyParams);
 });
 menu.addButton('Three', 'Navigate Three', () => {
-  void sections.navigateTo('three');
+  void sections.navigateTo(ROBOT_SECTION_IDS.three);
 });
 menu.addButton('Terminal', 'Navigate Terminal', () => {
-  void sections.navigateTo('xterm');
+  void sections.navigateTo(ROBOT_SECTION_IDS.xterm);
 });
 menu.addButton('Camera', 'Navigate Camera', () => {
-  void sections.navigateTo('video');
+  void sections.navigateTo(ROBOT_SECTION_IDS.video);
 });
 menu.addButton('Settings', 'Navigate Settings', () => {
-  void sections.navigateTo('settings');
+  void sections.navigateTo(ROBOT_SECTION_IDS.settings);
 });
 
-const sectionOrder = ['hero', 'docs', 'table', 'three', 'xterm', 'video', 'settings'] as const;
+const sectionOrder = ROBOT_SECTION_ORDER;
 const sectionSet = new Set(sectionOrder);
 const defaultSection = sectionOrder[0];
 
 const syncSectionFromURL = () => {
-  const hashId = window.location.hash.slice(1);
-  const targetId = sectionSet.has(hashId as (typeof sectionOrder)[number]) ? hashId : defaultSection;
+  const hashId = window.location.hash.slice(1).trim().toLowerCase();
+  const fromAlias = ROBOT_SECTION_HASH_ALIASES[hashId];
+  const targetId = fromAlias && sectionSet.has(fromAlias) ? fromAlias : defaultSection;
   const activeId = sections.getActiveSectionId();
   if (activeId === targetId) return;
   void sections.navigateTo(targetId, { updateHash: hashId !== targetId }).catch((err: unknown) => {
@@ -295,7 +376,7 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  const idx = sectionOrder.indexOf(active as (typeof sectionOrder)[number]);
+  const idx = sectionOrder.indexOf(active as RobotSectionID);
   if (idx < 0) return;
 
   if (event.key === 'ArrowDown' || event.key === 'PageDown' || event.key.toLowerCase() === 'j') {
@@ -329,7 +410,7 @@ window.addEventListener('wheel', (event) => {
   if (now - lastWheelTime < wheelThrottle) return;
 
   const active = sections.getActiveSectionId() ?? defaultSection;
-  const idx = sectionOrder.indexOf(active as (typeof sectionOrder)[number]);
+  const idx = sectionOrder.indexOf(active as RobotSectionID);
   if (idx < 0) return;
 
   if (Math.abs(event.deltaY) > 20) {

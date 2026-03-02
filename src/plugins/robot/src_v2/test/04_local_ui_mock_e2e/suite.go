@@ -3,6 +3,7 @@ package localuimocke2e
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
+	"github.com/chromedp/chromedp"
 	"github.com/nats-io/nats.go"
 )
 
@@ -40,7 +42,10 @@ func Register(reg *testv1.Registry) {
 			port := "18083"
 			baseURL := "http://127.0.0.1:" + port
 			browserBaseURL := baseURL
-			remoteNode := strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_NODE"))
+			remoteNode := strings.TrimSpace(testv1.RuntimeConfigSnapshot().BrowserNode)
+			if remoteNode == "" {
+				remoteNode = strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_NODE"))
+			}
 			if remoteNode == "" {
 				remoteNode = strings.TrimSpace(os.Getenv("ROBOT_TEST_BROWSER_NODE"))
 			}
@@ -52,6 +57,11 @@ func Register(reg *testv1.Registry) {
 				} else if host, err := os.Hostname(); err == nil && strings.TrimSpace(host) != "" {
 					// For remote browser nodes, avoid loopback URL targets.
 					browserBaseURL = "http://" + strings.TrimSpace(host) + ":" + port
+				}
+			} else if isWSL() {
+				// In WSL local mode, tests still launch Windows Chrome; avoid localhost.
+				if hostIP := wslHostIPForWindowsBrowser(); hostIP != "" {
+					browserBaseURL = "http://" + hostIP + ":" + port
 				}
 			}
 			cmd := exec.Command(
@@ -89,23 +99,19 @@ func Register(reg *testv1.Registry) {
 			}
 
 			if err := ctx.WaitForStepMessageAfterAction("browser ui checks passed", 20*time.Second, func() error {
-				if remoteNode == "" {
-					remoteNode = "chroma"
-				}
+				userDataDir := filepath.Join(os.TempDir(), fmt.Sprintf("dialtone-robot-e2e-%d", time.Now().UnixNano()))
 				_, err := ctx.EnsureBrowser(testv1.BrowserOptions{
-					Headless:   true,
-					GPU:        true,
-					Role:       "robot-src-v2-e2e",
-					RemoteNode: remoteNode,
-					URL:        browserBaseURL + "/#hero",
+					Headless:    false,
+					GPU:         true,
+					Role:        "robot-src-v2-e2e",
+					RemoteNode:  remoteNode,
+					UserDataDir: userDataDir,
+					URL:         browserBaseURL + "/#hero",
 				})
 				if err != nil {
 					return err
 				}
-				if err := ctx.WaitForAriaLabel("Hero Section", 8*time.Second); err != nil {
-					return err
-				}
-				if err := ctx.WaitForAriaLabelAttrEquals("Hero Section", "data-active", "true", 8*time.Second); err != nil {
+				if err := waitForHeroReadyByID(ctx, 8*time.Second); err != nil {
 					return err
 				}
 
@@ -192,4 +198,57 @@ func tailscaleSelfDNSName() string {
 		return ""
 	}
 	return strings.TrimSuffix(strings.TrimSpace(status.Self.DNSName), ".")
+}
+
+func isWSL() bool {
+	raw, err := os.ReadFile("/proc/version")
+	if err != nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(string(raw)), "microsoft")
+}
+
+func wslHostIPForWindowsBrowser() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, iface := range ifaces {
+		if (iface.Flags&net.FlagUp) == 0 || (iface.Flags&net.FlagLoopback) != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ipnet, ok := addr.(*net.IPNet)
+			if !ok || ipnet == nil {
+				continue
+			}
+			ip := ipnet.IP.To4()
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			return ip.String()
+		}
+	}
+	return ""
+}
+
+func waitForHeroReadyByID(ctx *testv1.StepContext, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		var ready bool
+		err := ctx.RunBrowserWithTimeout(1500*time.Millisecond, chromedp.Evaluate(`(() => {
+			const el = document.getElementById('robot-hero-stage');
+			if (!el) return false;
+			return el.getAttribute('data-ready') === 'true' && el.getAttribute('data-active') === 'true';
+		})()`, &ready))
+		if err == nil && ready {
+			return nil
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("timed out waiting for #robot-hero-stage ready/active after %s", timeout)
 }

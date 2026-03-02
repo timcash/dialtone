@@ -5,6 +5,8 @@ import { VisualizationControl } from '@ui/types';
 import { addMavlinkListener, sendCommand } from '../../data/connection';
 import { LatencyEstimator } from '../../data/latency';
 import { registerButtons, renderButtons } from '../../buttons';
+import { ROBOT_SECTION_IDS } from '../../section_ids';
+import { sendDriveDown, sendDriveDownLeft, sendDriveDownRight, sendDriveLeft, sendDriveRight, sendDriveUp, sendStopNow } from '../../data/steering';
 
 const CHATLOG_MAX_LINES = 7;
 
@@ -34,16 +36,37 @@ class ThreeControl implements VisualizationControl {
     this.chatlogHost = container.querySelector('.three-chatlog-xterm');
     this.initChatlogTerminal();
 
-    registerButtons('three', ['Control'], {
-      'Control': [
+	    registerButtons(ROBOT_SECTION_IDS.three, ['Drive', 'System', 'Guided'], {
+	      'Drive': [
+	        { label: 'Up-L', action: () => sendDriveLeft() },
+	        { label: 'Up', action: () => sendDriveUp() },
+        { label: 'Up-R', action: () => sendDriveRight() },
+        { label: 'Down-L', action: () => sendDriveDownLeft() },
+        { label: 'Down', action: () => sendDriveDown() },
+        { label: 'Down-R', action: () => sendDriveDownRight() },
+        { label: 'Stop', action: () => sendStopNow() },
+        null,
+      ],
+      'System': [
         { label: 'Arm', action: () => sendCommand('arm') },
         { label: 'Disarm', action: () => sendCommand('disarm') },
         { label: 'Manual', action: () => sendCommand('mode', 'manual') },
         { label: 'Steering', action: () => sendCommand('mode', 'steering') },
         { label: 'Guided', action: () => sendCommand('mode', 'guided') },
         { label: 'Pulse Fwd', action: () => sendCommand('pulse_fwd') },
-        null, null
-      ]
+        { label: 'Stop', action: () => sendStopNow() },
+        null,
+      ],
+      'Guided': [
+        { label: 'Guided On', action: () => sendCommand('mode', 'guided') },
+        { label: 'Fwd 1m', action: () => sendCommand('guided_forward_1m') },
+        { label: 'Square 5m', action: () => sendCommand('guided_square_5m') },
+        { label: 'Hold', action: () => sendCommand('guided_hold') },
+        { label: 'Manual', action: () => sendCommand('mode', 'manual') },
+        { label: 'Stop', action: () => sendStopNow() },
+        null,
+        null,
+      ],
     });
 
     this.camera.position.set(0, 5, 10);
@@ -316,7 +339,7 @@ class ThreeControl implements VisualizationControl {
   }
 
   private resize = () => {
-    const rect = this.container.getBoundingClientRect();
+    const rect = this.renderer.domElement.getBoundingClientRect();
     const width = Math.max(1, rect.width);
     const height = Math.max(1, rect.height);
     this.camera.aspect = width / height;
@@ -356,7 +379,7 @@ class ThreeControl implements VisualizationControl {
     if (visible) {
       this.resize();
       this.subscribe();
-      renderButtons('three');
+      renderButtons(ROBOT_SECTION_IDS.three);
     } else {
       if (this.unsubscribe) {
         this.unsubscribe();

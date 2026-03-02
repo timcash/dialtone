@@ -30,7 +30,7 @@ import (
 
 const testTag = "[TEST]"
 const defaultStepTimeout = 10 * time.Second
-const devtoolsHTTPTimeout = 1200 * time.Millisecond
+const devtoolsHTTPTimeout = 3 * time.Second
 
 var srcVersionTestDirRe = regexp.MustCompile(`(?i)(.*[/\\]src_v[0-9]+)[/\\]test(?:[/\\].*)?$`)
 var callerSrcVersionRootRe = regexp.MustCompile(`(?i)(.*?/src/plugins/[^/]+/src_v[0-9]+)(?:/.*)?$`)
@@ -107,6 +107,9 @@ type ConsoleMessage struct {
 type BrowserSession struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
+	allocCtx     context.Context
+	cancelAlloc  context.CancelFunc
+	cancelTab    context.CancelFunc
 	Session      *chrome.Session
 	closers      []io.Closer
 	mu           sync.Mutex
@@ -126,7 +129,14 @@ func (s *BrowserSession) ChromeSession() *chrome.Session {
 }
 
 func (s *BrowserSession) Close() {
-	s.cancel()
+	if s.cancelTab != nil {
+		s.cancelTab()
+	}
+	if s.cancelAlloc != nil {
+		s.cancelAlloc()
+	} else if s.cancel != nil {
+		s.cancel()
+	}
 	for _, c := range s.closers {
 		if c != nil {
 			_ = c.Close()
@@ -236,8 +246,12 @@ func (s *BrowserSession) EnsureOpenPage() error {
 	}
 	s.mu.Lock()
 	allowCreate := s.allowCreate
+	currentTarget := strings.TrimSpace(string(s.mainTargetID))
 	s.mu.Unlock()
 	if targetID, err := s.ensureFirstPageTargetIDViaCDP(allowCreate); err == nil && strings.TrimSpace(targetID) != "" {
+		if currentTarget != "" && currentTarget == strings.TrimSpace(targetID) {
+			return nil
+		}
 		return s.rebindToTarget(targetID)
 	}
 	ports := candidateDebugPortsForSession(s.Session)
@@ -246,7 +260,7 @@ func (s *BrowserSession) EnsureOpenPage() error {
 	}
 	var lastErr error
 	for _, p := range ports {
-		host := "127.0.0.1"
+		host := defaultLocalDebugHost()
 		if s.Session != nil {
 			host = debugHostFromWebSocketURL(s.Session.WebSocketURL)
 		}
@@ -372,19 +386,26 @@ func debugPortFromWebSocketURL(raw string) int {
 
 func (s *BrowserSession) rebindToTarget(targetID string) error {
 	targetID = strings.TrimSpace(targetID)
-	allocCtx, cancelAlloc := chromedp.NewRemoteAllocator(context.Background(), s.Session.WebSocketURL)
+	allocCtx := s.allocCtx
+	cancelAlloc := s.cancelAlloc
+	if allocCtx == nil || cancelAlloc == nil {
+		allocCtx, cancelAlloc = chromedp.NewRemoteAllocator(context.Background(), s.Session.WebSocketURL)
+		s.allocCtx = allocCtx
+		s.cancelAlloc = cancelAlloc
+	}
 	ctxOpts := []chromedp.ContextOption{}
 	if targetID != "" {
 		ctxOpts = append(ctxOpts, chromedp.WithTargetID(target.ID(targetID)))
 	}
 	ctx, cancelCtx := chromedp.NewContext(allocCtx, ctxOpts...)
-	oldCancel := s.cancel
+	oldCancelTab := s.cancelTab
 	s.ctx = ctx
+	s.cancelTab = cancelCtx
 	s.cancel = func() { cancelCtx(); cancelAlloc() }
 	s.mainTargetID = target.ID(targetID)
 	s.attachTargetListener(ctx)
-	if oldCancel != nil {
-		oldCancel()
+	if oldCancelTab != nil {
+		oldCancelTab()
 	}
 	return nil
 }
@@ -447,7 +468,7 @@ func (s *BrowserSession) CaptureScreenshot(path string) (err error) {
 	if err := chromedp.Run(s.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 		data, err := page.CaptureScreenshot().
 			WithCaptureBeyondViewport(false).
-			WithFromSurface(false).
+			WithFromSurface(true).
 			Do(ctx)
 		if err != nil {
 			return err
@@ -517,20 +538,36 @@ func ConnectToBrowser(port int, role string) (*BrowserSession, error) {
 }
 
 func getWebsocketURL(port int) (string, error) {
-	resp, err := devtoolsHTTPClient.Get(fmt.Sprintf("http://127.0.0.1:%d/json/version", port))
-	if err != nil {
-		return "", err
+	var lastErr error
+	for _, host := range localDebugProbeHosts() {
+		resp, err := devtoolsHTTPClient.Get(fmt.Sprintf("http://%s:%d/json/version", host, port))
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var data struct {
+			WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+			_ = resp.Body.Close()
+			lastErr = err
+			continue
+		}
+		_ = resp.Body.Close()
+		ws := strings.TrimSpace(data.WebSocketDebuggerURL)
+		if ws == "" {
+			lastErr = fmt.Errorf("empty websocket url for host %s port %d", host, port)
+			continue
+		}
+		if normalized := normalizeWebSocketHost(ws, host, port); normalized != "" {
+			return normalized, nil
+		}
+		return ws, nil
 	}
-	defer resp.Body.Close()
-
-	var data struct {
-		WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
+	if lastErr == nil {
+		lastErr = fmt.Errorf("failed to resolve websocket URL on port %d", port)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return "", err
-	}
-
-	return data.WebSocketDebuggerURL, nil
+	return "", lastErr
 }
 
 func initSession(session *chrome.Session, role string) (*BrowserSession, error) {
@@ -579,6 +616,9 @@ func initSession(session *chrome.Session, role string) (*BrowserSession, error) 
 	s := &BrowserSession{
 		ctx:         ctx,
 		cancel:      func() { cancelCtx(); cancelAlloc() },
+		allocCtx:    allocCtx,
+		cancelAlloc: cancelAlloc,
+		cancelTab:   cancelCtx,
 		Session:     session,
 		allowCreate: allowCreate,
 	}
@@ -598,11 +638,11 @@ func isLocalWebSocketHost(raw string) bool {
 func debugHostFromWebSocketURL(raw string) string {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || u == nil {
-		return "127.0.0.1"
+		return defaultLocalDebugHost()
 	}
 	host := strings.TrimSpace(u.Hostname())
 	if host == "" {
-		return "127.0.0.1"
+		return defaultLocalDebugHost()
 	}
 	return host
 }
@@ -630,7 +670,40 @@ func forceLocalWebSocketHost(raw string) string {
 	if port == "" {
 		return raw
 	}
-	u.Host = net.JoinHostPort("127.0.0.1", port)
+	u.Host = net.JoinHostPort(defaultLocalDebugHost(), port)
+	return u.String()
+}
+
+func localDebugProbeHosts() []string {
+	if stdruntime.GOOS == "linux" {
+		if gw := wslGatewayIP(); gw != "" {
+			return []string{gw}
+		}
+	}
+	return []string{"127.0.0.1"}
+}
+
+func defaultLocalDebugHost() string {
+	hosts := localDebugProbeHosts()
+	if len(hosts) == 0 {
+		return "127.0.0.1"
+	}
+	return strings.TrimSpace(hosts[0])
+}
+
+func normalizeWebSocketHost(raw, host string, port int) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	if strings.TrimSpace(host) != "" && port > 0 {
+		u.Scheme = "ws"
+		u.Host = net.JoinHostPort(strings.TrimSpace(host), strconv.Itoa(port))
+	}
 	return u.String()
 }
 
@@ -709,7 +782,7 @@ func (s *BrowserSession) attachTargetListener(ctx context.Context) {
 }
 
 func getFirstPageTargetID(port int) (string, error) {
-	return getFirstPageTargetIDAt("127.0.0.1", port)
+	return getFirstPageTargetIDAt(defaultLocalDebugHost(), port)
 }
 
 func getFirstPageTargetIDAt(host string, port int) (string, error) {
@@ -718,7 +791,7 @@ func getFirstPageTargetIDAt(host string, port int) (string, error) {
 	}
 	host = strings.TrimSpace(host)
 	if host == "" {
-		host = "127.0.0.1"
+		host = defaultLocalDebugHost()
 	}
 	resp, err := devtoolsHTTPClient.Get(fmt.Sprintf("http://%s/json/list", net.JoinHostPort(host, strconv.Itoa(port))))
 	if err != nil {
@@ -743,7 +816,7 @@ func getFirstPageTargetIDAt(host string, port int) (string, error) {
 }
 
 func createTargetAtPort(port int, url string) error {
-	return createTargetAtPortAt("127.0.0.1", port, url)
+	return createTargetAtPortAt(defaultLocalDebugHost(), port, url)
 }
 
 func createTargetAtPortAt(host string, port int, url string) error {
@@ -752,7 +825,7 @@ func createTargetAtPortAt(host string, port int, url string) error {
 	}
 	host = strings.TrimSpace(host)
 	if host == "" {
-		host = "127.0.0.1"
+		host = defaultLocalDebugHost()
 	}
 	u := fmt.Sprintf("http://%s/json/new?%s", net.JoinHostPort(host, strconv.Itoa(port)), url)
 	req, err := http.NewRequest(http.MethodPut, u, nil)
@@ -779,7 +852,7 @@ func createTargetAtPortAt(host string, port int, url string) error {
 }
 
 func ensureFirstPageTargetID(port int, allowCreate bool) (string, error) {
-	return ensureFirstPageTargetIDAt("127.0.0.1", port, allowCreate)
+	return ensureFirstPageTargetIDAt(defaultLocalDebugHost(), port, allowCreate)
 }
 
 func ensureFirstPageTargetIDAt(host string, port int, allowCreate bool) (string, error) {
@@ -956,7 +1029,7 @@ func preflightRemoteSharedBrowser(opts SuiteOptions) (*BrowserSession, error) {
 		logs.Info("%s preflight browser attach on node=%s role=%q", testTag, remoteNode, role)
 		s, err := StartBrowser(BrowserOptions{
 			Headless:            true,
-			GPU:                 false,
+			GPU:                 true,
 			Role:                role,
 			ReuseExisting:       true,
 			PreserveTabAndSize:  true,

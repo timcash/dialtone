@@ -30,6 +30,9 @@
         "name": "camera",
         "artifact": "camera",
         "depends_on": ["robot"],
+        "env": {
+          "CAMERA_DEVICE": "/dev/video1"
+        },
         "args": [
           "run",
           "--nats-url",

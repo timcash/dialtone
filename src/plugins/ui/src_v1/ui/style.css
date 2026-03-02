@@ -190,6 +190,12 @@ body.menu-open [data-overlay='mode-form'][data-overlay-active='true'] {
   pointer-events: none;
 }
 
+body.menu-open [data-overlay='mode-form-toggle'][data-overlay-active='true'] {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
 .section-loading {
   position: fixed;
   inset: 0;
@@ -397,6 +403,27 @@ section > form {
   margin: 0 auto calc(env(safe-area-inset-bottom, 0px) + 14px);
 }
 
+section > form[data-mode-form-state='closed'] {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+section > .mode-form-toggle {
+  position: absolute;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+  right: calc(((100vw - min(500px, calc(100vw - 28px))) / 2) + env(safe-area-inset-right, 0px));
+  z-index: 14;
+  width: calc((min(500px, calc(100vw - 28px)) - (var(--mode-form-gap, 12px) * 2)) / 3);
+  min-width: 56px;
+  height: 64px;
+  min-height: 56px;
+  padding: 0 10px;
+  font-size: 0.8rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
 @media (min-width: 1200px) {
   section.fullscreen > form {
     left: 50%;
@@ -430,8 +457,7 @@ section > form > input {
 section > form > input:focus { outline: 0; }
 
 section > form > button:last-of-type {
-  grid-row: 4;
-  grid-column: 3;
+  display: none !important;
 }
 
 /* Header overlay (legend/text styles usually applied by section CSS) */

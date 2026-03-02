@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PORT="${1:-9222}"
-URL="${2:-http://127.0.0.1:5177/#hero}"
+URL="${2:-http://127.0.0.1:5177/#ui-hero-stage}"
 ROLE="${3:-ui-dev-tailnet}"
 PROFILE_DIR="${HOME}/.dialtone/chrome-tailnet-${PORT}"
 LOG_FILE="${HOME}/.dialtone/chrome-tailnet-${PORT}.log"
@@ -45,4 +45,3 @@ done
 echo "failed to start debug endpoint on :${PORT}" >&2
 tail -n 80 "${LOG_FILE}" || true
 exit 2
-

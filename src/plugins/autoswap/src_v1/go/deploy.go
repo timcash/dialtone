@@ -36,7 +36,7 @@ func RunDeploy(args []string) error {
 	host := fs.String("host", strings.TrimSpace(os.Getenv("ROBOT_HOST")), "SSH host")
 	port := fs.String("port", "22", "SSH port")
 	user := fs.String("user", strings.TrimSpace(os.Getenv("ROBOT_USER")), "SSH user")
-	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password")
+	pass := fs.String("pass", os.Getenv("ROBOT_PASSWORD"), "SSH password (optional when SSH key auth is configured)")
 	remoteRepo := fs.String("remote-repo", "", "Remote repo root (default: /home/<user>/dialtone)")
 	installDir := fs.String("install-dir", "", "Remote autoswap install dir (default: /home/<user>/.dialtone/autoswap)")
 	service := fs.Bool("service", false, "Install/start autoswap service on remote host")
@@ -70,8 +70,8 @@ func RunDeploy(args []string) error {
 	if opts.Port == "" {
 		opts.Port = "22"
 	}
-	if opts.Host == "" || opts.Pass == "" {
-		return fmt.Errorf("deploy requires --host and --pass (or ROBOT_HOST/ROBOT_PASSWORD env)")
+	if opts.Host == "" {
+		return fmt.Errorf("deploy requires --host (or ROBOT_HOST env)")
 	}
 
 	node, err := sshplugin.ResolveMeshNode(opts.Host)
@@ -106,6 +106,12 @@ func RunDeploy(args []string) error {
 	if opts.Service && strings.TrimSpace(opts.ManifestURL) == "" {
 		opts.ManifestURL = fmt.Sprintf("https://github.com/%s/releases/latest/download/robot_src_v2_composition_manifest.json", opts.Repo)
 		logs.Info("[DEPLOY] manifest-url not provided; using latest release URL: %s", opts.ManifestURL)
+	}
+	if opts.Service {
+		if normalized, changed := normalizeManifestURLForAutoUpdate(opts.ManifestURL, opts.Repo); changed {
+			logs.Info("[DEPLOY] normalized manifest-url to auto-update latest: %s -> %s", opts.ManifestURL, normalized)
+			opts.ManifestURL = normalized
+		}
 	}
 
 	cmdOpts := sshplugin.CommandOptions{

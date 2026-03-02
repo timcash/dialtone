@@ -11,9 +11,21 @@
         <div aria-label="Global Menu Panel" hidden></div>
       </nav>
 
-      <section id="hero" class="fullscreen" aria-label="Hero Section">
+      <section id="earth-hero-stage" class="fullscreen" aria-label="Hero Section">
         <canvas aria-label="Hero Canvas" class="hero-stage overlay-primary"></canvas>
-        <form class="mode-form" data-mode-form="hero" aria-label="Hero Mode Form" hidden></form>
+        <form class="mode-form" data-mode-form="earth-hero-stage" aria-label="Hero Mode Form">
+          <button type="button" data-cmd="view-orbit">Orbit</button>
+          <button type="button" data-cmd="view-hover">Hover</button>
+          <button type="button" data-cmd="view-top">Top Down</button>
+          <button type="button" data-cmd="view-swap">Swap View</button>
+          <button type="button" hidden></button>
+          <button type="button" hidden></button>
+          <button type="button" hidden></button>
+          <button type="button" hidden></button>
+          <button type="button" hidden></button>
+          <input type="text" aria-label="Earth Command" placeholder="Solar system view..." />
+          <button type="button">Apply</button>
+        </form>
         <aside class="hero-legend overlay-legend legend-marketing" aria-label="Hero Legend">
           <h1>Dialtone Earth</h1>
           <p>Autonomous intelligence for the next generation of exploration.</p>

@@ -1,6 +1,7 @@
 import { VisualizationControl } from '@ui/types';
 import { addMavlinkListener } from '../../data/connection';
 import { registerButtons, renderButtons } from '../../buttons';
+import { ROBOT_SECTION_IDS } from '../../section_ids';
 
 type TableRow = {
   key: string;
@@ -16,7 +17,7 @@ class TableControl implements VisualizationControl {
   constructor(private container: HTMLElement) {
     this.subscribe();
     
-    registerButtons('table', ['Browse'], {
+    registerButtons(ROBOT_SECTION_IDS.table, ['Browse'], {
       'Browse': [
         { label: 'Refresh', action: () => this.renderRows() },
         { label: 'Clear', action: () => { this.allRows.clear(); this.renderRows(); } },
@@ -65,6 +66,13 @@ class TableControl implements VisualizationControl {
       this.allRows.set('status_text', { key: 'status_text', value: data.text, status: `MAV_SEV_${data.severity}` });
     } else if (data.command !== undefined && data.result !== undefined) {
       this.allRows.set('command_ack_cmd', { key: 'command_ack_cmd', value: String(data.command), status: `MAV_ACK_${data.result}` });
+    } else if (data.type === 'CONTROL_FEEDBACK') {
+      if (data.source !== undefined) this.allRows.set('control_source', { key: 'control_source', value: String(data.source), status: 'MAV' });
+      if (data.steering_channel !== undefined) this.allRows.set('steering_channel', { key: 'steering_channel', value: String(data.steering_channel), status: 'MAV' });
+      if (data.throttle_channel !== undefined) this.allRows.set('throttle_channel', { key: 'throttle_channel', value: String(data.throttle_channel), status: 'MAV' });
+      if (data.steering_raw !== undefined) this.allRows.set('steering_raw', { key: 'steering_raw', value: String(data.steering_raw), status: 'MAV' });
+      if (data.throttle_raw !== undefined) this.allRows.set('throttle_raw', { key: 'throttle_raw', value: String(data.throttle_raw), status: 'MAV' });
+      if (data.timestamp !== undefined) this.allRows.set('control_feedback_ts', { key: 'control_feedback_ts', value: String(data.timestamp), status: 'MAV' });
     }
     
     if (this.visible) {
@@ -97,7 +105,7 @@ class TableControl implements VisualizationControl {
     if (visible) {
       this.subscribe();
       this.renderRows();
-      renderButtons('table');
+      renderButtons(ROBOT_SECTION_IDS.table);
     } else {
       if (this.unsubscribe) {
         this.unsubscribe();
