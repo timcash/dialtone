@@ -121,7 +121,8 @@ func handleRemoteListCmd(args []string) {
 
 func handleRemoteNewCmd(args []string) {
 	fs := flag.NewFlagSet("chrome remote-new", flag.ExitOnError)
-	nodeName := fs.String("node", "", "Target mesh node")
+	hostName := fs.String("host", "", "Target mesh host")
+	nodeName := fs.String("node", "", "Alias for --host (deprecated)")
 	url := fs.String("url", "about:blank", "Initial URL")
 	port := fs.Int("port", chrome.DefaultDebugPort, "Remote debugging port")
 	role := fs.String("role", "dev", "Role tag (dev|test)")
@@ -131,9 +132,12 @@ func handleRemoteNewCmd(args []string) {
 	reuseExisting := fs.Bool("reuse-existing", true, "Reuse if /json/version is already available")
 	_ = fs.Parse(args)
 
-	n := strings.TrimSpace(*nodeName)
+	n := strings.TrimSpace(*hostName)
 	if n == "" {
-		logs.Fatal("remote-new: --node is required")
+		n = strings.TrimSpace(*nodeName)
+	}
+	if n == "" {
+		logs.Fatal("remote-new: --host is required")
 	}
 	node, err := sshv1.ResolveMeshNode(n)
 	if err != nil {
@@ -181,16 +185,21 @@ func handleRemoteProbeCmd(args []string) {
 
 func handleRemoteRelayCmd(args []string) {
 	fs := flag.NewFlagSet("chrome remote-relay", flag.ExitOnError)
-	nodeName := fs.String("node", "", "Target mesh node")
+	hostName := fs.String("host", "", "Target mesh host")
+	nodeName := fs.String("node", "", "Alias for --host (deprecated)")
 	listenPort := fs.Int("listen-port", 9223, "Relay listen port on remote host")
 	targetPort := fs.Int("target-port", chrome.DefaultDebugPort, "Target debug port on remote localhost")
 	stop := fs.Bool("stop", false, "Stop relay on remote host instead of starting")
 	_ = fs.Parse(args)
 
-	if strings.TrimSpace(*nodeName) == "" {
-		logs.Fatal("remote-relay: --node is required")
+	target := strings.TrimSpace(*hostName)
+	if target == "" {
+		target = strings.TrimSpace(*nodeName)
 	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(*nodeName))
+	if target == "" {
+		logs.Fatal("remote-relay: --host is required")
+	}
+	node, err := sshv1.ResolveMeshNode(target)
 	if err != nil {
 		logs.Fatal("remote-relay: %v", err)
 	}
@@ -297,12 +306,17 @@ func handleRemoteKillCmd(args []string) {
 
 func handleRemoteWSLForwardCmd(args []string) {
 	fs := flag.NewFlagSet("chrome remote-wsl-forward", flag.ExitOnError)
-	nodeName := fs.String("node", "legion", "Windows mesh node to configure")
+	hostName := fs.String("host", "legion", "Windows mesh host to configure")
+	nodeName := fs.String("node", "", "Alias for --host (deprecated)")
 	portsArg := fs.String("ports", fmt.Sprintf("%d", chrome.DefaultDebugPort), "Ports csv")
 	remove := fs.Bool("remove", false, "Remove forwarding/firewall rules instead of creating them")
 	_ = fs.Parse(args)
 
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(*nodeName))
+	target := strings.TrimSpace(*hostName)
+	if target == "" {
+		target = strings.TrimSpace(*nodeName)
+	}
+	node, err := sshv1.ResolveMeshNode(target)
 	if err != nil {
 		logs.Fatal("remote-wsl-forward: %v", err)
 	}
@@ -377,6 +391,25 @@ func startRemoteChrome(node sshv1.MeshNode, opts remoteStartOptions) error {
 	if opts.DebugAddress == "" {
 		opts.DebugAddress = "0.0.0.0"
 	}
+	if opts.ReuseExisting {
+		if procs, err := listRemoteNodeChrome(node); err == nil {
+			for _, p := range procs {
+				if !strings.EqualFold(strings.TrimSpace(p.Origin), "dialtone") {
+					continue
+				}
+				if !strings.EqualFold(strings.TrimSpace(p.Role), strings.TrimSpace(opts.Role)) {
+					continue
+				}
+				if p.DebugPort <= 0 {
+					continue
+				}
+				if _, ok := probeRemoteNodePort(node, p.DebugPort); ok {
+					opts.Port = p.DebugPort
+					break
+				}
+			}
+		}
+	}
 
 	if node.OS == "windows" {
 		reusePS := "$false"
@@ -396,9 +429,26 @@ $paths=@("$env:ProgramFiles\Google\Chrome\Application\chrome.exe","$env:ProgramF
 $exe=$null
 foreach($p in $paths){ if(Test-Path $p){ $exe=$p; break } }
 if(-not $exe){ Write-Error "chrome executable not found"; exit 1 }
+function Trim-DialtoneTabs([int]$p){
+  try{
+    $list=Invoke-RestMethod -Uri ("http://127.0.0.1:{0}/json/list" -f $p) -TimeoutSec 2
+    $pages=@($list | Where-Object { $_.type -eq 'page' })
+    if($pages.Count -eq 0){
+      try { Invoke-WebRequest -UseBasicParsing -Method GET -Uri ("http://127.0.0.1:{0}/json/new?about:blank" -f $p) -TimeoutSec 2 | Out-Null } catch {}
+      return
+    }
+    if($pages.Count -le 1){ return }
+    $keep=$pages[0].id
+    foreach($pg in $pages){
+      if($pg.id -ne $keep){
+        try { Invoke-WebRequest -UseBasicParsing -Method GET -Uri ("http://127.0.0.1:{0}/json/close/{1}" -f $p,$pg.id) -TimeoutSec 2 | Out-Null } catch {}
+      }
+    }
+  } catch {}
+}
 $port=%d
 if (%s) {
-  try { $v=Invoke-RestMethod -Uri ("http://127.0.0.1:{0}/json/version" -f $port) -TimeoutSec 1; if($v.webSocketDebuggerUrl){ Write-Output ("reused debugger on :{0}" -f $port); Write-Output ($v | ConvertTo-Json -Compress); exit 0 } } catch {}
+  try { $v=Invoke-RestMethod -Uri ("http://127.0.0.1:{0}/json/version" -f $port) -TimeoutSec 1; if($v.webSocketDebuggerUrl){ Trim-DialtoneTabs -p $port; Write-Output ("reused debugger on :{0}" -f $port); Write-Output ($v | ConvertTo-Json -Compress); exit 0 } } catch {}
 }
 for($attempt=0;$attempt -lt 8;$attempt++){
   $used=Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue
@@ -417,7 +467,7 @@ if(%s){ $args += "--headless=new" }
 if(%s){ } else { $args += "--disable-gpu" }
 $args += %q
 $proc=Start-Process -FilePath $exe -ArgumentList $args -PassThru
-for($i=0;$i -lt 60;$i++){ try{ $v=Invoke-RestMethod -Uri ("http://127.0.0.1:{0}/json/version" -f $port) -TimeoutSec 1; if($v.webSocketDebuggerUrl){ Write-Output ("started pid="+$proc.Id); Write-Output ($v | ConvertTo-Json -Compress); exit 0 } }catch{}; Start-Sleep -Milliseconds 200 }
+for($i=0;$i -lt 60;$i++){ try{ $v=Invoke-RestMethod -Uri ("http://127.0.0.1:{0}/json/version" -f $port) -TimeoutSec 1; if($v.webSocketDebuggerUrl){ Trim-DialtoneTabs -p $port; Write-Output ("started pid="+$proc.Id); Write-Output ($v | ConvertTo-Json -Compress); exit 0 } }catch{}; Start-Sleep -Milliseconds 200 }
 Write-Error "debug endpoint not ready on :$port"; exit 2`,
 			opts.Port, reusePS, opts.Role, opts.DebugAddress, opts.Role, headlessPS, gpuPS, opts.URL)
 		out, err := sshv1.RunNodeCommand(node.Name, ps, sshv1.CommandOptions{})
@@ -540,14 +590,21 @@ func listRemoteNodeChrome(node sshv1.MeshNode) ([]remoteChromeProcess, error) {
 			if pid <= 0 || cmd == "" {
 				continue
 			}
+			lc := strings.ToLower(cmd)
+			// Keep remote instance listing simple: only top-level browser commands.
+			// Child renderer/gpu/utility/crashpad processes should not appear as
+			// separate browser instances in list/remote-list output.
+			if strings.Contains(lc, "--type=") {
+				continue
+			}
 			rows = append(rows, remoteChromeProcess{
 				Node:      node.Name,
 				Host:      node.Host,
 				PID:       pid,
 				PPID:      ppid,
 				Command:   cmd,
-				Headless:  strings.Contains(strings.ToLower(cmd), "--headless"),
-				GPU:       !strings.Contains(strings.ToLower(cmd), "--disable-gpu"),
+				Headless:  strings.Contains(lc, "--headless"),
+				GPU:       !strings.Contains(lc, "--disable-gpu"),
 				DebugPort: debugPortFromCmd(cmd),
 				Origin:    detectOriginFromCmd(cmd),
 				Role:      detectRoleFromCmd(cmd),
