@@ -122,7 +122,8 @@ func runRsyncToNode(src string, node MeshNode, dest string, del bool, excludes [
 	if node.Name == "wsl" {
 		return runLocalRsync(src, dest, del, excludes)
 	}
-	if node.Name == "legion" && shouldUseLocalPowerShell(node) {
+	// From WSL on Legion, sync directly to /mnt/c/... without SSH.
+	if node.Name == "legion" && isWSLFunc() {
 		// Local WSL -> Windows copy path (no SSH hop needed).
 		return runLocalRsync(src, dest, del, excludes)
 	}
