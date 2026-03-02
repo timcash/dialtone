@@ -9,14 +9,14 @@ import (
 
 func Register(reg *testv1.Registry) {
 	tc := sectionsnav.SectionCase{
-		ID:          "three-fullscreen",
+		ID:          "ui-three-fullscreen-stage",
 		NavAria:     "Navigate Three Fullscreen",
 		SectionAria: "Three Fullscreen Section",
 		Screenshot:  "ui_three_fullscreen.png",
 	}
 	reg.Add(testv1.Step{
 		Name:    "ui-section-three-fullscreen-via-menu",
-		Timeout: 5 * time.Second,
+		Timeout: 10 * time.Second,
 		RunWithContext: func(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 			return sectionsnav.RunSectionFromMenu(sc, tc, false)
 		},

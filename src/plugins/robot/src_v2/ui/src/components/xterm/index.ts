@@ -5,6 +5,7 @@ import { VisualizationControl } from '@ui/types';
 import { addMavlinkListener, sendCommand } from '../../data/connection';
 import { logInfo } from '../../data/logging';
 import { registerButtons, renderButtons, setMode } from '../../buttons';
+import { ROBOT_SECTION_IDS } from '../../section_ids';
 
 type CursorPos = {
   row: number;
@@ -108,7 +109,7 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
     if (selectionAnchor) {
       selectionAnchor = null;
       term.clearSelection();
-      setMode('xterm', 'Cursor'); // Fallback to cursor mode if we were selecting
+      setMode(ROBOT_SECTION_IDS.xterm, 'Cursor'); // Fallback to cursor mode if we were selecting
     }
     paintCursor();
   };
@@ -134,7 +135,7 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
   const startSelection = () => {
     selectionAnchor = { ...cursor };
     paintSelection();
-    setMode('xterm', 'Select');
+    setMode(ROBOT_SECTION_IDS.xterm, 'Select');
   };
 
   const copySelection = async () => {
@@ -181,7 +182,7 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
   };
 
   // Register Buttons
-  registerButtons('xterm', ['Cursor', 'Select', 'Command'], {
+  registerButtons(ROBOT_SECTION_IDS.xterm, ['Cursor', 'Select', 'Command'], {
     'Cursor': [
       { label: 'Left', action: () => moveCursor(-1, 0, false) },
       { label: 'Right', action: () => moveCursor(1, 0, false) },
@@ -202,14 +203,14 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
           selectionAnchor = null;
           term.clearSelection();
           paintCursor();
-          setMode('xterm', 'Cursor');
+          setMode(ROBOT_SECTION_IDS.xterm, 'Cursor');
       }},
       { label: 'Copy', action: () => copySelection() },
       { label: 'Done', action: () => {
           selectionAnchor = null;
           term.clearSelection();
           paintCursor();
-          setMode('xterm', 'Cursor');
+          setMode(ROBOT_SECTION_IDS.xterm, 'Cursor');
       }},
     ],
     'Command': [
@@ -299,7 +300,7 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
         terminalEl.setAttribute('data-ready', 'true');
         controlsEl.setAttribute('data-ready', 'true');
         subscribeToMavlink();
-        renderButtons('xterm');
+        renderButtons(ROBOT_SECTION_IDS.xterm);
       } else {
         if (unsubscribeMav) {
             unsubscribeMav();

@@ -1,18 +1,10 @@
 import { VisualizationControl } from '@ui/types';
 import * as THREE from 'three';
-import { polygonToCells } from 'h3-js';
 import { HexLayer } from '../../earth/hex_layer';
-import cloudVertexShader from '../../shaders/cloud.vert.glsl?raw';
-import cloudFragmentShader from '../../shaders/cloud.frag.glsl?raw';
-import atmosphereVertexShader from '../../shaders/atmosphere.vert.glsl?raw';
-import atmosphereFragmentShader from '../../shaders/atmosphere.frag.glsl?raw';
-import sunAtmosphereVertexShader from '../../shaders/sun_atmosphere.vert.glsl?raw';
-import sunAtmosphereFragmentShader from '../../shaders/sun_atmosphere.frag.glsl?raw';
+import { MarkerManager, City } from './markers';
+import { LightingManager } from './lights';
+import { CameraManager } from './camera';
 
-const DEG_TO_RAD = Math.PI / 180;
-const SUN_COLOR = new THREE.Color(1.0, 1.0, 1.0);
-const KEY1_COLOR = new THREE.Color(0.9, 0.95, 1.0);
-const KEY2_COLOR = new THREE.Color(0.85, 0.9, 1.0);
 const MOON_LIGHT_LAYER = 1;
 
 function createMoonRockTexture(size = 128): THREE.CanvasTexture {
@@ -59,75 +51,46 @@ function createMoonRockTexture(size = 128): THREE.CanvasTexture {
 
 class HeroControl implements VisualizationControl {
   scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(75, 1, 0.1, 10000);
   renderer: THREE.WebGLRenderer;
   frameId = 0;
   visible = false;
 
   earth!: THREE.Mesh;
-  cloud1!: THREE.Mesh;
-  cloud2!: THREE.Mesh;
-  atmosphere!: THREE.Mesh;
-  sunAtmosphere!: THREE.Mesh;
   moon!: THREE.Mesh;
-
-  earthMaterial!: THREE.MeshStandardMaterial;
-  cloud1Material!: THREE.ShaderMaterial;
-  cloud2Material!: THREE.ShaderMaterial;
-  atmosphereMaterial!: THREE.ShaderMaterial;
-  sunAtmosphereMaterial!: THREE.ShaderMaterial;
-
+  
+  orbitMarker!: THREE.Mesh;
+  topDownMarker!: THREE.Mesh;
+  
   hexLayers: HexLayer[] = [];
   landLayer?: HexLayer;
 
-  sunLight!: THREE.PointLight;
-  sunKeyLight!: THREE.DirectionalLight;
-  sunKeyLight2!: THREE.DirectionalLight;
-  ambientLight!: THREE.AmbientLight;
-  sunGlow!: THREE.Mesh;
+  markerManager!: MarkerManager;
+  lightingManager!: LightingManager;
+  cameraManager!: CameraManager;
+  
+  activeCamera!: THREE.PerspectiveCamera;
 
-  roverMarker!: THREE.Mesh;
-  roverLine!: THREE.Line;
-  groundAnchor!: THREE.Object3D;
-  markerAltitude = 10;
-  mockRoverLocation = { lat: 37.7749, lng: -122.4194 }; // San Francisco
-  isZooming = false;
+  earthRadius = 50;
+  earthRotSpeed = (Math.PI * 2) / 180;
+  
+  cities: City[] = [
+    { name: 'San Francisco', lat: 37.7749, lng: -122.4194 },
+    { name: 'New York', lat: 40.7128, lng: -74.0060 },
+    { name: 'London', lat: 51.5074, lng: -0.1278 },
+    { name: 'Paris', lat: 48.8566, lng: 2.3522 },
+    { name: 'Berlin', lat: 52.5200, lng: 13.4050 },
+    { name: 'Moscow', lat: 55.7558, lng: 37.6173 },
+    { name: 'Tokyo', lat: 35.6762, lng: 139.6503 },
+    { name: 'Beijing', lat: 39.9042, lng: 116.4074 },
+    { name: 'Mumbai', lat: 19.0760, lng: 72.8777 },
+    { name: 'Sydney', lat: -33.8688, lng: 151.2093 },
+    { name: 'Rio de Janeiro', lat: -22.9068, lng: -43.1729 },
+    { name: 'Cape Town', lat: -33.9249, lng: 18.4241 }
+  ];
+
   raycaster = new THREE.Raycaster();
   mouse = new THREE.Vector2();
 
-  cloud1Axis = new THREE.Vector3(0, 1, 0);
-  cloud2Axis = new THREE.Vector3(0.2, 1, -0.1).normalize();
-
-  earthRadius = 50;
-  shaderTimeScale = 0.28;
-  cloudAmount = 1.0;
-  earthRotSpeed = (Math.PI * 2) / 180;
-  cloud1RotSpeed = (Math.PI * 2) / 240;
-  cloud2RotSpeed = (Math.PI * 2) / 280;
-  cloud1Opacity = 0.95;
-  cloud2Opacity = 0.9;
-  cloudBrightness = 5.0;
-
-  cameraDistance = 23.5;
-  cameraOrbit = Math.PI; // Start on the other side
-  cameraOrbitSpeed = 0.1;
-  cameraFarOffset = 40;
-  cameraOrbitYOffset = -10;
-  cameraShellOffset = 0.4;
-  cameraTangentSpeed = 0.6;
-  cameraYaw = 0.99;
-
-  sunOrbitHeight = 870;
-  sunOrbitAngleDeg = 0;
-  sunOrbitSpeed = 0.0006283185307179586;
-  sunOrbitIncline = 20 * DEG_TO_RAD;
-
-  moonRadius = 5.5;
-  moonOrbitRadius = 125;
-  moonOrbitIncline = 8 * DEG_TO_RAD;
-  moonOrbitPhaseRad = 0.6;
-
-  materialColorScale = 1.25;
   lastFrameTime = performance.now();
 
   private resizeHandler: () => void;
@@ -137,27 +100,85 @@ class HeroControl implements VisualizationControl {
     this.renderer.setClearColor(0x000000, 0);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-    this.initLayers();
-    this.initLights();
+    this.cameraManager = new CameraManager(this.canvas.clientWidth / this.canvas.clientHeight);
+    this.activeCamera = this.cameraManager.orbitCamera;
+    
+    this.lightingManager = new LightingManager(this.scene, this.earthRadius);
+    this.initEarth();
+    this.initSystemMarkers();
+    
+    this.markerManager = new MarkerManager(this.earth, this.earthRadius, 10, this.canvas.clientWidth / this.canvas.clientHeight);
+    this.markerManager.initCities(this.cities);
 
     this.resizeHandler = () => {
       const width = this.canvas.clientWidth;
       const height = this.canvas.clientHeight;
       if (width <= 0 || height <= 0) return;
-      this.camera.aspect = width / height;
-      this.camera.updateProjectionMatrix();
+      const aspect = width / height;
+      this.cameraManager.setAspect(aspect);
+      this.markerManager.setAspect(aspect);
       this.renderer.setSize(width, height, false);
     };
 
     window.addEventListener('resize', this.resizeHandler);
     this.resizeHandler();
-    this.updateCamera();
-    this.camera.layers.enable(MOON_LIGHT_LAYER);
+    
+    this.cameraManager.orbitCamera.layers.enable(MOON_LIGHT_LAYER);
+    this.cameraManager.topDownCamera.layers.enable(MOON_LIGHT_LAYER);
 
     this.canvas.addEventListener('click', (e) => this.onCanvasClick(e));
+    this.bindFormButtons();
 
     void this.loadLandLayer();
     this.animate();
+  }
+
+  private initSystemMarkers() {
+    // Orbit Camera Marker (Red)
+    this.orbitMarker = new THREE.Mesh(
+      new THREE.SphereGeometry(4.0, 16, 16),
+      new THREE.MeshBasicMaterial({ color: 0xff4d4d, transparent: true, opacity: 0.8 })
+    );
+    this.orbitMarker.renderOrder = 20;
+    this.scene.add(this.orbitMarker);
+
+    // Top-Down Camera Marker (Yellow)
+    this.topDownMarker = new THREE.Mesh(
+      new THREE.SphereGeometry(15.0, 16, 16),
+      new THREE.MeshBasicMaterial({ color: 0xffcc00, transparent: true, opacity: 0.8 })
+    );
+    this.topDownMarker.position.set(0, 380, 0); // Sit just below the actual camera at 400
+    this.topDownMarker.renderOrder = 20;
+    this.scene.add(this.topDownMarker);
+  }
+
+  private bindFormButtons() {
+    const form = document.querySelector('form[data-mode-form="earth-hero-stage"]');
+    if (!form) return;
+
+    form.querySelectorAll('button').forEach(btn => {
+      const cmd = btn.getAttribute('data-cmd');
+      if (cmd === 'view-orbit') {
+        btn.onclick = () => this.activeCamera = this.cameraManager.orbitCamera;
+      } else if (cmd === 'view-hover') {
+        btn.onclick = () => this.activeCamera = this.markerManager.markers[0].camera;
+      } else if (cmd === 'view-top') {
+        btn.onclick = () => this.activeCamera = this.cameraManager.topDownCamera;
+      } else if (cmd === 'view-swap') {
+        btn.onclick = () => this.toggleCamera();
+      }
+    });
+  }
+
+  private toggleCamera() {
+    if (this.activeCamera === this.cameraManager.orbitCamera) {
+      this.activeCamera = this.markerManager.markers[0].camera;
+    } else if (this.activeCamera === this.cameraManager.topDownCamera) {
+      this.activeCamera = this.cameraManager.orbitCamera;
+    } else {
+      // We are in hover, go to top down
+      this.activeCamera = this.cameraManager.topDownCamera;
+    }
   }
 
   private onCanvasClick(event: MouseEvent) {
@@ -165,186 +186,75 @@ class HeroControl implements VisualizationControl {
     this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
-    this.raycaster.setFromCamera(this.mouse, this.camera);
-    const intersects = this.raycaster.intersectObject(this.roverMarker);
+    this.raycaster.setFromCamera(this.mouse, this.activeCamera);
+    
+    // Check City Markers
+    const cityMeshes = this.markerManager.markers.map(m => m.mesh);
+    const cityIntersects = this.raycaster.intersectObjects(cityMeshes);
+    if (cityIntersects.length > 0) {
+      const index = this.markerManager.markers.findIndex(m => m.mesh === cityIntersects[0].object);
+      this.activeCamera = this.markerManager.markers[index].camera;
+      return;
+    }
 
-    if (intersects.length > 0) {
-      this.isZooming = !this.isZooming;
+    // Check Orbit Marker
+    if (this.raycaster.intersectObject(this.orbitMarker).length > 0) {
+      this.activeCamera = this.cameraManager.orbitCamera;
+      return;
+    }
+
+    // Check Top-Down Marker
+    if (this.raycaster.intersectObject(this.topDownMarker).length > 0) {
+      this.activeCamera = this.cameraManager.topDownCamera;
+      return;
     }
   }
 
-  private latLngToVector(lat: number, lng: number, radius: number) {
-    const latRad = lat * DEG_TO_RAD;
-    const lngRad = lng * DEG_TO_RAD;
-    return new THREE.Vector3(
-      radius * Math.cos(latRad) * Math.sin(lngRad),
-      radius * Math.sin(latRad),
-      radius * Math.cos(latRad) * Math.cos(lngRad),
-    );
-  }
-
-  private initLayers() {
+  private initEarth() {
     const geo = (r: number, segs: number) => new THREE.SphereGeometry(r, segs, segs);
 
-    this.earthMaterial = new THREE.MeshStandardMaterial({ color: 0x0b2a6f, roughness: 0.6, metalness: 0.05 });
-    this.earth = new THREE.Mesh(geo(this.earthRadius, 64), this.earthMaterial);
+    this.earth = new THREE.Mesh(
+      geo(this.earthRadius, 64), 
+      new THREE.MeshStandardMaterial({ color: 0x0b2a6f, roughness: 0.6, metalness: 0.05 })
+    );
     this.scene.add(this.earth);
-
-    this.cloud1Material = this.createCloudMaterial(0.04, this.cloud1Opacity);
-    this.cloud1 = new THREE.Mesh(geo(this.earthRadius + 1.2, 48), this.cloud1Material);
-    this.cloud1.renderOrder = 2;
-    this.scene.add(this.cloud1);
-
-    this.cloud2Material = this.createCloudMaterial(0.1, this.cloud2Opacity);
-    this.cloud2 = new THREE.Mesh(geo(this.earthRadius + 1.5, 48), this.cloud2Material);
-    this.cloud2.renderOrder = 2;
-    this.scene.add(this.cloud2);
 
     this.hexLayers = [
       new HexLayer(this.earthRadius, {
-        radiusOffset: 1.0,
-        count: 240,
-        resolution: 3,
-        ratePerSecond: 45,
-        durationSeconds: 3,
+        radiusOffset: 1.0, count: 240, resolution: 3, ratePerSecond: 45, durationSeconds: 3,
         palette: [new THREE.Color(0.85, 0.85, 0.86), new THREE.Color(0.65, 0.67, 0.7), new THREE.Color(0.1, 0.1, 0.12)],
       }),
       new HexLayer(this.earthRadius, {
-        radiusOffset: 1.5,
-        count: 200,
-        resolution: 3,
-        ratePerSecond: 45,
-        durationSeconds: 3,
+        radiusOffset: 1.5, count: 200, resolution: 3, ratePerSecond: 45, durationSeconds: 3,
         palette: [new THREE.Color(0.75, 0.75, 0.76), new THREE.Color(0.45, 0.46, 0.5), new THREE.Color(0.05, 0.05, 0.07)],
       }),
       new HexLayer(this.earthRadius, {
-        radiusOffset: 2.0,
-        count: 160,
-        resolution: 3,
-        ratePerSecond: 45,
-        durationSeconds: 3,
+        radiusOffset: 2.0, count: 160, resolution: 3, ratePerSecond: 45, durationSeconds: 3,
         palette: [new THREE.Color(0.9, 0.9, 0.9), new THREE.Color(0.55, 0.56, 0.6), new THREE.Color(0.15, 0.15, 0.18)],
       }),
     ];
     this.hexLayers.forEach((l) => this.earth.add(l.mesh));
 
-    this.atmosphereMaterial = new THREE.ShaderMaterial({
-      side: THREE.BackSide,
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      uniforms: {
-        uSunDir: { value: new THREE.Vector3(1, 1, 1).normalize() },
-        uSunColor: { value: SUN_COLOR.clone() },
-        uKeyDir: { value: new THREE.Vector3(-1, 0, 0).normalize() },
-        uKeyColor: { value: KEY1_COLOR.clone() },
-        uKeyDir2: { value: new THREE.Vector3(0, 1, 0).normalize() },
-        uKey2Color: { value: KEY2_COLOR.clone() },
-        uKeyIntensity: { value: 0.8 },
-        uKeyIntensity2: { value: 0.55 },
-        uSunIntensity: { value: 0.5 },
-        uAmbientIntensity: { value: 0.1 },
-        uColorScale: { value: this.materialColorScale },
-      },
-      vertexShader: atmosphereVertexShader,
-      fragmentShader: atmosphereFragmentShader,
-    });
-    this.atmosphere = new THREE.Mesh(geo(this.earthRadius + 2.0, 32), this.atmosphereMaterial);
-    this.scene.add(this.atmosphere);
-
-    this.sunAtmosphereMaterial = new THREE.ShaderMaterial({
-      side: THREE.BackSide,
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      uniforms: {
-        uSunDir: { value: new THREE.Vector3(1, 1, 1).normalize() },
-        uKeyDir: { value: new THREE.Vector3(-1, 0, 0).normalize() },
-        uSunIntensity: { value: 0.5 },
-        uAmbientIntensity: { value: 0.1 },
-        uCameraPos: { value: new THREE.Vector3() },
-        uColorScale: { value: this.materialColorScale },
-      },
-      vertexShader: sunAtmosphereVertexShader,
-      fragmentShader: sunAtmosphereFragmentShader,
-    });
-    this.sunAtmosphere = new THREE.Mesh(geo(this.earthRadius + 3.2, 32), this.sunAtmosphereMaterial);
-    this.scene.add(this.sunAtmosphere);
-
     this.moon = new THREE.Mesh(
-      geo(this.moonRadius, 32),
+      geo(5.5, 32),
       new THREE.MeshStandardMaterial({ color: 0xbfbfbf, map: createMoonRockTexture(128), roughness: 0.95, metalness: 0.02 }),
     );
     this.moon.layers.set(MOON_LIGHT_LAYER);
     this.scene.add(this.moon);
 
-    // Ground and Hover positions
-    const groundPos = this.latLngToVector(this.mockRoverLocation.lat, this.mockRoverLocation.lng, this.earthRadius);
-    const hoverPos = this.latLngToVector(this.mockRoverLocation.lat, this.mockRoverLocation.lng, this.earthRadius + this.markerAltitude);
-
-    // Ground Anchor
-    this.groundAnchor = new THREE.Object3D();
-    this.groundAnchor.position.copy(groundPos);
-    this.earth.add(this.groundAnchor);
-
-    // Rover Marker
-    const roverGeo = new THREE.SphereGeometry(0.8, 16, 16);
-    const roverMat = new THREE.MeshBasicMaterial({ color: 0x7bf2d8 });
-    this.roverMarker = new THREE.Mesh(roverGeo, roverMat);
-    this.roverMarker.position.copy(hoverPos);
-    this.earth.add(this.roverMarker);
-
-    // Rover Line
-    const lineGeo = new THREE.BufferGeometry().setFromPoints([groundPos, hoverPos]);
-    const lineMat = new THREE.LineBasicMaterial({ color: 0x7bf2d8, transparent: true, opacity: 0.5 });
-    this.roverLine = new THREE.Line(lineGeo, lineMat);
-    this.earth.add(this.roverLine);
-  }
-
-  private createCloudMaterial(scale: number, opacity: number) {
-    return new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: false,
-      vertexShader: cloudVertexShader,
-      fragmentShader: cloudFragmentShader.replace(/CLOUD_SCALE/g, scale.toFixed(2)),
-      uniforms: {
-        uTime: { value: 0 },
-        uTint: { value: new THREE.Color(1, 1, 1) },
-        uOpacity: { value: opacity },
-        uSunDir: { value: new THREE.Vector3(1, 1, 1).normalize() },
-        uSunColor: { value: SUN_COLOR.clone() },
-        uKeyDir: { value: new THREE.Vector3(-1, 0, 0).normalize() },
-        uKeyColor: { value: KEY1_COLOR.clone() },
-        uKeyDir2: { value: new THREE.Vector3(0, 1, 0).normalize() },
-        uKey2Color: { value: KEY2_COLOR.clone() },
-        uKeyIntensity: { value: 0.8 },
-        uKeyIntensity2: { value: 0.55 },
-        uSunIntensity: { value: 0.5 },
-        uAmbientIntensity: { value: 0.1 },
-        uColorScale: { value: this.materialColorScale },
-        uCloudAmount: { value: this.cloudAmount },
-      },
-    });
-  }
-
-  private initLights() {
-    this.sunKeyLight = new THREE.DirectionalLight(0xffffff, 0.35);
-    this.sunKeyLight.position.set(100, 50, 100);
-    this.scene.add(this.sunKeyLight, this.sunKeyLight.target);
-
-    this.sunKeyLight2 = new THREE.DirectionalLight(0xffffff, 0.22);
-    this.sunKeyLight2.position.set(-100, -50, -100);
-    this.scene.add(this.sunKeyLight2, this.sunKeyLight2.target);
-
-    this.ambientLight = new THREE.AmbientLight(0x090a10, 0.26);
-    this.scene.add(this.ambientLight);
-
-    this.sunGlow = new THREE.Mesh(new THREE.SphereGeometry(60, 32, 32), new THREE.MeshBasicMaterial({ color: 0xffe08a }));
-    this.scene.add(this.sunGlow);
-
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x111111, 1.0));
-
-    this.sunLight = new THREE.PointLight(0xffffff, 2.1, 220);
-    this.sunLight.layers.enable(MOON_LIGHT_LAYER);
-    this.scene.add(this.sunLight);
+    // Camera Orbit Path Visualization (Elliptical)
+    const near = this.earthRadius + 23.5;
+    const xRadius = near + 80 + (this.cameraManager.cameraDistance - 23.5);
+    const zRadius = near + (this.cameraManager.cameraDistance - 23.5) / 2;
+    const orbitPoints = [];
+    for (let i = 0; i <= 128; i++) {
+      const a = (i / 128) * Math.PI * 2 + 0.99;
+      orbitPoints.push(new THREE.Vector3(Math.cos(a) * xRadius, -10, Math.sin(a) * zRadius));
+    }
+    const orbitGeo = new THREE.BufferGeometry().setFromPoints(orbitPoints);
+    const orbitMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.4 });
+    const orbitLine = new THREE.LineLoop(orbitGeo, orbitMat);
+    this.scene.add(orbitLine);
   }
 
   private async loadLandLayer() {
@@ -359,33 +269,26 @@ class HeroControl implements VisualizationControl {
           return;
         }
       }
-
       const geoResp = await fetch('/land.geojson');
       if (geoResp.ok) {
-        const cells = this.geojsonToCells(await geoResp.json(), 3);
+        const json = await geoResp.json();
+        const cells = this.geojsonToCells(json, 3);
         if (cells.length) this.buildLandLayer(cells, 3);
       }
-    } catch {
-      // Optional land layer.
+    } catch (err) {
+      console.error('[Earth] Failed to load land layer:', err);
     }
   }
 
   private buildLandLayer(cells: string[], resolution: number) {
     const landLayer = new HexLayer(this.earthRadius, {
-      radiusOffset: 1.1,
-      count: cells.length,
-      resolution,
-      ratePerSecond: 1,
-      durationSeconds: 9999,
-      opacity: 0.95,
-      palette: [new THREE.Color(0.2, 0.35, 0.2), new THREE.Color(0.25, 0.45, 0.25), new THREE.Color(0.4, 0.5, 0.3)],
-      cells,
-      animate: false,
+      radiusOffset: 0.1, count: cells.length, resolution, ratePerSecond: 1, durationSeconds: 9999,
+      opacity: 0.95, palette: [new THREE.Color(0.2, 0.35, 0.2), new THREE.Color(0.25, 0.45, 0.25), new THREE.Color(0.4, 0.5, 0.3)],
+      cells, animate: false,
     });
     landLayer.material.depthWrite = false;
     landLayer.material.polygonOffset = true;
-    landLayer.material.polygonOffsetFactor = -1;
-    landLayer.material.polygonOffsetUnits = -1;
+    landLayer.material.polygonOffsetFactor = landLayer.material.polygonOffsetUnits = -1;
     landLayer.mesh.renderOrder = 1;
     this.hexLayers.push(landLayer);
     this.earth.add(landLayer.mesh);
@@ -400,30 +303,13 @@ class HeroControl implements VisualizationControl {
       const polys = g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : [];
       polys.forEach((coords: any) => {
         try {
-          polygonToCells(coords, res, true).forEach((c) => cells.add(c));
-        } catch {
-          // Ignore malformed geometry.
-        }
+          const { latLngToCell } = require('h3-js');
+          // Simplified geojson to cells for basic land display
+          cells.add(latLngToCell(coords[0][1], coords[0][0], res));
+        } catch {}
       });
     });
     return Array.from(cells);
-  }
-
-  private updateCamera() {
-    const near = this.earthRadius + Math.max(6, this.cameraDistance);
-    const orbit = this.cameraOrbit + this.cameraYaw;
-    this.camera.position.set(
-      Math.cos(orbit) * (near + this.cameraFarOffset),
-      this.cameraOrbitYOffset,
-      Math.sin(orbit) * near,
-    );
-    this.camera.lookAt(
-      new THREE.Vector3(
-        Math.cos(orbit * this.cameraTangentSpeed) * (this.earthRadius + this.cameraShellOffset),
-        0,
-        Math.sin(orbit * this.cameraTangentSpeed) * (this.earthRadius + this.cameraShellOffset),
-      ),
-    );
   }
 
   private animate = () => {
@@ -434,72 +320,35 @@ class HeroControl implements VisualizationControl {
     const delta = (now - this.lastFrameTime) / 1000;
     this.lastFrameTime = now;
 
-    const ds = delta;
-    const ct = now * 0.001 * this.shaderTimeScale;
+    this.earth.rotation.y += this.earthRotSpeed * delta;
+    this.earth.updateMatrixWorld(true);
 
-    this.earth.rotation.y += this.earthRotSpeed * ds;
-    this.cloud1.rotateOnAxis(this.cloud1Axis, this.cloud1RotSpeed * delta);
-    this.cloud2.rotateOnAxis(this.cloud2Axis, this.cloud2RotSpeed * delta);
+    this.markerManager.update(now);
+    this.cameraManager.updateOrbit(delta, this.earthRadius);
+    
+    // Sync Orbit Marker to Camera position
+    this.orbitMarker.position.copy(this.cameraManager.orbitCamera.position);
 
-    // Rover Blinking
-    const blink = 1.0 + Math.sin(now * 0.01) * 0.4;
-    this.roverMarker.scale.setScalar(blink);
+    // Hide marker of active camera
+    this.orbitMarker.visible = this.activeCamera !== this.cameraManager.orbitCamera;
+    this.topDownMarker.visible = this.activeCamera !== this.cameraManager.topDownCamera;
+    this.markerManager.markers.forEach(m => {
+      m.mesh.visible = this.activeCamera !== m.camera;
+      m.label.visible = this.activeCamera !== m.camera;
+      m.line.visible = this.activeCamera !== m.camera;
+    });
 
-    // Zoom Logic
-    const targetDist = this.isZooming ? 8.0 : 23.5;
-    this.cameraDistance = THREE.MathUtils.lerp(this.cameraDistance, targetDist, 0.05);
+    const { sunDir, sunColor } = this.lightingManager.update(now, this.activeCamera.position);
+    this.hexLayers.forEach((l) => l.update(now * 0.001, sunDir, sunColor));
 
-    this.cloud1Material.uniforms.uTime.value = ct;
-    this.cloud2Material.uniforms.uTime.value = ct;
-
-    if (this.isZooming) {
-      const targetPos = new THREE.Vector3();
-      const targetLookAt = new THREE.Vector3();
-      this.roverMarker.getWorldPosition(targetPos);
-      this.groundAnchor.getWorldPosition(targetLookAt);
-
-      // Offset camera slightly back from the marker so we aren't inside it
-      const viewDir = targetPos.clone().sub(targetLookAt).normalize();
-      targetPos.add(viewDir.multiplyScalar(10));
-
-      this.camera.position.lerp(targetPos, 0.05);
-      this.camera.lookAt(targetLookAt);
-    } else {
-      this.cameraOrbit += this.cameraOrbitSpeed * ds;
-      this.updateCamera();
-    }
-
-    const sunRad = this.earthRadius + this.sunOrbitHeight;
-    const sunA = now * this.sunOrbitSpeed + this.sunOrbitAngleDeg * DEG_TO_RAD;
-    const ky = Math.sin(sunA) * Math.sin(this.sunOrbitIncline) * sunRad;
-    const kz = Math.sin(sunA) * Math.cos(this.sunOrbitIncline) * sunRad;
-    this.sunLight.position.set(Math.cos(sunA) * sunRad, ky, kz);
-    this.sunGlow.position.copy(this.sunLight.position);
-
-    const sDir = this.sunLight.position.clone().normalize();
-    this.cloud1Material.uniforms.uSunDir.value.copy(sDir);
-    this.cloud2Material.uniforms.uSunDir.value.copy(sDir);
-    this.cloud1Material.uniforms.uSunIntensity.value = 0.5 * this.cloudBrightness;
-    this.cloud2Material.uniforms.uSunIntensity.value = 0.5 * this.cloudBrightness;
-    this.cloud1Material.uniforms.uOpacity.value = this.cloud1Opacity;
-    this.cloud2Material.uniforms.uOpacity.value = this.cloud2Opacity;
-    this.cloud1Material.uniforms.uCloudAmount.value = this.cloudAmount;
-    this.cloud2Material.uniforms.uCloudAmount.value = this.cloudAmount;
-
-    this.hexLayers.forEach((l) => l.update(now * 0.001, sDir, SUN_COLOR));
-
-    this.atmosphereMaterial.uniforms.uSunDir.value.copy(sDir);
-    this.sunAtmosphereMaterial.uniforms.uSunDir.value.copy(sDir);
-    this.sunAtmosphereMaterial.uniforms.uCameraPos.value.copy(this.camera.position);
-
-    const moonA = now * (this.sunOrbitSpeed / 10) + this.moonOrbitPhaseRad;
+    const moonA = now * (this.lightingManager.sunOrbitSpeed / 10) + 0.6;
     this.moon.position.set(
-      Math.cos(moonA) * this.moonOrbitRadius,
-      Math.sin(moonA) * Math.sin(this.moonOrbitIncline) * this.moonOrbitRadius,
-      Math.sin(moonA) * Math.cos(this.moonOrbitIncline) * this.moonOrbitRadius,
+      Math.cos(moonA) * 125,
+      Math.sin(moonA) * Math.sin(8 * (Math.PI / 180)) * 125,
+      Math.sin(moonA) * Math.cos(8 * (Math.PI / 180)) * 125,
     );
 
-    this.renderer.render(this.scene, this.camera);
+    this.renderer.render(this.scene, this.activeCamera);
   };
 
   dispose() {
@@ -520,6 +369,5 @@ class HeroControl implements VisualizationControl {
 export function mountHero(container: HTMLElement): VisualizationControl {
   const canvas = container.querySelector('canvas.hero-stage') as HTMLCanvasElement | null;
   if (!canvas) throw new Error('hero canvas not found');
-
   return new HeroControl(canvas);
 }

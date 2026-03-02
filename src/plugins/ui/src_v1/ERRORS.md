@@ -1,9 +1,21 @@
 # Error Report
 
-- **Date**: Sat, 28 Feb 2026 12:39:03 PST
+- **Date**: Sat, 28 Feb 2026 14:38:31 PST
 - **Suite**: ui-src-v1
-- **Total Duration**: 50.549334866s
+- **Total Duration**: 10.056023833s
 
-- **Error Steps**: 0 / 11
+- **Error Steps**: 1 / 1
 
-No errors captured.
+## 1. ui-section-hero-via-menu
+
+- **Duration**: 10.056019935s
+- **Step Error**: `step ui-section-hero-via-menu timed out`
+
+### Step Errors
+
+```text
+FAIL: [TEST][FAIL] [STEP:ui-section-hero-via-menu] timed out after 10s
+```
+
+---
+

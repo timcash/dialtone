@@ -23,6 +23,10 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    allowedHosts: [
+      'legion-wsl-1.shad-artichoke.ts.net',
+      '.shad-artichoke.ts.net',
+    ],
     headers: {
       'Cache-Control': 'no-store',
     },

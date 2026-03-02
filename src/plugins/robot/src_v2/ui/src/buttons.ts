@@ -113,15 +113,7 @@ export function renderButtons(sectionId: string) {
   }
 }
 
-// Helper to map section ID to form data-mode-form ID
-// In index.html:
-// hero -> hero
-// table -> table
-// three -> three
-// xterm -> log  <-- Mismatch!
-// video -> video
 function getFormId(sectionId: string): string {
-  if (sectionId === 'xterm') return 'log';
   return sectionId;
 }
 

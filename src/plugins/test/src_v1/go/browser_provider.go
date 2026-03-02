@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os/exec"
 	stdruntime "runtime"
 	"strings"
 	"time"
@@ -16,6 +17,9 @@ import (
 
 func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 	navigateOnStart := strings.TrimSpace(opts.URL) != "" && !opts.SkipNavigateOnReuse && !opts.PreserveTabAndSize
+	if s, err := startBrowserViaChromeCLI(opts, navigateOnStart); err == nil && s != nil {
+		return s, nil
+	}
 	if remoteNode := resolveRemoteBrowserNode(opts); remoteNode != "" {
 		logs.Info("   [BROWSER] Remote node configured; trying remote-first on %s", remoteNode)
 		rs, rerr := startRemoteBrowser(remoteNode, opts)
@@ -55,10 +59,20 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 	requestedPort := cfg.RemoteDebugPort
 	debugAddress := ""
 	wslMode := stdruntime.GOOS == "linux" && wslGatewayIP() != ""
+	if wslMode && requestedPort <= 0 {
+		switch strings.ToLower(strings.TrimSpace(opts.Role)) {
+		case "dev":
+			requestedPort = chrome.DefaultDebugPort
+		case "test":
+			requestedPort = 9223
+		default:
+			requestedPort = 9334
+		}
+	}
 	if requestedPort > 0 {
 		if wslMode {
-			// With Windows portproxy on fixed ports, Chrome must bind loopback.
-			debugAddress = "127.0.0.1"
+			// WSL should bind/debug through the Windows host path, not loopback-only.
+			debugAddress = "0.0.0.0"
 		}
 		isChromeDebug, isInUse := probeRequestedDebugPort(requestedPort)
 		if isChromeDebug {
@@ -186,6 +200,55 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 	return s, nil
 }
 
+func startBrowserViaChromeCLI(opts BrowserOptions, navigateOnStart bool) (*BrowserSession, error) {
+	role := strings.TrimSpace(opts.Role)
+	if role == "" {
+		role = "test"
+	}
+	args := []string{"chrome", "src_v1", "debug-url", "--role", role}
+	if opts.Headless {
+		args = append(args, "--headless")
+	}
+	if u := strings.TrimSpace(opts.URL); u != "" {
+		args = append(args, "--url", u)
+	}
+	if n := strings.TrimSpace(resolveRemoteBrowserNode(opts)); n != "" {
+		args = append(args, "--host", n)
+	}
+	cmd := exec.Command("./dialtone.sh", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("chrome debug-url cli failed: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
+	wsURL := ""
+	for _, line := range strings.Split(strings.ReplaceAll(string(out), "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToLower(line), "ws://") || strings.HasPrefix(strings.ToLower(line), "wss://") {
+			wsURL = line
+		}
+	}
+	if wsURL == "" {
+		return nil, fmt.Errorf("chrome debug-url cli returned no websocket url")
+	}
+	session := &chrome.Session{
+		PID:          0,
+		Port:         debugPortFromWebSocketURL(wsURL),
+		WebSocketURL: wsURL,
+		IsNew:        false,
+	}
+	s, err := initSession(session, role)
+	if err != nil {
+		return nil, err
+	}
+	if navigateOnStart {
+		if err := chromedp.Run(s.ctx, chromedp.Navigate(opts.URL)); err != nil {
+			s.Close()
+			return nil, err
+		}
+	}
+	return s, nil
+}
+
 func probeRequestedDebugPort(port int) (isChromeDebug bool, isInUse bool) {
 	if port <= 0 {
 		return false, false
@@ -193,7 +256,8 @@ func probeRequestedDebugPort(port int) (isChromeDebug bool, isInUse bool) {
 	hosts := []string{"127.0.0.1"}
 	if stdruntime.GOOS == "linux" {
 		if gw := wslGatewayIP(); gw != "" {
-			hosts = append([]string{gw}, hosts...)
+			// In WSL NAT mode, always probe the Windows host gateway and avoid localhost fallback.
+			hosts = []string{gw}
 		}
 	}
 	isReachable := false

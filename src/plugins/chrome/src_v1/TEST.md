@@ -6,22 +6,22 @@
 <empty>
 ```
 
-**Generated at:** Sat, 28 Feb 2026 12:43:47 -0800
+**Generated at:** Sun, 01 Mar 2026 12:53:28 -0800
 **Version:** `chrome-src-v1`
 **Runner:** `test/src_v1`
 **Status:** ✅ PASS
-**Total Time:** `27.904093279s`
+**Total Time:** `24.208277411s`
 
 ## Test Steps
 
 | Step | Result | Duration |
 |---|---|---|
-| example-library-metadata-and-helpers | ✅ PASS | `4.109473ms` |
-| setup-and-launch-dev-headed-gpu | ✅ PASS | `10.314511748s` |
-| reuse-dev-and-attach-new-tab | ✅ PASS | `3.132499892s` |
-| launch-test-headless-and-list-processes | ✅ PASS | `6.183450156s` |
-| cleanup-test-preserve-dev | ✅ PASS | `3.210537398s` |
-| cleanup-all | ✅ PASS | `5.05896293s` |
+| example-library-metadata-and-helpers | ✅ PASS | `4.128185ms` |
+| setup-and-launch-dev-headed-gpu | ✅ PASS | `7.184729304s` |
+| reuse-dev-and-attach-new-tab | ✅ PASS | `2.793912852s` |
+| launch-test-headless-and-list-processes | ✅ PASS | `5.942887107s` |
+| cleanup-test-preserve-dev | ✅ PASS | `3.127769046s` |
+| cleanup-all | ✅ PASS | `5.154830459s` |
 
 ## Step Details
 
@@ -31,7 +31,7 @@
 
 ```text
 result: PASS
-duration: 4.109473ms
+duration: 4.128185ms
 report: library metadata helpers validated
 ```
 
@@ -39,7 +39,7 @@ report: library metadata helpers validated
 
 ```text
 logs:
-INFO: wrote metadata file: .chrome_data/meta-1772311401305303634.json
+INFO: wrote metadata file: .chrome_data/meta-1772398385147893389.json
 INFO: report: library metadata helpers validated
 PASS: [TEST][PASS] [STEP:example-library-metadata-and-helpers] report: library metadata helpers validated
 ```
@@ -64,7 +64,7 @@ browser_logs:
 
 ```text
 result: PASS
-duration: 10.314511748s
+duration: 7.184729304s
 report: launched headed dev session with gpu and debug port ready
 ```
 
@@ -72,10 +72,10 @@ report: launched headed dev session with gpu and debug port ready
 
 ```text
 logs:
-INFO: pre-launch role counts: dev=0 test=8
+INFO: pre-launch role counts: dev=0 test=0
 INFO: post-precleanup role counts: dev=0 test=0
 INFO: post-dev-launch role counts: dev=2 test=0
-INFO: launched dev session pid=1759749 port=9333 user_data_dir=C:\Users\timca\AppData\Local\Temp\dialtone-chrome-test-1772311406209575706-dev
+INFO: launched dev session pid=2322693 port=19333 user_data_dir=C:\Users\timca\AppData\Local\Temp\dialtone-chrome-test-1772398386952404533-dev
 INFO: report: launched headed dev session with gpu and debug port ready
 PASS: [TEST][PASS] [STEP:setup-and-launch-dev-headed-gpu] report: launched headed dev session with gpu and debug port ready
 ```
@@ -100,7 +100,7 @@ browser_logs:
 
 ```text
 result: PASS
-duration: 3.132499892s
+duration: 2.793912852s
 report: reused dev session, reattached after disconnect, and confirmed no extra dev spawn
 ```
 
@@ -133,7 +133,7 @@ browser_logs:
 
 ```text
 result: PASS
-duration: 6.183450156s
+duration: 5.942887107s
 report: launched headless test session and validated process listing metadata
 ```
 
@@ -167,7 +167,7 @@ browser_logs:
 
 ```text
 result: PASS
-duration: 3.210537398s
+duration: 3.127769046s
 report: cleaned test session while preserving dev session
 ```
 
@@ -201,7 +201,7 @@ browser_logs:
 
 ```text
 result: PASS
-duration: 5.05896293s
+duration: 5.154830459s
 report: cleanup complete for chrome role sessions
 ```
 
@@ -209,7 +209,7 @@ report: cleanup complete for chrome role sessions
 
 ```text
 logs:
-INFO: final role counts: dev=0 test=0 (pre-launch dev=0 test=8)
+INFO: final role counts: dev=0 test=0 (pre-launch dev=0 test=0)
 INFO: cleanup complete
 INFO: report: cleanup complete for chrome role sessions
 PASS: [TEST][PASS] [STEP:cleanup-all] report: cleanup complete for chrome role sessions

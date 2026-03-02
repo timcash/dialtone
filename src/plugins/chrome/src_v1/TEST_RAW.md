@@ -1,7 +1,7 @@
 # Test Report: chrome-src-v1
 
-- **Date**: Sat, 28 Feb 2026 12:43:47 PST
-- **Total Duration**: 27.904093279s
+- **Date**: Sun, 01 Mar 2026 12:53:28 PST
+- **Total Duration**: 24.208277411s
 
 ## Summary
 
@@ -12,13 +12,13 @@
 
 ### 1. ✅ example-library-metadata-and-helpers
 
-- **Duration**: 4.109473ms
+- **Duration**: 4.128185ms
 - **Report**: library metadata helpers validated
 
 #### Logs
 
 ```text
-INFO: wrote metadata file: .chrome_data/meta-1772311401305303634.json
+INFO: wrote metadata file: .chrome_data/meta-1772398385147893389.json
 INFO: report: library metadata helpers validated
 PASS: [TEST][PASS] [STEP:example-library-metadata-and-helpers] report: library metadata helpers validated
 ```
@@ -33,16 +33,16 @@ PASS: [TEST][PASS] [STEP:example-library-metadata-and-helpers] report: library m
 
 ### 2. ✅ setup-and-launch-dev-headed-gpu
 
-- **Duration**: 10.314511748s
+- **Duration**: 7.184729304s
 - **Report**: launched headed dev session with gpu and debug port ready
 
 #### Logs
 
 ```text
-INFO: pre-launch role counts: dev=0 test=8
+INFO: pre-launch role counts: dev=0 test=0
 INFO: post-precleanup role counts: dev=0 test=0
 INFO: post-dev-launch role counts: dev=2 test=0
-INFO: launched dev session pid=1759749 port=9333 user_data_dir=C:\Users\timca\AppData\Local\Temp\dialtone-chrome-test-1772311406209575706-dev
+INFO: launched dev session pid=2322693 port=19333 user_data_dir=C:\Users\timca\AppData\Local\Temp\dialtone-chrome-test-1772398386952404533-dev
 INFO: report: launched headed dev session with gpu and debug port ready
 PASS: [TEST][PASS] [STEP:setup-and-launch-dev-headed-gpu] report: launched headed dev session with gpu and debug port ready
 ```
@@ -57,7 +57,7 @@ PASS: [TEST][PASS] [STEP:setup-and-launch-dev-headed-gpu] report: launched heade
 
 ### 3. ✅ reuse-dev-and-attach-new-tab
 
-- **Duration**: 3.132499892s
+- **Duration**: 2.793912852s
 - **Report**: reused dev session, reattached after disconnect, and confirmed no extra dev spawn
 
 #### Logs
@@ -78,7 +78,7 @@ PASS: [TEST][PASS] [STEP:reuse-dev-and-attach-new-tab] report: reused dev sessio
 
 ### 4. ✅ launch-test-headless-and-list-processes
 
-- **Duration**: 6.183450156s
+- **Duration**: 5.942887107s
 - **Report**: launched headless test session and validated process listing metadata
 
 #### Logs
@@ -100,7 +100,7 @@ PASS: [TEST][PASS] [STEP:launch-test-headless-and-list-processes] report: launch
 
 ### 5. ✅ cleanup-test-preserve-dev
 
-- **Duration**: 3.210537398s
+- **Duration**: 3.127769046s
 - **Report**: cleaned test session while preserving dev session
 
 #### Logs
@@ -122,13 +122,13 @@ PASS: [TEST][PASS] [STEP:cleanup-test-preserve-dev] report: cleaned test session
 
 ### 6. ✅ cleanup-all
 
-- **Duration**: 5.05896293s
+- **Duration**: 5.154830459s
 - **Report**: cleanup complete for chrome role sessions
 
 #### Logs
 
 ```text
-INFO: final role counts: dev=0 test=0 (pre-launch dev=0 test=8)
+INFO: final role counts: dev=0 test=0 (pre-launch dev=0 test=0)
 INFO: cleanup complete
 INFO: report: cleanup complete for chrome role sessions
 PASS: [TEST][PASS] [STEP:cleanup-all] report: cleanup complete for chrome role sessions

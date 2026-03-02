@@ -2,6 +2,7 @@ package buildandserve
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
@@ -24,19 +25,23 @@ func runBuildAndServe(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 	if err := ctx.EnsureBuiltAndServed(); err != nil {
 		return testv1.StepRunResult{}, err
 	}
-	defaultURL = ctx.AppURL("/#hero")
-	testv1.UpdateRuntimeConfig(func(cfg *testv1.RuntimeConfig) {
-		cfg.BrowserNewTargetURL = defaultURL
-	})
+	defaultURL = ctx.AppURL("/#ui-hero-stage")
 
 	browserOpts, attach, err := uitest.BrowserOptionsFor(defaultURL)
 	if err != nil {
 		return testv1.StepRunResult{}, err
 	}
+	navigateURL := strings.TrimSpace(browserOpts.URL)
+	if navigateURL == "" {
+		navigateURL = defaultURL
+	}
+	testv1.UpdateRuntimeConfig(func(cfg *testv1.RuntimeConfig) {
+		cfg.BrowserNewTargetURL = navigateURL
+	})
 	if _, err := sc.EnsureBrowser(browserOpts); err != nil {
 		return testv1.StepRunResult{}, fmt.Errorf("ensure browser: %w", err)
 	}
-	if err := sc.RunBrowserWithTimeout(8*time.Second, testv1.Navigate(defaultURL)); err != nil {
+	if err := sc.RunBrowserWithTimeout(8*time.Second, testv1.Navigate(navigateURL)); err != nil {
 		return testv1.StepRunResult{}, fmt.Errorf("navigate attached browser: %w", err)
 	}
 	if err := uitest.SaveBrowserDebugConfig(sc); err != nil {
@@ -49,7 +54,7 @@ func runBuildAndServe(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 	}
 	// Attached sessions can recover onto a blank target after tab churn;
 	// enforce a final navigate to the fixture URL before DOM assertions.
-	if err := sc.RunBrowserWithTimeout(8*time.Second, testv1.Navigate(defaultURL)); err != nil {
+	if err := sc.RunBrowserWithTimeout(8*time.Second, testv1.Navigate(navigateURL)); err != nil {
 		return testv1.StepRunResult{}, fmt.Errorf("re-navigate before hero assertions: %w", err)
 	}
 	if err := sc.WaitForAriaLabel("Hero Section", 10*time.Second); err != nil {
@@ -62,7 +67,7 @@ func runBuildAndServe(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 		return testv1.StepRunResult{}, fmt.Errorf("wait hero canvas: %w", err)
 	}
 	if err := uitest.AssertJS(sc, 5*time.Second, `(() => {
-		const s = document.getElementById('hero');
+		const s = document.getElementById('ui-hero-stage');
 		if (!s) return false;
 		const h = s.querySelector('header');
 		return !!h && h.classList.contains('legend');

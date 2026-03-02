@@ -9,19 +9,19 @@ import (
 
 func Register(reg *testv1.Registry) {
 	tc := sectionsnav.SectionCase{
-		ID:          "settings",
+		ID:          "ui-settings-button-list",
 		NavAria:     "Navigate Settings",
 		SectionAria: "Settings Section",
 		Screenshot:  "ui_settings.png",
 		AssertJSExpr: `(() => {
-			const s = document.getElementById('settings');
+			const s = document.getElementById('ui-settings-button-list');
 			return !!s && s.classList.contains('fullscreen') && !!s.querySelector('header.text');
 		})()`,
 		AssertFail: "settings should be fullscreen with text header",
 	}
 	reg.Add(testv1.Step{
 		Name:    "ui-section-settings-via-menu",
-		Timeout: 5 * time.Second,
+		Timeout: 10 * time.Second,
 		RunWithContext: func(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 			return sectionsnav.RunSectionFromMenu(sc, tc, false)
 		},

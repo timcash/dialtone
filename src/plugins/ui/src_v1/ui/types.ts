@@ -31,6 +31,8 @@ export interface HeaderConfig {
 export interface SectionConfig {
   containerId: string;
   load: () => Promise<VisualizationControl>;
+  // Canonical section name, e.g. "robot-hero-stage".
+  canonicalName?: string;
   header?: HeaderConfig;
   overlays?: SectionOverlayConfig;
 }

@@ -5,7 +5,10 @@ export class SectionManager {
   private controls = new Map<string, VisualizationControl>();
   private loading = new Map<string, Promise<void>>();
   private resumed = new Map<string, boolean>();
-  private overlays = new Map<string, Partial<Record<'primary' | 'mode-form' | 'legend' | 'chatlog' | 'status-bar', HTMLElement>>>();
+  private overlays = new Map<
+    string,
+    Partial<Record<'primary' | 'mode-form' | 'mode-form-toggle' | 'legend' | 'chatlog' | 'status-bar', HTMLElement>>
+  >();
   private activeSectionId: string | null = null;
   private debug: boolean;
 
@@ -23,6 +26,7 @@ export class SectionManager {
   }
 
   register(sectionId: string, config: SectionConfig): void {
+    this.validateSectionRegistration(sectionId, config);
     this.configs.set(sectionId, config);
     this.bindSectionOverlays(sectionId, config);
   }
@@ -169,7 +173,12 @@ export class SectionManager {
   private bindSectionOverlays(sectionId: string, cfg: SectionConfig): void {
     const section = document.getElementById(cfg.containerId);
     if (!section) return;
-    const overlays: Partial<Record<'primary' | 'mode-form' | 'legend' | 'chatlog' | 'status-bar', HTMLElement>> = {};
+    const sectionName = this.sectionNameFor(sectionId);
+    section.setAttribute('data-section-id', sectionId);
+    section.setAttribute('data-section-name', sectionName);
+    const overlays: Partial<
+      Record<'primary' | 'mode-form' | 'mode-form-toggle' | 'legend' | 'chatlog' | 'status-bar', HTMLElement>
+    > = {};
     const selectors: SectionOverlayConfig | null = cfg.overlays ?? null;
     if (!selectors) {
       this.overlays.set(sectionId, overlays);
@@ -179,36 +188,64 @@ export class SectionManager {
     if (primaryEl instanceof HTMLElement) {
       primaryEl.setAttribute('data-overlay', selectors.primaryKind);
       primaryEl.setAttribute('data-overlay-role', 'primary');
-      primaryEl.setAttribute('data-overlay-section', sectionId);
+      primaryEl.setAttribute('data-overlay-section', sectionName);
       overlays.primary = primaryEl;
     }
     const modeFormSelector = selectors.form ?? selectors.modeForm;
     const modeFormEl = modeFormSelector ? section.querySelector(modeFormSelector) : null;
     if (modeFormEl instanceof HTMLElement) {
+      const declaredFormId = (modeFormEl.getAttribute('data-mode-form') || '').trim();
+      if (declaredFormId !== '' && declaredFormId !== sectionId) {
+        throw new Error(
+          `[SectionManager] section "${sectionId}" mode-form id mismatch: expected data-mode-form="${sectionId}", got "${declaredFormId}"`
+        );
+      }
       modeFormEl.setAttribute('data-overlay', 'mode-form');
       modeFormEl.setAttribute('data-overlay-role', 'mode-form');
-      modeFormEl.setAttribute('data-overlay-section', sectionId);
+      modeFormEl.setAttribute('data-overlay-section', sectionName);
       overlays['mode-form'] = modeFormEl;
+
+      let toggleEl = section.querySelector('[data-overlay-role="mode-form-toggle"]');
+      if (!(toggleEl instanceof HTMLButtonElement)) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'mode-form-toggle menu-button';
+        btn.setAttribute('aria-label', 'Toggle Mode Form');
+        btn.setAttribute('data-overlay', 'mode-form-toggle');
+        btn.setAttribute('data-overlay-role', 'mode-form-toggle');
+        btn.setAttribute('data-overlay-section', sectionName);
+        section.appendChild(btn);
+        toggleEl = btn;
+      }
+      if (toggleEl instanceof HTMLButtonElement) {
+        const initialState = (modeFormEl.getAttribute('data-mode-form-state') || 'open').trim().toLowerCase();
+        this.setModeFormOpen(modeFormEl, toggleEl, initialState !== 'closed');
+        toggleEl.onclick = () => {
+          const isOpen = (modeFormEl.getAttribute('data-mode-form-state') || 'open') !== 'closed';
+          this.setModeFormOpen(modeFormEl, toggleEl, !isOpen);
+        };
+        overlays['mode-form-toggle'] = toggleEl;
+      }
     }
     const legendEl = selectors.legend ? section.querySelector(selectors.legend) : null;
     if (legendEl instanceof HTMLElement) {
       legendEl.setAttribute('data-overlay', 'legend');
       legendEl.setAttribute('data-overlay-role', 'legend');
-      legendEl.setAttribute('data-overlay-section', sectionId);
+      legendEl.setAttribute('data-overlay-section', sectionName);
       overlays.legend = legendEl;
     }
     const chatlogEl = selectors.chatlog ? section.querySelector(selectors.chatlog) : null;
     if (chatlogEl instanceof HTMLElement) {
       chatlogEl.setAttribute('data-overlay', 'chatlog');
       chatlogEl.setAttribute('data-overlay-role', 'chatlog');
-      chatlogEl.setAttribute('data-overlay-section', sectionId);
+      chatlogEl.setAttribute('data-overlay-section', sectionName);
       overlays.chatlog = chatlogEl;
     }
     const statusBarEl = selectors.statusBar ? section.querySelector(selectors.statusBar) : null;
     if (statusBarEl instanceof HTMLElement) {
       statusBarEl.setAttribute('data-overlay', 'status-bar');
       statusBarEl.setAttribute('data-overlay-role', 'status-bar');
-      statusBarEl.setAttribute('data-overlay-section', sectionId);
+      statusBarEl.setAttribute('data-overlay-section', sectionName);
       overlays['status-bar'] = statusBarEl;
     }
     this.overlays.set(sectionId, overlays);
@@ -219,11 +256,72 @@ export class SectionManager {
       const isActive = sectionId === activeId;
       sectionOverlays.primary?.setAttribute('data-overlay-active', isActive ? 'true' : 'false');
       sectionOverlays['mode-form']?.setAttribute('data-overlay-active', isActive ? 'true' : 'false');
+      sectionOverlays['mode-form-toggle']?.setAttribute('data-overlay-active', isActive ? 'true' : 'false');
       sectionOverlays.legend?.setAttribute('data-overlay-active', isActive ? 'true' : 'false');
       sectionOverlays.chatlog?.setAttribute('data-overlay-active', isActive ? 'true' : 'false');
       sectionOverlays['status-bar']?.setAttribute('data-overlay-active', isActive ? 'true' : 'false');
     }
     document.body.setAttribute('data-active-section', activeId);
+    const activeSectionName = this.sectionNameFor(activeId);
+    document.body.setAttribute('data-active-section-name', activeSectionName);
+  }
+
+  private sectionNameFor(sectionId: string): string {
+    const cfg = this.configs.get(sectionId);
+    const explicit = cfg?.canonicalName?.trim();
+    if (explicit) return explicit;
+    return sectionId;
+  }
+
+  private setModeFormOpen(modeFormEl: HTMLElement, toggleEl: HTMLButtonElement, open: boolean): void {
+    modeFormEl.setAttribute('data-mode-form-state', open ? 'open' : 'closed');
+    toggleEl.textContent = open ? 'Close' : 'Open';
+    toggleEl.setAttribute('data-mode-form-state', open ? 'open' : 'closed');
+  }
+
+  private validateSectionRegistration(sectionId: string, config: SectionConfig): void {
+    const normalizedID = sectionId.trim();
+    if (normalizedID === '') {
+      throw new Error('[SectionManager] section id is required');
+    }
+    const canonicalPattern = /^[a-z0-9]+-[a-z0-9][a-z0-9-]*-[a-z0-9][a-z0-9-]*$/;
+    if (!canonicalPattern.test(normalizedID)) {
+      throw new Error(
+        `[SectionManager] invalid section id "${sectionId}". Expected format "<plugin>-<subname>-<underlay-type>" (lowercase kebab-case).`
+      );
+    }
+    const containerID = (config.containerId || '').trim();
+    if (containerID !== normalizedID) {
+      throw new Error(
+        `[SectionManager] section "${sectionId}" must use matching containerId. Expected "${normalizedID}", got "${config.containerId}".`
+      );
+    }
+    const canonicalName = (config.canonicalName || '').trim();
+    if (canonicalName !== '' && canonicalName !== normalizedID) {
+      throw new Error(
+        `[SectionManager] section "${sectionId}" canonicalName must match section id when provided. Got "${canonicalName}".`
+      );
+    }
+    if (config.overlays) {
+      const kind = (config.overlays.primaryKind || '').trim();
+      if (kind === '') {
+        throw new Error(`[SectionManager] section "${sectionId}" overlays.primaryKind is required`);
+      }
+      if (!normalizedID.endsWith(`-${kind}`)) {
+        throw new Error(
+          `[SectionManager] section "${sectionId}" must end with "-${kind}" to match overlays.primaryKind="${kind}".`
+        );
+      }
+      const hasDeprecatedThumb = Object.prototype.hasOwnProperty.call(
+        config.overlays as unknown as Record<string, unknown>,
+        'thumb'
+      );
+      if (hasDeprecatedThumb) {
+        throw new Error(
+          `[SectionManager] section "${sectionId}" uses deprecated overlays.thumb. Use overlays.form (or overlays.modeForm) instead.`
+        );
+      }
+    }
   }
 
   private ensureLoadingOverlay(): HTMLElement {

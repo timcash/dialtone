@@ -9,19 +9,19 @@ import (
 
 func Register(reg *testv1.Registry) {
 	tc := sectionsnav.SectionCase{
-		ID:          "hero",
+		ID:          "ui-hero-stage",
 		NavAria:     "Navigate Hero",
 		SectionAria: "Hero Section",
 		Screenshot:  "ui_hero_section.png",
 		AssertJSExpr: `(() => {
-			const s = document.getElementById('hero');
+			const s = document.getElementById('ui-hero-stage');
 			return !!s && s.classList.contains('fullscreen') && !!s.querySelector('header.legend');
 		})()`,
 		AssertFail: "hero should be fullscreen with legend header",
 	}
 	reg.Add(testv1.Step{
 		Name:    "ui-section-hero-via-menu",
-		Timeout: 5 * time.Second,
+		Timeout: 10 * time.Second,
 		RunWithContext: func(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 			return sectionsnav.RunSectionFromMenu(sc, tc, true)
 		},

@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 type MeshNode struct {
@@ -55,6 +57,18 @@ var defaultMeshNodes = []MeshNode{
 			"/Users/dev/dialtone",
 			"/Users/dev/dialtone",
 			"/Users/dev/Documents/dialtone",
+		},
+	},
+	{
+		Name:    "gold",
+		Aliases: []string{"gold", "gold.shad-artichoke.ts.net"},
+		User:    "user",
+		Host:    "192.168.4.53",
+		Port:    "22",
+		OS:      "macos",
+		RepoCandidates: []string{
+			"/Users/user/dialtone",
+			"/Users/user/Documents/dialtone",
 		},
 	},
 	{
@@ -119,6 +133,23 @@ var (
 	canReachHostFn  = canReachHostPort
 )
 
+func dialMeshClient(host, port, user, password string) (*ssh.Client, error) {
+	// Always prefer key-based auth for mesh nodes. If a password is provided,
+	// use it only as a fallback after key-only auth fails.
+	client, err := dialSSHFunc(host, port, user, "")
+	if err == nil {
+		return client, nil
+	}
+	if strings.TrimSpace(password) == "" {
+		return nil, err
+	}
+	client, passErr := dialSSHFunc(host, port, user, password)
+	if passErr == nil {
+		return client, nil
+	}
+	return nil, fmt.Errorf("key auth failed: %v; password fallback failed: %w", err, passErr)
+}
+
 func ListMeshNodes() []MeshNode {
 	out := make([]MeshNode, len(defaultMeshNodes))
 	copy(out, defaultMeshNodes)
@@ -169,7 +200,7 @@ func RunNodeCommand(target string, command string, opts CommandOptions) (string,
 		port = node.Port
 	}
 	host := resolvePreferredHost(node, port)
-	client, err := dialSSHFunc(host, port, user, opts.Password)
+	client, err := dialMeshClient(host, port, user, opts.Password)
 	if err != nil {
 		return "", fmt.Errorf("ssh dial %s@%s:%s failed: %w", user, host, port, err)
 	}
@@ -180,6 +211,35 @@ func RunNodeCommand(target string, command string, opts CommandOptions) (string,
 		return out, fmt.Errorf("ssh command failed on %s: %w", node.Name, err)
 	}
 	return out, nil
+}
+
+// DialMeshNode resolves a mesh alias and opens an SSH client using the same
+// host selection logic as RunNodeCommand.
+func DialMeshNode(target string, opts CommandOptions) (*ssh.Client, MeshNode, string, string, error) {
+	node, err := ResolveMeshNode(target)
+	if err != nil {
+		return nil, MeshNode{}, "", "", err
+	}
+	if shouldUseLocalPowerShell(node) {
+		return nil, MeshNode{}, "", "", fmt.Errorf("mesh node %s uses powershell transport, ssh unavailable", node.Name)
+	}
+	user := strings.TrimSpace(opts.User)
+	if user == "" {
+		user = node.User
+	}
+	port := strings.TrimSpace(opts.Port)
+	if port == "" {
+		port = node.Port
+	}
+	if port == "" {
+		port = "22"
+	}
+	host := resolvePreferredHost(node, port)
+	client, err := dialMeshClient(host, port, user, opts.Password)
+	if err != nil {
+		return nil, MeshNode{}, "", "", fmt.Errorf("ssh dial %s@%s:%s failed: %w", user, host, port, err)
+	}
+	return client, node, host, port, nil
 }
 
 func UploadNodeFile(target, localPath, remotePath string, opts CommandOptions) error {
@@ -199,7 +259,7 @@ func UploadNodeFile(target, localPath, remotePath string, opts CommandOptions) e
 		port = node.Port
 	}
 	host := resolvePreferredHost(node, port)
-	client, err := dialSSHFunc(host, port, user, opts.Password)
+	client, err := dialMeshClient(host, port, user, opts.Password)
 	if err != nil {
 		return fmt.Errorf("ssh dial %s@%s:%s failed: %w", user, host, port, err)
 	}

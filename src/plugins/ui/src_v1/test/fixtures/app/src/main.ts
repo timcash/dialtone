@@ -127,40 +127,48 @@ const { sections, menu } = setupApp({
   debug: true,
 });
 
-const sectionIDs: UISharedTemplateID[] = [
-  "hero",
-  "three-fullscreen",
-  "three-calculator",
-  "table",
-  "camera",
-  "docs",
-  "terminal",
-  "settings",
+const sectionEntries: Array<{ template: UISharedTemplateID; sectionID: string }> = [
+  { template: "hero", sectionID: "ui-hero-stage" },
+  { template: "three-fullscreen", sectionID: "ui-three-fullscreen-stage" },
+  { template: "three-calculator", sectionID: "ui-three-calculator-stage" },
+  { template: "table", sectionID: "ui-table-table" },
+  { template: "camera", sectionID: "ui-camera-video" },
+  { template: "docs", sectionID: "ui-docs-docs" },
+  { template: "terminal", sectionID: "ui-terminal-xterm" },
+  { template: "settings", sectionID: "ui-settings-button-list" },
 ];
 
-const sectionModes = new Map<UISharedTemplateID, "fullscreen" | "calculator">();
+const sectionByTemplate = new Map<UISharedTemplateID, string>();
+const sectionByAlias = new Map<string, string>();
+for (const entry of sectionEntries) {
+  sectionByTemplate.set(entry.template, entry.sectionID);
+  sectionByAlias.set(entry.sectionID, entry.sectionID);
+  sectionByAlias.set(entry.template, entry.sectionID);
+}
+
+const sectionModes = new Map<string, "fullscreen" | "calculator">();
 
 function applyMode(
-  sectionId: UISharedTemplateID,
+  sectionID: string,
   mode: "fullscreen" | "calculator",
 ): void {
-  const section = document.getElementById(sectionId);
+  const section = document.getElementById(sectionID);
   if (!section) return;
   section.classList.remove("fullscreen", "calculator");
   section.classList.add(mode);
-  sectionModes.set(sectionId, mode);
+  sectionModes.set(sectionID, mode);
 }
 
-function toggleModeFor(sectionId: UISharedTemplateID): void {
-  const current =
-    sectionModes.get(sectionId) ?? getUISharedTemplate(sectionId).defaultMode;
+function toggleModeFor(templateId: UISharedTemplateID, sectionID: string): void {
+  const current = sectionModes.get(sectionID) ?? getUISharedTemplate(templateId).defaultMode;
   const next = current === "fullscreen" ? "calculator" : "fullscreen";
-  applyMode(sectionId, next);
-  console.log(`mode-toggle:${sectionId}:${next}`);
+  applyMode(sectionID, next);
+  console.log(`mode-toggle:${sectionID}:${next}`);
 }
 
 function bindInteractions(
   sectionId: UISharedTemplateID,
+  sectionID: string,
   container: HTMLElement,
 ): void {
   if (container.dataset.bound === "1") return;
@@ -170,7 +178,7 @@ function bindInteractions(
     (b) => b.textContent?.trim().toLowerCase() === "mode",
   );
   if (modeButton) {
-    modeButton.addEventListener("click", () => toggleModeFor(sectionId));
+    modeButton.addEventListener("click", () => toggleModeFor(sectionId, sectionID));
   }
 
   if (sectionId === "table") {
@@ -226,17 +234,18 @@ function bindInteractions(
   }
 }
 
-for (const sectionId of sectionIDs) {
-  const template = getUISharedTemplate(sectionId);
-  sections.register(sectionId, {
-    containerId: sectionId,
+for (const entry of sectionEntries) {
+  const template = getUISharedTemplate(entry.template);
+  sections.register(entry.sectionID, {
+    containerId: entry.sectionID,
+    canonicalName: entry.sectionID,
     load: async () => {
-      const container = document.getElementById(sectionId);
-      if (!container) throw new Error(`${sectionId} container not found`);
-      renderUISharedTemplate(container, sectionId);
+      const container = document.getElementById(entry.sectionID);
+      if (!container) throw new Error(`${entry.sectionID} container not found`);
+      renderUISharedTemplate(container, entry.template);
       // Keep a stable section layout across navigation steps.
-      applyMode(sectionId, "fullscreen");
-      bindInteractions(sectionId, container);
+      applyMode(entry.sectionID, "fullscreen");
+      bindInteractions(entry.template, entry.sectionID, container);
       const canvas = container.querySelector("canvas");
       if (canvas instanceof HTMLCanvasElement) {
         return mountSphereScene(canvas);
@@ -247,14 +256,12 @@ for (const sectionId of sectionIDs) {
   });
 
   menu.addButton(template.title, `Navigate ${template.title}`, () =>
-    sections.navigateTo(sectionId),
+    sections.navigateTo(entry.sectionID),
   );
 }
 
-const initialRaw = (window.location.hash || "#hero").slice(1);
-const initial = sectionIDs.includes(initialRaw as UISharedTemplateID)
-  ? (initialRaw as UISharedTemplateID)
-  : "hero";
+const initialRaw = (window.location.hash || "#ui-hero-stage").slice(1).trim().toLowerCase();
+const initial = sectionByAlias.get(initialRaw) || sectionByTemplate.get("hero") || "ui-hero-stage";
 void sections.navigateTo(initial).catch((err) => {
   console.error("[ui-fixture] initial navigation failed", err);
 });

@@ -142,6 +142,8 @@ func StartSession(opts SessionOptions) (*Session, error) {
 	if opts.Role == "" {
 		opts.Role = "default"
 	}
+	// Dialtone browser sessions should always run with GPU enabled.
+	opts.GPU = true
 
 	if opts.ReuseExisting {
 		procs, err := listResourcesWithTimeout(true, 2*time.Second)
@@ -151,6 +153,9 @@ func StartSession(opts SessionOptions) (*Session, error) {
 					continue
 				}
 				if p.IsHeadless != opts.Headless {
+					continue
+				}
+				if want := strings.TrimSpace(opts.DebugAddress); want != "" && !commandHasDebugAddress(p.Command, want) {
 					continue
 				}
 				wsURL := ""
@@ -221,6 +226,15 @@ func StartSession(opts SessionOptions) (*Session, error) {
 		IsNew:        true,
 		IsWindows:    isWindows,
 	}, nil
+}
+
+func commandHasDebugAddress(command, want string) bool {
+	command = strings.TrimSpace(command)
+	want = strings.TrimSpace(want)
+	if command == "" || want == "" {
+		return false
+	}
+	return strings.Contains(command, "--remote-debugging-address="+want)
 }
 
 func listResourcesWithTimeout(includeSystem bool, timeout time.Duration) ([]ChromeProcess, error) {
@@ -495,21 +509,16 @@ func LaunchChromeWithRoleAndUserDataDir(port int, gpu bool, headless bool, targe
 					if waitErr := WaitForDebugPort(assignedPort, 2*time.Second); waitErr == nil {
 						if resolvedWS, rerr := getWebsocketURL(assignedPort); rerr == nil && strings.TrimSpace(resolvedWS) != "" {
 							wsURL = resolvedWS
+							if p := portFromWebSocketURL(resolvedWS); p > 0 {
+								assignedPort = p
+							}
 							break
 						}
 					}
 					if runtime.GOOS == "linux" && IsWSL() && wsPath != "" {
-						fallbackHost := "127.0.0.1"
-						for _, h := range debugProbeHosts() {
-							h = strings.TrimSpace(h)
-							if h != "" && h != "0.0.0.0" {
-								fallbackHost = h
-								break
-							}
-						}
-						wsURL = fmt.Sprintf("ws://%s:%d%s", fallbackHost, assignedPort, wsPath)
-						logs.Warn("DEBUG: WSL fallback using DevToolsActivePort endpoint without confirmed reachability (port=%d)", assignedPort)
-						break
+						// Keep waiting for a reachable endpoint; unverified WS URLs can cause
+						// immediate attach failures in WSL NAT mode.
+						continue
 					}
 				}
 			}
@@ -520,24 +529,16 @@ func LaunchChromeWithRoleAndUserDataDir(port int, gpu bool, headless bool, targe
 			if waitErr := WaitForDebugPort(assignedPort, 1200*time.Millisecond); waitErr == nil {
 				if resolvedWS, rerr := getWebsocketURL(assignedPort); rerr == nil && strings.TrimSpace(resolvedWS) != "" {
 					wsURL = resolvedWS
+					if p := portFromWebSocketURL(resolvedWS); p > 0 {
+						assignedPort = p
+					}
 					break
 				}
 			}
 			if runtime.GOOS == "linux" && IsWSL() {
-				fallbackHost := "127.0.0.1"
-				for _, h := range debugProbeHosts() {
-					h = strings.TrimSpace(h)
-					if h != "" && h != "0.0.0.0" {
-						fallbackHost = h
-						break
-					}
-				}
-				wsURL = normalizeWebSocketURLHost(wsFromLog, fallbackHost, assignedPort)
-				if wsURL == "" {
-					wsURL = wsFromLog
-				}
-				logs.Warn("DEBUG: WSL fallback using DevTools URL from launch log without confirmed reachability (port=%d)", assignedPort)
-				break
+				// Keep waiting for a reachable endpoint; unverified WS URLs can cause
+				// immediate attach failures in WSL NAT mode.
+				continue
 			}
 		}
 
@@ -639,6 +640,22 @@ func debugProbePorts(port int) []int {
 	return out
 }
 
+func portFromWebSocketURL(raw string) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return 0
+	}
+	p, err := strconv.Atoi(strings.TrimSpace(u.Port()))
+	if err != nil || p <= 0 {
+		return 0
+	}
+	return p
+}
+
 func getWebsocketURLForHost(host string, port int) (string, error) {
 	resp, err := devtoolsHTTPClient.Get(fmt.Sprintf("http://%s:%d/json/version", host, port))
 	if err != nil {
@@ -678,8 +695,11 @@ func debugProbeHosts() []string {
 	if runtime.GOOS == "linux" && IsWSL() {
 		// In WSL NAT mode, Chrome usually runs on Windows and is reachable via host gateway.
 		add(&hosts, detectWSLHostGatewayIP())
+		// Some launches expose DevTools only on local loopback; keep localhost as fallback.
+		add(&hosts, "127.0.0.1")
+	} else {
+		add(&hosts, "127.0.0.1")
 	}
-	add(&hosts, "127.0.0.1")
 	return hosts
 }
 
