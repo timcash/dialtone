@@ -102,7 +102,7 @@ var defaultMeshNodes = []MeshNode{
 		},
 		Port:                "2223",
 		OS:                  "windows",
-		PreferWSLPowerShell: false,
+		PreferWSLPowerShell: true,
 		RepoCandidates: []string{
 			"/home/user/dialtone",
 			"/home/user/dialtone",
