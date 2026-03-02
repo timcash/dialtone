@@ -7,3 +7,7 @@
 [submodule "src/plugins/mapping-demo"]
 	path = src/plugins/mapping-demo
 	url = https://github.com/timcash/dialtone-mapping-demo.git
+[submodule "src/mods/mesh"]
+	path = src/mods/mesh
+	url = https://github.com/timcash/dialtone-mesh.git
+	branch = main
