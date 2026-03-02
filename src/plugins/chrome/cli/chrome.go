@@ -95,6 +95,7 @@ func RunChrome(args []string) {
 		port := newFlags.Int("port", 0, "Remote debugging port (0 for auto)")
 		gpu := newFlags.Bool("gpu", true, "Enable GPU acceleration")
 		headless := newFlags.Bool("headless", false, "Launch in headless mode")
+		kiosk := newFlags.Bool("kiosk", false, "Launch in kiosk mode (headed only)")
 		role := newFlags.String("role", "", "Dialtone role tag (e.g. dev, smoke)")
 		reuseExisting := newFlags.Bool("reuse-existing", false, "Attach to existing matching role/headless instance")
 		userDataDir := newFlags.String("user-data-dir", "", "Explicit Chrome user data dir")
@@ -119,7 +120,7 @@ func RunChrome(args []string) {
 		if rest := newFlags.Args(); len(rest) > 0 {
 			targetURL = rest[0]
 		}
-		handleNew(*port, *gpu, *headless, targetURL, *role, *reuseExisting, *userDataDir, *debugAddress, *debug)
+		handleNew(*port, *gpu, *headless, *kiosk, targetURL, *role, *reuseExisting, *userDataDir, *debugAddress, *debug)
 	case "open":
 		handleOpenCmd(args[1:])
 	case "dashboard":
@@ -335,7 +336,7 @@ func handleKill(arg string, isWindows, totalAll bool) {
 	logs.Info("Successfully killed process %d", pid)
 }
 
-func handleNew(port int, gpu bool, headless bool, targetURL, role string, reuseExisting bool, userDataDir string, debugAddress string, debug bool) {
+func handleNew(port int, gpu bool, headless bool, kiosk bool, targetURL, role string, reuseExisting bool, userDataDir string, debugAddress string, debug bool) {
 	logs.Info("Launching new %s Chrome instance...", func() string {
 		if headless {
 			return "headless"
@@ -351,6 +352,7 @@ func handleNew(port int, gpu bool, headless bool, targetURL, role string, reuseE
 		RequestedPort: port,
 		GPU:           gpu,
 		Headless:      headless,
+		Kiosk:         kiosk,
 		TargetURL:     targetURL,
 		Role:          role,
 		ReuseExisting: reuseExisting,
@@ -523,7 +525,10 @@ func handleServiceDaemonCmd(args []string) {
 		}
 		sess = ensureSessionPageReady(req, sess)
 		enforceSingleRoleInstance(req.Role, req.Headless, sess.PID)
-		_ = ensureSinglePageTab(sess.Port)
+		if err := ensureSinglePageTab(sess.Port); err != nil {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error()})
+			return
+		}
 		atomic.StoreInt64(&proxyPort, int64(sess.Port))
 		wsPath := chrome.WebSocketPathFromURL(strings.TrimSpace(sess.WebSocketURL))
 		if wsPath == "" {
@@ -566,6 +571,7 @@ func handleServiceDaemonCmd(args []string) {
 		req.Reuse = parseBoolQuery(q.Get("reuse_existing"), req.Reuse)
 		req.Port = parseIntQuery(q.Get("port"), req.Port)
 		req.Fullscreen = parseBoolQuery(q.Get("fullscreen"), req.Fullscreen)
+		req.Kiosk = parseBoolQuery(q.Get("kiosk"), req.Kiosk)
 		if v := strings.TrimSpace(q.Get("user_data_dir")); v != "" {
 			req.UserDataDir = v
 		}
@@ -588,6 +594,7 @@ func handleServiceDaemonCmd(args []string) {
 			RequestedPort: req.Port,
 			GPU:           true,
 			Headless:      req.Headless,
+			Kiosk:         req.Kiosk,
 			TargetURL:     req.URL,
 			Role:          req.Role,
 			ReuseExisting: req.Reuse,
@@ -600,9 +607,12 @@ func handleServiceDaemonCmd(args []string) {
 		}
 		sess = ensureSessionPageReady(req.debugURLRequest, sess)
 		enforceSingleRoleInstance(req.Role, req.Headless, sess.PID)
-		_ = ensureSinglePageTab(sess.Port)
+		if err := ensureSinglePageTab(sess.Port); err != nil {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error()})
+			return
+		}
 		atomic.StoreInt64(&proxyPort, int64(sess.Port))
-		_ = serviceNavigateAndFullscreen(sess.WebSocketURL, req.URL, req.Fullscreen)
+		_ = serviceNavigateAndFullscreen(sess.WebSocketURL, req.URL, req.Fullscreen || req.Kiosk)
 		wsPath := chrome.WebSocketPathFromURL(strings.TrimSpace(sess.WebSocketURL))
 		if wsPath == "" {
 			wsPath = "/devtools/browser"
@@ -665,7 +675,10 @@ func handleServiceDaemonCmd(args []string) {
 		}
 		sess = ensureSessionPageReady(req.debugURLRequest, sess)
 		enforceSingleRoleInstance(req.Role, req.Headless, sess.PID)
-		_ = ensureSinglePageTab(sess.Port)
+		if err := ensureSinglePageTab(sess.Port); err != nil {
+			writeJSON(w, http.StatusConflict, actionResponse{OK: false, Error: err.Error()})
+			return
+		}
 		atomic.StoreInt64(&proxyPort, int64(sess.Port))
 		actionLogs, actionErr := serviceRunAction(sess.Port, sess.WebSocketURL, req)
 		if actionErr != nil {
@@ -781,19 +794,26 @@ func ensureSinglePageTab(port int) error {
 	if err := json.Unmarshal(body, &targets); err != nil {
 		return err
 	}
-	first := ""
+	pageCount := 0
 	for _, t := range targets {
 		if strings.EqualFold(strings.TrimSpace(t.Type), "page") {
-			if first == "" {
-				first = strings.TrimSpace(t.ID)
-				continue
-			}
-			closeURL := fmt.Sprintf("http://127.0.0.1:%d/json/close/%s", port, strings.TrimSpace(t.ID))
-			r, e := client.Get(closeURL)
-			if e == nil && r != nil {
-				_ = r.Body.Close()
-			}
+			pageCount++
 		}
+	}
+	if pageCount == 1 {
+		return nil
+	}
+	if pageCount > 1 {
+		return fmt.Errorf("chrome tab guard failed: expected 1 page tab, found %d", pageCount)
+	}
+	createURL := fmt.Sprintf("http://127.0.0.1:%d/json/new?about:blank", port)
+	r, err := client.Get(createURL)
+	if err != nil {
+		return fmt.Errorf("chrome tab guard failed: no page tab and create failed: %w", err)
+	}
+	_ = r.Body.Close()
+	if r.StatusCode < 200 || r.StatusCode >= 300 {
+		return fmt.Errorf("chrome tab guard failed: no page tab and create returned %s", r.Status)
 	}
 	return nil
 }
@@ -1060,7 +1080,7 @@ func printChromeUsage() {
 	fmt.Println("  verify [--port N]   Verify chrome connectivity")
 	fmt.Println("  list [flags]        List detected chrome processes")
 	fmt.Println("  new [URL] [flags]   Launch a new Chrome instance")
-	fmt.Println("  open [flags]        Open URL on host(s) and optionally fullscreen it")
+	fmt.Println("  open [flags]        Open URL on host(s) and optionally fullscreen/kiosk it")
 	fmt.Println("  dashboard [flags]   Open daemon process-monitor dashboard on host(s)")
 	fmt.Println("  click <selector>    Click/tap selector via remote chrome service")
 	fmt.Println("  session [flags]     Launch/reuse and emit machine-readable session metadata")
@@ -1087,6 +1107,7 @@ func printChromeUsage() {
 	fmt.Println("\nFlags for new:")
 	fmt.Println("  --gpu               Enable GPU acceleration")
 	fmt.Println("  --headless          Enable headless mode")
+	fmt.Println("  --kiosk             Launch in kiosk mode (headed only)")
 	fmt.Println("  --role <name>       Tag launched browser role (dev|test)")
 	fmt.Println("  --reuse-existing    Reuse existing matching role/headless instance")
 	fmt.Println("  --user-data-dir     Set explicit profile directory")

@@ -19,6 +19,7 @@ import (
 	"net/url"
 
 	"dialtone/dev/plugins/logs/src_v1/go"
+	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 )
 
@@ -123,6 +124,7 @@ type SessionOptions struct {
 	RequestedPort int
 	GPU           bool
 	Headless      bool
+	Kiosk         bool
 	TargetURL     string
 	Role          string
 	ReuseExisting bool
@@ -142,6 +144,9 @@ func StartSession(opts SessionOptions) (*Session, error) {
 	if opts.Role == "" {
 		opts.Role = "default"
 	}
+	if opts.Headless {
+		opts.Kiosk = false
+	}
 	// Dialtone browser sessions should always run with GPU enabled.
 	opts.GPU = true
 
@@ -149,13 +154,7 @@ func StartSession(opts SessionOptions) (*Session, error) {
 		procs, err := listResourcesWithTimeout(true, 2*time.Second)
 		if err == nil {
 			for _, p := range procs {
-				if p.Origin != "Dialtone" || p.Role != opts.Role {
-					continue
-				}
-				if p.IsHeadless != opts.Headless {
-					continue
-				}
-				if want := strings.TrimSpace(opts.DebugAddress); want != "" && !commandHasDebugAddress(p.Command, want) {
+				if p.Origin != "Dialtone" {
 					continue
 				}
 				wsURL := ""
@@ -175,6 +174,7 @@ func StartSession(opts SessionOptions) (*Session, error) {
 				if wsURL == "" {
 					continue
 				}
+				enforceSingleDialtoneBrowser(p.PID)
 				return &Session{
 					PID:          p.PID,
 					Port:         port,
@@ -186,7 +186,7 @@ func StartSession(opts SessionOptions) (*Session, error) {
 		}
 	}
 
-	res, err := LaunchChromeWithRoleAndUserDataDir(opts.RequestedPort, opts.GPU, opts.Headless, opts.TargetURL, opts.Role, opts.UserDataDir, opts.DebugAddress)
+	res, err := LaunchChromeWithRoleAndUserDataDir(opts.RequestedPort, opts.GPU, opts.Headless, opts.Kiosk, opts.TargetURL, opts.Role, opts.UserDataDir, opts.DebugAddress)
 	if err != nil {
 		return nil, err
 	}
@@ -218,6 +218,9 @@ func StartSession(opts SessionOptions) (*Session, error) {
 			}
 		}
 	}
+	if finalPID > 0 {
+		enforceSingleDialtoneBrowser(finalPID)
+	}
 
 	return &Session{
 		PID:          finalPID,
@@ -228,13 +231,23 @@ func StartSession(opts SessionOptions) (*Session, error) {
 	}, nil
 }
 
-func commandHasDebugAddress(command, want string) bool {
-	command = strings.TrimSpace(command)
-	want = strings.TrimSpace(want)
-	if command == "" || want == "" {
-		return false
+func enforceSingleDialtoneBrowser(keepPID int) {
+	if keepPID <= 0 {
+		return
 	}
-	return strings.Contains(command, "--remote-debugging-address="+want)
+	procs, err := listResourcesWithTimeout(true, 2*time.Second)
+	if err != nil {
+		return
+	}
+	for _, p := range procs {
+		if p.PID <= 0 || p.PID == keepPID {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(p.Origin), "dialtone") {
+			continue
+		}
+		_ = KillResource(p.PID, p.IsWindows)
+	}
 }
 
 func listResourcesWithTimeout(includeSystem bool, timeout time.Duration) ([]ChromeProcess, error) {
@@ -324,10 +337,10 @@ func LaunchChrome(port int, gpu bool, headless bool, targetURL string) (*LaunchR
 
 // LaunchChromeWithRole starts a new Chrome instance and tags it with a dialtone role (e.g. "dev", "smoke").
 func LaunchChromeWithRole(port int, gpu bool, headless bool, targetURL, role string) (*LaunchResult, error) {
-	return LaunchChromeWithRoleAndUserDataDir(port, gpu, headless, targetURL, role, "", "")
+	return LaunchChromeWithRoleAndUserDataDir(port, gpu, headless, false, targetURL, role, "", "")
 }
 
-func LaunchChromeWithRoleAndUserDataDir(port int, gpu bool, headless bool, targetURL, role, requestedUserDataDir, debugAddress string) (*LaunchResult, error) {
+func LaunchChromeWithRoleAndUserDataDir(port int, gpu bool, headless bool, kiosk bool, targetURL, role, requestedUserDataDir, debugAddress string) (*LaunchResult, error) {
 	path := FindChromePath()
 	if path == "" {
 		return nil, fmt.Errorf("chrome not found")
@@ -449,6 +462,9 @@ func LaunchChromeWithRoleAndUserDataDir(port int, gpu bool, headless bool, targe
 
 	if headless {
 		args = append(args, "--headless=new")
+	}
+	if kiosk && !headless {
+		args = append(args, "--kiosk", "--start-fullscreen")
 	}
 
 	if targetURL != "" {
@@ -586,12 +602,40 @@ func AttachToWebSocket(websocketURL string) (context.Context, context.CancelFunc
 		return nil, nil, fmt.Errorf("websocket url is required")
 	}
 	allocCtx, cancelAlloc := chromedp.NewRemoteAllocator(context.Background(), ws)
-	tabCtx, cancelTab := chromedp.NewContext(allocCtx)
+	tabCtx, cancelTab := chromedp.NewContext(allocCtx, attachContextOptionsFromWS(ws)...)
 	cancel := func() {
 		cancelTab()
 		cancelAlloc()
 	}
 	return tabCtx, cancel, nil
+}
+
+func attachContextOptionsFromWS(ws string) []chromedp.ContextOption {
+	id := websocketTargetID(ws)
+	if strings.TrimSpace(id) == "" {
+		return nil
+	}
+	return []chromedp.ContextOption{chromedp.WithTargetID(target.ID(id))}
+}
+
+func websocketTargetID(ws string) string {
+	ws = strings.TrimSpace(ws)
+	if ws == "" {
+		return ""
+	}
+	u, err := url.Parse(ws)
+	if err != nil {
+		return ""
+	}
+	path := strings.TrimSpace(u.Path)
+	if !strings.Contains(path, "/devtools/page/") {
+		return ""
+	}
+	parts := strings.Split(path, "/")
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(parts[len(parts)-1])
 }
 
 func NewTabContext(parent context.Context) (context.Context, context.CancelFunc) {
