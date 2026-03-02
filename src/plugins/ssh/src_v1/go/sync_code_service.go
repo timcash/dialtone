@@ -15,7 +15,7 @@ const syncCodeServiceName = "dialtone-ssh-sync-code.service"
 
 func InstallSyncCodeService(opts SyncCodeOptions, interval time.Duration) error {
 	if strings.TrimSpace(opts.Node) == "" {
-		return fmt.Errorf("--node is required with --service")
+		return fmt.Errorf("--host is required with --service")
 	}
 	repoRoot, err := findDialtoneRepoRoot()
 	if err != nil {
@@ -103,7 +103,7 @@ func StatusSyncCodeService() error {
 func buildSyncCodeLoopExec(repoRoot string, opts SyncCodeOptions, interval time.Duration) string {
 	args := []string{
 		"./dialtone.sh", "ssh", "src_v1", "sync-code",
-		"--node", strings.TrimSpace(opts.Node),
+		"--host", strings.TrimSpace(opts.Node),
 		"--src", strings.TrimSpace(opts.Source),
 	}
 	if d := strings.TrimSpace(opts.Dest); d != "" {

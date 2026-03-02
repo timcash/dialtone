@@ -63,7 +63,7 @@ func Bootstrap(opts BootstrapOptions) error {
 func resolveBootstrapTargets(node string) ([]MeshNode, error) {
 	name := strings.TrimSpace(node)
 	if name == "" {
-		return nil, fmt.Errorf("node is required")
+		return nil, fmt.Errorf("host is required")
 	}
 	if name == "all" {
 		return ListMeshNodes(), nil

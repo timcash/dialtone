@@ -28,12 +28,16 @@ func Run(args []string) error {
 		return runInstall(args[1:])
 	case "dev":
 		return runDev(args[1:])
+	case "open-dev":
+		return runOpenDev(args[1:])
 	case "build":
 		return runBuild(args[1:])
 	case "serve":
 		return runServe(args[1:])
 	case "go-build":
 		return runGoBuild(args[1:])
+	case "download-dev":
+		return runDownloadDev(args[1:])
 	default:
 		PrintUsage()
 		return fmt.Errorf("unknown earth command: %s", args[0])
@@ -44,20 +48,49 @@ func PrintUsage() {
 	logs.Raw("Usage: ./dialtone.sh earth src_v1 <command> [args]")
 	logs.Raw("")
 	logs.Raw("Commands:")
-	logs.Raw("  install                 Install UI dependencies (bun install)")
+	logs.Raw("  install [flags]         Install UI dependencies, then launch Vite dev (HMR) unless --no-dev")
 	logs.Raw("  dev [--port P] [--browser-node N] [--public-url U] [--host H]")
+	logs.Raw("  open-dev [--hosts H] [--port P] [--public-url U] [--role R]")
 	logs.Raw("  build                   Build UI dist")
 	logs.Raw("  serve [--addr A]        Serve UI dist through Go server")
 	logs.Raw("  go-build                Build earth server binary to repo bin/")
+	logs.Raw("  download-dev [flags]    Clone/pull repo then run earth ui vite dev")
 	logs.Raw("  test [--attach N]       Run earth plugin test suite (optional remote attach node)")
 }
 
-func runInstall(_ []string) error {
+func runInstall(args []string) error {
 	paths, err := ResolvePaths("")
 	if err != nil {
 		return err
 	}
-	return runDialtone(paths.Runtime.RepoRoot, "bun", "src_v1", "exec", "--cwd", paths.Preset.UI, "install")
+	fs := flag.NewFlagSet("earth install", flag.ContinueOnError)
+	fs.SetOutput(nil)
+	noDev := fs.Bool("no-dev", false, "Only install dependencies; do not launch Vite dev")
+	port := fs.Int("port", 5181, "Dev server port")
+	host := fs.String("host", "0.0.0.0", "Vite bind host")
+	browserNode := fs.String("browser-node", "", "Optional mesh node for headed browser session")
+	publicURL := fs.String("public-url", "", "Public URL that remote browser should open")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := runDialtone(paths.Runtime.RepoRoot, "bun", "src_v1", "exec", "--cwd", paths.Preset.UI, "install"); err != nil {
+		return err
+	}
+	if *noDev {
+		logs.Info("earth install complete (dev launch skipped via --no-dev)")
+		return nil
+	}
+	devArgs := []string{
+		"--port", fmt.Sprintf("%d", *port),
+		"--host", strings.TrimSpace(*host),
+	}
+	if strings.TrimSpace(*browserNode) != "" {
+		devArgs = append(devArgs, "--browser-node", strings.TrimSpace(*browserNode))
+	}
+	if strings.TrimSpace(*publicURL) != "" {
+		devArgs = append(devArgs, "--public-url", strings.TrimSpace(*publicURL))
+	}
+	return runDev(devArgs)
 }
 
 func runDev(args []string) error {
@@ -105,6 +138,33 @@ func runDev(args []string) error {
 		NATSURL:           "nats://127.0.0.1:4222",
 		NATSSubject:       "logs.dev.earth-src-v1",
 	})
+}
+
+func runOpenDev(args []string) error {
+	paths, err := ResolvePaths("")
+	if err != nil {
+		return err
+	}
+	fs := flag.NewFlagSet("earth open-dev", flag.ContinueOnError)
+	fs.SetOutput(nil)
+	hosts := fs.String("hosts", "all", "Chrome target hosts CSV or 'all' (example: darkmac,legion,gold)")
+	port := fs.Int("port", 5177, "Vite dev server port")
+	publicURL := fs.String("public-url", "", "Explicit URL (default: http://127.0.0.1:<port> on each host)")
+	role := fs.String("role", "dev", "Chrome role to reuse/start")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	devURL := strings.TrimSpace(*publicURL)
+	if devURL == "" {
+		devURL = fmt.Sprintf("http://127.0.0.1:%d", *port)
+	}
+	logs.Info("earth open-dev hosts=%s url=%s role=%s", strings.TrimSpace(*hosts), devURL, strings.TrimSpace(*role))
+	return runDialtone(paths.Runtime.RepoRoot,
+		"chrome", "src_v1", "open",
+		"--host", strings.TrimSpace(*hosts),
+		"--role", strings.TrimSpace(*role),
+		"--url", devURL,
+	)
 }
 
 func defaultDevBrowserNode() string {
@@ -182,6 +242,90 @@ func runGoBuild(_ []string) error {
 		return err
 	}
 	logs.Info("built %s", out)
+	return nil
+}
+
+func runDownloadDev(args []string) error {
+	paths, err := ResolvePaths("")
+	if err != nil {
+		return err
+	}
+	fs := flag.NewFlagSet("earth download-dev", flag.ContinueOnError)
+	fs.SetOutput(nil)
+	repoURL := fs.String("repo", "https://github.com/timcash/dialtone.git", "Git repo URL to clone/pull")
+	branch := fs.String("branch", "main", "Git branch")
+	dest := fs.String("dest", filepath.Join(paths.Runtime.RepoRoot, ".dialtone", "plugins", "earth-dev"), "Destination directory")
+	pluginPath := fs.String("plugin-path", "src/plugins/earth/src_v1/ui", "Path to earth ui dir relative to repo root")
+	host := fs.String("host", "0.0.0.0", "Vite bind host")
+	port := fs.Int("port", 5181, "Vite dev server port")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	targetDir := strings.TrimSpace(*dest)
+	if targetDir == "" {
+		return errors.New("download-dev requires --dest")
+	}
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		return fmt.Errorf("create destination failed: %w", err)
+	}
+	repoRoot, err := ensureRepoCheckout(strings.TrimSpace(*repoURL), strings.TrimSpace(*branch), targetDir)
+	if err != nil {
+		return err
+	}
+	uiDir := filepath.Join(repoRoot, filepath.FromSlash(strings.TrimSpace(*pluginPath)))
+	if info, statErr := os.Stat(uiDir); statErr != nil || !info.IsDir() {
+		return fmt.Errorf("plugin ui directory not found: %s", uiDir)
+	}
+	logs.Info("earth download-dev repo=%s branch=%s ui=%s", strings.TrimSpace(*repoURL), strings.TrimSpace(*branch), uiDir)
+	if err := runDialtone(paths.Runtime.RepoRoot, "bun", "src_v1", "exec", "--cwd", uiDir, "install"); err != nil {
+		return err
+	}
+	return runDialtone(paths.Runtime.RepoRoot, "bun", "src_v1", "exec", "--cwd", uiDir, "run", "dev", "--host", strings.TrimSpace(*host), "--port", fmt.Sprintf("%d", *port))
+}
+
+func ensureRepoCheckout(repoURL, branch, dest string) (string, error) {
+	repoURL = strings.TrimSpace(repoURL)
+	branch = strings.TrimSpace(branch)
+	dest = strings.TrimSpace(dest)
+	if repoURL == "" {
+		return "", errors.New("download-dev requires --repo")
+	}
+	if branch == "" {
+		branch = "main"
+	}
+	gitDir := filepath.Join(dest, ".git")
+	if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
+		if err := runCmd(dest, "git", "fetch", "--all", "--tags", "--prune"); err != nil {
+			return "", err
+		}
+		if err := runCmd(dest, "git", "checkout", branch); err != nil {
+			return "", err
+		}
+		if err := runCmd(dest, "git", "pull", "--ff-only", "origin", branch); err != nil {
+			return "", err
+		}
+		return dest, nil
+	}
+	if entries, err := os.ReadDir(dest); err == nil && len(entries) > 0 {
+		return "", fmt.Errorf("destination is not empty and not a git checkout: %s", dest)
+	}
+	if err := runCmd("", "git", "clone", "--branch", branch, "--single-branch", repoURL, dest); err != nil {
+		return "", err
+	}
+	return dest, nil
+}
+
+func runCmd(cwd string, name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	if strings.TrimSpace(cwd) != "" {
+		cmd.Dir = cwd
+	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s %s failed: %w", name, strings.Join(args, " "), err)
+	}
 	return nil
 }
 

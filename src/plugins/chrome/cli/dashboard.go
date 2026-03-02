@@ -26,7 +26,7 @@ func handleDashboardCmd(args []string) {
 	ok := 0
 	for _, node := range nodes {
 		if strings.EqualFold(strings.TrimSpace(node.Name), "local") {
-			ws, err := openOnHost("local", url, strings.TrimSpace(*role), defaultChromeServicePort, false)
+			ws, err := openOnHost("local", url, strings.TrimSpace(*role), defaultChromeServicePort, false, false)
 			if err != nil {
 				logs.Warn("dashboard host=%s failed: %v", node.Name, err)
 				continue
