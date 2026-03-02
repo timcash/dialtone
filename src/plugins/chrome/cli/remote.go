@@ -127,6 +127,7 @@ func handleRemoteNewCmd(args []string) {
 	port := fs.Int("port", chrome.DefaultDebugPort, "Remote debugging port")
 	role := fs.String("role", "dev", "Role tag (dev|test)")
 	headless := fs.Bool("headless", false, "Headless mode")
+	kiosk := fs.Bool("kiosk", false, "Kiosk mode (headed only)")
 	gpu := fs.Bool("gpu", true, "Enable GPU")
 	debugAddress := fs.String("debug-address", "0.0.0.0", "Remote debug bind address")
 	reuseExisting := fs.Bool("reuse-existing", true, "Reuse if /json/version is already available")
@@ -148,6 +149,7 @@ func handleRemoteNewCmd(args []string) {
 		Port:          *port,
 		Role:          strings.TrimSpace(*role),
 		Headless:      *headless,
+		Kiosk:         *kiosk,
 		GPU:           *gpu,
 		DebugAddress:  strings.TrimSpace(*debugAddress),
 		ReuseExisting: *reuseExisting,
@@ -371,6 +373,7 @@ type remoteStartOptions struct {
 	Port          int
 	Role          string
 	Headless      bool
+	Kiosk         bool
 	GPU           bool
 	DebugAddress  string
 	ReuseExisting bool
@@ -390,6 +393,9 @@ func startRemoteChrome(node sshv1.MeshNode, opts remoteStartOptions) error {
 	}
 	if opts.DebugAddress == "" {
 		opts.DebugAddress = "0.0.0.0"
+	}
+	if opts.Headless {
+		opts.Kiosk = false
 	}
 	if opts.ReuseExisting {
 		if procs, err := listRemoteNodeChrome(node); err == nil {
@@ -423,6 +429,10 @@ func startRemoteChrome(node sshv1.MeshNode, opts remoteStartOptions) error {
 		gpuPS := "$false"
 		if opts.GPU {
 			gpuPS = "$true"
+		}
+		kioskPS := "$false"
+		if opts.Kiosk {
+			kioskPS = "$true"
 		}
 		ps := fmt.Sprintf(`$ErrorActionPreference='Stop'
 $paths=@("$env:ProgramFiles\Google\Chrome\Application\chrome.exe","$env:ProgramFiles(x86)\Google\Chrome\Application\chrome.exe","$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe")
@@ -465,11 +475,12 @@ try{
 $args=@("--remote-debugging-port=$port","--remote-debugging-address=%s","--remote-allow-origins=*","--no-first-run","--no-default-browser-check","--user-data-dir=$profile","--new-window","--dialtone-origin=true","--dialtone-role=%s")
 if(%s){ $args += "--headless=new" }
 if(%s){ } else { $args += "--disable-gpu" }
+if(%s){ $args += "--kiosk"; $args += "--start-fullscreen" }
 $args += %q
 $proc=Start-Process -FilePath $exe -ArgumentList $args -PassThru
 for($i=0;$i -lt 60;$i++){ try{ $v=Invoke-RestMethod -Uri ("http://127.0.0.1:{0}/json/version" -f $port) -TimeoutSec 1; if($v.webSocketDebuggerUrl){ Trim-DialtoneTabs -p $port; Write-Output ("started pid="+$proc.Id); Write-Output ($v | ConvertTo-Json -Compress); exit 0 } }catch{}; Start-Sleep -Milliseconds 200 }
 Write-Error "debug endpoint not ready on :$port"; exit 2`,
-			opts.Port, reusePS, opts.Role, opts.DebugAddress, opts.Role, headlessPS, gpuPS, opts.URL)
+			opts.Port, reusePS, opts.Role, opts.DebugAddress, opts.Role, headlessPS, gpuPS, kioskPS, opts.URL)
 		out, err := sshv1.RunNodeCommand(node.Name, ps, sshv1.CommandOptions{})
 		if err != nil {
 			return fmt.Errorf("remote-new windows failed: %v output=%s", err, strings.TrimSpace(out))
@@ -485,6 +496,10 @@ Write-Error "debug endpoint not ready on :$port"; exit 2`,
 	disableGPUFlag := ""
 	if !opts.GPU {
 		disableGPUFlag = " --disable-gpu"
+	}
+	kioskFlag := ""
+	if opts.Kiosk {
+		kioskFlag = " --kiosk --start-fullscreen"
 	}
 	cmd := fmt.Sprintf(`set -eu
 port=%d
@@ -502,7 +517,7 @@ done
 if [ -z "$bin" ]; then echo "chrome executable not found"; exit 1; fi
 profile="$HOME/.dialtone/chrome-%s-port-${port}"
 mkdir -p "$HOME/.dialtone"
-nohup "$bin" --remote-debugging-port="${port}" --remote-debugging-address=%s '--remote-allow-origins=*' --no-first-run --no-default-browser-check --user-data-dir="$profile" --new-window --dialtone-origin=true --dialtone-role=%s%s%s %q >"$HOME/.dialtone/chrome-%s-port-${port}.log" 2>&1 < /dev/null &
+nohup "$bin" --remote-debugging-port="${port}" --remote-debugging-address=%s '--remote-allow-origins=*' --no-first-run --no-default-browser-check --user-data-dir="$profile" --new-window --dialtone-origin=true --dialtone-role=%s%s%s%s %q >"$HOME/.dialtone/chrome-%s-port-${port}.log" 2>&1 < /dev/null &
 for _ in $(seq 1 60); do
   if curl -fsS --max-time 1 "http://127.0.0.1:${port}/json/version" >/dev/null 2>&1; then
     echo "started debugger on :${port}"
@@ -513,7 +528,7 @@ for _ in $(seq 1 60); do
 done
 echo "debug endpoint not ready on :${port}"
 exit 2`,
-		opts.Port, opts.ReuseExisting, opts.Role, opts.DebugAddress, opts.Role, headlessFlag, disableGPUFlag, opts.URL, opts.Role)
+		opts.Port, opts.ReuseExisting, opts.Role, opts.DebugAddress, opts.Role, headlessFlag, disableGPUFlag, kioskFlag, opts.URL, opts.Role)
 	out, err := sshv1.RunNodeCommand(node.Name, cmd, sshv1.CommandOptions{})
 	if err != nil {
 		return fmt.Errorf("remote-new failed: %v output=%s", err, strings.TrimSpace(out))

@@ -36,27 +36,14 @@ var defaultMeshNodes = []MeshNode{
 		Name:    "wsl",
 		Aliases: []string{"wsl", "legion-wsl-1", "legion-wsl-1.shad-artichoke.ts.net"},
 		User:    "user",
-		Host:    "legion-wsl-1.shad-artichoke.ts.net",
-		Port:    "22",
-		OS:      "linux",
-		RepoCandidates: []string{
-			"/home/user/dialtone",
-		},
-	},
-	{
-		Name:    "chroma",
-		Aliases: []string{"chroma", "chroma-1", "chroma-1.shad-artichoke.ts.net"},
-		User:    "dev",
-		Host:    "chroma-1.shad-artichoke.ts.net",
+		Host:    "192.168.4.52",
 		HostCandidates: []string{
-			"192.168.4.53", // Chroma LAN IP
+			"legion-wsl-1.shad-artichoke.ts.net",
 		},
 		Port: "22",
-		OS:   "macos",
+		OS:   "linux",
 		RepoCandidates: []string{
-			"/Users/dev/dialtone",
-			"/Users/dev/dialtone",
-			"/Users/dev/Documents/dialtone",
+			"/home/user/dialtone",
 		},
 	},
 	{
@@ -75,9 +62,9 @@ var defaultMeshNodes = []MeshNode{
 		Name:    "darkmac",
 		Aliases: []string{"darkmac", "darkmac.shad-artichoke.ts.net"},
 		User:    "tim",
-		Host:    "darkmac.shad-artichoke.ts.net",
+		Host:    "192.168.4.31",
 		HostCandidates: []string{
-			"192.168.4.31", // Darkmac LAN IP
+			"darkmac.shad-artichoke.ts.net",
 		},
 		Port: "22",
 		OS:   "macos",
@@ -92,10 +79,10 @@ var defaultMeshNodes = []MeshNode{
 		Name:    "rover",
 		Aliases: []string{"rover", "rover-1", "rover-1.shad-artichoke.ts.net"},
 		User:    "tim",
-		Host:    "rover-1.shad-artichoke.ts.net",
+		Host:    "192.168.4.36",
 		HostCandidates: []string{
 			"169.254.217.151", // Rover direct ethernet on the Legion switch
-			"192.168.4.36",    // Rover WLAN LAN IP
+			"rover-1.shad-artichoke.ts.net",
 		},
 		Port: "22",
 		OS:   "linux",
@@ -108,12 +95,14 @@ var defaultMeshNodes = []MeshNode{
 		Name:    "legion",
 		Aliases: []string{"legion", "legion.shad-artichoke.ts.net"},
 		User:    "timca",
-		Host:    "legion.shad-artichoke.ts.net",
-		Port:    "2223",
-		OS:      "windows",
-		// When invoked from this repo's WSL environment, execute directly via
-		// Windows PowerShell instead of mesh SSH.
-		PreferWSLPowerShell: true,
+		Host:    "192.168.4.52",
+		HostCandidates: []string{
+			"127.0.0.1",
+			"legion.shad-artichoke.ts.net",
+		},
+		Port:                "2223",
+		OS:                  "windows",
+		PreferWSLPowerShell: false,
 		RepoCandidates: []string{
 			"/home/user/dialtone",
 			"/home/user/dialtone",

@@ -1,182 +1,85 @@
-# Chrome Plugin
+# Chrome Plugin (src_v1)
 
-`src/plugins/chrome` manages local and remote Chrome/Chromium/Edge instances for Dialtone.
+Daemon-first Chrome control for local and mesh hosts.
 
-## What It Supports
-
-- detect existing Chrome processes and debug ports
-- start headed/headless sessions with role tags (`dev`, `test`, etc.)
-- reuse existing matching role/headless sessions
-- configure GPU on/off
-- set explicit `--user-data-dir`
-- attach to existing browser via websocket and open new tabs
-- clean up Dialtone-owned sessions
-
-## CLI
+## Command Workflow
 
 ```bash
-./dialtone.sh chrome help
-./dialtone.sh chrome src_v1 verify --port 9222
-./dialtone.sh chrome src_v1 list --verbose
-./dialtone.sh chrome src_v1 new https://example.com --role dev --gpu
-./dialtone.sh chrome src_v1 new --headless --role test --user-data-dir ./.chrome_data/test-profile
-./dialtone.sh chrome src_v1 kill all
-./dialtone.sh chrome src_v1 remote-list --nodes darkmac,gold,legion,rover,wsl --verbose
-./dialtone.sh chrome src_v1 remote-new --host darkmac --role dev --port 9222 --debug-address 0.0.0.0 --url http://127.0.0.1:5177/#hero
-./dialtone.sh chrome src_v1 remote-probe --nodes darkmac --ports 9222,9223
-./dialtone.sh chrome src_v1 remote-relay --host darkmac --listen-port 9223 --target-port 9222
-./dialtone.sh chrome src_v1 remote-doctor --nodes darkmac,gold,legion --ports 9222,9223
+# generic plugin workflow
+./dialtone.sh chrome src_v1 install
+./dialtone.sh chrome src_v1 format
+./dialtone.sh chrome src_v1 lint
+./dialtone.sh chrome src_v1 build
+./dialtone.sh chrome src_v1 test --filter open
+
+# deploy daemon binary to hosts
 ./dialtone.sh chrome src_v1 deploy --host darkmac --service --role dev
-./dialtone.sh chrome src_v1 deploy --host all --service --role dev
-./dialtone.sh chrome src_v1 open --host all --fullscreen --url dialtone.earth
-./dialtone.sh chrome src_v1 dashboard --host legion --role dev
-./dialtone.sh chrome src_v1 click form-submit-button --host all --url dialtone.earth
-./dialtone.sh chrome src_v1 list --host all
+./dialtone.sh chrome src_v1 deploy --host legion --service --role dev
+./dialtone.sh chrome src_v1 deploy --host gold --service --role dev
+
+# inspect running instances
+./dialtone.sh chrome src_v1 list --host darkmac,legion,gold --verbose
+./dialtone.sh chrome src_v1 remote-list --nodes darkmac,legion,gold --origin dialtone --verbose
+
+# open/reuse one headed browser per host (daemon path)
+./dialtone.sh chrome src_v1 open --host darkmac,legion --role dev --url http://127.0.0.1:5177
+./dialtone.sh chrome src_v1 open --host darkmac --role dev --kiosk --url https://dialtone.earth
+
+# fallback when daemon /open is unavailable on a host
+./dialtone.sh chrome src_v1 remote-new --host legion --role dev --url http://127.0.0.1:5177 --reuse-existing=false
+```
+
+## Core Rules
+
+- One Dialtone Chrome browser process per host.
+- One page tab per managed browser session.
+- Host controls browser state; callers send control signals.
+- `gold` should run non-kiosk unless explicitly requested.
+
+## Daemon Debug Checklist
+
+1. Verify daemon deployed and started:
+
+```bash
+./dialtone.sh chrome src_v1 deploy --host <host> --service --role dev
+```
+
+2. Verify process state:
+
+```bash
+./dialtone.sh chrome src_v1 list --host <host> --verbose
+./dialtone.sh chrome src_v1 remote-list --nodes <host> --origin dialtone --verbose
+```
+
+3. If `open` fails with `remote chrome service unavailable`:
+
+- redeploy daemon on that host
+- run `remote-new` as fallback
+- re-check tab/process count with `list --host`
+
+4. If tabs drift above one:
+
+- this should fail guard checks in daemon/CLI paths
+- run policy test and investigate host-specific control endpoint failures
+
+## Tests
+
+```bash
+# workflow
 ./dialtone.sh chrome src_v1 test
 ./dialtone.sh chrome src_v1 test --filter open
+
+# policy: required hosts running + gold non-kiosk
+./dialtone.sh chrome src_v1 test --filter policy --role dev --host darkmac,gold,legion
 ```
 
-Commands:
-- `verify [--port N] [--debug]`
-- `list [--headed|--headless] [--verbose|-v]`
-- `new [URL] [--port N] [--gpu] [--headless] [--role NAME] [--reuse-existing] [--user-data-dir PATH] [--debug]`
-- `kill [PID|all] [--all] [--windows]`
-- `remote-list [--nodes CSV|all] [--headed|--headless] [--role NAME] [--origin dialtone|other] [--verbose] [--json]`
-- `remote-new --host NAME [--url URL] [--role NAME] [--port N] [--debug-address ADDR] [--headless] [--gpu] [--reuse-existing] [--node NAME]`
-- `remote-probe [--nodes CSV|all] [--ports CSV] [--timeout-ms N]`
-- `remote-relay --host NAME [--listen-port N] [--target-port N] [--stop] [--node NAME]`
-- `remote-doctor [--nodes CSV|all] [--ports CSV] [--timeout-ms N]`
-- `remote-kill [--nodes CSV|all] [--role dev|test] [--all]`
-- `deploy --host NAME|all [--service] [--role dev|test] [--user USER] [--remote-path PATH]`
-- `open --host NAME|all [--url URL] [--fullscreen] [--role dev|test]`
-- `dashboard --host NAME|all [--role dev|test] [--port N]`
-- `click SELECTOR --host NAME|all [--url URL] [--role dev|test]`
-- `list [--host NAME|all] [--headed|--headless] [--verbose|-v]`
-- `test [--host NAME|all] [--role dev|test] [--url URL] [--filter text]`
-- `install`
+Test artifacts:
 
-## Library Usage (`src_v1/go`)
-
-Import:
-
-```go
-import chrome "dialtone/dev/plugins/chrome/src_v1/go"
-```
-
-Start session:
-
-```go
-session, err := chrome.StartSession(chrome.SessionOptions{
-	RequestedPort: 0,
-	GPU:           true,
-	Headless:      false,
-	Role:          "dev",
-	ReuseExisting: true,
-	UserDataDir:   ".chrome_data/dev-profile",
-})
-if err != nil {
-	return err
-}
-defer chrome.CleanupSession(session)
-```
-
-Attach and create a new tab:
-
-```go
-ctx, cancel, err := chrome.AttachToWebSocket(session.WebSocketURL)
-if err != nil {
-	return err
-}
-defer cancel()
-
-tabCtx, tabCancel := chrome.NewTabContext(ctx)
-defer tabCancel()
-```
-
-Wait for debug readiness:
-
-```go
-if err := chrome.WaitForDebugPort(session.Port, 20*time.Second); err != nil {
-	return err
-}
-```
-
-## Tests (`src_v1`)
-
-Run:
-
-```bash
-./dialtone.sh chrome src_v1 test
-./dialtone.sh chrome src_v1 test --host all
-./dialtone.sh chrome src_v1 test --filter click
-```
-
-Reports generated by test runner:
 - `src/plugins/chrome/src_v1/TEST.md`
 - `src/plugins/chrome/src_v1/ERRORS.md`
 
-Layout:
-- `src/plugins/chrome/src_v1/test/cmd/main.go`
+## Known Host Notes
 
-Workflow coverage:
-- open headed role session on target host(s)
-- list role/headless/debug-active/tab-count across hosts
-- click selector through service-side chromedp
-- verify list state after action
-
-## Windows <-> WSL Current Issues (Known)
-
-Current known behavior when running from WSL against Windows-host Chrome:
-
-- Chrome DevTools on Windows can be reachable locally (`127.0.0.1`) but unreliable from WSL/Tailnet without explicit forwarding.
-- `remote-probe` can show `local_dial=true` while `/json/version` from WSL still fails with `EOF` / `connection reset by peer`.
-- `remote-debugging-address=0.0.0.0` on Windows may still effectively behave loopback-only in some launch paths.
-- `netsh interface portproxy` on the same listen/target port (for example `9333 -> 9333`) creates a loop and can break local websocket readiness checks.
-- Port-proxy listeners can stay up even after backing Chrome exits, which looks like an open port but is not attachable.
-- In this state, attach-mode tests may time out while trying remote-first then local fallback.
-
-Practical checks:
-
-```bash
-./dialtone.sh chrome src_v1 remote-probe --nodes legion --ports 9333,9334
-./dialtone.sh chrome src_v1 remote-doctor --nodes legion --ports 9333,9334
-./dialtone.sh chrome src_v1 remote-list --nodes legion --role dev --verbose
-```
-
-If stale Dialtone sessions exist:
-
-```bash
-./dialtone.sh chrome src_v1 remote-kill --nodes legion --role dev
-./dialtone.sh chrome src_v1 remote-kill --nodes legion --role test
-```
-
-If you must use `portproxy`, use a different public listen port from the Chrome debug port (example: `19333 -> 9333`), and open the firewall rule for the public port.
-
-## Double-Hop SSH Trick (Gold -> Legion Windows)
-
-When direct path is insufficient (for setup/debug), use a double SSH hop through `gold`:
-
-1. Hop to `gold` via mesh:
-
-```bash
-./dialtone.sh ssh src_v1 run --host gold --cmd "whoami && hostname"
-```
-
-2. From `gold`, hop to `legion` Windows SSH endpoint:
-
-```bash
-./dialtone.sh ssh src_v1 run --host gold --cmd "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -p 2223 user@192.168.4.52 \"whoami\""
-```
-
-3. Run elevated/admin PowerShell tasks on `legion` when needed (firewall/portproxy setup is often admin-gated). If not elevated, Windows returns access denied.
-
-This pattern is useful for emergency setup, validating host state, and cross-checking behavior when WSL-native transport does not expose enough visibility.
-
-## Mesh Note for LLM Operators
-
-Mesh SSH is not one-directional: you can reach any mesh node from any other mesh node.
-
-- Example: `wsl -> gold -> legion`
-- Example: `wsl -> darkmac -> rover`
-
-Use this to validate remote Chrome behavior from a second vantage point and to isolate whether failure is local transport, remote Chrome state, or network policy.
+- `legion`: daemon `/open` may intermittently fail from WSL; use `remote-new` fallback.
+- `gold`: if local build/dev commands fail with `xcode-select` prompts, install Apple Command Line Tools on Gold.
+- `wsl -> windows`: avoid loopback assumptions; control via daemon/host commands.
