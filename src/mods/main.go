@@ -1188,7 +1188,7 @@ func buildCloneUpdateCommand(sourceSpecs []string, destPath, branch string) stri
 	}
 
 	lines = append(lines, "if [ $success -eq 0 ]; then echo \"All mesh/origin sources failed\"; exit 1; fi")
-	return strings.Join(lines, " ; ")
+	return strings.Join(lines, "\n")
 }
 
 func buildRemoteSubmoduleSync(repoDir string, modPaths []string, from string) string {
