@@ -621,11 +621,12 @@ func runSync(args []string) error {
 						break
 					}
 				} else {
-					if err := runCommand("git", "-C", absPath, "pull", src, "main"); err == nil {
+					if err := runCommand("git", "-C", absPath, "pull", "--ff-only", src, "main"); err == nil {
 						success = true
 						break
 					}
 				}
+
 			}
 			if !success {
 				return fmt.Errorf("failed to sync mod %s from github or mesh", p)
