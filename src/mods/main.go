@@ -1160,7 +1160,7 @@ func buildCloneUpdateCommand(sourceSpecs []string, destPath, branch string) stri
 	destGit := filepath.ToSlash(filepath.Join(destPath, ".git"))
 
 	var lines []string
-	lines = append(lines, "set -ex")
+	lines = append(lines, "set -e")
 	lines = append(lines, "success=0")
 
 	for i, src := range sourceSpecs {
