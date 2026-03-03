@@ -521,6 +521,16 @@ func runStatus(args []string) error {
 	if err != nil {
 		return err
 	}
+
+	fmt.Println("== Parent: dialtone ==")
+	parentStatus, _ := runCapture("git", "-C", repoRoot, "status", "--short")
+	if strings.TrimSpace(parentStatus) != "" {
+		fmt.Println(strings.TrimSpace(parentStatus))
+	} else {
+		fmt.Println("clean")
+	}
+	fmt.Println()
+
 	mods, err := discoverMods(repoRoot)
 	if err != nil {
 		return err
@@ -534,17 +544,38 @@ func runStatus(args []string) error {
 		return err
 	}
 	if len(paths) == 0 {
-		fmt.Println("No mods selected")
 		return nil
 	}
-	cmd := []string{"git", "-C", repoRoot, "submodule", "status", "--recursive", "--"}
-	cmd = append(cmd, paths...)
-	if err := runCommand(cmd...); err != nil {
-		return err
+
+	for _, p := range paths {
+		modName := filepath.Base(p)
+		absPath := filepath.Join(repoRoot, filepath.FromSlash(p))
+		fmt.Printf("== Mod: %s ==\n", modName)
+		
+		// 1. Version/Commit status
+		subStatus, _ := runCapture("git", "-C", repoRoot, "submodule", "status", "--", p)
+		fmt.Print(strings.TrimSpace(subStatus) + " ")
+
+		// 2. File status
+		if !*short {
+			modStatus, _ := runCapture("git", "-C", absPath, "status", "--short")
+			if strings.TrimSpace(modStatus) != "" {
+				fmt.Println("(dirty)")
+				fmt.Println(strings.TrimSpace(modStatus))
+			} else {
+				fmt.Println("(clean)")
+			}
+		} else {
+			dirty, _ := gitHasChanges(absPath)
+			if dirty {
+				fmt.Println("(dirty)")
+			} else {
+				fmt.Println("(clean)")
+			}
+		}
+		fmt.Println()
 	}
-	if !*short {
-		return runCommand("git", "-C", repoRoot, "status", "--short", ".gitmodules")
-	}
+
 	return nil
 }
 
