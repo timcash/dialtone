@@ -8,9 +8,13 @@ The `mods v1` workflow is designed for high-performance synchronization across a
 - **Mesh-First Sync**: Commands like `pull` and `sync` attempt to fetch code from other LAN nodes before falling back to GitHub.
 - **Safety First**: All mesh-to-mesh pulls use `--ff-only` to protect local dirty changes.
 - **Abstracted Git**: Complex Git/Submodule logic is wrapped into a simple, predictable CLI that preserves standard "Add -> Commit -> Push" habits.
-- **Nix-Managed**: Every command runs inside a consistent, reproducible toolchain (Go, Git, SSH, GitHub CLI) managed by Nix.
+- **Nix-Managed**: Every command runs inside a consistent, reproducible toolchain managed by Nix.
+- **Auto-Environment**: macOS hosts automatically use `CGO_ENABLED=0` and login shells to ensure consistent behavior across different hardware.
+- **Config-First**: All network-specific mesh details are centralized in `env/mesh.json`, keeping the source code clean and portable.
 
-## Core Commands
+## Configuration
+
+Mesh nodes are defined in `env/mesh.json`. This file is tracked by Git and shared across the mesh.
 
 ### Orchestration
 - `./dialtone.sh mods v1 new <mod-name>`  
