@@ -44,19 +44,19 @@ type meshNode struct {
 
 var meshNodes = []meshNode{
 	{Name: "wsl", Aliases: []string{"wsl", "legion-wsl-1", "legion-wsl-1.shad-artichoke.ts.net"}, User: "user", Host: "192.168.4.52", Port: "22", OS: "linux", RepoCandidates: []string{"/home/user/dialtone"}},
-	{Name: "gold", Aliases: []string{"gold", "gold.shad-artichoke.ts.net"}, User: "user", Host: "192.168.4.53", Port: "22", OS: "macos", RepoCandidates: []string{"/Users/user/dialtone", "/Users/user/Documents/dialtone"}},
+	{Name: "gold", Aliases: []string{"gold", "gold.shad-artichoke.ts.net"}, User: "user", Host: "192.168.4.55", Port: "22", OS: "macos", RepoCandidates: []string{"/Users/user/dialtone", "/Users/user/Documents/dialtone"}},
 	{Name: "darkmac", Aliases: []string{"darkmac", "darkmac.shad-artichoke.ts.net"}, User: "tim", Host: "192.168.4.31", Port: "22", OS: "macos", RepoCandidates: []string{"/Users/tim/dialtone", "/Users/tim/Documents/dialtone"}},
 	{Name: "rover", Aliases: []string{"rover", "rover-1", "rover-1.shad-artichoke.ts.net"}, User: "tim", Host: "192.168.4.36", Port: "22", OS: "linux", RepoCandidates: []string{"/home/tim/dialtone", "/home/user/dialtone"}},
 	{Name: "legion", Aliases: []string{"legion", "legion.shad-artichoke.ts.net"}, User: "timca", Host: "192.168.4.52", Port: "2223", OS: "windows", RepoCandidates: []string{"/home/user/dialtone", "/mnt/c/Users/timca/dialtone", "/mnt/c/Users/timca/code3/dialtone"}},
 }
 
 func main() {
-	if len(os.Args) < 2 {
+	cmd, args, err := parseTopLevel(os.Args[1:])
+	if err != nil {
 		printUsage()
+		exitIfErr(err)
 		return
 	}
-	cmd := strings.TrimSpace(os.Args[1])
-	args := os.Args[2:]
 	switch cmd {
 	case "help", "-h", "--help":
 		printUsage()
@@ -80,14 +80,36 @@ func main() {
 		exitIfErr(runCommit(args))
 	case "push":
 		exitIfErr(runPush(args))
+	case "pull":
+		exitIfErr(runPull(args))
 	default:
 		printUsage()
 		exitIfErr(fmt.Errorf("unknown mods command: %s", cmd))
 	}
 }
 
+func parseTopLevel(args []string) (string, []string, error) {
+	if len(args) == 0 {
+		return "", nil, errors.New("missing mods command")
+	}
+	cmd := strings.TrimSpace(args[0])
+	rest := args[1:]
+	if strings.EqualFold(cmd, "v1") {
+		if len(rest) == 0 {
+			return "", nil, errors.New("missing command after v1")
+		}
+		cmd = strings.TrimSpace(rest[0])
+		rest = rest[1:]
+	} else if len(rest) > 0 && strings.EqualFold(strings.TrimSpace(rest[0]), "v1") {
+		// Backward-compatible: ./dialtone.sh mods <command> v1 ...
+		rest = rest[1:]
+	}
+	return cmd, rest, nil
+}
+
 func printUsage() {
-	fmt.Println("Usage: ./dialtone.sh mods <command> [args]")
+	fmt.Println("Usage: ./dialtone.sh mods v1 <command> [args]")
+	fmt.Println("       ./dialtone.sh mods <command> [args]      # backward compatible")
 	fmt.Println("")
 	fmt.Println("Commands:")
 	fmt.Println("  bootstrap [dev|binary]")
@@ -101,7 +123,12 @@ func printUsage() {
 	fmt.Println("  sync-ui [--mod NAME|PATH ...] [--from PATH] [--dry-run] [--commit] [--push]")
 	fmt.Println("  gh-create <mod-name> --owner <owner> [--repo-name <name>] [--private|--public]")
 	fmt.Println("  commit --mod <mod-name> [--message <msg>] [--all]")
-	fmt.Println("  push --mod <mod-name> [--host <name|local>] [--writer <name>] [--skip-self=true|false]")
+	fmt.Println("  push [--mod <mod-name>] [--message <msg>] [--dry-run]")
+	fmt.Println("       [--host <name|local>] [--writer <name>] [--skip-self=true|false]")
+	fmt.Println("       Push one mod, or all dirty mods + parent submodule pointers in one step")
+	fmt.Println("  pull [--host <name|all|local>] [--from <name>] [--branch BRANCH]")
+	fmt.Println("       [--source PATH] [--dest PATH] [--repo-dir PATH] [--skip-self=true|false] [--dry-run]")
+	fmt.Println("       Clone/update dialtone repo across mesh nodes and sync mod submodules")
 }
 
 func runBootstrap(args []string) error {
@@ -557,24 +584,106 @@ func runPush(args []string) error {
 	host := fs.String("host", "local", "local|mesh node")
 	writer := fs.String("writer", "", "single writer override")
 	skipSelf := fs.Bool("skip-self", true, "skip self if remote resolves to self")
+	msg := fs.String("message", "Update mod", "commit message prefix used when pushing all mods")
+	dryRun := fs.Bool("dry-run", false, "print actions only")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	name := strings.TrimSpace(*modName)
-	if name == "" {
-		return errors.New("--mod is required")
-	}
 	target := strings.ToLower(strings.TrimSpace(*host))
 	if strings.TrimSpace(*writer) != "" {
 		target = strings.ToLower(strings.TrimSpace(*writer))
 	}
-	if target == "all" {
+	if target == "all" && name != "" {
 		return errors.New("refusing push on --host all; use --writer <host>")
 	}
+
+	if name == "" {
+		if target != "" && target != "local" {
+			return errors.New("push-all currently supports local writer only")
+		}
+		repoRoot, err := findRepoRoot()
+		if err != nil {
+			return err
+		}
+		mods, err := discoverMods(repoRoot)
+		if err != nil {
+			return err
+		}
+		if len(mods) == 0 {
+			return errors.New("no mods found")
+		}
+		changedPaths := []string{}
+		commitPrefix := strings.TrimSpace(*msg)
+		if commitPrefix == "" {
+			commitPrefix = "Update mod"
+		}
+		for _, m := range mods {
+			modPath := filepath.Join(repoRoot, filepath.FromSlash(m.Path))
+			dirty, err := gitHasChanges(modPath)
+			if err != nil {
+				return err
+			}
+			if !dirty {
+				continue
+			}
+			if *dryRun {
+				fmt.Printf("[DRY-RUN] git -C %s add -A\n", modPath)
+				fmt.Printf("[DRY-RUN] git -C %s commit -m %q\n", modPath, commitPrefix+" "+m.Name)
+				fmt.Printf("[DRY-RUN] git -C %s push origin $(git -C %s branch --show-current)\n", modPath, modPath)
+				changedPaths = append(changedPaths, m.Path)
+				continue
+			}
+			if err := runCommand("git", "-C", modPath, "add", "-A"); err != nil {
+				return err
+			}
+			if err := runCommand("git", "-C", modPath, "commit", "-m", commitPrefix+" "+m.Name); err != nil {
+				return err
+			}
+			if err := pushModRepo(modPath); err != nil {
+				return err
+			}
+			changedPaths = append(changedPaths, m.Path)
+			fmt.Printf("pushed mod %s\n", m.Name)
+		}
+		if len(changedPaths) == 0 {
+			fmt.Println("no dirty mod changes to push")
+			return nil
+		}
+		if *dryRun {
+			fmt.Printf("[DRY-RUN] git -C %s add -- %s\n", repoRoot, strings.Join(changedPaths, " "))
+			fmt.Printf("[DRY-RUN] git -C %s commit -m %q\n", repoRoot, "Update mod submodule pointers")
+			fmt.Printf("[DRY-RUN] git -C %s push origin $(git -C %s branch --show-current)\n", repoRoot, repoRoot)
+			return nil
+		}
+		addArgs := []string{"-C", repoRoot, "add", "--"}
+		addArgs = append(addArgs, changedPaths...)
+		if err := runCommand(append([]string{"git"}, addArgs...)...); err != nil {
+			return err
+		}
+		staged, err := gitHasStagedChanges(repoRoot)
+		if err != nil {
+			return err
+		}
+		if staged {
+			if err := runCommand("git", "-C", repoRoot, "commit", "-m", "Update mod submodule pointers"); err != nil {
+				return err
+			}
+			if err := pushModRepo(repoRoot); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	if target == "" || target == "local" {
 		repoRoot, err := findRepoRoot()
 		if err != nil {
 			return err
+		}
+		if *dryRun {
+			fmt.Printf("[DRY-RUN] push mod %s at %s\n", name, filepath.Join(repoRoot, "src", "mods", name))
+			return nil
 		}
 		return pushModRepo(filepath.Join(repoRoot, "src", "mods", name))
 	}
@@ -590,12 +699,69 @@ func runPush(args []string) error {
 	cmd := "set -e && cd " + shellQuote(remoteModPath) + " && " +
 		"b=$(git branch --show-current) && [ -n \"$b\" ] && " +
 		"(git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1 || git push -u origin \"$b\") && git push"
+	if *dryRun {
+		fmt.Printf("[DRY-RUN] remote(%s): %s\n", node.Name, cmd)
+		return nil
+	}
 	out, err := runSSH(node, cmd)
 	if strings.TrimSpace(out) != "" {
 		fmt.Print(strings.TrimRight(out, "\n"))
 		fmt.Println()
 	}
 	return err
+}
+
+func runPull(args []string) error {
+	fs := flag.NewFlagSet("mods pull", flag.ContinueOnError)
+	host := fs.String("host", "all", "target host: local|name|all")
+	from := fs.String("from", "wsl", "source mesh node")
+	source := fs.String("source", "", "source repo path on source node")
+	dest := fs.String("dest", "", "destination repo path on target node")
+	branch := fs.String("branch", "", "default branch")
+	repoDir := fs.String("repo-dir", "", "remote repo dir override for sync step")
+	skipSelf := fs.Bool("skip-self", true, "skip self when host=all")
+	dryRun := fs.Bool("dry-run", false, "print actions only")
+	var branchMapVals multiValueFlag
+	fs.Var(&branchMapVals, "branch-map", "host=branch (repeatable)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	cloneArgs := []string{
+		"--host", strings.TrimSpace(*host),
+		"--from", strings.TrimSpace(*from),
+		fmt.Sprintf("--skip-self=%t", *skipSelf),
+	}
+	if strings.TrimSpace(*source) != "" {
+		cloneArgs = append(cloneArgs, "--source", strings.TrimSpace(*source))
+	}
+	if strings.TrimSpace(*dest) != "" {
+		cloneArgs = append(cloneArgs, "--dest", strings.TrimSpace(*dest))
+	}
+	if strings.TrimSpace(*branch) != "" {
+		cloneArgs = append(cloneArgs, "--branch", strings.TrimSpace(*branch))
+	}
+	for _, bm := range branchMapVals.values {
+		cloneArgs = append(cloneArgs, "--branch-map", bm)
+	}
+	if *dryRun {
+		cloneArgs = append(cloneArgs, "--dry-run")
+	}
+	if err := runClone(cloneArgs); err != nil {
+		return err
+	}
+	if *dryRun {
+		fmt.Println("[DRY-RUN] would run: mods sync --host", strings.TrimSpace(*host))
+		return nil
+	}
+	syncArgs := []string{
+		"--host", strings.TrimSpace(*host),
+		fmt.Sprintf("--skip-self=%t", *skipSelf),
+	}
+	if strings.TrimSpace(*repoDir) != "" {
+		syncArgs = append(syncArgs, "--repo-dir", strings.TrimSpace(*repoDir))
+	}
+	return runSync(syncArgs)
 }
 
 func discoverMods(repoRoot string) ([]modEntry, error) {
@@ -1131,6 +1297,22 @@ func runCapture(args ...string) (string, error) {
 		return stdout.String(), err
 	}
 	return stdout.String(), nil
+}
+
+func gitHasChanges(repoPath string) (bool, error) {
+	out, err := runCapture("git", "-C", repoPath, "status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
+}
+
+func gitHasStagedChanges(repoPath string) (bool, error) {
+	out, err := runCapture("git", "-C", repoPath, "diff", "--cached", "--name-only")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
 }
 
 func fileExists(path string) bool {

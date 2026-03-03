@@ -14,7 +14,7 @@ One intentional CLI fallback remains: `git submodule add` (go-git lacks a robust
 ## Command Shape
 
 ```bash
-./dialtone.sh mods <command> [args]
+./dialtone.sh mods v1 <command> [args]
 ```
 
 ## Bootstrap Paths
@@ -57,7 +57,8 @@ Current status:
 - `./dialtone.sh mods sync-ui`
 - `./dialtone.sh mods gh-create <mod-name> ...`
 - `./dialtone.sh mods commit --mod <mod-name> [-m "..."]`
-- `./dialtone.sh mods push --mod <mod-name> [--host <name|local>]`
+- `./dialtone.sh mods v1 push [--mod <mod-name>]`
+- `./dialtone.sh mods v1 pull [--host all] [--from wsl]`
 
 ## Safety Rules
 
@@ -97,6 +98,16 @@ This is handled by native `mods clone` logic and supports hosts pulling differen
 ```bash
 ./dialtone.sh mods commit --mod mod-name -m "Update mod-name"
 ./dialtone.sh mods push --mod mod-name --host gold
+```
+
+### E. One-step push/pull for all mods
+
+```bash
+# Push all dirty mods, then commit/push parent submodule pointers
+./dialtone.sh mods v1 push
+
+# Clone/pull dialtone across hosts from a writer node, then sync submodules
+./dialtone.sh mods v1 pull --host all --from wsl
 ```
 
 ### D. Nix for mod dev/build
