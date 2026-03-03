@@ -35,6 +35,10 @@ ensure_nix_installed() {
     if command_exists nix; then
         return 0
     fi
+    if [ ! -t 0 ]; then
+        echo "DIALTONE> Nix is required but not found, and shell is non-interactive."
+        exit 1
+    fi
     echo "DIALTONE> Nix is required for bootstrap."
     printf "DIALTONE> Install Nix now? [Y/n] "
     read -r confirm
