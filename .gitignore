@@ -95,3 +95,4 @@ tmp/
 src/plugins/swarm/src_v3/libudx/
 src/plugins/swarm/src_v3/dialtone_swarm_v3_x86_64
 src/plugins/swarm/src_v3/dialtone_swarm_v3_arm64
+env/mesh.json
