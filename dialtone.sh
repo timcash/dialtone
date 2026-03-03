@@ -81,7 +81,7 @@ enter_nix_shell_if_needed() {
     fi
     ensure_nix_installed
     echo "DIALTONE> Entering Nix dev shell..."
-    exec nix "${NIX_EXPERIMENTAL_FLAGS[@]}" develop "path:$SCRIPT_DIR" --command env DIALTONE_NIX_SHELL_BOOTSTRAPPED=1 "$SCRIPT_DIR/dialtone.sh" "$@"
+    exec nix "${NIX_EXPERIMENTAL_FLAGS[@]}" develop --command env DIALTONE_NIX_SHELL_BOOTSTRAPPED=1 "$SCRIPT_DIR/dialtone.sh" "$@"
 }
 
 bootstrap_clone_repo_in_place() {
@@ -151,7 +151,7 @@ run_bootstrap_repl() {
     if [ -z "${IN_NIX_SHELL:-}" ]; then
         echo "DIALTONE> Re-entering bootstrap inside Nix shell..."
         export DIALTONE_BOOTSTRAP_DONE=1
-        exec nix "${NIX_EXPERIMENTAL_FLAGS[@]}" develop "path:$SCRIPT_DIR" --command env DIALTONE_NIX_SHELL_BOOTSTRAPPED=1 DIALTONE_BOOTSTRAP_DONE=1 "$SCRIPT_DIR/dialtone.sh" "$@"
+        exec nix "${NIX_EXPERIMENTAL_FLAGS[@]}" develop --command env DIALTONE_NIX_SHELL_BOOTSTRAPPED=1 DIALTONE_BOOTSTRAP_DONE=1 "$SCRIPT_DIR/dialtone.sh" "$@"
     fi
     if ! command_exists git || ! command_exists go; then
         echo "DIALTONE> Nix shell does not have git/go available. Check flake.nix."
