@@ -62,6 +62,8 @@ func main() {
 		printUsage()
 	case "bootstrap":
 		exitIfErr(runBootstrap(args))
+	case "new":
+		exitIfErr(runNew(args))
 	case "add":
 		exitIfErr(runAdd(args))
 	case "clone":
@@ -113,8 +115,10 @@ func printUsage() {
 	fmt.Println("")
 	fmt.Println("Commands:")
 	fmt.Println("  bootstrap [dev|binary]")
-	fmt.Println("  add <mod-name> [--repo <url|owner/repo|path>] [--owner <owner>] [--repo-name <name>]")
+	fmt.Println("  new <mod-name> [--repo <url|owner/repo|path>] [--owner <owner>] [--repo-name <name>]")
 	fmt.Println("      [--path src/mods/<name>] [--branch main] [--public|--private] [--dry-run]")
+	fmt.Println("  add --mod <mod-name> <paths...>")
+	fmt.Println("      Stage specific files inside a mod before committing")
 	fmt.Println("  clone [--host <name|all|local>] [--from wsl] [--source PATH] [--dest PATH]")
 	fmt.Println("      [--branch BRANCH] [--branch-map host=branch] [--skip-self=true|false] [--dry-run]")
 	fmt.Println("  list")
@@ -123,9 +127,9 @@ func printUsage() {
 	fmt.Println("  sync-ui [--mod NAME|PATH ...] [--from PATH] [--dry-run] [--commit] [--push]")
 	fmt.Println("  gh-create <mod-name> --owner <owner> [--repo-name <name>] [--private|--public]")
 	fmt.Println("  commit --mod <mod-name> [--message <msg>] [--all]")
+
 	fmt.Println("  push [--mod <mod-name>] [--message <msg>] [--dry-run]")
-	fmt.Println("       [--host <name|local>] [--writer <name>] [--skip-self=true|false]")
-	fmt.Println("       Push one mod, or all dirty mods + parent submodule pointers in one step")
+	fmt.Println("       Push one mod, or all dirty mods + parent submodule pointers to GitHub")
 	fmt.Println("  pull [--host <name|all|local>] [--from <name>] [--branch BRANCH]")
 	fmt.Println("       [--source PATH] [--dest PATH] [--repo-dir PATH] [--skip-self=true|false] [--dry-run]")
 	fmt.Println("       Clone/update dialtone repo across mesh nodes and sync mod submodules")
@@ -147,15 +151,15 @@ func runBootstrap(args []string) error {
 	}
 }
 
-func runAdd(args []string) error {
+func runNew(args []string) error {
 	if len(args) == 0 {
-		return errors.New("mods add requires <name>")
+		return errors.New("mods new requires <name>")
 	}
 	name := strings.TrimSpace(args[0])
 	if !isValidModName(name) {
 		return fmt.Errorf("invalid mod name %q", name)
 	}
-	fs := flag.NewFlagSet("mods add", flag.ContinueOnError)
+	fs := flag.NewFlagSet("mods new", flag.ContinueOnError)
 	repo := fs.String("repo", "", "repo URL, owner/repo, or local path")
 	owner := fs.String("owner", "", "GitHub owner")
 	repoName := fs.String("repo-name", "", "GitHub repo name (default: dialtone-<name>)")
@@ -221,10 +225,42 @@ func runAdd(args []string) error {
 	return addSubmoduleWithCLI(repoRoot, upd...)
 }
 
+func runAdd(args []string) error {
+	fs := flag.NewFlagSet("mods add", flag.ContinueOnError)
+	modName := fs.String("mod", "", "mod name")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	name := strings.TrimSpace(*modName)
+	if name == "" {
+		return errors.New("--mod is required")
+	}
+	
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return err
+	}
+	modPath := filepath.Join(repoRoot, "src", "mods", name)
+	if !fileExists(modPath) {
+		return fmt.Errorf("mod path missing: %s", modPath)
+	}
+	
+	paths := fs.Args()
+	if len(paths) == 0 {
+		return errors.New("no paths provided to add")
+	}
+	
+	addArgs := []string{"-C", modPath, "add"}
+	addArgs = append(addArgs, paths...)
+	
+	return runCommand(append([]string{"git"}, addArgs...)...)
+}
+
+
 func runClone(args []string) error {
 	fs := flag.NewFlagSet("mods clone", flag.ContinueOnError)
 	host := fs.String("host", "all", "target host name|all|local")
-	from := fs.String("from", "wsl", "source mesh node")
+	from := fs.String("from", "", "source mesh node (defaults to current host)")
 	source := fs.String("source", "", "source repo path on source node")
 	dest := fs.String("dest", "", "destination repo path on target node")
 	branch := fs.String("branch", "", "default branch")
@@ -236,7 +272,20 @@ func runClone(args []string) error {
 		return err
 	}
 
-	srcNode, err := resolveMeshNode(strings.TrimSpace(*from))
+	srcName := strings.TrimSpace(*from)
+	if srcName == "" {
+		for _, n := range meshNodes {
+			if isSelfMeshNode(n) {
+				srcName = n.Name
+				break
+			}
+		}
+	}
+	if srcName == "" {
+		srcName = "wsl" // final fallback
+	}
+
+	srcNode, err := resolveMeshNode(srcName)
 	if err != nil {
 		return err
 	}
@@ -256,6 +305,16 @@ func runClone(args []string) error {
 		target = "all"
 	}
 
+	repoRoot, _ := findRepoRoot()
+	originURL := ""
+	if repoRoot != "" {
+		if r, err := git.PlainOpen(repoRoot); err == nil {
+			if rem, err := r.Remote("origin"); err == nil && len(rem.Config().URLs) > 0 {
+				originURL = rem.Config().URLs[0]
+			}
+		}
+	}
+
 	runForNode := func(node meshNode) error {
 		if *skipSelf && target == "all" && isSelfMeshNode(node) {
 			fmt.Printf("== %s ==\nSKIP self node\n", node.Name)
@@ -269,11 +328,34 @@ func runClone(args []string) error {
 			return fmt.Errorf("cannot resolve dest path for %s", node.Name)
 		}
 		nodeBranch := pickBranch(node.Name, strings.TrimSpace(*branch), branchMap)
-		srcSpec := sourceURLForRemote(srcNode, srcPath)
+
+		sources := []string{}
+		// 1. Primary requested source
+		primary := sourceURLForRemote(srcNode, srcPath)
 		if strings.EqualFold(node.Name, srcNode.Name) {
-			srcSpec = srcPath
+			primary = srcPath
 		}
-		cmd := buildCloneUpdateCommand(srcSpec, dst, nodeBranch)
+		sources = append(sources, primary)
+
+		// 2. Add other mesh nodes as fallbacks if this is a general pull
+		if target == "all" || strings.HasSuffix(os.Args[0], "pull") {
+			for _, mn := range meshNodes {
+				if strings.EqualFold(mn.Name, node.Name) || strings.EqualFold(mn.Name, srcNode.Name) {
+					continue
+				}
+				mPath := defaultRepoDirForNode(mn)
+				if mPath != "" {
+					sources = append(sources, sourceURLForRemote(mn, mPath))
+				}
+			}
+		}
+
+		// 3. GitHub origin as final fallback
+		if originURL != "" {
+			sources = append(sources, originURL)
+		}
+
+		cmd := buildCloneUpdateCommand(sources, dst, nodeBranch)
 		fmt.Printf("== %s ==\n", node.Name)
 		if *dryRun {
 			fmt.Printf("[DRY-RUN] %s\n", cmd)
@@ -375,6 +457,7 @@ func runStatus(args []string) error {
 func runSync(args []string) error {
 	fs := flag.NewFlagSet("mods sync", flag.ContinueOnError)
 	host := fs.String("host", "all", "target host: local|name|all")
+	from := fs.String("from", "wsl", "source mesh node for fallbacks")
 	repoDir := fs.String("repo-dir", "", "remote repo dir override")
 	skipSelf := fs.Bool("skip-self", true, "skip self when host=all")
 	var modFilter multiValueFlag
@@ -397,13 +480,55 @@ func runSync(args []string) error {
 	if len(paths) == 0 {
 		return errors.New("no mods selected")
 	}
+
+	srcNode, _ := resolveMeshNode(strings.TrimSpace(*from))
+
 	doLocal := func(root string) error {
-		syncCmd := append([]string{"git", "-C", root, "submodule", "sync", "--recursive", "--"}, paths...)
-		updCmd := append([]string{"git", "-C", root, "submodule", "update", "--init", "--recursive", "--"}, paths...)
-		if err := runCommand(syncCmd...); err != nil {
-			return err
+		for _, p := range paths {
+			absPath := filepath.Join(root, filepath.FromSlash(p))
+			// 1. Try standard submodule update
+			syncCmd := []string{"git", "-C", root, "submodule", "sync", "--recursive", "--", p}
+			updCmd := []string{"git", "-C", root, "submodule", "update", "--init", "--recursive", "--", p}
+			_ = runCommand(syncCmd...)
+			if err := runCommand(updCmd...); err == nil {
+				continue
+			}
+
+			// 2. Fallback to mesh nodes if standard update fails
+			fmt.Printf("Submodule update failed for %s, trying mesh fallbacks...\n", p)
+			success := false
+			
+			// Build list of mesh sources for this specific mod
+			sources := []string{}
+			if srcNode.Name != "" {
+				sources = append(sources, sourceURLForRemote(srcNode, filepath.ToSlash(filepath.Join(defaultRepoDirForNode(srcNode), p))))
+			}
+			for _, mn := range meshNodes {
+				if mn.Name == srcNode.Name {
+					continue
+				}
+				sources = append(sources, sourceURLForRemote(mn, filepath.ToSlash(filepath.Join(defaultRepoDirForNode(mn), p))))
+			}
+
+			for _, src := range sources {
+				fmt.Printf("Trying mesh source: %s\n", src)
+				if !fileExists(absPath) {
+					if err := runCommand("git", "clone", src, absPath); err == nil {
+						success = true
+						break
+					}
+				} else {
+					if err := runCommand("git", "-C", absPath, "pull", src, "main"); err == nil {
+						success = true
+						break
+					}
+				}
+			}
+			if !success {
+				return fmt.Errorf("failed to sync mod %s from github or mesh", p)
+			}
 		}
-		return runCommand(updCmd...)
+		return nil
 	}
 	target := strings.ToLower(strings.TrimSpace(*host))
 	if target == "" || target == "local" {
@@ -550,7 +675,7 @@ func runCommit(args []string) error {
 	modName := fs.String("mod", "", "mod name")
 	msg := fs.String("message", "", "commit message")
 	fs.StringVar(msg, "m", "", "commit message")
-	all := fs.Bool("all", true, "stage all")
+	all := fs.Bool("all", false, "stage all changes before committing")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -581,31 +706,19 @@ func runCommit(args []string) error {
 func runPush(args []string) error {
 	fs := flag.NewFlagSet("mods push", flag.ContinueOnError)
 	modName := fs.String("mod", "", "mod name")
-	host := fs.String("host", "local", "local|mesh node")
-	writer := fs.String("writer", "", "single writer override")
-	skipSelf := fs.Bool("skip-self", true, "skip self if remote resolves to self")
 	msg := fs.String("message", "Update mod", "commit message prefix used when pushing all mods")
 	dryRun := fs.Bool("dry-run", false, "print actions only")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	name := strings.TrimSpace(*modName)
-	target := strings.ToLower(strings.TrimSpace(*host))
-	if strings.TrimSpace(*writer) != "" {
-		target = strings.ToLower(strings.TrimSpace(*writer))
-	}
-	if target == "all" && name != "" {
-		return errors.New("refusing push on --host all; use --writer <host>")
+
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return err
 	}
 
 	if name == "" {
-		if target != "" && target != "local" {
-			return errors.New("push-all currently supports local writer only")
-		}
-		repoRoot, err := findRepoRoot()
-		if err != nil {
-			return err
-		}
 		mods, err := discoverMods(repoRoot)
 		if err != nil {
 			return err
@@ -676,45 +789,17 @@ func runPush(args []string) error {
 		return nil
 	}
 
-	if target == "" || target == "local" {
-		repoRoot, err := findRepoRoot()
-		if err != nil {
-			return err
-		}
-		if *dryRun {
-			fmt.Printf("[DRY-RUN] push mod %s at %s\n", name, filepath.Join(repoRoot, "src", "mods", name))
-			return nil
-		}
-		return pushModRepo(filepath.Join(repoRoot, "src", "mods", name))
-	}
-	node, err := resolveMeshNode(target)
-	if err != nil {
-		return err
-	}
-	if *skipSelf && isSelfMeshNode(node) {
-		fmt.Printf("SKIP self node: %s\n", node.Name)
-		return nil
-	}
-	remoteModPath := filepath.ToSlash(filepath.Join(defaultRepoDirForNode(node), "src", "mods", name))
-	cmd := "set -e && cd " + shellQuote(remoteModPath) + " && " +
-		"b=$(git branch --show-current) && [ -n \"$b\" ] && " +
-		"(git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1 || git push -u origin \"$b\") && git push"
 	if *dryRun {
-		fmt.Printf("[DRY-RUN] remote(%s): %s\n", node.Name, cmd)
+		fmt.Printf("[DRY-RUN] push mod %s at %s\n", name, filepath.Join(repoRoot, "src", "mods", name))
 		return nil
 	}
-	out, err := runSSH(node, cmd)
-	if strings.TrimSpace(out) != "" {
-		fmt.Print(strings.TrimRight(out, "\n"))
-		fmt.Println()
-	}
-	return err
+	return pushModRepo(filepath.Join(repoRoot, "src", "mods", name))
 }
 
 func runPull(args []string) error {
 	fs := flag.NewFlagSet("mods pull", flag.ContinueOnError)
 	host := fs.String("host", "all", "target host: local|name|all")
-	from := fs.String("from", "wsl", "source mesh node")
+	from := fs.String("from", "", "source mesh node (defaults to current host)")
 	source := fs.String("source", "", "source repo path on source node")
 	dest := fs.String("dest", "", "destination repo path on target node")
 	branch := fs.String("branch", "", "default branch")
@@ -747,6 +832,9 @@ func runPull(args []string) error {
 	if *dryRun {
 		cloneArgs = append(cloneArgs, "--dry-run")
 	}
+
+	// Use the current process name or an environment hint to tell runClone
+	// that we are in a 'pull' context so it adds all mesh nodes as fallbacks.
 	if err := runClone(cloneArgs); err != nil {
 		return err
 	}
@@ -980,29 +1068,48 @@ func sourceURLForRemote(node meshNode, srcPath string) string {
 	return fmt.Sprintf("ssh://%s@%s:%s%s", user, host, port, srcPath)
 }
 
-func buildCloneUpdateCommand(sourceSpec, destPath, branch string) string {
+func buildCloneUpdateCommand(sourceSpecs []string, destPath, branch string) string {
 	b := strings.TrimSpace(branch)
-	cloneFlags := ""
-	fetch := "git -C " + shellQuote(destPath) + " fetch --all --prune"
-	checkout := "git -C " + shellQuote(destPath) + " checkout $(git -C " + shellQuote(destPath) + " rev-parse --abbrev-ref HEAD)"
-	pull := "git -C " + shellQuote(destPath) + " pull --ff-only"
-	if b != "" {
-		cloneFlags = "--branch " + shellQuote(b) + " --single-branch "
-		fetch = "git -C " + shellQuote(destPath) + " fetch origin " + shellQuote(b)
-		checkout = "git -C " + shellQuote(destPath) + " checkout " + shellQuote(b)
-		pull = "git -C " + shellQuote(destPath) + " pull --ff-only origin " + shellQuote(b)
+	if b == "" {
+		b = "$(git -C " + shellQuote(destPath) + " rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
 	}
-	lines := []string{
-		"set -e",
-		"if [ -d " + shellQuote(filepath.ToSlash(filepath.Join(destPath, ".git"))) + " ]; then",
-		"  " + fetch,
-		"  " + checkout,
-		"  " + pull,
-		"else",
-		"  mkdir -p " + shellQuote(filepath.ToSlash(filepath.Dir(destPath))),
-		"  git clone " + cloneFlags + shellQuote(sourceSpec) + " " + shellQuote(destPath),
-		"fi",
+
+	destGit := filepath.ToSlash(filepath.Join(destPath, ".git"))
+
+	var lines []string
+	lines = append(lines, "set -e")
+	lines = append(lines, "success=0")
+
+	for i, src := range sourceSpecs {
+		srcQuote := shellQuote(src)
+		destQuote := shellQuote(destPath)
+		branchQuote := shellQuote(b)
+
+		if i == 0 {
+			lines = append(lines, "if [ -d "+shellQuote(destGit)+" ]; then")
+			lines = append(lines, "  if git -C "+destQuote+" pull --ff-only "+srcQuote+" "+branchQuote+" ; then success=1; fi")
+			lines = append(lines, "else")
+			lines = append(lines, "  mkdir -p "+shellQuote(filepath.ToSlash(filepath.Dir(destPath))))
+			lines = append(lines, "  if git clone "+srcQuote+" "+destQuote+" ; then")
+			lines = append(lines, "    if [ -n "+branchQuote+" ] && [ "+branchQuote+" != \"main\" ]; then git -C "+destQuote+" checkout "+branchQuote+"; fi")
+			lines = append(lines, "    success=1")
+			lines = append(lines, "  fi")
+			lines = append(lines, "fi")
+		} else {
+			lines = append(lines, "if [ $success -eq 0 ]; then")
+			lines = append(lines, "  if [ -d "+shellQuote(destGit)+" ]; then")
+			lines = append(lines, "    if git -C "+destQuote+" pull --ff-only "+srcQuote+" "+branchQuote+" ; then success=1; fi")
+			lines = append(lines, "  else")
+			lines = append(lines, "    if git clone "+srcQuote+" "+destQuote+" ; then")
+			lines = append(lines, "      if [ -n "+branchQuote+" ] && [ "+branchQuote+" != \"main\" ]; then git -C "+destQuote+" checkout "+branchQuote+"; fi")
+			lines = append(lines, "      success=1")
+			lines = append(lines, "    fi")
+			lines = append(lines, "  fi")
+			lines = append(lines, "fi")
+		}
 	}
+
+	lines = append(lines, "if [ $success -eq 0 ]; then echo \"All mesh/origin sources failed\"; exit 1; fi")
 	return strings.Join(lines, " ; ")
 }
 

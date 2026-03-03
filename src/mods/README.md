@@ -36,7 +36,7 @@ Flow:
 ```
 
 This runs `./dialtone.sh dev install` and prepares managed runtimes.
-After this, use `mods add/clone/sync` and then mod-level Nix flows (`install/build/test`).
+After this, use `mods new/clone/sync` and then mod-level Nix flows (`install/build/test`).
 
 ### 2. Binary Path (lightweight runtime host)
 
@@ -49,14 +49,15 @@ Current status:
 
 ## Core Commands
 
-- `./dialtone.sh mods add <mod-name> [flags...]`
+- `./dialtone.sh mods new <mod-name> [flags...]`
+- `./dialtone.sh mods add --mod <mod-name> <paths...>`
 - `./dialtone.sh mods clone [flags...]`
 - `./dialtone.sh mods list`
 - `./dialtone.sh mods status`
 - `./dialtone.sh mods sync`
 - `./dialtone.sh mods sync-ui`
 - `./dialtone.sh mods gh-create <mod-name> ...`
-- `./dialtone.sh mods commit --mod <mod-name> [-m "..."]`
+- `./dialtone.sh mods commit --mod <mod-name> [-m "..."] [--all]`
 - `./dialtone.sh mods v1 push [--mod <mod-name>]`
 - `./dialtone.sh mods v1 pull [--host all] [--from wsl]`
 
@@ -72,10 +73,10 @@ Current status:
 ### A. Create a new mod repo and add submodule
 
 ```bash
-./dialtone.sh mods add mod-name --owner timcash --public
+./dialtone.sh mods new mod-name --owner timcash --public
 ```
 
-This uses native `mods add` behavior:
+This uses native `mods new` behavior:
 - GitHub repo naming convention: `dialtone-mod-name`
 - parent mapping: `src/mods/mod-name`
 - optional scaffold + UI seed
@@ -93,9 +94,10 @@ This uses native `mods add` behavior:
 
 This is handled by native `mods clone` logic and supports hosts pulling different branches.
 
-### C. Commit and push a mod safely
+### C. Add, commit, and push a mod safely
 
 ```bash
+./dialtone.sh mods add --mod mod-name .
 ./dialtone.sh mods commit --mod mod-name -m "Update mod-name"
 ./dialtone.sh mods push --mod mod-name --host gold
 ```
@@ -127,4 +129,4 @@ After code is present, run mod commands under your Nix-managed dev flow:
 - Entrypoint: `src/mods/main.go`
 - Router integration: `src/dev.go` (`./dialtone.sh mods ...`)
 - `src/mods` does not import `src/plugins/*` command packages.
-- Remaining CLI fallback: `git submodule add`/`update` during `mods add`.
+- Remaining CLI fallback: `git submodule add`/`update` during `mods new`.
