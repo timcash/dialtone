@@ -632,6 +632,10 @@ func doStatusLocal(root, nameFilter string, short bool) error {
 
 func doStatusRemote(node meshNode, nameFilter string, short bool) error {
 	repoDir := defaultRepoDirForNode(node)
+	envPrefix := ""
+	if strings.EqualFold(node.OS, "macos") || strings.EqualFold(node.OS, "darwin") {
+		envPrefix = "CGO_ENABLED=0 "
+	}
 	args := []string{"mods", "v1", "status"}
 	if nameFilter != "" {
 		args = append(args, "--name", nameFilter)
@@ -639,8 +643,8 @@ func doStatusRemote(node meshNode, nameFilter string, short bool) error {
 	if short {
 		args = append(args, "--short")
 	}
-	cmd := fmt.Sprintf("cd %s && if [ -x ./dialtone.sh ]; then ./dialtone.sh %s; else echo 'dialtone.sh not found'; fi",
-		shellQuote(repoDir), strings.Join(args, " "))
+	cmd := fmt.Sprintf("cd %s && if [ -x ./dialtone.sh ]; then bash -lc '%s./dialtone.sh %s'; else echo 'dialtone.sh not found'; fi",
+		shellQuote(repoDir), envPrefix, strings.Join(args, " "))
 
 	out, err := runSSH(node, cmd)
 	if strings.TrimSpace(out) != "" {
