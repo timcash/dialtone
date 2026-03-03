@@ -26,10 +26,11 @@
             ninja
             pkg-config
             nodejs
-            musl.dev
-            glibc.static
-            pkgsStatic.gcc
-          ];
+          ] ++ (if pkgs.stdenv.isLinux then [
+            pkgs.musl.dev
+            pkgs.glibc.static
+            pkgs.pkgsStatic.gcc
+          ] else [ ]);
           shellHook = ''
             export DIALTONE_USE_NIX=1
             echo "DIALTONE> nix-shell active"
