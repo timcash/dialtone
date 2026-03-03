@@ -183,7 +183,12 @@ if [ -f "$ENV_FILE" ]; then
     set +a
 fi
 if [ ! -f "$ENV_FILE" ] && [ -z "${DIALTONE_BOOTSTRAP_DONE:-}" ]; then
-    run_bootstrap_repl "$ENV_FILE" "$@"
+    if [ -t 0 ]; then
+        run_bootstrap_repl "$ENV_FILE" "$@"
+    else
+        echo "DIALTONE> Environment file missing ($ENV_FILE) and shell is non-interactive. Cannot bootstrap."
+        exit 1
+    fi
 fi
 enter_nix_shell_if_needed "$@"
 
