@@ -525,8 +525,10 @@ func runList(args []string) error {
 
 func runStatus(args []string) error {
 	fs := flag.NewFlagSet("mods status", flag.ContinueOnError)
+	host := fs.String("host", "local", "target host: local|name|all")
 	name := fs.String("name", "", "optional mod name")
 	short := fs.Bool("short", false, "short output")
+	skipSelf := fs.Bool("skip-self", true, "skip self when host=all")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -535,8 +537,41 @@ func runStatus(args []string) error {
 		return err
 	}
 
+	target := strings.ToLower(strings.TrimSpace(*host))
+	if target == "" || target == "local" || target == "self" {
+		return doStatusLocal(repoRoot, *name, *short)
+	}
+
+	if target == "all" {
+		failed := 0
+		for _, node := range listMeshNodes() {
+			if *skipSelf && isSelfMeshNode(node) {
+				fmt.Printf("== %s ==\nSKIP self node\n\n", node.Name)
+				continue
+			}
+			fmt.Printf("== %s ==\n", node.Name)
+			if err := doStatusRemote(node, *name, *short); err != nil {
+				failed++
+				fmt.Printf("ERROR: %v\n", err)
+			}
+			fmt.Println()
+		}
+		if failed > 0 {
+			return fmt.Errorf("status finished with %d host failures", failed)
+		}
+		return nil
+	}
+
+	node, err := resolveMeshNode(target)
+	if err != nil {
+		return err
+	}
+	return doStatusRemote(node, *name, *short)
+}
+
+func doStatusLocal(root, nameFilter string, short bool) error {
 	fmt.Println("== Parent: dialtone ==")
-	parentStatus, _ := runCapture("git", "-C", repoRoot, "status", "--short")
+	parentStatus, _ := runCapture("git", "-C", root, "status", "--short")
 	if strings.TrimSpace(parentStatus) != "" {
 		fmt.Println(strings.TrimSpace(parentStatus))
 	} else {
@@ -544,13 +579,13 @@ func runStatus(args []string) error {
 	}
 	fmt.Println()
 
-	mods, err := discoverMods(repoRoot)
+	mods, err := discoverMods(root)
 	if err != nil {
 		return err
 	}
 	filters := []string{}
-	if strings.TrimSpace(*name) != "" {
-		filters = append(filters, strings.TrimSpace(*name))
+	if strings.TrimSpace(nameFilter) != "" {
+		filters = append(filters, strings.TrimSpace(nameFilter))
 	}
 	paths, err := selectModPaths(mods, filters)
 	if err != nil {
@@ -562,15 +597,15 @@ func runStatus(args []string) error {
 
 	for _, p := range paths {
 		modName := filepath.Base(p)
-		absPath := filepath.Join(repoRoot, filepath.FromSlash(p))
+		absPath := filepath.Join(root, filepath.FromSlash(p))
 		fmt.Printf("== Mod: %s ==\n", modName)
-		
+
 		// 1. Version/Commit status
-		subStatus, _ := runCapture("git", "-C", repoRoot, "submodule", "status", "--", p)
+		subStatus, _ := runCapture("git", "-C", root, "submodule", "status", "--", p)
 		fmt.Print(strings.TrimSpace(subStatus) + " ")
 
 		// 2. File status
-		if !*short {
+		if !short {
 			modStatus, _ := runCapture("git", "-C", absPath, "status", "--short")
 			if strings.TrimSpace(modStatus) != "" {
 				fmt.Println("(dirty)")
@@ -588,8 +623,27 @@ func runStatus(args []string) error {
 		}
 		fmt.Println()
 	}
-
 	return nil
+}
+
+func doStatusRemote(node meshNode, nameFilter string, short bool) error {
+	repoDir := defaultRepoDirForNode(node)
+	args := []string{"mods", "v1", "status"}
+	if nameFilter != "" {
+		args = append(args, "--name", nameFilter)
+	}
+	if short {
+		args = append(args, "--short")
+	}
+	cmd := fmt.Sprintf("cd %s && if [ -x ./dialtone.sh ]; then ./dialtone.sh %s; else echo 'dialtone.sh not found'; fi",
+		shellQuote(repoDir), strings.Join(args, " "))
+
+	out, err := runSSH(node, cmd)
+	if strings.TrimSpace(out) != "" {
+		fmt.Print(strings.TrimRight(out, "\n"))
+		fmt.Println()
+	}
+	return err
 }
 
 func runSync(args []string) error {
@@ -1092,8 +1146,11 @@ func sourceURLForRemote(node meshNode, srcPath string) string {
 
 func buildCloneUpdateCommand(sourceSpecs []string, destPath, branch string) string {
 	b := strings.TrimSpace(branch)
+	branchExpr := ""
 	if b == "" {
-		b = "$(git -C " + shellQuote(destPath) + " rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+		branchExpr = "$(git -C " + shellQuote(destPath) + " rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+	} else {
+		branchExpr = shellQuote(b)
 	}
 
 	destGit := filepath.ToSlash(filepath.Join(destPath, ".git"))
@@ -1105,25 +1162,24 @@ func buildCloneUpdateCommand(sourceSpecs []string, destPath, branch string) stri
 	for i, src := range sourceSpecs {
 		srcQuote := shellQuote(src)
 		destQuote := shellQuote(destPath)
-		branchQuote := shellQuote(b)
 
 		if i == 0 {
 			lines = append(lines, "if [ -d "+shellQuote(destGit)+" ]; then")
-			lines = append(lines, "  if git -C "+destQuote+" pull --ff-only "+srcQuote+" "+branchQuote+" ; then success=1; fi")
+			lines = append(lines, "  if git -C "+destQuote+" pull --ff-only "+srcQuote+" "+branchExpr+" ; then success=1; fi")
 			lines = append(lines, "else")
 			lines = append(lines, "  mkdir -p "+shellQuote(filepath.ToSlash(filepath.Dir(destPath))))
 			lines = append(lines, "  if git clone "+srcQuote+" "+destQuote+" ; then")
-			lines = append(lines, "    if [ -n "+branchQuote+" ] && [ "+branchQuote+" != \"main\" ]; then git -C "+destQuote+" checkout "+branchQuote+"; fi")
+			lines = append(lines, "    if [ -n "+branchExpr+" ] && [ "+branchExpr+" != \"main\" ]; then git -C "+destQuote+" checkout "+branchExpr+"; fi")
 			lines = append(lines, "    success=1")
 			lines = append(lines, "  fi")
 			lines = append(lines, "fi")
 		} else {
 			lines = append(lines, "if [ $success -eq 0 ]; then")
 			lines = append(lines, "  if [ -d "+shellQuote(destGit)+" ]; then")
-			lines = append(lines, "    if git -C "+destQuote+" pull --ff-only "+srcQuote+" "+branchQuote+" ; then success=1; fi")
+			lines = append(lines, "    if git -C "+destQuote+" pull --ff-only "+srcQuote+" "+branchExpr+" ; then success=1; fi")
 			lines = append(lines, "  else")
 			lines = append(lines, "    if git clone "+srcQuote+" "+destQuote+" ; then")
-			lines = append(lines, "      if [ -n "+branchQuote+" ] && [ "+branchQuote+" != \"main\" ]; then git -C "+destQuote+" checkout "+branchQuote+"; fi")
+			lines = append(lines, "      if [ -n "+branchExpr+" ] && [ "+branchExpr+" != \"main\" ]; then git -C "+destQuote+" checkout "+branchExpr+"; fi")
 			lines = append(lines, "      success=1")
 			lines = append(lines, "    fi")
 			lines = append(lines, "  fi")
