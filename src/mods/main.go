@@ -480,7 +480,11 @@ func runClone(args []string) error {
 	}
 
 	if target == "local" {
-		local := meshNode{Name: "local", User: os.Getenv("USER"), Host: "127.0.0.1", Port: "22", OS: "linux", RepoCandidates: []string{"./"}}
+		root, _ := findRepoRoot()
+		if root == "" {
+			root = "./"
+		}
+		local := meshNode{Name: "local", User: os.Getenv("USER"), Host: "127.0.0.1", Port: "22", OS: "linux", RepoCandidates: []string{root}}
 		return runForNode(local)
 	}
 	if target == "all" {
