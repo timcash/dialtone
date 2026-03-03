@@ -21,6 +21,7 @@
             shellHook = ''
               export DIALTONE_REPO_ROOT=$(pwd)
               export PATH="$DIALTONE_REPO_ROOT/bin:$PATH"
+              export DIALTONE_SSH_CONFIG="$DIALTONE_REPO_ROOT/env/ssh_config"
               
               # Initialize completions and set up cycling if in ZSH
               if [ -n "$ZSH_VERSION" ]; then
@@ -39,4 +40,3 @@
       );
     };
 }
-
