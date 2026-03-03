@@ -227,22 +227,23 @@ func runNew(args []string) error {
 
 func runAdd(args []string) error {
 	fs := flag.NewFlagSet("mods add", flag.ContinueOnError)
-	modName := fs.String("mod", "", "mod name")
+	modName := fs.String("mod", "", "mod name (optional, defaults to parent repo)")
 	if err := fs.Parse(args); err != nil {
 		return err
-	}
-	name := strings.TrimSpace(*modName)
-	if name == "" {
-		return errors.New("--mod is required")
 	}
 	
 	repoRoot, err := findRepoRoot()
 	if err != nil {
 		return err
 	}
-	modPath := filepath.Join(repoRoot, "src", "mods", name)
-	if !fileExists(modPath) {
-		return fmt.Errorf("mod path missing: %s", modPath)
+
+	targetPath := repoRoot
+	name := strings.TrimSpace(*modName)
+	if name != "" {
+		targetPath = filepath.Join(repoRoot, "src", "mods", name)
+		if !fileExists(targetPath) {
+			return fmt.Errorf("mod path missing: %s", targetPath)
+		}
 	}
 	
 	paths := fs.Args()
@@ -250,12 +251,105 @@ func runAdd(args []string) error {
 		return errors.New("no paths provided to add")
 	}
 	
-	addArgs := []string{"-C", modPath, "add"}
+	addArgs := []string{"-C", targetPath, "add"}
 	addArgs = append(addArgs, paths...)
 	
 	return runCommand(append([]string{"git"}, addArgs...)...)
 }
 
+func runCommit(args []string) error {
+	fs := flag.NewFlagSet("mods commit", flag.ContinueOnError)
+	modName := fs.String("mod", "", "mod name (optional, defaults to parent repo)")
+	msg := fs.String("message", "", "commit message")
+	fs.StringVar(msg, "m", "", "commit message")
+	all := fs.Bool("all", false, "stage all changes before committing")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return err
+	}
+
+	targetPath := repoRoot
+	name := strings.TrimSpace(*modName)
+	if name != "" {
+		targetPath = filepath.Join(repoRoot, "src", "mods", name)
+		if !fileExists(targetPath) {
+			return fmt.Errorf("mod path missing: %s", targetPath)
+		}
+	}
+
+	if *all {
+		if err := runCommand("git", "-C", targetPath, "add", "-A"); err != nil {
+			return err
+		}
+	}
+	m := strings.TrimSpace(*msg)
+	if m == "" {
+		if name != "" {
+			m = "Update mod " + name
+		} else {
+			m = "Update dialtone"
+		}
+	}
+	return runCommand("git", "-C", targetPath, "commit", "-m", m)
+}
+
+func runPush(args []string) error {
+	fs := flag.NewFlagSet("mods push", flag.ContinueOnError)
+	modName := fs.String("mod", "", "mod name (optional, defaults to all mods + parent)")
+	dryRun := fs.Bool("dry-run", false, "print actions only")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	name := strings.TrimSpace(*modName)
+
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return err
+	}
+
+	if name == "" {
+		// Push all discovered mods first
+		mods, err := discoverMods(repoRoot)
+		if err != nil {
+			return err
+		}
+		for _, m := range mods {
+			modPath := filepath.Join(repoRoot, filepath.FromSlash(m.Path))
+			if *dryRun {
+				fmt.Printf("[DRY-RUN] push mod %s\n", m.Name)
+				continue
+			}
+			if err := pushModRepo(modPath); err != nil {
+				fmt.Printf("Warning: failed to push mod %s: %v\n", m.Name, err)
+			} else {
+				fmt.Printf("Pushed mod %s\n", m.Name)
+			}
+		}
+
+		// Push parent repo
+		if *dryRun {
+			fmt.Printf("[DRY-RUN] push parent repo\n")
+			return nil
+		}
+		fmt.Printf("Pushing parent repo...\n")
+		return pushModRepo(repoRoot)
+	}
+
+	// Push specific mod
+	modPath := filepath.Join(repoRoot, "src", "mods", name)
+	if !fileExists(modPath) {
+		return fmt.Errorf("mod path missing: %s", modPath)
+	}
+	if *dryRun {
+		fmt.Printf("[DRY-RUN] push mod %s\n", name)
+		return nil
+	}
+	return pushModRepo(modPath)
+}
 
 func runClone(args []string) error {
 	fs := flag.NewFlagSet("mods clone", flag.ContinueOnError)
@@ -457,7 +551,7 @@ func runStatus(args []string) error {
 func runSync(args []string) error {
 	fs := flag.NewFlagSet("mods sync", flag.ContinueOnError)
 	host := fs.String("host", "all", "target host: local|name|all")
-	from := fs.String("from", "wsl", "source mesh node for fallbacks")
+	from := fs.String("from", "", "source mesh node for fallbacks (defaults to current host)")
 	repoDir := fs.String("repo-dir", "", "remote repo dir override")
 	skipSelf := fs.Bool("skip-self", true, "skip self when host=all")
 	var modFilter multiValueFlag
@@ -481,7 +575,16 @@ func runSync(args []string) error {
 		return errors.New("no mods selected")
 	}
 
-	srcNode, _ := resolveMeshNode(strings.TrimSpace(*from))
+	srcName := strings.TrimSpace(*from)
+	if srcName == "" {
+		for _, n := range meshNodes {
+			if isSelfMeshNode(n) {
+				srcName = n.Name
+				break
+			}
+		}
+	}
+	srcNode, _ := resolveMeshNode(srcName)
 
 	doLocal := func(root string) error {
 		for _, p := range paths {
@@ -668,132 +771,6 @@ func runGitHubCreate(args []string) error {
 	}
 	repo := strings.TrimSpace(*owner) + "/" + rn
 	return ensureGitHubRepo(repo, *public || !*private)
-}
-
-func runCommit(args []string) error {
-	fs := flag.NewFlagSet("mods commit", flag.ContinueOnError)
-	modName := fs.String("mod", "", "mod name")
-	msg := fs.String("message", "", "commit message")
-	fs.StringVar(msg, "m", "", "commit message")
-	all := fs.Bool("all", false, "stage all changes before committing")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	name := strings.TrimSpace(*modName)
-	if name == "" {
-		return errors.New("--mod is required")
-	}
-	repoRoot, err := findRepoRoot()
-	if err != nil {
-		return err
-	}
-	modPath := filepath.Join(repoRoot, "src", "mods", name)
-	if !fileExists(modPath) {
-		return fmt.Errorf("mod path missing: %s", modPath)
-	}
-	if *all {
-		if err := runCommand("git", "-C", modPath, "add", "-A"); err != nil {
-			return err
-		}
-	}
-	m := strings.TrimSpace(*msg)
-	if m == "" {
-		m = "Update mod " + name
-	}
-	return runCommand("git", "-C", modPath, "commit", "-m", m)
-}
-
-func runPush(args []string) error {
-	fs := flag.NewFlagSet("mods push", flag.ContinueOnError)
-	modName := fs.String("mod", "", "mod name")
-	msg := fs.String("message", "Update mod", "commit message prefix used when pushing all mods")
-	dryRun := fs.Bool("dry-run", false, "print actions only")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	name := strings.TrimSpace(*modName)
-
-	repoRoot, err := findRepoRoot()
-	if err != nil {
-		return err
-	}
-
-	if name == "" {
-		mods, err := discoverMods(repoRoot)
-		if err != nil {
-			return err
-		}
-		if len(mods) == 0 {
-			return errors.New("no mods found")
-		}
-		changedPaths := []string{}
-		commitPrefix := strings.TrimSpace(*msg)
-		if commitPrefix == "" {
-			commitPrefix = "Update mod"
-		}
-		for _, m := range mods {
-			modPath := filepath.Join(repoRoot, filepath.FromSlash(m.Path))
-			dirty, err := gitHasChanges(modPath)
-			if err != nil {
-				return err
-			}
-			if !dirty {
-				continue
-			}
-			if *dryRun {
-				fmt.Printf("[DRY-RUN] git -C %s add -A\n", modPath)
-				fmt.Printf("[DRY-RUN] git -C %s commit -m %q\n", modPath, commitPrefix+" "+m.Name)
-				fmt.Printf("[DRY-RUN] git -C %s push origin $(git -C %s branch --show-current)\n", modPath, modPath)
-				changedPaths = append(changedPaths, m.Path)
-				continue
-			}
-			if err := runCommand("git", "-C", modPath, "add", "-A"); err != nil {
-				return err
-			}
-			if err := runCommand("git", "-C", modPath, "commit", "-m", commitPrefix+" "+m.Name); err != nil {
-				return err
-			}
-			if err := pushModRepo(modPath); err != nil {
-				return err
-			}
-			changedPaths = append(changedPaths, m.Path)
-			fmt.Printf("pushed mod %s\n", m.Name)
-		}
-		if len(changedPaths) == 0 {
-			fmt.Println("no dirty mod changes to push")
-			return nil
-		}
-		if *dryRun {
-			fmt.Printf("[DRY-RUN] git -C %s add -- %s\n", repoRoot, strings.Join(changedPaths, " "))
-			fmt.Printf("[DRY-RUN] git -C %s commit -m %q\n", repoRoot, "Update mod submodule pointers")
-			fmt.Printf("[DRY-RUN] git -C %s push origin $(git -C %s branch --show-current)\n", repoRoot, repoRoot)
-			return nil
-		}
-		addArgs := []string{"-C", repoRoot, "add", "--"}
-		addArgs = append(addArgs, changedPaths...)
-		if err := runCommand(append([]string{"git"}, addArgs...)...); err != nil {
-			return err
-		}
-		staged, err := gitHasStagedChanges(repoRoot)
-		if err != nil {
-			return err
-		}
-		if staged {
-			if err := runCommand("git", "-C", repoRoot, "commit", "-m", "Update mod submodule pointers"); err != nil {
-				return err
-			}
-			if err := pushModRepo(repoRoot); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-
-	if *dryRun {
-		fmt.Printf("[DRY-RUN] push mod %s at %s\n", name, filepath.Join(repoRoot, "src", "mods", name))
-		return nil
-	}
-	return pushModRepo(filepath.Join(repoRoot, "src", "mods", name))
 }
 
 func runPull(args []string) error {
@@ -1353,7 +1330,7 @@ func pushModRepo(path string) error {
 	return nil
 }
 
-func isValidModName(v string) bool {
+func isValidModName(v bool) bool {
 	re := regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 	return re.MatchString(strings.TrimSpace(v))
 }
