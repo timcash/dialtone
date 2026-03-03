@@ -755,7 +755,7 @@ func runSync(args []string) error {
 			if rd == "" {
 				rd = defaultRepoDirForNode(node)
 			}
-			cmd := buildRemoteSubmoduleSync(rd, paths, srcName)
+			cmd := buildRemoteSubmoduleSync(rd, paths, srcName, node.OS)
 			fmt.Printf("== %s ==\n", node.Name)
 			out, err := runSSH(node, cmd)
 			if strings.TrimSpace(out) != "" {
@@ -780,7 +780,7 @@ func runSync(args []string) error {
 	if rd == "" {
 		rd = defaultRepoDirForNode(node)
 	}
-	out, err := runSSH(node, buildRemoteSubmoduleSync(rd, paths, srcName))
+	out, err := runSSH(node, buildRemoteSubmoduleSync(rd, paths, srcName, node.OS))
 	if strings.TrimSpace(out) != "" {
 		fmt.Print(strings.TrimRight(out, "\n"))
 		fmt.Println()
@@ -926,14 +926,48 @@ func runPull(args []string) error {
 		fmt.Println("[DRY-RUN] would run: mods sync --host", strings.TrimSpace(*host))
 		return nil
 	}
+	target := strings.TrimSpace(*host)
 	syncArgs := []string{
-		"--host", strings.TrimSpace(*host),
+		"--host", target,
 		fmt.Sprintf("--skip-self=%t", *skipSelf),
 	}
 	if strings.TrimSpace(*repoDir) != "" {
 		syncArgs = append(syncArgs, "--repo-dir", strings.TrimSpace(*repoDir))
 	}
-	return runSync(syncArgs)
+
+	if strings.ToLower(target) == "local" || strings.ToLower(target) == "self" {
+		return runSync(syncArgs)
+	}
+
+	if strings.ToLower(target) == "all" {
+		return runSync(syncArgs)
+	}
+
+	node, err := resolveMeshNode(target)
+	if err != nil {
+		return err
+	}
+	
+	rd := strings.TrimSpace(*repoDir)
+	if rd == "" {
+		rd = defaultRepoDirForNode(node)
+	}
+	
+	mods, err := discoverMods(repoRoot)
+	if err != nil {
+		return err
+	}
+	paths := []string{}
+	for _, m := range mods {
+		paths = append(paths, m.Path)
+	}
+
+	out, err := runSSH(node, buildRemoteSubmoduleSync(rd, paths, strings.TrimSpace(*from), node.OS))
+	if strings.TrimSpace(out) != "" {
+		fmt.Print(strings.TrimRight(out, "\n"))
+		fmt.Println()
+	}
+	return err
 }
 
 func discoverMods(repoRoot string) ([]modEntry, error) {
@@ -1199,7 +1233,7 @@ func buildCloneUpdateCommand(sourceSpecs []string, destPath, branch string) stri
 	return strings.Join(lines, "\n")
 }
 
-func buildRemoteSubmoduleSync(repoDir string, modPaths []string, from string) string {
+func buildRemoteSubmoduleSync(repoDir string, modPaths []string, from string, os string) string {
 	var args []string
 	for _, p := range modPaths {
 		args = append(args, "--mod", p)
@@ -1212,8 +1246,13 @@ func buildRemoteSubmoduleSync(repoDir string, modPaths []string, from string) st
 		modArgs = " " + strings.Join(args, " ")
 	}
 
-	return fmt.Sprintf("cd %s && if [ -x ./dialtone.sh ]; then ./dialtone.sh mods v1 sync --host local%s; else git submodule update --init --recursive; fi",
-		shellQuote(repoDir), modArgs)
+	envPrefix := ""
+	if strings.EqualFold(os, "macos") || strings.EqualFold(os, "darwin") {
+		envPrefix = "CGO_ENABLED=0 "
+	}
+
+	return fmt.Sprintf("cd %s && if [ -x ./dialtone.sh ]; then bash -lc '%s./dialtone.sh mods v1 sync --host local%s'; else git submodule update --init --recursive; fi",
+		shellQuote(repoDir), envPrefix, modArgs)
 }
 
 func parseBranchMap(values []string) (map[string]string, error) {
