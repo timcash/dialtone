@@ -14,19 +14,34 @@ The `mods v1` workflow is designed for high-performance synchronization across a
 
 ### Orchestration
 - `./dialtone.sh mods v1 new <mod-name>`  
-  Create a new mod, provision a GitHub repo, and register it as a submodule.
+  Create a new mod, provision a GitHub repo, and register it as a submodule.  
+  Flags: `--repo`, `--owner`, `--repo-name`, `--path`, `--branch`, `--public|--private`, `--dry-run`.
 - `./dialtone.sh mods v1 pull [--host all]`  
   Broadcast a pull request to the mesh. Remote hosts will pull from **your current host** first, then fall back to GitHub.
-- `./dialtone.sh mods v1 status [--short]`  
+- `./dialtone.sh mods v1 status [--short] [--name <mod-name>]`  
   Detailed project health report showing dirty/staged files for the parent repo and all mods.
+- `./dialtone.sh mods v1 list`  
+  List all registered mods and their paths.
+- `./dialtone.sh mods v1 sync [--host <name|all|local>] [--mod NAME...]`  
+  Sync specific mods across the mesh nodes using LAN-first logic.
+- `./dialtone.sh mods v1 clone [--host <name|all|local>]`  
+  Clone or update the Dialtone repo across the mesh.
 
 ### Standard Git Workflow (Wrapped)
 - `./dialtone.sh mods v1 add [--mod <name>] <paths...>`  
   Stage files for commit. Defaults to the parent repo; use `--mod` for specific submodules.
-- `./dialtone.sh mods v1 commit [--mod <name>] [-m "msg"]`  
-  Commit staged changes. **Never auto-stages or auto-commits.**
-- `./dialtone.sh mods v1 push [--mod <name>]`  
+- `./dialtone.sh mods v1 commit [--mod <name>] [-m "msg"] [--all]`  
+  Commit staged changes. **Never auto-stages unless `--all` is passed.**
+- `./dialtone.sh mods v1 push [--mod <name>] [--dry-run]`  
   Push committed changes to GitHub. (Pushing with no args iterates through all mods + parent).
+
+### Utility & UI
+- `./dialtone.sh mods v1 sync-ui [--mod NAME...] [--from PATH] [--commit] [--push]`  
+  Synchronize the UI template from the UI plugin to one or more mods.
+- `./dialtone.sh mods v1 bootstrap [dev]`  
+  Initialize the Dialtone development environment.
+- `./dialtone.sh mods v1 gh-create <mod-name> --owner <owner>`  
+  Provision a new GitHub repository for a mod.
 
 ## Standard Workflow Example
 

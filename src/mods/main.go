@@ -33,24 +33,21 @@ type modEntry struct {
 }
 
 type meshNode struct {
-	Name           string
-	Aliases        []string
-	User           string
-	Host           string
-	Port           string
-	OS             string
-	RepoCandidates []string
+	Name           string   `json:"name"`
+	Aliases        []string `json:"aliases"`
+	User           string   `json:"user"`
+	Host           string   `json:"host"`
+	Port           string   `json:"port"`
+	OS             string   `json:"os"`
+	RepoCandidates []string `json:"repo_candidates"`
 }
 
-var meshNodes = []meshNode{
-	{Name: "wsl", Aliases: []string{"wsl", "legion-wsl-1", "legion-wsl-1.shad-artichoke.ts.net"}, User: "user", Host: "192.168.4.52", Port: "22", OS: "linux", RepoCandidates: []string{"/home/user/dialtone"}},
-	{Name: "gold", Aliases: []string{"gold", "gold.shad-artichoke.ts.net"}, User: "user", Host: "192.168.4.55", Port: "22", OS: "macos", RepoCandidates: []string{"/Users/user/dialtone", "/Users/user/Documents/dialtone"}},
-	{Name: "darkmac", Aliases: []string{"darkmac", "darkmac.shad-artichoke.ts.net"}, User: "tim", Host: "192.168.4.31", Port: "22", OS: "macos", RepoCandidates: []string{"/Users/tim/dialtone", "/Users/tim/Documents/dialtone"}},
-	{Name: "rover", Aliases: []string{"rover", "rover-1", "rover-1.shad-artichoke.ts.net"}, User: "tim", Host: "192.168.4.36", Port: "22", OS: "linux", RepoCandidates: []string{"/home/tim/dialtone", "/home/user/dialtone"}},
-	{Name: "legion", Aliases: []string{"legion", "legion.shad-artichoke.ts.net"}, User: "timca", Host: "192.168.4.52", Port: "2223", OS: "windows", RepoCandidates: []string{"/home/user/dialtone", "/mnt/c/Users/timca/dialtone", "/mnt/c/Users/timca/code3/dialtone"}},
-}
+var meshNodes []meshNode
 
 func main() {
+	if err := loadMeshConfig(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to load mesh config: %v\n", err)
+	}
 	cmd, args, err := parseTopLevel(os.Args[1:])
 	if err != nil {
 		printUsage()
@@ -1362,7 +1359,7 @@ func pushModRepo(path string) error {
 	return nil
 }
 
-func isValidModName(v bool) bool {
+func isValidModName(v string) bool {
 	re := regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 	return re.MatchString(strings.TrimSpace(v))
 }
@@ -1574,4 +1571,20 @@ func exitIfErr(err error) {
 	}
 	fmt.Fprintln(os.Stderr, err)
 	os.Exit(1)
+}
+
+func loadMeshConfig() error {
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return err
+	}
+	configPath := filepath.Join(repoRoot, "env", "mesh.json")
+	if !fileExists(configPath) {
+		return fmt.Errorf("mesh config missing: %s", configPath)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, &meshNodes)
 }
