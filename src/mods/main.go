@@ -953,7 +953,11 @@ func runPull(args []string) error {
 		rd = defaultRepoDirForNode(node)
 	}
 	
-	mods, err := discoverMods(repoRoot)
+	root, err := findRepoRoot()
+	if err != nil {
+		return err
+	}
+	mods, err := discoverMods(root)
 	if err != nil {
 		return err
 	}
