@@ -2,164 +2,105 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export DIALTONE_REPO_ROOT="$SCRIPT_DIR"
-export DIALTONE_SRC_ROOT="$SCRIPT_DIR/src"
-export DIALTONE_USE_NIX="${DIALTONE_USE_NIX:-1}"
-NIX_EXPERIMENTAL_FLAGS=(--extra-experimental-features "nix-command flakes")
+FLAKE_PATH="$SCRIPT_DIR/flake.nix"
 
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
+# 1. Ensure nix is in PATH
+if ! command -v nix &> /dev/null; then
+    # Try common Nix locations
+    NIX_PATHS=(
+        "/nix/var/nix/profiles/default/bin"
+        "$HOME/.nix-profile/bin"
+        "/nix/store/m21cgvq62rppvhq8yxlylh2gy6akclh4-user-environment/bin"
+    )
+    for p in "${NIX_PATHS[@]}"; do
+        if [ -d "$p" ]; then
+            export PATH="$p:$PATH"
+            break
+        fi
+    done
+fi
+
+# 2. Ensure flake.nix exists
+if [ ! -f "$FLAKE_PATH" ]; then
+    cat > "$FLAKE_PATH" <<EOF
+{
+  description = "Dialtone dev shell";
+  inputs = {
+    nixpkgs.url = "https://github.com/NixOS/nixpkgs/archive/refs/heads/nixos-24.11.tar.gz";
+  };
+  outputs = { self, nixpkgs }:
+    let
+      supportedSystems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
+    in
+    {
+      devShells = forAllSystems (system:
+        let pkgs = import nixpkgs { inherit system; }; in
+        {
+          default = pkgs.mkShell {
+            packages = with pkgs; [
+              bash curl git gh openssh go_1_24 gnumake gcc cmake ninja pkg-config nodejs tmux zsh cloudflared
+            ] ++ (if pkgs.stdenv.isLinux then [
+              pkgs.musl.dev pkgs.glibc.static pkgs.pkgsStatic.gcc
+            ] else [ ]);
+            shellHook = ''
+              export DIALTONE_REPO_ROOT=\$(pwd)
+              export PATH="\$DIALTONE_REPO_ROOT/bin:\$PATH"
+              
+              if [ -n "\$ZSH_VERSION" ]; then
+                fpath=(\$ZSH/functions \$ZSH/scripts \$fpath)
+                autoload -U compinit && compinit -u
+                zstyle ':completion:*' menu select
+                setopt MENU_COMPLETE
+                bindkey '^I' expand-or-complete
+              fi
+
+              export DIALTONE_NIX_ACTIVE=1
+              echo "DIALTONE> nix-shell active"
+            '';
+          };
+        }
+      );
+    };
 }
+EOF
+fi
 
-expand_home_path() {
-    local p="$1"
-    if [[ "$p" == "~"* ]]; then
-        p="${p/#\~/$HOME}"
-    fi
-    printf "%s" "$p"
-}
+# 3. Command routing
+NIX_FLAGS=(--extra-experimental-features "nix-command flakes")
+TMUX_CONF="$SCRIPT_DIR/.tmux.conf"
 
-resolve_go_version() {
-    if command_exists curl; then
-        curl -fsSL https://go.dev/VERSION?m=text | awk 'NR==1{gsub(/^go/, "", $1); print $1}'
-        return 0
-    fi
-    if command_exists wget; then
-        wget -qO- https://go.dev/VERSION?m=text | awk 'NR==1{gsub(/^go/, "", $1); print $1}'
-        return 0
-    fi
-    return 1
-}
-
-ensure_nix_installed() {
-    if command_exists nix; then
-        return 0
-    fi
-    echo "DIALTONE> Nix is required but not found. Please install Nix first."
-    exit 1
-}
-
-enter_nix_shell_if_needed() {
-    if [ "${DIALTONE_USE_NIX:-1}" != "1" ]; then
-        return 0
-    fi
-    if [ -n "${IN_NIX_SHELL:-}" ] || [ "${DIALTONE_NIX_SHELL_BOOTSTRAPPED:-}" = "1" ]; then
-        return 0
-    fi
-    if [ ! -f "$SCRIPT_DIR/flake.nix" ]; then
-        return 0
-    fi
-    ensure_nix_installed
-    echo "DIALTONE> Entering Nix dev shell..."
-    exec nix "${NIX_EXPERIMENTAL_FLAGS[@]}" develop --command env DIALTONE_NIX_SHELL_BOOTSTRAPPED=1 "$SCRIPT_DIR/dialtone.sh" "$@"
-}
-
-bootstrap_clone_repo_in_place() {
-    local repo_url="$1"
-    local branch="$2"
-    local backup="${SCRIPT_DIR}/dialtone.sh.back"
-
-    if ! command_exists git; then
-        echo "DIALTONE> Git is required to bootstrap the repository."
-        return 1
-    fi
-
-    if [ -f "${SCRIPT_DIR}/dialtone.sh" ]; then
-        cp "${SCRIPT_DIR}/dialtone.sh" "$backup"
-        echo "DIALTONE> Backed up launcher: $backup"
-    fi
-
-    if [ ! -d "${SCRIPT_DIR}/.git" ]; then
-        git -C "$SCRIPT_DIR" init >/dev/null
-        git -C "$SCRIPT_DIR" remote add origin "$repo_url"
+# If first arg is 'ssh', we want to use the Nix ssh with our mesh config
+if [ "$1" = "ssh" ]; then
+    shift
+    SSH_CONFIG="$SCRIPT_DIR/env/ssh_config"
+    if [ -f "$SSH_CONFIG" ]; then
+        exec nix "${NIX_FLAGS[@]}" develop "$SCRIPT_DIR" --command ssh -F "$SSH_CONFIG" "$@"
     else
-        if ! git -C "$SCRIPT_DIR" remote get-url origin >/dev/null 2>&1; then
-            git -C "$SCRIPT_DIR" remote add origin "$repo_url"
+        exec nix "${NIX_FLAGS[@]}" develop "$SCRIPT_DIR" --command ssh "$@"
+    fi
+fi
+
+# Default: Enter Nix shell or run generic command
+if [ $# -eq 0 ]; then
+    if [ "$DIALTONE_NIX_ACTIVE" = "1" ]; then
+        if [ -z "$TMUX" ]; then
+            if [ -f "$TMUX_CONF" ]; then
+                exec tmux -f "$TMUX_CONF" new-session -A -s dialtone -c "$SCRIPT_DIR"
+            else
+                exec tmux new-session -A -s dialtone -c "$SCRIPT_DIR"
+            fi
+        else
+            echo "DIALTONE> Already inside Nix and tmux."
+            exit 0
         fi
     fi
-
-    git -C "$SCRIPT_DIR" fetch --depth 1 origin "$branch"
-    git -C "$SCRIPT_DIR" checkout -f -B "$branch" FETCH_HEAD
-    return 0
-}
-
-write_env_file() {
-    local env_path="$1"
-    local dialtone_env="$2"
-    mkdir -p "$(dirname "$env_path")"
-    cat >"$env_path" <<EOF
-DIALTONE_ENV=$dialtone_env
-DIALTONE_USE_NIX=1
-EOF
-}
-
-# 1. Load Environment
-ENV_FILE="$SCRIPT_DIR/env/.env"
-if [ -z "${DIALTONE_ENV_FILE:-}" ]; then
-    export DIALTONE_ENV_FILE="$ENV_FILE"
-fi
-
-if [ -f "$ENV_FILE" ]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$ENV_FILE"
-    set +a
-fi
-if [ ! -f "$ENV_FILE" ] && [ -z "${DIALTONE_BOOTSTRAP_DONE:-}" ]; then
-    echo "DIALTONE> Environment file missing ($ENV_FILE). Cannot continue."
-    exit 1
-fi
-enter_nix_shell_if_needed "$@"
-
-# Default DIALTONE_ENV if not set
-if [ -z "${DIALTONE_ENV:-}" ]; then
-    DIALTONE_ENV="$SCRIPT_DIR/.dialtone_env"
-fi
-
-if [[ "$DIALTONE_ENV" == "~"* ]]; then
-    DIALTONE_ENV="${DIALTONE_ENV/#\~/$HOME}"
-fi
-
-GO_BIN="$DIALTONE_ENV/go/bin/go"
-BUN_BIN="$DIALTONE_ENV/bun/bin/bun"
-
-# Optional global log mirror: pass --stdout anywhere to mirror logs to stdout
-PASSTHRU_ARGS=()
-for arg in "$@"; do
-    if [ "$arg" = "--stdout" ]; then
-        export DIALTONE_LOG_STDOUT=1
-        continue
+    echo "DIALTONE> Entering Nix dev shell..."
+    if [ -f "$TMUX_CONF" ]; then
+        exec nix "${NIX_FLAGS[@]}" develop "$SCRIPT_DIR" -c tmux -f "$TMUX_CONF" new-session -A -s dialtone -c "$SCRIPT_DIR" zsh
+    else
+        exec nix "${NIX_FLAGS[@]}" develop "$SCRIPT_DIR" -c tmux new-session -A -s dialtone -c "$SCRIPT_DIR" zsh
     fi
-    PASSTHRU_ARGS+=("$arg")
-done
-
-# 2. Check for Go
-if [ ! -x "$GO_BIN" ] && command_exists go; then
-    GO_BIN="$(command -v go)"
-fi
-if [ ! -x "$GO_BIN" ]; then
-    echo "DIALTONE> Go runtime missing and not provided by Nix shell."
-    echo "DIALTONE> Run with Nix enabled (DIALTONE_USE_NIX=1) or install managed Go."
-    exit 1
-fi
-
-# 3. Setup PATH and GOROOT
-if [ -x "$DIALTONE_ENV/go/bin/go" ]; then
-    export GOROOT="$DIALTONE_ENV/go"
-fi
-if [ -x "$BUN_BIN" ]; then
-    export PATH="$DIALTONE_ENV/go/bin:$DIALTONE_ENV/bun/bin:$PATH"
 else
-    if [ -x "$DIALTONE_ENV/go/bin/go" ]; then
-        export PATH="$DIALTONE_ENV/go/bin:$PATH"
-    fi
+    exec nix "${NIX_FLAGS[@]}" develop "$SCRIPT_DIR" --command "$@"
 fi
-export DIALTONE_GO_BIN="$GO_BIN"
-if [ -x "$BUN_BIN" ]; then
-    export DIALTONE_BUN_BIN="$BUN_BIN"
-fi
-
-# 4. Hand over to Go-based orchestrator
-# Current working directory should be 'src' for Go imports to work correctly.
-cd "$DIALTONE_SRC_ROOT"
-exec "$GO_BIN" run dev.go "${PASSTHRU_ARGS[@]}"
