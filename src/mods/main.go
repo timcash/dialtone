@@ -18,7 +18,6 @@ import (
 	"time"
 
 	git "github.com/go-git/go-git/v5"
-	gitcfg "github.com/go-git/go-git/v5/config"
 	gittransport "github.com/go-git/go-git/v5/plumbing/transport"
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
@@ -308,6 +307,8 @@ func runPush(args []string) error {
 		return err
 	}
 
+	parentOwner, _ := getRepoOwner(repoRoot)
+
 	if name == "" {
 		// Push all discovered mods first
 		mods, err := discoverMods(repoRoot)
@@ -316,6 +317,17 @@ func runPush(args []string) error {
 		}
 		for _, m := range mods {
 			modPath := filepath.Join(repoRoot, filepath.FromSlash(m.Path))
+
+			modOwner, _ := getRepoOwner(modPath)
+			if parentOwner != "" && modOwner != "" && modOwner != parentOwner {
+				if *dryRun {
+					fmt.Printf("[DRY-RUN] skip mod %s (owner mismatch: %s != %s)\n", m.Name, modOwner, parentOwner)
+				} else {
+					fmt.Printf("Skipping mod %s (external owner: %s)\n", m.Name, modOwner)
+				}
+				continue
+			}
+
 			if *dryRun {
 				fmt.Printf("[DRY-RUN] push mod %s\n", m.Name)
 				continue
@@ -1270,33 +1282,31 @@ func ensureGitHubRepo(ownerRepo string, public bool) error {
 }
 
 func inferGitHubOwner(repoRoot string) (string, error) {
-	cfgPath := filepath.Join(repoRoot, ".git", "config")
-	data, err := os.ReadFile(cfgPath)
+	u, err := getRepoRemoteURL(repoRoot)
 	if err != nil {
 		return "", err
 	}
-	lines := strings.Split(string(data), "\n")
-	inOrigin := false
-	remoteURL := ""
-	for _, line := range lines {
-		t := strings.TrimSpace(line)
-		if strings.HasPrefix(t, "[") && strings.HasSuffix(t, "]") {
-			inOrigin = t == `[remote "origin"]`
-			continue
-		}
-		if !inOrigin {
-			continue
-		}
-		parts := strings.SplitN(t, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		if strings.TrimSpace(parts[0]) == "url" {
-			remoteURL = strings.TrimSpace(parts[1])
-			break
-		}
+	return parseGitHubOwner(u)
+}
+
+func getRepoRemoteURL(path string) (string, error) {
+	out, err := runCapture("git", "-C", path, "remote", "get-url", "origin")
+	if err != nil {
+		return "", err
 	}
-	u := strings.TrimSuffix(strings.TrimSpace(remoteURL), ".git")
+	return strings.TrimSpace(out), nil
+}
+
+func getRepoOwner(path string) (string, error) {
+	u, err := getRepoRemoteURL(path)
+	if err != nil {
+		return "", err
+	}
+	return parseGitHubOwner(u)
+}
+
+func parseGitHubOwner(u string) (string, error) {
+	u = strings.TrimSuffix(strings.TrimSpace(u), ".git")
 	if strings.Contains(u, "github.com/") {
 		tail := strings.Split(u, "github.com/")[1]
 		parts := strings.Split(strings.Trim(tail, "/"), "/")
@@ -1326,37 +1336,7 @@ func normalizeRepoSpec(v string) string {
 }
 
 func pushModRepo(path string) error {
-	repo, err := git.PlainOpen(path)
-	if err != nil {
-		return err
-	}
-	head, err := repo.Head()
-	if err != nil {
-		return err
-	}
-	branch := head.Name().Short()
-	if branch == "" {
-		return fmt.Errorf("cannot push: detached HEAD in %s", path)
-	}
-	remote, err := repo.Remote("origin")
-	if err != nil {
-		return err
-	}
-	remoteURL := ""
-	if cfg := remote.Config(); cfg != nil && len(cfg.URLs) > 0 {
-		remoteURL = cfg.URLs[0]
-	}
-	auth := gitAuthForURL(remoteURL)
-	refspec := gitcfg.RefSpec("refs/heads/" + branch + ":refs/heads/" + branch)
-	err = repo.Push(&git.PushOptions{
-		RemoteName: "origin",
-		Auth:       auth,
-		RefSpecs:   []gitcfg.RefSpec{refspec},
-	})
-	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
-		return err
-	}
-	return nil
+	return runCommand("git", "-C", path, "push", "origin", "HEAD")
 }
 
 func isValidModName(v string) bool {
