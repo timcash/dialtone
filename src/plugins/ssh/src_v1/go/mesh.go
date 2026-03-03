@@ -1,28 +1,31 @@
 package ssh
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 )
 
 type MeshNode struct {
-	Name                string
-	Aliases             []string
-	User                string
-	Host                string
-	HostCandidates      []string
-	Port                string
-	OS                  string
-	PreferWSLPowerShell bool
-	RepoCandidates      []string
+	Name                string   `json:"name"`
+	Aliases             []string `json:"aliases"`
+	User                string   `json:"user"`
+	Host                string   `json:"host"`
+	HostCandidates      []string `json:"host_candidates"`
+	Port                string   `json:"port"`
+	OS                  string   `json:"os"`
+	PreferWSLPowerShell bool     `json:"prefer_wsl_powershell"`
+	RepoCandidates      []string `json:"repo_candidates"`
 }
 
 type CommandOptions struct {
@@ -31,87 +34,38 @@ type CommandOptions struct {
 	Password string
 }
 
-var defaultMeshNodes = []MeshNode{
-	{
-		Name:    "wsl",
-		Aliases: []string{"wsl", "legion-wsl-1", "legion-wsl-1.shad-artichoke.ts.net"},
-		User:    "user",
-		Host:    "192.168.4.52",
-		HostCandidates: []string{
-			"legion-wsl-1.shad-artichoke.ts.net",
-		},
-		Port: "22",
-		OS:   "linux",
-		RepoCandidates: []string{
-			"/home/user/dialtone",
-		},
-	},
-	{
-		Name:    "gold",
-		Aliases: []string{"gold", "gold.shad-artichoke.ts.net"},
-		User:    "user",
-		Host:    "192.168.4.55",
-		Port:    "22",
-		OS:      "macos",
-		RepoCandidates: []string{
-			"/Users/user/dialtone",
-			"/Users/user/Documents/dialtone",
-		},
-	},
-	{
-		Name:    "darkmac",
-		Aliases: []string{"darkmac", "darkmac.shad-artichoke.ts.net"},
-		User:    "tim",
-		Host:    "192.168.4.31",
-		HostCandidates: []string{
-			"darkmac.shad-artichoke.ts.net",
-		},
-		Port: "22",
-		OS:   "macos",
-		RepoCandidates: []string{
-			"/Users/tim/dialtone",
-			"/Users/tim/dialtone",
-			"/Users/tim/Documents/dialtone",
-			"/Users/dialtone/dialtone",
-		},
-	},
-	{
-		Name:    "rover",
-		Aliases: []string{"rover", "rover-1", "rover-1.shad-artichoke.ts.net"},
-		User:    "tim",
-		Host:    "192.168.4.36",
-		HostCandidates: []string{
-			"169.254.217.151", // Rover direct ethernet on the Legion switch
-			"rover-1.shad-artichoke.ts.net",
-		},
-		Port: "22",
-		OS:   "linux",
-		RepoCandidates: []string{
-			"/home/tim/dialtone",
-			"/home/user/dialtone",
-		},
-	},
-	{
-		Name:    "legion",
-		Aliases: []string{"legion", "legion.shad-artichoke.ts.net"},
-		User:    "timca",
-		Host:    "192.168.4.52",
-		HostCandidates: []string{
-			"127.0.0.1",
-			"legion.shad-artichoke.ts.net",
-		},
-		Port:                "2223",
-		OS:                  "windows",
-		PreferWSLPowerShell: true,
-		RepoCandidates: []string{
-			"/home/user/dialtone",
-			"/home/user/dialtone",
-			"/home/tim/dialtone",
-			"/mnt/c/Users/timca/dialtone",
-			"/mnt/c/Users/tim/dialtone",
-			"/mnt/c/Users/timca/code3/dialtone",
-		},
-	},
+var (
+	defaultMeshNodes []MeshNode
+	meshOnce         sync.Once
+)
+
+func loadMeshConfig() {
+	meshOnce.Do(func() {
+		// Try to find repo root to locate env/mesh.json
+		cwd, _ := os.Getwd()
+		cur := cwd
+		repoRoot := ""
+		for {
+			if _, err := os.Stat(filepath.Join(cur, "dialtone.sh")); err == nil {
+				repoRoot = cur
+				break
+			}
+			parent := filepath.Dir(cur)
+			if parent == cur {
+				break
+			}
+			cur = parent
+		}
+		if repoRoot == "" {
+			return
+		}
+		configPath := filepath.Join(repoRoot, "env", "mesh.json")
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			return
+		}
+		_ = json.Unmarshal(data, &defaultMeshNodes)
+	})
 }
 
 var (
@@ -140,6 +94,7 @@ func dialMeshClient(host, port, user, password string) (*ssh.Client, error) {
 }
 
 func ListMeshNodes() []MeshNode {
+	loadMeshConfig()
 	out := make([]MeshNode, len(defaultMeshNodes))
 	copy(out, defaultMeshNodes)
 	sort.Slice(out, func(i, j int) bool {
@@ -149,6 +104,7 @@ func ListMeshNodes() []MeshNode {
 }
 
 func ResolveMeshNode(target string) (MeshNode, error) {
+	loadMeshConfig()
 	t := normalizeTarget(target)
 	if t == "" {
 		return MeshNode{}, fmt.Errorf("target is required")
