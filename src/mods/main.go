@@ -56,8 +56,6 @@ func main() {
 	switch cmd {
 	case "help", "-h", "--help":
 		printUsage()
-	case "bootstrap":
-		exitIfErr(runBootstrap(args))
 	case "new":
 		exitIfErr(runNew(args))
 	case "add":
@@ -74,8 +72,6 @@ func main() {
 		exitIfErr(runSyncUI(args))
 	case "gh-create":
 		exitIfErr(runGitHubCreate(args))
-	case "setup":
-		exitIfErr(runSetup(args))
 	case "commit":
 		exitIfErr(runCommit(args))
 	case "push":
@@ -112,7 +108,6 @@ func printUsage() {
 	fmt.Println("       ./dialtone.sh mods <command> [args]      # backward compatible")
 	fmt.Println("")
 	fmt.Println("Commands:")
-	fmt.Println("  bootstrap [dev|binary]")
 	fmt.Println("  new <mod-name> [--repo <url|owner/repo|path>] [--owner <owner>] [--repo-name <name>]")
 	fmt.Println("      [--path src/mods/<name>] [--branch main] [--public|--private] [--dry-run]")
 	fmt.Println("  add --mod <mod-name> <paths...>")
@@ -124,8 +119,6 @@ func printUsage() {
 	fmt.Println("  sync [--host <name|all|local>] [--repo-dir PATH] [--mod NAME|PATH ...] [--skip-self=true|false]")
 	fmt.Println("  sync-ui [--mod NAME|PATH ...] [--from PATH] [--dry-run] [--commit] [--push]")
 	fmt.Println("  gh-create <mod-name> --owner <owner> [--repo-name <name>] [--private|--public]")
-	fmt.Println("  setup")
-	fmt.Println("      Guide through setting up GitHub authentication and environment")
 	fmt.Println("  commit --mod <mod-name> [--message <msg>] [--all]")
 
 	fmt.Println("  push [--mod <mod-name>] [--message <msg>] [--dry-run]")
@@ -133,22 +126,6 @@ func printUsage() {
 	fmt.Println("  pull [--host <name|all|local>] [--from <name>] [--branch BRANCH]")
 	fmt.Println("       [--source PATH] [--dest PATH] [--repo-dir PATH] [--skip-self=true|false] [--dry-run]")
 	fmt.Println("       Clone/update dialtone repo across mesh nodes and sync mod submodules")
-}
-
-func runBootstrap(args []string) error {
-	mode := "dev"
-	if len(args) > 0 {
-		mode = strings.ToLower(strings.TrimSpace(args[0]))
-	}
-	switch mode {
-	case "dev":
-		return runDialtone("dev", "install")
-	case "binary":
-		fmt.Println("binary bootstrap path is reserved; use app-specific binary installers")
-		return nil
-	default:
-		return fmt.Errorf("unknown bootstrap mode: %s", mode)
-	}
 }
 
 func runNew(args []string) error {
@@ -1364,84 +1341,6 @@ func copyDir(src, dst string) error {
 	})
 }
 
-func runSetup(args []string) error {
-	fmt.Println("=== Dialtone Mods Setup ===")
-	fmt.Println("This guide will help you set up GitHub authentication for automated mod provisioning.")
-	fmt.Println()
-
-	repoRoot, err := findRepoRoot()
-	if err != nil {
-		return err
-	}
-
-	token := strings.TrimSpace(firstNonEmpty(os.Getenv("GH_TOKEN"), os.Getenv("GITHUB_TOKEN")))
-	if token != "" {
-		fmt.Printf("✓ GitHub token found in environment.\n")
-	} else {
-		fmt.Println("! GitHub token NOT found.")
-		fmt.Println("To create new mods automatically, you need a GitHub Personal Access Token (PAT).")
-		fmt.Println("1. Go to: https://github.com/settings/tokens/new")
-		fmt.Println("2. Select scopes: 'repo' (full control of private repositories).")
-		fmt.Println("3. Generate and copy the token.")
-		fmt.Println()
-		fmt.Print("Paste your GitHub token here (or press Enter to skip): ")
-		
-		var inputToken string
-		fmt.Scanln(&inputToken)
-		inputToken = strings.TrimSpace(inputToken)
-		
-		if inputToken != "" {
-			err := saveToEnv(repoRoot, "GITHUB_TOKEN", inputToken)
-			if err != nil {
-				return fmt.Errorf("failed to save token to .env: %w", err)
-			}
-			fmt.Println("✓ Token saved to env/.env")
-			os.Setenv("GITHUB_TOKEN", inputToken)
-			token = inputToken
-		} else {
-			fmt.Println("Skipped token setup. You can still push manually if you have SSH/Git auth set up.")
-		}
-	}
-
-	owner, err := getRepoOwner(repoRoot)
-	if err == nil {
-		fmt.Printf("✓ Detected GitHub owner: %s\n", owner)
-	} else {
-		fmt.Println("! Could not detect GitHub owner from 'origin' remote.")
-		fmt.Println("Make sure you have an 'origin' remote pointing to your GitHub fork.")
-	}
-
-	fmt.Println()
-	fmt.Println("Setup complete! You can now use './dialtone.sh mods v1 new <name>' to create new mods.")
-	return nil
-}
-
-func saveToEnv(repoRoot, key, value string) error {
-	envPath := filepath.Join(repoRoot, "env", ".env")
-	data, err := os.ReadFile(envPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return os.WriteFile(envPath, []byte(fmt.Sprintf("%s=%s\n", key, value)), 0644)
-		}
-		return err
-	}
-
-	lines := strings.Split(string(data), "\n")
-	found := false
-	for i, line := range lines {
-		if strings.HasPrefix(strings.TrimSpace(line), key+"=") {
-			lines[i] = fmt.Sprintf("%s=%s", key, value)
-			found = true
-			break
-		}
-	}
-	if !found {
-		lines = append(lines, fmt.Sprintf("%s=%s", key, value))
-	}
-
-	return os.WriteFile(envPath, []byte(strings.Join(lines, "\n")), 0644)
-}
-
 func ensureGitHubRepo(ownerRepo string, public bool) error {
 	parts := strings.Split(strings.TrimSpace(ownerRepo), "/")
 	if len(parts) != 2 {
@@ -1452,7 +1351,7 @@ func ensureGitHubRepo(ownerRepo string, public bool) error {
 	token := strings.TrimSpace(firstNonEmpty(os.Getenv("GH_TOKEN"), os.Getenv("GITHUB_TOKEN")))
 	if token == "" {
 		fmt.Println("Error: GitHub authentication token missing.")
-		fmt.Println("Run './dialtone.sh mods v1 setup' to configure your token.")
+		fmt.Println("Please set GITHUB_TOKEN environment variable.")
 		return errors.New("GH_TOKEN or GITHUB_TOKEN is required for GitHub repo creation")
 	}
 

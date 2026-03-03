@@ -35,38 +35,8 @@ ensure_nix_installed() {
     if command_exists nix; then
         return 0
     fi
-    if [ ! -t 0 ]; then
-        echo "DIALTONE> Nix is required but not found, and shell is non-interactive."
-        exit 1
-    fi
-    echo "DIALTONE> Nix is required for bootstrap."
-    printf "DIALTONE> Install Nix now? [Y/n] "
-    read -r confirm
-    if [[ -n "$confirm" && ! "$confirm" =~ ^[Yy]$ ]]; then
-        echo "DIALTONE> Nix install declined. Exiting."
-        exit 1
-    fi
-    if command_exists curl; then
-        sh <(curl -L https://nixos.org/nix/install) --daemon
-    elif command_exists wget; then
-        sh <(wget -qO- https://nixos.org/nix/install) --daemon
-    else
-        echo "DIALTONE> Need curl or wget to install Nix."
-        exit 1
-    fi
-    if [ -f "$HOME/.nix-profile/etc/profile.d/nix.sh" ]; then
-        # shellcheck disable=SC1090
-        . "$HOME/.nix-profile/etc/profile.d/nix.sh"
-    fi
-    if [ -f "/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh" ]; then
-        # shellcheck disable=SC1091
-        . "/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh"
-    fi
-    if ! command_exists nix; then
-        echo "DIALTONE> Nix install finished but nix is not on PATH yet."
-        echo "DIALTONE> Open a new shell and rerun ./dialtone.sh"
-        exit 1
-    fi
+    echo "DIALTONE> Nix is required but not found. Please install Nix first."
+    exit 1
 }
 
 enter_nix_shell_if_needed() {
@@ -123,57 +93,6 @@ DIALTONE_USE_NIX=1
 EOF
 }
 
-run_bootstrap_repl() {
-    local env_file="$1"
-    local default_env="${SCRIPT_DIR}/.dialtone_env"
-    local default_repo="https://github.com/timcash/dialtone.git"
-    local default_branch="main"
-    local input_env input_repo input_branch
-
-    echo "DIALTONE> Bootstrap REPL started."
-    echo "DIALTONE> This will configure env/.env, set up Nix shell, and bootstrap the dialtone repo."
-
-    while true; do
-        printf "DIALTONE> Install directory for Go/Bun [default: %s]: " "$default_env"
-        read -r input_env
-        input_env="$(expand_home_path "${input_env:-$default_env}")"
-        if [ -n "$input_env" ]; then
-            break
-        fi
-    done
-    mkdir -p "$input_env"
-    export DIALTONE_ENV="$input_env"
-
-    write_env_file "$env_file" "$DIALTONE_ENV"
-    echo "DIALTONE> Wrote $env_file"
-
-    ensure_nix_installed
-    if [ -z "${IN_NIX_SHELL:-}" ]; then
-        echo "DIALTONE> Re-entering bootstrap inside Nix shell..."
-        export DIALTONE_BOOTSTRAP_DONE=1
-        exec nix "${NIX_EXPERIMENTAL_FLAGS[@]}" develop --command env DIALTONE_NIX_SHELL_BOOTSTRAPPED=1 DIALTONE_BOOTSTRAP_DONE=1 "$SCRIPT_DIR/dialtone.sh" "$@"
-    fi
-    if ! command_exists git || ! command_exists go; then
-        echo "DIALTONE> Nix shell does not have git/go available. Check flake.nix."
-        exit 1
-    fi
-
-    printf "DIALTONE> Git repo to bootstrap [default: %s]: " "$default_repo"
-    read -r input_repo
-    input_repo="${input_repo:-$default_repo}"
-    printf "DIALTONE> Branch [default: %s]: " "$default_branch"
-    read -r input_branch
-    input_branch="${input_branch:-$default_branch}"
-
-    echo "DIALTONE> Bootstrapping repo in $SCRIPT_DIR ..."
-    bootstrap_clone_repo_in_place "$input_repo" "$input_branch"
-    echo "DIALTONE> Repo bootstrap complete."
-    echo "DIALTONE> Launching new dialtone runtime..."
-
-    export DIALTONE_BOOTSTRAP_DONE=1
-    exec "${SCRIPT_DIR}/dialtone.sh" "$@"
-}
-
 # 1. Load Environment
 ENV_FILE="$SCRIPT_DIR/env/.env"
 if [ -z "${DIALTONE_ENV_FILE:-}" ]; then
@@ -187,12 +106,8 @@ if [ -f "$ENV_FILE" ]; then
     set +a
 fi
 if [ ! -f "$ENV_FILE" ] && [ -z "${DIALTONE_BOOTSTRAP_DONE:-}" ]; then
-    if [ -t 0 ]; then
-        run_bootstrap_repl "$ENV_FILE" "$@"
-    else
-        echo "DIALTONE> Environment file missing ($ENV_FILE) and shell is non-interactive. Cannot bootstrap."
-        exit 1
-    fi
+    echo "DIALTONE> Environment file missing ($ENV_FILE). Cannot continue."
+    exit 1
 fi
 enter_nix_shell_if_needed "$@"
 
