@@ -1,7 +1,7 @@
 # Test Report: swarm-src-v3
 
-- **Date**: Mon, 02 Mar 2026 21:25:45 PST
-- **Total Duration**: 4.075600972s
+- **Date**: Tue, 03 Mar 2026 07:02:15 PST
+- **Total Duration**: 3.892333067s
 
 ## Summary
 
@@ -12,7 +12,7 @@
 
 ### 1. ✅ swarm-v3-rendezvous-self-test
 
-- **Duration**: 4.075598228s
+- **Duration**: 3.892327772s
 - **Report**: rendezvous self-test passed via https://relay.dialtone.earth
 
 #### Logs

@@ -26,6 +26,9 @@
             ninja
             pkg-config
             nodejs
+            musl.dev
+            glibc.static
+            pkgsStatic.gcc
           ];
           shellHook = ''
             export DIALTONE_USE_NIX=1
