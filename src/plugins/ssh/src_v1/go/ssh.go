@@ -11,6 +11,7 @@ import (
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 )
 
 func DialSSH(host, port, user, pass string) (*ssh.Client, error) {
@@ -33,17 +34,30 @@ func DialSSH(host, port, user, pass string) (*ssh.Client, error) {
 		Timeout:         10 * time.Second,
 	}
 
-	// Try to use SSH key if available
-	keyPath := filepath.Join(os.Getenv("HOME"), ".ssh", "id_ed25519")
-	if _, err := os.Stat(keyPath); err == nil {
-		key, err := os.ReadFile(keyPath)
+	// Try to use SSH agent if available
+	if socket := os.Getenv("SSH_AUTH_SOCK"); socket != "" {
+		conn, err := net.Dial("unix", socket)
 		if err == nil {
-			signer, err := ssh.ParsePrivateKey(key)
+			config.Auth = append(config.Auth, ssh.PublicKeysCallback(agent.NewClient(conn).Signers))
+		}
+	}
+
+	// Try to use common SSH keys if available
+	home, _ := os.UserHomeDir()
+	keys := []string{"id_ed25519", "id_rsa"}
+	for _, k := range keys {
+		keyPath := filepath.Join(home, ".ssh", k)
+		if _, err := os.Stat(keyPath); err == nil {
+			key, err := os.ReadFile(keyPath)
 			if err == nil {
-				config.Auth = append(config.Auth, ssh.PublicKeys(signer))
+				signer, err := ssh.ParsePrivateKey(key)
+				if err == nil {
+					config.Auth = append(config.Auth, ssh.PublicKeys(signer))
+				}
 			}
 		}
 	}
+
 	if strings.TrimSpace(pass) != "" {
 		config.Auth = append(config.Auth, ssh.Password(pass))
 	}
