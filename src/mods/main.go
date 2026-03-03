@@ -1204,7 +1204,7 @@ func buildRemoteSubmoduleSync(repoDir string, modPaths []string, from string) st
 		modArgs = " " + strings.Join(args, " ")
 	}
 
-	return fmt.Sprintf("cd %s && if [ -x ./dialtone.sh ]; then ./dialtone.sh mods v1 sync%s; else git submodule update --init --recursive; fi",
+	return fmt.Sprintf("cd %s && if [ -x ./dialtone.sh ]; then ./dialtone.sh mods v1 sync --host local%s; else git submodule update --init --recursive; fi",
 		shellQuote(repoDir), modArgs)
 }
 
