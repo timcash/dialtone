@@ -453,7 +453,7 @@ func printDevUsage() {
 	logs.Info("  help                 Show this help")
 	logs.Info("")
 	logs.Info("Plugin routing:")
-	logs.Info("  <plugin> <args...>   Run src/plugins/<plugin>/scaffold/main.go (or scaffold.sh)")
+	logs.Info("  <plugin> <args...>   Run <plugin>/{scaffold|cli}/main.go in src/plugins or src/mods (or scaffold.sh/cli.sh)")
 	logs.Info("")
 	logs.Info("Examples:")
 	logs.Info("  ./dialtone.sh go install --latest")
@@ -482,8 +482,15 @@ func listPlugins() {
 				continue
 			}
 			goScaffold := filepath.Join(root, name, "scaffold", "main.go")
+			cliScaffold := filepath.Join(root, name, "cli", "main.go")
 			shScaffold := filepath.Join(root, name, "scaffold.sh")
+			cliShell := filepath.Join(root, name, "cli.sh")
 			if fileExists(goScaffold) || fileExists(shScaffold) {
+				logs.Info("  - %s (%s)", name, root)
+				seen[name] = struct{}{}
+				continue
+			}
+			if fileExists(cliScaffold) || fileExists(cliShell) {
 				logs.Info("  - %s (%s)", name, root)
 				seen[name] = struct{}{}
 			}
@@ -506,6 +513,7 @@ func runPluginScaffold(plugin string, args []string) error {
 	}
 
 	goScaffold := filepath.Join(pluginDir, "scaffold", "main.go")
+	cliScaffold := filepath.Join(pluginDir, "cli", "main.go")
 	if fileExists(goScaffold) {
 		var cmd *exec.Cmd
 		if fileExists(filepath.Join(pluginDir, "go.mod")) {
@@ -513,6 +521,20 @@ func runPluginScaffold(plugin string, args []string) error {
 			cmd.Dir = pluginDir
 		} else {
 			cmd = exec.Command("go", append([]string{"run", "./" + filepath.ToSlash(goScaffold)}, args...)...)
+		}
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		return cmd.Run()
+	}
+
+	if fileExists(cliScaffold) {
+		var cmd *exec.Cmd
+		if fileExists(filepath.Join(pluginDir, "go.mod")) {
+			cmd = exec.Command("go", append([]string{"run", "./cli/main.go"}, args...)...)
+			cmd.Dir = pluginDir
+		} else {
+			cmd = exec.Command("go", append([]string{"run", "./" + filepath.ToSlash(cliScaffold)}, args...)...)
 		}
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -529,7 +551,7 @@ func runPluginScaffold(plugin string, args []string) error {
 		return cmd.Run()
 	}
 
-	return logs.Errorf("plugin %s has no scaffold/main.go or scaffold.sh", plugin)
+	return logs.Errorf("plugin %s has no scaffold/cli main.go or scaffold.sh/cli.sh", plugin)
 }
 
 func runMods(args []string) error {
@@ -537,7 +559,7 @@ func runMods(args []string) error {
 	if goBin == "" {
 		goBin = "go"
 	}
-	cmd := exec.Command(goBin, append([]string{"run", "./mods/main.go"}, args...)...)
+	cmd := exec.Command(goBin, append([]string{"run", "./mods/mod/v1/main.go"}, args...)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin

@@ -36,6 +36,7 @@
 
 # ACL policy
 ./dialtone.sh tsnet src_v1 acl get --tailnet <tailnet> --api-key <ts_api_key>
+./dialtone.sh tsnet src_v1 acl ensure --tailnet <tailnet> --api-key <ts_api_key> --hostname <dialtone-hostname>
 ```
 
 ## What this plugin does
@@ -133,6 +134,19 @@ Flags:
 
 ```bash
 ./dialtone.sh tsnet src_v1 acl get --tailnet shad-artichoke.ts.net --api-key "$TS_API_KEY"
+```
+
+### `acl ensure`
+Fetches the current ACL policy and ensures a mosh-access rule exists for the current host.
+
+Flags:
+
+- `--tailnet <name>`
+- `--api-key <key>`
+- `--hostname <dialtone-hostname>` (default: `DIALTONE_HOSTNAME` or auto-detected host)
+
+```bash
+./dialtone.sh tsnet src_v1 acl ensure --tailnet shad-artichoke.ts.net --api-key "$TS_API_KEY" --hostname gold
 ```
 
 ### `keys provision`
