@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-V3_DIR="$SCRIPT_DIR/src/mods/mesh/v3"
-NIX_FLAGS=(--extra-experimental-features "nix-command flakes")
 NIX_BIN=""
+NIX_FLAGS=(--extra-experimental-features "nix-command")
+NIXPKGS_URL="${NIXPKGS_URL:-https://channels.nixos.org/nixpkgs-unstable/nixexprs.tar.xz}"
+NIX_PKGS=(bashInteractive openssh tmux go bun)
 
 find_nix() {
   if command -v nix >/dev/null 2>&1; then
@@ -34,26 +34,8 @@ if ! NIX_BIN="$(find_nix)"; then
   exit 1
 fi
 
-if [ ! -d "$V3_DIR" ]; then
-  echo "mesh/v3 not found: $V3_DIR" >&2
-  exit 1
-fi
-
-run_in_shell() {
-  local cmd="$1"
-  exec "$NIX_BIN" "${NIX_FLAGS[@]}" develop "$V3_DIR" -c bash -c "cd \"$V3_DIR\" && command -v cargo >/dev/null 2>&1 || { echo 'cargo not found in nix dev shell' >&2; exit 127; }; $cmd"
-}
-
 if [ $# -eq 0 ]; then
-  run_in_shell "cargo build --release"
+  exec "$NIX_BIN" "${NIX_FLAGS[@]}" shell -f "$NIXPKGS_URL" "${NIX_PKGS[@]}" -c env IN_NIX_SHELL=1 bash -lc 'TMUX_BIN="$(command -v tmux)"; if [ -n "${TMUX:-}" ]; then exec bash -i; else exec "$TMUX_BIN" new -A -s dialtone; fi'
 fi
 
-CMD=""
-for arg in "$@"; do
-  if [ -n "$CMD" ]; then
-    CMD+=" "
-  fi
-  CMD+="$(printf '%q' "$arg")"
-done
-
-run_in_shell "$CMD"
+exec "$NIX_BIN" "${NIX_FLAGS[@]}" shell -f "$NIXPKGS_URL" "${NIX_PKGS[@]}" -c env IN_NIX_SHELL=1 "$@"
