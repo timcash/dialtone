@@ -68,6 +68,8 @@ func main() {
 		exitIfErr(runStatus(args))
 	case "sync":
 		exitIfErr(runSync(args))
+	case "rsync":
+		exitIfErr(runRsync(args))
 	case "sync-ui":
 		exitIfErr(runSyncUI(args))
 	case "gh-create":
@@ -88,24 +90,16 @@ func parseTopLevel(args []string) (string, []string, error) {
 	if len(args) == 0 {
 		return "", nil, errors.New("missing mods command")
 	}
+	if strings.EqualFold(strings.TrimSpace(args[0]), "v1") {
+		return "", nil, errors.New("version must be provided by ./src/cli.go, not mods argument")
+	}
 	cmd := strings.TrimSpace(args[0])
 	rest := args[1:]
-	if strings.EqualFold(cmd, "v1") {
-		if len(rest) == 0 {
-			return "", nil, errors.New("missing command after v1")
-		}
-		cmd = strings.TrimSpace(rest[0])
-		rest = rest[1:]
-	} else if len(rest) > 0 && strings.EqualFold(strings.TrimSpace(rest[0]), "v1") {
-		// Backward-compatible: ./dialtone.sh mods <command> v1 ...
-		rest = rest[1:]
-	}
 	return cmd, rest, nil
 }
 
 func printUsage() {
 	fmt.Println("Usage: ./dialtone.sh mods v1 <command> [args]")
-	fmt.Println("       ./dialtone.sh mods <command> [args]      # backward compatible")
 	fmt.Println("")
 	fmt.Println("Commands:")
 	fmt.Println("  new <mod-name> [--repo <url|owner/repo|path>] [--owner <owner>] [--repo-name <name>]")
@@ -117,6 +111,7 @@ func printUsage() {
 	fmt.Println("  list")
 	fmt.Println("  status [--name <mod-name>] [--short]")
 	fmt.Println("  sync [--host <name|all|local>] [--repo-dir PATH] [--mod NAME|PATH ...] [--skip-self=true|false]")
+	fmt.Println("  rsync [--mod NAME|PATH ...] [--from <name>] [--repo-dir PATH] [--skip-self=true|false]")
 	fmt.Println("  sync-ui [--mod NAME|PATH ...] [--from PATH] [--dry-run] [--commit] [--push]")
 	fmt.Println("  gh-create <mod-name> --owner <owner> [--repo-name <name>] [--private|--public]")
 	fmt.Println("  commit --mod <mod-name> [--message <msg>] [--all]")
@@ -181,7 +176,9 @@ func runNew(args []string) error {
 		if *dryRun {
 			fmt.Printf("[DRY-RUN] ensure github repo exists: %s (public=%t)\n", repoSpec, !*private)
 		} else {
-			_ = ensureGitHubRepo(repoSpec, !*private)
+			if err := ensureGitHubRepo(repoSpec, !*private); err != nil {
+				return fmt.Errorf("ensure repo failed: %w", err)
+			}
 		}
 	}
 	remote := normalizeRepoSpec(repoSpec)
@@ -208,7 +205,7 @@ func runAdd(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	
+
 	repoRoot, err := findRepoRoot()
 	if err != nil {
 		return err
@@ -222,15 +219,15 @@ func runAdd(args []string) error {
 			return fmt.Errorf("mod path missing: %s", targetPath)
 		}
 	}
-	
+
 	paths := fs.Args()
 	if len(paths) == 0 {
 		return errors.New("no paths provided to add")
 	}
-	
+
 	addArgs := []string{"-C", targetPath, "add"}
 	addArgs = append(addArgs, paths...)
-	
+
 	return runCommand(append([]string{"git"}, addArgs...)...)
 }
 
@@ -338,7 +335,29 @@ func runPush(args []string) error {
 		fmt.Printf("[DRY-RUN] push mod %s\n", name)
 		return nil
 	}
-	return pushModRepo(modPath)
+	if err := pushModRepo(modPath); err != nil {
+		return err
+	}
+	modRelPath := filepath.ToSlash(filepath.Join("src", "mods", name))
+	if changed, err := hasSubmodulePointerChanges(repoRoot, modRelPath); err == nil && changed {
+		fmt.Printf("Warning: parent repo has uncommitted submodule changes for %s. Run `mods v1 commit` then `mods v1 push` to sync pointer.\n", name)
+	}
+	return nil
+}
+
+func hasSubmodulePointerChanges(repoRoot, modRelPath string) (bool, error) {
+	statusOut, err := runCapture("git", "-C", repoRoot, "status", "--short", "--", modRelPath)
+	if err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(statusOut) != "" {
+		return true, nil
+	}
+	cachedOut, err := runCapture("git", "-C", repoRoot, "diff", "--cached", "--name-only", "--", modRelPath)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(cachedOut) != "", nil
 }
 
 func runClone(args []string) error {
@@ -683,7 +702,7 @@ func runSync(args []string) error {
 			// 2. Fallback to mesh nodes if standard update fails
 			fmt.Printf("Submodule update failed for %s, trying mesh fallbacks...\n", p)
 			success := false
-			
+
 			// Build list of mesh sources for this specific mod
 			sources := []string{}
 			if srcNode.Name != "" {
@@ -763,6 +782,10 @@ func runSync(args []string) error {
 		fmt.Println()
 	}
 	return err
+}
+
+func runRsync(args []string) error {
+	return runSync(append([]string{"--host", "all"}, args...))
 }
 
 func runSyncUI(args []string) error {
@@ -924,12 +947,12 @@ func runPull(args []string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	rd := strings.TrimSpace(*repoDir)
 	if rd == "" {
 		rd = defaultRepoDirForNode(node)
 	}
-	
+
 	root, err := findRepoRoot()
 	if err != nil {
 		return err

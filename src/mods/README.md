@@ -1,91 +1,93 @@
 # Mods System (`src/mods`)
 
-`mods` is the unified command surface for the Dialtone **Mesh-First** workflow. It abstracts standard Git operations into a mesh-aware API that prioritizes LAN speed and local reliability while maintaining GitHub as the final source of truth.
+`mods` is the orchestrated command surface for Dialtone.
+It is intentionally **non-plugin based**: `src/cli.go` is the orchestrator, and each mod version is invoked as a subprocess.
 
-## Philosophy: Together as a Mesh
+## Mod Contract
 
-The `mods v1` workflow is designed for high-performance synchronization across a LAN SSH mesh. 
-- **Mesh-First Sync**: Commands like `pull` and `sync` attempt to fetch code from other LAN nodes before falling back to GitHub.
-- **Safety First**: All mesh-to-mesh pulls use `--ff-only` to protect local dirty changes.
-- **Abstracted Git**: Complex Git/Submodule logic is wrapped into a simple, predictable CLI that preserves standard "Add -> Commit -> Push" habits.
-- **Nix-Managed**: Every command runs inside a consistent, reproducible toolchain managed by Nix.
-- **Auto-Environment**: macOS hosts automatically use `CGO_ENABLED=0` and login shells to ensure consistent behavior across different hardware.
-- **Config-First**: All network-specific mesh details are centralized in `env/mesh.json`, keeping the source code clean and portable.
+- `src/cli.go` is responsible only for command routing.
+  - It resolves `./dialtone2.sh <mod-name> <version> <command> [args]`.
+  - It does not execute mod logic directly.
+  - It launches the mod entrypoint as a subprocess (`go run <entry> ...`).
+- Mod behavior lives in `src/mods/<mod>/<version>/cli/*.go`.
+- Standard lifecycle commands should be implemented in the mod CLI:
+  - `install`
+  - `build`
+  - `format`
+  - `test`
+- Every mod CLI is expected to declare its own command wiring and dependency checks (typically via Nix + Go CLI logic).
+- `mods` and `plugins` are separate systems. `mods` does not depend on plugin code.
 
-## Configuration
+## Fast Workflow for a New Mod
 
-Mesh nodes are defined in `env/mesh.json`. This file is tracked by Git and shared across the mesh.
+```sh
+# 1) Create a new mod version and CLI directory
+mkdir -p src/mods/my_mod/v1/cli
 
-### Orchestration
-- `./dialtone.sh mods v1 new <mod-name>`  
-  Create a new mod, provision a GitHub repo, and register it as a submodule.  
-  Flags: `--repo`, `--owner`, `--repo-name`, `--path`, `--branch`, `--public|--private`, `--dry-run`.
-- `./dialtone.sh mods v1 pull [--host all]`  
-  Broadcast a pull request to the mesh. Remote hosts will pull from **your current host** first, then fall back to GitHub.
-- `./dialtone.sh mods v1 status [--short] [--name <mod-name>]`  
-  Detailed project health report showing dirty/staged files for the parent repo and all mods.
-- `./dialtone.sh mods v1 list`  
-  List all registered mods and their paths.
-- `./dialtone.sh mods v1 sync [--host <name|all|local>] [--mod NAME...]`  
-  Sync specific mods across the mesh nodes using LAN-first logic.
-- `./dialtone.sh mods v1 clone [--host <name|all|local>]`  
-  Clone or update the Dialtone repo across the mesh.
+# 2) Add a minimal CLI main
+cat > src/mods/my_mod/v1/cli/main.go <<'EOF'
+package main
 
-### Standard Git Workflow (Wrapped)
-- `./dialtone.sh mods v1 add [--mod <name>] <paths...>`  
-  Stage files for commit. Defaults to the parent repo; use `--mod` for specific submodules.
-- `./dialtone.sh mods v1 commit [--mod <name>] [-m "msg"] [--all]`  
-  Commit staged changes. **Never auto-stages unless `--all` is passed.**
-- `./dialtone.sh mods v1 push [--mod <name>] [--dry-run]`  
-  Push committed changes to GitHub. (Pushing with no args iterates through all mods + parent).
+import (
+  "fmt"
+  "os"
+)
 
-### Utility & UI
-- `./dialtone.sh mods v1 sync-ui [--mod NAME...] [--from PATH] [--commit] [--push]`  
-  Synchronize the UI template from the UI plugin to one or more mods.
-- `./dialtone.sh mods v1 bootstrap [dev]`  
-  Initialize the Dialtone development environment.
-- `./dialtone.sh mods v1 gh-create <mod-name> --owner <owner>`  
-  Provision a new GitHub repository for a mod.
+func main() {
+  if len(os.Args) < 2 {
+    fmt.Println("Usage: ./dialtone2.sh my_mod v1 <command> [args]")
+    return
+  }
+  switch os.Args[1] {
+  case "install":
+    // run nix checks/install for this mod
+  case "build":
+    // compile/build artifacts to <repo-root>/bin when possible
+  case "format":
+    // run gofmt or formatter checks
+  case "test":
+    // run module tests
+  default:
+    fmt.Printf("unknown command: %s\n", os.Args[1])
+  }
+}
+EOF
 
-## Standard Workflow Example
+# 3) Compile or syntax-check this CLI
+go run ./src/mods/my_mod/v1/cli help
 
-### 1. Create a Mod
-```bash
-./dialtone.sh mods v1 new my-feature --owner timcash --public
+# 4) Validate mod orchestration
+./dialtone2.sh mods v1 list
+./dialtone2.sh my_mod v1 install
+./dialtone2.sh my_mod v1 build
+./dialtone2.sh my_mod v1 format
+./dialtone2.sh my_mod v1 test
 ```
 
-### 2. Make Changes & Commit
-```bash
-# Edit files...
-./dialtone.sh mods v1 add --mod my-feature .
-./dialtone.sh mods v1 commit --mod my-feature -m "implement core logic"
-```
+## Orchestration (mods v1)
 
-### 3. Share with the Mesh
-```bash
-# Push your changes to GitHub
-./dialtone.sh mods v1 push --mod my-feature
+- `./dialtone2.sh mods v1 list`  
+  List registered mods and versions.
+- `./dialtone2.sh mods v1 new <mod-name>`  
+  Create a new mod workspace (subject to current in-repo conventions).
+- `./dialtone2.sh mods v1 pull [--host all]`  
+  Pull updates across mesh peers then fallback to GitHub.
+- `./dialtone2.sh mods v1 status [--short] [--name <mod-name>]`  
+  Show status for parent and known mod paths.
+- `./dialtone2.sh mods v1 sync [--host <name|all|local>] [--mod NAME...]`  
+  Sync selected mods across the mesh.
+- `./dialtone2.sh mods v1 rsync [--mod NAME...] [--from <name>] [--repo-dir PATH] [--skip-self=true|false]`  
+  Shorthand alias for `sync --host all`.
 
-# Coordinate all other mesh nodes to pull from you (LAN speed)
-./dialtone.sh mods v1 pull --host all
-```
+## Mesh and Git Safety
 
-## Safety & Deconfliction
+- Mesh sync commands use fast-forward only by default and fail on risky local conflicts.
+- Mesh transport and auth logic is implemented in the mod implementation, not in the orchestrator.
 
-The `mods` API is designed to be safe for both **Humans** and **LLM Agents**.
+## Note on Other Mods
 
-- **Dirty Change Protection**: `pull` and `sync` will fail if local changes would be overwritten.
-- **FF-Only**: Mesh synchronization strictly uses Fast-Forward only. If branches have diverged, the command reports failure.
-- **Agent Reasoning**: Because the API is predictable, an LLM agent can catch a failed pull, inspect the state with `mods v1 status`, and perform a standard `git merge` or manual edit to resolve conflicts before re-syncing.
-
-## Environment Toolchain
-
-Managed via `flake.nix`:
-- **Source**: `git`, `gh`, `openssh`
-- **Language**: `go`, `nodejs`
-- **Build**: `gcc`, `cmake`, `ninja`, `pkg-config`
-
-Run `./dialtone.sh` to automatically enter the Nix dev shell.
-
----
-*Implementation Note: `src/mods/main.go` implements this logic using Go-native GitHub/SSH/Git flows.*
+Example mod entrypoints currently available:
+- `./dialtone2.sh mesh v1 <command>`
+- `./dialtone2.sh mosh v1 <command>`
+- `./dialtone2.sh tsnet v1 <command>`
+- `./dialtone2.sh mods v1 <command>`
