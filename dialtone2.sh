@@ -187,7 +187,12 @@ run_tmux_v1_logs() {
 
 parse_args() {
   PARSED_ARGS=()
+  local command_started=0
   while [ "$#" -gt 0 ]; do
+    if [ "$command_started" -eq 1 ]; then
+      PARSED_ARGS+=("$@")
+      break
+    fi
     case "$1" in
       --env)
         if [ "$#" -lt 2 ]; then
@@ -226,6 +231,7 @@ parse_args() {
         ;;
       *)
         PARSED_ARGS+=("$1")
+        command_started=1
         shift
         ;;
     esac
