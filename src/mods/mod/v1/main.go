@@ -248,6 +248,7 @@ func runCommit(args []string) error {
 
 	targetPath := repoRoot
 	name := strings.TrimSpace(*modName)
+	msgText := strings.TrimSpace(*msg)
 	if name != "" {
 		targetPath = filepath.Join(repoRoot, "src", "mods", name)
 		if !fileExists(targetPath) {
@@ -256,11 +257,49 @@ func runCommit(args []string) error {
 	}
 
 	if *all {
-		if err := runCommand("git", "-C", targetPath, "add", "-A"); err != nil {
+		if name != "" {
+			if err := runCommand("git", "-C", targetPath, "add", "-A"); err != nil {
+				return err
+			}
+			commitMsg := msgText
+			if commitMsg == "" {
+				commitMsg = "Update mod " + name
+			}
+			if _, err := runCommitIfChanged(targetPath, commitMsg); err != nil {
+				return err
+			}
+			return nil
+		} else {
+			mods, err := discoverMods(repoRoot)
+			if err != nil {
+				return err
+			}
+			for _, mod := range mods {
+				modPath := filepath.Join(repoRoot, filepath.FromSlash(mod.Path))
+				if err := runCommand("git", "-C", modPath, "add", "-A"); err != nil {
+					return err
+				}
+				modMsg := msgText
+				if modMsg == "" {
+					modMsg = "Update mod " + mod.Name
+				}
+				if _, err := runCommitIfChanged(modPath, modMsg); err != nil {
+					return err
+				}
+			}
+
+			if err := runCommand("git", "-C", repoRoot, "add", "-A"); err != nil {
+				return err
+			}
+			parentMsg := msgText
+			if parentMsg == "" {
+				parentMsg = "Update dialtone"
+			}
+			_, err = runCommitIfChanged(repoRoot, parentMsg)
 			return err
 		}
 	}
-	m := strings.TrimSpace(*msg)
+	m := msgText
 	if m == "" {
 		if name != "" {
 			m = "Update mod " + name
@@ -268,7 +307,25 @@ func runCommit(args []string) error {
 			m = "Update dialtone"
 		}
 	}
-	return runCommand("git", "-C", targetPath, "commit", "-m", m)
+	_, err = runCommitIfChanged(targetPath, m)
+	return err
+}
+
+func runCommitIfChanged(repoPath, message string) (bool, error) {
+	changed, err := gitHasChanges(repoPath)
+	if err != nil {
+		return false, err
+	}
+	if !changed {
+		return false, nil
+	}
+	if err := runCommand("git", "-C", repoPath, "commit", "-m", message); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "nothing to commit") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func runPush(args []string) error {
@@ -932,11 +989,17 @@ func runPull(args []string) error {
 	}
 
 	if strings.ToLower(target) == "local" || strings.ToLower(target) == "self" {
-		return runSync(syncArgs)
+		if err := runSync(syncArgs); err != nil {
+			return err
+		}
+		return nil
 	}
 
 	if strings.ToLower(target) == "all" {
-		return runSync(syncArgs)
+		if err := runSync(syncArgs); err != nil {
+			return err
+		}
+		return nil
 	}
 
 	node, err := resolveMeshNode(target)
@@ -967,7 +1030,10 @@ func runPull(args []string) error {
 		fmt.Print(strings.TrimRight(out, "\n"))
 		fmt.Println()
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func discoverMods(repoRoot string) ([]modEntry, error) {
