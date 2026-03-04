@@ -113,11 +113,17 @@ func ensureMoshACLForHost(apiKey, tailnet, hostname string) error {
 	}
 
 	policy, hasWrapper, wrapperKey := unwrapACLPolicy(acl)
-	updated, err := mergeMoshACL(policy, []string{hostname})
+	updatedACL, err := mergeMoshACL(policy, []string{hostname})
 	if err != nil {
 		return err
 	}
-	if !updated {
+
+	updatedTagOwners, err := ensureMeshSSHTag(policy)
+	if err != nil {
+		return err
+	}
+
+	if !updatedACL && !updatedTagOwners {
 		return nil
 	}
 
@@ -294,33 +300,121 @@ func mergeMoshACL(policy map[string]any, hostnames []string) (bool, error) {
 		aclSlice = []any{}
 	}
 
+	sshRules := policy["ssh"]
+	sshSlice, ok := sshRules.([]any)
+	if !ok {
+		if sshRules != nil {
+			return false, fmt.Errorf("unexpected ACL schema: 'ssh' must be array")
+		}
+		sshSlice = []any{}
+	}
+
 	hostnames = dedupeNonEmptyStrings(hostnames)
 	if len(hostnames) == 0 {
 		return false, errors.New("no hostnames supplied")
 	}
-	desired := buildMoshACLRules(hostnames)
+
+	desiredACLs, desiredSSH := buildMoshACLRules(hostnames)
 	changed := false
-	for _, rule := range desired {
+	for _, rule := range desiredACLs {
 		if !aclRuleExists(aclSlice, rule) {
 			aclSlice = append(aclSlice, rule)
 			changed = true
 		}
 	}
+	for _, rule := range desiredSSH {
+		if !sshRuleExists(sshSlice, rule) {
+			sshSlice = append(sshSlice, rule)
+			changed = true
+		}
+	}
 	if changed {
 		policy["acls"] = aclSlice
+		policy["ssh"] = sshSlice
 	}
 	return changed, nil
 }
 
-func buildMoshACLRules(hostnames []string) []any {
+func ensureMeshSSHTag(policy map[string]any) (bool, error) {
+	const tag = "tag:dialtone"
+	ownerSelectors := []string{"autogroup:member"}
+
+	raw, ok := policy["tagOwners"]
+	if !ok || raw == nil {
+		policy["tagOwners"] = map[string]any{tag: ownerSelectors}
+		return true, nil
+	}
+
+	tagOwners, ok := raw.(map[string]any)
+	if !ok {
+		return false, fmt.Errorf("unexpected ACL schema: 'tagOwners' must be object")
+	}
+
+	existing, ok := tagOwners[tag]
+	if !ok || existing == nil {
+		tagOwners[tag] = ownerSelectors
+		policy["tagOwners"] = tagOwners
+		return true, nil
+	}
+
+	existingSlice, okAny := existing.([]any)
+	existingList := make([]string, 0, len(existingSlice))
+	if okAny {
+		for _, item := range existingSlice {
+			if selector := strings.TrimSpace(strings.ToLower(anyToString(item))); selector != "" {
+				existingList = append(existingList, selector)
+			}
+		}
+	} else if existingStrings, okStringSlice := existing.([]string); okStringSlice {
+		for _, selector := range existingStrings {
+			if s := strings.TrimSpace(strings.ToLower(selector)); s != "" {
+				existingList = append(existingList, s)
+			}
+		}
+	} else {
+		return false, fmt.Errorf("unexpected ACL schema: 'tagOwners[%q]' must be array", tag)
+	}
+
+	desiredList := dedupeNonEmptyStrings(ownerSelectors)
+	changed := false
+	for _, item := range desiredList {
+		if !stringSliceContains(existingList, item) {
+			existingList = append(existingList, item)
+			changed = true
+		}
+	}
+	if changed {
+		tagOwners[tag] = dedupeNonEmptyStrings(existingList)
+		policy["tagOwners"] = tagOwners
+	}
+	return changed, nil
+}
+
+func stringSliceContains(items []string, candidate string) bool {
+	for _, item := range items {
+		if item == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func buildMoshACLRules(hostnames []string) ([]any, []any) {
 	if len(hostnames) == 0 {
-		return []any{}
+		return []any{}, []any{}
 	}
 	return []any{
 		map[string]any{
 			"action": "accept",
 			"src":    []any{"autogroup:member"},
 			"dst":    []any{"autogroup:member:60000-61000"},
+		},
+	}, []any{
+		map[string]any{
+			"action": "accept",
+			"src":    []any{"autogroup:member"},
+			"dst":    []any{"tag:dialtone"},
+			"users":  []any{"autogroup:nonroot", "root"},
 		},
 	}
 }
@@ -344,11 +438,31 @@ func aclRuleExists(rules []any, candidate any) bool {
 	return false
 }
 
+func sshRuleExists(rules []any, candidate any) bool {
+	candidateRule, ok := candidate.(map[string]any)
+	if !ok {
+		return false
+	}
+	normalized := canonicalACLRule(candidateRule)
+	for _, raw := range rules {
+		rule, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		existing := canonicalACLRule(rule)
+		if deepEqualStringMap(existing, normalized) {
+			return true
+		}
+	}
+	return false
+}
+
 func canonicalACLRule(rule map[string]any) map[string]any {
 	return map[string]any{
 		"action": strings.ToLower(strings.TrimSpace(anyToString(rule["action"]))),
 		"src":    normalizeStringList(rule["src"]),
 		"dst":    normalizeStringList(rule["dst"]),
+		"users":  normalizeStringList(rule["users"]),
 	}
 }
 

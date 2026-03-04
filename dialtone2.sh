@@ -12,7 +12,7 @@ SSH_COMMON_OPTS=( -F /dev/null
   -o BatchMode=yes
   -o StrictHostKeyChecking=no
   -o UserKnownHostsFile=/dev/null
-  -o GSSAPIAuthentication=no
+  -o LogLevel=ERROR
 )
 ENV_FILE="${SCRIPT_DIR}/env/.env"
 ENV_FILE_EXPLICIT=0
@@ -45,9 +45,15 @@ run_tsnet_bootstrap() {
   if [ -n "${ENV_FILE:-}" ]; then
     args+=(--env-file "$ENV_FILE")
   fi
-  if ! "$NIX_BIN" "${NIX_FLAGS[@]}" shell -f "$NIXPKGS_URL" "${NIX_PKGS[@]}" --command go run ./src/cli.go "${args[@]}"; then
+  local tsnet_out
+  if ! tsnet_out="$($NIX_BIN "${NIX_FLAGS[@]}" shell -f "$NIXPKGS_URL" "${NIX_PKGS[@]}" --command go run ./src/cli.go "${args[@]}" 2>&1)"; then
     echo "warning: tsnet bootstrap failed; continuing without automatic tsnet keepalive" >&2
+    printf '%s\n' "$tsnet_out" >&2
     return 1
+  fi
+  if printf '%s\n' "$tsnet_out" | grep -q '^tsnet bootstrap:' && \
+     ! printf '%s\n' "$tsnet_out" | grep -qiE 'native tailscale daemon|already running|already detected|already running'; then
+    printf '%s\n' "$tsnet_out" | grep '^tsnet bootstrap:'
   fi
 }
 
