@@ -100,6 +100,7 @@ func PrintUsage() {
 	logs.Raw("  keys revoke <key-id> [--tailnet N] [--api-key K]")
 	logs.Raw("  keys usage [--tailnet N] [--api-key K]")
 	logs.Raw("  acl get [--tailnet N] [--api-key K]")
+	logs.Raw("  acl ensure [--tailnet N] [--api-key K] [--hostname H]")
 	logs.Raw("  test                                 Run tsnet plugin self-check")
 }
 
@@ -445,11 +446,13 @@ func runDevices(args []string) error {
 func runACL(args []string) error {
 	args = stripAllVersionArgs(args)
 	if len(args) == 0 {
-		return fmt.Errorf("usage: ./dialtone.sh tsnet acl <get> [--tailnet N] [--api-key K]")
+		return fmt.Errorf("usage: ./dialtone.sh tsnet acl <get|ensure> [--tailnet N] [--api-key K] [--hostname H]")
 	}
 	switch args[0] {
 	case "get":
 		return runACLGet(args[1:])
+	case "ensure":
+		return runACLEnsure(args[1:])
 	default:
 		return fmt.Errorf("unknown acl subcommand: %s", args[0])
 	}
@@ -465,6 +468,73 @@ func runACLGet(args []string) error {
 		return err
 	}
 	return printJSON(acl)
+}
+
+func runACLEnsure(args []string) error {
+	var tailnet string
+	var apiKey string
+	var hostname string
+	var explicitHostname bool
+
+	cfg, cfgErr := ResolveConfig("", "")
+	if cfgErr != nil {
+		return cfgErr
+	}
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--tailnet":
+			if i+1 < len(args) {
+				tailnet = strings.TrimSpace(args[i+1])
+				i++
+			}
+		case "--api-key":
+			if i+1 < len(args) {
+				apiKey = strings.TrimSpace(args[i+1])
+				i++
+			}
+		case "--hostname":
+			if i+1 < len(args) {
+				hostname = strings.TrimSpace(args[i+1])
+				explicitHostname = true
+				i++
+			}
+		}
+	}
+
+	if strings.TrimSpace(hostname) == "" {
+		hostname = cfg.Hostname
+	}
+	if strings.TrimSpace(tailnet) == "" {
+		tailnet = cfg.Tailnet
+	}
+
+	if strings.TrimSpace(apiKey) == "" {
+		apiKey = strings.TrimSpace(os.Getenv(cfg.APIKeyEnv))
+		if apiKey == "" {
+			apiKey = strings.TrimSpace(os.Getenv("TS_API_KEY"))
+		}
+	}
+
+	if !explicitHostname {
+		hostname = cfg.Hostname
+	}
+	if strings.TrimSpace(hostname) == "" {
+		hostname = "dialtone-node"
+	}
+	hostname = NormalizeHostname(hostname)
+	if hostname == "" {
+		return errors.New("resolved empty hostname for acl ensure")
+	}
+
+	if strings.TrimSpace(tailnet) == "" {
+		return errors.New("missing --tailnet value for acl ensure")
+	}
+	if strings.TrimSpace(apiKey) == "" {
+		return errors.New("missing API key for acl ensure; set TS_API_KEY or --api-key")
+	}
+
+	return EnsureDialtoneACL(apiKey, tailnet, hostname)
 }
 
 func runDevicesList(args []string) error {
@@ -1106,6 +1176,42 @@ func (c *tailscaleClient) GetACL() (map[string]any, error) {
 	return acl, nil
 }
 
+func (c *tailscaleClient) SetACL(policy any) error {
+	// Current tailscale API expects the ACL policy as a raw object on /acl.
+	// Previous wrapper variants ("ACL" / "acl") are kept for compatibility with
+	// older or intermediate API implementations.
+	errPost := c.do("POST", "/acl", policy, nil)
+	if errPost == nil {
+		logs.Info("SetACL accepted with raw policy payload")
+		return nil
+	}
+
+	// Fallback for environments using the older policy endpoint.
+	errPutPolicy := c.do("PUT", "/policy", policy, nil)
+	if errPutPolicy == nil {
+		logs.Info("SetACL accepted with raw policy payload at /policy")
+		return nil
+	}
+
+	wrapped := map[string]any{
+		"ACL": policy,
+	}
+	errPostUpper := c.do("POST", "/acl", wrapped, nil)
+	if errPostUpper == nil {
+		logs.Info("SetACL accepted with wrapped ACL payload")
+		return nil
+	}
+	wrapped = map[string]any{
+		"acl": policy,
+	}
+	errPostLower := c.do("POST", "/acl", wrapped, nil)
+	if errPostLower == nil {
+		logs.Info("SetACL accepted with wrapped acl payload")
+		return nil
+	}
+	return fmt.Errorf("tailscale ACL update failed (POST, /policy PUT, wrapped POST variants): post=%v putPolicy=%v postUpper=%v postLower=%v", errPost, errPutPolicy, errPostUpper, errPostLower)
+}
+
 func (c *tailscaleClient) do(method, path string, body any, out any) error {
 	path = strings.TrimPrefix(path, "/")
 	endpoint := fmt.Sprintf("%s/api/v2/tailnet/%s/%s", strings.TrimSuffix(c.BaseURL, "/"), url.PathEscape(c.Tailnet), path)
@@ -1186,6 +1292,252 @@ func UpsertEnvVar(envPath, key, value string) error {
 		out += "\n"
 	}
 	return os.WriteFile(envPath, []byte(out), 0o644)
+}
+
+func EnsureDialtoneACL(apiKey, tailnet string, hostnames ...string) error {
+	hostnames = dedupeNonEmptyStrings(hostnames)
+	if len(hostnames) == 0 {
+		return errors.New("no hostnames supplied")
+	}
+	qualified := make([]string, 0, len(hostnames))
+	for _, raw := range hostnames {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		name = NormalizeHostname(name)
+		if name == "" {
+			continue
+		}
+		if !strings.Contains(name, ".") && strings.TrimSpace(tailnet) != "" {
+			name = fmt.Sprintf("%s.%s", name, strings.TrimSpace(tailnet))
+		}
+		qualified = append(qualified, name)
+	}
+	hostnames = qualified
+
+	client, err := newClient(apiKey, tailnet)
+	if err != nil {
+		return err
+	}
+	acl, err := client.GetACL()
+	if err != nil {
+		return fmt.Errorf("fetch ACL failed: %w", err)
+	}
+	policy, hasWrapper, wrapperKey := unwrapACLPolicy(acl)
+	updated, err := ensureMoshACLForHosts(policy, hostnames)
+	if err != nil {
+		return err
+	}
+	if !updated {
+		logs.Info("tsnet ACL already allows mosh for %s in tailnet %s", strings.Join(hostnames, ", "), client.Tailnet)
+		return nil
+	}
+	var payload any = policy
+	if hasWrapper {
+		root := map[string]any{}
+		if acl != nil {
+			for k, v := range acl {
+				root[k] = v
+			}
+		}
+		root[wrapperKey] = policy
+		payload = root
+	}
+	if err := client.SetACL(payload); err != nil {
+		return fmt.Errorf("set ACL failed: %w", err)
+	}
+	logs.Info("Updated tsnet ACL for mosh access: tailnet=%s hosts=%s", client.Tailnet, strings.Join(hostnames, ", "))
+	return nil
+}
+
+func ensureMoshACLForHosts(policy map[string]any, hostnames []string) (bool, error) {
+	acls := policy["acls"]
+	slice, ok := acls.([]any)
+	if !ok {
+		if acls != nil {
+			return false, fmt.Errorf("unexpected ACL schema: 'acls' must be array")
+		}
+		slice = []any{}
+	}
+	changed := false
+	desiredHostRules := buildMoshACLRules(hostnames)
+	for _, rule := range desiredHostRules {
+		if !aclRuleExists(slice, rule) {
+			slice = append(slice, rule)
+			changed = true
+		}
+	}
+	if changed {
+		policy["acls"] = slice
+	}
+	return changed, nil
+}
+
+func buildMoshACLRules(hostnames []string) []any {
+	if len(hostnames) == 0 {
+		return []any{}
+	}
+	rules := []any{
+		map[string]any{
+			"action": "accept",
+			"src":    []any{"autogroup:member"},
+			"dst":    []any{"autogroup:member:60000-61000"},
+		},
+	}
+	return rules
+}
+
+func aclRuleExists(rules []any, candidate any) bool {
+	candidateRule, ok := candidate.(map[string]any)
+	if !ok {
+		return false
+	}
+	normalized := canonicalACLRule(candidateRule)
+	for _, raw := range rules {
+		rule, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		existing := canonicalACLRule(rule)
+		if deepEqualStringMap(existing, normalized) {
+			return true
+		}
+	}
+	return false
+}
+
+func canonicalACLRule(rule map[string]any) map[string]any {
+	out := map[string]any{
+		"action": strings.ToLower(strings.TrimSpace(anyToString(rule["action"]))),
+		"src":    normalizeStringList(rule["src"]),
+		"dst":    normalizeStringList(rule["dst"]),
+	}
+	return out
+}
+
+func normalizeStringList(v any) []any {
+	values := make([]string, 0)
+	switch typed := v.(type) {
+	case []any:
+		for _, x := range typed {
+			s := strings.TrimSpace(anyToString(x))
+			if s != "" {
+				values = append(values, strings.ToLower(s))
+			}
+		}
+	case []string:
+		for _, x := range typed {
+			s := strings.TrimSpace(x)
+			if s != "" {
+				values = append(values, strings.ToLower(s))
+			}
+		}
+	}
+	sort.Strings(values)
+	out := make([]any, 0, len(values))
+	for _, s := range values {
+		out = append(out, s)
+	}
+	return out
+}
+
+func deepEqualStringMap(a, b map[string]any) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key, av := range a {
+		bv, ok := b[key]
+		if !ok {
+			return false
+		}
+		if !deepEqualCanonicalValues(av, bv) {
+			return false
+		}
+	}
+	return true
+}
+
+func deepEqualCanonicalValues(a, b any) bool {
+	aa := canonicalSliceOrString(a)
+	bb := canonicalSliceOrString(b)
+	if len(aa) != len(bb) {
+		return false
+	}
+	for i := range aa {
+		if aa[i] != bb[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func canonicalSliceOrString(v any) []string {
+	switch typed := v.(type) {
+	case []string:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			item = strings.TrimSpace(strings.ToLower(item))
+			if item != "" {
+				out = append(out, item)
+			}
+		}
+		sort.Strings(out)
+		return out
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			s := strings.TrimSpace(strings.ToLower(anyToString(item)))
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		sort.Strings(out)
+		return out
+	case string:
+		s := strings.TrimSpace(strings.ToLower(typed))
+		if s == "" {
+			return nil
+		}
+		return []string{s}
+	default:
+		return nil
+	}
+}
+
+func unwrapACLPolicy(raw map[string]any) (map[string]any, bool, string) {
+	if raw == nil {
+		return map[string]any{}, false, ""
+	}
+	if aclRaw, ok := raw["acl"]; ok {
+		if policy, ok := aclRaw.(map[string]any); ok {
+			return policy, true, "acl"
+		}
+	}
+	if aclRaw, ok := raw["ACL"]; ok {
+		if policy, ok := aclRaw.(map[string]any); ok {
+			return policy, true, "ACL"
+		}
+	}
+	return raw, false, ""
+}
+
+func dedupeNonEmptyStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		s := NormalizeHostname(strings.TrimSpace(value))
+		if s == "" {
+			continue
+		}
+		key := strings.ToLower(s)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 func parseCSV(s string) []string {

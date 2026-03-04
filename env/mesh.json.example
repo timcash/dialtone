@@ -19,11 +19,11 @@
     "repo_candidates": ["/Users/user/dialtone", "/Users/user/Documents/dialtone"]
   },
   {
-    "name": "darkmac",
-    "aliases": ["darkmac", "darkmac.shad-artichoke.ts.net"],
+    "name": "grey",
+    "aliases": ["darkmac", "grey", "grey.shad-artichoke.ts.net"],
     "user": "tim",
     "host": "192.168.4.31",
-    "host_candidates": ["darkmac.shad-artichoke.ts.net"],
+    "host_candidates": ["grey.shad-artichoke.ts.net"],
     "port": "22",
     "os": "macos",
     "repo_candidates": ["/Users/tim/dialtone", "/Users/tim/Documents/dialtone", "/Users/dialtone/dialtone"]
