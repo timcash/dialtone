@@ -98,3 +98,4 @@ src/plugins/swarm/src_v3/dialtone_swarm_v3_arm64
 env/mesh.json
 env/id_ed25519_mesh*
 env/ssh_config
+env/known_hosts

@@ -14,10 +14,8 @@
         {
           default = pkgs.mkShell {
             packages = with pkgs; [
-              bash curl git gh openssh go_1_24 gnumake gcc cmake ninja pkg-config nodejs tmux zsh cloudflared
-            ] ++ (if pkgs.stdenv.isLinux then [
-              pkgs.musl.dev pkgs.glibc.static pkgs.pkgsStatic.gcc
-            ] else [ ]);
+              bash curl git gh openssh go_1_24 gnumake nodejs tmux zsh cloudflared
+            ];
             shellHook = ''
               export DIALTONE_REPO_ROOT=$(pwd)
               export PATH="$DIALTONE_REPO_ROOT/bin:$PATH"
