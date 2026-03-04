@@ -635,8 +635,8 @@ func doStatusRemote(node meshNode, nameFilter string, short bool) error {
 	if short {
 		args = append(args, "--short")
 	}
-	cmd := fmt.Sprintf("cd %s && if [ -x \"$HOME/.nix-profile/bin/go\" ]; then \"$HOME/.nix-profile/bin/go\" run ./src/cli.go %s; elif [ -x \"$HOME/dialtone_dependencies/go/bin/go\" ]; then \"$HOME/dialtone_dependencies/go/bin/go\" run ./src/cli.go %s; elif command -v go >/dev/null 2>&1; then go run ./src/cli.go %s; else echo \"go not found\"; fi",
-		shellQuote(repoDir), strings.Join(args, " "), strings.Join(args, " "), strings.Join(args, " "))
+	cmd := fmt.Sprintf("cd %s && if [ -x ./dialtone2.sh ]; then DIALTONE_USE_NIX=1 ./dialtone2.sh %s; else echo \"dialtone2.sh not found\"; exit 1; fi",
+		shellQuote(repoDir), strings.Join(args, " "))
 
 	out, err := runSSH(node, cmd)
 	if strings.TrimSpace(out) != "" {
@@ -1246,8 +1246,8 @@ func buildRemoteSubmoduleSync(repoDir string, modPaths []string, from string, os
 		modArgs = " " + strings.Join(args, " ")
 	}
 
-	return fmt.Sprintf("cd %s && if [ -x \"$HOME/.nix-profile/bin/go\" ]; then \"$HOME/.nix-profile/bin/go\" run ./src/cli.go mods v1 sync --host local%s; elif [ -x \"$HOME/dialtone_dependencies/go/bin/go\" ]; then \"$HOME/dialtone_dependencies/go/bin/go\" run ./src/cli.go mods v1 sync --host local%s; elif command -v go >/dev/null 2>&1; then go run ./src/cli.go mods v1 sync --host local%s; else echo \"go not found\"; fi",
-		shellQuote(repoDir), modArgs, modArgs, modArgs)
+	return fmt.Sprintf("cd %s && if [ -x ./dialtone2.sh ]; then DIALTONE_USE_NIX=1 ./dialtone2.sh mods v1 sync --host local%s; else echo \"dialtone2.sh not found\"; exit 1; fi",
+		shellQuote(repoDir), modArgs)
 }
 
 func parseBranchMap(values []string) (map[string]string, error) {
