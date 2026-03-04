@@ -639,8 +639,8 @@ func doStatusRemote(node meshNode, nameFilter string, short bool) error {
 	if short {
 		args = append(args, "--short")
 	}
-	cmd := fmt.Sprintf("cd %s && if [ -x ./dialtone.sh ]; then bash -lc '%s./dialtone.sh %s'; else echo 'dialtone.sh not found'; fi",
-		shellQuote(repoDir), envPrefix, strings.Join(args, " "))
+	cmd := fmt.Sprintf("cd %s && if [ -x ./dialtone2.sh ]; then bash -lc '%s./dialtone2.sh %s'; elif [ -x ./dialtone.sh ]; then bash -lc '%s./dialtone.sh %s'; else echo 'dialtone2.sh not found'; fi",
+		shellQuote(repoDir), envPrefix, strings.Join(args, " "), envPrefix, strings.Join(args, " "))
 
 	out, err := runSSH(node, cmd)
 	if strings.TrimSpace(out) != "" {
@@ -1255,8 +1255,8 @@ func buildRemoteSubmoduleSync(repoDir string, modPaths []string, from string, os
 		envPrefix = "CGO_ENABLED=0 "
 	}
 
-	return fmt.Sprintf("cd %s && if [ -x ./dialtone.sh ]; then bash -lc '%s./dialtone.sh mods v1 sync --host local%s'; else git submodule update --init --recursive; fi",
-		shellQuote(repoDir), envPrefix, modArgs)
+	return fmt.Sprintf("cd %s && if [ -x ./dialtone2.sh ]; then bash -lc '%s./dialtone2.sh mods v1 sync --host local%s'; elif [ -x ./dialtone.sh ]; then bash -lc '%s./dialtone.sh mods v1 sync --host local%s'; else git submodule update --init --recursive; fi",
+		shellQuote(repoDir), envPrefix, modArgs, envPrefix, modArgs)
 }
 
 func parseBranchMap(values []string) (map[string]string, error) {
