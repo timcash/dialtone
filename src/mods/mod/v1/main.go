@@ -628,10 +628,6 @@ func doStatusLocal(root, nameFilter string, short bool) error {
 
 func doStatusRemote(node meshNode, nameFilter string, short bool) error {
 	repoDir := defaultRepoDirForNode(node)
-	envPrefix := ""
-	if strings.EqualFold(node.OS, "macos") || strings.EqualFold(node.OS, "darwin") {
-		envPrefix = "CGO_ENABLED=0 "
-	}
 	args := []string{"mods", "v1", "status"}
 	if nameFilter != "" {
 		args = append(args, "--name", nameFilter)
@@ -639,8 +635,8 @@ func doStatusRemote(node meshNode, nameFilter string, short bool) error {
 	if short {
 		args = append(args, "--short")
 	}
-	cmd := fmt.Sprintf("cd %s && if [ -x ./dialtone2.sh ]; then bash -lc '%s./dialtone2.sh %s'; elif [ -x ./dialtone.sh ]; then bash -lc '%s./dialtone.sh %s'; else echo 'dialtone2.sh not found'; fi",
-		shellQuote(repoDir), envPrefix, strings.Join(args, " "), envPrefix, strings.Join(args, " "))
+	cmd := fmt.Sprintf("cd %s && if [ -x \"$HOME/.nix-profile/bin/go\" ]; then \"$HOME/.nix-profile/bin/go\" run ./src/cli.go %s; elif [ -x \"$HOME/dialtone_dependencies/go/bin/go\" ]; then \"$HOME/dialtone_dependencies/go/bin/go\" run ./src/cli.go %s; elif command -v go >/dev/null 2>&1; then go run ./src/cli.go %s; else echo \"go not found\"; fi",
+		shellQuote(repoDir), strings.Join(args, " "), strings.Join(args, " "), strings.Join(args, " "))
 
 	out, err := runSSH(node, cmd)
 	if strings.TrimSpace(out) != "" {
@@ -1250,13 +1246,8 @@ func buildRemoteSubmoduleSync(repoDir string, modPaths []string, from string, os
 		modArgs = " " + strings.Join(args, " ")
 	}
 
-	envPrefix := ""
-	if strings.EqualFold(os, "macos") || strings.EqualFold(os, "darwin") {
-		envPrefix = "CGO_ENABLED=0 "
-	}
-
-	return fmt.Sprintf("cd %s && if [ -x ./dialtone2.sh ]; then bash -lc '%s./dialtone2.sh mods v1 sync --host local%s'; elif [ -x ./dialtone.sh ]; then bash -lc '%s./dialtone.sh mods v1 sync --host local%s'; else git submodule update --init --recursive; fi",
-		shellQuote(repoDir), envPrefix, modArgs, envPrefix, modArgs)
+	return fmt.Sprintf("cd %s && if [ -x \"$HOME/.nix-profile/bin/go\" ]; then \"$HOME/.nix-profile/bin/go\" run ./src/cli.go mods v1 sync --host local%s; elif [ -x \"$HOME/dialtone_dependencies/go/bin/go\" ]; then \"$HOME/dialtone_dependencies/go/bin/go\" run ./src/cli.go mods v1 sync --host local%s; elif command -v go >/dev/null 2>&1; then go run ./src/cli.go mods v1 sync --host local%s; else echo \"go not found\"; fi",
+		shellQuote(repoDir), modArgs, modArgs, modArgs)
 }
 
 func parseBranchMap(values []string) (map[string]string, error) {
