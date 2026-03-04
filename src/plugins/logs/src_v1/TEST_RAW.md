@@ -1,7 +1,7 @@
 # Test Report: logs-src-v1
 
-- **Date**: Sat, 28 Feb 2026 12:36:54 PST
-- **Total Duration**: 2.299169378s
+- **Date**: Tue, 03 Mar 2026 14:21:41 PST
+- **Total Duration**: 2.326653543s
 
 ## Summary
 
@@ -12,7 +12,7 @@
 
 ### 1. ✅ 01 Embedded NATS + topic publish
 
-- **Duration**: 2.922695ms
+- **Duration**: 3.068936ms
 - **Report**: NATS messages verified at nats://127.0.0.1:4222.
 
 #### Logs
@@ -32,7 +32,7 @@ PASS: [TEST][PASS] [STEP:01 Embedded NATS + topic publish] report: NATS messages
 
 ### 2. ✅ 02 Listener filtering (error.topic)
 
-- **Duration**: 1.026545ms
+- **Duration**: 1.391416ms
 - **Report**: Verified error-topic filtering via NATS
 
 #### Logs
@@ -52,7 +52,7 @@ PASS: [TEST][PASS] [STEP:02 Listener filtering (error.topic)] report: Verified e
 
 ### 3. ✅ 04 Two-process pingpong via dialtone logs
 
-- **Duration**: 1.25906356s
+- **Duration**: 1.186771171s
 - **Report**: Verified two dialtone logs processes exchanged 3 ping/pong rounds on one topic.
 
 #### Logs
@@ -72,7 +72,7 @@ PASS: [TEST][PASS] [STEP:04 Two-process pingpong via dialtone logs] report: Veri
 
 ### 4. ✅ 05 Example plugin binary imports logs library
 
-- **Duration**: 1.034742881s
+- **Duration**: 1.133051513s
 - **Report**: Verified example plugin binary imports logs library and publishes expected messages.
 
 #### Logs
@@ -92,7 +92,7 @@ PASS: [TEST][PASS] [STEP:05 Example plugin binary imports logs library] report: 
 
 ### 5. ✅ 03 Finalize artifacts
 
-- **Duration**: 1.365045ms
+- **Duration**: 2.349304ms
 - **Report**: Suite finalized. Verification transitioned to NATS topics.
 
 #### Logs

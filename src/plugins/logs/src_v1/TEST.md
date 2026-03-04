@@ -6,21 +6,21 @@
 <empty>
 ```
 
-**Generated at:** Sat, 28 Feb 2026 12:36:54 -0800
+**Generated at:** Tue, 03 Mar 2026 14:21:41 -0800
 **Version:** `logs-src-v1`
 **Runner:** `test/src_v1`
 **Status:** ✅ PASS
-**Total Time:** `2.299169378s`
+**Total Time:** `2.326653543s`
 
 ## Test Steps
 
 | Step | Result | Duration |
 |---|---|---|
-| 01 Embedded NATS + topic publish | ✅ PASS | `2.922695ms` |
-| 02 Listener filtering (error.topic) | ✅ PASS | `1.026545ms` |
-| 04 Two-process pingpong via dialtone logs | ✅ PASS | `1.25906356s` |
-| 05 Example plugin binary imports logs library | ✅ PASS | `1.034742881s` |
-| 03 Finalize artifacts | ✅ PASS | `1.365045ms` |
+| 01 Embedded NATS + topic publish | ✅ PASS | `3.068936ms` |
+| 02 Listener filtering (error.topic) | ✅ PASS | `1.391416ms` |
+| 04 Two-process pingpong via dialtone logs | ✅ PASS | `1.186771171s` |
+| 05 Example plugin binary imports logs library | ✅ PASS | `1.133051513s` |
+| 03 Finalize artifacts | ✅ PASS | `2.349304ms` |
 
 ## Step Details
 
@@ -30,7 +30,7 @@
 
 ```text
 result: PASS
-duration: 2.922695ms
+duration: 3.068936ms
 report: NATS messages verified at nats://127.0.0.1:4222.
 ```
 
@@ -62,7 +62,7 @@ browser_logs:
 
 ```text
 result: PASS
-duration: 1.026545ms
+duration: 1.391416ms
 report: Verified error-topic filtering via NATS
 ```
 
@@ -94,7 +94,7 @@ browser_logs:
 
 ```text
 result: PASS
-duration: 1.25906356s
+duration: 1.186771171s
 report: Verified two dialtone logs processes exchanged 3 ping/pong rounds on one topic.
 ```
 
@@ -126,7 +126,7 @@ browser_logs:
 
 ```text
 result: PASS
-duration: 1.034742881s
+duration: 1.133051513s
 report: Verified example plugin binary imports logs library and publishes expected messages.
 ```
 
@@ -158,7 +158,7 @@ browser_logs:
 
 ```text
 result: PASS
-duration: 1.365045ms
+duration: 2.349304ms
 report: Suite finalized. Verification transitioned to NATS topics.
 ```
 
