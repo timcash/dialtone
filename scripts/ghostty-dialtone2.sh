@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "ghostty-dialtone2.sh is for macOS only" >&2
+  echo "ghostty-send.sh is macOS only" >&2
   exit 1
 fi
 
@@ -11,21 +11,29 @@ if ! command -v osascript >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ ! -x "$HOME/dialtone/dialtone2.sh" ]]; then
-  echo "missing executable: ~/dialtone/dialtone2.sh" >&2
+if [[ $# -lt 1 ]]; then
+  echo "Usage: ./ghostty-dialtone2.sh <command>" >&2
   exit 1
 fi
 
-open -a Ghostty
-sleep 0.4
+COMMAND="$*"
 
-osascript <<'APPLESCRIPT'
-tell application "Ghostty" to activate
+open -a Ghostty
+sleep 0.2
+
+osascript <<APPLESCRIPT
+tell application "Ghostty"
+  activate
+end tell
+
 delay 0.2
+
 tell application "System Events"
-  keystroke "cd ~/dialtone && ./dialtone2.sh"
-  key code 36
+  tell process "Ghostty"
+    keystroke "$COMMAND"
+    key code 36
+  end tell
 end tell
 APPLESCRIPT
 
-echo "sent to Ghostty: cd ~/dialtone && ./dialtone2.sh"
+echo "sent to Ghostty: $COMMAND"
