@@ -187,7 +187,7 @@ func pickHostForSSH(node typingMeshNode) string {
 	candidates := append([]string{}, node.HostCandidates...)
 	candidates = append(candidates, node.Aliases...)
 	candidates = append(candidates, node.Host)
-	for _, candidate := range candidates {
+	for _, candidate := range preferTailnetHostsInTyping(candidates) {
 		candidate = strings.TrimSpace(candidate)
 		if candidate == "" {
 			continue
@@ -201,6 +201,31 @@ func pickHostForSSH(node typingMeshNode) string {
 		return strings.TrimSuffix(node.Host, ".")
 	}
 	return ""
+}
+
+func preferTailnetHostsInTyping(candidates []string) []string {
+	seen := map[string]struct{}{}
+	tailnet := make([]string, 0, len(candidates))
+	others := make([]string, 0, len(candidates))
+	out := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		candidate = strings.TrimSuffix(strings.TrimSpace(candidate), ".")
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		if strings.HasSuffix(strings.ToLower(candidate), ".ts.net") {
+			tailnet = append(tailnet, candidate)
+		} else {
+			others = append(others, candidate)
+		}
+	}
+	out = append(out, tailnet...)
+	out = append(out, others...)
+	return out
 }
 
 func locateRepoRoot() (string, error) {

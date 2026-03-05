@@ -237,12 +237,38 @@ func resolvePreferredHost(node MeshNode, port string) string {
 	if len(candidates) == 0 {
 		return strings.TrimSpace(node.Host)
 	}
+	candidates = preferTailnetHosts(candidates)
 	for _, h := range candidates {
 		if canReachHostFn(h, port, 450*time.Millisecond) {
 			return h
 		}
 	}
 	return strings.TrimSpace(node.Host)
+}
+
+func preferTailnetHosts(hosts []string) []string {
+	out := make([]string, 0, len(hosts))
+	tailnetHosts := make([]string, 0, len(hosts))
+	others := make([]string, 0, len(hosts))
+	for _, h := range hosts {
+		h = strings.TrimSuffix(strings.TrimSpace(h), ".")
+		if h == "" {
+			continue
+		}
+		if isTailnetHost(h) {
+			tailnetHosts = append(tailnetHosts, h)
+		} else {
+			others = append(others, h)
+		}
+	}
+	out = append(out, tailnetHosts...)
+	out = append(out, others...)
+	return out
+}
+
+func isTailnetHost(host string) bool {
+	h := strings.ToLower(strings.TrimSpace(host))
+	return strings.HasSuffix(h, ".ts.net")
 }
 
 func canReachHostPort(host, port string, timeout time.Duration) bool {

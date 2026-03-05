@@ -12,7 +12,10 @@ import (
 )
 
 func TestSSHParseArgs(t *testing.T) {
-	opts := parseArgs([]string{"--host", "gold", "--user", "user", "--port", "2022", "--command", "echo hello", "--dry-run"})
+	opts, err := parseArgs([]string{"--host", "gold", "--user", "user", "--port", "2022", "--command", "echo hello", "--dry-run"})
+	if err != nil {
+		t.Fatalf("parseArgs failed: %v", err)
+	}
 	if opts.host != "gold" {
 		t.Fatalf("expected host gold, got %q", opts.host)
 	}
@@ -31,9 +34,12 @@ func TestSSHParseArgs(t *testing.T) {
 }
 
 func TestSSHParseArgsPositionalHost(t *testing.T) {
-	opts := parseArgs([]string{"wsl", "--command", "uptime"})
+	opts, err := parseArgs([]string{"--host", "wsl", "--command", "uptime"})
+	if err != nil {
+		t.Fatalf("parseArgs failed: %v", err)
+	}
 	if opts.host != "wsl" {
-		t.Fatalf("expected positional host wsl, got %q", opts.host)
+		t.Fatalf("expected host wsl, got %q", opts.host)
 	}
 	if opts.command != "uptime" {
 		t.Fatalf("expected command uptime, got %q", opts.command)
@@ -98,7 +104,10 @@ func TestSSHResolveMeshNodeFromConfig(t *testing.T) {
 
 func TestSSHBuildCommandUsesNodeDefaults(t *testing.T) {
 	node := meshNode{Name: "gold", Host: "example.com", User: "user", Port: "2223"}
-	opts := parseArgs([]string{"--host", "gold"})
+	opts, err := parseArgs([]string{"--host", "gold"})
+	if err != nil {
+		t.Fatalf("parseArgs failed: %v", err)
+	}
 	oldNixBin := os.Getenv("NIX_BIN")
 	_ = os.Setenv("NIX_BIN", "/opt/nix/bin/nix")
 	defer func() {
@@ -119,7 +128,10 @@ func TestSSHBuildCommandUsesNodeDefaults(t *testing.T) {
 
 func TestSSHBuildCommandRespectsOverrides(t *testing.T) {
 	node := meshNode{Name: "gold", Host: "example.com", User: "user", Port: "2223"}
-	opts := parseArgs([]string{"--host", "gold", "--user", "alice", "--port", "2200", "--command", "echo hi", "--nixpkgs-url", "nix://example"})
+	opts, err := parseArgs([]string{"--host", "gold", "--user", "alice", "--port", "2200", "--command", "echo hi", "--nixpkgs-url", "nix://example"})
+	if err != nil {
+		t.Fatalf("parseArgs failed: %v", err)
+	}
 	oldNixBin := os.Getenv("NIX_BIN")
 	_ = os.Setenv("NIX_BIN", "/opt/nix/bin/nix")
 	defer func() {
@@ -139,6 +151,29 @@ func TestSSHBuildCommandRespectsOverrides(t *testing.T) {
 	}
 	if got := cmd.Args[len(cmd.Args)-1]; got != "echo hi" {
 		t.Fatalf("expected command arg, got %q", got)
+	}
+}
+
+func TestSSHBuildCommandPrefersTailnetHostCandidate(t *testing.T) {
+	node := meshNode{
+		Name:           "gold",
+		Host:           "10.0.0.9",
+		HostCandidates: []string{"192.168.1.9", "gold.shad-artichoke.ts.net"},
+		User:           "user",
+		Port:           "22",
+	}
+	oldNixBin := os.Getenv("NIX_BIN")
+	_ = os.Setenv("NIX_BIN", "/opt/nix/bin/nix")
+	defer func() {
+		_ = os.Setenv("NIX_BIN", oldNixBin)
+	}()
+
+	cmd, err := buildSSHCommand(sshOptions{}, node)
+	if err != nil {
+		t.Fatalf("buildSSHCommand failed: %v", err)
+	}
+	if !strings.HasSuffix(cmd.Args[len(cmd.Args)-1], "user@gold.shad-artichoke.ts.net") {
+		t.Fatalf("expected tailnet host to be selected first, got target %q", cmd.Args[len(cmd.Args)-1])
 	}
 }
 
