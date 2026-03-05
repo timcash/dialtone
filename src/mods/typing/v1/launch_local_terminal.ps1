@@ -25,36 +25,66 @@ function Start-DialtoneLocalTerminal {
         }
     }
 
-    $cmdBytes = [System.Text.Encoding]::UTF8.GetBytes($CommandText)
-    $cmdB64 = [System.Convert]::ToBase64String($cmdBytes)
-    $bashRunner = 'eval "$(echo ' + $cmdB64 + ' | base64 -d)"; exec /bin/bash -i'
-    $wslArgs = @('--cd', '~', '-e', 'bash', '-ic', $bashRunner)
-    Write-DialtoneLaunchLog ("launch requested; WslPath={0}; WtPath={1}; WtProfile={2}; LogPath={3}" -f $WslPath, $WtPath, $WtProfile, $LogPath)
-    Write-DialtoneLaunchLog ("command b64 length: {0}" -f $cmdB64.Length)
-    Write-DialtoneLaunchLog ("wsl args: {0}" -f ($wslArgs -join " "))
+    Write-DialtoneLaunchLog ("launch requested; WtPath={0}; WtProfile={1}; LogPath={2}; WslPath={3}" -f $WtPath, $WtProfile, $LogPath, $WslPath)
 
-    if (-not [string]::IsNullOrWhiteSpace($WtPath) -and -not [string]::IsNullOrWhiteSpace($WtProfile)) {
+    $statePath = $LogPath + '.state.json'
+    $queuePath = $LogPath + '.queue.txt'
+    $outputLogPath = $LogPath + '.window.log'
+    $windowTitle = 'DialtoneTypingMain'
+
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($CommandText)) {
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($CommandText)
+            $line = [Convert]::ToBase64String($bytes)
+            Add-Content -Path $queuePath -Value $line
+            Write-DialtoneLaunchLog ("queued command b64 length={0}" -f $line.Length)
+        }
+    } catch {
+        Write-DialtoneLaunchLog ("queue write failed: {0}" -f $_.Exception.Message)
+        throw
+    }
+
+    $existingPid = $null
+    if (Test-Path -LiteralPath $statePath) {
         try {
-            $wtArgs = @('new-window', '-p', $WtProfile, '--', $WslPath) + $wslArgs
-            Write-DialtoneLaunchLog ("wt args: {0}" -f ($wtArgs -join " "))
-            Start-Process -FilePath $WtPath -WorkingDirectory 'C:\' -ArgumentList $wtArgs
-            Write-DialtoneLaunchLog 'launched via wt.exe'
-            return
+            $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+            if ($state -and $state.Pid) {
+                $existingPid = [int]$state.Pid
+            }
         } catch {
-            Write-DialtoneLaunchLog ("wt.exe launch failed: {0}" -f $_.Exception.Message)
+            Write-DialtoneLaunchLog ("state read failed: {0}" -f $_.Exception.Message)
+        }
+    }
+
+    if ($existingPid) {
+        $proc = Get-Process -Id $existingPid -ErrorAction SilentlyContinue
+        if ($proc) {
+            Write-DialtoneLaunchLog ("reusing existing window pid={0}" -f $existingPid)
+            return
         }
     }
 
     try {
-        $pwshRunner = @(
-            '$ErrorActionPreference = "Continue"; ' +
-            '& "' + $WslPath + '" --cd ~ -e bash -ic ''' + $bashRunner.Replace("'", "''") + ''''
-        )
-        Write-DialtoneLaunchLog ("powershell -NoExit runner: {0}" -f $pwshRunner[0])
-        Start-Process -FilePath 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -WorkingDirectory 'C:\' -ArgumentList @('-NoExit', '-Command', $pwshRunner[0])
-        Write-DialtoneLaunchLog 'launched via powershell.exe -NoExit wrapper'
+        $bootstrap = '$Host.UI.RawUI.WindowTitle = ''' + $windowTitle + '''; ' +
+            '$script:__queuePath = ''' + $queuePath.Replace("'", "''") + '''; ' +
+            '$script:__outPath = ''' + $outputLogPath.Replace("'", "''") + '''; ' +
+            '$script:__idx = 0; ' +
+            'try { Start-Transcript -Path $script:__outPath -Append -Force | Out-Null } catch {} ; ' +
+            'while ($true) { ' +
+            'if (Test-Path -LiteralPath $script:__queuePath) { ' +
+            '$lines = Get-Content -LiteralPath $script:__queuePath; ' +
+            'for ($i = $script:__idx; $i -lt $lines.Count; $i++) { ' +
+            '$line = $lines[$i]; if ([string]::IsNullOrWhiteSpace($line)) { continue } ' +
+            'try { $cmd = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($line)); Write-Host (''PS C:\> '' + $cmd); Invoke-Expression $cmd } catch { Write-Host $_.Exception.Message } } ' +
+            '$script:__idx = $lines.Count } ; Start-Sleep -Milliseconds 250 }'
+        $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($bootstrap))
+        $proc = Start-Process -FilePath 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -WorkingDirectory 'C:\' -ArgumentList @('-NoExit', '-EncodedCommand', $encoded) -PassThru
+        @{ Pid = $proc.Id; WindowTitle = $windowTitle } | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
+        Write-DialtoneLaunchLog ("launched powershell window pid={0}" -f $proc.Id)
+        Write-DialtoneLaunchLog ("window transcript path={0}" -f $outputLogPath)
+        Write-DialtoneLaunchLog ("queue path={0}" -f $queuePath)
     } catch {
-        Write-DialtoneLaunchLog ("powershell -NoExit launch failed: {0}" -f $_.Exception.Message)
+        Write-DialtoneLaunchLog ("powershell launch failed: {0}" -f $_.Exception.Message)
         throw
     }
 }
