@@ -19,6 +19,8 @@ ENV_FILE_EXPLICIT=0
 REMOTE_HOST=""
 REMOTE_HOST_SET=0
 TMUX_SESSION_PREFIX="dialtone-"
+DEFAULT_LOCAL_REPO_ROOT="${SCRIPT_DIR}"
+DIALTONE_REPO_ROOT="${DIALTONE_REPO_ROOT:-$DEFAULT_LOCAL_REPO_ROOT}"
 GO_SANITIZE_VARS=(GOROOT GOPATH GOMODCACHE GOCACHE GOENV GOMOD GOFLAGS GOOS GOARCH GOEXE GOTOOLCHAIN GOPROXY GOSUMDB GONOSUMDB GOPRIVATE GOSUMDB GOTOOLCHAIN CGO_ENABLED CGO_CFLAGS CGO_CPPFLAGS CGO_CXXFLAGS CGO_LDFLAGS CXXFLAGS CPPFLAGS CFLAGS CC CXX)
 
 sanitize_system_go_env() {
@@ -254,6 +256,7 @@ run_remote_dialtone_command() {
   local host="$1"
   shift
   local args=("$@")
+  local remote_repo_root=""
 
   local remote_host
   remote_host="$(tmux_session_for_host "$host")"
@@ -273,8 +276,15 @@ run_remote_dialtone_command() {
 
   local remote_cmd
   remote_cmd="DIALTONE_HOSTNAME=$(printf '%q' "${remote_host}") "
-  if [ -n "${DIALTONE_REPO_ROOT:-}" ]; then
-    remote_cmd+="DIALTONE_REPO_ROOT=$(printf '%q' "${DIALTONE_REPO_ROOT}") "
+  remote_repo_root="$(resolve_mesh_repo_root "$host" || true)"
+  if [ -z "${remote_repo_root}" ]; then
+    remote_repo_root="${DIALTONE_REMOTE_REPO_ROOT:-}"
+  fi
+  if [ -z "${remote_repo_root}" ] && [ -n "${DIALTONE_REPO_ROOT:-}" ] && [ "${remote_host}" = "$(normalize_host "${DIALTONE_HOSTNAME:-}")" ]; then
+    remote_repo_root="${DIALTONE_REPO_ROOT}"
+  fi
+  if [ -n "${remote_repo_root:-}" ]; then
+    remote_cmd+="DIALTONE_REMOTE_REPO_ROOT=$(printf '%q' "${remote_repo_root}") "
   fi
   if [ "${ENV_FILE_EXPLICIT}" -eq 1 ]; then
     remote_cmd+="DIALTONE_ENV_FILE=$(printf '%q' "${ENV_FILE}") "
@@ -284,12 +294,7 @@ run_remote_dialtone_command() {
   remote_cmd+='set -e
 repo_root="${DIALTONE_REMOTE_REPO_ROOT:-${DIALTONE_REPO_ROOT}}"
 if [ -z "${repo_root}" ]; then
-  for p in "$HOME/dialtone" "/home/user/dialtone" "/Users/user/dialtone" "/home/tim/dialtone" "/Users/tim/dialtone"; do
-    if [ -d "$p" ]; then
-      repo_root="$p"
-      break
-    fi
-  done
+  repo_root="$HOME/dialtone"
 fi
 if [ -z "${repo_root}" ] || [ ! -d "${repo_root}" ]; then
   echo "remote repo root not found; set DIALTONE_REMOTE_REPO_ROOT" >&2
@@ -302,6 +307,54 @@ cd "$repo_root"
   fi
 
   run_remote_exec "$host" "$remote_cmd"
+}
+
+resolve_mesh_repo_root() {
+  local raw_host="${1:-}"
+  local host
+  local mesh_file
+  host="$(normalize_host "$raw_host")"
+  if [ -z "$host" ]; then
+    return 1
+  fi
+
+  mesh_file="$(mesh_config_path)"
+  if [ ! -f "$mesh_file" ]; then
+    return 1
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    local resolved=""
+    resolved="$(python3 - "$mesh_file" "$host" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+target = sys.argv[2].strip().lower().rstrip(".")
+
+with open(path, "r", encoding="utf-8") as fp:
+    data = json.load(fp)
+
+def norm(v):
+    return str(v or "").strip().lower().rstrip(".")
+
+for node in data:
+    name = norm(node.get("name"))
+    aliases = [norm(a) for a in (node.get("aliases") or [])]
+    if name == target or target in aliases:
+        if node.get("repo_candidates"):
+            print(node["repo_candidates"][0])
+            sys.exit(0)
+
+print("")
+PY
+)"
+    if [ -n "$resolved" ]; then
+      echo "$resolved"
+      return 0
+    fi
+  fi
+  return 1
 }
 
 parse_args() {
