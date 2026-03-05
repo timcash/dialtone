@@ -199,6 +199,7 @@ infer_tailnet_host() {
 tmux_session_for_host() {
   local host="${1:-}"
   host="$(normalize_host "$host")"
+  host="${host//./_}"
   echo "${TMUX_SESSION_PREFIX}${host}"
 }
 
@@ -257,10 +258,11 @@ run_remote_dialtone_command() {
   shift
   local args=("$@")
   local remote_repo_root=""
+  local raw_remote_host
 
   local remote_host
-  remote_host="$(tmux_session_for_host "$host")"
-  remote_host="${remote_host#${TMUX_SESSION_PREFIX}}"
+  raw_remote_host="$(normalize_host "$host")"
+  remote_host="${raw_remote_host}"
 
   local quoted=()
   local i
