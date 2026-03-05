@@ -162,6 +162,67 @@ DIALTONE> Goodbye.
 
 
 
+## `mods` and `dialtone_mod` quickstart
+
+This repository uses two entry points:
+- `./dialtone_mod` — main mesh launcher and Nix-aware command runner.
+- `./src/mods/mod/v1/main.go` via `mods` — mod lifecycle and sync tooling.
+
+`mods` and `plugins` are separate systems; they do not replace each other.
+
+### Start working with `dialtone_mod`
+
+```sh
+cd /home/user/dialtone
+./dialtone_mod
+```
+
+### Core `mods v1` usage
+
+```sh
+./dialtone_mod mods v1 list
+./dialtone_mod mods v1 status [--name <mod-name>] [--short]
+./dialtone_mod mods v1 new <mod-name> [--repo ...] [--path src/mods/<name>] [--branch main]
+./dialtone_mod mods v1 add --mod <mod-name> <paths...>
+./dialtone_mod mods v1 commit --all --message "..."
+./dialtone_mod mods v1 push
+./dialtone_mod mods v1 pull --host all
+./dialtone_mod mods v1 sync --host gold --mod mesh
+./dialtone_mod mods v1 rsync --host gold --mod mosh
+./dialtone_mod mods v1 rsync --host gold --all-repo --dry-run
+./dialtone_mod mods v1 rsync --host gold --all-repo
+```
+
+### Sync behavior
+
+- `sync` updates tracked submodule paths on target hosts.
+- `rsync` performs rsync-based sync and honors `.gitignore`-driven exclusion through generated `--exclude-from`.
+- `--dry-run` prints actions only.
+
+### Typical mod workflow
+
+1. Pull latest state from all nodes.
+2. Apply local changes.
+3. Sync/update targets.
+4. Commit then push from local.
+
+```sh
+./dialtone_mod mods v1 pull --host all --dry-run
+./dialtone_mod mods v1 pull --host all
+./dialtone_mod mods v1 rsync gold --mod mesh
+./dialtone_mod mods v1 commit --all --message "Update mesh tools"
+./dialtone_mod mods v1 push
+```
+
+### Related helpers
+
+```sh
+./dialtone_mod mesh v1 list
+./dialtone_mod tmux v1 logs --host gold
+```
+
+`mods v1` should typically be run from the repo root. `./dialtone_mod` uses the same Nix shell context expected by this workflow.
+
 ## Plugin README.md
 Every plugin must include a `README.md` at its plugin root (`src/plugins/<plugin>/README.md`).
 
