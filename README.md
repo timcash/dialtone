@@ -223,6 +223,15 @@ cd /home/user/dialtone
 
 `mods v1` should typically be run from the repo root. `./dialtone_mod` uses the same Nix shell context expected by this workflow.
 
+## Codex auth from `dialtone_mod`
+
+- `codex` is available inside the Nix shell launched by `./dialtone_mod`.
+- First run one-time login on the host where you use it:
+  - `codex login --device-auth` (interactive)  
+  - or set `OPENAI_API_KEY` in `env/.env` and rely on shell inheritance.
+- `dialtone_mod` maps `OPENCODE_API_KEY` to `OPENAI_API_KEY`, so if you already use that
+  variable in `env/.env`, Codex picks it up automatically.
+
 ## Plugin README.md
 Every plugin must include a `README.md` at its plugin root (`src/plugins/<plugin>/README.md`).
 

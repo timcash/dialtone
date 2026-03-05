@@ -271,7 +271,8 @@ func findTmuxMeshNode(nodes []tmuxMeshNode, rawHost string) (tmuxMeshNode, bool)
 func pickHostForTMux(node tmuxMeshNode) string {
 	candidates := append([]string{}, node.HostCandidates...)
 	candidates = append(candidates, node.Host)
-	for _, candidate := range candidates {
+	ordered := preferTailnetHostsForMods(candidates)
+	for _, candidate := range ordered {
 		candidate = strings.TrimSpace(candidate)
 		if candidate == "" {
 			continue
@@ -279,6 +280,31 @@ func pickHostForTMux(node tmuxMeshNode) string {
 		return strings.TrimSuffix(candidate, ".")
 	}
 	return ""
+}
+
+func preferTailnetHostsForMods(candidates []string) []string {
+	seen := map[string]struct{}{}
+	tailnet := make([]string, 0, len(candidates))
+	others := make([]string, 0, len(candidates))
+	out := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		c = strings.TrimSuffix(strings.TrimSpace(c), ".")
+		if c == "" {
+			continue
+		}
+		if _, ok := seen[c]; ok {
+			continue
+		}
+		seen[c] = struct{}{}
+		if strings.HasSuffix(strings.ToLower(c), ".ts.net") {
+			tailnet = append(tailnet, c)
+		} else {
+			others = append(others, c)
+		}
+	}
+	out = append(out, tailnet...)
+	out = append(out, others...)
+	return out
 }
 
 func sanitizeDialtoneHost(raw string) string {

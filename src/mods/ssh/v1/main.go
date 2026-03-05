@@ -41,34 +41,112 @@ func run(args []string) error {
 		printUsage()
 		return nil
 	}
+	if len(args) > 0 && args[0] == "test" {
+		return runTest(args[1:])
+	}
 
-	cfg := parseArgs(args)
+	cfg, err := parseArgs(args)
+	if err != nil {
+		return err
+	}
 	if cfg.host == "" {
-		return fmt.Errorf("ssh requires --host or positional host argument")
+		return fmt.Errorf("ssh requires --host")
+	}
+	if strings.EqualFold(strings.TrimSpace(cfg.host), "all") {
+		return fmt.Errorf("ssh execute mode does not support --host all; use --host <name>")
 	}
 
 	node, err := resolveMeshNode(cfg.host)
 	if err != nil {
 		return err
 	}
+	return runSSHCommand(cfg, node)
+}
 
-	cmd, err := buildSSHCommand(cfg, node)
+func runSSHCommand(cfg sshOptions, node meshNode) error {
+	candidates := orderedMeshHostsForSSH(node.HostCandidates, node.Host)
+	if len(candidates) == 0 {
+		return fmt.Errorf("no host candidates for %q", node.Name)
+	}
+
+	var lastErr error
+	for _, host := range candidates {
+		commandCfg := cfg
+		commandCfg.host = host
+		cmd, err := buildSSHCommandForHost(commandCfg, node, host)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if cfg.dryRun {
+			fmt.Printf("nix command: %s", cmd.Path)
+			for _, arg := range cmd.Args[1:] {
+				fmt.Printf(" %q", arg)
+			}
+			fmt.Println()
+			return nil
+		}
+
+		if err := execRunner(cmd); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+	}
+	if lastErr != nil {
+		return fmt.Errorf("%s", lastErr)
+	}
+	return fmt.Errorf("ssh host candidates exhausted for %q", node.Name)
+}
+
+func runTest(args []string) error {
+	cfg, err := parseArgs(args)
 	if err != nil {
 		return err
 	}
-	if cfg.dryRun {
-		fmt.Printf("nix command: %s", cmd.Path)
-		for _, arg := range cmd.Args[1:] {
-			fmt.Printf(" %q", arg)
+	if strings.TrimSpace(cfg.host) == "" {
+		return fmt.Errorf("ssh test requires --host")
+	}
+	cfg.command = "printf READY"
+	if strings.EqualFold(strings.TrimSpace(cfg.host), "all") {
+		nodes, err := loadMeshConfig()
+		if err != nil {
+			return err
 		}
-		fmt.Println()
+		if len(nodes) == 0 {
+			return fmt.Errorf("no mesh nodes found in env/mesh.json")
+		}
+		failed := 0
+		for _, node := range nodes {
+			if err := runSSHCommandTest(cfg, node); err != nil {
+				fmt.Fprintf(os.Stderr, "FAIL %s: %v\n", node.Name, err)
+				failed++
+			} else {
+				fmt.Printf("PASS %s\n", node.Name)
+			}
+		}
+		if failed > 0 {
+			return fmt.Errorf("%d ssh test(s) failed", failed)
+		}
 		return nil
 	}
 
-	return execRunner(cmd)
+	node, err := resolveMeshNode(cfg.host)
+	if err != nil {
+		return err
+	}
+	if err := runSSHCommandTest(cfg, node); err != nil {
+		return err
+	}
+	fmt.Printf("PASS %s\n", node.Name)
+	return nil
 }
 
-func parseArgs(argv []string) sshOptions {
+func runSSHCommandTest(cfg sshOptions, node meshNode) error {
+	return runSSHCommand(cfg, node)
+}
+
+func parseArgs(argv []string) (sshOptions, error) {
 	opts := sshOptions{
 		port:       "",
 		nixpkgsURL: "https://channels.nixos.org/nixpkgs-unstable/nixexprs.tar.xz",
@@ -89,6 +167,10 @@ func parseArgs(argv []string) sshOptions {
 			}
 		case strings.HasPrefix(current, "--host="):
 			opts.host = strings.TrimSpace(strings.TrimPrefix(current, "--host="))
+		case strings.EqualFold(current, "--node"):
+			return sshOptions{}, fmt.Errorf("use --host instead of --node; --node is not supported")
+		case strings.HasPrefix(current, "--node="):
+			return sshOptions{}, fmt.Errorf("use --host instead of --node; --node is not supported")
 		case strings.EqualFold(current, "--user"):
 			if i+1 < len(argv) {
 				opts.user = strings.TrimSpace(argv[i+1])
@@ -120,20 +202,17 @@ func parseArgs(argv []string) sshOptions {
 		case strings.EqualFold(current, "--dry-run"):
 			opts.dryRun = true
 		case strings.HasPrefix(current, "--"):
-			// Unknown flag; ignore to keep parsing permissive.
+			return sshOptions{}, fmt.Errorf("unknown flag: %s", current)
 		default:
 			positional = append(positional, current)
 		}
 	}
 
-	if opts.host == "" && len(positional) > 0 {
-		opts.host = strings.TrimSpace(positional[0])
-	}
-	if opts.command == "" && len(positional) > 1 {
-		opts.command = strings.Join(positional[1:], " ")
+	if opts.command == "" && len(positional) > 0 {
+		opts.command = strings.Join(positional, " ")
 	}
 
-	return opts
+	return opts, nil
 }
 
 type meshNode struct {
@@ -141,6 +220,7 @@ type meshNode struct {
 	Aliases []string `json:"aliases"`
 	User    string   `json:"user"`
 	Host    string   `json:"host"`
+	HostCandidates []string `json:"host_candidates"`
 	Port    string   `json:"port"`
 }
 
@@ -212,7 +292,15 @@ func loadMeshConfig() ([]meshNode, error) {
 }
 
 func buildSSHCommand(cfg sshOptions, node meshNode) (*exec.Cmd, error) {
-	host := strings.TrimSpace(node.Host)
+	host := selectSSHMeshHost(node.HostCandidates, node.Host)
+	if host == "" {
+		return nil, fmt.Errorf("mesh host is missing for %q", node.Name)
+	}
+	return buildSSHCommandForHost(cfg, node, host)
+}
+
+func buildSSHCommandForHost(cfg sshOptions, node meshNode, host string) (*exec.Cmd, error) {
+	host = strings.TrimSuffix(strings.TrimSpace(host), ".")
 	if host == "" {
 		return nil, fmt.Errorf("mesh host is missing for %q", node.Name)
 	}
@@ -253,7 +341,9 @@ func buildSSHCommand(cfg sshOptions, node meshNode) (*exec.Cmd, error) {
 		"-o", "BatchMode=yes",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
-		"-o", "GSSAPIAuthentication=no",
+		"-o", "GlobalKnownHostsFile=/dev/null",
+		"-o", "LogLevel=ERROR",
+		"-o", "ConnectTimeout=5",
 	}
 	if remotePort != "" && remotePort != "22" {
 		args = append(args, "-p", remotePort)
@@ -267,8 +357,51 @@ func buildSSHCommand(cfg sshOptions, node meshNode) (*exec.Cmd, error) {
 	return exec.Command(nixBin, args...), nil
 }
 
+func orderedMeshHostsForSSH(candidates []string, host string) []string {
+	return preferTailnetHostsForSSH(append(append([]string{}, candidates...), host))
+}
+
+func selectSSHMeshHost(candidates []string, host string) string {
+	ordered := orderedMeshHostsForSSH(candidates, host)
+	for _, c := range ordered {
+		c = strings.TrimSpace(c)
+		if c != "" {
+			return strings.TrimSuffix(c, ".")
+		}
+	}
+	return strings.TrimSuffix(strings.TrimSpace(host), ".")
+}
+
+func preferTailnetHostsForSSH(candidates []string) []string {
+	out := make([]string, 0, len(candidates))
+	tailnet := make([]string, 0, len(candidates))
+	others := make([]string, 0, len(candidates))
+	seen := map[string]struct{}{}
+
+	for _, c := range candidates {
+		c = strings.TrimSuffix(strings.TrimSpace(c), ".")
+		if c == "" {
+			continue
+		}
+		if _, ok := seen[c]; ok {
+			continue
+		}
+		seen[c] = struct{}{}
+		if strings.HasSuffix(strings.ToLower(c), ".ts.net") {
+			tailnet = append(tailnet, c)
+		} else {
+			others = append(others, c)
+		}
+	}
+	out = append(out, tailnet...)
+	out = append(out, others...)
+	return out
+}
+
 func printUsage() {
-	fmt.Println("Usage: ./dialtone_mod ssh v1 [run] --host <name|ip> [--user <user>] [--port <port>] [--command <cmd>] [--dry-run]")
+	fmt.Println("Usage:")
+	fmt.Println("  ./dialtone_mod ssh v1 [run] --host <name|ip> [--user <user>] [--port <port>] [--command <cmd>] [--dry-run]")
+	fmt.Println("  ./dialtone_mod ssh v1 test [--host <name|all|ip>] [--user <user>] [--port <port>] [--dry-run]")
 	fmt.Println("Aliases are loaded from env/mesh.json (for example gold, wsl, rover, grey).")
 }
 

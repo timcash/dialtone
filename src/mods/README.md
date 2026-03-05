@@ -79,6 +79,11 @@ go run ./src/mods/my_mod/v1/cli help
     - Push one mod, or all dirty mods + parent submodule pointers.
   - `./dialtone_mod mods v1 pull [--host <name|all|local>] [--from <name>] [--branch <branch>] [--source PATH] [--dest PATH] [--repo-dir PATH] [--skip-self=true|false] [--dry-run]`
     - Pull updates from remote mesh nodes (or local), fallback to GitHub if needed.
+  - `./dialtone_mod mods v1 clean [--host <name|all|local>] [--repo-dir PATH] [--skip-self=true|false] [--dry-run] [--force]`
+    - Force the target repo(s) to hard-reset to `origin/<current branch>` and clean dirty tree/submodules.
+    - Useful when a host is dirty and blocking `pull`/`sync`.
+  - `./dialtone_mod mods v1 reset [--host <name|all|local>] [--from <name>] [--branch <branch>] [--source PATH] [--dest PATH] [--repo-dir PATH] [--skip-self=true|false] [--branch-map host=branch ...] [--dry-run] [--force]`
+    - Run `clean --force` and then `pull` for the same target host set in one command.
   - `./dialtone_mod mods v1 sync [--host <name|all|local>] [--repo-dir PATH] [--mod NAME|PATH ...] [--skip-self=true|false]`
     - Sync selected submodules for selected targets.
   - `./dialtone_mod mods v1 rsync [--host <local|name|all>] [--all-repo] [--mod NAME|PATH ...] [--repo-dir PATH] [--skip-self=true|false] [--dry-run]`
@@ -105,6 +110,10 @@ go run ./src/mods/my_mod/v1/cli help
 - Sync just a specific mod:
   - `./dialtone_mod mods v1 sync --host gold --mod mosh`
   - `./dialtone_mod mods v1 rsync --host gold --mod mosh`
+- Recover a dirty remote and unblock pull/sync:
+  - `./dialtone_mod mods v1 reset --host grey --force`
+  - `./dialtone_mod mods v1 clean --host grey --force`
+  - `./dialtone_mod mods v1 clean --host grey --dry-run --force`
 - Gold sync uses the same command form:
   - `./dialtone_mod mods v1 rsync gold --mod mesh`
 - Sync entire repo (all files, including submodules checked out under mod paths):

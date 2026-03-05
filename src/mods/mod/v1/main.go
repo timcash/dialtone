@@ -80,6 +80,10 @@ func main() {
 		exitIfErr(runPush(args))
 	case "pull":
 		exitIfErr(runPull(args))
+	case "clean":
+		exitIfErr(runClean(args))
+	case "reset":
+		exitIfErr(runReset(args))
 	default:
 		printUsage()
 		exitIfErr(fmt.Errorf("unknown mods command: %s", cmd))
@@ -121,6 +125,12 @@ func printUsage() {
 	fmt.Println("  pull [--host <name|all|local>] [--from <name>] [--branch BRANCH]")
 	fmt.Println("       [--source PATH] [--dest PATH] [--repo-dir PATH] [--skip-self=true|false] [--dry-run]")
 	fmt.Println("       Clone/update dialtone repo across mesh nodes and sync mod submodules")
+	fmt.Println("  clean [--host <name|all|local>] [--repo-dir PATH] [--skip-self=true|false] [--dry-run] [--force]")
+	fmt.Println("       Discard local edits and hard-reset target repo(s) to origin/<current branch>, then clean submodule worktrees")
+	fmt.Println("  reset [--host <name|all|local>] [--from <name>] [--branch BRANCH]")
+	fmt.Println("       [--source PATH] [--dest PATH] [--repo-dir PATH] [--skip-self=true|false]")
+	fmt.Println("       [--branch-map host=branch ...] [--dry-run] [--force]")
+	fmt.Println("       Run `clean --force` then `pull` for the same host target")
 }
 
 func runNew(args []string) error {
@@ -934,23 +944,7 @@ func runRsyncToNode(node meshNode, repoRoot, destinationBase string, paths []str
 		destPort = "22"
 	}
 
-	hosts := []string{strings.TrimSpace(node.Host)}
-	for _, candidate := range node.HostCandidates {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
-			continue
-		}
-		dup := false
-		for _, existing := range hosts {
-			if existing == candidate {
-				dup = true
-				break
-			}
-		}
-		if !dup {
-			hosts = append(hosts, candidate)
-		}
-	}
+	hosts := orderedMeshHosts(node.Host, node.HostCandidates)
 
 	lastErr := error(nil)
 	targetBase := filepath.Clean(destinationBase)
@@ -1262,6 +1256,184 @@ func runPull(args []string) error {
 	return nil
 }
 
+func runClean(args []string) error {
+	fs := flag.NewFlagSet("mods clean", flag.ContinueOnError)
+	host := fs.String("host", "local", "target host: local|name|all")
+	repoDir := fs.String("repo-dir", "", "remote repo dir override")
+	skipSelf := fs.Bool("skip-self", true, "skip self when host=all")
+	dryRun := fs.Bool("dry-run", false, "print actions only")
+	force := fs.Bool("force", false, "required to allow destructive clean")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if !*force {
+		return errors.New("mods v1 clean is destructive and requires --force")
+	}
+
+	target := strings.ToLower(strings.TrimSpace(*host))
+	if target == "" || target == "local" || target == "self" {
+		root := strings.TrimSpace(*repoDir)
+		if root == "" {
+			var err error
+			root, err = findRepoRoot()
+			if err != nil {
+				return err
+			}
+		}
+		return cleanRepoState(root, *dryRun)
+	}
+	if target == "all" {
+		nodes := listMeshNodes()
+		failed := 0
+		for _, n := range nodes {
+			if *skipSelf && isSelfMeshNode(n) {
+				fmt.Printf("== %s ==\nSKIP self node\n", n.Name)
+				continue
+			}
+			rd := strings.TrimSpace(*repoDir)
+			if rd == "" {
+				rd = defaultRepoDirForNode(n)
+			}
+			if rd == "" {
+				failed++
+				fmt.Printf("== %s ==\nERROR: unresolved repo path\n", n.Name)
+				continue
+			}
+			fmt.Printf("== %s ==\n", n.Name)
+			if *dryRun {
+				fmt.Printf("[DRY-RUN] remote clean on %s (repo=%s)\n", n.Name, rd)
+				continue
+			}
+			if err := runRemoteClean(n, rd); err != nil {
+				failed++
+				fmt.Printf("ERROR: %v\n", err)
+			}
+		}
+		if failed > 0 {
+			return fmt.Errorf("clean finished with %d host failures", failed)
+		}
+		return nil
+	}
+
+	node, err := resolveMeshNode(target)
+	if err != nil {
+		return err
+	}
+	rd := strings.TrimSpace(*repoDir)
+	if rd == "" {
+		rd = defaultRepoDirForNode(node)
+	}
+	if rd == "" {
+		return fmt.Errorf("destination path unresolved for %s", node.Name)
+	}
+	if *dryRun {
+		fmt.Printf("[DRY-RUN] remote clean on %s (repo=%s)\n", node.Name, rd)
+		return nil
+	}
+	return runRemoteClean(node, rd)
+}
+
+func runReset(args []string) error {
+	fs := flag.NewFlagSet("mods reset", flag.ContinueOnError)
+	host := fs.String("host", "all", "target host: local|name|all")
+	from := fs.String("from", "", "source mesh node (defaults to current host)")
+	source := fs.String("source", "", "source repo path on source node")
+	dest := fs.String("dest", "", "destination repo path on target node")
+	branch := fs.String("branch", "", "default branch")
+	repoDir := fs.String("repo-dir", "", "remote repo dir override for sync step")
+	skipSelf := fs.Bool("skip-self", true, "skip self when host=all")
+	dryRun := fs.Bool("dry-run", false, "print actions only")
+	force := fs.Bool("force", false, "required before destructive reset")
+	var branchMapVals multiValueFlag
+	fs.Var(&branchMapVals, "branch-map", "host=branch (repeatable)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if !*force {
+		return errors.New("mods v1 reset is destructive and requires --force")
+	}
+
+	cleanArgs := []string{
+		"--host", strings.TrimSpace(*host),
+		"--force",
+		fmt.Sprintf("--skip-self=%t", *skipSelf),
+	}
+	if strings.TrimSpace(*repoDir) != "" {
+		cleanArgs = append(cleanArgs, "--repo-dir", strings.TrimSpace(*repoDir))
+	}
+	if *dryRun {
+		cleanArgs = append(cleanArgs, "--dry-run")
+	}
+	fmt.Println("== mods v1 reset: clean ==")
+	if err := runClean(cleanArgs); err != nil {
+		return err
+	}
+
+	pullArgs := []string{
+		"--host", strings.TrimSpace(*host),
+		fmt.Sprintf("--skip-self=%t", *skipSelf),
+	}
+	if strings.TrimSpace(*from) != "" {
+		pullArgs = append(pullArgs, "--from", strings.TrimSpace(*from))
+	}
+	if strings.TrimSpace(*source) != "" {
+		pullArgs = append(pullArgs, "--source", strings.TrimSpace(*source))
+	}
+	if strings.TrimSpace(*dest) != "" {
+		pullArgs = append(pullArgs, "--dest", strings.TrimSpace(*dest))
+	}
+	if strings.TrimSpace(*branch) != "" {
+		pullArgs = append(pullArgs, "--branch", strings.TrimSpace(*branch))
+	}
+	for _, bm := range branchMapVals.values {
+		pullArgs = append(pullArgs, "--branch-map", bm)
+	}
+	if strings.TrimSpace(*repoDir) != "" {
+		pullArgs = append(pullArgs, "--repo-dir", strings.TrimSpace(*repoDir))
+	}
+	if *dryRun {
+		pullArgs = append(pullArgs, "--dry-run")
+	}
+	fmt.Println("== mods v1 reset: pull ==")
+	return runPull(pullArgs)
+}
+
+func runRemoteClean(node meshNode, repoDir string) error {
+	out, err := runSSH(node, buildRemoteCleanCommand(repoDir, false))
+	if strings.TrimSpace(out) != "" {
+		fmt.Print(strings.TrimRight(out, "\n"))
+		fmt.Println()
+	}
+	return err
+}
+
+func cleanRepoState(repoRoot string, dryRun bool) error {
+	branch, err := runCapture("git", "-C", repoRoot, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil || strings.TrimSpace(branch) == "" || strings.TrimSpace(branch) == "HEAD" {
+		branch = "main"
+	} else {
+		branch = strings.TrimSpace(branch)
+	}
+	commands := [][]string{
+		{"git", "-C", repoRoot, "fetch", "--all", "--prune"},
+		{"git", "-C", repoRoot, "reset", "--hard", "origin/" + branch},
+		{"git", "-C", repoRoot, "clean", "-fd"},
+		{"git", "-C", repoRoot, "submodule", "foreach", "--recursive", "if [ -d .git ] || [ -f .git ]; then git reset --hard; git clean -fd .; fi"},
+	}
+	if dryRun {
+		for _, cmd := range commands {
+			fmt.Printf("[DRY-RUN] %s\n", shellJoin(cmd))
+		}
+		return nil
+	}
+	for _, cmd := range commands {
+		if err := runCommand(cmd...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func discoverMods(repoRoot string) ([]modEntry, error) {
 	gm := filepath.Join(repoRoot, ".gitmodules")
 	if !fileExists(gm) {
@@ -1416,23 +1588,7 @@ func runSSH(node meshNode, command string) (string, error) {
 		remotePort = "22"
 	}
 
-	hosts := []string{strings.TrimSpace(node.Host)}
-	for _, candidate := range node.HostCandidates {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
-			continue
-		}
-		found := false
-		for _, existing := range hosts {
-			if candidate == existing {
-				found = true
-				break
-			}
-		}
-		if !found {
-			hosts = append(hosts, candidate)
-		}
-	}
+	hosts := orderedMeshHosts(node.Host, node.HostCandidates)
 
 	var lastErr error
 	for _, host := range hosts {
@@ -1479,6 +1635,39 @@ func runSSH(node meshNode, command string) (string, error) {
 		return "", lastErr
 	}
 	return "", fmt.Errorf("ssh to %s failed", node.Name)
+}
+
+func orderedMeshHosts(host string, candidates []string) []string {
+	all := make([]string, 0, len(candidates)+1)
+	for _, c := range candidates {
+		c = strings.TrimSuffix(strings.TrimSpace(c), ".")
+		if c != "" {
+			all = append(all, c)
+		}
+	}
+	baseHost := strings.TrimSuffix(strings.TrimSpace(host), ".")
+	if baseHost != "" {
+		all = append(all, baseHost)
+	}
+
+	tailnetHosts := make([]string, 0, len(all))
+	otherHosts := make([]string, 0, len(all))
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(all))
+	for _, c := range all {
+		if _, ok := seen[c]; ok {
+			continue
+		}
+		seen[c] = struct{}{}
+		if strings.HasSuffix(strings.ToLower(c), ".ts.net") {
+			tailnetHosts = append(tailnetHosts, c)
+		} else {
+			otherHosts = append(otherHosts, c)
+		}
+	}
+	out = append(out, tailnetHosts...)
+	out = append(out, otherHosts...)
+	return out
 }
 
 func defaultRepoDirForNode(node meshNode) string {
@@ -1577,6 +1766,15 @@ func buildRemoteSubmoduleSync(repoDir string, modPaths []string, from string, os
 
 	return fmt.Sprintf("cd %s && if [ -x ./dialtone_mod ]; then DIALTONE_USE_NIX=1 ./dialtone_mod mods v1 sync --host local%s; else echo \"dialtone_mod not found\"; exit 1; fi",
 		shellQuote(repoDir), modArgs)
+}
+
+func buildRemoteCleanCommand(repoDir string, dryRun bool) string {
+	args := []string{"mods", "v1", "clean", "--host", "local", "--force"}
+	if dryRun {
+		args = append(args, "--dry-run")
+	}
+	return fmt.Sprintf("cd %s && if [ -x ./dialtone_mod ]; then DIALTONE_USE_NIX=1 ./dialtone_mod %s; else echo \"dialtone_mod not found\"; exit 1; fi",
+		shellQuote(repoDir), strings.Join(args, " "))
 }
 
 func parseBranchMap(values []string) (map[string]string, error) {

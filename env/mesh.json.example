@@ -14,6 +14,7 @@
     "aliases": ["gold", "gold.shad-artichoke.ts.net"],
     "user": "user",
     "host": "192.168.4.55",
+    "host_candidates": ["gold.shad-artichoke.ts.net", "192.168.4.55"],
     "port": "22",
     "os": "macos",
     "repo_candidates": ["/Users/user/dialtone", "/Users/user/Documents/dialtone"]
@@ -33,7 +34,7 @@
     "aliases": ["rover", "rover-1", "rover-1.shad-artichoke.ts.net"],
     "user": "tim",
     "host": "192.168.4.36",
-    "host_candidates": ["169.254.217.151", "rover-1.shad-artichoke.ts.net"],
+    "host_candidates": ["rover-1.shad-artichoke.ts.net", "169.254.217.151"],
     "port": "22",
     "os": "linux",
     "repo_candidates": ["/home/tim/dialtone", "/home/user/dialtone"]
@@ -43,7 +44,7 @@
     "aliases": ["legion", "legion.shad-artichoke.ts.net"],
     "user": "timca",
     "host": "192.168.4.52",
-    "host_candidates": ["127.0.0.1", "legion.shad-artichoke.ts.net"],
+    "host_candidates": ["legion.shad-artichoke.ts.net", "127.0.0.1"],
     "port": "2223",
     "os": "windows",
     "prefer_wsl_powershell": true,

@@ -64,6 +64,24 @@ func TestResolvePreferredHostUsesReachableCandidate(t *testing.T) {
 	}
 }
 
+func TestResolvePreferredHostPrefersTailnetWhenReachable(t *testing.T) {
+	prev := canReachHostFn
+	canReachHostFn = func(host, port string, _ time.Duration) bool {
+		return host == "rover-1.shad-artichoke.ts.net" && port == "22"
+	}
+	defer func() { canReachHostFn = prev }()
+
+	node := MeshNode{
+		Name:           "rover",
+		Host:           "rover-1.shad-artichoke.ts.net",
+		HostCandidates: []string{"169.254.217.151", "rover-1.shad-artichoke.ts.net"},
+	}
+	got := resolvePreferredHost(node, "22")
+	if got != "rover-1.shad-artichoke.ts.net" {
+		t.Fatalf("expected tailnet host, got %s", got)
+	}
+}
+
 func TestResolvePreferredHostFallsBackToPrimaryHost(t *testing.T) {
 	prev := canReachHostFn
 	canReachHostFn = func(host, port string, _ time.Duration) bool {
