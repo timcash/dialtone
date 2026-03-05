@@ -81,8 +81,11 @@ go run ./src/mods/my_mod/v1/cli help
     - Pull updates from remote mesh nodes (or local), fallback to GitHub if needed.
   - `./dialtone2.sh mods v1 sync [--host <name|all|local>] [--repo-dir PATH] [--mod NAME|PATH ...] [--skip-self=true|false]`
     - Sync selected submodules for selected targets.
-  - `./dialtone2.sh mods v1 rsync [--host <local|name|all>] [--mod NAME|PATH ...] [--repo-dir PATH] [--skip-self=true|false] [--dry-run]`
-    - Perform `.gitignore`-aware `rsync` of selected paths across the mesh.
+  - `./dialtone2.sh mods v1 rsync [--host <local|name|all>] [--all-repo] [--mod NAME|PATH ...] [--repo-dir PATH] [--skip-self=true|false] [--dry-run]`
+    - Performs true `rsync` to selected hosts.
+    - Uses an auto-generated `--exclude-from` file from `git` ignore rules (`.gitignore`, `.git/info/exclude`, global+XDG excludes where configured).
+    - Keeps `.git` content out and preserves ignored-file filtering for each sync path.
+    - Respects nested mod `.gitignore` when syncing submodules.
   - `./dialtone2.sh mods v1 new <mod-name> [--repo ...] [--path src/mods/<name>] [--branch main] [--public|--private]`
     - Create a new mod workspace and submodule pointer.
   - `./dialtone2.sh mods v1 add --mod <mod-name> <paths...>`
@@ -102,6 +105,10 @@ go run ./src/mods/my_mod/v1/cli help
 - Sync just a specific mod:
   - `./dialtone2.sh mods v1 sync --host gold --mod mosh`
   - `./dialtone2.sh mods v1 rsync --host gold --mod mosh`
+- Gold sync uses the same command form:
+  - `./dialtone2.sh mods v1 rsync gold --mod mesh`
+- Sync entire repo (all files, including submodules checked out under mod paths):
+  - `./dialtone2.sh mods v1 rsync gold --all-repo`
 - Push parent + child modules in separate steps:
   - `./dialtone2.sh mods v1 commit --all --message "Update mod tooling"`
   - `./dialtone2.sh mods v1 push --message "Update mod tooling"`
