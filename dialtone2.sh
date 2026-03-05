@@ -19,6 +19,37 @@ ENV_FILE_EXPLICIT=0
 REMOTE_HOST=""
 REMOTE_HOST_SET=0
 TMUX_SESSION_PREFIX="dialtone-"
+GO_SANITIZE_VARS=(GOROOT GOPATH GOMODCACHE GOCACHE GOENV GOMOD GOFLAGS GOOS GOARCH GOEXE GOTOOLCHAIN GOPROXY GOSUMDB GONOSUMDB GOPRIVATE GOSUMDB GOTOOLCHAIN CGO_ENABLED CGO_CFLAGS CGO_CPPFLAGS CGO_CXXFLAGS CGO_LDFLAGS CXXFLAGS CPPFLAGS CFLAGS CC CXX)
+
+sanitize_system_go_env() {
+  local var
+  local path_entries
+  local entry
+  local filtered_path=""
+
+  for var in "${GO_SANITIZE_VARS[@]}"; do
+    unset "$var"
+  done
+
+  IFS=: read -r -a path_entries <<< "${PATH:-}"
+  for entry in "${path_entries[@]}"; do
+    [ -z "$entry" ] && continue
+    case "$entry" in
+      "/usr/local/go/bin" | "/usr/local/go/bin/")
+        continue
+        ;;
+      *)
+        if [ -z "$filtered_path" ]; then
+          filtered_path="$entry"
+        else
+          filtered_path="${filtered_path}:$entry"
+        fi
+        ;;
+    esac
+  done
+  PATH="$filtered_path"
+  export PATH
+}
 
 normalize_host() {
   local host="${1:-}"
@@ -30,6 +61,137 @@ normalize_host() {
     host="dialtone"
   fi
   echo "$host"
+}
+
+mesh_config_path() {
+  local candidate="${DIALTONE_MESH_CONFIG:-env/mesh.json}"
+  if [ -z "$candidate" ]; then
+    echo "${SCRIPT_DIR}/env/mesh.json"
+    return 0
+  fi
+  if [ "${candidate#/}" != "$candidate" ]; then
+    echo "$candidate"
+  else
+    echo "${SCRIPT_DIR}/${candidate}"
+  fi
+}
+
+tailnet_alias_from_mesh() {
+  local raw_host="${1:-}"
+  local host
+  host="$(normalize_host "$raw_host")"
+  if [ -z "$host" ]; then
+    return 1
+  fi
+  local mesh_file
+  mesh_file="$(mesh_config_path)"
+  if [ ! -f "$mesh_file" ]; then
+    return 1
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    local resolved=""
+    resolved="$(python3 - "$mesh_file" "$host" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+target = sys.argv[2].strip().lower().rstrip(".")
+
+def norm(v):
+    return str(v or "").strip().lower().rstrip(".")
+
+with open(path, "r", encoding="utf-8") as fp:
+    data = json.load(fp)
+
+for node in data:
+    name = norm(node.get("name"))
+    aliases = [norm(a) for a in (node.get("aliases") or [])]
+    if name == target or target in aliases:
+        for a in aliases:
+            if ".ts.net" in a:
+                print(a)
+                sys.exit(0)
+        host = norm(node.get("host"))
+        if ".ts.net" in host:
+            print(host)
+            sys.exit(0)
+
+        continue
+
+sys.exit(1)
+PY
+)"
+    if [ -n "$resolved" ]; then
+      echo "$resolved"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+infer_tailnet_host() {
+  local env_host
+  local host
+  local picked_host=""
+  local from_mesh
+  local candidates=()
+
+  host="$(normalize_host "$(hostname -s 2>/dev/null || echo)")"
+  if [ -n "$host" ]; then
+    candidates+=("$host")
+    candidates+=("${host%%.*}")
+  fi
+
+  host="$(normalize_host "${HOSTNAME:-}")"
+  if [ -n "$host" ]; then
+    candidates+=("$host")
+    candidates+=("${host%%.*}")
+  fi
+
+  env_host="$(normalize_host "${DIALTONE_HOSTNAME:-}")"
+  if [ -n "$env_host" ]; then
+    candidates+=("$env_host")
+  fi
+
+  if [ "${#candidates[@]}" -eq 0 ]; then
+    candidates+=("$(normalize_host "${DIALTONE_HOSTNAME:-$(hostname -s 2>/dev/null || echo dialtone)}")")
+  fi
+
+  for host in "${candidates[@]}"; do
+    [ -z "$host" ] && continue
+    if [ -z "$picked_host" ]; then
+      picked_host="$host"
+    fi
+    if from_mesh="$(tailnet_alias_from_mesh "$host")" && [ -n "$from_mesh" ]; then
+      echo "$from_mesh"
+      return 0
+    fi
+  done
+
+  local tailnet="${TS_TAILNET:-shad-artichoke.ts.net}"
+  if [ -n "$picked_host" ] && [[ "$picked_host" == *".ts.net" ]]; then
+    echo "$picked_host"
+    return 0
+  fi
+
+  if [ -n "$picked_host" ] && [ -n "$tailnet" ] && [ "$tailnet" != "shad-artichoke.ts.net" ]; then
+    echo "$picked_host.$tailnet"
+    return 0
+  fi
+
+  # tailscale status from the local node often provides self DNSName.
+  if command -v tailscale >/dev/null 2>&1; then
+    local tail_dns
+    tail_dns="$(tailscale status --json 2>/dev/null | tr -d '\n' | sed -n 's/.*"Self":[[:space:]]*{[^}]*"DNSName":"\\([^"]*\\)".*/\\1/p' | head -n1)"
+    if [ -n "$tail_dns" ]; then
+      echo "$tail_dns"
+      return 0
+    fi
+  fi
+
+  echo "$picked_host"
 }
 
 tmux_session_for_host() {
@@ -246,6 +408,8 @@ if [ -f "$ENV_FILE" ]; then
   export DIALTONE_ENV_FILE="$ENV_FILE"
 fi
 
+sanitize_system_go_env
+
 if ! NIX_BIN="$(find_nix)"; then
   echo "nix is required" >&2
   exit 1
@@ -266,7 +430,7 @@ if [ "$REMOTE_HOST_SET" -eq 1 ]; then
 fi
 
 if [ $# -eq 0 ]; then
-  SESSION_NAME="$(tmux_session_for_host "${DIALTONE_HOSTNAME:-}")"
+  SESSION_NAME="$(tmux_session_for_host "$(infer_tailnet_host)")"
   TMUX_START_COMMAND='if command -v tmux >/dev/null 2>&1 && [ -z "${TMUX:-}" ]; then if ! tmux has-session -t "${TMUX_SESSION_NAME}" 2>/dev/null; then tmux new-session -ds "${TMUX_SESSION_NAME}" -n "${TMUX_SESSION_NAME}"; fi; exec tmux attach-session -t "${TMUX_SESSION_NAME}"; else exec bash -i; fi'
   exec "$NIX_BIN" "${NIX_FLAGS[@]}" shell -f "$NIXPKGS_URL" "${NIX_PKGS[@]}" --command env IN_NIX_SHELL=1 TMUX_SESSION_NAME="$SESSION_NAME" bash -lc "$TMUX_START_COMMAND"
 fi
@@ -277,7 +441,7 @@ if [ "$1" = "tmux" ] && [ "${2:-}" = "v1" ]; then
     echo "tmux command is required: ./dialtone2.sh tmux v1 <command>" >&2
     exit 1
   fi
-  exec "$NIX_BIN" "${NIX_FLAGS[@]}" shell -f "$NIXPKGS_URL" "${NIX_PKGS[@]}" --command env IN_NIX_SHELL=1 go run ./src/cli.go "$@"
+  exec "$NIX_BIN" "${NIX_FLAGS[@]}" shell -f "$NIXPKGS_URL" "${NIX_PKGS[@]}" --command env IN_NIX_SHELL=1 go run ./src/cli.go tmux v1 "$@"
   exit $?
 fi
 
