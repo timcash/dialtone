@@ -81,7 +81,7 @@ func ensureRemoteMoshServer(host string, ensureInstall bool) error {
 
 func checkMoshClient() error {
 	if !isExecutableAvailable("mosh") {
-		return errors.New("mosh client not found; run ./dialtone2.sh mosh v1 setup --ensure")
+		return errors.New("mosh client not found; run ./dialtone_mod mosh v1 setup --ensure")
 	}
 	if !isExecutableAvailable("mosh-server") {
 		return errors.New("mosh-server not found locally")

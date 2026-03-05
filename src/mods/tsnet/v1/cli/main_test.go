@@ -203,7 +203,7 @@ func TestTsnetV1HostsCommandRemoteSSHJSON(t *testing.T) {
 			continue
 		}
 		t.Run("host="+h, func(t *testing.T) {
-			cmd := "cd /Users/user/dialtone 2>/dev/null || cd /home/user/dialtone 2>/dev/null || cd ~/dialtone; ./dialtone2.sh -- tsnet v1 hosts --format json"
+			cmd := "cd /Users/user/dialtone 2>/dev/null || cd /home/user/dialtone 2>/dev/null || cd ~/dialtone; ./dialtone_mod -- tsnet v1 hosts --format json"
 			raw, err := runRemoteCommand(h, cmd)
 			if err != nil {
 				t.Fatalf("remote tsnet hosts command failed for %s: %v", h, err)

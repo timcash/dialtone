@@ -53,7 +53,7 @@ func runGhostty(argv []string) error {
 	user := opts.String("user", "", "SSH user for the target host")
 	port := opts.String("port", "", "SSH port for the target host")
 	repoPath := opts.String("repo", "", "Repository path to cd into before typing command")
-	command := opts.String("command", "./dialtone2.sh", "Command to type in Ghostty (default from positional args)")
+	command := opts.String("command", "./dialtone_mod", "Command to type in Ghostty (default from positional args)")
 	dryRun := opts.Bool("dry-run", false, "Print generated script without typing it")
 	if err := opts.Parse(argv); err != nil {
 		return err
@@ -272,11 +272,11 @@ func buildGhosttyTypingCommand(script string) string {
 }
 
 func printUsage() {
-	fmt.Println("Usage: ./dialtone2.sh typing v1 <command> [args]")
+	fmt.Println("Usage: ./dialtone_mod typing v1 <command> [args]")
 	fmt.Println("")
 	fmt.Println("Commands:")
 	fmt.Println("  ghostty --host <name|ip> [--user USER] [--port PORT] [--repo PATH]")
-	fmt.Println("      [--command \"./dialtone2.sh ...\"] [positional command fallback]")
+	fmt.Println("      [--command \"./dialtone_mod ...\"] [positional command fallback]")
 	fmt.Println("      [--dry-run]")
 	fmt.Println("      Send a command into the active Ghostty window on the target host via AppleScript")
 }

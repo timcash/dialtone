@@ -268,7 +268,7 @@ func buildSSHCommand(cfg sshOptions, node meshNode) (*exec.Cmd, error) {
 }
 
 func printUsage() {
-	fmt.Println("Usage: ./dialtone2.sh ssh v1 [run] --host <name|ip> [--user <user>] [--port <port>] [--command <cmd>] [--dry-run]")
+	fmt.Println("Usage: ./dialtone_mod ssh v1 [run] --host <name|ip> [--user <user>] [--port <port>] [--command <cmd>] [--dry-run]")
 	fmt.Println("Aliases are loaded from env/mesh.json (for example gold, wsl, rover, grey).")
 }
 

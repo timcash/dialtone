@@ -37,7 +37,7 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println("Usage: ./dialtone2.sh mosh v1 <install|setup|connect> [options]")
+	fmt.Println("Usage: ./dialtone_mod mosh v1 <install|setup|connect> [options]")
 	fmt.Println("")
 	fmt.Println("Commands:")
 	fmt.Println("  install [--nixpkgs-url URL] [--ensure]")

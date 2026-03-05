@@ -12,7 +12,7 @@ if ! command -v osascript >/dev/null 2>&1; then
 fi
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: ./ghostty-dialtone2.sh <command>" >&2
+  echo "Usage: ./ghostty-dialtone_mod <command>" >&2
   exit 1
 fi
 

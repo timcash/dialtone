@@ -692,7 +692,7 @@ func doStatusRemote(node meshNode, nameFilter string, short bool) error {
 	if short {
 		args = append(args, "--short")
 	}
-	cmd := fmt.Sprintf("cd %s && if [ -x ./dialtone2.sh ]; then DIALTONE_USE_NIX=1 ./dialtone2.sh %s; else echo \"dialtone2.sh not found\"; exit 1; fi",
+	cmd := fmt.Sprintf("cd %s && if [ -x ./dialtone_mod ]; then DIALTONE_USE_NIX=1 ./dialtone_mod %s; else echo \"dialtone_mod not found\"; exit 1; fi",
 		shellQuote(repoDir), strings.Join(args, " "))
 
 	out, err := runSSH(node, cmd)
@@ -1406,7 +1406,7 @@ func runSSH(node meshNode, command string) (string, error) {
 	if goBin == "" {
 		goBin = "go"
 	}
-	dialtone2Path := filepath.Join(repoRoot, "dialtone2.sh")
+	dialtoneModPath := filepath.Join(repoRoot, "dialtone_mod")
 	targetUser := strings.TrimSpace(node.User)
 	if targetUser == "" {
 		targetUser = strings.TrimSpace(os.Getenv("USER"))
@@ -1451,8 +1451,8 @@ func runSSH(node meshNode, command string) (string, error) {
 		goArgs := append([]string{"run", "./src/cli.go"}, sshArgs...)
 
 		var cmd *exec.Cmd
-		if fileExists(dialtone2Path) {
-			cmd = exec.Command(dialtone2Path, sshArgs...)
+		if fileExists(dialtoneModPath) {
+			cmd = exec.Command(dialtoneModPath, sshArgs...)
 		} else {
 			cmd = exec.Command(goBin, goArgs...)
 		}
@@ -1575,7 +1575,7 @@ func buildRemoteSubmoduleSync(repoDir string, modPaths []string, from string, os
 		modArgs = " " + strings.Join(args, " ")
 	}
 
-	return fmt.Sprintf("cd %s && if [ -x ./dialtone2.sh ]; then DIALTONE_USE_NIX=1 ./dialtone2.sh mods v1 sync --host local%s; else echo \"dialtone2.sh not found\"; exit 1; fi",
+	return fmt.Sprintf("cd %s && if [ -x ./dialtone_mod ]; then DIALTONE_USE_NIX=1 ./dialtone_mod mods v1 sync --host local%s; else echo \"dialtone_mod not found\"; exit 1; fi",
 		shellQuote(repoDir), modArgs)
 }
 

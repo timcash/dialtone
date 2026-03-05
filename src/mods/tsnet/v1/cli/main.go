@@ -45,7 +45,7 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println("Usage: ./dialtone2.sh tsnet v1 <bootstrap|install|keepalive|status|hosts> [options]")
+	fmt.Println("Usage: ./dialtone_mod tsnet v1 <bootstrap|install|keepalive|status|hosts> [options]")
 	fmt.Println("")
 	fmt.Println("Commands:")
 	fmt.Println("  bootstrap   Ensure TS_AUTHKEY is available and start a persistent tsnet keepalive process")
