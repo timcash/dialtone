@@ -111,7 +111,7 @@ func printUsage() {
 	fmt.Println("  list")
 	fmt.Println("  status [--name <mod-name>] [--short]")
 	fmt.Println("  sync [--host <name|all|local>] [--repo-dir PATH] [--mod NAME|PATH ...] [--skip-self=true|false]")
-	fmt.Println("  rsync [--host local|name|all] [--mod NAME|PATH ...] [--repo-dir PATH] [--skip-self=true|false] [--dry-run]")
+	fmt.Println("  rsync [--host local|name|all] [--all-repo] [--mod NAME|PATH ...] [--repo-dir PATH] [--skip-self=true|false] [--dry-run]")
 	fmt.Println("  sync-ui [--mod NAME|PATH ...] [--from PATH] [--dry-run] [--commit] [--push]")
 	fmt.Println("  gh-create <mod-name> --owner <owner> [--repo-name <name>] [--private|--public]")
 	fmt.Println("  commit --mod <mod-name> [--message <msg>] [--all]")
@@ -840,6 +840,7 @@ func runSync(args []string) error {
 func runRsync(args []string) error {
 	fs := flag.NewFlagSet("mods rsync", flag.ContinueOnError)
 	host := fs.String("host", "all", "target host: local|name|all")
+	allRepo := fs.Bool("all-repo", false, "sync entire repo root instead of only known mods")
 	repoDir := fs.String("repo-dir", "", "destination repo dir override")
 	skipSelf := fs.Bool("skip-self", true, "skip self when host=all")
 	dryRun := fs.Bool("dry-run", false, "print commands only")
@@ -863,9 +864,17 @@ func runRsync(args []string) error {
 	if err != nil {
 		return err
 	}
-	paths, err := selectModPaths(mods, modFilter.values)
-	if err != nil {
-		return err
+	var paths []string
+	if *allRepo {
+		if len(modFilter.values) > 0 {
+			return errors.New("cannot combine --all-repo with --mod")
+		}
+		paths = []string{"."}
+	} else {
+		paths, err = selectModPaths(mods, modFilter.values)
+		if err != nil {
+			return err
+		}
 	}
 	if len(paths) == 0 {
 		return errors.New("no mods selected")
@@ -950,7 +959,7 @@ func runRsyncToNode(node meshNode, repoRoot, destinationBase string, paths []str
 			continue
 		}
 		hostTarget := fmt.Sprintf("%s@%s", destUser, host)
-		sshArgs := []string{"-F", "/dev/null", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR", "-o", "GSSAPIAuthentication=no"}
+		sshArgs := []string{"-F", "/dev/null", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR"}
 		if destPort != "" && destPort != "22" {
 			sshArgs = append(sshArgs, "-p", destPort)
 		}
@@ -960,6 +969,16 @@ func runRsyncToNode(node meshNode, repoRoot, destinationBase string, paths []str
 			relPath := filepath.ToSlash(filepath.Clean(p))
 			src := filepath.ToSlash(filepath.Join(repoRoot, filepath.FromSlash(p)))
 			dst := filepath.ToSlash(filepath.Join(targetBase, relPath))
+			if relPath == "." {
+				dst = filepath.ToSlash(filepath.Clean(targetBase))
+			}
+			excludeFile, err := gitIgnoreExcludeFile(repoRoot, relPath)
+			if err != nil {
+				return err
+			}
+			if excludeFile != "" {
+				defer os.Remove(excludeFile)
+			}
 			args := []string{
 				"--archive",
 				"--compress",
@@ -974,6 +993,9 @@ func runRsyncToNode(node meshNode, repoRoot, destinationBase string, paths []str
 				src + "/",
 				hostTarget + ":" + dst + "/",
 			}
+			if excludeFile != "" {
+				args = append(args, "--exclude-from", excludeFile)
+			}
 			if dryRun {
 				fmt.Printf("[DRY-RUN] rsync %s\n", strings.Join(args, " "))
 				continue
@@ -983,13 +1005,66 @@ func runRsyncToNode(node meshNode, repoRoot, destinationBase string, paths []str
 				lastErr = err
 				break
 			}
-		}
-		if lastErr == nil {
-			return nil
-		}
-		break
+	}
+	if lastErr == nil {
+		return nil
+	}
+	break
 	}
 	return lastErr
+}
+
+func gitIgnoreExcludeFile(repoRoot, relPath string) (string, error) {
+	modRoot := filepath.ToSlash(filepath.Clean(filepath.Join(repoRoot, filepath.FromSlash(relPath))))
+	insideSubmodule := false
+	if out, err := runCapture("git", "-C", modRoot, "rev-parse", "--is-inside-work-tree"); err == nil && strings.TrimSpace(out) == "true" {
+		insideSubmodule = true
+	}
+
+	var cmdArgs []string
+	if insideSubmodule {
+		cmdArgs = []string{"-C", modRoot, "ls-files", "-o", "-i", "-z", "--exclude-standard"}
+	} else {
+		cmdArgs = []string{"-C", repoRoot, "ls-files", "-o", "-i", "-z", "--exclude-standard", "--", relPath}
+	}
+
+	out, err := runCapture(append([]string{"git"}, cmdArgs...)...)
+	if err != nil {
+		return "", nil
+	}
+	out = strings.TrimSuffix(out, "\x00")
+	if out == "" {
+		return "", nil
+	}
+	lines := strings.Split(out, "\x00")
+	trimmed := make([]string, 0, len(lines))
+	prefix := relPath + "/"
+	for _, line := range lines {
+		entry := strings.TrimSpace(line)
+		if entry == "" {
+			continue
+		}
+		if !insideSubmodule && strings.HasPrefix(entry, prefix) {
+			entry = strings.TrimPrefix(entry, prefix)
+		}
+		trimmed = append(trimmed, entry)
+	}
+	if len(trimmed) == 0 {
+		return "", nil
+	}
+
+	tmp, err := os.CreateTemp("", "dialtone-rsync-exclude-")
+	if err != nil {
+		return "", err
+	}
+	for _, entry := range trimmed {
+		_, _ = tmp.WriteString(entry + "\n")
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		return "", err
+	}
+	return tmp.Name(), nil
 }
 
 func runSyncUI(args []string) error {
