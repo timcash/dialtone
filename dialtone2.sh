@@ -142,55 +142,6 @@ cd "$repo_root"
   run_remote_exec "$host" "$remote_cmd"
 }
 
-run_tmux_v1_logs() {
-  local lines=10
-  local args=("$@")
-
-  local i=0
-  while [ "$i" -lt "${#args[@]}" ]; do
-    case "${args[$i]}" in
-      --lines)
-        i=$((i + 1))
-        if [ "$i" -ge "${#args[@]}" ]; then
-          echo "tmux logs requires a value for --lines" >&2
-          exit 1
-        fi
-        lines="${args[$i]}"
-        ;;
-      --lines=*)
-        lines="${args[$i]#--lines=}"
-        ;;
-      *)
-        ;;
-    esac
-    i=$((i + 1))
-  done
-
-  if ! command -v tmux >/dev/null 2>&1; then
-    echo "tmux is not available in this shell" >&2
-    exit 1
-  fi
-
-  local session
-  session="$(tmux_session_for_host "${DIALTONE_HOSTNAME:-}")"
-  local target="${session}:0.0"
-  if ! tmux has-session -t "$session" 2>/dev/null; then
-    echo "tmux session not found: $session" >&2
-    exit 1
-  fi
-  if ! tmux capture-pane -pt "$target" -S "-$lines"; then
-    local first_pane
-    first_pane="$(tmux list-panes -t "$session" -F '#{window_index}.#{pane_index}' | head -n1 || true)"
-    if [ -n "$first_pane" ]; then
-      target="${session}:${first_pane}"
-      tmux capture-pane -pt "$target" -S "-$lines"
-      return $?
-    fi
-    echo "tmux session $session has no panes" >&2
-    exit 1
-  fi
-}
-
 parse_args() {
   PARSED_ARGS=()
   local command_started=0
@@ -320,9 +271,13 @@ if [ $# -eq 0 ]; then
   exec "$NIX_BIN" "${NIX_FLAGS[@]}" shell -f "$NIXPKGS_URL" "${NIX_PKGS[@]}" --command env IN_NIX_SHELL=1 TMUX_SESSION_NAME="$SESSION_NAME" bash -lc "$TMUX_START_COMMAND"
 fi
 
-if [ "$1" = "tmux" ] && [ "${2:-}" = "v1" ] && [ "${3:-}" = "logs" ]; then
-  shift 3
-  run_tmux_v1_logs "$@"
+if [ "$1" = "tmux" ] && [ "${2:-}" = "v1" ]; then
+  shift 2
+  if [ "$#" -eq 0 ]; then
+    echo "tmux command is required: ./dialtone2.sh tmux v1 <command>" >&2
+    exit 1
+  fi
+  exec "$NIX_BIN" "${NIX_FLAGS[@]}" shell -f "$NIXPKGS_URL" "${NIX_PKGS[@]}" --command env IN_NIX_SHELL=1 go run ./src/cli.go "$@"
   exit $?
 fi
 
