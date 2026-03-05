@@ -14,7 +14,7 @@
         {
           default = pkgs.mkShell {
             packages = with pkgs; [
-              bash curl git gh openssh go_1_24 gnumake nodejs tmux zsh cloudflared
+              bash curl git gh openssh go_1_24 gnumake nodejs tmux zsh cloudflared codex
             ];
             shellHook = ''
               export DIALTONE_REPO_ROOT=$(pwd)
