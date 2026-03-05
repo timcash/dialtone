@@ -199,6 +199,11 @@ func StartService(natsPort, chromePort, wsPort int) error {
 }
 
 func FindChromePath() string {
-	if runtime.GOOS == "windows" { return os.Getenv("ProgramFiles") + "\\Google\\Chrome\\Application\\chrome.exe" }
+	if runtime.GOOS == "windows" {
+		return os.Getenv("ProgramFiles") + "\\Google\\Chrome\\Application\\chrome.exe"
+	}
+	if runtime.GOOS == "darwin" {
+		return "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+	}
 	return "google-chrome"
 }
