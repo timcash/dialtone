@@ -23,7 +23,6 @@ import (
 	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
-	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 type modEntry struct {
@@ -36,6 +35,7 @@ type meshNode struct {
 	Aliases        []string `json:"aliases"`
 	User           string   `json:"user"`
 	Host           string   `json:"host"`
+	HostCandidates []string `json:"host_candidates"`
 	Port           string   `json:"port"`
 	OS             string   `json:"os"`
 	RepoCandidates []string `json:"repo_candidates"`
@@ -111,7 +111,7 @@ func printUsage() {
 	fmt.Println("  list")
 	fmt.Println("  status [--name <mod-name>] [--short]")
 	fmt.Println("  sync [--host <name|all|local>] [--repo-dir PATH] [--mod NAME|PATH ...] [--skip-self=true|false]")
-	fmt.Println("  rsync [--mod NAME|PATH ...] [--from <name>] [--repo-dir PATH] [--skip-self=true|false]")
+	fmt.Println("  rsync [--host local|name|all] [--mod NAME|PATH ...] [--repo-dir PATH] [--skip-self=true|false] [--dry-run]")
 	fmt.Println("  sync-ui [--mod NAME|PATH ...] [--from PATH] [--dry-run] [--commit] [--push]")
 	fmt.Println("  gh-create <mod-name> --owner <owner> [--repo-name <name>] [--private|--public]")
 	fmt.Println("  commit --mod <mod-name> [--message <msg>] [--all]")
@@ -838,7 +838,158 @@ func runSync(args []string) error {
 }
 
 func runRsync(args []string) error {
-	return runSync(append([]string{"--host", "all"}, args...))
+	fs := flag.NewFlagSet("mods rsync", flag.ContinueOnError)
+	host := fs.String("host", "all", "target host: local|name|all")
+	repoDir := fs.String("repo-dir", "", "destination repo dir override")
+	skipSelf := fs.Bool("skip-self", true, "skip self when host=all")
+	dryRun := fs.Bool("dry-run", false, "print commands only")
+	var modFilter multiValueFlag
+	fs.Var(&modFilter, "mod", "mod name or path (repeatable)")
+
+	cmdArgs := args
+	if len(cmdArgs) > 0 && !strings.HasPrefix(strings.TrimSpace(cmdArgs[0]), "--") {
+		*host = strings.TrimSpace(cmdArgs[0])
+		cmdArgs = cmdArgs[1:]
+	}
+	if err := fs.Parse(cmdArgs); err != nil {
+		return err
+	}
+
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return err
+	}
+	mods, err := discoverMods(repoRoot)
+	if err != nil {
+		return err
+	}
+	paths, err := selectModPaths(mods, modFilter.values)
+	if err != nil {
+		return err
+	}
+	if len(paths) == 0 {
+		return errors.New("no mods selected")
+	}
+
+	runForNode := func(node meshNode) error {
+		if strings.EqualFold(strings.TrimSpace(node.Name), "local") || strings.EqualFold(strings.TrimSpace(node.Name), "self") {
+			return nil
+		}
+		dstBase := strings.TrimSpace(*repoDir)
+		if dstBase == "" {
+			dstBase = defaultRepoDirForNode(node)
+		}
+		if dstBase == "" {
+			return fmt.Errorf("destination path unresolved for %s", node.Name)
+		}
+		return runRsyncToNode(node, repoRoot, dstBase, paths, *dryRun)
+	}
+
+	target := strings.ToLower(strings.TrimSpace(*host))
+	if target == "" || target == "local" || target == "self" {
+		return nil
+	}
+	if target == "all" {
+		failed := 0
+		for _, node := range listMeshNodes() {
+			if *skipSelf && isSelfMeshNode(node) {
+				fmt.Printf("== %s ==\nSKIP self node\n", node.Name)
+				continue
+			}
+			fmt.Printf("== %s ==\n", node.Name)
+			if err := runForNode(node); err != nil {
+				failed++
+				fmt.Printf("ERROR: %v\n", err)
+			}
+		}
+		if failed > 0 {
+			return fmt.Errorf("rsync finished with %d host failures", failed)
+		}
+		return nil
+	}
+	node, err := resolveMeshNode(target)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("== %s ==\n", node.Name)
+	return runForNode(node)
+}
+
+func runRsyncToNode(node meshNode, repoRoot, destinationBase string, paths []string, dryRun bool) error {
+	destUser := strings.TrimSpace(node.User)
+	if destUser == "" {
+		destUser = strings.TrimSpace(os.Getenv("USER"))
+	}
+	destPort := strings.TrimSpace(node.Port)
+	if destPort == "" {
+		destPort = "22"
+	}
+
+	hosts := []string{strings.TrimSpace(node.Host)}
+	for _, candidate := range node.HostCandidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		dup := false
+		for _, existing := range hosts {
+			if existing == candidate {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			hosts = append(hosts, candidate)
+		}
+	}
+
+	lastErr := error(nil)
+	targetBase := filepath.Clean(destinationBase)
+	for _, host := range hosts {
+		if host == "" {
+			continue
+		}
+		hostTarget := fmt.Sprintf("%s@%s", destUser, host)
+		sshArgs := []string{"-F", "/dev/null", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR", "-o", "GSSAPIAuthentication=no"}
+		if destPort != "" && destPort != "22" {
+			sshArgs = append(sshArgs, "-p", destPort)
+		}
+		sshCmd := "ssh " + strings.Join(sshArgs, " ")
+
+		for _, p := range paths {
+			relPath := filepath.ToSlash(filepath.Clean(p))
+			src := filepath.ToSlash(filepath.Join(repoRoot, filepath.FromSlash(p)))
+			dst := filepath.ToSlash(filepath.Join(targetBase, relPath))
+			args := []string{
+				"--archive",
+				"--compress",
+				"--checksum",
+				"--delete",
+				"--prune-empty-dirs",
+				"--filter=:- .gitignore",
+				"--filter=:- .git/info/exclude",
+				"--exclude=.git",
+				"-e",
+				sshCmd,
+				src + "/",
+				hostTarget + ":" + dst + "/",
+			}
+			if dryRun {
+				fmt.Printf("[DRY-RUN] rsync %s\n", strings.Join(args, " "))
+				continue
+			}
+			rsyncArgs := append([]string{"rsync"}, args...)
+			if err := runCommand(rsyncArgs...); err != nil {
+				lastErr = err
+				break
+			}
+		}
+		if lastErr == nil {
+			return nil
+		}
+		break
+	}
+	return lastErr
 }
 
 func runSyncUI(args []string) error {
@@ -1172,50 +1323,87 @@ func resolveMeshNode(target string) (meshNode, error) {
 }
 
 func runSSH(node meshNode, command string) (string, error) {
-	port := strings.TrimSpace(node.Port)
-	if port == "" {
-		port = "22"
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return "", err
 	}
-	user := strings.TrimSpace(node.User)
-	if user == "" {
-		user = "git"
+	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
+	if goBin == "" {
+		goBin = "go"
 	}
-	host := strings.TrimSpace(node.Host)
-	if host == "" {
-		return "", fmt.Errorf("mesh node %s has empty host", node.Name)
+	dialtone2Path := filepath.Join(repoRoot, "dialtone2.sh")
+	targetUser := strings.TrimSpace(node.User)
+	if targetUser == "" {
+		targetUser = strings.TrimSpace(os.Getenv("USER"))
 	}
-	authMethods := sshAuthMethods(user)
-	if len(authMethods) == 0 {
-		return "", errors.New("no SSH auth methods available (agent/key)")
+	remotePort := strings.TrimSpace(node.Port)
+	if remotePort == "" {
+		remotePort = "22"
 	}
-	hostCB := ssh.InsecureIgnoreHostKey()
-	if home, err := os.UserHomeDir(); err == nil {
-		kh := filepath.Join(home, ".ssh", "known_hosts")
-		if cb, err := knownhosts.New(kh); err == nil {
-			hostCB = cb
+
+	hosts := []string{strings.TrimSpace(node.Host)}
+	for _, candidate := range node.HostCandidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		found := false
+		for _, existing := range hosts {
+			if candidate == existing {
+				found = true
+				break
+			}
+		}
+		if !found {
+			hosts = append(hosts, candidate)
 		}
 	}
-	cfg := &ssh.ClientConfig{
-		User:            user,
-		Auth:            authMethods,
-		HostKeyCallback: hostCB,
-		Timeout:         8 * time.Second,
+
+	var lastErr error
+	for _, host := range hosts {
+		if host == "" {
+			continue
+		}
+		sshArgs := []string{"ssh", "v1", "run", "--host", host}
+		if targetUser != "" {
+			sshArgs = append(sshArgs, "--user", targetUser)
+		}
+		if remotePort != "" {
+			sshArgs = append(sshArgs, "--port", remotePort)
+		}
+		sshArgs = append(sshArgs, "--command", command)
+
+		goArgs := append([]string{"run", "./src/cli.go"}, sshArgs...)
+
+		var cmd *exec.Cmd
+		if fileExists(dialtone2Path) {
+			cmd = exec.Command(dialtone2Path, sshArgs...)
+		} else {
+			cmd = exec.Command(goBin, goArgs...)
+		}
+		cmd.Dir = repoRoot
+		var out bytes.Buffer
+		var errOut bytes.Buffer
+		cmd.Stdout = &out
+		cmd.Stderr = &errOut
+		if err := cmd.Run(); err == nil {
+			return out.String(), nil
+		} else {
+			msg := strings.TrimSpace(errOut.String())
+			if msg == "" {
+				msg = strings.TrimSpace(out.String())
+			}
+			if msg == "" {
+				lastErr = err
+			} else {
+				lastErr = fmt.Errorf("%w: %s", err, msg)
+			}
+		}
 	}
-	client, err := ssh.Dial("tcp", host+":"+port, cfg)
-	if err != nil {
-		return "", err
+	if lastErr != nil {
+		return "", lastErr
 	}
-	defer client.Close()
-	sess, err := client.NewSession()
-	if err != nil {
-		return "", err
-	}
-	defer sess.Close()
-	var out bytes.Buffer
-	sess.Stdout = &out
-	sess.Stderr = &out
-	err = sess.Run(command)
-	return out.String(), err
+	return "", fmt.Errorf("ssh to %s failed", node.Name)
 }
 
 func defaultRepoDirForNode(node meshNode) string {
