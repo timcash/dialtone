@@ -7,7 +7,7 @@ cd "$SCRIPT_DIR"
 NIX_BIN=""
 NIX_FLAGS=(--extra-experimental-features "nix-command")
 NIXPKGS_URL="${NIXPKGS_URL:-https://channels.nixos.org/nixpkgs-unstable/nixexprs.tar.xz}"
-NIX_PKGS=(bashInteractive openssh go git tmux tailscale)
+NIX_PKGS=(bashInteractive openssh go git tmux tailscale codex)
 SSH_COMMON_OPTS=( -F /dev/null
   -o BatchMode=yes
   -o StrictHostKeyChecking=no
@@ -199,6 +199,7 @@ infer_tailnet_host() {
 tmux_session_for_host() {
   local host="${1:-}"
   host="$(normalize_host "$host")"
+  host="${host%%.*}"
   host="${host//./_}"
   echo "${TMUX_SESSION_PREFIX}${host}"
 }
