@@ -14,6 +14,13 @@ func TestBuildTerminalCommandKeepsInteractiveShell(t *testing.T) {
 	}
 }
 
+func TestBuildLocalTypedCommand(t *testing.T) {
+	cmd := buildLocalTypedCommand("echo hi", "/tmp/repo")
+	if cmd != "cd '/tmp/repo' && echo hi" {
+		t.Fatalf("unexpected local typed command: %q", cmd)
+	}
+}
+
 func TestBuildLocalLauncherScriptCommandIncludesInteractiveCommand(t *testing.T) {
 	repoRoot, err := locateRepoRoot()
 	if err != nil {
@@ -26,7 +33,7 @@ func TestBuildLocalLauncherScriptCommandIncludesInteractiveCommand(t *testing.T)
 		"",
 		"",
 		"",
-		"echo hi; exec /bin/bash -i",
+		"echo hi",
 	)
 	if err != nil {
 		t.Fatalf("build launcher command: %v", err)
@@ -38,15 +45,15 @@ func TestBuildLocalLauncherScriptCommandIncludesInteractiveCommand(t *testing.T)
 	if !strings.Contains(cmd, "-WslPath 'C:\\Windows\\System32\\wsl.exe'") {
 		t.Fatalf("launcher command missing resolved wsl path: %q", cmd)
 	}
-	if !strings.Contains(cmd, "-CommandText 'echo hi; exec /bin/bash -i'") {
-		t.Fatalf("launcher command missing interactive command text: %q", cmd)
+	if !strings.Contains(cmd, "-CommandText 'echo hi'") {
+		t.Fatalf("launcher command missing typed command text: %q", cmd)
 	}
 	if !strings.Contains(cmd, "-LogPath 'C:\\Users\\Public\\dialtone-typing-terminal.log'") {
 		t.Fatalf("launcher command missing default windows log path: %q", cmd)
 	}
 }
 
-func TestLauncherScriptUsesInteractiveBashRunner(t *testing.T) {
+func TestLauncherScriptUsesQueueReuse(t *testing.T) {
 	repoRoot, err := locateRepoRoot()
 	if err != nil {
 		t.Fatalf("locate repo root: %v", err)
@@ -59,10 +66,16 @@ func TestLauncherScriptUsesInteractiveBashRunner(t *testing.T) {
 	}
 	text := string(body)
 
-	if !strings.Contains(text, "'-e', 'bash', '-ic'") {
-		t.Fatalf("script does not launch bash in interactive command mode")
+	if !strings.Contains(text, ".queue.txt") {
+		t.Fatalf("script missing queue file")
 	}
-	if !strings.Contains(text, "exec /bin/bash -i") {
-		t.Fatalf("script does not keep interactive shell open")
+	if !strings.Contains(text, ".state.json") {
+		t.Fatalf("script missing state file for window reuse")
+	}
+	if !strings.Contains(text, "Invoke-Expression $cmd") {
+		t.Fatalf("script does not execute queued commands")
+	}
+	if !strings.Contains(text, "Start-Process -FilePath 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'") {
+		t.Fatalf("script does not launch powershell window")
 	}
 }

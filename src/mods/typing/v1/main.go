@@ -166,6 +166,7 @@ func runTerminal(argv []string) error {
 	if isLocalWindowsTerminal && strings.TrimSpace(*repoPath) == "" {
 		localRepoPath = ""
 	}
+	typedLocalCommand := buildLocalTypedCommand(strings.TrimSpace(*command), localRepoPath)
 	terminalCommand := buildTerminalCommand(strings.TrimSpace(*command), localRepoPath)
 	trimmedWTP := strings.TrimSpace(*windowsTerminalProfile)
 	localPowerShellPath := strings.TrimSpace(*powershellPath)
@@ -176,7 +177,7 @@ func runTerminal(argv []string) error {
 	if *dryRun {
 		fmt.Printf("typing target: %s\n", targetAddr)
 		if isLocalWindowsTerminal {
-			scriptCommand, err := buildLocalLauncherScriptCommand(repoRoot, localWSLPath, localTerminalPath, trimmedWTP, localLogPath, trimForLocalPowerShellTerminal(terminalCommand))
+			scriptCommand, err := buildLocalLauncherScriptCommand(repoRoot, localWSLPath, localTerminalPath, trimmedWTP, localLogPath, typedLocalCommand)
 			if err != nil {
 				return err
 			}
@@ -196,7 +197,7 @@ func runTerminal(argv []string) error {
 	}
 
 	if isLocalWindowsTerminal {
-		return runTypingLocalPowerShellSession(repoRoot, terminalCommand, localPowerShellPath, localTerminalPath, localWSLPath, trimmedWTP, localLogPath)
+		return runTypingLocalPowerShellSession(repoRoot, typedLocalCommand, localPowerShellPath, localTerminalPath, localWSLPath, trimmedWTP, localLogPath)
 	}
 	if shouldUsePowerShellForTypingNode(target) {
 		return runTypingPowerShellSession(targetAddr, target.Port, terminalCommand, localPowerShellPath)
@@ -457,6 +458,17 @@ func buildTerminalCommand(command, repoPath string) string {
 		return tail
 	}
 	return strings.Join(setup, " && ") + "; " + tail
+}
+
+func buildLocalTypedCommand(command, repoPath string) string {
+	parts := []string{}
+	if repoPath != "" {
+		parts = append(parts, "cd "+shellQuoteForShell(repoPath))
+	}
+	if strings.TrimSpace(command) != "" {
+		parts = append(parts, strings.TrimSpace(command))
+	}
+	return strings.Join(parts, " && ")
 }
 
 func shouldUsePowerShellForTypingNode(node typingMeshNode) bool {
