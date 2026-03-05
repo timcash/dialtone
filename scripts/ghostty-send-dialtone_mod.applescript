@@ -1,12 +1,12 @@
 on run argv
     -- Usage:
-    --   osascript ghostty-send-dialtone2.applescript [command] [host] [user] [repoPath]
+    --   osascript ghostty-send-dialtone_mod.applescript [command] [host] [user] [repoPath]
     --
     -- Default behavior sends:
-    --   ssh -tt user@gold.shad-artichoke.ts.net 'cd /Users/user/dialtone && ./dialtone2.sh'
+    --   ssh -tt user@gold.shad-artichoke.ts.net 'cd /Users/user/dialtone && ./dialtone_mod'
     -- into the active Ghostty window.
 
-    set cmd to "./dialtone2.sh"
+    set cmd to "./dialtone_mod"
     if (count of argv) > 0 then
         set cmd to item 1 of argv
     end if

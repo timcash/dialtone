@@ -2,12 +2,12 @@
 
 The `tmux` mod provides lightweight, remote tmux log retrieval for Dialtone hosts.
 It is designed to read scrollback from a running tmux session on a remote node
-over SSH (via the transport used by `dialtone2.sh`).
+over SSH (via the transport used by `dialtone_mod`).
 
 ## Command API
 
 ```bash
-./dialtone2.sh tmux v1 logs [--host <name|ip>] [--user <user>] [--port <port>] [--session <tmux-session>] [--pane <window.pane>] [--lines <n>] [--dry-run]
+./dialtone_mod tmux v1 logs [--host <name|ip>] [--user <user>] [--port <port>] [--session <tmux-session>] [--pane <window.pane>] [--lines <n>] [--dry-run]
 ```
 
 ## `logs` command
@@ -41,11 +41,11 @@ Captures tmux scrollback from a remote host and prints it to stdout.
 
 ```bash
 # Read the last 10 lines from the gold host's default tmux session
-./dialtone2.sh tmux v1 logs --host gold
+./dialtone_mod tmux v1 logs --host gold
 
 # Read 40 lines from a specific session/pane on gold
-./dialtone2.sh tmux v1 logs --host gold --session dialtone-gold --pane 0.0 --lines 40
+./dialtone_mod tmux v1 logs --host gold --session dialtone-gold --pane 0.0 --lines 40
 
 # Inspect command generated remotely without executing
-./dialtone2.sh tmux v1 logs --host gold --dry-run
+./dialtone_mod tmux v1 logs --host gold --dry-run
 ```

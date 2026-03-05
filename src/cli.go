@@ -114,10 +114,10 @@ func isVersionArg(v string) bool {
 }
 
 func printUsage(repoRoot string) {
-	fmt.Println("Usage: ./dialtone2.sh <mod-name> <version> <command> [args]")
+	fmt.Println("Usage: ./dialtone_mod <mod-name> <version> <command> [args]")
 	fmt.Println("Examples:")
-	fmt.Println("  ./dialtone2.sh mods v1 help")
-	fmt.Println("  ./dialtone2.sh mesh v3 help")
+	fmt.Println("  ./dialtone_mod mods v1 help")
+	fmt.Println("  ./dialtone_mod mesh v3 help")
 	listAvailableMods(filepath.Join(repoRoot, "src", "mods"))
 }
 
@@ -210,7 +210,7 @@ func runMeshV3(meshRoot string, args []string) error {
 }
 
 func printMeshV3Usage() {
-	fmt.Println("Usage: ./dialtone2.sh mesh v3 <command> [args]")
+	fmt.Println("Usage: ./dialtone_mod mesh v3 <command> [args]")
 	fmt.Println("")
 	fmt.Println("Commands:")
 	fmt.Println("  install                                       Prepare nix development dependencies for mesh v3")

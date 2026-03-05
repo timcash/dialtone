@@ -44,7 +44,7 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println("Usage: ./dialtone2.sh mod v1 <install|build|format|test> [args]")
+	fmt.Println("Usage: ./dialtone_mod mod v1 <install|build|format|test> [args]")
 	fmt.Println("")
 	fmt.Println("Commands:")
 	fmt.Println("  install                                  Prepare shell environment (nix develop)")

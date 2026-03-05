@@ -301,7 +301,7 @@ if [ -z "${repo_root}" ] || [ ! -d "${repo_root}" ]; then
   exit 1
 fi
 cd "$repo_root"
-./dialtone2.sh'
+./dialtone_mod'
   if [ -n "$arg_line" ]; then
     remote_cmd="${remote_cmd} ${arg_line}"
   fi
@@ -491,7 +491,7 @@ fi
 if [ "$1" = "tmux" ] && [ "${2:-}" = "v1" ]; then
   shift 2
   if [ "$#" -eq 0 ]; then
-    echo "tmux command is required: ./dialtone2.sh tmux v1 <command>" >&2
+    echo "tmux command is required: ./dialtone_mod tmux v1 <command>" >&2
     exit 1
   fi
   exec "$NIX_BIN" "${NIX_FLAGS[@]}" shell -f "$NIXPKGS_URL" "${NIX_PKGS[@]}" --command env IN_NIX_SHELL=1 go run ./src/cli.go tmux v1 "$@"

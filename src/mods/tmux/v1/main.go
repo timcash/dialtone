@@ -320,7 +320,7 @@ func locateRepoRoot() (string, error) {
 }
 
 func printUsage() {
-	fmt.Println("Usage: ./dialtone2.sh tmux v1 <command> [args]")
+	fmt.Println("Usage: ./dialtone_mod tmux v1 <command> [args]")
 	fmt.Println("")
 	fmt.Println("Commands:")
 	fmt.Println("  logs --host <name|ip> [--user USER] [--port PORT]")

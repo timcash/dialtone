@@ -51,7 +51,7 @@ func TestSSHParseArgsHostFallbackFromRunPrefix(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(meshPath), 0o755); err != nil {
 		t.Fatalf("mkdir env dir failed: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmp, "dialtone2.sh"), []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(tmp, "dialtone_mod"), []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
 		t.Fatalf("write dialtone entrypoint failed: %v", err)
 	}
 	if err := os.WriteFile(meshPath, []byte(`[{"name":"gold","aliases":["gold"],"host":"10.0.0.1","user":"alice","port":"22"}]`), 0o644); err != nil {
@@ -208,7 +208,7 @@ func TestSSHDryRunDoesNotExecute(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(tmp, "env"), 0o755); err != nil {
 		t.Fatalf("mkdir env failed: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmp, "dialtone2.sh"), []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(tmp, "dialtone_mod"), []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
 		t.Fatalf("write dialtone entrypoint failed: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(tmp, "env/mesh.json"), []byte(`[{"name":"gold","aliases":["gold"],"host":"10.0.0.1","user":"alice","port":"22"}]`), 0o644); err != nil {

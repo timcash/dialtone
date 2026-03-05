@@ -14,7 +14,7 @@ func locateRepoRoot() (string, error) {
 	}
 	cwd = filepath.Clean(cwd)
 	for {
-		if _, err := os.Stat(filepath.Join(cwd, "dialtone2.sh")); err == nil {
+		if _, err := os.Stat(filepath.Join(cwd, "dialtone_mod")); err == nil {
 			return cwd, nil
 		}
 		parent := filepath.Dir(cwd)

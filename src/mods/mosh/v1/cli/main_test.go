@@ -307,7 +307,7 @@ func TestMoshV1RemoteConnectDryRunSSH(t *testing.T) {
 			continue
 		}
 		t.Run("host="+h, func(t *testing.T) {
-			cmd := "cd /Users/user/dialtone 2>/dev/null || cd /home/user/dialtone 2>/dev/null || cd ~/dialtone; ./dialtone2.sh -- mosh v1 connect --host " + h + " --dry-run"
+			cmd := "cd /Users/user/dialtone 2>/dev/null || cd /home/user/dialtone 2>/dev/null || cd ~/dialtone; ./dialtone_mod -- mosh v1 connect --host " + h + " --dry-run"
 			output, err := runRemoteCommand(h, cmd)
 			if err != nil {
 				t.Fatalf("remote mosh connect dry run failed for %s: %v", h, err)

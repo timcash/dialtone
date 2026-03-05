@@ -6,7 +6,7 @@ It is intentionally **non-plugin based**: `src/cli.go` is the orchestrator, and 
 ## Mod Contract
 
 - `src/cli.go` is responsible only for command routing.
-  - It resolves `./dialtone2.sh <mod-name> <version> <command> [args]`.
+  - It resolves `./dialtone_mod <mod-name> <version> <command> [args]`.
   - It does not execute mod logic directly.
   - It launches the mod entrypoint as a subprocess (`go run <entry> ...`).
 - Mod behavior lives in `src/mods/<mod>/<version>/cli/*.go`.
@@ -35,7 +35,7 @@ import (
 
 func main() {
   if len(os.Args) < 2 {
-    fmt.Println("Usage: ./dialtone2.sh my_mod v1 <command> [args]")
+    fmt.Println("Usage: ./dialtone_mod my_mod v1 <command> [args]")
     return
   }
   switch os.Args[1] {
@@ -57,66 +57,66 @@ EOF
 go run ./src/mods/my_mod/v1/cli help
 
 # 4) Validate mod orchestration
-./dialtone2.sh mods v1 list
-./dialtone2.sh my_mod v1 install
-./dialtone2.sh my_mod v1 build
-./dialtone2.sh my_mod v1 format
-./dialtone2.sh my_mod v1 test
+./dialtone_mod mods v1 list
+./dialtone_mod my_mod v1 install
+./dialtone_mod my_mod v1 build
+./dialtone_mod my_mod v1 format
+./dialtone_mod my_mod v1 test
 ```
 
 ## Orchestration (mods v1)
 
-- `mods v1` should be run inside the Nix shell via `dialtone2.sh` unless you are intentionally bypassing it.
-  - Recommended: `./dialtone2.sh mods v1 <command> [args]`
+- `mods v1` should be run inside the Nix shell via `dialtone_mod` unless you are intentionally bypassing it.
+  - Recommended: `./dialtone_mod mods v1 <command> [args]`
 - Core workflow:
-  - `./dialtone2.sh mods v1 list`
+  - `./dialtone_mod mods v1 list`
     - List all registered mods discovered under `src/mods/*`.
-  - `./dialtone2.sh mods v1 status [--name <mod-name>] [--short]`
+  - `./dialtone_mod mods v1 status [--name <mod-name>] [--short]`
     - Show status for parent repo and known mods.
-  - `./dialtone2.sh mods v1 commit [--mod <mod-name>] [--message <msg>] [--all]`
+  - `./dialtone_mod mods v1 commit [--mod <mod-name>] [--message <msg>] [--all]`
     - Commit in target mod or parent repo.
-  - `./dialtone2.sh mods v1 push [--mod <mod-name>] [--message <msg>] [--dry-run]`
+  - `./dialtone_mod mods v1 push [--mod <mod-name>] [--message <msg>] [--dry-run]`
     - Push one mod, or all dirty mods + parent submodule pointers.
-  - `./dialtone2.sh mods v1 pull [--host <name|all|local>] [--from <name>] [--branch <branch>] [--source PATH] [--dest PATH] [--repo-dir PATH] [--skip-self=true|false] [--dry-run]`
+  - `./dialtone_mod mods v1 pull [--host <name|all|local>] [--from <name>] [--branch <branch>] [--source PATH] [--dest PATH] [--repo-dir PATH] [--skip-self=true|false] [--dry-run]`
     - Pull updates from remote mesh nodes (or local), fallback to GitHub if needed.
-  - `./dialtone2.sh mods v1 sync [--host <name|all|local>] [--repo-dir PATH] [--mod NAME|PATH ...] [--skip-self=true|false]`
+  - `./dialtone_mod mods v1 sync [--host <name|all|local>] [--repo-dir PATH] [--mod NAME|PATH ...] [--skip-self=true|false]`
     - Sync selected submodules for selected targets.
-  - `./dialtone2.sh mods v1 rsync [--host <local|name|all>] [--all-repo] [--mod NAME|PATH ...] [--repo-dir PATH] [--skip-self=true|false] [--dry-run]`
+  - `./dialtone_mod mods v1 rsync [--host <local|name|all>] [--all-repo] [--mod NAME|PATH ...] [--repo-dir PATH] [--skip-self=true|false] [--dry-run]`
     - Performs true `rsync` to selected hosts.
     - Uses an auto-generated `--exclude-from` file from `git` ignore rules (`.gitignore`, `.git/info/exclude`, global+XDG excludes where configured).
     - Keeps `.git` content out and preserves ignored-file filtering for each sync path.
     - Respects nested mod `.gitignore` when syncing submodules.
-  - `./dialtone2.sh mods v1 new <mod-name> [--repo ...] [--path src/mods/<name>] [--branch main] [--public|--private]`
+  - `./dialtone_mod mods v1 new <mod-name> [--repo ...] [--path src/mods/<name>] [--branch main] [--public|--private]`
     - Create a new mod workspace and submodule pointer.
-  - `./dialtone2.sh mods v1 add --mod <mod-name> <paths...>`
+  - `./dialtone_mod mods v1 add --mod <mod-name> <paths...>`
     - Stage paths directly in a mod repo (or parent if omitted).
-  - `./dialtone2.sh mods v1 sync-ui [--mod ...] [--from PATH] [--dry-run] [--commit] [--push]`
+  - `./dialtone_mod mods v1 sync-ui [--mod ...] [--from PATH] [--dry-run] [--commit] [--push]`
     - Interactive helper for local sync with optional commit/push.
-  - `./dialtone2.sh mods v1 clone [--host <name|all|local>] [--from wsl] [--source PATH] [--dest PATH] [--branch BRANCH] [--branch-map host=branch] [--skip-self=true|false] [--dry-run]`
+  - `./dialtone_mod mods v1 clone [--host <name|all|local>] [--from wsl] [--source PATH] [--dest PATH] [--branch BRANCH] [--branch-map host=branch] [--skip-self=true|false] [--dry-run]`
     - Clone/sync the dialtone repo across targets and then update mod submodules.
-  - `./dialtone2.sh mods v1 gh-create <mod-name> --owner <owner> [--repo-name <name>] [--private|--public]`
+  - `./dialtone_mod mods v1 gh-create <mod-name> --owner <owner> [--repo-name <name>] [--private|--public]`
     - Create GitHub repos for a mod when needed.
 
 ## Typical `mods v1` patterns
 
 - Make all host changes visible first:
-  - `./dialtone2.sh mods v1 pull --host all --dry-run`
-  - `./dialtone2.sh mods v1 pull --host all`
+  - `./dialtone_mod mods v1 pull --host all --dry-run`
+  - `./dialtone_mod mods v1 pull --host all`
 - Sync just a specific mod:
-  - `./dialtone2.sh mods v1 sync --host gold --mod mosh`
-  - `./dialtone2.sh mods v1 rsync --host gold --mod mosh`
+  - `./dialtone_mod mods v1 sync --host gold --mod mosh`
+  - `./dialtone_mod mods v1 rsync --host gold --mod mosh`
 - Gold sync uses the same command form:
-  - `./dialtone2.sh mods v1 rsync gold --mod mesh`
+  - `./dialtone_mod mods v1 rsync gold --mod mesh`
 - Sync entire repo (all files, including submodules checked out under mod paths):
-  - `./dialtone2.sh mods v1 rsync gold --all-repo`
+  - `./dialtone_mod mods v1 rsync gold --all-repo`
 - Push parent + child modules in separate steps:
-  - `./dialtone2.sh mods v1 commit --all --message "Update mod tooling"`
-  - `./dialtone2.sh mods v1 push --message "Update mod tooling"`
+  - `./dialtone_mod mods v1 commit --all --message "Update mod tooling"`
+  - `./dialtone_mod mods v1 push --message "Update mod tooling"`
 
 ## Nix + remote execution note
 
-- When `runSSH` is used internally, remote commands are now executed by running `ssh v1` through `dialtone2.sh` when available, so remote execution matches local CLI behavior.
-- If `dialtone2.sh` is not present on a host, fallback is `go run ./src/cli.go`, which bypasses `dialtone2` and may miss the pinned Nix shell behavior.
+- When `runSSH` is used internally, remote commands are now executed by running `ssh v1` through `dialtone_mod` when available, so remote execution matches local CLI behavior.
+- If `dialtone_mod` is not present on a host, fallback is `go run ./src/cli.go`, which bypasses `dialtone_mod` and may miss the pinned Nix shell behavior.
 
 ## Mesh and Git Safety
 
@@ -126,7 +126,7 @@ go run ./src/mods/my_mod/v1/cli help
 ## Note on Other Mods
 
 Example mod entrypoints currently available:
-- `./dialtone2.sh mesh v1 <command>`
-- `./dialtone2.sh mosh v1 <command>`
-- `./dialtone2.sh tsnet v1 <command>`
-- `./dialtone2.sh mods v1 <command>`
+- `./dialtone_mod mesh v1 <command>`
+- `./dialtone_mod mosh v1 <command>`
+- `./dialtone_mod tsnet v1 <command>`
+- `./dialtone_mod mods v1 <command>`

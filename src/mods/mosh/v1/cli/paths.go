@@ -9,7 +9,7 @@ import (
 func locateRepoRoot() (string, error) {
 	if envRoot := os.Getenv("DIALTONE_REPO_ROOT"); envRoot != "" {
 		candidate := filepath.Clean(envRoot)
-		if _, err := os.Stat(filepath.Join(candidate, "dialtone2.sh")); err == nil {
+		if _, err := os.Stat(filepath.Join(candidate, "dialtone_mod")); err == nil {
 			return candidate, nil
 		}
 	}
@@ -20,7 +20,7 @@ func locateRepoRoot() (string, error) {
 	}
 	cwd = filepath.Clean(cwd)
 	for {
-		if _, err := os.Stat(filepath.Join(cwd, "dialtone2.sh")); err == nil {
+		if _, err := os.Stat(filepath.Join(cwd, "dialtone_mod")); err == nil {
 			return cwd, nil
 		}
 		parent := filepath.Dir(cwd)
