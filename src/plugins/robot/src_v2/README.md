@@ -4,12 +4,15 @@ This document is the end-to-end operating workflow for `robot src_v2`:
 - edit code
 - test locally
 - publish artifacts
-- run/update on robot through autoswap + manifest
+- run/update on robot through autoswap + published release artifacts
 - verify with diagnostics
 - expose UI through local WSL relay
 
 ```bash
 # From repo root: /home/user/dialtone
+
+# Prefer direct-link fallback when WiFi is down:
+# ./dialtone.sh robot src_v2 ... --host link-local
 
 # Core local workflow
 ./dialtone.sh robot src_v2 install
@@ -27,12 +30,17 @@ This document is the end-to-end operating workflow for `robot src_v2`:
 # Publish release artifacts
 ./dialtone.sh robot src_v2 publish --repo timcash/dialtone
 
-# Deploy/update autoswap runtime on robot
-./dialtone.sh autoswap src_v1 deploy --host rover --user tim --service --repo timcash/dialtone --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_composition_manifest.json
+# Install/update autoswap runtime on robot
+./dialtone.sh autoswap src_v1 deploy --host rover --user tim --service --repo timcash/dialtone --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_channel.json
+
+# Build and publish release artifacts from WSL
+./dialtone.sh robot src_v2 publish --repo timcash/dialtone
+
+# Force immediate rover poll instead of waiting for autoswap's interval
 ./dialtone.sh autoswap src_v1 update --host rover --user tim
 
 # Validate runtime and UI integration
-./dialtone.sh robot src_v2 diagnostic --host rover --user tim --browser-node chroma
+./dialtone.sh robot src_v2 diagnostic --host rover --user tim --skip-ui --public-check=false
 
 # Public relay from WSL to robot UI
 ./dialtone.sh robot src_v2 relay --subdomain rover-1 --robot-ui-url http://rover-1:18086 --service
@@ -43,7 +51,7 @@ This document is the end-to-end operating workflow for `robot src_v2`:
 
 ## 1) Architecture Contract
 
-`robot src_v2` runtime is manifest-driven by autoswap:
+`robot src_v2` runtime is autoswap-managed and artifact-executed:
 - `dialtone_autoswap_v1` (only OS service)
 - `dialtone_robot_v2`
 - `dialtone_camera_v1`
@@ -55,7 +63,7 @@ Primary manifest:
 - `src/plugins/robot/src_v2/config/composition.manifest.json`
 
 Important rule:
-- Robot runtime must work without source repo on robot host. Runtime must come from manifest + downloaded/installed artifacts.
+- Robot runtime comes from release artifacts downloaded by autoswap. The rover does not need to build the runtime from source during normal updates.
 
 ## 2) Prerequisites
 
@@ -178,7 +186,7 @@ Use autoswap deploy helper to install/update autoswap on robot and install servi
   --host rover \
   --user tim \
   --service \
-  --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_composition_manifest.json \
+  --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_channel.json \
   --repo timcash/dialtone
 ```
 
@@ -194,6 +202,24 @@ Force immediate update check (instead of waiting poll interval):
 ./dialtone.sh autoswap src_v1 update --host rover --user tim
 ```
 
+Normal field update path:
+```bash
+# 1. Build and publish from WSL
+./dialtone.sh robot src_v2 publish --repo timcash/dialtone
+
+# 2. Let autoswap detect it, or force an immediate poll
+./dialtone.sh autoswap src_v1 update --host rover --user tim
+
+# 3. Verify rover is running downloaded artifacts
+./dialtone.sh robot src_v2 diagnostic --host rover --user tim --skip-ui --public-check=false
+```
+
+Optional rover Nix maintenance checks:
+```bash
+./dialtone.sh robot src_v2 nix-diagnostic --host rover --user tim
+./dialtone.sh robot src_v2 nix-gc --host rover --user tim
+```
+
 ## 7) Robot Diagnostic (Mandatory)
 
 Run full diagnostic against robot host:
@@ -203,6 +229,7 @@ Run full diagnostic against robot host:
 
 Common variants:
 ```bash
+./dialtone.sh robot src_v2 diagnostic --host link-local --user tim --skip-ui --public-check=false
 ./dialtone.sh robot src_v2 diagnostic --host rover --user tim --skip-ui
 ./dialtone.sh robot src_v2 diagnostic --host rover --user tim --ui-url https://rover-1.dialtone.earth --browser-node chroma
 ./dialtone.sh robot src_v2 diagnostic --host rover --user tim --manifest /home/tim/.dialtone/autoswap/manifests/manifest-<hash>.json
@@ -258,5 +285,22 @@ After publish + autoswap update + diagnostic:
 ```
 2. Autoswap status/list on robot.
 3. Robot `src_v2 diagnostic --skip-ui`.
+
+## 12) Deployment Architecture
+
+Current publish flow should be treated as two layers:
+- `robot src_v2 publish` creates immutable versioned release assets
+- publish also writes `robot_src_v2_channel.json`, a stable channel asset that points to the current immutable manifest asset for that release
+- autoswap `deploy` should use the channel URL, not the raw manifest URL
+- autoswap resolves that channel, pins the resulting manifest by digest, then syncs assets into `~/.dialtone/autoswap/artifacts`
+
+For a Nix-based rover runtime, the better field-update model is:
+1. Keep autoswap as the update agent and supervisor over tailscale WLAN.
+2. Publish Nix-backed artifacts alongside the legacy binaries.
+3. Put only immutable release selection and digests in the resolved manifest.
+4. On rover, autoswap should realize the correct Nix outputs for the resolved manifest version, then execute those store paths directly.
+5. Fall back to raw release binaries only when Nix realization is unavailable.
+
+That keeps the mutable part small and network-friendly for mobile rover updates, while keeping the runtime contract immutable once a release is selected.
 4. Full `src_v2 diagnostic` with browser node override.
 5. Relay service status on WSL.
