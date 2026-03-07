@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"dialtone/dev/browser"
 	chrome_app "dialtone/dev/plugins/chrome/src_v1/go"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
@@ -38,7 +37,7 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 	smokeFile := filepath.Join(pluginDir, "SMOKE.md")
 	port := 8080
 
-	browser.CleanupPort(port)
+	cleanupPort(port)
 	cmd := exec.Command("go", "run", "cmd/main.go")
 	cmd.Dir = pluginDir
 	logFile, _ := os.Create(filepath.Join(pluginDir, "smoke_server.log"))
@@ -316,6 +315,23 @@ func RunSmoke(versionDir string, timeoutSec int) error {
 
 	fmt.Printf(">> [NIX] Smoke: COMPLETE. Report at %s\n", smokeFile)
 	return nil
+}
+
+func cleanupPort(port int) {
+	for _, tool := range []string{"fuser", "lsof"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			continue
+		}
+		switch tool {
+		case "fuser":
+			cmd := exec.Command(tool, "-k", fmt.Sprintf("%d/tcp", port))
+			_ = cmd.Run()
+		case "lsof":
+			cmd := exec.Command("bash", "-lc", fmt.Sprintf("lsof -ti tcp:%d | xargs -r kill -9", port))
+			_ = cmd.Run()
+		}
+		return
+	}
 }
 
 func waitForPort(port int, timeout time.Duration) error {

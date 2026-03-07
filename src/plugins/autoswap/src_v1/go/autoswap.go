@@ -3,6 +3,7 @@ package autoswap
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -21,9 +22,13 @@ import (
 )
 
 type runtimeManifest struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-	Runtime struct {
+	Name             string `json:"name"`
+	Version          string `json:"version"`
+	ReleaseVersion   string `json:"release_version,omitempty"`
+	ManifestAsset    string `json:"manifest_asset,omitempty"`
+	ManifestSHA256   string `json:"manifest_sha256,omitempty"`
+	ReleasePublished string `json:"release_published_at,omitempty"`
+	Runtime          struct {
 		Binary    string            `json:"binary"`
 		Processes []manifestProcess `json:"processes"`
 	} `json:"runtime"`
@@ -33,6 +38,17 @@ type runtimeManifest struct {
 	} `json:"artifacts"`
 }
 
+type manifestChannel struct {
+	SchemaVersion  string `json:"schema_version"`
+	Name           string `json:"name"`
+	Channel        string `json:"channel"`
+	Repo           string `json:"repo,omitempty"`
+	ReleaseVersion string `json:"release_version"`
+	ManifestURL    string `json:"manifest_url"`
+	ManifestSHA256 string `json:"manifest_sha256,omitempty"`
+	PublishedAt    string `json:"published_at,omitempty"`
+}
+
 type manifestProcess struct {
 	Name      string            `json:"name"`
 	Artifact  string            `json:"artifact"`
@@ -40,6 +56,14 @@ type manifestProcess struct {
 	Args      []string          `json:"args"`
 	Env       map[string]string `json:"env"`
 	DependsOn []string          `json:"depends_on"`
+	Nix       *manifestNix      `json:"nix,omitempty"`
+}
+
+type manifestNix struct {
+	Installable string   `json:"installable,omitempty"`
+	Develop     string   `json:"develop,omitempty"`
+	Command     []string `json:"command,omitempty"`
+	Impure      bool     `json:"impure,omitempty"`
 }
 
 type releaseBinding struct {
@@ -247,6 +271,10 @@ func Run(args []string) error {
 func runManifestProcesses(cfg composeConfig, art resolvedArtifacts) error {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
 	defer cancel()
+	expand := makeManifestExpander(art, cfg)
+	if err := prebuildManifestNixInstallables(expand, art.Manifest.Runtime.Processes); err != nil {
+		return err
+	}
 
 	procs, err := buildManagedProcessesFromManifest(ctx, cfg, art)
 	if err != nil {
@@ -258,6 +286,22 @@ func runManifestProcesses(cfg composeConfig, art resolvedArtifacts) error {
 		}
 		defer procs[i].Stop()
 	}
+	runtimeStatePath := strings.TrimSpace(os.Getenv("AUTOSWAP_RUNTIME_STATE"))
+	writeState := func() {
+		if runtimeStatePath == "" {
+			return
+		}
+		_ = writeRuntimeState(runtimeStatePath, runtimeState{
+			UpdatedAt:    time.Now().UTC().Format(time.RFC3339),
+			ManifestPath: cfg.ManifestPath,
+			RepoRoot:     cfg.RepoRoot,
+			Listen:       cfg.Listen,
+			NATSPort:     cfg.NATSPort,
+			NATSWSPort:   cfg.NATSWSPort,
+			Processes:    snapshotManagedProcesses(procs),
+		})
+	}
+	writeState()
 
 	baseURL := "http://127.0.0.1" + cfg.Listen
 	if err := waitHTTP(ctx, baseURL+"/health", http.StatusOK); err != nil {
@@ -270,6 +314,7 @@ func runManifestProcesses(cfg composeConfig, art resolvedArtifacts) error {
 	if cfg.StayRunning {
 		return superviseProcesses(ctx, procs)
 	}
+	writeState()
 	return nil
 }
 
@@ -278,10 +323,11 @@ func buildManagedProcessesFromManifest(ctx context.Context, cfg composeConfig, a
 	if err != nil {
 		return nil, err
 	}
+	expand := makeManifestExpander(art, cfg)
 	out := make([]managedProc, 0, len(ordered))
 	for _, p := range ordered {
 		proc := p
-		cmdArgs, envVars, err := resolveProcessInvocation(proc, art, cfg)
+		cmdArgs, envVars, err := resolveProcessInvocation(proc, expand, art)
 		if err != nil {
 			return nil, err
 		}
@@ -302,17 +348,51 @@ func buildManagedProcessesFromManifest(ctx context.Context, cfg composeConfig, a
 	return out, nil
 }
 
-func resolveProcessInvocation(p manifestProcess, art resolvedArtifacts, cfg composeConfig) ([]string, []string, error) {
+func resolveProcessInvocation(p manifestProcess, expand func(string) string, art resolvedArtifacts) ([]string, []string, error) {
+	cmdArgs := []string{}
+	needsArgSeparator := false
+	if p.Nix != nil {
+		var err error
+		cmdArgs, needsArgSeparator, err = resolveNixProcessInvocation(*p.Nix, expand)
+		if err != nil {
+			return nil, nil, fmt.Errorf("process %s nix invocation invalid: %w", p.Name, err)
+		}
+	} else if len(p.Command) > 0 {
+		for _, c := range p.Command {
+			cmdArgs = append(cmdArgs, expand(c))
+		}
+	} else if strings.TrimSpace(p.Artifact) != "" {
+		target := strings.TrimSpace(art.Sync[p.Artifact])
+		if target == "" {
+			return nil, nil, fmt.Errorf("process %s references unknown artifact %s", p.Name, p.Artifact)
+		}
+		cmdArgs = append(cmdArgs, target)
+	}
+	if needsArgSeparator && len(p.Args) > 0 {
+		cmdArgs = append(cmdArgs, "--")
+	}
+	for _, a := range p.Args {
+		cmdArgs = append(cmdArgs, expand(a))
+	}
+	envVars := []string{}
+	for k, v := range p.Env {
+		envVars = append(envVars, strings.TrimSpace(k)+"="+expand(v))
+	}
+	return cmdArgs, envVars, nil
+}
+
+func makeManifestExpander(art resolvedArtifacts, cfg composeConfig) func(string) string {
 	tokens := map[string]string{
 		"listen":       cfg.Listen,
 		"nats_port":    strconv.Itoa(cfg.NATSPort),
 		"nats_ws_port": strconv.Itoa(cfg.NATSWSPort),
 		"nats_url":     fmt.Sprintf("nats://127.0.0.1:%d", cfg.NATSPort),
+		"repo_root":    art.RepoRoot,
 	}
 	for k, v := range art.Sync {
 		tokens["artifact:"+k] = v
 	}
-	expand := func(v string) string {
+	return func(v string) string {
 		s := strings.TrimSpace(v)
 		for tk, tv := range tokens {
 			s = strings.ReplaceAll(s, "${"+tk+"}", tv)
@@ -332,26 +412,76 @@ func resolveProcessInvocation(p manifestProcess, art resolvedArtifacts, cfg comp
 		}
 		return s
 	}
-	cmdArgs := []string{}
-	if len(p.Command) > 0 {
-		for _, c := range p.Command {
-			cmdArgs = append(cmdArgs, expand(c))
+}
+
+func prebuildManifestNixInstallables(expand func(string) string, processes []manifestProcess) error {
+	nixBin, err := exec.LookPath("nix")
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	installables := make([]string, 0, len(processes))
+	for _, p := range processes {
+		if p.Nix == nil {
+			continue
 		}
-	} else if strings.TrimSpace(p.Artifact) != "" {
-		target := strings.TrimSpace(art.Sync[p.Artifact])
-		if target == "" {
-			return nil, nil, fmt.Errorf("process %s references unknown artifact %s", p.Name, p.Artifact)
+		installable := strings.TrimSpace(expand(p.Nix.Installable))
+		if installable == "" || seen[installable] {
+			continue
 		}
-		cmdArgs = append(cmdArgs, target)
+		seen[installable] = true
+		installables = append(installables, installable)
 	}
-	for _, a := range p.Args {
-		cmdArgs = append(cmdArgs, expand(a))
+	if len(installables) == 0 {
+		return nil
 	}
-	envVars := []string{}
-	for k, v := range p.Env {
-		envVars = append(envVars, strings.TrimSpace(k)+"="+expand(v))
+	args := []string{"--extra-experimental-features", "nix-command flakes", "build"}
+	args = append(args, installables...)
+	cmd := exec.Command(nixBin, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = nil
+	return cmd.Run()
+}
+
+func resolveNixProcessInvocation(spec manifestNix, expand func(string) string) ([]string, bool, error) {
+	nixBin, err := exec.LookPath("nix")
+	if err != nil {
+		return nil, false, fmt.Errorf("nix executable not found in PATH")
 	}
-	return cmdArgs, envVars, nil
+	if installable := strings.TrimSpace(expand(spec.Installable)); installable != "" {
+		args := []string{
+			nixBin,
+			"--extra-experimental-features", "nix-command flakes",
+			"run",
+		}
+		if spec.Impure {
+			args = append(args, "--impure")
+		}
+		args = append(args, installable)
+		return args, true, nil
+	}
+	develop := strings.TrimSpace(expand(spec.Develop))
+	if develop == "" {
+		return nil, false, fmt.Errorf("set nix.installable or nix.develop")
+	}
+	if len(spec.Command) == 0 {
+		return nil, false, fmt.Errorf("nix.develop requires nix.command")
+	}
+	args := []string{
+		nixBin,
+		"--extra-experimental-features", "nix-command flakes",
+		"develop",
+		develop,
+	}
+	if spec.Impure {
+		args = append(args, "--impure")
+	}
+	args = append(args, "--command")
+	for _, part := range spec.Command {
+		args = append(args, expand(part))
+	}
+	return args, false, nil
 }
 
 func orderManifestProcesses(in []manifestProcess) ([]manifestProcess, error) {
@@ -633,28 +763,70 @@ func resolveManifestPath(manifestPath, manifestURL, manifestDir, token string) (
 	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256([]byte(url))
-	fileName := fmt.Sprintf("manifest-%x.json", sum[:8])
-	finalPath := filepath.Join(manifestDir, fileName)
-	tmpPath := finalPath + ".tmp"
-	if err := downloadFile(url, token, tmpPath); err != nil {
+	return resolveManifestPathRecursive(url, manifestDir, token, 0)
+}
+
+func resolveManifestPathRecursive(sourceURL, manifestDir, token string, depth int) (string, error) {
+	if depth > 4 {
+		return "", fmt.Errorf("manifest resolution exceeded redirect depth")
+	}
+	tmpPath := filepath.Join(manifestDir, fmt.Sprintf("manifest-fetch-%d.tmp", time.Now().UnixNano()))
+	if err := downloadFile(sourceURL, token, tmpPath); err != nil {
 		return "", fmt.Errorf("download manifest failed: %w", err)
 	}
 	raw, err := os.ReadFile(tmpPath)
+	_ = os.Remove(tmpPath)
 	if err != nil {
-		_ = os.Remove(tmpPath)
 		return "", err
 	}
-	var mf runtimeManifest
-	if err := json.Unmarshal(raw, &mf); err != nil {
-		_ = os.Remove(tmpPath)
+	return materializeRemoteManifest(raw, sourceURL, manifestDir, token, depth)
+}
+
+func materializeRemoteManifest(raw []byte, sourceURL, manifestDir, token string, depth int) (string, error) {
+	trimmed := []byte(strings.TrimSpace(string(raw)))
+	if len(trimmed) == 0 {
+		return "", fmt.Errorf("manifest download from %s was empty", sourceURL)
+	}
+
+	var probe map[string]any
+	if err := json.Unmarshal(trimmed, &probe); err != nil {
 		return "", fmt.Errorf("manifest parse failed: %w", err)
 	}
-	if err := os.WriteFile(finalPath, raw, 0o644); err != nil {
-		_ = os.Remove(tmpPath)
+	if manifestURL, ok := probe["manifest_url"].(string); ok && strings.TrimSpace(manifestURL) != "" && probe["runtime"] == nil {
+		var channel manifestChannel
+		if err := json.Unmarshal(trimmed, &channel); err != nil {
+			return "", fmt.Errorf("manifest channel parse failed: %w", err)
+		}
+		nextURL := strings.TrimSpace(channel.ManifestURL)
+		if nextURL == "" {
+			return "", fmt.Errorf("manifest channel missing manifest_url")
+		}
+		resolvedPath, err := resolveManifestPathRecursive(nextURL, manifestDir, token, depth+1)
+		if err != nil {
+			return "", err
+		}
+		if expected := normalizeSHA256(channel.ManifestSHA256); expected != "" {
+			got, err := sha256File(resolvedPath)
+			if err != nil {
+				return "", err
+			}
+			if !strings.EqualFold(expected, got) {
+				return "", fmt.Errorf("manifest channel sha256 mismatch: expected=%s got=%s", expected, got)
+			}
+		}
+		return resolvedPath, nil
+	}
+
+	var mf runtimeManifest
+	if err := json.Unmarshal(trimmed, &mf); err != nil {
+		return "", fmt.Errorf("manifest parse failed: %w", err)
+	}
+	sum := sha256.Sum256(trimmed)
+	fileName := fmt.Sprintf("manifest-%s.json", hex.EncodeToString(sum[:8]))
+	finalPath := filepath.Join(manifestDir, fileName)
+	if err := os.WriteFile(finalPath, append(trimmed, '\n'), 0o644); err != nil {
 		return "", err
 	}
-	_ = os.Remove(tmpPath)
 	return finalPath, nil
 }
 

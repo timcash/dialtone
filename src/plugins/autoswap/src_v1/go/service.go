@@ -180,6 +180,9 @@ func runServiceSupervisor(opts serviceOptions) error {
 	runOpts := opts
 	runOpts.ManifestPath = resolvedManifestPath
 	lastManifestFingerprint, _ := sha256File(runOpts.ManifestPath)
+	if err := syncRepoRoot(runOpts.RepoRoot); err != nil {
+		logs.Warn("initial repo sync failed: %v", err)
+	}
 
 	rel, asset, err := latestRelease(opts.Repo, token, assetName)
 	workerVersion := ""
@@ -321,6 +324,9 @@ func runServiceSupervisor(opts serviceOptions) error {
 			artifactsChanged := false
 			nextManifestAssetsFingerprint := releaseAssetsFingerprint(latest.Assets)
 			if manifestChanged || (nextManifestAssetsFingerprint != "" && nextManifestAssetsFingerprint != lastManifestAssetsFingerprint) {
+				if err := syncRepoRoot(runOpts.RepoRoot); err != nil {
+					logs.Warn("repo sync failed before manifest refresh: %v", err)
+				}
 				// Sync manifest artifacts when manifest content changes or release
 				// assets changed, even if the autoswap worker release tag is unchanged.
 				if syncErr := syncManifestReleaseArtifacts(runOpts, latest, token); syncErr != nil {
@@ -418,6 +424,9 @@ func runServiceSupervisor(opts serviceOptions) error {
 				continue
 			}
 			mgr.version = latest.TagName
+			if err := syncRepoRoot(runOpts.RepoRoot); err != nil {
+				logs.Warn("repo sync failed before worker restart: %v", err)
+			}
 			if serr := mgr.startWorker(currentLink, runOpts, runtimeStatePath); serr != nil {
 				logs.Error("restart updated worker failed: %v", serr)
 				_ = writeSupervisorState(supervisorPath, supervisorState{
@@ -448,6 +457,32 @@ func runServiceSupervisor(opts serviceOptions) error {
 			})
 		}
 	}
+}
+
+func syncRepoRoot(repoRoot string) error {
+	repoRoot = strings.TrimSpace(repoRoot)
+	if repoRoot == "" {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(repoRoot, ".git")); err != nil {
+		return nil
+	}
+script := fmt.Sprintf(`set -e
+cd %s
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  exit 0
+fi
+git fetch --all --tags --prune
+branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+if [ -n "$branch" ] && git rev-parse --abbrev-ref --symbolic-full-name "@{u}" >/dev/null 2>&1; then
+  git pull --ff-only --tags
+fi
+rm -rf bin/releases
+find . -path '*/ui/dist' -type d -prune -exec rm -rf {} + 2>/dev/null || true`, shellQuoteArg(repoRoot))
+	cmd := exec.Command("bash", "-lc", script)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 func releaseAssetsFingerprint(assets []releaseAsset) string {
@@ -770,13 +805,20 @@ func normalizeManifestURLForAutoUpdate(rawURL, repo string) (string, bool) {
 	if parts[2] != "releases" || parts[3] != "download" {
 		return rawURL, false
 	}
-	if parts[len(parts)-1] != "robot_src_v2_composition_manifest.json" {
+	assetName := strings.TrimSpace(parts[len(parts)-1])
+	switch assetName {
+	case "robot_src_v2_channel.json", "robot_src_v2_composition_manifest.json":
+	case "":
+		return rawURL, false
+	default:
+		if !strings.HasPrefix(assetName, "robot_src_v2_composition_manifest-") {
+			return rawURL, false
+		}
+	}
+	if parts[4] == "latest" && assetName == "robot_src_v2_channel.json" {
 		return rawURL, false
 	}
-	if parts[4] == "latest" {
-		return rawURL, false
-	}
-	u.Path = "/" + owner + "/" + repoName + "/releases/latest/download/robot_src_v2_composition_manifest.json"
+	u.Path = "/" + owner + "/" + repoName + "/releases/latest/download/robot_src_v2_channel.json"
 	u.RawQuery = ""
 	u.Fragment = ""
 	return u.String(), true
@@ -908,6 +950,9 @@ func (m *serviceManager) startWorker(workerPath string, opts serviceOptions, run
 		args = append(args, "--require-stream=true")
 	} else {
 		args = append(args, "--require-stream=false")
+	}
+	if strings.TrimSpace(runtimeStatePath) != "" {
+		_ = os.Remove(strings.TrimSpace(runtimeStatePath))
 	}
 
 	cmd := exec.Command(workerPath, args...)
@@ -1257,7 +1302,13 @@ func ensureReleaseBinary(installDir, tag string, asset releaseAsset, allAssets [
 	}
 	dstPath := filepath.Join(dstDir, assetName)
 	if _, err := os.Stat(dstPath); err == nil {
-		return dstPath, nil
+		if verr := verifyReleaseAssetChecksum(asset, allAssets, dstPath, token); verr == nil {
+			return dstPath, nil
+		}
+		logs.Warn("release worker asset changed in-place for tag=%s asset=%s; refreshing local copy", sanitizeTag(tag), assetName)
+		if rmErr := os.Remove(dstPath); rmErr != nil && !os.IsNotExist(rmErr) {
+			return "", rmErr
+		}
 	}
 	if strings.TrimSpace(asset.BrowserDownloadURL) == "" {
 		return "", fmt.Errorf("release asset %s has empty download URL", assetName)
@@ -1383,7 +1434,7 @@ func sha256File(path string) (string, error) {
 }
 
 func downloadFile(url, token, outPath string) error {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	req, err := http.NewRequest(http.MethodGet, cacheBustedReleaseURL(url), nil)
 	if err != nil {
 		return err
 	}
@@ -1409,6 +1460,23 @@ func downloadFile(url, token, outPath string) error {
 	defer f.Close()
 	_, err = io.Copy(f, resp.Body)
 	return err
+}
+
+func cacheBustedReleaseURL(rawURL string) string {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return rawURL
+	}
+	if !strings.EqualFold(strings.TrimSpace(u.Hostname()), "github.com") {
+		return rawURL
+	}
+	if !strings.Contains(strings.TrimSpace(u.Path), "/releases/latest/download/") {
+		return rawURL
+	}
+	q := u.Query()
+	q.Set("dialtone_ts", strconv.FormatInt(time.Now().UnixNano(), 10))
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func latestRelease(repo, token, assetName string) (releaseInfo, releaseAsset, error) {

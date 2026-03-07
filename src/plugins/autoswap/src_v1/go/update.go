@@ -74,7 +74,7 @@ func RunUpdate(args []string) error {
 	if err != nil {
 		return fmt.Errorf("remote autoswap update failed: %w", err)
 	}
-	logs.Raw(strings.TrimSpace(out))
+	logs.Raw("%s", strings.TrimSpace(out))
 	logs.Info("[UPDATE] autoswap refresh command completed on %s at %s", node.Name, time.Now().UTC().Format(time.RFC3339))
 	return nil
 }
