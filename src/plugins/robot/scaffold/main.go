@@ -246,6 +246,21 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 			return fmt.Errorf("publish is currently supported only for robot src_v2")
 		}
 		return runSrcV2Publish(repoRoot, args)
+	case "rollout":
+		if version != "src_v2" {
+			return fmt.Errorf("rollout is currently supported only for robot src_v2")
+		}
+		return runSrcV2Rollout(repoRoot, args)
+	case "nix-diagnostic":
+		if version != "src_v2" {
+			return fmt.Errorf("nix-diagnostic is currently supported only for robot src_v2")
+		}
+		return runSrcV2NixDiagnostic(repoRoot, args)
+	case "nix-gc":
+		if version != "src_v2" {
+			return fmt.Errorf("nix-gc is currently supported only for robot src_v2")
+		}
+		return runSrcV2NixGC(args)
 	case "diagnostic":
 		if version != "src_v2" {
 			return fmt.Errorf("diagnostic is currently supported only for robot src_v2")
@@ -364,6 +379,9 @@ func printUsage() {
 	logs.Raw("  sync-watch   Start/stop/status continuous source sync loop to remote host")
 	logs.Raw("  relay       Configure local Cloudflare relay for robot src_v2 UI (rover-1.dialtone.earth)")
 	logs.Raw("  publish      Build/publish robot src_v2 composition artifacts to GitHub release only (default target: linux-arm64)")
+	logs.Raw("  rollout      Publish + autoswap deploy/update + diagnostic for robot src_v2 over mesh SSH")
+	logs.Raw("  nix-diagnostic Verify nix + flake workflow on remote robot host over mesh SSH")
+	logs.Raw("  nix-gc       Run nix garbage collection on remote robot host over mesh SSH")
 	logs.Raw("  diagnostic   Verify robot src_v2 composition binaries/processes/endpoints")
 	logs.Raw("  clean        Remove remote dialtone source/runtime (use --keep-autoswap to preserve autoswap service/bin)")
 	logs.Raw("  deploy-test  Run step-by-step verification on remote robot")
@@ -635,9 +653,268 @@ func runSrcV2Publish(repoRoot string, args []string) error {
 	return nil
 }
 
+func runSrcV2Rollout(repoRoot string, args []string) error {
+	fs := flag.NewFlagSet("robot-src-v2-rollout", flag.ContinueOnError)
+	host := fs.String("host", "rover", "Mesh host for rollout")
+	port := fs.String("port", "", "SSH port override")
+	user := fs.String("user", "", "SSH user override")
+	pass := fs.String("pass", "", "SSH password override")
+	repo := fs.String("repo", "timcash/dialtone", "GitHub repo owner/name")
+	version := fs.String("version", "", "Optional release version/tag override")
+	target := fs.String("target", "linux-arm64", "Release target GOOS-GOARCH")
+	allTargets := fs.Bool("all-targets", false, "Build/publish all release targets")
+	uiOnly := fs.Bool("ui", false, "Publish only UI assets")
+	skipPublish := fs.Bool("skip-publish", false, "Skip publish step")
+	skipDeploy := fs.Bool("skip-deploy", false, "Skip autoswap deploy step")
+	skipUpdate := fs.Bool("skip-update", false, "Skip autoswap refresh step")
+	skipDiagnostic := fs.Bool("skip-diagnostic", false, "Skip robot diagnostic step")
+	skipUI := fs.Bool("skip-ui", true, "Skip headed browser UI checks during rollout diagnostic")
+	publicCheck := fs.Bool("public-check", false, "Verify public UI endpoint during rollout diagnostic")
+	requireNix := fs.Bool("require-nix", false, "Fail if nix is not installed on the rover")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	targetHost := strings.TrimSpace(*host)
+	if targetHost == "" {
+		return fmt.Errorf("rollout requires --host")
+	}
+	node, err := ssh_plugin.ResolveMeshNode(targetHost)
+	if err != nil {
+		return fmt.Errorf("rollout requires a mesh node alias/hostname for --host: %w", err)
+	}
+	targetUser := strings.TrimSpace(*user)
+	if targetUser == "" {
+		targetUser = node.User
+	}
+	if targetUser == "" {
+		return fmt.Errorf("rollout requires --user or a mesh node with a default user")
+	}
+
+	cmdOpts := ssh_plugin.CommandOptions{
+		User:     targetUser,
+		Port:     strings.TrimSpace(*port),
+		Password: strings.TrimSpace(*pass),
+	}
+	nixProbe := "if command -v nix >/dev/null 2>&1; then nix --extra-experimental-features 'nix-command flakes' --version 2>/dev/null || nix --version; else echo MISSING; fi"
+	nixOut, err := ssh_plugin.RunNodeCommand(node.Name, nixProbe, cmdOpts)
+	if err != nil {
+		return fmt.Errorf("rollout nix probe failed on %s: %w", node.Name, err)
+	}
+	nixOut = strings.TrimSpace(nixOut)
+	if strings.EqualFold(nixOut, "MISSING") {
+		if *requireNix {
+			return fmt.Errorf("rollout requires nix on %s, but nix is not installed", node.Name)
+		}
+		logs.Warn("robot src_v2 rollout: nix not installed on %s; continuing with autoswap release artifacts only", node.Name)
+	} else {
+		logs.Info("robot src_v2 rollout: remote nix available on %s (%s)", node.Name, nixOut)
+	}
+
+	if !*skipPublish {
+		publishArgs := []string{"--repo", strings.TrimSpace(*repo), "--target", strings.TrimSpace(*target)}
+		if strings.TrimSpace(*version) != "" {
+			publishArgs = append(publishArgs, "--version", strings.TrimSpace(*version))
+		}
+		if *allTargets {
+			publishArgs = append(publishArgs, "--all-targets")
+		}
+		if *uiOnly {
+			publishArgs = append(publishArgs, "--ui")
+		}
+		if err := runSrcV2Publish(repoRoot, publishArgs); err != nil {
+			return err
+		}
+	}
+
+	if !*skipDeploy {
+		deployArgs := []string{"autoswap", "src_v1", "deploy", "--host", node.Name, "--user", targetUser, "--repo", strings.TrimSpace(*repo), "--service"}
+		if strings.TrimSpace(*port) != "" {
+			deployArgs = append(deployArgs, "--port", strings.TrimSpace(*port))
+		}
+		if strings.TrimSpace(*pass) != "" {
+			deployArgs = append(deployArgs, "--pass", strings.TrimSpace(*pass))
+		}
+		if err := runDialtone(repoRoot, deployArgs...); err != nil {
+			return err
+		}
+	}
+
+	if !*skipUpdate {
+		updateArgs := []string{"autoswap", "src_v1", "update", "--host", node.Name, "--user", targetUser}
+		if strings.TrimSpace(*port) != "" {
+			updateArgs = append(updateArgs, "--port", strings.TrimSpace(*port))
+		}
+		if strings.TrimSpace(*pass) != "" {
+			updateArgs = append(updateArgs, "--pass", strings.TrimSpace(*pass))
+		}
+		if err := runDialtone(repoRoot, updateArgs...); err != nil {
+			return err
+		}
+	}
+
+	if !*skipDiagnostic {
+		diagArgs := []string{"--host", node.Name, "--user", targetUser}
+		if strings.TrimSpace(*port) != "" {
+			diagArgs = append(diagArgs, "--port", strings.TrimSpace(*port))
+		}
+		if strings.TrimSpace(*pass) != "" {
+			diagArgs = append(diagArgs, "--pass", strings.TrimSpace(*pass))
+		}
+		if *skipUI {
+			diagArgs = append(diagArgs, "--skip-ui")
+		}
+		if !*publicCheck {
+			diagArgs = append(diagArgs, "--public-check=false")
+		}
+		if err := runSrcV2Diagnostic(repoRoot, diagArgs); err != nil {
+			return err
+		}
+	}
+
+	logs.Info("robot src_v2 rollout completed host=%s user=%s", node.Name, targetUser)
+	return nil
+}
+
+func runSrcV2NixDiagnostic(repoRoot string, args []string) error {
+	fs := flag.NewFlagSet("robot-src-v2-nix-diagnostic", flag.ContinueOnError)
+	host := fs.String("host", "rover", "Mesh host for nix diagnostic")
+	port := fs.String("port", "", "SSH port override")
+	user := fs.String("user", "", "SSH user override")
+	pass := fs.String("pass", "", "SSH password override")
+	remoteRepo := fs.String("remote-repo", "", "Remote repo root (default: first mesh repo candidate or ~/dialtone)")
+	syncFlake := fs.Bool("sync-flake", true, "Sync local flake.nix and dialtone.sh to remote repo before diagnostics")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	node, err := ssh_plugin.ResolveMeshNode(strings.TrimSpace(*host))
+	if err != nil {
+		return err
+	}
+	targetUser := strings.TrimSpace(*user)
+	if targetUser == "" {
+		targetUser = node.User
+	}
+	if targetUser == "" {
+		return fmt.Errorf("nix-diagnostic requires --user or a mesh node with a default user")
+	}
+	targetRepo := strings.TrimSpace(*remoteRepo)
+	if targetRepo == "" {
+		if len(node.RepoCandidates) > 0 {
+			targetRepo = strings.TrimSpace(node.RepoCandidates[0])
+		}
+	}
+	if targetRepo == "" {
+		targetRepo = filepath.ToSlash(filepath.Join("/home", targetUser, "dialtone"))
+	}
+	cmdOpts := ssh_plugin.CommandOptions{
+		User:     targetUser,
+		Port:     strings.TrimSpace(*port),
+		Password: strings.TrimSpace(*pass),
+	}
+	if *syncFlake {
+		if _, err := ssh_plugin.RunNodeCommand(node.Name, "mkdir -p "+shellSingleQuote(targetRepo), cmdOpts); err != nil {
+			return fmt.Errorf("nix-diagnostic prepare remote repo failed: %w", err)
+		}
+		if err := ssh_plugin.UploadNodeFile(node.Name, filepath.Join(repoRoot, "flake.nix"), filepath.ToSlash(filepath.Join(targetRepo, "flake.nix")), cmdOpts); err != nil {
+			return fmt.Errorf("nix-diagnostic sync flake.nix failed: %w", err)
+		}
+		if err := ssh_plugin.UploadNodeFile(node.Name, filepath.Join(repoRoot, "dialtone.sh"), filepath.ToSlash(filepath.Join(targetRepo, "dialtone.sh")), cmdOpts); err != nil {
+			return fmt.Errorf("nix-diagnostic sync dialtone.sh failed: %w", err)
+		}
+		if _, err := ssh_plugin.RunNodeCommand(node.Name, "chmod +x "+shellSingleQuote(filepath.ToSlash(filepath.Join(targetRepo, "dialtone.sh"))), cmdOpts); err != nil {
+			return fmt.Errorf("nix-diagnostic chmod dialtone.sh failed: %w", err)
+		}
+	}
+	checks := []struct {
+		name string
+		cmd  string
+	}{
+		{name: "nix-version", cmd: "nix --extra-experimental-features 'nix-command flakes' --version"},
+		{name: "repo-exists", cmd: "test -d " + shellSingleQuote(targetRepo) + " && echo ok"},
+		{name: "flake-metadata", cmd: "nix --extra-experimental-features 'nix-command flakes' flake metadata path:" + shellSingleQuote(targetRepo)},
+		{name: "develop-toolchain", cmd: "cd " + shellSingleQuote(targetRepo) + " && nix --extra-experimental-features 'nix-command flakes' develop --command bash -c 'go version && bun --version && git --version'"},
+		{name: "runtime-apps-build", cmd: "cd " + shellSingleQuote(targetRepo) + " && nix --extra-experimental-features 'nix-command flakes' build .#robot-server .#camera-service .#mavlink-service .#repl-service"},
+	}
+	for _, check := range checks {
+		out, err := ssh_plugin.RunNodeCommand(node.Name, check.cmd, cmdOpts)
+		if err != nil {
+			return fmt.Errorf("nix-diagnostic %s failed: %w", check.name, err)
+		}
+		logs.Info("robot src_v2 nix-diagnostic: %s ok: %s", check.name, strings.TrimSpace(firstLine(out)))
+	}
+	logs.Info("robot src_v2 nix-diagnostic completed host=%s repo=%s", node.Name, targetRepo)
+	return nil
+}
+
+func runSrcV2NixGC(args []string) error {
+	fs := flag.NewFlagSet("robot-src-v2-nix-gc", flag.ContinueOnError)
+	host := fs.String("host", "rover", "Mesh host for nix garbage collection")
+	port := fs.String("port", "", "SSH port override")
+	user := fs.String("user", "", "SSH user override")
+	pass := fs.String("pass", "", "SSH password override")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	node, err := ssh_plugin.ResolveMeshNode(strings.TrimSpace(*host))
+	if err != nil {
+		return err
+	}
+	targetUser := strings.TrimSpace(*user)
+	if targetUser == "" {
+		targetUser = node.User
+	}
+	if targetUser == "" {
+		return fmt.Errorf("nix-gc requires --user or a mesh node with a default user")
+	}
+	cmdOpts := ssh_plugin.CommandOptions{
+		User:     targetUser,
+		Port:     strings.TrimSpace(*port),
+		Password: strings.TrimSpace(*pass),
+	}
+	cmd := strings.Join([]string{
+		"set -e",
+		"df -h / /nix/store $HOME",
+		"echo '---'",
+		"rm -rf $HOME/dialtone/bin/releases",
+		"find $HOME/dialtone -path '*/ui/dist' -type d -prune -exec rm -rf {} + 2>/dev/null || true",
+		"nix --extra-experimental-features 'nix-command flakes' store gc || nix-collect-garbage -d",
+		"echo '---'",
+		"df -h / /nix/store $HOME",
+	}, " && ")
+	out, err := ssh_plugin.RunNodeCommand(node.Name, cmd, cmdOpts)
+	if err != nil {
+		return fmt.Errorf("nix-gc failed on %s: %w", node.Name, err)
+	}
+	logs.Raw("%s", strings.TrimSpace(out))
+	logs.Info("robot src_v2 nix-gc completed host=%s user=%s", node.Name, targetUser)
+	return nil
+}
+
+func firstLine(raw string) string {
+	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return ""
+}
+
 type releaseAssetInfo struct {
 	Name   string `json:"name"`
 	Digest string `json:"digest"`
+}
+
+type manifestChannelDoc struct {
+	SchemaVersion  string `json:"schema_version"`
+	Name           string `json:"name"`
+	Channel        string `json:"channel"`
+	Repo           string `json:"repo,omitempty"`
+	ReleaseVersion string `json:"release_version"`
+	ManifestURL    string `json:"manifest_url"`
+	ManifestSHA256 string `json:"manifest_sha256,omitempty"`
+	PublishedAt    string `json:"published_at,omitempty"`
 }
 
 type releaseView struct {
@@ -719,7 +996,9 @@ func publishRobotSrcV2Release(repoRoot, repo, version string, targets []buildTar
 		assetPathByName[uiName] = uiArchive
 	}
 	manifestAssetName := "robot_src_v2_composition_manifest.json"
+	manifestVersionedAssetName := "robot_src_v2_composition_manifest-" + sanitizeVersion(version) + ".json"
 	manifestAssetPath := filepath.Join(outDir, manifestAssetName)
+	manifestVersionedAssetPath := filepath.Join(outDir, manifestVersionedAssetName)
 	manifestRaw, err := os.ReadFile(manifestSrc)
 	if err != nil {
 		return fmt.Errorf("robot src_v2 publish: read manifest failed: %w", err)
@@ -745,6 +1024,7 @@ func publishRobotSrcV2Release(repoRoot, repo, version string, targets []buildTar
 	manifestDoc["release_version"] = strings.TrimSpace(version)
 	manifestDoc["release_published_at"] = time.Now().UTC().Format(time.RFC3339)
 	manifestDoc["release_asset_sha256"] = assetSHA
+	manifestDoc["manifest_asset"] = manifestVersionedAssetName
 	if artifactsRaw, ok := manifestDoc["artifacts"].(map[string]any); ok {
 		if releaseRaw, ok := artifactsRaw["release"].(map[string]any); ok {
 			for depKey, bindingRaw := range releaseRaw {
@@ -787,7 +1067,36 @@ func publishRobotSrcV2Release(repoRoot, repo, version string, targets []buildTar
 	if err := os.WriteFile(manifestAssetPath, manifestOut, 0o644); err != nil {
 		return fmt.Errorf("robot src_v2 publish: write manifest asset failed: %w", err)
 	}
+	if err := os.WriteFile(manifestVersionedAssetPath, manifestOut, 0o644); err != nil {
+		return fmt.Errorf("robot src_v2 publish: write versioned manifest asset failed: %w", err)
+	}
 	assetPathByName[manifestAssetName] = manifestAssetPath
+	assetPathByName[manifestVersionedAssetName] = manifestVersionedAssetPath
+	manifestDigest, err := fileSHA256(manifestVersionedAssetPath)
+	if err != nil {
+		return fmt.Errorf("robot src_v2 publish: manifest sha failed: %w", err)
+	}
+	channelAssetName := "robot_src_v2_channel.json"
+	channelAssetPath := filepath.Join(outDir, channelAssetName)
+	channelDoc := manifestChannelDoc{
+		SchemaVersion:  "v1",
+		Name:           "robot-src_v2",
+		Channel:        "latest",
+		Repo:           strings.TrimSpace(repo),
+		ReleaseVersion: strings.TrimSpace(version),
+		ManifestURL:    fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", strings.TrimSpace(repo), strings.TrimSpace(version), manifestVersionedAssetName),
+		ManifestSHA256: manifestDigest,
+		PublishedAt:    time.Now().UTC().Format(time.RFC3339),
+	}
+	channelRaw, err := json.MarshalIndent(channelDoc, "", "  ")
+	if err != nil {
+		return fmt.Errorf("robot src_v2 publish: marshal channel asset failed: %w", err)
+	}
+	channelRaw = append(channelRaw, '\n')
+	if err := os.WriteFile(channelAssetPath, channelRaw, 0o644); err != nil {
+		return fmt.Errorf("robot src_v2 publish: write channel asset failed: %w", err)
+	}
+	assetPathByName[channelAssetName] = channelAssetPath
 
 	if len(assetPathByName) == 0 {
 		return fmt.Errorf("robot src_v2 publish: no release assets were built")
@@ -1044,6 +1353,7 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 	uiURL := fs.String("ui-url", "", "Robot UI URL for public checks + browser checks (default: https://<robot-hostname>.dialtone.earth)")
 	browserNode := fs.String("browser-node", defaultRobotDevBrowserNode(), "Mesh node for remote browser (for example legion, chroma)")
 	skipUI := fs.Bool("skip-ui", false, "Skip chromedp UI menu checks")
+	publicCheck := fs.Bool("public-check", true, "Verify public UI endpoint is reachable")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -1218,6 +1528,7 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 	if err != nil {
 		return fmt.Errorf("autoswap service ExecStart check failed: %w", err)
 	}
+	manifestURL := strings.TrimSpace(extractFlagValue(execOut, "--manifest-url"))
 	if !strings.Contains(execOut, "dialtone_autoswap_v1") {
 		return fmt.Errorf("autoswap service ExecStart does not reference dialtone_autoswap_v1")
 	}
@@ -1225,25 +1536,60 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 		return fmt.Errorf("autoswap service ExecStart does not reference manifest path %s or --manifest-url", manifestAbs)
 	}
 	logs.Info("robot src_v2 diagnostic: autoswap service is active and uses expected manifest")
-	if manifestURL := extractFlagValue(execOut, "--manifest-url"); manifestURL != "" {
-		remoteManifestHashOut, err := ssh_plugin.RunSSHCommand(client, "sha256sum "+shellSingleQuote(manifestAbs)+" | awk '{print $1}'")
-		if err != nil {
-			return fmt.Errorf("active manifest hash read failed: %w", err)
-		}
-		remoteManifestHash := strings.TrimSpace(remoteManifestHashOut)
-		latestManifestHash, err := fetchURLSHA256(manifestURL, 15*time.Second)
-		if err != nil {
-			return fmt.Errorf("latest manifest fetch failed (%s): %w", manifestURL, err)
-		}
-		if !strings.EqualFold(remoteManifestHash, latestManifestHash) {
-			return fmt.Errorf("active manifest is not latest from manifest-url: active=%s latest=%s", remoteManifestHash, latestManifestHash)
-		}
-		logs.Info("robot src_v2 diagnostic: active manifest hash matches latest manifest-url")
-	}
 
 	repoRootForList := ""
 	if _, err := ssh_plugin.RunSSHCommand(client, "test -d "+shellSingleQuote(resolvedRemoteRepo)); err == nil {
 		repoRootForList = resolvedRemoteRepo
+	}
+	runtimePath := filepath.ToSlash(filepath.Join(remoteHome, ".dialtone", "autoswap", "state", "runtime.json"))
+	runtimeRaw, err := ssh_plugin.RunSSHCommand(client, "cat "+shellSingleQuote(runtimePath))
+	if err != nil {
+		return fmt.Errorf("autoswap runtime state read failed: %w", err)
+	}
+	var runtimeState struct {
+		ManifestPath string `json:"manifest_path"`
+		Processes    []struct {
+			Name   string `json:"name"`
+			PID    int    `json:"pid"`
+			Status string `json:"status"`
+		} `json:"processes"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(runtimeRaw)), &runtimeState); err != nil {
+		return fmt.Errorf("autoswap runtime state parse failed: %w", err)
+	}
+	if rp := strings.TrimSpace(runtimeState.ManifestPath); rp != "" {
+		if remoteFileExists(rp) {
+			manifestAbs = filepath.ToSlash(rp)
+			logs.Info("robot src_v2 diagnostic: using runtime manifest path from state: %s", manifestAbs)
+		}
+	} else if manifestURL != "" {
+		// When using --manifest-url, the manifest is typically downloaded under autoswap/manifests/.
+		// Prefer the explicit runtime manifest path when present; fail only if missing.
+		candidates := []string{
+			filepath.ToSlash(filepath.Join(autoswapRoot, "manifests", "robot-src_v2.manifest.json")),
+			filepath.ToSlash(filepath.Join(autoswapRoot, "manifests")),
+		}
+		found := ""
+		for _, c := range candidates {
+			if c == filepath.ToSlash(filepath.Join(autoswapRoot, "manifests")) {
+				if latestManifestOut, lerr := ssh_plugin.RunSSHCommand(client, "find "+shellSingleQuote(c)+" -maxdepth 1 -type f -name 'manifest-*.json' -printf '%T@ %p\\n' 2>/dev/null | sort -nr | head -n1 | awk '{print $2}'"); lerr == nil {
+					latestManifest := strings.TrimSpace(latestManifestOut)
+					if latestManifest != "" && remoteFileExists(latestManifest) {
+						found = latestManifest
+						break
+					}
+				}
+				continue
+			}
+			if remoteFileExists(c) {
+				found = c
+				break
+			}
+		}
+		if found == "" {
+			return fmt.Errorf("diagnostic could not resolve active autoswap manifest for --manifest-url mode")
+		}
+		manifestAbs = found
 	}
 	listCmd := shellSingleQuote(autoswapBin) + " service --mode list --manifest " + shellSingleQuote(manifestAbs)
 	if strings.TrimSpace(repoRootForList) != "" {
@@ -1260,11 +1606,6 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 	}
 	logs.Info("robot src_v2 diagnostic: autoswap list output looks valid")
 
-	runtimePath := filepath.ToSlash(filepath.Join(remoteHome, ".dialtone", "autoswap", "state", "runtime.json"))
-	runtimeRaw, err := ssh_plugin.RunSSHCommand(client, "cat "+shellSingleQuote(runtimePath))
-	if err != nil {
-		return fmt.Errorf("autoswap runtime state read failed: %w", err)
-	}
 	manifestRaw, err := ssh_plugin.RunSSHCommand(client, "cat "+shellSingleQuote(manifestAbs))
 	if err != nil {
 		return fmt.Errorf("autoswap manifest read failed: %w", err)
@@ -1290,22 +1631,21 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 	if len(expectedProc) == 0 {
 		return fmt.Errorf("manifest has no runtime.processes entries")
 	}
-	var runtimeState struct {
-		ManifestPath string `json:"manifest_path"`
-		Processes    []struct {
-			Name   string `json:"name"`
-			PID    int    `json:"pid"`
-			Status string `json:"status"`
-		} `json:"processes"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(runtimeRaw)), &runtimeState); err != nil {
-		return fmt.Errorf("autoswap runtime state parse failed: %w", err)
+	if manifestURL != "" {
+		if strings.TrimSpace(runtimeState.ManifestPath) == "" {
+			return fmt.Errorf("active autoswap manifest is empty while service uses --manifest-url")
+		}
+		if strings.TrimSpace(manifestAbs) == "" || filepath.Clean(runtimeState.ManifestPath) != filepath.Clean(manifestAbs) {
+			logs.Info("robot src_v2 diagnostic: active manifest path resolved from runtime state: %s", strings.TrimSpace(runtimeState.ManifestPath))
+			manifestAbs = filepath.ToSlash(strings.TrimSpace(runtimeState.ManifestPath))
+		}
 	}
 	if filepath.Clean(runtimeState.ManifestPath) != filepath.Clean(manifestAbs) {
 		if strings.Contains(execOut, "--manifest-url") {
 			if strings.TrimSpace(runtimeState.ManifestPath) == "" {
 				return fmt.Errorf("active autoswap manifest is empty while service uses --manifest-url")
 			}
+			logs.Info("robot src_v2 diagnostic: active manifest path is %s, using this for checks", strings.TrimSpace(runtimeState.ManifestPath))
 		} else {
 			return fmt.Errorf("active autoswap manifest mismatch: got=%s expected=%s", runtimeState.ManifestPath, manifestAbs)
 		}
@@ -1326,31 +1666,71 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 	}
 	logs.Info("robot src_v2 diagnostic: autoswap runtime matches manifest processes")
 
-	procsOut, err := ssh_plugin.RunSSHCommand(client, "pgrep -af 'dialtone_(robot_v2|camera_v1|mavlink_v1|repl_v1)' || true")
-	if err != nil {
-		return fmt.Errorf("remote process list failed: %w", err)
-	}
-	for _, token := range []string{"dialtone_robot_v2", "dialtone_camera_v1", "dialtone_mavlink_v1", "dialtone_repl_v1"} {
-		if !strings.Contains(procsOut, token) {
-			return fmt.Errorf("remote process list missing %s", token)
+	if manifestURL != "" {
+		remoteManifestHashOut, err := ssh_plugin.RunSSHCommand(client, "sha256sum "+shellSingleQuote(manifestAbs)+" | awk '{print $1}'")
+		if err != nil {
+			return fmt.Errorf("active manifest hash read failed: %w", err)
 		}
+		remoteManifestHash := strings.TrimSpace(remoteManifestHashOut)
+		latestManifestHash, err := fetchResolvedManifestSHA256(manifestURL, 15*time.Second)
+		if err != nil {
+			return fmt.Errorf("latest manifest fetch failed (%s): %w", manifestURL, err)
+		}
+		if !strings.EqualFold(remoteManifestHash, latestManifestHash) {
+			return fmt.Errorf("active manifest is not latest from manifest-url: active=%s latest=%s", remoteManifestHash, latestManifestHash)
+		}
+		logs.Info("robot src_v2 diagnostic: active manifest hash matches latest manifest-url")
 	}
 
-	healthOut, err := ssh_plugin.RunSSHCommand(client, "curl -fsS http://127.0.0.1:18086/health")
+	pidArgs := make([]string, 0, len(runtimeState.Processes))
+	for _, p := range runtimeState.Processes {
+		if p.PID <= 0 {
+			continue
+		}
+		pidArgs = append(pidArgs, strconv.Itoa(p.PID))
+	}
+	if len(pidArgs) == 0 {
+		return fmt.Errorf("runtime state has no managed process pids")
+	}
+	procsOut := ""
+	foundAllProcTokens := false
+	for attempt := 0; attempt < 6; attempt++ {
+		nextOut, perr := ssh_plugin.RunSSHCommand(client, "ps -p "+strings.Join(pidArgs, ",")+" -o pid= -o args= || true")
+		if perr != nil {
+			return fmt.Errorf("remote process list failed: %w", perr)
+		}
+		procsOut = nextOut
+		foundAllProcTokens = true
+		for _, pid := range pidArgs {
+			if !strings.Contains(procsOut, pid) {
+				foundAllProcTokens = false
+				break
+			}
+		}
+		if foundAllProcTokens {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+	if !foundAllProcTokens {
+		return fmt.Errorf("remote process list missing expected managed pids: %s", strings.TrimSpace(procsOut))
+	}
+
+	healthOut, err := ssh_plugin.RunSSHCommand(client, "curl -fsS --max-time 5 http://127.0.0.1:18086/health")
 	if err != nil {
 		return fmt.Errorf("remote /health check failed: %w", err)
 	}
 	if strings.TrimSpace(healthOut) != "ok" {
 		return fmt.Errorf("remote /health expected ok, got %q", strings.TrimSpace(healthOut))
 	}
-	initOut, err := ssh_plugin.RunSSHCommand(client, "curl -fsS http://127.0.0.1:18086/api/init")
+	initOut, err := ssh_plugin.RunSSHCommand(client, "curl -fsS --max-time 5 http://127.0.0.1:18086/api/init")
 	if err != nil {
 		return fmt.Errorf("remote /api/init check failed: %w", err)
 	}
 	if !strings.Contains(initOut, "/natsws") {
 		return fmt.Errorf("remote /api/init missing /natsws")
 	}
-	integOut, err := ssh_plugin.RunSSHCommand(client, "curl -fsS http://127.0.0.1:18086/api/integration-health")
+	integOut, err := ssh_plugin.RunSSHCommand(client, "curl -fsS --max-time 5 http://127.0.0.1:18086/api/integration-health")
 	if err != nil {
 		return fmt.Errorf("remote /api/integration-health check failed: %w", err)
 	}
@@ -1363,6 +1743,14 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 	}
 	if strings.TrimSpace(streamCodeOut) != "200" {
 		return fmt.Errorf("remote /stream expected HTTP 200, got %s", strings.TrimSpace(streamCodeOut))
+	}
+	natswsProbe, err := ssh_plugin.RunSSHCommand(client, "python3 - <<'PY'\nimport socket\n\ns = socket.create_connection(('127.0.0.1', 18086), timeout=2)\nreq = (\n    'GET /natsws HTTP/1.1\\r\\n'\n    'Host: 127.0.0.1:18086\\r\\n'\n    'Connection: Upgrade\\r\\n'\n    'Upgrade: websocket\\r\\n'\n    'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\\r\\n'\n    'Sec-WebSocket-Version: 13\\r\\n\\r\\n'\n)\ns.sendall(req.encode())\nresp = s.recv(64)\ns.close()\nprint(resp.decode(errors='replace'))\nPY")
+	if err != nil {
+		return fmt.Errorf("remote /natsws websocket handshake failed: %w", err)
+	}
+	natswsStatusLine := strings.TrimSpace(strings.SplitN(strings.TrimSpace(natswsProbe), "\n", 2)[0])
+	if !strings.HasPrefix(natswsStatusLine, "HTTP/1.1 101") {
+		return fmt.Errorf("remote /natsws expected websocket upgrade 101, got %s", natswsStatusLine)
 	}
 	cameraSidecarHealth, err := ssh_plugin.RunSSHCommand(client, "curl -fsS --max-time 5 http://127.0.0.1:19090/health")
 	if err != nil {
@@ -1388,9 +1776,17 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 	logs.Info("robot src_v2 diagnostic: remote endpoints passed (/health, /api/init, /api/integration-health, /stream, sidecar camera stream, mavlink telemetry liveness)")
 
 	resolvedUIURL := strings.TrimSpace(*uiURL)
-	if resolvedUIURL == "" {
+	if resolvedUIURL == "" && *publicCheck {
 		publicHost := inferPublicRobotHostname(strings.TrimSpace(*host), meshNode)
 		resolvedUIURL = "https://" + publicHost + ".dialtone.earth"
+	}
+	if !*publicCheck {
+		logs.Info("robot src_v2 diagnostic: skipping public UI verification (pass --public-check=true to re-enable)")
+		logs.Info("robot src_v2 diagnostic: remote checks completed")
+		return nil
+	}
+	if resolvedUIURL == "" {
+		resolvedUIURL = "http://127.0.0.1:18086"
 	}
 	if !strings.Contains(resolvedUIURL, "://") {
 		resolvedUIURL = "https://" + resolvedUIURL
@@ -1448,6 +1844,9 @@ func inferPublicRobotHostname(host string, node *ssh_plugin.MeshNode) string {
 		}
 		c = strings.Trim(c, ".")
 		if strings.Contains(c, ".") {
+			if isIPv4Address(c) {
+				continue
+			}
 			if strings.HasSuffix(c, ".shad-artichoke.ts.net") {
 				base := strings.TrimSuffix(c, ".shad-artichoke.ts.net")
 				base = strings.Trim(base, ".")
@@ -1467,6 +1866,26 @@ func inferPublicRobotHostname(host string, node *ssh_plugin.MeshNode) string {
 	return "rover-1"
 }
 
+func isIPv4Address(raw string) bool {
+	parts := strings.Split(strings.TrimSpace(raw), ".")
+	if len(parts) != 4 {
+		return false
+	}
+	for _, p := range parts {
+		if p == "" {
+			return false
+		}
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return false
+		}
+		if n < 0 || n > 255 {
+			return false
+		}
+	}
+	return true
+}
+
 func fetchURLText(rawURL string, timeout time.Duration) (string, error) {
 	client := &http.Client{Timeout: timeout}
 	resp, err := client.Get(rawURL)
@@ -1484,9 +1903,15 @@ func fetchURLText(rawURL string, timeout time.Duration) (string, error) {
 	return string(body), nil
 }
 
-func fetchURLSHA256(rawURL string, timeout time.Duration) (string, error) {
+func fetchResolvedManifestSHA256(rawURL string, timeout time.Duration) (string, error) {
 	client := &http.Client{Timeout: timeout}
-	resp, err := client.Get(rawURL)
+	req, err := http.NewRequest(http.MethodGet, cacheBustedLatestReleaseURL(rawURL), nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Cache-Control", "no-cache")
+	req.Header.Set("Pragma", "no-cache")
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -1494,11 +1919,42 @@ func fetchURLSHA256(rawURL string, timeout time.Duration) (string, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("http status %d", resp.StatusCode)
 	}
-	h := sha256.New()
-	if _, err := io.Copy(h, resp.Body); err != nil {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	trimmed := strings.TrimSpace(string(body))
+	var probe map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &probe); err == nil {
+		if manifestURL, ok := probe["manifest_url"].(string); ok && strings.TrimSpace(manifestURL) != "" && probe["runtime"] == nil {
+			if manifestSHA, ok := probe["manifest_sha256"].(string); ok {
+				manifestSHA = strings.TrimSpace(strings.TrimPrefix(strings.ToLower(manifestSHA), "sha256:"))
+				if manifestSHA != "" {
+					return manifestSHA, nil
+				}
+			}
+			return fetchResolvedManifestSHA256(strings.TrimSpace(manifestURL), timeout)
+		}
+	}
+	sum := sha256.Sum256([]byte(trimmed))
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func cacheBustedLatestReleaseURL(rawURL string) string {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return rawURL
+	}
+	if !strings.EqualFold(strings.TrimSpace(u.Hostname()), "github.com") {
+		return rawURL
+	}
+	if !strings.Contains(strings.TrimSpace(u.Path), "/releases/latest/download/") {
+		return rawURL
+	}
+	q := u.Query()
+	q.Set("dialtone_ts", strconv.FormatInt(time.Now().UnixNano(), 10))
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func extractFlagValue(execStart, flagName string) string {

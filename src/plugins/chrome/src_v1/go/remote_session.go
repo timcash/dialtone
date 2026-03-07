@@ -296,8 +296,8 @@ if [ "$ok" != "1" ]; then
   exit 4
 fi
 resp="$(curl -fsS --max-time 1 "http://127.0.0.1:${port}/json/version")"
-ws="$(printf '%s' "$resp" | sed -n 's/.*"webSocketDebuggerUrl":"\([^"]*\)".*/\1/p' | head -n1)"
-path="$(printf '%s' "$ws" | sed -n 's#^ws://[^/]*/\(.*\)$#/\1#p' | head -n1)"
+ws="$(echo "$resp" | sed -n 's/.*"webSocketDebuggerUrl":"\([^"]*\)".*/\1/p' | head -n1)"
+path="$(echo "$ws" | sed -n 's#^ws://[^/]*/\(.*\)$#/\1#p' | head -n1)"
 echo "DIALTONE_CHROME_SESSION_JSON={\"pid\":${pid},\"debug_port\":${port},\"websocket_url\":\"${ws}\",\"websocket_path\":\"${path:-}\",\"is_new\":true}"
 `, remoteShellQuote(url), roleToken, DefaultDebugPort, roleToken, headlessFlag, disableGPUFlag)
 	out, err := sshv1.RunNodeCommand(nodeInfo.Name, launchScript, sshv1.CommandOptions{})

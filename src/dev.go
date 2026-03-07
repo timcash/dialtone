@@ -499,14 +499,26 @@ func listPlugins() {
 }
 
 func runPluginScaffold(plugin string, args []string) error {
-	roots := []string{"mods", "plugins"}
+	roots := []string{"plugins", "mods"}
 	pluginDir := ""
+	var fallbackDir string
 	for _, root := range roots {
 		candidate := filepath.Join(root, plugin)
 		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			pluginDir = candidate
-			break
+			goScaffold := filepath.Join(candidate, "scaffold", "main.go")
+			cliScaffold := filepath.Join(candidate, "cli", "main.go")
+			shScaffold := filepath.Join(candidate, "scaffold.sh")
+			if fileExists(goScaffold) || fileExists(cliScaffold) || fileExists(shScaffold) {
+				pluginDir = candidate
+				break
+			}
+			if fallbackDir == "" {
+				fallbackDir = candidate
+			}
 		}
+	}
+	if pluginDir == "" && fallbackDir != "" {
+		pluginDir = fallbackDir
 	}
 	if pluginDir == "" {
 		return logs.Errorf("unknown plugin: %s", plugin)
@@ -551,7 +563,7 @@ func runPluginScaffold(plugin string, args []string) error {
 		return cmd.Run()
 	}
 
-	return logs.Errorf("plugin %s has no scaffold/cli main.go or scaffold.sh/cli.sh", plugin)
+	return logs.Errorf("plugin %s has no scaffold/cli main.go or scaffold.sh/cli.sh in candidate roots", plugin)
 }
 
 func runMods(args []string) error {

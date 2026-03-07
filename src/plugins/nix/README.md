@@ -10,6 +10,11 @@ Use the `./dialtone.sh` wrapper to manage the Nix plugin:
 # Start the Nix host and UI in development mode
 ./dialtone.sh nix dev src_v1
 
+# Run raw nix commands through dialtone
+./dialtone.sh nix exec --version
+./dialtone.sh nix exec build .#robot-server .#camera-service
+./dialtone.sh nix run .#some-app
+
 # Build the UI assets (Vite + TypeScript)
 ./dialtone.sh nix build src_v1
 

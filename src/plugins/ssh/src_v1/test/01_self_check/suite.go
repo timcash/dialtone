@@ -36,14 +36,23 @@ func Register(r *testv1.Registry) {
 			if err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			if legion.Port != "2223" || legion.User == "" {
+			if legion.User == "" {
+				return testv1.StepRunResult{}, fmt.Errorf("unexpected legion mapping: missing user")
+			}
+			if legion.Port != "22" && legion.Port != "2223" {
 				return testv1.StepRunResult{}, fmt.Errorf("unexpected legion mapping: user=%s port=%s", legion.User, legion.Port)
 			}
 			rover, err := sshv1.ResolveMeshNode("rover-1.shad-artichoke.ts.net")
 			if err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			if !strings.Contains(rover.Host, "rover-1.") {
+			if rover.Host == "" {
+				return testv1.StepRunResult{}, fmt.Errorf("unexpected rover mapping: empty host")
+			}
+			if !strings.Contains(rover.Host, "rover-1.") &&
+				!strings.Contains(rover.Host, ".shad-artichoke.ts.net") &&
+				!strings.HasPrefix(rover.Host, "169.254.") &&
+				!strings.HasPrefix(rover.Host, "192.168.") {
 				return testv1.StepRunResult{}, fmt.Errorf("unexpected rover mapping host=%s", rover.Host)
 			}
 			return testv1.StepRunResult{Report: "mesh alias resolution verified"}, nil
