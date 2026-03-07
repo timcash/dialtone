@@ -6,7 +6,7 @@
 
 # 2) On target (standalone usage, no dialtone.sh needed):
 ./dialtone_autoswap_v1 service --mode install \
-  --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_composition_manifest.json \
+  --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_channel.json \
   --repo timcash/dialtone \
   --check-interval 5m
 
@@ -22,6 +22,37 @@
 - Only `autoswap` is installed as an OS service.
 - `autoswap` then acts as a process manager for manifest workloads (any set of binaries/processes).
 - `autoswap` polls GitHub releases (default every 5 minutes), swaps to newer artifacts, and restarts managed runtime.
+
+## Robot Publish Workflow
+
+The validated rover workflow is:
+
+```bash
+# 1) Build and publish robot binaries/UI from WSL
+./dialtone.sh robot src_v2 publish --repo timcash/dialtone
+
+# 2) Install autoswap once on the rover
+./dialtone.sh autoswap src_v1 deploy \
+  --host rover \
+  --user tim \
+  --service \
+  --repo timcash/dialtone \
+  --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_channel.json
+
+# 3) Let autoswap poll, or force an immediate refresh
+./dialtone.sh autoswap src_v1 update --host rover --user tim
+
+# 4) Verify the rover is running downloaded release artifacts
+./dialtone.sh robot src_v2 diagnostic --host rover --user tim --skip-ui --public-check=false
+```
+
+For the active `robot src_v2` deployment, autoswap downloads and runs release artifacts directly from:
+
+- `~/.dialtone/autoswap/artifacts/dialtone_robot_v2`
+- `~/.dialtone/autoswap/artifacts/dialtone_camera_v1`
+- `~/.dialtone/autoswap/artifacts/dialtone_mavlink_v1`
+- `~/.dialtone/autoswap/artifacts/dialtone_repl_v1`
+- `~/.dialtone/autoswap/artifacts/robot_src_v2_ui_dist`
 
 ## Model
 
@@ -52,11 +83,11 @@ Validates manifest and resolved artifact paths.
 ### `run`
 Runs manifest composition directly (foreground). With `--stay-running`, autoswap supervises child processes.
 If manifest defines `runtime.processes`, autoswap starts exactly those processes using manifest dependency order.
-Use `--manifest-url` to fetch the manifest from GitHub/HTTP and re-check it on each poll interval.
+Use `--manifest-url` to fetch either a direct manifest or a channel document from GitHub/HTTP. Channel documents are preferred because they resolve to an immutable release-pinned manifest.
 
 ```bash
 ./dialtone.sh autoswap src_v1 run \
-  --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_composition_manifest.json \
+  --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_channel.json \
   --listen :18086 --nats-port 18236 --nats-ws-port 18237 \
   --require-stream=true --stay-running=true
 ```
@@ -67,7 +98,7 @@ Builds autoswap for target OS/arch and deploys via SSH mesh node routing.
 ```bash
 ./dialtone.sh autoswap src_v1 deploy \
   --host rover --user tim --pass '<PASSWORD>' --service \
-  --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_composition_manifest.json
+  --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_channel.json
 ```
 
 ### `service`
@@ -95,6 +126,7 @@ Examples:
 
 - Poll interval: `--check-interval` (default `5m`)
 - Source: GitHub latest release of `--repo`
+- Preferred manifest source: stable channel asset (`robot_src_v2_channel.json`) that points at an immutable versioned manifest asset for that release
 - Swapped artifacts: from `manifest.artifacts.release` mapping (generic), or legacy fallback keys.
 - Supports file artifacts and directory artifacts (`type=dir`, e.g. UI dist archive extraction).
 - Downloaded artifacts are checksum-verified before activation:
@@ -105,6 +137,11 @@ Examples:
 2. switch current worker pointer
 3. start new worker
 4. worker starts/supervises manifest processes
+
+This means you can keep builds on WSL and use autoswap only for:
+- update detection
+- artifact download
+- process restart on the rover
 
 ## State Files
 
