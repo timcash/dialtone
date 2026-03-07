@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chrome Diagnostic</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f0f2f5; }
+        table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #007bff; color: white; }
+        tr:hover { background-color: #f5f5f5; }
+        .status { padding: 5px 10px; border-radius: 4px; font-weight: bold; }
+        .online { background: #d4edda; color: #155724; }
+        .offline { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <h1>Chrome Service Diagnostic <span id="status" class="status offline">Connecting...</span></h1>
+    <table>
+        <thead>
+            <tr><th>Metric</th><th>Value</th></tr>
+        </thead>
+        <tbody id="stats-body">
+            <!-- Stats will be inserted here -->
+        </tbody>
+    </table>
+
+    <script>
+        const statsBody = document.getElementById('stats-body');
+        const statusSpan = document.getElementById('status');
+        const ws = new WebSocket('ws://' + window.location.hostname + ':19445/ws');
+
+        ws.onopen = () => {
+            statusSpan.textContent = 'Online';
+            statusSpan.className = 'status online';
+        };
+
+        ws.onclose = () => {
+            statusSpan.textContent = 'Offline';
+            statusSpan.className = 'status offline';
+        };
+
+        ws.onmessage = (event) => {
+            const stats = JSON.parse(event.data);
+            let html = '';
+            for (const [key, value] of Object.entries(stats)) {
+                let displayValue = value;
+                if (Array.isArray(value)) {
+                    displayValue = '<ul>' + value.map(v => `<li>${v}</li>`).join('') + '</ul>';
+                }
+                html += `<tr><td><strong>${key}</strong></td><td>${displayValue}</td></tr>`;
+            }
+            statsBody.innerHTML = html;
+        };
+    </script>
+</body>
+</html>

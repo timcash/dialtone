@@ -23,6 +23,7 @@ bin/
 .vscode/
 .idea/
 .chrome_data/
+.chrome_data_v2/
 
 # DuckDB
 *.duckdb
