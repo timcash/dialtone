@@ -14,6 +14,13 @@ func Run(args []string) error {
 
 	command := args[0]
 	switch command {
+	case "exec":
+		return RunExec(args[1:])
+	case "run":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: nix run <installable> [-- <args...>]")
+		}
+		return RunInstallable(args[1], args[2:])
 	case "smoke":
 		smokeFlags := flag.NewFlagSet("nix smoke", flag.ContinueOnError)
 		timeout := smokeFlags.Int("smoke-timeout", 45, "Timeout in seconds for smoke test")
@@ -59,5 +66,7 @@ func printUsage() {
 	fmt.Println("  dev <dir>                            Start host and UI in development mode")
 	fmt.Println("  build <dir>                          Build everything needed (UI assets)")
 	fmt.Println("  smoke <dir> [--smoke-timeout <sec>]  Run automated UI tests")
+	fmt.Println("  exec <nix args...>                   Run nix directly through dialtone")
+	fmt.Println("  run <installable> [-- <args...>]     Run a nix installable")
 	fmt.Println("  lint                                 Lint Go and TypeScript code")
 }

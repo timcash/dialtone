@@ -1,11 +1,27 @@
 import { defineConfig } from 'vite';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
+import type { ProxyOptions } from 'vite';
 
 const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8'));
 
 const proxyTarget = process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:8080';
-const wsProxyTarget = proxyTarget.replace('http', 'ws');
+const wsProxyTarget = proxyTarget.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
+const proxyTargetURL = new URL(proxyTarget);
+const proxyOrigin = proxyTargetURL.origin;
+
+function wsProxyOptions(): ProxyOptions {
+  return {
+    target: wsProxyTarget,
+    ws: true,
+    changeOrigin: true,
+    configure: (proxy) => {
+      proxy.on('proxyReqWs', (proxyReq) => {
+        proxyReq.setHeader('Origin', proxyOrigin);
+      });
+    },
+  };
+}
 
 export default defineConfig({
   root: '.',
@@ -31,20 +47,17 @@ export default defineConfig({
       'Cache-Control': 'no-store',
     },
     proxy: {
-      '/ws': {
-        target: wsProxyTarget,
-        ws: true,
+      '/ws': wsProxyOptions(),
+      '/nats-ws': wsProxyOptions(),
+      '/natsws': wsProxyOptions(),
+      '/api': {
+        target: proxyTarget,
+        changeOrigin: true,
       },
-      '/nats-ws': {
-        target: wsProxyTarget,
-        ws: true,
+      '/stream': {
+        target: proxyTarget,
+        changeOrigin: true,
       },
-      '/natsws': {
-        target: wsProxyTarget,
-        ws: true,
-      },
-      '/api': proxyTarget,
-      '/stream': proxyTarget,
     }
   },
   optimizeDeps: {

@@ -2,6 +2,7 @@ package test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"dialtone/dev/plugins/chrome/src_v1/go"
+	chrome "dialtone/dev/plugins/chrome/src_v3"
 	"dialtone/dev/plugins/logs/src_v1/go"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/page"
@@ -128,6 +129,254 @@ func (s *BrowserSession) ChromeSession() *chrome.Session {
 	return s.Session
 }
 
+func (s *BrowserSession) isServiceManaged() bool {
+	return s != nil && s.Session != nil && strings.TrimSpace(s.Session.Host) != ""
+}
+
+func (s *BrowserSession) refreshServiceStatus() (*chrome.CommandResponse, error) {
+	if !s.isServiceManaged() {
+		return nil, fmt.Errorf("browser session is not service-managed")
+	}
+	resp, err := chrome.SendCommandByHost(s.Session.Host, chrome.CommandRequest{
+		Command: "status",
+		Role:    strings.TrimSpace(s.Session.Role),
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.applyServiceResponse(resp)
+	return resp, nil
+}
+
+func (s *BrowserSession) applyServiceResponse(resp *chrome.CommandResponse) {
+	if s == nil || s.Session == nil || resp == nil {
+		return
+	}
+	s.Session.Role = strings.TrimSpace(resp.Role)
+	s.Session.PID = resp.BrowserPID
+	s.Session.Port = resp.ChromePort
+	s.Session.NATSPort = resp.NATSPort
+	s.Session.CurrentURL = strings.TrimSpace(resp.CurrentURL)
+	s.Session.ManagedTarget = strings.TrimSpace(resp.ManagedTarget)
+}
+
+func (s *BrowserSession) Navigate(rawURL string) error {
+	if strings.TrimSpace(rawURL) == "" {
+		return nil
+	}
+	if s.ctx != nil {
+		if err := paceAction(s.ctx); err != nil {
+			return err
+		}
+	}
+	if s.isServiceManaged() {
+		resp, err := chrome.SendCommandByHost(s.Session.Host, chrome.CommandRequest{
+			Command: "goto",
+			Role:    strings.TrimSpace(s.Session.Role),
+			URL:     strings.TrimSpace(rawURL),
+		})
+		if err != nil {
+			return err
+		}
+		s.applyServiceResponse(resp)
+		return nil
+	}
+	return s.Run(chromedp.Navigate(rawURL))
+}
+
+func (s *BrowserSession) serviceCommand(req chrome.CommandRequest) (*chrome.CommandResponse, error) {
+	if !s.isServiceManaged() {
+		return nil, fmt.Errorf("browser session is not service-managed")
+	}
+	req.Role = strings.TrimSpace(s.Session.Role)
+	resp, err := chrome.SendCommandByHost(s.Session.Host, req)
+	if err != nil {
+		return nil, err
+	}
+	s.applyServiceResponse(resp)
+	if len(resp.ConsoleLines) > 0 {
+		s.ingestServiceConsoleLines(resp.ConsoleLines)
+	}
+	return resp, nil
+}
+
+func (s *BrowserSession) ingestServiceConsoleLines(lines []string) {
+	if len(lines) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seen := make(map[string]struct{}, len(s.messages))
+	for _, msg := range s.messages {
+		seen[msg.Text] = struct{}{}
+	}
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if _, ok := seen[line]; ok {
+			continue
+		}
+		msg := ConsoleMessage{Type: "log", Text: line, Time: time.Now()}
+		s.messages = append(s.messages, msg)
+		seen[line] = struct{}{}
+		if s.onConsole != nil {
+			s.onConsole(msg)
+		}
+	}
+}
+
+func (s *BrowserSession) WaitForConsoleContains(substr string, timeout time.Duration) error {
+	needle := strings.TrimSpace(substr)
+	if needle == "" {
+		return fmt.Errorf("console needle is required")
+	}
+	if s.isServiceManaged() {
+		resp, err := s.serviceCommand(chrome.CommandRequest{
+			Command:   "wait-log",
+			Contains:  needle,
+			TimeoutMS: int(timeout.Milliseconds()),
+		})
+		if err != nil {
+			return err
+		}
+		s.ingestServiceConsoleLines(resp.ConsoleLines)
+		return nil
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		for _, entry := range s.Entries() {
+			if strings.Contains(entry.Text, needle) {
+				return nil
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout waiting for browser console message containing %q", needle)
+}
+
+func (s *BrowserSession) WaitForAriaLabel(label string, timeout time.Duration) error {
+	if s.isServiceManaged() {
+		_, err := s.serviceCommand(chrome.CommandRequest{
+			Command:   "wait-aria",
+			AriaLabel: strings.TrimSpace(label),
+			TimeoutMS: int(timeout.Milliseconds()),
+		})
+		return err
+	}
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	selector := fmt.Sprintf(`[aria-label=%q]`, label)
+	js := fmt.Sprintf(`(() => !!document.querySelector(%q))()`, selector)
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		var ok bool
+		if err := s.Run(chromedp.Evaluate(js, &ok)); err == nil {
+			if ok {
+				return nil
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(140 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("timed out waiting for aria-label %q after %v (last error: %w)", label, timeout, lastErr)
+	}
+	return fmt.Errorf("timed out waiting for aria-label %q after %v", label, timeout)
+}
+
+func (s *BrowserSession) ClickAriaLabel(label string) error {
+	if s.ctx != nil {
+		if err := paceAction(s.ctx); err != nil {
+			return err
+		}
+	}
+	if s.isServiceManaged() {
+		_, err := s.serviceCommand(chrome.CommandRequest{
+			Command:   "click-aria",
+			AriaLabel: strings.TrimSpace(label),
+		})
+		return err
+	}
+	return s.Run(ClickAriaLabel(label))
+}
+
+func (s *BrowserSession) TypeAriaLabel(label, value string) error {
+	if s.ctx != nil {
+		if err := paceAction(s.ctx); err != nil {
+			return err
+		}
+	}
+	if s.isServiceManaged() {
+		_, err := s.serviceCommand(chrome.CommandRequest{
+			Command:   "type-aria",
+			AriaLabel: strings.TrimSpace(label),
+			Value:     value,
+		})
+		return err
+	}
+	return s.Run(TypeAriaLabel(label, value))
+}
+
+func (s *BrowserSession) PressEnterAriaLabel(label string) error {
+	if s.ctx != nil {
+		if err := paceAction(s.ctx); err != nil {
+			return err
+		}
+	}
+	if s.isServiceManaged() {
+		_, err := s.serviceCommand(chrome.CommandRequest{
+			Command:   "press-enter-aria",
+			AriaLabel: strings.TrimSpace(label),
+		})
+		return err
+	}
+	return s.Run(PressEnterAriaLabel(label))
+}
+
+func (s *BrowserSession) WaitForAriaLabelAttrEquals(label, attr, expected string, timeout time.Duration) error {
+	if s.isServiceManaged() {
+		_, err := s.serviceCommand(chrome.CommandRequest{
+			Command:   "wait-aria-attr",
+			AriaLabel: strings.TrimSpace(label),
+			Attr:      strings.TrimSpace(attr),
+			Expected:  expected,
+			TimeoutMS: int(timeout.Milliseconds()),
+		})
+		return err
+	}
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	selector := fmt.Sprintf(`[aria-label=%q]`, label)
+	js := fmt.Sprintf(`(() => {
+		const el = document.querySelector(%q);
+		if (!el) return false;
+		return el.getAttribute(%q) === %q;
+	})()`, selector, attr, expected)
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		var ok bool
+		if err := s.Run(chromedp.Evaluate(js, &ok)); err == nil {
+			if ok {
+				return nil
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(160 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("timed out waiting for aria-label %q attr %q=%q after %v (last error: %w)", label, attr, expected, timeout, lastErr)
+	}
+	return fmt.Errorf("timed out waiting for aria-label %q attr %q=%q after %v", label, attr, expected, timeout)
+}
+
 func (s *BrowserSession) Close() {
 	if s.cancelTab != nil {
 		s.cancelTab()
@@ -142,12 +391,12 @@ func (s *BrowserSession) Close() {
 			_ = c.Close()
 		}
 	}
-	if s.Session != nil && s.Session.IsNew {
-		chrome.CleanupSession(s.Session)
-	}
 }
 
 func (s *BrowserSession) Run(tasks ...chromedp.Action) error {
+	if s.isServiceManaged() {
+		return fmt.Errorf("direct chromedp actions are unsupported with chrome src_v3 service sessions")
+	}
 	if err := chromedp.Run(s.ctx, tasks...); err != nil {
 		if isRecoverableBrowserRunError(err) {
 			logs.Warn("   [BROWSER] recoverable run error; attempting rebind: %v", err)
@@ -175,6 +424,9 @@ func (s *BrowserSession) Run(tasks ...chromedp.Action) error {
 }
 
 func (s *BrowserSession) RunWithTimeout(timeout time.Duration, tasks ...chromedp.Action) error {
+	if s.isServiceManaged() {
+		return fmt.Errorf("direct chromedp actions are unsupported with chrome src_v3 service sessions")
+	}
 	if timeout <= 0 {
 		return s.Run(tasks...)
 	}
@@ -241,6 +493,22 @@ func isNoTargetIDError(err error) bool {
 }
 
 func (s *BrowserSession) EnsureOpenPage() error {
+	if s.isServiceManaged() {
+		resp, err := s.refreshServiceStatus()
+		if err == nil && resp != nil && resp.BrowserPID > 0 && !resp.Unhealthy {
+			return nil
+		}
+		resp, err = chrome.SendCommandByHost(s.Session.Host, chrome.CommandRequest{
+			Command: "open",
+			Role:    strings.TrimSpace(s.Session.Role),
+			URL:     "about:blank",
+		})
+		if err != nil {
+			return err
+		}
+		s.applyServiceResponse(resp)
+		return nil
+	}
 	if s == nil || s.Session == nil {
 		return fmt.Errorf("browser session unavailable")
 	}
@@ -459,6 +727,25 @@ func (s *BrowserSession) CloseExtraTabsKeepMain() error {
 }
 
 func (s *BrowserSession) CaptureScreenshot(path string) (err error) {
+	if s.ctx != nil {
+		if err := paceAction(s.ctx); err != nil {
+			return err
+		}
+	}
+	if s.isServiceManaged() {
+		resp, err := s.serviceCommand(chrome.CommandRequest{Command: "screenshot"})
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(resp.ScreenshotB64) == "" {
+			return fmt.Errorf("service screenshot returned empty payload")
+		}
+		raw, err := base64.StdEncoding.DecodeString(resp.ScreenshotB64)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(path, raw, 0644)
+	}
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("capture screenshot panic: %v", r)
@@ -501,7 +788,11 @@ func RemoteBrowserConfigured() bool {
 }
 
 func BrowserProviderAvailable() bool {
-	return chrome.FindChromePath() != "" || RemoteBrowserConfigured()
+	return RemoteBrowserConfigured()
+}
+
+func DirectBrowserControlAvailable() bool {
+	return !RemoteBrowserConfigured()
 }
 
 func (s *BrowserSession) HasConsoleMessage(substr string) bool {
@@ -522,19 +813,7 @@ func (s *BrowserSession) Entries() []ConsoleMessage {
 }
 
 func ConnectToBrowser(port int, role string) (*BrowserSession, error) {
-	wsURL, err := getWebsocketURL(port)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get websocket URL for port %d: %w", port, err)
-	}
-
-	session := &chrome.Session{
-		PID:          0, // Unknown
-		Port:         port,
-		WebSocketURL: wsURL,
-		IsNew:        false,
-	}
-
-	return initSession(session, role)
+	return nil, fmt.Errorf("direct browser port attachment is retired; use chrome src_v3 NATS commands through a service host")
 }
 
 func getWebsocketURL(port int) (string, error) {
@@ -571,6 +850,18 @@ func getWebsocketURL(port int) (string, error) {
 }
 
 func initSession(session *chrome.Session, role string) (*BrowserSession, error) {
+	if session != nil && strings.TrimSpace(session.Host) != "" && strings.TrimSpace(session.WebSocketURL) == "" {
+		if strings.TrimSpace(session.Role) == "" {
+			session.Role = strings.TrimSpace(role)
+		}
+		return &BrowserSession{
+			Session:     session,
+			allowCreate: true,
+		}, nil
+	}
+	if session != nil && strings.TrimSpace(session.WebSocketURL) != "" {
+		return nil, fmt.Errorf("direct websocket browser sessions are retired; use chrome src_v3 NATS service commands")
+	}
 	cfg := RuntimeConfigSnapshot()
 	remoteMode := strings.TrimSpace(cfg.BrowserNode) != ""
 	if !remoteMode && session != nil {
@@ -590,7 +881,7 @@ func initSession(session *chrome.Session, role string) (*BrowserSession, error) 
 			}
 		}
 	}
-	if session != nil && session.Port > 0 && (!remoteMode || isLocalWebSocketHost(session.WebSocketURL)) {
+	if session != nil && session.Port > 0 && (!remoteMode || (isLocalWebSocketHost(session.WebSocketURL) && !isChromeServiceProxySession(session))) {
 		if ws, err := getWebsocketURL(session.Port); err == nil && strings.TrimSpace(ws) != "" {
 			session.WebSocketURL = strings.TrimSpace(ws)
 		}
@@ -624,6 +915,16 @@ func initSession(session *chrome.Session, role string) (*BrowserSession, error) 
 	}
 	s.attachTargetListener(ctx)
 	return s, nil
+}
+
+func isChromeServiceProxySession(session *chrome.Session) bool {
+	if session == nil {
+		return false
+	}
+	if session.Port == chrome.DefaultServicePort {
+		return true
+	}
+	return debugPortFromWebSocketURL(session.WebSocketURL) == chrome.DefaultServicePort
 }
 
 func isLocalWebSocketHost(raw string) bool {
@@ -899,7 +1200,7 @@ func (sc *StepContext) EnsureBrowser(opts BrowserOptions) (*BrowserSession, erro
 			return nil, err
 		}
 		if strings.TrimSpace(opts.URL) != "" && !opts.SkipNavigateOnReuse && !opts.PreserveTabAndSize {
-			if err := sc.Session.Run(chromedp.Navigate(opts.URL)); err != nil {
+			if err := sc.Session.Navigate(opts.URL); err != nil {
 				return nil, err
 			}
 		}
@@ -926,7 +1227,7 @@ func (sc *StepContext) EnsureBrowser(opts BrowserOptions) (*BrowserSession, erro
 			return nil, err
 		}
 		if strings.TrimSpace(opts.URL) != "" && !opts.SkipNavigateOnReuse && !opts.PreserveTabAndSize {
-			if err := sc.Session.Run(chromedp.Navigate(opts.URL)); err != nil {
+			if err := sc.Session.Navigate(opts.URL); err != nil {
 				return nil, err
 			}
 		}
@@ -954,6 +1255,10 @@ func (sc *StepContext) EnsureBrowser(opts BrowserOptions) (*BrowserSession, erro
 }
 
 func isBrowserSessionAlive(s *BrowserSession) bool {
+	if s != nil && s.isServiceManaged() {
+		resp, err := s.refreshServiceStatus()
+		return err == nil && resp != nil && resp.BrowserPID > 0 && !resp.Unhealthy
+	}
 	if s == nil || s.ctx == nil {
 		return false
 	}
@@ -969,6 +1274,29 @@ func isBrowserSessionAlive(s *BrowserSession) bool {
 func waitForBrowserSessionReady(s *BrowserSession, timeout time.Duration) error {
 	if s == nil {
 		return fmt.Errorf("browser session is nil")
+	}
+	if s.isServiceManaged() {
+		if timeout <= 0 {
+			timeout = 8 * time.Second
+		}
+		deadline := time.Now().Add(timeout)
+		var lastErr error
+		for time.Now().Before(deadline) {
+			resp, err := s.refreshServiceStatus()
+			if err == nil && resp != nil && resp.BrowserPID > 0 && !resp.Unhealthy {
+				return nil
+			}
+			if err != nil {
+				lastErr = err
+			} else {
+				lastErr = fmt.Errorf("browser service unhealthy or not running")
+			}
+			time.Sleep(140 * time.Millisecond)
+		}
+		if lastErr == nil {
+			lastErr = fmt.Errorf("browser did not become ready in time")
+		}
+		return lastErr
 	}
 	if timeout <= 0 {
 		timeout = 8 * time.Second
@@ -1005,7 +1333,7 @@ func preflightRemoteSharedBrowser(opts SuiteOptions) (*BrowserSession, error) {
 	if remoteNode == "" {
 		return nil, nil
 	}
-	roleCandidates := []string{"test"}
+	roleCandidates := []string{strings.TrimSpace(cfg.RemoteBrowserRole), "test"}
 	if r := strings.TrimSpace(opts.BrowserCleanupRole); r != "" {
 		roleCandidates = append(roleCandidates, r)
 	}
@@ -1068,43 +1396,11 @@ func preflightRemoteSharedBrowser(opts SuiteOptions) (*BrowserSession, error) {
 }
 
 func (sc *StepContext) AttachBrowserByPort(port int, role string) (*BrowserSession, error) {
-	sc.markBrowserUsed()
-	if sc.Session != nil {
-		return sc.Session, nil
-	}
-	s, err := ConnectToBrowser(port, role)
-	if err != nil {
-		return nil, err
-	}
-	sc.bindBrowserSession(s)
-	if sc.setSuiteBrowser != nil {
-		sc.setSuiteBrowser(s)
-		sc.suiteBrowser = s
-	}
-	return s, nil
+	return nil, fmt.Errorf("AttachBrowserByPort is retired; use StartBrowser/EnsureBrowser with a chrome src_v3 service host")
 }
 
 func (sc *StepContext) AttachBrowserByWebSocket(webSocketURL string, role string) (*BrowserSession, error) {
-	sc.markBrowserUsed()
-	if sc.Session != nil {
-		return sc.Session, nil
-	}
-	session := &chrome.Session{
-		PID:          0,
-		Port:         0,
-		WebSocketURL: strings.TrimSpace(webSocketURL),
-		IsNew:        false,
-	}
-	s, err := initSession(session, role)
-	if err != nil {
-		return nil, err
-	}
-	sc.bindBrowserSession(s)
-	if sc.setSuiteBrowser != nil {
-		sc.setSuiteBrowser(s)
-		sc.suiteBrowser = s
-	}
-	return s, nil
+	return nil, fmt.Errorf("AttachBrowserByWebSocket is retired; use StartBrowser/EnsureBrowser with a chrome src_v3 service host")
 }
 
 func (sc *StepContext) Browser() (*BrowserSession, error) {
@@ -1134,20 +1430,7 @@ func (sc *StepContext) WaitForConsoleContains(substr string, timeout time.Durati
 	if err != nil {
 		return err
 	}
-	needle := strings.TrimSpace(substr)
-	if needle == "" {
-		return fmt.Errorf("console needle is required")
-	}
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		for _, entry := range b.Entries() {
-			if strings.Contains(entry.Text, needle) {
-				return nil
-			}
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return fmt.Errorf("timeout waiting for browser console message containing %q", needle)
+	return b.WaitForConsoleContains(substr, timeout)
 }
 
 func (sc *StepContext) WaitForAriaLabel(label string, timeout time.Duration) error {
@@ -1155,28 +1438,7 @@ func (sc *StepContext) WaitForAriaLabel(label string, timeout time.Duration) err
 	if err != nil {
 		return err
 	}
-	if timeout <= 0 {
-		timeout = 5 * time.Second
-	}
-	selector := fmt.Sprintf(`[aria-label=%q]`, label)
-	js := fmt.Sprintf(`(() => !!document.querySelector(%q))()`, selector)
-	deadline := time.Now().Add(timeout)
-	var lastErr error
-	for time.Now().Before(deadline) {
-		var ok bool
-		if err := b.Run(chromedp.Evaluate(js, &ok)); err == nil {
-			if ok {
-				return nil
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(140 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("timed out waiting for aria-label %q after %v (last error: %w)", label, timeout, lastErr)
-	}
-	return fmt.Errorf("timed out waiting for aria-label %q after %v", label, timeout)
+	return b.WaitForAriaLabel(label, timeout)
 }
 
 func (sc *StepContext) ClickAriaLabel(label string) error {
@@ -1184,7 +1446,7 @@ func (sc *StepContext) ClickAriaLabel(label string) error {
 	if err != nil {
 		return err
 	}
-	return b.Run(ClickAriaLabel(label))
+	return b.ClickAriaLabel(label)
 }
 
 func (sc *StepContext) TypeAriaLabel(label, value string) error {
@@ -1192,7 +1454,7 @@ func (sc *StepContext) TypeAriaLabel(label, value string) error {
 	if err != nil {
 		return err
 	}
-	return b.Run(TypeAriaLabel(label, value))
+	return b.TypeAriaLabel(label, value)
 }
 
 func (sc *StepContext) PressEnterAriaLabel(label string) error {
@@ -1200,7 +1462,7 @@ func (sc *StepContext) PressEnterAriaLabel(label string) error {
 	if err != nil {
 		return err
 	}
-	return b.Run(PressEnterAriaLabel(label))
+	return b.PressEnterAriaLabel(label)
 }
 
 func (sc *StepContext) WaitForAriaLabelAttrEquals(label, attr, expected string, timeout time.Duration) error {
@@ -1208,32 +1470,7 @@ func (sc *StepContext) WaitForAriaLabelAttrEquals(label, attr, expected string, 
 	if err != nil {
 		return err
 	}
-	if timeout <= 0 {
-		timeout = 5 * time.Second
-	}
-	selector := fmt.Sprintf(`[aria-label=%q]`, label)
-	js := fmt.Sprintf(`(() => {
-		const el = document.querySelector(%q);
-		if (!el) return false;
-		return el.getAttribute(%q) === %q;
-	})()`, selector, attr, expected)
-	deadline := time.Now().Add(timeout)
-	var lastErr error
-	for time.Now().Before(deadline) {
-		var ok bool
-		if err := b.Run(chromedp.Evaluate(js, &ok)); err == nil {
-			if ok {
-				return nil
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(160 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("timed out waiting for aria-label %q attr %q=%q after %v (last error: %w)", label, attr, expected, timeout, lastErr)
-	}
-	return fmt.Errorf("timed out waiting for aria-label %q attr %q=%q after %v", label, attr, expected, timeout)
+	return b.WaitForAriaLabelAttrEquals(label, attr, expected, timeout)
 }
 
 func (sc *StepContext) ClickAriaLabelAfterWait(label string, timeout time.Duration) error {
@@ -1249,6 +1486,14 @@ func (sc *StepContext) ClickAt(x, y float64) error {
 		return err
 	}
 	return b.Run(ClickAt(x, y))
+}
+
+func (sc *StepContext) Goto(rawURL string) error {
+	b, err := sc.Browser()
+	if err != nil {
+		return err
+	}
+	return b.Navigate(rawURL)
 }
 
 // TapAt uses a click event as the cross-platform tap primitive for test automation.

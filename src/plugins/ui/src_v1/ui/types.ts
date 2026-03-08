@@ -4,7 +4,20 @@ export interface VisualizationControl {
 }
 
 // Exactly one underlay per section.
-export type SectionPrimaryOverlayKind = 'stage' | 'table' | 'xterm' | 'docs' | 'video' | 'button-list' | (string & {});
+export type CanonicalSectionPrimaryOverlayKind =
+  | 'three'
+  | 'table'
+  | 'terminal'
+  | 'docs'
+  | 'camera'
+  | 'settings';
+export type SectionPrimaryOverlayKind =
+  | CanonicalSectionPrimaryOverlayKind
+  | 'stage'
+  | 'xterm'
+  | 'video'
+  | 'button-list'
+  | (string & {});
 // Optional overlays layered above the underlay.
 export type OverlayKind = 'menu' | 'mode-form' | 'status-bar' | 'chatlog' | 'legend' | SectionPrimaryOverlayKind;
 
@@ -49,4 +62,42 @@ export interface PWAOptions {
   registerOnLoad?: boolean;
   disableInDev?: boolean;
   log?: boolean;
+}
+
+const PRIMARY_KIND_ALIASES: Record<string, CanonicalSectionPrimaryOverlayKind> = {
+  three: 'three',
+  stage: 'three',
+  table: 'table',
+  terminal: 'terminal',
+  xterm: 'terminal',
+  docs: 'docs',
+  camera: 'camera',
+  video: 'camera',
+  settings: 'settings',
+  'button-list': 'settings',
+};
+
+export function normalizePrimaryOverlayKind(kind: string): CanonicalSectionPrimaryOverlayKind | string {
+  const normalized = kind.trim().toLowerCase();
+  return PRIMARY_KIND_ALIASES[normalized] ?? normalized;
+}
+
+export function primaryOverlaySuffixes(kind: string): string[] {
+  const canonical = normalizePrimaryOverlayKind(kind);
+  switch (canonical) {
+    case 'three':
+      return ['three', 'stage'];
+    case 'table':
+      return ['table', 'grid'];
+    case 'terminal':
+      return ['terminal', 'xterm', 'log'];
+    case 'docs':
+      return ['docs', 'notes'];
+    case 'camera':
+      return ['camera', 'video'];
+    case 'settings':
+      return ['settings', 'button-list'];
+    default:
+      return [String(canonical)];
+  }
 }

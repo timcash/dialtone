@@ -43,12 +43,8 @@ export function logWarn(source: string, message: string) {
 }
 
 export function logError(source: string, message: string, err?: unknown) {
-  if (err !== undefined) {
-    console.error(message, err);
-  } else {
-    console.error(message);
-  }
   const full = err === undefined ? message : `${message}: ${errorText(err)}`;
+  console.error(full);
   publish('ERROR', source, full);
 }
 

@@ -21,6 +21,8 @@ func Run(args []string) error {
 		return nil
 	case "mesh", "nodes", "list":
 		return runMeshList(args[1:])
+	case "tailnet-check":
+		return runTailnetCheck(args[1:])
 	case "run":
 		return runCommand(args[1:])
 	case "run-all":
@@ -44,6 +46,9 @@ func PrintUsage() {
 	logs.Raw("")
 	logs.Raw("Commands:")
 	logs.Raw("  mesh|nodes|list                       List canonical mesh nodes and transport mode")
+	logs.Raw("  tailnet-check [--host H|all] [--timeout 5s]")
+	logs.Raw("                                        Verify SSH handshake over each node's tailscale host")
+	logs.Raw("  format                                Run go fmt for the ssh plugin")
 	logs.Raw("  run --host H --cmd C [--user U --port P --password X] [--node N]")
 	logs.Raw("                                        Run command on a mesh host (preferred flag: --host)")
 	logs.Raw("  run-all --cmd C [--user U --port P --password X]")
@@ -63,15 +68,122 @@ func PrintUsage() {
 
 func runMeshList(_ []string) error {
 	nodes := ListMeshNodes()
-	logs.Raw("NAME      USER   HOST                                   PORT  OS       TRANSPORT")
+	logs.Raw("NAME      USER   HOST                                   TAILNET                                PORT  OS       TRANSPORT")
 	for _, n := range nodes {
 		transport := "ssh"
 		if shouldUseLocalPowerShell(n) {
 			transport = "powershell"
 		}
-		logs.Raw("%-9s %-6s %-38s %-5s %-8s %s", n.Name, n.User, n.Host, n.Port, n.OS, transport)
+		logs.Raw("%-9s %-6s %-38s %-38s %-5s %-8s %s", n.Name, n.User, PreferredHost(n, n.Port), RouteHost(n, meshRouteTailnet, n.Port), n.Port, n.OS, transport)
 	}
 	return nil
+}
+
+func runTailnetCheck(args []string) error {
+	fs := flag.NewFlagSet("ssh tailnet-check", flag.ContinueOnError)
+	fs.SetOutput(nil)
+	host := fs.String("host", "all", "Target mesh host or 'all'")
+	timeout := fs.Duration("timeout", 5*time.Second, "Per-node command timeout")
+	user := fs.String("user", "", "Override remote user")
+	port := fs.String("port", "", "Override remote port")
+	pass := fs.String("password", "", "Optional SSH password")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	targets := make([]MeshNode, 0)
+	rawHost := strings.TrimSpace(*host)
+	if rawHost == "" || rawHost == "all" {
+		targets = ListMeshNodes()
+	} else {
+		for _, part := range strings.Split(rawHost, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			node, err := ResolveMeshNode(part)
+			if err != nil {
+				return err
+			}
+			targets = append(targets, node)
+		}
+	}
+
+	logs.Raw("NAME      USER   TAILNET                                PORT  RESULT   DETAILS")
+	failures := 0
+	for _, node := range targets {
+		portValue := strings.TrimSpace(*port)
+		if portValue == "" {
+			portValue = strings.TrimSpace(node.Port)
+		}
+		if portValue == "" {
+			portValue = "22"
+		}
+		hostValue := RouteHost(node, meshRouteTailnet, portValue)
+		userValue := strings.TrimSpace(*user)
+		if userValue == "" {
+			userValue = node.User
+		}
+		if hostValue == "" {
+			failures++
+			logs.Raw("%-9s %-6s %-38s %-5s %-8s %s", node.Name, userValue, "-", portValue, "NO_ROUTE", "no tailscale host candidate")
+			continue
+		}
+
+		started := time.Now()
+		client, _, resolvedHost, resolvedPort, err := DialMeshNodeViaRoute(node.Name, meshRouteTailnet, CommandOptions{
+			User:     userValue,
+			Port:     portValue,
+			Password: *pass,
+		})
+		if err != nil {
+			failures++
+			detail := summarizeTailnetCheckError(err)
+			logs.Raw("%-9s %-6s %-38s %-5s %-8s %s", node.Name, userValue, hostValue, portValue, "FAIL", detail)
+			continue
+		}
+
+		commandTimeout := *timeout
+		if commandTimeout <= 0 {
+			commandTimeout = 5 * time.Second
+		}
+		resultCh := make(chan error, 1)
+		go func() {
+			defer client.Close()
+			_, runErr := runSSHFunc(client, "printf tailnet-ok")
+			resultCh <- runErr
+		}()
+
+		select {
+		case runErr := <-resultCh:
+			if runErr != nil {
+				failures++
+				logs.Raw("%-9s %-6s %-38s %-5s %-8s %s", node.Name, userValue, resolvedHost, resolvedPort, "FAIL", summarizeTailnetCheckError(runErr))
+				continue
+			}
+			logs.Raw("%-9s %-6s %-38s %-5s %-8s %s", node.Name, userValue, resolvedHost, resolvedPort, "PASS", time.Since(started).Round(10*time.Millisecond))
+		case <-time.After(commandTimeout):
+			_ = client.Close()
+			failures++
+			logs.Raw("%-9s %-6s %-38s %-5s %-8s %s", node.Name, userValue, resolvedHost, resolvedPort, "TIMEOUT", commandTimeout)
+		}
+	}
+	if failures > 0 {
+		return fmt.Errorf("tailnet-check finished with %d failure(s)", failures)
+	}
+	return nil
+}
+
+func summarizeTailnetCheckError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.TrimSpace(err.Error())
+	msg = strings.ReplaceAll(msg, "\n", " | ")
+	if len(msg) > 96 {
+		return msg[:93] + "..."
+	}
+	return msg
 }
 
 func runCommand(args []string) error {

@@ -5,6 +5,15 @@ Reusable test runtime for plugin integration tests.
 ## Bash Workflows
 
 ```bash
+# Install test UI dependencies
+./dialtone.sh test src_v1 install
+
+# Format test Go code and UI sources
+./dialtone.sh test src_v1 format
+
+# Build test Go entrypoints and the Vite UI
+./dialtone.sh test src_v1 build
+
 # Run test plugin self-check suite (reference implementation)
 ./dialtone.sh test src_v1 test
 
@@ -24,6 +33,16 @@ Reusable test runtime for plugin integration tests.
 ./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.pass.>'
 ./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.fail.>'
 ```
+
+Use the `dialtone.sh` wrapper for test plugin workflows. Do not run `go`, `npm`, or `vite` directly for normal install/build/format paths; the wrapper is the supported entrypoint.
+
+Build outputs:
+- Go binaries go to `bin/`, not `src/`
+- current wrapped build artifacts are:
+  - `bin/dialtone_test_v1`
+  - `bin/dialtone_test_v1_runner`
+  - `bin/dialtone_test_v1_mock_server`
+- the UI build output stays in `src/plugins/test/src_v1/ui/dist`
 
 Minimal plugin layout:
 
@@ -55,8 +74,8 @@ Use `StepContext` only; avoid plugin-local test context wrappers.
 Common methods:
 - logging: `Infof`, `Warnf`, `Errorf`, `TestPassf`, `TestFailf`
 - wait helpers: `WaitForStepMessage*`, `WaitForBrowserMessage*`, `WaitForErrorMessage*`
-- browser: `EnsureBrowser`, `RunBrowser`, `RunBrowserWithTimeout`
-- aria helpers: `WaitForAriaLabel`, `ClickAriaLabel`, `TypeAriaLabel`, `PressEnterAriaLabel`
+- browser: `EnsureBrowser`, `Goto`, `CaptureScreenshot`
+- aria helpers: `WaitForAriaLabel`, `ClickAriaLabel`, `TypeAriaLabel`, `PressEnterAriaLabel`, `WaitForAriaLabelAttrEquals`
 - misc: `WaitForConsoleContains`, `ClickAt`, `TapAt`, `ResetStepLogClock`, `RepoRoot`
 - default step timeout: `10s` when `Step.Timeout` is not set
 
@@ -91,6 +110,7 @@ Remote browser behavior:
 - default is local/headless unless caller passes explicit attach options
 - set `DIALTONE_TEST_BROWSER_NODE=<node>` or pass plugin-level `--attach <node>`
 - when attach is active, browser console/error events are still routed through test logger + NATS
+- for `chrome src_v3` service sessions, treat the managed remote browser as exclusive for the duration of the run; do not run multiple attach suites against the same host at the same time
 
 ## Logs + NATS
 
@@ -174,34 +194,33 @@ Browser subjects:
 - error topic: `logs.test.<suite>.error`
 
 What the StepContext chromedp API can do:
-- start or attach browser sessions (`EnsureBrowser`, `AttachBrowserByPort`, `AttachBrowserByWebSocket`)
-- reuse active session in step (`Browser`, `CloseBrowser`)
-- run arbitrary chromedp actions (`RunBrowser`, `RunBrowserWithTimeout`)
+- start or reuse a service-backed browser session (`EnsureBrowser`)
+- navigate the managed tab (`Goto`)
 - wait/assert element presence and attributes by aria-label
 - click/type/press-enter by aria-label
-- click/tap by absolute coordinates
-- wait for browser console output and treat misses as test failures
-- route browser console/errors into test logs and NATS subjects automatically
+- capture screenshots that are written into `TEST.md`
+- wait for browser console output and route it into test logs/NATS
 
-StepContext browser API reference:
+Service-backed `StepContext` browser API reference:
 - `EnsureBrowser(BrowserOptions) (*BrowserSession, error)`
-- `AttachBrowserByPort(port int, role string) (*BrowserSession, error)`
-- `AttachBrowserByWebSocket(webSocketURL string, role string) (*BrowserSession, error)`
 - `Browser() (*BrowserSession, error)`
 - `CloseBrowser()` (no-op for suite-owned shared browser)
-- `RunBrowser(actions ...chromedp.Action) error`
-- `RunBrowserWithTimeout(timeout time.Duration, actions ...chromedp.Action) error`
+- `Goto(url string) error`
 - `WaitForAriaLabel(label string, timeout time.Duration) error`
 - `ClickAriaLabel(label string) error`
 - `ClickAriaLabelAfterWait(label string, timeout time.Duration) error`
 - `TypeAriaLabel(label, value string) error`
 - `PressEnterAriaLabel(label string) error`
 - `WaitForAriaLabelAttrEquals(label, attr, expected string, timeout time.Duration) error`
-- `ClickAt(x, y float64) error`
-- `TapAt(x, y float64) error`
+- `CaptureScreenshot(path string) error`
 - `WaitForConsoleContains(substr string, timeout time.Duration) error`
 - `WaitForBrowserMessage(pattern string, timeout time.Duration) error`
 - `WaitForBrowserMessageAfterAction(pattern string, timeout time.Duration, action func() error) error`
+
+Notes:
+- These browser helpers now drive `chrome src_v3` over NATS through the service host.
+- Direct `chromedp` attach/allocator workflows are retired for normal tests.
+- `RunBrowser(...)` and `RunBrowserWithTimeout(...)` are only for legacy direct-browser tests and should not be the default API.
 
 Local `index.html` smoke pattern (aria-label + console):
 

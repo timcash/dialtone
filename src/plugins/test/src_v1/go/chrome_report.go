@@ -79,6 +79,23 @@ if [ -n "$procs" ]; then
   done
 fi
 `
+	if strings.EqualFold(nodeInfo.OS, "windows") {
+		script = `
+$procs = Get-CimInstance Win32_Process | Where-Object {
+  $_.Name -eq 'chrome.exe' -and $_.CommandLine -match '--remote-debugging-port'
+}
+$count = @($procs).Count
+Write-Output ("DIALTONE_REMOTE_CHROME_COUNT=" + $count)
+foreach ($p in $procs) {
+  $cmd = [string]$p.CommandLine
+  $argPort = ''
+  if ($cmd -match '--remote-debugging-port=([0-9]+)') { $argPort = $Matches[1] }
+  $listenPort = ''
+  if ($argPort -ne '') { $listenPort = $argPort }
+  Write-Output ("DIALTONE_REMOTE_CHROME_PROCESS=" + $p.ProcessId + "|" + $argPort + "|" + $listenPort + "|" + $cmd)
+}
+`
+	}
 	out, err := sshv1.RunNodeCommand(nodeInfo.Name, script, sshv1.CommandOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("remote browser inventory on %s failed: %w", nodeInfo.Name, err)

@@ -104,7 +104,7 @@ func RunDeploy(args []string) error {
 		return fmt.Errorf("deploy requires --user or a mesh node with a default user")
 	}
 	if opts.Service && strings.TrimSpace(opts.ManifestURL) == "" {
-		opts.ManifestURL = fmt.Sprintf("https://github.com/%s/releases/latest/download/robot_src_v2_composition_manifest.json", opts.Repo)
+		opts.ManifestURL = fmt.Sprintf("https://github.com/%s/releases/latest/download/robot_src_v2_channel.json", opts.Repo)
 		logs.Info("[DEPLOY] manifest-url not provided; using latest release URL: %s", opts.ManifestURL)
 	}
 	if opts.Service {
@@ -154,7 +154,6 @@ func RunDeploy(args []string) error {
 	repoRootFlag := ""
 	if strings.TrimSpace(opts.ManifestURL) != "" {
 		manifestFlag = "--manifest-url " + shellQuoteArg(opts.ManifestURL)
-		// In manifest-url mode, runtime should not require repo-root.
 	} else {
 		remoteManifest := filepath.ToSlash(filepath.Join("plugins", strings.TrimPrefix(strings.TrimSpace(opts.ManifestPath), "src/plugins/")))
 		if strings.HasPrefix(opts.ManifestPath, "plugins/") {
@@ -167,7 +166,7 @@ func RunDeploy(args []string) error {
 		manifestFlag = "--manifest " + shellQuoteArg(remoteManifestAbs)
 		repoRootFlag = "--repo-root " + shellQuoteArg(opts.RemoteRepo)
 	}
-	if repoRootFlag == "" && strings.TrimSpace(opts.RemoteRepo) != "" && strings.TrimSpace(opts.ManifestURL) == "" {
+	if repoRootFlag == "" && strings.TrimSpace(opts.RemoteRepo) != "" {
 		repoRootFlag = "--repo-root " + shellQuoteArg(opts.RemoteRepo)
 	}
 

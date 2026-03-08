@@ -80,6 +80,11 @@ func BrowserOptionsFor(defaultURL string) (testv1.BrowserOptions, bool, error) {
 		b.URL = inferred
 		return b, true, nil
 	}
+	if meshNode, err := sshv1.ResolveMeshNode(strings.TrimSpace(opts.AttachNode)); err == nil && strings.EqualFold(strings.TrimSpace(meshNode.OS), "windows") && meshNode.PreferWSLPowerShell {
+		// WSL localhost forwarding is available on the paired Windows host; keep the
+		// local URL so the headed Chrome session opens the dev server reliably.
+		return b, true, nil
+	}
 	rewritten, err := rewriteLocalURLToWSLHost(b.URL)
 	if err != nil {
 		return b, true, err

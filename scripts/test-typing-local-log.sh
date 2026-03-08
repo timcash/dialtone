@@ -3,7 +3,6 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIALTONE_BIN="${ROOT_DIR}/dialtone_mod"
-HOST="${1:-legion}"
 WINDOW_LOG="/mnt/c/Users/Public/dialtone-typing-terminal.log.window.log"
 LAUNCH_LOG="/mnt/c/Users/Public/dialtone-typing-terminal.log"
 STATE_LOG="/mnt/c/Users/Public/dialtone-typing-terminal.log.state.json"
@@ -19,7 +18,7 @@ fi
 
 send_command() {
   local cmd="$1"
-  "${DIALTONE_BIN}" typing v1 terminal --host "${HOST}" --local --command "${cmd}"
+  "${DIALTONE_BIN}" terminal v1 type --command "${cmd}"
   sleep "${DELAY_SECONDS}"
 }
 

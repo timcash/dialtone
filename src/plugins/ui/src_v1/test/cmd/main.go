@@ -4,10 +4,9 @@ import (
 	"errors"
 	"flag"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 
+	chromev3 "dialtone/dev/plugins/chrome/src_v3"
 	"dialtone/dev/plugins/logs/src_v1/go"
 	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
@@ -29,7 +28,7 @@ func main() {
 	logs.SetOutput(os.Stdout)
 	fs := flag.NewFlagSet("ui test", flag.ContinueOnError)
 	commonFlags := testv1.BindCommonTestFlags(fs, testv1.CommonTestCLIOptions{
-		ClicksPerSecond: 5,
+		ActionsPerMinute: 360,
 	})
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -45,11 +44,11 @@ func main() {
 	}
 	attach := strings.TrimSpace(common.AttachNode)
 	url := strings.TrimSpace(common.TargetURL)
-	testv1.SetClicksPerSecond(common.ClicksPerSecond)
 	test.SetOptions(test.Options{
-		AttachNode:      attach,
-		TargetURL:       url,
-		ClicksPerSecond: common.ClicksPerSecond,
+		AttachNode:       attach,
+		TargetURL:        url,
+		ActionsPerMinute: common.ActionsPerMinute,
+		ClicksPerSecond:  common.ClicksPerSecond,
 	})
 	common.ApplyRuntimeConfig()
 	if attach != "" {
@@ -59,7 +58,7 @@ func main() {
 			})
 			logs.Info("ui test auto-enabled --no-ssh for windows attach node=%s", attach)
 		}
-		logs.Info("ui test remote attach mode (headed) node=%s url=%s cps=%.3f", attach, url, common.ClicksPerSecond)
+		logs.Info("ui test remote attach mode (headed) node=%s url=%s apm=%.3f", attach, url, common.ActionsPerMinute)
 		if err := ensureAttachBrowser(attach, url); err != nil {
 			logs.Error("ui test attach preflight failed: %v", err)
 			os.Exit(1)
@@ -76,7 +75,7 @@ func main() {
 			cfg.RemoteNoLaunch = false
 			cfg.RemoteBrowserPID = 0
 		})
-		logs.Info("ui test local mode url=%s cps=%.3f", url, common.ClicksPerSecond)
+		logs.Info("ui test local mode url=%s apm=%.3f", url, common.ActionsPerMinute)
 	}
 
 	reg := test.NewRegistry()
@@ -124,47 +123,19 @@ func ensureAttachBrowser(node, url string) error {
 	if targetURL == "" {
 		targetURL = "about:blank"
 	}
-	args := []string{
-		dialtoneScriptPath(),
-		"chrome", "src_v1", "remote-new",
-		"--node", node,
-		"--port", "9333",
-		"--role", "test",
-		"--reuse-existing",
-		"--debug-address", "0.0.0.0",
-		"--url", targetURL,
+	role := strings.TrimSpace(testv1.RuntimeConfigSnapshot().RemoteBrowserRole)
+	if role == "" {
+		role = "dev"
 	}
-	// Legion Windows attach is notably more stable in headless mode.
-	if meshNode, err := sshv1.ResolveMeshNode(node); err == nil && strings.EqualFold(strings.TrimSpace(meshNode.OS), "windows") {
-		args = append(args, "--headless")
+	if _, err := chromev3.EnsureRemoteServiceByHost(node, role, true); err != nil {
+		return err
 	}
-	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
-func dialtoneScriptPath() string {
-	if p := os.Getenv("DIALTONE_SCRIPT"); strings.TrimSpace(p) != "" {
-		return strings.TrimSpace(p)
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "./dialtone.sh"
-	}
-	cur := cwd
-	for i := 0; i < 6; i++ {
-		candidate := filepath.Join(cur, "dialtone.sh")
-		if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
-			return candidate
-		}
-		parent := filepath.Dir(cur)
-		if parent == cur {
-			break
-		}
-		cur = parent
-	}
-	return filepath.Join(cwd, "dialtone.sh")
+	_, err := chromev3.SendCommandByHost(node, chromev3.CommandRequest{
+		Command: "open",
+		Role:    role,
+		URL:     targetURL,
+	})
+	return err
 }
 
 func filterSteps(steps []testv1.Step, filterExpr string) []testv1.Step {

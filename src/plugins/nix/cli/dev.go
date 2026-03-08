@@ -1,8 +1,8 @@
 package cli
 
 import (
-	"dialtone/dev/browser"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,7 +36,7 @@ func RunDev(versionDir string) error {
 	}
 
 	// 2. Cleanup port 8080
-	browser.CleanupPort(port)
+	cleanupPort(port)
 
 	// 3. Start the host node
 	cmd := exec.Command("go", "run", "cmd/main.go")
@@ -51,7 +51,7 @@ func RunDev(versionDir string) error {
 	// 4. Wait for it to be ready
 	go func() {
 		for i := 0; i < 30; i++ {
-			if browser.IsPortOpen(port) {
+			if isPortOpen(port) {
 				fmt.Printf("\n🚀 Nix Plugin (%s) is READY!\n", versionDir)
 				fmt.Printf("🔗 URL: http://localhost:%d\n\n", port)
 				return
@@ -64,4 +64,30 @@ func RunDev(versionDir string) error {
 	// 5. Block until interrupted
 	fmt.Println(">> [NIX] Dev: host process started. Press Ctrl+C to stop.")
 	return cmd.Wait()
+}
+
+func isPortOpen(port int) bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 200*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+func cleanupPort(port int) {
+	for _, tool := range []string{"fuser", "lsof"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			continue
+		}
+		switch tool {
+		case "fuser":
+			cmd := exec.Command(tool, "-k", fmt.Sprintf("%d/tcp", port))
+			_ = cmd.Run()
+		case "lsof":
+			cmd := exec.Command("bash", "-lc", fmt.Sprintf("lsof -ti tcp:%d | xargs -r kill -9", port))
+			_ = cmd.Run()
+		}
+		return
+	}
 }
