@@ -36,6 +36,10 @@ func Run(args []string) error {
 		return runServe(args[1:])
 	case "go-build":
 		return runGoBuild(args[1:])
+	case "format":
+		return runFormat(args[1:])
+	case "test":
+		return runTest(args[1:])
 	case "download-dev":
 		return runDownloadDev(args[1:])
 	default:
@@ -54,8 +58,9 @@ func PrintUsage() {
 	logs.Raw("  build                   Build UI dist")
 	logs.Raw("  serve [--addr A]        Serve UI dist through Go server")
 	logs.Raw("  go-build                Build earth server binary to repo bin/")
+	logs.Raw("  format                  Format Go and UI source code")
+	logs.Raw("  test [--attach N]       Run earth plugin test suite")
 	logs.Raw("  download-dev [flags]    Clone/pull repo then run earth ui vite dev")
-	logs.Raw("  test [--attach N]       Run earth plugin test suite (optional remote attach node)")
 }
 
 func runInstall(args []string) error {
@@ -148,7 +153,7 @@ func runOpenDev(args []string) error {
 	fs := flag.NewFlagSet("earth open-dev", flag.ContinueOnError)
 	fs.SetOutput(nil)
 	hosts := fs.String("hosts", "all", "Chrome target hosts CSV or 'all' (example: darkmac,legion,gold)")
-	port := fs.Int("port", 5177, "Vite dev server port")
+	port := fs.Int("port", 5181, "Vite dev server port")
 	publicURL := fs.String("public-url", "", "Explicit URL (default: http://127.0.0.1:<port> on each host)")
 	role := fs.String("role", "dev", "Chrome role to reuse/start")
 	if err := fs.Parse(args); err != nil {
@@ -160,7 +165,7 @@ func runOpenDev(args []string) error {
 	}
 	logs.Info("earth open-dev hosts=%s url=%s role=%s", strings.TrimSpace(*hosts), devURL, strings.TrimSpace(*role))
 	return runDialtone(paths.Runtime.RepoRoot,
-		"chrome", "src_v1", "open",
+		"chrome", "src_v3", "open",
 		"--host", strings.TrimSpace(*hosts),
 		"--role", strings.TrimSpace(*role),
 		"--url", devURL,
@@ -171,7 +176,6 @@ func defaultDevBrowserNode() string {
 	if envNode := strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_NODE")); envNode != "" {
 		return envNode
 	}
-	// WSL typically has no native Chrome; prefer known remote dev browser node.
 	if isWSL() {
 		return "chroma"
 	}
@@ -196,6 +200,37 @@ func runBuild(_ []string) error {
 		return err
 	}
 	return runDialtone(paths.Runtime.RepoRoot, "bun", "src_v1", "exec", "--cwd", paths.Preset.UI, "run", "build")
+}
+
+func runFormat(args []string) error {
+	paths, err := ResolvePaths("")
+	if err != nil {
+		return err
+	}
+	logs.Info("earth src_v1 formatting Go code...")
+	if err := runCmd(paths.Preset.PluginVersionRoot, "go", "fmt", "./..."); err != nil {
+		return err
+	}
+	logs.Info("earth src_v1 formatting UI code...")
+	return runDialtone(paths.Runtime.RepoRoot, "bun", "src_v1", "exec", "--cwd", paths.Preset.UI, "run", "fmt")
+}
+
+func runTest(args []string) error {
+	paths, err := ResolvePaths("")
+	if err != nil {
+		return err
+	}
+	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
+	if goBin == "" {
+		goBin = "go"
+	}
+	runArgs := []string{"run", "./plugins/earth/src_v1/test/cmd/main.go"}
+	runArgs = append(runArgs, args...)
+	cmd := exec.Command(goBin, runArgs...)
+	cmd.Dir = paths.Runtime.SrcRoot
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 func runServe(args []string) error {
