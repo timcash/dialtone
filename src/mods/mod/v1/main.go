@@ -103,7 +103,7 @@ func parseTopLevel(args []string) (string, []string, error) {
 }
 
 func printUsage() {
-	fmt.Println("Usage: ./dialtone.sh mods v1 <command> [args]")
+	fmt.Println("Usage: ./dialtone_mod mods v1 <command> [args]")
 	fmt.Println("")
 	fmt.Println("Commands:")
 	fmt.Println("  new <mod-name> [--repo <url|owner/repo|path>] [--owner <owner>] [--repo-name <name>]")
@@ -999,11 +999,11 @@ func runRsyncToNode(node meshNode, repoRoot, destinationBase string, paths []str
 				lastErr = err
 				break
 			}
-	}
-	if lastErr == nil {
-		return nil
-	}
-	break
+		}
+		if lastErr == nil {
+			return nil
+		}
+		break
 	}
 	return lastErr
 }
@@ -1063,7 +1063,7 @@ func gitIgnoreExcludeFile(repoRoot, relPath string) (string, error) {
 
 func runSyncUI(args []string) error {
 	fs := flag.NewFlagSet("mods sync-ui", flag.ContinueOnError)
-	from := fs.String("from", "", "UI template source path (default: src/plugins/ui/src_v1/ui)")
+	from := fs.String("from", "", "UI template source path (required)")
 	dryRun := fs.Bool("dry-run", false, "print actions only")
 	commit := fs.Bool("commit", false, "commit UI updates in each mod")
 	push := fs.Bool("push", false, "push after commit")
@@ -1075,6 +1075,9 @@ func runSyncUI(args []string) error {
 	}
 	if *push {
 		*commit = true
+	}
+	if strings.TrimSpace(*from) == "" {
+		return errors.New("sync-ui requires --from")
 	}
 	repoRoot, err := findRepoRoot()
 	if err != nil {
@@ -1524,7 +1527,7 @@ func selectModPaths(mods []modEntry, filters []string) ([]string, error) {
 }
 
 func findRepoRoot() (string, error) {
-	if v := strings.TrimSpace(os.Getenv("DIALTONE_REPO_ROOT")); v != "" && fileExists(filepath.Join(v, "dialtone.sh")) {
+	if v := strings.TrimSpace(os.Getenv("DIALTONE_REPO_ROOT")); v != "" && isRepoRoot(v) {
 		return v, nil
 	}
 	cwd, err := os.Getwd()
@@ -1533,7 +1536,7 @@ func findRepoRoot() (string, error) {
 	}
 	cur := cwd
 	for {
-		if fileExists(filepath.Join(cur, "dialtone.sh")) {
+		if isRepoRoot(cur) {
 			return cur, nil
 		}
 		parent := filepath.Dir(cur)
@@ -1831,7 +1834,7 @@ func isSelfMeshNode(node meshNode) bool {
 func resolveUISourcePath(repoRoot, from string) string {
 	p := strings.TrimSpace(from)
 	if p == "" {
-		return filepath.Join(repoRoot, "src", "plugins", "ui", "src_v1", "ui")
+		return ""
 	}
 	if filepath.IsAbs(p) {
 		return p
@@ -1982,13 +1985,18 @@ func runDialtone(command string, args ...string) error {
 	if err != nil {
 		return err
 	}
-	script := filepath.Join(repoRoot, "dialtone.sh")
+	script := filepath.Join(repoRoot, "dialtone_mod")
 	all := append([]string{command}, args...)
 	cmd := exec.Command(script, all...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	return cmd.Run()
+}
+
+func isRepoRoot(candidate string) bool {
+	return fileExists(filepath.Join(candidate, "dialtone_mod")) &&
+		fileExists(filepath.Join(candidate, "src", "go.mod"))
 }
 
 func runCommand(args ...string) error {

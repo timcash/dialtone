@@ -9,7 +9,7 @@ import (
 func locateRepoRoot() (string, error) {
 	if envRoot := os.Getenv("DIALTONE_REPO_ROOT"); envRoot != "" {
 		candidate := filepath.Clean(envRoot)
-		if _, err := os.Stat(filepath.Join(candidate, "dialtone.sh")); err == nil {
+		if isRepoRoot(candidate) {
 			return candidate, nil
 		}
 	}
@@ -20,7 +20,7 @@ func locateRepoRoot() (string, error) {
 	}
 	cwd = filepath.Clean(cwd)
 	for {
-		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
+		if isRepoRoot(cwd) {
 			return cwd, nil
 		}
 		parent := filepath.Dir(cwd)
@@ -30,6 +30,14 @@ func locateRepoRoot() (string, error) {
 		cwd = parent
 	}
 	return "", fmt.Errorf("unable to locate repo root from %s", cwd)
+}
+
+func isRepoRoot(candidate string) bool {
+	if _, err := os.Stat(filepath.Join(candidate, "dialtone_mod")); err != nil {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(candidate, "src", "go.mod"))
+	return err == nil
 }
 
 func locateModRoot(repoRoot string) (string, error) {

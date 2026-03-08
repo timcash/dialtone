@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	chrome "dialtone/dev/plugins/chrome/src_v1/go"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
@@ -21,7 +20,7 @@ func newChromeServiceManager(opts serverOptions) (*chromeServiceManager, error) 
 		initialURL = "about:blank"
 	}
 
-	sess, err := chrome.StartSession(chrome.SessionOptions{
+	sess, err := StartSession(SessionOptions{
 		RequestedPort: opts.chromeDebugPort,
 		GPU:           true,
 		Headless:      opts.headless,
@@ -38,14 +37,14 @@ func newChromeServiceManager(opts serverOptions) (*chromeServiceManager, error) 
 	if err := chromedp.Run(browserCtx); err != nil {
 		cancelBrowser()
 		cancelAlloc()
-		_ = chrome.CleanupSession(sess)
+		_ = CleanupSession(sess)
 		return nil, fmt.Errorf("initialize browser connection: %w", err)
 	}
 	chromeCtx := chromedp.FromContext(browserCtx)
 	if chromeCtx == nil || chromeCtx.Browser == nil || chromeCtx.Target == nil {
 		cancelBrowser()
 		cancelAlloc()
-		_ = chrome.CleanupSession(sess)
+		_ = CleanupSession(sess)
 		return nil, fmt.Errorf("initialize browser connection: browser or target executor missing")
 	}
 
@@ -103,7 +102,7 @@ func (m *chromeServiceManager) Close() {
 	m.mu.Unlock()
 	m.cancelBrowser()
 	m.cancelAlloc()
-	_ = chrome.CleanupSession(m.session)
+	_ = CleanupSession(m.session)
 }
 
 func (m *chromeServiceManager) addTab(name, url string) (tabInfo, error) {

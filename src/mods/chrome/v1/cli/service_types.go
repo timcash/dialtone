@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 
-	chrome "dialtone/dev/plugins/chrome/src_v1/go"
 	"github.com/chromedp/chromedp"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
@@ -46,7 +45,7 @@ type managedTab struct {
 }
 
 type chromeServiceManager struct {
-	session       *chrome.Session
+	session       *Session
 	allocCtx      context.Context
 	cancelAlloc   context.CancelFunc
 	browserCtx    context.Context
