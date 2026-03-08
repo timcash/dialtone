@@ -25,7 +25,7 @@ func runBuildAndServe(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 	if err := ctx.EnsureBuiltAndServed(); err != nil {
 		return testv1.StepRunResult{}, err
 	}
-	defaultURL = ctx.AppURL("/#ui-hero-stage")
+	defaultURL = ctx.AppURL("/#ui-home-docs")
 
 	browserOpts, attach, err := uitest.BrowserOptionsFor(defaultURL)
 	if err != nil {
@@ -41,7 +41,7 @@ func runBuildAndServe(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 	if _, err := sc.EnsureBrowser(browserOpts); err != nil {
 		return testv1.StepRunResult{}, fmt.Errorf("ensure browser: %w", err)
 	}
-	if err := sc.RunBrowserWithTimeout(8*time.Second, testv1.Navigate(navigateURL)); err != nil {
+	if err := sc.Goto(navigateURL); err != nil {
 		return testv1.StepRunResult{}, fmt.Errorf("navigate attached browser: %w", err)
 	}
 	if err := uitest.SaveBrowserDebugConfig(sc); err != nil {
@@ -54,28 +54,28 @@ func runBuildAndServe(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 	}
 	// Attached sessions can recover onto a blank target after tab churn;
 	// enforce a final navigate to the fixture URL before DOM assertions.
-	if err := sc.RunBrowserWithTimeout(8*time.Second, testv1.Navigate(navigateURL)); err != nil {
+	if err := sc.Goto(navigateURL); err != nil {
 		return testv1.StepRunResult{}, fmt.Errorf("re-navigate before hero assertions: %w", err)
 	}
-	if err := sc.WaitForAriaLabel("Hero Section", 10*time.Second); err != nil {
-		return testv1.StepRunResult{}, fmt.Errorf("wait hero section: %w", err)
+	if err := sc.WaitForAriaLabel("Docs Section", 10*time.Second); err != nil {
+		return testv1.StepRunResult{}, fmt.Errorf("wait docs section: %w", err)
 	}
-	if err := sc.WaitForAriaLabelAttrEquals("Hero Section", "data-active", "true", 10*time.Second); err != nil {
-		return testv1.StepRunResult{}, fmt.Errorf("wait hero section active attr: %w", err)
+	if err := sc.WaitForAriaLabelAttrEquals("Docs Section", "data-active", "true", 10*time.Second); err != nil {
+		return testv1.StepRunResult{}, fmt.Errorf("wait docs section active attr: %w", err)
 	}
-	if err := sc.WaitForAriaLabel("Hero Canvas", 10*time.Second); err != nil {
-		return testv1.StepRunResult{}, fmt.Errorf("wait hero canvas: %w", err)
+	if err := sc.WaitForAriaLabel("Docs Underlay", 10*time.Second); err != nil {
+		return testv1.StepRunResult{}, fmt.Errorf("wait docs underlay: %w", err)
 	}
 	if err := uitest.AssertJS(sc, 5*time.Second, `(() => {
-		const s = document.getElementById('ui-hero-stage');
+		const s = document.getElementById('ui-home-docs');
 		if (!s) return false;
 		const h = s.querySelector('header');
-		return !!h && h.classList.contains('legend');
-	})()`, "hero should use legend header mode"); err != nil {
-		return testv1.StepRunResult{}, fmt.Errorf("assert hero legend mode: %w", err)
+		return !!h && h.classList.contains('shell-legend-text');
+	})()`, "docs should use text legend mode"); err != nil {
+		return testv1.StepRunResult{}, fmt.Errorf("assert docs legend mode: %w", err)
 	}
-	if err := uitest.CaptureScreenshot(sc, "ui_hero.png"); err != nil {
-		return testv1.StepRunResult{}, fmt.Errorf("capture screenshot ui_hero.png: %w", err)
+	if err := uitest.CaptureScreenshot(sc, "ui_home_docs.png"); err != nil {
+		return testv1.StepRunResult{}, fmt.Errorf("capture screenshot ui_home_docs.png: %w", err)
 	}
-	return testv1.StepRunResult{Report: fmt.Sprintf("fixture built, hero section loaded, legend header verified (attach=%t)", attach)}, nil
+	return testv1.StepRunResult{Report: fmt.Sprintf("fixture built, docs/home section loaded, text legend verified (attach=%t)", attach)}, nil
 }

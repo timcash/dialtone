@@ -3,7 +3,6 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIALTONE_BIN="${ROOT_DIR}/dialtone_mod"
-HOST="${1:-legion}"
 DELAY_SECONDS="${DELAY_SECONDS:-1}"
 
 if [[ ! -x "${DIALTONE_BIN}" ]]; then
@@ -14,7 +13,7 @@ fi
 send_command() {
   local cmd="$1"
   echo "sending: ${cmd}"
-  "${DIALTONE_BIN}" typing v1 terminal --host "${HOST}" --local --command "${cmd}"
+  "${DIALTONE_BIN}" terminal v1 type --command "${cmd}"
   sleep "${DELAY_SECONDS}"
 }
 

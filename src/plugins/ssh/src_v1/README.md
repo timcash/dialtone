@@ -13,6 +13,9 @@ Current usage includes:
 ./dialtone.sh ssh src_v1 mesh
 ./dialtone.sh ssh src_v1 nodes
 ./dialtone.sh ssh src_v1 list
+./dialtone.sh ssh src_v1 format
+./dialtone.sh ssh src_v1 tailnet-check
+./dialtone.sh ssh src_v1 tailnet-check --host gold,grey,rover,wsl
 
 # Run one command on one host (preferred flag: --host; --node still works)
 ./dialtone.sh ssh src_v1 run --host rover --cmd "hostname"
@@ -63,6 +66,8 @@ Current usage includes:
 ## CLI
 
 - `./dialtone.sh ssh src_v1 mesh`
+- `./dialtone.sh ssh src_v1 format`
+- `./dialtone.sh ssh src_v1 tailnet-check`
 - `./dialtone.sh ssh src_v1 run --host rover --cmd "hostname"`
 - `./dialtone.sh ssh src_v1 run-all --cmd "hostname"`
 - `./dialtone.sh ssh src_v1 status --host all`
@@ -151,11 +156,15 @@ Notes:
 - Active mesh hosts are `darkmac`, `gold`, `legion`, `rover`, and `wsl` (no `chroma` entry).
 - Darkmac default mesh account is `tim` (home: `/Users/tim`).
 - Gold default mesh account is `user` (home: `/Users/user`).
+- `tailnet-check` performs an actual SSH handshake over each node's `.ts.net` candidate and prints a compact pass/fail table.
 - Default transport is Go SSH (`golang.org/x/crypto/ssh`).
-- Legion now uses SSH transport on port `2223` (user `user`) instead of local PowerShell transport.
-- Darkmac host selection is LAN-first (`192.168.4.31`) with tailnet fallback.
-- Rover host selection is LAN-first (`192.168.4.36`) with direct ethernet/tailnet fallbacks.
-- WSL host selection is LAN-first (`192.168.4.52`) with tailnet fallback.
+- Legion SSH defaults use port `22` (user `user`), while WSL-local command execution can still prefer local PowerShell transport.
+- Gold, Grey, WSL, Legion, and Rover now all carry explicit tailnet host candidates in `env/mesh.json`.
+- Gold host selection prefers tailscale (`gold.shad-artichoke.ts.net`) first, then LAN (`192.168.4.55`).
+- Grey host selection prefers tailscale (`grey.shad-artichoke.ts.net`) first, then LAN (`192.168.4.31`).
+- Rover host selection prefers tailscale (`rover-1.shad-artichoke.ts.net`) first, then WLAN/LAN (`192.168.4.36` on cashwifi), and only then link-local (`169.254.217.151`, `link-local`) as a debug fallback.
+- WSL host selection prefers tailscale (`wsl.shad-artichoke.ts.net`) first, then LAN (`192.168.4.52`).
+- Legion host selection prefers tailscale (`legion.shad-artichoke.ts.net`) first, then LAN (`192.168.4.52`), while still using local PowerShell transport from WSL when requested.
 - `sync-repos` updates each node to the same branch using node-specific repo paths.
 - `sync-repos` skips dirty repos by default; use `--allow-dirty` to force.
 - Per-node repo overrides are supported with flags like `--repo-legion /path/to/dialtone`.

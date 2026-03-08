@@ -1,10 +1,11 @@
 [
   {
     "name": "wsl",
-    "aliases": ["wsl", "legion-wsl-1", "legion-wsl-1.shad-artichoke.ts.net"],
+    "aliases": ["wsl", "legion-wsl-1", "legion-wsl-1.shad-artichoke.ts.net", "wsl.shad-artichoke.ts.net"],
     "user": "user",
-    "host": "192.168.4.52",
-    "host_candidates": ["legion-wsl-1.shad-artichoke.ts.net"],
+    "host": "wsl.shad-artichoke.ts.net",
+    "host_candidates": ["wsl.shad-artichoke.ts.net", "192.168.4.52"],
+    "route_preference": ["tailscale", "private", "other"],
     "port": "22",
     "os": "linux",
     "repo_candidates": ["/home/user/dialtone"]
@@ -13,8 +14,9 @@
     "name": "gold",
     "aliases": ["gold", "gold.shad-artichoke.ts.net"],
     "user": "user",
-    "host": "192.168.4.55",
+    "host": "gold.shad-artichoke.ts.net",
     "host_candidates": ["gold.shad-artichoke.ts.net", "192.168.4.55"],
+    "route_preference": ["tailscale", "private", "other"],
     "port": "22",
     "os": "macos",
     "repo_candidates": ["/Users/user/dialtone", "/Users/user/Documents/dialtone"]
@@ -23,8 +25,9 @@
     "name": "grey",
     "aliases": ["darkmac", "grey", "grey.shad-artichoke.ts.net"],
     "user": "tim",
-    "host": "192.168.4.31",
-    "host_candidates": ["grey.shad-artichoke.ts.net"],
+    "host": "grey.shad-artichoke.ts.net",
+    "host_candidates": ["grey.shad-artichoke.ts.net", "192.168.4.31"],
+    "route_preference": ["tailscale", "private", "other"],
     "port": "22",
     "os": "macos",
     "repo_candidates": ["/Users/tim/dialtone", "/Users/tim/Documents/dialtone", "/Users/dialtone/dialtone"]
@@ -33,8 +36,9 @@
     "name": "rover",
     "aliases": ["rover", "rover-1", "rover-1.shad-artichoke.ts.net"],
     "user": "tim",
-    "host": "192.168.4.36",
-    "host_candidates": ["rover-1.shad-artichoke.ts.net", "169.254.217.151"],
+    "host": "rover-1.shad-artichoke.ts.net",
+    "route_preference": ["tailscale", "private", "link-local", "other"],
+    "host_candidates": ["rover-1.shad-artichoke.ts.net", "192.168.4.36", "169.254.217.151"],
     "port": "22",
     "os": "linux",
     "repo_candidates": ["/home/tim/dialtone", "/home/user/dialtone"]
@@ -42,16 +46,13 @@
   {
     "name": "legion",
     "aliases": ["legion", "legion.shad-artichoke.ts.net"],
-    "user": "timca",
-    "host": "192.168.4.52",
-    "host_candidates": ["legion.shad-artichoke.ts.net", "127.0.0.1"],
-    "port": "2223",
+    "user": "user",
+    "host": "legion.shad-artichoke.ts.net",
+    "host_candidates": ["legion.shad-artichoke.ts.net", "192.168.4.52", "127.0.0.1"],
+    "route_preference": ["tailscale", "private", "other"],
+    "port": "22",
     "os": "windows",
     "prefer_wsl_powershell": true,
-    "repo_candidates": [
-      "/home/user/dialtone",
-      "/mnt/c/Users/timca/dialtone",
-      "/mnt/c/Users/timca/code3/dialtone"
-    ]
+    "repo_candidates": ["/home/user/dialtone"]
   }
 ]

@@ -31,6 +31,57 @@ type initResponse struct {
 	WSPathCompat   string `json:"wsPath"`
 }
 
+type telemetryMonitor struct {
+	lastMavlinkTelemetryAt atomic.Int64
+}
+
+type autoswapSupervisorSnapshot struct {
+	UpdatedAt      string `json:"updated_at"`
+	Status         string `json:"status"`
+	Repo           string `json:"repo"`
+	ManifestPath   string `json:"manifest_path"`
+	WorkerVersion  string `json:"worker_version"`
+	WorkerPID      int    `json:"worker_pid"`
+	LastCheckAt    string `json:"last_check_at"`
+	LastError      string `json:"last_error"`
+	LastReleaseTag string `json:"last_release_tag"`
+}
+
+type autoswapRuntimeProcess struct {
+	Name         string `json:"name"`
+	PID          int    `json:"pid"`
+	RestartCount int    `json:"restart_count"`
+	Status       string `json:"status"`
+}
+
+type autoswapRuntimeSnapshot struct {
+	UpdatedAt    string                   `json:"updated_at"`
+	ManifestPath string                   `json:"manifest_path"`
+	Listen       string                   `json:"listen"`
+	NATSPort     int                      `json:"nats_port"`
+	NATSWSPort   int                      `json:"nats_ws_port"`
+	Processes    []autoswapRuntimeProcess `json:"processes"`
+}
+
+func (m *telemetryMonitor) markTelemetryNow() {
+	m.lastMavlinkTelemetryAt.Store(time.Now().UnixMilli())
+}
+
+func (m *telemetryMonitor) mavlinkStatus(enabled bool) (string, string) {
+	if !enabled {
+		return "not-configured", ""
+	}
+	last := m.lastMavlinkTelemetryAt.Load()
+	if last == 0 {
+		return "configured", "mavlink telemetry not received yet"
+	}
+	since := time.Since(time.UnixMilli(last))
+	if since > 3*time.Second {
+		return "degraded", fmt.Sprintf("mavlink telemetry stale (%s ago)", since.Round(time.Second))
+	}
+	return "ok", ""
+}
+
 func main() {
 	logs.SetOutput(os.Stdout)
 
@@ -50,6 +101,7 @@ func main() {
 		}
 	}
 	appVersion := resolveAppVersion(resolvedUIDist)
+	telemetry := &telemetryMonitor{}
 
 	ns, err := startEmbeddedNATS(*natsPort, *natsWSPort)
 	if err != nil {
@@ -57,7 +109,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer ns.Shutdown()
-	startStatsPublisher(*natsPort, ns, mavlinkEnabled)
+	startStatsPublisher(*natsPort, ns, mavlinkEnabled, telemetry)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -78,12 +130,13 @@ func main() {
 		if cameraStreamURL != "" {
 			cameraStatus = "configured"
 		}
-		mavlinkStatus := "not-configured"
-		if mavlinkEnabled {
-			mavlinkStatus = "configured"
+		mavlinkStatus, mavlinkError := telemetry.mavlinkStatus(mavlinkEnabled)
+		status := "ok"
+		if cameraStatus != "configured" || mavlinkStatus != "ok" {
+			status = "degraded"
 		}
 		payload := map[string]any{
-			"status": "degraded",
+			"status": status,
 			"natsws": map[string]any{
 				"status": "ok",
 			},
@@ -101,6 +154,9 @@ func main() {
 			"mavlink": map[string]any{
 				"status": mavlinkStatus,
 			},
+		}
+		if mavlinkError != "" {
+			payload["mavlink"].(map[string]any)["error"] = mavlinkError
 		}
 		writeJSON(w, payload)
 	})
@@ -168,7 +224,7 @@ func startEmbeddedNATS(port, wsPort int) (*natsserver.Server, error) {
 	return ns, nil
 }
 
-func startStatsPublisher(natsPort int, ns *natsserver.Server, mavlinkEnabled bool) {
+func startStatsPublisher(natsPort int, ns *natsserver.Server, mavlinkEnabled bool, telemetry *telemetryMonitor) {
 	natsURL := fmt.Sprintf("nats://127.0.0.1:%d", natsPort)
 	nc, err := nats.Connect(natsURL, nats.Timeout(2*time.Second))
 	if err != nil {
@@ -176,12 +232,13 @@ func startStatsPublisher(natsPort int, ns *natsserver.Server, mavlinkEnabled boo
 		return
 	}
 	started := time.Now()
-	var lastMavlinkTelemetryAt atomic.Int64
 	_, _ = nc.Subscribe("mavlink.>", func(msg *nats.Msg) {
 		subj := strings.TrimSpace(msg.Subject)
 		switch subj {
 		case "mavlink.heartbeat", "mavlink.attitude", "mavlink.global_position_int", "mavlink.statustext", "mavlink.command_ack":
-			lastMavlinkTelemetryAt.Store(time.Now().UnixMilli())
+			if telemetry != nil {
+				telemetry.markTelemetryNow()
+			}
 		}
 	})
 	_ = nc.Flush()
@@ -189,24 +246,19 @@ func startStatsPublisher(natsPort int, ns *natsserver.Server, mavlinkEnabled boo
 	go func() {
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
+		autoswapStateDir := resolveAutoswapStateDir()
 		for range ticker.C {
 			varz, err := ns.Varz(nil)
 			if err != nil {
 				continue
 			}
 			errors := make([]string, 0, 2)
-			if mavlinkEnabled {
-				last := lastMavlinkTelemetryAt.Load()
-				if last == 0 {
-					errors = append(errors, "mavlink telemetry not received yet")
-				} else {
-					since := time.Since(time.UnixMilli(last))
-					if since > 3*time.Second {
-						errors = append(errors, fmt.Sprintf("mavlink telemetry stale (%s ago)", since.Round(time.Second)))
-					}
-				}
-			} else {
+			if !mavlinkEnabled {
 				errors = append(errors, "mavlink disabled")
+			} else if telemetry != nil {
+				if _, errText := telemetry.mavlinkStatus(true); errText != "" {
+					errors = append(errors, errText)
+				}
 			}
 			payload := map[string]any{
 				"type":        "STATS",
@@ -219,8 +271,106 @@ func startStatsPublisher(natsPort int, ns *natsserver.Server, mavlinkEnabled boo
 			if b, err := json.Marshal(payload); err == nil {
 				_ = nc.Publish("mavlink.stats", b)
 			}
+			servicePayload := map[string]any{
+				"type":        "SERVICE",
+				"source":      "robot_src_v2",
+				"uptime":      time.Since(started).Round(time.Second).String(),
+				"connections": varz.Connections,
+				"timestamp":   time.Now().UnixMilli(),
+				"errors":      errors,
+			}
+			if b, err := json.Marshal(servicePayload); err == nil {
+				_ = nc.Publish("robot.service", b)
+			}
+			publishAutoswapState(nc, autoswapStateDir)
 		}
 	}()
+}
+
+func resolveAutoswapStateDir() string {
+	if v := strings.TrimSpace(os.Getenv("ROBOT_V2_AUTOSWAP_STATE_DIR")); v != "" {
+		return v
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return ""
+	}
+	return filepath.Join(home, ".dialtone", "autoswap", "state")
+}
+
+func publishAutoswapState(nc *nats.Conn, stateDir string) {
+	stateDir = strings.TrimSpace(stateDir)
+	if nc == nil || stateDir == "" {
+		return
+	}
+	if payload, ok := readAutoswapSupervisorPayload(filepath.Join(stateDir, "supervisor.json")); ok {
+		if b, err := json.Marshal(payload); err == nil {
+			_ = nc.Publish("robot.autoswap.supervisor", b)
+		}
+	}
+	if payload, ok := readAutoswapRuntimePayload(filepath.Join(stateDir, "runtime.json")); ok {
+		if b, err := json.Marshal(payload); err == nil {
+			_ = nc.Publish("robot.autoswap.runtime", b)
+		}
+	}
+}
+
+func readAutoswapSupervisorPayload(path string) (map[string]any, bool) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	var snapshot autoswapSupervisorSnapshot
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
+		return nil, false
+	}
+	errors := make([]string, 0, 1)
+	if msg := strings.TrimSpace(snapshot.LastError); msg != "" {
+		errors = append(errors, msg)
+	}
+	return map[string]any{
+		"type":             "AUTOSWAP_SUPERVISOR",
+		"source":           "autoswap",
+		"status":           strings.TrimSpace(snapshot.Status),
+		"repo":             strings.TrimSpace(snapshot.Repo),
+		"manifest_path":    strings.TrimSpace(snapshot.ManifestPath),
+		"worker_version":   strings.TrimSpace(snapshot.WorkerVersion),
+		"worker_pid":       snapshot.WorkerPID,
+		"last_check_at":    strings.TrimSpace(snapshot.LastCheckAt),
+		"last_release_tag": strings.TrimSpace(snapshot.LastReleaseTag),
+		"timestamp":        strings.TrimSpace(snapshot.UpdatedAt),
+		"errors":           errors,
+	}, true
+}
+
+func readAutoswapRuntimePayload(path string) (map[string]any, bool) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	var snapshot autoswapRuntimeSnapshot
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
+		return nil, false
+	}
+	running := 0
+	names := make([]string, 0, len(snapshot.Processes))
+	for _, proc := range snapshot.Processes {
+		names = append(names, proc.Name)
+		if strings.EqualFold(strings.TrimSpace(proc.Status), "running") {
+			running++
+		}
+	}
+	return map[string]any{
+		"type":          "AUTOSWAP_RUNTIME",
+		"source":        "autoswap",
+		"manifest_path": strings.TrimSpace(snapshot.ManifestPath),
+		"listen":        strings.TrimSpace(snapshot.Listen),
+		"process_count": len(snapshot.Processes),
+		"running_count": running,
+		"process_names": strings.Join(names, ","),
+		"timestamp":     strings.TrimSpace(snapshot.UpdatedAt),
+		"errors":        []string{},
+	}, true
 }
 
 func proxyNATSWS(w http.ResponseWriter, r *http.Request, upstreamURL string) {

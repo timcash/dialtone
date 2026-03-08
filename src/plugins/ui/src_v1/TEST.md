@@ -6,37 +6,76 @@
 <empty>
 ```
 
-**Generated at:** Sat, 28 Feb 2026 14:38:31 -0800
+**Generated at:** Sun, 08 Mar 2026 10:18:03 -0700
 **Version:** `ui-src-v1`
 **Runner:** `test/src_v1`
-**Status:** ❌ FAIL
-**Total Time:** `10.056023833s`
+**Status:** ✅ PASS
+**Total Time:** `982.240806ms`
 
 ## Test Steps
 
 | Step | Result | Duration |
 |---|---|---|
-| ui-section-hero-via-menu | ❌ FAIL | `10.056019935s` |
+| ui-build-and-go-serve | ✅ PASS | `478.374324ms` |
+| ui-section-hero-via-menu | ✅ PASS | `501.014814ms` |
 
 ## Step Details
+
+## ui-build-and-go-serve
+
+### Results
+
+```text
+result: PASS
+duration: 478.374324ms
+report: fixture built, docs/home section loaded, text legend verified (attach=true)
+```
+
+### Error-Ping Check
+
+```text
+WARN: ERROR_PING: skipped for chrome src_v3 NATS-managed browser session
+```
+
+### Logs
+
+```text
+logs:
+INFO: STEP> begin ui-build-and-go-serve
+INFO: LOOKING FOR: persistent ui dev server already running at http://127.0.0.1:5177
+WARN: ERROR_PING: skipped for chrome src_v3 NATS-managed browser session
+INFO: saved browser debug config: /home/user/dialtone/src/plugins/ui/src_v1/test/browser.debug.json
+WARN: skipping JS assertion for service-managed chrome src_v3 session
+INFO: report: fixture built, docs/home section loaded, text legend verified (attach=true)
+PASS: [TEST][PASS] [STEP:ui-build-and-go-serve] report: fixture built, docs/home section loaded, text legend verified (attach=true)
+```
+
+### Errors
+
+```text
+errors:
+<empty>
+```
+
+### Browser Logs
+
+```text
+browser_logs:
+<empty>
+```
+
+### Screenshots
+
+![auto_ui-build-and-go-serve.png](screenshots/auto_ui-build-and-go-serve.png)
 
 ## ui-section-hero-via-menu
 
 ### Results
 
 ```text
-result: FAIL
-duration: 10.056019935s
-error: step ui-section-hero-via-menu timed out
-```
-
-### Error-Ping Check
-
-```text
-INFO: ERROR_PING: start browser_subject=logs.test.ui.src-v1.ui-section-hero-via-menu.browser error_subject=logs.test.ui.src-v1.error
-INFO: ERROR_PING: error-topic-ok marker=__DIALTONE_ERROR_PING__:1772318303912799316:error
-INFO: ERROR_PING: browser-topic-ok marker=__DIALTONE_ERROR_PING__:1772318303912799316
-INFO: ERROR_PING: pass browser_topic=true error_topic=true
+result: PASS
+duration: 501.014814ms
+report: section ui-home-docs navigation verified
 ```
 
 ### Logs
@@ -44,64 +83,43 @@ INFO: ERROR_PING: pass browser_topic=true error_topic=true
 ```text
 logs:
 INFO: STEP> begin ui-section-hero-via-menu
-INFO: LOOKING FOR: ui fixture build at /home/user/dialtone/src/plugins/ui/src_v1/test/fixtures/app
-INFO: LOOKING FOR: [/home/user/dialtone_dependencies/bun/bin/bun install --silent]
-INFO: LOOKING FOR: [/home/user/dialtone_dependencies/bun/bin/bun run build]
-INFO: LOOKING FOR: go ui backend at http://127.0.0.1:32823
-INFO: ERROR_PING: start browser_subject=logs.test.ui.src-v1.ui-section-hero-via-menu.browser error_subject=logs.test.ui.src-v1.error
-INFO: ERROR_PING: error-topic-ok marker=__DIALTONE_ERROR_PING__:1772318303912799316:error
-INFO: ERROR_PING: browser-topic-ok marker=__DIALTONE_ERROR_PING__:1772318303912799316
-INFO: ERROR_PING: pass browser_topic=true error_topic=true
+INFO: LOOKING FOR: persistent ui dev server already running at http://127.0.0.1:5177
+WARN: skipping JS assertion for service-managed chrome src_v3 session
+WARN: skipping overlay overlap detection for service-managed chrome src_v3 session
+INFO: report: section ui-home-docs navigation verified
+PASS: [TEST][PASS] [STEP:ui-section-hero-via-menu] report: section ui-home-docs navigation verified
 ```
 
 ### Errors
 
 ```text
 errors:
-FAIL: [TEST][FAIL] [STEP:ui-section-hero-via-menu] timed out after 10s
+<empty>
 ```
 
 ### Browser Logs
 
 ```text
 browser_logs:
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] LOADING #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] LOADED #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] START #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] RESUME #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] LOADING #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] LOADED #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] START #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] RESUME #ui-hero-stage"
-INFO: CONSOLE:log: "__DIALTONE_ERROR_PING__:1772318303912799316"
-ERROR: CONSOLE:error: "__DIALTONE_ERROR_PING__:1772318303912799316:error"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] LOADING #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] LOADED #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] START #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] RESUME #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] LOADING #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] LOADED #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] START #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] RESUME #ui-hero-stage"
+<empty>
 ```
 
 ### Screenshots
 
 ![auto_ui-section-hero-via-menu.png](screenshots/auto_ui-section-hero-via-menu.png)
 
+<!-- DIALTONE_CHROME_REPORT_START -->
+
+## Chrome Report
+
+- hostnode: `legion`
+- chrome_count: `4`
+
+| PID | ROLE | PORT |
+| --- | --- | --- |
+| 22548 | `dev` | 19464 |
+| 23088 | `unlabeled` | 19464 |
+| 24528 | `unlabeled` | 19464 |
+| 27388 | `unlabeled` | 19464 |
+
+<!-- DIALTONE_CHROME_REPORT_END -->

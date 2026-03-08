@@ -8,7 +8,6 @@ import (
 
 	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
-	"github.com/chromedp/chromedp"
 )
 
 var (
@@ -41,20 +40,16 @@ func runUseBrowser(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 		GPU:           false,
 		Role:          "test",
 		ReuseExisting: false,
-		URL:           "data:text/html,<title>auto-shot</title><h1>ok</h1>",
+		URL:           "data:text/html,<title>auto-shot</title><h1 aria-label='ok'>ok</h1>",
 	})
 	if err != nil {
 		return testv1.StepRunResult{}, err
 	}
 	stepUsedBrowser = true
-	var title string
-	if err := sc.RunBrowserWithTimeout(5*time.Second, chromedp.Title(&title)); err != nil {
+	if err := sc.WaitForAriaLabel("ok", 5*time.Second); err != nil {
 		return testv1.StepRunResult{}, err
 	}
-	if title != "auto-shot" {
-		return testv1.StepRunResult{}, fmt.Errorf("unexpected title %q", title)
-	}
-	return testv1.StepRunResult{Report: "browser used; auto screenshot should be captured after step"}, nil
+	return testv1.StepRunResult{Report: "browser used through chrome src_v3 service; auto screenshot should be captured after step"}, nil
 }
 
 func expectedAutoScreenshotPath() string {

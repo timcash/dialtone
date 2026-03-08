@@ -27,6 +27,10 @@ func runSetup(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 		sc.Warnf("browser provider not available; use --attach <node> for remote mode")
 		return testv1.StepRunResult{Report: "skipped browser lifecycle options (chrome not installed)"}, nil
 	}
+	if !testv1.DirectBrowserControlAvailable() {
+		sc.Warnf("direct browser automation is unavailable through chrome src_v3 NATS sessions")
+		return testv1.StepRunResult{Report: "skipped browser lifecycle options (service-backed browser only supports navigation/lifecycle)"}, nil
+	}
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		return testv1.StepRunResult{}, fmt.Errorf("unable to resolve caller path")
@@ -72,6 +76,9 @@ func runSetup(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 func runReuse(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 	if !testv1.BrowserProviderAvailable() {
 		return testv1.StepRunResult{Report: "skipped browser lifecycle reuse (chrome not installed)"}, nil
+	}
+	if !testv1.DirectBrowserControlAvailable() {
+		return testv1.StepRunResult{Report: "skipped browser lifecycle reuse (service-backed browser only supports navigation/lifecycle)"}, nil
 	}
 	b, err := sc.EnsureBrowser(testv1.BrowserOptions{})
 	if err != nil {

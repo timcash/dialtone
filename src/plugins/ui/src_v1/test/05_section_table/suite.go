@@ -10,14 +10,14 @@ import (
 func Register(reg *testv1.Registry) {
 	tc := sectionsnav.SectionCase{
 		ID:          "ui-table-table",
-		NavAria:     "Navigate Table",
+		NavAria:     "Open Table",
 		SectionAria: "Table Section",
 		Screenshot:  "ui_table.png",
 		AssertJSExpr: `(() => {
 			const s = document.getElementById('ui-table-table');
-			return !!s && s.classList.contains('fullscreen') && !!s.querySelector('header.legend');
+			return !!s && s.classList.contains('fullscreen') && !!s.querySelector('aside.shell-legend-telemetry');
 		})()`,
-		AssertFail: "table should be fullscreen with legend header",
+		AssertFail: "table should be fullscreen with telemetry legend",
 	}
 	reg.Add(testv1.Step{
 		Name:    "ui-section-table-via-menu",

@@ -2,10 +2,16 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
     <meta name="theme-color" content="#0b0d12" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
     <meta name="apple-mobile-web-app-title" content="Dialtone Earth" />
     <meta name="mobile-web-app-capable" content="yes" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
@@ -15,30 +21,19 @@
   </head>
   <body>
     <div id="app">
+      <header aria-label="App Header">
+        <h1>Dialtone Earth</h1>
+      </header>
+
       <nav aria-label="Global Menu">
         <div aria-label="Global Menu Panel" hidden></div>
       </nav>
 
-      <section id="earth-hero-stage" class="fullscreen" aria-label="Hero Section">
-        <canvas aria-label="Hero Canvas" class="hero-stage overlay-primary"></canvas>
-        <form class="mode-form" data-mode-form="earth-hero-stage" aria-label="Hero Mode Form">
-          <button type="button" data-cmd="view-orbit">Orbit</button>
-          <button type="button" data-cmd="view-hover">Hover</button>
-          <button type="button" data-cmd="view-top">Top Down</button>
-          <button type="button" data-cmd="view-swap">Swap View</button>
-          <button type="button" hidden></button>
-          <button type="button" hidden></button>
-          <button type="button" hidden></button>
-          <button type="button" hidden></button>
-          <button type="button" hidden></button>
-          <input type="text" aria-label="Earth Command" placeholder="Solar system view..." />
-          <button type="button">Apply</button>
-        </form>
-        <aside class="hero-legend overlay-legend legend-marketing" aria-label="Hero Legend">
-          <h1>Dialtone Earth</h1>
-          <p>Autonomous intelligence for the next generation of exploration.</p>
-        </aside>
-      </section>
+      <section
+        id="earth-hero-stage"
+        class="fullscreen"
+        aria-label="Hero Section"
+      ></section>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

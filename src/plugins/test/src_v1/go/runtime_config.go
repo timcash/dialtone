@@ -7,9 +7,11 @@ import (
 
 type RuntimeConfig struct {
 	BrowserNode              string
+	RemoteBrowserRole        string
 	RemoteRequireRole        bool
 	BrowserAllowCreateTarget bool
 	BrowserNewTargetURL      string
+	ActionsPerMinute         float64
 	NoSSH                    bool
 	RemoteDebugPort          int
 	RemoteDebugPorts         []int

@@ -9,15 +9,15 @@ import (
 
 func Register(reg *testv1.Registry) {
 	tc := sectionsnav.SectionCase{
-		ID:          "ui-hero-stage",
-		NavAria:     "Navigate Hero",
-		SectionAria: "Hero Section",
-		Screenshot:  "ui_hero_section.png",
+		ID:          "ui-home-docs",
+		NavAria:     "Open Home",
+		SectionAria: "Docs Section",
+		Screenshot:  "ui_home_docs_section.png",
 		AssertJSExpr: `(() => {
-			const s = document.getElementById('ui-hero-stage');
-			return !!s && s.classList.contains('fullscreen') && !!s.querySelector('header.legend');
+			const s = document.getElementById('ui-home-docs');
+			return !!s && s.classList.contains('fullscreen') && !!s.querySelector('header.shell-legend-text');
 		})()`,
-		AssertFail: "hero should be fullscreen with legend header",
+		AssertFail: "home/docs should be fullscreen with text legend header",
 	}
 	reg.Add(testv1.Step{
 		Name:    "ui-section-hero-via-menu",

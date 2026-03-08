@@ -1,11 +1,9 @@
 package exampleplugintemplate
 
 import (
-	"fmt"
 	"time"
 
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
-	"github.com/chromedp/chromedp"
 )
 
 func Register(r *testv1.Registry) {
@@ -36,7 +34,7 @@ func Register(r *testv1.Registry) {
 				sc.Warnf("browser provider not available; use --attach <node> for remote mode")
 				return testv1.StepRunResult{Report: "skipped browser helper example (chrome not installed)"}, nil
 			}
-			b, err := sc.EnsureBrowser(testv1.BrowserOptions{
+			_, err := sc.EnsureBrowser(testv1.BrowserOptions{
 				Headless:      true,
 				GPU:           false,
 				Role:          "test",
@@ -60,11 +58,7 @@ func Register(r *testv1.Registry) {
 				sc.Warnf("browser console wait failed: %v", err)
 				return testv1.StepRunResult{Report: "skipped browser helper example (console wait failed)"}, nil
 			}
-			var title string
-			if err := b.Run(chromedp.Evaluate(`document.title || ''`, &title)); err != nil {
-				return testv1.StepRunResult{}, fmt.Errorf("eval title: %w", err)
-			}
-			return testv1.StepRunResult{Report: "StepContext browser helpers ready (aria + console + chromedp)"}, nil
+			return testv1.StepRunResult{Report: "StepContext browser helpers ready (goto + aria + console via chrome src_v3 service)"}, nil
 		},
 	})
 }

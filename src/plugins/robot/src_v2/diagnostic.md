@@ -47,7 +47,7 @@ This is the required check list for `./dialtone.sh robot src_v2 diagnostic --hos
 2. `GET http://127.0.0.1:18086/api/init` includes `/natsws`.
 3. `GET http://127.0.0.1:18086/api/integration-health` includes:
 - `"camera":{"status":"configured"}`
-- `"mavlink":{"status":"configured"}`
+- `"mavlink":{"status":"ok"}`
 4. `GET http://127.0.0.1:18086/stream` returns HTTP `200`.
 
 ## 6) UI Chromedp Checks

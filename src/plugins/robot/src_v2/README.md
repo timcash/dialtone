@@ -4,12 +4,50 @@ This document is the end-to-end operating workflow for `robot src_v2`:
 - edit code
 - test locally
 - publish artifacts
-- run/update on robot through autoswap + manifest
+- run/update on robot through autoswap + published release artifacts
 - verify with diagnostics
 - expose UI through local WSL relay
+- run headed UI on `legion` while rover serves APIs and telemetry
+
+## Shell Workflow
+
+```sh
+# From repo root
+cd /home/user/dialtone
+
+# 1. Build and run the local dev UI, but use rover for API + telemetry
+./dialtone.sh robot src_v2 build
+./dialtone.sh robot src_v2 dev \
+  --browser-node legion \
+  --public-url http://127.0.0.1:3000 \
+  --backend-url http://rover-1:18086
+
+# 2. Drive the long-lived chrome src_v3 session on legion
+./dialtone.sh chrome src_v3 status --host legion --role robot-test
+./dialtone.sh chrome src_v3 goto --host legion --role robot-test --url http://127.0.0.1:3000/#robot-three-stage
+./dialtone.sh chrome src_v3 click-aria --host legion --role robot-test --label "Three Mode"
+./dialtone.sh chrome src_v3 click-aria --host legion --role robot-test --label "Three Thumb 1"
+./dialtone.sh chrome src_v3 wait-log --host legion --role robot-test --contains "Publishing rover.command cmd=arm" --timeout-ms 5000
+
+# 3. Run the integrated robot src_v2 test suite
+./dialtone.sh robot src_v2 test
+
+# 4. Run only the dedicated arm browser step through the Go test/src_v1 suite
+./dialtone.sh robot src_v2 test --filter three-system-arm
+
+# 5. Run only the local UI mock E2E / terminal validation step
+./dialtone.sh robot src_v2 test --filter local-ui-mock-e2e
+
+# 6. Inspect generated report + screenshots
+sed -n '1,220p' src/plugins/robot/src_v2/TEST.md
+ls -l src/plugins/robot/src_v2/test/screenshots
+```
 
 ```bash
 # From repo root: /home/user/dialtone
+
+# Prefer direct-link fallback when WiFi is down:
+# ./dialtone.sh robot src_v2 ... --host link-local
 
 # Core local workflow
 ./dialtone.sh robot src_v2 install
@@ -24,15 +62,30 @@ This document is the end-to-end operating workflow for `robot src_v2`:
 # Dev server + headed browser on mesh node + rover backend proxy routes
 ./dialtone.sh robot src_v2 dev --browser-node chroma --backend-url http://rover-1:18086
 
+# Dev server on this WSL node, headed browser on legion, real rover backend
+./dialtone.sh robot src_v2 dev --browser-node legion --public-url http://127.0.0.1:3000 --backend-url https://rover-1.dialtone.earth
+
+# Walk the live robot UI menu in the headed browser at one action per second
+src/plugins/robot/src_v2/ui/demo_menu_walkthrough.sh --host legion --url http://127.0.0.1:3000 --apm 60
+
+# Use the long-lived chrome src_v3 service on legion directly
+./dialtone.sh chrome src_v3 status --host legion --role robot-test
+./dialtone.sh chrome src_v3 get-aria-attr --host legion --role robot-test --label "Xterm Terminal" --attr data-last-command-ack-result
+
 # Publish release artifacts
 ./dialtone.sh robot src_v2 publish --repo timcash/dialtone
 
-# Deploy/update autoswap runtime on robot
-./dialtone.sh autoswap src_v1 deploy --host rover --user tim --service --repo timcash/dialtone --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_composition_manifest.json
+# Install/update autoswap runtime on robot
+./dialtone.sh autoswap src_v1 deploy --host rover --user tim --service --repo timcash/dialtone --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_channel.json
+
+# Build and publish release artifacts from WSL
+./dialtone.sh robot src_v2 publish --repo timcash/dialtone
+
+# Force immediate rover poll instead of waiting for autoswap's interval
 ./dialtone.sh autoswap src_v1 update --host rover --user tim
 
 # Validate runtime and UI integration
-./dialtone.sh robot src_v2 diagnostic --host rover --user tim --browser-node chroma
+./dialtone.sh robot src_v2 diagnostic --host rover --user tim --skip-ui --public-check=false
 
 # Public relay from WSL to robot UI
 ./dialtone.sh robot src_v2 relay --subdomain rover-1 --robot-ui-url http://rover-1:18086 --service
@@ -43,7 +96,7 @@ This document is the end-to-end operating workflow for `robot src_v2`:
 
 ## 1) Architecture Contract
 
-`robot src_v2` runtime is manifest-driven by autoswap:
+`robot src_v2` runtime is autoswap-managed and artifact-executed:
 - `dialtone_autoswap_v1` (only OS service)
 - `dialtone_robot_v2`
 - `dialtone_camera_v1`
@@ -55,7 +108,8 @@ Primary manifest:
 - `src/plugins/robot/src_v2/config/composition.manifest.json`
 
 Important rule:
-- Robot runtime must work without source repo on robot host. Runtime must come from manifest + downloaded/installed artifacts.
+- Robot runtime comes from release artifacts downloaded by autoswap. The rover does not need to build the runtime from source during normal updates.
+- Headed UI tests should prefer one long-lived `chrome src_v3` session on `legion` and one managed tab. Recreate the tab only as a recovery path.
 
 ## 2) Prerequisites
 
@@ -105,6 +159,12 @@ Common dev flows:
 # Dev + browser on chroma + backend routes proxied to rover
 ./dialtone.sh robot src_v2 dev --browser-node chroma --backend-url http://rover-1:18086
 
+# Dev + browser on legion + backend routes proxied to the real rover public UI
+./dialtone.sh robot src_v2 dev --browser-node legion --public-url http://127.0.0.1:3000 --backend-url https://rover-1.dialtone.earth
+
+# Dev + browser on legion + backend routes proxied directly to rover on tailnet
+./dialtone.sh robot src_v2 dev --browser-node legion --public-url http://127.0.0.1:3000 --backend-url http://rover-1:18086
+
 # Same backend proxy via env var
 ROBOT_DEV_BACKEND_URL=http://rover-1:18086 ./dialtone.sh robot src_v2 dev --browser-node chroma
 ```
@@ -112,6 +172,9 @@ ROBOT_DEV_BACKEND_URL=http://rover-1:18086 ./dialtone.sh robot src_v2 dev --brow
 Notes:
 - If `--backend-url` omits a port (example `http://rover-1`), it targets port `80`.
 - For rover runtime, use `http://rover-1:18086` to avoid `ECONNREFUSED` on proxied API/NATS routes.
+- For the live headed browser on `legion`, use `--public-url http://127.0.0.1:3000` so the Windows Chrome session opens the WSL-forwarded dev port on the same machine.
+- `robot src_v2 test` defaults to attach to `legion` as role `robot-test` when running from WSL.
+- The current passing workflow is: local dev server on WSL, remote headed Chrome on `legion`, rover backend on `http://rover-1:18086`.
 - Stop dev with `Ctrl+C`.
 
 ## 4) Local Dev + Test Loop
@@ -133,10 +196,102 @@ Notes:
 
 3. Optional: run with remote browser node when local host has no Chrome:
 ```bash
-DIALTONE_TEST_BROWSER_NODE=chroma ./dialtone.sh robot src_v2 test
+DIALTONE_TEST_BROWSER_NODE=legion ./dialtone.sh robot src_v2 test
 ```
 
-## 5) Publish Artifacts (No Deploy Side Effects)
+4. Focused UI step while iterating on terminal/logging:
+```bash
+./dialtone.sh robot src_v2 test --filter local-ui-mock-e2e
+```
+
+5. Dedicated filtered arm flow:
+```bash
+./dialtone.sh robot src_v2 test --filter three-system-arm
+```
+
+6. Generated test artifacts:
+```bash
+src/plugins/robot/src_v2/TEST.md
+src/plugins/robot/src_v2/test/screenshots/arm_failure_xterm.png
+src/plugins/robot/src_v2/test/screenshots/three_system_arm.png
+src/plugins/robot/src_v2/screenshots/auto_04-local-ui-mock-e2e-smoke.png
+```
+
+Available integrated test steps:
+- `01-build-robot-v2-binary`
+- `02-server-health-and-root-behavior`
+- `03-manifest-has-required-sync-artifacts`
+- `04-local-ui-mock-e2e-smoke`
+- `04-three-system-arm-cli`
+- `05-autoswap-compose-run-smoke`
+
+The current UI mock E2E explicitly validates the arm rejection path:
+- navigate to `Three`
+- exercise control buttons
+- open `Terminal`
+- publish mock `mavlink.command_ack` + `mavlink.statustext`
+- assert terminal attrs:
+  - `data-last-command-ack-result=MAV_RESULT_FAILED`
+  - `data-last-status-text=Arm: Radio failsafe on`
+- save screenshots and include them in `TEST.md`
+
+## 5) UI Log Architecture
+
+The UI should stay thin. The source of truth is the embedded NATS bus exposed by `robot src_v2`.
+
+Current model:
+- backend publishes and proxies runtime events over NATS
+- UI opens one `/natsws` connection
+- UI maintains one shared robot event store
+- sections render from shared state instead of owning separate subscriptions
+- `Terminal` is the primary debug surface
+
+Current subjects consumed by the UI event store:
+- `mavlink.>`
+- `camera.>`
+- `rover.command`
+- `robot.>`
+- `logs.ui.robot`
+
+Current backend-generated service subjects:
+- `robot.service`
+- `robot.autoswap.supervisor`
+- `robot.autoswap.runtime`
+- `mavlink.stats`
+
+Why this architecture:
+- section changes do not drop important events
+- `legion` UI and rover backend can live on different machines cleanly
+- tests can assert stable DOM attrs driven by structured events
+- the terminal can filter one centralized stream instead of stitching multiple local buffers
+
+Current terminal capabilities:
+- unified tail of UI, MAVLink, rover commands, robot service, camera, and autoswap state
+- filter buttons: `All`, `MAV`, `Cmd`, `UI`, `Cam`, `Svc`, `Err`
+- tail pause/resume
+- direct command buttons: `Arm`, `Disarm`, `Manual`, `Guided`, `Stop`
+
+Current test/debug attrs on `Xterm Terminal`:
+- `data-filter`
+- `data-paused`
+- `data-total-lines`
+- `data-last-log-line`
+- `data-last-log-category`
+- `data-last-log-level`
+- `data-last-error-line`
+- `data-last-status-text`
+- `data-last-command-ack-result`
+
+Useful chrome debug commands on `legion`:
+```bash
+./dialtone.sh chrome src_v3 status --host legion --role robot-test
+./dialtone.sh chrome src_v3 console --host legion --role robot-test
+./dialtone.sh chrome src_v3 get-aria-attr --host legion --role robot-test --label "Xterm Terminal" --attr data-last-status-text
+./dialtone.sh chrome src_v3 get-aria-attr --host legion --role robot-test --label "Xterm Terminal" --attr data-last-command-ack-result
+./dialtone.sh chrome src_v3 screenshot --host legion --role robot-test --out src/plugins/robot/src_v2/test/screenshots/manual_debug.png
+```
+
+## 6) Publish Artifacts (No Deploy Side Effects)
 
 `publish` only builds and uploads changed/missing release assets; it does not deploy remote hosts.
 By default it publishes only the real robot target (`linux-arm64`).
@@ -160,7 +315,7 @@ Publish all OS/arch assets (legacy/full matrix):
 ./dialtone.sh robot src_v2 publish --repo timcash/dialtone --all-targets
 ```
 
-## 6) Bring Robot Up With Autoswap
+## 7) Bring Robot Up With Autoswap
 
 Set token drop-in once on robot host:
 ```bash
@@ -178,7 +333,7 @@ Use autoswap deploy helper to install/update autoswap on robot and install servi
   --host rover \
   --user tim \
   --service \
-  --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_composition_manifest.json \
+  --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_channel.json \
   --repo timcash/dialtone
 ```
 
@@ -194,7 +349,25 @@ Force immediate update check (instead of waiting poll interval):
 ./dialtone.sh autoswap src_v1 update --host rover --user tim
 ```
 
-## 7) Robot Diagnostic (Mandatory)
+Normal field update path:
+```bash
+# 1. Build and publish from WSL
+./dialtone.sh robot src_v2 publish --repo timcash/dialtone
+
+# 2. Let autoswap detect it, or force an immediate poll
+./dialtone.sh autoswap src_v1 update --host rover --user tim
+
+# 3. Verify rover is running downloaded artifacts
+./dialtone.sh robot src_v2 diagnostic --host rover --user tim --skip-ui --public-check=false
+```
+
+Optional rover Nix maintenance checks:
+```bash
+./dialtone.sh robot src_v2 nix-diagnostic --host rover --user tim
+./dialtone.sh robot src_v2 nix-gc --host rover --user tim
+```
+
+## 8) Robot Diagnostic (Mandatory)
 
 Run full diagnostic against robot host:
 ```bash
@@ -203,6 +376,7 @@ Run full diagnostic against robot host:
 
 Common variants:
 ```bash
+./dialtone.sh robot src_v2 diagnostic --host link-local --user tim --skip-ui --public-check=false
 ./dialtone.sh robot src_v2 diagnostic --host rover --user tim --skip-ui
 ./dialtone.sh robot src_v2 diagnostic --host rover --user tim --ui-url https://rover-1.dialtone.earth --browser-node chroma
 ./dialtone.sh robot src_v2 diagnostic --host rover --user tim --manifest /home/tim/.dialtone/autoswap/manifests/manifest-<hash>.json
@@ -211,7 +385,7 @@ Common variants:
 Diagnostic checklist details:
 - `src/plugins/robot/src_v2/diagnostic.md`
 
-## 8) WSL Relay for Public UI
+## 9) WSL Relay for Public UI
 
 Run on WSL host to point tunnel to robot UI:
 ```bash
@@ -226,7 +400,7 @@ Verify local relay service:
 systemctl --user status dialtone-proxy-rover-1.service --no-pager
 ```
 
-## 9) Clean Remote Robot State (Reset)
+## 10) Clean Remote Robot State (Reset)
 
 If robot needs full teardown before re-bootstrap:
 ```bash
@@ -239,24 +413,57 @@ If robot needs full teardown before re-bootstrap:
 - dialtone runtime processes gone
 - autoswap binaries/artifacts/releases/manifests removed
 
-## 10) Expected Working State
+## 11) Expected Working State
 
 After publish + autoswap update + diagnostic:
 - autoswap service is active on robot
 - manifest path is correct and active
 - managed processes `robot/camera/mavlink/repl` are running
 - robot endpoints work (`/health`, `/api/init`, `/api/integration-health`, `/stream`)
+- `/api/integration-health` reports live MAVLink health, not just static configuration:
+  - `not-configured`: MAVLink disabled
+  - `configured`: enabled but no telemetry received yet
+  - `degraded`: telemetry stale
+  - `ok`: recent telemetry received
 - UI loads and sections/menu work
 - telemetry + latency render from real MAVLink flow over `/natsws`
+- terminal section shows the same MAVLink failures and command acks visible to other sections
+- terminal can filter unified NATS events without losing history when sections change
 - WSL relay service is active and public URL serves robot UI
 
-## 11) Troubleshooting Order
+## 12) Troubleshooting Order
 
 1. Mesh reachability:
 ```bash
 ./dialtone.sh ssh src_v1 mesh --mode check
 ```
-2. Autoswap status/list on robot.
-3. Robot `src_v2 diagnostic --skip-ui`.
+2. Remote Chrome service on `legion`:
+```bash
+./dialtone.sh chrome src_v3 status --host legion --role robot-test
+```
+3. Autoswap status/list on robot.
+4. Robot `src_v2 diagnostic --skip-ui`.
+5. Check terminal attrs directly on the remote browser when UI tests fail:
+```bash
+./dialtone.sh chrome src_v3 get-aria-attr --host legion --role robot-test --label "Xterm Terminal" --attr data-last-error-line
+./dialtone.sh chrome src_v3 get-aria-attr --host legion --role robot-test --label "Xterm Terminal" --attr data-last-status-text
+```
+
+## 13) Deployment Architecture
+
+Current publish flow should be treated as two layers:
+- `robot src_v2 publish` creates immutable versioned release assets
+- publish also writes `robot_src_v2_channel.json`, a stable channel asset that points to the current immutable manifest asset for that release
+- autoswap `deploy` should use the channel URL, not the raw manifest URL
+- autoswap resolves that channel, pins the resulting manifest by digest, then syncs assets into `~/.dialtone/autoswap/artifacts`
+
+For a Nix-based rover runtime, the better field-update model is:
+1. Keep autoswap as the update agent and supervisor over tailscale WLAN.
+2. Publish Nix-backed artifacts alongside the legacy binaries.
+3. Put only immutable release selection and digests in the resolved manifest.
+4. On rover, autoswap should realize the correct Nix outputs for the resolved manifest version, then execute those store paths directly.
+5. Fall back to raw release binaries only when Nix realization is unavailable.
+
+That keeps the mutable part small and network-friendly for mobile rover updates, while keeping the runtime contract immutable once a release is selected.
 4. Full `src_v2 diagnostic` with browser node override.
 5. Relay service status on WSL.

@@ -18,10 +18,16 @@ This file is the short, LLM-first contract for working in `src/plugins`.
 ./dialtone.sh <plugin> <src_vN> test --filter <expr>
 ```
 
+Important behavior learned from active plugin work:
+- Scaffold `test` commands must forward extra CLI args to the real `src_vN/test/cmd/main.go` runner. If they do not, `--filter` and attach flags silently do nothing.
+- Headed remote-browser plugins should prefer `chrome src_v3`, not `chrome src_v1`.
+- For WSL-driven headed UI work, the stable pattern is usually: local server on WSL, remote Chrome on `legion`, backend/service on a third host if needed.
+- Remote browser tests should prefer one long-lived managed tab and reuse it across steps. Create a new tab only for recovery.
+
 ## Core Plugins
 - `logs`: [src/plugins/logs/src_v1/README.md](/home/user/dialtone/src/plugins/logs/src_v1/README.md)
 - `test`: [src/plugins/test/src_v1/README.md](/home/user/dialtone/src/plugins/test/src_v1/README.md)
-- `chrome`: [src/plugins/chrome/src_v1/README.md](/home/user/dialtone/src/plugins/chrome/src_v1/README.md)
+- `chrome`: [src/plugins/chrome/src_v3/README.md](/home/user/dialtone/src/plugins/chrome/src_v3/README.md)
 - `ssh`: [src/plugins/ssh/src_v1/README.md](/home/user/dialtone/src/plugins/ssh/src_v1/README.md)
 - `ui`: [src/plugins/ui/src_v1/README.md](/home/user/dialtone/src/plugins/ui/src_v1/README.md)
 
@@ -36,6 +42,8 @@ This file is the short, LLM-first contract for working in `src/plugins`.
 8. Define one path resolver per plugin/version (for example `src_vN/go/paths.go`) and reuse it everywhere.
 9. Keep each plugin README aligned with actual CLI/env/test behavior.
 10. Treat each `src_vN` as the source of truth for that version.
+11. If a plugin exposes `test --filter`, verify the scaffold forwards user args into the test runner.
+12. If a plugin uses headed browser tests, document the expected remote browser role and host.
 
 ## Standard Plugin Layout
 ```text
@@ -88,10 +96,16 @@ Default URL: `nats://127.0.0.1:4222`
 - `mavlink.stats`: MAVLink health/stats
 - `mavlink.attitude`: orientation data
 - `rover.command`: robot control frames
+- `robot.>`: robot service/runtime state
+- `robot.autoswap.supervisor`: autoswap supervisor snapshot
+- `robot.autoswap.runtime`: autoswap runtime/process snapshot
 
 ### Misc coordination subjects
 - `test.subject`: connectivity/smoke checks
 - `ui.>`: mock UI state/telemetry topics
+
+### UI/browser debug subjects
+- `logs.ui.robot`: browser UI logs published back into NATS
 
 ## Minimal New Plugin Workflow
 ```sh

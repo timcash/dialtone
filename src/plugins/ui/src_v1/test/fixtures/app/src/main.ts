@@ -1,8 +1,9 @@
 import { setupApp } from "../../../../ui/ui";
 import {
   getUISharedTemplate,
-  renderUISharedTemplate,
+  registerUISharedSections,
   type UISharedTemplateID,
+  type UISharedSectionEntry,
 } from "../../../../ui/templates";
 import * as THREE from "three";
 import "../../../../ui/style.css";
@@ -127,15 +128,12 @@ const { sections, menu } = setupApp({
   debug: true,
 });
 
-const sectionEntries: Array<{ template: UISharedTemplateID; sectionID: string }> = [
-  { template: "hero", sectionID: "ui-hero-stage" },
-  { template: "three-fullscreen", sectionID: "ui-three-fullscreen-stage" },
-  { template: "three-calculator", sectionID: "ui-three-calculator-stage" },
-  { template: "table", sectionID: "ui-table-table" },
-  { template: "camera", sectionID: "ui-camera-video" },
-  { template: "docs", sectionID: "ui-docs-docs" },
-  { template: "terminal", sectionID: "ui-terminal-xterm" },
-  { template: "settings", sectionID: "ui-settings-button-list" },
+const sectionEntries: UISharedSectionEntry[] = [
+  { template: "docs", sectionID: "ui-home-docs", title: "Home" },
+  { template: "table", sectionID: "ui-table-table", title: "Table" },
+  { template: "three", sectionID: "ui-three-stage", title: "Three" },
+  { template: "terminal", sectionID: "ui-terminal-log", title: "Terminal" },
+  { template: "camera", sectionID: "ui-camera-video", title: "Camera" },
 ];
 
 const sectionByTemplate = new Map<UISharedTemplateID, string>();
@@ -148,10 +146,7 @@ for (const entry of sectionEntries) {
 
 const sectionModes = new Map<string, "fullscreen" | "calculator">();
 
-function applyMode(
-  sectionID: string,
-  mode: "fullscreen" | "calculator",
-): void {
+function applyMode(sectionID: string, mode: "fullscreen" | "calculator"): void {
   const section = document.getElementById(sectionID);
   if (!section) return;
   section.classList.remove("fullscreen", "calculator");
@@ -159,8 +154,12 @@ function applyMode(
   sectionModes.set(sectionID, mode);
 }
 
-function toggleModeFor(templateId: UISharedTemplateID, sectionID: string): void {
-  const current = sectionModes.get(sectionID) ?? getUISharedTemplate(templateId).defaultMode;
+function toggleModeFor(
+  templateId: UISharedTemplateID,
+  sectionID: string,
+): void {
+  const current =
+    sectionModes.get(sectionID) ?? getUISharedTemplate(templateId).defaultMode;
   const next = current === "fullscreen" ? "calculator" : "fullscreen";
   applyMode(sectionID, next);
   console.log(`mode-toggle:${sectionID}:${next}`);
@@ -178,12 +177,14 @@ function bindInteractions(
     (b) => b.textContent?.trim().toLowerCase() === "mode",
   );
   if (modeButton) {
-    modeButton.addEventListener("click", () => toggleModeFor(sectionId, sectionID));
+    modeButton.addEventListener("click", () =>
+      toggleModeFor(sectionId, sectionID),
+    );
   }
 
   if (sectionId === "table") {
     const refresh = container.querySelector(
-      "button.table-refresh",
+      'button[aria-label="Table Refresh"]',
     ) as HTMLButtonElement | null;
     const status = container.querySelector(
       "dd.table-status",
@@ -196,9 +197,9 @@ function bindInteractions(
     }
   }
 
-  if (sectionId === "three-calculator") {
+  if (sectionId === "three") {
     const add = container.querySelector(
-      "button.three-add",
+      'button[aria-label="Three Add"]',
     ) as HTMLButtonElement | null;
     if (add) {
       add.addEventListener("click", () => console.log("three-add:1"));
@@ -207,17 +208,20 @@ function bindInteractions(
 
   if (sectionId === "terminal") {
     const send = container.querySelector(
-      "button.terminal-send",
+      'button[aria-label="Terminal Submit"]',
     ) as HTMLButtonElement | null;
     const input = container.querySelector("input") as HTMLInputElement | null;
-    const pre = container.querySelector("pre") as HTMLElement | null;
+    const terminal = container.querySelector(
+      ".xterm-primary",
+    ) as HTMLElement | null;
     const status = container.querySelector(
       "dd.terminal-status",
     ) as HTMLElement | null;
     const run = () => {
       const value = (input?.value || "").trim();
-      if (!value || !pre) return;
-      pre.textContent += `log> ${value}\n`;
+      if (!value || !terminal) return;
+      terminal.textContent =
+        `${terminal.textContent || ""}\nlog> ${value}`.trim();
       if (status) status.textContent = value;
       console.log(`log-submit:${value}`);
       if (input) input.value = "";
@@ -234,34 +238,30 @@ function bindInteractions(
   }
 }
 
-for (const entry of sectionEntries) {
-  const template = getUISharedTemplate(entry.template);
-  sections.register(entry.sectionID, {
-    containerId: entry.sectionID,
-    canonicalName: entry.sectionID,
-    load: async () => {
-      const container = document.getElementById(entry.sectionID);
-      if (!container) throw new Error(`${entry.sectionID} container not found`);
-      renderUISharedTemplate(container, entry.template);
-      // Keep a stable section layout across navigation steps.
-      applyMode(entry.sectionID, "fullscreen");
-      bindInteractions(entry.template, entry.sectionID, container);
-      const canvas = container.querySelector("canvas");
-      if (canvas instanceof HTMLCanvasElement) {
-        return mountSphereScene(canvas);
-      }
-      return ctl();
-    },
-    overlays: template.overlays,
-  });
+registerUISharedSections({
+  sections,
+  menu,
+  entries: sectionEntries,
+  decorate: (entry, container) => {
+    const template = getUISharedTemplate(entry.template);
+    applyMode(entry.sectionID, template.defaultMode);
+    bindInteractions(entry.template, entry.sectionID, container);
+    const canvas = container.querySelector("canvas");
+    if (canvas instanceof HTMLCanvasElement) {
+      return mountSphereScene(canvas);
+    }
+    return ctl();
+  },
+});
 
-  menu.addButton(template.title, `Navigate ${template.title}`, () =>
-    sections.navigateTo(entry.sectionID),
-  );
-}
-
-const initialRaw = (window.location.hash || "#ui-hero-stage").slice(1).trim().toLowerCase();
-const initial = sectionByAlias.get(initialRaw) || sectionByTemplate.get("hero") || "ui-hero-stage";
+const initialRaw = (window.location.hash || "#ui-home-docs")
+  .slice(1)
+  .trim()
+  .toLowerCase();
+const initial =
+  sectionByAlias.get(initialRaw) ||
+  sectionByTemplate.get("docs") ||
+  "ui-home-docs";
 void sections.navigateTo(initial).catch((err) => {
   console.error("[ui-fixture] initial navigation failed", err);
 });
