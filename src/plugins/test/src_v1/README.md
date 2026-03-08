@@ -36,6 +36,14 @@ Reusable test runtime for plugin integration tests.
 
 Use the `dialtone.sh` wrapper for test plugin workflows. Do not run `go`, `npm`, or `vite` directly for normal install/build/format paths; the wrapper is the supported entrypoint.
 
+Build outputs:
+- Go binaries go to `bin/`, not `src/`
+- current wrapped build artifacts are:
+  - `bin/dialtone_test_v1`
+  - `bin/dialtone_test_v1_runner`
+  - `bin/dialtone_test_v1_mock_server`
+- the UI build output stays in `src/plugins/test/src_v1/ui/dist`
+
 Minimal plugin layout:
 
 ```text

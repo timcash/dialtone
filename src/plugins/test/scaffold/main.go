@@ -140,12 +140,22 @@ func runBuild(version string, passthrough []string) error {
 		goBin = "go"
 	}
 
-	goTargets := [][]string{
-		{"build", "./plugins/test/scaffold/main.go"},
-		{"build", "./plugins/test/src_v1/test/cmd/main.go"},
-		{"build", "./plugins/test/src_v1/mock_server"},
+	binDir := filepath.Join(paths.Runtime.RepoRoot, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return err
 	}
-	for _, args := range goTargets {
+
+	type goTarget struct {
+		output string
+		pkg    string
+	}
+	goTargets := []goTarget{
+		{output: filepath.Join(binDir, "dialtone_test_v1"), pkg: "./plugins/test/scaffold/main.go"},
+		{output: filepath.Join(binDir, "dialtone_test_v1_runner"), pkg: "./plugins/test/src_v1/test/cmd/main.go"},
+		{output: filepath.Join(binDir, "dialtone_test_v1_mock_server"), pkg: "./plugins/test/src_v1/mock_server"},
+	}
+	for _, target := range goTargets {
+		args := []string{"build", "-o", target.output, target.pkg}
 		cmd := exec.Command(goBin, args...)
 		cmd.Dir = paths.Runtime.SrcRoot
 		cmd.Stdout = os.Stdout
