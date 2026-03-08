@@ -33,8 +33,9 @@
     "name": "rover",
     "aliases": ["rover", "rover-1", "rover-1.shad-artichoke.ts.net"],
     "user": "tim",
-    "host": "192.168.4.36",
-    "host_candidates": ["rover-1.shad-artichoke.ts.net", "169.254.217.151"],
+    "host": "rover-1.shad-artichoke.ts.net",
+    "route_preference": ["tailscale", "private", "link-local", "other"],
+    "host_candidates": ["rover-1.shad-artichoke.ts.net", "192.168.4.36", "169.254.217.151"],
     "port": "22",
     "os": "linux",
     "repo_candidates": ["/home/tim/dialtone", "/home/user/dialtone"]

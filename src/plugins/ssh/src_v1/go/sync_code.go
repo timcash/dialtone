@@ -246,7 +246,8 @@ func runRemoteRsync(src string, node MeshNode, dest string, del bool, excludes [
 	for _, e := range excludes {
 		args = append(args, "--exclude", e)
 	}
-	sshTarget := fmt.Sprintf("%s@%s", node.User, node.Host)
+	host := PreferredHost(node, node.Port)
+	sshTarget := fmt.Sprintf("%s@%s", node.User, host)
 	sshCmd := "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
 	if strings.TrimSpace(node.Port) != "" && node.Port != "22" {
 		sshCmd = fmt.Sprintf("%s -p %s", sshCmd, node.Port)

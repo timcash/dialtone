@@ -393,7 +393,7 @@ func sourceURL(node sshv1.MeshNode, srcPath string) string {
 	if !strings.HasPrefix(srcPath, "/") {
 		srcPath = "/" + srcPath
 	}
-	host := strings.TrimSpace(node.Host)
+	host := strings.TrimSpace(sshv1.PreferredHost(node, node.Port))
 	user := strings.TrimSpace(node.User)
 	port := strings.TrimSpace(node.Port)
 	if host == "" || user == "" {
@@ -417,7 +417,7 @@ func sourceURLForRemote(node sshv1.MeshNode, srcPath string) string {
 	if !strings.HasPrefix(srcPath, "/") {
 		srcPath = "/" + srcPath
 	}
-	host := strings.TrimSpace(node.Host)
+	host := strings.TrimSpace(sshv1.PreferredHost(node, node.Port))
 	user := strings.TrimSpace(node.User)
 	port := strings.TrimSpace(node.Port)
 	if host == "" || user == "" {

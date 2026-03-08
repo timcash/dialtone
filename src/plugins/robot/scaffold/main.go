@@ -1489,10 +1489,6 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 		repoRootForList = resolvedRemoteRepo
 	}
 	runtimePath := filepath.ToSlash(filepath.Join(remoteHome, ".dialtone", "autoswap", "state", "runtime.json"))
-	runtimeRaw, err := ssh_plugin.RunSSHCommand(client, "cat "+shellSingleQuote(runtimePath))
-	if err != nil {
-		return fmt.Errorf("autoswap runtime state read failed: %w", err)
-	}
 	var runtimeState struct {
 		ManifestPath string `json:"manifest_path"`
 		Processes    []struct {
@@ -1501,17 +1497,25 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 			Status string `json:"status"`
 		} `json:"processes"`
 	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(runtimeRaw)), &runtimeState); err != nil {
-		return fmt.Errorf("autoswap runtime state parse failed: %w", err)
-	}
-	if rp := strings.TrimSpace(runtimeState.ManifestPath); rp != "" {
-		if remoteFileExists(rp) {
-			manifestAbs = filepath.ToSlash(rp)
-			logs.Info("robot src_v2 diagnostic: using runtime manifest path from state: %s", manifestAbs)
+	loadRuntimeState := func() error {
+		runtimeRaw, err := ssh_plugin.RunSSHCommand(client, "cat "+shellSingleQuote(runtimePath))
+		if err != nil {
+			return fmt.Errorf("autoswap runtime state read failed: %w", err)
 		}
-	} else if manifestURL != "" {
+		if err := json.Unmarshal([]byte(strings.TrimSpace(runtimeRaw)), &runtimeState); err != nil {
+			return fmt.Errorf("autoswap runtime state parse failed: %w", err)
+		}
+		if rp := strings.TrimSpace(runtimeState.ManifestPath); rp != "" {
+			if remoteFileExists(rp) {
+				manifestAbs = filepath.ToSlash(rp)
+				logs.Info("robot src_v2 diagnostic: using runtime manifest path from state: %s", manifestAbs)
+				return nil
+			}
+		}
+		if manifestURL == "" {
+			return nil
+		}
 		// When using --manifest-url, the manifest is typically downloaded under autoswap/manifests/.
-		// Prefer the explicit runtime manifest path when present; fail only if missing.
 		candidates := []string{
 			filepath.ToSlash(filepath.Join(autoswapRoot, "manifests", "robot-src_v2.manifest.json")),
 			filepath.ToSlash(filepath.Join(autoswapRoot, "manifests")),
@@ -1537,6 +1541,10 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 			return fmt.Errorf("diagnostic could not resolve active autoswap manifest for --manifest-url mode")
 		}
 		manifestAbs = found
+		return nil
+	}
+	if err := loadRuntimeState(); err != nil {
+		return err
 	}
 	listCmd := shellSingleQuote(autoswapBin) + " service --mode list --manifest " + shellSingleQuote(manifestAbs)
 	if strings.TrimSpace(repoRootForList) != "" {
@@ -1614,34 +1622,60 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 	logs.Info("robot src_v2 diagnostic: autoswap runtime matches manifest processes")
 
 	if manifestURL != "" {
-		remoteManifestHashOut, err := ssh_plugin.RunSSHCommand(client, "sha256sum "+shellSingleQuote(manifestAbs)+" | awk '{print $1}'")
-		if err != nil {
-			return fmt.Errorf("active manifest hash read failed: %w", err)
-		}
-		remoteManifestHash := strings.TrimSpace(remoteManifestHashOut)
 		latestManifestHash, err := fetchResolvedManifestSHA256(manifestURL, 15*time.Second)
 		if err != nil {
 			return fmt.Errorf("latest manifest fetch failed (%s): %w", manifestURL, err)
 		}
-		if !strings.EqualFold(remoteManifestHash, latestManifestHash) {
-			return fmt.Errorf("active manifest is not latest from manifest-url: active=%s latest=%s", remoteManifestHash, latestManifestHash)
+		remoteManifestHash := ""
+		deadline := time.Now().Add(45 * time.Second)
+		for {
+			remoteManifestHashOut, herr := ssh_plugin.RunSSHCommand(client, "sha256sum "+shellSingleQuote(manifestAbs)+" | awk '{print $1}'")
+			if herr != nil {
+				return fmt.Errorf("active manifest hash read failed: %w", herr)
+			}
+			remoteManifestHash = strings.TrimSpace(remoteManifestHashOut)
+			if strings.EqualFold(remoteManifestHash, latestManifestHash) {
+				break
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf("active manifest is not latest from manifest-url: active=%s latest=%s", remoteManifestHash, latestManifestHash)
+			}
+			time.Sleep(2 * time.Second)
+			if err := loadRuntimeState(); err != nil {
+				return err
+			}
 		}
 		logs.Info("robot src_v2 diagnostic: active manifest hash matches latest manifest-url")
 	}
 
-	pidArgs := make([]string, 0, len(runtimeState.Processes))
-	for _, p := range runtimeState.Processes {
-		if p.PID <= 0 {
-			continue
-		}
-		pidArgs = append(pidArgs, strconv.Itoa(p.PID))
-	}
-	if len(pidArgs) == 0 {
-		return fmt.Errorf("runtime state has no managed process pids")
-	}
 	procsOut := ""
 	foundAllProcTokens := false
-	for attempt := 0; attempt < 6; attempt++ {
+	for attempt := 0; attempt < 10; attempt++ {
+		if err := loadRuntimeState(); err != nil {
+			return err
+		}
+		pidArgs := make([]string, 0, len(runtimeState.Processes))
+		missingRunning := ""
+		for name := range expectedProc {
+			expectedProc[name] = false
+		}
+		for _, p := range runtimeState.Processes {
+			name := strings.TrimSpace(p.Name)
+			if _, ok := expectedProc[name]; ok && strings.EqualFold(strings.TrimSpace(p.Status), "running") && p.PID > 0 {
+				expectedProc[name] = true
+				pidArgs = append(pidArgs, strconv.Itoa(p.PID))
+			}
+		}
+		for name, ok := range expectedProc {
+			if !ok {
+				missingRunning = name
+				break
+			}
+		}
+		if missingRunning != "" || len(pidArgs) == 0 {
+			time.Sleep(1 * time.Second)
+			continue
+		}
 		nextOut, perr := ssh_plugin.RunSSHCommand(client, "ps -p "+strings.Join(pidArgs, ",")+" -o pid= -o args= || true")
 		if perr != nil {
 			return fmt.Errorf("remote process list failed: %w", perr)

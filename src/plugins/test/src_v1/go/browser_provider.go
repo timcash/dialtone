@@ -25,7 +25,16 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	if resp.BrowserPID == 0 {
+	if resp.Unhealthy {
+		if _, err := chrome.SendCommandByHost(remoteNode, chrome.CommandRequest{
+			Command: "close",
+			Role:    role,
+		}); err != nil {
+			return nil, err
+		}
+		resp = nil
+	}
+	if resp == nil || resp.BrowserPID == 0 {
 		resp, err = chrome.SendCommandByHost(remoteNode, chrome.CommandRequest{
 			Command: "open",
 			Role:    role,

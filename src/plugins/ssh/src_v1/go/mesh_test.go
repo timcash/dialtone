@@ -91,8 +91,8 @@ func TestResolvePreferredHostPrefersTailscaleWhenConfigured(t *testing.T) {
 
 	node := MeshNode{
 		Name:            "rover",
-		Host:            "169.254.217.151",
-		RoutePreference: []string{"tailscale", "link-local", "private", "other"},
+		Host:            "rover-1.shad-artichoke.ts.net",
+		RoutePreference: []string{"tailscale", "private", "link-local", "other"},
 		HostCandidates:  []string{"169.254.217.151", "192.168.4.36", "rover-1.shad-artichoke.ts.net"},
 	}
 	got := resolvePreferredHost(node, "22")
@@ -108,7 +108,7 @@ func TestPrioritizedMeshHostsFallsBackToDefaultWhenRoutePreferenceIsUnknown(t *t
 		HostCandidates:  []string{"rover-1.shad-artichoke.ts.net", "169.254.217.151", "192.168.4.36"},
 	}
 	got := prioritizedMeshHostsForNode(node, resolveMeshCandidates(node))
-	want := []string{"169.254.217.151", "192.168.4.36", "rover-1.shad-artichoke.ts.net"}
+	want := []string{"rover-1.shad-artichoke.ts.net", "192.168.4.36", "169.254.217.151"}
 	if len(got) != len(want) {
 		t.Fatalf("unexpected candidate count: got %d want %d", len(got), len(want))
 	}
@@ -133,6 +133,6 @@ func TestResolvePreferredHostFallsBackToPrimaryHost(t *testing.T) {
 	}
 	got := resolvePreferredHost(node, "22")
 	if got != "169.254.217.151" {
-		t.Fatalf("expected first candidate host, got %s", got)
+		t.Fatalf("expected first remaining candidate host, got %s", got)
 	}
 }
