@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
@@ -28,6 +29,21 @@ func main() {
 	}
 
 	switch cmd {
+	case "install":
+		if err := runInstall(version, passthrough); err != nil {
+			logs.Error("test install failed: %v", err)
+			os.Exit(1)
+		}
+	case "build":
+		if err := runBuild(version, passthrough); err != nil {
+			logs.Error("test build failed: %v", err)
+			os.Exit(1)
+		}
+	case "format":
+		if err := runFormat(version, passthrough); err != nil {
+			logs.Error("test format failed: %v", err)
+			os.Exit(1)
+		}
 	case "test":
 		runTests(version, passthrough)
 	case "help", "-h", "--help":
@@ -85,7 +101,113 @@ func runTests(version string, passthrough []string) {
 	}
 }
 
+func runInstall(version string, passthrough []string) error {
+	if version != "src_v1" {
+		return fmt.Errorf("unsupported version %s", version)
+	}
+	if len(passthrough) > 0 {
+		return fmt.Errorf("install does not accept extra arguments")
+	}
+
+	paths, err := testv1.ResolvePaths("")
+	if err != nil {
+		return err
+	}
+	uiDir := filepath.Join(paths.Runtime.RepoRoot, "src", "plugins", "test", "src_v1", "ui")
+	npmCmd := exec.Command("npm", "install")
+	npmCmd.Dir = uiDir
+	npmCmd.Stdout = os.Stdout
+	npmCmd.Stderr = os.Stderr
+	logs.Info("test install ui: npm install")
+	return npmCmd.Run()
+}
+
+func runBuild(version string, passthrough []string) error {
+	if version != "src_v1" {
+		return fmt.Errorf("unsupported version %s", version)
+	}
+	if len(passthrough) > 0 {
+		return fmt.Errorf("build does not accept extra arguments")
+	}
+
+	paths, err := testv1.ResolvePaths("")
+	if err != nil {
+		return err
+	}
+
+	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
+	if goBin == "" {
+		goBin = "go"
+	}
+
+	goTargets := [][]string{
+		{"build", "./plugins/test/scaffold/main.go"},
+		{"build", "./plugins/test/src_v1/test/cmd/main.go"},
+		{"build", "./plugins/test/src_v1/mock_server"},
+	}
+	for _, args := range goTargets {
+		cmd := exec.Command(goBin, args...)
+		cmd.Dir = paths.Runtime.SrcRoot
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		logs.Info("test build go: %s", strings.Join(args, " "))
+		if err := cmd.Run(); err != nil {
+			return err
+		}
+	}
+
+	uiDir := filepath.Join(paths.Runtime.RepoRoot, "src", "plugins", "test", "src_v1", "ui")
+	npmCmd := exec.Command("npm", "run", "build")
+	npmCmd.Dir = uiDir
+	npmCmd.Stdout = os.Stdout
+	npmCmd.Stderr = os.Stderr
+	logs.Info("test build ui: npm run build")
+	if err := npmCmd.Run(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func runFormat(version string, passthrough []string) error {
+	if version != "src_v1" {
+		return fmt.Errorf("unsupported version %s", version)
+	}
+	if len(passthrough) > 0 {
+		return fmt.Errorf("format does not accept extra arguments")
+	}
+
+	paths, err := testv1.ResolvePaths("")
+	if err != nil {
+		return err
+	}
+
+	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
+	if goBin == "" {
+		goBin = "go"
+	}
+	goCmd := exec.Command(goBin, "fmt", "./plugins/test/...")
+	goCmd.Dir = paths.Runtime.SrcRoot
+	goCmd.Stdout = os.Stdout
+	goCmd.Stderr = os.Stderr
+	logs.Info("test format go: go fmt ./plugins/test/...")
+	if err := goCmd.Run(); err != nil {
+		return err
+	}
+
+	uiDir := filepath.Join(paths.Runtime.RepoRoot, "src", "plugins", "test", "src_v1", "ui")
+	npmCmd := exec.Command("npm", "run", "format")
+	npmCmd.Dir = uiDir
+	npmCmd.Stdout = os.Stdout
+	npmCmd.Stderr = os.Stderr
+	logs.Info("test format ui: npm run format")
+	return npmCmd.Run()
+}
+
 func printUsage() {
 	logs.Info("Usage: ./dialtone.sh test src_v1 <command> [args]")
+	logs.Info("  install         Install test plugin UI dependencies")
+	logs.Info("  build           Build test plugin Go entrypoints and Vite UI")
+	logs.Info("  format          Format test plugin Go code and UI sources")
 	logs.Info("  test            Run test plugin verification suite")
 }

@@ -5,6 +5,15 @@ Reusable test runtime for plugin integration tests.
 ## Bash Workflows
 
 ```bash
+# Install test UI dependencies
+./dialtone.sh test src_v1 install
+
+# Format test Go code and UI sources
+./dialtone.sh test src_v1 format
+
+# Build test Go entrypoints and the Vite UI
+./dialtone.sh test src_v1 build
+
 # Run test plugin self-check suite (reference implementation)
 ./dialtone.sh test src_v1 test
 
@@ -24,6 +33,8 @@ Reusable test runtime for plugin integration tests.
 ./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.pass.>'
 ./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.fail.>'
 ```
+
+Use the `dialtone.sh` wrapper for test plugin workflows. Do not run `go`, `npm`, or `vite` directly for normal install/build/format paths; the wrapper is the supported entrypoint.
 
 Minimal plugin layout:
 
