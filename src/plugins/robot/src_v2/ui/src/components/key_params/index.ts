@@ -20,6 +20,7 @@ const DEFAULT_ROWS: ParamRow[] = [
 ];
 
 export function mountKeyParams(container: HTMLElement): VisualizationControl {
+  const table = container.querySelector("table[aria-label='Key Params Table']") as HTMLTableElement | null;
   const tbody = container.querySelector('tbody');
   if (!tbody) {
     throw new Error('key params table body not found');
@@ -30,6 +31,7 @@ export function mountKeyParams(container: HTMLElement): VisualizationControl {
 
   const renderRows = (rows: ParamRow[]) => {
     tbody.innerHTML = '';
+    if (table) table.setAttribute('data-row-count', String(rows.length));
     for (const row of rows) {
       const tr = document.createElement('tr');
       tr.innerHTML = `<td>${row.key}</td><td>${row.value}</td><td>${row.status}</td>`;

@@ -37,6 +37,15 @@ const subscriptions = [
   'logs.ui.robot',
 ] as const;
 
+function setConnectionState(connected: boolean) {
+  const value = connected ? 'true' : 'false';
+  document.body.setAttribute('data-nats-connected', value);
+  const header = document.querySelector("[aria-label='App Header']") as HTMLElement | null;
+  if (header) {
+    header.setAttribute('data-nats-connected', value);
+  }
+}
+
 function pushRobotEvent(event: RobotEvent) {
   eventHistory.push(event);
   if (eventHistory.length > MAX_EVENT_HISTORY) {
@@ -69,6 +78,15 @@ function stringifyValue(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function summarizeExtraPayload(payload: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(payload)) {
+    if (key === 'cmd' || key === 'mode') continue;
+    parts.push(`${key}=${stringifyValue(value)}`);
+  }
+  return parts.join(' ');
 }
 
 function summarizePayload(payload: any): string {
@@ -179,20 +197,24 @@ export async function initConnection() {
       ? `${protocol}//${window.location.host}${wsPath}`
       : `${protocol}//${hostname}:${wsPort}`;
     logInfo('ui/connection', `[NATS] Connecting to ${server}...`);
+    setConnectionState(false);
     nc = await connect({ servers: [server] });
     setNATSPublisher((subject, payload) => {
       if (nc) nc.publish(subject, payload);
     });
+    setConnectionState(true);
     logInfo('ui/connection', `[NATS] Connected.`);
     await bindSubscriptions(nc);
 
     nc.closed().then(() => {
       setNATSPublisher(null);
+      setConnectionState(false);
       logWarn('ui/connection', '[NATS] Connection closed, retrying...');
       setTimeout(initConnection, 2000);
     });
   } catch (err) {
     setNATSPublisher(null);
+    setConnectionState(false);
     logError('ui/connection', '[NATS] Connection failed', err);
     setTimeout(initConnection, 5000);
   }
@@ -206,7 +228,15 @@ export function sendCommand(cmd: string, mode?: string, extra?: Record<string, u
   const payload: any = { cmd };
   if (mode) payload.mode = mode;
   if (extra && typeof extra === 'object') Object.assign(payload, extra);
-  logInfo('ui/connection', `[NATS] Publishing rover.command cmd=${cmd}${mode ? ` mode=${mode}` : ''}`);
+  const extraSummary = summarizeExtraPayload(payload);
+  const summary = `[NATS] Publishing rover.command cmd=${cmd}${mode ? ` mode=${mode}` : ''}${extraSummary ? ` ${extraSummary}` : ''}`;
+  const header = document.querySelector("[aria-label='App Header']") as HTMLElement | null;
+  if (header) {
+    header.setAttribute('data-last-rover-command', cmd);
+    header.setAttribute('data-last-rover-command-mode', mode || '');
+    header.setAttribute('data-last-rover-command-extra', extraSummary);
+  }
+  logInfo('ui/connection', summary);
   nc.publish('rover.command', jc.encode(payload));
 }
 

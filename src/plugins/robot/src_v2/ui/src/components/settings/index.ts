@@ -27,7 +27,11 @@ export function mountSettings(container: HTMLElement): VisualizationControl {
   const applySettings = () => {
     // Apply chatlog
     const chatlog = document.querySelector('.three-chatlog') as HTMLElement;
-    if (chatlog) chatlog.hidden = !get('robot.chatlog.enabled');
+    if (chatlog) {
+      const enabled = get('robot.chatlog.enabled');
+      chatlog.hidden = !enabled;
+      chatlog.setAttribute('data-enabled', enabled ? 'true' : 'false');
+    }
   };
 
   // Also render list in primary area
@@ -36,6 +40,7 @@ export function mountSettings(container: HTMLElement): VisualizationControl {
   if (list) {
     const chatlogBtn = document.createElement('button');
     chatlogBtn.className = 'menu-button';
+    chatlogBtn.setAttribute('aria-label', 'Toggle Chatlog Button');
     chatlogBtn.textContent = 'Toggle Chatlog';
     chatlogBtn.onclick = () => {
         set('robot.chatlog.enabled', !get('robot.chatlog.enabled'));
