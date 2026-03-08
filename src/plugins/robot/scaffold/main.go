@@ -25,8 +25,6 @@ import (
 	bun_plugin "dialtone/dev/plugins/bun/src_v1/go"
 	go_plugin "dialtone/dev/plugins/go/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
-	robot_cli "dialtone/dev/plugins/robot/src_v1/cmd/cli"
-	robot_ops "dialtone/dev/plugins/robot/src_v1/cmd/ops"
 	test_plugin "dialtone/dev/plugins/test/src_v1/go"
 	"github.com/chromedp/chromedp"
 )
@@ -92,57 +90,7 @@ func isHelp(s string) bool {
 }
 
 func runSrcV1(command, repoRoot string, args []string) error {
-	switch command {
-	case "help", "-h", "--help":
-		printUsage()
-		return nil
-	case "install":
-		return robot_ops.Install(args...)
-	case "fmt":
-		return robot_ops.Fmt()
-	case "vet":
-		return robot_ops.Vet()
-	case "go-build":
-		return robot_ops.GoBuild()
-	case "lint":
-		return robot_ops.Lint()
-	case "format":
-		return robot_ops.Format()
-	case "build":
-		return robot_ops.Build(args...)
-	case "dev":
-		return robot_ops.Dev(repoRoot, args)
-	case "test":
-		return robot_ops.Test(repoRoot, args)
-	case "serve":
-		return robot_ops.Serve(repoRoot, args...)
-	case "sleep":
-		return robot_ops.Sleep(repoRoot, args)
-	case "wake":
-		return robot_ops.Wake(repoRoot, args)
-	case "ui-run":
-		port := 0
-		for i, arg := range args {
-			if arg == "--port" && i+1 < len(args) {
-				port, _ = strconv.Atoi(args[i+1])
-			}
-		}
-		return robot_ops.UIRun(port)
-	case "deploy-test":
-		return robot_cli.RunDeployTest("src_v1", args)
-	case "deploy":
-		return robot_cli.RunDeploy("src_v1", args)
-	case "sync-code":
-		return robot_cli.RunSyncCode("src_v1", args)
-	case "sync-watch":
-		return robot_cli.RunSyncWatch("src_v1", args)
-	case "diagnostic":
-		return robot_cli.RunDiagnostic("src_v1")
-	case "vpn-test":
-		return robot_cli.RunVPNTest(args)
-	default:
-		return fmt.Errorf("unknown robot command: %s", command)
-	}
+	return fmt.Errorf("robot src_v1 is no longer supported from this scaffold; use ./dialtone.sh robot src_v2 ...")
 }
 
 func runGeneric(version, command, repoRoot string, args []string) error {
@@ -210,6 +158,7 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 				return err
 			}
 			_ = os.Setenv("VITE_PROXY_TARGET", normalized)
+			_ = os.Unsetenv("VITE_NATS_WS_URL")
 			logs.Info("robot src_v2 dev backend proxy target=%s (input=%s)", normalized, raw)
 		}
 
@@ -233,9 +182,9 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 		testPkg := "./plugins/robot/" + version + "/test/cmd"
 		return go_plugin.RunGo("run", testPkg)
 	case "sync-code":
-		return robot_cli.RunSyncCode(version, args)
+		return runRobotSyncCode(repoRoot, args)
 	case "sync-watch":
-		return robot_cli.RunSyncWatch(version, args)
+		return runRobotSyncWatch(repoRoot, args)
 	case "relay":
 		if version != "src_v2" {
 			return fmt.Errorf("relay is currently supported only for robot src_v2")
@@ -331,6 +280,7 @@ func normalizeRobotBackendURL(raw string) (string, error) {
 	u.Fragment = ""
 	return u.String(), nil
 }
+
 
 func getLatestVersionDir(repoRoot string) string {
 	rt, err := configv1.ResolveRuntime(repoRoot)
@@ -446,10 +396,7 @@ func runSrcV2Relay(repoRoot string, args []string) error {
 	}()
 
 	if *service {
-		if err := robot_ops.Wake(repoRoot, []string{"--url", targetURL}); err != nil {
-			return err
-		}
-		logs.Info("robot src_v2 relay service active: dialtone-proxy-%s.service", relayName)
+		return fmt.Errorf("robot src_v2 relay --service currently requires the retired robot src_v1 wake path; use relay without --service for now")
 	} else {
 		if err := runDialtone(repoRoot, "cloudflare", "robot", "--name", relayName, "--url", targetURL); err != nil {
 			return err
@@ -2134,4 +2081,25 @@ func runDialtone(repoRoot string, args ...string) error {
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	return cmd.Run()
+}
+
+func runRobotSyncCode(repoRoot string, args []string) error {
+	return runDialtone(repoRoot, append([]string{"ssh", "src_v1", "sync-code"}, args...)...)
+}
+
+func runRobotSyncWatch(repoRoot string, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("sync-watch requires start|stop|status")
+	}
+	switch args[0] {
+	case "start":
+		rest := append([]string{"ssh", "src_v1", "sync-code", "--service"}, args[1:]...)
+		return runDialtone(repoRoot, rest...)
+	case "stop":
+		return runDialtone(repoRoot, "ssh", "src_v1", "sync-code", "--service-stop")
+	case "status":
+		return runDialtone(repoRoot, "ssh", "src_v1", "sync-code", "--service-status")
+	default:
+		return fmt.Errorf("sync-watch requires start|stop|status")
+	}
 }
