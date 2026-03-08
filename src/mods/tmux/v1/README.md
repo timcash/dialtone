@@ -1,51 +1,84 @@
 # Tmux Mod (`v1`)
 
-The `tmux` mod provides lightweight, remote tmux log retrieval for Dialtone hosts.
-It is designed to read scrollback from a running tmux session on a remote node
-over SSH (via the transport used by `dialtone_mod`).
+The `tmux` mod provides local tmux session utilities for Dialtone.
+
+It is local-only (no SSH/host routing) and targets panes with a single
+`session:window:pane` selector.
 
 ## Command API
 
 ```bash
-./dialtone_mod tmux v1 logs [--host <name|ip>] [--user <user>] [--port <port>] [--session <tmux-session>] [--pane <window.pane>] [--lines <n>] [--dry-run]
+./dialtone_mod tmux v1 list [--short]
+./dialtone_mod tmux v1 write [--pane dialtone:0:0] [--enter] <text...>
+./dialtone_mod tmux v1 read [--pane dialtone:0:0] [--lines 10]
+./dialtone_mod tmux v1 rename [--session NAME] [--to dialtone]
 ```
 
-## `logs` command
+## Pane Target Format
 
-Captures tmux scrollback from a remote host and prints it to stdout.
+Commands that operate on panes use:
 
-### Arguments
+- `--pane <session:window:pane>`
 
-- `--host` (required): Mesh host alias or IP.
-  - Defaults to `$DIALTONE_HOSTNAME`.
-- `--user`: SSH user (defaults to host entry in `env/mesh.json`, then `$USER`).
-- `--port`: SSH port (defaults to host entry in `env/mesh.json`, then `22`).
-- `--session`: Target tmux session name.
-  - Default: `dialtone-<host>`
-- `--pane`: Tmux target pane (`<window>.<pane>`), default `0.0`.
-- `--lines`: Number of lines to capture, default `10`.
-- `--dry-run`: Print generated command without running it.
+Default value:
 
-### Notes
+- `dialtone:0:0`
 
-- The mod reads host metadata from `env/mesh.json` using the same host matching
-  logic as other Dialtone mods.
-- If the target session is unavailable, it attempts to fall back to the first
-  available tmux session on that host.
-- If the requested pane fails, it falls back to the first available pane in the
-  session.
-- If tmux is not on `$PATH`, it tries to discover it via running process path,
-  `/nix/store/*-tmux-*/bin/tmux`, and `$HOME/.nix-profile/bin/tmux`.
+Examples:
 
-## Example
+- `dialtone:0:0`
+- `ops:1:2`
+
+## Commands
+
+### `list`
+
+Lists local tmux sessions.
+
+- `--short`: print only session names.
+
+### `write`
+
+Writes text into the target pane.
+
+- `--pane`: target pane in `session:window:pane` format.
+- `--enter`: additionally send Enter (`C-m`) after writing.
+
+By default, `write` only writes text and does not press Enter.
+
+### `read`
+
+Reads trailing scrollback lines from the target pane.
+
+- `--pane`: target pane in `session:window:pane` format.
+- `--lines`: number of lines to read (default `10`).
+
+### `rename`
+
+Renames a tmux session.
+
+- `--session`: existing session name (defaults to current session, then first).
+- `--to`: new session name (default `dialtone`).
+
+## Examples
 
 ```bash
-# Read the last 10 lines from the gold host's default tmux session
-./dialtone_mod tmux v1 logs --host gold
+# List sessions
+./dialtone_mod tmux v1 list
+./dialtone_mod tmux v1 list --short
 
-# Read 40 lines from a specific session/pane on gold
-./dialtone_mod tmux v1 logs --host gold --session dialtone-gold --pane 0.0 --lines 40
+# Write text to default target (dialtone:0:0)
+./dialtone_mod tmux v1 write "echo hello"
 
-# Inspect command generated remotely without executing
-./dialtone_mod tmux v1 logs --host gold --dry-run
+# Write text and press Enter
+./dialtone_mod tmux v1 write --enter "echo hello"
+
+# Read last 10 lines from default target
+./dialtone_mod tmux v1 read
+
+# Read last 40 lines from a specific pane
+./dialtone_mod tmux v1 read --pane dialtone:0:0 --lines 40
+
+# Rename current session to dialtone
+./dialtone_mod tmux v1 rename --to dialtone
 ```
