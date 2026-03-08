@@ -1,9 +1,9 @@
 # Error Report
 
-- **Date**: Tue, 03 Mar 2026 07:02:15 PST
-- **Suite**: swarm-src-v3
-- **Total Duration**: 3.892333067s
+- **Date**: Sat, 07 Mar 2026 16:19:22 PST
+- **Suite**: src-v1-self-check
+- **Total Duration**: 6.165517001s
 
-- **Error Steps**: 0 / 1
+- **Error Steps**: 0 / 4
 
 No errors captured.

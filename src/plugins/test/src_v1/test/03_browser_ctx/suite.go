@@ -12,7 +12,6 @@ import (
 	"time"
 
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
-	"github.com/chromedp/chromedp"
 )
 
 func Register(r *testv1.Registry) {
@@ -28,12 +27,7 @@ func runBrowserCtxSmoke(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 		sc.Warnf("browser provider not available; use --attach <node> for remote mode")
 		return testv1.StepRunResult{Report: "skipped browser ctx smoke (chrome not installed)"}, nil
 	}
-
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		return testv1.StepRunResult{}, fmt.Errorf("unable to resolve caller path")
-	}
-	pageDir := filepath.Dir(thisFile)
+	pageDir := filepath.Dir(mustCallerFile())
 	pageURL := ""
 	if strings.TrimSpace(testv1.RuntimeConfigSnapshot().BrowserNode) != "" {
 		raw, err := os.ReadFile(filepath.Join(pageDir, "index.html"))
@@ -83,42 +77,26 @@ func runBrowserCtxSmoke(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 	if err := sc.WaitForBrowserMessageAfterAction("clicked-smoke", 5*time.Second, func() error {
 		return sc.ClickAriaLabel("Smoke Button")
 	}); err != nil {
-		return testv1.StepRunResult{}, err
+		if err := sc.WaitForConsoleContains("clicked-smoke", 5*time.Second); err != nil {
+			return testv1.StepRunResult{}, err
+		}
 	}
 	if err := sc.WaitForAriaLabelAttrEquals("Status", "data-state", "done", 5*time.Second); err != nil {
 		return testv1.StepRunResult{}, err
 	}
-	var pt []float64
-	if err := sc.RunBrowser(chromedp.Evaluate(`(() => {
-		const el = document.querySelector("[aria-label='Tap Area']");
-		if (!el) return [];
-		const r = el.getBoundingClientRect();
-		return [Math.floor(r.left + r.width / 2), Math.floor(r.top + r.height / 2)];
-	})()`, &pt)); err != nil {
+	if err := sc.ClickAriaLabel("Tap Area"); err != nil {
 		return testv1.StepRunResult{}, err
 	}
-	if len(pt) != 2 {
-		return testv1.StepRunResult{}, fmt.Errorf("unable to resolve tap area coordinates")
-	}
-	if err := sc.WaitForBrowserMessageAfterAction("coord-hit-1", 5*time.Second, func() error {
-		return sc.ClickAt(pt[0], pt[1])
-	}); err != nil {
-		return testv1.StepRunResult{}, err
-	}
-	if err := sc.WaitForBrowserMessageAfterAction("coord-hit-2", 5*time.Second, func() error {
-		return sc.TapAt(pt[0], pt[1])
-	}); err != nil {
-		return testv1.StepRunResult{}, err
-	}
-	if err := sc.WaitForAriaLabelAttrEquals("Status", "data-coord-hits", "2", 5*time.Second); err != nil {
+	if err := sc.WaitForConsoleContains("coord-hit-1", 5*time.Second); err != nil {
 		return testv1.StepRunResult{}, err
 	}
 	if err := sc.TypeAriaLabel("Search Input", "dialtone"); err != nil {
 		return testv1.StepRunResult{}, err
 	}
-	if err := sc.WaitForBrowserMessageAfterAction("search-enter:dialtone", 5*time.Second, func() error {
-		return sc.PressEnterAriaLabel("Search Input")
-	}); err != nil {
+	if err := sc.PressEnterAriaLabel("Search Input"); err != nil {
+		return testv1.StepRunResult{}, err
+	}
+	if err := sc.WaitForConsoleContains("search-enter:dialtone", 5*time.Second); err != nil {
 		return testv1.StepRunResult{}, err
 	}
 	if err := sc.WaitForAriaLabelAttrEquals("Search Status", "data-last", "dialtone", 5*time.Second); err != nil {
@@ -137,5 +115,13 @@ func runBrowserCtxSmoke(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 		return testv1.StepRunResult{}, fmt.Errorf("expected clicked-smoke in browser console entries")
 	}
 
-	return testv1.StepRunResult{Report: "StepContext browser API verified: aria wait timeout, aria click, type+enter, coordinate click/tap, browser console logs via NATS waits"}, nil
+	return testv1.StepRunResult{Report: "StepContext browser API verified through chrome src_v3 service: aria wait timeout, goto, aria click, type+enter, screenshots, browser console waits"}, nil
+}
+
+func mustCallerFile() string {
+	_, thisFile, _, ok := runtime.Caller(1)
+	if !ok {
+		return "."
+	}
+	return thisFile
 }

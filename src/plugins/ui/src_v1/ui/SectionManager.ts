@@ -1,4 +1,11 @@
-import { HeaderConfig, SectionConfig, SectionOverlayConfig, VisualizationControl } from './types';
+import {
+  HeaderConfig,
+  SectionConfig,
+  SectionOverlayConfig,
+  VisualizationControl,
+  normalizePrimaryOverlayKind,
+  primaryOverlaySuffixes,
+} from './types';
 
 export class SectionManager {
   private configs = new Map<string, SectionConfig>();
@@ -65,6 +72,7 @@ export class SectionManager {
         if (this.debug) console.log(`[SectionManager] ctl.load() RESOLVED for #${sectionId}`);
         this.controls.set(sectionId, ctl);
         this.resumed.set(sectionId, false);
+        this.bindSectionOverlays(sectionId, cfg);
         if (this.debug) console.log(`[SectionManager] LOADED #${sectionId}`);
         if (this.debug) console.log(`[SectionManager] START #${sectionId}`);
         ctl.setVisible(false);
@@ -186,7 +194,7 @@ export class SectionManager {
     }
     const primaryEl = selectors.primary ? section.querySelector(selectors.primary) : null;
     if (primaryEl instanceof HTMLElement) {
-      primaryEl.setAttribute('data-overlay', selectors.primaryKind);
+      primaryEl.setAttribute('data-overlay', String(normalizePrimaryOverlayKind(selectors.primaryKind)));
       primaryEl.setAttribute('data-overlay-role', 'primary');
       primaryEl.setAttribute('data-overlay-section', sectionName);
       overlays.primary = primaryEl;
@@ -303,13 +311,16 @@ export class SectionManager {
       );
     }
     if (config.overlays) {
-      const kind = (config.overlays.primaryKind || '').trim();
+      const kind = String(normalizePrimaryOverlayKind(config.overlays.primaryKind || ''));
       if (kind === '') {
         throw new Error(`[SectionManager] section "${sectionId}" overlays.primaryKind is required`);
       }
-      if (!normalizedID.endsWith(`-${kind}`)) {
+      const allowedSuffixes = primaryOverlaySuffixes(kind);
+      if (!allowedSuffixes.some((suffix) => normalizedID.endsWith(`-${suffix}`))) {
         throw new Error(
-          `[SectionManager] section "${sectionId}" must end with "-${kind}" to match overlays.primaryKind="${kind}".`
+          `[SectionManager] section "${sectionId}" must end with one of ${allowedSuffixes
+            .map((suffix) => `"-${suffix}"`)
+            .join(', ')} to match overlays.primaryKind="${kind}".`
         );
       }
       const hasDeprecatedThumb = Object.prototype.hasOwnProperty.call(

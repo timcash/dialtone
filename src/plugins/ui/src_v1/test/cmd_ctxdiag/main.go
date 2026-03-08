@@ -17,17 +17,17 @@ func main() {
 	fs := flag.NewFlagSet("ui-src-v1-ctxdiag", flag.ExitOnError)
 	attachNode := fs.String("attach", "", "Attach to headed browser on mesh node")
 	targetURL := fs.String("url", "", "Browser target URL")
-	clicksPerSecond := fs.Float64("cps", 5, "Throttle UI clicks/taps in clicks per second")
+	actionsPerMinute := fs.Float64("apm", 300, "Throttle browser actions in actions per minute")
 	_ = fs.Parse(os.Args[1:])
 
 	attach := strings.TrimSpace(*attachNode)
 	url := strings.TrimSpace(*targetURL)
-	testv1.SetClicksPerSecond(*clicksPerSecond)
 	test.SetOptions(test.Options{
-		AttachNode:      attach,
-		TargetURL:       url,
-		ClicksPerSecond: *clicksPerSecond,
+		AttachNode:       attach,
+		TargetURL:        url,
+		ActionsPerMinute: *actionsPerMinute,
 	})
+	testv1.SetActionsPerMinute(*actionsPerMinute)
 	if attach != "" {
 		testv1.UpdateRuntimeConfig(func(cfg *testv1.RuntimeConfig) {
 			cfg.BrowserNode = attach

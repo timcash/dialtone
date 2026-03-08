@@ -4,19 +4,20 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
-	"dialtone/dev/plugins/chrome/src_v1/go"
+	chrome "dialtone/dev/plugins/chrome/src_v3"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
-	"github.com/chromedp/chromedp"
 	"github.com/nats-io/nats.go"
 )
 
@@ -64,13 +65,13 @@ func RunDev(opts DevOptions) error {
 	if _, err := os.Stat(opts.UIDir); os.IsNotExist(err) {
 		return fmt.Errorf("UI directory not found: %s", opts.UIDir)
 	}
-	uiTitle, err := chrome.ReadHTMLTitle(filepath.Join(opts.UIDir, "index.html"))
+	uiTitle, err := readHTMLTitle(filepath.Join(opts.UIDir, "index.html"))
 	if err != nil {
 		return err
 	}
 
 	if err := WaitForPort(opts.DevPort, 600*time.Millisecond); err == nil {
-		matched, probeErr := chrome.DevServerMatchesVersion(opts.DevPort, uiTitle)
+		matched, probeErr := devServerMatchesVersion(opts.DevPort, uiTitle)
 		if probeErr != nil {
 			return fmt.Errorf("port %d is in use and could not verify existing dev server: %w", opts.DevPort, probeErr)
 		}
@@ -197,21 +198,12 @@ func StartDevBrowser(opts DevOptions, logOut io.Writer, devURL string, devLogger
 		fmt.Fprintf(logOut, format+"\n", args...)
 	}
 
-	browserMode := os.Getenv(opts.BrowserModeEnvVar)
-	if browserMode == "regular" {
-		if err := chrome.OpenInRegularChrome(devURL); err == nil {
-			logf("   [DEV] Opened URL in regular browser profile: %s", devURL)
-			return nil, nil
-		}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv(opts.BrowserModeEnvVar)), "regular") {
+		logf("   [DEV] %s=regular is no longer supported; using chrome src_v3 service commands only.", opts.BrowserModeEnvVar)
 	}
-
-	logf("   [DEV] Starting attachable debug-profile browser session.")
-	if strings.TrimSpace(RuntimeConfigSnapshot().BrowserNode) == "" {
-		if err := EnsureAttachableBrowser(opts, logf, devURL); err != nil {
-			return nil, err
-		}
-	} else {
-		logf("   [DEV] Remote browser node configured; skipping local debug-profile bootstrap.")
+	logf("   [DEV] Opening dev URL through chrome src_v3 service commands.")
+	if err := EnsureAttachableBrowser(opts, logf, devURL); err != nil {
+		return nil, err
 	}
 
 	s, err := StartBrowser(BrowserOptions{
@@ -246,33 +238,56 @@ func StartDevBrowser(opts DevOptions, logOut io.Writer, devURL string, devLogger
 		}
 	}
 
-	// Default mobile emulation
-	if err := chromedp.Run(s.Context(), chromedp.Tasks{
-		// Keep a fixed viewport only; avoid touch/mobile emulation-induced viewport shifts.
-		chromedp.EmulateViewport(393, 852),
-	}); err != nil {
-		logf("   [DEV] Warning: failed to apply mobile emulation: %v", err)
-	}
-
 	return s, nil
 }
 
 func EnsureAttachableBrowser(opts DevOptions, logf func(string, ...any), url string) error {
-	// Standard profile debug port.
-	if chrome.HasReachableDevtoolsWebSocket(chrome.DefaultDebugPort) {
+	host := strings.TrimSpace(RuntimeConfigSnapshot().BrowserNode)
+	if host == "" {
+		return fmt.Errorf("browser service host is required; set --attach and start chrome src_v3 on that host")
+	}
+	resp, err := chrome.SendCommandByHost(host, chrome.CommandRequest{
+		Command: "status",
+		Role:    strings.TrimSpace(opts.Role),
+	})
+	if err == nil && resp != nil && resp.BrowserPID > 0 && !resp.Unhealthy {
 		return nil
 	}
-	if err := chrome.RelaunchProfileChromeDebug(url, opts.Role); err != nil {
-		return err
+	_, err = chrome.SendCommandByHost(host, chrome.CommandRequest{
+		Command: "open",
+		Role:    strings.TrimSpace(opts.Role),
+		URL:     strings.TrimSpace(url),
+	})
+	return err
+}
+
+func readHTMLTitle(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if chrome.HasReachableDevtoolsWebSocket(chrome.DefaultDebugPort) {
-			return nil
-		}
-		time.Sleep(500 * time.Millisecond)
+	m := regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`).FindSubmatch(raw)
+	if len(m) != 2 {
+		return "", fmt.Errorf("missing title in %s", path)
 	}
-	return fmt.Errorf("timed out waiting for debug browser on :%d", chrome.DefaultDebugPort)
+	return strings.TrimSpace(string(m[1])), nil
+}
+
+func devServerMatchesVersion(port int, expectedTitle string) (bool, error) {
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d", port))
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return false, err
+	}
+	m := regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`).FindSubmatch(raw)
+	if len(m) != 2 {
+		return false, fmt.Errorf("dev server response missing title")
+	}
+	return strings.TrimSpace(string(m[1])) == strings.TrimSpace(expectedTitle), nil
 }
 
 type devNATSLogger struct {

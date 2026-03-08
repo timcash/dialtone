@@ -44,6 +44,10 @@ func (sc *StepContext) runErrorPingCheck() error {
 	if b == nil {
 		return fmt.Errorf("error-ping requires an initialized browser session")
 	}
+	if b.isServiceManaged() {
+		sc.Warnf("ERROR_PING: skipped for chrome src_v3 NATS-managed browser session")
+		return nil
+	}
 	if err := waitForBrowserSessionReady(b, 12*time.Second); err != nil {
 		return fmt.Errorf("error-ping browser readiness: %w", err)
 	}

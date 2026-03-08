@@ -195,7 +195,7 @@ func UploadNodeFile(target, localPath, remotePath string, opts CommandOptions) e
 		return err
 	}
 	if shouldUseLocalPowerShell(node) {
-		return fmt.Errorf("mesh upload for %s via powershell transport is not supported", node.Name)
+		return uploadViaLocalPowerShell(localPath, remotePath)
 	}
 	user := strings.TrimSpace(opts.User)
 	if user == "" {
@@ -217,6 +217,41 @@ func UploadNodeFile(target, localPath, remotePath string, opts CommandOptions) e
 		return fmt.Errorf("upload failed on %s: %w", node.Name, err)
 	}
 	return nil
+}
+
+func uploadViaLocalPowerShell(localPath, remotePath string) error {
+	localPath = strings.TrimSpace(localPath)
+	remotePath = strings.TrimSpace(remotePath)
+	if localPath == "" || remotePath == "" {
+		return fmt.Errorf("local and remote paths are required")
+	}
+	src := toWindowsPath(localPath)
+	dst := strings.ReplaceAll(remotePath, "/", "\\")
+	ps := fmt.Sprintf(`$src=%s; $dst=%s; $dir=Split-Path -Parent $dst; if($dir){ New-Item -ItemType Directory -Path $dir -Force | Out-Null }; Copy-Item -LiteralPath $src -Destination $dst -Force`, psSingleQuoted(src), psSingleQuoted(dst))
+	if _, err := runPowerShellCommand(ps); err != nil {
+		return err
+	}
+	return nil
+}
+
+func toWindowsPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if len(path) >= 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/') {
+		return strings.ReplaceAll(path, "/", "\\")
+	}
+	if out, err := execCommandFunc("wslpath", "-w", path).Output(); err == nil {
+		if win := strings.TrimSpace(string(out)); win != "" {
+			return win
+		}
+	}
+	return strings.ReplaceAll(path, "/", "\\")
+}
+
+func psSingleQuoted(v string) string {
+	return "'" + strings.ReplaceAll(v, "'", "''") + "'"
 }
 
 func dialMeshNode(node MeshNode, user, port, password string) (string, *ssh.Client, error) {

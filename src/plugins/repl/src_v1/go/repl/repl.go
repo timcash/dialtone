@@ -10,7 +10,9 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -18,7 +20,6 @@ import (
 	"syscall"
 	"time"
 
-	chrome "dialtone/dev/plugins/chrome/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	"dialtone/dev/plugins/proc/src_v1/go/proc"
 	tsnetlib "dialtone/dev/plugins/tsnet/src_v1/go"
@@ -627,7 +628,7 @@ func RunStatus(args []string) error {
 		st.TSAuthKey = cfg.AuthKeyPresent
 		st.TSApiKey = cfg.APIKeyPresent
 	}
-	st.ChromePath = strings.TrimSpace(chrome.FindChromePath())
+	st.ChromePath = findChromePath()
 	st.ChromeFound = st.ChromePath != ""
 
 	logs.Raw("REPL status")
@@ -658,6 +659,49 @@ func DefaultPromptName() string {
 		return "USER-1"
 	}
 	return host
+}
+
+func findChromePath() string {
+	candidates := []string{}
+	switch runtime.GOOS {
+	case "darwin":
+		candidates = append(candidates,
+			"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+			"/Applications/Chromium.app/Contents/MacOS/Chromium",
+		)
+	case "windows":
+		programFiles := strings.TrimSpace(os.Getenv("ProgramFiles"))
+		programFilesX86 := strings.TrimSpace(os.Getenv("ProgramFiles(x86)"))
+		localAppData := strings.TrimSpace(os.Getenv("LocalAppData"))
+		candidates = append(candidates,
+			filepath.Join(programFiles, "Google", "Chrome", "Application", "chrome.exe"),
+			filepath.Join(programFilesX86, "Google", "Chrome", "Application", "chrome.exe"),
+			filepath.Join(localAppData, "Google", "Chrome", "Application", "chrome.exe"),
+			filepath.Join(programFiles, "Chromium", "Application", "chrome.exe"),
+		)
+	default:
+		candidates = append(candidates,
+			"/usr/bin/google-chrome",
+			"/usr/bin/google-chrome-stable",
+			"/usr/bin/chromium",
+			"/usr/bin/chromium-browser",
+		)
+	}
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	for _, name := range []string{"google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome"} {
+		if path, err := exec.LookPath(name); err == nil {
+			return strings.TrimSpace(path)
+		}
+	}
+	return ""
 }
 
 func runLocalSession(in io.Reader, out io.Writer, promptName string, logFn func(category, msg string)) error {
