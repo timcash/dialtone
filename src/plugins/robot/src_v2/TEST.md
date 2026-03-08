@@ -1,137 +1,127 @@
 # Test Report: robot-src-v2
 
-- **Date**: Sat, 07 Mar 2026 18:32:40 PST
-- **Total Duration**: 6.221486277s
+- **Date**: Sun, 08 Mar 2026 13:12:06 PDT
+- **Total Duration**: 4.606626225s
 
 ## Summary
 
-- **Steps**: 5 / 5 passed
+- **Steps**: 1 / 1 passed
 - **Status**: PASSED
 
 ## Details
 
-### 1. ✅ 01-build-robot-v2-binary
+### 1. ✅ 04-three-system-arm-cli
 
-- **Duration**: 315.641801ms
-- **Report**: binary build verified
-
-#### Logs
-
-```text
-INFO: [ACTION] build robot src_v2 server binary
-INFO: build complete
-INFO: report: binary build verified
-PASS: [TEST][PASS] [STEP:01-build-robot-v2-binary] report: binary build verified
-```
-
-#### Browser Logs
-
-```text
-<empty>
-```
-
----
-
-### 2. ✅ 02-server-health-and-root-behavior
-
-- **Duration**: 1.035842887s
-- **Report**: server runtime smoke verified
-
-#### Logs
-
-```text
-INFO: [ACTION] probe /health on http://127.0.0.1:18082
-INFO: health ok
-INFO: [ACTION] probe / expecting 200 (ui dist present) or 503 (scaffold)
-INFO: root behavior verified
-INFO: [ACTION] probe /api/init scaffold payload
-INFO: api init returned wsPath
-INFO: [ACTION] websocket dial /natsws
-INFO: natsws websocket connected
-INFO: [ACTION] probe /stream scaffold behavior
-INFO: stream returned 503
-INFO: [ACTION] probe /api/integration-health scaffold payload
-INFO: integration health reported degraded
-INFO: report: server runtime smoke verified
-PASS: [TEST][PASS] [STEP:02-server-health-and-root-behavior] report: server runtime smoke verified
-```
-
-#### Browser Logs
-
-```text
-<empty>
-```
-
----
-
-### 3. ✅ 03-manifest-has-required-sync-artifacts
-
-- **Duration**: 560.226µs
-- **Report**: manifest sync artifact contract verified
-
-#### Logs
-
-```text
-INFO: manifest contains required artifact keys
-INFO: report: manifest sync artifact contract verified
-PASS: [TEST][PASS] [STEP:03-manifest-has-required-sync-artifacts] report: manifest sync artifact contract verified
-```
-
-#### Browser Logs
-
-```text
-<empty>
-```
-
----
-
-### 4. ✅ 04-local-ui-mock-e2e-smoke
-
-- **Duration**: 3.616000078s
-- **Report**: local UI mock E2E smoke verified
+- **Duration**: 4.591391497s
+- **Report**: three system arm CLI flow verified
 
 #### Logs
 
 ```text
 INFO: ui build complete
-INFO: ui root returned 200
 WARN: ERROR_PING: skipped for chrome src_v3 NATS-managed browser session
-INFO: browser ui checks passed
-INFO: mock nats publish ok
-INFO: report: local UI mock E2E smoke verified
-PASS: [TEST][PASS] [STEP:04-local-ui-mock-e2e-smoke] report: local UI mock E2E smoke verified
+INFO: three arm command published
+INFO: report: three system arm CLI flow verified
+PASS: [TEST][PASS] [STEP:04-three-system-arm-cli] report: three system arm CLI flow verified
 ```
 
 #### Browser Logs
 
 ```text
-<empty>
+INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #robot-video-video"
+INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #robot-xterm-xterm"
+INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #robot-video-video"
+INFO: CONSOLE:log: "[TEST_ACTION] click aria=Toggle Global Menu"
+INFO: CONSOLE:log: "[SectionManager] RESUME #robot-three-stage"
+INFO: CONSOLE:log: "[SectionManager] RESUME #robot-xterm-xterm"
+INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #robot-xterm-xterm"
+INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #robot-video-video"
+INFO: CONSOLE:log: "[SectionManager] PAUSE #robot-video-video"
+INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #robot-xterm-xterm"
+INFO: CONSOLE:log: "[TEST_ACTION] click aria=Navigate Settings"
+INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #robot-settings-button-list"
+INFO: CONSOLE:log: "[SectionManager] PAUSE #robot-xterm-xterm"
+INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #robot-settings-button-list"
+INFO: CONSOLE:log: "[TEST_ACTION] click aria=Navigate Three"
+INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #robot-three-stage"
+INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #robot-settings-button-list"
+INFO: CONSOLE:log: "[SectionManager] PAUSE #robot-settings-button-list"
+INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #robot-three-stage"
+INFO: CONSOLE:log: "[TEST_ACTION] click aria=Three Mode"
+INFO: CONSOLE:log: "[TEST_ACTION] click aria=Three Thumb 1"
+INFO: CONSOLE:log: "[NATS] Publishing rover.command cmd=drive_up"
+INFO: CONSOLE:log: "[TEST_ACTION] click aria=Navigate Terminal"
+INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #robot-three-stage"
+INFO: CONSOLE:log: "[SectionManager] PAUSE #robot-three-stage"
+INFO: CONSOLE:log: "[vite] connecting..."
+INFO: CONSOLE:log: "[vite] connected."
+INFO: CONSOLE:log: "[SectionManager] LOADING #robot-three-stage"
+INFO: CONSOLE:log: "[SW] Unregistering stale worker: http://127.0.0.1:3000/"
+INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #robot-three-stage"
+INFO: CONSOLE:log: "[SectionManager] LOADED #robot-three-stage"
+INFO: CONSOLE:log: "[SectionManager] START #robot-three-stage"
+INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #robot-three-stage"
+INFO: CONSOLE:log: "[NATS] Connecting to ws://127.0.0.1:3000/natsws..."
+INFO: CONSOLE:log: "[NATS] Connected."
+INFO: CONSOLE:log: "[NATS] Publishing rover.command cmd=arm"
+INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #robot-hero-stage"
+INFO: CONSOLE:log: "[SectionManager] LOADING #robot-hero-stage"
+INFO: CONSOLE:log: "[NATS] Connecting to ws://127.0.0.1:18083/natsws..."
+INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #robot-hero-stage"
+INFO: CONSOLE:log: "[SectionManager] LOADED #robot-hero-stage"
+INFO: CONSOLE:log: "[SectionManager] START #robot-hero-stage"
+INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #robot-hero-stage"
+INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #robot-hero-stage"
+INFO: CONSOLE:log: "[SectionManager] RESUME #robot-hero-stage"
+INFO: CONSOLE:log: "[TEST_ACTION] click aria=Navigate Docs"
+INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #robot-docs-docs"
+INFO: CONSOLE:log: "[SectionManager] LOADING #robot-docs-docs"
+INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #robot-docs-docs"
+INFO: CONSOLE:log: "[SectionManager] LOADED #robot-docs-docs"
+INFO: CONSOLE:log: "[SectionManager] START #robot-docs-docs"
+INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #robot-docs-docs"
+INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #robot-hero-stage"
+INFO: CONSOLE:log: "[SectionManager] PAUSE #robot-hero-stage"
+INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #robot-docs-docs"
+INFO: CONSOLE:log: "[SectionManager] RESUME #robot-docs-docs"
+INFO: CONSOLE:log: "[TEST_ACTION] click aria=Navigate Telemetry"
+INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #robot-table-table"
+INFO: CONSOLE:log: "[SectionManager] LOADING #robot-table-table"
+INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #robot-table-table"
+INFO: CONSOLE:log: "[SectionManager] LOADED #robot-table-table"
+INFO: CONSOLE:log: "[SectionManager] START #robot-table-table"
+INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #robot-table-table"
+INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #robot-docs-docs"
+INFO: CONSOLE:log: "[SectionManager] PAUSE #robot-docs-docs"
+INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #robot-table-table"
+INFO: CONSOLE:log: "[SectionManager] RESUME #robot-table-table"
+INFO: CONSOLE:log: "[SectionManager] NAVIGATE AWAY #robot-table-table"
+INFO: CONSOLE:log: "[SectionManager] PAUSE #robot-table-table"
+INFO: CONSOLE:log: "[SectionManager] LOADING #robot-xterm-xterm"
+INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #robot-xterm-xterm"
+INFO: CONSOLE:log: "[SectionManager] LOADED #robot-xterm-xterm"
+INFO: CONSOLE:log: "[SectionManager] START #robot-xterm-xterm"
+INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #robot-xterm-xterm"
+INFO: CONSOLE:log: "[TEST_ACTION] click aria=Navigate Camera"
+INFO: CONSOLE:log: "[SectionManager] LOADING #robot-video-video"
+INFO: CONSOLE:log: "[Video] Switching to feed: Primary"
+INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #robot-video-video"
+INFO: CONSOLE:log: "[SectionManager] LOADED #robot-video-video"
+INFO: CONSOLE:log: "[SectionManager] START #robot-video-video"
+INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #robot-video-video"
+INFO: CONSOLE:log: "[SectionManager] RESUME #robot-video-video"
+INFO: CONSOLE:log: "[SectionManager] LOADING #robot-settings-button-list"
+INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #robot-settings-button-list"
+INFO: CONSOLE:log: "[SectionManager] LOADED #robot-settings-button-list"
+INFO: CONSOLE:log: "[SectionManager] START #robot-settings-button-list"
+INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #robot-settings-button-list"
+INFO: CONSOLE:log: "[SectionManager] RESUME #robot-settings-button-list"
 ```
 
 #### Screenshots
 
-![auto_04-local-ui-mock-e2e-smoke.png](screenshots/auto_04-local-ui-mock-e2e-smoke.png)
-
----
-
-### 5. ✅ 05-autoswap-compose-run-smoke
-
-- **Duration**: 1.250535134s
-- **Report**: autoswap manifest composition run verified
-
-#### Logs
-
-```text
-INFO: autoswap compose run passed
-INFO: report: autoswap manifest composition run verified
-PASS: [TEST][PASS] [STEP:05-autoswap-compose-run-smoke] report: autoswap manifest composition run verified
-```
-
-#### Browser Logs
-
-```text
-<empty>
-```
+![auto_04-three-system-arm-cli.png](screenshots/auto_04-three-system-arm-cli.png)
+![three_system_arm.png](screenshots/three_system_arm.png)
 
 ---
 
@@ -140,7 +130,13 @@ PASS: [TEST][PASS] [STEP:05-autoswap-compose-run-smoke] report: autoswap manifes
 ## Chrome Report
 
 - hostnode: `legion`
-- chrome_count: `unknown`
-- error: `remote browser inventory on legion failed: powershell command failed: exit status 1`
+- chrome_count: `4`
+
+| PID | ROLE | PORT |
+| --- | --- | --- |
+| 18892 | `unlabeled` | 19464 |
+| 23912 | `unlabeled` | 19464 |
+| 29344 | `robot-test` | 19464 |
+| 29508 | `unlabeled` | 19464 |
 
 <!-- DIALTONE_CHROME_REPORT_END -->

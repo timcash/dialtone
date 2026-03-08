@@ -192,6 +192,19 @@ func (d *daemonState) handle(req commandRequest) commandResponse {
 			resp.Error = err.Error()
 			return d.refreshResponse(resp)
 		}
+	case "get-aria-attr":
+		if err := d.ensureBrowser(); err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return resp
+		}
+		value, err := d.readAriaLabelAttr(req.AriaLabel, req.Attr)
+		if err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return d.refreshResponse(resp)
+		}
+		resp.Value = value
 	case "set-html":
 		if err := d.ensureBrowser(); err != nil {
 			resp.OK = false

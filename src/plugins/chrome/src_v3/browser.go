@@ -2,20 +2,15 @@ package src_v3
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
-	"github.com/chromedp/cdproto/page"
 	cdruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
@@ -250,169 +245,6 @@ func shouldRecreateManagedTab(err error) bool {
 		strings.Contains(msg, "target closed")
 }
 
-func (d *daemonState) navigateManaged(rawURL string) error {
-	url := normalizeURL(rawURL)
-	return d.withManagedContext(30*time.Second, func(ctx context.Context) error {
-		if err := chromedp.Run(ctx, chromedp.Navigate(url)); err != nil {
-			return err
-		}
-		d.mu.Lock()
-		d.currentURL = url
-		d.mu.Unlock()
-		return nil
-	})
-}
-
-func (d *daemonState) clickAriaLabel(label string) error {
-	selector := ariaSelector(label)
-	return d.withManagedContext(15*time.Second, func(ctx context.Context) error {
-		return chromedp.Run(ctx,
-			chromedp.WaitVisible(selector, chromedp.ByQuery),
-			chromedp.Click(selector, chromedp.ByQuery),
-		)
-	})
-}
-
-func (d *daemonState) pressEnterAriaLabel(label string) error {
-	selector := ariaSelector(label)
-	return d.withManagedContext(15*time.Second, func(ctx context.Context) error {
-		return chromedp.Run(ctx,
-			chromedp.WaitVisible(selector, chromedp.ByQuery),
-			chromedp.SendKeys(selector, "\r", chromedp.ByQuery),
-		)
-	})
-}
-
-func (d *daemonState) typeAriaLabel(label, value string) error {
-	selector := ariaSelector(label)
-	selectorJSON, err := json.Marshal(selector)
-	if err != nil {
-		return err
-	}
-	valueJSON, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	script := fmt.Sprintf(`(() => {
-		const el = document.querySelector(%s);
-		if (!el) return "missing";
-		el.focus();
-		el.value = %s;
-		el.dispatchEvent(new Event("input", { bubbles: true }));
-		el.dispatchEvent(new Event("change", { bubbles: true }));
-		return "ok";
-	})()`, string(selectorJSON), string(valueJSON))
-	return d.withManagedContext(15*time.Second, func(ctx context.Context) error {
-		var result string
-		if err := chromedp.Run(ctx,
-			chromedp.WaitVisible(selector, chromedp.ByQuery),
-			chromedp.Evaluate(script, &result),
-		); err != nil {
-			return err
-		}
-		if result != "ok" {
-			return fmt.Errorf("type target %q not found", label)
-		}
-		return nil
-	})
-}
-
-func (d *daemonState) waitForAriaLabel(label string, timeout time.Duration) error {
-	selector := ariaSelector(label)
-	if timeout <= 0 {
-		timeout = 5 * time.Second
-	}
-	return d.withManagedContext(timeout, func(ctx context.Context) error {
-		return chromedp.Run(ctx, chromedp.WaitVisible(selector, chromedp.ByQuery))
-	})
-}
-
-func (d *daemonState) waitForAriaLabelAttrEquals(label, attr, expected string, timeout time.Duration) error {
-	if strings.TrimSpace(attr) == "" {
-		return fmt.Errorf("wait-aria-attr requires attr")
-	}
-	selector := ariaSelector(label)
-	if timeout <= 0 {
-		timeout = 5 * time.Second
-	}
-	return d.withManagedContext(timeout, func(ctx context.Context) error {
-		deadline := time.Now().Add(timeout)
-		for time.Now().Before(deadline) {
-			var actual string
-			var ok bool
-			if err := chromedp.Run(ctx, chromedp.AttributeValue(selector, attr, &actual, &ok, chromedp.ByQuery)); err == nil && ok && actual == expected {
-				return nil
-			}
-			time.Sleep(120 * time.Millisecond)
-		}
-		return fmt.Errorf("timed out waiting for aria-label %q attr %q=%q", label, attr, expected)
-	})
-}
-
-func (d *daemonState) setManagedHTML(markup string) error {
-	if err := d.navigateManaged("about:blank"); err != nil {
-		return err
-	}
-	raw, err := json.Marshal(markup)
-	if err != nil {
-		return err
-	}
-	script := fmt.Sprintf(`document.open(); document.write(%s); document.close();`, string(raw))
-	return d.withManagedContext(15*time.Second, func(ctx context.Context) error {
-		return chromedp.Run(ctx, chromedp.Evaluate(script, nil))
-	})
-}
-
-func (d *daemonState) waitForConsoleContains(substr string, timeout time.Duration) ([]string, error) {
-	substr = strings.TrimSpace(substr)
-	if substr == "" {
-		return nil, fmt.Errorf("wait-log requires contains")
-	}
-	if timeout <= 0 {
-		timeout = 5 * time.Second
-	}
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		d.mu.Lock()
-		lines := append([]string(nil), d.consoleLines...)
-		d.mu.Unlock()
-		for _, line := range lines {
-			if strings.Contains(line, substr) {
-				return lines, nil
-			}
-		}
-		time.Sleep(120 * time.Millisecond)
-	}
-	return nil, fmt.Errorf("timed out waiting for console log containing %q", substr)
-}
-
-func (d *daemonState) consoleSnapshot() []string {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return append([]string(nil), d.consoleLines...)
-}
-
-func (d *daemonState) captureScreenshotB64() (string, error) {
-	var buf []byte
-	err := d.withManagedContext(20*time.Second, func(ctx context.Context) error {
-		return chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
-			data, err := page.CaptureScreenshot().
-				WithCaptureBeyondViewport(false).
-				WithFromSurface(true).
-				Do(ctx)
-			if err != nil {
-				return err
-			}
-			buf = data
-			return nil
-		}))
-	})
-	if err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(buf), nil
-}
-
 func (d *daemonState) openNewTab(rawURL string) error {
 	url := normalizeURL(rawURL)
 	if url == "" {
@@ -523,17 +355,6 @@ func (d *daemonState) currentURLFromTabs(tabs []pageInfo) string {
 	return ""
 }
 
-func (d *daemonState) readManagedURL() (string, error) {
-	var current string
-	err := d.withManagedContext(10*time.Second, func(ctx context.Context) error {
-		return chromedp.Run(ctx, chromedp.Location(&current))
-	})
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(current), nil
-}
-
 func (d *daemonState) appendConsoleLine(line string) {
 	line = strings.TrimSpace(line)
 	if line == "" {
@@ -547,145 +368,8 @@ func (d *daemonState) appendConsoleLine(line string) {
 	}
 }
 
-func ariaSelector(label string) string {
-	return fmt.Sprintf(`[aria-label=%q]`, strings.TrimSpace(label))
-}
-
-func findChromePath() (string, error) {
-	if runtime.GOOS == "windows" {
-		candidates := []string{
-			filepath.Join(os.Getenv("ProgramFiles"), "Google", "Chrome", "Application", "chrome.exe"),
-			filepath.Join(os.Getenv("ProgramFiles(x86)"), "Google", "Chrome", "Application", "chrome.exe"),
-		}
-		for _, candidate := range candidates {
-			if strings.TrimSpace(candidate) != "" {
-				if _, err := os.Stat(candidate); err == nil {
-					return candidate, nil
-				}
-			}
-		}
-		return "", fmt.Errorf("chrome.exe not found")
-	}
-	if p, err := exec.LookPath("google-chrome"); err == nil {
-		return p, nil
-	}
-	if p, err := exec.LookPath("chromium"); err == nil {
-		return p, nil
-	}
-	return "", fmt.Errorf("chrome not found in PATH")
-}
-
-func waitForWebSocket(port int, timeout time.Duration) (string, error) {
-	deadline := time.Now().Add(timeout)
-	client := &http.Client{Timeout: 1200 * time.Millisecond}
-	for time.Now().Before(deadline) {
-		resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/json/version", port))
-		if err == nil {
-			var payload struct {
-				WS string `json:"webSocketDebuggerUrl"`
-			}
-			if err := json.NewDecoder(resp.Body).Decode(&payload); err == nil {
-				_ = resp.Body.Close()
-				if strings.TrimSpace(payload.WS) != "" {
-					return strings.TrimSpace(payload.WS), nil
-				}
-			}
-			_ = resp.Body.Close()
-		}
-		time.Sleep(250 * time.Millisecond)
-	}
-	return "", fmt.Errorf("timed out waiting for chrome debug websocket on port %d", port)
-}
-
-func detectBrowserPID(port int, role, profileDir string) (int, error) {
-	switch runtime.GOOS {
-	case "windows":
-		for i := 0; i < 5; i++ {
-			script := fmt.Sprintf(`$port=%d; `+
-				`$listener=$null; `+
-				`try { $listener=Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort $port -State Listen -ErrorAction Stop | Select-Object -First 1 -ExpandProperty OwningProcess } catch {}; `+
-				`if(-not $listener){ try { $listener=Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction Stop | Select-Object -First 1 -ExpandProperty OwningProcess } catch {} }; `+
-				`if($listener){ Write-Output $listener; exit 0 }; `+
-				`$role=%s; $profile=%s; `+
-				`$procs=Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'chrome.exe' -and $_.CommandLine -like ('*--remote-debugging-port=' + $port + '*') -and ($_.CommandLine -like ('*--dialtone-role=' + $role + '*') -or $_.CommandLine -like ('*' + $profile + '*')) } | Select-Object -First 1 -ExpandProperty ProcessId; `+
-				`if($procs){ Write-Output $procs }`, port, psQuote(role), psQuote(windowsPath(profileDir)))
-			out, err := exec.Command("powershell", "-NoProfile", "-Command", script).CombinedOutput()
-			if err == nil {
-				if n, convErr := strconv.Atoi(strings.TrimSpace(string(out))); convErr == nil && n > 0 {
-					return n, nil
-				}
-			}
-			time.Sleep(500 * time.Millisecond)
-		}
-		return 0, fmt.Errorf("chrome pid not found for port %d", port)
-	default:
-		out, err := exec.Command("bash", "-lc", fmt.Sprintf("ps -eo pid,args | grep '[c]hrome' | grep -- '--remote-debugging-port=%d' | grep -- '--dialtone-role=%s' | head -n1 | awk '{print $1}'", port, shellEscapeGrep(role))).Output()
-		if err != nil {
-			return 0, err
-		}
-		n, err := strconv.Atoi(strings.TrimSpace(string(out)))
-		if err != nil || n <= 0 {
-			return 0, fmt.Errorf("chrome pid not found")
-		}
-		return n, nil
-	}
-}
-
-func cleanupChromeProfileLocks(profileDir string) error {
-	lockNames := []string{"SingletonLock", "SingletonCookie", "SingletonSocket"}
-	var errs []string
-	for _, name := range lockNames {
-		path := filepath.Join(profileDir, name)
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			errs = append(errs, err.Error())
-		}
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf(strings.Join(errs, "; "))
-	}
-	return nil
-}
-
-func startDetachedWindowsProcess(exePath string, args []string) (int, error) {
-	quotedArgs := make([]string, 0, len(args))
-	for _, arg := range args {
-		quotedArgs = append(quotedArgs, psQuote(arg))
-	}
-	script := fmt.Sprintf("$p = Start-Process -FilePath %s -ArgumentList @(%s) -WindowStyle Hidden -PassThru; $p.Id",
-		psQuote(windowsPath(exePath)),
-		strings.Join(quotedArgs, ","),
-	)
-	out, err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput()
-	if err != nil {
-		return 0, fmt.Errorf("start detached chrome failed: %w (%s)", err, strings.TrimSpace(string(out)))
-	}
-	pid, convErr := strconv.Atoi(strings.TrimSpace(string(out)))
-	if convErr != nil {
-		return 0, fmt.Errorf("unable to parse detached chrome pid from %q: %w", strings.TrimSpace(string(out)), convErr)
-	}
-	return pid, nil
-}
-
-func killPID(pid int) error {
-	if pid <= 0 {
-		return nil
-	}
-	if runtime.GOOS == "windows" {
-		return exec.Command("taskkill", "/F", "/PID", strconv.Itoa(pid)).Run()
-	}
-	return exec.Command("kill", "-9", strconv.Itoa(pid)).Run()
-}
-
-func normalizeURL(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	if strings.Contains(raw, "://") ||
-		strings.HasPrefix(raw, "about:") ||
-		strings.HasPrefix(raw, "data:") ||
-		strings.HasPrefix(raw, "file:") {
-		return raw
-	}
-	return "https://" + raw
+func (d *daemonState) consoleSnapshot() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]string(nil), d.consoleLines...)
 }

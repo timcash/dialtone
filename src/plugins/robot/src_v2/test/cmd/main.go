@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
+	chromev3 "dialtone/dev/plugins/chrome/src_v3"
 	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	buildbinary "dialtone/dev/plugins/robot/src_v2/test/01_build_binary"
@@ -32,7 +33,7 @@ func main() {
 	}
 	commonBindings := testv1.BindCommonTestFlags(fs, testv1.CommonTestCLIOptions{
 		AttachNode:       defaultAttachNode,
-		AttachRole:       "robot-dev",
+		AttachRole:       "robot-test",
 		ActionsPerMinute: 300,
 	})
 	if err := fs.Parse(os.Args[1:]); err != nil {
@@ -48,6 +49,13 @@ func main() {
 		os.Exit(1)
 	}
 	commonOpts.ApplyRuntimeConfig()
+	if host := strings.TrimSpace(commonOpts.AttachNode); host != "" {
+		role := strings.TrimSpace(commonOpts.AttachRole)
+		if _, err := chromev3.EnsureRemoteServiceByHost(host, role, false); err != nil {
+			logs.Error("robot src_v2 ensure remote chrome role failed: %v", err)
+			os.Exit(1)
+		}
+	}
 	cleanupRobotTestServers()
 
 	reg := testv1.NewRegistry()
@@ -61,14 +69,14 @@ func main() {
 	}
 
 	suiteOpts := commonOpts.ApplySuiteOptions(testv1.SuiteOptions{
-		Version:              "robot-src-v2",
-		RepoRoot:             rt.RepoRoot,
-		NATSURL:              "nats://127.0.0.1:4222",
-		NATSSubject:          "logs.test.robot-src-v2",
-		AutoStartNATS:        true,
-		ReportPath:           "plugins/robot/src_v2/test/TEST.md",
-		LogPath:              "plugins/robot/src_v2/test/test.log",
-		ErrorLogPath:         "plugins/robot/src_v2/test/error.log",
+		Version:               "robot-src-v2",
+		RepoRoot:              rt.RepoRoot,
+		NATSURL:               "nats://127.0.0.1:4222",
+		NATSSubject:           "logs.test.robot-src-v2",
+		AutoStartNATS:         true,
+		ReportPath:            "plugins/robot/src_v2/test/TEST.md",
+		LogPath:               "plugins/robot/src_v2/test/test.log",
+		ErrorLogPath:          "plugins/robot/src_v2/test/error.log",
 		PreserveSharedBrowser: true,
 		SkipBrowserCleanup:    true,
 	})

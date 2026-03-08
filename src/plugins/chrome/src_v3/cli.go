@@ -56,6 +56,12 @@ func Run(args []string) error {
 		return handleAriaCommand("click-aria", args[1:])
 	case "type-aria":
 		return handleAriaCommand("type-aria", args[1:])
+	case "wait-aria":
+		return handleAriaWaitCommand("wait-aria", args[1:])
+	case "wait-aria-attr":
+		return handleAriaWaitCommand("wait-aria-attr", args[1:])
+	case "get-aria-attr":
+		return handleAriaGetAttrCommand(args[1:])
 	case "set-html":
 		return handleSetHTMLCommand(args[1:])
 	case "wait-log":
@@ -98,6 +104,9 @@ func printUsage() {
 	logs.Info("  close --host <host>")
 	logs.Info("  click-aria --host <host> --label <aria-label>")
 	logs.Info("  type-aria --host <host> --label <aria-label> --value <text>")
+	logs.Info("  wait-aria --host <host> --label <aria-label> [--timeout-ms 5000]")
+	logs.Info("  wait-aria-attr --host <host> --label <aria-label> --attr <name> --expected <value> [--timeout-ms 5000]")
+	logs.Info("  get-aria-attr --host <host> --label <aria-label> --attr <name>")
 	logs.Info("  set-html --host <host> --value <html>")
 	logs.Info("  wait-log --host <host> --contains <text> [--timeout-ms 5000]")
 	logs.Info("  console --host <host>")
@@ -117,25 +126,6 @@ func buildLocalBinary() error {
 	return buildBinaryFor(filepath.Join("..", "bin", binaryName(runtime.GOOS, runtime.GOARCH)), runtime.GOOS, runtime.GOARCH)
 }
 
-func buildBinaryFor(outPath, goos, goarch string) error {
-	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
-	if goBin == "" {
-		goBin = "go"
-	}
-	if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil {
-		return err
-	}
-	cmd := exec.Command(goBin, "build", "-o", outPath, "./plugins/chrome/scaffold/main.go")
-	cmd.Dir = resolveSrcRoot()
-	cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch, "CGO_ENABLED=0")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("go build failed: %w (%s)", err, strings.TrimSpace(string(out)))
-	}
-	logs.Info("chrome src_v3 build ok: %s", outPath)
-	return nil
-}
-
 func handleDeploy(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 deploy", flag.ExitOnError)
 	host := fs.String("host", "", "Mesh host")
@@ -149,35 +139,7 @@ func handleDeploy(args []string) error {
 	if err != nil {
 		return err
 	}
-	goos := mapNodeGOOS(node.OS)
-	goarch := detectRemoteGOARCH(node)
-	localBin := filepath.Join(resolveRepoRoot(), "bin", binaryName(goos, goarch))
-	if err := buildBinaryFor(localBin, goos, goarch); err != nil {
-		return err
-	}
-	remoteBin, err := remoteBinaryPath(node)
-	if err != nil {
-		return err
-	}
-	if err := sshv1.UploadNodeFile(node.Name, localBin, remoteBin+".upload", sshv1.CommandOptions{}); err != nil {
-		return err
-	}
-	if strings.EqualFold(node.OS, "windows") {
-		cmd := fmt.Sprintf(`$bin=%s; New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($bin)) -Force | Out-Null; if(Test-Path $bin){ Remove-Item -Force $bin }; Move-Item -Force %s $bin`, psQuote(remoteBin), psQuote(remoteBin+".upload"))
-		if _, err := sshv1.RunNodeCommand(node.Name, cmd, sshv1.CommandOptions{}); err != nil {
-			return err
-		}
-	} else {
-		cmd := fmt.Sprintf("mkdir -p %s && chmod +x %s && mv %s %s", shellQuote(filepath.Dir(remoteBin)), shellQuote(remoteBin+".upload"), shellQuote(remoteBin+".upload"), shellQuote(remoteBin))
-		if _, err := sshv1.RunNodeCommand(node.Name, cmd, sshv1.CommandOptions{}); err != nil {
-			return err
-		}
-	}
-	logs.Info("chrome src_v3 deployed to %s:%s", node.Name, remoteBin)
-	if *service {
-		return startRemoteService(node, strings.TrimSpace(*role))
-	}
-	return nil
+	return deployRemoteBinary(node, strings.TrimSpace(*role), *service)
 }
 
 func handleService(args []string) error {
@@ -239,34 +201,17 @@ func handleRequestCommand(command string, args []string) error {
 }
 
 func handleSmokeTest(args []string) error {
-	fs := flag.NewFlagSet("chrome src_v3 test", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host")
-	role := fs.String("role", defaultRole, "Chrome role")
-	_ = fs.Parse(args)
-	if strings.TrimSpace(*host) == "" {
-		return fmt.Errorf("test requires --host")
+	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
+	if goBin == "" {
+		goBin = "go"
 	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(*host))
-	if err != nil {
-		return err
-	}
-	steps := []commandRequest{
-		{Command: "status", Role: *role},
-		{Command: "open", Role: *role, URL: "https://example.com/?dialtone=open"},
-		{Command: "get-url", Role: *role},
-		{Command: "tab-open", Role: *role, URL: "https://example.com/?dialtone=tab-open"},
-		{Command: "tabs", Role: *role},
-		{Command: "tab-close", Role: *role},
-		{Command: "close", Role: *role},
-	}
-	for _, step := range steps {
-		resp, err := sendRemoteCommand(node, step)
-		if err != nil {
-			return fmt.Errorf("%s failed: %w", step.Command, err)
-		}
-		printResponse(resp)
-	}
-	return nil
+	runArgs := append([]string{"run", "./plugins/chrome/src_v3/test/cmd/main.go"}, args...)
+	cmd := exec.Command(goBin, runArgs...)
+	cmd.Dir = resolveSrcRoot()
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = os.Environ()
+	return cmd.Run()
 }
 
 func handleAriaCommand(command string, args []string) error {
@@ -296,6 +241,79 @@ func handleAriaCommand(command string, args []string) error {
 		return err
 	}
 	printResponse(resp)
+	return nil
+}
+
+func handleAriaWaitCommand(command string, args []string) error {
+	fs := flag.NewFlagSet("chrome src_v3 "+command, flag.ExitOnError)
+	host := fs.String("host", "", "Mesh host")
+	role := fs.String("role", defaultRole, "Chrome role")
+	label := fs.String("label", "", "ARIA label")
+	attr := fs.String("attr", "", "Attribute name")
+	expected := fs.String("expected", "", "Expected attribute value")
+	timeoutMS := fs.Int("timeout-ms", 5000, "Timeout milliseconds")
+	_ = fs.Parse(args)
+	if strings.TrimSpace(*host) == "" {
+		return fmt.Errorf("%s requires --host", command)
+	}
+	if strings.TrimSpace(*label) == "" {
+		return fmt.Errorf("%s requires --label", command)
+	}
+	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(*host))
+	if err != nil {
+		return err
+	}
+	req := commandRequest{
+		Command:   command,
+		Role:      strings.TrimSpace(*role),
+		AriaLabel: strings.TrimSpace(*label),
+		TimeoutMS: *timeoutMS,
+	}
+	if command == "wait-aria-attr" {
+		req.Attr = strings.TrimSpace(*attr)
+		req.Expected = *expected
+	}
+	resp, err := sendRemoteCommand(node, req)
+	if err != nil {
+		return err
+	}
+	printResponse(resp)
+	return nil
+}
+
+func handleAriaGetAttrCommand(args []string) error {
+	fs := flag.NewFlagSet("chrome src_v3 get-aria-attr", flag.ExitOnError)
+	host := fs.String("host", "", "Mesh host")
+	role := fs.String("role", defaultRole, "Chrome role")
+	label := fs.String("label", "", "ARIA label")
+	attr := fs.String("attr", "", "Attribute name")
+	_ = fs.Parse(args)
+	if strings.TrimSpace(*host) == "" {
+		return fmt.Errorf("get-aria-attr requires --host")
+	}
+	if strings.TrimSpace(*label) == "" {
+		return fmt.Errorf("get-aria-attr requires --label")
+	}
+	if strings.TrimSpace(*attr) == "" {
+		return fmt.Errorf("get-aria-attr requires --attr")
+	}
+	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(*host))
+	if err != nil {
+		return err
+	}
+	resp, err := sendRemoteCommand(node, commandRequest{
+		Command:   "get-aria-attr",
+		Role:      strings.TrimSpace(*role),
+		AriaLabel: strings.TrimSpace(*label),
+		Attr:      strings.TrimSpace(*attr),
+	})
+	if err != nil {
+		return err
+	}
+	printResponse(resp)
+	if strings.TrimSpace(resp.Value) != "" {
+		logs.Raw(resp.Value)
+	}
 	return nil
 }
 
