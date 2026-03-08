@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
+	go_plugin "dialtone/dev/plugins/go/src_v1/go"
 	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 )
 
@@ -30,11 +31,17 @@ func Run(args []string) error {
 	}
 
 	switch args[1] {
+	case "format":
+		return runFormat()
 	case "test":
 		return runTests()
 	default:
 		return sshv1.Run(args[1:])
 	}
+}
+
+func runFormat() error {
+	return go_plugin.RunGo("fmt", "./plugins/ssh/...")
 }
 
 func runTests() error {
