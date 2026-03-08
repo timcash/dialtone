@@ -146,10 +146,7 @@ for (const entry of sectionEntries) {
 
 const sectionModes = new Map<string, "fullscreen" | "calculator">();
 
-function applyMode(
-  sectionID: string,
-  mode: "fullscreen" | "calculator",
-): void {
+function applyMode(sectionID: string, mode: "fullscreen" | "calculator"): void {
   const section = document.getElementById(sectionID);
   if (!section) return;
   section.classList.remove("fullscreen", "calculator");
@@ -157,8 +154,12 @@ function applyMode(
   sectionModes.set(sectionID, mode);
 }
 
-function toggleModeFor(templateId: UISharedTemplateID, sectionID: string): void {
-  const current = sectionModes.get(sectionID) ?? getUISharedTemplate(templateId).defaultMode;
+function toggleModeFor(
+  templateId: UISharedTemplateID,
+  sectionID: string,
+): void {
+  const current =
+    sectionModes.get(sectionID) ?? getUISharedTemplate(templateId).defaultMode;
   const next = current === "fullscreen" ? "calculator" : "fullscreen";
   applyMode(sectionID, next);
   console.log(`mode-toggle:${sectionID}:${next}`);
@@ -176,7 +177,9 @@ function bindInteractions(
     (b) => b.textContent?.trim().toLowerCase() === "mode",
   );
   if (modeButton) {
-    modeButton.addEventListener("click", () => toggleModeFor(sectionId, sectionID));
+    modeButton.addEventListener("click", () =>
+      toggleModeFor(sectionId, sectionID),
+    );
   }
 
   if (sectionId === "table") {
@@ -208,14 +211,17 @@ function bindInteractions(
       'button[aria-label="Terminal Submit"]',
     ) as HTMLButtonElement | null;
     const input = container.querySelector("input") as HTMLInputElement | null;
-    const terminal = container.querySelector(".xterm-primary") as HTMLElement | null;
+    const terminal = container.querySelector(
+      ".xterm-primary",
+    ) as HTMLElement | null;
     const status = container.querySelector(
       "dd.terminal-status",
     ) as HTMLElement | null;
     const run = () => {
       const value = (input?.value || "").trim();
       if (!value || !terminal) return;
-      terminal.textContent = `${terminal.textContent || ""}\nlog> ${value}`.trim();
+      terminal.textContent =
+        `${terminal.textContent || ""}\nlog> ${value}`.trim();
       if (status) status.textContent = value;
       console.log(`log-submit:${value}`);
       if (input) input.value = "";
@@ -248,8 +254,14 @@ registerUISharedSections({
   },
 });
 
-const initialRaw = (window.location.hash || "#ui-home-docs").slice(1).trim().toLowerCase();
-const initial = sectionByAlias.get(initialRaw) || sectionByTemplate.get("docs") || "ui-home-docs";
+const initialRaw = (window.location.hash || "#ui-home-docs")
+  .slice(1)
+  .trim()
+  .toLowerCase();
+const initial =
+  sectionByAlias.get(initialRaw) ||
+  sectionByTemplate.get("docs") ||
+  "ui-home-docs";
 void sections.navigateTo(initial).catch((err) => {
   console.error("[ui-fixture] initial navigation failed", err);
 });

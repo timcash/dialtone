@@ -17,7 +17,7 @@ func main() {
 	fs := flag.NewFlagSet("ui-src-v1-ctxdiag", flag.ExitOnError)
 	attachNode := fs.String("attach", "", "Attach to headed browser on mesh node")
 	targetURL := fs.String("url", "", "Browser target URL")
-	actionsPerMinute := fs.Float64("apm", 300, "Throttle browser actions in actions per minute")
+	actionsPerMinute := fs.Float64("apm", 360, "Throttle browser actions in actions per minute")
 	_ = fs.Parse(os.Args[1:])
 
 	attach := strings.TrimSpace(*attachNode)

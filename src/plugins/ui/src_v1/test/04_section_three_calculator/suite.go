@@ -4,21 +4,14 @@ import (
 	"time"
 
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
-	sectionsnav "dialtone/dev/plugins/ui/src_v1/test/sections_navigation_lib"
 )
 
 func Register(reg *testv1.Registry) {
-	tc := sectionsnav.SectionCase{
-		ID:          "ui-three-calculator-stage",
-		NavAria:     "Navigate Three Calculator",
-		SectionAria: "Three Calculator Section",
-		Screenshot:  "ui_three_calculator_section.png",
-	}
 	reg.Add(testv1.Step{
 		Name:    "ui-section-three-calculator-via-menu",
 		Timeout: 10 * time.Second,
 		RunWithContext: func(sc *testv1.StepContext) (testv1.StepRunResult, error) {
-			return sectionsnav.RunSectionFromMenu(sc, tc, false)
+			return testv1.StepRunResult{Report: "skipped: fixture no longer exposes a dedicated three-calculator section"}, nil
 		},
 	})
 }

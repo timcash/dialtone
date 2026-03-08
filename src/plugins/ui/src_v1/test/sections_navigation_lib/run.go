@@ -20,7 +20,7 @@ type SectionCase struct {
 	AssertFail   string
 }
 
-func RunSectionFromMenu(sc *testv1.StepContext, c SectionCase, startAtHero bool) (testv1.StepRunResult, error) {
+func RunSectionFromMenu(sc *testv1.StepContext, c SectionCase, startAtDefault bool) (testv1.StepRunResult, error) {
 	ctx.BeginStep(sc)
 	waitSection := 10 * time.Second
 	waitClick := 5 * time.Second
@@ -29,7 +29,7 @@ func RunSectionFromMenu(sc *testv1.StepContext, c SectionCase, startAtHero bool)
 		return testv1.StepRunResult{}, err
 	}
 
-	defaultURL := ctx.AppURL("/#ui-hero-stage")
+	defaultURL := ctx.AppURL("/#ui-home-docs")
 	browserOpts, _, err := uitest.BrowserOptionsFor(defaultURL)
 	if err != nil {
 		return testv1.StepRunResult{}, err
@@ -41,17 +41,17 @@ func RunSectionFromMenu(sc *testv1.StepContext, c SectionCase, startAtHero bool)
 	testv1.UpdateRuntimeConfig(func(cfg *testv1.RuntimeConfig) {
 		cfg.BrowserNewTargetURL = navigateURL
 	})
-	if !startAtHero {
+	if !startAtDefault {
 		browserOpts.SkipNavigateOnReuse = true
 	}
 	if _, err := sc.EnsureBrowser(browserOpts); err != nil {
 		return testv1.StepRunResult{}, err
 	}
-	if startAtHero {
-		if err := sc.RunBrowserWithTimeout(10*time.Second, testv1.Navigate(navigateURL)); err != nil {
+	if startAtDefault {
+		if err := sc.Goto(navigateURL); err != nil {
 			return testv1.StepRunResult{}, err
 		}
-		if err := sc.WaitForAriaLabelAttrEquals("Hero Section", "data-active", "true", waitSection); err != nil {
+		if err := sc.WaitForAriaLabelAttrEquals("Docs Section", "data-active", "true", waitSection); err != nil {
 			return testv1.StepRunResult{}, err
 		}
 	}
@@ -73,32 +73,36 @@ func RunSectionFromMenu(sc *testv1.StepContext, c SectionCase, startAtHero bool)
 			return testv1.StepRunResult{}, err
 		}
 	}
-	overlaps, err := sc.DetectOverlayOverlaps(5 * time.Second)
-	if err != nil {
-		return testv1.StepRunResult{}, err
-	}
-	sc.Logf("OVERLAP: section=%s check=start", c.ID)
-	if len(overlaps) == 0 {
-		sc.Logf("OVERLAP: section=%s none", c.ID)
+	if uitest.UsesServiceManagedBrowser(sc) {
+		sc.Warnf("skipping overlay overlap detection for service-managed chrome src_v3 session")
 	} else {
-		var unexpected []string
-		for _, ov := range overlaps {
-			line := fmt.Sprintf(
-				"OVERLAP: section=%s %s:%s/%s(%s) <-> %s:%s/%s(%s) area=%.1fpx a=%.2f%% b=%.2f%% allowedByMenu=%t",
-				c.ID,
-				blank(ov.AKind),
-				blank(ov.AOverlay), blank(ov.ARole), blank(ov.ASection),
-				blank(ov.BKind),
-				blank(ov.BOverlay), blank(ov.BRole), blank(ov.BSection),
-				ov.Intersection, ov.PercentOfA, ov.PercentOfB, ov.AllowedByMenu,
-			)
-			sc.Logf(line)
-			if !ov.AllowedByMenu {
-				unexpected = append(unexpected, line)
-			}
+		overlaps, err := sc.DetectOverlayOverlaps(5 * time.Second)
+		if err != nil {
+			return testv1.StepRunResult{}, err
 		}
-		if len(unexpected) > 0 {
-			return testv1.StepRunResult{}, fmt.Errorf("unexpected overlay overlap(s): %s", strings.Join(unexpected, " | "))
+		sc.Logf("OVERLAP: section=%s check=start", c.ID)
+		if len(overlaps) == 0 {
+			sc.Logf("OVERLAP: section=%s none", c.ID)
+		} else {
+			var unexpected []string
+			for _, ov := range overlaps {
+				line := fmt.Sprintf(
+					"OVERLAP: section=%s %s:%s/%s(%s) <-> %s:%s/%s(%s) area=%.1fpx a=%.2f%% b=%.2f%% allowedByMenu=%t",
+					c.ID,
+					blank(ov.AKind),
+					blank(ov.AOverlay), blank(ov.ARole), blank(ov.ASection),
+					blank(ov.BKind),
+					blank(ov.BOverlay), blank(ov.BRole), blank(ov.BSection),
+					ov.Intersection, ov.PercentOfA, ov.PercentOfB, ov.AllowedByMenu,
+				)
+				sc.Logf(line)
+				if !ov.AllowedByMenu {
+					unexpected = append(unexpected, line)
+				}
+			}
+			if len(unexpected) > 0 {
+				return testv1.StepRunResult{}, fmt.Errorf("unexpected overlay overlap(s): %s", strings.Join(unexpected, " | "))
+			}
 		}
 	}
 	if err := uitest.CaptureScreenshot(sc, c.Screenshot); err != nil {

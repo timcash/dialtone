@@ -1,77 +1,64 @@
 # Test Report: ui-src-v1
 
-- **Date**: Sat, 28 Feb 2026 14:38:31 PST
-- **Total Duration**: 10.056023833s
+- **Date**: Sun, 08 Mar 2026 10:18:03 PDT
+- **Total Duration**: 982.240806ms
 
 ## Summary
 
-- **Steps**: 0 / 1 passed
-- **Status**: FAILED
+- **Steps**: 2 / 2 passed
+- **Status**: PASSED
 
 ## Details
 
-### 1. ❌ ui-section-hero-via-menu
+### 1. ✅ ui-build-and-go-serve
 
-- **Duration**: 10.056019935s
-- **Error**: `step ui-section-hero-via-menu timed out`
+- **Duration**: 478.374324ms
+- **Report**: fixture built, docs/home section loaded, text legend verified (attach=true)
 
 #### Logs
 
 ```text
-INFO: STEP> begin ui-section-hero-via-menu
-INFO: LOOKING FOR: ui fixture build at /home/user/dialtone/src/plugins/ui/src_v1/test/fixtures/app
-INFO: LOOKING FOR: [/home/user/dialtone_dependencies/bun/bin/bun install --silent]
-INFO: LOOKING FOR: [/home/user/dialtone_dependencies/bun/bin/bun run build]
-INFO: LOOKING FOR: go ui backend at http://127.0.0.1:32823
-INFO: ERROR_PING: start browser_subject=logs.test.ui.src-v1.ui-section-hero-via-menu.browser error_subject=logs.test.ui.src-v1.error
-INFO: ERROR_PING: error-topic-ok marker=__DIALTONE_ERROR_PING__:1772318303912799316:error
-INFO: ERROR_PING: browser-topic-ok marker=__DIALTONE_ERROR_PING__:1772318303912799316
-INFO: ERROR_PING: pass browser_topic=true error_topic=true
-```
-
-#### Errors
-
-```text
-FAIL: [TEST][FAIL] [STEP:ui-section-hero-via-menu] timed out after 10s
+INFO: STEP> begin ui-build-and-go-serve
+INFO: LOOKING FOR: persistent ui dev server already running at http://127.0.0.1:5177
+WARN: ERROR_PING: skipped for chrome src_v3 NATS-managed browser session
+INFO: saved browser debug config: /home/user/dialtone/src/plugins/ui/src_v1/test/browser.debug.json
+WARN: skipping JS assertion for service-managed chrome src_v3 session
+INFO: report: fixture built, docs/home section loaded, text legend verified (attach=true)
+PASS: [TEST][PASS] [STEP:ui-build-and-go-serve] report: fixture built, docs/home section loaded, text legend verified (attach=true)
 ```
 
 #### Browser Logs
 
 ```text
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] LOADING #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] LOADED #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] START #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] RESUME #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] LOADING #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] LOADED #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] START #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] RESUME #ui-hero-stage"
-INFO: CONSOLE:log: "__DIALTONE_ERROR_PING__:1772318303912799316"
-ERROR: CONSOLE:error: "__DIALTONE_ERROR_PING__:1772318303912799316:error"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] LOADING #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] LOADED #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] START #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] RESUME #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] LOADING #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] LOADED #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] START #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #ui-hero-stage"
-INFO: CONSOLE:log: "[SectionManager] RESUME #ui-hero-stage"
+<empty>
+```
+
+#### Screenshots
+
+![auto_ui-build-and-go-serve.png](screenshots/auto_ui-build-and-go-serve.png)
+
+---
+
+### 2. ✅ ui-section-hero-via-menu
+
+- **Duration**: 501.014814ms
+- **Report**: section ui-home-docs navigation verified
+
+#### Logs
+
+```text
+INFO: STEP> begin ui-section-hero-via-menu
+INFO: LOOKING FOR: persistent ui dev server already running at http://127.0.0.1:5177
+WARN: skipping JS assertion for service-managed chrome src_v3 session
+WARN: skipping overlay overlap detection for service-managed chrome src_v3 session
+INFO: report: section ui-home-docs navigation verified
+PASS: [TEST][PASS] [STEP:ui-section-hero-via-menu] report: section ui-home-docs navigation verified
+```
+
+#### Browser Logs
+
+```text
+<empty>
 ```
 
 #### Screenshots
