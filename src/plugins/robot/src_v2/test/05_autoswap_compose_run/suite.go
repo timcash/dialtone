@@ -11,7 +11,7 @@ import (
 
 func Register(reg *testv1.Registry) {
 	reg.Add(testv1.Step{
-		Name:    "05-autoswap-compose-run-smoke",
+		Name:    "11-autoswap-compose-run-smoke",
 		Timeout: 50 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			if err := ctx.WaitForStepMessageAfterAction("autoswap compose run passed", 50*time.Second, func() error {

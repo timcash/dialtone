@@ -47,8 +47,16 @@ if ('serviceWorker' in navigator) {
 
 // Display version
 const versionEl = document.getElementById('app-version');
+const headerEl = document.querySelector("[aria-label='App Header']") as HTMLElement | null;
 const currentAppVersion = String(APP_VERSION ?? '').trim();
 let runtimeReportedVersion = currentAppVersion || 'dev';
+if (headerEl) {
+  headerEl.setAttribute('data-last-rover-command', '');
+  headerEl.setAttribute('data-last-rover-command-mode', '');
+  headerEl.setAttribute('data-last-rover-command-extra', '');
+  headerEl.setAttribute('data-nats-connected', 'false');
+}
+document.body.setAttribute('data-nats-connected', 'false');
 if (versionEl) {
   const stamp = isLocalDevHost ? ` (dev-${new Date().toLocaleTimeString()})` : '';
   const shown = runtimeReportedVersion || 'dev';
