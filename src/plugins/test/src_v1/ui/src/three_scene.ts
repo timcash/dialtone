@@ -50,8 +50,14 @@ export function mountSphereScene(canvas: HTMLCanvasElement): ThreeSceneControl {
   const clock = new THREE.Clock();
 
   const resize = () => {
-    const width = Math.max(1, canvas.clientWidth || canvas.parentElement?.clientWidth || 1);
-    const height = Math.max(1, canvas.clientHeight || canvas.parentElement?.clientHeight || 1);
+    const width = Math.max(
+      1,
+      canvas.clientWidth || canvas.parentElement?.clientWidth || 1,
+    );
+    const height = Math.max(
+      1,
+      canvas.clientHeight || canvas.parentElement?.clientHeight || 1,
+    );
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();

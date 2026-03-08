@@ -1,4 +1,9 @@
-import { JSONCodec, connect, type NatsConnection, type Subscription } from "nats.ws";
+import {
+  JSONCodec,
+  connect,
+  type NatsConnection,
+  type Subscription,
+} from "nats.ws";
 
 export type RoverState = {
   connected: boolean;
@@ -33,6 +38,7 @@ const listeners = new Set<StateListener>();
 
 let nc: NatsConnection | null = null;
 let reconnectTimer = 0;
+let lastLogLine = "";
 
 const state: RoverState = {
   connected: false,
@@ -66,12 +72,46 @@ const state: RoverState = {
 
 function emit(): void {
   for (const listener of listeners) {
-    listener({ ...state, logs: [...state.logs], steeringProfile: [...state.steeringProfile], keyParams: [...state.keyParams] });
+    listener({
+      ...state,
+      logs: [...state.logs],
+      steeringProfile: [...state.steeringProfile],
+      keyParams: [...state.keyParams],
+    });
   }
 }
 
 function appendLog(line: string): void {
+  if (line === lastLogLine) {
+    return;
+  }
+  lastLogLine = line;
   state.logs = [...state.logs.slice(-79), line];
+}
+
+function describeError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message || error.name;
+  }
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    const message = record.message;
+    if (typeof message === "string" && message.trim()) {
+      return message;
+    }
+    const code = record.code;
+    if (typeof code === "string" && code.trim()) {
+      return code;
+    }
+    const type = record.type;
+    if (typeof type === "string" && type.trim()) {
+      return type;
+    }
+  }
+  return "unknown connection error";
 }
 
 function scheduleReconnect(delayMS: number): void {
@@ -104,7 +144,9 @@ function applyMessage(subject: string, payload: Record<string, unknown>): void {
       state.mode = String(payload.mode ?? "GUIDED");
       break;
     case "mavlink.vfr_hud":
-      state.speedMS = Number(payload.groundspeed ?? payload.airspeed ?? 0).toFixed(1);
+      state.speedMS = Number(
+        payload.groundspeed ?? payload.airspeed ?? 0,
+      ).toFixed(1);
       state.altitudeM = Number(payload.alt ?? 0).toFixed(1);
       state.headingDeg = String(Math.round(Number(payload.heading ?? 0)));
       break;
@@ -151,7 +193,9 @@ function applyMessage(subject: string, payload: Record<string, unknown>): void {
       appendLog(String(payload.line ?? "[mock] log"));
       break;
     case "rover.command_ack":
-      appendLog(`[ack] ${String(payload.cmd ?? "command")} => ${String(payload.status ?? "ok")}`);
+      appendLog(
+        `[ack] ${String(payload.cmd ?? "command")} => ${String(payload.status ?? "ok")}`,
+      );
       break;
     default:
       if (subject.startsWith("mavlink.")) {
@@ -196,7 +240,7 @@ export async function startMockConnection(): Promise<void> {
   } catch (error) {
     state.connected = false;
     state.link = "offline";
-    appendLog(`[mock] connect failed: ${error instanceof Error ? error.message : String(error)}`);
+    appendLog(`[mock] connect failed: ${describeError(error)}`);
     emit();
     scheduleReconnect(2000);
   }
@@ -204,13 +248,21 @@ export async function startMockConnection(): Promise<void> {
 
 export function subscribeRoverState(listener: StateListener): () => void {
   listeners.add(listener);
-  listener({ ...state, logs: [...state.logs], steeringProfile: [...state.steeringProfile], keyParams: [...state.keyParams] });
+  listener({
+    ...state,
+    logs: [...state.logs],
+    steeringProfile: [...state.steeringProfile],
+    keyParams: [...state.keyParams],
+  });
   return () => {
     listeners.delete(listener);
   };
 }
 
-export function sendRoverCommand(cmd: string, extra: Record<string, unknown> = {}): void {
+export function sendRoverCommand(
+  cmd: string,
+  extra: Record<string, unknown> = {},
+): void {
   if (!nc) {
     appendLog(`[mock] command dropped: ${cmd}`);
     emit();

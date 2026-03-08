@@ -21,8 +21,16 @@ const sectionEntries: UISharedSectionEntry[] = [
   { sectionID: "test-robot-docs", template: "docs", title: "Docs" },
   { sectionID: "test-telemetry-table", template: "table", title: "Telemetry" },
   { sectionID: "test-steering-table", template: "table", title: "Steering" },
-  { sectionID: "test-key-params-table", template: "table", title: "Key Params" },
-  { sectionID: "test-signals-terminal", template: "terminal", title: "Signals" },
+  {
+    sectionID: "test-key-params-table",
+    template: "table",
+    title: "Key Params",
+  },
+  {
+    sectionID: "test-signals-terminal",
+    template: "terminal",
+    title: "Signals",
+  },
   { sectionID: "test-camera-video", template: "camera", title: "Camera" },
   { sectionID: "test-settings-docs", template: "docs", title: "Settings" },
 ];
@@ -72,8 +80,14 @@ function ctl() {
   };
 }
 
-function setLegendValue(section: ParentNode, label: string, value: string): void {
-  const rows = Array.from(section.querySelectorAll(".shell-legend-telemetry div"));
+function setLegendValue(
+  section: ParentNode,
+  label: string,
+  value: string,
+): void {
+  const rows = Array.from(
+    section.querySelectorAll(".shell-legend-telemetry div"),
+  );
   for (const row of rows) {
     const dt = row.querySelector("dt");
     const dd = row.querySelector("dd");
@@ -92,7 +106,10 @@ function renderSignals(lines = roverState.logs): void {
   }
 }
 
-function updateTableRows(sectionId: string, rows: Array<[string, string, string, string]>): void {
+function updateTableRows(
+  sectionId: string,
+  rows: Array<[string, string, string, string]>,
+): void {
   const section = document.getElementById(sectionId);
   const tbody = section?.querySelector("tbody");
   if (!tbody) return;
@@ -143,7 +160,9 @@ function bindCommandForm(
   const buttons = Array.from(form.querySelectorAll("button"));
   buttons.slice(0, 8).forEach((button, index) => {
     button.addEventListener("click", () => {
-      sendRoverCommand(`${commandPrefix}.${labels[index].toLowerCase().replace(/\s+/g, "_")}`);
+      sendRoverCommand(
+        `${commandPrefix}.${labels[index].toLowerCase().replace(/\s+/g, "_")}`,
+      );
       console.log(`fixture:button:${commandPrefix}:${labels[index]}`);
     });
   });
@@ -184,13 +203,27 @@ function updateTelemetrySections(): void {
     ["mode", roverState.mode, "live", `${roverState.link} link`],
     ["battery", `${roverState.batteryV} V`, "live", "mavlink.sys_status"],
     ["speed", `${roverState.speedMS} m/s`, "live", "mavlink.vfr_hud"],
-    ["altitude", `${roverState.altitudeM} m`, "live", "mavlink.global_position_int"],
+    [
+      "altitude",
+      `${roverState.altitudeM} m`,
+      "live",
+      "mavlink.global_position_int",
+    ],
     ["heading", `${roverState.headingDeg} deg`, "live", "mavlink.vfr_hud"],
-    ["gps", `${roverState.latitude}, ${roverState.longitude}`, "live", `${roverState.satellites} sats`],
+    [
+      "gps",
+      `${roverState.latitude}, ${roverState.longitude}`,
+      "live",
+      `${roverState.satellites} sats`,
+    ],
   ]);
   const section = document.getElementById("test-telemetry-table");
   if (!section) return;
-  setLegendValue(section, "source", roverState.connected ? "real-or-mock" : "offline");
+  setLegendValue(
+    section,
+    "source",
+    roverState.connected ? "real-or-mock" : "offline",
+  );
   setLegendValue(section, "status", roverState.link);
   setLegendValue(section, "rows", "6");
   setLegendValue(section, "rate", `${roverState.fps || "0"}hz`);
@@ -203,7 +236,12 @@ function updateTelemetrySections(): void {
 function updateSteeringSection(): void {
   updateTableRows(
     "test-steering-table",
-    roverState.steeringProfile.map(([key, value, status]) => [key, value, status, "rover.steering"]),
+    roverState.steeringProfile.map(([key, value, status]) => [
+      key,
+      value,
+      status,
+      "rover.steering",
+    ]),
   );
   const section = document.getElementById("test-steering-table");
   if (!section) return;
@@ -220,7 +258,12 @@ function updateSteeringSection(): void {
 function updateKeyParamsSection(): void {
   updateTableRows(
     "test-key-params-table",
-    roverState.keyParams.map(([key, value, status]) => [key, value, status, "rover.params"]),
+    roverState.keyParams.map(([key, value, status]) => [
+      key,
+      value,
+      status,
+      "rover.params",
+    ]),
   );
   const section = document.getElementById("test-key-params-table");
   if (!section) return;
@@ -297,7 +340,10 @@ function refreshLiveState(): void {
   renderSignals(roverState.logs);
 }
 
-function decorateSection(entry: UISharedSectionEntry, container: HTMLElement): void {
+function decorateSection(
+  entry: UISharedSectionEntry,
+  container: HTMLElement,
+): void {
   if (container.dataset.bound === "1") return;
   container.dataset.bound = "1";
 
@@ -313,7 +359,9 @@ function decorateSection(entry: UISharedSectionEntry, container: HTMLElement): v
     const subtitle = container.querySelector(".shell-legend-text p");
     const article = container.querySelector("article");
     if (title) title.textContent = "Robot docs template";
-    if (subtitle) subtitle.textContent = "Docs-style section matching the Robot page shell without carrying Robot-specific component code.";
+    if (subtitle)
+      subtitle.textContent =
+        "Docs-style section matching the Robot page shell without carrying Robot-specific component code.";
     if (article) {
       article.innerHTML = `
         <h2>Reduced template map</h2>
@@ -353,7 +401,17 @@ function decorateSection(entry: UISharedSectionEntry, container: HTMLElement): v
   if (entry.sectionID === "test-telemetry-table") {
     bindCommandForm(
       container,
-      ["Refresh", "Clear", "Signals", "Focus", "Mark", "Trace", "Diff", "Tail", "Browse"],
+      [
+        "Refresh",
+        "Clear",
+        "Signals",
+        "Focus",
+        "Mark",
+        "Trace",
+        "Diff",
+        "Tail",
+        "Browse",
+      ],
       "telemetry",
       "Telemetry Query Input",
       "Telemetry Submit",
@@ -377,7 +435,17 @@ function decorateSection(entry: UISharedSectionEntry, container: HTMLElement): v
   if (entry.sectionID === "test-key-params-table") {
     bindCommandForm(
       container,
-      ["Refresh", "Search", "Export", "Pin", "Reveal", "Audit", "Diff", "Tail", "Inspect"],
+      [
+        "Refresh",
+        "Search",
+        "Export",
+        "Pin",
+        "Reveal",
+        "Audit",
+        "Diff",
+        "Tail",
+        "Inspect",
+      ],
       "params",
       "Key Params Input",
       "Key Params Submit",
@@ -407,7 +475,17 @@ function decorateSection(entry: UISharedSectionEntry, container: HTMLElement): v
     }
     bindCommandForm(
       container,
-      ["Left", "Right", "Up", "Down", "Home", "End", "Select", "Copy", "Cursor"],
+      [
+        "Left",
+        "Right",
+        "Up",
+        "Down",
+        "Home",
+        "End",
+        "Select",
+        "Copy",
+        "Cursor",
+      ],
       "terminal",
       "Log Command Input",
       "Log Submit",
@@ -419,7 +497,17 @@ function decorateSection(entry: UISharedSectionEntry, container: HTMLElement): v
   if (entry.sectionID === "test-camera-video") {
     bindCommandForm(
       container,
-      ["Feed A", "Feed B", "Wide", "Zoom", "IR", "Map", "Log", "Bookmark", "View"],
+      [
+        "Feed A",
+        "Feed B",
+        "Wide",
+        "Zoom",
+        "IR",
+        "Map",
+        "Log",
+        "Bookmark",
+        "View",
+      ],
       "camera",
       "Camera Input",
       "Camera Submit",
@@ -432,7 +520,9 @@ function decorateSection(entry: UISharedSectionEntry, container: HTMLElement): v
     const title = container.querySelector(".shell-legend-text h1");
     const subtitle = container.querySelector(".shell-legend-text p");
     if (title) title.textContent = "Robot settings template";
-    if (subtitle) subtitle.textContent = "Reduced docs/settings page for backend selection and test instructions.";
+    if (subtitle)
+      subtitle.textContent =
+        "Reduced docs/settings page for backend selection and test instructions.";
     refreshLiveState();
   }
 }
@@ -442,8 +532,16 @@ sections.register("test-three-overview-stage", {
   canonicalName: "test-three-overview-stage",
   load: async () => {
     const container = document.getElementById("test-three-overview-stage");
-    if (!container) throw new Error("test-three-overview-stage container not found");
-    decorateSection({ sectionID: "test-three-overview-stage", template: "docs", title: "Three" }, container);
+    if (!container)
+      throw new Error("test-three-overview-stage container not found");
+    decorateSection(
+      {
+        sectionID: "test-three-overview-stage",
+        template: "docs",
+        title: "Three",
+      },
+      container,
+    );
     const canvas = container.querySelector("canvas");
     if (canvas instanceof HTMLCanvasElement) {
       return mountSphereScene(canvas);
@@ -466,7 +564,8 @@ sections.register("test-three-calculator-stage", {
   canonicalName: "test-three-calculator-stage",
   load: async () => {
     const container = document.getElementById("test-three-calculator-stage");
-    if (!container) throw new Error("test-three-calculator-stage container not found");
+    if (!container)
+      throw new Error("test-three-calculator-stage container not found");
     renderUISharedShell(container, {
       underlay: "three",
       mode: "calculator",
@@ -474,7 +573,9 @@ sections.register("test-three-calculator-stage", {
       form: true,
       chatlog: true,
     });
-    const chatlogHost = container.querySelector<HTMLElement>(".shell-chatlog-terminal");
+    const chatlogHost = container.querySelector<HTMLElement>(
+      ".shell-chatlog-terminal",
+    );
     if (chatlogHost) {
       threeChatTerminal = mountSignalTerminal(chatlogHost);
       const chatlog = container.querySelector<HTMLElement>(".shell-chatlog");
@@ -486,12 +587,38 @@ sections.register("test-three-calculator-stage", {
     if (form instanceof HTMLFormElement) {
       labelForm(
         form,
-        ["Back", "Add", "Link", "Clear", "Open", "Rename", "Focus", "Labels On", "Graph"],
+        [
+          "Back",
+          "Add",
+          "Link",
+          "Clear",
+          "Open",
+          "Rename",
+          "Focus",
+          "Labels On",
+          "Graph",
+        ],
         "Three Input",
         "select node to rename",
         "Three Submit",
       );
-      bindCommandForm(container, ["Back", "Add", "Link", "Clear", "Open", "Rename", "Focus", "Labels On", "Graph"], "three", "Three Input", "Three Submit");
+      bindCommandForm(
+        container,
+        [
+          "Back",
+          "Add",
+          "Link",
+          "Clear",
+          "Open",
+          "Rename",
+          "Focus",
+          "Labels On",
+          "Graph",
+        ],
+        "three",
+        "Three Input",
+        "Three Submit",
+      );
     }
     refreshLiveState();
     const canvas = container.querySelector("canvas");

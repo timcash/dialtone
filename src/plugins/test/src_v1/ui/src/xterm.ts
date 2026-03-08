@@ -12,7 +12,8 @@ export function mountSignalTerminal(container: HTMLElement): SignalTerminal {
     cursorBlink: false,
     convertEol: true,
     disableStdin: true,
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    fontFamily:
+      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
     fontSize: 14,
     lineHeight: 1.2,
     scrollback: 1500,
