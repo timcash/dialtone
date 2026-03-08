@@ -55,8 +55,8 @@ Use `StepContext` only; avoid plugin-local test context wrappers.
 Common methods:
 - logging: `Infof`, `Warnf`, `Errorf`, `TestPassf`, `TestFailf`
 - wait helpers: `WaitForStepMessage*`, `WaitForBrowserMessage*`, `WaitForErrorMessage*`
-- browser: `EnsureBrowser`, `RunBrowser`, `RunBrowserWithTimeout`
-- aria helpers: `WaitForAriaLabel`, `ClickAriaLabel`, `TypeAriaLabel`, `PressEnterAriaLabel`
+- browser: `EnsureBrowser`, `Goto`, `CaptureScreenshot`
+- aria helpers: `WaitForAriaLabel`, `ClickAriaLabel`, `TypeAriaLabel`, `PressEnterAriaLabel`, `WaitForAriaLabelAttrEquals`
 - misc: `WaitForConsoleContains`, `ClickAt`, `TapAt`, `ResetStepLogClock`, `RepoRoot`
 - default step timeout: `10s` when `Step.Timeout` is not set
 
@@ -174,34 +174,33 @@ Browser subjects:
 - error topic: `logs.test.<suite>.error`
 
 What the StepContext chromedp API can do:
-- start or attach browser sessions (`EnsureBrowser`, `AttachBrowserByPort`, `AttachBrowserByWebSocket`)
-- reuse active session in step (`Browser`, `CloseBrowser`)
-- run arbitrary chromedp actions (`RunBrowser`, `RunBrowserWithTimeout`)
+- start or reuse a service-backed browser session (`EnsureBrowser`)
+- navigate the managed tab (`Goto`)
 - wait/assert element presence and attributes by aria-label
 - click/type/press-enter by aria-label
-- click/tap by absolute coordinates
-- wait for browser console output and treat misses as test failures
-- route browser console/errors into test logs and NATS subjects automatically
+- capture screenshots that are written into `TEST.md`
+- wait for browser console output and route it into test logs/NATS
 
-StepContext browser API reference:
+Service-backed `StepContext` browser API reference:
 - `EnsureBrowser(BrowserOptions) (*BrowserSession, error)`
-- `AttachBrowserByPort(port int, role string) (*BrowserSession, error)`
-- `AttachBrowserByWebSocket(webSocketURL string, role string) (*BrowserSession, error)`
 - `Browser() (*BrowserSession, error)`
 - `CloseBrowser()` (no-op for suite-owned shared browser)
-- `RunBrowser(actions ...chromedp.Action) error`
-- `RunBrowserWithTimeout(timeout time.Duration, actions ...chromedp.Action) error`
+- `Goto(url string) error`
 - `WaitForAriaLabel(label string, timeout time.Duration) error`
 - `ClickAriaLabel(label string) error`
 - `ClickAriaLabelAfterWait(label string, timeout time.Duration) error`
 - `TypeAriaLabel(label, value string) error`
 - `PressEnterAriaLabel(label string) error`
 - `WaitForAriaLabelAttrEquals(label, attr, expected string, timeout time.Duration) error`
-- `ClickAt(x, y float64) error`
-- `TapAt(x, y float64) error`
+- `CaptureScreenshot(path string) error`
 - `WaitForConsoleContains(substr string, timeout time.Duration) error`
 - `WaitForBrowserMessage(pattern string, timeout time.Duration) error`
 - `WaitForBrowserMessageAfterAction(pattern string, timeout time.Duration, action func() error) error`
+
+Notes:
+- These browser helpers now drive `chrome src_v3` over NATS through the service host.
+- Direct `chromedp` attach/allocator workflows are retired for normal tests.
+- `RunBrowser(...)` and `RunBrowserWithTimeout(...)` are only for legacy direct-browser tests and should not be the default API.
 
 Local `index.html` smoke pattern (aria-label + console):
 

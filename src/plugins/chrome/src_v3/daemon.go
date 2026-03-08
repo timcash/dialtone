@@ -136,6 +136,105 @@ func (d *daemonState) handle(req commandRequest) commandResponse {
 			resp.Error = err.Error()
 			return d.refreshResponse(resp)
 		}
+	case "click-aria":
+		if err := d.ensureBrowser(); err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return resp
+		}
+		if err := d.clickAriaLabel(req.AriaLabel); err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return d.refreshResponse(resp)
+		}
+	case "type-aria":
+		if err := d.ensureBrowser(); err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return resp
+		}
+		if err := d.typeAriaLabel(req.AriaLabel, req.Value); err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return d.refreshResponse(resp)
+		}
+	case "press-enter-aria":
+		if err := d.ensureBrowser(); err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return resp
+		}
+		if err := d.pressEnterAriaLabel(req.AriaLabel); err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return d.refreshResponse(resp)
+		}
+	case "wait-aria":
+		if err := d.ensureBrowser(); err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return resp
+		}
+		if err := d.waitForAriaLabel(req.AriaLabel, time.Duration(req.TimeoutMS)*time.Millisecond); err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return d.refreshResponse(resp)
+		}
+	case "wait-aria-attr":
+		if err := d.ensureBrowser(); err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return resp
+		}
+		if err := d.waitForAriaLabelAttrEquals(req.AriaLabel, req.Attr, req.Expected, time.Duration(req.TimeoutMS)*time.Millisecond); err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return d.refreshResponse(resp)
+		}
+	case "set-html":
+		if err := d.ensureBrowser(); err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return resp
+		}
+		if err := d.setManagedHTML(req.Value); err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return d.refreshResponse(resp)
+		}
+	case "wait-log":
+		if err := d.ensureBrowser(); err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return resp
+		}
+		lines, err := d.waitForConsoleContains(req.Contains, time.Duration(req.TimeoutMS)*time.Millisecond)
+		if err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return d.refreshResponse(resp)
+		}
+		resp.ConsoleLines = lines
+	case "console":
+		if err := d.ensureBrowser(); err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return resp
+		}
+		resp.ConsoleLines = d.consoleSnapshot()
+	case "screenshot":
+		if err := d.ensureBrowser(); err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return resp
+		}
+		b64, err := d.captureScreenshotB64()
+		if err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return d.refreshResponse(resp)
+		}
+		resp.ScreenshotB64 = b64
 	case "close":
 		if err := d.closeBrowser(); err != nil {
 			resp.OK = false
@@ -241,6 +340,12 @@ func printResponse(resp *commandResponse) {
 		resp.Role, resp.ServicePID, resp.BrowserPID, resp.ChromePort, resp.NATSPort, len(resp.Tabs), strings.TrimSpace(resp.CurrentURL), strings.TrimSpace(resp.ManagedTarget), resp.Unhealthy, strings.TrimSpace(resp.Error))
 	for i, tab := range resp.Tabs {
 		fmt.Printf("TAB %d id=%s url=%s\n", i, tab.ID, tab.URL)
+	}
+	for i, line := range resp.ConsoleLines {
+		fmt.Printf("LOG %d %s\n", i, line)
+	}
+	if strings.TrimSpace(resp.ScreenshotB64) != "" {
+		fmt.Printf("SCREENSHOT_B64_LEN %d\n", len(resp.ScreenshotB64))
 	}
 }
 

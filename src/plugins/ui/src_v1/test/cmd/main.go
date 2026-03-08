@@ -29,7 +29,7 @@ func main() {
 	logs.SetOutput(os.Stdout)
 	fs := flag.NewFlagSet("ui test", flag.ContinueOnError)
 	commonFlags := testv1.BindCommonTestFlags(fs, testv1.CommonTestCLIOptions{
-		ClicksPerSecond: 5,
+		ActionsPerMinute: 300,
 	})
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -45,11 +45,11 @@ func main() {
 	}
 	attach := strings.TrimSpace(common.AttachNode)
 	url := strings.TrimSpace(common.TargetURL)
-	testv1.SetClicksPerSecond(common.ClicksPerSecond)
 	test.SetOptions(test.Options{
-		AttachNode:      attach,
-		TargetURL:       url,
-		ClicksPerSecond: common.ClicksPerSecond,
+		AttachNode:       attach,
+		TargetURL:        url,
+		ActionsPerMinute: common.ActionsPerMinute,
+		ClicksPerSecond:  common.ClicksPerSecond,
 	})
 	common.ApplyRuntimeConfig()
 	if attach != "" {
@@ -59,7 +59,7 @@ func main() {
 			})
 			logs.Info("ui test auto-enabled --no-ssh for windows attach node=%s", attach)
 		}
-		logs.Info("ui test remote attach mode (headed) node=%s url=%s cps=%.3f", attach, url, common.ClicksPerSecond)
+		logs.Info("ui test remote attach mode (headed) node=%s url=%s apm=%.3f", attach, url, common.ActionsPerMinute)
 		if err := ensureAttachBrowser(attach, url); err != nil {
 			logs.Error("ui test attach preflight failed: %v", err)
 			os.Exit(1)
@@ -76,7 +76,7 @@ func main() {
 			cfg.RemoteNoLaunch = false
 			cfg.RemoteBrowserPID = 0
 		})
-		logs.Info("ui test local mode url=%s cps=%.3f", url, common.ClicksPerSecond)
+		logs.Info("ui test local mode url=%s apm=%.3f", url, common.ActionsPerMinute)
 	}
 
 	reg := test.NewRegistry()

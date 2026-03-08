@@ -17,7 +17,7 @@ func main() {
 		return
 	}
 
-	version, cmd, warnedOldOrder, err := parseArgs(os.Args[1:])
+	version, cmd, passthrough, warnedOldOrder, err := parseArgs(os.Args[1:])
 	if err != nil {
 		logs.Error("%v", err)
 		printUsage()
@@ -29,7 +29,7 @@ func main() {
 
 	switch cmd {
 	case "test":
-		runTests(version)
+		runTests(version, passthrough)
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -39,27 +39,27 @@ func main() {
 	}
 }
 
-func parseArgs(args []string) (version, command string, warnedOldOrder bool, err error) {
+func parseArgs(args []string) (version, command string, passthrough []string, warnedOldOrder bool, err error) {
 	if len(args) == 0 {
-		return "", "", false, fmt.Errorf("missing arguments")
+		return "", "", nil, false, fmt.Errorf("missing arguments")
 	}
 	if isHelp(args[0]) {
-		return "src_v1", "help", false, nil
+		return "src_v1", "help", nil, false, nil
 	}
 	if len(args) >= 2 && strings.HasPrefix(args[0], "src_v") {
-		return args[0], args[1], false, nil
+		return args[0], args[1], args[2:], false, nil
 	}
 	if len(args) >= 2 && strings.HasPrefix(args[1], "src_v") {
-		return args[1], args[0], true, nil
+		return args[1], args[0], append([]string{}, args[2:]...), true, nil
 	}
-	return "", "", false, fmt.Errorf("expected version as first test argument (for example: ./dialtone.sh test src_v1 test)")
+	return "", "", nil, false, fmt.Errorf("expected version as first test argument (for example: ./dialtone.sh test src_v1 test)")
 }
 
 func isHelp(s string) bool {
 	return s == "help" || s == "-h" || s == "--help"
 }
 
-func runTests(version string) {
+func runTests(version string, passthrough []string) {
 	if version != "src_v1" {
 		logs.Error("Unsupported version %s", version)
 		os.Exit(1)
@@ -75,7 +75,8 @@ func runTests(version string) {
 	if goBin == "" {
 		goBin = "go"
 	}
-	cmd := exec.Command(goBin, "run", "./plugins/test/src_v1/test/cmd/main.go")
+	args := append([]string{"run", "./plugins/test/src_v1/test/cmd/main.go"}, passthrough...)
+	cmd := exec.Command(goBin, args...)
 	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

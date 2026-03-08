@@ -8,27 +8,35 @@ import (
 )
 
 const (
-	defaultRole       = "dev"
-	defaultChromePort = 19464
-	defaultNATSPort   = 19465
-	defaultTimeout    = 12 * time.Second
+	defaultRole        = "dev"
+	defaultChromePort  = 19464
+	defaultNATSPort    = 19465
+	defaultTimeout     = 12 * time.Second
+	DefaultServicePort = defaultNATSPort
 )
 
 var errBrowserClosed = fmt.Errorf("browser is closed or unhealthy")
 
-type commandRequest struct {
-	Command string `json:"command"`
-	Role    string `json:"role,omitempty"`
-	URL     string `json:"url,omitempty"`
-	Index   int    `json:"index,omitempty"`
+type CommandRequest struct {
+	Command   string `json:"command"`
+	Role      string `json:"role,omitempty"`
+	URL       string `json:"url,omitempty"`
+	Index     int    `json:"index,omitempty"`
+	AriaLabel string `json:"aria_label,omitempty"`
+	Attr      string `json:"attr,omitempty"`
+	Expected  string `json:"expected,omitempty"`
+	Value     string `json:"value,omitempty"`
+	Contains  string `json:"contains,omitempty"`
+	TimeoutMS int    `json:"timeout_ms,omitempty"`
+	Script    string `json:"script,omitempty"`
 }
 
-type pageInfo struct {
+type PageInfo struct {
 	ID  string `json:"id"`
 	URL string `json:"url"`
 }
 
-type commandResponse struct {
+type CommandResponse struct {
 	OK            bool       `json:"ok"`
 	Error         string     `json:"error,omitempty"`
 	ServicePID    int        `json:"service_pid"`
@@ -39,9 +47,27 @@ type commandResponse struct {
 	ProfileDir    string     `json:"profile_dir,omitempty"`
 	ManagedTarget string     `json:"managed_target,omitempty"`
 	CurrentURL    string     `json:"current_url,omitempty"`
-	Tabs          []pageInfo `json:"tabs,omitempty"`
+	Tabs          []PageInfo `json:"tabs,omitempty"`
 	Unhealthy     bool       `json:"unhealthy,omitempty"`
+	ConsoleLines  []string   `json:"console_lines,omitempty"`
+	ScreenshotB64 string     `json:"screenshot_b64,omitempty"`
 }
+
+type Session struct {
+	Host          string `json:"host,omitempty"`
+	Role          string `json:"role,omitempty"`
+	PID           int    `json:"pid"`
+	Port          int    `json:"port"`
+	NATSPort      int    `json:"nats_port"`
+	WebSocketURL  string `json:"websocket_url,omitempty"`
+	CurrentURL    string `json:"current_url,omitempty"`
+	ManagedTarget string `json:"managed_target,omitempty"`
+	IsNew         bool   `json:"is_new,omitempty"`
+}
+
+type commandRequest = CommandRequest
+type pageInfo = PageInfo
+type commandResponse = CommandResponse
 
 type daemonState struct {
 	mu              sync.Mutex
@@ -58,6 +84,7 @@ type daemonState struct {
 	cancelTab       context.CancelFunc
 	managedTarget   string
 	currentURL      string
+	consoleLines    []string
 	unexpectedErr   error
 	intentionalStop bool
 }

@@ -9,8 +9,10 @@ import (
 
 type CommonTestCLIOptions struct {
 	AttachNode       string
+	AttachRole       string
 	TargetURL        string
 	FilterExpr       string
+	ActionsPerMinute float64
 	ClicksPerSecond  float64
 	NoSSH            bool
 	RemoteNoLaunch   bool
@@ -21,8 +23,10 @@ type CommonTestCLIOptions struct {
 
 type CommonTestCLIBindings struct {
 	attachNode       *string
+	attachRole       *string
 	targetURL        *string
 	filterExpr       *string
+	actionsPerMinute *float64
 	clicksPerSecond  *float64
 	noSSH            *bool
 	remoteNoLaunch   *bool
@@ -34,12 +38,18 @@ type CommonTestCLIBindings struct {
 func BindCommonTestFlags(fs *flag.FlagSet, defaults CommonTestCLIOptions) CommonTestCLIBindings {
 	return CommonTestCLIBindings{
 		attachNode: fs.String("attach", strings.TrimSpace(defaults.AttachNode), "Attach test browser to headed browser on mesh node (example: chroma)"),
+		attachRole: fs.String("attach-role", strings.TrimSpace(defaults.AttachRole), "Browser role to reuse on attach node (default: dev)"),
 		targetURL:  fs.String("url", strings.TrimSpace(defaults.TargetURL), "URL for browser steps"),
 		filterExpr: fs.String("filter", strings.TrimSpace(defaults.FilterExpr), "Run only matching steps"),
+		actionsPerMinute: fs.Float64(
+			"apm",
+			defaults.ActionsPerMinute,
+			"Throttle browser actions in actions per minute across goto/click/type/enter/screenshot (example: --apm 60)",
+		),
 		clicksPerSecond: fs.Float64(
 			"cps",
 			defaults.ClicksPerSecond,
-			"Throttle UI clicks/taps in clicks per second (example: --cps 1)",
+			"Deprecated alias for click pacing in clicks per second; prefer --apm",
 		),
 		noSSH:            fs.Bool("no-ssh", defaults.NoSSH, "Disable SSH fallback and use direct attach only"),
 		remoteNoLaunch:   fs.Bool("remote-no-launch", defaults.RemoteNoLaunch, "Do not launch remote browser when attach probe cannot reuse one"),
@@ -54,11 +64,17 @@ func (b CommonTestCLIBindings) Resolve() (CommonTestCLIOptions, error) {
 	if b.attachNode != nil {
 		opts.AttachNode = strings.TrimSpace(*b.attachNode)
 	}
+	if b.attachRole != nil {
+		opts.AttachRole = strings.TrimSpace(*b.attachRole)
+	}
 	if b.targetURL != nil {
 		opts.TargetURL = strings.TrimSpace(*b.targetURL)
 	}
 	if b.filterExpr != nil {
 		opts.FilterExpr = strings.TrimSpace(*b.filterExpr)
+	}
+	if b.actionsPerMinute != nil {
+		opts.ActionsPerMinute = *b.actionsPerMinute
 	}
 	if b.clicksPerSecond != nil {
 		opts.ClicksPerSecond = *b.clicksPerSecond
@@ -82,8 +98,14 @@ func (b CommonTestCLIBindings) Resolve() (CommonTestCLIOptions, error) {
 	if b.remoteBrowserPID != nil {
 		opts.RemoteBrowserPID = *b.remoteBrowserPID
 	}
+	if opts.ActionsPerMinute < 0 {
+		return CommonTestCLIOptions{}, fmt.Errorf("--apm must be >= 0")
+	}
 	if opts.ClicksPerSecond < 0 {
 		return CommonTestCLIOptions{}, fmt.Errorf("--cps must be >= 0")
+	}
+	if opts.ActionsPerMinute <= 0 && opts.ClicksPerSecond > 0 {
+		opts.ActionsPerMinute = opts.ClicksPerSecond * 60
 	}
 	return opts, nil
 }
@@ -91,13 +113,22 @@ func (b CommonTestCLIBindings) Resolve() (CommonTestCLIOptions, error) {
 func (o CommonTestCLIOptions) ApplyRuntimeConfig() {
 	cfg := RuntimeConfig{
 		BrowserNode:       strings.TrimSpace(o.AttachNode),
-		RemoteRequireRole: false,
+		RemoteRequireRole: strings.TrimSpace(o.AttachRole) != "",
 		NoSSH:             o.NoSSH,
 		RemoteNoLaunch:    o.RemoteNoLaunch,
 		RemoteDebugPort:   o.RemoteDebugPort,
 		RemoteDebugPorts:  append([]int(nil), o.RemoteDebugPorts...),
 		RemoteBrowserPID:  o.RemoteBrowserPID,
+		ActionsPerMinute:  o.ActionsPerMinute,
 	}
+	if cfg.BrowserNode != "" {
+		cfg.RemoteBrowserRole = strings.TrimSpace(o.AttachRole)
+		if cfg.RemoteBrowserRole == "" {
+			cfg.RemoteBrowserRole = "dev"
+			cfg.RemoteRequireRole = true
+		}
+	}
+	SetActionsPerMinute(o.ActionsPerMinute)
 	SetRuntimeConfig(cfg)
 }
 

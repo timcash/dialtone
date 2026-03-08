@@ -102,6 +102,6 @@ func ClickAt(x, y float64) Action {
 
 func clickThrottleAction(click Action) Action {
 	return chromedp.ActionFunc(func(ctx context.Context) error {
-		return runThrottledClick(ctx, click)
+		return runPacedChromedpAction(ctx, click)
 	})
 }
