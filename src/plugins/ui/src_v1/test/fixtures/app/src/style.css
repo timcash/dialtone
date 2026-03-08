@@ -1,7 +1,15 @@
 body {
   background:
-    radial-gradient(circle at top left, rgba(79, 140, 255, 0.18), transparent 26rem),
-    radial-gradient(circle at bottom right, rgba(114, 255, 214, 0.14), transparent 22rem),
+    radial-gradient(
+      circle at top left,
+      rgba(79, 140, 255, 0.18),
+      transparent 26rem
+    ),
+    radial-gradient(
+      circle at bottom right,
+      rgba(114, 255, 214, 0.14),
+      transparent 22rem
+    ),
     #06080d;
 }
 
