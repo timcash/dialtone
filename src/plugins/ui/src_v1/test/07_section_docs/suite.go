@@ -9,15 +9,15 @@ import (
 
 func Register(reg *testv1.Registry) {
 	tc := sectionsnav.SectionCase{
-		ID:          "ui-docs-docs",
-		NavAria:     "Navigate Docs",
+		ID:          "ui-home-docs",
+		NavAria:     "Open Home",
 		SectionAria: "Docs Section",
 		Screenshot:  "ui_docs.png",
 		AssertJSExpr: `(() => {
-			const s = document.getElementById('ui-docs-docs');
-			return !!s && s.classList.contains('fullscreen') && !!s.querySelector('header.text');
+			const s = document.getElementById('ui-home-docs');
+			return !!s && s.classList.contains('fullscreen') && !!s.querySelector('header.shell-legend-text');
 		})()`,
-		AssertFail: "docs should be fullscreen with text header",
+		AssertFail: "docs should be fullscreen with text legend header",
 	}
 	reg.Add(testv1.Step{
 		Name:    "ui-section-docs-via-menu",

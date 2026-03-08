@@ -10,7 +10,7 @@ import (
 func Register(reg *testv1.Registry) {
 	tc := sectionsnav.SectionCase{
 		ID:          "ui-camera-video",
-		NavAria:     "Navigate Camera",
+		NavAria:     "Open Camera",
 		SectionAria: "Camera Section",
 		Screenshot:  "ui_camera.png",
 	}
