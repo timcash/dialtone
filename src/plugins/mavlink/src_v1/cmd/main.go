@@ -176,7 +176,7 @@ func runParams(args []string, defaultNamesCSV string) error {
 			"missing":  missing,
 		}
 		raw, _ := json.MarshalIndent(out, "", "  ")
-		logs.Raw(string(raw))
+		logs.Raw("%s", string(raw))
 	} else {
 		logs.Raw("endpoint=%s", ep)
 		for _, name := range names {

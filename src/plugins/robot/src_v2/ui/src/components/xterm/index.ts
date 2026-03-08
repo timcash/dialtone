@@ -2,7 +2,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { VisualizationControl } from '@ui/types';
-import { addMavlinkListener, sendCommand } from '../../data/connection';
+import { addRobotEventListener, getRobotEventHistory, sendCommand, type RobotEvent } from '../../data/connection';
 import { logInfo } from '../../data/logging';
 import { registerButtons, renderButtons, setMode } from '../../buttons';
 import { ROBOT_SECTION_IDS } from '../../section_ids';
@@ -12,12 +12,23 @@ type CursorPos = {
   col: number;
 };
 
+type LogFilter = 'all' | 'mavlink' | 'camera' | 'command' | 'service' | 'ui' | 'error';
+
+type LogLine = {
+  text: string;
+  filter: Exclude<LogFilter, 'all' | 'error'> | 'unknown';
+  level: 'INFO' | 'WARN' | 'ERROR';
+  timestamp: string;
+};
+
+const MAX_LINES = 300;
+
 export function mountXterm(container: HTMLElement): VisualizationControl {
   const terminalEl = container.querySelector("[aria-label='Xterm Terminal']") as HTMLElement | null;
   const controlsEl = container.querySelector("[aria-label='Log Mode Form']") as HTMLFormElement | null;
   const inputEl = container.querySelector("input[aria-label='Log Command Input']") as HTMLInputElement | null;
   const submitBtn = container.querySelector("button[aria-label='Log Submit']") as HTMLButtonElement | null;
-  
+
   if (!terminalEl || !controlsEl || !inputEl || !submitBtn) {
     throw new Error('xterm terminal controls not found');
   }
@@ -28,7 +39,7 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
     fontSize: 14,
     lineHeight: 1.2,
-    scrollback: 1500,
+    scrollback: 3000,
     theme: {
       background: '#000000',
       foreground: '#cfe3ff',
@@ -38,13 +49,17 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.open(terminalEl);
-  term.writeln('[ROBOT TERM] ready');
-  term.writeln('[ROBOT TERM] listening to mavlink...');
 
   let disposed = false;
+  let paused = false;
+  let activeFilter: LogFilter = 'all';
   let cursor: CursorPos = { row: 0, col: 0 };
   let selectionAnchor: CursorPos | null = null;
-  let unsubscribeMav: (() => void) | null = null;
+  let unsubscribeEvents: (() => void) | null = null;
+  const logLines: LogLine[] = [];
+  let lastStatusText = '';
+  let lastCommandAckResult = '';
+  let lastErrorLine = '';
 
   const lineText = (row: number): string => {
     const line = term.buffer.active.getLine(row);
@@ -52,7 +67,6 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
   };
 
   const lineLength = (row: number): number => lineText(row).length;
-
   const maxRow = (): number => Math.max(0, term.buffer.active.length - 1);
 
   const clampPos = (pos: CursorPos): CursorPos => {
@@ -63,9 +77,7 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
 
   const posToLinear = (pos: CursorPos): number => {
     let idx = 0;
-    for (let row = 0; row < pos.row; row += 1) {
-      idx += lineLength(row) + 1;
-    }
+    for (let row = 0; row < pos.row; row += 1) idx += lineLength(row) + 1;
     return idx + pos.col;
   };
 
@@ -73,6 +85,8 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
     terminalEl.setAttribute('data-cursor-row', String(cursor.row));
     terminalEl.setAttribute('data-cursor-col', String(cursor.col));
     terminalEl.setAttribute('data-selecting', selectionAnchor ? 'true' : 'false');
+    terminalEl.setAttribute('data-filter', activeFilter);
+    terminalEl.setAttribute('data-paused', paused ? 'true' : 'false');
   };
 
   const paintCursor = () => {
@@ -97,19 +111,16 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
 
   const moveCursor = (dx: number, dy: number, extendSelection: boolean) => {
     const next: CursorPos = { row: cursor.row + dy, col: cursor.col + dx };
-    if (dy !== 0 && dx === 0) {
-      next.col = cursor.col;
-    }
+    if (dy !== 0 && dx === 0) next.col = cursor.col;
     cursor = clampPos(next);
     if (extendSelection && selectionAnchor) {
       paintSelection();
       return;
     }
-    // Auto-clear selection if moving without extend
     if (selectionAnchor) {
       selectionAnchor = null;
       term.clearSelection();
-      setMode(ROBOT_SECTION_IDS.xterm, 'Cursor'); // Fallback to cursor mode if we were selecting
+      setMode(ROBOT_SECTION_IDS.xterm, 'Tail');
     }
     paintCursor();
   };
@@ -156,73 +167,170 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
     }
   };
 
+  const matchFilter = (line: LogLine) => {
+    if (activeFilter === 'all') return true;
+    if (activeFilter === 'error') return line.level === 'ERROR';
+    return line.filter === activeFilter;
+  };
+
+  const syncTerminalAttrs = () => {
+    const filtered = logLines.filter(matchFilter);
+    const last = filtered[filtered.length - 1];
+    const filteredLastError = [...filtered].reverse().find((line) => line.level === 'ERROR');
+    terminalEl.setAttribute('data-total-lines', String(filtered.length));
+    terminalEl.setAttribute('data-last-log-line', last?.text || '');
+    terminalEl.setAttribute('data-last-log-category', last?.filter || '');
+    terminalEl.setAttribute('data-last-log-level', last?.level || '');
+    terminalEl.setAttribute('data-last-error-line', lastErrorLine || filteredLastError?.text || '');
+    terminalEl.setAttribute('data-last-status-text', lastStatusText);
+    terminalEl.setAttribute('data-last-command-ack-result', lastCommandAckResult);
+    applyCursorAttrs();
+  };
+
+  const renderLogs = () => {
+    const filtered = logLines.filter(matchFilter);
+    term.reset();
+    term.writeln('[ROBOT TERM] ready');
+    term.writeln('[ROBOT TERM] unified NATS log bus active');
+    term.writeln(`[ROBOT TERM] filter=${activeFilter} paused=${paused ? 'true' : 'false'}`);
+    filtered.slice(-MAX_LINES).forEach((line) => term.writeln(line.text));
+    cursor = clampPos({ row: maxRow(), col: lineLength(maxRow()) });
+    paintCursor();
+    syncTerminalAttrs();
+  };
+
+  const setFilter = (filter: LogFilter) => {
+    activeFilter = filter;
+    renderLogs();
+  };
+
+  const togglePause = () => {
+    paused = !paused;
+    renderButtons(ROBOT_SECTION_IDS.xterm);
+    syncTerminalAttrs();
+  };
+
+  const clearLogs = () => {
+    logLines.splice(0, logLines.length);
+    renderLogs();
+  };
+
   const submitInput = () => {
     const value = inputEl.value.trim();
     if (!value) return;
     const inputAria = inputEl.getAttribute('aria-label') || 'Log Command Input';
     logInfo('ui/xterm', `[TEST_ACTION] input aria=${inputAria} value=${value}`);
     terminalEl.setAttribute('data-last-command', value);
-    
-    term.writeln(`$ ${value}`);
-    
     if (value.startsWith('mode ')) {
-        const parts = value.split(' ');
-        if (parts.length > 1) sendCommand('mode', parts[1]);
+      const parts = value.split(' ');
+      if (parts.length > 1) sendCommand('mode', parts[1]);
     } else if (value === 'arm') {
-        sendCommand('arm');
+      sendCommand('arm');
     } else if (value === 'disarm') {
-        sendCommand('disarm');
+      sendCommand('disarm');
     } else {
-        sendCommand(value);
+      sendCommand(value);
     }
-
     inputEl.value = '';
-    cursor = clampPos({ row: maxRow(), col: lineLength(maxRow()) });
-    paintCursor();
   };
 
-  // Register Buttons
-  registerButtons(ROBOT_SECTION_IDS.xterm, ['Cursor', 'Select', 'Command'], {
-    'Cursor': [
+  const appendEvent = (event: RobotEvent) => {
+    const filter = (event.category === 'unknown' ? 'service' : event.category) as LogLine['filter'];
+    const line: LogLine = {
+      text: event.logLine,
+      filter,
+      level: event.level,
+      timestamp: event.timestamp,
+    };
+    logLines.push(line);
+    if (logLines.length > MAX_LINES * 4) {
+      logLines.splice(0, logLines.length - MAX_LINES * 4);
+    }
+    if (event.subject === 'mavlink.command_ack') {
+      const result = String(event.payload?.result || '').trim();
+      if (result !== '') {
+        lastCommandAckResult = result;
+      }
+    }
+    if (event.subject === 'mavlink.statustext') {
+      const text = String(event.payload?.text || '').trim();
+      if (text !== '') {
+        lastStatusText = text;
+      }
+    }
+    if (event.level === 'ERROR' && line.text.trim() !== '') {
+      lastErrorLine = line.text;
+    }
+    if (!paused) {
+      renderLogs();
+    } else {
+      syncTerminalAttrs();
+    }
+  };
+
+  const bootstrapHistory = () => {
+    logLines.splice(0, logLines.length);
+    getRobotEventHistory({ category: 'all' }).forEach((event) => appendEvent(event));
+    if (logLines.length === 0) {
+      renderLogs();
+    }
+  };
+
+  registerButtons(ROBOT_SECTION_IDS.xterm, ['Tail', 'Filter', 'Command', 'Select'], {
+    Tail: [
       { label: 'Left', action: () => moveCursor(-1, 0, false) },
       { label: 'Right', action: () => moveCursor(1, 0, false) },
       { label: 'Up', action: () => moveCursor(0, -1, false) },
       { label: 'Down', action: () => moveCursor(0, 1, false) },
       { label: 'Home', action: () => moveHome(false) },
       { label: 'End', action: () => moveEnd(false) },
-      { label: 'Select', action: () => startSelection() },
+      { label: paused ? 'Resume' : 'Pause', action: () => togglePause(), active: paused },
       { label: 'Copy', action: () => copySelection() },
     ],
-    'Select': [
+    Filter: [
+      { label: 'All', action: () => setFilter('all'), active: activeFilter === 'all' },
+      { label: 'MAV', action: () => setFilter('mavlink'), active: activeFilter === 'mavlink' },
+      { label: 'Cmd', action: () => setFilter('command'), active: activeFilter === 'command' },
+      { label: 'UI', action: () => setFilter('ui'), active: activeFilter === 'ui' },
+      { label: 'Cam', action: () => setFilter('camera'), active: activeFilter === 'camera' },
+      { label: 'Svc', action: () => setFilter('service'), active: activeFilter === 'service' },
+      { label: 'Err', action: () => setFilter('error'), active: activeFilter === 'error' },
+      { label: 'Clear', action: () => clearLogs() },
+    ],
+    Command: [
+      { label: 'Send', action: () => submitInput() },
+      { label: 'Arm', action: () => sendCommand('arm') },
+      { label: 'Disarm', action: () => sendCommand('disarm') },
+      { label: 'Manual', action: () => sendCommand('mode', 'manual') },
+      { label: 'Guided', action: () => sendCommand('mode', 'guided') },
+      { label: 'Stop', action: () => sendCommand('stop') },
+      { label: 'Tail', action: () => setMode(ROBOT_SECTION_IDS.xterm, 'Tail') },
+      { label: 'Filters', action: () => setMode(ROBOT_SECTION_IDS.xterm, 'Filter') },
+    ],
+    Select: [
       { label: 'Left', action: () => moveCursor(-1, 0, true) },
       { label: 'Right', action: () => moveCursor(1, 0, true) },
       { label: 'Up', action: () => moveCursor(0, -1, true) },
       { label: 'Down', action: () => moveCursor(0, 1, true) },
-      { label: 'Start', action: () => startSelection() }, // Restart anchor?
-      { label: 'Clear', action: () => {
+      { label: 'Start', action: () => startSelection() },
+      {
+        label: 'Clear', action: () => {
           selectionAnchor = null;
           term.clearSelection();
           paintCursor();
-          setMode(ROBOT_SECTION_IDS.xterm, 'Cursor');
-      }},
+          setMode(ROBOT_SECTION_IDS.xterm, 'Tail');
+        },
+      },
       { label: 'Copy', action: () => copySelection() },
-      { label: 'Done', action: () => {
+      {
+        label: 'Done', action: () => {
           selectionAnchor = null;
           term.clearSelection();
           paintCursor();
-          setMode(ROBOT_SECTION_IDS.xterm, 'Cursor');
-      }},
+          setMode(ROBOT_SECTION_IDS.xterm, 'Tail');
+        },
+      },
     ],
-    'Command': [
-      { label: 'Send', action: () => submitInput() },
-      { label: 'Clear', action: () => { inputEl.value = ''; inputEl.focus(); } },
-      { label: 'Left', action: () => moveCursor(-1, 0, false) },
-      { label: 'Right', action: () => moveCursor(1, 0, false) },
-      { label: 'Up', action: () => moveCursor(0, -1, false) },
-      { label: 'Down', action: () => moveCursor(0, 1, false) },
-      { label: 'Select', action: () => startSelection() },
-      { label: 'Copy', action: () => copySelection() },
-    ]
   });
 
   submitBtn.addEventListener('click', submitInput);
@@ -239,32 +347,11 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
   };
   inputEl.addEventListener('keydown', onInputKeyDown);
 
-  const subscribeToMavlink = () => {
-    if (unsubscribeMav) return;
-    unsubscribeMav = addMavlinkListener((data: any) => {
-        if (disposed) return;
-        
-        let msg = '';
-        const ts = new Date().toLocaleTimeString();
-        
-        if (data.text) {
-            const sev = data.severity !== undefined ? `[SEV${data.severity}]` : '';
-            msg = `[${ts}] ${sev} ${data.text}`;
-        } else if (data.command && data.result) {
-            msg = `[${ts}] CMD_ACK: cmd=${data.command} res=${data.result}`;
-        }
-
-        if (msg) {
-            term.writeln(msg);
-            if (cursor.row >= maxRow() - 1) {
-                cursor = clampPos({ row: maxRow(), col: lineLength(maxRow()) });
-                paintCursor();
-            }
-        }
-    });
-  };
-
-  subscribeToMavlink();
+  unsubscribeEvents = addRobotEventListener((event) => {
+    if (disposed) return;
+    appendEvent(event);
+  }, { replay: false });
+  bootstrapHistory();
 
   const safeFit = () => {
     if (container.hidden) return;
@@ -278,9 +365,6 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
 
   const onResize = () => safeFit();
   window.addEventListener('resize', onResize);
-
-  cursor = clampPos({ row: maxRow(), col: lineLength(maxRow()) });
-  paintCursor();
   queueMicrotask(safeFit);
 
   return {
@@ -290,7 +374,7 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
       submitBtn.removeEventListener('click', submitInput);
       controlsEl.removeEventListener('submit', onFormSubmit);
       inputEl.removeEventListener('keydown', onInputKeyDown);
-      if (unsubscribeMav) unsubscribeMav();
+      if (unsubscribeEvents) unsubscribeEvents();
       term.dispose();
     },
     setVisible: (visible: boolean) => {
@@ -299,13 +383,8 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
         inputEl.focus();
         terminalEl.setAttribute('data-ready', 'true');
         controlsEl.setAttribute('data-ready', 'true');
-        subscribeToMavlink();
         renderButtons(ROBOT_SECTION_IDS.xterm);
-      } else {
-        if (unsubscribeMav) {
-            unsubscribeMav();
-            unsubscribeMav = null;
-        }
+        renderLogs();
       }
     },
   };

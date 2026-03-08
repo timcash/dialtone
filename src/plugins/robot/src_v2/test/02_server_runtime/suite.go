@@ -161,8 +161,8 @@ func Register(reg *testv1.Registry) {
 					return fmt.Errorf("integration health missing camera scaffold status")
 				}
 				if !strings.Contains(body, "\"mavlink\":{\"status\":\"not-configured\"}") {
-					ctx.Errorf("integration health missing mavlink scaffold status: %s", body)
-					return fmt.Errorf("integration health missing mavlink scaffold status")
+					ctx.Errorf("integration health missing mavlink not-configured status: %s", body)
+					return fmt.Errorf("integration health missing mavlink not-configured status")
 				}
 				ctx.Infof("integration health reported degraded")
 				return nil

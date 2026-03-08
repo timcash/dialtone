@@ -180,7 +180,9 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 		return test_plugin.RunDev(opts)
 	case "test":
 		testPkg := "./plugins/robot/" + version + "/test/cmd"
-		return go_plugin.RunGo("run", testPkg)
+		runArgs := []string{"run", testPkg}
+		runArgs = append(runArgs, args...)
+		return go_plugin.RunGo(runArgs...)
 	case "sync-code":
 		return runRobotSyncCode(repoRoot, args)
 	case "sync-watch":
@@ -280,7 +282,6 @@ func normalizeRobotBackendURL(raw string) (string, error) {
 	u.Fragment = ""
 	return u.String(), nil
 }
-
 
 func getLatestVersionDir(repoRoot string) string {
 	rt, err := configv1.ResolveRuntime(repoRoot)
@@ -396,14 +397,108 @@ func runSrcV2Relay(repoRoot string, args []string) error {
 	}()
 
 	if *service {
-		return fmt.Errorf("robot src_v2 relay --service currently requires the retired robot src_v1 wake path; use relay without --service for now")
+		serviceName, err := configureCloudflareProxyTarget(repoRoot, relayName, targetURL)
+		if err != nil {
+			return err
+		}
+		logs.Info("robot src_v2 relay service active: %s", serviceName)
 	} else {
-		if err := runDialtone(repoRoot, "cloudflare", "robot", "--name", relayName, "--url", targetURL); err != nil {
+		if err := runDialtone(repoRoot, "cloudflare", "src_v1", "robot", "--name", relayName, "--url", targetURL); err != nil {
 			return err
 		}
 	}
 	logs.Info("robot src_v2 relay active: https://%s.dialtone.earth -> %s", relayName, targetURL)
 	return nil
+}
+
+func configureCloudflareProxyTarget(repoRoot, name, targetURL string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = chooseNonEmpty(strings.TrimSpace(os.Getenv("DIALTONE_DOMAIN")), strings.TrimSpace(os.Getenv("DIALTONE_HOSTNAME")), "rover-1")
+	}
+	token := resolveCloudflareTunnelToken(name)
+	if token == "" {
+		return "", fmt.Errorf("missing Cloudflare tunnel token for %s (set CF_TUNNEL_TOKEN_%s or CF_TUNNEL_TOKEN)", name, strings.ToUpper(strings.ReplaceAll(name, "-", "_")))
+	}
+	cfBin := resolveCloudflaredPath(repoRoot)
+	if cfBin == "" {
+		return "", fmt.Errorf("cloudflared binary not found (expected in DIALTONE_ENV/cloudflare or PATH)")
+	}
+	serviceName := fmt.Sprintf("dialtone-proxy-%s.service", name)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	serviceDir := filepath.Join(home, ".config", "systemd", "user")
+	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
+		return "", err
+	}
+	servicePath := filepath.Join(serviceDir, serviceName)
+	serviceContent := fmt.Sprintf(`[Unit]
+Description=Dialtone Cloudflare Proxy for %s
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%s tunnel --no-autoupdate run --token %s --url %s
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+`, name, cfBin, token, targetURL)
+	if err := os.WriteFile(servicePath, []byte(serviceContent), 0o644); err != nil {
+		return "", err
+	}
+	if err := runSystemctlUser("daemon-reload"); err != nil {
+		return "", err
+	}
+	if err := runSystemctlUser("enable", serviceName); err != nil {
+		return "", err
+	}
+	if err := runSystemctlUser("restart", serviceName); err != nil {
+		if err := runSystemctlUser("start", serviceName); err != nil {
+			return "", err
+		}
+	}
+	return serviceName, nil
+}
+
+func resolveCloudflareTunnelToken(name string) string {
+	key := "CF_TUNNEL_TOKEN_" + strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(name), "-", "_"))
+	if token := strings.TrimSpace(os.Getenv(key)); token != "" {
+		return token
+	}
+	return strings.TrimSpace(os.Getenv("CF_TUNNEL_TOKEN"))
+}
+
+func resolveCloudflaredPath(repoRoot string) string {
+	envRoot := chooseNonEmpty(strings.TrimSpace(os.Getenv("DIALTONE_ENV")), filepath.Join(repoRoot, "..", "dialtone_dependencies"))
+	candidate := filepath.Join(envRoot, "cloudflare", "cloudflared")
+	if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
+		return candidate
+	}
+	if p, err := exec.LookPath("cloudflared"); err == nil {
+		return p
+	}
+	return ""
+}
+
+func runSystemctlUser(args ...string) error {
+	cmd := exec.Command("systemctl", append([]string{"--user"}, args...)...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	return cmd.Run()
+}
+
+func chooseNonEmpty(values ...string) string {
+	for _, v := range values {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 func runSrcV2Clean(args []string) error {
@@ -1715,8 +1810,11 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 	if err != nil {
 		return fmt.Errorf("remote /api/integration-health check failed: %w", err)
 	}
-	if !strings.Contains(integOut, "\"camera\":{\"status\":\"configured\"}") || !strings.Contains(integOut, "\"mavlink\":{\"status\":\"configured\"}") {
-		return fmt.Errorf("remote /api/integration-health missing configured camera/mavlink")
+	if !strings.Contains(integOut, "\"camera\":{\"status\":\"configured\"}") {
+		return fmt.Errorf("remote /api/integration-health missing configured camera")
+	}
+	if !strings.Contains(integOut, "\"mavlink\":{\"status\":\"ok\"}") {
+		return fmt.Errorf("remote /api/integration-health missing live mavlink ok status")
 	}
 	streamCodeOut, err := ssh_plugin.RunSSHCommand(client, "curl -sS -I --max-time 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:18086/stream")
 	if err != nil {

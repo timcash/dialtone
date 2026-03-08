@@ -13,6 +13,9 @@ class TableControl implements VisualizationControl {
   private allRows = new Map<string, TableRow>();
   private visible = false;
   private unsubscribe: (() => void) | null = null;
+  private lastStatusText = '';
+  private lastCommandAckCommand = '';
+  private lastCommandAckResult = '';
 
   constructor(private container: HTMLElement) {
     this.subscribe();
@@ -63,8 +66,11 @@ class TableControl implements VisualizationControl {
       this.allRows.set('pitch', { key: 'pitch', value: data.pitch.toFixed(3), status: 'MAV' });
       this.allRows.set('yaw', { key: 'yaw', value: data.yaw.toFixed(3), status: 'MAV' });
     } else if (data.text !== undefined && data.severity !== undefined) {
+      this.lastStatusText = String(data.text);
       this.allRows.set('status_text', { key: 'status_text', value: data.text, status: `MAV_SEV_${data.severity}` });
     } else if (data.command !== undefined && data.result !== undefined) {
+      this.lastCommandAckCommand = String(data.command);
+      this.lastCommandAckResult = String(data.result);
       this.allRows.set('command_ack_cmd', { key: 'command_ack_cmd', value: String(data.command), status: `MAV_ACK_${data.result}` });
     } else if (data.type === 'CONTROL_FEEDBACK') {
       if (data.source !== undefined) this.allRows.set('control_source', { key: 'control_source', value: String(data.source), status: 'MAV' });
@@ -96,7 +102,10 @@ class TableControl implements VisualizationControl {
     tbody.innerHTML = rows
       .map((r) => `<tr><td>${r.key}</td><td>${r.value}</td><td>${r.status}</td></tr>`)
       .join('');
-    
+
+    table.setAttribute('data-last-status-text', this.lastStatusText);
+    table.setAttribute('data-last-command-ack-command', this.lastCommandAckCommand);
+    table.setAttribute('data-last-command-ack-result', this.lastCommandAckResult);
     table.setAttribute('data-ready', 'true');
   }
 
