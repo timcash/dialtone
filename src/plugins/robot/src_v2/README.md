@@ -27,6 +27,12 @@ This document is the end-to-end operating workflow for `robot src_v2`:
 # Dev server + headed browser on mesh node + rover backend proxy routes
 ./dialtone.sh robot src_v2 dev --browser-node chroma --backend-url http://rover-1:18086
 
+# Dev server on this WSL node, headed browser on legion, real rover backend
+./dialtone.sh robot src_v2 dev --browser-node legion --public-url http://127.0.0.1:3000 --backend-url https://rover-1.dialtone.earth
+
+# Walk the live robot UI menu in the headed browser at one action per second
+src/plugins/robot/src_v2/ui/demo_menu_walkthrough.sh --host legion --url http://127.0.0.1:3000 --apm 60
+
 # Publish release artifacts
 ./dialtone.sh robot src_v2 publish --repo timcash/dialtone
 
@@ -113,6 +119,9 @@ Common dev flows:
 # Dev + browser on chroma + backend routes proxied to rover
 ./dialtone.sh robot src_v2 dev --browser-node chroma --backend-url http://rover-1:18086
 
+# Dev + browser on legion + backend routes proxied to the real rover public UI
+./dialtone.sh robot src_v2 dev --browser-node legion --public-url http://127.0.0.1:3000 --backend-url https://rover-1.dialtone.earth
+
 # Same backend proxy via env var
 ROBOT_DEV_BACKEND_URL=http://rover-1:18086 ./dialtone.sh robot src_v2 dev --browser-node chroma
 ```
@@ -120,6 +129,7 @@ ROBOT_DEV_BACKEND_URL=http://rover-1:18086 ./dialtone.sh robot src_v2 dev --brow
 Notes:
 - If `--backend-url` omits a port (example `http://rover-1`), it targets port `80`.
 - For rover runtime, use `http://rover-1:18086` to avoid `ECONNREFUSED` on proxied API/NATS routes.
+- For the live headed browser on `legion`, use `--public-url http://127.0.0.1:3000` so the Windows Chrome session opens the WSL-forwarded dev port on the same machine.
 - Stop dev with `Ctrl+C`.
 
 ## 4) Local Dev + Test Loop
