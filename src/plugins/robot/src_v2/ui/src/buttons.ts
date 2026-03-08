@@ -59,6 +59,8 @@ export function renderButtons(sectionId: string) {
 
   const form = document.querySelector(`form[data-mode-form='${getFormId(sectionId)}']`);
   if (!form) return;
+  form.setAttribute('data-current-mode', cfg.currentMode);
+  form.setAttribute('data-buttons-ready', 'true');
 
   const btns = Array.from(form.querySelectorAll('button'));
   // Indices 0-7 are action buttons (1-8)
@@ -77,6 +79,8 @@ export function renderButtons(sectionId: string) {
       btn.onclick = (e) => {
         e.preventDefault();
         const aria = btn.getAttribute('aria-label') || def.label;
+        form.setAttribute('data-last-button-aria', aria);
+        form.setAttribute('data-last-button-label', def.label);
         logInfo('ui/buttons', `[TEST_ACTION] click aria=${aria}`);
         def.action();
         // Re-render to update active state if needed
@@ -107,6 +111,8 @@ export function renderButtons(sectionId: string) {
     modeBtn.onclick = (e) => {
       e.preventDefault();
       const aria = modeBtn.getAttribute('aria-label') || `Mode: ${cfg.currentMode}`;
+      form.setAttribute('data-last-button-aria', aria);
+      form.setAttribute('data-last-button-label', `Mode: ${cfg.currentMode}`);
       logInfo('ui/buttons', `[TEST_ACTION] click aria=${aria}`);
       toggleMode(sectionId);
     };

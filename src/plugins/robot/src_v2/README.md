@@ -32,11 +32,10 @@ cd /home/user/dialtone
 # 3. Run the integrated robot src_v2 test suite
 ./dialtone.sh robot src_v2 test
 
-# 4. Run only the dedicated arm browser step through the Go test/src_v1 suite
-./dialtone.sh robot src_v2 test --filter three-system-arm
-
-# 5. Run only the local UI mock E2E / terminal validation step
-./dialtone.sh robot src_v2 test --filter local-ui-mock-e2e
+# 4. Run focused section-by-section browser steps through the Go test/src_v1 suite
+./dialtone.sh robot src_v2 test --filter ui-three-buttons
+./dialtone.sh robot src_v2 test --filter ui-terminal-routing-and-buttons
+./dialtone.sh robot src_v2 test --filter ui-video-buttons
 
 # 6. Inspect generated report + screenshots
 sed -n '1,220p' src/plugins/robot/src_v2/TEST.md
@@ -199,14 +198,16 @@ Notes:
 DIALTONE_TEST_BROWSER_NODE=legion ./dialtone.sh robot src_v2 test
 ```
 
-4. Focused UI step while iterating on terminal/logging:
+4. Focused UI steps while iterating:
 ```bash
-./dialtone.sh robot src_v2 test --filter local-ui-mock-e2e
+./dialtone.sh robot src_v2 test --filter ui-terminal-routing-and-buttons
+./dialtone.sh robot src_v2 test --filter ui-video-buttons
+./dialtone.sh robot src_v2 test --filter ui-settings-and-keyparams
 ```
 
-5. Dedicated filtered arm flow:
+5. Dedicated filtered Three/arm flow:
 ```bash
-./dialtone.sh robot src_v2 test --filter three-system-arm
+./dialtone.sh robot src_v2 test --filter ui-three-buttons
 ```
 
 6. Generated test artifacts:
@@ -221,18 +222,30 @@ Available integrated test steps:
 - `01-build-robot-v2-binary`
 - `02-server-health-and-root-behavior`
 - `03-manifest-has-required-sync-artifacts`
-- `04-local-ui-mock-e2e-smoke`
-- `04-three-system-arm-cli`
-- `05-autoswap-compose-run-smoke`
+- `04-ui-section-navigation`
+- `05-ui-table-buttons`
+- `06-ui-steering-settings-buttons`
+- `07-ui-three-buttons-three-system-arm`
+- `08-ui-terminal-routing-and-buttons`
+- `09-ui-video-buttons`
+- `10-ui-settings-and-keyparams`
+- `11-autoswap-compose-run-smoke`
 
-The current UI mock E2E explicitly validates the arm rejection path:
-- navigate to `Three`
-- exercise control buttons
-- open `Terminal`
+The current headed UI suite is organized section by section:
+- `04-ui-section-navigation`: menu navigation across all robot sections
+- `05-ui-table-buttons`: telemetry table refresh/clear behavior
+- `06-ui-steering-settings-buttons`: steering selection and save/reset controls
+- `07-ui-three-buttons-three-system-arm`: Drive/System/Guided controls, including arm/disarm and mode changes
+- `08-ui-terminal-routing-and-buttons`: unified NATS log routing, MAVLink error validation, filter/tail/command/select controls
+- `09-ui-video-buttons`: camera feed switching plus bookmark capture
+- `10-ui-settings-and-keyparams`: chatlog toggle plus key-params visibility
+
+The terminal step explicitly validates the arm rejection path:
 - publish mock `mavlink.command_ack` + `mavlink.statustext`
 - assert terminal attrs:
   - `data-last-command-ack-result=MAV_RESULT_FAILED`
   - `data-last-status-text=Arm: Radio failsafe on`
+- navigate to `Telemetry` and confirm the replayed command-ack state reaches the table section too
 - save screenshots and include them in `TEST.md`
 
 ## 5) UI Log Architecture
