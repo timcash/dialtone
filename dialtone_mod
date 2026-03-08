@@ -212,7 +212,7 @@ run_tsnet_bootstrap() {
     args+=(--env-file "$ENV_FILE")
   fi
   local tsnet_out
-  if ! tsnet_out="$($NIX_BIN "${NIX_FLAGS[@]}" shell -f "$NIXPKGS_URL" "${NIX_PKGS[@]}" --command go run ./src/cmd/dialtone_mod/main.go "${args[@]}" 2>&1)"; then
+  if ! tsnet_out="$($NIX_BIN "${NIX_FLAGS[@]}" shell -f "$NIXPKGS_URL" "${NIX_PKGS[@]}" --command go run ./src/cli.go "${args[@]}" 2>&1)"; then
     echo "warning: tsnet bootstrap failed; continuing without automatic tsnet keepalive" >&2
     printf '%s\n' "$tsnet_out" >&2
     return 1
@@ -507,8 +507,8 @@ if [ "$1" = "tmux" ] && [ "${2:-}" = "v1" ]; then
     echo "tmux command is required: ./dialtone_mod tmux v1 <command>" >&2
     exit 1
   fi
-  exec "$NIX_BIN" "${NIX_FLAGS[@]}" shell -f "$NIXPKGS_URL" "${NIX_PKGS[@]}" --command env IN_NIX_SHELL=1 go run ./src/cmd/dialtone_mod/main.go tmux v1 "$@"
+  exec "$NIX_BIN" "${NIX_FLAGS[@]}" shell -f "$NIXPKGS_URL" "${NIX_PKGS[@]}" --command env IN_NIX_SHELL=1 go run ./src/cli.go tmux v1 "$@"
   exit $?
 fi
 
-exec "$NIX_BIN" "${NIX_FLAGS[@]}" shell -f "$NIXPKGS_URL" "${NIX_PKGS[@]}" --command env IN_NIX_SHELL=1 go run ./src/cmd/dialtone_mod/main.go "$@"
+exec "$NIX_BIN" "${NIX_FLAGS[@]}" shell -f "$NIXPKGS_URL" "${NIX_PKGS[@]}" --command env IN_NIX_SHELL=1 go run ./src/cli.go "$@"
