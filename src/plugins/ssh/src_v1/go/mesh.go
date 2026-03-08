@@ -305,6 +305,17 @@ func resolvePreferredHost(node MeshNode, port string) string {
 	return candidates[0]
 }
 
+func PreferredHost(node MeshNode, port string) string {
+	port = strings.TrimSpace(port)
+	if port == "" {
+		port = strings.TrimSpace(node.Port)
+	}
+	if port == "" {
+		port = "22"
+	}
+	return resolvePreferredHost(node, port)
+}
+
 func resolveMeshCandidates(node MeshNode) []string {
 	seen := map[string]struct{}{}
 	candidates := make([]string, 0, len(node.HostCandidates)+1)
@@ -389,9 +400,9 @@ const (
 )
 
 var defaultMeshRouteOrder = []string{
-	meshRouteLinkLocal,
-	meshRoutePrivate,
 	meshRouteTailnet,
+	meshRoutePrivate,
+	meshRouteLinkLocal,
 	meshRouteOther,
 }
 
@@ -411,9 +422,9 @@ func resolveRoutePreferenceOrder(preference []string) []int {
 	}
 	if len(categoryOrder) == 0 {
 		return []int{
-			meshHostPriorityLinkLocal,
-			meshHostPriorityPrivate,
 			meshHostPriorityTailnet,
+			meshHostPriorityPrivate,
+			meshHostPriorityLinkLocal,
 			meshHostPriorityOther,
 		}
 	}

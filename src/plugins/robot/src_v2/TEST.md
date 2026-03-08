@@ -1,18 +1,18 @@
 # Test Report: robot-src-v2
 
-- **Date**: Sun, 01 Mar 2026 12:21:12 PST
-- **Total Duration**: 28.752958266s
+- **Date**: Sat, 07 Mar 2026 18:32:40 PST
+- **Total Duration**: 6.221486277s
 
 ## Summary
 
-- **Steps**: 3 / 4 passed
-- **Status**: FAILED
+- **Steps**: 5 / 5 passed
+- **Status**: PASSED
 
 ## Details
 
 ### 1. ✅ 01-build-robot-v2-binary
 
-- **Duration**: 290.105277ms
+- **Duration**: 315.641801ms
 - **Report**: binary build verified
 
 #### Logs
@@ -34,7 +34,7 @@ PASS: [TEST][PASS] [STEP:01-build-robot-v2-binary] report: binary build verified
 
 ### 2. ✅ 02-server-health-and-root-behavior
 
-- **Duration**: 165.420585ms
+- **Duration**: 1.035842887s
 - **Report**: server runtime smoke verified
 
 #### Logs
@@ -66,7 +66,7 @@ PASS: [TEST][PASS] [STEP:02-server-health-and-root-behavior] report: server runt
 
 ### 3. ✅ 03-manifest-has-required-sync-artifacts
 
-- **Duration**: 583.557µs
+- **Duration**: 560.226µs
 - **Report**: manifest sync artifact contract verified
 
 #### Logs
@@ -85,22 +85,46 @@ PASS: [TEST][PASS] [STEP:03-manifest-has-required-sync-artifacts] report: manife
 
 ---
 
-### 4. ❌ 04-local-ui-mock-e2e-smoke
+### 4. ✅ 04-local-ui-mock-e2e-smoke
 
-- **Duration**: 28.29683801s
-- **Error**: `error-ping browser readiness: Get "http://172.27.80.1:19334/json/new?about:blank": read tcp 172.27.88.249:36144->172.27.80.1:19334: read: connection reset by peer`
+- **Duration**: 3.616000078s
+- **Report**: local UI mock E2E smoke verified
 
 #### Logs
 
 ```text
 INFO: ui build complete
 INFO: ui root returned 200
+WARN: ERROR_PING: skipped for chrome src_v3 NATS-managed browser session
+INFO: browser ui checks passed
+INFO: mock nats publish ok
+INFO: report: local UI mock E2E smoke verified
+PASS: [TEST][PASS] [STEP:04-local-ui-mock-e2e-smoke] report: local UI mock E2E smoke verified
 ```
 
-#### Errors
+#### Browser Logs
 
 ```text
-FAIL: [TEST][FAIL] [STEP:04-local-ui-mock-e2e-smoke] failed: error-ping browser readiness: Get "http://172.27.80.1:19334/json/new?about:blank": read tcp 172.27.88.249:36144->172.27.80.1:19334: read: connection reset by peer
+<empty>
+```
+
+#### Screenshots
+
+![auto_04-local-ui-mock-e2e-smoke.png](screenshots/auto_04-local-ui-mock-e2e-smoke.png)
+
+---
+
+### 5. ✅ 05-autoswap-compose-run-smoke
+
+- **Duration**: 1.250535134s
+- **Report**: autoswap manifest composition run verified
+
+#### Logs
+
+```text
+INFO: autoswap compose run passed
+INFO: report: autoswap manifest composition run verified
+PASS: [TEST][PASS] [STEP:05-autoswap-compose-run-smoke] report: autoswap manifest composition run verified
 ```
 
 #### Browser Logs
@@ -111,3 +135,12 @@ FAIL: [TEST][FAIL] [STEP:04-local-ui-mock-e2e-smoke] failed: error-ping browser 
 
 ---
 
+<!-- DIALTONE_CHROME_REPORT_START -->
+
+## Chrome Report
+
+- hostnode: `legion`
+- chrome_count: `unknown`
+- error: `remote browser inventory on legion failed: powershell command failed: exit status 1`
+
+<!-- DIALTONE_CHROME_REPORT_END -->

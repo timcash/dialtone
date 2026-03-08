@@ -154,7 +154,7 @@ Notes:
 - Default transport is Go SSH (`golang.org/x/crypto/ssh`).
 - Legion now uses SSH transport on port `2223` (user `user`) instead of local PowerShell transport.
 - Darkmac host selection is LAN-first (`192.168.4.31`) with tailnet fallback.
-- Rover host selection prefers tailscale (`rover-1.shad-artichoke.ts.net`) first, then link-local (`169.254.217.151`, "link-local"), then LAN (`192.168.4.36` on cashwifi). Other routes remain fallback.
+- Rover host selection prefers tailscale (`rover-1.shad-artichoke.ts.net`) first, then WLAN/LAN (`192.168.4.36` on cashwifi), and only then link-local (`169.254.217.151`, `link-local`) as a debug fallback.
 - WSL host selection is LAN-first (`192.168.4.52`) with tailnet fallback.
 - `sync-repos` updates each node to the same branch using node-specific repo paths.
 - `sync-repos` skips dirty repos by default; use `--allow-dirty` to force.

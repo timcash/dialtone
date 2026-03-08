@@ -200,7 +200,7 @@ func preferredHost(node sshv1.MeshNode) string {
 	if node.PreferWSLPowerShell && runtime.GOOS == "linux" {
 		return "127.0.0.1"
 	}
-	return strings.TrimSpace(node.Host)
+	return strings.TrimSpace(sshv1.PreferredHost(node, node.Port))
 }
 
 func mapNodeGOOS(nodeOS string) string {

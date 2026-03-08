@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -240,6 +241,17 @@ func (d *daemonState) handle(req commandRequest) commandResponse {
 			resp.OK = false
 			resp.Error = err.Error()
 			return d.refreshResponse(resp)
+		}
+	case "reset":
+		if err := d.closeBrowser(); err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return d.refreshResponse(resp)
+		}
+		if runtime.GOOS == "windows" {
+			if err := cleanupChromeProfileLocks(d.profileDir); err != nil {
+				logs.Error("chrome src_v3 reset cleanup failed: %v", err)
+			}
 		}
 	default:
 		resp.OK = false

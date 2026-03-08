@@ -1,9 +1,9 @@
 {
-  "pid": 96030,
-  "debug_port": 44939,
-  "websocket_url": "ws://127.0.0.1:44939/devtools/browser/cbbf453f-a847-4213-a921-82e91eaf571f",
-  "websocket_path": "/devtools/browser/cbbf453f-a847-4213-a921-82e91eaf571f",
-  "debug_url": "http://127.0.0.1:44939/devtools/browser/cbbf453f-a847-4213-a921-82e91eaf571f",
-  "is_new": false,
-  "generated_at_rfc3339": "2026-02-28T16:55:17-08:00"
+  "host": "legion",
+  "role": "robot-dev",
+  "pid": 18416,
+  "debug_port": 19464,
+  "nats_port": 19465,
+  "current_url": "http://127.0.0.1:3000/",
+  "managed_target": "managed"
 }

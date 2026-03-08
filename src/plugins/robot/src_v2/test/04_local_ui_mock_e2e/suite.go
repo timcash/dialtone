@@ -9,10 +9,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
-	"github.com/chromedp/chromedp"
 	"github.com/nats-io/nats.go"
 )
 
@@ -52,6 +52,10 @@ func Register(reg *testv1.Registry) {
 			if remoteNode != "" {
 				if v := strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_BASE_URL")); v != "" {
 					browserBaseURL = strings.TrimRight(v, "/")
+				} else if isWSL() && strings.EqualFold(remoteNode, "legion") {
+					// In the normal dev setup, legion is the local Windows host for this
+					// WSL instance, so localhost forwarding is the most reliable path.
+					browserBaseURL = baseURL
 				} else if dnsName := tailscaleSelfDNSName(); dnsName != "" {
 					browserBaseURL = "http://" + dnsName + ":" + port
 				} else if host, err := os.Hostname(); err == nil && strings.TrimSpace(host) != "" {
@@ -72,13 +76,19 @@ func Register(reg *testv1.Registry) {
 				"--ui-dist", uiDist,
 			)
 			cmd.Dir = repo
+			logPath := filepath.Join(repo, "src", "plugins", "robot", "src_v2", "test", "local_ui_mock_server.log")
+			logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			defer logFile.Close()
+			cmd.Stdout = logFile
+			cmd.Stderr = logFile
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 			if err := cmd.Start(); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			defer func() {
-				_ = cmd.Process.Kill()
-				_, _ = cmd.Process.Wait()
-			}()
+			_ = cmd.Process.Release()
 
 			if err := ctx.WaitForStepMessageAfterAction("ui root returned 200", 10*time.Second, func() error {
 				deadline := time.Now().Add(8 * time.Second)
@@ -106,7 +116,7 @@ func Register(reg *testv1.Registry) {
 					Role:        "robot-src-v2-e2e",
 					RemoteNode:  remoteNode,
 					UserDataDir: userDataDir,
-					URL:         browserBaseURL + "/#hero",
+					URL:         browserBaseURL + "/#robot-hero-stage",
 				})
 				if err != nil {
 					return err
@@ -237,18 +247,14 @@ func wslHostIPForWindowsBrowser() string {
 }
 
 func waitForHeroReadyByID(ctx *testv1.StepContext, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		var ready bool
-		err := ctx.RunBrowserWithTimeout(1500*time.Millisecond, chromedp.Evaluate(`(() => {
-			const el = document.getElementById('robot-hero-stage');
-			if (!el) return false;
-			return el.getAttribute('data-ready') === 'true' && el.getAttribute('data-active') === 'true';
-		})()`, &ready))
-		if err == nil && ready {
-			return nil
-		}
-		time.Sleep(200 * time.Millisecond)
+	if err := ctx.WaitForAriaLabel("Hero Section", timeout); err != nil {
+		return err
 	}
-	return fmt.Errorf("timed out waiting for #robot-hero-stage ready/active after %s", timeout)
+	if err := ctx.WaitForAriaLabel("Hero Canvas", timeout); err != nil {
+		return err
+	}
+	if err := ctx.WaitForAriaLabelAttrEquals("Hero Section", "data-ready", "true", timeout); err != nil {
+		return err
+	}
+	return ctx.WaitForAriaLabelAttrEquals("Hero Section", "data-active", "true", timeout)
 }
