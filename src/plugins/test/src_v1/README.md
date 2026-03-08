@@ -110,6 +110,7 @@ Remote browser behavior:
 - default is local/headless unless caller passes explicit attach options
 - set `DIALTONE_TEST_BROWSER_NODE=<node>` or pass plugin-level `--attach <node>`
 - when attach is active, browser console/error events are still routed through test logger + NATS
+- for `chrome src_v3` service sessions, treat the managed remote browser as exclusive for the duration of the run; do not run multiple attach suites against the same host at the same time
 
 ## Logs + NATS
 

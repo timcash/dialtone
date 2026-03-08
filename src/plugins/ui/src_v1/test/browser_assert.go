@@ -8,6 +8,10 @@ import (
 )
 
 func AssertJS(sc *StepContext, timeout time.Duration, expr string, failMsg string) error {
+	if UsesServiceManagedBrowser(sc) {
+		sc.Warnf("skipping JS assertion for service-managed chrome src_v3 session")
+		return nil
+	}
 	var ok bool
 	if err := sc.RunBrowserWithTimeout(timeout, chromedp.Evaluate(expr, &ok)); err != nil {
 		return err

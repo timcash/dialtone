@@ -9,8 +9,8 @@ import (
 
 func Register(reg *testv1.Registry) {
 	tc := sectionsnav.SectionCase{
-		ID:          "ui-terminal-xterm",
-		NavAria:     "Navigate Terminal",
+		ID:          "ui-terminal-log",
+		NavAria:     "Open Terminal",
 		SectionAria: "Terminal Section",
 		Screenshot:  "ui_terminal_section.png",
 	}

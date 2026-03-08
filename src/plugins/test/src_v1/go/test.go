@@ -378,9 +378,6 @@ func (s *BrowserSession) WaitForAriaLabelAttrEquals(label, attr, expected string
 }
 
 func (s *BrowserSession) Close() {
-	if s.isServiceManaged() {
-		_ = chrome.CleanupSession(s.Session)
-	}
 	if s.cancelTab != nil {
 		s.cancelTab()
 	}

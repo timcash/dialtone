@@ -50,6 +50,7 @@ type CommandResponse struct {
 	Tabs          []PageInfo `json:"tabs,omitempty"`
 	Unhealthy     bool       `json:"unhealthy,omitempty"`
 	ConsoleLines  []string   `json:"console_lines,omitempty"`
+	Value         string     `json:"value,omitempty"`
 	ScreenshotB64 string     `json:"screenshot_b64,omitempty"`
 }
 

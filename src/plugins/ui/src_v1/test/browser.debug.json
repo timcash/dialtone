@@ -1,7 +1,7 @@
 {
-  "websocket_url": "ws://100.70.50.64:19333/devtools/browser/d6d5bc3b-a7cb-4740-9d86-6101bfa7430a",
-  "debug_port": 19333,
-  "pid": 0,
+  "websocket_url": "",
+  "debug_port": 19464,
+  "pid": 22548,
   "role": "test",
-  "updated_at_utc": "2026-02-28T20:38:30Z"
+  "updated_at_utc": "2026-03-08T17:18:02Z"
 }
