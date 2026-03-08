@@ -316,6 +316,53 @@ func PreferredHost(node MeshNode, port string) string {
 	return resolvePreferredHost(node, port)
 }
 
+func RouteHost(node MeshNode, route string, port string) string {
+	port = strings.TrimSpace(port)
+	if port == "" {
+		port = strings.TrimSpace(node.Port)
+	}
+	if port == "" {
+		port = "22"
+	}
+	route = normalizeRouteCategory(route)
+	if route == "" {
+		return ""
+	}
+	candidates := prioritizedRouteHostsForNode(node, route, resolveMeshCandidates(node))
+	if len(candidates) == 0 {
+		return ""
+	}
+	for _, h := range candidates {
+		if canReachHostFn(h, port, 450*time.Millisecond) {
+			return h
+		}
+	}
+	return candidates[0]
+}
+
+func DialMeshNodeViaRoute(target string, route string, opts CommandOptions) (*ssh.Client, MeshNode, string, string, error) {
+	node, err := ResolveMeshNode(target)
+	if err != nil {
+		return nil, MeshNode{}, "", "", err
+	}
+	user := strings.TrimSpace(opts.User)
+	if user == "" {
+		user = node.User
+	}
+	port := strings.TrimSpace(opts.Port)
+	if port == "" {
+		port = node.Port
+	}
+	if port == "" {
+		port = "22"
+	}
+	host, client, err := dialMeshNodeViaRoute(node, normalizeRouteCategory(route), user, port, opts.Password)
+	if err != nil {
+		return nil, MeshNode{}, "", "", fmt.Errorf("ssh dial %s@%s:%s failed: %w", user, host, port, err)
+	}
+	return client, node, host, port, nil
+}
+
 func resolveMeshCandidates(node MeshNode) []string {
 	seen := map[string]struct{}{}
 	candidates := make([]string, 0, len(node.HostCandidates)+1)
@@ -356,6 +403,25 @@ func prioritizedMeshHostsForNode(node MeshNode, candidates []string) []string {
 	}
 	order := resolveRoutePreferenceOrder(node.RoutePreference)
 	return prioritizedMeshHostsByCategory(candidates, order, meshRouteCategoryNormalize)
+}
+
+func prioritizedRouteHostsForNode(node MeshNode, route string, candidates []string) []string {
+	routePriority := routeCategoryPriority(route)
+	filtered := make([]string, 0, len(candidates))
+	for _, raw := range candidates {
+		h := strings.TrimSpace(strings.TrimSuffix(raw, "."))
+		if h == "" {
+			continue
+		}
+		if meshRouteCategoryNormalize(h) != routePriority {
+			continue
+		}
+		filtered = append(filtered, h)
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return prioritizedMeshHostsByCategory(filtered, []int{routePriority}, meshRouteCategoryNormalize)
 }
 
 func prioritizedMeshHostsByCategory(candidates []string, categoryOrder []int, categoryNormalizer func(string) int) []string {
@@ -589,6 +655,44 @@ func canReachHostPort(host, port string, timeout time.Duration) bool {
 
 func shouldUseLocalPowerShell(node MeshNode) bool {
 	return node.PreferWSLPowerShell && isWSLFunc()
+}
+
+func dialMeshNodeViaRoute(node MeshNode, route, user, port, password string) (string, *ssh.Client, error) {
+	if route == "" {
+		return "", nil, fmt.Errorf("route is required")
+	}
+	candidates := prioritizedRouteHostsForNode(node, route, resolveMeshCandidates(node))
+	if len(candidates) == 0 {
+		return "", nil, fmt.Errorf("mesh node %s has no %s host candidates", node.Name, route)
+	}
+
+	attempted := map[string]struct{}{}
+	errors := make([]string, 0, len(candidates))
+	for _, host := range candidates {
+		if !canReachHostFn(host, port, 450*time.Millisecond) {
+			continue
+		}
+		attempted[host] = struct{}{}
+		client, err := dialMeshClient(host, port, user, password)
+		if err == nil {
+			return host, client, nil
+		}
+		errors = append(errors, fmt.Sprintf("%s: %v", host, err))
+	}
+	for _, host := range candidates {
+		if _, ok := attempted[host]; ok {
+			continue
+		}
+		client, err := dialMeshClient(host, port, user, password)
+		if err == nil {
+			return host, client, nil
+		}
+		errors = append(errors, fmt.Sprintf("%s: %v", host, err))
+	}
+	if len(attempted) > 0 {
+		return candidates[0], nil, fmt.Errorf("all reachable %s host attempts failed (%s)", route, strings.Join(errors, "; "))
+	}
+	return candidates[0], nil, fmt.Errorf("all %s host attempts failed (%s)", route, strings.Join(errors, "; "))
 }
 
 func ResolveCommandTransport(target string) (string, error) {
