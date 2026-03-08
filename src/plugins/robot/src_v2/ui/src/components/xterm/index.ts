@@ -120,6 +120,7 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
     if (selectionAnchor) {
       selectionAnchor = null;
       term.clearSelection();
+      terminalEl.setAttribute('data-selecting', 'false');
       setMode(ROBOT_SECTION_IDS.xterm, 'Tail');
     }
     paintCursor();
@@ -145,6 +146,7 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
 
   const startSelection = () => {
     selectionAnchor = { ...cursor };
+    terminalEl.setAttribute('data-selecting', 'true');
     paintSelection();
     setMode(ROBOT_SECTION_IDS.xterm, 'Select');
   };
@@ -317,6 +319,7 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
         label: 'Clear', action: () => {
           selectionAnchor = null;
           term.clearSelection();
+          terminalEl.setAttribute('data-selecting', 'false');
           paintCursor();
           setMode(ROBOT_SECTION_IDS.xterm, 'Tail');
         },
@@ -326,6 +329,7 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
         label: 'Done', action: () => {
           selectionAnchor = null;
           term.clearSelection();
+          terminalEl.setAttribute('data-selecting', 'false');
           paintCursor();
           setMode(ROBOT_SECTION_IDS.xterm, 'Tail');
         },

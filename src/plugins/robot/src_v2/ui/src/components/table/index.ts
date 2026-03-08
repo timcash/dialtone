@@ -81,9 +81,7 @@ class TableControl implements VisualizationControl {
       if (data.timestamp !== undefined) this.allRows.set('control_feedback_ts', { key: 'control_feedback_ts', value: String(data.timestamp), status: 'MAV' });
     }
     
-    if (this.visible) {
-      this.renderRows();
-    }
+    this.renderRows();
   }
 
   dispose(): void {
@@ -106,6 +104,7 @@ class TableControl implements VisualizationControl {
     table.setAttribute('data-last-status-text', this.lastStatusText);
     table.setAttribute('data-last-command-ack-command', this.lastCommandAckCommand);
     table.setAttribute('data-last-command-ack-result', this.lastCommandAckResult);
+    table.setAttribute('data-row-count', String(rows.length));
     table.setAttribute('data-ready', 'true');
   }
 
@@ -115,11 +114,6 @@ class TableControl implements VisualizationControl {
       this.subscribe();
       this.renderRows();
       renderButtons(ROBOT_SECTION_IDS.table);
-    } else {
-      if (this.unsubscribe) {
-        this.unsubscribe();
-        this.unsubscribe = null;
-      }
     }
   }
 }

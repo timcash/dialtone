@@ -16,276 +16,641 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+const (
+	mockPort   = "18083"
+	mockNATSP  = "18224"
+	mockNATSWP = "18225"
+)
+
+type mockUISession struct {
+	repo           string
+	baseURL        string
+	browserBaseURL string
+	remoteNode     string
+}
+
 func Register(reg *testv1.Registry) {
 	reg.Add(testv1.Step{
-		Name:    "04-local-ui-mock-e2e-smoke",
-		Timeout: 90 * time.Second,
+		Name:    "04-ui-section-navigation",
+		Timeout: 60 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
-			repo := ctx.RepoRoot()
-			uiDist := filepath.Join(repo, "src", "plugins", "robot", "src_v2", "ui", "dist")
-
-			if err := ctx.WaitForStepMessageAfterAction("ui build complete", 60*time.Second, func() error {
-				cmd := exec.Command("./dialtone.sh", "robot", "src_v2", "build")
-				cmd.Dir = repo
-				out, err := cmd.CombinedOutput()
-				if err != nil {
-					ctx.Errorf("ui build failed: %s", strings.TrimSpace(string(out)))
-					return err
-				}
-				ctx.Infof("ui build complete")
-				return nil
-			}); err != nil {
-				return testv1.StepRunResult{}, err
-			}
-
-			port := "18083"
-			baseURL, browserBaseURL, remoteNode, err := startLocalMockServer(repo, uiDist, port)
+			mock, err := prepareMockUI(ctx, "robot-hero-stage", "Hero Section", "nav")
 			if err != nil {
 				return testv1.StepRunResult{}, err
 			}
-
-			if err := ctx.WaitForStepMessageAfterAction("ui root returned 200", 10*time.Second, func() error {
-				deadline := time.Now().Add(8 * time.Second)
-				for time.Now().Before(deadline) {
-					resp, err := http.Get(baseURL + "/")
-					if err == nil {
-						_ = resp.Body.Close()
-						if resp.StatusCode == http.StatusOK {
-							ctx.Infof("ui root returned 200")
-							return nil
-						}
-					}
-					time.Sleep(200 * time.Millisecond)
-				}
-				return fmt.Errorf("ui root did not return 200")
-			}); err != nil {
-				return testv1.StepRunResult{}, err
+			sections := []struct {
+				Menu  string
+				Aria  string
+				Extra string
+			}{
+				{Menu: "Navigate Hero", Aria: "Hero Section"},
+				{Menu: "Navigate Docs", Aria: "Docs Section"},
+				{Menu: "Navigate Telemetry", Aria: "Telemetry Section", Extra: "Robot Table"},
+				{Menu: "Navigate Steering Settings", Aria: "Steering Settings Section", Extra: "Steering Settings Table"},
+				{Menu: "Navigate Key Params", Aria: "Key Params Section", Extra: "Key Params Table"},
+				{Menu: "Navigate Three", Aria: "Three Section"},
+				{Menu: "Navigate Terminal", Aria: "Xterm Section", Extra: "Xterm Terminal"},
+				{Menu: "Navigate Camera", Aria: "Video Section"},
+				{Menu: "Navigate Settings", Aria: "Settings Section", Extra: "Robot Version Button"},
 			}
-
-			if err := ctx.WaitForStepMessageAfterAction("browser ui checks passed", 20*time.Second, func() error {
-				userDataDir := filepath.Join(os.TempDir(), fmt.Sprintf("dialtone-robot-e2e-%d", time.Now().UnixNano()))
-				_, err := ctx.EnsureBrowser(testv1.BrowserOptions{
-					Headless:    false,
-					GPU:         true,
-					Role:        "robot-src-v2-e2e",
-					RemoteNode:  remoteNode,
-					UserDataDir: userDataDir,
-					URL:         browserBaseURL + "/#robot-hero-stage",
-				})
-				if err != nil {
-					return err
+			for _, s := range sections {
+				if err := navigateMenuToSection(ctx, s.Menu, s.Aria, s.Extra); err != nil {
+					return testv1.StepRunResult{}, err
 				}
-				if err := waitForHeroReadyByID(ctx, 8*time.Second); err != nil {
-					return err
-				}
-
-				sections := []struct {
-					Menu  string
-					Aria  string
-					Extra string
-				}{
-					{Menu: "Navigate Docs", Aria: "Docs Section"},
-					{Menu: "Navigate Telemetry", Aria: "Telemetry Section", Extra: "Robot Table"},
-					{Menu: "Navigate Three", Aria: "Three Section"},
-					{Menu: "Navigate Terminal", Aria: "Xterm Section"},
-					{Menu: "Navigate Camera", Aria: "Video Section"},
-					{Menu: "Navigate Settings", Aria: "Settings Section"},
-				}
-				for _, s := range sections {
-					if err := ctx.WaitForAriaLabel("Toggle Global Menu", 8*time.Second); err != nil {
-						return err
-					}
-					if err := ctx.ClickAriaLabel("Toggle Global Menu"); err != nil {
-						return err
-					}
-					if err := ctx.WaitForAriaLabel(s.Menu, 8*time.Second); err != nil {
-						return err
-					}
-					if err := ctx.ClickAriaLabel(s.Menu); err != nil {
-						return err
-					}
-					if err := ctx.WaitForAriaLabel(s.Aria, 8*time.Second); err != nil {
-						return err
-					}
-					if s.Extra != "" {
-						if err := ctx.WaitForAriaLabel(s.Extra, 8*time.Second); err != nil {
-							return err
-						}
-					}
-					if err := ctx.WaitForAriaLabelAttrEquals(s.Aria, "data-active", "true", 8*time.Second); err != nil {
-						return err
-					}
-				}
-
-				ctx.Infof("browser ui checks passed")
-				return nil
-			}); err != nil {
-				return testv1.StepRunResult{}, err
 			}
-
-			if err := ctx.WaitForStepMessageAfterAction("arm failure surfaced in terminal", 20*time.Second, func() error {
-				nc, err := nats.Connect("nats://127.0.0.1:18224", nats.Timeout(2*time.Second))
-				if err != nil {
-					return err
-				}
-				defer nc.Close()
-
-				if err := ctx.ClickAriaLabelAfterWait("Toggle Global Menu", 8*time.Second); err != nil {
-					return err
-				}
-				if err := ctx.ClickAriaLabelAfterWait("Navigate Three", 8*time.Second); err != nil {
-					return err
-				}
-				if err := ctx.WaitForAriaLabel("Three Section", 8*time.Second); err != nil {
-					return err
-				}
-				if err := ctx.WaitForAriaLabelAttrEquals("Three Section", "data-active", "true", 8*time.Second); err != nil {
-					return err
-				}
-				if err := ctx.ClickAriaLabel("Three Mode"); err != nil {
-					return err
-				}
-				if err := ctx.ClickAriaLabel("Three Thumb 1"); err != nil {
-					return err
-				}
-				if err := ctx.ClickAriaLabelAfterWait("Toggle Global Menu", 8*time.Second); err != nil {
-					return err
-				}
-				if err := ctx.ClickAriaLabelAfterWait("Navigate Terminal", 8*time.Second); err != nil {
-					return err
-				}
-				if err := ctx.WaitForAriaLabel("Xterm Terminal", 8*time.Second); err != nil {
-					return err
-				}
-				if err := ctx.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-ready", "true", 8*time.Second); err != nil {
-					return err
-				}
-				for i := 0; i < 8; i++ {
-					ack := fmt.Sprintf(`{"type":"COMMAND_ACK","command":"MAV_CMD_COMPONENT_ARM_DISARM","result":"MAV_RESULT_FAILED","timestamp":%d,"t_raw":%d}`, 12346+i, 12346+i)
-					text := fmt.Sprintf(`{"type":"STATUSTEXT","severity":"MAV_SEVERITY_CRITICAL","text":"Arm: Radio failsafe on","timestamp":%d,"t_raw":%d}`, 12446+i, 12446+i)
-					if err := nc.Publish("mavlink.command_ack", []byte(ack)); err != nil {
-						return err
-					}
-					if err := nc.Publish("mavlink.statustext", []byte(text)); err != nil {
-						return err
-					}
-				}
-				if err := nc.Flush(); err != nil {
-					return err
-				}
-				if err := ctx.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-last-command-ack-result", "MAV_RESULT_FAILED", 8*time.Second); err != nil {
-					return err
-				}
-				if err := ctx.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-last-status-text", "Arm: Radio failsafe on", 8*time.Second); err != nil {
-					return err
-				}
-				shotPath := filepath.Join(repo, "src", "plugins", "robot", "src_v2", "test", "screenshots", "arm_failure_xterm.png")
-				if err := os.MkdirAll(filepath.Dir(shotPath), 0755); err != nil {
-					return err
-				}
-				if err := ctx.CaptureScreenshot(shotPath); err != nil {
-					return err
-				}
-				ctx.Infof("arm failure surfaced in terminal")
-				return nil
-			}); err != nil {
-				return testv1.StepRunResult{}, err
-			}
-
-			if err := ctx.WaitForStepMessageAfterAction("mock nats publish ok", 5*time.Second, func() error {
-				nc, err := nats.Connect("nats://127.0.0.1:18224", nats.Timeout(2*time.Second))
-				if err != nil {
-					return err
-				}
-				defer nc.Close()
-				msg := `{"type":"HEARTBEAT","timestamp":12345}`
-				if err := nc.Publish("mavlink.heartbeat", []byte(msg)); err != nil {
-					return err
-				}
-				if err := nc.Flush(); err != nil {
-					return err
-				}
-				ctx.Infof("mock nats publish ok")
-				return nil
-			}); err != nil {
-				return testv1.StepRunResult{}, err
-			}
-
-			return testv1.StepRunResult{Report: "local UI mock E2E smoke verified, including arm failure terminal path"}, nil
+			return testv1.StepRunResult{Report: fmt.Sprintf("UI section navigation verified on %s", mock.browserBaseURL)}, nil
 		},
 	})
+
 	reg.Add(testv1.Step{
-		Name:    "04-three-system-arm-cli",
+		Name:    "05-ui-table-buttons",
 		Timeout: 45 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
-			repo := ctx.RepoRoot()
-			uiDist := filepath.Join(repo, "src", "plugins", "robot", "src_v2", "ui", "dist")
-			if err := ctx.WaitForStepMessageAfterAction("ui build complete", 60*time.Second, func() error {
-				cmd := exec.Command("./dialtone.sh", "robot", "src_v2", "build")
-				cmd.Dir = repo
-				out, err := cmd.CombinedOutput()
-				if err != nil {
-					ctx.Errorf("ui build failed: %s", strings.TrimSpace(string(out)))
-					return err
-				}
-				ctx.Infof("ui build complete")
-				return nil
-			}); err != nil {
+			if _, err := prepareMockUI(ctx, "robot-table-table", "Telemetry Section", "table"); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-
-			_, browserBaseURL, remoteNode, err := startLocalMockServer(repo, uiDist, "18083")
+			nc, err := connectMockNATS()
 			if err != nil {
 				return testv1.StepRunResult{}, err
 			}
-
-			if err := ctx.WaitForStepMessageAfterAction("three arm command published", 20*time.Second, func() error {
-				userDataDir := filepath.Join(os.TempDir(), fmt.Sprintf("dialtone-robot-arm-%d", time.Now().UnixNano()))
-				_, err := ctx.EnsureBrowser(testv1.BrowserOptions{
-					Headless:    false,
-					GPU:         true,
-					Role:        "robot-src-v2-arm",
-					RemoteNode:  remoteNode,
-					UserDataDir: userDataDir,
-					URL:         browserBaseURL + fmt.Sprintf("/?arm=%d#robot-three-stage", time.Now().UnixNano()),
-				})
-				if err != nil {
-					return err
-				}
-				if err := ctx.WaitForAriaLabel("Three Section", 8*time.Second); err != nil {
-					return err
-				}
-				if err := ctx.WaitForAriaLabelAttrEquals("Three Section", "data-active", "true", 8*time.Second); err != nil {
-					return err
-				}
-				if err := ctx.ClickAriaLabel("Three Mode"); err != nil {
-					return err
-				}
-				if err := ctx.ClickAriaLabel("Three Thumb 1"); err != nil {
-					return err
-				}
-				if err := ctx.WaitForConsoleContains("Publishing rover.command cmd=arm", 5*time.Second); err != nil {
-					return err
-				}
-				shotPath := filepath.Join(repo, "src", "plugins", "robot", "src_v2", "test", "screenshots", "three_system_arm.png")
-				if err := os.MkdirAll(filepath.Dir(shotPath), 0755); err != nil {
-					return err
-				}
-				if err := ctx.CaptureScreenshot(shotPath); err != nil {
-					return err
-				}
-				ctx.Infof("three arm command published")
-				return nil
-			}); err != nil {
+			defer nc.Close()
+			if err := publishHeartbeat(nc); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			return testv1.StepRunResult{Report: "three system arm CLI flow verified"}, nil
+			if err := ctx.WaitForAriaLabelAttrEquals("Robot Table", "data-row-count", "3", 8*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := clickFormButton(ctx, "Table Mode Form", "Table Thumb 1"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Table Mode Form", "data-last-button-aria", "Table Thumb 1", 3*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := clickFormButton(ctx, "Table Mode Form", "Table Thumb 2"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Robot Table", "data-row-count", "0", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := publishHeartbeat(nc); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Robot Table", "data-row-count", "3", 8*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			return testv1.StepRunResult{Report: "Telemetry section buttons verified"}, nil
+		},
+	})
+
+	reg.Add(testv1.Step{
+		Name:    "06-ui-steering-settings-buttons",
+		Timeout: 45 * time.Second,
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			if _, err := prepareMockUI(ctx, "robot-steering-settings-table", "Steering Settings Section", "steering"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Steering Settings Table", "data-selected-key", "forwardThrottlePwm", 8*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			for i := 0; i < 5; i++ {
+				if err := clickFormButton(ctx, "Steering Settings Form", "Steering Settings Thumb 2"); err != nil {
+					return testv1.StepRunResult{}, err
+				}
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Steering Settings Table", "data-selected-key", "forwardDurationMs", 8*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := clickFormButton(ctx, "Steering Settings Form", "Steering Settings Thumb 3"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Steering Settings Status", "data-status", "Forward Duration (ms) = 1900", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := clickFormButton(ctx, "Steering Settings Form", "Steering Settings Thumb 4"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Steering Settings Status", "data-status", "Forward Duration (ms) = 1890", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := clickFormButton(ctx, "Steering Settings Form", "Steering Settings Thumb 5"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Steering Settings Status", "data-status", "Forward Duration (ms) = 1900", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := clickFormButton(ctx, "Steering Settings Form", "Steering Settings Thumb 6"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Steering Settings Status", "data-status", "Forward Duration (ms) = 2000", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := clickFormButton(ctx, "Steering Settings Form", "Steering Settings Thumb 7"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Steering Settings Status", "data-status", "Saved", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := clickFormButton(ctx, "Steering Settings Form", "Steering Settings Thumb 8"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Steering Settings Status", "data-status", "Reset to defaults", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := clickFormButton(ctx, "Steering Settings Form", "Steering Settings Thumb 1"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Steering Settings Table", "data-selected-key", "rightSteeringPwm", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			return testv1.StepRunResult{Report: "Steering settings buttons verified"}, nil
+		},
+	})
+
+	reg.Add(testv1.Step{
+		Name:    "07-ui-three-buttons-three-system-arm",
+		Timeout: 60 * time.Second,
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			repo := ctx.RepoRoot()
+			if _, err := prepareMockUI(ctx, "robot-three-stage", "Three Section", "three"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Three Mode Form", "data-current-mode", "Drive", 8*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			driveChecks := []struct {
+				ButtonAria string
+				Command    string
+				Extra      string
+			}{
+				{"Three Thumb 1", "drive_up", "throttlePwm=2000 steeringPwm=1000 durationMs=2000"},
+				{"Three Thumb 2", "drive_up", "throttlePwm=2000 steeringPwm=1500 durationMs=2000"},
+				{"Three Thumb 3", "drive_up", "throttlePwm=2000 steeringPwm=2000 durationMs=2000"},
+				{"Three Thumb 4", "drive_down", "throttlePwm=1000 steeringPwm=1000 durationMs=2000"},
+				{"Three Thumb 5", "drive_down", "throttlePwm=1000 steeringPwm=1500 durationMs=2000"},
+				{"Three Thumb 6", "drive_down", "throttlePwm=1000 steeringPwm=2000 durationMs=2000"},
+			}
+			for _, check := range driveChecks {
+				if err := clickFormButton(ctx, "Three Mode Form", check.ButtonAria); err != nil {
+					return testv1.StepRunResult{}, err
+				}
+				if err := waitForLastCommand(ctx, check.Command, "", check.Extra, 5*time.Second); err != nil {
+					return testv1.StepRunResult{}, err
+				}
+			}
+			if err := clickFormButton(ctx, "Three Mode Form", "Three Thumb 7"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := waitForLastCommand(ctx, "guided_hold", "", "", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := cycleFormMode(ctx, "Three Mode Form", "Three Mode", "System"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			systemChecks := []struct {
+				ButtonAria string
+				Command    string
+				Mode       string
+			}{
+				{"Three Thumb 1", "arm", ""},
+				{"Three Thumb 2", "disarm", ""},
+				{"Three Thumb 3", "mode", "manual"},
+				{"Three Thumb 4", "mode", "steering"},
+				{"Three Thumb 5", "mode", "guided"},
+				{"Three Thumb 6", "pulse_fwd", ""},
+			}
+			for _, check := range systemChecks {
+				if err := clickFormButton(ctx, "Three Mode Form", check.ButtonAria); err != nil {
+					return testv1.StepRunResult{}, err
+				}
+				if err := waitForLastCommand(ctx, check.Command, check.Mode, "", 5*time.Second); err != nil {
+					return testv1.StepRunResult{}, err
+				}
+			}
+			if err := clickFormButton(ctx, "Three Mode Form", "Three Thumb 7"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := waitForLastCommand(ctx, "guided_hold", "", "", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := cycleFormMode(ctx, "Three Mode Form", "Three Mode", "Guided"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			guidedChecks := []struct {
+				ButtonAria string
+				Command    string
+				Mode       string
+			}{
+				{"Three Thumb 1", "mode", "guided"},
+				{"Three Thumb 2", "guided_forward_1m", ""},
+				{"Three Thumb 3", "guided_square_5m", ""},
+				{"Three Thumb 4", "guided_hold", ""},
+				{"Three Thumb 5", "mode", "manual"},
+			}
+			for _, check := range guidedChecks {
+				if err := clickFormButton(ctx, "Three Mode Form", check.ButtonAria); err != nil {
+					return testv1.StepRunResult{}, err
+				}
+				if err := waitForLastCommand(ctx, check.Command, check.Mode, "", 5*time.Second); err != nil {
+					return testv1.StepRunResult{}, err
+				}
+			}
+			if err := clickFormButton(ctx, "Three Mode Form", "Three Thumb 6"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := waitForLastCommand(ctx, "guided_hold", "", "", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			shotPath := filepath.Join(repo, "src", "plugins", "robot", "src_v2", "test", "screenshots", "three_system_arm.png")
+			if err := os.MkdirAll(filepath.Dir(shotPath), 0755); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.CaptureScreenshot(shotPath); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			return testv1.StepRunResult{Report: "Three section buttons verified, including system arm flow"}, nil
+		},
+	})
+
+	reg.Add(testv1.Step{
+		Name:    "08-ui-terminal-routing-and-buttons",
+		Timeout: 60 * time.Second,
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			repo := ctx.RepoRoot()
+			if _, err := prepareMockUI(ctx, "robot-xterm-xterm", "Xterm Section", "xterm"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabel("Xterm Terminal", 8*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-ready", "true", 8*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			nc, err := connectMockNATS()
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			defer nc.Close()
+			if err := publishTerminalEvents(nc); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-last-command-ack-result", "MAV_RESULT_FAILED", 8*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-last-status-text", "Arm: Radio failsafe on", 8*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := navigateMenuToSection(ctx, "Navigate Telemetry", "Telemetry Section", "Robot Table"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Robot Table", "data-last-command-ack-result", "MAV_RESULT_FAILED", 8*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := navigateMenuToSection(ctx, "Navigate Terminal", "Xterm Section", "Xterm Terminal"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := clickFormButton(ctx, "Log Mode Form", "Log Thumb 7"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-paused", "true", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := clickFormButton(ctx, "Log Mode Form", "Log Thumb 7"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-paused", "false", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			for _, button := range []string{"Log Thumb 1", "Log Thumb 2", "Log Thumb 3", "Log Thumb 4", "Log Thumb 5", "Log Thumb 6", "Log Thumb 8"} {
+				if err := clickFormButton(ctx, "Log Mode Form", button); err != nil {
+					return testv1.StepRunResult{}, err
+				}
+			}
+			if err := cycleFormMode(ctx, "Log Mode Form", "Log Mode", "Filter"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			filterChecks := []struct {
+				ButtonAria string
+				Expected   string
+			}{
+				{"Log Thumb 2", "mavlink"},
+				{"Log Thumb 3", "command"},
+				{"Log Thumb 4", "ui"},
+				{"Log Thumb 5", "camera"},
+				{"Log Thumb 6", "service"},
+				{"Log Thumb 7", "error"},
+				{"Log Thumb 1", "all"},
+			}
+			for _, check := range filterChecks {
+				if err := clickFormButton(ctx, "Log Mode Form", check.ButtonAria); err != nil {
+					return testv1.StepRunResult{}, err
+				}
+				if err := ctx.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-filter", check.Expected, 5*time.Second); err != nil {
+					return testv1.StepRunResult{}, err
+				}
+			}
+			if err := clickFormButton(ctx, "Log Mode Form", "Log Thumb 8"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-last-log-category", "ui", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := cycleFormMode(ctx, "Log Mode Form", "Log Mode", "Command"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.TypeAriaLabel("Log Command Input", "arm"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := clickFormButton(ctx, "Log Mode Form", "Log Thumb 1"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := waitForLastCommand(ctx, "arm", "", "", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			commandChecks := []struct {
+				ButtonAria string
+				Command    string
+				Mode       string
+			}{
+				{"Log Thumb 2", "arm", ""},
+				{"Log Thumb 3", "disarm", ""},
+				{"Log Thumb 4", "mode", "manual"},
+				{"Log Thumb 5", "mode", "guided"},
+			}
+			for _, check := range commandChecks {
+				if err := clickFormButton(ctx, "Log Mode Form", check.ButtonAria); err != nil {
+					return testv1.StepRunResult{}, err
+				}
+				if err := waitForLastCommand(ctx, check.Command, check.Mode, "", 5*time.Second); err != nil {
+					return testv1.StepRunResult{}, err
+				}
+			}
+			if err := clickFormButton(ctx, "Log Mode Form", "Log Thumb 6"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := waitForLastCommand(ctx, "stop", "", "", 3*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := clickFormButton(ctx, "Log Mode Form", "Log Thumb 7"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Log Mode Form", "data-current-mode", "Tail", 3*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := cycleFormMode(ctx, "Log Mode Form", "Log Mode", "Select"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			for _, button := range []string{"Log Thumb 1", "Log Thumb 2", "Log Thumb 3", "Log Thumb 4", "Log Thumb 5", "Log Thumb 7"} {
+				if err := clickFormButton(ctx, "Log Mode Form", button); err != nil {
+					return testv1.StepRunResult{}, err
+				}
+			}
+			if err := clickFormButton(ctx, "Log Mode Form", "Log Thumb 6"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Log Mode Form", "data-current-mode", "Tail", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := cycleFormMode(ctx, "Log Mode Form", "Log Mode", "Select"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := clickFormButton(ctx, "Log Mode Form", "Log Thumb 8"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Log Mode Form", "data-current-mode", "Tail", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			shotPath := filepath.Join(repo, "src", "plugins", "robot", "src_v2", "test", "screenshots", "arm_failure_xterm.png")
+			if err := os.MkdirAll(filepath.Dir(shotPath), 0755); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.CaptureScreenshot(shotPath); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			return testv1.StepRunResult{Report: "Terminal section buttons and MAVLink routing verified"}, nil
+		},
+	})
+
+	reg.Add(testv1.Step{
+		Name:    "09-ui-video-buttons",
+		Timeout: 45 * time.Second,
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			if _, err := prepareMockUI(ctx, "robot-video-video", "Video Section", "video"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Video Section", "data-feed-source", "Primary", 8*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := clickFormButton(ctx, "Video Mode Form", "Video Thumb 2"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Video Section", "data-feed-source", "Secondary", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := clickFormButton(ctx, "Video Mode Form", "Video Thumb 1"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Video Section", "data-feed-source", "Primary", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := clickFormButton(ctx, "Video Mode Form", "Video Thumb 3"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Video Section", "data-last-bookmark-status", "saved", 8*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := clickFormButton(ctx, "Video Mode Form", "Video Mode"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Video Mode Form", "data-current-mode", "View", 3*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			return testv1.StepRunResult{Report: "Video section buttons verified"}, nil
+		},
+	})
+
+	reg.Add(testv1.Step{
+		Name:    "10-ui-settings-and-keyparams",
+		Timeout: 45 * time.Second,
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			if _, err := prepareMockUI(ctx, "robot-settings-button-list", "Settings Section", "settings"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabel("Robot Version Button", 8*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabel("Toggle Chatlog Button", 8*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.ClickAriaLabel("Toggle Chatlog Button"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := navigateMenuToSection(ctx, "Navigate Three", "Three Section", "Three Chatlog Overlay"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Three Chatlog Overlay", "data-enabled", "true", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := navigateMenuToSection(ctx, "Navigate Key Params", "Key Params Section", "Key Params Table"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Key Params Table", "data-row-count", "10", 8*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			return testv1.StepRunResult{Report: "Settings and key params sections verified"}, nil
 		},
 	})
 }
 
+func ensureUIBuild(ctx *testv1.StepContext, repo string) error {
+	return ctx.WaitForStepMessageAfterAction("ui build complete", 60*time.Second, func() error {
+		cmd := exec.Command("./dialtone.sh", "robot", "src_v2", "build")
+		cmd.Dir = repo
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			ctx.Errorf("ui build failed: %s", strings.TrimSpace(string(out)))
+			return err
+		}
+		ctx.Infof("ui build complete")
+		return nil
+	})
+}
+
+func prepareMockUI(ctx *testv1.StepContext, hashID, sectionAria, roleSuffix string) (mockUISession, error) {
+	repo := ctx.RepoRoot()
+	uiDist := filepath.Join(repo, "src", "plugins", "robot", "src_v2", "ui", "dist")
+	if err := ensureUIBuild(ctx, repo); err != nil {
+		return mockUISession{}, err
+	}
+	baseURL, browserBaseURL, remoteNode, err := startLocalMockServer(repo, uiDist, mockPort)
+	if err != nil {
+		return mockUISession{}, err
+	}
+	userDataDir := filepath.Join(os.TempDir(), fmt.Sprintf("dialtone-robot-%s-%d", roleSuffix, time.Now().UnixNano()))
+	_, err = ctx.EnsureBrowser(testv1.BrowserOptions{
+		Headless:    false,
+		GPU:         true,
+		Role:        "robot-src-v2-" + roleSuffix,
+		RemoteNode:  remoteNode,
+		UserDataDir: userDataDir,
+		URL:         browserBaseURL + fmt.Sprintf("/?step=%s-%d#%s", roleSuffix, time.Now().UnixNano(), hashID),
+	})
+	if err != nil {
+		return mockUISession{}, err
+	}
+	if sectionAria == "Hero Section" {
+		if err := waitForHeroReadyByID(ctx, 12*time.Second); err != nil {
+			return mockUISession{}, err
+		}
+	} else {
+		if err := waitForSectionReady(ctx, sectionAria, 12*time.Second); err != nil {
+			return mockUISession{}, err
+		}
+	}
+	if err := ctx.WaitForAriaLabelAttrEquals("App Header", "data-nats-connected", "true", 12*time.Second); err != nil {
+		return mockUISession{}, err
+	}
+	return mockUISession{
+		repo:           repo,
+		baseURL:        baseURL,
+		browserBaseURL: browserBaseURL,
+		remoteNode:     remoteNode,
+	}, nil
+}
+
+func waitForSectionReady(ctx *testv1.StepContext, sectionAria string, timeout time.Duration) error {
+	if err := ctx.WaitForAriaLabel(sectionAria, timeout); err != nil {
+		return err
+	}
+	return ctx.WaitForAriaLabelAttrEquals(sectionAria, "data-active", "true", timeout)
+}
+
+func navigateMenuToSection(ctx *testv1.StepContext, menuAria, sectionAria, extraAria string) error {
+	if err := ctx.ClickAriaLabelAfterWait("Toggle Global Menu", 12*time.Second); err != nil {
+		return err
+	}
+	if err := ctx.ClickAriaLabelAfterWait(menuAria, 12*time.Second); err != nil {
+		return err
+	}
+	if err := waitForSectionReady(ctx, sectionAria, 12*time.Second); err != nil {
+		return err
+	}
+	if extraAria != "" {
+		if err := ctx.WaitForAriaLabel(extraAria, 12*time.Second); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func clickFormButton(ctx *testv1.StepContext, formAria, buttonAria string) error {
+	if err := ctx.WaitForAriaLabel(formAria, 8*time.Second); err != nil {
+		return err
+	}
+	if err := ctx.WaitForAriaLabelAttrEquals(formAria, "data-buttons-ready", "true", 8*time.Second); err != nil {
+		return err
+	}
+	if err := ctx.ClickAriaLabel(buttonAria); err != nil {
+		return err
+	}
+	return ctx.WaitForAriaLabelAttrEquals(formAria, "data-last-button-aria", buttonAria, 3*time.Second)
+}
+
+func cycleFormMode(ctx *testv1.StepContext, formAria, modeButtonAria, expectedMode string) error {
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := ctx.WaitForAriaLabelAttrEquals(formAria, "data-current-mode", expectedMode, 500*time.Millisecond); err == nil {
+			return nil
+		}
+		if err := clickFormButton(ctx, formAria, modeButtonAria); err != nil {
+			return err
+		}
+	}
+	return fmt.Errorf("timed out waiting for %s current mode=%s", formAria, expectedMode)
+}
+
+func waitForLastCommand(ctx *testv1.StepContext, cmd, mode, extra string, timeout time.Duration) error {
+	if err := ctx.WaitForAriaLabelAttrEquals("App Header", "data-last-rover-command", cmd, timeout); err != nil {
+		return err
+	}
+	if err := ctx.WaitForAriaLabelAttrEquals("App Header", "data-last-rover-command-mode", mode, timeout); err != nil {
+		return err
+	}
+	if extra == "" {
+		return nil
+	}
+	return ctx.WaitForAriaLabelAttrEquals("App Header", "data-last-rover-command-extra", extra, timeout)
+}
+
+func connectMockNATS() (*nats.Conn, error) {
+	return nats.Connect("nats://127.0.0.1:"+mockNATSP, nats.Timeout(2*time.Second))
+}
+
+func publishHeartbeat(nc *nats.Conn) error {
+	msg := `{"type":"HEARTBEAT","custom_mode":4,"mav_type":"rover","timestamp":12345}`
+	if err := nc.Publish("mavlink.heartbeat", []byte(msg)); err != nil {
+		return err
+	}
+	return nc.Flush()
+}
+
+func publishTerminalEvents(nc *nats.Conn) error {
+	messages := map[string]string{
+		"mavlink.heartbeat":      `{"type":"HEARTBEAT","custom_mode":4,"mav_type":"rover","timestamp":12345}`,
+		"mavlink.command_ack":    `{"type":"COMMAND_ACK","command":"MAV_CMD_COMPONENT_ARM_DISARM","result":"MAV_RESULT_FAILED","timestamp":12346}`,
+		"mavlink.statustext":     `{"type":"STATUSTEXT","severity":"MAV_SEVERITY_CRITICAL","text":"Arm: Radio failsafe on","timestamp":12347}`,
+		"camera.status":          `{"message":"camera stream ready","timestamp":12348}`,
+		"robot.service":          `{"type":"SERVICE","source":"robot_src_v2","uptime":"5s","connections":1,"timestamp":12349,"errors":[]}`,
+		"robot.autoswap.runtime": `{"type":"AUTOSWAP_RUNTIME","source":"autoswap","listen":":18086","running_count":4,"process_count":4,"process_names":"robot,camera,mavlink,repl","timestamp":12350,"errors":[]}`,
+	}
+	for subject, payload := range messages {
+		if err := nc.Publish(subject, []byte(payload)); err != nil {
+			return err
+		}
+	}
+	return nc.Flush()
+}
+
 func startLocalMockServer(repo, uiDist, port string) (baseURL, browserBaseURL, remoteNode string, err error) {
-	binPath := filepath.Join(repo, "bin", "dialtone_robot_v2")
 	baseURL = "http://127.0.0.1:" + port
 	browserBaseURL = baseURL
 	remoteNode = strings.TrimSpace(testv1.RuntimeConfigSnapshot().BrowserNode)
@@ -310,11 +675,12 @@ func startLocalMockServer(repo, uiDist, port string) (baseURL, browserBaseURL, r
 			browserBaseURL = "http://" + hostIP + ":" + port
 		}
 	}
+	_ = exec.Command("pkill", "-f", `dialtone_robot_v2.*--listen :`+port).Run()
 	cmd := exec.Command(
-		binPath,
+		filepath.Join(repo, "bin", "dialtone_robot_v2"),
 		"--listen", ":"+port,
-		"--nats-port", "18224",
-		"--nats-ws-port", "18225",
+		"--nats-port", mockNATSP,
+		"--nats-ws-port", mockNATSWP,
 		"--ui-dist", uiDist,
 	)
 	cmd.Dir = repo

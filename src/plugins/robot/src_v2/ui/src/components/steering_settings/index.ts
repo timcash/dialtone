@@ -72,8 +72,13 @@ class SteeringSettingsControl implements VisualizationControl {
       const selected = idx === this.selectedIndex ? ' data-selected="true"' : '';
       return `<tr${selected}><td>${STEERING_LABELS[key]}</td><td>${this.settings[key]}</td><td>${idx === this.selectedIndex ? 'SELECTED' : ''}</td></tr>`;
     }).join('');
+    table.setAttribute('data-selected-key', this.currentKey());
+    table.setAttribute('data-selected-label', STEERING_LABELS[this.currentKey()]);
     const status = this.container.querySelector("[aria-label='Steering Settings Status']") as HTMLElement | null;
-    if (status) status.textContent = this.status;
+    if (status) {
+      status.textContent = this.status;
+      status.setAttribute('data-status', this.status);
+    }
   }
 
   dispose(): void {}

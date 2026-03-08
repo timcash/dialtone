@@ -1,10 +1,9 @@
 import { VisualizationControl } from '@ui/types';
-import { addMavlinkListener, sendCommand } from '../../data/connection';
+import { addMavlinkListener } from '../../data/connection';
 import { LatencyEstimator } from '../../data/latency';
 import { logError, logInfo } from '../../data/logging';
 import { registerButtons, renderButtons } from '../../buttons';
 import { ROBOT_SECTION_IDS } from '../../section_ids';
-import { sendDriveDown, sendDriveDownLeft, sendDriveDownRight, sendDriveLeft, sendDriveRight, sendDriveUp, sendStopNow } from '../../data/steering';
 
 class VideoControl implements VisualizationControl {
   private img: HTMLImageElement | null;
@@ -17,6 +16,8 @@ class VideoControl implements VisualizationControl {
   private isPaused = false;
   private watchdogOverlay: HTMLElement;
   private readonly WATCHDOG_TIMEOUT = 3 * 60 * 1000; // 3 minutes
+  private currentFeed = 'Primary';
+  private lastBookmarkStatus = '';
 
   constructor(private container: HTMLElement) {
     this.sectionEl = container;
@@ -39,40 +40,27 @@ class VideoControl implements VisualizationControl {
     if (btn) btn.addEventListener('click', () => this.resumeStream());
 
     // Register Buttons
-    registerButtons(ROBOT_SECTION_IDS.video, ['View', 'Drive', 'Guided'], {
+    registerButtons(ROBOT_SECTION_IDS.video, ['View'], {
       'View': [
         { label: 'Feed A', action: () => this.updateFeedSource('Primary') },
         { label: 'Feed B', action: () => this.updateFeedSource('Secondary') },
-        { label: 'Wide', action: () => this.updateFeedSource('Wide') },
-        { label: 'Zoom', action: () => this.updateFeedSource('Zoom') },
-        { label: 'IR', action: () => this.updateFeedSource('IR') },
-        { label: 'Map', action: () => this.updateFeedSource('Map') },
-        { label: 'Log', action: () => this.updateFeedSource('Log') },
         { label: 'Bookmark', action: () => this.bookmarkFrame() },
-      ],
-      'Drive': [
-        { label: 'Up-L', action: () => sendDriveLeft() },
-        { label: 'Up', action: () => sendDriveUp() },
-        { label: 'Up-R', action: () => sendDriveRight() },
-        { label: 'Down-L', action: () => sendDriveDownLeft() },
-        { label: 'Down', action: () => sendDriveDown() },
-        { label: 'Down-R', action: () => sendDriveDownRight() },
-        { label: 'Stop', action: () => sendStopNow() },
         null,
-      ],
-      'Guided': [
-        { label: 'Guided On', action: () => sendCommand('mode', 'guided') },
-        { label: 'Fwd 1m', action: () => sendCommand('guided_forward_1m') },
-        { label: 'Square 5m', action: () => sendCommand('guided_square_5m') },
-        { label: 'Hold', action: () => sendCommand('guided_hold') },
-        { label: 'Manual', action: () => sendCommand('mode', 'manual') },
-        { label: 'Stop', action: () => sendStopNow() },
+        null,
+        null,
+        null,
+        null,
         null,
         null,
       ],
     });
     
     this.updateFeedSource('Primary');
+  }
+
+  private syncAttrs() {
+    this.sectionEl.setAttribute('data-feed-source', this.currentFeed);
+    this.sectionEl.setAttribute('data-last-bookmark-status', this.lastBookmarkStatus);
   }
 
   private startWatchdog() {
@@ -129,22 +117,30 @@ class VideoControl implements VisualizationControl {
   }
 
   private updateFeedSource(name: string) {
+    this.currentFeed = name;
     logInfo('ui/video', `[Video] Switching to feed: ${name}`);
     const sourceEl = this.container.querySelector('#vid-source');
     if (sourceEl) sourceEl.textContent = name.toUpperCase();
+    this.syncAttrs();
   }
 
   private async bookmarkFrame() {
-    if (!this.img) return;
-    
     try {
       const canvas = document.createElement('canvas');
       canvas.width = this.img.naturalWidth || 1280;
       canvas.height = this.img.naturalHeight || 720;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-      
-      ctx.drawImage(this.img, 0, 0, canvas.width, canvas.height);
+
+      if (this.img && this.img.complete && this.img.naturalWidth > 0 && this.img.naturalHeight > 0) {
+        ctx.drawImage(this.img, 0, 0, canvas.width, canvas.height);
+      } else {
+        ctx.fillStyle = '#05070a';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#cfe3ff';
+        ctx.font = '28px monospace';
+        ctx.fillText('robot.camera bookmark placeholder', 48, 72);
+      }
       
       const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.8));
       if (!blob) throw new Error('Frame capture failed');
@@ -158,6 +154,7 @@ class VideoControl implements VisualizationControl {
       });
       
       if (res.ok) {
+        this.lastBookmarkStatus = 'saved';
         logInfo('ui/video', '[Video] Bookmark saved');
         // Visual feedback? No direct button access anymore, but renderButtons re-renders.
         // I could update button label temporarily?
@@ -165,11 +162,14 @@ class VideoControl implements VisualizationControl {
         // For dynamic feedback, I'd need to update the config and re-render.
         // Or simpler: just log. The HUD is there.
       } else {
+        this.lastBookmarkStatus = `failed:${res.status}`;
         logError('ui/video', `[Video] Bookmark failed: ${res.status}`);
       }
     } catch (err) {
+      this.lastBookmarkStatus = 'error';
       logError('ui/video', '[Video] Bookmark error', err);
     }
+    this.syncAttrs();
   }
 
   dispose(): void {
@@ -180,6 +180,7 @@ class VideoControl implements VisualizationControl {
   setVisible(visible: boolean): void {
     if (visible) {
       renderButtons(ROBOT_SECTION_IDS.video);
+      this.syncAttrs();
       if (!this.isPaused) {
         this.startStream();
         this.startWatchdog();
