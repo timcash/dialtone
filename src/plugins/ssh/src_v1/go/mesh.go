@@ -60,12 +60,25 @@ func loadMeshConfig() {
 		if repoRoot == "" {
 			return
 		}
-		configPath := filepath.Join(repoRoot, "env", "mesh.json")
+		configPath := os.Getenv("DIALTONE_MESH_CONFIG")
+		if configPath == "" {
+			configPath = filepath.Join(repoRoot, "env", "dialtone.json")
+		}
 		data, err := os.ReadFile(configPath)
 		if err != nil {
 			return
 		}
-		_ = json.Unmarshal(data, &defaultMeshNodes)
+		// Support both direct array (legacy) or nested inside dialtone.json
+		if len(data) > 0 && data[0] == '[' {
+			_ = json.Unmarshal(data, &defaultMeshNodes)
+		} else {
+			var config struct {
+				MeshNodes []MeshNode `json:"mesh_nodes"`
+			}
+			if err := json.Unmarshal(data, &config); err == nil {
+				defaultMeshNodes = config.MeshNodes
+			}
+		}
 	})
 }
 

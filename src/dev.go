@@ -174,26 +174,34 @@ func logLine(category, msg string) {
 
 // LoadConfig loads environment variables from a custom file or defaults to .env
 func LoadConfig() {
-	envFile := os.Getenv("DIALTONE_ENV_FILE")
-	if envFile == "" {
-		envFile = "env/.env"
-	}
-
-	// Try to find the env file by looking up from current dir
 	cwd, _ := os.Getwd()
 	repoRoot := cwd
 	if filepath.Base(cwd) == "src" {
 		repoRoot = filepath.Dir(cwd)
 	}
-	envPath := envFile
-	if !filepath.IsAbs(envPath) {
-		envPath = filepath.Join(repoRoot, envPath)
+
+	// Try dialtone.json first
+	jsonPath := filepath.Join(repoRoot, "env", "dialtone.json")
+	if fileExists(jsonPath) {
+		data, err := os.ReadFile(jsonPath)
+		if err == nil {
+			var config map[string]string
+			if err := json.Unmarshal(data, &config); err == nil {
+				for k, v := range config {
+					if os.Getenv(k) == "" {
+						os.Setenv(k, v)
+					}
+				}
+				logLine("CONFIG", "Loaded from "+jsonPath)
+			}
+		}
 	}
 
-	if err := godotenv.Load(envPath); err != nil {
-		logLine("CONFIG", "Warning: godotenv.Load failed: "+envPath)
+	envFile := os.Getenv("DIALTONE_ENV_FILE")
+	if envFile == "" {
+		envFile = "env/.env"
 	}
-}
+...
 
 // GetDialtoneEnv returns the directory where dependencies are installed.
 func GetDialtoneEnv() string {

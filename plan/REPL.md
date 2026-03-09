@@ -1,51 +1,42 @@
-# REPL Plugin Review
+# REPL & Onboarding Plan (v2)
 
 ## Overview
-The REPL plugin is the interactive heart of the Dialtone project. It provides a managed environment for executing commands, coordinating multiple agents, and maintaining persistent services. It distinguishes itself by offering both a local-first interactive experience and a distributed, NATS-powered shared environment.
+The goal is a "Zero-Config" autonomous setup where a user can download a single script (`dialtone.sh`), run it, and be guided through a complete environment setup (runtimes, repository, and configuration) without needing pre-installed tools like Git, Nix, or Go.
 
 ## Core Components
 
-### 1. Interactive REPL (`run`)
-- **Persona**: Uses a "Virtual Librarian" persona for user interaction.
-- **Subtones**: Commands are executed as "subtones" managed via the `proc` plugin. This provides structured logging, PID tracking, and the ability to run tasks in the background (`&`).
-- **Output Handling**: Supports structured log levels (`[INFO]`, `[ERROR]`, etc.) and prefixes output with the source (e.g., `DIALTONE:1234>`).
+### 1. Guided Onboarding (`dialtone.sh`)
+- **Interactive Setup**: Triggers automatically if `env/dialtone.json` is missing.
+- **Dependency Management**:
+    - **Go**: Automatically downloads and extracts Go 1.24.0 to a managed `DIALTONE_ENV` folder.
+    - **Bun**: (TODO) Add automated installation.
+- **Git-less Bootstrap**: Downloads the repository as a tarball from GitHub and expands it into the user-defined `DIALTONE_REPO_ROOT`.
+- **Configuration**: Stores all project settings in `env/dialtone.json` (JSON format).
 
-### 2. Distributed REPL (`serve` / `join`)
-- **NATS Bus**: Uses a frame-based protocol over NATS (`repl.<room>`).
-- **Roles**:
-    - **Host (`serve`)**: Listens for `input` frames, executes them, and broadcasts `line` frames (stdout/stderr) and `server` status.
-    - **Client (`join`)**: Sends `input` frames and displays broadcasted output.
-- **Integrations**: 
-    - **Tailscale (`tsnet`)**: Can optionally start an embedded Tailscale identity for the host.
-    - **Embedded NATS**: Can automatically start a NATS broker if one isn't available.
+### 2. REPL v2 (`src/plugins/repl/src_v2`)
+- **Environment Verification**: Performs a "pre-flight" check of `.env`, `mesh.json`, and `ssh_config`.
+- **Connectivity Testing**: Automatically validates SSH connectivity to key nodes (e.g., `wsl` on `legion`) upon startup.
+- **Command Routing**: Allows direct execution of any Dialtone command from the `host-name>` prompt.
+- **Test Mode**: Support for `--test` flag to verify the entire onboarding flow non-interactively.
 
-### 3. Service Supervisor (`service`)
-The `service` command provides a robust way to run the REPL as a persistent background process with self-updating capabilities.
+## Current Progress & TODOs
 
-#### How the Auto-Download Daemon Works (`--mode run`):
-1.  **Bootstrap**: On startup, it checks the local install directory (default `~/.dialtone/repl`) and identifies the `current` active binary.
-2.  **Latest Release Query**: It polls the GitHub API for the target repository (default `timcash/dialtone`). It uses `GITHUB_TOKEN` from the environment if available.
-3.  **Architecture Matching**: It looks for an asset matching the local OS and architecture (e.g., `repl-src_v1-linux-arm64`).
-4.  **Version Comparison**: It uses a semver-aware comparison logic to determine if the GitHub version is newer than the running version.
-5.  **Atomic Updates**:
-    - Downloads the new binary to a versioned subdirectory (`releases/<tag>/`).
-    - Updates a `current` symlink to point to the new binary.
-6.  **Hot-Swapping**:
-    - The supervisor process remains alive.
-    - It sends a `SIGTERM` to the existing worker (the `serve` process).
-    - Once the old worker exits, it spawns a new one using the updated binary.
-7.  **Persistence**: Includes `install` logic for `systemd` (Linux) and `launchd` (macOS) to ensure the supervisor itself starts on boot.
+### Completed
+- [x] Basic interactive onboarding flow in `dialtone.sh`.
+- [x] Automated Go installation for Darwin/Linux (ARM64/AMD64).
+- [x] GitHub tarball expansion for Git-less environments.
+- [x] JSON-based configuration (`env/dialtone.json`).
+- [x] REPL v2 scaffold and basic interactive loop.
+- [x] Enforced `CGO_ENABLED=0` for cross-platform stability.
 
-### 4. Release Tooling (`release`)
-- **Cross-Compilation**: The `build` command automates Go cross-compilation for `linux`, `darwin`, and `windows` across `amd64` and `arm64`.
-- **Automated Publishing**: The `publish` command uses the `github` plugin to create a release and upload all architecture-specific binaries as assets.
+### TODO
+- [ ] **Simplify `dialtone.sh`**: Fix the re-execution bug where JSON files are accidentally sourced as shell scripts.
+- [ ] **Robust JSON Parsing**: Improve the `read_json_val` helper or ensure it handles edge cases (whitespace, nested objects).
+- [ ] **Bun Support**: Implement `install_bun` in `dialtone.sh`.
+- [ ] **WSL Onboarding**: Add specific checks/tips for Windows/WSL users during the guided setup.
+- [ ] **Multiplayer Integration**: Bridge REPL v2 with the existing NATS-based multiplayer features of v1.
 
-## Architectural Strengths
-- **Resilience**: The supervisor/worker split ensures that even if a worker crashes or is being updated, the management layer remains stable.
-- **Zero-Config Networking**: The combination of embedded NATS and Tailscale makes it easy to set up a shared REPL across different networks.
-- **Plugin Synergy**: It effectively composes functionality from `proc` (execution), `logs` (transport), `config` (paths), and `github` (updates).
-
-## Areas for Investigation / Improvement
-- **Windows Service Support**: While it builds for Windows, the `install` logic currently only targets Linux and macOS.
-- **Update Security**: Adding checksum validation (e.g., SHA256) for downloaded binaries would enhance security.
-- **Task Log Integration**: The `TASK_LOG.md` defines a sophisticated dependency-based workflow that could be further integrated into the core REPL loop to automate multi-step engineering tasks.
+## Testing Strategy
+- **Blank Slate Test**: Run `dialtone.sh` in a completely empty directory with a restricted `PATH` (no Go/Git).
+- **Custom Env Test**: Use `--env` to point to different JSON configuration profiles.
+- **Non-Interactive Test**: Use `--test` to ensure the onboarding and verification logic remains healthy during CI/CD or automated sessions.
