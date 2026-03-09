@@ -1,0 +1,24 @@
+{
+  "DIALTONE_ENV": "/Users/your-user/.dialtone_env",
+  "DIALTONE_REPO_ROOT": "/Users/your-user/dialtone",
+  "DIALTONE_USE_NIX": "0",
+  "mesh_nodes": [
+    {
+      "name": "wsl",
+      "aliases": [
+        "wsl"
+      ],
+      "user": "user",
+      "host": "wsl.shad-artichoke.ts.net",
+      "host_candidates": [
+        "wsl.shad-artichoke.ts.net"
+      ],
+      "route_preference": [
+        "tailscale",
+        "private"
+      ],
+      "port": "22",
+      "os": "linux"
+    }
+  ]
+}

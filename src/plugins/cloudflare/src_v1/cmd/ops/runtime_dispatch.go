@@ -97,7 +97,7 @@ func runLogin(_ []string) error {
 
 func runTunnel(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: ./dialtone.sh cloudflare src_v1 tunnel <create|list|run|route|cleanup> ...")
+		return fmt.Errorf("usage: ./dialtone.sh cloudflare src_v1 tunnel <create|list|status|run|start|route|cleanup|stop> ...")
 	}
 	cf := findCloudflared()
 	sub := args[0]
@@ -114,7 +114,15 @@ func runTunnel(args []string) error {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
+	case "status":
+		cmd := exec.Command(cf, append([]string{"tunnel", "list"}, subArgs...)...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		return cmd.Run()
 	case "cleanup":
+		_ = exec.Command("pkill", "-f", "cloudflared").Run()
+		return nil
+	case "stop":
 		_ = exec.Command("pkill", "-f", "cloudflared").Run()
 		return nil
 	case "route":
@@ -145,6 +153,24 @@ func runTunnel(args []string) error {
 		}
 		tunnelName := subArgs[0]
 		fs := flag.NewFlagSet("tunnel-run", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		urlFlag := fs.String("url", "", "service URL")
+		tokenFlag := fs.String("token", os.Getenv("CF_TUNNEL_TOKEN"), "tunnel token")
+		if err := fs.Parse(subArgs[1:]); err != nil {
+			return err
+		}
+		token := cloudflarev1.ResolveTunnelToken(tunnelName, *tokenFlag)
+		cmd, err := cloudflarev1.BuildTunnelRunCommand(cf, tunnelName, *urlFlag, token)
+		if err != nil {
+			return err
+		}
+		return cmd.Run()
+	case "start":
+		if len(subArgs) < 1 {
+			return fmt.Errorf("usage: ./dialtone.sh cloudflare src_v1 tunnel start <name> --url <url> [--token <token>]")
+		}
+		tunnelName := subArgs[0]
+		fs := flag.NewFlagSet("tunnel-start", flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
 		urlFlag := fs.String("url", "", "service URL")
 		tokenFlag := fs.String("token", os.Getenv("CF_TUNNEL_TOKEN"), "tunnel token")

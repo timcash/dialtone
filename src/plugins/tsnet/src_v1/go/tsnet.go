@@ -3,6 +3,7 @@ package tsnet
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -313,6 +314,11 @@ func runUp(args []string) error {
 	if err != nil {
 		return err
 	}
+	if active, provider, tailnet := detectNativeTailnetConnected(); active {
+		logs.Info("native tailscale already connected via %s; skipping embedded tsnet fallback (tailnet=%s)", provider, chooseNonEmpty(tailnet, cfg.Tailnet, "-"))
+		return nil
+	}
+	cfg.Hostname = randomEmbeddedHostname(cfg.Hostname)
 	srv := BuildServer(cfg)
 	if dryRun {
 		logs.Info("tsnet dry-run: hostname=%s dir=%s auth_key_env=%s present=%t",
@@ -665,6 +671,12 @@ func ensureAuthKeyForEmbedded(cfg *Config) error {
 		apiKey = strings.TrimSpace(os.Getenv("TS_API_KEY"))
 	}
 	if apiKey == "" {
+		apiKey = strings.TrimSpace(os.Getenv("TAILSCALE_API_KEY"))
+	}
+	if apiKey == "" {
+		apiKey = strings.TrimSpace(loadTSAPIKeyFromDialtoneJSON())
+	}
+	if apiKey == "" {
 		return errors.New("missing TS_AUTHKEY and cannot auto-provision: set TS_API_KEY (or pass --api-key to keys provision)")
 	}
 	if strings.TrimSpace(cfg.Tailnet) == "" {
@@ -697,6 +709,134 @@ func ensureAuthKeyForEmbedded(cfg *Config) error {
 	cfg.APIKeyPresent = true
 	logs.Info("Auto-provisioned ephemeral TS_AUTHKEY for embedded tsnet and saved to %s", opts.WriteEnvPath)
 	return nil
+}
+
+func detectNativeTailnetConnected() (bool, string, string) {
+	if tailnet, err := detectConnectedTailnetFromLocalAPI(); err == nil && strings.TrimSpace(tailnet) != "" {
+		return true, "localapi", tailnet
+	}
+	if tailnet, err := detectConnectedTailnetFromCLI(); err == nil && strings.TrimSpace(tailnet) != "" {
+		return true, "tailscale-cli", tailnet
+	}
+	return false, "", ""
+}
+
+func detectConnectedTailnetFromLocalAPI() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	st, err := (&local.Client{}).Status(ctx)
+	if err != nil || st == nil {
+		if err == nil {
+			err = errors.New("nil local status")
+		}
+		return "", err
+	}
+	if strings.EqualFold(strings.TrimSpace(st.BackendState), "Stopped") {
+		return "", errors.New("tailscale backend stopped")
+	}
+	if st.Self == nil || len(st.Self.TailscaleIPs) == 0 {
+		return "", errors.New("self node not connected")
+	}
+	if st.CurrentTailnet != nil {
+		if suffix := sanitizeTailnet(st.CurrentTailnet.MagicDNSSuffix); suffix != "" {
+			return suffix, nil
+		}
+		if name := sanitizeTailnet(st.CurrentTailnet.Name); name != "" {
+			return name, nil
+		}
+	}
+	if suffix := sanitizeTailnet(st.MagicDNSSuffix); suffix != "" {
+		return suffix, nil
+	}
+	return "", errors.New("connected tailnet unknown")
+}
+
+func detectConnectedTailnetFromCLI() (string, error) {
+	path, err := exec.LookPath("tailscale")
+	if err != nil {
+		return "", err
+	}
+	out, err := exec.Command(path, "status", "--json").Output()
+	if err != nil {
+		return "", err
+	}
+	var doc struct {
+		BackendState   string `json:"BackendState"`
+		MagicDNSSuffix string `json:"MagicDNSSuffix"`
+		Self           struct {
+			TailscaleIPs []string `json:"TailscaleIPs"`
+			DNSName      string   `json:"DNSName"`
+		} `json:"Self"`
+		CurrentTailnet struct {
+			Name           string `json:"Name"`
+			MagicDNSSuffix string `json:"MagicDNSSuffix"`
+		} `json:"CurrentTailnet"`
+	}
+	if err := json.Unmarshal(out, &doc); err != nil {
+		return "", err
+	}
+	if strings.EqualFold(strings.TrimSpace(doc.BackendState), "Stopped") {
+		return "", errors.New("tailscale backend stopped")
+	}
+	if len(doc.Self.TailscaleIPs) == 0 {
+		return "", errors.New("self node not connected")
+	}
+	if v := sanitizeTailnet(doc.CurrentTailnet.MagicDNSSuffix); v != "" {
+		return v, nil
+	}
+	if v := sanitizeTailnet(doc.CurrentTailnet.Name); v != "" {
+		return v, nil
+	}
+	if v := sanitizeTailnet(doc.MagicDNSSuffix); v != "" {
+		return v, nil
+	}
+	if v := inferTailnetFromDNSName(doc.Self.DNSName); v != "" {
+		return v, nil
+	}
+	return "", errors.New("connected tailnet unknown")
+}
+
+func randomEmbeddedHostname(base string) string {
+	base = NormalizeHostname(base)
+	if base == "" {
+		base = "dialtone-node"
+	}
+	suffix := make([]byte, 3)
+	if _, err := rand.Read(suffix); err != nil {
+		return fmt.Sprintf("%s-%d", base, time.Now().Unix()%100000)
+	}
+	return fmt.Sprintf("%s-%x", base, suffix)
+}
+
+func loadTSAPIKeyFromDialtoneJSON() string {
+	path := strings.TrimSpace(os.Getenv("DIALTONE_MESH_CONFIG"))
+	if path == "" {
+		path = strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE"))
+	}
+	if path == "" {
+		path = filepath.Join("env", "dialtone.json")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return ""
+	}
+	for _, key := range []string{"TS_API_KEY", "TAILSCALE_API_KEY"} {
+		if v, ok := doc[key].(string); ok && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	if ts, ok := doc["tailscale"].(map[string]any); ok {
+		for _, key := range []string{"api_key", "ts_api_key", "auth_api_key"} {
+			if v, ok := ts[key].(string); ok && strings.TrimSpace(v) != "" {
+				return strings.TrimSpace(v)
+			}
+		}
+	}
+	return ""
 }
 
 func isControlAPICredsError(err error) bool {

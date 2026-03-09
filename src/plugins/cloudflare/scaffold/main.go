@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	logs "dialtone/dev/plugins/logs/src_v1/go"
 	cloudflare_ops "dialtone/dev/plugins/cloudflare/src_v1/cmd/ops"
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
 func main() {
@@ -119,7 +119,7 @@ func printUsage() {
 	logs.Raw("  test         Run automated tests")
 	logs.Raw("  serve        Run cloudflare UI server (no args) or tunnel serve (with args)")
 	logs.Raw("  login        Authenticate with Cloudflare")
-	logs.Raw("  tunnel       Manage Cloudflare tunnels")
+	logs.Raw("  tunnel       Manage Cloudflare tunnels (create/list/status/run/start/route/cleanup/stop)")
 	logs.Raw("  robot        Expose a remote robot via tunnel")
 	logs.Raw("  proxy        Start local TCP proxy")
 	logs.Raw("  provision    Create tunnel + DNS and store token in env/.env")
