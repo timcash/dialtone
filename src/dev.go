@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -201,7 +202,19 @@ func LoadConfig() {
 	if envFile == "" {
 		envFile = "env/.env"
 	}
-...
+
+	// Try to find the env file by looking up from current dir
+	envPath := envFile
+	if !filepath.IsAbs(envPath) {
+		envPath = filepath.Join(repoRoot, envPath)
+	}
+
+	if fileExists(envPath) {
+		if err := godotenv.Load(envPath); err != nil {
+			logLine("CONFIG", "Warning: godotenv.Load failed: "+envPath)
+		}
+	}
+}
 
 // GetDialtoneEnv returns the directory where dependencies are installed.
 func GetDialtoneEnv() string {
