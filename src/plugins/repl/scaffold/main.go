@@ -9,6 +9,7 @@ import (
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	repl "dialtone/dev/plugins/repl/src_v1/go/repl"
+	replv2 "dialtone/dev/plugins/repl/src_v2/go/repl"
 )
 
 func main() {
@@ -27,6 +28,19 @@ func main() {
 	}
 	if warnedOldOrder {
 		logs.Warn("old repl CLI order is deprecated. Use: ./dialtone.sh repl src_v1 <command> [args]")
+	}
+	if version == "src_v2" {
+		switch command {
+		case "run":
+			if err := replv2.RunREPLV2(rest); err != nil {
+				logs.Error("repl v2 run failed: %v", err)
+				os.Exit(1)
+			}
+			return
+		default:
+			logs.Error("Unsupported repl src_v2 command: %s", command)
+			os.Exit(1)
+		}
 	}
 	if version != "src_v1" {
 		logs.Error("Unsupported repl version: %s", version)

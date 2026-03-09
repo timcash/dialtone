@@ -30,6 +30,10 @@ func SendCommandByHost(host string, req CommandRequest) (*CommandResponse, error
 	return SendCommand(node, req)
 }
 
+func SendCommandByTarget(host string, req CommandRequest) (*CommandResponse, error) {
+	return sendCommandByTarget(host, req, false)
+}
+
 func NewSessionFromResponse(host string, resp *CommandResponse) *Session {
 	if resp == nil {
 		return nil
@@ -97,7 +101,7 @@ func WriteSessionMetadata(path string, session *Session) error {
 func NATSExample(host, role string) string {
 	host = strings.TrimSpace(host)
 	if host == "" {
-		host = "<host>"
+		host = "127.0.0.1"
 	}
 	role = strings.TrimSpace(role)
 	if role == "" {

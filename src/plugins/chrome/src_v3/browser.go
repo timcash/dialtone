@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
@@ -29,7 +30,7 @@ func (d *daemonState) isBrowserAlive(pid int, port int) bool {
 		if findErr != nil || proc == nil {
 			return false
 		}
-		return proc.Signal(os.Signal(nil)) == nil
+		return proc.Signal(syscall.Signal(0)) == nil
 	}
 	resp.Body.Close()
 	if runtime.GOOS == "windows" {
@@ -39,7 +40,7 @@ func (d *daemonState) isBrowserAlive(pid int, port int) bool {
 	if err != nil || proc == nil {
 		return false
 	}
-	return proc.Signal(os.Signal(nil)) == nil
+	return proc.Signal(syscall.Signal(0)) == nil
 }
 
 func (d *daemonState) ensureBrowser() error {
@@ -93,14 +94,22 @@ func (d *daemonState) ensureBrowser() error {
 		_ = killPID(pid)
 		return err
 	}
-	if actualPID, err := detectBrowserPID(d.chromePort, d.role, d.profileDir); err == nil && actualPID > 0 {
+	if runtime.GOOS == "windows" {
+		actualPID, err := detectBrowserPID(d.chromePort, d.role, d.profileDir)
+		if err == nil && actualPID > 0 {
+			logs.Info("chrome src_v3 refined browser PID: %d", actualPID)
+			d.mu.Lock()
+			d.browserPID = actualPID
+			d.mu.Unlock()
+		} else {
+			_ = killPID(pid)
+			return fmt.Errorf("failed to detect real chrome browser process on port %d", d.chromePort)
+		}
+	} else if actualPID, err := detectBrowserPID(d.chromePort, d.role, d.profileDir); err == nil && actualPID == pid {
 		logs.Info("chrome src_v3 refined browser PID: %d", actualPID)
 		d.mu.Lock()
 		d.browserPID = actualPID
 		d.mu.Unlock()
-	} else if runtime.GOOS == "windows" {
-		_ = killPID(pid)
-		return fmt.Errorf("failed to detect real chrome browser process on port %d", d.chromePort)
 	}
 
 	allocCtx, cancel := chromedp.NewRemoteAllocator(context.Background(), wsURL)

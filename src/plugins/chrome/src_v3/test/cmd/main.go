@@ -17,7 +17,7 @@ import (
 func main() {
 	logs.SetOutput(os.Stdout)
 	fs := flag.NewFlagSet("chrome src_v3 test", flag.ContinueOnError)
-	host := fs.String("host", "", "Mesh host")
+	host := fs.String("host", "", "Mesh host (optional; default local)")
 	role := fs.String("role", "dev", "Chrome role")
 	lines := fs.Int("lines", 80, "Remote daemon log lines to include")
 	filter := fs.String("filter", "", "Run only matching test steps")
@@ -26,11 +26,11 @@ func main() {
 		os.Exit(1)
 	}
 	hostValue := strings.TrimSpace(*host)
-	if hostValue == "" {
-		logs.Error("chrome src_v3 test requires --host")
-		os.Exit(1)
-	}
 	roleValue := defaultIfBlank(strings.TrimSpace(*role), "dev")
+	reportNode := hostValue
+	if reportNode == "" {
+		reportNode = "local"
+	}
 
 	reg := testv1.NewRegistry()
 	addChromeSuiteSteps(reg, hostValue, roleValue, *lines)
@@ -38,7 +38,7 @@ func main() {
 		reg.Steps = filteredSteps
 	}
 
-	logs.Info("chrome src_v3 test starting host=%s role=%s steps=%d", hostValue, roleValue, len(reg.Steps))
+	logs.Info("chrome src_v3 test starting host=%s role=%s steps=%d", reportNode, roleValue, len(reg.Steps))
 	if err := reg.Run(testv1.SuiteOptions{
 		Version:          "chrome-src-v3",
 		ReportPath:       "plugins/chrome/src_v3/TEST.md",
@@ -46,7 +46,7 @@ func main() {
 		ReportFormat:     "template",
 		ReportTitle:      "Chrome src_v3 Test Report",
 		ReportRunner:     "test/src_v1",
-		ChromeReportNode: hostValue,
+		ChromeReportNode: reportNode,
 		NATSURL:          "nats://127.0.0.1:4222",
 		NATSSubject:      "logs.test.chrome-src-v3",
 		AutoStartNATS:    true,
@@ -62,15 +62,15 @@ func addChromeSuiteSteps(reg *testv1.Registry, host, role string, lines int) {
 		Name:    "chrome-deploy-and-start",
 		Timeout: 120 * time.Second,
 		RunWithContext: func(sc *testv1.StepContext) (testv1.StepRunResult, error) {
-			resp, err := chromev3.EnsureRemoteServiceByHost(host, role, true)
+			resp, err := chromev3.EnsureServiceByTarget(host, role, true)
 			if err != nil {
-				appendRemoteLogsToStep(sc, host, lines)
+				appendTargetLogsToStep(sc, host, role, lines)
 				return testv1.StepRunResult{}, fmt.Errorf("ensure remote service: %w", err)
 			}
 			sc.Infof("service ready host=%s role=%s service_pid=%d browser_pid=%d chrome_port=%d nats_port=%d unhealthy=%t", host, role, resp.ServicePID, resp.BrowserPID, resp.ChromePort, resp.NATSPort, resp.Unhealthy)
-			appendRemoteLogsToStep(sc, host, lines)
+			appendTargetLogsToStep(sc, host, role, lines)
 			return testv1.StepRunResult{
-				Report: fmt.Sprintf("chrome src_v3 deployed and service started on %s (service_pid=%d browser_pid=%d)", host, resp.ServicePID, resp.BrowserPID),
+				Report: fmt.Sprintf("chrome src_v3 deployed and service started on %s (service_pid=%d browser_pid=%d)", defaultIfBlank(host, "local"), resp.ServicePID, resp.BrowserPID),
 			}, nil
 		},
 	})
@@ -92,9 +92,9 @@ func addChromeSuiteSteps(reg *testv1.Registry, host, role string, lines int) {
 			}
 			var screenshotResp *chromev3.CommandResponse
 			for _, step := range steps {
-				resp, err := chromev3.SendCommandByHost(host, step)
+				resp, err := chromev3.SendCommandByTarget(host, step)
 				if err != nil {
-					appendRemoteLogsToStep(sc, host, lines)
+					appendTargetLogsToStep(sc, host, role, lines)
 					return testv1.StepRunResult{}, fmt.Errorf("%s failed: %w", step.Command, err)
 				}
 				sc.Infof("command=%s ok service_pid=%d browser_pid=%d current_url=%s tabs=%d", step.Command, resp.ServicePID, resp.BrowserPID, strings.TrimSpace(resp.CurrentURL), len(resp.Tabs))
@@ -109,19 +109,19 @@ func addChromeSuiteSteps(reg *testv1.Registry, host, role string, lines int) {
 				}
 			}
 			if screenshotResp == nil || strings.TrimSpace(screenshotResp.ScreenshotB64) == "" {
-				appendRemoteLogsToStep(sc, host, lines)
+				appendTargetLogsToStep(sc, host, role, lines)
 				return testv1.StepRunResult{}, fmt.Errorf("screenshot response missing image data")
 			}
-			shotPath := filepath.Join("plugins", "chrome", "src_v3", "screenshots", fmt.Sprintf("chrome_src_v3_actions_%s.png", sanitizeToken(host)))
+			shotPath := filepath.Join("plugins", "chrome", "src_v3", "screenshots", fmt.Sprintf("chrome_src_v3_actions_%s.png", sanitizeToken(defaultIfBlank(host, "local"))))
 			if err := writeScreenshot(shotPath, screenshotResp.ScreenshotB64); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 			if err := sc.AddScreenshot(shotPath); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			appendRemoteLogsToStep(sc, host, lines)
+			appendTargetLogsToStep(sc, host, role, lines)
 			return testv1.StepRunResult{
-				Report: fmt.Sprintf("chrome src_v3 action flow passed on %s with screenshot capture", host),
+				Report: fmt.Sprintf("chrome src_v3 action flow passed on %s with screenshot capture", defaultIfBlank(host, "local")),
 			}, nil
 		},
 	})
@@ -130,27 +130,27 @@ func addChromeSuiteSteps(reg *testv1.Registry, host, role string, lines int) {
 		Name:    "chrome-logs-and-status",
 		Timeout: 20 * time.Second,
 		RunWithContext: func(sc *testv1.StepContext) (testv1.StepRunResult, error) {
-			resp, err := chromev3.SendCommandByHost(host, chromev3.CommandRequest{
+			resp, err := chromev3.SendCommandByTarget(host, chromev3.CommandRequest{
 				Command: "status",
 				Role:    role,
 			})
 			if err != nil {
-				appendRemoteLogsToStep(sc, host, lines)
+				appendTargetLogsToStep(sc, host, role, lines)
 				return testv1.StepRunResult{}, fmt.Errorf("status failed: %w", err)
 			}
-			stdout, stderr, logErr := chromev3.ReadRemoteLogsByHost(host, lines)
+			stdout, stderr, logErr := chromev3.ReadLogsByTarget(host, role, lines)
 			if logErr != nil {
-				return testv1.StepRunResult{}, fmt.Errorf("read remote logs: %w", logErr)
+				return testv1.StepRunResult{}, fmt.Errorf("read logs: %w", logErr)
 			}
 			if !strings.Contains(stdout, "chrome src_v3 daemon ready") {
-				return testv1.StepRunResult{}, fmt.Errorf("remote stdout log missing daemon ready line")
+				return testv1.StepRunResult{}, fmt.Errorf("stdout log missing daemon ready line")
 			}
 			if !strings.Contains(stdout, "chrome src_v3 daemon handle") {
-				return testv1.StepRunResult{}, fmt.Errorf("remote stdout log missing handled command lines")
+				return testv1.StepRunResult{}, fmt.Errorf("stdout log missing handled command lines")
 			}
 			logRemoteLogBlocks(sc, stdout, stderr)
 			return testv1.StepRunResult{
-				Report: fmt.Sprintf("chrome src_v3 logs captured and service remains healthy on %s (browser_pid=%d)", host, resp.BrowserPID),
+				Report: fmt.Sprintf("chrome src_v3 logs captured and service remains healthy on %s (browser_pid=%d)", defaultIfBlank(host, "local"), resp.BrowserPID),
 			}, nil
 		},
 	})
@@ -189,8 +189,8 @@ func filterSteps(steps []testv1.Step, filterExpr string) []testv1.Step {
 	return out
 }
 
-func appendRemoteLogsToStep(sc *testv1.StepContext, host string, lines int) {
-	stdout, stderr, err := chromev3.ReadRemoteLogsByHost(host, lines)
+func appendTargetLogsToStep(sc *testv1.StepContext, host, role string, lines int) {
+	stdout, stderr, err := chromev3.ReadLogsByTarget(host, role, lines)
 	if err != nil {
 		sc.Warnf("read remote logs failed: %v", err)
 		return

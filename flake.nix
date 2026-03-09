@@ -81,7 +81,11 @@
             default = pkgs.mkShell {
               packages = with pkgs; [
                 bash curl git gh openssh go_1_24 gnumake nodejs bun tmux zsh cloudflared
-              ];
+              ] ++ (pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs.darwin.apple_sdk.frameworks; [
+                Security
+                CoreFoundation
+                IOKit
+              ]));
               shellHook = ''
                 export DIALTONE_REPO_ROOT=$(pwd)
                 export PATH="$DIALTONE_REPO_ROOT/bin:$PATH"

@@ -2,6 +2,7 @@ package src_v3
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -29,6 +30,17 @@ func findChromePath() (string, error) {
 			}
 		}
 		return "", fmt.Errorf("chrome.exe not found")
+	}
+	if runtime.GOOS == "darwin" {
+		candidates := []string{
+			"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+			"/Applications/Chromium.app/Contents/MacOS/Chromium",
+		}
+		for _, candidate := range candidates {
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate, nil
+			}
+		}
 	}
 	if p, err := exec.LookPath("google-chrome"); err == nil {
 		return p, nil
@@ -105,7 +117,7 @@ func cleanupChromeProfileLocks(profileDir string) error {
 		}
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf(strings.Join(errs, "; "))
+		return errors.New(strings.Join(errs, "; "))
 	}
 	return nil
 }
@@ -233,6 +245,17 @@ func resolveRepoRoot() string {
 		return v
 	}
 	cwd, _ := os.Getwd()
+	cur := strings.TrimSpace(cwd)
+	for cur != "" {
+		if _, err := os.Stat(filepath.Join(cur, "src", "go.mod")); err == nil {
+			return cur
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			break
+		}
+		cur = parent
+	}
 	return cwd
 }
 
@@ -240,7 +263,11 @@ func resolveSrcRoot() string {
 	if v := strings.TrimSpace(os.Getenv("DIALTONE_SRC_ROOT")); v != "" {
 		return v
 	}
-	return filepath.Join(resolveRepoRoot(), "src")
+	repoRoot := resolveRepoRoot()
+	if _, err := os.Stat(filepath.Join(repoRoot, "go.mod")); err == nil {
+		return repoRoot
+	}
+	return filepath.Join(repoRoot, "src")
 }
 
 func preferredHost(node sshv1.MeshNode) string {
