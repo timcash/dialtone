@@ -4,37 +4,23 @@ import (
 	"flag"
 	"fmt"
 	"strings"
-
-	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 )
 
 func handleDoctor(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 doctor", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host")
+	host := fs.String("host", "", "Mesh host (optional; default local)")
+	role := fs.String("role", defaultRole, "Chrome role")
 	_ = fs.Parse(args)
-	if strings.TrimSpace(*host) == "" {
-		return fmt.Errorf("doctor requires --host")
-	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(*host))
-	if err != nil {
-		return err
-	}
-	return runRemoteDoctor(node)
+	return doctorTarget(strings.TrimSpace(*host), strings.TrimSpace(*role))
 }
 
 func handleLogs(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 logs", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host")
+	host := fs.String("host", "", "Mesh host (optional; default local)")
+	role := fs.String("role", defaultRole, "Chrome role")
 	lines := fs.Int("lines", 80, "Lines to tail")
 	_ = fs.Parse(args)
-	if strings.TrimSpace(*host) == "" {
-		return fmt.Errorf("logs requires --host")
-	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(*host))
-	if err != nil {
-		return err
-	}
-	stdout, stderr, err := readRemoteLogs(node, *lines)
+	stdout, stderr, err := readTargetLogs(strings.TrimSpace(*host), strings.TrimSpace(*role), *lines)
 	if err != nil {
 		return err
 	}
@@ -51,14 +37,8 @@ func handleLogs(args []string) error {
 
 func handleReset(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 reset", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host")
+	host := fs.String("host", "", "Mesh host (optional; default local)")
+	role := fs.String("role", defaultRole, "Chrome role")
 	_ = fs.Parse(args)
-	if strings.TrimSpace(*host) == "" {
-		return fmt.Errorf("reset requires --host")
-	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(*host))
-	if err != nil {
-		return err
-	}
-	return resetRemoteHost(node)
+	return resetTarget(strings.TrimSpace(*host), strings.TrimSpace(*role))
 }

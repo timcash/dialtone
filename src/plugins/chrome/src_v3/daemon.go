@@ -2,6 +2,7 @@ package src_v3
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -352,7 +353,7 @@ func sendRemoteCommand(node sshv1.MeshNode, req commandRequest) (*commandRespons
 		return nil, err
 	}
 	if !resp.OK && strings.TrimSpace(resp.Error) != "" {
-		return &resp, fmt.Errorf(resp.Error)
+		return &resp, errors.New(strings.TrimSpace(resp.Error))
 	}
 	return &resp, nil
 }

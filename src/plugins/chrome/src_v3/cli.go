@@ -13,7 +13,6 @@ import (
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
-	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 )
 
 func Run(args []string) error {
@@ -92,31 +91,31 @@ func printUsage() {
 	logs.Info("Commands:")
 	logs.Info("  install")
 	logs.Info("  build")
-	logs.Info("  deploy --host <host> [--service]")
-	logs.Info("  service --host <host> --mode start|stop|status")
-	logs.Info("  status --host <host>")
-	logs.Info("  open --host <host> --url <url>")
-	logs.Info("  goto --host <host> --url <url>")
-	logs.Info("  get-url --host <host>")
-	logs.Info("  tabs --host <host>")
-	logs.Info("  tab-open --host <host> [--url <url>]")
-	logs.Info("  tab-close --host <host> [--index <n>]")
-	logs.Info("  close --host <host>")
-	logs.Info("  click-aria --host <host> --label <aria-label>")
-	logs.Info("  type-aria --host <host> --label <aria-label> --value <text>")
-	logs.Info("  wait-aria --host <host> --label <aria-label> [--timeout-ms 5000]")
-	logs.Info("  wait-aria-attr --host <host> --label <aria-label> --attr <name> --expected <value> [--timeout-ms 5000]")
-	logs.Info("  get-aria-attr --host <host> --label <aria-label> --attr <name>")
-	logs.Info("  set-html --host <host> --value <html>")
-	logs.Info("  wait-log --host <host> --contains <text> [--timeout-ms 5000]")
-	logs.Info("  console --host <host>")
-	logs.Info("  screenshot --host <host> --out <png-path>")
-	logs.Info("  nats-example --host <host> [--role <role>]")
-	logs.Info("  test --host <host>")
-	logs.Info("  test-actions --host <host>")
-	logs.Info("  doctor --host <host>")
-	logs.Info("  logs --host <host>")
-	logs.Info("  reset --host <host>")
+	logs.Info("  deploy [--host <host>] [--service]")
+	logs.Info("  service [--host <host>] --mode start|stop|status")
+	logs.Info("  status [--host <host>]")
+	logs.Info("  open [--host <host>] --url <url>")
+	logs.Info("  goto [--host <host>] --url <url>")
+	logs.Info("  get-url [--host <host>]")
+	logs.Info("  tabs [--host <host>]")
+	logs.Info("  tab-open [--host <host>] [--url <url>]")
+	logs.Info("  tab-close [--host <host>] [--index <n>]")
+	logs.Info("  close [--host <host>]")
+	logs.Info("  click-aria [--host <host>] --label <aria-label>")
+	logs.Info("  type-aria [--host <host>] --label <aria-label> --value <text>")
+	logs.Info("  wait-aria [--host <host>] --label <aria-label> [--timeout-ms 5000]")
+	logs.Info("  wait-aria-attr [--host <host>] --label <aria-label> --attr <name> --expected <value> [--timeout-ms 5000]")
+	logs.Info("  get-aria-attr [--host <host>] --label <aria-label> --attr <name>")
+	logs.Info("  set-html [--host <host>] --value <html>")
+	logs.Info("  wait-log [--host <host>] --contains <text> [--timeout-ms 5000]")
+	logs.Info("  console [--host <host>]")
+	logs.Info("  screenshot [--host <host>] --out <png-path>")
+	logs.Info("  nats-example [--host <host>] [--role <role>]")
+	logs.Info("  test [--host <host>]")
+	logs.Info("  test-actions [--host <host>]")
+	logs.Info("  doctor [--host <host>]")
+	logs.Info("  logs [--host <host>]")
+	logs.Info("  reset [--host <host>]")
 	logs.Info("  daemon --role dev --chrome-port 19464 --nats-port 19465")
 	logs.Info("NATS example:")
 	logs.Info("  %s", NATSExample("<host>", defaultRole))
@@ -128,71 +127,44 @@ func buildLocalBinary() error {
 
 func handleDeploy(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 deploy", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host")
+	host := fs.String("host", "", "Mesh host (optional; default local)")
 	role := fs.String("role", defaultRole, "Chrome role")
 	service := fs.Bool("service", false, "Start service after deploy")
 	_ = fs.Parse(args)
-	if strings.TrimSpace(*host) == "" {
-		return fmt.Errorf("deploy requires --host")
-	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(*host))
-	if err != nil {
-		return err
-	}
-	return deployRemoteBinary(node, strings.TrimSpace(*role), *service)
+	return deployTarget(strings.TrimSpace(*host), strings.TrimSpace(*role), *service)
 }
 
 func handleService(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 service", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host")
+	host := fs.String("host", "", "Mesh host (optional; default local)")
 	mode := fs.String("mode", "status", "start|stop|status")
 	role := fs.String("role", defaultRole, "Chrome role")
 	_ = fs.Parse(args)
-	if strings.TrimSpace(*host) == "" {
-		return fmt.Errorf("service requires --host")
-	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(*host))
+	resp, err := serviceTarget(strings.TrimSpace(*host), strings.TrimSpace(*mode), strings.TrimSpace(*role))
 	if err != nil {
 		return err
 	}
-	switch strings.ToLower(strings.TrimSpace(*mode)) {
-	case "start":
-		return startRemoteService(node, strings.TrimSpace(*role))
-	case "stop":
-		return stopRemoteService(node)
-	case "status":
-		resp, err := sendRemoteCommand(node, commandRequest{Command: "status", Role: strings.TrimSpace(*role)})
-		if err != nil {
-			return err
-		}
+	if resp != nil {
 		printResponse(resp)
-		return nil
-	default:
-		return fmt.Errorf("unsupported service mode: %s", *mode)
 	}
+	return nil
 }
 
 func handleRequestCommand(command string, args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 "+command, flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host")
+	host := fs.String("host", "", "Mesh host (optional; default local)")
 	role := fs.String("role", defaultRole, "Chrome role")
 	rawURL := fs.String("url", "", "URL")
 	index := fs.Int("index", -1, "Tab index")
 	_ = fs.Parse(args)
-	if strings.TrimSpace(*host) == "" {
-		return fmt.Errorf("%s requires --host", command)
-	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(*host))
-	if err != nil {
-		return err
-	}
 	req := commandRequest{
 		Command: command,
 		Role:    strings.TrimSpace(*role),
 		URL:     normalizeURL(strings.TrimSpace(*rawURL)),
 		Index:   *index,
 	}
-	resp, err := sendRemoteCommand(node, req)
+	autoStart := command != "status" && command != "instances" && command != "close"
+	resp, err := sendCommandByTarget(strings.TrimSpace(*host), req, autoStart)
 	if err != nil {
 		return err
 	}
@@ -216,27 +188,20 @@ func handleSmokeTest(args []string) error {
 
 func handleAriaCommand(command string, args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 "+command, flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host")
+	host := fs.String("host", "", "Mesh host (optional; default local)")
 	role := fs.String("role", defaultRole, "Chrome role")
 	label := fs.String("label", "", "ARIA label")
 	value := fs.String("value", "", "Text to type")
 	_ = fs.Parse(args)
-	if strings.TrimSpace(*host) == "" {
-		return fmt.Errorf("%s requires --host", command)
-	}
 	if strings.TrimSpace(*label) == "" {
 		return fmt.Errorf("%s requires --label", command)
 	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(*host))
-	if err != nil {
-		return err
-	}
-	resp, err := sendRemoteCommand(node, commandRequest{
+	resp, err := sendCommandByTarget(strings.TrimSpace(*host), commandRequest{
 		Command:   command,
 		Role:      strings.TrimSpace(*role),
 		AriaLabel: strings.TrimSpace(*label),
 		Value:     *value,
-	})
+	}, true)
 	if err != nil {
 		return err
 	}
@@ -246,22 +211,15 @@ func handleAriaCommand(command string, args []string) error {
 
 func handleAriaWaitCommand(command string, args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 "+command, flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host")
+	host := fs.String("host", "", "Mesh host (optional; default local)")
 	role := fs.String("role", defaultRole, "Chrome role")
 	label := fs.String("label", "", "ARIA label")
 	attr := fs.String("attr", "", "Attribute name")
 	expected := fs.String("expected", "", "Expected attribute value")
 	timeoutMS := fs.Int("timeout-ms", 5000, "Timeout milliseconds")
 	_ = fs.Parse(args)
-	if strings.TrimSpace(*host) == "" {
-		return fmt.Errorf("%s requires --host", command)
-	}
 	if strings.TrimSpace(*label) == "" {
 		return fmt.Errorf("%s requires --label", command)
-	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(*host))
-	if err != nil {
-		return err
 	}
 	req := commandRequest{
 		Command:   command,
@@ -273,7 +231,7 @@ func handleAriaWaitCommand(command string, args []string) error {
 		req.Attr = strings.TrimSpace(*attr)
 		req.Expected = *expected
 	}
-	resp, err := sendRemoteCommand(node, req)
+	resp, err := sendCommandByTarget(strings.TrimSpace(*host), req, true)
 	if err != nil {
 		return err
 	}
@@ -283,63 +241,49 @@ func handleAriaWaitCommand(command string, args []string) error {
 
 func handleAriaGetAttrCommand(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 get-aria-attr", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host")
+	host := fs.String("host", "", "Mesh host (optional; default local)")
 	role := fs.String("role", defaultRole, "Chrome role")
 	label := fs.String("label", "", "ARIA label")
 	attr := fs.String("attr", "", "Attribute name")
 	_ = fs.Parse(args)
-	if strings.TrimSpace(*host) == "" {
-		return fmt.Errorf("get-aria-attr requires --host")
-	}
 	if strings.TrimSpace(*label) == "" {
 		return fmt.Errorf("get-aria-attr requires --label")
 	}
 	if strings.TrimSpace(*attr) == "" {
 		return fmt.Errorf("get-aria-attr requires --attr")
 	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(*host))
-	if err != nil {
-		return err
-	}
-	resp, err := sendRemoteCommand(node, commandRequest{
+	resp, err := sendCommandByTarget(strings.TrimSpace(*host), commandRequest{
 		Command:   "get-aria-attr",
 		Role:      strings.TrimSpace(*role),
 		AriaLabel: strings.TrimSpace(*label),
 		Attr:      strings.TrimSpace(*attr),
-	})
+	}, true)
 	if err != nil {
 		return err
 	}
 	printResponse(resp)
 	if strings.TrimSpace(resp.Value) != "" {
-		logs.Raw(resp.Value)
+		logs.Raw("%s", resp.Value)
 	}
 	return nil
 }
 
 func handleWaitLogCommand(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 wait-log", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host")
+	host := fs.String("host", "", "Mesh host (optional; default local)")
 	role := fs.String("role", defaultRole, "Chrome role")
 	contains := fs.String("contains", "", "Substring to wait for")
 	timeoutMS := fs.Int("timeout-ms", 5000, "Timeout in milliseconds")
 	_ = fs.Parse(args)
-	if strings.TrimSpace(*host) == "" {
-		return fmt.Errorf("wait-log requires --host")
-	}
 	if strings.TrimSpace(*contains) == "" {
 		return fmt.Errorf("wait-log requires --contains")
 	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(*host))
-	if err != nil {
-		return err
-	}
-	resp, err := sendRemoteCommand(node, commandRequest{
+	resp, err := sendCommandByTarget(strings.TrimSpace(*host), commandRequest{
 		Command:   "wait-log",
 		Role:      strings.TrimSpace(*role),
 		Contains:  strings.TrimSpace(*contains),
 		TimeoutMS: *timeoutMS,
-	})
+	}, true)
 	if err != nil {
 		return err
 	}
@@ -349,22 +293,15 @@ func handleWaitLogCommand(args []string) error {
 
 func handleSetHTMLCommand(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 set-html", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host")
+	host := fs.String("host", "", "Mesh host (optional; default local)")
 	role := fs.String("role", defaultRole, "Chrome role")
 	value := fs.String("value", "", "HTML markup")
 	_ = fs.Parse(args)
-	if strings.TrimSpace(*host) == "" {
-		return fmt.Errorf("set-html requires --host")
-	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(*host))
-	if err != nil {
-		return err
-	}
-	resp, err := sendRemoteCommand(node, commandRequest{
+	resp, err := sendCommandByTarget(strings.TrimSpace(*host), commandRequest{
 		Command: "set-html",
 		Role:    strings.TrimSpace(*role),
 		Value:   *value,
-	})
+	}, true)
 	if err != nil {
 		return err
 	}
@@ -374,24 +311,17 @@ func handleSetHTMLCommand(args []string) error {
 
 func handleScreenshotCommand(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 screenshot", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host")
+	host := fs.String("host", "", "Mesh host (optional; default local)")
 	role := fs.String("role", defaultRole, "Chrome role")
 	outPath := fs.String("out", "", "Local PNG output path")
 	_ = fs.Parse(args)
-	if strings.TrimSpace(*host) == "" {
-		return fmt.Errorf("screenshot requires --host")
-	}
 	if strings.TrimSpace(*outPath) == "" {
 		return fmt.Errorf("screenshot requires --out")
 	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(*host))
-	if err != nil {
-		return err
-	}
-	resp, err := sendRemoteCommand(node, commandRequest{
+	resp, err := sendCommandByTarget(strings.TrimSpace(*host), commandRequest{
 		Command: "screenshot",
 		Role:    strings.TrimSpace(*role),
-	})
+	}, true)
 	if err != nil {
 		return err
 	}
@@ -412,17 +342,10 @@ func handleScreenshotCommand(args []string) error {
 
 func handleActionSmokeTest(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 test-actions", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host")
+	host := fs.String("host", "", "Mesh host (optional; default local)")
 	role := fs.String("role", defaultRole, "Chrome role")
 	outPath := fs.String("out", filepath.Join(os.TempDir(), "chrome-src-v3-actions.png"), "Local PNG output path")
 	_ = fs.Parse(args)
-	if strings.TrimSpace(*host) == "" {
-		return fmt.Errorf("test-actions requires --host")
-	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(*host))
-	if err != nil {
-		return err
-	}
 	marker := strconv.FormatInt(time.Now().UnixNano(), 10)
 	markup := actionSmokeHTML(marker)
 	steps := []commandRequest{
@@ -436,7 +359,7 @@ func handleActionSmokeTest(args []string) error {
 		{Command: "screenshot", Role: *role},
 	}
 	for _, step := range steps {
-		resp, err := sendRemoteCommand(node, step)
+		resp, err := sendCommandByTarget(strings.TrimSpace(*host), step, true)
 		if err != nil {
 			return fmt.Errorf("%s failed: %w", step.Command, err)
 		}
