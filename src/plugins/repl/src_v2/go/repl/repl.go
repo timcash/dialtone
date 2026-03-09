@@ -14,11 +14,11 @@ import (
 )
 
 type DialtoneConfig struct {
-	EnvRoot   string           `json:"DIALTONE_ENV,omitempty"`
-	RepoRoot  string           `json:"DIALTONE_REPO_ROOT,omitempty"`
-	UseNix    string           `json:"DIALTONE_USE_NIX,omitempty"`
+	EnvRoot   string            `json:"DIALTONE_ENV,omitempty"`
+	RepoRoot  string            `json:"DIALTONE_REPO_ROOT,omitempty"`
+	UseNix    string            `json:"DIALTONE_USE_NIX,omitempty"`
 	Session   map[string]string `json:"session,omitempty"`
-	MeshNodes []sshv1.MeshNode `json:"mesh_nodes,omitempty"`
+	MeshNodes []sshv1.MeshNode  `json:"mesh_nodes,omitempty"`
 }
 
 func RunREPLV2(args []string) error {
@@ -30,16 +30,22 @@ func RunREPLV2(args []string) error {
 	isTest := false
 	isLLM := false
 	for _, arg := range args {
-		if arg == "--test" { isTest = true }
-		if arg == "--llm" { isLLM = true }
+		if arg == "--test" {
+			isTest = true
+		}
+		if arg == "--llm" {
+			isLLM = true
+		}
 	}
 
 	hostname, _ := os.Hostname()
-	if hostname == "" { hostname = "USER-1" }
+	if hostname == "" {
+		hostname = "USER-1"
+	}
 	prompt := hostname + "> "
 
 	fmt.Println("DIALTONE> REPL v2 (Autonomous Mode) starting...")
-	
+
 	configPath := filepath.Join(repoRoot, "env", "dialtone.json")
 	dialtoneSh := filepath.Join(repoRoot, "dialtone.sh")
 
@@ -53,7 +59,9 @@ func RunREPLV2(args []string) error {
 		}
 		for _, cmd := range testCmds {
 			fmt.Printf("%s%s\n", prompt, cmd)
-			if shouldExit(cmd) { return nil }
+			if shouldExit(cmd) {
+				return nil
+			}
 			if err := handleInput(cmd, configPath, dialtoneSh); err != nil {
 				fmt.Printf("DIALTONE> [ERROR] %v\n", err)
 			}
@@ -66,16 +74,22 @@ func RunREPLV2(args []string) error {
 		foundCmds := false
 		for _, arg := range args {
 			// Skip flags and internal routing keywords
-			if arg == "--llm" || arg == "repl" || arg == "src_v2" || arg == "run" { continue }
-			
+			if arg == "--llm" || arg == "repl" || arg == "src_v2" || arg == "run" {
+				continue
+			}
+
 			foundCmds = true
 			fmt.Printf("%s%s\n", prompt, arg)
-			if shouldExit(arg) { return nil }
+			if shouldExit(arg) {
+				return nil
+			}
 			if err := handleInput(arg, configPath, dialtoneSh); err != nil {
 				fmt.Printf("DIALTONE> [ERROR] %v\n", err)
 			}
 		}
-		if foundCmds { return nil }
+		if foundCmds {
+			return nil
+		}
 		fmt.Println("DIALTONE> LLM Mode active. Listening for input...")
 	}
 
@@ -83,10 +97,16 @@ func RunREPLV2(args []string) error {
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Print(prompt)
-		if !scanner.Scan() { break }
+		if !scanner.Scan() {
+			break
+		}
 		line := strings.TrimSpace(scanner.Text())
-		if line == "" { continue }
-		if shouldExit(line) { break }
+		if line == "" {
+			continue
+		}
+		if shouldExit(line) {
+			break
+		}
 
 		if err := handleInput(line, configPath, dialtoneSh); err != nil {
 			fmt.Printf("DIALTONE> [ERROR] %v\n", err)
@@ -144,11 +164,15 @@ func handleSession(args []string, path string) error {
 
 	switch args[0] {
 	case "set":
-		if len(args) < 3 { return fmt.Errorf("usage: /session set <key> <value>") }
+		if len(args) < 3 {
+			return fmt.Errorf("usage: /session set <key> <value>")
+		}
 		config.Session[args[1]] = args[2]
 		fmt.Printf("DIALTONE> Session state updated: %s=%s\n", args[1], args[2])
 	case "get":
-		if len(args) < 2 { return fmt.Errorf("usage: /session get <key>") }
+		if len(args) < 2 {
+			return fmt.Errorf("usage: /session get <key>")
+		}
 		fmt.Printf("DIALTONE> Session %s: %s\n", args[1], config.Session[args[1]])
 		return nil // Don't save
 	case "clear":
@@ -167,10 +191,14 @@ func handleEnv(args []string, path string) error {
 	config, _ := loadConfig(path)
 	key, val := args[1], args[2]
 	switch key {
-	case "DIALTONE_ENV": config.EnvRoot = val
-	case "DIALTONE_REPO_ROOT": config.RepoRoot = val
-	case "DIALTONE_USE_NIX": config.UseNix = val
-	default: return fmt.Errorf("unknown env key: %s", key)
+	case "DIALTONE_ENV":
+		config.EnvRoot = val
+	case "DIALTONE_REPO_ROOT":
+		config.RepoRoot = val
+	case "DIALTONE_USE_NIX":
+		config.UseNix = val
+	default:
+		return fmt.Errorf("unknown env key: %s", key)
 	}
 	return saveConfig(path, config)
 }
@@ -213,16 +241,22 @@ func handleSSH(args []string, bin string, configPath string) error {
 func loadConfig(path string) (DialtoneConfig, error) {
 	var config DialtoneConfig
 	data, err := os.ReadFile(path)
-	if err != nil { return config, err }
+	if err != nil {
+		return config, err
+	}
 	err = json.Unmarshal(data, &config)
 	return config, err
 }
 
 func saveConfig(path string, config DialtoneConfig) error {
 	data, err := json.MarshalIndent(config, "", "  ")
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	err = os.WriteFile(path, data, 0644)
-	if err == nil { fmt.Printf("DIALTONE> [OK] Configuration saved to %s\n", path) }
+	if err == nil {
+		fmt.Printf("DIALTONE> [OK] Configuration saved to %s\n", path)
+	}
 	return err
 }
 
@@ -239,7 +273,9 @@ func printHelp() {
 
 func printStatus(path string) error {
 	config, err := loadConfig(path)
-	if err != nil { return fmt.Errorf("failed to load config: %v", err) }
+	if err != nil {
+		return fmt.Errorf("failed to load config: %v", err)
+	}
 	fmt.Printf("DIALTONE> Configuration: %s\n", path)
 	fmt.Printf("  Mesh Nodes (%d):\n", len(config.MeshNodes))
 	for _, n := range config.MeshNodes {
@@ -255,10 +291,14 @@ func printStatus(path string) error {
 }
 
 func executeCommand(line string, bin string) error {
-	if shouldExit(line) { return nil }
+	if shouldExit(line) {
+		return nil
+	}
 	args := strings.Fields(line)
-	if len(args) == 0 { return nil }
-	
+	if len(args) == 0 {
+		return nil
+	}
+
 	cmd := exec.Command(bin, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

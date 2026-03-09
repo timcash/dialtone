@@ -6,17 +6,17 @@
 <empty>
 ```
 
-**Generated at:** Mon, 09 Mar 2026 14:25:52 -0700
+**Generated at:** Mon, 09 Mar 2026 14:59:22 -0700
 **Version:** `repl-src-v3`
 **Runner:** `test/src_v1`
 **Status:** ✅ PASS
-**Total Time:** `1.017980625s`
+**Total Time:** `1.599875459s`
 
 ## Test Steps
 
 | Step | Result | Duration |
 |---|---|---|
-| bootstrap-leader-and-inject-command | ✅ PASS | `1.01785175s` |
+| bootstrap-leader-and-inject-command | ✅ PASS | `1.599839041s` |
 
 ## Step Details
 
@@ -26,8 +26,8 @@
 
 ```text
 result: PASS
-duration: 1.01785175s
-report: Started leader, joined from a second REPL client, injected a command as llm-codex, and observed command completion over NATS.
+duration: 1.599839041s
+report: Started leader, joined from a second REPL client, injected bootstrap command to add wsl host, then injected go version command and observed completion over NATS.
 ```
 
 ### Logs
@@ -35,8 +35,8 @@ report: Started leader, joined from a second REPL client, injected a command as 
 ```text
 logs:
 PASS: [TEST][PASS] [STEP:bootstrap-leader-and-inject-command] leader boot, NATS command injection, and completion wait all succeeded
-INFO: report: Started leader, joined from a second REPL client, injected a command as llm-codex, and observed command completion over NATS.
-PASS: [TEST][PASS] [STEP:bootstrap-leader-and-inject-command] report: Started leader, joined from a second REPL client, injected a command as llm-codex, and observed command completion over NATS.
+INFO: report: Started leader, joined from a second REPL client, injected bootstrap command to add wsl host, then injected go version command and observed completion over NATS.
+PASS: [TEST][PASS] [STEP:bootstrap-leader-and-inject-command] report: Started leader, joined from a second REPL client, injected bootstrap command to add wsl host, then injected go version command and observed completion over NATS.
 ```
 
 ### Errors

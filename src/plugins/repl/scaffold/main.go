@@ -3,13 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
-	repl "dialtone/dev/plugins/repl/src_v1/go/repl"
-	replv2 "dialtone/dev/plugins/repl/src_v2/go/repl"
 	replv3 "dialtone/dev/plugins/repl/src_v3/go/repl"
 )
 
@@ -28,23 +24,35 @@ func main() {
 		os.Exit(1)
 	}
 	if warnedOldOrder {
-		logs.Warn("old repl CLI order is deprecated. Use: ./dialtone.sh repl src_v1 <command> [args]")
-	}
-	if version == "src_v2" {
-		switch command {
-		case "run":
-			if err := replv2.RunREPLV2(rest); err != nil {
-				logs.Error("repl v2 run failed: %v", err)
-				os.Exit(1)
-			}
-			return
-		default:
-			logs.Error("Unsupported repl src_v2 command: %s", command)
-			os.Exit(1)
-		}
+		logs.Warn("old repl CLI order is deprecated. Use: ./dialtone.sh repl src_v3 <command> [args]")
 	}
 	if version == "src_v3" {
 		switch command {
+		case "install":
+			if err := replv3.RunInstall(rest); err != nil {
+				logs.Error("repl v3 install failed: %v", err)
+				os.Exit(1)
+			}
+		case "format", "fmt":
+			if err := replv3.RunFormat(rest); err != nil {
+				logs.Error("repl v3 format failed: %v", err)
+				os.Exit(1)
+			}
+		case "build":
+			if err := replv3.RunBuild(rest); err != nil {
+				logs.Error("repl v3 build failed: %v", err)
+				os.Exit(1)
+			}
+		case "lint":
+			if err := replv3.RunLint(rest); err != nil {
+				logs.Error("repl v3 lint failed: %v", err)
+				os.Exit(1)
+			}
+		case "check":
+			if err := replv3.RunCheck(rest); err != nil {
+				logs.Error("repl v3 check failed: %v", err)
+				os.Exit(1)
+			}
 		case "run":
 			if err := replv3.Run(rest); err != nil {
 				logs.Error("repl v3 run failed: %v", err)
@@ -63,6 +71,16 @@ func main() {
 		case "inject":
 			if err := replv3.Inject(rest); err != nil {
 				logs.Error("repl v3 inject failed: %v", err)
+				os.Exit(1)
+			}
+		case "bootstrap":
+			if err := replv3.RunBootstrap(rest); err != nil {
+				logs.Error("repl v3 bootstrap failed: %v", err)
+				os.Exit(1)
+			}
+		case "add-host":
+			if err := replv3.AddHost(rest); err != nil {
+				logs.Error("repl v3 add-host failed: %v", err)
 				os.Exit(1)
 			}
 		case "status":
@@ -90,66 +108,8 @@ func main() {
 		}
 		return
 	}
-	if version != "src_v1" {
-		logs.Error("Unsupported repl version: %s", version)
-		os.Exit(1)
-	}
-
-	switch command {
-	case "test":
-		if err := runVersionedTest(version, rest); err != nil {
-			logs.Error("REPL test error: %v", err)
-			os.Exit(1)
-		}
-	case "run":
-		if err := repl.RunLocal(nil, rest); err != nil {
-			logs.Error("repl run failed: %v", err)
-			os.Exit(1)
-		}
-	case "leader":
-		if err := repl.RunLeader(rest); err != nil {
-			logs.Error("repl leader failed: %v", err)
-			os.Exit(1)
-		}
-	case "join":
-		if err := repl.RunJoin(rest); err != nil {
-			logs.Error("repl join failed: %v", err)
-			os.Exit(1)
-		}
-	case "status":
-		if err := repl.RunStatus(rest); err != nil {
-			logs.Error("repl status failed: %v", err)
-			os.Exit(1)
-		}
-	case "service":
-		if err := repl.RunService(rest); err != nil {
-			logs.Error("repl service failed: %v", err)
-			os.Exit(1)
-		}
-	case "build":
-		if err := buildStandaloneBinary("", "", ""); err != nil {
-			logs.Error("repl build failed: %v", err)
-			os.Exit(1)
-		}
-	case "deploy":
-		if err := repl.RunDeploy(rest); err != nil {
-			logs.Error("repl deploy failed: %v", err)
-			os.Exit(1)
-		}
-	case "release":
-		if err := runRelease(rest); err != nil {
-			logs.Error("repl release failed: %v", err)
-			os.Exit(1)
-		}
-	case "version":
-		logs.Raw("%s", repl.BuildVersion)
-	case "help", "-h", "--help":
-		printUsage()
-	default:
-		logs.Error("Unknown repl command: %s", command)
-		printUsage()
-		os.Exit(1)
-	}
+	logs.Error("Unsupported repl version: %s (supported: src_v3)", version)
+	os.Exit(1)
 }
 
 func parseArgs(args []string) (version, command string, rest []string, warnedOldOrder bool, err error) {
@@ -157,210 +117,40 @@ func parseArgs(args []string) (version, command string, rest []string, warnedOld
 		return "", "", nil, false, fmt.Errorf("missing arguments")
 	}
 	if isHelp(args[0]) {
-		return "src_v1", "help", nil, false, nil
+		return "src_v3", "help", nil, false, nil
 	}
 	if strings.HasPrefix(args[0], "src_v") {
 		if len(args) < 2 {
-			return "", "", nil, false, fmt.Errorf("missing command (usage: ./dialtone.sh repl src_v1 <command> [args])")
+			return "", "", nil, false, fmt.Errorf("missing command (usage: ./dialtone.sh repl src_v3 <command> [args])")
 		}
 		return args[0], args[1], args[2:], false, nil
 	}
 	if len(args) >= 2 && strings.HasPrefix(args[1], "src_v") {
 		return args[1], args[0], args[2:], true, nil
 	}
-	return "", "", nil, false, fmt.Errorf("expected version as first repl argument (usage: ./dialtone.sh repl src_v1 <command> [args])")
+	return "", "", nil, false, fmt.Errorf("expected version as first repl argument (usage: ./dialtone.sh repl src_v3 <command> [args])")
 }
 
 func isHelp(s string) bool {
 	return s == "help" || s == "-h" || s == "--help"
 }
 
-func runVersionedTest(versionDir string, args []string) error {
-	paths, err := repl.ResolvePaths("")
-	if err != nil {
-		return err
-	}
-	testMain := ""
-	switch versionDir {
-	case "src_v1":
-		testMain = paths.TestCmdMain
-	case "src_v3":
-		testMain = filepath.Join(paths.Runtime.SrcRoot, "plugins", "repl", "src_v3", "test", "cmd", "main.go")
-	default:
-		return fmt.Errorf("unsupported repl version for tests: %s", versionDir)
-	}
-	goArgs := []string{"src_v1", "exec", "run", testMain}
-	goArgs = append(goArgs, args...)
-	fullArgs := append([]string{"go"}, goArgs...)
-	cmd := exec.Command(filepath.Join(paths.Runtime.RepoRoot, "dialtone.sh"), fullArgs...)
-	cmd.Dir = paths.Runtime.RepoRoot
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	return cmd.Run()
-}
-
-func buildStandaloneBinary(version, goos, goarch string) error {
-	paths, err := repl.ResolvePaths("")
-	if err != nil {
-		return err
-	}
-	binDir := paths.StandaloneBinDir
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		return err
-	}
-	name := "dialtone_repl"
-	if goos != "" && goarch != "" {
-		name = fmt.Sprintf("dialtone_repl-%s-%s", goos, goarch)
-		if goos == "windows" {
-			name += ".exe"
-		}
-	}
-	out := filepath.Join(binDir, name)
-	pkg := filepath.Join(paths.Preset.Cmd, "repld", "main.go")
-	ld := ""
-	if strings.TrimSpace(version) != "" {
-		ld = "-X dialtone/dev/plugins/repl/src_v1/go/repl.BuildVersion=" + version
-	}
-
-	goBin := filepath.Join(logs.GetDialtoneEnv(), "go", "bin", "go")
-	if _, err := os.Stat(goBin); err != nil {
-		if fallback, lookErr := exec.LookPath("go"); lookErr == nil {
-			goBin = fallback
-		} else {
-			return fmt.Errorf("managed go binary not found at %s and fallback go not in PATH", goBin)
-		}
-	}
-	args := []string{"build"}
-	if ld != "" {
-		args = append(args, "-ldflags", ld)
-	}
-	args = append(args, "-o", out, pkg)
-
-	cmd := exec.Command(goBin, args...)
-	cmd.Dir = paths.Runtime.SrcRoot
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, "CGO_ENABLED=0")
-	if goos != "" {
-		cmd.Env = append(cmd.Env, "GOOS="+goos)
-	}
-	if goarch != "" {
-		cmd.Env = append(cmd.Env, "GOARCH="+goarch)
-	}
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-	logs.Raw("Built standalone REPL binary: %s", out)
-	return nil
-}
-
-func runRelease(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("missing release subcommand (build|publish)")
-	}
-	sub := args[0]
-	rest := args[1:]
-	switch sub {
-	case "build":
-		return releaseBuild(rest)
-	case "publish":
-		return releasePublish(rest)
-	default:
-		return fmt.Errorf("unknown release subcommand: %s", sub)
-	}
-}
-
-func releaseBuild(args []string) error {
-	version := ""
-	if len(args) > 0 {
-		version = strings.TrimSpace(args[0])
-	}
-	if version == "" {
-		return fmt.Errorf("usage: ./dialtone.sh repl src_v1 release build <version>")
-	}
-	targets := [][2]string{{"linux", "amd64"}, {"linux", "arm64"}, {"darwin", "amd64"}, {"darwin", "arm64"}, {"windows", "amd64"}}
-	for _, t := range targets {
-		if err := buildStandaloneBinary(version, t[0], t[1]); err != nil {
-			return err
-		}
-	}
-	logs.Info("Built release binaries for %s", version)
-	return nil
-}
-
-func releasePublish(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: ./dialtone.sh repl src_v1 release publish <version> [repo]")
-	}
-	version := strings.TrimSpace(args[0])
-	repo := "timcash/dialtone"
-	if len(args) > 1 && strings.TrimSpace(args[1]) != "" {
-		repo = strings.TrimSpace(args[1])
-	}
-	paths, err := repl.ResolvePaths("")
-	if err != nil {
-		return err
-	}
-	binDir := paths.StandaloneBinDir
-	assets := []string{
-		"dialtone_repl-linux-amd64",
-		"dialtone_repl-linux-arm64",
-		"dialtone_repl-darwin-amd64",
-		"dialtone_repl-darwin-arm64",
-		"dialtone_repl-windows-amd64.exe",
-	}
-	for _, a := range assets {
-		if _, err := os.Stat(filepath.Join(binDir, a)); err != nil {
-			return fmt.Errorf("missing asset %s (run release build first)", a)
-		}
-	}
-
-	githubArgs := []string{"github", "src_v1", "release", "upsert", "--tag", version, "--repo", repo, "--title", "REPL " + version, "--notes", "Automated REPL release " + version}
-	for _, a := range assets {
-		githubArgs = append(githubArgs, "--asset", filepath.Join(binDir, a))
-	}
-	cmd := exec.Command(filepath.Join(paths.Runtime.RepoRoot, "dialtone.sh"), githubArgs...)
-	cmd.Dir = paths.Runtime.RepoRoot
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-	logs.Info("Published release %s to %s", version, repo)
-	return nil
-}
-
 func printUsage() {
-	logs.Raw("Usage: ./dialtone.sh repl src_v1 <command> [args]")
-	logs.Raw("       ./dialtone.sh repl src_v3 <command> [args]")
-	logs.Raw("")
-	logs.Raw("Commands (src_v1):")
-	logs.Raw("  run [--name HOST]                                    Run local REPL session")
-	logs.Raw("  leader [--nats-url URL] [--room NAME] [--embedded-nats] [--tsnet] [--tsnet-nats-port PORT] [--hostname HOST]")
-	logs.Raw("                                                       Start shared REPL leader/service")
-	logs.Raw("  join [room-name] [--nats-url URL] [--name HOST]     Join a shared REPL host (default room: index)")
-	logs.Raw("  status [--nats-url URL] [--room NAME]               Show NATS/tsnet/chrome status")
-	logs.Raw("  service [--mode install|run|status] [--repo owner/repo] [--nats-url URL] [--room NAME] [--hostname HOST] [--check-interval 5m] [--embedded-nats] [--tsnet] [--tsnet-nats-port PORT]")
-	logs.Raw("                                                       install: register persistent OS service (default)")
-	logs.Raw("                                                       run: start supervisor in foreground")
-	logs.Raw("                                                       status: print OS service status")
-	logs.Raw("  build                                                Build standalone dialtone_repl binary")
-	logs.Raw("  deploy [--host HOST] [--user USER] [--pass PASS] [--service] [--repo owner/repo]")
-	logs.Raw("                                                       Build local binary and deploy to remote host")
-	logs.Raw("  release build <version>                              Build per-architecture release binaries")
-	logs.Raw("  release publish <version> [owner/repo]              Publish binaries to GitHub release")
-	logs.Raw("  test [multiplayer]                                   Run REPL src_v1 tests")
-	logs.Raw("  version                                              Print repl build version")
-	logs.Raw("  help                                                 Show this help")
+	logs.Raw("Usage: ./dialtone.sh repl src_v3 <command> [args]")
 	logs.Raw("")
 	logs.Raw("Commands (src_v3):")
+	logs.Raw("  install                                              Verify managed Go toolchain for REPL workflows")
+	logs.Raw("  format|fmt                                           Run go fmt on REPL packages")
+	logs.Raw("  lint                                                 Run go vet on REPL packages")
+	logs.Raw("  check                                                Compile-check REPL v3 and scaffold packages")
+	logs.Raw("  build                                                Build REPL scaffold/binaries/packages")
 	logs.Raw("  run [--nats-url URL] [--room NAME] [--name USER] [--test]")
-	logs.Raw("  leader [reuses src_v1 leader flags]")
-	logs.Raw("  join [reuses src_v1 join flags]")
+	logs.Raw("  leader [--nats-url URL] [--room NAME] [--embedded-nats] [--tsnet] [--tsnet-nats-port PORT] [--hostname HOST]")
+	logs.Raw("  join [room-name] [--nats-url URL] [--name HOST] [--room NAME]")
 	logs.Raw("  inject --user NAME [--nats-url URL] [--room NAME] <command>")
-	logs.Raw("  status [reuses src_v1 status flags]")
-	logs.Raw("  service [reuses src_v1 service flags]")
+	logs.Raw("  bootstrap [--apply] [--wsl-host HOST] [--wsl-user USER]  Show/apply first-host bootstrap guide")
+	logs.Raw("  add-host --name wsl --host HOST --user USER              Add/update mesh host in env/dialtone.json")
+	logs.Raw("  status [--nats-url URL] [--room NAME]")
+	logs.Raw("  service [--mode install|run|status] [--repo owner/repo] [--nats-url URL] [--room NAME] [--hostname HOST] [--check-interval 5m] [--embedded-nats] [--tsnet] [--tsnet-nats-port PORT]")
 	logs.Raw("  test                                                 Run REPL src_v3 tests")
 }

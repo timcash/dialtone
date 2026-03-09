@@ -56,7 +56,7 @@ install_go() {
 bootstrap_repo() {
     local deps_dir="$1"
     local target_root="$2"
-    local url="https://github.com/timcash/dialtone/archive/refs/heads/main.tar.gz"
+    local url="${DIALTONE_BOOTSTRAP_REPO_URL:-https://github.com/timcash/dialtone/archive/refs/heads/main.tar.gz}"
     log_info "Bootstrapping repo into $target_root from $url..."
     mkdir -p "$deps_dir/repo_tmp"
     curl -L "$url" | tar -xz -C "$deps_dir/repo_tmp" --strip-components=1
@@ -77,7 +77,7 @@ bootstrap_repo() {
     rm -rf "$deps_dir/repo_tmp"
 
     if [ -n "$saved_script" ] || [ ! -f "$target_root/dialtone.sh" ] || [ "$target_root" != "$SCRIPT_DIR" ]; then
-        cp "$0" "$target_root/dialtone.sh"
+        cp -f "$0" "$target_root/dialtone.sh" 2>/dev/null || true
     fi
     log_info "Repo bootstrap complete."
 }
