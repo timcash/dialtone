@@ -350,6 +350,113 @@ func RunTest(args []string) error {
 	return runTmpBootstrapTest(args)
 }
 
+func RunTestClean(args []string) error {
+	fs := flag.NewFlagSet("repl-v3-test-clean", flag.ContinueOnError)
+	dryRun := fs.Bool("dry-run", false, "List temp folders without deleting")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	tmpRoot := strings.TrimSpace(os.TempDir())
+	if tmpRoot == "" {
+		return fmt.Errorf("temp directory is empty")
+	}
+	entries, err := os.ReadDir(tmpRoot)
+	if err != nil {
+		return err
+	}
+	const prefix = "dialtone-repl-v3-bootstrap-"
+	matches := make([]string, 0, 16)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := strings.TrimSpace(e.Name())
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		matches = append(matches, filepath.Join(tmpRoot, name))
+	}
+	if len(matches) == 0 {
+		logs.Info("test-clean: no %s* folders found in %s", prefix, tmpRoot)
+		return nil
+	}
+	if *dryRun {
+		for _, p := range matches {
+			logs.Info("test-clean dry-run: %s", p)
+		}
+		logs.Info("test-clean dry-run complete: %d folder(s) matched", len(matches))
+		return nil
+	}
+	removed := 0
+	for _, p := range matches {
+		if err := os.RemoveAll(p); err != nil {
+			return err
+		}
+		removed++
+		logs.Info("test-clean removed: %s", p)
+	}
+	logs.Info("test-clean complete: %d folder(s) removed", removed)
+	return nil
+}
+
+func RunProcessClean(args []string) error {
+	fs := flag.NewFlagSet("repl-v3-process-clean", flag.ContinueOnError)
+	dryRun := fs.Bool("dry-run", false, "List matching processes without killing them")
+	includeChrome := fs.Bool("include-chrome", false, "Also kill chrome-v1 service processes")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	type pattern struct {
+		label string
+		expr  string
+	}
+	patterns := []pattern{
+		{label: "repl-v3-leader", expr: `plugins/repl/scaffold/main.go src_v3 leader`},
+		{label: "repl-v3-leader-bin", expr: `src_v3 leader --embedded-nats`},
+		{label: "dialtone-tap", expr: `dialtone-tap`},
+		{label: "stuck-tsnet-shell", expr: `dialtone\.sh tsnet src_v1 up`},
+		{label: "stuck-tsnet-go", expr: `go run dev\.go tsnet src_v1 up`},
+	}
+	if *includeChrome {
+		patterns = append(patterns,
+			pattern{label: "chrome-v1-service", expr: `/tmp/dialtone/chrome-v1/chrome-v1-service`},
+			pattern{label: "chrome-v1-role", expr: `--dialtone-role=chrome-v1-service`},
+		)
+	}
+
+	totalFound := 0
+	totalKilled := 0
+	for _, p := range patterns {
+		found, err := pgrepCount(p.expr)
+		if err != nil {
+			return err
+		}
+		if found == 0 {
+			continue
+		}
+		totalFound += found
+		if *dryRun {
+			logs.Info("process-clean dry-run: %s matched %d process(es)", p.label, found)
+			continue
+		}
+		killed, err := pkillCount(p.expr)
+		if err != nil {
+			return err
+		}
+		totalKilled += killed
+		logs.Info("process-clean: %s killed %d process(es)", p.label, killed)
+	}
+
+	if *dryRun {
+		logs.Info("process-clean dry-run complete: %d process(es) matched", totalFound)
+		return nil
+	}
+	logs.Info("process-clean complete: %d matched, %d killed", totalFound, totalKilled)
+	return nil
+}
+
 func runInRepoTest(args []string) error {
 	repoRoot, srcRoot, err := resolveRoots()
 	if err != nil {
@@ -689,4 +796,51 @@ func resolveGoBin() (string, error) {
 		return "", fmt.Errorf("go binary not found (DIALTONE_GO_BIN unset and go not in PATH)")
 	}
 	return path, nil
+}
+
+func pgrepCount(expr string) (int, error) {
+	cmd := exec.Command("pgrep", "-f", expr)
+	out, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return countNonEmptyLines(string(out)), nil
+}
+
+func pkillCount(expr string) (int, error) {
+	before, err := pgrepCount(expr)
+	if err != nil {
+		return 0, err
+	}
+	if before == 0 {
+		return 0, nil
+	}
+	cmd := exec.Command("pkill", "-f", expr)
+	if err := cmd.Run(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+			return 0, nil
+		}
+		return 0, err
+	}
+	after, err := pgrepCount(expr)
+	if err != nil {
+		return 0, err
+	}
+	if before < after {
+		return 0, nil
+	}
+	return before - after, nil
+}
+
+func countNonEmptyLines(raw string) int {
+	n := 0
+	for _, line := range strings.Split(raw, "\n") {
+		if strings.TrimSpace(line) != "" {
+			n++
+		}
+	}
+	return n
 }

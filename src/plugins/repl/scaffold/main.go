@@ -98,6 +98,16 @@ func main() {
 				logs.Error("repl v3 test failed: %v", err)
 				os.Exit(1)
 			}
+		case "test-clean":
+			if err := replv3.RunTestClean(rest); err != nil {
+				logs.Error("repl v3 test-clean failed: %v", err)
+				os.Exit(1)
+			}
+		case "process-clean":
+			if err := replv3.RunProcessClean(rest); err != nil {
+				logs.Error("repl v3 process-clean failed: %v", err)
+				os.Exit(1)
+			}
 		case "version":
 			logs.Raw("src_v3")
 		case "help", "-h", "--help":
@@ -153,4 +163,6 @@ func printUsage() {
 	logs.Raw("  status [--nats-url URL] [--room NAME]")
 	logs.Raw("  service [--mode install|run|status] [--repo owner/repo] [--nats-url URL] [--room NAME] [--hostname HOST] [--check-interval 5m] [--embedded-nats] [--tsnet] [--tsnet-nats-port PORT]")
 	logs.Raw("  test                                                 Run REPL src_v3 tests")
+	logs.Raw("  test-clean [--dry-run]                               Remove REPL src_v3 /tmp bootstrap test folders")
+	logs.Raw("  process-clean [--dry-run] [--include-chrome]        Stop REPL/tap/subtone runtime processes")
 }

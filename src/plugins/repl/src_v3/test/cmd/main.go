@@ -4,7 +4,12 @@ import (
 	"os"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
-	bootinject "dialtone/dev/plugins/repl/src_v3/test/01_bootstrap_inject"
+	tmpworkspace "dialtone/dev/plugins/repl/src_v3/test/01_tmp_workspace"
+	clihelp "dialtone/dev/plugins/repl/src_v3/test/02_cli_help"
+	bootstrapcfg "dialtone/dev/plugins/repl/src_v3/test/03_bootstrap_config"
+	replhelpps "dialtone/dev/plugins/repl/src_v3/test/04_repl_help_ps"
+	sshwsl "dialtone/dev/plugins/repl/src_v3/test/05_ssh_wsl"
+	cloudflaretunnel "dialtone/dev/plugins/repl/src_v3/test/06_cloudflare_tunnel"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
 )
 
@@ -12,7 +17,12 @@ func main() {
 	logs.SetOutput(os.Stdout)
 
 	reg := testv1.NewRegistry()
-	bootinject.Register(reg)
+	tmpworkspace.Register(reg)
+	clihelp.Register(reg)
+	bootstrapcfg.Register(reg)
+	replhelpps.Register(reg)
+	sshwsl.Register(reg)
+	cloudflaretunnel.Register(reg)
 
 	err := reg.Run(testv1.SuiteOptions{
 		Version:       "repl-src-v3",

@@ -18,6 +18,13 @@ The `cloudflare` plugin integrates Cloudflare Tunnels into Dialtone, enabling se
 
 # Run a tunnel and optionally specify a service URL to forward.
 ./dialtone.sh cloudflare src_v1 tunnel run <name> --url <service-url>
+./dialtone.sh cloudflare src_v1 tunnel start <name> --url <service-url>
+
+# Stop running cloudflared tunnel processes.
+./dialtone.sh cloudflare src_v1 tunnel stop
+
+# Tunnel status alias (lists tunnels).
+./dialtone.sh cloudflare src_v1 tunnel status
 
 # Automate exposing a remote robot (direct Tailscale-to-Cloudflare relay).
 # Target defaults to DIALTONE_DOMAIN or DIALTONE_HOSTNAME.

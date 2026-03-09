@@ -252,6 +252,109 @@ Required fixtures:
 
 ---
 
+## Current `repl src_v3` CLI Runbook
+The commands below are the active development surface for REPL v3.
+
+### Primary commands
+- `./dialtone.sh repl src_v3 help`
+- `./dialtone.sh repl src_v3 install`
+- `./dialtone.sh repl src_v3 format`
+- `./dialtone.sh repl src_v3 lint`
+- `./dialtone.sh repl src_v3 check`
+- `./dialtone.sh repl src_v3 build`
+- `./dialtone.sh repl src_v3 run`
+- `./dialtone.sh repl src_v3 leader --embedded-nats --nats-url nats://0.0.0.0:4222 --room index`
+- `./dialtone.sh repl src_v3 join --nats-url nats://127.0.0.1:4222 --room index --name observer`
+- `./dialtone.sh repl src_v3 inject --user llm-codex go src_v1 version`
+- `./dialtone.sh repl src_v3 bootstrap`
+- `./dialtone.sh repl src_v3 bootstrap --apply --wsl-host wsl.shad-artichoke.ts.net --wsl-user user`
+- `./dialtone.sh repl src_v3 add-host --name wsl --host wsl.shad-artichoke.ts.net --user user`
+- `./dialtone.sh repl src_v3 status`
+- `./dialtone.sh repl src_v3 service --mode run --room index`
+- `./dialtone.sh repl src_v3 test`
+- `./dialtone.sh repl src_v3 process-clean --dry-run`
+- `./dialtone.sh repl src_v3 process-clean --include-chrome`
+
+### End-to-end local loop
+1. `./dialtone.sh repl src_v3 install`
+2. `./dialtone.sh repl src_v3 check`
+3. Start daemon+REPL: `./dialtone.sh`
+4. Inject from another shell: `./dialtone.sh go src_v1 version --user llm-codex`
+5. Confirm room output shows requester prefix and subtone lifecycle lines.
+6. Stop stale runtime processes when needed: `./dialtone.sh repl src_v3 process-clean`
+
+### Plugin dev loop through REPL subtone path
+Use this pattern to verify plugin commands always flow through REPL/NATS:
+1. `./dialtone.sh` (starts/joins REPL runtime)
+2. `./dialtone.sh <plugin> <src_vN> <action> --user <role>`
+3. Watch REPL output for:
+   - `<role>/command> ...`
+   - `DIALTONE> Request received...`
+   - `DIALTONE:<pid> Started...`
+   - `DIALTONE> Subtone ... exited with code <n>`
+
+### Test workflows
+- Primary E2E path is installer download into an empty `/tmp` folder:
+  - `curl -fsSL https://shell.dialtone.earth/install.sh | bash`
+  - For local testing, use a local HTTP server that serves an install script with the same contract.
+- Installer responsibilities:
+  - Create or enter an empty working folder under `/tmp`.
+  - Download `dialtone.sh`.
+  - Start first-run onboarding flow.
+- First-run onboarding responsibilities:
+  - Prompt for dependency install folder.
+  - Prompt for source/repo folder.
+  - Persist selections to `env/dialtone.json`.
+  - Bootstrap Go and repo source if missing.
+  - Hand off to `dev.go`.
+- Runtime handoff responsibilities:
+  - Start `repl src_v3` daemon/service in background.
+  - Attach interactive REPL client in foreground.
+  - Ensure commands run through REPL/NATS injection path (subtones), not direct ad-hoc execution.
+- Test command:
+  - `./dialtone.sh --test`
+  - This command must execute the same bootstrap/install/handoff path from `/tmp` (not local repo working directory).
+
+### Ordered REPL v3 test suites (run by `./dialtone.sh --test`)
+`./dialtone.sh --test` must execute these suites from `src/plugins/repl/src_v3/test/` in order, inside a `/tmp` bootstrap workspace:
+1. `01_tmp_workspace`
+2. `02_cli_help`
+3. `03_bootstrap_config`
+4. `04_repl_help_ps`
+5. `05_ssh_wsl`
+6. `06_cloudflare_tunnel`
+
+Scope per suite:
+- `01_tmp_workspace`: prove execution is in `/tmp` bootstrap workspace and required files (`dialtone.sh`, `src/dev.go`, `env/dialtone.json`) exist.
+- `02_cli_help`: verify top-level and `repl src_v3` help surfaces through `./dialtone.sh` in the tmp workspace.
+- `03_bootstrap_config`: inject `repl src_v3 bootstrap --apply` over NATS and verify `env/dialtone.json` mesh node update for `wsl`.
+- `04_repl_help_ps`: inject `help` and `ps` through REPL bus and validate room output for command + response.
+- `05_ssh_wsl`: inject `ssh src_v1 run --host wsl --cmd whoami` and validate REPL subtone lifecycle output for SSH command path.
+- `06_cloudflare_tunnel`: inject `cloudflare src_v1 tunnel start ...` and validate tunnel startup path via subtone output (using mocked cloudflared in test runtime).
+
+Planned next suites to complete full installer narrative:
+1. `06_installer_download`
+2. `07_onboarding_prompts`
+3. `08_go_runtime_provenance`
+4. `09_daemon_background_attach`
+5. `10_full_user_flow`
+
+Planned scope for next suites:
+- `06_installer_download`: simulate `curl | bash` against local installer web server and verify `dialtone.sh` lands in an empty `/tmp` workspace.
+- `07_onboarding_prompts`: assert first-run prompts capture dependency/source folders and persist expected values.
+- `08_go_runtime_provenance`: assert managed Go path from selected env folder is used after bootstrap (not system go).
+- `09_daemon_background_attach`: verify REPL daemon/service starts in background and CLI attaches as client.
+- `10_full_user_flow`: run full end-to-end from empty `/tmp` through injected command execution with final pass/fail transcript.
+
+### Observability and process hygiene
+- See active managed subtones from REPL: `/ps`
+- See REPL/NATS status: `./dialtone.sh repl src_v3 status`
+- Safe cleanup preview: `./dialtone.sh repl src_v3 process-clean --dry-run`
+- Full cleanup of REPL/tap/stuck commands: `./dialtone.sh repl src_v3 process-clean`
+- Include chrome-v1 service processes in cleanup: `./dialtone.sh repl src_v3 process-clean --include-chrome`
+
+---
+
 ## Migration Plan
 ### Phase 1: Spec + compatibility shell
 - Add daemon/nats schemas and subjects.
