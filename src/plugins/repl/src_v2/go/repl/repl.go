@@ -2,6 +2,7 @@ package repl
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,7 +10,15 @@ import (
 	"strings"
 
 	"dialtone/dev/plugins/proc/src_v1/go/proc"
+	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 )
+
+type DialtoneConfig struct {
+	EnvRoot   string           `json:"DIALTONE_ENV,omitempty"`
+	RepoRoot  string           `json:"DIALTONE_REPO_ROOT,omitempty"`
+	UseNix    string           `json:"DIALTONE_USE_NIX,omitempty"`
+	MeshNodes []sshv1.MeshNode `json:"mesh_nodes,omitempty"`
+}
 
 func RunREPLV2(args []string) error {
 	repoRoot := os.Getenv("DIALTONE_REPO_ROOT")
@@ -19,8 +28,9 @@ func RunREPLV2(args []string) error {
 
 	isTest := false
 	for _, arg := range args {
-		if arg == "--test" {
+		if arg == "--test" || arg == "-test" {
 			isTest = true
+			break
 		}
 	}
 
@@ -30,48 +40,31 @@ func RunREPLV2(args []string) error {
 	}
 	prompt := hostname + "> "
 
-	fmt.Println("DIALTONE> REPL v2 starting...")
+	fmt.Println("DIALTONE> REPL v2 (Autonomous Mode) starting...")
+	fmt.Println("DIALTONE> Type /help to see available slash commands.")
 	
-	// --- 1. Guided Setup & Verification ---
-	verifyFile := func(path, description string) bool {
-		fullPath := filepath.Join(repoRoot, path)
-		if _, err := os.Stat(fullPath); err == nil {
-			fmt.Printf("DIALTONE> [OK] %s found: %s\n", description, path)
-			return true
-		}
-		fmt.Printf("DIALTONE> [MISSING] %s not found: %s\n", description, path)
-		return false
-	}
+	configPath := filepath.Join(repoRoot, "env", "dialtone.json")
+	dialtoneSh := filepath.Join(repoRoot, "dialtone.sh")
 
-	verifyFile("env/.env", ".env file")
-	verifyFile("env/mesh.json", "mesh.json file")
-	verifyFile("env/ssh_config", "ssh_config file")
-
-	// --- 2. SSH connectivity check to wsl ---
-	fmt.Println("DIALTONE> Verifying SSH connectivity to wsl...")
-	sshCmd := exec.Command("ssh", "-F", filepath.Join(repoRoot, "env", "ssh_config"), "wsl", "whoami")
-	sshCmd.Stderr = os.Stderr
-	if out, err := sshCmd.Output(); err == nil {
-		fmt.Printf("DIALTONE> [OK] SSH connection to wsl successful (user: %s)\n", strings.TrimSpace(string(out)))
-	} else {
-		fmt.Printf("DIALTONE> [FAIL] SSH connection to wsl failed: %v\n", err)
-	}
-
+	// --- Interactive Loop ---
+	scanner := bufio.NewScanner(os.Stdin)
+	
 	if isTest {
-		fmt.Println("DIALTONE> Test mode active. Exiting after verification.")
+		fmt.Println("DIALTONE> [TEST] Running automated onboarding sequence...")
+		commands := []string{
+			"/mesh add wsl wsl.shad-artichoke.ts.net user",
+			"/ssh wsl whoami",
+			"exit",
+		}
+		for _, cmd := range commands {
+			fmt.Printf("%s%s\n", prompt, cmd)
+			if err := handleInput(cmd, configPath, dialtoneSh); err != nil {
+				fmt.Printf("DIALTONE> [ERROR] %v\n", err)
+			}
+		}
 		return nil
 	}
 
-	// --- 3. Print Available Commands ---
-	fmt.Println("\nAvailable Dialtone commands (from REPL):")
-	fmt.Println("  ssh src_v1 run --host <node> --cmd <command>")
-	fmt.Println("  chrome v1 status")
-	fmt.Println("  ps (List active processes)")
-	fmt.Println("  help (Full help)")
-	fmt.Println("  exit (Quit REPL)\n")
-
-	// --- 4. Interactive Loop ---
-	scanner := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Print(prompt)
 		if !scanner.Scan() {
@@ -84,18 +77,154 @@ func RunREPLV2(args []string) error {
 		if line == "exit" || line == "quit" {
 			break
 		}
-		if line == "help" {
-			fmt.Println("Type any dialtone command directly, or 'exit' to quit.")
-			continue
-		}
-		if line == "ps" {
-			printManagedProcesses()
-			continue
-		}
 
-		executeCommand(line)
+		if err := handleInput(line, configPath, dialtoneSh); err != nil {
+			fmt.Printf("DIALTONE> [ERROR] %v\n", err)
+		}
 	}
 
+	return nil
+}
+
+func handleInput(line string, configPath string, dialtoneSh string) error {
+	if !strings.HasPrefix(line, "/") {
+		// Pass-through to dialtone.sh for standard commands
+		executeCommand(line, dialtoneSh)
+		return nil
+	}
+
+	parts := strings.Fields(line)
+	cmd := parts[0]
+	args := parts[1:]
+
+	switch cmd {
+	case "/help":
+		printHelp()
+	case "/env":
+		return handleEnv(args, configPath)
+	case "/mesh":
+		return handleMesh(args, configPath)
+	case "/ssh":
+		return handleSSH(args, dialtoneSh, configPath)
+	case "/status":
+		return printStatus(configPath)
+	case "/ps":
+		printManagedProcesses()
+	default:
+		return fmt.Errorf("unknown slash command: %s", cmd)
+	}
+	return nil
+}
+
+func handleEnv(args []string, path string) error {
+	if len(args) < 3 || args[0] != "set" {
+		return fmt.Errorf("usage: /env set <key> <value>")
+	}
+	config, _ := loadConfig(path)
+	key, val := args[1], args[2]
+	
+	switch key {
+	case "DIALTONE_ENV": config.EnvRoot = val
+	case "DIALTONE_REPO_ROOT": config.RepoRoot = val
+	case "DIALTONE_USE_NIX": config.UseNix = val
+	default: return fmt.Errorf("unknown env key: %s", key)
+	}
+	
+	return saveConfig(path, config)
+}
+
+func handleMesh(args []string, path string) error {
+	if len(args) < 4 || args[0] != "add" {
+		return fmt.Errorf("usage: /mesh add <name> <host> <user>")
+	}
+	config, _ := loadConfig(path)
+	name, host, user := args[1], args[2], args[3]
+	
+	// Check if already exists
+	for i, n := range config.MeshNodes {
+		if n.Name == name {
+			config.MeshNodes[i].Host = host
+			config.MeshNodes[i].User = user
+			fmt.Printf("DIALTONE> Updated existing mesh node: %s\n", name)
+			return saveConfig(path, config)
+		}
+	}
+
+	newNode := sshv1.MeshNode{
+		Name:    name,
+		Host:    host,
+		User:    user,
+		Port:    "22",
+		OS:      "linux",
+		Aliases: []string{name},
+		HostCandidates: []string{host},
+		RoutePreference: []string{"tailscale", "private"},
+	}
+	config.MeshNodes = append(config.MeshNodes, newNode)
+	fmt.Printf("DIALTONE> Added new mesh node: %s\n", name)
+	return saveConfig(path, config)
+}
+
+func handleSSH(args []string, bin string, configPath string) error {
+	if len(args) < 2 {
+		return fmt.Errorf("usage: /ssh <node> <command>")
+	}
+	node := args[0]
+	cmd := strings.Join(args[1:], " ")
+	
+	// Map /ssh to plugin command
+	pluginCmd := fmt.Sprintf("ssh src_v1 run --host %s --cmd %q", node, cmd)
+	
+	// Ensure the plugin knows where the config is
+	os.Setenv("DIALTONE_MESH_CONFIG", configPath)
+	executeCommand(pluginCmd, bin)
+	return nil
+}
+
+func loadConfig(path string) (DialtoneConfig, error) {
+	var config DialtoneConfig
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return config, err
+	}
+	err = json.Unmarshal(data, &config)
+	return config, err
+}
+
+func saveConfig(path string, config DialtoneConfig) error {
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+	err = os.WriteFile(path, data, 0644)
+	if err == nil {
+		fmt.Printf("DIALTONE> [OK] Configuration saved to %s\n", path)
+	}
+	return err
+}
+
+func printHelp() {
+	fmt.Println("DIALTONE> Available commands:")
+	fmt.Println("  /env set <K> <V>       Set environment variable in dialtone.json")
+	fmt.Println("  /mesh add <N> <H> <U>  Add/Update a mesh node configuration")
+	fmt.Println("  /ssh <node> <cmd>      Run a command on a mesh node via SSH plugin")
+	fmt.Println("  /status                Show current configuration and health")
+	fmt.Println("  /ps                    List managed subtones")
+	fmt.Println("  exit                   Quit REPL")
+}
+
+func printStatus(path string) error {
+	config, err := loadConfig(path)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %v", err)
+	}
+	fmt.Printf("DIALTONE> Configuration: %s\n", path)
+	fmt.Printf("  DIALTONE_ENV:       %s\n", config.EnvRoot)
+	fmt.Printf("  DIALTONE_REPO_ROOT:  %s\n", config.RepoRoot)
+	fmt.Printf("  Mesh Nodes (%d):\n", len(config.MeshNodes))
+	for _, n := range config.MeshNodes {
+		fmt.Printf("    - %s (%s@%s)\n", n.Name, n.User, n.Host)
+	}
 	return nil
 }
 
@@ -112,15 +241,9 @@ func printManagedProcesses() {
 	}
 }
 
-func executeCommand(line string) {
+func executeCommand(line string, bin string) {
 	args := strings.Fields(line)
-	// We call back into dialtone.sh for simplicity or run dev.go
-	// But let's assume we can run any dialtone command.
-	repoRoot := os.Getenv("DIALTONE_REPO_ROOT")
-	dialtoneSh := filepath.Join(repoRoot, "dialtone.sh")
-
-	// We'll pass the command through dialtone.sh to reuse its env setup
-	cmd := exec.Command(dialtoneSh, args...)
+	cmd := exec.Command(bin, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
