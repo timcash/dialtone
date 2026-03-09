@@ -15,6 +15,7 @@ import (
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	repl "dialtone/dev/plugins/repl/src_v1/go/repl"
+	replv3 "dialtone/dev/plugins/repl/src_v3/go/repl"
 
 	"github.com/joho/godotenv"
 )
@@ -362,6 +363,8 @@ func main() {
 	switch command {
 	case "help", "-h", "--help":
 		printDevUsage()
+	case "exit":
+		os.Exit(0)
 	case "branch":
 		runBranch(args)
 	case "plugins":
@@ -381,6 +384,13 @@ func main() {
 		}
 		logs.Error("Unknown dev command: %v", args)
 	default:
+		if shouldRouteCommandViaREPL(command) {
+			if err := dispatchViaREPL(command, args); err != nil {
+				logs.Error("REPL dispatch failed: %v", err)
+				os.Exit(1)
+			}
+			return
+		}
 		if err := runPluginScaffold(command, args); err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				os.Exit(exitErr.ExitCode())
@@ -389,6 +399,58 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+func shouldRouteCommandViaREPL(command string) bool {
+	if strings.TrimSpace(os.Getenv("DIALTONE_SUBTONE")) == "1" {
+		return false
+	}
+	switch strings.TrimSpace(command) {
+	case "", "help", "-h", "--help", "exit", "branch", "plugins", "dev", "repl":
+		return false
+	default:
+		return true
+	}
+}
+
+func dispatchViaREPL(command string, args []string) error {
+	user := repl.DefaultPromptName()
+	filtered := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := strings.TrimSpace(args[i])
+		if a == "" {
+			continue
+		}
+		if a == "--user" && i+1 < len(args) {
+			u := strings.TrimSpace(args[i+1])
+			if u != "" {
+				user = u
+			}
+			i++
+			continue
+		}
+		if strings.HasPrefix(a, "--user=") {
+			u := strings.TrimSpace(strings.TrimPrefix(a, "--user="))
+			if u != "" {
+				user = u
+			}
+			continue
+		}
+		filtered = append(filtered, a)
+	}
+	line := strings.TrimSpace(strings.Join(append([]string{command}, filtered...), " "))
+	if line == "" {
+		return fmt.Errorf("empty command")
+	}
+	natsURL := strings.TrimSpace(os.Getenv("DIALTONE_REPL_NATS_URL"))
+	if natsURL == "" {
+		natsURL = "nats://127.0.0.1:4222"
+	}
+	room := strings.TrimSpace(os.Getenv("DIALTONE_REPL_ROOM"))
+	if room == "" {
+		room = "index"
+	}
+	return replv3.InjectCommand(natsURL, room, user, line)
 }
 
 func detectMissingForREPL() []MissingInstall {

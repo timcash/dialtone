@@ -6,22 +6,131 @@
 <empty>
 ```
 
-**Generated at:** Sat, 07 Mar 2026 16:19:22 -0800
+**Generated at:** Mon, 09 Mar 2026 14:26:34 -0700
 **Version:** `src-v1-self-check`
 **Runner:** `test/src_v1`
 **Status:** ✅ PASS
-**Total Time:** `6.165517001s`
+**Total Time:** `7.063625ms`
 
 ## Test Steps
 
 | Step | Result | Duration |
 |---|---|---|
-| example-browser-stepcontext-api | ✅ PASS | `134.578364ms` |
-| browser-stepcontext-aria-and-console | ✅ PASS | `5.920962135s` |
-| auto-screenshot-uses-browser | ✅ PASS | `104.39557ms` |
-| auto-screenshot-file-exists | ✅ PASS | `155.309µs` |
+| ctx-logging-and-waits | ✅ PASS | `2.924167ms` |
+| ctx-subjects-populated | ✅ PASS | `158.292µs` |
+| example-template-step | ✅ PASS | `729.542µs` |
+| example-browser-stepcontext-api | ✅ PASS | `350.25µs` |
+| browser-stepcontext-aria-and-console | ✅ PASS | `790.917µs` |
+| nats-step-wait-patterns | ✅ PASS | `1.256542ms` |
+| browser-lifecycle-setup-options | ✅ PASS | `206.458µs` |
+| browser-lifecycle-reuse-shared-session | ✅ PASS | `127.708µs` |
+| auto-screenshot-uses-browser | ✅ PASS | `291µs` |
+| auto-screenshot-file-exists | ✅ PASS | `151.625µs` |
 
 ## Step Details
+
+## ctx-logging-and-waits
+
+### Results
+
+```text
+result: PASS
+duration: 2.924167ms
+report: StepContext log methods + wait helpers verified
+```
+
+### Logs
+
+```text
+logs:
+INFO: ctx info message
+WARN: ctx warn message
+INFO: ctx info format check
+WARN: ctx warn format check
+INFO: report: StepContext log methods + wait helpers verified
+PASS: [TEST][PASS] [STEP:ctx-logging-and-waits] report: StepContext log methods + wait helpers verified
+```
+
+### Errors
+
+```text
+errors:
+ERROR: ctx error message
+ERROR: ctx error message
+ERROR: ctx error format check
+```
+
+### Browser Logs
+
+```text
+browser_logs:
+<empty>
+```
+
+## ctx-subjects-populated
+
+### Results
+
+```text
+result: PASS
+duration: 158.292µs
+report: StepContext subjects available for plugin tests
+```
+
+### Logs
+
+```text
+logs:
+INFO: report: StepContext subjects available for plugin tests
+PASS: [TEST][PASS] [STEP:ctx-subjects-populated] report: StepContext subjects available for plugin tests
+```
+
+### Errors
+
+```text
+errors:
+<empty>
+```
+
+### Browser Logs
+
+```text
+browser_logs:
+<empty>
+```
+
+## example-template-step
+
+### Results
+
+```text
+result: PASS
+duration: 729.542µs
+report: template-style test step ran in shared process
+```
+
+### Logs
+
+```text
+logs:
+INFO: template plugin info
+INFO: report: template-style test step ran in shared process
+PASS: [TEST][PASS] [STEP:example-template-step] report: template-style test step ran in shared process
+```
+
+### Errors
+
+```text
+errors:
+ERROR: template plugin error
+```
+
+### Browser Logs
+
+```text
+browser_logs:
+<empty>
+```
 
 ## example-browser-stepcontext-api
 
@@ -29,23 +138,17 @@
 
 ```text
 result: PASS
-duration: 134.578364ms
-report: StepContext browser helpers ready (goto + aria + console via chrome src_v3 service)
-```
-
-### Error-Ping Check
-
-```text
-WARN: ERROR_PING: skipped for chrome src_v3 NATS-managed browser session
+duration: 350.25µs
+report: skipped browser helper example (chrome not installed)
 ```
 
 ### Logs
 
 ```text
 logs:
-WARN: ERROR_PING: skipped for chrome src_v3 NATS-managed browser session
-INFO: report: StepContext browser helpers ready (goto + aria + console via chrome src_v3 service)
-PASS: [TEST][PASS] [STEP:example-browser-stepcontext-api] report: StepContext browser helpers ready (goto + aria + console via chrome src_v3 service)
+WARN: browser provider not available; use --attach <node> for remote mode
+INFO: report: skipped browser helper example (chrome not installed)
+PASS: [TEST][PASS] [STEP:example-browser-stepcontext-api] report: skipped browser helper example (chrome not installed)
 ```
 
 ### Errors
@@ -59,15 +162,8 @@ errors:
 
 ```text
 browser_logs:
-INFO: CONSOLE:log: "clicked"
-INFO: CONSOLE:log: "clicked-smoke"
-INFO: CONSOLE:log: "coord-hit-1"
-INFO: CONSOLE:log: "search-enter:dialtone"
+<empty>
 ```
-
-### Screenshots
-
-![auto_example-browser-stepcontext-api.png](screenshots/auto_example-browser-stepcontext-api.png)
 
 ## browser-stepcontext-aria-and-console
 
@@ -75,16 +171,17 @@ INFO: CONSOLE:log: "search-enter:dialtone"
 
 ```text
 result: PASS
-duration: 5.920962135s
-report: StepContext browser API verified through chrome src_v3 service: aria wait timeout, goto, aria click, type+enter, screenshots, browser console waits
+duration: 790.917µs
+report: skipped browser ctx smoke (chrome not installed)
 ```
 
 ### Logs
 
 ```text
 logs:
-INFO: report: StepContext browser API verified through chrome src_v3 service: aria wait timeout, goto, aria click, type+enter, screenshots, browser console waits
-PASS: [TEST][PASS] [STEP:browser-stepcontext-aria-and-console] report: StepContext browser API verified through chrome src_v3 service: aria wait timeout, goto, aria click, type+enter, screenshots, browser console waits
+WARN: browser provider not available; use --attach <node> for remote mode
+INFO: report: skipped browser ctx smoke (chrome not installed)
+PASS: [TEST][PASS] [STEP:browser-stepcontext-aria-and-console] report: skipped browser ctx smoke (chrome not installed)
 ```
 
 ### Errors
@@ -101,9 +198,106 @@ browser_logs:
 <empty>
 ```
 
-### Screenshots
+## nats-step-wait-patterns
 
-![auto_browser-stepcontext-aria-and-console.png](screenshots/auto_browser-stepcontext-aria-and-console.png)
+### Results
+
+```text
+result: PASS
+duration: 1.256542ms
+report: StepContext NATS wait patterns verified (step/error/custom/all)
+```
+
+### Logs
+
+```text
+logs:
+INFO: step-msg-one
+INFO: multi-a
+INFO: multi-b
+INFO: direct-step-hit
+INFO: report: StepContext NATS wait patterns verified (step/error/custom/all)
+PASS: [TEST][PASS] [STEP:nats-step-wait-patterns] report: StepContext NATS wait patterns verified (step/error/custom/all)
+```
+
+### Errors
+
+```text
+errors:
+ERROR: expected-step-error
+```
+
+### Browser Logs
+
+```text
+browser_logs:
+<empty>
+```
+
+## browser-lifecycle-setup-options
+
+### Results
+
+```text
+result: PASS
+duration: 206.458µs
+report: skipped browser lifecycle options (chrome not installed)
+```
+
+### Logs
+
+```text
+logs:
+WARN: browser provider not available; use --attach <node> for remote mode
+INFO: report: skipped browser lifecycle options (chrome not installed)
+PASS: [TEST][PASS] [STEP:browser-lifecycle-setup-options] report: skipped browser lifecycle options (chrome not installed)
+```
+
+### Errors
+
+```text
+errors:
+<empty>
+```
+
+### Browser Logs
+
+```text
+browser_logs:
+<empty>
+```
+
+## browser-lifecycle-reuse-shared-session
+
+### Results
+
+```text
+result: PASS
+duration: 127.708µs
+report: skipped browser lifecycle reuse (chrome not installed)
+```
+
+### Logs
+
+```text
+logs:
+INFO: report: skipped browser lifecycle reuse (chrome not installed)
+PASS: [TEST][PASS] [STEP:browser-lifecycle-reuse-shared-session] report: skipped browser lifecycle reuse (chrome not installed)
+```
+
+### Errors
+
+```text
+errors:
+<empty>
+```
+
+### Browser Logs
+
+```text
+browser_logs:
+<empty>
+```
 
 ## auto-screenshot-uses-browser
 
@@ -111,16 +305,17 @@ browser_logs:
 
 ```text
 result: PASS
-duration: 104.39557ms
-report: browser used through chrome src_v3 service; auto screenshot should be captured after step
+duration: 291µs
+report: skipped auto screenshot setup (browser unavailable)
 ```
 
 ### Logs
 
 ```text
 logs:
-INFO: report: browser used through chrome src_v3 service; auto screenshot should be captured after step
-PASS: [TEST][PASS] [STEP:auto-screenshot-uses-browser] report: browser used through chrome src_v3 service; auto screenshot should be captured after step
+WARN: browser provider not available; skipping auto screenshot test step
+INFO: report: skipped auto screenshot setup (browser unavailable)
+PASS: [TEST][PASS] [STEP:auto-screenshot-uses-browser] report: skipped auto screenshot setup (browser unavailable)
 ```
 
 ### Errors
@@ -136,10 +331,6 @@ errors:
 browser_logs:
 <empty>
 ```
-
-### Screenshots
-
-![auto_auto-screenshot-uses-browser.png](screenshots/auto_auto-screenshot-uses-browser.png)
 
 ## auto-screenshot-file-exists
 
@@ -147,16 +338,16 @@ browser_logs:
 
 ```text
 result: PASS
-duration: 155.309µs
-report: auto screenshot file exists
+duration: 151.625µs
+report: skipped auto screenshot verification (browser step skipped)
 ```
 
 ### Logs
 
 ```text
 logs:
-INFO: report: auto screenshot file exists
-PASS: [TEST][PASS] [STEP:auto-screenshot-file-exists] report: auto screenshot file exists
+INFO: report: skipped auto screenshot verification (browser step skipped)
+PASS: [TEST][PASS] [STEP:auto-screenshot-file-exists] report: skipped auto screenshot verification (browser step skipped)
 ```
 
 ### Errors
@@ -173,12 +364,3 @@ browser_logs:
 <empty>
 ```
 
-<!-- DIALTONE_CHROME_REPORT_START -->
-
-## Chrome Report
-
-- hostnode: `legion`
-- chrome_count: `unknown`
-- error: `remote browser inventory on legion failed: powershell command failed: exit status 1`
-
-<!-- DIALTONE_CHROME_REPORT_END -->

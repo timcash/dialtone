@@ -10,6 +10,7 @@ import (
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	repl "dialtone/dev/plugins/repl/src_v1/go/repl"
 	replv2 "dialtone/dev/plugins/repl/src_v2/go/repl"
+	replv3 "dialtone/dev/plugins/repl/src_v3/go/repl"
 )
 
 func main() {
@@ -41,6 +42,53 @@ func main() {
 			logs.Error("Unsupported repl src_v2 command: %s", command)
 			os.Exit(1)
 		}
+	}
+	if version == "src_v3" {
+		switch command {
+		case "run":
+			if err := replv3.Run(rest); err != nil {
+				logs.Error("repl v3 run failed: %v", err)
+				os.Exit(1)
+			}
+		case "leader":
+			if err := replv3.RunLeader(rest); err != nil {
+				logs.Error("repl v3 leader failed: %v", err)
+				os.Exit(1)
+			}
+		case "join":
+			if err := replv3.RunJoin(rest); err != nil {
+				logs.Error("repl v3 join failed: %v", err)
+				os.Exit(1)
+			}
+		case "inject":
+			if err := replv3.Inject(rest); err != nil {
+				logs.Error("repl v3 inject failed: %v", err)
+				os.Exit(1)
+			}
+		case "status":
+			if err := replv3.RunStatus(rest); err != nil {
+				logs.Error("repl v3 status failed: %v", err)
+				os.Exit(1)
+			}
+		case "service":
+			if err := replv3.RunService(rest); err != nil {
+				logs.Error("repl v3 service failed: %v", err)
+				os.Exit(1)
+			}
+		case "test":
+			if err := replv3.RunTest(rest); err != nil {
+				logs.Error("repl v3 test failed: %v", err)
+				os.Exit(1)
+			}
+		case "version":
+			logs.Raw("src_v3")
+		case "help", "-h", "--help":
+			printUsage()
+		default:
+			logs.Error("Unsupported repl src_v3 command: %s", command)
+			os.Exit(1)
+		}
+		return
 	}
 	if version != "src_v1" {
 		logs.Error("Unsupported repl version: %s", version)
@@ -132,10 +180,16 @@ func runVersionedTest(versionDir string, args []string) error {
 	if err != nil {
 		return err
 	}
-	if versionDir != "src_v1" {
+	testMain := ""
+	switch versionDir {
+	case "src_v1":
+		testMain = paths.TestCmdMain
+	case "src_v3":
+		testMain = filepath.Join(paths.Runtime.SrcRoot, "plugins", "repl", "src_v3", "test", "cmd", "main.go")
+	default:
 		return fmt.Errorf("unsupported repl version for tests: %s", versionDir)
 	}
-	goArgs := []string{"src_v1", "exec", "run", paths.TestCmdMain}
+	goArgs := []string{"src_v1", "exec", "run", testMain}
 	goArgs = append(goArgs, args...)
 	fullArgs := append([]string{"go"}, goArgs...)
 	cmd := exec.Command(filepath.Join(paths.Runtime.RepoRoot, "dialtone.sh"), fullArgs...)
@@ -280,8 +334,9 @@ func releasePublish(args []string) error {
 
 func printUsage() {
 	logs.Raw("Usage: ./dialtone.sh repl src_v1 <command> [args]")
+	logs.Raw("       ./dialtone.sh repl src_v3 <command> [args]")
 	logs.Raw("")
-	logs.Raw("Commands:")
+	logs.Raw("Commands (src_v1):")
 	logs.Raw("  run [--name HOST]                                    Run local REPL session")
 	logs.Raw("  leader [--nats-url URL] [--room NAME] [--embedded-nats] [--tsnet] [--tsnet-nats-port PORT] [--hostname HOST]")
 	logs.Raw("                                                       Start shared REPL leader/service")
@@ -299,4 +354,13 @@ func printUsage() {
 	logs.Raw("  test [multiplayer]                                   Run REPL src_v1 tests")
 	logs.Raw("  version                                              Print repl build version")
 	logs.Raw("  help                                                 Show this help")
+	logs.Raw("")
+	logs.Raw("Commands (src_v3):")
+	logs.Raw("  run [--nats-url URL] [--room NAME] [--name USER] [--test]")
+	logs.Raw("  leader [reuses src_v1 leader flags]")
+	logs.Raw("  join [reuses src_v1 join flags]")
+	logs.Raw("  inject --user NAME [--nats-url URL] [--room NAME] <command>")
+	logs.Raw("  status [reuses src_v1 status flags]")
+	logs.Raw("  service [reuses src_v1 service flags]")
+	logs.Raw("  test                                                 Run REPL src_v3 tests")
 }
