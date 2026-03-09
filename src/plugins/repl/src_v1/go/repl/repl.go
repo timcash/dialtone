@@ -813,6 +813,34 @@ func executeCommand(line string, emit func(prefix, msg string)) {
 	}
 
 	emit("DIALTONE", fmt.Sprintf("Request received. Spawning subtone for %s...", cmdName))
+	heartbeatInterval := 5 * time.Second
+	if raw := strings.TrimSpace(os.Getenv("DIALTONE_SUBTONE_HEARTBEAT_SEC")); raw != "" {
+		if sec, err := strconv.Atoi(raw); err == nil && sec > 0 {
+			heartbeatInterval = time.Duration(sec) * time.Second
+		}
+	}
+	stopHeartbeat := make(chan struct{})
+	startHeartbeat := func(pid int, startedAt time.Time) {
+		if pid <= 0 || heartbeatInterval <= 0 {
+			return
+		}
+		go func() {
+			t := time.NewTicker(heartbeatInterval)
+			defer t.Stop()
+			for {
+				select {
+				case <-t.C:
+					uptime := time.Since(startedAt).Round(time.Second)
+					emit(fmt.Sprintf("DIALTONE:%d", pid), fmt.Sprintf("[HEARTBEAT] running for %s", uptime))
+				case <-stopHeartbeat:
+					return
+				}
+			}
+		}()
+	}
+	stopHeartbeatOnce := sync.OnceFunc(func() {
+		close(stopHeartbeat)
+	})
 	onEvent := func(ev proc.SubtoneEvent) {
 		switch ev.Type {
 		case proc.SubtoneEventStarted:
@@ -824,6 +852,7 @@ func executeCommand(line string, emit func(prefix, msg string)) {
 			if strings.TrimSpace(ev.LogPath) != "" {
 				emit(fmt.Sprintf("DIALTONE:%d", ev.PID), fmt.Sprintf("Log: %s", ev.LogPath))
 			}
+			startHeartbeat(ev.PID, ev.StartedAt)
 		case proc.SubtoneEventStdout:
 			if ev.PID <= 0 {
 				return
@@ -841,6 +870,7 @@ func executeCommand(line string, emit func(prefix, msg string)) {
 			}
 			emit(fmt.Sprintf("DIALTONE:%d", ev.PID), "[ERROR] "+line)
 		case proc.SubtoneEventExited:
+			stopHeartbeatOnce()
 			if ev.PID > 0 {
 				emit("DIALTONE", fmt.Sprintf("Subtone for %s exited with code %d.", cmdName, ev.ExitCode))
 			}

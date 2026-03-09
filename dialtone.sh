@@ -118,6 +118,7 @@ PASSTHRU_ARGS=()
 ENV_OVERRIDE=""
 FORCE_NO_NIX=0
 IS_TEST=0
+IS_LLM=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -128,18 +129,25 @@ while [[ $# -gt 0 ]]; do
             PASSTHRU_ARGS+=("--test")
             shift
             ;;
+        --llm)
+            IS_LLM=1
+            PASSTHRU_ARGS+=("--llm")
+            shift
+            ;;
         --stdout) export DIALTONE_LOG_STDOUT=1; shift ;;
         *) PASSTHRU_ARGS+=("$1"); shift ;;
     esac
 done
 
-DEFAULT_CMD_NEEDED=1
-for arg in "${PASSTHRU_ARGS[@]}"; do
-    [[ "$arg" != -* ]] && DEFAULT_CMD_NEEDED=0 && break
-done
+DEFAULT_CMD_NEEDED=0
+if [ "${#PASSTHRU_ARGS[@]}" -eq 0 ]; then
+    DEFAULT_CMD_NEEDED=1
+elif [[ "${PASSTHRU_ARGS[0]}" == --* ]]; then
+    DEFAULT_CMD_NEEDED=1
+fi
 
 if [ "$DEFAULT_CMD_NEEDED" = "1" ]; then
-    PASSTHRU_ARGS=("repl" "src_v2" "run" "${PASSTHRU_ARGS[@]}")
+    PASSTHRU_ARGS=("repl" "src_v3" "run" "${PASSTHRU_ARGS[@]}")
 fi
 
 # --- 5. Environment Loading ---
