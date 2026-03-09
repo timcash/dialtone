@@ -108,6 +108,30 @@ func Register(r *testv1.Registry) {
 				stopCmd(join)
 			}()
 
+			bootstrapPatterns := []string{
+				`"type":"command","from":"llm-codex"`,
+				`"type":"input","from":"llm-codex"`,
+				`/repl src_v3 bootstrap --apply`,
+				`Request received. Spawning subtone for repl src_v3`,
+				`mesh host wsl`,
+				`Subtone for repl src_v3 exited with code 0.`,
+			}
+			inject := exec.Command(goBin, "run", "./plugins/repl/scaffold/main.go", "src_v3", "inject",
+				"--nats-url", natsURL,
+				"--room", "index",
+				"--user", "llm-codex",
+				"repl", "src_v3", "bootstrap", "--apply",
+				"--wsl-host", "wsl.shad-artichoke.ts.net",
+				"--wsl-user", "user",
+			)
+			inject.Dir = srcRoot
+			if err := inject.Run(); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := waitForPatterns(msgCh, 35*time.Second, bootstrapPatterns); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("bootstrap injection did not complete: %w", err)
+			}
+
 			waitPatterns := []string{
 				`"type":"command","from":"llm-codex"`,
 				`"type":"input","from":"llm-codex"`,
@@ -115,7 +139,7 @@ func Register(r *testv1.Registry) {
 				`Request received. Spawning subtone for go src_v1`,
 				`Subtone for go src_v1 exited with code 0.`,
 			}
-			inject := exec.Command(goBin, "run", "./plugins/repl/scaffold/main.go", "src_v3", "inject",
+			inject = exec.Command(goBin, "run", "./plugins/repl/scaffold/main.go", "src_v3", "inject",
 				"--nats-url", natsURL,
 				"--room", "index",
 				"--user", "llm-codex",
@@ -131,7 +155,7 @@ func Register(r *testv1.Registry) {
 
 			ctx.TestPassf("leader boot, NATS command injection, and completion wait all succeeded")
 			return testv1.StepRunResult{
-				Report: "Started leader, joined from a second REPL client, injected a command as llm-codex, and observed command completion over NATS.",
+				Report: "Started leader, joined from a second REPL client, injected bootstrap command to add wsl host, then injected go version command and observed completion over NATS.",
 			}, nil
 		},
 	})

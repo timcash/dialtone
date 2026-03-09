@@ -384,7 +384,7 @@ func main() {
 		}
 		logs.Error("Unknown dev command: %v", args)
 	default:
-		if shouldRouteCommandViaREPL(command) {
+		if shouldRouteCommandViaREPL(command, args) {
 			if err := dispatchViaREPL(command, args); err != nil {
 				logs.Error("REPL dispatch failed: %v", err)
 				os.Exit(1)
@@ -401,12 +401,22 @@ func main() {
 	}
 }
 
-func shouldRouteCommandViaREPL(command string) bool {
+func shouldRouteCommandViaREPL(command string, args []string) bool {
 	if strings.TrimSpace(os.Getenv("DIALTONE_SUBTONE")) == "1" {
 		return false
 	}
 	switch strings.TrimSpace(command) {
-	case "", "help", "-h", "--help", "exit", "branch", "plugins", "dev", "repl":
+	case "", "help", "-h", "--help", "exit", "branch", "plugins", "dev":
+		return false
+	case "repl":
+		if len(args) >= 2 && strings.HasPrefix(strings.TrimSpace(args[0]), "src_v") {
+			switch strings.TrimSpace(args[1]) {
+			case "install", "format", "fmt", "lint", "build", "test":
+				return true
+			default:
+				return false
+			}
+		}
 		return false
 	default:
 		return true
@@ -718,7 +728,7 @@ func startDefaultMultiplayerREPL() error {
 		return repl.RunJoin(joinArgs)
 	}
 	if !replAutostartEnabled() {
-		return fmt.Errorf("no REPL daemon detected on %s (autostart disabled). start daemon with: ./dialtone.sh repl src_v1 service --mode run --room %s", clientURL, room)
+		return fmt.Errorf("no REPL daemon detected on %s (autostart disabled). start daemon with: ./dialtone.sh repl src_v3 service --mode run --room %s", clientURL, room)
 	}
 
 	logs.Info("DIALTONE> No REPL leader detected on %s; starting leader for room %s", clientURL, room)
@@ -753,7 +763,7 @@ func startLocalLeaderProcess(natsURL, room string) (*exec.Cmd, error) {
 	if goBin == "" {
 		goBin = "go"
 	}
-	cmd := exec.Command(goBin, "run", "./plugins/repl/scaffold/main.go", "src_v1", "leader", "--embedded-nats", "--nats-url", natsURL, "--room", room)
+	cmd := exec.Command(goBin, "run", "./plugins/repl/scaffold/main.go", "src_v3", "leader", "--embedded-nats", "--nats-url", natsURL, "--room", room)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = nil
