@@ -78,6 +78,11 @@ func main() {
 				logs.Error("repl v3 bootstrap failed: %v", err)
 				os.Exit(1)
 			}
+		case "bootstrap-http":
+			if err := replv3.RunBootstrapHTTP(rest); err != nil {
+				logs.Error("repl v3 bootstrap-http failed: %v", err)
+				os.Exit(1)
+			}
 		case "add-host":
 			if err := replv3.AddHost(rest); err != nil {
 				logs.Error("repl v3 add-host failed: %v", err)
@@ -96,6 +101,21 @@ func main() {
 		case "test":
 			if err := replv3.RunTest(rest); err != nil {
 				logs.Error("repl v3 test failed: %v", err)
+				os.Exit(1)
+			}
+		case "subtone-list":
+			if err := replv3.RunSubtoneList(rest); err != nil {
+				logs.Error("repl v3 subtone-list failed: %v", err)
+				os.Exit(1)
+			}
+		case "subtone-log":
+			if err := replv3.RunSubtoneLog(rest); err != nil {
+				logs.Error("repl v3 subtone-log failed: %v", err)
+				os.Exit(1)
+			}
+		case "watch":
+			if err := replv3.RunWatch(rest); err != nil {
+				logs.Error("repl v3 watch failed: %v", err)
 				os.Exit(1)
 			}
 		case "test-clean":
@@ -157,12 +177,16 @@ func printUsage() {
 	logs.Raw("  run [--nats-url URL] [--room NAME] [--name USER] [--test]")
 	logs.Raw("  leader [--nats-url URL] [--room NAME] [--embedded-nats] [--tsnet] [--tsnet-nats-port PORT] [--hostname HOST]")
 	logs.Raw("  join [room-name] [--nats-url URL] [--name HOST] [--room NAME]")
-	logs.Raw("  inject --user NAME [--nats-url URL] [--room NAME] <command>")
+	logs.Raw("  inject --user NAME [--host HOST] [--nats-url URL] [--room NAME] <command>")
 	logs.Raw("  bootstrap [--apply] [--wsl-host HOST] [--wsl-user USER]  Show/apply first-host bootstrap guide")
+	logs.Raw("  bootstrap-http [--host 127.0.0.1] [--port 8811]         Serve /install.sh + /dialtone.sh + /dialtone-main.tar.gz")
 	logs.Raw("  add-host --name wsl --host HOST --user USER              Add/update mesh host in env/dialtone.json")
 	logs.Raw("  status [--nats-url URL] [--room NAME]")
 	logs.Raw("  service [--mode install|run|status] [--repo owner/repo] [--nats-url URL] [--room NAME] [--hostname HOST] [--check-interval 5m] [--embedded-nats] [--tsnet] [--tsnet-nats-port PORT]")
-	logs.Raw("  test                                                 Run REPL src_v3 tests")
+	logs.Raw("  test [--real] [--require-embedded-tsnet] [--wsl-host HOST] [--wsl-user USER] [--tunnel-name NAME] [--tunnel-url URL] [--install-url URL] [--bootstrap-repo-url URL]")
+	logs.Raw("  subtone-list [--count N]                             List recent subtone logs with pid/command")
+	logs.Raw("  subtone-log --pid PID [--lines N]                    Print subtone log file for a pid")
+	logs.Raw("  watch [--nats-url URL] [--subject repl.>] [--filter TEXT]  Stream NATS room/events")
 	logs.Raw("  test-clean [--dry-run]                               Remove REPL src_v3 /tmp bootstrap test folders")
-	logs.Raw("  process-clean [--dry-run] [--include-chrome]        Stop REPL/tap/subtone runtime processes")
+	logs.Raw("  process-clean [--dry-run] [--include-chrome]        Stop REPL/tap/subtone runtime processes + known dialtone LaunchAgents")
 }

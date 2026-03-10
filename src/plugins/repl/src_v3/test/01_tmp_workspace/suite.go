@@ -19,9 +19,33 @@ func Register(r *testv1.Registry) {
 			if strings.HasSuffix(filepath.ToSlash(repoRoot), "/src") {
 				repoRoot = filepath.Dir(repoRoot)
 			}
+			repoRootClean := filepath.Clean(repoRoot)
+			repoRootReal := repoRootClean
+			if resolved, err := filepath.EvalSymlinks(repoRootClean); err == nil && strings.TrimSpace(resolved) != "" {
+				repoRootReal = filepath.Clean(resolved)
+			}
 			tmpRoot := filepath.Clean(os.TempDir())
-			if !strings.HasPrefix(filepath.Clean(repoRoot), tmpRoot+string(os.PathSeparator)) {
-				return testv1.StepRunResult{}, fmt.Errorf("expected tmp workspace under %s, got %s", tmpRoot, repoRoot)
+			tmpRootReal := tmpRoot
+			if resolved, err := filepath.EvalSymlinks(tmpRoot); err == nil && strings.TrimSpace(resolved) != "" {
+				tmpRootReal = filepath.Clean(resolved)
+			}
+			tmpAliases := []string{
+				filepath.Clean("/tmp"),
+				filepath.Clean("/private/tmp"),
+			}
+			isUnderTmp := strings.HasPrefix(repoRootClean, tmpRoot+string(os.PathSeparator)) ||
+				strings.HasPrefix(repoRootReal, tmpRootReal+string(os.PathSeparator))
+			if !isUnderTmp {
+				for _, alias := range tmpAliases {
+					if strings.HasPrefix(repoRootClean, alias+string(os.PathSeparator)) ||
+						strings.HasPrefix(repoRootReal, alias+string(os.PathSeparator)) {
+						isUnderTmp = true
+						break
+					}
+				}
+			}
+			if !isUnderTmp {
+				return testv1.StepRunResult{}, fmt.Errorf("expected tmp workspace under %s (resolved %s) or /tmp aliases, got %s (resolved %s)", tmpRoot, tmpRootReal, repoRootClean, repoRootReal)
 			}
 			required := []string{
 				filepath.Join(repoRoot, "dialtone.sh"),

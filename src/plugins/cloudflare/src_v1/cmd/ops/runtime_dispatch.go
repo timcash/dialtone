@@ -15,9 +15,13 @@ import (
 	cloudflarev1 "dialtone/dev/plugins/cloudflare/src_v1/go"
 	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
+	replv3 "dialtone/dev/plugins/repl/src_v3/go/repl"
 )
 
 func findCloudflared() string {
+	if override := strings.TrimSpace(os.Getenv("DIALTONE_CLOUDFLARED_BIN")); override != "" {
+		return override
+	}
 	if rt, err := configv1.ResolveRuntime(""); err == nil {
 		cfPath := filepath.Join(rt.DialtoneEnv, "cloudflare", "cloudflared")
 		if _, statErr := os.Stat(cfPath); statErr == nil {
@@ -28,6 +32,24 @@ func findCloudflared() string {
 		return p
 	}
 	return "cloudflared"
+}
+
+func resolveDefaultTunnelURL(explicit string) string {
+	if v := strings.TrimSpace(explicit); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("DIALTONE_BOOTSTRAP_HTTP_URL")); v != "" {
+		return v
+	}
+	host := strings.TrimSpace(os.Getenv("DIALTONE_BOOTSTRAP_HTTP_HOST"))
+	port := strings.TrimSpace(os.Getenv("DIALTONE_BOOTSTRAP_HTTP_PORT"))
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if port == "" {
+		port = "8811"
+	}
+	return "http://" + host + ":" + port
 }
 
 func RunRuntime(command string, args []string) error {
@@ -46,6 +68,8 @@ func RunRuntime(command string, args []string) error {
 		return runProvision(args)
 	case "setup-service":
 		return fmt.Errorf("setup-service is not yet migrated to src_v1 ops")
+	case "shell":
+		return runShell(args)
 	default:
 		return fmt.Errorf("unknown cloudflare runtime command: %s", command)
 	}
@@ -149,7 +173,7 @@ func runTunnel(args []string) error {
 		return cmd.Run()
 	case "run":
 		if len(subArgs) < 1 {
-			return fmt.Errorf("usage: ./dialtone.sh cloudflare src_v1 tunnel run <name> --url <url> [--token <token>]")
+			return fmt.Errorf("usage: ./dialtone.sh cloudflare src_v1 tunnel run <name> [--url <url>] [--token <token>]")
 		}
 		tunnelName := subArgs[0]
 		fs := flag.NewFlagSet("tunnel-run", flag.ContinueOnError)
@@ -159,15 +183,16 @@ func runTunnel(args []string) error {
 		if err := fs.Parse(subArgs[1:]); err != nil {
 			return err
 		}
+		targetURL := resolveDefaultTunnelURL(*urlFlag)
 		token := cloudflarev1.ResolveTunnelToken(tunnelName, *tokenFlag)
-		cmd, err := cloudflarev1.BuildTunnelRunCommand(cf, tunnelName, *urlFlag, token)
+		cmd, err := cloudflarev1.BuildTunnelRunCommand(cf, tunnelName, targetURL, token)
 		if err != nil {
 			return err
 		}
 		return cmd.Run()
 	case "start":
 		if len(subArgs) < 1 {
-			return fmt.Errorf("usage: ./dialtone.sh cloudflare src_v1 tunnel start <name> --url <url> [--token <token>]")
+			return fmt.Errorf("usage: ./dialtone.sh cloudflare src_v1 tunnel start <name> [--url <url>] [--token <token>]")
 		}
 		tunnelName := subArgs[0]
 		fs := flag.NewFlagSet("tunnel-start", flag.ContinueOnError)
@@ -177,14 +202,67 @@ func runTunnel(args []string) error {
 		if err := fs.Parse(subArgs[1:]); err != nil {
 			return err
 		}
+		targetURL := resolveDefaultTunnelURL(*urlFlag)
 		token := cloudflarev1.ResolveTunnelToken(tunnelName, *tokenFlag)
-		cmd, err := cloudflarev1.BuildTunnelRunCommand(cf, tunnelName, *urlFlag, token)
+		cmd, err := cloudflarev1.BuildTunnelRunCommand(cf, tunnelName, targetURL, token)
 		if err != nil {
 			return err
 		}
 		return cmd.Run()
 	default:
 		return fmt.Errorf("unknown tunnel subcommand: %s", sub)
+	}
+}
+
+func runShell(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: ./dialtone.sh cloudflare src_v1 shell <up|down|status> [args]")
+	}
+	switch strings.TrimSpace(args[0]) {
+	case "up":
+		fs := flag.NewFlagSet("shell-up", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		name := fs.String("name", "shell", "Tunnel name")
+		host := fs.String("host", strings.TrimSpace(os.Getenv("DIALTONE_BOOTSTRAP_HTTP_HOST")), "Bootstrap HTTP host")
+		port := fs.Int("port", 0, "Bootstrap HTTP port")
+		token := fs.String("token", "", "Tunnel token override")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		h := strings.TrimSpace(*host)
+		if h == "" {
+			h = "127.0.0.1"
+		}
+		p := *port
+		if p <= 0 {
+			if raw := strings.TrimSpace(os.Getenv("DIALTONE_BOOTSTRAP_HTTP_PORT")); raw != "" {
+				if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+					p = parsed
+				}
+			}
+		}
+		if p <= 0 {
+			p = 8811
+		}
+		if err := replv3.EnsureBootstrapHTTPRunning(h, p); err != nil {
+			return err
+		}
+		url := fmt.Sprintf("http://%s:%d", h, p)
+		runArgs := []string{"start", strings.TrimSpace(*name), "--url", url}
+		if strings.TrimSpace(*token) != "" {
+			runArgs = append(runArgs, "--token", strings.TrimSpace(*token))
+		}
+		logs.Info("starting shell tunnel connector: name=%s url=%s", strings.TrimSpace(*name), url)
+		logs.Info("run the same command on other hosts to add more connectors for HA/load distribution")
+		return runTunnel(runArgs)
+	case "down":
+		return runTunnel([]string{"stop"})
+	case "status":
+		url := resolveDefaultTunnelURL("")
+		logs.Info("shell bootstrap url: %s", url)
+		return runTunnel([]string{"status"})
+	default:
+		return fmt.Errorf("unknown shell subcommand: %s", args[0])
 	}
 }
 
@@ -304,7 +382,7 @@ func runProvision(args []string) error {
 	}
 	envPath := strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE"))
 	if envPath == "" {
-		envPath = "env/.env"
+		envPath = "env/dialtone.json"
 	}
 	res, err := cloudflarev1.ProvisionTunnelAndDNS(cloudflarev1.ProvisionRequest{
 		TunnelName: tunnelName,

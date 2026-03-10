@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -85,7 +86,7 @@ func ProvisionTunnelAndDNS(in ProvisionRequest) (ProvisionResult, error) {
 		return ProvisionResult{}, fmt.Errorf("account id is required")
 	}
 	if envPath == "" {
-		envPath = "env/.env"
+		envPath = "env/dialtone.json"
 	}
 
 	client := &http.Client{}
@@ -168,19 +169,13 @@ func ProvisionTunnelAndDNS(in ProvisionRequest) (ProvisionResult, error) {
 		dnsCreated = dnsResp.StatusCode == http.StatusOK
 	}
 
-	// 4) Save run token in env.
+	// 4) Save run token in dialtone config.
 	tokenData := map[string]string{"a": accountID, "t": tunnelID, "s": tunnelSecret}
 	tokenJSON, _ := json.Marshal(tokenData)
 	runToken := base64.StdEncoding.EncodeToString(tokenJSON)
 	envVar := TokenEnvKey(name)
-
-	f, err := os.OpenFile(envPath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
-	if err != nil {
-		return ProvisionResult{}, fmt.Errorf("open env file failed: %w", err)
-	}
-	defer f.Close()
-	if _, err := f.WriteString(fmt.Sprintf("\n# CF Token for %s\n%s=%s\n", name, envVar, runToken)); err != nil {
-		return ProvisionResult{}, fmt.Errorf("write env token failed: %w", err)
+	if err := upsertConfigVar(envPath, envVar, runToken); err != nil {
+		return ProvisionResult{}, fmt.Errorf("write config token failed: %w", err)
 	}
 
 	return ProvisionResult{
@@ -190,4 +185,60 @@ func ProvisionTunnelAndDNS(in ProvisionRequest) (ProvisionResult, error) {
 		RunToken:     runToken,
 		DNSCreated:   dnsCreated,
 	}, nil
+}
+
+func upsertConfigVar(path, key, value string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		path = "env/dialtone.json"
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return fmt.Errorf("missing config key")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil && filepath.Dir(path) != "." {
+		return err
+	}
+	if strings.HasSuffix(strings.ToLower(path), ".json") {
+		doc := map[string]any{}
+		if raw, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(raw)) != "" {
+			if err := json.Unmarshal(raw, &doc); err != nil {
+				return err
+			}
+		}
+		doc[key] = value
+		out, err := json.MarshalIndent(doc, "", "  ")
+		if err != nil {
+			return err
+		}
+		out = append(out, '\n')
+		return os.WriteFile(path, out, 0o644)
+	}
+	existing := ""
+	if raw, err := os.ReadFile(path); err == nil {
+		existing = string(raw)
+	}
+	lines := []string{}
+	if existing != "" {
+		lines = strings.Split(existing, "\n")
+	}
+	prefix := key + "="
+	replaced := false
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), prefix) {
+			lines[i] = fmt.Sprintf("%s=%s", key, value)
+			replaced = true
+		}
+	}
+	if !replaced {
+		if len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) != "" {
+			lines = append(lines, "")
+		}
+		lines = append(lines, fmt.Sprintf("%s=%s", key, value))
+	}
+	out := strings.Join(lines, "\n")
+	if !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+	return os.WriteFile(path, []byte(out), 0o644)
 }

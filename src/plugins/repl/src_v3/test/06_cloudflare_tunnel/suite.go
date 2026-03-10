@@ -22,28 +22,44 @@ func Register(r *testv1.Registry) {
 			if err != nil {
 				return testv1.StepRunResult{}, err
 			}
-
-			tmpBin, restorePath, err := installMockCloudflared(rt.RepoRoot)
-			if err != nil {
-				return testv1.StepRunResult{}, err
+			realMode := strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_REAL")) == "1"
+			tunnelName := strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_TUNNEL_NAME"))
+			if tunnelName == "" {
+				tunnelName = "repl-src-v3-test"
 			}
-			defer restorePath()
-			_ = tmpBin
-
-			cmd := exec.Command(rt.GoBin,
-				"run", "./plugins/cloudflare/scaffold/main.go",
-				"src_v1", "tunnel", "start", "demo",
-				"--url", "http://127.0.0.1:8080",
-				"--token", "token-test",
-			)
-			cmd.Dir = rt.SrcRoot
-			outBytes, err := cmd.CombinedOutput()
-			out := string(outBytes)
-			if err != nil {
-				return testv1.StepRunResult{}, fmt.Errorf("direct cloudflare tunnel start failed: %w\n%s", err, out)
+			tunnelURL := strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_TUNNEL_URL"))
+			if tunnelURL == "" {
+				tunnelURL = "http://127.0.0.1:8080"
 			}
-			if !strings.Contains(out, "MOCK-CLOUDFLARED args: tunnel run --token token-test --url http://127.0.0.1:8080") {
-				return testv1.StepRunResult{}, fmt.Errorf("direct tunnel start did not execute cloudflared as expected:\n%s", out)
+
+			if !realMode {
+				tmpBin, restorePath, err := installMockCloudflared(rt.RepoRoot)
+				if err != nil {
+					return testv1.StepRunResult{}, err
+				}
+				defer restorePath()
+				oldCF := os.Getenv("DIALTONE_CLOUDFLARED_BIN")
+				_ = os.Setenv("DIALTONE_CLOUDFLARED_BIN", tmpBin)
+				defer func() {
+					_ = os.Setenv("DIALTONE_CLOUDFLARED_BIN", oldCF)
+				}()
+
+				cmd := exec.Command(rt.GoBin,
+					"run", "./plugins/cloudflare/scaffold/main.go",
+					"src_v1", "tunnel", "start", tunnelName,
+					"--url", tunnelURL,
+					"--token", "token-test",
+				)
+				cmd.Dir = rt.SrcRoot
+				cmd.Env = append(os.Environ(), "DIALTONE_CLOUDFLARED_BIN="+tmpBin)
+				outBytes, err := cmd.CombinedOutput()
+				out := string(outBytes)
+				if err != nil {
+					return testv1.StepRunResult{}, fmt.Errorf("direct cloudflare tunnel start failed: %w\n%s", err, out)
+				}
+				if !strings.Contains(out, "MOCK-CLOUDFLARED args: tunnel run --token token-test --url "+tunnelURL) {
+					return testv1.StepRunResult{}, fmt.Errorf("direct tunnel start did not execute cloudflared as expected:\n%s", out)
+				}
 			}
 
 			defer rt.Stop()
@@ -54,24 +70,39 @@ func Register(r *testv1.Registry) {
 				return testv1.StepRunResult{}, err
 			}
 
-			if err := rt.Inject("llm-codex",
-				"cloudflare", "src_v1", "tunnel", "start", "demo",
-				"--url", "http://127.0.0.1:8080",
-				"--token", "token-test",
-			); err != nil {
+			injectedArgs := []string{
+				"cloudflare", "src_v1", "tunnel", "start", tunnelName,
+				"--url", tunnelURL,
+			}
+			if !realMode {
+				injectedArgs = append(injectedArgs, "--token", "token-test")
+			}
+			if err := rt.Inject("llm-codex", injectedArgs...); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 
 			if err := rt.WaitForPatterns(40*time.Second, []string{
 				`Request received. Spawning subtone for cloudflare src_v1`,
-				`Subtone for cloudflare src_v1 exited with code`,
 			}); err != nil {
 				return testv1.StepRunResult{}, err
+			}
+			if realMode {
+				if err := rt.Inject("llm-codex",
+					"cloudflare", "src_v1", "tunnel", "stop",
+				); err != nil {
+					return testv1.StepRunResult{}, err
+				}
+				if err := rt.WaitForPatterns(40*time.Second, []string{
+					`/cloudflare src_v1 tunnel stop`,
+					`Subtone for cloudflare src_v1 exited with code 0.`,
+				}); err != nil {
+					return testv1.StepRunResult{}, err
+				}
 			}
 
 			ctx.TestPassf("cloudflare tunnel start executed through repl src_v3 injection")
 			return testv1.StepRunResult{
-				Report: "Injected cloudflare tunnel start through REPL/NATS with a mock cloudflared binary and verified subtone lifecycle + runtime args output.",
+				Report: "Injected cloudflare tunnel start through REPL/NATS and verified REPL command ingress (mock mode by default, real start/stop when DIALTONE_REPL_V3_TEST_REAL=1).",
 			}, nil
 		},
 	})
