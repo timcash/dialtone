@@ -1,6 +1,8 @@
 package sshwsl
 
 import (
+	"os"
+	"strings"
 	"time"
 
 	"dialtone/dev/plugins/repl/src_v3/test/support"
@@ -24,15 +26,24 @@ func Register(r *testv1.Registry) {
 				return testv1.StepRunResult{}, err
 			}
 
+			wslHost := strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_HOST"))
+			if wslHost == "" {
+				wslHost = "127.0.0.1"
+			}
+			wslUser := strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_USER"))
+			if wslUser == "" {
+				wslUser = "user"
+			}
+
 			if err := rt.Inject("llm-codex",
 				"repl", "src_v3", "bootstrap", "--apply",
-				"--wsl-host", "127.0.0.1",
-				"--wsl-user", "user",
+				"--wsl-host", wslHost,
+				"--wsl-user", wslUser,
 			); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 			if err := rt.WaitForPatterns(35*time.Second, []string{
-				`/repl src_v3 bootstrap --apply --wsl-host 127.0.0.1 --wsl-user user`,
+				`/repl src_v3 bootstrap --apply`,
 				`Subtone for repl src_v3 exited with code 0.`,
 			}); err != nil {
 				return testv1.StepRunResult{}, err

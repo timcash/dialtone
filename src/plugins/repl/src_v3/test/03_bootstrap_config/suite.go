@@ -37,16 +37,25 @@ func Register(r *testv1.Registry) {
 				return testv1.StepRunResult{}, err
 			}
 
+			wslHost := strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_HOST"))
+			if wslHost == "" {
+				wslHost = "127.0.0.1"
+			}
+			wslUser := strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_USER"))
+			if wslUser == "" {
+				wslUser = "user"
+			}
+
 			if err := rt.Inject("llm-codex",
 				"repl", "src_v3", "bootstrap", "--apply",
-				"--wsl-host", "127.0.0.1",
-				"--wsl-user", "user",
+				"--wsl-host", wslHost,
+				"--wsl-user", wslUser,
 			); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 			if err := rt.WaitForPatterns(40*time.Second, []string{
 				`"type":"command","from":"llm-codex"`,
-				`/repl src_v3 bootstrap --apply --wsl-host 127.0.0.1 --wsl-user user`,
+				fmt.Sprintf(`/repl src_v3 bootstrap --apply --wsl-host %s --wsl-user %s`, wslHost, wslUser),
 				`Request received. Spawning subtone for repl src_v3`,
 				`Subtone for repl src_v3 exited with code 0.`,
 			}); err != nil {
@@ -66,10 +75,10 @@ func Register(r *testv1.Registry) {
 			for _, n := range cfg.MeshNodes {
 				if strings.EqualFold(strings.TrimSpace(n.Name), "wsl") {
 					found = true
-					if strings.TrimSpace(n.Host) != "127.0.0.1" {
+					if strings.TrimSpace(n.Host) != wslHost {
 						return testv1.StepRunResult{}, fmt.Errorf("wsl host mismatch: got %q", n.Host)
 					}
-					if strings.TrimSpace(n.User) != "user" {
+					if strings.TrimSpace(n.User) != wslUser {
 						return testv1.StepRunResult{}, fmt.Errorf("wsl user mismatch: got %q", n.User)
 					}
 					break

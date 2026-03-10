@@ -156,22 +156,6 @@ func RunLeader(args []string) error {
 
 	stopTSNet := func() {}
 	var tsRuntime *tsnetRuntime
-	if *enableTSNet {
-		if active, provider, tailnet := tsnetlib.NativeTailnetConnected(); active {
-			logs.Info("REPL native tailscale already connected via %s; skipping embedded tsnet startup (tailnet=%s)", provider, strings.TrimSpace(tailnet))
-		} else {
-			cleanup, upErr := startTSNetInstance(normalizeTSNetHostname(normalizePromptName(*hostname)))
-			if upErr != nil {
-				logs.Warn("REPL tsnet startup failed: %v", upErr)
-			} else {
-				tsRuntime = cleanup
-				stopTSNet = func() {
-					_ = tsRuntime.Close()
-				}
-			}
-		}
-	}
-	defer stopTSNet()
 
 	h := normalizePromptName(*hostname)
 	roomName := sanitizeRoom(*room)
@@ -186,6 +170,24 @@ func RunLeader(args []string) error {
 		}
 		_ = publishFrame(nc, replRoomSubject(targetRoom), f)
 	}
+
+	if *enableTSNet {
+		if active, provider, tailnet := tsnetlib.NativeTailnetConnected(); active {
+			logs.Info("REPL native tailscale already connected via %s; skipping embedded tsnet startup (tailnet=%s)", provider, strings.TrimSpace(tailnet))
+			publishRoom(roomName, BusFrame{Type: frameTypeServer, Message: fmt.Sprintf("DIALTONE native tailscale already connected via %s; skipping embedded tsnet startup (tailnet=%s)", provider, strings.TrimSpace(tailnet))})
+		} else {
+			cleanup, upErr := startTSNetInstance(normalizeTSNetHostname(normalizePromptName(*hostname)))
+			if upErr != nil {
+				logs.Warn("REPL tsnet startup failed: %v", upErr)
+			} else {
+				tsRuntime = cleanup
+				stopTSNet = func() {
+					_ = tsRuntime.Close()
+				}
+			}
+		}
+	}
+	defer stopTSNet()
 
 	// Publish initial presence line to NATS so every connected client sees it.
 	publishRoom(roomName, BusFrame{Type: frameTypeServer, Message: fmt.Sprintf("DIALTONE leader online on %s (subject=%s nats=%s)", h, replRoomSubject(roomName), usedURL)})
@@ -271,19 +273,19 @@ func RunLeader(args []string) error {
 			presence.UpsertClient(sender, currentRoom, frame.Version, frame.OS, frame.Arch)
 			publishRoom(currentRoom, BusFrame{Type: frameTypeInput, From: sender, Message: "/" + raw})
 
-			if len(args) >= 3 && args[0] == "repl" && args[1] == "src_v1" && args[2] == "who" {
+			if len(args) >= 3 && args[0] == "repl" && args[1] == "src_v3" && args[2] == "who" {
 				publishPresenceReport(currentRoom, "who", presence.Snapshot(time.Now(), daemonTTL), publishRoom)
 				return
 			}
-			if len(args) >= 3 && args[0] == "repl" && args[1] == "src_v1" && args[2] == "versions" {
+			if len(args) >= 3 && args[0] == "repl" && args[1] == "src_v3" && args[2] == "versions" {
 				publishPresenceReport(currentRoom, "versions", presence.Snapshot(time.Now(), daemonTTL), publishRoom)
 				return
 			}
 
-			if len(args) >= 4 && args[0] == "repl" && args[1] == "src_v1" && args[2] == "join" {
+			if len(args) >= 4 && args[0] == "repl" && args[1] == "src_v3" && args[2] == "join" {
 				targetRoom := sanitizeRoom(args[3])
 				if targetRoom == "" {
-					publishRoom(currentRoom, BusFrame{Type: frameTypeError, Message: "Usage: /repl src_v1 join <room-name> | /repl src_v1 who | /repl src_v1 versions"})
+					publishRoom(currentRoom, BusFrame{Type: frameTypeError, Message: "Usage: /repl src_v3 join <room-name> | /repl src_v3 who | /repl src_v3 versions"})
 					return
 				}
 				if targetRoom == currentRoom {

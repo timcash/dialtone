@@ -180,6 +180,25 @@ func (rt *Runtime) WaitForPatterns(timeout time.Duration, patterns []string) err
 	return fmt.Errorf("timeout waiting for patterns: %s", strings.Join(missing, ", "))
 }
 
+func (rt *Runtime) WaitForAnyPattern(timeout time.Duration, patterns []string) (string, error) {
+	if len(patterns) == 0 {
+		return "", fmt.Errorf("patterns are required")
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		select {
+		case msg := <-rt.msgCh:
+			for _, p := range patterns {
+				if strings.Contains(msg, p) {
+					return p, nil
+				}
+			}
+		case <-time.After(120 * time.Millisecond):
+		}
+	}
+	return "", fmt.Errorf("timeout waiting for any pattern: %s", strings.Join(patterns, ", "))
+}
+
 func (rt *Runtime) RunDialtone(args ...string) (string, error) {
 	cmd := exec.Command("./dialtone.sh", args...)
 	cmd.Dir = rt.RepoRoot
