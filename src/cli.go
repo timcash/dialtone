@@ -383,7 +383,8 @@ func isRepoRoot(candidate string) bool {
 func setBaseEnv(repoRoot string) {
 	_ = os.Setenv("DIALTONE_REPO_ROOT", repoRoot)
 	_ = os.Setenv("DIALTONE_SRC_ROOT", filepath.Join(repoRoot, "src"))
-	_ = os.Setenv("DIALTONE_ENV_FILE", filepath.Join(repoRoot, "env", ".env"))
+	_ = os.Setenv("DIALTONE_ENV_FILE", filepath.Join(repoRoot, "env", "dialtone.json"))
+	_ = os.Setenv("DIALTONE_MESH_CONFIG", filepath.Join(repoRoot, "env", "dialtone.json"))
 }
 
 func hasGoPackage(path string) bool {

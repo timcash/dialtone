@@ -2,6 +2,12 @@
 
 SSH transport utilities used by plugins that need remote access/tunneling.
 
+Config source of truth:
+- `env/dialtone.json` (`mesh_nodes` and related keys)
+- legacy `env/.env`, `env/mesh.json`, and ad hoc SSH host files are deprecated
+- SSH auth is explicit only: `mesh_nodes[].password` / `mesh_nodes[].ssh_private_key_path` or CLI flags (`--password`, `--key-path`)
+- no implicit `~/.ssh` key scan and no `SSH_AUTH_SOCK` agent fallback
+
 Current usage includes:
 - robot deploy/dev SSH operations
 - logs remote stream mode
@@ -9,10 +15,29 @@ Current usage includes:
 ## Complete Shell Workflow
 
 ```bash
+# Live REPL/NATS debugging for SSH commands (recommended)
+./dialtone.sh repl src_v3 watch --subject 'repl.>' --filter 'ssh src_v1'
+./dialtone.sh repl src_v3 subtone-list --count 20
+./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 200
+
+# Resolve/probe before running remote commands (new debug path)
+./dialtone.sh ssh src_v1 resolve --host grey
+./dialtone.sh ssh src_v1 probe --host grey --user user --password 'mac3edc#EDC' --timeout 5s
+./dialtone.sh ssh src_v1 probe --host grey --user user --key-path /path/to/id_ed25519 --timeout 5s
+./dialtone.sh ssh src_v1 run --host grey --cmd "hostname" --user user --password 'mac3edc#EDC' --connect-timeout 5s --debug
+./dialtone.sh ssh src_v1 run --host grey --cmd "hostname" --user user --key-path /path/to/id_ed25519 --connect-timeout 5s --debug
+
 # Discover mesh nodes and transport mode
 ./dialtone.sh ssh src_v1 mesh
 ./dialtone.sh ssh src_v1 nodes
 ./dialtone.sh ssh src_v1 list
+
+# Passwordless key bootstrap (gold -> wsl example)
+./dialtone.sh ssh src_v1 keygen --host wsl
+./dialtone.sh ssh src_v1 key-install --host wsl --password '<initial-password>'
+./dialtone.sh ssh src_v1 key-setup --host wsl --password '<initial-password>'
+./dialtone.sh ssh src_v1 run --host wsl --cmd "hostname" --debug
+
 ./dialtone.sh ssh src_v1 format
 ./dialtone.sh ssh src_v1 tailnet-check
 ./dialtone.sh ssh src_v1 tailnet-check --host gold,grey,rover,wsl
@@ -22,6 +47,7 @@ Current usage includes:
 ./dialtone.sh ssh src_v1 run --host darkmac --cmd "pwd" --user tim --port 22
 ./dialtone.sh ssh src_v1 run --host legion --cmd "whoami"
 ./dialtone.sh ssh src_v1 run --host gold --cmd "uname -a"
+./dialtone.sh ssh src_v1 run --host grey --cmd "hostname" --user user --password 'mac3edc#EDC'
 
 # Run one command on all nodes
 ./dialtone.sh ssh src_v1 run-all --cmd "hostname"
@@ -66,9 +92,16 @@ Current usage includes:
 ## CLI
 
 - `./dialtone.sh ssh src_v1 mesh`
+- `./dialtone.sh ssh src_v1 keygen --host wsl`
+- `./dialtone.sh ssh src_v1 key-install --host wsl --password '<initial-password>'`
+- `./dialtone.sh ssh src_v1 key-setup --host wsl --password '<initial-password>'`
 - `./dialtone.sh ssh src_v1 format`
 - `./dialtone.sh ssh src_v1 tailnet-check`
 - `./dialtone.sh ssh src_v1 run --host rover --cmd "hostname"`
+- `./dialtone.sh ssh src_v1 resolve --host rover`
+- `./dialtone.sh ssh src_v1 probe --host rover --timeout 5s`
+- `./dialtone.sh ssh src_v1 run --host rover --cmd "hostname" --connect-timeout 5s --debug`
+- `./dialtone.sh ssh src_v1 run --host rover --cmd "hostname" --key-path /path/to/id_ed25519`
 - `./dialtone.sh ssh src_v1 run-all --cmd "hostname"`
 - `./dialtone.sh ssh src_v1 status --host all`
 - `./dialtone.sh ssh src_v1 sync-repos --branch feat/robot-src-v4-split-runtime`
@@ -159,7 +192,7 @@ Notes:
 - `tailnet-check` performs an actual SSH handshake over each node's `.ts.net` candidate and prints a compact pass/fail table.
 - Default transport is Go SSH (`golang.org/x/crypto/ssh`).
 - Legion SSH defaults use port `22` (user `user`), while WSL-local command execution can still prefer local PowerShell transport.
-- Gold, Grey, WSL, Legion, and Rover now all carry explicit tailnet host candidates in `env/mesh.json`.
+- Gold, Grey, WSL, Legion, and Rover now all carry explicit tailnet host candidates in `env/dialtone.json` under `mesh_nodes`.
 - Gold host selection prefers tailscale (`gold.shad-artichoke.ts.net`) first, then LAN (`192.168.4.55`).
 - Grey host selection prefers tailscale (`grey.shad-artichoke.ts.net`) first, then LAN (`192.168.4.31`).
 - Rover host selection prefers tailscale (`rover-1.shad-artichoke.ts.net`) first, then WLAN/LAN (`192.168.4.36` on cashwifi), and only then link-local (`169.254.217.151`, `link-local`) as a debug fallback.

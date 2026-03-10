@@ -56,6 +56,11 @@ install_go() {
 bootstrap_repo() {
     local deps_dir="$1"
     local target_root="$2"
+    local method="${DIALTONE_BOOTSTRAP_METHOD:-tar}"
+    if [ "$method" = "git-go" ] || [ "$method" = "git" ]; then
+        bootstrap_repo_git_go "$deps_dir" "$target_root"
+        return
+    fi
     local url="${DIALTONE_BOOTSTRAP_REPO_URL:-https://github.com/timcash/dialtone/archive/refs/heads/main.tar.gz}"
     log_info "Bootstrapping repo into $target_root from $url..."
     mkdir -p "$deps_dir/repo_tmp"
@@ -80,6 +85,109 @@ bootstrap_repo() {
         cp -f "$0" "$target_root/dialtone.sh" 2>/dev/null || true
     fi
     log_info "Repo bootstrap complete."
+}
+
+bootstrap_repo_git_go() {
+    local deps_dir="$1"
+    local target_root="$2"
+    local git_url="${DIALTONE_BOOTSTRAP_GIT_URL:-https://github.com/timcash/dialtone.git}"
+    local git_branch="${DIALTONE_BOOTSTRAP_GIT_BRANCH:-main}"
+    local git_depth="${DIALTONE_BOOTSTRAP_GIT_DEPTH:-1}"
+    local go_bin="${DIALTONE_GO_BIN:-$DIALTONE_ENV/go/bin/go}"
+
+    if [ ! -x "$go_bin" ]; then
+        if command_exists go; then
+            go_bin="$(command -v go)"
+        else
+            log_info "Go runtime missing. Installing to ${DIALTONE_ENV} for git-go bootstrap..."
+            install_go "$DIALTONE_ENV"
+            go_bin="$DIALTONE_ENV/go/bin/go"
+        fi
+    fi
+
+    log_info "Bootstrapping repo via go-git into $target_root from $git_url (branch=$git_branch depth=$git_depth)..."
+    local work="$deps_dir/git_bootstrap_tmp"
+    local clone_dir="$work/clone"
+    local tool_dir="$work/tool"
+    rm -rf "$work"
+    mkdir -p "$clone_dir" "$tool_dir"
+
+    cat > "$tool_dir/main.go" <<'EOF'
+package main
+
+import (
+	"flag"
+	"log"
+	"os"
+	"strings"
+
+	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+)
+
+func main() {
+	url := flag.String("url", "", "git url")
+	dest := flag.String("dest", "", "destination")
+	branch := flag.String("branch", "main", "branch")
+	depth := flag.Int("depth", 1, "depth")
+	flag.Parse()
+	if strings.TrimSpace(*url) == "" || strings.TrimSpace(*dest) == "" {
+		log.Fatalf("missing required --url/--dest")
+	}
+	opts := &git.CloneOptions{URL: strings.TrimSpace(*url), Progress: os.Stdout}
+	if strings.TrimSpace(*branch) != "" {
+		opts.ReferenceName = plumbing.NewBranchReferenceName(strings.TrimSpace(*branch))
+		opts.SingleBranch = true
+	}
+	if *depth > 0 {
+		opts.Depth = *depth
+	}
+	if _, err := git.PlainClone(strings.TrimSpace(*dest), false, opts); err != nil {
+		log.Fatalf("clone failed: %v", err)
+	}
+}
+EOF
+    cat > "$tool_dir/go.mod" <<'EOF'
+module dialtone-bootstrap-git
+
+go 1.24
+
+require github.com/go-git/go-git/v5 v5.16.3
+EOF
+
+    (cd "$tool_dir" && "$go_bin" run . --url "$git_url" --dest "$clone_dir" --branch "$git_branch" --depth "$git_depth")
+    mkdir -p "$target_root"
+
+    local saved_script=""
+    if [ -f "$target_root/dialtone.sh" ]; then
+        saved_script=$(cat "$target_root/dialtone.sh")
+    fi
+
+    if [ "$target_root" = "$SCRIPT_DIR" ]; then
+        mv "$clone_dir/src" "$target_root/" || true
+        mv "$clone_dir/flake.nix" "$target_root/" || true
+        shopt -s dotglob nullglob
+        for item in "$clone_dir"/*; do
+            base="$(basename "$item")"
+            [ "$base" = ".git" ] && continue
+            [ "$base" = "src" ] && continue
+            [ "$base" = "flake.nix" ] && continue
+            cp -rn "$item" "$target_root/" || true
+        done
+        shopt -u dotglob nullglob
+    else
+        shopt -s dotglob nullglob
+        for item in "$clone_dir"/*; do
+            mv "$item" "$target_root/" || true
+        done
+        shopt -u dotglob nullglob
+    fi
+    rm -rf "$work"
+
+    if [ -n "$saved_script" ] || [ ! -f "$target_root/dialtone.sh" ] || [ "$target_root" != "$SCRIPT_DIR" ]; then
+        cp -f "$0" "$target_root/dialtone.sh" 2>/dev/null || true
+    fi
+    log_info "Repo bootstrap complete (method=git-go)."
 }
 
 run_onboarding() {
@@ -135,6 +243,10 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --stdout) export DIALTONE_LOG_STDOUT=1; shift ;;
+        --subtone)
+            export DIALTONE_SUBTONE=1
+            shift
+            ;;
         *) PASSTHRU_ARGS+=("$1"); shift ;;
     esac
 done
@@ -180,9 +292,15 @@ export DIALTONE_MESH_CONFIG="$ENV_FILE_JSON"
 
 # --- 6. Guided Dependency Checks ---
 log_info "Verifying dependencies..."
+log_info "Bootstrap path checks:"
+[ -n "$DIALTONE_REPO_ROOT" ] && { [ -d "$DIALTONE_REPO_ROOT" ] && log_info "- repo root: $DIALTONE_REPO_ROOT (dir)" || log_info "- repo root: $DIALTONE_REPO_ROOT (missing)"; }
+[ -n "$DIALTONE_SRC_ROOT" ] && { [ -d "$DIALTONE_SRC_ROOT" ] && log_info "- src root: $DIALTONE_SRC_ROOT (dir)" || log_info "- src root: $DIALTONE_SRC_ROOT (missing)"; }
+[ -n "$DIALTONE_ENV" ] && { [ -d "$DIALTONE_ENV" ] && log_info "- env dir: $DIALTONE_ENV (dir)" || log_info "- env dir: $DIALTONE_ENV (missing)"; }
+[ -n "$ENV_FILE_JSON" ] && { [ -f "$ENV_FILE_JSON" ] && log_info "- env json: $ENV_FILE_JSON (file)" || log_info "- env json: $ENV_FILE_JSON (missing)"; }
+[ -n "$DIALTONE_MESH_CONFIG" ] && { [ -f "$DIALTONE_MESH_CONFIG" ] && log_info "- mesh config: $DIALTONE_MESH_CONFIG (file)" || log_info "- mesh config: $DIALTONE_MESH_CONFIG (missing)"; }
 
 if [ "$SCRIPT_DIR" != "$DIALTONE_REPO_ROOT" ] && [ -f "$DIALTONE_REPO_ROOT/dialtone.sh" ] && [ -z "$DIALTONE_TRANSFERRED" ]; then
-    log_info "Transferring execution to $DIALTONE_REPO_ROOT/dialtone.sh"
+	log_info "Transferring execution to $DIALTONE_REPO_ROOT/dialtone.sh"
     exec env DIALTONE_TRANSFERRED=1 "$DIALTONE_REPO_ROOT/dialtone.sh" --env "$ENV_FILE_JSON" "${PASSTHRU_ARGS[@]}"
 fi
 

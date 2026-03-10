@@ -5,16 +5,26 @@ import (
 	"io"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/agent"
 )
 
 func DialSSH(host, port, user, pass string) (*ssh.Client, error) {
+	return DialSSHWithTimeout(host, port, user, pass, 10*time.Second)
+}
+
+func DialSSHWithTimeout(host, port, user, pass string, timeout time.Duration) (*ssh.Client, error) {
+	return DialSSHWithAuth(host, port, user, pass, "", timeout)
+}
+
+func DialSSHWithPrivateKeyPath(host, port, user, keyPath string, timeout time.Duration) (*ssh.Client, error) {
+	return DialSSHWithAuth(host, port, user, "", keyPath, timeout)
+}
+
+func DialSSHWithAuth(host, port, user, pass, keyPath string, timeout time.Duration) (*ssh.Client, error) {
 	username := user
 	hostname := host
 	if username == "" {
@@ -31,38 +41,26 @@ func DialSSH(host, port, user, pass string) (*ssh.Client, error) {
 		User:            username,
 		Auth:            []ssh.AuthMethod{},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         10 * time.Second,
+		Timeout:         timeout,
 	}
 
-	// Try to use SSH agent if available
-	if socket := os.Getenv("SSH_AUTH_SOCK"); socket != "" {
-		conn, err := net.Dial("unix", socket)
-		if err == nil {
-			config.Auth = append(config.Auth, ssh.PublicKeysCallback(agent.NewClient(conn).Signers))
+	if strings.TrimSpace(keyPath) != "" {
+		key, err := os.ReadFile(strings.TrimSpace(keyPath))
+		if err != nil {
+			return nil, fmt.Errorf("read private key %s: %w", strings.TrimSpace(keyPath), err)
 		}
-	}
-
-	// Try to use common SSH keys if available
-	home, _ := os.UserHomeDir()
-	keys := []string{"id_ed25519", "id_rsa"}
-	for _, k := range keys {
-		keyPath := filepath.Join(home, ".ssh", k)
-		if _, err := os.Stat(keyPath); err == nil {
-			key, err := os.ReadFile(keyPath)
-			if err == nil {
-				signer, err := ssh.ParsePrivateKey(key)
-				if err == nil {
-					config.Auth = append(config.Auth, ssh.PublicKeys(signer))
-				}
-			}
+		signer, err := ssh.ParsePrivateKey(key)
+		if err != nil {
+			return nil, fmt.Errorf("parse private key %s: %w", strings.TrimSpace(keyPath), err)
 		}
+		config.Auth = append(config.Auth, ssh.PublicKeys(signer))
 	}
 
 	if strings.TrimSpace(pass) != "" {
 		config.Auth = append(config.Auth, ssh.Password(pass))
 	}
 	if len(config.Auth) == 0 {
-		return nil, fmt.Errorf("no SSH auth methods available (missing key and password)")
+		return nil, fmt.Errorf("no SSH auth methods available (set password or key path)")
 	}
 
 	addr := fmt.Sprintf("%s:%s", hostname, port)
