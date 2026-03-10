@@ -96,7 +96,7 @@ func PrintUsage() {
 	logs.Raw("  devices prune --name-contains S [--tailnet N] [--api-key K] [--dry-run] [--yes]")
 	logs.Raw("  computers list [--tailnet N] [--api-key K] [--format report|json] [--all]")
 	logs.Raw("  list [--tailnet N] [--api-key K] [--format report|json] [--all]  Alias for devices list")
-	logs.Raw("  keys provision [--tailnet N] [--api-key K] [--description D] [--tags t1,t2] [--ephemeral] [--preauthorized] [--reusable] [--expiry-hours N] [--write-env env/.env]")
+	logs.Raw("  keys provision [--tailnet N] [--api-key K] [--description D] [--tags t1,t2] [--ephemeral] [--preauthorized] [--reusable] [--expiry-hours N] [--write-env env/dialtone.json]")
 	logs.Raw("  keys list [--tailnet N] [--api-key K]")
 	logs.Raw("  keys revoke <key-id> [--tailnet N] [--api-key K]")
 	logs.Raw("  keys usage [--tailnet N] [--api-key K]")
@@ -692,7 +692,7 @@ func ensureAuthKeyForEmbedded(cfg *Config) error {
 		Ephemeral:     true,
 		Preauthorized: true,
 		ExpiryHours:   24,
-		WriteEnvPath:  chooseNonEmpty(strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE")), "env/.env"),
+		WriteEnvPath:  chooseNonEmpty(strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE")), "env/dialtone.json"),
 		EnvKeyName:    "TS_AUTHKEY",
 	}
 	key, err := ProvisionAuthKey(opts)
@@ -719,6 +719,18 @@ func detectNativeTailnetConnected() (bool, string, string) {
 		return true, "tailscale-cli", tailnet
 	}
 	return false, "", ""
+}
+
+// NativeTailnetConnected reports whether a host already has an active native
+// tailscale connection (via localapi or tailscale CLI).
+func NativeTailnetConnected() (bool, string, string) {
+	return detectNativeTailnetConnected()
+}
+
+// EnsureAuthKeyForEmbedded provisions TS_AUTHKEY when needed for embedded tsnet
+// workflows (for example REPL leader), then updates cfg with the resolved key state.
+func EnsureAuthKeyForEmbedded(cfg *Config) error {
+	return ensureAuthKeyForEmbedded(cfg)
 }
 
 func detectConnectedTailnetFromLocalAPI() (string, error) {
@@ -985,7 +997,7 @@ func runKeysProvision(args []string) error {
 		Ephemeral:     true,
 		Preauthorized: true,
 		ExpiryHours:   24,
-		WriteEnvPath:  chooseNonEmpty(strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE")), "env/.env"),
+		WriteEnvPath:  chooseNonEmpty(strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE")), "env/dialtone.json"),
 		EnvKeyName:    "TS_AUTHKEY",
 	}
 	if opts.APIToken == "" {
@@ -1396,9 +1408,16 @@ func (c *tailscaleClient) do(method, path string, body any, out any) error {
 }
 
 func UpsertEnvVar(envPath, key, value string) error {
+	envPath = strings.TrimSpace(envPath)
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return errors.New("missing env key")
+	}
+	if envPath == "" {
+		envPath = filepath.Join("env", "dialtone.json")
+	}
+	if strings.HasSuffix(strings.ToLower(envPath), ".json") {
+		return UpsertJSONVar(envPath, key, value)
 	}
 	if err := os.MkdirAll(filepath.Dir(envPath), 0o755); err != nil && filepath.Dir(envPath) != "." {
 		return err
@@ -1432,6 +1451,29 @@ func UpsertEnvVar(envPath, key, value string) error {
 		out += "\n"
 	}
 	return os.WriteFile(envPath, []byte(out), 0o644)
+}
+
+func UpsertJSONVar(jsonPath, key, value string) error {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return errors.New("missing json key")
+	}
+	if err := os.MkdirAll(filepath.Dir(jsonPath), 0o755); err != nil && filepath.Dir(jsonPath) != "." {
+		return err
+	}
+	doc := map[string]any{}
+	if raw, err := os.ReadFile(jsonPath); err == nil && strings.TrimSpace(string(raw)) != "" {
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			return err
+		}
+	}
+	doc[key] = value
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return err
+	}
+	out = append(out, '\n')
+	return os.WriteFile(jsonPath, out, 0o644)
 }
 
 func EnsureDialtoneACL(apiKey, tailnet string, hostnames ...string) error {

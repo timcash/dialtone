@@ -10,6 +10,7 @@ import (
 	replhelpps "dialtone/dev/plugins/repl/src_v3/test/04_repl_help_ps"
 	sshwsl "dialtone/dev/plugins/repl/src_v3/test/05_ssh_wsl"
 	cloudflaretunnel "dialtone/dev/plugins/repl/src_v3/test/06_cloudflare_tunnel"
+	tsnetephemeral "dialtone/dev/plugins/repl/src_v3/test/07_tsnet_ephemeral"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
 )
 
@@ -23,6 +24,7 @@ func main() {
 	replhelpps.Register(reg)
 	sshwsl.Register(reg)
 	cloudflaretunnel.Register(reg)
+	tsnetephemeral.Register(reg)
 
 	err := reg.Run(testv1.SuiteOptions{
 		Version:       "repl-src-v3",

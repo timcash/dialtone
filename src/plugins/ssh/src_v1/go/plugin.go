@@ -23,6 +23,10 @@ func Run(args []string) error {
 		return runMeshList(args[1:])
 	case "tailnet-check":
 		return runTailnetCheck(args[1:])
+	case "resolve":
+		return runResolve(args[1:])
+	case "probe":
+		return runProbe(args[1:])
 	case "run":
 		return runCommand(args[1:])
 	case "run-all":
@@ -35,6 +39,12 @@ func Run(args []string) error {
 		return runSyncCode(args[1:])
 	case "bootstrap":
 		return runBootstrap(args[1:])
+	case "keygen":
+		return runKeygen(args[1:])
+	case "key-install":
+		return runKeyInstall(args[1:])
+	case "key-setup":
+		return runKeySetup(args[1:])
 	default:
 		PrintUsage()
 		return fmt.Errorf("unknown ssh command: %s", args[0])
@@ -49,9 +59,13 @@ func PrintUsage() {
 	logs.Raw("  tailnet-check [--host H|all] [--timeout 5s]")
 	logs.Raw("                                        Verify SSH handshake over each node's tailscale host")
 	logs.Raw("  format                                Run go fmt for the ssh plugin")
-	logs.Raw("  run --host H --cmd C [--user U --port P --password X] [--node N]")
+	logs.Raw("  run --host H --cmd C [--user U --port P --password X --key-path P] [--node N]")
 	logs.Raw("                                        Run command on a mesh host (preferred flag: --host)")
-	logs.Raw("  run-all --cmd C [--user U --port P --password X]")
+	logs.Raw("  resolve --host H [--user U --port P]")
+	logs.Raw("                                        Show resolved host/user/port/candidates/transport for one mesh node")
+	logs.Raw("  probe --host H [--user U --port P --password X --key-path P --timeout 5s]")
+	logs.Raw("                                        Probe reachability/auth for a mesh node with detailed per-candidate results")
+	logs.Raw("  run-all --cmd C [--user U --port P --password X --key-path P]")
 	logs.Raw("                                        Run command on every mesh node")
 	logs.Raw("  status [--host H|all] [--json]")
 	logs.Raw("                                        Show cpu/mem-free/network/disk-free/battery for mesh nodes")
@@ -63,6 +77,12 @@ func PrintUsage() {
 	logs.Raw("                                        Rsync code without git, excludes node_modules/.pixi by default")
 	logs.Raw("  bootstrap --host <name|all> [--src P] [--dest P] [--delete] [--install-cmd C] [--node <name|all>]")
 	logs.Raw("                                        Sync code + run install command(s) on target node(s)")
+	logs.Raw("  keygen --host H [--key-path P --force]")
+	logs.Raw("                                        Generate local ed25519 keypair for host and write key path to dialtone.json")
+	logs.Raw("  key-install --host H [--user U --port P --password X --key-path P --pub-key-path P]")
+	logs.Raw("                                        Install local public key to remote ~/.ssh/authorized_keys for passwordless auth")
+	logs.Raw("  key-setup --host H [--user U --port P --password X --key-path P]")
+	logs.Raw("                                        Generate key if needed, install it remotely, verify auth, and save key path in dialtone.json")
 	logs.Raw("  test                                  Run ssh plugin self-check suite")
 }
 
@@ -87,6 +107,7 @@ func runTailnetCheck(args []string) error {
 	user := fs.String("user", "", "Override remote user")
 	port := fs.String("port", "", "Override remote port")
 	pass := fs.String("password", "", "Optional SSH password")
+	keyPath := fs.String("key-path", "", "Optional SSH private key path")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -132,9 +153,10 @@ func runTailnetCheck(args []string) error {
 
 		started := time.Now()
 		client, _, resolvedHost, resolvedPort, err := DialMeshNodeViaRoute(node.Name, meshRouteTailnet, CommandOptions{
-			User:     userValue,
-			Port:     portValue,
-			Password: *pass,
+			User:           userValue,
+			Port:           portValue,
+			Password:       *pass,
+			PrivateKeyPath: *keyPath,
 		})
 		if err != nil {
 			failures++
@@ -195,6 +217,9 @@ func runCommand(args []string) error {
 	user := fs.String("user", "", "Override remote user")
 	port := fs.String("port", "", "Override remote port")
 	pass := fs.String("password", "", "Optional SSH password")
+	keyPath := fs.String("key-path", "", "Optional SSH private key path")
+	connectTimeout := fs.Duration("connect-timeout", 10*time.Second, "SSH connect/auth timeout per attempt")
+	debug := fs.Bool("debug", false, "Print resolved host selection/debug info")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -208,13 +233,36 @@ func runCommand(args []string) error {
 	if strings.TrimSpace(*cmd) == "" {
 		return errors.New("--cmd is required")
 	}
-	out, err := RunNodeCommand(target, *cmd, CommandOptions{
-		User:     *user,
-		Port:     *port,
-		Password: *pass,
-	})
+	opts := CommandOptions{
+		User:           *user,
+		Port:           *port,
+		Password:       *pass,
+		PrivateKeyPath: *keyPath,
+		Debug:          *debug,
+	}
+	opts.ConnectTimeout = *connectTimeout
+	if opts.ConnectTimeout <= 0 {
+		opts.ConnectTimeout = 10 * time.Second
+	}
+	if *debug {
+		if report, err := BuildResolveReport(target, opts); err == nil {
+			logs.Raw("Resolved node: %s", report.Name)
+			logs.Raw("  transport: %s", report.Transport)
+			logs.Raw("  user: %s", report.User)
+			logs.Raw("  port: %s", report.Port)
+			logs.Raw("  preferred: %s", report.PreferredHost)
+			logs.Raw("  route[tailscale]: %s", report.RouteTailnet)
+			logs.Raw("  route[private]: %s", report.RoutePrivate)
+			logs.Raw("  candidates: %s", strings.Join(report.Candidates, ", "))
+		}
+	}
+	started := time.Now()
+	out, err := RunNodeCommand(target, *cmd, opts)
 	if strings.TrimSpace(out) != "" {
 		logs.Raw("%s", strings.TrimRight(out, "\n"))
+	}
+	if *debug {
+		logs.Raw("Elapsed: %s", time.Since(started).Round(10*time.Millisecond))
 	}
 	return err
 }
@@ -226,6 +274,7 @@ func runCommandAll(args []string) error {
 	user := fs.String("user", "", "Override remote user")
 	port := fs.String("port", "", "Override remote port")
 	pass := fs.String("password", "", "Optional SSH password")
+	keyPath := fs.String("key-path", "", "Optional SSH private key path")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -237,9 +286,10 @@ func runCommandAll(args []string) error {
 	for _, node := range ListMeshNodes() {
 		logs.Raw("== %s ==", node.Name)
 		out, err := RunNodeCommand(node.Name, *cmd, CommandOptions{
-			User:     *user,
-			Port:     *port,
-			Password: *pass,
+			User:           *user,
+			Port:           *port,
+			Password:       *pass,
+			PrivateKeyPath: *keyPath,
 		})
 		if strings.TrimSpace(out) != "" {
 			logs.Raw("%s", strings.TrimRight(out, "\n"))
@@ -251,6 +301,116 @@ func runCommandAll(args []string) error {
 	}
 	if failures > 0 {
 		return fmt.Errorf("run-all finished with %d node failures", failures)
+	}
+	return nil
+}
+
+func runResolve(args []string) error {
+	fs := flag.NewFlagSet("ssh resolve", flag.ContinueOnError)
+	fs.SetOutput(nil)
+	host := fs.String("host", "", "Mesh host name or alias")
+	node := fs.String("node", "", "Alias for --host (deprecated)")
+	user := fs.String("user", "", "Override remote user")
+	port := fs.String("port", "", "Override remote port")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	target := strings.TrimSpace(*host)
+	if target == "" {
+		target = strings.TrimSpace(*node)
+	}
+	if target == "" {
+		return errors.New("--host is required")
+	}
+	report, err := BuildResolveReport(target, CommandOptions{User: *user, Port: *port})
+	if err != nil {
+		return err
+	}
+	logs.Raw("name=%s", report.Name)
+	logs.Raw("transport=%s", report.Transport)
+	logs.Raw("user=%s", report.User)
+	logs.Raw("port=%s", report.Port)
+	logs.Raw("preferred=%s", report.PreferredHost)
+	logs.Raw("route.tailscale=%s", report.RouteTailnet)
+	logs.Raw("route.private=%s", report.RoutePrivate)
+	logs.Raw("candidates=%s", strings.Join(report.Candidates, ","))
+	return nil
+}
+
+func runProbe(args []string) error {
+	fs := flag.NewFlagSet("ssh probe", flag.ContinueOnError)
+	fs.SetOutput(nil)
+	host := fs.String("host", "", "Mesh host name or alias")
+	node := fs.String("node", "", "Alias for --host (deprecated)")
+	user := fs.String("user", "", "Override remote user")
+	port := fs.String("port", "", "Override remote port")
+	pass := fs.String("password", "", "Optional SSH password")
+	keyPath := fs.String("key-path", "", "Optional SSH private key path")
+	timeout := fs.Duration("timeout", 5*time.Second, "Per-candidate probe timeout")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	target := strings.TrimSpace(*host)
+	if target == "" {
+		target = strings.TrimSpace(*node)
+	}
+	if target == "" {
+		return errors.New("--host is required")
+	}
+	opts := CommandOptions{
+		User:           *user,
+		Port:           *port,
+		Password:       *pass,
+		PrivateKeyPath: *keyPath,
+	}
+	opts.ConnectTimeout = *timeout
+	if opts.ConnectTimeout <= 0 {
+		opts.ConnectTimeout = 5 * time.Second
+	}
+	report, err := BuildResolveReport(target, opts)
+	if err != nil {
+		return err
+	}
+	logs.Raw("Probe target=%s transport=%s user=%s port=%s", report.Name, report.Transport, report.User, report.Port)
+	if report.Transport != "ssh" {
+		logs.Raw("transport %s does not use ssh candidate dialing", report.Transport)
+		return nil
+	}
+	resolvedNode, err := ResolveMeshNode(target)
+	if err != nil {
+		return err
+	}
+	passValue := strings.TrimSpace(opts.Password)
+	if passValue == "" {
+		passValue = strings.TrimSpace(resolvedNode.Password)
+	}
+	keyPathValue := strings.TrimSpace(opts.PrivateKeyPath)
+	if keyPathValue == "" {
+		keyPathValue = strings.TrimSpace(resolvedNode.SSHPrivateKeyPath)
+	}
+	failures := 0
+	for _, c := range report.Candidates {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		tcpOK := CanReachHostPort(c, report.Port, opts.ConnectTimeout)
+		tcpState := "unreachable"
+		if tcpOK {
+			tcpState = "reachable"
+		}
+		started := time.Now()
+		client, err := DialSSHWithAuth(c, report.Port, report.User, passValue, keyPathValue, opts.ConnectTimeout)
+		if err != nil {
+			failures++
+			logs.Raw("candidate=%s tcp=%s auth=FAIL elapsed=%s err=%s", c, tcpState, time.Since(started).Round(10*time.Millisecond), summarizeTailnetCheckError(err))
+			continue
+		}
+		_ = client.Close()
+		logs.Raw("candidate=%s tcp=%s auth=PASS elapsed=%s", c, tcpState, time.Since(started).Round(10*time.Millisecond))
+	}
+	if failures > 0 {
+		return fmt.Errorf("probe finished with %d auth failure(s)", failures)
 	}
 	return nil
 }

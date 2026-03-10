@@ -96,7 +96,7 @@ func runSrcV1(command string, args []string) error {
 		}
 		// src_v1 serve with args delegates runtime tunnel serve behavior.
 		return cloudflare_ops.RunRuntime("serve", args)
-	case "login", "tunnel", "robot", "proxy", "provision", "setup-service":
+	case "login", "tunnel", "robot", "proxy", "provision", "setup-service", "shell":
 		return cloudflare_ops.RunRuntime(command, args)
 	default:
 		return fmt.Errorf("unknown cloudflare command: %s", command)
@@ -120,8 +120,9 @@ func printUsage() {
 	logs.Raw("  serve        Run cloudflare UI server (no args) or tunnel serve (with args)")
 	logs.Raw("  login        Authenticate with Cloudflare")
 	logs.Raw("  tunnel       Manage Cloudflare tunnels (create/list/status/run/start/route/cleanup/stop)")
+	logs.Raw("  shell        Run shell bootstrap tunnel helper (up/down/status)")
 	logs.Raw("  robot        Expose a remote robot via tunnel")
 	logs.Raw("  proxy        Start local TCP proxy")
-	logs.Raw("  provision    Create tunnel + DNS and store token in env/.env")
+	logs.Raw("  provision    Create tunnel + DNS and store token in env/dialtone.json")
 	logs.Raw("  setup-service Install cloudflare robot proxy as a service")
 }

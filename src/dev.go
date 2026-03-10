@@ -5,19 +5,20 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
-	repl "dialtone/dev/plugins/repl/src_v1/go/repl"
 	replv3 "dialtone/dev/plugins/repl/src_v3/go/repl"
-
-	"github.com/joho/godotenv"
+	tsnetv1 "dialtone/dev/plugins/tsnet/src_v1/go"
 )
 
 var logFile *os.File
@@ -88,7 +89,10 @@ func bootstrapDialtoneRuntimeEnv() {
 		_ = os.Setenv("DIALTONE_REPO_ROOT", repoRoot)
 		_ = os.Setenv("DIALTONE_SRC_ROOT", filepath.Join(repoRoot, "src"))
 		if strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE")) == "" {
-			_ = os.Setenv("DIALTONE_ENV_FILE", filepath.Join(repoRoot, "env", ".env"))
+			_ = os.Setenv("DIALTONE_ENV_FILE", filepath.Join(repoRoot, "env", "dialtone.json"))
+		}
+		if strings.TrimSpace(os.Getenv("DIALTONE_MESH_CONFIG")) == "" {
+			_ = os.Setenv("DIALTONE_MESH_CONFIG", filepath.Join(repoRoot, "env", "dialtone.json"))
 		}
 	}
 
@@ -174,7 +178,7 @@ func logLine(category, msg string) {
 	logs.Info("[%s] %s", category, msg)
 }
 
-// LoadConfig loads environment variables from a custom file or defaults to .env
+// LoadConfig loads environment variables from env/dialtone.json.
 func LoadConfig() {
 	cwd, _ := os.Getwd()
 	repoRoot := cwd
@@ -182,37 +186,31 @@ func LoadConfig() {
 		repoRoot = filepath.Dir(cwd)
 	}
 
-	// Try dialtone.json first
 	jsonPath := filepath.Join(repoRoot, "env", "dialtone.json")
 	if fileExists(jsonPath) {
 		data, err := os.ReadFile(jsonPath)
 		if err == nil {
-			var config map[string]string
+			var config map[string]any
 			if err := json.Unmarshal(data, &config); err == nil {
 				for k, v := range config {
-					if os.Getenv(k) == "" {
-						os.Setenv(k, v)
+					if os.Getenv(k) != "" {
+						continue
+					}
+					switch vv := v.(type) {
+					case string:
+						_ = os.Setenv(k, vv)
+					case float64:
+						_ = os.Setenv(k, fmt.Sprintf("%v", vv))
+					case bool:
+						if vv {
+							_ = os.Setenv(k, "true")
+						} else {
+							_ = os.Setenv(k, "false")
+						}
 					}
 				}
 				logLine("CONFIG", "Loaded from "+jsonPath)
 			}
-		}
-	}
-
-	envFile := os.Getenv("DIALTONE_ENV_FILE")
-	if envFile == "" {
-		envFile = "env/.env"
-	}
-
-	// Try to find the env file by looking up from current dir
-	envPath := envFile
-	if !filepath.IsAbs(envPath) {
-		envPath = filepath.Join(repoRoot, envPath)
-	}
-
-	if fileExists(envPath) {
-		if err := godotenv.Load(envPath); err != nil {
-			logLine("CONFIG", "Warning: godotenv.Load failed: "+envPath)
 		}
 	}
 }
@@ -236,6 +234,19 @@ func GetDialtoneEnv() string {
 type Requirement struct {
 	Tool    string
 	Version string
+}
+
+type replMeshConfig struct {
+	MeshNodes []replMeshNode `json:"mesh_nodes"`
+}
+
+type replMeshNode struct {
+	Name           string   `json:"name"`
+	Aliases        []string `json:"aliases"`
+	Host           string   `json:"host"`
+	HostCandidates []string `json:"host_candidates"`
+	NATSURL        string   `json:"nats_url"`
+	NATSPort       int      `json:"nats_port"`
 }
 
 type MissingInstall struct {
@@ -333,6 +344,7 @@ func main() {
 	maybeReexecInNixShell()
 	initLogger()
 	LoadConfig()
+	logBootstrapChecks()
 	defer func() {
 		if logFile != nil {
 			logFile.Close()
@@ -359,6 +371,7 @@ func main() {
 
 	command := os.Args[1]
 	args := os.Args[2:]
+	targetHost, sshHost, args := extractTransportFlags(command, args)
 
 	switch command {
 	case "help", "-h", "--help":
@@ -370,6 +383,13 @@ func main() {
 	case "plugins":
 		listPlugins()
 	case "mods":
+		if shouldRouteCommandViaREPL(command, args) {
+			if err := dispatchViaREPL(command, args, targetHost); err != nil {
+				logs.Error("REPL dispatch failed: %v", err)
+				os.Exit(1)
+			}
+			return
+		}
 		if err := runMods(args); err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				os.Exit(exitErr.ExitCode())
@@ -384,8 +404,18 @@ func main() {
 		}
 		logs.Error("Unknown dev command: %v", args)
 	default:
+		if strings.TrimSpace(sshHost) != "" {
+			if err := runViaSSHHost(strings.TrimSpace(sshHost), command, args); err != nil {
+				if exitErr, ok := err.(*exec.ExitError); ok {
+					os.Exit(exitErr.ExitCode())
+				}
+				logs.Error("SSH transport failed: %v", err)
+				os.Exit(1)
+			}
+			return
+		}
 		if shouldRouteCommandViaREPL(command, args) {
-			if err := dispatchViaREPL(command, args); err != nil {
+			if err := dispatchViaREPL(command, args, targetHost); err != nil {
 				logs.Error("REPL dispatch failed: %v", err)
 				os.Exit(1)
 			}
@@ -399,6 +429,67 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+func extractTransportFlags(command string, args []string) (targetHost string, sshHost string, filtered []string) {
+	filtered = make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := strings.TrimSpace(args[i])
+		if a == "" {
+			continue
+		}
+		if a == "--ssh-host" && i+1 < len(args) {
+			h := strings.TrimSpace(args[i+1])
+			if h != "" {
+				sshHost = h
+			}
+			i++
+			continue
+		}
+		if strings.HasPrefix(a, "--ssh-host=") {
+			h := strings.TrimSpace(strings.TrimPrefix(a, "--ssh-host="))
+			if h != "" {
+				sshHost = h
+			}
+			continue
+		}
+		if a == "--target-host" && i+1 < len(args) {
+			h := strings.TrimSpace(args[i+1])
+			if h != "" {
+				targetHost = h
+			}
+			i++
+			continue
+		}
+		if strings.HasPrefix(a, "--target-host=") {
+			h := strings.TrimSpace(strings.TrimPrefix(a, "--target-host="))
+			if h != "" {
+				targetHost = h
+			}
+			continue
+		}
+		// --host is now a global REPL routing flag, except for ssh plugin
+		// subcommands where --host is still the ssh target flag.
+		if command != "ssh" {
+			if a == "--host" && i+1 < len(args) {
+				h := strings.TrimSpace(args[i+1])
+				if h != "" {
+					targetHost = h
+				}
+				i++
+				continue
+			}
+			if strings.HasPrefix(a, "--host=") {
+				h := strings.TrimSpace(strings.TrimPrefix(a, "--host="))
+				if h != "" {
+					targetHost = h
+				}
+				continue
+			}
+		}
+		filtered = append(filtered, a)
+	}
+	return targetHost, sshHost, filtered
 }
 
 func shouldRouteCommandViaREPL(command string, args []string) bool {
@@ -423,8 +514,8 @@ func shouldRouteCommandViaREPL(command string, args []string) bool {
 	}
 }
 
-func dispatchViaREPL(command string, args []string) error {
-	user := repl.DefaultPromptName()
+func dispatchViaREPL(command string, args []string, targetHost string) error {
+	user := replv3.DefaultPromptName()
 	filtered := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		a := strings.TrimSpace(args[i])
@@ -460,7 +551,420 @@ func dispatchViaREPL(command string, args []string) error {
 	if room == "" {
 		room = "index"
 	}
-	return replv3.InjectCommand(natsURL, room, user, line)
+	injectionHost := strings.TrimSpace(targetHost)
+	candidateNATSURLs := []string{natsURL}
+	if injectionHost != "" {
+		candidateNATSURLs = resolveTargetNATSURLs(injectionHost)
+		injectionHost = ""
+	}
+	attemptErrs := make([]string, 0, len(candidateNATSURLs))
+	for _, candidateURL := range candidateNATSURLs {
+		if injectionHost == "" && isLocalNATSURL(candidateURL) && replBootstrapHTTPAutostartEnabled() {
+			host := strings.TrimSpace(os.Getenv("DIALTONE_REPL_BOOTSTRAP_HTTP_HOST"))
+			if host == "" {
+				host = "127.0.0.1"
+			}
+			port := 8811
+			if raw := strings.TrimSpace(os.Getenv("DIALTONE_REPL_BOOTSTRAP_HTTP_PORT")); raw != "" {
+				if p, err := strconv.Atoi(raw); err == nil && p > 0 {
+					port = p
+				}
+			}
+			if err := replv3.EnsureBootstrapHTTPRunning(host, port); err != nil {
+				return fmt.Errorf("bootstrap http autostart failed: %w", err)
+			}
+		}
+		if err := replv3.InjectCommand(candidateURL, room, user, injectionHost, line); err == nil {
+			return nil
+		} else {
+			attemptErrs = append(attemptErrs, fmt.Sprintf("%s: %v", candidateURL, err))
+		}
+	}
+	if len(attemptErrs) == 0 {
+		return fmt.Errorf("no nats endpoint candidates were resolved")
+	}
+	return fmt.Errorf("repl inject failed after %d endpoint attempt(s): %s", len(attemptErrs), strings.Join(attemptErrs, " | "))
+}
+
+func resolveTargetNATSURLs(host string) []string {
+	host = strings.TrimSpace(strings.TrimPrefix(host, "@"))
+	if host == "" {
+		return []string{"nats://127.0.0.1:4222"}
+	}
+	if strings.HasPrefix(host, "nats://") {
+		return []string{host}
+	}
+	if strings.Contains(host, ":") && !strings.Contains(host, "/") {
+		return []string{"nats://" + host}
+	}
+	if host == "localhost" || net.ParseIP(host) != nil {
+		return []string{"nats://" + host + ":4222"}
+	}
+
+	out := make([]string, 0, 4)
+	seen := map[string]struct{}{}
+	add := func(raw string) {
+		n := normalizeNATSURL(raw)
+		if n == "" {
+			return
+		}
+		if _, ok := seen[n]; ok {
+			return
+		}
+		seen[n] = struct{}{}
+		out = append(out, n)
+	}
+
+	cfgPath := strings.TrimSpace(os.Getenv("DIALTONE_MESH_CONFIG"))
+	if cfgPath == "" {
+		cfgPath = strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE"))
+	}
+	if cfgPath == "" {
+		repoRoot := strings.TrimSpace(os.Getenv("DIALTONE_REPO_ROOT"))
+		if repoRoot != "" {
+			cfgPath = filepath.Join(repoRoot, "env", "dialtone.json")
+		}
+	}
+	if cfgPath != "" {
+		if b, err := os.ReadFile(cfgPath); err == nil {
+			var cfg replMeshConfig
+			if err := json.Unmarshal(b, &cfg); err == nil {
+				target := strings.ToLower(host)
+				for _, node := range cfg.MeshNodes {
+					if meshNodeMatches(node, target) {
+						if v := strings.TrimSpace(node.NATSURL); v != "" {
+							add(v)
+						}
+						port := node.NATSPort
+						if port <= 0 {
+							port = 4222
+						}
+						// Prefer host candidates (tailnet/LAN fallback), then node host.
+						for _, c := range node.HostCandidates {
+							candidate := strings.TrimSpace(c)
+							if candidate == "" {
+								continue
+							}
+							add(fmt.Sprintf("%s:%d", candidate, port))
+						}
+						candidate := strings.TrimSpace(node.Host)
+						for _, c := range node.HostCandidates {
+							if strings.TrimSpace(c) != "" {
+								candidate = strings.TrimSpace(c)
+								break
+							}
+						}
+						if candidate != "" {
+							add(fmt.Sprintf("%s:%d", candidate, port))
+						}
+						break
+					}
+				}
+			}
+		}
+	}
+	add(host + ":4222")
+	if len(out) == 0 {
+		return []string{"nats://127.0.0.1:4222"}
+	}
+	return out
+}
+
+func runViaSSHHost(host, command string, args []string) error {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return fmt.Errorf("--ssh-host requires a host value")
+	}
+	baseArgs := append([]string{"./dialtone.sh", "--subtone", command}, args...)
+	remoteDialtoneCmd := shellJoin(baseArgs)
+	remoteRepo := strings.TrimSpace(os.Getenv("DIALTONE_REMOTE_REPO"))
+	var remoteCmd string
+	if remoteRepo != "" {
+		remoteCmd = fmt.Sprintf(
+			"if [ -x %s/dialtone.sh ]; then cd %s && %s; elif [ -x ./dialtone.sh ]; then %s; elif [ -x \"$HOME/dialtone/dialtone.sh\" ]; then cd \"$HOME/dialtone\" && %s; else echo \"dialtone.sh not found in %s, $PWD, or $HOME/dialtone\" >&2; exit 127; fi",
+			shellQuote(remoteRepo), shellQuote(remoteRepo), remoteDialtoneCmd, remoteDialtoneCmd, remoteDialtoneCmd, shellQuote(remoteRepo),
+		)
+	} else {
+		remoteCmd = fmt.Sprintf(
+			"if [ -x ./dialtone.sh ]; then %s; elif [ -x \"$HOME/dialtone/dialtone.sh\" ]; then cd \"$HOME/dialtone\" && %s; else echo \"dialtone.sh not found in $PWD or $HOME/dialtone\" >&2; exit 127; fi",
+			remoteDialtoneCmd, remoteDialtoneCmd,
+		)
+	}
+	sshArgs := []string{
+		"src_v1",
+		"run",
+		"--host", host,
+		"--cmd", remoteCmd,
+	}
+	return runPluginScaffold("ssh", sshArgs)
+}
+
+func shellJoin(args []string) string {
+	quoted := make([]string, 0, len(args))
+	for _, a := range args {
+		quoted = append(quoted, shellQuote(a))
+	}
+	return strings.Join(quoted, " ")
+}
+
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
+}
+
+func meshNodeMatches(node replMeshNode, target string) bool {
+	if strings.EqualFold(strings.TrimSpace(node.Name), target) {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(node.Host), target) {
+		return true
+	}
+	for _, a := range node.Aliases {
+		if strings.EqualFold(strings.TrimSpace(a), target) {
+			return true
+		}
+	}
+	for _, c := range node.HostCandidates {
+		if strings.EqualFold(strings.TrimSpace(c), target) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeNATSURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "nats://127.0.0.1:4222"
+	}
+	if strings.HasPrefix(raw, "nats://") {
+		return raw
+	}
+	if strings.Contains(raw, ":") && !strings.Contains(raw, "/") {
+		return "nats://" + raw
+	}
+	return "nats://" + raw + ":4222"
+}
+
+func isLocalNATSURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	host := strings.TrimSpace(strings.ToLower(u.Hostname()))
+	switch host {
+	case "", "127.0.0.1", "localhost", "0.0.0.0", "::1", "::":
+		return true
+	default:
+		return false
+	}
+}
+
+func logBootstrapChecks() {
+	repoRoot := strings.TrimSpace(os.Getenv("DIALTONE_REPO_ROOT"))
+	srcRoot := strings.TrimSpace(os.Getenv("DIALTONE_SRC_ROOT"))
+	envDir := strings.TrimSpace(os.Getenv("DIALTONE_ENV"))
+	envFile := strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE"))
+	meshFile := strings.TrimSpace(os.Getenv("DIALTONE_MESH_CONFIG"))
+	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
+
+	logs.Info("DIALTONE> Bootstrap checks:")
+	logPathCheck("repo root", repoRoot)
+	logPathCheck("src root", srcRoot)
+	logPathCheck("env dir", envDir)
+	logPathCheck("env json", envFile)
+	logPathCheck("mesh config", meshFile)
+	logPathCheck("go bin", goBin)
+
+	natsURL := strings.TrimSpace(os.Getenv("DIALTONE_REPL_NATS_URL"))
+	if natsURL == "" {
+		natsURL = "nats://127.0.0.1:4222"
+	}
+	logs.Info("DIALTONE> State:")
+	natsReachable := endpointReachable(natsURL, 700*time.Millisecond)
+	logs.Info("DIALTONE> - nats endpoint %s reachable=%t", natsURL, natsReachable)
+	logs.Info("DIALTONE> - repl leader process running=%t", replLeaderProcessRunning())
+
+	if active, provider, tailnet := tsnetv1.NativeTailnetConnected(); active {
+		logs.Info("DIALTONE> - tailnet active=true provider=%s tailnet=%s", provider, strings.TrimSpace(tailnet))
+	} else {
+		logs.Info("DIALTONE> - tailnet active=false")
+	}
+
+	logs.Info("DIALTONE> - cloudflare running=%t", cloudflaredRunning())
+
+	host := strings.TrimSpace(os.Getenv("DIALTONE_REPL_BOOTSTRAP_HTTP_HOST"))
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	port := 8811
+	if raw := strings.TrimSpace(os.Getenv("DIALTONE_REPL_BOOTSTRAP_HTTP_PORT")); raw != "" {
+		if p, err := strconv.Atoi(raw); err == nil && p > 0 {
+			port = p
+		}
+	}
+	bootstrapRunning := bootstrapHTTPReachable(host, port)
+	logs.Info("DIALTONE> - bootstrap http %s running=%t", fmt.Sprintf("http://%s:%d/install.sh", host, port), bootstrapRunning)
+	logs.Info("DIALTONE> - bootstrap http process running=%t", bootstrapHTTPProcessRunning())
+
+	replScaffold := fileExists(filepath.Join(srcRoot, "plugins", "repl", "scaffold", "main.go"))
+	procScaffold := fileExists(filepath.Join(srcRoot, "plugins", "proc", "scaffold", "main.go"))
+	sshScaffold := fileExists(filepath.Join(srcRoot, "plugins", "ssh", "scaffold", "main.go"))
+	logs.Info("DIALTONE> Command checks:")
+	logs.Info("DIALTONE> - help command available=true")
+	logs.Info("DIALTONE> - ps command available=%t (proc scaffold)", procScaffold)
+	logs.Info("DIALTONE> - ssh command available=%t (ssh scaffold)", sshScaffold)
+	logs.Info("DIALTONE> - repl command path available=%t (repl scaffold)", replScaffold)
+	logs.Info("DIALTONE> - repl injection ready=%t", natsReachable && replScaffold)
+	logs.Info("DIALTONE> - repl autostart enabled=%t", replAutostartEnabled())
+	logs.Info("DIALTONE> - bootstrap http autostart enabled=%t", replBootstrapHTTPAutostartEnabled())
+
+	validateEnvJSON(envFile)
+}
+
+func logPathCheck(label, path string) {
+	p := strings.TrimSpace(path)
+	if p == "" {
+		logs.Info("DIALTONE> - %s: <empty>", label)
+		return
+	}
+	info, err := os.Stat(p)
+	if err != nil {
+		logs.Info("DIALTONE> - %s: %s (missing)", label, p)
+		return
+	}
+	kind := "file"
+	if info.IsDir() {
+		kind = "dir"
+	}
+	logs.Info("DIALTONE> - %s: %s (%s)", label, p, kind)
+}
+
+func cloudflaredRunning() bool {
+	if runtime.GOOS == "windows" {
+		return false
+	}
+	cmd := exec.Command("pgrep", "-f", "cloudflared")
+	return cmd.Run() == nil
+}
+
+func replLeaderProcessRunning() bool {
+	if runtime.GOOS == "windows" {
+		return false
+	}
+	if processMatch(`plugins/repl/scaffold/main.go src_v3 leader`) {
+		return true
+	}
+	if processMatch(`src_v3 leader --embedded-nats`) {
+		return true
+	}
+	return false
+}
+
+func bootstrapHTTPProcessRunning() bool {
+	if runtime.GOOS == "windows" {
+		return false
+	}
+	return processMatch(`bootstrap-http --host`)
+}
+
+func processMatch(pattern string) bool {
+	cmd := exec.Command("pgrep", "-f", pattern)
+	return cmd.Run() == nil
+}
+
+func bootstrapHTTPReachable(host string, port int) bool {
+	client := &http.Client{Timeout: 800 * time.Millisecond}
+	resp, err := client.Get(fmt.Sprintf("http://%s:%d/install.sh", host, port))
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode >= 200 && resp.StatusCode < 300
+}
+
+func validateEnvJSON(path string) {
+	path = strings.TrimSpace(path)
+	logs.Info("DIALTONE> env/dialtone.json checks:")
+	if path == "" {
+		logs.Info("DIALTONE> - format valid=false (env file path empty)")
+		return
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		logs.Info("DIALTONE> - format valid=false (read error: %v)", err)
+		return
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		logs.Info("DIALTONE> - format valid=false (json error: %v)", err)
+		return
+	}
+	logs.Info("DIALTONE> - format valid=true")
+
+	requiredCore := []string{"DIALTONE_ENV", "DIALTONE_REPO_ROOT"}
+	for _, key := range requiredCore {
+		logs.Info("DIALTONE> - required %s present=%t", key, nonEmptyJSONValue(doc, key))
+	}
+
+	tsReady := nonEmptyJSONValue(doc, "TS_AUTHKEY") || (nonEmptyJSONValue(doc, "TS_API_KEY") && nonEmptyJSONValue(doc, "TS_TAILNET"))
+	logs.Info("DIALTONE> - tsnet bootstrap keys present=%t (TS_AUTHKEY or TS_API_KEY+TS_TAILNET)", tsReady)
+
+	cfReady := nonEmptyJSONValue(doc, "CF_TUNNEL_TOKEN_SHELL") || (nonEmptyJSONValue(doc, "CLOUDFLARE_API_TOKEN") && nonEmptyJSONValue(doc, "CLOUDFLARE_ACCOUNT_ID"))
+	logs.Info("DIALTONE> - cloudflare bootstrap keys present=%t (CF_TUNNEL_TOKEN_SHELL or CLOUDFLARE_API_TOKEN+CLOUDFLARE_ACCOUNT_ID)", cfReady)
+
+	nodesOK, nodeCount := meshNodesReady(doc["mesh_nodes"])
+	logs.Info("DIALTONE> - mesh_nodes valid=%t count=%d (each needs name+host+user)", nodesOK, nodeCount)
+}
+
+func nonEmptyJSONValue(doc map[string]any, key string) bool {
+	v, ok := doc[key]
+	if !ok || v == nil {
+		return false
+	}
+	switch t := v.(type) {
+	case string:
+		return strings.TrimSpace(t) != ""
+	case float64:
+		return true
+	case bool:
+		return true
+	default:
+		return fmt.Sprintf("%v", t) != ""
+	}
+}
+
+func meshNodesReady(raw any) (bool, int) {
+	nodes, ok := raw.([]any)
+	if !ok || len(nodes) == 0 {
+		return false, 0
+	}
+	count := 0
+	for _, n := range nodes {
+		m, ok := n.(map[string]any)
+		if !ok {
+			return false, count
+		}
+		if !mapValueNonEmpty(m, "name") || !mapValueNonEmpty(m, "host") || !mapValueNonEmpty(m, "user") {
+			return false, count
+		}
+		count++
+	}
+	return true, count
+}
+
+func mapValueNonEmpty(m map[string]any, key string) bool {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return false
+	}
+	s, ok := v.(string)
+	if !ok {
+		return false
+	}
+	return strings.TrimSpace(s) != ""
 }
 
 func detectMissingForREPL() []MissingInstall {
@@ -539,6 +1043,9 @@ func printDevUsage() {
 	logs.Info("Usage: %s <command> [options]", script)
 	logs.Info("Global flags:")
 	logs.Info("  --stdout             Mirror logs to stdout (logs still publish to NATS)")
+	logs.Info("  --target-host <host> Route injected command to a specific REPL host over NATS/tsnet")
+	logs.Info("  --host <host>        Alias of --target-host (NATS routing, not SSH)")
+	logs.Info("  --ssh-host <host>    Run any command over SSH transport via ssh src_v1 run --host <host>")
 	logs.Info("")
 	logs.Info("Dev orchestrator commands:")
 	logs.Info("  plugins              List available plugin scaffolds")
@@ -555,6 +1062,9 @@ func printDevUsage() {
 	logs.Info("  ./dialtone.sh dag install src_v3")
 	logs.Info("  ./dialtone.sh mods help")
 	logs.Info("  ./dialtone.sh gemini run --task task.md")
+	logs.Info("  ./dialtone.sh go src_v1 version --host grey")
+	logs.Info("  ./dialtone.sh go src_v1 version --ssh-host grey")
+	logs.Info("  ./dialtone.sh test src_v1 test --target-host wsl")
 }
 
 func listPlugins() {
@@ -718,34 +1228,207 @@ func startDefaultMultiplayerREPL() error {
 	if clientURL == "" {
 		clientURL = "nats://127.0.0.1:4222"
 	}
-	leaderURL := strings.TrimSpace(os.Getenv("DIALTONE_REPL_LEADER_NATS_URL"))
-	if leaderURL == "" {
-		leaderURL = "nats://0.0.0.0:4222"
-	}
-
 	joinArgs := []string{"--nats-url", clientURL, room}
-	if endpointReachable(clientURL, 700*time.Millisecond) {
-		return repl.RunJoin(joinArgs)
-	}
-	if !replAutostartEnabled() {
+	if !endpointReachable(clientURL, 700*time.Millisecond) && !replAutostartEnabled() {
 		return fmt.Errorf("no REPL daemon detected on %s (autostart disabled). start daemon with: ./dialtone.sh repl src_v3 service --mode run --room %s", clientURL, room)
 	}
-
-	logs.Info("DIALTONE> No REPL leader detected on %s; starting leader for room %s", clientURL, room)
-	cmd, err := startLocalLeaderProcess(leaderURL, room)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
+	if !endpointReachable(clientURL, 700*time.Millisecond) {
+		logs.Info("DIALTONE> No REPL leader detected on %s; starting background leader for room %s", clientURL, room)
+		if err := replv3.EnsureLeaderRunning(clientURL, room); err != nil {
+			return err
 		}
-	}()
-
-	if !waitForEndpoint(clientURL, 6*time.Second) {
-		return fmt.Errorf("leader started but nats endpoint did not become reachable: %s", clientURL)
 	}
-	return repl.RunJoin(joinArgs)
+	if replBootstrapHTTPAutostartEnabled() {
+		host := strings.TrimSpace(os.Getenv("DIALTONE_REPL_BOOTSTRAP_HTTP_HOST"))
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		port := 8811
+		if raw := strings.TrimSpace(os.Getenv("DIALTONE_REPL_BOOTSTRAP_HTTP_PORT")); raw != "" {
+			if p, err := strconv.Atoi(raw); err == nil && p > 0 {
+				port = p
+			}
+		}
+		if err := replv3.EnsureBootstrapHTTPRunning(host, port); err != nil {
+			return err
+		}
+		logs.Info("DIALTONE> Bootstrap installer available at http://%s:%d/install.sh", host, port)
+	}
+	logREPLStartupState(clientURL, room)
+	return replv3.RunJoin(joinArgs)
+}
+
+func logREPLStartupState(clientURL, room string) {
+	hostName := strings.TrimSpace(replv3.DefaultPromptName())
+	if hostName == "" {
+		hostName = "unknown"
+	}
+	cpuCores := runtime.NumCPU()
+	memText := humanizeBytes(detectHostMemoryBytes())
+	if memText == "" {
+		memText = "unknown"
+	}
+
+	logs.Info("DIALTONE> REPL startup state:")
+	logs.Info("DIALTONE> - repl version=%s host=%s os=%s arch=%s cpu_cores=%d mem_total=%s", strings.TrimSpace(replv3.BuildVersion), hostName, runtime.GOOS, runtime.GOARCH, cpuCores, memText)
+	logs.Info("DIALTONE> - room=%s nats=%s reachable=%t", strings.TrimSpace(room), strings.TrimSpace(clientURL), endpointReachable(clientURL, 700*time.Millisecond))
+
+	pids := replLeaderPIDs()
+	if len(pids) == 0 {
+		logs.Info("DIALTONE> - repl leader pid=<none>")
+	} else {
+		logs.Info("DIALTONE> - repl leader pid(s)=%s", joinInts(pids, ","))
+		for _, pid := range pids {
+			cpuPct, rssKB, etime := replProcessStats(pid)
+			rssText := "-"
+			if rssKB > 0 {
+				rssText = humanizeBytes(uint64(rssKB) * 1024)
+			}
+			logs.Info("DIALTONE>   pid=%d cpu=%s%% rss=%s etime=%s", pid, cpuPct, rssText, etime)
+		}
+	}
+
+	if active, provider, tailnet := tsnetv1.NativeTailnetConnected(); active {
+		logs.Info("DIALTONE> - native tailscale active=true provider=%s tailnet=%s", provider, strings.TrimSpace(tailnet))
+	} else {
+		logs.Info("DIALTONE> - native tailscale active=false")
+	}
+	if cfg, err := tsnetv1.ResolveConfig(hostName, ""); err == nil {
+		logs.Info("DIALTONE> - tsnet config hostname=%s tailnet=%s auth_key=%t api_key=%t", strings.TrimSpace(cfg.Hostname), strings.TrimSpace(cfg.Tailnet), cfg.AuthKeyPresent, cfg.APIKeyPresent)
+	}
+
+	bootstrapHost := strings.TrimSpace(os.Getenv("DIALTONE_REPL_BOOTSTRAP_HTTP_HOST"))
+	if bootstrapHost == "" {
+		bootstrapHost = "127.0.0.1"
+	}
+	bootstrapPort := 8811
+	if raw := strings.TrimSpace(os.Getenv("DIALTONE_REPL_BOOTSTRAP_HTTP_PORT")); raw != "" {
+		if p, err := strconv.Atoi(raw); err == nil && p > 0 {
+			bootstrapPort = p
+		}
+	}
+	logs.Info("DIALTONE> - bootstrap_http=%s running=%t", fmt.Sprintf("http://%s:%d/install.sh", bootstrapHost, bootstrapPort), bootstrapHTTPReachable(bootstrapHost, bootstrapPort))
+}
+
+func replLeaderPIDs() []int {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	patterns := []string{
+		`plugins/repl/scaffold/main.go src_v3 leader`,
+		`src_v3 leader --embedded-nats`,
+	}
+	seen := map[int]struct{}{}
+	out := make([]int, 0, 2)
+	for _, p := range patterns {
+		cmd := exec.Command("pgrep", "-f", p)
+		raw, err := cmd.Output()
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(raw), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			pid, err := strconv.Atoi(line)
+			if err != nil || pid <= 0 {
+				continue
+			}
+			if _, ok := seen[pid]; ok {
+				continue
+			}
+			seen[pid] = struct{}{}
+			out = append(out, pid)
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
+func replProcessStats(pid int) (cpuPct string, rssKB int, etime string) {
+	cpuPct = "-"
+	etime = "-"
+	if pid <= 0 || runtime.GOOS == "windows" {
+		return cpuPct, 0, etime
+	}
+	if out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "pcpu=").Output(); err == nil {
+		v := strings.TrimSpace(string(out))
+		if v != "" {
+			cpuPct = v
+		}
+	}
+	if out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "rss=").Output(); err == nil {
+		if parsed, perr := strconv.Atoi(strings.TrimSpace(string(out))); perr == nil && parsed > 0 {
+			rssKB = parsed
+		}
+	}
+	if out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "etime=").Output(); err == nil {
+		v := strings.TrimSpace(string(out))
+		if v != "" {
+			etime = v
+		}
+	}
+	return cpuPct, rssKB, etime
+}
+
+func detectHostMemoryBytes() uint64 {
+	switch runtime.GOOS {
+	case "darwin":
+		if out, err := exec.Command("sysctl", "-n", "hw.memsize").Output(); err == nil {
+			if v, perr := strconv.ParseUint(strings.TrimSpace(string(out)), 10, 64); perr == nil {
+				return v
+			}
+		}
+	case "linux":
+		if raw, err := os.ReadFile("/proc/meminfo"); err == nil {
+			for _, line := range strings.Split(string(raw), "\n") {
+				line = strings.TrimSpace(line)
+				if !strings.HasPrefix(line, "MemTotal:") {
+					continue
+				}
+				fields := strings.Fields(line)
+				if len(fields) >= 2 {
+					if kb, perr := strconv.ParseUint(fields[1], 10, 64); perr == nil {
+						return kb * 1024
+					}
+				}
+				break
+			}
+		}
+	}
+	return 0
+}
+
+func humanizeBytes(v uint64) string {
+	if v == 0 {
+		return ""
+	}
+	const unit = 1024
+	if v < unit {
+		return fmt.Sprintf("%d B", v)
+	}
+	div, exp := uint64(unit), 0
+	for n := v / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	suffixes := []string{"KiB", "MiB", "GiB", "TiB", "PiB"}
+	if exp < 0 || exp >= len(suffixes) {
+		return fmt.Sprintf("%d B", v)
+	}
+	return fmt.Sprintf("%.1f %s", float64(v)/float64(div), suffixes[exp])
+}
+
+func joinInts(vals []int, sep string) string {
+	if len(vals) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(vals))
+	for _, v := range vals {
+		parts = append(parts, strconv.Itoa(v))
+	}
+	return strings.Join(parts, sep)
 }
 
 func replAutostartEnabled() bool {
@@ -758,31 +1441,14 @@ func replAutostartEnabled() bool {
 	}
 }
 
-func startLocalLeaderProcess(natsURL, room string) (*exec.Cmd, error) {
-	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
-	if goBin == "" {
-		goBin = "go"
+func replBootstrapHTTPAutostartEnabled() bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("DIALTONE_REPL_BOOTSTRAP_HTTP_AUTOSTART")))
+	switch v {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
 	}
-	cmd := exec.Command(goBin, "run", "./plugins/repl/scaffold/main.go", "src_v3", "leader", "--embedded-nats", "--nats-url", natsURL, "--room", room)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = nil
-	cmd.Dir, _ = os.Getwd()
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	return cmd, nil
-}
-
-func waitForEndpoint(natsURL string, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if endpointReachable(natsURL, 500*time.Millisecond) {
-			return true
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	return false
 }
 
 func endpointReachable(natsURL string, timeout time.Duration) bool {

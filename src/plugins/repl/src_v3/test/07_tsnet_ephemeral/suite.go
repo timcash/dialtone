@@ -1,0 +1,61 @@
+package tsnetephemeral
+
+import (
+	"fmt"
+	"os"
+	"strings"
+	"time"
+
+	"dialtone/dev/plugins/repl/src_v3/test/support"
+	testv1 "dialtone/dev/plugins/test/src_v1/go"
+)
+
+func Register(r *testv1.Registry) {
+	r.Add(testv1.Step{
+		Name:    "injected-tsnet-ephemeral-up",
+		Timeout: 180 * time.Second,
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_REAL")) != "1" {
+				ctx.TestPassf("skipping tsnet ephemeral integration step (set DIALTONE_REPL_V3_TEST_REAL=1)")
+				return testv1.StepRunResult{
+					Report: "Skipped tsnet ephemeral integration step (disabled unless DIALTONE_REPL_V3_TEST_REAL=1).",
+				}, nil
+			}
+
+			rt, err := support.NewRuntime(ctx)
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			defer rt.Stop()
+			if err := rt.StartLeader(); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := rt.StartJoin("local-human"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+
+			matched, err := rt.WaitForAnyPattern(120*time.Second, []string{
+				`DIALTONE tsnet NATS endpoint: nats://`,
+				`DIALTONE native tailscale already connected`,
+			})
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			requireEmbedded := strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_REQUIRE_EMBEDDED_TSNET")) == "1"
+			if strings.Contains(matched, "native tailscale already connected") {
+				if requireEmbedded {
+					return testv1.StepRunResult{}, fmt.Errorf("native tailscale detected, but embedded tsnet was required")
+				}
+				ctx.TestPassf("detected native tailscale; embedded tsnet fallback correctly skipped")
+				return testv1.StepRunResult{
+					Report: "Detected native tailscale and verified REPL leader published explicit skip signal for embedded tsnet fallback.",
+				}, nil
+			}
+
+			ctx.TestPassf("embedded tsnet endpoint announced by REPL leader")
+			return testv1.StepRunResult{
+				Report: "Verified REPL leader published embedded tsnet NATS endpoint in real integration mode (native tailscale absent).",
+			}, nil
+		},
+	})
+}

@@ -29,7 +29,7 @@
 ./dialtone.sh tsnet src_v1 devices prune --name-contains rover --yes
 
 # Auth key lifecycle
-./dialtone.sh tsnet src_v1 keys provision --tailnet <tailnet> --api-key <ts_api_key> --description "dialtone key" --tags dialtone,robot --write-env env/.env
+./dialtone.sh tsnet src_v1 keys provision --tailnet <tailnet> --api-key <ts_api_key> --description "dialtone key" --tags dialtone,robot --write-env env/dialtone.json
 ./dialtone.sh tsnet src_v1 keys list --tailnet <tailnet> --api-key <ts_api_key>
 ./dialtone.sh tsnet src_v1 keys usage --tailnet <tailnet> --api-key <ts_api_key>
 ./dialtone.sh tsnet src_v1 keys revoke <key_id> --tailnet <tailnet> --api-key <ts_api_key>
@@ -60,7 +60,7 @@ Defaults:
 
 - If `TS_TAILNET` is unset, plugin attempts auto-detection from local tailscale status.
 - If not detected, tailnet falls back to `shad-artichoke.ts.net`.
-- If `TS_AUTHKEY` is missing and `TS_API_KEY` exists, `up` auto-provisions an ephemeral auth key and writes it to `env/.env` (or `DIALTONE_ENV_FILE`).
+- If `TS_AUTHKEY` is missing and `TS_API_KEY` exists, `up` auto-provisions an ephemeral auth key and writes it to `env/dialtone.json` (or `DIALTONE_ENV_FILE`).
 
 ## Command Reference
 
@@ -172,7 +172,7 @@ Flags:
   --description "dialtone-tsnet" \
   --tags dialtone,robot \
   --expiry-hours 24 \
-  --write-env env/.env
+  --write-env env/dialtone.json
 ```
 
 ### `keys list`

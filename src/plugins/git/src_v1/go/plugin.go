@@ -41,6 +41,8 @@ func Run(args []string) error {
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
+	case "clone-url":
+		return runCloneURL(rest)
 	case "clone":
 		return runClone(rest)
 	case "mesh-clone":
@@ -83,6 +85,8 @@ func printUsage() {
 	logs.Raw("Usage: ./dialtone.sh git src_v1 <command> [args]")
 	logs.Raw("")
 	logs.Raw("Commands:")
+	logs.Raw("  clone-url --url URL [--dest PATH] [--branch BRANCH] [--depth N]")
+	logs.Raw("           Clone from a Git URL using go-git (HTTP/SSH)")
 	logs.Raw("  clone [--from wsl] [--source PATH] [--dest PATH] [--branch BRANCH] [--depth N]")
 	logs.Raw("        Clone a repo from a mesh node over SSH (default source node: wsl)")
 	logs.Raw("  mesh-clone [--host <name|all>] [--from wsl] [--source PATH] [--dest PATH]")
@@ -91,10 +95,57 @@ func printUsage() {
 	logs.Raw("  help")
 	logs.Raw("")
 	logs.Raw("Examples:")
+	logs.Raw("  ./dialtone.sh git src_v1 clone-url --url https://github.com/timcash/dialtone.git --dest /tmp/dialtone")
 	logs.Raw("  ./dialtone.sh git clone")
 	logs.Raw("  ./dialtone.sh git clone --from rover --source /home/tim/dialtone --dest ./rover-clone")
 	logs.Raw("  ./dialtone.sh git mesh-clone --host all --from wsl --branch main")
 	logs.Raw("  ./dialtone.sh git mesh-clone --host all --branch-map gold=main --branch-map darkmac=feature-x")
+}
+
+func runCloneURL(args []string) error {
+	fs := flag.NewFlagSet("git-clone-url", flag.ContinueOnError)
+	url := fs.String("url", "", "Git URL (https://... or ssh://...)")
+	dest := fs.String("dest", "", "Destination path")
+	branch := fs.String("branch", "", "Optional branch to checkout")
+	depth := fs.Int("depth", 0, "Optional shallow clone depth")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*url) == "" {
+		return fmt.Errorf("clone-url requires --url")
+	}
+
+	dstPath := strings.TrimSpace(*dest)
+	if dstPath == "" {
+		name := filepath.Base(strings.TrimRight(strings.TrimSpace(*url), "/"))
+		name = strings.TrimSuffix(name, ".git")
+		if name == "" || name == "." {
+			name = "dialtone-clone"
+		}
+		dstPath = "./" + name
+	}
+	if _, err := os.Stat(dstPath); err == nil {
+		return fmt.Errorf("destination already exists: %s", dstPath)
+	}
+
+	cloneOpts := &git.CloneOptions{
+		URL:      strings.TrimSpace(*url),
+		Progress: os.Stdout,
+	}
+	if *depth > 0 {
+		cloneOpts.Depth = *depth
+	}
+	if strings.TrimSpace(*branch) != "" {
+		cloneOpts.ReferenceName = plumbing.NewBranchReferenceName(strings.TrimSpace(*branch))
+		cloneOpts.SingleBranch = true
+	}
+	if auth := authForURL(strings.TrimSpace(*url)); auth != nil {
+		cloneOpts.Auth = auth
+	}
+
+	logs.Info("git clone-url %s -> %s", strings.TrimSpace(*url), dstPath)
+	_, err := git.PlainClone(dstPath, false, cloneOpts)
+	return err
 }
 
 func runClone(args []string) error {
