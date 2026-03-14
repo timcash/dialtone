@@ -26,6 +26,7 @@ type MeshNode struct {
 	Port                string   `json:"port"`
 	OS                  string   `json:"os"`
 	Password            string   `json:"password,omitempty"`
+	SSHPrivateKey       string   `json:"ssh_private_key,omitempty"`
 	SSHPrivateKeyPath   string   `json:"ssh_private_key_path,omitempty"`
 	PreferWSLPowerShell bool     `json:"prefer_wsl_powershell"`
 	RepoCandidates      []string `json:"repo_candidates"`
@@ -35,6 +36,7 @@ type CommandOptions struct {
 	User           string
 	Port           string
 	Password       string
+	PrivateKey     string
 	PrivateKeyPath string
 	ConnectTimeout time.Duration
 	Debug          bool
@@ -49,6 +51,8 @@ type ResolveReport struct {
 	PreferredHost string
 	RouteTailnet  string
 	RoutePrivate  string
+	AuthSource    string
+	HostKeyMode   string
 }
 
 var (
@@ -135,11 +139,26 @@ func normalizeConnectTimeout(d time.Duration) time.Duration {
 	return d
 }
 
-func dialMeshClient(host, port, user, password, keyPath string, connectTimeout time.Duration) (*ssh.Client, error) {
+func dialMeshClient(host, port, user, password, privateKey, keyPath string, connectTimeout time.Duration) (*ssh.Client, error) {
 	connectTimeout = normalizeConnectTimeout(connectTimeout)
 	pass := strings.TrimSpace(password)
+	privateKey = strings.TrimSpace(privateKey)
 	keyPath = strings.TrimSpace(keyPath)
 
+	if privateKey != "" {
+		client, err := DialSSHWithPrivateKey(host, port, user, privateKey, connectTimeout)
+		if err == nil {
+			return client, nil
+		}
+		if pass == "" {
+			return nil, err
+		}
+		client, passErr := dialSSHWithTimeoutFunc(host, port, user, pass, connectTimeout)
+		if passErr == nil {
+			return client, nil
+		}
+		return nil, fmt.Errorf("inline private key auth failed: %v; password fallback failed: %w", err, passErr)
+	}
 	if keyPath != "" {
 		client, err := DialSSHWithPrivateKeyPath(host, port, user, keyPath, connectTimeout)
 		if err == nil {
@@ -155,7 +174,7 @@ func dialMeshClient(host, port, user, password, keyPath string, connectTimeout t
 		return nil, fmt.Errorf("private key auth failed: %v; password fallback failed: %w", err, passErr)
 	}
 	if pass == "" {
-		return nil, fmt.Errorf("no ssh auth configured for %s (set --password/--key-path or dialtone.json mesh node password/ssh_private_key_path)", host)
+		return nil, fmt.Errorf("no ssh auth configured for %s (set --password, --key-path, --private-key, or dialtone.json mesh node password/ssh_private_key/ssh_private_key_path)", host)
 	}
 	client, passErr := dialSSHWithTimeoutFunc(host, port, user, pass, connectTimeout)
 	if passErr == nil {
@@ -198,6 +217,18 @@ func BuildResolveReport(target string, opts CommandOptions) (ResolveReport, erro
 	if port == "" {
 		port = "22"
 	}
+	pass := strings.TrimSpace(opts.Password)
+	if pass == "" {
+		pass = strings.TrimSpace(node.Password)
+	}
+	privateKey := strings.TrimSpace(opts.PrivateKey)
+	if privateKey == "" {
+		privateKey = strings.TrimSpace(node.SSHPrivateKey)
+	}
+	keyPath := strings.TrimSpace(opts.PrivateKeyPath)
+	if keyPath == "" {
+		keyPath = strings.TrimSpace(node.SSHPrivateKeyPath)
+	}
 	transport := "ssh"
 	if shouldUseLocalPowerShell(node) {
 		transport = "powershell"
@@ -211,7 +242,29 @@ func BuildResolveReport(target string, opts CommandOptions) (ResolveReport, erro
 		PreferredHost: PreferredHost(node, port),
 		RouteTailnet:  RouteHost(node, meshRouteTailnet, port),
 		RoutePrivate:  RouteHost(node, meshRoutePrivate, port),
+		AuthSource:    describeAuthSource(pass, privateKey, keyPath),
+		HostKeyMode:   "insecure-ignore",
 	}, nil
+}
+
+func describeAuthSource(password, privateKey, keyPath string) string {
+	privateKey = strings.TrimSpace(privateKey)
+	keyPath = strings.TrimSpace(keyPath)
+	password = strings.TrimSpace(password)
+	switch {
+	case privateKey != "" && password != "":
+		return "inline-private-key,password-fallback"
+	case privateKey != "":
+		return "inline-private-key"
+	case keyPath != "" && password != "":
+		return fmt.Sprintf("private-key:%s,password-fallback", keyPath)
+	case keyPath != "":
+		return fmt.Sprintf("private-key:%s", keyPath)
+	case password != "":
+		return "password"
+	default:
+		return "none"
+	}
 }
 
 func ResolveMeshNode(target string) (MeshNode, error) {
@@ -262,11 +315,15 @@ func RunNodeCommand(target string, command string, opts CommandOptions) (string,
 	if pass == "" {
 		pass = strings.TrimSpace(node.Password)
 	}
+	privateKey := strings.TrimSpace(opts.PrivateKey)
+	if privateKey == "" {
+		privateKey = strings.TrimSpace(node.SSHPrivateKey)
+	}
 	keyPath := strings.TrimSpace(opts.PrivateKeyPath)
 	if keyPath == "" {
 		keyPath = strings.TrimSpace(node.SSHPrivateKeyPath)
 	}
-	host, client, err := dialMeshNode(node, user, port, pass, keyPath, opts.ConnectTimeout)
+	host, client, err := dialMeshNode(node, user, port, pass, privateKey, keyPath, opts.ConnectTimeout)
 	if err != nil {
 		return "", fmt.Errorf("ssh dial %s@%s:%s failed: %w", user, host, port, err)
 	}
@@ -293,6 +350,10 @@ func DialMeshNode(target string, opts CommandOptions) (*ssh.Client, MeshNode, st
 	if user == "" {
 		user = node.User
 	}
+	privateKey := strings.TrimSpace(opts.PrivateKey)
+	if privateKey == "" {
+		privateKey = strings.TrimSpace(node.SSHPrivateKey)
+	}
 	keyPath := strings.TrimSpace(opts.PrivateKeyPath)
 	if keyPath == "" {
 		keyPath = strings.TrimSpace(node.SSHPrivateKeyPath)
@@ -308,7 +369,7 @@ func DialMeshNode(target string, opts CommandOptions) (*ssh.Client, MeshNode, st
 	if pass == "" {
 		pass = strings.TrimSpace(node.Password)
 	}
-	host, client, err := dialMeshNode(node, user, port, pass, keyPath, opts.ConnectTimeout)
+	host, client, err := dialMeshNode(node, user, port, pass, privateKey, keyPath, opts.ConnectTimeout)
 	if err != nil {
 		return nil, MeshNode{}, "", "", fmt.Errorf("ssh dial %s@%s:%s failed: %w", user, host, port, err)
 	}
@@ -327,6 +388,10 @@ func UploadNodeFile(target, localPath, remotePath string, opts CommandOptions) e
 	if user == "" {
 		user = node.User
 	}
+	privateKey := strings.TrimSpace(opts.PrivateKey)
+	if privateKey == "" {
+		privateKey = strings.TrimSpace(node.SSHPrivateKey)
+	}
 	keyPath := strings.TrimSpace(opts.PrivateKeyPath)
 	if keyPath == "" {
 		keyPath = strings.TrimSpace(node.SSHPrivateKeyPath)
@@ -342,7 +407,7 @@ func UploadNodeFile(target, localPath, remotePath string, opts CommandOptions) e
 	if pass == "" {
 		pass = strings.TrimSpace(node.Password)
 	}
-	host, client, err := dialMeshNode(node, user, port, pass, keyPath, opts.ConnectTimeout)
+	host, client, err := dialMeshNode(node, user, port, pass, privateKey, keyPath, opts.ConnectTimeout)
 	if err != nil {
 		return fmt.Errorf("ssh dial %s@%s:%s failed: %w", user, host, port, err)
 	}
@@ -388,7 +453,7 @@ func psSingleQuoted(v string) string {
 	return "'" + strings.ReplaceAll(v, "'", "''") + "'"
 }
 
-func dialMeshNode(node MeshNode, user, port, password, keyPath string, connectTimeout time.Duration) (string, *ssh.Client, error) {
+func dialMeshNode(node MeshNode, user, port, password, privateKey, keyPath string, connectTimeout time.Duration) (string, *ssh.Client, error) {
 	candidates := prioritizedMeshHostsForNode(node, resolveMeshCandidates(node))
 	if len(candidates) == 0 {
 		return "", nil, fmt.Errorf("mesh node %s has no host candidates", node.Name)
@@ -404,7 +469,7 @@ func dialMeshNode(node MeshNode, user, port, password, keyPath string, connectTi
 			continue
 		}
 		attempted[host] = struct{}{}
-		client, err := dialMeshClient(host, port, user, password, keyPath, connectTimeout)
+		client, err := dialMeshClient(host, port, user, password, privateKey, keyPath, connectTimeout)
 		if err == nil {
 			return host, client, nil
 		}
@@ -414,7 +479,7 @@ func dialMeshNode(node MeshNode, user, port, password, keyPath string, connectTi
 		if _, ok := attempted[host]; ok {
 			continue
 		}
-		client, err := dialMeshClient(host, port, user, password, keyPath, connectTimeout)
+		client, err := dialMeshClient(host, port, user, password, privateKey, keyPath, connectTimeout)
 		if err == nil {
 			return host, client, nil
 		}
@@ -483,6 +548,10 @@ func DialMeshNodeViaRoute(target string, route string, opts CommandOptions) (*ss
 	if user == "" {
 		user = node.User
 	}
+	privateKey := strings.TrimSpace(opts.PrivateKey)
+	if privateKey == "" {
+		privateKey = strings.TrimSpace(node.SSHPrivateKey)
+	}
 	keyPath := strings.TrimSpace(opts.PrivateKeyPath)
 	if keyPath == "" {
 		keyPath = strings.TrimSpace(node.SSHPrivateKeyPath)
@@ -498,7 +567,7 @@ func DialMeshNodeViaRoute(target string, route string, opts CommandOptions) (*ss
 	if pass == "" {
 		pass = strings.TrimSpace(node.Password)
 	}
-	host, client, err := dialMeshNodeViaRoute(node, normalizeRouteCategory(route), user, port, pass, keyPath, opts.ConnectTimeout)
+	host, client, err := dialMeshNodeViaRoute(node, normalizeRouteCategory(route), user, port, pass, privateKey, keyPath, opts.ConnectTimeout)
 	if err != nil {
 		return nil, MeshNode{}, "", "", fmt.Errorf("ssh dial %s@%s:%s failed: %w", user, host, port, err)
 	}
@@ -799,7 +868,7 @@ func shouldUseLocalPowerShell(node MeshNode) bool {
 	return node.PreferWSLPowerShell && isWSLFunc()
 }
 
-func dialMeshNodeViaRoute(node MeshNode, route, user, port, password, keyPath string, connectTimeout time.Duration) (string, *ssh.Client, error) {
+func dialMeshNodeViaRoute(node MeshNode, route, user, port, password, privateKey, keyPath string, connectTimeout time.Duration) (string, *ssh.Client, error) {
 	if route == "" {
 		return "", nil, fmt.Errorf("route is required")
 	}
@@ -815,7 +884,7 @@ func dialMeshNodeViaRoute(node MeshNode, route, user, port, password, keyPath st
 			continue
 		}
 		attempted[host] = struct{}{}
-		client, err := dialMeshClient(host, port, user, password, keyPath, connectTimeout)
+		client, err := dialMeshClient(host, port, user, password, privateKey, keyPath, connectTimeout)
 		if err == nil {
 			return host, client, nil
 		}
@@ -825,7 +894,7 @@ func dialMeshNodeViaRoute(node MeshNode, route, user, port, password, keyPath st
 		if _, ok := attempted[host]; ok {
 			continue
 		}
-		client, err := dialMeshClient(host, port, user, password, keyPath, connectTimeout)
+		client, err := dialMeshClient(host, port, user, password, privateKey, keyPath, connectTimeout)
 		if err == nil {
 			return host, client, nil
 		}

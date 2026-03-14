@@ -17,14 +17,18 @@ func DialSSH(host, port, user, pass string) (*ssh.Client, error) {
 }
 
 func DialSSHWithTimeout(host, port, user, pass string, timeout time.Duration) (*ssh.Client, error) {
-	return DialSSHWithAuth(host, port, user, pass, "", timeout)
+	return DialSSHWithAuth(host, port, user, pass, "", "", timeout)
 }
 
 func DialSSHWithPrivateKeyPath(host, port, user, keyPath string, timeout time.Duration) (*ssh.Client, error) {
-	return DialSSHWithAuth(host, port, user, "", keyPath, timeout)
+	return DialSSHWithAuth(host, port, user, "", "", keyPath, timeout)
 }
 
-func DialSSHWithAuth(host, port, user, pass, keyPath string, timeout time.Duration) (*ssh.Client, error) {
+func DialSSHWithPrivateKey(host, port, user, privateKey string, timeout time.Duration) (*ssh.Client, error) {
+	return DialSSHWithAuth(host, port, user, "", privateKey, "", timeout)
+}
+
+func DialSSHWithAuth(host, port, user, pass, privateKey, keyPath string, timeout time.Duration) (*ssh.Client, error) {
 	username := user
 	hostname := host
 	if username == "" {
@@ -44,27 +48,55 @@ func DialSSHWithAuth(host, port, user, pass, keyPath string, timeout time.Durati
 		Timeout:         timeout,
 	}
 
-	if strings.TrimSpace(keyPath) != "" {
-		key, err := os.ReadFile(strings.TrimSpace(keyPath))
-		if err != nil {
-			return nil, fmt.Errorf("read private key %s: %w", strings.TrimSpace(keyPath), err)
-		}
-		signer, err := ssh.ParsePrivateKey(key)
-		if err != nil {
-			return nil, fmt.Errorf("parse private key %s: %w", strings.TrimSpace(keyPath), err)
-		}
-		config.Auth = append(config.Auth, ssh.PublicKeys(signer))
+	if method, err := inlinePrivateKeyAuthMethod(strings.TrimSpace(privateKey)); err != nil {
+		return nil, err
+	} else if method != nil {
+		config.Auth = append(config.Auth, method)
+	}
+
+	if method, err := filePrivateKeyAuthMethod(strings.TrimSpace(keyPath)); err != nil {
+		return nil, err
+	} else if method != nil {
+		config.Auth = append(config.Auth, method)
 	}
 
 	if strings.TrimSpace(pass) != "" {
 		config.Auth = append(config.Auth, ssh.Password(pass))
 	}
 	if len(config.Auth) == 0 {
-		return nil, fmt.Errorf("no SSH auth methods available (set password or key path)")
+		return nil, fmt.Errorf("no SSH auth methods available (set password, inline private key, or key path)")
 	}
 
 	addr := fmt.Sprintf("%s:%s", hostname, port)
 	return ssh.Dial("tcp", addr, config)
+}
+
+func inlinePrivateKeyAuthMethod(privateKey string) (ssh.AuthMethod, error) {
+	privateKey = strings.TrimSpace(privateKey)
+	if privateKey == "" {
+		return nil, nil
+	}
+	signer, err := ssh.ParsePrivateKey([]byte(privateKey))
+	if err != nil {
+		return nil, fmt.Errorf("parse inline private key: %w", err)
+	}
+	return ssh.PublicKeys(signer), nil
+}
+
+func filePrivateKeyAuthMethod(keyPath string) (ssh.AuthMethod, error) {
+	keyPath = strings.TrimSpace(keyPath)
+	if keyPath == "" {
+		return nil, nil
+	}
+	key, err := os.ReadFile(keyPath)
+	if err != nil {
+		return nil, fmt.Errorf("read private key %s: %w", keyPath, err)
+	}
+	signer, err := ssh.ParsePrivateKey(key)
+	if err != nil {
+		return nil, fmt.Errorf("parse private key %s: %w", keyPath, err)
+	}
+	return ssh.PublicKeys(signer), nil
 }
 
 func RunSSHCommand(client *ssh.Client, cmd string) (string, error) {

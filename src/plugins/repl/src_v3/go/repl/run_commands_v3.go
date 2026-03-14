@@ -21,21 +21,8 @@ func Run(args []string) error {
 	natsURL := fs.String("nats-url", defaultNATSURL, "NATS URL")
 	room := fs.String("room", defaultRoom, "Shared room name")
 	name := fs.String("name", DefaultPromptName(), "Prompt name for this client")
-	isTest := fs.Bool("test", false, "Run REPL v3 end-to-end tests")
-	testReal := fs.Bool("test-real", false, "Enable real integration mode for --test")
-	testRequireEmbeddedTSNet := fs.Bool("test-require-embedded-tsnet", false, "Require embedded tsnet path in real mode")
 	if err := fs.Parse(args); err != nil {
 		return err
-	}
-	if *isTest {
-		testArgs := append([]string{}, fs.Args()...)
-		if *testReal {
-			testArgs = append(testArgs, "--real")
-		}
-		if *testRequireEmbeddedTSNet {
-			testArgs = append(testArgs, "--require-embedded-tsnet")
-		}
-		return RunTest(testArgs)
 	}
 	wasReachable := endpointReachable(strings.TrimSpace(*natsURL), 700*time.Millisecond)
 	if err := EnsureLeaderRunning(strings.TrimSpace(*natsURL), strings.TrimSpace(*room)); err != nil {

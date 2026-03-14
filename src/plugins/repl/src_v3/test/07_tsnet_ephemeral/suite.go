@@ -30,7 +30,7 @@ func Register(r *testv1.Registry) {
 			if err := rt.StartLeader(); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			if err := rt.StartJoin("local-human"); err != nil {
+			if err := rt.StartJoin("llm-codex"); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 
@@ -46,13 +46,13 @@ func Register(r *testv1.Registry) {
 				if requireEmbedded {
 					return testv1.StepRunResult{}, fmt.Errorf("native tailscale detected, but embedded tsnet was required")
 				}
-				ctx.TestPassf("detected native tailscale; embedded tsnet fallback correctly skipped")
+				ctx.TestPassf("detected native tailscale; embedded tsnet fallback correctly skipped for llm-codex session")
 				return testv1.StepRunResult{
 					Report: "Detected native tailscale and verified REPL leader published explicit skip signal for embedded tsnet fallback.",
 				}, nil
 			}
 
-			ctx.TestPassf("embedded tsnet endpoint announced by REPL leader")
+			ctx.TestPassf("embedded tsnet endpoint announced by REPL leader for llm-codex session")
 			return testv1.StepRunResult{
 				Report: "Verified REPL leader published embedded tsnet NATS endpoint in real integration mode (native tailscale absent).",
 			}, nil

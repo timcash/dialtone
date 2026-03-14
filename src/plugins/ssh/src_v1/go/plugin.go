@@ -251,6 +251,8 @@ func runCommand(args []string) error {
 			logs.Raw("  user: %s", report.User)
 			logs.Raw("  port: %s", report.Port)
 			logs.Raw("  preferred: %s", report.PreferredHost)
+			logs.Raw("  auth: %s", report.AuthSource)
+			logs.Raw("  host-key: %s", report.HostKeyMode)
 			logs.Raw("  route[tailscale]: %s", report.RouteTailnet)
 			logs.Raw("  route[private]: %s", report.RoutePrivate)
 			logs.Raw("  candidates: %s", strings.Join(report.Candidates, ", "))
@@ -331,6 +333,8 @@ func runResolve(args []string) error {
 	logs.Raw("user=%s", report.User)
 	logs.Raw("port=%s", report.Port)
 	logs.Raw("preferred=%s", report.PreferredHost)
+	logs.Raw("auth=%s", report.AuthSource)
+	logs.Raw("host_key=%s", report.HostKeyMode)
 	logs.Raw("route.tailscale=%s", report.RouteTailnet)
 	logs.Raw("route.private=%s", report.RoutePrivate)
 	logs.Raw("candidates=%s", strings.Join(report.Candidates, ","))
@@ -384,6 +388,10 @@ func runProbe(args []string) error {
 	if passValue == "" {
 		passValue = strings.TrimSpace(resolvedNode.Password)
 	}
+	privateKeyValue := strings.TrimSpace(opts.PrivateKey)
+	if privateKeyValue == "" {
+		privateKeyValue = strings.TrimSpace(resolvedNode.SSHPrivateKey)
+	}
 	keyPathValue := strings.TrimSpace(opts.PrivateKeyPath)
 	if keyPathValue == "" {
 		keyPathValue = strings.TrimSpace(resolvedNode.SSHPrivateKeyPath)
@@ -400,7 +408,7 @@ func runProbe(args []string) error {
 			tcpState = "reachable"
 		}
 		started := time.Now()
-		client, err := DialSSHWithAuth(c, report.Port, report.User, passValue, keyPathValue, opts.ConnectTimeout)
+		client, err := DialSSHWithAuth(c, report.Port, report.User, passValue, privateKeyValue, keyPathValue, opts.ConnectTimeout)
 		if err != nil {
 			failures++
 			logs.Raw("candidate=%s tcp=%s auth=FAIL elapsed=%s err=%s", c, tcpState, time.Since(started).Round(10*time.Millisecond), summarizeTailnetCheckError(err))
