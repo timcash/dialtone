@@ -14,7 +14,6 @@ import (
 func RunTest(args []string) error {
 	fs := flag.NewFlagSet("repl-v3-test", flag.ContinueOnError)
 	filter := fs.String("filter", "", "Run only matching test steps")
-	real := fs.Bool("real", false, "Run real integration steps (cloudflare/tsnet)")
 	requireEmbeddedTSNet := fs.Bool("require-embedded-tsnet", false, "Fail if native tailscale is active during tsnet step")
 	wslHost := fs.String("wsl-host", "", "Override WSL host used by test steps")
 	wslUser := fs.String("wsl-user", "", "Override WSL user used by test steps")
@@ -24,9 +23,6 @@ func RunTest(args []string) error {
 	bootstrapRepoURL := fs.String("bootstrap-repo-url", "", "Override bootstrap repo tarball URL for tmp bootstrap mode")
 	if err := fs.Parse(args); err != nil {
 		return err
-	}
-	if *real {
-		_ = os.Setenv("DIALTONE_REPL_V3_TEST_REAL", "1")
 	}
 	if *requireEmbeddedTSNet {
 		_ = os.Setenv("DIALTONE_REPL_V3_TEST_REQUIRE_EMBEDDED_TSNET", "1")
@@ -144,7 +140,7 @@ func runTmpBootstrapTest(args []string) error {
 	if err != nil {
 		return err
 	}
-	wslHost, wslUser := resolveWSLTestDefaults(repoRoot)
+	wslNode := resolveWSLTestDefaults(repoRoot)
 	tmpRoot, err := os.MkdirTemp("", "dialtone-repl-v3-bootstrap-*")
 	if err != nil {
 		return err
@@ -218,11 +214,20 @@ func runTmpBootstrapTest(args []string) error {
 		"DIALTONE_REPL_V3_TEST_BOOTSTRAPPED=1",
 		"DIALTONE_REPL_NATS_URL=nats://127.0.0.1:47222",
 	)
-	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_HOST")) == "" && strings.TrimSpace(wslHost) != "" {
-		env = append(env, "DIALTONE_REPL_V3_TEST_WSL_HOST="+strings.TrimSpace(wslHost))
+	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_HOST")) == "" && strings.TrimSpace(wslNode.Host) != "" {
+		env = append(env, "DIALTONE_REPL_V3_TEST_WSL_HOST="+strings.TrimSpace(wslNode.Host))
 	}
-	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_USER")) == "" && strings.TrimSpace(wslUser) != "" {
-		env = append(env, "DIALTONE_REPL_V3_TEST_WSL_USER="+strings.TrimSpace(wslUser))
+	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_USER")) == "" && strings.TrimSpace(wslNode.User) != "" {
+		env = append(env, "DIALTONE_REPL_V3_TEST_WSL_USER="+strings.TrimSpace(wslNode.User))
+	}
+	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_PORT")) == "" && strings.TrimSpace(wslNode.Port) != "" {
+		env = append(env, "DIALTONE_REPL_V3_TEST_WSL_PORT="+strings.TrimSpace(wslNode.Port))
+	}
+	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_OS")) == "" && strings.TrimSpace(wslNode.OS) != "" {
+		env = append(env, "DIALTONE_REPL_V3_TEST_WSL_OS="+strings.TrimSpace(wslNode.OS))
+	}
+	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_SSH_PRIVATE_KEY")) == "" && strings.TrimSpace(wslNode.SSHPrivateKey) != "" {
+		env = append(env, "DIALTONE_REPL_V3_TEST_WSL_SSH_PRIVATE_KEY="+wslNode.SSHPrivateKey)
 	}
 	if bootstrapRepoURL != "" {
 		env = append(env, "DIALTONE_BOOTSTRAP_REPO_URL="+bootstrapRepoURL)
@@ -274,24 +279,24 @@ func copyFileIfPresent(srcPath string, dstPath string) error {
 	return os.WriteFile(dstPath, raw, 0o644)
 }
 
-func resolveWSLTestDefaults(repoRoot string) (host string, user string) {
+func resolveWSLTestDefaults(repoRoot string) meshNode {
 	cfgPath := filepath.Join(strings.TrimSpace(repoRoot), "env", "dialtone.json")
 	cfg, err := loadConfig(cfgPath)
 	if err != nil {
-		return "", ""
+		return meshNode{}
 	}
 	for _, node := range cfg.MeshNodes {
 		name := strings.TrimSpace(strings.ToLower(node.Name))
 		if name == "wsl" {
-			return strings.TrimSpace(node.Host), strings.TrimSpace(node.User)
+			return node
 		}
 		for _, alias := range node.Aliases {
 			if strings.TrimSpace(strings.ToLower(alias)) == "wsl" {
-				return strings.TrimSpace(node.Host), strings.TrimSpace(node.User)
+				return node
 			}
 		}
 	}
-	return "", ""
+	return meshNode{}
 }
 
 func shellQuote(s string) string {

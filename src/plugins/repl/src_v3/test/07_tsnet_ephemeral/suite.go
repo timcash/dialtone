@@ -15,13 +15,6 @@ func Register(r *testv1.Registry) {
 		Name:    "injected-tsnet-ephemeral-up",
 		Timeout: 180 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
-			if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_REAL")) != "1" {
-				ctx.TestPassf("skipping tsnet ephemeral integration step (set DIALTONE_REPL_V3_TEST_REAL=1)")
-				return testv1.StepRunResult{
-					Report: "Skipped tsnet ephemeral integration step (disabled unless DIALTONE_REPL_V3_TEST_REAL=1).",
-				}, nil
-			}
-
 			rt, err := support.NewRuntime(ctx)
 			if err != nil {
 				return testv1.StepRunResult{}, err
@@ -54,7 +47,7 @@ func Register(r *testv1.Registry) {
 
 			ctx.TestPassf("embedded tsnet endpoint announced by REPL leader for llm-codex session")
 			return testv1.StepRunResult{
-				Report: "Verified REPL leader published embedded tsnet NATS endpoint in real integration mode (native tailscale absent).",
+				Report: "Verified REPL leader published embedded tsnet NATS endpoint when native tailscale was absent, or published the explicit native-tailscale skip signal otherwise.",
 			}, nil
 		},
 	})

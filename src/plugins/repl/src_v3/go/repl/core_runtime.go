@@ -863,9 +863,11 @@ func executeCommand(line string, emit func(prefix, msg string)) {
 			if ev.PID <= 0 {
 				return
 			}
-			if hasStructuredLevel(ev.Line) {
-				emit(fmt.Sprintf("DIALTONE:%d", ev.PID), ev.Line)
+			line := strings.TrimSpace(ev.Line)
+			if line == "" {
+				return
 			}
+			emit(fmt.Sprintf("DIALTONE:%d", ev.PID), line)
 		case proc.SubtoneEventStderr:
 			if ev.PID <= 0 {
 				return

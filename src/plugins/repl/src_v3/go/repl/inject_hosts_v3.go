@@ -59,6 +59,7 @@ func AddHost(args []string) error {
 	if len(n.RoutePreference) == 0 {
 		n.RoutePreference = []string{"tailscale", "private"}
 	}
+	mergeBootstrapHostDefaults(&n)
 	n.HostCandidates = []string{n.Host}
 	upserted := false
 	for i := range cfg.MeshNodes {
@@ -105,6 +106,24 @@ func verifyHostPersisted(cfgPath string, expected meshNode) error {
 		return nil
 	}
 	return fmt.Errorf("verify mesh host write failed: host %q not present in %s", expected.Name, cfgPath)
+}
+
+func mergeBootstrapHostDefaults(n *meshNode) {
+	if n == nil {
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(n.Name), "wsl") {
+		return
+	}
+	if port := strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_PORT")); port != "" && strings.TrimSpace(n.Port) == "22" {
+		n.Port = port
+	}
+	if osName := strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_OS")); osName != "" && strings.TrimSpace(n.OS) == "linux" {
+		n.OS = osName
+	}
+	if key := strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_SSH_PRIVATE_KEY")); key != "" && strings.TrimSpace(n.SSHPrivateKey) == "" {
+		n.SSHPrivateKey = key
+	}
 }
 
 func Inject(args []string) error {
