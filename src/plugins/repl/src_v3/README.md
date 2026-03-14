@@ -63,10 +63,9 @@
 DIALTONE_REPL_V3_TEST_INSTALL_URL="https://shell.dialtone.earth/install.sh" \
 ./dialtone.sh repl src_v3 test
 
-# Real integration mode for grey->wsl/cloudflare/tsnet:
+# Real integration test run:
 # (requires valid env/dialtone.json keys + reachable wsl host)
 DIALTONE_REPL_V3_TEST_INSTALL_URL="https://shell.dialtone.earth/install.sh" \
-DIALTONE_REPL_V3_TEST_REAL=1 \
 DIALTONE_REPL_V3_TEST_WSL_HOST="wsl.shad-artichoke.ts.net" \
 DIALTONE_REPL_V3_TEST_WSL_USER="user" \
 ./dialtone.sh repl src_v3 test
@@ -102,7 +101,7 @@ DIALTONE_REPL_V3_TEST_WSL_USER="user" \
 - `./dialtone.sh repl src_v3 test` starts from an empty `/tmp` repo folder.
 - Default `./dialtone.sh repl src_v3 test` mode starts an embedded local HTTP server in REPL src_v3 and executes `curl .../install.sh | bash`.
 - Real external mode is enabled by `DIALTONE_REPL_V3_TEST_INSTALL_URL=https://shell.dialtone.earth/install.sh`.
-- Real integration actions (ssh->wsl, cloudflare tunnel start/stop, tsnet up) are enabled by `DIALTONE_REPL_V3_TEST_REAL=1`.
+- REPL v3 test steps are real integration steps by default (ssh->wsl, cloudflare tunnel start/stop, tsnet checks).
 - `./dialtone.sh repl src_v3 test` starts with no `env/dialtone.json`; onboarding creates base runtime keys and injected REPL commands fill additional fields (for example mesh hosts).
 - Use `subtone-list` to map pid -> command.
 - Use `subtone-log --pid` to fetch exact subtone log file output.
