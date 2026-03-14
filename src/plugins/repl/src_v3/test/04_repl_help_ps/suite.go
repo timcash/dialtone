@@ -9,7 +9,7 @@ import (
 
 func Register(r *testv1.Registry) {
 	r.Add(testv1.Step{
-		Name:    "injected-help-and-ps",
+		Name:    "interactive-help-and-ps",
 		Timeout: 120 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			rt, err := support.NewRuntime(ctx)
@@ -20,32 +20,34 @@ func Register(r *testv1.Registry) {
 			if err := rt.StartLeader(); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			if err := rt.StartJoin("local-human"); err != nil {
+			if err := rt.StartJoin("llm-codex"); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 
-			if err := rt.Inject("llm-codex", "help"); err != nil {
+			if err := rt.RunTranscript([]support.TranscriptStep{
+				{
+					Send:         "/help",
+					ExpectRoom:   []string{`"type":"input"`, `"from":"llm-codex"`, `"message":"/help"`, `"message":"Help"`, `"message":"List active subtones"`},
+					ExpectOutput: []string{`/help`, `DIALTONE> Help`, `DIALTONE> List active subtones`},
+					Timeout:      30 * time.Second,
+				},
+			}); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			if err := rt.WaitForPatterns(30*time.Second, []string{
-				`"message":"System"`,
-				`"message":"List active subtones"`,
+			if err := rt.RunTranscript([]support.TranscriptStep{
+				{
+					Send:         "/ps",
+					ExpectRoom:   []string{`"type":"input"`, `"from":"llm-codex"`, `"message":"/ps"`, `"message":"No active subtones."`},
+					ExpectOutput: []string{`/ps`, `DIALTONE> No active subtones.`},
+					Timeout:      30 * time.Second,
+				},
 			}); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 
-			if err := rt.Inject("llm-codex", "ps"); err != nil {
-				return testv1.StepRunResult{}, err
-			}
-			if err := rt.WaitForPatterns(30*time.Second, []string{
-				`"message":"No active subtones."`,
-			}); err != nil {
-				return testv1.StepRunResult{}, err
-			}
-
-			ctx.TestPassf("help and ps executed through injected command path")
+			ctx.TestPassf("help and ps executed through llm-codex REPL prompt path")
 			return testv1.StepRunResult{
-				Report: "Injected help and ps commands through REPL command bus and validated room output includes command/help text and ps empty-state response.",
+				Report: "Joined REPL as llm-codex, typed /help and /ps through the live prompt path, and validated the room output includes the user input lines, help text, and ps empty-state response.",
 			}, nil
 		},
 	})

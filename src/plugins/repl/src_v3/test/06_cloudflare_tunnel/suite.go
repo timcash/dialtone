@@ -3,7 +3,6 @@ package cloudflaretunnel
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -15,7 +14,7 @@ import (
 
 func Register(r *testv1.Registry) {
 	r.Add(testv1.Step{
-		Name:    "injected-cloudflare-tunnel-start",
+		Name:    "interactive-cloudflare-tunnel-start",
 		Timeout: 120 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			rt, err := support.NewRuntime(ctx)
@@ -44,16 +43,11 @@ func Register(r *testv1.Registry) {
 					_ = os.Setenv("DIALTONE_CLOUDFLARED_BIN", oldCF)
 				}()
 
-				cmd := exec.Command(rt.GoBin,
-					"run", "./plugins/cloudflare/scaffold/main.go",
-					"src_v1", "tunnel", "start", tunnelName,
+				out, err := rt.RunDialtone(
+					"cloudflare", "src_v1", "tunnel", "start", tunnelName,
 					"--url", tunnelURL,
 					"--token", "token-test",
 				)
-				cmd.Dir = rt.SrcRoot
-				cmd.Env = append(os.Environ(), "DIALTONE_CLOUDFLARED_BIN="+tmpBin)
-				outBytes, err := cmd.CombinedOutput()
-				out := string(outBytes)
 				if err != nil {
 					return testv1.StepRunResult{}, fmt.Errorf("direct cloudflare tunnel start failed: %w\n%s", err, out)
 				}
@@ -66,43 +60,49 @@ func Register(r *testv1.Registry) {
 			if err := rt.StartLeader(); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			if err := rt.StartJoin("local-human"); err != nil {
+			if err := rt.StartJoin("llm-codex"); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 
-			injectedArgs := []string{
-				"cloudflare", "src_v1", "tunnel", "start", tunnelName,
-				"--url", tunnelURL,
-			}
+			replCmd := fmt.Sprintf("/cloudflare src_v1 tunnel start %s --url %s", tunnelName, tunnelURL)
 			if !realMode {
-				injectedArgs = append(injectedArgs, "--token", "token-test")
+				replCmd += " --token token-test"
 			}
-			if err := rt.Inject("llm-codex", injectedArgs...); err != nil {
-				return testv1.StepRunResult{}, err
-			}
-
-			if err := rt.WaitForPatterns(40*time.Second, []string{
-				`Request received. Spawning subtone for cloudflare src_v1`,
+			if err := rt.RunTranscript([]support.TranscriptStep{
+				{
+					Send: replCmd,
+					ExpectRoom: support.CombinePatterns([]string{
+						fmt.Sprintf(`"message":"%s"`, replCmd),
+					}, support.StandardSubtoneRoomPatterns("cloudflare src_v1", ``)),
+					ExpectOutput: support.CombinePatterns([]string{
+						`/cloudflare src_v1 tunnel start`,
+					}, support.StandardSubtoneOutputPatterns("cloudflare src_v1", ``)),
+					Timeout: 40 * time.Second,
+				},
 			}); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 			if realMode {
-				if err := rt.Inject("llm-codex",
-					"cloudflare", "src_v1", "tunnel", "stop",
-				); err != nil {
-					return testv1.StepRunResult{}, err
-				}
-				if err := rt.WaitForPatterns(40*time.Second, []string{
-					`/cloudflare src_v1 tunnel stop`,
-					`Subtone for cloudflare src_v1 exited with code 0.`,
+				stopCmd := "/cloudflare src_v1 tunnel stop"
+				if err := rt.RunTranscript([]support.TranscriptStep{
+					{
+						Send: stopCmd,
+						ExpectRoom: support.CombinePatterns([]string{
+							fmt.Sprintf(`"message":"%s"`, stopCmd),
+						}, support.StandardSubtoneRoomPatterns("cloudflare src_v1", ``)),
+						ExpectOutput: support.CombinePatterns([]string{
+							`/cloudflare src_v1 tunnel stop`,
+						}, support.StandardSubtoneOutputPatterns("cloudflare src_v1", ``)),
+						Timeout: 40 * time.Second,
+					},
 				}); err != nil {
 					return testv1.StepRunResult{}, err
 				}
 			}
 
-			ctx.TestPassf("cloudflare tunnel start executed through repl src_v3 injection")
+			ctx.TestPassf("cloudflare tunnel start executed through llm-codex REPL prompt path")
 			return testv1.StepRunResult{
-				Report: "Injected cloudflare tunnel start through REPL/NATS and verified REPL command ingress (mock mode by default, real start/stop when DIALTONE_REPL_V3_TEST_REAL=1).",
+				Report: "Joined REPL as llm-codex, typed /cloudflare src_v1 tunnel start through the live prompt path, and verified REPL command ingress (mock mode by default, real start/stop when DIALTONE_REPL_V3_TEST_REAL=1).",
 			}, nil
 		},
 	})

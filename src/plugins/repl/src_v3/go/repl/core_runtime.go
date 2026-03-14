@@ -879,6 +879,12 @@ func executeCommand(line string, emit func(prefix, msg string)) {
 			stopHeartbeatOnce()
 			if ev.PID > 0 {
 				emit("DIALTONE", fmt.Sprintf("Subtone for %s exited with code %d.", cmdName, ev.ExitCode))
+				return
+			}
+			if line := strings.TrimSpace(ev.Line); line != "" {
+				emit("DIALTONE", fmt.Sprintf("Subtone for %s failed to start: %s", cmdName, line))
+			} else {
+				emit("DIALTONE", fmt.Sprintf("Subtone for %s failed to start.", cmdName))
 			}
 		}
 	}

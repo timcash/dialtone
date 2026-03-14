@@ -59,7 +59,7 @@ func Register(r *testv1.Registry) {
 			}
 			ctx.TestPassf("tmp workspace is active at %s", repoRoot)
 			return testv1.StepRunResult{
-				Report: "Verified ./dialtone.sh --test runs from a bootstrap workspace under /tmp with dialtone.sh, src, and env configuration materialized.",
+				Report: "Verified ./dialtone.sh repl src_v3 test runs from a bootstrap workspace under /tmp with dialtone.sh, src, and env configuration materialized.",
 			}, nil
 		},
 	})
