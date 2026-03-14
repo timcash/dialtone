@@ -863,9 +863,11 @@ func executeCommand(line string, emit func(prefix, msg string)) {
 			if ev.PID <= 0 {
 				return
 			}
-			if hasStructuredLevel(ev.Line) {
-				emit(fmt.Sprintf("DIALTONE:%d", ev.PID), ev.Line)
+			line := strings.TrimSpace(ev.Line)
+			if line == "" {
+				return
 			}
+			emit(fmt.Sprintf("DIALTONE:%d", ev.PID), line)
 		case proc.SubtoneEventStderr:
 			if ev.PID <= 0 {
 				return
@@ -879,6 +881,12 @@ func executeCommand(line string, emit func(prefix, msg string)) {
 			stopHeartbeatOnce()
 			if ev.PID > 0 {
 				emit("DIALTONE", fmt.Sprintf("Subtone for %s exited with code %d.", cmdName, ev.ExitCode))
+				return
+			}
+			if line := strings.TrimSpace(ev.Line); line != "" {
+				emit("DIALTONE", fmt.Sprintf("Subtone for %s failed to start: %s", cmdName, line))
+			} else {
+				emit("DIALTONE", fmt.Sprintf("Subtone for %s failed to start.", cmdName))
 			}
 		}
 	}

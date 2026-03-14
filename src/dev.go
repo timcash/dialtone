@@ -150,10 +150,14 @@ func maybeReexecInNixShell() {
 }
 
 func initLogger() {
-	mirrorStdout := strings.TrimSpace(os.Getenv("DIALTONE_LOG_STDOUT")) == "1"
-	// No-arg invocation is interactive entry; always surface logs to stdout.
-	if !mirrorStdout && len(os.Args) < 2 {
-		mirrorStdout = true
+	mirrorStdout := true
+	if raw := strings.TrimSpace(strings.ToLower(os.Getenv("DIALTONE_LOG_STDOUT"))); raw != "" {
+		switch raw {
+		case "0", "false", "no", "off":
+			mirrorStdout = false
+		default:
+			mirrorStdout = true
+		}
 	}
 	if mirrorStdout {
 		logs.SetOutput(os.Stdout)
@@ -176,6 +180,29 @@ func initLogger() {
 
 func logLine(category, msg string) {
 	logs.Info("[%s] %s", category, msg)
+}
+
+func normalizeGlobalFlags() {
+	if len(os.Args) <= 1 {
+		return
+	}
+	filtered := make([]string, 0, len(os.Args))
+	filtered = append(filtered, os.Args[0])
+	for i := 1; i < len(os.Args); i++ {
+		arg := strings.TrimSpace(os.Args[i])
+		if arg == "" {
+			continue
+		}
+		switch arg {
+		case "--stdout":
+			continue
+		case "--no-stdout":
+			_ = os.Setenv("DIALTONE_LOG_STDOUT", "0")
+			continue
+		}
+		filtered = append(filtered, os.Args[i])
+	}
+	os.Args = filtered
 }
 
 // LoadConfig loads environment variables from env/dialtone.json.
@@ -342,6 +369,7 @@ func ensureBunRequirement(version string) error {
 func main() {
 	bootstrapDialtoneRuntimeEnv()
 	maybeReexecInNixShell()
+	normalizeGlobalFlags()
 	initLogger()
 	LoadConfig()
 	logBootstrapChecks()
@@ -468,9 +496,9 @@ func extractTransportFlags(command string, args []string) (targetHost string, ss
 			}
 			continue
 		}
-		// --host is now a global REPL routing flag, except for ssh plugin
-		// subcommands where --host is still the ssh target flag.
-		if command != "ssh" {
+		// --host is a global REPL routing flag for regular plugin commands.
+		// Keep plugin-local --host semantics for ssh and repl subcommands.
+		if command != "ssh" && command != "repl" {
 			if a == "--host" && i+1 < len(args) {
 				h := strings.TrimSpace(args[i+1])
 				if h != "" {
@@ -493,21 +521,13 @@ func extractTransportFlags(command string, args []string) (targetHost string, ss
 }
 
 func shouldRouteCommandViaREPL(command string, args []string) bool {
-	if strings.TrimSpace(os.Getenv("DIALTONE_SUBTONE")) == "1" {
+	if strings.TrimSpace(os.Getenv("DIALTONE_INTERNAL_SUBTONE")) == "1" {
 		return false
 	}
 	switch strings.TrimSpace(command) {
 	case "", "help", "-h", "--help", "exit", "branch", "plugins", "dev":
 		return false
 	case "repl":
-		if len(args) >= 2 && strings.HasPrefix(strings.TrimSpace(args[0]), "src_v") {
-			switch strings.TrimSpace(args[1]) {
-			case "install", "format", "fmt", "lint", "build", "test":
-				return true
-			default:
-				return false
-			}
-		}
 		return false
 	default:
 		return true
@@ -675,7 +695,7 @@ func runViaSSHHost(host, command string, args []string) error {
 	if host == "" {
 		return fmt.Errorf("--ssh-host requires a host value")
 	}
-	baseArgs := append([]string{"./dialtone.sh", "--subtone", command}, args...)
+	baseArgs := append([]string{"./dialtone.sh", "--subtone-internal", command}, args...)
 	remoteDialtoneCmd := shellJoin(baseArgs)
 	remoteRepo := strings.TrimSpace(os.Getenv("DIALTONE_REMOTE_REPO"))
 	var remoteCmd string
@@ -1042,7 +1062,7 @@ func printDevUsage() {
 	}
 	logs.Info("Usage: %s <command> [options]", script)
 	logs.Info("Global flags:")
-	logs.Info("  --stdout             Mirror logs to stdout (logs still publish to NATS)")
+	logs.Info("  --no-stdout          Disable stdout mirroring (logs still publish to NATS)")
 	logs.Info("  --target-host <host> Route injected command to a specific REPL host over NATS/tsnet")
 	logs.Info("  --host <host>        Alias of --target-host (NATS routing, not SSH)")
 	logs.Info("  --ssh-host <host>    Run any command over SSH transport via ssh src_v1 run --host <host>")
