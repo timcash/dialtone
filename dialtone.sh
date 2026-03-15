@@ -7,6 +7,9 @@ export CGO_ENABLED=0
 ENV_FILE_JSON_DEFAULT="$SCRIPT_DIR/env/dialtone.json"
 
 log_info() {
+    if [ "${DIALTONE_INTERNAL_SUBTONE:-}" = "1" ]; then
+        return
+    fi
     if [ "${DIALTONE_CONTEXT:-}" = "repl" ]; then
         echo "$*"
         return

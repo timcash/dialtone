@@ -49,10 +49,8 @@ func Register(r *testv1.Registry) {
 					ExpectRoom: support.CombinePatterns([]string{
 						fmt.Sprintf(`"message":"%s"`, addHostCmd),
 					}, support.StandardSubtoneRoomPatterns("repl src_v3", "")),
-					ExpectOutput: support.CombinePatterns([]string{
-						`/repl src_v3 add-host`,
-					}, support.StandardSubtoneOutputPatterns("repl src_v3", "")),
-					Timeout: 35 * time.Second,
+					ExpectOutput: support.StandardSubtoneOutputPatterns("repl src_v3", ""),
+					Timeout:      35 * time.Second,
 				},
 			}); err != nil {
 				return testv1.StepRunResult{}, err
@@ -67,10 +65,8 @@ func Register(r *testv1.Registry) {
 						`"scope":"subtone"`,
 						`Subtone for ssh src_v1 exited with code 0.`,
 					}, support.StandardSubtoneRoomPatterns("ssh src_v1", "")),
-					ExpectOutput: support.CombinePatterns([]string{
-						resolveCmd,
-					}, support.StandardSubtoneOutputPatterns("ssh src_v1", "")),
-					Timeout: 35 * time.Second,
+					ExpectOutput: support.StandardSubtoneOutputPatterns("ssh src_v1", ""),
+					Timeout:      35 * time.Second,
 				},
 			}); err != nil {
 				return testv1.StepRunResult{}, err
@@ -110,10 +106,8 @@ func Register(r *testv1.Registry) {
 						`auth=PASS`,
 						`Subtone for ssh src_v1 exited with code 0.`,
 					}, support.StandardSubtoneRoomPatterns("ssh src_v1", "")),
-					ExpectOutput: support.CombinePatterns([]string{
-						probeCmd,
-					}, support.StandardSubtoneOutputPatterns("ssh src_v1", "")),
-					Timeout: 20 * time.Second,
+					ExpectOutput: support.StandardSubtoneOutputPatterns("ssh src_v1", ""),
+					Timeout:      20 * time.Second,
 				},
 			}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("ssh probe via REPL failed before remote command run: %w", err)
@@ -129,10 +123,8 @@ func Register(r *testv1.Registry) {
 						`"message":"user"`,
 						`Subtone for ssh src_v1 exited with code`,
 					}, support.StandardSubtoneRoomPatterns("ssh src_v1", `Subtone for ssh src_v1 exited with code`)),
-					ExpectOutput: support.CombinePatterns([]string{
-						`/ssh src_v1 run --host wsl --cmd whoami`,
-					}, support.StandardSubtoneOutputPatterns("ssh src_v1", `Subtone for ssh src_v1 exited with code`)),
-					Timeout: 35 * time.Second,
+					ExpectOutput: support.StandardSubtoneOutputPatterns("ssh src_v1", `DIALTONE> Subtone for ssh src_v1 exited with code`),
+					Timeout:      35 * time.Second,
 				},
 			}); err != nil {
 				return testv1.StepRunResult{}, err
@@ -140,7 +132,7 @@ func Register(r *testv1.Registry) {
 
 			ctx.TestPassf("ssh wsl command routed through llm-codex REPL prompt path")
 			return testv1.StepRunResult{
-				Report: "Joined REPL as llm-codex, added the sample wsl host via /repl src_v3 add-host, exercised /ssh src_v1 resolve --host wsl through the prompt, verified the SSH resolve report selected the expected host/user/port plus a usable auth source and host-key mode, confirmed reachability and auth with /ssh src_v1 probe --host wsl --timeout 5s, then typed /ssh src_v1 run --host wsl --cmd whoami and verified the REPL subtone returned the remote user output.",
+				Report: "Joined REPL as llm-codex, added the sample wsl host through the REPL prompt flow, exercised SSH resolve through the prompt, verified the SSH resolve report selected the expected host/user/port plus a usable auth source and host-key mode, confirmed reachability and auth with the REPL SSH probe, then ran `whoami` through the REPL SSH subtone and verified the remote user output.",
 			}, nil
 		},
 	})

@@ -28,7 +28,7 @@ func Register(r *testv1.Registry) {
 				{
 					Send:         "/help",
 					ExpectRoom:   []string{`"type":"input"`, `"from":"llm-codex"`, `"message":"/help"`, `"message":"Help"`, `"message":"List active subtones"`},
-					ExpectOutput: []string{`/help`, `DIALTONE> Help`, `DIALTONE> List active subtones`},
+					ExpectOutput: []string{`DIALTONE> Help`, `DIALTONE> List active subtones`},
 					Timeout:      30 * time.Second,
 				},
 			}); err != nil {
@@ -38,7 +38,7 @@ func Register(r *testv1.Registry) {
 				{
 					Send:         "/ps",
 					ExpectRoom:   []string{`"type":"input"`, `"from":"llm-codex"`, `"message":"/ps"`, `"message":"No active subtones."`},
-					ExpectOutput: []string{`/ps`, `DIALTONE> No active subtones.`},
+					ExpectOutput: []string{`DIALTONE> No active subtones.`},
 					Timeout:      30 * time.Second,
 				},
 			}); err != nil {
@@ -47,7 +47,7 @@ func Register(r *testv1.Registry) {
 
 			ctx.TestPassf("help and ps executed through llm-codex REPL prompt path")
 			return testv1.StepRunResult{
-				Report: "Joined REPL as llm-codex, typed /help and /ps through the live prompt path, and validated the room output includes the user input lines, help text, and ps empty-state response.",
+				Report: "Joined REPL as llm-codex, ran /help and /ps through the live prompt path, and validated the room output includes the input events, help text, and ps empty-state response.",
 			}, nil
 		},
 	})

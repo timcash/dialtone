@@ -37,19 +37,22 @@ func Register(r *testv1.Registry) {
 				return testv1.StepRunResult{}, err
 			}
 
+			roomSeq, _ := rt.CurrentSeqs()
 			if err := rt.SendJoinLine("/ssh src_v1 probe --host wsl --timeout 5s"); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			if err := rt.WaitForPatterns(20*time.Second, []string{
-				`"scope":"index"`,
+			probeCommand := "ssh src_v1 probe --host wsl --timeout 5s"
+			if err := rt.WaitForPatternsAfter(20*time.Second, []string{
+				fmt.Sprintf(`"message":"/%s"`, probeCommand),
 				`Request received. Spawning subtone for ssh src_v1`,
 				`Subtone started as pid `,
 				`Subtone room: subtone-`,
 				`Subtone log file: `,
-			}); err != nil {
+				fmt.Sprintf(`Command: [%s]`, probeCommand),
+			}, roomSeq); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("probe subtone did not start cleanly: %w", err)
 			}
-			pid, err := rt.LatestSubtonePID()
+			pid, err := rt.WaitForSubtonePIDForCommandAfter(probeCommand, 20*time.Second, roomSeq)
 			if err != nil {
 				return testv1.StepRunResult{}, err
 			}

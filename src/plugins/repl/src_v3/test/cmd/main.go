@@ -16,34 +16,43 @@ import (
 	tsnetephemeral "dialtone/dev/plugins/repl/src_v3/test/07_tsnet_ephemeral"
 	subtoneobservability "dialtone/dev/plugins/repl/src_v3/test/08_subtone_observability"
 	subtoneattach "dialtone/dev/plugins/repl/src_v3/test/09_subtone_attach"
+	replloggingcontract "dialtone/dev/plugins/repl/src_v3/test/10_repl_logging_contract"
+	"dialtone/dev/plugins/repl/src_v3/test/support"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	logs.SetOutput(os.Stdout)
 	fs := flag.NewFlagSet("repl-src-v3-test", flag.ContinueOnError)
 	filter := fs.String("filter", "", "Run only matching test steps")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			os.Exit(0)
+			return 0
 		}
 		logs.Error("repl src_v3 test parse failed: %v", err)
-		os.Exit(1)
+		return 1
 	}
 
 	reg := testv1.NewRegistry()
 	tmpworkspace.Register(reg)
 	clihelp.Register(reg)
+	tsnetephemeral.Register(reg)
 	bootstrapcfg.Register(reg)
 	replhelpps.Register(reg)
+	replloggingcontract.Register(reg)
 	sshwsl.Register(reg)
 	cloudflaretunnel.Register(reg)
-	tsnetephemeral.Register(reg)
 	subtoneobservability.Register(reg)
 	subtoneattach.Register(reg)
 	if filtered := filterSteps(reg.Steps, strings.TrimSpace(*filter)); len(filtered) > 0 {
 		reg.Steps = filtered
 	}
+	support.EnableSharedRuntime()
+	defer support.CloseSharedRuntime()
 
 	err := reg.Run(testv1.SuiteOptions{
 		Version:       "repl-src-v3",
@@ -51,6 +60,7 @@ func main() {
 		NATSListenURL: "nats://0.0.0.0:46222",
 		NATSSubject:   "logs.test.repl-src-v3",
 		AutoStartNATS: false,
+		QuietConsole:  true,
 		ReportPath:    "plugins/repl/src_v3/TEST.md",
 		RawReportPath: "plugins/repl/src_v3/TEST_RAW.md",
 		ReportFormat:  "template",
@@ -59,9 +69,12 @@ func main() {
 	})
 	if err != nil {
 		logs.Error("repl src_v3 tests failed: %v", err)
-		os.Exit(1)
+		return 1
 	}
-	logs.Info("repl src_v3 tests passed")
+	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_VERBOSE")) == "1" {
+		logs.Info("repl src_v3 tests passed")
+	}
+	return 0
 }
 
 func filterSteps(steps []testv1.Step, filterExpr string) []testv1.Step {

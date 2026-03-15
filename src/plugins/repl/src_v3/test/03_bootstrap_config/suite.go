@@ -53,7 +53,6 @@ func Register(r *testv1.Registry) {
 						`Subtone for repl src_v3 exited with code 0.`,
 					},
 					ExpectOutput: []string{
-						`/repl src_v3 add-host`,
 						`DIALTONE> Request received. Spawning subtone for repl src_v3`,
 						`DIALTONE> Subtone started as pid `,
 						`DIALTONE> Subtone room: subtone-`,
@@ -72,7 +71,7 @@ func Register(r *testv1.Registry) {
 
 			ctx.TestPassf("interactive add-host wrote %s mesh node to env/dialtone.json", hostName)
 			return testv1.StepRunResult{
-				Report: "Joined REPL as llm-codex, typed /repl src_v3 add-host through the live prompt path, and verified the production add-host flow structurally persisted the mesh host to env/dialtone.json.",
+				Report: "Joined REPL as llm-codex, ran the add-host prompt flow through the live REPL path, and verified the production add-host flow structurally persisted the mesh host to env/dialtone.json.",
 			}, nil
 		},
 	})

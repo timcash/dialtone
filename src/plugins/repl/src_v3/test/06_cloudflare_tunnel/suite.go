@@ -53,10 +53,8 @@ func Register(r *testv1.Registry) {
 						`installed cloudflared at `,
 						`Subtone for cloudflare src_v1 exited with code 0.`,
 					}, support.StandardSubtoneRoomPatterns("cloudflare src_v1", "")),
-					ExpectOutput: support.CombinePatterns([]string{
-						installCmd,
-					}, support.StandardSubtoneOutputPatterns("cloudflare src_v1", "")),
-					Timeout: 90 * time.Second,
+					ExpectOutput: support.StandardSubtoneOutputPatterns("cloudflare src_v1", ""),
+					Timeout:      90 * time.Second,
 				},
 			}); err != nil {
 				return testv1.StepRunResult{}, err
@@ -76,10 +74,8 @@ func Register(r *testv1.Registry) {
 						`tunnel_id`,
 						`Subtone for cloudflare src_v1 exited with code 0.`,
 					}, support.StandardSubtoneRoomPatterns("cloudflare src_v1", "")),
-					ExpectOutput: support.CombinePatterns([]string{
-						provisionCmd,
-					}, support.StandardSubtoneOutputPatterns("cloudflare src_v1", "")),
-					Timeout: 40 * time.Second,
+					ExpectOutput: support.StandardSubtoneOutputPatterns("cloudflare src_v1", ""),
+					Timeout:      40 * time.Second,
 				},
 			}); err != nil {
 				return testv1.StepRunResult{}, err
@@ -100,10 +96,8 @@ func Register(r *testv1.Registry) {
 						`cloudflared confirmed tunnel connection in background pid=`,
 						`Subtone for cloudflare src_v1 exited with code 0.`,
 					}, support.StandardSubtoneRoomPatterns("cloudflare src_v1", ``)),
-					ExpectOutput: support.CombinePatterns([]string{
-						`/cloudflare src_v1 tunnel start`,
-					}, support.StandardSubtoneOutputPatterns("cloudflare src_v1", ``)),
-					Timeout: 40 * time.Second,
+					ExpectOutput: support.StandardSubtoneOutputPatterns("cloudflare src_v1", ``),
+					Timeout:      40 * time.Second,
 				},
 			}); err != nil {
 				return testv1.StepRunResult{}, err
@@ -116,10 +110,8 @@ func Register(r *testv1.Registry) {
 						fmt.Sprintf(`"message":"%s"`, stopCmd),
 						`Subtone for cloudflare src_v1 exited with code 0.`,
 					}, support.StandardSubtoneRoomPatterns("cloudflare src_v1", ``)),
-					ExpectOutput: support.CombinePatterns([]string{
-						`/cloudflare src_v1 tunnel stop`,
-					}, support.StandardSubtoneOutputPatterns("cloudflare src_v1", ``)),
-					Timeout: 40 * time.Second,
+					ExpectOutput: support.StandardSubtoneOutputPatterns("cloudflare src_v1", ``),
+					Timeout:      40 * time.Second,
 				},
 			}); err != nil {
 				return testv1.StepRunResult{}, err
@@ -138,10 +130,8 @@ func Register(r *testv1.Registry) {
 						`token_removed`,
 						`Subtone for cloudflare src_v1 exited with code 0.`,
 					}, support.StandardSubtoneRoomPatterns("cloudflare src_v1", ``)),
-					ExpectOutput: support.CombinePatterns([]string{
-						cleanupCmd,
-					}, support.StandardSubtoneOutputPatterns("cloudflare src_v1", ``)),
-					Timeout: 40 * time.Second,
+					ExpectOutput: support.StandardSubtoneOutputPatterns("cloudflare src_v1", ``),
+					Timeout:      40 * time.Second,
 				},
 			}); err != nil {
 				return testv1.StepRunResult{}, err

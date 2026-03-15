@@ -544,13 +544,9 @@ func RunJoin(args []string) error {
 							Message:    fmt.Sprintf("Command: %s", cmdText),
 						})
 					case proc.SubtoneEventStdout, proc.SubtoneEventStderr:
-						line := strings.TrimSpace(ev.Line)
-						if ev.PID <= 0 || line == "" {
+						kind, line, ok := normalizeSubtoneLine(ev.Line, ev.Type == proc.SubtoneEventStderr)
+						if ev.PID <= 0 || !ok {
 							return
-						}
-						kind := "log"
-						if ev.Type == proc.SubtoneEventStderr {
-							kind = "error"
 						}
 						_ = publishFrame(nc, replSubtoneSubject(ev.PID), BusFrame{
 							Type:       frameTypeLine,
@@ -1044,6 +1040,18 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 		}
 	}
 	stopHeartbeat := make(chan struct{})
+	lastLineByPID := map[int]string{}
+	emitSubtoneLine := func(pid int, stderr bool, line string) {
+		kind, text, ok := normalizeSubtoneLine(line, stderr)
+		if !ok || pid <= 0 {
+			return
+		}
+		if lastLineByPID[pid] == kind+"\n"+text {
+			return
+		}
+		lastLineByPID[pid] = kind + "\n" + text
+		emit(BusFrame{Type: frameTypeLine, Scope: "subtone", Kind: kind, Room: subtoneRoomName(pid), SubtonePID: pid, Message: text})
+	}
 	startHeartbeat := func(pid int, startedAt time.Time) {
 		if pid <= 0 || heartbeatInterval <= 0 {
 			return
@@ -1061,7 +1069,7 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 						Kind:       "lifecycle",
 						Room:       subtoneRoomName(pid),
 						SubtonePID: pid,
-						Message:    fmt.Sprintf("[HEARTBEAT] running for %s", uptime),
+						Message:    fmt.Sprintf("Heartbeat: running for %s", uptime),
 					})
 				case <-stopHeartbeat:
 					return
@@ -1119,23 +1127,9 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 			emit(BusFrame{Type: frameTypeLine, Scope: "subtone", Kind: "lifecycle", Room: subtoneRoom, SubtonePID: ev.PID, Message: fmt.Sprintf("Command: %v", ev.Args)})
 			startHeartbeat(ev.PID, ev.StartedAt)
 		case proc.SubtoneEventStdout:
-			if ev.PID <= 0 {
-				return
-			}
-			line := strings.TrimSpace(ev.Line)
-			if line == "" {
-				return
-			}
-			emit(BusFrame{Type: frameTypeLine, Scope: "subtone", Kind: "log", Room: subtoneRoomName(ev.PID), SubtonePID: ev.PID, Message: line})
+			emitSubtoneLine(ev.PID, false, ev.Line)
 		case proc.SubtoneEventStderr:
-			if ev.PID <= 0 {
-				return
-			}
-			line := strings.TrimSpace(ev.Line)
-			if line == "" {
-				return
-			}
-			emit(BusFrame{Type: frameTypeLine, Scope: "subtone", Kind: "error", Room: subtoneRoomName(ev.PID), SubtonePID: ev.PID, Message: line})
+			emitSubtoneLine(ev.PID, true, ev.Line)
 		case proc.SubtoneEventExited:
 			stopHeartbeatOnce()
 			if ev.PID > 0 {
@@ -1516,6 +1510,47 @@ func decodeFrame(data []byte) (BusFrame, bool) {
 	return f, true
 }
 
+func normalizeSubtoneLine(line string, stderr bool) (kind string, text string, ok bool) {
+	text = strings.TrimSpace(line)
+	if text == "" {
+		return "", "", false
+	}
+	if looksLikeProgressNoise(text) {
+		return "", "", false
+	}
+	kind = "log"
+	if stderr && !looksLikeBenignStderr(text) {
+		kind = "error"
+	}
+	return kind, text, true
+}
+
+func looksLikeProgressNoise(line string) bool {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return false
+	}
+	if strings.Contains(line, "\r") && strings.Contains(line, "%") {
+		return true
+	}
+	if strings.HasPrefix(line, "#=#=#") || strings.HasPrefix(line, "##O") {
+		return true
+	}
+	return false
+}
+
+func looksLikeBenignStderr(line string) bool {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return true
+	}
+	switch line {
+	case "Saved lockfile":
+		return true
+	}
+	return false
+}
+
 func printFrame(w io.Writer, frame BusFrame) {
 	switch frame.Type {
 	case frameTypeInput:
@@ -1554,13 +1589,11 @@ func printFrame(w io.Writer, frame BusFrame) {
 			name = "unknown"
 		}
 		if strings.TrimSpace(frame.Room) == "" {
-			fmt.Fprintf(w, "DIALTONE> [JOIN] %s\n", name)
+			fmt.Fprintf(w, "DIALTONE> %s joined.\n", name)
+		} else if strings.TrimSpace(frame.Version) == "" {
+			fmt.Fprintf(w, "DIALTONE> %s joined room %s.\n", name, sanitizeRoom(frame.Room))
 		} else {
-			if strings.TrimSpace(frame.Version) == "" {
-				fmt.Fprintf(w, "DIALTONE> [JOIN] %s (room=%s)\n", name, sanitizeRoom(frame.Room))
-			} else {
-				fmt.Fprintf(w, "DIALTONE> [JOIN] %s (room=%s version=%s)\n", name, sanitizeRoom(frame.Room), strings.TrimSpace(frame.Version))
-			}
+			fmt.Fprintf(w, "DIALTONE> %s joined room %s (version=%s).\n", name, sanitizeRoom(frame.Room), strings.TrimSpace(frame.Version))
 		}
 	case frameTypeLeft:
 		name := normalizePromptName(frame.From)
@@ -1571,18 +1604,18 @@ func printFrame(w io.Writer, frame BusFrame) {
 			name = "unknown"
 		}
 		if strings.TrimSpace(frame.Room) == "" {
-			fmt.Fprintf(w, "DIALTONE> [LEFT] %s\n", name)
+			fmt.Fprintf(w, "DIALTONE> %s left.\n", name)
 		} else {
-			fmt.Fprintf(w, "DIALTONE> [LEFT] %s (room=%s)\n", name, sanitizeRoom(frame.Room))
+			fmt.Fprintf(w, "DIALTONE> %s left room %s.\n", name, sanitizeRoom(frame.Room))
 		}
 	case frameTypeControl:
 		text := strings.TrimSpace(frame.Message)
 		if text == "" {
 			text = fmt.Sprintf("%s %s", strings.TrimSpace(frame.Command), strings.TrimSpace(frame.Room))
 		}
-		fmt.Fprintf(w, "DIALTONE> [CONTROL] %s\n", strings.TrimSpace(text))
+		fmt.Fprintf(w, "DIALTONE> Control: %s\n", strings.TrimSpace(text))
 	case frameTypeError:
-		fmt.Fprintf(w, "DIALTONE> [ERROR] %s\n", strings.TrimSpace(frame.Message))
+		fmt.Fprintf(w, "DIALTONE> Error: %s\n", strings.TrimSpace(frame.Message))
 	}
 }
 
