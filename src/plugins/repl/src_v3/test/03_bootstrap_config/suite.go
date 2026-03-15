@@ -42,14 +42,24 @@ func Register(r *testv1.Registry) {
 			if err := rt.RunTranscript([]support.TranscriptStep{
 				{
 					Send: cmd,
-					ExpectRoom: support.CombinePatterns([]string{
+					ExpectRoom: []string{
 						fmt.Sprintf(`"message":"%s"`, cmd),
+						`"scope":"index"`,
+						`Subtone started as pid`,
+						`Subtone room: subtone-`,
+						`Subtone log file: `,
 						fmt.Sprintf(`Verified mesh host %s persisted to %s`, hostName, filepath.Join(rt.RepoRoot, "env", "dialtone.json")),
-					}, support.StandardSubtoneRoomPatterns("repl src_v3", "")),
-					ExpectOutput: support.CombinePatterns([]string{
+						`"scope":"subtone"`,
+						`Subtone for repl src_v3 exited with code 0.`,
+					},
+					ExpectOutput: []string{
 						`/repl src_v3 add-host`,
-						fmt.Sprintf("Verified mesh host %s persisted to %s", hostName, filepath.Join(rt.RepoRoot, "env", "dialtone.json")),
-					}, support.StandardSubtoneOutputPatterns("repl src_v3", "")),
+						`DIALTONE> Request received. Spawning subtone for repl src_v3`,
+						`DIALTONE> Subtone started as pid `,
+						`DIALTONE> Subtone room: subtone-`,
+						`DIALTONE> Subtone log file: `,
+						`DIALTONE> Subtone for repl src_v3 exited with code 0.`,
+					},
 					Timeout: 40 * time.Second,
 				},
 			}); err != nil {

@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -229,6 +230,11 @@ func runTmpBootstrapTest(args []string) error {
 	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_SSH_PRIVATE_KEY")) == "" && strings.TrimSpace(wslNode.SSHPrivateKey) != "" {
 		env = append(env, "DIALTONE_REPL_V3_TEST_WSL_SSH_PRIVATE_KEY="+wslNode.SSHPrivateKey)
 	}
+	env = appendConfigEnvIfMissing(env, repoRoot, "CLOUDFLARE_API_TOKEN")
+	env = appendConfigEnvIfMissing(env, repoRoot, "CLOUDFLARE_ACCOUNT_ID")
+	env = appendConfigEnvIfMissing(env, repoRoot, "CF_TUNNEL_TOKEN_SHELL")
+	env = appendConfigEnvIfMissing(env, repoRoot, "DIALTONE_DOMAIN")
+	env = appendConfigEnvIfMissing(env, repoRoot, "DIALTONE_HOSTNAME")
 	if bootstrapRepoURL != "" {
 		env = append(env, "DIALTONE_BOOTSTRAP_REPO_URL="+bootstrapRepoURL)
 	}
@@ -297,6 +303,35 @@ func resolveWSLTestDefaults(repoRoot string) meshNode {
 		}
 	}
 	return meshNode{}
+}
+
+func appendConfigEnvIfMissing(env []string, repoRoot string, key string) []string {
+	key = strings.TrimSpace(key)
+	if key == "" || strings.TrimSpace(os.Getenv(key)) != "" {
+		return env
+	}
+	if value := strings.TrimSpace(readTopLevelConfigValue(repoRoot, key)); value != "" {
+		env = append(env, key+"="+value)
+	}
+	return env
+}
+
+func readTopLevelConfigValue(repoRoot string, key string) string {
+	cfgPath := filepath.Join(strings.TrimSpace(repoRoot), "env", "dialtone.json")
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return ""
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return ""
+	}
+	if v, ok := doc[strings.TrimSpace(key)]; ok {
+		if s, ok := v.(string); ok {
+			return strings.TrimSpace(s)
+		}
+	}
+	return ""
 }
 
 func shellQuote(s string) string {

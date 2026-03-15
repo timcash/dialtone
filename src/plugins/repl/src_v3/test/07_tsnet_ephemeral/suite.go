@@ -29,7 +29,7 @@ func Register(r *testv1.Registry) {
 
 			matched, err := rt.WaitForAnyPattern(120*time.Second, []string{
 				`DIALTONE tsnet NATS endpoint: nats://`,
-				`DIALTONE native tailscale already connected`,
+				`Native tailscale already connected`,
 			})
 			if err != nil {
 				return testv1.StepRunResult{}, err

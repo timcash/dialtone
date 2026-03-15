@@ -6,8 +6,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export CGO_ENABLED=0
 ENV_FILE_JSON_DEFAULT="$SCRIPT_DIR/env/dialtone.json"
 
-log_info() { echo "DIALTONE> $*"; }
-log_err() { echo "DIALTONE> ERROR: $*" >&2; }
+log_info() {
+    if [ "${DIALTONE_CONTEXT:-}" = "repl" ]; then
+        echo "$*"
+        return
+    fi
+    echo "DIALTONE> $*"
+}
+log_err() {
+    if [ "${DIALTONE_CONTEXT:-}" = "repl" ]; then
+        echo "ERROR: $*" >&2
+        return
+    fi
+    echo "DIALTONE> ERROR: $*" >&2
+}
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 

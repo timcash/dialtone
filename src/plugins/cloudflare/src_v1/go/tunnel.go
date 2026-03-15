@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -28,6 +29,26 @@ type ProvisionResult struct {
 	DNSCreated   bool
 }
 
+type CleanupRequest struct {
+	TunnelName string
+	Domain     string
+	APIToken   string
+	AccountID  string
+	EnvPath    string
+}
+
+type CleanupResult struct {
+	FullHostname       string
+	TunnelID           string
+	TokenEnvName       string
+	DNSDeleted         bool
+	ConnectionsCleared bool
+	TunnelDeleted      bool
+	TokenRemoved       bool
+}
+
+const defaultManagedZone = "dialtone.earth"
+
 func TokenEnvKey(name string) string {
 	upper := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(name), "-", "_"))
 	return "CF_TUNNEL_TOKEN_" + upper
@@ -42,8 +63,14 @@ func ResolveTunnelToken(name, explicitToken string) string {
 		if tok := strings.TrimSpace(os.Getenv(TokenEnvKey(name))); tok != "" {
 			return tok
 		}
+		if tok := strings.TrimSpace(readConfigVar(defaultConfigPath(), TokenEnvKey(name))); tok != "" {
+			return tok
+		}
 	}
-	return strings.TrimSpace(os.Getenv("CF_TUNNEL_TOKEN"))
+	if tok := strings.TrimSpace(os.Getenv("CF_TUNNEL_TOKEN")); tok != "" {
+		return tok
+	}
+	return strings.TrimSpace(readConfigVar(defaultConfigPath(), "CF_TUNNEL_TOKEN"))
 }
 
 func BuildTunnelRunArgs(name, url, token string) ([]string, error) {
@@ -90,31 +117,16 @@ func ProvisionTunnelAndDNS(in ProvisionRequest) (ProvisionResult, error) {
 	}
 
 	client := &http.Client{}
-	fullHostname := fmt.Sprintf("%s.%s", name, domain)
+	hostSpec, err := resolveManagedHostname(name, domain)
+	if err != nil {
+		return ProvisionResult{}, err
+	}
 
 	// 1) Resolve zone id.
-	type zoneResponse struct {
-		Result []struct {
-			ID string `json:"id"`
-		} `json:"result"`
-		Success bool `json:"success"`
-	}
-	zoneReq, _ := http.NewRequest("GET", fmt.Sprintf("https://api.cloudflare.com/client/v4/zones?name=%s", domain), nil)
-	zoneReq.Header.Set("Authorization", "Bearer "+apiToken)
-	zoneResp, err := client.Do(zoneReq)
+	zoneID, err := resolveZoneID(client, apiToken, hostSpec.Zone)
 	if err != nil {
-		return ProvisionResult{}, fmt.Errorf("fetch zone failed: %w", err)
+		return ProvisionResult{}, err
 	}
-	defer zoneResp.Body.Close()
-
-	var zr zoneResponse
-	if err := json.NewDecoder(zoneResp.Body).Decode(&zr); err != nil {
-		return ProvisionResult{}, fmt.Errorf("decode zone response failed: %w", err)
-	}
-	if !zr.Success || len(zr.Result) == 0 {
-		return ProvisionResult{}, fmt.Errorf("zone %s not found", domain)
-	}
-	zoneID := zr.Result[0].ID
 
 	// 2) Create tunnel.
 	secretBytes := make([]byte, 32)
@@ -153,7 +165,7 @@ func ProvisionTunnelAndDNS(in ProvisionRequest) (ProvisionResult, error) {
 	dnsCreated := false
 	dnsPayload := map[string]any{
 		"type":    "CNAME",
-		"name":    name,
+		"name":    hostSpec.RecordName,
 		"content": fmt.Sprintf("%s.cfargotunnel.com", tunnelID),
 		"proxied": true,
 		"ttl":     1,
@@ -179,12 +191,320 @@ func ProvisionTunnelAndDNS(in ProvisionRequest) (ProvisionResult, error) {
 	}
 
 	return ProvisionResult{
-		FullHostname: fullHostname,
+		FullHostname: hostSpec.FullHostname,
 		TunnelID:     tunnelID,
 		EnvVarName:   envVar,
 		RunToken:     runToken,
 		DNSCreated:   dnsCreated,
 	}, nil
+}
+
+func CleanupTunnelAndDNS(in CleanupRequest) (CleanupResult, error) {
+	name := strings.TrimSpace(in.TunnelName)
+	domain := strings.TrimSpace(in.Domain)
+	apiToken := strings.TrimSpace(in.APIToken)
+	accountID := strings.TrimSpace(in.AccountID)
+	envPath := strings.TrimSpace(in.EnvPath)
+
+	if name == "" {
+		return CleanupResult{}, fmt.Errorf("tunnel name is required")
+	}
+	if domain == "" {
+		return CleanupResult{}, fmt.Errorf("domain is required")
+	}
+	if apiToken == "" {
+		return CleanupResult{}, fmt.Errorf("api token is required")
+	}
+	if accountID == "" {
+		return CleanupResult{}, fmt.Errorf("account id is required")
+	}
+	if envPath == "" {
+		envPath = defaultConfigPath()
+	}
+
+	client := &http.Client{}
+	hostSpec, err := resolveManagedHostname(name, domain)
+	if err != nil {
+		return CleanupResult{}, err
+	}
+	zoneID, err := resolveZoneID(client, apiToken, hostSpec.Zone)
+	if err != nil {
+		return CleanupResult{}, err
+	}
+	tunnelID := decodeTunnelIDFromToken(readConfigVar(envPath, TokenEnvKey(name)))
+	if tunnelID == "" {
+		tunnelID, err = resolveTunnelIDByName(client, apiToken, accountID, name)
+		if err != nil {
+			return CleanupResult{}, err
+		}
+	}
+	if tunnelID == "" {
+		return CleanupResult{}, fmt.Errorf("tunnel id for %s not found", name)
+	}
+
+	dnsDeleted, err := deleteDNSRecord(client, apiToken, zoneID, hostSpec.FullHostname)
+	if err != nil {
+		return CleanupResult{}, err
+	}
+	if err := deleteTunnelConnections(client, apiToken, accountID, tunnelID); err != nil {
+		return CleanupResult{}, err
+	}
+	if err := deleteTunnel(client, apiToken, accountID, tunnelID); err != nil {
+		return CleanupResult{}, err
+	}
+	tokenEnvName := TokenEnvKey(name)
+	tokenRemoved, err := removeConfigVar(envPath, tokenEnvName)
+	if err != nil {
+		return CleanupResult{}, err
+	}
+	return CleanupResult{
+		FullHostname:       hostSpec.FullHostname,
+		TunnelID:           tunnelID,
+		TokenEnvName:       tokenEnvName,
+		DNSDeleted:         dnsDeleted,
+		ConnectionsCleared: true,
+		TunnelDeleted:      true,
+		TokenRemoved:       tokenRemoved,
+	}, nil
+}
+
+type managedHostname struct {
+	Zone         string
+	RecordName   string
+	FullHostname string
+}
+
+func resolveManagedHostname(name string, domain string) (managedHostname, error) {
+	name = strings.TrimSpace(name)
+	domain = strings.TrimSpace(domain)
+	if name == "" {
+		return managedHostname{}, fmt.Errorf("tunnel name is required")
+	}
+	if domain == "" {
+		domain = defaultManagedZone
+	}
+
+	zone := domain
+	if !strings.Contains(zone, ".") {
+		// Dialtone commonly stores a short public label like "rover-1" in DIALTONE_DOMAIN.
+		// Cloudflare zone operations still target the managed apex zone.
+		zone = defaultManagedZone
+	}
+
+	return managedHostname{
+		Zone:         zone,
+		RecordName:   name,
+		FullHostname: fmt.Sprintf("%s.%s", name, zone),
+	}, nil
+}
+
+func resolveZoneID(client *http.Client, apiToken string, domain string) (string, error) {
+	type zoneResponse struct {
+		Result []struct {
+			ID string `json:"id"`
+		} `json:"result"`
+		Success bool `json:"success"`
+	}
+	zoneReq, _ := http.NewRequest("GET", fmt.Sprintf("https://api.cloudflare.com/client/v4/zones?name=%s", domain), nil)
+	zoneReq.Header.Set("Authorization", "Bearer "+apiToken)
+	zoneResp, err := client.Do(zoneReq)
+	if err != nil {
+		return "", fmt.Errorf("fetch zone failed: %w", err)
+	}
+	defer zoneResp.Body.Close()
+	var zr zoneResponse
+	if err := json.NewDecoder(zoneResp.Body).Decode(&zr); err != nil {
+		return "", fmt.Errorf("decode zone response failed: %w", err)
+	}
+	if !zr.Success || len(zr.Result) == 0 {
+		return "", fmt.Errorf("zone %s not found", domain)
+	}
+	return zr.Result[0].ID, nil
+}
+
+func resolveTunnelIDByName(client *http.Client, apiToken string, accountID string, name string) (string, error) {
+	type listResponse struct {
+		Result []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"result"`
+		Success bool `json:"success"`
+	}
+	req, _ := http.NewRequest("GET", fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/tunnels?name=%s", accountID, name), nil)
+	req.Header.Set("Authorization", "Bearer "+apiToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("list tunnels failed: %w", err)
+	}
+	defer resp.Body.Close()
+	var lr listResponse
+	if err := json.NewDecoder(resp.Body).Decode(&lr); err != nil {
+		return "", fmt.Errorf("decode tunnel list failed: %w", err)
+	}
+	if !lr.Success {
+		return "", fmt.Errorf("list tunnels failed for %s", name)
+	}
+	for _, item := range lr.Result {
+		if strings.TrimSpace(item.Name) == name && strings.TrimSpace(item.ID) != "" {
+			return strings.TrimSpace(item.ID), nil
+		}
+	}
+	return "", nil
+}
+
+func deleteDNSRecord(client *http.Client, apiToken string, zoneID string, fullHostname string) (bool, error) {
+	type recordResponse struct {
+		Result []struct {
+			ID string `json:"id"`
+		} `json:"result"`
+		Success bool `json:"success"`
+	}
+	req, _ := http.NewRequest("GET", fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records?type=CNAME&name=%s", zoneID, fullHostname), nil)
+	req.Header.Set("Authorization", "Bearer "+apiToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("list dns records failed: %w", err)
+	}
+	defer resp.Body.Close()
+	var rr recordResponse
+	if err := json.NewDecoder(resp.Body).Decode(&rr); err != nil {
+		return false, fmt.Errorf("decode dns list failed: %w", err)
+	}
+	if !rr.Success {
+		return false, fmt.Errorf("dns lookup failed for %s", fullHostname)
+	}
+	deleted := false
+	for _, rec := range rr.Result {
+		if strings.TrimSpace(rec.ID) == "" {
+			continue
+		}
+		delReq, _ := http.NewRequest("DELETE", fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records/%s", zoneID, rec.ID), nil)
+		delReq.Header.Set("Authorization", "Bearer "+apiToken)
+		delResp, err := client.Do(delReq)
+		if err != nil {
+			return deleted, fmt.Errorf("delete dns record failed: %w", err)
+		}
+		delResp.Body.Close()
+		if delResp.StatusCode >= 200 && delResp.StatusCode < 300 {
+			deleted = true
+		}
+	}
+	return deleted, nil
+}
+
+func deleteTunnel(client *http.Client, apiToken string, accountID string, tunnelID string) error {
+	req, _ := http.NewRequest("DELETE", fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/tunnels/%s", accountID, tunnelID), nil)
+	req.Header.Set("Authorization", "Bearer "+apiToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("delete tunnel failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		text := strings.TrimSpace(string(body))
+		if text == "" {
+			return fmt.Errorf("delete tunnel failed: status=%d", resp.StatusCode)
+		}
+		return fmt.Errorf("delete tunnel failed: status=%d body=%s", resp.StatusCode, text)
+	}
+	return nil
+}
+
+func deleteTunnelConnections(client *http.Client, apiToken string, accountID string, tunnelID string) error {
+	req, _ := http.NewRequest("DELETE", fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/cfd_tunnel/%s/connections", accountID, tunnelID), nil)
+	req.Header.Set("Authorization", "Bearer "+apiToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("delete tunnel connections failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	text := strings.TrimSpace(string(body))
+	if text == "" {
+		return fmt.Errorf("delete tunnel connections failed: status=%d", resp.StatusCode)
+	}
+	return fmt.Errorf("delete tunnel connections failed: status=%d body=%s", resp.StatusCode, text)
+}
+
+func defaultConfigPath() string {
+	if path := strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE")); path != "" {
+		return path
+	}
+	if path := strings.TrimSpace(os.Getenv("DIALTONE_MESH_CONFIG")); path != "" {
+		return path
+	}
+	return filepath.Join("env", "dialtone.json")
+}
+
+func readConfigVar(path string, key string) string {
+	path = strings.TrimSpace(path)
+	key = strings.TrimSpace(key)
+	if path == "" || key == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil || strings.TrimSpace(string(raw)) == "" {
+		return ""
+	}
+	doc := map[string]any{}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return ""
+	}
+	if v, ok := doc[key]; ok {
+		if s, ok := v.(string); ok {
+			return strings.TrimSpace(s)
+		}
+	}
+	return ""
+}
+
+func removeConfigVar(path string, key string) (bool, error) {
+	path = strings.TrimSpace(path)
+	key = strings.TrimSpace(key)
+	if path == "" || key == "" {
+		return false, fmt.Errorf("missing config path or key")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	doc := map[string]any{}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return false, err
+	}
+	if _, ok := doc[key]; !ok {
+		return false, nil
+	}
+	delete(doc, key)
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return false, err
+	}
+	out = append(out, '\n')
+	return true, os.WriteFile(path, out, 0o644)
+}
+
+func decodeTunnelIDFromToken(token string) string {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return ""
+	}
+	raw, err := base64.StdEncoding.DecodeString(token)
+	if err != nil {
+		return ""
+	}
+	var doc map[string]string
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(doc["t"])
 }
 
 func upsertConfigVar(path, key, value string) error {

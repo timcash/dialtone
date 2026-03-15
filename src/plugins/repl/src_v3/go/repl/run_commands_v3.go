@@ -226,34 +226,34 @@ func logREPLRunStartupState(natsURL, room, mode string) {
 		memText = "unknown"
 	}
 
-	logs.Raw("DIALTONE> Startup state:")
-	logs.Raw("DIALTONE> - repl version=%s host=%s os=%s arch=%s cpu_cores=%d mem_total=%s", strings.TrimSpace(BuildVersion), hostName, runtime.GOOS, runtime.GOARCH, cpuCores, memText)
-	logs.Raw("DIALTONE> - repl mode=%s", strings.TrimSpace(mode))
-	logs.Raw("DIALTONE> - room=%s nats=%s reachable=%t", strings.TrimSpace(room), strings.TrimSpace(natsURL), endpointReachable(strings.TrimSpace(natsURL), 700*time.Millisecond))
+	logs.System("Startup state:")
+	logs.System("- repl version=%s host=%s os=%s arch=%s cpu_cores=%d mem_total=%s", strings.TrimSpace(BuildVersion), hostName, runtime.GOOS, runtime.GOARCH, cpuCores, memText)
+	logs.System("- repl mode=%s", strings.TrimSpace(mode))
+	logs.System("- room=%s nats=%s reachable=%t", strings.TrimSpace(room), strings.TrimSpace(natsURL), endpointReachable(strings.TrimSpace(natsURL), 700*time.Millisecond))
 
 	pid := replLeaderPID()
 	if pid <= 0 {
-		logs.Raw("DIALTONE> - repl leader pid=<none>")
+		logs.System("- repl leader pid=<none>")
 	} else {
-		logs.Raw("DIALTONE> - repl leader pid=%d", pid)
+		logs.System("- repl leader pid=%d", pid)
 		cpuPct, rssKB, etime := replProcessStats(pid)
 		rssText := "-"
 		if rssKB > 0 {
 			rssText = humanizeBytes(uint64(rssKB) * 1024)
 		}
-		logs.Raw("DIALTONE>   cpu=%s%% rss=%s etime=%s", cpuPct, rssText, etime)
+		logs.System("  cpu=%s%% rss=%s etime=%s", cpuPct, rssText, etime)
 		if secs, ok := parsePSElapsed(etime); ok && secs > 0 {
-			logs.Raw("DIALTONE> - repl uptime=%s", formatUptime(secs))
+			logs.System("- repl uptime=%s", formatUptime(secs))
 		}
 	}
 
 	if active, provider, tailnet := tsnetv1.NativeTailnetConnected(); active {
-		logs.Raw("DIALTONE> - native tailscale active=true provider=%s tailnet=%s", provider, strings.TrimSpace(tailnet))
+		logs.System("- native tailscale active=true provider=%s tailnet=%s", provider, strings.TrimSpace(tailnet))
 	} else {
-		logs.Raw("DIALTONE> - native tailscale active=false")
+		logs.System("- native tailscale active=false")
 	}
 	if cfg, err := tsnetv1.ResolveConfig(hostName, ""); err == nil {
-		logs.Raw("DIALTONE> - tsnet config hostname=%s tailnet=%s auth_key=%t api_key=%t", strings.TrimSpace(cfg.Hostname), strings.TrimSpace(cfg.Tailnet), cfg.AuthKeyPresent, cfg.APIKeyPresent)
+		logs.System("- tsnet config hostname=%s tailnet=%s auth_key=%t api_key=%t", strings.TrimSpace(cfg.Hostname), strings.TrimSpace(cfg.Tailnet), cfg.AuthKeyPresent, cfg.APIKeyPresent)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,6 +70,13 @@ func NewRuntime(ctx *testv1.StepContext) (*Runtime, error) {
 }
 
 func (rt *Runtime) StartLeader() error {
+	cleanCmd := rt.newDialtoneCommand("repl", "src_v3", "process-clean")
+	cleanCmd.Stdout = os.Stdout
+	cleanCmd.Stderr = os.Stderr
+	if err := cleanCmd.Run(); err != nil {
+		return fmt.Errorf("process-clean before leader start failed: %w", err)
+	}
+
 	listenURL := listenURLFromClientURL(rt.NATSURL)
 	rt.leader = rt.newDialtoneCommand("repl", "src_v3", "leader",
 		"--embedded-nats",
@@ -89,6 +97,7 @@ func (rt *Runtime) StartLeader() error {
 	rt.nc = nc
 	sub, err := rt.nc.Subscribe("repl.>", func(m *nats.Msg) {
 		line := string(m.Data)
+		rt.rememberRoom(line)
 		rt.debugf("[REPL][ROOM][%s] %s", strings.TrimSpace(m.Subject), strings.TrimSpace(line))
 		select {
 		case rt.msgCh <- line:
@@ -119,8 +128,8 @@ func (rt *Runtime) StartLeader() error {
 		return err
 	}
 	_, err = rt.WaitForAnyPattern(12*time.Second, []string{
-		"DIALTONE leader active",
-		"DIALTONE leader online on",
+		"Leader active on",
+		"Leader online on",
 	})
 	return err
 }
@@ -157,11 +166,6 @@ func (rt *Runtime) StartJoin(name string) error {
 	go rt.captureOutput(stdout)
 	go rt.captureOutput(stderr)
 	p := fmt.Sprintf(`"type":"join"`)
-	if rt.hasSuiteNATS() {
-		return rt.Ctx.WaitForAllMessagesAfterAction(rt.RoomSubject(), []string{p, fmt.Sprintf(`"from":"%s"`, name)}, 12*time.Second, func() error {
-			return nil
-		})
-	}
 	return rt.WaitForPatterns(12*time.Second, []string{p, fmt.Sprintf(`"from":"%s"`, name)})
 }
 
@@ -299,6 +303,13 @@ func (rt *Runtime) WaitForAnyPattern(timeout time.Duration, patterns []string) (
 	if len(patterns) == 0 {
 		return "", fmt.Errorf("patterns are required")
 	}
+	for _, msg := range rt.recentRoomTail() {
+		for _, p := range patterns {
+			if strings.Contains(msg, p) {
+				return p, nil
+			}
+		}
+	}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		select {
@@ -362,6 +373,32 @@ func (rt *Runtime) WaitForOutput(timeout time.Duration, patterns []string) error
 	return err
 }
 
+func (rt *Runtime) LatestSubtonePID() (int, error) {
+	for i := len(rt.recentRoom) - 1; i >= 0; i-- {
+		msg := strings.TrimSpace(rt.recentRoom[i])
+		if msg == "" {
+			continue
+		}
+		var frame map[string]any
+		if err := json.Unmarshal([]byte(msg), &frame); err == nil {
+			if raw, ok := frame["subtone_pid"]; ok {
+				switch v := raw.(type) {
+				case float64:
+					if int(v) > 0 {
+						return int(v), nil
+					}
+				case string:
+					parsed, err := strconv.Atoi(strings.TrimSpace(v))
+					if err == nil && parsed > 0 {
+						return parsed, nil
+					}
+				}
+			}
+		}
+	}
+	return 0, fmt.Errorf("no subtone pid found in recent room messages")
+}
+
 func (rt *Runtime) RunDialtone(args ...string) (string, error) {
 	cmd := rt.newDialtoneCommand(args...)
 	out, err := cmd.CombinedOutput()
@@ -371,8 +408,39 @@ func (rt *Runtime) RunDialtone(args ...string) (string, error) {
 func (rt *Runtime) newDialtoneCommand(args ...string) *exec.Cmd {
 	cmd := exec.Command("./dialtone.sh", args...)
 	cmd.Dir = rt.RepoRoot
-	cmd.Env = append(os.Environ(), "DIALTONE_USE_NIX=0")
+	envFile := filepath.Join(rt.RepoRoot, "env", "dialtone.json")
+	cmd.Env = append(os.Environ(),
+		"DIALTONE_USE_NIX=0",
+		"DIALTONE_REPO_ROOT="+rt.RepoRoot,
+		"DIALTONE_SRC_ROOT="+rt.SrcRoot,
+		"DIALTONE_ENV_FILE="+envFile,
+		"DIALTONE_MESH_CONFIG="+envFile,
+		"DIALTONE_REPL_NATS_URL="+rt.NATSURL,
+	)
+	if envDir := strings.TrimSpace(readConfigTopLevelString(envFile, "DIALTONE_ENV")); envDir != "" {
+		cmd.Env = append(cmd.Env, "DIALTONE_ENV="+envDir)
+	}
 	return cmd
+}
+
+func readConfigTopLevelString(path string, key string) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return ""
+	}
+	value, ok := doc[key]
+	if !ok {
+		return ""
+	}
+	s, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(s)
 }
 
 func StandardSubtoneRoomPatterns(cmdName string, exitPattern string) []string {
@@ -382,10 +450,11 @@ func StandardSubtoneRoomPatterns(cmdName string, exitPattern string) []string {
 		exitPattern = fmt.Sprintf("Subtone for %s exited with code 0.", cmdName)
 	}
 	patterns := []string{
+		`"scope":"index"`,
 		fmt.Sprintf("Request received. Spawning subtone for %s", cmdName),
-		`"message":"Started at `,
-		`"message":"Command:`,
-		`"message":"Log: `,
+		`Subtone started as pid `,
+		`Subtone room: subtone-`,
+		`Subtone log file: `,
 	}
 	if exitPattern != "" {
 		patterns = append(patterns, exitPattern)
@@ -401,10 +470,9 @@ func StandardSubtoneOutputPatterns(cmdName string, exitPattern string) []string 
 	}
 	patterns := []string{
 		fmt.Sprintf("DIALTONE> Request received. Spawning subtone for %s", cmdName),
-		"DIALTONE:",
-		"Started at ",
-		"Command:",
-		"Log: ",
+		"DIALTONE> Subtone started as pid ",
+		"DIALTONE> Subtone room: subtone-",
+		"DIALTONE> Subtone log file: ",
 	}
 	if exitPattern != "" {
 		patterns = append(patterns, exitPattern)
@@ -471,6 +539,7 @@ func (rt *Runtime) captureOutput(r io.Reader) {
 		if line == "" {
 			continue
 		}
+		rt.rememberOutput(line)
 		rt.infof("[REPL][OUT] %s", line)
 		select {
 		case rt.outCh <- line:
