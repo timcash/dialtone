@@ -15,13 +15,6 @@ func Register(r *testv1.Registry) {
 		Name:    "injected-tsnet-ephemeral-up",
 		Timeout: 180 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
-			if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_REAL")) != "1" {
-				ctx.TestPassf("skipping tsnet ephemeral integration step (set DIALTONE_REPL_V3_TEST_REAL=1)")
-				return testv1.StepRunResult{
-					Report: "Skipped tsnet ephemeral integration step (disabled unless DIALTONE_REPL_V3_TEST_REAL=1).",
-				}, nil
-			}
-
 			rt, err := support.NewRuntime(ctx)
 			if err != nil {
 				return testv1.StepRunResult{}, err
@@ -30,13 +23,13 @@ func Register(r *testv1.Registry) {
 			if err := rt.StartLeader(); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			if err := rt.StartJoin("local-human"); err != nil {
+			if err := rt.StartJoin("llm-codex"); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 
 			matched, err := rt.WaitForAnyPattern(120*time.Second, []string{
 				`DIALTONE tsnet NATS endpoint: nats://`,
-				`DIALTONE native tailscale already connected`,
+				`Native tailscale already connected`,
 			})
 			if err != nil {
 				return testv1.StepRunResult{}, err
@@ -46,15 +39,15 @@ func Register(r *testv1.Registry) {
 				if requireEmbedded {
 					return testv1.StepRunResult{}, fmt.Errorf("native tailscale detected, but embedded tsnet was required")
 				}
-				ctx.TestPassf("detected native tailscale; embedded tsnet fallback correctly skipped")
+				ctx.TestPassf("detected native tailscale; embedded tsnet fallback correctly skipped for llm-codex session")
 				return testv1.StepRunResult{
 					Report: "Detected native tailscale and verified REPL leader published explicit skip signal for embedded tsnet fallback.",
 				}, nil
 			}
 
-			ctx.TestPassf("embedded tsnet endpoint announced by REPL leader")
+			ctx.TestPassf("embedded tsnet endpoint announced by REPL leader for llm-codex session")
 			return testv1.StepRunResult{
-				Report: "Verified REPL leader published embedded tsnet NATS endpoint in real integration mode (native tailscale absent).",
+				Report: "Verified REPL leader published embedded tsnet NATS endpoint when native tailscale was absent, or published the explicit native-tailscale skip signal otherwise.",
 			}, nil
 		},
 	})

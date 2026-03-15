@@ -94,12 +94,32 @@ Debugging:
 Use roles to isolate long-lived browser sessions:
 - `robot-test`: integrated robot suite on `legion`
 - `robot-dev`: live dev browser for `robot src_v2 dev`
-- `dev`: generic/manual use
+- `dev`: generic/manual use (default)
 
 Recommendation:
 - keep one role per workflow
 - do not mix unrelated tests on the same role
 - do not run concurrent headed flows against the same role unless you explicitly want them to share one tab
+
+## Agent & System Internals
+
+This section provides critical context for LLM agents and automated tools.
+
+### Process & Port Mapping
+- **Daemon Port (NATS)**: `19465` (default). This is the control plane.
+- **Chrome Debug Port**: `19464` (default). The daemon communicates with Chrome over this port via `chromedp`.
+- **Isolation**: Each role gets its own NATS port and Chrome port if multiple daemons run on one host (though standard practice is one daemon/role per host).
+
+### Log Streams
+1. **Daemon Logs**: Stored locally on the host at `~/.dialtone/chrome-v3/<role>/service/daemon.out.log`. These logs show NATS request handling and browser lifecycle events.
+2. **Browser Console**: The daemon captures the last 200 lines of the browser's console. Query these via `./dialtone.sh chrome src_v3 console`.
+3. **NATS Transport**: All CLI commands are converted to NATS requests on the subject `chrome.src_v3.<role>.cmd`. Responses include status, current URL, and console log snapshots.
+
+### LLM Strategy for Troubleshooting
+- **Verification**: Always start with `status`. If `unhealthy=true`, check the daemon logs.
+- **State Recovery**: If the browser is unresponsive, try `reset`. This kills the browser and clears lock files but preserves the profile.
+- **DOM Inspection**: Use `get-aria-attr` and `screenshot` to verify UI state without needing a head.
+- **Synchronicity**: Use `wait-log` or `wait-aria` to handle async page loads. The system is designed for high-latency remote links.
 
 ## Integration With `test/src_v1`
 

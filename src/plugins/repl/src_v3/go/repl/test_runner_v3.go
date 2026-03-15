@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -11,9 +12,20 @@ import (
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
+func replTestVerbose() bool {
+	return strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_VERBOSE")) == "1"
+}
+
+func replTestInfof(format string, args ...any) {
+	if !replTestVerbose() {
+		return
+	}
+	logs.Info(format, args...)
+}
+
 func RunTest(args []string) error {
 	fs := flag.NewFlagSet("repl-v3-test", flag.ContinueOnError)
-	real := fs.Bool("real", false, "Run real integration steps (cloudflare/tsnet)")
+	filter := fs.String("filter", "", "Run only matching test steps")
 	requireEmbeddedTSNet := fs.Bool("require-embedded-tsnet", false, "Fail if native tailscale is active during tsnet step")
 	wslHost := fs.String("wsl-host", "", "Override WSL host used by test steps")
 	wslUser := fs.String("wsl-user", "", "Override WSL user used by test steps")
@@ -23,9 +35,6 @@ func RunTest(args []string) error {
 	bootstrapRepoURL := fs.String("bootstrap-repo-url", "", "Override bootstrap repo tarball URL for tmp bootstrap mode")
 	if err := fs.Parse(args); err != nil {
 		return err
-	}
-	if *real {
-		_ = os.Setenv("DIALTONE_REPL_V3_TEST_REAL", "1")
 	}
 	if *requireEmbeddedTSNet {
 		_ = os.Setenv("DIALTONE_REPL_V3_TEST_REQUIRE_EMBEDDED_TSNET", "1")
@@ -50,8 +59,11 @@ func RunTest(args []string) error {
 	}
 
 	rest := fs.Args()
-	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_MODE")) == "inside" {
-		return runInRepoTest(rest)
+	if strings.TrimSpace(*filter) != "" {
+		rest = append(rest, "--filter", strings.TrimSpace(*filter))
+	}
+	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_BOOTSTRAPPED")) == "1" {
+		return runBootstrappedSuite(rest)
 	}
 	return runTmpBootstrapTest(rest)
 }
@@ -106,11 +118,17 @@ func RunTestClean(args []string) error {
 	return nil
 }
 
-func runInRepoTest(args []string) error {
+func runBootstrappedSuite(args []string) error {
 	repoRoot, srcRoot, err := resolveRoots()
 	if err != nil {
 		return err
 	}
+	reportPath := filepath.Join(srcRoot, "plugins", "repl", "src_v3", "TEST.md")
+	rawReportPath := filepath.Join(srcRoot, "plugins", "repl", "src_v3", "TEST_RAW.md")
+	_ = os.Remove(reportPath)
+	_ = os.Remove(rawReportPath)
+	replTestInfof("REPL v3 bootstrapped suite: repo=%s", repoRoot)
+	replTestInfof("REPL v3 bootstrapped suite: cleared reports %s and %s", reportPath, rawReportPath)
 	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
 	if goBin == "" {
 		goBin = "go"
@@ -123,7 +141,10 @@ func runInRepoTest(args []string) error {
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	cmd.Env = append(os.Environ(), "DIALTONE_REPO_ROOT="+repoRoot, "DIALTONE_SRC_ROOT="+srcRoot)
-	return cmd.Run()
+	err = cmd.Run()
+	replTestInfof("REPL v3 bootstrapped suite reports: %s", reportPath)
+	replTestInfof("REPL v3 bootstrapped suite raw reports: %s", rawReportPath)
+	return err
 }
 
 func runTmpBootstrapTest(args []string) error {
@@ -131,6 +152,7 @@ func runTmpBootstrapTest(args []string) error {
 	if err != nil {
 		return err
 	}
+	wslNode := resolveWSLTestDefaults(repoRoot)
 	tmpRoot, err := os.MkdirTemp("", "dialtone-repl-v3-bootstrap-*")
 	if err != nil {
 		return err
@@ -171,21 +193,26 @@ func runTmpBootstrapTest(args []string) error {
 		bootstrapRepoURL = serverURL + "/dialtone-main.tar.gz"
 	}
 
-	logs.Info("REPL v3 bootstrap test temp root: %s", tmpRoot)
-	logs.Info("REPL v3 bootstrap test starts with no config file at: %s", tmpConfig)
-	logs.Info("REPL v3 bootstrap install URL: %s", installURL)
+	replTestInfof("REPL v3 bootstrap test temp root: %s", tmpRoot)
+	replTestInfof("REPL v3 bootstrap test starts with no config file at: %s", tmpConfig)
+	replTestInfof("REPL v3 bootstrap install URL: %s", installURL)
 	if serverURL != "" {
-		logs.Info("REPL v3 bootstrap test local server URL: %s", serverURL)
+		replTestInfof("REPL v3 bootstrap test local server URL: %s", serverURL)
 	} else {
-		logs.Info("REPL v3 bootstrap test mode: external install URL (no local bootstrap server)")
+		replTestInfof("REPL v3 bootstrap test mode: external install URL (no local bootstrap server)")
 	}
-	logs.Info("REPL v3 bootstrap test command: (cd %s && curl -fsSL %s | bash -s -- --test)", tmpRepo, installURL)
-	logs.Info("REPL v3 bootstrap inject demo command:")
-	logs.Info("  ./dialtone.sh repl src_v3 inject --user llm-codex repl src_v3 bootstrap --apply --wsl-host wsl.shad-artichoke.ts.net --wsl-user user")
+	replTestInfof("REPL v3 bootstrap test command: (cd %s && curl -fsSL %s | bash -s -- repl src_v3 test ...)", tmpRepo, installURL)
+	replTestInfof("REPL v3 bootstrap inject demo command:")
+	replTestInfof("  ./dialtone.sh repl src_v3 inject --user llm-codex repl src_v3 add-host --name wsl --host wsl.shad-artichoke.ts.net --user user")
 
-	curlCmd := fmt.Sprintf("curl -fsSL %s | bash -s -- --test", installURL)
+	testArgs := append([]string{"repl", "src_v3", "test"}, args...)
+	quotedTestArgs := make([]string, 0, len(testArgs))
+	for _, a := range testArgs {
+		quotedTestArgs = append(quotedTestArgs, shellQuote(a))
+	}
+	curlCmd := fmt.Sprintf("curl -fsSL %s | bash -s -- %s", installURL, strings.Join(quotedTestArgs, " "))
 	if serverPort > 0 {
-		curlCmd = fmt.Sprintf("curl -fsSL --resolve shell.dialtone.earth:%d:127.0.0.1 %s | bash -s -- --test", serverPort, installURL)
+		curlCmd = fmt.Sprintf("curl -fsSL --resolve shell.dialtone.earth:%d:127.0.0.1 %s | bash -s -- %s", serverPort, installURL, strings.Join(quotedTestArgs, " "))
 	}
 	bootstrap := exec.Command("bash", "-lc", curlCmd)
 	bootstrap.Dir = tmpRepo
@@ -196,13 +223,132 @@ func runTmpBootstrapTest(args []string) error {
 		"TEST_ANS_ENV="+tmpEnv,
 		"TEST_ANS_REPO="+tmpRepo,
 		"DIALTONE_USE_NIX=0",
-		"DIALTONE_REPL_V3_TEST_MODE=inside",
+		"DIALTONE_LOG_STDOUT=0",
+		"DIALTONE_REPL_V3_TEST_BOOTSTRAPPED=1",
 		"DIALTONE_REPL_NATS_URL=nats://127.0.0.1:47222",
 	)
+	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_HOST")) == "" && strings.TrimSpace(wslNode.Host) != "" {
+		env = append(env, "DIALTONE_REPL_V3_TEST_WSL_HOST="+strings.TrimSpace(wslNode.Host))
+	}
+	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_USER")) == "" && strings.TrimSpace(wslNode.User) != "" {
+		env = append(env, "DIALTONE_REPL_V3_TEST_WSL_USER="+strings.TrimSpace(wslNode.User))
+	}
+	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_PORT")) == "" && strings.TrimSpace(wslNode.Port) != "" {
+		env = append(env, "DIALTONE_REPL_V3_TEST_WSL_PORT="+strings.TrimSpace(wslNode.Port))
+	}
+	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_OS")) == "" && strings.TrimSpace(wslNode.OS) != "" {
+		env = append(env, "DIALTONE_REPL_V3_TEST_WSL_OS="+strings.TrimSpace(wslNode.OS))
+	}
+	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_SSH_PRIVATE_KEY")) == "" && strings.TrimSpace(wslNode.SSHPrivateKey) != "" {
+		env = append(env, "DIALTONE_REPL_V3_TEST_WSL_SSH_PRIVATE_KEY="+wslNode.SSHPrivateKey)
+	}
+	env = appendConfigEnvIfMissing(env, repoRoot, "CLOUDFLARE_API_TOKEN")
+	env = appendConfigEnvIfMissing(env, repoRoot, "CLOUDFLARE_ACCOUNT_ID")
+	env = appendConfigEnvIfMissing(env, repoRoot, "CF_TUNNEL_TOKEN_SHELL")
+	env = appendConfigEnvIfMissing(env, repoRoot, "DIALTONE_DOMAIN")
+	env = appendConfigEnvIfMissing(env, repoRoot, "DIALTONE_HOSTNAME")
 	if bootstrapRepoURL != "" {
 		env = append(env, "DIALTONE_BOOTSTRAP_REPO_URL="+bootstrapRepoURL)
 	}
 	bootstrap.Env = env
-	bootstrap.Args = append(bootstrap.Args, args...)
-	return bootstrap.Run()
+	err = bootstrap.Run()
+	reportPath := filepath.Join(tmpRepo, "src", "plugins", "repl", "src_v3", "TEST.md")
+	rawReportPath := filepath.Join(tmpRepo, "src", "plugins", "repl", "src_v3", "TEST_RAW.md")
+	errorsPath := filepath.Join(tmpRepo, "src", "plugins", "repl", "src_v3", "ERRORS.md")
+	if syncErr := syncTmpReportsToRepo(repoRoot, reportPath, rawReportPath, errorsPath); syncErr != nil {
+		logs.Warn("REPL v3 bootstrap test report sync failed: %v", syncErr)
+	}
+	replTestInfof("REPL v3 bootstrap test repo: %s", tmpRepo)
+	replTestInfof("REPL v3 bootstrap test report: %s", reportPath)
+	replTestInfof("REPL v3 bootstrap test raw report: %s", rawReportPath)
+	return err
+}
+
+func syncTmpReportsToRepo(repoRoot string, reportPath string, rawReportPath string, errorsPath string) error {
+	dstRoot := filepath.Join(repoRoot, "src", "plugins", "repl", "src_v3")
+	if err := os.MkdirAll(dstRoot, 0o755); err != nil {
+		return err
+	}
+	for _, pair := range [][2]string{
+		{reportPath, filepath.Join(dstRoot, "TEST.md")},
+		{rawReportPath, filepath.Join(dstRoot, "TEST_RAW.md")},
+		{errorsPath, filepath.Join(dstRoot, "ERRORS.md")},
+	} {
+		srcPath := strings.TrimSpace(pair[0])
+		dstPath := strings.TrimSpace(pair[1])
+		if srcPath == "" || dstPath == "" {
+			continue
+		}
+		if err := copyFileIfPresent(srcPath, dstPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyFileIfPresent(srcPath string, dstPath string) error {
+	raw, err := os.ReadFile(srcPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	return os.WriteFile(dstPath, raw, 0o644)
+}
+
+func resolveWSLTestDefaults(repoRoot string) meshNode {
+	cfgPath := filepath.Join(strings.TrimSpace(repoRoot), "env", "dialtone.json")
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		return meshNode{}
+	}
+	for _, node := range cfg.MeshNodes {
+		name := strings.TrimSpace(strings.ToLower(node.Name))
+		if name == "wsl" {
+			return node
+		}
+		for _, alias := range node.Aliases {
+			if strings.TrimSpace(strings.ToLower(alias)) == "wsl" {
+				return node
+			}
+		}
+	}
+	return meshNode{}
+}
+
+func appendConfigEnvIfMissing(env []string, repoRoot string, key string) []string {
+	key = strings.TrimSpace(key)
+	if key == "" || strings.TrimSpace(os.Getenv(key)) != "" {
+		return env
+	}
+	if value := strings.TrimSpace(readTopLevelConfigValue(repoRoot, key)); value != "" {
+		env = append(env, key+"="+value)
+	}
+	return env
+}
+
+func readTopLevelConfigValue(repoRoot string, key string) string {
+	cfgPath := filepath.Join(strings.TrimSpace(repoRoot), "env", "dialtone.json")
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return ""
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return ""
+	}
+	if v, ok := doc[strings.TrimSpace(key)]; ok {
+		if s, ok := v.(string); ok {
+			return strings.TrimSpace(s)
+		}
+	}
+	return ""
+}
+
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
 }

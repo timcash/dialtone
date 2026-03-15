@@ -29,6 +29,9 @@ type meshNode struct {
 	RoutePreference     []string `json:"route_preference,omitempty"`
 	Port                string   `json:"port,omitempty"`
 	OS                  string   `json:"os,omitempty"`
+	Password            string   `json:"password,omitempty"`
+	SSHPrivateKey       string   `json:"ssh_private_key,omitempty"`
+	SSHPrivateKeyPath   string   `json:"ssh_private_key_path,omitempty"`
 	PreferWSLPowerShell bool     `json:"prefer_wsl_powershell,omitempty"`
 	RepoCandidates      []string `json:"repo_candidates,omitempty"`
 }

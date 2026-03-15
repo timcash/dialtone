@@ -59,6 +59,7 @@ func AddHost(args []string) error {
 	if len(n.RoutePreference) == 0 {
 		n.RoutePreference = []string{"tailscale", "private"}
 	}
+	mergeBootstrapHostDefaults(&n)
 	n.HostCandidates = []string{n.Host}
 	upserted := false
 	for i := range cfg.MeshNodes {
@@ -74,6 +75,10 @@ func AddHost(args []string) error {
 	if err := saveConfig(cfgPath, cfg); err != nil {
 		return err
 	}
+	if err := verifyHostPersisted(cfgPath, n); err != nil {
+		return err
+	}
+	logs.Info("Verified mesh host %s persisted to %s", n.Name, cfgPath)
 	if upserted {
 		logs.Info("Updated mesh host %s (%s@%s:%s)", n.Name, n.User, n.Host, n.Port)
 	} else {
@@ -81,6 +86,44 @@ func AddHost(args []string) error {
 	}
 	logs.Info("You can now run: ./dialtone.sh ssh src_v1 run --host %s --cmd whoami", n.Name)
 	return nil
+}
+
+func verifyHostPersisted(cfgPath string, expected meshNode) error {
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		return fmt.Errorf("verify mesh host write failed reading %s: %w", cfgPath, err)
+	}
+	for _, node := range cfg.MeshNodes {
+		if !strings.EqualFold(strings.TrimSpace(node.Name), strings.TrimSpace(expected.Name)) {
+			continue
+		}
+		if strings.TrimSpace(node.Host) != strings.TrimSpace(expected.Host) {
+			return fmt.Errorf("verify mesh host write failed: expected host %q got %q", expected.Host, node.Host)
+		}
+		if strings.TrimSpace(node.User) != strings.TrimSpace(expected.User) {
+			return fmt.Errorf("verify mesh host write failed: expected user %q got %q", expected.User, node.User)
+		}
+		return nil
+	}
+	return fmt.Errorf("verify mesh host write failed: host %q not present in %s", expected.Name, cfgPath)
+}
+
+func mergeBootstrapHostDefaults(n *meshNode) {
+	if n == nil {
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(n.Name), "wsl") {
+		return
+	}
+	if port := strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_PORT")); port != "" && strings.TrimSpace(n.Port) == "22" {
+		n.Port = port
+	}
+	if osName := strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_OS")); osName != "" && strings.TrimSpace(n.OS) == "linux" {
+		n.OS = osName
+	}
+	if key := strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_SSH_PRIVATE_KEY")); key != "" && strings.TrimSpace(n.SSHPrivateKey) == "" {
+		n.SSHPrivateKey = key
+	}
 }
 
 func Inject(args []string) error {
