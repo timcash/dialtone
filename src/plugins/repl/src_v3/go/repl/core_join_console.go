@@ -24,9 +24,7 @@ func newJoinConsole(out io.Writer, prompt string, interactive bool) *joinConsole
 func (c *joinConsole) PrintFrame(frame BusFrame) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.clearActivePrompt()
-	printFrame(c.out, frame)
-	c.renderPrompt()
+	c.printFrameLocked(frame)
 }
 
 func (c *joinConsole) PrintLine(msg string) {
@@ -55,4 +53,10 @@ func (c *joinConsole) renderPrompt() {
 		return
 	}
 	fmt.Fprintf(c.out, "%s> ", c.prompt)
+}
+
+func (c *joinConsole) printFrameLocked(frame BusFrame) {
+	c.clearActivePrompt()
+	printFrame(c.out, frame)
+	c.renderPrompt()
 }

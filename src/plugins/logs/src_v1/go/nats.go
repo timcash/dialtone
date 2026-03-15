@@ -17,6 +17,7 @@ import (
 type Record struct {
 	Subject   string `json:"subject"`
 	Level     string `json:"level"`
+	Kind      string `json:"kind,omitempty"`
 	Message   string `json:"message"`
 	Source    string `json:"source,omitempty"`
 	ElapsedS  int    `json:"elapsed_s,omitempty"`
@@ -185,6 +186,10 @@ func (l *NATSLogger) ErrorfFromTest(source, format string, args ...any) error {
 }
 
 func (l *NATSLogger) publishWithSource(level, message, source string, isTest bool) error {
+	return l.publishWithMeta(level, "", message, source, isTest)
+}
+
+func (l *NATSLogger) publishWithMeta(level, kind, message, source string, isTest bool) error {
 	level = strings.ToUpper(strings.TrimSpace(level))
 	subject := strings.TrimSpace(l.subject)
 	src := strings.TrimSpace(source)
@@ -201,6 +206,7 @@ func (l *NATSLogger) publishWithSource(level, message, source string, isTest boo
 		rec := Record{
 			Subject:   target,
 			Level:     level,
+			Kind:      strings.TrimSpace(kind),
 			Message:   message,
 			Source:    src,
 			ElapsedS:  elapsed,
@@ -383,11 +389,15 @@ func ResetTopicClock(subject string) {
 }
 
 func publishPrimary(level, message, source string, isTest bool) {
+	publishPrimaryWithKind(level, "", message, source, isTest)
+}
+
+func publishPrimaryWithKind(level, kind, message, source string, isTest bool) {
 	ensurePrimaryLogger()
 	if primaryNATS.logger == nil {
 		return
 	}
-	_ = primaryNATS.logger.publishWithSource(level, message, source, isTest)
+	_ = primaryNATS.logger.publishWithMeta(level, kind, message, source, isTest)
 }
 
 func ensurePrimaryLogger() {

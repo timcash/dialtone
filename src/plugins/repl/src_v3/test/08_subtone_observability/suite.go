@@ -48,9 +48,10 @@ func Register(r *testv1.Registry) {
 				},
 				support.StandardSubtoneRoomPatterns("repl src_v3", ""),
 			)
-			if err := ctx.WaitForAllMessagesAfterAction(rt.RoomSubject(), roomPatterns, 45*time.Second, func() error {
-				return rt.Inject("llm-codex", "repl", "src_v3", "add-host", "--name", hostName, "--host", hostAddr, "--user", hostUser)
-			}); err != nil {
+			if err := rt.Inject("llm-codex", "repl", "src_v3", "add-host", "--name", hostName, "--host", hostAddr, "--user", hostUser); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("inject add-host observability setup failed: %w", err)
+			}
+			if err := rt.WaitForPatterns(45*time.Second, roomPatterns); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("inject add-host observability setup failed: %w", err)
 			}
 			if err := rt.WaitForOutput(45*time.Second, support.CombinePatterns(
@@ -63,6 +64,9 @@ func Register(r *testv1.Registry) {
 			listOut, err := rt.RunDialtone("repl", "src_v3", "subtone-list", "--count", "20")
 			if err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("subtone-list failed: %w\n%s", err, listOut)
+			}
+			if !strings.Contains(listOut, "STATE") {
+				return testv1.StepRunResult{}, fmt.Errorf("subtone-list did not return registry-backed output\n%s", listOut)
 			}
 			pid, err := findSubtonePID(listOut, "repl src_v3 add-host")
 			if err != nil {
