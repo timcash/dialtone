@@ -35,6 +35,12 @@ func formatPlain(level, message string) string {
 }
 
 func formatPlainWithSource(level, source, message string, isTest bool) string {
+	if IsREPLContext() {
+		if isTest {
+			message = TestPrefix(message)
+		}
+		return strings.TrimSpace(message)
+	}
 	src := normalizeSourcePath(source)
 	if src == "" {
 		src = "unknown"
@@ -44,6 +50,22 @@ func formatPlainWithSource(level, source, message string, isTest bool) string {
 	}
 	elapsed := elapsedSeconds("default")
 	return fmt.Sprintf("[T+%04ds|%s|%s] %s", elapsed, strings.ToUpper(level), src, message)
+}
+
+func formatSystemMessage(message string) string {
+	message = strings.TrimSpace(message)
+	if IsREPLContext() {
+		return message
+	}
+	return "DIALTONE> " + message
+}
+
+func formatUserMessage(message string) string {
+	message = strings.TrimSpace(message)
+	if IsREPLContext() {
+		return message
+	}
+	return "DIALTONE> " + message
 }
 
 func TestPrefix(line string) string {
@@ -132,6 +154,18 @@ func Raw(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	publishPrimary("INFO", msg, callerSourceLocation(), false)
 	fmt.Fprintf(logOutput, "%s\n", msg)
+}
+
+func System(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	publishPrimaryWithKind("INFO", "status", msg, callerSourceLocation(), false)
+	fmt.Fprintf(logOutput, "%s\n", formatSystemMessage(msg))
+}
+
+func User(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	publishPrimaryWithKind("INFO", "chat", msg, callerSourceLocation(), false)
+	fmt.Fprintf(logOutput, "%s\n", formatUserMessage(msg))
 }
 
 func Error(format string, args ...any) {

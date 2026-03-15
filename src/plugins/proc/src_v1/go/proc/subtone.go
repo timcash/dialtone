@@ -44,9 +44,10 @@ func RunSubtoneWithEvents(args []string, onEvent SubtoneEventHandler) int {
 	}
 	dialtoneSh := filepath.Join(repoRoot, "dialtone.sh")
 
-	cmd := exec.Command(dialtoneSh, args...)
+	internalArgs := append([]string{"--subtone-internal"}, args...)
+	cmd := exec.Command(dialtoneSh, internalArgs...)
 	cmd.Dir = repoRoot
-	cmd.Env = append(os.Environ(), "DIALTONE_SUBTONE=1")
+	cmd.Env = append(os.Environ(), "DIALTONE_CONTEXT=repl")
 	logDir := filepath.Join(repoRoot, ".dialtone", "logs")
 	return runCommandWithEvents(cmd, args, logDir, onEvent)
 }

@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	cloudflarev1 "dialtone/dev/plugins/cloudflare/src_v1/go"
 	configv1 "dialtone/dev/plugins/config/src_v1/go"
@@ -145,6 +148,42 @@ func runTunnel(args []string) error {
 		return cmd.Run()
 	case "cleanup":
 		_ = exec.Command("pkill", "-f", "cloudflared").Run()
+		fs := flag.NewFlagSet("tunnel-cleanup", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		name := fs.String("name", "", "Tunnel name to remove")
+		domain := fs.String("domain", strings.TrimSpace(os.Getenv("DIALTONE_DOMAIN")), "Managed domain")
+		apiToken := fs.String("api-token", os.Getenv("CLOUDFLARE_API_TOKEN"), "Cloudflare API token")
+		accountID := fs.String("account-id", os.Getenv("CLOUDFLARE_ACCOUNT_ID"), "Cloudflare account id")
+		if err := fs.Parse(subArgs); err != nil {
+			return err
+		}
+		tunnelName := strings.TrimSpace(*name)
+		if tunnelName == "" && len(fs.Args()) > 0 {
+			tunnelName = strings.TrimSpace(fs.Args()[0])
+		}
+		if tunnelName == "" {
+			return nil
+		}
+		envPath := strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE"))
+		if envPath == "" {
+			envPath = "env/dialtone.json"
+		}
+		res, err := cloudflarev1.CleanupTunnelAndDNS(cloudflarev1.CleanupRequest{
+			TunnelName: tunnelName,
+			Domain:     strings.TrimSpace(*domain),
+			APIToken:   strings.TrimSpace(*apiToken),
+			AccountID:  strings.TrimSpace(*accountID),
+			EnvPath:    envPath,
+		})
+		if err != nil {
+			return err
+		}
+		logs.Raw("cloudflare cleanup verified dns hostname=%s deleted=%t", res.FullHostname, res.DNSDeleted)
+		logs.Raw("cloudflare cleanup verified connections tunnel_id=%s cleared=%t", res.TunnelID, res.ConnectionsCleared)
+		logs.Raw("cloudflare cleanup verified tunnel tunnel_id=%s deleted=%t", res.TunnelID, res.TunnelDeleted)
+		logs.Raw("cloudflare cleanup verified token env=%s removed=%t", res.TokenEnvName, res.TokenRemoved)
+		logs.Raw(`{"hostname":%q,"tunnel_id":%q,"dns_deleted":%t,"connections_cleared":%t,"tunnel_deleted":%t,"token_env":%q,"token_removed":%t}`,
+			res.FullHostname, res.TunnelID, res.DNSDeleted, res.ConnectionsCleared, res.TunnelDeleted, res.TokenEnvName, res.TokenRemoved)
 		return nil
 	case "stop":
 		_ = exec.Command("pkill", "-f", "cloudflared").Run()
@@ -208,10 +247,105 @@ func runTunnel(args []string) error {
 		if err != nil {
 			return err
 		}
-		return cmd.Run()
+		logPath, logFile, err := prepareCloudflaredBackgroundLog(tunnelName)
+		if err != nil {
+			return err
+		}
+		defer logFile.Close()
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+		cmd.Stdin = nil
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+		logs.Raw("cloudflared started pid=%d", cmd.Process.Pid)
+		if err := waitForCloudflaredReady(cmd.Process, logPath, 20*time.Second); err != nil {
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+			return err
+		}
+		logs.Raw("cloudflared confirmed tunnel connection in background pid=%d", cmd.Process.Pid)
+		return nil
 	default:
 		return fmt.Errorf("unknown tunnel subcommand: %s", sub)
 	}
+}
+
+func prepareCloudflaredBackgroundLog(tunnelName string) (string, *os.File, error) {
+	envDir := strings.TrimSpace(logs.GetDialtoneEnv())
+	if envDir == "" {
+		return "", nil, fmt.Errorf("DIALTONE_ENV is required for cloudflared background log")
+	}
+	logDir := filepath.Join(envDir, "cloudflare", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return "", nil, err
+	}
+	name := strings.TrimSpace(tunnelName)
+	if name == "" {
+		name = "tunnel"
+	}
+	safe := strings.NewReplacer("/", "_", "\\", "_", " ", "_").Replace(name)
+	logPath := filepath.Join(logDir, safe+"-cloudflared.log")
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return "", nil, err
+	}
+	return logPath, f, nil
+}
+
+func waitForCloudflaredReady(proc *os.Process, logPath string, timeout time.Duration) error {
+	if proc == nil {
+		return fmt.Errorf("cloudflared process missing")
+	}
+	if timeout <= 0 {
+		timeout = 20 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	successPatterns := []string{
+		"Registered tunnel connection",
+		"Connection registered",
+	}
+	for time.Now().Before(deadline) {
+		if processExited(proc.Pid) {
+			return fmt.Errorf("cloudflared exited before tunnel was ready; see %s", logPath)
+		}
+		matched, err := logContainsAny(logPath, successPatterns)
+		if err == nil && matched {
+			return nil
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return fmt.Errorf("timed out waiting for cloudflared tunnel readiness; see %s", logPath)
+}
+
+func logContainsAny(path string, patterns []string) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := sc.Text()
+		for _, p := range patterns {
+			if strings.Contains(line, p) {
+				return true, nil
+			}
+		}
+	}
+	return false, sc.Err()
+}
+
+func processExited(pid int) bool {
+	if pid <= 0 {
+		return true
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return true
+	}
+	err = proc.Signal(syscall.Signal(0))
+	return err != nil
 }
 
 func runShell(args []string) error {

@@ -72,10 +72,18 @@ type StepContext struct {
 	reportPath      string
 	autoShotDone    bool
 	logMu           sync.Mutex
+	quietConsole    bool
+	statusPublisher func(string, string)
+	pendingStatus   []stepStatusEvent
 }
 
 type StepRunResult struct {
 	Report string
+}
+
+type stepStatusEvent struct {
+	Kind    string
+	Message string
 }
 
 type SuiteOptions struct {
@@ -97,6 +105,7 @@ type SuiteOptions struct {
 	NATSListenURL         string
 	NATSSubject           string
 	AutoStartNATS         bool
+	QuietConsole          bool
 }
 
 type ConsoleMessage struct {
@@ -1655,7 +1664,9 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 		logs.Warn("%s error log path is deprecated and ignored: %s", testTag, opts.ErrorLogPath)
 	}
 
-	logs.Info("%s Starting Test Suite: %s", testTag, opts.Version)
+	if !opts.QuietConsole {
+		logs.Info("%s Starting Test Suite: %s", testTag, opts.Version)
+	}
 	repoRoot := strings.TrimSpace(opts.RepoRoot)
 	if repoRoot == "" {
 		if cwd, err := os.Getwd(); err == nil {
@@ -1671,7 +1682,9 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 	autoStart := opts.AutoStartNATS
 	nc, broker, baseSubject, natsErr := setupSuiteNATS(opts, natsURL, natsListenURL, autoStart)
 	if natsErr != nil {
-		logs.Warn("%s NATS suite logging disabled: %v", testTag, natsErr)
+		if !opts.QuietConsole {
+			logs.Warn("%s NATS suite logging disabled: %v", testTag, natsErr)
+		}
 	}
 	if nc != nil {
 		defer nc.Close()
@@ -1727,6 +1740,7 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 			natsURL:         natsURL,
 			repoRoot:        repoRoot,
 			reportPath:      opts.ReportPath,
+			quietConsole:    opts.QuietConsole,
 			suiteBrowser:    sharedBrowser,
 			setSuiteBrowser: func(s *BrowserSession) { sharedBrowser = s },
 		}
@@ -1755,6 +1769,7 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 				stepCtx.failLogger = failLogger
 			}
 		}
+		stepCtx.publishStatus("lifecycle", fmt.Sprintf("Starting test: %s", step.Name))
 
 		done := make(chan struct{})
 		var result StepRunResult
@@ -1791,7 +1806,9 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 				logs.Error("%s Step %s failed: %v", testTag, step.Name, err)
 				stepCtx.TestFailf("failed: %v", err)
 			} else if result.Report != "" {
-				logs.Info("%s Step %s report: %s", testTag, step.Name, result.Report)
+				if !opts.QuietConsole {
+					logs.Info("%s Step %s report: %s", testTag, step.Name, result.Report)
+				}
 				stepCtx.Logf("report: %s", result.Report)
 				stepCtx.TestPassf("report: %s", result.Report)
 			} else {
@@ -1835,7 +1852,9 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 	}
 
 	duration := time.Since(startTime)
-	logs.Info("%s Test Suite Completed in %v", testTag, duration)
+	if !opts.QuietConsole {
+		logs.Info("%s Test Suite Completed in %v", testTag, duration)
+	}
 
 	if opts.ReportPath != "" {
 		if genErr := generateReports(opts, results, duration); genErr != nil {

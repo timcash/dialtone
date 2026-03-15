@@ -10,8 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
 func createRepoTarball(repoRoot, tarPath string) error {
@@ -83,7 +81,6 @@ func createRepoTarball(repoRoot, tarPath string) error {
 		info, statErr := os.Lstat(absPath)
 		if statErr != nil {
 			if os.IsNotExist(statErr) {
-				logs.Warn("repl src_v3 tar skip missing path: %s", rel)
 				continue
 			}
 			return statErr

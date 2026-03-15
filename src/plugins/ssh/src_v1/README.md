@@ -5,112 +5,46 @@ SSH transport utilities used by plugins that need remote access/tunneling.
 Config source of truth:
 - `env/dialtone.json` (`mesh_nodes` and related keys)
 - legacy `env/.env`, `env/mesh.json`, and ad hoc SSH host files are deprecated
-- SSH auth is explicit only: `mesh_nodes[].password` / `mesh_nodes[].ssh_private_key_path` or CLI flags (`--password`, `--key-path`)
-- no implicit `~/.ssh` key scan and no `SSH_AUTH_SOCK` agent fallback
+- SSH auth comes from explicit config only: `mesh_nodes[].password`, `mesh_nodes[].ssh_private_key`, `mesh_nodes[].ssh_private_key_path`, or CLI flags
 
 Current usage includes:
 - robot deploy/dev SSH operations
 - logs remote stream mode
 
-## Complete Shell Workflow
+## Core Commands
 
-```bash
-# Live REPL/NATS debugging for SSH commands (recommended)
-./dialtone.sh repl src_v3 watch --subject 'repl.>' --filter 'ssh src_v1'
-./dialtone.sh repl src_v3 subtone-list --count 20
-./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 200
+### Debug & Discovery
+- `./dialtone.sh ssh src_v1 mesh` / `nodes`: List configured mesh nodes.
+- `./dialtone.sh ssh src_v1 resolve --host grey`: Resolve mesh name to IP/host.
+- `./dialtone.sh ssh src_v1 probe --host grey`: Test connectivity and auth.
+- `./dialtone.sh ssh src_v1 tailnet-check`: Verify SSH connectivity over Tailscale for all nodes.
 
-# Resolve/probe before running remote commands (new debug path)
-./dialtone.sh ssh src_v1 resolve --host grey
-./dialtone.sh ssh src_v1 probe --host grey --user user --password 'mac3edc#EDC' --timeout 5s
-./dialtone.sh ssh src_v1 probe --host grey --user user --key-path /path/to/id_ed25519 --timeout 5s
-./dialtone.sh ssh src_v1 run --host grey --cmd "hostname" --user user --password 'mac3edc#EDC' --connect-timeout 5s --debug
-./dialtone.sh ssh src_v1 run --host grey --cmd "hostname" --user user --key-path /path/to/id_ed25519 --connect-timeout 5s --debug
+### Execution
+- `./dialtone.sh ssh src_v1 run --host rover --cmd "hostname"`: Run command on one node.
+- `./dialtone.sh ssh src_v1 run-all --cmd "uptime"`: Run on all nodes in parallel.
+- `./dialtone.sh ssh src_v1 status --host all`: Get mesh-wide health (CPU, Mem, Disk).
 
-# Discover mesh nodes and transport mode
-./dialtone.sh ssh src_v1 mesh
-./dialtone.sh ssh src_v1 nodes
-./dialtone.sh ssh src_v1 list
+### Code Sync & Lifecycle
+- `./dialtone.sh ssh src_v1 sync-code --host gold --delete`: Rsync local changes (ignores `node_modules`, `.git`).
+- `./dialtone.sh ssh src_v1 sync-repos --branch main`: Git-based sync for all nodes.
+- `./dialtone.sh ssh src_v1 bootstrap --host rover`: One-shot remote setup (sync + install + verify).
+- `./dialtone.sh ssh src_v1 key-setup --host wsl`: Bootstrap passwordless SSH keys.
 
-# Passwordless key bootstrap (gold -> wsl example)
-./dialtone.sh ssh src_v1 keygen --host wsl
-./dialtone.sh ssh src_v1 key-install --host wsl --password '<initial-password>'
-./dialtone.sh ssh src_v1 key-setup --host wsl --password '<initial-password>'
-./dialtone.sh ssh src_v1 run --host wsl --cmd "hostname" --debug
+## Agent & System Internals
 
-./dialtone.sh ssh src_v1 format
-./dialtone.sh ssh src_v1 tailnet-check
-./dialtone.sh ssh src_v1 tailnet-check --host gold,grey,rover,wsl
+### NATS-Logged Transport
+When running SSH commands via the orchestrator (`./dialtone.sh ssh ...`), logs are typically captured and routed to NATS rather than direct stdout.
+- **Recommended Debugging**: `./dialtone.sh repl src_v3 watch --subject 'repl.>' --filter 'ssh src_v1'`
+- **Subtone Logs**: The orchestrator runs these as "subtones". Use `subtone-list` and `subtone-log` in the REPL to inspect hung or verbose remote processes.
 
-# Run one command on one host (preferred flag: --host; --node still works)
-./dialtone.sh ssh src_v1 run --host rover --cmd "hostname"
-./dialtone.sh ssh src_v1 run --host darkmac --cmd "pwd" --user tim --port 22
-./dialtone.sh ssh src_v1 run --host legion --cmd "whoami"
-./dialtone.sh ssh src_v1 run --host gold --cmd "uname -a"
-./dialtone.sh ssh src_v1 run --host grey --cmd "hostname" --user user --password 'mac3edc#EDC'
-
-# Run one command on all nodes
-./dialtone.sh ssh src_v1 run-all --cmd "hostname"
-./dialtone.sh ssh src_v1 run-all --cmd "pwd" --user tim
-
-# Mesh health snapshot (cpu, mem-free, network, disk-free, battery)
-./dialtone.sh ssh src_v1 status
-./dialtone.sh ssh src_v1 status --host all
-./dialtone.sh ssh src_v1 status --host darkmac,gold,legion
-./dialtone.sh ssh src_v1 status --json
-
-# Git-based repo sync across mesh
-./dialtone.sh ssh src_v1 sync-repos
-./dialtone.sh ssh src_v1 sync-repos --branch main
-./dialtone.sh ssh src_v1 sync-repos --branch feat/my-branch --allow-dirty
-./dialtone.sh ssh src_v1 sync-repos --branch feat/my-branch --repo-rover /home/tim/dialtone
-
-# Rsync code sync (single run)
-./dialtone.sh ssh src_v1 sync-code --host gold --src /home/user/dialtone
-./dialtone.sh ssh src_v1 sync-code --host darkmac --src /home/user/dialtone --dest /Users/tim/dialtone --delete
-./dialtone.sh ssh src_v1 sync-code --host all --src /home/user/dialtone --delete
-# skip-self is true by default for --host all; set false to include current node
-./dialtone.sh ssh src_v1 sync-code --host all --src /home/user/dialtone --delete --skip-self=false
-./dialtone.sh ssh src_v1 sync-code --host rover --src /home/user/dialtone --exclude '.env.local'
-
-# Rsync code sync (persistent service mode on local machine)
-./dialtone.sh ssh src_v1 sync-code --host all --src /home/user/dialtone --delete --service --interval 30s
-./dialtone.sh ssh src_v1 sync-code --service-status
-./dialtone.sh ssh src_v1 sync-code --service-stop
-
-# Bootstrap a host (sync + install + verify)
-./dialtone.sh ssh src_v1 bootstrap --host gold --src /home/user/dialtone --dest /Users/user/dialtone --delete
-./dialtone.sh ssh src_v1 bootstrap --host darkmac --src /home/user/dialtone --dest /Users/tim/dialtone --delete
-./dialtone.sh ssh src_v1 bootstrap --host all --src /home/user/dialtone --delete
-./dialtone.sh ssh src_v1 bootstrap --host legion --no-sync --install-cmd "./dialtone.sh go src_v1 install"
-./dialtone.sh ssh src_v1 bootstrap --host rover --install-cmd "./dialtone.sh go src_v1 install" --verify-cmd "./dialtone.sh go src_v1 exec version"
-
-# Plugin verification suite
-./dialtone.sh ssh src_v1 test
-```
-
-## CLI
-
-- `./dialtone.sh ssh src_v1 mesh`
-- `./dialtone.sh ssh src_v1 keygen --host wsl`
-- `./dialtone.sh ssh src_v1 key-install --host wsl --password '<initial-password>'`
-- `./dialtone.sh ssh src_v1 key-setup --host wsl --password '<initial-password>'`
-- `./dialtone.sh ssh src_v1 format`
-- `./dialtone.sh ssh src_v1 tailnet-check`
-- `./dialtone.sh ssh src_v1 run --host rover --cmd "hostname"`
-- `./dialtone.sh ssh src_v1 resolve --host rover`
-- `./dialtone.sh ssh src_v1 probe --host rover --timeout 5s`
-- `./dialtone.sh ssh src_v1 run --host rover --cmd "hostname" --connect-timeout 5s --debug`
-- `./dialtone.sh ssh src_v1 run --host rover --cmd "hostname" --key-path /path/to/id_ed25519`
-- `./dialtone.sh ssh src_v1 run-all --cmd "hostname"`
-- `./dialtone.sh ssh src_v1 status --host all`
-- `./dialtone.sh ssh src_v1 sync-repos --branch feat/robot-src-v4-split-runtime`
-- `./dialtone.sh ssh src_v1 sync-code --host rover --src /home/user/dialtone --dest /home/tim/dialtone --delete`
-- `./dialtone.sh ssh src_v1 sync-code --host all --src /home/user/dialtone --delete --service --interval 30s`
-- `./dialtone.sh ssh src_v1 sync-code --service-status`
-- `./dialtone.sh ssh src_v1 sync-code --service-stop`
-- `./dialtone.sh ssh src_v1 bootstrap --host darkmac --src /home/user/dialtone --dest /Users/tim/dialtone --delete`
-- `./dialtone.sh ssh src_v1 test`
+### Mesh Behavior & Defaults
+- **Source of Truth**: `env/dialtone.json` (the `mesh_nodes` array).
+- **Auth**: Explicit only from mesh node config or CLI flags. No implicit `~/.ssh` scan or ssh-agent fallback.
+- **Route Preference**: Nodes prioritize **Tailscale** (`.ts.net`) first, then **LAN IPs**, then link-local fallbacks.
+- **Node Specifics**:
+  - `legion`: Windows host; prefers PowerShell transport when called from WSL.
+  - `rover`: Linux (Raspberry Pi); has complex route preferences including link-local debug fallbacks.
+  - `gold`/`grey`: macOS hosts; use standard Go SSH transport.
 
 ## Bootstrap
 
@@ -182,32 +116,38 @@ Notes:
 ./dialtone.sh ssh src_v1 sync-code --service-stop
 ```
 
-## Mesh behavior
-
-- Node aliases are centralized in `src_v1/go/mesh.go`.
-- Preferred command flag is `--host`; `--node` is retained as a backward-compatible alias.
-- Active mesh hosts are `darkmac`, `gold`, `legion`, `rover`, and `wsl` (no `chroma` entry).
-- Darkmac default mesh account is `tim` (home: `/Users/tim`).
-- Gold default mesh account is `user` (home: `/Users/user`).
-- `tailnet-check` performs an actual SSH handshake over each node's `.ts.net` candidate and prints a compact pass/fail table.
-- Default transport is Go SSH (`golang.org/x/crypto/ssh`).
-- Legion SSH defaults use port `22` (user `user`), while WSL-local command execution can still prefer local PowerShell transport.
-- Gold, Grey, WSL, Legion, and Rover now all carry explicit tailnet host candidates in `env/dialtone.json` under `mesh_nodes`.
-- Gold host selection prefers tailscale (`gold.shad-artichoke.ts.net`) first, then LAN (`192.168.4.55`).
-- Grey host selection prefers tailscale (`grey.shad-artichoke.ts.net`) first, then LAN (`192.168.4.31`).
-- Rover host selection prefers tailscale (`rover-1.shad-artichoke.ts.net`) first, then WLAN/LAN (`192.168.4.36` on cashwifi), and only then link-local (`169.254.217.151`, `link-local`) as a debug fallback.
-- WSL host selection prefers tailscale (`wsl.shad-artichoke.ts.net`) first, then LAN (`192.168.4.52`).
-- Legion host selection prefers tailscale (`legion.shad-artichoke.ts.net`) first, then LAN (`192.168.4.52`), while still using local PowerShell transport from WSL when requested.
-- `sync-repos` updates each node to the same branch using node-specific repo paths.
-- `sync-repos` skips dirty repos by default; use `--allow-dirty` to force.
-- Per-node repo overrides are supported with flags like `--repo-legion /path/to/dialtone`.
-- `sync-code` uses `rsync` to mirror working tree changes without requiring commits.
-- `sync-code` excludes `node_modules`, `.pixi`, `.git`, and `bin` by default.
-- `sync-code --service` installs a local user `systemd` loop service (`dialtone-ssh-sync-code.service`) that reruns sync at the requested interval.
-- `sync-code --service-status` shows service status.
-- `sync-code --service-stop` stops/disables the service.
-
 ## New machine from scratch
+
+```bash
+# 1) Sync local working tree (no git required on remote)
+./dialtone.sh ssh src_v1 bootstrap \
+  --host darkmac \
+  --src /home/user/dialtone \
+  --dest /Users/tim/dialtone \
+  --delete
+
+# 2) Bootstrap all mesh nodes with node default destinations
+./dialtone.sh ssh src_v1 bootstrap \
+  --host all \
+  --src /home/user/dialtone \
+  --delete
+
+# 3) Optional: add extra remote install steps
+./dialtone.sh ssh src_v1 bootstrap \
+  --host rover \
+  --src /home/user/dialtone \
+  --dest /home/tim/dialtone \
+  --install-cmd "printf 'y\n' | ./dialtone.sh go src_v1 install" \
+  --install-cmd "./dialtone.sh go src_v1 exec env GOROOT" \
+  --verify-cmd "./dialtone.sh go src_v1 exec version"
+
+# 4) Re-run install/verify only (no file sync)
+./dialtone.sh ssh src_v1 bootstrap \
+  --host darkmac \
+  --no-sync \
+  --install-cmd "printf 'y\n' | ./dialtone.sh go src_v1 install"
+```
+
 
 ```bash
 # 1) Sync local working tree (no git required on remote)

@@ -150,10 +150,14 @@ func maybeReexecInNixShell() {
 }
 
 func initLogger() {
-	mirrorStdout := strings.TrimSpace(os.Getenv("DIALTONE_LOG_STDOUT")) == "1"
-	// No-arg invocation is interactive entry; always surface logs to stdout.
-	if !mirrorStdout && len(os.Args) < 2 {
-		mirrorStdout = true
+	mirrorStdout := true
+	if raw := strings.TrimSpace(strings.ToLower(os.Getenv("DIALTONE_LOG_STDOUT"))); raw != "" {
+		switch raw {
+		case "0", "false", "no", "off":
+			mirrorStdout = false
+		default:
+			mirrorStdout = true
+		}
 	}
 	if mirrorStdout {
 		logs.SetOutput(os.Stdout)
@@ -174,8 +178,27 @@ func initLogger() {
 	}
 }
 
-func logLine(category, msg string) {
-	logs.Info("[%s] %s", category, msg)
+func normalizeGlobalFlags() {
+	if len(os.Args) <= 1 {
+		return
+	}
+	filtered := make([]string, 0, len(os.Args))
+	filtered = append(filtered, os.Args[0])
+	for i := 1; i < len(os.Args); i++ {
+		arg := strings.TrimSpace(os.Args[i])
+		if arg == "" {
+			continue
+		}
+		switch arg {
+		case "--stdout":
+			continue
+		case "--no-stdout":
+			_ = os.Setenv("DIALTONE_LOG_STDOUT", "0")
+			continue
+		}
+		filtered = append(filtered, os.Args[i])
+	}
+	os.Args = filtered
 }
 
 // LoadConfig loads environment variables from env/dialtone.json.
@@ -209,7 +232,6 @@ func LoadConfig() {
 						}
 					}
 				}
-				logLine("CONFIG", "Loaded from "+jsonPath)
 			}
 		}
 	}
@@ -342,9 +364,12 @@ func ensureBunRequirement(version string) error {
 func main() {
 	bootstrapDialtoneRuntimeEnv()
 	maybeReexecInNixShell()
+	normalizeGlobalFlags()
 	initLogger()
 	LoadConfig()
-	logBootstrapChecks()
+	if strings.TrimSpace(os.Getenv("DIALTONE_INTERNAL_SUBTONE")) != "1" {
+		logBootstrapChecks()
+	}
 	defer func() {
 		if logFile != nil {
 			logFile.Close()
@@ -354,12 +379,12 @@ func main() {
 	if len(os.Args) < 2 {
 		missing := detectMissingForREPL()
 		if len(missing) > 0 {
-			logs.Info("DIALTONE> REPL prerequisites are missing.")
+			logs.System("REPL prerequisites are missing.")
 			for _, m := range missing {
-				logs.Info("DIALTONE> - %s: %s", m.Tool, m.Why)
-				logs.Info("DIALTONE>   install: %s", m.Command)
+				logs.System("- %s: %s", m.Tool, m.Why)
+				logs.System("  install: %s", m.Command)
 			}
-			logs.Info("DIALTONE> After installing, run ./dialtone.sh again.")
+			logs.System("After installing, run ./dialtone.sh again.")
 			return
 		}
 		if err := startDefaultMultiplayerREPL(); err != nil {
@@ -468,9 +493,9 @@ func extractTransportFlags(command string, args []string) (targetHost string, ss
 			}
 			continue
 		}
-		// --host is now a global REPL routing flag, except for ssh plugin
-		// subcommands where --host is still the ssh target flag.
-		if command != "ssh" {
+		// --host is a global REPL routing flag for regular plugin commands.
+		// Keep plugin-local --host semantics for ssh and repl subcommands.
+		if command != "ssh" && command != "repl" {
 			if a == "--host" && i+1 < len(args) {
 				h := strings.TrimSpace(args[i+1])
 				if h != "" {
@@ -493,21 +518,13 @@ func extractTransportFlags(command string, args []string) (targetHost string, ss
 }
 
 func shouldRouteCommandViaREPL(command string, args []string) bool {
-	if strings.TrimSpace(os.Getenv("DIALTONE_SUBTONE")) == "1" {
+	if strings.TrimSpace(os.Getenv("DIALTONE_INTERNAL_SUBTONE")) == "1" {
 		return false
 	}
 	switch strings.TrimSpace(command) {
 	case "", "help", "-h", "--help", "exit", "branch", "plugins", "dev":
 		return false
 	case "repl":
-		if len(args) >= 2 && strings.HasPrefix(strings.TrimSpace(args[0]), "src_v") {
-			switch strings.TrimSpace(args[1]) {
-			case "install", "format", "fmt", "lint", "build", "test":
-				return true
-			default:
-				return false
-			}
-		}
 		return false
 	default:
 		return true
@@ -675,7 +692,7 @@ func runViaSSHHost(host, command string, args []string) error {
 	if host == "" {
 		return fmt.Errorf("--ssh-host requires a host value")
 	}
-	baseArgs := append([]string{"./dialtone.sh", "--subtone", command}, args...)
+	baseArgs := append([]string{"./dialtone.sh", "--subtone-internal", command}, args...)
 	remoteDialtoneCmd := shellJoin(baseArgs)
 	remoteRepo := strings.TrimSpace(os.Getenv("DIALTONE_REMOTE_REPO"))
 	var remoteCmd string
@@ -770,7 +787,7 @@ func logBootstrapChecks() {
 	meshFile := strings.TrimSpace(os.Getenv("DIALTONE_MESH_CONFIG"))
 	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
 
-	logs.Info("DIALTONE> Bootstrap checks:")
+	logs.System("Bootstrap checks:")
 	logPathCheck("repo root", repoRoot)
 	logPathCheck("src root", srcRoot)
 	logPathCheck("env dir", envDir)
@@ -782,18 +799,18 @@ func logBootstrapChecks() {
 	if natsURL == "" {
 		natsURL = "nats://127.0.0.1:4222"
 	}
-	logs.Info("DIALTONE> State:")
+	logs.System("State:")
 	natsReachable := endpointReachable(natsURL, 700*time.Millisecond)
-	logs.Info("DIALTONE> - nats endpoint %s reachable=%t", natsURL, natsReachable)
-	logs.Info("DIALTONE> - repl leader process running=%t", replLeaderProcessRunning())
+	logs.System("- nats endpoint %s reachable=%t", natsURL, natsReachable)
+	logs.System("- repl leader process running=%t", replLeaderProcessRunning())
 
 	if active, provider, tailnet := tsnetv1.NativeTailnetConnected(); active {
-		logs.Info("DIALTONE> - tailnet active=true provider=%s tailnet=%s", provider, strings.TrimSpace(tailnet))
+		logs.System("- tailnet active=true provider=%s tailnet=%s", provider, strings.TrimSpace(tailnet))
 	} else {
-		logs.Info("DIALTONE> - tailnet active=false")
+		logs.System("- tailnet active=false")
 	}
 
-	logs.Info("DIALTONE> - cloudflare running=%t", cloudflaredRunning())
+	logs.System("- cloudflare running=%t", cloudflaredRunning())
 
 	host := strings.TrimSpace(os.Getenv("DIALTONE_REPL_BOOTSTRAP_HTTP_HOST"))
 	if host == "" {
@@ -806,20 +823,20 @@ func logBootstrapChecks() {
 		}
 	}
 	bootstrapRunning := bootstrapHTTPReachable(host, port)
-	logs.Info("DIALTONE> - bootstrap http %s running=%t", fmt.Sprintf("http://%s:%d/install.sh", host, port), bootstrapRunning)
-	logs.Info("DIALTONE> - bootstrap http process running=%t", bootstrapHTTPProcessRunning())
+	logs.System("- bootstrap http %s running=%t", fmt.Sprintf("http://%s:%d/install.sh", host, port), bootstrapRunning)
+	logs.System("- bootstrap http process running=%t", bootstrapHTTPProcessRunning())
 
 	replScaffold := fileExists(filepath.Join(srcRoot, "plugins", "repl", "scaffold", "main.go"))
 	procScaffold := fileExists(filepath.Join(srcRoot, "plugins", "proc", "scaffold", "main.go"))
 	sshScaffold := fileExists(filepath.Join(srcRoot, "plugins", "ssh", "scaffold", "main.go"))
-	logs.Info("DIALTONE> Command checks:")
-	logs.Info("DIALTONE> - help command available=true")
-	logs.Info("DIALTONE> - ps command available=%t (proc scaffold)", procScaffold)
-	logs.Info("DIALTONE> - ssh command available=%t (ssh scaffold)", sshScaffold)
-	logs.Info("DIALTONE> - repl command path available=%t (repl scaffold)", replScaffold)
-	logs.Info("DIALTONE> - repl injection ready=%t", natsReachable && replScaffold)
-	logs.Info("DIALTONE> - repl autostart enabled=%t", replAutostartEnabled())
-	logs.Info("DIALTONE> - bootstrap http autostart enabled=%t", replBootstrapHTTPAutostartEnabled())
+	logs.System("Command checks:")
+	logs.System("- help command available=true")
+	logs.System("- ps command available=%t (proc scaffold)", procScaffold)
+	logs.System("- ssh command available=%t (ssh scaffold)", sshScaffold)
+	logs.System("- repl command path available=%t (repl scaffold)", replScaffold)
+	logs.System("- repl injection ready=%t", natsReachable && replScaffold)
+	logs.System("- repl autostart enabled=%t", replAutostartEnabled())
+	logs.System("- bootstrap http autostart enabled=%t", replBootstrapHTTPAutostartEnabled())
 
 	validateEnvJSON(envFile)
 }
@@ -827,19 +844,19 @@ func logBootstrapChecks() {
 func logPathCheck(label, path string) {
 	p := strings.TrimSpace(path)
 	if p == "" {
-		logs.Info("DIALTONE> - %s: <empty>", label)
+		logs.System("- %s: <empty>", label)
 		return
 	}
 	info, err := os.Stat(p)
 	if err != nil {
-		logs.Info("DIALTONE> - %s: %s (missing)", label, p)
+		logs.System("- %s: %s (missing)", label, p)
 		return
 	}
 	kind := "file"
 	if info.IsDir() {
 		kind = "dir"
 	}
-	logs.Info("DIALTONE> - %s: %s (%s)", label, p, kind)
+	logs.System("- %s: %s (%s)", label, p, kind)
 }
 
 func cloudflaredRunning() bool {
@@ -887,36 +904,36 @@ func bootstrapHTTPReachable(host string, port int) bool {
 
 func validateEnvJSON(path string) {
 	path = strings.TrimSpace(path)
-	logs.Info("DIALTONE> env/dialtone.json checks:")
+	logs.System("env/dialtone.json checks:")
 	if path == "" {
-		logs.Info("DIALTONE> - format valid=false (env file path empty)")
+		logs.System("- format valid=false (env file path empty)")
 		return
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		logs.Info("DIALTONE> - format valid=false (read error: %v)", err)
+		logs.System("- format valid=false (read error: %v)", err)
 		return
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(raw, &doc); err != nil {
-		logs.Info("DIALTONE> - format valid=false (json error: %v)", err)
+		logs.System("- format valid=false (json error: %v)", err)
 		return
 	}
-	logs.Info("DIALTONE> - format valid=true")
+	logs.System("- format valid=true")
 
 	requiredCore := []string{"DIALTONE_ENV", "DIALTONE_REPO_ROOT"}
 	for _, key := range requiredCore {
-		logs.Info("DIALTONE> - required %s present=%t", key, nonEmptyJSONValue(doc, key))
+		logs.System("- required %s present=%t", key, nonEmptyJSONValue(doc, key))
 	}
 
 	tsReady := nonEmptyJSONValue(doc, "TS_AUTHKEY") || (nonEmptyJSONValue(doc, "TS_API_KEY") && nonEmptyJSONValue(doc, "TS_TAILNET"))
-	logs.Info("DIALTONE> - tsnet bootstrap keys present=%t (TS_AUTHKEY or TS_API_KEY+TS_TAILNET)", tsReady)
+	logs.System("- tsnet bootstrap keys present=%t (TS_AUTHKEY or TS_API_KEY+TS_TAILNET)", tsReady)
 
 	cfReady := nonEmptyJSONValue(doc, "CF_TUNNEL_TOKEN_SHELL") || (nonEmptyJSONValue(doc, "CLOUDFLARE_API_TOKEN") && nonEmptyJSONValue(doc, "CLOUDFLARE_ACCOUNT_ID"))
-	logs.Info("DIALTONE> - cloudflare bootstrap keys present=%t (CF_TUNNEL_TOKEN_SHELL or CLOUDFLARE_API_TOKEN+CLOUDFLARE_ACCOUNT_ID)", cfReady)
+	logs.System("- cloudflare bootstrap keys present=%t (CF_TUNNEL_TOKEN_SHELL or CLOUDFLARE_API_TOKEN+CLOUDFLARE_ACCOUNT_ID)", cfReady)
 
 	nodesOK, nodeCount := meshNodesReady(doc["mesh_nodes"])
-	logs.Info("DIALTONE> - mesh_nodes valid=%t count=%d (each needs name+host+user)", nodesOK, nodeCount)
+	logs.System("- mesh_nodes valid=%t count=%d (each needs name+host+user)", nodesOK, nodeCount)
 }
 
 func nonEmptyJSONValue(doc map[string]any, key string) bool {
@@ -1042,7 +1059,7 @@ func printDevUsage() {
 	}
 	logs.Info("Usage: %s <command> [options]", script)
 	logs.Info("Global flags:")
-	logs.Info("  --stdout             Mirror logs to stdout (logs still publish to NATS)")
+	logs.Info("  --no-stdout          Disable stdout mirroring (logs still publish to NATS)")
 	logs.Info("  --target-host <host> Route injected command to a specific REPL host over NATS/tsnet")
 	logs.Info("  --host <host>        Alias of --target-host (NATS routing, not SSH)")
 	logs.Info("  --ssh-host <host>    Run any command over SSH transport via ssh src_v1 run --host <host>")
@@ -1233,7 +1250,7 @@ func startDefaultMultiplayerREPL() error {
 		return fmt.Errorf("no REPL daemon detected on %s (autostart disabled). start daemon with: ./dialtone.sh repl src_v3 service --mode run --room %s", clientURL, room)
 	}
 	if !endpointReachable(clientURL, 700*time.Millisecond) {
-		logs.Info("DIALTONE> No REPL leader detected on %s; starting background leader for room %s", clientURL, room)
+		logs.System("No REPL leader detected on %s; starting background leader for room %s", clientURL, room)
 		if err := replv3.EnsureLeaderRunning(clientURL, room); err != nil {
 			return err
 		}
@@ -1252,7 +1269,7 @@ func startDefaultMultiplayerREPL() error {
 		if err := replv3.EnsureBootstrapHTTPRunning(host, port); err != nil {
 			return err
 		}
-		logs.Info("DIALTONE> Bootstrap installer available at http://%s:%d/install.sh", host, port)
+		logs.System("Bootstrap installer available at http://%s:%d/install.sh", host, port)
 	}
 	logREPLStartupState(clientURL, room)
 	return replv3.RunJoin(joinArgs)
@@ -1269,32 +1286,32 @@ func logREPLStartupState(clientURL, room string) {
 		memText = "unknown"
 	}
 
-	logs.Info("DIALTONE> REPL startup state:")
-	logs.Info("DIALTONE> - repl version=%s host=%s os=%s arch=%s cpu_cores=%d mem_total=%s", strings.TrimSpace(replv3.BuildVersion), hostName, runtime.GOOS, runtime.GOARCH, cpuCores, memText)
-	logs.Info("DIALTONE> - room=%s nats=%s reachable=%t", strings.TrimSpace(room), strings.TrimSpace(clientURL), endpointReachable(clientURL, 700*time.Millisecond))
+	logs.System("REPL startup state:")
+	logs.System("- repl version=%s host=%s os=%s arch=%s cpu_cores=%d mem_total=%s", strings.TrimSpace(replv3.BuildVersion), hostName, runtime.GOOS, runtime.GOARCH, cpuCores, memText)
+	logs.System("- room=%s nats=%s reachable=%t", strings.TrimSpace(room), strings.TrimSpace(clientURL), endpointReachable(clientURL, 700*time.Millisecond))
 
 	pids := replLeaderPIDs()
 	if len(pids) == 0 {
-		logs.Info("DIALTONE> - repl leader pid=<none>")
+		logs.System("- repl leader pid=<none>")
 	} else {
-		logs.Info("DIALTONE> - repl leader pid(s)=%s", joinInts(pids, ","))
+		logs.System("- repl leader pid(s)=%s", joinInts(pids, ","))
 		for _, pid := range pids {
 			cpuPct, rssKB, etime := replProcessStats(pid)
 			rssText := "-"
 			if rssKB > 0 {
 				rssText = humanizeBytes(uint64(rssKB) * 1024)
 			}
-			logs.Info("DIALTONE>   pid=%d cpu=%s%% rss=%s etime=%s", pid, cpuPct, rssText, etime)
+			logs.System("  pid=%d cpu=%s%% rss=%s etime=%s", pid, cpuPct, rssText, etime)
 		}
 	}
 
 	if active, provider, tailnet := tsnetv1.NativeTailnetConnected(); active {
-		logs.Info("DIALTONE> - native tailscale active=true provider=%s tailnet=%s", provider, strings.TrimSpace(tailnet))
+		logs.System("- native tailscale active=true provider=%s tailnet=%s", provider, strings.TrimSpace(tailnet))
 	} else {
-		logs.Info("DIALTONE> - native tailscale active=false")
+		logs.System("- native tailscale active=false")
 	}
 	if cfg, err := tsnetv1.ResolveConfig(hostName, ""); err == nil {
-		logs.Info("DIALTONE> - tsnet config hostname=%s tailnet=%s auth_key=%t api_key=%t", strings.TrimSpace(cfg.Hostname), strings.TrimSpace(cfg.Tailnet), cfg.AuthKeyPresent, cfg.APIKeyPresent)
+		logs.System("- tsnet config hostname=%s tailnet=%s auth_key=%t api_key=%t", strings.TrimSpace(cfg.Hostname), strings.TrimSpace(cfg.Tailnet), cfg.AuthKeyPresent, cfg.APIKeyPresent)
 	}
 
 	bootstrapHost := strings.TrimSpace(os.Getenv("DIALTONE_REPL_BOOTSTRAP_HTTP_HOST"))
@@ -1307,7 +1324,7 @@ func logREPLStartupState(clientURL, room string) {
 			bootstrapPort = p
 		}
 	}
-	logs.Info("DIALTONE> - bootstrap_http=%s running=%t", fmt.Sprintf("http://%s:%d/install.sh", bootstrapHost, bootstrapPort), bootstrapHTTPReachable(bootstrapHost, bootstrapPort))
+	logs.System("- bootstrap_http=%s running=%t", fmt.Sprintf("http://%s:%d/install.sh", bootstrapHost, bootstrapPort), bootstrapHTTPReachable(bootstrapHost, bootstrapPort))
 }
 
 func replLeaderPIDs() []int {

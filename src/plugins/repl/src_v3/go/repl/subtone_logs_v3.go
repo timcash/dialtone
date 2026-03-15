@@ -2,6 +2,7 @@ package repl
 
 import (
 	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -12,13 +13,38 @@ import (
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
+	"github.com/nats-io/nats.go"
 )
 
 func RunSubtoneList(args []string) error {
 	fs := flag.NewFlagSet("repl-v3-subtone-list", flag.ContinueOnError)
 	count := fs.Int("count", 20, "Number of recent subtones to show")
+	natsURL := fs.String("nats-url", resolveREPLNATSURL(), "NATS URL for querying the live REPL leader")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if items, err := querySubtoneRegistry(strings.TrimSpace(*natsURL), *count); err == nil {
+		if len(items) == 0 {
+			logs.Raw("No recent subtones reported by leader.")
+			return nil
+		}
+		logs.Raw("PID      UPDATED                   STATE    COMMAND")
+		for _, item := range items {
+			state := "done"
+			if item.Active {
+				state = "active"
+			}
+			updated := strings.TrimSpace(item.LastUpdate)
+			if updated == "" {
+				updated = strings.TrimSpace(item.StartedAt)
+			}
+			cmd := strings.TrimSpace(item.Command)
+			if cmd == "" {
+				cmd = "-"
+			}
+			logs.Raw("%-8d %-24s %-8s %s", item.PID, updated, state, cmd)
+		}
+		return nil
 	}
 	logsDir, err := resolveSubtoneLogsDir()
 	if err != nil {
@@ -49,11 +75,24 @@ func RunSubtoneLog(args []string) error {
 	fs := flag.NewFlagSet("repl-v3-subtone-log", flag.ContinueOnError)
 	pid := fs.Int("pid", 0, "Subtone PID")
 	lines := fs.Int("lines", 200, "Max lines to print")
+	natsURL := fs.String("nats-url", resolveREPLNATSURL(), "NATS URL for querying the live REPL leader")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *pid <= 0 {
 		return fmt.Errorf("usage: ./dialtone.sh repl src_v3 subtone-log --pid <pid> [--lines N]")
+	}
+	if item, ok := querySubtoneByPID(strings.TrimSpace(*natsURL), *pid); ok && strings.TrimSpace(item.LogPath) != "" {
+		max := *lines
+		if max <= 0 {
+			max = 200
+		}
+		content, err := tailFileLines(strings.TrimSpace(item.LogPath), max)
+		if err == nil {
+			logs.Raw("Subtone log: %s", strings.TrimSpace(item.LogPath))
+			logs.Raw("%s", content)
+			return nil
+		}
 	}
 	logsDir, err := resolveSubtoneLogsDir()
 	if err != nil {
@@ -161,11 +200,45 @@ func extractSubtoneCommand(path string) string {
 		if strings.Contains(line, " args=") {
 			i := strings.Index(line, "args=")
 			if i >= 0 {
-				return strings.TrimSpace(line[i+5:])
+				return normalizeLoggedArgs(strings.TrimSpace(line[i+5:]))
 			}
 		}
 	}
 	return "-"
+}
+
+func normalizeLoggedArgs(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return raw
+	}
+	if !strings.HasPrefix(raw, "[") || !strings.HasSuffix(raw, "]") {
+		return raw
+	}
+	body := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(raw, "["), "]"))
+	if body == "" {
+		return "-"
+	}
+	fields := strings.Fields(body)
+	if len(fields) == 0 {
+		return raw
+	}
+	args := make([]string, 0, len(fields))
+	for _, field := range fields {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		if unquoted, err := strconv.Unquote(field); err == nil {
+			args = append(args, unquoted)
+			continue
+		}
+		args = append(args, strings.Trim(field, `"`))
+	}
+	if len(args) == 0 {
+		return raw
+	}
+	return strings.Join(args, " ")
 }
 
 func tailFileLines(path string, maxLines int) (string, error) {
@@ -181,4 +254,50 @@ func tailFileLines(path string, maxLines int) (string, error) {
 		lines = lines[len(lines)-maxLines:]
 	}
 	return strings.Join(lines, "\n"), nil
+}
+
+func resolveREPLNATSURL() string {
+	if raw := strings.TrimSpace(os.Getenv("DIALTONE_REPL_NATS_URL")); raw != "" {
+		return raw
+	}
+	return defaultNATSURL
+}
+
+func querySubtoneRegistry(natsURL string, count int) ([]subtoneRegistryItem, error) {
+	natsURL = strings.TrimSpace(natsURL)
+	if natsURL == "" {
+		natsURL = defaultNATSURL
+	}
+	nc, err := nats.Connect(natsURL, nats.Timeout(1200*time.Millisecond))
+	if err != nil {
+		return nil, err
+	}
+	defer nc.Close()
+
+	payload, err := json.Marshal(subtoneRegistryRequest{Count: count})
+	if err != nil {
+		return nil, err
+	}
+	msg, err := nc.Request(subtoneRegistrySubject, payload, 1500*time.Millisecond)
+	if err != nil {
+		return nil, err
+	}
+	var items []subtoneRegistryItem
+	if err := json.Unmarshal(msg.Data, &items); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func querySubtoneByPID(natsURL string, pid int) (subtoneRegistryItem, bool) {
+	items, err := querySubtoneRegistry(natsURL, 0)
+	if err != nil {
+		return subtoneRegistryItem{}, false
+	}
+	for _, item := range items {
+		if item.PID == pid {
+			return item, true
+		}
+	}
+	return subtoneRegistryItem{}, false
 }

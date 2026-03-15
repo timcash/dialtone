@@ -55,7 +55,7 @@ func RunBootstrapHTTP(args []string) error {
 	logs.Info("Cloudflare example:")
 	logs.Info("  ./dialtone.sh cloudflare src_v1 tunnel start shell --url http://127.0.0.1:%d", *port)
 	logs.Info("Remote bootstrap example:")
-	logs.Info("  curl -fsSL https://shell.dialtone.earth/install.sh | bash -s -- --test")
+	logs.Info("  curl -fsSL https://shell.dialtone.earth/install.sh | bash -s -- repl src_v3 test")
 	return srv.ListenAndServe()
 }
 

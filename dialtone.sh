@@ -6,8 +6,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export CGO_ENABLED=0
 ENV_FILE_JSON_DEFAULT="$SCRIPT_DIR/env/dialtone.json"
 
-log_info() { echo "DIALTONE> $*"; }
-log_err() { echo "DIALTONE> ERROR: $*" >&2; }
+log_info() {
+    if [ "${DIALTONE_INTERNAL_SUBTONE:-}" = "1" ]; then
+        return
+    fi
+    if [ "${DIALTONE_CONTEXT:-}" = "repl" ]; then
+        echo "$*"
+        return
+    fi
+    echo "DIALTONE> $*"
+}
+log_err() {
+    if [ "${DIALTONE_CONTEXT:-}" = "repl" ]; then
+        echo "ERROR: $*" >&2
+        return
+    fi
+    echo "DIALTONE> ERROR: $*" >&2
+}
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
@@ -233,9 +248,9 @@ while [[ $# -gt 0 ]]; do
         --env) ENV_OVERRIDE="$2"; shift 2 ;;
         --no-nix) FORCE_NO_NIX=1; shift ;;
         --test)
-            IS_TEST=1
-            PASSTHRU_ARGS+=("--test")
-            shift
+            log_err "Top-level --test is no longer supported."
+            log_err "Use: ./dialtone.sh repl src_v3 test [args]"
+            exit 1
             ;;
         --llm)
             IS_LLM=1
@@ -243,9 +258,14 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --stdout) export DIALTONE_LOG_STDOUT=1; shift ;;
-        --subtone)
-            export DIALTONE_SUBTONE=1
+        --subtone-internal)
+            export DIALTONE_INTERNAL_SUBTONE=1
             shift
+            ;;
+        --subtone)
+            log_err "--subtone is deprecated and not supported."
+            log_err "Subtone mode is internal to DIALTONE> execution paths."
+            exit 1
             ;;
         *) PASSTHRU_ARGS+=("$1"); shift ;;
     esac
@@ -271,6 +291,9 @@ fi
 
 if [ ! -f "$ENV_FILE_JSON" ] && [ -z "$DIALTONE_ONBOARDING_DONE" ]; then
     if [ -z "$ENV_OVERRIDE" ]; then
+        if [ -n "$TEST_ANS_ENV" ] || [ -n "$TEST_ANS_REPO" ]; then
+            IS_TEST=1
+        fi
         run_onboarding "$IS_TEST"
     fi
 fi
