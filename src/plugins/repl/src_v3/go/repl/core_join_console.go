@@ -36,6 +36,9 @@ func (c *joinConsole) PrintLine(msg string) {
 }
 
 func (c *joinConsole) Prompt() {
+	if !c.interactive {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	fmt.Fprintf(c.out, "%s> ", c.prompt)

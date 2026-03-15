@@ -367,7 +367,9 @@ func main() {
 	normalizeGlobalFlags()
 	initLogger()
 	LoadConfig()
-	logBootstrapChecks()
+	if strings.TrimSpace(os.Getenv("DIALTONE_INTERNAL_SUBTONE")) != "1" {
+		logBootstrapChecks()
+	}
 	defer func() {
 		if logFile != nil {
 			logFile.Close()

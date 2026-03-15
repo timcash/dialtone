@@ -27,6 +27,11 @@ func RunProcessClean(args []string) error {
 	patterns := []pattern{
 		{label: "repl-v3-run-go", expr: `go run dev\.go repl src_v3 run`},
 		{label: "repl-v3-run", expr: `plugins/repl/scaffold/main.go src_v3 run`},
+		{label: "repl-v3-watch-go", expr: `go run dev\.go repl src_v3 watch`},
+		{label: "repl-v3-watch-bin", expr: `dev repl src_v3 watch --nats-url`},
+		{label: "repl-v3-join-go", expr: `go run dev\.go repl src_v3 join`},
+		{label: "repl-v3-join-bin", expr: `dev repl src_v3 join --nats-url`},
+		{label: "repl-v3-leader-go", expr: `go run dev\.go repl src_v3 leader`},
 		{label: "repl-v3-leader", expr: `plugins/repl/scaffold/main.go src_v3 leader`},
 		{label: "repl-v3-leader-bin", expr: `src_v3 leader --embedded-nats`},
 		{label: "repl-v3-bootstrap-http", expr: `plugins/repl/scaffold/main.go src_v3 bootstrap-http`},

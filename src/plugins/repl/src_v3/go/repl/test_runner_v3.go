@@ -12,6 +12,17 @@ import (
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
+func replTestVerbose() bool {
+	return strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_VERBOSE")) == "1"
+}
+
+func replTestInfof(format string, args ...any) {
+	if !replTestVerbose() {
+		return
+	}
+	logs.Info(format, args...)
+}
+
 func RunTest(args []string) error {
 	fs := flag.NewFlagSet("repl-v3-test", flag.ContinueOnError)
 	filter := fs.String("filter", "", "Run only matching test steps")
@@ -116,8 +127,8 @@ func runBootstrappedSuite(args []string) error {
 	rawReportPath := filepath.Join(srcRoot, "plugins", "repl", "src_v3", "TEST_RAW.md")
 	_ = os.Remove(reportPath)
 	_ = os.Remove(rawReportPath)
-	logs.Info("REPL v3 bootstrapped suite: repo=%s", repoRoot)
-	logs.Info("REPL v3 bootstrapped suite: cleared reports %s and %s", reportPath, rawReportPath)
+	replTestInfof("REPL v3 bootstrapped suite: repo=%s", repoRoot)
+	replTestInfof("REPL v3 bootstrapped suite: cleared reports %s and %s", reportPath, rawReportPath)
 	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
 	if goBin == "" {
 		goBin = "go"
@@ -131,8 +142,8 @@ func runBootstrappedSuite(args []string) error {
 	cmd.Stdin = os.Stdin
 	cmd.Env = append(os.Environ(), "DIALTONE_REPO_ROOT="+repoRoot, "DIALTONE_SRC_ROOT="+srcRoot)
 	err = cmd.Run()
-	logs.Info("REPL v3 bootstrapped suite reports: %s", reportPath)
-	logs.Info("REPL v3 bootstrapped suite raw reports: %s", rawReportPath)
+	replTestInfof("REPL v3 bootstrapped suite reports: %s", reportPath)
+	replTestInfof("REPL v3 bootstrapped suite raw reports: %s", rawReportPath)
 	return err
 }
 
@@ -182,17 +193,17 @@ func runTmpBootstrapTest(args []string) error {
 		bootstrapRepoURL = serverURL + "/dialtone-main.tar.gz"
 	}
 
-	logs.Info("REPL v3 bootstrap test temp root: %s", tmpRoot)
-	logs.Info("REPL v3 bootstrap test starts with no config file at: %s", tmpConfig)
-	logs.Info("REPL v3 bootstrap install URL: %s", installURL)
+	replTestInfof("REPL v3 bootstrap test temp root: %s", tmpRoot)
+	replTestInfof("REPL v3 bootstrap test starts with no config file at: %s", tmpConfig)
+	replTestInfof("REPL v3 bootstrap install URL: %s", installURL)
 	if serverURL != "" {
-		logs.Info("REPL v3 bootstrap test local server URL: %s", serverURL)
+		replTestInfof("REPL v3 bootstrap test local server URL: %s", serverURL)
 	} else {
-		logs.Info("REPL v3 bootstrap test mode: external install URL (no local bootstrap server)")
+		replTestInfof("REPL v3 bootstrap test mode: external install URL (no local bootstrap server)")
 	}
-	logs.Info("REPL v3 bootstrap test command: (cd %s && curl -fsSL %s | bash -s -- repl src_v3 test ...)", tmpRepo, installURL)
-	logs.Info("REPL v3 bootstrap inject demo command:")
-	logs.Info("  ./dialtone.sh repl src_v3 inject --user llm-codex repl src_v3 add-host --name wsl --host wsl.shad-artichoke.ts.net --user user")
+	replTestInfof("REPL v3 bootstrap test command: (cd %s && curl -fsSL %s | bash -s -- repl src_v3 test ...)", tmpRepo, installURL)
+	replTestInfof("REPL v3 bootstrap inject demo command:")
+	replTestInfof("  ./dialtone.sh repl src_v3 inject --user llm-codex repl src_v3 add-host --name wsl --host wsl.shad-artichoke.ts.net --user user")
 
 	testArgs := append([]string{"repl", "src_v3", "test"}, args...)
 	quotedTestArgs := make([]string, 0, len(testArgs))
@@ -212,6 +223,7 @@ func runTmpBootstrapTest(args []string) error {
 		"TEST_ANS_ENV="+tmpEnv,
 		"TEST_ANS_REPO="+tmpRepo,
 		"DIALTONE_USE_NIX=0",
+		"DIALTONE_LOG_STDOUT=0",
 		"DIALTONE_REPL_V3_TEST_BOOTSTRAPPED=1",
 		"DIALTONE_REPL_NATS_URL=nats://127.0.0.1:47222",
 	)
@@ -246,9 +258,9 @@ func runTmpBootstrapTest(args []string) error {
 	if syncErr := syncTmpReportsToRepo(repoRoot, reportPath, rawReportPath, errorsPath); syncErr != nil {
 		logs.Warn("REPL v3 bootstrap test report sync failed: %v", syncErr)
 	}
-	logs.Info("REPL v3 bootstrap test repo: %s", tmpRepo)
-	logs.Info("REPL v3 bootstrap test report: %s", reportPath)
-	logs.Info("REPL v3 bootstrap test raw report: %s", rawReportPath)
+	replTestInfof("REPL v3 bootstrap test repo: %s", tmpRepo)
+	replTestInfof("REPL v3 bootstrap test report: %s", reportPath)
+	replTestInfof("REPL v3 bootstrap test raw report: %s", rawReportPath)
 	return err
 }
 

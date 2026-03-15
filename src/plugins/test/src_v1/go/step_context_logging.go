@@ -19,7 +19,9 @@ func (sc *StepContext) Infof(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	sc.appendStepLog("INFO", msg)
 	source := sc.callerLocation()
-	logs.InfoFromTest(source, "[STEP:%s] %s", sc.Name, msg)
+	if !sc.quietConsole {
+		logs.InfoFromTest(source, "[STEP:%s] %s", sc.Name, msg)
+	}
 	if sc.logger != nil {
 		_ = sc.logger.InfofFromTest(source, "[STEP:%s] %s", sc.Name, msg)
 	}
@@ -29,7 +31,9 @@ func (sc *StepContext) Warnf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	sc.appendStepLog("WARN", msg)
 	source := sc.callerLocation()
-	logs.WarnFromTest(source, "[STEP:%s] %s", sc.Name, msg)
+	if !sc.quietConsole {
+		logs.WarnFromTest(source, "[STEP:%s] %s", sc.Name, msg)
+	}
 	if sc.logger != nil {
 		_ = sc.logger.WarnfFromTest(source, "[STEP:%s] %s", sc.Name, msg)
 	}
@@ -39,7 +43,9 @@ func (sc *StepContext) Debugf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	sc.appendStepLog("DEBUG", msg)
 	source := sc.callerLocation()
-	logs.DebugFromTest(source, "[STEP:%s] %s", sc.Name, msg)
+	if !sc.quietConsole {
+		logs.DebugFromTest(source, "[STEP:%s] %s", sc.Name, msg)
+	}
 	if sc.logger != nil {
 		_ = sc.logger.InfofFromTest(source, "[STEP:%s] %s", sc.Name, msg)
 	}
@@ -66,7 +72,9 @@ func (sc *StepContext) TestPassf(format string, args ...any) {
 	source := sc.callerLocation()
 	line := fmt.Sprintf("[TEST][PASS] [STEP:%s] %s", sc.Name, msg)
 	sc.appendStepLog("PASS", line)
-	logs.InfoFromTest(source, "%s", line)
+	if !sc.quietConsole {
+		logs.InfoFromTest(source, "%s", line)
+	}
 	if sc.passLogger != nil {
 		_ = sc.passLogger.InfofFromTest(source, "%s", line)
 		return
@@ -74,6 +82,10 @@ func (sc *StepContext) TestPassf(format string, args ...any) {
 	if sc.logger != nil {
 		_ = sc.logger.InfofFromTest(source, "%s", line)
 	}
+	if strings.HasPrefix(msg, "report: ") || msg == "completed" {
+		return
+	}
+	sc.publishStatus("validation", fmt.Sprintf("Validation passed for %s: %s", sc.Name, msg))
 }
 
 func (sc *StepContext) TestFailf(format string, args ...any) {
@@ -96,6 +108,7 @@ func (sc *StepContext) TestFailf(format string, args ...any) {
 	if sc.logger != nil {
 		_ = sc.logger.ErrorfFromTest(source, "%s", line)
 	}
+	sc.publishStatus("validation", fmt.Sprintf("Validation failed for %s: %s", sc.Name, msg))
 }
 
 func (sc *StepContext) WaitForMessage(subject string, pattern string, timeout time.Duration) error {
