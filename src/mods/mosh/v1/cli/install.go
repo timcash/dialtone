@@ -48,6 +48,19 @@ func runInstall(args []string) error {
 }
 
 func runMoshAvailabilityCheck(nixBin, repoRoot string, pkgs []string, nixExpr string) error {
+	if os.Getenv("DIALTONE_NIX_ACTIVE") == "1" {
+		cmd := exec.Command("bash", "-lc", "command -v mosh >/dev/null && command -v mosh-server >/dev/null")
+		if strings.TrimSpace(repoRoot) != "" {
+			cmd.Dir = repoRoot
+		}
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("checking mosh availability failed: %w", err)
+		}
+		return nil
+	}
 	base := []string{
 		"--extra-experimental-features", "nix-command",
 		"--extra-experimental-features", "flakes",

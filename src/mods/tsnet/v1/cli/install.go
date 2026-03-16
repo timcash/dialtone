@@ -49,6 +49,13 @@ type installOptions struct {
 }
 
 func runNixShellCommand(command string, arg string, pkgs []string, nixExpr string) error {
+	if os.Getenv("DIALTONE_NIX_ACTIVE") == "1" {
+		cmd := exec.Command(command, arg)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		return cmd.Run()
+	}
 	base := []string{
 		"--extra-experimental-features",
 		"nix-command flakes",
