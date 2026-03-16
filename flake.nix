@@ -51,6 +51,15 @@
               exec go run ./plugins/repl/src_v1/cmd/repld/main.go "$@"
             '';
           };
+          replModV1 = runtimeScript {
+            name = "dialtone-repl-v1";
+            text = ''
+              set -euo pipefail
+              repo_root="''${DIALTONE_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+              cd "$repo_root"
+              exec go run ./src/cli.go repl v1 "$@"
+            '';
+          };
         in
         {
           packages = {
@@ -58,6 +67,7 @@
             camera-service = cameraService;
             mavlink-service = mavlinkService;
             repl-service = replService;
+            repl-v1 = replModV1;
           };
           apps = {
             robot-server = {
@@ -75,6 +85,10 @@
             repl-service = {
               type = "app";
               program = "${replService}/bin/dialtone-repl-service";
+            };
+            repl-v1 = {
+              type = "app";
+              program = "${replModV1}/bin/dialtone-repl-v1";
             };
           };
           devShells = {
