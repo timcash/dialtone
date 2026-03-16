@@ -40,12 +40,15 @@ func runInstall(args []string) error {
 	} else {
 		base = append(base, modV1NixPackages...)
 	}
-	base = append(base, "--command", "true")
-	cmd := exec.Command("nix", base...)
-	cmd.Env = append(
-		os.Environ(),
-		"DIALTONE_REPO_ROOT="+repoRoot,
-	)
+	base = append(base, "--command", "bash", "-lc", "command -v bash >/dev/null && command -v git >/dev/null && command -v go >/dev/null && command -v ssh >/dev/null")
+	cmd := exec.Command("bash", "-lc", "command -v bash >/dev/null && command -v git >/dev/null && command -v go >/dev/null && command -v ssh >/dev/null")
+	if os.Getenv("DIALTONE_NIX_ACTIVE") != "1" {
+		cmd = exec.Command("nix", base...)
+		cmd.Env = append(
+			os.Environ(),
+			"DIALTONE_REPO_ROOT="+repoRoot,
+		)
+	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
