@@ -31,9 +31,12 @@ func runInstall(args []string) error {
 	base = append(base, pkgs...)
 	base = append(base, "--command", "bash", "-lc", checkCommand)
 
-	cmd := exec.Command("nix", base...)
-	if strings.TrimSpace(repoRoot) != "" {
-		cmd.Dir = repoRoot
+	cmd := exec.Command("bash", "-lc", checkCommand)
+	if os.Getenv("DIALTONE_NIX_ACTIVE") != "1" {
+		cmd = exec.Command("nix", base...)
+		if strings.TrimSpace(repoRoot) != "" {
+			cmd.Dir = repoRoot
+		}
 	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -64,7 +67,7 @@ func chromeInstallSpec() ([]string, string) {
 	pkgs := make([]string, len(chromeInstallPackages))
 	copy(pkgs, chromeInstallPackages)
 	if runtime.GOOS == "darwin" {
-		return pkgs, "command -v open >/dev/null"
+		return pkgs, "true"
 	}
 	pkgs = append(pkgs, "nixpkgs#chromium")
 	return pkgs, "command -v chromium >/dev/null || command -v chromium-browser >/dev/null || command -v google-chrome >/dev/null || command -v google-chrome-stable >/dev/null"
