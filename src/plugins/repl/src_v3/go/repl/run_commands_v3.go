@@ -18,7 +18,7 @@ import (
 
 func Run(args []string) error {
 	fs := flag.NewFlagSet("repl-v3-run", flag.ContinueOnError)
-	natsURL := fs.String("nats-url", defaultNATSURL, "NATS URL")
+	natsURL := fs.String("nats-url", resolveREPLNATSURL(), "NATS URL")
 	room := fs.String("room", defaultRoom, "Shared room name")
 	name := fs.String("name", DefaultPromptName(), "Prompt name for this client")
 	if err := fs.Parse(args); err != nil {
@@ -86,7 +86,7 @@ func RunInstall(args []string) error {
 
 func RunWatch(args []string) error {
 	fs := flag.NewFlagSet("repl-v3-watch", flag.ContinueOnError)
-	natsURL := fs.String("nats-url", defaultNATSURL, "NATS URL")
+	natsURL := fs.String("nats-url", resolveREPLNATSURL(), "NATS URL")
 	subject := fs.String("subject", "repl.>", "NATS subject")
 	filter := fs.String("filter", "", "Only print messages containing this text")
 	if err := fs.Parse(args); err != nil {

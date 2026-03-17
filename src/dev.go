@@ -19,6 +19,7 @@ import (
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	replv3 "dialtone/dev/plugins/repl/src_v3/go/repl"
 	tsnetv1 "dialtone/dev/plugins/tsnet/src_v1/go"
+	"github.com/nats-io/nats.go"
 )
 
 var logFile *os.File
@@ -367,7 +368,7 @@ func main() {
 	normalizeGlobalFlags()
 	initLogger()
 	LoadConfig()
-	if strings.TrimSpace(os.Getenv("DIALTONE_INTERNAL_SUBTONE")) != "1" {
+	if strings.TrimSpace(os.Getenv("DIALTONE_INTERNAL_SUBTONE")) != "1" && shouldLogBootstrapChecks() {
 		logBootstrapChecks()
 	}
 	defer func() {
@@ -493,9 +494,10 @@ func extractTransportFlags(command string, args []string) (targetHost string, ss
 			}
 			continue
 		}
-		// --host is a global REPL routing flag for regular plugin commands.
-		// Keep plugin-local --host semantics for ssh and repl subcommands.
-		if command != "ssh" && command != "repl" {
+		// --host is a global REPL routing flag for commands that don't define
+		// plugin-local host semantics. Keep plugin-local --host for commands
+		// that already use it as an operational target/bind flag.
+		if command != "ssh" && command != "repl" && command != "autoswap" && command != "robot" {
 			if a == "--host" && i+1 < len(args) {
 				h := strings.TrimSpace(args[i+1])
 				if h != "" {
@@ -528,6 +530,21 @@ func shouldRouteCommandViaREPL(command string, args []string) bool {
 		return false
 	default:
 		return true
+	}
+}
+
+func shouldLogBootstrapChecks() bool {
+	if strings.TrimSpace(strings.ToLower(os.Getenv("DIALTONE_VERBOSE_BOOTSTRAP"))) == "1" {
+		return true
+	}
+	if len(os.Args) < 2 {
+		return true
+	}
+	switch strings.TrimSpace(os.Args[1]) {
+	case "", "repl", "help", "-h", "--help", "dev", "plugins", "branch":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -576,6 +593,12 @@ func dispatchViaREPL(command string, args []string, targetHost string) error {
 	}
 	attemptErrs := make([]string, 0, len(candidateNATSURLs))
 	for _, candidateURL := range candidateNATSURLs {
+		if injectionHost == "" && isLocalNATSURL(candidateURL) && !endpointReachable(candidateURL, 700*time.Millisecond) && replAutostartEnabled() {
+			logs.System("No REPL leader detected on %s; starting background leader for room %s", candidateURL, room)
+			if err := replv3.EnsureLeaderRunning(candidateURL, room); err != nil {
+				return fmt.Errorf("repl leader autostart failed: %w", err)
+			}
+		}
 		if injectionHost == "" && isLocalNATSURL(candidateURL) && replBootstrapHTTPAutostartEnabled() {
 			host := strings.TrimSpace(os.Getenv("DIALTONE_REPL_BOOTSTRAP_HTTP_HOST"))
 			if host == "" {
@@ -591,7 +614,9 @@ func dispatchViaREPL(command string, args []string, targetHost string) error {
 				return fmt.Errorf("bootstrap http autostart failed: %w", err)
 			}
 		}
-		if err := replv3.InjectCommand(candidateURL, room, user, injectionHost, line); err == nil {
+		if err := relayInjectedIndexLifecycle(candidateURL, room, user, line, func() error {
+			return replv3.InjectCommand(candidateURL, room, user, injectionHost, line)
+		}); err == nil {
 			return nil
 		} else {
 			attemptErrs = append(attemptErrs, fmt.Sprintf("%s: %v", candidateURL, err))
@@ -601,6 +626,100 @@ func dispatchViaREPL(command string, args []string, targetHost string) error {
 		return fmt.Errorf("no nats endpoint candidates were resolved")
 	}
 	return fmt.Errorf("repl inject failed after %d endpoint attempt(s): %s", len(attemptErrs), strings.Join(attemptErrs, " | "))
+}
+
+func relayInjectedIndexLifecycle(natsURL, room, user, line string, inject func() error) error {
+	if inject == nil {
+		return fmt.Errorf("inject function is required")
+	}
+	nc, err := nats.Connect(strings.TrimSpace(natsURL), nats.Timeout(1500*time.Millisecond))
+	if err != nil {
+		return inject()
+	}
+	defer nc.Close()
+
+	room = sanitizeREPLRoom(room)
+	subject := "repl.room." + room
+	targetInput := "/" + strings.TrimSpace(line)
+	cmdLabel := injectedCommandLabel(line)
+	seenInput := false
+	seenLifecycle := false
+	done := make(chan struct{})
+	doneClosed := false
+	var subErr error
+	sub, err := nc.Subscribe(subject, func(msg *nats.Msg) {
+		frame := replv3.BusFrame{}
+		if err := json.Unmarshal(msg.Data, &frame); err != nil {
+			return
+		}
+		switch strings.TrimSpace(frame.Type) {
+		case "input":
+			if strings.TrimSpace(frame.From) != strings.TrimSpace(user) {
+				return
+			}
+			if strings.TrimSpace(frame.Message) != targetInput {
+				return
+			}
+			seenInput = true
+			fmt.Fprintf(os.Stdout, "%s> %s\n", strings.TrimSpace(frame.From), strings.TrimSpace(frame.Message))
+		case "line":
+			if !seenInput || strings.TrimSpace(frame.Scope) != "index" {
+				return
+			}
+			msgText := strings.TrimSpace(frame.Message)
+			if !strings.Contains(msgText, cmdLabel) && !seenLifecycle {
+				return
+			}
+			if strings.Contains(msgText, cmdLabel) {
+				seenLifecycle = true
+			}
+			fmt.Fprintf(os.Stdout, "DIALTONE> %s\n", msgText)
+			if strings.Contains(msgText, "Subtone for "+cmdLabel+" is running in background.") || strings.Contains(msgText, "Subtone for "+cmdLabel+" exited with code ") || strings.Contains(msgText, "Subtone for "+cmdLabel+" failed to start") {
+				if !doneClosed {
+					close(done)
+					doneClosed = true
+				}
+			}
+		}
+	})
+	if err != nil {
+		return inject()
+	}
+	defer func() {
+		if unsubErr := sub.Unsubscribe(); unsubErr != nil && subErr == nil {
+			subErr = unsubErr
+		}
+	}()
+	if err := nc.Flush(); err != nil {
+		return inject()
+	}
+	if err := inject(); err != nil {
+		return err
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Minute):
+	}
+	return subErr
+}
+
+func sanitizeREPLRoom(room string) string {
+	room = strings.TrimSpace(room)
+	if room == "" {
+		return "index"
+	}
+	return room
+}
+
+func injectedCommandLabel(line string) string {
+	fields := strings.Fields(strings.TrimSpace(line))
+	if len(fields) == 0 {
+		return ""
+	}
+	if len(fields) == 1 {
+		return fields[0]
+	}
+	return fields[0] + " " + fields[1]
 }
 
 func resolveTargetNATSURLs(host string) []string {

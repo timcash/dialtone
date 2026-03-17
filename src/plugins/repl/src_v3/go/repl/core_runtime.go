@@ -31,6 +31,7 @@ const (
 	defaultRoom    = "index"
 	commandSubject = "repl.cmd"
 	commandQueue   = "repl.leader"
+	indexStatusTag = "DIALTONE_INDEX:"
 )
 
 const (
@@ -141,7 +142,7 @@ func RunLocal(logFn func(category, msg string), args []string) error {
 
 func RunLeader(args []string) error {
 	fs := flag.NewFlagSet("repl-leader", flag.ContinueOnError)
-	natsURL := fs.String("nats-url", defaultNATSURL, "NATS URL")
+	natsURL := fs.String("nats-url", resolveREPLNATSURL(), "NATS URL")
 	room := fs.String("room", defaultRoom, "Primary REPL room")
 	embedded := fs.Bool("embedded-nats", true, "Start embedded NATS on --nats-url")
 	enableTSNet := fs.Bool("tsnet", true, "Start embedded tsnet identity on host when native tailscale is not already connected")
@@ -425,7 +426,7 @@ func RunLeader(args []string) error {
 
 func RunJoin(args []string) error {
 	fs := flag.NewFlagSet("repl-join", flag.ContinueOnError)
-	natsURL := fs.String("nats-url", defaultNATSURL, "NATS URL")
+	natsURL := fs.String("nats-url", resolveREPLNATSURL(), "NATS URL")
 	room := fs.String("room", defaultRoom, "Shared REPL room")
 	name := fs.String("name", DefaultPromptName(), "Prompt name for this client")
 	if err := fs.Parse(args); err != nil {
@@ -802,7 +803,7 @@ func RunJoin(args []string) error {
 
 func RunStatus(args []string) error {
 	fs := flag.NewFlagSet("repl-status", flag.ContinueOnError)
-	natsURL := fs.String("nats-url", defaultNATSURL, "NATS URL")
+	natsURL := fs.String("nats-url", resolveREPLNATSURL(), "NATS URL")
 	room := fs.String("room", defaultRoom, "Shared REPL room")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -1044,6 +1045,10 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 	emitSubtoneLine := func(pid int, stderr bool, line string) {
 		kind, text, ok := normalizeSubtoneLine(line, stderr)
 		if !ok || pid <= 0 {
+			return
+		}
+		if promoted, promotedOK := promotedIndexMessage(text); promotedOK {
+			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", SubtonePID: pid, Message: promoted})
 			return
 		}
 		if lastLineByPID[pid] == kind+"\n"+text {
@@ -1465,7 +1470,7 @@ func normalizeTargetHost(raw string) string {
 func connectNATS(natsURL string, embedded bool) (*nats.Conn, *logs.EmbeddedNATS, string, error) {
 	natsURL = strings.TrimSpace(natsURL)
 	if natsURL == "" {
-		natsURL = defaultNATSURL
+		natsURL = resolveREPLNATSURL()
 	}
 	if embedded {
 		broker, err := logs.StartEmbeddedNATSOnURL(natsURL)
@@ -1549,6 +1554,18 @@ func looksLikeBenignStderr(line string) bool {
 		return true
 	}
 	return false
+}
+
+func promotedIndexMessage(line string) (string, bool) {
+	text := strings.TrimSpace(line)
+	if !strings.HasPrefix(text, indexStatusTag) {
+		return "", false
+	}
+	text = strings.TrimSpace(strings.TrimPrefix(text, indexStatusTag))
+	if text == "" {
+		return "", false
+	}
+	return text, true
 }
 
 func printFrame(w io.Writer, frame BusFrame) {

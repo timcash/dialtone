@@ -62,7 +62,7 @@ func RunService(args []string) error {
 	fs := flag.NewFlagSet("repl-service", flag.ContinueOnError)
 	mode := fs.String("mode", "install", "Service mode: install|run|status")
 	repo := fs.String("repo", "timcash/dialtone", "GitHub repo owner/name")
-	natsURL := fs.String("nats-url", defaultNATSURL, "NATS URL for worker leader")
+	natsURL := fs.String("nats-url", resolveREPLNATSURL(), "NATS URL for worker leader")
 	room := fs.String("room", defaultRoom, "REPL room for worker leader")
 	hostname := fs.String("hostname", DefaultPromptName(), "Host name used by worker leader")
 	checkInterval := fs.Duration("check-interval", 5*time.Minute, "Update check interval")
