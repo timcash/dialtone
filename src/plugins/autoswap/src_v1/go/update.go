@@ -40,6 +40,7 @@ func RunUpdate(args []string) error {
 	if opts.Host == "" {
 		return fmt.Errorf("update requires --host (or ROBOT_HOST env)")
 	}
+	replIndexInfof("autoswap update: checking latest release channel on %s", opts.Host)
 
 	node, err := sshplugin.ResolveMeshNode(opts.Host)
 	if err != nil {
@@ -61,6 +62,7 @@ func RunUpdate(args []string) error {
 		Password: opts.Pass,
 	}
 	logs.Info("[UPDATE] forcing autoswap refresh on mesh node=%s as %s", node.Name, opts.User)
+	replIndexInfof("autoswap update: restarting autoswap service on %s", node.Name)
 
 	cmd := strings.Join([]string{
 		"set -e",
@@ -76,5 +78,7 @@ func RunUpdate(args []string) error {
 	}
 	logs.Raw("%s", strings.TrimSpace(out))
 	logs.Info("[UPDATE] autoswap refresh command completed on %s at %s", node.Name, time.Now().UTC().Format(time.RFC3339))
+	replIndexInfof("autoswap update: switched active manifest on %s", node.Name)
+	replIndexInfof("autoswap update: completed")
 	return nil
 }

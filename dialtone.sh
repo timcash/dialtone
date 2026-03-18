@@ -26,6 +26,18 @@ log_err() {
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
+should_quiet_bootstrap() {
+    local cmd="$1"
+    case "$cmd" in
+        ""|"help"|"-h"|"--help"|"exit"|"branch"|"plugins"|"dev"|"repl")
+            return 1
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+}
+
 expand_home_path() {
     local p="$1"
     [[ "$p" == "~"* ]] && p="${p/#\~/$HOME}"
@@ -313,14 +325,22 @@ export DIALTONE_ENV="$(expand_home_path "$DIALTONE_ENV")"
 export DIALTONE_ENV_FILE="$ENV_FILE_JSON"
 export DIALTONE_MESH_CONFIG="$ENV_FILE_JSON"
 
+QUIET_BOOTSTRAP=0
+PRIMARY_CMD="${PASSTHRU_ARGS[0]:-}"
+if should_quiet_bootstrap "$PRIMARY_CMD"; then
+    QUIET_BOOTSTRAP=1
+fi
+
 # --- 6. Guided Dependency Checks ---
-log_info "Verifying dependencies..."
-log_info "Bootstrap path checks:"
-[ -n "$DIALTONE_REPO_ROOT" ] && { [ -d "$DIALTONE_REPO_ROOT" ] && log_info "- repo root: $DIALTONE_REPO_ROOT (dir)" || log_info "- repo root: $DIALTONE_REPO_ROOT (missing)"; }
-[ -n "$DIALTONE_SRC_ROOT" ] && { [ -d "$DIALTONE_SRC_ROOT" ] && log_info "- src root: $DIALTONE_SRC_ROOT (dir)" || log_info "- src root: $DIALTONE_SRC_ROOT (missing)"; }
-[ -n "$DIALTONE_ENV" ] && { [ -d "$DIALTONE_ENV" ] && log_info "- env dir: $DIALTONE_ENV (dir)" || log_info "- env dir: $DIALTONE_ENV (missing)"; }
-[ -n "$ENV_FILE_JSON" ] && { [ -f "$ENV_FILE_JSON" ] && log_info "- env json: $ENV_FILE_JSON (file)" || log_info "- env json: $ENV_FILE_JSON (missing)"; }
-[ -n "$DIALTONE_MESH_CONFIG" ] && { [ -f "$DIALTONE_MESH_CONFIG" ] && log_info "- mesh config: $DIALTONE_MESH_CONFIG (file)" || log_info "- mesh config: $DIALTONE_MESH_CONFIG (missing)"; }
+if [ "$QUIET_BOOTSTRAP" != "1" ]; then
+    log_info "Verifying dependencies..."
+    log_info "Bootstrap path checks:"
+    [ -n "$DIALTONE_REPO_ROOT" ] && { [ -d "$DIALTONE_REPO_ROOT" ] && log_info "- repo root: $DIALTONE_REPO_ROOT (dir)" || log_info "- repo root: $DIALTONE_REPO_ROOT (missing)"; }
+    [ -n "$DIALTONE_SRC_ROOT" ] && { [ -d "$DIALTONE_SRC_ROOT" ] && log_info "- src root: $DIALTONE_SRC_ROOT (dir)" || log_info "- src root: $DIALTONE_SRC_ROOT (missing)"; }
+    [ -n "$DIALTONE_ENV" ] && { [ -d "$DIALTONE_ENV" ] && log_info "- env dir: $DIALTONE_ENV (dir)" || log_info "- env dir: $DIALTONE_ENV (missing)"; }
+    [ -n "$ENV_FILE_JSON" ] && { [ -f "$ENV_FILE_JSON" ] && log_info "- env json: $ENV_FILE_JSON (file)" || log_info "- env json: $ENV_FILE_JSON (missing)"; }
+    [ -n "$DIALTONE_MESH_CONFIG" ] && { [ -f "$DIALTONE_MESH_CONFIG" ] && log_info "- mesh config: $DIALTONE_MESH_CONFIG (file)" || log_info "- mesh config: $DIALTONE_MESH_CONFIG (missing)"; }
+fi
 
 if [ "$SCRIPT_DIR" != "$DIALTONE_REPO_ROOT" ] && [ -f "$DIALTONE_REPO_ROOT/dialtone.sh" ] && [ -z "$DIALTONE_TRANSFERRED" ]; then
 	log_info "Transferring execution to $DIALTONE_REPO_ROOT/dialtone.sh"
@@ -338,14 +358,14 @@ GO_BIN="$DIALTONE_ENV/go/bin/go"
 if [ ! -x "$GO_BIN" ]; then
     if command_exists go && [ "$DIALTONE_USE_NIX" != "0" ]; then
         GO_BIN="$(command -v go)"
-        log_info "Using system Go: $GO_BIN"
+        [ "$QUIET_BOOTSTRAP" != "1" ] && log_info "Using system Go: $GO_BIN"
     else
         log_info "Go runtime missing. Installing to ${DIALTONE_ENV}..."
         install_go "$DIALTONE_ENV"
         GO_BIN="$DIALTONE_ENV/go/bin/go"
     fi
 else
-    log_info "Using managed Go (Cached): $GO_BIN"
+    [ "$QUIET_BOOTSTRAP" != "1" ] && log_info "Using managed Go (Cached): $GO_BIN"
 fi
 
 
@@ -355,6 +375,6 @@ export PATH="$DIALTONE_ENV/go/bin:$DIALTONE_ENV/bun/bin:$PATH"
 export DIALTONE_GO_BIN="$GO_BIN"
 
 # --- 7. Hand over to Go orchestrator ---
-log_info "Environment ready. Launching Dialtone..."
+[ "$QUIET_BOOTSTRAP" != "1" ] && log_info "Environment ready. Launching Dialtone..."
 cd "$DIALTONE_SRC_ROOT"
 exec "$GO_BIN" run dev.go "${PASSTHRU_ARGS[@]}"

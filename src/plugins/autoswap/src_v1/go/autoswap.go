@@ -21,6 +21,18 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+func replIndexInfof(format string, args ...any) {
+	msg := strings.TrimSpace(fmt.Sprintf(format, args...))
+	if msg == "" {
+		return
+	}
+	if strings.TrimSpace(os.Getenv("DIALTONE_INTERNAL_SUBTONE")) == "1" {
+		logs.Info("DIALTONE_INDEX: %s", msg)
+		return
+	}
+	logs.Info("%s", msg)
+}
+
 type runtimeManifest struct {
 	Name             string `json:"name"`
 	Version          string `json:"version"`
@@ -107,14 +119,17 @@ func Stage(args []string) error {
 	if err != nil {
 		return err
 	}
+	replIndexInfof("autoswap stage: validating manifest inputs")
 	manifestPath, err := materializeManifestForCompose(cfg)
 	if err != nil {
 		return err
 	}
+	replIndexInfof("autoswap stage: resolved manifest %s", manifestPath)
 	art, err := loadAndValidateManifest(manifestPath, cfg.RepoRoot)
 	if err != nil {
 		return err
 	}
+	replIndexInfof("autoswap stage: artifact graph validated")
 	logs.Info("autoswap stage OK manifest=%s", art.ManifestPath)
 	logs.Info("autoswap stage artifacts robot=%s camera=%s mavlink=%s repl=%s ui=%s", art.RobotBin, art.CameraBin, art.MavlinkBin, art.ReplBin, art.UIDist)
 	return nil
@@ -125,15 +140,18 @@ func Run(args []string) error {
 	if err != nil {
 		return err
 	}
+	replIndexInfof("autoswap run: preparing manifest runtime")
 	manifestPath, err := materializeManifestForCompose(cfg)
 	if err != nil {
 		return err
 	}
+	replIndexInfof("autoswap run: using manifest %s", manifestPath)
 	art, err := loadAndValidateManifest(manifestPath, cfg.RepoRoot)
 	if err != nil {
 		return err
 	}
 	if len(art.Manifest.Runtime.Processes) > 0 {
+		replIndexInfof("autoswap run: starting manifest-defined process graph")
 		cfg.ManifestPath = manifestPath
 		return runManifestProcesses(cfg, art)
 	}
@@ -220,6 +238,7 @@ func Run(args []string) error {
 	if err := robotProc.Start(); err != nil {
 		return fmt.Errorf("start robot failed: %w", err)
 	}
+	replIndexInfof("autoswap run: robot process started")
 	defer robotProc.Stop()
 
 	baseURL := "http://127.0.0.1" + cfg.Listen
@@ -242,6 +261,7 @@ func Run(args []string) error {
 		}
 		defer procs[i].Stop()
 	}
+	replIndexInfof("autoswap run: sidecar processes started")
 	writeState(procs)
 
 	if err := verifyReplBinary(ctx, art.ReplBin); err != nil {
@@ -260,8 +280,10 @@ func Run(args []string) error {
 	}
 
 	logs.Info("autoswap run OK: robot+ui+camera+mavlink composition healthy")
+	replIndexInfof("autoswap run: composition healthy")
 	if cfg.StayRunning {
 		logs.Info("autoswap stay-running enabled; supervising manifest processes")
+		replIndexInfof("autoswap run: supervising managed processes")
 		return superviseProcesses(ctx, procs)
 	}
 	writeState(procs)
@@ -311,7 +333,9 @@ func runManifestProcesses(cfg composeConfig, art resolvedArtifacts) error {
 		_ = waitHTTP(ctx, baseURL+"/stream", http.StatusOK)
 	}
 	logs.Info("autoswap run OK: manifest composition healthy processes=%d", len(procs))
+	replIndexInfof("autoswap run: manifest composition healthy processes=%d", len(procs))
 	if cfg.StayRunning {
+		replIndexInfof("autoswap run: supervising managed processes")
 		return superviseProcesses(ctx, procs)
 	}
 	writeState()
@@ -745,11 +769,23 @@ func materializeManifestForCompose(cfg composeConfig) (string, error) {
 		token = strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
 	}
 	return resolveManifestPath(
-		cfg.ManifestPath,
+		resolveLocalManifestPath(cfg.ManifestPath, cfg.RepoRoot),
 		cfg.ManifestURL,
 		filepath.Join(userHomeDir(), ".dialtone", "autoswap", "manifests"),
 		token,
 	)
+}
+
+func resolveLocalManifestPath(manifestPath, repoRoot string) string {
+	manifestPath = strings.TrimSpace(manifestPath)
+	if manifestPath == "" || filepath.IsAbs(manifestPath) {
+		return manifestPath
+	}
+	repoRoot = strings.TrimSpace(repoRoot)
+	if repoRoot == "" {
+		return manifestPath
+	}
+	return filepath.Join(repoRoot, manifestPath)
 }
 
 func resolveManifestPath(manifestPath, manifestURL, manifestDir, token string) (string, error) {

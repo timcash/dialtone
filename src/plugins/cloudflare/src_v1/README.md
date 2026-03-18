@@ -1,6 +1,24 @@
 # Cloudflare Plugin (src_v1)
 The `cloudflare` plugin integrates Cloudflare Tunnels into Dialtone, enabling secure remote access and service forwarding without manual firewall configuration. It wraps the `cloudflared` CLI for runtime connectivity and uses versioned ops under `src_v1`.
 
+## Runtime Note
+
+Plain `./dialtone.sh cloudflare src_v1 ...` is the default operator path.
+
+That command is normally routed through the local REPL leader, which means:
+- `DIALTONE>` should stay high-level
+- detailed `cloudflared` output stays in the subtone log
+- use `./dialtone.sh repl src_v3 subtone-list --count 20`
+- use `./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 200`
+
+Typical index-room summaries are:
+
+```text
+DIALTONE> cloudflare tunnel: starting <name> -> <url>
+DIALTONE> cloudflare shell: checking shell tunnel status
+DIALTONE> cloudflare robot: exposing <hostname> via <url>
+```
+
 ## Core Commands
 
 ```bash

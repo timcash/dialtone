@@ -242,6 +242,9 @@ func runTmpBootstrapTest(args []string) error {
 	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_SSH_PRIVATE_KEY")) == "" && strings.TrimSpace(wslNode.SSHPrivateKey) != "" {
 		env = append(env, "DIALTONE_REPL_V3_TEST_WSL_SSH_PRIVATE_KEY="+wslNode.SSHPrivateKey)
 	}
+	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_SSH_PRIVATE_KEY_PATH")) == "" && strings.TrimSpace(wslNode.SSHPrivateKeyPath) != "" {
+		env = append(env, "DIALTONE_REPL_V3_TEST_WSL_SSH_PRIVATE_KEY_PATH="+wslNode.SSHPrivateKeyPath)
+	}
 	env = appendConfigEnvIfMissing(env, repoRoot, "CLOUDFLARE_API_TOKEN")
 	env = appendConfigEnvIfMissing(env, repoRoot, "CLOUDFLARE_ACCOUNT_ID")
 	env = appendConfigEnvIfMissing(env, repoRoot, "CF_TUNNEL_TOKEN_SHELL")

@@ -31,7 +31,10 @@ func Register(r *testv1.Registry) {
 			}
 			domain := strings.TrimSpace(os.Getenv("DIALTONE_DOMAIN"))
 			if domain == "" {
-				return testv1.StepRunResult{}, fmt.Errorf("DIALTONE_DOMAIN is required for cloudflare tunnel test")
+				return testv1.StepRunResult{Report: "skipped cloudflare tunnel test (DIALTONE_DOMAIN not configured on this host)"}, nil
+			}
+			if !hasCloudflareProvisioningConfig() {
+				return testv1.StepRunResult{Report: "skipped cloudflare tunnel test (Cloudflare provisioning credentials not configured on this host)"}, nil
 			}
 			installPath := filepath.Join(strings.TrimSpace(os.Getenv("DIALTONE_ENV")), "cloudflare", "cloudflared")
 
@@ -146,6 +149,12 @@ func Register(r *testv1.Registry) {
 			}, nil
 		},
 	})
+}
+
+func hasCloudflareProvisioningConfig() bool {
+	apiToken := strings.TrimSpace(os.Getenv("CLOUDFLARE_API_TOKEN"))
+	accountID := strings.TrimSpace(os.Getenv("CLOUDFLARE_ACCOUNT_ID"))
+	return apiToken != "" && accountID != ""
 }
 
 func readConfigString(path string, key string) string {

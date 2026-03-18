@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -42,8 +45,32 @@ func EnsureLeaderRunning(clientNATSURL, room string) error {
 		"DIALTONE_REPO_ROOT="+repoRoot,
 		"DIALTONE_SRC_ROOT="+srcRoot,
 	)
+	if err := os.MkdirAll(filepath.Join(repoRoot, ".dialtone", "repl-v3"), 0o755); err != nil {
+		return err
+	}
+	stdoutPath := filepath.Join(repoRoot, ".dialtone", "repl-v3", "leader-autostart.out.log")
+	stderrPath := filepath.Join(repoRoot, ".dialtone", "repl-v3", "leader-autostart.err.log")
+	stdout, err := os.OpenFile(stdoutPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer stdout.Close()
+	stderr, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer stderr.Close()
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	cmd.Stdin = nil
+	if runtime.GOOS != "windows" {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
 	if err := cmd.Start(); err != nil {
 		return err
+	}
+	if cmd.Process != nil {
+		_ = cmd.Process.Release()
 	}
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
