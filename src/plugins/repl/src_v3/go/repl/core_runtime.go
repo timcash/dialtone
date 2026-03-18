@@ -1021,6 +1021,10 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 	if len(args) == 0 {
 		return
 	}
+	if err := validateSingleCommandTokens(args); err != nil {
+		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "error", Message: err.Error()})
+		return
+	}
 	cmdName := args[0]
 	if len(args) > 1 {
 		cmdName += " " + args[1]
@@ -1205,6 +1209,24 @@ func shellSplit(line string) []string {
 	}
 	flush()
 	return args
+}
+
+func validateSingleCommandTokens(args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	for i, arg := range args {
+		token := strings.TrimSpace(arg)
+		switch token {
+		case "&&", "||", ";":
+			return fmt.Errorf("DIALTONE ERROR: run exactly one command at a time; command chaining with %q is not allowed. Use one foreground command per turn, or a single command with a trailing & for background mode.", token)
+		case "&":
+			if i != len(args)-1 {
+				return fmt.Errorf("DIALTONE ERROR: run exactly one command at a time; only a trailing & is allowed for background mode")
+			}
+		}
+	}
+	return nil
 }
 
 func printHelp(emit func(BusFrame)) {
