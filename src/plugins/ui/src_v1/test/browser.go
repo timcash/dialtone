@@ -34,7 +34,7 @@ func BrowserOptionsFor(defaultURL string) (testv1.BrowserOptions, bool, error) {
 		if isWSL() && strings.TrimSpace(os.Getenv("DIALTONE_UI_TEST_FORCE_LOCAL")) == "" {
 			defaultNode := strings.TrimSpace(os.Getenv("DIALTONE_UI_TEST_ATTACH_DEFAULT"))
 			if defaultNode == "" {
-				defaultNode = "darkmac"
+				defaultNode = "legion"
 			}
 			if defaultNode != "" {
 				rewritten := strings.TrimSpace(b.URL)
