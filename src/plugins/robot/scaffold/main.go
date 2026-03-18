@@ -1022,6 +1022,7 @@ func publishRobotSrcV2Release(repoRoot, repo, version string, targets []buildTar
 				if err := buildGoBinary(goBin, srcRoot, s.MainPath, out, t.GOOS, t.GOARCH); err != nil {
 					if s.AssetPrefix == "dialtone_camera_v1" && t.GOOS == "linux" && t.GOARCH == "arm64" {
 						logs.Warn("robot src_v2 publish: camera cross-build failed for %s; trying camera plugin podman build fallback", name)
+						replIndexInfof("robot publish: camera arm64 cross-build failed, using podman fallback")
 						if ferr := runDialtone(repoRoot, "camera", "src_v1", "build", "--goos", t.GOOS, "--goarch", t.GOARCH, "--out", out, "--podman"); ferr == nil {
 							assetPathByName[name] = out
 							continue
@@ -1165,6 +1166,7 @@ func publishRobotSrcV2Release(repoRoot, repo, version string, targets []buildTar
 	}
 	sort.Strings(needsUpload)
 	if len(needsUpload) == 0 {
+		replIndexInfof("robot publish: release %s already has matching assets", version)
 		logs.Info("robot src_v2 publish: release %s already has all required assets with matching digests; skipping upload", version)
 		return nil
 	}
@@ -1177,6 +1179,7 @@ func publishRobotSrcV2Release(repoRoot, repo, version string, targets []buildTar
 	for _, name := range needsUpload {
 		assetPaths = append(assetPaths, assetPathByName[name])
 	}
+	replIndexInfof("robot publish: uploading %d release assets for %s", len(assetPaths), version)
 	if !exists {
 		args := []string{"release", "create", version, "--repo", repo, "--title", "Robot src_v2 " + version, "--notes", "Automated robot src_v2 publish " + version}
 		args = append(args, assetPaths...)
@@ -1656,7 +1659,27 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 		manifestAbs = found
 		return nil
 	}
-	if err := loadRuntimeState(); err != nil {
+	runtimeStateSettlingLogged := false
+	loadRuntimeStateWithRetry := func() error {
+		var lastErr error
+		for attempt := 0; attempt < 5; attempt++ {
+			if err := loadRuntimeState(); err == nil {
+				return nil
+			} else {
+				lastErr = err
+				if !strings.Contains(err.Error(), "autoswap runtime state parse failed") {
+					return err
+				}
+				if !runtimeStateSettlingLogged {
+					replIndexInfof("robot diagnostic: waiting for autoswap runtime state to settle")
+					runtimeStateSettlingLogged = true
+				}
+				time.Sleep(750 * time.Millisecond)
+			}
+		}
+		return lastErr
+	}
+	if err := loadRuntimeStateWithRetry(); err != nil {
 		return err
 	}
 	listCmd := shellSingleQuote(autoswapBin) + " service --mode list --manifest " + shellSingleQuote(manifestAbs)
