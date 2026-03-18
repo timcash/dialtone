@@ -3,6 +3,7 @@ package processmanager
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -23,6 +24,67 @@ type leaderState struct {
 }
 
 func Register(r *testv1.Registry) {
+	r.Add(testv1.Step{
+		Name:    "shell-routed-command-autostarts-leader-when-missing",
+		Timeout: 120 * time.Second,
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			rt, err := support.NewIsolatedRuntime(ctx)
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			defer rt.Stop()
+			rt.NATSURL = allocateLocalNATSURL()
+
+			cleanOut, cleanErr := rt.RunDialtone("repl", "src_v3", "process-clean")
+			if cleanErr != nil && strings.TrimSpace(cleanOut) == "" {
+				return testv1.StepRunResult{}, fmt.Errorf("pre-test process-clean failed: %w", cleanErr)
+			}
+
+			out, err := rt.RunDialtone("proc", "src_v1", "emit", "shell-autostart-ok")
+			if err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("shell routed proc emit failed: %w\n%s", err, out)
+			}
+			required := []string{
+				"Request received. Spawning subtone for proc src_v1",
+				"Subtone started as pid ",
+				"Subtone room: subtone-",
+				"Subtone log file: ",
+				"Subtone for proc src_v1 exited with code 0.",
+			}
+			for _, needle := range required {
+				if !strings.Contains(out, needle) {
+					return testv1.StepRunResult{}, fmt.Errorf("shell autostart output missing %q\n%s", needle, out)
+				}
+			}
+			if strings.Contains(out, "\nDIALTONE> shell-autostart-ok") || strings.Contains(out, "\nshell-autostart-ok\n") {
+				return testv1.StepRunResult{}, fmt.Errorf("shell routed output leaked subtone payload into index/shell output\n%s", out)
+			}
+			logPath, err := parseSubtoneLogPath(out)
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			logBody, err := os.ReadFile(logPath)
+			if err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("read subtone log %s: %w", logPath, err)
+			}
+			if !strings.Contains(string(logBody), "shell-autostart-ok") {
+				return testv1.StepRunResult{}, fmt.Errorf("subtone log missing emitted payload\n%s", string(logBody))
+			}
+			st, err := readLeaderState(rt.RepoRoot)
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if st.PID <= 0 || !st.Running {
+				return testv1.StepRunResult{}, fmt.Errorf("leader state invalid after shell autostart: %+v", st)
+			}
+
+			ctx.TestPassf("shell routed command autostarted leader pid %d and kept payload in subtone log", st.PID)
+			return testv1.StepRunResult{
+				Report: fmt.Sprintf("Ran `./dialtone.sh proc src_v1 emit shell-autostart-ok` against a fresh local NATS URL, verified the shell path produced the normal routed subtone lifecycle, wrote leader pid %d to `leader.json`, and kept the emitted payload in the subtone log instead of leaking it into shell/index output.", st.PID),
+			}, nil
+		},
+	})
+
 	r.Add(testv1.Step{
 		Name:    "leader-state-file-persists-and-startleader-reuses-worker",
 		Timeout: 90 * time.Second,
@@ -71,6 +133,62 @@ func Register(r *testv1.Registry) {
 			ctx.TestPassf("leader state persisted and StartLeader reused pid %d", first.PID)
 			return testv1.StepRunResult{
 				Report: fmt.Sprintf("Started the shared REPL leader, verified `.dialtone/repl-v3/leader.json` was written with pid %d and the expected NATS URL, then called StartLeader again and confirmed the same worker pid was reused instead of restarting the leader.", first.PID),
+			}, nil
+		},
+	})
+
+	r.Add(testv1.Step{
+		Name:    "shell-routed-command-reuses-running-leader",
+		Timeout: 120 * time.Second,
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			rt, err := support.NewIsolatedRuntime(ctx)
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			defer rt.Stop()
+			rt.NATSURL = allocateLocalNATSURL()
+
+			if err := rt.StartLeader(); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			first, err := readLeaderState(rt.RepoRoot)
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+
+			out, err := rt.RunDialtone("proc", "src_v1", "emit", "shell-reuse-ok")
+			if err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("shell routed proc emit failed with running leader: %w\n%s", err, out)
+			}
+			if strings.Contains(out, "No REPL leader detected on") {
+				return testv1.StepRunResult{}, fmt.Errorf("shell path unexpectedly autostarted a new leader despite existing healthy leader\n%s", out)
+			}
+			required := []string{
+				"Request received. Spawning subtone for proc src_v1",
+				"Subtone started as pid ",
+				"Subtone room: subtone-",
+				"Subtone log file: ",
+				"Subtone for proc src_v1 exited with code 0.",
+			}
+			for _, needle := range required {
+				if !strings.Contains(out, needle) {
+					return testv1.StepRunResult{}, fmt.Errorf("shell reuse output missing %q\n%s", needle, out)
+				}
+			}
+			if strings.Contains(out, "\nDIALTONE> shell-reuse-ok") || strings.Contains(out, "\nshell-reuse-ok\n") {
+				return testv1.StepRunResult{}, fmt.Errorf("shell routed output leaked subtone payload into index/shell output\n%s", out)
+			}
+			second, err := readLeaderState(rt.RepoRoot)
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if first.PID != second.PID {
+				return testv1.StepRunResult{}, fmt.Errorf("leader pid changed across routed shell command: before=%d after=%d", first.PID, second.PID)
+			}
+
+			ctx.TestPassf("shell routed command reused existing leader pid %d", first.PID)
+			return testv1.StepRunResult{
+				Report: fmt.Sprintf("Started the REPL leader first, then ran `./dialtone.sh proc src_v1 emit shell-reuse-ok` and verified the shell path reused leader pid %d without printing a new autostart message while still routing the command into a subtone.", first.PID),
 			}, nil
 		},
 	})
@@ -245,4 +363,28 @@ func waitForSubjectContains(rt *support.Runtime, subject string, timeout time.Du
 		}
 		time.Sleep(120 * time.Millisecond)
 	}
+}
+
+func parseSubtoneLogPath(output string) (string, error) {
+	for _, line := range strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		const prefix = "DIALTONE> Subtone log file: "
+		if strings.HasPrefix(line, prefix) {
+			path := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+			if path != "" {
+				return path, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("subtone log path not found in shell output")
+}
+
+func allocateLocalNATSURL() string {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "nats://127.0.0.1:46322"
+	}
+	defer ln.Close()
+	addr := ln.Addr().String()
+	return "nats://" + strings.TrimSpace(addr)
 }
