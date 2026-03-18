@@ -140,3 +140,8 @@ func leaderHealth(natsURL string, timeout time.Duration) (LeaderState, error) {
 	}
 	return st, nil
 }
+
+func LeaderHealthy(natsURL string, timeout time.Duration) bool {
+	_, err := leaderHealth(strings.TrimSpace(natsURL), timeout)
+	return err == nil
+}
