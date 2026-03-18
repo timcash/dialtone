@@ -1,5 +1,26 @@
 # UI src_v1 Library
 
+## Runtime Note
+
+Plain `./dialtone.sh ui src_v1 test ...` is the default operator path.
+
+That command is normally routed through the local REPL leader, which means:
+- `DIALTONE>` should stay high-level
+- detailed test output stays in the subtone log
+- use `./dialtone.sh repl src_v3 subtone-list --count 20`
+- use `./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 200`
+
+For WSL, the default remote headed browser path now targets `legion` through `chrome src_v3`.
+
+Typical test summaries are:
+
+```text
+DIALTONE> ui test: preparing remote chrome session on legion
+DIALTONE> ui test: ensuring chrome src_v3 role=dev on legion
+DIALTONE> ui test: running 1 suite steps
+DIALTONE> ui test: suite passed
+```
+
 ```sh
 # generic plugin workflow
 ./dialtone.sh ui src_v1 install
@@ -11,9 +32,17 @@
 ./dialtone.sh ui src_v1 test
 
 # useful variants
+# Run the full suite via the local REPL path.
+./dialtone.sh ui src_v1 test
+
+# Run one headed attach test against the managed Chrome v3 daemon on legion.
 ./dialtone.sh ui src_v1 dev --browser-node legion
 ./dialtone.sh ui src_v1 test --attach legion
-./dialtone.sh ui src_v1 test --filter ui-section-hero-via-menu
+./dialtone.sh ui src_v1 test --attach legion --filter ui-build-and-go-serve
+
+# Inspect the subtone log if the high-level transcript is not enough.
+./dialtone.sh repl src_v3 subtone-list --count 10
+./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 200
 ```
 
 `src/plugins/ui/src_v1/ui` is the shared section shell used by plugin UIs (robot, earth, fixture apps).
