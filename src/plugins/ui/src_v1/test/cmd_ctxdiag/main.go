@@ -44,6 +44,7 @@ func main() {
 
 	reg := test.NewRegistry()
 	ctxdiag.Register(reg)
+	test.ReplIndexInfof("ui test: running context-cancel diagnostic")
 	runErr := reg.Run(testv1.SuiteOptions{
 		Version:               "ui-src-v1-ctxdiag",
 		ReportPath:            "plugins/ui/src_v1/CTX_DIAG_TEST.md",
@@ -51,7 +52,7 @@ func main() {
 		ReportFormat:          "template",
 		ReportTitle:           "UI src_v1 Context Canceled Diagnostic",
 		ReportRunner:          "test/src_v1",
-		NATSURL:               "nats://127.0.0.1:4222",
+		NATSURL:               test.ResolveSuiteNATSURL(),
 		NATSSubject:           "logs.test.ui.src-v1.ctxdiag",
 		AutoStartNATS:         true,
 		BrowserCleanupRole:    "ui-test",
@@ -62,5 +63,6 @@ func main() {
 		logs.Error("ui src_v1 context-cancel diagnostic failed: %v", runErr)
 		os.Exit(1)
 	}
+	test.ReplIndexInfof("ui test: context-cancel diagnostic passed")
 	logs.Info("ui src_v1 context-cancel diagnostic passed")
 }

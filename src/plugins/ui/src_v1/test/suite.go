@@ -21,7 +21,7 @@ func RunSuiteV1(reg *Registry) error {
 		ReportFormat:          "template",
 		ReportTitle:           "UI Plugin src_v1 Test Report",
 		ReportRunner:          "test/src_v1",
-		NATSURL:               "nats://127.0.0.1:4222",
+		NATSURL:               ResolveSuiteNATSURL(),
 		NATSSubject:           "logs.test.ui.src-v1",
 		AutoStartNATS:         true,
 		BrowserCleanupRole:    "ui-test",
