@@ -28,7 +28,7 @@ func RunSubtoneList(args []string) error {
 			logs.Raw("No recent subtones reported by leader.")
 			return nil
 		}
-		logs.Raw("PID      UPDATED                   STATE    COMMAND")
+		logs.Raw("PID      UPDATED                   STATE    MODE         COMMAND")
 		for _, item := range items {
 			state := "done"
 			if item.Active {
@@ -42,7 +42,11 @@ func RunSubtoneList(args []string) error {
 			if cmd == "" {
 				cmd = "-"
 			}
-			logs.Raw("%-8d %-24s %-8s %s", item.PID, updated, state, cmd)
+			mode := strings.TrimSpace(item.Mode)
+			if mode == "" {
+				mode = "foreground"
+			}
+			logs.Raw("%-8d %-24s %-8s %-12s %s", item.PID, updated, state, mode, cmd)
 		}
 		return nil
 	}

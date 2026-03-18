@@ -248,6 +248,97 @@ func Register(r *testv1.Registry) {
 			}, nil
 		},
 	})
+
+	r.Add(testv1.Step{
+		Name:    "background-subtone-can-be-stopped-and-registry-shows-mode",
+		Timeout: 120 * time.Second,
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			rt, err := support.NewRuntime(ctx)
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			defer rt.Stop()
+
+			if err := rt.StartLeader(); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := rt.StartJoin("llm-codex"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+
+			bgPID, err := startBackgroundWatch(rt, "stopme")
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+
+			roomSeq, _ := rt.CurrentSeqs()
+			listCmd := "/repl src_v3 subtone-list --count 20"
+			if err := rt.RunTranscript([]support.TranscriptStep{{
+				Send: listCmd,
+				ExpectRoom: support.CombinePatterns([]string{
+					fmt.Sprintf(`"message":"%s"`, listCmd),
+				}, support.StandardSubtoneRoomPatterns("repl src_v3", "")),
+				ExpectOutput: append([]string{fmt.Sprintf("llm-codex> %s", listCmd)}, support.StandardSubtoneOutputPatterns("repl src_v3", "")...),
+				Timeout:      30 * time.Second,
+			}}); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("pre-stop subtone-list failed: %w", err)
+			}
+			listPID, err := rt.WaitForSubtonePIDForCommandAfter("repl src_v3 subtone-list --count 20", 20*time.Second, roomSeq)
+			if err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("missing pre-stop subtone-list pid: %w", err)
+			}
+			if err := rt.WaitForSubjectPatterns(fmt.Sprintf("repl.subtone.%d", listPID), 20*time.Second, []string{
+				`STATE`,
+				`MODE`,
+				strconv.Itoa(bgPID),
+				`active`,
+				`background`,
+			}); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("pre-stop subtone-list missing background mode row for pid %d: %w", bgPID, err)
+			}
+
+			stopCmd := fmt.Sprintf("/subtone-stop --pid %d", bgPID)
+			if err := rt.RunTranscript([]support.TranscriptStep{{
+				Send:         stopCmd,
+				ExpectRoom:   []string{fmt.Sprintf(`"message":"%s"`, stopCmd), fmt.Sprintf(`"message":"Stopping subtone-%d."`, bgPID), fmt.Sprintf(`"message":"Stopped subtone-%d."`, bgPID)},
+				ExpectOutput: []string{fmt.Sprintf("llm-codex> %s", stopCmd), fmt.Sprintf("DIALTONE> Stopping subtone-%d.", bgPID), fmt.Sprintf("DIALTONE> Stopped subtone-%d.", bgPID)},
+				Timeout:      20 * time.Second,
+			}}); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("subtone-stop failed for pid %d: %w", bgPID, err)
+			}
+
+			postSeq, _ := rt.CurrentSeqs()
+			postListCmd := "/repl src_v3 subtone-list --count 20"
+			if err := rt.RunTranscript([]support.TranscriptStep{{
+				Send: postListCmd,
+				ExpectRoom: support.CombinePatterns([]string{
+					fmt.Sprintf(`"message":"%s"`, postListCmd),
+				}, support.StandardSubtoneRoomPatterns("repl src_v3", "")),
+				ExpectOutput: append([]string{fmt.Sprintf("llm-codex> %s", postListCmd)}, support.StandardSubtoneOutputPatterns("repl src_v3", "")...),
+				Timeout:      30 * time.Second,
+			}}); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("post-stop subtone-list failed: %w", err)
+			}
+			postListPID, err := rt.WaitForSubtonePIDForCommandAfter("repl src_v3 subtone-list --count 20", 20*time.Second, postSeq)
+			if err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("missing post-stop subtone-list pid: %w", err)
+			}
+			if err := rt.WaitForSubjectPatterns(fmt.Sprintf("repl.subtone.%d", postListPID), 20*time.Second, []string{
+				`STATE`,
+				`MODE`,
+				strconv.Itoa(bgPID),
+				`done`,
+				`background`,
+			}); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("post-stop subtone-list missing done/background row for pid %d: %w", bgPID, err)
+			}
+
+			ctx.TestPassf("background pid %d stopped cleanly and registry preserved mode/state", bgPID)
+			return testv1.StepRunResult{
+				Report: fmt.Sprintf("Started background subtone pid %d, verified `subtone-list` showed it as `active background`, stopped it with `/subtone-stop --pid %d`, and then verified `subtone-list` preserved the row as `done background`.", bgPID, bgPID),
+			}, nil
+		},
+	})
 }
 
 func readLeaderState(repoRoot string) (leaderState, error) {
@@ -264,7 +355,7 @@ func readLeaderState(repoRoot string) (leaderState, error) {
 }
 
 func startBackgroundWatch(rt *support.Runtime, filter string) (int, error) {
-	prevPID, _ := rt.LatestSubtonePID()
+	roomSeq, _ := rt.CurrentSeqs()
 	cmd := fmt.Sprintf("/repl src_v3 watch --nats-url %s --subject repl.room.index --filter %s &", rt.NATSURL, strings.TrimSpace(filter))
 	if err := rt.SendJoinLine(cmd); err != nil {
 		return 0, err
@@ -280,18 +371,10 @@ func startBackgroundWatch(rt *support.Runtime, filter string) (int, error) {
 	}); err != nil {
 		return 0, fmt.Errorf("background watch subtone did not start cleanly: %w", err)
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	pid := 0
-	for time.Now().Before(deadline) {
-		nextPID, err := rt.LatestSubtonePID()
-		if err == nil && nextPID > 0 && nextPID != prevPID {
-			pid = nextPID
-			break
-		}
-		time.Sleep(120 * time.Millisecond)
-	}
-	if pid <= 0 {
-		return 0, fmt.Errorf("no new background subtone pid observed after %q", cmd)
+	command := fmt.Sprintf("repl src_v3 watch --nats-url %s --subject repl.room.index --filter %s", rt.NATSURL, strings.TrimSpace(filter))
+	pid, err := rt.WaitForSubtonePIDForCommandAfter(command, 10*time.Second, roomSeq)
+	if err != nil || pid <= 0 {
+		return 0, fmt.Errorf("no new background subtone pid observed after %q: %w", cmd, err)
 	}
 	if err := waitForSubjectContains(rt, fmt.Sprintf("repl.subtone.%d", pid), 10*time.Second, []string{
 		`"scope":"subtone"`,
@@ -304,6 +387,7 @@ func startBackgroundWatch(rt *support.Runtime, filter string) (int, error) {
 }
 
 func cleanupManagedSubtones(rt *support.Runtime) error {
+	roomSeq, _ := rt.CurrentSeqs()
 	listCmd := "/repl src_v3 subtone-list --count 50"
 	if err := rt.RunTranscript([]support.TranscriptStep{{
 		Send: listCmd,
@@ -315,11 +399,12 @@ func cleanupManagedSubtones(rt *support.Runtime) error {
 	}}); err != nil {
 		return fmt.Errorf("repl subtone-list cleanup failed: %w", err)
 	}
-	listPID, err := rt.WaitForSubtonePIDForCommand("repl src_v3 subtone-list --count 50", 20*time.Second)
+	listPID, err := rt.WaitForSubtonePIDForCommandAfter("repl src_v3 subtone-list --count 50", 20*time.Second, roomSeq)
 	if err != nil {
 		return fmt.Errorf("missing cleanup subtone-list pid: %w", err)
 	}
 	out := strings.Join(rt.SubjectMessages(fmt.Sprintf("repl.subtone.%d", listPID)), "\n")
+	stoppedAny := false
 	for _, line := range strings.Split(strings.ReplaceAll(out, "\r\n", "\n"), "\n") {
 		fields := strings.Fields(strings.TrimSpace(line))
 		if len(fields) < 3 {
@@ -334,12 +419,28 @@ func cleanupManagedSubtones(rt *support.Runtime) error {
 		if err != nil || pid <= 0 {
 			continue
 		}
-		proc, err := os.FindProcess(pid)
-		if err != nil {
-			return fmt.Errorf("find active subtone pid %s: %w", pidText, err)
+		if pid == listPID {
+			continue
 		}
-		if err := proc.Kill(); err != nil {
-			return fmt.Errorf("kill active subtone pid %s: %w", pidText, err)
+		stopCmd := fmt.Sprintf("/subtone-stop --pid %d", pid)
+		if err := rt.RunTranscript([]support.TranscriptStep{{
+			Send:         stopCmd,
+			ExpectRoom:   []string{fmt.Sprintf(`"message":"%s"`, stopCmd), fmt.Sprintf(`"message":"Stopping subtone-%d."`, pid), fmt.Sprintf(`"message":"Stopped subtone-%d."`, pid)},
+			ExpectOutput: []string{fmt.Sprintf("llm-codex> %s", stopCmd), fmt.Sprintf("DIALTONE> Stopping subtone-%d.", pid), fmt.Sprintf("DIALTONE> Stopped subtone-%d.", pid)},
+			Timeout:      20 * time.Second,
+		}}); err != nil {
+			return fmt.Errorf("stop active subtone pid %d: %w", pid, err)
+		}
+		stoppedAny = true
+	}
+	if stoppedAny {
+		if err := rt.RunTranscript([]support.TranscriptStep{{
+			Send:         "/ps",
+			ExpectRoom:   []string{`"type":"input"`, `"message":"/ps"`, `"message":"No active subtones."`},
+			ExpectOutput: []string{`DIALTONE> No active subtones.`},
+			Timeout:      20 * time.Second,
+		}}); err != nil {
+			return fmt.Errorf("verify no active subtones after cleanup: %w", err)
 		}
 	}
 	return nil

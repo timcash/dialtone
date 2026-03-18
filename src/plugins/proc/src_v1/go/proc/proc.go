@@ -89,11 +89,7 @@ func ListManagedProcesses() []ManagedProcessSnapshot {
 }
 
 func KillManagedProcess(pid int) error {
-	p, err := process.NewProcess(int32(pid))
-	if err != nil {
-		return err
-	}
-	if err := p.Kill(); err != nil {
+	if err := killManagedPID(pid); err != nil {
 		return err
 	}
 	UntrackProcess(pid)
