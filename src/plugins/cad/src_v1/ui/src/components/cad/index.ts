@@ -13,6 +13,14 @@ type GearParams = {
   mounting_hole_diameter: number;
 };
 
+type CadMode = 'gear' | 'render';
+type CameraView = 'front' | 'top' | 'side' | 'isometric';
+
+type ButtonSpec = {
+  label: string;
+  action: () => void;
+};
+
 const DEFAULT_PARAMS: GearParams = {
   outer_diameter: 80,
   inner_diameter: 20,
@@ -39,6 +47,10 @@ class CadStage implements VisualizationControl {
   private abortController: AbortController | null = null;
   private params: GearParams = { ...DEFAULT_PARAMS };
   private rotationVelocity = 0.005;
+  private spinEnabled = true;
+  private wireframeVisible = true;
+  private mode: CadMode = 'gear';
+  private cameraView: CameraView = 'isometric';
   private generationSeq = 0;
   private regenerationInFlight = false;
   private pendingRegenerationStatus: string | null = null;
@@ -56,6 +68,7 @@ class CadStage implements VisualizationControl {
   private form: HTMLFormElement;
   private formButtons: HTMLButtonElement[];
   private input: HTMLInputElement;
+  private submitButton: HTMLButtonElement;
   private buttonClickListeners: Array<(event: MouseEvent) => void> = [];
 
   constructor(private container: HTMLElement, private canvas: HTMLCanvasElement) {
@@ -75,6 +88,7 @@ class CadStage implements VisualizationControl {
     this.form = this.container.querySelector('.mode-form') as HTMLFormElement;
     this.formButtons = Array.from(this.form.querySelectorAll('button')).slice(0, 9);
     this.input = this.form.querySelector('input[aria-label="CAD Input"]') as HTMLInputElement;
+    this.submitButton = this.form.querySelector('button[type="submit"]') as HTMLButtonElement;
     this.stageStatus = this.stats.status;
 
     this.bootstrapScene();
@@ -142,14 +156,14 @@ class CadStage implements VisualizationControl {
   }
 
   private buttonHandlers: Array<() => void> = [
-    () => this.adjustAndRegenerate({ outer_diameter: this.params.outer_diameter + 6 }, 'Scaling gear up...'),
-    () => this.adjustAndRegenerate({ outer_diameter: Math.max(24, this.params.outer_diameter - 6) }, 'Scaling gear down...'),
-    () => this.adjustAndRegenerate({ num_teeth: Math.min(96, this.params.num_teeth + 2) }, 'Adding teeth...'),
-    () => this.adjustAndRegenerate({ num_teeth: Math.max(6, this.params.num_teeth - 2) }, 'Reducing teeth...'),
-    () => this.adjustAndRegenerate({ inner_diameter: Math.min(this.params.outer_diameter - 8, this.params.inner_diameter + 2) }, 'Opening bore...'),
-    () => this.adjustAndRegenerate({ inner_diameter: Math.max(4, this.params.inner_diameter - 2) }, 'Tightening bore...'),
-    () => this.adjustAndRegenerate({ num_mounting_holes: Math.min(12, this.params.num_mounting_holes + 1) }, 'Adding mounting holes...'),
-    () => this.downloadCurrentSTL(),
+    () => this.runCurrentModeButton(0),
+    () => this.runCurrentModeButton(1),
+    () => this.runCurrentModeButton(2),
+    () => this.runCurrentModeButton(3),
+    () => this.runCurrentModeButton(4),
+    () => this.runCurrentModeButton(5),
+    () => this.runCurrentModeButton(6),
+    () => this.runCurrentModeButton(7),
     () => this.cycleMode(),
   ];
 
@@ -165,6 +179,7 @@ class CadStage implements VisualizationControl {
     });
     this.form.addEventListener('submit', this.onSubmit);
     this.refreshLegend();
+    this.applyMode();
   }
 
   private onSubmit = (event: Event): void => {
@@ -214,13 +229,59 @@ class CadStage implements VisualizationControl {
   }
 
   private cycleMode(): void {
-    const modes = [0.0035, 0.005, 0.008];
-    const labels = ['Mode: Inspect', 'Mode: Gear', 'Mode: Spin'];
-    const current = modes.findIndex((value) => value === this.rotationVelocity);
-    const nextIndex = (current + 1) % modes.length;
-    this.rotationVelocity = modes[nextIndex];
-    this.formButtons[8].textContent = labels[nextIndex];
-    this.setStatus(`Switched ${labels[nextIndex].toLowerCase()}`);
+    this.mode = this.mode === 'gear' ? 'render' : 'gear';
+    if (this.mode === 'render') {
+      this.spinEnabled = false;
+      this.setCameraView('isometric');
+    } else {
+      this.spinEnabled = true;
+    }
+    this.applyMode();
+    this.setStatus(`Switched to ${this.mode} mode`);
+  }
+
+  private currentModeButtons(): ButtonSpec[] {
+    if (this.mode === 'render') {
+      return [
+        { label: this.wireframeVisible ? 'Wireframe Off' : 'Wireframe On', action: () => this.toggleWireframe() },
+        { label: this.spinEnabled ? 'Spin Off' : 'Spin On', action: () => this.toggleSpin() },
+        { label: 'Front', action: () => this.setCameraView('front') },
+        { label: 'Top', action: () => this.setCameraView('top') },
+        { label: 'Side', action: () => this.setCameraView('side') },
+        { label: 'Isometric', action: () => this.setCameraView('isometric') },
+        { label: 'Download', action: () => this.downloadCurrentSTL() },
+        { label: 'Reset View', action: () => this.resetRenderView() },
+      ];
+    }
+    return [
+      { label: 'Scale +', action: () => this.adjustAndRegenerate({ outer_diameter: this.params.outer_diameter + 6 }, 'Scaling gear up...') },
+      { label: 'Scale -', action: () => this.adjustAndRegenerate({ outer_diameter: Math.max(24, this.params.outer_diameter - 6) }, 'Scaling gear down...') },
+      { label: 'Teeth +', action: () => this.adjustAndRegenerate({ num_teeth: Math.min(96, this.params.num_teeth + 2) }, 'Adding teeth...') },
+      { label: 'Teeth -', action: () => this.adjustAndRegenerate({ num_teeth: Math.max(6, this.params.num_teeth - 2) }, 'Reducing teeth...') },
+      { label: 'Bore +', action: () => this.adjustAndRegenerate({ inner_diameter: Math.min(this.params.outer_diameter - 8, this.params.inner_diameter + 2) }, 'Opening bore...') },
+      { label: 'Bore -', action: () => this.adjustAndRegenerate({ inner_diameter: Math.max(4, this.params.inner_diameter - 2) }, 'Tightening bore...') },
+      { label: 'Holes +', action: () => this.adjustAndRegenerate({ num_mounting_holes: Math.min(12, this.params.num_mounting_holes + 1) }, 'Adding mounting holes...') },
+      { label: 'Download', action: () => this.downloadCurrentSTL() },
+    ];
+  }
+
+  private runCurrentModeButton(index: number): void {
+    const spec = this.currentModeButtons()[index];
+    spec?.action();
+  }
+
+  private applyMode(): void {
+    const specs = this.currentModeButtons();
+    this.formButtons.slice(0, 8).forEach((button, index) => {
+      button.textContent = specs[index]?.label ?? `Action ${index + 1}`;
+    });
+    this.formButtons[8].textContent = this.mode === 'gear' ? 'Mode: Gear' : 'Mode: Render';
+    if (this.mode === 'render') {
+      this.input.placeholder = 'Switch to Gear mode for param commands';
+    } else {
+      this.input.placeholder = 'od:92 teeth:24 holes:6';
+    }
+    this.setControlsBusy(this.regenerationInFlight);
   }
 
   private adjustAndRegenerate(update: Partial<GearParams>, status: string): void {
@@ -321,6 +382,7 @@ class CadStage implements VisualizationControl {
         opacity: 0.18,
       }),
     );
+    this.wireframe.visible = this.wireframeVisible;
     this.root.add(this.wireframe);
 
     this.refreshFloorPlane(geometry);
@@ -374,7 +436,9 @@ class CadStage implements VisualizationControl {
     this.formButtons.forEach((button) => {
       button.disabled = busy;
     });
-    this.input.disabled = busy;
+    const renderMode = this.mode === 'render';
+    this.input.disabled = busy || renderMode;
+    this.submitButton.disabled = busy || renderMode;
   }
 
   private serializeParams(): string {
@@ -390,12 +454,65 @@ class CadStage implements VisualizationControl {
     this.grid.position.y = floorY + 0.2;
   }
 
+  private toggleWireframe(): void {
+    this.wireframeVisible = !this.wireframeVisible;
+    if (this.wireframe) {
+      this.wireframe.visible = this.wireframeVisible;
+    }
+    this.setStatus(this.wireframeVisible ? 'Wireframe enabled' : 'Wireframe hidden');
+    this.applyMode();
+  }
+
+  private toggleSpin(): void {
+    this.spinEnabled = !this.spinEnabled;
+    if (!this.spinEnabled) {
+      this.root.rotation.set(0, 0, 0);
+    }
+    this.setStatus(this.spinEnabled ? 'Spin resumed' : 'Spin paused');
+    this.applyMode();
+  }
+
+  private resetRenderView(): void {
+    this.spinEnabled = false;
+    this.setCameraView('isometric');
+    this.setStatus('Render view reset');
+    this.applyMode();
+  }
+
+  private setCameraView(view: CameraView): void {
+    this.cameraView = view;
+    switch (view) {
+      case 'front':
+        this.camera.position.set(0, 0, 170);
+        this.camera.up.set(0, 1, 0);
+        break;
+      case 'top':
+        this.camera.position.set(0, 170, 0.01);
+        this.camera.up.set(0, 0, -1);
+        break;
+      case 'side':
+        this.camera.position.set(170, 0, 0);
+        this.camera.up.set(0, 1, 0);
+        break;
+      default:
+        this.camera.position.set(0, 62, 152);
+        this.camera.up.set(0, 1, 0);
+        break;
+    }
+    this.camera.lookAt(0, 0, 0);
+    this.camera.updateProjectionMatrix();
+    this.root.rotation.set(0, 0, 0);
+    this.setStatus(`Camera: ${view}`);
+  }
+
   private animate = (): void => {
     this.frameId = requestAnimationFrame(this.animate);
     if (!this.visible) return;
-    this.root.rotation.z += this.rotationVelocity;
-    this.root.rotation.x = Math.cos(performance.now() * 0.0005) * 0.15;
-    this.root.rotation.y = Math.sin(performance.now() * 0.00035) * 0.22;
+    if (this.spinEnabled) {
+      this.root.rotation.z += this.rotationVelocity;
+      this.root.rotation.x = Math.cos(performance.now() * 0.0005) * 0.15;
+      this.root.rotation.y = Math.sin(performance.now() * 0.00035) * 0.22;
+    }
     this.renderer.render(this.scene, this.camera);
   };
 

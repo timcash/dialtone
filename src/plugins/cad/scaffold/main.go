@@ -1,14 +1,18 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	cadv1 "dialtone/dev/plugins/cad/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
+	testv1 "dialtone/dev/plugins/test/src_v1/go"
 )
 
 func main() {
@@ -42,6 +46,12 @@ func main() {
 		case "build":
 			if err := runBuild(); err != nil {
 				logs.Error("cad src_v1 build failed: %v", err)
+				os.Exit(1)
+			}
+			return
+		case "dev":
+			if err := runDev(rest); err != nil {
+				logs.Error("cad src_v1 dev failed: %v", err)
 				os.Exit(1)
 			}
 			return
@@ -88,6 +98,7 @@ func printUsage() {
 	logs.Raw("  server [--port <n>]  Alias for serve")
 	logs.Raw("  status [--port <n>]  Check local CAD server health")
 	logs.Raw("  stop [--port <n>]    Stop the tracked local CAD server")
+	logs.Raw("  dev [--port <n>] [--backend-port <n>] [--host <host>] [--browser-node <node>] [--public-url <url>]")
 	logs.Raw("  build                Build the CAD UI assets")
 	logs.Raw("  format               Format Go and UI sources")
 	logs.Raw("  test                 Run cad src_v1 test suite")
@@ -147,6 +158,133 @@ func runBuild() error {
 	}
 	logs.Info("DIALTONE_INDEX: cad build: ui dist ready")
 	return nil
+}
+
+func runDev(args []string) error {
+	paths, err := cadv1.ResolvePaths("", "src_v1")
+	if err != nil {
+		return err
+	}
+
+	fs := flag.NewFlagSet("cad-dev", flag.ContinueOnError)
+	port := fs.Int("port", 3012, "Vite dev server port")
+	host := fs.String("host", "0.0.0.0", "Vite dev server host")
+	backendPort := fs.Int("backend-port", 8081, "CAD backend port")
+	browserNode := fs.String("browser-node", "", "Optional mesh node for headed browser session")
+	publicURL := fs.String("public-url", "", "URL a remote browser should open")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	logs.Info("DIALTONE_INDEX: cad dev: ensuring ui dependencies")
+	if err := ensureUIDeps(paths); err != nil {
+		return err
+	}
+
+	backendURL := fmt.Sprintf("http://127.0.0.1:%d", *backendPort)
+	ok, err := devBackendHealthy(*backendPort)
+	if err != nil {
+		return err
+	}
+	if ok {
+		logs.Info("DIALTONE_INDEX: cad dev: reusing backend on 127.0.0.1:%d", *backendPort)
+	} else {
+		logs.Info("DIALTONE_INDEX: cad dev: starting backend on 127.0.0.1:%d", *backendPort)
+		if err := startDevBackend(paths, *backendPort); err != nil {
+			return err
+		}
+		logs.Info("DIALTONE_INDEX: cad dev: backend ready on 127.0.0.1:%d", *backendPort)
+	}
+
+	localURL := fmt.Sprintf("http://127.0.0.1:%d", *port)
+	devURL := strings.TrimSpace(*publicURL)
+	if devURL == "" {
+		devURL = localURL
+	}
+	node := strings.TrimSpace(*browserNode)
+	if node == "" {
+		_ = os.Setenv("CAD_DEV_BROWSER_MODE", "none")
+		testv1.SetRuntimeConfig(testv1.RuntimeConfig{})
+	} else {
+		_ = os.Unsetenv("CAD_DEV_BROWSER_MODE")
+		testv1.SetRuntimeConfig(testv1.RuntimeConfig{
+			BrowserNode:       node,
+			RemoteBrowserRole: "cad-dev",
+		})
+		logs.Info("DIALTONE_INDEX: cad dev: browser node=%s url=%s", node, devURL)
+	}
+
+	prevProxy := os.Getenv("VITE_PROXY_TARGET")
+	defer restoreEnv("VITE_PROXY_TARGET", prevProxy)
+	_ = os.Setenv("VITE_PROXY_TARGET", backendURL)
+
+	logs.Info("DIALTONE_INDEX: cad dev: starting vite on %s", localURL)
+	return testv1.RunDev(testv1.DevOptions{
+		RepoRoot:          paths.Runtime.RepoRoot,
+		PluginDir:         paths.Preset.PluginVersionRoot,
+		UIDir:             paths.UIDir,
+		DevPort:           *port,
+		DevHost:           strings.TrimSpace(*host),
+		DevPublicURL:      devURL,
+		Role:              "cad-dev",
+		BrowserMetaPath:   filepath.Join(paths.Preset.PluginVersionRoot, "dev.browser.json"),
+		BrowserModeEnvVar: "CAD_DEV_BROWSER_MODE",
+		NATSURL:           resolveDevNATSURL(),
+		NATSSubject:       "logs.dev.cad.src-v1",
+	})
+}
+
+func ensureUIDeps(paths cadv1.Paths) error {
+	if _, err := os.Stat(filepath.Join(paths.UIDir, "node_modules")); err == nil {
+		return nil
+	}
+	return runBun(paths, "install")
+}
+
+func startDevBackend(paths cadv1.Paths, port int) error {
+	srv := &http.Server{
+		Addr:    fmt.Sprintf(":%d", port),
+		Handler: cadv1.NewHandler(paths),
+	}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logs.Error("cad dev backend failed: %v", err)
+		}
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		ok, _ := devBackendHealthy(port)
+		if ok {
+			return nil
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	return fmt.Errorf("cad dev backend did not become healthy on 127.0.0.1:%d", port)
+}
+
+func devBackendHealthy(port int) (bool, error) {
+	client := &http.Client{Timeout: 1500 * time.Millisecond}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/health", port))
+	if err != nil {
+		return false, nil
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK, nil
+}
+
+func resolveDevNATSURL() string {
+	if raw := strings.TrimSpace(os.Getenv("DIALTONE_REPL_NATS_URL")); raw != "" {
+		return raw
+	}
+	return "nats://127.0.0.1:4222"
+}
+
+func restoreEnv(key, prev string) {
+	if strings.TrimSpace(prev) == "" {
+		_ = os.Unsetenv(key)
+		return
+	}
+	_ = os.Setenv(key, prev)
 }
 
 func runBun(paths cadv1.Paths, args ...string) error {
