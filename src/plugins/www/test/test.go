@@ -165,7 +165,7 @@ func RunWwwCadHeaded() error {
 	devCmd.Start()
 	defer devCmd.Process.Kill()
 
-	cadCmd := exec.Command("./dialtone.sh", "cad", "server")
+	cadCmd := exec.Command("./dialtone.sh", "cad", "src_v1", "serve")
 	cadCmd.Start()
 	defer cadCmd.Process.Kill()
 

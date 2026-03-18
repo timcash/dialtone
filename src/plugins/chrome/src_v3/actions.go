@@ -14,14 +14,12 @@ import (
 
 func (d *daemonState) navigateManaged(rawURL string) error {
 	url := normalizeURL(rawURL)
+	d.mu.Lock()
+	d.consoleLines = nil
+	d.currentURL = url
+	d.mu.Unlock()
 	return d.withManagedContext(30*time.Second, func(ctx context.Context) error {
-		if err := chromedp.Run(ctx, chromedp.Navigate(url)); err != nil {
-			return err
-		}
-		d.mu.Lock()
-		d.currentURL = url
-		d.mu.Unlock()
-		return nil
+		return chromedp.Run(ctx, chromedp.Navigate(url))
 	})
 }
 

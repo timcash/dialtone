@@ -45,11 +45,29 @@ func (d *daemonState) isBrowserAlive(pid int, port int) bool {
 
 func (d *daemonState) ensureBrowser() error {
 	d.mu.Lock()
-	if d.unexpectedErr != nil {
-		err := d.unexpectedErr
-		d.mu.Unlock()
-		return fmt.Errorf("browser connection unhealthy: %w", err)
+	pid := d.browserPID
+	port := d.chromePort
+	hasAlloc := d.allocCtx != nil
+	hasTab := d.tabCtx != nil
+	unexpected := d.unexpectedErr
+	d.mu.Unlock()
+
+	if pid > 0 && d.isBrowserAlive(pid, port) {
+		if !hasAlloc || unexpected != nil {
+			if err := d.attachToRunningBrowser(); err == nil {
+				if !hasTab {
+					return d.ensureManagedTab()
+				}
+				return nil
+			}
+		}
+		if !hasTab {
+			return d.ensureManagedTab()
+		}
+		return nil
 	}
+
+	d.mu.Lock()
 	if d.browserPID > 0 && d.allocCtx != nil {
 		pid := d.browserPID
 		port := d.chromePort
@@ -112,22 +130,8 @@ func (d *daemonState) ensureBrowser() error {
 		d.mu.Unlock()
 	}
 
-	allocCtx, cancel := chromedp.NewRemoteAllocator(context.Background(), wsURL)
-	d.mu.Lock()
-	d.allocCtx = allocCtx
-	d.cancelAlloc = cancel
-	d.browserWS = wsURL
-	d.mu.Unlock()
-
-	go func() {
-		<-allocCtx.Done()
-		d.mu.Lock()
-		if !d.intentionalStop && d.unexpectedErr == nil {
-			logs.Error("chrome src_v3 allocator connection closed")
-			d.unexpectedErr = fmt.Errorf("browser allocator connection lost")
-		}
-		d.mu.Unlock()
-	}()
+	d.installAllocator(wsURL)
+	d.persistState()
 
 	return d.ensureManagedTab()
 }
@@ -149,6 +153,11 @@ func (d *daemonState) ensureManagedTab() error {
 		cancel()
 		return err
 	}
+	d.attachManagedTab(tabCtx, cancel)
+	return nil
+}
+
+func (d *daemonState) attachManagedTab(tabCtx context.Context, cancel context.CancelFunc) {
 	d.mu.Lock()
 	d.tabCtx = tabCtx
 	d.cancelTab = cancel
@@ -156,6 +165,7 @@ func (d *daemonState) ensureManagedTab() error {
 	d.currentURL = "about:blank"
 	d.consoleLines = nil
 	d.mu.Unlock()
+	d.persistState()
 	chromedp.ListenTarget(tabCtx, func(ev interface{}) {
 		switch ev := ev.(type) {
 		case *cdruntime.EventConsoleAPICalled:
@@ -168,7 +178,6 @@ func (d *daemonState) ensureManagedTab() error {
 			d.appendConsoleLine(strings.TrimSpace(ev.ExceptionDetails.Text))
 		}
 	})
-	return nil
 }
 
 func (d *daemonState) recreateManagedTab() error {
@@ -183,6 +192,46 @@ func (d *daemonState) recreateManagedTab() error {
 		cancelTab()
 	}
 	return d.ensureManagedTab()
+}
+
+func (d *daemonState) attachToRunningBrowser() error {
+	wsURL, err := waitForWebSocket(d.chromePort, 3*time.Second)
+	if err != nil {
+		return err
+	}
+	d.installAllocator(wsURL)
+	if actualPID, err := detectBrowserPID(d.chromePort, d.role, d.profileDir); err == nil && actualPID > 0 {
+		d.mu.Lock()
+		d.browserPID = actualPID
+		d.mu.Unlock()
+	}
+	d.persistState()
+	return nil
+}
+
+func (d *daemonState) installAllocator(wsURL string) {
+	allocCtx, cancel := chromedp.NewRemoteAllocator(context.Background(), wsURL)
+	d.mu.Lock()
+	if d.cancelAlloc != nil {
+		d.cancelAlloc()
+	}
+	d.allocCtx = allocCtx
+	d.cancelAlloc = cancel
+	d.browserWS = wsURL
+	d.unexpectedErr = nil
+	d.intentionalStop = false
+	d.mu.Unlock()
+
+	go func() {
+		<-allocCtx.Done()
+		d.mu.Lock()
+		if !d.intentionalStop && d.unexpectedErr == nil {
+			logs.Error("chrome src_v3 allocator connection closed")
+			d.unexpectedErr = fmt.Errorf("browser allocator connection lost")
+		}
+		d.mu.Unlock()
+		d.persistState()
+	}()
 }
 
 func (d *daemonState) startBrowserProcess() (int, error) {
@@ -272,11 +321,7 @@ func (d *daemonState) openNewTab(rawURL string) error {
 		return errBrowserClosed
 	}
 	tabCtx, cancel := chromedp.NewContext(allocCtx)
-	d.mu.Lock()
-	d.tabCtx = tabCtx
-	d.cancelTab = cancel
-	d.managedTarget = "managed"
-	d.mu.Unlock()
+	d.attachManagedTab(tabCtx, cancel)
 	if err := d.navigateManaged(url); err != nil {
 		d.mu.Lock()
 		d.cancelTab = nil
@@ -332,6 +377,41 @@ func (d *daemonState) closeBrowser() error {
 		}
 	}
 	d.browserPID = 0
+	d.persistState()
+	return nil
+}
+
+func (d *daemonState) resetSession() error {
+	d.mu.Lock()
+	d.consoleLines = nil
+	d.currentURL = "about:blank"
+	d.unexpectedErr = nil
+	hasBrowser := d.browserPID > 0 && d.isBrowserAlive(d.browserPID, d.chromePort)
+	hasAlloc := d.allocCtx != nil
+	d.mu.Unlock()
+	if hasBrowser && hasAlloc {
+		if err := d.recreateManagedTab(); err == nil {
+			d.persistState()
+			return nil
+		}
+	}
+	if hasBrowser {
+		if err := d.attachToRunningBrowser(); err == nil {
+			if err := d.recreateManagedTab(); err == nil {
+				d.persistState()
+				return nil
+			}
+		}
+	}
+	if runtime.GOOS == "windows" {
+		if err := cleanupChromeProfileLocks(d.profileDir); err != nil {
+			logs.Error("chrome src_v3 reset cleanup failed: %v", err)
+		}
+	}
+	if err := d.ensureBrowser(); err != nil {
+		return err
+	}
+	d.persistState()
 	return nil
 }
 

@@ -14,6 +14,36 @@ Important:
 - `--subtone` is internal-only and not a user command path.
 - Runtime config source of truth is `env/dialtone.json`.
 
+## Plugin Contract
+
+Plugins that want to work cleanly with the REPL should follow the standard Dialtone layout:
+
+```text
+src/plugins/<plugin>/
+  README.md
+  scaffold/main.go
+  src_v1/
+    go/
+    test/cmd/main.go
+```
+
+Rules:
+- expose versioned commands: `./dialtone.sh <plugin> src_vN <command>`
+- keep `scaffold/main.go` thin and move real logic into `src_vN`
+- emit only short promoted summaries into `DIALTONE>` via `DIALTONE_INDEX: ...`
+- keep detailed stdout, stderr, and debug logs in the subtone
+- if tests publish to NATS, use `DIALTONE_REPL_NATS_URL` when present instead of hardcoding `127.0.0.1:4222`
+
+Example:
+
+```bash
+# Start a versioned plugin server through the default REPL path.
+./dialtone.sh cad src_v1 serve
+
+# Run the plugin's smoke suite through the same REPL path.
+./dialtone.sh cad src_v1 test
+```
+
 ## Mental Model
 
 - Every host should run a background REPL leader.
