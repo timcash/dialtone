@@ -280,11 +280,11 @@ class CadStage implements VisualizationControl {
       const geometry = this.loader.parse(arrayBuffer);
       this.applyGeometry(geometry);
       this.refreshLegend();
+      this.generationSeq += 1;
       this.setModelState('ready', 'ready');
       this.stats.mesh.textContent = `${Math.round(arrayBuffer.byteLength / 1024)} kb`;
       this.setStatus('Gear regenerated');
       this.lastGeneratedKey = requestKey;
-      this.generationSeq += 1;
       console.info(`cad-model-ready:${this.generationSeq}`);
       void this.refreshMetadata();
     } catch (error) {
@@ -401,6 +401,8 @@ class CadStage implements VisualizationControl {
   }
 
   private setControlsBusy(busy: boolean): void {
+    this.form.setAttribute('data-busy', busy ? 'true' : 'false');
+    this.form.setAttribute('data-generation', String(this.generationSeq));
     this.formButtons.forEach((button) => {
       button.disabled = busy;
     });

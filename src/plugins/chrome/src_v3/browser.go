@@ -149,6 +149,11 @@ func (d *daemonState) ensureManagedTab() error {
 		cancel()
 		return err
 	}
+	d.attachManagedTab(tabCtx, cancel)
+	return nil
+}
+
+func (d *daemonState) attachManagedTab(tabCtx context.Context, cancel context.CancelFunc) {
 	d.mu.Lock()
 	d.tabCtx = tabCtx
 	d.cancelTab = cancel
@@ -168,7 +173,6 @@ func (d *daemonState) ensureManagedTab() error {
 			d.appendConsoleLine(strings.TrimSpace(ev.ExceptionDetails.Text))
 		}
 	})
-	return nil
 }
 
 func (d *daemonState) recreateManagedTab() error {
@@ -272,11 +276,7 @@ func (d *daemonState) openNewTab(rawURL string) error {
 		return errBrowserClosed
 	}
 	tabCtx, cancel := chromedp.NewContext(allocCtx)
-	d.mu.Lock()
-	d.tabCtx = tabCtx
-	d.cancelTab = cancel
-	d.managedTarget = "managed"
-	d.mu.Unlock()
+	d.attachManagedTab(tabCtx, cancel)
 	if err := d.navigateManaged(url); err != nil {
 		d.mu.Lock()
 		d.cancelTab = nil
