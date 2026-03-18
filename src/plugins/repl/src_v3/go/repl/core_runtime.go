@@ -1026,6 +1026,27 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 		printManagedProcesses(room, registry, emit)
 		return
 	}
+	args := shellSplit(line)
+	if len(args) == 0 {
+		return
+	}
+	if args[0] == "subtone-stop" || args[0] == "subtone-kill" {
+		pid, err := parseManagedPIDCommand(args)
+		if err != nil {
+			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: err.Error()})
+			return
+		}
+		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("Stopping subtone-%d.", pid)})
+		if err := killManagedProcessFn(pid); err != nil {
+			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("Failed to stop subtone-%d: %v", pid, err)})
+			return
+		}
+		if registry != nil {
+			registry.Exited(pid, -1)
+		}
+		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("Stopped subtone-%d.", pid)})
+		return
+	}
 	if strings.HasPrefix(line, "kill ") {
 		pidText := strings.TrimSpace(strings.TrimPrefix(line, "kill"))
 		pid := 0
@@ -1038,11 +1059,6 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 		} else {
 			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("Killed managed process %d.", pid)})
 		}
-		return
-	}
-
-	args := shellSplit(line)
-	if len(args) == 0 {
 		return
 	}
 	if err := validateSingleCommandTokens(args); err != nil {
@@ -1120,7 +1136,11 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 				return
 			}
 			if registry != nil {
-				registry.Started(room, ev)
+				mode := "foreground"
+				if isBackground {
+					mode = "background"
+				}
+				registry.Started(room, mode, ev)
 			}
 			subtoneRoom := subtoneRoomName(ev.PID)
 			emit(BusFrame{
@@ -1169,7 +1189,11 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 				if registry != nil {
 					registry.Exited(ev.PID, ev.ExitCode)
 				}
-				emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "lifecycle", SubtonePID: ev.PID, ExitCode: ev.ExitCode, Message: fmt.Sprintf("Subtone for %s exited with code %d.", cmdName, ev.ExitCode)})
+				message := fmt.Sprintf("Subtone for %s exited with code %d.", cmdName, ev.ExitCode)
+				if ev.ExitCode < 0 {
+					message = fmt.Sprintf("Subtone for %s stopped.", cmdName)
+				}
+				emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "lifecycle", SubtonePID: ev.PID, ExitCode: ev.ExitCode, Message: message})
 				return
 			}
 			if line := strings.TrimSpace(ev.Line); line != "" {
@@ -1281,8 +1305,11 @@ func printHelp(emit func(BusFrame)) {
 		"`/subtone-detach`",
 		"Stop streaming attached subtone output",
 		"",
+		"`/subtone-stop --pid <pid>`",
+		"Stop a managed subtone by PID",
+		"",
 		"`kill <pid>`",
-		"Kill a managed subtone process by PID",
+		"Kill a managed subtone process by PID (legacy alias)",
 		"",
 		"`<any command>`",
 		"Run any dialtone command on a managed subtone",
@@ -1308,14 +1335,14 @@ func printManagedProcesses(room string, registry *subtoneRegistry, emit func(Bus
 			return
 		}
 		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: "Active Subtones:"})
-		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("%-8s %-8s %-10s %-8s %s", "PID", "UPTIME", "CPU%", "PORTS", "COMMAND")})
+		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("%-8s %-8s %-12s %-8s %-8s %s", "PID", "UPTIME", "MODE", "CPU%", "PORTS", "COMMAND")})
 		for _, p := range procs {
-			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("%-8d %-8s %-10.1f %-8d %s", p.PID, p.StartedAgo, p.CPUPercent, p.PortCount, p.Command)})
+			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("%-8d %-8s %-12s %-8.1f %-8d %s", p.PID, p.StartedAgo, "unknown", p.CPUPercent, p.PortCount, p.Command)})
 		}
 		return
 	}
 	emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Room: sanitizeRoom(room), Message: "Active Subtones:"})
-	emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Room: sanitizeRoom(room), Message: fmt.Sprintf("%-8s %-8s %-10s %-8s %s", "PID", "UPTIME", "CPU%", "PORTS", "COMMAND")})
+	emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Room: sanitizeRoom(room), Message: fmt.Sprintf("%-8s %-8s %-12s %-8s %-8s %s", "PID", "UPTIME", "MODE", "CPU%", "PORTS", "COMMAND")})
 	for _, item := range items {
 		uptime := strings.TrimSpace(item.StartedAgo)
 		if uptime == "" {
@@ -1331,9 +1358,41 @@ func printManagedProcesses(room string, registry *subtoneRegistry, emit func(Bus
 			Kind:    "status",
 			Room:    sanitizeRoom(room),
 			LogPath: strings.TrimSpace(item.LogPath),
-			Message: fmt.Sprintf("%-8d %-8s %-10.1f %-8d %s", item.PID, uptime, item.CPUPercent, item.PortCount, command),
+			Message: fmt.Sprintf("%-8d %-8s %-12s %-8.1f %-8d %s", item.PID, uptime, defaultSubtoneMode(item.Mode), item.CPUPercent, item.PortCount, command),
 		})
 	}
+}
+
+func parseManagedPIDCommand(args []string) (int, error) {
+	if len(args) < 3 {
+		return 0, fmt.Errorf("Usage: subtone-stop --pid <pid>")
+	}
+	for i := 1; i < len(args); i++ {
+		token := strings.TrimSpace(args[i])
+		switch {
+		case token == "--pid" && i+1 < len(args):
+			pid, err := strconv.Atoi(strings.TrimSpace(args[i+1]))
+			if err != nil || pid <= 0 {
+				return 0, fmt.Errorf("Usage: subtone-stop --pid <pid>")
+			}
+			return pid, nil
+		case strings.HasPrefix(token, "--pid="):
+			pid, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(token, "--pid=")))
+			if err != nil || pid <= 0 {
+				return 0, fmt.Errorf("Usage: subtone-stop --pid <pid>")
+			}
+			return pid, nil
+		}
+	}
+	return 0, fmt.Errorf("Usage: subtone-stop --pid <pid>")
+}
+
+func defaultSubtoneMode(mode string) string {
+	mode = strings.TrimSpace(mode)
+	if mode == "" {
+		return "foreground"
+	}
+	return mode
 }
 
 func subtoneRoomName(pid int) string {
