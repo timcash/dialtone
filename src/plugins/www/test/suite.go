@@ -33,7 +33,7 @@ func RunComprehensiveSmoke() error {
 	}
 	if !isPortOpenSuite(8081) {
 		fmt.Println(">> [WWW] Starting CAD Server on port 8081...")
-		cadCmd := exec.Command("./dialtone.sh", "cad", "server")
+		cadCmd := exec.Command("./dialtone.sh", "cad", "src_v1", "serve")
 		cadCmd.Dir = cwd
 		cadCmd.Start()
 		defer cadCmd.Process.Kill()
