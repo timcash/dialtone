@@ -58,6 +58,7 @@ func main() {
 			})
 			logs.Info("ui test auto-enabled --no-ssh for windows attach node=%s", attach)
 		}
+		test.ReplIndexInfof("ui test: preparing remote chrome session on %s", attach)
 		logs.Info("ui test remote attach mode (headed) node=%s url=%s apm=%.3f", attach, url, common.ActionsPerMinute)
 		if err := ensureAttachBrowser(attach, url); err != nil {
 			logs.Error("ui test attach preflight failed: %v", err)
@@ -75,6 +76,7 @@ func main() {
 			cfg.RemoteNoLaunch = false
 			cfg.RemoteBrowserPID = 0
 		})
+		test.ReplIndexInfof("ui test: running in local browser mode")
 		logs.Info("ui test local mode url=%s apm=%.3f", url, common.ActionsPerMinute)
 	}
 
@@ -94,6 +96,7 @@ func main() {
 	if filtered := filterSteps(reg.Steps, strings.TrimSpace(common.FilterExpr)); len(filtered) > 0 {
 		reg.Steps = filtered
 	}
+	test.ReplIndexInfof("ui test: running %d suite steps", len(reg.Steps))
 	logs.Info("Starting UI src_v1 suite with %d registered steps", len(reg.Steps))
 	runErr := reg.Run(common.ApplySuiteOptions(testv1.SuiteOptions{
 		Version:            "ui-src-v1",
@@ -102,7 +105,7 @@ func main() {
 		ReportFormat:       "template",
 		ReportTitle:        "UI Plugin src_v1 Test Report",
 		ReportRunner:       "test/src_v1",
-		NATSURL:            "nats://127.0.0.1:4222",
+		NATSURL:            test.ResolveSuiteNATSURL(),
 		NATSSubject:        "logs.test.ui.src-v1",
 		AutoStartNATS:      true,
 		BrowserCleanupRole: "ui-test",
@@ -111,6 +114,7 @@ func main() {
 		logs.Error("UI src_v1 suite failed: %v", runErr)
 		os.Exit(1)
 	}
+	test.ReplIndexInfof("ui test: suite passed")
 	logs.Info("UI src_v1 suite passed")
 }
 
@@ -127,6 +131,7 @@ func ensureAttachBrowser(node, url string) error {
 	if role == "" {
 		role = "dev"
 	}
+	test.ReplIndexInfof("ui test: ensuring chrome src_v3 role=%s on %s", role, node)
 	if _, err := chromev3.EnsureRemoteServiceByHost(node, role, true); err != nil {
 		return err
 	}
