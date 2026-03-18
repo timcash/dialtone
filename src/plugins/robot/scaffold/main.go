@@ -501,6 +501,18 @@ func chooseNonEmpty(values ...string) string {
 	return ""
 }
 
+func replIndexInfof(format string, args ...any) {
+	msg := strings.TrimSpace(fmt.Sprintf(format, args...))
+	if msg == "" {
+		return
+	}
+	if strings.TrimSpace(os.Getenv("DIALTONE_INTERNAL_SUBTONE")) == "1" {
+		logs.Info("DIALTONE_INDEX: %s", msg)
+		return
+	}
+	logs.Info("%s", msg)
+}
+
 func runSrcV2Clean(args []string) error {
 	fs := flag.NewFlagSet("robot-src-v2-clean", flag.ContinueOnError)
 	host := fs.String("host", "", "Mesh node alias/hostname to clean")
@@ -658,31 +670,21 @@ func runSrcV2Publish(repoRoot string, args []string) error {
 		return err
 	}
 
-	builds := [][]string{{"robot", "src_v2", "build"}}
-	if !*uiOnly {
-		builds = append([][]string{
-			{"go", "src_v1", "exec", "build", "-o", "../bin/dialtone_autoswap_v1", "./plugins/autoswap/src_v1/cmd/main.go"},
-			{"go", "src_v1", "exec", "build", "-o", "../bin/dialtone_robot_v2", "./plugins/robot/src_v2/cmd/server/main.go"},
-			{"go", "src_v1", "exec", "build", "-o", "../bin/dialtone_camera_v1", "./plugins/camera/src_v1/cmd/main.go"},
-			{"go", "src_v1", "exec", "build", "-o", "../bin/dialtone_mavlink_v1", "./plugins/mavlink/src_v1/cmd/main.go"},
-			{"go", "src_v1", "exec", "build", "-o", "../bin/dialtone_repl_v1", "./plugins/repl/src_v1/cmd/repld/main.go"},
-		}, builds...)
+	if err := runDialtone(repoRoot, "robot", "src_v2", "build"); err != nil {
+		return err
 	}
-	for _, cmdArgs := range builds {
-		if err := runDialtone(repoRoot, cmdArgs...); err != nil {
-			return err
-		}
-	}
+	replIndexInfof("robot publish: local UI build complete")
 	if *uiOnly {
 		logs.Info("robot src_v2 publish: local UI artifacts built (--ui mode)")
 	} else {
-		logs.Info("robot src_v2 publish: local artifacts built")
+		logs.Info("robot src_v2 publish: local UI artifacts built; release asset builds handled by publish stage")
 	}
 	if !*skipRelease {
 		resolvedVersion, err := resolveRobotPublishVersion(repoRoot, strings.TrimSpace(*version))
 		if err != nil {
 			return err
 		}
+		replIndexInfof("robot publish: preparing release assets for %s", strings.TrimSpace(*repo))
 		targets, err := resolvePublishTargets(strings.TrimSpace(*targetFlag), *allTargets)
 		if err != nil {
 			return err
@@ -690,6 +692,7 @@ func runSrcV2Publish(repoRoot string, args []string) error {
 		if err := publishRobotSrcV2Release(repoRoot, strings.TrimSpace(*repo), resolvedVersion, targets, *uiOnly); err != nil {
 			return err
 		}
+		replIndexInfof("robot publish: release assets ready for version %s", resolvedVersion)
 		logs.Info("robot src_v2 publish: release assets up to date version=%s repo=%s", resolvedVersion, strings.TrimSpace(*repo))
 	}
 	return nil
@@ -1019,6 +1022,7 @@ func publishRobotSrcV2Release(repoRoot, repo, version string, targets []buildTar
 				if err := buildGoBinary(goBin, srcRoot, s.MainPath, out, t.GOOS, t.GOARCH); err != nil {
 					if s.AssetPrefix == "dialtone_camera_v1" && t.GOOS == "linux" && t.GOARCH == "arm64" {
 						logs.Warn("robot src_v2 publish: camera cross-build failed for %s; trying camera plugin podman build fallback", name)
+						replIndexInfof("robot publish: camera arm64 cross-build failed, using podman fallback")
 						if ferr := runDialtone(repoRoot, "camera", "src_v1", "build", "--goos", t.GOOS, "--goarch", t.GOARCH, "--out", out, "--podman"); ferr == nil {
 							assetPathByName[name] = out
 							continue
@@ -1162,6 +1166,7 @@ func publishRobotSrcV2Release(repoRoot, repo, version string, targets []buildTar
 	}
 	sort.Strings(needsUpload)
 	if len(needsUpload) == 0 {
+		replIndexInfof("robot publish: release %s already has matching assets", version)
 		logs.Info("robot src_v2 publish: release %s already has all required assets with matching digests; skipping upload", version)
 		return nil
 	}
@@ -1174,6 +1179,7 @@ func publishRobotSrcV2Release(repoRoot, repo, version string, targets []buildTar
 	for _, name := range needsUpload {
 		assetPaths = append(assetPaths, assetPathByName[name])
 	}
+	replIndexInfof("robot publish: uploading %d release assets for %s", len(assetPaths), version)
 	if !exists {
 		args := []string{"release", "create", version, "--repo", repo, "--title", "Robot src_v2 " + version, "--notes", "Automated robot src_v2 publish " + version}
 		args = append(args, assetPaths...)
@@ -1413,15 +1419,29 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 			return fmt.Errorf("diagnostic missing local artifact: %s", p)
 		}
 	}
+	replIndexInfof("robot diagnostic: checking local artifacts")
 	logs.Info("robot src_v2 diagnostic: local artifact check passed")
-
-	if strings.TrimSpace(*host) == "" || strings.TrimSpace(*user) == "" {
-		logs.Warn("robot src_v2 diagnostic: no --host/--user provided; skipped remote checks")
-		return nil
-	}
 
 	targetHost := strings.TrimSpace(*host)
 	targetUser := strings.TrimSpace(*user)
+	if targetHost == "" {
+		logs.Warn("robot src_v2 diagnostic: no --host provided; skipped remote checks")
+		return nil
+	}
+	if targetUser == "" {
+		if node, err := ssh_plugin.ResolveMeshNode(targetHost); err == nil {
+			targetUser = strings.TrimSpace(node.User)
+			if targetUser != "" {
+				*user = targetUser
+			}
+		}
+	}
+	if targetUser == "" {
+		logs.Warn("robot src_v2 diagnostic: no --user provided and mesh node has no default user; skipped remote checks")
+		return nil
+	}
+	replIndexInfof("robot diagnostic: checking rover runtime on %s", targetHost)
+
 	targetPort := strings.TrimSpace(*port)
 	targetPass := *pass
 	var meshNode *ssh_plugin.MeshNode
@@ -1578,6 +1598,7 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 		return fmt.Errorf("autoswap service ExecStart does not reference manifest path %s or --manifest-url", manifestAbs)
 	}
 	logs.Info("robot src_v2 diagnostic: autoswap service is active and uses expected manifest")
+	replIndexInfof("robot diagnostic: autoswap service and manifest look healthy")
 
 	repoRootForList := ""
 	if _, err := ssh_plugin.RunSSHCommand(client, "test -d "+shellSingleQuote(resolvedRemoteRepo)); err == nil {
@@ -1638,7 +1659,27 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 		manifestAbs = found
 		return nil
 	}
-	if err := loadRuntimeState(); err != nil {
+	runtimeStateSettlingLogged := false
+	loadRuntimeStateWithRetry := func() error {
+		var lastErr error
+		for attempt := 0; attempt < 5; attempt++ {
+			if err := loadRuntimeState(); err == nil {
+				return nil
+			} else {
+				lastErr = err
+				if !strings.Contains(err.Error(), "autoswap runtime state parse failed") {
+					return err
+				}
+				if !runtimeStateSettlingLogged {
+					replIndexInfof("robot diagnostic: waiting for autoswap runtime state to settle")
+					runtimeStateSettlingLogged = true
+				}
+				time.Sleep(750 * time.Millisecond)
+			}
+		}
+		return lastErr
+	}
+	if err := loadRuntimeStateWithRetry(); err != nil {
 		return err
 	}
 	listCmd := shellSingleQuote(autoswapBin) + " service --mode list --manifest " + shellSingleQuote(manifestAbs)
@@ -1741,6 +1782,7 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 			}
 		}
 		logs.Info("robot src_v2 diagnostic: active manifest hash matches latest manifest-url")
+		replIndexInfof("robot diagnostic: active manifest matches latest release channel")
 	}
 
 	procsOut := ""
@@ -1853,6 +1895,7 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 		return fmt.Errorf("remote mavlink telemetry liveness check found no recent MAVLINK-RAW HEARTBEAT/GLOBALPOSITIONINT")
 	}
 	logs.Info("robot src_v2 diagnostic: remote endpoints passed (/health, /api/init, /api/integration-health, /stream, sidecar camera stream, mavlink telemetry liveness)")
+	replIndexInfof("robot diagnostic: rover API and telemetry endpoints passed")
 
 	resolvedUIURL := strings.TrimSpace(*uiURL)
 	if resolvedUIURL == "" && *publicCheck {
@@ -1861,6 +1904,7 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 	}
 	if !*publicCheck {
 		logs.Info("robot src_v2 diagnostic: skipping public UI verification (pass --public-check=true to re-enable)")
+		replIndexInfof("robot diagnostic: completed")
 		logs.Info("robot src_v2 diagnostic: remote checks completed")
 		return nil
 	}
@@ -1904,6 +1948,7 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 		logs.Info("robot src_v2 diagnostic: UI menu checks passed (%s)", resolvedUIURL)
 	}
 
+	replIndexInfof("robot diagnostic: completed")
 	logs.Info("robot src_v2 diagnostic: remote checks completed")
 	return nil
 }

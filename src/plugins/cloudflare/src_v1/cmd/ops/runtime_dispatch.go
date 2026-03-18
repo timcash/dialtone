@@ -21,6 +21,18 @@ import (
 	replv3 "dialtone/dev/plugins/repl/src_v3/go/repl"
 )
 
+func replIndexInfof(format string, args ...any) {
+	msg := strings.TrimSpace(fmt.Sprintf(format, args...))
+	if msg == "" {
+		return
+	}
+	if strings.TrimSpace(os.Getenv("DIALTONE_INTERNAL_SUBTONE")) == "1" {
+		logs.Info("DIALTONE_INDEX: %s", msg)
+		return
+	}
+	logs.Info("%s", msg)
+}
+
 func findCloudflared() string {
 	if override := strings.TrimSpace(os.Getenv("DIALTONE_CLOUDFLARED_BIN")); override != "" {
 		return override
@@ -114,6 +126,7 @@ func ParseUIRunPort(args []string) (int, error) {
 }
 
 func runLogin(_ []string) error {
+	replIndexInfof("cloudflare login: opening cloudflared auth flow")
 	cf := findCloudflared()
 	cmd := exec.Command(cf, "tunnel", "login")
 	cmd.Stdout = os.Stdout
@@ -132,21 +145,27 @@ func runTunnel(args []string) error {
 
 	switch sub {
 	case "create":
+		if len(subArgs) > 0 {
+			replIndexInfof("cloudflare tunnel: creating %s", strings.TrimSpace(subArgs[0]))
+		}
 		cmd := exec.Command(cf, append([]string{"tunnel", "create"}, subArgs...)...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
 	case "list":
+		replIndexInfof("cloudflare tunnel: listing configured tunnels")
 		cmd := exec.Command(cf, append([]string{"tunnel", "list"}, subArgs...)...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
 	case "status":
+		replIndexInfof("cloudflare tunnel: checking tunnel status")
 		cmd := exec.Command(cf, append([]string{"tunnel", "list"}, subArgs...)...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
 	case "cleanup":
+		replIndexInfof("cloudflare tunnel: cleaning up tunnel resources")
 		_ = exec.Command("pkill", "-f", "cloudflared").Run()
 		fs := flag.NewFlagSet("tunnel-cleanup", flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
@@ -184,8 +203,10 @@ func runTunnel(args []string) error {
 		logs.Raw("cloudflare cleanup verified token env=%s removed=%t", res.TokenEnvName, res.TokenRemoved)
 		logs.Raw(`{"hostname":%q,"tunnel_id":%q,"dns_deleted":%t,"connections_cleared":%t,"tunnel_deleted":%t,"token_env":%q,"token_removed":%t}`,
 			res.FullHostname, res.TunnelID, res.DNSDeleted, res.ConnectionsCleared, res.TunnelDeleted, res.TokenEnvName, res.TokenRemoved)
+		replIndexInfof("cloudflare tunnel: cleanup completed for %s", tunnelName)
 		return nil
 	case "stop":
+		replIndexInfof("cloudflare tunnel: stopping cloudflared processes")
 		_ = exec.Command("pkill", "-f", "cloudflared").Run()
 		return nil
 	case "route":
@@ -206,6 +227,7 @@ func runTunnel(args []string) error {
 		if hostname == "" {
 			return fmt.Errorf("hostname required (arg or DIALTONE_HOSTNAME)")
 		}
+		replIndexInfof("cloudflare tunnel: routing %s to %s", tunnelName, hostname)
 		cmd := exec.Command(cf, "tunnel", "route", "dns", tunnelName, hostname)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -224,6 +246,7 @@ func runTunnel(args []string) error {
 		}
 		targetURL := resolveDefaultTunnelURL(*urlFlag)
 		token := cloudflarev1.ResolveTunnelToken(tunnelName, *tokenFlag)
+		replIndexInfof("cloudflare tunnel: running %s -> %s", tunnelName, targetURL)
 		cmd, err := cloudflarev1.BuildTunnelRunCommand(cf, tunnelName, targetURL, token)
 		if err != nil {
 			return err
@@ -243,6 +266,7 @@ func runTunnel(args []string) error {
 		}
 		targetURL := resolveDefaultTunnelURL(*urlFlag)
 		token := cloudflarev1.ResolveTunnelToken(tunnelName, *tokenFlag)
+		replIndexInfof("cloudflare tunnel: starting %s -> %s", tunnelName, targetURL)
 		cmd, err := cloudflarev1.BuildTunnelRunCommand(cf, tunnelName, targetURL, token)
 		if err != nil {
 			return err
@@ -265,6 +289,7 @@ func runTunnel(args []string) error {
 			return err
 		}
 		logs.Raw("cloudflared confirmed tunnel connection in background pid=%d", cmd.Process.Pid)
+		replIndexInfof("cloudflare tunnel: background connector ready for %s", tunnelName)
 		return nil
 	default:
 		return fmt.Errorf("unknown tunnel subcommand: %s", sub)
@@ -388,12 +413,15 @@ func runShell(args []string) error {
 		}
 		logs.Info("starting shell tunnel connector: name=%s url=%s", strings.TrimSpace(*name), url)
 		logs.Info("run the same command on other hosts to add more connectors for HA/load distribution")
+		replIndexInfof("cloudflare shell: starting shell connector %s -> %s", strings.TrimSpace(*name), url)
 		return runTunnel(runArgs)
 	case "down":
+		replIndexInfof("cloudflare shell: stopping shell connector")
 		return runTunnel([]string{"stop"})
 	case "status":
 		url := resolveDefaultTunnelURL("")
 		logs.Info("shell bootstrap url: %s", url)
+		replIndexInfof("cloudflare shell: checking shell tunnel status")
 		return runTunnel([]string{"status"})
 	default:
 		return fmt.Errorf("unknown shell subcommand: %s", args[0])
@@ -408,6 +436,7 @@ func runServeTunnel(args []string) error {
 	if !strings.Contains(target, "://") {
 		target = "http://localhost:" + strings.TrimPrefix(target, ":")
 	}
+	replIndexInfof("cloudflare serve: forwarding %s", target)
 	cf := findCloudflared()
 	cmd := exec.Command(cf, "tunnel", "--url", target)
 	cmd.Stdout = os.Stdout
@@ -444,6 +473,7 @@ func runRobot(args []string) error {
 	if targetURL == "" {
 		targetURL = fmt.Sprintf("http://%s:80", robotName)
 	}
+	replIndexInfof("cloudflare robot: exposing %s via %s", robotName, targetURL)
 	runToken := cloudflarev1.ResolveTunnelToken(robotName, *token)
 	cmd, err := cloudflarev1.BuildTunnelRunCommand(findCloudflared(), robotName, targetURL, runToken)
 	if err != nil {
@@ -514,6 +544,7 @@ func runProvision(args []string) error {
 	if tunnelName == "" {
 		return fmt.Errorf("usage: ./dialtone.sh cloudflare src_v1 provision <name> [--domain <domain>]")
 	}
+	replIndexInfof("cloudflare provision: creating tunnel and DNS for %s", tunnelName)
 	envPath := strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE"))
 	if envPath == "" {
 		envPath = "env/dialtone.json"
@@ -528,6 +559,7 @@ func runProvision(args []string) error {
 	if err != nil {
 		return err
 	}
+	replIndexInfof("cloudflare provision: hostname %s ready", res.FullHostname)
 	out := map[string]any{
 		"hostname":    res.FullHostname,
 		"tunnel_id":   res.TunnelID,

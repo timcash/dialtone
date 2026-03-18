@@ -9,35 +9,65 @@ It is designed around:
 - one managed tab reused by default
 - one NATS request/reply control surface
 
+## Runtime Note
+
+Plain `./dialtone.sh chrome src_v3 ...` is the default operator path.
+
+That command is normally routed through the local REPL leader, which means:
+- `DIALTONE>` should stay high-level
+- full request detail stays in the subtone log
+- use `./dialtone.sh repl src_v3 subtone-list --count 20`
+- use `./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 200`
+
+Typical index-room summaries are:
+
+```text
+DIALTONE> chrome service: ensuring daemon on legion role=dev
+DIALTONE> chrome goto: opening http://127.0.0.1:8766/chrome_src_v3_action.html on legion role=dev
+DIALTONE> chrome screenshot: saved to /home/user/dialtone/src/plugins/chrome/src_v3/screenshots/manual_debug.png
+```
+
+The normal shell transcript pattern is:
+
+```text
+legion> /chrome src_v3 screenshot --host legion --role dev --out src/plugins/chrome/src_v3/screenshots/manual_debug.png
+DIALTONE> Request received. Spawning subtone for chrome src_v3...
+DIALTONE> Subtone started as pid 327530.
+DIALTONE> Subtone room: subtone-327530
+DIALTONE> Subtone log file: /home/user/dialtone/.dialtone/logs/subtone-327530-20260317-171019.log
+DIALTONE> chrome screenshot: capturing managed tab on legion role=dev
+DIALTONE> chrome service: ensuring daemon on legion role=dev
+DIALTONE> chrome screenshot: saved to /home/user/dialtone/src/plugins/chrome/src_v3/screenshots/manual_debug.png
+DIALTONE> Subtone for chrome src_v3 exited with code 0.
+```
+
+`--host` is plugin-local for `chrome` and should keep meaning the target mesh node, for example `legion`.
+
 ## Shell Workflow
 
 ```sh
 # From repo root
 cd /home/user/dialtone
 
-# Build local binaries
-./dialtone.sh chrome src_v3 build
-
-# Deploy and start the robot-test role on legion
-./dialtone.sh chrome src_v3 deploy --host legion --role robot-test --service
+# Deploy and start a headed role on legion
+./dialtone.sh chrome src_v3 deploy --host legion --role dev --service
 
 # Check service state
-./dialtone.sh chrome src_v3 status --host legion --role robot-test
+./dialtone.sh chrome src_v3 status --host legion --role dev
 ./dialtone.sh chrome src_v3 logs --host legion
 ./dialtone.sh chrome src_v3 doctor --host legion
 
 # Drive the managed tab
-./dialtone.sh chrome src_v3 goto --host legion --role robot-test --url http://127.0.0.1:3000/#robot-three-stage
-./dialtone.sh chrome src_v3 click-aria --host legion --role robot-test --label "Three Mode"
-./dialtone.sh chrome src_v3 click-aria --host legion --role robot-test --label "Three Thumb 1"
-./dialtone.sh chrome src_v3 wait-log --host legion --role robot-test --contains "Publishing rover.command cmd=arm" --timeout-ms 5000
+./dialtone.sh chrome src_v3 goto --host legion --role dev --url http://127.0.0.1:8766/chrome_src_v3_action.html
+./dialtone.sh chrome src_v3 type-aria --host legion --role dev --label "Name Input" --value dialtone
+./dialtone.sh chrome src_v3 click-aria --host legion --role dev --label "Do Thing"
 
 # Inspect live DOM state on the managed tab
-./dialtone.sh chrome src_v3 get-aria-attr --host legion --role robot-test --label "Xterm Terminal" --attr data-last-status-text
-./dialtone.sh chrome src_v3 get-aria-attr --host legion --role robot-test --label "Xterm Terminal" --attr data-last-command-ack-result
+./dialtone.sh chrome src_v3 get-aria-attr --host legion --role dev --label "Name Input" --attr value
+./dialtone.sh chrome src_v3 wait-log --host legion --role dev --contains "clicked:" --timeout-ms 5000
 
 # Capture a screenshot
-./dialtone.sh chrome src_v3 screenshot --host legion --role robot-test --out src/plugins/chrome/src_v3/screenshots/manual_debug.png
+./dialtone.sh chrome src_v3 screenshot --host legion --role dev --out src/plugins/chrome/src_v3/screenshots/manual_debug.png
 ```
 
 ## Core Model
@@ -60,7 +90,6 @@ What should not happen by default:
 ## Main Commands
 
 Lifecycle:
-- `./dialtone.sh chrome src_v3 build`
 - `./dialtone.sh chrome src_v3 deploy --host <host> --role <role> --service`
 - `./dialtone.sh chrome src_v3 service --host <host> --mode start|stop|status --role <role>`
 - `./dialtone.sh chrome src_v3 status --host <host> --role <role>`
@@ -113,13 +142,15 @@ This section provides critical context for LLM agents and automated tools.
 ### Log Streams
 1. **Daemon Logs**: Stored locally on the host at `~/.dialtone/chrome-v3/<role>/service/daemon.out.log`. These logs show NATS request handling and browser lifecycle events.
 2. **Browser Console**: The daemon captures the last 200 lines of the browser's console. Query these via `./dialtone.sh chrome src_v3 console`.
-3. **NATS Transport**: All CLI commands are converted to NATS requests on the subject `chrome.src_v3.<role>.cmd`. Responses include status, current URL, and console log snapshots.
+3. **REPL Subtone Logs**: Plain shell commands keep the detailed CLI-side request/response output in the subtone log shown in the `DIALTONE>` transcript.
+4. **NATS Transport**: All CLI commands are converted to NATS requests on the subject `chrome.src_v3.<role>.cmd`. Responses include status, current URL, and console log snapshots.
 
 ### LLM Strategy for Troubleshooting
 - **Verification**: Always start with `status`. If `unhealthy=true`, check the daemon logs.
 - **State Recovery**: If the browser is unresponsive, try `reset`. This kills the browser and clears lock files but preserves the profile.
 - **DOM Inspection**: Use `get-aria-attr` and `screenshot` to verify UI state without needing a head.
 - **Synchronicity**: Use `wait-log` or `wait-aria` to handle async page loads. The system is designed for high-latency remote links.
+- **REPL Context Hygiene**: Keep the index room clean. Use `DIALTONE>` lifecycle plus short summaries for progress, and use `subtone-log` when raw payloads or stack traces are needed.
 
 ## Integration With `test/src_v1`
 
@@ -163,24 +194,30 @@ Known operational constraint:
 
 1. Check daemon state:
 ```sh
-./dialtone.sh chrome src_v3 status --host legion --role robot-test
+./dialtone.sh chrome src_v3 status --host legion --role dev
 ```
 
 2. If the tab lands on `chrome-error://chromewebdata/`, verify the target UI server is actually running.
 
 3. Read browser console:
 ```sh
-./dialtone.sh chrome src_v3 console --host legion --role robot-test
+./dialtone.sh chrome src_v3 console --host legion --role dev
 ```
 
 4. Inspect live UI attrs:
 ```sh
-./dialtone.sh chrome src_v3 get-aria-attr --host legion --role robot-test --label "Xterm Terminal" --attr data-last-error-line
+./dialtone.sh chrome src_v3 get-aria-attr --host legion --role dev --label "Name Input" --attr value
 ```
 
 5. Only use `reset` when normal recovery is not enough:
 ```sh
 ./dialtone.sh chrome src_v3 reset --host legion
+```
+
+6. Inspect the exact subtone transcript when the index room is not enough:
+```sh
+./dialtone.sh repl src_v3 subtone-list --count 20
+./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 200
 ```
 
 ## Related Docs

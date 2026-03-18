@@ -31,6 +31,7 @@ const (
 	defaultRoom    = "index"
 	commandSubject = "repl.cmd"
 	commandQueue   = "repl.leader"
+	indexStatusTag = "DIALTONE_INDEX:"
 )
 
 const (
@@ -141,7 +142,7 @@ func RunLocal(logFn func(category, msg string), args []string) error {
 
 func RunLeader(args []string) error {
 	fs := flag.NewFlagSet("repl-leader", flag.ContinueOnError)
-	natsURL := fs.String("nats-url", defaultNATSURL, "NATS URL")
+	natsURL := fs.String("nats-url", resolveREPLNATSURL(), "NATS URL")
 	room := fs.String("room", defaultRoom, "Primary REPL room")
 	embedded := fs.Bool("embedded-nats", true, "Start embedded NATS on --nats-url")
 	enableTSNet := fs.Bool("tsnet", true, "Start embedded tsnet identity on host when native tailscale is not already connected")
@@ -306,7 +307,7 @@ func RunLeader(args []string) error {
 				})
 				return
 			}
-			args := strings.Fields(raw)
+			args := shellSplit(raw)
 			if len(args) == 0 {
 				return
 			}
@@ -425,7 +426,7 @@ func RunLeader(args []string) error {
 
 func RunJoin(args []string) error {
 	fs := flag.NewFlagSet("repl-join", flag.ContinueOnError)
-	natsURL := fs.String("nats-url", defaultNATSURL, "NATS URL")
+	natsURL := fs.String("nats-url", resolveREPLNATSURL(), "NATS URL")
 	room := fs.String("room", defaultRoom, "Shared REPL room")
 	name := fs.String("name", DefaultPromptName(), "Prompt name for this client")
 	if err := fs.Parse(args); err != nil {
@@ -802,7 +803,7 @@ func RunJoin(args []string) error {
 
 func RunStatus(args []string) error {
 	fs := flag.NewFlagSet("repl-status", flag.ContinueOnError)
-	natsURL := fs.String("nats-url", defaultNATSURL, "NATS URL")
+	natsURL := fs.String("nats-url", resolveREPLNATSURL(), "NATS URL")
 	room := fs.String("room", defaultRoom, "Shared REPL room")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -1016,8 +1017,12 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 		return
 	}
 
-	args := strings.Fields(line)
+	args := shellSplit(line)
 	if len(args) == 0 {
+		return
+	}
+	if err := validateSingleCommandTokens(args); err != nil {
+		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "error", Message: err.Error()})
 		return
 	}
 	cmdName := args[0]
@@ -1044,6 +1049,10 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 	emitSubtoneLine := func(pid int, stderr bool, line string) {
 		kind, text, ok := normalizeSubtoneLine(line, stderr)
 		if !ok || pid <= 0 {
+			return
+		}
+		if promoted, promotedOK := promotedIndexMessage(text); promotedOK {
+			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", SubtonePID: pid, Message: promoted})
 			return
 		}
 		if lastLineByPID[pid] == kind+"\n"+text {
@@ -1152,6 +1161,72 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 		return
 	}
 	runSubtoneWithEventsFn(args, onEvent)
+}
+
+func shellSplit(line string) []string {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return nil
+	}
+	args := make([]string, 0, 8)
+	var cur strings.Builder
+	var quote rune
+	flush := func() {
+		if cur.Len() == 0 {
+			return
+		}
+		args = append(args, cur.String())
+		cur.Reset()
+	}
+	for i := 0; i < len(line); i++ {
+		ch := rune(line[i])
+		if quote != 0 {
+			if ch == quote {
+				quote = 0
+				continue
+			}
+			if ch == '\\' && quote == '"' && i+1 < len(line) {
+				i++
+				cur.WriteByte(line[i])
+				continue
+			}
+			cur.WriteRune(ch)
+			continue
+		}
+		switch ch {
+		case '\'', '"':
+			quote = ch
+		case ' ', '\t', '\n', '\r':
+			flush()
+		case '\\':
+			if i+1 < len(line) {
+				i++
+				cur.WriteByte(line[i])
+			}
+		default:
+			cur.WriteRune(ch)
+		}
+	}
+	flush()
+	return args
+}
+
+func validateSingleCommandTokens(args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	for i, arg := range args {
+		token := strings.TrimSpace(arg)
+		switch token {
+		case "&&", "||", ";":
+			return fmt.Errorf("DIALTONE ERROR: run exactly one command at a time; command chaining with %q is not allowed. Use one foreground command per turn, or a single command with a trailing & for background mode.", token)
+		case "&":
+			if i != len(args)-1 {
+				return fmt.Errorf("DIALTONE ERROR: run exactly one command at a time; only a trailing & is allowed for background mode")
+			}
+		}
+	}
+	return nil
 }
 
 func printHelp(emit func(BusFrame)) {
@@ -1465,7 +1540,7 @@ func normalizeTargetHost(raw string) string {
 func connectNATS(natsURL string, embedded bool) (*nats.Conn, *logs.EmbeddedNATS, string, error) {
 	natsURL = strings.TrimSpace(natsURL)
 	if natsURL == "" {
-		natsURL = defaultNATSURL
+		natsURL = resolveREPLNATSURL()
 	}
 	if embedded {
 		broker, err := logs.StartEmbeddedNATSOnURL(natsURL)
@@ -1549,6 +1624,18 @@ func looksLikeBenignStderr(line string) bool {
 		return true
 	}
 	return false
+}
+
+func promotedIndexMessage(line string) (string, bool) {
+	text := strings.TrimSpace(line)
+	if !strings.HasPrefix(text, indexStatusTag) {
+		return "", false
+	}
+	text = strings.TrimSpace(strings.TrimPrefix(text, indexStatusTag))
+	if text == "" {
+		return "", false
+	}
+	return text, true
 }
 
 func printFrame(w io.Writer, frame BusFrame) {

@@ -15,6 +15,80 @@ import (
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
+func replIndexInfof(format string, args ...any) {
+	msg := strings.TrimSpace(fmt.Sprintf(format, args...))
+	if msg == "" {
+		return
+	}
+	if strings.TrimSpace(os.Getenv("DIALTONE_INTERNAL_SUBTONE")) == "1" {
+		logs.Info("DIALTONE_INDEX: %s", msg)
+		return
+	}
+	logs.Info("%s", msg)
+}
+
+func defaultHostLabel(host string) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return "local"
+	}
+	return host
+}
+
+func emitChromeCommandSummary(command, host, role, url string) {
+	switch command {
+	case "status":
+		replIndexInfof("chrome status: checking %s role=%s", host, role)
+	case "open":
+		if strings.TrimSpace(url) == "" {
+			replIndexInfof("chrome open: opening managed tab on %s role=%s", host, role)
+		} else {
+			replIndexInfof("chrome open: opening %s on %s role=%s", strings.TrimSpace(url), host, role)
+		}
+	case "goto":
+		replIndexInfof("chrome goto: opening %s on %s role=%s", strings.TrimSpace(url), host, role)
+	case "get-url":
+		replIndexInfof("chrome get-url: reading managed tab URL on %s role=%s", host, role)
+	case "tabs":
+		replIndexInfof("chrome tabs: listing tabs on %s role=%s", host, role)
+	case "tab-open":
+		replIndexInfof("chrome tab-open: opening tab on %s role=%s", host, role)
+	case "tab-close":
+		replIndexInfof("chrome tab-close: closing tab on %s role=%s", host, role)
+	case "close":
+		replIndexInfof("chrome close: closing browser on %s role=%s", host, role)
+	case "console":
+		replIndexInfof("chrome console: reading console buffer on %s role=%s", host, role)
+	}
+}
+
+func emitChromeCommandResult(command, host, role string, resp *commandResponse) {
+	switch command {
+	case "goto", "open":
+		replIndexInfof("chrome %s: managed tab ready", command)
+	case "status":
+		if resp != nil && resp.BrowserPID > 0 {
+			replIndexInfof("chrome status: daemon ready on %s role=%s browser_pid=%d", host, role, resp.BrowserPID)
+		} else {
+			replIndexInfof("chrome status: daemon ready on %s role=%s", host, role)
+		}
+	case "tabs":
+		if resp != nil {
+			replIndexInfof("chrome tabs: %d tab(s) visible", len(resp.Tabs))
+		}
+	case "get-url":
+		if resp != nil {
+			replIndexInfof("chrome get-url: %s", strings.TrimSpace(resp.CurrentURL))
+		}
+	case "console":
+		if resp != nil {
+			replIndexInfof("chrome console: captured %d line(s)", len(resp.ConsoleLines))
+		}
+	case "close":
+		replIndexInfof("chrome close: browser stopped")
+	}
+}
+
 func Run(args []string) error {
 	if len(args) == 0 {
 		printUsage()
@@ -131,6 +205,12 @@ func handleDeploy(args []string) error {
 	role := fs.String("role", defaultRole, "Chrome role")
 	service := fs.Bool("service", false, "Start service after deploy")
 	_ = fs.Parse(args)
+	targetHost := defaultHostLabel(*host)
+	if *service {
+		replIndexInfof("chrome deploy: syncing binary to %s role=%s and starting service", targetHost, strings.TrimSpace(*role))
+	} else {
+		replIndexInfof("chrome deploy: syncing binary to %s role=%s", targetHost, strings.TrimSpace(*role))
+	}
 	return deployTarget(strings.TrimSpace(*host), strings.TrimSpace(*role), *service)
 }
 
@@ -140,6 +220,15 @@ func handleService(args []string) error {
 	mode := fs.String("mode", "status", "start|stop|status")
 	role := fs.String("role", defaultRole, "Chrome role")
 	_ = fs.Parse(args)
+	targetHost := defaultHostLabel(*host)
+	switch strings.ToLower(strings.TrimSpace(*mode)) {
+	case "start":
+		replIndexInfof("chrome service: starting on %s role=%s", targetHost, strings.TrimSpace(*role))
+	case "stop":
+		replIndexInfof("chrome service: stopping on %s role=%s", targetHost, strings.TrimSpace(*role))
+	default:
+		replIndexInfof("chrome service: checking on %s role=%s", targetHost, strings.TrimSpace(*role))
+	}
 	resp, err := serviceTarget(strings.TrimSpace(*host), strings.TrimSpace(*mode), strings.TrimSpace(*role))
 	if err != nil {
 		return err
@@ -164,10 +253,16 @@ func handleRequestCommand(command string, args []string) error {
 		Index:   *index,
 	}
 	autoStart := command != "status" && command != "instances" && command != "close"
+	targetHost := defaultHostLabel(*host)
+	emitChromeCommandSummary(command, targetHost, strings.TrimSpace(*role), req.URL)
+	if autoStart {
+		replIndexInfof("chrome service: ensuring daemon on %s role=%s", targetHost, strings.TrimSpace(*role))
+	}
 	resp, err := sendCommandByTarget(strings.TrimSpace(*host), req, autoStart)
 	if err != nil {
 		return err
 	}
+	emitChromeCommandResult(command, targetHost, strings.TrimSpace(*role), resp)
 	printResponse(resp)
 	return nil
 }
@@ -196,6 +291,14 @@ func handleAriaCommand(command string, args []string) error {
 	if strings.TrimSpace(*label) == "" {
 		return fmt.Errorf("%s requires --label", command)
 	}
+	targetHost := defaultHostLabel(*host)
+	switch command {
+	case "click-aria":
+		replIndexInfof("chrome click: clicking aria-label %q on %s role=%s", strings.TrimSpace(*label), targetHost, strings.TrimSpace(*role))
+	case "type-aria":
+		replIndexInfof("chrome type: typing into aria-label %q on %s role=%s", strings.TrimSpace(*label), targetHost, strings.TrimSpace(*role))
+	}
+	replIndexInfof("chrome service: ensuring daemon on %s role=%s", targetHost, strings.TrimSpace(*role))
 	resp, err := sendCommandByTarget(strings.TrimSpace(*host), commandRequest{
 		Command:   command,
 		Role:      strings.TrimSpace(*role),
@@ -204,6 +307,11 @@ func handleAriaCommand(command string, args []string) error {
 	}, true)
 	if err != nil {
 		return err
+	}
+	if command == "click-aria" {
+		replIndexInfof("chrome click: action completed")
+	} else {
+		replIndexInfof("chrome type: input updated")
 	}
 	printResponse(resp)
 	return nil
@@ -221,6 +329,13 @@ func handleAriaWaitCommand(command string, args []string) error {
 	if strings.TrimSpace(*label) == "" {
 		return fmt.Errorf("%s requires --label", command)
 	}
+	targetHost := defaultHostLabel(*host)
+	if command == "wait-aria" {
+		replIndexInfof("chrome wait: waiting for aria-label %q on %s role=%s", strings.TrimSpace(*label), targetHost, strings.TrimSpace(*role))
+	} else {
+		replIndexInfof("chrome wait: waiting for %q attr %q=%q on %s role=%s", strings.TrimSpace(*label), strings.TrimSpace(*attr), *expected, targetHost, strings.TrimSpace(*role))
+	}
+	replIndexInfof("chrome service: ensuring daemon on %s role=%s", targetHost, strings.TrimSpace(*role))
 	req := commandRequest{
 		Command:   command,
 		Role:      strings.TrimSpace(*role),
@@ -235,6 +350,7 @@ func handleAriaWaitCommand(command string, args []string) error {
 	if err != nil {
 		return err
 	}
+	replIndexInfof("chrome wait: condition satisfied")
 	printResponse(resp)
 	return nil
 }
@@ -252,6 +368,9 @@ func handleAriaGetAttrCommand(args []string) error {
 	if strings.TrimSpace(*attr) == "" {
 		return fmt.Errorf("get-aria-attr requires --attr")
 	}
+	targetHost := defaultHostLabel(*host)
+	replIndexInfof("chrome inspect: reading aria-label %q attr %q on %s role=%s", strings.TrimSpace(*label), strings.TrimSpace(*attr), targetHost, strings.TrimSpace(*role))
+	replIndexInfof("chrome service: ensuring daemon on %s role=%s", targetHost, strings.TrimSpace(*role))
 	resp, err := sendCommandByTarget(strings.TrimSpace(*host), commandRequest{
 		Command:   "get-aria-attr",
 		Role:      strings.TrimSpace(*role),
@@ -261,6 +380,7 @@ func handleAriaGetAttrCommand(args []string) error {
 	if err != nil {
 		return err
 	}
+	replIndexInfof("chrome inspect: value captured")
 	printResponse(resp)
 	if strings.TrimSpace(resp.Value) != "" {
 		logs.Raw("%s", resp.Value)
@@ -278,6 +398,9 @@ func handleWaitLogCommand(args []string) error {
 	if strings.TrimSpace(*contains) == "" {
 		return fmt.Errorf("wait-log requires --contains")
 	}
+	targetHost := defaultHostLabel(*host)
+	replIndexInfof("chrome wait-log: waiting for %q on %s role=%s", strings.TrimSpace(*contains), targetHost, strings.TrimSpace(*role))
+	replIndexInfof("chrome service: ensuring daemon on %s role=%s", targetHost, strings.TrimSpace(*role))
 	resp, err := sendCommandByTarget(strings.TrimSpace(*host), commandRequest{
 		Command:   "wait-log",
 		Role:      strings.TrimSpace(*role),
@@ -287,6 +410,7 @@ func handleWaitLogCommand(args []string) error {
 	if err != nil {
 		return err
 	}
+	replIndexInfof("chrome wait-log: log observed")
 	printResponse(resp)
 	return nil
 }
@@ -297,6 +421,9 @@ func handleSetHTMLCommand(args []string) error {
 	role := fs.String("role", defaultRole, "Chrome role")
 	value := fs.String("value", "", "HTML markup")
 	_ = fs.Parse(args)
+	targetHost := defaultHostLabel(*host)
+	replIndexInfof("chrome html: replacing managed tab DOM on %s role=%s", targetHost, strings.TrimSpace(*role))
+	replIndexInfof("chrome service: ensuring daemon on %s role=%s", targetHost, strings.TrimSpace(*role))
 	resp, err := sendCommandByTarget(strings.TrimSpace(*host), commandRequest{
 		Command: "set-html",
 		Role:    strings.TrimSpace(*role),
@@ -305,6 +432,7 @@ func handleSetHTMLCommand(args []string) error {
 	if err != nil {
 		return err
 	}
+	replIndexInfof("chrome html: content applied")
 	printResponse(resp)
 	return nil
 }
@@ -318,6 +446,9 @@ func handleScreenshotCommand(args []string) error {
 	if strings.TrimSpace(*outPath) == "" {
 		return fmt.Errorf("screenshot requires --out")
 	}
+	targetHost := defaultHostLabel(*host)
+	replIndexInfof("chrome screenshot: capturing managed tab on %s role=%s", targetHost, strings.TrimSpace(*role))
+	replIndexInfof("chrome service: ensuring daemon on %s role=%s", targetHost, strings.TrimSpace(*role))
 	resp, err := sendCommandByTarget(strings.TrimSpace(*host), commandRequest{
 		Command: "screenshot",
 		Role:    strings.TrimSpace(*role),
@@ -329,14 +460,19 @@ func handleScreenshotCommand(args []string) error {
 	if err != nil {
 		return fmt.Errorf("decode screenshot: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(*outPath), 0755); err != nil {
+	targetPath := strings.TrimSpace(*outPath)
+	if !filepath.IsAbs(targetPath) {
+		targetPath = filepath.Join(resolveRepoRoot(), targetPath)
+	}
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(*outPath, data, 0644); err != nil {
+	if err := os.WriteFile(targetPath, data, 0644); err != nil {
 		return err
 	}
+	replIndexInfof("chrome screenshot: saved to %s", targetPath)
 	printResponse(resp)
-	fmt.Printf("SCREENSHOT_SAVED %s\n", strings.TrimSpace(*outPath))
+	fmt.Printf("SCREENSHOT_SAVED %s\n", targetPath)
 	return nil
 }
 
@@ -368,13 +504,17 @@ func handleActionSmokeTest(args []string) error {
 			if err != nil {
 				return fmt.Errorf("decode screenshot: %w", err)
 			}
-			if err := os.MkdirAll(filepath.Dir(*outPath), 0755); err != nil {
+			targetPath := strings.TrimSpace(*outPath)
+			if !filepath.IsAbs(targetPath) {
+				targetPath = filepath.Join(resolveRepoRoot(), targetPath)
+			}
+			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 				return err
 			}
-			if err := os.WriteFile(*outPath, data, 0644); err != nil {
+			if err := os.WriteFile(targetPath, data, 0644); err != nil {
 				return err
 			}
-			fmt.Printf("SCREENSHOT_SAVED %s\n", strings.TrimSpace(*outPath))
+			fmt.Printf("SCREENSHOT_SAVED %s\n", targetPath)
 		}
 		printResponse(resp)
 	}

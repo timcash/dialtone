@@ -124,11 +124,14 @@ func mergeBootstrapHostDefaults(n *meshNode) {
 	if key := strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_SSH_PRIVATE_KEY")); key != "" && strings.TrimSpace(n.SSHPrivateKey) == "" {
 		n.SSHPrivateKey = key
 	}
+	if keyPath := strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_SSH_PRIVATE_KEY_PATH")); keyPath != "" && strings.TrimSpace(n.SSHPrivateKeyPath) == "" {
+		n.SSHPrivateKeyPath = keyPath
+	}
 }
 
 func Inject(args []string) error {
 	fs := flag.NewFlagSet("repl-v3-inject", flag.ContinueOnError)
-	natsURL := fs.String("nats-url", defaultNATSURL, "NATS URL")
+	natsURL := fs.String("nats-url", resolveREPLNATSURL(), "NATS URL")
 	room := fs.String("room", defaultRoom, "Shared room name")
 	user := fs.String("user", "llm-codex", "Logical user name")
 	host := fs.String("host", "", "Target REPL host (routes as @host command)")
@@ -147,7 +150,7 @@ func InjectCommand(natsURL, room, user, host, command string) error {
 		return fmt.Errorf("command is required")
 	}
 	if strings.TrimSpace(natsURL) == "" {
-		natsURL = defaultNATSURL
+		natsURL = resolveREPLNATSURL()
 	}
 	if strings.TrimSpace(room) == "" {
 		room = defaultRoom
