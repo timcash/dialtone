@@ -411,6 +411,10 @@ func main() {
 	case "mods":
 		if shouldRouteCommandViaREPL(command, args) {
 			if err := dispatchViaREPL(command, args, targetHost); err != nil {
+				if strings.HasPrefix(strings.TrimSpace(err.Error()), "DIALTONE ERROR:") {
+					logs.System("%s", strings.TrimSpace(err.Error()))
+					os.Exit(1)
+				}
 				logs.Error("REPL dispatch failed: %v", err)
 				os.Exit(1)
 			}
@@ -442,6 +446,10 @@ func main() {
 		}
 		if shouldRouteCommandViaREPL(command, args) {
 			if err := dispatchViaREPL(command, args, targetHost); err != nil {
+				if strings.HasPrefix(strings.TrimSpace(err.Error()), "DIALTONE ERROR:") {
+					logs.System("%s", strings.TrimSpace(err.Error()))
+					os.Exit(1)
+				}
 				logs.Error("REPL dispatch failed: %v", err)
 				os.Exit(1)
 			}
@@ -577,6 +585,9 @@ func dispatchViaREPL(command string, args []string, targetHost string) error {
 	injectLine := strings.TrimSpace(shellJoin(append([]string{command}, filtered...)))
 	if injectLine == "" {
 		return fmt.Errorf("empty command")
+	}
+	if err := validateSingleCommandTokens(shellSplit(displayLine)); err != nil {
+		return err
 	}
 	natsURL := strings.TrimSpace(os.Getenv("DIALTONE_REPL_NATS_URL"))
 	if natsURL == "" {
@@ -960,6 +971,24 @@ func shellSplit(line string) []string {
 	}
 	flush()
 	return args
+}
+
+func validateSingleCommandTokens(args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	for i, arg := range args {
+		token := strings.TrimSpace(arg)
+		switch token {
+		case "&&", "||", ";":
+			return fmt.Errorf("DIALTONE ERROR: run exactly one ./dialtone.sh command at a time; command chaining with %q is not allowed. Use one foreground command per turn, or a single command with a trailing & for background mode.", token)
+		case "&":
+			if i != len(args)-1 {
+				return fmt.Errorf("DIALTONE ERROR: run exactly one ./dialtone.sh command at a time; only a trailing & is allowed for background mode")
+			}
+		}
+	}
+	return nil
 }
 
 func meshNodeMatches(node replMeshNode, target string) bool {
