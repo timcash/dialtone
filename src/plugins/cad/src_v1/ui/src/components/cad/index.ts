@@ -44,7 +44,6 @@ class CadStage implements VisualizationControl {
   private pendingRegenerationStatus: string | null = null;
   private pendingRegenerationKey: string | null = null;
   private lastGeneratedKey = '';
-  private statusEl: HTMLDivElement;
   private stageStatus: HTMLElement;
   private stats = {
     outer: this.requireEl('cad-stat-outer'),
@@ -53,7 +52,6 @@ class CadStage implements VisualizationControl {
     holes: this.requireEl('cad-stat-holes'),
     status: this.requireEl('cad-stat-status'),
     mesh: this.requireEl('cad-stat-mesh'),
-    source: this.requireEl('cad-source-snippet'),
   };
   private form: HTMLFormElement;
   private formButtons: HTMLButtonElement[];
@@ -74,11 +72,6 @@ class CadStage implements VisualizationControl {
     this.camera.position.set(0, 62, 152);
     this.camera.lookAt(0, 0, 0);
 
-    this.statusEl = document.createElement('div');
-    this.statusEl.className = 'cad-stage-status';
-    this.statusEl.textContent = 'Materializing gear...';
-    this.container.appendChild(this.statusEl);
-
     this.form = this.container.querySelector('.mode-form') as HTMLFormElement;
     this.formButtons = Array.from(this.form.querySelectorAll('button')).slice(0, 9);
     this.input = this.form.querySelector('input[aria-label="CAD Input"]') as HTMLInputElement;
@@ -89,7 +82,6 @@ class CadStage implements VisualizationControl {
     this.setControlsBusy(true);
     this.resize();
     window.addEventListener('resize', this.resize);
-    void this.refreshMetadata();
     void this.regenerate('Generating baseline gear...');
     this.animate();
   }
@@ -97,7 +89,6 @@ class CadStage implements VisualizationControl {
   setVisible(visible: boolean): void {
     this.visible = visible;
     this.canvas.style.visibility = visible ? 'visible' : 'hidden';
-    this.statusEl.style.display = visible ? 'block' : 'none';
   }
 
   dispose(): void {
@@ -110,7 +101,6 @@ class CadStage implements VisualizationControl {
     });
     this.disposeCurrentGeometry();
     this.renderer.dispose();
-    this.statusEl.remove();
   }
 
   private requireEl(id: string): HTMLElement {
@@ -286,7 +276,6 @@ class CadStage implements VisualizationControl {
       this.setStatus('Gear regenerated');
       this.lastGeneratedKey = requestKey;
       console.info(`cad-model-ready:${this.generationSeq}`);
-      void this.refreshMetadata();
     } catch (error) {
       if ((error as Error).name === 'AbortError') return;
       console.error('[cad/ui] regenerate failed', error);
@@ -352,27 +341,6 @@ class CadStage implements VisualizationControl {
     }
   }
 
-  private async refreshMetadata(): Promise<void> {
-    const query = new URLSearchParams({
-      num_teeth: String(this.params.num_teeth),
-      outer_diameter: String(this.params.outer_diameter),
-      inner_diameter: String(this.params.inner_diameter),
-    });
-    try {
-      const response = await fetch(`/api/cad?${query.toString()}`);
-      if (!response.ok) return;
-      const payload = (await response.json()) as { source_code?: string };
-      const snippet = payload.source_code
-        ?.split('\n')
-        .slice(0, 12)
-        .join('\n')
-        .trim();
-      this.stats.source.textContent = snippet || 'source unavailable';
-    } catch (error) {
-      console.error('[cad/ui] metadata failed', error);
-    }
-  }
-
   private refreshLegend(): void {
     this.stats.outer.textContent = `${Math.round(this.params.outer_diameter)} mm`;
     this.stats.inner.textContent = `${Math.round(this.params.inner_diameter)} mm`;
@@ -389,7 +357,7 @@ class CadStage implements VisualizationControl {
   }
 
   private setStatus(text: string): void {
-    this.statusEl.textContent = text;
+    this.stageStatus.textContent = text;
   }
 
   private setModelState(state: string, text: string): void {
