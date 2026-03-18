@@ -480,7 +480,7 @@ func handleCadDemo(webDir string) {
 	_ = browser.CleanupPort(8081)
 	chrome.KillDialtoneResources()
 
-	cadCmd := getDialtoneCmd("cad", "server")
+	cadCmd := getDialtoneCmd("cad", "src_v1", "serve")
 	if err := cadCmd.Start(); err != nil {
 		logFatal("Failed to start CAD server: %v", err)
 	}

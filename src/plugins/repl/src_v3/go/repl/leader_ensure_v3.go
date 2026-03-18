@@ -19,7 +19,7 @@ func EnsureLeaderRunning(clientNATSURL, room string) error {
 	if strings.TrimSpace(room) == "" {
 		room = defaultRoom
 	}
-	if endpointReachable(clientNATSURL, 700*time.Millisecond) {
+	if _, err := leaderHealth(clientNATSURL, 1200*time.Millisecond); err == nil {
 		return nil
 	}
 	if !isLocalNATSEndpoint(clientNATSURL) {
@@ -29,18 +29,11 @@ func EnsureLeaderRunning(clientNATSURL, room string) error {
 	if err != nil {
 		return err
 	}
-	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
-	if goBin == "" {
-		goBin = "go"
-	}
 	listenURL := listenURLFromClientURL(clientNATSURL)
-	cmd := exec.Command(goBin, "run", "./plugins/repl/scaffold/main.go", "src_v3", "leader",
-		"--embedded-nats",
-		"--nats-url", listenURL,
-		"--room", room,
-		"--hostname", "DIALTONE-SERVER",
-	)
-	cmd.Dir = srcRoot
+	cmd, err := leaderAutostartCommand(repoRoot, srcRoot, listenURL, room)
+	if err != nil {
+		return err
+	}
 	cmd.Env = append(os.Environ(),
 		"DIALTONE_REPO_ROOT="+repoRoot,
 		"DIALTONE_SRC_ROOT="+srcRoot,
@@ -74,10 +67,40 @@ func EnsureLeaderRunning(clientNATSURL, room string) error {
 	}
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
-		if endpointReachable(clientNATSURL, 600*time.Millisecond) {
+		if _, err := leaderHealth(clientNATSURL, 800*time.Millisecond); err == nil {
 			return nil
 		}
 		time.Sleep(150 * time.Millisecond)
 	}
 	return fmt.Errorf("repl v3 leader did not start nats endpoint at %s", clientNATSURL)
+}
+
+func leaderAutostartCommand(repoRoot, srcRoot, listenURL, room string) (*exec.Cmd, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	exe, err = filepath.Abs(exe)
+	if err != nil {
+		return nil, err
+	}
+	args := []string{
+		"repl", "src_v3", "leader",
+		"--embedded-nats",
+		"--nats-url", listenURL,
+		"--room", room,
+		"--hostname", "DIALTONE-SERVER",
+	}
+	if len(os.Args) > 1 && strings.HasPrefix(strings.TrimSpace(os.Args[1]), "src_v") {
+		args = []string{
+			"src_v3", "leader",
+			"--embedded-nats",
+			"--nats-url", listenURL,
+			"--room", room,
+			"--hostname", "DIALTONE-SERVER",
+		}
+	}
+	cmd := exec.Command(exe, args...)
+	cmd.Dir = srcRoot
+	return cmd, nil
 }

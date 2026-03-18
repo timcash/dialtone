@@ -326,7 +326,7 @@ func resetTarget(host, role string) error {
 	if err != nil {
 		return err
 	}
-	return resetRemoteHost(node)
+	return resetRemoteHost(node, strings.TrimSpace(role))
 }
 
 func localListenPortOpen(port int) bool {
