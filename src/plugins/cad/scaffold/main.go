@@ -86,6 +86,8 @@ func printUsage() {
 	logs.Raw("Commands:")
 	logs.Raw("  serve [--port <n>]   Start the CAD backend server")
 	logs.Raw("  server [--port <n>]  Alias for serve")
+	logs.Raw("  status [--port <n>]  Check local CAD server health")
+	logs.Raw("  stop [--port <n>]    Stop the tracked local CAD server")
 	logs.Raw("  build                Build the CAD UI assets")
 	logs.Raw("  format               Format Go and UI sources")
 	logs.Raw("  test                 Run cad src_v1 test suite")
@@ -123,7 +125,11 @@ func runFormat() error {
 		return err
 	}
 	logs.Info("DIALTONE_INDEX: cad format: formatting ui sources")
-	return runBun(paths, "run", "format")
+	if err := runBun(paths, "run", "format"); err != nil {
+		return err
+	}
+	logs.Info("DIALTONE_INDEX: cad format: completed")
+	return nil
 }
 
 func runBuild() error {
@@ -136,7 +142,11 @@ func runBuild() error {
 		return err
 	}
 	logs.Info("DIALTONE_INDEX: cad build: building ui dist")
-	return runBun(paths, "run", "build")
+	if err := runBun(paths, "run", "build"); err != nil {
+		return err
+	}
+	logs.Info("DIALTONE_INDEX: cad build: ui dist ready")
+	return nil
 }
 
 func runBun(paths cadv1.Paths, args ...string) error {

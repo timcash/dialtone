@@ -11,6 +11,9 @@ type Paths struct {
 	BackendMain string
 	UIDir       string
 	UIDist      string
+	StateDir    string
+	ServerPID   string
+	ServerMeta  string
 }
 
 func ResolvePaths(start, version string) (Paths, error) {
@@ -29,5 +32,8 @@ func ResolvePaths(start, version string) (Paths, error) {
 		BackendMain: preset.Join("backend", "main.py"),
 		UIDir:       preset.UI,
 		UIDist:      preset.UIDist,
+		StateDir:    configv1.RepoPath(rt, ".dialtone", "cad", version),
+		ServerPID:   configv1.RepoPath(rt, ".dialtone", "cad", version, "server.pid"),
+		ServerMeta:  configv1.RepoPath(rt, ".dialtone", "cad", version, "server.json"),
 	}, nil
 }

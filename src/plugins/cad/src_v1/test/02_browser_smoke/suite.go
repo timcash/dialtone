@@ -53,19 +53,25 @@ func Register(r *testv1.Registry) {
 			if err := ctx.WaitForAriaLabelAttrEquals("CAD Stage", "data-model-state", "ready", 25*time.Second); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("cad model never reached ready state: %w", err)
 			}
+			if err := ctx.WaitForAriaLabelAttrEquals("CAD Mode Form", "data-busy", "false", 25*time.Second); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("cad controls never reached idle state: %w", err)
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("CAD Mode Form", "data-generation", "1", 25*time.Second); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("cad controls never published generation 1: %w", err)
+			}
 			if err := ctx.WaitForConsoleContains("cad-model-ready:", 15*time.Second); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("cad model ready console marker missing: %w", err)
 			}
-			if err := clickAndWaitReady(ctx, "CAD Thumb 1", "cad-model-ready:2"); err != nil {
+			if err := clickAndWaitReady(ctx, "CAD Thumb 1", "2"); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			if err := clickAndWaitReady(ctx, "CAD Thumb 3", "cad-model-ready:3"); err != nil {
+			if err := clickAndWaitReady(ctx, "CAD Thumb 3", "3"); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			if err := clickAndWaitReady(ctx, "CAD Thumb 5", "cad-model-ready:4"); err != nil {
+			if err := clickAndWaitReady(ctx, "CAD Thumb 5", "4"); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			if err := clickAndWaitReady(ctx, "CAD Thumb 7", "cad-model-ready:5"); err != nil {
+			if err := clickAndWaitReady(ctx, "CAD Thumb 7", "5"); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 
@@ -101,14 +107,22 @@ func browserRole() string {
 	return role
 }
 
-func clickAndWaitReady(ctx *testv1.StepContext, label string, expectedMarker string) error {
+func clickAndWaitReady(ctx *testv1.StepContext, label string, expectedGeneration string) error {
 	if err := ctx.ClickAriaLabel(label); err != nil {
 		return fmt.Errorf("button %s click failed: %w", label, err)
 	}
-	if err := ctx.WaitForConsoleContains(expectedMarker, 15*time.Second); err != nil {
-		return fmt.Errorf("button %s did not emit %s: %w", label, expectedMarker, err)
+	if err := ctx.WaitForAriaLabelAttrEquals("CAD Mode Form", "data-generation", expectedGeneration, 25*time.Second); err != nil {
+		return fmt.Errorf("button %s did not publish generation %s: %w", label, expectedGeneration, err)
 	}
-	time.Sleep(250 * time.Millisecond)
+	if err := ctx.WaitForAriaLabelAttrEquals("CAD Mode Form", "data-busy", "false", 25*time.Second); err != nil {
+		return fmt.Errorf("button %s never returned controls to idle: %w", label, err)
+	}
+	if err := ctx.WaitForAriaLabelAttrEquals("CAD Stage", "data-model-state", "ready", 25*time.Second); err != nil {
+		return fmt.Errorf("button %s never returned CAD stage to ready: %w", label, err)
+	}
+	if err := ctx.WaitForConsoleContains("cad-model-ready:"+expectedGeneration, 15*time.Second); err != nil {
+		return fmt.Errorf("button %s did not emit cad-model-ready:%s: %w", label, expectedGeneration, err)
+	}
 	return nil
 }
 
