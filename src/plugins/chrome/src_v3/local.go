@@ -201,6 +201,11 @@ func sendCommandByTarget(host string, req commandRequest, autoStart bool) (*comm
 		}
 		return sendLocalCommand(req)
 	}
+	if autoStart {
+		if _, err := EnsureRemoteServiceByHost(strings.TrimSpace(host), req.Role, false); err != nil {
+			return nil, err
+		}
+	}
 	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(host))
 	if err != nil {
 		return nil, err

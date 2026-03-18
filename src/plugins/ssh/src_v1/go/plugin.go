@@ -4,11 +4,24 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
+
+func replIndexInfof(format string, args ...any) {
+	msg := strings.TrimSpace(fmt.Sprintf(format, args...))
+	if msg == "" {
+		return
+	}
+	if strings.TrimSpace(os.Getenv("DIALTONE_INTERNAL_SUBTONE")) == "1" {
+		logs.Info("DIALTONE_INDEX: %s", msg)
+		return
+	}
+	logs.Info("%s", msg)
+}
 
 func Run(args []string) error {
 	if len(args) == 0 {
@@ -233,6 +246,7 @@ func runCommand(args []string) error {
 	if strings.TrimSpace(*cmd) == "" {
 		return errors.New("--cmd is required")
 	}
+	replIndexInfof("ssh run: executing remote command on %s", target)
 	opts := CommandOptions{
 		User:           *user,
 		Port:           *port,
@@ -265,6 +279,9 @@ func runCommand(args []string) error {
 	}
 	if *debug {
 		logs.Raw("Elapsed: %s", time.Since(started).Round(10*time.Millisecond))
+	}
+	if err == nil {
+		replIndexInfof("ssh run: command completed on %s", target)
 	}
 	return err
 }
@@ -324,10 +341,12 @@ func runResolve(args []string) error {
 	if target == "" {
 		return errors.New("--host is required")
 	}
+	replIndexInfof("ssh resolve: resolving %s", target)
 	report, err := BuildResolveReport(target, CommandOptions{User: *user, Port: *port})
 	if err != nil {
 		return err
 	}
+	replIndexInfof("ssh resolve: transport=%s preferred=%s", report.Transport, report.PreferredHost)
 	logs.Raw("name=%s", report.Name)
 	logs.Raw("transport=%s", report.Transport)
 	logs.Raw("user=%s", report.User)
@@ -361,6 +380,7 @@ func runProbe(args []string) error {
 	if target == "" {
 		return errors.New("--host is required")
 	}
+	replIndexInfof("ssh probe: checking transport/auth for %s", target)
 	opts := CommandOptions{
 		User:           *user,
 		Port:           *port,
@@ -375,8 +395,10 @@ func runProbe(args []string) error {
 	if err != nil {
 		return err
 	}
+	replIndexInfof("ssh probe: transport=%s preferred=%s", report.Transport, report.PreferredHost)
 	logs.Raw("Probe target=%s transport=%s user=%s port=%s", report.Name, report.Transport, report.User, report.Port)
 	if report.Transport != "ssh" {
+		replIndexInfof("ssh probe: transport %s does not use ssh candidate dialing", report.Transport)
 		logs.Raw("transport %s does not use ssh candidate dialing", report.Transport)
 		return nil
 	}
@@ -420,6 +442,7 @@ func runProbe(args []string) error {
 	if failures > 0 {
 		return fmt.Errorf("probe finished with %d auth failure(s)", failures)
 	}
+	replIndexInfof("ssh probe: auth checks passed for %s", report.Name)
 	return nil
 }
 

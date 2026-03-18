@@ -1,5 +1,17 @@
 # Autoswap Plugin
 
+## Runtime Note
+
+Plain `./dialtone.sh autoswap src_v1 ...` is the default operator path.
+
+That command is normally routed through the local REPL leader, which means:
+- `DIALTONE>` should stay high-level
+- full command output stays in the subtone log
+- use `./dialtone.sh repl src_v3 subtone-list --count 20`
+- use `./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 200`
+
+`--host` is plugin-local for `autoswap` and should keep meaning the target mesh node, for example `rover`.
+
 ```bash
 # 1) Build autoswap in dev
 ./dialtone.sh go src_v1 exec build -o ../bin/dialtone_autoswap_v1 ./plugins/autoswap/src_v1/cmd/main.go
@@ -34,16 +46,15 @@ The validated rover workflow is:
 # 2) Install autoswap once on the rover
 ./dialtone.sh autoswap src_v1 deploy \
   --host rover \
-  --user tim \
   --service \
   --repo timcash/dialtone \
   --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_channel.json
 
 # 3) Let autoswap poll, or force an immediate refresh
-./dialtone.sh autoswap src_v1 update --host rover --user tim
+./dialtone.sh autoswap src_v1 update --host rover
 
 # 4) Verify the rover is running downloaded release artifacts
-./dialtone.sh robot src_v2 diagnostic --host rover --user tim --skip-ui --public-check=false
+./dialtone.sh robot src_v2 diagnostic --host rover --skip-ui --public-check=false
 ```
 
 For the active `robot src_v2` deployment, autoswap downloads and runs release artifacts directly from:
@@ -97,7 +108,7 @@ Builds autoswap for target OS/arch and deploys via SSH mesh node routing.
 
 ```bash
 ./dialtone.sh autoswap src_v1 deploy \
-  --host rover --user tim --pass '<PASSWORD>' --service \
+  --host rover --service \
   --manifest-url https://github.com/timcash/dialtone/releases/latest/download/robot_src_v2_channel.json
 ```
 

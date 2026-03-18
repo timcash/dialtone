@@ -307,7 +307,7 @@ func RunLeader(args []string) error {
 				})
 				return
 			}
-			args := strings.Fields(raw)
+			args := shellSplit(raw)
 			if len(args) == 0 {
 				return
 			}
@@ -1017,7 +1017,7 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 		return
 	}
 
-	args := strings.Fields(line)
+	args := shellSplit(line)
 	if len(args) == 0 {
 		return
 	}
@@ -1157,6 +1157,54 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 		return
 	}
 	runSubtoneWithEventsFn(args, onEvent)
+}
+
+func shellSplit(line string) []string {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return nil
+	}
+	args := make([]string, 0, 8)
+	var cur strings.Builder
+	var quote rune
+	flush := func() {
+		if cur.Len() == 0 {
+			return
+		}
+		args = append(args, cur.String())
+		cur.Reset()
+	}
+	for i := 0; i < len(line); i++ {
+		ch := rune(line[i])
+		if quote != 0 {
+			if ch == quote {
+				quote = 0
+				continue
+			}
+			if ch == '\\' && quote == '"' && i+1 < len(line) {
+				i++
+				cur.WriteByte(line[i])
+				continue
+			}
+			cur.WriteRune(ch)
+			continue
+		}
+		switch ch {
+		case '\'', '"':
+			quote = ch
+		case ' ', '\t', '\n', '\r':
+			flush()
+		case '\\':
+			if i+1 < len(line) {
+				i++
+				cur.WriteByte(line[i])
+			}
+		default:
+			cur.WriteRune(ch)
+		}
+	}
+	flush()
+	return args
 }
 
 func printHelp(emit func(BusFrame)) {
