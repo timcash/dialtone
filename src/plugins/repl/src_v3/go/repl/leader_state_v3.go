@@ -140,4 +140,3 @@ func leaderHealth(natsURL string, timeout time.Duration) (LeaderState, error) {
 	}
 	return st, nil
 }
-

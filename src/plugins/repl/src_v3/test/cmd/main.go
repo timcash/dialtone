@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
+	processmanager "dialtone/dev/plugins/repl/src_v3/test/00_process_manager"
 	tmpworkspace "dialtone/dev/plugins/repl/src_v3/test/01_tmp_workspace"
 	clihelp "dialtone/dev/plugins/repl/src_v3/test/02_cli_help"
 	bootstrapcfg "dialtone/dev/plugins/repl/src_v3/test/03_bootstrap_config"
@@ -38,6 +39,7 @@ func run() int {
 	}
 
 	reg := testv1.NewRegistry()
+	processmanager.Register(reg)
 	tmpworkspace.Register(reg)
 	clihelp.Register(reg)
 	tsnetephemeral.Register(reg)
