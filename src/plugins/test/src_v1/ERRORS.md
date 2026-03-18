@@ -1,46 +1,9 @@
 # Error Report
 
-- **Date**: Mon, 09 Mar 2026 14:26:34 PDT
-- **Suite**: src-v1-self-check
-- **Total Duration**: 7.063625ms
+- **Date**: Wed, 18 Mar 2026 14:54:05 PDT
+- **Suite**: cad-src-v1
+- **Total Duration**: 9.25849658s
 
-- **Error Steps**: 3 / 10
+- **Error Steps**: 0 / 1
 
-## 1. ctx-logging-and-waits
-
-- **Duration**: 2.924167ms
-
-### Step Errors
-
-```text
-ERROR: ctx error message
-ERROR: ctx error message
-ERROR: ctx error format check
-```
-
----
-
-## 3. example-template-step
-
-- **Duration**: 729.542µs
-
-### Step Errors
-
-```text
-ERROR: template plugin error
-```
-
----
-
-## 6. nats-step-wait-patterns
-
-- **Duration**: 1.256542ms
-
-### Step Errors
-
-```text
-ERROR: expected-step-error
-```
-
----
-
+No errors captured.

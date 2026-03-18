@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"runtime"
 	"strings"
 	"time"
 
@@ -35,6 +34,7 @@ func runDaemon(args []string) error {
 	if err := state.init(); err != nil {
 		return err
 	}
+	state.persistState()
 	opts := &natsserver.Options{Host: "0.0.0.0", Port: state.natsPort}
 	ns, err := natsserver.NewServer(opts)
 	if err != nil {
@@ -77,6 +77,7 @@ func (d *daemonState) init() error {
 		return err
 	}
 	d.chromePath = path
+	d.startedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	return nil
 }
 
@@ -257,15 +258,10 @@ func (d *daemonState) handle(req commandRequest) commandResponse {
 			return d.refreshResponse(resp)
 		}
 	case "reset":
-		if err := d.closeBrowser(); err != nil {
+		if err := d.resetSession(); err != nil {
 			resp.OK = false
 			resp.Error = err.Error()
 			return d.refreshResponse(resp)
-		}
-		if runtime.GOOS == "windows" {
-			if err := cleanupChromeProfileLocks(d.profileDir); err != nil {
-				logs.Error("chrome src_v3 reset cleanup failed: %v", err)
-			}
 		}
 	default:
 		resp.OK = false
@@ -287,6 +283,9 @@ func (d *daemonState) baseResponse() commandResponse {
 		NATSPort:   d.natsPort,
 		Role:       d.role,
 		ProfileDir: d.profileDir,
+		WebSocketURL: d.browserWS,
+		StartedAt:  d.startedAt,
+		LastHealthyAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if d.managedTarget != "" {
 		resp.ManagedTarget = d.managedTarget
@@ -295,11 +294,13 @@ func (d *daemonState) baseResponse() commandResponse {
 	if d.unexpectedErr != nil {
 		resp.Unhealthy = true
 		resp.Error = d.unexpectedErr.Error()
+		resp.LastError = d.unexpectedErr.Error()
 	}
 	return resp
 }
 
 func (d *daemonState) refreshResponse(resp commandResponse) commandResponse {
+	d.persistState()
 	_ = d.fillStatus(&resp)
 	return resp
 }
@@ -319,7 +320,11 @@ func (d *daemonState) fillStatus(resp *commandResponse) error {
 		if resp.Error == "" {
 			resp.Error = d.unexpectedErr.Error()
 		}
+		resp.LastError = d.unexpectedErr.Error()
 	}
+	resp.WebSocketURL = d.browserWS
+	resp.StartedAt = d.startedAt
+	resp.LastHealthyAt = time.Now().UTC().Format(time.RFC3339Nano)
 	d.mu.Unlock()
 
 	if pid == 0 {

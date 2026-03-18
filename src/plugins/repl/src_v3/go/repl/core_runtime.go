@@ -168,6 +168,11 @@ func RunLeader(args []string) error {
 	h := normalizePromptName(*hostname)
 	roomName := sanitizeRoom(*room)
 	serverID := h + "@" + roomName
+	startedAt := time.Now()
+	if err := writeLeaderStateHeartbeat(usedURL, roomName, h, serverID, *embedded, startedAt); err != nil {
+		logs.Warn("REPL leader state write failed: %v", err)
+	}
+	defer markLeaderStopped()
 
 	publishRoom := func(targetRoom string, f BusFrame) {
 		targetRoom = sanitizeRoom(targetRoom)
@@ -359,6 +364,24 @@ func RunLeader(args []string) error {
 		return err
 	}
 	defer cmdSub.Unsubscribe()
+	healthSub, err := nc.Subscribe(leaderHealthSubject, func(msg *nats.Msg) {
+		st := buildLeaderState(usedURL, roomName, h, serverID, *embedded, startedAt)
+		raw, _ := json.Marshal(st)
+		_ = msg.Respond(raw)
+	})
+	if err != nil {
+		return err
+	}
+	defer healthSub.Unsubscribe()
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := writeLeaderStateHeartbeat(usedURL, roomName, h, serverID, *embedded, startedAt); err != nil {
+				logs.Warn("REPL leader heartbeat write failed: %v", err)
+			}
+		}
+	}()
 
 	registrySub, err := nc.Subscribe(subtoneRegistrySubject, func(msg *nats.Msg) {
 		if strings.TrimSpace(msg.Reply) == "" {
@@ -818,33 +841,12 @@ func RunStatus(args []string) error {
 		Subject:  subject,
 	}
 
-	nc, err := nats.Connect(st.NATSURL, nats.Timeout(1200*time.Millisecond))
-	if err == nil {
+	leaderSt, healthErr := leaderHealth(st.NATSURL, 1500*time.Millisecond)
+	if healthErr == nil {
 		st.NATSReachable = true
-		serverSeen := make(chan bool, 1)
-		sub, subErr := nc.Subscribe(subject, func(msg *nats.Msg) {
-			frame, ok := decodeFrame(msg.Data)
-			if !ok {
-				return
-			}
-			if frame.Type == frameTypeServer || frame.Type == frameTypeHeartbeat {
-				select {
-				case serverSeen <- true:
-				default:
-				}
-			}
-		})
-		if subErr == nil {
-			_ = nc.Flush()
-			_ = publishFrame(nc, commandSubject, BusFrame{Type: frameTypeProbe, From: st.HostName, Room: roomName, Message: "status-probe"})
-			select {
-			case <-serverSeen:
-				st.ServerSeen = true
-			case <-time.After(1400 * time.Millisecond):
-			}
-			_ = sub.Unsubscribe()
-		}
-		nc.Close()
+		st.ServerSeen = true
+	} else if endpointReachable(st.NATSURL, 700*time.Millisecond) {
+		st.NATSReachable = true
 	}
 
 	if cfg, err := tsnetlib.ResolveConfig(st.HostName, ""); err == nil {
@@ -862,6 +864,20 @@ func RunStatus(args []string) error {
 	logs.Raw("  Subject: %s", st.Subject)
 	logs.Raw("  NATS Reachable: %t", st.NATSReachable)
 	logs.Raw("  DIALTONE Server Seen: %t", st.ServerSeen)
+	if healthErr == nil {
+		logs.Raw("  Leader PID: %d", leaderSt.PID)
+		logs.Raw("  Leader Started: %s", leaderSt.StartedAt)
+		logs.Raw("  Leader Healthy At: %s", leaderSt.LastHealthyAt)
+		logs.Raw("  Leader Version: %s", leaderSt.Version)
+	} else if saved, err := readLeaderState(); err == nil {
+		logs.Raw("  Leader State File: %s", savedStatePathOrUnknown())
+		logs.Raw("  Saved Leader PID: %d", saved.PID)
+		logs.Raw("  Saved Leader Running: %t", saved.Running)
+		logs.Raw("  Saved Leader Healthy At: %s", saved.LastHealthyAt)
+		logs.Raw("  Leader Health Error: %v", healthErr)
+	} else if healthErr != nil {
+		logs.Raw("  Leader Health Error: %v", healthErr)
+	}
 	logs.Raw("  TS Tailnet: %s", st.TSNetTailnet)
 	logs.Raw("  TS AuthKey Present: %t", st.TSAuthKey)
 	logs.Raw("  TS API Key Present: %t", st.TSApiKey)
@@ -871,6 +887,14 @@ func RunStatus(args []string) error {
 		logs.Raw("  Chrome: not found")
 	}
 	return nil
+}
+
+func savedStatePathOrUnknown() string {
+	path, err := leaderStatePath()
+	if err != nil {
+		return "<unknown>"
+	}
+	return path
 }
 
 func DefaultPromptName() string {

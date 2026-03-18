@@ -165,13 +165,21 @@ func runRemoteDoctor(node sshv1.MeshNode) error {
 	return nil
 }
 
-func resetRemoteHost(node sshv1.MeshNode) error {
-	_ = stopRemoteService(node)
-	if strings.EqualFold(node.OS, "windows") {
-		cmd := fmt.Sprintf(`Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'chrome.exe' -and ($_.CommandLine -like '*dialtone*' -or $_.CommandLine -like '*--remote-debugging-port=%d*') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`, defaultChromePort)
-		_, _ = sshv1.RunNodeCommand(node.Name, cmd, sshv1.CommandOptions{})
+func resetRemoteHost(node sshv1.MeshNode, role string) error {
+	if role == "" {
+		role = defaultRole
 	}
-	logs.Info("chrome src_v3 reset ok host=%s profile_preserved=true", node.Name)
+	if _, err := sendRemoteCommand(node, commandRequest{Command: "reset", Role: role}); err == nil {
+		logs.Info("chrome src_v3 reset ok host=%s role=%s profile_preserved=true", node.Name, role)
+		return nil
+	}
+	if err := startRemoteService(node, role); err != nil {
+		return err
+	}
+	if _, err := sendRemoteCommand(node, commandRequest{Command: "reset", Role: role}); err != nil {
+		return err
+	}
+	logs.Info("chrome src_v3 reset ok host=%s role=%s profile_preserved=true", node.Name, role)
 	return nil
 }
 
