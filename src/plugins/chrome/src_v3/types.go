@@ -45,8 +45,12 @@ type CommandResponse struct {
 	NATSPort      int        `json:"nats_port"`
 	Role          string     `json:"role"`
 	ProfileDir    string     `json:"profile_dir,omitempty"`
+	WebSocketURL  string     `json:"websocket_url,omitempty"`
 	ManagedTarget string     `json:"managed_target,omitempty"`
 	CurrentURL    string     `json:"current_url,omitempty"`
+	StartedAt     string     `json:"started_at,omitempty"`
+	LastHealthyAt string     `json:"last_healthy_at,omitempty"`
+	LastError     string     `json:"last_error,omitempty"`
 	Tabs          []PageInfo `json:"tabs,omitempty"`
 	Unhealthy     bool       `json:"unhealthy,omitempty"`
 	ConsoleLines  []string   `json:"console_lines,omitempty"`
@@ -88,4 +92,5 @@ type daemonState struct {
 	consoleLines    []string
 	unexpectedErr   error
 	intentionalStop bool
+	startedAt       string
 }
