@@ -73,6 +73,7 @@ func RunDeploy(args []string) error {
 	if opts.Host == "" {
 		return fmt.Errorf("deploy requires --host (or ROBOT_HOST env)")
 	}
+	replIndexInfof("autoswap deploy: preparing service on %s", opts.Host)
 
 	node, err := sshplugin.ResolveMeshNode(opts.Host)
 	if err != nil {
@@ -120,12 +121,14 @@ func RunDeploy(args []string) error {
 		Password: opts.Pass,
 	}
 	logs.Info("[DEPLOY] Connecting to mesh node=%s as %s", node.Name, opts.User)
+	replIndexInfof("autoswap deploy: connecting to %s", node.Name)
 
 	goos, goarch, err := detectRemoteTarget(node.Name, cmdOpts)
 	if err != nil {
 		return err
 	}
 	logs.Info("[DEPLOY] Remote target detected: %s/%s", goos, goarch)
+	replIndexInfof("autoswap deploy: remote target is %s/%s", goos, goarch)
 
 	localBinary, err := buildDeployBinary(goos, goarch)
 	if err != nil {
@@ -144,8 +147,10 @@ func RunDeploy(args []string) error {
 		return fmt.Errorf("failed to activate remote binary: %w", err)
 	}
 	logs.Info("[DEPLOY] Uploaded %s", remoteBin)
+	replIndexInfof("autoswap deploy: uploaded runtime to %s", node.Name)
 
 	if !opts.Service {
+		replIndexInfof("autoswap deploy: completed")
 		return nil
 	}
 
@@ -188,6 +193,10 @@ func RunDeploy(args []string) error {
 		return fmt.Errorf("remote service install failed: %w", err)
 	}
 	logs.Info("[DEPLOY] Installed autoswap service on %s", opts.Host)
+	if strings.TrimSpace(opts.ManifestURL) != "" {
+		replIndexInfof("autoswap deploy: manifest source is %s", opts.ManifestURL)
+	}
+	replIndexInfof("autoswap deploy: service installed on %s", node.Name)
 	return nil
 }
 

@@ -129,6 +129,24 @@ func RunService(args []string) error {
 	if opts.Mode == "" {
 		opts.Mode = "install"
 	}
+	switch opts.Mode {
+	case "install":
+		replIndexInfof("autoswap service: installing launcher")
+	case "run":
+		replIndexInfof("autoswap service: starting supervisor loop")
+	case "start":
+		replIndexInfof("autoswap service: starting launcher")
+	case "stop":
+		replIndexInfof("autoswap service: stopping launcher")
+	case "restart":
+		replIndexInfof("autoswap service: restarting launcher")
+	case "is-active":
+		replIndexInfof("autoswap service: checking active state")
+	case "list":
+		replIndexInfof("autoswap service: listing state files")
+	case "status":
+		replIndexInfof("autoswap service: reading launcher status")
+	}
 
 	switch opts.Mode {
 	case "run":

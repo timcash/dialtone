@@ -497,7 +497,7 @@ func extractTransportFlags(command string, args []string) (targetHost string, ss
 		// --host is a global REPL routing flag for commands that don't define
 		// plugin-local host semantics. Keep plugin-local --host for commands
 		// that already use it as an operational target/bind flag.
-		if command != "ssh" && command != "repl" && command != "autoswap" && command != "robot" {
+		if command != "ssh" && command != "repl" && command != "autoswap" && command != "robot" && command != "chrome" {
 			if a == "--host" && i+1 < len(args) {
 				h := strings.TrimSpace(args[i+1])
 				if h != "" {
@@ -573,8 +573,9 @@ func dispatchViaREPL(command string, args []string, targetHost string) error {
 		}
 		filtered = append(filtered, a)
 	}
-	line := strings.TrimSpace(strings.Join(append([]string{command}, filtered...), " "))
-	if line == "" {
+	displayLine := strings.TrimSpace(strings.Join(append([]string{command}, filtered...), " "))
+	injectLine := strings.TrimSpace(shellJoin(append([]string{command}, filtered...)))
+	if injectLine == "" {
 		return fmt.Errorf("empty command")
 	}
 	natsURL := strings.TrimSpace(os.Getenv("DIALTONE_REPL_NATS_URL"))
@@ -614,8 +615,8 @@ func dispatchViaREPL(command string, args []string, targetHost string) error {
 				return fmt.Errorf("bootstrap http autostart failed: %w", err)
 			}
 		}
-		if err := relayInjectedIndexLifecycle(candidateURL, room, user, line, func() error {
-			return replv3.InjectCommand(candidateURL, room, user, injectionHost, line)
+		if err := relayInjectedIndexLifecycle(candidateURL, room, user, displayLine, injectLine, func() error {
+			return replv3.InjectCommand(candidateURL, room, user, injectionHost, injectLine)
 		}); err == nil {
 			return nil
 		} else {
@@ -628,7 +629,7 @@ func dispatchViaREPL(command string, args []string, targetHost string) error {
 	return fmt.Errorf("repl inject failed after %d endpoint attempt(s): %s", len(attemptErrs), strings.Join(attemptErrs, " | "))
 }
 
-func relayInjectedIndexLifecycle(natsURL, room, user, line string, inject func() error) error {
+func relayInjectedIndexLifecycle(natsURL, room, user, displayLine, injectLine string, inject func() error) error {
 	if inject == nil {
 		return fmt.Errorf("inject function is required")
 	}
@@ -640,12 +641,19 @@ func relayInjectedIndexLifecycle(natsURL, room, user, line string, inject func()
 
 	room = sanitizeREPLRoom(room)
 	subject := "repl.room." + room
-	targetInput := "/" + strings.TrimSpace(line)
-	cmdLabel := injectedCommandLabel(line)
+	targetInput := "/" + strings.TrimSpace(injectLine)
+	displayInput := "/" + strings.TrimSpace(displayLine)
+	cmdLabel := injectedCommandLabel(injectLine)
+	summaryPrefix := injectedSummaryPrefix(injectLine)
+	requestLine := "Request received. Spawning subtone for " + cmdLabel + "..."
 	seenInput := false
-	seenLifecycle := false
+	startedLifecycle := false
+	seenSubtoneStart := false
+	seenSubtoneRoom := false
+	seenSubtoneLog := false
 	done := make(chan struct{})
 	doneClosed := false
+	finalSeen := false
 	var subErr error
 	sub, err := nc.Subscribe(subject, func(msg *nats.Msg) {
 		frame := replv3.BusFrame{}
@@ -661,23 +669,51 @@ func relayInjectedIndexLifecycle(natsURL, room, user, line string, inject func()
 				return
 			}
 			seenInput = true
-			fmt.Fprintf(os.Stdout, "%s> %s\n", strings.TrimSpace(frame.From), strings.TrimSpace(frame.Message))
+			fmt.Fprintf(os.Stdout, "%s> %s\n", strings.TrimSpace(frame.From), displayInput)
 		case "line":
 			if !seenInput || strings.TrimSpace(frame.Scope) != "index" {
 				return
 			}
 			msgText := strings.TrimSpace(frame.Message)
-			if !strings.Contains(msgText, cmdLabel) && !seenLifecycle {
+			if !startedLifecycle {
+				if msgText != requestLine {
+					return
+				}
+				startedLifecycle = true
+				fmt.Fprintf(os.Stdout, "DIALTONE> %s\n", msgText)
 				return
 			}
-			if strings.Contains(msgText, cmdLabel) {
-				seenLifecycle = true
+			if !shouldForwardIndexLine(msgText, cmdLabel, summaryPrefix) {
+				return
+			}
+			switch {
+			case strings.HasPrefix(msgText, "Subtone started as pid "):
+				if seenSubtoneStart {
+					return
+				}
+				seenSubtoneStart = true
+			case strings.HasPrefix(msgText, "Subtone room: "):
+				if seenSubtoneRoom {
+					return
+				}
+				seenSubtoneRoom = true
+			case strings.HasPrefix(msgText, "Subtone log file: "):
+				if seenSubtoneLog {
+					return
+				}
+				seenSubtoneLog = true
 			}
 			fmt.Fprintf(os.Stdout, "DIALTONE> %s\n", msgText)
 			if strings.Contains(msgText, "Subtone for "+cmdLabel+" is running in background.") || strings.Contains(msgText, "Subtone for "+cmdLabel+" exited with code ") || strings.Contains(msgText, "Subtone for "+cmdLabel+" failed to start") {
-				if !doneClosed {
-					close(done)
-					doneClosed = true
+				if !finalSeen {
+					finalSeen = true
+					go func() {
+						time.Sleep(250 * time.Millisecond)
+						if !doneClosed {
+							close(done)
+							doneClosed = true
+						}
+					}()
 				}
 			}
 		}
@@ -712,7 +748,7 @@ func sanitizeREPLRoom(room string) string {
 }
 
 func injectedCommandLabel(line string) string {
-	fields := strings.Fields(strings.TrimSpace(line))
+	fields := shellSplit(strings.TrimSpace(line))
 	if len(fields) == 0 {
 		return ""
 	}
@@ -720,6 +756,34 @@ func injectedCommandLabel(line string) string {
 		return fields[0]
 	}
 	return fields[0] + " " + fields[1]
+}
+
+func injectedSummaryPrefix(line string) string {
+	fields := shellSplit(strings.TrimSpace(line))
+	if len(fields) < 3 {
+		return ""
+	}
+	return fields[0] + " " + fields[2] + ":"
+}
+
+func shouldForwardIndexLine(msgText, cmdLabel, summaryPrefix string) bool {
+	msgText = strings.TrimSpace(msgText)
+	switch {
+	case msgText == "":
+		return false
+	case strings.HasPrefix(msgText, "Subtone started as pid "):
+		return true
+	case strings.HasPrefix(msgText, "Subtone room: "):
+		return true
+	case strings.HasPrefix(msgText, "Subtone log file: "):
+		return true
+	case strings.Contains(msgText, "Subtone for "+cmdLabel+" "):
+		return true
+	case summaryPrefix != "" && strings.HasPrefix(msgText, summaryPrefix):
+		return true
+	default:
+		return false
+	}
 }
 
 func resolveTargetNATSURLs(host string) []string {
@@ -848,6 +912,54 @@ func shellQuote(s string) string {
 		return "''"
 	}
 	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
+}
+
+func shellSplit(line string) []string {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return nil
+	}
+	args := make([]string, 0, 8)
+	var cur strings.Builder
+	var quote rune
+	flush := func() {
+		if cur.Len() == 0 {
+			return
+		}
+		args = append(args, cur.String())
+		cur.Reset()
+	}
+	for i := 0; i < len(line); i++ {
+		ch := rune(line[i])
+		if quote != 0 {
+			if ch == quote {
+				quote = 0
+				continue
+			}
+			if ch == '\\' && quote == '"' && i+1 < len(line) {
+				i++
+				cur.WriteByte(line[i])
+				continue
+			}
+			cur.WriteRune(ch)
+			continue
+		}
+		switch ch {
+		case '\'', '"':
+			quote = ch
+		case ' ', '\t', '\n', '\r':
+			flush()
+		case '\\':
+			if i+1 < len(line) {
+				i++
+				cur.WriteByte(line[i])
+			}
+		default:
+			cur.WriteRune(ch)
+		}
+	}
+	flush()
+	return args
 }
 
 func meshNodeMatches(node replMeshNode, target string) bool {
