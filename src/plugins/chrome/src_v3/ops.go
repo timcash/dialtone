@@ -1,8 +1,10 @@
 package src_v3
 
 import (
+	"encoding/base64"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -28,9 +30,30 @@ func managerNATSURL() string {
 	return strings.TrimSpace(os.Getenv("DIALTONE_REPL_NATS_URL"))
 }
 
+type replLeaderStateDoc struct {
+	NATSURL      string `json:"nats_url"`
+	TSNetNATSURL string `json:"tsnet_nats_url,omitempty"`
+}
+
+func readManagerLeaderState() replLeaderStateDoc {
+	path := filepath.Join(resolveRepoRoot(), ".dialtone", "repl-v3", "leader.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return replLeaderStateDoc{}
+	}
+	var doc replLeaderStateDoc
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return replLeaderStateDoc{}
+	}
+	return doc
+}
+
 func managerNATSURLForNode(node sshv1.MeshNode) string {
 	if raw := strings.TrimSpace(os.Getenv("DIALTONE_REPL_MANAGER_NATS_URL")); raw != "" {
 		return raw
+	}
+	if st := readManagerLeaderState(); strings.TrimSpace(st.TSNetNATSURL) != "" {
+		return strings.TrimSpace(st.TSNetNATSURL)
 	}
 	raw := managerNATSURL()
 	if raw == "" {
@@ -51,6 +74,20 @@ func managerNATSURLForNode(node sshv1.MeshNode) string {
 		}
 	}
 	return raw
+}
+
+func shouldUseLocalManagerNATS(node sshv1.MeshNode) bool {
+	if raw := strings.TrimSpace(os.Getenv("DIALTONE_REPL_MANAGER_NATS_URL")); raw != "" {
+		return true
+	}
+	st := readManagerLeaderState()
+	if strings.TrimSpace(st.TSNetNATSURL) != "" {
+		return true
+	}
+	if node.PreferWSLPowerShell {
+		return false
+	}
+	return strings.TrimSpace(managerNATSURL()) != ""
 }
 
 func localAdvertiseIP() string {
@@ -246,35 +283,50 @@ func startRemoteService(node sshv1.MeshNode, role string) error {
 	if role == "" {
 		role = defaultRole
 	}
+	_ = stopRemoteService(node, role)
 	remoteBin, err := remoteBinaryPath(node)
 	if err != nil {
 		return err
 	}
 	natsURL := managerNATSURLForNode(node)
-	if natsURL == "" {
-		return fmt.Errorf("remote chrome service requires DIALTONE_REPL_NATS_URL so the daemon can connect back to the local manager")
+	useManagerNATS := shouldUseLocalManagerNATS(node) && strings.TrimSpace(natsURL) != ""
+	if node.PreferWSLPowerShell && strings.TrimSpace(readManagerLeaderState().TSNetNATSURL) == "" {
+		useManagerNATS = false
+		natsURL = ""
 	}
 	role = strings.TrimSpace(role)
 	serviceName := chromeServiceName(role)
+	logs.Info("chrome src_v3 remote service start host=%s role=%s prefer_wsl_powershell=%t use_manager_nats=%t manager_nats_url=%q",
+		node.Name, role, node.PreferWSLPowerShell, useManagerNATS, natsURL)
 	if strings.EqualFold(node.OS, "windows") {
 		stdoutPath := windowsPath(filepath.Join(filepath.Dir(remoteBin), "dialtone_chrome_v3.out.log"))
 		stderrPath := windowsPath(filepath.Join(filepath.Dir(remoteBin), "dialtone_chrome_v3.err.log"))
 		cmdPath := windowsPath(filepath.Join(filepath.Dir(remoteBin), "dialtone_chrome_v3.cmd"))
-		script := fmt.Sprintf("@echo off\r\n\"%s\" src_v3 daemon --role %s --chrome-port %d --nats-url %s --host-id %s 1>> \"%s\" 2>> \"%s\"\r\n",
-			remoteBin, role, defaultChromePort, natsURL, node.Name, stdoutPath, stderrPath)
-		cmd := fmt.Sprintf(`$cmdPath=%s; $script=%s; New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($cmdPath)) -Force | Out-Null; Set-Content -LiteralPath $cmdPath -Value $script -Encoding ASCII; Start-Process -FilePath $cmdPath -WindowStyle Hidden`,
-			psQuote(cmdPath), psQuote(script))
+		args := fmt.Sprintf("src_v3 daemon --role %s --chrome-port %d --host-id %s", role, defaultChromePort, node.Name)
+		if useManagerNATS {
+			args += " --nats-url " + natsURL
+		} else {
+			args += fmt.Sprintf(" --nats-port %d", defaultNATSPort)
+		}
+		script := fmt.Sprintf("@echo off\r\n\"%s\" %s 1>> \"%s\" 2>> \"%s\"\r\n", remoteBin, args, stdoutPath, stderrPath)
+		scriptB64 := base64.StdEncoding.EncodeToString([]byte(script))
+		cmd := fmt.Sprintf(`$cmdPath=%s; New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($cmdPath)) -Force | Out-Null; [IO.File]::WriteAllBytes($cmdPath, [Convert]::FromBase64String(%s)); Unblock-File -LiteralPath $cmdPath -ErrorAction SilentlyContinue; Start-Process -FilePath $cmdPath -WindowStyle Hidden`,
+			psQuote(cmdPath), psQuote(scriptB64))
+		logs.Info("chrome src_v3 windows launcher command: %s", cmd)
 		if _, err := sshv1.RunNodeCommand(node.Name, cmd, sshv1.CommandOptions{}); err != nil {
 			return err
 		}
 	} else {
-		cmd := fmt.Sprintf("mkdir -p %s && nohup %s src_v3 daemon --role %s --chrome-port %d --nats-url %s --host-id %s >> %s 2>> %s < /dev/null &",
+		args := fmt.Sprintf("src_v3 daemon --role %s --chrome-port %d --host-id %s", shellQuote(role), defaultChromePort, shellQuote(node.Name))
+		if useManagerNATS {
+			args += " --nats-url " + shellQuote(natsURL)
+		} else {
+			args += fmt.Sprintf(" --nats-port %d", defaultNATSPort)
+		}
+		cmd := fmt.Sprintf("mkdir -p %s && nohup %s %s >> %s 2>> %s < /dev/null &",
 			shellQuote(filepath.Dir(remoteBin)),
 			shellQuote(remoteBin),
-			shellQuote(role),
-			defaultChromePort,
-			shellQuote(natsURL),
-			shellQuote(node.Name),
+			args,
 			shellQuote(filepath.Join(filepath.Dir(remoteBin), serviceName+".out.log")),
 			shellQuote(filepath.Join(filepath.Dir(remoteBin), serviceName+".err.log")),
 		)
@@ -298,7 +350,13 @@ func stopRemoteService(node sshv1.MeshNode, role string) error {
 		return err
 	}
 	if strings.EqualFold(node.OS, "windows") {
-		cmd := fmt.Sprintf(`Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'dialtone_chrome_v3.exe' -and $_.ExecutablePath -eq %s } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`, psQuote(remoteBin))
+		cmdPath := windowsPath(filepath.Join(filepath.Dir(remoteBin), "dialtone_chrome_v3.cmd"))
+		cmd := fmt.Sprintf(`Get-CimInstance Win32_Process | Where-Object {
+  ($_.Name -eq 'dialtone_chrome_v3.exe' -and $_.ExecutablePath -eq %s) -or
+  ($_.Name -eq 'cmd.exe' -and $_.CommandLine -like %s)
+} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`,
+			psQuote(remoteBin),
+			psQuote("*"+cmdPath+"*"))
 		_, err = sshv1.RunNodeCommand(node.Name, cmd, sshv1.CommandOptions{})
 		return err
 	}

@@ -385,29 +385,36 @@ func (d *daemonState) fillStatus(resp *commandResponse) error {
 
 func sendRemoteCommand(node sshv1.MeshNode, req commandRequest) (*commandResponse, error) {
 	subject := hostScopedCommandSubject(node.Name, req.Role)
-	natsURL := managerNATSURL()
-	if strings.TrimSpace(natsURL) == "" {
-		subject = natsSubject(req.Role)
-		natsURL = fmt.Sprintf("nats://%s:%d", preferredHost(node), defaultNATSPort)
-	}
-	nc, err := nats.Connect(natsURL, nats.Timeout(defaultTimeout))
-	if err != nil {
-		return nil, err
-	}
-	defer nc.Close()
 	raw, _ := json.Marshal(req)
-	msg, err := nc.Request(subject, raw, 20*time.Second)
-	if err != nil {
-		return nil, err
+	tryRequest := func(natsURL, subject string) (*commandResponse, error) {
+		nc, err := nats.Connect(natsURL, nats.Timeout(defaultTimeout))
+		if err != nil {
+			return nil, err
+		}
+		defer nc.Close()
+		msg, err := nc.Request(subject, raw, 20*time.Second)
+		if err != nil {
+			return nil, err
+		}
+		var resp commandResponse
+		if err := json.Unmarshal(msg.Data, &resp); err != nil {
+			return nil, err
+		}
+		if !resp.OK && strings.TrimSpace(resp.Error) != "" {
+			return &resp, errors.New(strings.TrimSpace(resp.Error))
+		}
+		publishRemoteServiceHeartbeat(resp)
+		return &resp, nil
 	}
-	var resp commandResponse
-	if err := json.Unmarshal(msg.Data, &resp); err != nil {
-		return nil, err
+
+	if natsURL := strings.TrimSpace(managerNATSURL()); natsURL != "" {
+		if resp, err := tryRequest(natsURL, subject); err == nil {
+			return resp, nil
+		}
 	}
-	if !resp.OK && strings.TrimSpace(resp.Error) != "" {
-		return &resp, errors.New(strings.TrimSpace(resp.Error))
-	}
-	return &resp, nil
+
+	directURL := fmt.Sprintf("nats://%s:%d", preferredHost(node), defaultNATSPort)
+	return tryRequest(directURL, natsSubject(req.Role))
 }
 
 func printResponse(resp *commandResponse) {
@@ -523,4 +530,34 @@ func publishServiceHeartbeat(d *daemonState, nc *nats.Conn) {
 
 func heartbeatSubjectForHost(hostID, serviceName string) string {
 	return "repl.host." + chromeSubjectToken(hostID) + ".heartbeat.service." + chromeSubjectToken(serviceName)
+}
+
+func publishRemoteServiceHeartbeat(resp commandResponse) {
+	natsURL := strings.TrimSpace(managerNATSURL())
+	if natsURL == "" || strings.TrimSpace(resp.Host) == "" || strings.TrimSpace(resp.Role) == "" {
+		return
+	}
+	nc, err := nats.Connect(natsURL, nats.Timeout(defaultTimeout))
+	if err != nil {
+		return
+	}
+	defer nc.Close()
+	payload := map[string]any{
+		"host":       strings.TrimSpace(resp.Host),
+		"kind":       "service",
+		"name":       chromeServiceName(resp.Role),
+		"mode":       "service",
+		"pid":        resp.ServicePID,
+		"room":       "service:" + chromeServiceName(resp.Role),
+		"command":    fmt.Sprintf("chrome src_v3 daemon --role %s", strings.TrimSpace(resp.Role)),
+		"state":      "running",
+		"last_ok_at": time.Now().UTC().Format(time.RFC3339),
+		"started_at": strings.TrimSpace(resp.StartedAt),
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	_ = nc.Publish(heartbeatSubjectForHost(resp.Host, chromeServiceName(resp.Role)), raw)
+	_ = nc.Flush()
 }

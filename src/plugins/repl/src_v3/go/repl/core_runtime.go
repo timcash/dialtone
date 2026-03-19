@@ -164,12 +164,13 @@ func RunLeader(args []string) error {
 	stopTSNet := func() {}
 	var tsRuntime *tsnetRuntime
 	tsnetStatusMessage := ""
+	tsnetPublicURL := ""
 
 	h := normalizePromptName(*hostname)
 	roomName := sanitizeRoom(*room)
 	serverID := h + "@" + roomName
 	startedAt := time.Now()
-	if err := writeLeaderStateHeartbeat(usedURL, roomName, h, serverID, *embedded, startedAt); err != nil {
+	if err := writeLeaderStateHeartbeat(usedURL, tsnetPublicURL, roomName, h, serverID, *embedded, startedAt); err != nil {
 		logs.Warn("REPL leader state write failed: %v", err)
 	}
 	defer markLeaderStopped()
@@ -216,15 +217,14 @@ func RunLeader(args []string) error {
 			tsnetStatusMessage = fmt.Sprintf("Native tailscale already connected via %s; skipping embedded tsnet startup (tailnet=%s)", provider, strings.TrimSpace(tailnet))
 			logs.Info("REPL native tailscale already connected via %s; skipping embedded tsnet startup (tailnet=%s)", provider, strings.TrimSpace(tailnet))
 			publishRoom(roomName, BusFrame{Type: frameTypeServer, Message: tsnetStatusMessage})
+		}
+		cleanup, upErr := startTSNetInstance(normalizeTSNetHostname(normalizePromptName(*hostname)))
+		if upErr != nil {
+			logs.Warn("REPL tsnet startup failed: %v", upErr)
 		} else {
-			cleanup, upErr := startTSNetInstance(normalizeTSNetHostname(normalizePromptName(*hostname)))
-			if upErr != nil {
-				logs.Warn("REPL tsnet startup failed: %v", upErr)
-			} else {
-				tsRuntime = cleanup
-				stopTSNet = func() {
-					_ = tsRuntime.Close()
-				}
+			tsRuntime = cleanup
+			stopTSNet = func() {
+				_ = tsRuntime.Close()
 			}
 		}
 	}
@@ -250,9 +250,13 @@ func RunLeader(args []string) error {
 				tsnetListener = ln
 				go serveTCPProxy(tsnetListener, targetAddr)
 				tsURL := fmt.Sprintf("nats://%s:%d", tsRuntime.DNSName, exposePort)
+				tsnetPublicURL = tsURL
 				tsnetStatusMessage = fmt.Sprintf("tsnet NATS endpoint: %s", tsURL)
 				logs.Info("REPL tsnet NATS endpoint active: %s -> %s", tsURL, targetAddr)
 				publishRoom(roomName, BusFrame{Type: frameTypeServer, Message: tsnetStatusMessage})
+				if err := writeLeaderStateHeartbeat(usedURL, tsnetPublicURL, roomName, h, serverID, *embedded, startedAt); err != nil {
+					logs.Warn("REPL leader state write failed after tsnet activation: %v", err)
+				}
 			}
 		}
 	}
@@ -368,7 +372,7 @@ func RunLeader(args []string) error {
 	}
 	defer cmdSub.Unsubscribe()
 	healthSub, err := nc.Subscribe(leaderHealthSubject, func(msg *nats.Msg) {
-		st := buildLeaderState(usedURL, roomName, h, serverID, *embedded, startedAt)
+		st := buildLeaderState(usedURL, tsnetPublicURL, roomName, h, serverID, *embedded, startedAt)
 		raw, _ := json.Marshal(st)
 		_ = msg.Respond(raw)
 	})
@@ -380,7 +384,7 @@ func RunLeader(args []string) error {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
-			if err := writeLeaderStateHeartbeat(usedURL, roomName, h, serverID, *embedded, startedAt); err != nil {
+			if err := writeLeaderStateHeartbeat(usedURL, tsnetPublicURL, roomName, h, serverID, *embedded, startedAt); err != nil {
 				logs.Warn("REPL leader heartbeat write failed: %v", err)
 			}
 		}

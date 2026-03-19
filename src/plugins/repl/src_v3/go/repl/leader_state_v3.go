@@ -16,6 +16,7 @@ const leaderHealthSubject = "repl.leader.health"
 type LeaderState struct {
 	PID              int    `json:"pid"`
 	NATSURL          string `json:"nats_url"`
+	TSNetNATSURL     string `json:"tsnet_nats_url,omitempty"`
 	Room             string `json:"room"`
 	HostName         string `json:"hostname"`
 	ServerID         string `json:"server_id"`
@@ -77,10 +78,11 @@ func writeLeaderState(st LeaderState) error {
 	return os.WriteFile(path, raw, 0o644)
 }
 
-func buildLeaderState(usedURL, room, hostName, serverID string, embedded bool, startedAt time.Time) LeaderState {
+func buildLeaderState(usedURL, tsnetURL, room, hostName, serverID string, embedded bool, startedAt time.Time) LeaderState {
 	st := LeaderState{
 		PID:           os.Getpid(),
 		NATSURL:       strings.TrimSpace(usedURL),
+		TSNetNATSURL:  strings.TrimSpace(tsnetURL),
 		Room:          sanitizeRoom(room),
 		HostName:      normalizePromptName(hostName),
 		ServerID:      strings.TrimSpace(serverID),
@@ -103,8 +105,8 @@ func buildLeaderState(usedURL, room, hostName, serverID string, embedded bool, s
 	return st
 }
 
-func writeLeaderStateHeartbeat(usedURL, room, hostName, serverID string, embedded bool, startedAt time.Time) error {
-	return writeLeaderState(buildLeaderState(usedURL, room, hostName, serverID, embedded, startedAt))
+func writeLeaderStateHeartbeat(usedURL, tsnetURL, room, hostName, serverID string, embedded bool, startedAt time.Time) error {
+	return writeLeaderState(buildLeaderState(usedURL, tsnetURL, room, hostName, serverID, embedded, startedAt))
 }
 
 func markLeaderStopped() {
