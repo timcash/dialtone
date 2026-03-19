@@ -132,7 +132,7 @@ func ensureAttachBrowser(node, url string) error {
 		role = "dev"
 	}
 	test.ReplIndexInfof("ui test: ensuring chrome src_v3 role=%s on %s", role, node)
-	if _, err := chromev3.EnsureRemoteServiceByHost(node, role, true); err != nil {
+	if _, err := chromev3.EnsureRemoteServiceByHost(node, role, false); err != nil {
 		return err
 	}
 	_, err := chromev3.SendCommandByHost(node, chromev3.CommandRequest{

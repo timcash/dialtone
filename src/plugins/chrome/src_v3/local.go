@@ -178,7 +178,7 @@ func sendLocalCommand(req commandRequest) (*commandResponse, error) {
 	}
 	defer nc.Close()
 	raw, _ := json.Marshal(req)
-	msg, err := nc.Request(natsSubject(req.Role), raw, 20*time.Second)
+	msg, err := nc.Request(natsSubject(req.Role), raw, commandRequestTimeout(req))
 	if err != nil {
 		return nil, err
 	}
@@ -190,6 +190,17 @@ func sendLocalCommand(req commandRequest) (*commandResponse, error) {
 		return &resp, errors.New(strings.TrimSpace(resp.Error))
 	}
 	return &resp, nil
+}
+
+func commandRequestTimeout(req commandRequest) time.Duration {
+	if req.TimeoutMS <= 0 {
+		return 20 * time.Second
+	}
+	timeout := time.Duration(req.TimeoutMS) * time.Millisecond
+	if timeout < 5*time.Second {
+		timeout = 5 * time.Second
+	}
+	return timeout + 5*time.Second
 }
 
 func sendCommandByTarget(host string, req commandRequest, autoStart bool) (*commandResponse, error) {
