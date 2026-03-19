@@ -101,6 +101,21 @@ func (r *subtoneRegistry) Exited(pid int, exitCode int) {
 	r.trimLocked()
 }
 
+func (r *subtoneRegistry) Heartbeat(pid int) {
+	if r == nil || pid <= 0 {
+		return
+	}
+	now := time.Now().UTC()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.entries[pid]
+	if !ok {
+		return
+	}
+	entry.LastUpdate = now
+	r.trimLocked()
+}
+
 func (r *subtoneRegistry) Snapshot(count int, managed []proc.ManagedProcessSnapshot) []subtoneRegistryItem {
 	if r == nil {
 		return nil

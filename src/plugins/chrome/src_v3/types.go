@@ -39,6 +39,7 @@ type PageInfo struct {
 type CommandResponse struct {
 	OK            bool       `json:"ok"`
 	Error         string     `json:"error,omitempty"`
+	Host          string     `json:"host,omitempty"`
 	ServicePID    int        `json:"service_pid"`
 	BrowserPID    int        `json:"browser_pid"`
 	ChromePort    int        `json:"chrome_port"`
@@ -77,8 +78,11 @@ type commandResponse = CommandResponse
 type daemonState struct {
 	mu              sync.Mutex
 	role            string
+	hostID          string
 	chromePort      int
 	natsPort        int
+	natsURL         string
+	embeddedNATS    bool
 	profileDir      string
 	chromePath      string
 	browserPID      int

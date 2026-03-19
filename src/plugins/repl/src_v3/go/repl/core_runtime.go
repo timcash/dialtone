@@ -264,6 +264,7 @@ func RunLeader(args []string) error {
 
 	presence := newPresenceTracker()
 	subtones := newSubtoneRegistry(256)
+	services := newServiceRegistry(128)
 	daemonTTL := 20 * time.Second
 	var runMu sync.Mutex
 	cmdSub, err := nc.QueueSubscribe(commandSubject, commandQueue, func(msg *nats.Msg) {
@@ -354,7 +355,9 @@ func RunLeader(args []string) error {
 			go func(in BusFrame) {
 				runMu.Lock()
 				defer runMu.Unlock()
-				executeCommand(strings.TrimSpace(in.Message), currentRoom, subtones, func(frame BusFrame) {
+				executeCommand(strings.TrimSpace(in.Message), currentRoom, h, subtones, services, func(subject string, payload []byte) error {
+					return nc.Publish(subject, payload)
+				}, func(frame BusFrame) {
 					publishScopedFrame(currentRoom, frame)
 				})
 			}(BusFrame{Message: raw})
@@ -402,6 +405,36 @@ func RunLeader(args []string) error {
 		return err
 	}
 	defer registrySub.Unsubscribe()
+	serviceRegistrySub, err := nc.Subscribe(serviceRegistrySubject, func(msg *nats.Msg) {
+		if strings.TrimSpace(msg.Reply) == "" {
+			return
+		}
+		req := serviceRegistryRequest{}
+		if len(msg.Data) > 0 {
+			_ = json.Unmarshal(msg.Data, &req)
+		}
+		items := services.Snapshot(req.Count, listManagedFn())
+		payload, err := encodeServiceRegistrySnapshot(items)
+		if err != nil {
+			return
+		}
+		_ = nc.Publish(msg.Reply, payload)
+	})
+	if err != nil {
+		return err
+	}
+	defer serviceRegistrySub.Unsubscribe()
+	serviceHeartbeatSub, err := nc.Subscribe("repl.host.*.heartbeat.service.*", func(msg *nats.Msg) {
+		var hb managedHeartbeat
+		if err := json.Unmarshal(msg.Data, &hb); err != nil {
+			return
+		}
+		services.ObserveHeartbeat(hb)
+	})
+	if err != nil {
+		return err
+	}
+	defer serviceHeartbeatSub.Unsubscribe()
 
 	roomSub, err := nc.Subscribe("repl.room.*", func(msg *nats.Msg) {
 		frame, ok := decodeFrame(msg.Data)
@@ -992,7 +1025,7 @@ func runLocalSession(in io.Reader, out io.Writer, promptName string, logFn func(
 			say(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: "Goodbye."})
 			break
 		}
-		executeCommand(line, defaultRoom, nil, say)
+		executeCommand(line, defaultRoom, "", nil, nil, nil, say)
 	}
 	return scanner.Err()
 }
@@ -1009,7 +1042,15 @@ func isInputTTY(in io.Reader) bool {
 	return (fi.Mode() & os.ModeCharDevice) != 0
 }
 
-func executeCommand(line string, room string, registry *subtoneRegistry, emit func(BusFrame)) {
+func executeCommand(
+	line string,
+	room string,
+	hostName string,
+	registry *subtoneRegistry,
+	services *serviceRegistry,
+	publish func(subject string, payload []byte) error,
+	emit func(BusFrame),
+) {
 	if emit == nil {
 		return
 	}
@@ -1030,6 +1071,10 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 	if len(args) == 0 {
 		return
 	}
+	if args[0] == "service-list" {
+		printManagedServices(room, services, emit)
+		return
+	}
 	if args[0] == "subtone-stop" || args[0] == "subtone-kill" {
 		pid, err := parseManagedPIDCommand(args)
 		if err != nil {
@@ -1047,6 +1092,43 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("Stopped subtone-%d.", pid)})
 		return
 	}
+	if args[0] == "service-stop" {
+		name, err := parseServiceNameCommand(args, "service-stop")
+		if err != nil {
+			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: err.Error()})
+			return
+		}
+		item, ok := services.ActiveByName(name)
+		if !ok || item.PID <= 0 {
+			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("No active service named %s.", name)})
+			return
+		}
+		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("Stopping service %s (pid %d).", name, item.PID)})
+		if err := killManagedProcessFn(item.PID); err != nil {
+			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("Failed to stop service %s: %v", name, err)})
+			return
+		}
+		if registry != nil {
+			registry.Exited(item.PID, -1)
+		}
+		if services != nil {
+			services.Exited(name, item.PID, -1)
+		}
+		if publish != nil {
+			ev := proc.SubtoneEvent{
+				PID:       item.PID,
+				Args:      shellSplit(item.Command),
+				LogPath:   item.LogPath,
+				StartedAt: parseRFC3339(item.StartedAt),
+			}
+			hb := buildManagedHeartbeat(hostName, item.Room, "service", name, ev, heartbeatStateToken(false, -1), -1)
+			if payload, err := encodeManagedHeartbeat(hb); err == nil {
+				_ = publish(heartbeatSubject(hostName, "service", name, item.PID), payload)
+			}
+		}
+		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("Stopped service %s.", name)})
+		return
+	}
 	if strings.HasPrefix(line, "kill ") {
 		pidText := strings.TrimSpace(strings.TrimPrefix(line, "kill"))
 		pid := 0
@@ -1060,6 +1142,20 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("Killed managed process %d.", pid)})
 		}
 		return
+	}
+	serviceName := ""
+	if args[0] == "service-start" {
+		name, cmdArgs, err := parseServiceStartCommand(args)
+		if err != nil {
+			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: err.Error()})
+			return
+		}
+		if item, ok := services.ActiveByName(name); ok && item.PID > 0 {
+			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("Service %s is already running as pid %d.", name, item.PID)})
+			return
+		}
+		serviceName = name
+		args = cmdArgs
 	}
 	if err := validateSingleCommandTokens(args); err != nil {
 		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "error", Message: err.Error()})
@@ -1076,8 +1172,17 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 		args = args[:len(args)-1]
 		cmdName = strings.TrimSuffix(cmdName, " &")
 	}
-
-	emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "lifecycle", Message: fmt.Sprintf("Request received. Spawning subtone for %s...", cmdName)})
+	mode := "foreground"
+	if serviceName != "" {
+		mode = "service"
+	} else if isBackground {
+		mode = "background"
+	}
+	if serviceName != "" {
+		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "lifecycle", Message: fmt.Sprintf("Request received. Starting service %s...", serviceName)})
+	} else {
+		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "lifecycle", Message: fmt.Sprintf("Request received. Spawning subtone for %s...", cmdName)})
+	}
 	heartbeatInterval := 5 * time.Second
 	if raw := strings.TrimSpace(os.Getenv("DIALTONE_SUBTONE_HEARTBEAT_SEC")); raw != "" {
 		if sec, err := strconv.Atoi(raw); err == nil && sec > 0 {
@@ -1086,6 +1191,7 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 	}
 	stopHeartbeat := make(chan struct{})
 	lastLineByPID := map[int]string{}
+	serviceRoom := serviceRoomName(serviceName)
 	emitSubtoneLine := func(pid int, stderr bool, line string) {
 		kind, text, ok := normalizeSubtoneLine(line, stderr)
 		if !ok || pid <= 0 {
@@ -1101,6 +1207,20 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 		lastLineByPID[pid] = kind + "\n" + text
 		emit(BusFrame{Type: frameTypeLine, Scope: "subtone", Kind: kind, Room: subtoneRoomName(pid), SubtonePID: pid, Message: text})
 	}
+	publishHeartbeat := func(ev proc.SubtoneEvent, state string, exitCode int) {
+		if publish == nil || ev.PID <= 0 {
+			return
+		}
+		hb := buildManagedHeartbeat(hostName, room, mode, serviceName, ev, state, exitCode)
+		if serviceName != "" {
+			hb.Room = serviceRoom
+		}
+		payload, err := encodeManagedHeartbeat(hb)
+		if err != nil {
+			return
+		}
+		_ = publish(heartbeatSubject(hostName, mode, serviceName, ev.PID), payload)
+	}
 	startHeartbeat := func(pid int, startedAt time.Time) {
 		if pid <= 0 || heartbeatInterval <= 0 {
 			return
@@ -1112,6 +1232,12 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 				select {
 				case <-t.C:
 					uptime := time.Since(startedAt).Round(time.Second)
+					if registry != nil {
+						registry.Heartbeat(pid)
+					}
+					if services != nil && serviceName != "" {
+						services.Heartbeat(serviceName)
+					}
 					emit(BusFrame{
 						Type:       frameTypeLine,
 						Scope:      "subtone",
@@ -1120,6 +1246,11 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 						SubtonePID: pid,
 						Message:    fmt.Sprintf("Heartbeat: running for %s", uptime),
 					})
+					publishHeartbeat(proc.SubtoneEvent{
+						PID:       pid,
+						Args:      append([]string(nil), args...),
+						StartedAt: startedAt,
+					}, heartbeatStateToken(true, 0), 0)
 				case <-stopHeartbeat:
 					return
 				}
@@ -1136,38 +1267,70 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 				return
 			}
 			if registry != nil {
-				mode := "foreground"
-				if isBackground {
-					mode = "background"
+				registryRoom := room
+				if serviceName != "" {
+					registryRoom = serviceRoom
 				}
-				registry.Started(room, mode, ev)
+				registry.Started(registryRoom, mode, ev)
+			}
+			if services != nil && serviceName != "" {
+				services.Started(serviceName, serviceRoom, ev)
 			}
 			subtoneRoom := subtoneRoomName(ev.PID)
-			emit(BusFrame{
-				Type:       frameTypeLine,
-				Scope:      "index",
-				Kind:       "lifecycle",
-				SubtonePID: ev.PID,
-				Message:    fmt.Sprintf("Subtone started as pid %d.", ev.PID),
-			})
-			emit(BusFrame{
-				Type:       frameTypeLine,
-				Scope:      "index",
-				Kind:       "lifecycle",
-				SubtonePID: ev.PID,
-				Message:    fmt.Sprintf("Subtone room: %s", subtoneRoom),
-			})
+			if serviceName != "" {
+				emit(BusFrame{
+					Type:       frameTypeLine,
+					Scope:      "index",
+					Kind:       "lifecycle",
+					SubtonePID: ev.PID,
+					Message:    fmt.Sprintf("Service %s started as pid %d.", serviceName, ev.PID),
+				})
+				emit(BusFrame{
+					Type:       frameTypeLine,
+					Scope:      "index",
+					Kind:       "lifecycle",
+					SubtonePID: ev.PID,
+					Message:    fmt.Sprintf("Service room: %s", serviceRoom),
+				})
+			} else {
+				emit(BusFrame{
+					Type:       frameTypeLine,
+					Scope:      "index",
+					Kind:       "lifecycle",
+					SubtonePID: ev.PID,
+					Message:    fmt.Sprintf("Subtone started as pid %d.", ev.PID),
+				})
+				emit(BusFrame{
+					Type:       frameTypeLine,
+					Scope:      "index",
+					Kind:       "lifecycle",
+					SubtonePID: ev.PID,
+					Message:    fmt.Sprintf("Subtone room: %s", subtoneRoom),
+				})
+			}
 			if strings.TrimSpace(ev.LogPath) != "" {
+				message := fmt.Sprintf("Subtone log file: %s", ev.LogPath)
+				if serviceName != "" {
+					message = fmt.Sprintf("Service log file: %s", ev.LogPath)
+				}
 				emit(BusFrame{
 					Type:       frameTypeLine,
 					Scope:      "index",
 					Kind:       "lifecycle",
 					SubtonePID: ev.PID,
 					LogPath:    strings.TrimSpace(ev.LogPath),
-					Message:    fmt.Sprintf("Subtone log file: %s", ev.LogPath),
+					Message:    message,
 				})
 			}
-			if isBackground {
+			if serviceName != "" {
+				emit(BusFrame{
+					Type:       frameTypeLine,
+					Scope:      "index",
+					Kind:       "lifecycle",
+					SubtonePID: ev.PID,
+					Message:    fmt.Sprintf("Service %s is running.", serviceName),
+				})
+			} else if isBackground {
 				emit(BusFrame{
 					Type:       frameTypeLine,
 					Scope:      "index",
@@ -1178,6 +1341,7 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 			}
 			emit(BusFrame{Type: frameTypeLine, Scope: "subtone", Kind: "lifecycle", Room: subtoneRoom, SubtonePID: ev.PID, Message: fmt.Sprintf("Started at %s", ev.StartedAt.Format(time.RFC3339))})
 			emit(BusFrame{Type: frameTypeLine, Scope: "subtone", Kind: "lifecycle", Room: subtoneRoom, SubtonePID: ev.PID, Message: fmt.Sprintf("Command: %v", ev.Args)})
+			publishHeartbeat(ev, heartbeatStateToken(true, 0), 0)
 			startHeartbeat(ev.PID, ev.StartedAt)
 		case proc.SubtoneEventStdout:
 			emitSubtoneLine(ev.PID, false, ev.Line)
@@ -1189,9 +1353,19 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 				if registry != nil {
 					registry.Exited(ev.PID, ev.ExitCode)
 				}
+				if services != nil && serviceName != "" {
+					services.Exited(serviceName, ev.PID, ev.ExitCode)
+				}
+				publishHeartbeat(ev, heartbeatStateToken(false, ev.ExitCode), ev.ExitCode)
 				message := fmt.Sprintf("Subtone for %s exited with code %d.", cmdName, ev.ExitCode)
 				if ev.ExitCode < 0 {
 					message = fmt.Sprintf("Subtone for %s stopped.", cmdName)
+				}
+				if serviceName != "" {
+					message = fmt.Sprintf("Service %s exited with code %d.", serviceName, ev.ExitCode)
+					if ev.ExitCode < 0 {
+						message = fmt.Sprintf("Service %s stopped.", serviceName)
+					}
 				}
 				emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "lifecycle", SubtonePID: ev.PID, ExitCode: ev.ExitCode, Message: message})
 				return
@@ -1204,7 +1378,7 @@ func executeCommand(line string, room string, registry *subtoneRegistry, emit fu
 		}
 	}
 
-	if isBackground {
+	if isBackground || serviceName != "" {
 		go runSubtoneWithEventsFn(args, onEvent)
 		return
 	}
@@ -1308,6 +1482,15 @@ func printHelp(emit func(BusFrame)) {
 		"`/subtone-stop --pid <pid>`",
 		"Stop a managed subtone by PID",
 		"",
+		"`/service-start --name <name> -- <command...>`",
+		"Start a managed long-lived service",
+		"",
+		"`/service-stop --name <name>`",
+		"Stop a managed service by name",
+		"",
+		"`/service-list`",
+		"List managed services",
+		"",
 		"`kill <pid>`",
 		"Kill a managed subtone process by PID (legacy alias)",
 		"",
@@ -1363,6 +1546,48 @@ func printManagedProcesses(room string, registry *subtoneRegistry, emit func(Bus
 	}
 }
 
+func printManagedServices(room string, registry *serviceRegistry, emit func(BusFrame)) {
+	items := []serviceRegistryItem(nil)
+	if registry != nil {
+		items = registry.Snapshot(0, listManagedFn())
+	}
+	if len(items) == 0 {
+		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: "No managed services."})
+		return
+	}
+	emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Room: sanitizeRoom(room), Message: "Managed Services:"})
+	emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Room: sanitizeRoom(room), Message: fmt.Sprintf("%-16s %-10s %-8s %-24s %-8s %-12s %s", "NAME", "HOST", "PID", "UPDATED", "STATE", "MODE", "COMMAND")})
+	for _, item := range items {
+		command := strings.TrimSpace(item.Command)
+		if command == "" {
+			command = "-"
+		}
+		updated := strings.TrimSpace(item.LastHeartbeat)
+		if updated == "" {
+			updated = strings.TrimSpace(item.LastUpdate)
+		}
+		if updated == "" {
+			updated = "-"
+		}
+		state := "done"
+		if item.Active {
+			state = "active"
+		}
+		host := strings.TrimSpace(item.Host)
+		if host == "" {
+			host = "local"
+		}
+		emit(BusFrame{
+			Type:    frameTypeLine,
+			Scope:   "index",
+			Kind:    "status",
+			Room:    sanitizeRoom(room),
+			LogPath: strings.TrimSpace(item.LogPath),
+			Message: fmt.Sprintf("%-16s %-10s %-8d %-24s %-8s %-12s %s", item.Name, host, item.PID, updated, state, defaultSubtoneMode(item.Mode), command),
+		})
+	}
+}
+
 func parseManagedPIDCommand(args []string) (int, error) {
 	if len(args) < 3 {
 		return 0, fmt.Errorf("Usage: subtone-stop --pid <pid>")
@@ -1387,12 +1612,76 @@ func parseManagedPIDCommand(args []string) (int, error) {
 	return 0, fmt.Errorf("Usage: subtone-stop --pid <pid>")
 }
 
+func parseServiceStartCommand(args []string) (string, []string, error) {
+	if len(args) < 5 {
+		return "", nil, fmt.Errorf("Usage: service-start --name <name> -- <command...>")
+	}
+	name, err := parseServiceNameCommand(args[:3], "service-start")
+	if err != nil {
+		return "", nil, err
+	}
+	for i := 3; i < len(args); i++ {
+		if strings.TrimSpace(args[i]) == "--" {
+			cmdArgs := append([]string(nil), args[i+1:]...)
+			if len(cmdArgs) == 0 {
+				return "", nil, fmt.Errorf("Usage: service-start --name <name> -- <command...>")
+			}
+			return name, cmdArgs, nil
+		}
+	}
+	return "", nil, fmt.Errorf("Usage: service-start --name <name> -- <command...>")
+}
+
+func parseServiceNameCommand(args []string, command string) (string, error) {
+	if len(args) < 3 {
+		return "", fmt.Errorf("Usage: %s --name <name>", command)
+	}
+	for i := 1; i < len(args); i++ {
+		token := strings.TrimSpace(args[i])
+		switch {
+		case token == "--name" && i+1 < len(args):
+			name := strings.TrimSpace(args[i+1])
+			if name == "" {
+				return "", fmt.Errorf("Usage: %s --name <name>", command)
+			}
+			return name, nil
+		case strings.HasPrefix(token, "--name="):
+			name := strings.TrimSpace(strings.TrimPrefix(token, "--name="))
+			if name == "" {
+				return "", fmt.Errorf("Usage: %s --name <name>", command)
+			}
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("Usage: %s --name <name>", command)
+}
+
 func defaultSubtoneMode(mode string) string {
 	mode = strings.TrimSpace(mode)
 	if mode == "" {
 		return "foreground"
 	}
 	return mode
+}
+
+func serviceRoomName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	return "service:" + sanitizeRoom(name)
+}
+
+func parseRFC3339(raw string) time.Time {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
 }
 
 func subtoneRoomName(pid int) string {
