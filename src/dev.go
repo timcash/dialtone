@@ -605,7 +605,8 @@ func dispatchViaREPL(command string, args []string, targetHost string) error {
 	}
 	attemptErrs := make([]string, 0, len(candidateNATSURLs))
 	for _, candidateURL := range candidateNATSURLs {
-		if injectionHost == "" && isLocalNATSURL(candidateURL) && !endpointReachable(candidateURL, 700*time.Millisecond) && replAutostartEnabled() {
+		leaderHealthy := replv3.LeaderHealthy(candidateURL, 1200*time.Millisecond)
+		if injectionHost == "" && isLocalNATSURL(candidateURL) && !leaderHealthy && replAutostartEnabled() {
 			logs.System("No REPL leader detected on %s; starting background leader for room %s", candidateURL, room)
 			if err := replv3.EnsureLeaderRunning(candidateURL, room); err != nil {
 				return fmt.Errorf("repl leader autostart failed: %w", err)
@@ -1506,10 +1507,11 @@ func startDefaultMultiplayerREPL() error {
 		clientURL = "nats://127.0.0.1:4222"
 	}
 	joinArgs := []string{"--nats-url", clientURL, room}
-	if !endpointReachable(clientURL, 700*time.Millisecond) && !replAutostartEnabled() {
+	leaderHealthy := replv3.LeaderHealthy(clientURL, 1200*time.Millisecond)
+	if !leaderHealthy && !replAutostartEnabled() {
 		return fmt.Errorf("no REPL daemon detected on %s (autostart disabled). start daemon with: ./dialtone.sh repl src_v3 service --mode run --room %s", clientURL, room)
 	}
-	if !endpointReachable(clientURL, 700*time.Millisecond) {
+	if !leaderHealthy {
 		logs.System("No REPL leader detected on %s; starting background leader for room %s", clientURL, room)
 		if err := replv3.EnsureLeaderRunning(clientURL, room); err != nil {
 			return err

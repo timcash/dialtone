@@ -20,6 +20,7 @@ type subtoneRegistryItem struct {
 	PID        int     `json:"pid"`
 	Room       string  `json:"room,omitempty"`
 	Command    string  `json:"command,omitempty"`
+	Mode       string  `json:"mode,omitempty"`
 	LogPath    string  `json:"log_path,omitempty"`
 	StartedAt  string  `json:"started_at,omitempty"`
 	LastUpdate string  `json:"last_update,omitempty"`
@@ -34,6 +35,7 @@ type subtoneRegistryEntry struct {
 	PID        int
 	Room       string
 	Command    string
+	Mode       string
 	LogPath    string
 	StartedAt  time.Time
 	LastUpdate time.Time
@@ -57,17 +59,22 @@ func newSubtoneRegistry(limit int) *subtoneRegistry {
 	}
 }
 
-func (r *subtoneRegistry) Started(room string, ev proc.SubtoneEvent) {
+func (r *subtoneRegistry) Started(room string, mode string, ev proc.SubtoneEvent) {
 	if r == nil || ev.PID <= 0 {
 		return
 	}
 	now := time.Now().UTC()
+	mode = strings.TrimSpace(mode)
+	if mode == "" {
+		mode = "foreground"
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.entries[ev.PID] = &subtoneRegistryEntry{
 		PID:        ev.PID,
 		Room:       sanitizeRoom(room),
 		Command:    strings.TrimSpace(strings.Join(ev.Args, " ")),
+		Mode:       mode,
 		LogPath:    strings.TrimSpace(ev.LogPath),
 		StartedAt:  ev.StartedAt.UTC(),
 		LastUpdate: now,
@@ -90,6 +97,21 @@ func (r *subtoneRegistry) Exited(pid int, exitCode int) {
 	}
 	entry.ExitCode = exitCode
 	entry.Active = false
+	entry.LastUpdate = now
+	r.trimLocked()
+}
+
+func (r *subtoneRegistry) Heartbeat(pid int) {
+	if r == nil || pid <= 0 {
+		return
+	}
+	now := time.Now().UTC()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.entries[pid]
+	if !ok {
+		return
+	}
 	entry.LastUpdate = now
 	r.trimLocked()
 }
@@ -124,6 +146,7 @@ func (r *subtoneRegistry) Snapshot(count int, managed []proc.ManagedProcessSnaps
 			PID:      entry.PID,
 			Room:     entry.Room,
 			Command:  entry.Command,
+			Mode:     entry.Mode,
 			LogPath:  entry.LogPath,
 			ExitCode: entry.ExitCode,
 			Active:   entry.Active,

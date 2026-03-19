@@ -254,7 +254,7 @@ func serviceTarget(host, mode, role string) (*commandResponse, error) {
 	case "start":
 		return nil, startRemoteService(node, strings.TrimSpace(role))
 	case "stop":
-		return nil, stopRemoteService(node)
+		return nil, stopRemoteService(node, strings.TrimSpace(role))
 	case "status":
 		return sendRemoteCommand(node, commandRequest{Command: "status", Role: strings.TrimSpace(role)})
 	default:
