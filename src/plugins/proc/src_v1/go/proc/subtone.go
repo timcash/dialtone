@@ -85,6 +85,8 @@ func runCommandWithEvents(cmd *exec.Cmd, trackArgs []string, logDir string, onEv
 		}
 	}
 
+	configureManagedCommand(cmd)
+
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
 
