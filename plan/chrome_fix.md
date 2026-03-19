@@ -27,3 +27,32 @@ Verification:
 - start `cad-smoke` once and reuse it for CAD browser smoke runs
 - start `dev` once and reuse it for direct Chrome actions
 - confirm `status`, `open`, `reset`, `click`, `type`, and `screenshot` operate against the same daemon-owned browser
+
+Debug workflow for an LLM:
+
+```bash
+# 1. Reset the local REPL/process-manager state first.
+./dialtone.sh repl src_v3 process-clean
+
+# 2. Start one long-lived Chrome daemon role on legion.
+./dialtone.sh chrome src_v3 service --host legion --mode start --role cad-smoke
+
+# 3. Confirm the daemon is healthy over the normal REPL/NATS path.
+./dialtone.sh chrome src_v3 status --host legion --role cad-smoke
+
+# 4. Exercise the existing daemon without redeploying it.
+./dialtone.sh chrome src_v3 screenshot --host legion --role cad-smoke --out src/plugins/chrome/src_v3/screenshots/cad_smoke_check.png
+
+# 5. Run the focused CAD smoke against that already-running role.
+./dialtone.sh cad src_v1 test --attach legion --filter cad-ui-browser-smoke
+
+# 6. If the smoke fails, inspect the subtone log instead of guessing from DIALTONE>.
+./dialtone.sh repl src_v3 subtone-list --count 10
+./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 250
+```
+
+What to look for:
+- `chrome status: daemon ready on legion role=cad-smoke`
+- no `chrome src_v3 build ok` / redeploy lines during normal CAD/UI preflight
+- one persistent daemon/browser per role
+- CAD failures narrowed to UI/model-ready state, not Chrome lifecycle
