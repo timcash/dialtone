@@ -107,6 +107,103 @@ func detectBrowserPID(port int, role, profileDir string) (int, error) {
 	}
 }
 
+func countLocalChromeProcesses(role string) (int, error) {
+	role = normalizeRole(role)
+	profileDir := defaultProfileDir(role)
+	pids, err := chromeBrowserPIDsForRole(role, profileDir, roleChromePort(role))
+	if err != nil {
+		return 0, err
+	}
+	return len(pids), nil
+}
+
+func countRemoteChromeProcesses(node sshv1.MeshNode, role string) (int, error) {
+	role = normalizeRole(role)
+	profileDir := defaultProfileDir(role)
+	if strings.EqualFold(node.OS, "windows") {
+		script := fmt.Sprintf(`$role=%s; $profile=%s; $port=%d; `+
+			`$items=Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'chrome.exe' -and $_.CommandLine -like ('*--remote-debugging-port=' + $port + '*') -and $_.CommandLine -notlike '*--type=*' -and (($_.CommandLine -like ('*--dialtone-role=' + $role + '*')) -or ($_.CommandLine -like ('*' + $profile + '*'))) } | Select-Object -ExpandProperty ProcessId; `+
+			`if($items){ ($items | Measure-Object).Count } else { 0 }`,
+			psQuote(role), psQuote(windowsPath(profileDir)), roleChromePort(role))
+		out, err := sshv1.RunNodeCommand(node.Name, script, sshv1.CommandOptions{})
+		if err != nil {
+			return 0, err
+		}
+		n, convErr := strconv.Atoi(strings.TrimSpace(out))
+		if convErr != nil {
+			return 0, convErr
+		}
+		return n, nil
+	}
+	cmd := fmt.Sprintf("ps -eo pid,args | grep '[c]hrome' | grep -- '--remote-debugging-port=%d' | grep -- '--dialtone-role=%s' | grep -v -- '--type=' | wc -l", roleChromePort(role), shellEscapeGrep(role))
+	out, err := sshv1.RunNodeCommand(node.Name, cmd, sshv1.CommandOptions{})
+	if err != nil {
+		return 0, err
+	}
+	n, convErr := strconv.Atoi(strings.TrimSpace(out))
+	if convErr != nil {
+		return 0, convErr
+	}
+	return n, nil
+}
+
+func chromeBrowserPIDsForRole(role, profileDir string, port int) ([]int, error) {
+	role = normalizeRole(role)
+	switch runtime.GOOS {
+	case "windows":
+		script := fmt.Sprintf(`$role=%s; $profile=%s; $port=%d; `+
+			`$items=Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'chrome.exe' -and $_.CommandLine -like ('*--remote-debugging-port=' + $port + '*') -and $_.CommandLine -notlike '*--type=*' -and (($_.CommandLine -like ('*--dialtone-role=' + $role + '*')) -or ($_.CommandLine -like ('*' + $profile + '*'))) } | Select-Object -ExpandProperty ProcessId; `+
+			`if($items){ $items }`,
+			psQuote(role), psQuote(windowsPath(profileDir)), port)
+		out, err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("list chrome pids failed: %w (%s)", err, strings.TrimSpace(string(out)))
+		}
+		return parsePIDList(string(out)), nil
+	default:
+		cmd := fmt.Sprintf("ps -eo pid,args | grep '[c]hrome' | grep -- '--remote-debugging-port=%d' | grep -- '--dialtone-role=%s' | grep -v -- '--type=' | awk '{print $1}'", port, shellEscapeGrep(role))
+		out, err := exec.Command("bash", "-lc", cmd).Output()
+		if err != nil {
+			return nil, err
+		}
+		return parsePIDList(string(out)), nil
+	}
+}
+
+func parsePIDList(raw string) []int {
+	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
+	out := make([]int, 0, len(lines))
+	seen := map[int]struct{}{}
+	for _, line := range lines {
+		n, err := strconv.Atoi(strings.TrimSpace(line))
+		if err != nil || n <= 0 {
+			continue
+		}
+		if _, ok := seen[n]; ok {
+			continue
+		}
+		seen[n] = struct{}{}
+		out = append(out, n)
+	}
+	return out
+}
+
+func ensureSingleChromeProcessForRole(role, profileDir string, port int, keepPID int) error {
+	pids, err := chromeBrowserPIDsForRole(role, profileDir, port)
+	if err != nil {
+		return err
+	}
+	for _, pid := range pids {
+		if keepPID > 0 && pid == keepPID {
+			continue
+		}
+		if err := killPID(pid); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func cleanupChromeProfileLocks(profileDir string) error {
 	lockNames := []string{"SingletonLock", "SingletonCookie", "SingletonSocket"}
 	var errs []string

@@ -97,9 +97,20 @@ func ReadRemoteLogsByHost(host string, lines int) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	return readRemoteLogs(node, lines)
+	return readRemoteLogs(node, defaultRole, lines)
 }
 
 func ReadLogsByTarget(host, role string, lines int) (string, string, error) {
 	return readTargetLogs(host, role, lines)
+}
+
+func CountChromeProcessesByTarget(host, role string) (int, error) {
+	if isLocalHost(host) {
+		return countLocalChromeProcesses(role)
+	}
+	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(host))
+	if err != nil {
+		return 0, err
+	}
+	return countRemoteChromeProcesses(node, role)
 }

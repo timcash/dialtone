@@ -1,9 +1,9 @@
 # Error Report
 
-- **Date**: Sun, 08 Mar 2026 10:17:55 PDT
+- **Date**: Thu, 19 Mar 2026 15:49:41 PDT
 - **Suite**: chrome-src-v3
-- **Total Duration**: 975.540312ms
+- **Total Duration**: 25.515940568s
 
-- **Error Steps**: 0 / 1
+- **Error Steps**: 0 / 9
 
 No errors captured.

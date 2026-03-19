@@ -1,25 +1,26 @@
 # Test Report: ui-src-v1
 
-- **Date**: Sun, 08 Mar 2026 10:18:03 PDT
-- **Total Duration**: 982.240806ms
+- **Date**: Thu, 19 Mar 2026 15:51:03 PDT
+- **Total Duration**: 39.532556616s
 
 ## Summary
 
-- **Steps**: 2 / 2 passed
+- **Steps**: 1 / 1 passed
 - **Status**: PASSED
 
 ## Details
 
 ### 1. ✅ ui-build-and-go-serve
 
-- **Duration**: 478.374324ms
+- **Duration**: 38.81339405s
 - **Report**: fixture built, docs/home section loaded, text legend verified (attach=true)
 
 #### Logs
 
 ```text
 INFO: STEP> begin ui-build-and-go-serve
-INFO: LOOKING FOR: persistent ui dev server already running at http://127.0.0.1:5177
+INFO: LOOKING FOR: starting persistent ui dev server in background at http://127.0.0.1:5177
+INFO: LOOKING FOR: persistent ui dev server ready at http://127.0.0.1:5177
 WARN: ERROR_PING: skipped for chrome src_v3 NATS-managed browser session
 INFO: saved browser debug config: /home/user/dialtone/src/plugins/ui/src_v1/test/browser.debug.json
 WARN: skipping JS assertion for service-managed chrome src_v3 session
@@ -36,34 +37,6 @@ PASS: [TEST][PASS] [STEP:ui-build-and-go-serve] report: fixture built, docs/home
 #### Screenshots
 
 ![auto_ui-build-and-go-serve.png](screenshots/auto_ui-build-and-go-serve.png)
-
----
-
-### 2. ✅ ui-section-hero-via-menu
-
-- **Duration**: 501.014814ms
-- **Report**: section ui-home-docs navigation verified
-
-#### Logs
-
-```text
-INFO: STEP> begin ui-section-hero-via-menu
-INFO: LOOKING FOR: persistent ui dev server already running at http://127.0.0.1:5177
-WARN: skipping JS assertion for service-managed chrome src_v3 session
-WARN: skipping overlay overlap detection for service-managed chrome src_v3 session
-INFO: report: section ui-home-docs navigation verified
-PASS: [TEST][PASS] [STEP:ui-section-hero-via-menu] report: section ui-home-docs navigation verified
-```
-
-#### Browser Logs
-
-```text
-<empty>
-```
-
-#### Screenshots
-
-![auto_ui-section-hero-via-menu.png](screenshots/auto_ui-section-hero-via-menu.png)
 
 ---
 
