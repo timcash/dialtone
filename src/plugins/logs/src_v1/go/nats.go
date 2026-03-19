@@ -47,8 +47,9 @@ func StartEmbeddedNATS() (*EmbeddedNATS, error) {
 		return nil, err
 	}
 	go srv.Start()
-	if !srv.ReadyForConnections(5 * time.Second) {
-		return nil, fmt.Errorf("embedded nats server did not become ready")
+	if !srv.ReadyForConnections(15 * time.Second) {
+		srv.Shutdown()
+		return nil, fmt.Errorf("embedded nats server did not become ready on %s:%d", opts.Host, opts.Port)
 	}
 
 	nc, err := nats.Connect(srv.ClientURL())
@@ -88,8 +89,9 @@ func StartEmbeddedNATSOnURL(natsURL string) (*EmbeddedNATS, error) {
 		return nil, err
 	}
 	go srv.Start()
-	if !srv.ReadyForConnections(5 * time.Second) {
-		return nil, fmt.Errorf("embedded nats server did not become ready")
+	if !srv.ReadyForConnections(15 * time.Second) {
+		srv.Shutdown()
+		return nil, fmt.Errorf("embedded nats server did not become ready on %s:%d", opts.Host, opts.Port)
 	}
 	nc, err := nats.Connect(srv.ClientURL())
 	if err != nil {
