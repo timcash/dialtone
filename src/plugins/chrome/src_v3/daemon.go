@@ -392,7 +392,7 @@ func sendRemoteCommand(node sshv1.MeshNode, req commandRequest) (*commandRespons
 			return nil, err
 		}
 		defer nc.Close()
-		msg, err := nc.Request(subject, raw, 20*time.Second)
+		msg, err := nc.Request(subject, raw, commandRequestTimeout(req))
 		if err != nil {
 			return nil, err
 		}
