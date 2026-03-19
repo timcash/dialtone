@@ -43,7 +43,7 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println("Usage: go run ./src/cli.go repl v1 <install|build|format|test> [args]")
+	fmt.Println("Usage: ./dialtone_mod repl v1 <install|build|format|test> [args]")
 	fmt.Println("")
 	fmt.Println("Commands:")
 	fmt.Println("  install                                  Verify the repo Nix dev shell can load repl prerequisites")
