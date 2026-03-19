@@ -126,6 +126,9 @@ go run ./src/mods/my_mod/v1/cli help
 
 - When `runSSH` is used internally, remote commands are now executed by running `ssh v1` through `dialtone_mod` when available, so remote execution matches local CLI behavior.
 - If `dialtone_mod` is not present on a host, fallback is `go run ./src/cli.go`, which bypasses `dialtone_mod` and may miss the pinned Nix shell behavior.
+- To avoid GitHub-backed `flake:nixpkgs` registry lookups, you can export `DIALTONE_NIXPKGS_FLAKE=<flake-ref>` before running `./dialtone_mod`.
+  - Example local source: `DIALTONE_NIXPKGS_FLAKE=path:/path/to/nixpkgs ./dialtone_mod repl v1 test`
+- To force cached/offline Nix resolution after inputs are already present locally, set `DIALTONE_NIX_OFFLINE=1`.
 
 ## Mesh and Git Safety
 

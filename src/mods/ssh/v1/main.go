@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,7 +14,6 @@ type sshOptions struct {
 	user        string
 	port        string
 	command     string
-	nixpkgsURL  string
 	dryRun      bool
 	showVersion bool
 }
@@ -79,7 +77,7 @@ func runSSHCommand(cfg sshOptions, node meshNode) error {
 			continue
 		}
 		if cfg.dryRun {
-			fmt.Printf("nix command: %s", cmd.Path)
+			fmt.Printf("command: %s", cmd.Path)
 			for _, arg := range cmd.Args[1:] {
 				fmt.Printf(" %q", arg)
 			}
@@ -147,10 +145,7 @@ func runSSHCommandTest(cfg sshOptions, node meshNode) error {
 }
 
 func parseArgs(argv []string) (sshOptions, error) {
-	opts := sshOptions{
-		port:       "",
-		nixpkgsURL: "https://channels.nixos.org/nixpkgs-unstable/nixexprs.tar.xz",
-	}
+	opts := sshOptions{port: ""}
 	positional := make([]string, 0)
 
 	for i := 0; i < len(argv); i++ {
@@ -193,12 +188,9 @@ func parseArgs(argv []string) (sshOptions, error) {
 		case strings.HasPrefix(current, "--command="):
 			opts.command = strings.TrimSpace(strings.TrimPrefix(current, "--command="))
 		case strings.EqualFold(current, "--nixpkgs-url"):
-			if i+1 < len(argv) {
-				opts.nixpkgsURL = strings.TrimSpace(argv[i+1])
-				i++
-			}
+			return sshOptions{}, fmt.Errorf("--nixpkgs-url is no longer supported; run ssh v1 through ./dialtone_mod so Dialtone manages the nix shell")
 		case strings.HasPrefix(current, "--nixpkgs-url="):
-			opts.nixpkgsURL = strings.TrimSpace(strings.TrimPrefix(current, "--nixpkgs-url="))
+			return sshOptions{}, fmt.Errorf("--nixpkgs-url is no longer supported; run ssh v1 through ./dialtone_mod so Dialtone manages the nix shell")
 		case strings.EqualFold(current, "--dry-run"):
 			opts.dryRun = true
 		case strings.HasPrefix(current, "--"):
@@ -216,12 +208,12 @@ func parseArgs(argv []string) (sshOptions, error) {
 }
 
 type meshNode struct {
-	Name    string   `json:"name"`
-	Aliases []string `json:"aliases"`
-	User    string   `json:"user"`
-	Host    string   `json:"host"`
+	Name           string   `json:"name"`
+	Aliases        []string `json:"aliases"`
+	User           string   `json:"user"`
+	Host           string   `json:"host"`
 	HostCandidates []string `json:"host_candidates"`
-	Port    string   `json:"port"`
+	Port           string   `json:"port"`
 }
 
 func resolveMeshNode(raw string) (meshNode, error) {
@@ -321,22 +313,7 @@ func buildSSHCommandForHost(cfg sshOptions, node meshNode, host string) (*exec.C
 		remotePort = "22"
 	}
 
-	nixBin := strings.TrimSpace(os.Getenv("NIX_BIN"))
-	if nixBin == "" {
-		var err error
-		nixBin, err = locateNixBinary()
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	args := []string{
-		"--extra-experimental-features", "nix-command",
-		"--extra-experimental-features", "flakes",
-		"shell",
-		"-f", cfg.nixpkgsURL,
-		"openssh",
-		"--command", "ssh",
+	sshArgs := []string{
 		"-F", "/dev/null",
 		"-o", "BatchMode=yes",
 		"-o", "StrictHostKeyChecking=no",
@@ -346,15 +323,19 @@ func buildSSHCommandForHost(cfg sshOptions, node meshNode, host string) (*exec.C
 		"-o", "ConnectTimeout=5",
 	}
 	if remotePort != "" && remotePort != "22" {
-		args = append(args, "-p", remotePort)
+		sshArgs = append(sshArgs, "-p", remotePort)
 	}
 	target := fmt.Sprintf("%s@%s", remoteUser, host)
-	args = append(args, target)
+	sshArgs = append(sshArgs, target)
 	if cfg.command != "" {
-		args = append(args, cfg.command)
+		sshArgs = append(sshArgs, cfg.command)
 	}
 
-	return exec.Command(nixBin, args...), nil
+	sshBin, err := shellSSHBinary()
+	if err != nil {
+		return nil, err
+	}
+	return exec.Command(sshBin, sshArgs...), nil
 }
 
 func orderedMeshHostsForSSH(candidates []string, host string) []string {
@@ -413,32 +394,19 @@ func exitIfErr(err error, context string) {
 	os.Exit(1)
 }
 
-func locateNixBinary() (string, error) {
-	if p := strings.TrimSpace(os.Getenv("NIX_BIN")); p != "" {
-		return p, nil
+func shellSSHBinary() (string, error) {
+	if os.Getenv("DIALTONE_NIX_ACTIVE") != "1" {
+		return "", fmt.Errorf("ssh v1 must run inside the Dialtone nix shell; use ./dialtone_mod ssh v1 ...")
 	}
-	if p, err := exec.LookPath("nix"); err == nil {
-		return p, nil
+	sshBin := strings.TrimSpace(os.Getenv("DIALTONE_SSH_BIN"))
+	if sshBin == "" {
+		return "", fmt.Errorf("ssh v1 requires DIALTONE_SSH_BIN from the Dialtone nix shell")
 	}
-
-	candidates := []string{
-		"/usr/local/bin/nix",
-		"/nix/var/nix/profiles/default/bin/nix",
-		filepath.Join(os.Getenv("HOME"), ".nix-profile/bin/nix"),
-		"/run/current-system/sw/bin/nix",
+	clean := filepath.Clean(sshBin)
+	if !strings.HasPrefix(clean, "/nix/") {
+		return "", fmt.Errorf("ssh v1 requires nix-provided ssh, got %s", clean)
 	}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c, nil
-		}
-	}
-
-	matches, err := filepath.Glob("/nix/store/*-nix-*/bin/nix")
-	if err == nil && len(matches) > 0 {
-		return matches[len(matches)-1], nil
-	}
-
-	return "", errors.New("nix executable not found. Set NIX_BIN or install nix")
+	return clean, nil
 }
 
 var execRunner = func(cmd *exec.Cmd) error {
