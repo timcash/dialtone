@@ -99,7 +99,7 @@ func ensureAttachBrowser(node string) error {
 		role = "dev"
 	}
 	logs.Info("DIALTONE_INDEX: cad test: ensuring chrome src_v3 role=%s on %s", role, node)
-	if _, err := chromev3.EnsureRemoteServiceByHost(node, role, true); err != nil {
+	if _, err := chromev3.EnsureRemoteServiceByHost(node, role, false); err != nil {
 		return err
 	}
 	logs.Info("DIALTONE_INDEX: cad test: resetting chrome src_v3 role=%s on %s", role, node)
