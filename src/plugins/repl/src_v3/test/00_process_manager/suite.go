@@ -12,6 +12,7 @@ import (
 
 	"dialtone/dev/plugins/repl/src_v3/test/support"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
+	"github.com/nats-io/nats.go"
 )
 
 type leaderState struct {
@@ -189,6 +190,224 @@ func Register(r *testv1.Registry) {
 			ctx.TestPassf("shell routed command reused existing leader pid %d", first.PID)
 			return testv1.StepRunResult{
 				Report: fmt.Sprintf("Started the REPL leader first, then ran `./dialtone.sh proc src_v1 emit shell-reuse-ok` and verified the shell path reused leader pid %d without printing a new autostart message while still routing the command into a subtone.", first.PID),
+			}, nil
+		},
+	})
+
+	r.Add(testv1.Step{
+		Name:    "service-start-publishes-heartbeat-and-service-registry-state",
+		Timeout: 120 * time.Second,
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			rt, err := support.NewRuntime(ctx)
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			defer rt.Stop()
+
+			if err := rt.StartLeader(); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := rt.StartJoin("llm-codex"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+
+			serviceName := "pm-svc"
+			roomSeq, _ := rt.CurrentSeqs()
+			startCmd := "/service-start --name pm-svc -- proc src_v1 sleep 30"
+			if err := rt.RunTranscript([]support.TranscriptStep{{
+				Send: startCmd,
+				ExpectRoom: []string{
+					fmt.Sprintf(`"message":"%s"`, startCmd),
+					`"message":"Request received. Starting service pm-svc..."`,
+					`"message":"Service pm-svc started as pid `,
+					`"message":"Service room: service:pm-svc"`,
+					`"message":"Service log file: `,
+					`"message":"Service pm-svc is running."`,
+				},
+				ExpectOutput: []string{
+					fmt.Sprintf("llm-codex> %s", startCmd),
+					`DIALTONE> Request received. Starting service pm-svc...`,
+					`DIALTONE> Service pm-svc started as pid `,
+					`DIALTONE> Service room: service:pm-svc`,
+					`DIALTONE> Service log file: `,
+					`DIALTONE> Service pm-svc is running.`,
+				},
+				Timeout: 30 * time.Second,
+			}}); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("service-start transcript failed: %w", err)
+			}
+			servicePID, err := rt.WaitForSubtonePIDForCommandAfter("proc src_v1 sleep 30", 20*time.Second, roomSeq)
+			if err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("missing service pid after start: %w", err)
+			}
+
+			listCmd := "/service-list"
+			if err := rt.RunTranscript([]support.TranscriptStep{{
+				Send: listCmd,
+				ExpectRoom: []string{
+					fmt.Sprintf(`"message":"%s"`, listCmd),
+					`"message":"Managed Services:"`,
+					serviceName,
+					strconv.Itoa(servicePID),
+					`active`,
+					`service`,
+					`proc src_v1 sleep 30`,
+				},
+				ExpectOutput: []string{
+					fmt.Sprintf("llm-codex> %s", listCmd),
+					`DIALTONE> Managed Services:`,
+					serviceName,
+					strconv.Itoa(servicePID),
+					`active`,
+					`service`,
+					`proc src_v1 sleep 30`,
+				},
+				Timeout: 30 * time.Second,
+			}}); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("service-list transcript failed: %w", err)
+			}
+
+			heartbeatSubject := serviceHeartbeatSubject(rt.RepoRoot, serviceName)
+			if err := rt.WaitForSubjectPatterns(heartbeatSubject, 15*time.Second, []string{
+				`"kind":"service"`,
+				`"name":"pm-svc"`,
+				`"mode":"service"`,
+				`"state":"running"`,
+				fmt.Sprintf(`"pid":%d`, servicePID),
+			}); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("service heartbeat missing running payload on %s: %w", heartbeatSubject, err)
+			}
+
+			stopCmd := "/service-stop --name pm-svc"
+			if err := rt.RunTranscript([]support.TranscriptStep{{
+				Send: stopCmd,
+				ExpectRoom: []string{
+					fmt.Sprintf(`"message":"%s"`, stopCmd),
+					fmt.Sprintf(`"message":"Stopping service %s (pid %d)."`, serviceName, servicePID),
+					fmt.Sprintf(`"message":"Stopped service %s."`, serviceName),
+				},
+				ExpectOutput: []string{
+					fmt.Sprintf("llm-codex> %s", stopCmd),
+					fmt.Sprintf("DIALTONE> Stopping service %s (pid %d).", serviceName, servicePID),
+					fmt.Sprintf("DIALTONE> Stopped service %s.", serviceName),
+				},
+				Timeout: 30 * time.Second,
+			}}); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("service-stop transcript failed: %w", err)
+			}
+			if err := rt.WaitForSubjectPatterns(heartbeatSubject, 15*time.Second, []string{
+				`"state":"stopped"`,
+				fmt.Sprintf(`"pid":%d`, servicePID),
+			}); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("service heartbeat missing stopped payload on %s: %w", heartbeatSubject, err)
+			}
+
+			if err := rt.RunTranscript([]support.TranscriptStep{{
+				Send: listCmd,
+				ExpectRoom: []string{
+					fmt.Sprintf(`"message":"%s"`, listCmd),
+					`"message":"Managed Services:"`,
+					serviceName,
+					strconv.Itoa(servicePID),
+					`done`,
+					`service`,
+				},
+				ExpectOutput: []string{
+					fmt.Sprintf("llm-codex> %s", listCmd),
+					`DIALTONE> Managed Services:`,
+					serviceName,
+					strconv.Itoa(servicePID),
+					`done`,
+					`service`,
+				},
+				Timeout: 30 * time.Second,
+			}}); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("post-stop service-list failed: %w", err)
+			}
+
+			ctx.TestPassf("service %s pid %d emitted heartbeats and stayed visible in service registry", serviceName, servicePID)
+			return testv1.StepRunResult{
+				Report: fmt.Sprintf("Started named service %s as pid %d through the REPL, verified `service-list` showed it as `active service`, observed its NATS heartbeat subject transition to `running`, stopped it with `/service-stop --name %s`, observed a `stopped` heartbeat, and verified `service-list` preserved the row as `done service`.", serviceName, servicePID, serviceName),
+			}, nil
+		},
+	})
+
+	r.Add(testv1.Step{
+		Name:    "external-service-heartbeat-appears-in-service-list",
+		Timeout: 90 * time.Second,
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			rt, err := support.NewRuntime(ctx)
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			defer rt.Stop()
+
+			if err := rt.StartLeader(); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := rt.StartJoin("llm-codex"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+
+			nc, err := nats.Connect(rt.NATSURL, nats.Timeout(1200*time.Millisecond))
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			defer nc.Close()
+
+			payload := map[string]any{
+				"host":       "legion",
+				"kind":       "service",
+				"name":       "chrome-dev",
+				"mode":       "service",
+				"pid":        42424,
+				"room":       "service:chrome-dev",
+				"command":    "chrome src_v3 daemon --role dev --nats-url nats://127.0.0.1:46222 --host-id legion",
+				"state":      "running",
+				"log_path":   "C:/Users/test/.dialtone/bin/dialtone_chrome_v3.out.log",
+				"started_at": time.Now().UTC().Add(-10 * time.Second).Format(time.RFC3339),
+				"last_ok_at": time.Now().UTC().Format(time.RFC3339),
+			}
+			raw, err := json.Marshal(payload)
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := nc.Publish("repl.host.legion.heartbeat.service.chrome-dev", raw); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := nc.Flush(); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+
+			if err := rt.RunTranscript([]support.TranscriptStep{{
+				Send: "/service-list",
+				ExpectRoom: []string{
+					`"message":"/service-list"`,
+					`"message":"Managed Services:"`,
+					`chrome-dev`,
+					`legion`,
+					`42424`,
+					`active`,
+					`service`,
+					`chrome src_v3 daemon --role dev`,
+				},
+				ExpectOutput: []string{
+					`llm-codex> /service-list`,
+					`DIALTONE> Managed Services:`,
+					`chrome-dev`,
+					`legion`,
+					`42424`,
+					`active`,
+					`service`,
+				},
+				Timeout: 20 * time.Second,
+			}}); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("service-list did not surface external heartbeat: %w", err)
+			}
+
+			ctx.TestPassf("external service heartbeat for chrome-dev appeared in service-list as host legion")
+			return testv1.StepRunResult{
+				Report: "Published an external `service` heartbeat on `repl.host.legion.heartbeat.service.chrome-dev` and verified `/service-list` surfaced it in the index room as an active managed service on host `legion`.",
 			}, nil
 		},
 	})
@@ -464,6 +683,45 @@ func waitForSubjectContains(rt *support.Runtime, subject string, timeout time.Du
 		}
 		time.Sleep(120 * time.Millisecond)
 	}
+}
+
+func serviceHeartbeatSubject(repoRoot, serviceName string) string {
+	st, err := readLeaderState(repoRoot)
+	host := "local"
+	if err == nil {
+		raw := strings.TrimSpace(st.ServerID)
+		if idx := strings.Index(raw, "@"); idx > 0 {
+			host = raw[:idx]
+		} else if raw != "" {
+			host = raw
+		}
+	}
+	return fmt.Sprintf("repl.host.%s.heartbeat.service.%s", subjectTokenForTest(host), subjectTokenForTest(serviceName))
+}
+
+func subjectTokenForTest(raw string) string {
+	raw = strings.TrimSpace(strings.ToLower(raw))
+	if raw == "" {
+		return "unknown"
+	}
+	var b strings.Builder
+	for _, r := range raw {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	out := strings.Trim(b.String(), "._-")
+	if out == "" {
+		return "unknown"
+	}
+	return out
 }
 
 func parseSubtoneLogPath(output string) (string, error) {

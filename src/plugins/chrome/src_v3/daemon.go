@@ -5,7 +5,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,12 +22,35 @@ func runDaemon(args []string) error {
 	role := fs.String("role", defaultRole, "Chrome role")
 	chromePort := fs.Int("chrome-port", defaultChromePort, "Chrome debug port")
 	natsPort := fs.Int("nats-port", defaultNATSPort, "NATS port")
+	natsURL := fs.String("nats-url", "", "Manager NATS URL to connect to instead of starting embedded NATS")
+	hostID := fs.String("host-id", "", "Logical host id for manager subject routing")
 	_ = fs.Parse(args)
+
+	managerURL := strings.TrimSpace(*natsURL)
+	managerHostID := strings.TrimSpace(*hostID)
+	if managerHostID == "" {
+		if hn, err := os.Hostname(); err == nil {
+			managerHostID = strings.TrimSpace(hn)
+		}
+	}
+	portValue := *natsPort
+	if managerURL != "" {
+		if parsed, err := url.Parse(managerURL); err == nil {
+			if p := strings.TrimSpace(parsed.Port()); p != "" {
+				if parsedPort, convErr := strconv.Atoi(p); convErr == nil && parsedPort > 0 {
+					portValue = parsedPort
+				}
+			}
+		}
+	}
 
 	state := &daemonState{
 		role:       strings.TrimSpace(*role),
+		hostID:     managerHostID,
 		chromePort: *chromePort,
-		natsPort:   *natsPort,
+		natsPort:   portValue,
+		natsURL:    managerURL,
+		embeddedNATS: managerURL == "",
 		profileDir: defaultProfileDir(strings.TrimSpace(*role)),
 	}
 	if state.role == "" {
@@ -35,33 +60,44 @@ func runDaemon(args []string) error {
 		return err
 	}
 	state.persistState()
-	opts := &natsserver.Options{Host: "0.0.0.0", Port: state.natsPort}
-	ns, err := natsserver.NewServer(opts)
-	if err != nil {
-		return err
+	var ns *natsserver.Server
+	var err error
+	if state.embeddedNATS {
+		opts := &natsserver.Options{Host: "0.0.0.0", Port: state.natsPort}
+		ns, err = natsserver.NewServer(opts)
+		if err != nil {
+			return err
+		}
+		go ns.Start()
+		if !ns.ReadyForConnections(10 * time.Second) {
+			return fmt.Errorf("embedded nats failed to start on %d", state.natsPort)
+		}
+		state.natsURL = fmt.Sprintf("nats://127.0.0.1:%d", state.natsPort)
 	}
-	go ns.Start()
-	if !ns.ReadyForConnections(10 * time.Second) {
-		return fmt.Errorf("embedded nats failed to start on %d", state.natsPort)
+	if strings.TrimSpace(state.natsURL) == "" {
+		state.natsURL = fmt.Sprintf("nats://127.0.0.1:%d", state.natsPort)
 	}
-	nc, err := nats.Connect(fmt.Sprintf("nats://127.0.0.1:%d", state.natsPort))
+	nc, err := nats.Connect(state.natsURL)
 	if err != nil {
 		return err
 	}
 	defer nc.Close()
-	subject := natsSubject(state.role)
-	_, err = nc.Subscribe(subject, func(m *nats.Msg) {
-		var req commandRequest
-		if err := json.Unmarshal(m.Data, &req); err != nil {
-			writeReply(m, commandResponse{OK: false, Error: err.Error()})
-			return
+	subjects := commandSubjects(state.hostID, state.role)
+	for _, subject := range subjects {
+		_, err = nc.Subscribe(subject, func(m *nats.Msg) {
+			var req commandRequest
+			if err := json.Unmarshal(m.Data, &req); err != nil {
+				writeReply(m, commandResponse{OK: false, Error: err.Error()})
+				return
+			}
+			writeReply(m, state.handle(req))
+		})
+		if err != nil {
+			return err
 		}
-		writeReply(m, state.handle(req))
-	})
-	if err != nil {
-		return err
 	}
-	logs.Info("chrome src_v3 daemon ready role=%s nats=%d chrome=%d", state.role, state.natsPort, state.chromePort)
+	go publishServiceHeartbeat(state, nc)
+	logs.Info("chrome src_v3 daemon ready role=%s host=%s nats=%s chrome=%d", state.role, state.hostID, state.natsURL, state.chromePort)
 	select {}
 }
 
@@ -263,6 +299,12 @@ func (d *daemonState) handle(req commandRequest) commandResponse {
 			resp.Error = err.Error()
 			return d.refreshResponse(resp)
 		}
+	case "shutdown":
+		_ = d.closeBrowser()
+		go func() {
+			time.Sleep(150 * time.Millisecond)
+			os.Exit(0)
+		}()
 	default:
 		resp.OK = false
 		resp.Error = fmt.Sprintf("unsupported command: %s", req.Command)
@@ -282,6 +324,7 @@ func (d *daemonState) baseResponse() commandResponse {
 		ChromePort: d.chromePort,
 		NATSPort:   d.natsPort,
 		Role:       d.role,
+		Host:       d.hostID,
 		ProfileDir: d.profileDir,
 		WebSocketURL: d.browserWS,
 		StartedAt:  d.startedAt,
@@ -341,8 +384,12 @@ func (d *daemonState) fillStatus(resp *commandResponse) error {
 }
 
 func sendRemoteCommand(node sshv1.MeshNode, req commandRequest) (*commandResponse, error) {
-	subject := natsSubject(req.Role)
-	natsURL := fmt.Sprintf("nats://%s:%d", preferredHost(node), defaultNATSPort)
+	subject := hostScopedCommandSubject(node.Name, req.Role)
+	natsURL := managerNATSURL()
+	if strings.TrimSpace(natsURL) == "" {
+		subject = natsSubject(req.Role)
+		natsURL = fmt.Sprintf("nats://%s:%d", preferredHost(node), defaultNATSPort)
+	}
 	nc, err := nats.Connect(natsURL, nats.Timeout(defaultTimeout))
 	if err != nil {
 		return nil, err
@@ -391,4 +438,89 @@ func natsSubject(role string) string {
 		role = defaultRole
 	}
 	return "chrome.src_v3." + role + ".cmd"
+}
+
+func hostScopedCommandSubject(hostID, role string) string {
+	role = strings.TrimSpace(role)
+	if role == "" {
+		role = defaultRole
+	}
+	hostID = strings.TrimSpace(hostID)
+	if hostID == "" {
+		return natsSubject(role)
+	}
+	return "chrome.src_v3." + chromeSubjectToken(hostID) + "." + chromeSubjectToken(role) + ".cmd"
+}
+
+func commandSubjects(hostID, role string) []string {
+	primary := hostScopedCommandSubject(hostID, role)
+	legacy := natsSubject(role)
+	if primary == legacy {
+		return []string{primary}
+	}
+	return []string{primary, legacy}
+}
+
+func chromeSubjectToken(raw string) string {
+	raw = strings.TrimSpace(strings.ToLower(raw))
+	if raw == "" {
+		return "unknown"
+	}
+	var b strings.Builder
+	for _, r := range raw {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	out := strings.Trim(b.String(), "._-")
+	if out == "" {
+		return "unknown"
+	}
+	return out
+}
+
+func publishServiceHeartbeat(d *daemonState, nc *nats.Conn) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	publish := func(state string, exitCode int) {
+		if nc == nil {
+			return
+		}
+		resp := d.baseResponse()
+		payload := map[string]any{
+			"host":       strings.TrimSpace(resp.Host),
+			"kind":       "service",
+			"name":       chromeServiceName(resp.Role),
+			"mode":       "service",
+			"pid":        resp.ServicePID,
+			"room":       "service:" + chromeServiceName(resp.Role),
+			"command":    fmt.Sprintf("chrome src_v3 daemon --role %s --chrome-port %d --nats-url %s --host-id %s", resp.Role, resp.ChromePort, strings.TrimSpace(d.natsURL), strings.TrimSpace(resp.Host)),
+			"state":      state,
+			"log_path":   daemonStatePath(resp.Role),
+			"started_at": strings.TrimSpace(resp.StartedAt),
+			"last_ok_at": time.Now().UTC().Format(time.RFC3339),
+			"exit_code":  exitCode,
+		}
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			return
+		}
+		_ = nc.Publish(heartbeatSubjectForHost(resp.Host, chromeServiceName(resp.Role)), raw)
+		_ = nc.Flush()
+	}
+	publish("running", 0)
+	for range ticker.C {
+		publish("running", 0)
+	}
+}
+
+func heartbeatSubjectForHost(hostID, serviceName string) string {
+	return "repl.host." + chromeSubjectToken(hostID) + ".heartbeat.service." + chromeSubjectToken(serviceName)
 }

@@ -13,7 +13,9 @@ type persistedDaemonState struct {
 	BrowserPID    int    `json:"browser_pid"`
 	ChromePort    int    `json:"chrome_port"`
 	NATSPort      int    `json:"nats_port"`
+	NATSURL       string `json:"nats_url,omitempty"`
 	Role          string `json:"role"`
+	HostID        string `json:"host_id,omitempty"`
 	ProfileDir    string `json:"profile_dir"`
 	WebSocketURL  string `json:"websocket_url,omitempty"`
 	CurrentURL    string `json:"current_url,omitempty"`
@@ -44,7 +46,9 @@ func (d *daemonState) persistedState() persistedDaemonState {
 		BrowserPID:    d.browserPID,
 		ChromePort:    d.chromePort,
 		NATSPort:      d.natsPort,
+		NATSURL:       d.natsURL,
 		Role:          d.role,
+		HostID:        d.hostID,
 		ProfileDir:    d.profileDir,
 		WebSocketURL:  d.browserWS,
 		CurrentURL:    d.currentURL,
@@ -70,4 +74,3 @@ func (d *daemonState) persistState() {
 	}
 	_ = os.WriteFile(daemonStatePath(st.Role), raw, 0o644)
 }
-
