@@ -34,7 +34,7 @@ Extend argument parsing to support:
 - `--env <path>` / `--env=<path>` (existing behavior)
 - `--host <name|alias>`
 
-Preserve positional/command args for downstream `src/cli.go`.
+Preserve positional/command args for downstream `src/mods.go`.
 
 ### 3) Local bootstrap behavior remains
 
@@ -88,4 +88,3 @@ Fail with a clear error if no valid repo root is found.
 1) Keep host argument as `--host` only, or also support positional `host` before `<mod>` for backward compatibility?
 2) For remote one-shot commands, is returning captured stdout from remote tmux execution required, or is direct non-interactive execution in remote shell sufficient after ensuring session exists?
 3) Should remote path discovery include values from `env/mesh.json` (requires JSON parsing) or stay on fixed path heuristics for now?
-
