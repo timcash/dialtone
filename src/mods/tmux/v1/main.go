@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -72,6 +73,14 @@ func main() {
 	case "rename":
 		if err := runRename(args); err != nil {
 			exitIfErr(err, "tmux rename")
+		}
+	case "shell":
+		if err := runShell(args); err != nil {
+			exitIfErr(err, "tmux shell")
+		}
+	case "target":
+		if err := runTarget(args); err != nil {
+			exitIfErr(err, "tmux target")
 		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown tmux command: %s\n", command)
@@ -202,6 +211,124 @@ func runRename(argv []string) error {
 	return nil
 }
 
+func runShell(argv []string) error {
+	opts := flag.NewFlagSet("tmux v1 shell", flag.ContinueOnError)
+	pane := opts.String("pane", "dialtone:0:0", "tmux target in session:window:pane form")
+	shellName := opts.String("shell", "default", "flake shell to enter (default|repl-v1|ssh-v1)")
+	if err := opts.Parse(argv); err != nil {
+		return err
+	}
+
+	target, err := parsePaneTarget(*pane)
+	if err != nil {
+		return err
+	}
+	repoRoot, err := locateRepoRoot()
+	if err != nil {
+		return err
+	}
+	switch strings.TrimSpace(*shellName) {
+	case "default", "repl-v1", "ssh-v1":
+	default:
+		return fmt.Errorf("unsupported --shell %q", *shellName)
+	}
+
+	tmuxTarget := target.target()
+	command := fmt.Sprintf(
+		"cd %s && export DIALTONE_TMUX_PROXY_ACTIVE=1 && exec nix --extra-experimental-features %s develop %s",
+		shellQuote(repoRoot),
+		shellQuote("nix-command flakes"),
+		shellQuote(".#"+strings.TrimSpace(*shellName)),
+	)
+	if out, err := exec.Command("tmux", "send-keys", "-t", tmuxTarget, "C-c").CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux send-keys interrupt failed: %s", strings.TrimSpace(string(out)))
+	}
+	if out, err := exec.Command("tmux", "send-keys", "-t", tmuxTarget, "--", command).CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux send-keys shell failed: %s", strings.TrimSpace(string(out)))
+	}
+	if out, err := exec.Command("tmux", "send-keys", "-t", tmuxTarget, "C-m").CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux send-keys enter failed: %s", strings.TrimSpace(string(out)))
+	}
+	fmt.Printf("entered nix shell %s in %s\n", strings.TrimSpace(*shellName), tmuxTarget)
+	return nil
+}
+
+func runTarget(argv []string) error {
+	opts := flag.NewFlagSet("tmux v1 target", flag.ContinueOnError)
+	setPane := opts.String("set", "", "Persist the dialtone_mod tmux target as session:window:pane")
+	clear := opts.Bool("clear", false, "Clear the persisted dialtone_mod tmux target")
+	if err := opts.Parse(argv); err != nil {
+		return err
+	}
+	repoRoot, err := locateRepoRoot()
+	if err != nil {
+		return err
+	}
+	targetPath := filepath.Join(repoRoot, ".dialtone", "tmux_target")
+
+	if *clear {
+		if err := os.Remove(targetPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		fmt.Println("cleared dialtone_mod tmux target")
+		return nil
+	}
+
+	if strings.TrimSpace(*setPane) != "" {
+		target, err := parsePaneTarget(*setPane)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+			return err
+		}
+		value := target.Session + ":" + target.Window + ":" + target.Pane + "\n"
+		if err := os.WriteFile(targetPath, []byte(value), 0o644); err != nil {
+			return err
+		}
+		fmt.Printf("set dialtone_mod tmux target: %s", value)
+		return nil
+	}
+
+	raw, err := os.ReadFile(targetPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Println("no dialtone_mod tmux target configured")
+			return nil
+		}
+		return err
+	}
+	fmt.Print(strings.TrimSpace(string(raw)))
+	fmt.Println()
+	return nil
+}
+
+func locateRepoRoot() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Clean(cwd)
+	for i := 0; i < 30; i++ {
+		if dir == "" || dir == "." {
+			break
+		}
+		if _, err := os.Stat(filepath.Join(dir, "src", "mods.go")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", errors.New("cannot locate repo root")
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
 func printUsage() {
 	fmt.Println("Usage: ./dialtone_mod tmux v1 <command> [args]")
 	fmt.Println("")
@@ -214,6 +341,10 @@ func printUsage() {
 	fmt.Println("       Read trailing lines from a tmux pane (default: 10)")
 	fmt.Println("  rename [--session NAME] [--to dialtone]")
 	fmt.Println("       Rename tmux session (defaults to current/first session)")
+	fmt.Println("  shell [--pane codex-view:1:1] [--shell default|repl-v1|ssh-v1]")
+	fmt.Println("       Put the target tmux pane into the repo nix develop shell without starting Codex")
+	fmt.Println("  target [--set codex-view:1:1] [--clear]")
+	fmt.Println("       Persist or clear the default tmux pane that dialtone_mod should proxy non-control commands into")
 }
 
 func exitIfErr(err error, context string) {

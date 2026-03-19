@@ -95,7 +95,7 @@ func parseTopLevel(args []string) (string, []string, error) {
 		return "", nil, errors.New("missing mods command")
 	}
 	if strings.EqualFold(strings.TrimSpace(args[0]), "v1") {
-		return "", nil, errors.New("version must be provided by ./src/cli.go, not mods argument")
+		return "", nil, errors.New("version must be provided by ./src/mods.go, not mods argument")
 	}
 	cmd := strings.TrimSpace(args[0])
 	rest := args[1:]
@@ -1607,7 +1607,7 @@ func runSSH(node meshNode, command string) (string, error) {
 		}
 		sshArgs = append(sshArgs, "--command", command)
 
-		goArgs := append([]string{"run", "./src/cli.go"}, sshArgs...)
+		goArgs := append([]string{"run", "./src/mods.go"}, sshArgs...)
 
 		var cmd *exec.Cmd
 		if fileExists(dialtoneModPath) {

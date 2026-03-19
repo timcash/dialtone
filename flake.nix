@@ -102,7 +102,7 @@
               set -euo pipefail
               repo_root="''${DIALTONE_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
               cd "$repo_root"
-              exec go run ./src/cli.go repl v1 "$@"
+              exec go run ./src/mods.go repl v1 "$@"
             '';
           };
           sshModV1 = runtimeScript {
@@ -111,7 +111,7 @@
               set -euo pipefail
               repo_root="''${DIALTONE_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
               cd "$repo_root"
-              exec go run ./src/cli.go ssh v1 "$@"
+              exec go run ./src/mods.go ssh v1 "$@"
             '';
           };
         in

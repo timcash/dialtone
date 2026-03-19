@@ -51,6 +51,10 @@ func runStart(argv []string) error {
 	if err != nil {
 		return err
 	}
+	startCmd := buildStartCommand(repoRoot, *shellName, *reasoning, *model)
+	if isProxyActive() {
+		return runInCurrentPane(startCmd)
+	}
 	if err := ensureSession(*session, repoRoot); err != nil {
 		return err
 	}
@@ -58,7 +62,6 @@ func runStart(argv []string) error {
 	if err != nil {
 		return err
 	}
-	startCmd := buildStartCommand(repoRoot, *shellName, *reasoning, *model)
 	if err := resetPane(target); err != nil {
 		return err
 	}
@@ -74,6 +77,18 @@ func runStatus(argv []string) error {
 	session := opts.String("session", "codex-view", "tmux session name on the default tmux server")
 	if err := opts.Parse(argv); err != nil {
 		return err
+	}
+	if isProxyActive() {
+		target, err := currentPaneTarget()
+		if err != nil {
+			return err
+		}
+		out, err := tmuxOutput("display-message", "-p", "-t", target, "#{session_name}\t#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_current_path}")
+		if err != nil {
+			return err
+		}
+		fmt.Println(strings.TrimSpace(out))
+		return nil
 	}
 
 	target, err := activePaneTarget(*session)
@@ -98,7 +113,7 @@ func locateRepoRoot() (string, error) {
 		if dir == "" || dir == "." {
 			break
 		}
-		if _, err := os.Stat(filepath.Join(dir, "src", "cli.go")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, "src", "mods.go")); err == nil {
 			return dir, nil
 		}
 		parent := filepath.Dir(dir)
@@ -135,6 +150,14 @@ func activePaneTarget(session string) (string, error) {
 	return target, nil
 }
 
+func currentPaneTarget() (string, error) {
+	pane := strings.TrimSpace(os.Getenv("TMUX_PANE"))
+	if pane == "" {
+		return "", errors.New("TMUX_PANE is not set")
+	}
+	return pane, nil
+}
+
 func buildStartCommand(repoRoot, shellName, reasoning, model string) string {
 	codexCmd := buildCodexExecCommand(strings.TrimSpace(model))
 	inner := fmt.Sprintf(
@@ -163,6 +186,18 @@ func buildCodexExecCommand(model string) string {
 		args,
 		args,
 	)
+}
+
+func isProxyActive() bool {
+	return strings.TrimSpace(os.Getenv("DIALTONE_TMUX_PROXY_ACTIVE")) == "1"
+}
+
+func runInCurrentPane(command string) error {
+	cmd := exec.Command("bash", "-lc", command)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 func resetPane(target string) error {

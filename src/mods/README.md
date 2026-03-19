@@ -1,11 +1,11 @@
 # Mods System (`src/mods`)
 
 `mods` is the orchestrated command surface for Dialtone.
-It is intentionally **non-plugin based**: `src/cli.go` is the orchestrator, and each mod version is invoked as a subprocess.
+It is intentionally **non-plugin based**: `src/mods.go` is the orchestrator, and each mod version is invoked as a subprocess.
 
 ## Mod Contract
 
-- `src/cli.go` is responsible only for command routing.
+- `src/mods.go` is responsible only for command routing.
   - It resolves `./dialtone_mod <mod-name> <version> <command> [args]`.
   - It does not execute mod logic directly.
   - It launches the mod entrypoint as a subprocess (`go run <entry> ...`).
@@ -125,7 +125,7 @@ go run ./src/mods/my_mod/v1/cli help
 ## Nix + remote execution note
 
 - When `runSSH` is used internally, remote commands are now executed by running `ssh v1` through `dialtone_mod` when available, so remote execution matches local CLI behavior.
-- If `dialtone_mod` is not present on a host, fallback is `go run ./src/cli.go`, which bypasses `dialtone_mod` and may miss the pinned Nix shell behavior.
+- If `dialtone_mod` is not present on a host, fallback is `go run ./src/mods.go`, which bypasses `dialtone_mod` and may miss the pinned Nix shell behavior.
 - To avoid GitHub-backed `flake:nixpkgs` registry lookups, you can export `DIALTONE_NIXPKGS_FLAKE=<flake-ref>` before running `./dialtone_mod`.
   - Example local source: `DIALTONE_NIXPKGS_FLAKE=path:/path/to/nixpkgs ./dialtone_mod repl v1 test`
 - To force cached/offline Nix resolution after inputs are already present locally, set `DIALTONE_NIX_OFFLINE=1`.
