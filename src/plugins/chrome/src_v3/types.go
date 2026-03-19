@@ -3,6 +3,8 @@ package src_v3
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -16,6 +18,32 @@ const (
 )
 
 var errBrowserClosed = fmt.Errorf("browser is closed or unhealthy")
+
+func normalizeRole(role string) string {
+	role = strings.TrimSpace(role)
+	if role == "" {
+		return defaultRole
+	}
+	return role
+}
+
+func rolePortOffset(role string) int {
+	role = normalizeRole(role)
+	if role == defaultRole {
+		return 0
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(role))
+	return int(h.Sum32()%2000) + 1
+}
+
+func roleChromePort(role string) int {
+	return defaultChromePort + rolePortOffset(role)*2
+}
+
+func roleNATSPort(role string) int {
+	return defaultNATSPort + rolePortOffset(role)*2
+}
 
 type CommandRequest struct {
 	Command   string `json:"command"`
@@ -52,6 +80,7 @@ type CommandResponse struct {
 	StartedAt     string     `json:"started_at,omitempty"`
 	LastHealthyAt string     `json:"last_healthy_at,omitempty"`
 	LastError     string     `json:"last_error,omitempty"`
+	ProcessCount  int        `json:"process_count,omitempty"`
 	Tabs          []PageInfo `json:"tabs,omitempty"`
 	Unhealthy     bool       `json:"unhealthy,omitempty"`
 	ConsoleLines  []string   `json:"console_lines,omitempty"`

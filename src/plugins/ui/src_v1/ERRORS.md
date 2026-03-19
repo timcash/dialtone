@@ -1,9 +1,9 @@
 # Error Report
 
-- **Date**: Sun, 08 Mar 2026 10:18:03 PDT
+- **Date**: Thu, 19 Mar 2026 15:51:03 PDT
 - **Suite**: ui-src-v1
-- **Total Duration**: 982.240806ms
+- **Total Duration**: 39.532556616s
 
-- **Error Steps**: 0 / 2
+- **Error Steps**: 0 / 1
 
 No errors captured.

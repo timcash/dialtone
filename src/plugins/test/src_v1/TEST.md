@@ -1,42 +1,51 @@
 # Test Report: cad-src-v1
 
-- **Date**: Wed, 18 Mar 2026 21:46:39 PDT
-- **Total Duration**: 25.020993794s
+- **Date**: Thu, 19 Mar 2026 15:49:05 PDT
+- **Total Duration**: 27.815270754s
 
 ## Summary
 
-- **Steps**: 0 / 1 passed
-- **Status**: FAILED
+- **Steps**: 1 / 1 passed
+- **Status**: PASSED
 
 ## Details
 
-### 1. ❌ cad-ui-browser-smoke-src-v1
+### 1. ✅ cad-ui-browser-smoke-src-v1
 
-- **Duration**: 25.008534645s
-- **Error**: `cad model never reached ready state: timed out waiting for aria-label "CAD Stage" attr "data-model-state"="ready"`
+- **Duration**: 27.099309989s
+- **Report**: CAD UI loaded in chrome src_v3 with no browser exceptions and STL model reached ready state
 
 #### Logs
 
 ```text
-INFO: cad browser smoke server ready at http://127.0.0.1:43397
+INFO: cad browser smoke server ready at http://127.0.0.1:42935
 WARN: ERROR_PING: skipped for chrome src_v3 NATS-managed browser session
-```
-
-#### Errors
-
-```text
-FAIL: [TEST][FAIL] [STEP:cad-ui-browser-smoke-src-v1] failed: cad model never reached ready state: timed out waiting for aria-label "CAD Stage" attr "data-model-state"="ready"
+INFO: report: CAD UI loaded in chrome src_v3 with no browser exceptions and STL model reached ready state
+PASS: [TEST][PASS] [STEP:cad-ui-browser-smoke-src-v1] report: CAD UI loaded in chrome src_v3 with no browser exceptions and STL model reached ready state
 ```
 
 #### Browser Logs
 
 ```text
-<empty>
+INFO: CONSOLE:log: "[SectionManager] NAVIGATING TO #cad-three-stage"
+INFO: CONSOLE:log: "[SectionManager] LOADING #cad-three-stage"
+INFO: CONSOLE:log: "[SectionManager] ctl.load() RESOLVED for #cad-three-stage"
+INFO: CONSOLE:log: "[SectionManager] LOADED #cad-three-stage"
+INFO: CONSOLE:log: "[SectionManager] START #cad-three-stage"
+INFO: CONSOLE:log: "[SectionManager] Setting data-ready=true on #cad-three-stage"
+INFO: CONSOLE:log: "[SectionManager] NAVIGATE TO #cad-three-stage"
+INFO: CONSOLE:log: "[SectionManager] RESUME #cad-three-stage"
+INFO: CONSOLE:log: "cad-model-ready:1"
+INFO: CONSOLE:log: "cad-model-ready:2"
+INFO: CONSOLE:log: "cad-model-ready:3"
+INFO: CONSOLE:log: "cad-model-ready:4"
+INFO: CONSOLE:log: "cad-model-ready:5"
 ```
 
 #### Screenshots
 
 ![auto_cad-ui-browser-smoke-src-v1.png](screenshots/auto_cad-ui-browser-smoke-src-v1.png)
+![cad_ui_browser_smoke.png](screenshots/cad_ui_browser_smoke.png)
 
 ---
 
@@ -45,19 +54,22 @@ FAIL: [TEST][FAIL] [STEP:cad-ui-browser-smoke-src-v1] failed: cad model never re
 ## Chrome Report
 
 - hostnode: `legion`
-- chrome_count: `10`
+- chrome_count: `13`
 
 | PID | ROLE | PORT |
 | --- | --- | --- |
-| 2412 | `unlabeled` | 19464 |
-| 6928 | `unlabeled` | 19464 |
-| 9592 | `unlabeled` | 19464 |
-| 10452 | `unlabeled` | 19464 |
-| 11364 | `cad-smoke` | 19464 |
-| 12412 | `unlabeled` | 19464 |
-| 13336 | `unlabeled` | 19464 |
-| 16608 | `unlabeled` | 19464 |
-| 19084 | `unlabeled` | 19464 |
-| 19736 | `dev` | 19464 |
+| 1148 | `unlabeled` | 21944 |
+| 2996 | `cad-smoke` | 21944 |
+| 3084 | `unlabeled` | 22602 |
+| 4296 | `dev-isolated` | 22602 |
+| 5956 | `unlabeled` | 21944 |
+| 10076 | `unlabeled` | 21944 |
+| 11952 | `unlabeled` | 22602 |
+| 14156 | `dev` | 19464 |
+| 14500 | `unlabeled` | 19464 |
+| 17200 | `unlabeled` | 21944 |
+| 17492 | `unlabeled` | 19464 |
+| 19132 | `unlabeled` | 19464 |
+| 19640 | `unlabeled` | 22602 |
 
 <!-- DIALTONE_CHROME_REPORT_END -->
