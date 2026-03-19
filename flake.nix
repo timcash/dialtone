@@ -10,11 +10,56 @@
       mkPerSystem = system:
         let
           pkgs = import nixpkgs { inherit system; };
+          baseDevPackages = with pkgs; [
+            bash curl git gh go_1_24 gnumake nodejs bun tmux zsh cloudflared
+          ] ++ (pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs.darwin.apple_sdk.frameworks; [
+            Security
+            CoreFoundation
+            IOKit
+          ]));
+          mkShellHook = shellName: ''
+            export DIALTONE_REPO_ROOT="''${DIALTONE_REPO_ROOT:-$(pwd)}"
+            export DIALTONE_NIX_ACTIVE=1
+            export DIALTONE_NIX_SHELL="${shellName}"
+            export DIALTONE_SSH_CONFIG="$DIALTONE_REPO_ROOT/env/ssh_config"
+            export DIALTONE_NIX_BASE_PATH="$PATH"
+            export DIALTONE_GO_BIN="$(PATH="$DIALTONE_NIX_BASE_PATH" command -v go)"
+            if PATH="$DIALTONE_NIX_BASE_PATH" command -v ssh >/dev/null 2>&1; then
+              export DIALTONE_SSH_BIN="$(PATH="$DIALTONE_NIX_BASE_PATH" command -v ssh)"
+            else
+              unset DIALTONE_SSH_BIN || true
+            fi
+            export PATH="$DIALTONE_REPO_ROOT/bin:$PATH"
+
+            if [ -n "$ZSH_VERSION" ]; then
+              fpath=($ZSH/functions $ZSH/scripts $fpath)
+              autoload -U compinit && compinit -u
+              zstyle ':completion:*' menu select
+              setopt MENU_COMPLETE
+              bindkey '^I' expand-or-complete
+            fi
+
+            echo "DIALTONE> nix-shell active (${shellName})"
+          '';
+          mkDevShell = { shellName, extraPackages ? [ ] }:
+            pkgs.mkShell {
+              packages = baseDevPackages ++ extraPackages;
+              shellHook = mkShellHook shellName;
+            };
           runtimeScript = { name, text, inputs ? [ ] }:
             pkgs.writeShellApplication {
               inherit name text;
               runtimeInputs = with pkgs; [ bash git go_1_24 ] ++ inputs;
             };
+          dialtoneMod = runtimeScript {
+            name = "dialtone-mod";
+            text = ''
+              set -euo pipefail
+              repo_root="''${DIALTONE_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+              cd "$repo_root"
+              exec ./dialtone_mod "$@"
+            '';
+          };
           robotServer = runtimeScript {
             name = "dialtone-robot-server";
             text = ''
@@ -60,16 +105,31 @@
               exec go run ./src/cli.go repl v1 "$@"
             '';
           };
+          sshModV1 = runtimeScript {
+            name = "dialtone-ssh-v1";
+            text = ''
+              set -euo pipefail
+              repo_root="''${DIALTONE_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+              cd "$repo_root"
+              exec go run ./src/cli.go ssh v1 "$@"
+            '';
+          };
         in
         {
           packages = {
+            dialtone-mod = dialtoneMod;
             robot-server = robotServer;
             camera-service = cameraService;
             mavlink-service = mavlinkService;
             repl-service = replService;
             repl-v1 = replModV1;
+            ssh-v1 = sshModV1;
           };
           apps = {
+            dialtone-mod = {
+              type = "app";
+              program = "${dialtoneMod}/bin/dialtone-mod";
+            };
             robot-server = {
               type = "app";
               program = "${robotServer}/bin/dialtone-robot-server";
@@ -90,33 +150,22 @@
               type = "app";
               program = "${replModV1}/bin/dialtone-repl-v1";
             };
+            ssh-v1 = {
+              type = "app";
+              program = "${sshModV1}/bin/dialtone-ssh-v1";
+            };
           };
           devShells = {
-            default = pkgs.mkShell {
-              packages = with pkgs; [
-                bash curl git gh openssh go_1_24 gnumake nodejs bun tmux zsh cloudflared
-              ] ++ (pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs.darwin.apple_sdk.frameworks; [
-                Security
-                CoreFoundation
-                IOKit
-              ]));
-              shellHook = ''
-                export DIALTONE_REPO_ROOT=$(pwd)
-                export PATH="$DIALTONE_REPO_ROOT/bin:$PATH"
-                export DIALTONE_SSH_CONFIG="$DIALTONE_REPO_ROOT/env/ssh_config"
-
-                # Initialize completions and set up cycling if in ZSH
-                if [ -n "$ZSH_VERSION" ]; then
-                  fpath=($ZSH/functions $ZSH/scripts $fpath)
-                  autoload -U compinit && compinit -u
-                  zstyle ':completion:*' menu select
-                  setopt MENU_COMPLETE
-                  bindkey '^I' expand-or-complete
-                fi
-
-                export DIALTONE_NIX_ACTIVE=1
-                echo "DIALTONE> nix-shell active"
-              '';
+            default = mkDevShell {
+              shellName = "default";
+              extraPackages = [ pkgs.openssh ];
+            };
+            repl-v1 = mkDevShell {
+              shellName = "repl-v1";
+            };
+            ssh-v1 = mkDevShell {
+              shellName = "ssh-v1";
+              extraPackages = [ pkgs.openssh ];
             };
           };
         };
