@@ -4,7 +4,33 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${DIALTONE_REPO_ROOT:-$SCRIPT_DIR}"
 USE_NIX="${DIALTONE_USE_NIX:-1}"
+NIXPKGS_FLAKE_REF="${DIALTONE_NIXPKGS_FLAKE:-${NIXPKGS_FLAKE:-nixpkgs}}"
 declare -a DIALTONE_NIX_PACKAGES=()
+
+rewrite_nix_package_ref() {
+  local pkg="${1:-}"
+  if [[ "$pkg" == nixpkgs#* ]] && [ "$NIXPKGS_FLAKE_REF" != "nixpkgs" ]; then
+    printf '%s#%s' "$NIXPKGS_FLAKE_REF" "${pkg#nixpkgs#}"
+    return
+  fi
+  printf '%s' "$pkg"
+}
+
+resolve_flake_shell() {
+  local mod="${1:-}"
+  local version="${2:-}"
+  case "${mod}:${version}" in
+    "repl:v1")
+      printf '%s' "repl-v1"
+      ;;
+    "ssh:v1")
+      printf '%s' "ssh-v1"
+      ;;
+    *)
+      printf '%s' ""
+      ;;
+  esac
+}
 
 if [ ! -f "$REPO_ROOT/src/cli.go" ]; then
   echo "DIALTONE> src/cli.go not found under $REPO_ROOT" >&2
@@ -21,6 +47,7 @@ add_nix_package() {
   if [ -z "$pkg" ]; then
     return
   fi
+  pkg="$(rewrite_nix_package_ref "$pkg")"
   local existing=""
   for existing in "${DIALTONE_NIX_PACKAGES[@]:-}"; do
     if [ "$existing" = "$pkg" ]; then
@@ -99,20 +126,51 @@ join_nix_package_sig() {
 
 load_mod_nix_packages "${1:-}" "${2:-}"
 NIX_PACKAGE_SIG="$(join_nix_package_sig)"
+FLAKE_SHELL="$(resolve_flake_shell "${1:-}" "${2:-}")"
 
-if [ "$USE_NIX" != "0" ] && { [ "${DIALTONE_NIX_ACTIVE:-0}" != "1" ] || [ "${DIALTONE_NIX_PACKAGES_SIG:-}" != "$NIX_PACKAGE_SIG" ]; }; then
+if [ "$USE_NIX" != "0" ] && [ -n "$FLAKE_SHELL" ] && { [ "${DIALTONE_NIX_ACTIVE:-0}" != "1" ] || [ "${DIALTONE_NIX_SHELL:-}" != "$FLAKE_SHELL" ]; }; then
   if ! command -v nix >/dev/null 2>&1; then
     echo "DIALTONE> nix is required for dialtone_mod (set DIALTONE_USE_NIX=0 to bypass)" >&2
     exit 1
   fi
+  NIX_ARGS=()
+  if [ "${DIALTONE_NIX_OFFLINE:-0}" = "1" ]; then
+    NIX_ARGS+=(--offline)
+  fi
   exec nix \
+    "${NIX_ARGS[@]}" \
+    --extra-experimental-features "nix-command flakes" \
+    develop "path:$REPO_ROOT#$FLAKE_SHELL" \
+    --command env \
+      DIALTONE_NIX_ACTIVE=1 \
+      DIALTONE_NIX_SHELL="$FLAKE_SHELL" \
+      DIALTONE_REPO_ROOT="$REPO_ROOT" \
+      DIALTONE_NIX_OFFLINE="${DIALTONE_NIX_OFFLINE:-0}" \
+      DIALTONE_USE_NIX="$USE_NIX" \
+      "$REPO_ROOT/dialtone_mod" "$@"
+fi
+
+if [ "$USE_NIX" != "0" ] && [ -z "$FLAKE_SHELL" ] && { [ "${DIALTONE_NIX_ACTIVE:-0}" != "1" ] || [ "${DIALTONE_NIX_PACKAGES_SIG:-}" != "$NIX_PACKAGE_SIG" ]; }; then
+  if ! command -v nix >/dev/null 2>&1; then
+    echo "DIALTONE> nix is required for dialtone_mod (set DIALTONE_USE_NIX=0 to bypass)" >&2
+    exit 1
+  fi
+  NIX_ARGS=()
+  if [ "${DIALTONE_NIX_OFFLINE:-0}" = "1" ]; then
+    NIX_ARGS+=(--offline)
+  fi
+  exec nix \
+    "${NIX_ARGS[@]}" \
     --extra-experimental-features "nix-command flakes" \
     shell \
     "${DIALTONE_NIX_PACKAGES[@]}" \
     --command env \
       DIALTONE_NIX_ACTIVE=1 \
       DIALTONE_NIX_PACKAGES_SIG="$NIX_PACKAGE_SIG" \
+      DIALTONE_NIXPKGS_FLAKE="$NIXPKGS_FLAKE_REF" \
+      NIXPKGS_FLAKE="$NIXPKGS_FLAKE_REF" \
       DIALTONE_REPO_ROOT="$REPO_ROOT" \
+      DIALTONE_NIX_OFFLINE="${DIALTONE_NIX_OFFLINE:-0}" \
       DIALTONE_USE_NIX="$USE_NIX" \
       "$REPO_ROOT/dialtone_mod" "$@"
 fi

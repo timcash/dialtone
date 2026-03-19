@@ -46,12 +46,15 @@ func TestSSHParseArgsPositionalHost(t *testing.T) {
 	}
 }
 
+func TestSSHParseArgsRejectsNixpkgsURL(t *testing.T) {
+	_, err := parseArgs([]string{"--host", "gold", "--nixpkgs-url", "nix://example"})
+	if err == nil || !strings.Contains(err.Error(), "no longer supported") {
+		t.Fatalf("expected nixpkgs-url rejection, got %v", err)
+	}
+}
+
 func TestSSHParseArgsHostFallbackFromRunPrefix(t *testing.T) {
 	tmp := t.TempDir()
-	nixPath := filepath.Join(tmp, "fake-nix")
-	if err := os.WriteFile(nixPath, []byte("#!/bin/sh\necho test\n"), 0o755); err != nil {
-		t.Fatalf("write fake nix failed: %v", err)
-	}
 	meshPath := filepath.Join(tmp, "env", "mesh.json")
 
 	if err := os.MkdirAll(filepath.Dir(meshPath), 0o755); err != nil {
@@ -64,13 +67,16 @@ func TestSSHParseArgsHostFallbackFromRunPrefix(t *testing.T) {
 		t.Fatalf("write mesh config failed: %v", err)
 	}
 
-	oldNixBin := os.Getenv("NIX_BIN")
 	oldRepoRoot := os.Getenv("DIALTONE_REPO_ROOT")
-	_ = os.Setenv("NIX_BIN", nixPath)
+	oldActive := os.Getenv("DIALTONE_NIX_ACTIVE")
+	oldSSHBin := os.Getenv("DIALTONE_SSH_BIN")
 	_ = os.Setenv("DIALTONE_REPO_ROOT", tmp)
+	_ = os.Setenv("DIALTONE_NIX_ACTIVE", "1")
+	_ = os.Setenv("DIALTONE_SSH_BIN", "/nix/store/test-openssh/bin/ssh")
 	defer func() {
-		_ = os.Setenv("NIX_BIN", oldNixBin)
 		_ = os.Setenv("DIALTONE_REPO_ROOT", oldRepoRoot)
+		_ = os.Setenv("DIALTONE_NIX_ACTIVE", oldActive)
+		_ = os.Setenv("DIALTONE_SSH_BIN", oldSSHBin)
 	}()
 
 	output := captureStdout(t, func() {
@@ -78,7 +84,7 @@ func TestSSHParseArgsHostFallbackFromRunPrefix(t *testing.T) {
 			t.Fatalf("run with run-prefix failed: %v", err)
 		}
 	})
-	if !strings.Contains(output, "nix command:") {
+	if !strings.Contains(output, "command:") {
 		t.Fatalf("run with run prefix did not emit dry-run command: %q", output)
 	}
 }
@@ -108,50 +114,72 @@ func TestSSHBuildCommandUsesNodeDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseArgs failed: %v", err)
 	}
-	oldNixBin := os.Getenv("NIX_BIN")
-	_ = os.Setenv("NIX_BIN", "/opt/nix/bin/nix")
-	defer func() {
-		_ = os.Setenv("NIX_BIN", oldNixBin)
-	}()
-
-	cmd, err := buildSSHCommand(opts, node)
-	if err != nil {
-		t.Fatalf("buildSSHCommand failed: %v", err)
-	}
-	if got := strings.Join(cmd.Args, " "); !strings.Contains(got, "-p 2223") {
-		t.Fatalf("expected port 2223 from mesh node, got args %q", got)
-	}
-	if !strings.HasSuffix(strings.TrimSpace(cmd.Args[len(cmd.Args)-1]), "@example.com") {
-		t.Fatalf("expected default user target, got target arg %q", cmd.Args[len(cmd.Args)-1])
-	}
+	withShellSSH(t, "/nix/store/test-openssh/bin/ssh", func() {
+		cmd, err := buildSSHCommand(opts, node)
+		if err != nil {
+			t.Fatalf("buildSSHCommand failed: %v", err)
+		}
+		if cmd.Path != "/nix/store/test-openssh/bin/ssh" {
+			t.Fatalf("expected nix shell ssh path, got %q", cmd.Path)
+		}
+		if got := strings.Join(cmd.Args, " "); !strings.Contains(got, "-p 2223") {
+			t.Fatalf("expected port 2223 from mesh node, got args %q", got)
+		}
+		if !strings.HasSuffix(strings.TrimSpace(cmd.Args[len(cmd.Args)-1]), "@example.com") {
+			t.Fatalf("expected default user target, got target arg %q", cmd.Args[len(cmd.Args)-1])
+		}
+	})
 }
 
 func TestSSHBuildCommandRespectsOverrides(t *testing.T) {
 	node := meshNode{Name: "gold", Host: "example.com", User: "user", Port: "2223"}
-	opts, err := parseArgs([]string{"--host", "gold", "--user", "alice", "--port", "2200", "--command", "echo hi", "--nixpkgs-url", "nix://example"})
+	opts, err := parseArgs([]string{"--host", "gold", "--user", "alice", "--port", "2200", "--command", "echo hi"})
 	if err != nil {
 		t.Fatalf("parseArgs failed: %v", err)
 	}
-	oldNixBin := os.Getenv("NIX_BIN")
-	_ = os.Setenv("NIX_BIN", "/opt/nix/bin/nix")
-	defer func() {
-		_ = os.Setenv("NIX_BIN", oldNixBin)
-	}()
+	withShellSSH(t, "/nix/store/test-openssh/bin/ssh", func() {
+		cmd, err := buildSSHCommand(opts, node)
+		if err != nil {
+			t.Fatalf("buildSSHCommand failed: %v", err)
+		}
+		joined := strings.Join(cmd.Args, " ")
+		if !strings.Contains(joined, "-p 2200") {
+			t.Fatalf("expected CLI port override to win, got %q", joined)
+		}
+		if !strings.HasSuffix(strings.TrimSpace(cmd.Args[len(cmd.Args)-2]), "alice@example.com") {
+			t.Fatalf("expected CLI user override, got %q", cmd.Args[len(cmd.Args)-2])
+		}
+		if got := cmd.Args[len(cmd.Args)-1]; got != "echo hi" {
+			t.Fatalf("expected command arg, got %q", got)
+		}
+	})
+}
 
-	cmd, err := buildSSHCommand(opts, node)
-	if err != nil {
-		t.Fatalf("buildSSHCommand failed: %v", err)
+func TestSSHBuildCommandRequiresNixShellSSH(t *testing.T) {
+	node := meshNode{Name: "gold", Host: "example.com", User: "user", Port: "2223"}
+	oldActive := os.Getenv("DIALTONE_NIX_ACTIVE")
+	oldSSHBin := os.Getenv("DIALTONE_SSH_BIN")
+	defer func() {
+		_ = os.Setenv("DIALTONE_NIX_ACTIVE", oldActive)
+		_ = os.Setenv("DIALTONE_SSH_BIN", oldSSHBin)
+	}()
+	_ = os.Setenv("DIALTONE_NIX_ACTIVE", "")
+	_ = os.Setenv("DIALTONE_SSH_BIN", "")
+
+	_, err := buildSSHCommand(sshOptions{}, node)
+	if err == nil || !strings.Contains(err.Error(), "must run inside the Dialtone nix shell") {
+		t.Fatalf("expected nix shell requirement error, got %v", err)
 	}
-	joined := strings.Join(cmd.Args, " ")
-	if !strings.Contains(joined, "-p 2200") {
-		t.Fatalf("expected CLI port override to win, got %q", joined)
-	}
-	if !strings.HasSuffix(strings.TrimSpace(cmd.Args[len(cmd.Args)-2]), "alice@example.com") {
-		t.Fatalf("expected CLI user override, got %q", cmd.Args[len(cmd.Args)-2])
-	}
-	if got := cmd.Args[len(cmd.Args)-1]; got != "echo hi" {
-		t.Fatalf("expected command arg, got %q", got)
-	}
+}
+
+func TestSSHBuildCommandRejectsHostSSHPath(t *testing.T) {
+	node := meshNode{Name: "gold", Host: "example.com", User: "user", Port: "2223"}
+	withShellSSH(t, "/usr/bin/ssh", func() {
+		_, err := buildSSHCommand(sshOptions{}, node)
+		if err == nil || !strings.Contains(err.Error(), "requires nix-provided ssh") {
+			t.Fatalf("expected nix-provided ssh error, got %v", err)
+		}
+	})
 }
 
 func TestSSHBuildCommandPrefersTailnetHostCandidate(t *testing.T) {
@@ -162,82 +190,22 @@ func TestSSHBuildCommandPrefersTailnetHostCandidate(t *testing.T) {
 		User:           "user",
 		Port:           "22",
 	}
-	oldNixBin := os.Getenv("NIX_BIN")
-	_ = os.Setenv("NIX_BIN", "/opt/nix/bin/nix")
-	defer func() {
-		_ = os.Setenv("NIX_BIN", oldNixBin)
-	}()
-
-	cmd, err := buildSSHCommand(sshOptions{}, node)
-	if err != nil {
-		t.Fatalf("buildSSHCommand failed: %v", err)
-	}
-	if !strings.HasSuffix(cmd.Args[len(cmd.Args)-1], "user@gold.shad-artichoke.ts.net") {
-		t.Fatalf("expected tailnet host to be selected first, got target %q", cmd.Args[len(cmd.Args)-1])
-	}
-}
-
-func TestSSHLocateNixBinaryEnvOverride(t *testing.T) {
-	tmp := t.TempDir()
-	fakeNix := filepath.Join(tmp, "nix")
-	if err := os.WriteFile(fakeNix, []byte("#!/bin/sh\necho test\n"), 0o755); err != nil {
-		t.Fatalf("write fake nix failed: %v", err)
-	}
-
-	old := os.Getenv("NIX_BIN")
-	_ = os.Setenv("NIX_BIN", fakeNix)
-	defer func() { _ = os.Setenv("NIX_BIN", old) }()
-
-	got, err := locateNixBinary()
-	if err != nil {
-		t.Fatalf("locateNixBinary env override failed: %v", err)
-	}
-	if got != fakeNix {
-		t.Fatalf("expected %q, got %q", fakeNix, got)
-	}
-}
-
-func TestSSHLocateNixBinaryHomeFallback(t *testing.T) {
-	tmp := t.TempDir()
-	fakeHome := filepath.Join(tmp, "home")
-	nixPath := filepath.Join(fakeHome, ".nix-profile/bin/nix")
-	if err := os.MkdirAll(filepath.Dir(nixPath), 0o755); err != nil {
-		t.Fatalf("mkdir home profile failed: %v", err)
-	}
-	if err := os.WriteFile(nixPath, []byte("#!/bin/sh\necho test\n"), 0o755); err != nil {
-		t.Fatalf("write fallback nix failed: %v", err)
-	}
-
-	oldHome := os.Getenv("HOME")
-	oldPath := os.Getenv("PATH")
-	oldNix := os.Getenv("NIX_BIN")
-	_ = os.Setenv("HOME", fakeHome)
-	_ = os.Setenv("NIX_BIN", "")
-	_ = os.Setenv("PATH", tmp)
-	defer func() {
-		_ = os.Setenv("HOME", oldHome)
-		_ = os.Setenv("PATH", oldPath)
-		_ = os.Setenv("NIX_BIN", oldNix)
-	}()
-
-	got, err := locateNixBinary()
-	if err != nil {
-		t.Fatalf("locateNixBinary fallback failed: %v", err)
-	}
-	if got != nixPath {
-		t.Fatalf("expected fallback %q, got %q", nixPath, got)
-	}
+	withShellSSH(t, "/nix/store/test-openssh/bin/ssh", func() {
+		cmd, err := buildSSHCommand(sshOptions{}, node)
+		if err != nil {
+			t.Fatalf("buildSSHCommand failed: %v", err)
+		}
+		if !strings.HasSuffix(cmd.Args[len(cmd.Args)-1], "user@gold.shad-artichoke.ts.net") {
+			t.Fatalf("expected tailnet host to be selected first, got target %q", cmd.Args[len(cmd.Args)-1])
+		}
+	})
 }
 
 func TestSSHDryRunDoesNotExecute(t *testing.T) {
 	tmp := t.TempDir()
-	nixPath := filepath.Join(tmp, "fake-nix")
-	if err := os.WriteFile(nixPath, []byte("#!/bin/sh\necho test\n"), 0o755); err != nil {
-		t.Fatalf("write fake nix failed: %v", err)
-	}
-
-	oldNixBin := os.Getenv("NIX_BIN")
 	oldRepoRoot := os.Getenv("DIALTONE_REPO_ROOT")
+	oldActive := os.Getenv("DIALTONE_NIX_ACTIVE")
+	oldSSHBin := os.Getenv("DIALTONE_SSH_BIN")
 	oldRunner := execRunner
 
 	if err := os.MkdirAll(filepath.Join(tmp, "env"), 0o755); err != nil {
@@ -256,11 +224,13 @@ func TestSSHDryRunDoesNotExecute(t *testing.T) {
 		return nil
 	}
 
-	_ = os.Setenv("NIX_BIN", nixPath)
 	_ = os.Setenv("DIALTONE_REPO_ROOT", tmp)
+	_ = os.Setenv("DIALTONE_NIX_ACTIVE", "1")
+	_ = os.Setenv("DIALTONE_SSH_BIN", "/nix/store/test-openssh/bin/ssh")
 	defer func() {
-		_ = os.Setenv("NIX_BIN", oldNixBin)
 		_ = os.Setenv("DIALTONE_REPO_ROOT", oldRepoRoot)
+		_ = os.Setenv("DIALTONE_NIX_ACTIVE", oldActive)
+		_ = os.Setenv("DIALTONE_SSH_BIN", oldSSHBin)
 		execRunner = oldRunner
 	}()
 
@@ -272,9 +242,22 @@ func TestSSHDryRunDoesNotExecute(t *testing.T) {
 	if executed {
 		t.Fatal("dry-run should not execute command")
 	}
-	if !strings.Contains(output, "nix command:") || !strings.Contains(output, "echo hi") {
+	if !strings.Contains(output, "command:") || !strings.Contains(output, "echo hi") {
 		t.Fatalf("dry-run output missing expected content: %q", output)
 	}
+}
+
+func withShellSSH(t *testing.T, sshBin string, fn func()) {
+	t.Helper()
+	oldActive := os.Getenv("DIALTONE_NIX_ACTIVE")
+	oldSSHBin := os.Getenv("DIALTONE_SSH_BIN")
+	_ = os.Setenv("DIALTONE_NIX_ACTIVE", "1")
+	_ = os.Setenv("DIALTONE_SSH_BIN", sshBin)
+	defer func() {
+		_ = os.Setenv("DIALTONE_NIX_ACTIVE", oldActive)
+		_ = os.Setenv("DIALTONE_SSH_BIN", oldSSHBin)
+	}()
+	fn()
 }
 
 func captureStdout(t *testing.T, fn func()) string {

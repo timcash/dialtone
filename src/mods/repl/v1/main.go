@@ -169,7 +169,7 @@ func parseLogsConfig(args []string) (LogsConfig, error) {
 }
 
 func printUsage() {
-	fmt.Println("Usage: go run ./src/cli.go repl v1 <command> [args]")
+	fmt.Println("Usage: ./dialtone_mod repl v1 <command> [args]")
 	fmt.Println("")
 	fmt.Println("Commands:")
 	fmt.Println("  run [--name NAME] [--room ROOM] [--log-file PATH] [--once TEXT]")

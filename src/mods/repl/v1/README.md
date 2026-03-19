@@ -5,9 +5,16 @@ Minimal local REPL mod scaffold.
 Run it through the repo CLI:
 
 ```bash
-nix develop --command go run ./src/cli.go repl v1 run
-nix develop --command go run ./src/cli.go repl v1 run --once "hello"
-nix develop --command go run ./src/cli.go repl v1 logs --tail 20
+./dialtone_mod repl v1 run
+./dialtone_mod repl v1 run --once "hello"
+./dialtone_mod repl v1 logs --tail 20
+```
+
+Or enter the focused flake shell first:
+
+```bash
+nix develop .#repl-v1
+./dialtone_mod repl v1 test
 ```
 
 Files stay local to this mod:
