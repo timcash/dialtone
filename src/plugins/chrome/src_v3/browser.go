@@ -53,6 +53,11 @@ func (d *daemonState) ensureBrowser() error {
 	d.mu.Unlock()
 
 	if pid > 0 && d.isBrowserAlive(pid, port) {
+		if runtime.GOOS == "windows" {
+			if err := ensureSingleChromeProcessForRole(d.role, d.profileDir, d.chromePort, pid); err != nil {
+				logs.Error("chrome src_v3 failed to prune duplicate browsers: %v", err)
+			}
+		}
 		if !hasAlloc || unexpected != nil {
 			if err := d.attachToRunningBrowser(); err == nil {
 				if !hasTab {
@@ -79,18 +84,39 @@ func (d *daemonState) ensureBrowser() error {
 			}
 			return nil
 		}
-		logs.Error("chrome src_v3 detected browser death, marking unhealthy")
+		logs.Error("chrome src_v3 detected browser death, clearing stale session and restarting")
 		d.mu.Lock()
-		d.unexpectedErr = fmt.Errorf("browser process or port lost")
-		err := d.unexpectedErr
+		cancelAlloc := d.cancelAlloc
+		cancelTab := d.cancelTab
+		d.allocCtx = nil
+		d.cancelAlloc = nil
+		d.tabCtx = nil
+		d.cancelTab = nil
+		d.browserPID = 0
+		d.browserWS = ""
+		d.currentURL = ""
+		d.managedTarget = ""
+		d.consoleLines = nil
+		d.unexpectedErr = nil
+		d.intentionalStop = false
 		d.mu.Unlock()
-		return fmt.Errorf("browser connection unhealthy: %w", err)
+		if cancelTab != nil {
+			cancelTab()
+		}
+		if cancelAlloc != nil {
+			cancelAlloc()
+		}
+		d.persistState()
+	} else {
+		d.mu.Unlock()
 	}
-	d.mu.Unlock()
 
 	if runtime.GOOS == "windows" {
 		if err := cleanupChromeProfileLocks(d.profileDir); err != nil {
 			logs.Error("chrome src_v3 failed to clean profile locks: %v", err)
+		}
+		if err := ensureSingleChromeProcessForRole(d.role, d.profileDir, d.chromePort, 0); err != nil {
+			logs.Error("chrome src_v3 failed to clear duplicate browsers before start: %v", err)
 		}
 	}
 
@@ -119,6 +145,9 @@ func (d *daemonState) ensureBrowser() error {
 			d.mu.Lock()
 			d.browserPID = actualPID
 			d.mu.Unlock()
+			if err := ensureSingleChromeProcessForRole(d.role, d.profileDir, d.chromePort, actualPID); err != nil {
+				logs.Error("chrome src_v3 failed to prune duplicate browsers after start: %v", err)
+			}
 		} else {
 			_ = killPID(pid)
 			return fmt.Errorf("failed to detect real chrome browser process on port %d", d.chromePort)
@@ -204,6 +233,11 @@ func (d *daemonState) attachToRunningBrowser() error {
 		d.mu.Lock()
 		d.browserPID = actualPID
 		d.mu.Unlock()
+		if runtime.GOOS == "windows" {
+			if err := ensureSingleChromeProcessForRole(d.role, d.profileDir, d.chromePort, actualPID); err != nil {
+				logs.Error("chrome src_v3 failed to prune duplicate browsers after attach: %v", err)
+			}
+		}
 	}
 	d.persistState()
 	return nil
@@ -383,32 +417,13 @@ func (d *daemonState) closeBrowser() error {
 
 func (d *daemonState) resetSession() error {
 	d.mu.Lock()
-	d.consoleLines = nil
-	d.currentURL = "about:blank"
 	d.unexpectedErr = nil
-	hasBrowser := d.browserPID > 0 && d.isBrowserAlive(d.browserPID, d.chromePort)
-	hasAlloc := d.allocCtx != nil
+	d.consoleLines = nil
 	d.mu.Unlock()
-	if hasBrowser && hasAlloc {
-		if err := d.recreateManagedTab(); err == nil {
-			d.persistState()
-			return nil
-		}
-	}
-	if hasBrowser {
-		if err := d.attachToRunningBrowser(); err == nil {
-			if err := d.recreateManagedTab(); err == nil {
-				d.persistState()
-				return nil
-			}
-		}
-	}
-	if runtime.GOOS == "windows" {
-		if err := cleanupChromeProfileLocks(d.profileDir); err != nil {
-			logs.Error("chrome src_v3 reset cleanup failed: %v", err)
-		}
-	}
 	if err := d.ensureBrowser(); err != nil {
+		return err
+	}
+	if err := d.navigateManaged("about:blank"); err != nil {
 		return err
 	}
 	d.persistState()

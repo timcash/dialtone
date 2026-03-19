@@ -94,10 +94,7 @@ func waitForLocalNATS(role string, timeout time.Duration) error {
 }
 
 func startLocalService(role string) error {
-	role = strings.TrimSpace(role)
-	if role == "" {
-		role = defaultRole
-	}
+	role = normalizeRole(role)
 	if localServiceRunning(role) {
 		return nil
 	}
@@ -120,7 +117,7 @@ func startLocalService(role string) error {
 	}
 	defer stderr.Close()
 
-	cmd := exec.Command(bin, "src_v3", "daemon", "--role", role, "--chrome-port", strconv.Itoa(defaultChromePort), "--nats-port", strconv.Itoa(defaultNATSPort))
+	cmd := exec.Command(bin, "src_v3", "daemon", "--role", role, "--chrome-port", strconv.Itoa(roleChromePort(role)), "--nats-port", strconv.Itoa(roleNATSPort(role)))
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	prepareBackgroundCommand(cmd)
@@ -138,10 +135,7 @@ func startLocalService(role string) error {
 }
 
 func stopLocalService(role string) error {
-	role = strings.TrimSpace(role)
-	if role == "" {
-		role = defaultRole
-	}
+	role = normalizeRole(role)
 	if resp, err := sendLocalCommand(commandRequest{Command: "status", Role: role}); err == nil {
 		if resp.BrowserPID > 0 {
 			_ = killPID(resp.BrowserPID)
@@ -158,10 +152,7 @@ func stopLocalService(role string) error {
 }
 
 func ensureLocalService(role string) error {
-	role = strings.TrimSpace(role)
-	if role == "" {
-		role = defaultRole
-	}
+	role = normalizeRole(role)
 	if _, err := sendLocalCommand(commandRequest{Command: "status", Role: role}); err == nil {
 		return nil
 	}
@@ -169,10 +160,8 @@ func ensureLocalService(role string) error {
 }
 
 func sendLocalCommand(req commandRequest) (*commandResponse, error) {
-	if strings.TrimSpace(req.Role) == "" {
-		req.Role = defaultRole
-	}
-	nc, err := nats.Connect(fmt.Sprintf("nats://127.0.0.1:%d", defaultNATSPort), nats.Timeout(defaultTimeout))
+	req.Role = normalizeRole(req.Role)
+	nc, err := nats.Connect(fmt.Sprintf("nats://127.0.0.1:%d", roleNATSPort(req.Role)), nats.Timeout(defaultTimeout))
 	if err != nil {
 		return nil, err
 	}
@@ -300,7 +289,7 @@ func readTargetLogs(host, role string, lines int) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	return readRemoteLogs(node, lines)
+	return readRemoteLogs(node, role, lines)
 }
 
 func doctorTarget(host, role string) error {

@@ -3,6 +3,8 @@ package repl
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,7 +83,7 @@ func writeLeaderState(st LeaderState) error {
 func buildLeaderState(usedURL, tsnetURL, room, hostName, serverID string, embedded bool, startedAt time.Time) LeaderState {
 	st := LeaderState{
 		PID:           os.Getpid(),
-		NATSURL:       strings.TrimSpace(usedURL),
+		NATSURL:       leaderClientNATSURL(usedURL),
 		TSNetNATSURL:  strings.TrimSpace(tsnetURL),
 		Room:          sanitizeRoom(room),
 		HostName:      normalizePromptName(hostName),
@@ -103,6 +105,27 @@ func buildLeaderState(usedURL, tsnetURL, room, hostName, serverID string, embedd
 		st.BootstrapHTTPURL = fmt.Sprintf("http://%s:%s/install.sh", host, port)
 	}
 	return st
+}
+
+func leaderClientNATSURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return raw
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	if host == "" || host == "0.0.0.0" || host == "::" || host == "localhost" {
+		port := parsed.Port()
+		if port == "" {
+			port = "4222"
+		}
+		parsed.Host = net.JoinHostPort("127.0.0.1", port)
+		return parsed.String()
+	}
+	return raw
 }
 
 func writeLeaderStateHeartbeat(usedURL, tsnetURL, room, hostName, serverID string, embedded bool, startedAt time.Time) error {

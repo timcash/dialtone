@@ -160,6 +160,8 @@ func RunLeader(args []string) error {
 	if broker != nil {
 		defer broker.Close()
 	}
+	clientNATSURL := leaderClientNATSURL(usedURL)
+	_ = os.Setenv("DIALTONE_REPL_NATS_URL", clientNATSURL)
 
 	stopTSNet := func() {}
 	var tsRuntime *tsnetRuntime
@@ -170,7 +172,7 @@ func RunLeader(args []string) error {
 	roomName := sanitizeRoom(*room)
 	serverID := h + "@" + roomName
 	startedAt := time.Now()
-	if err := writeLeaderStateHeartbeat(usedURL, tsnetPublicURL, roomName, h, serverID, *embedded, startedAt); err != nil {
+	if err := writeLeaderStateHeartbeat(clientNATSURL, tsnetPublicURL, roomName, h, serverID, *embedded, startedAt); err != nil {
 		logs.Warn("REPL leader state write failed: %v", err)
 	}
 	defer markLeaderStopped()
@@ -254,7 +256,7 @@ func RunLeader(args []string) error {
 				tsnetStatusMessage = fmt.Sprintf("tsnet NATS endpoint: %s", tsURL)
 				logs.Info("REPL tsnet NATS endpoint active: %s -> %s", tsURL, targetAddr)
 				publishRoom(roomName, BusFrame{Type: frameTypeServer, Message: tsnetStatusMessage})
-				if err := writeLeaderStateHeartbeat(usedURL, tsnetPublicURL, roomName, h, serverID, *embedded, startedAt); err != nil {
+				if err := writeLeaderStateHeartbeat(clientNATSURL, tsnetPublicURL, roomName, h, serverID, *embedded, startedAt); err != nil {
 					logs.Warn("REPL leader state write failed after tsnet activation: %v", err)
 				}
 			}
@@ -372,7 +374,7 @@ func RunLeader(args []string) error {
 	}
 	defer cmdSub.Unsubscribe()
 	healthSub, err := nc.Subscribe(leaderHealthSubject, func(msg *nats.Msg) {
-		st := buildLeaderState(usedURL, tsnetPublicURL, roomName, h, serverID, *embedded, startedAt)
+		st := buildLeaderState(clientNATSURL, tsnetPublicURL, roomName, h, serverID, *embedded, startedAt)
 		raw, _ := json.Marshal(st)
 		_ = msg.Respond(raw)
 	})
@@ -384,7 +386,7 @@ func RunLeader(args []string) error {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
-			if err := writeLeaderStateHeartbeat(usedURL, tsnetPublicURL, roomName, h, serverID, *embedded, startedAt); err != nil {
+			if err := writeLeaderStateHeartbeat(clientNATSURL, tsnetPublicURL, roomName, h, serverID, *embedded, startedAt); err != nil {
 				logs.Warn("REPL leader heartbeat write failed: %v", err)
 			}
 		}

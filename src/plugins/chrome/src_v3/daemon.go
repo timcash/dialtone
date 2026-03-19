@@ -20,8 +20,8 @@ import (
 func runDaemon(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 daemon", flag.ExitOnError)
 	role := fs.String("role", defaultRole, "Chrome role")
-	chromePort := fs.Int("chrome-port", defaultChromePort, "Chrome debug port")
-	natsPort := fs.Int("nats-port", defaultNATSPort, "NATS port")
+	chromePort := fs.Int("chrome-port", 0, "Chrome debug port")
+	natsPort := fs.Int("nats-port", 0, "NATS port")
 	natsURL := fs.String("nats-url", "", "Manager NATS URL to connect to instead of starting embedded NATS")
 	hostID := fs.String("host-id", "", "Logical host id for manager subject routing")
 	_ = fs.Parse(args)
@@ -33,7 +33,15 @@ func runDaemon(args []string) error {
 			managerHostID = strings.TrimSpace(hn)
 		}
 	}
+	roleName := normalizeRole(strings.TrimSpace(*role))
+	chromePortValue := *chromePort
+	if chromePortValue <= 0 {
+		chromePortValue = roleChromePort(roleName)
+	}
 	portValue := *natsPort
+	if portValue <= 0 {
+		portValue = roleNATSPort(roleName)
+	}
 	if managerURL != "" {
 		if parsed, err := url.Parse(managerURL); err == nil {
 			if p := strings.TrimSpace(parsed.Port()); p != "" {
@@ -45,16 +53,13 @@ func runDaemon(args []string) error {
 	}
 
 	state := &daemonState{
-		role:       strings.TrimSpace(*role),
-		hostID:     managerHostID,
-		chromePort: *chromePort,
-		natsPort:   portValue,
-		natsURL:    managerURL,
+		role:         roleName,
+		hostID:       managerHostID,
+		chromePort:   chromePortValue,
+		natsPort:     portValue,
+		natsURL:      managerURL,
 		embeddedNATS: managerURL == "",
-		profileDir: defaultProfileDir(strings.TrimSpace(*role)),
-	}
-	if state.role == "" {
-		state.role = defaultRole
+		profileDir:   defaultProfileDir(roleName),
 	}
 	if err := state.init(); err != nil {
 		return err
@@ -274,6 +279,19 @@ func (d *daemonState) handle(req commandRequest) commandResponse {
 			return resp
 		}
 		resp.ConsoleLines = d.consoleSnapshot()
+	case "eval":
+		if err := d.ensureBrowser(); err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return resp
+		}
+		value, err := d.evaluateManagedScript(req.Script)
+		if err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return d.refreshResponse(resp)
+		}
+		resp.Value = value
 	case "screenshot":
 		if err := d.ensureBrowser(); err != nil {
 			resp.OK = false
@@ -319,15 +337,15 @@ func (d *daemonState) baseResponse() commandResponse {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	resp := commandResponse{
-		ServicePID: os.Getpid(),
-		BrowserPID: d.browserPID,
-		ChromePort: d.chromePort,
-		NATSPort:   d.natsPort,
-		Role:       d.role,
-		Host:       d.hostID,
-		ProfileDir: d.profileDir,
-		WebSocketURL: d.browserWS,
-		StartedAt:  d.startedAt,
+		ServicePID:    os.Getpid(),
+		BrowserPID:    d.browserPID,
+		ChromePort:    d.chromePort,
+		NATSPort:      d.natsPort,
+		Role:          d.role,
+		Host:          d.hostID,
+		ProfileDir:    d.profileDir,
+		WebSocketURL:  d.browserWS,
+		StartedAt:     d.startedAt,
 		LastHealthyAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if d.managedTarget != "" {
@@ -351,6 +369,7 @@ func (d *daemonState) refreshResponse(resp commandResponse) commandResponse {
 func (d *daemonState) fillStatus(resp *commandResponse) error {
 	d.mu.Lock()
 	pid := d.browserPID
+	role := d.role
 	resp.BrowserPID = pid
 	resp.ChromePort = d.chromePort
 	resp.NATSPort = d.natsPort
@@ -370,6 +389,10 @@ func (d *daemonState) fillStatus(resp *commandResponse) error {
 	resp.LastHealthyAt = time.Now().UTC().Format(time.RFC3339Nano)
 	d.mu.Unlock()
 
+	if processCount, err := countLocalChromeProcesses(role); err == nil {
+		resp.ProcessCount = processCount
+	}
+
 	if pid == 0 {
 		return nil
 	}
@@ -384,8 +407,9 @@ func (d *daemonState) fillStatus(resp *commandResponse) error {
 }
 
 func sendRemoteCommand(node sshv1.MeshNode, req commandRequest) (*commandResponse, error) {
-	subject := hostScopedCommandSubject(node.Name, req.Role)
+	subjects := commandSubjects(node.Name, req.Role)
 	raw, _ := json.Marshal(req)
+	var lastErr error
 	tryRequest := func(natsURL, subject string) (*commandResponse, error) {
 		nc, err := nats.Connect(natsURL, nats.Timeout(defaultTimeout))
 		if err != nil {
@@ -407,9 +431,26 @@ func sendRemoteCommand(node sshv1.MeshNode, req commandRequest) (*commandRespons
 		return &resp, nil
 	}
 
-	if natsURL := strings.TrimSpace(managerNATSURL()); natsURL != "" {
-		if resp, err := tryRequest(natsURL, subject); err == nil {
-			return resp, nil
+	if natsURL := strings.TrimSpace(managerNATSURLForNode(node)); natsURL != "" {
+		deadline := time.Now().Add(3 * time.Second)
+		for {
+			for _, subject := range subjects {
+				if resp, err := tryRequest(natsURL, subject); err == nil {
+					return resp, nil
+				} else {
+					lastErr = err
+				}
+			}
+			if time.Now().After(deadline) {
+				break
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		if shouldUseLocalManagerNATS(node) {
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return nil, fmt.Errorf("chrome src_v3 manager nats request failed for host=%s role=%s", node.Name, strings.TrimSpace(req.Role))
 		}
 	}
 

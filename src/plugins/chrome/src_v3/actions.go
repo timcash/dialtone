@@ -25,11 +25,29 @@ func (d *daemonState) navigateManaged(rawURL string) error {
 
 func (d *daemonState) clickAriaLabel(label string) error {
 	selector := ariaSelector(label)
+	selectorJSON, err := json.Marshal(selector)
+	if err != nil {
+		return err
+	}
+	script := fmt.Sprintf(`(() => {
+		const el = document.querySelector(%s);
+		if (!el) return "missing";
+		el.click();
+		return "ok";
+	})()`, string(selectorJSON))
 	return d.withManagedContext(15*time.Second, func(ctx context.Context) error {
-		return chromedp.Run(ctx,
-			chromedp.WaitVisible(selector, chromedp.ByQuery),
-			chromedp.Click(selector, chromedp.ByQuery),
-		)
+		deadline := time.Now().Add(8 * time.Second)
+		for time.Now().Before(deadline) {
+			var result string
+			if err := chromedp.Run(ctx, chromedp.Evaluate(script, &result)); err != nil {
+				return err
+			}
+			if result == "ok" {
+				return nil
+			}
+			time.Sleep(120 * time.Millisecond)
+		}
+		return fmt.Errorf("click target %q not found", label)
 	})
 }
 
@@ -63,17 +81,18 @@ func (d *daemonState) typeAriaLabel(label, value string) error {
 		return "ok";
 	})()`, string(selectorJSON), string(valueJSON))
 	return d.withManagedContext(15*time.Second, func(ctx context.Context) error {
-		var result string
-		if err := chromedp.Run(ctx,
-			chromedp.WaitVisible(selector, chromedp.ByQuery),
-			chromedp.Evaluate(script, &result),
-		); err != nil {
-			return err
+		deadline := time.Now().Add(8 * time.Second)
+		for time.Now().Before(deadline) {
+			var result string
+			if err := chromedp.Run(ctx, chromedp.Evaluate(script, &result)); err != nil {
+				return err
+			}
+			if result == "ok" {
+				return nil
+			}
+			time.Sleep(120 * time.Millisecond)
 		}
-		if result != "ok" {
-			return fmt.Errorf("type target %q not found", label)
-		}
-		return nil
+		return fmt.Errorf("type target %q not found", label)
 	})
 }
 
@@ -195,4 +214,19 @@ func (d *daemonState) readManagedURL() (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(current), nil
+}
+
+func (d *daemonState) evaluateManagedScript(script string) (string, error) {
+	script = strings.TrimSpace(script)
+	if script == "" {
+		return "", fmt.Errorf("eval requires script")
+	}
+	var result string
+	err := d.withManagedContext(10*time.Second, func(ctx context.Context) error {
+		return chromedp.Run(ctx, chromedp.Evaluate(script, &result))
+	})
+	if err != nil {
+		return "", err
+	}
+	return result, nil
 }
