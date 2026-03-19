@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf16"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -932,12 +934,22 @@ func runPowerShellCommand(command string) (string, error) {
 	if looksLikePosixShell(command) {
 		psCommand = "Set-Location C:\\; wsl.exe -e bash -lc '" + strings.ReplaceAll(command, "'", "''") + "'"
 	}
-	cmd := execCommandFunc(powerShellPath, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psCommand)
+	encoded := encodePowerShellCommand(psCommand)
+	cmd := execCommandFunc(powerShellPath, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("powershell command failed: %w", err)
 	}
 	return string(out), nil
+}
+
+func encodePowerShellCommand(command string) string {
+	utf16Vals := utf16.Encode([]rune(command))
+	buf := make([]byte, 0, len(utf16Vals)*2)
+	for _, v := range utf16Vals {
+		buf = append(buf, byte(v), byte(v>>8))
+	}
+	return base64.StdEncoding.EncodeToString(buf)
 }
 
 func looksLikePosixShell(command string) bool {
