@@ -1,5 +1,5 @@
 nixpkgs#bashInteractive
 nixpkgs#git
-nixpkgs#go_1_24
+nixpkgs#go_1_25
 nixpkgs#mosh
 nixpkgs#openssh

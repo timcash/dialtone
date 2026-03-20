@@ -1,7 +1,7 @@
 {
   description = "Dialtone dev shell";
   inputs = {
-    nixpkgs.url = "https://github.com/NixOS/nixpkgs/archive/refs/heads/nixos-24.11.tar.gz";
+    nixpkgs.url = "https://github.com/NixOS/nixpkgs/archive/refs/heads/nixos-25.05.tar.gz";
   };
   outputs = { self, nixpkgs }:
     let
@@ -11,7 +11,7 @@
         let
           pkgs = import nixpkgs { inherit system; };
           baseDevPackages = with pkgs; [
-            bash curl git gh go_1_24 gnumake nodejs bun tmux zsh cloudflared
+            bash curl git gh go_1_25 gnumake nodejs bun tmux zsh cloudflared
           ] ++ (pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs.darwin.apple_sdk.frameworks; [
             Security
             CoreFoundation
@@ -49,7 +49,7 @@
           runtimeScript = { name, text, inputs ? [ ] }:
             pkgs.writeShellApplication {
               inherit name text;
-              runtimeInputs = with pkgs; [ bash git go_1_24 ] ++ inputs;
+              runtimeInputs = with pkgs; [ bash git go_1_25 ] ++ inputs;
             };
           dialtoneMod = runtimeScript {
             name = "dialtone-mod";
@@ -165,7 +165,7 @@
             };
             ssh-v1 = mkDevShell {
               shellName = "ssh-v1";
-              extraPackages = [ pkgs.openssh ];
+              extraPackages = [ pkgs.openssh pkgs.expect ];
             };
           };
         };
