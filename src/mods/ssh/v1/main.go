@@ -12,6 +12,7 @@ import (
 type sshOptions struct {
 	host        string
 	user        string
+	password    string
 	port        string
 	command     string
 	dryRun      bool
@@ -173,6 +174,13 @@ func parseArgs(argv []string) (sshOptions, error) {
 			}
 		case strings.HasPrefix(current, "--user="):
 			opts.user = strings.TrimSpace(strings.TrimPrefix(current, "--user="))
+		case strings.EqualFold(current, "--password"):
+			if i+1 < len(argv) {
+				opts.password = argv[i+1]
+				i++
+			}
+		case strings.HasPrefix(current, "--password="):
+			opts.password = strings.TrimPrefix(current, "--password=")
 		case strings.EqualFold(current, "--port"):
 			if i+1 < len(argv) {
 				opts.port = strings.TrimSpace(argv[i+1])
@@ -315,12 +323,22 @@ func buildSSHCommandForHost(cfg sshOptions, node meshNode, host string) (*exec.C
 
 	sshArgs := []string{
 		"-F", "/dev/null",
-		"-o", "BatchMode=yes",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "GlobalKnownHostsFile=/dev/null",
 		"-o", "LogLevel=ERROR",
 		"-o", "ConnectTimeout=5",
+	}
+	password := cfg.password
+	if password == "" {
+		sshArgs = append(sshArgs, "-o", "BatchMode=yes")
+	} else {
+		sshArgs = append(sshArgs,
+			"-o", "BatchMode=no",
+			"-o", "PreferredAuthentications=password",
+			"-o", "PubkeyAuthentication=no",
+			"-o", "KbdInteractiveAuthentication=no",
+		)
 	}
 	if remotePort != "" && remotePort != "22" {
 		sshArgs = append(sshArgs, "-p", remotePort)
@@ -335,7 +353,55 @@ func buildSSHCommandForHost(cfg sshOptions, node meshNode, host string) (*exec.C
 	if err != nil {
 		return nil, err
 	}
+	if password != "" {
+		return buildPasswordSSHCommand(sshBin, password, sshArgs), nil
+	}
 	return exec.Command(sshBin, sshArgs...), nil
+}
+
+func buildPasswordSSHCommand(sshBin string, password string, sshArgs []string) *exec.Cmd {
+	expectScript := fmt.Sprintf(`
+log_user 1
+set timeout 15
+set sshbin %s
+set password %s
+set sshargs [list %s]
+eval spawn -noecho $sshbin $sshargs
+expect {
+    -re "(?i)password:" {
+        send -- "$password\r"
+        exp_continue
+    }
+    eof {
+        catch wait result
+        set code [lindex $result 3]
+        if {$code eq ""} {
+            exit 0
+        }
+        exit $code
+    }
+}
+`, tclQuote(sshBin), tclQuote(password), tclJoinList(sshArgs))
+	return exec.Command("expect", "-c", expectScript)
+}
+
+func tclQuote(value string) string {
+	replacer := strings.NewReplacer(
+		`\\`, `\\\\`,
+		`"`, `\"`,
+		`$`, `\$`,
+		`[`, `\[`,
+		`]`, `\]`,
+	)
+	return `"` + replacer.Replace(value) + `"`
+}
+
+func tclJoinList(values []string) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		parts = append(parts, tclQuote(value))
+	}
+	return strings.Join(parts, " ")
 }
 
 func orderedMeshHostsForSSH(candidates []string, host string) []string {
@@ -381,8 +447,8 @@ func preferTailnetHostsForSSH(candidates []string) []string {
 
 func printUsage() {
 	fmt.Println("Usage:")
-	fmt.Println("  ./dialtone_mod ssh v1 [run] --host <name|ip> [--user <user>] [--port <port>] [--command <cmd>] [--dry-run]")
-	fmt.Println("  ./dialtone_mod ssh v1 test [--host <name|all|ip>] [--user <user>] [--port <port>] [--dry-run]")
+	fmt.Println("  ./dialtone_mod ssh v1 [run] --host <name|ip> [--user <user>] [--password <password>] [--port <port>] [--command <cmd>] [--dry-run]")
+	fmt.Println("  ./dialtone_mod ssh v1 test [--host <name|all|ip>] [--user <user>] [--password <password>] [--port <port>] [--dry-run]")
 	fmt.Println("Aliases are loaded from env/mesh.json (for example gold, wsl, rover, grey).")
 }
 

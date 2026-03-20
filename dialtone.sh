@@ -177,7 +177,7 @@ EOF
     cat > "$tool_dir/go.mod" <<'EOF'
 module dialtone-bootstrap-git
 
-go 1.24
+go 1.25
 
 require github.com/go-git/go-git/v5 v5.16.3
 EOF
