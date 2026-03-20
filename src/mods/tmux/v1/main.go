@@ -62,6 +62,10 @@ func main() {
 		if err := runRead(args); err != nil {
 			exitIfErr(err, "tmux read")
 		}
+	case "clear":
+		if err := runClear(args); err != nil {
+			exitIfErr(err, "tmux clear")
+		}
 	case "write":
 		if err := runWrite(args); err != nil {
 			exitIfErr(err, "tmux write")
@@ -73,6 +77,10 @@ func main() {
 	case "rename":
 		if err := runRename(args); err != nil {
 			exitIfErr(err, "tmux rename")
+		}
+	case "split":
+		if err := runSplit(args); err != nil {
+			exitIfErr(err, "tmux split")
 		}
 	case "shell":
 		if err := runShell(args); err != nil {
@@ -175,6 +183,31 @@ func runRead(argv []string) error {
 	return nil
 }
 
+func runClear(argv []string) error {
+	opts := flag.NewFlagSet("tmux v1 clear", flag.ContinueOnError)
+	pane := opts.String("pane", "dialtone:0:0", "tmux target in session:window:pane form")
+	if err := opts.Parse(argv); err != nil {
+		return err
+	}
+	if opts.NArg() != 0 {
+		return errors.New("clear does not accept positional arguments")
+	}
+	target, err := parsePaneTarget(*pane)
+	if err != nil {
+		return err
+	}
+
+	tmuxTarget := target.target()
+	if out, err := exec.Command("tmux", "clear-history", "-t", tmuxTarget).CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux clear-history failed: %s", strings.TrimSpace(string(out)))
+	}
+	if out, err := exec.Command("tmux", "send-keys", "-t", tmuxTarget, "C-l").CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux send-keys clear failed: %s", strings.TrimSpace(string(out)))
+	}
+	fmt.Printf("cleared tmux pane %s\n", tmuxTarget)
+	return nil
+}
+
 func runRename(argv []string) error {
 	opts := flag.NewFlagSet("tmux v1 rename", flag.ContinueOnError)
 	session := opts.String("session", "", "Existing tmux session name (default: current or first)")
@@ -211,6 +244,76 @@ func runRename(argv []string) error {
 	return nil
 }
 
+func runSplit(argv []string) error {
+	opts := flag.NewFlagSet("tmux v1 split", flag.ContinueOnError)
+	pane := opts.String("pane", "dialtone:0:0", "tmux target in session:window:pane form")
+	direction := opts.String("direction", "right", "Split direction: right|left|down|up")
+	title := opts.String("title", "", "Optional title for the new pane")
+	cwd := opts.String("cwd", "", "Working directory for the new pane")
+	command := opts.String("command", "", "Optional command to run in the new pane")
+	focus := opts.Bool("focus", true, "Focus the new pane after splitting")
+	if err := opts.Parse(argv); err != nil {
+		return err
+	}
+	if opts.NArg() != 0 {
+		return errors.New("split does not accept positional arguments")
+	}
+
+	target, err := parsePaneTarget(*pane)
+	if err != nil {
+		return err
+	}
+
+	tmuxArgs := []string{
+		"split-window",
+		"-P",
+		"-F", "#{session_name}:#{window_index}:#{pane_index}",
+		"-t", target.target(),
+	}
+	switch strings.TrimSpace(*direction) {
+	case "right":
+		tmuxArgs = append(tmuxArgs, "-h")
+	case "left":
+		tmuxArgs = append(tmuxArgs, "-h", "-b")
+	case "down":
+		tmuxArgs = append(tmuxArgs, "-v")
+	case "up":
+		tmuxArgs = append(tmuxArgs, "-v", "-b")
+	default:
+		return fmt.Errorf("invalid --direction %q (expected right|left|down|up)", *direction)
+	}
+	if strings.TrimSpace(*cwd) != "" {
+		tmuxArgs = append(tmuxArgs, "-c", strings.TrimSpace(*cwd))
+	}
+	if strings.TrimSpace(*command) != "" {
+		tmuxArgs = append(tmuxArgs, strings.TrimSpace(*command))
+	}
+
+	out, err := exec.Command("tmux", tmuxArgs...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("tmux split-window failed: %s", strings.TrimSpace(string(out)))
+	}
+	newPane := strings.TrimSpace(string(out))
+	newTarget, err := parsePaneTarget(newPane)
+	if err != nil {
+		return fmt.Errorf("invalid tmux split result %q: %w", newPane, err)
+	}
+
+	if strings.TrimSpace(*title) != "" {
+		if out, err := exec.Command("tmux", "select-pane", "-t", newTarget.target(), "-T", strings.TrimSpace(*title)).CombinedOutput(); err != nil {
+			return fmt.Errorf("tmux select-pane title failed: %s", strings.TrimSpace(string(out)))
+		}
+	}
+	if !*focus {
+		if out, err := exec.Command("tmux", "select-pane", "-t", target.target()).CombinedOutput(); err != nil {
+			return fmt.Errorf("tmux select-pane restore failed: %s", strings.TrimSpace(string(out)))
+		}
+	}
+
+	fmt.Printf("split %s %s -> %s\n", target.target(), strings.TrimSpace(*direction), newTarget.target())
+	return nil
+}
+
 func runShell(argv []string) error {
 	opts := flag.NewFlagSet("tmux v1 shell", flag.ContinueOnError)
 	pane := opts.String("pane", "dialtone:0:0", "tmux target in session:window:pane form")
@@ -235,7 +338,7 @@ func runShell(argv []string) error {
 
 	tmuxTarget := target.target()
 	command := fmt.Sprintf(
-		"cd %s && export DIALTONE_TMUX_PROXY_ACTIVE=1 && exec nix --extra-experimental-features %s develop %s",
+		"cd %s && export DIALTONE_TMUX_PROXY_ACTIVE=1 && nix --extra-experimental-features %s develop %s --command zsh -l",
 		shellQuote(repoRoot),
 		shellQuote("nix-command flakes"),
 		shellQuote(".#"+strings.TrimSpace(*shellName)),
@@ -339,8 +442,12 @@ func printUsage() {
 	fmt.Println("       Write text to a tmux pane (default target: dialtone:0:0)")
 	fmt.Println("  read [--pane dialtone:0:0] [--lines 10]")
 	fmt.Println("       Read trailing lines from a tmux pane (default: 10)")
+	fmt.Println("  clear [--pane codex-view:0:0]")
+	fmt.Println("       Clear tmux history and redraw the target pane")
 	fmt.Println("  rename [--session NAME] [--to dialtone]")
 	fmt.Println("       Rename tmux session (defaults to current/first session)")
+	fmt.Println("  split [--pane codex-view:0:0] [--direction right|left|down|up] [--title NAME] [--cwd PATH] [--command CMD] [--focus=true|false]")
+	fmt.Println("       Split a tmux pane and optionally title or initialize the new pane")
 	fmt.Println("  shell [--pane codex-view:1:1] [--shell default|repl-v1|ssh-v1]")
 	fmt.Println("       Put the target tmux pane into the repo nix develop shell without starting Codex")
 	fmt.Println("  target [--set codex-view:1:1] [--clear]")

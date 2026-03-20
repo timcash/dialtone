@@ -13,14 +13,23 @@ func TestBuildStartCommandUsesRepoShellAndInlineCodexLaunch(t *testing.T) {
 	if !strings.Contains(cmd, "develop '.#default'") {
 		t.Fatalf("missing nix develop shell: %q", cmd)
 	}
+	if !strings.Contains(cmd, "clear; printf") {
+		t.Fatalf("missing clear before startup banner: %q", cmd)
+	}
 	if !strings.Contains(cmd, "command -v codex") {
 		t.Fatalf("missing codex lookup: %q", cmd)
 	}
 	if !strings.Contains(cmd, "npx --yes @openai/codex") {
 		t.Fatalf("missing npx fallback: %q", cmd)
 	}
-	if !strings.Contains(cmd, "exec codex -m '\"'\"'gpt-5.4'\"'\"' -a never -s danger-full-access") {
-		t.Fatalf("missing codex args: %q", cmd)
+	if !strings.Contains(cmd, "exec env CI=1 codex -c") {
+		t.Fatalf("missing codex exec prefix: %q", cmd)
+	}
+	if !strings.Contains(cmd, "check_for_update_on_startup=false") {
+		t.Fatalf("missing update-check override: %q", cmd)
+	}
+	if !strings.Contains(cmd, "-m '\"'\"'gpt-5.4'\"'\"' -a never -s danger-full-access") {
+		t.Fatalf("missing model and sandbox args: %q", cmd)
 	}
 }
 
@@ -33,10 +42,13 @@ func TestShellQuoteEscapesSingleQuotes(t *testing.T) {
 
 func TestBuildCodexExecCommandIncludesFallback(t *testing.T) {
 	cmd := buildCodexExecCommand("gpt-5.4")
-	if !strings.Contains(cmd, "exec codex") {
+	if !strings.Contains(cmd, "-c 'check_for_update_on_startup=false'") {
+		t.Fatalf("missing update-check override: %q", cmd)
+	}
+	if !strings.Contains(cmd, "exec env CI=1 codex") {
 		t.Fatalf("missing direct codex exec: %q", cmd)
 	}
-	if !strings.Contains(cmd, "exec npx --yes @openai/codex") {
+	if !strings.Contains(cmd, "exec env CI=1 npx --yes @openai/codex") {
 		t.Fatalf("missing npx exec: %q", cmd)
 	}
 }

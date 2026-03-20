@@ -53,6 +53,13 @@ func runStart(argv []string) error {
 	}
 	startCmd := buildStartCommand(repoRoot, *shellName, *reasoning, *model)
 	if isProxyActive() {
+		target, err := currentPaneTarget()
+		if err != nil {
+			return err
+		}
+		if err := clearPaneHistory(target); err != nil {
+			return err
+		}
 		return runInCurrentPane(startCmd)
 	}
 	if err := ensureSession(*session, repoRoot); err != nil {
@@ -63,6 +70,9 @@ func runStart(argv []string) error {
 		return err
 	}
 	if err := resetPane(target); err != nil {
+		return err
+	}
+	if err := clearPaneHistory(target); err != nil {
 		return err
 	}
 	if err := sendKeys(target, startCmd, true); err != nil {
@@ -161,7 +171,7 @@ func currentPaneTarget() (string, error) {
 func buildStartCommand(repoRoot, shellName, reasoning, model string) string {
 	codexCmd := buildCodexExecCommand(strings.TrimSpace(model))
 	inner := fmt.Sprintf(
-		"printf 'Starting Codex CLI with %s (requested reasoning: %s) and skipping confirmations...\\n'; %s",
+		"clear; printf 'Starting Codex CLI with %s (requested reasoning: %s) and skipping confirmations...\\n'; %s",
 		shellSingleQuoteLiteral(strings.TrimSpace(model)),
 		shellSingleQuoteLiteral(strings.TrimSpace(reasoning)),
 		codexCmd,
@@ -177,12 +187,13 @@ func buildStartCommand(repoRoot, shellName, reasoning, model string) string {
 
 func buildCodexExecCommand(model string) string {
 	args := strings.Join([]string{
+		"-c", shellQuote("check_for_update_on_startup=false"),
 		"-m", shellQuote(model),
 		"-a", "never",
 		"-s", "danger-full-access",
 	}, " ")
 	return fmt.Sprintf(
-		"if command -v codex >/dev/null 2>&1; then exec codex %s; else exec npx --yes @openai/codex %s; fi",
+		"if command -v codex >/dev/null 2>&1; then exec env CI=1 codex %s; else exec env CI=1 npx --yes @openai/codex %s; fi",
 		args,
 		args,
 	)
@@ -202,6 +213,13 @@ func runInCurrentPane(command string) error {
 
 func resetPane(target string) error {
 	if _, err := tmuxOutput("send-keys", "-t", target, "C-c"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func clearPaneHistory(target string) error {
+	if _, err := tmuxOutput("clear-history", "-t", target); err != nil {
 		return err
 	}
 	return nil
