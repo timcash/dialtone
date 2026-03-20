@@ -12,7 +12,7 @@ import (
 )
 
 func TestSSHParseArgs(t *testing.T) {
-	opts, err := parseArgs([]string{"--host", "gold", "--user", "user", "--port", "2022", "--command", "echo hello", "--dry-run"})
+	opts, err := parseArgs([]string{"--host", "gold", "--user", "user", "--password", "secret", "--port", "2022", "--command", "echo hello", "--dry-run"})
 	if err != nil {
 		t.Fatalf("parseArgs failed: %v", err)
 	}
@@ -21,6 +21,9 @@ func TestSSHParseArgs(t *testing.T) {
 	}
 	if opts.user != "user" {
 		t.Fatalf("expected user user, got %q", opts.user)
+	}
+	if opts.password != "secret" {
+		t.Fatalf("expected password secret, got %q", opts.password)
 	}
 	if opts.port != "2022" {
 		t.Fatalf("expected port 2022, got %q", opts.port)
@@ -151,6 +154,33 @@ func TestSSHBuildCommandRespectsOverrides(t *testing.T) {
 		}
 		if got := cmd.Args[len(cmd.Args)-1]; got != "echo hi" {
 			t.Fatalf("expected command arg, got %q", got)
+		}
+	})
+}
+
+func TestSSHBuildCommandUsesExpectForPasswordAuth(t *testing.T) {
+	node := meshNode{Name: "gold", Host: "example.com", User: "user", Port: "2223"}
+	opts, err := parseArgs([]string{"--host", "gold", "--user", "alice", "--password", "secret", "--command", "echo hi"})
+	if err != nil {
+		t.Fatalf("parseArgs failed: %v", err)
+	}
+	withShellSSH(t, "/nix/store/test-openssh/bin/ssh", func() {
+		cmd, err := buildSSHCommand(opts, node)
+		if err != nil {
+			t.Fatalf("buildSSHCommand failed: %v", err)
+		}
+		if !strings.HasSuffix(cmd.Path, "/expect") && cmd.Path != "expect" {
+			t.Fatalf("expected expect wrapper, got %q", cmd.Path)
+		}
+		joined := strings.Join(cmd.Args, " ")
+		if !strings.Contains(joined, "/nix/store/test-openssh/bin/ssh") {
+			t.Fatalf("expected nix ssh path inside expect args, got %q", joined)
+		}
+		if !strings.Contains(joined, "PreferredAuthentications=password") {
+			t.Fatalf("expected password auth args, got %q", joined)
+		}
+		if strings.Contains(joined, "BatchMode=yes") {
+			t.Fatalf("did not expect batch mode for password auth, got %q", joined)
 		}
 	})
 }
