@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"errors"
 	"flag"
 	"fmt"
@@ -8,6 +9,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"dialtone/dev/internal/modstate"
+	"dialtone/dev/mods/shared/sqlitestate"
 )
 
 type tmuxPaneTarget struct {
@@ -359,7 +363,11 @@ func runShell(argv []string) error {
 func runTarget(argv []string) error {
 	opts := flag.NewFlagSet("tmux v1 target", flag.ContinueOnError)
 	setPane := opts.String("set", "", "Persist the dialtone_mod tmux target as session:window:pane")
+	setPromptPane := opts.String("set-prompt", "", "Persist the codex prompt tmux target as session:window:pane")
 	clear := opts.Bool("clear", false, "Clear the persisted dialtone_mod tmux target")
+	clearPrompt := opts.Bool("clear-prompt", false, "Clear the persisted codex prompt tmux target")
+	showPrompt := opts.Bool("prompt", false, "Print the persisted codex prompt tmux target")
+	showAll := opts.Bool("all", false, "Print both command and prompt tmux targets")
 	if err := opts.Parse(argv); err != nil {
 		return err
 	}
@@ -367,13 +375,30 @@ func runTarget(argv []string) error {
 	if err != nil {
 		return err
 	}
-	targetPath := filepath.Join(repoRoot, ".dialtone", "tmux_target")
 
-	if *clear {
-		if err := os.Remove(targetPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if *clear && *clearPrompt {
+		if err := clearPersistedTarget(repoRoot); err != nil {
 			return err
 		}
-		fmt.Println("cleared dialtone_mod tmux target")
+		if err := clearPersistedPromptTarget(repoRoot); err != nil {
+			return err
+		}
+		fmt.Println("cleared dialtone_mod tmux command target")
+		fmt.Println("cleared dialtone_mod tmux prompt target")
+		return nil
+	}
+	if *clear {
+		if err := clearPersistedTarget(repoRoot); err != nil {
+			return err
+		}
+		fmt.Println("cleared dialtone_mod tmux command target")
+		return nil
+	}
+	if *clearPrompt {
+		if err := clearPersistedPromptTarget(repoRoot); err != nil {
+			return err
+		}
+		fmt.Println("cleared dialtone_mod tmux prompt target")
 		return nil
 	}
 
@@ -382,21 +407,62 @@ func runTarget(argv []string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		value := target.Session + ":" + target.Window + ":" + target.Pane
+		if err := storePersistedTarget(repoRoot, value); err != nil {
 			return err
 		}
-		value := target.Session + ":" + target.Window + ":" + target.Pane + "\n"
-		if err := os.WriteFile(targetPath, []byte(value), 0o644); err != nil {
+		fmt.Printf("set dialtone_mod tmux command target: %s\n", value)
+		return nil
+	}
+	if strings.TrimSpace(*setPromptPane) != "" {
+		target, err := parsePaneTarget(*setPromptPane)
+		if err != nil {
 			return err
 		}
-		fmt.Printf("set dialtone_mod tmux target: %s", value)
+		value := target.Session + ":" + target.Window + ":" + target.Pane
+		if err := storePersistedPromptTarget(repoRoot, value); err != nil {
+			return err
+		}
+		fmt.Printf("set dialtone_mod tmux prompt target: %s\n", value)
 		return nil
 	}
 
-	raw, err := os.ReadFile(targetPath)
+	if *showAll {
+		commandValue, commandErr := loadPersistedTarget(repoRoot)
+		promptValue, promptErr := loadPersistedPromptTarget(repoRoot)
+		if commandErr != nil && !errors.Is(commandErr, os.ErrNotExist) {
+			return commandErr
+		}
+		if promptErr != nil && !errors.Is(promptErr, os.ErrNotExist) {
+			return promptErr
+		}
+		if commandValue == "" {
+			commandValue = "(unset)"
+		}
+		if promptValue == "" {
+			promptValue = "(unset)"
+		}
+		fmt.Printf("command\t%s\nprompt\t%s\n", commandValue, promptValue)
+		return nil
+	}
+	if *showPrompt {
+		raw, err := loadPersistedPromptTarget(repoRoot)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				fmt.Println("no dialtone_mod tmux prompt target configured")
+				return nil
+			}
+			return err
+		}
+		fmt.Print(strings.TrimSpace(raw))
+		fmt.Println()
+		return nil
+	}
+
+	raw, err := loadPersistedTarget(repoRoot)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			fmt.Println("no dialtone_mod tmux target configured")
+			fmt.Println("no dialtone_mod tmux command target configured")
 			return nil
 		}
 		return err
@@ -404,6 +470,97 @@ func runTarget(argv []string) error {
 	fmt.Print(strings.TrimSpace(string(raw)))
 	fmt.Println()
 	return nil
+}
+
+func loadPersistedTarget(repoRoot string) (string, error) {
+	value, ok, err := loadPersistedTargetFromState(repoRoot)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", os.ErrNotExist
+	}
+	return value, nil
+}
+
+func storePersistedTarget(repoRoot, target string) error {
+	return storeStateTarget(repoRoot, sqlitestate.TmuxTargetKey, target)
+}
+
+func clearPersistedTarget(repoRoot string) error {
+	return clearStateTarget(repoRoot, sqlitestate.TmuxTargetKey)
+}
+
+func loadPersistedPromptTarget(repoRoot string) (string, error) {
+	value, ok, err := loadStateTarget(repoRoot, sqlitestate.TmuxPromptTargetKey)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", os.ErrNotExist
+	}
+	return value, nil
+}
+
+func storePersistedPromptTarget(repoRoot, target string) error {
+	return storeStateTarget(repoRoot, sqlitestate.TmuxPromptTargetKey, target)
+}
+
+func clearPersistedPromptTarget(repoRoot string) error {
+	return clearStateTarget(repoRoot, sqlitestate.TmuxPromptTargetKey)
+}
+
+func loadPersistedTargetFromState(repoRoot string) (string, bool, error) {
+	return loadStateTarget(repoRoot, sqlitestate.TmuxTargetKey)
+}
+
+func loadStateTarget(repoRoot, key string) (string, bool, error) {
+	var value string
+	var found bool
+	err := withStateDB(repoRoot, func(db *sql.DB) error {
+		record, ok, err := modstate.LoadStateValue(db, sqlitestate.SystemScope, key)
+		if err != nil {
+			return err
+		}
+		value = strings.TrimSpace(record.Value)
+		found = ok && value != ""
+		return nil
+	})
+	if err != nil {
+		return "", false, err
+	}
+	return value, found, nil
+}
+
+func storeStateTarget(repoRoot, key, target string) error {
+	value := strings.TrimSpace(target)
+	if value == "" {
+		return errors.New("target value is required")
+	}
+	if err := withStateDB(repoRoot, func(db *sql.DB) error {
+		return modstate.UpsertStateValue(db, sqlitestate.SystemScope, key, value)
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func clearStateTarget(repoRoot, key string) error {
+	if err := withStateDB(repoRoot, func(db *sql.DB) error {
+		return modstate.DeleteStateValue(db, sqlitestate.SystemScope, key)
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func withStateDB(repoRoot string, fn func(*sql.DB) error) error {
+	db, err := modstate.Open(sqlitestate.ResolveStateDBPath(repoRoot))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	return fn(db)
 }
 
 func locateRepoRoot() (string, error) {

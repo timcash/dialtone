@@ -43,6 +43,19 @@ It is intentionally opinionated:
 # Codex stays on the left in `codex-view:0:0`, and a nix shell pane titled
 # `dialtone-view` is created on the right in `codex-view:0:1`.
 ./dialtone_mod shell v1 split-vertical
+
+# Run the SQLite-backed protocol smoke test against the current visible panes.
+# This records prompt/command events in SQLite and expects a visible
+# `./dialtone_mod` command to succeed in `dialtone-view`.
+./dialtone_mod shell v1 demo-protocol --bootstrap=false
+
+# Inspect the SQLite-backed tmux target and queued proxy commands after startup.
+./dialtone_mod mods v1 db state --key tmux.target
+./dialtone_mod mods v1 db queue --name tmux --limit 10
+
+# Inspect the latest protocol run directly from the controller shell.
+env DIALTONE_TMUX_PROXY_ACTIVE=1 ./dialtone_mod mods v1 db protocol-runs --limit 5
+env DIALTONE_TMUX_PROXY_ACTIVE=1 ./dialtone_mod mods v1 db protocol-events --run 2
 ```
 
 ## DIALTONE>
@@ -70,6 +83,13 @@ entered nix shell default in codex-view:0.1
 cleared tmux pane codex-view:0.1
 set dialtone_mod tmux target: codex-view:0:0
 split shell workflow: codex on codex-view:0:0 (left), dialtone-view on codex-view:0:1 (right)
+
+$ ./dialtone_mod shell v1 demo-protocol --bootstrap=false
+demo protocol run 2 passed
+prompt_target	codex-view:0:0
+command_target	codex-view:0:1
+command	env DIALTONE_TMUX_PROXY_ACTIVE=1 ./dialtone_mod mods v1 db graph --format outline
+result	observed "- shell:v1" in codex-view:0:1
 ```
 
 Expected behavior after the command returns:
@@ -79,11 +99,15 @@ Expected behavior after the command returns:
 - Codex CLI is starting or already running in that pane
 - the startup path suppresses the Codex self-update chooser so the workflow
   does not stop on an interactive update prompt
-- future non-control `./dialtone_mod` commands are proxied into `codex-view:0:0`
+- prompts should be submitted into `codex-view:0:0`
+- visible `./dialtone_mod` commands should run in `codex-view:0:1`
 - `split-vertical` keeps `codex-view:0:0` on the left and makes
   `dialtone-view` the right-hand tmux pane at `codex-view:0:1`
 - `split-vertical` clears `dialtone-view` after entering the Nix shell so the
   right pane lands on a clean prompt
+- `demo-protocol` records a `protocol_runs` row and ordered `protocol_events`
+  rows in SQLite while proving that one visible `./dialtone_mod` command can be
+  observed successfully in `dialtone-view`
 
 ## Dependencies
 
@@ -104,28 +128,27 @@ Runtime environment dependencies:
 
 Most recent validation run:
 
-- `<timestamp-start>`: 2026-03-20T18:58:30Z
-- `<timestamp-stop>`: 2026-03-20T19:02:52Z
-- `<runtime>`: 4m22s
-- `<ERRORS>`: none in the final accepted run; earlier validation exposed that Codex still showed its self-update chooser until `codex v1` forced `CI=1`
-- `<ui-screenshot-grid>`: not captured; verification was performed by reading the live `codex-view:0:0` tmux pane and confirming Ghostty had one terminal in the selected tab
+- `<timestamp-start>`: 2026-03-20T23:59:00Z
+- `<timestamp-stop>`: 2026-03-21T00:00:00Z
+- `<runtime>`: ~60s across the final formatting/test/demo loop
+- `<ERRORS>`: none in the accepted `demo-protocol --bootstrap=false` run
+- `<ui-screenshot-grid>`: not captured; verification was performed by reading the live `codex-view:0:0` and `codex-view:0:1` tmux panes plus direct SQLite queries
 
 Most recent command set:
 
 ```text
-./dialtone_mod tmux v1 shell --pane codex-view:0:0 --shell default
-./dialtone_mod tmux v1 write --pane codex-view:0:0 --enter "cd /Users/user/dialtone/src && gofmt -w mods/codex/v1/main.go mods/codex/v1/main_test.go mods/ghostty/v1/main.go mods/ghostty/v1/main_test.go mods/shell/v1/main.go mods/shell/v1/main_test.go && go vet ./mods/codex/v1 ./mods/ghostty/v1 ./mods/shell/v1 && go test ./mods/codex/v1 ./mods/ghostty/v1 ./mods/shell/v1 && go build -o /tmp/dialtone-codex-v1 ./mods/codex/v1 && go build -o /tmp/dialtone-ghostty-v1 ./mods/ghostty/v1 && go build -o /tmp/dialtone-shell-v1 ./mods/shell/v1"
-./dialtone_mod tmux v1 read --pane codex-view:0:0 --lines 80
-./dialtone_mod shell v1 start
-./dialtone_mod ghostty v1 list
-./dialtone_mod tmux v1 read --pane codex-view:0:0 --lines 40
+cd /Users/user/dialtone && nix --extra-experimental-features 'nix-command flakes' develop .#default --command zsh -lc 'cd src && gofmt -w ./mods/shell/v1/main.go && go test ./mods/shell/v1'
+./dialtone_mod shell v1 demo-protocol --bootstrap=false
+env DIALTONE_TMUX_PROXY_ACTIVE=1 ./dialtone_mod tmux v1 read --pane codex-view:0:0 --lines 40
+env DIALTONE_TMUX_PROXY_ACTIVE=1 ./dialtone_mod tmux v1 read --pane codex-view:0:1 --lines 120
+nix --extra-experimental-features 'nix-command flakes' develop .#default --command sqlite3 .dialtone/state.sqlite "select id,name,status,prompt_target,command_target,result_text from protocol_runs order by id desc limit 5;"
+```
 
 Observed result summary:
-- `go vet ./mods/codex/v1 ./mods/ghostty/v1 ./mods/shell/v1` passed
-- `go test ./mods/codex/v1 ./mods/ghostty/v1 ./mods/shell/v1` passed
-- `/tmp/dialtone-codex-v1`, `/tmp/dialtone-ghostty-v1`, and `/tmp/dialtone-shell-v1` were produced
-- `./dialtone_mod shell v1 start` recreated Ghostty as one window with one tab
-- the Ghostty terminal visibly received `tmux new-session -A -s codex-view`
-- `./dialtone_mod ghostty v1 list` showed one focused terminal in the selected tab
-- the final proxied `codex v1 start` reached the Codex TUI without the update chooser appearing
+
+- `go test ./mods/shell/v1` passed under Nix in the visible `dialtone-view` pane
+- `demo protocol run 2 passed`
+- the recorded visible command was `env DIALTONE_TMUX_PROXY_ACTIVE=1 ./dialtone_mod mods v1 db graph --format outline`
+- `protocol_runs` recorded `passed` with prompt target `codex-view:0:0` and command target `codex-view:0:1`
+- `protocol_events` recorded `workflow_ready`, `prompt_submitted`, `command_written`, and `command_observed`
 ```
