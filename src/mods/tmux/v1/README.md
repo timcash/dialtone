@@ -12,6 +12,34 @@ In practice, the safest way to discover a pane selector is still native tmux:
 tmux list-panes -a -F '#{session_name}:#{window_index}:#{pane_index}'
 ```
 
+## Quick Start
+
+```sh
+# List tmux sessions known to the default tmux server.
+./dialtone_mod tmux v1 list
+
+# Save the default Dialtone tmux target into SQLite system state.
+./dialtone_mod tmux v1 target --set codex-view:0:0
+
+# Verify the persisted target.
+./dialtone_mod tmux v1 target
+
+# Clear the pane before writing the next command.
+./dialtone_mod tmux v1 clear --pane codex-view:0:0
+
+# Send a command into the pane and press Enter.
+./dialtone_mod tmux v1 write --pane codex-view:0:0 --enter "pwd"
+
+# Read back the last lines from the pane to verify the command ran.
+./dialtone_mod tmux v1 read --pane codex-view:0:0 --lines 20
+
+# Split the session to create the right-hand Dialtone pane.
+./dialtone_mod tmux v1 split --pane codex-view:0:0 --direction right --title dialtone-view --cwd /Users/user/dialtone
+
+# Print recent queued tmux proxy commands from SQLite.
+./dialtone_mod mods v1 db queue --name tmux --limit 10
+```
+
 ## Command API
 
 ```bash
@@ -91,7 +119,7 @@ Puts the target pane into a Dialtone repo Nix shell without starting Codex.
 Persists or clears the default tmux pane that `./dialtone_mod` should proxy
 non-control commands into.
 
-- `--set`: save a `session:window:pane` target for later `dialtone_mod` proxying
+- `--set`: save a `session:window:pane` target into SQLite system state for later `dialtone_mod` proxying
 - `--clear`: remove the saved target
 
 When a target is set, normal non-control commands like `./dialtone_mod repl v1 test`
@@ -219,4 +247,23 @@ Example:
 ```sh
 # Split codex-view:0:0 to the right and title the new pane dialtone-view.
 ./dialtone_mod tmux v1 split --pane codex-view:0:0 --direction right --title dialtone-view --cwd /Users/user/dialtone
+```
+
+## Test Results
+
+Most recent validation run:
+
+- `<timestamp-start>`: 2026-03-20T22:58:05Z
+- `<timestamp-stop>`: 2026-03-20T22:58:57Z
+- `<runtime>`: 52s
+- `<ERRORS>`: none in the final accepted run; earlier verification exposed a stale `DIALTONE_TMUX_TARGET` row in `runtime_env`, and the final fix moved tmux target ownership entirely to SQLite system state
+- `<ui-screenshot-grid>`: not captured
+
+Most recent command set:
+
+```text
+./dialtone_mod tmux v1 target --set codex-view:0:1
+./dialtone_mod mods v1 db state --key tmux.target
+env DIALTONE_TMUX_TARGET_FILE=/tmp/dialtone-missing-target ./dialtone_mod mods v1 help
+env DIALTONE_TMUX_PROXY_ACTIVE=1 ./dialtone_mod mods v1 db queue --name tmux --limit 5
 ```

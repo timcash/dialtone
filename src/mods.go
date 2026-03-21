@@ -1,12 +1,16 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"dialtone/dev/internal/modstate"
+	"dialtone/dev/mods/shared/sqlitestate"
 )
 
 func main() {
@@ -21,8 +25,16 @@ func runCLI() error {
 	if err != nil {
 		return err
 	}
+	stateDB := openStateDBBestEffort(repoRoot)
+	if stateDB != nil {
+		_, _ = sqlitestate.HydrateRuntimeEnv(stateDB, "process", false)
+	}
 	setBaseEnv(repoRoot)
 	srcRoot := filepath.Join(repoRoot, "src")
+	stateDB = syncStateDBBestEffort(repoRoot, stateDB)
+	if stateDB != nil {
+		defer stateDB.Close()
+	}
 
 	if len(os.Args) < 3 {
 		printUsage(repoRoot)
@@ -52,7 +64,7 @@ func runCLI() error {
 	if len(os.Args) > 3 {
 		commandArg = strings.TrimSpace(os.Args[3])
 	}
-	entry := resolveModEntry(srcRoot, modName, version, commandArg)
+	entry := resolveModEntry(srcRoot, stateDB, modName, version, commandArg)
 	if entry == "" {
 		return fmt.Errorf("unknown mod entrypoint for %s %s", modName, version)
 	}
@@ -77,7 +89,12 @@ func runCLI() error {
 	return nil
 }
 
-func resolveModEntry(srcRoot, modName, version, command string) string {
+func resolveModEntry(srcRoot string, stateDB *sql.DB, modName, version, command string) string {
+	if stateDB != nil {
+		if entry, err := resolveModEntryFromState(stateDB, srcRoot, modName, version, command); err == nil && strings.TrimSpace(entry) != "" {
+			return entry
+		}
+	}
 	modDir := filepath.Join(srcRoot, "mods", modName, version)
 	if shouldUseModCLI(command) && hasGoPackage(filepath.Join(modDir, "cli")) {
 		return relativeFrom(srcRoot, filepath.Join(modDir, "cli"))
@@ -118,10 +135,33 @@ func printUsage(repoRoot string) {
 	fmt.Println("Examples:")
 	fmt.Println("  ./dialtone_mod mods v1 help")
 	fmt.Println("  ./dialtone_mod mesh v3 help")
-	listAvailableMods(filepath.Join(repoRoot, "src", "mods"))
+	stateDB := syncStateDBBestEffort(repoRoot, nil)
+	if stateDB != nil {
+		defer stateDB.Close()
+	}
+	listAvailableMods(filepath.Join(repoRoot, "src", "mods"), stateDB)
 }
 
-func listAvailableMods(modRoot string) {
+func listAvailableMods(modRoot string, stateDB *sql.DB) {
+	if stateDB != nil {
+		if records, err := listAvailableModsFromState(stateDB); err == nil && len(records) > 0 {
+			fmt.Println("Available mods:")
+			current := ""
+			for _, record := range records {
+				if record.Name != current {
+					if current != "" {
+						fmt.Println()
+					}
+					fmt.Printf("  %s %s", record.Name, record.Version)
+					current = record.Name
+					continue
+				}
+				fmt.Printf(" %s", record.Version)
+			}
+			fmt.Println()
+			return
+		}
+	}
 	entries, err := os.ReadDir(modRoot)
 	if err != nil {
 		return
@@ -381,10 +421,14 @@ func isRepoRoot(candidate string) bool {
 }
 
 func setBaseEnv(repoRoot string) {
-	_ = os.Setenv("DIALTONE_REPO_ROOT", repoRoot)
-	_ = os.Setenv("DIALTONE_SRC_ROOT", filepath.Join(repoRoot, "src"))
-	_ = os.Setenv("DIALTONE_ENV_FILE", filepath.Join(repoRoot, "env", "dialtone.json"))
-	_ = os.Setenv("DIALTONE_MESH_CONFIG", filepath.Join(repoRoot, "env", "dialtone.json"))
+	setEnvDefault("DIALTONE_REPO_ROOT", repoRoot)
+	setEnvDefault("DIALTONE_SRC_ROOT", filepath.Join(repoRoot, "src"))
+	setEnvDefault("DIALTONE_ENV_FILE", filepath.Join(repoRoot, "env", "dialtone.json"))
+	setEnvDefault("DIALTONE_MESH_CONFIG", filepath.Join(repoRoot, "env", "dialtone.json"))
+	stateDir := sqlitestate.ResolveStateDir(repoRoot)
+	_ = os.MkdirAll(stateDir, 0o755)
+	setEnvDefault("DIALTONE_STATE_DIR", stateDir)
+	setEnvDefault("DIALTONE_STATE_DB", sqlitestate.ResolveStateDBPath(repoRoot))
 }
 
 func hasGoPackage(path string) bool {
@@ -416,4 +460,50 @@ func relativeFrom(base, target string) string {
 		return rel
 	}
 	return "./" + rel
+}
+
+func openStateDBBestEffort(repoRoot string) *sql.DB {
+	db, err := modstate.Open(sqlitestate.ResolveStateDBPath(repoRoot))
+	if err != nil {
+		return nil
+	}
+	if err := modstate.EnsureSchema(db); err != nil {
+		_ = db.Close()
+		return nil
+	}
+	return db
+}
+
+func syncStateDBBestEffort(repoRoot string, stateDB *sql.DB) *sql.DB {
+	db := stateDB
+	if db == nil {
+		db = openStateDBBestEffort(repoRoot)
+		if db == nil {
+			return nil
+		}
+	}
+	if _, err := modstate.SyncRepo(db, repoRoot, modstate.CaptureRuntimeEnv()); err != nil {
+		_ = db.Close()
+		return nil
+	}
+	return db
+}
+
+func setEnvDefault(key, value string) {
+	if strings.TrimSpace(os.Getenv(key)) != "" {
+		return
+	}
+	_ = os.Setenv(key, value)
+}
+
+func resolveModEntryFromState(stateDB *sql.DB, srcRoot, modName, version, command string) (string, error) {
+	entry, err := modstate.ResolveEntrypoint(stateDB, srcRoot, modName, version, command)
+	if err != nil {
+		return "", err
+	}
+	return entry.Path, nil
+}
+
+func listAvailableModsFromState(stateDB *sql.DB) ([]modstate.ModRecord, error) {
+	return modstate.LoadMods(stateDB)
 }

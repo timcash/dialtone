@@ -1,0 +1,14 @@
+{
+  "name": "ghostty",
+  "version": "v1",
+  "depends_on": [],
+  "env_vars": [
+    { "name": "DIALTONE_REPO_ROOT", "required": true },
+    { "name": "DIALTONE_STATE_DB", "required": true }
+  ],
+  "testing": {
+    "requires_nix": true,
+    "serial_group": "desktop",
+    "visible_tmux": true
+  }
+}

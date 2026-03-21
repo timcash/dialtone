@@ -231,3 +231,44 @@ The most important invariants are:
 - identify tabs by stable names, not window ordering
 - reuse the existing tab context for `tab goto` when possible
 - close the underlying CDP target for non-`main` tabs on `tab close`
+
+## Quick Start
+
+```sh
+# Show the chrome command surface from the sqlite-managed mods system.
+./dialtone_mod chrome v1 help
+
+# Run the Go test package for this mod from the repo source tree.
+cd /Users/user/dialtone/src
+go test ./mods/chrome/v1/cli
+
+# Regenerate the sqlite DAG and the stepwise test plan before the next TDD loop.
+cd ..
+./dialtone_mod mods v1 db sync
+./dialtone_mod mods v1 db test-plan
+```
+
+## Test Results
+
+Most recent validation run:
+
+- `<run-id>`: 2
+- `<plan-name>`: default
+- `<timestamp-start>`: 2026-03-20T23:26:51Z
+- `<timestamp-stop>`: 2026-03-20T23:26:58Z
+- `<runtime>`: 7s
+- `<status>`: failed
+- `<ERRORS>`: none
+- `<ui-screenshot-grid>`: not captured
+
+Most recent command set:
+
+```sh
+# step 1 -> chrome v1 (passed)
+go test ./mods/chrome/v1/cli
+
+```
+
+Observed result summary:
+
+- step 1 `chrome v1` -> `passed` (exit=0)

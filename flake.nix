@@ -11,7 +11,7 @@
         let
           pkgs = import nixpkgs { inherit system; };
           baseDevPackages = with pkgs; [
-            bash curl git gh go_1_25 gnumake nodejs bun tmux zsh cloudflared
+            bash curl git gh go_1_25 gnumake nodejs bun tmux zsh cloudflared sqlite
           ] ++ (pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs.darwin.apple_sdk.frameworks; [
             Security
             CoreFoundation
@@ -19,11 +19,19 @@
           ]));
           mkShellHook = shellName: ''
             export DIALTONE_REPO_ROOT="''${DIALTONE_REPO_ROOT:-$(pwd)}"
+            export DIALTONE_STATE_DIR="''${DIALTONE_STATE_DIR:-$DIALTONE_REPO_ROOT/.dialtone}"
+            export DIALTONE_STATE_DB="''${DIALTONE_STATE_DB:-$DIALTONE_STATE_DIR/state.sqlite}"
             export DIALTONE_NIX_ACTIVE=1
             export DIALTONE_NIX_SHELL="${shellName}"
             export DIALTONE_SSH_CONFIG="$DIALTONE_REPO_ROOT/env/ssh_config"
             export DIALTONE_NIX_BASE_PATH="$PATH"
+            mkdir -p "$DIALTONE_STATE_DIR"
             export DIALTONE_GO_BIN="$(PATH="$DIALTONE_NIX_BASE_PATH" command -v go)"
+            if PATH="$DIALTONE_NIX_BASE_PATH" command -v sqlite3 >/dev/null 2>&1; then
+              export DIALTONE_SQLITE_BIN="$(PATH="$DIALTONE_NIX_BASE_PATH" command -v sqlite3)"
+            else
+              unset DIALTONE_SQLITE_BIN || true
+            fi
             if PATH="$DIALTONE_NIX_BASE_PATH" command -v ssh >/dev/null 2>&1; then
               export DIALTONE_SSH_BIN="$(PATH="$DIALTONE_NIX_BASE_PATH" command -v ssh)"
             else
@@ -101,8 +109,8 @@
             text = ''
               set -euo pipefail
               repo_root="''${DIALTONE_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-              cd "$repo_root"
-              exec go run ./src/mods.go repl v1 "$@"
+              cd "$repo_root/src"
+              exec go run ./mods.go repl v1 "$@"
             '';
           };
           sshModV1 = runtimeScript {
@@ -110,8 +118,8 @@
             text = ''
               set -euo pipefail
               repo_root="''${DIALTONE_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-              cd "$repo_root"
-              exec go run ./src/mods.go ssh v1 "$@"
+              cd "$repo_root/src"
+              exec go run ./mods.go ssh v1 "$@"
             '';
           };
         in

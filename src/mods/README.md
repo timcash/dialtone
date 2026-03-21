@@ -138,7 +138,7 @@ go run ./src/mods/my_mod/v1/cli help
 ## Note on Other Mods
 
 Example mod entrypoints currently available:
-- `./dialtone_mod mesh v1 <command>`
+- `./dialtone_mod mesh v3 <command>`
 - `./dialtone_mod mosh v1 <command>`
 - `./dialtone_mod tsnet v1 <command>`
 - `./dialtone_mod mods v1 <command>`

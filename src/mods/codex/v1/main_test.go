@@ -52,3 +52,12 @@ func TestBuildCodexExecCommandIncludesFallback(t *testing.T) {
 		t.Fatalf("missing npx exec: %q", cmd)
 	}
 }
+
+func TestNormalizePaneTargetAcceptsColonAndDotForms(t *testing.T) {
+	if got := normalizePaneTarget("codex-view:0:1"); got != "codex-view:0.1" {
+		t.Fatalf("unexpected normalized colon target: %q", got)
+	}
+	if got := normalizePaneTarget("codex-view:0.1"); got != "codex-view:0.1" {
+		t.Fatalf("unexpected normalized dot target: %q", got)
+	}
+}

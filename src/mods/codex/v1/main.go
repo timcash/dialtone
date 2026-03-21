@@ -40,6 +40,7 @@ func main() {
 func runStart(argv []string) error {
 	opts := flag.NewFlagSet("codex v1 start", flag.ContinueOnError)
 	session := opts.String("session", "codex-view", "tmux session name on the default tmux server")
+	pane := opts.String("pane", "", "Explicit tmux pane target to launch Codex into")
 	shellName := opts.String("shell", "default", "flake shell to enter before launching Codex")
 	reasoning := opts.String("reasoning", "medium", "reasoning label for startup banner")
 	model := opts.String("model", "gpt-5.4", "Codex model to launch")
@@ -52,6 +53,21 @@ func runStart(argv []string) error {
 		return err
 	}
 	startCmd := buildStartCommand(repoRoot, *shellName, *reasoning, *model)
+	explicitPane := strings.TrimSpace(*pane)
+	if explicitPane != "" {
+		target := normalizePaneTarget(explicitPane)
+		if err := resetPane(target); err != nil {
+			return err
+		}
+		if err := clearPaneHistory(target); err != nil {
+			return err
+		}
+		if err := sendKeys(target, startCmd, true); err != nil {
+			return err
+		}
+		fmt.Printf("started codex in tmux pane %s\n", target)
+		return nil
+	}
 	if isProxyActive() {
 		target, err := currentPaneTarget()
 		if err != nil {
@@ -201,6 +217,15 @@ func buildCodexExecCommand(model string) string {
 
 func isProxyActive() bool {
 	return strings.TrimSpace(os.Getenv("DIALTONE_TMUX_PROXY_ACTIVE")) == "1"
+}
+
+func normalizePaneTarget(value string) string {
+	trimmed := strings.TrimSpace(value)
+	parts := strings.Split(trimmed, ":")
+	if len(parts) == 3 {
+		return fmt.Sprintf("%s:%s.%s", parts[0], parts[1], parts[2])
+	}
+	return trimmed
 }
 
 func runInCurrentPane(command string) error {

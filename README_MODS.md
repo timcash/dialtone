@@ -1,11 +1,16 @@
 # Mods Guide
 
-This file is the working guide for the Dialtone mods system: how mods are
-organized, how `./dialtone_mod` resolves them, how to work on Go mods with Nix,
-and how LLM agents should route commands through Ghostty + tmux so the user can
-see what is being run.
+This is the operating guide for the Dialtone mods system.
 
-## Overview
+The goal is to make five things work together in one visible loop:
+
+- `codex-view`: the left tmux pane where prompts go
+- `dialtone-view`: the right tmux pane where `./dialtone_mod` commands run visibly
+- `./dialtone_mod`: the mod launcher and visible command surface
+- SQLite: the source of truth for DAG, targets, queue state, protocol runs, and test runs
+- `src/mods/<mod-name>/<version>/`: the versioned mod implementation layout
+
+## Core Model
 
 Dialtone mods live under:
 
@@ -19,10 +24,11 @@ Examples:
 src/mods/ghostty/v1/
 src/mods/tmux/v1/
 src/mods/codex/v1/
+src/mods/shell/v1/
 src/mods/mod/v1/
 ```
 
-The top-level launcher is:
+The normal entrypoint is:
 
 ```sh
 ./dialtone_mod <mod-name> <version> <command> [args]
@@ -33,336 +39,304 @@ Examples:
 ```sh
 ./dialtone_mod ghostty v1 help
 ./dialtone_mod shell v1 start
-./dialtone_mod tmux v1 list
-./dialtone_mod codex v1 status --session codex-view
-./dialtone_mod mods v1 help
+./dialtone_mod shell v1 demo-protocol
+./dialtone_mod tmux v1 read --pane codex-view:0:0 --lines 40
+./dialtone_mod mods v1 db sync
 ```
 
-Notes:
+## SQLite First
 
-- `mods` is an alias for the `mod` mod.
-- Versions are explicit. `v1` and `v2` are separate command surfaces.
-- `./dialtone_mod` runs `go run ./src/mods.go ...` under the repo's Nix-aware
-  wrapper unless Nix is explicitly bypassed.
+The central state database is:
+
+```text
+.dialtone/state.sqlite
+```
+
+SQLite is the shared ledger for:
+
+- the mod DAG
+- test-plan ordering
+- tmux targets
+- prompt queue rows
+- command queue rows
+- protocol runs and protocol events
+- test runs and test steps
+
+Use the `mods` mod to keep the DB in sync:
+
+```sh
+# Resolve the current SQLite path.
+./dialtone_mod mods v1 db path
+
+# Initialize the schema if needed.
+./dialtone_mod mods v1 db init
+
+# Sync the repo scan, manifests, nix packages, env, topology, and test plan.
+./dialtone_mod mods v1 db sync
+
+# Render the DAG as a simple outline from SQLite.
+./dialtone_mod mods v1 db graph --format outline
+
+# Show the topological test order from SQLite.
+./dialtone_mod mods v1 db topo
+./dialtone_mod mods v1 db test-plan
+```
+
+Current SQLite outline:
+
+```text
+- chrome:v1
+- mesh:v3
+- mod:v1
+- mosh:v1
+- repl:v1
+- ssh:v1
+- shell:v1
+  - ghostty:v1
+  - tmux:v1
+  - codex:v1
+    - tmux:v1
+- tsnet:v1
+```
 
 ## Required Workflow
 
-1. Use Ghostty as the interactive terminal UI.
-2. Use a tmux session named `codex-view` inside Ghostty for interactive mod work.
-3. Use Nix for all build, format, lint, and test work. Do not rely on host Go.
-4. Use `./dialtone_mod` from the repo root, not ad-hoc `go run` commands, when
-   exercising real mod behavior.
-5. Prefer the repo's own control mods when operating the local session:
-   - `ghostty v1`
-   - `tmux v1`
-   - `codex v1`
-6. For the tested one-window/one-tab local workflow, use `codex-view:0:0` as
-   the canonical tmux target unless you are explicitly debugging tmux layout.
+For interactive work, the system should look like this:
 
-## Version System
+- one Ghostty window
+- one Ghostty tab
+- one tmux session: `codex-view`
+- left pane: `codex-view:0:0`
+- right pane: `codex-view:0:1`
 
-Each mod version is a stable CLI contract.
+Target roles:
 
-```sh
-# List available mods and their versions.
-./dialtone_mod help
+- `tmux.prompt_target = codex-view:0:0`
+- `tmux.target = codex-view:0:1`
 
-# Work against a specific version explicitly.
-./dialtone_mod ghostty v1 help
-./dialtone_mod tmux v1 help
-```
+That means:
 
-Rules:
+- prompts go left
+- visible `./dialtone_mod` commands go right
+- SQLite tracks both
 
-- New compatible work should stay inside the existing version directory.
-- Breaking CLI or behavior changes should go into a new version directory such
-  as `v2`.
-- Do not silently change `v1` semantics if downstream agents or scripts may
-  already depend on them.
-
-The launcher resolves entrypoints like this:
-
-- `./dialtone_mod <mod> <version> <non-build-command>` runs the package in
-  `src/mods/<mod>/<version>/` when present.
-- `./dialtone_mod <mod> <version> install|build|format|test` prefers
-  `src/mods/<mod>/<version>/cli/` when that package exists.
-
-## Canonical Session Bootstrap
-
-Use this to create the working Ghostty + tmux environment. Prefer the
-single-command shell mod when you want the full local workflow.
+## Quick Start
 
 ```sh
-# Preferred path: reset Ghostty to one window with one tab, attach codex-view,
-# set the tmux proxy target, and launch Codex in one command.
-./dialtone_mod shell v1 start
-```
+# 1. Start the visible two-pane workflow.
+# This creates one fresh Ghostty window, one tab, attaches tmux, keeps Codex on
+# the left, and keeps `dialtone-view` on the right.
+./dialtone_mod shell v1 start --run-tests=false
 
-Manual path:
+# 2. Confirm the tmux targets stored in SQLite.
+# `command` should be the right pane and `prompt` should be the left pane.
+./dialtone_mod tmux v1 target --all
 
-```sh
-# Reset Ghostty to one window with one tab rooted at the repo.
-# Keep AppleScript inside the Ghostty mod; use the mod CLI here.
-./dialtone_mod ghostty v1 fresh-window --cwd /Users/user/dialtone
+# 3. Show the DAG outline from SQLite.
+./dialtone_mod mods v1 db graph --format outline
 
-# Start or attach the canonical tmux session in the selected Ghostty terminal.
-# `--focus` is harmless here and keeps the write target explicit.
-./dialtone_mod ghostty v1 write --terminal 1 --focus "tmux new-session -A -s codex-view"
+# 4. Run the protocol smoke test against the current visible panes.
+# `--bootstrap=false` keeps the current Ghostty/tmux layout and only exercises
+# the prompt/command/SQLite protocol.
+./dialtone_mod shell v1 demo-protocol --bootstrap=false
 
-# Persist the default proxy target for future dialtone_mod commands.
-# In the tested one-window/one-tab workflow, the canonical pane is
-# `codex-view:0:0`.
-./dialtone_mod tmux v1 target --set codex-view:0:0
-
-# Launch Codex in the visible tmux session.
-./dialtone_mod codex v1 start --session codex-view
-```
-
-## Working Through Ghostty And tmux
-
-All LLMs should route mod work through the live Ghostty/tmux session whenever
-the user should be able to see the commands being executed.
-
-### Direct Injection
-
-```sh
-# Send a command to the live tmux pane explicitly.
-./dialtone_mod tmux v1 write --pane codex-view:0:0 --enter "pwd"
-
-# Read back recent output from that pane.
+# 5. Inspect the panes after the smoke test.
 ./dialtone_mod tmux v1 read --pane codex-view:0:0 --lines 40
+./dialtone_mod tmux v1 read --pane codex-view:0:1 --lines 80
+
+# 6. Supervise the live system.
+./dialtone_mod shell v1 supervise --limit 5
+
+# 7. Inspect protocol rows directly without queueing another visible command.
+# Use the proxy bypass when the controller wants immediate SQLite readback.
+env DIALTONE_TMUX_PROXY_ACTIVE=1 ./dialtone_mod mods v1 db protocol-runs --limit 5
+env DIALTONE_TMUX_PROXY_ACTIVE=1 ./dialtone_mod mods v1 db protocol-events --run 2
 ```
 
-### Set The Default tmux Target
+## LLM Workflow
 
-Once the target is set, normal non-control `./dialtone_mod` commands are sent
-into that tmux pane automatically.
+All LLMs should operate as controllers, not hidden workers.
+
+The intended loop is:
+
+1. Read `README_MODS.md`.
+2. Sync the SQLite DAG.
+3. Start or verify the visible two-pane session.
+4. Improve the user prompt before sending it.
+5. Submit the improved prompt into `codex-view`.
+6. Expect `./dialtone_mod` commands to appear visibly in `dialtone-view`.
+7. Poll SQLite and pane output to decide whether the run is healthy, stuck, or looping.
+8. Intervene by sending a better prompt or a recovery command.
+
+The basic controller commands are:
 
 ```sh
-# Set the default proxy target once.
-./dialtone_mod tmux v1 target --set codex-view:0:0
+# Submit a prompt into the left pane and record it in SQLite.
+./dialtone_mod shell v1 prompt "Your improved prompt here"
 
-# Show the current target.
-./dialtone_mod tmux v1 target
+# Inspect the live panes.
+./dialtone_mod tmux v1 read --pane codex-view:0:0 --lines 60
+./dialtone_mod tmux v1 read --pane codex-view:0:1 --lines 80
 
-# After this, non-control mod commands are injected into the tmux pane instead
-# of running directly in the caller shell.
-./dialtone_mod codex v1 status --session codex-view
-./dialtone_mod repl v1 help
+# Inspect queue health.
+./dialtone_mod shell v1 supervise --limit 5
 
-# Read the visible output from the tmux pane.
-./dialtone_mod tmux v1 read --pane codex-view:0:0 --lines 80
+# Inspect the queued tmux commands.
+./dialtone_mod mods v1 db queue --name tmux --limit 10
+./dialtone_mod mods v1 db queue --name prompts --limit 10
+
+# Inspect protocol rows directly from the controller shell.
+env DIALTONE_TMUX_PROXY_ACTIVE=1 ./dialtone_mod mods v1 db protocol-runs --limit 5
+env DIALTONE_TMUX_PROXY_ACTIVE=1 ./dialtone_mod mods v1 db protocol-events --run 2
 ```
 
-Important behavior:
+### Prompt Pattern
 
-- `tmux v1`, `ghostty v1`, and `shell v1` are control mods and bypass the tmux proxy.
-- Most other `./dialtone_mod` commands will be sent into the configured tmux
-  pane once the target is set.
-- This is the preferred mode for LLM agents because the user can see the exact
-  commands arrive in Ghostty.
-
-### Recommended LLM Pattern
-
-```sh
-# 1. Prefer the one-command bootstrap for a fresh local session.
-./dialtone_mod shell v1 start
-
-# 2. If you are following the manual path, make sure the tmux session exists.
-./dialtone_mod ghostty v1 fresh-window --cwd /Users/user/dialtone
-./dialtone_mod ghostty v1 write --terminal 1 --focus "tmux new-session -A -s codex-view"
-
-# 3. Persist the canonical pane id for the tested layout.
-./dialtone_mod tmux v1 target --set codex-view:0:0
-
-# 4. Run normal non-control mod commands; they will be injected into tmux for
-# visibility.
-./dialtone_mod codex v1 status --session codex-view
-./dialtone_mod repl v1 help
-
-# 5. Read output back when needed.
-./dialtone_mod tmux v1 read --pane codex-view:0:0 --lines 80
-```
-
-## Golang And Nix
-
-All Go work must run with Nix-provided tooling.
-
-### Enter A Nix Shell In The tmux Session
-
-```sh
-# Put the live tmux pane into the repo's default Nix shell.
-./dialtone_mod tmux v1 shell --pane codex-view:0:0 --shell default
-
-# Read the pane to confirm the shell switched.
-./dialtone_mod tmux v1 read --pane codex-view:0:0 --lines 40
-```
-
-### Go Mod Development Workflow
-
-For a Go-backed mod like `ghostty v1`, the normal work loop is:
-
-```sh
-# Change into the Go module root inside the repo.
-cd /Users/user/dialtone/src
-
-# Format the mod package and its tests.
-gofmt -w mods/ghostty/v1/main.go mods/ghostty/v1/main_test.go
-
-# Lint the package with go vet when the package is Go-based.
-go vet ./mods/ghostty/v1
-
-# Run unit tests for the mod package.
-go test ./mods/ghostty/v1
-
-# Build the package directly to verify it compiles cleanly.
-go build -o /tmp/dialtone-ghostty-v1 ./mods/ghostty/v1
-```
-
-If you want those commands to be visible to the user in Ghostty, inject them
-through tmux:
-
-```sh
-# Run the whole Go validation sequence inside the live tmux pane.
-./dialtone_mod tmux v1 write --pane codex-view:0:0 --enter "cd /Users/user/dialtone/src && gofmt -w mods/ghostty/v1/main.go mods/ghostty/v1/main_test.go && go vet ./mods/ghostty/v1 && go test ./mods/ghostty/v1 && go build -o /tmp/dialtone-ghostty-v1 ./mods/ghostty/v1"
-
-# Read the result from the pane.
-./dialtone_mod tmux v1 read --pane codex-view:0:0 --lines 120
-```
-
-### Using `./dialtone_mod` For Install, Format, Build, Test
-
-When a mod has a `cli/` package, `./dialtone_mod <mod> <version> install|build|format|test`
-prefers that CLI entrypoint. Use the mod's own help output to see which
-commands it exposes.
-
-```sh
-# Discover the mod's own CLI surface.
-./dialtone_mod mod v1 help
-./dialtone_mod ghostty v1 help
-
-# Example of a mod with a CLI entrypoint.
-./dialtone_mod mod v1 format
-./dialtone_mod mod v1 test
-./dialtone_mod mod v1 build
-```
-
-For Go mods that do not expose `install|build|format|test` themselves, use the
-Nix shell plus normal Go tools:
-
-```sh
-# Example for a Go mod without a dedicated build/test CLI.
-cd /Users/user/dialtone/src
-gofmt -w mods/ghostty/v1/main.go mods/ghostty/v1/main_test.go
-go vet ./mods/ghostty/v1
-go test ./mods/ghostty/v1
-go build -o /tmp/dialtone-ghostty-v1 ./mods/ghostty/v1
-```
-
-### When Linting Needs More Than `go vet`
-
-If a mod needs extra tools such as `staticcheck`, add them to the mod's
-`nix.packages` file first so the tool is provided by Nix instead of the host.
-
-```sh
-# Example shape only; adjust the package if the mod actually adopts it.
-printf '%s\n' 'nixpkgs#staticcheck' >> /Users/user/dialtone/src/mods/<mod>/<version>/nix.packages
-```
-
-## Full LLM Workflow For Go Mods
-
-This is the expected end-to-end loop for an LLM agent working on a Go mod.
-
-```sh
-# 1. Start the visible local session with one command.
-./dialtone_mod shell v1 start
-
-# 2. Confirm the canonical tmux target.
-./dialtone_mod tmux v1 target --set codex-view:0:0
-
-# 3. Put the pane into the Nix shell.
-./dialtone_mod tmux v1 shell --pane codex-view:0:0 --shell default
-
-# 4. Inject formatting, linting, tests, and builds into the visible tmux pane.
-./dialtone_mod tmux v1 write --pane codex-view:0:0 --enter "cd /Users/user/dialtone/src && gofmt -w mods/<mod>/<version>/*.go && go vet ./mods/<mod>/<version> && go test ./mods/<mod>/<version> && go build -o /tmp/<mod>-<version> ./mods/<mod>/<version>"
-
-# 5. Read the output back and use it to decide the next edit.
-./dialtone_mod tmux v1 read --pane codex-view:0:0 --lines 160
-
-# 6. Exercise the real mod behavior with ./dialtone_mod so the user can see it.
-./dialtone_mod <mod> <version> help
-./dialtone_mod <mod> <version> <command> [args]
-./dialtone_mod tmux v1 read --pane codex-view:0:0 --lines 160
-```
-
-LLM rules:
-
-- Use `./dialtone_mod shell v1 start` for fresh local session bootstrap unless
-  you are debugging the lower-level Ghostty/tmux mods themselves.
-- Prefer visible tmux-injected commands over invisible host-only execution.
-- Set the tmux target early when you plan to use `./dialtone_mod` repeatedly.
-- Use `tmux v1 read` after meaningful commands so the output is inspectable.
-- Keep using Nix-backed tooling; do not switch to host Go, host linters, or
-  host build chains mid-task.
-
-## Creating Or Updating A Mod
-
-New or existing mods should follow the versioned directory layout:
+When the user gives a task, the controller should tighten it into something like:
 
 ```text
-src/mods/<name>/<version>/
+Task: update src/mods/<mod>/<version>/...
+
+Requirements:
+- use the existing mod/version CLI contract
+- keep SQLite as the source of truth for state and DAG data
+- run visible ./dialtone_mod commands in dialtone-view
+- record results precisely
+- summarize blockers instead of guessing
 ```
 
-Typical contents:
+## Protocol Smoke Test
+
+The current smoke test is:
+
+```sh
+./dialtone_mod shell v1 demo-protocol --bootstrap=false
+```
+
+What it does:
+
+- records a `protocol_runs` row in SQLite
+- records ordered `protocol_events` rows in SQLite
+- submits a prompt into `codex-view`
+- writes one visible `./dialtone_mod` command into `dialtone-view`
+- waits for expected output in the right pane
+- marks the protocol run `passed` or `failed`
+
+Current validated result:
 
 ```text
-src/mods/ghostty/v1/main.go
-src/mods/ghostty/v1/main_test.go
-src/mods/ghostty/v1/README.md
-src/mods/ghostty/v1/nix.packages
-src/mods/ghostty/v1/cli/
+demo protocol run 2 passed
+prompt_target	codex-view:0:0
+command_target	codex-view:0:1
+command	env DIALTONE_TMUX_PROXY_ACTIVE=1 ./dialtone_mod mods v1 db graph --format outline
+result	observed "- shell:v1" in codex-view:0:1
 ```
 
-Guidelines:
+The live right-pane command that was observed:
 
-- Put runtime behavior in `main.go` unless the package becomes large.
-- If the package grows beyond a clean single-file implementation, split it by
-  concern inside the same version directory.
-- Use `main_test.go` or additional `*_test.go` files for unit tests.
-- Add or update `nix.packages` when the mod needs extra tools.
-- Keep the README accurate and runnable.
+```text
+env DIALTONE_TMUX_PROXY_ACTIVE=1 ./dialtone_mod mods v1 db graph --format outline
+- chrome:v1
+- mesh:v3
+- mod:v1
+- mosh:v1
+- repl:v1
+- ssh:v1
+- shell:v1
+  - ghostty:v1
+  - tmux:v1
+  - codex:v1
+    - tmux:v1
+- tsnet:v1
+```
 
-## Documentation Expectations
+## Deep Inspection
 
-When updating a mod README, include:
+Use the shell mod first. If you need raw SQLite inspection, use Nix and query the DB directly.
 
-1. `Quick Start`
-2. `DIALTONE>`
-3. `Dependencies`
-4. `Test Results`
+```sh
+# Show protocol runs through the mod CLI without queueing to dialtone-view.
+env DIALTONE_TMUX_PROXY_ACTIVE=1 ./dialtone_mod mods v1 db protocol-runs --limit 5
+env DIALTONE_TMUX_PROXY_ACTIVE=1 ./dialtone_mod mods v1 db protocol-events --run 2
 
-The `Quick Start` section should prefer shell code blocks with comments.
+# Show the latest protocol runs directly from SQLite.
+nix --extra-experimental-features 'nix-command flakes' develop .#default \
+  --command sqlite3 .dialtone/state.sqlite \
+  "select id,name,status,prompt_target,command_target,result_text from protocol_runs order by id desc limit 5;"
 
-The `DIALTONE>` section should show realistic command/output examples so future
-LLM agents can infer expected interaction patterns.
+# Show the ordered events for one protocol run.
+nix --extra-experimental-features 'nix-command flakes' develop .#default \
+  --command sqlite3 .dialtone/state.sqlite \
+  "select run_id,event_index,event_type,queue_name,queue_row_id,pane_target,command_text,message_text from protocol_events where run_id=2 order by event_index;"
+```
 
-The `Dependencies` section should name other mods and versions the mod depends
-on.
+Observed rows for run `2`:
 
-The `Test Results` section should track the most recent validation run with
-metadata fields such as:
+```text
+2|demo-protocol|passed|codex-view:0:0|codex-view:0:1|observed "- shell:v1" in codex-view:0:1
+```
 
-- `<timestamp-start>`
-- `<timestamp-stop>`
-- `<runtime>`
-- `<ERRORS>`
-- `<ui-screenshot-grid>`
+```text
+2|1|workflow_ready||0|||prompt=codex-view:0:0 command=codex-view:0:1
+2|2|prompt_submitted|prompts|27|codex-view:0:0|Protocol demo: the controller is recording this run in SQLite. A visible dialtone_mod command will run in dialtone-view while this prompt is shown in codex-view.|submitted prompt to codex-view
+2|3|command_written|tmux|0|codex-view:0:1|env DIALTONE_TMUX_PROXY_ACTIVE=1 ./dialtone_mod mods v1 db graph --format outline|wrote visible command to dialtone-view
+2|4|command_observed|tmux|0|codex-view:0:1|env DIALTONE_TMUX_PROXY_ACTIVE=1 ./dialtone_mod mods v1 db graph --format outline|- shell:v1
+```
 
-## macOS Notes
+## Go + Nix
 
-- Ghostty's native AppleScript API is sufficient for window, tab, and terminal
-  inspection, creation, splitting, focusing, and text input.
-- `System Events` GUI scripting is only needed for fallback keystroke-style
-  automation.
-- If `System Events` automation is ever needed, grant the host app
-  Accessibility and Automation permissions in macOS System Settings.
+All Go build, format, and test work should run through Nix.
+
+```sh
+# Format and test a mod inside the repo Nix shell.
+cd /Users/user/dialtone
+nix --extra-experimental-features 'nix-command flakes' develop .#default \
+  --command zsh -lc 'cd src && gofmt -w ./mods/shell/v1/main.go && go test ./mods/shell/v1'
+
+# Build a mod binary inside the same shell.
+cd /Users/user/dialtone
+nix --extra-experimental-features 'nix-command flakes' develop .#default \
+  --command zsh -lc 'cd src && go build -o /tmp/dialtone-shell-v1 ./mods/shell/v1'
+```
+
+For visible runs, prefer writing the command into `dialtone-view`:
+
+```sh
+./dialtone_mod tmux v1 write --pane codex-view:0:1 --enter \
+  "cd /Users/user/dialtone && nix --extra-experimental-features 'nix-command flakes' develop .#default --command zsh -lc 'cd src && go test ./mods/shell/v1'"
+```
+
+## Test Strategy
+
+There are three useful layers:
+
+- unit tests
+  Pure Go tests for DAG logic, queue transitions, protocol tables, and renderers
+- integration tests
+  Real SQLite + real tmux + visible command execution
+- visible protocol smoke tests
+  `shell v1 demo-protocol` against the current two-pane session
+
+Current validated packages under Nix:
+
+```text
+ok  	dialtone/dev/internal/modstate
+ok  	dialtone/dev/mods/mod/v1
+ok  	dialtone/dev/mods/shell/v1
+```
+
+## Current Mod Order
+
+The current SQLite-derived test order is:
+
+1. `chrome v1`
+2. `ghostty v1`
+3. `mesh v3`
+4. `mod v1`
+5. `mosh v1`
+6. `repl v1`
+7. `ssh v1`
+8. `tmux v1`
+9. `codex v1`
+10. `shell v1`
+11. `tsnet v1`
