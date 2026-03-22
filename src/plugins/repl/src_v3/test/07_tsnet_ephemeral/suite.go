@@ -1,6 +1,7 @@
 package tsnetephemeral
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"dialtone/dev/plugins/repl/src_v3/test/support"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
+	"github.com/nats-io/nats.go"
 )
 
 func Register(r *testv1.Registry) {
@@ -27,15 +29,32 @@ func Register(r *testv1.Registry) {
 				return testv1.StepRunResult{}, err
 			}
 
+			// Send a probe to the leader so it announces its tsnet status.
+			nc, err := nats.Connect(rt.NATSURL, nats.Timeout(1200*time.Millisecond))
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			defer nc.Close()
+			probe := map[string]string{
+				"type":    "probe",
+				"from":    "repl-src-v3-test",
+				"room":    rt.Room,
+				"message": "probe",
+			}
+			rawProbe, _ := json.Marshal(probe)
+			_ = nc.Publish("repl.cmd", rawProbe)
+			_ = nc.Flush()
+
 			matched, err := rt.WaitForAnyPattern(120*time.Second, []string{
 				`DIALTONE tsnet NATS endpoint: nats://`,
+				`tsnet NATS endpoint: nats://`,
 				`Native tailscale already connected`,
 			})
 			if err != nil {
 				return testv1.StepRunResult{}, err
 			}
 			requireEmbedded := strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_REQUIRE_EMBEDDED_TSNET")) == "1"
-			if strings.Contains(matched, "native tailscale already connected") {
+			if strings.Contains(matched, "native tailscale already connected") || strings.Contains(matched, "Native tailscale already connected") {
 				if requireEmbedded {
 					return testv1.StepRunResult{}, fmt.Errorf("native tailscale detected, but embedded tsnet was required")
 				}
