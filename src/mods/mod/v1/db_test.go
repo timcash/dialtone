@@ -125,7 +125,7 @@ func TestRunDBSyncPersistsTopologyAndPlan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadTestPlan returned error: %v", err)
 	}
-	if len(plan) != 2 || plan[1].CommandText != "go test ./mods/shell/v1" {
+	if len(plan) != 2 || plan[1].CommandText != "go test ./mods/shell/v1/..." {
 		t.Fatalf("unexpected test plan after db sync: %+v", plan)
 	}
 }

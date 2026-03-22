@@ -7,6 +7,28 @@ import (
 	"testing"
 )
 
+func TestDefaultStateDirUsesUserHome(t *testing.T) {
+	t.Setenv("HOME", "/tmp/dialtone-home")
+	if got := DefaultStateDir("/tmp/repo"); got != "/tmp/dialtone-home/.dialtone" {
+		t.Fatalf("unexpected default state dir: %q", got)
+	}
+	if got := DefaultDBPath("/tmp/repo"); got != "/tmp/dialtone-home/.dialtone/state.sqlite" {
+		t.Fatalf("unexpected default db path: %q", got)
+	}
+}
+
+func TestHasGoPackageIgnoresTestOnlyDirectories(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "main_test.go"), "package example_test\n")
+	if hasGoPackage(dir) {
+		t.Fatalf("expected test-only directory to be treated as non-runnable")
+	}
+	writeFile(t, filepath.Join(dir, "main.go"), "package main\n")
+	if !hasGoPackage(dir) {
+		t.Fatalf("expected non-test go file to be treated as runnable")
+	}
+}
+
 func TestSyncRepoPersistsModsDependenciesAndEnv(t *testing.T) {
 	repoRoot := t.TempDir()
 	writeFile(t, filepath.Join(repoRoot, "dialtone_mod"), "#!/bin/sh\nexit 0\n")
@@ -250,6 +272,49 @@ func TestProtocolRunLifecycle(t *testing.T) {
 	}
 }
 
+func TestShellBusLifecycle(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "state.sqlite"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer db.Close()
+
+	id, err := EnqueueShellBus(db, "shell", "desired", "prompt", "submit", "controller", "codex-view", "codex-view:0:0", `{"text":"hello"}`)
+	if err != nil {
+		t.Fatalf("EnqueueShellBus returned error: %v", err)
+	}
+	queued, err := LoadQueuedShellBus(db, 10)
+	if err != nil {
+		t.Fatalf("LoadQueuedShellBus returned error: %v", err)
+	}
+	if len(queued) != 1 || queued[0].ID != id || queued[0].Status != "queued" {
+		t.Fatalf("unexpected queued shell bus rows: %+v", queued)
+	}
+	if err := UpdateShellBusStatus(db, id, "done", 99, `{"result":"ok"}`); err != nil {
+		t.Fatalf("UpdateShellBusStatus returned error: %v", err)
+	}
+	if _, err := AppendShellBusObserved(db, "tmux", "pane", "snapshot", "sync", "codex-view", "codex-view:0:0", id, `{"text":"hello"}`); err != nil {
+		t.Fatalf("AppendShellBusObserved returned error: %v", err)
+	}
+	rows, err := LoadShellBus(db, "", 10)
+	if err != nil {
+		t.Fatalf("LoadShellBus returned error: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 shell bus rows, got %d", len(rows))
+	}
+	if rows[0].Scope != "observed" || rows[1].Status != "done" || rows[1].RefID != 99 {
+		t.Fatalf("unexpected shell bus rows: %+v", rows)
+	}
+	record, ok, err := LoadShellBusRecord(db, id)
+	if err != nil {
+		t.Fatalf("LoadShellBusRecord returned error: %v", err)
+	}
+	if !ok || record.Status != "done" || record.RefID != 99 {
+		t.Fatalf("unexpected shell bus record: ok=%v record=%+v", ok, record)
+	}
+}
+
 func TestBuildTopologyAndTestPlan(t *testing.T) {
 	mods := []ModRecord{
 		{Name: "ghostty", Version: "v1", Path: "src/mods/ghostty/v1"},
@@ -278,7 +343,7 @@ func TestBuildTopologyAndTestPlan(t *testing.T) {
 	if len(plan) != 3 {
 		t.Fatalf("expected 3 plan steps, got %d", len(plan))
 	}
-	if plan[2].ModName != "shell" || plan[2].CommandText != "go test ./mods/shell/v1" {
+	if plan[2].ModName != "shell" || plan[2].CommandText != "go test ./mods/shell/v1/..." {
 		t.Fatalf("unexpected final plan step: %+v", plan[2])
 	}
 }
@@ -334,8 +399,51 @@ func TestSyncRepoPersistsTopologyAndTestSteps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadTestPlan returned error: %v", err)
 	}
-	if len(plan) != 2 || plan[1].CommandText != "go test ./mods/shell/v1" {
+	if len(plan) != 2 || plan[1].CommandText != "go test ./mods/shell/v1/..." {
 		t.Fatalf("unexpected persisted test plan: %+v", plan)
+	}
+}
+
+func TestSyncRepoPreservesStateValues(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeFile(t, filepath.Join(repoRoot, "dialtone_mod"), "#!/bin/sh\nexit 0\n")
+	writeFile(t, filepath.Join(repoRoot, "src", "go.mod"), "module example\n\ngo 1.25\n")
+	writeFile(t, filepath.Join(repoRoot, "src", "mods", "ghostty", "v1", "cli", "main.go"), "package main\n")
+	writeFile(t, filepath.Join(repoRoot, "src", "mods", "ghostty", "v1", "mod.json"), `{"name":"ghostty","version":"v1"}`)
+	writeFile(t, filepath.Join(repoRoot, "src", "mods", "shell", "v1", "cli", "main.go"), "package main\n")
+	writeFile(t, filepath.Join(repoRoot, "src", "mods", "shell", "v1", "mod.json"), `{"name":"shell","version":"v1","depends_on":[{"name":"ghostty","version":"v1"}]}`)
+
+	db, err := Open(filepath.Join(repoRoot, ".dialtone", "state.sqlite"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer db.Close()
+
+	if err := UpsertStateValue(db, "system", "tmux.target", "codex-view:0:1"); err != nil {
+		t.Fatalf("set tmux.target: %v", err)
+	}
+	if err := UpsertStateValue(db, "system", "tmux.prompt_target", "codex-view:0:0"); err != nil {
+		t.Fatalf("set tmux.prompt_target: %v", err)
+	}
+
+	if _, err := SyncRepo(db, repoRoot, map[string]string{}); err != nil {
+		t.Fatalf("SyncRepo returned error: %v", err)
+	}
+
+	commandTarget, ok, err := LoadStateValue(db, "system", "tmux.target")
+	if err != nil {
+		t.Fatalf("LoadStateValue command target returned error: %v", err)
+	}
+	if !ok || commandTarget.Value != "codex-view:0:1" {
+		t.Fatalf("unexpected command target after sync: ok=%v record=%+v", ok, commandTarget)
+	}
+
+	promptTarget, ok, err := LoadStateValue(db, "system", "tmux.prompt_target")
+	if err != nil {
+		t.Fatalf("LoadStateValue prompt target returned error: %v", err)
+	}
+	if !ok || promptTarget.Value != "codex-view:0:0" {
+		t.Fatalf("unexpected prompt target after sync: ok=%v record=%+v", ok, promptTarget)
 	}
 }
 

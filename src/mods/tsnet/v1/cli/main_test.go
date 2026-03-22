@@ -45,6 +45,10 @@ func TestTsnetV1CLISmoke(t *testing.T) {
 	}
 
 	t.Setenv("DIALTONE_HOSTNAME", "Gold-Host")
+	t.Setenv("HOME", "/tmp/dialtone-home")
+	t.Setenv("DIALTONE_STATE_DIR", "")
+	t.Setenv("DIALTONE_STATE_DB", "")
+	t.Setenv("DIALTONE_TSNET_STATE_DIR", "")
 	bootstrap := parseBootstrapArgs([]string{})
 	if bootstrap.hostname != "Gold-Host" {
 		t.Fatalf("bootstrap should default to env hostname, got %q", bootstrap.hostname)
@@ -69,6 +73,9 @@ func TestTsnetV1CLISmoke(t *testing.T) {
 	}
 	if cfg.Hostname == "" || cfg.StateDir == "" || cfg.AuthKeyEnv == "" || cfg.APIKeyEnv == "" {
 		t.Fatalf("resolveConfig returned incomplete values: %+v", cfg)
+	}
+	if cfg.StateDir != filepath.Join("/tmp/dialtone-home", ".dialtone", "tsnet") {
+		t.Fatalf("resolveConfig should default state dir to user home, got %q", cfg.StateDir)
 	}
 
 	abs, raw := resolveFilePath("/repo", "", "env/.env")

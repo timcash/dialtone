@@ -1,104 +1,80 @@
 # Ghostty Mod (`v1`)
 
-The `ghostty` mod provides local Ghostty automation on macOS through Ghostty's
-native AppleScript API.
+`ghostty v1` is the macOS UI automation layer for the local Dialtone workflow.
 
-It is the local UI control surface for the Ghostty + tmux + Codex workflow:
+Code layout:
 
-- create a new window or tab
-- split a terminal inside the selected tab
-- focus a terminal in the selected tab
-- type text into a terminal in the selected tab
-- inspect the terminals currently visible in the selected tab
+```text
+src/mods/ghostty/v1/
+├── README.md
+├── mod.json
+├── main_test.go
+└── cli/
+    ├── main.go
+    └── main_test.go
+```
 
-`ghostty v1` always targets the selected tab of the front Ghostty window.
+`ghostty v1` should stay focused on Ghostty itself:
+
+- windows
+- tabs
+- selected-tab terminals
+- splits
+- focus
+- fullscreen
+- text input
 
 ## Quick Start
 
 ```sh
-# Show the ghostty command surface from the sqlite-managed mods system.
+# Show the command surface.
 ./dialtone_mod ghostty v1 help
 
-# Run the Go test package for this mod from the repo source tree.
-cd /Users/user/dialtone/src
-go test ./mods/ghostty/v1
+# Create a fresh window at the repo root.
+./dialtone_mod ghostty v1 fresh-window --cwd /Users/user/dialtone
 
-# Regenerate the sqlite DAG and the stepwise test plan before the next TDD loop.
-cd ..
-./dialtone_mod mods v1 db sync
-./dialtone_mod mods v1 db test-plan
+# Inspect the selected tab's terminals.
+./dialtone_mod ghostty v1 list
+
+# Split the selected terminal.
+./dialtone_mod ghostty v1 split --terminal 1 --direction right
+
+# Run the Go tests for this standardized mod layout.
+./dialtone_mod shell v1 run --wait-seconds 60 \
+  "clear && cd /Users/user/dialtone/src && go test ./mods/ghostty/v1/..."
 ```
 
 ## DIALTONE>
 
 ```text
-$ ./dialtone_mod ghostty v1 new-tab --cwd /Users/user/dialtone
-created ghostty tab 2 (id=tab-c5c374a00) terminal (id=FC1DB632-5FFC-484E-B9C9-BDF9410E8359)
+$ ./dialtone_mod ghostty v1 fresh-window --cwd /Users/user/dialtone
+created fresh ghostty window ...
 
 $ ./dialtone_mod ghostty v1 list
-1	focused=true	id=FC1DB632-5FFC-484E-B9C9-BDF9410E8359	name=~/dialtone	cwd=/Users/user/dialtone
+1	focused=true	...
 
 $ ./dialtone_mod ghostty v1 split --terminal 1 --direction right
-split ghostty terminal 1 right -> terminal (id=7BEBD1BB-9CD1-4FEE-8D3E-6B4FEDBB068F)
-
-$ ./dialtone_mod ghostty v1 list
-1	focused=false	id=FC1DB632-5FFC-484E-B9C9-BDF9410E8359	name=~/dialtone	cwd=/Users/user/dialtone
-2	focused=true	id=7BEBD1BB-9CD1-4FEE-8D3E-6B4FEDBB068F	name=~/dialtone	cwd=/Users/user/dialtone
-
-$ ./dialtone_mod ghostty v1 write --terminal 2 "tmux new-session -A -s codex-view"
-wrote to ghostty terminal 2 (id=7BEBD1BB-9CD1-4FEE-8D3E-6B4FEDBB068F): tmux new-session -A -s codex-view
-
-$ tmux list-panes -a -F '#{session_name}:#{window_index}:#{pane_index}'
-codex-view:0:0
+split ghostty terminal 1 right -> terminal (...)
 ```
-
-This is the interaction pattern future agents should expect:
-
-- `new-tab` and `new-window` print the created object ids
-- `split` prints the new terminal id
-- `focus` prints the focused terminal id
-- `fullscreen` prints the front window id and target fullscreen state
-- `write` echoes the terminal index, terminal id, and submitted text
-- `list` prints one line per terminal in the selected tab
 
 ## Dependencies
 
-Hard mod dependencies:
-
-- none
-
-Common workflow companions:
-
-- `tmux v1`
-- `codex v1`
-
-Runtime environment dependencies:
-
 - macOS
-- Ghostty with AppleScript support
+- Ghostty
 - `/usr/bin/osascript`
 
 ## Test Results
 
-Most recent validation run:
-
-- `<run-id>`: 2
-- `<plan-name>`: default
-- `<timestamp-start>`: 2026-03-20T23:26:51Z
-- `<timestamp-stop>`: 2026-03-20T23:26:58Z
-- `<runtime>`: 7s
-- `<status>`: failed
-- `<ERRORS>`: none
-- `<ui-screenshot-grid>`: not captured
-
-Most recent command set:
+- Timestamp: 2026-03-22
+- Command:
 
 ```sh
-# step 2 -> ghostty v1 (passed)
-go test ./mods/ghostty/v1
-
+./dialtone_mod shell v1 test-all --wait-seconds 240
 ```
 
-Observed result summary:
+- Visible result:
 
-- step 2 `ghostty v1` -> `passed` (exit=0)
+```text
+ok  	dialtone/dev/mods/ghostty/v1
+ok  	dialtone/dev/mods/ghostty/v1/cli
+```

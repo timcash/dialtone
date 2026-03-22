@@ -358,9 +358,7 @@ func buildListScript() string {
 
 func buildQuitScript() string {
 	return strings.Join([]string{
-		`tell application "Ghostty"`,
-		`	quit`,
-		`end tell`,
+		`do shell script "pkill -9 -x Ghostty >/dev/null 2>&1 || true"`,
 	}, "\n")
 }
 

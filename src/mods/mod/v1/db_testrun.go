@@ -49,7 +49,7 @@ type testRunStepRecord struct {
 
 func runDBTestRun(args []string) error {
 	fs := flag.NewFlagSet("mods db test-run", flag.ContinueOnError)
-	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or .dialtone/state.sqlite)")
+	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or ~/.dialtone/state.sqlite)")
 	planName := fs.String("name", "default", "Test plan name to execute")
 	stopOnError := fs.Bool("stop-on-error", true, "Stop after the first failed step")
 	syncBefore := fs.Bool("sync", true, "Sync repo state into sqlite before executing the plan")
@@ -142,7 +142,7 @@ func runDBTestRun(args []string) error {
 
 func runDBTestRuns(args []string) error {
 	fs := flag.NewFlagSet("mods db test-runs", flag.ContinueOnError)
-	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or .dialtone/state.sqlite)")
+	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or ~/.dialtone/state.sqlite)")
 	limit := fs.Int("limit", 20, "Maximum test runs to print")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -175,7 +175,7 @@ func runDBTestRuns(args []string) error {
 
 func runDBTestRunSteps(args []string) error {
 	fs := flag.NewFlagSet("mods db test-run-steps", flag.ContinueOnError)
-	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or .dialtone/state.sqlite)")
+	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or ~/.dialtone/state.sqlite)")
 	runID := fs.Int64("run", 0, "Test run id to inspect")
 	if err := fs.Parse(args); err != nil {
 		return err

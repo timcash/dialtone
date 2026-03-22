@@ -156,6 +156,22 @@ type ProtocolEventRecord struct {
 	CreatedAt   string
 }
 
+type ShellBusRecord struct {
+	ID        int64
+	System    string
+	Scope     string
+	Subject   string
+	Action    string
+	Status    string
+	Actor     string
+	Session   string
+	Pane      string
+	RefID     int64
+	BodyJSON  string
+	CreatedAt string
+	UpdatedAt string
+}
+
 type SyncSummary struct {
 	Mods         int
 	Dependencies int
@@ -185,7 +201,10 @@ var volatileRuntimeEnvKeys = map[string]struct{}{
 }
 
 func DefaultStateDir(repoRoot string) string {
-	return filepath.Join(strings.TrimSpace(repoRoot), ".dialtone")
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		return filepath.Join(strings.TrimSpace(home), ".dialtone")
+	}
+	return filepath.Join(os.TempDir(), "dialtone")
 }
 
 func DefaultDBPath(repoRoot string) string {
@@ -347,6 +366,21 @@ func EnsureSchema(db *sql.DB) error {
 			message_text text not null default '',
 			created_at text not null,
 			primary key (run_id, event_index)
+		);`,
+		`create table if not exists shell_bus (
+			id integer primary key autoincrement,
+			system text not null,
+			scope text not null,
+			subject text not null,
+			action text not null,
+			status text not null,
+			actor text not null,
+			session text not null default '',
+			pane text not null default '',
+			ref_id integer not null default 0,
+			body_json text not null default '',
+			created_at text not null,
+			updated_at text not null
 		);`,
 	}
 	for _, stmt := range stmts {
@@ -840,6 +874,135 @@ func LoadProtocolEvents(db *sql.DB, runID int64) ([]ProtocolEventRecord, error) 
 	return out, rows.Err()
 }
 
+func EnqueueShellBus(db *sql.DB, system, scope, subject, action, actor, session, pane, bodyJSON string) (int64, error) {
+	if err := EnsureSchema(db); err != nil {
+		return 0, err
+	}
+	now := nowRFC3339()
+	result, err := db.Exec(`insert into shell_bus(system, scope, subject, action, status, actor, session, pane, ref_id, body_json, created_at, updated_at)
+		values(?, ?, ?, ?, 'queued', ?, ?, ?, 0, ?, ?, ?)`,
+		strings.TrimSpace(system),
+		strings.TrimSpace(scope),
+		strings.TrimSpace(subject),
+		strings.TrimSpace(action),
+		strings.TrimSpace(actor),
+		strings.TrimSpace(session),
+		strings.TrimSpace(pane),
+		bodyJSON,
+		now,
+		now,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
+}
+
+func AppendShellBusObserved(db *sql.DB, system, subject, action, actor, session, pane string, refID int64, bodyJSON string) (int64, error) {
+	if err := EnsureSchema(db); err != nil {
+		return 0, err
+	}
+	now := nowRFC3339()
+	result, err := db.Exec(`insert into shell_bus(system, scope, subject, action, status, actor, session, pane, ref_id, body_json, created_at, updated_at)
+		values(?, 'observed', ?, ?, 'done', ?, ?, ?, ?, ?, ?, ?)`,
+		strings.TrimSpace(system),
+		strings.TrimSpace(subject),
+		strings.TrimSpace(action),
+		strings.TrimSpace(actor),
+		strings.TrimSpace(session),
+		strings.TrimSpace(pane),
+		refID,
+		bodyJSON,
+		now,
+		now,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
+}
+
+func UpdateShellBusStatus(db *sql.DB, id int64, status string, refID int64, bodyJSON string) error {
+	if err := EnsureSchema(db); err != nil {
+		return err
+	}
+	_, err := db.Exec(`update shell_bus set status = ?, ref_id = ?, body_json = ?, updated_at = ? where id = ?`,
+		strings.TrimSpace(status), refID, bodyJSON, nowRFC3339(), id)
+	return err
+}
+
+func LoadShellBus(db *sql.DB, scope string, limit int) ([]ShellBusRecord, error) {
+	if err := EnsureSchema(db); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := db.Query(`select id, system, scope, subject, action, status, actor, session, pane, ref_id, body_json, created_at, updated_at
+		from shell_bus
+		where (? = '' or scope = ?)
+		order by id desc
+		limit ?`, strings.TrimSpace(scope), strings.TrimSpace(scope), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ShellBusRecord{}
+	for rows.Next() {
+		var record ShellBusRecord
+		if err := rows.Scan(&record.ID, &record.System, &record.Scope, &record.Subject, &record.Action, &record.Status, &record.Actor, &record.Session, &record.Pane, &record.RefID, &record.BodyJSON, &record.CreatedAt, &record.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
+func LoadQueuedShellBus(db *sql.DB, limit int) ([]ShellBusRecord, error) {
+	if err := EnsureSchema(db); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := db.Query(`select id, system, scope, subject, action, status, actor, session, pane, ref_id, body_json, created_at, updated_at
+		from shell_bus
+		where scope = 'desired' and status = 'queued'
+		order by id asc
+		limit ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ShellBusRecord{}
+	for rows.Next() {
+		var record ShellBusRecord
+		if err := rows.Scan(&record.ID, &record.System, &record.Scope, &record.Subject, &record.Action, &record.Status, &record.Actor, &record.Session, &record.Pane, &record.RefID, &record.BodyJSON, &record.CreatedAt, &record.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
+func LoadShellBusRecord(db *sql.DB, id int64) (ShellBusRecord, bool, error) {
+	if err := EnsureSchema(db); err != nil {
+		return ShellBusRecord{}, false, err
+	}
+	var record ShellBusRecord
+	err := db.QueryRow(`select id, system, scope, subject, action, status, actor, session, pane, ref_id, body_json, created_at, updated_at
+		from shell_bus
+		where id = ?`, id).
+		Scan(&record.ID, &record.System, &record.Scope, &record.Subject, &record.Action, &record.Status, &record.Actor, &record.Session, &record.Pane, &record.RefID, &record.BodyJSON, &record.CreatedAt, &record.UpdatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return ShellBusRecord{}, false, nil
+		}
+		return ShellBusRecord{}, false, err
+	}
+	return record, true, nil
+}
+
 func LoadTopology(db *sql.DB) ([]TopologyRecord, error) {
 	rows, err := db.Query(`select mod_name, mod_version, topo_rank
 		from mod_topology
@@ -969,7 +1132,7 @@ func BuildTestPlan(mods []ModRecord, manifests map[string]Manifest, topology []T
 			continue
 		}
 		manifest := manifests[key]
-		commandPath := "./" + strings.TrimPrefix(filepath.ToSlash(mod.Path), "src/")
+		commandPath := "./" + strings.TrimPrefix(filepath.ToSlash(mod.Path), "src/") + "/..."
 		out = append(out, TestStepRecord{
 			PlanName:    "default",
 			StepIndex:   idx + 1,
@@ -1281,7 +1444,7 @@ func hasGoPackage(path string) bool {
 		if entry.IsDir() {
 			continue
 		}
-		if strings.HasSuffix(entry.Name(), ".go") {
+		if strings.HasSuffix(entry.Name(), ".go") && !strings.HasSuffix(entry.Name(), "_test.go") {
 			return true
 		}
 	}

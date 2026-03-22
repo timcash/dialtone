@@ -54,7 +54,7 @@ func runDB(args []string) error {
 
 func runDBPath(args []string) error {
 	fs := flag.NewFlagSet("mods db path", flag.ContinueOnError)
-	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or .dialtone/state.sqlite)")
+	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or ~/.dialtone/state.sqlite)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -71,7 +71,7 @@ func runDBPath(args []string) error {
 
 func runDBInit(args []string) error {
 	fs := flag.NewFlagSet("mods db init", flag.ContinueOnError)
-	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or .dialtone/state.sqlite)")
+	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or ~/.dialtone/state.sqlite)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -97,7 +97,7 @@ func runDBInit(args []string) error {
 
 func runDBSync(args []string) error {
 	fs := flag.NewFlagSet("mods db sync", flag.ContinueOnError)
-	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or .dialtone/state.sqlite)")
+	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or ~/.dialtone/state.sqlite)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -126,7 +126,7 @@ func runDBSync(args []string) error {
 
 func runDBGraph(args []string) error {
 	fs := flag.NewFlagSet("mods db graph", flag.ContinueOnError)
-	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or .dialtone/state.sqlite)")
+	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or ~/.dialtone/state.sqlite)")
 	format := fs.String("format", "text", "Output format: text|mermaid|outline")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -166,7 +166,7 @@ func runDBGraph(args []string) error {
 
 func runDBEnv(args []string) error {
 	fs := flag.NewFlagSet("mods db env", flag.ContinueOnError)
-	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or .dialtone/state.sqlite)")
+	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or ~/.dialtone/state.sqlite)")
 	scope := fs.String("scope", "process", "Runtime env scope to print")
 	setValue := fs.String("set", "", "Persist a KEY=VALUE runtime env entry into sqlite")
 	unsetKey := fs.String("unset", "", "Delete a runtime env key from sqlite")
@@ -221,7 +221,7 @@ func runDBEnv(args []string) error {
 
 func runDBState(args []string) error {
 	fs := flag.NewFlagSet("mods db state", flag.ContinueOnError)
-	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or .dialtone/state.sqlite)")
+	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or ~/.dialtone/state.sqlite)")
 	scope := fs.String("scope", sqlitestate.SystemScope, "State scope to inspect")
 	key := fs.String("key", "", "Specific state key to print")
 	setValue := fs.String("set", "", "Persist a KEY=VALUE state entry into sqlite")
@@ -285,7 +285,7 @@ func runDBState(args []string) error {
 
 func runDBQueue(args []string) error {
 	fs := flag.NewFlagSet("mods db queue", flag.ContinueOnError)
-	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or .dialtone/state.sqlite)")
+	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or ~/.dialtone/state.sqlite)")
 	name := fs.String("name", "tmux", "Queue name to inspect")
 	limit := fs.Int("limit", 20, "Maximum queue rows to print")
 	if err := fs.Parse(args); err != nil {
@@ -316,7 +316,7 @@ func runDBQueue(args []string) error {
 
 func runDBTopo(args []string) error {
 	fs := flag.NewFlagSet("mods db topo", flag.ContinueOnError)
-	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or .dialtone/state.sqlite)")
+	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or ~/.dialtone/state.sqlite)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -344,7 +344,7 @@ func runDBTopo(args []string) error {
 
 func runDBTestPlan(args []string) error {
 	fs := flag.NewFlagSet("mods db test-plan", flag.ContinueOnError)
-	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or .dialtone/state.sqlite)")
+	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or ~/.dialtone/state.sqlite)")
 	planName := fs.String("name", "default", "Test plan name to print")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -374,7 +374,7 @@ func runDBTestPlan(args []string) error {
 
 func runDBProtocolRuns(args []string) error {
 	fs := flag.NewFlagSet("mods db protocol-runs", flag.ContinueOnError)
-	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or .dialtone/state.sqlite)")
+	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or ~/.dialtone/state.sqlite)")
 	limit := fs.Int("limit", 20, "Maximum protocol runs to print")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -404,7 +404,7 @@ func runDBProtocolRuns(args []string) error {
 
 func runDBProtocolEvents(args []string) error {
 	fs := flag.NewFlagSet("mods db protocol-events", flag.ContinueOnError)
-	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or .dialtone/state.sqlite)")
+	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or ~/.dialtone/state.sqlite)")
 	runID := fs.Int64("run", 0, "Protocol run id to inspect")
 	if err := fs.Parse(args); err != nil {
 		return err

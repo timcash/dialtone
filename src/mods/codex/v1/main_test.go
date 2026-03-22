@@ -1,63 +1,39 @@
-package main
+package codexv1_test
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
-func TestBuildStartCommandUsesRepoShellAndInlineCodexLaunch(t *testing.T) {
-	cmd := buildStartCommand("/tmp/dialtone", "default", "medium", "gpt-5.4")
-	if !strings.Contains(cmd, "cd '/tmp/dialtone'") {
-		t.Fatalf("missing repo cd: %q", cmd)
+func TestCodexV1Layout(t *testing.T) {
+	root := currentDir(t)
+	for _, rel := range []string{
+		"README.md",
+		"mod.json",
+		filepath.Join("cli", "main.go"),
+		filepath.Join("cli", "main_test.go"),
+	} {
+		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
+			t.Fatalf("expected %s in codex/v1: %v", rel, err)
+		}
 	}
-	if !strings.Contains(cmd, "develop '.#default'") {
-		t.Fatalf("missing nix develop shell: %q", cmd)
+	readme, err := os.ReadFile(filepath.Join(root, "README.md"))
+	if err != nil {
+		t.Fatalf("read README.md: %v", err)
 	}
-	if !strings.Contains(cmd, "clear; printf") {
-		t.Fatalf("missing clear before startup banner: %q", cmd)
-	}
-	if !strings.Contains(cmd, "command -v codex") {
-		t.Fatalf("missing codex lookup: %q", cmd)
-	}
-	if !strings.Contains(cmd, "npx --yes @openai/codex") {
-		t.Fatalf("missing npx fallback: %q", cmd)
-	}
-	if !strings.Contains(cmd, "exec env CI=1 codex -c") {
-		t.Fatalf("missing codex exec prefix: %q", cmd)
-	}
-	if !strings.Contains(cmd, "check_for_update_on_startup=false") {
-		t.Fatalf("missing update-check override: %q", cmd)
-	}
-	if !strings.Contains(cmd, "-m '\"'\"'gpt-5.4'\"'\"' -a never -s danger-full-access") {
-		t.Fatalf("missing model and sandbox args: %q", cmd)
+	if !strings.Contains(string(readme), "## Test Result") {
+		t.Fatalf("expected codex/v1 README to contain a Test Result section")
 	}
 }
 
-func TestShellQuoteEscapesSingleQuotes(t *testing.T) {
-	quoted := shellQuote("/tmp/dialtone's")
-	if quoted != "'/tmp/dialtone'\"'\"'s'" {
-		t.Fatalf("unexpected quote result: %q", quoted)
+func currentDir(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
 	}
-}
-
-func TestBuildCodexExecCommandIncludesFallback(t *testing.T) {
-	cmd := buildCodexExecCommand("gpt-5.4")
-	if !strings.Contains(cmd, "-c 'check_for_update_on_startup=false'") {
-		t.Fatalf("missing update-check override: %q", cmd)
-	}
-	if !strings.Contains(cmd, "exec env CI=1 codex") {
-		t.Fatalf("missing direct codex exec: %q", cmd)
-	}
-	if !strings.Contains(cmd, "exec env CI=1 npx --yes @openai/codex") {
-		t.Fatalf("missing npx exec: %q", cmd)
-	}
-}
-
-func TestNormalizePaneTargetAcceptsColonAndDotForms(t *testing.T) {
-	if got := normalizePaneTarget("codex-view:0:1"); got != "codex-view:0.1" {
-		t.Fatalf("unexpected normalized colon target: %q", got)
-	}
-	if got := normalizePaneTarget("codex-view:0.1"); got != "codex-view:0.1" {
-		t.Fatalf("unexpected normalized dot target: %q", got)
-	}
+	return filepath.Dir(file)
 }
