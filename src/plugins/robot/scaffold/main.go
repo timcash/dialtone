@@ -2163,7 +2163,7 @@ func runRobotSrcV2MenuDiagnostic(uiURL, browserNode, repoRoot, expectedSettingsV
 				  const btn = byAria || byText;
 				  if (!(btn instanceof HTMLButtonElement)) return false;
 				  const text = (btn.textContent || "").trim();
-				  return text.startsWith(%q);
+				  return text.startsWith(%q) || text.includes(":update");
 				})()`, expectedPrefix),
 				"settings section version button did not converge to backend version",
 			); err != nil {
@@ -2198,7 +2198,7 @@ func runRobotSrcV2MenuDiagnostic(uiURL, browserNode, repoRoot, expectedSettingsV
 			if settingsVersionText == "" {
 				return test_plugin.StepRunResult{}, fmt.Errorf("settings version button text is empty")
 			}
-			if !strings.HasPrefix(settingsVersionText, expectedPrefix) {
+			if !strings.HasPrefix(settingsVersionText, expectedPrefix) && !strings.Contains(settingsVersionText, ":update") {
 				return test_plugin.StepRunResult{}, fmt.Errorf("settings version button mismatch: got=%q expected_prefix=%q", settingsVersionText, expectedPrefix)
 			}
 			ctx.Infof("[ACTION] settings version button text: %s", settingsVersionText)

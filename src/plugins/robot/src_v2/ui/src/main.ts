@@ -99,6 +99,7 @@ const checkForUpdate = async () => {
     if (!res.ok) return;
     const data = await res.json();
     const nextVersion = String(data.version ?? '').trim();
+    const currentNorm = normalizeVersion(runtimeReportedVersion || currentAppVersion || 'dev');
     runtimeReportedVersion = nextVersion || runtimeReportedVersion || 'dev';
     if (versionEl) {
       const stamp = isLocalDevHost ? ` (dev-${new Date().toLocaleTimeString()})` : '';
@@ -106,7 +107,6 @@ const checkForUpdate = async () => {
       versionEl.textContent = `v${shown}${stamp}`;
     }
     const nextNorm = normalizeVersion(nextVersion || runtimeReportedVersion || 'dev');
-    const currentNorm = normalizeVersion(runtimeReportedVersion || currentAppVersion || 'dev');
     const available =
       !!nextNorm &&
       !/^dev$/i.test(nextNorm) &&
