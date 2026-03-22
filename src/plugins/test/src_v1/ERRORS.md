@@ -1,9 +1,9 @@
 # Error Report
 
-- **Date**: Thu, 19 Mar 2026 15:49:05 PDT
+- **Date**: Sun, 22 Mar 2026 10:36:16 PDT
 - **Suite**: cad-src-v1
-- **Total Duration**: 27.815270754s
+- **Total Duration**: 2.425400506s
 
-- **Error Steps**: 0 / 1
+- **Error Steps**: 0 / 3
 
 No errors captured.
