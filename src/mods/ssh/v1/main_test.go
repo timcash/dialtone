@@ -111,6 +111,39 @@ func TestSSHResolveMeshNodeFromConfig(t *testing.T) {
 	}
 }
 
+func TestSSHLoadMeshConfigPrefersDialtoneJSON(t *testing.T) {
+	tmp := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmp, "env"), 0o755); err != nil {
+		t.Fatalf("mkdir env failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "dialtone_mod"), []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
+		t.Fatalf("write dialtone entrypoint failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "env", "dialtone.json"), []byte(`{"mesh_nodes":[{"name":"grey","aliases":["grey"],"host":"192.168.4.31","user":"user","password":"secret","port":"22"}]}`), 0o644); err != nil {
+		t.Fatalf("write dialtone json failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "env", "mesh.json"), []byte(`[{"name":"grey","aliases":["grey"],"host":"wrong.example","user":"tim","port":"22"}]`), 0o644); err != nil {
+		t.Fatalf("write mesh json failed: %v", err)
+	}
+
+	oldRepoRoot := os.Getenv("DIALTONE_REPO_ROOT")
+	_ = os.Setenv("DIALTONE_REPO_ROOT", tmp)
+	defer func() {
+		_ = os.Setenv("DIALTONE_REPO_ROOT", oldRepoRoot)
+	}()
+
+	nodes, err := loadMeshConfig()
+	if err != nil {
+		t.Fatalf("loadMeshConfig failed: %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodes))
+	}
+	if nodes[0].User != "user" || nodes[0].Password != "secret" || nodes[0].Host != "192.168.4.31" {
+		t.Fatalf("unexpected dialtone node: %+v", nodes[0])
+	}
+}
+
 func TestSSHBuildCommandUsesNodeDefaults(t *testing.T) {
 	node := meshNode{Name: "gold", Host: "example.com", User: "user", Port: "2223"}
 	opts, err := parseArgs([]string{"--host", "gold"})
@@ -181,6 +214,26 @@ func TestSSHBuildCommandUsesExpectForPasswordAuth(t *testing.T) {
 		}
 		if strings.Contains(joined, "BatchMode=yes") {
 			t.Fatalf("did not expect batch mode for password auth, got %q", joined)
+		}
+	})
+}
+
+func TestSSHBuildCommandUsesNodePasswordByDefault(t *testing.T) {
+	node := meshNode{Name: "grey", Host: "192.168.4.31", User: "user", Password: "secret", Port: "22"}
+	withShellSSH(t, "/nix/store/test-openssh/bin/ssh", func() {
+		cmd, err := buildSSHCommand(sshOptions{}, node)
+		if err != nil {
+			t.Fatalf("buildSSHCommand failed: %v", err)
+		}
+		if !strings.HasSuffix(cmd.Path, "/expect") && cmd.Path != "expect" {
+			t.Fatalf("expected expect wrapper, got %q", cmd.Path)
+		}
+		joined := strings.Join(cmd.Args, " ")
+		if !strings.Contains(joined, "PreferredAuthentications=password") {
+			t.Fatalf("expected password auth args, got %q", joined)
+		}
+		if !strings.Contains(joined, "user@192.168.4.31") {
+			t.Fatalf("expected grey target, got %q", joined)
 		}
 	})
 }

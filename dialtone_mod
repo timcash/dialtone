@@ -4,9 +4,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${DIALTONE_REPO_ROOT:-$SCRIPT_DIR}"
 USE_NIX="${DIALTONE_USE_NIX:-1}"
-NIXPKGS_FLAKE_REF="${DIALTONE_NIXPKGS_FLAKE:-${NIXPKGS_FLAKE:-nixpkgs}}"
-DIALTONE_TMUX_TARGET_FILE="$REPO_ROOT/.dialtone/tmux_target"
+DIALTONE_HOME_ROOT="${HOME:-$SCRIPT_DIR}"
+DIALTONE_STATE_DIR="${DIALTONE_STATE_DIR:-$DIALTONE_HOME_ROOT/.dialtone}"
+DIALTONE_STATE_DB="${DIALTONE_STATE_DB:-$DIALTONE_STATE_DIR/state.sqlite}"
+DIALTONE_TMUX_TARGET_FILE="${DIALTONE_TMUX_TARGET_FILE:-$DIALTONE_STATE_DIR/tmux_target}"
 declare -a DIALTONE_NIX_PACKAGES=()
+
+mkdir -p "$DIALTONE_STATE_DIR"
 
 rewrite_nix_package_ref() {
   local pkg="${1:-}"
@@ -15,22 +19,6 @@ rewrite_nix_package_ref() {
     return
   fi
   printf '%s' "$pkg"
-}
-
-resolve_flake_shell() {
-  local mod="${1:-}"
-  local version="${2:-}"
-  case "${mod}:${version}" in
-    "repl:v1")
-      printf '%s' "repl-v1"
-      ;;
-    "ssh:v1")
-      printf '%s' "ssh-v1"
-      ;;
-    *)
-      printf '%s' ""
-      ;;
-  esac
 }
 
 shell_quote() {
@@ -49,44 +37,157 @@ join_shell_args() {
   printf '%s' "$out"
 }
 
+hydrate_env_from_state_db() {
+  local key=""
+  local value=""
+
+  if [ ! -f "$DIALTONE_STATE_DB" ]; then
+    return 0
+  fi
+
+  while IFS=$'\t' read -r key value; do
+    if [ -z "$key" ]; then
+      continue
+    fi
+    case "$key" in
+      DIALTONE_TMUX_PROXY_ACTIVE|DIALTONE_TMUX_TARGET|DIALTONE_TMUX_TARGET_FILE|DIALTONE_NIX_ACTIVE|DIALTONE_NIX_BASE_PATH|DIALTONE_NIX_PACKAGES_SIG|DIALTONE_NIX_SHELL)
+        continue
+        ;;
+    esac
+    if [[ "$key" != DIALTONE_* ]] && [ "$key" != "NIXPKGS_FLAKE" ]; then
+      continue
+    fi
+    if [ -n "${!key:-}" ]; then
+      continue
+    fi
+    export "$key=$value"
+  done < <(
+    run_sqlite_query "$DIALTONE_STATE_DB" \
+      "select key, value from runtime_env where scope = 'process' and (key like 'DIALTONE_%' or key = 'NIXPKGS_FLAKE') order by key;" \
+      2>/dev/null || true
+  )
+}
+
+run_sqlite_query() {
+  local db_path="${1:-}"
+  local query="${2:-}"
+  local flake_ref="${DIALTONE_NIXPKGS_FLAKE:-${NIXPKGS_FLAKE:-nixpkgs}}"
+  local nix_args=()
+
+  if [ -z "$db_path" ] || [ -z "$query" ] || [ ! -f "$db_path" ]; then
+    return 1
+  fi
+  if command -v sqlite3 >/dev/null 2>&1; then
+    sqlite3 -tabs -noheader "$db_path" "$query"
+    return
+  fi
+  if ! command -v nix >/dev/null 2>&1; then
+    return 1
+  fi
+  if [ "${DIALTONE_NIX_OFFLINE:-0}" = "1" ]; then
+    nix_args+=(--offline)
+  fi
+  nix \
+    "${nix_args[@]}" \
+    --extra-experimental-features "nix-command flakes" \
+    shell "${flake_ref}#sqlite" \
+    --command sqlite3 -tabs -noheader "$db_path" "$query"
+}
+
+run_sqlite_exec() {
+  local db_path="${1:-}"
+  local query="${2:-}"
+  run_sqlite_query "$db_path" "$query" >/dev/null
+}
+
 load_tmux_target() {
   local raw=""
   if [ -n "${DIALTONE_TMUX_TARGET:-}" ]; then
     printf '%s' "${DIALTONE_TMUX_TARGET}"
     return
   fi
-  if [ -f "$DIALTONE_TMUX_TARGET_FILE" ]; then
-    IFS= read -r raw < "$DIALTONE_TMUX_TARGET_FILE" || true
-    printf '%s' "$(printf '%s' "$raw" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  raw="$(run_sqlite_query "$DIALTONE_STATE_DB" "select value from state_values where scope = 'system' and key = 'tmux.target' limit 1;" 2>/dev/null || true)"
+  raw="$(printf '%s' "$raw" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  if [ -n "$raw" ]; then
+    printf '%s' "$raw"
     return
   fi
   printf '%s' ""
 }
 
-tmux_target_ref() {
-  local raw="${1:-}"
-  local session=""
-  local window=""
-  local pane=""
-  IFS=':' read -r session window pane <<< "$raw"
-  if [ -n "$session" ] && [ -n "$window" ] && [ -n "$pane" ]; then
-    printf '%s:%s.%s' "$session" "$window" "$pane"
-    return
-  fi
+load_tmux_prompt_target() {
+  local raw=""
+  raw="$(run_sqlite_query "$DIALTONE_STATE_DB" "select value from state_values where scope = 'system' and key = 'tmux.prompt_target' limit 1;" 2>/dev/null || true)"
+  raw="$(printf '%s' "$raw" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
   printf '%s' "$raw"
 }
 
-should_bypass_tmux_proxy() {
+should_route_via_shell() {
   local mod="${1:-}"
   local version="${2:-}"
-  case "${mod}:${version}" in
-    "tmux:v1"|"ghostty:v1"|"shell:v1")
-      return 0
-      ;;
-    *)
+  local command="${3:-}"
+  case "${mod}:${version}:${command}" in
+    "shell:v1:"*|"tmux:v1:"*|"ghostty:v1:"*|"mod:v1:db")
       return 1
       ;;
+    *)
+      return 0
+      ;;
   esac
+}
+
+run_go_in_default_nix() {
+  local subcommand="${1:-exec}"
+  shift || true
+  declare -a NIX_ARGS=()
+  local quoted_args=""
+  if [ "${DIALTONE_NIX_OFFLINE:-0}" = "1" ]; then
+    NIX_ARGS+=(--offline)
+  fi
+  if [ "${DIALTONE_NIX_ACTIVE:-0}" = "1" ] || [ "$USE_NIX" = "0" ]; then
+    cd "$REPO_ROOT/src"
+    if [ "$subcommand" = "capture" ]; then
+      "${DIALTONE_GO_BIN:-go}" run ./mods.go "$@"
+      return
+    fi
+    exec "${DIALTONE_GO_BIN:-go}" run ./mods.go "$@"
+  fi
+  if ! command -v nix >/dev/null 2>&1; then
+    echo "DIALTONE> nix is required for dialtone_mod (set DIALTONE_USE_NIX=0 to bypass)" >&2
+    exit 1
+  fi
+  quoted_args="$(join_shell_args "$@")"
+  if [ "$subcommand" = "capture" ]; then
+    nix \
+      "${NIX_ARGS[@]}" \
+      --extra-experimental-features "nix-command flakes" \
+      develop "path:$REPO_ROOT#default" \
+      --command env \
+        DIALTONE_NIX_ACTIVE=1 \
+        DIALTONE_NIX_SHELL="default" \
+        DIALTONE_HOST_PATH="$PATH" \
+        DIALTONE_REPO_ROOT="$REPO_ROOT" \
+        DIALTONE_STATE_DIR="$DIALTONE_STATE_DIR" \
+        DIALTONE_STATE_DB="$DIALTONE_STATE_DB" \
+        DIALTONE_NIX_OFFLINE="${DIALTONE_NIX_OFFLINE:-0}" \
+        DIALTONE_USE_NIX="$USE_NIX" \
+        zsh -lc "cd $(shell_quote "$REPO_ROOT/src") && \${DIALTONE_GO_BIN:-go} run ./mods.go $quoted_args"
+    return
+  fi
+  exec nix \
+    "${NIX_ARGS[@]}" \
+    --extra-experimental-features "nix-command flakes" \
+    develop "path:$REPO_ROOT#default" \
+    --command env \
+      DIALTONE_NIX_ACTIVE=1 \
+      DIALTONE_NIX_SHELL="default" \
+      DIALTONE_HOST_PATH="$PATH" \
+      DIALTONE_REPO_ROOT="$REPO_ROOT" \
+      DIALTONE_STATE_DIR="$DIALTONE_STATE_DIR" \
+      DIALTONE_STATE_DB="$DIALTONE_STATE_DB" \
+      DIALTONE_NIX_OFFLINE="${DIALTONE_NIX_OFFLINE:-0}" \
+      DIALTONE_USE_NIX="$USE_NIX" \
+      zsh -lc "cd $(shell_quote "$REPO_ROOT/src") && exec \${DIALTONE_GO_BIN:-go} run ./mods.go $quoted_args"
 }
 
 if [ ! -f "$REPO_ROOT/src/mods.go" ]; then
@@ -98,6 +199,16 @@ if [ ! -d "$REPO_ROOT/src/mods" ]; then
   echo "DIALTONE> src/mods not found under $REPO_ROOT" >&2
   exit 1
 fi
+
+hydrate_env_from_state_db
+REPO_ROOT="${DIALTONE_REPO_ROOT:-$REPO_ROOT}"
+USE_NIX="${DIALTONE_USE_NIX:-$USE_NIX}"
+DIALTONE_HOME_ROOT="${HOME:-$REPO_ROOT}"
+DIALTONE_STATE_DIR="${DIALTONE_STATE_DIR:-$DIALTONE_HOME_ROOT/.dialtone}"
+DIALTONE_STATE_DB="${DIALTONE_STATE_DB:-$DIALTONE_STATE_DIR/state.sqlite}"
+DIALTONE_TMUX_TARGET_FILE="${DIALTONE_TMUX_TARGET_FILE:-$DIALTONE_STATE_DIR/tmux_target}"
+NIXPKGS_FLAKE_REF="${DIALTONE_NIXPKGS_FLAKE:-${NIXPKGS_FLAKE:-nixpkgs}}"
+mkdir -p "$DIALTONE_STATE_DIR"
 
 add_nix_package() {
   local pkg="$1"
@@ -114,61 +225,6 @@ add_nix_package() {
   DIALTONE_NIX_PACKAGES+=("$pkg")
 }
 
-load_mod_nix_packages() {
-  local mod="${1:-}"
-  local version="${2:-}"
-  local manifest=""
-  local raw=""
-  local selector=""
-  local pkg=""
-
-  add_nix_package "nixpkgs#bashInteractive"
-  add_nix_package "nixpkgs#git"
-  add_nix_package "nixpkgs#go_1_25"
-
-  if [ -z "$mod" ] || [ -z "$version" ]; then
-    return
-  fi
-
-  manifest="$REPO_ROOT/src/mods/$mod/$version/nix.packages"
-  if [ ! -f "$manifest" ]; then
-    return
-  fi
-
-  while true; do
-    if ! IFS= read -r raw; then
-      break
-    fi
-    raw="$(printf '%s' "$raw" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-    if [ -z "$raw" ]; then
-      continue
-    fi
-    if [[ "$raw" == \#* ]]; then
-      continue
-    fi
-
-    selector=""
-    pkg="$raw"
-    if [[ "$raw" == *:* ]]; then
-      selector="${raw%%:*}"
-      pkg="${raw#*:}"
-      pkg="$(printf '%s' "$pkg" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-    fi
-
-    case "$selector" in
-      ""|"all")
-        add_nix_package "$pkg"
-        ;;
-      "linux")
-        [ "$(uname -s)" = "Linux" ] && add_nix_package "$pkg"
-        ;;
-      "darwin")
-        [ "$(uname -s)" = "Darwin" ] && add_nix_package "$pkg"
-        ;;
-    esac
-  done < "$manifest"
-}
-
 join_nix_package_sig() {
   local out=""
   local pkg=""
@@ -181,34 +237,36 @@ join_nix_package_sig() {
   printf '%s' "$out"
 }
 
-load_mod_nix_packages "${1:-}" "${2:-}"
+add_nix_package "nixpkgs#bashInteractive"
+add_nix_package "nixpkgs#git"
+add_nix_package "nixpkgs#go_1_25"
+FLAKE_SHELL=""
+while IFS=$'\t' read -r plan_kind plan_value; do
+  case "$plan_kind" in
+    "flake_shell")
+      FLAKE_SHELL="$plan_value"
+      ;;
+    "package")
+      add_nix_package "$plan_value"
+      ;;
+  esac
+done < <(
+  run_go_in_default_nix capture __nix-plan "${1:-}" "${2:-}" 2>/dev/null || true
+)
 NIX_PACKAGE_SIG="$(join_nix_package_sig)"
-FLAKE_SHELL="$(resolve_flake_shell "${1:-}" "${2:-}")"
 TMUX_TARGET="$(load_tmux_target)"
+TMUX_PROMPT_TARGET="$(load_tmux_prompt_target)"
 
-if [ -n "$TMUX_TARGET" ] && [ "${DIALTONE_TMUX_PROXY_ACTIVE:-0}" != "1" ] && ! should_bypass_tmux_proxy "${1:-}" "${2:-}"; then
-  if ! command -v tmux >/dev/null 2>&1; then
-    echo "DIALTONE> tmux is required for tmux target proxying" >&2
-    exit 1
-  fi
-  TMUX_TARGET_REF="$(tmux_target_ref "$TMUX_TARGET")"
-  TMUX_COMMAND="DIALTONE_TMUX_PROXY_ACTIVE=1 $(shell_quote "$REPO_ROOT/dialtone_mod")"
-  if [ "$#" -gt 0 ]; then
-    TMUX_COMMAND+=" $(join_shell_args "$@")"
-  fi
-  tmux send-keys -t "$TMUX_TARGET_REF" C-c >/dev/null 2>&1 || true
-  tmux send-keys -t "$TMUX_TARGET_REF" -- "$TMUX_COMMAND"
-  tmux send-keys -t "$TMUX_TARGET_REF" C-m
-  echo "DIALTONE> sent to tmux target $TMUX_TARGET: $*"
-  exit 0
+if [ -n "$TMUX_TARGET" ] && [ -n "$TMUX_PROMPT_TARGET" ] && [ "${DIALTONE_TMUX_PROXY_ACTIVE:-0}" != "1" ] && should_route_via_shell "${1:-}" "${2:-}" "${3:-}"; then
+  run_go_in_default_nix exec "$@"
 fi
 
-if [ "$USE_NIX" != "0" ] && [ -n "$FLAKE_SHELL" ] && { [ "${DIALTONE_NIX_ACTIVE:-0}" != "1" ] || [ "${DIALTONE_NIX_SHELL:-}" != "$FLAKE_SHELL" ]; }; then
+if [ "$USE_NIX" != "0" ] && [ -n "$FLAKE_SHELL" ] && [ "${DIALTONE_NIX_ACTIVE:-0}" != "1" ]; then
   if ! command -v nix >/dev/null 2>&1; then
     echo "DIALTONE> nix is required for dialtone_mod (set DIALTONE_USE_NIX=0 to bypass)" >&2
     exit 1
   fi
-  NIX_ARGS=()
+  declare -a NIX_ARGS=()
   if [ "${DIALTONE_NIX_OFFLINE:-0}" = "1" ]; then
     NIX_ARGS+=(--offline)
   fi
@@ -219,18 +277,21 @@ if [ "$USE_NIX" != "0" ] && [ -n "$FLAKE_SHELL" ] && { [ "${DIALTONE_NIX_ACTIVE:
     --command env \
       DIALTONE_NIX_ACTIVE=1 \
       DIALTONE_NIX_SHELL="$FLAKE_SHELL" \
+      DIALTONE_HOST_PATH="$PATH" \
       DIALTONE_REPO_ROOT="$REPO_ROOT" \
+      DIALTONE_STATE_DIR="$DIALTONE_STATE_DIR" \
+      DIALTONE_STATE_DB="$DIALTONE_STATE_DB" \
       DIALTONE_NIX_OFFLINE="${DIALTONE_NIX_OFFLINE:-0}" \
       DIALTONE_USE_NIX="$USE_NIX" \
       "$REPO_ROOT/dialtone_mod" "$@"
 fi
 
-if [ "$USE_NIX" != "0" ] && [ -z "$FLAKE_SHELL" ] && { [ "${DIALTONE_NIX_ACTIVE:-0}" != "1" ] || [ "${DIALTONE_NIX_PACKAGES_SIG:-}" != "$NIX_PACKAGE_SIG" ]; }; then
+if [ "$USE_NIX" != "0" ] && [ -z "$FLAKE_SHELL" ] && [ "${DIALTONE_NIX_ACTIVE:-0}" != "1" ]; then
   if ! command -v nix >/dev/null 2>&1; then
     echo "DIALTONE> nix is required for dialtone_mod (set DIALTONE_USE_NIX=0 to bypass)" >&2
     exit 1
   fi
-  NIX_ARGS=()
+  declare -a NIX_ARGS=()
   if [ "${DIALTONE_NIX_OFFLINE:-0}" = "1" ]; then
     NIX_ARGS+=(--offline)
   fi
@@ -244,11 +305,14 @@ if [ "$USE_NIX" != "0" ] && [ -z "$FLAKE_SHELL" ] && { [ "${DIALTONE_NIX_ACTIVE:
       DIALTONE_NIX_PACKAGES_SIG="$NIX_PACKAGE_SIG" \
       DIALTONE_NIXPKGS_FLAKE="$NIXPKGS_FLAKE_REF" \
       NIXPKGS_FLAKE="$NIXPKGS_FLAKE_REF" \
+      DIALTONE_HOST_PATH="$PATH" \
       DIALTONE_REPO_ROOT="$REPO_ROOT" \
+      DIALTONE_STATE_DIR="$DIALTONE_STATE_DIR" \
+      DIALTONE_STATE_DB="$DIALTONE_STATE_DB" \
       DIALTONE_NIX_OFFLINE="${DIALTONE_NIX_OFFLINE:-0}" \
       DIALTONE_USE_NIX="$USE_NIX" \
       "$REPO_ROOT/dialtone_mod" "$@"
 fi
 
-cd "$REPO_ROOT"
-exec "${DIALTONE_GO_BIN:-go}" run ./src/mods.go "$@"
+cd "$REPO_ROOT/src"
+exec "${DIALTONE_GO_BIN:-go}" run ./mods.go "$@"

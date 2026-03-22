@@ -1,4 +1,4 @@
-package shellv1_test
+package tmuxv1_test
 
 import (
 	"os"
@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestShellV1Layout(t *testing.T) {
+func TestTmuxV1Layout(t *testing.T) {
 	root := currentDir(t)
 	for _, rel := range []string{
 		"README.md",
@@ -18,7 +18,7 @@ func TestShellV1Layout(t *testing.T) {
 		filepath.Join("cli", "main_test.go"),
 	} {
 		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
-			t.Fatalf("expected %s in shell/v1: %v", rel, err)
+			t.Fatalf("expected %s in tmux/v1: %v", rel, err)
 		}
 	}
 	readme, err := os.ReadFile(filepath.Join(root, "README.md"))
@@ -26,7 +26,7 @@ func TestShellV1Layout(t *testing.T) {
 		t.Fatalf("read README.md: %v", err)
 	}
 	if !strings.Contains(string(readme), "## Test Result") {
-		t.Fatalf("expected shell/v1 README to contain a Test Result section")
+		t.Fatalf("expected tmux/v1 README to contain a Test Result section")
 	}
 }
 

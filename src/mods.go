@@ -1,12 +1,20 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
+
+	"dialtone/dev/internal/modstate"
+	"dialtone/dev/mods/shared/dispatch"
+	"dialtone/dev/mods/shared/nixplan"
+	"dialtone/dev/mods/shared/router"
+	"dialtone/dev/mods/shared/sqlitestate"
 )
 
 func main() {
@@ -21,11 +29,37 @@ func runCLI() error {
 	if err != nil {
 		return err
 	}
+	stateDB := openStateDBBestEffort(repoRoot)
+	if stateDB != nil {
+		_, _ = sqlitestate.HydrateRuntimeEnv(stateDB, "process", false)
+	}
 	setBaseEnv(repoRoot)
 	srcRoot := filepath.Join(repoRoot, "src")
+	stateDB = syncStateDBBestEffort(repoRoot, stateDB)
+	if stateDB != nil {
+		defer stateDB.Close()
+	}
 
 	if len(os.Args) < 3 {
 		printUsage(repoRoot)
+		return nil
+	}
+	if strings.TrimSpace(os.Args[1]) == "__nix-plan" {
+		if len(os.Args) < 4 {
+			return fmt.Errorf("__nix-plan requires <mod> <version>")
+		}
+		modName := mapCommandNameToMod(strings.TrimSpace(os.Args[2]))
+		version := strings.TrimSpace(os.Args[3])
+		plan, err := nixplan.BuildPlan(stateDB, repoRoot, modName, version, runtime.GOOS)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(plan.FlakeShell) != "" {
+			fmt.Printf("flake_shell\t%s\n", strings.TrimSpace(plan.FlakeShell))
+		}
+		for _, pkg := range plan.Packages {
+			fmt.Printf("package\t%s\n", strings.TrimSpace(pkg))
+		}
 		return nil
 	}
 
@@ -52,14 +86,41 @@ func runCLI() error {
 	if len(os.Args) > 3 {
 		commandArg = strings.TrimSpace(os.Args[3])
 	}
-	entry := resolveModEntry(srcRoot, modName, version, commandArg)
-	if entry == "" {
-		return fmt.Errorf("unknown mod entrypoint for %s %s", modName, version)
-	}
 
 	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
 	if goBin == "" {
 		goBin = "go"
+	}
+
+	if stateDB != nil && dispatch.ShouldRouteViaShell(modName, commandArg) {
+		executeDirect, err := dispatch.ShouldExecuteDirectInPane(stateDB, os.Args[1:], strings.TrimSpace(os.Getenv("TMUX")) != "")
+		if err != nil {
+			return err
+		}
+		if !executeDirect {
+			ready, err := dispatch.ShellReady(stateDB)
+			if err != nil {
+				return err
+			}
+			if !ready {
+				if err := router.StartShellWorkflow(repoRoot, goBin, goRunner{}); err != nil {
+					return err
+				}
+				stateDB = syncStateDBBestEffort(repoRoot, stateDB)
+				if stateDB == nil {
+					return fmt.Errorf("failed to reopen sqlite state after starting shell workflow")
+				}
+			}
+			if err := routeCommandViaShell(repoRoot, goBin, stateDB, os.Args[1:]); err != nil {
+				return err
+			}
+			return nil
+		}
+	}
+
+	entry := resolveModEntry(srcRoot, stateDB, modName, version, commandArg)
+	if entry == "" {
+		return fmt.Errorf("unknown mod entrypoint for %s %s", modName, version)
 	}
 
 	cmdArgs := append([]string{"run", entry}, os.Args[3:]...)
@@ -77,7 +138,12 @@ func runCLI() error {
 	return nil
 }
 
-func resolveModEntry(srcRoot, modName, version, command string) string {
+func resolveModEntry(srcRoot string, stateDB *sql.DB, modName, version, command string) string {
+	if stateDB != nil {
+		if entry, err := resolveModEntryFromState(stateDB, srcRoot, modName, version, command); err == nil && strings.TrimSpace(entry) != "" {
+			return entry
+		}
+	}
 	modDir := filepath.Join(srcRoot, "mods", modName, version)
 	if shouldUseModCLI(command) && hasGoPackage(filepath.Join(modDir, "cli")) {
 		return relativeFrom(srcRoot, filepath.Join(modDir, "cli"))
@@ -89,6 +155,47 @@ func resolveModEntry(srcRoot, modName, version, command string) string {
 		return relativeFrom(srcRoot, filepath.Join(modDir, "cli"))
 	}
 	return ""
+}
+
+func routeCommandViaShell(repoRoot, goBin string, stateDB *sql.DB, args []string) error {
+	if stateDB == nil {
+		return fmt.Errorf("sqlite state is required to route commands via shell")
+	}
+	rowID, err := router.QueueCommandViaShell(stateDB, repoRoot, args)
+	if err != nil {
+		return err
+	}
+	if err := router.SyncShell(repoRoot, goBin, goRunner{}, 20, 240); err != nil {
+		return err
+	}
+	record, err := router.WaitForShellBusCompletion(stateDB, rowID, 240*time.Second)
+	if err != nil {
+		return err
+	}
+	if record.Status == "failed" {
+		body, decodeErr := dispatch.DecodeIntentBody(record.BodyJSON)
+		if decodeErr == nil && strings.TrimSpace(body.Error) != "" {
+			return fmt.Errorf("dialtone-view command failed: %s", body.Error)
+		}
+		return fmt.Errorf("dialtone-view command failed [row_id=%d]", rowID)
+	}
+	fmt.Printf("routed to dialtone-view [row_id=%d]\n", rowID)
+	return nil
+}
+
+type goRunner struct{}
+
+func (goRunner) Run(repoRoot, goBin, entry string, args ...string) error {
+	cmdArgs := append([]string{"run", entry}, args...)
+	cmd := exec.Command(goBin, cmdArgs...)
+	cmd.Dir = filepath.Join(repoRoot, "src")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to launch %s: %w", entry, err)
+	}
+	return nil
 }
 
 func shouldUseModCLI(command string) bool {
@@ -118,10 +225,33 @@ func printUsage(repoRoot string) {
 	fmt.Println("Examples:")
 	fmt.Println("  ./dialtone_mod mods v1 help")
 	fmt.Println("  ./dialtone_mod mesh v3 help")
-	listAvailableMods(filepath.Join(repoRoot, "src", "mods"))
+	stateDB := syncStateDBBestEffort(repoRoot, nil)
+	if stateDB != nil {
+		defer stateDB.Close()
+	}
+	listAvailableMods(filepath.Join(repoRoot, "src", "mods"), stateDB)
 }
 
-func listAvailableMods(modRoot string) {
+func listAvailableMods(modRoot string, stateDB *sql.DB) {
+	if stateDB != nil {
+		if records, err := listAvailableModsFromState(stateDB); err == nil && len(records) > 0 {
+			fmt.Println("Available mods:")
+			current := ""
+			for _, record := range records {
+				if record.Name != current {
+					if current != "" {
+						fmt.Println()
+					}
+					fmt.Printf("  %s %s", record.Name, record.Version)
+					current = record.Name
+					continue
+				}
+				fmt.Printf(" %s", record.Version)
+			}
+			fmt.Println()
+			return
+		}
+	}
 	entries, err := os.ReadDir(modRoot)
 	if err != nil {
 		return
@@ -381,10 +511,14 @@ func isRepoRoot(candidate string) bool {
 }
 
 func setBaseEnv(repoRoot string) {
-	_ = os.Setenv("DIALTONE_REPO_ROOT", repoRoot)
-	_ = os.Setenv("DIALTONE_SRC_ROOT", filepath.Join(repoRoot, "src"))
-	_ = os.Setenv("DIALTONE_ENV_FILE", filepath.Join(repoRoot, "env", "dialtone.json"))
-	_ = os.Setenv("DIALTONE_MESH_CONFIG", filepath.Join(repoRoot, "env", "dialtone.json"))
+	setEnvDefault("DIALTONE_REPO_ROOT", repoRoot)
+	setEnvDefault("DIALTONE_SRC_ROOT", filepath.Join(repoRoot, "src"))
+	setEnvDefault("DIALTONE_ENV_FILE", filepath.Join(repoRoot, "env", "dialtone.json"))
+	setEnvDefault("DIALTONE_MESH_CONFIG", filepath.Join(repoRoot, "env", "dialtone.json"))
+	stateDir := sqlitestate.ResolveStateDir(repoRoot)
+	_ = os.MkdirAll(stateDir, 0o755)
+	setEnvDefault("DIALTONE_STATE_DIR", stateDir)
+	setEnvDefault("DIALTONE_STATE_DB", sqlitestate.ResolveStateDBPath(repoRoot))
 }
 
 func hasGoPackage(path string) bool {
@@ -396,7 +530,7 @@ func hasGoPackage(path string) bool {
 		if entry.IsDir() {
 			continue
 		}
-		if strings.HasSuffix(entry.Name(), ".go") {
+		if strings.HasSuffix(entry.Name(), ".go") && !strings.HasSuffix(entry.Name(), "_test.go") {
 			return true
 		}
 	}
@@ -416,4 +550,50 @@ func relativeFrom(base, target string) string {
 		return rel
 	}
 	return "./" + rel
+}
+
+func openStateDBBestEffort(repoRoot string) *sql.DB {
+	db, err := modstate.Open(sqlitestate.ResolveStateDBPath(repoRoot))
+	if err != nil {
+		return nil
+	}
+	if err := modstate.EnsureSchema(db); err != nil {
+		_ = db.Close()
+		return nil
+	}
+	return db
+}
+
+func syncStateDBBestEffort(repoRoot string, stateDB *sql.DB) *sql.DB {
+	db := stateDB
+	if db == nil {
+		db = openStateDBBestEffort(repoRoot)
+		if db == nil {
+			return nil
+		}
+	}
+	if _, err := modstate.SyncRepo(db, repoRoot, modstate.CaptureRuntimeEnv()); err != nil {
+		_ = db.Close()
+		return nil
+	}
+	return db
+}
+
+func setEnvDefault(key, value string) {
+	if strings.TrimSpace(os.Getenv(key)) != "" {
+		return
+	}
+	_ = os.Setenv(key, value)
+}
+
+func resolveModEntryFromState(stateDB *sql.DB, srcRoot, modName, version, command string) (string, error) {
+	entry, err := modstate.ResolveEntrypoint(stateDB, srcRoot, modName, version, command)
+	if err != nil {
+		return "", err
+	}
+	return entry.Path, nil
+}
+
+func listAvailableModsFromState(stateDB *sql.DB) ([]modstate.ModRecord, error) {
+	return modstate.LoadMods(stateDB)
 }

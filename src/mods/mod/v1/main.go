@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"dialtone/dev/internal/modstate"
 	git "github.com/go-git/go-git/v5"
 	gittransport "github.com/go-git/go-git/v5/plumbing/transport"
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
@@ -84,6 +85,8 @@ func main() {
 		exitIfErr(runClean(args))
 	case "reset":
 		exitIfErr(runReset(args))
+	case "db":
+		exitIfErr(runDB(args))
 	default:
 		printUsage()
 		exitIfErr(fmt.Errorf("unknown mods command: %s", cmd))
@@ -131,6 +134,8 @@ func printUsage() {
 	fmt.Println("       [--source PATH] [--dest PATH] [--repo-dir PATH] [--skip-self=true|false]")
 	fmt.Println("       [--branch-map host=branch ...] [--dry-run] [--force]")
 	fmt.Println("       Run `clean --force` then `pull` for the same host target")
+	fmt.Println("  db <path|init|sync|graph|env|state|queue|topo|test-plan|test-run|protocol-runs|protocol-events> [args]")
+	fmt.Println("       Manage the central sqlite state database for the mod DAG, protocol runs, queue/state, and TDD test execution")
 }
 
 func runNew(args []string) error {
@@ -1438,6 +1443,9 @@ func cleanRepoState(repoRoot string, dryRun bool) error {
 }
 
 func discoverMods(repoRoot string) ([]modEntry, error) {
+	if mods, err := discoverModsFromState(repoRoot); err == nil && len(mods) > 0 {
+		return mods, nil
+	}
 	gm := filepath.Join(repoRoot, ".gitmodules")
 	if !fileExists(gm) {
 		return nil, nil
@@ -1479,6 +1487,43 @@ func discoverMods(repoRoot string) ([]modEntry, error) {
 			continue
 		}
 		mods = append(mods, modEntry{Name: rest, Path: p})
+	}
+	sort.SliceStable(mods, func(i, j int) bool { return mods[i].Path < mods[j].Path })
+	return mods, nil
+}
+
+func discoverModsFromState(repoRoot string) ([]modEntry, error) {
+	dbPath := strings.TrimSpace(os.Getenv("DIALTONE_STATE_DB"))
+	if dbPath == "" {
+		dbPath = modstate.DefaultDBPath(repoRoot)
+	}
+	db, err := modstate.Open(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	if _, err := modstate.SyncRepo(db, repoRoot, modstate.CaptureRuntimeEnv()); err != nil {
+		return nil, err
+	}
+	records, err := modstate.LoadMods(db)
+	if err != nil {
+		return nil, err
+	}
+	mods := make([]modEntry, 0, len(records))
+	seen := map[string]struct{}{}
+	for _, record := range records {
+		name := strings.TrimSpace(record.Name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		mods = append(mods, modEntry{
+			Name: name,
+			Path: filepath.ToSlash(filepath.Join("src", "mods", name)),
+		})
 	}
 	sort.SliceStable(mods, func(i, j int) bool { return mods[i].Path < mods[j].Path })
 	return mods, nil
@@ -1607,7 +1652,7 @@ func runSSH(node meshNode, command string) (string, error) {
 		}
 		sshArgs = append(sshArgs, "--command", command)
 
-		goArgs := append([]string{"run", "./src/mods.go"}, sshArgs...)
+		goArgs := append([]string{"run", "./mods.go"}, sshArgs...)
 
 		var cmd *exec.Cmd
 		if fileExists(dialtoneModPath) {
@@ -1615,7 +1660,7 @@ func runSSH(node meshNode, command string) (string, error) {
 		} else {
 			cmd = exec.Command(goBin, goArgs...)
 		}
-		cmd.Dir = repoRoot
+		cmd.Dir = filepath.Join(repoRoot, "src")
 		var out bytes.Buffer
 		var errOut bytes.Buffer
 		cmd.Stdout = &out

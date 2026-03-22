@@ -1,131 +1,143 @@
 # Shell Mod (`v1`)
 
-The `shell` mod turns the local Ghostty + tmux + Codex bootstrap into one
-command.
+`shell v1` is the primary local control plane for the Ghostty + tmux + Codex workflow.
 
-It is intentionally opinionated:
+Code layout:
 
-- quit Ghostty first
-- create exactly one fresh Ghostty window
-- keep exactly one tab in that window
-- start or attach `codex-view`
-- set the tmux proxy target to `codex-view:0:0`
-- launch Codex CLI in that session
-- optionally split the tmux window so Codex stays left and `dialtone-view`
-  appears right
+```text
+src/mods/shell/v1/
+├── README.md
+├── mod.json
+├── nix.packages
+├── main_test.go
+└── cli/
+    ├── main.go
+    └── main_test.go
+```
 
 ## Quick Start
 
 ```sh
-# Start the full local interactive workflow in one command.
-# This quits Ghostty, creates one fresh window with one tab, starts or attaches
-# `codex-view`, sets the tmux target, and launches Codex CLI there.
-./dialtone_mod shell v1 start
+# Run the core preflight tests first.
+./dialtone_mod shell v1 test-basic
 
-# Start the same workflow but choose a different Codex model.
-./dialtone_mod shell v1 start --model gpt-5.4
+# Start the preferred local workflow:
+# - one Ghostty window
+# - one tab
+# - left pane: codex-view
+# - right pane: dialtone-view
+./dialtone_mod shell v1 start --run-tests=false
 
-# Start the workflow but use a different flake shell before Codex launches.
-./dialtone_mod shell v1 start --shell repl-v1
+# Run the full mod test sweep visibly in dialtone-view.
+./dialtone_mod shell v1 test-all
 
-# Wait longer for the tmux pane if local startup is slow.
-./dialtone_mod shell v1 start --wait-seconds 30
+# Or run the full sequence in one command:
+# - test-basic
+# - start
+# - test-all
+./dialtone_mod shell v1 workflow
 
-# Inspect the single selected Ghostty terminal after startup.
-# You should see exactly one terminal in the selected tab.
-./dialtone_mod ghostty v1 list
+# Read the left pane through SQLite-backed shell state.
+./dialtone_mod shell v1 read --role prompt
 
-# Read the live tmux pane after startup.
-# This is how you verify that the startup banner reached Codex itself.
-./dialtone_mod tmux v1 read --pane codex-view:0:0 --lines 40
+# Read the right pane through SQLite-backed shell state.
+./dialtone_mod shell v1 read --role command
 
-# Split the tmux window vertically.
-# Codex stays on the left in `codex-view:0:0`, and a nix shell pane titled
-# `dialtone-view` is created on the right in `codex-view:0:1`.
-./dialtone_mod shell v1 split-vertical
+# Run the shell mod's Go tests visibly in dialtone-view.
+./dialtone_mod shell v1 test
+
+# Run a one-off visible command in dialtone-view.
+./dialtone_mod shell v1 run --wait-seconds 60 \
+  "clear && cd /Users/user/dialtone/src && go test ./mods/shell/v1/..."
+
+# Inspect shell bus state and recent events from SQLite.
+./dialtone_mod shell v1 state --full
+./dialtone_mod shell v1 events --limit 10
 ```
 
 ## DIALTONE>
 
 ```text
-$ ./dialtone_mod shell v1 start
-created fresh ghostty window (id=tab-group-8ae4ade00) tab (id=tab-8aee84800) terminal (id=E15ED691-F19A-4D16-982A-D42D0A483754)
-wrote to ghostty terminal 1 (id=E15ED691-F19A-4D16-982A-D42D0A483754): tmux new-session -A -s codex-view
-set dialtone_mod tmux target: codex-view:0:0
-DIALTONE> sent to tmux target codex-view:0:0: codex v1 start --session codex-view --shell default --reasoning medium --model gpt-5.4
-started shell workflow: ghostty one-window/one-tab -> codex-view:0:0 -> codex gpt-5.4
+$ ./dialtone_mod shell v1 test-basic
+ok  	dialtone/dev/internal/modstate	...
+ok  	dialtone/dev/mods/shared/sqlitestate	...
+ok  	dialtone/dev/mods/mod/v1	...
+ok  	dialtone/dev/mods/shell/v1/cli	...
 
-$ ./dialtone_mod tmux v1 read --pane codex-view:0:0 --lines 12
-Starting Codex CLI with gpt-5.4 (requested reasoning: medium) and skipping confirmations...
-╭────────────────────────────────────────────╮
-│ >_ OpenAI Codex (v0.115.0)                 │
-│                                            │
-│ model:     gpt-5.4 high   /model to change │
-│ directory: ~/dialtone                      │
-╰────────────────────────────────────────────╯
+$ ./dialtone_mod shell v1 start --run-tests=false
+created fresh ghostty window ...
+started shell workflow: ghostty one-window/one-tab -> codex-view:0:0 (codex) + codex-view:0:1 (dialtone-view) -> codex gpt-5.4
 
-$ ./dialtone_mod shell v1 split-vertical
-split codex-view:0.0 right -> codex-view:0.1
-entered nix shell default in codex-view:0.1
-cleared tmux pane codex-view:0.1
-set dialtone_mod tmux target: codex-view:0:0
-split shell workflow: codex on codex-view:0:0 (left), dialtone-view on codex-view:0:1 (right)
+$ ./dialtone_mod shell v1 test-all
+ran command via shell bus [row_id=70]
+
+$ ./dialtone_mod shell v1 read --pane codex-view:0:1 --full
+role	command
+pane	codex-view:0:1
+text
+user@gold src % clear && cd /Users/user/dialtone/src && go test ./mods/... && printf 'DIALTONE_TEST_ALL_DONE\n'
+ok  	dialtone/dev/mods/chrome/v1	...
+ok  	dialtone/dev/mods/codex/v1	...
+ok  	dialtone/dev/mods/ghostty/v1	...
+ok  	dialtone/dev/mods/shell/v1	...
+ok  	dialtone/dev/mods/tmux/v1	...
+ok  	dialtone/dev/mods/tsnet/v1/cli	...
+DIALTONE_TEST_ALL_DONE
 ```
 
-Expected behavior after the command returns:
-
-- Ghostty is open with one fresh window and one tab
-- that tab is attached to the `codex-view` tmux session
-- Codex CLI is starting or already running in that pane
-- the startup path suppresses the Codex self-update chooser so the workflow
-  does not stop on an interactive update prompt
-- future non-control `./dialtone_mod` commands are proxied into `codex-view:0:0`
-- `split-vertical` keeps `codex-view:0:0` on the left and makes
-  `dialtone-view` the right-hand tmux pane at `codex-view:0:1`
-- `split-vertical` clears `dialtone-view` after entering the Nix shell so the
-  right pane lands on a clean prompt
-
 ## Dependencies
-
-Runtime command dependencies:
 
 - `ghostty v1`
 - `tmux v1`
 - `codex v1`
-
-Runtime environment dependencies:
-
 - macOS
-- Ghostty
 - tmux
+- Ghostty
 - Nix
 
 ## Test Results
 
-Most recent validation run:
+- Timestamp: 2026-03-22
+- Commands:
 
-- `<timestamp-start>`: 2026-03-20T18:58:30Z
-- `<timestamp-stop>`: 2026-03-20T19:02:52Z
-- `<runtime>`: 4m22s
-- `<ERRORS>`: none in the final accepted run; earlier validation exposed that Codex still showed its self-update chooser until `codex v1` forced `CI=1`
-- `<ui-screenshot-grid>`: not captured; verification was performed by reading the live `codex-view:0:0` tmux pane and confirming Ghostty had one terminal in the selected tab
+```sh
+./dialtone_mod shell v1 run --wait-seconds 180 \
+  "clear && cd /Users/user/dialtone/src && go test ./mods/shared/router ./mods/tmux/v1/cli ./mods/shared/nixplan ./mods/shell/v1/cli"
 
-Most recent command set:
+./dialtone_mod shell v1 test-all --wait-seconds 240
+```
+
+- Visible result:
 
 ```text
-./dialtone_mod tmux v1 shell --pane codex-view:0:0 --shell default
-./dialtone_mod tmux v1 write --pane codex-view:0:0 --enter "cd /Users/user/dialtone/src && gofmt -w mods/codex/v1/main.go mods/codex/v1/main_test.go mods/ghostty/v1/main.go mods/ghostty/v1/main_test.go mods/shell/v1/main.go mods/shell/v1/main_test.go && go vet ./mods/codex/v1 ./mods/ghostty/v1 ./mods/shell/v1 && go test ./mods/codex/v1 ./mods/ghostty/v1 ./mods/shell/v1 && go build -o /tmp/dialtone-codex-v1 ./mods/codex/v1 && go build -o /tmp/dialtone-ghostty-v1 ./mods/ghostty/v1 && go build -o /tmp/dialtone-shell-v1 ./mods/shell/v1"
-./dialtone_mod tmux v1 read --pane codex-view:0:0 --lines 80
-./dialtone_mod shell v1 start
-./dialtone_mod ghostty v1 list
-./dialtone_mod tmux v1 read --pane codex-view:0:0 --lines 40
+ok  	dialtone/dev/mods/shared/router
+ok  	dialtone/dev/mods/tmux/v1/cli
+ok  	dialtone/dev/mods/shared/nixplan
+ok  	dialtone/dev/mods/shell/v1/cli
 
-Observed result summary:
-- `go vet ./mods/codex/v1 ./mods/ghostty/v1 ./mods/shell/v1` passed
-- `go test ./mods/codex/v1 ./mods/ghostty/v1 ./mods/shell/v1` passed
-- `/tmp/dialtone-codex-v1`, `/tmp/dialtone-ghostty-v1`, and `/tmp/dialtone-shell-v1` were produced
-- `./dialtone_mod shell v1 start` recreated Ghostty as one window with one tab
-- the Ghostty terminal visibly received `tmux new-session -A -s codex-view`
-- `./dialtone_mod ghostty v1 list` showed one focused terminal in the selected tab
-- the final proxied `codex v1 start` reached the Codex TUI without the update chooser appearing
+ok  	dialtone/dev/mods/chrome/v1
+ok  	dialtone/dev/mods/chrome/v1/cli
+ok  	dialtone/dev/mods/codex/v1
+ok  	dialtone/dev/mods/codex/v1/cli
+ok  	dialtone/dev/mods/ghostty/v1
+ok  	dialtone/dev/mods/ghostty/v1/cli
+ok  	dialtone/dev/mods/mesh/v3
+ok  	dialtone/dev/mods/mod/v1
+ok  	dialtone/dev/mods/mod/v1/cli
+ok  	dialtone/dev/mods/mosh/v1
+ok  	dialtone/dev/mods/mosh/v1/cli
+ok  	dialtone/dev/mods/repl/v1
+ok  	dialtone/dev/mods/repl/v1/cli
+ok  	dialtone/dev/mods/shared/dispatch
+ok  	dialtone/dev/mods/shared/nixplan
+ok  	dialtone/dev/mods/shared/router
+ok  	dialtone/dev/mods/shared/sqlitestate
+ok  	dialtone/dev/mods/shell/v1
+ok  	dialtone/dev/mods/shell/v1/cli
+ok  	dialtone/dev/mods/ssh/v1
+ok  	dialtone/dev/mods/tmux/v1
+ok  	dialtone/dev/mods/tmux/v1/cli
+ok  	dialtone/dev/mods/tsnet/v1
+ok  	dialtone/dev/mods/tsnet/v1/cli
+DIALTONE_TEST_ALL_DONE
 ```
