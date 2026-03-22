@@ -54,7 +54,7 @@ func Register(r *testv1.Registry) {
 			}
 			for _, needle := range required {
 				if !strings.Contains(out, needle) {
-					return testv1.StepRunResult{}, fmt.Errorf("shell autostart output missing %q\n%s", needle, out)
+					return testv1.StepRunResult{}, fmt.Errorf("shell autostart output missing %q. Output was:\n%q", needle, out)
 				}
 			}
 			if strings.Contains(out, "\nDIALTONE> shell-autostart-ok") || strings.Contains(out, "\nshell-autostart-ok\n") {
@@ -625,7 +625,15 @@ func cleanupManagedSubtones(rt *support.Runtime) error {
 	out := strings.Join(rt.SubjectMessages(fmt.Sprintf("repl.subtone.%d", listPID)), "\n")
 	stoppedAny := false
 	for _, line := range strings.Split(strings.ReplaceAll(out, "\r\n", "\n"), "\n") {
-		fields := strings.Fields(strings.TrimSpace(line))
+		var frame map[string]any
+		if err := json.Unmarshal([]byte(line), &frame); err != nil {
+			continue
+		}
+		msgText, ok := frame["message"].(string)
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(strings.TrimSpace(msgText))
 		if len(fields) < 3 {
 			continue
 		}
