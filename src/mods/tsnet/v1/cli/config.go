@@ -43,7 +43,7 @@ func resolveConfig(hostnameArg, stateDirArg string) (tsnetConfig, error) {
 		stateDir = strings.TrimSpace(os.Getenv("DIALTONE_TSNET_STATE_DIR"))
 	}
 	if stateDir == "" {
-		stateDir = filepath.Join(".dialtone", "tsnet")
+		stateDir = filepath.Join(defaultDialtoneStateDir(), "tsnet")
 	}
 
 	authVar := "TS_AUTHKEY"
@@ -83,6 +83,16 @@ func resolveConfig(hostnameArg, stateDirArg string) (tsnetConfig, error) {
 		APIKeyPresent:  apiVal != "",
 		APIKeyEnv:      apiVar,
 	}, nil
+}
+
+func defaultDialtoneStateDir() string {
+	if value := strings.TrimSpace(os.Getenv("DIALTONE_STATE_DIR")); value != "" {
+		return value
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		return filepath.Join(strings.TrimSpace(home), ".dialtone")
+	}
+	return filepath.Join(os.TempDir(), "dialtone")
 }
 
 func detectTailnetFromLocalStatus() (string, error) {

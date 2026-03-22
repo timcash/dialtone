@@ -1,63 +1,40 @@
-package main
+package tmuxv1_test
 
 import (
-	"errors"
 	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
-func TestPersistedTargetRoundTripUsesSQLiteState(t *testing.T) {
-	repoRoot := t.TempDir()
-	if err := storePersistedTarget(repoRoot, "codex-view:0:0"); err != nil {
-		t.Fatalf("storePersistedTarget returned error: %v", err)
+func TestTmuxV1Layout(t *testing.T) {
+	root := currentDir(t)
+	for _, rel := range []string{
+		"README.md",
+		"mod.json",
+		"nix.packages",
+		filepath.Join("cli", "main.go"),
+		filepath.Join("cli", "main_test.go"),
+	} {
+		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
+			t.Fatalf("expected %s in tmux/v1: %v", rel, err)
+		}
 	}
-	value, err := loadPersistedTarget(repoRoot)
+	readme, err := os.ReadFile(filepath.Join(root, "README.md"))
 	if err != nil {
-		t.Fatalf("loadPersistedTarget returned error: %v", err)
+		t.Fatalf("read README.md: %v", err)
 	}
-	if value != "codex-view:0:0" {
-		t.Fatalf("unexpected persisted target: %q", value)
-	}
-}
-
-func TestClearPersistedTargetRemovesSQLiteState(t *testing.T) {
-	repoRoot := t.TempDir()
-	if err := storePersistedTarget(repoRoot, "codex-view:0:0"); err != nil {
-		t.Fatalf("storePersistedTarget returned error: %v", err)
-	}
-	if err := clearPersistedTarget(repoRoot); err != nil {
-		t.Fatalf("clearPersistedTarget returned error: %v", err)
-	}
-	_, err := loadPersistedTarget(repoRoot)
-	if !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("expected os.ErrNotExist after clear, got %v", err)
+	if !strings.Contains(string(readme), "## Test Result") {
+		t.Fatalf("expected tmux/v1 README to contain a Test Result section")
 	}
 }
 
-func TestPersistedPromptTargetRoundTripUsesSQLiteState(t *testing.T) {
-	repoRoot := t.TempDir()
-	if err := storePersistedPromptTarget(repoRoot, "codex-view:0:0"); err != nil {
-		t.Fatalf("storePersistedPromptTarget returned error: %v", err)
+func currentDir(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
 	}
-	value, err := loadPersistedPromptTarget(repoRoot)
-	if err != nil {
-		t.Fatalf("loadPersistedPromptTarget returned error: %v", err)
-	}
-	if value != "codex-view:0:0" {
-		t.Fatalf("unexpected persisted prompt target: %q", value)
-	}
-}
-
-func TestClearPersistedPromptTargetRemovesSQLiteState(t *testing.T) {
-	repoRoot := t.TempDir()
-	if err := storePersistedPromptTarget(repoRoot, "codex-view:0:0"); err != nil {
-		t.Fatalf("storePersistedPromptTarget returned error: %v", err)
-	}
-	if err := clearPersistedPromptTarget(repoRoot); err != nil {
-		t.Fatalf("clearPersistedPromptTarget returned error: %v", err)
-	}
-	_, err := loadPersistedPromptTarget(repoRoot)
-	if !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("expected os.ErrNotExist after prompt clear, got %v", err)
-	}
+	return filepath.Dir(file)
 }

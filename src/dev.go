@@ -408,25 +408,6 @@ func main() {
 		runBranch(args)
 	case "plugins":
 		listPlugins()
-	case "mods":
-		if shouldRouteCommandViaREPL(command, args) {
-			if err := dispatchViaREPL(command, args, targetHost); err != nil {
-				if strings.HasPrefix(strings.TrimSpace(err.Error()), "DIALTONE ERROR:") {
-					logs.System("%s", strings.TrimSpace(err.Error()))
-					os.Exit(1)
-				}
-				logs.Error("REPL dispatch failed: %v", err)
-				os.Exit(1)
-			}
-			return
-		}
-		if err := runMods(args); err != nil {
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				os.Exit(exitErr.ExitCode())
-			}
-			logs.Error("mods command failed: %v", err)
-			os.Exit(1)
-		}
 	case "dev":
 		if len(args) > 0 && args[0] == "install" {
 			runDevInstall()
@@ -1331,14 +1312,13 @@ func printDevUsage() {
 	logs.Info("  help                 Show this help")
 	logs.Info("")
 	logs.Info("Plugin routing:")
-	logs.Info("  <plugin> <args...>   Run <plugin>/{scaffold|cli}/main.go in src/plugins or src/mods (or scaffold.sh/cli.sh)")
+	logs.Info("  <plugin> <args...>   Run <plugin>/{scaffold|cli}/main.go in src/plugins (or scaffold.sh/cli.sh)")
 	logs.Info("")
 	logs.Info("Examples:")
 	logs.Info("  ./dialtone.sh go install --latest")
 	logs.Info("  ./dialtone.sh go exec version")
 	logs.Info("  ./dialtone.sh robot install src_v1")
 	logs.Info("  ./dialtone.sh dag install src_v3")
-	logs.Info("  ./dialtone.sh mods help")
 	logs.Info("  ./dialtone.sh gemini run --task task.md")
 	logs.Info("  ./dialtone.sh go src_v1 version --host grey")
 	logs.Info("  ./dialtone.sh go src_v1 version --ssh-host grey")
@@ -1346,7 +1326,7 @@ func printDevUsage() {
 }
 
 func listPlugins() {
-	roots := []string{"mods", "plugins"}
+	roots := []string{"plugins"}
 	seen := map[string]struct{}{}
 	logs.Info("Available commands with scaffold:")
 	for _, root := range roots {
@@ -1380,7 +1360,7 @@ func listPlugins() {
 }
 
 func runPluginScaffold(plugin string, args []string) error {
-	roots := []string{"plugins", "mods"}
+	roots := []string{"plugins"}
 	pluginDir := ""
 	var fallbackDir string
 	for _, root := range roots {
@@ -1445,18 +1425,6 @@ func runPluginScaffold(plugin string, args []string) error {
 	}
 
 	return logs.Errorf("plugin %s has no scaffold/cli main.go or scaffold.sh/cli.sh in candidate roots", plugin)
-}
-
-func runMods(args []string) error {
-	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
-	if goBin == "" {
-		goBin = "go"
-	}
-	cmd := exec.Command(goBin, append([]string{"run", "./mods/mod/v1/main.go"}, args...)...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	return cmd.Run()
 }
 
 func fileExists(path string) bool {

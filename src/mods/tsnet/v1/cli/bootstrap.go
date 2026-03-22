@@ -157,8 +157,9 @@ func ensureKeepalive(repoRoot string, cfg tsnetConfig, envPath, stateDir string)
 		stateDir = filepath.Join(repoRoot, stateDir)
 	}
 
-	pidFile := filepath.Join(repoRoot, ".dialtone", "run", fmt.Sprintf("tsnet-keepalive-%s.pid", hostname))
-	logFile := filepath.Join(repoRoot, ".dialtone", "logs", fmt.Sprintf("tsnet-keepalive-%s.log", hostname))
+	stateRoot := defaultDialtoneStateDir()
+	pidFile := filepath.Join(stateRoot, "run", fmt.Sprintf("tsnet-keepalive-%s.pid", hostname))
+	logFile := filepath.Join(stateRoot, "logs", fmt.Sprintf("tsnet-keepalive-%s.log", hostname))
 	_ = os.MkdirAll(filepath.Dir(pidFile), 0o755)
 	_ = os.MkdirAll(filepath.Dir(logFile), 0o755)
 	_ = os.MkdirAll(stateDir, 0o755)

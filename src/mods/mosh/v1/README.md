@@ -20,25 +20,16 @@ cd ..
 
 ## Test Results
 
-Most recent validation run:
-
-- `<run-id>`: 2
-- `<plan-name>`: default
-- `<timestamp-start>`: 2026-03-20T23:26:51Z
-- `<timestamp-stop>`: 2026-03-20T23:26:58Z
-- `<runtime>`: 7s
-- `<status>`: failed
-- `<ERRORS>`: none
-- `<ui-screenshot-grid>`: not captured
-
-Most recent command set:
+- Timestamp: 2026-03-22
+- Command:
 
 ```sh
-# step 5 -> mosh v1 (passed)
-go test ./mods/mosh/v1/cli
-
+./dialtone_mod shell v1 test-all --wait-seconds 240
 ```
 
-Observed result summary:
+- Visible result:
 
-- step 5 `mosh v1` -> `passed` (exit=0)
+```text
+ok  	dialtone/dev/mods/mosh/v1
+ok  	dialtone/dev/mods/mosh/v1/cli
+```

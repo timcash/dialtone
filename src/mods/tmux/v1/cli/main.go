@@ -14,6 +14,13 @@ import (
 	"dialtone/dev/mods/shared/sqlitestate"
 )
 
+func tmuxBinary() string {
+	if value := strings.TrimSpace(os.Getenv("DIALTONE_TMUX_BIN")); value != "" {
+		return value
+	}
+	return "tmux"
+}
+
 type tmuxPaneTarget struct {
 	Session string
 	Window  string
@@ -112,7 +119,7 @@ func runList(argv []string) error {
 	if *short {
 		format = "#{session_name}"
 	}
-	cmd := exec.Command("tmux", "list-sessions", "-F", format)
+	cmd := exec.Command(tmuxBinary(), "list-sessions", "-F", format)
 	out, err := cmd.CombinedOutput()
 	text := strings.TrimSpace(string(out))
 	if err != nil {
@@ -151,11 +158,11 @@ func runWrite(argv []string) error {
 	}
 
 	tmuxTarget := target.target()
-	if out, err := exec.Command("tmux", "send-keys", "-t", tmuxTarget, "--", text).CombinedOutput(); err != nil {
+	if out, err := exec.Command(tmuxBinary(), "send-keys", "-t", tmuxTarget, "--", text).CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux send-keys failed: %s", strings.TrimSpace(string(out)))
 	}
 	if *enter {
-		if out, err := exec.Command("tmux", "send-keys", "-t", tmuxTarget, "C-m").CombinedOutput(); err != nil {
+		if out, err := exec.Command(tmuxBinary(), "send-keys", "-t", tmuxTarget, "C-m").CombinedOutput(); err != nil {
 			return fmt.Errorf("tmux send-keys enter failed: %s", strings.TrimSpace(string(out)))
 		}
 	}
@@ -178,7 +185,7 @@ func runRead(argv []string) error {
 		return err
 	}
 
-	cmd := exec.Command("tmux", "capture-pane", "-pt", target.target(), "-S", fmt.Sprintf("-%d", *lines))
+	cmd := exec.Command(tmuxBinary(), "capture-pane", "-pt", target.target(), "-S", fmt.Sprintf("-%d", *lines))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("tmux capture-pane failed: %s", strings.TrimSpace(string(out)))
@@ -202,10 +209,10 @@ func runClear(argv []string) error {
 	}
 
 	tmuxTarget := target.target()
-	if out, err := exec.Command("tmux", "clear-history", "-t", tmuxTarget).CombinedOutput(); err != nil {
+	if out, err := exec.Command(tmuxBinary(), "clear-history", "-t", tmuxTarget).CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux clear-history failed: %s", strings.TrimSpace(string(out)))
 	}
-	if out, err := exec.Command("tmux", "send-keys", "-t", tmuxTarget, "C-l").CombinedOutput(); err != nil {
+	if out, err := exec.Command(tmuxBinary(), "send-keys", "-t", tmuxTarget, "C-l").CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux send-keys clear failed: %s", strings.TrimSpace(string(out)))
 	}
 	fmt.Printf("cleared tmux pane %s\n", tmuxTarget)
@@ -222,11 +229,11 @@ func runRename(argv []string) error {
 
 	resolveSession := strings.TrimSpace(*session)
 	if resolveSession == "" {
-		out, _ := exec.Command("tmux", "display-message", "-p", "#S").Output()
+		out, _ := exec.Command(tmuxBinary(), "display-message", "-p", "#S").Output()
 		resolveSession = strings.TrimSpace(string(out))
 	}
 	if resolveSession == "" {
-		out, _ := exec.Command("tmux", "list-sessions", "-F", "#{session_name}").Output()
+		out, _ := exec.Command(tmuxBinary(), "list-sessions", "-F", "#{session_name}").Output()
 		resolveSession = strings.TrimSpace(strings.Split(strings.TrimSpace(string(out)), "\n")[0])
 	}
 	if resolveSession == "" {
@@ -240,7 +247,7 @@ func runRename(argv []string) error {
 		fmt.Printf("tmux session already named %s\n", newName)
 		return nil
 	}
-	cmd := exec.Command("tmux", "rename-session", "-t", resolveSession, newName)
+	cmd := exec.Command(tmuxBinary(), "rename-session", "-t", resolveSession, newName)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux rename-session failed: %s", strings.TrimSpace(string(out)))
 	}
@@ -293,7 +300,7 @@ func runSplit(argv []string) error {
 		tmuxArgs = append(tmuxArgs, strings.TrimSpace(*command))
 	}
 
-	out, err := exec.Command("tmux", tmuxArgs...).CombinedOutput()
+	out, err := exec.Command(tmuxBinary(), tmuxArgs...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("tmux split-window failed: %s", strings.TrimSpace(string(out)))
 	}
@@ -304,12 +311,12 @@ func runSplit(argv []string) error {
 	}
 
 	if strings.TrimSpace(*title) != "" {
-		if out, err := exec.Command("tmux", "select-pane", "-t", newTarget.target(), "-T", strings.TrimSpace(*title)).CombinedOutput(); err != nil {
+		if out, err := exec.Command(tmuxBinary(), "select-pane", "-t", newTarget.target(), "-T", strings.TrimSpace(*title)).CombinedOutput(); err != nil {
 			return fmt.Errorf("tmux select-pane title failed: %s", strings.TrimSpace(string(out)))
 		}
 	}
 	if !*focus {
-		if out, err := exec.Command("tmux", "select-pane", "-t", target.target()).CombinedOutput(); err != nil {
+		if out, err := exec.Command(tmuxBinary(), "select-pane", "-t", target.target()).CombinedOutput(); err != nil {
 			return fmt.Errorf("tmux select-pane restore failed: %s", strings.TrimSpace(string(out)))
 		}
 	}
@@ -347,14 +354,11 @@ func runShell(argv []string) error {
 		shellQuote("nix-command flakes"),
 		shellQuote(".#"+strings.TrimSpace(*shellName)),
 	)
-	if out, err := exec.Command("tmux", "send-keys", "-t", tmuxTarget, "C-c").CombinedOutput(); err != nil {
-		return fmt.Errorf("tmux send-keys interrupt failed: %s", strings.TrimSpace(string(out)))
+	if out, err := exec.Command(tmuxBinary(), "clear-history", "-t", tmuxTarget).CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux clear-history failed: %s", strings.TrimSpace(string(out)))
 	}
-	if out, err := exec.Command("tmux", "send-keys", "-t", tmuxTarget, "--", command).CombinedOutput(); err != nil {
-		return fmt.Errorf("tmux send-keys shell failed: %s", strings.TrimSpace(string(out)))
-	}
-	if out, err := exec.Command("tmux", "send-keys", "-t", tmuxTarget, "C-m").CombinedOutput(); err != nil {
-		return fmt.Errorf("tmux send-keys enter failed: %s", strings.TrimSpace(string(out)))
+	if out, err := exec.Command(tmuxBinary(), "respawn-pane", "-k", "-t", tmuxTarget, "zsh", "-lc", command).CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux respawn-pane shell failed: %s", strings.TrimSpace(string(out)))
 	}
 	fmt.Printf("entered nix shell %s in %s\n", strings.TrimSpace(*shellName), tmuxTarget)
 	return nil

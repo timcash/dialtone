@@ -113,7 +113,7 @@ func runTest(args []string) error {
 			return err
 		}
 		if len(nodes) == 0 {
-			return fmt.Errorf("no mesh nodes found in env/mesh.json")
+			return fmt.Errorf("no mesh nodes found in env/dialtone.json mesh_nodes or env/mesh.json")
 		}
 		failed := 0
 		for _, node := range nodes {
@@ -219,9 +219,14 @@ type meshNode struct {
 	Name           string   `json:"name"`
 	Aliases        []string `json:"aliases"`
 	User           string   `json:"user"`
+	Password       string   `json:"password"`
 	Host           string   `json:"host"`
 	HostCandidates []string `json:"host_candidates"`
 	Port           string   `json:"port"`
+}
+
+type dialtoneEnvConfig struct {
+	MeshNodes []meshNode `json:"mesh_nodes"`
 }
 
 func resolveMeshNode(raw string) (meshNode, error) {
@@ -279,8 +284,19 @@ func loadMeshConfig() ([]meshNode, error) {
 		return nil, err
 	}
 
-	configPath := filepath.Join(repoRoot, "env", "mesh.json")
-	raw, err := os.ReadFile(configPath)
+	dialtonePath := filepath.Join(repoRoot, "env", "dialtone.json")
+	if raw, err := os.ReadFile(dialtonePath); err == nil {
+		cfg := dialtoneEnvConfig{}
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			return nil, err
+		}
+		if len(cfg.MeshNodes) > 0 {
+			return cfg.MeshNodes, nil
+		}
+	}
+
+	meshPath := filepath.Join(repoRoot, "env", "mesh.json")
+	raw, err := os.ReadFile(meshPath)
 	if err != nil {
 		return nil, err
 	}
@@ -331,13 +347,16 @@ func buildSSHCommandForHost(cfg sshOptions, node meshNode, host string) (*exec.C
 	}
 	password := cfg.password
 	if password == "" {
+		password = strings.TrimSpace(node.Password)
+	}
+	if password == "" {
 		sshArgs = append(sshArgs, "-o", "BatchMode=yes")
 	} else {
 		sshArgs = append(sshArgs,
+			"-tt",
 			"-o", "BatchMode=no",
-			"-o", "PreferredAuthentications=password",
+			"-o", "PreferredAuthentications=password,keyboard-interactive",
 			"-o", "PubkeyAuthentication=no",
-			"-o", "KbdInteractiveAuthentication=no",
 		)
 	}
 	if remotePort != "" && remotePort != "22" {
@@ -449,7 +468,7 @@ func printUsage() {
 	fmt.Println("Usage:")
 	fmt.Println("  ./dialtone_mod ssh v1 [run] --host <name|ip> [--user <user>] [--password <password>] [--port <port>] [--command <cmd>] [--dry-run]")
 	fmt.Println("  ./dialtone_mod ssh v1 test [--host <name|all|ip>] [--user <user>] [--password <password>] [--port <port>] [--dry-run]")
-	fmt.Println("Aliases are loaded from env/mesh.json (for example gold, wsl, rover, grey).")
+	fmt.Println("Aliases are loaded from env/dialtone.json mesh_nodes, with env/mesh.json as a fallback (for example gold, wsl, rover, grey).")
 }
 
 func exitIfErr(err error, context string) {

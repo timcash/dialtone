@@ -131,6 +131,19 @@ func TestResolveStatePathsMakeRelativeEnvAbsoluteFromRepoRoot(t *testing.T) {
 	}
 }
 
+func TestResolveStatePathsDefaultToUserHome(t *testing.T) {
+	repoRoot := "/tmp/example"
+	t.Setenv("HOME", "/tmp/dialtone-home")
+	t.Setenv("DIALTONE_STATE_DIR", "")
+	t.Setenv("DIALTONE_STATE_DB", "")
+	if got := ResolveStateDir(repoRoot); got != "/tmp/dialtone-home/.dialtone" {
+		t.Fatalf("unexpected default state dir: %q", got)
+	}
+	if got := ResolveStateDBPath(repoRoot); got != "/tmp/dialtone-home/.dialtone/state.sqlite" {
+		t.Fatalf("unexpected default state db: %q", got)
+	}
+}
+
 func TestParseAssignment(t *testing.T) {
 	key, value, err := ParseAssignment("DIALTONE_FOO=bar=baz")
 	if err != nil {

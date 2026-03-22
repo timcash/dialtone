@@ -22,7 +22,7 @@ env DIALTONE_TMUX_PROXY_ACTIVE=1 ./dialtone_mod mods v1 db protocol-events --run
 
 # Or query the tables directly through sqlite.
 nix --extra-experimental-features 'nix-command flakes' develop .#default \
-  --command sqlite3 .dialtone/state.sqlite \
+  --command sqlite3 "$(./dialtone_mod mods v1 db path)" \
   "select id,name,status,prompt_target,command_target,result_text from protocol_runs order by id desc limit 5;"
 
 # Run the Go test package for this mod under Nix.
@@ -34,40 +34,22 @@ nix --extra-experimental-features 'nix-command flakes' develop .#default \
 ## Dependencies
 
 - `tmux v1`
-- local SQLite database at `.dialtone/state.sqlite`
+- local SQLite database at `~/.dialtone/state.sqlite`
 - Nix-backed Go toolchain for build/test/sync operations
 - `shell v1` for the visible Ghostty + tmux + protocol smoke-test workflow
 
 ## Test Results
 
-Most recent validation run:
-
-- `<run-id>`: protocol run 2 plus package tests
-- `<plan-name>`: default and `demo-protocol`
-- `<timestamp-start>`: 2026-03-20T23:59:00Z
-- `<timestamp-stop>`: 2026-03-21T00:00:00Z
-- `<runtime>`: ~60s across the final Nix test and protocol verification
-- `<status>`: passed for `go test ./mods/mod/v1`; passed for protocol run 2
-- `<ERRORS>`: none
-- `<ui-screenshot-grid>`: not captured
-
-Most recent command set:
+- Timestamp: 2026-03-22
+- Command:
 
 ```sh
-# package test
-cd /Users/user/dialtone
-nix --extra-experimental-features 'nix-command flakes' develop .#default \
-  --command zsh -lc 'cd src && go test ./mods/mod/v1'
-
-# protocol evidence
-nix --extra-experimental-features 'nix-command flakes' develop .#default \
-  --command sqlite3 .dialtone/state.sqlite \
-  "select id,name,status,prompt_target,command_target,result_text from protocol_runs order by id desc limit 5;"
-
+./dialtone_mod shell v1 test-all --wait-seconds 240
 ```
 
-Observed result summary:
+- Visible result:
 
-- `go test ./mods/mod/v1` passed under Nix
-- SQLite recorded `protocol_runs.id=2` with `status=passed`
-- the recorded visible command was `env DIALTONE_TMUX_PROXY_ACTIVE=1 ./dialtone_mod mods v1 db graph --format outline`
+```text
+ok  	dialtone/dev/mods/mod/v1
+ok  	dialtone/dev/mods/mod/v1/cli
+```

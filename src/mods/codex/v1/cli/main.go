@@ -8,6 +8,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
+)
+
+const tmuxRetryAttempts = 6
+
+var (
+	tmuxOutputRunner     = tmuxOutput
+	defaultTmuxRetrySleep = func() { time.Sleep(250 * time.Millisecond) }
+	tmuxRetrySleep       = defaultTmuxRetrySleep
 )
 
 func main() {
@@ -56,13 +65,7 @@ func runStart(argv []string) error {
 	explicitPane := strings.TrimSpace(*pane)
 	if explicitPane != "" {
 		target := normalizePaneTarget(explicitPane)
-		if err := resetPane(target); err != nil {
-			return err
-		}
-		if err := clearPaneHistory(target); err != nil {
-			return err
-		}
-		if err := sendKeys(target, startCmd, true); err != nil {
+		if err := respawnPane(target, startCmd); err != nil {
 			return err
 		}
 		fmt.Printf("started codex in tmux pane %s\n", target)
@@ -85,13 +88,7 @@ func runStart(argv []string) error {
 	if err != nil {
 		return err
 	}
-	if err := resetPane(target); err != nil {
-		return err
-	}
-	if err := clearPaneHistory(target); err != nil {
-		return err
-	}
-	if err := sendKeys(target, startCmd, true); err != nil {
+	if err := respawnPane(target, startCmd); err != nil {
 		return err
 	}
 	fmt.Printf("started codex in tmux session %s via %s\n", *session, target)
@@ -244,7 +241,17 @@ func resetPane(target string) error {
 }
 
 func clearPaneHistory(target string) error {
-	if _, err := tmuxOutput("clear-history", "-t", target); err != nil {
+	if _, err := tmuxOutputWithRetry("clear-history", "-t", target); err != nil {
+		return err
+	}
+	return nil
+}
+
+func respawnPane(target, command string) error {
+	if err := clearPaneHistory(target); err != nil {
+		return err
+	}
+	if _, err := tmuxOutputWithRetry("respawn-pane", "-k", "-t", target, "bash", "-lc", command); err != nil {
 		return err
 	}
 	return nil
@@ -274,6 +281,32 @@ func tmuxOutput(args ...string) (string, error) {
 		return "", fmt.Errorf("tmux %s failed: %s", strings.Join(args, " "), text)
 	}
 	return text, nil
+}
+
+func tmuxOutputWithRetry(args ...string) (string, error) {
+	var lastErr error
+	for attempt := 1; attempt <= tmuxRetryAttempts; attempt++ {
+		out, err := tmuxOutputRunner(args...)
+		if err == nil {
+			return out, nil
+		}
+		lastErr = err
+		if !isTransientTmuxError(err) || attempt == tmuxRetryAttempts {
+			return "", err
+		}
+		tmuxRetrySleep()
+	}
+	return "", lastErr
+}
+
+func isTransientTmuxError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "server exited unexpectedly") ||
+		strings.Contains(text, "lost server") ||
+		strings.Contains(text, "no server running")
 }
 
 func shellQuote(value string) string {
