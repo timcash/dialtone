@@ -22,6 +22,7 @@ export type RobotEvent = {
   timestamp: string;
   logLine: string;
   level: 'INFO' | 'WARN' | 'ERROR';
+  noisy: boolean;
 };
 
 type RobotEventListener = (event: RobotEvent) => void;
@@ -120,6 +121,7 @@ function normalizeRobotEvent(subject: string, payload: any): RobotEvent {
   let category: RobotEventCategory = 'unknown';
   let level: 'INFO' | 'WARN' | 'ERROR' = 'INFO';
   let prefix = '[EVENT]';
+  let noisy = false;
 
   if (subject.startsWith('mavlink.')) {
     category = 'mavlink';
@@ -137,13 +139,20 @@ function normalizeRobotEvent(subject: string, payload: any): RobotEvent {
       if (stringifyValue(payload?.result).toUpperCase().includes('FAILED')) {
         level = 'ERROR';
       }
-    } else if (subject === 'mavlink.stats' && Array.isArray(payload?.errors) && payload.errors.length > 0) {
-      prefix = '[MAVLINK][STATS]';
-      level = 'ERROR';
+    } else if (subject === 'mavlink.stats') {
+      if (Array.isArray(payload?.errors) && payload.errors.length > 0) {
+        prefix = '[MAVLINK][STATS]';
+        level = 'ERROR';
+      } else {
+        noisy = true;
+      }
+    } else if (['mavlink.heartbeat', 'mavlink.attitude', 'mavlink.global_position_int', 'mavlink.sys_status', 'mavlink.rc_channels', 'mavlink.servo_output_raw', 'mavlink.control_feedback'].includes(subject)) {
+      noisy = true;
     }
   } else if (subject.startsWith('camera.')) {
     category = 'camera';
     prefix = '[CAMERA]';
+    if (subject === 'camera.heartbeat') noisy = true;
   } else if (subject === 'rover.command') {
     category = 'command';
     prefix = '[COMMAND]';
@@ -152,6 +161,8 @@ function normalizeRobotEvent(subject: string, payload: any): RobotEvent {
     prefix = '[ROBOT]';
     if (Array.isArray(payload?.errors) && payload.errors.length > 0) {
       level = 'ERROR';
+    } else if (['robot.service', 'robot.autoswap.supervisor', 'robot.autoswap.runtime'].includes(subject)) {
+      noisy = true;
     }
   } else if (subject === 'logs.ui.robot') {
     category = 'ui';
@@ -165,7 +176,7 @@ function normalizeRobotEvent(subject: string, payload: any): RobotEvent {
 
   const summary = summarizePayload(payload);
   const logLine = `[${timeText}] ${prefix} ${summary}`.trim();
-  return { subject, category, payload, timestamp: ts, logLine, level };
+  return { subject, category, payload, timestamp: ts, logLine, level, noisy };
 }
 
 async function bindSubscriptions(next: NatsConnection) {

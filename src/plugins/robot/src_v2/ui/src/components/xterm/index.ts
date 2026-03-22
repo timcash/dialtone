@@ -19,6 +19,7 @@ type LogLine = {
   filter: Exclude<LogFilter, 'all' | 'error'> | 'unknown';
   level: 'INFO' | 'WARN' | 'ERROR';
   timestamp: string;
+  noisy: boolean;
 };
 
 const MAX_LINES = 300;
@@ -170,7 +171,7 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
   };
 
   const matchFilter = (line: LogLine) => {
-    if (activeFilter === 'all') return true;
+    if (activeFilter === 'all') return !line.noisy;
     if (activeFilter === 'error') return line.level === 'ERROR';
     return line.filter === activeFilter;
   };
@@ -194,7 +195,7 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
     term.reset();
     term.writeln('[ROBOT TERM] ready');
     term.writeln('[ROBOT TERM] unified NATS log bus active');
-    term.writeln(`[ROBOT TERM] filter=${activeFilter} paused=${paused ? 'true' : 'false'}`);
+    term.writeln(`[ROBOT TERM] filter=${activeFilter} paused=${paused ? 'true' : 'false'} (noisy=hidden)`);
     filtered.slice(-MAX_LINES).forEach((line) => term.writeln(line.text));
     cursor = clampPos({ row: maxRow(), col: lineLength(maxRow()) });
     paintCursor();
@@ -243,6 +244,7 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
       filter,
       level: event.level,
       timestamp: event.timestamp,
+      noisy: event.noisy,
     };
     logLines.push(line);
     if (logLines.length > MAX_LINES * 4) {
