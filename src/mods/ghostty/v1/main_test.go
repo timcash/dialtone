@@ -24,8 +24,24 @@ func TestGhosttyV1Layout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read README.md: %v", err)
 	}
-	if !strings.Contains(string(readme), "## Test Result") {
-		t.Fatalf("expected ghostty/v1 README to contain a Test Result section")
+	readmeText := string(readme)
+	if !strings.Contains(readmeText, "## Quick Start") {
+		t.Fatalf("expected ghostty/v1 README to contain Quick Start")
+	}
+	if !strings.Contains(readmeText, "## DIALTONE>") {
+		t.Fatalf("expected ghostty/v1 README to contain DIALTONE>")
+	}
+	if !strings.Contains(readmeText, "## Dependencies") {
+		t.Fatalf("expected ghostty/v1 README to contain Dependencies")
+	}
+	if !strings.Contains(readmeText, "## Test Results") {
+		t.Fatalf("expected ghostty/v1 README to contain Test Results")
+	}
+	if first := strings.Index(readmeText, "## Test Results"); first == -1 || strings.LastIndex(readmeText, "## Test Results") != first {
+		t.Fatalf("expected exactly one Test Results section")
+	}
+	if strings.LastIndex(readmeText, "\n## ") > strings.Index(readmeText, "## Test Results") {
+		t.Fatalf("expected Test Results to be the last README section")
 	}
 }
 

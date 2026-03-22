@@ -11,11 +11,11 @@ import (
 	"time"
 )
 
-const tmuxRetryAttempts = 6
+const tmuxRetryAttempts = 20
 
 var (
 	tmuxOutputRunner     = tmuxOutput
-	defaultTmuxRetrySleep = func() { time.Sleep(250 * time.Millisecond) }
+	defaultTmuxRetrySleep = func() { time.Sleep(500 * time.Millisecond) }
 	tmuxRetrySleep       = defaultTmuxRetrySleep
 )
 
