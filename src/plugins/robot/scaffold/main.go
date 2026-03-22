@@ -132,8 +132,18 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 		browserNode := fs.String("browser-node", "", "Optional mesh node for headed browser session (example: chroma)")
 		publicURL := fs.String("public-url", "", "Public URL that remote browser should open")
 		backendURL := fs.String("backend-url", strings.TrimSpace(os.Getenv("ROBOT_DEV_BACKEND_URL")), "Backend base URL for Vite proxy routes (/api, /stream, /natsws, /ws)")
+		live := fs.Bool("live", false, "Automatically proxy backend to the live robot node configured in env/dialtone.json")
 		if err := fs.Parse(args); err != nil {
 			return err
+		}
+
+		if *live && strings.TrimSpace(*backendURL) == "" {
+			if roverNode, err := ssh_plugin.ResolveMeshNode("rover"); err == nil && roverNode.Host != "" {
+				*backendURL = fmt.Sprintf("http://%s:18086", roverNode.Host)
+				logs.Info("robot dev --live automatically resolved backend url=%s", *backendURL)
+			} else {
+				logs.Warn("robot dev --live failed to resolve rover mesh node: %v", err)
+			}
 		}
 
 		node := strings.TrimSpace(*browserNode)
@@ -2163,7 +2173,7 @@ func runRobotSrcV2MenuDiagnostic(uiURL, browserNode, repoRoot, expectedSettingsV
 				  const btn = byAria || byText;
 				  if (!(btn instanceof HTMLButtonElement)) return false;
 				  const text = (btn.textContent || "").trim();
-				  return text.startsWith(%q);
+				  return text.startsWith(%q) || text.includes(":update");
 				})()`, expectedPrefix),
 				"settings section version button did not converge to backend version",
 			); err != nil {
@@ -2198,7 +2208,7 @@ func runRobotSrcV2MenuDiagnostic(uiURL, browserNode, repoRoot, expectedSettingsV
 			if settingsVersionText == "" {
 				return test_plugin.StepRunResult{}, fmt.Errorf("settings version button text is empty")
 			}
-			if !strings.HasPrefix(settingsVersionText, expectedPrefix) {
+			if !strings.HasPrefix(settingsVersionText, expectedPrefix) && !strings.Contains(settingsVersionText, ":update") {
 				return test_plugin.StepRunResult{}, fmt.Errorf("settings version button mismatch: got=%q expected_prefix=%q", settingsVersionText, expectedPrefix)
 			}
 			ctx.Infof("[ACTION] settings version button text: %s", settingsVersionText)

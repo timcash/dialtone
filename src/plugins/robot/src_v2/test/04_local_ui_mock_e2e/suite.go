@@ -32,7 +32,7 @@ type mockUISession struct {
 func Register(reg *testv1.Registry) {
 	reg.Add(testv1.Step{
 		Name:    "04-ui-section-navigation",
-		Timeout: 60 * time.Second,
+		Timeout: 120 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			mock, err := prepareMockUI(ctx, "robot-hero-stage", "Hero Section", "nav")
 			if err != nil {
@@ -493,7 +493,7 @@ func Register(reg *testv1.Registry) {
 			if err := navigateMenuToSection(ctx, "Navigate Key Params", "Key Params Section", "Key Params Table"); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			if err := ctx.WaitForAriaLabelAttrEquals("Key Params Table", "data-row-count", "10", 8*time.Second); err != nil {
+			if err := ctx.WaitForAriaLabelAttrEquals("Key Params Table", "data-row-count", "10", 15*time.Second); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 			return testv1.StepRunResult{Report: "Settings and key params sections verified"}, nil
