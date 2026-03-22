@@ -190,7 +190,8 @@ Command shape:
   [--port 3000] \
   [--browser-node chroma] \
   [--public-url http://legion-wsl-1.shad-artichoke.ts.net:3000] \
-  [--backend-url http://rover-1:18086]
+  [--backend-url http://rover-1:18086] \
+  [--live]
 ```
 
 Flags:
@@ -199,6 +200,7 @@ Flags:
 - `--browser-node`: mesh node for headed browser (example `chroma`)
 - `--public-url`: URL opened by remote browser (auto-inferred if omitted)
 - `--backend-url`: shared proxy target for `/api`, `/stream`, `/natsws`, `/ws`
+- `--live`: automatically pull the `rover` node IP from `env/dialtone.json` and proxy backend routes to it.
 
 Environment:
 - `ROBOT_DEV_BACKEND_URL`: optional default for `--backend-url`
@@ -210,6 +212,10 @@ Common dev flows:
 
 # Dev + browser on chroma (default browser node is chroma if available)
 ./dialtone.sh robot src_v2 dev --browser-node chroma
+
+# Zero-config live robot connection (proxies to rover and opens UI)
+./dialtone.sh robot src_v2 dev --live
+```
 
 # Dev + browser on chroma + backend routes proxied to rover
 ./dialtone.sh robot src_v2 dev --browser-node chroma --backend-url http://rover-1:18086

@@ -132,8 +132,18 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 		browserNode := fs.String("browser-node", "", "Optional mesh node for headed browser session (example: chroma)")
 		publicURL := fs.String("public-url", "", "Public URL that remote browser should open")
 		backendURL := fs.String("backend-url", strings.TrimSpace(os.Getenv("ROBOT_DEV_BACKEND_URL")), "Backend base URL for Vite proxy routes (/api, /stream, /natsws, /ws)")
+		live := fs.Bool("live", false, "Automatically proxy backend to the live robot node configured in env/dialtone.json")
 		if err := fs.Parse(args); err != nil {
 			return err
+		}
+
+		if *live && strings.TrimSpace(*backendURL) == "" {
+			if roverNode, err := ssh_plugin.ResolveMeshNode("rover"); err == nil && roverNode.Host != "" {
+				*backendURL = fmt.Sprintf("http://%s:18086", roverNode.Host)
+				logs.Info("robot dev --live automatically resolved backend url=%s", *backendURL)
+			} else {
+				logs.Warn("robot dev --live failed to resolve rover mesh node: %v", err)
+			}
 		}
 
 		node := strings.TrimSpace(*browserNode)
