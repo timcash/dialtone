@@ -9,32 +9,54 @@ This document is the end-to-end operating workflow for `robot src_v2`:
 - expose UI through local WSL relay
 - run headed UI on `legion` while rover serves APIs and telemetry
 
-Important runtime note:
-- `./dialtone.sh` is REPL-first now. Plain `./dialtone.sh robot src_v2 ...` commands should be the default operator path.
-- For normal use, do not add `repl src_v3 inject` or `--nats-url`; Dialtone should find or start the local background REPL leader and route the command automatically.
-- Use explicit `repl src_v3 inject --nats-url ...` only when you intentionally need a non-default leader or an isolated local test leader.
-- For WSL operator work, the local default REPL target should come from `env/dialtone.json`. An isolated watcher is still useful when you want to inspect raw room traffic:
+## 1) CLI & REPL Interaction Guide
+
+`robot src_v2` embraces a "REPL-first" execution model. When you run `./dialtone.sh robot src_v2 <command>`, the CLI does not execute the command directly in the foreground. Instead, it locates (or spawns) a local background REPL leader and routes the command into a managed REPL room as a "subtone".
+
+**The Default Operator Path:**
+For 99% of your daily workflow, just use plain `dialtone.sh` commands. The framework handles the REPL routing automatically.
 
 ```bash
-./dialtone.sh repl src_v3 watch --nats-url nats://127.0.0.1:47222 --subject 'repl.>'
+# Good: The command is automatically routed to the default REPL room
+./dialtone.sh robot src_v2 dev
 ```
 
-- Then inject commands through that local leader:
+**What to expect in the terminal:**
+1. A brief `DIALTONE>` prefix acknowledging the request.
+2. An announcement that a "subtone" (a managed child process) has started.
+3. The location of the permanent log file for that specific run.
+4. Top-level status messages promoted from the subtone to the main room (e.g., `robot publish: local UI build complete`).
+5. Detailed, verbose output goes strictly to the log file.
+
+**Advanced REPL Inspection:**
+Because your commands run as subtones, you can inspect their lifecycle and logs using the `repl src_v3` plugin tools:
 
 ```bash
-./dialtone.sh repl src_v3 inject --nats-url nats://127.0.0.1:47222 --user llm-codex <command...>
+# See all active background tasks (subtones)
+./dialtone.sh ps
+
+# List recent completed or running subtones
+./dialtone.sh repl src_v3 subtone-list --count 20
+
+# View the full detailed log of a specific subtone by its PID
+./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 200
+
+# Watch the raw underlying NATS traffic for the REPL room
+./dialtone.sh repl src_v3 watch --subject 'repl.>'
 ```
 
-- `env/dialtone.json` is the SSH source of truth for `rover` mesh config, default user, and SSH key path.
-- `robot` and `autoswap` keep plugin-local `--host` semantics; top-level REPL routing should use `--target-host` when you want remote REPL/NATS routing instead of plugin-local host flags.
+**Explicit Remote Injection:**
+By default, commands are routed using the local environment settings in `env/dialtone.json`. If you intentionally need to target a remote robot's REPL leader directly, you can bypass the automatic local routing and inject explicitly:
 
-Expected REPL output contract for robot commands:
-- `DIALTONE>` should stay short and high-level.
-- The index room should show lifecycle plus a few promoted status lines such as `robot diagnostic: ...` or `robot publish: ...`.
-- Detailed command output belongs in the subtone room and subtone log file printed by `DIALTONE> Subtone log file: ...`.
-- Use `./dialtone.sh repl src_v3 subtone-list --count 20` and `./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 200` when you need the full detail.
+```bash
+./dialtone.sh repl src_v3 inject --nats-url nats://rover-1.shad-artichoke.ts.net:4222 --user llm-codex robot src_v2 diagnostic
+```
 
-## Shell Workflow
+*(Note: Most `robot` commands support a `--host` flag for targeting the remote node via SSH/Mesh, so explicit injection is rarely needed unless testing REPL core behavior).*
+
+---
+
+## 2) Architecture Contract
 
 ```sh
 # From repo root
@@ -168,7 +190,8 @@ Command shape:
   [--port 3000] \
   [--browser-node chroma] \
   [--public-url http://legion-wsl-1.shad-artichoke.ts.net:3000] \
-  [--backend-url http://rover-1:18086]
+  [--backend-url http://rover-1:18086] \
+  [--live]
 ```
 
 Flags:
@@ -177,6 +200,7 @@ Flags:
 - `--browser-node`: mesh node for headed browser (example `chroma`)
 - `--public-url`: URL opened by remote browser (auto-inferred if omitted)
 - `--backend-url`: shared proxy target for `/api`, `/stream`, `/natsws`, `/ws`
+- `--live`: automatically pull the `rover` node IP from `env/dialtone.json` and proxy backend routes to it.
 
 Environment:
 - `ROBOT_DEV_BACKEND_URL`: optional default for `--backend-url`
@@ -188,6 +212,10 @@ Common dev flows:
 
 # Dev + browser on chroma (default browser node is chroma if available)
 ./dialtone.sh robot src_v2 dev --browser-node chroma
+
+# Zero-config live robot connection (proxies to rover and opens UI)
+./dialtone.sh robot src_v2 dev --live
+```
 
 # Dev + browser on chroma + backend routes proxied to rover
 ./dialtone.sh robot src_v2 dev --browser-node chroma --backend-url http://rover-1:18086
