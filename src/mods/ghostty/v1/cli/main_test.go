@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildListScriptUsesFocusedTerminalAndTabTerminals(t *testing.T) {
@@ -82,11 +84,114 @@ func TestBuildNewWindowScriptCanOmitConfiguration(t *testing.T) {
 
 func TestBuildQuitScriptForceKillsGhostty(t *testing.T) {
 	script := buildQuitScript()
-	if !strings.Contains(script, `pkill -9 -x Ghostty`) {
+	if !strings.Contains(script, `pkill -9 -x ghostty`) {
 		t.Fatalf("quit script missing force-kill command: %q", script)
+	}
+	if !strings.Contains(script, `/Applications/Ghostty.app/Contents/MacOS/ghostty`) {
+		t.Fatalf("quit script missing process-path fallback: %q", script)
 	}
 	if strings.Contains(script, `tell application "Ghostty"`) {
 		t.Fatalf("quit script should bypass app-level quit prompts: %q", script)
+	}
+}
+
+func TestFreshWindowResetsBeforeOpeningNewWindow(t *testing.T) {
+	t.Cleanup(func() {
+		ghosttyAppleScriptRunner = runAppleScript
+		ghosttySleep = time.Sleep
+	})
+
+	var scripts []string
+	var slept time.Duration
+	ghosttyAppleScriptRunner = func(script string) (string, error) {
+		scripts = append(scripts, script)
+		switch len(scripts) {
+		case 1:
+			if script != buildQuitScript() {
+				t.Fatalf("first script should be quit script, got %q", script)
+			}
+			return "", nil
+		case 2:
+			if script != buildNewWindowScript(ghosttySurfaceConfig{WorkingDirectory: "/Users/user/dialtone"}) {
+				t.Fatalf("second script should be new window script, got %q", script)
+			}
+			return "win-1\ttab-1\tterm-1", nil
+		default:
+			t.Fatalf("unexpected extra AppleScript call %d: %q", len(scripts), script)
+			return "", nil
+		}
+	}
+	ghosttySleep = func(d time.Duration) {
+		slept = d
+	}
+
+	windowID, tabID, terminalID, err := freshWindow(ghosttySurfaceConfig{WorkingDirectory: "/Users/user/dialtone"})
+	if err != nil {
+		t.Fatalf("freshWindow returned error: %v", err)
+	}
+	if windowID != "win-1" || tabID != "tab-1" || terminalID != "term-1" {
+		t.Fatalf("unexpected freshWindow result: %q %q %q", windowID, tabID, terminalID)
+	}
+	if len(scripts) != 2 {
+		t.Fatalf("expected 2 AppleScript calls, got %d", len(scripts))
+	}
+	if slept != 500*time.Millisecond {
+		t.Fatalf("expected 500ms reset delay, got %v", slept)
+	}
+}
+
+func TestFreshWindowContinuesAfterBestEffortResetFailure(t *testing.T) {
+	t.Cleanup(func() {
+		ghosttyAppleScriptRunner = runAppleScript
+		ghosttySleep = time.Sleep
+	})
+
+	var scripts []string
+	ghosttyAppleScriptRunner = func(script string) (string, error) {
+		scripts = append(scripts, script)
+		if len(scripts) == 1 {
+			return "", errors.New("pkill failed")
+		}
+		return "win-2\ttab-2\tterm-2", nil
+	}
+	ghosttySleep = func(time.Duration) {}
+
+	windowID, tabID, terminalID, err := freshWindow(ghosttySurfaceConfig{})
+	if err != nil {
+		t.Fatalf("freshWindow should continue after reset failure: %v", err)
+	}
+	if windowID != "win-2" || tabID != "tab-2" || terminalID != "term-2" {
+		t.Fatalf("unexpected freshWindow result after reset failure: %q %q %q", windowID, tabID, terminalID)
+	}
+	if len(scripts) != 2 {
+		t.Fatalf("expected quit and new-window scripts, got %d calls", len(scripts))
+	}
+	if scripts[0] != buildQuitScript() {
+		t.Fatalf("first script should be quit script, got %q", scripts[0])
+	}
+	if scripts[1] != buildNewWindowScript(ghosttySurfaceConfig{}) {
+		t.Fatalf("second script should be new-window script, got %q", scripts[1])
+	}
+}
+
+func TestFreshWindowReturnsNewWindowLaunchError(t *testing.T) {
+	t.Cleanup(func() {
+		ghosttyAppleScriptRunner = runAppleScript
+		ghosttySleep = time.Sleep
+	})
+
+	wantErr := errors.New("launch failed")
+	ghosttyAppleScriptRunner = func(script string) (string, error) {
+		if script == buildQuitScript() {
+			return "", nil
+		}
+		return "", wantErr
+	}
+	ghosttySleep = func(time.Duration) {}
+
+	_, _, _, err := freshWindow(ghosttySurfaceConfig{})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected new-window error, got %v", err)
 	}
 }
 

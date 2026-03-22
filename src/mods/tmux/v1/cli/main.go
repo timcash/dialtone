@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"dialtone/dev/internal/modstate"
 	"dialtone/dev/mods/shared/sqlitestate"
@@ -162,6 +163,8 @@ func runWrite(argv []string) error {
 		return fmt.Errorf("tmux send-keys failed: %s", strings.TrimSpace(string(out)))
 	}
 	if *enter {
+		// Raw terminal UIs such as Codex can miss an immediate Enter after a large paste.
+		time.Sleep(300 * time.Millisecond)
 		if out, err := exec.Command(tmuxBinary(), "send-keys", "-t", tmuxTarget, "C-m").CombinedOutput(); err != nil {
 			return fmt.Errorf("tmux send-keys enter failed: %s", strings.TrimSpace(string(out)))
 		}
