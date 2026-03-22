@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 
@@ -56,7 +57,8 @@ func Register(r *testv1.Registry) {
 			}
 			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusOK {
-				return testv1.StepRunResult{}, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+				body, _ := io.ReadAll(resp.Body)
+				return testv1.StepRunResult{}, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
 			}
 			if resp.Header.Get("Content-Type") != "application/sla" {
 				return testv1.StepRunResult{}, fmt.Errorf("unexpected content type: %s", resp.Header.Get("Content-Type"))

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 )
@@ -41,6 +42,15 @@ func (o CADObject) ToJSON() (string, error) {
 }
 
 func GenerateSTL(paths Paths, params map[string]interface{}) ([]byte, error) {
+	pixiBin := "pixi"
+	if _, err := exec.LookPath(pixiBin); err != nil {
+		home, _ := os.UserHomeDir()
+		candidate := filepath.Join(home, ".pixi", "bin", "pixi")
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			pixiBin = candidate
+		}
+	}
+
 	args := []string{"run", "python", "main.py"}
 	keys := make([]string, 0, len(params))
 	for k := range params {
@@ -51,14 +61,14 @@ func GenerateSTL(paths Paths, params map[string]interface{}) ([]byte, error) {
 		args = append(args, "--"+k, fmt.Sprintf("%v", params[k]))
 	}
 
-	cmd := exec.Command("pixi", args...)
+	cmd := exec.Command(pixiBin, args...)
 	cmd.Dir = paths.BackendDir
 	output, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("python cli failed: %s", string(exitErr.Stderr))
+			return nil, fmt.Errorf("python cli failed (pixi=%s): %s", pixiBin, string(exitErr.Stderr))
 		}
-		return nil, err
+		return nil, fmt.Errorf("pixi command failed (pixi=%s): %w", pixiBin, err)
 	}
 	return output, nil
 }

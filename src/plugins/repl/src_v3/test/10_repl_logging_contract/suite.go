@@ -1,6 +1,7 @@
 package replloggingcontract
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -404,12 +405,23 @@ func cleanupManagedSubtones(rt *support.Runtime) error {
 	}
 	out := strings.Join(rt.SubjectMessages(fmt.Sprintf("repl.subtone.%d", listPID)), "\n")
 	for _, line := range strings.Split(strings.ReplaceAll(out, "\r\n", "\n"), "\n") {
-		fields := strings.Fields(strings.TrimSpace(line))
+		var frame map[string]any
+		if err := json.Unmarshal([]byte(line), &frame); err != nil {
+			continue
+		}
+		msgText, ok := frame["message"].(string)
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(strings.TrimSpace(msgText))
 		if len(fields) < 3 {
 			continue
 		}
 		pid, err := strconv.Atoi(strings.TrimSpace(fields[0]))
 		if err != nil || pid <= 0 {
+			continue
+		}
+		if pid == listPID {
 			continue
 		}
 		if strings.TrimSpace(fields[2]) != "active" {
