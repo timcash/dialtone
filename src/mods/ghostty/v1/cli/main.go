@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+var (
+	ghosttyAppleScriptRunner = runAppleScript
+	ghosttySleep             = time.Sleep
+)
+
 type ghosttyTerminal struct {
 	Index            int
 	ID               string
@@ -156,20 +161,28 @@ func runFreshWindow(argv []string) error {
 		return errors.New("fresh-window does not accept positional arguments")
 	}
 
-	// Best effort reset so the workflow always lands in one window with one tab.
-	_, _ = runAppleScript(buildQuitScript())
-	time.Sleep(500 * time.Millisecond)
-
-	out, err := runAppleScript(buildNewWindowScript(config))
-	if err != nil {
-		return err
-	}
-	windowID, tabID, terminalID, err := parseCreatedWindowResult(out)
+	windowID, tabID, terminalID, err := freshWindow(config)
 	if err != nil {
 		return err
 	}
 	fmt.Printf("created fresh ghostty window (id=%s) tab (id=%s) terminal (id=%s)\n", windowID, tabID, terminalID)
 	return nil
+}
+
+func freshWindow(config ghosttySurfaceConfig) (string, string, string, error) {
+	// Best effort reset so the workflow always lands in one window with one tab.
+	_, _ = ghosttyAppleScriptRunner(buildQuitScript())
+	ghosttySleep(500 * time.Millisecond)
+
+	out, err := ghosttyAppleScriptRunner(buildNewWindowScript(config))
+	if err != nil {
+		return "", "", "", err
+	}
+	windowID, tabID, terminalID, err := parseCreatedWindowResult(out)
+	if err != nil {
+		return "", "", "", err
+	}
+	return windowID, tabID, terminalID, nil
 }
 
 func runSplit(argv []string) error {
@@ -358,9 +371,7 @@ func buildListScript() string {
 
 func buildQuitScript() string {
 	return strings.Join([]string{
-		`tell application "Ghostty"`,
-		`	quit`,
-		`end tell`,
+		`do shell script "pkill -9 -x ghostty >/dev/null 2>&1 || pkill -9 -f '/Applications/Ghostty.app/Contents/MacOS/ghostty' >/dev/null 2>&1 || true"`,
 	}, "\n")
 }
 

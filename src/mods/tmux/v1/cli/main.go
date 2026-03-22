@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"errors"
 	"flag"
 	"fmt"
@@ -8,7 +9,18 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"dialtone/dev/internal/modstate"
+	"dialtone/dev/mods/shared/sqlitestate"
 )
+
+func tmuxBinary() string {
+	if value := strings.TrimSpace(os.Getenv("DIALTONE_TMUX_BIN")); value != "" {
+		return value
+	}
+	return "tmux"
+}
 
 type tmuxPaneTarget struct {
 	Session string
@@ -108,7 +120,7 @@ func runList(argv []string) error {
 	if *short {
 		format = "#{session_name}"
 	}
-	cmd := exec.Command("tmux", "list-sessions", "-F", format)
+	cmd := exec.Command(tmuxBinary(), "list-sessions", "-F", format)
 	out, err := cmd.CombinedOutput()
 	text := strings.TrimSpace(string(out))
 	if err != nil {
@@ -147,11 +159,13 @@ func runWrite(argv []string) error {
 	}
 
 	tmuxTarget := target.target()
-	if out, err := exec.Command("tmux", "send-keys", "-t", tmuxTarget, "--", text).CombinedOutput(); err != nil {
+	if out, err := exec.Command(tmuxBinary(), "send-keys", "-t", tmuxTarget, "--", text).CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux send-keys failed: %s", strings.TrimSpace(string(out)))
 	}
 	if *enter {
-		if out, err := exec.Command("tmux", "send-keys", "-t", tmuxTarget, "C-m").CombinedOutput(); err != nil {
+		// Raw terminal UIs such as Codex can miss an immediate Enter after a large paste.
+		time.Sleep(300 * time.Millisecond)
+		if out, err := exec.Command(tmuxBinary(), "send-keys", "-t", tmuxTarget, "C-m").CombinedOutput(); err != nil {
 			return fmt.Errorf("tmux send-keys enter failed: %s", strings.TrimSpace(string(out)))
 		}
 	}
@@ -174,7 +188,7 @@ func runRead(argv []string) error {
 		return err
 	}
 
-	cmd := exec.Command("tmux", "capture-pane", "-pt", target.target(), "-S", fmt.Sprintf("-%d", *lines))
+	cmd := exec.Command(tmuxBinary(), "capture-pane", "-pt", target.target(), "-S", fmt.Sprintf("-%d", *lines))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("tmux capture-pane failed: %s", strings.TrimSpace(string(out)))
@@ -198,10 +212,10 @@ func runClear(argv []string) error {
 	}
 
 	tmuxTarget := target.target()
-	if out, err := exec.Command("tmux", "clear-history", "-t", tmuxTarget).CombinedOutput(); err != nil {
+	if out, err := exec.Command(tmuxBinary(), "clear-history", "-t", tmuxTarget).CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux clear-history failed: %s", strings.TrimSpace(string(out)))
 	}
-	if out, err := exec.Command("tmux", "send-keys", "-t", tmuxTarget, "C-l").CombinedOutput(); err != nil {
+	if out, err := exec.Command(tmuxBinary(), "send-keys", "-t", tmuxTarget, "C-l").CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux send-keys clear failed: %s", strings.TrimSpace(string(out)))
 	}
 	fmt.Printf("cleared tmux pane %s\n", tmuxTarget)
@@ -218,11 +232,11 @@ func runRename(argv []string) error {
 
 	resolveSession := strings.TrimSpace(*session)
 	if resolveSession == "" {
-		out, _ := exec.Command("tmux", "display-message", "-p", "#S").Output()
+		out, _ := exec.Command(tmuxBinary(), "display-message", "-p", "#S").Output()
 		resolveSession = strings.TrimSpace(string(out))
 	}
 	if resolveSession == "" {
-		out, _ := exec.Command("tmux", "list-sessions", "-F", "#{session_name}").Output()
+		out, _ := exec.Command(tmuxBinary(), "list-sessions", "-F", "#{session_name}").Output()
 		resolveSession = strings.TrimSpace(strings.Split(strings.TrimSpace(string(out)), "\n")[0])
 	}
 	if resolveSession == "" {
@@ -236,7 +250,7 @@ func runRename(argv []string) error {
 		fmt.Printf("tmux session already named %s\n", newName)
 		return nil
 	}
-	cmd := exec.Command("tmux", "rename-session", "-t", resolveSession, newName)
+	cmd := exec.Command(tmuxBinary(), "rename-session", "-t", resolveSession, newName)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux rename-session failed: %s", strings.TrimSpace(string(out)))
 	}
@@ -289,7 +303,7 @@ func runSplit(argv []string) error {
 		tmuxArgs = append(tmuxArgs, strings.TrimSpace(*command))
 	}
 
-	out, err := exec.Command("tmux", tmuxArgs...).CombinedOutput()
+	out, err := exec.Command(tmuxBinary(), tmuxArgs...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("tmux split-window failed: %s", strings.TrimSpace(string(out)))
 	}
@@ -300,12 +314,12 @@ func runSplit(argv []string) error {
 	}
 
 	if strings.TrimSpace(*title) != "" {
-		if out, err := exec.Command("tmux", "select-pane", "-t", newTarget.target(), "-T", strings.TrimSpace(*title)).CombinedOutput(); err != nil {
+		if out, err := exec.Command(tmuxBinary(), "select-pane", "-t", newTarget.target(), "-T", strings.TrimSpace(*title)).CombinedOutput(); err != nil {
 			return fmt.Errorf("tmux select-pane title failed: %s", strings.TrimSpace(string(out)))
 		}
 	}
 	if !*focus {
-		if out, err := exec.Command("tmux", "select-pane", "-t", target.target()).CombinedOutput(); err != nil {
+		if out, err := exec.Command(tmuxBinary(), "select-pane", "-t", target.target()).CombinedOutput(); err != nil {
 			return fmt.Errorf("tmux select-pane restore failed: %s", strings.TrimSpace(string(out)))
 		}
 	}
@@ -343,14 +357,11 @@ func runShell(argv []string) error {
 		shellQuote("nix-command flakes"),
 		shellQuote(".#"+strings.TrimSpace(*shellName)),
 	)
-	if out, err := exec.Command("tmux", "send-keys", "-t", tmuxTarget, "C-c").CombinedOutput(); err != nil {
-		return fmt.Errorf("tmux send-keys interrupt failed: %s", strings.TrimSpace(string(out)))
+	if out, err := exec.Command(tmuxBinary(), "clear-history", "-t", tmuxTarget).CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux clear-history failed: %s", strings.TrimSpace(string(out)))
 	}
-	if out, err := exec.Command("tmux", "send-keys", "-t", tmuxTarget, "--", command).CombinedOutput(); err != nil {
-		return fmt.Errorf("tmux send-keys shell failed: %s", strings.TrimSpace(string(out)))
-	}
-	if out, err := exec.Command("tmux", "send-keys", "-t", tmuxTarget, "C-m").CombinedOutput(); err != nil {
-		return fmt.Errorf("tmux send-keys enter failed: %s", strings.TrimSpace(string(out)))
+	if out, err := exec.Command(tmuxBinary(), "respawn-pane", "-k", "-t", tmuxTarget, "zsh", "-lc", command).CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux respawn-pane shell failed: %s", strings.TrimSpace(string(out)))
 	}
 	fmt.Printf("entered nix shell %s in %s\n", strings.TrimSpace(*shellName), tmuxTarget)
 	return nil
@@ -359,7 +370,11 @@ func runShell(argv []string) error {
 func runTarget(argv []string) error {
 	opts := flag.NewFlagSet("tmux v1 target", flag.ContinueOnError)
 	setPane := opts.String("set", "", "Persist the dialtone_mod tmux target as session:window:pane")
+	setPromptPane := opts.String("set-prompt", "", "Persist the codex prompt tmux target as session:window:pane")
 	clear := opts.Bool("clear", false, "Clear the persisted dialtone_mod tmux target")
+	clearPrompt := opts.Bool("clear-prompt", false, "Clear the persisted codex prompt tmux target")
+	showPrompt := opts.Bool("prompt", false, "Print the persisted codex prompt tmux target")
+	showAll := opts.Bool("all", false, "Print both command and prompt tmux targets")
 	if err := opts.Parse(argv); err != nil {
 		return err
 	}
@@ -367,13 +382,30 @@ func runTarget(argv []string) error {
 	if err != nil {
 		return err
 	}
-	targetPath := filepath.Join(repoRoot, ".dialtone", "tmux_target")
 
-	if *clear {
-		if err := os.Remove(targetPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if *clear && *clearPrompt {
+		if err := clearPersistedTarget(repoRoot); err != nil {
 			return err
 		}
-		fmt.Println("cleared dialtone_mod tmux target")
+		if err := clearPersistedPromptTarget(repoRoot); err != nil {
+			return err
+		}
+		fmt.Println("cleared dialtone_mod tmux command target")
+		fmt.Println("cleared dialtone_mod tmux prompt target")
+		return nil
+	}
+	if *clear {
+		if err := clearPersistedTarget(repoRoot); err != nil {
+			return err
+		}
+		fmt.Println("cleared dialtone_mod tmux command target")
+		return nil
+	}
+	if *clearPrompt {
+		if err := clearPersistedPromptTarget(repoRoot); err != nil {
+			return err
+		}
+		fmt.Println("cleared dialtone_mod tmux prompt target")
 		return nil
 	}
 
@@ -382,21 +414,62 @@ func runTarget(argv []string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		value := target.Session + ":" + target.Window + ":" + target.Pane
+		if err := storePersistedTarget(repoRoot, value); err != nil {
 			return err
 		}
-		value := target.Session + ":" + target.Window + ":" + target.Pane + "\n"
-		if err := os.WriteFile(targetPath, []byte(value), 0o644); err != nil {
+		fmt.Printf("set dialtone_mod tmux command target: %s\n", value)
+		return nil
+	}
+	if strings.TrimSpace(*setPromptPane) != "" {
+		target, err := parsePaneTarget(*setPromptPane)
+		if err != nil {
 			return err
 		}
-		fmt.Printf("set dialtone_mod tmux target: %s", value)
+		value := target.Session + ":" + target.Window + ":" + target.Pane
+		if err := storePersistedPromptTarget(repoRoot, value); err != nil {
+			return err
+		}
+		fmt.Printf("set dialtone_mod tmux prompt target: %s\n", value)
 		return nil
 	}
 
-	raw, err := os.ReadFile(targetPath)
+	if *showAll {
+		commandValue, commandErr := loadPersistedTarget(repoRoot)
+		promptValue, promptErr := loadPersistedPromptTarget(repoRoot)
+		if commandErr != nil && !errors.Is(commandErr, os.ErrNotExist) {
+			return commandErr
+		}
+		if promptErr != nil && !errors.Is(promptErr, os.ErrNotExist) {
+			return promptErr
+		}
+		if commandValue == "" {
+			commandValue = "(unset)"
+		}
+		if promptValue == "" {
+			promptValue = "(unset)"
+		}
+		fmt.Printf("command\t%s\nprompt\t%s\n", commandValue, promptValue)
+		return nil
+	}
+	if *showPrompt {
+		raw, err := loadPersistedPromptTarget(repoRoot)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				fmt.Println("no dialtone_mod tmux prompt target configured")
+				return nil
+			}
+			return err
+		}
+		fmt.Print(strings.TrimSpace(raw))
+		fmt.Println()
+		return nil
+	}
+
+	raw, err := loadPersistedTarget(repoRoot)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			fmt.Println("no dialtone_mod tmux target configured")
+			fmt.Println("no dialtone_mod tmux command target configured")
 			return nil
 		}
 		return err
@@ -404,6 +477,97 @@ func runTarget(argv []string) error {
 	fmt.Print(strings.TrimSpace(string(raw)))
 	fmt.Println()
 	return nil
+}
+
+func loadPersistedTarget(repoRoot string) (string, error) {
+	value, ok, err := loadPersistedTargetFromState(repoRoot)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", os.ErrNotExist
+	}
+	return value, nil
+}
+
+func storePersistedTarget(repoRoot, target string) error {
+	return storeStateTarget(repoRoot, sqlitestate.TmuxTargetKey, target)
+}
+
+func clearPersistedTarget(repoRoot string) error {
+	return clearStateTarget(repoRoot, sqlitestate.TmuxTargetKey)
+}
+
+func loadPersistedPromptTarget(repoRoot string) (string, error) {
+	value, ok, err := loadStateTarget(repoRoot, sqlitestate.TmuxPromptTargetKey)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", os.ErrNotExist
+	}
+	return value, nil
+}
+
+func storePersistedPromptTarget(repoRoot, target string) error {
+	return storeStateTarget(repoRoot, sqlitestate.TmuxPromptTargetKey, target)
+}
+
+func clearPersistedPromptTarget(repoRoot string) error {
+	return clearStateTarget(repoRoot, sqlitestate.TmuxPromptTargetKey)
+}
+
+func loadPersistedTargetFromState(repoRoot string) (string, bool, error) {
+	return loadStateTarget(repoRoot, sqlitestate.TmuxTargetKey)
+}
+
+func loadStateTarget(repoRoot, key string) (string, bool, error) {
+	var value string
+	var found bool
+	err := withStateDB(repoRoot, func(db *sql.DB) error {
+		record, ok, err := modstate.LoadStateValue(db, sqlitestate.SystemScope, key)
+		if err != nil {
+			return err
+		}
+		value = strings.TrimSpace(record.Value)
+		found = ok && value != ""
+		return nil
+	})
+	if err != nil {
+		return "", false, err
+	}
+	return value, found, nil
+}
+
+func storeStateTarget(repoRoot, key, target string) error {
+	value := strings.TrimSpace(target)
+	if value == "" {
+		return errors.New("target value is required")
+	}
+	if err := withStateDB(repoRoot, func(db *sql.DB) error {
+		return modstate.UpsertStateValue(db, sqlitestate.SystemScope, key, value)
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func clearStateTarget(repoRoot, key string) error {
+	if err := withStateDB(repoRoot, func(db *sql.DB) error {
+		return modstate.DeleteStateValue(db, sqlitestate.SystemScope, key)
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func withStateDB(repoRoot string, fn func(*sql.DB) error) error {
+	db, err := modstate.Open(sqlitestate.ResolveStateDBPath(repoRoot))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	return fn(db)
 }
 
 func locateRepoRoot() (string, error) {
