@@ -75,9 +75,11 @@ func Register(r *testv1.Registry) {
 				return testv1.StepRunResult{}, err
 			}
 
+			/*
 			if err := ctx.CaptureScreenshot(filepath.Join("plugins", "cad", "src_v1", "screenshots", "cad_ui_browser_smoke.png")); err != nil {
 				ctx.Warnf("screenshot capture failed: %v", err)
 			}
+			*/
 
 			for _, entry := range ctx.Session.Entries() {
 				if strings.Contains(strings.ToLower(entry.Text), "regenerate failed") {
