@@ -24,6 +24,273 @@ import (
 
 var logFile *os.File
 
+type replMeshConfig struct {
+	MeshNodes []replMeshNode `json:"mesh_nodes"`
+}
+
+type replMeshNode struct {
+	Name           string   `json:"name"`
+	Aliases        []string `json:"aliases"`
+	Host           string   `json:"host"`
+	HostCandidates []string `json:"host_candidates"`
+	NATSURL        string   `json:"nats_url"`
+	NATSPort       int      `json:"nats_port"`
+}
+
+type MissingInstall struct {
+	Tool    string
+	Command string
+	Why     string
+}
+
+type Requirement struct {
+	Tool    string
+	Version string
+}
+
+// isServiceCommand checks if the command or any arg implies a long-running background service.
+func isServiceCommand(cmd string, args []string) bool {
+	keywords := []string{"serve", "server", "daemon", "up", "service"}
+	if isKeyword(cmd, keywords) {
+		return true
+	}
+	for _, arg := range args {
+		if isKeyword(arg, keywords) {
+			return true
+		}
+	}
+	return false
+}
+
+// isActionCommand checks if the command implies a long-running but finite task.
+func isActionCommand(cmd string, args []string) bool {
+	keywords := []string{"build", "test", "install", "format", "run"}
+	if isKeyword(cmd, keywords) {
+		return true
+	}
+	for _, arg := range args {
+		if isKeyword(arg, keywords) {
+			return true
+		}
+	}
+	return false
+}
+
+func isKeyword(val string, keywords []string) bool {
+	v := strings.ToLower(strings.TrimSpace(val))
+	for _, k := range keywords {
+		if v == k {
+			return true
+		}
+	}
+	return false
+}
+
+func dispatchViaREPL(command string, args []string, targetHost string) error {
+	user := replv3.DefaultPromptName()
+	filtered := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := strings.TrimSpace(args[i])
+		if a == "" {
+			continue
+		}
+		if a == "--user" && i+1 < len(args) {
+			u := strings.TrimSpace(args[i+1])
+			if u != "" {
+				user = u
+			}
+			i++
+			continue
+		}
+		if strings.HasPrefix(a, "--user=") {
+			u := strings.TrimSpace(strings.TrimPrefix(a, "--user="))
+			if u != "" {
+				user = u
+			}
+			continue
+		}
+		filtered = append(filtered, a)
+	}
+
+	displayLine := strings.TrimSpace(strings.Join(append([]string{command}, filtered...), " "))
+	injectLine := strings.TrimSpace(shellJoin(append([]string{command}, filtered...)))
+	if injectLine == "" {
+		return fmt.Errorf("empty command")
+	}
+
+	isService := isServiceCommand(command, filtered)
+	isAction := isActionCommand(command, filtered)
+
+	// Rule 1: Services are ALWAYS forced to background mode (&)
+	if isService && !strings.HasSuffix(injectLine, "&") {
+		injectLine += " &"
+		displayLine += " &"
+	}
+
+	if err := validateSingleCommandTokens(shellSplit(displayLine)); err != nil {
+		return err
+	}
+
+	natsURL := strings.TrimSpace(os.Getenv("DIALTONE_REPL_NATS_URL"))
+	if natsURL == "" {
+		natsURL = "nats://127.0.0.1:4222"
+	}
+	room := strings.TrimSpace(os.Getenv("DIALTONE_REPL_ROOM"))
+	if room == "" {
+		room = "index"
+	}
+
+	injectionHost := strings.TrimSpace(targetHost)
+	candidateNATSURLs := []string{natsURL}
+	if injectionHost != "" {
+		candidateNATSURLs = resolveTargetNATSURLs(injectionHost)
+		injectionHost = ""
+	}
+
+	// Rule 2: Services and Actions exit the CLI as soon as the Subtone starts.
+	// Only Queries (not service, not action) wait for completion.
+	handoverOnStart := isService || isAction
+
+	for _, candidateURL := range candidateNATSURLs {
+		if err := replv3.EnsureLeaderRunning(candidateURL, room); err != nil {
+			continue
+		}
+
+		// Rule 3: Fast Check & Reset. 
+		// If leader is not healthy or room is deadlocked, the relay will time out and we retry.
+		err := relayInjectedIndexLifecycle(candidateURL, room, user, displayLine, injectLine, handoverOnStart, func() error {
+			return replv3.InjectCommand(candidateURL, room, user, injectionHost, injectLine)
+		})
+		
+		if err == nil {
+			return nil
+		}
+
+		// If it's a timeout, it's likely a deadlocked leader.
+		if strings.Contains(err.Error(), "handover timeout") {
+			logs.System("REPL room %s is unresponsive. Resetting leader...", room)
+			resetREPLLeader()
+			// Second attempt after reset
+			return relayInjectedIndexLifecycle(candidateURL, room, user, displayLine, injectLine, handoverOnStart, func() error {
+				return replv3.InjectCommand(candidateURL, room, user, injectionHost, injectLine)
+			})
+		}
+		
+		return err
+	}
+	return fmt.Errorf("no nats endpoint candidates resolved")
+}
+
+func resetREPLLeader() {
+	// Kill any local leader process to force a clean restart.
+	patterns := []string{
+		`plugins/repl/scaffold/main.go src_v3 leader`,
+		`src_v3 leader --embedded-nats`,
+	}
+	for _, p := range patterns {
+		cmd := exec.Command("pkill", "-9", "-f", p)
+		_ = cmd.Run()
+	}
+	time.Sleep(500 * time.Millisecond)
+}
+
+func relayInjectedIndexLifecycle(natsURL, room, user, displayLine, injectLine string, handoverOnStart bool, inject func() error) error {
+	nc, err := nats.Connect(strings.TrimSpace(natsURL), nats.Timeout(1500*time.Millisecond))
+	if err != nil {
+		return inject()
+	}
+	defer nc.Close()
+
+	room = sanitizeREPLRoom(room)
+	subject := "repl.room." + room
+	targetInput := "/" + strings.TrimSpace(injectLine)
+	displayInput := "/" + strings.TrimSpace(displayLine)
+	cmdLabel := injectedCommandLabel(injectLine)
+	summaryPrefix := injectedSummaryPrefix(injectLine)
+	
+	done := make(chan struct{})
+	seenSubtoneMetadata := false
+
+	sub, err := nc.Subscribe(subject, func(msg *nats.Msg) {
+		frame := replv3.BusFrame{}
+		if err := json.Unmarshal(msg.Data, &frame); err != nil {
+			return
+		}
+		
+		switch frame.Type {
+		case "input":
+			if strings.TrimSpace(frame.From) == strings.TrimSpace(user) && strings.TrimSpace(frame.Message) == targetInput {
+				fmt.Fprintf(os.Stdout, "%s> %s\n", strings.TrimSpace(frame.From), displayInput)
+			}
+		case "line":
+			if strings.TrimSpace(frame.Scope) != "index" {
+				return
+			}
+			msgText := strings.TrimSpace(frame.Message)
+			if !shouldForwardIndexLine(msgText, cmdLabel, summaryPrefix) {
+				return
+			}
+
+			fmt.Fprintf(os.Stdout, "DIALTONE> %s\n", msgText)
+
+			// Metadata markers indicate the process has successfully been managed by the Leader.
+			isMetadata := strings.HasPrefix(msgText, "Subtone started as pid ") || 
+						  strings.HasPrefix(msgText, "Subtone room: ") || 
+						  strings.HasPrefix(msgText, "Subtone log file: ")
+
+			if isMetadata {
+				seenSubtoneMetadata = true
+				if handoverOnStart {
+					go func() {
+						time.Sleep(200 * time.Millisecond) // Grace period for log path to arrive
+						select { case done <- struct{}{}: default: }
+					}()
+				}
+			}
+
+			// Termination markers
+			if strings.Contains(msgText, "exited with code") || 
+			   strings.Contains(msgText, "failed to start") || 
+			   strings.Contains(msgText, "running in background") {
+				select { case done <- struct{}{}: default: }
+			}
+		}
+	})
+	if err != nil {
+		return inject()
+	}
+	defer sub.Unsubscribe()
+
+	if err := nc.Flush(); err != nil {
+		return inject()
+	}
+	if err := inject(); err != nil {
+		return err
+	}
+
+	// Rule 4: Aggressive Timeout. 
+	// If we haven't seen metadata in 8s, the Leader is stuck.
+	timeout := 10 * time.Second
+	if !handoverOnStart {
+		timeout = 5 * time.Minute // Queries can take longer to finish, but should start fast.
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case <-done:
+		return nil
+	case <-timer.C:
+		if handoverOnStart && seenSubtoneMetadata {
+			return nil // We saw it start, good enough.
+		}
+		return fmt.Errorf("handover timeout: REPL room %s did not acknowledge command", room)
+	}
+}
+
+// ... Rest of the file (helpers) ...
+
 func findRepoRootFromPath(start string) (string, error) {
 	cwd := start
 	if cwd == "" {
@@ -175,7 +442,7 @@ func initLogger() {
 	var err error
 	logFile, err = os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		// Silent failure for logger init to avoid fmt dependency
+		// Silent failure
 	}
 }
 
@@ -202,7 +469,6 @@ func normalizeGlobalFlags() {
 	os.Args = filtered
 }
 
-// LoadConfig loads environment variables from env/dialtone.json.
 func LoadConfig() {
 	cwd, _ := os.Getwd()
 	repoRoot := cwd
@@ -238,7 +504,6 @@ func LoadConfig() {
 	}
 }
 
-// GetDialtoneEnv returns the directory where dependencies are installed.
 func GetDialtoneEnv() string {
 	env := os.Getenv("DIALTONE_ENV")
 	if env != "" {
@@ -249,117 +514,8 @@ func GetDialtoneEnv() string {
 		absEnv, _ := filepath.Abs(env)
 		return absEnv
 	}
-	// Fallback to default
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".dialtone_env")
-}
-
-type Requirement struct {
-	Tool    string
-	Version string
-}
-
-type replMeshConfig struct {
-	MeshNodes []replMeshNode `json:"mesh_nodes"`
-}
-
-type replMeshNode struct {
-	Name           string   `json:"name"`
-	Aliases        []string `json:"aliases"`
-	Host           string   `json:"host"`
-	HostCandidates []string `json:"host_candidates"`
-	NATSURL        string   `json:"nats_url"`
-	NATSPort       int      `json:"nats_port"`
-}
-
-type MissingInstall struct {
-	Tool    string
-	Command string
-	Why     string
-}
-
-func EnsureRequirements(reqs []Requirement) error {
-	for _, req := range reqs {
-		if err := EnsureRequirement(req); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func EnsureRequirement(req Requirement) error {
-	switch req.Tool {
-	case "go":
-		return ensureGoRequirement(req.Version)
-	case "bun":
-		return ensureBunRequirement(req.Version)
-	default:
-		return logs.Errorf("unsupported install requirement tool: %s", req.Tool)
-	}
-}
-
-func ensureGoRequirement(version string) error {
-	depsDir := GetDialtoneEnv()
-	goBinName := "go"
-	if runtime.GOOS == "windows" {
-		goBinName = "go.exe"
-	}
-	goBin := filepath.Join(depsDir, "go", "bin", goBinName)
-	if _, err := os.Stat(goBin); os.IsNotExist(err) {
-		logs.Info("[install] Go missing; running ./dialtone.sh go src_v1 install")
-		cmd := exec.Command("./dialtone.sh", "go", "src_v1", "install")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return logs.Errorf("failed to install Go: %w", err)
-		}
-	}
-
-	if version == "" {
-		return nil
-	}
-
-	out, err := exec.Command(goBin, "version").CombinedOutput()
-	if err != nil {
-		return logs.Errorf("failed checking go version: %w", err)
-	}
-	want := "go" + version
-	if !strings.Contains(string(out), want) {
-		return logs.Errorf("go version mismatch: want %s, got %s", want, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
-
-func ensureBunRequirement(version string) error {
-	depsDir := GetDialtoneEnv()
-	bunBinName := "bun"
-	if runtime.GOOS == "windows" {
-		bunBinName = "bun.exe"
-	}
-	bunBin := filepath.Join(depsDir, "bun", "bin", bunBinName)
-	if _, err := os.Stat(bunBin); os.IsNotExist(err) {
-		logs.Info("[install] Bun missing; installing via ./dialtone.sh bun src_v1 install")
-		cmd := exec.Command("./dialtone.sh", "bun", "src_v1", "install")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return logs.Errorf("failed to install Bun: %w", err)
-		}
-	}
-
-	if version == "" || version == "latest" {
-		return nil
-	}
-
-	out, err := exec.Command(bunBin, "--version").CombinedOutput()
-	if err != nil {
-		return logs.Errorf("failed checking bun version: %w", err)
-	}
-	got := strings.TrimSpace(string(out))
-	if got != version {
-		return logs.Errorf("bun version mismatch: want %s, got %s", version, got)
-	}
-	return nil
 }
 
 func main() {
@@ -411,10 +567,6 @@ func main() {
 	case "mods":
 		if shouldRouteCommandViaREPL(command, args) {
 			if err := dispatchViaREPL(command, args, targetHost); err != nil {
-				if strings.HasPrefix(strings.TrimSpace(err.Error()), "DIALTONE ERROR:") {
-					logs.System("%s", strings.TrimSpace(err.Error()))
-					os.Exit(1)
-				}
 				logs.Error("REPL dispatch failed: %v", err)
 				os.Exit(1)
 			}
@@ -446,10 +598,6 @@ func main() {
 		}
 		if shouldRouteCommandViaREPL(command, args) {
 			if err := dispatchViaREPL(command, args, targetHost); err != nil {
-				if strings.HasPrefix(strings.TrimSpace(err.Error()), "DIALTONE ERROR:") {
-					logs.System("%s", strings.TrimSpace(err.Error()))
-					os.Exit(1)
-				}
 				logs.Error("REPL dispatch failed: %v", err)
 				os.Exit(1)
 			}
@@ -502,9 +650,6 @@ func extractTransportFlags(command string, args []string) (targetHost string, ss
 			}
 			continue
 		}
-		// --host is a global REPL routing flag for commands that don't define
-		// plugin-local host semantics. Keep plugin-local --host for commands
-		// that already use it as an operational target/bind flag.
 		if command != "ssh" && command != "repl" && command != "autoswap" && command != "robot" && command != "chrome" {
 			if a == "--host" && i+1 < len(args) {
 				h := strings.TrimSpace(args[i+1])
@@ -556,201 +701,6 @@ func shouldLogBootstrapChecks() bool {
 	}
 }
 
-func dispatchViaREPL(command string, args []string, targetHost string) error {
-	user := replv3.DefaultPromptName()
-	filtered := make([]string, 0, len(args))
-	for i := 0; i < len(args); i++ {
-		a := strings.TrimSpace(args[i])
-		if a == "" {
-			continue
-		}
-		if a == "--user" && i+1 < len(args) {
-			u := strings.TrimSpace(args[i+1])
-			if u != "" {
-				user = u
-			}
-			i++
-			continue
-		}
-		if strings.HasPrefix(a, "--user=") {
-			u := strings.TrimSpace(strings.TrimPrefix(a, "--user="))
-			if u != "" {
-				user = u
-			}
-			continue
-		}
-		filtered = append(filtered, a)
-	}
-	displayLine := strings.TrimSpace(strings.Join(append([]string{command}, filtered...), " "))
-	injectLine := strings.TrimSpace(shellJoin(append([]string{command}, filtered...)))
-	if injectLine == "" {
-		return fmt.Errorf("empty command")
-	}
-	if err := validateSingleCommandTokens(shellSplit(displayLine)); err != nil {
-		return err
-	}
-	natsURL := strings.TrimSpace(os.Getenv("DIALTONE_REPL_NATS_URL"))
-	if natsURL == "" {
-		natsURL = "nats://127.0.0.1:4222"
-	}
-	room := strings.TrimSpace(os.Getenv("DIALTONE_REPL_ROOM"))
-	if room == "" {
-		room = "index"
-	}
-	injectionHost := strings.TrimSpace(targetHost)
-	candidateNATSURLs := []string{natsURL}
-	if injectionHost != "" {
-		candidateNATSURLs = resolveTargetNATSURLs(injectionHost)
-		injectionHost = ""
-	}
-	attemptErrs := make([]string, 0, len(candidateNATSURLs))
-	for _, candidateURL := range candidateNATSURLs {
-		leaderHealthy := replv3.LeaderHealthy(candidateURL, 1200*time.Millisecond)
-		if injectionHost == "" && isLocalNATSURL(candidateURL) && !leaderHealthy && replAutostartEnabled() {
-			logs.System("No REPL leader detected on %s; starting background leader for room %s", candidateURL, room)
-			if err := replv3.EnsureLeaderRunning(candidateURL, room); err != nil {
-				return fmt.Errorf("repl leader autostart failed: %w", err)
-			}
-		}
-		if injectionHost == "" && isLocalNATSURL(candidateURL) && replBootstrapHTTPAutostartEnabled() {
-			host := strings.TrimSpace(os.Getenv("DIALTONE_REPL_BOOTSTRAP_HTTP_HOST"))
-			if host == "" {
-				host = "127.0.0.1"
-			}
-			port := 8811
-			if raw := strings.TrimSpace(os.Getenv("DIALTONE_REPL_BOOTSTRAP_HTTP_PORT")); raw != "" {
-				if p, err := strconv.Atoi(raw); err == nil && p > 0 {
-					port = p
-				}
-			}
-			if err := replv3.EnsureBootstrapHTTPRunning(host, port); err != nil {
-				return fmt.Errorf("bootstrap http autostart failed: %w", err)
-			}
-		}
-		if err := relayInjectedIndexLifecycle(candidateURL, room, user, displayLine, injectLine, func() error {
-			return replv3.InjectCommand(candidateURL, room, user, injectionHost, injectLine)
-		}); err == nil {
-			return nil
-		} else {
-			attemptErrs = append(attemptErrs, fmt.Sprintf("%s: %v", candidateURL, err))
-		}
-	}
-	if len(attemptErrs) == 0 {
-		return fmt.Errorf("no nats endpoint candidates were resolved")
-	}
-	return fmt.Errorf("repl inject failed after %d endpoint attempt(s): %s", len(attemptErrs), strings.Join(attemptErrs, " | "))
-}
-
-func relayInjectedIndexLifecycle(natsURL, room, user, displayLine, injectLine string, inject func() error) error {
-	if inject == nil {
-		return fmt.Errorf("inject function is required")
-	}
-	nc, err := nats.Connect(strings.TrimSpace(natsURL), nats.Timeout(1500*time.Millisecond))
-	if err != nil {
-		return inject()
-	}
-	defer nc.Close()
-
-	room = sanitizeREPLRoom(room)
-	subject := "repl.room." + room
-	targetInput := "/" + strings.TrimSpace(injectLine)
-	displayInput := "/" + strings.TrimSpace(displayLine)
-	cmdLabel := injectedCommandLabel(injectLine)
-	summaryPrefix := injectedSummaryPrefix(injectLine)
-	requestLine := "Request received. Spawning subtone for " + cmdLabel + "..."
-	seenInput := false
-	startedLifecycle := false
-	seenSubtoneStart := false
-	seenSubtoneRoom := false
-	seenSubtoneLog := false
-	done := make(chan struct{})
-	doneClosed := false
-	finalSeen := false
-	var subErr error
-	sub, err := nc.Subscribe(subject, func(msg *nats.Msg) {
-		frame := replv3.BusFrame{}
-		if err := json.Unmarshal(msg.Data, &frame); err != nil {
-			return
-		}
-		switch strings.TrimSpace(frame.Type) {
-		case "input":
-			if strings.TrimSpace(frame.From) != strings.TrimSpace(user) {
-				return
-			}
-			if strings.TrimSpace(frame.Message) != targetInput {
-				return
-			}
-			seenInput = true
-			fmt.Fprintf(os.Stdout, "%s> %s\n", strings.TrimSpace(frame.From), displayInput)
-		case "line":
-			if !seenInput || strings.TrimSpace(frame.Scope) != "index" {
-				return
-			}
-			msgText := strings.TrimSpace(frame.Message)
-			if !startedLifecycle {
-				if msgText != requestLine {
-					return
-				}
-				startedLifecycle = true
-				fmt.Fprintf(os.Stdout, "DIALTONE> %s\n", msgText)
-				return
-			}
-			if !shouldForwardIndexLine(msgText, cmdLabel, summaryPrefix) {
-				return
-			}
-			switch {
-			case strings.HasPrefix(msgText, "Subtone started as pid "):
-				if seenSubtoneStart {
-					return
-				}
-				seenSubtoneStart = true
-			case strings.HasPrefix(msgText, "Subtone room: "):
-				if seenSubtoneRoom {
-					return
-				}
-				seenSubtoneRoom = true
-			case strings.HasPrefix(msgText, "Subtone log file: "):
-				if seenSubtoneLog {
-					return
-				}
-				seenSubtoneLog = true
-			}
-			fmt.Fprintf(os.Stdout, "DIALTONE> %s\n", msgText)
-			if strings.Contains(msgText, "Subtone for "+cmdLabel+" is running in background.") || strings.Contains(msgText, "Subtone for "+cmdLabel+" exited with code ") || strings.Contains(msgText, "Subtone for "+cmdLabel+" failed to start") {
-				if !finalSeen {
-					finalSeen = true
-					go func() {
-						time.Sleep(250 * time.Millisecond)
-						if !doneClosed {
-							close(done)
-							doneClosed = true
-						}
-					}()
-				}
-			}
-		}
-	})
-	if err != nil {
-		return inject()
-	}
-	defer func() {
-		if unsubErr := sub.Unsubscribe(); unsubErr != nil && subErr == nil {
-			subErr = unsubErr
-		}
-	}()
-	if err := nc.Flush(); err != nil {
-		return inject()
-	}
-	if err := inject(); err != nil {
-		return err
-	}
-	select {
-	case <-done:
-	case <-time.After(2 * time.Minute):
-	}
-	return subErr
-}
-
 func sanitizeREPLRoom(room string) string {
 	room = strings.TrimSpace(room)
 	if room == "" {
@@ -783,6 +733,10 @@ func shouldForwardIndexLine(msgText, cmdLabel, summaryPrefix string) bool {
 	switch {
 	case msgText == "":
 		return false
+	case strings.HasPrefix(msgText, "Request received. Spawning subtone for "):
+		return true
+	case strings.HasPrefix(msgText, "Request received. Starting service "):
+		return true
 	case strings.HasPrefix(msgText, "Subtone started as pid "):
 		return true
 	case strings.HasPrefix(msgText, "Subtone room: "):
@@ -851,7 +805,6 @@ func resolveTargetNATSURLs(host string) []string {
 						if port <= 0 {
 							port = 4222
 						}
-						// Prefer host candidates (tailnet/LAN fallback), then node host.
 						for _, c := range node.HostCandidates {
 							candidate := strings.TrimSpace(c)
 							if candidate == "" {
@@ -860,12 +813,6 @@ func resolveTargetNATSURLs(host string) []string {
 							add(fmt.Sprintf("%s:%d", candidate, port))
 						}
 						candidate := strings.TrimSpace(node.Host)
-						for _, c := range node.HostCandidates {
-							if strings.TrimSpace(c) != "" {
-								candidate = strings.TrimSpace(c)
-								break
-							}
-						}
 						if candidate != "" {
 							add(fmt.Sprintf("%s:%d", candidate, port))
 						}
@@ -902,12 +849,7 @@ func runViaSSHHost(host, command string, args []string) error {
 			remoteDialtoneCmd, remoteDialtoneCmd,
 		)
 	}
-	sshArgs := []string{
-		"src_v1",
-		"run",
-		"--host", host,
-		"--cmd", remoteCmd,
-	}
+	sshArgs := []string{"src_v1", "run", "--host", host, "--cmd", remoteCmd}
 	return runPluginScaffold("ssh", sshArgs)
 }
 
@@ -982,10 +924,10 @@ func validateSingleCommandTokens(args []string) error {
 		token := strings.TrimSpace(arg)
 		switch token {
 		case "&&", "||", ";":
-			return fmt.Errorf("DIALTONE ERROR: run exactly one ./dialtone.sh command at a time; command chaining with %q is not allowed. Use one foreground command per turn, or a single command with a trailing & for background mode.", token)
+			return fmt.Errorf("DIALTONE ERROR: run exactly one ./dialtone.sh command at a time; command chaining with %q is not allowed", token)
 		case "&":
 			if i != len(args)-1 {
-				return fmt.Errorf("DIALTONE ERROR: run exactly one ./dialtone.sh command at a time; only a trailing & is allowed for background mode")
+				return fmt.Errorf("DIALTONE ERROR: only a trailing & is allowed for background mode")
 			}
 		}
 	}
