@@ -1,0 +1,21 @@
+0
+6151 6032188 1774284554728952197 e5b0a051f18d2b939422c33b9fd676c9 0 /Users/user/dialtone/src/mods/db/v1/sqlite-graph/src/graph-destructors.c
+3902 6032192 1774284554729302186 bb0cf2b330ea5fd0efe984e714bee0f6 0 /Users/user/dialtone/src/mods/db/v1/sqlite-graph/src/graph-memory.h
+5053 22042745 1000000000 65368a9f4cf365969d64bd6a0f1410e6 1 include/stddef.h
+3816 327170 1000000000 99013b1607793cbf6c54c05ab6f0f72e 0 /nix/store/49rnbvkp4nywgr2pqcmii0dr4sbj9zs7-apple-sdk-14.4/Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.4.sdk/usr/include/stddef.h
+417 22042542 1000000000 d2edf43390585163b0f70c6bd1d7e3b7 1 include/__stddef_header_macro.h
+717 22042547 1000000000 81288588f2bdd7ac4f213fa113429ef2 1 include/__stddef_ptrdiff_t.h
+708 22042549 1000000000 39fb92c68f9106377b154afee9e96194 1 include/__stddef_size_t.h
+853 22042551 1000000000 754796f5faa70049051526dc04a0d36b 1 include/__stddef_wchar_t.h
+875 22042544 1000000000 f8a94bfcc5c5499d269a5391c5933024 1 include/__stddef_null.h
+857 22042543 1000000000 02545cb6a8f1dcd75cccde1b4f4910c6 1 include/__stddef_max_align_t.h
+708 22042546 1000000000 04b70454bf7cdd0c492cfaf134f95be7 1 include/__stddef_offsetof.h
+640658 6033035 1706631843000000000 26a1b6f6d15d424f22c5aac526621651 0 /Users/user/dialtone/src/mods/db/v1/sqlite3.h
+2497 22042741 1000000000 b2fdb090a7260fd9bb1ee13109f6f95f 1 include/stdarg.h
+417 22042538 1000000000 c8f062fa64e6bd8bfcbd2e1bc393ce2a 1 include/__stdarg_header_macro.h
+467 22042536 1000000000 0f78a248b04856b5d60755486dcfed37 1 include/__stdarg___gnuc_va_list.h
+448 22042541 1000000000 ee803b33be587fcb44ebc540dc1bd5b4 1 include/__stdarg_va_list.h
+793 22042539 1000000000 1006f9f7bf4b5778d8a640391b9c5a1c 1 include/__stdarg_va_arg.h
+445 22042537 1000000000 9c52fce0866e80d935dd268cff80c9c7 1 include/__stdarg___va_copy.h
+451 22042540 1000000000 7472f18389b3074d0606de36cb9d29ce 1 include/__stdarg_va_copy.h
+12266 6032142 1774284554723704458 2f669c81c1e7deb77058b9653c5f3d5c 0 /Users/user/dialtone/src/mods/db/v1/sqlite-graph/include/graph.h
