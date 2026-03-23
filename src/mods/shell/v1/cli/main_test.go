@@ -166,6 +166,32 @@ func TestBuildAllModsTestCommandUsesRecursiveModSweep(t *testing.T) {
 	}
 }
 
+func TestBuildTmuxStartCommandUsesRepoRootConfig(t *testing.T) {
+	got := buildTmuxStartCommand("/Users/user/dialtone", "codex-view")
+	if !strings.Contains(got, "/Users/user/dialtone/.tmux.conf") {
+		t.Fatalf("expected repo tmux config in command, got %q", got)
+	}
+	if !strings.Contains(got, "codex-view") {
+		t.Fatalf("expected session name in command, got %q", got)
+	}
+}
+
+func TestBuildCodexStartCommandTargetsPromptPane(t *testing.T) {
+	got := buildCodexStartCommand("codex-view", "codex-view:0:0", "default", "medium", "gpt-5.4")
+	if !strings.Contains(got, "./dialtone_mod codex v1 start") {
+		t.Fatalf("expected codex start command, got %q", got)
+	}
+	if !strings.Contains(got, "--session codex-view") {
+		t.Fatalf("expected session flag, got %q", got)
+	}
+	if !strings.Contains(got, "--pane codex-view:0:0") {
+		t.Fatalf("expected prompt pane target, got %q", got)
+	}
+	if !strings.Contains(got, "--shell default") || !strings.Contains(got, "--reasoning medium") || !strings.Contains(got, "--model gpt-5.4") {
+		t.Fatalf("expected codex launch flags, got %q", got)
+	}
+}
+
 func TestVisibleGoTestCommandsReuseExistingNixShell(t *testing.T) {
 	commands := []string{
 		buildGoTestCommand("/Users/user/dialtone", "shell", "v1"),
@@ -486,6 +512,29 @@ func TestTrackedCommandExitStatus(t *testing.T) {
 	status, ok = trackedCommandExitStatus("line one\nno sentinel here\n")
 	if ok {
 		t.Fatalf("expected missing sentinel to return ok=false, got status=%d ok=%v", status, ok)
+	}
+}
+
+func TestDeriveVisibleCommandErrorPrefersStructuredProbeError(t *testing.T) {
+	output := strings.Join([]string{
+		"probe_mode\tfail",
+		"probe_result\tfailure",
+		"probe_error\trequested failure",
+		"exit status 1",
+	}, "\n")
+	if got := deriveVisibleCommandError(output, nil, 1); got != "requested failure" {
+		t.Fatalf("unexpected derived error: %q", got)
+	}
+}
+
+func TestDeriveVisibleCommandErrorFallsBackToLastMeaningfulLine(t *testing.T) {
+	output := strings.Join([]string{
+		"line one",
+		"custom stderr detail",
+		"exit status 1",
+	}, "\n")
+	if got := deriveVisibleCommandError(output, nil, 1); got != "custom stderr detail" {
+		t.Fatalf("unexpected derived error: %q", got)
 	}
 }
 

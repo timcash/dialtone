@@ -56,7 +56,7 @@ func ShouldRouteViaShell(modName, command string) bool {
 	if mod == "" {
 		return false
 	}
-	if mod == "shell" || mod == "ghostty" || mod == "tmux" || mod == "test" {
+	if mod == "shell" || mod == "ghostty" || mod == "tmux" || mod == "test" || mod == "dialtone" {
 		return false
 	}
 	return true

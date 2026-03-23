@@ -9,14 +9,16 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"dialtone/dev/internal/tmuxcmd"
 )
 
 const tmuxRetryAttempts = 20
 
 var (
-	tmuxOutputRunner     = tmuxOutput
+	tmuxOutputRunner      = tmuxOutput
 	defaultTmuxRetrySleep = func() { time.Sleep(500 * time.Millisecond) }
-	tmuxRetrySleep       = defaultTmuxRetrySleep
+	tmuxRetrySleep        = defaultTmuxRetrySleep
 )
 
 func main() {
@@ -213,9 +215,8 @@ func clearPaneHistory(target string) error {
 }
 
 func respawnPane(target, command string) error {
-	if err := clearPaneHistory(target); err != nil {
-		return err
-	}
+	// A stale pane history is cosmetic. The restart itself is what must succeed.
+	_ = clearPaneHistory(target)
 	if _, err := tmuxOutputWithRetry("respawn-pane", "-k", "-t", target, "bash", "-lc", command); err != nil {
 		return err
 	}
@@ -235,7 +236,11 @@ func sendKeys(target, text string, enter bool) error {
 }
 
 func tmuxOutput(args ...string) (string, error) {
-	cmd := exec.Command("tmux", args...)
+	repoRoot, err := locateRepoRoot()
+	if err != nil {
+		repoRoot = ""
+	}
+	cmd := tmuxcmd.Command(repoRoot, args...)
 	out, err := cmd.CombinedOutput()
 	text := string(out)
 	if err != nil {

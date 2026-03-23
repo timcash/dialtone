@@ -57,6 +57,7 @@ func TestShouldRouteViaShellExcludesBootstrapAndBackendMods(t *testing.T) {
 		{mod: "tmux", command: "read", want: false},
 		{mod: "ghostty", command: "list", want: false},
 		{mod: "test", command: "start", want: false},
+		{mod: "dialtone", command: "status", want: false},
 		{mod: "mod", command: "db", want: true},
 		{mod: "ssh", command: "test", want: true},
 		{mod: "codex", command: "status", want: true},

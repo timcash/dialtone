@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"dialtone/dev/internal/modstate"
+	"dialtone/dev/internal/tmuxcmd"
 	"dialtone/dev/mods/shared/dispatch"
 	"dialtone/dev/mods/shared/sqlitestate"
 )
@@ -139,7 +140,7 @@ func runStart(argv []string) error {
 		return err
 	}
 
-	startTmuxCmd := fmt.Sprintf("tmux new-session -A -s %s", strings.TrimSpace(*session))
+	startTmuxCmd := buildTmuxStartCommand(repoRoot, strings.TrimSpace(*session))
 	if _, err := runDialtoneMod(repoRoot,
 		"ghostty", "v1", "fresh-window",
 		"--cwd", repoRoot,
@@ -164,17 +165,14 @@ func runStart(argv []string) error {
 	if err := ensureSplitLayout(repoRoot, strings.TrimSpace(*session), strings.TrimSpace(*dialtoneShell), strings.TrimSpace(*rightTitle), time.Duration(*waitSeconds)*time.Second); err != nil {
 		return err
 	}
-	if _, err := runDialtoneMod(repoRoot,
-		"codex", "v1", "start",
-		"--session", strings.TrimSpace(*session),
-		"--pane", pane,
-		"--shell", strings.TrimSpace(*shellName),
-		"--reasoning", strings.TrimSpace(*reasoning),
-		"--model", strings.TrimSpace(*model),
-	); err != nil {
+	if err := startShellWorker(repoRoot, rightPane, strings.TrimSpace(*dialtoneShell), time.Duration(*waitSeconds)*time.Second); err != nil {
 		return err
 	}
-	if err := startShellWorker(repoRoot, rightPane, strings.TrimSpace(*dialtoneShell), time.Duration(*waitSeconds)*time.Second); err != nil {
+	if err := runRun([]string{
+		"--pane", rightPane,
+		"--wait-seconds", fmt.Sprintf("%d", *waitSeconds),
+		buildCodexStartCommand(strings.TrimSpace(*session), pane, strings.TrimSpace(*shellName), strings.TrimSpace(*reasoning), strings.TrimSpace(*model)),
+	}); err != nil {
 		return err
 	}
 	if *runTests {
@@ -215,6 +213,10 @@ func runSplitVertical(argv []string) error {
 		return errors.New("--wait-seconds must be positive")
 	}
 	return runSplitVerticalWithOptions(strings.TrimSpace(*session), strings.TrimSpace(*shellName), strings.TrimSpace(*rightTitle), time.Duration(*waitSeconds)*time.Second)
+}
+
+func buildTmuxStartCommand(repoRoot, session string) string {
+	return tmuxcmd.ShellCommand(repoRoot, "new-session", "-A", "-s", strings.TrimSpace(session))
 }
 
 func runSplitVerticalWithOptions(session, shellName, rightTitle string, wait time.Duration) error {
@@ -606,6 +608,17 @@ func buildBasicTestCommand(repoRoot string) string {
 func buildAllModsTestCommand(repoRoot string) string {
 	root := strings.TrimSpace(repoRoot)
 	return fmt.Sprintf("clear && cd %s/src && go test ./mods/...", root)
+}
+
+func buildCodexStartCommand(session, pane, shellName, reasoning, model string) string {
+	return dispatch.BuildDialtoneCommand([]string{
+		"codex", "v1", "start",
+		"--session", strings.TrimSpace(session),
+		"--pane", strings.TrimSpace(pane),
+		"--shell", strings.TrimSpace(shellName),
+		"--reasoning", strings.TrimSpace(reasoning),
+		"--model", strings.TrimSpace(model),
+	})
 }
 
 func defaultDialtoneShellName() string {
@@ -1147,10 +1160,10 @@ func syncShellBusRowInWorker(db *sql.DB, repoRoot string, row modstate.ShellBusR
 		status := "done"
 		if execErr != nil {
 			status = "failed"
-			body.Error = execErr.Error()
+			body.Error = deriveVisibleCommandError(output, execErr, exitCode)
 		} else if exitCode != 0 {
 			status = "failed"
-			body.Error = fmt.Sprintf("command exited with status %d", exitCode)
+			body.Error = deriveVisibleCommandError(output, nil, exitCode)
 		}
 		observedBody, _ := json.Marshal(map[string]any{
 			"command":   body.DisplayCommand,
@@ -1739,6 +1752,46 @@ func trackedCommandExitStatus(text string) (int, bool) {
 		return statusCode, true
 	}
 	return 0, false
+}
+
+func deriveVisibleCommandError(output string, execErr error, exitCode int) string {
+	fallback := ""
+	switch {
+	case execErr != nil:
+		fallback = strings.TrimSpace(execErr.Error())
+	case exitCode != 0:
+		fallback = fmt.Sprintf("command exited with status %d", exitCode)
+	}
+
+	lines := strings.Split(output, "\n")
+	for index := len(lines) - 1; index >= 0; index-- {
+		line := strings.TrimSpace(lines[index])
+		if strings.HasPrefix(line, "probe_error\t") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "probe_error\t"))
+		}
+		if strings.HasPrefix(line, "error\t") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "error\t"))
+		}
+	}
+	for index := len(lines) - 1; index >= 0; index-- {
+		line := strings.TrimSpace(lines[index])
+		if line == "" || strings.HasPrefix(line, "exit status ") {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(line, "probe_mode\t"),
+			strings.HasPrefix(line, "probe_label\t"),
+			strings.HasPrefix(line, "probe_pid\t"),
+			strings.HasPrefix(line, "probe_started_at\t"),
+			strings.HasPrefix(line, "probe_sleep_ms\t"),
+			strings.HasPrefix(line, "probe_finished_at\t"),
+			strings.HasPrefix(line, "probe_result\t"),
+			strings.HasPrefix(line, "probe_background_"):
+			continue
+		}
+		return line
+	}
+	return fallback
 }
 
 func waitForPaneContains(repoRoot, pane, needle string, timeout time.Duration) (string, error) {

@@ -12,14 +12,20 @@ import (
 	"time"
 
 	"dialtone/dev/internal/modstate"
+	"dialtone/dev/internal/tmuxcmd"
 	"dialtone/dev/mods/shared/sqlitestate"
 )
 
 func tmuxBinary() string {
-	if value := strings.TrimSpace(os.Getenv("DIALTONE_TMUX_BIN")); value != "" {
-		return value
+	return tmuxcmd.Binary()
+}
+
+func tmuxCommand(args ...string) *exec.Cmd {
+	repoRoot, err := locateRepoRoot()
+	if err != nil {
+		repoRoot = ""
 	}
-	return "tmux"
+	return tmuxcmd.Command(repoRoot, args...)
 }
 
 type tmuxPaneTarget struct {
@@ -120,7 +126,7 @@ func runList(argv []string) error {
 	if *short {
 		format = "#{session_name}"
 	}
-	cmd := exec.Command(tmuxBinary(), "list-sessions", "-F", format)
+	cmd := tmuxCommand("list-sessions", "-F", format)
 	out, err := cmd.CombinedOutput()
 	text := strings.TrimSpace(string(out))
 	if err != nil {
@@ -159,13 +165,13 @@ func runWrite(argv []string) error {
 	}
 
 	tmuxTarget := target.target()
-	if out, err := exec.Command(tmuxBinary(), "send-keys", "-t", tmuxTarget, "--", text).CombinedOutput(); err != nil {
+	if out, err := tmuxCommand("send-keys", "-t", tmuxTarget, "--", text).CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux send-keys failed: %s", strings.TrimSpace(string(out)))
 	}
 	if *enter {
 		// Raw terminal UIs such as Codex can miss an immediate Enter after a large paste.
 		time.Sleep(300 * time.Millisecond)
-		if out, err := exec.Command(tmuxBinary(), "send-keys", "-t", tmuxTarget, "C-m").CombinedOutput(); err != nil {
+		if out, err := tmuxCommand("send-keys", "-t", tmuxTarget, "C-m").CombinedOutput(); err != nil {
 			return fmt.Errorf("tmux send-keys enter failed: %s", strings.TrimSpace(string(out)))
 		}
 	}
@@ -188,7 +194,7 @@ func runRead(argv []string) error {
 		return err
 	}
 
-	cmd := exec.Command(tmuxBinary(), "capture-pane", "-pt", target.target(), "-S", fmt.Sprintf("-%d", *lines))
+	cmd := tmuxCommand("capture-pane", "-pt", target.target(), "-S", fmt.Sprintf("-%d", *lines))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("tmux capture-pane failed: %s", strings.TrimSpace(string(out)))
@@ -212,10 +218,10 @@ func runClear(argv []string) error {
 	}
 
 	tmuxTarget := target.target()
-	if out, err := exec.Command(tmuxBinary(), "clear-history", "-t", tmuxTarget).CombinedOutput(); err != nil {
+	if out, err := tmuxCommand("clear-history", "-t", tmuxTarget).CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux clear-history failed: %s", strings.TrimSpace(string(out)))
 	}
-	if out, err := exec.Command(tmuxBinary(), "send-keys", "-t", tmuxTarget, "C-l").CombinedOutput(); err != nil {
+	if out, err := tmuxCommand("send-keys", "-t", tmuxTarget, "C-l").CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux send-keys clear failed: %s", strings.TrimSpace(string(out)))
 	}
 	fmt.Printf("cleared tmux pane %s\n", tmuxTarget)
@@ -232,11 +238,11 @@ func runRename(argv []string) error {
 
 	resolveSession := strings.TrimSpace(*session)
 	if resolveSession == "" {
-		out, _ := exec.Command(tmuxBinary(), "display-message", "-p", "#S").Output()
+		out, _ := tmuxCommand("display-message", "-p", "#S").Output()
 		resolveSession = strings.TrimSpace(string(out))
 	}
 	if resolveSession == "" {
-		out, _ := exec.Command(tmuxBinary(), "list-sessions", "-F", "#{session_name}").Output()
+		out, _ := tmuxCommand("list-sessions", "-F", "#{session_name}").Output()
 		resolveSession = strings.TrimSpace(strings.Split(strings.TrimSpace(string(out)), "\n")[0])
 	}
 	if resolveSession == "" {
@@ -250,7 +256,7 @@ func runRename(argv []string) error {
 		fmt.Printf("tmux session already named %s\n", newName)
 		return nil
 	}
-	cmd := exec.Command(tmuxBinary(), "rename-session", "-t", resolveSession, newName)
+	cmd := tmuxCommand("rename-session", "-t", resolveSession, newName)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux rename-session failed: %s", strings.TrimSpace(string(out)))
 	}
@@ -303,7 +309,7 @@ func runSplit(argv []string) error {
 		tmuxArgs = append(tmuxArgs, strings.TrimSpace(*command))
 	}
 
-	out, err := exec.Command(tmuxBinary(), tmuxArgs...).CombinedOutput()
+	out, err := tmuxCommand(tmuxArgs...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("tmux split-window failed: %s", strings.TrimSpace(string(out)))
 	}
@@ -314,12 +320,12 @@ func runSplit(argv []string) error {
 	}
 
 	if strings.TrimSpace(*title) != "" {
-		if out, err := exec.Command(tmuxBinary(), "select-pane", "-t", newTarget.target(), "-T", strings.TrimSpace(*title)).CombinedOutput(); err != nil {
+		if out, err := tmuxCommand("select-pane", "-t", newTarget.target(), "-T", strings.TrimSpace(*title)).CombinedOutput(); err != nil {
 			return fmt.Errorf("tmux select-pane title failed: %s", strings.TrimSpace(string(out)))
 		}
 	}
 	if !*focus {
-		if out, err := exec.Command(tmuxBinary(), "select-pane", "-t", target.target()).CombinedOutput(); err != nil {
+		if out, err := tmuxCommand("select-pane", "-t", target.target()).CombinedOutput(); err != nil {
 			return fmt.Errorf("tmux select-pane restore failed: %s", strings.TrimSpace(string(out)))
 		}
 	}
@@ -357,10 +363,10 @@ func runShell(argv []string) error {
 		shellQuote("nix-command flakes"),
 		shellQuote(".#"+strings.TrimSpace(*shellName)),
 	)
-	if out, err := exec.Command(tmuxBinary(), "clear-history", "-t", tmuxTarget).CombinedOutput(); err != nil {
+	if out, err := tmuxCommand("clear-history", "-t", tmuxTarget).CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux clear-history failed: %s", strings.TrimSpace(string(out)))
 	}
-	if out, err := exec.Command(tmuxBinary(), "respawn-pane", "-k", "-t", tmuxTarget, "zsh", "-lc", command).CombinedOutput(); err != nil {
+	if out, err := tmuxCommand("respawn-pane", "-k", "-t", tmuxTarget, "zsh", "-lc", command).CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux respawn-pane shell failed: %s", strings.TrimSpace(string(out)))
 	}
 	fmt.Printf("entered nix shell %s in %s\n", strings.TrimSpace(*shellName), tmuxTarget)

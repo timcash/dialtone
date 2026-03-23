@@ -113,3 +113,37 @@ func TestTmuxOutputWithRetryReturnsNonTransientErrorImmediately(t *testing.T) {
 		t.Fatalf("expected 1 attempt, got %d", attempts)
 	}
 }
+
+func TestRespawnPaneIgnoresClearHistoryFailureWhenRespawnSucceeds(t *testing.T) {
+	t.Cleanup(func() {
+		tmuxOutputRunner = tmuxOutput
+		tmuxRetrySleep = defaultTmuxRetrySleep
+	})
+
+	ops := make([]string, 0, 2)
+	tmuxOutputRunner = func(args ...string) (string, error) {
+		ops = append(ops, strings.Join(args, " "))
+		switch args[0] {
+		case "clear-history":
+			return "", errors.New("tmux clear-history -t codex-view:0.0 failed: can't find pane")
+		case "respawn-pane":
+			return "", nil
+		default:
+			return "", nil
+		}
+	}
+	tmuxRetrySleep = func() {}
+
+	if err := respawnPane("codex-view:0.0", "printf ok"); err != nil {
+		t.Fatalf("respawnPane returned error: %v", err)
+	}
+	if len(ops) != 2 {
+		t.Fatalf("expected 2 tmux operations, got %d: %+v", len(ops), ops)
+	}
+	if !strings.HasPrefix(ops[0], "clear-history -t codex-view:0.0") {
+		t.Fatalf("unexpected first tmux operation: %q", ops[0])
+	}
+	if !strings.HasPrefix(ops[1], "respawn-pane -k -t codex-view:0.0") {
+		t.Fatalf("unexpected second tmux operation: %q", ops[1])
+	}
+}
