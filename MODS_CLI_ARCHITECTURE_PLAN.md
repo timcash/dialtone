@@ -1,5 +1,19 @@
 # Mods CLI Architecture Plan
 
+## Intended Reader
+
+This file is for the next engineer or LLM agent who needs to continue the mods transition without rediscovering the architecture from scratch.
+
+Read order:
+
+1. `src/mods/README.md`
+2. this file
+3. the target mod README you are changing
+4. `src/mods.go`
+5. `src/internal/modstate/modstate.go`
+
+Use this file as the transition plan. Use `src/mods/README.md` as the stable system guide.
+
 ## Purpose
 
 This plan defines a clean architecture for the mods system so that:
@@ -12,6 +26,65 @@ This plan defines a clean architecture for the mods system so that:
 - build outputs land under `bin/mods/<mod>/<version>/` so the `bin` tree mirrors `src/mods`
 
 This is a migration plan, not a flag day rewrite.
+
+## Decisions Already Made
+
+These decisions are already settled and should not be reopened during normal transition work:
+
+- `dialtone_mod` remains the stable user-facing shell command
+- `dialtone` remains the standalone background process manager
+- SQLite remains the source of truth for queue, worker, status, protocol, and test state
+- routed plain `./dialtone_mod ...` commands should execute in `dialtone-view`
+- `codex-view` is for prompts and reasoning, not for executing routed worker commands
+- every real mod version should expose a small Go CLI wrapper at `src/mods/<mod>/<version>/cli/main.go`
+- every mod CLI should recognize `install`, `build`, `format`, and `test`
+- build outputs should mirror the source tree under `bin/mods/<mod>/<version>/`
+
+## Transition Guardrails
+
+While migrating the system:
+
+- do not change the user-facing command shape from plain `./dialtone_mod ...`
+- do not move queue ownership out of `dialtone`
+- do not make `src/mods.go` CLI-only until all real mods have working CLI wrappers
+- do not remove a version-root runtime entrypoint until its commands have been moved behind the CLI wrapper
+- do not let routed commands execute in the caller terminal or in `codex-view`
+- do not reintroduce flat build outputs like `bin/mod-v1` or `bin/repl-v1`
+- do not bypass the Nix-backed mod workflow with host `go build`, `gofmt`, or `go test`
+- do not break `./dialtone_mod shell v1 test-basic` or `./dialtone_mod test v1 start`
+
+## New Agent Start Checklist
+
+Before making code changes:
+
+1. read `src/mods/README.md` and this file completely
+2. confirm the shell/control-plane baseline still works:
+   - `./dialtone_mod shell v1 test-basic`
+   - `./dialtone_mod test v1 start`
+3. scan mod CLI coverage and pick one bounded migration slice
+4. add or normalize tests before changing behavior
+5. keep the visible shell workflow centered on `shell v1`
+6. update the target mod README and this plan if the transition state changes materially
+
+Recommended first commands for a new agent:
+
+```sh
+# inspect mod versions
+find src/mods -mindepth 2 -maxdepth 2 -type d | sort
+
+# inspect CLI coverage
+for d in $(find src/mods -mindepth 2 -maxdepth 2 -type d | sort); do
+  if [ -f "$d/cli/main.go" ]; then
+    printf 'HAS_CLI\t%s\n' "$d"
+  else
+    printf 'NO_CLI\t%s\n' "$d"
+  fi
+done
+
+# baseline control plane
+./dialtone_mod shell v1 test-basic
+./dialtone_mod test v1 start
+```
 
 ## Target Architecture
 
@@ -193,6 +266,61 @@ Some existing build helpers still target flat paths under `bin/`, for example:
 
 Those need to move to `bin/mods/<mod>/<version>/`.
 
+### Shared helper gap
+
+There is not yet a single shared helper package for the common mod-CLI contract.
+
+That means many wrappers still duplicate logic for:
+
+- repo-root discovery
+- output-path construction
+- `gofmt` / `go test` / `go build` execution
+- Nix-aware command launching
+- usage and exit handling
+
+This should be consolidated before or while the broader CLI migration proceeds.
+
+## File Map For The Transition
+
+These files are the main control points for the migration:
+
+- `dialtone_mod`
+  Stable user-facing shell wrapper and daemon bootstrap path
+- `src/mods.go`
+  Main Go dispatcher that should become CLI-only for real mods
+- `src/internal/modstate/modstate.go`
+  SQLite-backed mod registry and entrypoint resolution
+- `src/mods/<mod>/<version>/cli/main.go`
+  Per-mod contract entrypoint
+- `src/mods/<mod>/<version>/main.go`
+  Legacy runtime entrypoint or standalone binary entrypoint when a real runtime binary is needed
+- `src/mods/README.md`
+  Stable system guide for how the future system should work
+
+## Suggested Slice Order
+
+Do the transition in small vertical slices instead of one large rewrite.
+
+Suggested order:
+
+1. add `src/internal/modcli`
+2. migrate one missing-CLI mod with strong architectural value:
+   - `dialtone/v1`
+3. migrate the next missing-CLI runtime mod:
+   - `db/v1`
+4. migrate the remaining missing-CLI mods:
+   - `ssh/v1`
+   - `mesh/v3`
+5. fill in missing `install|build|format|test` for existing CLI mods
+6. standardize build paths under `bin/mods/...`
+7. flip dispatcher resolution to CLI-only
+
+Why this order:
+
+- `dialtone/v1` and `db/v1` set the pattern for standalone runtime binaries
+- once that pattern is clear, the simpler CLI gaps become mechanical
+- only after every mod can be reached through a wrapper should the dispatcher stop using version-root fallbacks
+
 ## Clean Migration Strategy
 
 ### Phase 1: define the shared CLI scaffold
@@ -213,6 +341,19 @@ It should centralize:
 Goal:
 
 - remove repeated path and shell logic from every CLI wrapper
+
+Suggested contents for `src/internal/modcli`:
+
+- `FindRepoRoot()`
+- `ModDir(mod, version)`
+- `CLIDir(mod, version)`
+- `BinDir(mod, version)`
+- `EnsureBinDir(mod, version)`
+- `GoBuildOutput(mod, version, artifact)`
+- `RunNixGo(...)`
+- `RunFormat(...)`
+- `RunTest(...)`
+- common help/exit helpers where that actually reduces duplication
 
 ### Phase 2: make every mod expose the contract
 
@@ -275,6 +416,11 @@ Important detail:
 
 That keeps the visible workflow stable even while the internals migrate to CLI-only entrypoints.
 
+One important constraint:
+
+- `dialtone_mod` should still be able to bootstrap and call into `dialtone` even before the full CLI migration is complete
+- the CLI migration should not require a flag day change to the shell wrapper
+
 ### Phase 6: keep the daemon boundary clean
 
 The `dialtone` daemon should remain outside Nix if needed, but:
@@ -290,6 +436,21 @@ Recommended split for `dialtone/v1`:
 - `dialtone_mod`: ensure/exec that built binary
 
 ## Testing Plan
+
+Each migration slice should prove three things:
+
+- the target mod CLI contract works
+- dispatcher behavior did not regress
+- the visible control plane still works
+
+Minimum validation for a slice that changes mod dispatch or the control plane:
+
+```sh
+./dialtone_mod shell v1 test-basic
+./dialtone_mod shell v1 run --wait-seconds 120 \
+  "clear && cd /Users/user/dialtone/src && go test ./mods/<mod-name>/<version>/..."
+./dialtone_mod test v1 start
+```
 
 ### Contract tests
 
@@ -343,3 +504,14 @@ The migration is done when all of the following are true:
 - built artifacts land under `bin/mods/<mod>/<version>/`
 - `test v1 start` still proves `codex-view` and `dialtone-view` cooperate correctly
 
+## What “Done” Looks Like For One Mod
+
+A single mod transition is complete when:
+
+- `src/mods/<mod>/<version>/cli/main.go` exists
+- that CLI recognizes `install`, `build`, `format`, and `test`
+- mod-specific runtime/admin commands are reachable through the CLI too
+- `build` writes to `bin/mods/<mod>/<version>/`
+- focused recursive tests for that mod pass
+- `src/mods.go` no longer needs the version-root entrypoint for that mod’s normal command surface
+- the mod README documents the current accepted behavior

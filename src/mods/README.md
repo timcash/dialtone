@@ -43,9 +43,44 @@ Hard rules:
 - a runtime binary may execute outside Nix, but its `install`, `build`, `format`, and `test` flows should still be driven through the mod CLI wrapper from a Nix shell
 - if a mod needs extra runtime commands, add them after the basic `install|build|format|test` contract is in place
 
+## Future System
+
+The future mods system should look like this:
+
+- users and LLMs type plain `./dialtone_mod ...` commands
+- `dialtone_mod` stays a small shell bootstrap and routing wrapper
+- `dialtone` stays the standalone background process manager and SQLite owner
+- `src/mods.go` becomes a thin Go router that dispatches every real mod through `src/mods/<mod>/<version>/cli/main.go`
+- every mod CLI exposes `install`, `build`, `format`, and `test`, plus any extra mod-specific runtime/admin commands it needs
+- routed commands queue into SQLite and run visibly in `dialtone-view`
+- `codex-view` stays the prompt/reasoning pane and should not be the place where routed commands actually execute
+- standalone runtime binaries like `dialtone` and `db` are still allowed, but their dev/build/test flows are owned by the mod CLI wrapper
+- build outputs mirror the source tree under `<repo-root>/bin/mods/<mod>/<version>/`
+
+If you are changing the architecture toward that future state, read [MODS_CLI_ARCHITECTURE_PLAN.md](/Users/user/dialtone/MODS_CLI_ARCHITECTURE_PLAN.md) before editing the dispatcher, the control plane, or mod CLI layout.
+
+## Transition Rules
+
+While the system is moving toward that future state:
+
+- keep the user-facing command shape as plain `./dialtone_mod ...`
+- keep `dialtone` as the queue/process manager
+- keep `shell v1` as the visible workflow owner
+- do not switch `src/mods.go` to CLI-only resolution until all real mods have working CLI wrappers
+- do not remove version-root runtime commands until those commands are reachable through the CLI wrapper
+- do not let routed commands execute in the caller terminal or in `codex-view`
+- use `test v1 start` as the end-to-end proof that `codex-view` and `dialtone-view` still cooperate correctly
+
 ## LLM Start Here
 
 If you are a new LLM working in `src/mods`, use this workflow first.
+
+Read order:
+
+1. this file
+2. [MODS_CLI_ARCHITECTURE_PLAN.md](/Users/user/dialtone/MODS_CLI_ARCHITECTURE_PLAN.md) if you are changing mod layout, dispatcher resolution, CLI wrappers, or build paths
+3. the target mod README
+4. the target mod code
 
 Goal:
 
@@ -193,6 +228,8 @@ Hard rules:
 - no routed mod command should execute in the caller terminal
 - `./dialtone_mod` should return quickly with `command_id`, state, and inspection hints
 - background state should live in SQLite, not in ad hoc shell environment
+- `src/mods.go` should move toward CLI-only dispatch for real mods
+- per-mod runtime/admin commands should move behind the mod CLI wrapper instead of staying split between CLI and version-root entrypoints
 
 Current implementation:
 
@@ -204,6 +241,7 @@ Current implementation:
 - the worker is `shell v1 serve` in `dialtone-view`
 - fast `shell v1 status|state` reads now delegate to `dialtone v1 status`
 - local `tmux` control-plane commands now use the repo-root `.tmux.conf` when it exists
+- the CLI-only dispatcher transition is still incomplete, so use the plan file before changing entrypoint resolution
 
 Current `test v1 start` coverage:
 
@@ -307,6 +345,8 @@ DB / graph checks:
 
 These files matter most for the control-plane architecture:
 
+- [MODS_CLI_ARCHITECTURE_PLAN.md](/Users/user/dialtone/MODS_CLI_ARCHITECTURE_PLAN.md)
+  Transition plan for the CLI-wrapper migration and dispatcher cleanup
 - [dialtone_mod](/Users/user/dialtone/dialtone_mod)
   Thin entrypoint that bootstraps the repo and delegates to the standalone `dialtone` binary
 - [src/mods/dialtone/v1/main.go](/Users/user/dialtone/src/mods/dialtone/v1/main.go)
@@ -335,13 +375,14 @@ These files matter most for the control-plane architecture:
 Another LLM should assume this current state:
 
 - the target architecture is mostly working now
+- the future-state direction is: `dialtone_mod` shell wrapper -> `dialtone` daemon -> SQLite queue -> `shell v1 serve` worker -> per-mod CLI wrappers
 - the standalone daemon now lives in [src/mods/dialtone/v1/main.go](/Users/user/dialtone/src/mods/dialtone/v1/main.go)
 - [dialtone_mod](/Users/user/dialtone/dialtone_mod) builds and delegates to that binary for `dialtone v1 ensure|serve|status|queue`
 - `dialtone v1 ensure` will replace a legacy `dialtone_mod __dialtone serve` process so the active daemon becomes `/Users/user/.dialtone/bin/dialtone serve`
 - the visible worker is still [src/mods/shell/v1/cli/main.go](/Users/user/dialtone/src/mods/shell/v1/cli/main.go) running `shell v1 serve` in `dialtone-view`
 - fast `status` and `state` reads now come from `dialtone v1 status`, usually through the wrapper fast path
 - direct routed-command handling in [src/mods.go](/Users/user/dialtone/src/mods.go) now also delegates to `dialtone v1 queue`
-- further cleanup is optional polish, not a structural requirement
+- the remaining structural transition is the CLI-wrapper migration described in [MODS_CLI_ARCHITECTURE_PLAN.md](/Users/user/dialtone/MODS_CLI_ARCHITECTURE_PLAN.md)
 
 Before changing the control plane, rerun these first:
 
@@ -385,9 +426,11 @@ Rules:
 
 - the runnable Go entrypoint lives in `cli/main.go`
 - `cli/main.go` should expose the standard `install`, `build`, `format`, and `test` commands for the mod, even when their exact behavior differs by mod
+- extra runtime/admin commands should also be reachable through `cli/main.go`
 - version-root `main_test.go` is a smoke/layout contract test
 - CLI behavior tests live in `cli/main_test.go`
 - builds should write outputs under `<repo-root>/bin/mods/<mod-name>/<version>/`
+- `src/mods.go` should eventually invoke the CLI wrapper, not the version-root main package, for normal mod commands
 - do not put the runnable mod CLI entrypoint at the version root
 
 ## SQLite
