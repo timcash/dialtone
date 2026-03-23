@@ -33,10 +33,11 @@ To build the project:
 # Ensure you are in the module directory
 cd src/mods/db/v1
 
-# Use Zig to compile the standalone binary
-zig build
+# Use the wrapper script to compile the standalone binary
+# (This ensures the .zig-cache is placed outside the repo)
+./build.sh
 ```
-*(If you do not have Zig installed globally, you can use Nix: `nix-shell -p zig --run "zig build"`)*
+*(If you do not have Zig installed globally, you can use Nix: `nix-shell -p zig --run "./build.sh"`)*
 
 This compiles the binary and places it in the repository root at: `bin/mods/db/v1/dialtone_db`
 
