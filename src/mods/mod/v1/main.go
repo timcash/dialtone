@@ -59,6 +59,8 @@ func main() {
 		printUsage()
 	case "new":
 		exitIfErr(runNew(args))
+	case "probe":
+		exitIfErr(runProbe(args))
 	case "add":
 		exitIfErr(runAdd(args))
 	case "clone":
@@ -111,6 +113,8 @@ func printUsage() {
 	fmt.Println("Commands:")
 	fmt.Println("  new <mod-name> [--repo <url|owner/repo|path>] [--owner <owner>] [--repo-name <name>]")
 	fmt.Println("      [--path src/mods/<name>] [--branch main] [--public|--private] [--dry-run]")
+	fmt.Println("  probe [--mode success|sleep|fail|background] [--sleep-ms N] [--label TEXT] [--background-file PATH]")
+	fmt.Println("      Deterministic routed probe command for validating dialtone queue/worker behavior")
 	fmt.Println("  add --mod <mod-name> <paths...>")
 	fmt.Println("      Stage specific files inside a mod before committing")
 	fmt.Println("  clone [--host <name|all|local>] [--from wsl] [--source PATH] [--dest PATH]")
