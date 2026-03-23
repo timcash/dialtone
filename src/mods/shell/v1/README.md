@@ -2,6 +2,15 @@
 
 `shell v1` is the primary local control plane for the Ghostty + tmux + Codex workflow.
 
+Plain `./dialtone_mod ...` commands should stay plain. The intended flow is:
+
+- `dialtone_mod` bootstraps the Nix-backed toolchain on first run
+- `dialtone_mod` starts the background `dialtone` process when needed
+- agent terminal queues the command in SQLite
+- `dialtone_mod` returns immediately with a `command_id`, queue state, and a control-plane process report
+- the long-lived `shell v1 serve` worker in `dialtone-view` prints and runs it
+- SQLite stores the command status, PID, exit code, runtime, and output
+
 Code layout:
 
 ```text
@@ -25,7 +34,7 @@ src/mods/shell/v1/
 # - one Ghostty window
 # - one tab
 # - left pane: codex-view
-# - right pane: dialtone-view
+# - right pane: dialtone-view running the SQLite shell worker
 ./dialtone_mod shell v1 start --run-tests=false
 
 # Run the full mod test sweep visibly in dialtone-view.
@@ -43,6 +52,15 @@ src/mods/shell/v1/
 # Read the right pane through SQLite-backed shell state.
 ./dialtone_mod shell v1 read --role command
 
+# Check worker status, queued work, and the latest routed command result.
+./dialtone_mod shell v1 status --full
+
+# Inspect one routed command later by its row id.
+./dialtone_mod shell v1 status --row-id 901 --full --sync=false
+
+# Plain mod commands are routed through SQLite into dialtone-view.
+./dialtone_mod mods v1 db graph --format outline
+
 # Run the shell mod's Go tests visibly in dialtone-view.
 ./dialtone_mod shell v1 test
 
@@ -53,6 +71,9 @@ src/mods/shell/v1/
 # Inspect shell bus state and recent events from SQLite.
 ./dialtone_mod shell v1 state --full
 ./dialtone_mod shell v1 events --limit 10
+
+# Run the full end-to-end system harness.
+./dialtone_mod test v1 start
 ```
 
 ## DIALTONE>
@@ -68,8 +89,13 @@ $ ./dialtone_mod shell v1 start --run-tests=false
 created fresh ghostty window ...
 started shell workflow: ghostty one-window/one-tab -> codex-view:0:0 (codex) + codex-view:0:1 (dialtone-view) -> codex gpt-5.4
 
+$ ./dialtone_mod mods v1 db graph --format outline
+route	queued
+command_id	71
+inspect	./dialtone_mod shell v1 status --row-id 71 --full --sync=false
+
 $ ./dialtone_mod shell v1 test-all
-ran command via shell bus [row_id=70]
+ran command via shell bus [row_id=72]
 
 $ ./dialtone_mod shell v1 read --pane codex-view:0:1 --full
 role	command

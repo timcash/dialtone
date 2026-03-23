@@ -352,7 +352,7 @@ func runShell(argv []string) error {
 
 	tmuxTarget := target.target()
 	command := fmt.Sprintf(
-		"cd %s && export DIALTONE_TMUX_PROXY_ACTIVE=1 && nix --extra-experimental-features %s develop %s --command zsh -l",
+		"cd %s && nix --extra-experimental-features %s develop %s --command zsh -l",
 		shellQuote(repoRoot),
 		shellQuote("nix-command flakes"),
 		shellQuote(".#"+strings.TrimSpace(*shellName)),

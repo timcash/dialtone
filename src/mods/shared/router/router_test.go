@@ -75,8 +75,11 @@ func TestQueueCommandViaShellCreatesTrackedShellBusRow(t *testing.T) {
 	if body.InnerCommand != "./dialtone_mod ssh v1 help" {
 		t.Fatalf("unexpected inner command: %+v", body)
 	}
-	if !strings.Contains(body.Command, "cd /Users/user/dialtone && ./dialtone_mod ssh v1 help") {
+	if body.Command != "./dialtone_mod ssh v1 help" {
 		t.Fatalf("unexpected visible command: %+v", body)
+	}
+	if len(body.Args) != 3 || body.Args[0] != "ssh" || body.Args[2] != "help" {
+		t.Fatalf("expected raw args to be stored in sqlite, got %+v", body.Args)
 	}
 }
 
@@ -110,7 +113,7 @@ func TestRunCommandViaShellUsesShellRunCLI(t *testing.T) {
 	if call.Entry != "./mods/shell/v1/cli" {
 		t.Fatalf("unexpected entry: %+v", call)
 	}
-	if len(call.Args) < 5 || call.Args[0] != "run" || call.Args[1] != "--wait-seconds" || call.Args[2] != "240" || call.Args[3] != "--expect" {
+	if len(call.Args) != 4 || call.Args[0] != "run" || call.Args[1] != "--wait-seconds" || call.Args[2] != "240" {
 		t.Fatalf("unexpected shell run args: %+v", call.Args)
 	}
 	if got := call.Args[len(call.Args)-1]; !strings.Contains(got, "./dialtone_mod ssh v1 help") {
@@ -120,14 +123,31 @@ func TestRunCommandViaShellUsesShellRunCLI(t *testing.T) {
 
 func TestBuildShellRunArgsWrapsDialtoneCommand(t *testing.T) {
 	args := BuildShellRunArgs("/Users/user/dialtone", []string{"ssh", "v1", "help"}, 240)
-	if len(args) < 5 {
+	if len(args) != 4 {
 		t.Fatalf("unexpected args: %+v", args)
 	}
-	if args[0] != "run" || args[1] != "--wait-seconds" || args[2] != "240" || args[3] != "--expect" {
+	if args[0] != "run" || args[1] != "--wait-seconds" || args[2] != "240" {
 		t.Fatalf("unexpected shell run args: %+v", args)
 	}
 	if got := args[len(args)-1]; !strings.Contains(got, "./dialtone_mod ssh v1 help") {
 		t.Fatalf("expected visible routed command, got %q", got)
+	}
+}
+
+func TestShellWorkerHealthyRequiresFreshHeartbeat(t *testing.T) {
+	db := openRouterTestDB(t)
+	if err := modstate.UpsertStateValue(db, sqlitestate.SystemScope, sqlitestate.ShellWorkerStatusKey, "running"); err != nil {
+		t.Fatalf("set worker status: %v", err)
+	}
+	if err := modstate.UpsertStateValue(db, sqlitestate.SystemScope, sqlitestate.ShellWorkerHeartbeatKey, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		t.Fatalf("set worker heartbeat: %v", err)
+	}
+	ok, err := ShellWorkerHealthy(db, 5*time.Second)
+	if err != nil {
+		t.Fatalf("ShellWorkerHealthy returned error: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected worker to be healthy")
 	}
 }
 
