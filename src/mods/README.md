@@ -17,7 +17,10 @@ Goal:
 
 - keep `shell v1` at the center
 - keep SQLite as the source of truth
+- keep only a tiny bootstrap/report stub outside Nix
 - run all visible tests in `dialtone-view`
+- let plain `./dialtone_mod ...` commands queue into SQLite and run in `dialtone-view`
+- expect routed commands to return immediately with a `command_id`
 - write the Go test first, then change code, then rerun the test
 
 ### End-to-End Test Flow
@@ -37,13 +40,20 @@ Goal:
 # Read state through the shell mod, not by manually inspecting tmux first.
 ./dialtone_mod shell v1 state --full
 
-# 4. Run one focused visible test for the mod you are changing.
+# 4. Plain dialtone_mod commands should stay plain.
+# No `ENV=... ./dialtone_mod ...` prefixes are needed.
+./dialtone_mod mods v1 db graph --format outline
+
+# 4b. Inspect a routed command later by row id.
+./dialtone_mod shell v1 status --row-id <command_id> --full --sync=false
+
+# 5. Run one focused visible test for the mod you are changing.
 # Always prefer recursive package tests so both the version-root smoke test
 # and the CLI tests run together.
 ./dialtone_mod shell v1 run --wait-seconds 120 \
   "clear && cd /Users/user/dialtone/src && go test ./mods/<mod-name>/<version>/..."
 
-# 5. After the focused test passes, run the broader visible suite.
+# 6. After the focused test passes, run the broader visible suite.
 ./dialtone_mod shell v1 test-all --wait-seconds 240
 ```
 
@@ -64,6 +74,8 @@ Goal:
 - Do not run ad hoc `go test` outside the Nix-backed shell workflow.
 - Prefer `./dialtone_mod shell v1 run ...` for focused work.
 - Prefer `./dialtone_mod shell v1 test-all` for the full visible sweep.
+- Do not prefix routed mod commands with custom environment variables.
+- Treat the `command_id` returned by routed commands as the durable handle.
 - Treat `ghostty v1`, `tmux v1`, and `codex v1` as backend mods behind `shell v1`.
 - Read state from SQLite through the shell/mods commands when possible.
 
@@ -82,11 +94,15 @@ Goal:
 
 # inspect SQLite-backed shell state
 ./dialtone_mod shell v1 state --full
+./dialtone_mod shell v1 status --row-id <command_id> --full --sync=false
 ./dialtone_mod shell v1 events --limit 20
 
 # inspect the DAG / test plan
 ./dialtone_mod mods v1 db graph --format outline
 ./dialtone_mod mods v1 db test-plan
+
+# full end-to-end control-plane check
+./dialtone_mod test v1 start
 ```
 
 ## Core Model
@@ -101,16 +117,190 @@ The preferred local workflow is:
 
 Roles:
 
+- `dialtone_mod`
+  Thin bootstrap/enqueue/report client. It bootstraps the local install, ensures `dialtone` is running, queues work in SQLite, and returns immediately with a `command_id` plus process/status data for the agent.
+- `dialtone`
+  Internal control-plane/process-manager process started by `dialtone_mod`. It owns the SQLite database, queue state, and worker supervision outside Nix.
 - `codex-view`
   Prompt and reasoning pane
 - `dialtone-view`
-  Visible command and test pane
+  Visible command/test pane with the long-lived SQLite shell worker. This is where routed plain `./dialtone_mod ...` commands actually run.
 - SQLite
-  Source of truth for targets, queue rows, snapshots, DAG, and test state
+  Source of truth for targets, queue rows, command status, outputs, snapshots, DAG, and test state
 - `shell v1`
   High-level orchestrator for the visible workflow
+- `test v1`
+  End-to-end acceptance harness for the whole client/daemon/worker/SQLite flow
 
 Treat `ghostty v1`, `tmux v1`, and `codex v1` as supporting mods behind `shell v1`.
+
+## Architecture Goal
+
+The architecture should be:
+
+- `dialtone_mod`
+  Tiny user-facing entrypoint. It should bootstrap the local install, ensure `dialtone` is running, queue routed work, print useful state immediately, and return fast.
+- `dialtone`
+  One long-lived control-plane process outside Nix. It should own the SQLite database, queue lifecycle, process supervision, health/heartbeat state, and fast status reporting.
+- `dialtone-view`
+  One long-lived worker pane inside the shared Nix shell. All routed plain `./dialtone_mod ...` commands should execute here, visibly.
+- `codex-view`
+  Prompt/reasoning pane. Routed mod commands should never actually execute here.
+- SQLite
+  Source of truth for all durable state: targets, queue rows, process state, PID, exit code, runtime, output, pane snapshots, protocol runs, and test results.
+
+Hard rules:
+
+- plain routed commands stay plain: `./dialtone_mod ...`
+- no `ENV=... ./dialtone_mod ...` prefixes
+- no routed mod command should execute in the caller terminal
+- `./dialtone_mod` should return quickly with `command_id`, state, and inspection hints
+- background state should live in SQLite, not in ad hoc shell environment
+
+Current implementation:
+
+- this architecture is mostly in place now
+- `dialtone_mod` is still a shell wrapper
+- the current `dialtone` daemon is implemented inside `dialtone_mod` as `__dialtone serve`
+- the worker is `shell v1 serve` in `dialtone-view`
+
+## Next Step
+
+The next step to get to the cleaner architecture is:
+
+- move `dialtone` out of the shell wrapper and into a dedicated Go mod, for example `src/mods/dialtone/v1`
+- keep the same user-facing command: `./dialtone_mod ...`
+- keep `dialtone` outside Nix
+- keep the worker in `dialtone-view` inside Nix
+- use the Go SQLite driver already used by `src/internal/modstate/modstate.go`
+- keep the same SQLite schema and fast status contract so existing agent flows do not change
+
+That next step should simplify the system by removing shell-daemon logic from `dialtone_mod` while preserving the current queue/worker model.
+
+## Test Commands
+
+Use these commands to test the system.
+
+Bootstrap and workflow:
+
+```sh
+# preflight for sqlite + shell packages
+./dialtone_mod shell v1 test-basic
+
+# ensure the visible workflow exists
+./dialtone_mod shell v1 start --run-tests=false
+
+# end-to-end acceptance test for the whole control plane
+./dialtone_mod test v1 start
+```
+
+Focused and broad visible tests:
+
+```sh
+# run one focused package visibly in dialtone-view
+./dialtone_mod shell v1 run --wait-seconds 120 \
+  "clear && cd /Users/user/dialtone/src && go test ./mods/<mod-name>/<version>/..."
+
+# run the shell module package tests visibly
+./dialtone_mod shell v1 test
+
+# run the full visible mod sweep
+./dialtone_mod shell v1 test-all --wait-seconds 240
+```
+
+Inspect state after a run:
+
+```sh
+# cached overall system view
+./dialtone_mod shell v1 state --full
+
+# inspect one routed command by durable row id
+./dialtone_mod shell v1 status --row-id <command_id> --full --sync=false
+
+# read the prompt pane through SQLite snapshots
+./dialtone_mod shell v1 read --role prompt --full
+
+# read the command pane through SQLite snapshots
+./dialtone_mod shell v1 read --role command --full
+
+# recent shell bus rows
+./dialtone_mod shell v1 events --limit 20
+
+# protocol runs recorded by the end-to-end harness
+./dialtone_mod mods v1 db protocol-runs --limit 10
+./dialtone_mod mods v1 db protocol-events --run <protocol_run_id>
+```
+
+DB / graph checks:
+
+```sh
+# mod graph from SQLite
+./dialtone_mod mods v1 db graph --format outline
+
+# current SQLite-backed state values
+./dialtone_mod mods v1 db state
+
+# derived test plan
+./dialtone_mod mods v1 db test-plan
+```
+
+## Important Files
+
+These files matter most for the control-plane architecture:
+
+- [dialtone_mod](/Users/user/dialtone/dialtone_mod)
+  Thin entrypoint, current internal `dialtone` daemon implementation, fast SQLite status/report path
+- [src/mods.go](/Users/user/dialtone/src/mods.go)
+  Main Go mod dispatcher used inside Nix
+- [src/internal/modstate/modstate.go](/Users/user/dialtone/src/internal/modstate/modstate.go)
+  SQLite schema, queue helpers, protocol run/event persistence
+- [src/mods/shared/sqlitestate/sqlitestate.go](/Users/user/dialtone/src/mods/shared/sqlitestate/sqlitestate.go)
+  Shared SQLite path and state-key definitions
+- [src/mods/shared/dispatch/dispatch.go](/Users/user/dialtone/src/mods/shared/dispatch/dispatch.go)
+  Routing decisions and shell intent encoding
+- [src/mods/shared/router/router.go](/Users/user/dialtone/src/mods/shared/router/router.go)
+  Queueing helpers and worker-health helpers
+- [src/mods/shell/v1/cli/main.go](/Users/user/dialtone/src/mods/shell/v1/cli/main.go)
+  Workflow bootstrap, `dialtone-view` worker, shell status/read/events commands
+- [src/mods/test/v1/cli/main.go](/Users/user/dialtone/src/mods/test/v1/cli/main.go)
+  End-to-end acceptance harness for the current architecture
+- [src/mods/shell/v1/README.md](/Users/user/dialtone/src/mods/shell/v1/README.md)
+  Operator guide for the shell workflow
+- [src/mods/test/v1/README.md](/Users/user/dialtone/src/mods/test/v1/README.md)
+  Operator guide for the end-to-end harness
+
+## Current Handoff Status
+
+Another LLM should assume this current state:
+
+- the target architecture is mostly working now
+- `dialtone` is still implemented inside [dialtone_mod](/Users/user/dialtone/dialtone_mod) as `__dialtone serve`
+- the visible worker is still [src/mods/shell/v1/cli/main.go](/Users/user/dialtone/src/mods/shell/v1/cli/main.go) running `shell v1 serve` in `dialtone-view`
+- fast `status` and `state` reads still come from the wrapper path in [dialtone_mod](/Users/user/dialtone/dialtone_mod)
+- the next cleanup step is still to move `dialtone` into a dedicated Go mod without changing the user-facing `./dialtone_mod ...` flow
+
+Before changing the control plane, rerun these first:
+
+```sh
+./dialtone_mod shell v1 test-basic
+./dialtone_mod test v1 start
+```
+
+Use the end-to-end harness result as the acceptance check:
+
+- it should submit a prompt to `codex-view`
+- it should queue a plain routed `./dialtone_mod mods v1 db graph --format outline`
+- the command should run in `dialtone-view`
+- SQLite should record protocol events, pane snapshots, `pid`, `exit_code`, and `runtime_ms`
+- the final stdout should end with `test_result	passed`
+
+Latest validated inspection pattern:
+
+```sh
+./dialtone_mod test v1 start
+./dialtone_mod shell v1 status --row-id <command_row_id> --full --sync=false
+./dialtone_mod mods v1 db protocol-events --run <protocol_run_id>
+```
 
 ## Standard Layout
 
@@ -144,6 +334,7 @@ The shared state database is:
 
 SQLite stores:
 
+- bootstrap status and log path
 - the mod DAG
 - test topology and test steps
 - tmux prompt and command targets

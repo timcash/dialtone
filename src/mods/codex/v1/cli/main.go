@@ -71,16 +71,6 @@ func runStart(argv []string) error {
 		fmt.Printf("started codex in tmux pane %s\n", target)
 		return nil
 	}
-	if isProxyActive() {
-		target, err := currentPaneTarget()
-		if err != nil {
-			return err
-		}
-		if err := clearPaneHistory(target); err != nil {
-			return err
-		}
-		return runInCurrentPane(startCmd)
-	}
 	if err := ensureSession(*session, repoRoot); err != nil {
 		return err
 	}
@@ -101,19 +91,6 @@ func runStatus(argv []string) error {
 	if err := opts.Parse(argv); err != nil {
 		return err
 	}
-	if isProxyActive() {
-		target, err := currentPaneTarget()
-		if err != nil {
-			return err
-		}
-		out, err := tmuxOutput("display-message", "-p", "-t", target, "#{session_name}\t#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_current_path}")
-		if err != nil {
-			return err
-		}
-		fmt.Println(strings.TrimSpace(out))
-		return nil
-	}
-
 	target, err := activePaneTarget(*session)
 	if err != nil {
 		return err
@@ -173,14 +150,6 @@ func activePaneTarget(session string) (string, error) {
 	return target, nil
 }
 
-func currentPaneTarget() (string, error) {
-	pane := strings.TrimSpace(os.Getenv("TMUX_PANE"))
-	if pane == "" {
-		return "", errors.New("TMUX_PANE is not set")
-	}
-	return pane, nil
-}
-
 func buildStartCommand(repoRoot, shellName, reasoning, model string) string {
 	codexCmd := buildCodexExecCommand(strings.TrimSpace(model))
 	inner := fmt.Sprintf(
@@ -210,10 +179,6 @@ func buildCodexExecCommand(model string) string {
 		args,
 		args,
 	)
-}
-
-func isProxyActive() bool {
-	return strings.TrimSpace(os.Getenv("DIALTONE_TMUX_PROXY_ACTIVE")) == "1"
 }
 
 func normalizePaneTarget(value string) string {

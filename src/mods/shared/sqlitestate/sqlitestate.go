@@ -15,6 +15,18 @@ const ProcessScope = "process"
 const SystemScope = "system"
 const TmuxTargetKey = "tmux.target"
 const TmuxPromptTargetKey = "tmux.prompt_target"
+const ShellWorkerStatusKey = "shell.worker.status"
+const ShellWorkerPaneKey = "shell.worker.pane"
+const ShellWorkerHeartbeatKey = "shell.worker.heartbeat_at"
+const ShellWorkerCurrentRowIDKey = "shell.worker.current_row_id"
+const ShellWorkerCurrentCommandKey = "shell.worker.current_command"
+const ShellWorkerLastRowIDKey = "shell.worker.last_row_id"
+const ShellWorkerLastStatusKey = "shell.worker.last_status"
+const ShellWorkerLastSummaryKey = "shell.worker.last_summary"
+const ShellWorkerLastExitCodeKey = "shell.worker.last_exit_code"
+const ShellEnsurePIDKey = "shell.ensure.pid"
+const ShellEnsureLogPathKey = "shell.ensure.log_path"
+const ShellEnsureStartedAtKey = "shell.ensure.started_at"
 
 func ResolveStateDir(repoRoot string) string {
 	if value := strings.TrimSpace(os.Getenv("DIALTONE_STATE_DIR")); value != "" {
