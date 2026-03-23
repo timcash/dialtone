@@ -104,3 +104,5 @@ env/ssh_config
 env/known_hosts
 test_env/
 test_onboarding_clean/
+.zig-cache/
+zig-out/
