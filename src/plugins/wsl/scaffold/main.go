@@ -44,7 +44,7 @@ func main() {
 	} else {
 		err = runGeneric(version, command, repoRoot, args)
 	}
-	
+
 	if err != nil {
 		logs.Error("wsl error: %v", err)
 		os.Exit(1)

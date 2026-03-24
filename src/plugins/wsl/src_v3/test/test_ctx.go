@@ -16,12 +16,12 @@ import (
 )
 
 type testCtx struct {
-	repoRoot            string
-	sharedServer        *exec.Cmd
-	stepCtx             *test_v2.StepContext
-	baseURL             string
-	webPort             int
-	browserInitialized  bool
+	repoRoot           string
+	sharedServer       *exec.Cmd
+	stepCtx            *test_v2.StepContext
+	baseURL            string
+	webPort            int
+	browserInitialized bool
 }
 
 func newTestCtx() *testCtx {
@@ -76,7 +76,7 @@ func (t *testCtx) ensureSharedBrowser() (*test_v2.BrowserSession, error) {
 	if t.stepCtx == nil {
 		return nil, fmt.Errorf("step context not bound")
 	}
-	
+
 	urlArg := ""
 	if !t.browserInitialized {
 		urlArg = t.baseURL
