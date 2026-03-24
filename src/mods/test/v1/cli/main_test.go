@@ -40,6 +40,16 @@ func TestParseStartArgsRejectsNonPositiveWaitSeconds(t *testing.T) {
 	}
 }
 
+func TestParseFormatArgsKeepsBlankDirEmpty(t *testing.T) {
+	got, err := parseFormatArgs(nil)
+	if err != nil {
+		t.Fatalf("parseFormatArgs returned error: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("parseFormatArgs(nil) = %q, want empty string so format defaults to src/mods/test/v1", got)
+	}
+}
+
 func TestBuildPromptTextUsesTokenByDefault(t *testing.T) {
 	scenario := buildCodexAgentScenario("TOKEN_123")
 	got := buildPromptText("TOKEN_123", "", scenario)
@@ -183,7 +193,22 @@ func TestValidateE2EOutputsRequiresHealthyState(t *testing.T) {
 		"prompt token",
 		"codex-view:0:0",
 		"codex-view:0:1",
-		"role\tprompt\ntext\nDialtone test v1 start prompt token\n./dialtone_mod mods v1 probe --mode success --label CODEX_AGENT_prompt_token\n./dialtone_mod mods v1 probe --mode fail --label TEST_FAILURE\n",
+		strings.Join([]string{
+			"role\tprompt",
+			"text",
+			"Dialtone test v1 start",
+			"prompt token",
+			"./dialtone_mod mods v1 probe --mode success --label CODEX_AGENT_prompt_token",
+			"1. ./dialtone_mod mods v1 db graph --format outline",
+			"2. ./dialtone_mod mods v1 probe --mode sleep --sleep-ms 1500 --label TEST_LONG_RUNNING",
+			"3. ./dialtone_mod mods v1 probe",
+			"--mode fail",
+			"--label TEST_FAILURE",
+			"4. ./dialtone_mod mods v1 probe --mode invalid --label TEST_INVALID_MODE",
+			"5. ./dialtone_mod mods v1 probe --mode background --sleep-ms 4000 --label TEST_BACKGROUND",
+			"--background-file <marker-",
+			"file>",
+		}, "\n"),
 		"role\tcommand\ntext\nprobe_label\tTEST_BACKGROUND\nprobe_result\tbackground-started\n",
 		"prompt_target\tcodex-view:0:0\ncommand_target\tcodex-view:0:1\ndialtone_status\trunning\nworker_status\trunning\nworker_pane\tcodex-view:0:1\n",
 		results,
@@ -291,7 +316,18 @@ func TestValidateE2EOutputsRejectsPromptLeakIntoCommandPane(t *testing.T) {
 		"prompt token",
 		"codex-view:0:0",
 		"codex-view:0:1",
-		"role\tprompt\ntext\nDialtone test v1 start prompt token\n./dialtone_mod mods v1 probe --mode success --label CODEX_AGENT_prompt_token\n./dialtone_mod mods v1 probe --mode fail --label TEST_FAILURE\n",
+		strings.Join([]string{
+			"role\tprompt",
+			"text",
+			"Dialtone test v1 start",
+			"prompt token",
+			"./dialtone_mod mods v1 probe --mode success --label CODEX_AGENT_prompt_token",
+			"1. ./dialtone_mod mods v1 db graph --format outline",
+			"2. ./dialtone_mod mods v1 probe --mode sleep --sleep-ms 1500 --label TEST_LONG_RUNNING",
+			"3. ./dialtone_mod mods v1 probe --mode fail --label TEST_FAILURE",
+			"4. ./dialtone_mod mods v1 probe --mode invalid --label TEST_INVALID_MODE",
+			"5. ./dialtone_mod mods v1 probe --mode background --sleep-ms 4000 --label TEST_BACKGROUND --background-file <marker-file>",
+		}, "\n"),
 		"role\tcommand\ntext\nDialtone test v1 start prompt token\nprobe_label\tTEST_BACKGROUND\n",
 		"prompt_target\tcodex-view:0:0\ncommand_target\tcodex-view:0:1\ndialtone_status\trunning\nworker_status\trunning\nworker_pane\tcodex-view:0:1\n",
 		results,

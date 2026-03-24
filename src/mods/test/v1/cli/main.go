@@ -25,7 +25,10 @@ const (
 	protocolRunName    = "test-v1-start"
 )
 
-var rowIDPattern = regexp.MustCompile(`row_id=(\d+)`)
+var (
+	rowIDPattern             = regexp.MustCompile(`row_id=(\d+)`)
+	wrappedTerminalJoinRegex = regexp.MustCompile(`([[:alnum:]<>])-\s+([[:alnum:]<>])`)
+)
 
 type startOptions struct {
 	session          string
@@ -91,6 +94,22 @@ func main() {
 	switch command {
 	case "help", "-h", "--help":
 		printUsage()
+	case "install":
+		if err := runInstall(args); err != nil {
+			exitIfErr(err, "test install")
+		}
+	case "build":
+		if err := runBuild(args); err != nil {
+			exitIfErr(err, "test build")
+		}
+	case "format":
+		if err := runFormat(args); err != nil {
+			exitIfErr(err, "test format")
+		}
+	case "test":
+		if err := runTest(args); err != nil {
+			exitIfErr(err, "test")
+		}
 	case "start":
 		if err := runStart(args); err != nil {
 			exitIfErr(err, "test start")
@@ -984,12 +1003,12 @@ func validateE2EOutputs(promptToken, promptTarget, commandTarget, promptReadOutp
 	if strings.TrimSpace(workerPane) != strings.TrimSpace(commandTarget) {
 		return fmt.Errorf("worker pane = %s, want %s", workerPane, commandTarget)
 	}
-	if !strings.Contains(promptReadOutput, promptTextMarker) {
+	if !containsNormalizedText(promptReadOutput, promptTextMarker) {
 		return errors.New("prompt pane read did not contain the submitted test token")
 	}
 	if codexAgent, ok := scenarioResultByName(results, "codex_agent"); ok {
 		codexCommand := dispatch.BuildDialtoneCommand(codexAgent.Scenario.Args)
-		if !strings.Contains(normalizeWhitespace(promptReadOutput), normalizeWhitespace(codexCommand)) {
+		if !containsNormalizedText(promptReadOutput, codexCommand) {
 			return errors.New("prompt pane read did not contain the exact Codex-routed command")
 		}
 		if strings.TrimSpace(codexAgent.Record.Status) != "done" || codexAgent.Command.exitCode != 0 {
@@ -999,10 +1018,10 @@ func validateE2EOutputs(promptToken, promptTarget, commandTarget, promptReadOutp
 			return errors.New("codex-agent scenario did not carry the unique prompted label into dialtone-view output")
 		}
 	}
-	if !strings.Contains(promptReadOutput, "./dialtone_mod mods v1 probe --mode fail --label TEST_FAILURE") {
-		return errors.New("prompt pane read did not contain the routed example commands")
+	if missing := missingPromptExampleCommands(promptReadOutput); len(missing) > 0 {
+		return fmt.Errorf("prompt pane read did not contain the routed example commands: %s", strings.Join(missing, " | "))
 	}
-	if strings.Contains(commandReadOutput, promptTextMarker) {
+	if containsNormalizedText(commandReadOutput, promptTextMarker) {
 		return errors.New("command pane read unexpectedly contained the submitted prompt token")
 	}
 	for _, result := range results {
@@ -1066,8 +1085,8 @@ func renderArchitectureSummary(promptToken, promptTarget, commandTarget string, 
 	fmt.Fprintf(&out, "command_target\t%s\n", strings.TrimSpace(commandTarget))
 	fmt.Fprintf(&out, "worker_pane\t%s\n", strings.TrimSpace(workerPane))
 	fmt.Fprintf(&out, "worker_matches_command_target\t%t\n", strings.TrimSpace(workerPane) == strings.TrimSpace(commandTarget))
-	fmt.Fprintf(&out, "prompt_visible_in_codex_view\t%t\n", strings.Contains(promptReadOutput, promptTextMarker))
-	fmt.Fprintf(&out, "prompt_not_visible_in_dialtone_view\t%t\n", !strings.Contains(commandReadOutput, promptTextMarker))
+	fmt.Fprintf(&out, "prompt_visible_in_codex_view\t%t\n", containsNormalizedText(promptReadOutput, promptTextMarker))
+	fmt.Fprintf(&out, "prompt_not_visible_in_dialtone_view\t%t\n", !containsNormalizedText(commandReadOutput, promptTextMarker))
 	fmt.Fprintf(&out, "codex_initiated_command\t%t\n", hasCodexAgent && codexAgent.RowID > promptRowID)
 	if hasCodexAgent {
 		fmt.Fprintf(&out, "codex_command_row_id\t%d\n", codexAgent.RowID)
@@ -1129,7 +1148,24 @@ func renderScenarioResult(result routedScenarioResult) string {
 }
 
 func normalizeWhitespace(value string) string {
-	return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	cleaned := strings.TrimSpace(value)
+	cleaned = wrappedTerminalJoinRegex.ReplaceAllString(cleaned, "$1-$2")
+	return strings.Join(strings.Fields(cleaned), " ")
+}
+
+func containsNormalizedText(haystack, needle string) bool {
+	return strings.Contains(normalizeWhitespace(haystack), normalizeWhitespace(needle))
+}
+
+func missingPromptExampleCommands(promptReadOutput string) []string {
+	missing := []string{}
+	for _, command := range promptExampleCommands() {
+		if containsNormalizedText(promptReadOutput, command) {
+			continue
+		}
+		missing = append(missing, command)
+	}
+	return missing
 }
 
 func loadSelectedSystemState(db *sql.DB) (string, error) {
@@ -1201,9 +1237,17 @@ func sanitizeFileComponent(value string) string {
 }
 
 func printUsage() {
-	fmt.Println("Usage: ./dialtone_mod test v1 <start> [args]")
+	fmt.Println("Usage: ./dialtone_mod test v1 <command> [args]")
 	fmt.Println("")
 	fmt.Println("Commands:")
+	fmt.Println("  install")
+	fmt.Println("       Verify Go, tmux, and codex or npx are available in the default nix shell")
+	fmt.Println("  build")
+	fmt.Println("       Build the test v1 CLI wrapper to <repo-root>/bin/mods/test/v1/test")
+	fmt.Println("  format [--dir DIR]")
+	fmt.Println("       Run gofmt on test v1 Go files")
+	fmt.Println("  test")
+	fmt.Println("       Run go test for test v1")
 	fmt.Println("  start")
 	fmt.Println("       Run the end-to-end dialtone system test: ensure the workflow, refresh codex-view, submit a prompt, wait for Codex to queue one plain routed ./dialtone_mod command, then queue deterministic routed commands into dialtone-view to validate success, long-running, failure, recovery, and background behavior")
 }

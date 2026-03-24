@@ -65,6 +65,14 @@ Expected behavior:
   - the cached `shell v1 status`
   - the latest prompt and command pane text
 
+After a run, the intended inspection path is:
+
+```sh
+./dialtone_mod dialtone v1 command --row-id <command_row_id> --full
+./dialtone_mod dialtone v1 log --kind command --row-id <command_row_id>
+./dialtone_mod dialtone v1 protocol-run --run <protocol_run_id> --full
+```
+
 ## Next Steps
 
 The next acceptance upgrade for `test v1 start` is to expand the agent-driven part of the proof:

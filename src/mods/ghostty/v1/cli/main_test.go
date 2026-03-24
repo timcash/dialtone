@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -92,6 +93,25 @@ func TestBuildQuitScriptForceKillsGhostty(t *testing.T) {
 	}
 	if strings.Contains(script, `tell application "Ghostty"`) {
 		t.Fatalf("quit script should bypass app-level quit prompts: %q", script)
+	}
+}
+
+func TestGhosttyCLIUsageIncludesContractAndWorkflowCommands(t *testing.T) {
+	output := captureGhosttyStdout(t, printUsage)
+	for _, want := range []string{"install", "build", "format", "test", "fresh-window", "split", "write"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("usage missing %q: %s", want, output)
+		}
+	}
+}
+
+func TestGhosttyParseFormatArgsKeepsBlankDirEmpty(t *testing.T) {
+	got, err := parseFormatArgs(nil)
+	if err != nil {
+		t.Fatalf("parseFormatArgs returned error: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("parseFormatArgs(nil) = %q, want empty string so format defaults to src/mods/ghostty/v1", got)
 	}
 }
 
@@ -260,4 +280,33 @@ func TestIsValidSplitDirection(t *testing.T) {
 	if isValidSplitDirection("sideways") {
 		t.Fatalf("unexpected valid direction")
 	}
+}
+
+func captureGhosttyStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+	done := make(chan string, 1)
+	go func() {
+		var buf [4096]byte
+		var out strings.Builder
+		for {
+			n, readErr := r.Read(buf[:])
+			if n > 0 {
+				out.Write(buf[:n])
+			}
+			if readErr != nil {
+				done <- out.String()
+				return
+			}
+		}
+	}()
+	fn()
+	_ = w.Close()
+	return <-done
 }

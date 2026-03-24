@@ -43,6 +43,37 @@ type statusOptions struct {
 	full  bool
 }
 
+type commandsOptions struct {
+	limit   int
+	scope   string
+	subject string
+	status  string
+	session string
+	pane    string
+}
+
+type commandOptions struct {
+	rowID int64
+	full  bool
+}
+
+type logOptions struct {
+	kind     string
+	rowID    int64
+	lines    int
+	pathOnly bool
+}
+
+type protocolRunOptions struct {
+	runID int64
+	full  bool
+}
+
+type testRunOptions struct {
+	runID int64
+	full  bool
+}
+
 var (
 	nowUTC              = func() time.Time { return time.Now().UTC() }
 	processAliveFn      = processAlive
@@ -69,14 +100,32 @@ func run(args []string) error {
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
+	case "paths":
+		return runPaths(args[1:])
+	case "processes":
+		return runProcesses(args[1:])
 	case "serve":
 		return runServe(args[1:])
 	case "ensure":
 		return runEnsure(args[1:])
 	case "status", "state", "bootstrap":
 		return runStatus(args[1:])
+	case "commands":
+		return runCommands(args[1:])
+	case "command":
+		return runCommand(args[1:])
+	case "log", "logs":
+		return runLog(args[1:])
 	case "queue":
 		return runQueue(args[1:])
+	case "protocol-runs":
+		return runProtocolRuns(args[1:])
+	case "protocol-run":
+		return runProtocolRun(args[1:])
+	case "test-runs":
+		return runTestRuns(args[1:])
+	case "test-run":
+		return runTestRun(args[1:])
 	default:
 		return fmt.Errorf("unknown dialtone command: %s", strings.TrimSpace(args[0]))
 	}
@@ -101,6 +150,57 @@ func runEnsure(argv []string) error {
 		return err
 	}
 	fmt.Printf("%d\t%s\t%s\n", result.PID, strings.TrimSpace(result.LogPath), strings.TrimSpace(result.State))
+	return nil
+}
+
+func runPaths(argv []string) error {
+	if len(argv) != 0 {
+		return errors.New("paths does not accept positional arguments")
+	}
+	repoRoot, err := locateRepoRoot()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("repo_root\t%s\n", strings.TrimSpace(repoRoot))
+	fmt.Printf("state_dir\t%s\n", sqlitestate.ResolveStateDir(repoRoot))
+	fmt.Printf("state_db\t%s\n", sqlitestate.ResolveStateDBPath(repoRoot))
+	fmt.Printf("logs_dir\t%s\n", sqlitestate.ResolveLogsDir(repoRoot))
+	fmt.Printf("command_logs_dir\t%s\n", sqlitestate.ResolveCommandLogsDir(repoRoot))
+	return nil
+}
+
+func runProcesses(argv []string) error {
+	if len(argv) != 0 {
+		return errors.New("processes does not accept positional arguments")
+	}
+	processes, err := loadProcessReportFn()
+	if err != nil {
+		return err
+	}
+	total, totalBackground, dialtoneModCount, dialtoneModBackground, dialtoneCount, workerCount, ensureCount := summarizeProcessRecords(processes)
+	fmt.Printf("dialtone_processes_running\t%d\n", total)
+	fmt.Printf("dialtone_processes_background\t%d\n", totalBackground)
+	fmt.Printf("dialtone_mod_running\t%d\n", dialtoneModCount)
+	fmt.Printf("dialtone_mod_background\t%d\n", dialtoneModBackground)
+	fmt.Printf("dialtone_running\t%d\n", dialtoneCount)
+	fmt.Printf("worker_running\t%d\n", workerCount)
+	fmt.Printf("ensure_running\t%d\n", ensureCount)
+	fmt.Println("pid\tppid\tstat\ttty\trole\tbackground\tcommand")
+	for _, record := range processes {
+		background := "no"
+		if record.Background {
+			background = "yes"
+		}
+		fmt.Printf("%d\t%d\t%s\t%s\t%s\t%s\t%s\n",
+			record.PID,
+			record.PPID,
+			record.Stat,
+			record.TTY,
+			record.Role,
+			background,
+			record.Command,
+		)
+	}
 	return nil
 }
 
@@ -168,10 +268,8 @@ func runServe(argv []string) error {
 		if _, err := ensureWorkerAsync(repoRoot, db); err != nil {
 			fmt.Fprintf(os.Stderr, "DIALTONE> ensure-worker warning: %v\n", err)
 		}
-		if healthy, err := router.ShellWorkerHealthy(db, 5*time.Second); err == nil && healthy {
-			_ = modstate.DeleteStateValue(db, sqlitestate.SystemScope, sqlitestate.ShellEnsurePIDKey)
-			_ = modstate.DeleteStateValue(db, sqlitestate.SystemScope, sqlitestate.ShellEnsureLogPathKey)
-			_ = modstate.DeleteStateValue(db, sqlitestate.SystemScope, sqlitestate.ShellEnsureStartedAtKey)
+		if _, err := clearEnsureStateIfShellReady(db, 5*time.Second); err != nil {
+			fmt.Fprintf(os.Stderr, "DIALTONE> ensure-state cleanup warning: %v\n", err)
 		}
 
 		select {
@@ -255,6 +353,10 @@ func runStatus(argv []string) error {
 
 	var out bytes.Buffer
 	fmt.Fprintf(&out, "state_source\tsqlite_cached\n")
+	fmt.Fprintf(&out, "state_dir\t%s\n", sqlitestate.ResolveStateDir(repoRoot))
+	fmt.Fprintf(&out, "state_db\t%s\n", sqlitestate.ResolveStateDBPath(repoRoot))
+	fmt.Fprintf(&out, "logs_dir\t%s\n", sqlitestate.ResolveLogsDir(repoRoot))
+	fmt.Fprintf(&out, "command_logs_dir\t%s\n", sqlitestate.ResolveCommandLogsDir(repoRoot))
 	fmt.Fprintf(&out, "prompt_target\t%s\n", printableTarget(promptTarget))
 	fmt.Fprintf(&out, "command_target\t%s\n", printableTarget(commandTarget))
 	fmt.Fprintf(&out, "queued\t%d\n", queuedCount)
@@ -306,6 +408,508 @@ func runStatus(argv []string) error {
 		fmt.Println()
 	}
 	return nil
+}
+
+func runCommands(argv []string) error {
+	opts, err := parseCommandsArgs(argv)
+	if err != nil {
+		return err
+	}
+	repoRoot, err := locateRepoRoot()
+	if err != nil {
+		return err
+	}
+	db, err := openStateDB(repoRoot)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	loadLimit := opts.limit
+	if loadLimit < 100 {
+		loadLimit = 100
+	}
+	scope := strings.TrimSpace(opts.scope)
+	if scope == "all" {
+		scope = ""
+	}
+	rows, err := modstate.LoadShellBus(db, scope, loadLimit)
+	if err != nil {
+		return err
+	}
+	filtered := make([]modstate.ShellBusRecord, 0, len(rows))
+	for _, row := range rows {
+		if !matchesCommandFilters(row, opts) {
+			continue
+		}
+		filtered = append(filtered, row)
+		if len(filtered) >= opts.limit {
+			break
+		}
+	}
+	fmt.Printf("state_db\t%s\n", sqlitestate.ResolveStateDBPath(repoRoot))
+	fmt.Printf("rows\t%d\n", len(filtered))
+	fmt.Println("id\tscope\tsubject\taction\tstatus\tactor\tsession\tpane\tref_id\texit_code\truntime_ms\tlog_path\tsummary\tcommand\tupdated_at")
+	for _, row := range filtered {
+		body, _ := decodeIntentBody(row)
+		exitCode := "pending"
+		if row.Status == "done" || row.Status == "failed" || body.ExitCode != 0 {
+			exitCode = strconv.Itoa(body.ExitCode)
+		}
+		runtime := "pending"
+		if runtimeMS, ok := commandRuntimeMillis(row, body); ok {
+			runtime = strconv.FormatInt(runtimeMS, 10)
+		}
+		commandText := strings.TrimSpace(body.DisplayCommand)
+		if commandText == "" {
+			commandText = strings.TrimSpace(body.Command)
+		}
+		logPath := strings.TrimSpace(body.LogPath)
+		if logPath == "" && row.Subject == "command" && row.ID > 0 {
+			logPath = sqlitestate.ResolveCommandLogPath(repoRoot, row.ID)
+		}
+		fmt.Printf("%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			row.ID,
+			row.Scope,
+			row.Subject,
+			row.Action,
+			row.Status,
+			row.Actor,
+			printableTarget(row.Session),
+			printableTarget(row.Pane),
+			row.RefID,
+			exitCode,
+			runtime,
+			logPath,
+			strings.TrimSpace(body.Summary),
+			commandText,
+			row.UpdatedAt,
+		)
+	}
+	return nil
+}
+
+func runCommand(argv []string) error {
+	opts, err := parseCommandArgs(argv)
+	if err != nil {
+		return err
+	}
+	repoRoot, err := locateRepoRoot()
+	if err != nil {
+		return err
+	}
+	db, err := openStateDB(repoRoot)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	var row modstate.ShellBusRecord
+	var body dispatch.ShellCommandIntent
+	found := false
+	if opts.rowID > 0 {
+		record, ok, err := modstate.LoadShellBusRecord(db, opts.rowID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("shell bus row %d not found", opts.rowID)
+		}
+		row = record
+		body, _ = decodeIntentBody(record)
+		found = true
+	} else {
+		rows, err := modstate.LoadShellBus(db, "desired", 100)
+		if err != nil {
+			return err
+		}
+		row, body, found = latestDesiredCommandRecord(rows)
+	}
+	if !found {
+		return errors.New("no command rows found")
+	}
+
+	var out bytes.Buffer
+	fmt.Fprintf(&out, "state_db\t%s\n", sqlitestate.ResolveStateDBPath(repoRoot))
+	fmt.Fprintf(&out, "command_scope\t%s\n", row.Scope)
+	fmt.Fprintf(&out, "command_subject\t%s\n", row.Subject)
+	fmt.Fprintf(&out, "command_action\t%s\n", row.Action)
+	fmt.Fprintf(&out, "command_actor\t%s\n", row.Actor)
+	fmt.Fprintf(&out, "command_session\t%s\n", printableTarget(row.Session))
+	fmt.Fprintf(&out, "command_pane\t%s\n", printableTarget(row.Pane))
+	fmt.Fprintf(&out, "command_ref_id\t%d\n", row.RefID)
+	writeCommandStatus(&out, row, body, opts.full)
+	fmt.Print(out.String())
+	return nil
+}
+
+func runLog(argv []string) error {
+	opts, err := parseLogArgs(argv)
+	if err != nil {
+		return err
+	}
+	repoRoot, err := locateRepoRoot()
+	if err != nil {
+		return err
+	}
+	db, err := openStateDB(repoRoot)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	kind := strings.TrimSpace(opts.kind)
+	if kind == "" {
+		kind = "daemon"
+	}
+	logPath, err := resolveDialtoneLogPath(db, repoRoot, kind, opts.rowID)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("kind\t%s\n", kind)
+	fmt.Printf("path\t%s\n", logPath)
+	if opts.pathOnly {
+		return nil
+	}
+	text, err := tailFileLines(logPath, opts.lines)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("lines\t%d\n", opts.lines)
+	fmt.Printf("text\n%s\n", text)
+	return nil
+}
+
+func runProtocolRuns(argv []string) error {
+	limit, err := parseLimitOnlyArgs("protocol-runs", argv)
+	if err != nil {
+		return err
+	}
+	repoRoot, err := locateRepoRoot()
+	if err != nil {
+		return err
+	}
+	db, err := openStateDB(repoRoot)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	rows, err := modstate.LoadProtocolRuns(db, limit)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("state_db\t%s\n", sqlitestate.ResolveStateDBPath(repoRoot))
+	fmt.Printf("rows\t%d\n", len(rows))
+	fmt.Println("id\tname\tstatus\tprompt_target\tcommand_target\tstarted_at\tfinished_at\tresult_text\terror_text")
+	for _, row := range rows {
+		fmt.Printf("%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			row.ID,
+			row.Name,
+			row.Status,
+			printableTarget(row.PromptTarget),
+			printableTarget(row.CommandTarget),
+			row.StartedAt,
+			row.FinishedAt,
+			row.ResultText,
+			row.ErrorText,
+		)
+	}
+	return nil
+}
+
+func runProtocolRun(argv []string) error {
+	opts, err := parseProtocolRunArgs(argv)
+	if err != nil {
+		return err
+	}
+	repoRoot, err := locateRepoRoot()
+	if err != nil {
+		return err
+	}
+	db, err := openStateDB(repoRoot)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	run, found, err := loadProtocolRunByID(db, opts.runID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("protocol run %d not found", opts.runID)
+	}
+	events, err := modstate.LoadProtocolEvents(db, opts.runID)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("state_db\t%s\n", sqlitestate.ResolveStateDBPath(repoRoot))
+	fmt.Printf("run_id\t%d\n", run.ID)
+	fmt.Printf("name\t%s\n", run.Name)
+	fmt.Printf("status\t%s\n", run.Status)
+	fmt.Printf("prompt_target\t%s\n", printableTarget(run.PromptTarget))
+	fmt.Printf("command_target\t%s\n", printableTarget(run.CommandTarget))
+	fmt.Printf("started_at\t%s\n", run.StartedAt)
+	fmt.Printf("finished_at\t%s\n", run.FinishedAt)
+	if strings.TrimSpace(run.ResultText) != "" {
+		fmt.Printf("result_text\t%s\n", run.ResultText)
+	}
+	if strings.TrimSpace(run.ErrorText) != "" {
+		fmt.Printf("error_text\t%s\n", run.ErrorText)
+	}
+	if opts.full && strings.TrimSpace(run.PromptText) != "" {
+		fmt.Printf("prompt_text\n%s\n", strings.TrimSpace(run.PromptText))
+	}
+	fmt.Printf("events\t%d\n", len(events))
+	fmt.Println("event_index\tevent_type\tqueue_name\tqueue_row_id\tpane_target\tcommand_text\tmessage_text\tcreated_at")
+	for _, event := range events {
+		fmt.Printf("%d\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n",
+			event.EventIndex,
+			event.EventType,
+			event.QueueName,
+			event.QueueRowID,
+			printableTarget(event.PaneTarget),
+			event.CommandText,
+			event.MessageText,
+			event.CreatedAt,
+		)
+	}
+	return nil
+}
+
+func runTestRuns(argv []string) error {
+	limit, err := parseLimitOnlyArgs("test-runs", argv)
+	if err != nil {
+		return err
+	}
+	repoRoot, err := locateRepoRoot()
+	if err != nil {
+		return err
+	}
+	db, err := openStateDB(repoRoot)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	rows, err := modstate.LoadModTestRuns(db, limit)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("state_db\t%s\n", sqlitestate.ResolveStateDBPath(repoRoot))
+	fmt.Printf("rows\t%d\n", len(rows))
+	fmt.Println("id\tplan_name\tstatus\ttotal_steps\tpassed_steps\tfailed_steps\tskipped_steps\tstop_on_error\tstarted_at\tfinished_at\terror_text")
+	for _, row := range rows {
+		stopOnError := "false"
+		if row.StopOnError {
+			stopOnError = "true"
+		}
+		fmt.Printf("%d\t%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\t%s\t%s\n",
+			row.ID,
+			row.PlanName,
+			row.Status,
+			row.TotalSteps,
+			row.PassedSteps,
+			row.FailedSteps,
+			row.SkippedSteps,
+			stopOnError,
+			row.StartedAt,
+			row.FinishedAt,
+			row.ErrorText,
+		)
+	}
+	return nil
+}
+
+func runTestRun(argv []string) error {
+	opts, err := parseTestRunArgs(argv)
+	if err != nil {
+		return err
+	}
+	repoRoot, err := locateRepoRoot()
+	if err != nil {
+		return err
+	}
+	db, err := openStateDB(repoRoot)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	run, ok, err := modstate.LoadModTestRun(db, opts.runID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("test run %d not found", opts.runID)
+	}
+	steps, err := modstate.LoadModTestRunSteps(db, opts.runID)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("state_db\t%s\n", sqlitestate.ResolveStateDBPath(repoRoot))
+	fmt.Printf("run_id\t%d\n", run.ID)
+	fmt.Printf("plan_name\t%s\n", run.PlanName)
+	fmt.Printf("status\t%s\n", run.Status)
+	fmt.Printf("total_steps\t%d\n", run.TotalSteps)
+	fmt.Printf("passed_steps\t%d\n", run.PassedSteps)
+	fmt.Printf("failed_steps\t%d\n", run.FailedSteps)
+	fmt.Printf("skipped_steps\t%d\n", run.SkippedSteps)
+	fmt.Printf("stop_on_error\t%t\n", run.StopOnError)
+	fmt.Printf("started_at\t%s\n", run.StartedAt)
+	fmt.Printf("finished_at\t%s\n", run.FinishedAt)
+	if strings.TrimSpace(run.ErrorText) != "" {
+		fmt.Printf("error_text\t%s\n", run.ErrorText)
+	}
+	fmt.Printf("steps\t%d\n", len(steps))
+	fmt.Println("step_index\tmod_name\tmod_version\tstatus\texit_code\tqueue_id\truntime_ms\tvisible_tmux\trequires_nix\tserial_group\tcommand_text\terror_text")
+	for _, step := range steps {
+		fmt.Printf("%d\t%s\t%s\t%s\t%d\t%d\t%d\t%t\t%t\t%s\t%s\t%s\n",
+			step.StepIndex,
+			step.ModName,
+			step.ModVersion,
+			step.Status,
+			step.ExitCode,
+			step.QueueID,
+			step.RuntimeMS,
+			step.VisibleTmux,
+			step.RequiresNix,
+			step.SerialGroup,
+			step.CommandText,
+			step.ErrorText,
+		)
+		if opts.full && strings.TrimSpace(step.OutputText) != "" {
+			fmt.Printf("step_%d_output\n%s\n", step.StepIndex, strings.TrimSpace(step.OutputText))
+		}
+	}
+	return nil
+}
+
+func parseCommandsArgs(argv []string) (commandsOptions, error) {
+	fs := flag.NewFlagSet("dialtone commands", flag.ContinueOnError)
+	limit := fs.Int("limit", 20, "Maximum shell_bus rows to print")
+	scope := fs.String("scope", "desired", "Scope filter: desired, observed, or all")
+	subject := fs.String("subject", "command", "Subject filter: command, prompt, pane, or all")
+	status := fs.String("status", "", "Optional exact status filter")
+	session := fs.String("session", "", "Optional exact session filter")
+	pane := fs.String("pane", "", "Optional exact pane filter")
+	if err := fs.Parse(argv); err != nil {
+		return commandsOptions{}, err
+	}
+	if fs.NArg() != 0 {
+		return commandsOptions{}, errors.New("commands does not accept positional arguments")
+	}
+	if *limit <= 0 {
+		return commandsOptions{}, errors.New("--limit must be positive")
+	}
+	return commandsOptions{
+		limit:   *limit,
+		scope:   strings.TrimSpace(*scope),
+		subject: strings.TrimSpace(*subject),
+		status:  strings.TrimSpace(*status),
+		session: strings.TrimSpace(*session),
+		pane:    strings.TrimSpace(*pane),
+	}, nil
+}
+
+func parseCommandArgs(argv []string) (commandOptions, error) {
+	fs := flag.NewFlagSet("dialtone command", flag.ContinueOnError)
+	rowID := fs.Int64("row-id", 0, "Optional exact shell_bus row id to print")
+	full := fs.Bool("full", false, "Print full command output")
+	if err := fs.Parse(argv); err != nil {
+		return commandOptions{}, err
+	}
+	if fs.NArg() != 0 {
+		return commandOptions{}, errors.New("command does not accept positional arguments")
+	}
+	return commandOptions{rowID: *rowID, full: *full}, nil
+}
+
+func parseLogArgs(argv []string) (logOptions, error) {
+	fs := flag.NewFlagSet("dialtone log", flag.ContinueOnError)
+	kind := fs.String("kind", "daemon", "Log kind: daemon, ensure, bootstrap, or command")
+	rowID := fs.Int64("row-id", 0, "Required for --kind command when multiple rows exist")
+	lines := fs.Int("lines", 80, "Number of trailing lines to print")
+	pathOnly := fs.Bool("path-only", false, "Print only the resolved log path")
+	if err := fs.Parse(argv); err != nil {
+		return logOptions{}, err
+	}
+	if fs.NArg() != 0 {
+		return logOptions{}, errors.New("log does not accept positional arguments")
+	}
+	if *lines <= 0 {
+		return logOptions{}, errors.New("--lines must be positive")
+	}
+	return logOptions{kind: strings.TrimSpace(*kind), rowID: *rowID, lines: *lines, pathOnly: *pathOnly}, nil
+}
+
+func parseProtocolRunArgs(argv []string) (protocolRunOptions, error) {
+	fs := flag.NewFlagSet("dialtone protocol-run", flag.ContinueOnError)
+	runID := fs.Int64("run", 0, "Protocol run id")
+	full := fs.Bool("full", false, "Print the stored prompt text")
+	if err := fs.Parse(argv); err != nil {
+		return protocolRunOptions{}, err
+	}
+	if fs.NArg() != 0 {
+		return protocolRunOptions{}, errors.New("protocol-run does not accept positional arguments")
+	}
+	if *runID <= 0 {
+		return protocolRunOptions{}, errors.New("protocol-run requires --run <id>")
+	}
+	return protocolRunOptions{runID: *runID, full: *full}, nil
+}
+
+func parseTestRunArgs(argv []string) (testRunOptions, error) {
+	fs := flag.NewFlagSet("dialtone test-run", flag.ContinueOnError)
+	runID := fs.Int64("run", 0, "SQLite mod test run id")
+	full := fs.Bool("full", false, "Print full step output text")
+	if err := fs.Parse(argv); err != nil {
+		return testRunOptions{}, err
+	}
+	if fs.NArg() != 0 {
+		return testRunOptions{}, errors.New("test-run does not accept positional arguments")
+	}
+	if *runID <= 0 {
+		return testRunOptions{}, errors.New("test-run requires --run <id>")
+	}
+	return testRunOptions{runID: *runID, full: *full}, nil
+}
+
+func parseLimitOnlyArgs(name string, argv []string) (int, error) {
+	fs := flag.NewFlagSet("dialtone "+name, flag.ContinueOnError)
+	limit := fs.Int("limit", 20, "Maximum rows to print")
+	if err := fs.Parse(argv); err != nil {
+		return 0, err
+	}
+	if fs.NArg() != 0 {
+		return 0, fmt.Errorf("%s does not accept positional arguments", name)
+	}
+	if *limit <= 0 {
+		return 0, errors.New("--limit must be positive")
+	}
+	return *limit, nil
+}
+
+func matchesCommandFilters(row modstate.ShellBusRecord, opts commandsOptions) bool {
+	scope := strings.TrimSpace(opts.scope)
+	if scope != "" && scope != "all" && strings.TrimSpace(row.Scope) != scope {
+		return false
+	}
+	subject := strings.TrimSpace(opts.subject)
+	if subject != "" && subject != "all" && strings.TrimSpace(row.Subject) != subject {
+		return false
+	}
+	if strings.TrimSpace(opts.status) != "" && strings.TrimSpace(row.Status) != strings.TrimSpace(opts.status) {
+		return false
+	}
+	if strings.TrimSpace(opts.session) != "" && strings.TrimSpace(row.Session) != strings.TrimSpace(opts.session) {
+		return false
+	}
+	if strings.TrimSpace(opts.pane) != "" && strings.TrimSpace(row.Pane) != strings.TrimSpace(opts.pane) {
+		return false
+	}
+	return true
 }
 
 func parseStatusArgs(argv []string) (statusOptions, error) {
@@ -471,6 +1075,30 @@ func ensureWorkerAsync(repoRoot string, db *sql.DB) (ensureResult, error) {
 	return ensureResult{PID: pid, LogPath: logPath, State: "started"}, nil
 }
 
+func clearEnsureStateIfShellReady(db *sql.DB, maxAge time.Duration) (bool, error) {
+	if db == nil {
+		return false, nil
+	}
+	ready, err := dispatch.ShellReady(db)
+	if err != nil || !ready {
+		return false, err
+	}
+	healthy, err := router.ShellWorkerHealthy(db, maxAge)
+	if err != nil || !healthy {
+		return false, err
+	}
+	if err := modstate.DeleteStateValue(db, sqlitestate.SystemScope, sqlitestate.ShellEnsurePIDKey); err != nil {
+		return false, err
+	}
+	if err := modstate.DeleteStateValue(db, sqlitestate.SystemScope, sqlitestate.ShellEnsureLogPathKey); err != nil {
+		return false, err
+	}
+	if err := modstate.DeleteStateValue(db, sqlitestate.SystemScope, sqlitestate.ShellEnsureStartedAtKey); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func existingEnsureProcess(db *sql.DB) (int, string, error) {
 	pidText, ok, err := loadOptionalStateValue(db, sqlitestate.ShellEnsurePIDKey)
 	if err != nil || !ok {
@@ -506,6 +1134,110 @@ func loadOptionalStateValue(db *sql.DB, key string) (string, bool, error) {
 func loadStateValue(db *sql.DB, key string) (string, error) {
 	value, _, err := loadOptionalStateValue(db, key)
 	return value, err
+}
+
+func resolveDialtoneLogPath(db *sql.DB, repoRoot, kind string, rowID int64) (string, error) {
+	switch strings.TrimSpace(kind) {
+	case "daemon":
+		value, ok, err := loadOptionalStateValue(db, "dialtone.daemon.log_path")
+		if err != nil {
+			return "", err
+		}
+		if !ok || strings.TrimSpace(value) == "" {
+			return "", errors.New("no dialtone daemon log path recorded")
+		}
+		return strings.TrimSpace(value), nil
+	case "ensure":
+		value, ok, err := loadOptionalStateValue(db, sqlitestate.ShellEnsureLogPathKey)
+		if err != nil {
+			return "", err
+		}
+		if !ok || strings.TrimSpace(value) == "" {
+			return "", errors.New("no ensure-worker log path recorded")
+		}
+		return strings.TrimSpace(value), nil
+	case "bootstrap":
+		value, ok, err := loadOptionalStateValue(db, "bootstrap.log_path")
+		if err != nil {
+			return "", err
+		}
+		if !ok || strings.TrimSpace(value) == "" {
+			return "", errors.New("no bootstrap log path recorded")
+		}
+		return strings.TrimSpace(value), nil
+	case "command":
+		var row modstate.ShellBusRecord
+		var ok bool
+		var err error
+		if rowID > 0 {
+			row, ok, err = modstate.LoadShellBusRecord(db, rowID)
+			if err != nil {
+				return "", err
+			}
+			if !ok {
+				return "", fmt.Errorf("shell bus row %d not found", rowID)
+			}
+		} else {
+			rows, err := modstate.LoadShellBus(db, "desired", 100)
+			if err != nil {
+				return "", err
+			}
+			var body dispatch.ShellCommandIntent
+			row, body, ok = latestDesiredCommandRecord(rows)
+			if ok && strings.TrimSpace(body.LogPath) != "" {
+				return strings.TrimSpace(body.LogPath), nil
+			}
+			if !ok {
+				return "", errors.New("no command rows found")
+			}
+		}
+		body, _ := decodeIntentBody(row)
+		if strings.TrimSpace(body.LogPath) != "" {
+			return strings.TrimSpace(body.LogPath), nil
+		}
+		return sqlitestate.ResolveCommandLogPath(repoRoot, row.ID), nil
+	default:
+		return "", fmt.Errorf("unsupported --kind %q", kind)
+	}
+}
+
+func tailFileLines(path string, lines int) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", errors.New("log path is required")
+	}
+	if lines <= 0 {
+		lines = 80
+	}
+	raw, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return "", err
+	}
+	text := strings.TrimRight(string(raw), "\n")
+	if text == "" {
+		return "", nil
+	}
+	parts := strings.Split(text, "\n")
+	if len(parts) > lines {
+		parts = parts[len(parts)-lines:]
+	}
+	return strings.Join(parts, "\n"), nil
+}
+
+func loadProtocolRunByID(db *sql.DB, runID int64) (modstate.ProtocolRunRecord, bool, error) {
+	var record modstate.ProtocolRunRecord
+	err := db.QueryRow(`select id, name, status, prompt_text, prompt_target, command_target, result_text, error_text, started_at, finished_at
+		from protocol_runs
+		where id = ?`, runID).Scan(
+		&record.ID, &record.Name, &record.Status, &record.PromptText, &record.PromptTarget,
+		&record.CommandTarget, &record.ResultText, &record.ErrorText, &record.StartedAt, &record.FinishedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return modstate.ProtocolRunRecord{}, false, nil
+		}
+		return modstate.ProtocolRunRecord{}, false, err
+	}
+	return record, true, nil
 }
 
 func renderRouteReport(repoRoot string, db *sql.DB, rowID int64, commandText, commandTarget string, result ensureResult) string {
@@ -549,7 +1281,10 @@ func renderRouteReport(repoRoot string, db *sql.DB, rowID int64, commandText, co
 	fmt.Fprintf(&out, "command_runtime_ms\tpending\n")
 	fmt.Fprintf(&out, "command\t%s\n", strings.TrimSpace(commandText))
 	fmt.Fprintf(&out, "command_target\t%s\n", printableTarget(commandTarget))
+	fmt.Fprintf(&out, "command_log_path\t%s\n", sqlitestate.ResolveCommandLogPath(repoRoot, rowID))
+	fmt.Fprintf(&out, "state_dir\t%s\n", sqlitestate.ResolveStateDir(repoRoot))
 	fmt.Fprintf(&out, "state_db\t%s\n", sqlitestate.ResolveStateDBPath(repoRoot))
+	fmt.Fprintf(&out, "logs_dir\t%s\n", sqlitestate.ResolveLogsDir(repoRoot))
 	writeField(&out, "bootstrap_status", bootstrapStatus)
 	writeField(&out, "bootstrap_mode", bootstrapMode)
 	writeField(&out, "bootstrap_shell", bootstrapShell)
@@ -571,7 +1306,8 @@ func renderRouteReport(repoRoot string, db *sql.DB, rowID int64, commandText, co
 	fmt.Fprintf(&out, "dialtone_running\t%d\n", dialtoneCount)
 	fmt.Fprintf(&out, "worker_running\t%d\n", workerCount)
 	fmt.Fprintf(&out, "ensure_running\t%d\n", ensureCount)
-	fmt.Fprintf(&out, "inspect\t./dialtone_mod shell v1 status --row-id %d --full --sync=false\n", rowID)
+	fmt.Fprintf(&out, "inspect\t./dialtone_mod dialtone v1 command --row-id %d --full\n", rowID)
+	fmt.Fprintf(&out, "inspect_log\t./dialtone_mod dialtone v1 log --kind command --row-id %d\n", rowID)
 	fmt.Fprintf(&out, "\n")
 	fmt.Fprintf(&out, "%-8s %-8s %-6s %-6s %-12s %-10s %s\n", "PID", "PPID", "STAT", "TTY", "ROLE", "BACKGROUND", "COMMAND")
 	for _, record := range processes {
@@ -701,6 +1437,13 @@ func writeCommandStatus(out *bytes.Buffer, row modstate.ShellBusRecord, body dis
 	}
 	if strings.TrimSpace(body.Target) != "" {
 		fmt.Fprintf(out, "command_target\t%s\n", strings.TrimSpace(body.Target))
+	}
+	logPath := strings.TrimSpace(body.LogPath)
+	if logPath == "" && row.Subject == "command" && row.ID > 0 {
+		logPath = sqlitestate.ResolveCommandLogPath(strings.TrimSpace(os.Getenv("DIALTONE_REPO_ROOT")), row.ID)
+	}
+	if logPath != "" {
+		fmt.Fprintf(out, "command_log_path\t%s\n", logPath)
 	}
 	if strings.TrimSpace(body.StartedAt) != "" {
 		fmt.Fprintf(out, "command_started_at\t%s\n", strings.TrimSpace(body.StartedAt))
@@ -1009,14 +1752,32 @@ func printUsage() {
 	fmt.Println("Usage: ./dialtone_mod dialtone v1 <command> [args]")
 	fmt.Println("")
 	fmt.Println("Commands:")
+	fmt.Println("  paths")
+	fmt.Println("       Print repo/state/log paths used by the dialtone control plane")
 	fmt.Println("  ensure")
 	fmt.Println("       Ensure the standalone dialtone daemon process is running outside Nix")
 	fmt.Println("  serve")
 	fmt.Println("       Run the standalone dialtone daemon loop outside Nix")
+	fmt.Println("  processes")
+	fmt.Println("       Print the live dialtone/dialtone_mod/worker process table")
 	fmt.Println("  status [--row-id <id>] [--full] [--sync=false]")
 	fmt.Println("       Print the cached SQLite-backed control-plane status and latest command row")
+	fmt.Println("  commands [--limit 20] [--scope desired|observed|all] [--subject command|prompt|pane|all] [--status STATUS]")
+	fmt.Println("       List recent shell_bus rows without writing SQL")
+	fmt.Println("  command [--row-id <id>] [--full]")
+	fmt.Println("       Print one routed command row in detail")
+	fmt.Println("  log [--kind daemon|ensure|bootstrap|command] [--row-id <id>] [--lines 80] [--path-only]")
+	fmt.Println("       Resolve and print a known log file from cached state")
 	fmt.Println("  queue <plain ./dialtone_mod args...>")
 	fmt.Println("       Queue one routed plain dialtone_mod command into SQLite and ensure dialtone is running")
+	fmt.Println("  protocol-runs [--limit 20]")
+	fmt.Println("       List recorded end-to-end protocol test runs")
+	fmt.Println("  protocol-run --run <id> [--full]")
+	fmt.Println("       Print one protocol run and its ordered events")
+	fmt.Println("  test-runs [--limit 20]")
+	fmt.Println("       List recorded SQLite mod test runs")
+	fmt.Println("  test-run --run <id> [--full]")
+	fmt.Println("       Print one SQLite mod test run and its step outcomes")
 }
 
 func exitIfErr(err error, context string) {

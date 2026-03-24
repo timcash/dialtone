@@ -41,7 +41,7 @@ func QueueCommandViaShell(db *sql.DB, repoRoot string, args []string) (int64, er
 	innerCommand := dispatch.BuildDialtoneCommand(args)
 	body, err := dispatch.EncodeIntentBody(dispatch.ShellCommandIntent{
 		Command:        innerCommand,
-		InnerCommand: innerCommand,
+		InnerCommand:   innerCommand,
 		DisplayCommand: innerCommand,
 		Args:           append([]string(nil), args...),
 		Target:         commandTarget,
@@ -49,7 +49,25 @@ func QueueCommandViaShell(db *sql.DB, repoRoot string, args []string) (int64, er
 	if err != nil {
 		return 0, err
 	}
-	return modstate.EnqueueShellBus(db, "shell", "desired", "command", "run", "dialtone_mod", session, commandTarget, body)
+	rowID, err := modstate.EnqueueShellBus(db, "shell", "desired", "command", "run", "dialtone_mod", session, commandTarget, body)
+	if err != nil {
+		return 0, err
+	}
+	updatedBody, err := dispatch.EncodeIntentBody(dispatch.ShellCommandIntent{
+		Command:        innerCommand,
+		InnerCommand:   innerCommand,
+		DisplayCommand: innerCommand,
+		Args:           append([]string(nil), args...),
+		Target:         commandTarget,
+		LogPath:        sqlitestate.ResolveCommandLogPath(repoRoot, rowID),
+	})
+	if err != nil {
+		return 0, err
+	}
+	if err := modstate.UpdateShellBusStatus(db, rowID, "queued", 0, updatedBody); err != nil {
+		return 0, err
+	}
+	return rowID, nil
 }
 
 func SyncShell(repoRoot, goBin string, runner GoPackageRunner, limit, waitSeconds int) error {

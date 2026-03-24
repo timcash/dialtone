@@ -323,7 +323,7 @@ should_route_via_shell() {
   local version="${2:-}"
   local command="${3:-}"
   case "${mod}:${version}:${command}" in
-    "shell:v1:"*|"tmux:v1:"*|"ghostty:v1:"*|"test:v1:"*|"dialtone:v1:"*)
+    "shell:v1:"*|"tmux:v1:"*|"ghostty:v1:"*|"test:v1:"*|"dialtone:v1:"*|"codex:v1:"*)
       return 1
       ;;
     *)
@@ -333,6 +333,10 @@ should_route_via_shell() {
 }
 
 current_tmux_pane_target() {
+  if [ -n "${DIALTONE_TMUX_TARGET:-}" ]; then
+    printf '%s' "${DIALTONE_TMUX_TARGET}" | tr -d '\r'
+    return 0
+  fi
   if [ -z "${TMUX_PANE:-}" ] || ! command -v tmux >/dev/null 2>&1; then
     return 0
   fi
@@ -503,8 +507,12 @@ fi
 ensure_bootstrap_state
 
 if [ "${1:-}" = "dialtone" ] && [ "${2:-}" = "v1" ]; then
-  shift 2 || true
-  exec_dialtone_internal "$@"
+  case "${3:-}" in
+    ""|ensure|serve|status|state|bootstrap|queue|paths|processes|commands|command|log|logs|protocol-runs|protocol-run|test-runs|test-run)
+      shift 2 || true
+      exec_dialtone_internal "$@"
+      ;;
+  esac
 fi
 
 if [ "${1:-}" = "shell" ] && [ "${2:-}" = "v1" ]; then

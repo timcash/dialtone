@@ -18,6 +18,18 @@ func main() {
 	case "help", "-h", "--help":
 		printUsage()
 		return
+	case "build":
+		if err := runBuild(args); err != nil {
+			exitIfErr(err, "tsnet build")
+		}
+	case "format":
+		if err := runFormat(args); err != nil {
+			exitIfErr(err, "tsnet format")
+		}
+	case "test":
+		if err := runTest(args); err != nil {
+			exitIfErr(err, "tsnet test")
+		}
 	case "keepalive":
 		if err := runKeepalive(args); err != nil {
 			exitIfErr(err, "tsnet keepalive")
@@ -45,9 +57,12 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println("Usage: ./dialtone_mod tsnet v1 <bootstrap|install|keepalive|status|hosts> [options]")
+	fmt.Println("Usage: ./dialtone_mod tsnet v1 <command> [options]")
 	fmt.Println("")
 	fmt.Println("Commands:")
+	fmt.Println("  build       Build the tsnet v1 CLI wrapper to <repo-root>/bin/mods/tsnet/v1/tsnet")
+	fmt.Println("  format      Run gofmt on tsnet v1 Go files")
+	fmt.Println("  test        Run go test for tsnet v1")
 	fmt.Println("  bootstrap   Ensure TS_AUTHKEY is available and start a persistent tsnet keepalive process")
 	fmt.Println("    --host NAME        Hostname override")
 	fmt.Println("    --env-file FILE    Env file to store/read TS_AUTHKEY")

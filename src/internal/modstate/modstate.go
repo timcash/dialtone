@@ -156,6 +156,39 @@ type ProtocolEventRecord struct {
 	CreatedAt   string
 }
 
+type ModTestRunRecord struct {
+	ID           int64
+	PlanName     string
+	Status       string
+	TotalSteps   int
+	PassedSteps  int
+	FailedSteps  int
+	SkippedSteps int
+	StopOnError  bool
+	ErrorText    string
+	StartedAt    string
+	FinishedAt   string
+}
+
+type ModTestRunStepRecord struct {
+	RunID       int64
+	StepIndex   int
+	ModName     string
+	ModVersion  string
+	SerialGroup string
+	VisibleTmux bool
+	RequiresNix bool
+	Status      string
+	ExitCode    int
+	QueueID     int64
+	CommandText string
+	OutputText  string
+	ErrorText   string
+	StartedAt   string
+	FinishedAt  string
+	RuntimeMS   int64
+}
+
 type ShellBusRecord struct {
 	ID        int64
 	System    string
@@ -342,6 +375,38 @@ func EnsureSchema(db *sql.DB) error {
 			command_text text not null,
 			updated_at text not null,
 			primary key (plan_name, step_index)
+		);`,
+		`create table if not exists mod_test_runs (
+			id integer primary key autoincrement,
+			plan_name text not null,
+			status text not null,
+			total_steps integer not null default 0,
+			passed_steps integer not null default 0,
+			failed_steps integer not null default 0,
+			skipped_steps integer not null default 0,
+			stop_on_error integer not null default 1,
+			error_text text not null default '',
+			started_at text not null,
+			finished_at text not null default ''
+		);`,
+		`create table if not exists mod_test_run_steps (
+			run_id integer not null,
+			step_index integer not null,
+			mod_name text not null,
+			mod_version text not null,
+			serial_group text not null default '',
+			visible_tmux integer not null default 0,
+			requires_nix integer not null default 0,
+			status text not null,
+			exit_code integer not null default 0,
+			queue_id integer not null default 0,
+			command_text text not null,
+			output_text text not null default '',
+			error_text text not null default '',
+			started_at text not null,
+			finished_at text not null default '',
+			runtime_ms integer not null default 0,
+			primary key (run_id, step_index)
 		);`,
 		`create table if not exists protocol_runs (
 			id integer primary key autoincrement,
@@ -874,6 +939,91 @@ func LoadProtocolEvents(db *sql.DB, runID int64) ([]ProtocolEventRecord, error) 
 	return out, rows.Err()
 }
 
+func LoadModTestRuns(db *sql.DB, limit int) ([]ModTestRunRecord, error) {
+	if err := EnsureSchema(db); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := db.Query(`select id, plan_name, status, total_steps, passed_steps, failed_steps, skipped_steps, stop_on_error, error_text, started_at, finished_at
+		from mod_test_runs
+		order by id desc
+		limit ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ModTestRunRecord{}
+	for rows.Next() {
+		var record ModTestRunRecord
+		var stopOnError int
+		if err := rows.Scan(
+			&record.ID, &record.PlanName, &record.Status, &record.TotalSteps, &record.PassedSteps,
+			&record.FailedSteps, &record.SkippedSteps, &stopOnError, &record.ErrorText, &record.StartedAt, &record.FinishedAt,
+		); err != nil {
+			return nil, err
+		}
+		record.StopOnError = stopOnError == 1
+		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
+func LoadModTestRun(db *sql.DB, runID int64) (ModTestRunRecord, bool, error) {
+	if err := EnsureSchema(db); err != nil {
+		return ModTestRunRecord{}, false, err
+	}
+	var record ModTestRunRecord
+	var stopOnError int
+	err := db.QueryRow(`select id, plan_name, status, total_steps, passed_steps, failed_steps, skipped_steps, stop_on_error, error_text, started_at, finished_at
+		from mod_test_runs
+		where id = ?`, runID).Scan(
+		&record.ID, &record.PlanName, &record.Status, &record.TotalSteps, &record.PassedSteps,
+		&record.FailedSteps, &record.SkippedSteps, &stopOnError, &record.ErrorText, &record.StartedAt, &record.FinishedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return ModTestRunRecord{}, false, nil
+		}
+		return ModTestRunRecord{}, false, err
+	}
+	record.StopOnError = stopOnError == 1
+	return record, true, nil
+}
+
+func LoadModTestRunSteps(db *sql.DB, runID int64) ([]ModTestRunStepRecord, error) {
+	if err := EnsureSchema(db); err != nil {
+		return nil, err
+	}
+	rows, err := db.Query(`select run_id, step_index, mod_name, mod_version, serial_group, visible_tmux, requires_nix,
+		status, exit_code, queue_id, command_text, output_text, error_text, started_at, finished_at, runtime_ms
+		from mod_test_run_steps
+		where run_id = ?
+		order by step_index`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ModTestRunStepRecord{}
+	for rows.Next() {
+		var record ModTestRunStepRecord
+		var visibleTmux int
+		var requiresNix int
+		if err := rows.Scan(
+			&record.RunID, &record.StepIndex, &record.ModName, &record.ModVersion, &record.SerialGroup, &visibleTmux, &requiresNix,
+			&record.Status, &record.ExitCode, &record.QueueID, &record.CommandText, &record.OutputText, &record.ErrorText,
+			&record.StartedAt, &record.FinishedAt, &record.RuntimeMS,
+		); err != nil {
+			return nil, err
+		}
+		record.VisibleTmux = visibleTmux == 1
+		record.RequiresNix = requiresNix == 1
+		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
 func EnqueueShellBus(db *sql.DB, system, scope, subject, action, actor, session, pane, bodyJSON string) (int64, error) {
 	if err := EnsureSchema(db); err != nil {
 		return 0, err
@@ -1193,18 +1343,15 @@ func ResolveEntrypoint(db *sql.DB, srcRoot, modName, version, command string) (E
 		HasMain: hasMain == 1,
 		HasCLI:  hasCLI == 1,
 	}
-	if shouldUseCLICommand(command) && entry.HasCLI {
-		entry.Path = srcRelativePath(srcRoot, filepath.ToSlash(filepath.Join(path, "cli")))
-		return entry, nil
-	}
-	if entry.HasMain {
-		return entry, nil
-	}
+	_ = command
 	if entry.HasCLI {
 		entry.Path = srcRelativePath(srcRoot, filepath.ToSlash(filepath.Join(path, "cli")))
 		return entry, nil
 	}
-	return Entrypoint{}, fmt.Errorf("mod has no runnable entrypoint in sqlite registry: %s %s", modName, version)
+	if entry.HasMain {
+		return Entrypoint{}, fmt.Errorf("mod is missing required cli/main.go wrapper in sqlite registry: %s %s", modName, version)
+	}
+	return Entrypoint{}, fmt.Errorf("mod has no runnable cli entrypoint in sqlite registry: %s %s", modName, version)
 }
 
 func LoadNixPackages(db *sql.DB, modName, version string) ([]NixPackageRecord, error) {
@@ -1488,15 +1635,6 @@ func sortedRuntimeEnvKeys(env map[string]string) []string {
 	}
 	sort.Strings(keys)
 	return keys
-}
-
-func shouldUseCLICommand(command string) bool {
-	switch strings.ToLower(strings.TrimSpace(command)) {
-	case "install", "build", "format", "test":
-		return true
-	default:
-		return false
-	}
 }
 
 func srcRelativePath(srcRoot, repoRelative string) string {

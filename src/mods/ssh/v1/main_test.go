@@ -7,9 +7,26 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+func TestSSHV1Layout(t *testing.T) {
+	root := currentDir(t)
+	for _, rel := range []string{
+		"README.md",
+		"mod.json",
+		"main.go",
+		"main_test.go",
+		filepath.Join("cli", "main.go"),
+		filepath.Join("cli", "main_test.go"),
+	} {
+		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
+			t.Fatalf("expected %s in ssh/v1: %v", rel, err)
+		}
+	}
+}
 
 func TestSSHParseArgs(t *testing.T) {
 	opts, err := parseArgs([]string{"--host", "gold", "--user", "user", "--password", "secret", "--port", "2022", "--command", "echo hello", "--dry-run"})
@@ -367,4 +384,13 @@ func captureStdout(t *testing.T, fn func()) string {
 		t.Fatalf("close reader failed: %v", err)
 	}
 	return buf.String()
+}
+
+func currentDir(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	return filepath.Dir(file)
 }
