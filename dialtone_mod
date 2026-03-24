@@ -7,6 +7,7 @@ USE_NIX="${DIALTONE_USE_NIX:-1}"
 DIALTONE_HOME_ROOT="${HOME:-$SCRIPT_DIR}"
 DIALTONE_STATE_DIR="${DIALTONE_STATE_DIR:-$DIALTONE_HOME_ROOT/.dialtone}"
 DIALTONE_STATE_DB="${DIALTONE_STATE_DB:-$DIALTONE_STATE_DIR/state.sqlite}"
+DIALTONE_BIN_DIR="${DIALTONE_BIN_DIR:-$DIALTONE_STATE_DIR/bin}"
 DIALTONE_TMUX_TARGET_FILE="${DIALTONE_TMUX_TARGET_FILE:-$DIALTONE_STATE_DIR/tmux_target}"
 declare -a DIALTONE_NIX_PACKAGES=()
 
@@ -207,18 +208,6 @@ on conflict(scope, key) do update set
 "
 }
 
-clear_state_value() {
-  local key="${1:-}"
-  if [ -z "$key" ] || [ ! -f "$DIALTONE_STATE_DB" ]; then
-    return 0
-  fi
-  run_sqlite_exec "$DIALTONE_STATE_DB" "
-delete from state_values
-where scope = 'system'
-  and key = '$(sql_quote "$key")';
-"
-}
-
 ensure_bootstrap_state() {
   local bootstrap_status=""
   local bootstrap_log=""
@@ -255,151 +244,78 @@ ensure_bootstrap_state() {
 }
 
 exec_dialtone_internal() {
-  exec "$REPO_ROOT/dialtone_mod" __dialtone "$@"
+  local binary=""
+  ensure_dialtone_binary >/dev/null
+  binary="$(dialtone_binary_path)"
+  exec "$binary" "$@"
 }
 
-dialtone_daemon_healthy() {
-  local daemon_status=""
-  local daemon_pid=""
-  local daemon_heartbeat=""
-  local now_epoch=0
-  local heartbeat_epoch=0
-  local age=0
-
-  daemon_status="$(load_state_value "dialtone.daemon.status")"
-  daemon_pid="$(load_state_value "dialtone.daemon.pid")"
-  daemon_heartbeat="$(load_state_value "dialtone.daemon.heartbeat_at")"
-  if [ "$daemon_status" != "running" ] || [ -z "$daemon_pid" ] || [ -z "$daemon_heartbeat" ]; then
-    return 1
-  fi
-  if ! process_alive "$daemon_pid"; then
-    return 1
-  fi
-  if ! heartbeat_epoch="$(rfc3339_to_epoch "$daemon_heartbeat")"; then
-    return 1
-  fi
-  now_epoch="$(date -u +%s)"
-  age=$((now_epoch - heartbeat_epoch))
-  [ "$age" -le 10 ]
+dialtone_binary_path() {
+  printf '%s' "$DIALTONE_BIN_DIR/dialtone"
 }
 
-start_dialtone_daemon() {
-  local pid=""
-  local log_path=""
-  local log_dir=""
-  local started_at=""
-
-  pid="$(load_state_value "dialtone.daemon.pid")"
-  log_path="$(load_state_value "dialtone.daemon.log_path")"
-  if dialtone_daemon_healthy; then
-    printf '%s\t%s\t%s\n' "$pid" "$log_path" "running"
+dialtone_binary_needs_build() {
+  local binary="${1:-}"
+  if [ -z "$binary" ] || [ ! -x "$binary" ]; then
     return 0
   fi
-  if process_alive "$pid"; then
-    printf '%s\t%s\t%s\n' "$pid" "$log_path" "existing"
-    return 0
-  fi
-  log_dir="$DIALTONE_STATE_DIR/logs"
-  mkdir -p "$log_dir"
-  log_path="$log_dir/dialtone-daemon-$(date -u +%s)-$$-${RANDOM:-0}.log"
-  if command -v python3 >/dev/null 2>&1; then
-    pid="$(
-      python3 - "$log_path" "$REPO_ROOT/dialtone_mod" <<'PY'
-import os
-import sys
-
-log_path = sys.argv[1]
-script_path = sys.argv[2]
-
-pid = os.fork()
-if pid:
-    print(pid)
-    sys.exit(0)
-
-os.setsid()
-fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
-devnull = os.open(os.devnull, os.O_RDONLY)
-os.dup2(devnull, 0)
-os.dup2(fd, 1)
-os.dup2(fd, 2)
-os.environ["DIALTONE_DAEMON_LOG_PATH"] = log_path
-os.execv(script_path, [script_path, "__dialtone", "serve"])
-PY
-    )"
-  else
-    nohup env DIALTONE_DAEMON_LOG_PATH="$log_path" "$REPO_ROOT/dialtone_mod" __dialtone serve >"$log_path" 2>&1 </dev/null &
-    pid="$!"
-  fi
-  pid="$(trim_text "$pid")"
-  started_at="$(now_utc_rfc3339)"
-  upsert_state_value "dialtone.daemon.pid" "$pid" >/dev/null
-  upsert_state_value "dialtone.daemon.log_path" "$log_path" >/dev/null
-  upsert_state_value "dialtone.daemon.status" "starting" >/dev/null
-  upsert_state_value "dialtone.daemon.started_at" "$started_at" >/dev/null
-  upsert_state_value "dialtone.daemon.heartbeat_at" "$started_at" >/dev/null
-  printf '%s\t%s\t%s\n' "$pid" "$log_path" "started"
+  find \
+    "$REPO_ROOT/src/internal" \
+    "$REPO_ROOT/src/mods/shared" \
+    "$REPO_ROOT/src/mods/dialtone" \
+    "$REPO_ROOT/src/go.mod" \
+    "$REPO_ROOT/src/go.sum" \
+    -type f \
+    \( -name '*.go' -o -name 'go.mod' -o -name 'go.sum' \) \
+    -newer "$binary" \
+    -print -quit 2>/dev/null | grep -q .
 }
 
-run_dialtone_serve() {
-  local daemon_pid="$$"
-  local daemon_log=""
-  local now=""
-  local existing_pid=""
-
-  daemon_log="${DIALTONE_DAEMON_LOG_PATH:-}"
-  if [ -z "$daemon_log" ]; then
-    daemon_log="$(load_state_value "dialtone.daemon.log_path")"
+build_dialtone_binary() {
+  local binary="${1:-}"
+  local nix_cmd=()
+  if [ -z "$binary" ]; then
+    return 1
   fi
-  existing_pid="$(load_state_value "dialtone.daemon.pid")"
-  if [ -n "$existing_pid" ] && [ "$existing_pid" != "$daemon_pid" ] && process_alive "$existing_pid"; then
-    printf 'dialtone already running\t%s\n' "$existing_pid"
-    return 0
-  fi
-  dialtone_mark_stopped() {
-    now="$(now_utc_rfc3339)"
-    upsert_state_value "dialtone.daemon.status" "stopped" >/dev/null || true
-    upsert_state_value "dialtone.daemon.heartbeat_at" "$now" >/dev/null || true
-  }
-  trap 'dialtone_mark_stopped' EXIT
-  trap 'dialtone_mark_stopped; exit 0' INT TERM
-  while true; do
-    now="$(now_utc_rfc3339)"
-    upsert_state_value "dialtone.daemon.pid" "$daemon_pid" >/dev/null || true
-    upsert_state_value "dialtone.daemon.status" "running" >/dev/null || true
-    upsert_state_value "dialtone.daemon.heartbeat_at" "$now" >/dev/null || true
-    if [ -n "$daemon_log" ]; then
-      upsert_state_value "dialtone.daemon.log_path" "$daemon_log" >/dev/null || true
-    fi
-    ensure_worker_async_fast >/dev/null || true
-    if shell_worker_healthy_fast; then
-      clear_state_value "shell.ensure.pid" >/dev/null || true
-      clear_state_value "shell.ensure.log_path" >/dev/null || true
-      clear_state_value "shell.ensure.started_at" >/dev/null || true
-    fi
-    sleep 1
-  done
-}
-
-load_tmux_target() {
-  local raw=""
-  if [ -n "${DIALTONE_TMUX_TARGET:-}" ]; then
-    printf '%s' "${DIALTONE_TMUX_TARGET}"
+  mkdir -p "$(dirname "$binary")"
+  if [ "${DIALTONE_NIX_ACTIVE:-0}" = "1" ] || [ "$USE_NIX" = "0" ]; then
+    (
+      cd "$REPO_ROOT/src"
+      "${DIALTONE_GO_BIN:-go}" build -o "$binary" ./mods/dialtone/v1
+    )
     return
   fi
-  raw="$(run_sqlite_query "$DIALTONE_STATE_DB" "select value from state_values where scope = 'system' and key = 'tmux.target' limit 1;" 2>/dev/null || true)"
-  raw="$(printf '%s' "$raw" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-  if [ -n "$raw" ]; then
-    printf '%s' "$raw"
-    return
+  if ! command -v nix >/dev/null 2>&1; then
+    echo "DIALTONE> nix is required to build the dialtone binary" >&2
+    return 1
   fi
-  printf '%s' ""
+  if [ "${DIALTONE_NIX_OFFLINE:-0}" = "1" ]; then
+    nix_cmd+=(--offline)
+  fi
+  nix \
+    "${nix_cmd[@]}" \
+    --extra-experimental-features "nix-command flakes" \
+    develop "path:$REPO_ROOT#default" \
+    --command env \
+      DIALTONE_NIX_ACTIVE=1 \
+      DIALTONE_NIX_SHELL="default" \
+      DIALTONE_HOST_PATH="$PATH" \
+      DIALTONE_REPO_ROOT="$REPO_ROOT" \
+      DIALTONE_STATE_DIR="$DIALTONE_STATE_DIR" \
+      DIALTONE_STATE_DB="$DIALTONE_STATE_DB" \
+      DIALTONE_BIN_DIR="$DIALTONE_BIN_DIR" \
+      DIALTONE_NIX_OFFLINE="${DIALTONE_NIX_OFFLINE:-0}" \
+      DIALTONE_USE_NIX="$USE_NIX" \
+      zsh -lc "cd $(shell_quote "$REPO_ROOT/src") && exec \${DIALTONE_GO_BIN:-go} build -o $(shell_quote "$binary") ./mods/dialtone/v1"
 }
 
-load_tmux_prompt_target() {
-  local raw=""
-  raw="$(run_sqlite_query "$DIALTONE_STATE_DB" "select value from state_values where scope = 'system' and key = 'tmux.prompt_target' limit 1;" 2>/dev/null || true)"
-  raw="$(printf '%s' "$raw" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-  printf '%s' "$raw"
+ensure_dialtone_binary() {
+  local binary=""
+  binary="$(dialtone_binary_path)"
+  if [ ! -x "$binary" ] || dialtone_binary_needs_build "$binary"; then
+    build_dialtone_binary "$binary" >&2
+  fi
+  printf '%s' "$binary"
 }
 
 should_route_via_shell() {
@@ -407,7 +323,7 @@ should_route_via_shell() {
   local version="${2:-}"
   local command="${3:-}"
   case "${mod}:${version}:${command}" in
-    "shell:v1:"*|"tmux:v1:"*|"ghostty:v1:"*|"test:v1:"*)
+    "shell:v1:"*|"tmux:v1:"*|"ghostty:v1:"*|"test:v1:"*|"dialtone:v1:"*|"codex:v1:"*)
       return 1
       ;;
     *)
@@ -417,58 +333,14 @@ should_route_via_shell() {
 }
 
 current_tmux_pane_target() {
+  if [ -n "${DIALTONE_TMUX_TARGET:-}" ]; then
+    printf '%s' "${DIALTONE_TMUX_TARGET}" | tr -d '\r'
+    return 0
+  fi
   if [ -z "${TMUX_PANE:-}" ] || ! command -v tmux >/dev/null 2>&1; then
     return 0
   fi
   tmux display-message -p -t "$TMUX_PANE" "#{session_name}:#{window_index}:#{pane_index}" 2>/dev/null | tr -d '\r'
-}
-
-rfc3339_to_epoch() {
-  local raw="${1:-}"
-  local value=""
-  if [ -z "$raw" ]; then
-    return 1
-  fi
-  value="$(printf '%s' "$raw" | tr -d '\r' | sed -e 's/\.[0-9][0-9]*Z$/Z/')"
-  if date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$value" "+%s" >/dev/null 2>&1; then
-    date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$value" "+%s"
-    return 0
-  fi
-  if date -u -d "$value" "+%s" >/dev/null 2>&1; then
-    date -u -d "$value" "+%s"
-    return 0
-  fi
-  return 1
-}
-
-process_alive() {
-  local pid="${1:-}"
-  if [ -z "$pid" ] || ! [[ "$pid" =~ ^[0-9]+$ ]] || [ "$pid" -le 0 ]; then
-    return 1
-  fi
-  kill -0 "$pid" 2>/dev/null
-}
-
-shell_worker_healthy_fast() {
-  local worker_status=""
-  local worker_pane=""
-  local worker_heartbeat=""
-  local now_epoch=0
-  local heartbeat_epoch=0
-  local age=0
-
-  worker_status="$(load_state_value "shell.worker.status")"
-  worker_pane="$(load_state_value "shell.worker.pane")"
-  worker_heartbeat="$(load_state_value "shell.worker.heartbeat_at")"
-  if [ "$worker_status" != "running" ] || [ -z "$worker_pane" ] || [ -z "$worker_heartbeat" ]; then
-    return 1
-  fi
-  if ! heartbeat_epoch="$(rfc3339_to_epoch "$worker_heartbeat")"; then
-    return 1
-  fi
-  now_epoch="$(date -u +%s)"
-  age=$((now_epoch - heartbeat_epoch))
-  [ "$age" -le 10 ]
 }
 
 should_execute_direct_in_pane_fast() {
@@ -497,309 +369,6 @@ order by id desc
 limit 1;
 " 2>/dev/null || true)"
   [ "$(printf '%s' "$match" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')" = "1" ]
-}
-
-queue_command_via_shell_fast() {
-  local session="${1:-codex-view}"
-  local command_target="${2:-}"
-  local display_command="${3:-}"
-  local now=""
-
-  ensure_fast_route_schema
-  now="$(now_utc_rfc3339)"
-  run_sqlite_query "$DIALTONE_STATE_DB" "
-insert into shell_bus(system, scope, subject, action, status, actor, session, pane, ref_id, body_json, created_at, updated_at)
-values(
-  'shell',
-  'desired',
-  'command',
-  'run',
-  'queued',
-  'dialtone_mod',
-  '$(sql_quote "$session")',
-  '$(sql_quote "$command_target")',
-  0,
-  json_object(
-    'command', '$(sql_quote "$display_command")',
-    'inner_command', '$(sql_quote "$display_command")',
-    'display_command', '$(sql_quote "$display_command")',
-    'target', '$(sql_quote "$command_target")'
-  ),
-  '$(sql_quote "$now")',
-  '$(sql_quote "$now")'
-);
-select last_insert_rowid();
-"
-}
-
-ensure_worker_async_fast() {
-  local pid=""
-  local log_path=""
-  local log_dir=""
-  local started_at=""
-
-  pid="$(load_state_value "shell.ensure.pid")"
-  log_path="$(load_state_value "shell.ensure.log_path")"
-  if shell_worker_healthy_fast; then
-    if process_alive "$pid"; then
-      printf '%s\t%s\t%s\n' "$pid" "$log_path" "existing"
-      return 0
-    fi
-    printf '\t\tworker\n'
-    return 0
-  fi
-  if process_alive "$pid"; then
-    printf '%s\t%s\t%s\n' "$pid" "$log_path" "existing"
-    return 0
-  fi
-  log_dir="$DIALTONE_STATE_DIR/logs"
-  mkdir -p "$log_dir"
-  log_path="$log_dir/dialtone-ensure-$(date -u +%s)-$$-${RANDOM:-0}.log"
-  nohup "$REPO_ROOT/dialtone_mod" shell v1 ensure-worker --wait-seconds 30 >"$log_path" 2>&1 </dev/null &
-  pid="$!"
-  started_at="$(now_utc_rfc3339)"
-  upsert_state_value "shell.ensure.pid" "$pid" >/dev/null
-  upsert_state_value "shell.ensure.log_path" "$log_path" >/dev/null
-  upsert_state_value "shell.ensure.started_at" "$started_at" >/dev/null
-  printf '%s\t%s\t%s\n' "$pid" "$log_path" "started"
-}
-
-load_dialtone_process_rows() {
-  ps -axo pid=,ppid=,stat=,tt=,command= | awk '
-{
-  pid=$1
-  ppid=$2
-  stat=$3
-  tty=$4
-  $1=""
-  $2=""
-  $3=""
-  $4=""
-  sub(/^[[:space:]]+/, "", $0)
-  cmd=$0
-  if (cmd ~ /^awk / || cmd ~ / ps -axo / || cmd ~ /^ps -axo / || cmd ~ / rg /) {
-    next
-  }
-  if (cmd ~ /(^|[[:space:]\/])dialtone_mod([[:space:]]|$)/ && cmd !~ /__dialtone serve/) {
-    role="dialtone_mod"
-  } else if (cmd ~ /(^|[[:space:]])dialtone([[:space:]]|$)/ || cmd ~ /__dialtone serve/) {
-    role="dialtone"
-  } else if (cmd ~ /go run \.\/mods\.go shell v1 serve/ || cmd ~ /\/mods shell v1 serve/) {
-    role="worker"
-  } else if (cmd ~ /go run \.\/mods\.go shell v1 ensure-worker/ || cmd ~ /\/mods shell v1 ensure-worker/) {
-    role="ensure"
-  } else {
-    next
-  }
-  background=(tty == "??" || stat !~ /\+/) ? "yes" : "no"
-  printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", pid, ppid, stat, tty, role, background, cmd
-}'
-}
-
-summarize_dialtone_process_rows() {
-  local process_rows="${1:-}"
-  local total=0
-  local total_background=0
-  local client_total=0
-  local client_background=0
-  local daemon_total=0
-  local worker_total=0
-  local ensure_total=0
-  local pid=""
-  local ppid=""
-  local stat=""
-  local tty=""
-  local role=""
-  local background=""
-  local command=""
-
-  if [ -n "$process_rows" ]; then
-    while IFS=$'\t' read -r pid ppid stat tty role background command; do
-      [ -n "$pid" ] || continue
-      total=$((total + 1))
-      if [ "$background" = "yes" ]; then
-        total_background=$((total_background + 1))
-      fi
-      case "$role" in
-        dialtone_mod)
-          client_total=$((client_total + 1))
-          if [ "$background" = "yes" ]; then
-            client_background=$((client_background + 1))
-          fi
-          ;;
-        dialtone)
-          daemon_total=$((daemon_total + 1))
-          ;;
-        worker)
-          worker_total=$((worker_total + 1))
-          ;;
-        ensure)
-          ensure_total=$((ensure_total + 1))
-          ;;
-      esac
-    done <<<"$process_rows"
-  fi
-
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$total" \
-    "$total_background" \
-    "$client_total" \
-    "$client_background" \
-    "$daemon_total" \
-    "$worker_total" \
-    "$ensure_total"
-}
-
-print_fast_route_report() {
-  local row_id="${1:-0}"
-  local display_command="${2:-}"
-  local command_target="${3:-}"
-  local daemon_pid="${4:-}"
-  local daemon_log="${5:-}"
-  local daemon_state="${6:-}"
-  local bootstrap_status=""
-  local bootstrap_mode=""
-  local bootstrap_shell=""
-  local bootstrap_log=""
-  local persisted_daemon_pid=""
-  local persisted_daemon_status=""
-  local persisted_daemon_log=""
-  local worker_status=""
-  local worker_pane=""
-  local worker_current_row=""
-  local worker_last_row=""
-  local worker_last_status=""
-  local worker_last_exit_code=""
-  local worker_last_summary=""
-  local process_rows=""
-  local process_summary=""
-  local process_count=0
-  local background_count=0
-  local client_process_count=0
-  local client_background_count=0
-  local daemon_process_count=0
-  local worker_process_count=0
-  local ensure_process_count=0
-  local pid=""
-  local ppid=""
-  local stat=""
-  local tty=""
-  local role=""
-  local background=""
-  local command=""
-
-  bootstrap_status="$(load_state_value "bootstrap.status")"
-  bootstrap_mode="$(load_state_value "bootstrap.mode")"
-  bootstrap_shell="$(load_state_value "bootstrap.shell")"
-  bootstrap_log="$(load_state_value "bootstrap.log_path")"
-  persisted_daemon_pid="$(load_state_value "dialtone.daemon.pid")"
-  persisted_daemon_status="$(load_state_value "dialtone.daemon.status")"
-  persisted_daemon_log="$(load_state_value "dialtone.daemon.log_path")"
-  worker_status="$(load_state_value "shell.worker.status")"
-  worker_pane="$(load_state_value "shell.worker.pane")"
-  worker_current_row="$(load_state_value "shell.worker.current_row_id")"
-  worker_last_row="$(load_state_value "shell.worker.last_row_id")"
-  worker_last_status="$(load_state_value "shell.worker.last_status")"
-  worker_last_exit_code="$(load_state_value "shell.worker.last_exit_code")"
-  worker_last_summary="$(load_state_value "shell.worker.last_summary")"
-  process_rows="$(load_dialtone_process_rows || true)"
-  process_summary="$(summarize_dialtone_process_rows "$process_rows")"
-  process_count="$(printf '%s' "$process_summary" | awk -F'\t' 'NR==1 {print $1}')"
-  background_count="$(printf '%s' "$process_summary" | awk -F'\t' 'NR==1 {print $2}')"
-  client_process_count="$(printf '%s' "$process_summary" | awk -F'\t' 'NR==1 {print $3}')"
-  client_background_count="$(printf '%s' "$process_summary" | awk -F'\t' 'NR==1 {print $4}')"
-  daemon_process_count="$(printf '%s' "$process_summary" | awk -F'\t' 'NR==1 {print $5}')"
-  worker_process_count="$(printf '%s' "$process_summary" | awk -F'\t' 'NR==1 {print $6}')"
-  ensure_process_count="$(printf '%s' "$process_summary" | awk -F'\t' 'NR==1 {print $7}')"
-
-  printf 'route\tqueued\n'
-  printf 'command_id\t%s\n' "$row_id"
-  printf 'command_status\tqueued\n'
-  printf 'command_pid\tpending\n'
-  printf 'command_exit_code\tpending\n'
-  printf 'command_runtime_ms\tpending\n'
-  printf 'command\t%s\n' "$display_command"
-  printf 'command_target\t%s\n' "${command_target:-pending}"
-  printf 'state_db\t%s\n' "$DIALTONE_STATE_DB"
-  if [ -n "$bootstrap_status" ]; then
-    printf 'bootstrap_status\t%s\n' "$bootstrap_status"
-  fi
-  if [ -n "$bootstrap_mode" ]; then
-    printf 'bootstrap_mode\t%s\n' "$bootstrap_mode"
-  fi
-  if [ -n "$bootstrap_shell" ]; then
-    printf 'bootstrap_shell\t%s\n' "$bootstrap_shell"
-  fi
-  if [ -n "$bootstrap_log" ]; then
-    printf 'bootstrap_log\t%s\n' "$bootstrap_log"
-  fi
-  if [ -n "${daemon_pid:-$persisted_daemon_pid}" ]; then
-    printf 'dialtone_pid\t%s\n' "${daemon_pid:-$persisted_daemon_pid}"
-  fi
-  if [ -n "${daemon_state:-$persisted_daemon_status}" ]; then
-    printf 'dialtone_status\t%s\n' "${daemon_state:-$persisted_daemon_status}"
-  fi
-  if [ -n "${daemon_log:-$persisted_daemon_log}" ]; then
-    printf 'dialtone_log\t%s\n' "${daemon_log:-$persisted_daemon_log}"
-  fi
-  printf 'worker_status\t%s\n' "${worker_status:-unknown}"
-  printf 'worker_pane\t%s\n' "${worker_pane:-pending}"
-  if [ -n "$worker_current_row" ]; then
-    printf 'worker_current_row\t%s\n' "$worker_current_row"
-  fi
-  if [ -n "$worker_last_row" ]; then
-    printf 'worker_last_row\t%s\n' "$worker_last_row"
-  fi
-  if [ -n "$worker_last_status" ]; then
-    printf 'worker_last_status\t%s\n' "$worker_last_status"
-  fi
-  if [ -n "$worker_last_exit_code" ]; then
-    printf 'worker_last_exit_code\t%s\n' "$worker_last_exit_code"
-  fi
-  if [ -n "$worker_last_summary" ]; then
-    printf 'worker_last_summary\t%s\n' "$worker_last_summary"
-  fi
-  printf 'dialtone_processes_running\t%d\n' "$process_count"
-  printf 'dialtone_processes_background\t%d\n' "$background_count"
-  printf 'dialtone_mod_running\t%d\n' "$client_process_count"
-  printf 'dialtone_mod_background\t%d\n' "$client_background_count"
-  printf 'dialtone_running\t%d\n' "$daemon_process_count"
-  printf 'worker_running\t%d\n' "$worker_process_count"
-  printf 'ensure_running\t%d\n' "$ensure_process_count"
-  printf 'inspect\t./dialtone_mod shell v1 status --row-id %s --full --sync=false\n' "$row_id"
-  printf '\n'
-  printf '%-8s %-8s %-6s %-6s %-12s %-10s %s\n' "PID" "PPID" "STAT" "TTY" "ROLE" "BACKGROUND" "COMMAND"
-  if [ -n "$process_rows" ]; then
-    while IFS=$'\t' read -r pid ppid stat tty role background command; do
-      [ -n "$pid" ] || continue
-      printf '%-8s %-8s %-6s %-6s %-12s %-10s %s\n' "$pid" "$ppid" "$stat" "$tty" "$role" "$background" "$command"
-    done <<<"$process_rows"
-  fi
-}
-
-route_via_shell_fast() {
-  local command_target=""
-  local session="codex-view"
-  local display_command=""
-  local row_id=""
-  local daemon_info=""
-  local daemon_pid=""
-  local daemon_log=""
-  local daemon_state=""
-
-  command_target="$(load_tmux_target)"
-  if [ -n "$command_target" ]; then
-    session="${command_target%%:*}"
-    [ -n "$session" ] || session="codex-view"
-  fi
-  display_command="$(build_dialtone_command "$@")"
-  row_id="$(queue_command_via_shell_fast "$session" "$command_target" "$display_command")"
-  row_id="$(printf '%s' "$row_id" | tail -n 1 | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-  daemon_info="$(start_dialtone_daemon)"
-  daemon_pid="$(printf '%s' "$daemon_info" | awk -F'\t' 'NR==1 {print $1}')"
-  daemon_log="$(printf '%s' "$daemon_info" | awk -F'\t' 'NR==1 {print $2}')"
-  daemon_state="$(printf '%s' "$daemon_info" | awk -F'\t' 'NR==1 {print $3}')"
-  print_fast_route_report "$row_id" "$display_command" "$command_target" "$daemon_pid" "$daemon_log" "$daemon_state"
 }
 
 FAST_STATUS_ROW_ID=""
@@ -853,341 +422,6 @@ parse_fast_shell_status_args() {
     return 1
   fi
   return 0
-}
-
-sqlite_scalar() {
-  local query="${1:-}"
-  local value=""
-  if [ -z "$query" ] || [ ! -f "$DIALTONE_STATE_DB" ]; then
-    return 0
-  fi
-  value="$(run_sqlite_query "$DIALTONE_STATE_DB" "$query" 2>/dev/null || true)"
-  printf '%s' "$(trim_text "$value")"
-}
-
-latest_snapshot_summary_fast() {
-  local pane="${1:-}"
-  if [ -z "$pane" ]; then
-    return 0
-  fi
-  sqlite_scalar "
-select coalesce(trim(json_extract(body_json, '$.summary')), '')
-from shell_bus
-where scope = 'observed'
-  and subject = 'pane'
-  and action = 'snapshot'
-  and trim(pane) = '$(sql_quote "$pane")'
-order by id desc
-limit 1;
-"
-}
-
-latest_snapshot_text_fast() {
-  local pane="${1:-}"
-  if [ -z "$pane" ]; then
-    return 0
-  fi
-  if [ ! -f "$DIALTONE_STATE_DB" ]; then
-    return 0
-  fi
-  run_sqlite_query "$DIALTONE_STATE_DB" "
-select coalesce(json_extract(body_json, '$.text'), '')
-from shell_bus
-where scope = 'observed'
-  and subject = 'pane'
-  and action = 'snapshot'
-  and trim(pane) = '$(sql_quote "$pane")'
-order by id desc
-limit 1;
-" 2>/dev/null || true
-}
-
-print_fast_shell_command_status() {
-  local row_id="${1:-}"
-  local full="${2:-0}"
-  local status=""
-  local command=""
-  local target=""
-  local started_at=""
-  local finished_at=""
-  local pid=""
-  local exit_code=""
-  local runtime_ms=""
-  local summary=""
-  local error_text=""
-  local output_text=""
-
-  if [ -z "$row_id" ] || ! [[ "$row_id" =~ ^[0-9]+$ ]]; then
-    return 0
-  fi
-  status="$(sqlite_scalar "select coalesce(trim(status), '') from shell_bus where id = $row_id limit 1;")"
-  [ -n "$status" ] || return 0
-  command="$(sqlite_scalar "select coalesce(nullif(trim(json_extract(body_json, '$.display_command')), ''), nullif(trim(json_extract(body_json, '$.inner_command')), ''), trim(json_extract(body_json, '$.command')), '') from shell_bus where id = $row_id limit 1;")"
-  target="$(sqlite_scalar "select coalesce(nullif(trim(json_extract(body_json, '$.target')), ''), trim(pane), '') from shell_bus where id = $row_id limit 1;")"
-  started_at="$(sqlite_scalar "select coalesce(trim(json_extract(body_json, '$.started_at')), '') from shell_bus where id = $row_id limit 1;")"
-  finished_at="$(sqlite_scalar "select coalesce(trim(json_extract(body_json, '$.finished_at')), '') from shell_bus where id = $row_id limit 1;")"
-  pid="$(sqlite_scalar "select coalesce(trim(json_extract(body_json, '$.pid')), '') from shell_bus where id = $row_id limit 1;")"
-  exit_code="$(sqlite_scalar "select coalesce(trim(json_extract(body_json, '$.exit_code')), '') from shell_bus where id = $row_id limit 1;")"
-  runtime_ms="$(sqlite_scalar "select coalesce(trim(json_extract(body_json, '$.runtime_ms')), '') from shell_bus where id = $row_id limit 1;")"
-  summary="$(sqlite_scalar "select coalesce(trim(json_extract(body_json, '$.summary')), '') from shell_bus where id = $row_id limit 1;")"
-  error_text="$(sqlite_scalar "select coalesce(trim(json_extract(body_json, '$.error')), '') from shell_bus where id = $row_id limit 1;")"
-  if [ "$status" = "done" ] && [ -z "$exit_code" ]; then
-    exit_code="0"
-  fi
-
-  printf 'command_row_id\t%s\n' "$row_id"
-  printf 'command_status\t%s\n' "$status"
-  if [ -n "$command" ]; then
-    printf 'command\t%s\n' "$command"
-    printf 'last_command\t%s\n' "$command"
-  fi
-  if [ -n "$target" ]; then
-    printf 'command_target\t%s\n' "$target"
-  fi
-  if [ -n "$started_at" ]; then
-    printf 'command_started_at\t%s\n' "$started_at"
-  fi
-  if [ -n "$finished_at" ]; then
-    printf 'command_finished_at\t%s\n' "$finished_at"
-  fi
-  if [ -n "$pid" ] && [ "$pid" != "0" ]; then
-    printf 'command_pid\t%s\n' "$pid"
-  else
-    printf 'command_pid\tpending\n'
-  fi
-  if [ -n "$exit_code" ] && { [ "$status" = "done" ] || [ "$status" = "failed" ] || [ "$exit_code" != "0" ]; }; then
-    printf 'command_exit_code\t%s\n' "$exit_code"
-  else
-    printf 'command_exit_code\tpending\n'
-  fi
-  if [ "$status" = "done" ] && [ -z "$runtime_ms" ]; then
-    runtime_ms="0"
-  fi
-  if [ -n "$runtime_ms" ]; then
-    printf 'command_runtime_ms\t%s\n' "$runtime_ms"
-  else
-    printf 'command_runtime_ms\tpending\n'
-  fi
-  if [ -n "$summary" ]; then
-    printf 'command_summary\t%s\n' "$summary"
-  fi
-  if [ -n "$error_text" ]; then
-    printf 'command_error\t%s\n' "$error_text"
-  fi
-  if [ "$full" = "1" ]; then
-    output_text="$(run_sqlite_query "$DIALTONE_STATE_DB" "select coalesce(json_extract(body_json, '$.output'), '') from shell_bus where id = $row_id limit 1;" 2>/dev/null || true)"
-    if [ -n "$(trim_text "$output_text")" ]; then
-      printf 'command_output\n%s\n' "$output_text"
-      printf 'last_command_output\n%s\n' "$output_text"
-    fi
-  fi
-}
-
-print_fast_shell_status() {
-  local prompt_target=""
-  local command_target=""
-  local queued_count="0"
-  local bootstrap_status=""
-  local bootstrap_mode=""
-  local bootstrap_shell=""
-  local bootstrap_log=""
-  local bootstrap_completed_at=""
-  local daemon_pid=""
-  local daemon_status=""
-  local daemon_log=""
-  local daemon_started_at=""
-  local daemon_heartbeat=""
-  local worker_status=""
-  local worker_pane=""
-  local worker_heartbeat=""
-  local worker_current_row=""
-  local worker_current_command=""
-  local worker_last_row=""
-  local worker_last_status=""
-  local worker_last_exit_code=""
-  local worker_last_summary=""
-  local command_row_id=""
-  local process_rows=""
-  local process_summary=""
-  local process_count="0"
-  local background_count="0"
-  local client_process_count="0"
-  local client_background_count="0"
-  local daemon_process_count="0"
-  local worker_process_count="0"
-  local ensure_process_count="0"
-  local prompt_snapshot=""
-  local command_snapshot=""
-  local prompt_text=""
-  local command_text=""
-
-  prompt_target="$(load_state_value "tmux.prompt_target")"
-  command_target="$(load_state_value "tmux.target")"
-  queued_count="$(sqlite_scalar "select count(*) from shell_bus where scope = 'desired' and status = 'queued';")"
-  [ -n "$queued_count" ] || queued_count="0"
-  bootstrap_status="$(load_state_value "bootstrap.status")"
-  bootstrap_mode="$(load_state_value "bootstrap.mode")"
-  bootstrap_shell="$(load_state_value "bootstrap.shell")"
-  bootstrap_log="$(load_state_value "bootstrap.log_path")"
-  bootstrap_completed_at="$(load_state_value "bootstrap.completed_at")"
-  daemon_pid="$(load_state_value "dialtone.daemon.pid")"
-  daemon_status="$(load_state_value "dialtone.daemon.status")"
-  daemon_log="$(load_state_value "dialtone.daemon.log_path")"
-  daemon_started_at="$(load_state_value "dialtone.daemon.started_at")"
-  daemon_heartbeat="$(load_state_value "dialtone.daemon.heartbeat_at")"
-  worker_status="$(load_state_value "shell.worker.status")"
-  worker_pane="$(load_state_value "shell.worker.pane")"
-  worker_heartbeat="$(load_state_value "shell.worker.heartbeat_at")"
-  worker_current_row="$(load_state_value "shell.worker.current_row_id")"
-  worker_current_command="$(load_state_value "shell.worker.current_command")"
-  worker_last_row="$(load_state_value "shell.worker.last_row_id")"
-  worker_last_status="$(load_state_value "shell.worker.last_status")"
-  worker_last_exit_code="$(load_state_value "shell.worker.last_exit_code")"
-  worker_last_summary="$(load_state_value "shell.worker.last_summary")"
-  process_rows="$(load_dialtone_process_rows || true)"
-  process_summary="$(summarize_dialtone_process_rows "$process_rows")"
-  process_count="$(printf '%s' "$process_summary" | awk -F'\t' 'NR==1 {print $1}')"
-  background_count="$(printf '%s' "$process_summary" | awk -F'\t' 'NR==1 {print $2}')"
-  client_process_count="$(printf '%s' "$process_summary" | awk -F'\t' 'NR==1 {print $3}')"
-  client_background_count="$(printf '%s' "$process_summary" | awk -F'\t' 'NR==1 {print $4}')"
-  daemon_process_count="$(printf '%s' "$process_summary" | awk -F'\t' 'NR==1 {print $5}')"
-  worker_process_count="$(printf '%s' "$process_summary" | awk -F'\t' 'NR==1 {print $6}')"
-  ensure_process_count="$(printf '%s' "$process_summary" | awk -F'\t' 'NR==1 {print $7}')"
-  if [ -n "$FAST_STATUS_ROW_ID" ]; then
-    command_row_id="$FAST_STATUS_ROW_ID"
-  else
-    command_row_id="$(sqlite_scalar "select id from shell_bus where scope = 'desired' and subject = 'command' and action = 'run' order by id desc limit 1;")"
-  fi
-  prompt_snapshot="$(latest_snapshot_summary_fast "$prompt_target")"
-  command_snapshot="$(latest_snapshot_summary_fast "$command_target")"
-
-  printf 'state_source\tsqlite_cached\n'
-  printf 'prompt_target\t%s\n' "${prompt_target:-missing}"
-  printf 'command_target\t%s\n' "${command_target:-missing}"
-  printf 'queued\t%s\n' "$queued_count"
-  if [ -n "$bootstrap_status" ]; then
-    printf 'bootstrap_status\t%s\n' "$bootstrap_status"
-  fi
-  if [ -n "$bootstrap_mode" ]; then
-    printf 'bootstrap_mode\t%s\n' "$bootstrap_mode"
-  fi
-  if [ -n "$bootstrap_shell" ]; then
-    printf 'bootstrap_shell\t%s\n' "$bootstrap_shell"
-  fi
-  if [ -n "$bootstrap_completed_at" ]; then
-    printf 'bootstrap_completed_at\t%s\n' "$bootstrap_completed_at"
-  fi
-  if [ -n "$bootstrap_log" ]; then
-    printf 'bootstrap_log\t%s\n' "$bootstrap_log"
-  fi
-  if [ -n "$daemon_pid" ]; then
-    printf 'dialtone_pid\t%s\n' "$daemon_pid"
-  fi
-  if [ -n "$daemon_status" ]; then
-    printf 'dialtone_status\t%s\n' "$daemon_status"
-  fi
-  if [ -n "$daemon_started_at" ]; then
-    printf 'dialtone_started_at\t%s\n' "$daemon_started_at"
-  fi
-  if [ -n "$daemon_heartbeat" ]; then
-    printf 'dialtone_heartbeat\t%s\n' "$daemon_heartbeat"
-  fi
-  if [ -n "$daemon_log" ]; then
-    printf 'dialtone_log\t%s\n' "$daemon_log"
-  fi
-  if [ -n "$worker_status" ]; then
-    printf 'worker_status\t%s\n' "$worker_status"
-  fi
-  if [ -n "$worker_pane" ]; then
-    printf 'worker_pane\t%s\n' "$worker_pane"
-  fi
-  if [ -n "$worker_heartbeat" ]; then
-    printf 'worker_heartbeat\t%s\n' "$worker_heartbeat"
-  fi
-  if [ -n "$worker_current_row" ]; then
-    printf 'worker_current_row\t%s\n' "$worker_current_row"
-  fi
-  if [ -n "$worker_current_command" ]; then
-    printf 'worker_current_command\t%s\n' "$worker_current_command"
-  fi
-  if [ -n "$worker_last_row" ]; then
-    printf 'worker_last_row\t%s\n' "$worker_last_row"
-  fi
-  if [ -n "$worker_last_status" ]; then
-    printf 'worker_last_status\t%s\n' "$worker_last_status"
-  fi
-  if [ -n "$worker_last_exit_code" ]; then
-    printf 'worker_last_exit_code\t%s\n' "$worker_last_exit_code"
-  fi
-  if [ -n "$worker_last_summary" ]; then
-    printf 'worker_last_summary\t%s\n' "$worker_last_summary"
-  fi
-  printf 'dialtone_processes_running\t%s\n' "$process_count"
-  printf 'dialtone_processes_background\t%s\n' "$background_count"
-  printf 'dialtone_mod_running\t%s\n' "$client_process_count"
-  printf 'dialtone_mod_background\t%s\n' "$client_background_count"
-  printf 'dialtone_running\t%s\n' "$daemon_process_count"
-  printf 'worker_running\t%s\n' "$worker_process_count"
-  printf 'ensure_running\t%s\n' "$ensure_process_count"
-  if [ -n "$command_row_id" ]; then
-    print_fast_shell_command_status "$command_row_id" "$FAST_STATUS_FULL"
-  fi
-  if [ -n "$prompt_snapshot" ]; then
-    printf 'prompt_snapshot\t%s\n' "$prompt_snapshot"
-  fi
-  if [ -n "$command_snapshot" ]; then
-    printf 'command_snapshot\t%s\n' "$command_snapshot"
-  fi
-  if [ "$FAST_STATUS_FULL" = "1" ]; then
-    prompt_text="$(latest_snapshot_text_fast "$prompt_target")"
-    command_text="$(latest_snapshot_text_fast "$command_target")"
-    if [ -n "$(trim_text "$prompt_text")" ]; then
-      printf 'prompt_text\n%s\n' "$prompt_text"
-    fi
-    if [ -n "$(trim_text "$command_text")" ]; then
-      printf 'command_text\n%s\n' "$command_text"
-    fi
-  fi
-}
-
-run_internal_dialtone() {
-  local subcommand="${1:-}"
-  shift || true
-  ensure_bootstrap_state
-  case "$subcommand" in
-    bootstrap)
-      print_fast_shell_status
-      return 0
-      ;;
-    serve)
-      run_dialtone_serve
-      return 0
-      ;;
-    ensure)
-      start_dialtone_daemon
-      return 0
-      ;;
-    status|state)
-      if ! parse_fast_shell_status_args "$@"; then
-        echo "DIALTONE> unsupported dialtone status arguments" >&2
-        return 1
-      fi
-      print_fast_shell_status
-      return 0
-      ;;
-    queue)
-      if [ "$#" -eq 0 ]; then
-        echo "DIALTONE> queue requires a dialtone_mod command" >&2
-        return 1
-      fi
-      route_via_shell_fast "$@"
-      return 0
-      ;;
-    *)
-      echo "DIALTONE> unknown dialtone command: $subcommand" >&2
-      return 1
-      ;;
-  esac
 }
 
 run_go_in_default_nix() {
@@ -1260,17 +494,26 @@ USE_NIX="${DIALTONE_USE_NIX:-$USE_NIX}"
 DIALTONE_HOME_ROOT="${HOME:-$REPO_ROOT}"
 DIALTONE_STATE_DIR="${DIALTONE_STATE_DIR:-$DIALTONE_HOME_ROOT/.dialtone}"
 DIALTONE_STATE_DB="${DIALTONE_STATE_DB:-$DIALTONE_STATE_DIR/state.sqlite}"
+DIALTONE_BIN_DIR="${DIALTONE_BIN_DIR:-$DIALTONE_STATE_DIR/bin}"
 DIALTONE_TMUX_TARGET_FILE="${DIALTONE_TMUX_TARGET_FILE:-$DIALTONE_STATE_DIR/tmux_target}"
 NIXPKGS_FLAKE_REF="${DIALTONE_NIXPKGS_FLAKE:-${NIXPKGS_FLAKE:-nixpkgs}}"
 mkdir -p "$DIALTONE_STATE_DIR"
 
 if [ "${1:-}" = "__dialtone" ]; then
   shift || true
-  run_internal_dialtone "$@"
-  exit $?
+  exec_dialtone_internal "$@"
 fi
 
 ensure_bootstrap_state
+
+if [ "${1:-}" = "dialtone" ] && [ "${2:-}" = "v1" ]; then
+  case "${3:-}" in
+    ""|ensure|serve|status|state|bootstrap|queue|paths|processes|commands|command|log|logs|protocol-runs|protocol-run|test-runs|test-run)
+      shift 2 || true
+      exec_dialtone_internal "$@"
+      ;;
+  esac
+fi
 
 if [ "${1:-}" = "shell" ] && [ "${2:-}" = "v1" ]; then
   case "${3:-}" in

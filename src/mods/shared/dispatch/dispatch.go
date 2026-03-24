@@ -17,6 +17,7 @@ type ShellCommandIntent struct {
 	DisplayCommand string   `json:"display_command,omitempty"`
 	Args           []string `json:"args,omitempty"`
 	Target         string   `json:"target,omitempty"`
+	LogPath        string   `json:"log_path,omitempty"`
 	Summary        string   `json:"summary,omitempty"`
 	Error          string   `json:"error,omitempty"`
 	Output         string   `json:"output,omitempty"`
@@ -56,7 +57,7 @@ func ShouldRouteViaShell(modName, command string) bool {
 	if mod == "" {
 		return false
 	}
-	if mod == "shell" || mod == "ghostty" || mod == "tmux" || mod == "test" {
+	if mod == "shell" || mod == "ghostty" || mod == "tmux" || mod == "test" || mod == "dialtone" || mod == "codex" {
 		return false
 	}
 	return true

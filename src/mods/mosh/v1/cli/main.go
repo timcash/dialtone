@@ -21,6 +21,18 @@ func main() {
 		if err := runInstall(args); err != nil {
 			exitIfErr(err, "mosh install")
 		}
+	case "build":
+		if err := runBuild(args); err != nil {
+			exitIfErr(err, "mosh build")
+		}
+	case "format":
+		if err := runFormat(args); err != nil {
+			exitIfErr(err, "mosh format")
+		}
+	case "test":
+		if err := runTest(args); err != nil {
+			exitIfErr(err, "mosh test")
+		}
 	case "setup":
 		if err := runSetup(args); err != nil {
 			exitIfErr(err, "mosh setup")
@@ -37,11 +49,17 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println("Usage: ./dialtone_mod mosh v1 <install|setup|connect> [options]")
+	fmt.Println("Usage: ./dialtone_mod mosh v1 <command> [options]")
 	fmt.Println("")
 	fmt.Println("Commands:")
 	fmt.Println("  install [--nixpkgs-url URL] [--ensure]")
 	fmt.Println("      Check for mosh availability; use --ensure to install via nix profile.")
+	fmt.Println("  build")
+	fmt.Println("      Build the mosh v1 CLI wrapper to <repo-root>/bin/mods/mosh/v1/mosh")
+	fmt.Println("  format [--dir DIR]")
+	fmt.Println("      Run gofmt on mosh v1 Go files")
+	fmt.Println("  test")
+	fmt.Println("      Run go test for mosh v1")
 	fmt.Println("  setup [--host NAME] [--ensure]")
 	fmt.Println("      Verify local or remote mosh-server availability.")
 	fmt.Println("      --host    target host for server setup check")

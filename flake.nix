@@ -12,11 +12,7 @@
           pkgs = import nixpkgs { inherit system; };
           baseDevPackages = with pkgs; [
             bash curl git gh go_1_25 gnumake nodejs bun tmux zsh cloudflared sqlite
-          ] ++ (pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs.darwin.apple_sdk.frameworks; [
-            Security
-            CoreFoundation
-            IOKit
-          ]));
+          ];
           mkShellHook = shellName: ''
             export DIALTONE_HOST_PATH="''${DIALTONE_HOST_PATH:-$PATH}"
             export DIALTONE_REPO_ROOT="''${DIALTONE_REPO_ROOT:-$(pwd)}"
@@ -55,7 +51,9 @@
               bindkey '^I' expand-or-complete
             fi
 
-            echo "DIALTONE> nix-shell active (${shellName})"
+            if [ "''${DIALTONE_NIX_SHELL_BANNER:-1}" != "0" ]; then
+              echo "DIALTONE> nix-shell active (${shellName})"
+            fi
           '';
           mkDevShell = { shellName, extraPackages ? [ ] }:
             pkgs.mkShell {
@@ -112,15 +110,6 @@
               exec go run ./plugins/repl/src_v1/cmd/repld/main.go "$@"
             '';
           };
-          replModV1 = runtimeScript {
-            name = "dialtone-repl-v1";
-            text = ''
-              set -euo pipefail
-              repo_root="''${DIALTONE_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-              cd "$repo_root/src"
-              exec go run ./mods.go repl v1 "$@"
-            '';
-          };
           sshModV1 = runtimeScript {
             name = "dialtone-ssh-v1";
             text = ''
@@ -138,7 +127,6 @@
             camera-service = cameraService;
             mavlink-service = mavlinkService;
             repl-service = replService;
-            repl-v1 = replModV1;
             ssh-v1 = sshModV1;
           };
           apps = {
@@ -162,10 +150,6 @@
               type = "app";
               program = "${replService}/bin/dialtone-repl-service";
             };
-            repl-v1 = {
-              type = "app";
-              program = "${replModV1}/bin/dialtone-repl-v1";
-            };
             ssh-v1 = {
               type = "app";
               program = "${sshModV1}/bin/dialtone-ssh-v1";
@@ -175,9 +159,6 @@
             default = mkDevShell {
               shellName = "default";
               extraPackages = [ pkgs.openssh pkgs.expect ];
-            };
-            repl-v1 = mkDevShell {
-              shellName = "default";
             };
             ssh-v1 = mkDevShell {
               shellName = "default";

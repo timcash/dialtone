@@ -49,4 +49,3 @@ func main() {
 		fmt.Fprintf(os.Stderr, "close error: %v\n", err)
 	}
 }
-

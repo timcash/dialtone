@@ -55,13 +55,15 @@ src/mods/shell/v1/
 # Check worker status, queued work, and the latest routed command result.
 ./dialtone_mod shell v1 status --full
 
-# Inspect one routed command later by its row id.
-./dialtone_mod shell v1 status --row-id 901 --full --sync=false
+# Use dialtone v1 for focused control-plane inspection.
+./dialtone_mod dialtone v1 commands --limit 10
+./dialtone_mod dialtone v1 command --row-id 901 --full
+./dialtone_mod dialtone v1 log --kind command --row-id 901
 
 # Plain mod commands are routed through SQLite into dialtone-view.
 ./dialtone_mod mods v1 db graph --format outline
 
-# Run the shell mod's Go tests visibly in dialtone-view.
+# Run the shell workflow Go suite visibly in dialtone-view.
 ./dialtone_mod shell v1 test
 
 # Run a one-off visible command in dialtone-view.
@@ -75,6 +77,30 @@ src/mods/shell/v1/
 # Run the full end-to-end system harness.
 ./dialtone_mod test v1 start
 ```
+
+## Readiness Model
+
+`shell v1` now owns visible-workflow readiness.
+
+That means:
+
+- `shell v1 ensure-worker` is the single setup/recovery path
+- `shell v1 run`, `shell v1 prompt`, `shell v1 enqueue-command`, `shell v1 test`, and `shell v1 test-all` should all rely on that preflight path before enqueueing visible work
+- the readiness check verifies:
+  - `prompt_target`
+  - `command_target`
+  - tmux pane reachability for both targets
+  - worker heartbeat / running state
+  - worker pane matching `command_target`
+- if targets or panes are missing, the shell workflow should be recreated
+- if panes exist but the worker is stale, only the worker should be restarted
+- if preflight still cannot produce a healthy workflow, the command should fail with concrete reasons instead of hanging
+
+Current known live blocker:
+
+- the Go preflight tests are green
+- the live `shell v1 start` / `shell v1 test` path can still loop queued `codex v1 start` rows after the panes are created
+- treat that as the next shell-workflow bug to fix before trusting the visible startup path as fully healthy
 
 ## DIALTONE>
 
@@ -92,7 +118,10 @@ started shell workflow: ghostty one-window/one-tab -> codex-view:0:0 (codex) + c
 $ ./dialtone_mod mods v1 db graph --format outline
 route	queued
 command_id	71
-inspect	./dialtone_mod shell v1 status --row-id 71 --full --sync=false
+inspect	./dialtone_mod dialtone v1 command --row-id 71 --full
+
+$ ./dialtone_mod shell v1 test
+ran command via shell bus [row_id=72]
 
 $ ./dialtone_mod shell v1 test-all
 ran command via shell bus [row_id=72]
@@ -123,47 +152,25 @@ DIALTONE_TEST_ALL_DONE
 
 ## Test Results
 
-- Timestamp: 2026-03-22
+- Timestamp: 2026-03-23
 - Commands:
 
 ```sh
-./dialtone_mod shell v1 run --wait-seconds 180 \
-  "clear && cd /Users/user/dialtone/src && go test ./mods/shared/router ./mods/tmux/v1/cli ./mods/shared/nixplan ./mods/shell/v1/cli"
+env DIALTONE_NIX_SHELL_BANNER=0 nix --extra-experimental-features 'nix-command flakes' --no-warn-dirty develop .#default --command \
+  bash -lc 'cd /Users/user/dialtone/src && go test ./mods/shell/v1/cli ./mods/dialtone/v1 ./mods/ghostty/v1/cli ./mods/tmux/v1/cli'
 
-./dialtone_mod shell v1 test-all --wait-seconds 240
+./dialtone_mod shell v1 test
 ```
 
 - Visible result:
 
 ```text
-ok  	dialtone/dev/mods/shared/router
-ok  	dialtone/dev/mods/tmux/v1/cli
-ok  	dialtone/dev/mods/shared/nixplan
 ok  	dialtone/dev/mods/shell/v1/cli
-
-ok  	dialtone/dev/mods/chrome/v1
-ok  	dialtone/dev/mods/chrome/v1/cli
-ok  	dialtone/dev/mods/codex/v1
-ok  	dialtone/dev/mods/codex/v1/cli
-ok  	dialtone/dev/mods/ghostty/v1
+ok  	dialtone/dev/mods/dialtone/v1
 ok  	dialtone/dev/mods/ghostty/v1/cli
-ok  	dialtone/dev/mods/mesh/v3
-ok  	dialtone/dev/mods/mod/v1
-ok  	dialtone/dev/mods/mod/v1/cli
-ok  	dialtone/dev/mods/mosh/v1
-ok  	dialtone/dev/mods/mosh/v1/cli
-ok  	dialtone/dev/mods/repl/v1
-ok  	dialtone/dev/mods/repl/v1/cli
-ok  	dialtone/dev/mods/shared/dispatch
-ok  	dialtone/dev/mods/shared/nixplan
-ok  	dialtone/dev/mods/shared/router
-ok  	dialtone/dev/mods/shared/sqlitestate
-ok  	dialtone/dev/mods/shell/v1
-ok  	dialtone/dev/mods/shell/v1/cli
-ok  	dialtone/dev/mods/ssh/v1
-ok  	dialtone/dev/mods/tmux/v1
 ok  	dialtone/dev/mods/tmux/v1/cli
-ok  	dialtone/dev/mods/tsnet/v1
-ok  	dialtone/dev/mods/tsnet/v1/cli
-DIALTONE_TEST_ALL_DONE
+
+live note:
+./dialtone_mod shell v1 test now recreates the workflow instead of silently trusting stale worker state,
+but the visible startup path still loops queued ./dialtone_mod codex v1 start rows after pane creation.
 ```

@@ -61,12 +61,22 @@ dialtone> SELECT cypher_execute('MATCH (r:Router) RETURN r');
 ### 3. Running Single Commands
 If you want to execute a query script automatically (e.g., from another Dialtone mod or shell script), use the `-c` flag.
 
+**Important:** If no database file is provided, each command runs against a fresh, empty in-memory (`:memory:`) database and destroys it upon exit. It **does not** include the default network topology seed data that the REPL uses.
+
 ```sh
-# Example: Creating a new node
+# Example: Creating a new node in an ephemeral database (data is lost immediately)
 ../../../../bin/mods/db/v1/dialtone_db -c "SELECT cypher_execute('CREATE (r:Router {name: \"Core-1\", ip: \"10.0.0.1\"})');"
 
-# Example: Running the latency-aware shortest path algorithm
+# Example: Running the latency-aware shortest path algorithm (will return empty/failure on a fresh DB)
 ../../../../bin/mods/db/v1/dialtone_db -c "SELECT graph_shortest_path_weighted(1, 3);"
+```
+
+To persist data, pass a file path as the first positional argument before the `-c` flag:
+
+```sh
+# Example: Persisting state across commands
+../../../../bin/mods/db/v1/dialtone_db my_graph.db -c "SELECT cypher_execute('CREATE (r:Router {name: \"Core-1\", ip: \"10.0.0.1\"})');"
+../../../../bin/mods/db/v1/dialtone_db my_graph.db -c "SELECT cypher_execute('MATCH (r:Router) RETURN r');"
 ```
 
 ## How the Code Works
@@ -78,3 +88,11 @@ If you want to execute a query script automatically (e.g., from another Dialtone
     3.  Runs the `CREATE VIRTUAL TABLE` setup.
     4.  Manages the standard input/output loop for the CLI.
 *   **`patch_dijkstra`**: In `sqlite-graph/src/graph-algo.c`, we modified the SQL query driving Dijkstra's algorithm to do a dynamic `COALESCE` on the edge's JSON properties. It looks for `weight`, then `latency`, defaulting to `1.0`. We also exposed this via `graphShortestPathWeightedFunc` in `graph.c`.
+
+## Notes for AI Agents
+
+When working with this module, please adhere to the following constraints and gotchas:
+
+1.  **Statefulness:** Single commands (`-c`) run against an empty `:memory:` database unless a file path is provided as the first positional argument (e.g., `dialtone_db my_graph.db -c "..."`). State is not saved unless a file is specified.
+2.  **Seed Data:** The "Computer Networking Topology" seed is ONLY injected when starting the interactive REPL with no arguments. It is not available when using `-c` or when providing a database file.
+3.  **Build Constraints:** Never run `zig build` directly. Always use `./build.sh`. The wrapper script explicitly redirects the local and global Zig caches (`ZIG_LOCAL_CACHE_DIR`, `ZIG_GLOBAL_CACHE_DIR`) outside the repository (e.g., to `/tmp/`) to prevent massive binary caches from polluting the workspace and overflowing your context window.

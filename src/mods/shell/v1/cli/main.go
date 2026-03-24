@@ -16,9 +16,85 @@ import (
 	"time"
 
 	"dialtone/dev/internal/modstate"
+	"dialtone/dev/internal/tmuxcmd"
 	"dialtone/dev/mods/shared/dispatch"
 	"dialtone/dev/mods/shared/sqlitestate"
 )
+
+type shellWorkflowState struct {
+	PromptTarget       string
+	CommandTarget      string
+	PromptPanePresent  bool
+	CommandPanePresent bool
+	WorkerHealthy      bool
+	WorkerPane         string
+}
+
+var (
+	shellPaneExistsFn  = paneExists
+	shellRunStartFn    func([]string) error
+	shellStartWorkerFn func(string, string, string, time.Duration) error
+)
+
+func (state shellWorkflowState) readyForVisibleCommands() bool {
+	if strings.TrimSpace(state.PromptTarget) == "" || strings.TrimSpace(state.CommandTarget) == "" {
+		return false
+	}
+	if !state.PromptPanePresent || !state.CommandPanePresent || !state.WorkerHealthy {
+		return false
+	}
+	workerPane := strings.TrimSpace(state.WorkerPane)
+	commandTarget := strings.TrimSpace(state.CommandTarget)
+	return workerPane != "" && workerPane == commandTarget
+}
+
+func (state shellWorkflowState) problems() []string {
+	problems := make([]string, 0, 6)
+	if strings.TrimSpace(state.PromptTarget) == "" {
+		problems = append(problems, "missing prompt_target")
+	} else if !state.PromptPanePresent {
+		problems = append(problems, "prompt pane is not reachable")
+	}
+	if strings.TrimSpace(state.CommandTarget) == "" {
+		problems = append(problems, "missing command_target")
+	} else if !state.CommandPanePresent {
+		problems = append(problems, "command pane is not reachable")
+	}
+	if !state.WorkerHealthy {
+		problems = append(problems, "worker heartbeat is stale or stopped")
+	}
+	workerPane := strings.TrimSpace(state.WorkerPane)
+	commandTarget := strings.TrimSpace(state.CommandTarget)
+	switch {
+	case workerPane == "":
+		problems = append(problems, "worker pane is missing")
+	case commandTarget != "" && workerPane != commandTarget:
+		problems = append(problems, fmt.Sprintf("worker pane %s does not match command target %s", printableTarget(workerPane), printableTarget(commandTarget)))
+	}
+	return problems
+}
+
+func (state shellWorkflowState) problemSummary() string {
+	problems := state.problems()
+	if len(problems) == 0 {
+		return "no workflow issues"
+	}
+	return strings.Join(problems, "; ")
+}
+
+func invokeShellRunStart(args []string) error {
+	if shellRunStartFn != nil {
+		return shellRunStartFn(args)
+	}
+	return runStart(args)
+}
+
+func invokeShellStartWorker(repoRoot, pane, shellName string, wait time.Duration) error {
+	if shellStartWorkerFn != nil {
+		return shellStartWorkerFn(repoRoot, pane, shellName, wait)
+	}
+	return startShellWorker(repoRoot, pane, shellName, wait)
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -32,6 +108,18 @@ func main() {
 	switch command {
 	case "help", "-h", "--help":
 		printUsage()
+	case "install":
+		if err := runInstall(args); err != nil {
+			exitIfErr(err, "shell install")
+		}
+	case "build":
+		if err := runBuild(args); err != nil {
+			exitIfErr(err, "shell build")
+		}
+	case "format":
+		if err := runFormat(args); err != nil {
+			exitIfErr(err, "shell format")
+		}
 	case "start":
 		if err := runStart(args); err != nil {
 			exitIfErr(err, "shell start")
@@ -139,7 +227,7 @@ func runStart(argv []string) error {
 		return err
 	}
 
-	startTmuxCmd := fmt.Sprintf("tmux new-session -A -s %s", strings.TrimSpace(*session))
+	startTmuxCmd := buildTmuxStartCommand(repoRoot, strings.TrimSpace(*session))
 	if _, err := runDialtoneMod(repoRoot,
 		"ghostty", "v1", "fresh-window",
 		"--cwd", repoRoot,
@@ -161,20 +249,13 @@ func runStart(argv []string) error {
 		return err
 	}
 
-	if err := ensureSplitLayout(repoRoot, strings.TrimSpace(*session), strings.TrimSpace(*dialtoneShell), strings.TrimSpace(*rightTitle), time.Duration(*waitSeconds)*time.Second); err != nil {
-		return err
-	}
-	if _, err := runDialtoneMod(repoRoot,
-		"codex", "v1", "start",
-		"--session", strings.TrimSpace(*session),
-		"--pane", pane,
-		"--shell", strings.TrimSpace(*shellName),
-		"--reasoning", strings.TrimSpace(*reasoning),
-		"--model", strings.TrimSpace(*model),
-	); err != nil {
+	if err := ensureSplitLayout(repoRoot, strings.TrimSpace(*session), strings.TrimSpace(*dialtoneShell), strings.TrimSpace(*rightTitle), time.Duration(*waitSeconds)*time.Second, false); err != nil {
 		return err
 	}
 	if err := startShellWorker(repoRoot, rightPane, strings.TrimSpace(*dialtoneShell), time.Duration(*waitSeconds)*time.Second); err != nil {
+		return err
+	}
+	if _, err := runDialtoneMod(repoRoot, buildCodexStartArgs(strings.TrimSpace(*session), pane, strings.TrimSpace(*shellName), strings.TrimSpace(*reasoning), strings.TrimSpace(*model))...); err != nil {
 		return err
 	}
 	if *runTests {
@@ -217,12 +298,16 @@ func runSplitVertical(argv []string) error {
 	return runSplitVerticalWithOptions(strings.TrimSpace(*session), strings.TrimSpace(*shellName), strings.TrimSpace(*rightTitle), time.Duration(*waitSeconds)*time.Second)
 }
 
+func buildTmuxStartCommand(repoRoot, session string) string {
+	return tmuxcmd.ShellCommand(repoRoot, "new-session", "-A", "-s", strings.TrimSpace(session))
+}
+
 func runSplitVerticalWithOptions(session, shellName, rightTitle string, wait time.Duration) error {
 	repoRoot, err := locateRepoRoot()
 	if err != nil {
 		return err
 	}
-	if err := ensureSplitLayout(repoRoot, session, shellName, rightTitle, wait); err != nil {
+	if err := ensureSplitLayout(repoRoot, session, shellName, rightTitle, wait, true); err != nil {
 		return err
 	}
 	fmt.Printf("split shell workflow: codex on %s:0:0 (left), %s on %s:0:1 (right)\n",
@@ -233,7 +318,7 @@ func runSplitVerticalWithOptions(session, shellName, rightTitle string, wait tim
 	return nil
 }
 
-func ensureSplitLayout(repoRoot, session, shellName, rightTitle string, wait time.Duration) error {
+func ensureSplitLayout(repoRoot, session, shellName, rightTitle string, wait time.Duration, enterShell bool) error {
 	leftPane := fmt.Sprintf("%s:0:0", strings.TrimSpace(session))
 	rightPane := fmt.Sprintf("%s:0:1", strings.TrimSpace(session))
 	if !paneExists(repoRoot, rightPane) {
@@ -250,16 +335,19 @@ func ensureSplitLayout(repoRoot, session, shellName, rightTitle string, wait tim
 	if err := waitForPane(repoRoot, rightPane, wait); err != nil {
 		return err
 	}
-	if _, err := runDialtoneMod(repoRoot,
-		"tmux", "v1", "shell",
-		"--pane", rightPane,
-		"--shell", strings.TrimSpace(shellName),
-	); err != nil {
-		return err
-	}
-	time.Sleep(500 * time.Millisecond)
-	if _, err := runDialtoneMod(repoRoot, "tmux", "v1", "clear", "--pane", rightPane); err != nil {
-		return err
+	if enterShell {
+		if _, err := runDialtoneMod(repoRoot,
+			"tmux", "v1", "shell",
+			"--pane", rightPane,
+			"--shell", strings.TrimSpace(shellName),
+			"--banner=false",
+		); err != nil {
+			return err
+		}
+		time.Sleep(500 * time.Millisecond)
+		if _, err := runDialtoneMod(repoRoot, "tmux", "v1", "clear", "--pane", rightPane); err != nil {
+			return err
+		}
 	}
 	if _, err := runDialtoneMod(repoRoot, "tmux", "v1", "target", "--set", rightPane); err != nil {
 		return err
@@ -271,22 +359,27 @@ func ensureSplitLayout(repoRoot, session, shellName, rightTitle string, wait tim
 }
 
 func startShellWorker(repoRoot, pane, shellName string, wait time.Duration) error {
+	serveCommand := buildShellWorkerStartCommand(repoRoot, strings.TrimSpace(pane))
 	if _, err := runDialtoneMod(repoRoot,
 		"tmux", "v1", "shell",
 		"--pane", strings.TrimSpace(pane),
 		"--shell", strings.TrimSpace(shellName),
+		"--banner=false",
+		"--command", serveCommand,
 	); err != nil {
 		return err
 	}
-	if _, err := runDialtoneMod(repoRoot,
-		"tmux", "v1", "write",
-		"--pane", strings.TrimSpace(pane),
-		"--enter",
-		fmt.Sprintf("cd %s && ./dialtone_mod shell v1 serve --pane %s", repoRoot, strings.TrimSpace(pane)),
-	); err != nil {
+	if err := waitForShellWorkerReady(repoRoot, strings.TrimSpace(pane), wait); err != nil {
 		return err
 	}
-	return waitForShellWorkerReady(repoRoot, strings.TrimSpace(pane), wait)
+	if _, err := runDialtoneModQuiet(repoRoot, "tmux", "v1", "clear", "--pane", strings.TrimSpace(pane)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func buildShellWorkerStartCommand(repoRoot, pane string) string {
+	return fmt.Sprintf("cd %s && ./dialtone_mod shell v1 serve --pane %s", repoRoot, strings.TrimSpace(pane))
 }
 
 func waitForShellWorkerReady(repoRoot, pane string, timeout time.Duration) error {
@@ -328,50 +421,27 @@ func runEnsureWorker(argv []string) error {
 	if err != nil {
 		return err
 	}
-	db, err := modstate.Open(sqlitestate.ResolveStateDBPath(repoRoot))
+	wait := time.Duration(*waitSeconds) * time.Second
+	if err := ensureVisibleShellWorkflow(
+		repoRoot,
+		strings.TrimSpace(*session),
+		strings.TrimSpace(*dialtoneShell),
+		strings.TrimSpace(*reasoning),
+		strings.TrimSpace(*model),
+		strings.TrimSpace(*rightTitle),
+		wait,
+	); err != nil {
+		return err
+	}
+	state, err := inspectShellWorkflowState(repoRoot)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
-	ready, err := dispatch.ShellReady(db)
-	if err != nil {
-		return err
+	if !state.readyForVisibleCommands() {
+		return fmt.Errorf("shell workflow is not ready: %s", state.problemSummary())
 	}
-	healthy, err := shellWorkerHealthy(db, 5*time.Second)
-	if err != nil {
-		return err
-	}
-	if ready && healthy {
-		fmt.Println("shell worker already running")
-		return nil
-	}
-	if !ready {
-		return runStart([]string{
-			"--session", strings.TrimSpace(*session),
-			"--dialtone-shell", strings.TrimSpace(*dialtoneShell),
-			"--reasoning", strings.TrimSpace(*reasoning),
-			"--model", strings.TrimSpace(*model),
-			"--right-title", strings.TrimSpace(*rightTitle),
-			"--wait-seconds", fmt.Sprintf("%d", *waitSeconds),
-			"--run-tests=false",
-		})
-	}
-	commandTarget, err := loadStateTarget(repoRoot, sqlitestate.TmuxTargetKey)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(commandTarget) == "" || !paneExists(repoRoot, commandTarget) {
-		return runStart([]string{
-			"--session", strings.TrimSpace(*session),
-			"--dialtone-shell", strings.TrimSpace(*dialtoneShell),
-			"--reasoning", strings.TrimSpace(*reasoning),
-			"--model", strings.TrimSpace(*model),
-			"--right-title", strings.TrimSpace(*rightTitle),
-			"--wait-seconds", fmt.Sprintf("%d", *waitSeconds),
-			"--run-tests=false",
-		})
-	}
-	return startShellWorker(repoRoot, commandTarget, strings.TrimSpace(*dialtoneShell), time.Duration(*waitSeconds)*time.Second)
+	fmt.Printf("shell worker ready\t%s\n", strings.TrimSpace(state.CommandTarget))
+	return nil
 }
 
 func runPrompt(argv []string) error {
@@ -388,6 +458,11 @@ func runPrompt(argv []string) error {
 	repoRoot, err := locateRepoRoot()
 	if err != nil {
 		return err
+	}
+	if *syncNow {
+		if err := ensureVisibleShellWorkflow(repoRoot, strings.TrimSpace(*session), defaultDialtoneShellName(), "medium", "gpt-5.4", "dialtone-view", 20*time.Second); err != nil {
+			return err
+		}
 	}
 	text := strings.TrimSpace(strings.Join(opts.Args(), " "))
 	db, err := modstate.Open(sqlitestate.ResolveStateDBPath(repoRoot))
@@ -435,19 +510,20 @@ func runEnqueueCommand(argv []string) error {
 	if err != nil {
 		return err
 	}
+	if *syncNow {
+		if err := ensureVisibleShellWorkflow(repoRoot, strings.TrimSpace(*session), defaultDialtoneShellName(), "medium", "gpt-5.4", "dialtone-view", time.Duration(*waitSeconds)*time.Second); err != nil {
+			return err
+		}
+	}
 	db, err := modstate.Open(sqlitestate.ResolveStateDBPath(repoRoot))
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	body, err := json.Marshal(shellBusIntentBody{
+	rowID, err := enqueueShellBusCommand(db, repoRoot, "shell-cli", strings.TrimSpace(*session), strings.TrimSpace(*pane), shellBusIntentBody{
 		Command: strings.TrimSpace(strings.Join(opts.Args(), " ")),
 		Expect:  strings.TrimSpace(*expect),
 	})
-	if err != nil {
-		return err
-	}
-	rowID, err := modstate.EnqueueShellBus(db, "shell", "desired", "command", "run", "shell-cli", strings.TrimSpace(*session), strings.TrimSpace(*pane), string(body))
 	if err != nil {
 		return err
 	}
@@ -482,19 +558,18 @@ func runRun(argv []string) error {
 	if err != nil {
 		return err
 	}
+	if err := ensureVisibleShellWorkflow(repoRoot, strings.TrimSpace(*session), defaultDialtoneShellName(), "medium", "gpt-5.4", "dialtone-view", time.Duration(*waitSeconds)*time.Second); err != nil {
+		return err
+	}
 	db, err := modstate.Open(sqlitestate.ResolveStateDBPath(repoRoot))
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	body, err := json.Marshal(shellBusIntentBody{
+	rowID, err := enqueueShellBusCommand(db, repoRoot, "shell-cli", strings.TrimSpace(*session), strings.TrimSpace(*pane), shellBusIntentBody{
 		Command: strings.TrimSpace(strings.Join(opts.Args(), " ")),
 		Expect:  strings.TrimSpace(*expect),
 	})
-	if err != nil {
-		return err
-	}
-	rowID, err := modstate.EnqueueShellBus(db, "shell", "desired", "command", "run", "shell-cli", strings.TrimSpace(*session), strings.TrimSpace(*pane), string(body))
 	if err != nil {
 		return err
 	}
@@ -508,7 +583,7 @@ func runRun(argv []string) error {
 
 func runTest(argv []string) error {
 	opts := flag.NewFlagSet("shell v1 test", flag.ContinueOnError)
-	waitSeconds := opts.Int("wait-seconds", 20, "Seconds to wait for the go test result in dialtone-view")
+	waitSeconds := opts.Int("wait-seconds", 60, "Seconds to wait for the shell workflow Go suite in dialtone-view")
 	if err := opts.Parse(argv); err != nil {
 		return err
 	}
@@ -522,11 +597,10 @@ func runTest(argv []string) error {
 	if err != nil {
 		return err
 	}
-	command := buildGoTestCommand(repoRoot, "shell", "v1")
-	expect := "ok  \tdialtone/dev/mods/shell/v1"
+	command := buildShellTestCommand(repoRoot)
 	return runRun([]string{
 		"--wait-seconds", fmt.Sprintf("%d", *waitSeconds),
-		"--expect", expect,
+		"--expect", "DIALTONE_SHELL_TEST_DONE",
 		command,
 	})
 }
@@ -598,6 +672,28 @@ func buildGoTestCommand(repoRoot, modName, version string) string {
 	return fmt.Sprintf("clear && cd %s/src && go test ./mods/%s/%s/...", root, mod, ver)
 }
 
+func shellTestPackages() []string {
+	return []string{
+		"./internal/modcli",
+		"./internal/modstate",
+		"./mods/shared/dispatch",
+		"./mods/shared/router",
+		"./mods/shared/sqlitestate",
+		"./mods/dialtone/v1",
+		"./mods/codex/v1/...",
+		"./mods/ghostty/v1/...",
+		"./mods/shell/v1/...",
+		"./mods/test/v1/...",
+		"./mods/tmux/v1/...",
+	}
+}
+
+func buildShellTestCommand(repoRoot string) string {
+	root := strings.TrimSpace(repoRoot)
+	packages := strings.Join(shellTestPackages(), " ")
+	return fmt.Sprintf("clear && cd %s/src && go test %s && printf 'DIALTONE_SHELL_TEST_DONE\\n'", root, packages)
+}
+
 func buildBasicTestCommand(repoRoot string) string {
 	root := strings.TrimSpace(repoRoot)
 	return fmt.Sprintf("clear && cd %s/src && go test ./internal/modstate ./mods/shared/sqlitestate ./mods/mod/v1 ./mods/shell/v1/cli", root)
@@ -606,6 +702,17 @@ func buildBasicTestCommand(repoRoot string) string {
 func buildAllModsTestCommand(repoRoot string) string {
 	root := strings.TrimSpace(repoRoot)
 	return fmt.Sprintf("clear && cd %s/src && go test ./mods/...", root)
+}
+
+func buildCodexStartArgs(session, pane, shellName, reasoning, model string) []string {
+	return []string{
+		"codex", "v1", "start",
+		"--session", strings.TrimSpace(session),
+		"--pane", strings.TrimSpace(pane),
+		"--shell", strings.TrimSpace(shellName),
+		"--reasoning", strings.TrimSpace(reasoning),
+		"--model", strings.TrimSpace(model),
+	}
 }
 
 func defaultDialtoneShellName() string {
@@ -749,6 +856,7 @@ type shellBusIntentBody struct {
 	DisplayCommand string   `json:"display_command,omitempty"`
 	Args           []string `json:"args,omitempty"`
 	Target         string   `json:"target,omitempty"`
+	LogPath        string   `json:"log_path,omitempty"`
 	Summary        string   `json:"summary,omitempty"`
 	Error          string   `json:"error,omitempty"`
 	Output         string   `json:"output,omitempty"`
@@ -757,6 +865,88 @@ type shellBusIntentBody struct {
 	PID            int      `json:"pid,omitempty"`
 	ExitCode       int      `json:"exit_code"`
 	RuntimeMS      int64    `json:"runtime_ms"`
+}
+
+func enqueueShellBusCommand(db *sql.DB, repoRoot, actor, session, pane string, body shellBusIntentBody) (int64, error) {
+	if db == nil {
+		return 0, errors.New("enqueueShellBusCommand requires an open sqlite db handle")
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return 0, err
+	}
+	rowID, err := modstate.EnqueueShellBus(db, "shell", "desired", "command", "run", strings.TrimSpace(actor), strings.TrimSpace(session), strings.TrimSpace(pane), string(raw))
+	if err != nil {
+		return 0, err
+	}
+	body.LogPath = sqlitestate.ResolveCommandLogPath(repoRoot, rowID)
+	updated, err := json.Marshal(body)
+	if err != nil {
+		return 0, err
+	}
+	if err := modstate.UpdateShellBusStatus(db, rowID, "queued", 0, string(updated)); err != nil {
+		return 0, err
+	}
+	return rowID, nil
+}
+
+func ensureShellBusCommandLogPath(repoRoot string, rowID int64, body *shellBusIntentBody) {
+	if body == nil || rowID <= 0 || strings.TrimSpace(repoRoot) == "" {
+		return
+	}
+	if strings.TrimSpace(body.LogPath) == "" {
+		body.LogPath = sqlitestate.ResolveCommandLogPath(repoRoot, rowID)
+	}
+}
+
+func writeShellBusCommandLog(repoRoot string, rowID int64, body shellBusIntentBody, status string) error {
+	ensureShellBusCommandLogPath(repoRoot, rowID, &body)
+	logPath := strings.TrimSpace(body.LogPath)
+	if logPath == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		return err
+	}
+	var out strings.Builder
+	fmt.Fprintf(&out, "row_id=%d\n", rowID)
+	if strings.TrimSpace(body.DisplayCommand) != "" {
+		fmt.Fprintf(&out, "display_command=%s\n", strings.TrimSpace(body.DisplayCommand))
+	}
+	if strings.TrimSpace(body.Command) != "" {
+		fmt.Fprintf(&out, "command=%s\n", strings.TrimSpace(body.Command))
+	}
+	if strings.TrimSpace(body.Target) != "" {
+		fmt.Fprintf(&out, "target=%s\n", strings.TrimSpace(body.Target))
+	}
+	if strings.TrimSpace(status) != "" {
+		fmt.Fprintf(&out, "status=%s\n", strings.TrimSpace(status))
+	}
+	if strings.TrimSpace(body.StartedAt) != "" {
+		fmt.Fprintf(&out, "started_at=%s\n", strings.TrimSpace(body.StartedAt))
+	}
+	if strings.TrimSpace(body.FinishedAt) != "" {
+		fmt.Fprintf(&out, "finished_at=%s\n", strings.TrimSpace(body.FinishedAt))
+	}
+	if body.PID > 0 {
+		fmt.Fprintf(&out, "pid=%d\n", body.PID)
+	}
+	if body.ExitCode != 0 || strings.TrimSpace(status) == "done" || strings.TrimSpace(status) == "failed" {
+		fmt.Fprintf(&out, "exit_code=%d\n", body.ExitCode)
+	}
+	if body.RuntimeMS > 0 {
+		fmt.Fprintf(&out, "runtime_ms=%d\n", body.RuntimeMS)
+	}
+	if strings.TrimSpace(body.Summary) != "" {
+		fmt.Fprintf(&out, "summary=%s\n", strings.TrimSpace(body.Summary))
+	}
+	if strings.TrimSpace(body.Error) != "" {
+		fmt.Fprintf(&out, "error=%s\n", strings.TrimSpace(body.Error))
+	}
+	if strings.TrimSpace(body.Output) != "" {
+		fmt.Fprintf(&out, "\noutput\n%s\n", strings.TrimRight(body.Output, "\n"))
+	}
+	return os.WriteFile(logPath, []byte(out.String()), 0o644)
 }
 
 func runServe(argv []string) error {
@@ -866,6 +1056,82 @@ func shellWorkerHealthy(db *sql.DB, maxAge time.Duration) (bool, error) {
 		return false, nil
 	}
 	return time.Since(heartbeat) <= maxAge, nil
+}
+
+func inspectShellWorkflowState(repoRoot string) (shellWorkflowState, error) {
+	db, err := modstate.Open(sqlitestate.ResolveStateDBPath(repoRoot))
+	if err != nil {
+		return shellWorkflowState{}, err
+	}
+	defer db.Close()
+	if err := modstate.EnsureSchema(db); err != nil {
+		return shellWorkflowState{}, err
+	}
+	promptTarget, err := loadStateTargetFromDB(db, sqlitestate.TmuxPromptTargetKey)
+	if err != nil {
+		return shellWorkflowState{}, err
+	}
+	commandTarget, err := loadStateTargetFromDB(db, sqlitestate.TmuxTargetKey)
+	if err != nil {
+		return shellWorkflowState{}, err
+	}
+	workerPane, _ := loadOptionalStateValue(db, sqlitestate.ShellWorkerPaneKey)
+	healthy, err := shellWorkerHealthy(db, 5*time.Second)
+	if err != nil {
+		return shellWorkflowState{}, err
+	}
+	state := shellWorkflowState{
+		PromptTarget:  strings.TrimSpace(promptTarget),
+		CommandTarget: strings.TrimSpace(commandTarget),
+		WorkerHealthy: healthy,
+		WorkerPane:    strings.TrimSpace(workerPane),
+	}
+	if state.PromptTarget != "" {
+		state.PromptPanePresent = shellPaneExistsFn(repoRoot, state.PromptTarget)
+	}
+	if state.CommandTarget != "" {
+		state.CommandPanePresent = shellPaneExistsFn(repoRoot, state.CommandTarget)
+	}
+	return state, nil
+}
+
+func ensureShellWorkflowWorker(repoRoot, session, dialtoneShell, reasoning, model, rightTitle string, wait time.Duration) error {
+	state, err := inspectShellWorkflowState(repoRoot)
+	if err != nil {
+		return err
+	}
+	if state.readyForVisibleCommands() {
+		return nil
+	}
+	if strings.TrimSpace(state.PromptTarget) == "" ||
+		strings.TrimSpace(state.CommandTarget) == "" ||
+		!state.PromptPanePresent ||
+		!state.CommandPanePresent {
+		return invokeShellRunStart([]string{
+			"--session", strings.TrimSpace(session),
+			"--dialtone-shell", strings.TrimSpace(dialtoneShell),
+			"--reasoning", strings.TrimSpace(reasoning),
+			"--model", strings.TrimSpace(model),
+			"--right-title", strings.TrimSpace(rightTitle),
+			"--wait-seconds", fmt.Sprintf("%d", int(wait.Seconds())),
+			"--run-tests=false",
+		})
+	}
+	return invokeShellStartWorker(repoRoot, strings.TrimSpace(state.CommandTarget), strings.TrimSpace(dialtoneShell), wait)
+}
+
+func ensureVisibleShellWorkflow(repoRoot, session, dialtoneShell, reasoning, model, rightTitle string, wait time.Duration) error {
+	if err := ensureShellWorkflowWorker(repoRoot, session, dialtoneShell, reasoning, model, rightTitle, wait); err != nil {
+		return err
+	}
+	state, err := inspectShellWorkflowState(repoRoot)
+	if err != nil {
+		return err
+	}
+	if !state.readyForVisibleCommands() {
+		return fmt.Errorf("shell workflow is not ready: %s", state.problemSummary())
+	}
+	return nil
 }
 
 func waitForShellBusRowExecution(db *sql.DB, repoRoot string, rowID int64, wait time.Duration) error {
@@ -981,6 +1247,9 @@ func syncShellBusRow(db *sql.DB, repoRoot string, row modstate.ShellBusRecord, w
 		return err
 	}
 	body.Target = target
+	if row.Subject == "command" && row.Action == "run" {
+		ensureShellBusCommandLogPath(repoRoot, row.ID, &body)
+	}
 
 	switch {
 	case row.Subject == "prompt" && row.Action == "submit":
@@ -1038,15 +1307,18 @@ func syncShellBusRow(db *sql.DB, repoRoot string, row modstate.ShellBusRecord, w
 	if err != nil {
 		return err
 	}
-	updated, _ := json.Marshal(body)
 	status := "done"
 	if row.Subject == "command" {
+		body.Output = snapshotText
 		if exitCode, ok := trackedCommandExitStatus(snapshotText); ok && exitCode != 0 {
 			status = "failed"
 			body.Error = fmt.Sprintf("command exited with status %d", exitCode)
-			updated, _ = json.Marshal(body)
+		}
+		if err := writeShellBusCommandLog(repoRoot, row.ID, body, status); err != nil {
+			return err
 		}
 	}
+	updated, _ := json.Marshal(body)
 	if err := modstate.UpdateShellBusStatus(db, row.ID, status, observedID, string(updated)); err != nil {
 		return err
 	}
@@ -1068,6 +1340,9 @@ func syncShellBusRowInWorker(db *sql.DB, repoRoot string, row modstate.ShellBusR
 		return err
 	}
 	body.Target = target
+	if row.Subject == "command" && row.Action == "run" {
+		ensureShellBusCommandLogPath(repoRoot, row.ID, &body)
+	}
 	body.StartedAt = time.Now().UTC().Format(time.RFC3339)
 	if strings.TrimSpace(body.DisplayCommand) == "" {
 		switch {
@@ -1133,7 +1408,7 @@ func syncShellBusRowInWorker(db *sql.DB, repoRoot string, row modstate.ShellBusR
 		if strings.TrimSpace(body.DisplayCommand) != "" {
 			fmt.Printf("$ %s\n", strings.TrimSpace(body.DisplayCommand))
 		}
-		output, exitCode, pid, runtime, execErr := runVisibleCommand(repoRoot, body.Command, func(pid int) error {
+		output, exitCode, pid, runtime, execErr := runVisibleCommand(repoRoot, workerPane, body.Command, func(pid int) error {
 			body.PID = pid
 			updated, _ := json.Marshal(body)
 			return modstate.UpdateShellBusStatus(db, row.ID, "running", 0, string(updated))
@@ -1147,10 +1422,13 @@ func syncShellBusRowInWorker(db *sql.DB, repoRoot string, row modstate.ShellBusR
 		status := "done"
 		if execErr != nil {
 			status = "failed"
-			body.Error = execErr.Error()
+			body.Error = deriveVisibleCommandError(output, execErr, exitCode)
 		} else if exitCode != 0 {
 			status = "failed"
-			body.Error = fmt.Sprintf("command exited with status %d", exitCode)
+			body.Error = deriveVisibleCommandError(output, nil, exitCode)
+		}
+		if err := writeShellBusCommandLog(repoRoot, row.ID, body, status); err != nil {
+			return err
 		}
 		observedBody, _ := json.Marshal(map[string]any{
 			"command":   body.DisplayCommand,
@@ -1159,6 +1437,7 @@ func syncShellBusRowInWorker(db *sql.DB, repoRoot string, row modstate.ShellBusR
 			"pid":       body.PID,
 			"exitCode":  body.ExitCode,
 			"runtimeMs": body.RuntimeMS,
+			"logPath":   body.LogPath,
 		})
 		observedID, err := modstate.AppendShellBusObserved(db, "shell", "command", "result", "shell-worker", row.Session, target, row.ID, string(observedBody))
 		if err != nil {
@@ -1187,11 +1466,22 @@ func syncShellBusRowInWorker(db *sql.DB, repoRoot string, row modstate.ShellBusR
 	}
 }
 
-func runVisibleCommand(repoRoot, command string, onStart func(pid int) error) (string, int, int, time.Duration, error) {
+func buildVisibleCommandEnv(baseEnv []string, paneTarget string) []string {
+	env := append([]string{}, baseEnv...)
+	env = append(env, "TERM=xterm-256color")
+	if target := strings.TrimSpace(paneTarget); target != "" {
+		env = append(env,
+			"DIALTONE_TMUX_PROXY_ACTIVE=1",
+			"DIALTONE_TMUX_TARGET="+target,
+		)
+	}
+	return env
+}
+
+func runVisibleCommand(repoRoot, paneTarget, command string, onStart func(pid int) error) (string, int, int, time.Duration, error) {
 	cmd := exec.Command("zsh", "-lc", command)
 	cmd.Dir = strings.TrimSpace(repoRoot)
-	env := append(os.Environ(), "TERM=xterm-256color")
-	cmd.Env = env
+	cmd.Env = buildVisibleCommandEnv(os.Environ(), paneTarget)
 	var output bytes.Buffer
 	stdout := io.MultiWriter(os.Stdout, &output)
 	stderr := io.MultiWriter(os.Stderr, &output)
@@ -1637,6 +1927,9 @@ func printShellBusCommandStatus(prefix string, row modstate.ShellBusRecord, body
 	if strings.TrimSpace(body.Target) != "" {
 		fmt.Printf("%s_target\t%s\n", label, strings.TrimSpace(body.Target))
 	}
+	if strings.TrimSpace(body.LogPath) != "" {
+		fmt.Printf("%s_log_path\t%s\n", label, strings.TrimSpace(body.LogPath))
+	}
 	if strings.TrimSpace(body.StartedAt) != "" {
 		fmt.Printf("%s_started_at\t%s\n", label, strings.TrimSpace(body.StartedAt))
 	}
@@ -1741,6 +2034,46 @@ func trackedCommandExitStatus(text string) (int, bool) {
 	return 0, false
 }
 
+func deriveVisibleCommandError(output string, execErr error, exitCode int) string {
+	fallback := ""
+	switch {
+	case execErr != nil:
+		fallback = strings.TrimSpace(execErr.Error())
+	case exitCode != 0:
+		fallback = fmt.Sprintf("command exited with status %d", exitCode)
+	}
+
+	lines := strings.Split(output, "\n")
+	for index := len(lines) - 1; index >= 0; index-- {
+		line := strings.TrimSpace(lines[index])
+		if strings.HasPrefix(line, "probe_error\t") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "probe_error\t"))
+		}
+		if strings.HasPrefix(line, "error\t") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "error\t"))
+		}
+	}
+	for index := len(lines) - 1; index >= 0; index-- {
+		line := strings.TrimSpace(lines[index])
+		if line == "" || strings.HasPrefix(line, "exit status ") {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(line, "probe_mode\t"),
+			strings.HasPrefix(line, "probe_label\t"),
+			strings.HasPrefix(line, "probe_pid\t"),
+			strings.HasPrefix(line, "probe_started_at\t"),
+			strings.HasPrefix(line, "probe_sleep_ms\t"),
+			strings.HasPrefix(line, "probe_finished_at\t"),
+			strings.HasPrefix(line, "probe_result\t"),
+			strings.HasPrefix(line, "probe_background_"):
+			continue
+		}
+		return line
+	}
+	return fallback
+}
+
 func waitForPaneContains(repoRoot, pane, needle string, timeout time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
 	lastOutput := ""
@@ -1821,6 +2154,13 @@ func loadStateTarget(repoRoot, key string) (string, error) {
 		return "", err
 	}
 	defer db.Close()
+	return loadStateTargetFromDB(db, key)
+}
+
+func loadStateTargetFromDB(db *sql.DB, key string) (string, error) {
+	if db == nil {
+		return "", errors.New("loadStateTargetFromDB requires an open sqlite db handle")
+	}
 	record, ok, err := modstate.LoadStateValue(db, sqlitestate.SystemScope, key)
 	if err != nil {
 		return "", err
@@ -2083,9 +2423,15 @@ func printUsage() {
 	fmt.Println("Usage: ./dialtone_mod shell v1 <command> [args]")
 	fmt.Println("")
 	fmt.Println("Commands:")
-	fmt.Println("  start [--session codex-view] [--shell default|repl-v1|ssh-v1] [--dialtone-shell ssh-v1] [--reasoning medium] [--model gpt-5.4] [--wait-seconds 20] [--run-tests=true]")
+	fmt.Println("  install")
+	fmt.Println("       Verify bash, Go, and tmux are available in the default nix shell")
+	fmt.Println("  build")
+	fmt.Println("       Build the shell v1 CLI wrapper to <repo-root>/bin/mods/shell/v1/shell")
+	fmt.Println("  format [--dir DIR]")
+	fmt.Println("       Run gofmt on shell v1 Go files")
+	fmt.Println("  start [--session codex-view] [--shell default|ssh-v1] [--dialtone-shell ssh-v1] [--reasoning medium] [--model gpt-5.4] [--wait-seconds 20] [--run-tests=true]")
 	fmt.Println("       Quit Ghostty, create one fresh window with one tab, start/attach codex-view, split dialtone-view on the right, launch Codex left, and optionally run the sqlite test plan on the right")
-	fmt.Println("  split-vertical [--session codex-view] [--shell default|repl-v1|ssh-v1] [--right-title dialtone-view] [--wait-seconds 10]")
+	fmt.Println("  split-vertical [--session codex-view] [--shell default|ssh-v1] [--right-title dialtone-view] [--wait-seconds 10]")
 	fmt.Println("       Split the tmux window so Codex stays on the left and a dialtone shell pane titled dialtone-view appears on the right")
 	fmt.Println("  prompt [--session codex-view] [--pane codex-view:0:0] <text...>")
 	fmt.Println("       Queue a prompt intent on the SQLite shell bus for codex-view")
@@ -2093,8 +2439,8 @@ func printUsage() {
 	fmt.Println("       Queue a visible command intent on the SQLite shell bus for dialtone-view")
 	fmt.Println("  run [--session codex-view] [--pane codex-view:0:1] [--expect TEXT] [--wait-seconds 10] <command...>")
 	fmt.Println("       Queue one visible command through SQLite and wait for the dialtone-view worker or fallback sync")
-	fmt.Println("  test [--wait-seconds 20]")
-	fmt.Println("       Run the shell/v1 Go test visibly in dialtone-view through the SQLite shell bus")
+	fmt.Println("  test [--wait-seconds 60]")
+	fmt.Println("       Run the shell workflow Go suite visibly in dialtone-view through the SQLite shell bus")
 	fmt.Println("  test-basic")
 	fmt.Println("       Run the core SQLite and shell Go tests first before starting the visible Ghostty workflow")
 	fmt.Println("  test-all [--wait-seconds 120]")

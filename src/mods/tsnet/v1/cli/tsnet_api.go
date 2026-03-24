@@ -404,19 +404,19 @@ func buildMoshACLRules(hostnames []string) ([]any, []any) {
 		return []any{}, []any{}
 	}
 	return []any{
-		map[string]any{
-			"action": "accept",
-			"src":    []any{"autogroup:member"},
-			"dst":    []any{"autogroup:member:60000-61000"},
-		},
-	}, []any{
-		map[string]any{
-			"action": "accept",
-			"src":    []any{"autogroup:member"},
-			"dst":    []any{"tag:dialtone"},
-			"users":  []any{"autogroup:nonroot", "root"},
-		},
-	}
+			map[string]any{
+				"action": "accept",
+				"src":    []any{"autogroup:member"},
+				"dst":    []any{"autogroup:member:60000-61000"},
+			},
+		}, []any{
+			map[string]any{
+				"action": "accept",
+				"src":    []any{"autogroup:member"},
+				"dst":    []any{"tag:dialtone"},
+				"users":  []any{"autogroup:nonroot", "root"},
+			},
+		}
 }
 
 func aclRuleExists(rules []any, candidate any) bool {

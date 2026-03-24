@@ -7,15 +7,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
-	"syscall"
-	"time"
 
+	"dialtone/dev/internal/modcli"
 	"dialtone/dev/internal/modstate"
+	"dialtone/dev/internal/tmuxcmd"
 	"dialtone/dev/mods/shared/dispatch"
 	"dialtone/dev/mods/shared/nixplan"
-	"dialtone/dev/mods/shared/router"
 	"dialtone/dev/mods/shared/sqlitestate"
 )
 
@@ -76,14 +74,6 @@ func runCLI() error {
 		return nil
 	}
 
-	if modName == "mesh" && version == "v3" {
-		meshDir := filepath.Join(srcRoot, "mods", "mesh", "v3")
-		return runMeshV3(meshDir, os.Args[3:])
-	}
-	if modName == "mesh" {
-		return fmt.Errorf("unsupported mesh version %s; use mesh v3", version)
-	}
-
 	commandArg := ""
 	if len(os.Args) > 3 {
 		commandArg = strings.TrimSpace(os.Args[3])
@@ -100,7 +90,7 @@ func runCLI() error {
 			return err
 		}
 		if !executeDirect {
-			if err := routeCommandViaShell(repoRoot, goBin, stateDB, os.Args[1:]); err != nil {
+			if err := routeCommandViaShell(repoRoot, os.Args[1:]); err != nil {
 				return err
 			}
 			return nil
@@ -134,31 +124,25 @@ func resolveModEntry(srcRoot string, stateDB *sql.DB, modName, version, command 
 		}
 	}
 	modDir := filepath.Join(srcRoot, "mods", modName, version)
-	if shouldUseModCLI(command) && hasGoPackage(filepath.Join(modDir, "cli")) {
-		return relativeFrom(srcRoot, filepath.Join(modDir, "cli"))
-	}
-	if hasGoPackage(modDir) {
-		return relativeFrom(srcRoot, modDir)
-	}
 	if hasGoPackage(filepath.Join(modDir, "cli")) {
 		return relativeFrom(srcRoot, filepath.Join(modDir, "cli"))
 	}
 	return ""
 }
 
-func routeCommandViaShell(repoRoot, goBin string, stateDB *sql.DB, args []string) error {
-	if stateDB == nil {
-		return fmt.Errorf("sqlite state is required to route commands via shell")
+func routeCommandViaShell(repoRoot string, args []string) error {
+	cmdArgs := append([]string{"dialtone", "v1", "queue"}, args...)
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone_mod"), cmdArgs...)
+	cmd.Dir = repoRoot
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		}
+		return fmt.Errorf("failed to queue routed command via dialtone: %w", err)
 	}
-	rowID, err := router.QueueCommandViaShell(stateDB, repoRoot, args)
-	if err != nil {
-		return err
-	}
-	startedPID, startedLogPath, err := ensureShellWorkerAsync(repoRoot, stateDB)
-	if err != nil {
-		return err
-	}
-	printDialtoneRouteReport(repoRoot, rowID, startedPID, startedLogPath)
 	return nil
 }
 
@@ -172,229 +156,23 @@ func (goRunner) Run(repoRoot, goBin, entry string, args ...string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-	return fmt.Errorf("failed to launch %s: %w", entry, err)
+		return fmt.Errorf("failed to launch %s: %w", entry, err)
 	}
 	return nil
 }
 
 func currentTmuxPaneTarget() string {
-	paneID := strings.TrimSpace(os.Getenv("TMUX_PANE"))
-	if paneID == "" {
-		return ""
-	}
-	out, err := exec.Command("tmux", "display-message", "-p", "-t", paneID, "#{session_name}:#{window_index}:#{pane_index}").Output()
+	repoRoot, err := findRepoRoot()
 	if err != nil {
-		return ""
+		repoRoot = ""
 	}
-	return strings.TrimSpace(string(out))
-}
-
-func ensureShellWorkerAsync(repoRoot string, stateDB *sql.DB) (int, string, error) {
-	ready, err := dispatch.ShellReady(stateDB)
-	if err != nil {
-		return 0, "", err
-	}
-	healthy, err := router.ShellWorkerHealthy(stateDB, 5*time.Second)
-	if err != nil {
-		return 0, "", err
-	}
-	if ready && healthy {
-		return existingEnsureProcess(stateDB)
-	}
-	if pid, logPath, ok, err := existingEnsureProcessIfAlive(stateDB); err != nil {
-		return 0, "", err
-	} else if ok {
-		return pid, logPath, nil
-	}
-	pid, logPath, err := startDetachedDialtoneProcess(repoRoot, "shell", "v1", "ensure-worker", "--wait-seconds", "30")
-	if err != nil {
-		return 0, "", err
-	}
-	if err := modstate.UpsertStateValue(stateDB, sqlitestate.SystemScope, sqlitestate.ShellEnsurePIDKey, strconv.Itoa(pid)); err != nil {
-		return 0, "", err
-	}
-	if err := modstate.UpsertStateValue(stateDB, sqlitestate.SystemScope, sqlitestate.ShellEnsureLogPathKey, logPath); err != nil {
-		return 0, "", err
-	}
-	if err := modstate.UpsertStateValue(stateDB, sqlitestate.SystemScope, sqlitestate.ShellEnsureStartedAtKey, time.Now().UTC().Format(time.RFC3339)); err != nil {
-		return 0, "", err
-	}
-	return pid, logPath, nil
-}
-
-func existingEnsureProcess(stateDB *sql.DB) (int, string, error) {
-	if stateDB == nil {
-		return 0, "", nil
-	}
-	pidText, ok, err := loadOptionalStateValue(stateDB, sqlitestate.ShellEnsurePIDKey)
-	if err != nil || !ok {
-		return 0, "", err
-	}
-	pid, err := strconv.Atoi(pidText)
-	if err != nil {
-		return 0, "", nil
-	}
-	logPath, _, err := loadOptionalStateValue(stateDB, sqlitestate.ShellEnsureLogPathKey)
-	if err != nil {
-		return 0, "", err
-	}
-	return pid, logPath, nil
-}
-
-func existingEnsureProcessIfAlive(stateDB *sql.DB) (int, string, bool, error) {
-	pid, logPath, err := existingEnsureProcess(stateDB)
-	if err != nil || pid <= 0 {
-		return 0, "", false, err
-	}
-	return pid, logPath, processAlive(pid), nil
-}
-
-func loadOptionalStateValue(db *sql.DB, key string) (string, bool, error) {
-	record, ok, err := modstate.LoadStateValue(db, sqlitestate.SystemScope, key)
-	if err != nil || !ok {
-		return "", ok, err
-	}
-	return strings.TrimSpace(record.Value), true, nil
-}
-
-func startDetachedDialtoneProcess(repoRoot string, args ...string) (int, string, error) {
-	logDir := filepath.Join(sqlitestate.ResolveStateDir(repoRoot), "logs")
-	if err := os.MkdirAll(logDir, 0o755); err != nil {
-		return 0, "", err
-	}
-	logPath := filepath.Join(logDir, fmt.Sprintf("dialtone-%d.log", time.Now().UnixNano()))
-	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return 0, "", err
-	}
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone_mod"), args...)
-	cmd.Dir = repoRoot
-	cmd.Stdout = file
-	cmd.Stderr = file
-	cmd.Stdin = nil
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err != nil {
-		_ = file.Close()
-		return 0, "", err
-	}
-	_ = file.Close()
-	return cmd.Process.Pid, logPath, nil
-}
-
-type dialtoneProcessRecord struct {
-	PID        int
-	PPID       int
-	Stat       string
-	TTY        string
-	Role       string
-	Command    string
-	Background bool
-}
-
-func printDialtoneRouteReport(repoRoot string, rowID int64, startedPID int, startedLogPath string) {
-	processes, _ := loadDialtoneProcessReport()
-	backgroundCount := 0
-	for _, process := range processes {
-		if process.Background {
-			backgroundCount++
-		}
-	}
-	fmt.Printf("queued to dialtone-view [row_id=%d]\n", rowID)
-	fmt.Printf("state_db\t%s\n", sqlitestate.ResolveStateDBPath(repoRoot))
-	if startedPID > 0 {
-		fmt.Printf("started_pid\t%d\n", startedPID)
-	}
-	if strings.TrimSpace(startedLogPath) != "" {
-		fmt.Printf("started_log\t%s\n", startedLogPath)
-	}
-	fmt.Printf("dialtone_mod_running\t%d\n", len(processes))
-	fmt.Printf("dialtone_mod_background\t%d\n", backgroundCount)
-	fmt.Println("pid\tppid\tstat\ttty\trole\tbackground\tcommand")
-	for _, process := range processes {
-		background := "no"
-		if process.Background {
-			background = "yes"
-		}
-		fmt.Printf("%d\t%d\t%s\t%s\t%s\t%s\t%s\n",
-			process.PID,
-			process.PPID,
-			process.Stat,
-			process.TTY,
-			process.Role,
-			background,
-			process.Command,
-		)
-	}
-}
-
-func loadDialtoneProcessReport() ([]dialtoneProcessRecord, error) {
-	out, err := exec.Command("ps", "-axo", "pid=,ppid=,stat=,tt=,command=").Output()
-	if err != nil {
-		return nil, err
-	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	records := make([]dialtoneProcessRecord, 0, len(lines))
-	for _, line := range lines {
-		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) < 5 {
-			continue
-		}
-		command := strings.Join(fields[4:], " ")
-		if !strings.Contains(command, "dialtone_mod") {
-			continue
-		}
-		pid, err := strconv.Atoi(fields[0])
+	return modcli.CurrentTmuxTarget(os.Getenv("DIALTONE_TMUX_TARGET"), os.Getenv("TMUX_PANE"), func(paneID string) (string, error) {
+		out, err := tmuxcmd.Command(repoRoot, "display-message", "-p", "-t", paneID, "#{session_name}:#{window_index}:#{pane_index}").Output()
 		if err != nil {
-			continue
+			return "", err
 		}
-		ppid, err := strconv.Atoi(fields[1])
-		if err != nil {
-			continue
-		}
-		stat := fields[2]
-		tty := fields[3]
-		records = append(records, dialtoneProcessRecord{
-			PID:        pid,
-			PPID:       ppid,
-			Stat:       stat,
-			TTY:        tty,
-			Role:       dialtoneProcessRole(command),
-			Command:    command,
-			Background: tty == "??" || !strings.Contains(stat, "+"),
-		})
-	}
-	return records, nil
-}
-
-func dialtoneProcessRole(command string) string {
-	switch {
-	case strings.Contains(command, "shell v1 serve"):
-		return "worker"
-	case strings.Contains(command, "shell v1 ensure-worker"):
-		return "ensure"
-	default:
-		return "dialtone_mod"
-	}
-}
-
-func processAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return process.Signal(syscall.Signal(0)) == nil
-}
-
-func shouldUseModCLI(command string) bool {
-	switch strings.ToLower(strings.TrimSpace(command)) {
-	case "install", "build", "format", "test":
-		return true
-	default:
-		return false
-	}
+		return string(out), nil
+	})
 }
 
 func mapCommandNameToMod(name string) string {

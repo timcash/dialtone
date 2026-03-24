@@ -42,6 +42,22 @@ func main() {
 	switch command {
 	case "help", "-h", "--help":
 		printUsage()
+	case "install":
+		if err := runInstall(args); err != nil {
+			exitIfErr(err, "ghostty install")
+		}
+	case "build":
+		if err := runBuild(args); err != nil {
+			exitIfErr(err, "ghostty build")
+		}
+	case "format":
+		if err := runFormat(args); err != nil {
+			exitIfErr(err, "ghostty format")
+		}
+	case "test":
+		if err := runTest(args); err != nil {
+			exitIfErr(err, "ghostty test")
+		}
 	case "list":
 		if err := runList(args); err != nil {
 			exitIfErr(err, "ghostty list")
@@ -543,6 +559,14 @@ func printUsage() {
 	fmt.Println("Usage: ./dialtone_mod ghostty v1 <command> [args]")
 	fmt.Println("")
 	fmt.Println("Commands:")
+	fmt.Println("  install")
+	fmt.Println("       Verify AppleScript plus Ghostty are available on this host")
+	fmt.Println("  build")
+	fmt.Println("       Build the ghostty v1 CLI wrapper to <repo-root>/bin/mods/ghostty/v1/ghostty")
+	fmt.Println("  format [--dir DIR]")
+	fmt.Println("       Run gofmt on ghostty v1 Go files")
+	fmt.Println("  test")
+	fmt.Println("       Run go test for ghostty v1")
 	fmt.Println("  list")
 	fmt.Println("       List terminals in the selected tab of the front Ghostty window")
 	fmt.Println("  new-tab [--cwd PATH] [--command CMD] [--input TEXT]")
