@@ -101,7 +101,7 @@ func handleVisionDemo(webDir string) {
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d/#s-vision", port)
 	logInfo("Launching Chrome on Vision section...")
 	chromeCmd := getDialtoneCmd("chrome", "new", baseURL, "--gpu")
-	
+
 	// Capture output to get the WebSocket URL for chromedp
 	chromeOut, err := chromeCmd.CombinedOutput()
 	if err != nil {

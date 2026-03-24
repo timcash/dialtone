@@ -23,7 +23,7 @@ func Add(name, taskFile, branch string) error {
 	if err := os.MkdirAll(managedWorktreeBase(repoRoot), 0755); err != nil {
 		return fmt.Errorf("failed to create managed worktree base dir: %w", err)
 	}
-	
+
 	// 2. Create git worktree
 	fmt.Printf("[Worktree] Creating worktree at %s...\n", worktreePath)
 	gitArgs := []string{"worktree", "add", worktreePath}
@@ -38,7 +38,7 @@ func Add(name, taskFile, branch string) error {
 			gitArgs = append(gitArgs, name)
 		}
 	}
-	
+
 	cmd := exec.Command("git", gitArgs...)
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
@@ -133,12 +133,12 @@ func Start(name, prompt string) error {
 
 	fmt.Printf("[Worktree] Launching Gemini Agent in session '%s'...\n", name)
 	cmd := fmt.Sprintf("./dialtone.sh gemini run --task TASK.md --prompt %s", strconv.Quote(prompt))
-	
+
 	tmuxCmd := exec.Command("tmux", "send-keys", "-t", name, cmd, "C-m")
 	if err := tmuxCmd.Run(); err != nil {
 		return fmt.Errorf("failed to send keys to tmux: %w", err)
 	}
-	
+
 	return nil
 }
 
