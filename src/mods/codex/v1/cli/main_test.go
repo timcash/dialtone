@@ -2,9 +2,21 @@ package main
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 )
+
+func TestCodexTestPackagesCoverDirectControlPlaneContract(t *testing.T) {
+	got := codexTestPackages()
+	want := []string{
+		"./mods/codex/v1/...",
+		"./mods/shared/dispatch",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("unexpected codex test packages\nwant:\n%s\n\ngot:\n%s", strings.Join(want, "\n"), strings.Join(got, "\n"))
+	}
+}
 
 func TestBuildStartCommandUsesRepoShellAndInlineCodexLaunch(t *testing.T) {
 	cmd := buildStartCommand("/tmp/dialtone", "default", "medium", "gpt-5.4")
@@ -13,6 +25,12 @@ func TestBuildStartCommandUsesRepoShellAndInlineCodexLaunch(t *testing.T) {
 	}
 	if !strings.Contains(cmd, "develop '.#default'") {
 		t.Fatalf("missing nix develop shell: %q", cmd)
+	}
+	if !strings.Contains(cmd, "DIALTONE_NIX_SHELL_BANNER=0") {
+		t.Fatalf("missing shell banner suppression: %q", cmd)
+	}
+	if !strings.Contains(cmd, "--no-warn-dirty") {
+		t.Fatalf("missing dirty-tree warning suppression: %q", cmd)
 	}
 	if !strings.Contains(cmd, "clear; printf") {
 		t.Fatalf("missing clear before startup banner: %q", cmd)
@@ -29,8 +47,36 @@ func TestBuildStartCommandUsesRepoShellAndInlineCodexLaunch(t *testing.T) {
 	if !strings.Contains(cmd, "check_for_update_on_startup=false") {
 		t.Fatalf("missing update-check override: %q", cmd)
 	}
+	if !strings.Contains(cmd, "model_reasoning_effort=\"medium\"") {
+		t.Fatalf("missing requested model reasoning effort: %q", cmd)
+	}
+	if !strings.Contains(cmd, "plan_mode_reasoning_effort=\"medium\"") {
+		t.Fatalf("missing requested plan mode reasoning effort: %q", cmd)
+	}
 	if !strings.Contains(cmd, "-m '\"'\"'gpt-5.4'\"'\"' -a never -s danger-full-access") {
 		t.Fatalf("missing model and sandbox args: %q", cmd)
+	}
+}
+
+func TestCodexCLIUsageIncludesContractAndRuntimeCommands(t *testing.T) {
+	output := captureCodexStdout(t, printUsage)
+	for _, want := range []string{"install", "build", "format", "test", "start", "status"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("usage missing %q: %s", want, output)
+		}
+	}
+	if !strings.Contains(output, "Run go test for codex v1 plus direct-routing helpers") {
+		t.Fatalf("usage missing strengthened codex test description: %s", output)
+	}
+}
+
+func TestCodexParseFormatArgsKeepsBlankDirEmpty(t *testing.T) {
+	got, err := parseFormatArgs(nil)
+	if err != nil {
+		t.Fatalf("parseFormatArgs returned error: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("parseFormatArgs(nil) = %q, want empty string so format defaults to src/mods/codex/v1", got)
 	}
 }
 
@@ -42,15 +88,28 @@ func TestShellQuoteEscapesSingleQuotes(t *testing.T) {
 }
 
 func TestBuildCodexExecCommandIncludesFallback(t *testing.T) {
-	cmd := buildCodexExecCommand("gpt-5.4")
+	cmd := buildCodexExecCommand("gpt-5.4", "medium")
 	if !strings.Contains(cmd, "-c 'check_for_update_on_startup=false'") {
 		t.Fatalf("missing update-check override: %q", cmd)
+	}
+	if !strings.Contains(cmd, "-c 'model_reasoning_effort=\"medium\"'") {
+		t.Fatalf("missing model reasoning effort override: %q", cmd)
+	}
+	if !strings.Contains(cmd, "-c 'plan_mode_reasoning_effort=\"medium\"'") {
+		t.Fatalf("missing plan mode reasoning effort override: %q", cmd)
 	}
 	if !strings.Contains(cmd, "exec env CI=1 codex") {
 		t.Fatalf("missing direct codex exec: %q", cmd)
 	}
 	if !strings.Contains(cmd, "exec env CI=1 npx --yes @openai/codex") {
 		t.Fatalf("missing npx exec: %q", cmd)
+	}
+}
+
+func TestBuildCodexExecCommandDefaultsBlankReasoningToMedium(t *testing.T) {
+	cmd := buildCodexExecCommand("gpt-5.4", "")
+	if !strings.Contains(cmd, "model_reasoning_effort=\"medium\"") {
+		t.Fatalf("expected blank reasoning to default to medium: %q", cmd)
 	}
 }
 
@@ -146,4 +205,33 @@ func TestRespawnPaneIgnoresClearHistoryFailureWhenRespawnSucceeds(t *testing.T) 
 	if !strings.HasPrefix(ops[1], "respawn-pane -k -t codex-view:0.0") {
 		t.Fatalf("unexpected second tmux operation: %q", ops[1])
 	}
+}
+
+func captureCodexStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+	done := make(chan string, 1)
+	go func() {
+		var buf [4096]byte
+		var out strings.Builder
+		for {
+			n, readErr := r.Read(buf[:])
+			if n > 0 {
+				out.Write(buf[:n])
+			}
+			if readErr != nil {
+				done <- out.String()
+				return
+			}
+		}
+	}()
+	fn()
+	_ = w.Close()
+	return <-done
 }

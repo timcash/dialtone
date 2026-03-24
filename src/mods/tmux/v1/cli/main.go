@@ -72,6 +72,22 @@ func main() {
 	switch command {
 	case "help", "-h", "--help":
 		printUsage()
+	case "install":
+		if err := runInstall(args); err != nil {
+			exitIfErr(err, "tmux install")
+		}
+	case "build":
+		if err := runBuild(args); err != nil {
+			exitIfErr(err, "tmux build")
+		}
+	case "format":
+		if err := runFormat(args); err != nil {
+			exitIfErr(err, "tmux format")
+		}
+	case "test":
+		if err := runTest(args); err != nil {
+			exitIfErr(err, "tmux test")
+		}
 	case "list":
 		if err := runList(args); err != nil {
 			exitIfErr(err, "tmux list")
@@ -337,9 +353,14 @@ func runSplit(argv []string) error {
 func runShell(argv []string) error {
 	opts := flag.NewFlagSet("tmux v1 shell", flag.ContinueOnError)
 	pane := opts.String("pane", "dialtone:0:0", "tmux target in session:window:pane form")
-	shellName := opts.String("shell", "default", "flake shell to enter (default|repl-v1|ssh-v1)")
+	shellName := opts.String("shell", "default", "flake shell to enter (default|ssh-v1)")
+	commandText := opts.String("command", "", "Optional command to exec inside the nix shell instead of opening an interactive shell")
+	showBanner := opts.Bool("banner", true, "Print the flake shell banner inside the pane")
 	if err := opts.Parse(argv); err != nil {
 		return err
+	}
+	if opts.NArg() != 0 {
+		return errors.New("shell does not accept positional arguments")
 	}
 
 	target, err := parsePaneTarget(*pane)
@@ -351,17 +372,23 @@ func runShell(argv []string) error {
 		return err
 	}
 	switch strings.TrimSpace(*shellName) {
-	case "default", "repl-v1", "ssh-v1":
+	case "default", "ssh-v1":
 	default:
 		return fmt.Errorf("unsupported --shell %q", *shellName)
 	}
 
 	tmuxTarget := target.target()
+	innerCommand := "exec zsh -l"
+	if strings.TrimSpace(*commandText) != "" {
+		innerCommand = fmt.Sprintf("clear; %s", strings.TrimSpace(*commandText))
+	}
 	command := fmt.Sprintf(
-		"cd %s && nix --extra-experimental-features %s develop %s --command zsh -l",
+		"cd %s && exec env DIALTONE_NIX_SHELL_BANNER=%s nix --extra-experimental-features %s --no-warn-dirty develop %s --command zsh -lc %s",
 		shellQuote(repoRoot),
+		shellQuote(boolEnvValue(*showBanner)),
 		shellQuote("nix-command flakes"),
 		shellQuote(".#"+strings.TrimSpace(*shellName)),
+		shellQuote(innerCommand),
 	)
 	if out, err := tmuxCommand("clear-history", "-t", tmuxTarget).CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux clear-history failed: %s", strings.TrimSpace(string(out)))
@@ -371,6 +398,13 @@ func runShell(argv []string) error {
 	}
 	fmt.Printf("entered nix shell %s in %s\n", strings.TrimSpace(*shellName), tmuxTarget)
 	return nil
+}
+
+func boolEnvValue(value bool) string {
+	if value {
+		return "1"
+	}
+	return "0"
 }
 
 func runTarget(argv []string) error {
@@ -606,6 +640,14 @@ func printUsage() {
 	fmt.Println("Usage: ./dialtone_mod tmux v1 <command> [args]")
 	fmt.Println("")
 	fmt.Println("Commands:")
+	fmt.Println("  install")
+	fmt.Println("       Verify tmux is available in the default nix shell")
+	fmt.Println("  build")
+	fmt.Println("       Build the tmux v1 CLI wrapper to <repo-root>/bin/mods/tmux/v1/tmux")
+	fmt.Println("  format [--dir DIR]")
+	fmt.Println("       Run gofmt on tmux v1 Go files")
+	fmt.Println("  test")
+	fmt.Println("       Run go test for tmux v1")
 	fmt.Println("  list [--short]")
 	fmt.Println("       List local tmux sessions")
 	fmt.Println("  write [--pane dialtone:0:0] [--enter] <text...>")
@@ -618,7 +660,7 @@ func printUsage() {
 	fmt.Println("       Rename tmux session (defaults to current/first session)")
 	fmt.Println("  split [--pane codex-view:0:0] [--direction right|left|down|up] [--title NAME] [--cwd PATH] [--command CMD] [--focus=true|false]")
 	fmt.Println("       Split a tmux pane and optionally title or initialize the new pane")
-	fmt.Println("  shell [--pane codex-view:1:1] [--shell default|repl-v1|ssh-v1]")
+	fmt.Println("  shell [--pane codex-view:1:1] [--shell default|ssh-v1]")
 	fmt.Println("       Put the target tmux pane into the repo nix develop shell without starting Codex")
 	fmt.Println("  target [--set codex-view:1:1] [--clear]")
 	fmt.Println("       Persist or clear the default tmux pane that dialtone_mod should proxy non-control commands into")

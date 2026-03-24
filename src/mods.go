@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 
+	"dialtone/dev/internal/modcli"
 	"dialtone/dev/internal/modstate"
 	"dialtone/dev/internal/tmuxcmd"
 	"dialtone/dev/mods/shared/dispatch"
@@ -73,14 +74,6 @@ func runCLI() error {
 		return nil
 	}
 
-	if modName == "mesh" && version == "v3" {
-		meshDir := filepath.Join(srcRoot, "mods", "mesh", "v3")
-		return runMeshV3(meshDir, os.Args[3:])
-	}
-	if modName == "mesh" {
-		return fmt.Errorf("unsupported mesh version %s; use mesh v3", version)
-	}
-
 	commandArg := ""
 	if len(os.Args) > 3 {
 		commandArg = strings.TrimSpace(os.Args[3])
@@ -131,12 +124,6 @@ func resolveModEntry(srcRoot string, stateDB *sql.DB, modName, version, command 
 		}
 	}
 	modDir := filepath.Join(srcRoot, "mods", modName, version)
-	if shouldUseModCLI(command) && hasGoPackage(filepath.Join(modDir, "cli")) {
-		return relativeFrom(srcRoot, filepath.Join(modDir, "cli"))
-	}
-	if hasGoPackage(modDir) {
-		return relativeFrom(srcRoot, modDir)
-	}
 	if hasGoPackage(filepath.Join(modDir, "cli")) {
 		return relativeFrom(srcRoot, filepath.Join(modDir, "cli"))
 	}
@@ -175,28 +162,17 @@ func (goRunner) Run(repoRoot, goBin, entry string, args ...string) error {
 }
 
 func currentTmuxPaneTarget() string {
-	paneID := strings.TrimSpace(os.Getenv("TMUX_PANE"))
-	if paneID == "" {
-		return ""
-	}
 	repoRoot, err := findRepoRoot()
 	if err != nil {
 		repoRoot = ""
 	}
-	out, err := tmuxcmd.Command(repoRoot, "display-message", "-p", "-t", paneID, "#{session_name}:#{window_index}:#{pane_index}").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
-func shouldUseModCLI(command string) bool {
-	switch strings.ToLower(strings.TrimSpace(command)) {
-	case "install", "build", "format", "test":
-		return true
-	default:
-		return false
-	}
+	return modcli.CurrentTmuxTarget(os.Getenv("DIALTONE_TMUX_TARGET"), os.Getenv("TMUX_PANE"), func(paneID string) (string, error) {
+		out, err := tmuxcmd.Command(repoRoot, "display-message", "-p", "-t", paneID, "#{session_name}:#{window_index}:#{pane_index}").Output()
+		if err != nil {
+			return "", err
+		}
+		return string(out), nil
+	})
 }
 
 func mapCommandNameToMod(name string) string {

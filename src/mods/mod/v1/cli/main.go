@@ -4,7 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
+
+	"dialtone/dev/internal/modcli"
 )
 
 func main() {
@@ -37,20 +38,21 @@ func main() {
 			exitIfErr(err, "mod test")
 		}
 	default:
-		fmt.Fprintf(os.Stderr, "unknown mod v1 command: %s\n", command)
-		printUsage()
-		os.Exit(1)
+		if err := runRuntime(append([]string{command}, args...)); err != nil {
+			exitIfErr(err, "mod runtime")
+		}
 	}
 }
 
 func printUsage() {
-	fmt.Println("Usage: ./dialtone_mod mod v1 <install|build|format|test> [args]")
+	fmt.Println("Usage: ./dialtone_mod mod v1 <command> [args]")
 	fmt.Println("")
 	fmt.Println("Commands:")
 	fmt.Println("  install                                  Prepare shell environment (nix develop)")
 	fmt.Println("  build                                    Build dialtone mod CLI to <repo-root>/bin")
 	fmt.Println("  format [--dir DIR]                       Run gofmt on Go files")
 	fmt.Println("  test                                     Run go test for mod management code")
+	fmt.Println("  probe|db|sync|status|list|new|clone|...  Delegate to the existing mod management runtime entrypoint")
 }
 
 func exitIfErr(err error, context string) {
@@ -67,5 +69,5 @@ func parseFormatArgs(argv []string) (string, error) {
 	if err := fs.Parse(argv); err != nil {
 		return "", err
 	}
-	return filepath.Clean(*dir), nil
+	return modcli.NormalizeOptionalPathArg(*dir), nil
 }

@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -33,6 +32,22 @@ func main() {
 	switch command {
 	case "help", "-h", "--help":
 		printUsage()
+	case "install":
+		if err := runInstall(args); err != nil {
+			exitIfErr(err, "codex install")
+		}
+	case "build":
+		if err := runBuild(args); err != nil {
+			exitIfErr(err, "codex build")
+		}
+	case "format":
+		if err := runFormat(args); err != nil {
+			exitIfErr(err, "codex format")
+		}
+	case "test":
+		if err := runTest(args); err != nil {
+			exitIfErr(err, "codex test")
+		}
 	case "start":
 		if err := runStart(args); err != nil {
 			exitIfErr(err, "codex start")
@@ -53,7 +68,7 @@ func runStart(argv []string) error {
 	session := opts.String("session", "codex-view", "tmux session name on the default tmux server")
 	pane := opts.String("pane", "", "Explicit tmux pane target to launch Codex into")
 	shellName := opts.String("shell", "default", "flake shell to enter before launching Codex")
-	reasoning := opts.String("reasoning", "medium", "reasoning label for startup banner")
+	reasoning := opts.String("reasoning", "medium", "Codex reasoning effort to request")
 	model := opts.String("model", "gpt-5.4", "Codex model to launch")
 	if err := opts.Parse(argv); err != nil {
 		return err
@@ -70,6 +85,7 @@ func runStart(argv []string) error {
 		if err := respawnPane(target, startCmd); err != nil {
 			return err
 		}
+		trimPaneStartupScrollback(target)
 		fmt.Printf("started codex in tmux pane %s\n", target)
 		return nil
 	}
@@ -83,6 +99,7 @@ func runStart(argv []string) error {
 	if err := respawnPane(target, startCmd); err != nil {
 		return err
 	}
+	trimPaneStartupScrollback(target)
 	fmt.Printf("started codex in tmux session %s via %s\n", *session, target)
 	return nil
 }
@@ -153,7 +170,7 @@ func activePaneTarget(session string) (string, error) {
 }
 
 func buildStartCommand(repoRoot, shellName, reasoning, model string) string {
-	codexCmd := buildCodexExecCommand(strings.TrimSpace(model))
+	codexCmd := buildCodexExecCommand(strings.TrimSpace(model), strings.TrimSpace(reasoning))
 	inner := fmt.Sprintf(
 		"clear; printf 'Starting Codex CLI with %s (requested reasoning: %s) and skipping confirmations...\\n'; %s",
 		shellSingleQuoteLiteral(strings.TrimSpace(model)),
@@ -161,7 +178,7 @@ func buildStartCommand(repoRoot, shellName, reasoning, model string) string {
 		codexCmd,
 	)
 	return fmt.Sprintf(
-		"cd %s && exec nix --extra-experimental-features %s develop %s --command bash -lc %s",
+		"cd %s && exec env DIALTONE_NIX_SHELL_BANNER=0 nix --extra-experimental-features %s --no-warn-dirty develop %s --command bash -lc %s",
 		shellQuote(repoRoot),
 		shellQuote("nix-command flakes"),
 		shellQuote(".#"+strings.TrimSpace(shellName)),
@@ -169,9 +186,15 @@ func buildStartCommand(repoRoot, shellName, reasoning, model string) string {
 	)
 }
 
-func buildCodexExecCommand(model string) string {
+func buildCodexExecCommand(model, reasoning string) string {
+	effort := strings.TrimSpace(reasoning)
+	if effort == "" {
+		effort = "medium"
+	}
 	args := strings.Join([]string{
 		"-c", shellQuote("check_for_update_on_startup=false"),
+		"-c", shellQuote(fmt.Sprintf("model_reasoning_effort=%q", effort)),
+		"-c", shellQuote(fmt.Sprintf("plan_mode_reasoning_effort=%q", effort)),
 		"-m", shellQuote(model),
 		"-a", "never",
 		"-s", "danger-full-access",
@@ -192,21 +215,6 @@ func normalizePaneTarget(value string) string {
 	return trimmed
 }
 
-func runInCurrentPane(command string) error {
-	cmd := exec.Command("bash", "-lc", command)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
-func resetPane(target string) error {
-	if _, err := tmuxOutput("send-keys", "-t", target, "C-c"); err != nil {
-		return err
-	}
-	return nil
-}
-
 func clearPaneHistory(target string) error {
 	if _, err := tmuxOutputWithRetry("clear-history", "-t", target); err != nil {
 		return err
@@ -223,16 +231,9 @@ func respawnPane(target, command string) error {
 	return nil
 }
 
-func sendKeys(target, text string, enter bool) error {
-	if _, err := tmuxOutput("send-keys", "-t", target, "--", text); err != nil {
-		return err
-	}
-	if enter {
-		if _, err := tmuxOutput("send-keys", "-t", target, "C-m"); err != nil {
-			return err
-		}
-	}
-	return nil
+func trimPaneStartupScrollback(target string) {
+	time.Sleep(750 * time.Millisecond)
+	_ = clearPaneHistory(target)
 }
 
 func tmuxOutput(args ...string) (string, error) {
@@ -291,8 +292,16 @@ func printUsage() {
 	fmt.Println("Usage: ./dialtone_mod codex v1 <command> [args]")
 	fmt.Println("")
 	fmt.Println("Commands:")
-	fmt.Println("  start [--session codex-view] [--shell default|repl-v1|ssh-v1] [--reasoning medium] [--model gpt-5.4]")
-	fmt.Println("       Ensure the tmux session exists on the default server and launch Codex there via nix develop")
+	fmt.Println("  install")
+	fmt.Println("       Verify tmux plus codex or npx are available in the default nix shell")
+	fmt.Println("  build")
+	fmt.Println("       Build the codex v1 CLI wrapper to <repo-root>/bin/mods/codex/v1/codex")
+	fmt.Println("  format [--dir DIR]")
+	fmt.Println("       Run gofmt on codex v1 Go files")
+	fmt.Println("  test")
+	fmt.Println("       Run go test for codex v1 plus direct-routing helpers")
+	fmt.Println("  start [--session codex-view] [--shell default|ssh-v1] [--reasoning medium] [--model gpt-5.4]")
+	fmt.Println("       Launch Codex directly in the target tmux pane via nix develop; shell v1 owns the broader workflow")
 	fmt.Println("  status [--session codex-view]")
 	fmt.Println("       Show the current pane command and cwd for the tmux session")
 }

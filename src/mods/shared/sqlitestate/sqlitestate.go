@@ -42,6 +42,18 @@ func ResolveStateDBPath(repoRoot string) string {
 	return filepath.Join(ResolveStateDir(repoRoot), "state.sqlite")
 }
 
+func ResolveLogsDir(repoRoot string) string {
+	return filepath.Join(ResolveStateDir(repoRoot), "logs")
+}
+
+func ResolveCommandLogsDir(repoRoot string) string {
+	return filepath.Join(ResolveLogsDir(repoRoot), "commands")
+}
+
+func ResolveCommandLogPath(repoRoot string, rowID int64) string {
+	return filepath.Join(ResolveCommandLogsDir(repoRoot), fmt.Sprintf("shell-bus-%d.log", rowID))
+}
+
 func ParseAssignment(raw string) (string, string, error) {
 	key, value, ok := strings.Cut(strings.TrimSpace(raw), "=")
 	if !ok {

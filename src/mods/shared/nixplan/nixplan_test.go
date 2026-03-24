@@ -73,7 +73,7 @@ func TestBuildPlanUsesFallbackFlakeShells(t *testing.T) {
 	}
 	defer db.Close()
 
-	plan, err := BuildPlan(db, t.TempDir(), "repl", "v1", runtime.GOOS)
+	plan, err := BuildPlan(db, t.TempDir(), "demo", "v1", runtime.GOOS)
 	if err != nil {
 		t.Fatalf("BuildPlan returned error: %v", err)
 	}

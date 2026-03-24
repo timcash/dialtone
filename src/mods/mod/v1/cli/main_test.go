@@ -40,6 +40,11 @@ func TestModV1CLISmoke(t *testing.T) {
 	if _, err := parseFormatArgs([]string{"--help"}); err == nil {
 		t.Fatalf("expected parseFormatArgs to reject --help")
 	}
+	if got, err := parseFormatArgs(nil); err != nil {
+		t.Fatalf("parseFormatArgs should accept blank args: %v", err)
+	} else if got != "" {
+		t.Fatalf("parseFormatArgs(nil) = %q, want empty string so format defaults to the mod root", got)
+	}
 
 	modRoot := filepath.Join(testDataDir(), "..")
 	if err := os.Chdir(modRoot); err != nil {
