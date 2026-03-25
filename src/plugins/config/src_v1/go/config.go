@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -8,8 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-
-	"github.com/joho/godotenv"
 )
 
 type Runtime struct {
@@ -85,7 +84,7 @@ func EnvPath(rt Runtime) string {
 	if strings.TrimSpace(rt.EnvFile) != "" {
 		return rt.EnvFile
 	}
-	return RepoPath(rt, "env", ".env")
+	return RepoPath(rt, "env", "dialtone.json")
 }
 
 func FindRepoRoot(start string) (string, error) {
@@ -145,7 +144,7 @@ func DefaultDialtoneEnv() string {
 		return expandHome(v)
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".dialtone_env")
+	return filepath.Join(home, ".dialtone")
 }
 
 func ResolveRuntime(start string) (Runtime, error) {
@@ -167,7 +166,7 @@ func ResolveRuntime(start string) (Runtime, error) {
 
 	envFile := strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE"))
 	if envFile == "" {
-		envFile = filepath.Join(repoRoot, "env", ".env")
+		envFile = filepath.Join(repoRoot, "env", "dialtone.json")
 	}
 	envFile, _ = filepath.Abs(envFile)
 
@@ -244,7 +243,31 @@ func LoadEnvFile(rt Runtime) error {
 		}
 		return err
 	}
-	return godotenv.Overload(rt.EnvFile)
+	raw, err := os.ReadFile(rt.EnvFile)
+	if err != nil {
+		return err
+	}
+	var config map[string]any
+	if err := json.Unmarshal(raw, &config); err != nil {
+		return err
+	}
+	for key, value := range config {
+		switch v := value.(type) {
+		case string:
+			_ = os.Setenv(key, v)
+		case float64:
+			_ = os.Setenv(key, fmt.Sprintf("%v", v))
+		case bool:
+			if v {
+				_ = os.Setenv(key, "true")
+			} else {
+				_ = os.Setenv(key, "false")
+			}
+		default:
+			_ = os.Setenv(key, fmt.Sprintf("%v", v))
+		}
+	}
+	return nil
 }
 
 func expandHome(v string) string {

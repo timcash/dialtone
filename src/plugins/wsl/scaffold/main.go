@@ -44,7 +44,7 @@ func main() {
 	} else {
 		err = runGeneric(version, command, repoRoot, args)
 	}
-	
+
 	if err != nil {
 		logs.Error("wsl error: %v", err)
 		os.Exit(1)
@@ -87,6 +87,18 @@ func runSrcV3(command, repoRoot string, args []string) error {
 		return wsl_ops.Build(args...)
 	case "dev":
 		return wsl_ops.Dev(repoRoot, args)
+	case "run", "serve":
+		return wsl_ops.Run(repoRoot, args)
+	case "list", "ls", "status":
+		return wsl_ops.List(args)
+	case "create", "spawn":
+		return wsl_ops.Create(args)
+	case "stop":
+		return wsl_ops.Stop(args)
+	case "delete", "rm":
+		return wsl_ops.Delete(args)
+	case "exec":
+		return wsl_ops.Exec(args)
 	case "fmt":
 		pkg := "./plugins/wsl/src_v3/..."
 		return go_plugin.RunGo("fmt", pkg)
@@ -152,6 +164,10 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 			BrowserModeEnvVar: "WSL_DEV_BROWSER_MODE",
 		}
 		return test_plugin.RunDev(opts)
+	case "run", "serve":
+		runArgs := []string{"run", "./plugins/wsl/" + version + "/cmd/server/main.go"}
+		runArgs = append(runArgs, args...)
+		return go_plugin.RunGo(runArgs...)
 	case "test":
 		// For now, delegate to internal test package if it exists
 		testPkg := "./plugins/wsl/" + version + "/test/cmd"
@@ -190,13 +206,24 @@ func printUsage() {
 	logs.Raw("Usage: ./dialtone.sh wsl src_vN <command> [args]")
 	logs.Raw("")
 	logs.Raw("Commands:")
-	logs.Raw("  install      Install dependencies")
+	logs.Raw("  install      Install CLI/runtime prerequisites (UI skipped by default)")
 	logs.Raw("  fmt          Run go fmt")
 	logs.Raw("  vet          Run go vet")
 	logs.Raw("  go-build     Run go build")
 	logs.Raw("  lint         Run TS lint")
 	logs.Raw("  format       Run TS format")
-	logs.Raw("  build        Build UI")
+	logs.Raw("  build        Build WSL server binary (UI skipped by default)")
 	logs.Raw("  dev          Start dev server")
+	logs.Raw("  run          Start WSL plugin server")
+	logs.Raw("  serve        Alias for run")
+	logs.Raw("  list         List WSL instances")
+	logs.Raw("  status       Alias for list")
+	logs.Raw("  create       Create Alpine-backed WSL instance")
+	logs.Raw("  stop         Stop a WSL instance")
+	logs.Raw("  delete       Delete a WSL instance")
+	logs.Raw("  exec         Run a command inside a WSL instance")
 	logs.Raw("  test         Run tests")
+	logs.Raw("")
+	logs.Raw("Notes:")
+	logs.Raw("  install/build skip the UI by default; pass --with-ui to include frontend assets")
 }

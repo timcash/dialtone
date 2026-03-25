@@ -515,7 +515,7 @@ func shouldRouteCommandViaREPL(command string, args []string) bool {
 	switch strings.TrimSpace(command) {
 	case "", "help", "-h", "--help", "exit", "branch", "plugins", "dev":
 		return false
-	case "repl":
+	case "repl", "go", "bun", "wsl":
 		return false
 	default:
 		return true

@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -27,35 +29,164 @@ type InstanceInfo struct {
 }
 
 type WslPlugin struct {
-	Addr    string
-	mu      sync.Mutex
-	clients map[*websocket.Conn]bool
+	Addr      string
+	mu        sync.Mutex
+	clients   map[*websocket.Conn]bool
+	keepAlive map[string]*exec.Cmd
 }
 
 func NewWslPlugin(addr string) *WslPlugin {
 	return &WslPlugin{
-		Addr:    addr,
-		clients: make(map[*websocket.Conn]bool),
+		Addr:      addr,
+		clients:   make(map[*websocket.Conn]bool),
+		keepAlive: make(map[string]*exec.Cmd),
 	}
 }
 
-// wslExec runs a wsl.exe command with a 30-second timeout. Logs the command and result.
-func wslExec(args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func ListInstances() ([]InstanceInfo, error) {
+	return NewWslPlugin("").listInstances()
+}
+
+func CreateInstance(name string) error {
+	p := NewWslPlugin("")
+	p.createInstance(strings.TrimSpace(name))
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("instance name is required")
+	}
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		instances, err := p.listInstances()
+		if err == nil {
+			for _, inst := range instances {
+				if strings.EqualFold(strings.TrimSpace(inst.Name), strings.TrimSpace(name)) {
+					return nil
+				}
+			}
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return fmt.Errorf("instance %s did not appear after create", name)
+}
+
+func StopInstance(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("instance name is required")
+	}
+	NewWslPlugin("").stopInstance(name)
+	return nil
+}
+
+func DeleteInstance(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("instance name is required")
+	}
+	NewWslPlugin("").deleteInstance(name)
+	return nil
+}
+
+func ExecInstance(name string, args ...string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", fmt.Errorf("instance name is required")
+	}
+	cmdArgs := []string{"-d", name, "-u", "root", "--"}
+	if len(args) == 0 {
+		cmdArgs = append(cmdArgs, "sh", "-lc", "cat /etc/alpine-release")
+	} else {
+		cmdArgs = append(cmdArgs, args...)
+	}
+	out, err := wslExecWithTimeout(45*time.Second, cmdArgs...)
+	return strings.TrimSpace(cleanWSLOutput(out)), err
+}
+
+func resolveWSLExecutable() (string, error) {
+	candidates := []string{
+		"wsl.exe",
+		"/mnt/c/WINDOWS/system32/wsl.exe",
+		"/mnt/c/Windows/System32/wsl.exe",
+		`C:\WINDOWS\system32\wsl.exe`,
+		`C:\Windows\System32\wsl.exe`,
+	}
+	for _, candidate := range candidates {
+		if strings.Contains(candidate, string(os.PathSeparator)) || strings.Contains(candidate, ":") {
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate, nil
+			}
+			continue
+		}
+		if resolved, err := exec.LookPath(candidate); err == nil {
+			return resolved, nil
+		}
+	}
+	return "", fmt.Errorf("wsl.exe not found on PATH or known Windows locations")
+}
+
+func cleanWSLOutput(raw []byte) string {
+	return strings.ReplaceAll(string(raw), "\x00", "")
+}
+
+func toWindowsPath(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	if runtime.GOOS == "windows" {
+		return path
+	}
+	out, err := exec.Command("wslpath", "-w", path).CombinedOutput()
+	if err != nil {
+		return path
+	}
+	return strings.TrimSpace(cleanWSLOutput(out))
+}
+
+func downloadFile(url, path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	resp, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("download failed: http status %d", resp.StatusCode)
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = io.Copy(f, resp.Body)
+	return err
+}
+
+func wslExecWithTimeout(timeout time.Duration, args ...string) ([]byte, error) {
+	wslExe, err := resolveWSLExecutable()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	log.Printf("[WSL] exec: wsl.exe %s", strings.Join(args, " "))
-	cmd := exec.CommandContext(ctx, "wsl.exe", args...)
+	log.Printf("[WSL] exec: %s %s", wslExe, strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, wslExe, args...)
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
-		log.Printf("[WSL] exec TIMEOUT (30s): wsl.exe %s", strings.Join(args, " "))
-		return out, fmt.Errorf("wsl.exe %s timed out after 30s", strings.Join(args, " "))
+		log.Printf("[WSL] exec TIMEOUT (%s): %s %s", timeout, wslExe, strings.Join(args, " "))
+		return out, fmt.Errorf("wsl.exe %s timed out after %s", strings.Join(args, " "), timeout)
 	}
 	if err != nil {
-		log.Printf("[WSL] exec ERROR: wsl.exe %s -> %v (output: %s)", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+		log.Printf("[WSL] exec ERROR: %s %s -> %v (output: %s)", wslExe, strings.Join(args, " "), err, strings.TrimSpace(cleanWSLOutput(out)))
 	} else {
-		log.Printf("[WSL] exec OK: wsl.exe %s (%d bytes output)", strings.Join(args, " "), len(out))
+		log.Printf("[WSL] exec OK: %s %s (%d bytes output)", wslExe, strings.Join(args, " "), len(out))
 	}
 	return out, err
+}
+
+// wslExec runs a wsl.exe command with a default timeout.
+func wslExec(args ...string) ([]byte, error) {
+	return wslExecWithTimeout(30*time.Second, args...)
 }
 
 func (p *WslPlugin) Start() error {
@@ -208,7 +339,7 @@ func (p *WslPlugin) listInstances() ([]InstanceInfo, error) {
 		return nil, err
 	}
 
-	cleanOut := strings.ReplaceAll(string(out), "\x00", "")
+	cleanOut := cleanWSLOutput(out)
 	lines := strings.Split(cleanOut, "\n")
 	if len(lines) <= 1 {
 		return []InstanceInfo{}, nil
@@ -243,7 +374,7 @@ func (p *WslPlugin) listInstances() ([]InstanceInfo, error) {
 func (p *WslPlugin) getStats(name string) (string, string) {
 	mem := "--"
 	disk := "--"
-	out, err := wslExec("-d", name, "--", "sh", "-c", "free -m | grep Mem:; df -h / | grep /$")
+	out, err := wslExecWithTimeout(10*time.Second, "-d", name, "--", "sh", "-c", "free -m | grep Mem:; df -h / | grep /$")
 	if err != nil {
 		return mem, disk
 	}
@@ -306,6 +437,8 @@ func (p *WslPlugin) createInstance(name string) {
 	baseDir := filepath.Join(wslDir, "_bases")
 	basePath := filepath.Join(baseDir, "alpine.tar.gz")
 	installPath := filepath.Join(wslDir, name)
+	basePathWin := toWindowsPath(basePath)
+	installPathWin := toWindowsPath(installPath)
 
 	log.Printf("[WSL] createInstance: name=%s wslDir=%s", name, wslDir)
 	os.MkdirAll(baseDir, 0755)
@@ -319,10 +452,7 @@ func (p *WslPlugin) createInstance(name string) {
 		}
 		log.Printf("[WSL] Downloading Alpine rootfs...")
 		alpineURL := "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/x86_64/alpine-minirootfs-3.21.2-x86_64.tar.gz"
-		dlCmd := exec.Command("curl.exe", "-L", "-o", basePath, alpineURL)
-		dlCmd.Stdout = os.Stdout
-		dlCmd.Stderr = os.Stderr
-		if err := dlCmd.Run(); err != nil {
+		if err := downloadFile(alpineURL, basePath); err != nil {
 			log.Printf("[WSL] Alpine download failed: %v", err)
 			return
 		}
@@ -344,34 +474,79 @@ func (p *WslPlugin) createInstance(name string) {
 	// Import
 	log.Printf("[WSL] Importing %s from %s into %s...", name, basePath, installPath)
 	os.MkdirAll(installPath, 0755)
-	importOut, err := wslExec("--import", name, installPath, basePath)
+	importOut, err := wslExecWithTimeout(2*time.Minute, "--import", name, installPathWin, basePathWin)
 	if err != nil {
-		log.Printf("[WSL] Import failed: %v\nOutput: %s", err, string(importOut))
+		log.Printf("[WSL] Import failed: %v\nOutput: %s", err, cleanWSLOutput(importOut))
 		return
 	}
 	log.Printf("[WSL] Import succeeded for %s", name)
 
-	// Start the instance with a keep-alive process
-	log.Printf("[WSL] Starting %s...", name)
-	go func() {
-		startOut, err := wslExec("-d", name, "-u", "root", "--", "sh", "-c", "echo STARTED && while true; do sleep 3600; done")
-		if err != nil {
-			log.Printf("[WSL] Start background for %s ended: %v (output: %s)", name, err, strings.TrimSpace(string(startOut)))
-		}
-	}()
+	if _, err := wslExecWithTimeout(45*time.Second, "-d", name, "-u", "root", "--", "sh", "-c", "test -f /etc/alpine-release && cat /etc/alpine-release"); err != nil {
+		log.Printf("[WSL] Alpine verification for %s failed: %v", name, err)
+		return
+	}
+	if err := p.startKeepAlive(name); err != nil {
+		log.Printf("[WSL] Start keepalive for %s failed: %v", name, err)
+		return
+	}
+	log.Printf("[WSL] Alpine instance %s is running", name)
 }
 
 func (p *WslPlugin) stopInstance(name string) {
 	log.Printf("[WSL] Stopping instance %s...", name)
-	wslExec("--terminate", name)
+	p.stopKeepAlive(name)
+	wslExecWithTimeout(20*time.Second, "--terminate", name)
 	log.Printf("[WSL] Stop complete for %s", name)
 }
 
 func (p *WslPlugin) deleteInstance(name string) {
 	log.Printf("[WSL] Deleting instance %s...", name)
 	p.stopInstance(name)
-	wslExec("--unregister", name)
+	wslExecWithTimeout(30*time.Second, "--unregister", name)
 	installPath := filepath.Join(p.wslBaseDir(), name)
 	os.RemoveAll(installPath)
 	log.Printf("[WSL] Delete complete for %s", name)
+}
+
+func (p *WslPlugin) startKeepAlive(name string) error {
+	wslExe, err := resolveWSLExecutable()
+	if err != nil {
+		return err
+	}
+	p.stopKeepAlive(name)
+
+	cmd := exec.Command(wslExe, "-d", name, "-u", "root", "--", "sh", "-c", "mkdir -p /run && touch /run/dialtone-host-started && exec tail -f /dev/null")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	p.mu.Lock()
+	p.keepAlive[name] = cmd
+	p.mu.Unlock()
+
+	go func() {
+		err := cmd.Wait()
+		p.mu.Lock()
+		if current, ok := p.keepAlive[name]; ok && current == cmd {
+			delete(p.keepAlive, name)
+		}
+		p.mu.Unlock()
+		if err != nil {
+			log.Printf("[WSL] Keepalive exited for %s: %v", name, err)
+		}
+	}()
+	return nil
+}
+
+func (p *WslPlugin) stopKeepAlive(name string) {
+	p.mu.Lock()
+	cmd := p.keepAlive[name]
+	delete(p.keepAlive, name)
+	p.mu.Unlock()
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	_ = cmd.Process.Kill()
 }

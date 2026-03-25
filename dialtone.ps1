@@ -16,15 +16,20 @@ function Write-EnvFile {
     )
     $envDir = Split-Path -Parent $EnvFilePath
     New-Item -ItemType Directory -Path $envDir -Force | Out-Null
-    @(
-        "DIALTONE_ENV=$DialtoneEnv"
-        "DIALTONE_USE_NIX=1"
-    ) | Set-Content -Path $EnvFilePath -Encoding UTF8
+    @{
+        DIALTONE_ENV = $DialtoneEnv
+        DIALTONE_REPO_ROOT = $ScriptDir
+        DIALTONE_USE_NIX = "1"
+    } | ConvertTo-Json | Set-Content -Path $EnvFilePath -Encoding UTF8
 }
 
 function Convert-ToWslPath {
     param([Parameter(Mandatory = $true)][string]$Path)
-    $p = (Resolve-Path -LiteralPath $Path).Path
+    $p = if (Test-Path -LiteralPath $Path) {
+        (Resolve-Path -LiteralPath $Path).Path
+    } else {
+        $Path
+    }
     if ($p -match '^([A-Za-z]):\\(.*)$') {
         $drive = $matches[1].ToLower()
         $rest = $matches[2] -replace '\\', '/'
@@ -35,7 +40,44 @@ function Convert-ToWslPath {
 
 function Escape-BashArg {
     param([Parameter(Mandatory = $true)][string]$Value)
-    return "'" + ($Value -replace "'", "'\"'\"'") + "'"
+    $replacement = "'`"`'`"`'"
+    return "'" + ($Value -replace "'", $replacement) + "'"
+}
+
+function Convert-EnvPathToWsl {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $Path }
+    if ($Path -match '^[A-Za-z]:\\') {
+        return Convert-ToWslPath -Path $Path
+    }
+    return ($Path -replace '\\', '/')
+}
+
+function Invoke-WslPluginViaShell {
+    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
+        throw "WSL is required for dialtone.ps1 wsl ..."
+    }
+
+    $wslRepo = Convert-ToWslPath -Path $ScriptDir
+    $resolvedEnv = if ([string]::IsNullOrWhiteSpace($env:DIALTONE_ENV)) {
+        Join-Path $env:USERPROFILE ".dialtone"
+    } else {
+        $env:DIALTONE_ENV
+    }
+    $wslEnv = Convert-EnvPathToWsl -Path $resolvedEnv
+
+    $escapedArgs = @()
+    foreach ($a in $ScriptArgs) { $escapedArgs += (Escape-BashArg -Value $a) }
+    $argTail = [string]::Join(" ", $escapedArgs)
+    $cmd = "cd $(Escape-BashArg -Value $wslRepo) && export DIALTONE_ONBOARDING_DONE=1 && export DIALTONE_REPO_ROOT=$(Escape-BashArg -Value $wslRepo) && export DIALTONE_ENV=$(Escape-BashArg -Value $wslEnv) && export DIALTONE_USE_NIX=0 && ./dialtone.sh $argTail"
+
+    Write-Host "DIALTONE> Running wsl plugin via WSL shell..."
+    & wsl.exe -e bash -lc $cmd
+    exit $LASTEXITCODE
+}
+
+if ($ScriptArgs.Length -gt 0 -and $ScriptArgs[0] -eq "wsl") {
+    Invoke-WslPluginViaShell
 }
 
 function Enter-NixShellIfNeeded {
@@ -96,12 +138,12 @@ function Run-BootstrapRepl {
     param(
         [Parameter(Mandatory = $true)][string]$EnvFilePath
     )
-    $defaultEnv = Join-Path $ScriptDir ".dialtone_env"
+    $defaultEnv = Join-Path $env:USERPROFILE ".dialtone"
     $defaultRepo = "https://github.com/timcash/dialtone.git"
     $defaultBranch = "main"
 
     Write-Host "DIALTONE> Bootstrap REPL started."
-    Write-Host "DIALTONE> This will configure env/.env and bootstrap the dialtone repo."
+    Write-Host "DIALTONE> This will configure env/dialtone.json and bootstrap the dialtone repo."
     Write-Host "DIALTONE> Runtime/tooling install happens in WSL + Nix shell after bootstrap."
 
     $inputEnv = Read-Host "DIALTONE> Environment directory [default: $defaultEnv]"
@@ -131,7 +173,7 @@ function Run-BootstrapRepl {
 }
 
 # 1. Load Environment
-$EnvFile = Join-Path $ScriptDir "env/.env"
+$EnvFile = Join-Path $ScriptDir "env/dialtone.json"
 if ([string]::IsNullOrWhiteSpace($env:DIALTONE_ENV_FILE)) {
     $env:DIALTONE_ENV_FILE = $EnvFile
 }
@@ -139,16 +181,9 @@ if (!(Test-Path $EnvFile) -and [string]::IsNullOrWhiteSpace($env:DIALTONE_BOOTST
     Run-BootstrapRepl -EnvFilePath $EnvFile
 }
 if (Test-Path $EnvFile) {
-    Get-Content $EnvFile | ForEach-Object {
-        $line = $_.Trim()
-        if (!$line -or $line.StartsWith("#")) { return }
-        $parts = $line.Split("=", 2)
-        if ($parts.Length -eq 2) {
-            $key = $parts[0].Trim()
-            $value = $parts[1].Trim()
-            # Basic env expansion (optional but helpful)
-            [System.Environment]::SetEnvironmentVariable($key, $value, "Process")
-        }
+    $config = Get-Content $EnvFile -Raw | ConvertFrom-Json
+    $config.PSObject.Properties | ForEach-Object {
+        [System.Environment]::SetEnvironmentVariable($_.Name, [string]$_.Value, "Process")
     }
 }
 
@@ -156,7 +191,7 @@ Enter-NixShellIfNeeded
 
 # Default DIALTONE_ENV if not set
 if ([string]::IsNullOrWhiteSpace($env:DIALTONE_ENV)) {
-    $env:DIALTONE_ENV = Join-Path $ScriptDir ".dialtone_env"
+    $env:DIALTONE_ENV = Join-Path $env:USERPROFILE ".dialtone"
 }
 
 # Expand ~ in DIALTONE_ENV

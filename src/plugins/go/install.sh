@@ -12,7 +12,7 @@ Usage: ./dialtone.sh install [path]
 Installs the Go toolchain into DIALTONE_ENV/go.
 
 Arguments:
-  [path]    Optional install root. Overrides DIALTONE_ENV from env/.env.
+  [path]    Optional install root. Overrides DIALTONE_ENV from env/dialtone.json.
 Flags:
   --latest  Install the latest stable Go version from go.dev.
 EOF
@@ -42,18 +42,16 @@ if [ -n "${POSITIONAL_ARGS[0]:-}" ]; then
 fi
 
 if [ -z "${DIALTONE_ENV:-}" ]; then
-  ENV_FILE="${DIALTONE_ENV_FILE:-$REPO_ROOT/env/.env}"
+  ENV_FILE="${DIALTONE_ENV_FILE:-$REPO_ROOT/env/dialtone.json}"
   if [ -f "$ENV_FILE" ]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$ENV_FILE"
-    set +a
+    DIALTONE_ENV="$(grep -m 1 '"DIALTONE_ENV"' "$ENV_FILE" | sed -E 's/.*: *"([^"]*)".*/\1/' | tr -d '\r')"
+    export DIALTONE_ENV
   fi
 fi
 
 if [ -z "${DIALTONE_ENV:-}" ]; then
   echo "Error: DIALTONE_ENV is not set."
-  echo "Set it in env/.env or pass an install path:"
+  echo "Set it in env/dialtone.json or pass an install path:"
   echo "  ./dialtone.sh install /path/to/env"
   exit 1
 fi
@@ -66,15 +64,15 @@ mkdir -p "$DIALTONE_ENV"
 
 if [ "$INSTALL_LATEST" -eq 1 ]; then
   if command -v curl >/dev/null 2>&1; then
-    GO_VERSION="$(curl -fsSL https://go.dev/VERSION?m=text | awk 'NR==1{gsub(/^go/, "", $1); print $1}')"
+    GO_VERSION="$(curl -fsSL https://go.dev/VERSION?m=text | awk 'NR==1{gsub(/^go/, "", $1); print $1}' | tr -d '\r')"
   elif command -v wget >/dev/null 2>&1; then
-    GO_VERSION="$(wget -qO- https://go.dev/VERSION?m=text | awk 'NR==1{gsub(/^go/, "", $1); print $1}')"
+    GO_VERSION="$(wget -qO- https://go.dev/VERSION?m=text | awk 'NR==1{gsub(/^go/, "", $1); print $1}' | tr -d '\r')"
   else
     echo "Error: need curl or wget to resolve latest Go version"
     exit 1
   fi
 else
-  GO_VERSION="$(grep "^go " "$REPO_ROOT/src/go.mod" | awk '{print $2}')"
+  GO_VERSION="$(grep "^go " "$REPO_ROOT/src/go.mod" | awk '{print $2}' | tr -d '\r')"
 fi
 
 if [ -z "${GO_VERSION:-}" ]; then

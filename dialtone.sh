@@ -68,7 +68,7 @@ EOF
 # --- 3. Installation Helpers ---
 install_go() {
     local target_dir="$1"
-    local version="1.24.0"
+    local version="1.25.5"
     local os="linux"
     local arch="amd64"
     [[ "$(uname)" == "Darwin" ]] && os="darwin"
@@ -221,7 +221,7 @@ run_onboarding() {
     local is_test="$1"
     log_info "Welcome to Dialtone! Let's get you set up."
     
-    DEFAULT_ENV="$HOME/.dialtone_env"
+    DEFAULT_ENV="$HOME/.dialtone"
     if [ "$is_test" = "1" ]; then
         input_env="${TEST_ANS_ENV:-$DEFAULT_ENV}"
         log_info "Where should dependencies (Go/Bun) be installed? [$DEFAULT_ENV]: $input_env (Auto)"

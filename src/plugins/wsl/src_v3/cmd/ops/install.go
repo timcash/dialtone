@@ -5,6 +5,7 @@ import (
 	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"encoding/hex"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -26,16 +27,28 @@ type installState struct {
 }
 
 func Install(args ...string) error {
+	fs := flag.NewFlagSet("wsl-install", flag.ContinueOnError)
+	withUI := fs.Bool("with-ui", false, "Install optional UI dependencies")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
 	repoRoot, uiDir, err := resolveWSLPaths()
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(filepath.Join(uiDir, "package.json")); err != nil {
-		return fmt.Errorf("missing src_v3 ui package.json: %w", err)
-	}
 
 	if err := run(repoRoot, "go", "src_v1", "install"); err != nil {
 		return fmt.Errorf("go toolchain install failed: %w", err)
+	}
+
+	if !*withUI {
+		logs.Info("[WSL INSTALL] skipping UI dependencies; pass --with-ui to install frontend assets")
+		return nil
+	}
+
+	if _, err := os.Stat(filepath.Join(uiDir, "package.json")); err != nil {
+		return fmt.Errorf("missing src_v3 ui package.json: %w", err)
 	}
 
 	if err := ensureBunToolchain(repoRoot); err != nil {

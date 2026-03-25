@@ -1,6 +1,5 @@
 {
-  "DIALTONE_ENV": "/Users/your-user/.dialtone_env",
-  "DIALTONE_REPO_ROOT": "/Users/your-user/dialtone",
+  "DIALTONE_ENV": "~/.dialtone",
   "DIALTONE_USE_NIX": "0",
   "mesh_nodes": [
     {
