@@ -248,6 +248,9 @@ func runTmpBootstrapTest(args []string) error {
 	env = appendConfigEnvIfMissing(env, repoRoot, "CLOUDFLARE_API_TOKEN")
 	env = appendConfigEnvIfMissing(env, repoRoot, "CLOUDFLARE_ACCOUNT_ID")
 	env = appendConfigEnvIfMissing(env, repoRoot, "CF_TUNNEL_TOKEN_SHELL")
+	env = appendConfigEnvIfMissing(env, repoRoot, "TS_AUTHKEY")
+	env = appendConfigEnvIfMissing(env, repoRoot, "TS_API_KEY")
+	env = appendConfigEnvIfMissing(env, repoRoot, "TS_TAILNET")
 	env = appendConfigEnvIfMissing(env, repoRoot, "DIALTONE_DOMAIN")
 	env = appendConfigEnvIfMissing(env, repoRoot, "DIALTONE_HOSTNAME")
 	if bootstrapRepoURL != "" {

@@ -18,6 +18,26 @@ func TestResolveMeshNodeAlias(t *testing.T) {
 	}
 }
 
+func TestResolveMeshNodeHost(t *testing.T) {
+	n, err := ResolveMeshNode("rover-1.shad-artichoke.ts.net")
+	if err != nil {
+		t.Fatalf("ResolveMeshNode(rover hostname) failed: %v", err)
+	}
+	if n.Name != "rover" {
+		t.Fatalf("expected rover node, got %s", n.Name)
+	}
+}
+
+func TestResolveMeshNodeHostCandidate(t *testing.T) {
+	n, err := ResolveMeshNode("192.168.4.36")
+	if err != nil {
+		t.Fatalf("ResolveMeshNode(rover LAN ip) failed: %v", err)
+	}
+	if n.Name != "rover" {
+		t.Fatalf("expected rover node, got %s", n.Name)
+	}
+}
+
 func TestResolveCommandTransportLegionUsesPowerShellInWSL(t *testing.T) {
 	prev := isWSLFunc
 	isWSLFunc = func() bool { return true }

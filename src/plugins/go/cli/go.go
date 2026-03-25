@@ -138,35 +138,48 @@ func runInstall(args []string) {
 	archName := runtime.GOARCH
 	tarball := fmt.Sprintf("go%s.%s-%s.tar.gz", goVersion, osName, archName)
 	downloadURL := fmt.Sprintf("https://go.dev/dl/%s", tarball)
-	destTar := filepath.Join(depsDir, tarball)
+	cacheDir := strings.TrimSpace(os.Getenv("DIALTONE_GO_CACHE_DIR"))
+	if cacheDir == "" {
+		home, err := os.UserHomeDir()
+		if err == nil && strings.TrimSpace(home) != "" {
+			cacheDir = filepath.Join(home, ".cache", "dialtone", "go")
+		}
+	}
+	if cacheDir == "" {
+		cacheDir = filepath.Join(depsDir, ".cache")
+	}
+	cacheTar := filepath.Join(cacheDir, tarball)
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		logs.Fatal("Failed to create Go cache directory %s: %v", cacheDir, err)
+	}
 
-	logs.Info("Downloading %s to %s...", downloadURL, destTar)
-
-	var downloadCmd *exec.Cmd
-	if _, err := exec.LookPath("curl"); err == nil {
-		downloadCmd = exec.Command("curl", "-L", "-o", destTar, downloadURL)
-	} else if _, err := exec.LookPath("wget"); err == nil {
-		downloadCmd = exec.Command("wget", "-O", destTar, downloadURL)
+	if _, err := os.Stat(cacheTar); err == nil {
+		logs.Info("Using cached Go tarball %s", cacheTar)
 	} else {
-		logs.Fatal("Neither curl nor wget found in PATH")
+		logs.Info("Downloading %s to shared cache %s...", downloadURL, cacheTar)
+
+		var downloadCmd *exec.Cmd
+		if _, err := exec.LookPath("curl"); err == nil {
+			downloadCmd = exec.Command("curl", "-L", "-o", cacheTar, downloadURL)
+		} else if _, err := exec.LookPath("wget"); err == nil {
+			downloadCmd = exec.Command("wget", "-O", cacheTar, downloadURL)
+		} else {
+			logs.Fatal("Neither curl nor wget found in PATH")
+		}
+
+		downloadCmd.Stdout = os.Stdout
+		downloadCmd.Stderr = os.Stderr
+		if err := downloadCmd.Run(); err != nil {
+			logs.Fatal("Failed to download Go: %v", err)
+		}
 	}
 
-	downloadCmd.Stdout = os.Stdout
-	downloadCmd.Stderr = os.Stderr
-	if err := downloadCmd.Run(); err != nil {
-		logs.Fatal("Failed to download Go: %v", err)
-	}
-
-	logs.Info("Extracting %s...", destTar)
-	extractCmd := exec.Command("tar", "-C", depsDir, "-xzf", destTar)
+	logs.Info("Extracting %s...", cacheTar)
+	extractCmd := exec.Command("tar", "-C", depsDir, "-xzf", cacheTar)
 	extractCmd.Stdout = os.Stdout
 	extractCmd.Stderr = os.Stderr
 	if err := extractCmd.Run(); err != nil {
 		logs.Fatal("Failed to extract Go: %v", err)
-	}
-
-	if err := os.Remove(destTar); err != nil {
-		logs.Warn("Failed to remove temporary tarball %s: %v", destTar, err)
 	}
 
 	logs.Info("Go toolchain installed successfully at %s", goDir)

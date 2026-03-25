@@ -662,9 +662,6 @@ func ensureAuthKeyForEmbedded(cfg *Config) error {
 	if cfg == nil {
 		return errors.New("nil config")
 	}
-	if cfg.AuthKeyPresent {
-		return nil
-	}
 
 	apiKey := strings.TrimSpace(os.Getenv(cfg.APIKeyEnv))
 	if apiKey == "" {
@@ -677,6 +674,9 @@ func ensureAuthKeyForEmbedded(cfg *Config) error {
 		apiKey = strings.TrimSpace(loadTSAPIKeyFromDialtoneJSON())
 	}
 	if apiKey == "" {
+		if cfg.AuthKeyPresent {
+			return nil
+		}
 		return errors.New("missing TS_AUTHKEY and cannot auto-provision: set TS_API_KEY (or pass --api-key to keys provision)")
 	}
 	if strings.TrimSpace(cfg.Tailnet) == "" {
@@ -687,7 +687,7 @@ func ensureAuthKeyForEmbedded(cfg *Config) error {
 		APIToken:      apiKey,
 		Tailnet:       cfg.Tailnet,
 		Description:   fmt.Sprintf("dialtone-tsnet-embedded-%s", cfg.Hostname),
-		Tags:          []string{"dialtone", "embedded", "ephemeral"},
+		Tags:          nil,
 		Reusable:      false,
 		Ephemeral:     true,
 		Preauthorized: true,

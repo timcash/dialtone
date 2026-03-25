@@ -450,6 +450,17 @@ func RunLeader(args []string) error {
 		switch frame.Type {
 		case frameTypeJoin:
 			presence.UpsertClient(frame.From, frame.Room, frame.Version, frame.OS, frame.Arch)
+			targetRoom := sanitizeRoom(frame.Room)
+			if targetRoom == "" {
+				targetRoom = roomName
+			}
+			publishRoom(targetRoom, BusFrame{
+				Type:    frameTypeServer,
+				Message: fmt.Sprintf("Leader online on %s (subject=%s nats=%s)", h, replRoomSubject(roomName), usedURL),
+			})
+			if strings.TrimSpace(tsnetStatusMessage) != "" {
+				publishRoom(targetRoom, BusFrame{Type: frameTypeServer, Message: tsnetStatusMessage})
+			}
 		case frameTypeLeft:
 			presence.RemoveClient(frame.From)
 		case frameTypeDaemon:
@@ -2099,6 +2110,7 @@ func startTSNetInstance(hostname string) (*tsnetRuntime, error) {
 		return nil, err
 	}
 	srv := tsnetlib.BuildServer(cfg)
+	srv.Ephemeral = true
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	status, err := srv.Up(ctx)

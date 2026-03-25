@@ -1,5 +1,6 @@
 {
   "DIALTONE_ENV": "~/.dialtone",
+  "DIALTONE_REPO_ROOT": "/home/user/dialtone",
   "DIALTONE_USE_NIX": "0",
   "mesh_nodes": [
     {
@@ -17,7 +18,10 @@
         "private"
       ],
       "port": "22",
-      "os": "linux"
+      "os": "linux",
+      "repo_candidates": [
+        "/home/user/dialtone"
+      ]
     }
   ]
 }

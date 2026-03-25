@@ -229,6 +229,20 @@ func persistBootstrapHTTPConfig(host string, port int) error {
 	doc["DIALTONE_BOOTSTRAP_HTTP_HOST"] = strings.TrimSpace(host)
 	doc["DIALTONE_BOOTSTRAP_HTTP_PORT"] = strconv.Itoa(port)
 	doc["DIALTONE_BOOTSTRAP_HTTP_URL"] = fmt.Sprintf("http://%s:%d", strings.TrimSpace(host), port)
+	for _, key := range []string{
+		"TS_AUTHKEY",
+		"TS_API_KEY",
+		"TS_TAILNET",
+		"CLOUDFLARE_API_TOKEN",
+		"CLOUDFLARE_ACCOUNT_ID",
+		"CF_TUNNEL_TOKEN_SHELL",
+		"DIALTONE_DOMAIN",
+		"DIALTONE_HOSTNAME",
+	} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			doc[key] = value
+		}
+	}
 	out, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return err

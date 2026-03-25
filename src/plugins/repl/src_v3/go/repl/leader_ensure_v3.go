@@ -65,9 +65,9 @@ func EnsureLeaderRunning(clientNATSURL, room string) error {
 	if cmd.Process != nil {
 		_ = cmd.Process.Release()
 	}
-	deadline := time.Now().Add(8 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, err := leaderHealth(clientNATSURL, 800*time.Millisecond); err == nil {
+		if _, err := leaderHealth(clientNATSURL, 1200*time.Millisecond); err == nil {
 			return nil
 		}
 		time.Sleep(150 * time.Millisecond)

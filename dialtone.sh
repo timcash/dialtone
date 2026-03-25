@@ -63,6 +63,35 @@ write_json_config() {
   "DIALTONE_USE_NIX": "0"
 }
 EOF
+    local key value tmp_file
+    for key in \
+        CLOUDFLARE_API_TOKEN \
+        CLOUDFLARE_ACCOUNT_ID \
+        CF_TUNNEL_TOKEN_SHELL \
+        DIALTONE_DOMAIN \
+        DIALTONE_HOSTNAME \
+        TS_AUTHKEY \
+        TS_API_KEY \
+        TS_TAILNET
+    do
+        value="${!key:-}"
+        if [ -n "$value" ]; then
+            tmp_file="$(mktemp)"
+            python3 - "$ENV_FILE_JSON_DEFAULT" "$tmp_file" "$key" "$value" <<'PY'
+import json
+import sys
+
+src, dst, key, value = sys.argv[1:5]
+with open(src, "r", encoding="utf-8") as f:
+    doc = json.load(f)
+doc[key] = value
+with open(dst, "w", encoding="utf-8") as f:
+    json.dump(doc, f, indent=2)
+    f.write("\n")
+PY
+            mv "$tmp_file" "$ENV_FILE_JSON_DEFAULT"
+        fi
+    done
 }
 
 # --- 3. Installation Helpers ---
@@ -75,9 +104,19 @@ install_go() {
     [[ "$(uname -m)" == "arm64" || "$(uname -m)" == "aarch64" ]] && arch="arm64"
 
     local url="https://go.dev/dl/go${version}.${os}-${arch}.tar.gz"
-    log_info "Downloading Go ${version} to ${target_dir}..."
+    local tarball="go${version}.${os}-${arch}.tar.gz"
+    local cache_dir="${DIALTONE_GO_CACHE_DIR:-$HOME/.cache/dialtone/go}"
+    local cache_tar="${cache_dir}/${tarball}"
     mkdir -p "$target_dir"
-    curl -L "$url" | tar -xz -C "$target_dir"
+    mkdir -p "$cache_dir"
+    if [ -f "$cache_tar" ]; then
+        log_info "Using cached Go ${version} tarball from ${cache_tar}..."
+    else
+        log_info "Downloading Go ${version} to shared cache ${cache_tar}..."
+        curl -L "$url" -o "$cache_tar"
+    fi
+    log_info "Installing Go ${version} into ${target_dir}..."
+    tar -xzf "$cache_tar" -C "$target_dir"
 }
 
 bootstrap_repo() {

@@ -1,9 +1,8 @@
 [CmdletBinding(PositionalBinding = $false)]
 param(
   [Parameter(Position = 0)]
-  [ValidateSet("ensure", "send", "read", "clear", "interrupt", "list")]
-  [string]$Action = "send",
-  [string]$Session = "codex",
+  [string]$Action,
+  [string]$Session = "windows",
   [string]$Distro,
   [string]$Cwd = "/home/user/dialtone",
   [int]$Lines = 120,
@@ -14,6 +13,20 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$knownActions = @("ensure", "send", "read", "clear", "interrupt", "list")
+
+if (-not $Action) {
+  if ($CommandArgs -and $CommandArgs.Count -gt 0) {
+    $Action = "send"
+  }
+  else {
+    $Action = "read"
+  }
+}
+elseif ($knownActions -notcontains $Action) {
+  $CommandArgs = @($Action) + $CommandArgs
+  $Action = "send"
+}
 
 function Invoke-WslBash {
   param(
@@ -21,17 +34,30 @@ function Invoke-WslBash {
     [string]$Script
   )
 
+  $tempFile = Join-Path ([System.IO.Path]::GetTempPath()) ("wsl-tmux-" + [guid]::NewGuid().ToString("N") + ".sh")
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($tempFile, $Script, $utf8NoBom)
+
+  $root = [System.IO.Path]::GetPathRoot($tempFile).TrimEnd('\').TrimEnd(':').ToLowerInvariant()
+  $relative = $tempFile.Substring(3).Replace('\', '/')
+  $linuxPath = "/mnt/$root/$relative"
+
   $wslArgs = @()
   if ($Distro) {
     $wslArgs += "-d"
     $wslArgs += $Distro
   }
   $wslArgs += "bash"
-  $wslArgs += "-s"
+  $wslArgs += $linuxPath
 
-  $Script | & wsl.exe @wslArgs
-  if ($LASTEXITCODE -ne 0) {
-    throw "wsl command failed with exit code $LASTEXITCODE"
+  try {
+    & wsl.exe @wslArgs
+    if ($LASTEXITCODE -ne 0) {
+      throw "wsl command failed with exit code $LASTEXITCODE"
+    }
+  }
+  finally {
+    Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue
   }
 }
 
@@ -95,9 +121,9 @@ tmux capture-pane -pt '$safeSession' -S -$Lines
     $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($commandText))
     Invoke-WslBash @"
 cmd_b64='$encodedCommand'
-cmd_text=\$(printf '%s' "\$cmd_b64" | base64 -d)
+cmd_text=`$(printf '%s' "`$cmd_b64" | base64 -d)
 tmux send-keys -t '$safeSession' C-c
-tmux send-keys -l -t '$safeSession' "\$cmd_text"
+tmux send-keys -l -t '$safeSession' "`$cmd_text"
 tmux send-keys -t '$safeSession' Enter
 sleep 0.5
 tmux capture-pane -pt '$safeSession' -S -$Lines

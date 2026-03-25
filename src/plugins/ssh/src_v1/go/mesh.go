@@ -284,6 +284,14 @@ func ResolveMeshNode(target string) (MeshNode, error) {
 				return n, nil
 			}
 		}
+		if normalizeTarget(strings.TrimSpace(n.Host)) == t {
+			return n, nil
+		}
+		for _, h := range n.HostCandidates {
+			if normalizeTarget(h) == t {
+				return n, nil
+			}
+		}
 	}
 	return MeshNode{}, fmt.Errorf("unknown mesh node %q", target)
 }
