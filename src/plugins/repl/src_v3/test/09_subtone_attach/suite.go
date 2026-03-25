@@ -28,7 +28,7 @@ func Register(r *testv1.Registry) {
 
 			if err := rt.RunTranscript([]support.TranscriptStep{
 				{
-					Send:         "/repl src_v3 add-host --name wsl --host wsl.shad-artichoke.ts.net --user user",
+					Send:         "/repl src_v3 add-host --name wsl --host grey.shad-artichoke.ts.net --user user",
 					ExpectRoom:   support.StandardSubtoneRoomPatterns("repl src_v3", ""),
 					ExpectOutput: support.StandardSubtoneOutputPatterns("repl src_v3", "DIALTONE> Subtone for repl src_v3 exited with code 0."),
 					Timeout:      40 * time.Second,

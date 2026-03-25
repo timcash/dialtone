@@ -122,7 +122,6 @@ tmux capture-pane -pt '$safeSession' -S -$Lines
     Invoke-WslBash @"
 cmd_b64='$encodedCommand'
 cmd_text=`$(printf '%s' "`$cmd_b64" | base64 -d)
-tmux send-keys -t '$safeSession' C-c
 tmux send-keys -l -t '$safeSession' "`$cmd_text"
 tmux send-keys -t '$safeSession' Enter
 sleep 0.5
