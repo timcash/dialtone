@@ -14,7 +14,7 @@ func RunGo(args ...string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	goBin := os.Getenv("DIALTONE_GO_BIN")
 	if goBin == "" {
 		dialtoneEnv := os.Getenv("DIALTONE_ENV")

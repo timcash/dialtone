@@ -119,6 +119,20 @@ func TestResolveStatePathsPreferEnvironment(t *testing.T) {
 	}
 }
 
+func TestResolveLogPathsFollowStateDir(t *testing.T) {
+	repoRoot := "/tmp/example"
+	t.Setenv("DIALTONE_STATE_DIR", "/tmp/example/.dialtone")
+	if got := ResolveLogsDir(repoRoot); got != "/tmp/example/.dialtone/logs" {
+		t.Fatalf("unexpected logs dir: %q", got)
+	}
+	if got := ResolveCommandLogsDir(repoRoot); got != "/tmp/example/.dialtone/logs/commands" {
+		t.Fatalf("unexpected command logs dir: %q", got)
+	}
+	if got := ResolveCommandLogPath(repoRoot, 42); got != "/tmp/example/.dialtone/logs/commands/shell-bus-42.log" {
+		t.Fatalf("unexpected command log path: %q", got)
+	}
+}
+
 func TestResolveStatePathsMakeRelativeEnvAbsoluteFromRepoRoot(t *testing.T) {
 	repoRoot := "/tmp/example"
 	t.Setenv("DIALTONE_STATE_DIR", ".dialtone")

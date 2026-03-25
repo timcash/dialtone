@@ -105,3 +105,5 @@ env/known_hosts
 test_env/
 test_onboarding_clean/
 /.dialtone_env
+.zig-cache/
+zig-out/

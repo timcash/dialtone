@@ -43,7 +43,7 @@ func Register(reg *testv1.Registry, opts Options) {
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			attachNode := strings.TrimSpace(opts.AttachNode)
 			targetURL := strings.TrimSpace(opts.TargetURL)
-			
+
 			localURL := "http://127.0.0.1:8891"
 			if targetURL == "" {
 				targetURL = localURL

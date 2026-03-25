@@ -485,7 +485,7 @@ func syncRepoRoot(repoRoot string) error {
 	if _, err := os.Stat(filepath.Join(repoRoot, ".git")); err != nil {
 		return nil
 	}
-script := fmt.Sprintf(`set -e
+	script := fmt.Sprintf(`set -e
 cd %s
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 0

@@ -11,12 +11,21 @@ import (
 )
 
 type ShellCommandIntent struct {
-	Command      string `json:"command,omitempty"`
-	Expect       string `json:"expect,omitempty"`
-	InnerCommand string `json:"inner_command,omitempty"`
-	Target       string `json:"target,omitempty"`
-	Summary      string `json:"summary,omitempty"`
-	Error        string `json:"error,omitempty"`
+	Command        string   `json:"command,omitempty"`
+	Expect         string   `json:"expect,omitempty"`
+	InnerCommand   string   `json:"inner_command,omitempty"`
+	DisplayCommand string   `json:"display_command,omitempty"`
+	Args           []string `json:"args,omitempty"`
+	Target         string   `json:"target,omitempty"`
+	LogPath        string   `json:"log_path,omitempty"`
+	Summary        string   `json:"summary,omitempty"`
+	Error          string   `json:"error,omitempty"`
+	Output         string   `json:"output,omitempty"`
+	StartedAt      string   `json:"started_at,omitempty"`
+	FinishedAt     string   `json:"finished_at,omitempty"`
+	PID            int      `json:"pid,omitempty"`
+	ExitCode       int      `json:"exit_code"`
+	RuntimeMS      int64    `json:"runtime_ms"`
 }
 
 func ShellReady(db *sql.DB) (bool, error) {
@@ -45,14 +54,10 @@ func ShellReady(db *sql.DB) (bool, error) {
 
 func ShouldRouteViaShell(modName, command string) bool {
 	mod := strings.ToLower(strings.TrimSpace(modName))
-	cmd := strings.ToLower(strings.TrimSpace(command))
 	if mod == "" {
 		return false
 	}
-	if mod == "shell" || mod == "ghostty" || mod == "tmux" {
-		return false
-	}
-	if mod == "mod" && cmd == "db" {
+	if mod == "shell" || mod == "ghostty" || mod == "tmux" || mod == "test" || mod == "dialtone" || mod == "codex" {
 		return false
 	}
 	return true
@@ -99,8 +104,8 @@ func DecodeIntentBody(raw string) (ShellCommandIntent, error) {
 	return body, nil
 }
 
-func ShouldExecuteDirectInPane(db *sql.DB, args []string, insideTmux bool) (bool, error) {
-	if !insideTmux || db == nil {
+func ShouldExecuteDirectInPane(db *sql.DB, args []string, currentPane string) (bool, error) {
+	if strings.TrimSpace(currentPane) == "" || db == nil {
 		return false, nil
 	}
 	if err := modstate.EnsureSchema(db); err != nil {
@@ -113,6 +118,9 @@ func ShouldExecuteDirectInPane(db *sql.DB, args []string, insideTmux bool) (bool
 	}
 	for _, row := range rows {
 		if row.Subject != "command" || row.Action != "run" || row.Status != "running" {
+			continue
+		}
+		if strings.TrimSpace(row.Pane) != "" && strings.TrimSpace(row.Pane) != strings.TrimSpace(currentPane) {
 			continue
 		}
 		body, err := DecodeIntentBody(row.BodyJSON)

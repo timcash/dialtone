@@ -26,40 +26,45 @@ func QueueCommandViaShell(db *sql.DB, repoRoot string, args []string) (int64, er
 	if db == nil {
 		return 0, fmt.Errorf("sqlite state is required to queue command via shell")
 	}
-	commandTarget, ok, err := modstate.LoadStateValue(db, sqlitestate.SystemScope, sqlitestate.TmuxTargetKey)
+	session := "codex-view"
+	commandTarget := ""
+	targetRecord, ok, err := modstate.LoadStateValue(db, sqlitestate.SystemScope, sqlitestate.TmuxTargetKey)
 	if err != nil {
 		return 0, err
 	}
-	if !ok || strings.TrimSpace(commandTarget.Value) == "" {
-		return 0, fmt.Errorf("shell workflow is not ready: tmux command target is missing")
-	}
-	session := "codex-view"
-	if parts := strings.Split(strings.TrimSpace(commandTarget.Value), ":"); len(parts) > 0 && strings.TrimSpace(parts[0]) != "" {
-		session = strings.TrimSpace(parts[0])
+	if ok && strings.TrimSpace(targetRecord.Value) != "" {
+		commandTarget = strings.TrimSpace(targetRecord.Value)
+		if parts := strings.Split(commandTarget, ":"); len(parts) > 0 && strings.TrimSpace(parts[0]) != "" {
+			session = strings.TrimSpace(parts[0])
+		}
 	}
 	innerCommand := dispatch.BuildDialtoneCommand(args)
-	initialBody, err := dispatch.EncodeIntentBody(dispatch.ShellCommandIntent{
-		InnerCommand: innerCommand,
-		Target:       strings.TrimSpace(commandTarget.Value),
+	body, err := dispatch.EncodeIntentBody(dispatch.ShellCommandIntent{
+		Command:        innerCommand,
+		InnerCommand:   innerCommand,
+		DisplayCommand: innerCommand,
+		Args:           append([]string(nil), args...),
+		Target:         commandTarget,
 	})
 	if err != nil {
 		return 0, err
 	}
-	rowID, err := modstate.EnqueueShellBus(db, "shell", "desired", "command", "run", "dialtone_mod", session, strings.TrimSpace(commandTarget.Value), initialBody)
+	rowID, err := modstate.EnqueueShellBus(db, "shell", "desired", "command", "run", "dialtone_mod", session, commandTarget, body)
 	if err != nil {
 		return 0, err
 	}
-	command, expect, innerCommand := dispatch.BuildTrackedVisibleCommand(repoRoot, args, rowID)
-	finalBody, err := dispatch.EncodeIntentBody(dispatch.ShellCommandIntent{
-		Command:      command,
-		Expect:       expect,
-		InnerCommand: innerCommand,
-		Target:       strings.TrimSpace(commandTarget.Value),
+	updatedBody, err := dispatch.EncodeIntentBody(dispatch.ShellCommandIntent{
+		Command:        innerCommand,
+		InnerCommand:   innerCommand,
+		DisplayCommand: innerCommand,
+		Args:           append([]string(nil), args...),
+		Target:         commandTarget,
+		LogPath:        sqlitestate.ResolveCommandLogPath(repoRoot, rowID),
 	})
 	if err != nil {
 		return 0, err
 	}
-	if err := modstate.UpdateShellBusStatus(db, rowID, "queued", 0, finalBody); err != nil {
+	if err := modstate.UpdateShellBusStatus(db, rowID, "queued", 0, updatedBody); err != nil {
 		return 0, err
 	}
 	return rowID, nil
@@ -82,9 +87,7 @@ func BuildShellRunArgs(repoRoot string, args []string, waitSeconds int) []string
 	if waitSeconds <= 0 {
 		waitSeconds = 240
 	}
-	rowID := time.Now().UnixNano()
-	command, expect, _ := dispatch.BuildTrackedVisibleCommand(repoRoot, args, rowID)
-	return []string{"run", "--wait-seconds", fmt.Sprintf("%d", waitSeconds), "--expect", expect, command}
+	return []string{"run", "--wait-seconds", fmt.Sprintf("%d", waitSeconds), dispatch.BuildDialtoneCommand(args)}
 }
 
 func RunCommandViaShell(repoRoot, goBin string, runner GoPackageRunner, args []string, waitSeconds int) error {
@@ -92,6 +95,41 @@ func RunCommandViaShell(repoRoot, goBin string, runner GoPackageRunner, args []s
 		return fmt.Errorf("go package runner is required")
 	}
 	return runner.Run(repoRoot, goBin, "./mods/shell/v1/cli", BuildShellRunArgs(repoRoot, args, waitSeconds)...)
+}
+
+func ShellWorkerHealthy(db *sql.DB, maxAge time.Duration) (bool, error) {
+	if db == nil {
+		return false, nil
+	}
+	if err := modstate.EnsureSchema(db); err != nil {
+		return false, err
+	}
+	statusRecord, ok, err := modstate.LoadStateValue(db, sqlitestate.SystemScope, sqlitestate.ShellWorkerStatusKey)
+	if err != nil || !ok || strings.TrimSpace(statusRecord.Value) != "running" {
+		return false, err
+	}
+	heartbeatRecord, ok, err := modstate.LoadStateValue(db, sqlitestate.SystemScope, sqlitestate.ShellWorkerHeartbeatKey)
+	if err != nil || !ok {
+		return false, err
+	}
+	heartbeat, ok := parseRFC3339(heartbeatRecord.Value)
+	if !ok {
+		return false, nil
+	}
+	return time.Since(heartbeat) <= maxAge, nil
+}
+
+func parseRFC3339(raw string) (time.Time, bool) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if ts, err := time.Parse(layout, value); err == nil {
+			return ts, true
+		}
+	}
+	return time.Time{}, false
 }
 
 func WaitForShellBusCompletion(stateDB *sql.DB, rowID int64, timeout time.Duration) (modstate.ShellBusRecord, error) {

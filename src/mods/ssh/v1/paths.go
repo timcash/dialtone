@@ -31,4 +31,3 @@ func locateRepoRoot() (string, error) {
 	}
 	return "", fmt.Errorf("unable to locate repository root from %s", cwd)
 }
-

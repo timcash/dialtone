@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"dialtone/dev/plugins/logs/src_v1/go"
-	go_plugin "dialtone/dev/plugins/go/src_v1/go"
 	bun_plugin "dialtone/dev/plugins/bun/src_v1/go"
+	go_plugin "dialtone/dev/plugins/go/src_v1/go"
+	"dialtone/dev/plugins/logs/src_v1/go"
 	test_plugin "dialtone/dev/plugins/test/src_v1/go"
 )
 
@@ -98,7 +98,7 @@ func main() {
 		repoRoot, _ := findRepoRoot()
 		pluginDir := filepath.Join(repoRoot, "src", "plugins", "dag", versionDir)
 		testPkg := "./plugins/dag/" + versionDir + "/test/cmd"
-		
+
 		opts := test_plugin.TestOptions{
 			RepoRoot:   repoRoot,
 			PluginDir:  pluginDir,

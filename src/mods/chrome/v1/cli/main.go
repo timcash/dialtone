@@ -4,7 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
+
+	"dialtone/dev/internal/modcli"
 )
 
 func main() {
@@ -122,5 +123,5 @@ func parseFormatArgs(argv []string) (string, error) {
 	if err := fs.Parse(argv); err != nil {
 		return "", err
 	}
-	return filepath.Clean(*dir), nil
+	return modcli.NormalizeOptionalPathArg(*dir), nil
 }

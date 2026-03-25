@@ -56,9 +56,12 @@ func TestShouldRouteViaShellExcludesBootstrapAndBackendMods(t *testing.T) {
 		{mod: "shell", command: "test", want: false},
 		{mod: "tmux", command: "read", want: false},
 		{mod: "ghostty", command: "list", want: false},
-		{mod: "mod", command: "db", want: false},
+		{mod: "test", command: "start", want: false},
+		{mod: "dialtone", command: "status", want: false},
+		{mod: "codex", command: "start", want: false},
+		{mod: "codex", command: "status", want: false},
+		{mod: "mod", command: "db", want: true},
 		{mod: "ssh", command: "test", want: true},
-		{mod: "codex", command: "status", want: true},
 	}
 	for _, tc := range cases {
 		if got := ShouldRouteViaShell(tc.mod, tc.command); got != tc.want {
@@ -123,7 +126,7 @@ func TestShouldExecuteDirectInPaneMatchesRunningInnerCommand(t *testing.T) {
 		t.Fatalf("UpdateShellBusStatus returned error: %v", err)
 	}
 
-	ok, err := ShouldExecuteDirectInPane(db, []string{"ssh", "v1", "test"}, true)
+	ok, err := ShouldExecuteDirectInPane(db, []string{"ssh", "v1", "test"}, "codex-view:0:1")
 	if err != nil {
 		t.Fatalf("ShouldExecuteDirectInPane returned error: %v", err)
 	}
@@ -132,18 +135,34 @@ func TestShouldExecuteDirectInPaneMatchesRunningInnerCommand(t *testing.T) {
 	}
 }
 
-func TestShouldExecuteDirectInPaneSkipsOutsideTmux(t *testing.T) {
+func TestShouldExecuteDirectInPaneSkipsWhenPaneDoesNotMatch(t *testing.T) {
 	db, err := modstate.Open(filepath.Join(t.TempDir(), "state.sqlite"))
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
 	}
 	defer db.Close()
 
-	ok, err := ShouldExecuteDirectInPane(db, []string{"ssh", "v1", "test"}, false)
+	body, err := EncodeIntentBody(ShellCommandIntent{
+		Command:      "./dialtone_mod ssh v1 test",
+		InnerCommand: "./dialtone_mod ssh v1 test",
+		Target:       "codex-view:0:1",
+	})
+	if err != nil {
+		t.Fatalf("EncodeIntentBody returned error: %v", err)
+	}
+	rowID, err := modstate.EnqueueShellBus(db, "shell", "desired", "command", "run", "dialtone_mod", "codex-view", "codex-view:0:1", body)
+	if err != nil {
+		t.Fatalf("EnqueueShellBus returned error: %v", err)
+	}
+	if err := modstate.UpdateShellBusStatus(db, rowID, "running", 0, body); err != nil {
+		t.Fatalf("UpdateShellBusStatus returned error: %v", err)
+	}
+
+	ok, err := ShouldExecuteDirectInPane(db, []string{"ssh", "v1", "test"}, "codex-view:0:0")
 	if err != nil {
 		t.Fatalf("ShouldExecuteDirectInPane returned error: %v", err)
 	}
 	if ok {
-		t.Fatalf("expected direct execution to be disabled outside tmux")
+		t.Fatalf("expected direct execution to stay disabled outside the dialtone-view pane")
 	}
 }

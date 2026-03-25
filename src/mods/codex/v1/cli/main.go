@@ -5,18 +5,19 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"dialtone/dev/internal/tmuxcmd"
 )
 
 const tmuxRetryAttempts = 20
 
 var (
-	tmuxOutputRunner     = tmuxOutput
+	tmuxOutputRunner      = tmuxOutput
 	defaultTmuxRetrySleep = func() { time.Sleep(500 * time.Millisecond) }
-	tmuxRetrySleep       = defaultTmuxRetrySleep
+	tmuxRetrySleep        = defaultTmuxRetrySleep
 )
 
 func main() {
@@ -31,6 +32,22 @@ func main() {
 	switch command {
 	case "help", "-h", "--help":
 		printUsage()
+	case "install":
+		if err := runInstall(args); err != nil {
+			exitIfErr(err, "codex install")
+		}
+	case "build":
+		if err := runBuild(args); err != nil {
+			exitIfErr(err, "codex build")
+		}
+	case "format":
+		if err := runFormat(args); err != nil {
+			exitIfErr(err, "codex format")
+		}
+	case "test":
+		if err := runTest(args); err != nil {
+			exitIfErr(err, "codex test")
+		}
 	case "start":
 		if err := runStart(args); err != nil {
 			exitIfErr(err, "codex start")
@@ -51,7 +68,7 @@ func runStart(argv []string) error {
 	session := opts.String("session", "codex-view", "tmux session name on the default tmux server")
 	pane := opts.String("pane", "", "Explicit tmux pane target to launch Codex into")
 	shellName := opts.String("shell", "default", "flake shell to enter before launching Codex")
-	reasoning := opts.String("reasoning", "medium", "reasoning label for startup banner")
+	reasoning := opts.String("reasoning", "medium", "Codex reasoning effort to request")
 	model := opts.String("model", "gpt-5.4", "Codex model to launch")
 	if err := opts.Parse(argv); err != nil {
 		return err
@@ -68,18 +85,9 @@ func runStart(argv []string) error {
 		if err := respawnPane(target, startCmd); err != nil {
 			return err
 		}
+		trimPaneStartupScrollback(target)
 		fmt.Printf("started codex in tmux pane %s\n", target)
 		return nil
-	}
-	if isProxyActive() {
-		target, err := currentPaneTarget()
-		if err != nil {
-			return err
-		}
-		if err := clearPaneHistory(target); err != nil {
-			return err
-		}
-		return runInCurrentPane(startCmd)
 	}
 	if err := ensureSession(*session, repoRoot); err != nil {
 		return err
@@ -91,6 +99,7 @@ func runStart(argv []string) error {
 	if err := respawnPane(target, startCmd); err != nil {
 		return err
 	}
+	trimPaneStartupScrollback(target)
 	fmt.Printf("started codex in tmux session %s via %s\n", *session, target)
 	return nil
 }
@@ -101,19 +110,6 @@ func runStatus(argv []string) error {
 	if err := opts.Parse(argv); err != nil {
 		return err
 	}
-	if isProxyActive() {
-		target, err := currentPaneTarget()
-		if err != nil {
-			return err
-		}
-		out, err := tmuxOutput("display-message", "-p", "-t", target, "#{session_name}\t#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_current_path}")
-		if err != nil {
-			return err
-		}
-		fmt.Println(strings.TrimSpace(out))
-		return nil
-	}
-
 	target, err := activePaneTarget(*session)
 	if err != nil {
 		return err
@@ -173,16 +169,8 @@ func activePaneTarget(session string) (string, error) {
 	return target, nil
 }
 
-func currentPaneTarget() (string, error) {
-	pane := strings.TrimSpace(os.Getenv("TMUX_PANE"))
-	if pane == "" {
-		return "", errors.New("TMUX_PANE is not set")
-	}
-	return pane, nil
-}
-
 func buildStartCommand(repoRoot, shellName, reasoning, model string) string {
-	codexCmd := buildCodexExecCommand(strings.TrimSpace(model))
+	codexCmd := buildCodexExecCommand(strings.TrimSpace(model), strings.TrimSpace(reasoning))
 	inner := fmt.Sprintf(
 		"clear; printf 'Starting Codex CLI with %s (requested reasoning: %s) and skipping confirmations...\\n'; %s",
 		shellSingleQuoteLiteral(strings.TrimSpace(model)),
@@ -190,7 +178,7 @@ func buildStartCommand(repoRoot, shellName, reasoning, model string) string {
 		codexCmd,
 	)
 	return fmt.Sprintf(
-		"cd %s && exec nix --extra-experimental-features %s develop %s --command bash -lc %s",
+		"cd %s && exec env DIALTONE_NIX_SHELL_BANNER=0 nix --extra-experimental-features %s --no-warn-dirty develop %s --command bash -lc %s",
 		shellQuote(repoRoot),
 		shellQuote("nix-command flakes"),
 		shellQuote(".#"+strings.TrimSpace(shellName)),
@@ -198,9 +186,15 @@ func buildStartCommand(repoRoot, shellName, reasoning, model string) string {
 	)
 }
 
-func buildCodexExecCommand(model string) string {
+func buildCodexExecCommand(model, reasoning string) string {
+	effort := strings.TrimSpace(reasoning)
+	if effort == "" {
+		effort = "medium"
+	}
 	args := strings.Join([]string{
 		"-c", shellQuote("check_for_update_on_startup=false"),
+		"-c", shellQuote(fmt.Sprintf("model_reasoning_effort=%q", effort)),
+		"-c", shellQuote(fmt.Sprintf("plan_mode_reasoning_effort=%q", effort)),
 		"-m", shellQuote(model),
 		"-a", "never",
 		"-s", "danger-full-access",
@@ -212,10 +206,6 @@ func buildCodexExecCommand(model string) string {
 	)
 }
 
-func isProxyActive() bool {
-	return strings.TrimSpace(os.Getenv("DIALTONE_TMUX_PROXY_ACTIVE")) == "1"
-}
-
 func normalizePaneTarget(value string) string {
 	trimmed := strings.TrimSpace(value)
 	parts := strings.Split(trimmed, ":")
@@ -223,21 +213,6 @@ func normalizePaneTarget(value string) string {
 		return fmt.Sprintf("%s:%s.%s", parts[0], parts[1], parts[2])
 	}
 	return trimmed
-}
-
-func runInCurrentPane(command string) error {
-	cmd := exec.Command("bash", "-lc", command)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
-func resetPane(target string) error {
-	if _, err := tmuxOutput("send-keys", "-t", target, "C-c"); err != nil {
-		return err
-	}
-	return nil
 }
 
 func clearPaneHistory(target string) error {
@@ -248,29 +223,25 @@ func clearPaneHistory(target string) error {
 }
 
 func respawnPane(target, command string) error {
-	if err := clearPaneHistory(target); err != nil {
-		return err
-	}
+	// A stale pane history is cosmetic. The restart itself is what must succeed.
+	_ = clearPaneHistory(target)
 	if _, err := tmuxOutputWithRetry("respawn-pane", "-k", "-t", target, "bash", "-lc", command); err != nil {
 		return err
 	}
 	return nil
 }
 
-func sendKeys(target, text string, enter bool) error {
-	if _, err := tmuxOutput("send-keys", "-t", target, "--", text); err != nil {
-		return err
-	}
-	if enter {
-		if _, err := tmuxOutput("send-keys", "-t", target, "C-m"); err != nil {
-			return err
-		}
-	}
-	return nil
+func trimPaneStartupScrollback(target string) {
+	time.Sleep(750 * time.Millisecond)
+	_ = clearPaneHistory(target)
 }
 
 func tmuxOutput(args ...string) (string, error) {
-	cmd := exec.Command("tmux", args...)
+	repoRoot, err := locateRepoRoot()
+	if err != nil {
+		repoRoot = ""
+	}
+	cmd := tmuxcmd.Command(repoRoot, args...)
 	out, err := cmd.CombinedOutput()
 	text := string(out)
 	if err != nil {
@@ -321,8 +292,16 @@ func printUsage() {
 	fmt.Println("Usage: ./dialtone_mod codex v1 <command> [args]")
 	fmt.Println("")
 	fmt.Println("Commands:")
-	fmt.Println("  start [--session codex-view] [--shell default|repl-v1|ssh-v1] [--reasoning medium] [--model gpt-5.4]")
-	fmt.Println("       Ensure the tmux session exists on the default server and launch Codex there via nix develop")
+	fmt.Println("  install")
+	fmt.Println("       Verify tmux plus codex or npx are available in the default nix shell")
+	fmt.Println("  build")
+	fmt.Println("       Build the codex v1 CLI wrapper to <repo-root>/bin/mods/codex/v1/codex")
+	fmt.Println("  format [--dir DIR]")
+	fmt.Println("       Run gofmt on codex v1 Go files")
+	fmt.Println("  test")
+	fmt.Println("       Run go test for codex v1 plus direct-routing helpers")
+	fmt.Println("  start [--session codex-view] [--shell default|ssh-v1] [--reasoning medium] [--model gpt-5.4]")
+	fmt.Println("       Launch Codex directly in the target tmux pane via nix develop; shell v1 owns the broader workflow")
 	fmt.Println("  status [--session codex-view]")
 	fmt.Println("       Show the current pane command and cwd for the tmux session")
 }

@@ -12,14 +12,20 @@ import (
 	"time"
 
 	"dialtone/dev/internal/modstate"
+	"dialtone/dev/internal/tmuxcmd"
 	"dialtone/dev/mods/shared/sqlitestate"
 )
 
 func tmuxBinary() string {
-	if value := strings.TrimSpace(os.Getenv("DIALTONE_TMUX_BIN")); value != "" {
-		return value
+	return tmuxcmd.Binary()
+}
+
+func tmuxCommand(args ...string) *exec.Cmd {
+	repoRoot, err := locateRepoRoot()
+	if err != nil {
+		repoRoot = ""
 	}
-	return "tmux"
+	return tmuxcmd.Command(repoRoot, args...)
 }
 
 type tmuxPaneTarget struct {
@@ -66,6 +72,22 @@ func main() {
 	switch command {
 	case "help", "-h", "--help":
 		printUsage()
+	case "install":
+		if err := runInstall(args); err != nil {
+			exitIfErr(err, "tmux install")
+		}
+	case "build":
+		if err := runBuild(args); err != nil {
+			exitIfErr(err, "tmux build")
+		}
+	case "format":
+		if err := runFormat(args); err != nil {
+			exitIfErr(err, "tmux format")
+		}
+	case "test":
+		if err := runTest(args); err != nil {
+			exitIfErr(err, "tmux test")
+		}
 	case "list":
 		if err := runList(args); err != nil {
 			exitIfErr(err, "tmux list")
@@ -120,7 +142,7 @@ func runList(argv []string) error {
 	if *short {
 		format = "#{session_name}"
 	}
-	cmd := exec.Command(tmuxBinary(), "list-sessions", "-F", format)
+	cmd := tmuxCommand("list-sessions", "-F", format)
 	out, err := cmd.CombinedOutput()
 	text := strings.TrimSpace(string(out))
 	if err != nil {
@@ -159,13 +181,13 @@ func runWrite(argv []string) error {
 	}
 
 	tmuxTarget := target.target()
-	if out, err := exec.Command(tmuxBinary(), "send-keys", "-t", tmuxTarget, "--", text).CombinedOutput(); err != nil {
+	if out, err := tmuxCommand("send-keys", "-t", tmuxTarget, "--", text).CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux send-keys failed: %s", strings.TrimSpace(string(out)))
 	}
 	if *enter {
 		// Raw terminal UIs such as Codex can miss an immediate Enter after a large paste.
 		time.Sleep(300 * time.Millisecond)
-		if out, err := exec.Command(tmuxBinary(), "send-keys", "-t", tmuxTarget, "C-m").CombinedOutput(); err != nil {
+		if out, err := tmuxCommand("send-keys", "-t", tmuxTarget, "C-m").CombinedOutput(); err != nil {
 			return fmt.Errorf("tmux send-keys enter failed: %s", strings.TrimSpace(string(out)))
 		}
 	}
@@ -188,7 +210,7 @@ func runRead(argv []string) error {
 		return err
 	}
 
-	cmd := exec.Command(tmuxBinary(), "capture-pane", "-pt", target.target(), "-S", fmt.Sprintf("-%d", *lines))
+	cmd := tmuxCommand("capture-pane", "-pt", target.target(), "-S", fmt.Sprintf("-%d", *lines))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("tmux capture-pane failed: %s", strings.TrimSpace(string(out)))
@@ -212,10 +234,10 @@ func runClear(argv []string) error {
 	}
 
 	tmuxTarget := target.target()
-	if out, err := exec.Command(tmuxBinary(), "clear-history", "-t", tmuxTarget).CombinedOutput(); err != nil {
+	if out, err := tmuxCommand("clear-history", "-t", tmuxTarget).CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux clear-history failed: %s", strings.TrimSpace(string(out)))
 	}
-	if out, err := exec.Command(tmuxBinary(), "send-keys", "-t", tmuxTarget, "C-l").CombinedOutput(); err != nil {
+	if out, err := tmuxCommand("send-keys", "-t", tmuxTarget, "C-l").CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux send-keys clear failed: %s", strings.TrimSpace(string(out)))
 	}
 	fmt.Printf("cleared tmux pane %s\n", tmuxTarget)
@@ -232,11 +254,11 @@ func runRename(argv []string) error {
 
 	resolveSession := strings.TrimSpace(*session)
 	if resolveSession == "" {
-		out, _ := exec.Command(tmuxBinary(), "display-message", "-p", "#S").Output()
+		out, _ := tmuxCommand("display-message", "-p", "#S").Output()
 		resolveSession = strings.TrimSpace(string(out))
 	}
 	if resolveSession == "" {
-		out, _ := exec.Command(tmuxBinary(), "list-sessions", "-F", "#{session_name}").Output()
+		out, _ := tmuxCommand("list-sessions", "-F", "#{session_name}").Output()
 		resolveSession = strings.TrimSpace(strings.Split(strings.TrimSpace(string(out)), "\n")[0])
 	}
 	if resolveSession == "" {
@@ -250,7 +272,7 @@ func runRename(argv []string) error {
 		fmt.Printf("tmux session already named %s\n", newName)
 		return nil
 	}
-	cmd := exec.Command(tmuxBinary(), "rename-session", "-t", resolveSession, newName)
+	cmd := tmuxCommand("rename-session", "-t", resolveSession, newName)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux rename-session failed: %s", strings.TrimSpace(string(out)))
 	}
@@ -303,7 +325,7 @@ func runSplit(argv []string) error {
 		tmuxArgs = append(tmuxArgs, strings.TrimSpace(*command))
 	}
 
-	out, err := exec.Command(tmuxBinary(), tmuxArgs...).CombinedOutput()
+	out, err := tmuxCommand(tmuxArgs...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("tmux split-window failed: %s", strings.TrimSpace(string(out)))
 	}
@@ -314,12 +336,12 @@ func runSplit(argv []string) error {
 	}
 
 	if strings.TrimSpace(*title) != "" {
-		if out, err := exec.Command(tmuxBinary(), "select-pane", "-t", newTarget.target(), "-T", strings.TrimSpace(*title)).CombinedOutput(); err != nil {
+		if out, err := tmuxCommand("select-pane", "-t", newTarget.target(), "-T", strings.TrimSpace(*title)).CombinedOutput(); err != nil {
 			return fmt.Errorf("tmux select-pane title failed: %s", strings.TrimSpace(string(out)))
 		}
 	}
 	if !*focus {
-		if out, err := exec.Command(tmuxBinary(), "select-pane", "-t", target.target()).CombinedOutput(); err != nil {
+		if out, err := tmuxCommand("select-pane", "-t", target.target()).CombinedOutput(); err != nil {
 			return fmt.Errorf("tmux select-pane restore failed: %s", strings.TrimSpace(string(out)))
 		}
 	}
@@ -331,9 +353,14 @@ func runSplit(argv []string) error {
 func runShell(argv []string) error {
 	opts := flag.NewFlagSet("tmux v1 shell", flag.ContinueOnError)
 	pane := opts.String("pane", "dialtone:0:0", "tmux target in session:window:pane form")
-	shellName := opts.String("shell", "default", "flake shell to enter (default|repl-v1|ssh-v1)")
+	shellName := opts.String("shell", "default", "flake shell to enter (default|ssh-v1)")
+	commandText := opts.String("command", "", "Optional command to exec inside the nix shell instead of opening an interactive shell")
+	showBanner := opts.Bool("banner", true, "Print the flake shell banner inside the pane")
 	if err := opts.Parse(argv); err != nil {
 		return err
+	}
+	if opts.NArg() != 0 {
+		return errors.New("shell does not accept positional arguments")
 	}
 
 	target, err := parsePaneTarget(*pane)
@@ -345,26 +372,39 @@ func runShell(argv []string) error {
 		return err
 	}
 	switch strings.TrimSpace(*shellName) {
-	case "default", "repl-v1", "ssh-v1":
+	case "default", "ssh-v1":
 	default:
 		return fmt.Errorf("unsupported --shell %q", *shellName)
 	}
 
 	tmuxTarget := target.target()
+	innerCommand := "exec zsh -l"
+	if strings.TrimSpace(*commandText) != "" {
+		innerCommand = fmt.Sprintf("clear; %s", strings.TrimSpace(*commandText))
+	}
 	command := fmt.Sprintf(
-		"cd %s && export DIALTONE_TMUX_PROXY_ACTIVE=1 && nix --extra-experimental-features %s develop %s --command zsh -l",
+		"cd %s && exec env DIALTONE_NIX_SHELL_BANNER=%s nix --extra-experimental-features %s --no-warn-dirty develop %s --command zsh -lc %s",
 		shellQuote(repoRoot),
+		shellQuote(boolEnvValue(*showBanner)),
 		shellQuote("nix-command flakes"),
 		shellQuote(".#"+strings.TrimSpace(*shellName)),
+		shellQuote(innerCommand),
 	)
-	if out, err := exec.Command(tmuxBinary(), "clear-history", "-t", tmuxTarget).CombinedOutput(); err != nil {
+	if out, err := tmuxCommand("clear-history", "-t", tmuxTarget).CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux clear-history failed: %s", strings.TrimSpace(string(out)))
 	}
-	if out, err := exec.Command(tmuxBinary(), "respawn-pane", "-k", "-t", tmuxTarget, "zsh", "-lc", command).CombinedOutput(); err != nil {
+	if out, err := tmuxCommand("respawn-pane", "-k", "-t", tmuxTarget, "zsh", "-lc", command).CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux respawn-pane shell failed: %s", strings.TrimSpace(string(out)))
 	}
 	fmt.Printf("entered nix shell %s in %s\n", strings.TrimSpace(*shellName), tmuxTarget)
 	return nil
+}
+
+func boolEnvValue(value bool) string {
+	if value {
+		return "1"
+	}
+	return "0"
 }
 
 func runTarget(argv []string) error {
@@ -600,6 +640,14 @@ func printUsage() {
 	fmt.Println("Usage: ./dialtone_mod tmux v1 <command> [args]")
 	fmt.Println("")
 	fmt.Println("Commands:")
+	fmt.Println("  install")
+	fmt.Println("       Verify tmux is available in the default nix shell")
+	fmt.Println("  build")
+	fmt.Println("       Build the tmux v1 CLI wrapper to <repo-root>/bin/mods/tmux/v1/tmux")
+	fmt.Println("  format [--dir DIR]")
+	fmt.Println("       Run gofmt on tmux v1 Go files")
+	fmt.Println("  test")
+	fmt.Println("       Run go test for tmux v1")
 	fmt.Println("  list [--short]")
 	fmt.Println("       List local tmux sessions")
 	fmt.Println("  write [--pane dialtone:0:0] [--enter] <text...>")
@@ -612,7 +660,7 @@ func printUsage() {
 	fmt.Println("       Rename tmux session (defaults to current/first session)")
 	fmt.Println("  split [--pane codex-view:0:0] [--direction right|left|down|up] [--title NAME] [--cwd PATH] [--command CMD] [--focus=true|false]")
 	fmt.Println("       Split a tmux pane and optionally title or initialize the new pane")
-	fmt.Println("  shell [--pane codex-view:1:1] [--shell default|repl-v1|ssh-v1]")
+	fmt.Println("  shell [--pane codex-view:1:1] [--shell default|ssh-v1]")
 	fmt.Println("       Put the target tmux pane into the repo nix develop shell without starting Codex")
 	fmt.Println("  target [--set codex-view:1:1] [--clear]")
 	fmt.Println("       Persist or clear the default tmux pane that dialtone_mod should proxy non-control commands into")

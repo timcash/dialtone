@@ -8,12 +8,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
+	"dialtone/dev/internal/modcli"
 	"dialtone/dev/internal/modstate"
+	"dialtone/dev/internal/tmuxcmd"
 	"dialtone/dev/mods/shared/dispatch"
 	"dialtone/dev/mods/shared/nixplan"
-	"dialtone/dev/mods/shared/router"
 	"dialtone/dev/mods/shared/sqlitestate"
 )
 
@@ -74,14 +74,6 @@ func runCLI() error {
 		return nil
 	}
 
-	if modName == "mesh" && version == "v3" {
-		meshDir := filepath.Join(srcRoot, "mods", "mesh", "v3")
-		return runMeshV3(meshDir, os.Args[3:])
-	}
-	if modName == "mesh" {
-		return fmt.Errorf("unsupported mesh version %s; use mesh v3", version)
-	}
-
 	commandArg := ""
 	if len(os.Args) > 3 {
 		commandArg = strings.TrimSpace(os.Args[3])
@@ -93,25 +85,12 @@ func runCLI() error {
 	}
 
 	if stateDB != nil && dispatch.ShouldRouteViaShell(modName, commandArg) {
-		executeDirect, err := dispatch.ShouldExecuteDirectInPane(stateDB, os.Args[1:], strings.TrimSpace(os.Getenv("TMUX")) != "")
+		executeDirect, err := dispatch.ShouldExecuteDirectInPane(stateDB, os.Args[1:], currentTmuxPaneTarget())
 		if err != nil {
 			return err
 		}
 		if !executeDirect {
-			ready, err := dispatch.ShellReady(stateDB)
-			if err != nil {
-				return err
-			}
-			if !ready {
-				if err := router.StartShellWorkflow(repoRoot, goBin, goRunner{}); err != nil {
-					return err
-				}
-				stateDB = syncStateDBBestEffort(repoRoot, stateDB)
-				if stateDB == nil {
-					return fmt.Errorf("failed to reopen sqlite state after starting shell workflow")
-				}
-			}
-			if err := routeCommandViaShell(repoRoot, goBin, stateDB, os.Args[1:]); err != nil {
+			if err := routeCommandViaShell(repoRoot, os.Args[1:]); err != nil {
 				return err
 			}
 			return nil
@@ -145,41 +124,25 @@ func resolveModEntry(srcRoot string, stateDB *sql.DB, modName, version, command 
 		}
 	}
 	modDir := filepath.Join(srcRoot, "mods", modName, version)
-	if shouldUseModCLI(command) && hasGoPackage(filepath.Join(modDir, "cli")) {
-		return relativeFrom(srcRoot, filepath.Join(modDir, "cli"))
-	}
-	if hasGoPackage(modDir) {
-		return relativeFrom(srcRoot, modDir)
-	}
 	if hasGoPackage(filepath.Join(modDir, "cli")) {
 		return relativeFrom(srcRoot, filepath.Join(modDir, "cli"))
 	}
 	return ""
 }
 
-func routeCommandViaShell(repoRoot, goBin string, stateDB *sql.DB, args []string) error {
-	if stateDB == nil {
-		return fmt.Errorf("sqlite state is required to route commands via shell")
-	}
-	rowID, err := router.QueueCommandViaShell(stateDB, repoRoot, args)
-	if err != nil {
-		return err
-	}
-	if err := router.SyncShell(repoRoot, goBin, goRunner{}, 20, 240); err != nil {
-		return err
-	}
-	record, err := router.WaitForShellBusCompletion(stateDB, rowID, 240*time.Second)
-	if err != nil {
-		return err
-	}
-	if record.Status == "failed" {
-		body, decodeErr := dispatch.DecodeIntentBody(record.BodyJSON)
-		if decodeErr == nil && strings.TrimSpace(body.Error) != "" {
-			return fmt.Errorf("dialtone-view command failed: %s", body.Error)
+func routeCommandViaShell(repoRoot string, args []string) error {
+	cmdArgs := append([]string{"dialtone", "v1", "queue"}, args...)
+	cmd := exec.Command(filepath.Join(repoRoot, "dialtone_mod"), cmdArgs...)
+	cmd.Dir = repoRoot
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
 		}
-		return fmt.Errorf("dialtone-view command failed [row_id=%d]", rowID)
+		return fmt.Errorf("failed to queue routed command via dialtone: %w", err)
 	}
-	fmt.Printf("routed to dialtone-view [row_id=%d]\n", rowID)
 	return nil
 }
 
@@ -198,13 +161,18 @@ func (goRunner) Run(repoRoot, goBin, entry string, args ...string) error {
 	return nil
 }
 
-func shouldUseModCLI(command string) bool {
-	switch strings.ToLower(strings.TrimSpace(command)) {
-	case "install", "build", "format", "test":
-		return true
-	default:
-		return false
+func currentTmuxPaneTarget() string {
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		repoRoot = ""
 	}
+	return modcli.CurrentTmuxTarget(os.Getenv("DIALTONE_TMUX_TARGET"), os.Getenv("TMUX_PANE"), func(paneID string) (string, error) {
+		out, err := tmuxcmd.Command(repoRoot, "display-message", "-p", "-t", paneID, "#{session_name}:#{window_index}:#{pane_index}").Output()
+		if err != nil {
+			return "", err
+		}
+		return string(out), nil
+	})
 }
 
 func mapCommandNameToMod(name string) string {
