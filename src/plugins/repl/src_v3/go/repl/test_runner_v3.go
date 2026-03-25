@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
@@ -228,7 +229,11 @@ func runTmpBootstrapTest(args []string) error {
 		"DIALTONE_REPL_NATS_URL=nats://127.0.0.1:47222",
 	)
 	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_HOST")) == "" && strings.TrimSpace(wslNode.Host) != "" {
-		env = append(env, "DIALTONE_REPL_V3_TEST_WSL_HOST="+strings.TrimSpace(wslNode.Host))
+		host := strings.TrimSpace(wslNode.Host)
+		if defaultWSLLoopbackHost() && meshNodeMatchesNameOrAlias(wslNode, "wsl") {
+			host = "127.0.0.1"
+		}
+		env = append(env, "DIALTONE_REPL_V3_TEST_WSL_HOST="+host)
 	}
 	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_USER")) == "" && strings.TrimSpace(wslNode.User) != "" {
 		env = append(env, "DIALTONE_REPL_V3_TEST_WSL_USER="+strings.TrimSpace(wslNode.User))
@@ -309,18 +314,30 @@ func resolveWSLTestDefaults(repoRoot string) meshNode {
 	if err != nil {
 		return meshNode{}
 	}
-	for _, node := range cfg.MeshNodes {
-		name := strings.TrimSpace(strings.ToLower(node.Name))
-		if name == "wsl" {
-			return node
-		}
-		for _, alias := range node.Aliases {
-			if strings.TrimSpace(strings.ToLower(alias)) == "wsl" {
+	for _, preferred := range []string{"grey", "wsl"} {
+		for _, node := range cfg.MeshNodes {
+			if meshNodeMatchesNameOrAlias(node, preferred) {
 				return node
 			}
 		}
 	}
 	return meshNode{}
+}
+
+func meshNodeMatchesNameOrAlias(node meshNode, target string) bool {
+	target = strings.TrimSpace(strings.ToLower(target))
+	if target == "" {
+		return false
+	}
+	if strings.TrimSpace(strings.ToLower(node.Name)) == target {
+		return true
+	}
+	for _, alias := range node.Aliases {
+		if strings.TrimSpace(strings.ToLower(alias)) == target {
+			return true
+		}
+	}
+	return false
 }
 
 func appendConfigEnvIfMissing(env []string, repoRoot string, key string) []string {
@@ -350,6 +367,13 @@ func readTopLevelConfigValue(repoRoot string, key string) string {
 		}
 	}
 	return ""
+}
+
+func defaultWSLLoopbackHost() bool {
+	if runtime.GOOS != "linux" {
+		return false
+	}
+	return strings.TrimSpace(os.Getenv("WSL_DISTRO_NAME")) != ""
 }
 
 func shellQuote(s string) string {
