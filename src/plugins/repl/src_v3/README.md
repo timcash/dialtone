@@ -186,6 +186,38 @@ Use direct `repl src_v3` commands when you need to debug the runtime itself, not
 ./dialtone.sh chrome src_v3 status --host legion --role dev
 ```
 
+## Windows To WSL Workflow
+
+If you are editing from Windows but running the real runtime in WSL, keep this split:
+
+- edit in `C:\Users\timca\dialtone`
+- run REPL and plugin tests in `/home/user/dialtone`
+- keep the WSL tmux session `windows` alive and reuse it
+
+Use the `wsl-tmux` wrapper from Windows so commands stay visible in the persistent WSL tmux pane:
+
+```powershell
+wsl-tmux "cd /home/user/dialtone && ./dialtone.sh repl src_v3 process-clean"
+wsl-tmux "cd /home/user/dialtone && ./dialtone.sh repl src_v3 test"
+wsl-tmux read
+wsl-tmux interrupt
+```
+
+For this repo, trust:
+
+- native Windows Git for `C:\Users\timca\dialtone`
+- WSL Git for `/home/user/dialtone`
+
+Do not judge the Windows checkout from `/mnt/c/...` inside WSL because line endings and file mode handling can make that view misleading.
+
+If you sync files from Windows into WSL, normalize line endings in WSL before testing:
+
+```bash
+perl -0pi -e 's/\r\n/\n/g' path/to/file
+```
+
+For a fuller Windows/WSL workflow, see [WINDOWS_DEV.md](C:\Users\timca\dialtone\WINDOWS_DEV.md).
+
 ## Host Flags
 
 For normal plugin commands, `--host` usually belongs to the plugin itself:
@@ -221,6 +253,31 @@ Use this default workflow:
 ```
 
 Do not guess from partial `DIALTONE>` output when a subtone log is available.
+
+When working from Windows, prefer this testing pattern:
+
+```powershell
+# 1. Keep the persistent WSL tmux session alive.
+wsl-tmux "cd /home/user/dialtone && ./dialtone.sh repl src_v3 process-clean"
+
+# 2. Run the full REPL suite visibly in WSL.
+wsl-tmux "cd /home/user/dialtone && ./dialtone.sh repl src_v3 test"
+
+# 3. If needed, rerun a focused step.
+wsl-tmux "cd /home/user/dialtone && ./dialtone.sh repl src_v3 test --filter interactive-ssh-wsl-command"
+
+# 4. Inspect the generated report files in the WSL repo.
+wsl-tmux "cd /home/user/dialtone && sed -n '1,80p' src/plugins/repl/src_v3/TEST.md"
+```
+
+For this environment, the SSH-backed REPL test path is most reliable when the reachable default node is `grey`:
+
+```bash
+./dialtone.sh ssh src_v1 probe --host grey --timeout 5s
+./dialtone.sh ssh src_v1 run --host grey --cmd whoami
+```
+
+If an SSH-focused REPL test refers to the logical host name `wsl`, the current test setup may still resolve that through `grey.shad-artichoke.ts.net` as the preferred reachable transport target.
 
 For Chrome/CAD/UI debugging, use this pattern:
 
