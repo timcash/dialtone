@@ -118,7 +118,7 @@ func runInstall(args []string) {
 
 	depsDir := logs.GetDialtoneEnv()
 	if depsDir == "" {
-		logs.Fatal("DIALTONE_ENV not set in env/.env or environment")
+		logs.Fatal("DIALTONE_ENV not set in env/dialtone.json or environment")
 	}
 
 	if err := os.MkdirAll(depsDir, 0o755); err != nil {
@@ -140,13 +140,7 @@ func runInstall(args []string) {
 	downloadURL := fmt.Sprintf("https://go.dev/dl/%s", tarball)
 	cacheDir := strings.TrimSpace(os.Getenv("DIALTONE_GO_CACHE_DIR"))
 	if cacheDir == "" {
-		home, err := os.UserHomeDir()
-		if err == nil && strings.TrimSpace(home) != "" {
-			cacheDir = filepath.Join(home, ".cache", "dialtone", "go")
-		}
-	}
-	if cacheDir == "" {
-		cacheDir = filepath.Join(depsDir, ".cache")
+		cacheDir = filepath.Join(depsDir, "cache", "go")
 	}
 	cacheTar := filepath.Join(cacheDir, tarball)
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {

@@ -16,12 +16,15 @@ Keep the WSL repo for Linux runtime checks, REPL/plugin tests, SSH, tmux, and de
 Use the `wsl-tmux` wrapper from Windows so WSL commands run inside the visible tmux session:
 
 ```powershell
+wsl-tmux help
+wsl-tmux status
 wsl-tmux "cd /home/user/dialtone && ./dialtone.sh repl src_v3 test"
 wsl-tmux read
 wsl-tmux interrupt
 ```
 
 The tmux session name is expected to be `windows`.
+`wsl-tmux help` shows the wrapper usage, and `wsl-tmux status` is the quickest way to confirm the current session, pane, cwd, and recent output before sending new commands.
 If the pane gets noisy or wedged, it is fine to recreate the session:
 
 ```powershell

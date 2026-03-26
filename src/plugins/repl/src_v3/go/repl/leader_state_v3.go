@@ -1,6 +1,7 @@
 package repl
 
 import (
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -33,11 +34,7 @@ type LeaderState struct {
 }
 
 func leaderStateDir() (string, error) {
-	repoRoot, _, err := resolveRoots()
-	if err != nil {
-		return "", err
-	}
-	dir := filepath.Join(repoRoot, ".dialtone", "repl-v3")
+	dir := filepath.Join(configv1.DefaultDialtoneHome(), "repl-v3")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}

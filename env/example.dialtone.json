@@ -1,7 +1,36 @@
 {
-  "DIALTONE_ENV": "~/.dialtone",
+  "DIALTONE_HOME": "~/.dialtone",
+  "DIALTONE_ENV": "~/.dialtone_env",
+  "DIALTONE_GO_CACHE_DIR": "~/.dialtone_env/cache/go",
+  "DIALTONE_BUN_CACHE_DIR": "~/.dialtone_env/cache/bun",
+  "DIALTONE_TOOL_CACHE_DIR": "~/.dialtone_env/cache/tools",
+  "DIALTONE_CONTAINER_CACHE_DIR": "~/.dialtone_env/cache/containers",
+  "DIALTONE_WSL_BUILD_IMAGE": "dialtone-builder-alpine:go1.25.5",
+  "DIALTONE_ZIG_VERSION": "0.13.0",
+  "GH_TOKEN": "",
   "DIALTONE_REPO_ROOT": "/home/user/dialtone",
   "DIALTONE_USE_NIX": "0",
+  "camera_src_v1_install": {
+    "tools": [
+      {
+        "name": "go",
+        "version": "1.25.5",
+        "manager": "dialtone"
+      },
+      {
+        "name": "zig",
+        "version": "0.13.0",
+        "manager": "dialtone"
+      }
+    ]
+  },
+  "robot_src_v2_install": {
+    "depends_on": [
+      "camera src_v1",
+      "github src_v1",
+      "bun src_v1"
+    ]
+  },
   "mesh_nodes": [
     {
       "name": "wsl",

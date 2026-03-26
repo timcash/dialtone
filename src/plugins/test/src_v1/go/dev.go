@@ -17,6 +17,7 @@ import (
 	"time"
 
 	chrome "dialtone/dev/plugins/chrome/src_v3"
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	"github.com/nats-io/nats.go"
 )
@@ -108,7 +109,7 @@ func RunDev(opts DevOptions) error {
 		logf("   [DEV] Running vite dev... (attempt %d)", restartAttemptID)
 
 		// Find bun from environment
-		bunBin := filepath.Join(os.Getenv("DIALTONE_ENV"), "bun", "bin", "bun")
+		bunBin := configv1.ManagedBunBinPath(configv1.DefaultDialtoneEnv())
 		if _, err := os.Stat(bunBin); err != nil {
 			bunBin = "bun" // Fallback
 		}

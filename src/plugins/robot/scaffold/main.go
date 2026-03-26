@@ -108,7 +108,7 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 		printUsage()
 		return nil
 	case "install":
-		return bun_plugin.RunBun(preset.UI, "install", "--force")
+		return ensureRobotUIDeps(repoRoot, preset.UI, true)
 	case "fmt":
 		pkg := "./plugins/robot/" + version + "/..."
 		return go_plugin.RunGo("fmt", pkg)
@@ -119,11 +119,23 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 		pkg := "./plugins/robot/" + version + "/..."
 		return go_plugin.RunGo("build", pkg)
 	case "lint":
+		if err := ensureRobotUIDeps(repoRoot, preset.UI, false); err != nil {
+			return err
+		}
 		return bun_plugin.RunBun(preset.UI, "run", "lint")
 	case "format":
+		if err := ensureRobotUIDeps(repoRoot, preset.UI, false); err != nil {
+			return err
+		}
 		return bun_plugin.RunBun(preset.UI, "run", "format")
 	case "build":
-		return bun_plugin.RunBun(preset.UI, "run", "build")
+		if err := ensureRobotUIDeps(repoRoot, preset.UI, false); err != nil {
+			return err
+		}
+		if err := bun_plugin.RunBun(preset.UI, "run", "build"); err != nil {
+			return err
+		}
+		return buildRobotLocalArtifacts(repoRoot)
 	case "dev":
 		fs := flag.NewFlagSet("robot-dev", flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
@@ -483,7 +495,11 @@ func resolveCloudflareTunnelToken(name string) string {
 }
 
 func resolveCloudflaredPath(repoRoot string) string {
-	envRoot := chooseNonEmpty(strings.TrimSpace(os.Getenv("DIALTONE_ENV")), filepath.Join(repoRoot, "..", "dialtone_dependencies"))
+	rt, err := configv1.ResolveRuntime(repoRoot)
+	if err != nil {
+		return ""
+	}
+	envRoot := rt.DialtoneEnv
 	candidate := filepath.Join(envRoot, "cloudflare", "cloudflared")
 	if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
 		return candidate
@@ -704,6 +720,103 @@ func runSrcV2Publish(repoRoot string, args []string) error {
 		}
 		replIndexInfof("robot publish: release assets ready for version %s", resolvedVersion)
 		logs.Info("robot src_v2 publish: release assets up to date version=%s repo=%s", resolvedVersion, strings.TrimSpace(*repo))
+	}
+	return nil
+}
+
+func ensureRobotUIDeps(repoRoot, uiDir string, force bool) error {
+	if strings.TrimSpace(uiDir) == "" {
+		return fmt.Errorf("robot ui directory is empty")
+	}
+	if _, err := os.Stat(filepath.Join(uiDir, "package.json")); err != nil {
+		return fmt.Errorf("robot ui package.json missing in %s: %w", uiDir, err)
+	}
+
+	logs.Info("robot install dependency: camera src_v1 install")
+	if err := runDialtone(repoRoot, "camera", "src_v1", "install"); err != nil {
+		return fmt.Errorf("camera dependency install failed: %w", err)
+	}
+	logs.Info("robot install dependency: github src_v1 install")
+	if err := runDialtone(repoRoot, "github", "src_v1", "install"); err != nil {
+		return fmt.Errorf("github dependency install failed: %w", err)
+	}
+	logs.Info("robot install dependency: bun src_v1 install")
+	if err := runDialtone(repoRoot, "bun", "src_v1", "install"); err != nil {
+		return fmt.Errorf("bun runtime install failed: %w", err)
+	}
+
+	viteBin := filepath.Join(uiDir, "node_modules", ".bin", "vite")
+	if runtime.GOOS == "windows" {
+		viteBin += ".cmd"
+	}
+	if !force {
+		if _, err := os.Stat(viteBin); err == nil {
+			return nil
+		}
+	}
+
+	installArgs := []string{"bun", "src_v1", "install", "--cwd", uiDir, "--frozen-lockfile"}
+	if force {
+		installArgs = append(installArgs, "--force")
+	}
+	if err := runDialtone(repoRoot, installArgs...); err != nil {
+		return fmt.Errorf("robot ui dependency install failed: %w", err)
+	}
+	if _, err := os.Stat(viteBin); err != nil {
+		return fmt.Errorf("robot ui vite binary missing after install: %s", viteBin)
+	}
+	return nil
+}
+
+func ensureRobotLocalArtifacts(repoRoot string) error {
+	required := []string{
+		filepath.Join(repoRoot, "bin", "dialtone_autoswap_v1"),
+		filepath.Join(repoRoot, "bin", "dialtone_robot_v2"),
+		filepath.Join(repoRoot, "bin", "dialtone_camera_v1"),
+		filepath.Join(repoRoot, "bin", "dialtone_mavlink_v1"),
+		filepath.Join(repoRoot, "bin", "dialtone_repl_v1"),
+		filepath.Join(repoRoot, "src", "plugins", "robot", "src_v2", "ui", "dist", "index.html"),
+	}
+	for _, p := range required {
+		if _, err := os.Stat(p); err != nil {
+			logs.Info("robot local artifacts missing; running ./dialtone.sh robot src_v2 build")
+			return runDialtone(repoRoot, "robot", "src_v2", "build")
+		}
+	}
+	return nil
+}
+
+func buildRobotLocalArtifacts(repoRoot string) error {
+	rt, err := configv1.ResolveRuntime(repoRoot)
+	if err != nil {
+		return err
+	}
+	srcRoot := rt.SrcRoot
+	goBin, err := resolveGoBinary()
+	if err != nil {
+		return err
+	}
+	specs := []struct {
+		outPath   string
+		mainPath  string
+		useCamera bool
+	}{
+		{outPath: filepath.Join(repoRoot, "bin", "dialtone_autoswap_v1"), mainPath: "./plugins/autoswap/src_v1/cmd/main.go"},
+		{outPath: filepath.Join(repoRoot, "bin", "dialtone_robot_v2"), mainPath: "./plugins/robot/src_v2/cmd/server/main.go"},
+		{outPath: filepath.Join(repoRoot, "bin", "dialtone_camera_v1"), useCamera: true},
+		{outPath: filepath.Join(repoRoot, "bin", "dialtone_mavlink_v1"), mainPath: "./plugins/mavlink/src_v1/cmd/main.go"},
+		{outPath: filepath.Join(repoRoot, "bin", "dialtone_repl_v1"), mainPath: "./plugins/repl/src_v1/cmd/repld/main.go"},
+	}
+	for _, spec := range specs {
+		if spec.useCamera {
+			if err := runDialtone(repoRoot, "camera", "src_v1", "build", "--goos", runtime.GOOS, "--goarch", runtime.GOARCH, "--out", spec.outPath, "--podman=false"); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := buildGoBinary(goBin, srcRoot, spec.mainPath, spec.outPath, runtime.GOOS, runtime.GOARCH); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1015,7 +1128,7 @@ func publishRobotSrcV2Release(repoRoot, repo, version string, targets []buildTar
 		{AssetPrefix: "dialtone_repl", MainPath: "./plugins/repl/src_v1/cmd/repld/main.go"},
 	}
 
-	existing, exists, err := githubReleaseAssets(repo, version)
+	existing, exists, err := githubReleaseAssets(repoRoot, repo, version)
 	if err != nil {
 		return err
 	}
@@ -1029,15 +1142,15 @@ func publishRobotSrcV2Release(repoRoot, repo, version string, targets []buildTar
 					name += ".exe"
 				}
 				out := filepath.Join(outDir, name)
-				if err := buildGoBinary(goBin, srcRoot, s.MainPath, out, t.GOOS, t.GOARCH); err != nil {
-					if s.AssetPrefix == "dialtone_camera_v1" && t.GOOS == "linux" && t.GOARCH == "arm64" {
-						logs.Warn("robot src_v2 publish: camera cross-build failed for %s; trying camera plugin podman build fallback", name)
-						replIndexInfof("robot publish: camera arm64 cross-build failed, using podman fallback")
-						if ferr := runDialtone(repoRoot, "camera", "src_v1", "build", "--goos", t.GOOS, "--goarch", t.GOARCH, "--out", out, "--podman"); ferr == nil {
-							assetPathByName[name] = out
-							continue
-						}
+				if s.AssetPrefix == "dialtone_camera_v1" {
+					if err := runDialtone(repoRoot, "camera", "src_v1", "build", "--goos", t.GOOS, "--goarch", t.GOARCH, "--out", out, "--podman=false"); err != nil {
+						logs.Warn("robot src_v2 publish: skip asset %s (%s/%s camera build failed: %v)", name, t.GOOS, t.GOARCH, err)
+						continue
 					}
+					assetPathByName[name] = out
+					continue
+				}
+				if err := buildGoBinary(goBin, srcRoot, s.MainPath, out, t.GOOS, t.GOARCH); err != nil {
 					logs.Warn("robot src_v2 publish: skip asset %s (%s/%s build failed: %v)", name, t.GOOS, t.GOARCH, err)
 					continue
 				}
@@ -1181,7 +1294,7 @@ func publishRobotSrcV2Release(repoRoot, repo, version string, targets []buildTar
 		return nil
 	}
 
-	gh, err := resolveGHCli()
+	gh, err := resolveGHCli(repoRoot)
 	if err != nil {
 		return err
 	}
@@ -1340,8 +1453,8 @@ func createTarGzFromDir(outFile, srcDir string) error {
 	})
 }
 
-func githubReleaseAssets(repo, version string) (map[string]string, bool, error) {
-	gh, err := resolveGHCli()
+func githubReleaseAssets(repoRoot, repo, version string) (map[string]string, bool, error) {
+	gh, err := resolveGHCli(repoRoot)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1378,13 +1491,23 @@ func fileSHA256(path string) (string, error) {
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
-func resolveGHCli() (string, error) {
+func resolveGHCli(repoRoot string) (string, error) {
 	if p, err := exec.LookPath("gh"); err == nil {
 		return p, nil
 	}
 	candidate := filepath.Join(logs.GetDialtoneEnv(), "gh", "bin", "gh")
 	if _, err := os.Stat(candidate); err == nil {
 		return candidate, nil
+	}
+	if strings.TrimSpace(repoRoot) != "" {
+		if err := runDialtone(repoRoot, "github", "src_v1", "install"); err == nil {
+			if p, err := exec.LookPath("gh"); err == nil {
+				return p, nil
+			}
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate, nil
+			}
+		}
 	}
 	return "", fmt.Errorf("gh cli not found; run ./dialtone.sh github src_v1 install")
 }
@@ -1413,6 +1536,10 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 	skipUI := fs.Bool("skip-ui", false, "Skip chromedp UI menu checks")
 	publicCheck := fs.Bool("public-check", true, "Verify public UI endpoint is reachable")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if err := ensureRobotLocalArtifacts(repoRoot); err != nil {
 		return err
 	}
 

@@ -19,6 +19,7 @@ import (
 
 	"dialtone/dev/browser"
 	chrome "dialtone/dev/plugins/chrome/src_v1/go"
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	wwwtest "dialtone/dev/plugins/www/test"
 
 	"github.com/chromedp/chromedp"
@@ -42,12 +43,9 @@ func logFatal(format string, args ...interface{}) {
 }
 
 func dialtoneBunPath() (string, bool) {
-	envDir := os.Getenv("DIALTONE_ENV")
-	if envDir == "" {
-		return "", false
-	}
+	envDir := configv1.DefaultDialtoneEnv()
 	candidates := []string{
-		filepath.Join(envDir, "bun", "bin", "bun"),
+		configv1.ManagedBunBinPath(envDir),
 		filepath.Join(envDir, "bin", "bun"),
 	}
 	for _, candidate := range candidates {
@@ -59,10 +57,7 @@ func dialtoneBunPath() (string, bool) {
 }
 
 func dialtoneNpmPath() (string, bool) {
-	envDir := os.Getenv("DIALTONE_ENV")
-	if envDir == "" {
-		return "", false
-	}
+	envDir := configv1.DefaultDialtoneEnv()
 	candidate := filepath.Join(envDir, "node", "bin", "npm")
 	if _, err := os.Stat(candidate); err == nil {
 		return candidate, true
@@ -301,8 +296,7 @@ func publishPrebuilt(webDir string, vercelPath string, vercelEnv []string, args 
 // RunWww handles 'www <subcommand>'
 func RunWww(args []string) {
 	// Lazy-load Vercel CLI path
-	homeDir, _ := os.UserHomeDir()
-	defaultVercelPath := filepath.Join(homeDir, ".dialtone_env", "node", "bin", "vercel")
+	defaultVercelPath := filepath.Join(configv1.DefaultDialtoneEnv(), "node", "bin", "vercel")
 
 	getVercel := func() string {
 		if _, err := os.Stat(defaultVercelPath); os.IsNotExist(err) {

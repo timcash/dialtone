@@ -215,7 +215,7 @@ func pruneTailscaleNodes(hostname string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		return fmt.Errorf("TS_API_KEY is invalid or expired. Please update it in env/.env (HTTP 401)")
+		return fmt.Errorf("TS_API_KEY is invalid or expired. Please update it in env/dialtone.json (HTTP 401)")
 	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to list devices: %s", resp.Status)

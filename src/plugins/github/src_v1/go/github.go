@@ -1,13 +1,19 @@
 package github
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"compress/gzip"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -143,21 +149,13 @@ func PrintUsage() {
 
 func runInstall() error {
 	depsDir := getDialtoneEnv()
-	ghBin := filepath.Join(depsDir, "gh", "bin", "gh")
+	ghBin := managedGHPath(depsDir)
 	if _, err := os.Stat(ghBin); err == nil {
 		logs.Info("GitHub CLI already installed at %s", ghBin)
 		return nil
 	}
-	rt, err := ResolvePaths()
-	if err != nil {
-		return err
-	}
-	logs.Info("Installing GitHub CLI via core installer")
-	cmd := exec.Command(filepath.Join(rt.Preset.Runtime.RepoRoot, "dialtone.sh"), "install")
-	cmd.Dir = rt.Preset.Runtime.RepoRoot
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	logs.Info("Installing GitHub CLI into %s", filepath.Dir(ghBin))
+	return installManagedGH(depsDir)
 }
 
 func runRelease(args []string) error {
@@ -2029,7 +2027,7 @@ func runGHPassthrough(args []string) error {
 
 func findGH() string {
 	depsDir := getDialtoneEnv()
-	ghPath := filepath.Join(depsDir, "gh", "bin", "gh")
+	ghPath := managedGHPath(depsDir)
 	if _, err := os.Stat(ghPath); err == nil {
 		return ghPath
 	}
@@ -2096,4 +2094,265 @@ func resolveOutDir(outDir string) string {
 		return strings.TrimPrefix(outDir, "src"+string(filepath.Separator))
 	}
 	return outDir
+}
+
+func managedGHPath(depsDir string) string {
+	name := "gh"
+	if runtime.GOOS == "windows" {
+		name = "gh.exe"
+	}
+	return filepath.Join(depsDir, "gh", "bin", name)
+}
+
+func installManagedGH(depsDir string) error {
+	version, err := resolveLatestGHVersion()
+	if err != nil {
+		return err
+	}
+	archiveName, downloadURL, nestedBin, err := ghArchiveSpec(version)
+	if err != nil {
+		return err
+	}
+	cacheDir := filepath.Join(depsDir, "cache", "github")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return fmt.Errorf("create github cache dir: %w", err)
+	}
+	archivePath := filepath.Join(cacheDir, archiveName)
+	if _, err := os.Stat(archivePath); err != nil {
+		logs.Info("Downloading GitHub CLI %s to shared cache %s", version, archivePath)
+		if err := downloadFile(downloadURL, archivePath); err != nil {
+			return err
+		}
+	} else {
+		logs.Info("Using cached GitHub CLI archive %s", archivePath)
+	}
+
+	destDir := filepath.Join(depsDir, "gh")
+	if err := os.RemoveAll(destDir); err != nil {
+		return fmt.Errorf("reset gh install dir: %w", err)
+	}
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return fmt.Errorf("create gh install dir: %w", err)
+	}
+	if strings.HasSuffix(archiveName, ".zip") {
+		if err := extractZipBinary(archivePath, destDir, nestedBin); err != nil {
+			return err
+		}
+	} else {
+		if err := extractTarGzBinary(archivePath, destDir, nestedBin); err != nil {
+			return err
+		}
+	}
+	ghBin := managedGHPath(depsDir)
+	if _, err := os.Stat(ghBin); err != nil {
+		return fmt.Errorf("gh install completed but binary missing at %s: %w", ghBin, err)
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(ghBin, 0o755); err != nil {
+			return fmt.Errorf("chmod gh binary: %w", err)
+		}
+	}
+	logs.Info("GitHub CLI installed at %s", ghBin)
+	return nil
+}
+
+func resolveLatestGHVersion() (string, error) {
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/cli/cli/releases/latest", nil)
+	if err != nil {
+		return "", fmt.Errorf("build github cli release request: %w", err)
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("fetch github cli release metadata: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", fmt.Errorf("fetch github cli release metadata: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var payload struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return "", fmt.Errorf("decode github cli release metadata: %w", err)
+	}
+	version := strings.TrimSpace(strings.TrimPrefix(payload.TagName, "v"))
+	if version == "" {
+		return "", fmt.Errorf("github cli release metadata missing tag_name")
+	}
+	return version, nil
+}
+
+func ghArchiveSpec(version string) (archiveName, downloadURL, nestedBin string, err error) {
+	baseVersion := strings.TrimSpace(version)
+	if baseVersion == "" {
+		return "", "", "", fmt.Errorf("github cli version is empty")
+	}
+	goos := runtime.GOOS
+	goarch := runtime.GOARCH
+	var suffix string
+	switch goos {
+	case "linux":
+		switch goarch {
+		case "amd64":
+			suffix = "linux_amd64.tar.gz"
+		case "arm64":
+			suffix = "linux_arm64.tar.gz"
+		default:
+			return "", "", "", fmt.Errorf("unsupported gh install arch on linux: %s", goarch)
+		}
+	case "darwin":
+		switch goarch {
+		case "amd64":
+			suffix = "macOS_amd64.zip"
+		case "arm64":
+			suffix = "macOS_arm64.zip"
+		default:
+			return "", "", "", fmt.Errorf("unsupported gh install arch on macOS: %s", goarch)
+		}
+	case "windows":
+		switch goarch {
+		case "amd64":
+			suffix = "windows_amd64.zip"
+		case "arm64":
+			suffix = "windows_arm64.zip"
+		default:
+			return "", "", "", fmt.Errorf("unsupported gh install arch on windows: %s", goarch)
+		}
+	default:
+		return "", "", "", fmt.Errorf("unsupported gh install OS: %s", goos)
+	}
+	archiveName = fmt.Sprintf("gh_%s_%s", baseVersion, suffix)
+	nestedBin = filepath.ToSlash(fmt.Sprintf("gh_%s_%s/bin/%s", baseVersion, strings.TrimSuffix(suffix, filepath.Ext(suffix)), ghBinaryName()))
+	if strings.HasSuffix(archiveName, ".tar.gz") {
+		nestedBin = fmt.Sprintf("gh_%s_%s/bin/%s", baseVersion, strings.TrimSuffix(suffix, ".tar.gz"), ghBinaryName())
+	}
+	if strings.HasSuffix(archiveName, ".zip") {
+		nestedBin = fmt.Sprintf("gh_%s_%s/bin/%s", baseVersion, strings.TrimSuffix(suffix, ".zip"), ghBinaryName())
+	}
+	downloadURL = fmt.Sprintf("https://github.com/cli/cli/releases/download/v%s/%s", baseVersion, archiveName)
+	return archiveName, downloadURL, nestedBin, nil
+}
+
+func ghBinaryName() string {
+	if runtime.GOOS == "windows" {
+		return "gh.exe"
+	}
+	return "gh"
+}
+
+func downloadFile(url, dst string) error {
+	resp, err := http.Get(url)
+	if err != nil {
+		return fmt.Errorf("download %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("download %s: status %d: %s", url, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	tmp := dst + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return fmt.Errorf("create temp file %s: %w", tmp, err)
+	}
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("close %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("move %s to %s: %w", tmp, dst, err)
+	}
+	return nil
+}
+
+func extractTarGzBinary(archivePath, destDir, target string) error {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", archivePath, err)
+	}
+	defer f.Close()
+	gzr, err := gzip.NewReader(f)
+	if err != nil {
+		return fmt.Errorf("open gzip %s: %w", archivePath, err)
+	}
+	defer gzr.Close()
+	tr := tar.NewReader(gzr)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("read tar %s: %w", archivePath, err)
+		}
+		if hdr.Typeflag != tar.TypeReg || filepath.ToSlash(hdr.Name) != filepath.ToSlash(target) {
+			continue
+		}
+		dst := managedGHPath(filepath.Dir(destDir))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return fmt.Errorf("create gh bin dir: %w", err)
+		}
+		out, err := os.Create(dst)
+		if err != nil {
+			return fmt.Errorf("create %s: %w", dst, err)
+		}
+		if _, err := io.Copy(out, tr); err != nil {
+			_ = out.Close()
+			return fmt.Errorf("write %s: %w", dst, err)
+		}
+		if err := out.Close(); err != nil {
+			return fmt.Errorf("close %s: %w", dst, err)
+		}
+		return nil
+	}
+	return fmt.Errorf("gh binary %s not found in %s", target, archivePath)
+}
+
+func extractZipBinary(archivePath, destDir, target string) error {
+	zr, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return fmt.Errorf("open zip %s: %w", archivePath, err)
+	}
+	defer zr.Close()
+	for _, file := range zr.File {
+		if filepath.ToSlash(file.Name) != filepath.ToSlash(target) {
+			continue
+		}
+		rc, err := file.Open()
+		if err != nil {
+			return fmt.Errorf("open %s in %s: %w", file.Name, archivePath, err)
+		}
+		dst := managedGHPath(filepath.Dir(destDir))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			_ = rc.Close()
+			return fmt.Errorf("create gh bin dir: %w", err)
+		}
+		out, err := os.Create(dst)
+		if err != nil {
+			_ = rc.Close()
+			return fmt.Errorf("create %s: %w", dst, err)
+		}
+		if _, err := io.Copy(out, rc); err != nil {
+			_ = out.Close()
+			_ = rc.Close()
+			return fmt.Errorf("write %s: %w", dst, err)
+		}
+		if err := out.Close(); err != nil {
+			_ = rc.Close()
+			return fmt.Errorf("close %s: %w", dst, err)
+		}
+		if err := rc.Close(); err != nil {
+			return fmt.Errorf("close archive entry %s: %w", file.Name, err)
+		}
+		return nil
+	}
+	return fmt.Errorf("gh binary %s not found in %s", target, archivePath)
 }

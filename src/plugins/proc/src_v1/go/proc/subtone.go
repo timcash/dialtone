@@ -2,6 +2,7 @@ package proc
 
 import (
 	"bufio"
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"fmt"
 	"os"
 	"os/exec"
@@ -48,7 +49,7 @@ func RunSubtoneWithEvents(args []string, onEvent SubtoneEventHandler) int {
 	cmd := exec.Command(dialtoneSh, internalArgs...)
 	cmd.Dir = repoRoot
 	cmd.Env = append(os.Environ(), "DIALTONE_CONTEXT=repl")
-	logDir := filepath.Join(repoRoot, ".dialtone", "logs")
+	logDir := filepath.Join(defaultDialtoneHome(), "logs")
 	return runCommandWithEvents(cmd, args, logDir, onEvent)
 }
 
@@ -172,8 +173,5 @@ func runCommandWithEvents(cmd *exec.Cmd, trackArgs []string, logDir string, onEv
 }
 
 func defaultDialtoneHome() string {
-	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		return filepath.Join(home, ".dialtone")
-	}
-	return ".dialtone"
+	return configv1.DefaultDialtoneHome()
 }

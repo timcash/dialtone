@@ -1,6 +1,7 @@
 package logs
 
 import (
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,7 +26,5 @@ func GetDialtoneEnv() string {
 		absEnv, _ := filepath.Abs(env)
 		return absEnv
 	}
-	// Fallback to default
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".dialtone_env")
+	return configv1.DefaultDialtoneEnv()
 }

@@ -85,6 +85,8 @@ func runSrcV3(command, repoRoot string, args []string) error {
 		return wsl_ops.Install(args...)
 	case "build":
 		return wsl_ops.Build(args...)
+	case "build-image":
+		return wsl_ops.BuildImage(args...)
 	case "dev":
 		return wsl_ops.Dev(repoRoot, args)
 	case "run", "serve":
@@ -213,6 +215,7 @@ func printUsage() {
 	logs.Raw("  lint         Run TS lint")
 	logs.Raw("  format       Run TS format")
 	logs.Raw("  build        Build WSL server binary (UI skipped by default)")
+	logs.Raw("  build-image  Ensure reusable alpine build image exists for cross-builds")
 	logs.Raw("  dev          Start dev server")
 	logs.Raw("  run          Start WSL plugin server")
 	logs.Raw("  serve        Alias for run")

@@ -15,7 +15,7 @@ func setupLocalCloudflareProxyService(hostname, robotHost string) error {
 	tokenKey := "CF_TUNNEL_TOKEN_" + strings.ToUpper(strings.ReplaceAll(hostname, "-", "_"))
 	token := strings.TrimSpace(os.Getenv(tokenKey))
 	if token == "" {
-		return fmt.Errorf("missing %s in env/.env", tokenKey)
+		return fmt.Errorf("missing %s in env/dialtone.json", tokenKey)
 	}
 
 	cloudflaredBin, err := ensureLocalCloudflaredBinary()

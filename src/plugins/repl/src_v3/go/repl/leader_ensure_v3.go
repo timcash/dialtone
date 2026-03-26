@@ -1,6 +1,7 @@
 package repl
 
 import (
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"fmt"
 	"os"
 	"os/exec"
@@ -38,11 +39,12 @@ func EnsureLeaderRunning(clientNATSURL, room string) error {
 		"DIALTONE_REPO_ROOT="+repoRoot,
 		"DIALTONE_SRC_ROOT="+srcRoot,
 	)
-	if err := os.MkdirAll(filepath.Join(repoRoot, ".dialtone", "repl-v3"), 0o755); err != nil {
+	dialtoneHome := configv1.DefaultDialtoneHome()
+	if err := os.MkdirAll(filepath.Join(dialtoneHome, "repl-v3"), 0o755); err != nil {
 		return err
 	}
-	stdoutPath := filepath.Join(repoRoot, ".dialtone", "repl-v3", "leader-autostart.out.log")
-	stderrPath := filepath.Join(repoRoot, ".dialtone", "repl-v3", "leader-autostart.err.log")
+	stdoutPath := filepath.Join(dialtoneHome, "repl-v3", "leader-autostart.out.log")
+	stderrPath := filepath.Join(dialtoneHome, "repl-v3", "leader-autostart.err.log")
 	stdout, err := os.OpenFile(stdoutPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return err

@@ -353,7 +353,7 @@ func validateRequiredVars(vars []string) {
 		}
 	}
 	if len(missing) > 0 {
-		logs.Fatal("Missing required environment variables: %s. Please check your env/.env file.", strings.Join(missing, ", "))
+		logs.Fatal("Missing required environment variables: %s. Please check env/dialtone.json.", strings.Join(missing, ", "))
 	}
 }
 

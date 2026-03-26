@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"dialtone/dev/plugins/repl/src_v3/test/support"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
 	"github.com/nats-io/nats.go"
@@ -133,7 +134,7 @@ func Register(r *testv1.Registry) {
 
 			ctx.TestPassf("leader state persisted and StartLeader reused pid %d", first.PID)
 			return testv1.StepRunResult{
-				Report: fmt.Sprintf("Started the shared REPL leader, verified `.dialtone/repl-v3/leader.json` was written with pid %d and the expected NATS URL, then called StartLeader again and confirmed the same worker pid was reused instead of restarting the leader.", first.PID),
+				Report: fmt.Sprintf("Started the shared REPL leader, verified `%s` was written with pid %d and the expected NATS URL, then called StartLeader again and confirmed the same worker pid was reused instead of restarting the leader.", filepath.Join(configv1.DefaultDialtoneHome(), "repl-v3", "leader.json"), first.PID),
 			}, nil
 		},
 	})
@@ -562,7 +563,7 @@ func Register(r *testv1.Registry) {
 
 func readLeaderState(repoRoot string) (leaderState, error) {
 	var st leaderState
-	path := filepath.Join(strings.TrimSpace(repoRoot), ".dialtone", "repl-v3", "leader.json")
+	path := filepath.Join(configv1.DefaultDialtoneHome(), "repl-v3", "leader.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return st, fmt.Errorf("read leader state %s: %w", path, err)

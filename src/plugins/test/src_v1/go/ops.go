@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 )
 
 type TestOptions struct {
@@ -32,10 +34,12 @@ func RunPluginTests(opts TestOptions) error {
 
 	dialtoneEnv := os.Getenv("DIALTONE_ENV")
 	if dialtoneEnv == "" {
-		home, _ := os.UserHomeDir()
-		dialtoneEnv = filepath.Join(home, ".dialtone_env")
+		dialtoneEnv = configv1.DefaultDialtoneEnv()
 	}
-	goBin := filepath.Join(dialtoneEnv, "go", "bin", "go")
+	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
+	if goBin == "" {
+		goBin = filepath.Join(dialtoneEnv, "go", "bin", "go")
+	}
 
 	target := opts.TestPkg
 	if !strings.HasPrefix(target, "./") && !strings.Contains(target, ".") {

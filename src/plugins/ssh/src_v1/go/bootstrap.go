@@ -82,7 +82,6 @@ func buildBootstrapCommand(dest string, installCmds []string, verifyCmd string) 
 		"mkdir -p \"$repo\"",
 		"cd \"$repo\"",
 		"if [ ! -x \"./dialtone.sh\" ]; then echo \"dialtone.sh not found in $repo\"; exit 1; fi",
-		"if [ -z \"${DIALTONE_ENV:-}\" ]; then export DIALTONE_ENV=\"$HOME/.dialtone_env\"; fi",
 	}
 	for _, cmd := range installCmds {
 		c := strings.TrimSpace(cmd)

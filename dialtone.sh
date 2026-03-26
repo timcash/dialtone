@@ -53,12 +53,16 @@ read_json_val() {
 }
 
 write_json_config() {
-    local env_dir="$1"
-    local repo_dir="$2"
+    local home_dir="$1"
+    local env_dir="$2"
+    local repo_dir="$3"
     mkdir -p "$(dirname "$ENV_FILE_JSON_DEFAULT")"
     cat > "$ENV_FILE_JSON_DEFAULT" <<EOF
 {
+  "DIALTONE_HOME": "$home_dir",
   "DIALTONE_ENV": "$env_dir",
+  "DIALTONE_GO_CACHE_DIR": "$env_dir/cache/go",
+  "DIALTONE_BUN_CACHE_DIR": "$env_dir/cache/bun",
   "DIALTONE_REPO_ROOT": "$repo_dir",
   "DIALTONE_USE_NIX": "0"
 }
@@ -105,7 +109,7 @@ install_go() {
 
     local url="https://go.dev/dl/go${version}.${os}-${arch}.tar.gz"
     local tarball="go${version}.${os}-${arch}.tar.gz"
-    local cache_dir="${DIALTONE_GO_CACHE_DIR:-$HOME/.cache/dialtone/go}"
+    local cache_dir="${DIALTONE_GO_CACHE_DIR:-$target_dir/cache/go}"
     local cache_tar="${cache_dir}/${tarball}"
     mkdir -p "$target_dir"
     mkdir -p "$cache_dir"
@@ -260,7 +264,16 @@ run_onboarding() {
     local is_test="$1"
     log_info "Welcome to Dialtone! Let's get you set up."
     
-    DEFAULT_ENV="$HOME/.dialtone"
+    DEFAULT_HOME="$HOME/.dialtone"
+    DEFAULT_ENV="$HOME/.dialtone_env"
+    if [ "$is_test" = "1" ]; then
+        input_home="${TEST_ANS_HOME:-$DEFAULT_HOME}"
+        log_info "Where should Dialtone runtime state live? [$DEFAULT_HOME]: $input_home (Auto)"
+    else
+        printf "DIALTONE> Where should Dialtone runtime state live? [%s]: " "$DEFAULT_HOME"
+        read -r input_home
+    fi
+    input_home="$(expand_home_path "${input_home:-$DEFAULT_HOME}")"
     if [ "$is_test" = "1" ]; then
         input_env="${TEST_ANS_ENV:-$DEFAULT_ENV}"
         log_info "Where should dependencies (Go/Bun) be installed? [$DEFAULT_ENV]: $input_env (Auto)"
@@ -280,10 +293,11 @@ run_onboarding() {
     fi
     input_repo="$(expand_home_path "${input_repo:-$DEFAULT_REPO}")"
 
+    export DIALTONE_HOME="$input_home"
     export DIALTONE_ENV="$input_env"
     export DIALTONE_REPO_ROOT="$input_repo"
     
-    write_json_config "$input_env" "$input_repo"
+    write_json_config "$input_home" "$input_env" "$input_repo"
     log_info "Configuration saved to $ENV_FILE_JSON_DEFAULT"
 }
 
@@ -350,14 +364,18 @@ if [ ! -f "$ENV_FILE_JSON" ] && [ -z "$DIALTONE_ONBOARDING_DONE" ]; then
 fi
 
 if [ -f "$ENV_FILE_JSON" ]; then
+    export DIALTONE_HOME="${DIALTONE_HOME:-$(read_json_val "DIALTONE_HOME" "$ENV_FILE_JSON")}"
     export DIALTONE_ENV="${DIALTONE_ENV:-$(read_json_val "DIALTONE_ENV" "$ENV_FILE_JSON")}"
     export DIALTONE_REPO_ROOT="${DIALTONE_REPO_ROOT:-$(read_json_val "DIALTONE_REPO_ROOT" "$ENV_FILE_JSON")}"
     export DIALTONE_USE_NIX="${DIALTONE_USE_NIX:-$(read_json_val "DIALTONE_USE_NIX" "$ENV_FILE_JSON")}"
+    export DIALTONE_GO_CACHE_DIR="${DIALTONE_GO_CACHE_DIR:-$(read_json_val "DIALTONE_GO_CACHE_DIR" "$ENV_FILE_JSON")}"
+    export DIALTONE_BUN_CACHE_DIR="${DIALTONE_BUN_CACHE_DIR:-$(read_json_val "DIALTONE_BUN_CACHE_DIR" "$ENV_FILE_JSON")}"
 fi
 
 [ "$FORCE_NO_NIX" = "1" ] && export DIALTONE_USE_NIX=0
 [ -z "$DIALTONE_USE_NIX" ] && export DIALTONE_USE_NIX=1
 
+export DIALTONE_HOME="$(expand_home_path "${DIALTONE_HOME:-$HOME/.dialtone}")"
 export DIALTONE_REPO_ROOT="$(expand_home_path "$DIALTONE_REPO_ROOT")"
 export DIALTONE_SRC_ROOT="${DIALTONE_REPO_ROOT}/src"
 export DIALTONE_ENV="$(expand_home_path "$DIALTONE_ENV")"

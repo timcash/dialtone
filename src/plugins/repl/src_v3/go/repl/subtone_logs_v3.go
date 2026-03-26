@@ -2,6 +2,7 @@ package repl
 
 import (
 	"bufio"
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -120,11 +121,7 @@ func RunSubtoneLog(args []string) error {
 }
 
 func resolveSubtoneLogsDir() (string, error) {
-	repoRoot, _, err := resolveRoots()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(repoRoot, ".dialtone", "logs"), nil
+	return filepath.Join(configv1.DefaultDialtoneHome(), "logs"), nil
 }
 
 func collectSubtoneLogs(logsDir string) ([]subtoneLogMeta, error) {

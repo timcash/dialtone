@@ -47,7 +47,7 @@ func RunSwarmIntegration() error {
 
 	envPath := config.GetDialtoneEnv()
 	if envPath == "" {
-		return fmt.Errorf("DIALTONE_ENV is not set. Please set it in env/.env or pass --env.")
+		return fmt.Errorf("DIALTONE_ENV is not set. Please set it in env/dialtone.json or pass --env.")
 	}
 	pearBin, err := resolvePearBin(envPath)
 	if err != nil {

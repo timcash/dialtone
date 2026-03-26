@@ -104,7 +104,7 @@ func validateRemoteOptions(opts remoteOptions) error {
 		return nil
 	}
 	if opts.Host == "" || opts.User == "" || opts.Pass == "" {
-		return fmt.Errorf("--remote requires host/user/pass (or ROBOT_HOST/ROBOT_USER/ROBOT_PASSWORD in env/.env)")
+		return fmt.Errorf("--remote requires host/user/pass (or ROBOT_HOST/ROBOT_USER/ROBOT_PASSWORD in env/dialtone.json)")
 	}
 	if opts.RemoteDir == "" {
 		return fmt.Errorf("missing remote source dir")
@@ -184,37 +184,19 @@ func remoteBootstrapAndInstallCommand(remoteDir string) string {
 	return strings.Join([]string{
 		"set -euo pipefail",
 		"REMOTE_DIR=" + shellQuote(remoteDir),
-		`DIALTONE_ENV="${DIALTONE_ENV:-$HOME/dialtone_dependencies}"`,
-		`mkdir -p "$DIALTONE_ENV" "$REMOTE_DIR/plugins/robot/src_v1/ui"`,
-		`if [ ! -x "$DIALTONE_ENV/go/bin/go" ]; then`,
-		`  GO_VER=1.25.5`,
-		`  ARCH="$(uname -m)"`,
-		`  case "$ARCH" in aarch64|arm64) GO_ARCH="arm64" ;; x86_64|amd64) GO_ARCH="amd64" ;; *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; esac`,
-		`  TAR="go${GO_VER}.linux-${GO_ARCH}.tar.gz"`,
-		`  TMP="$(mktemp -d)"`,
-		`  curl -fsSL "https://go.dev/dl/${TAR}" -o "$TMP/$TAR"`,
-		`  rm -rf "$DIALTONE_ENV/go"`,
-		`  tar -C "$DIALTONE_ENV" -xzf "$TMP/$TAR"`,
-		`  rm -rf "$TMP"`,
-		`fi`,
-		`if [ ! -x "$DIALTONE_ENV/bun/bin/bun" ]; then`,
-		`  curl -fsSL https://bun.sh/install | BUN_INSTALL="$DIALTONE_ENV/bun" bash`,
-		`fi`,
-		`export PATH="$DIALTONE_ENV/go/bin:$DIALTONE_ENV/bun/bin:$PATH"`,
-		`"$DIALTONE_ENV/go/bin/go" version`,
-		`"$DIALTONE_ENV/bun/bin/bun" --version`,
-		`cd "$REMOTE_DIR/plugins/robot/src_v1/ui"`,
-		`"$DIALTONE_ENV/bun/bin/bun" install --frozen-lockfile`,
+		`mkdir -p "$REMOTE_DIR/plugins/robot/src_v1/ui"`,
+		`cd "$REMOTE_DIR"`,
+		`./dialtone.sh install`,
+		`./dialtone.sh bun src_v1 install --cwd "$REMOTE_DIR/plugins/robot/src_v1/ui" --frozen-lockfile`,
 	}, "\n")
 }
 
 func remoteBuildCommand(remoteDir string) string {
 	return strings.Join([]string{
 		remoteBootstrapAndInstallCommand(remoteDir),
-		`"$DIALTONE_ENV/bun/bin/bun" run build`,
-		`cd "$REMOTE_DIR"`,
+		`./dialtone.sh bun src_v1 exec --cwd "$REMOTE_DIR/plugins/robot/src_v1/ui" run build`,
 		`mkdir -p "$REMOTE_DIR/plugins/robot/src_v1/bin"`,
-		`"$DIALTONE_ENV/go/bin/go" build -o "$REMOTE_DIR/plugins/robot/src_v1/bin/robot-src_v1" ./plugins/robot/src_v1/cmd/server/main.go`,
+		`./dialtone.sh go src_v1 exec build -o "$REMOTE_DIR/plugins/robot/src_v1/bin/robot-src_v1" ./plugins/robot/src_v1/cmd/server/main.go`,
 		`ls -lh "$REMOTE_DIR/plugins/robot/src_v1/bin/robot-src_v1"`,
 	}, "\n")
 }

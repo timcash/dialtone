@@ -19,14 +19,9 @@ func RunGo(args ...string) error {
 	if goBin == "" {
 		dialtoneEnv := os.Getenv("DIALTONE_ENV")
 		if dialtoneEnv == "" {
-			home, _ := os.UserHomeDir()
-			dialtoneEnv = filepath.Join(home, ".dialtone_env")
+			dialtoneEnv = configv1.DefaultDialtoneEnv()
 		}
-		goBinName := "go"
-		if os.Getenv("OS") == "Windows_NT" || filepath.Separator == '\\' {
-			goBinName = "go.exe"
-		}
-		goBin = filepath.Join(dialtoneEnv, "go", "bin", goBinName)
+		goBin = configv1.ManagedGoBinPath(dialtoneEnv)
 	}
 
 	cmd := exec.Command(goBin, args...)

@@ -25,8 +25,8 @@ func ResolvePaths(start string) (Paths, error) {
 		Runtime:           rt,
 		Preset:            preset,
 		PluginVersionRoot: preset.PluginVersionRoot,
-		StandaloneBinDir:  configv1.RepoPath(rt, ".dialtone", "bin"),
-		StandaloneBin:     configv1.RepoPath(rt, ".dialtone", "bin", "dialtone_repl"),
+		StandaloneBinDir:  filepath.Join(configv1.DefaultDialtoneHome(), "bin"),
+		StandaloneBin:     filepath.Join(configv1.DefaultDialtoneHome(), "bin", "dialtone_repl"),
 		TestCmdMain:       filepath.Join(preset.TestCmd, "main.go"),
 	}, nil
 }

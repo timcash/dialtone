@@ -20,8 +20,8 @@ import configv1 "dialtone/dev/plugins/config/src_v1/go"
 ```
 
 Main helpers:
-- `ResolveRuntime(start)` resolves repo root, src root, env file (`env/.env`), and managed Go/Bun paths.
-- `LoadEnvFile(rt)` loads `env/.env` when present.
+- `ResolveRuntime(start)` resolves repo root, src root, config file (`env/dialtone.json`), and managed Go/Bun paths.
+- `LoadEnvFile(rt)` loads `env/dialtone.json` when present.
 - `ApplyRuntimeEnv(rt)` exports `DIALTONE_*` vars and updates `PATH`.
 - `NewPluginPreset(rt, plugin, version)` returns typed paths rooted at `PluginVersionRoot` (`src/plugins/<plugin>/<src_vN>`).
 - `RepoPath(rt, ...)`, `SrcPath(rt, ...)`, `PluginPath(rt, plugin, version, ...)` remain available for generic cwd-independent paths.
@@ -33,7 +33,8 @@ Use this plugin first whenever you write or update plugin code that needs file p
 ### Rules
 - Do not hardcode paths like `filepath.Join(repoRoot, "src", "plugins", ...)`.
 - Do not assume current working directory.
-- Do not use `src/env/.env`; env file is `env/.env`.
+- Do not use `.env` files for Dialtone runtime configuration.
+- Use `env/dialtone.json` as the single runtime config source.
 - Resolve runtime once, then derive paths from presets.
 
 ### Standard pattern

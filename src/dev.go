@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	replv3 "dialtone/dev/plugins/repl/src_v3/go/repl"
 	tsnetv1 "dialtone/dev/plugins/tsnet/src_v1/go"
@@ -210,7 +211,13 @@ func LoadConfig() {
 		repoRoot = filepath.Dir(cwd)
 	}
 
-	jsonPath := filepath.Join(repoRoot, "env", "dialtone.json")
+	jsonPath := strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE"))
+	if jsonPath == "" {
+		jsonPath = filepath.Join(repoRoot, "env", "dialtone.json")
+	}
+	if filepath.Base(jsonPath) != "dialtone.json" {
+		jsonPath = filepath.Join(repoRoot, "env", "dialtone.json")
+	}
 	if fileExists(jsonPath) {
 		data, err := os.ReadFile(jsonPath)
 		if err == nil {
@@ -249,9 +256,7 @@ func GetDialtoneEnv() string {
 		absEnv, _ := filepath.Abs(env)
 		return absEnv
 	}
-	// Fallback to default
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".dialtone_env")
+	return configv1.DefaultDialtoneEnv()
 }
 
 type Requirement struct {
@@ -404,6 +409,15 @@ func main() {
 		printDevUsage()
 	case "exit":
 		os.Exit(0)
+	case "install":
+		if err := runPluginScaffold("repl", []string{"src_v3", "install"}); err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				os.Exit(exitErr.ExitCode())
+			}
+			logs.Error("Install failed: %v", err)
+			os.Exit(1)
+		}
+		return
 	case "branch":
 		runBranch(args)
 	case "plugins":
@@ -515,7 +529,7 @@ func shouldRouteCommandViaREPL(command string, args []string) bool {
 	switch strings.TrimSpace(command) {
 	case "", "help", "-h", "--help", "exit", "branch", "plugins", "dev":
 		return false
-	case "repl", "go", "bun", "wsl":
+	case "repl", "go", "bun":
 		return false
 	default:
 		return true
@@ -1163,10 +1177,12 @@ func validateEnvJSON(path string) {
 	}
 	logs.System("- format valid=true")
 
-	requiredCore := []string{"DIALTONE_ENV", "DIALTONE_REPO_ROOT"}
+	requiredCore := []string{"DIALTONE_HOME", "DIALTONE_ENV", "DIALTONE_REPO_ROOT"}
 	for _, key := range requiredCore {
 		logs.System("- required %s present=%t", key, nonEmptyJSONValue(doc, key))
 	}
+	logs.System("- shared go cache configured=%t", nonEmptyJSONValue(doc, "DIALTONE_GO_CACHE_DIR"))
+	logs.System("- shared bun cache configured=%t", nonEmptyJSONValue(doc, "DIALTONE_BUN_CACHE_DIR"))
 
 	tsReady := nonEmptyJSONValue(doc, "TS_AUTHKEY") || (nonEmptyJSONValue(doc, "TS_API_KEY") && nonEmptyJSONValue(doc, "TS_TAILNET"))
 	logs.System("- tsnet bootstrap keys present=%t (TS_AUTHKEY or TS_API_KEY+TS_TAILNET)", tsReady)

@@ -24,7 +24,15 @@ func SyncReposAll(opts RepoSyncOptions) []RepoSyncResult {
 	nodes := ListMeshNodes()
 	results := make([]RepoSyncResult, 0, len(nodes))
 	for _, node := range nodes {
-		repo := resolveRepoPath(node, opts.NodeRepoPaths)
+		repo, repoErr := resolveRepoPath(node, opts.NodeRepoPaths)
+		if repoErr != nil {
+			results = append(results, RepoSyncResult{
+				Node:   node.Name,
+				Branch: opts.Branch,
+				Err:    repoErr,
+			})
+			continue
+		}
 		cmd := buildRepoSyncCommand(repo, opts.Branch, opts.AllowDirty)
 		out, err := RunNodeCommand(node.Name, cmd, CommandOptions{})
 		skipped := false
@@ -43,21 +51,21 @@ func SyncReposAll(opts RepoSyncOptions) []RepoSyncResult {
 	return results
 }
 
-func resolveRepoPath(node MeshNode, explicit map[string]string) string {
+func resolveRepoPath(node MeshNode, explicit map[string]string) (string, error) {
 	if explicit != nil {
 		if v := strings.TrimSpace(explicit[node.Name]); v != "" {
-			return v
+			return v, nil
 		}
 		for _, a := range node.Aliases {
 			if v := strings.TrimSpace(explicit[a]); v != "" {
-				return v
+				return v, nil
 			}
 		}
 	}
 	if len(node.RepoCandidates) > 0 {
-		return node.RepoCandidates[0]
+		return node.RepoCandidates[0], nil
 	}
-	return "/home/user/dialtone"
+	return "", fmt.Errorf("mesh node %q is missing repo_candidates in env/dialtone.json", node.Name)
 }
 
 func buildRepoSyncCommand(repo string, branch string, allowDirty bool) string {
@@ -66,10 +74,6 @@ func buildRepoSyncCommand(repo string, branch string, allowDirty bool) string {
 	if branch == "" {
 		branch = "main"
 	}
-	if repo == "" {
-		repo = "/home/user/dialtone"
-	}
-
 	dirtyCheck := "if [ -n \"$(git status --porcelain)\" ]; then echo DIALTONE_SYNC_SKIPPED_DIRTY; exit 0; fi;"
 	if allowDirty {
 		dirtyCheck = ""

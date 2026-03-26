@@ -1,6 +1,7 @@
 package cli
 
 import (
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"fmt"
 	"os"
 	"os/exec"
@@ -56,14 +57,24 @@ func printUsage() {
 
 func runInstall(args []string) {
 	depsDir := logs.GetDialtoneEnv()
-	bunBin := filepath.Join(depsDir, "bun", "bin", "bun")
+	bunBin := configv1.ManagedBunBinPath(depsDir)
+	cacheDir := sharedBunCacheDir(depsDir)
+
+	if err := ensureManagedBun(depsDir, bunBin); err != nil {
+		logs.Fatal("%v", err)
+	}
 
 	cwd, bunArgs := extractCwd(args)
+	if cwd == "" && len(bunArgs) == 0 {
+		logs.Info("Managed Bun runtime ready at %s", bunBin)
+		return
+	}
 
 	cmd := exec.Command(bunBin, append([]string{"install"}, bunArgs...)...)
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
+	cmd.Env = append(os.Environ(), "BUN_INSTALL_CACHE_DIR="+cacheDir)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -71,9 +82,32 @@ func runInstall(args []string) {
 	}
 }
 
+func ensureManagedBun(depsDir, bunBin string) error {
+	if _, err := os.Stat(bunBin); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Join(depsDir, "bun"), 0o755); err != nil {
+		return fmt.Errorf("create bun directory: %w", err)
+	}
+
+	bunInstallDir := filepath.Join(depsDir, "bun")
+	logs.Info("Installing Bun runtime into %s", bunInstallDir)
+	installCmd := exec.Command("bash", "-lc", "curl -fsSL https://bun.sh/install | BUN_INSTALL="+shellQuote(bunInstallDir)+" bash")
+	installCmd.Stdout = os.Stdout
+	installCmd.Stderr = os.Stderr
+	installCmd.Stdin = os.Stdin
+	if err := installCmd.Run(); err != nil {
+		return fmt.Errorf("bun runtime install failed: %w", err)
+	}
+	if _, err := os.Stat(bunBin); err != nil {
+		return fmt.Errorf("bun runtime still missing after install at %s", bunBin)
+	}
+	return nil
+}
+
 func runVersion() {
 	depsDir := logs.GetDialtoneEnv()
-	bunBin := filepath.Join(depsDir, "bun", "bin", "bun")
+	bunBin := configv1.ManagedBunBinPath(depsDir)
 	cmd := exec.Command(bunBin, "--version")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -91,7 +125,7 @@ func runExec(args []string) {
 	}
 
 	depsDir := logs.GetDialtoneEnv()
-	bunBin := filepath.Join(depsDir, "bun", "bin", "bun")
+	bunBin := configv1.ManagedBunBinPath(depsDir)
 	if _, err := os.Stat(bunBin); os.IsNotExist(err) {
 		logs.Fatal("Bun toolchain not found at %s. Run './dialtone.sh bun src_v1 install' first.", bunBin)
 	}
@@ -99,11 +133,13 @@ func runExec(args []string) {
 	// Prepend managed bun and node bins so spawned scripts resolve managed tooling first.
 	newPath := filepath.Join(depsDir, "bun", "bin") + string(os.PathListSeparator) + filepath.Join(depsDir, "node", "bin") + string(os.PathListSeparator) + os.Getenv("PATH")
 	_ = os.Setenv("PATH", newPath)
+	cacheDir := sharedBunCacheDir(depsDir)
 
 	cmd := exec.Command(bunBin, bunArgs...)
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
+	cmd.Env = append(os.Environ(), "PATH="+newPath, "BUN_INSTALL_CACHE_DIR="+cacheDir)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -201,4 +237,16 @@ func extractCwd(args []string) (string, []string) {
 		filtered = append(filtered, arg)
 	}
 	return cwd, filtered
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(strings.TrimSpace(s), "'", "'\\''") + "'"
+}
+
+func sharedBunCacheDir(depsDir string) string {
+	cacheDir := strings.TrimSpace(os.Getenv("DIALTONE_BUN_CACHE_DIR"))
+	if cacheDir != "" {
+		return cacheDir
+	}
+	return filepath.Join(depsDir, "cache", "bun")
 }

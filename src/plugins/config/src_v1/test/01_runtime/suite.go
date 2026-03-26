@@ -16,13 +16,13 @@ func Register(reg *testv1.Registry) {
 			if err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			if !strings.HasSuffix(rt.EnvFile, "env/.env") {
-				return testv1.StepRunResult{}, fmt.Errorf("env file must default to env/.env: %s", rt.EnvFile)
+			if !strings.HasSuffix(rt.EnvFile, "env/dialtone.json") {
+				return testv1.StepRunResult{}, fmt.Errorf("env file must default to env/dialtone.json: %s", rt.EnvFile)
 			}
-			if strings.Contains(rt.EnvFile, "/src/env/.env") {
-				return testv1.StepRunResult{}, fmt.Errorf("env file must not resolve to src/env/.env: %s", rt.EnvFile)
+			if strings.Contains(strings.ReplaceAll(rt.EnvFile, "\\", "/"), "/src/env/") {
+				return testv1.StepRunResult{}, fmt.Errorf("env file must not resolve under src/env: %s", rt.EnvFile)
 			}
-			return testv1.StepRunResult{Report: "resolved runtime with env/.env"}, nil
+			return testv1.StepRunResult{Report: "resolved runtime with env/dialtone.json"}, nil
 		},
 	})
 

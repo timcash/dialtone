@@ -2,13 +2,21 @@ package test
 
 import (
 	"os"
+	"strings"
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
+	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 )
 
 func RunSuiteV3() {
+	if node := defaultWSLTestBrowserNode(); node != "" {
+		test_v2.SetRuntimeConfig(test_v2.RuntimeConfig{
+			BrowserNode:       node,
+			RemoteBrowserRole: "wsl-test",
+		})
+	}
 	ctx := newTestCtx()
 	defer ctx.teardown()
 	steps := []test_v2.Step{
@@ -31,6 +39,21 @@ func RunSuiteV3() {
 		logs.ErrorFromTest("wsl-test", "SUITE ERROR: %v", err)
 		os.Exit(1)
 	}
+}
+
+func defaultWSLTestBrowserNode() string {
+	if envNode := strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_NODE")); envNode != "" {
+		return envNode
+	}
+	if strings.TrimSpace(os.Getenv("WSL_DISTRO_NAME")) == "" {
+		return ""
+	}
+	for _, node := range sshv1.ListMeshNodes() {
+		if strings.EqualFold(strings.TrimSpace(node.OS), "windows") && node.PreferWSLPowerShell {
+			return strings.TrimSpace(node.Name)
+		}
+	}
+	return "legion"
 }
 
 func wrapRun(ctx *testCtx, fn func(*testCtx) (string, error)) func(*test_v2.StepContext) (test_v2.StepRunResult, error) {

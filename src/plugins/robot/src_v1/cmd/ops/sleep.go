@@ -1,6 +1,7 @@
 package ops
 
 import (
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -114,7 +115,7 @@ func Wake(repoRoot string, args []string) error {
 		h := strings.TrimSpace(*host)
 		p := strings.TrimSpace(*port)
 		if h == "" {
-			return fmt.Errorf("wake requires --host (or ROBOT_HOST in env/.env) unless --url is provided")
+		return fmt.Errorf("wake requires --host (or ROBOT_HOST in env/dialtone.json) unless --url is provided")
 		}
 		if p == "" {
 			p = "8080"
@@ -181,6 +182,10 @@ WantedBy=default.target
 }
 
 func startSleepDaemon(repoRoot string) error {
+	rt, err := configv1.ResolveRuntime(repoRoot)
+	if err != nil {
+		return err
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -208,7 +213,7 @@ RestartSec=5
 
 [Install]
 WantedBy=default.target
-`, repoRoot, filepath.Join(repoRoot, "dialtone.sh"), chooseNonEmpty(getenvTrim("DIALTONE_ENV"), filepath.Join(repoRoot, "..", "dialtone_dependencies")), filepath.Join(repoRoot, "env", ".env"))
+`, repoRoot, filepath.Join(repoRoot, "dialtone.sh"), rt.DialtoneEnv, rt.EnvFile)
 
 	changed := true
 	if b, readErr := os.ReadFile(servicePath); readErr == nil && string(b) == serviceContent {
@@ -255,7 +260,11 @@ func resolveCloudflareTunnelToken(name string) string {
 }
 
 func resolveCloudflaredPath(repoRoot string) string {
-	envRoot := chooseNonEmpty(getenvTrim("DIALTONE_ENV"), filepath.Join(repoRoot, "..", "dialtone_dependencies"))
+	rt, err := configv1.ResolveRuntime(repoRoot)
+	if err != nil {
+		return ""
+	}
+	envRoot := rt.DialtoneEnv
 	candidate := filepath.Join(envRoot, "cloudflare", "cloudflared")
 	if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
 		return candidate

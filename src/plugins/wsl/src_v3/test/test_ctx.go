@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"time"
 
-	chrome_app "dialtone/dev/plugins/chrome/src_v1/go"
 	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 	wslv3 "dialtone/dev/plugins/wsl/src_v3/go"
 	"github.com/chromedp/cdproto/emulation"
@@ -44,7 +43,7 @@ func (t *testCtx) ensureSharedServer() error {
 		return nil
 	}
 
-	_ = chrome_app.CleanupPort(t.webPort)
+	_ = cleanupPort(t.webPort)
 	buildCmd := getDialtoneCmd(t.repoRoot)
 	buildCmd.Args = append(buildCmd.Args, "wsl", "src_v3", "go-build")
 	buildCmd.Dir = t.repoRoot

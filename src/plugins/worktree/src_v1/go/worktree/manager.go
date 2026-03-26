@@ -1,7 +1,7 @@
 package worktree
 
 import (
-	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -417,26 +417,15 @@ func resolveDialtoneEnv(baseDir string) (string, error) {
 		return expandHome(env)
 	}
 
-	envFile := filepath.Join(baseDir, "env", ".env")
-	file, err := os.Open(envFile)
+	envFile := filepath.Join(baseDir, "env", "dialtone.json")
+	raw, err := os.ReadFile(envFile)
 	if err == nil {
-		defer file.Close()
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			if strings.HasPrefix(line, "DIALTONE_ENV=") {
-				value := strings.TrimPrefix(line, "DIALTONE_ENV=")
-				value = strings.TrimSpace(strings.Trim(value, `"'`))
-				if value != "" {
-					return expandHome(value)
-				}
-			}
+		var doc map[string]any
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			return "", fmt.Errorf("failed parsing %s: %w", envFile, err)
 		}
-		if err := scanner.Err(); err != nil {
-			return "", fmt.Errorf("failed reading %s: %w", envFile, err)
+		if value, ok := doc["DIALTONE_ENV"].(string); ok && strings.TrimSpace(value) != "" {
+			return expandHome(value)
 		}
 	}
 
@@ -453,30 +442,32 @@ func syncWorktreeEnv(repoRoot, worktreePath, dialtoneEnv string) error {
 		return err
 	}
 
-	srcEnv := filepath.Join(repoRoot, "env", ".env")
-	dstEnv := filepath.Join(envDir, ".env")
-	if _, err := os.Stat(srcEnv); err == nil {
-		if err := copyFile(srcEnv, dstEnv); err != nil {
+	srcEnv := filepath.Join(repoRoot, "env", "dialtone.json")
+	dstEnv := filepath.Join(envDir, "dialtone.json")
+	if raw, err := os.ReadFile(srcEnv); err == nil {
+		var doc map[string]any
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			return fmt.Errorf("failed parsing %s: %w", srcEnv, err)
+		}
+		doc["DIALTONE_ENV"] = dialtoneEnv
+		encoded, err := json.MarshalIndent(doc, "", "  ")
+		if err != nil {
 			return err
 		}
-		// Keep DIALTONE_ENV explicit/normalized in copied env for this worktree.
-		current, _ := os.ReadFile(dstEnv)
-		lines := []string{}
-		for _, line := range strings.Split(string(current), "\n") {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "DIALTONE_ENV=") {
-				continue
-			}
-			lines = append(lines, line)
-		}
-		lines = append(lines, fmt.Sprintf("DIALTONE_ENV=%s", dialtoneEnv))
-		content := strings.TrimRight(strings.Join(lines, "\n"), "\n") + "\n"
-		return os.WriteFile(dstEnv, []byte(content), 0644)
+		encoded = append(encoded, '\n')
+		return os.WriteFile(dstEnv, encoded, 0644)
 	}
 
-	// Fallback: create minimal env file if source env/.env does not exist.
-	content := fmt.Sprintf("DIALTONE_ENV=%s\n", dialtoneEnv)
-	return os.WriteFile(dstEnv, []byte(content), 0644)
+	// Fallback: create minimal env/dialtone.json if the source config does not exist.
+	doc := map[string]any{
+		"DIALTONE_ENV": dialtoneEnv,
+	}
+	encoded, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return err
+	}
+	encoded = append(encoded, '\n')
+	return os.WriteFile(dstEnv, encoded, 0644)
 }
 
 func expandHome(path string) (string, error) {

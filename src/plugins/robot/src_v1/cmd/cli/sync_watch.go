@@ -34,10 +34,10 @@ func RunSyncWatch(versionDir string, args []string) error {
 	}
 
 	if strings.TrimSpace(*host) == "" {
-		return fmt.Errorf("sync-watch requires --host (or ROBOT_HOST in env/.env)")
+		return fmt.Errorf("sync-watch requires --host (or ROBOT_HOST in env/dialtone.json)")
 	}
 	if strings.TrimSpace(*user) == "" {
-		return fmt.Errorf("sync-watch requires --user (or ROBOT_USER in env/.env)")
+		return fmt.Errorf("sync-watch requires --user (or ROBOT_USER in env/dialtone.json)")
 	}
 	if strings.TrimSpace(*remoteSrc) == "" {
 		*remoteSrc = path.Join("/home", strings.TrimSpace(*user), "dialtone", "src")

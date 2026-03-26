@@ -6,18 +6,23 @@ $ScriptArgs = @($args)
 $env:DIALTONE_USE_NIX = if ([string]::IsNullOrWhiteSpace($env:DIALTONE_USE_NIX)) { "1" } else { $env:DIALTONE_USE_NIX }
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$EnvFile = Join-Path $ScriptDir "env/dialtone.json"
 $env:DIALTONE_REPO_ROOT = $ScriptDir
 $env:DIALTONE_SRC_ROOT = Join-Path $ScriptDir "src"
 
 function Write-EnvFile {
     param(
         [Parameter(Mandatory = $true)][string]$EnvFilePath,
+        [Parameter(Mandatory = $true)][string]$DialtoneHome,
         [Parameter(Mandatory = $true)][string]$DialtoneEnv
     )
     $envDir = Split-Path -Parent $EnvFilePath
     New-Item -ItemType Directory -Path $envDir -Force | Out-Null
     @{
+        DIALTONE_HOME = $DialtoneHome
         DIALTONE_ENV = $DialtoneEnv
+        DIALTONE_GO_CACHE_DIR = (Join-Path $DialtoneEnv "cache/go")
+        DIALTONE_BUN_CACHE_DIR = (Join-Path $DialtoneEnv "cache/bun")
         DIALTONE_REPO_ROOT = $ScriptDir
         DIALTONE_USE_NIX = "1"
     } | ConvertTo-Json | Set-Content -Path $EnvFilePath -Encoding UTF8
@@ -59,17 +64,24 @@ function Invoke-WslPluginViaShell {
     }
 
     $wslRepo = Convert-ToWslPath -Path $ScriptDir
-    $resolvedEnv = if ([string]::IsNullOrWhiteSpace($env:DIALTONE_ENV)) {
+    $resolvedHome = if ([string]::IsNullOrWhiteSpace($env:DIALTONE_HOME)) {
         Join-Path $env:USERPROFILE ".dialtone"
+    } else {
+        $env:DIALTONE_HOME
+    }
+    $resolvedEnv = if ([string]::IsNullOrWhiteSpace($env:DIALTONE_ENV)) {
+        Join-Path $env:USERPROFILE ".dialtone_env"
     } else {
         $env:DIALTONE_ENV
     }
+    $wslHome = Convert-EnvPathToWsl -Path $resolvedHome
     $wslEnv = Convert-EnvPathToWsl -Path $resolvedEnv
+    $wslEnvFile = Convert-ToWslPath -Path $EnvFile
 
     $escapedArgs = @()
     foreach ($a in $ScriptArgs) { $escapedArgs += (Escape-BashArg -Value $a) }
     $argTail = [string]::Join(" ", $escapedArgs)
-    $cmd = "cd $(Escape-BashArg -Value $wslRepo) && export DIALTONE_ONBOARDING_DONE=1 && export DIALTONE_REPO_ROOT=$(Escape-BashArg -Value $wslRepo) && export DIALTONE_ENV=$(Escape-BashArg -Value $wslEnv) && export DIALTONE_USE_NIX=0 && ./dialtone.sh $argTail"
+    $cmd = "cd $(Escape-BashArg -Value $wslRepo) && export DIALTONE_ONBOARDING_DONE=1 && export DIALTONE_REPO_ROOT=$(Escape-BashArg -Value $wslRepo) && export DIALTONE_ENV_FILE=$(Escape-BashArg -Value $wslEnvFile) && export DIALTONE_HOME=$(Escape-BashArg -Value $wslHome) && export DIALTONE_ENV=$(Escape-BashArg -Value $wslEnv) && export DIALTONE_USE_NIX=0 && ./dialtone.sh $argTail"
 
     Write-Host "DIALTONE> Running wsl plugin via WSL shell..."
     & wsl.exe -e bash -lc $cmd
@@ -138,7 +150,8 @@ function Run-BootstrapRepl {
     param(
         [Parameter(Mandatory = $true)][string]$EnvFilePath
     )
-    $defaultEnv = Join-Path $env:USERPROFILE ".dialtone"
+    $defaultHome = Join-Path $env:USERPROFILE ".dialtone"
+    $defaultEnv = Join-Path $env:USERPROFILE ".dialtone_env"
     $defaultRepo = "https://github.com/timcash/dialtone.git"
     $defaultBranch = "main"
 
@@ -146,7 +159,15 @@ function Run-BootstrapRepl {
     Write-Host "DIALTONE> This will configure env/dialtone.json and bootstrap the dialtone repo."
     Write-Host "DIALTONE> Runtime/tooling install happens in WSL + Nix shell after bootstrap."
 
-    $inputEnv = Read-Host "DIALTONE> Environment directory [default: $defaultEnv]"
+    $inputHome = Read-Host "DIALTONE> Dialtone home directory [default: $defaultHome]"
+    if ([string]::IsNullOrWhiteSpace($inputHome)) { $inputHome = $defaultHome }
+    if ($inputHome.StartsWith("~")) {
+        $inputHome = Join-Path $env:USERPROFILE $inputHome.Substring(1).TrimStart("\/")
+    }
+    New-Item -ItemType Directory -Path $inputHome -Force | Out-Null
+    $env:DIALTONE_HOME = $inputHome
+
+    $inputEnv = Read-Host "DIALTONE> Dependency directory [default: $defaultEnv]"
     if ([string]::IsNullOrWhiteSpace($inputEnv)) { $inputEnv = $defaultEnv }
     if ($inputEnv.StartsWith("~")) {
         $inputEnv = Join-Path $env:USERPROFILE $inputEnv.Substring(1).TrimStart("\/")
@@ -154,7 +175,7 @@ function Run-BootstrapRepl {
     New-Item -ItemType Directory -Path $inputEnv -Force | Out-Null
     $env:DIALTONE_ENV = $inputEnv
 
-    Write-EnvFile -EnvFilePath $EnvFilePath -DialtoneEnv $env:DIALTONE_ENV
+    Write-EnvFile -EnvFilePath $EnvFilePath -DialtoneHome $env:DIALTONE_HOME -DialtoneEnv $env:DIALTONE_ENV
     Write-Host "DIALTONE> Wrote $EnvFilePath"
 
     $repoInput = Read-Host "DIALTONE> Git repo to bootstrap [default: $defaultRepo]"
@@ -173,7 +194,6 @@ function Run-BootstrapRepl {
 }
 
 # 1. Load Environment
-$EnvFile = Join-Path $ScriptDir "env/dialtone.json"
 if ([string]::IsNullOrWhiteSpace($env:DIALTONE_ENV_FILE)) {
     $env:DIALTONE_ENV_FILE = $EnvFile
 }
@@ -189,9 +209,19 @@ if (Test-Path $EnvFile) {
 
 Enter-NixShellIfNeeded
 
+# Default DIALTONE_HOME if not set
+if ([string]::IsNullOrWhiteSpace($env:DIALTONE_HOME)) {
+    $env:DIALTONE_HOME = Join-Path $env:USERPROFILE ".dialtone"
+}
+
 # Default DIALTONE_ENV if not set
 if ([string]::IsNullOrWhiteSpace($env:DIALTONE_ENV)) {
-    $env:DIALTONE_ENV = Join-Path $env:USERPROFILE ".dialtone"
+    $env:DIALTONE_ENV = Join-Path $env:USERPROFILE ".dialtone_env"
+}
+
+# Expand ~ in DIALTONE_HOME
+if ($env:DIALTONE_HOME.StartsWith("~")) {
+    $env:DIALTONE_HOME = Join-Path $env:USERPROFILE $env:DIALTONE_HOME.Substring(1).TrimStart("\/")
 }
 
 # Expand ~ in DIALTONE_ENV

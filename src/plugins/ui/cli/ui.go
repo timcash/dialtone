@@ -1,6 +1,7 @@
 package cli
 
 import (
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"errors"
 	"flag"
 	"fmt"
@@ -99,7 +100,7 @@ func runUIFixtureScript(script string, args []string) error {
 	if err != nil {
 		return err
 	}
-	bunBin := filepath.Join(os.Getenv("DIALTONE_ENV"), "bun", "bin", "bun")
+	bunBin := configv1.ManagedBunBinPath(configv1.DefaultDialtoneEnv())
 	if _, err := os.Stat(bunBin); os.IsNotExist(err) {
 		bunBin = "bun"
 	}

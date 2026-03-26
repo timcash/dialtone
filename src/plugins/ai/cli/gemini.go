@@ -2,14 +2,13 @@ package cli
 
 import (
 	"bufio"
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"dialtone/dev/plugins/logs/src_v1/go"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"github.com/joho/godotenv"
 )
 
 // RunGemini handles the --gemini flag functionality by proxying to @google/gemini-cli
@@ -24,22 +23,24 @@ func RunGemini(args []string) {
 		// For now, let's allow it and let gemini decide.
 	}
 
-	// Load env/.env
-	if err := godotenv.Load("env/.env"); err != nil {
-		logs.Debug("AI Plugin: No env/.env file found")
+	rt, err := configv1.ResolveRuntime("")
+	if err == nil {
+		if loadErr := configv1.LoadEnvFile(rt); loadErr != nil {
+			logs.Debug("AI Plugin: Failed loading env/dialtone.json: %v", loadErr)
+		}
 	}
 
 	dialtoneEnv := os.Getenv("DIALTONE_ENV")
 	if dialtoneEnv == "" {
-		logs.Fatal("DIALTONE_ENV is not set. Please add it to your .env file.")
+		logs.Fatal("DIALTONE_ENV is not set. Please add it to env/dialtone.json.")
 	}
 
 	// Check for API Key
 	googleKey := os.Getenv("GOOGLE_API_KEY")
 	if googleKey != "" {
-		logs.Info("AI Plugin: Authentication key (GOOGLE_API_KEY) found in env/.env")
+		logs.Info("AI Plugin: Authentication key (GOOGLE_API_KEY) found in env/dialtone.json")
 	} else {
-		logs.Info("AI Plugin: No GOOGLE_API_KEY found in env/.env.")
+		logs.Info("AI Plugin: No GOOGLE_API_KEY found in env/dialtone.json.")
 		logs.Error("AI Plugin: Authentication failed. No GOOGLE_API_KEY found.")
 		logs.Info("Please run 'dialtone ai auth' for instructions on how to set up your API key.")
 		return

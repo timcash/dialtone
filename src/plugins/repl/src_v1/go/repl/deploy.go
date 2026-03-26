@@ -63,10 +63,10 @@ func RunDeploy(args []string) error {
 		opts.Room = defaultRoom
 	}
 	if opts.Host == "" || opts.Pass == "" {
-		return fmt.Errorf("deploy requires --host and --pass (or ROBOT_HOST/ROBOT_PASSWORD in env/.env)")
+		return fmt.Errorf("deploy requires --host and --pass (or ROBOT_HOST/ROBOT_PASSWORD in env/dialtone.json)")
 	}
 	if opts.User == "" {
-		return fmt.Errorf("deploy requires --user (or ROBOT_USER in env/.env)")
+		return fmt.Errorf("deploy requires --user (or ROBOT_USER in env/dialtone.json)")
 	}
 	if opts.RemoteDir == "" {
 		opts.RemoteDir = path.Join("/home", opts.User, ".dialtone", "repl", "src_v1")

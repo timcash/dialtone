@@ -27,7 +27,7 @@ func RunSyncCode(versionDir string, args []string) error {
 		return err
 	}
 	if strings.TrimSpace(*host) == "" {
-		return fmt.Errorf("sync-code requires --host (or ROBOT_HOST in env/.env)")
+		return fmt.Errorf("sync-code requires --host (or ROBOT_HOST in env/dialtone.json)")
 	}
 	node, err := ssh_plugin.ResolveMeshNode(strings.TrimSpace(*host))
 	if err != nil {
@@ -205,7 +205,7 @@ func RunDeploy(versionDir string, args []string) error {
 		opts.Port = "22"
 	}
 	if opts.Host == "" || opts.Pass == "" {
-		return fmt.Errorf("deploy requires --host and --pass (or ROBOT_HOST/ROBOT_PASSWORD in env/.env)")
+		return fmt.Errorf("deploy requires --host and --pass (or ROBOT_HOST/ROBOT_PASSWORD in env/dialtone.json)")
 	}
 	return deployRobot(versionDir, opts)
 }

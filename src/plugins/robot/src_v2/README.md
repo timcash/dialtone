@@ -9,6 +9,13 @@ This document is the end-to-end operating workflow for `robot src_v2`:
 - expose UI through local WSL relay
 - run headed UI on `legion` while rover serves APIs and telemetry
 
+Validated WSL no-UI release path:
+- `./dialtone.sh robot src_v2 install`
+- `./dialtone.sh robot src_v2 build`
+- `./dialtone.sh robot src_v2 publish --repo timcash/dialtone`
+- `./dialtone.sh autoswap src_v1 update --host rover`
+- `./dialtone.sh robot src_v2 diagnostic --host rover --skip-ui --public-check=false`
+
 ## 1) CLI & REPL Interaction Guide
 
 `robot src_v2` embraces a "REPL-first" execution model. When you run `./dialtone.sh robot src_v2 <command>`, the CLI does not execute the command directly in the foreground. Instead, it locates (or spawns) a local background REPL leader and routes the command into a managed REPL room as a "subtone".
@@ -116,6 +123,15 @@ src/plugins/robot/src_v2/ui/demo_menu_walkthrough.sh --host legion --url http://
 ./dialtone.sh chrome src_v3 get-aria-attr --host legion --role robot-test --label "Xterm Terminal" --attr data-last-command-ack-result
 ```
 
+Notes:
+- `robot src_v2 install` uses plugin dependencies instead of duplicating tool setup:
+  - `camera src_v1 install`
+  - `github src_v1 install`
+  - `bun src_v1 install`
+- `camera src_v1 install` provisions managed Go and managed Zig from the shared caches configured in `env/dialtone.json`.
+- `robot src_v2 build` now produces both the UI dist and the local binary set used by `robot src_v2 diagnostic`.
+- On WSL, the camera Linux ARM64 publish artifact is built from the main WSL instance with the managed Zig toolchain; podman is not required for the normal robot target.
+
 ```bash
 # Default REPL-routed publish/update/diagnostic workflow from WSL
 
@@ -172,7 +188,9 @@ Run from repo root on WSL node:
 - `/home/user/dialtone`
 
 Required tools:
-- `go`, `bun`, `gh` authenticated (`gh auth status`)
+- `go`, `bun`
+- GitHub release auth via `GH_TOKEN` or `GITHUB_TOKEN` in `env/dialtone.json`
+- `gh` will be auto-installed into the managed dependency home when needed
 - SSH mesh connectivity to robot (`rover` alias) via `env/dialtone.json`
 - Robot host autoswap service must have `GITHUB_TOKEN` set (to avoid GitHub API rate limits when pulling release artifacts)
 
@@ -376,6 +394,13 @@ Default routed publish command:
 ./dialtone.sh robot src_v2 publish --repo timcash/dialtone
 ```
 
+Notes:
+- keep `publish` on the normal REPL-routed `./dialtone.sh robot src_v2 publish ...` path
+- if `gh` is missing, the workflow now installs a managed copy under `DIALTONE_ENV`
+- release operations still require GitHub auth; set `GH_TOKEN` or `GITHUB_TOKEN` in `env/dialtone.json`
+- `publish` already runs `robot src_v2 build` first, so local UI and local robot binaries are refreshed before release assets are assembled
+- the validated default publish target is still `linux-arm64`
+
 Explicit pinned-leader path when you need it:
 ```bash
 ./dialtone.sh repl src_v3 inject --nats-url nats://127.0.0.1:47222 --user llm-codex robot src_v2 publish --repo timcash/dialtone
@@ -441,6 +466,9 @@ Normal field update path:
 ./dialtone.sh robot src_v2 diagnostic --host rover --skip-ui --public-check=false
 ```
 
+Practical note:
+- after `autoswap src_v1 update --host rover`, the diagnostic may spend a short time waiting for the active manifest on rover to switch to the newest published release channel before it moves on to the endpoint checks
+
 Optional rover Nix maintenance checks:
 ```bash
 ./dialtone.sh robot src_v2 nix-diagnostic --host rover
@@ -464,6 +492,11 @@ Common variants:
 
 Diagnostic checklist details:
 - `src/plugins/robot/src_v2/diagnostic.md`
+
+Current validated no-UI result:
+- local artifact check passes after `robot src_v2 build`
+- rover artifact/service/runtime checks pass after `autoswap src_v1 update --host rover`
+- endpoint checks pass with `--skip-ui --public-check=false`
 
 ## 9) WSL Relay for Public UI
 

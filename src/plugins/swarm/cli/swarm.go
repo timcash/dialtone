@@ -534,7 +534,7 @@ func printSwarmUsage() {
 func getDialtoneEnvOrExit() string {
 	envPath := config.GetDialtoneEnv()
 	if envPath == "" {
-		fmt.Println("[swarm] DIALTONE_ENV is not set. Please set it in env/.env or pass --env.")
+		fmt.Println("[swarm] DIALTONE_ENV is not set. Please set it in env/dialtone.json or pass --env.")
 		os.Exit(1)
 	}
 	return envPath

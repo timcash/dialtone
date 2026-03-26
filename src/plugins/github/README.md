@@ -27,6 +27,10 @@ src/plugins/github/
 ./dialtone.sh github src_v1 test
 ```
 
+Install/auth notes:
+- `./dialtone.sh github src_v1 install` installs a managed `gh` binary into `DIALTONE_ENV`
+- authenticated GitHub operations should use `GH_TOKEN` or `GITHUB_TOKEN` from `env/dialtone.json`
+
 ### Issue Commands
 
 Core issue commands:
