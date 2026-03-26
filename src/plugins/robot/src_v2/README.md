@@ -16,6 +16,11 @@ Validated WSL no-UI release path:
 - `./dialtone.sh autoswap src_v1 update --host rover`
 - `./dialtone.sh robot src_v2 diagnostic --host rover --skip-ui --public-check=false`
 
+Validated result from the current WSL workflow:
+- all `./dialtone.sh ...` commands above were run through the REPL path from the WSL host
+- `robot src_v2 build` produced the local runtime binaries under `bin/plugins/<plugin>/<src_version>/...`
+- `robot src_v2 diagnostic --skip-ui --public-check=false` passed against `rover`
+
 ## 1) CLI & REPL Interaction Guide
 
 `robot src_v2` embraces a "REPL-first" execution model. When you run `./dialtone.sh robot src_v2 <command>`, the CLI does not execute the command directly in the foreground. Instead, it locates (or spawns) a local background REPL leader and routes the command into a managed REPL room as a "subtone".
@@ -131,6 +136,16 @@ Notes:
 - `camera src_v1 install` provisions managed Go and managed Zig from the shared caches configured in `env/dialtone.json`.
 - `robot src_v2 build` now produces both the UI dist and the local binary set used by `robot src_v2 diagnostic`.
 - On WSL, the camera Linux ARM64 publish artifact is built from the main WSL instance with the managed Zig toolchain; podman is not required for the normal robot target.
+
+Binary layout contract:
+- local host binaries now live under `bin/plugins/<plugin>/<src_version>/<binary>`
+- current robot build outputs are:
+  - `bin/plugins/autoswap/src_v1/dialtone_autoswap_v1`
+  - `bin/plugins/robot/src_v2/dialtone_robot_v2`
+  - `bin/plugins/camera/src_v1/dialtone_camera_v1`
+  - `bin/plugins/mavlink/src_v1/dialtone_mavlink_v1`
+  - `bin/plugins/repl/src_v1/dialtone_repl_v1`
+- treat those paths as the canonical repo-local runtime artifacts for local testing and diagnostics
 
 ```bash
 # Default REPL-routed publish/update/diagnostic workflow from WSL
@@ -400,6 +415,7 @@ Notes:
 - release operations still require GitHub auth; set `GH_TOKEN` or `GITHUB_TOKEN` in `env/dialtone.json`
 - `publish` already runs `robot src_v2 build` first, so local UI and local robot binaries are refreshed before release assets are assembled
 - the validated default publish target is still `linux-arm64`
+- the release staging area is separate from the stable local binary paths; local diagnostics should keep using `bin/plugins/...`, while publish assembles versioned assets under the robot release staging directory
 
 Explicit pinned-leader path when you need it:
 ```bash
@@ -497,6 +513,7 @@ Current validated no-UI result:
 - local artifact check passes after `robot src_v2 build`
 - rover artifact/service/runtime checks pass after `autoswap src_v1 update --host rover`
 - endpoint checks pass with `--skip-ui --public-check=false`
+- local artifact checks now resolve the canonical repo-local binaries from `bin/plugins/...`
 
 ## 9) WSL Relay for Public UI
 
