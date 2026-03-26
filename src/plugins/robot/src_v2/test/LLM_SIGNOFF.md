@@ -15,8 +15,8 @@ Each field must include evidence:
 ## Task A - robot src_v2 runtime/webserver + embedded NATS updates
 - `local-test`: done (scaffold phase 1)
   - commands:
-    - `./dialtone.sh go src_v1 exec build -o ../bin/dialtone_robot_v2 ./plugins/robot/src_v2/cmd/server/main.go`
-    - `./bin/dialtone_robot_v2 --listen :18082`
+    - `./dialtone.sh go src_v1 exec build -o ../bin/plugins/robot/src_v2/dialtone_robot_v2 ./plugins/robot/src_v2/cmd/server/main.go`
+    - `./bin/plugins/robot/src_v2/dialtone_robot_v2 --listen :18082`
     - `curl http://127.0.0.1:18082/health`
     - `curl -o /tmp/robot_v2_root.out -w '%{http_code}' http://127.0.0.1:18082/`
     - `curl http://127.0.0.1:18082/api/init`

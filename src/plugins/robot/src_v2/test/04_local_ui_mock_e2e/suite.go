@@ -1,6 +1,7 @@
 package localuimocke2e
 
 import (
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -677,7 +678,7 @@ func startLocalMockServer(repo, uiDist, port string) (baseURL, browserBaseURL, r
 	}
 	_ = exec.Command("pkill", "-f", `dialtone_robot_v2.*--listen :`+port).Run()
 	cmd := exec.Command(
-		filepath.Join(repo, "bin", "dialtone_robot_v2"),
+		configv1.PluginBinaryPath(configv1.Runtime{RepoRoot: repo}, "robot", "src_v2", "dialtone_robot_v2"),
 		"--listen", ":"+port,
 		"--nats-port", mockNATSP,
 		"--nats-ws-port", mockNATSWP,

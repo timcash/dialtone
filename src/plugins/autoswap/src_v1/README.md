@@ -14,7 +14,7 @@ That command is normally routed through the local REPL leader, which means:
 
 ```bash
 # 1) Build autoswap in dev
-./dialtone.sh go src_v1 exec build -o ../bin/dialtone_autoswap_v1 ./plugins/autoswap/src_v1/cmd/main.go
+./dialtone.sh go src_v1 exec build -o ../bin/plugins/autoswap/src_v1/dialtone_autoswap_v1 ./plugins/autoswap/src_v1/cmd/main.go
 
 # 2) On target (standalone usage, no dialtone.sh needed):
 ./dialtone_autoswap_v1 service --mode install \

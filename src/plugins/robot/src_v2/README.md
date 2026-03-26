@@ -261,11 +261,11 @@ Notes:
 1. Build UI and binaries (local):
 ```bash
 ./dialtone.sh robot src_v2 build
-./dialtone.sh go src_v1 exec build -o ../bin/dialtone_autoswap_v1 ./plugins/autoswap/src_v1/cmd/main.go
-./dialtone.sh go src_v1 exec build -o ../bin/dialtone_robot_v2 ./plugins/robot/src_v2/cmd/server/main.go
-./dialtone.sh go src_v1 exec build -o ../bin/dialtone_camera_v1 ./plugins/camera/src_v1/cmd/main.go
-./dialtone.sh go src_v1 exec build -o ../bin/dialtone_mavlink_v1 ./plugins/mavlink/src_v1/cmd/main.go
-./dialtone.sh go src_v1 exec build -o ../bin/dialtone_repl_v1 ./plugins/repl/src_v1/cmd/repld/main.go
+./dialtone.sh go src_v1 exec build -o ../bin/plugins/autoswap/src_v1/dialtone_autoswap_v1 ./plugins/autoswap/src_v1/cmd/main.go
+./dialtone.sh go src_v1 exec build -o ../bin/plugins/robot/src_v2/dialtone_robot_v2 ./plugins/robot/src_v2/cmd/server/main.go
+./dialtone.sh camera src_v1 build --goos linux --goarch amd64 --out ../bin/plugins/camera/src_v1/dialtone_camera_v1 --podman=false
+./dialtone.sh go src_v1 exec build -o ../bin/plugins/mavlink/src_v1/dialtone_mavlink_v1 ./plugins/mavlink/src_v1/cmd/main.go
+./dialtone.sh go src_v1 exec build -o ../bin/plugins/repl/src_v1/dialtone_repl_v1 ./plugins/repl/src_v1/cmd/repld/main.go
 ```
 
 2. Run robot test suite (includes UI mock E2E in test ctx pattern):

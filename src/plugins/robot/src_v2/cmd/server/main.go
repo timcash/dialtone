@@ -623,6 +623,7 @@ func resolveMavlinkBin() string {
 	candidates := []string{
 		filepath.Join(exeDir, "dialtone_mavlink_v1"),
 		filepath.Join(exeDir, "..", "dialtone_mavlink_v1"),
+		filepath.Join(exeDir, "..", "..", "mavlink", "src_v1", "dialtone_mavlink_v1"),
 		"/home/tim/.dialtone/autoswap/artifacts/dialtone_mavlink_v1",
 		"/usr/local/bin/dialtone_mavlink_v1",
 	}

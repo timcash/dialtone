@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -205,7 +206,10 @@ func buildDeployBinary(goos, goarch string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	out := filepath.Join(rt.RepoRoot, "bin", fmt.Sprintf("dialtone_autoswap-%s-%s", goos, goarch))
+	out := configv1.PluginBinaryPath(rt, "autoswap", "src_v1", fmt.Sprintf("dialtone_autoswap_v1-%s-%s", goos, goarch))
+	if goos == runtime.GOOS && goarch == runtime.GOARCH {
+		out = configv1.PluginBinaryPath(rt, "autoswap", "src_v1", "dialtone_autoswap_v1")
+	}
 	if goos == "windows" {
 		out += ".exe"
 	}

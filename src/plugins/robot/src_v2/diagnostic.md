@@ -3,15 +3,15 @@
 This is the required check list for `./dialtone.sh robot src_v2 diagnostic --host <host>`.
 
 ## 1) Local Artifact Preconditions
-1. `<repo_root>/bin/dialtone_autoswap_v1` exists and is executable.
-2. `<repo_root>/bin/dialtone_robot_v2` exists and is executable.
-3. `<repo_root>/bin/dialtone_camera_v1` exists and is executable.
-4. `<repo_root>/bin/dialtone_mavlink_v1` exists and is executable.
-5. `<repo_root>/bin/dialtone_repl_v1` exists and is executable.
+1. `<repo_root>/bin/plugins/autoswap/src_v1/dialtone_autoswap_v1` exists and is executable.
+2. `<repo_root>/bin/plugins/robot/src_v2/dialtone_robot_v2` exists and is executable.
+3. `<repo_root>/bin/plugins/camera/src_v1/dialtone_camera_v1` exists and is executable.
+4. `<repo_root>/bin/plugins/mavlink/src_v1/dialtone_mavlink_v1` exists and is executable.
+5. `<repo_root>/bin/plugins/repl/src_v1/dialtone_repl_v1` exists and is executable.
 6. `<repo_root>/src/plugins/robot/src_v2/ui/dist/index.html` exists.
 
 ## 2) Remote Runtime Artifact Checks
-1. Remote autoswap binary exists at `<remote_repo>/bin/dialtone_autoswap_v1`.
+1. Remote autoswap binary exists at `<remote_repo>/bin/plugins/autoswap/src_v1/dialtone_autoswap_v1` (legacy flat `bin/` fallback is still tolerated during migration).
 2. Remote robot/camera/mavlink/repl binaries exist in `<remote_repo>/bin`.
 3. Remote `ui/dist/index.html` exists at `src/plugins/robot/src_v2/ui/dist/index.html`.
 4. Target manifest file exists (absolute or repo-relative path accepted).

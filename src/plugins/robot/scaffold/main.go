@@ -769,12 +769,16 @@ func ensureRobotUIDeps(repoRoot, uiDir string, force bool) error {
 }
 
 func ensureRobotLocalArtifacts(repoRoot string) error {
+	rt, err := configv1.ResolveRuntime(repoRoot)
+	if err != nil {
+		return err
+	}
 	required := []string{
-		filepath.Join(repoRoot, "bin", "dialtone_autoswap_v1"),
-		filepath.Join(repoRoot, "bin", "dialtone_robot_v2"),
-		filepath.Join(repoRoot, "bin", "dialtone_camera_v1"),
-		filepath.Join(repoRoot, "bin", "dialtone_mavlink_v1"),
-		filepath.Join(repoRoot, "bin", "dialtone_repl_v1"),
+		configv1.PluginBinaryPath(rt, "autoswap", "src_v1", "dialtone_autoswap_v1"),
+		configv1.PluginBinaryPath(rt, "robot", "src_v2", "dialtone_robot_v2"),
+		configv1.PluginBinaryPath(rt, "camera", "src_v1", "dialtone_camera_v1"),
+		configv1.PluginBinaryPath(rt, "mavlink", "src_v1", "dialtone_mavlink_v1"),
+		configv1.PluginBinaryPath(rt, "repl", "src_v1", "dialtone_repl_v1"),
 		filepath.Join(repoRoot, "src", "plugins", "robot", "src_v2", "ui", "dist", "index.html"),
 	}
 	for _, p := range required {
@@ -801,11 +805,11 @@ func buildRobotLocalArtifacts(repoRoot string) error {
 		mainPath  string
 		useCamera bool
 	}{
-		{outPath: filepath.Join(repoRoot, "bin", "dialtone_autoswap_v1"), mainPath: "./plugins/autoswap/src_v1/cmd/main.go"},
-		{outPath: filepath.Join(repoRoot, "bin", "dialtone_robot_v2"), mainPath: "./plugins/robot/src_v2/cmd/server/main.go"},
-		{outPath: filepath.Join(repoRoot, "bin", "dialtone_camera_v1"), useCamera: true},
-		{outPath: filepath.Join(repoRoot, "bin", "dialtone_mavlink_v1"), mainPath: "./plugins/mavlink/src_v1/cmd/main.go"},
-		{outPath: filepath.Join(repoRoot, "bin", "dialtone_repl_v1"), mainPath: "./plugins/repl/src_v1/cmd/repld/main.go"},
+		{outPath: configv1.PluginBinaryPath(rt, "autoswap", "src_v1", "dialtone_autoswap_v1"), mainPath: "./plugins/autoswap/src_v1/cmd/main.go"},
+		{outPath: configv1.PluginBinaryPath(rt, "robot", "src_v2", "dialtone_robot_v2"), mainPath: "./plugins/robot/src_v2/cmd/server/main.go"},
+		{outPath: configv1.PluginBinaryPath(rt, "camera", "src_v1", "dialtone_camera_v1"), useCamera: true},
+		{outPath: configv1.PluginBinaryPath(rt, "mavlink", "src_v1", "dialtone_mavlink_v1"), mainPath: "./plugins/mavlink/src_v1/cmd/main.go"},
+		{outPath: configv1.PluginBinaryPath(rt, "repl", "src_v1", "dialtone_repl_v1"), mainPath: "./plugins/repl/src_v1/cmd/repld/main.go"},
 	}
 	for _, spec := range specs {
 		if spec.useCamera {
@@ -1103,7 +1107,7 @@ func publishRobotSrcV2Release(repoRoot, repo, version string, targets []buildTar
 		return fmt.Errorf("robot src_v2 publish: no release targets selected")
 	}
 	srcRoot := filepath.Join(repoRoot, "src")
-	outDir := filepath.Join(repoRoot, "bin", "releases", "robot_src_v2", sanitizeVersion(version))
+	outDir := configv1.PluginBinaryDir(configv1.Runtime{RepoRoot: repoRoot}, "robot", "src_v2", "releases", sanitizeVersion(version))
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
@@ -1544,11 +1548,11 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 	}
 
 	required := []string{
-		filepath.Join(repoRoot, "bin", "dialtone_autoswap_v1"),
-		filepath.Join(repoRoot, "bin", "dialtone_robot_v2"),
-		filepath.Join(repoRoot, "bin", "dialtone_camera_v1"),
-		filepath.Join(repoRoot, "bin", "dialtone_mavlink_v1"),
-		filepath.Join(repoRoot, "bin", "dialtone_repl_v1"),
+		configv1.PluginBinaryPath(configv1.Runtime{RepoRoot: repoRoot}, "autoswap", "src_v1", "dialtone_autoswap_v1"),
+		configv1.PluginBinaryPath(configv1.Runtime{RepoRoot: repoRoot}, "robot", "src_v2", "dialtone_robot_v2"),
+		configv1.PluginBinaryPath(configv1.Runtime{RepoRoot: repoRoot}, "camera", "src_v1", "dialtone_camera_v1"),
+		configv1.PluginBinaryPath(configv1.Runtime{RepoRoot: repoRoot}, "mavlink", "src_v1", "dialtone_mavlink_v1"),
+		configv1.PluginBinaryPath(configv1.Runtime{RepoRoot: repoRoot}, "repl", "src_v1", "dialtone_repl_v1"),
 		filepath.Join(repoRoot, "src", "plugins", "robot", "src_v2", "ui", "dist", "index.html"),
 	}
 	for _, p := range required {
@@ -1651,6 +1655,7 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 	}
 
 	autoswapBin, err := selectExecutable([]string{
+		filepath.Join(resolvedRemoteRepo, "bin", "plugins", "autoswap", "src_v1", "dialtone_autoswap_v1"),
 		filepath.Join(resolvedRemoteRepo, "bin", "dialtone_autoswap_v1"),
 		filepath.Join(autoswapRoot, "bin", "dialtone_autoswap_v1"),
 	})
@@ -1658,24 +1663,28 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 		return fmt.Errorf("diagnostic remote autoswap binary check failed: %w", err)
 	}
 	if _, err := selectExecutable([]string{
+		filepath.Join(resolvedRemoteRepo, "bin", "plugins", "robot", "src_v2", "dialtone_robot_v2"),
 		filepath.Join(resolvedRemoteRepo, "bin", "dialtone_robot_v2"),
 		filepath.Join(autoswapRoot, "artifacts", "dialtone_robot_v2"),
 	}); err != nil {
 		return fmt.Errorf("diagnostic remote robot binary check failed: %w", err)
 	}
 	if _, err := selectExecutable([]string{
+		filepath.Join(resolvedRemoteRepo, "bin", "plugins", "camera", "src_v1", "dialtone_camera_v1"),
 		filepath.Join(resolvedRemoteRepo, "bin", "dialtone_camera_v1"),
 		filepath.Join(autoswapRoot, "artifacts", "dialtone_camera_v1"),
 	}); err != nil {
 		return fmt.Errorf("diagnostic remote camera binary check failed: %w", err)
 	}
 	if _, err := selectExecutable([]string{
+		filepath.Join(resolvedRemoteRepo, "bin", "plugins", "mavlink", "src_v1", "dialtone_mavlink_v1"),
 		filepath.Join(resolvedRemoteRepo, "bin", "dialtone_mavlink_v1"),
 		filepath.Join(autoswapRoot, "artifacts", "dialtone_mavlink_v1"),
 	}); err != nil {
 		return fmt.Errorf("diagnostic remote mavlink binary check failed: %w", err)
 	}
 	if _, err := selectExecutable([]string{
+		filepath.Join(resolvedRemoteRepo, "bin", "plugins", "repl", "src_v1", "dialtone_repl_v1"),
 		filepath.Join(resolvedRemoteRepo, "bin", "dialtone_repl_v1"),
 		filepath.Join(autoswapRoot, "artifacts", "dialtone_repl_v1"),
 	}); err != nil {

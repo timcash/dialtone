@@ -1,6 +1,7 @@
 package buildbinary
 
 import (
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"os/exec"
 	"strings"
 	"time"
@@ -15,11 +16,12 @@ func Register(reg *testv1.Registry) {
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			if err := ctx.WaitForStepMessageAfterAction("build complete", 20*time.Second, func() error {
 				ctx.Infof("[ACTION] build robot src_v2 server binary")
-				cmd := exec.Command("./dialtone.sh", "go", "src_v1", "exec", "build", "-o", "../bin/dialtone_robot_v2", "./plugins/robot/src_v2/cmd/server/main.go")
+				out := configv1.PluginBinaryPath(configv1.Runtime{RepoRoot: ctx.RepoRoot()}, "robot", "src_v2", "dialtone_robot_v2")
+				cmd := exec.Command("./dialtone.sh", "go", "src_v1", "exec", "build", "-o", out, "./plugins/robot/src_v2/cmd/server/main.go")
 				cmd.Dir = ctx.RepoRoot()
-				out, err := cmd.CombinedOutput()
+				cmdOut, err := cmd.CombinedOutput()
 				if err != nil {
-					ctx.Errorf("build failed: %s", strings.TrimSpace(string(out)))
+					ctx.Errorf("build failed: %s", strings.TrimSpace(string(cmdOut)))
 					return err
 				}
 				ctx.Infof("build complete")

@@ -2,11 +2,11 @@ package serverruntime
 
 import (
 	"context"
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"fmt"
 	"io"
 	"net/http"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,7 +20,7 @@ func Register(reg *testv1.Registry) {
 		Timeout: 25 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			repo := ctx.RepoRoot()
-			binPath := filepath.Join(repo, "bin", "dialtone_robot_v2")
+			binPath := configv1.PluginBinaryPath(configv1.Runtime{RepoRoot: repo}, "robot", "src_v2", "dialtone_robot_v2")
 			port := "18082"
 			baseURL := "http://127.0.0.1:" + port
 

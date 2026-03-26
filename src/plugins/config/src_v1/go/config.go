@@ -61,6 +61,19 @@ func PluginPath(rt Runtime, plugin, version string, elems ...string) string {
 	return filepath.Join(parts...)
 }
 
+func PluginBinaryDir(rt Runtime, plugin, version string, elems ...string) string {
+	parts := []string{rt.RepoRoot, "bin", "plugins", plugin}
+	if strings.TrimSpace(version) != "" {
+		parts = append(parts, version)
+	}
+	parts = append(parts, elems...)
+	return filepath.Join(parts...)
+}
+
+func PluginBinaryPath(rt Runtime, plugin, version, binary string) string {
+	return PluginBinaryDir(rt, plugin, version, strings.TrimSpace(binary))
+}
+
 func NewPluginPreset(rt Runtime, plugin, version string) PluginPreset {
 	base := PluginPath(rt, plugin, "")
 	versionRoot := PluginPath(rt, plugin, version)
@@ -76,7 +89,7 @@ func NewPluginPreset(rt Runtime, plugin, version string) PluginPreset {
 		TestCmd:           filepath.Join(versionRoot, "test", "cmd"),
 		Cmd:               filepath.Join(versionRoot, "cmd"),
 		Go:                filepath.Join(versionRoot, "go"),
-		Bin:               filepath.Join(base, "bin"),
+		Bin:               PluginBinaryDir(rt, plugin, version),
 		Readme:            filepath.Join(base, "README.md"),
 	}
 }

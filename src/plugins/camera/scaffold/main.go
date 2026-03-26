@@ -102,7 +102,7 @@ func printUsage() {
 	logs.Raw("")
 	logs.Raw("Commands:")
 	logs.Raw("  install Install camera build dependencies into the managed dependency home")
-	logs.Raw("  build   Build dialtone_camera_v1 binary (supports podman cross-build with cache)")
+	logs.Raw("  build   Build dialtone_camera_v1 binary under <repo>/bin/plugins/camera/src_v1")
 	logs.Raw("  run     Run camera runtime command")
 	logs.Raw("  stream  Stream-test a remote camera host over ssh mesh and save one snapshot")
 	logs.Raw("  test    Run camera go tests")
@@ -120,7 +120,7 @@ func runBuild(args []string) error {
 	fs := flag.NewFlagSet("camera-build", flag.ContinueOnError)
 	goos := fs.String("goos", "linux", "Target GOOS")
 	goarch := fs.String("goarch", "arm64", "Target GOARCH")
-	out := fs.String("out", "", "Output binary path (default: <repo>/bin/dialtone_camera_v1-<goos>-<goarch>)")
+	out := fs.String("out", "", "Output binary path (default: <repo>/bin/plugins/camera/src_v1/dialtone_camera_v1[-<goos>-<goarch>])")
 	podman := fs.Bool("podman", true, "Use podman cross-build path when target differs from host")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -135,7 +135,10 @@ func runBuild(args []string) error {
 
 	output := strings.TrimSpace(*out)
 	if output == "" {
-		output = filepath.Join(repoRoot, "bin", fmt.Sprintf("dialtone_camera_v1-%s-%s", *goos, *goarch))
+		output = configv1.PluginBinaryPath(rt, "camera", "src_v1", "dialtone_camera_v1")
+		if *goos != runtime.GOOS || *goarch != runtime.GOARCH {
+			output = configv1.PluginBinaryPath(rt, "camera", "src_v1", fmt.Sprintf("dialtone_camera_v1-%s-%s", *goos, *goarch))
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
 		return err
