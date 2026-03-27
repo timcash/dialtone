@@ -11,6 +11,21 @@ import (
 
 var ctx = uitest.SharedContext()
 
+type menuSectionCheck struct {
+	NavAria      string
+	SectionAria  string
+	UnderlayAria string
+}
+
+var menuSmokeSections = []menuSectionCheck{
+	{NavAria: "Open Home", SectionAria: "Docs Section", UnderlayAria: "Docs Underlay"},
+	{NavAria: "Open Table", SectionAria: "Table Section", UnderlayAria: "Table Underlay"},
+	{NavAria: "Open Three", SectionAria: "Three Section", UnderlayAria: "Three Underlay"},
+	{NavAria: "Open Terminal", SectionAria: "Terminal Section", UnderlayAria: "Terminal Underlay"},
+	{NavAria: "Open Camera", SectionAria: "Camera Section", UnderlayAria: "Camera Underlay"},
+	{NavAria: "Open Home", SectionAria: "Docs Section", UnderlayAria: "Docs Underlay"},
+}
+
 func Register(reg *testv1.Registry) {
 	reg.Add(testv1.Step{
 		Name:           "ui-build-and-go-serve",
@@ -22,6 +37,8 @@ func Register(reg *testv1.Registry) {
 func runBuildAndServe(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 	ctx.BeginStep(sc)
 	defaultURL := ""
+	waitSection := 10 * time.Second
+	waitClick := 5 * time.Second
 	if err := ctx.EnsureBuiltAndServed(); err != nil {
 		return testv1.StepRunResult{}, err
 	}
@@ -57,14 +74,25 @@ func runBuildAndServe(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 	if err := sc.Goto(navigateURL); err != nil {
 		return testv1.StepRunResult{}, fmt.Errorf("re-navigate before hero assertions: %w", err)
 	}
-	if err := sc.WaitForAriaLabel("Docs Section", 10*time.Second); err != nil {
-		return testv1.StepRunResult{}, fmt.Errorf("wait docs section: %w", err)
+	if err := sc.WaitForAriaLabel("Toggle Global Menu", waitSection); err != nil {
+		return testv1.StepRunResult{}, fmt.Errorf("wait global menu toggle: %w", err)
 	}
-	if err := sc.WaitForAriaLabelAttrEquals("Docs Section", "data-active", "true", 10*time.Second); err != nil {
-		return testv1.StepRunResult{}, fmt.Errorf("wait docs section active attr: %w", err)
-	}
-	if err := sc.WaitForAriaLabel("Docs Underlay", 10*time.Second); err != nil {
-		return testv1.StepRunResult{}, fmt.Errorf("wait docs underlay: %w", err)
+	for _, section := range menuSmokeSections {
+		sc.Logf("MENU_NAV: visiting %s via %s", section.SectionAria, section.NavAria)
+		if err := sc.ClickAriaLabelAfterWait("Toggle Global Menu", waitClick); err != nil {
+			return testv1.StepRunResult{}, fmt.Errorf("open global menu for %s: %w", section.SectionAria, err)
+		}
+		if err := sc.ClickAriaLabelAfterWait(section.NavAria, waitClick); err != nil {
+			return testv1.StepRunResult{}, fmt.Errorf("click %s: %w", section.NavAria, err)
+		}
+		if err := sc.WaitForAriaLabelAttrEquals(section.SectionAria, "data-active", "true", waitSection); err != nil {
+			return testv1.StepRunResult{}, fmt.Errorf("wait active %s: %w", section.SectionAria, err)
+		}
+		if section.UnderlayAria != "" {
+			if err := sc.WaitForAriaLabel(section.UnderlayAria, waitSection); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("wait underlay %s: %w", section.UnderlayAria, err)
+			}
+		}
 	}
 	if err := uitest.AssertJS(sc, 5*time.Second, `(() => {
 		const s = document.getElementById('ui-home-docs');
@@ -74,8 +102,8 @@ func runBuildAndServe(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 	})()`, "docs should use text legend mode"); err != nil {
 		return testv1.StepRunResult{}, fmt.Errorf("assert docs legend mode: %w", err)
 	}
-	if err := uitest.CaptureScreenshot(sc, "ui_home_docs.png"); err != nil {
-		return testv1.StepRunResult{}, fmt.Errorf("capture screenshot ui_home_docs.png: %w", err)
+	if err := uitest.CaptureScreenshot(sc, "ui_menu_sections.png"); err != nil {
+		return testv1.StepRunResult{}, fmt.Errorf("capture screenshot ui_menu_sections.png: %w", err)
 	}
-	return testv1.StepRunResult{Report: fmt.Sprintf("fixture built, docs/home section loaded, text legend verified (attach=%t)", attach)}, nil
+	return testv1.StepRunResult{Report: fmt.Sprintf("fixture built, menu navigation visited home/table/three/terminal/camera and returned home, docs legend verified (attach=%t)", attach)}, nil
 }

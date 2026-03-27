@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf16"
 
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 	"github.com/nats-io/nats.go"
@@ -28,6 +29,61 @@ func chromeServiceName(role string) string {
 	return "chrome-" + role
 }
 
+func windowsDialtoneHomeFromRemoteBin(remoteBin string) string {
+	remoteBin = windowsPath(strings.TrimSpace(remoteBin))
+	if remoteBin == "" {
+		return ""
+	}
+	binDir := remotePathDir(remoteBin, true)
+	return windowsPath(remotePathDir(binDir, true))
+}
+
+func windowsChromeServiceDirFromDialtoneHome(dialtoneHome, role string) string {
+	role = normalizeRole(role)
+	dialtoneHome = windowsPath(strings.TrimSpace(dialtoneHome))
+	if dialtoneHome == "" {
+		return ""
+	}
+	return windowsPath(dialtoneHome + `\chrome-v3\` + role + `\service`)
+}
+
+func windowsChromeServiceLogPathsFromDialtoneHome(dialtoneHome, role string) (string, string) {
+	serviceDir := windowsChromeServiceDirFromDialtoneHome(dialtoneHome, role)
+	if serviceDir == "" {
+		return "", ""
+	}
+	return windowsPath(serviceDir + `\daemon.out.log`), windowsPath(serviceDir + `\daemon.err.log`)
+}
+
+func windowsChromeServiceLogPathsFromRemoteBin(remoteBin, role string) (string, string) {
+	return windowsChromeServiceLogPathsFromDialtoneHome(windowsDialtoneHomeFromRemoteBin(remoteBin), role)
+}
+
+func remoteRepoRoot(node sshv1.MeshNode) string {
+	if len(node.RepoCandidates) == 0 {
+		return ""
+	}
+	repo := strings.TrimSpace(node.RepoCandidates[0])
+	if repo == "" {
+		return ""
+	}
+	if strings.EqualFold(node.OS, "windows") {
+		return windowsPath(repo)
+	}
+	return repo
+}
+
+func remoteEnvFilePath(node sshv1.MeshNode) string {
+	repo := remoteRepoRoot(node)
+	if repo == "" {
+		return ""
+	}
+	if strings.EqualFold(node.OS, "windows") {
+		return windowsPath(strings.TrimRight(repo, `\/`) + `\env\dialtone.json`)
+	}
+	return filepath.Join(repo, "env", "dialtone.json")
+}
+
 func remotePathDir(remotePath string, windows bool) string {
 	if windows {
 		normalized := strings.ReplaceAll(strings.TrimSpace(remotePath), "/", "\\")
@@ -39,8 +95,8 @@ func remotePathDir(remotePath string, windows bool) string {
 	return filepath.Dir(remotePath)
 }
 
-func managerNATSURL() string {
-	raw := strings.TrimSpace(os.Getenv("DIALTONE_REPL_NATS_URL"))
+func requestNATSURL() string {
+	raw := strings.TrimSpace(configv1.ResolveREPLNATSURL())
 	if raw == "" {
 		return ""
 	}
@@ -65,7 +121,7 @@ type replLeaderStateDoc struct {
 }
 
 func readManagerLeaderState() replLeaderStateDoc {
-	path := filepath.Join(resolveRepoRoot(), ".dialtone", "repl-v3", "leader.json")
+	path := filepath.Join(configv1.DefaultDialtoneHome(), "repl-v3", "leader.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return replLeaderStateDoc{}
@@ -78,13 +134,16 @@ func readManagerLeaderState() replLeaderStateDoc {
 }
 
 func managerNATSURLForNode(node sshv1.MeshNode) string {
-	if raw := strings.TrimSpace(os.Getenv("DIALTONE_REPL_MANAGER_NATS_URL")); raw != "" {
+	if raw := strings.TrimSpace(configv1.LookupEnvString("DIALTONE_REPL_MANAGER_NATS_URL")); raw != "" {
 		return raw
 	}
 	if st := readManagerLeaderState(); strings.TrimSpace(st.TSNetNATSURL) != "" {
 		return strings.TrimSpace(st.TSNetNATSURL)
 	}
-	raw := managerNATSURL()
+	raw := strings.TrimSpace(configv1.ResolveREPLManagerNATSURL())
+	if raw == "" {
+		raw = requestNATSURL()
+	}
 	if raw == "" {
 		return ""
 	}
@@ -104,13 +163,6 @@ func managerNATSURLForNode(node sshv1.MeshNode) string {
 }
 
 func shouldUseLocalManagerNATS(node sshv1.MeshNode) bool {
-	if raw := strings.TrimSpace(os.Getenv("DIALTONE_REPL_MANAGER_NATS_URL")); raw != "" {
-		return true
-	}
-	st := readManagerLeaderState()
-	if strings.TrimSpace(st.TSNetNATSURL) != "" {
-		return true
-	}
 	return strings.TrimSpace(managerNATSURLForNode(node)) != ""
 }
 
@@ -213,13 +265,13 @@ func remoteDialtoneCommandWindows(node sshv1.MeshNode, args []string) string {
 	if repo != "" {
 		b.WriteString(fmt.Sprintf("$repo=%s; ", psQuote(windowsPath(repo))))
 		b.WriteString("$script=$null; ")
-		b.WriteString("if($repo -and (Test-Path (Join-Path $repo 'dialtone.sh'))){ Set-Location $repo; $script = Join-Path $repo 'dialtone.sh' } ")
+		b.WriteString("if($repo -and (Test-Path (Join-Path $repo 'dialtone.ps1'))){ Set-Location $repo; $script = Join-Path $repo 'dialtone.ps1' } ")
 	} else {
 		b.WriteString("$script=$null; ")
 	}
-	b.WriteString("if(-not $script -and (Test-Path './dialtone.sh')){ $script = (Resolve-Path './dialtone.sh').Path } ")
-	b.WriteString("if(-not $script){ $homeRepo = Join-Path $HOME 'dialtone'; if(Test-Path (Join-Path $homeRepo 'dialtone.sh')){ Set-Location $homeRepo; $script = Join-Path $homeRepo 'dialtone.sh' } } ")
-	b.WriteString("if(-not $script){ throw 'dialtone.sh not found in repo candidates, $PWD, or $HOME\\dialtone' } ")
+	b.WriteString("$cwdScript = Join-Path (Get-Location) 'dialtone.ps1'; if(-not $script -and (Test-Path $cwdScript)){ $script = (Resolve-Path $cwdScript).Path } ")
+	b.WriteString("if(-not $script){ $homeRepo = Join-Path $HOME 'dialtone'; if(Test-Path (Join-Path $homeRepo 'dialtone.ps1')){ Set-Location $homeRepo; $script = Join-Path $homeRepo 'dialtone.ps1' } } ")
+	b.WriteString("if(-not $script){ throw 'dialtone.ps1 not found in repo candidates, $PWD, or $HOME\\dialtone' } ")
 	b.WriteString(fmt.Sprintf("$argv=@(%s); & $script @argv", strings.Join(items, ", ")))
 	return b.String()
 }
@@ -233,8 +285,14 @@ func startRemoteReplService(node sshv1.MeshNode, serviceName string, commandArgs
 		"--",
 	}
 	args = append(args, commandArgs...)
-	_, err := sshv1.RunNodeCommand(node.Name, remoteDialtoneCommand(node, args), sshv1.CommandOptions{})
-	return err
+	out, err := sshv1.RunNodeCommand(node.Name, remoteDialtoneCommand(node, args), sshv1.CommandOptions{})
+	if err != nil {
+		if strings.TrimSpace(out) != "" {
+			return fmt.Errorf("powershell command failed: %w (%s)", err, strings.TrimSpace(out))
+		}
+		return fmt.Errorf("powershell command failed: %w", err)
+	}
+	return nil
 }
 
 func stopRemoteReplService(node sshv1.MeshNode, serviceName string) error {
@@ -244,8 +302,14 @@ func stopRemoteReplService(node sshv1.MeshNode, serviceName string) error {
 		"service-stop",
 		"--name", strings.TrimSpace(serviceName),
 	}
-	_, err := sshv1.RunNodeCommand(node.Name, remoteDialtoneCommand(node, args), sshv1.CommandOptions{})
-	return err
+	out, err := sshv1.RunNodeCommand(node.Name, remoteDialtoneCommand(node, args), sshv1.CommandOptions{})
+	if err != nil {
+		if strings.TrimSpace(out) != "" {
+			return fmt.Errorf("powershell command failed: %w (%s)", err, strings.TrimSpace(out))
+		}
+		return fmt.Errorf("powershell command failed: %w", err)
+	}
+	return nil
 }
 
 func buildBinaryFor(outPath, goos, goarch string) error {
@@ -267,57 +331,6 @@ func buildBinaryFor(outPath, goos, goarch string) error {
 	return nil
 }
 
-func preferredWindowsRepoPath(node sshv1.MeshNode) string {
-	for _, candidate := range node.RepoCandidates {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
-			continue
-		}
-		if strings.HasPrefix(candidate, "/mnt/") {
-			parts := strings.Split(strings.TrimPrefix(candidate, "/mnt/"), "/")
-			if len(parts) >= 2 && len(parts[0]) == 1 {
-				drive := strings.ToUpper(parts[0])
-				rest := strings.Join(parts[1:], `\`)
-				return drive + `:\` + rest
-			}
-		}
-		if len(candidate) >= 3 && candidate[1] == ':' && (candidate[2] == '\\' || candidate[2] == '/') {
-			return windowsPath(candidate)
-		}
-	}
-	home, err := sshv1.RunNodeCommand(node.Name, "$env:USERPROFILE", sshv1.CommandOptions{})
-	if err != nil {
-		return ""
-	}
-	home = strings.TrimSpace(home)
-	if home == "" {
-		return ""
-	}
-	return windowsPath(home + `\dialtone`)
-}
-
-func buildRemoteBinaryOnWindows(node sshv1.MeshNode, remoteBin string) error {
-	repo := preferredWindowsRepoPath(node)
-	if repo == "" {
-		return fmt.Errorf("chrome src_v3 native windows build requires repo candidate for %s", node.Name)
-	}
-	remoteBin = windowsPath(remoteBin)
-	script := fmt.Sprintf(`$repo=%s; $src=Join-Path $repo 'src'; $bin=%s; $subject='CN=Dialtone Local Dev'; if(-not (Test-Path $src)){ throw "chrome src_v3 remote build requires repo at $src" }; New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($bin)) -Force | Out-Null; Set-Location $src; $env:GOOS='windows'; $env:GOARCH='amd64'; $env:CGO_ENABLED='0'; go build -o $bin ./plugins/chrome/scaffold/main.go; Unblock-File -LiteralPath $bin -ErrorAction SilentlyContinue; $cert=Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -eq $subject } | Select-Object -First 1; if($cert){ Set-AuthenticodeSignature -FilePath $bin -Certificate $cert -HashAlgorithm SHA256 | Out-Null }; Get-AuthenticodeSignature -FilePath $bin | Select-Object Status, @{Name='Subject';Expression={ if($_.SignerCertificate){ $_.SignerCertificate.Subject } else { '' } }} | Format-List`,
-		psQuote(repo), psQuote(remoteBin))
-	cmd := "powershell.exe -NoProfile -NonInteractive -EncodedCommand " + encodePowerShellCommand(script)
-	out, err := sshv1.RunNodeCommand(node.Name, cmd, sshv1.CommandOptions{})
-	if err != nil {
-		trimmed := strings.TrimSpace(out)
-		if trimmed != "" {
-			logs.Info("chrome src_v3 native windows build error output on %s:\n%s", node.Name, trimmed)
-			return fmt.Errorf("chrome src_v3 native windows build failed on %s: %w (%s)", node.Name, err, trimmed)
-		}
-		return fmt.Errorf("chrome src_v3 native windows build failed on %s: %w", node.Name, err)
-	}
-	logs.Info("chrome src_v3 native windows build output on %s:\n%s", node.Name, strings.TrimSpace(out))
-	return nil
-}
-
 func deployRemoteBinary(node sshv1.MeshNode, role string, startService bool) error {
 	if role == "" {
 		role = defaultRole
@@ -326,20 +339,9 @@ func deployRemoteBinary(node sshv1.MeshNode, role string, startService bool) err
 	if err != nil {
 		return err
 	}
-	if strings.EqualFold(node.OS, "windows") && node.PreferWSLPowerShell && len(node.RepoCandidates) > 0 && strings.TrimSpace(node.RepoCandidates[0]) != "" {
-		_ = stopRemoteService(node, strings.TrimSpace(role))
-		if err := buildRemoteBinaryOnWindows(node, remoteBin); err != nil {
-			return err
-		}
-		logs.Info("chrome src_v3 native windows deploy complete on %s:%s", node.Name, remoteBin)
-		if startService {
-			return startRemoteService(node, strings.TrimSpace(role))
-		}
-		return nil
-	}
 	goos := mapNodeGOOS(node.OS)
 	goarch := detectRemoteGOARCH(node)
-	localBin := filepath.Join(resolveRepoRoot(), "bin", binaryName(goos, goarch))
+	localBin := localBinaryPathFor(goos, goarch)
 	if err := buildBinaryFor(localBin, goos, goarch); err != nil {
 		return err
 	}
@@ -396,25 +398,23 @@ func startRemoteService(node sshv1.MeshNode, role string) error {
 	serviceName := chromeServiceName(role)
 	logs.Info("chrome src_v3 remote service start host=%s role=%s prefer_wsl_powershell=%t use_manager_nats=%t manager_nats_url=%q",
 		node.Name, role, node.PreferWSLPowerShell, useManagerNATS, natsURL)
+	commandArgs := []string{remoteBin, "src_v3", "daemon", "--role", role, "--chrome-port", fmt.Sprintf("%d", roleChromePort(role)), "--host-id", node.Name}
+	if useManagerNATS {
+		commandArgs = append(commandArgs, "--nats-url", natsURL)
+	} else {
+		commandArgs = append(commandArgs, "--nats-port", fmt.Sprintf("%d", roleNATSPort(role)))
+	}
 	if strings.EqualFold(node.OS, "windows") {
 		remoteDir := remotePathDir(remoteBin, true)
-		stdoutPath := windowsPath(remoteDir + `\` + serviceName + `.out.log`)
-		stderrPath := windowsPath(remoteDir + `\` + serviceName + `.err.log`)
 		workDir := windowsPath(remoteDir)
-		args := []string{"src_v3", "daemon", "--role", role, "--chrome-port", fmt.Sprintf("%d", roleChromePort(role)), "--host-id", node.Name}
-		if useManagerNATS {
-			args = append(args, "--nats-url", natsURL)
-		} else {
-			args = append(args, "--nats-port", fmt.Sprintf("%d", roleNATSPort(role)))
-		}
-		cmdParts := make([]string, 0, len(args)+4)
-		cmdParts = append(cmdParts, `"`+strings.ReplaceAll(remoteBin, `"`, `\"`)+`"`)
-		for _, arg := range args {
-			cmdParts = append(cmdParts, `"`+strings.ReplaceAll(arg, `"`, `\"`)+`"`)
-		}
-		cmdParts = append(cmdParts, `1>>"`+stdoutPath+`"`, `2>>"`+stderrPath+`"`)
-		cmd := fmt.Sprintf(`$bin=%s; $workDir=%s; $stdout=%s; $stderr=%s; New-Item -ItemType Directory -Path $workDir -Force | Out-Null; Unblock-File -LiteralPath $bin -ErrorAction SilentlyContinue; $launch='start "" /b %s'; Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', $launch) -WorkingDirectory $workDir -WindowStyle Hidden | Out-Null; Write-Output 'STARTED'`,
-			psQuote(remoteBin), psQuote(workDir), psQuote(stdoutPath), psQuote(stderrPath), strings.Join(cmdParts, " "))
+		serviceDir := windowsChromeServiceDirFromDialtoneHome(windowsDialtoneHomeFromRemoteBin(remoteBin), role)
+		stdoutPath, stderrPath := windowsChromeServiceLogPathsFromRemoteBin(remoteBin, role)
+		repoRoot := remoteRepoRoot(node)
+		envFile := remoteEnvFilePath(node)
+		args := commandArgs[1:]
+		psArgs := strings.Join(quotePSArgs(args), ", ")
+		cmd := fmt.Sprintf(`$bin=%s; $workDir=%s; $serviceDir=%s; $stdout=%s; $stderr=%s; $repoRoot=%s; $envFile=%s; New-Item -ItemType Directory -Path $workDir,$serviceDir -Force | Out-Null; Remove-Item -LiteralPath $stdout,$stderr -Force -ErrorAction SilentlyContinue; Unblock-File -LiteralPath $bin -ErrorAction SilentlyContinue; if($repoRoot){$env:DIALTONE_REPO_ROOT=$repoRoot}; if($envFile){$env:DIALTONE_ENV_FILE=$envFile}; $proc = Start-Process -FilePath $bin -ArgumentList @(%s) -WorkingDirectory $workDir -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden -PassThru; Write-Output ('STARTED pid=' + $proc.Id)`,
+			psQuote(remoteBin), psQuote(workDir), psQuote(serviceDir), psQuote(stdoutPath), psQuote(stderrPath), psQuote(repoRoot), psQuote(envFile), psArgs)
 		logs.Info("chrome src_v3 windows launcher command: %s", cmd)
 		if out, err := sshv1.RunNodeCommand(node.Name, cmd, sshv1.CommandOptions{}); err != nil {
 			return err
@@ -423,11 +423,7 @@ func startRemoteService(node sshv1.MeshNode, role string) error {
 		}
 	} else {
 		args := fmt.Sprintf("src_v3 daemon --role %s --chrome-port %d --host-id %s", shellQuote(role), roleChromePort(role), shellQuote(node.Name))
-		if useManagerNATS {
-			args += " --nats-url " + shellQuote(natsURL)
-		} else {
-			args += fmt.Sprintf(" --nats-port %d", roleNATSPort(role))
-		}
+		args += fmt.Sprintf(" --nats-port %d", roleNATSPort(role))
 		cmd := fmt.Sprintf("mkdir -p %s && nohup %s %s >> %s 2>> %s < /dev/null &",
 			shellQuote(filepath.Dir(remoteBin)),
 			shellQuote(remoteBin),
@@ -439,7 +435,11 @@ func startRemoteService(node sshv1.MeshNode, role string) error {
 			return err
 		}
 	}
-	return waitForRemoteService(node, role, 20*time.Second)
+	timeout := 20 * time.Second
+	if strings.EqualFold(node.OS, "windows") {
+		timeout = 60 * time.Second
+	}
+	return waitForRemoteService(node, role, timeout)
 }
 
 func stopRemoteService(node sshv1.MeshNode, role string) error {
@@ -532,11 +532,11 @@ type remoteServiceRegistryItem struct {
 }
 
 func lookupRemoteServiceState(node sshv1.MeshNode, serviceName string) (remoteServiceRegistryItem, bool, error) {
-	managerURL := strings.TrimSpace(managerNATSURLForNode(node))
-	if managerURL == "" {
+	requestURL := strings.TrimSpace(requestNATSURL())
+	if requestURL == "" {
 		return remoteServiceRegistryItem{}, false, nil
 	}
-	nc, err := nats.Connect(managerURL, nats.Timeout(2*time.Second))
+	nc, err := nats.Connect(requestURL, nats.Timeout(2*time.Second))
 	if err != nil {
 		return remoteServiceRegistryItem{}, false, err
 	}
@@ -651,8 +651,14 @@ func readRemoteLogs(node sshv1.MeshNode, role string, lines int) (string, string
 	if !strings.EqualFold(node.OS, "windows") {
 		return "", "", fmt.Errorf("logs currently implemented for windows hosts only")
 	}
-	outCmd := fmt.Sprintf("Get-Content -Tail %d $env:USERPROFILE\\.dialtone\\bin\\%s.out.log", lines, serviceName)
-	errCmd := fmt.Sprintf("Get-Content -Tail %d $env:USERPROFILE\\.dialtone\\bin\\%s.err.log", lines, serviceName)
+	primaryOutRel := windowsPath(`.dialtone\chrome-v3\` + role + `\service\daemon.out.log`)
+	primaryErrRel := windowsPath(`.dialtone\chrome-v3\` + role + `\service\daemon.err.log`)
+	legacyOutRel := windowsPath(`.dialtone\bin\` + serviceName + `.out.log`)
+	legacyErrRel := windowsPath(`.dialtone\bin\` + serviceName + `.err.log`)
+	outCmd := fmt.Sprintf(`$userHome=$env:USERPROFILE; $primary=Join-Path $userHome %s; $legacy=Join-Path $userHome %s; if(Test-Path -LiteralPath $primary){ Get-Content -LiteralPath $primary -Tail %d } elseif(Test-Path -LiteralPath $legacy){ Get-Content -LiteralPath $legacy -Tail %d }`,
+		psQuote(primaryOutRel), psQuote(legacyOutRel), lines, lines)
+	errCmd := fmt.Sprintf(`$userHome=$env:USERPROFILE; $primary=Join-Path $userHome %s; $legacy=Join-Path $userHome %s; if(Test-Path -LiteralPath $primary){ Get-Content -LiteralPath $primary -Tail %d } elseif(Test-Path -LiteralPath $legacy){ Get-Content -LiteralPath $legacy -Tail %d }`,
+		psQuote(primaryErrRel), psQuote(legacyErrRel), lines, lines)
 	stdout, outErr := sshv1.RunNodeCommand(node.Name, outCmd, sshv1.CommandOptions{})
 	stderr, errErr := sshv1.RunNodeCommand(node.Name, errCmd, sshv1.CommandOptions{})
 	if outErr != nil && errErr != nil {

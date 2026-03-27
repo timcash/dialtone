@@ -32,6 +32,22 @@ func EnsureRemoteServiceByHost(host, role string, deploy bool) (*CommandResponse
 		})
 	}
 	if err := startRemoteService(node, role); err != nil {
+		if err := deployRemoteBinary(node, role, true); err != nil {
+			return nil, err
+		}
+		return sendRemoteCommand(node, commandRequest{
+			Command: "status",
+			Role:    role,
+		})
+	}
+	resp, err = sendRemoteCommand(node, commandRequest{
+		Command: "status",
+		Role:    role,
+	})
+	if err == nil {
+		return resp, nil
+	}
+	if err := deployRemoteBinary(node, role, true); err != nil {
 		return nil, err
 	}
 	return sendRemoteCommand(node, commandRequest{

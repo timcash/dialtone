@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chromedp/cdproto/page"
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 	"github.com/chromedp/chromedp"
 )
 
@@ -185,24 +185,21 @@ func (d *daemonState) waitForConsoleContains(substr string, timeout time.Duratio
 }
 
 func (d *daemonState) captureScreenshotB64() (string, error) {
+	logs.Info("chrome src_v3 screenshot start role=%s", d.role)
 	var buf []byte
-	err := d.withManagedContext(20*time.Second, func(ctx context.Context) error {
-		return chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
-			data, err := page.CaptureScreenshot().
-				WithCaptureBeyondViewport(false).
-				WithFromSurface(true).
-				Do(ctx)
-			if err != nil {
-				return err
-			}
-			buf = data
-			return nil
-		}))
-	})
-	if err != nil {
+	if err := d.withManagedContext(20*time.Second, func(ctx context.Context) error {
+		return chromedp.Run(ctx,
+			chromedp.WaitVisible("body", chromedp.ByQuery),
+			chromedp.Sleep(300*time.Millisecond),
+			chromedp.CaptureScreenshot(&buf),
+		)
+	}); err != nil {
+		logs.Error("chrome src_v3 screenshot failed role=%s err=%v", d.role, err)
 		return "", err
 	}
-	return base64.StdEncoding.EncodeToString(buf), nil
+	encoded := base64.StdEncoding.EncodeToString(buf)
+	logs.Info("chrome src_v3 screenshot complete role=%s bytes=%d b64_len=%d", d.role, len(buf), len(encoded))
+	return encoded, nil
 }
 
 func (d *daemonState) readManagedURL() (string, error) {

@@ -258,10 +258,7 @@ func tailFileLines(path string, maxLines int) (string, error) {
 }
 
 func resolveREPLNATSURL() string {
-	if raw := strings.TrimSpace(os.Getenv("DIALTONE_REPL_NATS_URL")); raw != "" {
-		return raw
-	}
-	return defaultNATSURL
+	return configv1.ResolveREPLNATSURL()
 }
 
 func querySubtoneRegistry(natsURL string, count int) ([]subtoneRegistryItem, error) {

@@ -942,6 +942,7 @@ func runPowerShellCommand(command string) (string, error) {
 	if looksLikePosixShell(command) {
 		psCommand = "Set-Location C:\\; wsl.exe -e bash -lc '" + strings.ReplaceAll(command, "'", "''") + "'"
 	}
+	psCommand = "$ProgressPreference='SilentlyContinue'; " + psCommand
 	encoded := encodePowerShellCommand(psCommand)
 	cmd := execCommandFunc(powerShellPath, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded)
 	out, err := cmd.CombinedOutput()

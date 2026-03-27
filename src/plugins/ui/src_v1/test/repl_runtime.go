@@ -1,17 +1,12 @@
 package test
 
 import (
-	"os"
-	"strings"
-
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"dialtone/dev/plugins/logs/src_v1/go"
 )
 
 func ResolveSuiteNATSURL() string {
-	if v := strings.TrimSpace(os.Getenv("DIALTONE_REPL_NATS_URL")); v != "" {
-		return v
-	}
-	return "nats://127.0.0.1:4222"
+	return configv1.ResolveREPLNATSURL()
 }
 
 func ReplIndexInfof(format string, args ...any) {

@@ -46,17 +46,18 @@ func roleNATSPort(role string) int {
 }
 
 type CommandRequest struct {
-	Command   string `json:"command"`
-	Role      string `json:"role,omitempty"`
-	URL       string `json:"url,omitempty"`
-	Index     int    `json:"index,omitempty"`
-	AriaLabel string `json:"aria_label,omitempty"`
-	Attr      string `json:"attr,omitempty"`
-	Expected  string `json:"expected,omitempty"`
-	Value     string `json:"value,omitempty"`
-	Contains  string `json:"contains,omitempty"`
-	TimeoutMS int    `json:"timeout_ms,omitempty"`
-	Script    string `json:"script,omitempty"`
+	Command          string  `json:"command"`
+	Role             string  `json:"role,omitempty"`
+	URL              string  `json:"url,omitempty"`
+	Index            int     `json:"index,omitempty"`
+	AriaLabel        string  `json:"aria_label,omitempty"`
+	Attr             string  `json:"attr,omitempty"`
+	Expected         string  `json:"expected,omitempty"`
+	Value            string  `json:"value,omitempty"`
+	Contains         string  `json:"contains,omitempty"`
+	TimeoutMS        int     `json:"timeout_ms,omitempty"`
+	Script           string  `json:"script,omitempty"`
+	ActionsPerSecond float64 `json:"actions_per_second,omitempty"`
 }
 
 type PageInfo struct {
@@ -65,27 +66,28 @@ type PageInfo struct {
 }
 
 type CommandResponse struct {
-	OK            bool       `json:"ok"`
-	Error         string     `json:"error,omitempty"`
-	Host          string     `json:"host,omitempty"`
-	ServicePID    int        `json:"service_pid"`
-	BrowserPID    int        `json:"browser_pid"`
-	ChromePort    int        `json:"chrome_port"`
-	NATSPort      int        `json:"nats_port"`
-	Role          string     `json:"role"`
-	ProfileDir    string     `json:"profile_dir,omitempty"`
-	WebSocketURL  string     `json:"websocket_url,omitempty"`
-	ManagedTarget string     `json:"managed_target,omitempty"`
-	CurrentURL    string     `json:"current_url,omitempty"`
-	StartedAt     string     `json:"started_at,omitempty"`
-	LastHealthyAt string     `json:"last_healthy_at,omitempty"`
-	LastError     string     `json:"last_error,omitempty"`
-	ProcessCount  int        `json:"process_count,omitempty"`
-	Tabs          []PageInfo `json:"tabs,omitempty"`
-	Unhealthy     bool       `json:"unhealthy,omitempty"`
-	ConsoleLines  []string   `json:"console_lines,omitempty"`
-	Value         string     `json:"value,omitempty"`
-	ScreenshotB64 string     `json:"screenshot_b64,omitempty"`
+	OK             bool       `json:"ok"`
+	Error          string     `json:"error,omitempty"`
+	Host           string     `json:"host,omitempty"`
+	ServicePID     int        `json:"service_pid"`
+	BrowserPID     int        `json:"browser_pid"`
+	ChromePort     int        `json:"chrome_port"`
+	NATSPort       int        `json:"nats_port"`
+	Role           string     `json:"role"`
+	ProfileDir     string     `json:"profile_dir,omitempty"`
+	WebSocketURL   string     `json:"websocket_url,omitempty"`
+	ManagedTarget  string     `json:"managed_target,omitempty"`
+	CurrentURL     string     `json:"current_url,omitempty"`
+	StartedAt      string     `json:"started_at,omitempty"`
+	LastHealthyAt  string     `json:"last_healthy_at,omitempty"`
+	LastError      string     `json:"last_error,omitempty"`
+	ProcessCount   int        `json:"process_count,omitempty"`
+	Tabs           []PageInfo `json:"tabs,omitempty"`
+	Unhealthy      bool       `json:"unhealthy,omitempty"`
+	ConsoleLines   []string   `json:"console_lines,omitempty"`
+	Value          string     `json:"value,omitempty"`
+	ScreenshotB64  string     `json:"screenshot_b64,omitempty"`
+	ScreenshotPath string     `json:"screenshot_path,omitempty"`
 }
 
 type Session struct {
@@ -106,6 +108,7 @@ type commandResponse = CommandResponse
 
 type daemonState struct {
 	mu              sync.Mutex
+	reqMu           sync.Mutex
 	role            string
 	hostID          string
 	chromePort      int

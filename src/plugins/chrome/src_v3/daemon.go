@@ -1,12 +1,14 @@
 package src_v3
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -95,14 +97,17 @@ func runDaemon(args []string) error {
 				writeReply(m, commandResponse{OK: false, Error: err.Error()})
 				return
 			}
-			writeReply(m, state.handle(req))
+			state.reqMu.Lock()
+			defer state.reqMu.Unlock()
+			resp := state.handle(req)
+			writeReply(m, resp)
 		})
 		if err != nil {
 			return err
 		}
 	}
 	go publishServiceHeartbeat(state, nc)
-	logs.Info("chrome src_v3 daemon ready role=%s host=%s nats=%s chrome=%d", state.role, state.hostID, state.natsURL, state.chromePort)
+	logs.Info("chrome src_v3 daemon ready role=%s host=%s nats=%s chrome=%d headless=%t step_delay_ms=%d", state.role, state.hostID, state.natsURL, state.chromePort, chromeHeadlessEnabled(), int(chromeCommandStepDelay()/time.Millisecond))
 	select {}
 }
 
@@ -125,6 +130,17 @@ func (d *daemonState) init() error {
 func (d *daemonState) handle(req commandRequest) commandResponse {
 	logs.Info("chrome src_v3 daemon handle: %s", req.Command)
 	resp := d.baseResponse()
+	defer func() {
+		command := strings.TrimSpace(req.Command)
+		if resp.OK && command != "close" && command != "shutdown" {
+			if err := d.pruneExtraPageTargets(); err != nil && !errors.Is(err, errBrowserClosed) {
+				logs.Warn("chrome src_v3 unable to prune extra page targets after %s: %v", command, err)
+			} else {
+				resp = d.refreshResponse(resp)
+			}
+		}
+		d.maybePauseAfterCommand(req.Command, resp.OK, req.ActionsPerSecond)
+	}()
 	switch strings.TrimSpace(req.Command) {
 	case "status":
 	case "open", "goto":
@@ -304,7 +320,18 @@ func (d *daemonState) handle(req commandRequest) commandResponse {
 			resp.Error = err.Error()
 			return d.refreshResponse(resp)
 		}
-		resp.ScreenshotB64 = b64
+		path, err := d.writeScreenshotArtifact(b64)
+		if err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return d.refreshResponse(resp)
+		}
+		resp.ScreenshotPath = path
+		if d.embeddedNATS {
+			resp.ScreenshotB64 = b64
+		}
+		resp.OK = true
+		return d.refreshResponse(resp)
 	case "close":
 		if err := d.closeBrowser(); err != nil {
 			resp.OK = false
@@ -331,6 +358,25 @@ func (d *daemonState) handle(req commandRequest) commandResponse {
 	resp = d.refreshResponse(resp)
 	resp.OK = true
 	return resp
+}
+
+func (d *daemonState) maybePauseAfterCommand(command string, ok bool, actionsPerSecond float64) {
+	if !ok || !shouldDelayChromeCommand(command) {
+		return
+	}
+	delay := chromeCommandStepDelay()
+	if actionsPerSecond > 0 {
+		delay = durationForActionsPerSecond(actionsPerSecond)
+	}
+	if delay <= 0 {
+		return
+	}
+	if actionsPerSecond > 0 {
+		logs.Info("chrome src_v3 visible command pause role=%s command=%s actions_per_second=%.3f delay_ms=%d", d.role, strings.TrimSpace(command), actionsPerSecond, int(delay/time.Millisecond))
+	} else {
+		logs.Info("chrome src_v3 visible command pause role=%s command=%s delay_ms=%d", d.role, strings.TrimSpace(command), int(delay/time.Millisecond))
+	}
+	time.Sleep(delay)
 }
 
 func (d *daemonState) baseResponse() commandResponse {
@@ -418,7 +464,13 @@ func sendRemoteCommand(node sshv1.MeshNode, req commandRequest) (*commandRespons
 		defer nc.Close()
 		msg, err := nc.Request(subject, raw, commandRequestTimeout(req))
 		if err != nil {
+			if strings.EqualFold(strings.TrimSpace(req.Command), "screenshot") {
+				logs.Error("chrome src_v3 screenshot request failed url=%s subject=%s err=%v", natsURL, subject, err)
+			}
 			return nil, err
+		}
+		if strings.EqualFold(strings.TrimSpace(req.Command), "screenshot") {
+			logs.Info("chrome src_v3 screenshot reply url=%s subject=%s bytes=%d", natsURL, subject, len(msg.Data))
 		}
 		var resp commandResponse
 		if err := json.Unmarshal(msg.Data, &resp); err != nil {
@@ -431,14 +483,32 @@ func sendRemoteCommand(node sshv1.MeshNode, req commandRequest) (*commandRespons
 		return &resp, nil
 	}
 
+	requestURLs := make([]string, 0, 2)
+	if natsURL := strings.TrimSpace(requestNATSURL()); natsURL != "" {
+		requestURLs = append(requestURLs, natsURL)
+	}
 	if natsURL := strings.TrimSpace(managerNATSURLForNode(node)); natsURL != "" {
+		duplicate := false
+		for _, existing := range requestURLs {
+			if strings.EqualFold(strings.TrimSpace(existing), natsURL) {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			requestURLs = append(requestURLs, natsURL)
+		}
+	}
+	if len(requestURLs) > 0 {
 		deadline := time.Now().Add(3 * time.Second)
 		for {
-			for _, subject := range subjects {
-				if resp, err := tryRequest(natsURL, subject); err == nil {
-					return resp, nil
-				} else {
-					lastErr = err
+			for _, natsURL := range requestURLs {
+				for _, subject := range subjects {
+					if resp, err := tryRequest(natsURL, subject); err == nil {
+						return resp, nil
+					} else {
+						lastErr = err
+					}
 				}
 			}
 			if time.Now().After(deadline) {
@@ -473,11 +543,37 @@ func printResponse(resp *commandResponse) {
 	if strings.TrimSpace(resp.ScreenshotB64) != "" {
 		fmt.Printf("SCREENSHOT_B64_LEN %d\n", len(resp.ScreenshotB64))
 	}
+	if strings.TrimSpace(resp.ScreenshotPath) != "" {
+		fmt.Printf("SCREENSHOT_PATH %s\n", strings.TrimSpace(resp.ScreenshotPath))
+	}
 }
 
 func writeReply(m *nats.Msg, resp commandResponse) {
 	data, _ := json.Marshal(resp)
-	_ = m.Respond(data)
+	if strings.TrimSpace(resp.ScreenshotB64) != "" {
+		logs.Info("chrome src_v3 reply screenshot bytes=%d b64_len=%d", len(data), len(resp.ScreenshotB64))
+	}
+	if strings.TrimSpace(resp.ScreenshotPath) != "" {
+		logs.Info("chrome src_v3 reply screenshot path=%s bytes=%d", strings.TrimSpace(resp.ScreenshotPath), len(data))
+	}
+	if err := m.Respond(data); err != nil {
+		logs.Error("chrome src_v3 respond failed: %v", err)
+	}
+}
+
+func (d *daemonState) writeScreenshotArtifact(b64 string) (string, error) {
+	data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(b64))
+	if err != nil {
+		return "", fmt.Errorf("decode screenshot for artifact: %w", err)
+	}
+	path := filepath.Join(d.profileDir, "artifacts", "managed.png")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func natsSubject(role string) string {
@@ -574,7 +670,7 @@ func heartbeatSubjectForHost(hostID, serviceName string) string {
 }
 
 func publishRemoteServiceHeartbeat(resp commandResponse) {
-	natsURL := strings.TrimSpace(managerNATSURL())
+	natsURL := strings.TrimSpace(requestNATSURL())
 	if natsURL == "" || strings.TrimSpace(resp.Host) == "" || strings.TrimSpace(resp.Role) == "" {
 		return
 	}

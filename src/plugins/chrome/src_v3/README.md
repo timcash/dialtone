@@ -54,6 +54,7 @@ cd /home/user/dialtone
 
 # Check service state
 ./dialtone.sh chrome src_v3 status --host legion --role dev
+./dialtone.sh chrome src_v3 instances --host legion
 ./dialtone.sh chrome src_v3 logs --host legion
 ./dialtone.sh chrome src_v3 doctor --host legion
 
@@ -69,6 +70,34 @@ cd /home/user/dialtone
 # Capture a screenshot
 ./dialtone.sh chrome src_v3 screenshot --host legion --role dev --out src/plugins/chrome/src_v3/screenshots/manual_debug.png
 ```
+
+## Hybrid Windows + WSL Workflow
+
+When the standard Windows service-managed launcher is flaky, use a hybrid path:
+- keep the visible WSL commands in the `windows` tmux session
+- start the WSL REPL leader explicitly in tmux
+- deploy from WSL
+- start the Windows chrome daemons directly from PowerShell with the helper script
+- run the real `chrome src_v3` checks and suite from WSL against those already-running roles
+
+Recommended sequence:
+
+```powershell
+wsl-tmux clean-state
+wsl-tmux "cd /home/user/dialtone && nohup ./dialtone.sh repl src_v3 leader --embedded-nats --tsnet --room index --hostname DIALTONE-SERVER >/home/user/.dialtone/repl-v3/manual-leader.out.log 2>/home/user/.dialtone/repl-v3/manual-leader.err.log &"
+wsl-tmux "cd /home/user/dialtone && ./dialtone.sh chrome src_v3 deploy --host legion --role dev"
+.\scripts\windows\chrome-src-v3-manual.ps1 restart -Role dev,dev-isolated
+wsl-tmux "cd /home/user/dialtone && ./dialtone.sh chrome src_v3 status --host legion --role dev"
+wsl-tmux "cd /home/user/dialtone && ./dialtone.sh chrome src_v3 status --host legion --role dev-isolated"
+wsl-tmux "cd /home/user/dialtone && ./dialtone.sh chrome src_v3 test --host legion --role dev"
+```
+
+Notes:
+- the helper script writes daemon logs to `~/.dialtone/chrome-v3/<role>/service/daemon.out.log` and `daemon.err.log`
+- prestarting both `dev` and `dev-isolated` avoids the flaky cross-WSL remote start path during the isolation step
+- if the WSL leader was restarted, make sure the helper can resolve a live `tsnet_nats_url` before starting Windows daemons
+- visible action-flow defaults can live in `env/dialtone.json` with `DIALTONE_CHROME_SRC_V3_INTERACTION_COUNT` and `DIALTONE_CHROME_SRC_V3_ACTIONS_PER_SECOND`
+- `./dialtone.sh chrome src_v3 test --host legion --role dev --interactions 10 --actions-per-second 0.5` runs ten type/click loops at one visible action every two seconds
 
 ## Core Model
 
@@ -93,9 +122,11 @@ Lifecycle:
 - `./dialtone.sh chrome src_v3 deploy --host <host> --role <role> --service`
 - `./dialtone.sh chrome src_v3 service --host <host> --mode start|stop|status --role <role>`
 - `./dialtone.sh chrome src_v3 status --host <host> --role <role>`
+- `./dialtone.sh chrome src_v3 instances --host <host> [--role <role>]`
 - `./dialtone.sh chrome src_v3 doctor --host <host>`
 - `./dialtone.sh chrome src_v3 logs --host <host>`
 - `./dialtone.sh chrome src_v3 reset --host <host>`
+- `./dialtone.sh chrome src_v3 close-all --host <host> [--role <role>]`
 
 Navigation:
 - `./dialtone.sh chrome src_v3 open --host <host> --role <role> --url <url>`
@@ -178,6 +209,8 @@ Example:
 - `deploy --service` preserves the running browser if the remote binary is already current.
 - `reset` preserves the Chrome profile/user-data directory.
 - explicit `tab-open`, `tab-close`, or `close` are the normal commands that change tab/browser lifecycle on purpose.
+- `instances` lists only Dialtone-managed Chrome roles by looking for the `--dialtone-role` process flag, so personal Chrome windows are excluded.
+- `close-all` closes only Dialtone-managed Chrome browser instances on the target host and leaves personal Chrome untouched.
 
 ## Verification On `legion`
 

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
+	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 )
 
 func replIndexInfof(format string, args ...any) {
@@ -109,8 +110,10 @@ func Run(args []string) error {
 		return handleDeploy(args[1:])
 	case "service":
 		return handleService(args[1:])
-	case "status", "instances":
+	case "status":
 		return handleRequestCommand("status", args[1:])
+	case "instances":
+		return handleInstances(args[1:])
 	case "open":
 		return handleRequestCommand("open", args[1:])
 	case "goto":
@@ -125,6 +128,8 @@ func Run(args []string) error {
 		return handleRequestCommand("tab-close", args[1:])
 	case "close":
 		return handleRequestCommand("close", args[1:])
+	case "close-all":
+		return handleCloseAll(args[1:])
 	case "click-aria":
 		return handleAriaCommand("click-aria", args[1:])
 	case "type-aria":
@@ -168,6 +173,7 @@ func printUsage() {
 	logs.Info("  deploy [--host <host>] [--service]")
 	logs.Info("  service [--host <host>] --mode start|stop|status")
 	logs.Info("  status [--host <host>]")
+	logs.Info("  instances [--host <host>] [--role <role>]")
 	logs.Info("  open [--host <host>] --url <url>")
 	logs.Info("  goto [--host <host>] --url <url>")
 	logs.Info("  get-url [--host <host>]")
@@ -175,6 +181,7 @@ func printUsage() {
 	logs.Info("  tab-open [--host <host>] [--url <url>]")
 	logs.Info("  tab-close [--host <host>] [--index <n>]")
 	logs.Info("  close [--host <host>]")
+	logs.Info("  close-all [--host <host>] [--role <role>]")
 	logs.Info("  click-aria [--host <host>] --label <aria-label>")
 	logs.Info("  type-aria [--host <host>] --label <aria-label> --value <text>")
 	logs.Info("  wait-aria [--host <host>] --label <aria-label> [--timeout-ms 5000]")
@@ -196,7 +203,35 @@ func printUsage() {
 }
 
 func buildLocalBinary() error {
-	return buildBinaryFor(filepath.Join("..", "bin", binaryName(runtime.GOOS, runtime.GOARCH)), runtime.GOOS, runtime.GOARCH)
+	return buildBinaryFor(localBinaryPathFor(runtime.GOOS, runtime.GOARCH), runtime.GOOS, runtime.GOARCH)
+}
+
+func defaultChromeTestHost() string {
+	if v := strings.TrimSpace(os.Getenv("DIALTONE_CHROME_TEST_HOST")); v != "" {
+		return v
+	}
+	if strings.TrimSpace(os.Getenv("WSL_DISTRO_NAME")) == "" {
+		return ""
+	}
+	if _, err := sshv1.ResolveMeshNode("legion"); err == nil {
+		return "legion"
+	}
+	return ""
+}
+
+func hasFlag(args []string, name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	prefix := name + "="
+	for _, arg := range args {
+		arg = strings.TrimSpace(arg)
+		if arg == name || strings.HasPrefix(arg, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func handleDeploy(args []string) error {
@@ -239,6 +274,43 @@ func handleService(args []string) error {
 	return nil
 }
 
+func handleInstances(args []string) error {
+	fs := flag.NewFlagSet("chrome src_v3 instances", flag.ExitOnError)
+	host := fs.String("host", "", "Mesh host (optional; default local)")
+	role := fs.String("role", "", "Chrome role filter")
+	_ = fs.Parse(args)
+	targetHost := defaultHostLabel(*host)
+	replIndexInfof("chrome instances: scanning managed chrome browsers on %s", targetHost)
+	resources, err := listResourcesByTarget(strings.TrimSpace(*host), true)
+	if err != nil {
+		return err
+	}
+	summaries := summarizeManagedResources(resources, strings.TrimSpace(*role))
+	active := make([]managedRoleSummary, 0, len(summaries))
+	totalBrowsers := 0
+	for _, item := range summaries {
+		if len(item.BrowserPIDs) == 0 {
+			continue
+		}
+		active = append(active, item)
+		totalBrowsers += len(item.BrowserPIDs)
+	}
+	replIndexInfof("chrome instances: found %d managed browser instance(s) across %d role(s) on %s", totalBrowsers, len(active), targetHost)
+	for _, item := range active {
+		fmt.Printf("INSTANCE role=%s browser_count=%d browser_pids=%s daemon_count=%d daemon_pids=%s headless=%t windows=%t\n",
+			item.Role,
+			len(item.BrowserPIDs),
+			formatPIDList(item.BrowserPIDs),
+			len(item.DaemonPIDs),
+			formatPIDList(item.DaemonPIDs),
+			item.IsHeadless,
+			item.IsWindows,
+		)
+	}
+	fmt.Printf("TOTAL browser_count=%d role_count=%d\n", totalBrowsers, len(active))
+	return nil
+}
+
 func handleRequestCommand(command string, args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 "+command, flag.ExitOnError)
 	host := fs.String("host", "", "Mesh host (optional; default local)")
@@ -267,12 +339,71 @@ func handleRequestCommand(command string, args []string) error {
 	return nil
 }
 
+func handleCloseAll(args []string) error {
+	fs := flag.NewFlagSet("chrome src_v3 close-all", flag.ExitOnError)
+	host := fs.String("host", "", "Mesh host (optional; default local)")
+	role := fs.String("role", "", "Chrome role filter")
+	_ = fs.Parse(args)
+	targetHost := defaultHostLabel(*host)
+	replIndexInfof("chrome close-all: closing managed chrome browsers on %s", targetHost)
+	before, after, err := closeManagedBrowsersByTarget(strings.TrimSpace(*host), strings.TrimSpace(*role))
+	if err != nil {
+		return err
+	}
+	activeBefore := make([]managedRoleSummary, 0, len(before))
+	for _, item := range before {
+		if len(item.BrowserPIDs) == 0 {
+			continue
+		}
+		activeBefore = append(activeBefore, item)
+	}
+	beforeByRole := map[string]managedRoleSummary{}
+	for _, item := range activeBefore {
+		beforeByRole[item.Role] = item
+	}
+	afterByRole := map[string]managedRoleSummary{}
+	for _, item := range after {
+		afterByRole[item.Role] = item
+	}
+	totalClosed := 0
+	totalRemaining := 0
+	for _, item := range activeBefore {
+		remaining := afterByRole[item.Role]
+		closed := len(item.BrowserPIDs) - len(remaining.BrowserPIDs)
+		if closed < 0 {
+			closed = 0
+		}
+		totalClosed += closed
+		totalRemaining += len(remaining.BrowserPIDs)
+		fmt.Printf("CLOSE role=%s before=%d after=%d browser_pids_before=%s browser_pids_after=%s daemon_count=%d\n",
+			item.Role,
+			len(item.BrowserPIDs),
+			len(remaining.BrowserPIDs),
+			formatPIDList(item.BrowserPIDs),
+			formatPIDList(remaining.BrowserPIDs),
+			len(beforeByRole[item.Role].DaemonPIDs),
+		)
+	}
+	replIndexInfof("chrome close-all: closed %d managed browser instance(s) on %s", totalClosed, targetHost)
+	fmt.Printf("TOTAL closed_browser_count=%d remaining_browser_count=%d role_count=%d\n", totalClosed, totalRemaining, len(activeBefore))
+	if totalRemaining > 0 {
+		return fmt.Errorf("managed chrome instances still running on %s", targetHost)
+	}
+	return nil
+}
+
 func handleSmokeTest(args []string) error {
 	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
 	if goBin == "" {
 		goBin = "go"
 	}
-	runArgs := append([]string{"run", "./plugins/chrome/src_v3/test/cmd/main.go"}, args...)
+	runArgs := []string{"run", "./plugins/chrome/src_v3/test/cmd/main.go"}
+	if !hasFlag(args, "--host") {
+		if host := defaultChromeTestHost(); host != "" {
+			runArgs = append(runArgs, "--host", host)
+		}
+	}
+	runArgs = append(runArgs, args...)
 	cmd := exec.Command(goBin, runArgs...)
 	cmd.Dir = resolveSrcRoot()
 	cmd.Stdout = os.Stdout
@@ -450,25 +581,19 @@ func handleScreenshotCommand(args []string) error {
 	replIndexInfof("chrome screenshot: capturing managed tab on %s role=%s", targetHost, strings.TrimSpace(*role))
 	replIndexInfof("chrome service: ensuring daemon on %s role=%s", targetHost, strings.TrimSpace(*role))
 	resp, err := sendCommandByTarget(strings.TrimSpace(*host), commandRequest{
-		Command: "screenshot",
-		Role:    strings.TrimSpace(*role),
+		Command:   "screenshot",
+		Role:      strings.TrimSpace(*role),
+		TimeoutMS: 60000,
 	}, true)
 	if err != nil {
 		return err
 	}
-	data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(resp.ScreenshotB64))
-	if err != nil {
-		return fmt.Errorf("decode screenshot: %w", err)
-	}
 	targetPath := strings.TrimSpace(*outPath)
+	if err := saveScreenshotOutput(strings.TrimSpace(*host), resp, targetPath); err != nil {
+		return err
+	}
 	if !filepath.IsAbs(targetPath) {
 		targetPath = filepath.Join(resolveRepoRoot(), targetPath)
-	}
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(targetPath, data, 0644); err != nil {
-		return err
 	}
 	replIndexInfof("chrome screenshot: saved to %s", targetPath)
 	printResponse(resp)
@@ -478,7 +603,7 @@ func handleScreenshotCommand(args []string) error {
 
 func handleActionSmokeTest(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 test-actions", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host (optional; default local)")
+	host := fs.String("host", defaultChromeTestHost(), "Mesh host (optional; default local)")
 	role := fs.String("role", defaultRole, "Chrome role")
 	outPath := fs.String("out", filepath.Join(os.TempDir(), "chrome-src-v3-actions.png"), "Local PNG output path")
 	_ = fs.Parse(args)
@@ -492,7 +617,7 @@ func handleActionSmokeTest(args []string) error {
 		{Command: "wait-log", Role: *role, Contains: "typed:dialtone:" + marker, TimeoutMS: 8000},
 		{Command: "click-aria", Role: *role, AriaLabel: "Do Thing"},
 		{Command: "wait-log", Role: *role, Contains: "clicked:" + marker, TimeoutMS: 8000},
-		{Command: "screenshot", Role: *role},
+		{Command: "screenshot", Role: *role, TimeoutMS: 60000},
 	}
 	for _, step := range steps {
 		resp, err := sendCommandByTarget(strings.TrimSpace(*host), step, true)
@@ -500,25 +625,127 @@ func handleActionSmokeTest(args []string) error {
 			return fmt.Errorf("%s failed: %w", step.Command, err)
 		}
 		if step.Command == "screenshot" {
-			data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(resp.ScreenshotB64))
-			if err != nil {
-				return fmt.Errorf("decode screenshot: %w", err)
-			}
 			targetPath := strings.TrimSpace(*outPath)
+			if err := saveScreenshotOutput(strings.TrimSpace(*host), resp, targetPath); err != nil {
+				return err
+			}
 			if !filepath.IsAbs(targetPath) {
 				targetPath = filepath.Join(resolveRepoRoot(), targetPath)
-			}
-			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
-				return err
-			}
-			if err := os.WriteFile(targetPath, data, 0644); err != nil {
-				return err
 			}
 			fmt.Printf("SCREENSHOT_SAVED %s\n", targetPath)
 		}
 		printResponse(resp)
 	}
 	return nil
+}
+
+func saveScreenshotOutput(host string, resp *commandResponse, outPath string) error {
+	if resp == nil {
+		return fmt.Errorf("missing screenshot response")
+	}
+	targetPath := strings.TrimSpace(outPath)
+	if targetPath == "" {
+		return fmt.Errorf("screenshot output path is required")
+	}
+	if !filepath.IsAbs(targetPath) {
+		targetPath = filepath.Join(resolveRepoRoot(), targetPath)
+	}
+	data, err := screenshotBytesForTarget(strings.TrimSpace(host), resp)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(targetPath, data, 0o644)
+}
+
+func WriteScreenshotByTarget(host string, resp *CommandResponse, outPath string) error {
+	return saveScreenshotOutput(strings.TrimSpace(host), resp, strings.TrimSpace(outPath))
+}
+
+func screenshotBytesForTarget(host string, resp *commandResponse) ([]byte, error) {
+	if resp == nil {
+		return nil, fmt.Errorf("missing screenshot response")
+	}
+	if raw := strings.TrimSpace(resp.ScreenshotB64); raw != "" {
+		data, err := base64.StdEncoding.DecodeString(raw)
+		if err != nil {
+			return nil, fmt.Errorf("decode screenshot: %w", err)
+		}
+		return data, nil
+	}
+	path := strings.TrimSpace(resp.ScreenshotPath)
+	if path == "" {
+		return nil, fmt.Errorf("screenshot response missing data and path")
+	}
+	if isLocalHost(host) {
+		return os.ReadFile(path)
+	}
+	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(host))
+	if err != nil {
+		return nil, err
+	}
+	var out string
+	if strings.EqualFold(strings.TrimSpace(node.OS), "windows") || node.PreferWSLPowerShell {
+		cmd := fmt.Sprintf("$p=%s; if (!(Test-Path -LiteralPath $p)) { throw ('missing screenshot artifact: ' + $p) }; [Convert]::ToBase64String([IO.File]::ReadAllBytes($p))", psSingleQuoted(path))
+		out, err = sshv1.RunNodeCommand(node.Name, cmd, sshv1.CommandOptions{})
+	} else {
+		cmd := fmt.Sprintf("base64 -w0 %s", shellSingleQuoted(path))
+		out, err = sshv1.RunNodeCommand(node.Name, cmd, sshv1.CommandOptions{})
+	}
+	if err != nil {
+		return nil, err
+	}
+	payload := extractBase64Payload(out)
+	data, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return nil, fmt.Errorf("decode remote screenshot artifact: %w", err)
+	}
+	return data, nil
+}
+
+func extractBase64Payload(raw string) string {
+	raw = strings.TrimSpace(strings.TrimPrefix(raw, "\ufeff"))
+	if raw == "" {
+		return ""
+	}
+	best := ""
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(strings.TrimPrefix(line, "\ufeff"))
+		if line == "" {
+			continue
+		}
+		if isBase64Line(line) && len(line) > len(best) {
+			best = line
+		}
+	}
+	if best != "" {
+		return best
+	}
+	return raw
+}
+
+func isBase64Line(v string) bool {
+	for _, r := range v {
+		switch {
+		case r >= 'A' && r <= 'Z':
+		case r >= 'a' && r <= 'z':
+		case r >= '0' && r <= '9':
+		case r == '+', r == '/', r == '=', r == '-', r == '_':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func psSingleQuoted(v string) string {
+	return "'" + strings.ReplaceAll(v, "'", "''") + "'"
+}
+
+func shellSingleQuoted(v string) string {
+	return "'" + strings.ReplaceAll(v, "'", `'"'"'`) + "'"
 }
 
 func actionSmokeHTML(marker string) string {
