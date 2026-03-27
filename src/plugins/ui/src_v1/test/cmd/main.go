@@ -28,7 +28,7 @@ func main() {
 	logs.SetOutput(os.Stdout)
 	fs := flag.NewFlagSet("ui test", flag.ContinueOnError)
 	commonFlags := testv1.BindCommonTestFlags(fs, testv1.CommonTestCLIOptions{
-		ActionsPerMinute: 360,
+		ActionsPerMinute: 300,
 	})
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

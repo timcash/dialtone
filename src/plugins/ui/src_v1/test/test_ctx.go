@@ -10,21 +10,24 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
+	testv1 "dialtone/dev/plugins/test/src_v1/go"
 	uiv1 "dialtone/dev/plugins/ui/src_v1/go"
 )
 
 type TestContext struct {
-	mu        sync.Mutex
-	repoRoot  string
-	appDir    string
-	distDir   string
-	server    *http.Server
-	serverURL string
-	built     bool
-	stepCtx   *StepContext
+	mu         sync.Mutex
+	repoRoot   string
+	pluginDir  string
+	appDir     string
+	distDir    string
+	server     *http.Server
+	serverURL  string
+	built      bool
+	devStarted bool
+	stepCtx    *StepContext
 }
 
 var (
@@ -99,6 +102,12 @@ func (t *TestContext) ensureAttachDevServerLocked() error {
 	if err := t.ensurePathsLocked(); err != nil {
 		return err
 	}
+	if !t.built {
+		if err := t.buildFixtureLocked(); err != nil {
+			return err
+		}
+		t.built = true
+	}
 	const localDevURL = "http://127.0.0.1:5177"
 	t.serverURL = localDevURL
 
@@ -107,25 +116,28 @@ func (t *TestContext) ensureAttachDevServerLocked() error {
 		return nil
 	}
 
-	t.logf("LOOKING FOR: starting persistent ui dev server in background at %s", localDevURL)
-	logFile, err := os.OpenFile("/tmp/ui_src_v1_dev.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return fmt.Errorf("open dev log file: %w", err)
+	if !t.devStarted {
+		t.devStarted = true
+		t.logf("LOOKING FOR: starting persistent ui dev server in background at %s", localDevURL)
+		go func(repoRoot, pluginDir, uiDir string) {
+			_ = os.Setenv("UI_DEV_BROWSER_MODE", "none")
+			if err := testv1.RunDev(testv1.DevOptions{
+				RepoRoot:          repoRoot,
+				PluginDir:         pluginDir,
+				UIDir:             uiDir,
+				DevPort:           5177,
+				DevHost:           "127.0.0.1",
+				DevPublicURL:      localDevURL,
+				Role:              "ui-dev",
+				BrowserMetaPath:   filepath.Join(pluginDir, "dev.browser.json"),
+				BrowserModeEnvVar: "UI_DEV_BROWSER_MODE",
+				NATSURL:           ResolveSuiteNATSURL(),
+				NATSSubject:       "logs.dev.ui.src-v1",
+			}); err != nil {
+				t.logf("WARN: background ui dev server exited: %v", err)
+			}
+		}(t.repoRoot, t.pluginDir, t.appDir)
 	}
-	defer logFile.Close()
-
-	cmd := exec.Command("./dialtone.sh", "ui", "src_v1", "dev")
-	cmd.Dir = t.repoRoot
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	env := append([]string{}, os.Environ()...)
-	env = append(env, "UI_DEV_BROWSER_MODE=none")
-	cmd.Env = env
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start detached ui dev server: %w", err)
-	}
-	_ = cmd.Process.Release()
 	if err := waitHTTP(localDevURL, 45*time.Second); err != nil {
 		return fmt.Errorf("background ui dev server did not become ready at %s: %w", localDevURL, err)
 	}
@@ -142,6 +154,7 @@ func (t *TestContext) ensurePathsLocked() error {
 		return err
 	}
 	t.repoRoot = paths.Runtime.RepoRoot
+	t.pluginDir = paths.PluginVersionRoot
 	t.appDir = paths.FixtureApp
 	t.distDir = filepath.Join(t.appDir, "dist")
 	return nil
@@ -225,11 +238,7 @@ func waitHTTP(url string, timeout time.Duration) error {
 }
 
 func bunBin() string {
-	envDir := strings.TrimSpace(os.Getenv("DIALTONE_ENV"))
-	if envDir == "" {
-		return "bun"
-	}
-	candidate := filepath.Join(envDir, "bun", "bin", "bun")
+	candidate := configv1.ManagedBunBinPath(configv1.LookupEnvString("DIALTONE_ENV"))
 	if _, err := os.Stat(candidate); err == nil {
 		return candidate
 	}

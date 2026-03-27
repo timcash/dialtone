@@ -2,7 +2,6 @@ package test
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,6 +19,7 @@ import (
 	"time"
 
 	chrome "dialtone/dev/plugins/chrome/src_v3"
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"dialtone/dev/plugins/logs/src_v1/go"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/page"
@@ -746,14 +746,11 @@ func (s *BrowserSession) CaptureScreenshot(path string) (err error) {
 		if err != nil {
 			return err
 		}
-		if strings.TrimSpace(resp.ScreenshotB64) == "" {
-			return fmt.Errorf("service screenshot returned empty payload")
+		host := ""
+		if cs := s.ChromeSession(); cs != nil {
+			host = strings.TrimSpace(cs.Host)
 		}
-		raw, err := base64.StdEncoding.DecodeString(resp.ScreenshotB64)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(path, raw, 0644)
+		return chrome.WriteScreenshotByTarget(host, resp, path)
 	}
 	defer func() {
 		if r := recover(); r != nil {
@@ -1617,9 +1614,21 @@ func (sc *StepContext) CaptureScreenshot(path string) error {
 		}
 	}
 	if err := b.CaptureScreenshot(path); err != nil {
+		// Best-effort recovery for remote/stale-target runs.
+		if recErr := b.EnsureOpenPage(); recErr != nil {
+			return err
+		}
+		if retryErr := b.CaptureScreenshot(path); retryErr != nil {
+			return err
+		}
+	}
+	if err := sc.AddScreenshot(path); err != nil {
 		return err
 	}
-	return sc.AddScreenshot(path)
+	sc.logMu.Lock()
+	sc.autoShotDone = true
+	sc.logMu.Unlock()
+	return nil
 }
 
 func (sc *StepContext) snapshotStepScreenshots() []string {
@@ -1676,7 +1685,7 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 
 	natsURL := strings.TrimSpace(opts.NATSURL)
 	if natsURL == "" {
-		natsURL = "nats://127.0.0.1:4222"
+		natsURL = configv1.ResolveREPLNATSURL()
 	}
 	natsListenURL := strings.TrimSpace(opts.NATSListenURL)
 	autoStart := opts.AutoStartNATS

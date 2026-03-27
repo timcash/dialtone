@@ -219,14 +219,19 @@ func cleanupChromeProfileLocks(profileDir string) error {
 	return nil
 }
 
-func startDetachedWindowsProcess(exePath string, args []string) (int, error) {
+func startDetachedWindowsProcess(exePath string, args []string, hidden bool) (int, error) {
 	quotedArgs := make([]string, 0, len(args))
 	for _, arg := range args {
 		quotedArgs = append(quotedArgs, psQuote(arg))
 	}
-	script := fmt.Sprintf("$p = Start-Process -FilePath %s -ArgumentList @(%s) -WindowStyle Hidden -PassThru; $p.Id",
+	windowStyle := "Normal"
+	if hidden {
+		windowStyle = "Hidden"
+	}
+	script := fmt.Sprintf("$p = Start-Process -FilePath %s -ArgumentList @(%s) -WindowStyle %s -PassThru; $p.Id",
 		psQuote(windowsPath(exePath)),
 		strings.Join(quotedArgs, ","),
+		windowStyle,
 	)
 	out, err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput()
 	if err != nil {

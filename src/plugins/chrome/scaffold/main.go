@@ -5,7 +5,6 @@ import (
 	"os"
 
 	chromev3 "dialtone/dev/plugins/chrome/src_v3"
-	chromev4cli "dialtone/dev/plugins/chrome/src_v4/cli"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
@@ -24,10 +23,8 @@ func main() {
 			os.Exit(1)
 		}
 	} else if version == "src_v4" {
-		if err := chromev4cli.Run(rest); err != nil {
-			logs.Error("chrome src_v4 error: %v", err)
-			os.Exit(1)
-		}
+		logs.Error("chrome src_v4 is not available in this checkout")
+		os.Exit(1)
 	} else {
 		printUsage()
 		os.Exit(1)

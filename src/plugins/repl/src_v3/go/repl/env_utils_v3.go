@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 )
 
 func resolveRoots() (repoRoot, srcRoot string, err error) {
@@ -32,6 +34,9 @@ func resolveConfigPath() (string, error) {
 	raw := strings.TrimSpace(os.Getenv("DIALTONE_MESH_CONFIG"))
 	if raw != "" {
 		return raw, nil
+	}
+	if resolved := strings.TrimSpace(configv1.ResolveEnvFilePath("")); resolved != "" {
+		return resolved, nil
 	}
 	repoRoot, _, err := resolveRoots()
 	if err != nil {

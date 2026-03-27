@@ -2,6 +2,7 @@ package src_v3
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -12,7 +13,9 @@ import (
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
+	"github.com/chromedp/cdproto/cdp"
 	cdruntime "github.com/chromedp/cdproto/runtime"
+	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 )
 
@@ -172,28 +175,93 @@ func (d *daemonState) ensureManagedTab() error {
 		return nil
 	}
 	allocCtx := d.allocCtx
+	chromePort := d.chromePort
 	d.mu.Unlock()
 	if allocCtx == nil {
 		return errBrowserClosed
 	}
-	tabCtx, cancel := chromedp.NewContext(allocCtx)
-	err := chromedp.Run(tabCtx)
+
+	if targetID, err := firstPageTargetID(chromePort); err == nil && strings.TrimSpace(targetID) != "" {
+		tabCtx, cancel, attachErr := newManagedTabContext(allocCtx, targetID)
+		if attachErr == nil {
+			d.attachManagedTab(tabCtx, cancel)
+			return nil
+		}
+		logs.Warn("chrome src_v3 failed to bind first page target %s: %v", targetID, attachErr)
+	}
+
+	tabCtx, cancel, err := newManagedTabContext(allocCtx, "")
 	if err != nil {
-		cancel()
 		return err
 	}
 	d.attachManagedTab(tabCtx, cancel)
 	return nil
 }
 
+func newManagedTabContext(allocCtx context.Context, targetID string) (context.Context, context.CancelFunc, error) {
+	ctxOpts := []chromedp.ContextOption{}
+	if strings.TrimSpace(targetID) != "" {
+		ctxOpts = append(ctxOpts, chromedp.WithTargetID(target.ID(strings.TrimSpace(targetID))))
+	}
+	tabCtx, cancel := chromedp.NewContext(allocCtx, ctxOpts...)
+	if err := chromedp.Run(tabCtx); err != nil {
+		cancel()
+		return nil, nil, err
+	}
+	return tabCtx, cancel, nil
+}
+
+type devtoolsTargetInfo struct {
+	ID   string `json:"id"`
+	Type string `json:"type"`
+	URL  string `json:"url"`
+}
+
+func firstPageTargetID(port int) (string, error) {
+	if port <= 0 {
+		return "", fmt.Errorf("chrome debug port unavailable")
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/json/list", port))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected devtools target status: %s", resp.Status)
+	}
+	var targets []devtoolsTargetInfo
+	if err := json.NewDecoder(resp.Body).Decode(&targets); err != nil {
+		return "", err
+	}
+	for _, t := range targets {
+		if strings.TrimSpace(t.Type) != "page" {
+			continue
+		}
+		if id := strings.TrimSpace(t.ID); id != "" {
+			return id, nil
+		}
+	}
+	return "", fmt.Errorf("no page target found")
+}
+
 func (d *daemonState) attachManagedTab(tabCtx context.Context, cancel context.CancelFunc) {
+	managedTarget := "managed"
+	if chromeCtx := chromedp.FromContext(tabCtx); chromeCtx != nil && chromeCtx.Target != nil {
+		if targetID := strings.TrimSpace(string(chromeCtx.Target.TargetID)); targetID != "" {
+			managedTarget = targetID
+		}
+	}
 	d.mu.Lock()
 	d.tabCtx = tabCtx
 	d.cancelTab = cancel
-	d.managedTarget = "managed"
+	d.managedTarget = managedTarget
 	d.currentURL = "about:blank"
 	d.consoleLines = nil
 	d.mu.Unlock()
+	if err := d.pruneExtraPageTargets(); err != nil {
+		logs.Warn("chrome src_v3 unable to prune extra tabs for role=%s: %v", d.role, err)
+	}
 	d.persistState()
 	chromedp.ListenTarget(tabCtx, func(ev interface{}) {
 		switch ev := ev.(type) {
@@ -207,6 +275,44 @@ func (d *daemonState) attachManagedTab(tabCtx context.Context, cancel context.Ca
 			d.appendConsoleLine(strings.TrimSpace(ev.ExceptionDetails.Text))
 		}
 	})
+}
+
+func (d *daemonState) pruneExtraPageTargets() error {
+	d.mu.Lock()
+	tabCtx := d.tabCtx
+	managedTarget := strings.TrimSpace(d.managedTarget)
+	d.mu.Unlock()
+	if tabCtx == nil {
+		return errBrowserClosed
+	}
+	chromeCtx := chromedp.FromContext(tabCtx)
+	if chromeCtx == nil || chromeCtx.Browser == nil {
+		return fmt.Errorf("browser executor unavailable for tab pruning")
+	}
+	if managedTarget == "" && chromeCtx.Target != nil {
+		managedTarget = strings.TrimSpace(string(chromeCtx.Target.TargetID))
+	}
+	if managedTarget == "" {
+		return fmt.Errorf("managed target unavailable for tab pruning")
+	}
+	browserExecCtx := cdp.WithExecutor(tabCtx, chromeCtx.Browser)
+	targets, err := target.GetTargets().Do(browserExecCtx)
+	if err != nil {
+		return err
+	}
+	for _, t := range targets {
+		if t == nil || t.Type != "page" {
+			continue
+		}
+		targetID := strings.TrimSpace(string(t.TargetID))
+		if targetID == "" || targetID == managedTarget {
+			continue
+		}
+		if err := target.CloseTarget(t.TargetID).Do(browserExecCtx); err != nil {
+			logs.Warn("chrome src_v3 failed closing extra target %s: %v", targetID, err)
+		}
+	}
+	return nil
 }
 
 func (d *daemonState) recreateManagedTab() error {
@@ -270,7 +376,7 @@ func (d *daemonState) installAllocator(wsURL string) {
 
 func (d *daemonState) startBrowserProcess() (int, error) {
 	if runtime.GOOS == "windows" {
-		return startDetachedWindowsProcess(d.chromePath, d.browserArgs())
+		return startDetachedWindowsProcess(d.chromePath, d.browserArgs(), chromeHeadlessEnabled())
 	}
 	cmd := exec.Command(d.chromePath, d.browserArgs()...)
 	if err := cmd.Start(); err != nil {
@@ -280,7 +386,7 @@ func (d *daemonState) startBrowserProcess() (int, error) {
 }
 
 func (d *daemonState) browserArgs() []string {
-	return []string{
+	args := []string{
 		fmt.Sprintf("--remote-debugging-port=%d", d.chromePort),
 		"--remote-debugging-address=127.0.0.1",
 		"--remote-allow-origins=*",
@@ -290,8 +396,18 @@ func (d *daemonState) browserArgs() []string {
 		"--no-first-run",
 		"--no-default-browser-check",
 		"--disable-gpu",
-		"about:blank",
 	}
+	if runtime.GOOS == "windows" {
+		if chromeHeadlessEnabled() {
+			args = append(args,
+				"--headless=new",
+				"--hide-scrollbars",
+			)
+		}
+		args = append(args, "--window-size=1440,960")
+	}
+	args = append(args, "about:blank")
+	return args
 }
 
 func (d *daemonState) withManagedContext(timeout time.Duration, fn func(context.Context) error) error {

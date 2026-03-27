@@ -10,6 +10,9 @@
   "GH_TOKEN": "",
   "DIALTONE_REPO_ROOT": "/home/user/dialtone",
   "DIALTONE_USE_NIX": "0",
+  "DIALTONE_CHROME_SRC_V3_ACTIONS_PER_SECOND": "5.0",
+  "DIALTONE_CHROME_SRC_V3_INTERACTION_COUNT": "6",
+  "DIALTONE_CHROME_SRC_V3_HEADLESS": "0",
   "camera_src_v1_install": {
     "tools": [
       {
@@ -50,6 +53,28 @@
       "os": "linux",
       "repo_candidates": [
         "/home/user/dialtone"
+      ]
+    },
+    {
+      "name": "legion",
+      "aliases": [
+        "legion",
+        "windows"
+      ],
+      "user": "timca",
+      "host": "legion",
+      "host_candidates": [
+        "legion"
+      ],
+      "route_preference": [
+        "private"
+      ],
+      "port": "22",
+      "os": "windows",
+      "prefer_wsl_powershell": true,
+      "repo_candidates": [
+        "C:\\Users\\timca\\dialtone",
+        "/mnt/c/Users/timca/dialtone"
       ]
     }
   ]

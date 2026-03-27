@@ -301,7 +301,7 @@ type devNATSLogger struct {
 func newDevNATSLogger(opts DevOptions) (*devNATSLogger, error) {
 	natsURL := strings.TrimSpace(opts.NATSURL)
 	if natsURL == "" {
-		natsURL = "nats://127.0.0.1:4222"
+		natsURL = configv1.ResolveREPLNATSURL()
 	}
 	subject := strings.TrimSpace(opts.NATSSubject)
 	if subject == "" {

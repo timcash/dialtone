@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 	"github.com/nats-io/nats.go"
@@ -40,8 +41,12 @@ func localServiceStderrPath(role string) string {
 	return filepath.Join(localServiceRoot(role), "daemon.err.log")
 }
 
+func localBinaryPathFor(goos, goarch string) string {
+	return configv1.PluginBinaryPath(configv1.Runtime{RepoRoot: resolveRepoRoot()}, "chrome", "src_v3", binaryName(goos, goarch))
+}
+
 func localBinaryPath() string {
-	return filepath.Join(resolveRepoRoot(), "bin", binaryName(runtime.GOOS, runtime.GOARCH))
+	return localBinaryPathFor(runtime.GOOS, runtime.GOARCH)
 }
 
 func ensureLocalBinary() (string, error) {

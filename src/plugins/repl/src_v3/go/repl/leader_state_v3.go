@@ -74,7 +74,10 @@ func writeLeaderState(st LeaderState) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, raw, 0o644)
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		return err
+	}
+	return syncLeaderRuntimeConfig(st)
 }
 
 func buildLeaderState(usedURL, tsnetURL, room, hostName, serverID string, embedded bool, startedAt time.Time) LeaderState {
@@ -141,6 +144,80 @@ func markLeaderStopped() {
 	st.StoppedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	st.LastHealthyAt = st.StoppedAt
 	_ = writeLeaderState(st)
+}
+
+func syncLeaderRuntimeConfig(st LeaderState) error {
+	managerURL := strings.TrimSpace(st.TSNetNATSURL)
+	if managerURL == "" && st.Running {
+		managerURL = strings.TrimSpace(st.NATSURL)
+	}
+	updates := map[string]any{
+		"DIALTONE_REPL_RUNNING":         "0",
+		"DIALTONE_REPL_ROOM":            sanitizeRoom(st.Room),
+		"DIALTONE_REPL_HOSTNAME":        normalizePromptName(st.HostName),
+		"DIALTONE_REPL_SERVER_ID":       strings.TrimSpace(st.ServerID),
+		"DIALTONE_REPL_LAST_HEALTHY_AT": strings.TrimSpace(st.LastHealthyAt),
+	}
+	if strings.TrimSpace(st.StartedAt) != "" {
+		updates["DIALTONE_REPL_STARTED_AT"] = strings.TrimSpace(st.StartedAt)
+	}
+	if st.Running {
+		updates["DIALTONE_REPL_RUNNING"] = "1"
+		if raw := strings.TrimSpace(st.NATSURL); raw != "" {
+			updates["DIALTONE_REPL_NATS_URL"] = raw
+			_ = os.Setenv("DIALTONE_REPL_NATS_URL", raw)
+		}
+		if raw := strings.TrimSpace(managerURL); raw != "" {
+			updates["DIALTONE_REPL_MANAGER_NATS_URL"] = raw
+			_ = os.Setenv("DIALTONE_REPL_MANAGER_NATS_URL", raw)
+		}
+		if raw := strings.TrimSpace(st.TSNetNATSURL); raw != "" {
+			updates["DIALTONE_REPL_TSNET_NATS_URL"] = raw
+			_ = os.Setenv("DIALTONE_REPL_TSNET_NATS_URL", raw)
+		} else {
+			updates["DIALTONE_REPL_TSNET_NATS_URL"] = nil
+			_ = os.Unsetenv("DIALTONE_REPL_TSNET_NATS_URL")
+		}
+		if raw := strings.TrimSpace(st.BootstrapHTTPURL); raw != "" {
+			updates["DIALTONE_REPL_BOOTSTRAP_HTTP_URL"] = raw
+		} else {
+			updates["DIALTONE_REPL_BOOTSTRAP_HTTP_URL"] = nil
+		}
+	} else {
+		for _, key := range []string{
+			"DIALTONE_REPL_NATS_URL",
+			"DIALTONE_REPL_MANAGER_NATS_URL",
+			"DIALTONE_REPL_TSNET_NATS_URL",
+			"DIALTONE_REPL_BOOTSTRAP_HTTP_URL",
+		} {
+			updates[key] = nil
+			_ = os.Unsetenv(key)
+		}
+	}
+	for _, pair := range []struct {
+		Key   string
+		Value string
+	}{
+		{Key: "DIALTONE_REPL_RUNNING", Value: "0"},
+		{Key: "DIALTONE_REPL_ROOM", Value: sanitizeRoom(st.Room)},
+		{Key: "DIALTONE_REPL_HOSTNAME", Value: normalizePromptName(st.HostName)},
+		{Key: "DIALTONE_REPL_SERVER_ID", Value: strings.TrimSpace(st.ServerID)},
+		{Key: "DIALTONE_REPL_LAST_HEALTHY_AT", Value: strings.TrimSpace(st.LastHealthyAt)},
+		{Key: "DIALTONE_REPL_STARTED_AT", Value: strings.TrimSpace(st.StartedAt)},
+	} {
+		if strings.TrimSpace(pair.Value) == "" {
+			_ = os.Unsetenv(pair.Key)
+			continue
+		}
+		_ = os.Setenv(pair.Key, pair.Value)
+	}
+	if st.Running {
+		_ = os.Setenv("DIALTONE_REPL_RUNNING", "1")
+	}
+	if err := configv1.UpdateRuntimeEnvFile("", updates); err != nil {
+		return err
+	}
+	return nil
 }
 
 func leaderHealth(natsURL string, timeout time.Duration) (LeaderState, error) {

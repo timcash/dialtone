@@ -118,13 +118,13 @@ func NATSExample(host, role string) string {
 }
 
 func KillDialtoneResources() error {
-	return nil
+	return killDialtoneResourcesLocal()
 }
 
 func ListResources(includeChrome bool) ([]Resource, error) {
-	return nil, nil
+	return listResourcesLocal(includeChrome)
 }
 
 func KillResource(pid int, isWindows bool) error {
-	return nil
+	return killResourceLocal(pid, isWindows)
 }

@@ -1,45 +1,56 @@
 package main
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	chromev3 "dialtone/dev/plugins/chrome/src_v3"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
+	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
 )
 
 func main() {
 	logs.SetOutput(os.Stdout)
+	defaultActionOptions := resolveActionFlowOptions()
 	fs := flag.NewFlagSet("chrome src_v3 test", flag.ContinueOnError)
 	host := fs.String("host", "", "Mesh host (optional; default local)")
 	role := fs.String("role", "dev", "Chrome role")
 	lines := fs.Int("lines", 80, "Remote daemon log lines to include")
 	filter := fs.String("filter", "", "Run only matching test steps")
+	interactions := fs.Int("interactions", defaultActionOptions.InteractionCount, "Number of visible browser interaction loops in the action step")
+	actionsPerSecond := fs.Float64("actions-per-second", defaultActionOptions.ActionsPerSecond, "Visible browser action rate for the action step")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		logs.Error("chrome src_v3 test parse failed: %v", err)
 		os.Exit(1)
 	}
 	hostValue := strings.TrimSpace(*host)
+	if hostValue == "" {
+		hostValue = defaultChromeTestHost()
+	}
 	roleValue := defaultIfBlank(strings.TrimSpace(*role), "dev")
 	reportNode := hostValue
 	if reportNode == "" {
 		reportNode = "local"
 	}
+	actionOptions := normalizeActionFlowOptions(actionFlowOptions{
+		InteractionCount: *interactions,
+		ActionsPerSecond: *actionsPerSecond,
+	})
 
 	reg := testv1.NewRegistry()
-	addChromeSuiteSteps(reg, hostValue, roleValue, *lines)
+	addChromeSuiteSteps(reg, hostValue, roleValue, *lines, actionOptions)
 	if filteredSteps := filterSteps(reg.Steps, strings.TrimSpace(*filter)); len(filteredSteps) > 0 {
 		reg.Steps = filteredSteps
 	}
 
-	logs.Info("chrome src_v3 test starting host=%s role=%s steps=%d", reportNode, roleValue, len(reg.Steps))
+	logs.Info("chrome src_v3 test starting host=%s role=%s steps=%d interactions=%d actions_per_second=%.3f", reportNode, roleValue, len(reg.Steps), actionOptions.InteractionCount, actionOptions.ActionsPerSecond)
 	if err := reg.Run(testv1.SuiteOptions{
 		Version:          "chrome-src-v3",
 		ReportPath:       "plugins/chrome/src_v3/TEST.md",
@@ -58,7 +69,25 @@ func main() {
 	logs.Info("chrome src_v3 test passed")
 }
 
-func addChromeSuiteSteps(reg *testv1.Registry, host, role string, lines int) {
+func defaultChromeTestHost() string {
+	if v := strings.TrimSpace(os.Getenv("DIALTONE_CHROME_TEST_HOST")); v != "" {
+		return v
+	}
+	if strings.TrimSpace(os.Getenv("WSL_DISTRO_NAME")) == "" {
+		return ""
+	}
+	if _, err := sshv1.ResolveMeshNode("legion"); err == nil {
+		return "legion"
+	}
+	return ""
+}
+
+type actionFlowOptions struct {
+	InteractionCount int
+	ActionsPerSecond float64
+}
+
+func addChromeSuiteSteps(reg *testv1.Registry, host, role string, lines int, actionOptions actionFlowOptions) {
 	reg.Add(testv1.Step{
 		Name:    "chrome-deploy-and-start",
 		Timeout: 120 * time.Second,
@@ -355,24 +384,16 @@ func addChromeSuiteSteps(reg *testv1.Registry, host, role string, lines int) {
 
 	reg.Add(testv1.Step{
 		Name:    "chrome-browser-actions-and-screenshot",
-		Timeout: 45 * time.Second,
+		Timeout: actionFlowTimeout(actionOptions),
 		RunWithContext: func(sc *testv1.StepContext) (testv1.StepRunResult, error) {
 			if _, err := chromev3.EnsureServiceByTarget(host, role, false); err != nil {
 				appendTargetLogsToStep(sc, host, role, lines)
 				return testv1.StepRunResult{}, fmt.Errorf("ensure service before actions: %w", err)
 			}
 			marker := fmt.Sprintf("%d", time.Now().UnixNano())
-			steps := []chromev3.CommandRequest{
-				{Command: "open", Role: role, URL: "about:blank"},
-				{Command: "set-html", Role: role, Value: actionSmokeHTML(marker)},
-				{Command: "wait-log", Role: role, Contains: "page-ready:" + marker, TimeoutMS: 8000},
-				{Command: "type-aria", Role: role, AriaLabel: "Name Input", Value: "dialtone"},
-				{Command: "wait-log", Role: role, Contains: "typed:dialtone:" + marker, TimeoutMS: 8000},
-				{Command: "click-aria", Role: role, AriaLabel: "Do Thing"},
-				{Command: "wait-log", Role: role, Contains: "clicked:" + marker, TimeoutMS: 8000},
-				{Command: "screenshot", Role: role},
-			}
+			steps := buildActionFlowRequests(role, marker, actionOptions)
 			var screenshotResp *chromev3.CommandResponse
+			lastTypedValue := ""
 			for _, step := range steps {
 				resp, err := chromev3.SendCommandByTarget(host, step)
 				if err != nil {
@@ -389,13 +410,41 @@ func addChromeSuiteSteps(reg *testv1.Registry, host, role string, lines int) {
 				if step.Command == "screenshot" {
 					screenshotResp = resp
 				}
+				if step.Command == "type-aria" {
+					lastTypedValue = step.Value
+				}
+				if step.Command == "eval" {
+					var snapshot struct {
+						Status string `json:"status"`
+						Count  string `json:"count"`
+						Value  string `json:"value"`
+					}
+					if err := json.Unmarshal([]byte(strings.TrimSpace(resp.Value)), &snapshot); err != nil {
+						appendTargetLogsToStep(sc, host, role, lines)
+						return testv1.StepRunResult{}, fmt.Errorf("decode action summary: %w", err)
+					}
+					expectedCount := fmt.Sprintf("%d", actionOptions.InteractionCount)
+					if strings.TrimSpace(snapshot.Count) != expectedCount {
+						appendTargetLogsToStep(sc, host, role, lines)
+						return testv1.StepRunResult{}, fmt.Errorf("unexpected action count: got=%q want=%q", strings.TrimSpace(snapshot.Count), expectedCount)
+					}
+					if strings.TrimSpace(snapshot.Value) != strings.TrimSpace(lastTypedValue) {
+						appendTargetLogsToStep(sc, host, role, lines)
+						return testv1.StepRunResult{}, fmt.Errorf("unexpected final input value: got=%q want=%q", strings.TrimSpace(snapshot.Value), strings.TrimSpace(lastTypedValue))
+					}
+					expectedStatus := fmt.Sprintf("clicked-%d", actionOptions.InteractionCount)
+					if strings.TrimSpace(snapshot.Status) != expectedStatus {
+						appendTargetLogsToStep(sc, host, role, lines)
+						return testv1.StepRunResult{}, fmt.Errorf("unexpected final status: got=%q want=%q", strings.TrimSpace(snapshot.Status), expectedStatus)
+					}
+				}
 			}
-			if screenshotResp == nil || strings.TrimSpace(screenshotResp.ScreenshotB64) == "" {
+			if screenshotResp == nil || (strings.TrimSpace(screenshotResp.ScreenshotB64) == "" && strings.TrimSpace(screenshotResp.ScreenshotPath) == "") {
 				appendTargetLogsToStep(sc, host, role, lines)
 				return testv1.StepRunResult{}, fmt.Errorf("screenshot response missing image data")
 			}
 			shotPath := filepath.Join("plugins", "chrome", "src_v3", "screenshots", fmt.Sprintf("chrome_src_v3_actions_%s.png", sanitizeToken(defaultIfBlank(host, "local"))))
-			if err := writeScreenshot(shotPath, screenshotResp.ScreenshotB64); err != nil {
+			if err := chromev3.WriteScreenshotByTarget(host, screenshotResp, shotPath); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 			if err := sc.AddScreenshot(shotPath); err != nil {
@@ -403,7 +452,7 @@ func addChromeSuiteSteps(reg *testv1.Registry, host, role string, lines int) {
 			}
 			appendTargetLogsToStep(sc, host, role, lines)
 			return testv1.StepRunResult{
-				Report: fmt.Sprintf("chrome src_v3 action flow passed on %s with screenshot capture", defaultIfBlank(host, "local")),
+				Report: fmt.Sprintf("chrome src_v3 action flow passed on %s with %d interactions at %.3f actions/s and screenshot capture", defaultIfBlank(host, "local"), actionOptions.InteractionCount, actionOptions.ActionsPerSecond),
 			}, nil
 		},
 	})
@@ -513,15 +562,87 @@ func logRemoteLogBlocks(sc *testv1.StepContext, stdout, stderr string) {
 	}
 }
 
-func writeScreenshot(path string, rawB64 string) error {
-	data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(rawB64))
-	if err != nil {
-		return fmt.Errorf("decode screenshot: %w", err)
+func resolveActionFlowOptions() actionFlowOptions {
+	return normalizeActionFlowOptions(actionFlowOptions{
+		InteractionCount: envIntDefault("DIALTONE_CHROME_SRC_V3_INTERACTION_COUNT", 6),
+		ActionsPerSecond: envFloatDefault("DIALTONE_CHROME_SRC_V3_ACTIONS_PER_SECOND", 1.0),
+	})
+}
+
+func normalizeActionFlowOptions(opts actionFlowOptions) actionFlowOptions {
+	if opts.InteractionCount <= 0 {
+		opts.InteractionCount = 1
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
+	return opts
+}
+
+func actionFlowTimeout(opts actionFlowOptions) time.Duration {
+	opts = normalizeActionFlowOptions(opts)
+	if opts.ActionsPerSecond <= 0 {
+		return 60 * time.Second
 	}
-	return os.WriteFile(path, data, 0644)
+	pacedCommands := 2 + (opts.InteractionCount * 2)
+	timeout := 30*time.Second + time.Duration(float64(pacedCommands)*float64(time.Second)/opts.ActionsPerSecond)
+	if timeout < 60*time.Second {
+		return 60 * time.Second
+	}
+	return timeout
+}
+
+func buildActionFlowRequests(role, marker string, opts actionFlowOptions) []chromev3.CommandRequest {
+	opts = normalizeActionFlowOptions(opts)
+	steps := []chromev3.CommandRequest{
+		{Command: "open", Role: role, URL: "about:blank", ActionsPerSecond: opts.ActionsPerSecond},
+		{Command: "set-html", Role: role, Value: actionSmokeHTML(marker), ActionsPerSecond: opts.ActionsPerSecond},
+		{Command: "wait-log", Role: role, Contains: "page-ready:" + marker, TimeoutMS: 8000},
+	}
+	for i := 1; i <= opts.InteractionCount; i++ {
+		value := fmt.Sprintf("dialtone-%02d", i)
+		steps = append(steps,
+			chromev3.CommandRequest{
+				Command:          "type-aria",
+				Role:             role,
+				AriaLabel:        "Name Input",
+				Value:            value,
+				ActionsPerSecond: opts.ActionsPerSecond,
+			},
+			chromev3.CommandRequest{
+				Command:   "wait-log",
+				Role:      role,
+				Contains:  fmt.Sprintf("typed:%s:%s", value, marker),
+				TimeoutMS: 8000,
+			},
+			chromev3.CommandRequest{
+				Command:          "click-aria",
+				Role:             role,
+				AriaLabel:        "Do Thing",
+				ActionsPerSecond: opts.ActionsPerSecond,
+			},
+			chromev3.CommandRequest{
+				Command:   "wait-log",
+				Role:      role,
+				Contains:  fmt.Sprintf("clicked:%d:%s", i, marker),
+				TimeoutMS: 8000,
+			},
+		)
+	}
+	steps = append(steps,
+		chromev3.CommandRequest{
+			Command: "eval",
+			Role:    role,
+			Script: `JSON.stringify({
+			  status: String((document.querySelector('[aria-label="Status"]') || {}).textContent || ""),
+			  count: String(window.__dialtoneClickCount || 0),
+			  value: String((document.querySelector('[aria-label="Name Input"]') || {}).value || "")
+			})`,
+		},
+		chromev3.CommandRequest{
+			Command:   "screenshot",
+			Role:      role,
+			TimeoutMS: 60000,
+		},
+	)
+	return steps
 }
 
 func actionSmokeHTML(marker string) string {
@@ -530,11 +651,36 @@ func actionSmokeHTML(marker string) string {
 <head><meta charset="utf-8"><title>chrome-src-v3-actions</title></head>
 <body>
   <input aria-label="Name Input" oninput="console.log('typed:' + this.value + ':%s')" />
-  <button aria-label="Do Thing" onclick="document.querySelector('[aria-label=&quot;Status&quot;]').textContent='clicked'; console.log('clicked:%s')">Go</button>
+  <button aria-label="Do Thing" onclick="window.__dialtoneClickCount=(window.__dialtoneClickCount||0)+1; document.querySelector('[aria-label=&quot;Status&quot;]').textContent='clicked-' + window.__dialtoneClickCount; console.log('clicked:' + window.__dialtoneClickCount + ':%s')">Go</button>
   <div aria-label="Status">idle</div>
+  <script>window.__dialtoneClickCount=0;</script>
   <script>console.log('page-ready:%s')</script>
 </body>
 </html>`, marker, marker, marker)
+}
+
+func envIntDefault(name string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return value
+}
+
+func envFloatDefault(name string, fallback float64) float64 {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return fallback
+	}
+	return value
 }
 
 func defaultIfBlank(v, fallback string) string {

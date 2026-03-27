@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -104,6 +105,152 @@ func EnvPath(rt Runtime) string {
 		return rt.EnvFile
 	}
 	return RepoPath(rt, "env", "dialtone.json")
+}
+
+func ResolveEnvFilePath(start string) string {
+	if envFile := strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE")); envFile != "" {
+		envFile = expandHome(envFile)
+		if abs, err := filepath.Abs(envFile); err == nil {
+			return abs
+		}
+		return envFile
+	}
+	if repoRoot := strings.TrimSpace(os.Getenv("DIALTONE_REPO_ROOT")); repoRoot != "" {
+		path := DefaultDialtoneJSONPath(expandHome(repoRoot))
+		if abs, err := filepath.Abs(path); err == nil {
+			return abs
+		}
+		return path
+	}
+	rt, err := ResolveRuntime(start)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(rt.EnvFile)
+}
+
+func ReadEnvFileMap(path string) (map[string]any, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return map[string]any{}, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]any{}, nil
+		}
+		return nil, err
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return map[string]any{}, nil
+	}
+	var doc map[string]any
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&doc); err != nil {
+		return nil, err
+	}
+	if doc == nil {
+		doc = map[string]any{}
+	}
+	return doc, nil
+}
+
+func WriteEnvFileMap(path string, doc map[string]any) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	if doc == nil {
+		doc = map[string]any{}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	return os.WriteFile(path, raw, 0o644)
+}
+
+func UpdateEnvFileValues(path string, updates map[string]any) error {
+	path = strings.TrimSpace(path)
+	if path == "" || len(updates) == 0 {
+		return nil
+	}
+	doc, err := ReadEnvFileMap(path)
+	if err != nil {
+		return err
+	}
+	for key, value := range updates {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if value == nil {
+			delete(doc, key)
+			continue
+		}
+		doc[key] = value
+	}
+	return WriteEnvFileMap(path, doc)
+}
+
+func UpdateRuntimeEnvFile(start string, updates map[string]any) error {
+	path := ResolveEnvFilePath(start)
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("env file path not resolved")
+	}
+	return UpdateEnvFileValues(path, updates)
+}
+
+func EnvFileString(path, key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+	doc, err := ReadEnvFileMap(path)
+	if err != nil {
+		return ""
+	}
+	return stringifyEnvValue(doc[key])
+}
+
+func LookupEnvString(key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+	if raw := strings.TrimSpace(os.Getenv(key)); raw != "" {
+		return raw
+	}
+	path := ResolveEnvFilePath("")
+	if path == "" {
+		return ""
+	}
+	return strings.TrimSpace(EnvFileString(path, key))
+}
+
+func ResolveREPLNATSURL() string {
+	if raw := LookupEnvString("DIALTONE_REPL_NATS_URL"); raw != "" {
+		return raw
+	}
+	return "nats://127.0.0.1:4222"
+}
+
+func ResolveREPLManagerNATSURL() string {
+	for _, key := range []string{
+		"DIALTONE_REPL_MANAGER_NATS_URL",
+		"DIALTONE_REPL_TSNET_NATS_URL",
+		"DIALTONE_REPL_NATS_URL",
+	} {
+		if raw := LookupEnvString(key); raw != "" {
+			return raw
+		}
+	}
+	return ""
 }
 
 func DefaultDialtoneJSONPath(repoRoot string) string {
@@ -373,37 +520,34 @@ func LoadEnvFile(rt Runtime) error {
 	if strings.TrimSpace(rt.EnvFile) == "" {
 		return nil
 	}
-	if _, err := os.Stat(rt.EnvFile); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	raw, err := os.ReadFile(rt.EnvFile)
+	config, err := ReadEnvFileMap(rt.EnvFile)
 	if err != nil {
 		return err
 	}
-	var config map[string]any
-	if err := json.Unmarshal(raw, &config); err != nil {
-		return err
-	}
 	for key, value := range config {
-		switch v := value.(type) {
-		case string:
-			_ = os.Setenv(key, v)
-		case float64:
-			_ = os.Setenv(key, fmt.Sprintf("%v", v))
-		case bool:
-			if v {
-				_ = os.Setenv(key, "true")
-			} else {
-				_ = os.Setenv(key, "false")
-			}
-		default:
-			_ = os.Setenv(key, fmt.Sprintf("%v", v))
+		if text := stringifyEnvValue(value); text != "" {
+			_ = os.Setenv(key, text)
 		}
 	}
 	return nil
+}
+
+func stringifyEnvValue(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(v)
+	case json.Number:
+		return v.String()
+	case bool:
+		if v {
+			return "true"
+		}
+		return "false"
+	default:
+		return strings.TrimSpace(fmt.Sprintf("%v", v))
+	}
 }
 
 func expandHome(v string) string {
