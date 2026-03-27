@@ -30,10 +30,12 @@ var (
 )
 
 type TranscriptStep struct {
-	Send         string
-	ExpectRoom   []string
-	ExpectOutput []string
-	Timeout      time.Duration
+	Send            string
+	ExpectRoom      []string
+	ExpectRoomAny   [][]string
+	ExpectOutput    []string
+	ExpectOutputAny [][]string
+	Timeout         time.Duration
 }
 
 type Runtime struct {
@@ -320,7 +322,7 @@ func (rt *Runtime) StartLeader() error {
 func (rt *Runtime) StartJoin(name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		name = "observer"
+		name = DefaultPromptName()
 	}
 	if rt.shared && rt.joinReady() {
 		rt.attachStatusPublisher()
@@ -420,7 +422,7 @@ func (rt *Runtime) emitStartupDialog(name string) error {
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		name = "observer"
+		name = DefaultPromptName()
 	}
 	cfgPath := filepath.Join(rt.RepoRoot, "env", "dialtone.json")
 	lines := []string{
@@ -545,15 +547,16 @@ func (rt *Runtime) RunTranscript(steps []TranscriptStep) error {
 		if timeout <= 0 {
 			timeout = 12 * time.Second
 		}
-		rt.infof("[REPL][STEP %d] send=%q expect_room=%d expect_output=%d timeout=%s", i+1, strings.TrimSpace(step.Send), len(step.ExpectRoom), len(step.ExpectOutput), timeout)
+		rt.infof("[REPL][STEP %d] send=%q expect_room=%d expect_room_any=%d expect_output=%d expect_output_any=%d timeout=%s", i+1, strings.TrimSpace(step.Send), len(step.ExpectRoom), len(step.ExpectRoomAny), len(step.ExpectOutput), len(step.ExpectOutputAny), timeout)
 		roomSeq, outputSeq := rt.currentSeqs()
+		deadline := time.Now().Add(timeout)
 		if len(step.ExpectRoom) > 0 {
 			if strings.TrimSpace(step.Send) != "" {
 				if err := rt.SendJoinLine(step.Send); err != nil {
 					return fmt.Errorf("transcript step %d send failed: %w", i+1, err)
 				}
 			}
-			if err := rt.waitForPatternsAfter(timeout, step.ExpectRoom, roomSeq); err != nil {
+			if err := rt.waitForPatternsAfter(remainingUntil(deadline), step.ExpectRoom, roomSeq); err != nil {
 				return fmt.Errorf("transcript step %d room expect failed: %w", i+1, err)
 			}
 		} else if strings.TrimSpace(step.Send) != "" {
@@ -561,9 +564,19 @@ func (rt *Runtime) RunTranscript(steps []TranscriptStep) error {
 				return fmt.Errorf("transcript step %d send failed: %w", i+1, err)
 			}
 		}
+		if len(step.ExpectRoomAny) > 0 {
+			if err := rt.waitForAnyPatternGroupAfter(remainingUntil(deadline), step.ExpectRoomAny, roomSeq); err != nil {
+				return fmt.Errorf("transcript step %d room-any expect failed: %w", i+1, err)
+			}
+		}
 		if len(step.ExpectOutput) > 0 {
-			if err := rt.waitForOutputAfter(timeout, step.ExpectOutput, outputSeq); err != nil {
+			if err := rt.waitForOutputAfter(remainingUntil(deadline), step.ExpectOutput, outputSeq); err != nil {
 				return fmt.Errorf("transcript step %d output expect failed: %w", i+1, err)
+			}
+		}
+		if len(step.ExpectOutputAny) > 0 {
+			if err := rt.waitForAnyOutputGroupAfter(remainingUntil(deadline), step.ExpectOutputAny, outputSeq); err != nil {
+				return fmt.Errorf("transcript step %d output-any expect failed: %w", i+1, err)
 			}
 		}
 		rt.infof("[REPL][STEP %d] complete", i+1)
@@ -582,7 +595,7 @@ func (rt *Runtime) RoomSubject() string {
 func (rt *Runtime) Inject(user string, args ...string) error {
 	user = strings.TrimSpace(user)
 	if user == "" {
-		user = "llm-codex"
+		user = DefaultPromptName()
 	}
 	if len(args) == 0 {
 		return fmt.Errorf("inject command args are required")
@@ -606,6 +619,10 @@ func (rt *Runtime) WaitForPatterns(timeout time.Duration, patterns []string) err
 
 func (rt *Runtime) WaitForPatternsAfter(timeout time.Duration, patterns []string, afterSeq int) error {
 	return rt.waitForPatternsAfter(timeout, patterns, afterSeq)
+}
+
+func (rt *Runtime) WaitForAnyPatternGroupAfter(timeout time.Duration, groups [][]string, afterSeq int) error {
+	return rt.waitForAnyPatternGroupAfter(timeout, groups, afterSeq)
 }
 
 func (rt *Runtime) waitForPatternsAfter(timeout time.Duration, patterns []string, afterSeq int) error {
@@ -648,6 +665,34 @@ func (rt *Runtime) waitForPatternsAfter(timeout time.Duration, patterns []string
 		}
 	}
 	err := fmt.Errorf("timeout waiting for room patterns: %s\nrecent room messages:\n%s", strings.Join(missing, ", "), strings.Join(rt.recentRoomTail(), "\n"))
+	rt.errorf("%v", err)
+	return err
+}
+
+func (rt *Runtime) waitForAnyPatternGroupAfter(timeout time.Duration, groups [][]string, afterSeq int) error {
+	groups = trimPatternGroups(groups)
+	if len(groups) == 0 {
+		return nil
+	}
+	seen := initializeGroupMatches(groups, rt.recentRoomTailAfter(afterSeq))
+	if completeGroupIndex(seen, groups) >= 0 {
+		return nil
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if err := rt.checkJoinExited(); err != nil {
+			return err
+		}
+		select {
+		case msg := <-rt.msgCh:
+			updateGroupMatches(seen, groups, msg)
+			if completeGroupIndex(seen, groups) >= 0 {
+				return nil
+			}
+		case <-time.After(120 * time.Millisecond):
+		}
+	}
+	err := fmt.Errorf("timeout waiting for any room pattern group: %s\nrecent room messages:\n%s", describePatternGroups(groups, seen), strings.Join(rt.recentRoomTail(), "\n"))
 	rt.errorf("%v", err)
 	return err
 }
@@ -728,6 +773,34 @@ func (rt *Runtime) waitForOutputAfter(timeout time.Duration, patterns []string, 
 	return err
 }
 
+func (rt *Runtime) waitForAnyOutputGroupAfter(timeout time.Duration, groups [][]string, afterSeq int) error {
+	groups = trimPatternGroups(groups)
+	if len(groups) == 0 {
+		return nil
+	}
+	seen := initializeGroupMatches(groups, rt.recentOutputTailAfter(afterSeq))
+	if completeGroupIndex(seen, groups) >= 0 {
+		return nil
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if err := rt.checkJoinExited(); err != nil {
+			return err
+		}
+		select {
+		case line := <-rt.outCh:
+			updateGroupMatches(seen, groups, line)
+			if completeGroupIndex(seen, groups) >= 0 {
+				return nil
+			}
+		case <-time.After(120 * time.Millisecond):
+		}
+	}
+	err := fmt.Errorf("timeout waiting for any output pattern group: %s\nrecent visible output:\n%s", describePatternGroups(groups, seen), strings.Join(rt.recentOutputTail(), "\n"))
+	rt.errorf("%v", err)
+	return err
+}
+
 func (rt *Runtime) LatestSubtonePID() (int, error) {
 	rt.bufMu.Lock()
 	recentRoom := append([]string(nil), rt.recentRoom...)
@@ -739,7 +812,7 @@ func (rt *Runtime) LatestSubtonePID() (int, error) {
 		}
 		var frame map[string]any
 		if err := json.Unmarshal([]byte(msg), &frame); err == nil {
-			if raw, ok := frame["subtone_pid"]; ok {
+			if raw, ok := frame["pid"]; ok {
 				switch v := raw.(type) {
 				case float64:
 					if int(v) > 0 {
@@ -754,7 +827,65 @@ func (rt *Runtime) LatestSubtonePID() (int, error) {
 			}
 		}
 	}
-	return 0, fmt.Errorf("no subtone pid found in recent room messages")
+	return 0, fmt.Errorf("no task pid found in recent room messages")
+}
+
+func (rt *Runtime) LatestTaskID() (string, error) {
+	rt.bufMu.Lock()
+	recentRoom := append([]string(nil), rt.recentRoom...)
+	rt.bufMu.Unlock()
+	for i := len(recentRoom) - 1; i >= 0; i-- {
+		msg := strings.TrimSpace(recentRoom[i])
+		if msg == "" {
+			continue
+		}
+		var frame map[string]any
+		if err := json.Unmarshal([]byte(msg), &frame); err != nil {
+			continue
+		}
+		raw, ok := frame["task_id"]
+		if !ok {
+			continue
+		}
+		taskID := strings.TrimSpace(fmt.Sprint(raw))
+		if strings.HasPrefix(taskID, "task-") {
+			return taskID, nil
+		}
+	}
+	return "", fmt.Errorf("no task id found in recent room messages")
+}
+
+func (rt *Runtime) LatestTaskIDForCommand(command string) (string, error) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return "", fmt.Errorf("command is required")
+	}
+	rt.bufMu.Lock()
+	roomEvents := append([]sequencedMessage(nil), rt.roomEvents...)
+	rt.bufMu.Unlock()
+	for i := len(roomEvents) - 1; i >= 0; i-- {
+		msg := strings.TrimSpace(roomEvents[i].Message)
+		if msg == "" {
+			continue
+		}
+		var frame map[string]any
+		if err := json.Unmarshal([]byte(msg), &frame); err != nil {
+			continue
+		}
+		message, _ := frame["message"].(string)
+		if !strings.Contains(message, "Command: ["+command+"]") {
+			continue
+		}
+		raw, ok := frame["task_id"]
+		if !ok {
+			continue
+		}
+		taskID := strings.TrimSpace(fmt.Sprint(raw))
+		if strings.HasPrefix(taskID, "task-") {
+			return taskID, nil
+		}
+	}
+	return "", fmt.Errorf("no task id found for command %q", command)
 }
 
 func (rt *Runtime) LatestSubtonePIDForCommand(command string) (int, error) {
@@ -785,7 +916,7 @@ func (rt *Runtime) latestSubtonePIDForCommandAfter(command string, afterSeq int)
 		if !strings.Contains(message, "Command: ["+command+"]") {
 			continue
 		}
-		raw, ok := frame["subtone_pid"]
+		raw, ok := frame["pid"]
 		if !ok {
 			continue
 		}
@@ -801,7 +932,7 @@ func (rt *Runtime) latestSubtonePIDForCommandAfter(command string, afterSeq int)
 			}
 		}
 	}
-	return 0, fmt.Errorf("no subtone pid found for command %q", command)
+	return 0, fmt.Errorf("no task pid found for command %q", command)
 }
 
 func (rt *Runtime) WaitForSubtonePIDForCommand(command string, timeout time.Duration) (int, error) {
@@ -809,6 +940,18 @@ func (rt *Runtime) WaitForSubtonePIDForCommand(command string, timeout time.Dura
 }
 
 func (rt *Runtime) WaitForSubtonePIDForCommandAfter(command string, timeout time.Duration, afterSeq int) (int, error) {
+	return rt.waitForSubtonePIDForCommandAfter(command, timeout, afterSeq)
+}
+
+func (rt *Runtime) LatestTaskPID() (int, error) {
+	return rt.LatestSubtonePID()
+}
+
+func (rt *Runtime) WaitForTaskPIDForCommand(command string, timeout time.Duration) (int, error) {
+	return rt.waitForSubtonePIDForCommandAfter(command, timeout, 0)
+}
+
+func (rt *Runtime) WaitForTaskPIDForCommandAfter(command string, timeout time.Duration, afterSeq int) (int, error) {
 	return rt.waitForSubtonePIDForCommandAfter(command, timeout, afterSeq)
 }
 
@@ -836,7 +979,7 @@ func (rt *Runtime) waitForSubtonePIDForCommandAfter(command string, timeout time
 		case <-time.After(120 * time.Millisecond):
 		}
 	}
-	return 0, fmt.Errorf("timeout waiting for subtone pid for command %q", command)
+	return 0, fmt.Errorf("timeout waiting for task pid for command %q", command)
 }
 
 func (rt *Runtime) RunDialtone(args ...string) (string, error) {
@@ -986,6 +1129,57 @@ func StandardSubtoneOutputPatterns(cmdName string, exitPattern string) []string 
 	return patterns
 }
 
+func StandardTaskRoomPatterns(exitPattern string) []string {
+	exitPattern = strings.TrimSpace(exitPattern)
+	if exitPattern == "" {
+		exitPattern = "exited with code 0."
+	}
+	patterns := []string{
+		`"scope":"index"`,
+		`Request received.`,
+		`Task queued as task-`,
+		`Task room: task.task-`,
+		`Task task-`,
+		`assigned pid `,
+		`Task log: `,
+	}
+	if exitPattern != "" {
+		patterns = append(patterns, exitPattern)
+	}
+	return patterns
+}
+
+func StandardTaskOutputPatterns(exitPattern string) []string {
+	exitPattern = strings.TrimSpace(exitPattern)
+	if exitPattern == "" {
+		exitPattern = "exited with code 0."
+	}
+	patterns := []string{
+		`DIALTONE> Request received.`,
+		`DIALTONE> Task queued as task-`,
+		`DIALTONE> Task room: task.task-`,
+		`DIALTONE> Task task-`,
+		`assigned pid `,
+		`DIALTONE> Task log: `,
+	}
+	if exitPattern != "" {
+		patterns = append(patterns, exitPattern)
+	}
+	return patterns
+}
+
+func StandardCommandRoomPatternGroups(cmdName string, subtoneExitPattern string, taskExitPattern string) [][]string {
+	return [][]string{
+		StandardTaskRoomPatterns(taskExitPattern),
+	}
+}
+
+func StandardCommandOutputPatternGroups(cmdName string, subtoneExitPattern string, taskExitPattern string) [][]string {
+	return [][]string{
+		StandardTaskOutputPatterns(taskExitPattern),
+	}
+}
+
 func CombinePatterns(groups ...[]string) []string {
 	combined := make([]string, 0, 8)
 	seen := map[string]struct{}{}
@@ -1003,6 +1197,108 @@ func CombinePatterns(groups ...[]string) []string {
 		}
 	}
 	return combined
+}
+
+func CombinePatternGroups(base []string, groups ...[]string) [][]string {
+	out := make([][]string, 0, len(groups))
+	for _, group := range groups {
+		out = append(out, CombinePatterns(base, group))
+	}
+	return out
+}
+
+func MatchAnyPatternGroupText(body string, groups [][]string) error {
+	groups = trimPatternGroups(groups)
+	if len(groups) == 0 {
+		return nil
+	}
+	seen := initializeGroupMatches(groups, []string{body})
+	if completeGroupIndex(seen, groups) >= 0 {
+		return nil
+	}
+	return fmt.Errorf("text did not match any pattern group: %s", describePatternGroups(groups, seen))
+}
+
+func ParseWorkLogPath(output string) (string, error) {
+	lines := strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		const prefix = "DIALTONE> Task log: "
+		if strings.HasPrefix(line, prefix) {
+			path := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+			if path != "" {
+				return path, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("work log path not found in shell output")
+}
+
+func trimPatternGroups(groups [][]string) [][]string {
+	out := make([][]string, 0, len(groups))
+	for _, group := range groups {
+		trimmed := CombinePatterns(group)
+		if len(trimmed) > 0 {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func initializeGroupMatches(groups [][]string, existing []string) []map[string]bool {
+	seen := make([]map[string]bool, len(groups))
+	for i := range groups {
+		seen[i] = map[string]bool{}
+	}
+	for _, msg := range existing {
+		updateGroupMatches(seen, groups, msg)
+	}
+	return seen
+}
+
+func updateGroupMatches(seen []map[string]bool, groups [][]string, msg string) {
+	for i, group := range groups {
+		for _, pattern := range group {
+			if !seen[i][pattern] && strings.Contains(msg, pattern) {
+				seen[i][pattern] = true
+			}
+		}
+	}
+}
+
+func completeGroupIndex(seen []map[string]bool, groups [][]string) int {
+	for i, group := range groups {
+		if len(seen[i]) == len(group) {
+			return i
+		}
+	}
+	return -1
+}
+
+func describePatternGroups(groups [][]string, seen []map[string]bool) string {
+	parts := make([]string, 0, len(groups))
+	for i, group := range groups {
+		missing := make([]string, 0, len(group))
+		for _, pattern := range group {
+			if !seen[i][pattern] {
+				missing = append(missing, pattern)
+			}
+		}
+		if len(missing) == 0 {
+			parts = append(parts, fmt.Sprintf("group %d matched", i+1))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("group %d missing [%s]", i+1, strings.Join(missing, ", ")))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func remainingUntil(deadline time.Time) time.Duration {
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return 100 * time.Millisecond
+	}
+	return remaining
 }
 
 func (rt *Runtime) Stop() {
@@ -1056,7 +1352,50 @@ func shouldPrintTranscriptLine(line string) bool {
 	}
 	return strings.HasPrefix(line, "DIALTONE>") ||
 		strings.HasPrefix(line, "DIALTONE:") ||
-		strings.HasPrefix(line, "llm-codex>")
+		isPromptLine(line)
+}
+
+func DefaultPromptName() string {
+	host, err := os.Hostname()
+	if err != nil {
+		return "USER-1"
+	}
+	host = strings.TrimSpace(strings.ReplaceAll(host, " ", "-"))
+	if host == "" {
+		return "USER-1"
+	}
+	return host
+}
+
+func PromptLine(command string) string {
+	return fmt.Sprintf("%s> %s", DefaultPromptName(), strings.TrimSpace(command))
+}
+
+func PromptFromPattern() string {
+	return fmt.Sprintf(`"from":"%s"`, DefaultPromptName())
+}
+
+func isPromptLine(line string) bool {
+	idx := strings.Index(line, ">")
+	if idx <= 0 || idx > 64 {
+		return false
+	}
+	prefix := strings.TrimSpace(line[:idx])
+	if prefix == "" {
+		return false
+	}
+	for _, ch := range prefix {
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') {
+			continue
+		}
+		switch ch {
+		case '-', '_', '.':
+			continue
+		default:
+			return false
+		}
+	}
+	return strings.TrimSpace(line[idx+1:]) != ""
 }
 
 func (rt *Runtime) rememberRoom(subject string, msg string) {

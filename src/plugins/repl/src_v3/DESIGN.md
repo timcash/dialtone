@@ -37,7 +37,7 @@ That model works for a single-machine task runner, but it is the wrong center of
 
 Today the system is:
 
-`dialtone.sh` -> `repl src_v3 inject` -> leader autostart if needed -> publish command frame to `repl.cmd` -> leader queue subscription -> `executeCommand(...)` -> legacy process launcher -> OS PID and PID-based log file -> in-memory task and service registries + NATS room messages.
+`dialtone.sh` -> `repl src_v3 inject` -> leader autostart if needed -> publish command frame to `repl.cmd` -> leader queue subscription -> `executeCommand(...)` -> current process launcher -> OS PID and PID-based log file -> in-memory task and service registries + NATS room messages.
 
 For remote Chrome management, `chrome src_v3` uses this REPL control plane mostly for:
 
@@ -55,9 +55,9 @@ flowchart LR
     C --> D["publish repl.cmd"]
     D --> E["leader QueueSubscribe(repl.cmd)"]
     E --> F["executeCommand"]
-    F --> G["legacy process launcher"]
+    F --> G["current process launcher"]
     G --> H["OS process + PID"]
-    G --> I["legacy pid-based task log"]
+    G --> I["pid-derived task log"]
     G --> J["stdout/stderr events"]
     J --> K["NATS room frames"]
     J --> L["task/service registries"]
@@ -77,7 +77,7 @@ flowchart LR
 | CLI wrapper | Autostarts leader, injects commands, joins rooms, lists task logs | `run_commands_v3.go`, `inject_hosts_v3.go`, `subtone_logs_v3.go` |
 | Leader | Owns REPL rooms, command intake, presence, registries, and execution dispatch | `core_runtime.go` |
 | Config | Resolves repo roots and `env/dialtone.json`, reads current NATS config | `env_utils_v3.go`, `leader_state_v3.go` |
-| Legacy task launcher | Starts real OS processes and emits lifecycle/stdout/stderr events | `../proc/src_v1/go/proc/subtone.go` |
+| Current process launcher | Starts real OS processes and emits lifecycle/stdout/stderr events | `../proc/src_v1/go/proc/subtone.go` |
 | Task registry | In-memory PID-keyed record of recent one-shot tasks | `subtone_registry_v3.go` |
 | Service registry | In-memory service-name-keyed record of long-lived services | `service_registry_v3.go` |
 | Heartbeats | Publishes process/service health onto NATS subjects | `managed_heartbeat_v3.go` |
@@ -184,7 +184,7 @@ The problem is not only foreground waiting. The deeper issue is identity:
 
 ### 5. The process launcher creates PID-based logs
 
-This is the current root of the legacy PID-first task identity model.
+This is the current source of PID-derived task log naming.
 
 ```go
 func RunSubtoneWithEvents(args []string, onEvent SubtoneEventHandler) int {
@@ -763,7 +763,7 @@ Responsibilities:
 
 Current:
 
-- legacy PID-based task log names
+- PID-based task log names
 - PID-based task attachment
 - registry keyed by PID
 
@@ -830,7 +830,7 @@ Current:
 
 Target:
 
-- typed submit request/reply with validation and compatibility control
+- typed submit request/reply with validation and explicit task metadata
 
 ### G. Make service reconciliation first-class
 
@@ -860,13 +860,16 @@ Target Chrome should depend on:
 
 ### I. Update user-facing REPL commands
 
-Recommended replacements:
+Required task-first commands:
 
-- `subtone-list` -> `task-list`
-- `subtone-log --pid` -> `task-log --task-id`
-- `subtone-attach --pid` -> `task-attach --task-id`
+- `task list`
+- `task show --task-id`
+- `task log --task-id`
+- `task kill --task-id`
+- `service list`
+- `service show`
 
-`service-list` can remain, but should read the canonical service state store.
+`service list` should read the canonical service state store.
 
 ## Suggested New CLI Contract
 
@@ -933,12 +936,12 @@ Follow-up inspection:
 
 ## Suggested Refactor Order
 
-1. Add task ids and NATS task snapshots without removing existing PID flows yet.
-2. Change log naming to task-id-first while still recording PID.
+1. Add task ids and NATS task snapshots as the only public control-plane identity.
+2. Change log naming to task-id-first while still recording PID as runtime metadata.
 3. Add task submit reply so CLI can print `task_id` immediately.
 4. Move queue state and task lifecycle to NATS-backed storage.
 5. Replace `runMu` with a scheduler.
-6. Convert the legacy `subtone-*` commands to `task-*` commands.
+6. Add task-first operator commands and remove process-first operator surfaces.
 7. Introduce desired/observed service state and service reconciliation.
 8. Update Chrome remote service control to read the new service state.
 9. Simplify `dialtone.sh` and `repl src_v3` into thin typed clients.

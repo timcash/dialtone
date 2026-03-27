@@ -2,20 +2,29 @@
 
 This file is the short, LLM-first contract for working in `src/plugins`.
 
+The canonical user-facing workflow now lives in the root [README.md](/C:/Users/timca/dialtone/README.md), especially the `Working With Plugins` and REPL sections. This file should stay short and mirror that command shape.
+
 ## Generic Shell Workflow
 ```bash
 # Generic command shape
-./dialtone.sh <plugin> <src_vN> <command> [args] [--flags]
+./dialtone.sh <plugin-name> <src_vN> <command> [args] [--flags]
 
 # Standard command set most plugins should expose
-./dialtone.sh <plugin> <src_vN> install
-./dialtone.sh <plugin> <src_vN> format
-./dialtone.sh <plugin> <src_vN> lint
-./dialtone.sh <plugin> <src_vN> build
-./dialtone.sh <plugin> <src_vN> test
+./dialtone.sh <plugin-name> <src_vN> install
+./dialtone.sh <plugin-name> <src_vN> format
+./dialtone.sh <plugin-name> <src_vN> lint
+./dialtone.sh <plugin-name> <src_vN> build
+./dialtone.sh <plugin-name> <src_vN> test
 
 # Typical filtered/flagged test run
-./dialtone.sh <plugin> <src_vN> test --filter <expr>
+./dialtone.sh <plugin-name> <src_vN> test --filter <expr>
+
+# The same commands inside the REPL
+/plugin-name src_vN install
+/plugin-name src_vN format
+/plugin-name src_vN lint
+/plugin-name src_vN build
+/plugin-name src_vN test --filter <expr>
 ```
 
 Important behavior learned from active plugin work:

@@ -30,6 +30,7 @@ func RunTest(args []string) error {
 	requireEmbeddedTSNet := fs.Bool("require-embedded-tsnet", false, "Fail if native tailscale is active during tsnet step")
 	wslHost := fs.String("wsl-host", "", "Override WSL host used by test steps")
 	wslUser := fs.String("wsl-user", "", "Override WSL user used by test steps")
+	wslLoopback := fs.Bool("wsl-loopback", false, "Force same-host WSL loopback for legacy wsl-named SSH test steps")
 	tunnelName := fs.String("tunnel-name", "", "Override cloudflare tunnel name used by test steps")
 	tunnelURL := fs.String("tunnel-url", "", "Override cloudflare tunnel URL used by test steps")
 	installURL := fs.String("install-url", "", "Override bootstrap install.sh URL for tmp bootstrap mode")
@@ -45,6 +46,9 @@ func RunTest(args []string) error {
 	}
 	if strings.TrimSpace(*wslUser) != "" {
 		_ = os.Setenv("DIALTONE_REPL_V3_TEST_WSL_USER", strings.TrimSpace(*wslUser))
+	}
+	if *wslLoopback {
+		_ = os.Setenv("DIALTONE_REPL_V3_TEST_WSL_LOOPBACK", "1")
 	}
 	if strings.TrimSpace(*tunnelName) != "" {
 		_ = os.Setenv("DIALTONE_REPL_V3_TEST_TUNNEL_NAME", strings.TrimSpace(*tunnelName))
@@ -230,7 +234,7 @@ func runTmpBootstrapTest(args []string) error {
 	)
 	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_HOST")) == "" && strings.TrimSpace(wslNode.Host) != "" {
 		host := strings.TrimSpace(wslNode.Host)
-		if defaultWSLLoopbackHost() && meshNodeMatchesNameOrAlias(wslNode, "wsl") {
+		if preferSameHostWSLLoopback() && meshNodeMatchesNameOrAlias(wslNode, "wsl") {
 			host = "127.0.0.1"
 		}
 		env = append(env, "DIALTONE_REPL_V3_TEST_WSL_HOST="+host)
@@ -369,11 +373,19 @@ func readTopLevelConfigValue(repoRoot string, key string) string {
 	return ""
 }
 
-func defaultWSLLoopbackHost() bool {
+func preferSameHostWSLLoopback() bool {
 	if runtime.GOOS != "linux" {
 		return false
 	}
-	return strings.TrimSpace(os.Getenv("WSL_DISTRO_NAME")) != ""
+	if strings.TrimSpace(os.Getenv("WSL_DISTRO_NAME")) == "" {
+		return false
+	}
+	switch strings.TrimSpace(strings.ToLower(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_LOOPBACK"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func shellQuote(s string) string {

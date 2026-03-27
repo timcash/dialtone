@@ -50,14 +50,18 @@ func Register(r *testv1.Registry) {
 			if err := rt.RunTranscript([]support.TranscriptStep{
 				{
 					Send: installCmd,
-					ExpectRoom: support.CombinePatterns([]string{
-						fmt.Sprintf(`"message":"%s"`, installCmd),
-						`"scope":"subtone"`,
-						`installed cloudflared at `,
-						`Subtone for cloudflare src_v1 exited with code 0.`,
-					}, support.StandardSubtoneRoomPatterns("cloudflare src_v1", "")),
-					ExpectOutput: support.StandardSubtoneOutputPatterns("cloudflare src_v1", ""),
-					Timeout:      90 * time.Second,
+					ExpectRoomAny: support.CombinePatternGroups(
+						[]string{
+							fmt.Sprintf(`"message":"%s"`, installCmd),
+							`installed cloudflared at `,
+						},
+						support.StandardCommandRoomPatternGroups("cloudflare src_v1", "", "")...,
+					),
+					ExpectOutputAny: support.CombinePatternGroups(
+						[]string{fmt.Sprintf("llm-codex> %s", installCmd)},
+						support.StandardCommandOutputPatternGroups("cloudflare src_v1", "", "")...,
+					),
+					Timeout: 90 * time.Second,
 				},
 			}); err != nil {
 				return testv1.StepRunResult{}, err
@@ -70,15 +74,19 @@ func Register(r *testv1.Registry) {
 			if err := rt.RunTranscript([]support.TranscriptStep{
 				{
 					Send: provisionCmd,
-					ExpectRoom: support.CombinePatterns([]string{
-						fmt.Sprintf(`"message":"%s"`, provisionCmd),
-						`"scope":"subtone"`,
-						`hostname`,
-						`tunnel_id`,
-						`Subtone for cloudflare src_v1 exited with code 0.`,
-					}, support.StandardSubtoneRoomPatterns("cloudflare src_v1", "")),
-					ExpectOutput: support.StandardSubtoneOutputPatterns("cloudflare src_v1", ""),
-					Timeout:      40 * time.Second,
+					ExpectRoomAny: support.CombinePatternGroups(
+						[]string{
+							fmt.Sprintf(`"message":"%s"`, provisionCmd),
+							`hostname`,
+							`tunnel_id`,
+						},
+						support.StandardCommandRoomPatternGroups("cloudflare src_v1", "", "")...,
+					),
+					ExpectOutputAny: support.CombinePatternGroups(
+						[]string{fmt.Sprintf("llm-codex> %s", provisionCmd)},
+						support.StandardCommandOutputPatternGroups("cloudflare src_v1", "", "")...,
+					),
+					Timeout: 40 * time.Second,
 				},
 			}); err != nil {
 				return testv1.StepRunResult{}, err
@@ -92,15 +100,19 @@ func Register(r *testv1.Registry) {
 			if err := rt.RunTranscript([]support.TranscriptStep{
 				{
 					Send: replCmd,
-					ExpectRoom: support.CombinePatterns([]string{
-						fmt.Sprintf(`"message":"%s"`, replCmd),
-						`"scope":"subtone"`,
-						`cloudflared started pid=`,
-						`cloudflared confirmed tunnel connection in background pid=`,
-						`Subtone for cloudflare src_v1 exited with code 0.`,
-					}, support.StandardSubtoneRoomPatterns("cloudflare src_v1", ``)),
-					ExpectOutput: support.StandardSubtoneOutputPatterns("cloudflare src_v1", ``),
-					Timeout:      40 * time.Second,
+					ExpectRoomAny: support.CombinePatternGroups(
+						[]string{
+							fmt.Sprintf(`"message":"%s"`, replCmd),
+							`cloudflared started pid=`,
+							`cloudflared confirmed tunnel connection in background pid=`,
+						},
+						support.StandardCommandRoomPatternGroups("cloudflare src_v1", "", "")...,
+					),
+					ExpectOutputAny: support.CombinePatternGroups(
+						[]string{fmt.Sprintf("llm-codex> %s", replCmd)},
+						support.StandardCommandOutputPatternGroups("cloudflare src_v1", "", "")...,
+					),
+					Timeout: 40 * time.Second,
 				},
 			}); err != nil {
 				return testv1.StepRunResult{}, err
@@ -109,12 +121,15 @@ func Register(r *testv1.Registry) {
 			if err := rt.RunTranscript([]support.TranscriptStep{
 				{
 					Send: stopCmd,
-					ExpectRoom: support.CombinePatterns([]string{
-						fmt.Sprintf(`"message":"%s"`, stopCmd),
-						`Subtone for cloudflare src_v1 exited with code 0.`,
-					}, support.StandardSubtoneRoomPatterns("cloudflare src_v1", ``)),
-					ExpectOutput: support.StandardSubtoneOutputPatterns("cloudflare src_v1", ``),
-					Timeout:      40 * time.Second,
+					ExpectRoomAny: support.CombinePatternGroups(
+						[]string{fmt.Sprintf(`"message":"%s"`, stopCmd)},
+						support.StandardCommandRoomPatternGroups("cloudflare src_v1", "", "")...,
+					),
+					ExpectOutputAny: support.CombinePatternGroups(
+						[]string{fmt.Sprintf("llm-codex> %s", stopCmd)},
+						support.StandardCommandOutputPatternGroups("cloudflare src_v1", "", "")...,
+					),
+					Timeout: 40 * time.Second,
 				},
 			}); err != nil {
 				return testv1.StepRunResult{}, err
@@ -123,18 +138,22 @@ func Register(r *testv1.Registry) {
 			if err := rt.RunTranscript([]support.TranscriptStep{
 				{
 					Send: cleanupCmd,
-					ExpectRoom: support.CombinePatterns([]string{
-						fmt.Sprintf(`"message":"%s"`, cleanupCmd),
-						`"scope":"subtone"`,
-						`cloudflare cleanup verified dns hostname=`,
-						`cloudflare cleanup verified connections tunnel_id=`,
-						`cloudflare cleanup verified tunnel tunnel_id=`,
-						`cloudflare cleanup verified token env=`,
-						`token_removed`,
-						`Subtone for cloudflare src_v1 exited with code 0.`,
-					}, support.StandardSubtoneRoomPatterns("cloudflare src_v1", ``)),
-					ExpectOutput: support.StandardSubtoneOutputPatterns("cloudflare src_v1", ``),
-					Timeout:      40 * time.Second,
+					ExpectRoomAny: support.CombinePatternGroups(
+						[]string{
+							fmt.Sprintf(`"message":"%s"`, cleanupCmd),
+							`cloudflare cleanup verified dns hostname=`,
+							`cloudflare cleanup verified connections tunnel_id=`,
+							`cloudflare cleanup verified tunnel tunnel_id=`,
+							`cloudflare cleanup verified token env=`,
+							`token_removed`,
+						},
+						support.StandardCommandRoomPatternGroups("cloudflare src_v1", "", "")...,
+					),
+					ExpectOutputAny: support.CombinePatternGroups(
+						[]string{fmt.Sprintf("llm-codex> %s", cleanupCmd)},
+						support.StandardCommandOutputPatternGroups("cloudflare src_v1", "", "")...,
+					),
+					Timeout: 40 * time.Second,
 				},
 			}); err != nil {
 				return testv1.StepRunResult{}, err

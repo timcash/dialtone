@@ -10,13 +10,14 @@ import (
 	"dialtone/dev/plugins/proc/src_v1/go/proc"
 )
 
-const subtoneRegistrySubject = "repl.registry.subtones"
+const taskRegistrySubject = "repl.registry.tasks"
 
-type subtoneRegistryRequest struct {
+type taskRegistryRequest struct {
 	Count int `json:"count,omitempty"`
 }
 
-type subtoneRegistryItem struct {
+type taskRegistryItem struct {
+	TaskID     string  `json:"task_id,omitempty"`
 	PID        int     `json:"pid"`
 	Room       string  `json:"room,omitempty"`
 	Command    string  `json:"command,omitempty"`
@@ -31,7 +32,8 @@ type subtoneRegistryItem struct {
 	StartedAgo string  `json:"started_ago,omitempty"`
 }
 
-type subtoneRegistryEntry struct {
+type taskRegistryEntry struct {
+	TaskID     string
 	PID        int
 	Room       string
 	Command    string
@@ -43,23 +45,23 @@ type subtoneRegistryEntry struct {
 	Active     bool
 }
 
-type subtoneRegistry struct {
+type taskRegistry struct {
 	mu      sync.Mutex
 	limit   int
-	entries map[int]*subtoneRegistryEntry
+	entries map[int]*taskRegistryEntry
 }
 
-func newSubtoneRegistry(limit int) *subtoneRegistry {
+func newTaskRegistry(limit int) *taskRegistry {
 	if limit <= 0 {
 		limit = 256
 	}
-	return &subtoneRegistry{
+	return &taskRegistry{
 		limit:   limit,
-		entries: map[int]*subtoneRegistryEntry{},
+		entries: map[int]*taskRegistryEntry{},
 	}
 }
 
-func (r *subtoneRegistry) Started(room string, mode string, ev proc.SubtoneEvent) {
+func (r *taskRegistry) Started(taskID, room, mode, taskLogPath string, ev proc.SubtoneEvent) {
 	if r == nil || ev.PID <= 0 {
 		return
 	}
@@ -70,12 +72,13 @@ func (r *subtoneRegistry) Started(room string, mode string, ev proc.SubtoneEvent
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.entries[ev.PID] = &subtoneRegistryEntry{
+	r.entries[ev.PID] = &taskRegistryEntry{
+		TaskID:     strings.TrimSpace(taskID),
 		PID:        ev.PID,
 		Room:       sanitizeRoom(room),
 		Command:    strings.TrimSpace(strings.Join(ev.Args, " ")),
 		Mode:       mode,
-		LogPath:    strings.TrimSpace(ev.LogPath),
+		LogPath:    strings.TrimSpace(taskLogPath),
 		StartedAt:  ev.StartedAt.UTC(),
 		LastUpdate: now,
 		Active:     true,
@@ -83,7 +86,7 @@ func (r *subtoneRegistry) Started(room string, mode string, ev proc.SubtoneEvent
 	r.trimLocked()
 }
 
-func (r *subtoneRegistry) Exited(pid int, exitCode int) {
+func (r *taskRegistry) Exited(pid int, exitCode int) {
 	if r == nil || pid <= 0 {
 		return
 	}
@@ -92,7 +95,7 @@ func (r *subtoneRegistry) Exited(pid int, exitCode int) {
 	defer r.mu.Unlock()
 	entry, ok := r.entries[pid]
 	if !ok {
-		entry = &subtoneRegistryEntry{PID: pid}
+		entry = &taskRegistryEntry{PID: pid}
 		r.entries[pid] = entry
 	}
 	entry.ExitCode = exitCode
@@ -101,7 +104,7 @@ func (r *subtoneRegistry) Exited(pid int, exitCode int) {
 	r.trimLocked()
 }
 
-func (r *subtoneRegistry) Heartbeat(pid int) {
+func (r *taskRegistry) Heartbeat(pid int) {
 	if r == nil || pid <= 0 {
 		return
 	}
@@ -116,12 +119,12 @@ func (r *subtoneRegistry) Heartbeat(pid int) {
 	r.trimLocked()
 }
 
-func (r *subtoneRegistry) Snapshot(count int, managed []proc.ManagedProcessSnapshot) []subtoneRegistryItem {
+func (r *taskRegistry) Snapshot(count int, managed []proc.ManagedProcessSnapshot) []taskRegistryItem {
 	if r == nil {
 		return nil
 	}
 	r.mu.Lock()
-	entries := make([]subtoneRegistryEntry, 0, len(r.entries))
+	entries := make([]taskRegistryEntry, 0, len(r.entries))
 	for _, entry := range r.entries {
 		entries = append(entries, *entry)
 	}
@@ -139,10 +142,11 @@ func (r *subtoneRegistry) Snapshot(count int, managed []proc.ManagedProcessSnaps
 		managedByPID[snap.PID] = snap
 	}
 
-	out := make([]subtoneRegistryItem, 0, len(entries))
+	out := make([]taskRegistryItem, 0, len(entries))
 	now := time.Now()
 	for _, entry := range entries {
-		item := subtoneRegistryItem{
+		item := taskRegistryItem{
+			TaskID:   entry.TaskID,
 			PID:      entry.PID,
 			Room:     entry.Room,
 			Command:  entry.Command,
@@ -177,9 +181,9 @@ func (r *subtoneRegistry) Snapshot(count int, managed []proc.ManagedProcessSnaps
 	return out
 }
 
-func (r *subtoneRegistry) Find(pid int) (subtoneRegistryItem, bool) {
+func (r *taskRegistry) Find(pid int) (taskRegistryItem, bool) {
 	if r == nil || pid <= 0 {
-		return subtoneRegistryItem{}, false
+		return taskRegistryItem{}, false
 	}
 	items := r.Snapshot(0, listManagedFn())
 	for _, item := range items {
@@ -187,14 +191,31 @@ func (r *subtoneRegistry) Find(pid int) (subtoneRegistryItem, bool) {
 			return item, true
 		}
 	}
-	return subtoneRegistryItem{}, false
+	return taskRegistryItem{}, false
 }
 
-func (r *subtoneRegistry) trimLocked() {
+func (r *taskRegistry) FindByTaskID(taskID string) (taskRegistryItem, bool) {
+	if r == nil {
+		return taskRegistryItem{}, false
+	}
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return taskRegistryItem{}, false
+	}
+	items := r.Snapshot(0, listManagedFn())
+	for _, item := range items {
+		if strings.EqualFold(strings.TrimSpace(item.TaskID), taskID) {
+			return item, true
+		}
+	}
+	return taskRegistryItem{}, false
+}
+
+func (r *taskRegistry) trimLocked() {
 	if r.limit <= 0 || len(r.entries) <= r.limit {
 		return
 	}
-	entries := make([]*subtoneRegistryEntry, 0, len(r.entries))
+	entries := make([]*taskRegistryEntry, 0, len(r.entries))
 	for _, entry := range r.entries {
 		entries = append(entries, entry)
 	}
@@ -206,6 +227,6 @@ func (r *subtoneRegistry) trimLocked() {
 	}
 }
 
-func encodeSubtoneRegistrySnapshot(items []subtoneRegistryItem) ([]byte, error) {
+func encodeTaskRegistrySnapshot(items []taskRegistryItem) ([]byte, error) {
 	return json.Marshal(items)
 }

@@ -15,10 +15,6 @@ Public terminology:
 - `service`: one long-lived managed process, such as `chrome src_v3` on `legion`
 - `room`: the event/log stream for a task or service
 
-Compatibility note:
-- the current implementation and some existing CLI commands still use the old `subtone` name internally
-- the public direction is `task` everywhere, with PID treated as later runtime state instead of the public identity
-
 ## Default Use
 
 ```bash
@@ -43,7 +39,7 @@ host-name> /robot src_v2 diagnostic --host rover --skip-ui --public-check=false
 dialtone> Request received.
 dialtone> Task queued as task-20260327-abc123.
 dialtone> Task room: task.task-20260327-abc123
-dialtone> Task log file: /home/user/dialtone/.dialtone/logs/task-20260327-abc123.log
+dialtone> Task log: /home/user/dialtone/.dialtone/logs/task-20260327-abc123.log
 dialtone> Task task-20260327-abc123 assigned pid 546289.
 dialtone> robot diagnostic: checking local artifacts
 dialtone> robot diagnostic: checking rover runtime on rover
@@ -300,17 +296,6 @@ The main invariants are:
 - `logs src_v1 stream` can attach to live task or service subjects for detail
 - the durable task log remains the best source for a finished task
 
-### Compatibility Commands
-
-Until the rename lands, the current compatibility commands are still:
-
-```bash
-./dialtone.sh repl src_v3 subtone-list --count 20
-./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 200
-```
-
-These should be treated as migration helpers, not the final operator surface.
-
 ### Queued Commands
 
 Target behavior:
@@ -319,13 +304,6 @@ Target behavior:
 - explicit trailing `&` becomes unnecessary for normal command submission
 - the leader decides when the task gets a PID and starts running
 
-Current compatibility behavior still allows one command with a trailing `&`:
-
-```bash
-./dialtone.sh repl src_v3 inject --user llm-codex "repl src_v3 watch --subject repl.room.index &"
-./dialtone.sh repl src_v3 inject --user llm-codex "repl src_v3 watch --subject 'repl.host.>' &"
-```
-
 Preferred queued pattern:
 
 ```text
@@ -333,7 +311,7 @@ host-name> /repl src_v3 watch --subject repl.room.index
 dialtone> Request received.
 dialtone> Task queued as task-20260327-def456.
 dialtone> Task room: task.task-20260327-def456
-dialtone> Task log file: /home/user/dialtone/.dialtone/logs/task-20260327-def456.log
+dialtone> Task log: /home/user/dialtone/.dialtone/logs/task-20260327-def456.log
 dialtone> Task task-20260327-def456 assigned pid 171214.
 dialtone> Task task-20260327-def456 is running.
 ```
@@ -355,7 +333,7 @@ These are rejected:
 Error pattern:
 
 ```text
-dialtone> ERROR: run exactly one ./dialtone.sh command at a time; command chaining with "&&" is not allowed. Use one foreground command per turn, or a single command with a trailing & for background mode.
+dialtone> ERROR: run exactly one ./dialtone.sh command at a time; command chaining with "&&" is not allowed.
 ```
 
 ## Explicit REPL Commands

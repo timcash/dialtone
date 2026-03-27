@@ -2,7 +2,6 @@ package sshwsl
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -28,45 +27,51 @@ func Register(r *testv1.Registry) {
 				return testv1.StepRunResult{}, err
 			}
 
-			hostName := "wsl"
-			hostAddr := strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_HOST"))
-			if hostAddr == "" {
-				hostAddr = "127.0.0.1"
-			}
-			hostUser := strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_USER"))
-			if hostUser == "" {
-				hostUser = "user"
-			}
-			hostPort := strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_WSL_PORT"))
-			if hostPort == "" {
-				hostPort = "22"
-			}
+			fixture := support.ResolveSSHFixture()
+			hostName := fixture.Alias
+			hostAddr := fixture.Host
+			hostUser := fixture.User
+			hostPort := fixture.Port
 
 			addHostCmd := fmt.Sprintf("/repl src_v3 add-host --name %s --host %s --user %s", hostName, hostAddr, hostUser)
 			if err := rt.RunTranscript([]support.TranscriptStep{
 				{
 					Send: addHostCmd,
-					ExpectRoom: support.CombinePatterns([]string{
-						fmt.Sprintf(`"message":"%s"`, addHostCmd),
-					}, support.StandardSubtoneRoomPatterns("repl src_v3", "")),
-					ExpectOutput: support.StandardSubtoneOutputPatterns("repl src_v3", ""),
-					Timeout:      35 * time.Second,
+					ExpectRoomAny: support.CombinePatternGroups(
+						[]string{fmt.Sprintf(`"message":"%s"`, addHostCmd)},
+						support.StandardCommandRoomPatternGroups("repl src_v3", "", "")...,
+					),
+					ExpectOutputAny: support.CombinePatternGroups(
+						[]string{fmt.Sprintf("llm-codex> %s", addHostCmd)},
+						support.StandardCommandOutputPatternGroups("repl src_v3", "", "")...,
+					),
+					Timeout: 35 * time.Second,
 				},
 			}); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 
-			resolveCmd := "/ssh src_v1 resolve --host wsl"
+			resolveCmd := fmt.Sprintf("/ssh src_v1 resolve --host %s", hostName)
 			if err := rt.RunTranscript([]support.TranscriptStep{
 				{
 					Send: resolveCmd,
-					ExpectRoom: support.CombinePatterns([]string{
-						fmt.Sprintf(`"message":"%s"`, resolveCmd),
-						`"scope":"subtone"`,
-						`Subtone for ssh src_v1 exited with code 0.`,
-					}, support.StandardSubtoneRoomPatterns("ssh src_v1", "")),
-					ExpectOutput: support.StandardSubtoneOutputPatterns("ssh src_v1", ""),
-					Timeout:      35 * time.Second,
+					ExpectRoomAny: support.CombinePatternGroups(
+						[]string{
+							fmt.Sprintf(`"message":"%s"`, resolveCmd),
+							fmt.Sprintf(`ssh resolve: resolving %s`, hostName),
+							fmt.Sprintf(`ssh resolve: transport=ssh preferred=%s`, hostAddr),
+						},
+						support.StandardCommandRoomPatternGroups("ssh src_v1", "", "")...,
+					),
+					ExpectOutputAny: support.CombinePatternGroups(
+						[]string{
+							fmt.Sprintf("llm-codex> %s", resolveCmd),
+							fmt.Sprintf("DIALTONE> ssh resolve: resolving %s", hostName),
+							fmt.Sprintf("DIALTONE> ssh resolve: transport=ssh preferred=%s", hostAddr),
+						},
+						support.StandardCommandOutputPatternGroups("ssh src_v1", "", "")...,
+					),
+					Timeout: 35 * time.Second,
 				},
 			}); err != nil {
 				return testv1.StepRunResult{}, err
@@ -94,45 +99,67 @@ func Register(r *testv1.Registry) {
 				return testv1.StepRunResult{}, fmt.Errorf("expected host key mode insecure-ignore, got %s", report.HostKeyMode)
 			}
 
-			probeCmd := "/ssh src_v1 probe --host wsl --timeout 5s"
+			probeCmd := fmt.Sprintf("/ssh src_v1 probe --host %s --timeout 5s", hostName)
 			if err := rt.RunTranscript([]support.TranscriptStep{
 				{
 					Send: probeCmd,
-					ExpectRoom: support.CombinePatterns([]string{
-						fmt.Sprintf(`"message":"%s"`, probeCmd),
-						`"scope":"subtone"`,
-						`Probe target=wsl transport=ssh user=`,
-						`candidate=`,
-						`auth=PASS`,
-						`Subtone for ssh src_v1 exited with code 0.`,
-					}, support.StandardSubtoneRoomPatterns("ssh src_v1", "")),
-					ExpectOutput: support.StandardSubtoneOutputPatterns("ssh src_v1", ""),
-					Timeout:      20 * time.Second,
+					ExpectRoomAny: support.CombinePatternGroups(
+						[]string{
+							fmt.Sprintf(`"message":"%s"`, probeCmd),
+							fmt.Sprintf(`ssh probe: checking transport/auth for %s`, hostName),
+							fmt.Sprintf(`ssh probe: transport=ssh preferred=%s`, hostAddr),
+							fmt.Sprintf(`Probe target=%s transport=ssh user=`, hostName),
+							`candidate=`,
+							`auth=PASS`,
+							fmt.Sprintf(`ssh probe: auth checks passed for %s`, hostName),
+						},
+						support.StandardCommandRoomPatternGroups("ssh src_v1", "", "")...,
+					),
+					ExpectOutputAny: support.CombinePatternGroups(
+						[]string{
+							fmt.Sprintf("llm-codex> %s", probeCmd),
+							fmt.Sprintf("DIALTONE> ssh probe: checking transport/auth for %s", hostName),
+							fmt.Sprintf("DIALTONE> ssh probe: transport=ssh preferred=%s", hostAddr),
+							fmt.Sprintf("DIALTONE> ssh probe: auth checks passed for %s", hostName),
+						},
+						support.StandardCommandOutputPatternGroups("ssh src_v1", "", "")...,
+					),
+					Timeout: 20 * time.Second,
 				},
 			}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("ssh probe via REPL failed before remote command run: %w", err)
 			}
 
-			sshCmd := "/ssh src_v1 run --host wsl --cmd whoami"
+			sshCmd := fmt.Sprintf("/ssh src_v1 run --host %s --cmd whoami", hostName)
 			if err := rt.RunTranscript([]support.TranscriptStep{
 				{
 					Send: sshCmd,
-					ExpectRoom: support.CombinePatterns([]string{
-						fmt.Sprintf(`"message":"%s"`, sshCmd),
-						`"scope":"subtone"`,
-						`"message":"user"`,
-						`Subtone for ssh src_v1 exited with code`,
-					}, support.StandardSubtoneRoomPatterns("ssh src_v1", `Subtone for ssh src_v1 exited with code`)),
-					ExpectOutput: support.StandardSubtoneOutputPatterns("ssh src_v1", `DIALTONE> Subtone for ssh src_v1 exited with code`),
-					Timeout:      35 * time.Second,
+					ExpectRoomAny: support.CombinePatternGroups(
+						[]string{
+							fmt.Sprintf(`"message":"%s"`, sshCmd),
+							fmt.Sprintf(`ssh run: executing remote command on %s`, hostName),
+							fmt.Sprintf(`ssh run: command completed on %s`, hostName),
+							`"message":"user"`,
+						},
+						support.StandardCommandRoomPatternGroups("ssh src_v1", "", "")...,
+					),
+					ExpectOutputAny: support.CombinePatternGroups(
+						[]string{
+							fmt.Sprintf("llm-codex> %s", sshCmd),
+							fmt.Sprintf("DIALTONE> ssh run: executing remote command on %s", hostName),
+							fmt.Sprintf("DIALTONE> ssh run: command completed on %s", hostName),
+						},
+						support.StandardCommandOutputPatternGroups("ssh src_v1", "", "")...,
+					),
+					Timeout: 35 * time.Second,
 				},
 			}); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 
-			ctx.TestPassf("ssh wsl command routed through llm-codex REPL prompt path")
+			ctx.TestPassf("ssh remote command routed through llm-codex REPL prompt path via alias %s", hostName)
 			return testv1.StepRunResult{
-				Report: "Joined REPL as llm-codex, added the sample wsl host through the REPL prompt flow, exercised SSH resolve through the prompt, verified the SSH resolve report selected the expected host/user/port plus a usable auth source and host-key mode, confirmed reachability and auth with the REPL SSH probe, then ran `whoami` through the REPL SSH subtone and verified the remote user output.",
+				Report: fmt.Sprintf("Joined REPL as llm-codex, added the sample SSH host alias `%s` through the REPL prompt flow, exercised SSH resolve through the prompt, verified the SSH resolve report selected the expected host/user/port plus a usable auth source and host-key mode, confirmed reachability and auth with the REPL SSH probe, then ran `whoami` through the REPL SSH subtone and verified the remote user output.", hostName),
 			}, nil
 		},
 	})

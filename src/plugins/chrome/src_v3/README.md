@@ -40,12 +40,6 @@ Important points:
 - that PID may be local or remote, for example the Chrome daemon PID on `legion`
 - Chrome service state should ultimately be read from REPL-managed desired/observed state in NATS
 
-Current compatibility note:
-
-- the current implementation still has some legacy `subtone` naming in commands and internals
-- `./dialtone.sh repl src_v3 subtone-list` and `subtone-log` are still the compatibility tools for inspecting detailed CLI-side logs
-- the public direction is task-first, and this README follows that direction
-
 `--host` is still plugin-local for `chrome` and should keep meaning the target mesh node, for example `legion`.
 
 ## Core Model
@@ -173,9 +167,10 @@ The useful log streams are:
 
 1. **Task logs**
    These are the detailed CLI-side logs for a submitted Chrome command.
-   Today the compatibility commands are still:
-   - `./dialtone.sh repl src_v3 subtone-list --count 20`
-   - `./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 200`
+   Read them with:
+   - `./dialtone.sh repl src_v3 task list`
+   - `./dialtone.sh repl src_v3 task show --task-id <task-id>`
+   - `./dialtone.sh repl src_v3 task log --task-id <task-id> --lines 200`
 
 2. **Daemon logs**
    Stored on the target host at:
@@ -206,7 +201,6 @@ The browser control surface is one request/reply API over NATS.
 Current daemon routing includes:
 
 - host-scoped command subjects
-- legacy compatibility subjects
 - REPL-managed service discovery
 
 The important operator takeaway is:
@@ -301,11 +295,12 @@ If you explicitly need the manual Windows helper path:
 ./dialtone.sh chrome src_v3 reset --host legion
 ```
 
-7. If the top-level transcript is not enough, inspect the detailed task log with the current compatibility commands:
+7. If the top-level transcript is not enough, inspect the detailed task log:
 
 ```sh
-./dialtone.sh repl src_v3 subtone-list --count 20
-./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 200
+./dialtone.sh repl src_v3 task list
+./dialtone.sh repl src_v3 task show --task-id <task-id>
+./dialtone.sh repl src_v3 task log --task-id <task-id> --lines 200
 ```
 
 ## Related Docs

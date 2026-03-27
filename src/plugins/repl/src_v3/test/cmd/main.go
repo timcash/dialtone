@@ -15,8 +15,8 @@ import (
 	sshwsl "dialtone/dev/plugins/repl/src_v3/test/05_ssh_wsl"
 	cloudflaretunnel "dialtone/dev/plugins/repl/src_v3/test/06_cloudflare_tunnel"
 	tsnetephemeral "dialtone/dev/plugins/repl/src_v3/test/07_tsnet_ephemeral"
-	subtoneobservability "dialtone/dev/plugins/repl/src_v3/test/08_subtone_observability"
-	subtoneattach "dialtone/dev/plugins/repl/src_v3/test/09_subtone_attach"
+	taskobservability "dialtone/dev/plugins/repl/src_v3/test/08_task_observability"
+	taskattach "dialtone/dev/plugins/repl/src_v3/test/09_task_attach"
 	replloggingcontract "dialtone/dev/plugins/repl/src_v3/test/10_repl_logging_contract"
 	"dialtone/dev/plugins/repl/src_v3/test/support"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
@@ -48,8 +48,8 @@ func run() int {
 	replloggingcontract.Register(reg)
 	sshwsl.Register(reg)
 	cloudflaretunnel.Register(reg)
-	subtoneobservability.Register(reg)
-	subtoneattach.Register(reg)
+	taskobservability.Register(reg)
+	taskattach.Register(reg)
 	if filtered := filterSteps(reg.Steps, strings.TrimSpace(*filter)); len(filtered) > 0 {
 		reg.Steps = filtered
 	}

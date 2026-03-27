@@ -146,7 +146,7 @@ func (r *serviceRegistry) ObserveHeartbeat(h managedHeartbeat) {
 	if cmd := strings.TrimSpace(h.Command); cmd != "" {
 		entry.Command = cmd
 	}
-	entry.Mode = defaultSubtoneMode(h.Mode)
+	entry.Mode = defaultManagedMode(h.Mode)
 	if logPath := strings.TrimSpace(h.LogPath); logPath != "" {
 		entry.LogPath = logPath
 	}

@@ -650,14 +650,14 @@ func relayInjectedIndexLifecycle(natsURL, room, user, displayLine, injectLine st
 	subject := "repl.room." + room
 	targetInput := "/" + strings.TrimSpace(injectLine)
 	displayInput := "/" + strings.TrimSpace(displayLine)
-	cmdLabel := injectedCommandLabel(injectLine)
 	summaryPrefix := injectedSummaryPrefix(injectLine)
-	requestLine := "Request received. Spawning subtone for " + cmdLabel + "..."
+	requestLine := "Request received."
 	seenInput := false
 	startedLifecycle := false
-	seenSubtoneStart := false
-	seenSubtoneRoom := false
-	seenSubtoneLog := false
+	seenTaskQueued := false
+	seenTaskRoom := false
+	seenTaskLog := false
+	seenTaskAssigned := false
 	done := make(chan struct{})
 	doneClosed := false
 	finalSeen := false
@@ -690,28 +690,33 @@ func relayInjectedIndexLifecycle(natsURL, room, user, displayLine, injectLine st
 				fmt.Fprintf(os.Stdout, "DIALTONE> %s\n", msgText)
 				return
 			}
-			if !shouldForwardIndexLine(msgText, cmdLabel, summaryPrefix) {
+			if !shouldForwardIndexLine(msgText, summaryPrefix) {
 				return
 			}
 			switch {
-			case strings.HasPrefix(msgText, "Subtone started as pid "):
-				if seenSubtoneStart {
+			case strings.HasPrefix(msgText, "Task queued as task-"):
+				if seenTaskQueued {
 					return
 				}
-				seenSubtoneStart = true
-			case strings.HasPrefix(msgText, "Subtone room: "):
-				if seenSubtoneRoom {
+				seenTaskQueued = true
+			case strings.HasPrefix(msgText, "Task room: task."):
+				if seenTaskRoom {
 					return
 				}
-				seenSubtoneRoom = true
-			case strings.HasPrefix(msgText, "Subtone log file: "):
-				if seenSubtoneLog {
+				seenTaskRoom = true
+			case strings.HasPrefix(msgText, "Task log: "):
+				if seenTaskLog {
 					return
 				}
-				seenSubtoneLog = true
+				seenTaskLog = true
+			case strings.HasPrefix(msgText, "Task task-") && strings.Contains(msgText, " assigned pid "):
+				if seenTaskAssigned {
+					return
+				}
+				seenTaskAssigned = true
 			}
 			fmt.Fprintf(os.Stdout, "DIALTONE> %s\n", msgText)
-			if strings.Contains(msgText, "Subtone for "+cmdLabel+" is running in background.") || strings.Contains(msgText, "Subtone for "+cmdLabel+" exited with code ") || strings.Contains(msgText, "Subtone for "+cmdLabel+" failed to start") {
+			if isInjectedTaskFinal(msgText) {
 				if !finalSeen {
 					finalSeen = true
 					go func() {
@@ -754,17 +759,6 @@ func sanitizeREPLRoom(room string) string {
 	return room
 }
 
-func injectedCommandLabel(line string) string {
-	fields := shellSplit(strings.TrimSpace(line))
-	if len(fields) == 0 {
-		return ""
-	}
-	if len(fields) == 1 {
-		return fields[0]
-	}
-	return fields[0] + " " + fields[1]
-}
-
 func injectedSummaryPrefix(line string) string {
 	fields := shellSplit(strings.TrimSpace(line))
 	if len(fields) < 3 {
@@ -773,20 +767,48 @@ func injectedSummaryPrefix(line string) string {
 	return fields[0] + " " + fields[2] + ":"
 }
 
-func shouldForwardIndexLine(msgText, cmdLabel, summaryPrefix string) bool {
+func shouldForwardIndexLine(msgText, summaryPrefix string) bool {
 	msgText = strings.TrimSpace(msgText)
 	switch {
 	case msgText == "":
 		return false
-	case strings.HasPrefix(msgText, "Subtone started as pid "):
+	case strings.HasPrefix(msgText, "Task queued as task-"):
 		return true
-	case strings.HasPrefix(msgText, "Subtone room: "):
+	case strings.HasPrefix(msgText, "Task room: task."):
 		return true
-	case strings.HasPrefix(msgText, "Subtone log file: "):
+	case strings.HasPrefix(msgText, "Task log: "):
 		return true
-	case strings.Contains(msgText, "Subtone for "+cmdLabel+" "):
+	case strings.HasPrefix(msgText, "Task task-") && strings.Contains(msgText, " assigned pid "):
+		return true
+	case strings.HasPrefix(msgText, "Task task-") && strings.Contains(msgText, " exited with code "):
+		return true
+	case strings.HasPrefix(msgText, "Task task-") && strings.Contains(msgText, " failed to start"):
+		return true
+	case strings.HasPrefix(msgText, "Task task-") && strings.Contains(msgText, " stopped."):
+		return true
+	case strings.HasPrefix(msgText, "Task task-") && strings.Contains(msgText, " is running in background."):
+		return true
+	case strings.HasPrefix(msgText, "Service ") && strings.Contains(msgText, " is running."):
 		return true
 	case summaryPrefix != "" && strings.HasPrefix(msgText, summaryPrefix):
+		return true
+	default:
+		return false
+	}
+}
+
+func isInjectedTaskFinal(msgText string) bool {
+	msgText = strings.TrimSpace(msgText)
+	switch {
+	case strings.HasPrefix(msgText, "Task task-") && strings.Contains(msgText, " exited with code "):
+		return true
+	case strings.HasPrefix(msgText, "Task task-") && strings.Contains(msgText, " failed to start"):
+		return true
+	case strings.HasPrefix(msgText, "Task task-") && strings.Contains(msgText, " stopped."):
+		return true
+	case strings.HasPrefix(msgText, "Task task-") && strings.Contains(msgText, " is running in background."):
+		return true
+	case strings.HasPrefix(msgText, "Service ") && strings.Contains(msgText, " is running."):
 		return true
 	default:
 		return false

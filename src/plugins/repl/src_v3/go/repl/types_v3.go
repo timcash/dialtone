@@ -36,10 +36,10 @@ type meshNode struct {
 	RepoCandidates      []string `json:"repo_candidates,omitempty"`
 }
 
-type subtoneLogMeta struct {
+type taskLogMeta struct {
 	Path    string
 	Name    string
-	PID     int
+	TaskID  string
 	ModTime time.Time
 }
 

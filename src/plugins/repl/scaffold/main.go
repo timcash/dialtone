@@ -103,14 +103,9 @@ func main() {
 				logs.Error("repl v3 test failed: %v", err)
 				os.Exit(1)
 			}
-		case "subtone-list":
-			if err := replv3.RunSubtoneList(rest); err != nil {
-				logs.Error("repl v3 subtone-list failed: %v", err)
-				os.Exit(1)
-			}
-		case "subtone-log":
-			if err := replv3.RunSubtoneLog(rest); err != nil {
-				logs.Error("repl v3 subtone-log failed: %v", err)
+		case "task":
+			if err := replv3.RunTask(rest); err != nil {
+				logs.Error("repl v3 task command failed: %v", err)
 				os.Exit(1)
 			}
 		case "watch":
@@ -183,10 +178,12 @@ func printUsage() {
 	logs.Raw("  add-host --name wsl --host HOST --user USER              Add/update mesh host in env/dialtone.json")
 	logs.Raw("  status [--nats-url URL] [--room NAME]")
 	logs.Raw("  service [--mode install|run|status] [--repo owner/repo] [--nats-url URL] [--room NAME] [--hostname HOST] [--check-interval 5m] [--embedded-nats] [--tsnet] [--tsnet-nats-port PORT]")
+	logs.Raw("  task list [--count N] [--state all|running|done] [--nats-url URL]")
+	logs.Raw("  task show --task-id TASK_ID [--nats-url URL]")
+	logs.Raw("  task log --task-id TASK_ID [--lines N] [--nats-url URL]")
+	logs.Raw("  task kill --task-id TASK_ID [--nats-url URL]")
 	logs.Raw("  test [--filter EXPR] [--real] [--require-embedded-tsnet] [--wsl-host HOST] [--wsl-user USER] [--tunnel-name NAME] [--tunnel-url URL] [--install-url URL] [--bootstrap-repo-url URL]")
-	logs.Raw("  subtone-list [--count N]                             List recent subtone logs with pid/command")
-	logs.Raw("  subtone-log --pid PID [--lines N]                    Print subtone log file for a pid")
 	logs.Raw("  watch [--nats-url URL] [--subject repl.>] [--filter TEXT]  Stream NATS room/events")
 	logs.Raw("  test-clean [--dry-run]                               Remove REPL src_v3 /tmp bootstrap test folders")
-	logs.Raw("  process-clean [--dry-run] [--include-chrome]        Stop REPL/tap/subtones/bootstrap-http/cloudflare processes + known dialtone LaunchAgents")
+	logs.Raw("  process-clean [--dry-run] [--include-chrome]        Stop REPL task workers, bootstrap-http, cloudflare, and known dialtone LaunchAgents")
 }

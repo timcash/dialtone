@@ -133,7 +133,7 @@ func Inject(args []string) error {
 	fs := flag.NewFlagSet("repl-v3-inject", flag.ContinueOnError)
 	natsURL := fs.String("nats-url", resolveREPLNATSURL(), "NATS URL")
 	room := fs.String("room", defaultRoom, "Shared room name")
-	user := fs.String("user", "llm-codex", "Logical user name")
+	user := fs.String("user", DefaultPromptName(), "Logical user name")
 	host := fs.String("host", "", "Target REPL host (routes as @host command)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -156,7 +156,7 @@ func InjectCommand(natsURL, room, user, host, command string) error {
 		room = defaultRoom
 	}
 	if strings.TrimSpace(user) == "" {
-		user = "llm-codex"
+		user = DefaultPromptName()
 	}
 	host = normalizeHostTarget(host)
 	command = strings.TrimPrefix(strings.TrimSpace(command), "/")

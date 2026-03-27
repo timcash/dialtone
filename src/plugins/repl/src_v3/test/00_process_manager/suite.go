@@ -46,24 +46,18 @@ func Register(r *testv1.Registry) {
 			if err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("shell routed proc emit failed: %w\n%s", err, out)
 			}
-			required := []string{
-				"Request received. Spawning subtone for proc src_v1",
-				"Subtone started as pid ",
-				"Subtone room: subtone-",
-				"Subtone log file: ",
-				"Subtone for proc src_v1 exited with code 0.",
-			}
-			for _, needle := range required {
-				if !strings.Contains(out, needle) {
-					return testv1.StepRunResult{}, fmt.Errorf("shell autostart output missing %q. Output was:\n%q", needle, out)
-				}
+			if err := support.MatchAnyPatternGroupText(out, support.StandardCommandOutputPatternGroups("proc src_v1", "", "")); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("shell autostart output missed the routed lifecycle contract: %w\n%s", err, out)
 			}
 			if strings.Contains(out, "\nDIALTONE> shell-autostart-ok") || strings.Contains(out, "\nshell-autostart-ok\n") {
 				return testv1.StepRunResult{}, fmt.Errorf("shell routed output leaked subtone payload into index/shell output\n%s", out)
 			}
-			logPath, err := parseSubtoneLogPath(out)
+			logPath, err := support.ParseWorkLogPath(out)
 			if err != nil {
 				return testv1.StepRunResult{}, err
+			}
+			if base := filepath.Base(logPath); !strings.HasPrefix(base, "task-") {
+				return testv1.StepRunResult{}, fmt.Errorf("expected task-first log name, got %s", logPath)
 			}
 			logBody, err := os.ReadFile(logPath)
 			if err != nil {
@@ -80,9 +74,9 @@ func Register(r *testv1.Registry) {
 				return testv1.StepRunResult{}, fmt.Errorf("leader state invalid after shell autostart: %+v", st)
 			}
 
-			ctx.TestPassf("shell routed command autostarted leader pid %d and kept payload in subtone log", st.PID)
+			ctx.TestPassf("shell routed command autostarted leader pid %d and kept payload in the routed work log", st.PID)
 			return testv1.StepRunResult{
-				Report: fmt.Sprintf("Ran `./dialtone.sh proc src_v1 emit shell-autostart-ok` against a fresh local NATS URL, verified the shell path produced the normal routed subtone lifecycle, wrote leader pid %d to `leader.json`, and kept the emitted payload in the subtone log instead of leaking it into shell/index output.", st.PID),
+				Report: fmt.Sprintf("Ran `./dialtone.sh proc src_v1 emit shell-autostart-ok` against a fresh local NATS URL, verified the shell path produced the normal routed command lifecycle, wrote leader pid %d to `leader.json`, and kept the emitted payload in the routed work log instead of leaking it into shell/index output.", st.PID),
 			}, nil
 		},
 	})
@@ -165,20 +159,18 @@ func Register(r *testv1.Registry) {
 			if strings.Contains(out, "No REPL leader detected on") {
 				return testv1.StepRunResult{}, fmt.Errorf("shell path unexpectedly autostarted a new leader despite existing healthy leader\n%s", out)
 			}
-			required := []string{
-				"Request received. Spawning subtone for proc src_v1",
-				"Subtone started as pid ",
-				"Subtone room: subtone-",
-				"Subtone log file: ",
-				"Subtone for proc src_v1 exited with code 0.",
-			}
-			for _, needle := range required {
-				if !strings.Contains(out, needle) {
-					return testv1.StepRunResult{}, fmt.Errorf("shell reuse output missing %q\n%s", needle, out)
-				}
+			if err := support.MatchAnyPatternGroupText(out, support.StandardCommandOutputPatternGroups("proc src_v1", "", "")); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("shell reuse output missed the routed lifecycle contract: %w\n%s", err, out)
 			}
 			if strings.Contains(out, "\nDIALTONE> shell-reuse-ok") || strings.Contains(out, "\nshell-reuse-ok\n") {
 				return testv1.StepRunResult{}, fmt.Errorf("shell routed output leaked subtone payload into index/shell output\n%s", out)
+			}
+			logPath, err := support.ParseWorkLogPath(out)
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if base := filepath.Base(logPath); !strings.HasPrefix(base, "task-") {
+				return testv1.StepRunResult{}, fmt.Errorf("expected task-first log name, got %s", logPath)
 			}
 			second, err := readLeaderState(rt.RepoRoot)
 			if err != nil {
@@ -190,7 +182,7 @@ func Register(r *testv1.Registry) {
 
 			ctx.TestPassf("shell routed command reused existing leader pid %d", first.PID)
 			return testv1.StepRunResult{
-				Report: fmt.Sprintf("Started the REPL leader first, then ran `./dialtone.sh proc src_v1 emit shell-reuse-ok` and verified the shell path reused leader pid %d without printing a new autostart message while still routing the command into a subtone.", first.PID),
+				Report: fmt.Sprintf("Started the REPL leader first, then ran `./dialtone.sh proc src_v1 emit shell-reuse-ok` and verified the shell path reused leader pid %d without printing a new autostart message while still routing the command through the indexed lifecycle.", first.PID),
 			}, nil
 		},
 	})
@@ -219,18 +211,22 @@ func Register(r *testv1.Registry) {
 				Send: startCmd,
 				ExpectRoom: []string{
 					fmt.Sprintf(`"message":"%s"`, startCmd),
-					`"message":"Request received. Starting service pm-svc..."`,
-					`"message":"Service pm-svc started as pid `,
-					`"message":"Service room: service:pm-svc"`,
-					`"message":"Service log file: `,
+					`"message":"Request received."`,
+					`"message":"Task queued as task-`,
+					`"message":"Task room: task.task-`,
+					`"message":"Task log: `,
+					`"message":"Task task-`,
+					`assigned pid `,
 					`"message":"Service pm-svc is running."`,
 				},
 				ExpectOutput: []string{
 					fmt.Sprintf("llm-codex> %s", startCmd),
-					`DIALTONE> Request received. Starting service pm-svc...`,
-					`DIALTONE> Service pm-svc started as pid `,
-					`DIALTONE> Service room: service:pm-svc`,
-					`DIALTONE> Service log file: `,
+					`DIALTONE> Request received.`,
+					`DIALTONE> Task queued as task-`,
+					`DIALTONE> Task room: task.task-`,
+					`DIALTONE> Task log: `,
+					`DIALTONE> Task task-`,
+					`assigned pid `,
 					`DIALTONE> Service pm-svc is running.`,
 				},
 				Timeout: 30 * time.Second,
@@ -452,8 +448,8 @@ func Register(r *testv1.Registry) {
 			}
 			if err := rt.RunTranscript([]support.TranscriptStep{{
 				Send:         "/ps",
-				ExpectRoom:   []string{`"type":"input"`, `"message":"/ps"`, `"message":"Active Subtones:"`, fmt.Sprintf(`"message":"%-8d`, bgPID)},
-				ExpectOutput: []string{`DIALTONE> Active Subtones:`, fmt.Sprintf("%d", bgPID)},
+				ExpectRoom:   []string{`"type":"input"`, `"message":"/ps"`, `"message":"Running Tasks:"`, fmt.Sprintf("%d", bgPID)},
+				ExpectOutput: []string{`DIALTONE> Running Tasks:`, fmt.Sprintf("%d", bgPID)},
 				Timeout:      20 * time.Second,
 			}}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("background pid %d stopped being visible after foreground help: %w", bgPID, err)
@@ -664,11 +660,11 @@ func cleanupManagedSubtones(rt *support.Runtime) error {
 	if stoppedAny {
 		if err := rt.RunTranscript([]support.TranscriptStep{{
 			Send:         "/ps",
-			ExpectRoom:   []string{`"type":"input"`, `"message":"/ps"`, `"message":"No active subtones."`},
-			ExpectOutput: []string{`DIALTONE> No active subtones.`},
+			ExpectRoom:   []string{`"type":"input"`, `"message":"/ps"`, `"message":"No running tasks."`},
+			ExpectOutput: []string{`DIALTONE> No running tasks.`},
 			Timeout:      20 * time.Second,
 		}}); err != nil {
-			return fmt.Errorf("verify no active subtones after cleanup: %w", err)
+			return fmt.Errorf("verify no running tasks after cleanup: %w", err)
 		}
 	}
 	return nil
@@ -731,20 +727,6 @@ func subjectTokenForTest(raw string) string {
 		return "unknown"
 	}
 	return out
-}
-
-func parseSubtoneLogPath(output string) (string, error) {
-	for _, line := range strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n") {
-		line = strings.TrimSpace(line)
-		const prefix = "DIALTONE> Subtone log file: "
-		if strings.HasPrefix(line, prefix) {
-			path := strings.TrimSpace(strings.TrimPrefix(line, prefix))
-			if path != "" {
-				return path, nil
-			}
-		}
-	}
-	return "", fmt.Errorf("subtone log path not found in shell output")
 }
 
 func allocateLocalNATSURL() string {

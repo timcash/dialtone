@@ -23,6 +23,64 @@ Use one Dialtone command per invocation:
 ./dialtone.sh chrome src_v3 status --host legion --role dev
 ```
 
+## Working With Plugins
+
+The generic plugin command shape is:
+
+```bash
+./dialtone.sh <plugin-name> <src_vN> <command> [args] [--flags]
+```
+
+Most plugins should expose the standard development verbs:
+
+```bash
+./dialtone.sh <plugin-name> <src_vN> install
+./dialtone.sh <plugin-name> <src_vN> format
+./dialtone.sh <plugin-name> <src_vN> lint
+./dialtone.sh <plugin-name> <src_vN> build
+./dialtone.sh <plugin-name> <src_vN> test
+```
+
+Examples:
+
+```bash
+./dialtone.sh repl src_v3 install
+./dialtone.sh repl src_v3 format
+./dialtone.sh repl src_v3 lint
+./dialtone.sh repl src_v3 build
+./dialtone.sh repl src_v3 test
+
+./dialtone.sh chrome src_v3 build
+./dialtone.sh chrome src_v3 test
+./dialtone.sh ssh src_v1 test
+```
+
+When a plugin supports filtered tests, use the same shape with extra flags:
+
+```bash
+./dialtone.sh <plugin-name> <src_vN> test --filter <expr>
+```
+
+Examples:
+
+```bash
+./dialtone.sh repl src_v3 test --filter interactive-command-index-emits-task-queue-lines
+./dialtone.sh chrome src_v3 test --filter service-start
+```
+
+The same plugin commands should also work naturally inside the REPL by adding a leading slash:
+
+```text
+host-name> /repl src_v3 format
+host-name> /repl src_v3 test --filter interactive-command-index-emits-task-queue-lines
+host-name> /chrome src_v3 test --host legion --role dev
+host-name> /ssh src_v1 run --host grey --cmd hostname
+```
+
+Use direct plugin commands when you want one explicit task submission from the shell.
+
+Use the REPL when you want to keep one long-lived session open, submit many plugin commands in a row, and watch `dialtone>` task and service lifecycle updates as they happen.
+
 The public direction for the CLI is task-first:
 
 - every request should queue immediately
@@ -263,12 +321,6 @@ Useful patterns:
 ./dialtone.sh repl src_v3 task log --task-id <task-id> --lines 200
 ./dialtone.sh logs src_v1 stream --topic 'logfilter.level.error.>'
 ```
-
-Compatibility note:
-
-- the current codebase still has some legacy `subtone` names in commands, files, and internals
-- the public model is `task` and `task-id`
-- `subtone-*` commands should be treated as compatibility commands until the CLI rename lands
 
 ## Windows Development
 

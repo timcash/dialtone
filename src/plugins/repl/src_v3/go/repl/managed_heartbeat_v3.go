@@ -28,7 +28,6 @@ type managedHeartbeat struct {
 	Ports       []int   `json:"ports,omitempty"`
 	ExitCode    int     `json:"exit_code,omitempty"`
 	ServiceName string  `json:"service_name,omitempty"`
-	SubtonePID  int     `json:"subtone_pid,omitempty"`
 }
 
 func encodeManagedHeartbeat(h managedHeartbeat) ([]byte, error) {
@@ -59,7 +58,7 @@ func buildManagedHeartbeat(host, room, mode, serviceName string, ev proc.Subtone
 		Host:        strings.TrimSpace(host),
 		Kind:        "process",
 		Name:        strings.TrimSpace(serviceName),
-		Mode:        defaultSubtoneMode(mode),
+		Mode:        defaultManagedMode(mode),
 		PID:         ev.PID,
 		Room:        sanitizeRoom(room),
 		Command:     strings.TrimSpace(strings.Join(ev.Args, " ")),
@@ -67,7 +66,6 @@ func buildManagedHeartbeat(host, room, mode, serviceName string, ev proc.Subtone
 		LogPath:     strings.TrimSpace(ev.LogPath),
 		StartedAt:   ev.StartedAt.UTC().Format(time.RFC3339),
 		LastOKAt:    now.Format(time.RFC3339),
-		SubtonePID:  ev.PID,
 		ExitCode:    exitCode,
 		ServiceName: strings.TrimSpace(serviceName),
 	}
