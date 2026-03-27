@@ -2,123 +2,77 @@
 
 `chrome src_v3` is the current Dialtone remote Chrome control path.
 
-It is designed around:
-- one daemon per role
-- one long-lived Chrome process
-- one preserved Chrome profile per role
-- one managed tab reused by default
-- one NATS request/reply control surface
+Its core runtime model is still:
 
-## Runtime Note
+- one daemon per role
+- one long-lived Chrome process per role
+- one preserved Chrome profile per role
+- one managed content tab reused by default
+- one NATS request/reply control surface for browser commands
+
+Its operator model should now be understood through the REPL task system:
+
+- `./dialtone.sh chrome src_v3 ...` should submit one task to the REPL leader
+- `dialtone>` should stay short and task-focused
+- detailed command output belongs in the task log and service state
+- long-lived Chrome roles should be managed as service state, not as one-off shell launches
+
+## REPL Integration
 
 Plain `./dialtone.sh chrome src_v3 ...` is the default operator path.
 
-That command is normally routed through the local REPL leader, which means:
-- `DIALTONE>` should stay high-level
-- full request detail stays in the subtone log
-- use `./dialtone.sh repl src_v3 subtone-list --count 20`
-- use `./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 200`
-
-Typical index-room summaries are:
+In the task-first REPL design, a normal Chrome command should behave like this:
 
 ```text
-DIALTONE> chrome service: ensuring daemon on legion role=dev
-DIALTONE> chrome goto: opening http://127.0.0.1:8766/chrome_src_v3_action.html on legion role=dev
-DIALTONE> chrome screenshot: saved to /home/user/dialtone/src/plugins/chrome/src_v3/screenshots/manual_debug.png
+host-name> /chrome src_v3 status --host legion --role dev
+dialtone> Request received.
+dialtone> Task queued as task-20260327-abc123.
+dialtone> Task room: task.task-20260327-abc123
+dialtone> Task log: ~/.dialtone/logs/task-20260327-abc123.log
+dialtone> chrome service on legion role=dev is healthy.
+dialtone> Task task-20260327-abc123 exited with code 0.
 ```
 
-The normal shell transcript pattern is:
+Important points:
 
-```text
-legion> /chrome src_v3 screenshot --host legion --role dev --out src/plugins/chrome/src_v3/screenshots/manual_debug.png
-DIALTONE> Request received. Spawning subtone for chrome src_v3...
-DIALTONE> Subtone started as pid 327530.
-DIALTONE> Subtone room: subtone-327530
-DIALTONE> Subtone log file: /home/user/dialtone/.dialtone/logs/subtone-327530-20260317-171019.log
-DIALTONE> chrome screenshot: capturing managed tab on legion role=dev
-DIALTONE> chrome service: ensuring daemon on legion role=dev
-DIALTONE> chrome screenshot: saved to /home/user/dialtone/src/plugins/chrome/src_v3/screenshots/manual_debug.png
-DIALTONE> Subtone for chrome src_v3 exited with code 0.
-```
+- the public identity is `task-id`
+- PID is later runtime state, not the public identity
+- that PID may be local or remote, for example the Chrome daemon PID on `legion`
+- Chrome service state should ultimately be read from REPL-managed desired/observed state in NATS
 
-`--host` is plugin-local for `chrome` and should keep meaning the target mesh node, for example `legion`.
+Current compatibility note:
 
-## Shell Workflow
+- the current implementation still has some legacy `subtone` naming in commands and internals
+- `./dialtone.sh repl src_v3 subtone-list` and `subtone-log` are still the compatibility tools for inspecting detailed CLI-side logs
+- the public direction is task-first, and this README follows that direction
 
-```sh
-# From repo root
-cd /home/user/dialtone
-
-# Deploy and start a headed role on legion
-./dialtone.sh chrome src_v3 deploy --host legion --role dev --service
-
-# Check service state
-./dialtone.sh chrome src_v3 status --host legion --role dev
-./dialtone.sh chrome src_v3 instances --host legion
-./dialtone.sh chrome src_v3 logs --host legion
-./dialtone.sh chrome src_v3 doctor --host legion
-
-# Drive the managed tab
-./dialtone.sh chrome src_v3 goto --host legion --role dev --url http://127.0.0.1:8766/chrome_src_v3_action.html
-./dialtone.sh chrome src_v3 type-aria --host legion --role dev --label "Name Input" --value dialtone
-./dialtone.sh chrome src_v3 click-aria --host legion --role dev --label "Do Thing"
-
-# Inspect live DOM state on the managed tab
-./dialtone.sh chrome src_v3 get-aria-attr --host legion --role dev --label "Name Input" --attr value
-./dialtone.sh chrome src_v3 wait-log --host legion --role dev --contains "clicked:" --timeout-ms 5000
-
-# Capture a screenshot
-./dialtone.sh chrome src_v3 screenshot --host legion --role dev --out src/plugins/chrome/src_v3/screenshots/manual_debug.png
-```
-
-## Hybrid Windows + WSL Workflow
-
-When the standard Windows service-managed launcher is flaky, use a hybrid path:
-- keep the visible WSL commands in the `windows` tmux session
-- start the WSL REPL leader explicitly in tmux
-- deploy from WSL
-- start the Windows chrome daemons directly from PowerShell with the helper script
-- run the real `chrome src_v3` checks and suite from WSL against those already-running roles
-
-Recommended sequence:
-
-```powershell
-wsl-tmux clean-state
-wsl-tmux "cd /home/user/dialtone && nohup ./dialtone.sh repl src_v3 leader --embedded-nats --tsnet --room index --hostname DIALTONE-SERVER >/home/user/.dialtone/repl-v3/manual-leader.out.log 2>/home/user/.dialtone/repl-v3/manual-leader.err.log &"
-wsl-tmux "cd /home/user/dialtone && ./dialtone.sh chrome src_v3 deploy --host legion --role dev"
-.\scripts\windows\chrome-src-v3-manual.ps1 restart -Role dev,dev-isolated
-wsl-tmux "cd /home/user/dialtone && ./dialtone.sh chrome src_v3 status --host legion --role dev"
-wsl-tmux "cd /home/user/dialtone && ./dialtone.sh chrome src_v3 status --host legion --role dev-isolated"
-wsl-tmux "cd /home/user/dialtone && ./dialtone.sh chrome src_v3 test --host legion --role dev"
-```
-
-Notes:
-- the helper script writes daemon logs to `~/.dialtone/chrome-v3/<role>/service/daemon.out.log` and `daemon.err.log`
-- prestarting both `dev` and `dev-isolated` avoids the flaky cross-WSL remote start path during the isolation step
-- if the WSL leader was restarted, make sure the helper can resolve a live `tsnet_nats_url` before starting Windows daemons
-- visible action-flow defaults can live in `env/dialtone.json` with `DIALTONE_CHROME_SRC_V3_INTERACTION_COUNT` and `DIALTONE_CHROME_SRC_V3_ACTIONS_PER_SECOND`
-- `./dialtone.sh chrome src_v3 test --host legion --role dev --interactions 10 --actions-per-second 0.5` runs ten type/click loops at one visible action every two seconds
+`--host` is still plugin-local for `chrome` and should keep meaning the target mesh node, for example `legion`.
 
 ## Core Model
 
 Normal behavior:
-- keep one Chrome process running on the target host
-- keep one managed tab
+
+- keep one Chrome process running on the target host for each role
+- keep one managed tab for that role
 - reuse that tab across tests and dev flows
 - preserve the Chrome user-data directory
 
 Recovery behavior:
-- if the managed target is gone, stale, or unhealthy, recreate the managed tab
+
+- if the managed target is stale or unhealthy, recreate the managed tab
 - if the browser process is gone, restart the browser service
+- if the daemon is gone, reconcile the desired service state for that role
 
 What should not happen by default:
-- creating a new tab for every test
-- deleting the Chrome user-data directory during normal reset/deploy
+
+- creating a new visible tab for every test
+- deleting the Chrome user-data directory during normal reset or deploy
 - silently running multiple independent headed sessions against one role on the same host
 
 ## Main Commands
 
 Lifecycle:
+
 - `./dialtone.sh chrome src_v3 deploy --host <host> --role <role> --service`
 - `./dialtone.sh chrome src_v3 service --host <host> --mode start|stop|status --role <role>`
 - `./dialtone.sh chrome src_v3 status --host <host> --role <role>`
@@ -129,6 +83,7 @@ Lifecycle:
 - `./dialtone.sh chrome src_v3 close-all --host <host> [--role <role>]`
 
 Navigation:
+
 - `./dialtone.sh chrome src_v3 open --host <host> --role <role> --url <url>`
 - `./dialtone.sh chrome src_v3 goto --host <host> --role <role> --url <url>`
 - `./dialtone.sh chrome src_v3 get-url --host <host> --role <role>`
@@ -138,6 +93,7 @@ Navigation:
 - `./dialtone.sh chrome src_v3 close --host <host> --role <role>`
 
 Element actions:
+
 - `./dialtone.sh chrome src_v3 click-aria --host <host> --role <role> --label <aria-label>`
 - `./dialtone.sh chrome src_v3 type-aria --host <host> --role <role> --label <aria-label> --value <text>`
 - `./dialtone.sh chrome src_v3 wait-aria --host <host> --role <role> --label <aria-label> [--timeout-ms 5000]`
@@ -145,87 +101,176 @@ Element actions:
 - `./dialtone.sh chrome src_v3 get-aria-attr --host <host> --role <role> --label <aria-label> --attr <name>`
 
 Debugging:
+
 - `./dialtone.sh chrome src_v3 console --host <host> --role <role>`
 - `./dialtone.sh chrome src_v3 wait-log --host <host> --role <role> --contains <text> [--timeout-ms 5000]`
 - `./dialtone.sh chrome src_v3 screenshot --host <host> --role <role> --out <png-path>`
 
+## Typical Workflow
+
+```sh
+# From repo root
+cd /home/user/dialtone
+
+# Reconcile and confirm a headed role on legion
+./dialtone.sh chrome src_v3 deploy --host legion --role dev --service
+./dialtone.sh chrome src_v3 status --host legion --role dev
+
+# Inspect service/runtime state
+./dialtone.sh chrome src_v3 instances --host legion
+./dialtone.sh chrome src_v3 logs --host legion
+./dialtone.sh chrome src_v3 doctor --host legion
+
+# Drive the managed tab
+./dialtone.sh chrome src_v3 goto --host legion --role dev --url http://127.0.0.1:8766/chrome_src_v3_action.html
+./dialtone.sh chrome src_v3 type-aria --host legion --role dev --label "Name Input" --value dialtone
+./dialtone.sh chrome src_v3 click-aria --host legion --role dev --label "Do Thing"
+
+# Inspect live DOM state
+./dialtone.sh chrome src_v3 get-aria-attr --host legion --role dev --label "Name Input" --attr value
+./dialtone.sh chrome src_v3 wait-log --host legion --role dev --contains "clicked:" --timeout-ms 5000
+
+# Capture a screenshot of the managed tab
+./dialtone.sh chrome src_v3 screenshot --host legion --role dev --out src/plugins/chrome/src_v3/screenshots/manual_debug.png
+```
+
 ## Roles
 
 Use roles to isolate long-lived browser sessions:
+
 - `robot-test`: integrated robot suite on `legion`
 - `robot-dev`: live dev browser for `robot src_v2 dev`
-- `dev`: generic/manual use (default)
+- `dev`: generic/manual use
 
-Recommendation:
+Recommendations:
+
 - keep one role per workflow
 - do not mix unrelated tests on the same role
 - do not run concurrent headed flows against the same role unless you explicitly want them to share one tab
 
-## Agent & System Internals
+## Config And State
 
-This section provides critical context for LLM agents and automated tools.
+Use `env/dialtone.json` as the shared runtime config source.
 
-### Process & Port Mapping
-- **Daemon Port (NATS)**: `19465` (default). This is the control plane.
-- **Chrome Debug Port**: `19464` (default). The daemon communicates with Chrome over this port via `chromedp`.
-- **Isolation**: Each role gets its own NATS port and Chrome port if multiple daemons run on one host (though standard practice is one daemon/role per host).
+Important current configuration examples:
 
-### Log Streams
-1. **Daemon Logs**: Stored locally on the host at `~/.dialtone/chrome-v3/<role>/service/daemon.out.log`. These logs show NATS request handling and browser lifecycle events.
-2. **Browser Console**: The daemon captures the last 200 lines of the browser's console. Query these via `./dialtone.sh chrome src_v3 console`.
-3. **REPL Subtone Logs**: Plain shell commands keep the detailed CLI-side request/response output in the subtone log shown in the `DIALTONE>` transcript.
-4. **NATS Transport**: All CLI commands are converted to NATS requests on the subject `chrome.src_v3.<role>.cmd`. Responses include status, current URL, and console log snapshots.
+- REPL manager/client NATS URLs
+- Chrome headed/headless defaults
+- visible action pacing
+- interaction count defaults used by browser-driven tests
 
-### LLM Strategy for Troubleshooting
-- **Verification**: Always start with `status`. If `unhealthy=true`, check the daemon logs.
-- **State Recovery**: If the browser is unresponsive, try `reset`. This kills the browser and clears lock files but preserves the profile.
-- **DOM Inspection**: Use `get-aria-attr` and `screenshot` to verify UI state without needing a head.
-- **Synchronicity**: Use `wait-log` or `wait-aria` to handle async page loads. The system is designed for high-latency remote links.
-- **REPL Context Hygiene**: Keep the index room clean. Use `DIALTONE>` lifecycle plus short summaries for progress, and use `subtone-log` when raw payloads or stack traces are needed.
+For the Chrome runtime, the main state buckets are:
+
+1. REPL task and service state in NATS
+2. daemon persisted state on the target host
+3. daemon stdout/stderr logs on the target host
+4. browser console snapshots returned by the daemon
+5. task logs for CLI-side request handling
+
+## Logs And Observability
+
+The useful log streams are:
+
+1. **Task logs**
+   These are the detailed CLI-side logs for a submitted Chrome command.
+   Today the compatibility commands are still:
+   - `./dialtone.sh repl src_v3 subtone-list --count 20`
+   - `./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 200`
+
+2. **Daemon logs**
+   Stored on the target host at:
+   - `~/.dialtone/chrome-v3/<role>/service/daemon.out.log`
+   - `~/.dialtone/chrome-v3/<role>/service/daemon.err.log`
+
+3. **Browser console**
+   Query via:
+   - `./dialtone.sh chrome src_v3 console --host <host> --role <role>`
+
+4. **Service state**
+   This should be the main truth for whether the daemon exists, is healthy, and which role/host it belongs to.
+
+5. **Daemon response state**
+   `status`, `tabs`, `get-url`, and related commands expose the live daemon/browser view.
+
+Operationally:
+
+- start with `status`
+- if `unhealthy=true`, inspect daemon logs
+- if the browser is running but misbehaving, inspect console, DOM attrs, and screenshot output
+- if the CLI transcript is too thin, inspect the task log
+
+## NATS And Control Surface
+
+The browser control surface is one request/reply API over NATS.
+
+Current daemon routing includes:
+
+- host-scoped command subjects
+- legacy compatibility subjects
+- REPL-managed service discovery
+
+The important operator takeaway is:
+
+- browser-driving commands should feel like task submissions against a durable service
+- service startup and reuse should be controlled by the REPL control plane
+- the daemon should not be treated as an ad hoc hidden side effect
 
 ## Integration With `test/src_v1`
 
 `chrome src_v3` is the preferred remote headed-browser backend for Dialtone tests.
 
 What the test library expects:
-- one attach node, often `legion` on WSL
+
+- one attach node, often `legion`
 - one attach role, for example `robot-test`
 - one reusable managed tab
 
-Current robot pattern:
-- local UI/mock server on WSL
-- remote Chrome on `legion`
-- rover backend optionally on a third host
+The test flow should conceptually be:
 
-Example:
-```sh
-./dialtone.sh robot src_v2 test --filter three-system-arm
-./dialtone.sh robot src_v2 test --filter local-ui-mock-e2e
-```
+1. queue a task through `dialtone.sh`
+2. ensure or reuse the Chrome service for the target role
+3. drive the managed tab through daemon commands
+4. record screenshots, console state, and reports
+5. keep top-level `dialtone>` output short
 
 ## Lifecycle Rules
 
-- `open` and `goto` reuse the managed tab.
-- `deploy --service` preserves the running browser if the remote binary is already current.
-- `reset` preserves the Chrome profile/user-data directory.
-- explicit `tab-open`, `tab-close`, or `close` are the normal commands that change tab/browser lifecycle on purpose.
-- `instances` lists only Dialtone-managed Chrome roles by looking for the `--dialtone-role` process flag, so personal Chrome windows are excluded.
-- `close-all` closes only Dialtone-managed Chrome browser instances on the target host and leaves personal Chrome untouched.
+- `open` and `goto` reuse the managed tab
+- screenshots should use the same managed tab
+- `deploy --service` should preserve the running browser when the binary is already current
+- `reset` should preserve the Chrome profile/user-data directory
+- explicit `tab-open`, `tab-close`, or `close` are the normal commands that change tab/browser lifecycle on purpose
+- `instances` lists only Dialtone-managed Chrome roles by looking for the `--dialtone-role` process flag, so personal Chrome windows are excluded
+- `close-all` closes only Dialtone-managed Chrome browser instances on the target host and leaves personal Chrome untouched
 
-## Verification On `legion`
+## Hybrid Windows + WSL Workflow
 
-Current working behavior on `legion`:
-- headed browser stays up across robot test runs
-- managed tab can be reused across dev and test flows by role
-- DOM attrs can be read remotely with `get-aria-attr`
-- screenshots and console logs can be collected remotely
+When the normal service path is unhealthy or you need direct visibility into WSL command execution, use the hybrid workflow as an escape hatch, not the primary model.
 
-Known operational constraint:
-- a role is effectively single-session. If two workflows drive the same role at once, they are sharing one managed tab and will interfere with each other.
+Recommended pattern:
+
+- keep the visible WSL commands in the `windows` tmux session
+- use the WSL repo for runtime checks
+- keep Windows-only helper scripts as explicit operator tools, not the default service contract
+
+Example:
+
+```powershell
+wsl-tmux clean-state
+wsl-tmux "cd /home/user/dialtone && ./dialtone.sh chrome src_v3 status --host legion --role dev"
+wsl-tmux "cd /home/user/dialtone && ./dialtone.sh chrome src_v3 test --host legion --role dev"
+```
+
+If you explicitly need the manual Windows helper path:
+
+- `.\scripts\windows\chrome-src-v3-manual.ps1` is a fallback operator helper
+- it is useful when the normal remote launcher path is flaky
+- it should not be treated as the long-term primary control-plane design
 
 ## Troubleshooting
 
 1. Check daemon state:
+
 ```sh
 ./dialtone.sh chrome src_v3 status --host legion --role dev
 ```
@@ -233,21 +278,31 @@ Known operational constraint:
 2. If the tab lands on `chrome-error://chromewebdata/`, verify the target UI server is actually running.
 
 3. Read browser console:
+
 ```sh
 ./dialtone.sh chrome src_v3 console --host legion --role dev
 ```
 
 4. Inspect live UI attrs:
+
 ```sh
 ./dialtone.sh chrome src_v3 get-aria-attr --host legion --role dev --label "Name Input" --attr value
 ```
 
-5. Only use `reset` when normal recovery is not enough:
+5. Capture a screenshot of the managed tab:
+
+```sh
+./dialtone.sh chrome src_v3 screenshot --host legion --role dev --out src/plugins/chrome/src_v3/screenshots/manual_debug.png
+```
+
+6. Only use `reset` when normal recovery is not enough:
+
 ```sh
 ./dialtone.sh chrome src_v3 reset --host legion
 ```
 
-6. Inspect the exact subtone transcript when the index room is not enough:
+7. If the top-level transcript is not enough, inspect the detailed task log with the current compatibility commands:
+
 ```sh
 ./dialtone.sh repl src_v3 subtone-list --count 20
 ./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 200
@@ -255,5 +310,7 @@ Known operational constraint:
 
 ## Related Docs
 
-- [README.md](/home/user/dialtone/src/plugins/test/src_v1/README.md)
-- [README.md](/home/user/dialtone/src/plugins/robot/src_v2/README.md)
+- [README.md](/C:/Users/timca/dialtone/src/plugins/repl/src_v3/README.md)
+- [DESIGN.md](/C:/Users/timca/dialtone/src/plugins/repl/src_v3/DESIGN.md)
+- [DESIGN.md](/C:/Users/timca/dialtone/src/plugins/chrome/src_v3/DESIGN.md)
+- [README.md](/C:/Users/timca/dialtone/src/plugins/test/src_v1/README.md)

@@ -1,240 +1,355 @@
-# [`DIALTONE`](https://dialtone.earth) `https://dialtone.earth`
-> A Virtual Librarian for learning, and civic coordination.
+# Dialtone
 
-## What is Dialtone?
-Dialtone is a small program that runs on computers, phones, and robots. It is built for small communities that need practical tools for learning, planning, and operations.
+Dialtone is a task-first CLI and REPL runtime for plugin work, remote process control, and long-lived services.
 
-- **Coordination:** Starts a virtual librarian for civic coordination and education.
-- **Visualization:** Builds interactive 3D spaces to work with users.
-- **Communication:** Uses mesh radios and local networks for peer-to-peer robot/human communication.
-- **Extensibility:** Robust plugin system for safely adding new skills and models.
-- **Integration:** Combines CAD, BIM, ERP, and GIS workflows into a single unified pattern.
+The intended model is:
 
-![dialtone](./src/plugins/www/screenshots/summary.png)
+- `./dialtone.sh <plugin> ...` submits one task to the local REPL leader
+- the leader keeps queue and service state in NATS
+- `env/dialtone.json` is the main runtime config source
+- `dialtone>` stays short and high-level
+- full detail belongs in the task log, task room, and service state
 
-## 1. REPL / Chat Interface (Target)
-- `./dialtone.sh` and `./dialtone.ps1` default to multiplayer REPL: join `index` room, or auto-start a local leader if none is running.
-- First-run flow: `DIALTONE>` asks for consent before installing only the minimum Go runtime + bootstrap files needed for `dev.go`.
-- After bootstrap, `DIALTONE>` can install plugins and connect to swarm, VPN, and NATS.
-- see [DIALTONE.md](./docs/dialtone/DIALTONE.md).
+For long-lived services like `chrome src_v3`, the REPL is the control plane that should start, reuse, inspect, and reconcile the remote daemon instead of every plugin inventing its own launcher flow.
 
-The REPL accepts commands from user roles (e.g. `USER-1>`), including plugin commands such as the [robot plugin](src/plugins/robot/README.md) for dev, deploy, and telemetry.
+## Using `dialtone.sh`
 
-**Example (robot plugin):**
-```shell
-$ ./dialtone.sh
-DIALTONE> Virtual Librarian online. Type 'help' for commands, or 'exit' to quit.
-USER-1> robot dev src_v1
-DIALTONE> Starting robot dev (mock data)...
-DIALTONE:41146> Vite at http://127.0.0.1:3000
-DIALTONE:41146> Chrome launched
-USER-1> robot test src_v1
-DIALTONE> Running robot tests...
-DIALTONE:41146> [PASS] headless tests complete.
-DIALTONE> Process exited with code 0
-USER-1> exit
-DIALTONE> Goodbye
-```
-
-## 2. Code Stack
-The following components form the core architecture of Dialtone. LLM agents should treat the **DAG Plugin** as the canonical source of truth for UI and interaction patterns.
-
-### Three-Layer Tech Stack
-1. **Shell Layer**: `./dialtone.sh` is a thin bootstrap script that ensures Go is installed and hands over execution to `src/dev.go`.
-2. **Dev Layer**: `src/dev.go` is the main orchestrator and REPL engine. It routes commands to plugins and manages subtone processes.
-3. **Plugin Layer**: plugins compose higher-level behavior and link back through the `src/dev.go` command router.
-
-### Bootstrap to Collaboration Flow
-1. Start from `./dialtone.sh` or `./dialtone.ps1`.
-2. Confirm minimal bootstrap install (runtime + basic Go files only).
-3. Activate `dev.go` command routing and interactive REPL.
-4. Install only needed plugins and connect transport layers (swarm, VPN, NATS).
-5. Collaborate in `DIALTONE>` with `USER-*` and `LLM-*` roles on a shared DAG of tasks and logs.
-
-### [DAG Plugin](./src/plugins/dag/README.md)
-The primary implementation of the Directed Acyclic Graph engine. It defines the standard for section lifecycle, mode-form controls, and 3D stage interactions.
-
-### [Test Plugin](./src/plugins/test/README.md)
-A specialized browser orchestration library for deterministic UI testing. It provides ARIA-driven actions, automated reporting, and screenshot capture.
-
-### [UI Plugin](./src/plugins/ui/README.md)
-The shared toolkit for building Dialtone interfaces. It handles section management, global menus, and overlay coordination.
-
-### [Logs Plugin](./src/plugins/logs/README.md)
-NATS-first logging across plugins and services. Producers publish to NATS; readers attach (CLI `--stdout`, file listener, browser).
-
-## 3. Getting Started
-The easiest way to get started is `https://dialtone.earth`.
-
-### Clone and Run
-```bash
-git clone https://github.com/dialtone/dialtone.git
-cd dialtone
-./dialtone.sh
-```
-
-### Run on Windows
-```powershell
-./dialtone.ps1 --help
-```
-
-### Run on Linux / WSL / macOS
-```bash
-./dialtone.sh --help
-```
-
-## 4. LLM Agent Usage (`./dialtone.sh` + REPL)
-Yes. Tools like Claude Code, Codex CLI, and Gemini CLI can use Dialtone in two ways:
-
-### A) Direct command mode (non-REPL)
-Run plugin/orchestrator commands directly:
+Use one Dialtone command per invocation:
 
 ```bash
-./dialtone.sh go version
-./dialtone.sh robot install src_v1
-./dialtone.sh ps tracked
+./dialtone.sh robot src_v2 diagnostic --host rover --skip-ui --public-check=false
+./dialtone.sh ssh src_v1 run --host grey --cmd whoami
+./dialtone.sh chrome src_v3 service --host legion --mode start --role dev
+./dialtone.sh chrome src_v3 status --host legion --role dev
 ```
 
-### B) REPL mode (interactive or scripted)
-Start an interactive session:
+The public direction for the CLI is task-first:
 
-```bash
-./dialtone.sh
-```
+- every request should queue immediately
+- every request should return a `task-id`
+- PID is later runtime state, not the public identity
+- that PID may be local or remote, for example a Chrome daemon PID on `legion`
+- the CLI should return quickly instead of blocking on the full task lifecycle
+- the REPL leader should keep reporting task start, log path, PID assignment, stop, and exit code through `dialtone>`
 
-Use agent-style command routing in REPL:
-- `USER-1>` enters commands.
-- `@DIALTONE ...` tells Dialtone to run managed commands/subtones.
-- `DIALTONE:PID> ` streams subprocess output.
+Expected non-blocking CLI pattern:
 
-### C) REPL automation for LLM agents (no extra tools required)
-For deterministic automation, run REPL from stdin:
-
-```bash
-./dialtone.sh <<'EOF'
-@DIALTONE dev install
-@DIALTONE robot install src_v1
-status
-exit
-EOF
-```
-
-### D) Interactive human workflow
-This is what a real interactive session looks like:
+The routed user command should appear as `host-name> /command`:
 
 ```text
-USER-1> @DIALTONE robot install src_v1
-DIALTONE> Request received. Spawning subtone for robot install...
-DIALTONE> Spawning subtone subprocess via PID 530013...
-DIALTONE> Streaming stdout/stderr from subtone PID 530013.
-DIALTONE:530013> >> [Robot] Install: src_v1
-DIALTONE:530013> >> [Robot] Install complete: src_v1
-DIALTONE> Process 530013 exited with code 0.
-USER-1> status
-USER-1> exit
-DIALTONE> Goodbye.
+host-name> /chrome src_v3 status --host legion --role dev
+dialtone> Request received.
+dialtone> Task queued as task-20260327-abc123.
+dialtone> Task room: task.task-20260327-abc123
+dialtone> Task log: ~/.dialtone/logs/task-20260327-abc123.log
 ```
 
-### Recommended agent pattern
-1. Use direct commands for simple checks (`go version`, `ps`, `status`).
-2. Use REPL for streaming plugin install/test output.
-3. Use `env/test.env` for isolated runs so test dependencies install outside the repo (for example under `/tmp`).
+What `dialtone>` should contain:
 
+- request receipt
+- task lifecycle
+- service lifecycle
+- short stage summaries
+- final success or failure
 
+What `dialtone>` should not contain:
 
-## How the code base is organized
-### Entry points
-- `./dialtone.sh`, `./dialtone.ps1`, and `./dialtone.cmd` are thin wrappers that start the `DIALTONE>` workflow.
-- `src/dev.go` is the main CLI orchestrator and REPL engine.
+- raw JSON
+- stack traces
+- long build output
+- repeated polling noise
+- browser console spam
 
-### Core source layout
-- `src/`: core orchestrator logic and shared Go packages.
-- `src/plugins/`: plugin modules and plugin CLIs (primary extension surface).
-- `docs/`: project docs, protocol docs, and examples/transcripts.
-- `skills/`: skill definitions used by the system.
-- `env/.env`: environment configuration for local/runtime setup.
+That detail belongs in the task log.
 
-### Three-layer mental model
-1. **Shell Layer**: wrapper scripts (`./dialtone.sh` etc.) keep startup simple and ensure Go is present.
-2. **Dev Layer**: `src/dev.go` provides structure and routes commands to plugins.
-3. **Plugin Layer**: plugins compose higher-level behavior and link back through the `src/dev.go` command router.
+The important behavior is:
 
+- the CLI returns as soon as the task is queued
+- the user gets the `task-id` right away
+- deeper lifecycle messages are still produced by the leader and can be watched in the REPL or task log
 
+Example lifecycle the leader should emit for that same task:
 
-
-## `mods` and `dialtone_mod` quickstart
-
-This repository uses two entry points:
-- `./dialtone_mod` — main mesh launcher and Nix-aware command runner.
-- `./src/mods/mod/v1/main.go` via `mods` — mod lifecycle and sync tooling.
-
-`mods` and `plugins` are separate systems; they do not replace each other.
-
-### Start working with `dialtone_mod`
-
-```sh
-cd /home/user/dialtone
-./dialtone_mod
+```text
+dialtone> Task task-20260327-abc123 assigned pid 25516 on legion.
+dialtone> Task task-20260327-abc123 log confirmed at ~/.dialtone/logs/task-20260327-abc123.log
+dialtone> chrome service on legion role=dev is healthy.
+dialtone> Task task-20260327-abc123 exited with code 0.
 ```
 
-### Core `mods v1` usage
+## Running The REPL
 
-```sh
-./dialtone_mod mods v1 list
-./dialtone_mod mods v1 status [--name <mod-name>] [--short]
-./dialtone_mod mods v1 new <mod-name> [--repo ...] [--path src/mods/<name>] [--branch main]
-./dialtone_mod mods v1 add --mod <mod-name> <paths...>
-./dialtone_mod mods v1 commit --all --message "..."
-./dialtone_mod mods v1 push
-./dialtone_mod mods v1 pull --host all
-./dialtone_mod mods v1 sync --host gold --mod mesh
-./dialtone_mod mods v1 rsync --host gold --mod mosh
-./dialtone_mod mods v1 rsync --host gold --all-repo --dry-run
-./dialtone_mod mods v1 rsync --host gold --all-repo
+Running plain `./dialtone.sh` should put you into the long-lived REPL.
+
+After starting it, the session should look like:
+
+```text
+dialtone> Connected to repl.room.index via nats://127.0.0.1:46222
+dialtone> Leader online on DIALTONE-SERVER
+dialtone> Shared REPL session ready in room index.
 ```
 
-### Sync behavior
+Inside that REPL, the user should send commands with a leading slash:
 
-- `sync` updates tracked submodule paths on target hosts.
-- `rsync` performs rsync-based sync and honors `.gitignore`-driven exclusion through generated `--exclude-from`.
-- `--dry-run` prints actions only.
-
-### Typical mod workflow
-
-1. Pull latest state from all nodes.
-2. Apply local changes.
-3. Sync/update targets.
-4. Commit then push from local.
-
-```sh
-./dialtone_mod mods v1 pull --host all --dry-run
-./dialtone_mod mods v1 pull --host all
-./dialtone_mod mods v1 rsync gold --mod mesh
-./dialtone_mod mods v1 commit --all --message "Update mesh tools"
-./dialtone_mod mods v1 push
+```text
+host-name> /chrome src_v3 status --host legion --role dev
+dialtone> Request received.
+dialtone> Task queued as task-20260327-def456.
+dialtone> Task room: task.task-20260327-def456
+dialtone> Task log: ~/.dialtone/logs/task-20260327-def456.log
+dialtone> Task task-20260327-def456 assigned pid 25516 on legion.
+dialtone> chrome service on legion role=dev is healthy.
+dialtone> Task task-20260327-def456 exited with code 0.
 ```
 
-### Related helpers
+Another example with a longer-running task:
 
-```sh
-./dialtone_mod mesh v1 list
-./dialtone_mod tmux v1 logs --host gold
+```text
+host-name> /proc src_v1 sleep 20
+dialtone> Request received.
+dialtone> Task queued as task-20260327-sleep01.
+dialtone> Task room: task.task-20260327-sleep01
+dialtone> Task log: ~/.dialtone/logs/task-20260327-sleep01.log
+dialtone> Task task-20260327-sleep01 assigned pid 41122.
+dialtone> Task task-20260327-sleep01 exited with code 0.
 ```
 
-`mods v1` should typically be run from the repo root. `./dialtone_mod` uses the same Nix shell context expected by this workflow.
+The REPL should be the place where the user can:
 
-## Codex auth from `dialtone_mod`
+- watch `dialtone>` lifecycle output as tasks start and stop
+- submit more commands with `/...`
+- see task IDs immediately
+- learn where the task logs are without needing raw internal output
 
-- `codex` is available inside the Nix shell launched by `./dialtone_mod`.
-- First run one-time login on the host where you use it:
-  - `codex login --device-auth` (interactive)  
-  - or set `OPENAI_API_KEY` in `env/.env` and rely on shell inheritance.
-- `dialtone_mod` maps `OPENCODE_API_KEY` to `OPENAI_API_KEY`, so if you already use that
-  variable in `env/.env`, Codex picks it up automatically.
+## Interleaved Background Work
 
-## Plugin README.md
-Every plugin must include a `README.md` at its plugin root (`src/plugins/<plugin>/README.md`).
+If the leader is running several background or service-class tasks at once, `dialtone>` output is a shared stream and can be non-deterministic. Lines from different tasks may interleave.
 
-Use the shared template:
+A realistic interactive session might look like this:
 
-- [README_TEMPLATE.md](./docs/templates/README_TEMPLATE.md)
+```text
+dialtone> Connected to repl.room.index via nats://127.0.0.1:46222
+dialtone> Leader online on DIALTONE-SERVER
+dialtone> Shared REPL session ready in room index.
+
+host-name> /proc src_v1 sleep 20
+dialtone> Request received.
+dialtone> Task queued as task-20260327-sleep01.
+dialtone> Task room: task.task-20260327-sleep01
+dialtone> Task log: ~/.dialtone/logs/task-20260327-sleep01.log
+
+host-name> /ssh src_v1 run --host grey --cmd 'echo ready'
+dialtone> Request received.
+dialtone> Task queued as task-20260327-echo01.
+dialtone> Task room: task.task-20260327-echo01
+dialtone> Task log: ~/.dialtone/logs/task-20260327-echo01.log
+
+host-name> /ssh src_v1 run --host grey --cmd 'echo boom >&2; exit 17'
+dialtone> Request received.
+dialtone> Task queued as task-20260327-fail01.
+dialtone> Task room: task.task-20260327-fail01
+dialtone> Task log: ~/.dialtone/logs/task-20260327-fail01.log
+
+dialtone> Task task-20260327-echo01 assigned pid 51102 on grey.
+dialtone> Task task-20260327-fail01 assigned pid 51108 on grey.
+dialtone> Task task-20260327-sleep01 assigned pid 41122.
+dialtone> ssh run on grey for task-20260327-echo01: ready
+dialtone> Task task-20260327-echo01 exited with code 0.
+dialtone> ERROR task task-20260327-fail01 on grey exited with code 17.
+dialtone> ERROR task task-20260327-fail01 stderr: boom
+dialtone> Task task-20260327-sleep01 exited with code 0.
+```
+
+The important thing to match is not the total line order. The important things are:
+
+- every lifecycle and error line identifies its task clearly
+- each task has a valid local lifecycle even if other tasks print between its lines
+- one failing task does not suppress unrelated successful task output
+- the task log remains the detailed per-task source of truth
+
+## Inspecting Tasks And Services
+
+The REPL should also expose lightweight inspection commands so users can understand long-running remote work without guessing from one shared transcript.
+
+Example: listing the active remote Chrome daemon task on `legion`:
+
+```text
+host-name> /repl src_v3 task list --state running --host legion
+dialtone> Running tasks:
+dialtone> TASK ID                  KIND      STATE    HOST    SERVICE/COMMAND           PID    EXIT
+dialtone> task-20260327-chr001     service   running  legion  chrome-src-v3-dev        25516  -
+dialtone> task-20260327-robot021   command   running  rover   robot src_v2 diagnostic  546289 -
+```
+
+Example: showing the task that owns that daemon:
+
+```text
+host-name> /repl src_v3 task show --task-id task-20260327-chr001
+dialtone> Task: task-20260327-chr001
+dialtone> Kind: service_reconcile
+dialtone> State: running
+dialtone> Host: legion
+dialtone> Service: chrome-src-v3-dev
+dialtone> PID: 25516
+dialtone> Task room: task.task-20260327-chr001
+dialtone> Task log: ~/.dialtone/logs/task-20260327-chr001.log
+dialtone> Log subject: logs.service.legion.chrome-src-v3-dev
+```
+
+Example: reading the detailed log for that task:
+
+```text
+host-name> /repl src_v3 task log --task-id task-20260327-chr001 --lines 6
+dialtone> Streaming task log for task-20260327-chr001
+[T+0000s|INFO|plugins/chrome/src_v3/ops.go:412] deploy requested for legion role=dev
+[T+0001s|INFO|plugins/chrome/src_v3/daemon.go:221] daemon connected to repl manager
+[T+0002s|INFO|plugins/chrome/src_v3/browser.go:301] chrome started headed pid=25516
+[T+0003s|INFO|plugins/chrome/src_v3/browser.go:362] managed tab ready target=7E1A3D
+```
+
+Example: killing the remote daemon task cleanly:
+
+```text
+host-name> /repl src_v3 task kill --task-id task-20260327-chr001
+dialtone> Request received.
+dialtone> Task queued as task-20260327-kill01.
+dialtone> Kill requested for task-20260327-chr001.
+dialtone> Target task task-20260327-chr001 is running on legion pid 25516.
+dialtone> Service chrome-src-v3-dev on legion moved to stopping.
+dialtone> Target task task-20260327-chr001 exited with code 143.
+dialtone> Task task-20260327-kill01 exited with code 0.
+```
+
+## NATS-First Logs
+
+The long-term logging model should match the logs plugin: producers publish to NATS, and readers decide whether to render to `dialtone>`, a file, or another UI.
+
+Useful example commands:
+
+```text
+host-name> /logs src_v1 stream --topic 'logs.task.task-20260327-chr001'
+host-name> /logs src_v1 stream --topic 'logs.service.legion.chrome-src-v3-dev'
+host-name> /logs src_v1 stream --topic 'logfilter.level.error.>'
+host-name> /logs src_v1 stream --topic 'logfilter.tag.fail.>'
+```
+
+The intended split is:
+
+- `dialtone>` stays brief and lifecycle-oriented
+- `task log` gives the durable per-task record
+- `logs src_v1 stream` gives the live NATS log stream
+- filtered subjects like `logfilter.level.error.>` help isolate failures across many tasks and services
+
+Useful slash-command examples:
+
+```text
+host-name> /chrome src_v3 status --host legion --role dev
+host-name> /chrome src_v3 test --host legion --role dev
+host-name> /robot src_v2 diagnostic --host rover --skip-ui --public-check=false
+```
+
+Useful patterns:
+
+```bash
+# Start or reuse the leader.
+./dialtone.sh repl src_v3 status
+
+# Run the REPL suite.
+./dialtone.sh repl src_v3 test
+
+# Inspect task/service activity.
+./dialtone.sh repl src_v3 task list
+./dialtone.sh repl src_v3 service list --host legion
+./dialtone.sh repl src_v3 task log --task-id <task-id> --lines 200
+./dialtone.sh logs src_v1 stream --topic 'logfilter.level.error.>'
+```
+
+Compatibility note:
+
+- the current codebase still has some legacy `subtone` names in commands, files, and internals
+- the public model is `task` and `task-id`
+- `subtone-*` commands should be treated as compatibility commands until the CLI rename lands
+
+## Windows Development
+
+This repo may be edited from a Windows checkout while the real runtime and tests execute inside WSL.
+
+Preferred layout:
+
+- Windows repo: `C:\Users\timca\dialtone`
+- WSL repo: `/home/user/dialtone`
+- visible WSL tmux session: `windows`
+
+Use the Windows repo for:
+
+- editing
+- code review
+- native Windows Git operations
+
+Use the WSL repo for:
+
+- REPL and plugin tests
+- SSH and mesh checks
+- Linux runtime validation
+- tmux-visible command execution
+
+Use `wsl-tmux` from Windows so WSL commands run inside the visible tmux session:
+
+```powershell
+wsl-tmux help
+wsl-tmux status
+wsl-tmux "cd /home/user/dialtone && ./dialtone.sh repl src_v3 process-clean"
+wsl-tmux "cd /home/user/dialtone && ./dialtone.sh repl src_v3 test"
+wsl-tmux read
+wsl-tmux interrupt
+```
+
+If the pane gets wedged, recreating the tmux session is fine:
+
+```powershell
+wsl.exe bash -lc "tmux kill-session -t windows 2>/dev/null || true; tmux new-session -d -s windows -c /home/user/dialtone"
+```
+
+Git rules:
+
+- trust native Windows Git for `C:\Users\timca\dialtone`
+- trust WSL Git for `/home/user/dialtone`
+- do not judge the Windows repo from `/mnt/c/...` inside WSL
+
+Editing flow:
+
+1. Edit in `C:\Users\timca\dialtone`.
+2. Sync changed files into `/home/user/dialtone` when WSL needs the same patch.
+3. Normalize line endings in WSL after copying if needed.
+
+```bash
+perl -0pi -e 's/\r\n/\n/g' path/to/file
+```
+
+Config rules:
+
+- use `env/dialtone.json` as the main config source
+- do not create accidental config copies under `src/env/`
+
+Typical WSL test commands:
+
+```powershell
+wsl-tmux "cd /home/user/dialtone && ./dialtone.sh repl src_v3 process-clean"
+wsl-tmux "cd /home/user/dialtone && ./dialtone.sh repl src_v3 test"
+wsl-tmux "cd /home/user/dialtone && ./dialtone.sh ssh src_v1 probe --host grey --timeout 5s"
+wsl-tmux "cd /home/user/dialtone && ./dialtone.sh chrome src_v3 status --host legion --role dev"
+```
+
+For Chrome, CAD, and UI work, prefer:
+
+1. start or confirm the Chrome role once
+2. reuse the healthy role
+3. inspect task/service logs when something fails
+
+Safe two-repo sync pattern:
+
+1. Commit and push the Windows repo with native Windows Git.
+2. Rebase the WSL repo onto the new `origin/main`.
+3. Re-run WSL tests.
+4. Commit and push the WSL repo.
+5. Fast-forward the Windows repo again if needed.
