@@ -59,7 +59,7 @@ func Register(r *testv1.Registry) {
 
 			ctx.TestPassf("interactive routed command emitted a strict task-first index lifecycle")
 			return testv1.StepRunResult{
-				Report: "Joined REPL with the default hostname prompt, ran `/repl src_v3 help`, and verified the top-level `dialtone>` lifecycle is strictly task-first: request received, task queued, task room, task log, pid assignment, and exit with no legacy subtone wording.",
+				Report: "Joined REPL with the default hostname prompt, ran `/repl src_v3 help`, and verified the top-level `dialtone>` lifecycle is strictly task-first: request received, task queued, task topic, task log, pid assignment, and exit with no legacy subtone wording.",
 			}, nil
 		},
 	})
@@ -109,7 +109,7 @@ func Register(r *testv1.Registry) {
 
 			ctx.TestPassf("interactive routed command emitted task queue, pid, log, and exit lines")
 			return testv1.StepRunResult{
-				Report: "Joined REPL with the default hostname prompt, ran `/repl src_v3 help`, and verified the index-room `dialtone>` transcript includes task queue, task room, task log, pid assignment, and task exit lines without legacy subtone lifecycle text.",
+				Report: "Joined REPL with the default hostname prompt, ran `/repl src_v3 help`, and verified the index-room `dialtone>` transcript includes task queue, task topic, task log, pid assignment, and task exit lines without legacy subtone lifecycle text.",
 			}, nil
 		},
 	})
@@ -130,7 +130,7 @@ func Register(r *testv1.Registry) {
 				return testv1.StepRunResult{}, err
 			}
 			if err := rt.WaitForOutput(10*time.Second, []string{
-				`DIALTONE> Starting test: interactive-foreground-task-room-payload`,
+				`dialtone> Starting test: interactive-foreground-task-room-payload`,
 			}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("test start lifecycle line missing from REPL output: %w", err)
 			}
@@ -159,12 +159,12 @@ func Register(r *testv1.Registry) {
 				`Usage: ./dialtone.sh repl src_v3 `,
 				`Commands (src_v3):`,
 			}); err != nil {
-				return testv1.StepRunResult{}, fmt.Errorf("foreground task room payload missing: %w", err)
+				return testv1.StepRunResult{}, fmt.Errorf("foreground task topic payload missing: %w", err)
 			}
-			ctx.TestPassf("foreground task lifecycle and task-room payload validated through REPL output")
+			ctx.TestPassf("foreground task lifecycle and task-topic payload validated through REPL output")
 
 			return testv1.StepRunResult{
-				Report: "Ran `/repl src_v3 help` as a foreground task and verified the full index-room task lifecycle plus the per-task room help payload.",
+				Report: "Ran `/repl src_v3 help` as a foreground task and verified the full index-room task lifecycle plus the per-task topic help payload.",
 			}, nil
 		},
 	})
@@ -251,7 +251,7 @@ func Register(r *testv1.Registry) {
 			if err := rt.RunTranscript([]support.TranscriptStep{{
 				Send:         "/ps",
 				ExpectRoom:   []string{`"type":"input"`, `"message":"/ps"`, `"message":"Running Tasks:"`, strconv.Itoa(pid)},
-				ExpectOutput: []string{`DIALTONE> Running Tasks:`, fmt.Sprintf("%d", pid)},
+				ExpectOutput: []string{`dialtone> Running Tasks:`, fmt.Sprintf("%d", pid)},
 				Timeout:      20 * time.Second,
 			}}); err != nil {
 				return testv1.StepRunResult{}, err
@@ -289,7 +289,7 @@ func Register(r *testv1.Registry) {
 			if err := rt.RunTranscript([]support.TranscriptStep{{
 				Send:         "/ps",
 				ExpectRoom:   []string{`"message":"Running Tasks:"`, strconv.Itoa(pid)},
-				ExpectOutput: []string{`DIALTONE> Running Tasks:`, fmt.Sprintf("%d", pid)},
+				ExpectOutput: []string{`dialtone> Running Tasks:`, fmt.Sprintf("%d", pid)},
 				Timeout:      20 * time.Second,
 			}}); err != nil {
 				return testv1.StepRunResult{}, err
@@ -415,7 +415,7 @@ func Register(r *testv1.Registry) {
 			}
 
 			return testv1.StepRunResult{
-				Report: "Ran an invalid REPL command and verified the index room reported a task-first nonzero exit while the per-task room retained the detailed error payload.",
+				Report: "Ran an invalid REPL command and verified the index room reported a task-first nonzero exit while the per-task topic retained the detailed error payload.",
 			}, nil
 		},
 	})
@@ -454,7 +454,7 @@ func Register(r *testv1.Registry) {
 			if err := rt.RunTranscript([]support.TranscriptStep{{
 				Send:         "/ps",
 				ExpectRoom:   []string{`"message":"Running Tasks:"`, strconv.Itoa(firstPID), strconv.Itoa(secondPID)},
-				ExpectOutput: []string{`DIALTONE> Running Tasks:`, strconv.Itoa(firstPID), strconv.Itoa(secondPID)},
+				ExpectOutput: []string{`dialtone> Running Tasks:`, strconv.Itoa(firstPID), strconv.Itoa(secondPID)},
 				Timeout:      20 * time.Second,
 			}}); err != nil {
 				return testv1.StepRunResult{}, err
@@ -480,7 +480,7 @@ func Register(r *testv1.Registry) {
 			}
 
 			return testv1.StepRunResult{
-				Report: "Started two concurrent background watch tasks, verified `/ps` showed both runtime pids, confirmed each task room kept its own command payload, then cleaned managed processes before the next step.",
+				Report: "Started two concurrent background watch tasks, verified `/ps` showed both runtime pids, confirmed each task topic kept its own command payload, then cleaned managed processes before the next step.",
 			}, nil
 		},
 	})

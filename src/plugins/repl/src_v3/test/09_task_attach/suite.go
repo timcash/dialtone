@@ -66,8 +66,8 @@ func Register(r *testv1.Registry) {
 				return testv1.StepRunResult{}, err
 			}
 			if err := rt.WaitForOutput(15*time.Second, []string{
-				"DIALTONE> Attached to task " + taskID + ".",
-				"DIALTONE:" + taskID + ">",
+				"dialtone> Attached to task " + taskID + ".",
+				"dialtone:" + taskID + ">",
 				fmt.Sprintf("Probe target=%s transport=ssh", fixture.Alias),
 			}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("attach output missing attached task stream: %w", err)
@@ -77,19 +77,19 @@ func Register(r *testv1.Registry) {
 				return testv1.StepRunResult{}, err
 			}
 			if err := rt.WaitForOutput(10*time.Second, []string{
-				"DIALTONE> Detached from task " + taskID + ".",
+				"dialtone> Detached from task " + taskID + ".",
 			}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("detach output missing: %w", err)
 			}
 			if err := rt.WaitForOutput(20*time.Second, []string{
-				"DIALTONE> Task " + taskID + " exited with code 0.",
+				"dialtone> Task " + taskID + " exited with code 0.",
 			}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("probe exit lifecycle missing after detach: %w", err)
 			}
 
 			ctx.TestPassf("attached to task %s and detached cleanly during real ssh probe for %s", taskID, fixture.Alias)
 			return testv1.StepRunResult{
-				Report: "Joined REPL with the default hostname prompt, started a real ssh probe as a task, attached the console to the task room with /task-attach --task-id, observed live task output, then detached and confirmed the shared room still reported the final task exit.",
+				Report: "Joined REPL with the default hostname prompt, started a real ssh probe as a task, attached the console to the task topic with /task-attach --task-id, observed live task output, then detached and confirmed the shared topic still reported the final task exit.",
 			}, nil
 		},
 	})

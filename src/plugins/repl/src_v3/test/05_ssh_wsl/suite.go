@@ -66,8 +66,8 @@ func Register(r *testv1.Registry) {
 					ExpectOutputAny: support.CombinePatternGroups(
 						[]string{
 							fmt.Sprintf("llm-codex> %s", resolveCmd),
-							fmt.Sprintf("DIALTONE> ssh resolve: resolving %s", hostName),
-							fmt.Sprintf("DIALTONE> ssh resolve: transport=ssh preferred=%s", hostAddr),
+							fmt.Sprintf("dialtone> ssh resolve: resolving %s", hostName),
+							fmt.Sprintf("dialtone> ssh resolve: transport=ssh preferred=%s", hostAddr),
 						},
 						support.StandardCommandOutputPatternGroups("ssh src_v1", "", "")...,
 					),
@@ -118,9 +118,9 @@ func Register(r *testv1.Registry) {
 					ExpectOutputAny: support.CombinePatternGroups(
 						[]string{
 							fmt.Sprintf("llm-codex> %s", probeCmd),
-							fmt.Sprintf("DIALTONE> ssh probe: checking transport/auth for %s", hostName),
-							fmt.Sprintf("DIALTONE> ssh probe: transport=ssh preferred=%s", hostAddr),
-							fmt.Sprintf("DIALTONE> ssh probe: auth checks passed for %s", hostName),
+							fmt.Sprintf("dialtone> ssh probe: checking transport/auth for %s", hostName),
+							fmt.Sprintf("dialtone> ssh probe: transport=ssh preferred=%s", hostAddr),
+							fmt.Sprintf("dialtone> ssh probe: auth checks passed for %s", hostName),
 						},
 						support.StandardCommandOutputPatternGroups("ssh src_v1", "", "")...,
 					),
@@ -146,8 +146,8 @@ func Register(r *testv1.Registry) {
 					ExpectOutputAny: support.CombinePatternGroups(
 						[]string{
 							fmt.Sprintf("llm-codex> %s", sshCmd),
-							fmt.Sprintf("DIALTONE> ssh run: executing remote command on %s", hostName),
-							fmt.Sprintf("DIALTONE> ssh run: command completed on %s", hostName),
+							fmt.Sprintf("dialtone> ssh run: executing remote command on %s", hostName),
+							fmt.Sprintf("dialtone> ssh run: command completed on %s", hostName),
 						},
 						support.StandardCommandOutputPatternGroups("ssh src_v1", "", "")...,
 					),

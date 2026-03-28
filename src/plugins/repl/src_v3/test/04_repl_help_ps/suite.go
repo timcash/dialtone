@@ -28,7 +28,7 @@ func Register(r *testv1.Registry) {
 				{
 					Send:         "/help",
 					ExpectRoom:   []string{`"type":"input"`, support.PromptFromPattern(), `"message":"/help"`, `"message":"Help"`, `"message":"List running tasks"`},
-					ExpectOutput: []string{`DIALTONE> Help`, `DIALTONE> List running tasks`},
+					ExpectOutput: []string{`dialtone> Help`, `dialtone> List running tasks`},
 					Timeout:      30 * time.Second,
 				},
 			}); err != nil {
@@ -38,7 +38,7 @@ func Register(r *testv1.Registry) {
 				{
 					Send:         "/ps",
 					ExpectRoom:   []string{`"type":"input"`, support.PromptFromPattern(), `"message":"/ps"`, `"message":"No running tasks."`},
-					ExpectOutput: []string{`DIALTONE> No running tasks.`},
+					ExpectOutput: []string{`dialtone> No running tasks.`},
 					Timeout:      30 * time.Second,
 				},
 			}); err != nil {

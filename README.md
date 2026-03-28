@@ -5,12 +5,14 @@ Dialtone is a task-first CLI and REPL runtime for plugin work, remote process co
 The intended model is:
 
 - `./dialtone.sh <plugin> ...` submits one task to the local REPL leader
-- the leader keeps queue and service state in NATS
-- `env/dialtone.json` is the main runtime config source
+- the leader keeps durable task and service state in NATS KV
+- the launch folder's `env/dialtone.json` is the default runtime config source, and `--env` can point at another env root or file
 - `dialtone>` stays short and high-level
-- full detail belongs in the task log, task room, and service state
+- full detail belongs in the task log, task topic, and service state
+- there is no public `subtone` language; `task` and `service` are the public operator terms
 
 For long-lived services like `chrome src_v3`, the REPL is the control plane that should start, reuse, inspect, and reconcile the remote daemon instead of every plugin inventing its own launcher flow.
+Service tasks should publish heartbeats, and the REPL leader should reconcile or restart them if those heartbeats stop.
 
 ## Using `dialtone.sh`
 
@@ -87,7 +89,7 @@ The public direction for the CLI is task-first:
 - every request should return a `task-id`
 - PID is later runtime state, not the public identity
 - that PID may be local or remote, for example a Chrome daemon PID on `legion`
-- the CLI should return quickly instead of blocking on the full task lifecycle
+- the CLI should print the queued-task summary, a helpful log-inspection command, and then return immediately
 - the REPL leader should keep reporting task start, log path, PID assignment, stop, and exit code through `dialtone>`
 
 Expected non-blocking CLI pattern:
@@ -98,35 +100,38 @@ The routed user command should appear as `host-name> /command`:
 host-name> /chrome src_v3 status --host legion --role dev
 dialtone> Request received.
 dialtone> Task queued as task-20260327-abc123.
-dialtone> Task room: task.task-20260327-abc123
+dialtone> Task topic: task.task-20260327-abc123
 dialtone> Task log: ~/.dialtone/logs/task-20260327-abc123.log
+dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-20260327-abc123 --lines 10
 ```
 
-What `dialtone>` should contain:
+What the one-shot CLI path should contain:
 
 - request receipt
-- task lifecycle
-- service lifecycle
-- short stage summaries
-- final success or failure
+- queued `task-id`
+- task topic
+- task log path
+- a helpful follow-up command to inspect the task log
 
-What `dialtone>` should not contain:
+What the one-shot CLI path should not contain:
 
 - raw JSON
 - stack traces
 - long build output
 - repeated polling noise
 - browser console spam
+- later `assigned pid` or final `exited with code ...` lines
 
-That detail belongs in the task log.
+That later lifecycle detail belongs in the REPL stream and the task log.
 
 The important behavior is:
 
-- the CLI returns as soon as the task is queued
+- the CLI returns as soon as the task is queued and the log-inspection hint is printed
 - the user gets the `task-id` right away
+- the one-shot CLI does not wait for PID assignment, progress lines, or final exit status
 - deeper lifecycle messages are still produced by the leader and can be watched in the REPL or task log
 
-Example lifecycle the leader should emit for that same task:
+Example lifecycle the leader should emit for that same task in the REPL or task log:
 
 ```text
 dialtone> Task task-20260327-abc123 assigned pid 25516 on legion.
@@ -142,9 +147,9 @@ Running plain `./dialtone.sh` should put you into the long-lived REPL.
 After starting it, the session should look like:
 
 ```text
-dialtone> Connected to repl.room.index via nats://127.0.0.1:46222
+dialtone> Connected to repl.topic.index via nats://127.0.0.1:46222
 dialtone> Leader online on DIALTONE-SERVER
-dialtone> Shared REPL session ready in room index.
+dialtone> Shared REPL session ready on topic index.
 ```
 
 Inside that REPL, the user should send commands with a leading slash:
@@ -153,7 +158,7 @@ Inside that REPL, the user should send commands with a leading slash:
 host-name> /chrome src_v3 status --host legion --role dev
 dialtone> Request received.
 dialtone> Task queued as task-20260327-def456.
-dialtone> Task room: task.task-20260327-def456
+dialtone> Task topic: task.task-20260327-def456
 dialtone> Task log: ~/.dialtone/logs/task-20260327-def456.log
 dialtone> Task task-20260327-def456 assigned pid 25516 on legion.
 dialtone> chrome service on legion role=dev is healthy.
@@ -166,7 +171,7 @@ Another example with a longer-running task:
 host-name> /proc src_v1 sleep 20
 dialtone> Request received.
 dialtone> Task queued as task-20260327-sleep01.
-dialtone> Task room: task.task-20260327-sleep01
+dialtone> Task topic: task.task-20260327-sleep01
 dialtone> Task log: ~/.dialtone/logs/task-20260327-sleep01.log
 dialtone> Task task-20260327-sleep01 assigned pid 41122.
 dialtone> Task task-20260327-sleep01 exited with code 0.
@@ -186,26 +191,26 @@ If the leader is running several background or service-class tasks at once, `dia
 A realistic interactive session might look like this:
 
 ```text
-dialtone> Connected to repl.room.index via nats://127.0.0.1:46222
+dialtone> Connected to repl.topic.index via nats://127.0.0.1:46222
 dialtone> Leader online on DIALTONE-SERVER
-dialtone> Shared REPL session ready in room index.
+dialtone> Shared REPL session ready on topic index.
 
 host-name> /proc src_v1 sleep 20
 dialtone> Request received.
 dialtone> Task queued as task-20260327-sleep01.
-dialtone> Task room: task.task-20260327-sleep01
+dialtone> Task topic: task.task-20260327-sleep01
 dialtone> Task log: ~/.dialtone/logs/task-20260327-sleep01.log
 
 host-name> /ssh src_v1 run --host grey --cmd 'echo ready'
 dialtone> Request received.
 dialtone> Task queued as task-20260327-echo01.
-dialtone> Task room: task.task-20260327-echo01
+dialtone> Task topic: task.task-20260327-echo01
 dialtone> Task log: ~/.dialtone/logs/task-20260327-echo01.log
 
 host-name> /ssh src_v1 run --host grey --cmd 'echo boom >&2; exit 17'
 dialtone> Request received.
 dialtone> Task queued as task-20260327-fail01.
-dialtone> Task room: task.task-20260327-fail01
+dialtone> Task topic: task.task-20260327-fail01
 dialtone> Task log: ~/.dialtone/logs/task-20260327-fail01.log
 
 dialtone> Task task-20260327-echo01 assigned pid 51102 on grey.
@@ -249,7 +254,7 @@ dialtone> State: running
 dialtone> Host: legion
 dialtone> Service: chrome-src-v3-dev
 dialtone> PID: 25516
-dialtone> Task room: task.task-20260327-chr001
+dialtone> Task topic: task.task-20260327-chr001
 dialtone> Task log: ~/.dialtone/logs/task-20260327-chr001.log
 dialtone> Log subject: logs.service.legion.chrome-src-v3-dev
 ```
@@ -380,7 +385,7 @@ perl -0pi -e 's/\r\n/\n/g' path/to/file
 
 Config rules:
 
-- use `env/dialtone.json` as the main config source
+- use the launch folder's `env/dialtone.json` as the default config source, or pass `--env` to target another env root/file
 - do not create accidental config copies under `src/env/`
 
 Typical WSL test commands:

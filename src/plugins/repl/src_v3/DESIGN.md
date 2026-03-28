@@ -6,11 +6,12 @@ This file maps the current `repl src_v3` runtime and proposes a more robust desi
 
 - task-id-first command handling
 - immediate CLI return on every request
-- NATS-backed task and service state
+- NATS KV-backed task and service state
 - a lighter `dialtone.sh` / REPL CLI wrapper
 - better support for long-lived remote services like `chrome src_v3`
+- removal of public `subtone` language in favor of `task` and `service`
 
-The goal is to make the REPL leader a real control plane, not just a process launcher with a shared room.
+The goal is to make the REPL leader a real control plane, not just a process launcher with a shared topic.
 
 ## Short Review Of The Current README
 
@@ -37,7 +38,7 @@ That model works for a single-machine task runner, but it is the wrong center of
 
 Today the system is:
 
-`dialtone.sh` -> `repl src_v3 inject` -> leader autostart if needed -> publish command frame to `repl.cmd` -> leader queue subscription -> `executeCommand(...)` -> current process launcher -> OS PID and PID-based log file -> in-memory task and service registries + NATS room messages.
+`dialtone.sh` -> `repl src_v3 inject` -> leader autostart if needed -> publish command frame to `repl.cmd` -> leader queue subscription -> `executeCommand(...)` -> current process launcher -> OS PID and PID-based log file -> in-memory task and service registries + NATS topic messages.
 
 For remote Chrome management, `chrome src_v3` uses this REPL control plane mostly for:
 
@@ -59,7 +60,7 @@ flowchart LR
     G --> H["OS process + PID"]
     G --> I["pid-derived task log"]
     G --> J["stdout/stderr events"]
-    J --> K["NATS room frames"]
+    J --> K["NATS topic frames"]
     J --> L["task/service registries"]
 
     M["chrome src_v3"] --> N["repl.registry.services"]
@@ -74,8 +75,8 @@ flowchart LR
 
 | Piece | What it does today | Main files |
 | --- | --- | --- |
-| CLI wrapper | Autostarts leader, injects commands, joins rooms, lists task logs | `run_commands_v3.go`, `inject_hosts_v3.go`, `subtone_logs_v3.go` |
-| Leader | Owns REPL rooms, command intake, presence, registries, and execution dispatch | `core_runtime.go` |
+| CLI wrapper | Autostarts leader, injects commands, joins topics, lists task logs | `run_commands_v3.go`, `inject_hosts_v3.go`, `subtone_logs_v3.go` |
+| Leader | Owns REPL topics, command intake, presence, registries, and execution dispatch | `core_runtime.go` |
 | Config | Resolves repo roots and `env/dialtone.json`, reads current NATS config | `env_utils_v3.go`, `leader_state_v3.go` |
 | Current process launcher | Starts real OS processes and emits lifecycle/stdout/stderr events | `../proc/src_v1/go/proc/subtone.go` |
 | Task registry | In-memory PID-keyed record of recent one-shot tasks | `subtone_registry_v3.go` |
@@ -90,14 +91,14 @@ flowchart LR
 The current CLI publishes a command frame and waits only long enough to flush it.
 
 ```go
-func InjectCommand(natsURL, room, user, host, command string) error {
-    if err := EnsureLeaderRunning(natsURL, room); err != nil {
+func InjectCommand(natsURL, topic, user, host, command string) error {
+    if err := EnsureLeaderRunning(natsURL, topic); err != nil {
         return err
     }
     frame := busFrame{
         Type:    "command",
         From:    user,
-        Room:    room,
+        Topic:   topic,
         Message: command,
     }
     raw, _ := json.Marshal(frame)
@@ -115,11 +116,11 @@ This is lightweight, which is good. But the command frame does not yet have a fi
 The CLI assumes one local leader and starts it if needed.
 
 ```go
-func EnsureLeaderRunning(clientNATSURL, room string) error {
+func EnsureLeaderRunning(clientNATSURL, topic string) error {
     if _, err := leaderHealth(clientNATSURL, 1200*time.Millisecond); err == nil {
         return nil
     }
-    cmd, err := leaderAutostartCommand(repoRoot, srcRoot, listenURL, room)
+    cmd, err := leaderAutostartCommand(repoRoot, srcRoot, listenURL, topic)
     if err != nil {
         return err
     }
@@ -151,7 +152,7 @@ cmdSub, err := nc.QueueSubscribe(commandSubject, commandQueue, func(msg *nats.Ms
     go func(in BusFrame) {
         runMu.Lock()
         defer runMu.Unlock()
-        executeCommand(in.Message, currentRoom, h, subtones, services, publish, emit)
+        executeCommand(in.Message, currentTopic, h, subtones, services, publish, emit)
     }(BusFrame{Message: raw})
 })
 ```
@@ -207,7 +208,7 @@ That makes PID discovery part of log discovery, which is exactly what we want to
 The current registries are useful, but they are leader-local caches, not the canonical system of record.
 
 ```go
-func (r *subtoneRegistry) Started(room string, mode string, ev proc.SubtoneEvent) {
+func (r *subtoneRegistry) Started(topic string, mode string, ev proc.SubtoneEvent) {
     r.entries[ev.PID] = &subtoneRegistryEntry{
         PID:      ev.PID,
         Command:  strings.Join(ev.Args, " "),
@@ -249,7 +250,7 @@ It serializes launches, but it does not own a true queue entry with a stable ide
 PID currently acts as:
 
 - task identity
-- room identity
+- topic identity
 - log lookup key
 - task list key
 - task attach key
@@ -289,7 +290,7 @@ The CLI currently:
 
 - ensures the leader is running
 - decides whether to autostart bootstrap HTTP
-- can join rooms directly
+- can join topics directly
 - mixes operator functions with user task submission
 
 That is workable, but not the cleanest split between control plane and client.
@@ -309,14 +310,15 @@ There is not yet a clean "desired service state" model.
 
 ## Core Idea
 
-Every command submission should create a task in NATS first.
+Every command submission should create a task in NATS KV first.
 
 The CLI should always return immediately with:
 
 - `task_id`
 - `state=queued`
-- `room`
+- `topic`
 - `log_key`
+- `task log` follow-up command
 
 Then the leader should schedule, launch, monitor, and update the task in the background.
 
@@ -341,13 +343,16 @@ From the user's point of view, every command is effectively backgrounded immedia
 host-name> /chrome src_v3 status --host legion --role dev
 dialtone> Request received.
 dialtone> Task queued as task-20260327-abc123.
-dialtone> Task room: task.task-20260327-abc123
+dialtone> Task topic: task.task-20260327-abc123
 dialtone> Task log: ~/.dialtone/logs/task-20260327-abc123.log
+dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-20260327-abc123 --lines 10
 ```
 
 No PID should be required at submission time.
 
-The CLI should return as soon as the task is queued.
+The CLI should return as soon as the task is queued and the short follow-up hint is printed.
+
+No later PID assignment, progress, or final exit lines should be printed in the short-lived one-shot CLI path.
 
 The leader should later emit lifecycle messages like:
 
@@ -357,11 +362,21 @@ dialtone> Task task-20260327-abc123 log confirmed at ~/.dialtone/logs/task-20260
 dialtone> Task task-20260327-abc123 exited with code 0.
 ```
 
+### 1a. Public Language Is Task-First
+
+There should be no public `subtone` language in the target design.
+
+Use these meanings consistently:
+
+- `task`: the main unit of queued or running work
+- `service`: a long-lived daemon-style task
+- `topic`: the event/log stream for a task, service, or shared REPL stream
+
 ### 2. Running plain `./dialtone.sh` opens a long-lived REPL session
 
 The REPL session should:
 
-- connect to the leader and room
+- connect to the leader and topic
 - keep streaming `dialtone>` lifecycle output
 - let the user submit commands with a leading slash
 - keep accepting more commands after earlier tasks are queued or running
@@ -369,14 +384,14 @@ The REPL session should:
 Expected shape:
 
 ```text
-dialtone> Connected to repl.room.index via nats://127.0.0.1:46222
+dialtone> Connected to repl.topic.index via nats://127.0.0.1:46222
 dialtone> Leader online on DIALTONE-SERVER
-dialtone> Shared REPL session ready in room index.
+dialtone> Shared REPL session ready on topic index.
 
 host-name> /chrome src_v3 status --host legion --role dev
 dialtone> Request received.
 dialtone> Task queued as task-20260327-def456.
-dialtone> Task room: task.task-20260327-def456
+dialtone> Task topic: task.task-20260327-def456
 dialtone> Task log: ~/.dialtone/logs/task-20260327-def456.log
 dialtone> Task task-20260327-def456 assigned pid 25516 on legion.
 dialtone> chrome service on legion role=dev is healthy.
@@ -400,9 +415,9 @@ If the leader is running several background or service-class tasks in parallel, 
 Expected shape:
 
 ```text
-dialtone> Connected to repl.room.index via nats://127.0.0.1:46222
+dialtone> Connected to repl.topic.index via nats://127.0.0.1:46222
 dialtone> Leader online on DIALTONE-SERVER
-dialtone> Shared REPL session ready in room index.
+dialtone> Shared REPL session ready on topic index.
 
 host-name> /proc src_v1 sleep 20
 dialtone> Request received.
@@ -450,9 +465,9 @@ But even a foreground task should:
 
 Foreground serialization does not prevent interleaving in the shared transcript, because background tasks and service reconciliation work may still be active at the same time.
 
-### 4. Task state lives in NATS
+### 4. Task And Service State Lives In NATS KV
 
-The leader should keep canonical task and service state in NATS, not only in memory.
+The leader should keep canonical task and service state in NATS KV, not only in memory.
 
 Recommended model:
 
@@ -461,11 +476,21 @@ Recommended model:
 - service desired state per `(host, service_name)`
 - service observed state per `(host, service_name)`
 
-If available, NATS JetStream/KV is the cleanest fit.
+Event streams can still use normal NATS subjects, but durable snapshots and desired/observed state should live in NATS KV.
 
-### 5. `env/dialtone.json` is the config source
+### 5. Service Tasks Must Heartbeat And Reconcile
 
-All runtime config should come from the repo-local env file the REPL is operating under.
+Long-lived service tasks must publish heartbeats.
+
+If heartbeats stop:
+
+- the leader should mark the service unhealthy
+- the unhealthy state should be written to NATS KV
+- the service reconciler should restart or recover the service
+
+### 6. Launch `env/dialtone.json` Is The Config Source
+
+All runtime config should come from the `env/dialtone.json` attached to the launch folder the REPL is operating under, unless the operator passes `--env` to point at a different env root or file.
 
 That includes:
 
@@ -475,11 +500,11 @@ That includes:
 - host/agent settings
 - bootstrap URLs
 - log root overrides
-- default room and hostname behavior
+- default topic and hostname behavior
 
-CLI flags can still override for debugging, but the normal path should resolve from `env/dialtone.json`.
+CLI flags can still override for debugging, but the normal path should resolve from the launch folder's `env/dialtone.json` or the explicit `--env` target.
 
-### 6. `dialtone.sh` becomes a lightweight client and REPL entrypoint
+### 7. `dialtone.sh` becomes a lightweight client and REPL entrypoint
 
 The wrapper and REPL CLI should mostly:
 
@@ -523,12 +548,14 @@ They should not be responsible for process lifecycle beyond local bootstrap.
 
 - key: `repl.state.service.observed.<host>.<service_name>`
 
+All of these durable records should live in NATS KV.
+
 ### Host agent command path
 
 - subject: `repl.host.<host>.task.start`
 - subject: `repl.host.<host>.service.reconcile`
 
-This is the main shift from "rooms plus ad hoc heartbeats" to "stateful control plane plus events."
+This is the main shift from "topics plus ad hoc heartbeats" to "stateful control plane plus events."
 
 ## Proposed Operator Query Surface
 
@@ -633,7 +660,7 @@ Suggested task fields:
 - `host_target`
 - `command`
 - `args`
-- `room`
+- `topic`
 - `log_key`
 - `status`: `queued|assigned|starting|running|succeeded|failed|canceled`
 - `pid`
@@ -671,6 +698,7 @@ Suggested service state:
 - observed pid
 - observed health
 - observed last heartbeat
+- observed restart count / recovery metadata
 - observed log key
 - observed chrome/browser-specific metadata if relevant
 
@@ -682,10 +710,12 @@ should become:
 
 1. submit service reconcile task
 2. return `task_id` immediately
-3. leader/host agent updates desired state in NATS
+3. leader/host agent updates desired state in NATS KV
 4. host agent starts or reuses the daemon
-5. observed service state updates in NATS
+5. observed service state updates in NATS KV
 6. `chrome src_v3 status` reads observed state, not only ad hoc process checks
+7. the service keeps publishing heartbeats while healthy
+8. if heartbeats stop, the leader marks the service unhealthy and reconciles/restarts it
 
 ## How This Helps Remote Chrome
 
@@ -701,7 +731,7 @@ The remote Chrome daemon is a strong test case because it needs:
 Under the new model:
 
 - Chrome service startup is a task submission, not a synchronous launch path
-- Chrome service health is a service-state object in NATS
+- Chrome service health is a service-state object in NATS KV
 - `chrome src_v3` can read one canonical service state record
 - the leader can reconcile desired service state across many remote hosts
 
@@ -713,7 +743,7 @@ That is a much cleaner control-plane fit than the current mixture of local regis
 
 Responsibilities:
 
-- read `env/dialtone.json`
+- read the launch folder's `env/dialtone.json` or the explicit `--env` target
 - submit tasks
 - print task id quickly and return
 - optionally query/tail task state
@@ -723,7 +753,7 @@ Responsibilities:
 Responsibilities:
 
 - start when the user runs plain `./dialtone.sh`
-- connect to the leader room
+- connect to the leader topic
 - accept slash commands
 - show task lifecycle output as the leader emits it
 - stay responsive while many tasks are queued or running
@@ -734,10 +764,11 @@ Responsibilities:
 
 - own queue state
 - assign work
-- maintain task and service state in NATS
+- maintain task and service state in NATS KV
 - enforce "one foreground task at a time"
 - coordinate host agents
 - keep publishing operator-facing lifecycle lines such as queued, pid assigned, log path, running, stopped, and exit code
+- mark service tasks unhealthy when heartbeats stop and drive reconciliation/restarts
 
 ### 4. Host agent
 
@@ -783,7 +814,7 @@ Current:
 
 Target:
 
-- NATS-backed snapshots as the source of truth
+- NATS KV-backed snapshots as the source of truth
 - optional in-memory cache in the leader for speed only
 
 ### C. Split intake from execution
@@ -879,12 +910,14 @@ Normal command:
 host-name> /chrome src_v3 status --host legion --role dev
 dialtone> Request received.
 dialtone> Task queued as task-20260327-abc123.
-dialtone> Type: command
-dialtone> Room: task.task-20260327-abc123
-dialtone> Log: ~/.dialtone/logs/task-20260327-abc123.log
+dialtone> Task topic: task.task-20260327-abc123
+dialtone> Task log: ~/.dialtone/logs/task-20260327-abc123.log
+dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-20260327-abc123 --lines 10
 ```
 
-Later leader lifecycle for that same task:
+Then the short-lived CLI call returns to the shell immediately.
+
+Later leader lifecycle for that same task belongs to the long-lived REPL stream, task inspection commands, and the task log:
 
 ```text
 dialtone> Task task-20260327-abc123 assigned pid 25516 on legion.
@@ -898,23 +931,23 @@ Service command:
 host-name> /chrome src_v3 service --host legion --mode start --role dev
 dialtone> Request received.
 dialtone> Task queued as task-20260327-def456.
-dialtone> Type: service_reconcile
-dialtone> Service: chrome-src-v3-dev on legion
-dialtone> Log: ~/.dialtone/logs/task-20260327-def456.log
+dialtone> Task topic: task.task-20260327-def456
+dialtone> Task log: ~/.dialtone/logs/task-20260327-def456.log
+dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-20260327-def456 --lines 10
 ```
 
 Interactive REPL session:
 
 ```text
-dialtone> Connected to repl.room.index via nats://127.0.0.1:46222
+dialtone> Connected to repl.topic.index via nats://127.0.0.1:46222
 dialtone> Leader online on DIALTONE-SERVER
-dialtone> Shared REPL session ready in room index.
+dialtone> Shared REPL session ready on topic index.
 
 host-name> /chrome src_v3 status --host legion --role dev
 dialtone> Request received.
 dialtone> Task queued as task-20260327-ghi789.
-dialtone> Room: task.task-20260327-ghi789
-dialtone> Log: ~/.dialtone/logs/task-20260327-ghi789.log
+dialtone> Task topic: task.task-20260327-ghi789
+dialtone> Task log: ~/.dialtone/logs/task-20260327-ghi789.log
 dialtone> Task task-20260327-ghi789 assigned pid 25516 on legion.
 dialtone> chrome service on legion role=dev is healthy.
 dialtone> Task task-20260327-ghi789 exited with code 0.
@@ -922,16 +955,17 @@ dialtone> Task task-20260327-ghi789 exited with code 0.
 
 The important contract is:
 
-- short-lived CLI calls return quickly once the task is queued
+- short-lived CLI calls return immediately after printing the queued task summary and a helpful `task log --task-id ... --lines N` follow-up command
 - the long-lived REPL keeps streaming the later lifecycle messages
 - both modes use the same task ids, log keys, and NATS-backed task/service state
 
 Follow-up inspection:
 
 ```bash
-./dialtone.sh repl src_v3 task-status --task-id task-20260327-def456
-./dialtone.sh repl src_v3 task-log --task-id task-20260327-def456 --lines 200
-./dialtone.sh repl src_v3 service-status --host legion --name chrome-src-v3-dev
+./dialtone.sh repl src_v3 task show --task-id task-20260327-def456
+./dialtone.sh repl src_v3 task log --task-id task-20260327-def456 --lines 10
+./dialtone.sh repl src_v3 task log --task-id task-20260327-def456 --lines 200
+./dialtone.sh repl src_v3 service show --host legion --name chrome-src-v3-dev
 ```
 
 ## Suggested Refactor Order
@@ -960,6 +994,6 @@ What it lacks is a first-class task model.
 
 The single best change is:
 
-make `task_id` the identity at submission time, make the leader own queue and service state in NATS, and make PID only an observed runtime field that appears later if execution begins.
+make `task_id` the identity at submission time, make the leader own durable task and service state in NATS KV, and make PID only an observed runtime field that appears later if execution begins.
 
 That change would make the REPL much more durable, make `chrome src_v3` service control more predictable, and make `dialtone.sh` feel like a fast control-plane client instead of a process-coupled launcher.

@@ -107,12 +107,32 @@ func EnvPath(rt Runtime) string {
 	return RepoPath(rt, "env", "dialtone.json")
 }
 
+func explicitEnvFilePath() string {
+	envFile := strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE"))
+	if envFile == "" {
+		return ""
+	}
+	envFile = expandHome(envFile)
+	if abs, err := filepath.Abs(envFile); err == nil {
+		return abs
+	}
+	return envFile
+}
+
+func configRootFromEnvFile(envFile string) string {
+	envFile = strings.TrimSpace(envFile)
+	if envFile == "" {
+		return ""
+	}
+	dir := filepath.Dir(envFile)
+	if strings.EqualFold(filepath.Base(dir), "env") {
+		return filepath.Dir(dir)
+	}
+	return dir
+}
+
 func ResolveEnvFilePath(start string) string {
-	if envFile := strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE")); envFile != "" {
-		envFile = expandHome(envFile)
-		if abs, err := filepath.Abs(envFile); err == nil {
-			return abs
-		}
+	if envFile := explicitEnvFilePath(); envFile != "" {
 		return envFile
 	}
 	if repoRoot := strings.TrimSpace(os.Getenv("DIALTONE_REPO_ROOT")); repoRoot != "" {
@@ -319,6 +339,9 @@ func DefaultDialtoneEnv() string {
 		base := filepath.Base(expanded)
 		return filepath.Join(parent, base+"_env")
 	}
+	if configRoot := configRootFromEnvFile(explicitEnvFilePath()); configRoot != "" {
+		return filepath.Join(configRoot, ".dialtone_env")
+	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".dialtone_env")
 }
@@ -326,6 +349,9 @@ func DefaultDialtoneEnv() string {
 func DefaultDialtoneHome() string {
 	if v := strings.TrimSpace(os.Getenv("DIALTONE_HOME")); v != "" {
 		return expandHome(v)
+	}
+	if configRoot := configRootFromEnvFile(explicitEnvFilePath()); configRoot != "" {
+		return filepath.Join(configRoot, ".dialtone")
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".dialtone")
@@ -407,16 +433,13 @@ func ResolveRuntime(start string) (Runtime, error) {
 	}
 	srcRoot, _ = filepath.Abs(srcRoot)
 
-	envFile := strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE"))
+	envFile := explicitEnvFilePath()
 	defaultEnvFile := DefaultDialtoneJSONPath(repoRoot)
 	if envFile == "" {
 		envFile = defaultEnvFile
 	}
 	envFile, _ = filepath.Abs(envFile)
 	defaultEnvFile, _ = filepath.Abs(defaultEnvFile)
-	if filepath.Base(envFile) != "dialtone.json" {
-		envFile = defaultEnvFile
-	}
 
 	dialtoneEnv := DefaultDialtoneEnv()
 	dialtoneEnv, _ = filepath.Abs(dialtoneEnv)

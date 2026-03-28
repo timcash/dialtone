@@ -3,8 +3,9 @@ set -e
 
 # --- 1. Configuration & Defaults ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LAUNCH_DIR="$(pwd -P)"
 export CGO_ENABLED=0
-ENV_FILE_JSON_DEFAULT="$SCRIPT_DIR/env/dialtone.json"
+ENV_FILE_JSON_DEFAULT="$LAUNCH_DIR/env/dialtone.json"
 
 log_info() {
     if [ "${DIALTONE_INTERNAL_SUBTONE:-}" = "1" ]; then
@@ -14,14 +15,14 @@ log_info() {
         echo "$*"
         return
     fi
-    echo "DIALTONE> $*"
+    echo "dialtone> $*"
 }
 log_err() {
     if [ "${DIALTONE_CONTEXT:-}" = "repl" ]; then
         echo "ERROR: $*" >&2
         return
     fi
-    echo "DIALTONE> ERROR: $*" >&2
+    echo "dialtone> ERROR: $*" >&2
 }
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
@@ -44,6 +45,65 @@ expand_home_path() {
     printf "%s" "$p"
 }
 
+resolve_path_from_launch_dir() {
+    local raw="$1"
+    raw="$(expand_home_path "$raw")"
+    case "$raw" in
+        "")
+            printf "%s" "$LAUNCH_DIR"
+            ;;
+        /*)
+            printf "%s" "$raw"
+            ;;
+        *)
+            printf "%s" "$LAUNCH_DIR/$raw"
+            ;;
+    esac
+}
+
+resolve_env_json_path() {
+    local raw="$1"
+    local resolved=""
+    if [ -n "$raw" ]; then
+        resolved="$(resolve_path_from_launch_dir "$raw")"
+    else
+        resolved="$ENV_FILE_JSON_DEFAULT"
+    fi
+    if [ "$resolved" != "/" ]; then
+        resolved="${resolved%/}"
+    fi
+    if [ -d "$resolved" ]; then
+        printf "%s/env/dialtone.json" "$resolved"
+        return
+    fi
+    case "$resolved" in
+        *.json)
+            printf "%s" "$resolved"
+            ;;
+        */env)
+            printf "%s/dialtone.json" "$resolved"
+            ;;
+        *)
+            printf "%s/env/dialtone.json" "$resolved"
+            ;;
+    esac
+}
+
+resolve_config_root_from_env_file() {
+    local env_file="$1"
+    local env_dir=""
+    if [ -z "$env_file" ]; then
+        printf "%s" "$LAUNCH_DIR"
+        return
+    fi
+    env_dir="$(dirname "$env_file")"
+    if [ "$(basename "$env_dir")" = "env" ]; then
+        dirname "$env_dir"
+        return
+    fi
+    printf "%s" "$env_dir"
+}
+
 # --- 2. Configuration Helpers ---
 read_json_val() {
     local key="$1"
@@ -56,8 +116,9 @@ write_json_config() {
     local home_dir="$1"
     local env_dir="$2"
     local repo_dir="$3"
-    mkdir -p "$(dirname "$ENV_FILE_JSON_DEFAULT")"
-    cat > "$ENV_FILE_JSON_DEFAULT" <<EOF
+    local config_path="$ENV_FILE_JSON"
+    mkdir -p "$(dirname "$config_path")"
+    cat > "$config_path" <<EOF
 {
   "DIALTONE_HOME": "$home_dir",
   "DIALTONE_ENV": "$env_dir",
@@ -81,7 +142,7 @@ EOF
         value="${!key:-}"
         if [ -n "$value" ]; then
             tmp_file="$(mktemp)"
-            python3 - "$ENV_FILE_JSON_DEFAULT" "$tmp_file" "$key" "$value" <<'PY'
+            python3 - "$config_path" "$tmp_file" "$key" "$value" <<'PY'
 import json
 import sys
 
@@ -93,7 +154,7 @@ with open(dst, "w", encoding="utf-8") as f:
     json.dump(doc, f, indent=2)
     f.write("\n")
 PY
-            mv "$tmp_file" "$ENV_FILE_JSON_DEFAULT"
+            mv "$tmp_file" "$config_path"
         fi
     done
 }
@@ -262,15 +323,17 @@ EOF
 
 run_onboarding() {
     local is_test="$1"
+    local config_root=""
     log_info "Welcome to Dialtone! Let's get you set up."
     
-    DEFAULT_HOME="$HOME/.dialtone"
-    DEFAULT_ENV="$HOME/.dialtone_env"
+    config_root="$(resolve_config_root_from_env_file "$ENV_FILE_JSON")"
+    DEFAULT_HOME="$config_root/.dialtone"
+    DEFAULT_ENV="$config_root/.dialtone_env"
     if [ "$is_test" = "1" ]; then
         input_home="${TEST_ANS_HOME:-$DEFAULT_HOME}"
         log_info "Where should Dialtone runtime state live? [$DEFAULT_HOME]: $input_home (Auto)"
     else
-        printf "DIALTONE> Where should Dialtone runtime state live? [%s]: " "$DEFAULT_HOME"
+        printf "dialtone> Where should Dialtone runtime state live? [%s]: " "$DEFAULT_HOME"
         read -r input_home
     fi
     input_home="$(expand_home_path "${input_home:-$DEFAULT_HOME}")"
@@ -278,7 +341,7 @@ run_onboarding() {
         input_env="${TEST_ANS_ENV:-$DEFAULT_ENV}"
         log_info "Where should dependencies (Go/Bun) be installed? [$DEFAULT_ENV]: $input_env (Auto)"
     else
-        printf "DIALTONE> Where should dependencies (Go/Bun) be installed? [%s]: " "$DEFAULT_ENV"
+        printf "dialtone> Where should dependencies (Go/Bun) be installed? [%s]: " "$DEFAULT_ENV"
         read -r input_env
     fi
     input_env="$(expand_home_path "${input_env:-$DEFAULT_ENV}")"
@@ -288,7 +351,7 @@ run_onboarding() {
         input_repo="${TEST_ANS_REPO:-$DEFAULT_REPO}"
         log_info "Where is the repository root? [$DEFAULT_REPO]: $input_repo (Auto)"
     else
-        printf "DIALTONE> Where is the repository root? [%s]: " "$DEFAULT_REPO"
+        printf "dialtone> Where is the repository root? [%s]: " "$DEFAULT_REPO"
         read -r input_repo
     fi
     input_repo="$(expand_home_path "${input_repo:-$DEFAULT_REPO}")"
@@ -298,7 +361,7 @@ run_onboarding() {
     export DIALTONE_REPO_ROOT="$input_repo"
     
     write_json_config "$input_home" "$input_env" "$input_repo"
-    log_info "Configuration saved to $ENV_FILE_JSON_DEFAULT"
+    log_info "Configuration saved to $ENV_FILE_JSON"
 }
 
 # --- 4. Argument Parsing ---
@@ -329,7 +392,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --subtone)
             log_err "--subtone is deprecated and not supported."
-            log_err "Subtone mode is internal to DIALTONE> execution paths."
+            log_err "Subtone mode is internal to dialtone> execution paths."
             exit 1
             ;;
         *) PASSTHRU_ARGS+=("$1"); shift ;;
@@ -348,11 +411,12 @@ if [ "$DEFAULT_CMD_NEEDED" = "1" ]; then
 fi
 
 # --- 5. Environment Loading ---
-ENV_FILE_JSON="$ENV_FILE_JSON_DEFAULT"
+ENV_FILE_JSON="$(resolve_env_json_path "")"
 if [ -n "$ENV_OVERRIDE" ]; then
-    ENV_FILE_JSON="$(expand_home_path "$ENV_OVERRIDE")"
+    ENV_FILE_JSON="$(resolve_env_json_path "$ENV_OVERRIDE")"
     log_info "Using custom environment (JSON): $ENV_FILE_JSON"
 fi
+CONFIG_ROOT="$(resolve_config_root_from_env_file "$ENV_FILE_JSON")"
 
 if [ ! -f "$ENV_FILE_JSON" ] && [ -z "$DIALTONE_ONBOARDING_DONE" ]; then
     if [ -z "$ENV_OVERRIDE" ]; then
@@ -375,10 +439,10 @@ fi
 [ "$FORCE_NO_NIX" = "1" ] && export DIALTONE_USE_NIX=0
 [ -z "$DIALTONE_USE_NIX" ] && export DIALTONE_USE_NIX=1
 
-export DIALTONE_HOME="$(expand_home_path "${DIALTONE_HOME:-$HOME/.dialtone}")"
-export DIALTONE_REPO_ROOT="$(expand_home_path "$DIALTONE_REPO_ROOT")"
+export DIALTONE_HOME="$(expand_home_path "${DIALTONE_HOME:-$CONFIG_ROOT/.dialtone}")"
+export DIALTONE_ENV="$(expand_home_path "${DIALTONE_ENV:-$CONFIG_ROOT/.dialtone_env}")"
+export DIALTONE_REPO_ROOT="$(expand_home_path "${DIALTONE_REPO_ROOT:-$SCRIPT_DIR}")"
 export DIALTONE_SRC_ROOT="${DIALTONE_REPO_ROOT}/src"
-export DIALTONE_ENV="$(expand_home_path "$DIALTONE_ENV")"
 export DIALTONE_ENV_FILE="$ENV_FILE_JSON"
 export DIALTONE_MESH_CONFIG="$ENV_FILE_JSON"
 

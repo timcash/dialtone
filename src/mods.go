@@ -12,6 +12,7 @@ import (
 	"dialtone/dev/internal/modcli"
 	"dialtone/dev/internal/modstate"
 	"dialtone/dev/internal/tmuxcmd"
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 	"dialtone/dev/mods/shared/dispatch"
 	"dialtone/dev/mods/shared/nixplan"
 	"dialtone/dev/mods/shared/sqlitestate"
@@ -19,7 +20,7 @@ import (
 
 func main() {
 	if err := runCLI(); err != nil {
-		fmt.Fprintln(os.Stderr, "DIALTONE>", err)
+		fmt.Fprintln(os.Stderr, logs.FormatSystemMessage(err.Error()))
 		os.Exit(1)
 	}
 }

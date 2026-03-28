@@ -27,7 +27,7 @@ func NewSubtoneLogger(pid int, args []string, logDir string) (*SubtoneLogger, er
 		return nil, err
 	}
 	startedAt := time.Now()
-	name := fmt.Sprintf("subtone-%d-%s.log", pid, startedAt.Format("20060102-150405"))
+	name := fmt.Sprintf("task-worker-%d-%s.log", pid, startedAt.Format("20060102-150405"))
 	path := filepath.Join(logDir, name)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {

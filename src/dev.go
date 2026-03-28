@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	configv1 "dialtone/dev/plugins/config/src_v1/go"
@@ -215,8 +216,8 @@ func LoadConfig() {
 	if jsonPath == "" {
 		jsonPath = filepath.Join(repoRoot, "env", "dialtone.json")
 	}
-	if filepath.Base(jsonPath) != "dialtone.json" {
-		jsonPath = filepath.Join(repoRoot, "env", "dialtone.json")
+	if absPath, err := filepath.Abs(jsonPath); err == nil {
+		jsonPath = absPath
 	}
 	if fileExists(jsonPath) {
 		data, err := os.ReadFile(jsonPath)
@@ -602,7 +603,7 @@ func dispatchViaREPL(command string, args []string, targetHost string) error {
 	for _, candidateURL := range candidateNATSURLs {
 		leaderHealthy := replv3.LeaderHealthy(candidateURL, 1200*time.Millisecond)
 		if injectionHost == "" && isLocalNATSURL(candidateURL) && !leaderHealthy && replAutostartEnabled() {
-			logs.System("No REPL leader detected on %s; starting background leader for room %s", candidateURL, room)
+		logs.System("No REPL leader detected on %s; starting background leader for topic %s", candidateURL, room)
 			if err := replv3.EnsureLeaderRunning(candidateURL, room); err != nil {
 				return fmt.Errorf("repl leader autostart failed: %w", err)
 			}
@@ -650,17 +651,20 @@ func relayInjectedIndexLifecycle(natsURL, room, user, displayLine, injectLine st
 	subject := "repl.room." + room
 	targetInput := "/" + strings.TrimSpace(injectLine)
 	displayInput := "/" + strings.TrimSpace(displayLine)
-	summaryPrefix := injectedSummaryPrefix(injectLine)
 	requestLine := "Request received."
 	seenInput := false
 	startedLifecycle := false
 	seenTaskQueued := false
-	seenTaskRoom := false
+	seenTaskTopic := false
 	seenTaskLog := false
-	seenTaskAssigned := false
+	taskID := ""
 	done := make(chan struct{})
-	doneClosed := false
-	finalSeen := false
+	var doneOnce sync.Once
+	finish := func() {
+		doneOnce.Do(func() {
+			close(done)
+		})
+	}
 	var subErr error
 	sub, err := nc.Subscribe(subject, func(msg *nats.Msg) {
 		frame := replv3.BusFrame{}
@@ -687,10 +691,10 @@ func relayInjectedIndexLifecycle(natsURL, room, user, displayLine, injectLine st
 					return
 				}
 				startedLifecycle = true
-				fmt.Fprintf(os.Stdout, "DIALTONE> %s\n", msgText)
+				replv3.WriteDialtoneSystemLine(os.Stdout, msgText)
 				return
 			}
-			if !shouldForwardIndexLine(msgText, summaryPrefix) {
+			if !shouldForwardInjectedQueueLine(msgText) {
 				return
 			}
 			switch {
@@ -699,34 +703,26 @@ func relayInjectedIndexLifecycle(natsURL, room, user, displayLine, injectLine st
 					return
 				}
 				seenTaskQueued = true
-			case strings.HasPrefix(msgText, "Task room: task."):
-				if seenTaskRoom {
+				taskID = parseQueuedTaskID(msgText)
+			case strings.HasPrefix(msgText, "Task topic: task."):
+				if seenTaskTopic {
 					return
 				}
-				seenTaskRoom = true
+				seenTaskTopic = true
 			case strings.HasPrefix(msgText, "Task log: "):
 				if seenTaskLog {
 					return
 				}
 				seenTaskLog = true
-			case strings.HasPrefix(msgText, "Task task-") && strings.Contains(msgText, " assigned pid "):
-				if seenTaskAssigned {
-					return
-				}
-				seenTaskAssigned = true
+			default:
+				return
 			}
-			fmt.Fprintf(os.Stdout, "DIALTONE> %s\n", msgText)
-			if isInjectedTaskFinal(msgText) {
-				if !finalSeen {
-					finalSeen = true
-					go func() {
-						time.Sleep(250 * time.Millisecond)
-						if !doneClosed {
-							close(done)
-							doneClosed = true
-						}
-					}()
+			replv3.WriteDialtoneSystemLine(os.Stdout, msgText)
+			if seenTaskLog {
+				if strings.TrimSpace(taskID) != "" {
+					replv3.WriteDialtoneSystemLine(os.Stdout, fmt.Sprintf("To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id %s --lines 10", strings.TrimSpace(taskID)))
 				}
+				finish()
 			}
 		}
 	})
@@ -746,7 +742,7 @@ func relayInjectedIndexLifecycle(natsURL, room, user, displayLine, injectLine st
 	}
 	select {
 	case <-done:
-	case <-time.After(2 * time.Minute):
+	case <-time.After(10 * time.Second):
 	}
 	return subErr
 }
@@ -759,60 +755,33 @@ func sanitizeREPLRoom(room string) string {
 	return room
 }
 
-func injectedSummaryPrefix(line string) string {
-	fields := shellSplit(strings.TrimSpace(line))
-	if len(fields) < 3 {
-		return ""
-	}
-	return fields[0] + " " + fields[2] + ":"
-}
-
-func shouldForwardIndexLine(msgText, summaryPrefix string) bool {
+func shouldForwardInjectedQueueLine(msgText string) bool {
 	msgText = strings.TrimSpace(msgText)
 	switch {
 	case msgText == "":
 		return false
 	case strings.HasPrefix(msgText, "Task queued as task-"):
 		return true
-	case strings.HasPrefix(msgText, "Task room: task."):
+	case strings.HasPrefix(msgText, "Task topic: task."):
 		return true
 	case strings.HasPrefix(msgText, "Task log: "):
-		return true
-	case strings.HasPrefix(msgText, "Task task-") && strings.Contains(msgText, " assigned pid "):
-		return true
-	case strings.HasPrefix(msgText, "Task task-") && strings.Contains(msgText, " exited with code "):
-		return true
-	case strings.HasPrefix(msgText, "Task task-") && strings.Contains(msgText, " failed to start"):
-		return true
-	case strings.HasPrefix(msgText, "Task task-") && strings.Contains(msgText, " stopped."):
-		return true
-	case strings.HasPrefix(msgText, "Task task-") && strings.Contains(msgText, " is running in background."):
-		return true
-	case strings.HasPrefix(msgText, "Service ") && strings.Contains(msgText, " is running."):
-		return true
-	case summaryPrefix != "" && strings.HasPrefix(msgText, summaryPrefix):
 		return true
 	default:
 		return false
 	}
 }
 
-func isInjectedTaskFinal(msgText string) bool {
+func parseQueuedTaskID(msgText string) string {
 	msgText = strings.TrimSpace(msgText)
-	switch {
-	case strings.HasPrefix(msgText, "Task task-") && strings.Contains(msgText, " exited with code "):
-		return true
-	case strings.HasPrefix(msgText, "Task task-") && strings.Contains(msgText, " failed to start"):
-		return true
-	case strings.HasPrefix(msgText, "Task task-") && strings.Contains(msgText, " stopped."):
-		return true
-	case strings.HasPrefix(msgText, "Task task-") && strings.Contains(msgText, " is running in background."):
-		return true
-	case strings.HasPrefix(msgText, "Service ") && strings.Contains(msgText, " is running."):
-		return true
-	default:
-		return false
+	const prefix = "Task queued as "
+	if !strings.HasPrefix(msgText, prefix) {
+		return ""
 	}
+	taskID := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(msgText, prefix), "."))
+	if strings.HasPrefix(taskID, "task-") {
+		return taskID
+	}
+	return ""
 }
 
 func resolveTargetNATSURLs(host string) []string {
@@ -1518,7 +1487,7 @@ func startDefaultMultiplayerREPL() error {
 		return fmt.Errorf("no REPL daemon detected on %s (autostart disabled). start daemon with: ./dialtone.sh repl src_v3 service --mode run --room %s", clientURL, room)
 	}
 	if !leaderHealthy {
-		logs.System("No REPL leader detected on %s; starting background leader for room %s", clientURL, room)
+		logs.System("No REPL leader detected on %s; starting background leader for topic %s", clientURL, room)
 		if err := replv3.EnsureLeaderRunning(clientURL, room); err != nil {
 			return err
 		}

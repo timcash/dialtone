@@ -5,15 +5,17 @@
 Use this mental model:
 - plain `./dialtone.sh <plugin> ...` injects into the local REPL leader
 - the leader turns the real command into a task or manages a long-lived service
-- NATS is the control plane for requests, lifecycle updates, and room traffic
+- NATS is the control plane for requests, lifecycle updates, and topic traffic
+- NATS KV stores durable task and service state
+- service tasks publish heartbeats and the leader reconciles them if heartbeats stop
 - `dialtone>` stays short and high-level
 - full output stays in the task log
 
 Public terminology:
-- `dialtone>`: the top-level control room
+- `dialtone>`: the top-level REPL and CLI control prefix
 - `task`: one queued or running command request; each task gets a `task-id` immediately and may later get a local or remote PID
 - `service`: one long-lived managed process, such as `chrome src_v3` on `legion`
-- `room`: the event/log stream for a task or service
+- `topic`: the event/log stream for a task or service
 
 ## Default Use
 
@@ -38,22 +40,21 @@ Preferred shell pattern:
 host-name> /robot src_v2 diagnostic --host rover --skip-ui --public-check=false
 dialtone> Request received.
 dialtone> Task queued as task-20260327-abc123.
-dialtone> Task room: task.task-20260327-abc123
+dialtone> Task topic: task.task-20260327-abc123
 dialtone> Task log: /home/user/dialtone/.dialtone/logs/task-20260327-abc123.log
-dialtone> Task task-20260327-abc123 assigned pid 546289.
-dialtone> robot diagnostic: checking local artifacts
-dialtone> robot diagnostic: checking rover runtime on rover
-dialtone> robot diagnostic: autoswap service and manifest look healthy
-dialtone> robot diagnostic: active manifest matches latest release channel
-dialtone> robot diagnostic: rover API and telemetry endpoints passed
-dialtone> robot diagnostic: completed
-dialtone> Task task-20260327-abc123 exited with code 0.
+dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-20260327-abc123 --lines 10
 ```
+
+The one-shot CLI should return immediately after these lines. Later lifecycle belongs in the shared REPL stream, `task show`, `service show`, and the task log.
 
 ## REPL Standards
 
-`dialtone>` should contain:
+For one-shot CLI commands, `dialtone>` should contain:
 - request receipt
+- queued task metadata
+- a task log follow-up command
+
+Inside the shared REPL stream or a live watch session, `dialtone>` may also contain:
 - task lifecycle
 - service lifecycle
 - short stage summaries
@@ -92,6 +93,29 @@ The intended service contract is:
 - `status` queries existing observed state
 - later commands reuse the existing healthy service
 - `service stop` clears desired running state and shuts down the owned process
+- service heartbeats update observed state
+- missed heartbeats mark the service unhealthy and trigger reconcile/restart
+
+### Shared Service Contract Fixture
+
+Use the fixture at `src/plugins/repl/src_v3/testdaemon/src_v1` to prove the shared service layer without depending on Chrome or any other plugin implementation.
+
+```bash
+./dialtone.sh testdaemon src_v1 service --host legion --mode start --name demo
+./dialtone.sh testdaemon src_v1 service --host legion --mode status --name demo
+./dialtone.sh testdaemon src_v1 service --host legion --mode stop --name demo
+```
+
+Target one-shot service submission pattern:
+
+```text
+host-name> /testdaemon src_v1 service --host legion --mode start --name demo
+dialtone> Request received.
+dialtone> Task queued as task-20260327-svc001.
+dialtone> Task topic: task.task-20260327-svc001
+dialtone> Task log: /home/user/dialtone/.dialtone/logs/task-20260327-svc001.log
+dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-20260327-svc001 --lines 10
+```
 
 ### Target REPL Operator Commands
 
@@ -103,33 +127,33 @@ The target REPL operator surface should make task and service state visible with
 ./dialtone.sh repl src_v3 task log --task-id <task-id> --lines 200
 ./dialtone.sh repl src_v3 task kill --task-id <task-id>
 ./dialtone.sh repl src_v3 service list --host legion
-./dialtone.sh repl src_v3 service show --host legion --name chrome-src-v3-dev
-./dialtone.sh repl src_v3 watch --subject 'repl.room.index'
+./dialtone.sh repl src_v3 service show --host legion --name testdaemon-demo
+./dialtone.sh repl src_v3 watch --subject 'repl.topic.index'
 ```
 
-Target `task list` example with a running remote Chrome daemon:
+Target `task list` example with a running remote service:
 
 ```text
 host-name> /repl src_v3 task list --state running --host legion
 dialtone> Running tasks:
 dialtone> TASK ID                  KIND      STATE    HOST    SERVICE/COMMAND           PID    EXIT
-dialtone> task-20260327-chr001     service   running  legion  chrome-src-v3-dev        25516  -
+dialtone> task-20260327-svc001     service   running  legion  testdaemon-demo          25516  -
 dialtone> task-20260327-robot021   command   running  rover   robot src_v2 diagnostic  546289 -
 ```
 
 Target `task show` example:
 
 ```text
-host-name> /repl src_v3 task show --task-id task-20260327-chr001
-dialtone> Task: task-20260327-chr001
+host-name> /repl src_v3 task show --task-id task-20260327-svc001
+dialtone> Task: task-20260327-svc001
 dialtone> Kind: service_reconcile
 dialtone> State: running
 dialtone> Host: legion
-dialtone> Service: chrome-src-v3-dev
+dialtone> Service: testdaemon-demo
 dialtone> PID: 25516
-dialtone> Task room: task.task-20260327-chr001
-dialtone> Task log: /home/user/dialtone/.dialtone/logs/task-20260327-chr001.log
-dialtone> Log subject: logs.service.legion.chrome-src-v3-dev
+dialtone> Task topic: task.task-20260327-svc001
+dialtone> Task log: /home/user/dialtone/.dialtone/logs/task-20260327-svc001.log
+dialtone> Log subject: logs.service.legion.testdaemon-demo
 ```
 
 Target `service list` example:
@@ -138,11 +162,11 @@ Target `service list` example:
 host-name> /repl src_v3 service list --host legion
 dialtone> Services:
 dialtone> HOST    NAME               ROLE       STATE    OWNER TASK              PID    HEALTH
-dialtone> legion  chrome-src-v3-dev  dev        running  task-20260327-chr001   25516  healthy
-dialtone> legion  chrome-src-v3-ui   robot-test running  task-20260327-ui001    25548  healthy
+dialtone> legion  testdaemon-demo    demo       running  task-20260327-svc001   25516  healthy
+dialtone> legion  testdaemon-metrics metrics    running  task-20260327-svc002   25548  healthy
 ```
 
-### Task Logs, Rooms, And NATS Logs
+### Task Logs, Topics, And NATS Logs
 
 The long-term logging model should follow the logs plugin:
 
@@ -161,9 +185,9 @@ Target subject model:
 Useful operator commands:
 
 ```bash
-./dialtone.sh repl src_v3 task log --task-id task-20260327-chr001 --lines 80
-./dialtone.sh logs src_v1 stream --topic 'logs.task.task-20260327-chr001'
-./dialtone.sh logs src_v1 stream --topic 'logs.service.legion.chrome-src-v3-dev'
+./dialtone.sh repl src_v3 task log --task-id task-20260327-svc001 --lines 80
+./dialtone.sh logs src_v1 stream --topic 'logs.task.task-20260327-svc001'
+./dialtone.sh logs src_v1 stream --topic 'logs.service.legion.testdaemon-demo'
 ./dialtone.sh logs src_v1 stream --topic 'logfilter.level.error.>'
 ./dialtone.sh logs src_v1 stream --topic 'logfilter.tag.fail.>'
 ```
@@ -171,27 +195,27 @@ Useful operator commands:
 Target `task log` example:
 
 ```text
-host-name> /repl src_v3 task log --task-id task-20260327-chr001 --lines 6
-dialtone> Streaming task log for task-20260327-chr001
-[T+0000s|INFO|plugins/chrome/src_v3/ops.go:412] deploy requested for legion role=dev
-[T+0001s|INFO|plugins/chrome/src_v3/daemon.go:221] daemon connected to repl manager
-[T+0002s|INFO|plugins/chrome/src_v3/browser.go:301] chrome started headed pid=25516
-[T+0003s|INFO|plugins/chrome/src_v3/browser.go:362] managed tab ready target=7E1A3D
+host-name> /repl src_v3 task log --task-id task-20260327-svc001 --lines 6
+dialtone> Streaming task log for task-20260327-svc001
+[T+0000s|INFO|plugins/repl/src_v3/testdaemon/src_v1/service.go:51] service start requested host=legion name=demo
+[T+0001s|INFO|plugins/repl/src_v3/testdaemon/src_v1/daemon.go:88] daemon connected to repl manager
+[T+0002s|INFO|plugins/repl/src_v3/testdaemon/src_v1/daemon.go:104] heartbeat healthy pid=25516
+[T+0003s|INFO|plugins/repl/src_v3/testdaemon/src_v1/daemon.go:117] service ready host=legion name=demo
 ```
 
 Target `logs stream` example:
 
 ```text
-host-name> /logs src_v1 stream --topic 'logs.service.legion.chrome-src-v3-dev'
-dialtone> Attached log stream logs.service.legion.chrome-src-v3-dev
-[T+0000s|INFO|plugins/chrome/src_v3/daemon.go:144] service heartbeat healthy pid=25516
-[T+0001s|INFO|plugins/chrome/src_v3/browser.go:488] command goto url=http://127.0.0.1:3000
-[T+0002s|ERROR|plugins/chrome/src_v3/actions.go:211] wait-aria timeout label=Open Camera
+host-name> /logs src_v1 stream --topic 'logs.service.legion.testdaemon-demo'
+dialtone> Attached log stream logs.service.legion.testdaemon-demo
+[T+0000s|INFO|plugins/repl/src_v3/testdaemon/src_v1/daemon.go:104] service heartbeat healthy pid=25516
+[T+0001s|INFO|plugins/repl/src_v3/testdaemon/src_v1/daemon.go:128] emit-progress stage=ready
+[T+0002s|ERROR|plugins/repl/src_v3/testdaemon/src_v1/daemon.go:141] exit-code requested code=17
 ```
 
-### Remote Chrome Service Walkthrough
+### Chrome Browser Integration Walkthrough
 
-The most important long-running REPL service right now is the remote Chrome daemon on `legion`.
+Chrome is an important browser-specific service integration, but the shared service contract itself should be validated first with `testdaemon`.
 
 Typical workflow:
 
@@ -199,11 +223,9 @@ Typical workflow:
 host-name> /chrome src_v3 service --host legion --mode start --role robot-test
 dialtone> Request received.
 dialtone> Task queued as task-20260327-chr001.
-dialtone> Task room: task.task-20260327-chr001
+dialtone> Task topic: task.task-20260327-chr001
 dialtone> Task log: /home/user/dialtone/.dialtone/logs/task-20260327-chr001.log
-dialtone> Task task-20260327-chr001 assigned pid 25516 on legion.
-dialtone> chrome service on legion role=robot-test is healthy.
-dialtone> Task task-20260327-chr001 exited with code 0.
+dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-20260327-chr001 --lines 10
 
 host-name> /repl src_v3 task list --state running --host legion
 dialtone> Running tasks:
@@ -213,9 +235,9 @@ dialtone> task-20260327-chr001     service   running  legion  chrome-src-v3-robo
 host-name> /chrome src_v3 goto --host legion --role robot-test --url http://127.0.0.1:3000/#robot-three-stage
 dialtone> Request received.
 dialtone> Task queued as task-20260327-nav001.
-dialtone> Task task-20260327-nav001 assigned pid 25516 on legion.
-dialtone> chrome goto on legion role=robot-test completed.
-dialtone> Task task-20260327-nav001 exited with code 0.
+dialtone> Task topic: task.task-20260327-nav001
+dialtone> Task log: /home/user/dialtone/.dialtone/logs/task-20260327-nav001.log
+dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-20260327-nav001 --lines 10
 ```
 
 This is the same control pattern that should support:
@@ -229,12 +251,9 @@ This is the same control pattern that should support:
 
 The REPL should make failures obvious without flooding the operator with raw internals.
 
-Target failure example for a Chrome command:
+Later failure lines in the shared REPL stream or task log for a Chrome command can look like:
 
 ```text
-host-name> /chrome src_v3 wait-aria --host legion --role robot-test --label "Open Camera" --timeout-ms 1500
-dialtone> Request received.
-dialtone> Task queued as task-20260327-wait001.
 dialtone> Task task-20260327-wait001 assigned pid 25516 on legion.
 dialtone> ERROR task task-20260327-wait001 on legion exited with code 28.
 dialtone> ERROR task task-20260327-wait001 wait-aria timeout label=Open Camera
@@ -254,12 +273,9 @@ dialtone> Target task task-20260327-chr001 exited with code 143.
 dialtone> Task task-20260327-kill01 exited with code 0.
 ```
 
-Target recovery example:
+Later recovery lines in the shared REPL stream can look like:
 
 ```text
-host-name> /chrome src_v3 service --host legion --mode start --role robot-test
-dialtone> Request received.
-dialtone> Task queued as task-20260327-chr002.
 dialtone> Existing chrome service on legion role=robot-test is missing.
 dialtone> Task task-20260327-chr002 assigned pid 26111 on legion.
 dialtone> chrome service on legion role=robot-test recovered and healthy.
@@ -307,13 +323,12 @@ Target behavior:
 Preferred queued pattern:
 
 ```text
-host-name> /repl src_v3 watch --subject repl.room.index
+host-name> /robot src_v2 publish --repo timcash/dialtone
 dialtone> Request received.
 dialtone> Task queued as task-20260327-def456.
-dialtone> Task room: task.task-20260327-def456
+dialtone> Task topic: task.task-20260327-def456
 dialtone> Task log: /home/user/dialtone/.dialtone/logs/task-20260327-def456.log
-dialtone> Task task-20260327-def456 assigned pid 171214.
-dialtone> Task task-20260327-def456 is running.
+dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-20260327-def456 --lines 10
 ```
 
 ## Single Command Rule
@@ -347,10 +362,10 @@ Use these only when you need direct REPL control.
 ./dialtone.sh repl src_v3 service list --host legion
 
 # Start or inspect the local leader directly.
-./dialtone.sh repl src_v3 leader --nats-url nats://127.0.0.1:47222 --room index
+./dialtone.sh repl src_v3 leader --nats-url nats://127.0.0.1:47222 --topic index
 ./dialtone.sh repl src_v3 status
 
-# Inject to a specific leader or room.
+# Inject to a specific leader or topic.
 ./dialtone.sh repl src_v3 inject --nats-url nats://127.0.0.1:47222 --user llm-codex robot src_v2 publish --repo timcash/dialtone
 
 # Clean local REPL helper processes.

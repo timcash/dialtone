@@ -46,11 +46,21 @@ func Register(r *testv1.Registry) {
 			if err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("shell routed proc emit failed: %w\n%s", err, out)
 			}
-			if err := support.MatchAnyPatternGroupText(out, support.StandardCommandOutputPatternGroups("proc src_v1", "", "")); err != nil {
+			if err := support.MatchAnyPatternGroupText(out, [][]string{support.StandardShellTaskOutputPatterns()}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("shell autostart output missed the routed lifecycle contract: %w\n%s", err, out)
 			}
-			if strings.Contains(out, "\nDIALTONE> shell-autostart-ok") || strings.Contains(out, "\nshell-autostart-ok\n") {
+			if strings.Contains(out, "\ndialtone> shell-autostart-ok") || strings.Contains(out, "\nshell-autostart-ok\n") {
 				return testv1.StepRunResult{}, fmt.Errorf("shell routed output leaked subtone payload into index/shell output\n%s", out)
+			}
+			for _, forbidden := range []string{
+				`assigned pid `,
+				`exited with code `,
+				` is running in background.`,
+				`Service `,
+			} {
+				if strings.Contains(out, forbidden) {
+					return testv1.StepRunResult{}, fmt.Errorf("shell routed output should return before later lifecycle line %q\n%s", forbidden, out)
+				}
 			}
 			logPath, err := support.ParseWorkLogPath(out)
 			if err != nil {
@@ -159,11 +169,21 @@ func Register(r *testv1.Registry) {
 			if strings.Contains(out, "No REPL leader detected on") {
 				return testv1.StepRunResult{}, fmt.Errorf("shell path unexpectedly autostarted a new leader despite existing healthy leader\n%s", out)
 			}
-			if err := support.MatchAnyPatternGroupText(out, support.StandardCommandOutputPatternGroups("proc src_v1", "", "")); err != nil {
+			if err := support.MatchAnyPatternGroupText(out, [][]string{support.StandardShellTaskOutputPatterns()}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("shell reuse output missed the routed lifecycle contract: %w\n%s", err, out)
 			}
-			if strings.Contains(out, "\nDIALTONE> shell-reuse-ok") || strings.Contains(out, "\nshell-reuse-ok\n") {
+			if strings.Contains(out, "\ndialtone> shell-reuse-ok") || strings.Contains(out, "\nshell-reuse-ok\n") {
 				return testv1.StepRunResult{}, fmt.Errorf("shell routed output leaked subtone payload into index/shell output\n%s", out)
+			}
+			for _, forbidden := range []string{
+				`assigned pid `,
+				`exited with code `,
+				` is running in background.`,
+				`Service `,
+			} {
+				if strings.Contains(out, forbidden) {
+					return testv1.StepRunResult{}, fmt.Errorf("shell routed output should return before later lifecycle line %q\n%s", forbidden, out)
+				}
 			}
 			logPath, err := support.ParseWorkLogPath(out)
 			if err != nil {
@@ -213,7 +233,7 @@ func Register(r *testv1.Registry) {
 					fmt.Sprintf(`"message":"%s"`, startCmd),
 					`"message":"Request received."`,
 					`"message":"Task queued as task-`,
-					`"message":"Task room: task.task-`,
+					`"message":"Task topic: task.task-`,
 					`"message":"Task log: `,
 					`"message":"Task task-`,
 					`assigned pid `,
@@ -221,13 +241,13 @@ func Register(r *testv1.Registry) {
 				},
 				ExpectOutput: []string{
 					fmt.Sprintf("llm-codex> %s", startCmd),
-					`DIALTONE> Request received.`,
-					`DIALTONE> Task queued as task-`,
-					`DIALTONE> Task room: task.task-`,
-					`DIALTONE> Task log: `,
-					`DIALTONE> Task task-`,
+					`dialtone> Request received.`,
+					`dialtone> Task queued as task-`,
+					`dialtone> Task topic: task.task-`,
+					`dialtone> Task log: `,
+					`dialtone> Task task-`,
 					`assigned pid `,
-					`DIALTONE> Service pm-svc is running.`,
+					`dialtone> Service pm-svc is running.`,
 				},
 				Timeout: 30 * time.Second,
 			}}); err != nil {
@@ -252,7 +272,7 @@ func Register(r *testv1.Registry) {
 				},
 				ExpectOutput: []string{
 					fmt.Sprintf("llm-codex> %s", listCmd),
-					`DIALTONE> Managed Services:`,
+					`dialtone> Managed Services:`,
 					serviceName,
 					strconv.Itoa(servicePID),
 					`active`,
@@ -285,8 +305,8 @@ func Register(r *testv1.Registry) {
 				},
 				ExpectOutput: []string{
 					fmt.Sprintf("llm-codex> %s", stopCmd),
-					fmt.Sprintf("DIALTONE> Stopping service %s (pid %d).", serviceName, servicePID),
-					fmt.Sprintf("DIALTONE> Stopped service %s.", serviceName),
+					fmt.Sprintf("dialtone> Stopping service %s (pid %d).", serviceName, servicePID),
+					fmt.Sprintf("dialtone> Stopped service %s.", serviceName),
 				},
 				Timeout: 30 * time.Second,
 			}}); err != nil {
@@ -311,7 +331,7 @@ func Register(r *testv1.Registry) {
 				},
 				ExpectOutput: []string{
 					fmt.Sprintf("llm-codex> %s", listCmd),
-					`DIALTONE> Managed Services:`,
+					`dialtone> Managed Services:`,
 					serviceName,
 					strconv.Itoa(servicePID),
 					`done`,
@@ -390,7 +410,7 @@ func Register(r *testv1.Registry) {
 				},
 				ExpectOutput: []string{
 					`llm-codex> /service-list`,
-					`DIALTONE> Managed Services:`,
+					`dialtone> Managed Services:`,
 					`chrome-dev`,
 					`legion`,
 					`42424`,
@@ -434,7 +454,7 @@ func Register(r *testv1.Registry) {
 			if err := rt.RunTranscript([]support.TranscriptStep{{
 				Send:         "/repl src_v3 help",
 				ExpectRoom:   support.StandardSubtoneRoomPatterns("repl src_v3", ""),
-				ExpectOutput: append([]string{`llm-codex> /repl src_v3 help`}, support.StandardSubtoneOutputPatterns("repl src_v3", "DIALTONE> Subtone for repl src_v3 exited with code 0.")...),
+				ExpectOutput: append([]string{`llm-codex> /repl src_v3 help`}, support.StandardSubtoneOutputPatterns("repl src_v3", "dialtone> Subtone for repl src_v3 exited with code 0.")...),
 				Timeout:      30 * time.Second,
 			}}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("foreground help command failed while background pid %d was active: %w", bgPID, err)
@@ -449,7 +469,7 @@ func Register(r *testv1.Registry) {
 			if err := rt.RunTranscript([]support.TranscriptStep{{
 				Send:         "/ps",
 				ExpectRoom:   []string{`"type":"input"`, `"message":"/ps"`, `"message":"Running Tasks:"`, fmt.Sprintf("%d", bgPID)},
-				ExpectOutput: []string{`DIALTONE> Running Tasks:`, fmt.Sprintf("%d", bgPID)},
+				ExpectOutput: []string{`dialtone> Running Tasks:`, fmt.Sprintf("%d", bgPID)},
 				Timeout:      20 * time.Second,
 			}}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("background pid %d stopped being visible after foreground help: %w", bgPID, err)
@@ -517,7 +537,7 @@ func Register(r *testv1.Registry) {
 			if err := rt.RunTranscript([]support.TranscriptStep{{
 				Send:         stopCmd,
 				ExpectRoom:   []string{fmt.Sprintf(`"message":"%s"`, stopCmd), fmt.Sprintf(`"message":"Stopping subtone-%d."`, bgPID), fmt.Sprintf(`"message":"Stopped subtone-%d."`, bgPID)},
-				ExpectOutput: []string{fmt.Sprintf("llm-codex> %s", stopCmd), fmt.Sprintf("DIALTONE> Stopping subtone-%d.", bgPID), fmt.Sprintf("DIALTONE> Stopped subtone-%d.", bgPID)},
+				ExpectOutput: []string{fmt.Sprintf("llm-codex> %s", stopCmd), fmt.Sprintf("dialtone> Stopping subtone-%d.", bgPID), fmt.Sprintf("dialtone> Stopped subtone-%d.", bgPID)},
 				Timeout:      20 * time.Second,
 			}}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("subtone-stop failed for pid %d: %w", bgPID, err)
@@ -650,7 +670,7 @@ func cleanupManagedSubtones(rt *support.Runtime) error {
 		if err := rt.RunTranscript([]support.TranscriptStep{{
 			Send:         stopCmd,
 			ExpectRoom:   []string{fmt.Sprintf(`"message":"%s"`, stopCmd), fmt.Sprintf(`"message":"Stopping subtone-%d."`, pid), fmt.Sprintf(`"message":"Stopped subtone-%d."`, pid)},
-			ExpectOutput: []string{fmt.Sprintf("llm-codex> %s", stopCmd), fmt.Sprintf("DIALTONE> Stopping subtone-%d.", pid), fmt.Sprintf("DIALTONE> Stopped subtone-%d.", pid)},
+			ExpectOutput: []string{fmt.Sprintf("llm-codex> %s", stopCmd), fmt.Sprintf("dialtone> Stopping subtone-%d.", pid), fmt.Sprintf("dialtone> Stopped subtone-%d.", pid)},
 			Timeout:      20 * time.Second,
 		}}); err != nil {
 			return fmt.Errorf("stop active subtone pid %d: %w", pid, err)
@@ -661,7 +681,7 @@ func cleanupManagedSubtones(rt *support.Runtime) error {
 		if err := rt.RunTranscript([]support.TranscriptStep{{
 			Send:         "/ps",
 			ExpectRoom:   []string{`"type":"input"`, `"message":"/ps"`, `"message":"No running tasks."`},
-			ExpectOutput: []string{`DIALTONE> No running tasks.`},
+			ExpectOutput: []string{`dialtone> No running tasks.`},
 			Timeout:      20 * time.Second,
 		}}); err != nil {
 			return fmt.Errorf("verify no running tasks after cleanup: %w", err)

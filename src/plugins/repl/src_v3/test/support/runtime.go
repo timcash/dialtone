@@ -420,13 +420,13 @@ func (rt *Runtime) emitStartupDialog(name string) error {
 	if rt == nil || rt.startupLogged {
 		return nil
 	}
-	name = strings.TrimSpace(name)
-	if name == "" {
-		name = DefaultPromptName()
-	}
 	cfgPath := filepath.Join(rt.RepoRoot, "env", "dialtone.json")
+	roomName := strings.TrimSpace(rt.Room)
+	if roomName == "" {
+		roomName = "index"
+	}
 	lines := []string{
-		fmt.Sprintf("Shared REPL session ready for %s in room %s.", name, strings.TrimSpace(rt.Room)),
+		fmt.Sprintf("Shared REPL session ready on topic %s.", roomName),
 		"Checking required files.",
 		describePathLine("repo root", rt.RepoRoot),
 		describePathLine("src/dev.go", filepath.Join(rt.SrcRoot, "dev.go")),
@@ -1118,10 +1118,10 @@ func StandardSubtoneOutputPatterns(cmdName string, exitPattern string) []string 
 		exitPattern = fmt.Sprintf("Subtone for %s exited with code 0.", cmdName)
 	}
 	patterns := []string{
-		fmt.Sprintf("DIALTONE> Request received. Spawning subtone for %s", cmdName),
-		"DIALTONE> Subtone started as pid ",
-		"DIALTONE> Subtone room: subtone-",
-		"DIALTONE> Subtone log file: ",
+		fmt.Sprintf("dialtone> Request received. Spawning subtone for %s", cmdName),
+		"dialtone> Subtone started as pid ",
+		"dialtone> Subtone room: subtone-",
+		"dialtone> Subtone log file: ",
 	}
 	if exitPattern != "" {
 		patterns = append(patterns, exitPattern)
@@ -1138,7 +1138,7 @@ func StandardTaskRoomPatterns(exitPattern string) []string {
 		`"scope":"index"`,
 		`Request received.`,
 		`Task queued as task-`,
-		`Task room: task.task-`,
+		`Task topic: task.task-`,
 		`Task task-`,
 		`assigned pid `,
 		`Task log: `,
@@ -1155,12 +1155,12 @@ func StandardTaskOutputPatterns(exitPattern string) []string {
 		exitPattern = "exited with code 0."
 	}
 	patterns := []string{
-		`DIALTONE> Request received.`,
-		`DIALTONE> Task queued as task-`,
-		`DIALTONE> Task room: task.task-`,
-		`DIALTONE> Task task-`,
+		`dialtone> Request received.`,
+		`dialtone> Task queued as task-`,
+		`dialtone> Task topic: task.task-`,
+		`dialtone> Task task-`,
 		`assigned pid `,
-		`DIALTONE> Task log: `,
+		`dialtone> Task log: `,
 	}
 	if exitPattern != "" {
 		patterns = append(patterns, exitPattern)
@@ -1177,6 +1177,17 @@ func StandardCommandRoomPatternGroups(cmdName string, subtoneExitPattern string,
 func StandardCommandOutputPatternGroups(cmdName string, subtoneExitPattern string, taskExitPattern string) [][]string {
 	return [][]string{
 		StandardTaskOutputPatterns(taskExitPattern),
+	}
+}
+
+func StandardShellTaskOutputPatterns() []string {
+	return []string{
+		`dialtone> Request received.`,
+		`dialtone> Task queued as task-`,
+		`dialtone> Task topic: task.task-`,
+		`dialtone> Task log: `,
+		`dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-`,
+		` --lines 10`,
 	}
 }
 
@@ -1223,7 +1234,7 @@ func ParseWorkLogPath(output string) (string, error) {
 	lines := strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		const prefix = "DIALTONE> Task log: "
+		const prefix = "dialtone> Task log: "
 		if strings.HasPrefix(line, prefix) {
 			path := strings.TrimSpace(strings.TrimPrefix(line, prefix))
 			if path != "" {
@@ -1350,8 +1361,8 @@ func shouldPrintTranscriptLine(line string) bool {
 	if line == "" {
 		return false
 	}
-	return strings.HasPrefix(line, "DIALTONE>") ||
-		strings.HasPrefix(line, "DIALTONE:") ||
+	return strings.HasPrefix(line, "dialtone>") ||
+		strings.HasPrefix(line, "dialtone:") ||
 		isPromptLine(line)
 }
 

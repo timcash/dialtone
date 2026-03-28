@@ -475,7 +475,7 @@ func printTaskSnapshot(item taskRegistryItem) {
 	logs.Raw("PID: %d", item.PID)
 	logs.Raw("State: %s", taskStateToken(item.Active))
 	logs.Raw("Mode: %s", mode)
-	logs.Raw("Room: %s", room)
+	logs.Raw("Topic: %s", room)
 	logs.Raw("Command: %s", command)
 	logs.Raw("Started: %s", started)
 	logs.Raw("Updated: %s", updated)

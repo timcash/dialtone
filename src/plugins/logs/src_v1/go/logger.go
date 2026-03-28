@@ -52,20 +52,34 @@ func formatPlainWithSource(level, source, message string, isTest bool) string {
 	return fmt.Sprintf("[T+%04ds|%s|%s] %s", elapsed, strings.ToUpper(level), src, message)
 }
 
-func formatSystemMessage(message string) string {
+func FormatDialtoneMessage(prefix, message string) string {
 	message = strings.TrimSpace(message)
 	if IsREPLContext() {
 		return message
 	}
-	return "DIALTONE> " + message
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		prefix = "dialtone"
+	} else if strings.HasPrefix(strings.ToUpper(prefix), "DIALTONE") {
+		prefix = "dialtone" + prefix[len("DIALTONE"):]
+	}
+	return prefix + "> " + message
+}
+
+func FormatSystemMessage(message string) string {
+	return FormatDialtoneMessage("dialtone", message)
+}
+
+func FormatUserMessage(message string) string {
+	return FormatDialtoneMessage("dialtone", message)
+}
+
+func formatSystemMessage(message string) string {
+	return FormatSystemMessage(message)
 }
 
 func formatUserMessage(message string) string {
-	message = strings.TrimSpace(message)
-	if IsREPLContext() {
-		return message
-	}
-	return "DIALTONE> " + message
+	return FormatUserMessage(message)
 }
 
 func TestPrefix(line string) string {

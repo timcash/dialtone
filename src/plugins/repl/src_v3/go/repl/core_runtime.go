@@ -90,28 +90,28 @@ func SetHooksForTest(h Hooks) func() {
 }
 
 type BusFrame struct {
-	Type       string   `json:"type"`
-	Scope      string   `json:"scope,omitempty"`
-	Kind       string   `json:"kind,omitempty"`
-	From       string   `json:"from,omitempty"`
-	Target     string   `json:"target,omitempty"`
-	Room       string   `json:"room,omitempty"`
-	Version    string   `json:"version,omitempty"`
-	OS         string   `json:"os,omitempty"`
-	Arch       string   `json:"arch,omitempty"`
-	ReplVer    string   `json:"repl_version,omitempty"`
-	DaemonVer  string   `json:"daemon_version,omitempty"`
-	Command    string   `json:"command,omitempty"`
-	Args       []string `json:"args,omitempty"`
-	Prefix     string   `json:"prefix,omitempty"`
-	Message    string   `json:"message,omitempty"`
-	TaskID     string   `json:"task_id,omitempty"`
-	PID        int      `json:"pid,omitempty"`
-	LogPath    string   `json:"log_path,omitempty"`
-	ExitCode   int      `json:"exit_code,omitempty"`
-	Ready      bool     `json:"ready,omitempty"`
-	ServerID   string   `json:"server_id,omitempty"`
-	Timestamp  string   `json:"timestamp"`
+	Type      string   `json:"type"`
+	Scope     string   `json:"scope,omitempty"`
+	Kind      string   `json:"kind,omitempty"`
+	From      string   `json:"from,omitempty"`
+	Target    string   `json:"target,omitempty"`
+	Room      string   `json:"room,omitempty"`
+	Version   string   `json:"version,omitempty"`
+	OS        string   `json:"os,omitempty"`
+	Arch      string   `json:"arch,omitempty"`
+	ReplVer   string   `json:"repl_version,omitempty"`
+	DaemonVer string   `json:"daemon_version,omitempty"`
+	Command   string   `json:"command,omitempty"`
+	Args      []string `json:"args,omitempty"`
+	Prefix    string   `json:"prefix,omitempty"`
+	Message   string   `json:"message,omitempty"`
+	TaskID    string   `json:"task_id,omitempty"`
+	PID       int      `json:"pid,omitempty"`
+	LogPath   string   `json:"log_path,omitempty"`
+	ExitCode  int      `json:"exit_code,omitempty"`
+	Ready     bool     `json:"ready,omitempty"`
+	ServerID  string   `json:"server_id,omitempty"`
+	Timestamp string   `json:"timestamp"`
 }
 
 type HostStatus struct {
@@ -245,7 +245,7 @@ func RunLeader(args []string) error {
 	defer stopTSNet()
 
 	// Publish initial presence line to NATS so every connected client sees it.
-	publishRoom(roomName, BusFrame{Type: frameTypeServer, Message: fmt.Sprintf("Leader online on %s (subject=%s nats=%s)", h, replRoomSubject(roomName), usedURL)})
+	publishRoom(roomName, BusFrame{Type: frameTypeServer, Message: fmt.Sprintf("Leader online on %s (topic=%s nats=%s)", h, replTopicSubjectLabel(roomName), usedURL)})
 	logs.Info("REPL host serving: hostname=%s room=%s cmd_subject=%s nats=%s", h, roomName, commandSubject, usedURL)
 	var tsnetListener net.Listener
 	if tsRuntime != nil {
@@ -355,7 +355,7 @@ func RunLeader(args []string) error {
 					return
 				}
 				if targetRoom == currentRoom {
-					publishRoom(currentRoom, BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("%s is already in room %s", sender, targetRoom)})
+					publishDialtoneIndexLine(publishRoom, currentRoom, "status", fmt.Sprintf("%s is already in room %s", sender, targetRoom))
 					return
 				}
 				publishRoom(currentRoom, BusFrame{Type: frameTypeLeft, From: sender})
@@ -373,7 +373,7 @@ func RunLeader(args []string) error {
 			go func(in BusFrame) {
 				runMu.Lock()
 				defer runMu.Unlock()
-					executeCommand(strings.TrimSpace(in.Message), currentRoom, h, tasks, services, func(subject string, payload []byte) error {
+				executeCommand(strings.TrimSpace(in.Message), currentRoom, h, tasks, services, func(subject string, payload []byte) error {
 					return nc.Publish(subject, payload)
 				}, func(frame BusFrame) {
 					publishScopedFrame(currentRoom, frame)
@@ -468,7 +468,7 @@ func RunLeader(args []string) error {
 			}
 			publishRoom(targetRoom, BusFrame{
 				Type:    frameTypeServer,
-				Message: fmt.Sprintf("Leader online on %s (subject=%s nats=%s)", h, replRoomSubject(roomName), usedURL),
+				Message: fmt.Sprintf("Leader online on %s (topic=%s nats=%s)", h, replTopicSubjectLabel(roomName), usedURL),
 			})
 			if strings.TrimSpace(tsnetStatusMessage) != "" {
 				publishRoom(targetRoom, BusFrame{Type: frameTypeServer, Message: tsnetStatusMessage})
@@ -725,7 +725,7 @@ func RunJoin(args []string) error {
 				Type:    frameTypeLine,
 				Scope:   "index",
 				Kind:    "status",
-				Message: fmt.Sprintf("Connected to %s via %s", targetSubj, natsAddr),
+				Message: fmt.Sprintf("Connected to %s via %s", replTopicSubjectLabel(targetRoom), natsAddr),
 			})
 		}
 		return nil
@@ -757,7 +757,7 @@ func RunJoin(args []string) error {
 		Type:    frameTypeLine,
 		Scope:   "index",
 		Kind:    "status",
-		Message: fmt.Sprintf("Connected to %s via %s", currentSubj, natsAddr),
+		Message: fmt.Sprintf("Connected to %s via %s", replTopicSubjectLabel(currentRoom), natsAddr),
 	})
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -1035,15 +1035,15 @@ func runLocalSession(in io.Reader, out io.Writer, promptName string, logFn func(
 		logFn("REPL", line)
 	}
 
-	say(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: "Virtual Librarian online."})
-	say(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: "Type 'help' for commands, or 'exit' to quit."})
+	emitDialtoneIndexLine(say, "status", "Virtual Librarian online.")
+	emitDialtoneIndexLine(say, "status", "Type 'help' for commands, or 'exit' to quit.")
 
 	scanner := bufio.NewScanner(in)
 	tty := isInputTTY(in)
 	for {
 		fmt.Fprintf(out, "%s> ", promptName)
 		if !scanner.Scan() {
-			say(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: "Session closed."})
+			emitDialtoneIndexLine(say, "status", "Session closed.")
 			break
 		}
 		line := strings.TrimSpace(scanner.Text())
@@ -1055,7 +1055,7 @@ func runLocalSession(in io.Reader, out io.Writer, promptName string, logFn func(
 		}
 		logFn("REPL", fmt.Sprintf("%s> %s", promptName, line))
 		if line == "exit" || line == "quit" {
-			say(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: "Goodbye."})
+			emitDialtoneIndexLine(say, "status", "Goodbye.")
 			break
 		}
 		executeCommand(line, defaultRoom, "", nil, nil, nil, say)
@@ -1111,34 +1111,34 @@ func executeCommand(
 	if args[0] == "subtone-stop" || args[0] == "subtone-kill" {
 		pid, err := parseManagedPIDCommand(args)
 		if err != nil {
-			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: err.Error()})
+			emitDialtoneIndexLine(emit, "status", err.Error())
 			return
 		}
-		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("Stopping subtone-%d.", pid)})
+		emitDialtoneIndexLine(emit, "status", fmt.Sprintf("Stopping subtone-%d.", pid))
 		if err := killManagedProcessFn(pid); err != nil {
-			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("Failed to stop subtone-%d: %v", pid, err)})
+			emitDialtoneIndexLine(emit, "status", fmt.Sprintf("Failed to stop subtone-%d: %v", pid, err))
 			return
 		}
 		if registry != nil {
 			registry.Exited(pid, -1)
 		}
-		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("Stopped subtone-%d.", pid)})
+		emitDialtoneIndexLine(emit, "status", fmt.Sprintf("Stopped subtone-%d.", pid))
 		return
 	}
 	if args[0] == "service-stop" {
 		name, err := parseServiceNameCommand(args, "service-stop")
 		if err != nil {
-			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: err.Error()})
+			emitDialtoneIndexLine(emit, "status", err.Error())
 			return
 		}
 		item, ok := services.ActiveByName(name)
 		if !ok || item.PID <= 0 {
-			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("No active service named %s.", name)})
+			emitDialtoneIndexLine(emit, "status", fmt.Sprintf("No active service named %s.", name))
 			return
 		}
-		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("Stopping service %s (pid %d).", name, item.PID)})
+		emitDialtoneIndexLine(emit, "status", fmt.Sprintf("Stopping service %s (pid %d).", name, item.PID))
 		if err := killManagedProcessFn(item.PID); err != nil {
-			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("Failed to stop service %s: %v", name, err)})
+			emitDialtoneIndexLine(emit, "status", fmt.Sprintf("Failed to stop service %s: %v", name, err))
 			return
 		}
 		if registry != nil {
@@ -1159,20 +1159,20 @@ func executeCommand(
 				_ = publish(heartbeatSubject(hostName, "service", name, item.PID), payload)
 			}
 		}
-		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("Stopped service %s.", name)})
+		emitDialtoneIndexLine(emit, "status", fmt.Sprintf("Stopped service %s.", name))
 		return
 	}
 	if strings.HasPrefix(line, "kill ") {
 		pidText := strings.TrimSpace(strings.TrimPrefix(line, "kill"))
 		pid := 0
 		if _, err := fmt.Sscanf(pidText, "%d", &pid); err != nil || pid <= 0 {
-			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: "Usage: kill <pid>"})
+			emitDialtoneIndexLine(emit, "status", "Usage: kill <pid>")
 			return
 		}
 		if err := killManagedProcessFn(pid); err != nil {
-			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("Failed to kill process %d: %v", pid, err)})
+			emitDialtoneIndexLine(emit, "status", fmt.Sprintf("Failed to kill process %d: %v", pid, err))
 		} else {
-			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("Killed managed process %d.", pid)})
+			emitDialtoneIndexLine(emit, "status", fmt.Sprintf("Killed managed process %d.", pid))
 		}
 		return
 	}
@@ -1180,18 +1180,18 @@ func executeCommand(
 	if args[0] == "service-start" {
 		name, cmdArgs, err := parseServiceStartCommand(args)
 		if err != nil {
-			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: err.Error()})
+			emitDialtoneIndexLine(emit, "status", err.Error())
 			return
 		}
 		if item, ok := services.ActiveByName(name); ok && item.PID > 0 {
-			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("Service %s is already running as pid %d.", name, item.PID)})
+			emitDialtoneIndexLine(emit, "status", fmt.Sprintf("Service %s is already running as pid %d.", name, item.PID))
 			return
 		}
 		serviceName = name
 		args = cmdArgs
 	}
 	if err := validateSingleCommandTokens(args); err != nil {
-		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "error", Message: err.Error()})
+		emitDialtoneIndexLine(emit, "error", err.Error())
 		return
 	}
 	isBackground := false
@@ -1209,7 +1209,7 @@ func executeCommand(
 	taskRoom := taskRoomName(taskID)
 	taskLog, err := newTaskLogWriter(taskID, args)
 	if err != nil {
-		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "error", TaskID: taskID, Message: fmt.Sprintf("Task %s could not create its log: %v", taskID, err)})
+		emitDialtoneIndexFrame(emit, BusFrame{Kind: "error", TaskID: taskID, Message: fmt.Sprintf("Task %s could not create its log: %v", taskID, err)})
 		return
 	}
 	closeTaskLog := sync.OnceFunc(func() {
@@ -1227,30 +1227,11 @@ func executeCommand(
 		}
 		emit(frame)
 	}
-	emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "lifecycle", TaskID: taskID, Message: "Request received."})
-	emit(BusFrame{
-		Type:    frameTypeLine,
-		Scope:   "index",
-		Kind:    "lifecycle",
-		TaskID:  taskID,
-		Message: fmt.Sprintf("Task queued as %s.", taskID),
-	})
-	emit(BusFrame{
-		Type:    frameTypeLine,
-		Scope:   "index",
-		Kind:    "lifecycle",
-		TaskID:  taskID,
-		Message: fmt.Sprintf("Task room: %s", taskRoom),
-	})
-	emit(BusFrame{
-		Type:    frameTypeLine,
-		Scope:   "index",
-		Kind:    "lifecycle",
-		TaskID:  taskID,
-		LogPath: taskLog.LogPath,
-		Message: fmt.Sprintf("Task log: %s", taskLog.LogPath),
-	})
-	taskLog.LogLifecycle("task room=%s mode=%s service=%s", taskRoom, mode, strings.TrimSpace(serviceName))
+	emitDialtoneIndexFrame(emit, BusFrame{Kind: "lifecycle", TaskID: taskID, Message: "Request received."})
+	emitDialtoneIndexFrame(emit, BusFrame{Kind: "lifecycle", TaskID: taskID, Message: fmt.Sprintf("Task queued as %s.", taskID)})
+	emitDialtoneIndexFrame(emit, BusFrame{Kind: "lifecycle", TaskID: taskID, Message: fmt.Sprintf("Task topic: %s", taskRoom)})
+	emitDialtoneIndexFrame(emit, BusFrame{Kind: "lifecycle", TaskID: taskID, LogPath: taskLog.LogPath, Message: fmt.Sprintf("Task log: %s", taskLog.LogPath)})
+	taskLog.LogLifecycle("task topic=%s mode=%s service=%s", taskRoom, mode, strings.TrimSpace(serviceName))
 	emitTaskFrame(BusFrame{Kind: "lifecycle", Message: fmt.Sprintf("Task queued as %s.", taskID)})
 	emitTaskFrame(BusFrame{Kind: "lifecycle", LogPath: taskLog.LogPath, Message: fmt.Sprintf("Task log: %s", taskLog.LogPath)})
 	heartbeatInterval := 5 * time.Second
@@ -1268,7 +1249,7 @@ func executeCommand(
 			return
 		}
 		if promoted, promotedOK := promotedIndexMessage(text); promotedOK {
-			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", TaskID: taskID, PID: pid, Message: promoted})
+			emitDialtoneIndexFrame(emit, BusFrame{Kind: "status", TaskID: taskID, PID: pid, Message: promoted})
 			return
 		}
 		if stderr {
@@ -1314,13 +1295,13 @@ func executeCommand(
 						services.Heartbeat(serviceName)
 					}
 					emit(BusFrame{
-						Type:       frameTypeLine,
-						Scope:      "task",
-						Kind:       "lifecycle",
-						Room:       taskRoom,
-						TaskID:     taskID,
-						PID:        pid,
-						Message:    fmt.Sprintf("Heartbeat: running for %s", uptime),
+						Type:    frameTypeLine,
+						Scope:   "task",
+						Kind:    "lifecycle",
+						Room:    taskRoom,
+						TaskID:  taskID,
+						PID:     pid,
+						Message: fmt.Sprintf("Heartbeat: running for %s", uptime),
 					})
 					publishHeartbeat(proc.SubtoneEvent{
 						PID:       pid,
@@ -1348,39 +1329,33 @@ func executeCommand(
 				if serviceName != "" {
 					registryRoom = serviceRoom
 				}
-					registry.Started(taskID, registryRoom, mode, taskLog.LogPath, ev)
+				registry.Started(taskID, registryRoom, mode, taskLog.LogPath, ev)
 			}
 			if services != nil && serviceName != "" {
 				services.Started(serviceName, serviceRoom, ev)
 			}
-			emit(BusFrame{
-				Type:       frameTypeLine,
-				Scope:      "index",
-				Kind:       "lifecycle",
-				TaskID:     taskID,
-				PID:        ev.PID,
-				Message:    fmt.Sprintf("Task %s assigned pid %d.", taskID, ev.PID),
+			emitDialtoneIndexFrame(emit, BusFrame{
+				Kind:    "lifecycle",
+				TaskID:  taskID,
+				PID:     ev.PID,
+				Message: fmt.Sprintf("Task %s assigned pid %d.", taskID, ev.PID),
 			})
 			if strings.TrimSpace(ev.LogPath) != "" {
 				taskLog.LogStatus("worker log=%s", strings.TrimSpace(ev.LogPath))
 			}
 			if serviceName != "" {
-				emit(BusFrame{
-					Type:       frameTypeLine,
-					Scope:      "index",
-					Kind:       "lifecycle",
-					TaskID:     taskID,
-					PID:        ev.PID,
-					Message:    fmt.Sprintf("Service %s is running.", serviceName),
+				emitDialtoneIndexFrame(emit, BusFrame{
+					Kind:    "lifecycle",
+					TaskID:  taskID,
+					PID:     ev.PID,
+					Message: fmt.Sprintf("Service %s is running.", serviceName),
 				})
 			} else if isBackground {
-				emit(BusFrame{
-					Type:       frameTypeLine,
-					Scope:      "index",
-					Kind:       "lifecycle",
-					TaskID:     taskID,
-					PID:        ev.PID,
-					Message:    fmt.Sprintf("Task %s is running in background.", taskID),
+				emitDialtoneIndexFrame(emit, BusFrame{
+					Kind:    "lifecycle",
+					TaskID:  taskID,
+					PID:     ev.PID,
+					Message: fmt.Sprintf("Task %s is running in background.", taskID),
 				})
 			}
 			emitTaskFrame(BusFrame{Kind: "lifecycle", PID: ev.PID, Message: fmt.Sprintf("Task %s assigned pid %d.", taskID, ev.PID)})
@@ -1403,14 +1378,12 @@ func executeCommand(
 				}
 				publishHeartbeat(ev, heartbeatStateToken(false, ev.ExitCode), ev.ExitCode)
 				taskLog.LogLifecycle("exited pid=%d code=%d", ev.PID, ev.ExitCode)
-				emit(BusFrame{
-					Type:       frameTypeLine,
-					Scope:      "index",
-					Kind:       "lifecycle",
-					TaskID:     taskID,
-					PID:        ev.PID,
-					ExitCode:   ev.ExitCode,
-					Message:    taskExitMessage(taskID, ev.ExitCode),
+				emitDialtoneIndexFrame(emit, BusFrame{
+					Kind:     "lifecycle",
+					TaskID:   taskID,
+					PID:      ev.PID,
+					ExitCode: ev.ExitCode,
+					Message:  taskExitMessage(taskID, ev.ExitCode),
 				})
 				emitTaskFrame(BusFrame{Kind: "lifecycle", PID: ev.PID, ExitCode: ev.ExitCode, Message: taskExitMessage(taskID, ev.ExitCode)})
 				closeTaskLog()
@@ -1418,10 +1391,10 @@ func executeCommand(
 			}
 			if line := strings.TrimSpace(ev.Line); line != "" {
 				taskLog.LogError(fmt.Sprintf("failed to start: %s", line))
-				emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "error", TaskID: taskID, Message: fmt.Sprintf("Task %s failed to start: %s", taskID, line)})
+				emitDialtoneIndexFrame(emit, BusFrame{Kind: "error", TaskID: taskID, Message: fmt.Sprintf("Task %s failed to start: %s", taskID, line)})
 			} else {
 				taskLog.LogError("failed to start")
-				emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "error", TaskID: taskID, Message: fmt.Sprintf("Task %s failed to start.", taskID)})
+				emitDialtoneIndexFrame(emit, BusFrame{Kind: "error", TaskID: taskID, Message: fmt.Sprintf("Task %s failed to start.", taskID)})
 			}
 			emitTaskFrame(BusFrame{Kind: "error", Message: fmt.Sprintf("Task %s failed to start.", taskID)})
 			closeTaskLog()
@@ -1554,7 +1527,7 @@ func printHelp(emit func(BusFrame)) {
 		"Queue any dialtone command as a task",
 	}
 	for _, line := range content {
-		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: line})
+		emitDialtoneIndexLine(emit, "status", line)
 	}
 }
 
@@ -1570,18 +1543,18 @@ func printManagedProcesses(room string, registry *taskRegistry, emit func(BusFra
 	if len(items) == 0 {
 		procs := listManagedFn()
 		if len(procs) == 0 {
-			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: "No running tasks."})
+			emitDialtoneIndexLine(emit, "status", "No running tasks.")
 			return
 		}
-		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: "Running Tasks:"})
-		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("%-28s %-8s %-8s %-12s %-8s %-8s %s", "TASK ID", "PID", "UPTIME", "MODE", "CPU%", "PORTS", "COMMAND")})
+		emitDialtoneIndexLine(emit, "status", "Running Tasks:")
+		emitDialtoneIndexLine(emit, "status", fmt.Sprintf("%-28s %-8s %-8s %-12s %-8s %-8s %s", "TASK ID", "PID", "UPTIME", "MODE", "CPU%", "PORTS", "COMMAND"))
 		for _, p := range procs {
-			emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: fmt.Sprintf("%-28s %-8d %-8s %-12s %-8.1f %-8d %s", "-", p.PID, p.StartedAgo, "unknown", p.CPUPercent, p.PortCount, p.Command)})
+			emitDialtoneIndexLine(emit, "status", fmt.Sprintf("%-28s %-8d %-8s %-12s %-8.1f %-8d %s", "-", p.PID, p.StartedAgo, "unknown", p.CPUPercent, p.PortCount, p.Command))
 		}
 		return
 	}
-	emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Room: sanitizeRoom(room), Message: "Running Tasks:"})
-	emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Room: sanitizeRoom(room), Message: fmt.Sprintf("%-28s %-8s %-8s %-12s %-8s %-8s %s", "TASK ID", "PID", "UPTIME", "MODE", "CPU%", "PORTS", "COMMAND")})
+	emitDialtoneIndexFrame(emit, BusFrame{Kind: "status", Room: room, Message: "Running Tasks:"})
+	emitDialtoneIndexFrame(emit, BusFrame{Kind: "status", Room: room, Message: fmt.Sprintf("%-28s %-8s %-8s %-12s %-8s %-8s %s", "TASK ID", "PID", "UPTIME", "MODE", "CPU%", "PORTS", "COMMAND")})
 	for _, item := range items {
 		uptime := strings.TrimSpace(item.StartedAgo)
 		if uptime == "" {
@@ -1595,11 +1568,9 @@ func printManagedProcesses(room string, registry *taskRegistry, emit func(BusFra
 		if command == "" {
 			command = "-"
 		}
-		emit(BusFrame{
-			Type:    frameTypeLine,
-			Scope:   "index",
+		emitDialtoneIndexFrame(emit, BusFrame{
 			Kind:    "status",
-			Room:    sanitizeRoom(room),
+			Room:    room,
 			LogPath: strings.TrimSpace(item.LogPath),
 			Message: fmt.Sprintf("%-28s %-8d %-8s %-12s %-8.1f %-8d %s", taskID, item.PID, uptime, defaultManagedMode(item.Mode), item.CPUPercent, item.PortCount, command),
 		})
@@ -1612,11 +1583,11 @@ func printManagedServices(room string, registry *serviceRegistry, emit func(BusF
 		items = registry.Snapshot(0, listManagedFn())
 	}
 	if len(items) == 0 {
-		emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: "No managed services."})
+		emitDialtoneIndexLine(emit, "status", "No managed services.")
 		return
 	}
-	emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Room: sanitizeRoom(room), Message: "Managed Services:"})
-	emit(BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Room: sanitizeRoom(room), Message: fmt.Sprintf("%-16s %-10s %-8s %-24s %-8s %-12s %s", "NAME", "HOST", "PID", "UPDATED", "STATE", "MODE", "COMMAND")})
+	emitDialtoneIndexFrame(emit, BusFrame{Kind: "status", Room: room, Message: "Managed Services:"})
+	emitDialtoneIndexFrame(emit, BusFrame{Kind: "status", Room: room, Message: fmt.Sprintf("%-16s %-10s %-8s %-24s %-8s %-12s %s", "NAME", "HOST", "PID", "UPDATED", "STATE", "MODE", "COMMAND")})
 	for _, item := range items {
 		command := strings.TrimSpace(item.Command)
 		if command == "" {
@@ -1637,11 +1608,9 @@ func printManagedServices(room string, registry *serviceRegistry, emit func(BusF
 		if host == "" {
 			host = "local"
 		}
-		emit(BusFrame{
-			Type:    frameTypeLine,
-			Scope:   "index",
+		emitDialtoneIndexFrame(emit, BusFrame{
 			Kind:    "status",
-			Room:    sanitizeRoom(room),
+			Room:    room,
 			LogPath: strings.TrimSpace(item.LogPath),
 			Message: fmt.Sprintf("%-16s %-10s %-8d %-24s %-8s %-12s %s", item.Name, host, item.PID, updated, state, defaultManagedMode(item.Mode), command),
 		})
@@ -1797,12 +1766,12 @@ func publishPresenceReport(
 	publishRoom func(targetRoom string, f BusFrame),
 ) {
 	if len(rows) == 0 {
-		publishRoom(room, BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: "No connected users."})
+		publishDialtoneIndexLine(publishRoom, room, "status", "No connected users.")
 		return
 	}
 	switch mode {
 	case "versions":
-		publishRoom(room, BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: "Connected versions:"})
+		publishDialtoneIndexLine(publishRoom, room, "status", "Connected versions:")
 		for _, row := range rows {
 			if row.Kind == "daemon" {
 				daemonVer := strings.TrimSpace(row.DaemonVersion)
@@ -1813,10 +1782,8 @@ func publishPresenceReport(
 				if replVer == "" {
 					replVer = "unknown"
 				}
-				publishRoom(room, BusFrame{
-					Type:  frameTypeLine,
-					Scope: "index",
-					Kind:  "status",
+				publishDialtoneIndexFrame(publishRoom, room, BusFrame{
+					Kind: "status",
 					Message: fmt.Sprintf(
 						"- [daemon] %s daemon=%s repl=%s room=%s os=%s arch=%s",
 						row.Name,
@@ -1833,10 +1800,8 @@ func publishPresenceReport(
 			if version == "" {
 				version = "unknown"
 			}
-			publishRoom(room, BusFrame{
-				Type:  frameTypeLine,
-				Scope: "index",
-				Kind:  "status",
+			publishDialtoneIndexFrame(publishRoom, room, BusFrame{
+				Kind: "status",
 				Message: fmt.Sprintf(
 					"- [client] %s repl=%s room=%s os=%s arch=%s",
 					row.Name,
@@ -1848,7 +1813,7 @@ func publishPresenceReport(
 			})
 		}
 	default:
-		publishRoom(room, BusFrame{Type: frameTypeLine, Scope: "index", Kind: "status", Message: "Connected sessions:"})
+		publishDialtoneIndexLine(publishRoom, room, "status", "Connected sessions:")
 		for _, row := range rows {
 			if row.Kind == "daemon" {
 				daemonVer := strings.TrimSpace(row.DaemonVersion)
@@ -1859,10 +1824,8 @@ func publishPresenceReport(
 				if replVer == "" {
 					replVer = "unknown"
 				}
-				publishRoom(room, BusFrame{
-					Type:  frameTypeLine,
-					Scope: "index",
-					Kind:  "status",
+				publishDialtoneIndexFrame(publishRoom, room, BusFrame{
+					Kind: "status",
 					Message: fmt.Sprintf(
 						"- [daemon] %s room=%s daemon=%s repl=%s os=%s arch=%s",
 						row.Name,
@@ -1879,10 +1842,8 @@ func publishPresenceReport(
 			if version == "" {
 				version = "unknown"
 			}
-			publishRoom(room, BusFrame{
-				Type:  frameTypeLine,
-				Scope: "index",
-				Kind:  "status",
+			publishDialtoneIndexFrame(publishRoom, room, BusFrame{
+				Kind: "status",
 				Message: fmt.Sprintf(
 					"- [client] %s room=%s repl=%s os=%s arch=%s",
 					row.Name,
@@ -1934,6 +1895,10 @@ func sanitizeRoom(room string) string {
 
 func replRoomSubject(room string) string {
 	return "repl.room." + sanitizeRoom(room)
+}
+
+func replTopicSubjectLabel(room string) string {
+	return "repl.topic." + sanitizeRoom(room)
 }
 
 func replSubtoneSubject(pid int) string {
@@ -2109,6 +2074,32 @@ func promotedIndexMessage(line string) (string, bool) {
 	return text, true
 }
 
+// Keep the local names for readability in this file, but route all behavior
+// through the canonical helpers in dialtone_output.go.
+func dialtoneIndexFrame(frame BusFrame) BusFrame {
+	return DialtoneIndexFrame(frame)
+}
+
+func emitDialtoneIndexFrame(emit func(BusFrame), frame BusFrame) {
+	EmitDialtoneIndexFrame(emit, frame)
+}
+
+func emitDialtoneIndexLine(emit func(BusFrame), kind, message string) {
+	EmitDialtoneIndexLine(emit, kind, message)
+}
+
+func publishDialtoneIndexFrame(publishRoom func(string, BusFrame), room string, frame BusFrame) {
+	PublishDialtoneIndexFrame(publishRoom, room, frame)
+}
+
+func publishDialtoneIndexLine(publishRoom func(string, BusFrame), room, kind, message string) {
+	PublishDialtoneIndexLine(publishRoom, room, kind, message)
+}
+
+func writeDialtoneLine(w io.Writer, prefix, message string) {
+	WriteDialtoneLine(w, prefix, message)
+}
+
 func printFrame(w io.Writer, frame BusFrame) {
 	switch frame.Type {
 	case frameTypeInput:
@@ -2122,7 +2113,7 @@ func printFrame(w io.Writer, frame BusFrame) {
 		if name == "" {
 			name = "USER"
 		}
-		fmt.Fprintf(w, "DIALTONE> %s: %s\n", name, strings.TrimSpace(frame.Message))
+		writeDialtoneLine(w, "DIALTONE", fmt.Sprintf("%s: %s", name, strings.TrimSpace(frame.Message)))
 	case frameTypeLine:
 		prefix := strings.TrimSpace(frame.Prefix)
 		if prefix == "" && frame.Scope == "subtone" && frame.PID > 0 {
@@ -2135,9 +2126,9 @@ func printFrame(w io.Writer, frame BusFrame) {
 		if frame.Kind == "error" && text != "" && !strings.HasPrefix(text, "[ERROR]") {
 			text = "[ERROR] " + text
 		}
-		fmt.Fprintf(w, "%s> %s\n", prefix, text)
+		writeDialtoneLine(w, prefix, text)
 	case frameTypeServer:
-		fmt.Fprintf(w, "DIALTONE> %s\n", strings.TrimSpace(frame.Message))
+		writeDialtoneLine(w, "DIALTONE", strings.TrimSpace(frame.Message))
 	case frameTypeJoin:
 		name := normalizePromptName(frame.From)
 		if name == "" {
@@ -2147,11 +2138,11 @@ func printFrame(w io.Writer, frame BusFrame) {
 			name = "unknown"
 		}
 		if strings.TrimSpace(frame.Room) == "" {
-			fmt.Fprintf(w, "DIALTONE> %s joined.\n", name)
+			writeDialtoneLine(w, "DIALTONE", fmt.Sprintf("%s joined.", name))
 		} else if strings.TrimSpace(frame.Version) == "" {
-			fmt.Fprintf(w, "DIALTONE> %s joined room %s.\n", name, sanitizeRoom(frame.Room))
+			writeDialtoneLine(w, "DIALTONE", fmt.Sprintf("%s joined topic %s.", name, sanitizeRoom(frame.Room)))
 		} else {
-			fmt.Fprintf(w, "DIALTONE> %s joined room %s (version=%s).\n", name, sanitizeRoom(frame.Room), strings.TrimSpace(frame.Version))
+			writeDialtoneLine(w, "DIALTONE", fmt.Sprintf("%s joined topic %s (version=%s).", name, sanitizeRoom(frame.Room), strings.TrimSpace(frame.Version)))
 		}
 	case frameTypeLeft:
 		name := normalizePromptName(frame.From)
@@ -2162,18 +2153,18 @@ func printFrame(w io.Writer, frame BusFrame) {
 			name = "unknown"
 		}
 		if strings.TrimSpace(frame.Room) == "" {
-			fmt.Fprintf(w, "DIALTONE> %s left.\n", name)
+			writeDialtoneLine(w, "DIALTONE", fmt.Sprintf("%s left.", name))
 		} else {
-			fmt.Fprintf(w, "DIALTONE> %s left room %s.\n", name, sanitizeRoom(frame.Room))
+			writeDialtoneLine(w, "DIALTONE", fmt.Sprintf("%s left topic %s.", name, sanitizeRoom(frame.Room)))
 		}
 	case frameTypeControl:
 		text := strings.TrimSpace(frame.Message)
 		if text == "" {
 			text = fmt.Sprintf("%s %s", strings.TrimSpace(frame.Command), strings.TrimSpace(frame.Room))
 		}
-		fmt.Fprintf(w, "DIALTONE> Control: %s\n", strings.TrimSpace(text))
+		writeDialtoneLine(w, "DIALTONE", fmt.Sprintf("Control: %s", strings.TrimSpace(text)))
 	case frameTypeError:
-		fmt.Fprintf(w, "DIALTONE> Error: %s\n", strings.TrimSpace(frame.Message))
+		writeDialtoneLine(w, "DIALTONE", fmt.Sprintf("Error: %s", strings.TrimSpace(frame.Message)))
 	}
 }
 
