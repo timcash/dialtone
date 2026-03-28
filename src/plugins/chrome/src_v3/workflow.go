@@ -11,53 +11,35 @@ func EnsureRemoteServiceByHost(host, role string, deploy bool) (*CommandResponse
 	if err != nil {
 		return nil, err
 	}
-	role = strings.TrimSpace(role)
-	if role == "" {
-		role = defaultRole
-	}
+	role = normalizeRole(role)
 	resp, err := sendRemoteCommand(node, commandRequest{
 		Command: "status",
 		Role:    role,
 	})
-	if err == nil {
+	if err == nil && chromeServiceReady(resp) {
 		return resp, nil
+	}
+	if err == nil {
+		return warmRemoteChromeService(node, role)
 	}
 	if deploy {
 		if err := deployRemoteBinary(node, role, true); err != nil {
 			return nil, err
 		}
-		return sendRemoteCommand(node, commandRequest{
-			Command: "status",
-			Role:    role,
-		})
+		return warmRemoteChromeService(node, role)
 	}
 	if err := startRemoteService(node, role); err != nil {
 		if err := deployRemoteBinary(node, role, true); err != nil {
 			return nil, err
 		}
-		return sendRemoteCommand(node, commandRequest{
-			Command: "status",
-			Role:    role,
-		})
+		return warmRemoteChromeService(node, role)
 	}
-	resp, err = sendRemoteCommand(node, commandRequest{
-		Command: "status",
-		Role:    role,
-	})
-	if err == nil {
-		return resp, nil
-	}
-	if err := deployRemoteBinary(node, role, true); err != nil {
-		return nil, err
-	}
-	return sendRemoteCommand(node, commandRequest{
-		Command: "status",
-		Role:    role,
-	})
+	return warmRemoteChromeService(node, role)
 }
 
 func EnsureServiceByTarget(host, role string, deploy bool) (*CommandResponse, error) {
 	if isLocalHost(host) {
+		role = normalizeRole(role)
 		if deploy {
 			if err := deployTarget(host, role, true); err != nil {
 				return nil, err
@@ -66,10 +48,17 @@ func EnsureServiceByTarget(host, role string, deploy bool) (*CommandResponse, er
 		if err := ensureLocalService(role); err != nil {
 			return nil, err
 		}
-		return sendLocalCommand(commandRequest{
+		resp, err := sendLocalCommand(commandRequest{
 			Command: "status",
-			Role:    strings.TrimSpace(role),
+			Role:    role,
 		})
+		if err == nil && chromeServiceReady(resp) {
+			return resp, nil
+		}
+		if err == nil {
+			return warmLocalChromeService(role)
+		}
+		return nil, err
 	}
 	return EnsureRemoteServiceByHost(host, role, deploy)
 }
@@ -79,21 +68,16 @@ func RestartRemoteServiceByHost(host, role string) (*CommandResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	role = strings.TrimSpace(role)
-	if role == "" {
-		role = defaultRole
-	}
+	role = normalizeRole(role)
 	if err := startRemoteService(node, role); err != nil {
 		return nil, err
 	}
-	return sendRemoteCommand(node, commandRequest{
-		Command: "status",
-		Role:    role,
-	})
+	return warmRemoteChromeService(node, role)
 }
 
 func RestartServiceByTarget(host, role string) (*CommandResponse, error) {
 	if isLocalHost(host) {
+		role = normalizeRole(role)
 		if err := stopLocalService(role); err != nil {
 			return nil, err
 		}
@@ -102,7 +86,7 @@ func RestartServiceByTarget(host, role string) (*CommandResponse, error) {
 		}
 		return sendLocalCommand(commandRequest{
 			Command: "status",
-			Role:    strings.TrimSpace(role),
+			Role:    role,
 		})
 	}
 	return RestartRemoteServiceByHost(host, role)

@@ -89,11 +89,21 @@ func localServiceRunning(role string) bool {
 
 func waitForLocalNATS(role string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
+	var lastErr error
 	for time.Now().Before(deadline) {
-		if _, err := sendLocalCommand(commandRequest{Command: "status", Role: role}); err == nil {
+		resp, err := sendLocalCommand(commandRequest{Command: "status", Role: role})
+		if err == nil && chromeServiceReady(resp) {
 			return nil
 		}
+		if err != nil {
+			lastErr = err
+		} else {
+			lastErr = chromeServiceNotReadyError("", role, resp)
+		}
 		time.Sleep(250 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("timed out waiting for local chrome src_v3 daemon: %w", lastErr)
 	}
 	return fmt.Errorf("timed out waiting for local chrome src_v3 daemon")
 }

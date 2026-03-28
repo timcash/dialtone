@@ -6,9 +6,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +38,10 @@ func runDaemon(args []string) error {
 		}
 	}
 	roleName := normalizeRole(strings.TrimSpace(*role))
+	restoreLogOutput := configureDaemonLogOutput(roleName)
+	if restoreLogOutput != nil {
+		defer restoreLogOutput()
+	}
 	chromePortValue := *chromePort
 	if chromePortValue <= 0 {
 		chromePortValue = roleChromePort(roleName)
@@ -64,6 +70,9 @@ func runDaemon(args []string) error {
 		profileDir:   defaultProfileDir(roleName),
 	}
 	if err := state.init(); err != nil {
+		return err
+	}
+	if err := state.ensureBrowser(); err != nil {
 		return err
 	}
 	state.persistState()
@@ -109,6 +118,25 @@ func runDaemon(args []string) error {
 	go publishServiceHeartbeat(state, nc)
 	logs.Info("chrome src_v3 daemon ready role=%s host=%s nats=%s chrome=%d headless=%t step_delay_ms=%d", state.role, state.hostID, state.natsURL, state.chromePort, chromeHeadlessEnabled(), int(chromeCommandStepDelay()/time.Millisecond))
 	select {}
+}
+
+func configureDaemonLogOutput(role string) func() {
+	if runtime.GOOS != "windows" || strings.TrimSpace(os.Getenv("DIALTONE_CHROME_SELF_LOG")) != "1" {
+		return nil
+	}
+	root := localServiceRoot(role)
+	if err := os.MkdirAll(root, 0755); err != nil {
+		return nil
+	}
+	out, err := os.OpenFile(localServiceStdoutPath(role), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return nil
+	}
+	logs.SetOutput(io.MultiWriter(os.Stdout, out))
+	return func() {
+		_ = out.Close()
+		logs.SetOutput(os.Stdout)
+	}
 }
 
 func (d *daemonState) init() error {
@@ -440,6 +468,13 @@ func (d *daemonState) fillStatus(resp *commandResponse) error {
 	}
 
 	if pid == 0 {
+		resp.Unhealthy = true
+		if resp.Error == "" {
+			resp.Error = "browser is not running"
+		}
+		if resp.LastError == "" {
+			resp.LastError = resp.Error
+		}
 		return nil
 	}
 	tabs, err := d.listTabs()

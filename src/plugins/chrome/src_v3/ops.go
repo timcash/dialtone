@@ -413,7 +413,7 @@ func startRemoteService(node sshv1.MeshNode, role string) error {
 		envFile := remoteEnvFilePath(node)
 		args := commandArgs[1:]
 		psArgs := strings.Join(quotePSArgs(args), ", ")
-		cmd := fmt.Sprintf(`$bin=%s; $workDir=%s; $serviceDir=%s; $stdout=%s; $stderr=%s; $repoRoot=%s; $envFile=%s; New-Item -ItemType Directory -Path $workDir,$serviceDir -Force | Out-Null; Remove-Item -LiteralPath $stdout,$stderr -Force -ErrorAction SilentlyContinue; Unblock-File -LiteralPath $bin -ErrorAction SilentlyContinue; if($repoRoot){$env:DIALTONE_REPO_ROOT=$repoRoot}; if($envFile){$env:DIALTONE_ENV_FILE=$envFile}; $proc = Start-Process -FilePath $bin -ArgumentList @(%s) -WorkingDirectory $workDir -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden -PassThru; Write-Output ('STARTED pid=' + $proc.Id)`,
+		cmd := fmt.Sprintf(`$bin=%s; $workDir=%s; $serviceDir=%s; $stdout=%s; $stderr=%s; $repoRoot=%s; $envFile=%s; New-Item -ItemType Directory -Path $workDir,$serviceDir -Force | Out-Null; Remove-Item -LiteralPath $stdout,$stderr -Force -ErrorAction SilentlyContinue; Unblock-File -LiteralPath $bin -ErrorAction SilentlyContinue; if($repoRoot){$env:DIALTONE_REPO_ROOT=$repoRoot}; if($envFile){$env:DIALTONE_ENV_FILE=$envFile}; $env:DIALTONE_CHROME_SELF_LOG='1'; $proc = Start-Process -FilePath $bin -ArgumentList @(%s) -WorkingDirectory $workDir -WindowStyle Hidden -PassThru; Write-Output ('STARTED pid=' + $proc.Id)`,
 			psQuote(remoteBin), psQuote(workDir), psQuote(serviceDir), psQuote(stdoutPath), psQuote(stderrPath), psQuote(repoRoot), psQuote(envFile), psArgs)
 		logs.Info("chrome src_v3 windows launcher command: %s", cmd)
 		if out, err := sshv1.RunNodeCommand(node.Name, cmd, sshv1.CommandOptions{}); err != nil {
@@ -477,11 +477,21 @@ func waitForRemoteService(node sshv1.MeshNode, role string, timeout time.Duratio
 	useManagerNATS := shouldUseLocalManagerNATS(node) && strings.TrimSpace(managerNATSURLForNode(node)) != ""
 	statusReq := commandRequest{Command: "status", Role: role, TimeoutMS: 1200}
 	var lastErr error
+	tryStatus := func() error {
+		resp, err := sendRemoteCommand(node, statusReq)
+		if err != nil {
+			return err
+		}
+		if !chromeServiceReady(resp) {
+			return chromeServiceNotReadyError(node.Name, role, resp)
+		}
+		return nil
+	}
 	for time.Now().Before(deadline) {
 		if useManagerNATS {
 			item, ok, err := lookupRemoteServiceState(node, serviceName)
 			if err == nil && ok && item.Active {
-				if _, err := sendRemoteCommand(node, statusReq); err == nil {
+				if err := tryStatus(); err == nil {
 					return nil
 				} else {
 					lastErr = err
@@ -489,13 +499,13 @@ func waitForRemoteService(node sshv1.MeshNode, role string, timeout time.Duratio
 			} else if err != nil {
 				lastErr = err
 			}
-			if _, err := sendRemoteCommand(node, statusReq); err == nil {
+			if err := tryStatus(); err == nil {
 				return nil
 			} else {
 				lastErr = err
 			}
 		} else {
-			if _, err := sendRemoteCommand(node, statusReq); err == nil {
+			if err := tryStatus(); err == nil {
 				return nil
 			} else {
 				lastErr = err
