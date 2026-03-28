@@ -45,6 +45,9 @@ func RunTaskList(args []string) error {
 		return err
 	}
 	_ = strings.TrimSpace(*host)
+	if err := ensureTaskQueryLeader(strings.TrimSpace(*natsURL)); err != nil {
+		return err
+	}
 
 	if items, err := queryTaskRegistry(strings.TrimSpace(*natsURL), *count); err == nil {
 		items = filterTaskRegistryItems(items, *state)
@@ -109,6 +112,9 @@ func RunTaskShow(args []string) error {
 		return err
 	}
 	_ = strings.TrimSpace(*host)
+	if err := ensureTaskQueryLeader(strings.TrimSpace(*natsURL)); err != nil {
+		return err
+	}
 
 	targetTaskID := strings.TrimSpace(*taskID)
 	if targetTaskID == "" {
@@ -143,6 +149,9 @@ func RunTaskLog(args []string) error {
 		return err
 	}
 	_ = strings.TrimSpace(*host)
+	if err := ensureTaskQueryLeader(strings.TrimSpace(*natsURL)); err != nil {
+		return err
+	}
 
 	targetTaskID := strings.TrimSpace(*taskID)
 	if targetTaskID == "" {
@@ -193,6 +202,9 @@ func RunTaskKill(args []string) error {
 		return err
 	}
 	_ = strings.TrimSpace(*host)
+	if err := ensureTaskQueryLeader(strings.TrimSpace(*natsURL)); err != nil {
+		return err
+	}
 
 	targetTaskID := strings.TrimSpace(*taskID)
 	if targetTaskID == "" {
@@ -219,6 +231,14 @@ func RunTaskKill(args []string) error {
 
 func resolveTaskLogsDir() (string, error) {
 	return filepath.Join(configv1.DefaultDialtoneHome(), "logs"), nil
+}
+
+func ensureTaskQueryLeader(natsURL string) error {
+	natsURL = strings.TrimSpace(natsURL)
+	if natsURL == "" {
+		natsURL = resolveREPLNATSURL()
+	}
+	return EnsureLeaderRunning(natsURL, defaultRoom)
 }
 
 func collectTaskLogs(logsDir string) ([]taskLogMeta, error) {

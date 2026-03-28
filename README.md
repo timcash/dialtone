@@ -5,6 +5,7 @@ Dialtone is a task-first CLI and REPL runtime for plugin work, remote process co
 The intended model is:
 
 - `./dialtone.sh <plugin> ...` submits one task to the local REPL leader
+- queued task submission is the default; only explicit query/operator commands stay foreground
 - the leader keeps durable task and service state in NATS KV
 - the launch folder's `env/dialtone.json` is the default runtime config source, and `--env` can point at another env root or file
 - `dialtone>` stays short and high-level
@@ -24,6 +25,62 @@ Use one Dialtone command per invocation:
 ./dialtone.sh chrome src_v3 service --host legion --mode start --role dev
 ./dialtone.sh chrome src_v3 status --host legion --role dev
 ```
+
+## Agent Rules
+
+If you are working in this repo as an LLM agent or operator, use these rules:
+
+- always prefer `./dialtone.sh <plugin> <src_vN> <command>` over raw `go`, `gofmt`, `go test`, `bun`, or ad hoc shell scripts
+- use plugin verbs like `install`, `format`, `lint`, `build`, and `test` instead of calling toolchains directly
+- use `./dialtone.sh repl src_v3 ...` for REPL operator queries and controls
+- use `./dialtone.sh logs src_v1 ...` for NATS log streaming and NATS daemon checks
+- use `./dialtone.sh` with no arguments when you want the shared interactive REPL
+- use one Dialtone command per invocation; do not chain commands with `&&`, `||`, or `;`
+- treat `dialtone.sh` as the public workflow layer and NATS as the control plane underneath it
+
+For normal development, these are the preferred commands:
+
+```bash
+./dialtone.sh <plugin> <src_vN> install
+./dialtone.sh <plugin> <src_vN> format
+./dialtone.sh <plugin> <src_vN> lint
+./dialtone.sh <plugin> <src_vN> build
+./dialtone.sh <plugin> <src_vN> test
+./dialtone.sh <plugin> <src_vN> test --filter <expr>
+```
+
+Do not replace those with:
+
+- `go fmt ./...`
+- `go build ./...`
+- `go test ./...`
+- `bun test`
+- raw `nats` CLI calls
+
+If you need lower-level tool access for debugging, route it through a Dialtone workflow when possible, for example `./dialtone.sh go src_v1 exec ...`, but prefer the plugin verb first.
+
+## Choosing A Path
+
+Use the one-shot CLI when you want one command from the shell:
+
+- queued task submission for normal work like `robot publish`, `ssh run`, or `chrome service start`
+- direct foreground output for explicit query/operator commands like `proc ps`, `task log`, or `logs stream`
+
+Use the REPL when you want:
+
+- many commands in one session
+- shared `dialtone>` lifecycle output
+- interleaved task/service progress
+- quick follow-up slash commands without restarting the wrapper
+
+Use `--env` when you want to run from a different runtime/config root:
+
+```bash
+./dialtone.sh --env /tmp/dialtone-demo/env robot src_v2 publish --skip-release --ui
+./dialtone.sh --env /tmp/dialtone-demo/env repl src_v3 task list
+```
+
+Without `--env`, Dialtone uses `env/dialtone.json` in the folder you launch from.
 
 ## Working With Plugins
 
@@ -83,16 +140,49 @@ Use direct plugin commands when you want one explicit task submission from the s
 
 Use the REPL when you want to keep one long-lived session open, submit many plugin commands in a row, and watch `dialtone>` task and service lifecycle updates as they happen.
 
+Common development loop for a plugin:
+
+```bash
+./dialtone.sh <plugin> <src_vN> install
+./dialtone.sh <plugin> <src_vN> format
+./dialtone.sh <plugin> <src_vN> build
+./dialtone.sh <plugin> <src_vN> test
+./dialtone.sh <plugin> <src_vN> test --filter <focused-step>
+```
+
+For REPL runtime work, the normal loop is:
+
+```bash
+./dialtone.sh repl src_v3 process-clean
+./dialtone.sh repl src_v3 format
+./dialtone.sh repl src_v3 build
+./dialtone.sh repl src_v3 test --filter <focused-step>
+```
+
 The public direction for the CLI is task-first:
 
-- every request should queue immediately
-- every request should return a `task-id`
+- queued task submission should be the default
+- queued commands should return a `task-id` immediately
 - PID is later runtime state, not the public identity
 - that PID may be local or remote, for example a Chrome daemon PID on `legion`
-- the CLI should print the queued-task summary, a helpful log-inspection command, and then return immediately
+- queued commands should print the queued-task summary, a helpful log-inspection command, and then return immediately
 - the REPL leader should keep reporting task start, log path, PID assignment, stop, and exit code through `dialtone>`
+- only explicit query/operator commands should stay foreground and print data directly
 
-Expected non-blocking CLI pattern:
+Foreground query/operator examples:
+
+- `./dialtone.sh proc src_v1 ps`
+- `./dialtone.sh proc src_v1 list`
+- `./dialtone.sh logs src_v1 stream --topic 'logs.task.<task-id>'`
+- `./dialtone.sh logs src_v1 tail --topic 'logs.task.<task-id>'`
+- `./dialtone.sh logs src_v1 nats-status`
+- `./dialtone.sh wsl src_v1 list`
+- `./dialtone.sh wsl src_v1 status`
+- `./dialtone.sh repl src_v3 task list`
+- `./dialtone.sh repl src_v3 task show --task-id <task-id>`
+- `./dialtone.sh repl src_v3 task log --task-id <task-id> --lines 10`
+
+Expected queued CLI pattern:
 
 The routed user command should appear as `host-name> /command`:
 
@@ -124,12 +214,19 @@ What the one-shot CLI path should not contain:
 
 That later lifecycle detail belongs in the REPL stream and the task log.
 
-The important behavior is:
+The important behavior for queued commands is:
 
 - the CLI returns as soon as the task is queued and the log-inspection hint is printed
 - the user gets the `task-id` right away
 - the one-shot CLI does not wait for PID assignment, progress lines, or final exit status
 - deeper lifecycle messages are still produced by the leader and can be watched in the REPL or task log
+
+The important behavior for foreground query/operator commands is:
+
+- they may start the background REPL leader if it is missing
+- they return the requested data directly to stdout instead of a queued-task transcript
+- they do not print `Request received.`, `Task queued as ...`, or a follow-up log-hint unless they are actually creating a task
+- the bootstrap shell wrapper may still print startup diagnostics before the actual query output; treat that as wrapper-level preamble rather than task output
 
 Example lifecycle the leader should emit for that same task in the REPL or task log:
 
@@ -287,6 +384,33 @@ dialtone> Task task-20260327-kill01 exited with code 0.
 
 The long-term logging model should match the logs plugin: producers publish to NATS, and readers decide whether to render to `dialtone>`, a file, or another UI.
 
+## NATS Control Plane
+
+Think about the runtime in these layers:
+
+- `dialtone.sh`: the public wrapper and operator entrypoint
+- `repl src_v3`: the task/service control plane
+- NATS: the transport for command frames, topics, heartbeats, and logs
+- NATS KV: the durable state store for task/service state
+
+As an operator or agent, you usually should not talk to NATS directly. Prefer these command surfaces:
+
+- `./dialtone.sh repl src_v3 status`
+- `./dialtone.sh repl src_v3 task list`
+- `./dialtone.sh repl src_v3 task show --task-id <task-id>`
+- `./dialtone.sh repl src_v3 task log --task-id <task-id> --lines 50`
+- `./dialtone.sh repl src_v3 watch --subject 'repl.>'`
+- `./dialtone.sh logs src_v1 stream --topic 'logs.task.<task-id>'`
+- `./dialtone.sh logs src_v1 stream --topic 'logs.service.<host>.<service-name>'`
+- `./dialtone.sh logs src_v1 nats-status`
+
+The mental model is:
+
+- the shared REPL session lives on `repl.topic.index`
+- queued commands get a per-task topic like `task.<task-id>`
+- task/service logs are published onto NATS subjects and may also be persisted into task logs
+- `dialtone>` is the short human summary stream, not the full raw event stream
+
 Useful example commands:
 
 ```text
@@ -327,7 +451,7 @@ Useful patterns:
 ./dialtone.sh logs src_v1 stream --topic 'logfilter.level.error.>'
 ```
 
-## Windows Development
+## Windows + WSL Development
 
 This repo may be edited from a Windows checkout while the real runtime and tests execute inside WSL.
 
@@ -350,16 +474,29 @@ Use the WSL repo for:
 - Linux runtime validation
 - tmux-visible command execution
 
-Use `wsl-tmux` from Windows so WSL commands run inside the visible tmux session:
+Use [wsl-tmux.cmd](wsl-tmux.cmd) from Windows so WSL commands run inside the visible tmux session:
 
 ```powershell
-wsl-tmux help
-wsl-tmux status
-wsl-tmux "cd /home/user/dialtone && ./dialtone.sh repl src_v3 process-clean"
-wsl-tmux "cd /home/user/dialtone && ./dialtone.sh repl src_v3 test"
-wsl-tmux read
-wsl-tmux interrupt
+.\wsl-tmux.cmd help
+.\wsl-tmux.cmd status
+.\wsl-tmux.cmd clean-state
+.\wsl-tmux.cmd "./dialtone.sh repl src_v3 process-clean"
+.\wsl-tmux.cmd "./dialtone.sh repl src_v3 test --filter shell-routed-command-autostarts-leader-when-missing"
+.\wsl-tmux.cmd read
+.\wsl-tmux.cmd interrupt
 ```
+
+Preferred tmux rhythm:
+
+1. send one command with `.\wsl-tmux.cmd "..."`
+2. call `.\wsl-tmux.cmd read` until you see the prompt again
+3. only then send the next command
+
+Important behavior:
+
+- `wsl-tmux.cmd` can queue input if you send a second command before the first one finishes
+- `clean-state` is the safest way to reset the pane before a new visible sequence
+- `interrupt` is better than piling on another command when the pane is wedged
 
 If the pane gets wedged, recreating the tmux session is fine:
 
@@ -383,18 +520,47 @@ Editing flow:
 perl -0pi -e 's/\r\n/\n/g' path/to/file
 ```
 
+When exact sync matters, prefer a byte-for-byte overwrite instead of `cp`:
+
+```powershell
+@'
+from pathlib import Path
+Path("/home/user/dialtone/src/dev.go").write_bytes(
+    Path("/mnt/c/Users/timca/dialtone/src/dev.go").read_bytes()
+)
+'@ | wsl.exe python3 -
+```
+
 Config rules:
 
 - use the launch folder's `env/dialtone.json` as the default config source, or pass `--env` to target another env root/file
 - do not create accidental config copies under `src/env/`
 
+If you changed REPL/bootstrap code, restart the long-lived helpers before rerunning isolated tests:
+
+```powershell
+.\wsl-tmux.cmd "./dialtone.sh repl src_v3 process-clean"
+```
+
 Typical WSL test commands:
 
 ```powershell
-wsl-tmux "cd /home/user/dialtone && ./dialtone.sh repl src_v3 process-clean"
-wsl-tmux "cd /home/user/dialtone && ./dialtone.sh repl src_v3 test"
-wsl-tmux "cd /home/user/dialtone && ./dialtone.sh ssh src_v1 probe --host grey --timeout 5s"
-wsl-tmux "cd /home/user/dialtone && ./dialtone.sh chrome src_v3 status --host legion --role dev"
+.\wsl-tmux.cmd "./dialtone.sh repl src_v3 process-clean"
+.\wsl-tmux.cmd "./dialtone.sh repl src_v3 format"
+.\wsl-tmux.cmd "./dialtone.sh repl src_v3 build"
+.\wsl-tmux.cmd "./dialtone.sh repl src_v3 test --filter interactive-command-index-lifecycle-contract"
+.\wsl-tmux.cmd "./dialtone.sh ssh src_v1 probe --host grey --timeout 5s"
+.\wsl-tmux.cmd "./dialtone.sh chrome src_v3 status --host legion --role dev"
+.\wsl-tmux.cmd "./dialtone.sh proc src_v1 ps"
+.\wsl-tmux.cmd read
+```
+
+For generic service-control-plane tests, prefer `testdaemon` instead of Chrome:
+
+```bash
+./dialtone.sh testdaemon src_v1 service --host legion --mode start --name demo
+./dialtone.sh testdaemon src_v1 service --host legion --mode status --name demo
+./dialtone.sh testdaemon src_v1 service --host legion --mode stop --name demo
 ```
 
 For Chrome, CAD, and UI work, prefer:

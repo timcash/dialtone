@@ -11,14 +11,14 @@ This plan defines the test strategy for the task-first `repl src_v3` system desc
 
 The runtime contract is:
 
-- every `./dialtone.sh ...` request becomes one queued task
-- every task gets a `task-id` immediately
-- every task gets a task topic and task log immediately
+- queued task submission is the default for `./dialtone.sh ...`
+- queued tasks get a `task-id`, task topic, and task log immediately
 - user-facing output uses lowercase `dialtone>`
 - PID is later runtime state, not the public identity
 - NATS KV is the source of truth for durable task and service state
 - the launch folder's `env/dialtone.json` is the default runtime config source, and `--env` can target another env root or file
-- the one-shot CLI prints the queued task summary and a helpful `task log --task-id ... --lines N` command, then returns immediately
+- queued one-shot CLI commands print the queued task summary and a helpful `task log --task-id ... --lines N` command, then return immediately
+- explicit query/operator commands stay foreground and print the requested data directly
 - there is no public `subtone` language; `task` and `service` are the public domain terms
 - `dialtone>` stays short, high-level, and task-oriented
 - `chrome src_v3` is managed through the REPL service model, not through ad hoc launcher behavior
@@ -62,6 +62,17 @@ Required operator surface:
 ./dialtone.sh logs src_v1 stream --topic 'logs.task.<task-id>'
 ```
 
+Required foreground query examples:
+
+```text
+./dialtone.sh proc src_v1 ps
+No active managed processes.
+
+./dialtone.sh repl src_v3 task log --task-id task-20260327-abc123 --lines 10
+Task log: ~/.dialtone/logs/task-20260327-abc123.log
+...
+```
+
 Required failures:
 
 - top-level output must not lead with PID
@@ -71,6 +82,7 @@ Required failures:
 - top-level output must point users to task and service inspection commands
 - normal task submission must not depend on trailing `&`
 - one-shot CLI submission must not block waiting for `assigned pid` or final exit lines
+- foreground query/operator commands must not emit the queued-task transcript unless they actually create a task
 
 ## Non-Goals
 
@@ -227,6 +239,7 @@ Required tests:
 
 - `shell-routed-command-autostarts-leader-when-missing`
 - `shell-routed-command-reuses-running-leader`
+- `shell-foreground-query-autostarts-leader-and-prints-direct-output`
 - `cli-returns-before-task-finishes`
 - `cli-prints-task-log-follow-up-command`
 - `cli-uses-lowercase-dialtone-prefix`
@@ -245,6 +258,12 @@ Required assertions:
 - `To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-... --lines 10`
 
 These tests should fail if the transcript says `Spawning subtone`, starts with a PID, or waits for later lifecycle lines before returning.
+
+Foreground query assertions:
+
+- `./dialtone.sh proc src_v1 ps` prints direct process state instead of `Request received.` / `Task queued as ...`
+- `./dialtone.sh repl src_v3 task log --task-id ... --lines N` prints the requested log lines directly
+- foreground query commands may start the background leader first, but they stay synchronous and data-first
 
 ## B. Interactive REPL Session
 

@@ -451,6 +451,10 @@ func main() {
 			}
 			return
 		}
+		if err := warmREPLForForegroundQuery(command, args, targetHost); err != nil {
+			logs.Error("REPL foreground warmup failed: %v", err)
+			os.Exit(1)
+		}
 		if err := runPluginScaffold(command, args); err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				os.Exit(exitErr.ExitCode())
@@ -533,8 +537,122 @@ func shouldRouteCommandViaREPL(command string, args []string) bool {
 	case "repl", "go", "bun":
 		return false
 	default:
-		return true
+		return !shouldRunForegroundQuery(command, args)
 	}
+}
+
+func shouldRunForegroundQuery(command string, args []string) bool {
+	command = strings.TrimSpace(strings.ToLower(command))
+	subcommand := scaffoldSubcommand(args)
+	switch command {
+	case "proc":
+		switch subcommand {
+		case "list", "ps":
+			return true
+		}
+	case "logs":
+		switch subcommand {
+		case "stream", "tail", "nats-status":
+			return true
+		}
+	case "wsl":
+		switch subcommand {
+		case "list", "ls", "status":
+			return true
+		}
+	}
+	return false
+}
+
+func scaffoldSubcommand(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	first := strings.TrimSpace(strings.ToLower(args[0]))
+	if strings.HasPrefix(first, "src_v") {
+		if len(args) < 2 {
+			return ""
+		}
+		return strings.TrimSpace(strings.ToLower(args[1]))
+	}
+	if len(args) >= 2 {
+		second := strings.TrimSpace(strings.ToLower(args[1]))
+		if strings.HasPrefix(second, "src_v") {
+			return first
+		}
+	}
+	return first
+}
+
+func resolveREPLDispatchCandidates(targetHost string) (string, []string) {
+	natsURL := strings.TrimSpace(os.Getenv("DIALTONE_REPL_NATS_URL"))
+	if natsURL == "" {
+		natsURL = "nats://127.0.0.1:4222"
+	}
+	room := strings.TrimSpace(os.Getenv("DIALTONE_REPL_ROOM"))
+	if room == "" {
+		room = "index"
+	}
+	candidateNATSURLs := []string{natsURL}
+	if host := strings.TrimSpace(targetHost); host != "" {
+		candidateNATSURLs = resolveTargetNATSURLs(host)
+	}
+	return room, candidateNATSURLs
+}
+
+func ensureLocalREPLRuntime(candidateURL, room string) error {
+	candidateURL = strings.TrimSpace(candidateURL)
+	room = sanitizeREPLRoom(room)
+	if candidateURL == "" {
+		return fmt.Errorf("empty nats endpoint candidate")
+	}
+	if !isLocalNATSURL(candidateURL) {
+		return nil
+	}
+	if !replv3.LeaderHealthy(candidateURL, 1200*time.Millisecond) {
+		if !replAutostartEnabled() {
+			return fmt.Errorf("no REPL daemon detected on %s (autostart disabled)", candidateURL)
+		}
+		logs.System("No REPL leader detected on %s; starting background leader for topic %s", candidateURL, room)
+		if err := replv3.EnsureLeaderRunning(candidateURL, room); err != nil {
+			return fmt.Errorf("repl leader autostart failed: %w", err)
+		}
+	}
+	if replBootstrapHTTPAutostartEnabled() {
+		host := strings.TrimSpace(os.Getenv("DIALTONE_REPL_BOOTSTRAP_HTTP_HOST"))
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		port := 8811
+		if raw := strings.TrimSpace(os.Getenv("DIALTONE_REPL_BOOTSTRAP_HTTP_PORT")); raw != "" {
+			if p, err := strconv.Atoi(raw); err == nil && p > 0 {
+				port = p
+			}
+		}
+		if err := replv3.EnsureBootstrapHTTPRunning(host, port); err != nil {
+			return fmt.Errorf("bootstrap http autostart failed: %w", err)
+		}
+	}
+	return nil
+}
+
+func warmREPLForForegroundQuery(command string, args []string, targetHost string) error {
+	if !shouldRunForegroundQuery(command, args) {
+		return nil
+	}
+	room, candidateNATSURLs := resolveREPLDispatchCandidates(targetHost)
+	if len(candidateNATSURLs) == 0 {
+		return fmt.Errorf("no nats endpoint candidates were resolved")
+	}
+	attemptErrs := make([]string, 0, len(candidateNATSURLs))
+	for _, candidateURL := range candidateNATSURLs {
+		if err := ensureLocalREPLRuntime(candidateURL, room); err == nil {
+			return nil
+		} else {
+			attemptErrs = append(attemptErrs, fmt.Sprintf("%s: %v", candidateURL, err))
+		}
+	}
+	return fmt.Errorf("repl foreground warmup failed after %d endpoint attempt(s): %s", len(attemptErrs), strings.Join(attemptErrs, " | "))
 }
 
 func shouldLogBootstrapChecks() bool {
@@ -544,9 +662,17 @@ func shouldLogBootstrapChecks() bool {
 	if len(os.Args) < 2 {
 		return true
 	}
-	switch strings.TrimSpace(os.Args[1]) {
-	case "", "repl", "help", "-h", "--help", "dev", "plugins", "branch":
+	command := strings.TrimSpace(os.Args[1])
+	switch command {
+	case "", "help", "-h", "--help", "dev", "plugins", "branch":
 		return true
+	case "repl":
+		switch scaffoldSubcommand(os.Args[2:]) {
+		case "", "help", "-h", "--help", "run", "join", "leader", "bootstrap", "bootstrap-http", "status":
+			return true
+		default:
+			return false
+		}
 	default:
 		return false
 	}
@@ -585,46 +711,15 @@ func dispatchViaREPL(command string, args []string, targetHost string) error {
 	if err := validateSingleCommandTokens(shellSplit(displayLine)); err != nil {
 		return err
 	}
-	natsURL := strings.TrimSpace(os.Getenv("DIALTONE_REPL_NATS_URL"))
-	if natsURL == "" {
-		natsURL = "nats://127.0.0.1:4222"
-	}
-	room := strings.TrimSpace(os.Getenv("DIALTONE_REPL_ROOM"))
-	if room == "" {
-		room = "index"
-	}
-	injectionHost := strings.TrimSpace(targetHost)
-	candidateNATSURLs := []string{natsURL}
-	if injectionHost != "" {
-		candidateNATSURLs = resolveTargetNATSURLs(injectionHost)
-		injectionHost = ""
-	}
+	room, candidateNATSURLs := resolveREPLDispatchCandidates(targetHost)
 	attemptErrs := make([]string, 0, len(candidateNATSURLs))
 	for _, candidateURL := range candidateNATSURLs {
-		leaderHealthy := replv3.LeaderHealthy(candidateURL, 1200*time.Millisecond)
-		if injectionHost == "" && isLocalNATSURL(candidateURL) && !leaderHealthy && replAutostartEnabled() {
-		logs.System("No REPL leader detected on %s; starting background leader for topic %s", candidateURL, room)
-			if err := replv3.EnsureLeaderRunning(candidateURL, room); err != nil {
-				return fmt.Errorf("repl leader autostart failed: %w", err)
-			}
-		}
-		if injectionHost == "" && isLocalNATSURL(candidateURL) && replBootstrapHTTPAutostartEnabled() {
-			host := strings.TrimSpace(os.Getenv("DIALTONE_REPL_BOOTSTRAP_HTTP_HOST"))
-			if host == "" {
-				host = "127.0.0.1"
-			}
-			port := 8811
-			if raw := strings.TrimSpace(os.Getenv("DIALTONE_REPL_BOOTSTRAP_HTTP_PORT")); raw != "" {
-				if p, err := strconv.Atoi(raw); err == nil && p > 0 {
-					port = p
-				}
-			}
-			if err := replv3.EnsureBootstrapHTTPRunning(host, port); err != nil {
-				return fmt.Errorf("bootstrap http autostart failed: %w", err)
-			}
+		if err := ensureLocalREPLRuntime(candidateURL, room); err != nil {
+			attemptErrs = append(attemptErrs, fmt.Sprintf("%s: %v", candidateURL, err))
+			continue
 		}
 		if err := relayInjectedIndexLifecycle(candidateURL, room, user, displayLine, injectLine, func() error {
-			return replv3.InjectCommand(candidateURL, room, user, injectionHost, injectLine)
+			return replv3.InjectCommand(candidateURL, room, user, "", injectLine)
 		}); err == nil {
 			return nil
 		} else {

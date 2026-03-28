@@ -208,6 +208,59 @@ func Register(r *testv1.Registry) {
 	})
 
 	r.Add(testv1.Step{
+		Name:    "shell-foreground-query-autostarts-leader-and-prints-direct-output",
+		Timeout: 120 * time.Second,
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			rt, err := support.NewIsolatedRuntime(ctx)
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			defer rt.Stop()
+			rt.NATSURL = allocateLocalNATSURL()
+
+			cleanOut, cleanErr := rt.RunDialtone("repl", "src_v3", "process-clean")
+			if cleanErr != nil && strings.TrimSpace(cleanOut) == "" {
+				return testv1.StepRunResult{}, fmt.Errorf("pre-test process-clean failed: %w", cleanErr)
+			}
+
+			out, err := rt.RunDialtone("proc", "src_v1", "ps")
+			if err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("foreground proc ps failed: %w\n%s", err, out)
+			}
+			for _, expected := range []string{
+				"No active managed processes.",
+			} {
+				if !strings.Contains(out, expected) {
+					return testv1.StepRunResult{}, fmt.Errorf("foreground proc ps output missing %q\n%s", expected, out)
+				}
+			}
+			for _, forbidden := range []string{
+				"Request received.",
+				"Task queued as task-",
+				"Task topic: task.task-",
+				"Task log: ",
+				"To view the last 10 log lines:",
+			} {
+				if strings.Contains(out, forbidden) {
+					return testv1.StepRunResult{}, fmt.Errorf("foreground proc ps unexpectedly queued through task transcript via %q\n%s", forbidden, out)
+				}
+			}
+			st, err := readLeaderState(rt.RepoRoot)
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if st.PID <= 0 || !st.Running {
+				return testv1.StepRunResult{}, fmt.Errorf("leader state invalid after foreground query autostart: %+v", st)
+			}
+
+			ctx.TestPassf("foreground proc query autostarted leader pid %d and printed direct output", st.PID)
+			return testv1.StepRunResult{
+				Report: fmt.Sprintf("Ran `./dialtone.sh proc src_v1 ps` against a fresh local NATS URL, verified the shell query path autostarted leader pid %d, and confirmed the command stayed foreground with direct process output instead of the queued task transcript.", st.PID),
+			}, nil
+		},
+	})
+
+	r.Add(testv1.Step{
 		Name:    "service-start-publishes-heartbeat-and-service-registry-state",
 		Timeout: 120 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {

@@ -5,13 +5,35 @@
 This file maps the current `repl src_v3` runtime and proposes a more robust design for:
 
 - task-id-first command handling
-- immediate CLI return on every request
+- immediate CLI return for queued task submission
+- queue-by-default command dispatch with an explicit foreground-query allowlist
 - NATS KV-backed task and service state
 - a lighter `dialtone.sh` / REPL CLI wrapper
 - better support for long-lived remote services like `chrome src_v3`
 - removal of public `subtone` language in favor of `task` and `service`
 
 The goal is to make the REPL leader a real control plane, not just a process launcher with a shared topic.
+
+## Dispatch Rule
+
+The intended shell rule is:
+
+- queued by default
+- foreground only for explicit query/operator commands
+
+Queued examples:
+
+- `./dialtone.sh robot src_v2 publish --repo timcash/dialtone`
+- `./dialtone.sh ssh src_v1 run --host grey --cmd hostname`
+- `./dialtone.sh chrome src_v3 service --host legion --mode start --role dev`
+
+Foreground examples:
+
+- `./dialtone.sh proc src_v1 ps`
+- `./dialtone.sh logs src_v1 stream --topic 'logs.task.<task-id>'`
+- `./dialtone.sh wsl src_v1 status`
+- `./dialtone.sh repl src_v3 task list`
+- `./dialtone.sh repl src_v3 task log --task-id <task-id> --lines 10`
 
 ## Short Review Of The Current README
 

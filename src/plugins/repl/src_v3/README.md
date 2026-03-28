@@ -4,6 +4,7 @@
 
 Use this mental model:
 - plain `./dialtone.sh <plugin> ...` injects into the local REPL leader
+- queued task submission is the default; only explicit query/operator commands stay foreground
 - the leader turns the real command into a task or manages a long-lived service
 - NATS is the control plane for requests, lifecycle updates, and topic traffic
 - NATS KV stores durable task and service state
@@ -47,12 +48,18 @@ dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --ta
 
 The one-shot CLI should return immediately after these lines. Later lifecycle belongs in the shared REPL stream, `task show`, `service show`, and the task log.
 
+Foreground query/operator commands are the exception to that queued pattern. They should stay synchronous, print the requested data directly, and may warm the background leader first so later queued work does not need a cold bootstrap.
+
 ## REPL Standards
 
 For one-shot CLI commands, `dialtone>` should contain:
 - request receipt
 - queued task metadata
 - a task log follow-up command
+
+For explicit foreground query/operator commands, stdout should contain:
+- the requested data
+- optional leader-autostart preamble if the background leader was missing
 
 Inside the shared REPL stream or a live watch session, `dialtone>` may also contain:
 - task lifecycle

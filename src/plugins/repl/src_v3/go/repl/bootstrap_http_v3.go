@@ -1,6 +1,7 @@
 package repl
 
 import (
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -10,8 +11,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
@@ -193,10 +196,35 @@ func EnsureBootstrapHTTPRunning(host string, port int) error {
 		"DIALTONE_REPO_ROOT="+repoRoot,
 		"DIALTONE_SRC_ROOT="+srcRoot,
 	)
+	dialtoneHome := configv1.DefaultDialtoneHome()
+	if err := os.MkdirAll(filepath.Join(dialtoneHome, "repl-v3"), 0o755); err != nil {
+		return err
+	}
+	stdoutPath := filepath.Join(dialtoneHome, "repl-v3", "bootstrap-http-autostart.out.log")
+	stderrPath := filepath.Join(dialtoneHome, "repl-v3", "bootstrap-http-autostart.err.log")
+	stdout, err := os.OpenFile(stdoutPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer stdout.Close()
+	stderr, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer stderr.Close()
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	cmd.Stdin = nil
+	if runtime.GOOS != "windows" {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	deadline := time.Now().Add(8 * time.Second)
+	if cmd.Process != nil {
+		_ = cmd.Process.Release()
+	}
+	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		if bootstrapHTTPEndpointReachable(host, port, 700*time.Millisecond) {
 			_ = persistBootstrapHTTPConfig(host, port)
@@ -204,7 +232,13 @@ func EnsureBootstrapHTTPRunning(host string, port int) error {
 		}
 		time.Sleep(150 * time.Millisecond)
 	}
-	return fmt.Errorf("repl v3 bootstrap HTTP server did not start at http://%s:%d/install.sh", host, port)
+	return fmt.Errorf(
+		"repl v3 bootstrap HTTP server did not start at http://%s:%d/install.sh (stdout=%s stderr=%s)",
+		host,
+		port,
+		stdoutPath,
+		stderrPath,
+	)
 }
 
 func persistBootstrapHTTPConfig(host string, port int) error {
