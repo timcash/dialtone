@@ -2,156 +2,416 @@
 
 ## Purpose
 
-This plan defines the test strategy for the task-first `repl src_v3` system described in:
+This plan is intentionally focused on the biggest unfinished parts of the `repl src_v3` system.
+It is not a broad product checklist.
+
+The core claim we still need to prove is:
+
+- `repl src_v3` is a task-first, service-aware control plane
+- queued-by-default command dispatch and foreground-query exceptions behave consistently
+- durable task and service state lives in NATS KV
+- service health is driven by heartbeats, not by optimistic process assumptions
+- local and remote services behave the same way through the same operator surface
+
+Until the focused areas in this file are implemented and passing, do not treat Chrome, Cloudflare, robot, or public-edge success as proof that the REPL core is complete.
+
+This plan is written against:
 
 - [README.md](/C:/Users/timca/dialtone/README.md)
 - [README.md](/C:/Users/timca/dialtone/src/plugins/repl/src_v3/README.md)
-- [README.md](/C:/Users/timca/dialtone/src/plugins/chrome/src_v3/README.md)
-- [DESIGN.md](/C:/Users/timca/dialtone/src/plugins/repl/src_v3/DESIGN.md)
 
-The runtime contract is:
+## The Big Missing Areas
 
-- queued task submission is the default for `./dialtone.sh ...`
-- queued tasks get a `task-id`, task topic, and task log immediately
-- user-facing output uses lowercase `dialtone>`
-- PID is later runtime state, not the public identity
-- NATS KV is the source of truth for durable task and service state
-- the launch folder's `env/dialtone.json` is the default runtime config source, and `--env` can target another env root or file
-- queued one-shot CLI commands print the queued task summary and a helpful `task log --task-id ... --lines N` command, then return immediately
-- explicit query/operator commands stay foreground and print the requested data directly
-- there is no public `subtone` language; `task` and `service` are the public domain terms
-- `dialtone>` stays short, high-level, and task-oriented
-- `chrome src_v3` is managed through the REPL service model, not through ad hoc launcher behavior
-- service tasks publish heartbeats and the leader reconciles/restarts them if heartbeats stop
+These are the areas this plan now centers on:
 
-The goal of this plan is to prove the task-id-first system directly.
-Generic service-control-plane tests and service transcript examples must use the `testdaemon` fixture so they do not depend on Chrome or any other plugin implementation.
+1. The queue-vs-foreground dispatch contract is only partially proven today.
+2. `testdaemon` now exists, but the generic fixture proof is still only partially implemented.
+3. NATS KV task and service state is not yet fully proven as the source of truth.
+4. Heartbeat-driven unhealthy detection and reconcile/restart behavior is not yet fully proven.
+5. Remote service suites are not yet deep enough to prove the model on real hosts.
+6. Legacy `subtone`-named suites still exist in the repo and should not remain part of the long-term proof surface.
 
-## Public Contract From The Docs
+If these areas are not covered by real implemented test code, the migration is not done.
 
-The tests should be written against the public contract, not current implementation accidents.
+## What Does Not Count As Enough
 
-Required one-shot CLI transcript:
+These do not substitute for the focused work above:
 
-```text
-host-name> /testdaemon src_v1 service --host legion --mode status --name demo
-dialtone> Request received.
-dialtone> Task queued as task-20260327-abc123.
-dialtone> Task topic: task.task-20260327-abc123
-dialtone> Task log: ~/.dialtone/logs/task-20260327-abc123.log
-dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-20260327-abc123 --lines 10
-```
+- a passing Chrome service flow
+- a passing robot relay flow
+- a passing public `rover-1.dialtone.earth` health check
+- docs that describe desired behavior
+- a few manual CLI smoke runs
+- tests that still depend on process-first or `subtone` behavior
 
-Required later REPL/task-log lifecycle for that same task:
+Those flows are useful integration checks, but they are not the core proof.
 
-```text
-dialtone> Task task-20260327-abc123 assigned pid 25516 on legion.
-dialtone> testdaemon service demo on legion is healthy.
-dialtone> Task task-20260327-abc123 exited with code 0.
-```
+## Definition Of Done
 
-Required operator surface:
+The focused work in this file is complete only when all of these are true:
 
-```bash
-./dialtone.sh repl src_v3 task list
-./dialtone.sh repl src_v3 task show --task-id <task-id>
-./dialtone.sh repl src_v3 task log --task-id <task-id> --lines 200
-./dialtone.sh repl src_v3 task kill --task-id <task-id>
-./dialtone.sh repl src_v3 service list --host legion
-./dialtone.sh repl src_v3 service show --host legion --name demo
-./dialtone.sh logs src_v1 stream --topic 'logs.task.<task-id>'
-```
+- queued commands return a task-first transcript and foreground queries return direct data
+- queued and foreground paths both autostart or reuse the correct background leader
+- `testdaemon` exists and is the generic fixture for shared service-control-plane tests
+- task creation, updates, and lookup are proven against NATS KV state
+- service desired state and observed state are proven against NATS KV state
+- service heartbeats update observed state continuously
+- missed heartbeats mark services unhealthy
+- the leader reconcile loop restarts unhealthy or missing services when desired state says they should be running
+- leader restart or failover can recover enough state from KV to keep the system coherent
+- remote `testdaemon` suites on `legion` pass and prove the same semantics as local runs
+- Chrome tests are layered on top of the above, not used instead of the above
 
-Required foreground query examples:
+## Priority Order
 
-```text
-./dialtone.sh proc src_v1 ps
-No active managed processes.
+Work in this order:
 
-./dialtone.sh repl src_v3 task log --task-id task-20260327-abc123 --lines 10
-Task log: ~/.dialtone/logs/task-20260327-abc123.log
-...
-```
+1. Prove queue-vs-foreground dispatch and leader autostart or reuse
+2. Build `testdaemon`
+3. Prove task KV state
+4. Prove service KV state
+5. Prove heartbeat and reconcile
+6. Prove remote service behavior with `testdaemon`
+7. Remove or replace legacy `subtone` suites
+8. Only then spend time on Chrome, robot, Cloudflare, and public-edge integrations
 
-Required failures:
+## Required Workflow
 
-- top-level output must not lead with PID
-- top-level output must not say `Spawning subtone`
-- top-level output must not expose public `subtone-*` commands or names
-- top-level output must not render uppercase `DIALTONE>` on the active `dialtone.sh` / `repl src_v3` path
-- top-level output must point users to task and service inspection commands
-- normal task submission must not depend on trailing `&`
-- one-shot CLI submission must not block waiting for `assigned pid` or final exit lines
-- foreground query/operator commands must not emit the queued-task transcript unless they actually create a task
-
-## Non-Goals
-
-The public contract does not include:
-
-- PID as the primary task identity
-- process-oriented operator commands as the primary inspection path
-- PID-named log files as the public log model
-- trailing `&` as the normal backgrounding contract
-- transcript wording centered on process launch rather than task queueing
-
-## Start Here: 8 Steps
-
-These are the first 8 steps to get the code moving toward the target design.
-
-1. Create a real task object in NATS KV before process launch and return `task-id`, task topic, task log, and log-inspection hint immediately.
-2. Replace top-level transcript wording so every command starts with `Request received.` and `Task queued as ...`, never `Spawning subtone`.
-3. Remove remaining public `subtone` names and process-first operator wording in favor of `task` and `service`.
-4. Introduce task-backed log creation and task-backed task state so log lookup is no longer derived from PID.
-5. Add `repl src_v3 task list`, `task show`, `task log`, and `task kill` with NATS KV task state as the primary source of truth.
-6. Add heartbeat-driven service reconciliation so missed service heartbeats mark a service unhealthy and trigger restart/recovery.
-7. Add a simple REPL test daemon for queue, progress, crash, hang, and recovery tests before depending on Chrome behavior.
-8. Move `chrome src_v3` fully onto desired/observed REPL service state and remove process-oriented public surfaces from the runtime and docs.
-
-## WSL tmux Test Workflow
-
-Use the Windows wrapper so every WSL run stays visible in the persistent tmux pane:
+If you are on Windows, you must use the supported Dialtone workflow through `.\wsl-tmux.cmd`, not raw toolchain commands or direct WSL REPL/test runs:
 
 ```powershell
 .\wsl-tmux.cmd clean-state
+.\wsl-tmux.cmd "./dialtone.sh repl src_v3 process-clean"
 .\wsl-tmux.cmd "./dialtone.sh repl src_v3 format"
-.\wsl-tmux.cmd "./dialtone.sh repl src_v3 test --filter interactive-command-index-lifecycle-contract"
+.\wsl-tmux.cmd "./dialtone.sh repl src_v3 build"
+.\wsl-tmux.cmd "./dialtone.sh repl src_v3 test --filter <name>"
 .\wsl-tmux.cmd read
 ```
 
-When the code changes affect the bootstrap tarball path, restart REPL/bootstrap processes first so isolated test repos pull a fresh snapshot:
+When working on `testdaemon`, use the same workflow style:
+
+```powershell
+.\wsl-tmux.cmd "./dialtone.sh testdaemon src_v1 format"
+.\wsl-tmux.cmd "./dialtone.sh testdaemon src_v1 build"
+.\wsl-tmux.cmd "./dialtone.sh testdaemon src_v1 test"
+```
+
+If bootstrap or runtime code changed, restart the background processes first:
 
 ```powershell
 .\wsl-tmux.cmd "./dialtone.sh repl src_v3 process-clean"
 ```
 
-## Current Verified Baseline
+## Focus Area 0: Dispatch Contract
 
-As of `2026-03-27`, these commands were rerun successfully against the WSL repo:
+### Goal
 
-- `./dialtone.sh repl src_v3 format`
-- `./dialtone.sh repl src_v3 build`
-- `./dialtone.sh repl src_v3 test --filter shell-routed-command-autostarts-leader-when-missing`
-- `./dialtone.sh repl src_v3 test --filter shell-routed-command-reuses-running-leader`
+Before the deeper KV and service work, prove the public shell contract:
 
-Visible `wsl-tmux.cmd` verification also confirmed the interactive startup transcript now uses the topic-first wording:
+- queued by default
+- foreground only for explicit query/operator commands
+- both paths autostart or reuse the correct background leader
+- queued output is short and task-first
+- foreground output returns direct data instead of a queued transcript
 
-- `dialtone> Connected to repl.topic.index via ...`
-- `dialtone> legion joined topic index (version=dev).`
-- `dialtone> Leader online on DIALTONE-SERVER (topic=repl.topic.index nats=...)`
-- `dialtone> Shared REPL session ready on topic index.`
+### Required Tests
 
-Visible operator checks also confirmed the current task-inspection surface:
+- `shell-routed-command-autostarts-leader-when-missing`
+- `shell-routed-command-reuses-running-leader`
+- `shell-foreground-query-autostarts-leader-and-prints-direct-output`
+- `interactive-command-index-lifecycle-contract`
+- `interactive-command-index-emits-task-queue-lines`
 
-- `./dialtone.sh repl src_v3 task show --task-id <task-id>` now prints `Topic: index` instead of `Room: index`
-- after `./dialtone.sh repl src_v3 process-clean`, a fresh routed task log shows `worker_log=/home/user/.dialtone/logs/task-worker-...` instead of `subtone-...`
+### Required CLI Assertions
 
-One live shell-routed verification command also matched the queue-only contract:
+Queued path:
 
-```bash
-./dialtone.sh proc src_v1 emit shell-contract-check
+```text
+dialtone> Request received.
+dialtone> Task queued as task-...
+dialtone> Task topic: task.task-...
+dialtone> Task log: ...
+dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-... --lines 10
 ```
 
-Expected transcript shape from that command:
+Foreground path:
+
+```text
+No active managed processes.
+```
+
+These tests should fail if:
+
+- a query command unexpectedly prints the queued task transcript
+- a normal command blocks waiting for full lifecycle
+- the shell path starts a second leader instead of reusing a healthy one
+- the output regresses to legacy `subtone` terms or back to `room` wording
+
+## Focus Area 1: testdaemon Fixture
+
+### Goal
+
+We need one simple fixture that proves the generic task and service model without depending on Chrome or any other plugin.
+
+### Required Location
+
+- `src/plugins/testdaemon/src_v1`
+
+### Required Operator Surface
+
+These commands should exist and be stable enough for the REPL suites:
+
+```bash
+./dialtone.sh testdaemon src_v1 build
+./dialtone.sh testdaemon src_v1 test
+./dialtone.sh testdaemon src_v1 run --mode once
+./dialtone.sh testdaemon src_v1 service --mode start --name demo
+./dialtone.sh testdaemon src_v1 service --mode status --name demo
+./dialtone.sh testdaemon src_v1 service --mode stop --name demo
+./dialtone.sh testdaemon src_v1 emit-progress --steps 5
+./dialtone.sh testdaemon src_v1 sleep --seconds 10
+./dialtone.sh testdaemon src_v1 exit-code --code 17
+./dialtone.sh testdaemon src_v1 panic
+./dialtone.sh testdaemon src_v1 crash
+./dialtone.sh testdaemon src_v1 hang
+./dialtone.sh testdaemon src_v1 heartbeat --name demo
+./dialtone.sh testdaemon src_v1 shutdown --name demo
+```
+
+### Required Fixture Capabilities
+
+- can run as a one-shot task
+- can run as a long-lived service
+- emits logs through the shared logs path
+- emits explicit progress lines
+- publishes heartbeats on a predictable interval
+- can stop heartbeats on command
+- can exit cleanly
+- can exit nonzero
+- can panic or crash
+- can hang
+- can report host, PID, started time, and service name
+
+### Required Tests
+
+- `testdaemon-builds`
+- `testdaemon-one-shot-command-emits-progress`
+- `testdaemon-service-starts`
+- `testdaemon-service-stops`
+- `testdaemon-can-exit-nonzero`
+- `testdaemon-can-panic`
+- `testdaemon-can-hang`
+- `testdaemon-heartbeats-while-running`
+- `testdaemon-can-stop-heartbeats-without-exiting`
+
+### Acceptance Criteria
+
+Do not move on to the later areas until `testdaemon` is real and can drive the generic suites.
+
+## Focus Area 2: Task State In NATS KV
+
+### Goal
+
+Task identity must be task-first and durable. PID is later runtime detail. The leader and operator commands must be reading and updating task state through KV, not reconstructing it from local process scans.
+
+### Minimum Task Record Contract
+
+Every task record should be provably able to answer:
+
+- task id
+- command
+- args
+- topic
+- log path
+- host
+- desired mode
+- current state
+- PID if assigned
+- exit code if finished
+- created time
+- updated time
+
+### Required Tests
+
+- `task-submit-creates-kv-record-before-launch`
+- `task-record-includes-task-id-command-topic-log-host`
+- `task-record-exists-before-pid-assignment`
+- `task-record-updates-to-running-after-launch`
+- `task-record-stores-pid-after-launch`
+- `task-record-updates-to-exited-on-finish`
+- `task-record-stores-exit-code-on-finish`
+- `task-list-reads-from-kv`
+- `task-show-reads-from-kv`
+- `task-show-prefers-kv-over-live-registry-fields`
+- `task-list-prefers-kv-over-live-registry-fields`
+- `task-state-queries-follow-kv-over-finished-task-history`
+- `task-log-by-task-id-still-works-after-task-exit`
+- `queued-task-still-visible-after-leader-restart`
+- `finished-task-still-visible-after-leader-restart`
+
+### Required CLI Assertions
+
+```text
+dialtone> Request received.
+dialtone> Task queued as task-...
+dialtone> Task topic: task.task-...
+dialtone> Task log: ...
+```
+
+These tests should fail if:
+
+- the system leads with PID
+- task lookup depends on PID identity
+- task list is really just a process list
+- a task disappears because the leader restarted
+
+## Focus Area 3: Service State In NATS KV
+
+### Goal
+
+Services must be modeled as desired state plus observed state, not as "there happens to be a process."
+
+### Minimum Service Record Contract
+
+Every service record should be provably able to answer:
+
+- service name
+- host
+- desired state
+- observed state
+- health
+- owner task id
+- current PID if any
+- heartbeat timestamp
+- restart count
+- updated time
+
+### Required Tests
+
+- `service-start-creates-desired-running-state`
+- `service-stop-clears-desired-running-state`
+- `service-show-reads-from-kv`
+- `service-list-reads-from-kv`
+- `service-record-is-keyed-by-host-and-name`
+- `service-record-includes-owner-task`
+- `service-record-includes-heartbeat-time`
+- `service-record-persists-across-leader-restart`
+
+### Required Negative Coverage
+
+- two hosts with the same service name must not overwrite each other
+- a stale PID must not be treated as healthy service state
+- a missing process with desired state `running` must not look healthy
+
+## Focus Area 4: Heartbeats And Reconcile
+
+### Goal
+
+The most important unfinished behavioral proof is:
+
+- healthy services keep publishing heartbeats
+- heartbeat loss marks them unhealthy
+- reconcile notices the unhealthy or missing service
+- reconcile restarts it when desired state still says `running`
+
+### Required Test Conditions
+
+Use short test-only timing values so these suites are fast and deterministic.
+
+### Required Tests
+
+- `service-heartbeat-updates-observed-state`
+- `service-heartbeat-keeps-health-healthy`
+- `missed-heartbeat-marks-service-unhealthy`
+- `leader-restarts-service-after-heartbeat-loss`
+- `leader-does-not-restart-healthy-service`
+- `manual-stop-prevents-reconcile-restart`
+- `missing-process-without-heartbeats-triggers-restart`
+- `leader-restart-resumes-heartbeat-monitoring`
+- `restarted-service-gets-new-pid-but-same-service-identity`
+
+### Required Evidence
+
+For each test above, prove all three layers:
+
+- top-level `dialtone>` transcript
+- KV state transition
+- task log / service log evidence
+
+### Required Failure Cases
+
+- hanging service stops heartbeating
+- crashed service stops heartbeating
+- heartbeat publisher is alive but service process is gone
+- reconcile loop restarts the wrong host or wrong service name
+
+## Focus Area 5: Remote Service Suites
+
+### Goal
+
+The local model is not enough. We need to prove the same service semantics on real hosts.
+
+### Required Remote Targets
+
+- `legion`: primary remote service target
+
+### Remote Service Tests That Must Use testdaemon
+
+- `remote-testdaemon-service-start-on-legion`
+- `remote-testdaemon-service-status-on-legion`
+- `remote-testdaemon-service-list-on-legion`
+- `remote-testdaemon-service-show-on-legion`
+- `remote-testdaemon-service-stop-on-legion`
+- `remote-testdaemon-service-heartbeat-on-legion`
+- `remote-testdaemon-heartbeat-loss-restarts-on-legion`
+- `remote-testdaemon-command-reuses-existing-service-on-legion`
+- `remote-testdaemon-owner-task-is-correct-on-legion`
+- `remote-testdaemon-log-and-kv-state-match-on-legion`
+
+### Required Rule
+
+Chrome must not be the thing proving that remote service semantics work.
+Chrome may have its own later suite, but the shared remote service proof must come from `testdaemon`.
+
+## Focus Area 6: Env Root And Leader Isolation
+
+### Goal
+
+This matters because the REPL leader is backgrounded automatically now.
+We need to prove that launch-folder default config and explicit `--env` runs do not bleed into each other.
+
+### Required Tests
+
+- `launch-folder-env-is-used-when-env-flag-is-omitted`
+- `explicit-env-switches-to-alternate-config-root`
+- `leader-autostarts-under-default-env-root`
+- `leader-autostarts-under-explicit-env-root`
+- `default-env-and-alt-env-do-not-share-task-state`
+- `default-env-and-alt-env-do-not-share-service-state`
+- `task-list-in-alt-env-does-not-show-default-env-tasks`
+
+## Focus Area 7: Remove Legacy Process-First Suites
+
+### Goal
+
+The repo still contains legacy `subtone`-named suites and helpers.
+Those are useful migration clues, but they should not remain part of the final proof surface for `repl src_v3`.
+
+### Current Legacy Areas To Replace
+
+- `src/plugins/repl/src_v3/test/08_subtone_observability`
+- `src/plugins/repl/src_v3/test/09_subtone_attach`
+
+### Required Work
+
+- replace `subtone` language with `task` and `service` in suite names, reports, and helper text
+- move any still-useful assertions into the task-first suites
+- remove or retire suites that only prove PID-first or process-first behavior
+- make sure the final focused suite set reads like the public operator model
+
+## Explicit Must-Pass Transcript Shapes
+
+### One-Shot Command
 
 ```text
 host-name> /proc src_v1 emit shell-contract-check
@@ -162,287 +422,15 @@ dialtone> Task log: ~/.dialtone/logs/task-20260327-abc123.log
 dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-20260327-abc123 --lines 10
 ```
 
-If the leader is missing, an autostart preamble may appear before the routed command. That preamble should also migrate to `topic index` wording rather than legacy `room index`.
-
-## Testing Principles
-
-1. Test through `./dialtone.sh` and `dialtone>` first.
-2. Assert task identity before asserting PID details.
-3. Assert NATS KV state as the main source of truth for durable task/service state.
-4. Test the CLI and interactive REPL as two views of the same task system.
-5. Prefer task-oriented assertions over implementation-oriented assertions.
-6. Treat interleaving as normal when multiple tasks are active.
-7. Validate remote and local flows with the same task lifecycle semantics.
-8. Make crash, panic, hang, timeout, and restart behavior first-class tests.
-9. Keep Chrome tests focused on browser-specific behavior over the shared service layer, not generic service reconciliation.
-10. Fail any test that depends on process-first naming or transcript structure.
-11. Fail any test that exposes public `subtone` domain language instead of `task`/`service`.
-
-## Execution Tiers
-
-### Tier 0. Bootstrap And Install
-
-- validates tmp bootstrap, config creation, installer behavior, and managed toolchain setup
-- proves `repl src_v3 install`, workspace bootstrap, and environment resolution
-
-### Tier 1. Fast Local Task Runtime
-
-- validates task submission, queue semantics, task state, task logs, task operator commands, and REPL transcript shape
-- should be the default inner loop during migration
-
-### Tier 2. Stable Remote SSH And Deploy
-
-- validates real SSH probe, run, copy, and deploy behavior on `grey`
-- proves that remote work still follows the same task-first lifecycle
-
-### Tier 3. Remote Service Reconciliation
-
-- validates long-lived generic service behavior on `legion` with the `testdaemon` fixture
-- proves service start, reuse, heartbeat, recovery, stop, and task ownership without depending on other plugin code
-
-### Tier 4. Same-Host WSL Diagnostics
-
-- covers same-host WSL mirror-mode behavior when useful
-- is a diagnostic lane for this workstation, not the core design gate
-
-## Test Fixtures We Need
-
-## 1. Simple REPL Test Daemon
-
-Add a small fixture plugin:
-
-- `src/plugins/repl/src_v3/testdaemon/src_v1`
-
-It should:
-
-- run locally or remotely
-- expose a request/reply command surface over NATS
-- expose a simple service command surface used by reconciliation tests
-- emit logs through the shared logs library
-- publish heartbeats
-- report host, PID, ports, and started time
-- support explicit `sleep`, `panic`, `crash`, `exit-code`, `hang`, `shutdown`, and `emit-progress`
-
-This fixture should carry the generic service-control-plane suite, the service transcript examples in this plan, and the local/remote reconciliation tests. Chrome tests should stay focused on browser-specific behavior layered on top of the shared service model.
-
-## 2. Remote Targets
-
-- `grey`: canonical SSH and deploy target
-- `legion`: canonical long-lived service target
-- same-host `wsl`: diagnostic-only lane when needed
-
-## Test Categories
-
-## A. CLI Task Submission
-
-Required tests:
-
-- `shell-routed-command-autostarts-leader-when-missing`
-- `shell-routed-command-reuses-running-leader`
-- `shell-foreground-query-autostarts-leader-and-prints-direct-output`
-- `cli-returns-before-task-finishes`
-- `cli-prints-task-log-follow-up-command`
-- `cli-uses-lowercase-dialtone-prefix`
-- `task-id-appears-before-pid-assignment`
-- `task-log-path-is-known-at-queue-time`
-- `task-topic-is-known-at-queue-time`
-- `dialtone-output-is-task-first`
-- `one-command-per-invocation-still-enforced`
-
-Required assertions:
-
-- `Request received.`
-- `Task queued as task-...`
-- `Task topic: task.task-...`
-- `Task log: ...task-...`
-- `To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-... --lines 10`
-
-These tests should fail if the transcript says `Spawning subtone`, starts with a PID, or waits for later lifecycle lines before returning.
-
-Foreground query assertions:
-
-- `./dialtone.sh proc src_v1 ps` prints direct process state instead of `Request received.` / `Task queued as ...`
-- `./dialtone.sh repl src_v3 task log --task-id ... --lines N` prints the requested log lines directly
-- foreground query commands may start the background leader first, but they stay synchronous and data-first
-
-## B. Interactive REPL Session
-
-Required tests:
-
-- `plain-dialtone-opens-shared-repl-session`
-- `slash-command-queues-task-and-keeps-session-open`
-- `multiple-slash-commands-can-run-in-sequence`
-- `interactive-repl-uses-lowercase-dialtone-prefix`
-- `repl-shows-task-id-for-every-command`
-- `repl-keeps-accepting-input-while-earlier-task-runs`
-
-Required assertions:
-
-- `dialtone> Connected to repl.topic.index ...`
-- `dialtone> Leader online ...`
-- `dialtone> Shared REPL session ready on topic index.`
-
-## C. Task Queue And Scheduler
-
-Required tests:
-
-- `queued-task-exists-before-launch`
-- `second-task-stays-queued-while-first-is-running`
-- `scheduler-starts-next-task-after-first-exits`
-- `task-state-transitions-queued-running-exited`
-- `parallel-service-and-command-tasks-can-interleave-cleanly`
-
-## D. Task State In NATS KV
-
-Required tests:
-
-- `task-submit-creates-nats-kv-record`
-- `task-record-includes-task-id-topic-log-host-command`
-- `task-record-updates-pid-after-launch`
-- `task-record-updates-exit-code-on-finish`
-- `task-list-reads-from-nats-kv-state`
-- `task-show-reads-from-nats-kv-state`
-
-## E. Task Logs
-
-Required tests:
-
-- `task-log-file-created-at-queue-time`
-- `task-log-appends-lifecycle-and-plugin-output`
-- `task-log-command-reads-by-task-id`
-- `logs-stream-task-subject-matches-task-log`
-- `error-lines-appear-in-task-log-and-top-level-summary`
-
-## F. Task Operator Commands
-
-Required tests:
-
-- `task-list-shows-running-and-finished-tasks`
-- `task-show-displays-topic-log-host-pid-exit`
-- `task-log-prints-recent-lines-by-task-id`
-- `task-kill-stops-running-task`
-- `task-kill-updates-state-to-stopping-or-exited`
-
-## G. Local Service Reconciliation With testdaemon
-
-These tests must run against `testdaemon` only. They should not rely on Chrome or any other plugin implementation to prove generic service behavior.
-
-Required tests:
-
-- `testdaemon-service-start-creates-desired-running-state`
-- `testdaemon-status-reuses-existing-healthy-service`
-- `testdaemon-service-stop-clears-desired-running-state`
-- `testdaemon-service-list-shows-owner-task-and-health`
-- `testdaemon-service-show-displays-desired-vs-observed-state`
-- `testdaemon-service-heartbeat-updates-observed-state`
-- `testdaemon-missed-service-heartbeat-marks-unhealthy`
-- `leader-restarts-testdaemon-service-after-heartbeat-loss`
-
-## H. Remote SSH And Deploy On Grey
-
-Required tests:
-
-- `remote-grey-probe-queues-task-and-succeeds`
-- `remote-grey-run-queues-task-and-returns-remote-pid`
-- `remote-grey-copy-or-deploy-creates-task-log`
-- `remote-grey-failure-propagates-error-lines-and-exit`
-
-## I. Remote testdaemon Service On Legion
-
-These tests prove the remote service layer itself. They must use `testdaemon`, not Chrome, so the reconciliation contract is validated without browser-specific code.
-
-Required tests:
-
-- `remote-testdaemon-service-start-queues-task-and-creates-service-state`
-- `remote-testdaemon-status-reuses-running-service`
-- `remote-testdaemon-command-reuses-service-pid`
-- `remote-testdaemon-service-recovery-replaces-missing-process`
-- `remote-testdaemon-service-stop-stops-owned-process`
-- `remote-testdaemon-service-list-on-legion-shows-owner-task`
-
-## J. Chrome Browser Integration Over The Service Layer
-
-These tests are allowed to depend on `chrome src_v3`, but they should prove browser-specific behavior only after the shared service contract already passes with `testdaemon`.
-
-Required tests:
-
-- `chrome-status-uses-service-layer-contract`
-- `chrome-command-reuses-existing-service-when-healthy`
-- `chrome-browser-failure-surfaces-through-task-log`
-
-## K. Failure, Timeout, And Recovery
-
-Required tests:
-
-- `task-panic-appears-as-error-and-nonzero-exit`
-- `task-crash-appears-as-error-and-nonzero-exit`
-- `task-timeout-produces-clear-task-error`
-- `hung-task-can-be-killed-by-task-id`
-- `missing-service-is-reconciled-on-next-command`
-- `heartbeat-loss-marks-service-unhealthy`
-- `heartbeat-loss-triggers-service-restart`
-
-## L. Interleaving And Isolation
-
-Required tests:
-
-- `multiple-running-tasks-produce-interleaved-but-coherent-output`
-- `one-failing-task-does-not-hide-other-successful-tasks`
-- `task-log-remains-isolated-under-interleaving`
-- `service-output-does-not-corrupt-unrelated-task-state`
-
-## M. Config And Bootstrap
-
-Required tests:
-
-- `bootstrap-creates-valid-env-dialtone-json`
-- `add-host-updates-mesh-config`
-- `task-runtime-resolves-repo-roots-correctly`
-- `task-runtime-uses-managed-go-and-bun`
-
-## N. Logs And Observability
-
-Required tests:
-
-- `logs-task-subject-exists-for-every-task`
-- `logs-service-subject-exists-for-running-service`
-- `logfilter-level-error-captures-task-failures`
-- `task-log-and-logs-stream-surface-the-same-core-events`
-
-## O. Multi-Host And Isolation
-
-Required tests:
-
-- `tasks-on-grey-and-legion-keep-distinct-host-state`
-- `same-command-on-two-hosts-gets-two-task-ids`
-- `service-owner-task-is-host-specific`
-- `host-filtered-task-list-returns-only-target-host`
-
-## Explicit dialtone> Transcript Scenarios
-
-## 1. Local One-Shot CLI Command
+### Interactive REPL
 
 ```text
-host-name> /proc src_v1 emit shell-contract-check
-dialtone> Request received.
-dialtone> Task queued as task-20260327-help001.
-dialtone> Task topic: task.task-20260327-help001
-dialtone> Task log: ~/.dialtone/logs/task-20260327-help001.log
-dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-20260327-help001 --lines 10
+dialtone> Connected to repl.topic.index via ...
+dialtone> Leader online on DIALTONE-SERVER (topic=repl.topic.index ...)
+dialtone> Shared REPL session ready on topic index.
 ```
 
-## 2. Remote SSH CLI Command
-
-```text
-host-name> /ssh src_v1 run --host grey --cmd hostname
-dialtone> Request received.
-dialtone> Task queued as task-20260327-ssh001.
-dialtone> Task topic: task.task-20260327-ssh001
-dialtone> Task log: ~/.dialtone/logs/task-20260327-ssh001.log
-dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-20260327-ssh001 --lines 10
-```
-
-## 3. One-Shot Service Start
+### Service Start
 
 ```text
 host-name> /testdaemon src_v1 service --host legion --mode start --name demo
@@ -453,99 +441,138 @@ dialtone> Task log: ~/.dialtone/logs/task-20260327-svc001.log
 dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-20260327-svc001 --lines 10
 ```
 
-## 4. Failure Still Queues As A Task
+### Heartbeat Recovery
+
+Expected later lifecycle shape:
 
 ```text
-host-name> /testdaemon src_v1 exit-code --host legion --code 17
-dialtone> Request received.
-dialtone> Task queued as task-20260327-fail001.
-dialtone> Task topic: task.task-20260327-fail001
-dialtone> Task log: ~/.dialtone/logs/task-20260327-fail001.log
-dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-20260327-fail001 --lines 10
+dialtone> Task task-20260327-svc001 assigned pid 25516 on legion.
+dialtone> testdaemon service demo on legion is healthy.
+dialtone> WARNING service demo on legion missed heartbeat.
+dialtone> Reconcile restarting service demo on legion.
+dialtone> Task task-20260327-svc009 assigned pid 25599 on legion.
+dialtone> testdaemon service demo on legion is healthy.
 ```
 
-## 5. Interleaving
+## Suites To Implement
 
-```text
-host-name> /proc src_v1 sleep 20
-dialtone> Request received.
-dialtone> Task queued as task-20260327-sleep01.
-dialtone> Task topic: task.task-20260327-sleep01
-dialtone> Task log: ~/.dialtone/logs/task-20260327-sleep01.log
+Only these suites are the current priority:
 
-host-name> /ssh src_v1 run --host grey --cmd 'echo ready'
-dialtone> Request received.
-dialtone> Task queued as task-20260327-echo01.
-dialtone> Task topic: task.task-20260327-echo01
-dialtone> Task log: ~/.dialtone/logs/task-20260327-echo01.log
+- `00_dispatch_contract`
+- `01_testdaemon_fixture`
+- `02_task_kv_state`
+- `03_service_kv_state`
+- `04_heartbeat_and_reconcile`
+- `05_remote_service_legion`
+- `06_env_root_isolation`
+- `07_legacy_suite_replacement`
 
-host-name> /ssh src_v1 run --host grey --cmd 'echo boom >&2; exit 17'
-dialtone> Request received.
-dialtone> Task queued as task-20260327-fail01.
-dialtone> Task topic: task.task-20260327-fail01
-dialtone> Task log: ~/.dialtone/logs/task-20260327-fail01.log
+These may exist later, but they are not the main gate right now:
 
-dialtone> Task task-20260327-echo01 assigned pid 51102 on grey.
-dialtone> Task task-20260327-fail01 assigned pid 51108 on grey.
-dialtone> Task task-20260327-sleep01 assigned pid 41122.
-dialtone> Task task-20260327-echo01 exited with code 0.
-dialtone> ERROR task task-20260327-fail01 on grey exited with code 17.
-dialtone> Task task-20260327-sleep01 exited with code 0.
-```
+- Chrome browser integration
+- robot/public-edge integration
+- Cloudflare/public-host integration
+- remote SSH and deploy integration beyond what the shared service model needs
+- workstation-specific WSL diagnostics beyond what is needed for the core suites
 
-## Proposed Suite Layout
+For now, the default `./dialtone.sh repl src_v3 test` registry should stay focused on the core proof surface and exclude the longer SSH- and Cloudflare-dependent integration suites.
+That includes the explicit SSH and Cloudflare suites plus the older SSH-fixture observability and attach slices that still depend on remote hosts.
+Treat those flows as separate opt-in integration coverage until the core `testdaemon`, KV, and reconcile work is complete.
 
-- `00_bootstrap_install`
-- `01_cli_task_submission`
-- `02_interactive_repl`
-- `03_task_state_and_logs`
-- `04_task_operator_commands`
-- `05_local_service_reconcile`
-- `06_remote_ssh_grey`
-- `07_remote_service_legion`
-- `08_failure_recovery`
-- `09_interleaving_and_isolation`
-- `10_logs_and_observability`
-- `11_same_host_wsl_diagnostics`
+### Default Registry Today
 
-## End-To-End Commands To Use While Migrating
+The default `./dialtone.sh repl src_v3 test` gate should currently contain only:
 
-These are the commands to keep using during the migration loop:
+- `00_process_manager`
+- `01_tmp_workspace`
+- `02_cli_help`
+- `03_bootstrap_config`
+- `04_repl_help_ps`
+- `07_tsnet_ephemeral`
+- `10_repl_logging_contract`
+- `11_testdaemon_fixture`
+- `12_task_kv_state`
+
+These suites are the current opt-in integration coverage and should not be part of the default gate while the core proof surface is still stabilizing:
+
+- `05_ssh_wsl`
+- `06_cloudflare_tunnel`
+- `08_task_observability`
+- `09_task_attach`
+
+## Commands To Keep Using During The Migration Loop
+
+Core REPL loop:
 
 ```bash
+./dialtone.sh repl src_v3 process-clean
+./dialtone.sh repl src_v3 format
+./dialtone.sh repl src_v3 build
 ./dialtone.sh repl src_v3 test --filter shell-routed-command-autostarts-leader-when-missing
 ./dialtone.sh repl src_v3 test --filter shell-routed-command-reuses-running-leader
+./dialtone.sh repl src_v3 test --filter shell-foreground-query-autostarts-leader-and-prints-direct-output
 ./dialtone.sh repl src_v3 test --filter interactive-command-index-lifecycle-contract
-./dialtone.sh repl src_v3 test --filter interactive-nonzero-exit-lifecycle
-./dialtone.sh repl src_v3 test --filter task-list-and-log-match-real-command
-./dialtone.sh repl src_v3 test --filter interactive-task-attach-detach
-./dialtone.sh proc src_v1 emit shell-contract-check
 ```
 
-The narrowest useful first command is:
+Focused fixture loop:
 
 ```bash
-./dialtone.sh repl src_v3 test --filter shell-routed-command-autostarts-leader-when-missing
+./dialtone.sh testdaemon src_v1 format
+./dialtone.sh testdaemon src_v1 build
+./dialtone.sh testdaemon src_v1 test
 ```
 
-The best local control-plane loop after that is:
+Focused service-model loop once the suites exist:
 
 ```bash
-./dialtone.sh repl src_v3 test --filter shell-routed-command-autostarts-leader-when-missing,shell-routed-command-reuses-running-leader,interactive-command-index-lifecycle-contract,task-list-and-log-match-real-command
+./dialtone.sh repl src_v3 test --filter testdaemon-builds
+./dialtone.sh repl src_v3 test --filter task-submit-creates-kv-record-before-launch
+./dialtone.sh repl src_v3 test --filter service-start-creates-desired-running-state
+./dialtone.sh repl src_v3 test --filter missed-heartbeat-marks-service-unhealthy
+./dialtone.sh repl src_v3 test --filter leader-restarts-service-after-heartbeat-loss
+./dialtone.sh repl src_v3 test --filter remote-testdaemon-service-start-on-legion
+./dialtone.sh repl src_v3 test --filter default-env-and-alt-env-do-not-share-task-state
 ```
 
-## Success Criteria
+## Current Verified Baseline
 
-The migration is successful when all of these are true:
+These are useful smoke checks that already passed recently, but they are not enough to declare the focused work complete:
 
-- every request returns a `task-id`
-- every request gets a task topic and task log before PID assignment
-- every one-shot CLI call returns immediately after printing the queued-task summary and log-inspection hint
-- the top-level transcript is task-first everywhere
-- the active CLI and REPL path render lowercase `dialtone>`
-- the CLI depends only on task-first wording
-- `task list`, `task show`, `task log`, and `task kill` are the standard operator tools
-- local and remote work share the same task lifecycle semantics
-- `chrome src_v3` is fully managed as REPL service state on `legion`
-- service health and restart behavior are driven by heartbeats and NATS KV state
-- the task log and NATS subjects provide durable, inspectable state for every task
+- `./dialtone.sh testdaemon src_v1 format`
+- `./dialtone.sh testdaemon src_v1 build`
+- `./dialtone.sh testdaemon src_v1 test`
+- `./dialtone.sh repl src_v3 format`
+- `./dialtone.sh repl src_v3 build`
+- `./dialtone.sh repl src_v3 test --filter testdaemon`
+- `./dialtone.sh repl src_v3 test --filter task-submit,task-record-includes,task-record-exists`
+- `./dialtone.sh repl src_v3 test --filter task-record-updates-to-running,task-record-stores-pid,task-record-updates-to-exited`
+- `./dialtone.sh repl src_v3 test --filter task-record-stores-exit-code-on-finish,task-list-reads-from-kv,task-show-reads-from-kv,task-log-by-task-id-still-works-after-task-exit,queued-task-still-visible-after-leader-restart,finished-task-still-visible-after-leader-restart`
+- `./dialtone.sh repl src_v3 test --filter shell-routed-command-autostarts-leader-when-missing`
+- `./dialtone.sh repl src_v3 test --filter shell-routed-command-reuses-running-leader`
+- `./dialtone.sh repl src_v3 test --filter shell-foreground-query-autostarts-leader-and-prints-direct-output`
+- `./dialtone.sh repl src_v3 test --filter interactive-command-index-lifecycle-contract`
+- `./dialtone.sh repl src_v3 test`
+
+Again: these are helpful, but they do not replace the focused areas above.
+
+## Current Gaps In The Repo
+
+Be honest about the current state while working this plan:
+
+- `src/plugins/testdaemon/src_v1` now exists as the generic local fixture, and the focused local REPL slice now covers build/progress/failure/service basics against it, but KV/reconcile/remote proof is still missing
+- the local task-KV slice now covers the full Focus Area 2 proof set plus direct source-of-truth override checks: queued-record creation, canonical fields, pre-PID visibility, running transition, PID persistence, done transition, exit-code persistence, KV-backed task list/show, KV-over-registry field preference, KV-over-history state preference, durable task log lookup by task id, and queued/finished visibility after leader restart
+- legacy `subtone` suite directories still exist under `src/plugins/repl/src_v3/test`
+- current dispatch and logging tests are useful, but they do not yet prove KV-backed task or service state
+- current Chrome, robot, Cloudflare, and public-edge wins are integration proof only, not the core gate
+
+## Final Success Criteria
+
+This work is successful only when:
+
+- `testdaemon` is the generic proof fixture
+- KV-backed task state is proven
+- KV-backed service state is proven
+- heartbeat loss and reconcile/restart are proven
+- remote service behavior is proven on `legion`
+- env-root leader isolation is proven
+- Chrome and other plugin tests are clearly layered on top of that core, not used instead of it

@@ -63,7 +63,7 @@ func RunService(args []string) error {
 	mode := fs.String("mode", "install", "Service mode: install|run|status")
 	repo := fs.String("repo", "timcash/dialtone", "GitHub repo owner/name")
 	natsURL := fs.String("nats-url", resolveREPLNATSURL(), "NATS URL for worker leader")
-	room := fs.String("room", defaultRoom, "REPL room for worker leader")
+	topic := topicFlag(fs, "REPL topic for worker leader")
 	hostname := fs.String("hostname", DefaultPromptName(), "Host name used by worker leader")
 	checkInterval := fs.Duration("check-interval", 5*time.Minute, "Update check interval")
 	installDir := fs.String("install-dir", filepath.Join(userHomeDir(), ".dialtone", "repl"), "Service install directory")
@@ -79,7 +79,7 @@ func RunService(args []string) error {
 		Mode:           strings.TrimSpace(*mode),
 		Repo:           strings.TrimSpace(*repo),
 		NATSURL:        strings.TrimSpace(*natsURL),
-		Room:           sanitizeRoom(*room),
+		Room:           sanitizeRoom(*topic),
 		HostName:       normalizePromptName(*hostname),
 		CheckInterval:  *checkInterval,
 		InstallDir:     strings.TrimSpace(*installDir),
@@ -154,7 +154,7 @@ func runServiceSupervisor(opts serviceOptions) error {
 	ticker := time.NewTicker(opts.CheckInterval)
 	defer ticker.Stop()
 
-	logs.Info("REPL service active: repo=%s room=%s nats=%s version=%s asset=%s", opts.Repo, opts.Room, opts.NATSURL, mgr.version, assetName)
+	logs.Info("REPL service active: repo=%s topic=%s nats=%s version=%s asset=%s", opts.Repo, opts.Room, opts.NATSURL, mgr.version, assetName)
 	stopPresence := startDaemonPresenceLoop(ctx, opts, mgr)
 	defer stopPresence()
 
@@ -260,7 +260,7 @@ func serviceRunArgs(opts serviceOptions) []string {
 		"service", "--mode", "run",
 		"--repo", opts.Repo,
 		"--nats-url", opts.NATSURL,
-		"--room", opts.Room,
+		"--topic", opts.Room,
 		"--hostname", opts.HostName,
 		"--check-interval", opts.CheckInterval.String(),
 		"--install-dir", opts.InstallDir,
@@ -410,7 +410,7 @@ func (m *serviceManager) startWorker(currentPath string, opts serviceOptions) er
 			}
 		}
 	}
-	args := []string{"leader", "--nats-url", opts.NATSURL, "--room", opts.Room}
+	args := []string{"leader", "--nats-url", opts.NATSURL, "--topic", opts.Room}
 	if opts.EmbeddedNATS {
 		args = append(args, "--embedded-nats")
 	} else {

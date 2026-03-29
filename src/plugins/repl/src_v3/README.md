@@ -18,6 +18,25 @@ Public terminology:
 - `service`: one long-lived managed process, such as `chrome src_v3` on `legion`
 - `topic`: the event/log stream for a task or service
 
+## Control Plane Rules
+
+These are the key rules the runtime should follow:
+
+- every queued command gets a `task-id` before process launch
+- `task-id` is the primary identity; PID is only an observed runtime field that may appear later
+- task creation, task updates, and task lookup should be backed by NATS KV state
+- service identity should be `(host, service-name)`, not just a bare service name
+- service desired state and observed state should be backed by NATS KV state
+- service heartbeats update observed state continuously
+- missed heartbeats mark services unhealthy and should trigger reconcile or restart when desired state still says `running`
+- query commands should read the control-plane state, not rely only on ad hoc process inspection
+
+Short architecture summary:
+
+`./dialtone.sh` -> leader autostart if needed -> command publish -> task record in NATS KV -> execution and log streaming -> service heartbeats -> reconcile loop
+
+That is the center of gravity for `repl src_v3`: a control plane with durable state, not a thin wrapper around a single local process launch.
+
 ## Default Use
 
 ```bash
@@ -42,7 +61,7 @@ host-name> /robot src_v2 diagnostic --host rover --skip-ui --public-check=false
 dialtone> Request received.
 dialtone> Task queued as task-20260327-abc123.
 dialtone> Task topic: task.task-20260327-abc123
-dialtone> Task log: /home/user/dialtone/.dialtone/logs/task-20260327-abc123.log
+dialtone> Task log: ~/.dialtone/logs/task-20260327-abc123.log
 dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-20260327-abc123 --lines 10
 ```
 
@@ -76,6 +95,24 @@ Inside the shared REPL stream or a live watch session, `dialtone>` may also cont
 
 That detail belongs in the task log.
 
+## Env Roots And Leader Isolation
+
+By default, `./dialtone.sh` should use the `env/dialtone.json` that lives in the folder you launched from.
+
+Use `--env` when you want to point at a different env root or a specific config file:
+
+```bash
+./dialtone.sh --env /tmp/dialtone-demo/env robot src_v2 publish --skip-release --ui
+./dialtone.sh --env /tmp/dialtone-demo/env repl src_v3 task list
+```
+
+Important expectations:
+
+- launch-folder default config and explicit `--env` runs should not bleed into each other
+- the leader should reuse the matching env root instead of silently crossing into another one
+- temp env roots are the right way to test isolated leader bootstrap and task state
+- query commands should still warm the correct background leader when needed
+
 ## Tasks, Services, And The Operator Surface
 
 Use normal plugin commands for one-shot work:
@@ -105,13 +142,22 @@ The intended service contract is:
 
 ### Shared Service Contract Fixture
 
-Use the fixture at `src/plugins/repl/src_v3/testdaemon/src_v1` to prove the shared service layer without depending on Chrome or any other plugin implementation.
+Use the fixture at `src/plugins/testdaemon/src_v1` to prove the shared service layer without depending on Chrome or any other plugin implementation.
 
 ```bash
 ./dialtone.sh testdaemon src_v1 service --host legion --mode start --name demo
 ./dialtone.sh testdaemon src_v1 service --host legion --mode status --name demo
 ./dialtone.sh testdaemon src_v1 service --host legion --mode stop --name demo
+./dialtone.sh testdaemon src_v1 emit-progress --steps 5
+./dialtone.sh testdaemon src_v1 exit-code --code 17
+./dialtone.sh testdaemon src_v1 panic
+./dialtone.sh testdaemon src_v1 hang
+./dialtone.sh testdaemon src_v1 heartbeat --name demo --mode stop
+./dialtone.sh testdaemon src_v1 heartbeat --name demo --mode resume
+./dialtone.sh testdaemon src_v1 shutdown --name demo
 ```
+
+The current local REPL fixture slice should at least prove build, one-shot progress, nonzero exit, panic, hang, service start or stop, heartbeat advance, and heartbeat pause or resume against this fixture before later KV, reconcile, or remote claims are treated as complete.
 
 Target one-shot service submission pattern:
 
@@ -120,7 +166,7 @@ host-name> /testdaemon src_v1 service --host legion --mode start --name demo
 dialtone> Request received.
 dialtone> Task queued as task-20260327-svc001.
 dialtone> Task topic: task.task-20260327-svc001
-dialtone> Task log: /home/user/dialtone/.dialtone/logs/task-20260327-svc001.log
+dialtone> Task log: ~/.dialtone/logs/task-20260327-svc001.log
 dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-20260327-svc001 --lines 10
 ```
 
@@ -137,6 +183,13 @@ The target REPL operator surface should make task and service state visible with
 ./dialtone.sh repl src_v3 service show --host legion --name testdaemon-demo
 ./dialtone.sh repl src_v3 watch --subject 'repl.topic.index'
 ```
+
+These commands should read canonical control-plane state:
+
+- `task list` and `task show` should reflect NATS KV-backed task state
+- `service list` and `service show` should reflect NATS KV-backed desired and observed service state
+- `task log` should read the durable task log directly
+- `watch` and `logs src_v1 stream` are event views, not the source of truth
 
 Target `task list` example with a running remote service:
 
@@ -159,7 +212,7 @@ dialtone> Host: legion
 dialtone> Service: testdaemon-demo
 dialtone> PID: 25516
 dialtone> Task topic: task.task-20260327-svc001
-dialtone> Task log: /home/user/dialtone/.dialtone/logs/task-20260327-svc001.log
+dialtone> Task log: ~/.dialtone/logs/task-20260327-svc001.log
 dialtone> Log subject: logs.service.legion.testdaemon-demo
 ```
 
@@ -231,7 +284,7 @@ host-name> /chrome src_v3 service --host legion --mode start --role robot-test
 dialtone> Request received.
 dialtone> Task queued as task-20260327-chr001.
 dialtone> Task topic: task.task-20260327-chr001
-dialtone> Task log: /home/user/dialtone/.dialtone/logs/task-20260327-chr001.log
+dialtone> Task log: ~/.dialtone/logs/task-20260327-chr001.log
 dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-20260327-chr001 --lines 10
 
 host-name> /repl src_v3 task list --state running --host legion
@@ -243,7 +296,7 @@ host-name> /chrome src_v3 goto --host legion --role robot-test --url http://127.
 dialtone> Request received.
 dialtone> Task queued as task-20260327-nav001.
 dialtone> Task topic: task.task-20260327-nav001
-dialtone> Task log: /home/user/dialtone/.dialtone/logs/task-20260327-nav001.log
+dialtone> Task log: ~/.dialtone/logs/task-20260327-nav001.log
 dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-20260327-nav001 --lines 10
 ```
 
@@ -253,6 +306,24 @@ This is the same control pattern that should support:
 - `robot src_v2 test`
 - `ui src_v1 test --attach legion`
 - direct browser-driving commands like `goto`, `click-aria`, and `screenshot`
+
+## Priority Order For Proof
+
+The REPL core should be considered proven in this order:
+
+1. `testdaemon` exists and can drive the shared task and service suites
+2. task state is durable and queryable through NATS KV
+3. service desired and observed state is durable and queryable through NATS KV
+4. heartbeat loss marks services unhealthy and the reconcile loop restarts them when desired state still says `running`
+5. remote `testdaemon` service behavior on `legion` proves the same semantics as local runs
+6. only after that should Chrome, robot, Cloudflare, and public-edge flows be treated as layered integration proof
+
+Chrome is still an important integration, but it should not be the thing that proves the generic control plane works.
+
+For now, `./dialtone.sh repl src_v3 test` intentionally excludes the longer SSH- and Cloudflare-dependent integration suites from the default gate.
+That includes the old SSH fixture observability and attach slices as well as the explicit SSH and Cloudflare suites.
+Keep the default loop focused on core REPL behavior, `testdaemon`, and KV-backed task or service state.
+Those integration suites can return later as separate opt-in coverage once the core proof surface is stable again.
 
 ### Errors, Kill, And Recovery
 
@@ -264,7 +335,7 @@ Later failure lines in the shared REPL stream or task log for a Chrome command c
 dialtone> Task task-20260327-wait001 assigned pid 25516 on legion.
 dialtone> ERROR task task-20260327-wait001 on legion exited with code 28.
 dialtone> ERROR task task-20260327-wait001 wait-aria timeout label=Open Camera
-dialtone> Task log: /home/user/dialtone/.dialtone/logs/task-20260327-wait001.log
+dialtone> Task log: ~/.dialtone/logs/task-20260327-wait001.log
 ```
 
 Target kill example:
@@ -334,7 +405,7 @@ host-name> /robot src_v2 publish --repo timcash/dialtone
 dialtone> Request received.
 dialtone> Task queued as task-20260327-def456.
 dialtone> Task topic: task.task-20260327-def456
-dialtone> Task log: /home/user/dialtone/.dialtone/logs/task-20260327-def456.log
+dialtone> Task log: ~/.dialtone/logs/task-20260327-def456.log
 dialtone> To view the last 10 log lines: ./dialtone.sh repl src_v3 task log --task-id task-20260327-def456 --lines 10
 ```
 
@@ -397,13 +468,14 @@ If you are editing from Windows but running the real runtime in WSL, keep this s
 - run REPL and plugin tests in `/home/user/dialtone`
 - keep the WSL tmux session `windows` alive and reuse it
 
-Use the `wsl-tmux` wrapper from Windows so commands stay visible in the persistent WSL tmux pane:
+If you are on Windows, you must use [wsl-tmux.cmd](/C:/Users/timca/dialtone/wsl-tmux.cmd) so REPL and plugin commands stay visible in the persistent WSL tmux pane:
 
 ```powershell
-wsl-tmux "cd /home/user/dialtone && ./dialtone.sh repl src_v3 process-clean"
-wsl-tmux "cd /home/user/dialtone && ./dialtone.sh repl src_v3 test"
-wsl-tmux read
-wsl-tmux interrupt
+.\wsl-tmux.cmd clean-state
+.\wsl-tmux.cmd "./dialtone.sh repl src_v3 process-clean"
+.\wsl-tmux.cmd "./dialtone.sh repl src_v3 test"
+.\wsl-tmux.cmd read
+.\wsl-tmux.cmd interrupt
 ```
 
 For this repo, trust:
@@ -463,26 +535,20 @@ When working from Windows, prefer this testing pattern:
 
 ```powershell
 # 1. Keep the persistent WSL tmux session alive.
-wsl-tmux "cd /home/user/dialtone && ./dialtone.sh repl src_v3 process-clean"
+.\wsl-tmux.cmd clean-state
+.\wsl-tmux.cmd "./dialtone.sh repl src_v3 process-clean"
 
 # 2. Run the full REPL suite visibly in WSL.
-wsl-tmux "cd /home/user/dialtone && ./dialtone.sh repl src_v3 test"
+.\wsl-tmux.cmd "./dialtone.sh repl src_v3 test"
 
 # 3. If needed, rerun a focused step.
-wsl-tmux "cd /home/user/dialtone && ./dialtone.sh repl src_v3 test --filter interactive-ssh-wsl-command"
+.\wsl-tmux.cmd "./dialtone.sh repl src_v3 test --filter interactive-command-index-lifecycle-contract"
+.\wsl-tmux.cmd "./dialtone.sh repl src_v3 test --filter task-list-reads-from-kv,task-show-reads-from-kv"
+.\wsl-tmux.cmd "./dialtone.sh testdaemon src_v1 test"
 
 # 4. Inspect the generated report files in the WSL repo.
-wsl-tmux "cd /home/user/dialtone && sed -n '1,80p' src/plugins/repl/src_v3/TEST.md"
+.\wsl-tmux.cmd "sed -n '1,80p' src/plugins/repl/src_v3/TEST.md"
 ```
-
-For this environment, the SSH-backed REPL test path is most reliable when the reachable default node is `grey`:
-
-```bash
-./dialtone.sh ssh src_v1 probe --host grey --timeout 5s
-./dialtone.sh ssh src_v1 run --host grey --cmd whoami
-```
-
-If an SSH-focused REPL test refers to the logical host name `wsl`, the current test setup may still resolve that through `grey.shad-artichoke.ts.net` as the preferred reachable transport target.
 
 For Chrome/CAD/UI debugging, use this pattern:
 

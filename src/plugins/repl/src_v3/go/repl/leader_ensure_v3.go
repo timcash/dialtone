@@ -90,7 +90,7 @@ func leaderAutostartCommand(repoRoot, srcRoot, listenURL, room string) (*exec.Cm
 		"repl", "src_v3", "leader",
 		"--embedded-nats",
 		"--nats-url", listenURL,
-		"--room", room,
+		"--topic", room,
 		"--hostname", "DIALTONE-SERVER",
 	}
 	if len(os.Args) > 1 && strings.HasPrefix(strings.TrimSpace(os.Args[1]), "src_v") {
@@ -98,7 +98,7 @@ func leaderAutostartCommand(repoRoot, srcRoot, listenURL, room string) (*exec.Cm
 			"src_v3", "leader",
 			"--embedded-nats",
 			"--nats-url", listenURL,
-			"--room", room,
+			"--topic", room,
 			"--hostname", "DIALTONE-SERVER",
 		}
 	}

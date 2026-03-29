@@ -12,12 +12,10 @@ import (
 	clihelp "dialtone/dev/plugins/repl/src_v3/test/02_cli_help"
 	bootstrapcfg "dialtone/dev/plugins/repl/src_v3/test/03_bootstrap_config"
 	replhelpps "dialtone/dev/plugins/repl/src_v3/test/04_repl_help_ps"
-	sshwsl "dialtone/dev/plugins/repl/src_v3/test/05_ssh_wsl"
-	cloudflaretunnel "dialtone/dev/plugins/repl/src_v3/test/06_cloudflare_tunnel"
 	tsnetephemeral "dialtone/dev/plugins/repl/src_v3/test/07_tsnet_ephemeral"
-	taskobservability "dialtone/dev/plugins/repl/src_v3/test/08_task_observability"
-	taskattach "dialtone/dev/plugins/repl/src_v3/test/09_task_attach"
 	replloggingcontract "dialtone/dev/plugins/repl/src_v3/test/10_repl_logging_contract"
+	testdaemonfixture "dialtone/dev/plugins/repl/src_v3/test/11_testdaemon_fixture"
+	taskkvstate "dialtone/dev/plugins/repl/src_v3/test/12_task_kv_state"
 	"dialtone/dev/plugins/repl/src_v3/test/support"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
 )
@@ -46,10 +44,8 @@ func run() int {
 	bootstrapcfg.Register(reg)
 	replhelpps.Register(reg)
 	replloggingcontract.Register(reg)
-	sshwsl.Register(reg)
-	cloudflaretunnel.Register(reg)
-	taskobservability.Register(reg)
-	taskattach.Register(reg)
+	testdaemonfixture.Register(reg)
+	taskkvstate.Register(reg)
 	if filtered := filterSteps(reg.Steps, strings.TrimSpace(*filter)); len(filtered) > 0 {
 		reg.Steps = filtered
 	}

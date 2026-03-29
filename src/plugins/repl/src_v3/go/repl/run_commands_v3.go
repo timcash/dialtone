@@ -19,13 +19,13 @@ import (
 func Run(args []string) error {
 	fs := flag.NewFlagSet("repl-v3-run", flag.ContinueOnError)
 	natsURL := fs.String("nats-url", resolveREPLNATSURL(), "NATS URL")
-	room := fs.String("room", defaultRoom, "Shared room name")
+	topic := topicFlag(fs, "Shared topic name")
 	name := fs.String("name", DefaultPromptName(), "Prompt name for this client")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	wasReachable := endpointReachable(strings.TrimSpace(*natsURL), 700*time.Millisecond)
-	if err := EnsureLeaderRunning(strings.TrimSpace(*natsURL), strings.TrimSpace(*room)); err != nil {
+	if err := EnsureLeaderRunning(strings.TrimSpace(*natsURL), strings.TrimSpace(*topic)); err != nil {
 		return err
 	}
 	if bootstrapHTTPAutostartEnabled() {
@@ -48,10 +48,10 @@ func Run(args []string) error {
 	if wasReachable {
 		startupMode = "connected"
 	}
-	logREPLRunStartupState(strings.TrimSpace(*natsURL), strings.TrimSpace(*room), startupMode)
+	logREPLRunStartupState(strings.TrimSpace(*natsURL), strings.TrimSpace(*topic), startupMode)
 	joinArgs := []string{
 		"--nats-url", strings.TrimSpace(*natsURL),
-		"--room", strings.TrimSpace(*room),
+		"--topic", strings.TrimSpace(*topic),
 		"--name", strings.TrimSpace(*name),
 	}
 	return RunJoin(joinArgs)
@@ -215,7 +215,7 @@ func RunBootstrap(args []string) error {
 	})
 }
 
-func logREPLRunStartupState(natsURL, room, mode string) {
+func logREPLRunStartupState(natsURL, topic, mode string) {
 	hostName := strings.TrimSpace(DefaultPromptName())
 	if hostName == "" {
 		hostName = "unknown"
@@ -229,7 +229,7 @@ func logREPLRunStartupState(natsURL, room, mode string) {
 	logs.System("Startup state:")
 	logs.System("- repl version=%s host=%s os=%s arch=%s cpu_cores=%d mem_total=%s", strings.TrimSpace(BuildVersion), hostName, runtime.GOOS, runtime.GOARCH, cpuCores, memText)
 	logs.System("- repl mode=%s", strings.TrimSpace(mode))
-	logs.System("- room=%s nats=%s reachable=%t", strings.TrimSpace(room), strings.TrimSpace(natsURL), endpointReachable(strings.TrimSpace(natsURL), 700*time.Millisecond))
+	logs.System("- topic=%s nats=%s reachable=%t", strings.TrimSpace(topic), strings.TrimSpace(natsURL), endpointReachable(strings.TrimSpace(natsURL), 700*time.Millisecond))
 
 	pid := replLeaderPID()
 	if pid <= 0 {

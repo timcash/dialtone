@@ -147,7 +147,7 @@ func RunLocal(logFn func(category, msg string), args []string) error {
 func RunLeader(args []string) error {
 	fs := flag.NewFlagSet("repl-leader", flag.ContinueOnError)
 	natsURL := fs.String("nats-url", resolveREPLNATSURL(), "NATS URL")
-	room := fs.String("room", defaultRoom, "Primary REPL room")
+	topic := topicFlag(fs, "Primary REPL topic")
 	embedded := fs.Bool("embedded-nats", true, "Start embedded NATS on --nats-url")
 	enableTSNet := fs.Bool("tsnet", true, "Start embedded tsnet identity on host when native tailscale is not already connected")
 	tsnetNATSPort := fs.Int("tsnet-nats-port", 0, "Expose NATS over tsnet on this port (default: port from --nats-url)")
@@ -173,7 +173,7 @@ func RunLeader(args []string) error {
 	tsnetPublicURL := ""
 
 	h := normalizePromptName(*hostname)
-	roomName := sanitizeRoom(*room)
+	roomName := sanitizeRoom(*topic)
 	serverID := h + "@" + roomName
 	startedAt := time.Now()
 	if err := writeLeaderStateHeartbeat(clientNATSURL, tsnetPublicURL, roomName, h, serverID, *embedded, startedAt); err != nil {
@@ -246,7 +246,7 @@ func RunLeader(args []string) error {
 
 	// Publish initial presence line to NATS so every connected client sees it.
 	publishRoom(roomName, BusFrame{Type: frameTypeServer, Message: fmt.Sprintf("Leader online on %s (topic=%s nats=%s)", h, replTopicSubjectLabel(roomName), usedURL)})
-	logs.Info("REPL host serving: hostname=%s room=%s cmd_subject=%s nats=%s", h, roomName, commandSubject, usedURL)
+	logs.Info("REPL host serving: hostname=%s topic=%s cmd_subject=%s nats=%s", h, roomName, commandSubject, usedURL)
 	var tsnetListener net.Listener
 	if tsRuntime != nil {
 		targetAddr, parsedPort, parseErr := natsProxyTarget(usedURL)
@@ -282,6 +282,10 @@ func RunLeader(args []string) error {
 
 	presence := newPresenceTracker()
 	tasks := newTaskRegistry(256)
+	taskStore, err := newTaskKVStore(nc)
+	if err != nil {
+		return err
+	}
 	services := newServiceRegistry(128)
 	daemonTTL := 20 * time.Second
 	var runMu sync.Mutex
@@ -351,11 +355,11 @@ func RunLeader(args []string) error {
 			if len(args) >= 4 && args[0] == "repl" && args[1] == "src_v3" && args[2] == "join" {
 				targetRoom := sanitizeRoom(args[3])
 				if targetRoom == "" {
-					publishRoom(currentRoom, BusFrame{Type: frameTypeError, Message: "Usage: /repl src_v3 join <room-name> | /repl src_v3 who | /repl src_v3 versions"})
+					publishRoom(currentRoom, BusFrame{Type: frameTypeError, Message: "Usage: /repl src_v3 join <topic-name> | /repl src_v3 who | /repl src_v3 versions"})
 					return
 				}
 				if targetRoom == currentRoom {
-					publishDialtoneIndexLine(publishRoom, currentRoom, "status", fmt.Sprintf("%s is already in room %s", sender, targetRoom))
+					publishDialtoneIndexLine(publishRoom, currentRoom, "status", fmt.Sprintf("%s is already on topic %s", sender, targetRoom))
 					return
 				}
 				publishRoom(currentRoom, BusFrame{Type: frameTypeLeft, From: sender})
@@ -364,7 +368,7 @@ func RunLeader(args []string) error {
 					Target:  sender,
 					Command: controlJoinRoom,
 					Room:    targetRoom,
-					Message: fmt.Sprintf("switching %s to room %s", sender, targetRoom),
+					Message: fmt.Sprintf("switching %s to topic %s", sender, targetRoom),
 				})
 				presence.UpsertClient(sender, targetRoom, frame.Version, frame.OS, frame.Arch)
 				return
@@ -373,7 +377,7 @@ func RunLeader(args []string) error {
 			go func(in BusFrame) {
 				runMu.Lock()
 				defer runMu.Unlock()
-				executeCommand(strings.TrimSpace(in.Message), currentRoom, h, tasks, services, func(subject string, payload []byte) error {
+				executeCommand(strings.TrimSpace(in.Message), currentRoom, h, tasks, taskStore, services, func(subject string, payload []byte) error {
 					return nc.Publish(subject, payload)
 				}, func(frame BusFrame) {
 					publishScopedFrame(currentRoom, frame)
@@ -454,7 +458,7 @@ func RunLeader(args []string) error {
 	}
 	defer serviceHeartbeatSub.Unsubscribe()
 
-	roomSub, err := nc.Subscribe("repl.room.*", func(msg *nats.Msg) {
+	roomSub, err := nc.Subscribe("repl.topic.*", func(msg *nats.Msg) {
 		frame, ok := decodeFrame(msg.Data)
 		if !ok {
 			return
@@ -512,16 +516,16 @@ func RunLeader(args []string) error {
 func RunJoin(args []string) error {
 	fs := flag.NewFlagSet("repl-join", flag.ContinueOnError)
 	natsURL := fs.String("nats-url", resolveREPLNATSURL(), "NATS URL")
-	room := fs.String("room", defaultRoom, "Shared REPL room")
+	topic := topicFlag(fs, "Shared REPL topic")
 	name := fs.String("name", DefaultPromptName(), "Prompt name for this client")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() > 1 {
-		return fmt.Errorf("usage: join [room-name] [--nats-url URL] [--name HOST]")
+		return fmt.Errorf("usage: join [topic-name] [--nats-url URL] [--name HOST]")
 	}
 	if fs.NArg() == 1 {
-		*room = fs.Arg(0)
+		*topic = fs.Arg(0)
 	}
 
 	nc, err := nats.Connect(strings.TrimSpace(*natsURL), nats.Timeout(1500*time.Millisecond))
@@ -531,7 +535,7 @@ func RunJoin(args []string) error {
 	defer nc.Close()
 
 	prompt := normalizePromptName(*name)
-	roomName := sanitizeRoom(*room)
+	roomName := sanitizeRoom(*topic)
 	currentRoom := roomName
 	currentSubj := replRoomSubject(currentRoom)
 	natsAddr := strings.TrimSpace(*natsURL)
@@ -601,7 +605,7 @@ func RunJoin(args []string) error {
 							Scope:   "index",
 							Kind:    "lifecycle",
 							PID:     ev.PID,
-							Message: fmt.Sprintf("Subtone room: %s", subtoneRoomName(ev.PID)),
+							Message: fmt.Sprintf("Subtone topic: %s", subtoneRoomName(ev.PID)),
 						})
 						if strings.TrimSpace(ev.LogPath) != "" {
 							publishHostFrame(BusFrame{
@@ -893,12 +897,12 @@ func RunJoin(args []string) error {
 func RunStatus(args []string) error {
 	fs := flag.NewFlagSet("repl-status", flag.ContinueOnError)
 	natsURL := fs.String("nats-url", resolveREPLNATSURL(), "NATS URL")
-	room := fs.String("room", defaultRoom, "Shared REPL room")
+	topic := topicFlag(fs, "Shared REPL topic")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	roomName := sanitizeRoom(*room)
+	roomName := sanitizeRoom(*topic)
 	subject := replRoomSubject(roomName)
 	st := HostStatus{
 		HostName: normalizePromptName(DefaultPromptName()),
@@ -926,7 +930,7 @@ func RunStatus(args []string) error {
 	logs.Raw("REPL status")
 	logs.Raw("  Hostname: %s", st.HostName)
 	logs.Raw("  NATS URL: %s", st.NATSURL)
-	logs.Raw("  Room: %s", st.Room)
+	logs.Raw("  Topic: %s", st.Room)
 	logs.Raw("  Subject: %s", st.Subject)
 	logs.Raw("  NATS Reachable: %t", st.NATSReachable)
 	logs.Raw("  DIALTONE Server Seen: %t", st.ServerSeen)
@@ -1058,7 +1062,7 @@ func runLocalSession(in io.Reader, out io.Writer, promptName string, logFn func(
 			emitDialtoneIndexLine(say, "status", "Goodbye.")
 			break
 		}
-		executeCommand(line, defaultRoom, "", nil, nil, nil, say)
+		executeCommand(line, defaultRoom, "", nil, nil, nil, nil, say)
 	}
 	return scanner.Err()
 }
@@ -1080,6 +1084,7 @@ func executeCommand(
 	room string,
 	hostName string,
 	registry *taskRegistry,
+	taskStore *taskKVStore,
 	services *serviceRegistry,
 	publish func(subject string, payload []byte) error,
 	emit func(BusFrame),
@@ -1215,6 +1220,14 @@ func executeCommand(
 	closeTaskLog := sync.OnceFunc(func() {
 		taskLog.Close()
 	})
+	if taskStore != nil {
+		if err := taskStore.PutQueued(taskID, args, taskRoom, taskLog.LogPath, hostName, mode, serviceName); err != nil {
+			taskLog.LogError(fmt.Sprintf("task kv queued write failed: %v", err))
+			emitDialtoneIndexFrame(emit, BusFrame{Kind: "error", TaskID: taskID, Message: fmt.Sprintf("Task %s could not persist queued state: %v", taskID, err)})
+			closeTaskLog()
+			return
+		}
+	}
 	emitTaskFrame := func(frame BusFrame) {
 		if publish == nil {
 			return
@@ -1291,6 +1304,9 @@ func executeCommand(
 					if registry != nil {
 						registry.Heartbeat(pid)
 					}
+					if taskStore != nil {
+						_ = taskStore.MarkHeartbeat(taskID)
+					}
 					if services != nil && serviceName != "" {
 						services.Heartbeat(serviceName)
 					}
@@ -1330,6 +1346,11 @@ func executeCommand(
 					registryRoom = serviceRoom
 				}
 				registry.Started(taskID, registryRoom, mode, taskLog.LogPath, ev)
+			}
+			if taskStore != nil {
+				if err := taskStore.MarkRunning(taskID, ev); err != nil {
+					taskLog.LogError(fmt.Sprintf("task kv running update failed: %v", err))
+				}
 			}
 			if services != nil && serviceName != "" {
 				services.Started(serviceName, serviceRoom, ev)
@@ -1373,6 +1394,11 @@ func executeCommand(
 				if registry != nil {
 					registry.Exited(ev.PID, ev.ExitCode)
 				}
+				if taskStore != nil {
+					if err := taskStore.MarkExited(taskID, ev.PID, ev.ExitCode); err != nil {
+						taskLog.LogError(fmt.Sprintf("task kv exit update failed: %v", err))
+					}
+				}
 				if services != nil && serviceName != "" {
 					services.Exited(serviceName, ev.PID, ev.ExitCode)
 				}
@@ -1390,9 +1416,15 @@ func executeCommand(
 				return
 			}
 			if line := strings.TrimSpace(ev.Line); line != "" {
+				if taskStore != nil {
+					_ = taskStore.MarkExited(taskID, 0, 1)
+				}
 				taskLog.LogError(fmt.Sprintf("failed to start: %s", line))
 				emitDialtoneIndexFrame(emit, BusFrame{Kind: "error", TaskID: taskID, Message: fmt.Sprintf("Task %s failed to start: %s", taskID, line)})
 			} else {
+				if taskStore != nil {
+					_ = taskStore.MarkExited(taskID, 0, 1)
+				}
 				taskLog.LogError("failed to start")
 				emitDialtoneIndexFrame(emit, BusFrame{Kind: "error", TaskID: taskID, Message: fmt.Sprintf("Task %s failed to start.", taskID)})
 			}
@@ -1401,11 +1433,41 @@ func executeCommand(
 		}
 	}
 
+	if err := waitForTaskStartHold(); err != nil {
+		if taskStore != nil {
+			_ = taskStore.MarkExited(taskID, 0, 1)
+		}
+		taskLog.LogError(fmt.Sprintf("failed to start: %v", err))
+		emitDialtoneIndexFrame(emit, BusFrame{Kind: "error", TaskID: taskID, Message: fmt.Sprintf("Task %s failed to start: %v", taskID, err)})
+		emitTaskFrame(BusFrame{Kind: "error", Message: fmt.Sprintf("Task %s failed to start.", taskID)})
+		closeTaskLog()
+		return
+	}
 	if isBackground || serviceName != "" {
 		go runSubtoneWithEventsFn(args, onEvent)
 		return
 	}
 	runSubtoneWithEventsFn(args, onEvent)
+}
+
+func waitForTaskStartHold() error {
+	holdPath := strings.TrimSpace(os.Getenv("DIALTONE_REPL_TEST_TASK_START_HOLD_FILE"))
+	if holdPath == "" {
+		return nil
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if _, err := os.Stat(holdPath); err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out waiting for test task start hold file %s to clear", holdPath)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func shellSplit(line string) []string {
@@ -1509,10 +1571,10 @@ func printHelp(emit func(BusFrame)) {
 		"Stop a running task by task id",
 		"",
 		"`/task-attach --task-id <task-id>`",
-		"Stream one task room directly in the REPL console",
+		"Stream one task topic directly in the REPL console",
 		"",
 		"`/task-detach`",
-		"Return to the shared room after streaming one task",
+		"Return to the shared topic after streaming one task",
 		"",
 		"`/service-start --name <name> -- <command...>`",
 		"Start a managed long-lived service",
@@ -1785,7 +1847,7 @@ func publishPresenceReport(
 				publishDialtoneIndexFrame(publishRoom, room, BusFrame{
 					Kind: "status",
 					Message: fmt.Sprintf(
-						"- [daemon] %s daemon=%s repl=%s room=%s os=%s arch=%s",
+						"- [daemon] %s daemon=%s repl=%s topic=%s os=%s arch=%s",
 						row.Name,
 						daemonVer,
 						replVer,
@@ -1803,7 +1865,7 @@ func publishPresenceReport(
 			publishDialtoneIndexFrame(publishRoom, room, BusFrame{
 				Kind: "status",
 				Message: fmt.Sprintf(
-					"- [client] %s repl=%s room=%s os=%s arch=%s",
+					"- [client] %s repl=%s topic=%s os=%s arch=%s",
 					row.Name,
 					version,
 					sanitizeRoom(row.Room),
@@ -1827,7 +1889,7 @@ func publishPresenceReport(
 				publishDialtoneIndexFrame(publishRoom, room, BusFrame{
 					Kind: "status",
 					Message: fmt.Sprintf(
-						"- [daemon] %s room=%s daemon=%s repl=%s os=%s arch=%s",
+						"- [daemon] %s topic=%s daemon=%s repl=%s os=%s arch=%s",
 						row.Name,
 						sanitizeRoom(row.Room),
 						daemonVer,
@@ -1845,7 +1907,7 @@ func publishPresenceReport(
 			publishDialtoneIndexFrame(publishRoom, room, BusFrame{
 				Kind: "status",
 				Message: fmt.Sprintf(
-					"- [client] %s room=%s repl=%s os=%s arch=%s",
+					"- [client] %s topic=%s repl=%s os=%s arch=%s",
 					row.Name,
 					sanitizeRoom(row.Room),
 					version,
@@ -1894,7 +1956,7 @@ func sanitizeRoom(room string) string {
 }
 
 func replRoomSubject(room string) string {
-	return "repl.room." + sanitizeRoom(room)
+	return "repl.topic." + sanitizeRoom(room)
 }
 
 func replTopicSubjectLabel(room string) string {

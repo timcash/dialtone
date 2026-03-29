@@ -19,6 +19,7 @@ import (
 type leaderState struct {
 	PID           int    `json:"pid"`
 	NATSURL       string `json:"nats_url"`
+	Topic         string `json:"topic"`
 	Room          string `json:"room"`
 	ServerID      string `json:"server_id"`
 	Running       bool   `json:"running"`
@@ -117,8 +118,12 @@ func Register(r *testv1.Registry) {
 			if !strings.Contains(strings.TrimSpace(first.NATSURL), ":46222") {
 				return testv1.StepRunResult{}, fmt.Errorf("leader state nats url missing expected port: %+v", first)
 			}
-			if strings.TrimSpace(first.Room) != "index" {
-				return testv1.StepRunResult{}, fmt.Errorf("leader state room mismatch: %+v", first)
+			firstTopic := strings.TrimSpace(first.Topic)
+			if firstTopic == "" {
+				firstTopic = strings.TrimSpace(first.Room)
+			}
+			if firstTopic != "index" {
+				return testv1.StepRunResult{}, fmt.Errorf("leader state topic mismatch: %+v", first)
 			}
 
 			time.Sleep(300 * time.Millisecond)
@@ -477,13 +482,13 @@ func Register(r *testv1.Registry) {
 
 			ctx.TestPassf("external service heartbeat for chrome-dev appeared in service-list as host legion")
 			return testv1.StepRunResult{
-				Report: "Published an external `service` heartbeat on `repl.host.legion.heartbeat.service.chrome-dev` and verified `/service-list` surfaced it in the index room as an active managed service on host `legion`.",
+				Report: "Published an external `service` heartbeat on `repl.host.legion.heartbeat.service.chrome-dev` and verified `/service-list` surfaced it in the index topic as an active managed service on host `legion`.",
 			}, nil
 		},
 	})
 
 	r.Add(testv1.Step{
-		Name:    "background-subtone-does-not-block-later-foreground-command",
+		Name:    "background-task-does-not-block-later-foreground-command",
 		Timeout: 120 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			rt, err := support.NewRuntime(ctx)
@@ -499,22 +504,35 @@ func Register(r *testv1.Registry) {
 				return testv1.StepRunResult{}, err
 			}
 
-			bgPID, err := startBackgroundWatch(rt, "pm")
+			bgTaskID, bgPID, err := startBackgroundWatch(rt, "pm")
 			if err != nil {
 				return testv1.StepRunResult{}, err
 			}
 			roomSeq, _ := rt.CurrentSeqs()
 			if err := rt.RunTranscript([]support.TranscriptStep{{
-				Send:         "/repl src_v3 help",
-				ExpectRoom:   support.StandardSubtoneRoomPatterns("repl src_v3", ""),
-				ExpectOutput: append([]string{`llm-codex> /repl src_v3 help`}, support.StandardSubtoneOutputPatterns("repl src_v3", "dialtone> Subtone for repl src_v3 exited with code 0.")...),
-				Timeout:      30 * time.Second,
+				Send: "/repl src_v3 help",
+				ExpectRoom: support.CombinePatterns(
+					[]string{`"message":"/repl src_v3 help"`},
+					support.StandardTaskRoomPatterns("exited with code 0."),
+				),
+				ExpectOutput: support.CombinePatterns(
+					[]string{`llm-codex> /repl src_v3 help`},
+					support.StandardTaskOutputPatterns("exited with code 0."),
+				),
+				Timeout: 30 * time.Second,
 			}}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("foreground help command failed while background pid %d was active: %w", bgPID, err)
 			}
-			helpPID, err := rt.WaitForSubtonePIDForCommandAfter("repl src_v3 help", 20*time.Second, roomSeq)
+			helpTaskID, err := rt.WaitForTaskIDForCommandAfter("repl src_v3 help", 20*time.Second, roomSeq)
 			if err != nil {
-				return testv1.StepRunResult{}, fmt.Errorf("missing foreground help subtone pid after background start: %w", err)
+				return testv1.StepRunResult{}, fmt.Errorf("missing foreground help task id after background start: %w", err)
+			}
+			helpPID, err := rt.WaitForTaskPIDForCommandAfter("repl src_v3 help", 20*time.Second, roomSeq)
+			if err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("missing foreground help task pid after background start: %w", err)
+			}
+			if helpTaskID == bgTaskID {
+				return testv1.StepRunResult{}, fmt.Errorf("foreground help reused background task id %s unexpectedly", bgTaskID)
 			}
 			if helpPID == bgPID {
 				return testv1.StepRunResult{}, fmt.Errorf("foreground help reused background pid %d unexpectedly", bgPID)
@@ -527,19 +545,28 @@ func Register(r *testv1.Registry) {
 			}}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("background pid %d stopped being visible after foreground help: %w", bgPID, err)
 			}
-			if err := cleanupManagedSubtones(rt); err != nil {
+			if _, err := waitForDialtoneContains(rt, 20*time.Second,
+				[]string{"repl", "src_v3", "task", "show", "--task-id", bgTaskID},
+				"Task: "+bgTaskID,
+				fmt.Sprintf("PID: %d", bgPID),
+				"State: running",
+				"Mode: background",
+			); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("background task %s stopped being visible after foreground help: %w", bgTaskID, err)
+			}
+			if err := cleanupManagedTasks(rt); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 
-			ctx.TestPassf("background pid %d stayed active while foreground help subtone pid %d completed", bgPID, helpPID)
+			ctx.TestPassf("background task %s pid %d stayed active while foreground help task %s pid %d completed", bgTaskID, bgPID, helpTaskID, helpPID)
 			return testv1.StepRunResult{
-				Report: fmt.Sprintf("Started a background REPL watch subtone as pid %d, then ran `/repl src_v3 help` as a new foreground subtone pid %d and verified the later foreground command still completed cleanly before cleaning active managed subtones.", bgPID, helpPID),
+				Report: fmt.Sprintf("Started a background REPL watch task as task %s pid %d, then ran `/repl src_v3 help` as a new foreground task %s pid %d and verified the later foreground command still completed cleanly before cleaning active managed tasks.", bgTaskID, bgPID, helpTaskID, helpPID),
 			}, nil
 		},
 	})
 
 	r.Add(testv1.Step{
-		Name:    "background-subtone-can-be-stopped-and-registry-shows-mode",
+		Name:    "background-task-can-be-stopped-and-registry-shows-mode",
 		Timeout: 120 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			rt, err := support.NewRuntime(ctx)
@@ -555,76 +582,64 @@ func Register(r *testv1.Registry) {
 				return testv1.StepRunResult{}, err
 			}
 
-			bgPID, err := startBackgroundWatch(rt, "stopme")
+			bgTaskID, bgPID, err := startBackgroundWatch(rt, "stopme")
 			if err != nil {
 				return testv1.StepRunResult{}, err
 			}
 
-			roomSeq, _ := rt.CurrentSeqs()
-			listCmd := "/repl src_v3 subtone-list --count 20"
-			if err := rt.RunTranscript([]support.TranscriptStep{{
-				Send: listCmd,
-				ExpectRoom: support.CombinePatterns([]string{
-					fmt.Sprintf(`"message":"%s"`, listCmd),
-				}, support.StandardSubtoneRoomPatterns("repl src_v3", "")),
-				ExpectOutput: append([]string{fmt.Sprintf("llm-codex> %s", listCmd)}, support.StandardSubtoneOutputPatterns("repl src_v3", "")...),
-				Timeout:      30 * time.Second,
-			}}); err != nil {
-				return testv1.StepRunResult{}, fmt.Errorf("pre-stop subtone-list failed: %w", err)
+			if _, err := waitForDialtoneContains(rt, 20*time.Second,
+				[]string{"repl", "src_v3", "task", "show", "--task-id", bgTaskID},
+				"Task: "+bgTaskID,
+				fmt.Sprintf("PID: %d", bgPID),
+				"State: running",
+				"Mode: background",
+			); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("pre-stop task show missing background mode row for task %s pid %d: %w", bgTaskID, bgPID, err)
 			}
-			listPID, err := rt.WaitForSubtonePIDForCommandAfter("repl src_v3 subtone-list --count 20", 20*time.Second, roomSeq)
-			if err != nil {
-				return testv1.StepRunResult{}, fmt.Errorf("missing pre-stop subtone-list pid: %w", err)
-			}
-			if err := rt.WaitForSubjectPatterns(fmt.Sprintf("repl.subtone.%d", listPID), 20*time.Second, []string{
-				`STATE`,
-				`MODE`,
+			if _, err := waitForDialtoneContains(rt, 20*time.Second,
+				[]string{"repl", "src_v3", "task", "list", "--state", "all", "--count", "20"},
+				bgTaskID,
 				strconv.Itoa(bgPID),
-				`active`,
-				`background`,
-			}); err != nil {
-				return testv1.StepRunResult{}, fmt.Errorf("pre-stop subtone-list missing background mode row for pid %d: %w", bgPID, err)
+				"running",
+				"background",
+			); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("pre-stop task list missing background row for task %s pid %d: %w", bgTaskID, bgPID, err)
 			}
 
-			stopCmd := fmt.Sprintf("/subtone-stop --pid %d", bgPID)
-			if err := rt.RunTranscript([]support.TranscriptStep{{
-				Send:         stopCmd,
-				ExpectRoom:   []string{fmt.Sprintf(`"message":"%s"`, stopCmd), fmt.Sprintf(`"message":"Stopping subtone-%d."`, bgPID), fmt.Sprintf(`"message":"Stopped subtone-%d."`, bgPID)},
-				ExpectOutput: []string{fmt.Sprintf("llm-codex> %s", stopCmd), fmt.Sprintf("dialtone> Stopping subtone-%d.", bgPID), fmt.Sprintf("dialtone> Stopped subtone-%d.", bgPID)},
-				Timeout:      20 * time.Second,
-			}}); err != nil {
-				return testv1.StepRunResult{}, fmt.Errorf("subtone-stop failed for pid %d: %w", bgPID, err)
-			}
-
-			postSeq, _ := rt.CurrentSeqs()
-			postListCmd := "/repl src_v3 subtone-list --count 20"
-			if err := rt.RunTranscript([]support.TranscriptStep{{
-				Send: postListCmd,
-				ExpectRoom: support.CombinePatterns([]string{
-					fmt.Sprintf(`"message":"%s"`, postListCmd),
-				}, support.StandardSubtoneRoomPatterns("repl src_v3", "")),
-				ExpectOutput: append([]string{fmt.Sprintf("llm-codex> %s", postListCmd)}, support.StandardSubtoneOutputPatterns("repl src_v3", "")...),
-				Timeout:      30 * time.Second,
-			}}); err != nil {
-				return testv1.StepRunResult{}, fmt.Errorf("post-stop subtone-list failed: %w", err)
-			}
-			postListPID, err := rt.WaitForSubtonePIDForCommandAfter("repl src_v3 subtone-list --count 20", 20*time.Second, postSeq)
+			stopOut, err := rt.RunDialtone("repl", "src_v3", "task", "kill", "--task-id", bgTaskID)
 			if err != nil {
-				return testv1.StepRunResult{}, fmt.Errorf("missing post-stop subtone-list pid: %w", err)
+				return testv1.StepRunResult{}, fmt.Errorf("task kill failed for %s: %w\n%s", bgTaskID, err, stopOut)
 			}
-			if err := rt.WaitForSubjectPatterns(fmt.Sprintf("repl.subtone.%d", postListPID), 20*time.Second, []string{
-				`STATE`,
-				`MODE`,
+			for _, expected := range []string{
+				fmt.Sprintf("Stopping task %s (pid %d)", bgTaskID, bgPID),
+				fmt.Sprintf("Stop signal sent to task %s.", bgTaskID),
+			} {
+				if !strings.Contains(stopOut, expected) {
+					return testv1.StepRunResult{}, fmt.Errorf("task kill output for %s missing %q\n%s", bgTaskID, expected, stopOut)
+				}
+			}
+			if _, err := waitForDialtoneContains(rt, 20*time.Second,
+				[]string{"repl", "src_v3", "task", "show", "--task-id", bgTaskID},
+				"Task: "+bgTaskID,
+				fmt.Sprintf("PID: %d", bgPID),
+				"State: done",
+				"Mode: background",
+			); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("post-stop task show missing done/background row for task %s pid %d: %w", bgTaskID, bgPID, err)
+			}
+			if _, err := waitForDialtoneContains(rt, 20*time.Second,
+				[]string{"repl", "src_v3", "task", "list", "--state", "all", "--count", "20"},
+				bgTaskID,
 				strconv.Itoa(bgPID),
-				`done`,
-				`background`,
-			}); err != nil {
-				return testv1.StepRunResult{}, fmt.Errorf("post-stop subtone-list missing done/background row for pid %d: %w", bgPID, err)
+				"done",
+				"background",
+			); err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("post-stop task list missing done/background row for task %s pid %d: %w", bgTaskID, bgPID, err)
 			}
 
-			ctx.TestPassf("background pid %d stopped cleanly and registry preserved mode/state", bgPID)
+			ctx.TestPassf("background task %s pid %d stopped cleanly and registry preserved mode/state", bgTaskID, bgPID)
 			return testv1.StepRunResult{
-				Report: fmt.Sprintf("Started background subtone pid %d, verified `subtone-list` showed it as `active background`, stopped it with `/subtone-stop --pid %d`, and then verified `subtone-list` preserved the row as `done background`.", bgPID, bgPID),
+				Report: fmt.Sprintf("Started background task %s pid %d, verified `task show` and `task list` showed it as `running background`, stopped it with `task kill --task-id %s`, and then verified the registry preserved the row as `done background`.", bgTaskID, bgPID, bgTaskID),
 			}, nil
 		},
 	})
@@ -643,56 +658,74 @@ func readLeaderState(repoRoot string) (leaderState, error) {
 	return st, nil
 }
 
-func startBackgroundWatch(rt *support.Runtime, filter string) (int, error) {
+func startBackgroundWatch(rt *support.Runtime, filter string) (string, int, error) {
+	prevPID, _ := rt.LatestSubtonePID()
+	command := fmt.Sprintf("repl src_v3 watch --nats-url %s --subject repl.topic.index --filter %s", rt.NATSURL, strings.TrimSpace(filter))
+	cmd := "/" + command + " &"
 	roomSeq, _ := rt.CurrentSeqs()
-	cmd := fmt.Sprintf("/repl src_v3 watch --nats-url %s --subject repl.room.index --filter %s &", rt.NATSURL, strings.TrimSpace(filter))
 	if err := rt.SendJoinLine(cmd); err != nil {
-		return 0, err
+		return "", 0, err
 	}
-	if err := rt.WaitForPatterns(20*time.Second, []string{
-		fmt.Sprintf(`--filter %s`, strings.TrimSpace(filter)),
-		`"scope":"index"`,
-		`Request received. Spawning subtone for repl src_v3`,
-		`Subtone started as pid `,
-		`Subtone room: subtone-`,
-		`Subtone log file: `,
-		`Subtone for repl src_v3 is running in background.`,
-	}); err != nil {
-		return 0, fmt.Errorf("background watch subtone did not start cleanly: %w", err)
+	if err := rt.WaitForPatterns(20*time.Second, support.CombinePatterns(
+		[]string{
+			fmt.Sprintf(`--filter %s`, strings.TrimSpace(filter)),
+		},
+		support.StandardTaskRoomPatterns("is running in background."),
+	)); err != nil {
+		return "", 0, fmt.Errorf("background watch task did not start cleanly: %w", err)
 	}
-	command := fmt.Sprintf("repl src_v3 watch --nats-url %s --subject repl.room.index --filter %s", rt.NATSURL, strings.TrimSpace(filter))
-	pid, err := rt.WaitForSubtonePIDForCommandAfter(command, 10*time.Second, roomSeq)
-	if err != nil || pid <= 0 {
-		return 0, fmt.Errorf("no new background subtone pid observed after %q: %w", cmd, err)
+	taskID, err := rt.WaitForTaskIDForCommandAfter(command, 10*time.Second, roomSeq)
+	if err != nil {
+		return "", 0, fmt.Errorf("background watch task id missing for command %q: %w", command, err)
 	}
-	if err := waitForSubjectContains(rt, fmt.Sprintf("repl.subtone.%d", pid), 10*time.Second, []string{
-		`"scope":"subtone"`,
+	deadline := time.Now().Add(10 * time.Second)
+	pid := 0
+	for time.Now().Before(deadline) {
+		nextPID, err := rt.LatestSubtonePID()
+		if err == nil && nextPID > 0 && nextPID != prevPID {
+			pid = nextPID
+			break
+		}
+		time.Sleep(120 * time.Millisecond)
+	}
+	if pid <= 0 {
+		return "", 0, fmt.Errorf("no new background runtime pid observed after %q", cmd)
+	}
+	if err := waitForSubjectContains(rt, fmt.Sprintf("repl.topic.task.%s", taskID), 10*time.Second, []string{
+		`"scope":"task"`,
 		`watching NATS subject`,
 		fmt.Sprintf(`--filter %s`, strings.TrimSpace(filter)),
 	}); err != nil {
-		return 0, err
+		return "", 0, err
 	}
-	return pid, nil
+	return taskID, pid, nil
 }
 
-func cleanupManagedSubtones(rt *support.Runtime) error {
+func cleanupManagedTasks(rt *support.Runtime) error {
+	listCmd := "/repl src_v3 task list --count 50 --state running"
 	roomSeq, _ := rt.CurrentSeqs()
-	listCmd := "/repl src_v3 subtone-list --count 50"
 	if err := rt.RunTranscript([]support.TranscriptStep{{
 		Send: listCmd,
 		ExpectRoom: support.CombinePatterns([]string{
 			fmt.Sprintf(`"message":"%s"`, listCmd),
-		}, support.StandardSubtoneRoomPatterns("repl src_v3", "")),
-		ExpectOutput: append([]string{fmt.Sprintf("llm-codex> %s", listCmd)}, support.StandardSubtoneOutputPatterns("repl src_v3", "")...),
-		Timeout:      30 * time.Second,
+		}, support.StandardTaskRoomPatterns("exited with code 0.")),
+		ExpectOutput: support.CombinePatterns(
+			[]string{fmt.Sprintf("llm-codex> %s", listCmd)},
+			support.StandardTaskOutputPatterns("exited with code 0."),
+		),
+		Timeout: 30 * time.Second,
 	}}); err != nil {
-		return fmt.Errorf("repl subtone-list cleanup failed: %w", err)
+		return fmt.Errorf("repl task list cleanup failed: %w", err)
 	}
-	listPID, err := rt.WaitForSubtonePIDForCommandAfter("repl src_v3 subtone-list --count 50", 20*time.Second, roomSeq)
+	listTaskID, err := rt.WaitForTaskIDForCommandAfter("repl src_v3 task list --count 50 --state running", 20*time.Second, roomSeq)
 	if err != nil {
-		return fmt.Errorf("missing cleanup subtone-list pid: %w", err)
+		return fmt.Errorf("missing cleanup task list task id: %w", err)
 	}
-	out := strings.Join(rt.SubjectMessages(fmt.Sprintf("repl.subtone.%d", listPID)), "\n")
+	listPID, err := rt.WaitForTaskPIDForCommandAfter("repl src_v3 task list --count 50 --state running", 20*time.Second, roomSeq)
+	if err != nil {
+		return fmt.Errorf("missing cleanup task list pid: %w", err)
+	}
+	out := strings.Join(rt.SubjectMessages(fmt.Sprintf("repl.topic.task.%s", listTaskID)), "\n")
 	stoppedAny := false
 	for _, line := range strings.Split(strings.ReplaceAll(out, "\r\n", "\n"), "\n") {
 		var frame map[string]any
@@ -704,29 +737,36 @@ func cleanupManagedSubtones(rt *support.Runtime) error {
 			continue
 		}
 		fields := strings.Fields(strings.TrimSpace(msgText))
-		if len(fields) < 3 {
+		if len(fields) < 4 {
 			continue
 		}
-		pidText := strings.TrimSpace(fields[0])
-		stateText := strings.TrimSpace(fields[2])
-		if pidText == "" || stateText != "active" {
+		runningTaskID := strings.TrimSpace(fields[0])
+		pidText := strings.TrimSpace(fields[1])
+		stateText := strings.TrimSpace(fields[3])
+		if runningTaskID == "" || pidText == "" || stateText != "running" {
 			continue
 		}
 		pid, err := strconv.Atoi(pidText)
 		if err != nil || pid <= 0 {
 			continue
 		}
-		if pid == listPID {
+		if pid == listPID || runningTaskID == listTaskID || runningTaskID == "-" {
 			continue
 		}
-		stopCmd := fmt.Sprintf("/subtone-stop --pid %d", pid)
+		stopCmd := fmt.Sprintf("/repl src_v3 task kill --task-id %s", runningTaskID)
 		if err := rt.RunTranscript([]support.TranscriptStep{{
-			Send:         stopCmd,
-			ExpectRoom:   []string{fmt.Sprintf(`"message":"%s"`, stopCmd), fmt.Sprintf(`"message":"Stopping subtone-%d."`, pid), fmt.Sprintf(`"message":"Stopped subtone-%d."`, pid)},
-			ExpectOutput: []string{fmt.Sprintf("llm-codex> %s", stopCmd), fmt.Sprintf("dialtone> Stopping subtone-%d.", pid), fmt.Sprintf("dialtone> Stopped subtone-%d.", pid)},
-			Timeout:      20 * time.Second,
+			Send: stopCmd,
+			ExpectRoom: support.CombinePatterns(
+				[]string{fmt.Sprintf(`"message":"%s"`, stopCmd)},
+				support.StandardTaskRoomPatterns("exited with code 0."),
+			),
+			ExpectOutput: support.CombinePatterns(
+				[]string{fmt.Sprintf("llm-codex> %s", stopCmd)},
+				support.StandardTaskOutputPatterns("exited with code 0."),
+			),
+			Timeout: 20 * time.Second,
 		}}); err != nil {
-			return fmt.Errorf("stop active subtone pid %d: %w", pid, err)
+			return fmt.Errorf("stop active task %s pid %d: %w", runningTaskID, pid, err)
 		}
 		stoppedAny = true
 	}
@@ -741,6 +781,29 @@ func cleanupManagedSubtones(rt *support.Runtime) error {
 		}
 	}
 	return nil
+}
+
+func waitForDialtoneContains(rt *support.Runtime, timeout time.Duration, args []string, patterns ...string) (string, error) {
+	deadline := time.Now().Add(timeout)
+	lastOut := ""
+	for time.Now().Before(deadline) {
+		out, err := rt.RunDialtone(args...)
+		lastOut = out
+		if err == nil {
+			matched := true
+			for _, pattern := range patterns {
+				if !strings.Contains(out, pattern) {
+					matched = false
+					break
+				}
+			}
+			if matched {
+				return out, nil
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return lastOut, fmt.Errorf("timed out waiting for dialtone output to contain %s\n%s", strings.Join(patterns, ", "), lastOut)
 }
 
 func waitForSubjectContains(rt *support.Runtime, subject string, timeout time.Duration, needles []string) error {

@@ -33,6 +33,7 @@ func Register(r *testv1.Registry) {
 
 			cmdText := fmt.Sprintf("repl src_v3 add-host --name %s --host %s --user %s", hostName, hostAddr, hostUser)
 			addHostCmd := "/" + cmdText
+			roomSeq, _ := rt.CurrentSeqs()
 			if err := rt.RunTranscript([]support.TranscriptStep{{
 				Send: addHostCmd,
 				ExpectRoom: support.CombinePatterns(
@@ -47,16 +48,17 @@ func Register(r *testv1.Registry) {
 			}}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("repl add-host task setup failed: %w", err)
 			}
-			taskID, err := rt.LatestTaskIDForCommand(cmdText)
+			taskID, err := rt.WaitForTaskIDForCommandAfter(cmdText, 20*time.Second, roomSeq)
 			if err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("missing add-host task id: %w", err)
 			}
-			pid, err := rt.WaitForTaskPIDForCommand(cmdText, 20*time.Second)
+			pid, err := rt.WaitForTaskPIDForCommandAfter(cmdText, 20*time.Second, roomSeq)
 			if err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("missing add-host task pid: %w", err)
 			}
 
 			listCmd := "/repl src_v3 task list --count 20"
+			roomSeq, _ = rt.CurrentSeqs()
 			if err := rt.RunTranscript([]support.TranscriptStep{{
 				Send: listCmd,
 				ExpectRoom: support.CombinePatterns(
@@ -71,14 +73,14 @@ func Register(r *testv1.Registry) {
 			}}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("repl task list failed: %w", err)
 			}
-			listTaskID, err := rt.LatestTaskIDForCommand("repl src_v3 task list --count 20")
+			listTaskID, err := rt.WaitForTaskIDForCommandAfter("repl src_v3 task list --count 20", 20*time.Second, roomSeq)
 			if err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("missing task list task id: %w", err)
 			}
-			if _, err := rt.WaitForTaskPIDForCommand("repl src_v3 task list --count 20", 20*time.Second); err != nil {
+			if _, err := rt.WaitForTaskPIDForCommandAfter("repl src_v3 task list --count 20", 20*time.Second, roomSeq); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("missing task list pid: %w", err)
 			}
-			if err := rt.WaitForSubjectPatterns(fmt.Sprintf("repl.room.task.%s", listTaskID), 20*time.Second, []string{
+			if err := rt.WaitForSubjectPatterns(fmt.Sprintf("repl.topic.task.%s", listTaskID), 20*time.Second, []string{
 				`"scope":"task"`,
 				`TASK ID`,
 				`STATE`,
@@ -90,6 +92,7 @@ func Register(r *testv1.Registry) {
 			}
 
 			logCmd := fmt.Sprintf("/repl src_v3 task log --task-id %s --lines 200", taskID)
+			roomSeq, _ = rt.CurrentSeqs()
 			if err := rt.RunTranscript([]support.TranscriptStep{{
 				Send: logCmd,
 				ExpectRoom: support.CombinePatterns(
@@ -104,14 +107,14 @@ func Register(r *testv1.Registry) {
 			}}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("repl task log failed for task %s: %w", taskID, err)
 			}
-			logTaskID, err := rt.LatestTaskIDForCommand(fmt.Sprintf("repl src_v3 task log --task-id %s --lines 200", taskID))
+			logTaskID, err := rt.WaitForTaskIDForCommandAfter(fmt.Sprintf("repl src_v3 task log --task-id %s --lines 200", taskID), 20*time.Second, roomSeq)
 			if err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("missing task log task id: %w", err)
 			}
-			if _, err := rt.WaitForTaskPIDForCommand(fmt.Sprintf("repl src_v3 task log --task-id %s --lines 200", taskID), 20*time.Second); err != nil {
+			if _, err := rt.WaitForTaskPIDForCommandAfter(fmt.Sprintf("repl src_v3 task log --task-id %s --lines 200", taskID), 20*time.Second, roomSeq); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("missing task log pid: %w", err)
 			}
-			if err := rt.WaitForSubjectPatterns(fmt.Sprintf("repl.room.task.%s", logTaskID), 20*time.Second, []string{
+			if err := rt.WaitForSubjectPatterns(fmt.Sprintf("repl.topic.task.%s", logTaskID), 20*time.Second, []string{
 				`"scope":"task"`,
 				`Task log:`,
 				taskID + `.log`,

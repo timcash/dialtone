@@ -53,7 +53,7 @@ func Register(r *testv1.Registry) {
 			), roomSeq); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("probe task did not start cleanly: %w", err)
 			}
-			taskID, err := rt.LatestTaskIDForCommand(probeCommand)
+			taskID, err := rt.WaitForTaskIDForCommandAfter(probeCommand, 20*time.Second, roomSeq)
 			if err != nil {
 				return testv1.StepRunResult{}, err
 			}

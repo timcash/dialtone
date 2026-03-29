@@ -20,7 +20,8 @@ type LeaderState struct {
 	PID              int    `json:"pid"`
 	NATSURL          string `json:"nats_url"`
 	TSNetNATSURL     string `json:"tsnet_nats_url,omitempty"`
-	Room             string `json:"room"`
+	Topic            string `json:"topic,omitempty"`
+	Room             string `json:"room,omitempty"`
 	HostName         string `json:"hostname"`
 	ServerID         string `json:"server_id"`
 	Version          string `json:"version"`
@@ -62,6 +63,12 @@ func readLeaderState() (LeaderState, error) {
 	if err := json.Unmarshal(raw, &st); err != nil {
 		return st, err
 	}
+	if strings.TrimSpace(st.Topic) == "" {
+		st.Topic = sanitizeRoom(st.Room)
+	}
+	if strings.TrimSpace(st.Room) == "" {
+		st.Room = sanitizeRoom(st.Topic)
+	}
 	return st, nil
 }
 
@@ -70,6 +77,10 @@ func writeLeaderState(st LeaderState) error {
 	if err != nil {
 		return err
 	}
+	if strings.TrimSpace(st.Topic) == "" {
+		st.Topic = sanitizeRoom(st.Room)
+	}
+	st.Room = ""
 	raw, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
@@ -81,11 +92,12 @@ func writeLeaderState(st LeaderState) error {
 }
 
 func buildLeaderState(usedURL, tsnetURL, room, hostName, serverID string, embedded bool, startedAt time.Time) LeaderState {
+	topic := sanitizeRoom(room)
 	st := LeaderState{
 		PID:           os.Getpid(),
 		NATSURL:       leaderClientNATSURL(usedURL),
 		TSNetNATSURL:  strings.TrimSpace(tsnetURL),
-		Room:          sanitizeRoom(room),
+		Topic:         topic,
 		HostName:      normalizePromptName(hostName),
 		ServerID:      strings.TrimSpace(serverID),
 		Version:       strings.TrimSpace(BuildVersion),
@@ -94,8 +106,8 @@ func buildLeaderState(usedURL, tsnetURL, room, hostName, serverID string, embedd
 		EmbeddedNATS:  embedded,
 		Running:       true,
 	}
-	if st.Room == "" {
-		st.Room = defaultRoom
+	if st.Topic == "" {
+		st.Topic = defaultRoom
 	}
 	if host := strings.TrimSpace(os.Getenv("DIALTONE_REPL_BOOTSTRAP_HTTP_HOST")); host != "" {
 		port := strings.TrimSpace(os.Getenv("DIALTONE_REPL_BOOTSTRAP_HTTP_PORT"))
@@ -151,9 +163,17 @@ func syncLeaderRuntimeConfig(st LeaderState) error {
 	if managerURL == "" && st.Running {
 		managerURL = strings.TrimSpace(st.NATSURL)
 	}
+	topic := sanitizeRoom(st.Topic)
+	if topic == "" {
+		topic = sanitizeRoom(st.Room)
+	}
+	if topic == "" {
+		topic = defaultRoom
+	}
 	updates := map[string]any{
 		"DIALTONE_REPL_RUNNING":         "0",
-		"DIALTONE_REPL_ROOM":            sanitizeRoom(st.Room),
+		"DIALTONE_REPL_TOPIC":           topic,
+		"DIALTONE_REPL_ROOM":            topic,
 		"DIALTONE_REPL_HOSTNAME":        normalizePromptName(st.HostName),
 		"DIALTONE_REPL_SERVER_ID":       strings.TrimSpace(st.ServerID),
 		"DIALTONE_REPL_LAST_HEALTHY_AT": strings.TrimSpace(st.LastHealthyAt),
@@ -199,7 +219,8 @@ func syncLeaderRuntimeConfig(st LeaderState) error {
 		Value string
 	}{
 		{Key: "DIALTONE_REPL_RUNNING", Value: "0"},
-		{Key: "DIALTONE_REPL_ROOM", Value: sanitizeRoom(st.Room)},
+		{Key: "DIALTONE_REPL_TOPIC", Value: topic},
+		{Key: "DIALTONE_REPL_ROOM", Value: topic},
 		{Key: "DIALTONE_REPL_HOSTNAME", Value: normalizePromptName(st.HostName)},
 		{Key: "DIALTONE_REPL_SERVER_ID", Value: strings.TrimSpace(st.ServerID)},
 		{Key: "DIALTONE_REPL_LAST_HEALTHY_AT", Value: strings.TrimSpace(st.LastHealthyAt)},
@@ -233,6 +254,12 @@ func leaderHealth(natsURL string, timeout time.Duration) (LeaderState, error) {
 	}
 	if err := json.Unmarshal(msg.Data, &st); err != nil {
 		return st, err
+	}
+	if strings.TrimSpace(st.Topic) == "" {
+		st.Topic = sanitizeRoom(st.Room)
+	}
+	if strings.TrimSpace(st.Room) == "" {
+		st.Room = sanitizeRoom(st.Topic)
 	}
 	if !st.Running || st.PID <= 0 {
 		return st, fmt.Errorf("leader reported unhealthy state")

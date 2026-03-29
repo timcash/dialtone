@@ -49,6 +49,7 @@ type Runtime struct {
 
 	leader   *exec.Cmd
 	join     *exec.Cmd
+	joinName string
 	joinIn   io.WriteCloser
 	joinDone chan error
 	nc       *nats.Conn
@@ -184,6 +185,7 @@ func (rt *Runtime) forceStop() {
 		_ = rt.join.Process.Kill()
 		rt.join = nil
 	}
+	rt.joinName = ""
 	if rt.nc != nil {
 		rt.nc.Close()
 		rt.nc = nil
@@ -284,7 +286,7 @@ func (rt *Runtime) StartLeader() error {
 	rt.leader = rt.newDialtoneCommand("repl", "src_v3", "leader",
 		"--embedded-nats",
 		"--nats-url", listenURL,
-		"--room", rt.Room,
+		"--topic", rt.Room,
 		"--hostname", "DIALTONE-SERVER",
 	)
 	if err := rt.leader.Start(); err != nil {
@@ -312,11 +314,41 @@ func (rt *Runtime) StartLeader() error {
 	if err := rt.nc.Flush(); err != nil {
 		return err
 	}
-	_, err = rt.WaitForAnyPattern(12*time.Second, []string{
+	patterns := []string{
 		"Leader active on",
 		"Leader online on",
-	})
-	return err
+	}
+	deadline := time.Now().Add(12 * time.Second)
+	for _, msg := range rt.recentRoomTail() {
+		for _, p := range patterns {
+			if strings.Contains(msg, p) {
+				return nil
+			}
+		}
+	}
+	for time.Now().Before(deadline) {
+		select {
+		case msg := <-rt.msgCh:
+			for _, p := range patterns {
+				if strings.Contains(msg, p) {
+					return nil
+				}
+			}
+		case <-time.After(120 * time.Millisecond):
+		}
+	}
+	timeoutErr := fmt.Errorf("timeout waiting for any pattern: %s", strings.Join(patterns, ", "))
+	if rt.nc != nil && rt.nc.IsConnected() {
+		if flushErr := rt.nc.FlushTimeout(1500 * time.Millisecond); flushErr == nil {
+			rt.debugf("[REPL][SETUP] leader probe lifecycle line missing, but NATS connection stayed healthy: %v", timeoutErr)
+			return nil
+		}
+	}
+	if waitErr := waitForEndpoint(rt.NATSURL, 5*time.Second); waitErr == nil {
+		rt.debugf("[REPL][SETUP] leader probe lifecycle line missing, but endpoint stayed reachable: %v", timeoutErr)
+		return nil
+	}
+	return timeoutErr
 }
 
 func (rt *Runtime) StartJoin(name string) error {
@@ -324,7 +356,7 @@ func (rt *Runtime) StartJoin(name string) error {
 	if name == "" {
 		name = DefaultPromptName()
 	}
-	if rt.shared && rt.joinReady() {
+	if rt.shared && rt.joinReady() && strings.TrimSpace(rt.joinName) == name {
 		rt.attachStatusPublisher()
 		return rt.emitStartupDialog(name)
 	}
@@ -335,30 +367,46 @@ func (rt *Runtime) StartJoin(name string) error {
 		rt.join = nil
 		rt.joinIn = nil
 		rt.joinDone = make(chan error, 1)
+		rt.joinName = ""
 	}
-	rt.join = rt.newDialtoneCommand("repl", "src_v3", "join",
+	if rt.shared && rt.joinReady() && strings.TrimSpace(rt.joinName) != name {
+		if rt.joinIn != nil {
+			_, _ = io.WriteString(rt.joinIn, "quit\n")
+			_ = rt.joinIn.Close()
+			rt.joinIn = nil
+		}
+		if rt.join != nil && rt.join.Process != nil {
+			_ = rt.join.Process.Kill()
+		}
+		rt.join = nil
+		rt.joinDone = make(chan error, 1)
+		rt.joinName = ""
+	}
+	cmd := rt.newDialtoneCommand("repl", "src_v3", "join",
 		"--nats-url", rt.NATSURL,
 		"--name", name,
-		"--room", rt.Room,
+		"--topic", rt.Room,
 	)
-	in, err := rt.join.StdinPipe()
+	in, err := cmd.StdinPipe()
 	if err != nil {
 		return err
 	}
-	stdout, err := rt.join.StdoutPipe()
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
 	}
-	stderr, err := rt.join.StderrPipe()
+	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return err
 	}
+	rt.join = cmd
 	rt.joinIn = in
-	if err := rt.join.Start(); err != nil {
+	if err := cmd.Start(); err != nil {
 		return err
 	}
+	doneCh := rt.joinDone
 	go func() {
-		rt.joinDone <- rt.join.Wait()
+		doneCh <- cmd.Wait()
 	}()
 	go rt.captureOutput(stdout)
 	go rt.captureOutput(stderr)
@@ -366,6 +414,7 @@ func (rt *Runtime) StartJoin(name string) error {
 	if err := rt.WaitForPatterns(12*time.Second, []string{p, fmt.Sprintf(`"from":"%s"`, name)}); err != nil {
 		return err
 	}
+	rt.joinName = name
 	rt.attachStatusPublisher()
 	return rt.emitStartupDialog(name)
 }
@@ -557,7 +606,7 @@ func (rt *Runtime) RunTranscript(steps []TranscriptStep) error {
 				}
 			}
 			if err := rt.waitForPatternsAfter(remainingUntil(deadline), step.ExpectRoom, roomSeq); err != nil {
-				return fmt.Errorf("transcript step %d room expect failed: %w", i+1, err)
+				return fmt.Errorf("transcript step %d topic expect failed: %w", i+1, err)
 			}
 		} else if strings.TrimSpace(step.Send) != "" {
 			if err := rt.SendJoinLine(step.Send); err != nil {
@@ -566,7 +615,7 @@ func (rt *Runtime) RunTranscript(steps []TranscriptStep) error {
 		}
 		if len(step.ExpectRoomAny) > 0 {
 			if err := rt.waitForAnyPatternGroupAfter(remainingUntil(deadline), step.ExpectRoomAny, roomSeq); err != nil {
-				return fmt.Errorf("transcript step %d room-any expect failed: %w", i+1, err)
+				return fmt.Errorf("transcript step %d topic-any expect failed: %w", i+1, err)
 			}
 		}
 		if len(step.ExpectOutput) > 0 {
@@ -589,7 +638,7 @@ func (rt *Runtime) RoomSubject() string {
 	if room == "" {
 		room = "index"
 	}
-	return "repl.room." + room
+	return "repl.topic." + room
 }
 
 func (rt *Runtime) Inject(user string, args ...string) error {
@@ -603,7 +652,7 @@ func (rt *Runtime) Inject(user string, args ...string) error {
 	injectArgs := []string{
 		"repl", "src_v3", "inject",
 		"--nats-url", rt.NATSURL,
-		"--room", rt.Room,
+		"--topic", rt.Room,
 		"--user", user,
 	}
 	injectArgs = append(injectArgs, args...)
@@ -664,7 +713,7 @@ func (rt *Runtime) waitForPatternsAfter(timeout time.Duration, patterns []string
 			missing = append(missing, p)
 		}
 	}
-	err := fmt.Errorf("timeout waiting for room patterns: %s\nrecent room messages:\n%s", strings.Join(missing, ", "), strings.Join(rt.recentRoomTail(), "\n"))
+	err := fmt.Errorf("timeout waiting for topic patterns: %s\nrecent topic messages:\n%s", strings.Join(missing, ", "), strings.Join(rt.recentRoomTail(), "\n"))
 	rt.errorf("%v", err)
 	return err
 }
@@ -692,7 +741,7 @@ func (rt *Runtime) waitForAnyPatternGroupAfter(timeout time.Duration, groups [][
 		case <-time.After(120 * time.Millisecond):
 		}
 	}
-	err := fmt.Errorf("timeout waiting for any room pattern group: %s\nrecent room messages:\n%s", describePatternGroups(groups, seen), strings.Join(rt.recentRoomTail(), "\n"))
+	err := fmt.Errorf("timeout waiting for any topic pattern group: %s\nrecent topic messages:\n%s", describePatternGroups(groups, seen), strings.Join(rt.recentRoomTail(), "\n"))
 	rt.errorf("%v", err)
 	return err
 }
@@ -827,7 +876,7 @@ func (rt *Runtime) LatestSubtonePID() (int, error) {
 			}
 		}
 	}
-	return 0, fmt.Errorf("no task pid found in recent room messages")
+	return 0, fmt.Errorf("no task pid found in recent topic messages")
 }
 
 func (rt *Runtime) LatestTaskID() (string, error) {
@@ -852,7 +901,7 @@ func (rt *Runtime) LatestTaskID() (string, error) {
 			return taskID, nil
 		}
 	}
-	return "", fmt.Errorf("no task id found in recent room messages")
+	return "", fmt.Errorf("no task id found in recent topic messages")
 }
 
 func (rt *Runtime) LatestTaskIDForCommand(command string) (string, error) {
@@ -888,8 +937,79 @@ func (rt *Runtime) LatestTaskIDForCommand(command string) (string, error) {
 	return "", fmt.Errorf("no task id found for command %q", command)
 }
 
+func (rt *Runtime) WaitForTaskIDForCommand(command string, timeout time.Duration) (string, error) {
+	return rt.waitForTaskIDForCommandAfter(command, timeout, 0)
+}
+
+func (rt *Runtime) WaitForTaskIDForCommandAfter(command string, timeout time.Duration, afterSeq int) (string, error) {
+	return rt.waitForTaskIDForCommandAfter(command, timeout, afterSeq)
+}
+
+func (rt *Runtime) waitForTaskIDForCommandAfter(command string, timeout time.Duration, afterSeq int) (string, error) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return "", fmt.Errorf("command is required")
+	}
+	if timeout <= 0 {
+		timeout = 12 * time.Second
+	}
+	if taskID, err := rt.latestTaskIDForCommandAfter(command, afterSeq); err == nil && strings.HasPrefix(taskID, "task-") {
+		return taskID, nil
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if err := rt.checkJoinExited(); err != nil {
+			return "", err
+		}
+		if taskID, err := rt.latestTaskIDForCommandAfter(command, afterSeq); err == nil && strings.HasPrefix(taskID, "task-") {
+			return taskID, nil
+		}
+		select {
+		case <-rt.msgCh:
+		case <-time.After(120 * time.Millisecond):
+		}
+	}
+	return "", fmt.Errorf("timeout waiting for task id for command %q", command)
+}
+
 func (rt *Runtime) LatestSubtonePIDForCommand(command string) (int, error) {
 	return rt.latestSubtonePIDForCommandAfter(command, 0)
+}
+
+func (rt *Runtime) latestTaskIDForCommandAfter(command string, afterSeq int) (string, error) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return "", fmt.Errorf("command is required")
+	}
+	rt.bufMu.Lock()
+	roomEvents := append([]sequencedMessage(nil), rt.roomEvents...)
+	rt.bufMu.Unlock()
+	for i := len(roomEvents) - 1; i >= 0; i-- {
+		if roomEvents[i].Seq <= afterSeq {
+			continue
+		}
+		msg := strings.TrimSpace(roomEvents[i].Message)
+		if msg == "" {
+			continue
+		}
+		var frame map[string]any
+		if err := json.Unmarshal([]byte(msg), &frame); err != nil {
+			continue
+		}
+		message, _ := frame["message"].(string)
+		if !strings.Contains(message, "Command: ["+command+"]") {
+			continue
+		}
+		raw, ok := frame["task_id"]
+		if !ok {
+			continue
+		}
+		taskID := strings.TrimSpace(fmt.Sprint(raw))
+		if strings.HasPrefix(taskID, "task-") {
+			return taskID, nil
+		}
+	}
+	return "", fmt.Errorf("no task id found for command %q", command)
 }
 
 func (rt *Runtime) latestSubtonePIDForCommandAfter(command string, afterSeq int) (int, error) {
@@ -1102,7 +1222,7 @@ func StandardSubtoneRoomPatterns(cmdName string, exitPattern string) []string {
 		`"scope":"index"`,
 		fmt.Sprintf("Request received. Spawning subtone for %s", cmdName),
 		`Subtone started as pid `,
-		`Subtone room: subtone-`,
+		`Subtone topic: subtone-`,
 		`Subtone log file: `,
 	}
 	if exitPattern != "" {
@@ -1120,7 +1240,7 @@ func StandardSubtoneOutputPatterns(cmdName string, exitPattern string) []string 
 	patterns := []string{
 		fmt.Sprintf("dialtone> Request received. Spawning subtone for %s", cmdName),
 		"dialtone> Subtone started as pid ",
-		"dialtone> Subtone room: subtone-",
+		"dialtone> Subtone topic: subtone-",
 		"dialtone> Subtone log file: ",
 	}
 	if exitPattern != "" {

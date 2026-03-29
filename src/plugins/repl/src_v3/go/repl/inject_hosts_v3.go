@@ -132,7 +132,7 @@ func mergeBootstrapHostDefaults(n *meshNode) {
 func Inject(args []string) error {
 	fs := flag.NewFlagSet("repl-v3-inject", flag.ContinueOnError)
 	natsURL := fs.String("nats-url", resolveREPLNATSURL(), "NATS URL")
-	room := fs.String("room", defaultRoom, "Shared room name")
+	topic := topicFlag(fs, "Shared topic name")
 	user := fs.String("user", DefaultPromptName(), "Logical user name")
 	host := fs.String("host", "", "Target REPL host (routes as @host command)")
 	if err := fs.Parse(args); err != nil {
@@ -140,20 +140,20 @@ func Inject(args []string) error {
 	}
 	command := strings.TrimSpace(strings.Join(fs.Args(), " "))
 	if command == "" {
-		return fmt.Errorf("usage: ./dialtone.sh repl src_v3 inject --user <name> [--host <name>] [--nats-url URL] [--room ROOM] <command>")
+		return fmt.Errorf("usage: ./dialtone.sh repl src_v3 inject --user <name> [--host <name>] [--nats-url URL] [--topic TOPIC] <command>")
 	}
-	return InjectCommand(strings.TrimSpace(*natsURL), strings.TrimSpace(*room), strings.TrimSpace(*user), strings.TrimSpace(*host), command)
+	return InjectCommand(strings.TrimSpace(*natsURL), strings.TrimSpace(*topic), strings.TrimSpace(*user), strings.TrimSpace(*host), command)
 }
 
-func InjectCommand(natsURL, room, user, host, command string) error {
+func InjectCommand(natsURL, topic, user, host, command string) error {
 	if strings.TrimSpace(command) == "" {
 		return fmt.Errorf("command is required")
 	}
 	if strings.TrimSpace(natsURL) == "" {
 		natsURL = resolveREPLNATSURL()
 	}
-	if strings.TrimSpace(room) == "" {
-		room = defaultRoom
+	if strings.TrimSpace(topic) == "" {
+		topic = defaultRoom
 	}
 	if strings.TrimSpace(user) == "" {
 		user = DefaultPromptName()
@@ -163,7 +163,7 @@ func InjectCommand(natsURL, room, user, host, command string) error {
 	if host != "" && !strings.HasPrefix(command, "@") {
 		command = "@" + host + " " + command
 	}
-	if err := EnsureLeaderRunning(natsURL, room); err != nil {
+	if err := EnsureLeaderRunning(natsURL, topic); err != nil {
 		return err
 	}
 	nc, err := nats.Connect(strings.TrimSpace(natsURL), nats.Timeout(1500*time.Millisecond))
@@ -175,7 +175,7 @@ func InjectCommand(natsURL, room, user, host, command string) error {
 	frame := busFrame{
 		Type:      "command",
 		From:      strings.TrimSpace(user),
-		Room:      strings.TrimSpace(room),
+		Room:      strings.TrimSpace(topic),
 		Version:   "src_v3",
 		OS:        runtime.GOOS,
 		Arch:      runtime.GOARCH,

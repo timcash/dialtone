@@ -47,7 +47,7 @@ func Register(r *testv1.Registry) {
 
 			ctx.TestPassf("help and ps executed through the hostname-based REPL prompt path")
 			return testv1.StepRunResult{
-				Report: "Joined REPL with the default hostname prompt, ran /help and /ps through the live prompt path, and validated the room output includes the input events, help text, and ps empty-state response.",
+				Report: "Joined REPL with the default hostname prompt, ran /help and /ps through the live prompt path, and validated the topic output includes the input events, help text, and ps empty-state response.",
 			}, nil
 		},
 	})

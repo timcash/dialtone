@@ -474,7 +474,7 @@ Use the WSL repo for:
 - Linux runtime validation
 - tmux-visible command execution
 
-Use [wsl-tmux.cmd](wsl-tmux.cmd) from Windows so WSL commands run inside the visible tmux session:
+If you are on Windows, you must use [wsl-tmux.cmd](wsl-tmux.cmd) so WSL REPL and test commands run inside the visible tmux session:
 
 ```powershell
 .\wsl-tmux.cmd help
@@ -497,6 +497,7 @@ Important behavior:
 - `wsl-tmux.cmd` can queue input if you send a second command before the first one finishes
 - `clean-state` is the safest way to reset the pane before a new visible sequence
 - `interrupt` is better than piling on another command when the pane is wedged
+- do not run WSL REPL or plugin test commands directly from a Windows shell when `.\wsl-tmux.cmd` is available
 
 If the pane gets wedged, recreating the tmux session is fine:
 
@@ -549,9 +550,8 @@ Typical WSL test commands:
 .\wsl-tmux.cmd "./dialtone.sh repl src_v3 format"
 .\wsl-tmux.cmd "./dialtone.sh repl src_v3 build"
 .\wsl-tmux.cmd "./dialtone.sh repl src_v3 test --filter interactive-command-index-lifecycle-contract"
-.\wsl-tmux.cmd "./dialtone.sh ssh src_v1 probe --host grey --timeout 5s"
-.\wsl-tmux.cmd "./dialtone.sh chrome src_v3 status --host legion --role dev"
-.\wsl-tmux.cmd "./dialtone.sh proc src_v1 ps"
+.\wsl-tmux.cmd "./dialtone.sh repl src_v3 test --filter task-list-reads-from-kv,task-show-reads-from-kv"
+.\wsl-tmux.cmd "./dialtone.sh testdaemon src_v1 test"
 .\wsl-tmux.cmd read
 ```
 

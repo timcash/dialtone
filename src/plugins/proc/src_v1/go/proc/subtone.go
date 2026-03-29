@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -141,9 +142,13 @@ func runCommandWithEvents(cmd *exec.Cmd, trackArgs []string, logDir string, onEv
 		}
 	}()
 
+	reportedExitCode := 0
 	scanner := bufio.NewScanner(stderr)
 	for scanner.Scan() {
 		line := scanner.Text()
+		if code, ok := parseForwardedExitStatus(line); ok && code > 1 {
+			reportedExitCode = code
+		}
 		if logger != nil {
 			logger.LogError(line)
 		}
@@ -163,6 +168,11 @@ func runCommandWithEvents(cmd *exec.Cmd, trackArgs []string, logDir string, onEv
 			exitCode = 1
 		}
 	}
+	// `go run` exits 1 for any child failure but prints the real code as
+	// `exit status N` on stderr. Preserve that task-visible exit code.
+	if exitCode == 1 && reportedExitCode > 1 {
+		exitCode = reportedExitCode
+	}
 	emit(SubtoneEvent{
 		Type:     SubtoneEventExited,
 		PID:      pid,
@@ -174,4 +184,16 @@ func runCommandWithEvents(cmd *exec.Cmd, trackArgs []string, logDir string, onEv
 
 func defaultDialtoneHome() string {
 	return configv1.DefaultDialtoneHome()
+}
+
+func parseForwardedExitStatus(line string) (int, bool) {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "exit status ") {
+		return 0, false
+	}
+	code, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "exit status ")))
+	if err != nil || code <= 0 {
+		return 0, false
+	}
+	return code, true
 }

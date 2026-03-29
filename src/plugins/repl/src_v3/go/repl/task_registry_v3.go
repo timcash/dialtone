@@ -17,19 +17,25 @@ type taskRegistryRequest struct {
 }
 
 type taskRegistryItem struct {
-	TaskID     string  `json:"task_id,omitempty"`
-	PID        int     `json:"pid"`
-	Room       string  `json:"room,omitempty"`
-	Command    string  `json:"command,omitempty"`
-	Mode       string  `json:"mode,omitempty"`
-	LogPath    string  `json:"log_path,omitempty"`
-	StartedAt  string  `json:"started_at,omitempty"`
-	LastUpdate string  `json:"last_update,omitempty"`
-	ExitCode   int     `json:"exit_code,omitempty"`
-	Active     bool    `json:"active"`
-	CPUPercent float64 `json:"cpu_percent,omitempty"`
-	PortCount  int     `json:"port_count,omitempty"`
-	StartedAgo string  `json:"started_ago,omitempty"`
+	TaskID     string   `json:"task_id,omitempty"`
+	PID        int      `json:"pid"`
+	Host       string   `json:"host,omitempty"`
+	Room       string   `json:"room,omitempty"`
+	Topic      string   `json:"topic,omitempty"`
+	Command    string   `json:"command,omitempty"`
+	Args       []string `json:"args,omitempty"`
+	Mode       string   `json:"mode,omitempty"`
+	State      string   `json:"state,omitempty"`
+	LogPath    string   `json:"log_path,omitempty"`
+	CreatedAt  string   `json:"created_at,omitempty"`
+	StartedAt  string   `json:"started_at,omitempty"`
+	UpdatedAt  string   `json:"updated_at,omitempty"`
+	LastUpdate string   `json:"last_update,omitempty"`
+	ExitCode   int      `json:"exit_code,omitempty"`
+	Active     bool     `json:"active"`
+	CPUPercent float64  `json:"cpu_percent,omitempty"`
+	PortCount  int      `json:"port_count,omitempty"`
+	StartedAgo string   `json:"started_ago,omitempty"`
 }
 
 type taskRegistryEntry struct {

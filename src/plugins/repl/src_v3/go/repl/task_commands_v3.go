@@ -3,7 +3,6 @@ package repl
 import (
 	"bufio"
 	configv1 "dialtone/dev/plugins/config/src_v1/go"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -14,7 +13,6 @@ import (
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
-	"github.com/nats-io/nats.go"
 )
 
 func RunTask(args []string) error {
@@ -72,7 +70,7 @@ func RunTaskList(args []string) error {
 			if cmd == "" {
 				cmd = "-"
 			}
-			logs.Raw("%-28s %-8d %-24s %-8s %-12s %s", taskID, item.PID, updated, taskStateToken(item.Active), defaultTaskMode(item.Mode), cmd)
+			logs.Raw("%-28s %-8d %-24s %-8s %-12s %s", taskID, item.PID, updated, effectiveTaskState(item), defaultTaskMode(item.Mode), cmd)
 		}
 		return nil
 	}
@@ -374,45 +372,6 @@ func resolveREPLNATSURL() string {
 	return configv1.ResolveREPLNATSURL()
 }
 
-func queryTaskRegistry(natsURL string, count int) ([]taskRegistryItem, error) {
-	natsURL = strings.TrimSpace(natsURL)
-	if natsURL == "" {
-		natsURL = defaultNATSURL
-	}
-	nc, err := nats.Connect(natsURL, nats.Timeout(1200*time.Millisecond))
-	if err != nil {
-		return nil, err
-	}
-	defer nc.Close()
-
-	payload, err := json.Marshal(taskRegistryRequest{Count: count})
-	if err != nil {
-		return nil, err
-	}
-	msg, err := nc.Request(taskRegistrySubject, payload, 1500*time.Millisecond)
-	if err != nil {
-		return nil, err
-	}
-	var items []taskRegistryItem
-	if err := json.Unmarshal(msg.Data, &items); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-func queryTaskByID(natsURL string, taskID string) (taskRegistryItem, bool) {
-	items, err := queryTaskRegistry(natsURL, 0)
-	if err != nil {
-		return taskRegistryItem{}, false
-	}
-	for _, item := range items {
-		if strings.EqualFold(strings.TrimSpace(item.TaskID), strings.TrimSpace(taskID)) {
-			return item, true
-		}
-	}
-	return taskRegistryItem{}, false
-}
-
 func filterTaskRegistryItems(items []taskRegistryItem, state string) []taskRegistryItem {
 	filter := strings.TrimSpace(strings.ToLower(state))
 	switch filter {
@@ -421,7 +380,15 @@ func filterTaskRegistryItems(items []taskRegistryItem, state string) []taskRegis
 	case "running", "active":
 		out := make([]taskRegistryItem, 0, len(items))
 		for _, item := range items {
-			if item.Active {
+			if strings.EqualFold(effectiveTaskState(item), "running") {
+				out = append(out, item)
+			}
+		}
+		return out
+	case "queued":
+		out := make([]taskRegistryItem, 0, len(items))
+		for _, item := range items {
+			if strings.EqualFold(effectiveTaskState(item), "queued") {
 				out = append(out, item)
 			}
 		}
@@ -429,7 +396,7 @@ func filterTaskRegistryItems(items []taskRegistryItem, state string) []taskRegis
 	case "done":
 		out := make([]taskRegistryItem, 0, len(items))
 		for _, item := range items {
-			if !item.Active {
+			if strings.EqualFold(effectiveTaskState(item), "done") {
 				out = append(out, item)
 			}
 		}
@@ -443,6 +410,8 @@ func noTaskListMessage(state string) string {
 	switch strings.TrimSpace(strings.ToLower(state)) {
 	case "running", "active":
 		return "No running tasks reported by leader."
+	case "queued":
+		return "No queued tasks reported by leader."
 	case "done":
 		return "No completed tasks reported by leader."
 	default:
@@ -450,8 +419,13 @@ func noTaskListMessage(state string) string {
 	}
 }
 
-func taskStateToken(active bool) string {
-	if active {
+func effectiveTaskState(item taskRegistryItem) string {
+	state := strings.TrimSpace(strings.ToLower(item.State))
+	switch state {
+	case "queued", "running", "done":
+		return state
+	}
+	if item.Active {
 		return "running"
 	}
 	return "done"
@@ -482,6 +456,9 @@ func printTaskSnapshot(item taskRegistryItem) {
 	logPath := preferredTaskLogPath(taskID, item.LogPath)
 	updated := strings.TrimSpace(item.LastUpdate)
 	if updated == "" {
+		updated = strings.TrimSpace(item.UpdatedAt)
+	}
+	if updated == "" {
 		updated = strings.TrimSpace(item.StartedAt)
 	}
 	if updated == "" {
@@ -489,11 +466,17 @@ func printTaskSnapshot(item taskRegistryItem) {
 	}
 	started := strings.TrimSpace(item.StartedAt)
 	if started == "" {
+		started = strings.TrimSpace(item.CreatedAt)
+	}
+	if started == "" {
 		started = "-"
 	}
 	logs.Raw("Task: %s", taskID)
 	logs.Raw("PID: %d", item.PID)
-	logs.Raw("State: %s", taskStateToken(item.Active))
+	if host := strings.TrimSpace(item.Host); host != "" {
+		logs.Raw("Host: %s", host)
+	}
+	logs.Raw("State: %s", effectiveTaskState(item))
 	logs.Raw("Mode: %s", mode)
 	logs.Raw("Topic: %s", room)
 	logs.Raw("Command: %s", command)

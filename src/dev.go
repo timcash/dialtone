@@ -584,15 +584,23 @@ func scaffoldSubcommand(args []string) string {
 	return first
 }
 
+func resolveREPLTopicEnv() string {
+	topic := strings.TrimSpace(os.Getenv("DIALTONE_REPL_TOPIC"))
+	if topic == "" {
+		topic = strings.TrimSpace(os.Getenv("DIALTONE_REPL_ROOM"))
+	}
+	if topic == "" {
+		topic = "index"
+	}
+	return topic
+}
+
 func resolveREPLDispatchCandidates(targetHost string) (string, []string) {
 	natsURL := strings.TrimSpace(os.Getenv("DIALTONE_REPL_NATS_URL"))
 	if natsURL == "" {
 		natsURL = "nats://127.0.0.1:4222"
 	}
-	room := strings.TrimSpace(os.Getenv("DIALTONE_REPL_ROOM"))
-	if room == "" {
-		room = "index"
-	}
+	room := resolveREPLTopicEnv()
 	candidateNATSURLs := []string{natsURL}
 	if host := strings.TrimSpace(targetHost); host != "" {
 		candidateNATSURLs = resolveTargetNATSURLs(host)
@@ -743,7 +751,7 @@ func relayInjectedIndexLifecycle(natsURL, room, user, displayLine, injectLine st
 	defer nc.Close()
 
 	room = sanitizeREPLRoom(room)
-	subject := "repl.room." + room
+	subject := "repl.topic." + room
 	targetInput := "/" + strings.TrimSpace(injectLine)
 	displayInput := "/" + strings.TrimSpace(displayLine)
 	requestLine := "Request received."
@@ -832,6 +840,7 @@ func relayInjectedIndexLifecycle(natsURL, room, user, displayLine, injectLine st
 	if err := nc.Flush(); err != nil {
 		return inject()
 	}
+	seenInput = true
 	if err := inject(); err != nil {
 		return err
 	}
@@ -1568,10 +1577,7 @@ func runBranch(args []string) {
 }
 
 func startDefaultMultiplayerREPL() error {
-	room := strings.TrimSpace(os.Getenv("DIALTONE_REPL_ROOM"))
-	if room == "" {
-		room = "index"
-	}
+	room := resolveREPLTopicEnv()
 	clientURL := strings.TrimSpace(os.Getenv("DIALTONE_REPL_NATS_URL"))
 	if clientURL == "" {
 		clientURL = "nats://127.0.0.1:4222"
@@ -1579,7 +1585,7 @@ func startDefaultMultiplayerREPL() error {
 	joinArgs := []string{"--nats-url", clientURL, room}
 	leaderHealthy := replv3.LeaderHealthy(clientURL, 1200*time.Millisecond)
 	if !leaderHealthy && !replAutostartEnabled() {
-		return fmt.Errorf("no REPL daemon detected on %s (autostart disabled). start daemon with: ./dialtone.sh repl src_v3 service --mode run --room %s", clientURL, room)
+		return fmt.Errorf("no REPL daemon detected on %s (autostart disabled). start daemon with: ./dialtone.sh repl src_v3 service --mode run --topic %s", clientURL, room)
 	}
 	if !leaderHealthy {
 		logs.System("No REPL leader detected on %s; starting background leader for topic %s", clientURL, room)
@@ -1620,7 +1626,7 @@ func logREPLStartupState(clientURL, room string) {
 
 	logs.System("REPL startup state:")
 	logs.System("- repl version=%s host=%s os=%s arch=%s cpu_cores=%d mem_total=%s", strings.TrimSpace(replv3.BuildVersion), hostName, runtime.GOOS, runtime.GOARCH, cpuCores, memText)
-	logs.System("- room=%s nats=%s reachable=%t", strings.TrimSpace(room), strings.TrimSpace(clientURL), endpointReachable(clientURL, 700*time.Millisecond))
+	logs.System("- topic=%s nats=%s reachable=%t", strings.TrimSpace(room), strings.TrimSpace(clientURL), endpointReachable(clientURL, 700*time.Millisecond))
 
 	pids := replLeaderPIDs()
 	if len(pids) == 0 {

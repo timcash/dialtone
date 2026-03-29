@@ -44,16 +44,16 @@ func Register(r *testv1.Registry) {
 				return testv1.StepRunResult{}, fmt.Errorf("interactive command lifecycle contract failed: %w", err)
 			}
 
-			indexLines := strings.Join(rt.SubjectMessages("repl.room.index"), "\n")
+			indexLines := strings.Join(rt.SubjectMessages("repl.topic.index"), "\n")
 			for _, forbidden := range []string{
 				`Spawning subtone`,
 				`Subtone started as pid`,
-				`Subtone room:`,
+				`Subtone topic:`,
 				`Subtone log file:`,
 				`Subtone for repl src_v3 exited`,
 			} {
 				if strings.Contains(indexLines, forbidden) {
-					return testv1.StepRunResult{}, fmt.Errorf("index room still contains legacy lifecycle text %q\n%s", forbidden, indexLines)
+					return testv1.StepRunResult{}, fmt.Errorf("index topic still contains legacy lifecycle text %q\n%s", forbidden, indexLines)
 				}
 			}
 
@@ -95,27 +95,27 @@ func Register(r *testv1.Registry) {
 			}}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("interactive command task-first lifecycle failed: %w", err)
 			}
-			indexLines := strings.Join(rt.SubjectMessages("repl.room.index"), "\n")
+			indexLines := strings.Join(rt.SubjectMessages("repl.topic.index"), "\n")
 			for _, forbidden := range []string{
 				`Spawning subtone`,
 				`Subtone started as pid`,
-				`Subtone room:`,
+				`Subtone topic:`,
 				`Subtone log file:`,
 			} {
 				if strings.Contains(indexLines, forbidden) {
-					return testv1.StepRunResult{}, fmt.Errorf("index room still contains legacy lifecycle text %q\n%s", forbidden, indexLines)
+					return testv1.StepRunResult{}, fmt.Errorf("index topic still contains legacy lifecycle text %q\n%s", forbidden, indexLines)
 				}
 			}
 
 			ctx.TestPassf("interactive routed command emitted task queue, pid, log, and exit lines")
 			return testv1.StepRunResult{
-				Report: "Joined REPL with the default hostname prompt, ran `/repl src_v3 help`, and verified the index-room `dialtone>` transcript includes task queue, task topic, task log, pid assignment, and task exit lines without legacy subtone lifecycle text.",
+				Report: "Joined REPL with the default hostname prompt, ran `/repl src_v3 help`, and verified the index-topic `dialtone>` transcript includes task queue, task topic, task log, pid assignment, and task exit lines without legacy subtone lifecycle text.",
 			}, nil
 		},
 	})
 
 	r.Add(testv1.Step{
-		Name:    "interactive-foreground-task-room-payload",
+		Name:    "interactive-foreground-task-topic-payload",
 		Timeout: 120 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			rt, err := support.NewRuntime(ctx)
@@ -130,12 +130,13 @@ func Register(r *testv1.Registry) {
 				return testv1.StepRunResult{}, err
 			}
 			if err := rt.WaitForOutput(10*time.Second, []string{
-				`dialtone> Starting test: interactive-foreground-task-room-payload`,
+				`dialtone> Starting test: interactive-foreground-task-topic-payload`,
 			}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("test start lifecycle line missing from REPL output: %w", err)
 			}
 
 			cmd := "/repl src_v3 help"
+			roomSeq, _ := rt.CurrentSeqs()
 			if err := rt.RunTranscript([]support.TranscriptStep{{
 				Send: cmd,
 				ExpectRoom: support.CombinePatterns(
@@ -150,11 +151,11 @@ func Register(r *testv1.Registry) {
 			}}); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			taskID, err := rt.LatestTaskIDForCommand("repl src_v3 help")
+			taskID, err := rt.WaitForTaskIDForCommandAfter("repl src_v3 help", 20*time.Second, roomSeq)
 			if err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			if err := waitForSubjectContains(rt, fmt.Sprintf("repl.room.task.%s", taskID), 15*time.Second, []string{
+			if err := waitForSubjectContains(rt, fmt.Sprintf("repl.topic.task.%s", taskID), 15*time.Second, []string{
 				`"scope":"task"`,
 				`Usage: ./dialtone.sh repl src_v3 `,
 				`Commands (src_v3):`,
@@ -164,13 +165,13 @@ func Register(r *testv1.Registry) {
 			ctx.TestPassf("foreground task lifecycle and task-topic payload validated through REPL output")
 
 			return testv1.StepRunResult{
-				Report: "Ran `/repl src_v3 help` as a foreground task and verified the full index-room task lifecycle plus the per-task topic help payload.",
+				Report: "Ran `/repl src_v3 help` as a foreground task and verified the full index-topic task lifecycle plus the per-task topic help payload.",
 			}, nil
 		},
 	})
 
 	r.Add(testv1.Step{
-		Name:    "index-room-does-not-mirror-task-room-payload",
+		Name:    "index-topic-does-not-mirror-task-topic-payload",
 		Timeout: 120 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			rt, err := support.NewRuntime(ctx)
@@ -186,6 +187,7 @@ func Register(r *testv1.Registry) {
 			}
 
 			cmd := "/repl src_v3 help"
+			roomSeq, _ := rt.CurrentSeqs()
 			if err := rt.RunTranscript([]support.TranscriptStep{{
 				Send: cmd,
 				ExpectRoom: support.CombinePatterns(
@@ -200,11 +202,11 @@ func Register(r *testv1.Registry) {
 			}}); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			taskID, err := rt.LatestTaskIDForCommand("repl src_v3 help")
+			taskID, err := rt.WaitForTaskIDForCommandAfter("repl src_v3 help", 20*time.Second, roomSeq)
 			if err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			subject := fmt.Sprintf("repl.room.task.%s", taskID)
+			subject := fmt.Sprintf("repl.topic.task.%s", taskID)
 			if err := waitForSubjectContains(rt, subject, 15*time.Second, []string{
 				`"scope":"task"`,
 				`Usage: ./dialtone.sh repl src_v3 `,
@@ -212,18 +214,18 @@ func Register(r *testv1.Registry) {
 			}); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			indexLines := strings.Join(rt.SubjectMessages("repl.room.index"), "\n")
+			indexLines := strings.Join(rt.SubjectMessages("repl.topic.index"), "\n")
 			for _, forbidden := range []string{
 				`Usage: ./dialtone.sh repl src_v3 `,
 				`Commands (src_v3):`,
 			} {
 				if strings.Contains(indexLines, forbidden) {
-					return testv1.StepRunResult{}, fmt.Errorf("index room mirrored subtone payload %q\n%s", forbidden, indexLines)
+					return testv1.StepRunResult{}, fmt.Errorf("index topic mirrored subtone payload %q\n%s", forbidden, indexLines)
 				}
 			}
 
 			return testv1.StepRunResult{
-				Report: "Ran a local foreground task and verified the detailed help payload stayed in `repl.room.task.<task-id>` rather than leaking into `repl.room.index`.",
+				Report: "Ran a local foreground task and verified the detailed help payload stayed in `repl.topic.task.<task-id>` rather than leaking into `repl.topic.index`.",
 			}, nil
 		},
 	})
@@ -296,6 +298,7 @@ func Register(r *testv1.Registry) {
 			}
 
 			listCmd := "/repl src_v3 task list --count 20"
+			roomSeq, _ := rt.CurrentSeqs()
 			if err := rt.RunTranscript([]support.TranscriptStep{{
 				Send: listCmd,
 				ExpectRoom: support.CombinePatterns([]string{
@@ -309,14 +312,14 @@ func Register(r *testv1.Registry) {
 			}}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("repl task list command failed: %w", err)
 			}
-			listTaskID, err := rt.LatestTaskIDForCommand("repl src_v3 task list --count 20")
+			listTaskID, err := rt.WaitForTaskIDForCommandAfter("repl src_v3 task list --count 20", 20*time.Second, roomSeq)
 			if err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("missing task list task id: %w", err)
 			}
-			if _, err := rt.WaitForTaskPIDForCommand("repl src_v3 task list --count 20", 20*time.Second); err != nil {
+			if _, err := rt.WaitForTaskPIDForCommandAfter("repl src_v3 task list --count 20", 20*time.Second, roomSeq); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("missing task list pid: %w", err)
 			}
-			if err := rt.WaitForSubjectPatterns(fmt.Sprintf("repl.room.task.%s", listTaskID), 20*time.Second, []string{
+			if err := rt.WaitForSubjectPatterns(fmt.Sprintf("repl.topic.task.%s", listTaskID), 20*time.Second, []string{
 				`"scope":"task"`,
 				`TASK ID`,
 				`STATE`,
@@ -328,6 +331,7 @@ func Register(r *testv1.Registry) {
 			}
 
 			logCmd := fmt.Sprintf("/repl src_v3 task log --task-id %s --lines 50", taskID)
+			roomSeq, _ = rt.CurrentSeqs()
 			if err := rt.RunTranscript([]support.TranscriptStep{{
 				Send: logCmd,
 				ExpectRoom: support.CombinePatterns([]string{
@@ -341,20 +345,20 @@ func Register(r *testv1.Registry) {
 			}}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("repl task log command failed for task %s: %w", taskID, err)
 			}
-			logTaskID, err := rt.LatestTaskIDForCommand(fmt.Sprintf("repl src_v3 task log --task-id %s --lines 50", taskID))
+			logTaskID, err := rt.WaitForTaskIDForCommandAfter(fmt.Sprintf("repl src_v3 task log --task-id %s --lines 50", taskID), 20*time.Second, roomSeq)
 			if err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("missing task log task id: %w", err)
 			}
-			if _, err := rt.WaitForTaskPIDForCommand(fmt.Sprintf("repl src_v3 task log --task-id %s --lines 50", taskID), 20*time.Second); err != nil {
+			if _, err := rt.WaitForTaskPIDForCommandAfter(fmt.Sprintf("repl src_v3 task log --task-id %s --lines 50", taskID), 20*time.Second, roomSeq); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("missing task log pid: %w", err)
 			}
-			if err := rt.WaitForSubjectPatterns(fmt.Sprintf("repl.room.task.%s", logTaskID), 20*time.Second, []string{
+			if err := rt.WaitForSubjectPatterns(fmt.Sprintf("repl.topic.task.%s", logTaskID), 20*time.Second, []string{
 				`"scope":"task"`,
 				"Task log:",
 				taskID + ".log",
 				"watch",
 				"--subject",
-				"repl.room.index",
+				"repl.topic.index",
 			}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("task log output for task %s missing required bits: %w", taskID, err)
 			}
@@ -407,7 +411,7 @@ func Register(r *testv1.Registry) {
 			if err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			if err := waitForSubjectContains(rt, fmt.Sprintf("repl.room.task.%s", taskID), 10*time.Second, []string{
+			if err := waitForSubjectContains(rt, fmt.Sprintf("repl.topic.task.%s", taskID), 10*time.Second, []string{
 				`"scope":"task"`,
 				`Unsupported repl src_v3 command: definitely-not-a-real-command`,
 			}); err != nil {
@@ -415,7 +419,7 @@ func Register(r *testv1.Registry) {
 			}
 
 			return testv1.StepRunResult{
-				Report: "Ran an invalid REPL command and verified the index room reported a task-first nonzero exit while the per-task topic retained the detailed error payload.",
+				Report: "Ran an invalid REPL command and verified the index topic reported a task-first nonzero exit while the per-task topic retained the detailed error payload.",
 			}, nil
 		},
 	})
@@ -467,7 +471,7 @@ func Register(r *testv1.Registry) {
 				{firstTaskID, firstPID, "alpha"},
 				{secondTaskID, secondPID, "beta"},
 			} {
-				if err := waitForSubjectContains(rt, fmt.Sprintf("repl.room.task.%s", spec.taskID), 10*time.Second, []string{
+				if err := waitForSubjectContains(rt, fmt.Sprintf("repl.topic.task.%s", spec.taskID), 10*time.Second, []string{
 					`"scope":"task"`,
 					`watching NATS subject`,
 					fmt.Sprintf(`--filter %s`, spec.filter),
@@ -488,8 +492,9 @@ func Register(r *testv1.Registry) {
 
 func startBackgroundWatch(rt *support.Runtime, filter string) (string, int, error) {
 	prevPID, _ := rt.LatestSubtonePID()
-	commandText := fmt.Sprintf("repl src_v3 watch --nats-url %s --subject repl.room.index --filter %s", rt.NATSURL, strings.TrimSpace(filter))
+	commandText := fmt.Sprintf("repl src_v3 watch --nats-url %s --subject repl.topic.index --filter %s", rt.NATSURL, strings.TrimSpace(filter))
 	cmd := "/" + commandText + " &"
+	roomSeq, _ := rt.CurrentSeqs()
 	if err := rt.SendJoinLine(cmd); err != nil {
 		return "", 0, err
 	}
@@ -501,19 +506,11 @@ func startBackgroundWatch(rt *support.Runtime, filter string) (string, int, erro
 	)); err != nil {
 		return "", 0, fmt.Errorf("background watch task did not start cleanly: %w", err)
 	}
+	taskID, err := rt.WaitForTaskIDForCommandAfter(commandText, 10*time.Second, roomSeq)
+	if err != nil {
+		return "", 0, fmt.Errorf("background watch task id missing for command %q: %w", commandText, err)
+	}
 	deadline := time.Now().Add(10 * time.Second)
-	taskID := ""
-	for time.Now().Before(deadline) {
-		resolvedTaskID, err := rt.LatestTaskIDForCommand(commandText)
-		if err == nil && strings.HasPrefix(resolvedTaskID, "task-") {
-			taskID = resolvedTaskID
-			break
-		}
-		time.Sleep(120 * time.Millisecond)
-	}
-	if taskID == "" {
-		return "", 0, fmt.Errorf("background watch task id missing for command %q", commandText)
-	}
 	pid := 0
 	for time.Now().Before(deadline) {
 		nextPID, err := rt.LatestSubtonePID()
@@ -526,7 +523,7 @@ func startBackgroundWatch(rt *support.Runtime, filter string) (string, int, erro
 	if pid <= 0 {
 		return "", 0, fmt.Errorf("no new background runtime pid observed after %q", cmd)
 	}
-	if err := waitForSubjectContains(rt, fmt.Sprintf("repl.room.task.%s", taskID), 10*time.Second, []string{
+	if err := waitForSubjectContains(rt, fmt.Sprintf("repl.topic.task.%s", taskID), 10*time.Second, []string{
 		`"scope":"task"`,
 		`watching NATS subject`,
 		fmt.Sprintf(`--filter %s`, strings.TrimSpace(filter)),
@@ -538,6 +535,7 @@ func startBackgroundWatch(rt *support.Runtime, filter string) (string, int, erro
 
 func cleanupManagedTasks(rt *support.Runtime) error {
 	listCmd := "/repl src_v3 task list --count 50 --state running"
+	roomSeq, _ := rt.CurrentSeqs()
 	if err := rt.RunTranscript([]support.TranscriptStep{{
 		Send: listCmd,
 		ExpectRoom: support.CombinePatterns([]string{
@@ -551,15 +549,15 @@ func cleanupManagedTasks(rt *support.Runtime) error {
 	}}); err != nil {
 		return fmt.Errorf("repl task list cleanup command failed: %w", err)
 	}
-	taskID, err := rt.LatestTaskIDForCommand("repl src_v3 task list --count 50 --state running")
+	taskID, err := rt.WaitForTaskIDForCommandAfter("repl src_v3 task list --count 50 --state running", 20*time.Second, roomSeq)
 	if err != nil {
 		return fmt.Errorf("missing cleanup task list task id: %w", err)
 	}
-	listPID, err := rt.WaitForTaskPIDForCommand("repl src_v3 task list --count 50 --state running", 20*time.Second)
+	listPID, err := rt.WaitForTaskPIDForCommandAfter("repl src_v3 task list --count 50 --state running", 20*time.Second, roomSeq)
 	if err != nil {
 		return fmt.Errorf("missing cleanup task list pid: %w", err)
 	}
-	out := strings.Join(rt.SubjectMessages(fmt.Sprintf("repl.room.task.%s", taskID)), "\n")
+	out := strings.Join(rt.SubjectMessages(fmt.Sprintf("repl.topic.task.%s", taskID)), "\n")
 	for _, line := range strings.Split(strings.ReplaceAll(out, "\r\n", "\n"), "\n") {
 		var frame map[string]any
 		if err := json.Unmarshal([]byte(line), &frame); err != nil {
