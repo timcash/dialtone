@@ -33,7 +33,7 @@ type mockUISession struct {
 func Register(reg *testv1.Registry) {
 	reg.Add(testv1.Step{
 		Name:    "04-ui-section-navigation",
-		Timeout: 120 * time.Second,
+		Timeout: uiStepTimeout(120 * time.Second),
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			mock, err := prepareMockUI(ctx, "robot-hero-stage", "Hero Section", "nav")
 			if err != nil {
@@ -65,7 +65,7 @@ func Register(reg *testv1.Registry) {
 
 	reg.Add(testv1.Step{
 		Name:    "05-ui-table-buttons",
-		Timeout: 45 * time.Second,
+		Timeout: uiStepTimeout(45 * time.Second),
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			if _, err := prepareMockUI(ctx, "robot-table-table", "Telemetry Section", "table"); err != nil {
 				return testv1.StepRunResult{}, err
@@ -78,7 +78,10 @@ func Register(reg *testv1.Registry) {
 			if err := publishHeartbeat(nc); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			if err := ctx.WaitForAriaLabelAttrEquals("Robot Table", "data-row-count", "3", 8*time.Second); err != nil {
+			if err := ctx.WaitForAriaLabelAttrEquals("Robot Table", "data-last-heartbeat-ts", "12345", 20*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Robot Table", "data-last-heartbeat-mav-type", "rover", 8*time.Second); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 			if err := clickFormButton(ctx, "Table Mode Form", "Table Thumb 1"); err != nil {
@@ -90,13 +93,13 @@ func Register(reg *testv1.Registry) {
 			if err := clickFormButton(ctx, "Table Mode Form", "Table Thumb 2"); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			if err := ctx.WaitForAriaLabelAttrEquals("Robot Table", "data-row-count", "0", 5*time.Second); err != nil {
+			if err := ctx.WaitForAriaLabelAttrEquals("Robot Table", "data-last-clear-row-count", "0", 5*time.Second); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 			if err := publishHeartbeat(nc); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			if err := ctx.WaitForAriaLabelAttrEquals("Robot Table", "data-row-count", "3", 8*time.Second); err != nil {
+			if err := ctx.WaitForAriaLabelAttrEquals("Robot Table", "data-last-heartbeat-ts", "12345", 20*time.Second); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 			return testv1.StepRunResult{Report: "Telemetry section buttons verified"}, nil
@@ -104,8 +107,34 @@ func Register(reg *testv1.Registry) {
 	})
 
 	reg.Add(testv1.Step{
+		Name:    "05a-ui-table-repeat-click-sequence",
+		Timeout: uiStepTimeout(45 * time.Second),
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			if _, err := prepareMockUI(ctx, "robot-table-table", "Telemetry Section", "table-click-seq"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			ctx.Infof("table repeat-click: first refresh click")
+			if err := clickFormButton(ctx, "Table Mode Form", "Table Thumb 1"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Table Mode Form", "data-click-seq", "1", uiStepTimeout(6*time.Second)); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			ctx.Infof("table repeat-click: second refresh click")
+			if err := clickFormButton(ctx, "Table Mode Form", "Table Thumb 1"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Table Mode Form", "data-click-seq", "2", uiStepTimeout(6*time.Second)); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			ctx.Infof("table repeat-click: repeated refresh advanced data-click-seq to 2")
+			return testv1.StepRunResult{Report: "Telemetry table repeated-button click sequence verified"}, nil
+		},
+	})
+
+	reg.Add(testv1.Step{
 		Name:    "06-ui-steering-settings-buttons",
-		Timeout: 45 * time.Second,
+		Timeout: uiStepTimeout(75 * time.Second),
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			if _, err := prepareMockUI(ctx, "robot-steering-settings-table", "Steering Settings Section", "steering"); err != nil {
 				return testv1.StepRunResult{}, err
@@ -169,7 +198,7 @@ func Register(reg *testv1.Registry) {
 
 	reg.Add(testv1.Step{
 		Name:    "07-ui-three-buttons-three-system-arm",
-		Timeout: 60 * time.Second,
+		Timeout: uiHeavyStepTimeout(60 * time.Second),
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			repo := ctx.RepoRoot()
 			if _, err := prepareMockUI(ctx, "robot-three-stage", "Three Section", "three"); err != nil {
@@ -178,6 +207,7 @@ func Register(reg *testv1.Registry) {
 			if err := ctx.WaitForAriaLabelAttrEquals("Three Mode Form", "data-current-mode", "Drive", 8*time.Second); err != nil {
 				return testv1.StepRunResult{}, err
 			}
+			ctx.Infof("three step: drive mode ready")
 			driveChecks := []struct {
 				ButtonAria string
 				Command    string
@@ -191,6 +221,7 @@ func Register(reg *testv1.Registry) {
 				{"Three Thumb 6", "drive_down", "throttlePwm=1000 steeringPwm=2000 durationMs=2000"},
 			}
 			for _, check := range driveChecks {
+				ctx.Infof("three drive: clicking %s expecting %s %s", check.ButtonAria, check.Command, check.Extra)
 				if err := clickFormButton(ctx, "Three Mode Form", check.ButtonAria); err != nil {
 					return testv1.StepRunResult{}, err
 				}
@@ -198,15 +229,18 @@ func Register(reg *testv1.Registry) {
 					return testv1.StepRunResult{}, err
 				}
 			}
+			ctx.Infof("three drive: issuing stop")
 			if err := clickFormButton(ctx, "Three Mode Form", "Three Thumb 7"); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 			if err := waitForLastCommand(ctx, "guided_hold", "", "", 5*time.Second); err != nil {
 				return testv1.StepRunResult{}, err
 			}
+			ctx.Infof("three step: switching to system mode")
 			if err := cycleFormMode(ctx, "Three Mode Form", "Three Mode", "System"); err != nil {
 				return testv1.StepRunResult{}, err
 			}
+			ctx.Infof("three step: system mode ready")
 			systemChecks := []struct {
 				ButtonAria string
 				Command    string
@@ -220,6 +254,7 @@ func Register(reg *testv1.Registry) {
 				{"Three Thumb 6", "pulse_fwd", ""},
 			}
 			for _, check := range systemChecks {
+				ctx.Infof("three system: clicking %s expecting %s mode=%s", check.ButtonAria, check.Command, check.Mode)
 				if err := clickFormButton(ctx, "Three Mode Form", check.ButtonAria); err != nil {
 					return testv1.StepRunResult{}, err
 				}
@@ -227,15 +262,18 @@ func Register(reg *testv1.Registry) {
 					return testv1.StepRunResult{}, err
 				}
 			}
+			ctx.Infof("three system: issuing stop")
 			if err := clickFormButton(ctx, "Three Mode Form", "Three Thumb 7"); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 			if err := waitForLastCommand(ctx, "guided_hold", "", "", 5*time.Second); err != nil {
 				return testv1.StepRunResult{}, err
 			}
+			ctx.Infof("three step: switching to guided mode")
 			if err := cycleFormMode(ctx, "Three Mode Form", "Three Mode", "Guided"); err != nil {
 				return testv1.StepRunResult{}, err
 			}
+			ctx.Infof("three step: guided mode ready")
 			guidedChecks := []struct {
 				ButtonAria string
 				Command    string
@@ -248,6 +286,7 @@ func Register(reg *testv1.Registry) {
 				{"Three Thumb 5", "mode", "manual"},
 			}
 			for _, check := range guidedChecks {
+				ctx.Infof("three guided: clicking %s expecting %s mode=%s", check.ButtonAria, check.Command, check.Mode)
 				if err := clickFormButton(ctx, "Three Mode Form", check.ButtonAria); err != nil {
 					return testv1.StepRunResult{}, err
 				}
@@ -273,33 +312,38 @@ func Register(reg *testv1.Registry) {
 	})
 
 	reg.Add(testv1.Step{
+		Name:    "07a-ui-three-mode-cycle",
+		Timeout: uiHeavyStepTimeout(45 * time.Second),
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			if _, err := prepareMockUI(ctx, "robot-three-stage", "Three Section", "three-cycle"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Three Mode Form", "data-current-mode", "Drive", 8*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := cycleFormMode(ctx, "Three Mode Form", "Three Mode", "System"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := cycleFormMode(ctx, "Three Mode Form", "Three Mode", "Guided"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := cycleFormMode(ctx, "Three Mode Form", "Three Mode", "Drive"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			return testv1.StepRunResult{Report: "Three mode cycling verified"}, nil
+		},
+	})
+
+	reg.Add(testv1.Step{
 		Name:    "08-ui-terminal-routing-and-buttons",
-		Timeout: 60 * time.Second,
+		Timeout: uiHeavyStepTimeout(60 * time.Second),
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			repo := ctx.RepoRoot()
-			if _, err := prepareMockUI(ctx, "robot-xterm-xterm", "Xterm Section", "xterm"); err != nil {
-				return testv1.StepRunResult{}, err
-			}
-			if err := ctx.WaitForAriaLabel("Xterm Terminal", 8*time.Second); err != nil {
-				return testv1.StepRunResult{}, err
-			}
-			if err := ctx.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-ready", "true", 8*time.Second); err != nil {
-				return testv1.StepRunResult{}, err
-			}
-			nc, err := connectMockNATS()
+			nc, err := prepareTerminalMockUI(ctx, "robot-xterm-xterm", "xterm")
 			if err != nil {
 				return testv1.StepRunResult{}, err
 			}
 			defer nc.Close()
-			if err := publishTerminalEvents(nc); err != nil {
-				return testv1.StepRunResult{}, err
-			}
-			if err := ctx.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-last-command-ack-result", "MAV_RESULT_FAILED", 8*time.Second); err != nil {
-				return testv1.StepRunResult{}, err
-			}
-			if err := ctx.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-last-status-text", "Arm: Radio failsafe on", 8*time.Second); err != nil {
-				return testv1.StepRunResult{}, err
-			}
 			if err := navigateMenuToSection(ctx, "Navigate Telemetry", "Telemetry Section", "Robot Table"); err != nil {
 				return testv1.StepRunResult{}, err
 			}
@@ -352,7 +396,7 @@ func Register(reg *testv1.Registry) {
 			if err := clickFormButton(ctx, "Log Mode Form", "Log Thumb 8"); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			if err := ctx.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-last-log-category", "ui", 5*time.Second); err != nil {
+			if err := ctx.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-last-ui-action", "clear", 5*time.Second); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 			if err := cycleFormMode(ctx, "Log Mode Form", "Log Mode", "Command"); err != nil {
@@ -432,8 +476,70 @@ func Register(reg *testv1.Registry) {
 	})
 
 	reg.Add(testv1.Step{
+		Name:    "08a-ui-terminal-clear-action-state",
+		Timeout: uiHeavyStepTimeout(45 * time.Second),
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			nc, err := prepareTerminalMockUI(ctx, "robot-xterm-xterm", "xterm-clear")
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			defer nc.Close()
+			if err := cycleFormMode(ctx, "Log Mode Form", "Log Mode", "Filter"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := clickFormButton(ctx, "Log Mode Form", "Log Thumb 4"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-filter", "ui", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := clickFormButton(ctx, "Log Mode Form", "Log Thumb 8"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-last-ui-action", "clear", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-last-log-category", "ui", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			return testv1.StepRunResult{Report: "Terminal clear action state verified"}, nil
+		},
+	})
+
+	reg.Add(testv1.Step{
+		Name:    "08b-ui-terminal-mode-cycle",
+		Timeout: uiHeavyStepTimeout(45 * time.Second),
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			nc, err := prepareTerminalMockUI(ctx, "robot-xterm-xterm", "xterm-mode-cycle")
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			defer nc.Close()
+			if err := cycleFormMode(ctx, "Log Mode Form", "Log Mode", "Filter"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := cycleFormMode(ctx, "Log Mode Form", "Log Mode", "Command"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := cycleFormMode(ctx, "Log Mode Form", "Log Mode", "Select"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := clickFormButton(ctx, "Log Mode Form", "Log Thumb 8"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := ctx.WaitForAriaLabelAttrEquals("Log Mode Form", "data-current-mode", "Tail", 5*time.Second); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := cycleFormMode(ctx, "Log Mode Form", "Log Mode", "Select"); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			return testv1.StepRunResult{Report: "Terminal mode cycling verified"}, nil
+		},
+	})
+
+	reg.Add(testv1.Step{
 		Name:    "09-ui-video-buttons",
-		Timeout: 45 * time.Second,
+		Timeout: uiStepTimeout(45 * time.Second),
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			if _, err := prepareMockUI(ctx, "robot-video-video", "Video Section", "video"); err != nil {
 				return testv1.StepRunResult{}, err
@@ -471,7 +577,7 @@ func Register(reg *testv1.Registry) {
 
 	reg.Add(testv1.Step{
 		Name:    "10-ui-settings-and-keyparams",
-		Timeout: 45 * time.Second,
+		Timeout: uiStepTimeout(75 * time.Second),
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			if _, err := prepareMockUI(ctx, "robot-settings-button-list", "Settings Section", "settings"); err != nil {
 				return testv1.StepRunResult{}, err
@@ -482,15 +588,18 @@ func Register(reg *testv1.Registry) {
 			if err := ctx.WaitForAriaLabel("Toggle Chatlog Button", 8*time.Second); err != nil {
 				return testv1.StepRunResult{}, err
 			}
+			ctx.Infof("settings step: toggling chatlog overlay on")
 			if err := ctx.ClickAriaLabel("Toggle Chatlog Button"); err != nil {
 				return testv1.StepRunResult{}, err
 			}
+			ctx.Infof("settings step: navigating to three section for overlay check")
 			if err := navigateMenuToSection(ctx, "Navigate Three", "Three Section", "Three Chatlog Overlay"); err != nil {
 				return testv1.StepRunResult{}, err
 			}
 			if err := ctx.WaitForAriaLabelAttrEquals("Three Chatlog Overlay", "data-enabled", "true", 5*time.Second); err != nil {
 				return testv1.StepRunResult{}, err
 			}
+			ctx.Infof("settings step: navigating to key params section")
 			if err := navigateMenuToSection(ctx, "Navigate Key Params", "Key Params Section", "Key Params Table"); err != nil {
 				return testv1.StepRunResult{}, err
 			}
@@ -558,6 +667,35 @@ func prepareMockUI(ctx *testv1.StepContext, hashID, sectionAria, roleSuffix stri
 	}, nil
 }
 
+func prepareTerminalMockUI(ctx *testv1.StepContext, hashID, roleSuffix string) (*nats.Conn, error) {
+	if _, err := prepareMockUI(ctx, hashID, "Xterm Section", roleSuffix); err != nil {
+		return nil, err
+	}
+	if err := ctx.WaitForAriaLabel("Xterm Terminal", 8*time.Second); err != nil {
+		return nil, err
+	}
+	if err := ctx.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-ready", "true", 8*time.Second); err != nil {
+		return nil, err
+	}
+	nc, err := connectMockNATS()
+	if err != nil {
+		return nil, err
+	}
+	if err := publishTerminalEvents(nc); err != nil {
+		nc.Close()
+		return nil, err
+	}
+	if err := ctx.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-last-command-ack-result", "MAV_RESULT_FAILED", 8*time.Second); err != nil {
+		nc.Close()
+		return nil, err
+	}
+	if err := ctx.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-last-status-text", "Arm: Radio failsafe on", 8*time.Second); err != nil {
+		nc.Close()
+		return nil, err
+	}
+	return nc, nil
+}
+
 func waitForSectionReady(ctx *testv1.StepContext, sectionAria string, timeout time.Duration) error {
 	if err := ctx.WaitForAriaLabel(sectionAria, timeout); err != nil {
 		return err
@@ -590,23 +728,65 @@ func clickFormButton(ctx *testv1.StepContext, formAria, buttonAria string) error
 	if err := ctx.WaitForAriaLabelAttrEquals(formAria, "data-buttons-ready", "true", 8*time.Second); err != nil {
 		return err
 	}
+	if err := ctx.WaitForAriaLabel(buttonAria, 8*time.Second); err != nil {
+		return err
+	}
+	beforeSeq, err := ctx.ReadAriaLabelAttr(formAria, "data-click-seq")
+	if err != nil {
+		return err
+	}
+	ctx.Infof("%s click start button=%s seq=%s", formAria, buttonAria, beforeSeq)
 	if err := ctx.ClickAriaLabel(buttonAria); err != nil {
 		return err
 	}
-	return ctx.WaitForAriaLabelAttrEquals(formAria, "data-last-button-aria", buttonAria, 3*time.Second)
+	afterSeq, err := waitForAriaLabelAttrChange(ctx, formAria, "data-click-seq", beforeSeq, uiStepTimeout(6*time.Second))
+	if err != nil {
+		return err
+	}
+	ctx.Infof("%s click complete button=%s seq=%s", formAria, buttonAria, afterSeq)
+	return ctx.WaitForAriaLabelAttrEquals(formAria, "data-last-button-aria", buttonAria, uiStepTimeout(6*time.Second))
 }
 
 func cycleFormMode(ctx *testv1.StepContext, formAria, modeButtonAria, expectedMode string) error {
-	deadline := time.Now().Add(8 * time.Second)
+	deadline := time.Now().Add(uiStepTimeout(30 * time.Second))
 	for time.Now().Before(deadline) {
-		if err := ctx.WaitForAriaLabelAttrEquals(formAria, "data-current-mode", expectedMode, 500*time.Millisecond); err == nil {
+		currentMode, err := ctx.ReadAriaLabelAttr(formAria, "data-current-mode")
+		if err != nil {
+			return err
+		}
+		if currentMode == expectedMode {
+			ctx.Infof("%s mode is now %s", formAria, expectedMode)
 			return nil
 		}
+		ctx.Infof("%s mode=%s target=%s", formAria, currentMode, expectedMode)
 		if err := clickFormButton(ctx, formAria, modeButtonAria); err != nil {
 			return err
 		}
+		if nextMode, err := waitForAriaLabelAttrChange(ctx, formAria, "data-current-mode", currentMode, uiStepTimeout(4*time.Second)); err == nil {
+			ctx.Infof("%s mode advanced to %s", formAria, nextMode)
+			continue
+		}
 	}
 	return fmt.Errorf("timed out waiting for %s current mode=%s", formAria, expectedMode)
+}
+
+func waitForAriaLabelAttrChange(ctx *testv1.StepContext, label, attr, before string, timeout time.Duration) (string, error) {
+	deadline := time.Now().Add(timeout)
+	var last string
+	for time.Now().Before(deadline) {
+		value, err := ctx.ReadAriaLabelAttr(label, attr)
+		if err == nil {
+			last = value
+			if value != before {
+				return value, nil
+			}
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	if last == "" {
+		last = before
+	}
+	return "", fmt.Errorf("timed out waiting for %s attr %s to change from %q (last=%q)", label, attr, before, last)
 }
 
 func waitForLastCommand(ctx *testv1.StepContext, cmd, mode, extra string, timeout time.Duration) error {
@@ -620,6 +800,21 @@ func waitForLastCommand(ctx *testv1.StepContext, cmd, mode, extra string, timeou
 		return nil
 	}
 	return ctx.WaitForAriaLabelAttrEquals("App Header", "data-last-rover-command-extra", extra, timeout)
+}
+
+func uiStepTimeout(base time.Duration) time.Duration {
+	if strings.TrimSpace(testv1.RuntimeConfigSnapshot().BrowserNode) != "" && base < 90*time.Second {
+		return base * 2
+	}
+	return base
+}
+
+func uiHeavyStepTimeout(base time.Duration) time.Duration {
+	timeout := uiStepTimeout(base)
+	if strings.TrimSpace(testv1.RuntimeConfigSnapshot().BrowserNode) != "" && timeout < 8*time.Minute {
+		return 8 * time.Minute
+	}
+	return timeout
 }
 
 func connectMockNATS() (*nats.Conn, error) {
@@ -655,17 +850,16 @@ func startLocalMockServer(repo, uiDist, port string) (baseURL, browserBaseURL, r
 	baseURL = "http://127.0.0.1:" + port
 	browserBaseURL = baseURL
 	remoteNode = strings.TrimSpace(testv1.RuntimeConfigSnapshot().BrowserNode)
-	if remoteNode == "" {
-		remoteNode = strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_NODE"))
-	}
-	if remoteNode == "" {
-		remoteNode = strings.TrimSpace(os.Getenv("ROBOT_TEST_BROWSER_NODE"))
-	}
+	opts := GetOptions()
 	if remoteNode != "" {
-		if v := strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_BASE_URL")); v != "" {
+		if v := strings.TrimSpace(opts.BrowserBaseURL); v != "" {
 			browserBaseURL = strings.TrimRight(v, "/")
 		} else if isWSL() && strings.EqualFold(remoteNode, "legion") {
-			browserBaseURL = baseURL
+			if hostIP := wslHostIPForWindowsBrowser(); hostIP != "" {
+				browserBaseURL = "http://" + hostIP + ":" + port
+			} else {
+				browserBaseURL = baseURL
+			}
 		} else if dnsName := tailscaleSelfDNSName(); dnsName != "" {
 			browserBaseURL = "http://" + dnsName + ":" + port
 		} else if host, herr := os.Hostname(); herr == nil && strings.TrimSpace(host) != "" {

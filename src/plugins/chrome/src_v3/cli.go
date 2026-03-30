@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 )
@@ -104,6 +105,10 @@ func Run(args []string) error {
 	case "install":
 		logs.Info("chrome src_v3 install: no-op")
 		return nil
+	case "format":
+		return formatLocalSources()
+	case "lint":
+		return lintLocalSources()
 	case "build":
 		return buildLocalBinary()
 	case "deploy":
@@ -169,6 +174,8 @@ func printUsage() {
 	logs.Info("Usage: ./dialtone.sh chrome src_v3 <command> [args]")
 	logs.Info("Commands:")
 	logs.Info("  install")
+	logs.Info("  format")
+	logs.Info("  lint")
 	logs.Info("  build")
 	logs.Info("  deploy [--host <host>] [--service]")
 	logs.Info("  service [--host <host>] --mode start|stop|status")
@@ -202,12 +209,93 @@ func printUsage() {
 	logs.Info("  %s", NATSExample("<host>", defaultRole))
 }
 
+func chromeRuntimeGoBin() string {
+	if v := strings.TrimSpace(configv1.LookupEnvString("DIALTONE_GO_BIN")); v != "" {
+		return v
+	}
+	if rt, err := configv1.ResolveRuntime(""); err == nil && strings.TrimSpace(rt.GoBin) != "" {
+		return strings.TrimSpace(rt.GoBin)
+	}
+	return "go"
+}
+
+func chromeRuntimeBunBin() string {
+	if v := strings.TrimSpace(configv1.LookupEnvString("DIALTONE_BUN_BIN")); v != "" {
+		return v
+	}
+	if rt, err := configv1.ResolveRuntime(""); err == nil && strings.TrimSpace(rt.BunBin) != "" {
+		return strings.TrimSpace(rt.BunBin)
+	}
+	return "bun"
+}
+
+func chromeUIRoot() string {
+	if rt, err := configv1.ResolveRuntime(""); err == nil && strings.TrimSpace(rt.SrcRoot) != "" {
+		return filepath.Join(rt.SrcRoot, "plugins", "chrome", "src_v3", "ui")
+	}
+	return filepath.Join(resolveSrcRoot(), "plugins", "chrome", "src_v3", "ui")
+}
+
+func chromeUISupportsScript(name string) bool {
+	raw, err := os.ReadFile(filepath.Join(chromeUIRoot(), "package.json"))
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(raw), `"`+strings.TrimSpace(name)+`"`)
+}
+
+func formatLocalSources() error {
+	goCmd := exec.Command(chromeRuntimeGoBin(), "fmt", "./plugins/chrome/...")
+	goCmd.Dir = resolveSrcRoot()
+	goCmd.Stdout = os.Stdout
+	goCmd.Stderr = os.Stderr
+	goCmd.Stdin = os.Stdin
+	goCmd.Env = os.Environ()
+	if err := goCmd.Run(); err != nil {
+		return err
+	}
+	if !chromeUISupportsScript("format") {
+		logs.Info("chrome src_v3 format: UI formatter script is not declared; formatted Go sources only")
+		return nil
+	}
+	bunCmd := exec.Command(chromeRuntimeBunBin(), "run", "format")
+	bunCmd.Dir = chromeUIRoot()
+	bunCmd.Stdout = os.Stdout
+	bunCmd.Stderr = os.Stderr
+	bunCmd.Stdin = os.Stdin
+	bunCmd.Env = os.Environ()
+	return bunCmd.Run()
+}
+
+func lintLocalSources() error {
+	goCmd := exec.Command(chromeRuntimeGoBin(), "vet", "./plugins/chrome/...")
+	goCmd.Dir = resolveSrcRoot()
+	goCmd.Stdout = os.Stdout
+	goCmd.Stderr = os.Stderr
+	goCmd.Stdin = os.Stdin
+	goCmd.Env = os.Environ()
+	if err := goCmd.Run(); err != nil {
+		return err
+	}
+	if !chromeUISupportsScript("lint") {
+		logs.Info("chrome src_v3 lint: UI lint script is not declared; checked Go sources only")
+		return nil
+	}
+	bunCmd := exec.Command(chromeRuntimeBunBin(), "run", "lint")
+	bunCmd.Dir = chromeUIRoot()
+	bunCmd.Stdout = os.Stdout
+	bunCmd.Stderr = os.Stderr
+	bunCmd.Stdin = os.Stdin
+	bunCmd.Env = os.Environ()
+	return bunCmd.Run()
+}
+
 func buildLocalBinary() error {
 	return buildBinaryFor(localBinaryPathFor(runtime.GOOS, runtime.GOARCH), runtime.GOOS, runtime.GOARCH)
 }
 
 func defaultChromeTestHost() string {
-	if v := strings.TrimSpace(os.Getenv("DIALTONE_CHROME_TEST_HOST")); v != "" {
+	if v := strings.TrimSpace(configv1.LookupEnvString("DIALTONE_CHROME_TEST_HOST")); v != "" {
 		return v
 	}
 	if strings.TrimSpace(os.Getenv("WSL_DISTRO_NAME")) == "" {
@@ -393,7 +481,7 @@ func handleCloseAll(args []string) error {
 }
 
 func handleSmokeTest(args []string) error {
-	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
+	goBin := strings.TrimSpace(configv1.LookupEnvString("DIALTONE_GO_BIN"))
 	if goBin == "" {
 		goBin = "go"
 	}

@@ -37,8 +37,8 @@ class CadStage implements VisualizationControl {
   private camera = new THREE.PerspectiveCamera(42, 1, 0.1, 2000);
   private renderer: THREE.WebGLRenderer;
   private root = new THREE.Group();
-  private floor: THREE.Mesh;
-  private grid: THREE.GridHelper;
+  private floor!: THREE.Mesh;
+  private grid!: THREE.GridHelper;
   private frameId = 0;
   private visible = true;
   private mesh: THREE.Mesh | null = null;
@@ -50,7 +50,6 @@ class CadStage implements VisualizationControl {
   private spinEnabled = true;
   private wireframeVisible = true;
   private mode: CadMode = 'gear';
-  private cameraView: CameraView = 'isometric';
   private generationSeq = 0;
   private regenerationInFlight = false;
   private pendingRegenerationStatus: string | null = null;
@@ -480,7 +479,6 @@ class CadStage implements VisualizationControl {
   }
 
   private setCameraView(view: CameraView): void {
-    this.cameraView = view;
     switch (view) {
       case 'front':
         this.camera.position.set(0, 0, 170);

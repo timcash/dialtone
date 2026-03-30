@@ -17,6 +17,7 @@ Current usage includes:
 - `./dialtone.sh ssh src_v1 mesh` / `nodes`: List configured mesh nodes.
 - `./dialtone.sh ssh src_v1 resolve --host grey`: Resolve mesh name to IP/host.
 - `./dialtone.sh ssh src_v1 probe --host grey`: Test connectivity and auth.
+- `./dialtone.sh ssh src_v1 test --host grey`: Run the ssh self-check suite. If `--host` is omitted, tests default to `grey`.
 - `./dialtone.sh ssh src_v1 tailnet-check`: Verify SSH connectivity over Tailscale for all nodes.
 
 ### Execution
@@ -35,7 +36,7 @@ Current usage includes:
 ### NATS-Logged Transport
 When running SSH commands via the orchestrator (`./dialtone.sh ssh ...`), logs are typically captured and routed to NATS rather than direct stdout.
 - **Recommended Debugging**: `./dialtone.sh repl src_v3 watch --subject 'repl.>' --filter 'ssh src_v1'`
-- **Subtone Logs**: The orchestrator runs these as "subtones". Use `subtone-list` and `subtone-log` in the REPL to inspect hung or verbose remote processes.
+- **Task Inspection**: Use `./dialtone.sh repl src_v3 task list`, `./dialtone.sh repl src_v3 task show --task-id <id>`, and `./dialtone.sh repl src_v3 task log --task-id <id>` to inspect queued or running remote work.
 
 ### Mesh Behavior & Defaults
 - **Source of Truth**: `env/dialtone.json` (the `mesh_nodes` array).
@@ -117,37 +118,6 @@ Notes:
 ```
 
 ## New machine from scratch
-
-```bash
-# 1) Sync local working tree (no git required on remote)
-./dialtone.sh ssh src_v1 bootstrap \
-  --host darkmac \
-  --src /home/user/dialtone \
-  --dest /Users/tim/dialtone \
-  --delete
-
-# 2) Bootstrap all mesh nodes with node default destinations
-./dialtone.sh ssh src_v1 bootstrap \
-  --host all \
-  --src /home/user/dialtone \
-  --delete
-
-# 3) Optional: add extra remote install steps
-./dialtone.sh ssh src_v1 bootstrap \
-  --host rover \
-  --src /home/user/dialtone \
-  --dest /home/tim/dialtone \
-  --install-cmd "printf 'y\n' | ./dialtone.sh go src_v1 install" \
-  --install-cmd "./dialtone.sh go src_v1 exec env GOROOT" \
-  --verify-cmd "./dialtone.sh go src_v1 exec version"
-
-# 4) Re-run install/verify only (no file sync)
-./dialtone.sh ssh src_v1 bootstrap \
-  --host darkmac \
-  --no-sync \
-  --install-cmd "printf 'y\n' | ./dialtone.sh go src_v1 install"
-```
-
 
 ```bash
 # 1) Sync local working tree (no git required on remote)

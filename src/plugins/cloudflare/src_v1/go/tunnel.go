@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
+
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 )
 
 type ProvisionRequest struct {
@@ -60,17 +60,14 @@ func ResolveTunnelToken(name, explicitToken string) string {
 	}
 	name = strings.TrimSpace(name)
 	if name != "" {
-		if tok := strings.TrimSpace(os.Getenv(TokenEnvKey(name))); tok != "" {
-			return tok
-		}
-		if tok := strings.TrimSpace(readConfigVar(defaultConfigPath(), TokenEnvKey(name))); tok != "" {
+		if tok := strings.TrimSpace(configv1.LookupEnvString(TokenEnvKey(name))); tok != "" {
 			return tok
 		}
 	}
-	if tok := strings.TrimSpace(os.Getenv("CF_TUNNEL_TOKEN")); tok != "" {
+	if tok := strings.TrimSpace(configv1.LookupEnvString("CF_TUNNEL_TOKEN")); tok != "" {
 		return tok
 	}
-	return strings.TrimSpace(readConfigVar(defaultConfigPath(), "CF_TUNNEL_TOKEN"))
+	return ""
 }
 
 func BuildTunnelRunArgs(name, url, token string) ([]string, error) {
@@ -156,10 +153,28 @@ func ProvisionTunnelAndDNS(in ProvisionRequest) (ProvisionResult, error) {
 	if err := json.NewDecoder(createResp.Body).Decode(&cr); err != nil {
 		return ProvisionResult{}, fmt.Errorf("decode create response failed: %w", err)
 	}
-	if createResp.StatusCode != http.StatusOK || !cr.Success || cr.Result.ID == "" {
+	tunnelID := strings.TrimSpace(cr.Result.ID)
+	runToken := ""
+	switch {
+	case createResp.StatusCode == http.StatusOK && cr.Success && tunnelID != "":
+		tokenData := map[string]string{"a": accountID, "t": tunnelID, "s": tunnelSecret}
+		tokenJSON, _ := json.Marshal(tokenData)
+		runToken = base64.StdEncoding.EncodeToString(tokenJSON)
+	case createResp.StatusCode == http.StatusConflict:
+		tunnelID, err = resolveTunnelIDByName(client, apiToken, accountID, name)
+		if err != nil {
+			return ProvisionResult{}, fmt.Errorf("resolve existing tunnel failed: %w", err)
+		}
+		if tunnelID == "" {
+			return ProvisionResult{}, fmt.Errorf("tunnel creation conflict but existing tunnel id for %s was not found", name)
+		}
+		runToken, err = fetchTunnelToken(client, apiToken, accountID, tunnelID)
+		if err != nil {
+			return ProvisionResult{}, fmt.Errorf("fetch existing tunnel token failed: %w", err)
+		}
+	default:
 		return ProvisionResult{}, fmt.Errorf("tunnel creation failed (status=%d)", createResp.StatusCode)
 	}
-	tunnelID := cr.Result.ID
 
 	// 3) Create DNS CNAME.
 	dnsCreated := false
@@ -182,9 +197,6 @@ func ProvisionTunnelAndDNS(in ProvisionRequest) (ProvisionResult, error) {
 	}
 
 	// 4) Save run token in dialtone config.
-	tokenData := map[string]string{"a": accountID, "t": tunnelID, "s": tunnelSecret}
-	tokenJSON, _ := json.Marshal(tokenData)
-	runToken := base64.StdEncoding.EncodeToString(tokenJSON)
 	envVar := TokenEnvKey(name)
 	if err := upsertConfigVar(envPath, envVar, runToken); err != nil {
 		return ProvisionResult{}, fmt.Errorf("write config token failed: %w", err)
@@ -434,35 +446,14 @@ func deleteTunnelConnections(client *http.Client, apiToken string, accountID str
 }
 
 func defaultConfigPath() string {
-	if path := strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE")); path != "" {
+	if path := strings.TrimSpace(configv1.ResolveEnvFilePath("")); path != "" {
 		return path
 	}
-	if path := strings.TrimSpace(os.Getenv("DIALTONE_MESH_CONFIG")); path != "" {
-		return path
-	}
-	return filepath.Join("env", "dialtone.json")
+	return "env/dialtone.json"
 }
 
 func readConfigVar(path string, key string) string {
-	path = strings.TrimSpace(path)
-	key = strings.TrimSpace(key)
-	if path == "" || key == "" {
-		return ""
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil || strings.TrimSpace(string(raw)) == "" {
-		return ""
-	}
-	doc := map[string]any{}
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return ""
-	}
-	if v, ok := doc[key]; ok {
-		if s, ok := v.(string); ok {
-			return strings.TrimSpace(s)
-		}
-	}
-	return ""
+	return strings.TrimSpace(configv1.EnvFileString(path, key))
 }
 
 func removeConfigVar(path string, key string) (bool, error) {
@@ -471,24 +462,14 @@ func removeConfigVar(path string, key string) (bool, error) {
 	if path == "" || key == "" {
 		return false, fmt.Errorf("missing config path or key")
 	}
-	raw, err := os.ReadFile(path)
+	doc, err := configv1.ReadEnvFileMap(path)
 	if err != nil {
-		return false, err
-	}
-	doc := map[string]any{}
-	if err := json.Unmarshal(raw, &doc); err != nil {
 		return false, err
 	}
 	if _, ok := doc[key]; !ok {
 		return false, nil
 	}
-	delete(doc, key)
-	out, err := json.MarshalIndent(doc, "", "  ")
-	if err != nil {
-		return false, err
-	}
-	out = append(out, '\n')
-	return true, os.WriteFile(path, out, 0o644)
+	return true, configv1.UpdateEnvFileValues(path, map[string]any{key: nil})
 }
 
 func decodeTunnelIDFromToken(token string) string {
@@ -507,58 +488,37 @@ func decodeTunnelIDFromToken(token string) string {
 	return strings.TrimSpace(doc["t"])
 }
 
+func fetchTunnelToken(client *http.Client, apiToken string, accountID string, tunnelID string) (string, error) {
+	type tokenResponse struct {
+		Result  string `json:"result"`
+		Success bool   `json:"success"`
+	}
+	req, _ := http.NewRequest("GET", fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/cfd_tunnel/%s/token", accountID, tunnelID), nil)
+	req.Header.Set("Authorization", "Bearer "+apiToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("fetch tunnel token failed: %w", err)
+	}
+	defer resp.Body.Close()
+	var tr tokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
+		return "", fmt.Errorf("decode tunnel token failed: %w", err)
+	}
+	token := strings.TrimSpace(tr.Result)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 || !tr.Success || token == "" {
+		return "", fmt.Errorf("fetch tunnel token failed: status=%d", resp.StatusCode)
+	}
+	return token, nil
+}
+
 func upsertConfigVar(path, key, value string) error {
 	path = strings.TrimSpace(path)
 	if path == "" {
-		path = "env/dialtone.json"
+		path = defaultConfigPath()
 	}
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return fmt.Errorf("missing config key")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil && filepath.Dir(path) != "." {
-		return err
-	}
-	if strings.HasSuffix(strings.ToLower(path), ".json") {
-		doc := map[string]any{}
-		if raw, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(raw)) != "" {
-			if err := json.Unmarshal(raw, &doc); err != nil {
-				return err
-			}
-		}
-		doc[key] = value
-		out, err := json.MarshalIndent(doc, "", "  ")
-		if err != nil {
-			return err
-		}
-		out = append(out, '\n')
-		return os.WriteFile(path, out, 0o644)
-	}
-	existing := ""
-	if raw, err := os.ReadFile(path); err == nil {
-		existing = string(raw)
-	}
-	lines := []string{}
-	if existing != "" {
-		lines = strings.Split(existing, "\n")
-	}
-	prefix := key + "="
-	replaced := false
-	for i, line := range lines {
-		if strings.HasPrefix(strings.TrimSpace(line), prefix) {
-			lines[i] = fmt.Sprintf("%s=%s", key, value)
-			replaced = true
-		}
-	}
-	if !replaced {
-		if len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) != "" {
-			lines = append(lines, "")
-		}
-		lines = append(lines, fmt.Sprintf("%s=%s", key, value))
-	}
-	out := strings.Join(lines, "\n")
-	if !strings.HasSuffix(out, "\n") {
-		out += "\n"
-	}
-	return os.WriteFile(path, []byte(out), 0o644)
+	return configv1.UpdateEnvFileValues(path, map[string]any{key: value})
 }

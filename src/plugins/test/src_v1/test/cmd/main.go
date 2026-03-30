@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
@@ -20,7 +21,9 @@ import (
 func main() {
 	logs.SetOutput(os.Stdout)
 	fs := flag.NewFlagSet("test test", flag.ContinueOnError)
-	commonFlags := testv1.BindCommonTestFlags(fs, testv1.CommonTestCLIOptions{})
+	commonFlags := testv1.BindCommonTestFlags(fs, testv1.CommonTestCLIOptions{
+		DefaultAttachNode: strings.TrimSpace(configv1.LookupEnvString("DIALTONE_TEST_BROWSER_NODE")),
+	})
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			os.Exit(0)
@@ -33,8 +36,7 @@ func main() {
 		logs.Error("test src_v1 parse failed: %v", err)
 		os.Exit(1)
 	}
-	// Keep attach-node opt-in. In WSL, local browser start should work and is
-	// more reliable than depending on remote node reachability.
+	testv1.ApplyDefaultBrowserAttach(&common, "test")
 	common.ApplyRuntimeConfig()
 	if attachNode := strings.TrimSpace(common.AttachNode); attachNode != "" && !common.NoSSH {
 		if node, nerr := sshv1.ResolveMeshNode(attachNode); nerr == nil && strings.EqualFold(strings.TrimSpace(node.OS), "windows") && node.PreferWSLPowerShell {

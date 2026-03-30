@@ -1,11 +1,11 @@
-package cli
+package logsv1
 
 import (
-	"fmt"
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
 func RunLint(versionDir string) error {
-	fmt.Printf(">> [LOGS] Lint: %s\n", versionDir)
+	logs.Info("logs %s lint", versionDir)
 	paths, err := resolveLogsPaths(versionDir)
 	if err != nil {
 		return err

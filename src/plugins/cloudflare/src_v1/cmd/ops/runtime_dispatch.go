@@ -33,8 +33,19 @@ func replIndexInfof(format string, args ...any) {
 	logs.Info("%s", msg)
 }
 
+func lookupConfigString(key string) string {
+	return strings.TrimSpace(configv1.LookupEnvString(key))
+}
+
+func resolveRuntimeEnvPath() string {
+	if path := strings.TrimSpace(configv1.ResolveEnvFilePath("")); path != "" {
+		return path
+	}
+	return filepath.Join("env", "dialtone.json")
+}
+
 func findCloudflared() string {
-	if override := strings.TrimSpace(os.Getenv("DIALTONE_CLOUDFLARED_BIN")); override != "" {
+	if override := lookupConfigString("DIALTONE_CLOUDFLARED_BIN"); override != "" {
 		return override
 	}
 	if rt, err := configv1.ResolveRuntime(""); err == nil {
@@ -53,11 +64,11 @@ func resolveDefaultTunnelURL(explicit string) string {
 	if v := strings.TrimSpace(explicit); v != "" {
 		return v
 	}
-	if v := strings.TrimSpace(os.Getenv("DIALTONE_BOOTSTRAP_HTTP_URL")); v != "" {
+	if v := lookupConfigString("DIALTONE_BOOTSTRAP_HTTP_URL"); v != "" {
 		return v
 	}
-	host := strings.TrimSpace(os.Getenv("DIALTONE_BOOTSTRAP_HTTP_HOST"))
-	port := strings.TrimSpace(os.Getenv("DIALTONE_BOOTSTRAP_HTTP_PORT"))
+	host := lookupConfigString("DIALTONE_BOOTSTRAP_HTTP_HOST")
+	port := lookupConfigString("DIALTONE_BOOTSTRAP_HTTP_PORT")
 	if host == "" {
 		host = "127.0.0.1"
 	}
@@ -99,13 +110,23 @@ func Dev() error {
 	return cmd.Run()
 }
 
-func Test(version string) error {
+func Test(version string, args []string) error {
 	paths, err := resolveCloudflarePaths()
 	if err != nil {
 		return err
 	}
-	cmd := runDialtone(paths.Runtime.RepoRoot, "go", "src_v1", "exec", "run", "./plugins/cloudflare/src_v1/test")
-	cmd.Dir = paths.Runtime.SrcRoot
+	version = strings.TrimSpace(version)
+	if version == "" {
+		version = "src_v1"
+	}
+	testMain := strings.TrimSpace(paths.TestMain)
+	if testMain == "" {
+		return fmt.Errorf("cloudflare %s test runner path is empty", version)
+	}
+	cmdArgs := []string{"go", "src_v1", "exec", "run", testMain}
+	cmdArgs = append(cmdArgs, args...)
+	cmd := runDialtone(paths.Runtime.RepoRoot, cmdArgs...)
+	cmd.Dir = paths.Runtime.RepoRoot
 	return cmd.Run()
 }
 
@@ -170,9 +191,9 @@ func runTunnel(args []string) error {
 		fs := flag.NewFlagSet("tunnel-cleanup", flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
 		name := fs.String("name", "", "Tunnel name to remove")
-		domain := fs.String("domain", strings.TrimSpace(os.Getenv("DIALTONE_DOMAIN")), "Managed domain")
-		apiToken := fs.String("api-token", os.Getenv("CLOUDFLARE_API_TOKEN"), "Cloudflare API token")
-		accountID := fs.String("account-id", os.Getenv("CLOUDFLARE_ACCOUNT_ID"), "Cloudflare account id")
+		domain := fs.String("domain", firstConfigured(lookupConfigString("DIALTONE_DOMAIN"), "dialtone.earth"), "Managed domain")
+		apiToken := fs.String("api-token", lookupConfigString("CLOUDFLARE_API_TOKEN"), "Cloudflare API token")
+		accountID := fs.String("account-id", lookupConfigString("CLOUDFLARE_ACCOUNT_ID"), "Cloudflare account id")
 		if err := fs.Parse(subArgs); err != nil {
 			return err
 		}
@@ -183,10 +204,7 @@ func runTunnel(args []string) error {
 		if tunnelName == "" {
 			return nil
 		}
-		envPath := strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE"))
-		if envPath == "" {
-			envPath = "env/dialtone.json"
-		}
+		envPath := resolveRuntimeEnvPath()
 		res, err := cloudflarev1.CleanupTunnelAndDNS(cloudflarev1.CleanupRequest{
 			TunnelName: tunnelName,
 			Domain:     strings.TrimSpace(*domain),
@@ -219,7 +237,7 @@ func runTunnel(args []string) error {
 			hostname = subArgs[1]
 		}
 		if hostname == "" {
-			dh := strings.TrimSpace(os.Getenv("DIALTONE_HOSTNAME"))
+			dh := lookupConfigString("DIALTONE_HOSTNAME")
 			if dh != "" {
 				hostname = dh + ".dialtone.earth"
 			}
@@ -240,7 +258,7 @@ func runTunnel(args []string) error {
 		fs := flag.NewFlagSet("tunnel-run", flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
 		urlFlag := fs.String("url", "", "service URL")
-		tokenFlag := fs.String("token", os.Getenv("CF_TUNNEL_TOKEN"), "tunnel token")
+		tokenFlag := fs.String("token", lookupConfigString("CF_TUNNEL_TOKEN"), "tunnel token")
 		if err := fs.Parse(subArgs[1:]); err != nil {
 			return err
 		}
@@ -260,7 +278,7 @@ func runTunnel(args []string) error {
 		fs := flag.NewFlagSet("tunnel-start", flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
 		urlFlag := fs.String("url", "", "service URL")
-		tokenFlag := fs.String("token", os.Getenv("CF_TUNNEL_TOKEN"), "tunnel token")
+		tokenFlag := fs.String("token", lookupConfigString("CF_TUNNEL_TOKEN"), "tunnel token")
 		if err := fs.Parse(subArgs[1:]); err != nil {
 			return err
 		}
@@ -382,7 +400,7 @@ func runShell(args []string) error {
 		fs := flag.NewFlagSet("shell-up", flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
 		name := fs.String("name", "shell", "Tunnel name")
-		host := fs.String("host", strings.TrimSpace(os.Getenv("DIALTONE_BOOTSTRAP_HTTP_HOST")), "Bootstrap HTTP host")
+		host := fs.String("host", lookupConfigString("DIALTONE_BOOTSTRAP_HTTP_HOST"), "Bootstrap HTTP host")
 		port := fs.Int("port", 0, "Bootstrap HTTP port")
 		token := fs.String("token", "", "Tunnel token override")
 		if err := fs.Parse(args[1:]); err != nil {
@@ -394,7 +412,7 @@ func runShell(args []string) error {
 		}
 		p := *port
 		if p <= 0 {
-			if raw := strings.TrimSpace(os.Getenv("DIALTONE_BOOTSTRAP_HTTP_PORT")); raw != "" {
+			if raw := lookupConfigString("DIALTONE_BOOTSTRAP_HTTP_PORT"); raw != "" {
 				if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
 					p = parsed
 				}
@@ -460,10 +478,10 @@ func runRobot(args []string) error {
 		robotName = strings.TrimSpace(fs.Args()[0])
 	}
 	if robotName == "" {
-		robotName = strings.TrimSpace(os.Getenv("DIALTONE_DOMAIN"))
+		robotName = lookupConfigString("DIALTONE_DOMAIN")
 	}
 	if robotName == "" {
-		robotName = strings.TrimSpace(os.Getenv("DIALTONE_HOSTNAME"))
+		robotName = lookupConfigString("DIALTONE_HOSTNAME")
 	}
 	if robotName == "" {
 		return fmt.Errorf("robot name is required")
@@ -528,9 +546,9 @@ func runProvision(args []string) error {
 	fs := flag.NewFlagSet("provision", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	name := fs.String("name", "", "tunnel name")
-	domain := fs.String("domain", "dialtone.earth", "managed domain")
-	apiToken := fs.String("api-token", os.Getenv("CLOUDFLARE_API_TOKEN"), "cloudflare api token")
-	accountID := fs.String("account-id", os.Getenv("CLOUDFLARE_ACCOUNT_ID"), "cloudflare account id")
+	domain := fs.String("domain", firstConfigured(lookupConfigString("DIALTONE_DOMAIN"), "dialtone.earth"), "managed domain")
+	apiToken := fs.String("api-token", lookupConfigString("CLOUDFLARE_API_TOKEN"), "cloudflare api token")
+	accountID := fs.String("account-id", lookupConfigString("CLOUDFLARE_ACCOUNT_ID"), "cloudflare account id")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -539,16 +557,13 @@ func runProvision(args []string) error {
 		tunnelName = strings.TrimSpace(fs.Args()[0])
 	}
 	if tunnelName == "" {
-		tunnelName = strings.TrimSpace(os.Getenv("DIALTONE_HOSTNAME"))
+		tunnelName = lookupConfigString("DIALTONE_HOSTNAME")
 	}
 	if tunnelName == "" {
 		return fmt.Errorf("usage: ./dialtone.sh cloudflare src_v1 provision <name> [--domain <domain>]")
 	}
 	replIndexInfof("cloudflare provision: creating tunnel and DNS for %s", tunnelName)
-	envPath := strings.TrimSpace(os.Getenv("DIALTONE_ENV_FILE"))
-	if envPath == "" {
-		envPath = "env/dialtone.json"
-	}
+	envPath := resolveRuntimeEnvPath()
 	res, err := cloudflarev1.ProvisionTunnelAndDNS(cloudflarev1.ProvisionRequest{
 		TunnelName: tunnelName,
 		Domain:     *domain,
@@ -573,4 +588,13 @@ func runProvision(args []string) error {
 
 func strconvAtoi(s string) (int, error) {
 	return strconv.Atoi(strings.TrimSpace(s))
+}
+
+func firstConfigured(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

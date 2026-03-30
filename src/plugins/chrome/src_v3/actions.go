@@ -53,11 +53,36 @@ func (d *daemonState) clickAriaLabel(label string) error {
 
 func (d *daemonState) pressEnterAriaLabel(label string) error {
 	selector := ariaSelector(label)
+	selectorJSON, err := json.Marshal(selector)
+	if err != nil {
+		return err
+	}
+	script := fmt.Sprintf(`(() => {
+		const el = document.querySelector(%s);
+		if (!el) return "missing";
+		el.focus();
+		el.dispatchEvent(new KeyboardEvent("keydown", {
+			key: "Enter",
+			code: "Enter",
+			keyCode: 13,
+			which: 13,
+			bubbles: true
+		}));
+		return "ok";
+	})()`, string(selectorJSON))
 	return d.withManagedContext(15*time.Second, func(ctx context.Context) error {
-		return chromedp.Run(ctx,
-			chromedp.WaitVisible(selector, chromedp.ByQuery),
-			chromedp.SendKeys(selector, "\r", chromedp.ByQuery),
-		)
+		deadline := time.Now().Add(8 * time.Second)
+		for time.Now().Before(deadline) {
+			var result string
+			if err := chromedp.Run(ctx, chromedp.Evaluate(script, &result)); err != nil {
+				return err
+			}
+			if result == "ok" {
+				return nil
+			}
+			time.Sleep(120 * time.Millisecond)
+		}
+		return fmt.Errorf("press-enter target %q not found", label)
 	})
 }
 

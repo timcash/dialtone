@@ -2,9 +2,11 @@ package test
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	chrome "dialtone/dev/plugins/chrome/src_v3"
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 )
 
 func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
@@ -18,10 +20,15 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 	if remoteNode != "" && strings.TrimSpace(cfg.RemoteBrowserRole) != "" {
 		role = strings.TrimSpace(cfg.RemoteBrowserRole)
 	}
-	resp, err := chrome.SendCommandByHost(remoteNode, chrome.CommandRequest{
-		Command: "status",
-		Role:    role,
-	})
+	if remoteNode != "" {
+		if managerURL := strings.TrimSpace(configv1.ResolveREPLManagerNATSURL()); managerURL != "" {
+			currentURL := strings.ToLower(strings.TrimSpace(configv1.ResolveREPLNATSURL()))
+			if currentURL == "" || strings.Contains(currentURL, "127.0.0.1") || strings.Contains(currentURL, "localhost") {
+				_ = os.Setenv("DIALTONE_REPL_NATS_URL", managerURL)
+			}
+		}
+	}
+	resp, err := chrome.EnsureServiceByTarget(remoteNode, role, false)
 	if err != nil {
 		return nil, err
 	}

@@ -44,7 +44,7 @@ func main() {
 			logs.Error("runtime error: %v", err)
 			os.Exit(1)
 		}
-		goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
+		goBin := strings.TrimSpace(rt.GoBin)
 		if goBin == "" {
 			goBin = "go"
 		}

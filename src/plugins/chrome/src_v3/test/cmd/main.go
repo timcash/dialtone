@@ -11,6 +11,7 @@ import (
 	"time"
 
 	chromev3 "dialtone/dev/plugins/chrome/src_v3"
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
@@ -70,7 +71,7 @@ func main() {
 }
 
 func defaultChromeTestHost() string {
-	if v := strings.TrimSpace(os.Getenv("DIALTONE_CHROME_TEST_HOST")); v != "" {
+	if v := strings.TrimSpace(configv1.LookupEnvString("DIALTONE_CHROME_TEST_HOST")); v != "" {
 		return v
 	}
 	if strings.TrimSpace(os.Getenv("WSL_DISTRO_NAME")) == "" {
@@ -491,10 +492,7 @@ func addChromeSuiteSteps(reg *testv1.Registry, host, role string, lines int, act
 }
 
 func resolveSuiteNATSURL() string {
-	if v := strings.TrimSpace(os.Getenv("DIALTONE_REPL_NATS_URL")); v != "" {
-		return v
-	}
-	return "nats://127.0.0.1:4222"
+	return configv1.ResolveREPLNATSURL()
 }
 
 func filterSteps(steps []testv1.Step, filterExpr string) []testv1.Step {
@@ -660,7 +658,7 @@ func actionSmokeHTML(marker string) string {
 }
 
 func envIntDefault(name string, fallback int) int {
-	raw := strings.TrimSpace(os.Getenv(name))
+	raw := strings.TrimSpace(configv1.LookupEnvString(name))
 	if raw == "" {
 		return fallback
 	}
@@ -672,7 +670,7 @@ func envIntDefault(name string, fallback int) int {
 }
 
 func envFloatDefault(name string, fallback float64) float64 {
-	raw := strings.TrimSpace(os.Getenv(name))
+	raw := strings.TrimSpace(configv1.LookupEnvString(name))
 	if raw == "" {
 		return fallback
 	}

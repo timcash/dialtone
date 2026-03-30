@@ -7,14 +7,17 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 
 	cadv1 "dialtone/dev/plugins/cad/src_v1/go"
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
 )
 
 func Register(r *testv1.Registry) {
 	r.Add(testv1.Step{
-		Name: "cad-object-creation-src-v1",
+		Name: "cad-self-check-object-creation-src-v1",
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			gear := cadv1.NewGearObject(80.0, 20.0, 20)
 			if gear.Type != "gear" {
@@ -29,8 +32,79 @@ func Register(r *testv1.Registry) {
 			if _, err := gear.ToJSON(); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("gear json failed: %w", err)
 			}
-			ctx.Infof("cad-object-creation-src-v1-ok")
+			ctx.Infof("cad-self-check-object-creation-src-v1-ok")
 			return testv1.StepRunResult{Report: "cad object creation verified"}, nil
+		},
+	})
+
+	r.Add(testv1.Step{
+		Name: "cad-self-check-install-layout-src-v1",
+		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
+			paths, err := cadv1.ResolvePaths("", "src_v1")
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := cadv1.VerifyInstallLayout(paths); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+
+			tmpRoot, err := os.MkdirTemp("", "cad-install-layout-*")
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			defer os.RemoveAll(tmpRoot)
+
+			fakeDialtoneEnv := filepath.Join(tmpRoot, "dialtone-env")
+			fakePixi := filepath.Join(fakeDialtoneEnv, "pixi", "bin", "pixi")
+			if err := os.MkdirAll(filepath.Dir(fakePixi), 0o755); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := os.WriteFile(fakePixi, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+
+			fakePaths := paths
+			fakePaths.Runtime = configv1.Runtime{
+				RepoRoot:     paths.Runtime.RepoRoot,
+				SrcRoot:      paths.Runtime.SrcRoot,
+				EnvFile:      paths.Runtime.EnvFile,
+				DialtoneHome: paths.Runtime.DialtoneHome,
+				DialtoneEnv:  fakeDialtoneEnv,
+				PixiBin:      fakePixi,
+			}
+			pixiBin, err := cadv1.ResolvePixiBinary(fakePaths)
+			if err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("resolve managed pixi failed: %w", err)
+			}
+			if pixiBin != fakePixi {
+				return testv1.StepRunResult{}, fmt.Errorf("resolve managed pixi mismatch: got %s want %s", pixiBin, fakePixi)
+			}
+
+			fakeBun := filepath.Join(fakeDialtoneEnv, "bun", "bin", "bun")
+			if err := os.MkdirAll(filepath.Dir(fakeBun), 0o755); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			if err := os.WriteFile(fakeBun, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			fakePaths.Runtime = configv1.Runtime{
+				RepoRoot:     paths.Runtime.RepoRoot,
+				SrcRoot:      paths.Runtime.SrcRoot,
+				EnvFile:      paths.Runtime.EnvFile,
+				DialtoneHome: paths.Runtime.DialtoneHome,
+				DialtoneEnv:  fakeDialtoneEnv,
+				PixiBin:      fakePixi,
+			}
+			bunBin, err := cadv1.ResolveBunBinary(fakePaths)
+			if err != nil {
+				return testv1.StepRunResult{}, fmt.Errorf("resolve bun fallback failed: %w", err)
+			}
+			if bunBin != fakeBun {
+				return testv1.StepRunResult{}, fmt.Errorf("resolve bun fallback mismatch: got %s want %s", bunBin, fakeBun)
+			}
+
+			ctx.Infof("cad-self-check-install-layout-src-v1-ok")
+			return testv1.StepRunResult{Report: "cad install layout and managed tool resolution verified"}, nil
 		},
 	})
 

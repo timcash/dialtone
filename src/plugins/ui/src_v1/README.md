@@ -22,6 +22,14 @@ env/dialtone.json
 
 That file should hold the repo root, managed tool paths, Chrome headed/headless settings, and browser pacing.
 
+If you need a one-off override, prefix the specific command instead of relying on exported shell state:
+
+```sh
+NAME=value ./dialtone.sh ui src_v1 test --attach legion
+```
+
+Optional behavior should use `--flags`, not ad-hoc env vars.
+
 ## Common Commands
 
 ```sh
@@ -52,6 +60,8 @@ Run a single step when debugging:
 
 ```sh
 ./dialtone.sh ui src_v1 test --attach legion --filter ui-build-and-go-serve
+./dialtone.sh ui src_v1 test --default-attach legion
+./dialtone.sh ui src_v1 test --force-local-browser
 ```
 
 For this workspace, `--attach legion` is the normal WSL -> Windows headed browser path.
@@ -94,17 +104,17 @@ If you want a visible browser, keep:
 
 ## Reading Wrapper Output
 
-`./dialtone.sh ui src_v1 test ...` usually runs through the local REPL/subtone path.
+`./dialtone.sh ui src_v1 test ...` usually runs through the local REPL/task path.
 
 That means:
 - terminal output stays high-level
-- detailed test logs go to the subtone log
+- detailed test logs go to the task log
 
 Useful commands:
 
 ```sh
-./dialtone.sh repl src_v3 subtone-list --count 10
-./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 200
+./dialtone.sh repl src_v3 task list
+./dialtone.sh repl src_v3 task log --task-id <task-id> --lines 200
 ```
 
 Typical success summary:

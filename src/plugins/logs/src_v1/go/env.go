@@ -17,7 +17,7 @@ func IsREPLContext() bool {
 
 // GetDialtoneEnv returns the directory where dependencies are installed.
 func GetDialtoneEnv() string {
-	env := os.Getenv("DIALTONE_ENV")
+	env := configv1.LookupEnvString("DIALTONE_ENV")
 	if env != "" {
 		if strings.HasPrefix(env, "~") {
 			home, _ := os.UserHomeDir()

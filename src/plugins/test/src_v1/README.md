@@ -11,6 +11,9 @@ Reusable test runtime for plugin integration tests.
 # Format test Go code and UI sources
 ./dialtone.sh test src_v1 format
 
+# Run test plugin Go vet and UI lint
+./dialtone.sh test src_v1 lint
+
 # Build test Go entrypoints and the Vite UI
 ./dialtone.sh test src_v1 build
 
@@ -21,7 +24,7 @@ Reusable test runtime for plugin integration tests.
 ./dialtone.sh ui src_v1 test
 
 # Run UI suite attached to a remote headed browser
-./dialtone.sh ui src_v1 test --attach chroma
+./dialtone.sh ui src_v1 test --attach legion
 
 # Stream all suite logs for one plugin
 ./dialtone.sh logs src_v1 stream --topic 'logs.test.ui.src-v1.>'
@@ -74,7 +77,7 @@ Use `StepContext` only; avoid plugin-local test context wrappers.
 Common methods:
 - logging: `Infof`, `Warnf`, `Errorf`, `TestPassf`, `TestFailf`
 - wait helpers: `WaitForStepMessage*`, `WaitForBrowserMessage*`, `WaitForErrorMessage*`
-- browser: `EnsureBrowser`, `Goto`, `CaptureScreenshot`
+- browser: `EnsureBrowser`, `Goto`, `SetHTML`, `CaptureScreenshot`
 - aria helpers: `WaitForAriaLabel`, `ClickAriaLabel`, `TypeAriaLabel`, `PressEnterAriaLabel`, `WaitForAriaLabelAttrEquals`
 - misc: `WaitForConsoleContains`, `ClickAt`, `TapAt`, `ResetStepLogClock`, `RepoRoot`
 - default step timeout: `10s` when `Step.Timeout` is not set
@@ -108,7 +111,8 @@ reg.Add(testv1.Step{
 
 Remote browser behavior:
 - default is local/headless unless caller passes explicit attach options
-- set `DIALTONE_TEST_BROWSER_NODE=<node>` or pass plugin-level `--attach <node>`
+- `./dialtone.sh test src_v1 test` auto-attaches to the paired Windows browser node on WSL unless you pass `--force-local-browser`
+- set `DIALTONE_TEST_BROWSER_NODE` in `env/dialtone.json`, pass `--default-attach <node>`, or pass `--attach <node>` to choose the test-browser host explicitly
 - when attach is active, browser console/error events are still routed through test logger + NATS
 - for `chrome src_v3` service sessions, treat the managed remote browser as exclusive for the duration of the run; do not run multiple attach suites against the same host at the same time
 
@@ -196,6 +200,7 @@ Browser subjects:
 What the StepContext chromedp API can do:
 - start or reuse a service-backed browser session (`EnsureBrowser`)
 - navigate the managed tab (`Goto`)
+- replace the managed tab document (`SetHTML`)
 - wait/assert element presence and attributes by aria-label
 - click/type/press-enter by aria-label
 - capture screenshots that are written into `TEST.md`
@@ -206,6 +211,7 @@ Service-backed `StepContext` browser API reference:
 - `Browser() (*BrowserSession, error)`
 - `CloseBrowser()` (no-op for suite-owned shared browser)
 - `Goto(url string) error`
+- `SetHTML(markup string) error`
 - `WaitForAriaLabel(label string, timeout time.Duration) error`
 - `ClickAriaLabel(label string) error`
 - `ClickAriaLabelAfterWait(label string, timeout time.Duration) error`

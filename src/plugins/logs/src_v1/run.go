@@ -1,22 +1,21 @@
-package cli
+package logsv1
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
-	logsv1 "dialtone/dev/plugins/logs/src_v1/go"
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
-func resolveLogsPaths(versionDir string) (logsv1.Paths, error) {
-	return logsv1.ResolvePaths("", versionDir)
+func resolveLogsPaths(versionDir string) (logs.Paths, error) {
+	return logs.ResolvePaths("", versionDir)
 }
 
 func runBun(repoRoot, uiDir string, args ...string) *exec.Cmd {
-	bunArgs := append([]string{"bun", "exec", "--cwd", uiDir}, args...)
+	bunArgs := append([]string{"bun", "src_v1", "exec", "--cwd", uiDir}, args...)
 	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), bunArgs...)
 	cmd.Dir = repoRoot
 	cmd.Stdout = os.Stdout
@@ -26,6 +25,7 @@ func runBun(repoRoot, uiDir string, args ...string) *exec.Cmd {
 
 // Run is the main entry for the logs plugin CLI (shared lib + CLI; test with logs test src_v1, logs dev src_v1).
 func Run(args []string) error {
+	logs.SetOutput(os.Stdout)
 	if len(args) == 0 {
 		printUsage()
 		return nil
@@ -41,7 +41,7 @@ func Run(args []string) error {
 		return err
 	}
 	if warnedOldOrder {
-		fmt.Println("[WARN] old logs CLI order is deprecated. Use: ./dialtone.sh logs src_v1 <command> [args]")
+		logs.Warn("old logs CLI order is deprecated. Use: ./dialtone.sh logs src_v1 <command> [args]")
 	}
 
 	switch command {
@@ -66,14 +66,7 @@ func Run(args []string) error {
 	case "build":
 		return RunBuild(version)
 	case "test":
-		testFlags := flag.NewFlagSet("logs test", flag.ContinueOnError)
-		attach := testFlags.Bool("attach", false, "Attach to running headed dev browser session")
-		cps := testFlags.Int("cps", 3, "Max clicks per second for UI interactions (must be >= 1)")
-		_ = testFlags.Parse(rest)
-		if *cps < 1 {
-			return fmt.Errorf("--cps must be >= 1")
-		}
-		return RunTest(version, *attach, *cps)
+		return RunTest(version, rest)
 	case "stream", "tail":
 		RunLogs(version, rest)
 		return nil
@@ -130,28 +123,30 @@ func isHelpArg(s string) bool {
 }
 
 func printUsage() {
-	fmt.Println("Usage: ./dialtone.sh logs src_v1 <command> [args]")
-	fmt.Println("\nCommands:")
-	fmt.Println("  install <dir>  Install Go/Bun and UI deps")
-	fmt.Println("  fmt <dir>      Run go fmt")
-	fmt.Println("  format <dir>   Run UI format checks")
-	fmt.Println("  vet <dir>      Run go vet")
-	fmt.Println("  go-build <dir> Run go build")
-	fmt.Println("  lint <dir>     Run TypeScript lint checks")
-	fmt.Println("  dev <dir>      Start Vite + debug browser attach")
-	fmt.Println("  ui-run <dir>   Run UI dev server")
-	fmt.Println("  serve <dir>   Run plugin Go server")
-	fmt.Println("  build <dir>   Build UI assets")
-	fmt.Println("  test <dir>    Run automated tests and write TEST.md artifacts")
-	fmt.Println("  stream        Stream logs (local or --remote from robot)")
-	fmt.Println("  tail          Alias for stream")
-	fmt.Println("  pingpong      Ping/pong test participant for NATS topic")
-	fmt.Println("  nats-start    Start local embedded NATS daemon")
-	fmt.Println("  nats-status   Check local NATS daemon status")
-	fmt.Println("  nats-stop     Stop local NATS daemon")
-	fmt.Println("\nExamples:")
-	fmt.Println("  ./dialtone.sh logs src_v1 test")
-	fmt.Println("  ./dialtone.sh logs src_v1 test --attach")
-	fmt.Println("  ./dialtone.sh logs src_v1 dev")
-	fmt.Println("  ./dialtone.sh logs src_v1 stream --remote")
+	logs.Raw("Usage: ./dialtone.sh logs src_v1 <command> [args]")
+	logs.Raw("")
+	logs.Raw("Commands:")
+	logs.Raw("  install     Install UI dependencies")
+	logs.Raw("  fmt         Run go fmt")
+	logs.Raw("  format      Run UI format checks")
+	logs.Raw("  vet         Run go vet")
+	logs.Raw("  go-build    Run go build")
+	logs.Raw("  lint        Run TypeScript lint checks")
+	logs.Raw("  dev         Start Vite + debug browser attach")
+	logs.Raw("  ui-run      Run UI dev server")
+	logs.Raw("  serve       Run plugin Go server")
+	logs.Raw("  build       Build Go package and UI assets")
+	logs.Raw("  test        Run automated tests and write TEST.md artifacts")
+	logs.Raw("  stream      Stream logs (local or --remote from robot)")
+	logs.Raw("  tail        Alias for stream")
+	logs.Raw("  pingpong    Ping/pong test participant for NATS topic")
+	logs.Raw("  nats-start  Start local embedded NATS daemon")
+	logs.Raw("  nats-status Check local NATS daemon status")
+	logs.Raw("  nats-stop   Stop local NATS daemon")
+	logs.Raw("")
+	logs.Raw("Examples:")
+	logs.Raw("  ./dialtone.sh logs src_v1 test")
+	logs.Raw("  ./dialtone.sh logs src_v1 test --filter infra")
+	logs.Raw("  ./dialtone.sh logs src_v1 build")
+	logs.Raw("  ./dialtone.sh logs src_v1 stream --topic 'logs.>'")
 }

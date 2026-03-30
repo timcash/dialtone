@@ -6,20 +6,15 @@ The canonical user-facing workflow now lives in the root [README.md](/C:/Users/t
 
 ## Generic Shell Workflow
 ```bash
-# Generic command shape
 ./dialtone.sh <plugin-name> <src_vN> <command> [args] [--flags]
-
-# Standard command set most plugins should expose
 ./dialtone.sh <plugin-name> <src_vN> install
 ./dialtone.sh <plugin-name> <src_vN> format
 ./dialtone.sh <plugin-name> <src_vN> lint
 ./dialtone.sh <plugin-name> <src_vN> build
-./dialtone.sh <plugin-name> <src_vN> test
-
-# Typical filtered/flagged test run
 ./dialtone.sh <plugin-name> <src_vN> test --filter <expr>
+```
 
-# The same commands inside the REPL
+```bash
 /plugin-name src_vN install
 /plugin-name src_vN format
 /plugin-name src_vN lint
@@ -32,6 +27,8 @@ Important behavior learned from active plugin work:
 - Headed remote-browser plugins should prefer `chrome src_v3`, not `chrome src_v1`.
 - For WSL-driven headed UI work, the stable pattern is usually: local server on WSL, remote Chrome on `legion`, backend/service on a third host if needed.
 - Remote browser tests should prefer one long-lived managed tab and reuse it across steps. Create a new tab only for recovery.
+- Shared config belongs in `env/dialtone.json`; if a temporary env override is unavoidable, prefix the one `./dialtone.sh ...` command instead of relying on exported shell state.
+- Optional behavior should be controlled by `--flags`, not optional env vars.
 
 ## Core Plugins
 - `logs`: [src/plugins/logs/src_v1/README.md](/home/user/dialtone/src/plugins/logs/src_v1/README.md)
@@ -44,15 +41,16 @@ Important behavior learned from active plugin work:
 1. Use versioned commands: `./dialtone.sh <plugin> src_vN <command> [args]`.
 2. Keep `scaffold/main.go` thin; put real logic in `src_vN`.
 3. Use `config` for runtime/env/path resolution; avoid hardcoded `src/plugins/...` joins.
-4. Use `env/.env`
-5. Use `logs` for operational output.
-6. Use `test` for plugin verification with a single `src_vN/test/cmd/main.go` orchestrator.
-7. Use managed toolchains from Dialtone (`go src_v1 ...`, `bun src_v1 ...`), not random system tools.
-8. Define one path resolver per plugin/version (for example `src_vN/go/paths.go`) and reuse it everywhere.
-9. Keep each plugin README aligned with actual CLI/env/test behavior.
-10. Treat each `src_vN` as the source of truth for that version.
-11. If a plugin exposes `test --filter`, verify the scaffold forwards user args into the test runner.
-12. If a plugin uses headed browser tests, document the expected remote browser role and host.
+4. Use `env/dialtone.json` for runtime configuration.
+5. Use `--flags` for optional behavior; reserve env values for shared config and explicit one-command overrides.
+6. Use `logs` for operational output.
+7. Use `test` for plugin verification with a single `src_vN/test/cmd/main.go` orchestrator.
+8. Use managed toolchains from Dialtone (`go src_v1 ...`, `bun src_v1 ...`), not random system tools.
+9. Define one path resolver per plugin/version (for example `src_vN/go/paths.go`) and reuse it everywhere.
+10. Keep each plugin README aligned with actual CLI/env/test behavior.
+11. Treat each `src_vN` as the source of truth for that version.
+12. If a plugin exposes `test --filter`, verify the scaffold forwards user args into the test runner.
+13. If a plugin uses headed browser tests, document the expected remote browser role and host.
 
 ## Standard Plugin Layout
 ```text
@@ -97,7 +95,7 @@ Default URL: `nats://127.0.0.1:4222`
 - `logs.test.<suite>.status.fail`
 
 ### REPL subjects
-- `repl.<room>`: shared REPL room subject
+- `repl.<topic>`: shared REPL topic subject
 - Frame types on that subject: `input`, `line`, `probe`, `server`, `heartbeat`, `join`, `left`
 
 ### Robot/telemetry subjects
@@ -117,7 +115,7 @@ Default URL: `nats://127.0.0.1:4222`
 - `logs.ui.robot`: browser UI logs published back into NATS
 
 ## Minimal New Plugin Workflow
-```sh
+```bash
 mkdir -p src/plugins/my-plugin/{scaffold,src_v1/go,src_v1/test/cmd,src_v1/test/01_setup}
 ./dialtone.sh my-plugin src_v1 help
 ./dialtone.sh my-plugin src_v1 test

@@ -1,6 +1,7 @@
 package src_v3
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,8 +14,11 @@ import (
 	"strings"
 	"time"
 
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 )
+
+const windowsProcessQueryTimeout = 2 * time.Second
 
 func findChromePath() (string, error) {
 	if runtime.GOOS == "windows" {
@@ -85,7 +89,7 @@ func detectBrowserPID(port int, role, profileDir string) (int, error) {
 				`$role=%s; $profile=%s; `+
 				`$procs=Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'chrome.exe' -and $_.CommandLine -like ('*--remote-debugging-port=' + $port + '*') -and ($_.CommandLine -like ('*--dialtone-role=' + $role + '*') -or $_.CommandLine -like ('*' + $profile + '*')) } | Select-Object -First 1 -ExpandProperty ProcessId; `+
 				`if($procs){ Write-Output $procs }`, port, psQuote(role), psQuote(windowsPath(profileDir)))
-			out, err := exec.Command("powershell", "-NoProfile", "-Command", script).CombinedOutput()
+			out, err := runWindowsPowerShell(script, windowsProcessQueryTimeout)
 			if err == nil {
 				if n, convErr := strconv.Atoi(strings.TrimSpace(string(out))); convErr == nil && n > 0 {
 					return n, nil
@@ -155,7 +159,7 @@ func chromeBrowserPIDsForRole(role, profileDir string, port int) ([]int, error) 
 			`$items=Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'chrome.exe' -and $_.CommandLine -like ('*--remote-debugging-port=' + $port + '*') -and $_.CommandLine -notlike '*--type=*' -and (($_.CommandLine -like ('*--dialtone-role=' + $role + '*')) -or ($_.CommandLine -like ('*' + $profile + '*'))) } | Select-Object -ExpandProperty ProcessId; `+
 			`if($items){ $items }`,
 			psQuote(role), psQuote(windowsPath(profileDir)), port)
-		out, err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput()
+		out, err := runWindowsPowerShell(script, windowsProcessQueryTimeout)
 		if err != nil {
 			return nil, fmt.Errorf("list chrome pids failed: %w (%s)", err, strings.TrimSpace(string(out)))
 		}
@@ -168,6 +172,19 @@ func chromeBrowserPIDsForRole(role, profileDir string, port int) ([]int, error) 
 		}
 		return parsePIDList(string(out)), nil
 	}
+}
+
+func runWindowsPowerShell(script string, timeout time.Duration) ([]byte, error) {
+	if timeout <= 0 {
+		timeout = windowsProcessQueryTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return out, fmt.Errorf("powershell timed out after %v", timeout)
+	}
+	return out, err
 }
 
 func parsePIDList(raw string) []int {
@@ -343,8 +360,8 @@ func detectRemoteGOARCH(node sshv1.MeshNode) string {
 }
 
 func resolveRepoRoot() string {
-	if v := strings.TrimSpace(os.Getenv("DIALTONE_REPO_ROOT")); v != "" {
-		return v
+	if rt, err := configv1.ResolveRuntime(""); err == nil && strings.TrimSpace(rt.RepoRoot) != "" {
+		return strings.TrimSpace(rt.RepoRoot)
 	}
 	cwd, _ := os.Getwd()
 	cur := strings.TrimSpace(cwd)
@@ -362,8 +379,8 @@ func resolveRepoRoot() string {
 }
 
 func resolveSrcRoot() string {
-	if v := strings.TrimSpace(os.Getenv("DIALTONE_SRC_ROOT")); v != "" {
-		return v
+	if rt, err := configv1.ResolveRuntime(""); err == nil && strings.TrimSpace(rt.SrcRoot) != "" {
+		return strings.TrimSpace(rt.SrcRoot)
 	}
 	repoRoot := resolveRepoRoot()
 	if _, err := os.Stat(filepath.Join(repoRoot, "go.mod")); err == nil {

@@ -11,6 +11,13 @@ import (
 
 var ctx = uitest.SharedContext()
 
+const (
+	StepTimeout = 30 * time.Second
+	WaitSection = 6 * time.Second
+	WaitClick   = 2500 * time.Millisecond
+	WaitAssert  = 4 * time.Second
+)
+
 type SectionCase struct {
 	ID           string
 	NavAria      string
@@ -20,19 +27,16 @@ type SectionCase struct {
 	AssertFail   string
 }
 
-func RunSectionFromMenu(sc *testv1.StepContext, c SectionCase, startAtDefault bool) (testv1.StepRunResult, error) {
+func EnsureMenuBrowser(sc *testv1.StepContext, startAtDefault bool) (bool, error) {
 	ctx.BeginStep(sc)
-	waitSection := 10 * time.Second
-	waitClick := 5 * time.Second
-	waitAssert := 5 * time.Second
 	if err := ctx.EnsureBuiltAndServed(); err != nil {
-		return testv1.StepRunResult{}, err
+		return false, err
 	}
 
 	defaultURL := ctx.AppURL("/#ui-home-docs")
-	browserOpts, _, err := uitest.BrowserOptionsFor(defaultURL)
+	browserOpts, attach, err := uitest.BrowserOptionsFor(defaultURL)
 	if err != nil {
-		return testv1.StepRunResult{}, err
+		return false, err
 	}
 	navigateURL := strings.TrimSpace(browserOpts.URL)
 	if navigateURL == "" {
@@ -45,31 +49,54 @@ func RunSectionFromMenu(sc *testv1.StepContext, c SectionCase, startAtDefault bo
 		browserOpts.SkipNavigateOnReuse = true
 	}
 	if _, err := sc.EnsureBrowser(browserOpts); err != nil {
-		return testv1.StepRunResult{}, err
+		return false, err
+	}
+	if err := uitest.SaveBrowserDebugConfig(sc); err != nil {
+		return false, err
+	}
+	if !attach {
+		if err := uitest.ApplyMobileViewport(sc); err != nil {
+			return false, err
+		}
 	}
 	if startAtDefault {
 		if err := sc.Goto(navigateURL); err != nil {
-			return testv1.StepRunResult{}, err
+			return false, err
 		}
-		if err := sc.WaitForAriaLabelAttrEquals("Docs Section", "data-active", "true", waitSection); err != nil {
-			return testv1.StepRunResult{}, err
+		if err := sc.WaitForAriaLabelAttrEquals("Docs Section", "data-active", "true", WaitSection); err != nil {
+			return false, err
 		}
+	}
+	return attach, nil
+}
+
+func OpenSectionFromMenu(sc *testv1.StepContext, navAria string, sectionAria string) error {
+	if err := sc.WaitForAriaLabel("Toggle Global Menu", WaitSection); err != nil {
+		return err
+	}
+	sc.Logf("MENU_NAV: visiting %s via %s", sectionAria, navAria)
+	if err := sc.ClickAriaLabelAfterWait("Toggle Global Menu", WaitClick); err != nil {
+		return err
+	}
+	if err := sc.ClickAriaLabelAfterWait(navAria, WaitClick); err != nil {
+		return err
+	}
+	if err := sc.WaitForAriaLabelAttrEquals(sectionAria, "data-active", "true", WaitSection); err != nil {
+		return err
+	}
+	return nil
+}
+
+func RunSectionFromMenu(sc *testv1.StepContext, c SectionCase, startAtDefault bool) (testv1.StepRunResult, error) {
+	if _, err := EnsureMenuBrowser(sc, startAtDefault); err != nil {
+		return testv1.StepRunResult{}, err
 	}
 
-	if err := sc.WaitForAriaLabel("Toggle Global Menu", waitSection); err != nil {
-		return testv1.StepRunResult{}, err
-	}
-	if err := sc.ClickAriaLabelAfterWait("Toggle Global Menu", waitClick); err != nil {
-		return testv1.StepRunResult{}, err
-	}
-	if err := sc.ClickAriaLabelAfterWait(c.NavAria, waitClick); err != nil {
-		return testv1.StepRunResult{}, err
-	}
-	if err := sc.WaitForAriaLabelAttrEquals(c.SectionAria, "data-active", "true", waitSection); err != nil {
+	if err := OpenSectionFromMenu(sc, c.NavAria, c.SectionAria); err != nil {
 		return testv1.StepRunResult{}, err
 	}
 	if c.AssertJSExpr != "" {
-		if err := uitest.AssertJS(sc, waitAssert, c.AssertJSExpr, c.AssertFail); err != nil {
+		if err := uitest.AssertJS(sc, WaitAssert, c.AssertJSExpr, c.AssertFail); err != nil {
 			return testv1.StepRunResult{}, err
 		}
 	}

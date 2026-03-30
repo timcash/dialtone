@@ -29,13 +29,26 @@ func Register(r *testv1.Registry) {
 				return testv1.StepRunResult{}, err
 			}
 			defer cleanup()
+			browserURL := baseURL
+			if remoteNode := strings.TrimSpace(testv1.RuntimeConfigSnapshot().BrowserNode); remoteNode != "" {
+				rewritten, err := testv1.RewriteBrowserURLForRemoteNode(baseURL, remoteNode)
+				if err != nil {
+					return testv1.StepRunResult{}, fmt.Errorf("rewrite CAD browser url for %s: %w", remoteNode, err)
+				}
+				if strings.TrimSpace(rewritten) != "" {
+					browserURL = rewritten
+				}
+				if browserURL != baseURL {
+					ctx.Infof("cad browser smoke using remote browser url %s", browserURL)
+				}
+			}
 
 			_, err = ctx.EnsureBrowser(testv1.BrowserOptions{
 				Headless:      false,
 				GPU:           true,
 				Role:          browserRole(),
 				ReuseExisting: false,
-				URL:           baseURL,
+				URL:           browserURL,
 			})
 			if err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("ensure browser: %w", err)
@@ -166,9 +179,9 @@ func ensureCADUIBuilt(ctx *testv1.StepContext) error {
 	if _, err := os.Stat(filepath.Join(paths.UIDist, "index.html")); err == nil {
 		return nil
 	}
-	bunBin := filepath.Join(paths.Runtime.DialtoneEnv, "bun", "bin", "bun")
-	if _, err := os.Stat(bunBin); err != nil {
-		bunBin = "bun"
+	bunBin, err := cadv1.ResolveBunBinary(paths)
+	if err != nil {
+		return err
 	}
 	for _, args := range [][]string{{"install"}, {"run", "build"}} {
 		cmd := exec.Command(bunBin, args...)

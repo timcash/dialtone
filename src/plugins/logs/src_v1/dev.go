@@ -1,4 +1,4 @@
-package cli
+package logsv1
 
 import (
 	"context"

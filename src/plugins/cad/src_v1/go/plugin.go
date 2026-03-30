@@ -41,6 +41,12 @@ func printUsage() {
 	logs.Raw("  server [--port <n>]  Alias for serve")
 	logs.Raw("  status [--port <n>]  Check local CAD server health")
 	logs.Raw("  stop [--port <n>]    Stop the tracked local CAD server")
+	logs.Raw("  dev [--port <n>] [--backend-port <n>] [--host <host>] [--browser-node <node>] [--public-url <url>]")
+	logs.Raw("  install              Verify/install CAD backend and UI dependencies")
+	logs.Raw("  build                Build the CAD UI assets")
+	logs.Raw("  format               Format Go and UI sources")
+	logs.Raw("  lint                 Run Go and UI lint checks")
+	logs.Raw("  test                 Run cad src_v1 test suite")
 	logs.Raw("  help                 Show this help")
 }
 

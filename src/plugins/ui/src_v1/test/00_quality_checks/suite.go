@@ -4,13 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
+	uipaths "dialtone/dev/plugins/ui/src_v1/go"
 )
 
 func Register(reg *testv1.Registry) {
@@ -18,15 +17,22 @@ func Register(reg *testv1.Registry) {
 		Name:    "ui-quality-fmt-lint-build",
 		Timeout: 2 * time.Minute,
 		RunWithContext: func(sc *testv1.StepContext) (testv1.StepRunResult, error) {
-			dialtoneScript := resolveDialtoneScript(sc.RepoRoot())
+			paths, err := uipaths.ResolvePaths(sc.RepoRoot())
+			if err != nil {
+				return testv1.StepRunResult{}, err
+			}
+			goBin := strings.TrimSpace(paths.Runtime.GoBin)
+			if goBin == "" {
+				goBin = "go"
+			}
 			commands := [][]string{
-				{dialtoneScript, "ui", "src_v1", "install"},
-				{dialtoneScript, "ui", "src_v1", "fmt-check"},
-				{dialtoneScript, "ui", "src_v1", "lint"},
-				{dialtoneScript, "ui", "src_v1", "build"},
+				{goBin, "run", "./plugins/ui/scaffold/main.go", "src_v1", "install"},
+				{goBin, "run", "./plugins/ui/scaffold/main.go", "src_v1", "fmt-check"},
+				{goBin, "run", "./plugins/ui/scaffold/main.go", "src_v1", "lint"},
+				{goBin, "run", "./plugins/ui/scaffold/main.go", "src_v1", "build"},
 			}
 			for _, cmdArgs := range commands {
-				if err := runAndLog(sc, cmdArgs); err != nil {
+				if err := runAndLog(sc, paths.Runtime.SrcRoot, cmdArgs); err != nil {
 					return testv1.StepRunResult{}, err
 				}
 			}
@@ -35,36 +41,17 @@ func Register(reg *testv1.Registry) {
 	})
 }
 
-func resolveDialtoneScript(start string) string {
-	cur := strings.TrimSpace(start)
-	if cur == "" {
-		return "./dialtone.sh"
-	}
-	for {
-		candidate := filepath.Join(cur, "dialtone.sh")
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			return candidate
-		}
-		parent := filepath.Dir(cur)
-		if parent == cur {
-			break
-		}
-		cur = parent
-	}
-	return "./dialtone.sh"
-}
-
-func runAndLog(sc *testv1.StepContext, cmdArgs []string) error {
+func runAndLog(sc *testv1.StepContext, workdir string, cmdArgs []string) error {
 	if len(cmdArgs) == 0 {
 		return fmt.Errorf("empty command")
 	}
-	repoRoot := strings.TrimSpace(sc.RepoRoot())
-	if repoRoot == "" {
-		return fmt.Errorf("repo root unavailable in test context")
+	workdir = strings.TrimSpace(workdir)
+	if workdir == "" {
+		return fmt.Errorf("workdir unavailable in test context")
 	}
 	sc.Infof("running command: %s", strings.Join(cmdArgs, " "))
 	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
-	cmd.Dir = repoRoot
+	cmd.Dir = workdir
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout

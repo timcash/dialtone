@@ -9,6 +9,7 @@ import (
 	selfcheck "dialtone/dev/plugins/cad/src_v1/test/01_self_check"
 	browsercheck "dialtone/dev/plugins/cad/src_v1/test/02_browser_smoke"
 	chromev3 "dialtone/dev/plugins/chrome/src_v3"
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
 )
@@ -56,10 +57,7 @@ func main() {
 }
 
 func resolveSuiteNATSURL() string {
-	if v := strings.TrimSpace(os.Getenv("DIALTONE_REPL_NATS_URL")); v != "" {
-		return v
-	}
-	return "nats://127.0.0.1:4222"
+	return configv1.ResolveREPLNATSURL()
 }
 
 func filterSteps(steps []testv1.Step, filterExpr string) []testv1.Step {

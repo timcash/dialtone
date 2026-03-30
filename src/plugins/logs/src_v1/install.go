@@ -1,13 +1,15 @@
-package cli
+package logsv1
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
 func RunInstall(versionDir string) error {
-	fmt.Printf(">> [LOGS] Install: %s\n", versionDir)
+	logs.Info("logs %s install", versionDir)
 
 	paths, err := resolveLogsPaths(versionDir)
 	if err != nil {

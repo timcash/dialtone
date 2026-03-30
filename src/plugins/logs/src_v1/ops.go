@@ -1,4 +1,4 @@
-package cli
+package logsv1
 
 import (
 	chrome_app "dialtone/dev/plugins/chrome/src_v1/go"
@@ -14,23 +14,30 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
 func RunFmt(versionDir string) error {
-	fmt.Printf(">> [LOGS] Fmt: %s\n", versionDir)
+	logs.Info("logs %s fmt", versionDir)
 	paths, err := resolveLogsPaths(versionDir)
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(filepath.Join(paths.Runtime.RepoRoot, "dialtone.sh"), "go", "src_v1", "exec", "fmt", "./plugins/logs/"+versionDir+"/...")
+	goBin := strings.TrimSpace(paths.Runtime.GoBin)
+	if goBin == "" {
+		goBin = "go"
+	}
+	cmd := exec.Command(goBin, "fmt", "./plugins/logs/"+versionDir+"/...")
 	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Env = os.Environ()
 	return cmd.Run()
 }
 
 func RunFormat(versionDir string) error {
-	fmt.Printf(">> [LOGS] Format: %s\n", versionDir)
+	logs.Info("logs %s format", versionDir)
 	paths, err := resolveLogsPaths(versionDir)
 	if err != nil {
 		return err
@@ -41,46 +48,61 @@ func RunFormat(versionDir string) error {
 }
 
 func RunVet(versionDir string) error {
-	fmt.Printf(">> [LOGS] Vet: %s\n", versionDir)
+	logs.Info("logs %s vet", versionDir)
 	paths, err := resolveLogsPaths(versionDir)
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(filepath.Join(paths.Runtime.RepoRoot, "dialtone.sh"), "go", "src_v1", "exec", "vet", "./plugins/logs/"+versionDir+"/...")
+	goBin := strings.TrimSpace(paths.Runtime.GoBin)
+	if goBin == "" {
+		goBin = "go"
+	}
+	cmd := exec.Command(goBin, "vet", "./plugins/logs/"+versionDir+"/...")
 	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Env = os.Environ()
 	return cmd.Run()
 }
 
 func RunGoBuild(versionDir string) error {
-	fmt.Printf(">> [LOGS] Go Build: %s\n", versionDir)
+	logs.Info("logs %s go-build", versionDir)
 	paths, err := resolveLogsPaths(versionDir)
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(filepath.Join(paths.Runtime.RepoRoot, "dialtone.sh"), "go", "src_v1", "exec", "build", "./plugins/logs/"+versionDir+"/...")
+	goBin := strings.TrimSpace(paths.Runtime.GoBin)
+	if goBin == "" {
+		goBin = "go"
+	}
+	cmd := exec.Command(goBin, "build", "./plugins/logs/"+versionDir+"/...")
 	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Env = os.Environ()
 	return cmd.Run()
 }
 
 func RunServe(versionDir string) error {
-	fmt.Printf(">> [LOGS] Serve: %s\n", versionDir)
+	logs.Info("logs %s serve", versionDir)
 	paths, err := resolveLogsPaths(versionDir)
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(filepath.Join(paths.Runtime.RepoRoot, "dialtone.sh"), "go", "src_v1", "exec", "run", filepath.ToSlash(filepath.Join("plugins", "logs", versionDir, "cmd", "main.go")))
+	goBin := strings.TrimSpace(paths.Runtime.GoBin)
+	if goBin == "" {
+		goBin = "go"
+	}
+	cmd := exec.Command(goBin, "run", filepath.ToSlash(filepath.Join("plugins", "logs", versionDir, "cmd", "main.go")))
 	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Env = os.Environ()
 	return cmd.Run()
 }
 
 func RunUIRun(versionDir string, extraArgs []string) error {
-	fmt.Printf(">> [LOGS] UI Run: %s\n", versionDir)
+	logs.Info("logs %s ui-run", versionDir)
 	port := 3000
 	if len(extraArgs) >= 2 && extraArgs[0] == "--port" {
 		if p, err := strconv.Atoi(extraArgs[1]); err == nil {
@@ -97,28 +119,25 @@ func RunUIRun(versionDir string, extraArgs []string) error {
 	return cmd.Run()
 }
 
-func RunTest(versionDir string, attach bool, cps int) error {
-	fmt.Printf(">> [LOGS] Test: %s\n", versionDir)
+func RunTest(versionDir string, extraArgs []string) error {
+	logs.Info("logs %s test", versionDir)
 	paths, err := resolveLogsPaths(versionDir)
 	if err != nil {
 		return err
 	}
-	repoRoot := paths.Runtime.RepoRoot
 	testPkg := "./" + filepath.ToSlash(filepath.Join("plugins", "logs", versionDir, "test", "cmd"))
 	testMain := filepath.Join(paths.Preset.TestCmd, "main.go")
 	if _, err := os.Stat(testMain); os.IsNotExist(err) {
 		return fmt.Errorf("test runner not found: %s/main.go", testPkg)
 	}
-
-	if attach {
-		fmt.Println(">> [LOGS] Test: --attach is ignored for infra tests.")
-	}
-	if cps != 3 {
-		fmt.Printf(">> [LOGS] Test: --cps=%d ignored for infra tests.\n", cps)
+	goBin := strings.TrimSpace(paths.Runtime.GoBin)
+	if goBin == "" {
+		goBin = "go"
 	}
 
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "go", "src_v1", "exec", "run", testPkg)
-	cmd.Dir = repoRoot
+	args := append([]string{"run", testPkg}, extraArgs...)
+	cmd := exec.Command(goBin, args...)
+	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = os.Environ()
@@ -153,13 +172,13 @@ func ensureDevServerAndHeadedBrowser(repoRoot, versionDir string, allowOpenBrows
 		matched, probeErr := devServerMatchesVersion(port, targetTitle)
 		if probeErr == nil && matched {
 			reuse = true
-			fmt.Printf(">> [LOGS] Test: dev server already running for %s at http://127.0.0.1:%d\n", versionDir, port)
+			logs.Info("logs %s test: dev server already running at http://127.0.0.1:%d", versionDir, port)
 		} else {
 			freePort, pickErr := pickFreePort()
 			if pickErr != nil {
 				return nil, fmt.Errorf("dev server on %d is not %s and no free port could be picked: %w", port, versionDir, pickErr)
 			}
-			fmt.Printf(">> [LOGS] Test: existing dev server on :%d is not %s; starting %s on :%d\n", port, versionDir, versionDir, freePort)
+			logs.Info("logs %s test: existing dev server on :%d is different; starting on :%d", versionDir, port, freePort)
 			port = freePort
 		}
 	}
@@ -173,17 +192,17 @@ func ensureDevServerAndHeadedBrowser(repoRoot, versionDir string, allowOpenBrows
 			return nil, fmt.Errorf("logs dev server for %s did not become ready on :%d: %w", versionDir, port, err)
 		}
 		session.startedHere = true
-		fmt.Printf(">> [LOGS] Test: started dev server for %s at http://127.0.0.1:%d\n", versionDir, port)
+		logs.Info("logs %s test: started dev server at http://127.0.0.1:%d", versionDir, port)
 		if allowOpenBrowser {
 			url := fmt.Sprintf("http://127.0.0.1:%d/#logs-log-xterm", port)
 			if err := openPersistentLogsDevChrome(url); err != nil {
 				session.Close()
 				return nil, err
 			}
-			fmt.Printf(">> [LOGS] Test: opened headed Chrome preview at %s\n", url)
+			logs.Info("logs %s test: opened headed Chrome preview at %s", versionDir, url)
 		}
 	} else if allowOpenBrowser {
-		fmt.Printf(">> [LOGS] Test: keeping existing dev preview tab at http://127.0.0.1:%d/#logs-log-xterm\n", port)
+		logs.Info("logs %s test: keeping existing dev preview at http://127.0.0.1:%d/#logs-log-xterm", versionDir, port)
 	}
 	return session, nil
 }
@@ -222,7 +241,7 @@ func ensureAttachableLogsDevBrowser(url string) error {
 	if hasAttachableLogsDevBrowser() {
 		return nil
 	}
-	fmt.Printf(">> [LOGS] Test: no attachable logs-dev browser found; opening managed browser...\n")
+	logs.Info("logs test: no attachable logs-dev browser found; opening managed browser")
 	return openPersistentLogsDevChrome(url)
 }
 

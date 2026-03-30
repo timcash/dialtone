@@ -13,8 +13,9 @@ func EnsureRemoteServiceByHost(host, role string, deploy bool) (*CommandResponse
 	}
 	role = normalizeRole(role)
 	resp, err := sendRemoteCommand(node, commandRequest{
-		Command: "status",
-		Role:    role,
+		Command:   "status",
+		Role:      role,
+		TimeoutMS: 1200,
 	})
 	if err == nil && chromeServiceReady(resp) {
 		return resp, nil

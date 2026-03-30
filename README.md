@@ -8,6 +8,7 @@ The intended model is:
 - queued task submission is the default; only explicit query/operator commands stay foreground
 - the leader keeps durable task and service state in NATS KV
 - the launch folder's `env/dialtone.json` is the default runtime config source, and `--env` can point at another env root or file
+- shared configuration belongs in `env/dialtone.json`; avoid plugin-specific config files or hidden exported shell state
 - `dialtone>` stays short and high-level
 - full detail belongs in the task log, task topic, and service state
 - there is no public `subtone` language; `task` and `service` are the public operator terms
@@ -37,6 +38,8 @@ If you are working in this repo as an LLM agent or operator, use these rules:
 - use `./dialtone.sh` with no arguments when you want the shared interactive REPL
 - use one Dialtone command per invocation; do not chain commands with `&&`, `||`, or `;`
 - treat `dialtone.sh` as the public workflow layer and NATS as the control plane underneath it
+- store normal configuration in `env/dialtone.json`; if a temporary env override is unavoidable, prefix that one command such as `NAME=value ./dialtone.sh ...`
+- optional behavior should be exposed as `--flags`, not optional environment variables
 
 For normal development, these are the preferred commands:
 
@@ -51,13 +54,17 @@ For normal development, these are the preferred commands:
 
 Do not replace those with:
 
-- `go fmt ./...`
-- `go build ./...`
-- `go test ./...`
-- `bun test`
-- raw `nats` CLI calls
+```bash
+go fmt ./...
+go build ./...
+go test ./...
+bun test
+nats ...
+```
 
 If you need lower-level tool access for debugging, route it through a Dialtone workflow when possible, for example `./dialtone.sh go src_v1 exec ...`, but prefer the plugin verb first.
+
+Managed toolchain helpers currently include `go src_v1`, `bun src_v1`, and `pixi src_v1`, so plugin code should resolve those runtimes through Dialtone instead of assuming host-installed binaries.
 
 ## Choosing A Path
 
@@ -84,25 +91,15 @@ Without `--env`, Dialtone uses `env/dialtone.json` in the folder you launch from
 
 ## Working With Plugins
 
-The generic plugin command shape is:
-
 ```bash
 ./dialtone.sh <plugin-name> <src_vN> <command> [args] [--flags]
-```
-
-Most plugins should expose the standard development verbs:
-
-```bash
 ./dialtone.sh <plugin-name> <src_vN> install
 ./dialtone.sh <plugin-name> <src_vN> format
 ./dialtone.sh <plugin-name> <src_vN> lint
 ./dialtone.sh <plugin-name> <src_vN> build
 ./dialtone.sh <plugin-name> <src_vN> test
-```
+./dialtone.sh <plugin-name> <src_vN> test --filter <expr>
 
-Examples:
-
-```bash
 ./dialtone.sh repl src_v3 install
 ./dialtone.sh repl src_v3 format
 ./dialtone.sh repl src_v3 lint
@@ -110,21 +107,10 @@ Examples:
 ./dialtone.sh repl src_v3 test
 
 ./dialtone.sh chrome src_v3 build
-./dialtone.sh chrome src_v3 test
-./dialtone.sh ssh src_v1 test
-```
-
-When a plugin supports filtered tests, use the same shape with extra flags:
-
-```bash
-./dialtone.sh <plugin-name> <src_vN> test --filter <expr>
-```
-
-Examples:
-
-```bash
-./dialtone.sh repl src_v3 test --filter interactive-command-index-emits-task-queue-lines
 ./dialtone.sh chrome src_v3 test --filter service-start
+./dialtone.sh ssh src_v1 test
+./dialtone.sh pixi src_v1 install
+./dialtone.sh repl src_v3 test --filter interactive-command-index-emits-task-queue-lines
 ```
 
 The same plugin commands should also work naturally inside the REPL by adding a leading slash:
@@ -171,16 +157,18 @@ The public direction for the CLI is task-first:
 
 Foreground query/operator examples:
 
-- `./dialtone.sh proc src_v1 ps`
-- `./dialtone.sh proc src_v1 list`
-- `./dialtone.sh logs src_v1 stream --topic 'logs.task.<task-id>'`
-- `./dialtone.sh logs src_v1 tail --topic 'logs.task.<task-id>'`
-- `./dialtone.sh logs src_v1 nats-status`
-- `./dialtone.sh wsl src_v1 list`
-- `./dialtone.sh wsl src_v1 status`
-- `./dialtone.sh repl src_v3 task list`
-- `./dialtone.sh repl src_v3 task show --task-id <task-id>`
-- `./dialtone.sh repl src_v3 task log --task-id <task-id> --lines 10`
+```bash
+./dialtone.sh proc src_v1 ps
+./dialtone.sh proc src_v1 list
+./dialtone.sh logs src_v1 stream --topic 'logs.task.<task-id>'
+./dialtone.sh logs src_v1 tail --topic 'logs.task.<task-id>'
+./dialtone.sh logs src_v1 nats-status
+./dialtone.sh wsl src_v1 list
+./dialtone.sh wsl src_v1 status
+./dialtone.sh repl src_v3 task list
+./dialtone.sh repl src_v3 task show --task-id <task-id>
+./dialtone.sh repl src_v3 task log --task-id <task-id> --lines 10
+```
 
 Expected queued CLI pattern:
 
@@ -380,11 +368,9 @@ dialtone> Target task task-20260327-chr001 exited with code 143.
 dialtone> Task task-20260327-kill01 exited with code 0.
 ```
 
-## NATS-First Logs
+## Logs And NATS
 
-The long-term logging model should match the logs plugin: producers publish to NATS, and readers decide whether to render to `dialtone>`, a file, or another UI.
-
-## NATS Control Plane
+The long-term logging model is NATS-first: producers publish logs to NATS, and readers decide whether to render those lines to `dialtone>`, a task log file, or another UI.
 
 Think about the runtime in these layers:
 
@@ -393,16 +379,18 @@ Think about the runtime in these layers:
 - NATS: the transport for command frames, topics, heartbeats, and logs
 - NATS KV: the durable state store for task/service state
 
-As an operator or agent, you usually should not talk to NATS directly. Prefer these command surfaces:
+As an operator or agent, usually do not talk to raw NATS directly. Prefer these command surfaces:
 
-- `./dialtone.sh repl src_v3 status`
-- `./dialtone.sh repl src_v3 task list`
-- `./dialtone.sh repl src_v3 task show --task-id <task-id>`
-- `./dialtone.sh repl src_v3 task log --task-id <task-id> --lines 50`
-- `./dialtone.sh repl src_v3 watch --subject 'repl.>'`
-- `./dialtone.sh logs src_v1 stream --topic 'logs.task.<task-id>'`
-- `./dialtone.sh logs src_v1 stream --topic 'logs.service.<host>.<service-name>'`
-- `./dialtone.sh logs src_v1 nats-status`
+```bash
+./dialtone.sh repl src_v3 status
+./dialtone.sh repl src_v3 task list
+./dialtone.sh repl src_v3 task show --task-id <task-id>
+./dialtone.sh repl src_v3 task log --task-id <task-id> --lines 50
+./dialtone.sh repl src_v3 watch --subject 'repl.>'
+./dialtone.sh logs src_v1 stream --topic 'logs.task.<task-id>'
+./dialtone.sh logs src_v1 stream --topic 'logs.service.<host>.<service-name>'
+./dialtone.sh logs src_v1 nats-status
+```
 
 The mental model is:
 
@@ -411,7 +399,7 @@ The mental model is:
 - task/service logs are published onto NATS subjects and may also be persisted into task logs
 - `dialtone>` is the short human summary stream, not the full raw event stream
 
-Useful example commands:
+Useful live log streams:
 
 ```text
 host-name> /logs src_v1 stream --topic 'logs.task.task-20260327-chr001'
@@ -427,24 +415,9 @@ The intended split is:
 - `logs src_v1 stream` gives the live NATS log stream
 - filtered subjects like `logfilter.level.error.>` help isolate failures across many tasks and services
 
-Useful slash-command examples:
-
-```text
-host-name> /chrome src_v3 status --host legion --role dev
-host-name> /chrome src_v3 test --host legion --role dev
-host-name> /robot src_v2 diagnostic --host rover --skip-ui --public-check=false
-```
-
-Useful patterns:
-
 ```bash
-# Start or reuse the leader.
 ./dialtone.sh repl src_v3 status
-
-# Run the REPL suite.
 ./dialtone.sh repl src_v3 test
-
-# Inspect task/service activity.
 ./dialtone.sh repl src_v3 task list
 ./dialtone.sh repl src_v3 service list --host legion
 ./dialtone.sh repl src_v3 task log --task-id <task-id> --lines 200
@@ -537,11 +510,7 @@ Config rules:
 - use the launch folder's `env/dialtone.json` as the default config source, or pass `--env` to target another env root/file
 - do not create accidental config copies under `src/env/`
 
-If you changed REPL/bootstrap code, restart the long-lived helpers before rerunning isolated tests:
-
-```powershell
-.\wsl-tmux.cmd "./dialtone.sh repl src_v3 process-clean"
-```
+If you changed REPL or bootstrap code, restart the long-lived helpers with `.\wsl-tmux.cmd "./dialtone.sh repl src_v3 process-clean"` before rerunning focused tests.
 
 Typical WSL test commands:
 

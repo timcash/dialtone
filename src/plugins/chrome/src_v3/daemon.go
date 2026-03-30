@@ -161,11 +161,12 @@ func (d *daemonState) handle(req commandRequest) commandResponse {
 	defer func() {
 		command := strings.TrimSpace(req.Command)
 		if resp.OK && command != "close" && command != "shutdown" {
-			if err := d.pruneExtraPageTargets(); err != nil && !errors.Is(err, errBrowserClosed) {
-				logs.Warn("chrome src_v3 unable to prune extra page targets after %s: %v", command, err)
-			} else {
-				resp = d.refreshResponse(resp)
+			if shouldPruneExtraTargetsAfterCommand(command) {
+				if err := d.pruneExtraPageTargets(); err != nil && !errors.Is(err, errBrowserClosed) {
+					logs.Warn("chrome src_v3 unable to prune extra page targets after %s: %v", command, err)
+				}
 			}
+			resp = d.refreshResponse(resp)
 		}
 		d.maybePauseAfterCommand(req.Command, resp.OK, req.ActionsPerSecond)
 	}()
@@ -388,6 +389,15 @@ func (d *daemonState) handle(req commandRequest) commandResponse {
 	return resp
 }
 
+func shouldPruneExtraTargetsAfterCommand(command string) bool {
+	switch strings.ToLower(strings.TrimSpace(command)) {
+	case "open", "goto", "tab-open", "tab-close", "reset":
+		return true
+	default:
+		return false
+	}
+}
+
 func (d *daemonState) maybePauseAfterCommand(command string, ok bool, actionsPerSecond float64) {
 	if !ok || !shouldDelayChromeCommand(command) {
 		return
@@ -444,12 +454,15 @@ func (d *daemonState) fillStatus(resp *commandResponse) error {
 	d.mu.Lock()
 	pid := d.browserPID
 	role := d.role
+	currentURL := strings.TrimSpace(d.currentURL)
+	managedTarget := strings.TrimSpace(d.managedTarget)
+	consoleLines := append([]string(nil), d.consoleLines...)
 	resp.BrowserPID = pid
 	resp.ChromePort = d.chromePort
 	resp.NATSPort = d.natsPort
-	resp.CurrentURL = d.currentURL
-	if d.managedTarget != "" {
-		resp.ManagedTarget = d.managedTarget
+	resp.CurrentURL = currentURL
+	if managedTarget != "" {
+		resp.ManagedTarget = managedTarget
 	}
 	if d.unexpectedErr != nil {
 		resp.Unhealthy = true
@@ -462,10 +475,10 @@ func (d *daemonState) fillStatus(resp *commandResponse) error {
 	resp.StartedAt = d.startedAt
 	resp.LastHealthyAt = time.Now().UTC().Format(time.RFC3339Nano)
 	d.mu.Unlock()
-
-	if processCount, err := countLocalChromeProcesses(role); err == nil {
-		resp.ProcessCount = processCount
+	if len(consoleLines) > 64 {
+		consoleLines = append([]string(nil), consoleLines[len(consoleLines)-64:]...)
 	}
+	resp.ConsoleLines = consoleLines
 
 	if pid == 0 {
 		resp.Unhealthy = true
@@ -477,13 +490,26 @@ func (d *daemonState) fillStatus(resp *commandResponse) error {
 		}
 		return nil
 	}
-	tabs, err := d.listTabs()
-	if err != nil {
-		logs.Error("chrome src_v3 listTabs failed: %v", err)
-		return err
+	if processCount, err := countLocalChromeProcesses(role); err == nil {
+		resp.ProcessCount = processCount
+	} else {
+		// Keep routine status replies fast; a slow Windows process enumeration
+		// should not block later browser commands on the shared daemon mutex.
+		resp.ProcessCount = 1
+		logs.Warn("chrome src_v3 unable to refresh process count for role=%s: %v", role, err)
 	}
-	resp.Tabs = tabs
-	resp.CurrentURL = d.currentURLFromTabs(tabs)
+
+	// Use cached managed-tab metadata for status snapshots so routine health checks
+	// do not depend on a live chromedp round-trip.
+	if currentURL == "" {
+		currentURL = "about:blank"
+	}
+	if managedTarget == "" {
+		managedTarget = "managed"
+	}
+	resp.CurrentURL = currentURL
+	resp.ManagedTarget = managedTarget
+	resp.Tabs = []pageInfo{{ID: managedTarget, URL: currentURL}}
 	return nil
 }
 
@@ -491,6 +517,7 @@ func sendRemoteCommand(node sshv1.MeshNode, req commandRequest) (*commandRespons
 	subjects := commandSubjects(node.Name, req.Role)
 	raw, _ := json.Marshal(req)
 	var lastErr error
+	shortExplicitTimeout := req.TimeoutMS > 0 && time.Duration(req.TimeoutMS)*time.Millisecond <= 5*time.Second
 	tryRequest := func(natsURL, subject string) (*commandResponse, error) {
 		nc, err := nats.Connect(natsURL, nats.Timeout(defaultTimeout))
 		if err != nil {
@@ -518,21 +545,28 @@ func sendRemoteCommand(node sshv1.MeshNode, req commandRequest) (*commandRespons
 		return &resp, nil
 	}
 
-	requestURLs := make([]string, 0, 2)
-	if natsURL := strings.TrimSpace(requestNATSURL()); natsURL != "" {
-		requestURLs = append(requestURLs, natsURL)
-	}
-	if natsURL := strings.TrimSpace(managerNATSURLForNode(node)); natsURL != "" {
-		duplicate := false
-		for _, existing := range requestURLs {
-			if strings.EqualFold(strings.TrimSpace(existing), natsURL) {
-				duplicate = true
-				break
+	addRequestURL := func(url string, urls *[]string) {
+		url = strings.TrimSpace(url)
+		if url == "" {
+			return
+		}
+		for _, existing := range *urls {
+			if strings.EqualFold(strings.TrimSpace(existing), url) {
+				return
 			}
 		}
-		if !duplicate {
-			requestURLs = append(requestURLs, natsURL)
-		}
+		*urls = append(*urls, url)
+	}
+
+	managerNATSURL := strings.TrimSpace(managerNATSURLForNode(node))
+	useManagerNATS := shouldUseLocalManagerNATS(node) && managerNATSURL != ""
+	requestURLs := make([]string, 0, 2)
+	if useManagerNATS {
+		addRequestURL(managerNATSURL, &requestURLs)
+		addRequestURL(requestNATSURL(), &requestURLs)
+	} else {
+		addRequestURL(requestNATSURL(), &requestURLs)
+		addRequestURL(managerNATSURL, &requestURLs)
 	}
 	if len(requestURLs) > 0 {
 		deadline := time.Now().Add(3 * time.Second)
@@ -543,6 +577,12 @@ func sendRemoteCommand(node sshv1.MeshNode, req commandRequest) (*commandRespons
 						return resp, nil
 					} else {
 						lastErr = err
+						if errors.Is(err, nats.ErrTimeout) {
+							if shortExplicitTimeout {
+								return nil, err
+							}
+							break
+						}
 					}
 				}
 			}
@@ -551,7 +591,7 @@ func sendRemoteCommand(node sshv1.MeshNode, req commandRequest) (*commandRespons
 			}
 			time.Sleep(200 * time.Millisecond)
 		}
-		if shouldUseLocalManagerNATS(node) {
+		if useManagerNATS {
 			if lastErr != nil {
 				return nil, lastErr
 			}

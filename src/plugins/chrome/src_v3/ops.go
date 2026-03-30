@@ -313,7 +313,12 @@ func stopRemoteReplService(node sshv1.MeshNode, serviceName string) error {
 }
 
 func buildBinaryFor(outPath, goos, goarch string) error {
-	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
+	goBin := strings.TrimSpace(configv1.LookupEnvString("DIALTONE_GO_BIN"))
+	if goBin == "" {
+		if rt, err := configv1.ResolveRuntime(""); err == nil && strings.TrimSpace(rt.GoBin) != "" {
+			goBin = strings.TrimSpace(rt.GoBin)
+		}
+	}
 	if goBin == "" {
 		goBin = "go"
 	}
@@ -447,7 +452,7 @@ func stopRemoteService(node sshv1.MeshNode, role string) error {
 	if role == "" {
 		role = defaultRole
 	}
-	if _, err := sendRemoteCommand(node, commandRequest{Command: "shutdown", Role: role}); err == nil {
+	if _, err := sendRemoteCommand(node, commandRequest{Command: "shutdown", Role: role, TimeoutMS: 1200}); err == nil {
 		return nil
 	}
 	remoteBin, err := remoteBinaryPath(node)
@@ -663,12 +668,13 @@ func readRemoteLogs(node sshv1.MeshNode, role string, lines int) (string, string
 	}
 	primaryOutRel := windowsPath(`.dialtone\chrome-v3\` + role + `\service\daemon.out.log`)
 	primaryErrRel := windowsPath(`.dialtone\chrome-v3\` + role + `\service\daemon.err.log`)
+	primaryServiceDirRel := windowsPath(`.dialtone\chrome-v3\` + role + `\service`)
 	legacyOutRel := windowsPath(`.dialtone\bin\` + serviceName + `.out.log`)
 	legacyErrRel := windowsPath(`.dialtone\bin\` + serviceName + `.err.log`)
-	outCmd := fmt.Sprintf(`$userHome=$env:USERPROFILE; $primary=Join-Path $userHome %s; $legacy=Join-Path $userHome %s; if(Test-Path -LiteralPath $primary){ Get-Content -LiteralPath $primary -Tail %d } elseif(Test-Path -LiteralPath $legacy){ Get-Content -LiteralPath $legacy -Tail %d }`,
-		psQuote(primaryOutRel), psQuote(legacyOutRel), lines, lines)
-	errCmd := fmt.Sprintf(`$userHome=$env:USERPROFILE; $primary=Join-Path $userHome %s; $legacy=Join-Path $userHome %s; if(Test-Path -LiteralPath $primary){ Get-Content -LiteralPath $primary -Tail %d } elseif(Test-Path -LiteralPath $legacy){ Get-Content -LiteralPath $legacy -Tail %d }`,
-		psQuote(primaryErrRel), psQuote(legacyErrRel), lines, lines)
+	outCmd := fmt.Sprintf(`$userHome=$env:USERPROFILE; $primaryDir=Join-Path $userHome %s; $primary=Join-Path $userHome %s; $legacy=Join-Path $userHome %s; if(Test-Path -LiteralPath $primary){ Get-Content -LiteralPath $primary -Tail %d } elseif(Test-Path -LiteralPath $primaryDir) { } elseif(Test-Path -LiteralPath $legacy){ Get-Content -LiteralPath $legacy -Tail %d }`,
+		psQuote(primaryServiceDirRel), psQuote(primaryOutRel), psQuote(legacyOutRel), lines, lines)
+	errCmd := fmt.Sprintf(`$userHome=$env:USERPROFILE; $primaryDir=Join-Path $userHome %s; $primary=Join-Path $userHome %s; $legacy=Join-Path $userHome %s; if(Test-Path -LiteralPath $primary){ Get-Content -LiteralPath $primary -Tail %d } elseif(Test-Path -LiteralPath $primaryDir) { } elseif(Test-Path -LiteralPath $legacy){ Get-Content -LiteralPath $legacy -Tail %d }`,
+		psQuote(primaryServiceDirRel), psQuote(primaryErrRel), psQuote(legacyErrRel), lines, lines)
 	stdout, outErr := sshv1.RunNodeCommand(node.Name, outCmd, sshv1.CommandOptions{})
 	stderr, errErr := sshv1.RunNodeCommand(node.Name, errCmd, sshv1.CommandOptions{})
 	if outErr != nil && errErr != nil {

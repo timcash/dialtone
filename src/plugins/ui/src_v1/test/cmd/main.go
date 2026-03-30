@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	chromev3 "dialtone/dev/plugins/chrome/src_v3"
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	"dialtone/dev/plugins/logs/src_v1/go"
 	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
@@ -28,6 +29,7 @@ func main() {
 	logs.SetOutput(os.Stdout)
 	fs := flag.NewFlagSet("ui test", flag.ContinueOnError)
 	commonFlags := testv1.BindCommonTestFlags(fs, testv1.CommonTestCLIOptions{
+		DefaultAttachNode: strings.TrimSpace(configv1.LookupEnvString("DIALTONE_UI_TEST_ATTACH_DEFAULT")),
 		ActionsPerMinute: 300,
 	})
 	if err := fs.Parse(os.Args[1:]); err != nil {
@@ -42,6 +44,7 @@ func main() {
 		logs.Error("ui test parse failed: %v", err)
 		os.Exit(1)
 	}
+	testv1.ApplyDefaultBrowserAttach(&common, "test")
 	attach := strings.TrimSpace(common.AttachNode)
 	url := strings.TrimSpace(common.TargetURL)
 	test.SetOptions(test.Options{

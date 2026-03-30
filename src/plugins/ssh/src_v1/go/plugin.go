@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -28,10 +29,27 @@ func Run(args []string) error {
 		PrintUsage()
 		return nil
 	}
+	normalized, warnedOldOrder, err := normalizeArgs(args)
+	if err != nil {
+		PrintUsage()
+		return err
+	}
+	if warnedOldOrder {
+		logs.Warn("old ssh CLI order is deprecated. Use: ./dialtone.sh ssh src_v1 <command> [args]")
+	}
+	args = normalized
 	switch strings.TrimSpace(args[0]) {
 	case "help", "--help", "-h":
 		PrintUsage()
 		return nil
+	case "install":
+		return runInstall(args[1:])
+	case "format":
+		return runFormat(args[1:])
+	case "lint":
+		return runLint(args[1:])
+	case "build":
+		return runBuild(args[1:])
 	case "mesh", "nodes", "list":
 		return runMeshList(args[1:])
 	case "tailnet-check":
@@ -58,20 +76,47 @@ func Run(args []string) error {
 		return runKeyInstall(args[1:])
 	case "key-setup":
 		return runKeySetup(args[1:])
+	case "test":
+		return runSelfCheck(args[1:])
 	default:
 		PrintUsage()
 		return fmt.Errorf("unknown ssh command: %s", args[0])
 	}
 }
 
+func normalizeArgs(args []string) ([]string, bool, error) {
+	if len(args) == 0 {
+		return nil, false, fmt.Errorf("missing arguments")
+	}
+	if strings.HasPrefix(strings.TrimSpace(args[0]), "src_v") {
+		if strings.TrimSpace(args[0]) != "src_v1" {
+			return nil, false, fmt.Errorf("unsupported ssh version: %s", args[0])
+		}
+		if len(args) < 2 {
+			return nil, false, fmt.Errorf("missing ssh command (usage: ./dialtone.sh ssh src_v1 <command> [args])")
+		}
+		return args[1:], false, nil
+	}
+	if len(args) >= 2 && strings.HasPrefix(strings.TrimSpace(args[1]), "src_v") {
+		if strings.TrimSpace(args[1]) != "src_v1" {
+			return nil, false, fmt.Errorf("unsupported ssh version: %s", args[1])
+		}
+		return append([]string{args[0]}, args[2:]...), true, nil
+	}
+	return args, false, nil
+}
+
 func PrintUsage() {
 	logs.Raw("Usage: ./dialtone.sh ssh src_v1 <command> [args]")
 	logs.Raw("")
 	logs.Raw("Commands:")
+	logs.Raw("  install                               Verify ssh src_v1 local dependencies")
+	logs.Raw("  format                                Run go fmt for the ssh plugin")
+	logs.Raw("  lint                                  Run go vet for the ssh plugin")
+	logs.Raw("  build                                 Run go build for the ssh plugin")
 	logs.Raw("  mesh|nodes|list                       List canonical mesh nodes and transport mode")
 	logs.Raw("  tailnet-check [--host H|all] [--timeout 5s]")
 	logs.Raw("                                        Verify SSH handshake over each node's tailscale host")
-	logs.Raw("  format                                Run go fmt for the ssh plugin")
 	logs.Raw("  run --host H --cmd C [--user U --port P --password X --key-path P] [--node N]")
 	logs.Raw("                                        Run command on a mesh host (preferred flag: --host)")
 	logs.Raw("  resolve --host H [--user U --port P]")
@@ -96,7 +141,73 @@ func PrintUsage() {
 	logs.Raw("                                        Install local public key to remote ~/.ssh/authorized_keys for passwordless auth")
 	logs.Raw("  key-setup --host H [--user U --port P --password X --key-path P]")
 	logs.Raw("                                        Generate key if needed, install it remotely, verify auth, and save key path in dialtone.json")
-	logs.Raw("  test                                  Run ssh plugin self-check suite")
+	logs.Raw("  test [--filter <expr>] [--host H]     Run ssh plugin self-check suite (default host: grey)")
+}
+
+func runInstall(args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("install does not accept extra arguments")
+	}
+	logs.Info("ssh src_v1 install: no-op")
+	return nil
+}
+
+func runFormat(args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("format does not accept extra arguments")
+	}
+	return runManagedGoCommand("fmt", "./plugins/ssh/...")
+}
+
+func runLint(args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("lint does not accept extra arguments")
+	}
+	return runManagedGoCommand("vet", "./plugins/ssh/...")
+}
+
+func runBuild(args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("build does not accept extra arguments")
+	}
+	return runManagedGoCommand("build", "./plugins/ssh/...")
+}
+
+func runSelfCheck(args []string) error {
+	paths, err := ResolvePaths("")
+	if err != nil {
+		return err
+	}
+	goBin := strings.TrimSpace(paths.Runtime.GoBin)
+	if goBin == "" {
+		goBin = "go"
+	}
+	cmdArgs := append([]string{"run", "./plugins/ssh/src_v1/test/cmd/main.go"}, args...)
+	cmd := exec.Command(goBin, cmdArgs...)
+	cmd.Dir = paths.Runtime.SrcRoot
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	cmd.Env = os.Environ()
+	return cmd.Run()
+}
+
+func runManagedGoCommand(args ...string) error {
+	paths, err := ResolvePaths("")
+	if err != nil {
+		return err
+	}
+	goBin := strings.TrimSpace(paths.Runtime.GoBin)
+	if goBin == "" {
+		goBin = "go"
+	}
+	cmd := exec.Command(goBin, args...)
+	cmd.Dir = paths.Runtime.SrcRoot
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	cmd.Env = os.Environ()
+	return cmd.Run()
 }
 
 func runMeshList(_ []string) error {

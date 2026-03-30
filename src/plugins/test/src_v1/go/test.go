@@ -180,9 +180,10 @@ func (s *BrowserSession) Navigate(rawURL string) error {
 	}
 	if s.isServiceManaged() {
 		resp, err := chrome.SendCommandByHost(s.Session.Host, chrome.CommandRequest{
-			Command: "goto",
-			Role:    strings.TrimSpace(s.Session.Role),
-			URL:     strings.TrimSpace(rawURL),
+			Command:   "goto",
+			Role:      strings.TrimSpace(s.Session.Role),
+			URL:       strings.TrimSpace(rawURL),
+			TimeoutMS: 60000,
 		})
 		if err != nil {
 			return err
@@ -240,6 +241,11 @@ func (s *BrowserSession) WaitForConsoleContains(substr string, timeout time.Dura
 	needle := strings.TrimSpace(substr)
 	if needle == "" {
 		return fmt.Errorf("console needle is required")
+	}
+	for _, entry := range s.Entries() {
+		if strings.Contains(entry.Text, needle) {
+			return nil
+		}
 	}
 	if s.isServiceManaged() {
 		resp, err := s.serviceCommand(chrome.CommandRequest{
@@ -345,6 +351,63 @@ func (s *BrowserSession) PressEnterAriaLabel(label string) error {
 		return err
 	}
 	return s.Run(PressEnterAriaLabel(label))
+}
+
+func (s *BrowserSession) ReadAriaLabelAttr(label, attr string) (string, error) {
+	if s.isServiceManaged() {
+		resp, err := s.serviceCommand(chrome.CommandRequest{
+			Command:   "get-aria-attr",
+			AriaLabel: strings.TrimSpace(label),
+			Attr:      strings.TrimSpace(attr),
+		})
+		if err != nil {
+			return "", err
+		}
+		return resp.Value, nil
+	}
+	selector := fmt.Sprintf(`[aria-label=%q]`, label)
+	var actual string
+	var ok bool
+	err := s.Run(chromedp.AttributeValue(selector, attr, &actual, &ok, chromedp.ByQuery))
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("aria-label %q attr %q not found", label, attr)
+	}
+	return actual, nil
+}
+
+func (s *BrowserSession) SetHTML(markup string) error {
+	if s == nil {
+		return fmt.Errorf("browser session unavailable")
+	}
+	if s.ctx != nil {
+		if err := paceAction(s.ctx); err != nil {
+			return err
+		}
+	}
+	if s.isServiceManaged() {
+		_, err := s.serviceCommand(chrome.CommandRequest{
+			Command:   "set-html",
+			Value:     markup,
+			TimeoutMS: 2600,
+		})
+		return err
+	}
+	if err := s.Run(chromedp.Navigate("about:blank")); err != nil {
+		return err
+	}
+	return s.Run(chromedp.ActionFunc(func(ctx context.Context) error {
+		tree, err := page.GetFrameTree().Do(ctx)
+		if err != nil {
+			return err
+		}
+		if tree == nil || tree.Frame == nil {
+			return fmt.Errorf("page frame unavailable")
+		}
+		return page.SetDocumentContent(tree.Frame.ID, markup).Do(ctx)
+	}))
 }
 
 func (s *BrowserSession) WaitForAriaLabelAttrEquals(label, attr, expected string, timeout time.Duration) error {
@@ -688,6 +751,15 @@ func (s *BrowserSession) rebindToTarget(targetID string) error {
 }
 
 func (s *BrowserSession) ensureMainTargetID() error {
+	if s == nil {
+		return fmt.Errorf("browser session unavailable")
+	}
+	if s.isServiceManaged() {
+		return fmt.Errorf("main target lookup is not supported for service-managed browser sessions")
+	}
+	if s.ctx == nil {
+		return fmt.Errorf("browser context unavailable")
+	}
 	s.mu.Lock()
 	if s.mainTargetID != "" {
 		s.mu.Unlock()
@@ -708,6 +780,12 @@ func (s *BrowserSession) ensureMainTargetID() error {
 }
 
 func (s *BrowserSession) CloseExtraTabsKeepMain() error {
+	if s == nil {
+		return fmt.Errorf("browser session unavailable")
+	}
+	if s.isServiceManaged() {
+		return nil
+	}
 	if err := s.ensureMainTargetID(); err != nil {
 		return err
 	}
@@ -742,7 +820,10 @@ func (s *BrowserSession) CaptureScreenshot(path string) (err error) {
 		}
 	}
 	if s.isServiceManaged() {
-		resp, err := s.serviceCommand(chrome.CommandRequest{Command: "screenshot"})
+		resp, err := s.serviceCommand(chrome.CommandRequest{
+			Command:   "screenshot",
+			TimeoutMS: 1200,
+		})
 		if err != nil {
 			return err
 		}
@@ -1188,6 +1269,18 @@ func ensureFirstPageTargetIDAt(host string, port int, allowCreate bool) (string,
 
 func (sc *StepContext) EnsureBrowser(opts BrowserOptions) (*BrowserSession, error) {
 	sc.markBrowserUsed()
+	if sc.Session != nil && sc.Session.isServiceManaged() {
+		sc.bindBrowserSession(sc.Session)
+		if strings.TrimSpace(opts.URL) != "" && !opts.SkipNavigateOnReuse && !opts.PreserveTabAndSize {
+			if err := sc.Session.Navigate(opts.URL); err != nil {
+				return nil, err
+			}
+		}
+		if err := sc.runErrorPingCheckOnce(); err != nil {
+			return nil, err
+		}
+		return sc.Session, nil
+	}
 	if sc.Session != nil {
 		if !opts.PreserveTabAndSize && !isBrowserSessionAlive(sc.Session) {
 			if RemoteBrowserConfigured() {
@@ -1205,6 +1298,18 @@ func (sc *StepContext) EnsureBrowser(opts BrowserOptions) (*BrowserSession, erro
 		if err := sc.Session.EnsureOpenPage(); err != nil {
 			return nil, err
 		}
+		if strings.TrimSpace(opts.URL) != "" && !opts.SkipNavigateOnReuse && !opts.PreserveTabAndSize {
+			if err := sc.Session.Navigate(opts.URL); err != nil {
+				return nil, err
+			}
+		}
+		if err := sc.runErrorPingCheckOnce(); err != nil {
+			return nil, err
+		}
+		return sc.Session, nil
+	}
+	if sc.suiteBrowser != nil && sc.suiteBrowser.isServiceManaged() {
+		sc.bindBrowserSession(sc.suiteBrowser)
 		if strings.TrimSpace(opts.URL) != "" && !opts.SkipNavigateOnReuse && !opts.PreserveTabAndSize {
 			if err := sc.Session.Navigate(opts.URL); err != nil {
 				return nil, err
@@ -1479,6 +1584,14 @@ func (sc *StepContext) WaitForAriaLabelAttrEquals(label, attr, expected string, 
 	return b.WaitForAriaLabelAttrEquals(label, attr, expected, timeout)
 }
 
+func (sc *StepContext) ReadAriaLabelAttr(label, attr string) (string, error) {
+	b, err := sc.Browser()
+	if err != nil {
+		return "", err
+	}
+	return b.ReadAriaLabelAttr(label, attr)
+}
+
 func (sc *StepContext) ClickAriaLabelAfterWait(label string, timeout time.Duration) error {
 	if err := sc.WaitForAriaLabel(label, timeout); err != nil {
 		return err
@@ -1500,6 +1613,14 @@ func (sc *StepContext) Goto(rawURL string) error {
 		return err
 	}
 	return b.Navigate(rawURL)
+}
+
+func (sc *StepContext) SetHTML(markup string) error {
+	b, err := sc.Browser()
+	if err != nil {
+		return err
+	}
+	return b.SetHTML(markup)
 }
 
 // TapAt uses a click event as the cross-platform tap primitive for test automation.
@@ -1755,7 +1876,7 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 		}
 		if sharedBrowser != nil {
 			stepCtx.bindBrowserSession(sharedBrowser)
-			if !RemoteBrowserConfigured() {
+			if !sharedBrowser.isServiceManaged() {
 				if cerr := sharedBrowser.CloseExtraTabsKeepMain(); cerr != nil {
 					logs.Warn("%s unable to cleanup extra browser tabs before step %s: %v", testTag, step.Name, cerr)
 				}
@@ -1827,10 +1948,14 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 
 		stepScreenshots := append([]string{}, step.Screenshots...)
 		if stepCtx.hasBrowserActivity() && stepCtx.Session != nil && !stepCtx.AutoScreenshotCaptured() {
-			if autoShot, shotErr := captureAutoStepScreenshot(stepCtx, opts.ReportPath, step.Name); shotErr != nil {
-				logs.Warn("%s unable to capture auto screenshot for step %s: %v", testTag, step.Name, shotErr)
-			} else if strings.TrimSpace(autoShot) != "" {
-				stepScreenshots = append(stepScreenshots, autoShot)
+			if stepCtx.Session.isServiceManaged() {
+				logs.Info("%s skipping auto screenshot for remote-managed step %s", testTag, step.Name)
+			} else {
+				if autoShot, shotErr := captureAutoStepScreenshot(stepCtx, opts.ReportPath, step.Name); shotErr != nil {
+					logs.Warn("%s unable to capture auto screenshot for step %s: %v", testTag, step.Name, shotErr)
+				} else if strings.TrimSpace(autoShot) != "" {
+					stepScreenshots = append(stepScreenshots, autoShot)
+				}
 			}
 		}
 		stepScreenshots = append(stepScreenshots, stepCtx.snapshotStepScreenshots()...)
@@ -1851,11 +1976,9 @@ func RunSuite(opts SuiteOptions, steps []Step) error {
 		if err != nil {
 			break
 		}
-		if sharedBrowser != nil {
-			if !RemoteBrowserConfigured() {
-				if cerr := sharedBrowser.CloseExtraTabsKeepMain(); cerr != nil {
-					logs.Warn("%s unable to cleanup extra browser tabs after step %s: %v", testTag, step.Name, cerr)
-				}
+		if sharedBrowser != nil && !sharedBrowser.isServiceManaged() {
+			if cerr := sharedBrowser.CloseExtraTabsKeepMain(); cerr != nil {
+				logs.Warn("%s unable to cleanup extra browser tabs after step %s: %v", testTag, step.Name, cerr)
 			}
 		}
 	}

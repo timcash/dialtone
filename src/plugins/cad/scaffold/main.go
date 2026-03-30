@@ -11,7 +11,9 @@ import (
 	"time"
 
 	cadv1 "dialtone/dev/plugins/cad/src_v1/go"
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
+	pixiv1 "dialtone/dev/plugins/pixi/src_v1/go"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
 )
 
@@ -31,6 +33,15 @@ func main() {
 	switch version {
 	case "src_v1":
 		switch command {
+		case "help", "-h", "--help":
+			printUsage()
+			return
+		case "install":
+			if err := runInstall(); err != nil {
+				logs.Error("cad src_v1 install failed: %v", err)
+				os.Exit(1)
+			}
+			return
 		case "test":
 			if err := runTests(rest); err != nil {
 				logs.Error("cad src_v1 tests failed: %v", err)
@@ -40,6 +51,12 @@ func main() {
 		case "format":
 			if err := runFormat(); err != nil {
 				logs.Error("cad src_v1 format failed: %v", err)
+				os.Exit(1)
+			}
+			return
+		case "lint":
+			if err := runLint(); err != nil {
+				logs.Error("cad src_v1 lint failed: %v", err)
 				os.Exit(1)
 			}
 			return
@@ -82,8 +99,7 @@ func parseArgs(args []string) (version, command string, rest []string, warnedOld
 	if len(args) >= 2 && strings.HasPrefix(args[1], "src_v") {
 		return args[1], args[0], args[2:], true, nil
 	}
-	// Preserve old single-version command shape like: ./dialtone.sh cad server
-	return "src_v1", args[0], args[1:], true, nil
+	return "", "", nil, false, fmt.Errorf("expected version as first cad argument (for example: ./dialtone.sh cad src_v1 serve)")
 }
 
 func isHelp(s string) bool {
@@ -99,20 +115,65 @@ func printUsage() {
 	logs.Raw("  status [--port <n>]  Check local CAD server health")
 	logs.Raw("  stop [--port <n>]    Stop the tracked local CAD server")
 	logs.Raw("  dev [--port <n>] [--backend-port <n>] [--host <host>] [--browser-node <node>] [--public-url <url>]")
+	logs.Raw("  install              Verify/install CAD backend and UI dependencies")
 	logs.Raw("  build                Build the CAD UI assets")
 	logs.Raw("  format               Format Go and UI sources")
+	logs.Raw("  lint                 Run Go and UI lint checks")
 	logs.Raw("  test                 Run cad src_v1 test suite")
 	logs.Raw("  help                 Show this help")
 }
 
+func runInstall() error {
+	paths, err := cadv1.ResolvePaths("", "src_v1")
+	if err != nil {
+		return err
+	}
+	logs.Info("DIALTONE_INDEX: cad install: verifying plugin layout")
+	if err := cadv1.VerifyInstallLayout(paths); err != nil {
+		return err
+	}
+
+	pixiBin, err := pixiv1.EnsureManaged(paths.Runtime)
+	if err != nil {
+		return err
+	}
+	logs.Info("DIALTONE_INDEX: cad install: using pixi at %s", pixiBin)
+	logs.Info("DIALTONE_INDEX: cad install: ensuring backend environment")
+	if err := runCmd(paths.BackendDir, pixiBin, "install"); err != nil {
+		return err
+	}
+	logs.Info("DIALTONE_INDEX: cad install: verifying backend imports")
+	if err := runCmd(paths.BackendDir, pixiBin, "run", "python", "-c", "import cadquery, fastapi, uvicorn; print('cad-backend-deps-ok')"); err != nil {
+		return err
+	}
+
+	bunBin, err := cadv1.ResolveBunBinary(paths)
+	if err != nil {
+		return err
+	}
+	logs.Info("DIALTONE_INDEX: cad install: using bun at %s", bunBin)
+	logs.Info("DIALTONE_INDEX: cad install: installing ui dependencies")
+	if err := runCmd(paths.UIDir, bunBin, "install"); err != nil {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(paths.UIDir, "node_modules")); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("cad install: ui dependencies missing after bun install")
+		}
+		return fmt.Errorf("cad install: unable to verify ui dependencies: %w", err)
+	}
+	logs.Info("DIALTONE_INDEX: cad install: dependencies ready")
+	return nil
+}
+
 func runTests(args []string) error {
-	repoRoot, err := findRepoRoot()
+	paths, err := cadv1.ResolvePaths("", "src_v1")
 	if err != nil {
 		return err
 	}
 	cmdArgs := append([]string{"run", "./plugins/cad/src_v1/test/cmd/main.go"}, args...)
-	cmd := exec.Command("go", cmdArgs...)
-	cmd.Dir = filepath.Join(repoRoot, "src")
+	cmd := exec.Command(resolveGoBin(paths), cmdArgs...)
+	cmd.Dir = paths.Runtime.SrcRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -143,6 +204,27 @@ func runFormat() error {
 	return nil
 }
 
+func runLint() error {
+	paths, err := cadv1.ResolvePaths("", "src_v1")
+	if err != nil {
+		return err
+	}
+	logs.Info("DIALTONE_INDEX: cad lint: ensuring ui dependencies")
+	if err := ensureUIDeps(paths); err != nil {
+		return err
+	}
+	logs.Info("DIALTONE_INDEX: cad lint: vetting go sources")
+	if err := runCmd(paths.Runtime.SrcRoot, resolveGoBin(paths), "vet", "./plugins/cad/..."); err != nil {
+		return err
+	}
+	logs.Info("DIALTONE_INDEX: cad lint: checking ui sources")
+	if err := runBun(paths, "run", "lint"); err != nil {
+		return err
+	}
+	logs.Info("DIALTONE_INDEX: cad lint: completed")
+	return nil
+}
+
 func runBuild() error {
 	paths, err := cadv1.ResolvePaths("", "src_v1")
 	if err != nil {
@@ -170,7 +252,7 @@ func runDev(args []string) error {
 	port := fs.Int("port", 3012, "Vite dev server port")
 	host := fs.String("host", "0.0.0.0", "Vite dev server host")
 	backendPort := fs.Int("backend-port", 8081, "CAD backend port")
-	browserNode := fs.String("browser-node", "", "Optional mesh node for headed browser session")
+	browserNode := fs.String("browser-node", "", "Optional mesh node for headed browser session (use none/off/local to disable)")
 	publicURL := fs.String("public-url", "", "URL a remote browser should open")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -202,11 +284,14 @@ func runDev(args []string) error {
 		devURL = localURL
 	}
 	node := strings.TrimSpace(*browserNode)
+	if resolved, disabled := testv1.ResolveConfiguredAttachNode(node); disabled {
+		node = ""
+	} else if resolved != "" {
+		node = resolved
+	}
 	if node == "" {
-		_ = os.Setenv("CAD_DEV_BROWSER_MODE", "none")
 		testv1.SetRuntimeConfig(testv1.RuntimeConfig{})
 	} else {
-		_ = os.Unsetenv("CAD_DEV_BROWSER_MODE")
 		testv1.SetRuntimeConfig(testv1.RuntimeConfig{
 			BrowserNode:       node,
 			RemoteBrowserRole: "cad-dev",
@@ -227,8 +312,8 @@ func runDev(args []string) error {
 		DevHost:           strings.TrimSpace(*host),
 		DevPublicURL:      devURL,
 		Role:              "cad-dev",
+		DisableBrowser:    node == "",
 		BrowserMetaPath:   filepath.Join(paths.Preset.PluginVersionRoot, "dev.browser.json"),
-		BrowserModeEnvVar: "CAD_DEV_BROWSER_MODE",
 		NATSURL:           resolveDevNATSURL(),
 		NATSSubject:       "logs.dev.cad.src-v1",
 	})
@@ -273,7 +358,7 @@ func devBackendHealthy(port int) (bool, error) {
 }
 
 func resolveDevNATSURL() string {
-	if raw := strings.TrimSpace(os.Getenv("DIALTONE_REPL_NATS_URL")); raw != "" {
+	if raw := strings.TrimSpace(configv1.LookupEnvString("DIALTONE_REPL_NATS_URL")); raw != "" {
 		return raw
 	}
 	return "nats://127.0.0.1:4222"
@@ -288,11 +373,18 @@ func restoreEnv(key, prev string) {
 }
 
 func runBun(paths cadv1.Paths, args ...string) error {
-	bunBin := filepath.Join(paths.Runtime.DialtoneEnv, "bun", "bin", "bun")
-	if _, err := os.Stat(bunBin); err != nil {
-		bunBin = "bun"
+	bunBin, err := cadv1.ResolveBunBinary(paths)
+	if err != nil {
+		return err
 	}
 	return runCmd(paths.UIDir, bunBin, args...)
+}
+
+func resolveGoBin(paths cadv1.Paths) string {
+	if v := strings.TrimSpace(paths.Runtime.GoBin); v != "" {
+		return v
+	}
+	return "go"
 }
 
 func runCmd(dir, bin string, args ...string) error {
@@ -302,21 +394,4 @@ func runCmd(dir, bin string, args ...string) error {
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	return cmd.Run()
-}
-
-func findRepoRoot() (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(cwd, "dialtone.sh")); err == nil {
-			return cwd, nil
-		}
-		parent := filepath.Dir(cwd)
-		if parent == cwd {
-			return "", fmt.Errorf("repo root not found")
-		}
-		cwd = parent
-	}
 }

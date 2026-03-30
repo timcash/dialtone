@@ -120,7 +120,6 @@ func (t *TestContext) ensureAttachDevServerLocked() error {
 		t.devStarted = true
 		t.logf("LOOKING FOR: starting persistent ui dev server in background at %s", localDevURL)
 		go func(repoRoot, pluginDir, uiDir string) {
-			_ = os.Setenv("UI_DEV_BROWSER_MODE", "none")
 			if err := testv1.RunDev(testv1.DevOptions{
 				RepoRoot:          repoRoot,
 				PluginDir:         pluginDir,
@@ -129,8 +128,8 @@ func (t *TestContext) ensureAttachDevServerLocked() error {
 				DevHost:           "127.0.0.1",
 				DevPublicURL:      localDevURL,
 				Role:              "ui-dev",
+				DisableBrowser:    true,
 				BrowserMetaPath:   filepath.Join(pluginDir, "dev.browser.json"),
-				BrowserModeEnvVar: "UI_DEV_BROWSER_MODE",
 				NATSURL:           ResolveSuiteNATSURL(),
 				NATSSubject:       "logs.dev.ui.src-v1",
 			}); err != nil {

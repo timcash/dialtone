@@ -1,4 +1,4 @@
-package cli
+package uiv1
 
 import (
 	configv1 "dialtone/dev/plugins/config/src_v1/go"
@@ -14,10 +14,11 @@ import (
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
-	uiv1 "dialtone/dev/plugins/ui/src_v1/go"
+	uipaths "dialtone/dev/plugins/ui/src_v1/go"
 )
 
 func Run(args []string) error {
+	logs.SetOutput(os.Stdout)
 	if len(args) < 1 {
 		printUsage()
 		return fmt.Errorf("no command provided")
@@ -29,7 +30,7 @@ func Run(args []string) error {
 		return err
 	}
 	if warnedOldOrder {
-		fmt.Println("[WARN] old ui CLI order is deprecated. Use: ./dialtone.sh ui src_v1 <command> [args]")
+		logs.Warn("old ui CLI order is deprecated. Use: ./dialtone.sh ui src_v1 <command> [args]")
 	}
 	args = normalized
 
@@ -46,7 +47,7 @@ func Run(args []string) error {
 		return runUIFixtureScript("build", cmdArgs)
 	case "lint":
 		return runUIFixtureScript("lint", cmdArgs)
-	case "fmt":
+	case "format", "fmt":
 		return runUIFixtureScript("fmt", cmdArgs)
 	case "fmt-check":
 		return runUIFixtureScript("fmt:check", cmdArgs)
@@ -67,22 +68,21 @@ func Run(args []string) error {
 }
 
 func printUsage() {
-	fmt.Println("Usage: ./dialtone.sh ui src_v1 <command> [args]")
-	fmt.Println("\nCommands:")
-	fmt.Println("  dev       Run fixture dev server + attachable browser session")
-	fmt.Println("  build     Build fixture UI dist (bun run build)")
-	fmt.Println("  lint      Lint/type-check fixture UI (bun run lint)")
-	fmt.Println("  fmt       Format fixture UI sources (bun run fmt)")
-	fmt.Println("  fmt-check Check fixture formatting (bun run fmt:check)")
-	fmt.Println("  install   Install fixture dependencies (bun install)")
-	fmt.Println("  test      Run ui src_v1 test suite (supports --attach <mesh-node>)")
-	fmt.Println("  mock-data Start mock data server for testing")
-	fmt.Println("  kill      Kill running UI processes (dev, mock-data)")
+	logs.Raw("Usage: ./dialtone.sh ui src_v1 <command> [args]")
+	logs.Raw("")
+	logs.Raw("Commands:")
+	logs.Raw("  dev       Run fixture dev server + attachable browser session")
+	logs.Raw("  install   Install fixture dependencies (bun install)")
+	logs.Raw("  format    Format fixture UI sources (bun run fmt)")
+	logs.Raw("  lint      Lint/type-check fixture UI (bun run lint)")
+	logs.Raw("  build     Build fixture UI dist (bun run build)")
+	logs.Raw("  test      Run ui src_v1 test suite (supports --attach <mesh-node>)")
+	logs.Raw("  mock-data Start mock data server for testing")
+	logs.Raw("  kill      Kill running UI processes (dev, mock-data)")
 }
 
 func runKill() {
-	fmt.Println(">> Killing UI processes...")
-
+	logs.Info("ui src_v1 kill: stopping local UI helper processes")
 	exec.Command("pkill", "-f", "vite").Run()
 	exec.Command("pkill", "-f", "dialtone ui mock-data").Run()
 	exec.Command("pkill", "-f", "dialtone ui dev").Run()
@@ -91,19 +91,22 @@ func runKill() {
 	for _, p := range ports {
 		exec.Command("fuser", "-k", "-n", "tcp", p).Run()
 	}
-
-	fmt.Println(">> UI processes terminated.")
+	logs.Info("ui src_v1 kill: complete")
 }
 
 func runUIFixtureScript(script string, args []string) error {
-	paths, err := uiv1.ResolvePaths("")
+	paths, err := uipaths.ResolvePaths("")
 	if err != nil {
 		return err
 	}
-	bunBin := configv1.ManagedBunBinPath(configv1.DefaultDialtoneEnv())
+	bunBin := strings.TrimSpace(paths.Runtime.BunBin)
+	if bunBin == "" {
+		bunBin = configv1.ManagedBunBinPath(configv1.DefaultDialtoneEnv())
+	}
 	if _, err := os.Stat(bunBin); os.IsNotExist(err) {
 		bunBin = "bun"
 	}
+
 	var cmdArgsRun []string
 	if script == "install" {
 		cmdArgsRun = []string{"install"}
@@ -112,18 +115,14 @@ func runUIFixtureScript(script string, args []string) error {
 	}
 	cmdArgsRun = append(cmdArgsRun, args...)
 
+	logs.Info("ui src_v1 %s: %s %s", script, bunBin, strings.Join(cmdArgsRun, " "))
 	cmd := exec.Command(bunBin, cmdArgsRun...)
 	cmd.Dir = paths.FixtureApp
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	cmd.Env = os.Environ()
-
-	fmt.Printf(">> Running: %s %s (in %s)\n", bunBin, strings.Join(cmdArgsRun, " "), paths.FixtureApp)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("ui command failed: %w", err)
-	}
-	return nil
+	return cmd.Run()
 }
 
 func normalizeUIArgs(args []string) ([]string, bool, error) {
@@ -161,11 +160,11 @@ func isHelp(s string) bool {
 }
 
 func runUITests(extraArgs []string) error {
-	paths, err := uiv1.ResolvePaths("")
+	paths, err := uipaths.ResolvePaths("")
 	if err != nil {
 		return err
 	}
-	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
+	goBin := strings.TrimSpace(paths.Runtime.GoBin)
 	if goBin == "" {
 		goBin = "go"
 	}
@@ -176,11 +175,12 @@ func runUITests(extraArgs []string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
+	cmd.Env = os.Environ()
 	return cmd.Run()
 }
 
 func runUIDev(args []string) error {
-	paths, err := uiv1.ResolvePaths("")
+	paths, err := uipaths.ResolvePaths("")
 	if err != nil {
 		return err
 	}
@@ -188,7 +188,7 @@ func runUIDev(args []string) error {
 	fs.SetOutput(nil)
 	port := fs.Int("port", 5177, "Dev server port")
 	host := fs.String("host", "0.0.0.0", "Vite bind host")
-	browserNode := fs.String("browser-node", "", "Optional mesh node for headed browser session (example: chroma)")
+	browserNode := fs.String("browser-node", "", "Optional mesh node for headed browser session (example: legion)")
 	publicURL := fs.String("public-url", "", "Public URL that remote browser should open")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -209,11 +209,9 @@ func runUIDev(args []string) error {
 		}
 		devURL = u
 	}
+	testv1.SetRuntimeConfig(testv1.RuntimeConfig{BrowserNode: node})
 	if node != "" {
-		_ = os.Setenv("DIALTONE_TEST_BROWSER_NODE", node)
 		logs.Info("ui dev remote browser node=%s url=%s", node, devURL)
-	} else {
-		_ = os.Unsetenv("DIALTONE_TEST_BROWSER_NODE")
 	}
 
 	return testv1.RunDev(testv1.DevOptions{
@@ -232,25 +230,7 @@ func runUIDev(args []string) error {
 }
 
 func defaultDevBrowserNode() string {
-	if envNode := strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_NODE")); envNode != "" {
-		return envNode
-	}
-	if isWSL() {
-		return "chroma"
-	}
-	return ""
-}
-
-func isWSL() bool {
-	if strings.Contains(strings.ToLower(strings.TrimSpace(os.Getenv("WSL_DISTRO_NAME"))), "ubuntu") ||
-		strings.TrimSpace(os.Getenv("WSL_DISTRO_NAME")) != "" {
-		return true
-	}
-	data, err := os.ReadFile("/proc/version")
-	if err != nil {
-		return false
-	}
-	return strings.Contains(strings.ToLower(string(data)), "microsoft")
+	return testv1.ResolveDefaultAttachNode(configv1.LookupEnvString("DIALTONE_TEST_BROWSER_NODE"))
 }
 
 func inferPublicDevURL(port int) (string, error) {

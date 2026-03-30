@@ -1,12 +1,17 @@
-package cli
+package logsv1
 
 import (
 	"fmt"
 	"os"
+
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
 func RunBuild(versionDir string) error {
-	fmt.Printf(">> [LOGS] Build: START for %s\n", versionDir)
+	logs.Info("logs %s build: start", versionDir)
+	if err := RunGoBuild(versionDir); err != nil {
+		return err
+	}
 
 	paths, err := resolveLogsPaths(versionDir)
 	if err != nil {
@@ -18,19 +23,19 @@ func RunBuild(versionDir string) error {
 		return fmt.Errorf("UI directory not found: %s", uiDir)
 	}
 
-	fmt.Printf(">> [LOGS] Installing UI dependencies in %s...\n", uiDir)
+	logs.Info("logs %s build: installing UI dependencies in %s", versionDir, uiDir)
 	installCmd := runBun(paths.Runtime.RepoRoot, uiDir, "install", "--force")
 	if err := installCmd.Run(); err != nil {
 		return fmt.Errorf("UI install failed: %v", err)
 	}
 
-	fmt.Printf(">> [LOGS] Building UI in %s...\n", uiDir)
+	logs.Info("logs %s build: building UI in %s", versionDir, uiDir)
 	cmd := runBun(paths.Runtime.RepoRoot, uiDir, "run", "build")
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("UI build failed: %v", err)
 	}
 
-	fmt.Printf(">> [LOGS] Build: COMPLETE for %s\n", versionDir)
+	logs.Info("logs %s build: complete", versionDir)
 	return nil
 }

@@ -61,6 +61,7 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
   let lastStatusText = '';
   let lastCommandAckResult = '';
   let lastErrorLine = '';
+  let lastUIAction = '';
 
   const lineText = (row: number): string => {
     const line = term.buffer.active.getLine(row);
@@ -187,6 +188,7 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
     terminalEl.setAttribute('data-last-error-line', lastErrorLine || filteredLastError?.text || '');
     terminalEl.setAttribute('data-last-status-text', lastStatusText);
     terminalEl.setAttribute('data-last-command-ack-result', lastCommandAckResult);
+    terminalEl.setAttribute('data-last-ui-action', lastUIAction);
     applyCursorAttrs();
   };
 
@@ -202,6 +204,20 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
     syncTerminalAttrs();
   };
 
+  const appendLocalUILog = (text: string) => {
+    const line: LogLine = {
+      text,
+      filter: 'ui',
+      level: 'INFO',
+      timestamp: new Date().toISOString(),
+      noisy: false,
+    };
+    logLines.push(line);
+    if (logLines.length > MAX_LINES * 4) {
+      logLines.splice(0, logLines.length - MAX_LINES * 4);
+    }
+  };
+
   const setFilter = (filter: LogFilter) => {
     activeFilter = filter;
     renderLogs();
@@ -215,6 +231,8 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
 
   const clearLogs = () => {
     logLines.splice(0, logLines.length);
+    lastUIAction = 'clear';
+    appendLocalUILog('[ROBOT TERM] cleared log buffer');
     renderLogs();
   };
 

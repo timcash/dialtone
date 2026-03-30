@@ -16,6 +16,10 @@ class TableControl implements VisualizationControl {
   private lastStatusText = '';
   private lastCommandAckCommand = '';
   private lastCommandAckResult = '';
+  private lastHeartbeatTimestamp = '';
+  private lastHeartbeatMode = '';
+  private lastHeartbeatMavType = '';
+  private lastClearRowCount = '';
 
   constructor(private container: HTMLElement) {
     this.subscribe();
@@ -23,10 +27,16 @@ class TableControl implements VisualizationControl {
     registerButtons(ROBOT_SECTION_IDS.table, ['Browse'], {
       'Browse': [
         { label: 'Refresh', action: () => this.renderRows() },
-        { label: 'Clear', action: () => { this.allRows.clear(); this.renderRows(); } },
+        { label: 'Clear', action: () => this.clearRows() },
         null, null, null, null, null, null
       ]
     });
+  }
+
+  private clearRows() {
+    this.allRows.clear();
+    this.lastClearRowCount = '0';
+    this.renderRows();
   }
 
   private subscribe() {
@@ -49,6 +59,9 @@ class TableControl implements VisualizationControl {
 
     // Handle Mavlink messages
     if (data.type === 'HEARTBEAT') {
+      this.lastHeartbeatTimestamp = String(data.timestamp ?? '');
+      this.lastHeartbeatMode = String(data.custom_mode ?? '');
+      this.lastHeartbeatMavType = String(data.mav_type ?? '');
       this.allRows.set('mav_type', { key: 'mav_type', value: String(data.mav_type), status: 'MAV' });
       this.allRows.set('custom_mode', { key: 'custom_mode', value: String(data.custom_mode), status: 'MAV' });
       this.allRows.set('heartbeat_ts', { key: 'heartbeat_ts', value: String(data.timestamp), status: 'MAV' });
@@ -104,6 +117,10 @@ class TableControl implements VisualizationControl {
     table.setAttribute('data-last-status-text', this.lastStatusText);
     table.setAttribute('data-last-command-ack-command', this.lastCommandAckCommand);
     table.setAttribute('data-last-command-ack-result', this.lastCommandAckResult);
+    table.setAttribute('data-last-heartbeat-ts', this.lastHeartbeatTimestamp);
+    table.setAttribute('data-last-heartbeat-mode', this.lastHeartbeatMode);
+    table.setAttribute('data-last-heartbeat-mav-type', this.lastHeartbeatMavType);
+    table.setAttribute('data-last-clear-row-count', this.lastClearRowCount);
     table.setAttribute('data-row-count', String(rows.length));
     table.setAttribute('data-ready', 'true');
   }

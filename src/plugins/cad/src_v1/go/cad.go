@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strconv"
 )
@@ -42,13 +41,9 @@ func (o CADObject) ToJSON() (string, error) {
 }
 
 func GenerateSTL(paths Paths, params map[string]interface{}) ([]byte, error) {
-	pixiBin := "pixi"
-	if _, err := exec.LookPath(pixiBin); err != nil {
-		home, _ := os.UserHomeDir()
-		candidate := filepath.Join(home, ".pixi", "bin", "pixi")
-		if _, statErr := os.Stat(candidate); statErr == nil {
-			pixiBin = candidate
-		}
+	pixiBin, err := ResolvePixiBinary(paths)
+	if err != nil {
+		return nil, err
 	}
 
 	args := []string{"run", "python", "main.py"}

@@ -16,6 +16,7 @@ export interface SectionConfig {
   modes: string[]; // ['default', 'alt']
   buttons: SectionButtons;
   currentMode: string;
+  clickSeq: number;
 }
 
 const configs: Record<string, SectionConfig> = {};
@@ -25,6 +26,7 @@ export function registerButtons(sectionId: string, modes: string[], buttons: Sec
     modes,
     buttons,
     currentMode: modes[0],
+    clickSeq: 0,
   };
 }
 
@@ -61,6 +63,7 @@ export function renderButtons(sectionId: string) {
   if (!form) return;
   form.setAttribute('data-current-mode', cfg.currentMode);
   form.setAttribute('data-buttons-ready', 'true');
+  form.setAttribute('data-click-seq', String(cfg.clickSeq));
 
   const btns = Array.from(form.querySelectorAll('button'));
   // Indices 0-7 are action buttons (1-8)
@@ -78,7 +81,9 @@ export function renderButtons(sectionId: string) {
       btn.textContent = def.label;
       btn.onclick = (e) => {
         e.preventDefault();
+        cfg.clickSeq += 1;
         const aria = btn.getAttribute('aria-label') || def.label;
+        form.setAttribute('data-click-seq', String(cfg.clickSeq));
         form.setAttribute('data-last-button-aria', aria);
         form.setAttribute('data-last-button-label', def.label);
         logInfo('ui/buttons', `[TEST_ACTION] click aria=${aria}`);
@@ -110,7 +115,9 @@ export function renderButtons(sectionId: string) {
     modeBtn.textContent = `Mode: ${cfg.currentMode}`;
     modeBtn.onclick = (e) => {
       e.preventDefault();
+      cfg.clickSeq += 1;
       const aria = modeBtn.getAttribute('aria-label') || `Mode: ${cfg.currentMode}`;
+      form.setAttribute('data-click-seq', String(cfg.clickSeq));
       form.setAttribute('data-last-button-aria', aria);
       form.setAttribute('data-last-button-label', `Mode: ${cfg.currentMode}`);
       logInfo('ui/buttons', `[TEST_ACTION] click aria=${aria}`);

@@ -235,16 +235,13 @@ Flags:
 - `--backend-url`: shared proxy target for `/api`, `/stream`, `/natsws`, `/ws`
 - `--live`: automatically pull the `rover` node IP from `env/dialtone.json` and proxy backend routes to it.
 
-Environment:
-- `ROBOT_DEV_BACKEND_URL`: optional default for `--backend-url`
-
 Common dev flows:
 ```bash
 # Local dev only
 ./dialtone.sh robot src_v2 dev
 
-# Dev + browser on chroma (default browser node is chroma if available)
-./dialtone.sh robot src_v2 dev --browser-node chroma
+# Dev + browser on the paired Windows node (usually legion on WSL)
+./dialtone.sh robot src_v2 dev --browser-node legion
 
 # Zero-config live robot connection (proxies to rover and opens UI)
 ./dialtone.sh robot src_v2 dev --live
@@ -259,8 +256,8 @@ Common dev flows:
 # Dev + browser on legion + backend routes proxied directly to rover on tailnet
 ./dialtone.sh robot src_v2 dev --browser-node legion --public-url http://127.0.0.1:3000 --backend-url http://rover-1:18086
 
-# Same backend proxy via env var
-ROBOT_DEV_BACKEND_URL=http://rover-1:18086 ./dialtone.sh robot src_v2 dev --browser-node chroma
+# One-off backend proxy override stays on the command line
+./dialtone.sh robot src_v2 dev --browser-node legion --backend-url http://rover-1:18086
 ```
 
 Notes:
@@ -290,7 +287,9 @@ Notes:
 
 3. Optional: run with remote browser node when local host has no Chrome:
 ```bash
-DIALTONE_TEST_BROWSER_NODE=legion ./dialtone.sh robot src_v2 test
+./dialtone.sh robot src_v2 test --attach legion
+./dialtone.sh robot src_v2 test --default-attach legion
+./dialtone.sh robot src_v2 test --attach legion --browser-base-url https://rover-1.dialtone.earth
 ```
 
 4. Focused UI steps while iterating:

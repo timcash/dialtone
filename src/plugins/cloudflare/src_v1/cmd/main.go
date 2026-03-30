@@ -7,12 +7,13 @@ import (
 	"strings"
 
 	cloudflarev1 "dialtone/dev/plugins/cloudflare/src_v1/go"
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
 func main() {
 	logs.SetOutput(os.Stdout)
-	port := strings.TrimSpace(os.Getenv("CLOUDFLARE_PORT"))
+	port := strings.TrimSpace(configv1.LookupEnvString("CLOUDFLARE_PORT"))
 	if port == "" {
 		port = "8080"
 	}

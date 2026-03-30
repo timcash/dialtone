@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	nserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 )
@@ -77,12 +79,18 @@ func StartEmbeddedNATSOnURL(natsURL string) (*EmbeddedNATS, error) {
 		}
 		port = parsed
 	}
+	storeDir, err := embeddedNATSJetStreamStoreDir(host, port)
+	if err != nil {
+		return nil, err
+	}
 
 	opts := &nserver.Options{
-		Host:   host,
-		Port:   port,
-		NoLog:  true,
-		NoSigs: true,
+		Host:      host,
+		Port:      port,
+		NoLog:     true,
+		NoSigs:    true,
+		JetStream: true,
+		StoreDir:  storeDir,
 	}
 	srv, err := nserver.NewServer(opts)
 	if err != nil {
@@ -99,6 +107,24 @@ func StartEmbeddedNATSOnURL(natsURL string) (*EmbeddedNATS, error) {
 		return nil, err
 	}
 	return &EmbeddedNATS{server: srv, conn: nc}, nil
+}
+
+func embeddedNATSJetStreamStoreDir(host string, port int) (string, error) {
+	host = strings.TrimSpace(strings.ToLower(host))
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	host = strings.NewReplacer(".", "_", ":", "_", "/", "_", "\\", "_").Replace(host)
+	dir := filepath.Join(
+		configv1.DefaultDialtoneHome(),
+		"nats",
+		fmt.Sprintf("%s_%d", host, port),
+		"jetstream",
+	)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	return dir, nil
 }
 
 func (e *EmbeddedNATS) URL() string {
@@ -404,17 +430,17 @@ func publishPrimaryWithKind(level, kind, message, source string, isTest bool) {
 
 func ensurePrimaryLogger() {
 	primaryNATS.once.Do(func() {
-		if strings.TrimSpace(os.Getenv("DIALTONE_LOG_NATS")) == "0" {
+		if strings.TrimSpace(configv1.LookupEnvString("DIALTONE_LOG_NATS")) == "0" {
 			return
 		}
-		natsURL := strings.TrimSpace(os.Getenv("DIALTONE_NATS_URL"))
+		natsURL := strings.TrimSpace(configv1.LookupEnvString("DIALTONE_NATS_URL"))
 		if natsURL == "" {
-			natsURL = strings.TrimSpace(os.Getenv("NATS_URL"))
+			natsURL = strings.TrimSpace(configv1.LookupEnvString("NATS_URL"))
 		}
 		if natsURL == "" {
 			natsURL = "nats://127.0.0.1:4222"
 		}
-		subject := strings.TrimSpace(os.Getenv("DIALTONE_LOG_SUBJECT"))
+		subject := strings.TrimSpace(configv1.LookupEnvString("DIALTONE_LOG_SUBJECT"))
 		if subject == "" {
 			subject = "logs.runtime"
 		}

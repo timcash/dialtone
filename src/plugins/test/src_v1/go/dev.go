@@ -30,8 +30,9 @@ type DevOptions struct {
 	DevHost           string
 	DevPublicURL      string
 	Role              string
+	DisableBrowser    bool
 	BrowserMetaPath   string
-	BrowserModeEnvVar string // e.g. "DAG_DEV_BROWSER_MODE"
+	BrowserModeEnvVar string // Deprecated compatibility knob for legacy callers.
 	NATSURL           string
 	NATSSubject       string
 }
@@ -81,8 +82,8 @@ func RunDev(opts DevOptions) error {
 		}
 
 		logf("   [DEV] Dev server already running at %s", localURL)
-		if strings.EqualFold(strings.TrimSpace(os.Getenv(opts.BrowserModeEnvVar)), "none") {
-			logf("   [DEV] Browser launch disabled by %s=none", opts.BrowserModeEnvVar)
+		if disabled, reason := browserLaunchDisabled(opts); disabled {
+			logf("   [DEV] Browser launch disabled (%s)", reason)
 			logf("   [DEV] No new dev server was started.")
 			return nil
 		}
@@ -108,11 +109,7 @@ func RunDev(opts DevOptions) error {
 		restartAttemptID++
 		logf("   [DEV] Running vite dev... (attempt %d)", restartAttemptID)
 
-		// Find bun from environment
-		bunBin := configv1.ManagedBunBinPath(configv1.DefaultDialtoneEnv())
-		if _, err := os.Stat(bunBin); err != nil {
-			bunBin = "bun" // Fallback
-		}
+		bunBin := resolveDevBunBin(opts.RepoRoot)
 
 		cmd := exec.Command(bunBin, "run", "dev", "--host", opts.DevHost, "--port", strconv.Itoa(opts.DevPort), "--strictPort")
 		cmd.Dir = opts.UIDir
@@ -137,8 +134,8 @@ func RunDev(opts DevOptions) error {
 			}
 
 			logf("   [DEV] Vite ready at %s", localURL)
-			if strings.EqualFold(strings.TrimSpace(os.Getenv(opts.BrowserModeEnvVar)), "none") {
-				logf("   [DEV] Browser launch disabled by %s=none", opts.BrowserModeEnvVar)
+			if disabled, reason := browserLaunchDisabled(opts); disabled {
+				logf("   [DEV] Browser launch disabled (%s)", reason)
 				return
 			}
 			logf("   [DEV] Opening dev URL in regular browser...")
@@ -199,7 +196,7 @@ func StartDevBrowser(opts DevOptions, logOut io.Writer, devURL string, devLogger
 		fmt.Fprintf(logOut, format+"\n", args...)
 	}
 
-	if strings.EqualFold(strings.TrimSpace(os.Getenv(opts.BrowserModeEnvVar)), "regular") {
+	if legacyDevBrowserRegularMode(opts) {
 		logf("   [DEV] %s=regular is no longer supported; using chrome src_v3 service commands only.", opts.BrowserModeEnvVar)
 	}
 	logf("   [DEV] Opening dev URL through chrome src_v3 service commands.")
@@ -240,6 +237,36 @@ func StartDevBrowser(opts DevOptions, logOut io.Writer, devURL string, devLogger
 	}
 
 	return s, nil
+}
+
+func browserLaunchDisabled(opts DevOptions) (bool, string) {
+	if opts.DisableBrowser {
+		return true, "disabled by command flags/runtime config"
+	}
+	envVar := strings.TrimSpace(opts.BrowserModeEnvVar)
+	if envVar != "" && strings.EqualFold(strings.TrimSpace(os.Getenv(envVar)), "none") {
+		return true, envVar + "=none (legacy compatibility)"
+	}
+	return false, ""
+}
+
+func legacyDevBrowserRegularMode(opts DevOptions) bool {
+	envVar := strings.TrimSpace(opts.BrowserModeEnvVar)
+	return envVar != "" && strings.EqualFold(strings.TrimSpace(os.Getenv(envVar)), "regular")
+}
+
+func resolveDevBunBin(start string) string {
+	if rt, err := configv1.ResolveRuntime(start); err == nil && strings.TrimSpace(rt.BunBin) != "" {
+		return strings.TrimSpace(rt.BunBin)
+	}
+	if bunBin := strings.TrimSpace(configv1.LookupEnvString("DIALTONE_BUN_BIN")); bunBin != "" {
+		return bunBin
+	}
+	candidate := configv1.ManagedBunBinPath(configv1.DefaultDialtoneEnv())
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	return "bun"
 }
 
 func EnsureAttachableBrowser(opts DevOptions, logf func(string, ...any), url string) error {

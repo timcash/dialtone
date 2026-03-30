@@ -7,14 +7,16 @@
 
 Use this mental model:
 - run `./dialtone.sh cad src_v1 ...`
-- REPL starts a subtone
+- REPL queues a task
 - `DIALTONE>` stays short
-- full CAD server logs and browser-test logs stay in the subtone log
+- full CAD server logs and browser-test logs stay in the task log
 
 ## Current Status
 
 Working now:
+- `./dialtone.sh cad src_v1 install`
 - `./dialtone.sh cad src_v1 format`
+- `./dialtone.sh cad src_v1 lint`
 - `./dialtone.sh cad src_v1 build`
 - `./dialtone.sh cad src_v1 serve`
 - `./dialtone.sh cad src_v1 status`
@@ -33,22 +35,17 @@ What to debug next:
 ## Default Use
 
 ```bash
-# Format the CAD plugin sources through the REPL path.
+./dialtone.sh cad src_v1 install
 ./dialtone.sh cad src_v1 format
-
-# Build the UI bundle into src/plugins/cad/src_v1/ui/dist.
+./dialtone.sh cad src_v1 lint
 ./dialtone.sh cad src_v1 build
-
-# Start the CAD server on the default port.
 ./dialtone.sh cad src_v1 serve
-
-# Check whether a tracked local CAD server is healthy.
 ./dialtone.sh cad src_v1 status
-
-# Stop the tracked local CAD server.
 ./dialtone.sh cad src_v1 stop
+```
 
-# Run the focused browser smoke against chrome src_v3 on legion.
+```bash
+./dialtone.sh cad src_v1 test --filter self-check
 ./dialtone.sh cad src_v1 test --attach legion --filter cad-ui-browser-smoke
 ```
 
@@ -63,14 +60,14 @@ Expected shell pattern:
 
 ```text
 legion> /cad src_v1 build
-DIALTONE> Request received. Spawning subtone for cad src_v1...
-DIALTONE> Subtone started as pid 389789.
-DIALTONE> Subtone room: subtone-389789
-DIALTONE> Subtone log file: /home/user/dialtone/.dialtone/logs/subtone-389789-20260318-135944.log
+DIALTONE> Request received.
+DIALTONE> Task queued as task-20260330-cad001.
+DIALTONE> Task topic: task.task-20260330-cad001
+DIALTONE> Task log: ~/.dialtone/logs/task-20260330-cad001.log
 DIALTONE> cad build: installing ui dependencies
 DIALTONE> cad build: building ui dist
 DIALTONE> cad build: ui dist ready
-DIALTONE> Subtone for cad src_v1 exited with code 0.
+DIALTONE> Task task-20260330-cad001 exited with code 0.
 ```
 
 Additional expected patterns:
@@ -106,20 +103,31 @@ DIALTONE> cad stop: server stopped
 # Format Go and UI sources.
 ./dialtone.sh cad src_v1 format
 
+# Verify/install backend and UI dependencies.
+./dialtone.sh cad src_v1 install
+
 # Build the UI assets.
 ./dialtone.sh cad src_v1 build
 
 # Run all CAD tests.
 ./dialtone.sh cad src_v1 test
 
+# Run the lightweight self-check slice.
+./dialtone.sh cad src_v1 test --filter self-check
+
 # Run only the browser smoke on the managed Chrome host.
 ./dialtone.sh cad src_v1 test --attach legion --filter cad-ui-browser-smoke
 ```
 
+Notes:
+- `--filter self-check` now covers the quick local object/layout checks.
+- the HTTP generation path now uses managed `pixi` from `DIALTONE_ENV/pixi` when available.
+- `./dialtone.sh pixi src_v1 install` and `./dialtone.sh cad src_v1 install` both prepare that managed runtime.
+
 ## REPL Standards
 
 `DIALTONE>` should contain:
-- subtone lifecycle
+- task lifecycle
 - short CAD stage summaries
 - final exit code
 - server lifecycle state like checking, ready, healthy, stopped
@@ -130,21 +138,21 @@ DIALTONE> cad stop: server stopped
 - full browser console streams
 - repeated CAD API polling
 
-That detail belongs in the subtone log.
+That detail belongs in the task log.
 
-## Subtone Logs
+## Task Logs
 
-Use the REPL logs when a CAD command fails or looks incomplete.
+Use the REPL task views when a CAD command fails or looks incomplete.
 
 ```bash
-# List recent subtones to find the CAD pid.
-./dialtone.sh repl src_v3 subtone-list --count 20
+# List recent tasks to find the CAD task id.
+./dialtone.sh repl src_v3 task list
 
 # Read the full log for one CAD run.
-./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 250
+./dialtone.sh repl src_v3 task log --task-id <task-id> --lines 250
 ```
 
-For browser smoke failures, the subtone log is where you will see:
+For browser smoke failures, the task log is where you will see:
 - CAD server requests like `POST /api/cad/generate`
 - browser console lines like `cad-model-ready:5`
 - browser console failures like `[cad/ui] regenerate failed`
@@ -185,7 +193,7 @@ Use the same REPL flow as operators.
 ./dialtone.sh chrome src_v3 screenshot --host legion --role cad-smoke --out src/plugins/cad/src_v1/screenshots/cad_manual.png
 ```
 
-If a command looks incomplete, inspect the CAD subtone log and the Chrome subtone log with `repl src_v3 subtone-list` and `subtone-log`.
+If a command looks incomplete, inspect the CAD task log and the Chrome task log with `repl src_v3 task list` and `task log`.
 
 For long-lived local servers, the clean operator loop is:
 
@@ -227,6 +235,13 @@ That prevents the next CAD change from being sent before the backend has finishe
 
 The Go server calls the Python backend through `pixi`.
 
+`./dialtone.sh cad src_v1 install` now does the dependency bootstrap/check path:
+- verifies the backend and UI manifests exist
+- ensures managed `pixi` is available under `DIALTONE_ENV/pixi`
+- runs `pixi install` in `backend/`
+- verifies the Python imports used by the CAD backend
+- runs `bun install` in `ui/`
+
 Current request path:
 - `POST /api/cad/generate`
 - Go calls `pixi run python main.py --outer_diameter ... --num_teeth ...`
@@ -239,8 +254,8 @@ Relevant paths:
 - Go HTTP server: [plugin.go](/home/user/dialtone/src/plugins/cad/src_v1/go/plugin.go)
 
 When debugging backend generation problems, check:
-- Python stderr in the CAD subtone log
-- whether `pixi` is available in the backend environment
+- Python stderr in the CAD task log
+- whether managed `pixi` exists under `DIALTONE_ENV/pixi` or `DIALTONE_PIXI_BIN`
 - whether `POST /api/cad/generate` returns a non-200 status
 
 ## For LLM Agents
@@ -251,9 +266,9 @@ Use this order:
 # 1. Run one CAD command.
 ./dialtone.sh cad src_v1 test --attach legion --filter cad-ui-browser-smoke
 
-# 2. Inspect the subtone log if the command failed.
-./dialtone.sh repl src_v3 subtone-list --count 10
-./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 250
+# 2. Inspect the task log if the command failed.
+./dialtone.sh repl src_v3 task list
+./dialtone.sh repl src_v3 task log --task-id <task-id> --lines 250
 
 # 3. Then run the next command.
 ./dialtone.sh cad src_v1 build

@@ -1,7 +1,13 @@
+import { resolve } from 'path';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
   root: '.',
+  resolve: {
+    alias: {
+      '@ui': resolve(__dirname, '../../../ui/src_v1/ui'),
+    },
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true

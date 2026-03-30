@@ -20,11 +20,13 @@ type Runtime struct {
 	DialtoneEnv       string `json:"dialtone_env"`
 	GoCacheDir        string `json:"go_cache_dir"`
 	BunCacheDir       string `json:"bun_cache_dir"`
+	PixiCacheDir      string `json:"pixi_cache_dir"`
 	ToolCacheDir      string `json:"tool_cache_dir"`
 	ContainerCacheDir string `json:"container_cache_dir"`
 	WslBuildImage     string `json:"wsl_build_image"`
 	GoBin             string `json:"go_bin"`
 	BunBin            string `json:"bun_bin"`
+	PixiBin           string `json:"pixi_bin"`
 }
 
 type PluginPreset struct {
@@ -73,6 +75,23 @@ func PluginBinaryDir(rt Runtime, plugin, version string, elems ...string) string
 
 func PluginBinaryPath(rt Runtime, plugin, version, binary string) string {
 	return PluginBinaryDir(rt, plugin, version, strings.TrimSpace(binary))
+}
+
+func PluginCachePath(rt Runtime, plugin, version string, elems ...string) string {
+	env := strings.TrimSpace(rt.DialtoneEnv)
+	if env == "" {
+		env = DefaultDialtoneEnv()
+	}
+	parts := []string{env, "cache", "plugins", plugin}
+	if strings.TrimSpace(version) != "" {
+		parts = append(parts, version)
+	}
+	parts = append(parts, elems...)
+	return filepath.Join(parts...)
+}
+
+func PluginInstallStatePath(rt Runtime, plugin, version string) string {
+	return PluginCachePath(rt, plugin, version, "install-state.json")
 }
 
 func NewPluginPreset(rt Runtime, plugin, version string) PluginPreset {
@@ -131,22 +150,72 @@ func configRootFromEnvFile(envFile string) string {
 	return dir
 }
 
-func ResolveEnvFilePath(start string) string {
-	if envFile := explicitEnvFilePath(); envFile != "" {
-		return envFile
+func normalizePathValue(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
 	}
+	v = expandHome(v)
+	if abs, err := filepath.Abs(v); err == nil {
+		return abs
+	}
+	return v
+}
+
+func repoRootFromEnvFile(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if repoRoot := strings.TrimSpace(EnvFileString(path, "DIALTONE_REPO_ROOT")); repoRoot != "" {
+		return normalizePathValue(repoRoot)
+	}
+	if strings.EqualFold(filepath.Base(filepath.Dir(path)), "env") {
+		return normalizePathValue(configRootFromEnvFile(path))
+	}
+	return ""
+}
+
+func resolveRepoRootCandidate(start string) string {
 	if repoRoot := strings.TrimSpace(os.Getenv("DIALTONE_REPO_ROOT")); repoRoot != "" {
-		path := DefaultDialtoneJSONPath(expandHome(repoRoot))
-		if abs, err := filepath.Abs(path); err == nil {
-			return abs
-		}
-		return path
+		return normalizePathValue(repoRoot)
 	}
-	rt, err := ResolveRuntime(start)
+	if envFile := explicitEnvFilePath(); envFile != "" {
+		if repoRoot := repoRootFromEnvFile(envFile); repoRoot != "" {
+			return repoRoot
+		}
+	}
+	resolved, err := FindRepoRoot(start)
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(rt.EnvFile)
+	return normalizePathValue(resolved)
+}
+
+func resolveEnvFileCandidate(start string) string {
+	if envFile := explicitEnvFilePath(); envFile != "" {
+		return envFile
+	}
+	if repoRoot := resolveRepoRootCandidate(start); repoRoot != "" {
+		return normalizePathValue(DefaultDialtoneJSONPath(repoRoot))
+	}
+	return ""
+}
+
+func lookupEnvFileString(start, key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+	path := resolveEnvFileCandidate(start)
+	if path == "" {
+		return ""
+	}
+	return strings.TrimSpace(EnvFileString(path, key))
+}
+
+func ResolveEnvFilePath(start string) string {
+	return resolveEnvFileCandidate(start)
 }
 
 func ReadEnvFileMap(path string) (map[string]any, error) {
@@ -246,11 +315,7 @@ func LookupEnvString(key string) string {
 	if raw := strings.TrimSpace(os.Getenv(key)); raw != "" {
 		return raw
 	}
-	path := ResolveEnvFilePath("")
-	if path == "" {
-		return ""
-	}
-	return strings.TrimSpace(EnvFileString(path, key))
+	return lookupEnvFileString("", key)
 }
 
 func ResolveREPLNATSURL() string {
@@ -333,7 +398,16 @@ func DefaultDialtoneEnv() string {
 	if v := strings.TrimSpace(os.Getenv("DIALTONE_ENV")); v != "" {
 		return expandHome(v)
 	}
+	if v := lookupEnvFileString("", "DIALTONE_ENV"); v != "" {
+		return expandHome(v)
+	}
 	if home := strings.TrimSpace(os.Getenv("DIALTONE_HOME")); home != "" {
+		expanded := expandHome(home)
+		parent := filepath.Dir(expanded)
+		base := filepath.Base(expanded)
+		return filepath.Join(parent, base+"_env")
+	}
+	if home := lookupEnvFileString("", "DIALTONE_HOME"); home != "" {
 		expanded := expandHome(home)
 		parent := filepath.Dir(expanded)
 		base := filepath.Base(expanded)
@@ -350,6 +424,9 @@ func DefaultDialtoneHome() string {
 	if v := strings.TrimSpace(os.Getenv("DIALTONE_HOME")); v != "" {
 		return expandHome(v)
 	}
+	if v := lookupEnvFileString("", "DIALTONE_HOME"); v != "" {
+		return expandHome(v)
+	}
 	if configRoot := configRootFromEnvFile(explicitEnvFilePath()); configRoot != "" {
 		return filepath.Join(configRoot, ".dialtone")
 	}
@@ -361,6 +438,9 @@ func DefaultGoCacheDir() string {
 	if v := strings.TrimSpace(os.Getenv("DIALTONE_GO_CACHE_DIR")); v != "" {
 		return expandHome(v)
 	}
+	if v := lookupEnvFileString("", "DIALTONE_GO_CACHE_DIR"); v != "" {
+		return expandHome(v)
+	}
 	return filepath.Join(DefaultDialtoneEnv(), "cache", "go")
 }
 
@@ -368,11 +448,27 @@ func DefaultBunCacheDir() string {
 	if v := strings.TrimSpace(os.Getenv("DIALTONE_BUN_CACHE_DIR")); v != "" {
 		return expandHome(v)
 	}
+	if v := lookupEnvFileString("", "DIALTONE_BUN_CACHE_DIR"); v != "" {
+		return expandHome(v)
+	}
 	return filepath.Join(DefaultDialtoneEnv(), "cache", "bun")
+}
+
+func DefaultPixiCacheDir() string {
+	if v := strings.TrimSpace(os.Getenv("DIALTONE_PIXI_CACHE_DIR")); v != "" {
+		return expandHome(v)
+	}
+	if v := lookupEnvFileString("", "DIALTONE_PIXI_CACHE_DIR"); v != "" {
+		return expandHome(v)
+	}
+	return filepath.Join(DefaultDialtoneEnv(), "cache", "pixi")
 }
 
 func DefaultContainerCacheDir() string {
 	if v := strings.TrimSpace(os.Getenv("DIALTONE_CONTAINER_CACHE_DIR")); v != "" {
+		return expandHome(v)
+	}
+	if v := lookupEnvFileString("", "DIALTONE_CONTAINER_CACHE_DIR"); v != "" {
 		return expandHome(v)
 	}
 	return filepath.Join(DefaultDialtoneEnv(), "cache", "containers")
@@ -382,11 +478,17 @@ func DefaultToolCacheDir() string {
 	if v := strings.TrimSpace(os.Getenv("DIALTONE_TOOL_CACHE_DIR")); v != "" {
 		return expandHome(v)
 	}
+	if v := lookupEnvFileString("", "DIALTONE_TOOL_CACHE_DIR"); v != "" {
+		return expandHome(v)
+	}
 	return filepath.Join(DefaultDialtoneEnv(), "cache", "tools")
 }
 
 func DefaultWSLBuildImage() string {
 	if v := strings.TrimSpace(os.Getenv("DIALTONE_WSL_BUILD_IMAGE")); v != "" {
+		return v
+	}
+	if v := lookupEnvFileString("", "DIALTONE_WSL_BUILD_IMAGE"); v != "" {
 		return v
 	}
 	return "dialtone-builder-alpine:go1.25.5"
@@ -416,8 +518,28 @@ func ManagedBunBinPath(dialtoneEnv string) string {
 	return filepath.Join(env, "bun", "bin", name)
 }
 
+func ManagedPixiHomePath(dialtoneEnv string) string {
+	env := strings.TrimSpace(dialtoneEnv)
+	if env == "" {
+		env = DefaultDialtoneEnv()
+	}
+	return filepath.Join(env, "pixi")
+}
+
+func ManagedPixiBinPath(dialtoneEnv string) string {
+	home := ManagedPixiHomePath(dialtoneEnv)
+	name := "pixi"
+	if runtime.GOOS == "windows" {
+		name = "pixi.exe"
+	}
+	return filepath.Join(home, "bin", name)
+}
+
 func ResolveRuntime(start string) (Runtime, error) {
 	repoRoot := strings.TrimSpace(os.Getenv("DIALTONE_REPO_ROOT"))
+	if repoRoot == "" {
+		repoRoot = lookupEnvFileString(start, "DIALTONE_REPO_ROOT")
+	}
 	if repoRoot == "" {
 		resolved, err := FindRepoRoot(start)
 		if err != nil {
@@ -428,6 +550,9 @@ func ResolveRuntime(start string) (Runtime, error) {
 	repoRoot, _ = filepath.Abs(repoRoot)
 
 	srcRoot := strings.TrimSpace(os.Getenv("DIALTONE_SRC_ROOT"))
+	if srcRoot == "" {
+		srcRoot = lookupEnvFileString(start, "DIALTONE_SRC_ROOT")
+	}
 	if srcRoot == "" {
 		srcRoot = filepath.Join(repoRoot, "src")
 	}
@@ -449,13 +574,15 @@ func ResolveRuntime(start string) (Runtime, error) {
 	goCacheDir, _ = filepath.Abs(goCacheDir)
 	bunCacheDir := DefaultBunCacheDir()
 	bunCacheDir, _ = filepath.Abs(bunCacheDir)
+	pixiCacheDir := DefaultPixiCacheDir()
+	pixiCacheDir, _ = filepath.Abs(pixiCacheDir)
 	toolCacheDir := DefaultToolCacheDir()
 	toolCacheDir, _ = filepath.Abs(toolCacheDir)
 	containerCacheDir := DefaultContainerCacheDir()
 	containerCacheDir, _ = filepath.Abs(containerCacheDir)
 	wslBuildImage := DefaultWSLBuildImage()
 
-	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
+	goBin := strings.TrimSpace(LookupEnvString("DIALTONE_GO_BIN"))
 	if goBin == "" {
 		candidate := ManagedGoBinPath(dialtoneEnv)
 		if _, err := os.Stat(candidate); err == nil {
@@ -465,13 +592,23 @@ func ResolveRuntime(start string) (Runtime, error) {
 		}
 	}
 
-	bunBin := strings.TrimSpace(os.Getenv("DIALTONE_BUN_BIN"))
+	bunBin := strings.TrimSpace(LookupEnvString("DIALTONE_BUN_BIN"))
 	if bunBin == "" {
 		candidate := ManagedBunBinPath(dialtoneEnv)
 		if _, err := os.Stat(candidate); err == nil {
 			bunBin = candidate
 		} else if p, lookErr := exec.LookPath("bun"); lookErr == nil {
 			bunBin = p
+		}
+	}
+
+	pixiBin := strings.TrimSpace(LookupEnvString("DIALTONE_PIXI_BIN"))
+	if pixiBin == "" {
+		candidate := ManagedPixiBinPath(dialtoneEnv)
+		if _, err := os.Stat(candidate); err == nil {
+			pixiBin = candidate
+		} else if p, lookErr := exec.LookPath("pixi"); lookErr == nil {
+			pixiBin = p
 		}
 	}
 
@@ -483,11 +620,13 @@ func ResolveRuntime(start string) (Runtime, error) {
 		DialtoneEnv:       dialtoneEnv,
 		GoCacheDir:        goCacheDir,
 		BunCacheDir:       bunCacheDir,
+		PixiCacheDir:      pixiCacheDir,
 		ToolCacheDir:      toolCacheDir,
 		ContainerCacheDir: containerCacheDir,
 		WslBuildImage:     wslBuildImage,
 		GoBin:             goBin,
 		BunBin:            bunBin,
+		PixiBin:           pixiBin,
 	}, nil
 }
 
@@ -512,6 +651,9 @@ func ApplyRuntimeEnv(rt Runtime) error {
 	if strings.TrimSpace(rt.BunCacheDir) != "" {
 		_ = os.Setenv("DIALTONE_BUN_CACHE_DIR", rt.BunCacheDir)
 	}
+	if strings.TrimSpace(rt.PixiCacheDir) != "" {
+		_ = os.Setenv("DIALTONE_PIXI_CACHE_DIR", rt.PixiCacheDir)
+	}
 	if strings.TrimSpace(rt.ToolCacheDir) != "" {
 		_ = os.Setenv("DIALTONE_TOOL_CACHE_DIR", rt.ToolCacheDir)
 	}
@@ -527,6 +669,9 @@ func ApplyRuntimeEnv(rt Runtime) error {
 	if strings.TrimSpace(rt.BunBin) != "" {
 		_ = os.Setenv("DIALTONE_BUN_BIN", rt.BunBin)
 	}
+	if strings.TrimSpace(rt.PixiBin) != "" {
+		_ = os.Setenv("DIALTONE_PIXI_BIN", rt.PixiBin)
+	}
 
 	prepend := []string{}
 	if strings.TrimSpace(rt.GoBin) != "" {
@@ -534,6 +679,9 @@ func ApplyRuntimeEnv(rt Runtime) error {
 	}
 	if strings.TrimSpace(rt.BunBin) != "" {
 		prepend = append(prepend, filepath.Dir(rt.BunBin))
+	}
+	if strings.TrimSpace(rt.PixiBin) != "" {
+		prepend = append(prepend, filepath.Dir(rt.PixiBin))
 	}
 	prependPath(prepend...)
 	return nil

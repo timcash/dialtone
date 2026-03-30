@@ -3,7 +3,6 @@ package test
 import (
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -32,15 +31,6 @@ func RunPluginTests(opts TestOptions) error {
 		}
 	}
 
-	dialtoneEnv := os.Getenv("DIALTONE_ENV")
-	if dialtoneEnv == "" {
-		dialtoneEnv = configv1.DefaultDialtoneEnv()
-	}
-	goBin := strings.TrimSpace(os.Getenv("DIALTONE_GO_BIN"))
-	if goBin == "" {
-		goBin = filepath.Join(dialtoneEnv, "go", "bin", "go")
-	}
-
 	target := opts.TestPkg
 	if !strings.HasPrefix(target, "./") && !strings.Contains(target, ".") {
 		target = "./" + target
@@ -49,6 +39,20 @@ func RunPluginTests(opts TestOptions) error {
 	paths, err := ResolvePaths(opts.RepoRoot)
 	if err != nil {
 		return err
+	}
+	dialtoneEnv := strings.TrimSpace(configv1.LookupEnvString("DIALTONE_ENV"))
+	if dialtoneEnv == "" {
+		dialtoneEnv = configv1.DefaultDialtoneEnv()
+	}
+	goBin := strings.TrimSpace(paths.Runtime.GoBin)
+	if goBin == "" {
+		goBin = strings.TrimSpace(configv1.LookupEnvString("DIALTONE_GO_BIN"))
+	}
+	if goBin == "" {
+		goBin = configv1.ManagedGoBinPath(dialtoneEnv)
+	}
+	if strings.TrimSpace(goBin) == "" {
+		goBin = "go"
 	}
 	cmd := exec.Command(goBin, "run", target)
 	cmd.Dir = paths.Runtime.SrcRoot

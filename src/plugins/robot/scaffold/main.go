@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"crypto/sha256"
+	cloudflarev1 "dialtone/dev/plugins/cloudflare/src_v1/go"
 	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	ssh_plugin "dialtone/dev/plugins/ssh/src_v1/go"
 	"encoding/hex"
@@ -141,9 +142,9 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 		fs.SetOutput(io.Discard)
 		port := fs.Int("port", 3000, "Dev server port")
 		host := fs.String("host", "0.0.0.0", "Vite bind host")
-		browserNode := fs.String("browser-node", "", "Optional mesh node for headed browser session (example: chroma)")
+		browserNode := fs.String("browser-node", "", "Optional mesh node for headed browser session (example: legion; use none/off/local to disable)")
 		publicURL := fs.String("public-url", "", "Public URL that remote browser should open")
-		backendURL := fs.String("backend-url", strings.TrimSpace(os.Getenv("ROBOT_DEV_BACKEND_URL")), "Backend base URL for Vite proxy routes (/api, /stream, /natsws, /ws)")
+		backendURL := fs.String("backend-url", "", "Backend base URL for Vite proxy routes (/api, /stream, /natsws, /ws)")
 		live := fs.Bool("live", false, "Automatically proxy backend to the live robot node configured in env/dialtone.json")
 		if err := fs.Parse(args); err != nil {
 			return err
@@ -158,10 +159,7 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 			}
 		}
 
-		node := strings.TrimSpace(*browserNode)
-		if node == "" {
-			node = defaultRobotDevBrowserNode()
-		}
+		node := resolveRobotDevBrowserNode(strings.TrimSpace(*browserNode), defaultRobotDevBrowserNode())
 		devURL := strings.TrimSpace(*publicURL)
 		if node != "" && devURL == "" {
 			u, err := inferRobotDevPublicURL(*port)
@@ -194,8 +192,8 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 			DevHost:           strings.TrimSpace(*host),
 			DevPublicURL:      devURL,
 			Role:              "robot-dev",
+			DisableBrowser:    node == "",
 			BrowserMetaPath:   filepath.Join(pluginDir, "dev.browser.json"),
-			BrowserModeEnvVar: "ROBOT_DEV_BROWSER_MODE",
 			NATSURL:           "nats://127.0.0.1:4222",
 			NATSSubject:       "logs.dev.robot." + strings.ReplaceAll(version, "_", "-"),
 		}
@@ -250,24 +248,20 @@ func runGeneric(version, command, repoRoot string, args []string) error {
 }
 
 func defaultRobotDevBrowserNode() string {
-	if envNode := strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_NODE")); envNode != "" {
-		return envNode
-	}
-	if robotIsWSL() {
-		return "legion"
-	}
-	return ""
+	return test_plugin.ResolveDefaultAttachNode(configv1.LookupEnvString("DIALTONE_TEST_BROWSER_NODE"))
 }
 
-func robotIsWSL() bool {
-	if strings.TrimSpace(os.Getenv("WSL_DISTRO_NAME")) != "" {
-		return true
+func resolveRobotDevBrowserNode(requested, fallback string) string {
+	requested = strings.TrimSpace(requested)
+	if requested == "" || strings.EqualFold(requested, "default") {
+		return strings.TrimSpace(fallback)
 	}
-	data, err := os.ReadFile("/proc/version")
-	if err != nil {
-		return false
+	if resolved, disabled := test_plugin.ResolveConfiguredAttachNode(requested); disabled {
+		return ""
+	} else if resolved != "" {
+		return resolved
 	}
-	return strings.Contains(strings.ToLower(string(data)), "microsoft")
+	return strings.TrimSpace(fallback)
 }
 
 func inferRobotDevPublicURL(port int) (string, error) {
@@ -397,10 +391,10 @@ func runSrcV2Relay(repoRoot string, args []string) error {
 		relayName = strings.TrimSpace(*name)
 	}
 	if relayName == "" {
-		relayName = strings.TrimSpace(os.Getenv("DIALTONE_DOMAIN"))
+		relayName = strings.TrimSpace(configv1.LookupEnvString("DIALTONE_DOMAIN"))
 	}
 	if relayName == "" {
-		relayName = strings.TrimSpace(os.Getenv("DIALTONE_HOSTNAME"))
+		relayName = strings.TrimSpace(configv1.LookupEnvString("DIALTONE_HOSTNAME"))
 	}
 	if relayName == "" {
 		relayName = "rover-1"
@@ -436,7 +430,7 @@ func runSrcV2Relay(repoRoot string, args []string) error {
 func configureCloudflareProxyTarget(repoRoot, name, targetURL string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		name = chooseNonEmpty(strings.TrimSpace(os.Getenv("DIALTONE_DOMAIN")), strings.TrimSpace(os.Getenv("DIALTONE_HOSTNAME")), "rover-1")
+		name = chooseNonEmpty(strings.TrimSpace(configv1.LookupEnvString("DIALTONE_DOMAIN")), strings.TrimSpace(configv1.LookupEnvString("DIALTONE_HOSTNAME")), "rover-1")
 	}
 	token := resolveCloudflareTunnelToken(name)
 	if token == "" {
@@ -487,11 +481,7 @@ WantedBy=default.target
 }
 
 func resolveCloudflareTunnelToken(name string) string {
-	key := "CF_TUNNEL_TOKEN_" + strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(name), "-", "_"))
-	if token := strings.TrimSpace(os.Getenv(key)); token != "" {
-		return token
-	}
-	return strings.TrimSpace(os.Getenv("CF_TUNNEL_TOKEN"))
+	return cloudflarev1.ResolveTunnelToken(strings.TrimSpace(name), "")
 }
 
 func resolveCloudflaredPath(repoRoot string) string {
@@ -1536,7 +1526,7 @@ func runSrcV2Diagnostic(repoRoot string, args []string) error {
 	remoteRepo := fs.String("remote-repo", "", "Remote repo root (default: <remote-home>/dialtone)")
 	manifest := fs.String("manifest", "src/plugins/robot/src_v2/config/composition.manifest.json", "Remote manifest path (absolute or repo-relative)")
 	uiURL := fs.String("ui-url", "", "Robot UI URL for public checks + browser checks (default: https://<robot-hostname>.dialtone.earth)")
-	browserNode := fs.String("browser-node", defaultRobotDevBrowserNode(), "Mesh node for remote browser (for example legion, chroma)")
+	browserNode := fs.String("browser-node", defaultRobotDevBrowserNode(), "Mesh node for remote browser (for example legion; use none/off/local to disable)")
 	skipUI := fs.Bool("skip-ui", false, "Skip chromedp UI menu checks")
 	publicCheck := fs.Bool("public-check", true, "Verify public UI endpoint is reachable")
 	if err := fs.Parse(args); err != nil {

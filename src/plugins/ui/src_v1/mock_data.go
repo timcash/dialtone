@@ -1,4 +1,4 @@
-package cli
+package uiv1
 
 import (
 	"encoding/json"
@@ -11,40 +11,33 @@ import (
 	"sync"
 	"time"
 
+	logs "dialtone/dev/plugins/logs/src_v1/go"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 )
 
-// RunMockData starts a standalone mock server for the UI
-func RunMockData(args []string) {
+// RunMockData starts a standalone mock server for the UI.
+func RunMockData(_ []string) {
 	natsPort := 4222
 	wsPort := 4223
-	streamPort := 8080 // Mock Camera Stream Port
-	fmt.Printf("Starting Mock Data Server with Embedded NATS...\n")
-	fmt.Printf(" - NATS: :%d\n", natsPort)
-	fmt.Printf(" - WS:   :%d\n", wsPort)
-	fmt.Printf(" - Stream: :%d/stream\n", streamPort)
+	streamPort := 8080
+	logs.Info("Starting mock data server with embedded NATS")
+	logs.Info("mock data server: nats=:%d ws=:%d stream=:%d/stream", natsPort, wsPort, streamPort)
 
-	// 1. Start Embedded NATS Server
 	ns := startMockNATSServer(natsPort, wsPort)
 	defer ns.Shutdown()
 
-	// 2. Start Publisher (Simulates Telemetry)
 	go runMockPublisher(natsPort)
 
-	// 3. Mock MJPEG Stream Server
 	go func() {
 		streamMux := http.NewServeMux()
 		streamMux.HandleFunc("/stream", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary=frame")
-
-			// Generate fake frames
 			for {
 				select {
 				case <-r.Context().Done():
 					return
 				default:
-					// Simple moving gradient
 					img := image.NewRGBA(image.Rect(0, 0, 640, 480))
 					offset := int(time.Now().UnixMilli()/10) % 255
 					for y := 0; y < 480; y++ {
@@ -61,19 +54,17 @@ func RunMockData(args []string) {
 					fmt.Fprintf(w, "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n", buf.Len())
 					w.Write(buf.Bytes())
 					w.Write([]byte("\r\n"))
-
-					time.Sleep(100 * time.Millisecond) // 10 FPS
+					time.Sleep(100 * time.Millisecond)
 				}
 			}
 		})
 
-		fmt.Printf("Mock Camera Stream listening on :%d/stream\n", streamPort)
+		logs.Info("mock camera stream listening on :%d/stream", streamPort)
 		if err := http.ListenAndServe(fmt.Sprintf(":%d", streamPort), streamMux); err != nil {
-			fmt.Printf("Stream Server failed: %v\n", err)
+			logs.Error("stream server failed: %v", err)
 		}
 	}()
 
-	// Block forever
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	wg.Wait()
@@ -84,7 +75,7 @@ func startMockNATSServer(port, wsPort int) *server.Server {
 		Host: "0.0.0.0",
 		Port: port,
 		Websocket: server.WebsocketOpts{
-			Host:           "0.0.0.0", // Bind to all interfaces for testing
+			Host:           "0.0.0.0",
 			Port:           wsPort,
 			NoTLS:          true,
 			AllowedOrigins: []string{"*"},
@@ -93,29 +84,28 @@ func startMockNATSServer(port, wsPort int) *server.Server {
 
 	ns, err := server.NewServer(opts)
 	if err != nil {
-		fmt.Printf("Failed to create NATS server: %v\n", err)
+		logs.Error("failed to create NATS server: %v", err)
 		return nil
 	}
 
 	go ns.Start()
 
 	if !ns.ReadyForConnections(10 * time.Second) {
-		fmt.Printf("NATS server failed to start\n")
+		logs.Error("NATS server failed to start")
 		return nil
 	}
 	return ns
 }
 
 func runMockPublisher(natsPort int) {
-	// Connect to local NATS
 	nc, err := nats.Connect(fmt.Sprintf("nats://127.0.0.1:%d", natsPort))
 	if err != nil {
-		fmt.Printf("Publisher failed to connect to NATS: %v\n", err)
+		logs.Error("publisher failed to connect to NATS: %v", err)
 		return
 	}
 	defer nc.Close()
 
-	fmt.Println("Mock Publisher Connected. Sending telemetry...")
+	logs.Info("mock publisher connected and streaming telemetry")
 
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -124,10 +114,9 @@ func runMockPublisher(natsPort int) {
 	for range ticker.C {
 		t := time.Since(start).Seconds()
 
-		// Heartbeat
 		heartbeat := map[string]interface{}{
 			"type":          "HEARTBEAT",
-			"mav_type":      10, // MAV_TYPE_GROUND_ROVER
+			"mav_type":      10,
 			"base_mode":     209,
 			"custom_mode":   5,
 			"system_status": 4,
@@ -135,7 +124,6 @@ func runMockPublisher(natsPort int) {
 		}
 		publishJSON(nc, "mavlink.heartbeat", heartbeat)
 
-		// HUD
 		hud := map[string]interface{}{
 			"airspeed": 5.0 + math.Sin(t),
 			"alt":      10.0 + math.Cos(t),
@@ -143,7 +131,6 @@ func runMockPublisher(natsPort int) {
 		}
 		publishJSON(nc, "mavlink.vfr_hud", hud)
 
-		// Attitude
 		att := map[string]interface{}{
 			"roll":  math.Sin(t) * 0.5,
 			"pitch": math.Cos(t*0.5) * 0.3,
@@ -151,19 +138,16 @@ func runMockPublisher(natsPort int) {
 		}
 		publishJSON(nc, "mavlink.attitude", att)
 
-		// Battery
 		sysStatus := map[string]interface{}{
-			"voltage_battery": 12000 + math.Sin(t)*500, // mV
+			"voltage_battery": 12000 + math.Sin(t)*500,
 		}
 		publishJSON(nc, "mavlink.sys_status", sysStatus)
 
-		// GPS
 		gps := map[string]interface{}{
 			"satellites_visible": 8 + int(math.Sin(t)*2),
 		}
 		publishJSON(nc, "mavlink.gps_raw_int", gps)
 
-		// Global Position
 		gpos := map[string]interface{}{
 			"lat":          37.7749 + math.Sin(t)*0.001,
 			"lon":          -122.4194 + math.Cos(t)*0.001,
@@ -192,6 +176,7 @@ func (m *multiWriter) Write(p []byte) (n int, err error) {
 func (m *multiWriter) Len() int {
 	return len(m.data)
 }
+
 func (m *multiWriter) Bytes() []byte {
 	return m.data
 }

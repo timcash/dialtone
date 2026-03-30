@@ -20,11 +20,13 @@ import configv1 "dialtone/dev/plugins/config/src_v1/go"
 ```
 
 Main helpers:
-- `ResolveRuntime(start)` resolves repo root, src root, config file (`env/dialtone.json`), and managed Go/Bun paths.
+- `ResolveRuntime(start)` resolves repo root, src root, config file (`env/dialtone.json`), and managed Go/Bun/Pixi paths.
 - `LoadEnvFile(rt)` loads `env/dialtone.json` when present.
 - `ApplyRuntimeEnv(rt)` exports `DIALTONE_*` vars and updates `PATH`.
 - `NewPluginPreset(rt, plugin, version)` returns typed paths rooted at `PluginVersionRoot` (`src/plugins/<plugin>/<src_vN>`).
 - `RepoPath(rt, ...)`, `SrcPath(rt, ...)`, `PluginPath(rt, plugin, version, ...)` remain available for generic cwd-independent paths.
+- Managed tool helpers include `ManagedGoBinPath(...)`, `ManagedBunBinPath(...)`, `ManagedPixiBinPath(...)`, and `ManagedPixiHomePath(...)`.
+- Shared cache helpers include `PluginCachePath(...)` and `PluginInstallStatePath(...)` for receipts like `.dialtone_env/cache/plugins/<plugin>/<src_vN>/install-state.json`.
 
 ## LLM Usage Guide
 

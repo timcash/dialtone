@@ -88,7 +88,7 @@ func runSrcV1(command string, args []string) error {
 		}
 		return cloudflare_ops.UIRun(port)
 	case "test":
-		return cloudflare_ops.Test("src_v1")
+		return cloudflare_ops.Test("src_v1", args)
 	case "serve":
 		// src_v1 serve without args runs plugin HTTP UI.
 		if len(args) == 0 {
@@ -116,7 +116,7 @@ func printUsage() {
 	logs.Raw("  build        Build UI assets")
 	logs.Raw("  dev          Run UI in development mode")
 	logs.Raw("  ui-run       Run UI dev server")
-	logs.Raw("  test         Run automated tests")
+	logs.Raw("  test         Run automated tests (supports --filter <expr>)")
 	logs.Raw("  serve        Run cloudflare UI server (no args) or tunnel serve (with args)")
 	logs.Raw("  login        Authenticate with Cloudflare")
 	logs.Raw("  tunnel       Manage Cloudflare tunnels (create/list/status/run/start/route/cleanup/stop)")

@@ -27,12 +27,9 @@ func main() {
 	}
 
 	fs := flag.NewFlagSet("robot-src-v2-test", flag.ExitOnError)
-	defaultAttachNode := strings.TrimSpace(os.Getenv("DIALTONE_TEST_BROWSER_NODE"))
-	if defaultAttachNode == "" && robotIsWSL() {
-		defaultAttachNode = "legion"
-	}
+	browserBaseURL := fs.String("browser-base-url", "", "Override the base URL used by attached browsers for the local mock UI server")
 	commonBindings := testv1.BindCommonTestFlags(fs, testv1.CommonTestCLIOptions{
-		AttachNode:       defaultAttachNode,
+		DefaultAttachNode: strings.TrimSpace(configv1.LookupEnvString("DIALTONE_TEST_BROWSER_NODE")),
 		AttachRole:       "robot-test",
 		ActionsPerMinute: 300,
 	})
@@ -48,6 +45,10 @@ func main() {
 		logs.Error("robot src_v2 parse failed: %v", err)
 		os.Exit(1)
 	}
+	testv1.ApplyDefaultBrowserAttach(&commonOpts, "robot-test")
+	localuimocke2e.SetOptions(localuimocke2e.Options{
+		BrowserBaseURL: strings.TrimSpace(*browserBaseURL),
+	})
 	commonOpts.ApplyRuntimeConfig()
 	if host := strings.TrimSpace(commonOpts.AttachNode); host != "" {
 		role := strings.TrimSpace(commonOpts.AttachRole)
@@ -96,17 +97,6 @@ func cleanupRobotTestServers() {
 		cmd := exec.Command("pkill", "-f", pattern)
 		_ = cmd.Run()
 	}
-}
-
-func robotIsWSL() bool {
-	if strings.TrimSpace(os.Getenv("WSL_DISTRO_NAME")) != "" {
-		return true
-	}
-	raw, err := os.ReadFile("/proc/version")
-	if err != nil {
-		return false
-	}
-	return strings.Contains(strings.ToLower(string(raw)), "microsoft")
 }
 
 func filterSteps(steps []testv1.Step, filterExpr string) []testv1.Step {

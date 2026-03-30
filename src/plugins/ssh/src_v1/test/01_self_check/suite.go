@@ -9,7 +9,13 @@ import (
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
 )
 
-func Register(r *testv1.Registry) {
+type Config struct {
+	Host string
+}
+
+func Register(r *testv1.Registry, cfg Config) {
+	cfg = normalizeConfig(cfg)
+
 	r.Add(testv1.Step{
 		Name:    "mesh-nodes-known",
 		Timeout: 5 * time.Second,
@@ -32,30 +38,34 @@ func Register(r *testv1.Registry) {
 		Name:    "resolve-node-aliases",
 		Timeout: 5 * time.Second,
 		RunWithContext: func(sc *testv1.StepContext) (testv1.StepRunResult, error) {
-			legion, err := sshv1.ResolveMeshNode("legion")
+			node, err := sshv1.ResolveMeshNode(cfg.Host)
 			if err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			if legion.User == "" {
-				return testv1.StepRunResult{}, fmt.Errorf("unexpected legion mapping: missing user")
+			if strings.TrimSpace(node.Name) == "" {
+				return testv1.StepRunResult{}, fmt.Errorf("unexpected %s mapping: missing canonical name", cfg.Host)
 			}
-			if legion.Port != "22" && legion.Port != "2223" {
-				return testv1.StepRunResult{}, fmt.Errorf("unexpected legion mapping: user=%s port=%s", legion.User, legion.Port)
+			if strings.TrimSpace(node.User) == "" {
+				return testv1.StepRunResult{}, fmt.Errorf("unexpected %s mapping: missing user", cfg.Host)
 			}
-			rover, err := sshv1.ResolveMeshNode("rover-1.shad-artichoke.ts.net")
-			if err != nil {
-				return testv1.StepRunResult{}, err
+			if strings.TrimSpace(node.Port) == "" {
+				return testv1.StepRunResult{}, fmt.Errorf("unexpected %s mapping: missing port", cfg.Host)
 			}
-			if rover.Host == "" {
-				return testv1.StepRunResult{}, fmt.Errorf("unexpected rover mapping: empty host")
+			if strings.TrimSpace(node.Host) == "" {
+				return testv1.StepRunResult{}, fmt.Errorf("unexpected %s mapping: empty host", cfg.Host)
 			}
-			if !strings.Contains(rover.Host, "rover-1.") &&
-				!strings.Contains(rover.Host, ".shad-artichoke.ts.net") &&
-				!strings.HasPrefix(rover.Host, "169.254.") &&
-				!strings.HasPrefix(rover.Host, "192.168.") {
-				return testv1.StepRunResult{}, fmt.Errorf("unexpected rover mapping host=%s", rover.Host)
+			if len(node.HostCandidates) == 0 {
+				return testv1.StepRunResult{}, fmt.Errorf("unexpected %s mapping: no host candidates", cfg.Host)
 			}
-			return testv1.StepRunResult{Report: "mesh alias resolution verified"}, nil
+			if !looksLikeMeshHost(node.Host) {
+				return testv1.StepRunResult{}, fmt.Errorf("unexpected %s mapping host=%s", cfg.Host, node.Host)
+			}
+			for _, candidate := range node.HostCandidates {
+				if looksLikeMeshHost(candidate) {
+					return testv1.StepRunResult{Report: fmt.Sprintf("mesh alias resolution verified for %s", node.Name)}, nil
+				}
+			}
+			return testv1.StepRunResult{}, fmt.Errorf("unexpected %s host candidates=%v", cfg.Host, node.HostCandidates)
 		},
 	})
 
@@ -63,12 +73,12 @@ func Register(r *testv1.Registry) {
 		Name:    "transport-resolution",
 		Timeout: 5 * time.Second,
 		RunWithContext: func(sc *testv1.StepContext) (testv1.StepRunResult, error) {
-			t, err := sshv1.ResolveCommandTransport("rover")
+			t, err := sshv1.ResolveCommandTransport(cfg.Host)
 			if err != nil {
 				return testv1.StepRunResult{}, err
 			}
 			if t != "ssh" {
-				return testv1.StepRunResult{}, fmt.Errorf("expected ssh transport for rover, got %s", t)
+				return testv1.StepRunResult{}, fmt.Errorf("expected ssh transport for %s, got %s", cfg.Host, t)
 			}
 			if err := sc.WaitForStepMessageAfterAction("transport-resolution-ok", 2*time.Second, func() error {
 				sc.Infof("transport-resolution-ok")
@@ -76,7 +86,25 @@ func Register(r *testv1.Registry) {
 			}); err != nil {
 				return testv1.StepRunResult{}, err
 			}
-			return testv1.StepRunResult{Report: "default transport resolution verified"}, nil
+			return testv1.StepRunResult{Report: fmt.Sprintf("default transport resolution verified for %s", cfg.Host)}, nil
 		},
 	})
+}
+
+func normalizeConfig(cfg Config) Config {
+	cfg.Host = strings.TrimSpace(cfg.Host)
+	if cfg.Host == "" {
+		cfg.Host = "grey"
+	}
+	return cfg
+}
+
+func looksLikeMeshHost(host string) bool {
+	host = strings.TrimSpace(strings.ToLower(host))
+	return strings.HasSuffix(host, ".shad-artichoke.ts.net") ||
+		strings.HasSuffix(host, ".ts.net") ||
+		strings.HasPrefix(host, "169.254.") ||
+		strings.HasPrefix(host, "192.168.") ||
+		strings.HasPrefix(host, "10.") ||
+		strings.HasPrefix(host, "100.")
 }

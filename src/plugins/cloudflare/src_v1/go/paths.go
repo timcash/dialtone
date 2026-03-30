@@ -33,7 +33,7 @@ func ResolvePaths(start, version string) (Paths, error) {
 		Runtime:           rt,
 		Preset:            preset,
 		PluginVersionRoot: preset.PluginVersionRoot,
-		TestMain:          filepath.Join(preset.Test, "main.go"),
+		TestMain:          filepath.Join(preset.Test, "cmd", "main.go"),
 		TestReport:        filepath.Join(preset.Test, "TEST.md"),
 		TestLog:           filepath.Join(preset.Test, "test.log"),
 		TestErrorLog:      filepath.Join(preset.Test, "error.log"),

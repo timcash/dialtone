@@ -201,10 +201,14 @@ func commandRequestTimeout(req commandRequest) time.Duration {
 		return 20 * time.Second
 	}
 	timeout := time.Duration(req.TimeoutMS) * time.Millisecond
-	if timeout < 5*time.Second {
-		timeout = 5 * time.Second
+	if timeout < time.Second {
+		timeout = time.Second
 	}
-	return timeout + 5*time.Second
+	buffer := 400 * time.Millisecond
+	if timeout > 5*time.Second {
+		buffer = time.Second
+	}
+	return timeout + buffer
 }
 
 func sendCommandByTarget(host string, req commandRequest, autoStart bool) (*commandResponse, error) {

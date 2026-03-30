@@ -2,9 +2,6 @@ package test
 
 import (
 	"fmt"
-	"net/url"
-	"os"
-	"os/exec"
 	"strings"
 
 	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
@@ -29,32 +26,10 @@ func BrowserOptionsFor(defaultURL string) (testv1.BrowserOptions, bool, error) {
 		PreserveTabAndSize:  true,
 	}
 	if !attach {
-		// WSL local -> Windows local Chrome attach is unreliable in NAT mode.
-		// Default to remote mesh browser unless explicitly opted out.
-		if isWSL() && strings.TrimSpace(os.Getenv("DIALTONE_UI_TEST_FORCE_LOCAL")) == "" {
-			defaultNode := strings.TrimSpace(os.Getenv("DIALTONE_UI_TEST_ATTACH_DEFAULT"))
-			if defaultNode == "" {
-				defaultNode = "legion"
-			}
-			if defaultNode != "" {
-				rewritten := strings.TrimSpace(b.URL)
-				if rewritten != "" {
-					if r, err := rewriteLocalURLToWSLHost(rewritten); err == nil && strings.TrimSpace(r) != "" {
-						rewritten = r
-					}
-				}
-				b.Headless = true
-				b.GPU = true
-				b.ReuseExisting = true
-				b.RemoteNode = defaultNode
-				b.URL = rewritten
-				return b, true, nil
-			}
-		}
 		// Local test runs from WSL often launch Windows Chrome under the hood.
 		// Rewrite localhost URLs to the mesh host so the browser can reach the served fixture.
-		if isWSL() && strings.TrimSpace(b.URL) != "" {
-			rewritten, err := rewriteLocalURLToWSLGuestIP(b.URL)
+		if testv1.IsWSLRuntime() && strings.TrimSpace(b.URL) != "" {
+			rewritten, err := testv1.RewriteLocalURLToWSLGuestIP(b.URL)
 			if err != nil {
 				return b, false, err
 			}
@@ -85,7 +60,7 @@ func BrowserOptionsFor(defaultURL string) (testv1.BrowserOptions, bool, error) {
 		// local URL so the headed Chrome session opens the dev server reliably.
 		return b, true, nil
 	}
-	rewritten, err := rewriteLocalURLToWSLHost(b.URL)
+	rewritten, err := testv1.RewriteLocalURLToWSLHost(b.URL)
 	if err != nil {
 		return b, true, err
 	}
@@ -93,14 +68,6 @@ func BrowserOptionsFor(defaultURL string) (testv1.BrowserOptions, bool, error) {
 		b.URL = rewritten
 	}
 	return b, true, nil
-}
-
-func isWSL() bool {
-	raw, err := os.ReadFile("/proc/version")
-	if err != nil {
-		return false
-	}
-	return strings.Contains(strings.ToLower(string(raw)), "microsoft")
 }
 
 func inferWSLURL(port int) (string, error) {
@@ -113,71 +80,4 @@ func inferWSLURL(port int) (string, error) {
 		return "", fmt.Errorf("wsl mesh host empty")
 	}
 	return fmt.Sprintf("http://%s:%d", host, port), nil
-}
-
-func rewriteLocalURLToWSLHost(raw string) (string, error) {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return "", err
-	}
-	if u == nil {
-		return "", nil
-	}
-	host := strings.TrimSpace(u.Hostname())
-	if host != "127.0.0.1" && host != "localhost" {
-		return "", nil
-	}
-	wsl, err := sshv1.ResolveMeshNode("wsl")
-	if err != nil {
-		return "", err
-	}
-	meshHost := strings.TrimSpace(wsl.Host)
-	if meshHost == "" {
-		return "", fmt.Errorf("wsl mesh host empty")
-	}
-	if p := u.Port(); p != "" {
-		u.Host = fmt.Sprintf("%s:%s", meshHost, p)
-	} else {
-		u.Host = meshHost
-	}
-	return u.String(), nil
-}
-
-func rewriteLocalURLToWSLGuestIP(raw string) (string, error) {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return "", err
-	}
-	if u == nil {
-		return "", nil
-	}
-	host := strings.TrimSpace(u.Hostname())
-	if host != "127.0.0.1" && host != "localhost" {
-		return "", nil
-	}
-	ip := detectWSLGuestIP()
-	if ip == "" {
-		return rewriteLocalURLToWSLHost(raw)
-	}
-	if p := u.Port(); p != "" {
-		u.Host = fmt.Sprintf("%s:%s", ip, p)
-	} else {
-		u.Host = ip
-	}
-	return u.String(), nil
-}
-
-func detectWSLGuestIP() string {
-	out, err := exec.Command("hostname", "-I").Output()
-	if err != nil {
-		return ""
-	}
-	for _, field := range strings.Fields(strings.TrimSpace(string(out))) {
-		ip := strings.TrimSpace(field)
-		if ip == "" || ip == "127.0.0.1" || strings.HasPrefix(ip, "100.") {
-			continue
-		}
-		return ip
-	}
-	return ""
 }

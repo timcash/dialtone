@@ -3,8 +3,8 @@ package test
 import "strings"
 
 type Options struct {
-	AttachNode       string
-	TargetURL        string
+	AttachNode        string
+	TargetURL         string
 	ActionsPerMinute float64
 	ClicksPerSecond  float64
 }
