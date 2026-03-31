@@ -1,10 +1,6 @@
 package main
 
-import (
-	"time"
-
-	test_v2 "dialtone/dev/plugins/test/src_v1/go"
-)
+import "time"
 
 func Run13TableSectionValidation() error {
 	session, err := ensureSharedBrowser(false)
@@ -15,10 +11,10 @@ func Run13TableSectionValidation() error {
 	if err := navigateToSection(session, "status"); err != nil {
 		return err
 	}
-	if err := session.Run(test_v2.WaitForAriaLabel("Tunnel Table")); err != nil {
+	if err := session.WaitForAriaLabel("Tunnel Table", 5*time.Second); err != nil {
 		return err
 	}
-	if err := session.Run(test_v2.WaitForAriaLabelAttrEquals("Tunnel Table", "data-ready", "true", 3*time.Second)); err != nil {
+	if err := session.WaitForAriaLabelAttrEquals("Tunnel Table", "data-ready", "true", 3*time.Second); err != nil {
 		return err
 	}
 

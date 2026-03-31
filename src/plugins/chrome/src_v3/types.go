@@ -58,6 +58,8 @@ type CommandRequest struct {
 	TimeoutMS        int     `json:"timeout_ms,omitempty"`
 	Script           string  `json:"script,omitempty"`
 	ActionsPerSecond float64 `json:"actions_per_second,omitempty"`
+	Width            int     `json:"width,omitempty"`
+	Height           int     `json:"height,omitempty"`
 }
 
 type PageInfo struct {
@@ -88,6 +90,7 @@ type CommandResponse struct {
 	Value          string     `json:"value,omitempty"`
 	ScreenshotB64  string     `json:"screenshot_b64,omitempty"`
 	ScreenshotPath string     `json:"screenshot_path,omitempty"`
+	IsNew          bool       `json:"is_new,omitempty"`
 }
 
 type Session struct {

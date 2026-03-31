@@ -409,6 +409,7 @@ func startRemoteService(node sshv1.MeshNode, role string) error {
 	} else {
 		commandArgs = append(commandArgs, "--nats-port", fmt.Sprintf("%d", roleNATSPort(role)))
 	}
+	forceHeadless := roleForcesHeadless(role)
 	if strings.EqualFold(node.OS, "windows") {
 		remoteDir := remotePathDir(remoteBin, true)
 		workDir := windowsPath(remoteDir)
@@ -418,8 +419,12 @@ func startRemoteService(node sshv1.MeshNode, role string) error {
 		envFile := remoteEnvFilePath(node)
 		args := commandArgs[1:]
 		psArgs := strings.Join(quotePSArgs(args), ", ")
-		cmd := fmt.Sprintf(`$bin=%s; $workDir=%s; $serviceDir=%s; $stdout=%s; $stderr=%s; $repoRoot=%s; $envFile=%s; New-Item -ItemType Directory -Path $workDir,$serviceDir -Force | Out-Null; Remove-Item -LiteralPath $stdout,$stderr -Force -ErrorAction SilentlyContinue; Unblock-File -LiteralPath $bin -ErrorAction SilentlyContinue; if($repoRoot){$env:DIALTONE_REPO_ROOT=$repoRoot}; if($envFile){$env:DIALTONE_ENV_FILE=$envFile}; $env:DIALTONE_CHROME_SELF_LOG='1'; $proc = Start-Process -FilePath $bin -ArgumentList @(%s) -WorkingDirectory $workDir -WindowStyle Hidden -PassThru; Write-Output ('STARTED pid=' + $proc.Id)`,
-			psQuote(remoteBin), psQuote(workDir), psQuote(serviceDir), psQuote(stdoutPath), psQuote(stderrPath), psQuote(repoRoot), psQuote(envFile), psArgs)
+		headlessEnv := ""
+		if forceHeadless {
+			headlessEnv = "$env:DIALTONE_CHROME_SRC_V3_HEADLESS='1'; "
+		}
+		cmd := fmt.Sprintf(`$bin=%s; $workDir=%s; $serviceDir=%s; $stdout=%s; $stderr=%s; $repoRoot=%s; $envFile=%s; New-Item -ItemType Directory -Path $workDir,$serviceDir -Force | Out-Null; Remove-Item -LiteralPath $stdout,$stderr -Force -ErrorAction SilentlyContinue; Unblock-File -LiteralPath $bin -ErrorAction SilentlyContinue; if($repoRoot){$env:DIALTONE_REPO_ROOT=$repoRoot}; if($envFile){$env:DIALTONE_ENV_FILE=$envFile}; %s$env:DIALTONE_CHROME_SELF_LOG='1'; $proc = Start-Process -FilePath $bin -ArgumentList @(%s) -WorkingDirectory $workDir -WindowStyle Hidden -PassThru; Write-Output ('STARTED pid=' + $proc.Id)`,
+			psQuote(remoteBin), psQuote(workDir), psQuote(serviceDir), psQuote(stdoutPath), psQuote(stderrPath), psQuote(repoRoot), psQuote(envFile), headlessEnv, psArgs)
 		logs.Info("chrome src_v3 windows launcher command: %s", cmd)
 		if out, err := sshv1.RunNodeCommand(node.Name, cmd, sshv1.CommandOptions{}); err != nil {
 			return err
@@ -429,8 +434,13 @@ func startRemoteService(node sshv1.MeshNode, role string) error {
 	} else {
 		args := fmt.Sprintf("src_v3 daemon --role %s --chrome-port %d --host-id %s", shellQuote(role), roleChromePort(role), shellQuote(node.Name))
 		args += fmt.Sprintf(" --nats-port %d", roleNATSPort(role))
-		cmd := fmt.Sprintf("mkdir -p %s && nohup %s %s >> %s 2>> %s < /dev/null &",
+		envPrefix := ""
+		if forceHeadless {
+			envPrefix = "DIALTONE_CHROME_SRC_V3_HEADLESS=1 "
+		}
+		cmd := fmt.Sprintf("mkdir -p %s && nohup %s%s %s >> %s 2>> %s < /dev/null &",
 			shellQuote(filepath.Dir(remoteBin)),
+			envPrefix,
 			shellQuote(remoteBin),
 			args,
 			shellQuote(filepath.Join(filepath.Dir(remoteBin), serviceName+".out.log")),

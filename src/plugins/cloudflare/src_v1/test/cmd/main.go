@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	cloudflarev1 "dialtone/dev/plugins/cloudflare/src_v1/go"
+	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 )
 
@@ -20,6 +21,14 @@ func main() {
 	paths, err := cloudflarev1.ResolvePaths(start, "src_v1")
 	if err != nil {
 		logs.Error("cloudflare src_v1 test init failed: %v", err)
+		os.Exit(1)
+	}
+	if err := configv1.ApplyRuntimeEnv(paths.Runtime); err != nil {
+		logs.Error("cloudflare src_v1 test runtime apply failed: %v", err)
+		os.Exit(1)
+	}
+	if err := configv1.LoadEnvFile(paths.Runtime); err != nil {
+		logs.Error("cloudflare src_v1 test env load failed: %v", err)
 		os.Exit(1)
 	}
 

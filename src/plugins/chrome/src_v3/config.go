@@ -13,6 +13,14 @@ func chromeHeadlessEnabled() bool {
 	return envBoolDefault("DIALTONE_CHROME_SRC_V3_HEADLESS", true)
 }
 
+func roleForcesHeadless(role string) bool {
+	role = strings.ToLower(strings.TrimSpace(role))
+	if role == "" {
+		return false
+	}
+	return role == "test" || strings.Contains(role, "test")
+}
+
 func chromeCommandStepDelay() time.Duration {
 	ms := envIntDefault("DIALTONE_CHROME_SRC_V3_STEP_DELAY_MS", 0)
 	if ms <= 0 {

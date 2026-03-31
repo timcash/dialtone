@@ -121,6 +121,27 @@ func countLocalChromeProcesses(role string) (int, error) {
 	return len(pids), nil
 }
 
+func countLocalChromeProcessesQuick(role string, timeout time.Duration) (int, error) {
+	if timeout <= 0 {
+		timeout = 400 * time.Millisecond
+	}
+	type result struct {
+		count int
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		count, err := countLocalChromeProcesses(role)
+		done <- result{count: count, err: err}
+	}()
+	select {
+	case res := <-done:
+		return res.count, res.err
+	case <-time.After(timeout):
+		return 0, fmt.Errorf("local chrome process count timed out after %v", timeout)
+	}
+}
+
 func countRemoteChromeProcesses(node sshv1.MeshNode, role string) (int, error) {
 	role = normalizeRole(role)
 	profileDir := defaultProfileDir(role)

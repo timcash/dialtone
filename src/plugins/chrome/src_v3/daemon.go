@@ -323,7 +323,11 @@ func (d *daemonState) handle(req commandRequest) commandResponse {
 			resp.Error = err.Error()
 			return resp
 		}
+		if err := d.syncManagedConsoleLines(1200 * time.Millisecond); err != nil {
+			logs.Warn("chrome src_v3 console sync failed role=%s err=%v", d.role, err)
+		}
 		resp.ConsoleLines = d.consoleSnapshot()
+		logs.Info("chrome src_v3 console snapshot role=%s lines=%d", d.role, len(resp.ConsoleLines))
 	case "eval":
 		if err := d.ensureBrowser(); err != nil {
 			resp.OK = false
@@ -337,6 +341,17 @@ func (d *daemonState) handle(req commandRequest) commandResponse {
 			return d.refreshResponse(resp)
 		}
 		resp.Value = value
+	case "set-viewport":
+		if err := d.ensureBrowser(); err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return resp
+		}
+		if err := d.setManagedViewport(req.Width, req.Height); err != nil {
+			resp.OK = false
+			resp.Error = err.Error()
+			return d.refreshResponse(resp)
+		}
 	case "screenshot":
 		if err := d.ensureBrowser(); err != nil {
 			resp.OK = false
@@ -360,7 +375,7 @@ func (d *daemonState) handle(req commandRequest) commandResponse {
 			resp.ScreenshotB64 = b64
 		}
 		resp.OK = true
-		return d.refreshResponse(resp)
+		return resp
 	case "close":
 		if err := d.closeBrowser(); err != nil {
 			resp.OK = false
@@ -384,7 +399,6 @@ func (d *daemonState) handle(req commandRequest) commandResponse {
 		resp.Error = fmt.Sprintf("unsupported command: %s", req.Command)
 		return resp
 	}
-	resp = d.refreshResponse(resp)
 	resp.OK = true
 	return resp
 }
@@ -490,7 +504,7 @@ func (d *daemonState) fillStatus(resp *commandResponse) error {
 		}
 		return nil
 	}
-	if processCount, err := countLocalChromeProcesses(role); err == nil {
+	if processCount, err := countLocalChromeProcessesQuick(role, 400*time.Millisecond); err == nil {
 		resp.ProcessCount = processCount
 	} else {
 		// Keep routine status replies fast; a slow Windows process enumeration
@@ -517,7 +531,7 @@ func sendRemoteCommand(node sshv1.MeshNode, req commandRequest) (*commandRespons
 	subjects := commandSubjects(node.Name, req.Role)
 	raw, _ := json.Marshal(req)
 	var lastErr error
-	shortExplicitTimeout := req.TimeoutMS > 0 && time.Duration(req.TimeoutMS)*time.Millisecond <= 5*time.Second
+	shortExplicitTimeout := req.TimeoutMS > 0 && time.Duration(req.TimeoutMS)*time.Millisecond <= 2*time.Second
 	tryRequest := func(natsURL, subject string) (*commandResponse, error) {
 		nc, err := nats.Connect(natsURL, nats.Timeout(defaultTimeout))
 		if err != nil {
@@ -577,6 +591,9 @@ func sendRemoteCommand(node sshv1.MeshNode, req commandRequest) (*commandRespons
 						return resp, nil
 					} else {
 						lastErr = err
+						if resp != nil {
+							return resp, err
+						}
 						if errors.Is(err, nats.ErrTimeout) {
 							if shortExplicitTimeout {
 								return nil, err

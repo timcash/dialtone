@@ -2,56 +2,63 @@ import { setupApp } from '@ui/ui';
 import './style.css';
 
 const { sections, menu } = setupApp({ title: 'dialtone.cloudflare', debug: true });
+const SECTION_IDS = {
+  hero: 'cloudflare-hero-stage',
+  status: 'cloudflare-status-table',
+  docs: 'cloudflare-docs-docs',
+  three: 'cloudflare-three-stage',
+  xterm: 'cloudflare-log-xterm',
+} as const;
 
-sections.register('hero', {
-  containerId: 'hero',
+sections.register(SECTION_IDS.hero, {
+  containerId: SECTION_IDS.hero,
   load: async () => {
     const { mountHero } = await import('./components/hero/index');
-    const container = document.getElementById('hero');
+    const container = document.getElementById(SECTION_IDS.hero);
     if (!container) throw new Error('hero container not found');
     return mountHero(container);
   },
   header: { visible: false, menuVisible: true, title: 'Cloudflare v1' },
 });
 
-sections.register('status', {
-  containerId: 'status',
+sections.register(SECTION_IDS.status, {
+  containerId: SECTION_IDS.status,
   load: async () => {
     const { mountTable } = await import('./components/table/index');
-    const container = document.getElementById('status');
+    const container = document.getElementById(SECTION_IDS.status);
     if (!container) throw new Error('status container not found');
     return mountTable(container);
   },
   header: { visible: false, menuVisible: true, title: 'Cloudflare Status' },
 });
 
-sections.register('xterm', {
-  containerId: 'xterm',
+sections.register(SECTION_IDS.xterm, {
+  containerId: SECTION_IDS.xterm,
   load: async () => {
     const { mountXterm } = await import('./components/xterm/index');
-    const container = document.getElementById('xterm');
+    const container = document.getElementById(SECTION_IDS.xterm);
     if (!container) throw new Error('xterm container not found');
     return mountXterm(container);
   },
   header: { visible: false, menuVisible: true, title: 'Cloudflare Terminal' },
 });
 
-sections.register('docs', {
-  containerId: 'docs',
+sections.register(SECTION_IDS.docs, {
+  containerId: SECTION_IDS.docs,
   load: async () => {
     const { mountDocs } = await import('./components/docs/index');
-    const container = document.getElementById('docs');
+    const container = document.getElementById(SECTION_IDS.docs);
     if (!container) throw new Error('docs container not found');
     return mountDocs(container);
   },
   header: { visible: false, menuVisible: true, title: 'Cloudflare v1 Docs' },
 });
 
-sections.register('three', {
-  containerId: 'three',
+sections.register(SECTION_IDS.three, {
+  containerId: SECTION_IDS.three,
   load: async () => {
     const { mountThree } = await import('./components/three/index');
-    const container = document.getElementById('three');
+    const container = document.getElementById(SECTION_IDS.three);
     if (!container) throw new Error('three container not found');
     return mountThree(container);
   },
@@ -59,23 +66,23 @@ sections.register('three', {
 });
 
 menu.addButton('Hero', 'Navigate Hero', () => {
-  void sections.navigateTo('hero');
+  void sections.navigateTo(SECTION_IDS.hero);
 });
 menu.addButton('Status', 'Navigate Status', () => {
-  void sections.navigateTo('status');
+  void sections.navigateTo(SECTION_IDS.status);
 });
 menu.addButton('Docs', 'Navigate Docs', () => {
-  void sections.navigateTo('docs');
+  void sections.navigateTo(SECTION_IDS.docs);
 });
 menu.addButton('Three', 'Navigate Three', () => {
-  void sections.navigateTo('three');
+  void sections.navigateTo(SECTION_IDS.three);
 });
 menu.addButton('Xterm', 'Navigate Xterm', () => {
-  void sections.navigateTo('xterm');
+  void sections.navigateTo(SECTION_IDS.xterm);
 });
 
-const sectionOrder = ['hero', 'status', 'docs', 'three', 'xterm'] as const;
-const wheelLockedSections = new Set(['status', 'three', 'xterm']);
+const sectionOrder = [SECTION_IDS.hero, SECTION_IDS.status, SECTION_IDS.docs, SECTION_IDS.three, SECTION_IDS.xterm] as const;
+const wheelLockedSections: ReadonlySet<string> = new Set([SECTION_IDS.status, SECTION_IDS.three, SECTION_IDS.xterm]);
 let wheelGestureActive = false;
 let wheelNavInFlight = false;
 let wheelGestureTimer = 0;
@@ -156,8 +163,8 @@ window.addEventListener('keydown', (event) => {
 if (import.meta.hot) {
   window.addEventListener('hashchange', () => {
     const id = window.location.hash.slice(1);
-    if (id !== 'xterm') return;
-    const xtermEl = document.querySelector('#xterm [aria-label="Xterm Terminal"]') as HTMLElement | null;
+    if (id !== SECTION_IDS.xterm) return;
+    const xtermEl = document.querySelector(`#${SECTION_IDS.xterm} [aria-label="Xterm Terminal"]`) as HTMLElement | null;
     if (xtermEl) {
       xtermEl.removeAttribute('data-ready');
     }

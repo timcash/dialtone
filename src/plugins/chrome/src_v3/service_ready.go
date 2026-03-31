@@ -39,6 +39,7 @@ func warmLocalChromeService(role string) (*commandResponse, error) {
 	if !chromeServiceReady(resp) {
 		return nil, chromeServiceNotReadyError("", role, resp)
 	}
+	resp.IsNew = true
 	return resp, nil
 }
 
@@ -55,5 +56,6 @@ func warmRemoteChromeService(node sshv1.MeshNode, role string) (*commandResponse
 	if !chromeServiceReady(resp) {
 		return nil, chromeServiceNotReadyError(node.Name, role, resp)
 	}
+	resp.IsNew = true
 	return resp, nil
 }

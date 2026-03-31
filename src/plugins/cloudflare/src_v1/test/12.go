@@ -1,8 +1,6 @@
 package main
 
-import (
-	test_v2 "dialtone/dev/plugins/test/src_v1/go"
-)
+import "time"
 
 func Run12DocsSectionValidation() error {
 	session, err := ensureSharedBrowser(false)
@@ -13,7 +11,7 @@ func Run12DocsSectionValidation() error {
 	if err := navigateToSection(session, "docs"); err != nil {
 		return err
 	}
-	if err := session.Run(test_v2.WaitForAriaLabel("Docs Title")); err != nil {
+	if err := session.WaitForAriaLabel("Docs Title", 5*time.Second); err != nil {
 		return err
 	}
 

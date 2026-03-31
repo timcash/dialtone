@@ -78,7 +78,7 @@ class ThreeControl implements VisualizationControl {
         cube.material.emissive.setHex(0x000000);
       }
     }
-    console.log(`[Three #three] touch cube: ${id || 'none'}`);
+    console.log(`[Three #${this.container.id}] touch cube: ${id || 'none'}`);
   }
 
   private onWheel = () => {

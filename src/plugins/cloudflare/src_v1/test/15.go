@@ -2,8 +2,6 @@ package main
 
 import (
 	"time"
-
-	test_v2 "dialtone/dev/plugins/test/src_v1/go"
 )
 
 func Run15XtermSectionValidation() error {
@@ -15,20 +13,23 @@ func Run15XtermSectionValidation() error {
 	if err := navigateToSection(session, "xterm"); err != nil {
 		return err
 	}
-	if err := session.Run(test_v2.WaitForAriaLabel("Xterm Terminal")); err != nil {
+	if err := session.WaitForAriaLabel("Xterm Terminal", 5*time.Second); err != nil {
 		return err
 	}
-	if err := session.Run(test_v2.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-ready", "true", 3*time.Second)); err != nil {
+	if err := session.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-ready", "true", 3*time.Second); err != nil {
 		return err
 	}
-	if err := session.Run(test_v2.WaitForAriaLabel("Xterm Input")); err != nil {
+	if err := session.WaitForAriaLabel("Xterm Input", 5*time.Second); err != nil {
 		return err
 	}
 	const cmd = "status --verbose"
-	if err := session.Run(test_v2.TypeAndSubmitAriaLabel("Xterm Input", cmd)); err != nil {
+	if err := session.TypeAriaLabel("Xterm Input", cmd); err != nil {
 		return err
 	}
-	if err := session.Run(test_v2.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-last-command", cmd, 3*time.Second)); err != nil {
+	if err := session.PressEnterAriaLabel("Xterm Input"); err != nil {
+		return err
+	}
+	if err := session.WaitForAriaLabelAttrEquals("Xterm Terminal", "data-last-command", cmd, 3*time.Second); err != nil {
 		return err
 	}
 

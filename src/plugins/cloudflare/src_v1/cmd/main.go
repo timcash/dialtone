@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,9 +14,19 @@ import (
 
 func main() {
 	logs.SetOutput(os.Stdout)
-	port := strings.TrimSpace(configv1.LookupEnvString("CLOUDFLARE_PORT"))
-	if port == "" {
-		port = "8080"
+	fs := flag.NewFlagSet("cloudflare-src-v1-http", flag.ContinueOnError)
+	port := fs.String("port", strings.TrimSpace(configv1.LookupEnvString("CLOUDFLARE_PORT")), "HTTP port for the local Cloudflare UI server")
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		logs.Error("cloudflare serve parse failed: %v", err)
+		os.Exit(1)
+	}
+	resolvedPort := strings.TrimSpace(*port)
+	if resolvedPort == "" && len(fs.Args()) > 0 {
+		resolvedPort = strings.TrimSpace(fs.Args()[0])
+	}
+	portValue := resolvedPort
+	if portValue == "" {
+		portValue = "8080"
 	}
 	paths, _ := cloudflarev1.ResolvePaths("", "src_v1")
 	cwd, _ := os.Getwd()
@@ -44,8 +55,8 @@ func main() {
 		http.ServeFile(w, r, path)
 	})
 
-	logs.Info("Cloudflare Server starting on http://localhost:%s", port)
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+	logs.Info("Cloudflare Server starting on http://localhost:%s", portValue)
+	if err := http.ListenAndServe(":"+portValue, nil); err != nil {
 		logs.Error("Error starting server: %v", err)
 		os.Exit(1)
 	}

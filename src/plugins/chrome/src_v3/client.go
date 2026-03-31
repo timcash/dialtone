@@ -50,6 +50,7 @@ func NewSessionFromResponse(host string, resp *CommandResponse) *Session {
 		NATSPort:      resp.NATSPort,
 		CurrentURL:    strings.TrimSpace(resp.CurrentURL),
 		ManagedTarget: strings.TrimSpace(resp.ManagedTarget),
+		IsNew:         resp.IsNew,
 	}
 }
 

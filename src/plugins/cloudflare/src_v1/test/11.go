@@ -1,8 +1,6 @@
 package main
 
-import (
-	"github.com/chromedp/chromedp"
-)
+import "time"
 
 func Run11HeroSectionValidation() error {
 	session, err := ensureSharedBrowser(false)
@@ -10,10 +8,10 @@ func Run11HeroSectionValidation() error {
 		return err
 	}
 
-	if err := session.Run(chromedp.Tasks{
-		chromedp.WaitVisible("[aria-label='Hero Section']", chromedp.ByQuery),
-		chromedp.WaitVisible("[aria-label='Hero Canvas']", chromedp.ByQuery),
-	}); err != nil {
+	if err := session.WaitForAriaLabel("Hero Section", 5*time.Second); err != nil {
+		return err
+	}
+	if err := session.WaitForAriaLabel("Hero Canvas", 5*time.Second); err != nil {
 		return err
 	}
 

@@ -135,6 +135,10 @@ func startLocalService(role string) error {
 	cmd := exec.Command(bin, "src_v3", "daemon", "--role", role, "--chrome-port", strconv.Itoa(roleChromePort(role)), "--nats-port", strconv.Itoa(roleNATSPort(role)))
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	cmd.Env = os.Environ()
+	if roleForcesHeadless(role) {
+		cmd.Env = append(cmd.Env, "DIALTONE_CHROME_SRC_V3_HEADLESS=1")
+	}
 	prepareBackgroundCommand(cmd)
 	if err := cmd.Start(); err != nil {
 		return err
@@ -204,9 +208,9 @@ func commandRequestTimeout(req commandRequest) time.Duration {
 	if timeout < time.Second {
 		timeout = time.Second
 	}
-	buffer := 400 * time.Millisecond
-	if timeout > 5*time.Second {
-		buffer = time.Second
+	buffer := 750 * time.Millisecond
+	if timeout >= 3*time.Second {
+		buffer = 2 * time.Second
 	}
 	return timeout + buffer
 }

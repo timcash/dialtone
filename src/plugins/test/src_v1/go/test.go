@@ -179,17 +179,12 @@ func (s *BrowserSession) Navigate(rawURL string) error {
 		}
 	}
 	if s.isServiceManaged() {
-		resp, err := chrome.SendCommandByHost(s.Session.Host, chrome.CommandRequest{
+		_, err := s.serviceCommand(chrome.CommandRequest{
 			Command:   "goto",
-			Role:      strings.TrimSpace(s.Session.Role),
 			URL:       strings.TrimSpace(rawURL),
 			TimeoutMS: 60000,
 		})
-		if err != nil {
-			return err
-		}
-		s.applyServiceResponse(resp)
-		return nil
+		return err
 	}
 	return s.Run(chromedp.Navigate(rawURL))
 }
@@ -201,11 +196,54 @@ func (s *BrowserSession) serviceCommand(req chrome.CommandRequest) (*chrome.Comm
 	req.Role = strings.TrimSpace(s.Session.Role)
 	resp, err := chrome.SendCommandByHost(s.Session.Host, req)
 	if err != nil {
-		return nil, err
+		resp, err = s.retryServiceCommand(req, err)
+		if err != nil {
+			return nil, err
+		}
 	}
 	s.applyServiceResponse(resp)
 	if len(resp.ConsoleLines) > 0 {
 		s.ingestServiceConsoleLines(resp.ConsoleLines)
+	}
+	return resp, nil
+}
+
+func (s *BrowserSession) retryServiceCommand(req chrome.CommandRequest, prior error) (*chrome.CommandResponse, error) {
+	if s == nil || !s.isServiceManaged() {
+		return nil, prior
+	}
+	if !isRecoverableBrowserRunError(prior) {
+		return nil, prior
+	}
+	switch strings.ToLower(strings.TrimSpace(req.Command)) {
+	case "", "status", "open", "close", "reset", "shutdown":
+		return nil, prior
+	}
+	host := strings.TrimSpace(s.Session.Host)
+	role := strings.TrimSpace(s.Session.Role)
+	timeoutMS := req.TimeoutMS
+	if timeoutMS < 5000 {
+		timeoutMS = 5000
+	}
+	logs.Warn("   [BROWSER] recoverable service command error (%s); resetting managed tab: %v", strings.TrimSpace(req.Command), prior)
+	resetResp, resetErr := chrome.SendCommandByHost(host, chrome.CommandRequest{
+		Command:   "reset",
+		Role:      role,
+		TimeoutMS: timeoutMS,
+	})
+	if resetErr == nil {
+		s.applyServiceResponse(resetResp)
+	} else {
+		logs.Warn("   [BROWSER] service reset failed after %s error: %v", strings.TrimSpace(req.Command), resetErr)
+		if recovered, rerr := waitForServiceHealthy(host, role, 5*time.Second); rerr == nil {
+			s.applyServiceResponse(recovered)
+		} else {
+			return nil, prior
+		}
+	}
+	resp, err := chrome.SendCommandByHost(host, req)
+	if err != nil {
+		return nil, err
 	}
 	return resp, nil
 }
@@ -248,16 +286,61 @@ func (s *BrowserSession) WaitForConsoleContains(substr string, timeout time.Dura
 		}
 	}
 	if s.isServiceManaged() {
+		if timeout <= 0 {
+			timeout = 5 * time.Second
+		}
+		if timeout < 8*time.Second {
+			timeout = 8 * time.Second
+		}
+		deadline := time.Now().Add(timeout)
+		logs.Info("   [BROWSER] service wait-log start needle=%q timeout=%v", needle, timeout)
+		waitLogTimeout := timeout
+		if waitLogTimeout > 8*time.Second {
+			waitLogTimeout = 8 * time.Second
+		}
 		resp, err := s.serviceCommand(chrome.CommandRequest{
 			Command:   "wait-log",
 			Contains:  needle,
-			TimeoutMS: int(timeout.Milliseconds()),
+			TimeoutMS: int(waitLogTimeout.Milliseconds()),
 		})
-		if err != nil {
-			return err
+		if err == nil {
+			s.ingestServiceConsoleLines(resp.ConsoleLines)
+			logs.Info("   [BROWSER] service wait-log matched needle=%q lines=%d", needle, len(resp.ConsoleLines))
+			return nil
 		}
-		s.ingestServiceConsoleLines(resp.ConsoleLines)
-		return nil
+		logs.Warn("   [BROWSER] service wait-log direct request failed: %v", err)
+		attempt := 0
+		for time.Now().Before(deadline) {
+			attempt++
+			logs.Info("   [BROWSER] service console snapshot attempt=%d needle=%q", attempt, needle)
+			requestTimeout := 5 * time.Second
+			if remaining := time.Until(deadline); remaining > 0 && remaining < requestTimeout {
+				requestTimeout = remaining
+			}
+			if requestTimeout < 2500*time.Millisecond {
+				requestTimeout = 2500 * time.Millisecond
+			}
+			resp, err := s.serviceCommand(chrome.CommandRequest{
+				Command:   "console",
+				TimeoutMS: int(requestTimeout.Milliseconds()),
+			})
+			if err != nil {
+				logs.Warn("   [BROWSER] service console snapshot attempt=%d failed: %v", attempt, err)
+			} else {
+				lineCount := len(resp.ConsoleLines)
+				entryCount := len(s.Entries())
+				logs.Info("   [BROWSER] service console snapshot attempt=%d returned lines=%d entries=%d", attempt, lineCount, entryCount)
+				s.ingestServiceConsoleLines(resp.ConsoleLines)
+				for _, entry := range s.Entries() {
+					if strings.Contains(entry.Text, needle) {
+						logs.Info("   [BROWSER] service console snapshot matched needle=%q", needle)
+						return nil
+					}
+				}
+			}
+			time.Sleep(250 * time.Millisecond)
+		}
+		return fmt.Errorf("timeout waiting for browser console message containing %q", needle)
 	}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -410,6 +493,58 @@ func (s *BrowserSession) SetHTML(markup string) error {
 	}))
 }
 
+func (s *BrowserSession) SetViewport(width, height int) error {
+	if width <= 0 || height <= 0 {
+		return fmt.Errorf("viewport width and height must be positive")
+	}
+	if s.ctx != nil {
+		if err := paceAction(s.ctx); err != nil {
+			return err
+		}
+	}
+	if s.isServiceManaged() {
+		_, err := s.serviceCommand(chrome.CommandRequest{
+			Command:   "set-viewport",
+			Width:     width,
+			Height:    height,
+			TimeoutMS: 15000,
+		})
+		return err
+	}
+	return s.Run(chromedp.EmulateViewport(int64(width), int64(height)))
+}
+
+func (s *BrowserSession) Evaluate(script string, out any) error {
+	script = strings.TrimSpace(script)
+	if script == "" {
+		return fmt.Errorf("browser script is required")
+	}
+	if s.ctx != nil {
+		if err := paceAction(s.ctx); err != nil {
+			return err
+		}
+	}
+	if s.isServiceManaged() {
+		resp, err := s.serviceCommand(chrome.CommandRequest{
+			Command:   "eval",
+			Script:    script,
+			TimeoutMS: 10000,
+		})
+		if err != nil {
+			return err
+		}
+		if out == nil {
+			return nil
+		}
+		raw := strings.TrimSpace(resp.Value)
+		if raw == "" {
+			raw = "null"
+		}
+		return json.Unmarshal([]byte(raw), out)
+	}
+	return s.Run(chromedp.Evaluate(script, out))
+}
+
 func (s *BrowserSession) WaitForAriaLabelAttrEquals(label, attr, expected string, timeout time.Duration) error {
 	if s.isServiceManaged() {
 		_, err := s.serviceCommand(chrome.CommandRequest{
@@ -552,6 +687,7 @@ func isRecoverableBrowserRunError(err error) bool {
 	text := strings.ToLower(strings.TrimSpace(err.Error()))
 	return strings.Contains(text, "target closed") ||
 		strings.Contains(text, "context canceled") ||
+		strings.Contains(text, "invalid context") ||
 		strings.Contains(text, "no target with given id found") ||
 		strings.Contains(text, "(-32602)")
 }
@@ -576,6 +712,12 @@ func (s *BrowserSession) EnsureOpenPage() error {
 			URL:     "about:blank",
 		})
 		if err != nil {
+			if isRecoverableBrowserRunError(err) {
+				if recovered, rerr := waitForServiceHealthy(strings.TrimSpace(s.Session.Host), strings.TrimSpace(s.Session.Role), 5*time.Second); rerr == nil {
+					s.applyServiceResponse(recovered)
+					return nil
+				}
+			}
 			return err
 		}
 		s.applyServiceResponse(resp)
@@ -615,6 +757,36 @@ func (s *BrowserSession) EnsureOpenPage() error {
 		lastErr = fmt.Errorf("no usable debug port")
 	}
 	return lastErr
+}
+
+func waitForServiceHealthy(host, role string, timeout time.Duration) (*chrome.CommandResponse, error) {
+	host = strings.TrimSpace(host)
+	role = strings.TrimSpace(role)
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		resp, err := chrome.SendCommandByHost(host, chrome.CommandRequest{
+			Command:   "status",
+			Role:      role,
+			TimeoutMS: 1200,
+		})
+		if err == nil && resp != nil && resp.BrowserPID > 0 && !resp.Unhealthy {
+			return resp, nil
+		}
+		if err != nil {
+			lastErr = err
+		} else {
+			lastErr = fmt.Errorf("browser service unhealthy or not running")
+		}
+		time.Sleep(180 * time.Millisecond)
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("browser service did not recover in time")
+	}
+	return nil, lastErr
 }
 
 func (s *BrowserSession) ensureFirstPageTargetIDViaCDP(allowCreate bool) (string, error) {
@@ -1621,6 +1793,22 @@ func (sc *StepContext) SetHTML(markup string) error {
 		return err
 	}
 	return b.SetHTML(markup)
+}
+
+func (sc *StepContext) SetViewport(width, height int) error {
+	b, err := sc.Browser()
+	if err != nil {
+		return err
+	}
+	return b.SetViewport(width, height)
+}
+
+func (sc *StepContext) Evaluate(script string, out any) error {
+	b, err := sc.Browser()
+	if err != nil {
+		return err
+	}
+	return b.Evaluate(script, out)
 }
 
 // TapAt uses a click event as the cross-platform tap primitive for test automation.

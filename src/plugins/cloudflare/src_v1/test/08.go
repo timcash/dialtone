@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"time"
 
 	test_v2 "dialtone/dev/plugins/test/src_v1/go"
@@ -21,8 +19,10 @@ func Run08UIRun() error {
 		return err
 	}
 
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "cloudflare", "src_v1", "ui-run", "--port", fmt.Sprintf("%d", port))
-	cmd.Dir = repoRoot
+	cmd, err := testDialtoneCommand(repoRoot, "cloudflare", "src_v1", "ui-run", "--port", fmt.Sprintf("%d", port))
+	if err != nil {
+		return err
+	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {

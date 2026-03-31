@@ -90,9 +90,9 @@ func runSrcV1(command string, args []string) error {
 	case "test":
 		return cloudflare_ops.Test("src_v1", args)
 	case "serve":
-		// src_v1 serve without args runs plugin HTTP UI.
-		if len(args) == 0 {
-			return cloudflare_ops.Serve()
+		// src_v1 serve without args, or with flag-style UI args, runs plugin HTTP UI.
+		if len(args) == 0 || strings.HasPrefix(strings.TrimSpace(args[0]), "-") {
+			return cloudflare_ops.Serve(args)
 		}
 		// src_v1 serve with args delegates runtime tunnel serve behavior.
 		return cloudflare_ops.RunRuntime("serve", args)

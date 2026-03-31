@@ -5,8 +5,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -26,8 +24,10 @@ func Run10DevServerRunningLatestUI() error {
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	url := fmt.Sprintf("http://%s", addr)
 
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone.sh"), "cloudflare", "src_v1", "ui-run", "--port", fmt.Sprintf("%d", port))
-	cmd.Dir = repoRoot
+	cmd, err := testDialtoneCommand(repoRoot, "cloudflare", "src_v1", "ui-run", "--port", fmt.Sprintf("%d", port))
+	if err != nil {
+		return err
+	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {

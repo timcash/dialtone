@@ -40,6 +40,15 @@ The recent alignment work also pushed the core plugins closer to the desired mod
 - `repl src_v3 test` is verified through the WSL bootstrap path, and its test runner now prints explicit start/pass lines while still writing `TEST.md` and `TEST_RAW.md`
 - a visible WSL tmux sweep revalidated `logs`, `test`, `ssh`, `repl`, `cloudflare`, `robot`, and `cad`; `cloudflare` needed the public `cloudflare src_v1 install` step first so the UI lint/build toolchain was present
 
+Current Windows/WSL REPL verification status from the latest visible `wsl-tmux.cmd` sweep:
+
+- `chrome src_v3 test-actions -host legion -role test` now passes end-to-end through the REPL/NATS service path, including `set-html`, `type-aria`, `click-aria`, `wait-log`, and screenshot capture
+- the Windows `chrome src_v3` daemon was rebuilt and redeployed from this repo branch, and the matching `src/plugins/chrome/src_v3/*.go` sources were synced into the WSL checkout while testing
+- `cloudflare src_v1 test` now passes end-to-end through the REPL/NATS/Windows-browser path from visible `wsl-tmux.cmd` runs; latest passing task: `task-20260331-152533-000`
+- shared-browser Cloudflare steps were standardized to rely on durable DOM/state assertions (`data-selected-cube`, `data-ready`, `data-active`, proof-of-life script execution) instead of cached browser-console messages
+- cached browser-console log propagation in shared browser sessions is still weaker than the dedicated `chrome src_v3 test-actions` control-plane/browser-service proof, so console-capture remains covered there rather than as a hard gate inside the Cloudflare suite
+- failed `cloudflare src_v1 test` workers are currently leaving stale `running` task entries / defunct worker processes in the REPL task registry, so task cleanup/reaping is part of the remaining control-plane work
+
 ## What To Do Next
 
 ### 1. Finish Shared Config And Install-State Work
@@ -99,6 +108,12 @@ Priority order:
 6. prove the same model on remote hosts, especially `legion`
 
 This matters because Chrome, Cloudflare, and robot success should sit on top of a proven control plane, not replace that proof.
+
+Immediate debug follow-up inside this lane:
+
+- keep using `chrome src_v3 test-actions -host legion -role test` as the fast control-plane/browser-service proof while Cloudflare step 04 is being stabilized
+- finish the service-managed console/log handoff between `test src_v1` and the `chrome src_v3` daemon so shared-browser suites can optionally promote cached browser-console messages back into hard assertions without flaking
+- fix REPL task reaping so failed foreground workers do not remain `running` after the worker process is already defunct
 
 ### 5. Keep Sweeping Docs And Tests Together
 

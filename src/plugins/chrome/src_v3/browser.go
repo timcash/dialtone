@@ -14,10 +14,64 @@ import (
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	"github.com/chromedp/cdproto/cdp"
+	cdpage "github.com/chromedp/cdproto/page"
 	cdruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 )
+
+const managedConsoleHookScript = `(() => {
+	if (window.__dialtoneConsoleHookInstalled) {
+		return true;
+	}
+	const normalize = (value) => {
+		if (typeof value === 'string') {
+			return value;
+		}
+		try {
+			return JSON.stringify(value);
+		} catch (_) {}
+		try {
+			return String(value);
+		} catch (_) {
+			return '[unprintable]';
+		}
+	};
+	const lines = Array.isArray(window.__dialtoneConsoleLines) ? window.__dialtoneConsoleLines : [];
+	window.__dialtoneConsoleLines = lines;
+	const capture = (...args) => {
+		const line = args
+			.map(normalize)
+			.filter((part) => typeof part === 'string' && part.trim() !== '')
+			.join(' ')
+			.trim();
+		if (!line) {
+			return;
+		}
+		lines.push(line);
+		if (lines.length > 200) {
+			lines.splice(0, lines.length - 200);
+		}
+	};
+	for (const level of ['log', 'info', 'warn', 'error', 'debug']) {
+		const original = typeof console[level] === 'function' ? console[level].bind(console) : () => {};
+		console[level] = (...args) => {
+			try {
+				capture(...args);
+			} catch (_) {}
+			return original(...args);
+		};
+	}
+	window.__dialtoneConsoleHookInstalled = true;
+	return true;
+})()`
+
+const managedConsoleReadScript = `(() => {
+	if (!Array.isArray(window.__dialtoneConsoleLines)) {
+		return [];
+	}
+	return window.__dialtoneConsoleLines.slice(-200);
+})()`
 
 func (d *daemonState) isBrowserAlive(pid int, port int) bool {
 	if pid <= 0 {
@@ -27,6 +81,22 @@ func (d *daemonState) isBrowserAlive(pid int, port int) bool {
 	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/json/version", port))
 	if err != nil {
 		if runtime.GOOS == "windows" {
+			if localListenPortOpen(port) {
+				return true
+			}
+			if processAlive(pid) {
+				return true
+			}
+			if pids, perr := chromeBrowserPIDsForRole(d.role, d.profileDir, port); perr == nil {
+				for _, candidate := range pids {
+					if candidate == pid {
+						return true
+					}
+				}
+				if len(pids) > 0 {
+					return true
+				}
+			}
 			return false
 		}
 		proc, findErr := os.FindProcess(pid)
@@ -63,6 +133,10 @@ func (d *daemonState) ensureBrowser() error {
 		}
 		if !hasAlloc || unexpected != nil {
 			if err := d.attachToRunningBrowser(); err == nil {
+				if unexpected != nil {
+					d.clearManagedTab()
+					return d.ensureManagedTab()
+				}
 				if !hasTab {
 					return d.ensureManagedTab()
 				}
@@ -101,7 +175,7 @@ func (d *daemonState) ensureBrowser() error {
 		d.managedTarget = ""
 		d.consoleLines = nil
 		d.unexpectedErr = nil
-		d.intentionalStop = false
+		d.intentionalStop = true
 		d.mu.Unlock()
 		if cancelTab != nil {
 			cancelTab()
@@ -109,6 +183,9 @@ func (d *daemonState) ensureBrowser() error {
 		if cancelAlloc != nil {
 			cancelAlloc()
 		}
+		d.mu.Lock()
+		d.intentionalStop = false
+		d.mu.Unlock()
 		d.persistState()
 	} else {
 		d.mu.Unlock()
@@ -198,17 +275,48 @@ func (d *daemonState) ensureManagedTab() error {
 	return nil
 }
 
+func (d *daemonState) clearManagedTab() {
+	d.mu.Lock()
+	cancelTab := d.cancelTab
+	d.cancelTab = nil
+	d.tabCtx = nil
+	d.currentURL = "about:blank"
+	d.managedTarget = ""
+	d.mu.Unlock()
+	if cancelTab != nil {
+		cancelTab()
+	}
+}
+
 func newManagedTabContext(allocCtx context.Context, targetID string) (context.Context, context.CancelFunc, error) {
 	ctxOpts := []chromedp.ContextOption{}
 	if strings.TrimSpace(targetID) != "" {
 		ctxOpts = append(ctxOpts, chromedp.WithTargetID(target.ID(strings.TrimSpace(targetID))))
 	}
 	tabCtx, cancel := chromedp.NewContext(allocCtx, ctxOpts...)
-	if err := chromedp.Run(tabCtx); err != nil {
+	if err := primeManagedTabContext(tabCtx); err != nil {
 		cancel()
 		return nil, nil, err
 	}
 	return tabCtx, cancel, nil
+}
+
+func primeManagedTabContext(tabCtx context.Context) error {
+	var readyState string
+	return chromedp.Run(tabCtx,
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return cdruntime.Enable().Do(ctx)
+		}),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return cdpage.Enable().Do(ctx)
+		}),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			_, err := cdpage.AddScriptToEvaluateOnNewDocument(managedConsoleHookScript).Do(ctx)
+			return err
+		}),
+		chromedp.Evaluate(managedConsoleHookScript, nil),
+		chromedp.Evaluate(`document.readyState`, &readyState),
+	)
 }
 
 type devtoolsTargetInfo struct {
@@ -246,7 +354,7 @@ func firstPageTargetID(port int) (string, error) {
 }
 
 func (d *daemonState) attachManagedTab(tabCtx context.Context, cancel context.CancelFunc) {
-	managedTarget := "managed"
+	managedTarget := ""
 	if chromeCtx := chromedp.FromContext(tabCtx); chromeCtx != nil && chromeCtx.Target != nil {
 		if targetID := strings.TrimSpace(string(chromeCtx.Target.TargetID)); targetID != "" {
 			managedTarget = targetID
@@ -259,22 +367,26 @@ func (d *daemonState) attachManagedTab(tabCtx context.Context, cancel context.Ca
 	d.currentURL = "about:blank"
 	d.consoleLines = nil
 	d.mu.Unlock()
-	if err := d.pruneExtraPageTargets(); err != nil {
-		logs.Warn("chrome src_v3 unable to prune extra tabs for role=%s: %v", d.role, err)
-	}
 	d.persistState()
 	chromedp.ListenTarget(tabCtx, func(ev interface{}) {
 		switch ev := ev.(type) {
 		case *cdruntime.EventConsoleAPICalled:
 			parts := make([]string, 0, len(ev.Args))
 			for _, arg := range ev.Args {
-				parts = append(parts, string(arg.Value))
+				parts = append(parts, consoleArgText(arg))
 			}
 			d.appendConsoleLine(strings.TrimSpace(strings.Join(parts, " ")))
 		case *cdruntime.EventExceptionThrown:
 			d.appendConsoleLine(strings.TrimSpace(ev.ExceptionDetails.Text))
 		}
 	})
+	if strings.TrimSpace(managedTarget) == "" {
+		logs.Warn("chrome src_v3 managed target unresolved for role=%s; skipping immediate tab prune", d.role)
+		return
+	}
+	if err := d.pruneExtraPageTargets(); err != nil {
+		logs.Warn("chrome src_v3 unable to prune extra tabs for role=%s: %v", d.role, err)
+	}
 }
 
 func (d *daemonState) pruneExtraPageTargets() error {
@@ -300,6 +412,42 @@ func (d *daemonState) pruneExtraPageTargets() error {
 	if err != nil {
 		return err
 	}
+	pageTargets := make([]string, 0, len(targets))
+	managedPresent := false
+	for _, t := range targets {
+		if t == nil || t.Type != "page" {
+			continue
+		}
+		targetID := strings.TrimSpace(string(t.TargetID))
+		if targetID == "" {
+			continue
+		}
+		pageTargets = append(pageTargets, targetID)
+		if targetID == managedTarget {
+			managedPresent = true
+		}
+	}
+	if managedTarget == "" && len(pageTargets) == 1 {
+		managedTarget = pageTargets[0]
+		managedPresent = true
+		d.mu.Lock()
+		d.managedTarget = managedTarget
+		d.mu.Unlock()
+	}
+	if managedTarget != "" && !managedPresent {
+		if len(pageTargets) == 1 {
+			managedTarget = pageTargets[0]
+			managedPresent = true
+			d.mu.Lock()
+			d.managedTarget = managedTarget
+			d.mu.Unlock()
+		} else {
+			return fmt.Errorf("managed target %q not found among page targets", managedTarget)
+		}
+	}
+	if !managedPresent && len(pageTargets) > 0 {
+		return fmt.Errorf("managed target unavailable for %d page targets", len(pageTargets))
+	}
 	for _, t := range targets {
 		if t == nil || t.Type != "page" {
 			continue
@@ -321,7 +469,7 @@ func (d *daemonState) recreateManagedTab() error {
 	d.cancelTab = nil
 	d.tabCtx = nil
 	d.currentURL = "about:blank"
-	d.managedTarget = "managed"
+	d.managedTarget = ""
 	d.mu.Unlock()
 	if cancelTab != nil {
 		cancelTab()
@@ -471,6 +619,10 @@ func (d *daemonState) openNewTab(rawURL string) error {
 		return errBrowserClosed
 	}
 	tabCtx, cancel := chromedp.NewContext(allocCtx)
+	if err := primeManagedTabContext(tabCtx); err != nil {
+		cancel()
+		return err
+	}
 	d.attachManagedTab(tabCtx, cancel)
 	if err := d.navigateManaged(url); err != nil {
 		d.mu.Lock()
@@ -592,4 +744,24 @@ func (d *daemonState) consoleSnapshot() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return append([]string(nil), d.consoleLines...)
+}
+
+func consoleArgText(arg *cdruntime.RemoteObject) string {
+	if arg == nil {
+		return ""
+	}
+	if len(arg.Value) > 0 {
+		var decoded any
+		if err := json.Unmarshal(arg.Value, &decoded); err == nil {
+			return strings.TrimSpace(fmt.Sprint(decoded))
+		}
+		return strings.TrimSpace(string(arg.Value))
+	}
+	if arg.UnserializableValue != "" {
+		return strings.TrimSpace(string(arg.UnserializableValue))
+	}
+	if strings.TrimSpace(arg.Description) != "" {
+		return strings.TrimSpace(arg.Description)
+	}
+	return strings.TrimSpace(string(arg.Type))
 }
