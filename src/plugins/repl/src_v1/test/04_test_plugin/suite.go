@@ -11,7 +11,7 @@ import (
 
 func Register(r *testv1.Registry) {
 	r.Add(testv1.Step{
-		Name:    "repl-runs-test-plugin-subtone",
+		Name:    "repl-runs-test-plugin-task-worker",
 		Timeout: 150 * time.Second,
 		RunWithContext: func(ctx *testv1.StepContext) (testv1.StepRunResult, error) {
 			prompt := repl.DefaultPromptName()
@@ -21,12 +21,12 @@ func Register(r *testv1.Registry) {
 			}
 			if err := support.RequireContainsAll(out, []string{
 				prompt + "> test src_v1 test",
-				"DIALTONE> Request received. Spawning subtone for test src_v1...",
-				"DIALTONE> Subtone for test src_v1 exited with code 0.",
+				"DIALTONE> Request received. Starting task worker for test src_v1...",
+				"DIALTONE> Task worker for test src_v1 exited with code 0.",
 			}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("test plugin foundation check failed: %w", err)
 			}
-			return testv1.StepRunResult{Report: "test plugin suite executed through repl subtone"}, nil
+			return testv1.StepRunResult{Report: "test plugin suite executed through repl task worker"}, nil
 		},
 	})
 }

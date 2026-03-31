@@ -67,7 +67,7 @@ func newTaskRegistry(limit int) *taskRegistry {
 	}
 }
 
-func (r *taskRegistry) Started(taskID, room, mode, taskLogPath string, ev proc.SubtoneEvent) {
+func (r *taskRegistry) Started(taskID, room, mode, taskLogPath string, ev proc.TaskWorkerEvent) {
 	if r == nil || ev.PID <= 0 {
 		return
 	}

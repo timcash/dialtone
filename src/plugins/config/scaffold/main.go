@@ -28,55 +28,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	switch command {
-	case "help", "-h", "--help":
-		printUsage()
-	case "runtime":
-		rt, err := configv1.ResolveRuntime("")
-		if err != nil {
-			logs.Error("config runtime error: %v", err)
-			os.Exit(1)
-		}
-		_ = json.NewEncoder(os.Stdout).Encode(rt)
-	case "test":
-		rt, err := configv1.ResolveRuntime("")
-		if err != nil {
-			logs.Error("runtime error: %v", err)
-			os.Exit(1)
-		}
-		goBin := strings.TrimSpace(rt.GoBin)
-		if goBin == "" {
-			goBin = "go"
-		}
-		cmd := exec.Command(goBin, "run", "./plugins/config/src_v1/test/cmd/main.go")
-		cmd.Dir = rt.SrcRoot
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			os.Exit(1)
-		}
-	case "apply":
-		rt, err := configv1.ResolveRuntime("")
-		if err != nil {
-			logs.Error("resolve runtime error: %v", err)
-			os.Exit(1)
-		}
-		if err := configv1.LoadEnvFile(rt); err != nil {
-			logs.Error("load env error: %v", err)
-			os.Exit(1)
-		}
-		if err := configv1.ApplyRuntimeEnv(rt); err != nil {
-			logs.Error("apply runtime env error: %v", err)
-			os.Exit(1)
-		}
-		logs.Info("Applied runtime env for repo=%s", rt.RepoRoot)
-	default:
-		logs.Error("unknown config command: %s", command)
+	if err := runCommand(command, rest); err != nil {
+		logs.Error("config src_v1 %s failed: %v", command, err)
 		printUsage()
 		os.Exit(1)
 	}
-
-	_ = rest
 }
 
 func parseArgs(args []string) (version, command string, rest []string, warnedOldOrder bool, err error) {
@@ -102,10 +58,102 @@ func isHelp(s string) bool {
 	return s == "help" || s == "-h" || s == "--help"
 }
 
+func runCommand(command string, args []string) error {
+	switch command {
+	case "help", "-h", "--help":
+		printUsage()
+		return nil
+	case "install":
+		return runInstall(args)
+	case "format":
+		return runManagedGo(command, args, "fmt", "./plugins/config/...")
+	case "lint":
+		return runManagedGo(command, args, "vet", "./plugins/config/...")
+	case "build":
+		return runManagedGo(command, args, "build", "./plugins/config/...")
+	case "runtime":
+		return runRuntime(args)
+	case "apply":
+		return runApply(args)
+	case "test":
+		return runTest(args)
+	default:
+		return fmt.Errorf("unknown config command: %s", command)
+	}
+}
+
+func runInstall(args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("install does not accept extra arguments")
+	}
+	logs.Info("config src_v1 install: no-op")
+	return nil
+}
+
+func runRuntime(args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("runtime does not accept extra arguments")
+	}
+	rt, err := configv1.ResolveRuntime("")
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(os.Stdout).Encode(rt)
+}
+
+func runApply(args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("apply does not accept extra arguments")
+	}
+	rt, err := configv1.ResolveRuntime("")
+	if err != nil {
+		return err
+	}
+	if err := configv1.LoadEnvFile(rt); err != nil {
+		return err
+	}
+	if err := configv1.ApplyRuntimeEnv(rt); err != nil {
+		return err
+	}
+	logs.Info("Applied runtime env for repo=%s", rt.RepoRoot)
+	return nil
+}
+
+func runTest(args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("test does not accept extra arguments")
+	}
+	return runManagedGo("test", args, "run", "./plugins/config/src_v1/test/cmd/main.go")
+}
+
+func runManagedGo(command string, extraArgs []string, args ...string) error {
+	if len(extraArgs) > 0 {
+		return fmt.Errorf("%s does not accept extra arguments", command)
+	}
+	rt, err := configv1.ResolveRuntime("")
+	if err != nil {
+		return err
+	}
+	goBin := strings.TrimSpace(rt.GoBin)
+	if goBin == "" {
+		goBin = "go"
+	}
+	cmd := exec.Command(goBin, args...)
+	cmd.Dir = rt.SrcRoot
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	return cmd.Run()
+}
+
 func printUsage() {
 	logs.Raw("Usage: ./dialtone.sh config src_v1 <command> [args]")
 	logs.Raw("")
 	logs.Raw("Commands:")
+	logs.Raw("  install     Verify shared runtime config access")
+	logs.Raw("  format      Run go fmt for the config plugin")
+	logs.Raw("  lint        Run go vet for the config plugin")
+	logs.Raw("  build       Run go build for the config plugin")
 	logs.Raw("  runtime     Print resolved runtime config as JSON")
 	logs.Raw("  apply       Load env file + apply runtime vars to current process")
 	logs.Raw("  test        Run config plugin src_v1 tests")

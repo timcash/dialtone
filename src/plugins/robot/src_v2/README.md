@@ -23,37 +23,37 @@ Validated result from the current WSL workflow:
 
 ## 1) CLI & REPL Interaction Guide
 
-`robot src_v2` embraces a "REPL-first" execution model. When you run `./dialtone.sh robot src_v2 <command>`, the CLI does not execute the command directly in the foreground. Instead, it locates (or spawns) a local background REPL leader and routes the command into a managed REPL room as a "subtone".
+`robot src_v2` embraces a task-first REPL execution model. When you run `./dialtone.sh robot src_v2 <command>`, the CLI routes the request through the local REPL leader and returns a managed task identity instead of streaming the full worker output in the foreground.
 
 **The Default Operator Path:**
 For 99% of your daily workflow, just use plain `dialtone.sh` commands. The framework handles the REPL routing automatically.
 
 ```bash
-# Good: The command is automatically routed to the default REPL room
+# Good: the command is automatically routed through the default REPL leader
 ./dialtone.sh robot src_v2 dev
 ```
 
 **What to expect in the terminal:**
-1. A brief `DIALTONE>` prefix acknowledging the request.
-2. An announcement that a "subtone" (a managed child process) has started.
-3. The location of the permanent log file for that specific run.
-4. Top-level status messages promoted from the subtone to the main room (e.g., `robot publish: local UI build complete`).
-5. Detailed, verbose output goes strictly to the log file.
+1. A brief `dialtone>` receipt acknowledging the request.
+2. A queued `task-id`.
+3. The task topic and permanent task log path.
+4. Short operator-facing status lines when appropriate.
+5. Detailed worker output in the task log instead of the shell transcript.
 
 **Advanced REPL Inspection:**
-Because your commands run as subtones, you can inspect their lifecycle and logs using the `repl src_v3` plugin tools:
+Because your commands run as REPL-managed tasks, you can inspect their lifecycle and logs with the `repl src_v3` tools:
 
 ```bash
-# See all active background tasks (subtones)
-./dialtone.sh ps
+# List recent completed or running tasks
+./dialtone.sh repl src_v3 task list --count 20
 
-# List recent completed or running subtones
-./dialtone.sh repl src_v3 subtone-list --count 20
+# Inspect one queued/running task
+./dialtone.sh repl src_v3 task show --task-id <task-id>
 
-# View the full detailed log of a specific subtone by its PID
-./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 200
+# View the detailed task log
+./dialtone.sh repl src_v3 task log --task-id <task-id> --lines 200
 
-# Watch the raw underlying NATS traffic for the REPL room
+# Watch the raw underlying NATS traffic for the REPL topic space
 ./dialtone.sh repl src_v3 watch --subject 'repl.>'
 ```
 

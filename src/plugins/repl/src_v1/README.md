@@ -2,7 +2,7 @@
 
 `repl src_v1` is the shared multiplayer command bus for Dialtone.
 
-- One host is the **leader** and is the only host that executes subtone commands.
+- One host is the **leader** and is the only host that executes task-worker commands.
 - All hosts (including leader) publish/subscribe over NATS first, then print to stdout.
 - Room traffic is topic-based: `repl.room.<room>`.
 - Command traffic is global: `repl.cmd`.
@@ -40,10 +40,10 @@ flowchart LR
   M2 -->|NATS join/chat/cmd| L
   R -->|NATS join/chat/cmd| L
 
-  L -->|subtone exec + DIALTONE output frames| W
-  L -->|subtone exec + DIALTONE output frames| M1
-  L -->|subtone exec + DIALTONE output frames| M2
-  L -->|subtone exec + DIALTONE output frames| R
+  L -->|task-worker exec + DIALTONE output frames| W
+  L -->|task-worker exec + DIALTONE output frames| M1
+  L -->|task-worker exec + DIALTONE output frames| M2
+  L -->|task-worker exec + DIALTONE output frames| R
 ```
 
 ## CLI Commands
@@ -80,9 +80,9 @@ When inside a REPL prompt:
 - `/repl src_v1 join <room-name>` switch rooms (single active room per client).
 - `/repl src_v1 who` show connected clients plus daemon presence/version.
 - `/repl src_v1 versions` show client versions by room.
-- `/ps` list leader-managed subtones.
-- `/kill <pid>` kill a subtone.
-- `@<hostname> <command>` run command on a specific host REPL client as a host subtone (example: `@chroma ls` or `@legion dir`).
+- `/ps` list leader-managed task workers.
+- `/kill <pid>` kill a task worker.
+- `@<hostname> <command>` run command on a specific host REPL client as a host task (example: `@chroma ls` or `@legion dir`).
 - `/<plugin> src_vN <command> ...` send command to leader for execution.
 - `exit` or `quit` leave session.
 
@@ -97,13 +97,13 @@ When inside a REPL prompt:
 Behavior:
 - Clients never execute Dialtone commands directly in multiplayer mode.
 - Leader executes and publishes output lines back to room topics.
-- `DIALTONE:PID>` lines are leader-formatted subtone output frames.
+- `DIALTONE:PID>` lines are leader-formatted task-worker output frames.
 - Both `/...` and `@host ...` are sent to leader first over `repl.cmd`.
 - Targeted host commands publish to `repl.cmd` as message text (`@<hostname> <command>`).
 - Leader dispatches `@host ...` as a targeted control frame to the room.
 - Only that host executes the command in its native shell (`sh -lc` on POSIX, `powershell -Command` on Windows).
 - The host publishes compact lifecycle lines only: start, command, log path, and exit code.
-- Full stdout/stderr stays in the subtone log file; it is not streamed to room output.
+- Full stdout/stderr stays in the task-worker log file; it is not streamed to room output.
 
 ## Leader and Failure Model
 - Exactly one active leader is intended for a shared room/domain.

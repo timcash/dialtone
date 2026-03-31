@@ -51,7 +51,7 @@ func Register(r *testv1.Registry) {
 				return testv1.StepRunResult{}, fmt.Errorf("shell autostart output missed the routed lifecycle contract: %w\n%s", err, out)
 			}
 			if strings.Contains(out, "\ndialtone> shell-autostart-ok") || strings.Contains(out, "\nshell-autostart-ok\n") {
-				return testv1.StepRunResult{}, fmt.Errorf("shell routed output leaked subtone payload into index/shell output\n%s", out)
+				return testv1.StepRunResult{}, fmt.Errorf("shell routed output leaked task payload into index/shell output\n%s", out)
 			}
 			for _, forbidden := range []string{
 				`assigned pid `,
@@ -72,10 +72,10 @@ func Register(r *testv1.Registry) {
 			}
 			logBody, err := os.ReadFile(logPath)
 			if err != nil {
-				return testv1.StepRunResult{}, fmt.Errorf("read subtone log %s: %w", logPath, err)
+				return testv1.StepRunResult{}, fmt.Errorf("read task log %s: %w", logPath, err)
 			}
 			if !strings.Contains(string(logBody), "shell-autostart-ok") {
-				return testv1.StepRunResult{}, fmt.Errorf("subtone log missing emitted payload\n%s", string(logBody))
+				return testv1.StepRunResult{}, fmt.Errorf("task log missing emitted payload\n%s", string(logBody))
 			}
 			st, err := readLeaderState(rt.RepoRoot)
 			if err != nil {
@@ -178,7 +178,7 @@ func Register(r *testv1.Registry) {
 				return testv1.StepRunResult{}, fmt.Errorf("shell reuse output missed the routed lifecycle contract: %w\n%s", err, out)
 			}
 			if strings.Contains(out, "\ndialtone> shell-reuse-ok") || strings.Contains(out, "\nshell-reuse-ok\n") {
-				return testv1.StepRunResult{}, fmt.Errorf("shell routed output leaked subtone payload into index/shell output\n%s", out)
+				return testv1.StepRunResult{}, fmt.Errorf("shell routed output leaked task payload into index/shell output\n%s", out)
 			}
 			for _, forbidden := range []string{
 				`assigned pid `,
@@ -311,7 +311,7 @@ func Register(r *testv1.Registry) {
 			}}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("service-start transcript failed: %w", err)
 			}
-			servicePID, err := rt.WaitForSubtonePIDForCommandAfter("proc src_v1 sleep 30", 20*time.Second, roomSeq)
+			servicePID, err := rt.WaitForTaskWorkerPIDForCommandAfter("proc src_v1 sleep 30", 20*time.Second, roomSeq)
 			if err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("missing service pid after start: %w", err)
 			}
@@ -659,7 +659,7 @@ func readLeaderState(repoRoot string) (leaderState, error) {
 }
 
 func startBackgroundWatch(rt *support.Runtime, filter string) (string, int, error) {
-	prevPID, _ := rt.LatestSubtonePID()
+	prevPID, _ := rt.LatestTaskWorkerPID()
 	command := fmt.Sprintf("repl src_v3 watch --nats-url %s --subject repl.topic.index --filter %s", rt.NATSURL, strings.TrimSpace(filter))
 	cmd := "/" + command + " &"
 	roomSeq, _ := rt.CurrentSeqs()
@@ -681,7 +681,7 @@ func startBackgroundWatch(rt *support.Runtime, filter string) (string, int, erro
 	deadline := time.Now().Add(10 * time.Second)
 	pid := 0
 	for time.Now().Before(deadline) {
-		nextPID, err := rt.LatestSubtonePID()
+		nextPID, err := rt.LatestTaskWorkerPID()
 		if err == nil && nextPID > 0 && nextPID != prevPID {
 			pid = nextPID
 			break

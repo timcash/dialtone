@@ -46,11 +46,11 @@ func Register(r *testv1.Registry) {
 
 			indexLines := strings.Join(rt.SubjectMessages("repl.topic.index"), "\n")
 			for _, forbidden := range []string{
-				`Spawning subtone`,
-				`Subtone started as pid`,
-				`Subtone topic:`,
-				`Subtone log file:`,
-				`Subtone for repl src_v3 exited`,
+				`Spawning task worker`,
+				`Task worker started as pid`,
+				`Task worker topic:`,
+				`Task worker log file:`,
+				`Task worker for repl src_v3 exited`,
 			} {
 				if strings.Contains(indexLines, forbidden) {
 					return testv1.StepRunResult{}, fmt.Errorf("index topic still contains legacy lifecycle text %q\n%s", forbidden, indexLines)
@@ -59,7 +59,7 @@ func Register(r *testv1.Registry) {
 
 			ctx.TestPassf("interactive routed command emitted a strict task-first index lifecycle")
 			return testv1.StepRunResult{
-				Report: "Joined REPL with the default hostname prompt, ran `/repl src_v3 help`, and verified the top-level `dialtone>` lifecycle is strictly task-first: request received, task queued, task topic, task log, pid assignment, and exit with no legacy subtone wording.",
+				Report: "Joined REPL with the default hostname prompt, ran `/repl src_v3 help`, and verified the top-level `dialtone>` lifecycle is strictly task-first: request received, task queued, task topic, task log, pid assignment, and exit with no legacy task-worker wording.",
 			}, nil
 		},
 	})
@@ -97,10 +97,10 @@ func Register(r *testv1.Registry) {
 			}
 			indexLines := strings.Join(rt.SubjectMessages("repl.topic.index"), "\n")
 			for _, forbidden := range []string{
-				`Spawning subtone`,
-				`Subtone started as pid`,
-				`Subtone topic:`,
-				`Subtone log file:`,
+				`Spawning task worker`,
+				`Task worker started as pid`,
+				`Task worker topic:`,
+				`Task worker log file:`,
 			} {
 				if strings.Contains(indexLines, forbidden) {
 					return testv1.StepRunResult{}, fmt.Errorf("index topic still contains legacy lifecycle text %q\n%s", forbidden, indexLines)
@@ -109,7 +109,7 @@ func Register(r *testv1.Registry) {
 
 			ctx.TestPassf("interactive routed command emitted task queue, pid, log, and exit lines")
 			return testv1.StepRunResult{
-				Report: "Joined REPL with the default hostname prompt, ran `/repl src_v3 help`, and verified the index-topic `dialtone>` transcript includes task queue, task topic, task log, pid assignment, and task exit lines without legacy subtone lifecycle text.",
+				Report: "Joined REPL with the default hostname prompt, ran `/repl src_v3 help`, and verified the index-topic `dialtone>` transcript includes task queue, task topic, task log, pid assignment, and task exit lines without legacy task-worker lifecycle text.",
 			}, nil
 		},
 	})
@@ -220,7 +220,7 @@ func Register(r *testv1.Registry) {
 				`Commands (src_v3):`,
 			} {
 				if strings.Contains(indexLines, forbidden) {
-					return testv1.StepRunResult{}, fmt.Errorf("index topic mirrored subtone payload %q\n%s", forbidden, indexLines)
+					return testv1.StepRunResult{}, fmt.Errorf("index topic mirrored task payload %q\n%s", forbidden, indexLines)
 				}
 			}
 
@@ -491,7 +491,7 @@ func Register(r *testv1.Registry) {
 }
 
 func startBackgroundWatch(rt *support.Runtime, filter string) (string, int, error) {
-	prevPID, _ := rt.LatestSubtonePID()
+	prevPID, _ := rt.LatestTaskWorkerPID()
 	commandText := fmt.Sprintf("repl src_v3 watch --nats-url %s --subject repl.topic.index --filter %s", rt.NATSURL, strings.TrimSpace(filter))
 	cmd := "/" + commandText + " &"
 	roomSeq, _ := rt.CurrentSeqs()
@@ -513,7 +513,7 @@ func startBackgroundWatch(rt *support.Runtime, filter string) (string, int, erro
 	deadline := time.Now().Add(10 * time.Second)
 	pid := 0
 	for time.Now().Before(deadline) {
-		nextPID, err := rt.LatestSubtonePID()
+		nextPID, err := rt.LatestTaskWorkerPID()
 		if err == nil && nextPID > 0 && nextPID != prevPID {
 			pid = nextPID
 			break

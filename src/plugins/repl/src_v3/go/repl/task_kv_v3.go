@@ -124,7 +124,7 @@ func (s *taskKVStore) PutQueued(taskID string, args []string, topic, logPath, ho
 	return s.put(record)
 }
 
-func (s *taskKVStore) MarkRunning(taskID string, ev proc.SubtoneEvent) error {
+func (s *taskKVStore) MarkRunning(taskID string, ev proc.TaskWorkerEvent) error {
 	record, err := s.Get(taskID)
 	if err != nil {
 		return err

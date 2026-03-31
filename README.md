@@ -11,7 +11,7 @@ The intended model is:
 - shared configuration belongs in `env/dialtone.json`; avoid plugin-specific config files or hidden exported shell state
 - `dialtone>` stays short and high-level
 - full detail belongs in the task log, task topic, and service state
-- there is no public `subtone` language; `task` and `service` are the public operator terms
+- public operator terms are `task` and `service`
 
 For long-lived services like `chrome src_v3`, the REPL is the control plane that should start, reuse, inspect, and reconcile the remote daemon instead of every plugin inventing its own launcher flow.
 Service tasks should publish heartbeats, and the REPL leader should reconcile or restart them if those heartbeats stop.

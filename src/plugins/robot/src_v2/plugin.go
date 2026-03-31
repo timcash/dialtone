@@ -24,7 +24,6 @@ import (
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
 	test_plugin "dialtone/dev/plugins/test/src_v1/go"
-	"github.com/chromedp/chromedp"
 )
 
 func replIndexInfof(format string, args ...any) {
@@ -32,7 +31,7 @@ func replIndexInfof(format string, args ...any) {
 	if msg == "" {
 		return
 	}
-	if strings.TrimSpace(os.Getenv("DIALTONE_INTERNAL_SUBTONE")) == "1" {
+	if logs.IsREPLContext() {
 		logs.Info("DIALTONE_INDEX: %s", msg)
 		return
 	}
@@ -173,7 +172,7 @@ func buildRobotLocalArtifacts(repoRoot string) error {
 			}
 			continue
 		}
-		if err := buildGoBinary(goBin, srcRoot, spec.mainPath, spec.outPath, runtime.GOOS, runtime.GOARCH); err != nil {
+		if err := buildGoBinary(goBin, srcRoot, spec.mainPath, spec.outPath, runtime.GOOS, runtime.GOARCH, ""); err != nil {
 			return err
 		}
 	}
@@ -261,7 +260,11 @@ func publishRobotSrcV2Release(repoRoot, repo, version string, targets []buildTar
 					assetPathByName[name] = out
 					continue
 				}
-				if err := buildGoBinary(goBin, srcRoot, s.MainPath, out, t.GOOS, t.GOARCH); err != nil {
+				ldflags := ""
+				if s.AssetPrefix == "dialtone_robot_v2" {
+					ldflags = fmt.Sprintf("-X main.embeddedAppVersion=%s", strings.TrimSpace(version))
+				}
+				if err := buildGoBinary(goBin, srcRoot, s.MainPath, out, t.GOOS, t.GOARCH, ldflags); err != nil {
 					logs.Warn("robot src_v2 publish: skip asset %s (%s/%s build failed: %v)", name, t.GOOS, t.GOARCH, err)
 					continue
 				}
@@ -505,11 +508,16 @@ func renderReleaseAssetTemplate(raw, goos, goarch string) string {
 	return v
 }
 
-func buildGoBinary(goBin, srcRoot, mainPath, out, goos, goarch string) error {
+func buildGoBinary(goBin, srcRoot, mainPath, out, goos, goarch, ldflags string) error {
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		return err
 	}
-	cmd := exec.Command(goBin, "build", "-o", out, mainPath)
+	args := []string{"build"}
+	if strings.TrimSpace(ldflags) != "" {
+		args = append(args, "-ldflags", strings.TrimSpace(ldflags))
+	}
+	args = append(args, "-o", out, mainPath)
+	cmd := exec.Command(goBin, args...)
 	cmd.Dir = srcRoot
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS="+goos, "GOARCH="+goarch)
 	cmd.Stdout = os.Stdout
@@ -1459,7 +1467,7 @@ func runRobotSrcV2MenuDiagnostic(uiURL, browserNode, repoRoot, expectedRobotVers
 				return test_plugin.StepRunResult{}, err
 			}
 			ctx.Infof("[ACTION] browser ready")
-			if err := ctx.RunBrowser(chromedp.Navigate(urlBase + "/#hero")); err != nil {
+			if err := ctx.Goto(urlBase + "/#hero"); err != nil {
 				return test_plugin.StepRunResult{}, fmt.Errorf("navigate robot ui: %w", err)
 			}
 			ctx.Infof("[ACTION] navigated to robot ui")
@@ -1511,7 +1519,7 @@ func runRobotSrcV2MenuDiagnostic(uiURL, browserNode, repoRoot, expectedRobotVers
 				"settings section version button did not converge to backend version",
 			); err != nil {
 				var debugInfo string
-				_ = ctx.RunBrowser(chromedp.Evaluate(`(() => {
+				_ = ctx.Evaluate(`(() => {
 				  const section = document.querySelector("[aria-label='Settings Section']");
 				  const active = section ? section.getAttribute("data-active") : "";
 				  const buttons = Array.from(document.querySelectorAll("[aria-label='Settings Section'] button")).map((b) => ({
@@ -1523,18 +1531,18 @@ func runRobotSrcV2MenuDiagnostic(uiURL, browserNode, repoRoot, expectedRobotVers
 				    aria: b.getAttribute("aria-label") || ""
 				  }));
 				  return JSON.stringify({ active, buttons, allButtons });
-				})()`, &debugInfo))
+				})()`, &debugInfo)
 				return test_plugin.StepRunResult{}, fmt.Errorf("%w; debug=%s", err, strings.TrimSpace(debugInfo))
 			}
 			var settingsVersionText string
-			if err := ctx.RunBrowser(chromedp.Evaluate(`(() => {
+			if err := ctx.Evaluate(`(() => {
 			  const section = document.querySelector("[aria-label='Settings Section']");
 			  const byAria = document.querySelector("button[aria-label='Robot Version Button']");
 			  const byText = section ? Array.from(section.querySelectorAll("button")).find((b) => /^version:\S+/i.test((b.textContent || "").trim())) : null;
 			  const btn = byAria || byText;
 			  if (!(btn instanceof HTMLButtonElement)) return "";
 			  return (btn.textContent || "").trim();
-			})()`, &settingsVersionText)); err != nil {
+			})()`, &settingsVersionText); err != nil {
 				return test_plugin.StepRunResult{}, err
 			}
 			settingsVersionText = strings.TrimSpace(settingsVersionText)
@@ -1562,7 +1570,7 @@ func waitForBrowserJSCondition(ctx *test_plugin.StepContext, timeout time.Durati
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		var ok bool
-		if err := ctx.RunBrowser(chromedp.Evaluate(expr, &ok)); err == nil && ok {
+		if err := ctx.Evaluate(expr, &ok); err == nil && ok {
 			return nil
 		}
 		time.Sleep(250 * time.Millisecond)

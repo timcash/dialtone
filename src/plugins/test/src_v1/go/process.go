@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// WaitForAllProcessesToComplete waits until 'dialtone.sh ps' returns "No active subtones."
+// WaitForAllProcessesToComplete waits until 'dialtone.sh ps' returns "No active task workers."
 // or the timeout is reached.
 func WaitForAllProcessesToComplete(repoRoot string, timeout time.Duration) error {
 	dialtoneSh := filepath.Join(repoRoot, "dialtone.sh")
@@ -21,10 +21,10 @@ func WaitForAllProcessesToComplete(repoRoot string, timeout time.Duration) error
 		output := string(out)
 
 		if err == nil {
-			// Check for "No active subtones" or equivalent empty state
-			// Current implementation prints "DIALTONE> No active subtones." or just headers if none?
-			// dev.go: "DIALTONE> No active subtones." if len==0
-			if strings.Contains(output, "No active subtones") {
+			// Check for "No active task workers" or equivalent empty state
+			// Current implementation prints "DIALTONE> No active task workers." or just headers if none?
+			// dev.go: "DIALTONE> No active task workers." if len==0
+			if strings.Contains(output, "No active task workers") {
 				return nil
 			}
 		}

@@ -13,21 +13,19 @@ import (
 	"time"
 
 	configv1 "dialtone/dev/plugins/config/src_v1/go"
-	testv1 "dialtone/dev/plugins/test/src_v1/go"
 	uiv1 "dialtone/dev/plugins/ui/src_v1/go"
 )
 
 type TestContext struct {
-	mu         sync.Mutex
-	repoRoot   string
-	pluginDir  string
-	appDir     string
-	distDir    string
-	server     *http.Server
-	serverURL  string
-	built      bool
-	devStarted bool
-	stepCtx    *StepContext
+	mu        sync.Mutex
+	repoRoot  string
+	pluginDir string
+	appDir    string
+	distDir   string
+	server    *http.Server
+	serverURL string
+	built     bool
+	stepCtx   *StepContext
 }
 
 var (
@@ -108,39 +106,39 @@ func (t *TestContext) ensureAttachDevServerLocked() error {
 		}
 		t.built = true
 	}
-	const localDevURL = "http://127.0.0.1:5177"
-	t.serverURL = localDevURL
+	const attachURL = "http://127.0.0.1:5177"
+	t.serverURL = attachURL
 
-	if err := waitHTTP(localDevURL, 1500*time.Millisecond); err == nil {
-		t.logf("LOOKING FOR: persistent ui dev server already running at %s", localDevURL)
+	if t.server != nil {
+		return nil
+	}
+	if err := waitHTTP(attachURL+"/health", 1500*time.Millisecond); err == nil {
+		t.logf("LOOKING FOR: persistent ui fixture server already running at %s", attachURL)
 		return nil
 	}
 
-	if !t.devStarted {
-		t.devStarted = true
-		t.logf("LOOKING FOR: starting persistent ui dev server in background at %s", localDevURL)
-		go func(repoRoot, pluginDir, uiDir string) {
-			if err := testv1.RunDev(testv1.DevOptions{
-				RepoRoot:          repoRoot,
-				PluginDir:         pluginDir,
-				UIDir:             uiDir,
-				DevPort:           5177,
-				DevHost:           "127.0.0.1",
-				DevPublicURL:      localDevURL,
-				Role:              "ui-dev",
-				DisableBrowser:    true,
-				BrowserMetaPath:   filepath.Join(pluginDir, "dev.browser.json"),
-				NATSURL:           ResolveSuiteNATSURL(),
-				NATSSubject:       "logs.dev.ui.src-v1",
-			}); err != nil {
-				t.logf("WARN: background ui dev server exited: %v", err)
-			}
-		}(t.repoRoot, t.pluginDir, t.appDir)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("ok"))
+	})
+	mux.Handle("/", http.FileServer(http.Dir(t.distDir)))
+
+	ln, err := net.Listen("tcp", "0.0.0.0:5177")
+	if err != nil {
+		return fmt.Errorf("start attach ui fixture server on %s: %w", attachURL, err)
 	}
-	if err := waitHTTP(localDevURL, 45*time.Second); err != nil {
-		return fmt.Errorf("background ui dev server did not become ready at %s: %w", localDevURL, err)
+	t.server = &http.Server{Handler: mux}
+	t.logf("LOOKING FOR: starting persistent ui fixture server at %s", attachURL)
+	go func() {
+		_ = t.server.Serve(ln)
+	}()
+	if err := waitHTTP(attachURL+"/health", 8*time.Second); err != nil {
+		_ = t.server.Close()
+		t.server = nil
+		return fmt.Errorf("persistent ui fixture server did not become ready at %s: %w", attachURL, err)
 	}
-	t.logf("LOOKING FOR: persistent ui dev server ready at %s", localDevURL)
+	t.logf("LOOKING FOR: persistent ui fixture server ready at %s", attachURL)
 	return nil
 }
 

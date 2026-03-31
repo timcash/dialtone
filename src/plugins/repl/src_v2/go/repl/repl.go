@@ -267,7 +267,7 @@ func printHelp() {
 	fmt.Println("  /ssh <node> <cmd>      Run SSH command")
 	fmt.Println("  /session <set|get>     Manage session state")
 	fmt.Println("  /status                Show config status")
-	fmt.Println("  /ps                    List subtones")
+	fmt.Println("  /ps                    List task workers")
 	fmt.Println("  exit                   Quit REPL")
 }
 
@@ -309,10 +309,10 @@ func executeCommand(line string, bin string) error {
 func printManagedProcesses() {
 	procs := proc.ListManagedProcesses()
 	if len(procs) == 0 {
-		fmt.Println("DIALTONE> No active subtones.")
+		fmt.Println("DIALTONE> No active task workers.")
 		return
 	}
-	fmt.Println("DIALTONE> Active Subtones:")
+	fmt.Println("DIALTONE> Active Task Workers:")
 	fmt.Printf("%-8s %-10s %s\n", "PID", "CPU%", "COMMAND")
 	for _, p := range procs {
 		fmt.Printf("%-8d %-10.1f %s\n", p.PID, p.CPUPercent, p.Command)

@@ -30,7 +30,7 @@ type busFrame struct {
 	Args       []string `json:"args,omitempty"`
 	Prefix     string   `json:"prefix,omitempty"`
 	Message    string   `json:"message,omitempty"`
-	SubtonePID int      `json:"subtone_pid,omitempty"`
+	PID        int      `json:"pid,omitempty"`
 	LogPath    string   `json:"log_path,omitempty"`
 	ExitCode   int      `json:"exit_code,omitempty"`
 	Ready      bool     `json:"ready,omitempty"`
@@ -218,8 +218,8 @@ func printFrame(subject string, f busFrame, showSubject bool) {
 
 	// Determine UI branding based on Scope and Kind
 	brand := "DIALTONE"
-	if f.Scope == "subtone" && f.SubtonePID > 0 {
-		brand = fmt.Sprintf("DIALTONE:%d", f.SubtonePID)
+	if f.Scope == "task-worker" && f.PID > 0 {
+		brand = fmt.Sprintf("DIALTONE:%d", f.PID)
 	} else if f.Prefix != "" {
 		brand = f.Prefix
 	}

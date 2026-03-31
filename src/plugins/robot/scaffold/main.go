@@ -33,7 +33,7 @@ func main() {
 
 func parseArgs(args []string) (version, command string, rest []string, warnedOldOrder bool, err error) {
 	if len(args) == 0 {
-		return "", "", nil, false, fmt.Errorf("missing arguments")
+		return "src_v2", "help", nil, false, nil
 	}
 	if isHelp(args[0]) {
 		return "src_v2", "help", nil, false, nil
@@ -47,9 +47,7 @@ func parseArgs(args []string) (version, command string, rest []string, warnedOld
 	if len(args) >= 2 && strings.HasPrefix(args[1], "src_v") {
 		return args[1], args[0], args[2:], true, nil
 	}
-
-	// Fallback: no explicit version provided, use latest version and first arg as command.
-	return "", args[0], args[1:], false, nil
+	return "", "", nil, false, fmt.Errorf("expected version as first robot argument (for example: ./dialtone.sh robot src_v2 diagnostic)")
 }
 
 func isHelp(s string) bool {

@@ -65,7 +65,7 @@ func newServiceRegistry(limit int) *serviceRegistry {
 	}
 }
 
-func (r *serviceRegistry) Started(name, room string, ev proc.SubtoneEvent) {
+func (r *serviceRegistry) Started(name, room string, ev proc.TaskWorkerEvent) {
 	if r == nil || ev.PID <= 0 {
 		return
 	}

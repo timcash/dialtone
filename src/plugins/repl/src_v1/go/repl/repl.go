@@ -49,28 +49,28 @@ const (
 )
 
 const controlJoinRoom = "join_room"
-const controlRunHostSubtone = "run_host_subtone"
+const controlRunHostTask = "run_host_task"
 
 type Hooks struct {
-	RunSubtoneWithEvents func(args []string, onEvent proc.SubtoneEventHandler) int
+	RunTaskWorkerWithEvents func(args []string, onEvent proc.TaskWorkerEventHandler) int
 	ListManaged          func() []proc.ManagedProcessSnapshot
 	KillManagedProcess   func(pid int) error
 }
 
 var (
-	runSubtoneWithEventsFn = proc.RunSubtoneWithEvents
+	runTaskWorkerWithEventsFn = proc.RunTaskWorkerWithEvents
 	listManagedFn          = proc.ListManagedProcesses
 	killManagedProcessFn   = proc.KillManagedProcess
 )
 
 // SetHooksForTest overrides REPL side-effect functions and returns a restore function.
 func SetHooksForTest(h Hooks) func() {
-	prevRunSubtoneWithEvents := runSubtoneWithEventsFn
+	prevRunTaskWorkerWithEvents := runTaskWorkerWithEventsFn
 	prevListManaged := listManagedFn
 	prevKillManaged := killManagedProcessFn
 
-	if h.RunSubtoneWithEvents != nil {
-		runSubtoneWithEventsFn = h.RunSubtoneWithEvents
+	if h.RunTaskWorkerWithEvents != nil {
+		runTaskWorkerWithEventsFn = h.RunTaskWorkerWithEvents
 	}
 	if h.ListManaged != nil {
 		listManagedFn = h.ListManaged
@@ -79,7 +79,7 @@ func SetHooksForTest(h Hooks) func() {
 		killManagedProcessFn = h.KillManagedProcess
 	}
 	return func() {
-		runSubtoneWithEventsFn = prevRunSubtoneWithEvents
+		runTaskWorkerWithEventsFn = prevRunTaskWorkerWithEvents
 		listManagedFn = prevListManaged
 		killManagedProcessFn = prevKillManaged
 	}
@@ -251,7 +251,7 @@ func RunLeader(args []string) error {
 				publishRoom(currentRoom, BusFrame{
 					Type:    frameTypeControl,
 					Target:  targetHost,
-					Command: controlRunHostSubtone,
+					Command: controlRunHostTask,
 					Room:    currentRoom,
 					Message: targetCommand,
 				})
@@ -259,7 +259,7 @@ func RunLeader(args []string) error {
 					Type:    frameTypeLine,
 					Prefix:  "DIALTONE",
 					Room:    currentRoom,
-					Message: fmt.Sprintf("Dispatching host subtone on %s.", targetHost),
+					Message: fmt.Sprintf("Dispatching host task on %s.", targetHost),
 				})
 				return
 			}
@@ -405,7 +405,7 @@ func RunJoin(args []string) error {
 			_ = switchRoom(nextRoom, true)
 			return
 		}
-		if frame.Type == frameTypeControl && frame.Target == prompt && frame.Command == controlRunHostSubtone {
+		if frame.Type == frameTypeControl && frame.Target == prompt && frame.Command == controlRunHostTask {
 			command := strings.TrimSpace(frame.Message)
 			targetRoom := sanitizeRoom(frame.Room)
 			if targetRoom == "" {
@@ -417,9 +417,9 @@ func RunJoin(args []string) error {
 			go func(room, host, cmdText string) {
 				hostRunMu.Lock()
 				defer hostRunMu.Unlock()
-				exitCode := proc.RunHostCommandWithEvents(cmdText, func(ev proc.SubtoneEvent) {
+				exitCode := proc.RunHostCommandWithEvents(cmdText, func(ev proc.TaskWorkerEvent) {
 					switch ev.Type {
-					case proc.SubtoneEventStarted:
+					case proc.TaskWorkerEventStarted:
 						prefix := fmt.Sprintf("DIALTONE:%d:%s", ev.PID, host)
 						_ = publishFrame(nc, replRoomSubject(room), BusFrame{
 							Type:    frameTypeLine,
@@ -447,7 +447,7 @@ func RunJoin(args []string) error {
 					Type:    frameTypeLine,
 					Room:    room,
 					Prefix:  "DIALTONE",
-					Message: fmt.Sprintf("Subtone on %s exited with code %d.", host, exitCode),
+					Message: fmt.Sprintf("Task on %s exited with code %d.", host, exitCode),
 				})
 				_ = nc.FlushTimeout(1200 * time.Millisecond)
 			}(targetRoom, prompt, command)
@@ -816,7 +816,7 @@ func executeCommand(line string, emit func(prefix, msg string)) {
 		cmdName = strings.TrimSuffix(cmdName, " &")
 	}
 
-	emit("DIALTONE", fmt.Sprintf("Request received. Spawning subtone for %s...", cmdName))
+	emit("DIALTONE", fmt.Sprintf("Request received. Starting task worker for %s...", cmdName))
 	heartbeatInterval := 5 * time.Second
 	if raw := strings.TrimSpace(os.Getenv("DIALTONE_SUBTONE_HEARTBEAT_SEC")); raw != "" {
 		if sec, err := strconv.Atoi(raw); err == nil && sec > 0 {
@@ -845,9 +845,9 @@ func executeCommand(line string, emit func(prefix, msg string)) {
 	stopHeartbeatOnce := sync.OnceFunc(func() {
 		close(stopHeartbeat)
 	})
-	onEvent := func(ev proc.SubtoneEvent) {
+	onEvent := func(ev proc.TaskWorkerEvent) {
 		switch ev.Type {
-		case proc.SubtoneEventStarted:
+		case proc.TaskWorkerEventStarted:
 			if ev.PID <= 0 {
 				return
 			}
@@ -857,14 +857,14 @@ func executeCommand(line string, emit func(prefix, msg string)) {
 				emit(fmt.Sprintf("DIALTONE:%d", ev.PID), fmt.Sprintf("Log: %s", ev.LogPath))
 			}
 			startHeartbeat(ev.PID, ev.StartedAt)
-		case proc.SubtoneEventStdout:
+		case proc.TaskWorkerEventStdout:
 			if ev.PID <= 0 {
 				return
 			}
 			if hasStructuredLevel(ev.Line) {
 				emit(fmt.Sprintf("DIALTONE:%d", ev.PID), ev.Line)
 			}
-		case proc.SubtoneEventStderr:
+		case proc.TaskWorkerEventStderr:
 			if ev.PID <= 0 {
 				return
 			}
@@ -873,20 +873,20 @@ func executeCommand(line string, emit func(prefix, msg string)) {
 				return
 			}
 			emit(fmt.Sprintf("DIALTONE:%d", ev.PID), "[ERROR] "+line)
-		case proc.SubtoneEventExited:
+		case proc.TaskWorkerEventExited:
 			stopHeartbeatOnce()
 			if ev.PID > 0 {
-				emit("DIALTONE", fmt.Sprintf("Subtone for %s exited with code %d.", cmdName, ev.ExitCode))
+				emit("DIALTONE", fmt.Sprintf("Task worker for %s exited with code %d.", cmdName, ev.ExitCode))
 			}
 		}
 	}
 
 	if isBackground {
-		go runSubtoneWithEventsFn(args, onEvent)
-		emit("DIALTONE", fmt.Sprintf("Subtone for %s started in background.", cmdName))
+		go runTaskWorkerWithEventsFn(args, onEvent)
+		emit("DIALTONE", fmt.Sprintf("Task worker for %s started in background.", cmdName))
 		return
 	}
-	runSubtoneWithEventsFn(args, onEvent)
+	runTaskWorkerWithEventsFn(args, onEvent)
 }
 
 func printHelp(emit func(prefix, msg string)) {
@@ -905,17 +905,17 @@ func printHelp(emit func(prefix, msg string)) {
 		"Install dag src_v3 dependencies",
 		"",
 		"`logs src_v1 test`",
-		"Run logs plugin tests on a subtone",
+		"Run logs plugin tests on a task worker",
 		"",
 		"System",
 		"`ps`",
-		"List active subtones",
+		"List active task workers",
 		"",
 		"`kill <pid>`",
-		"Kill a managed subtone process by PID",
+		"Kill a managed task-worker process by PID",
 		"",
 		"`<any command>`",
-		"Run any dialtone command on a managed subtone",
+		"Run any dialtone command on a managed task worker",
 	}
 	for _, line := range content {
 		emit("DIALTONE", line)
@@ -925,10 +925,10 @@ func printHelp(emit func(prefix, msg string)) {
 func printManagedProcesses(emit func(prefix, msg string)) {
 	procs := listManagedFn()
 	if len(procs) == 0 {
-		emit("DIALTONE", "No active subtones.")
+		emit("DIALTONE", "No active task workers.")
 		return
 	}
-	emit("DIALTONE", "Active Subtones:")
+	emit("DIALTONE", "Active Task Workers:")
 	emit("DIALTONE", fmt.Sprintf("%-8s %-8s %-10s %-8s %s", "PID", "UPTIME", "CPU%", "PORTS", "COMMAND"))
 	for _, p := range procs {
 		emit("DIALTONE", fmt.Sprintf("%-8d %-8s %-10.1f %-8d %s", p.PID, p.StartedAgo, p.CPUPercent, p.PortCount, p.Command))

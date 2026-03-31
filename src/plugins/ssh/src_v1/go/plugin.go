@@ -17,7 +17,7 @@ func replIndexInfof(format string, args ...any) {
 	if msg == "" {
 		return
 	}
-	if strings.TrimSpace(os.Getenv("DIALTONE_INTERNAL_SUBTONE")) == "1" {
+	if logs.IsREPLContext() {
 		logs.Info("DIALTONE_INDEX: %s", msg)
 		return
 	}
@@ -103,7 +103,7 @@ func normalizeArgs(args []string) ([]string, bool, error) {
 		}
 		return append([]string{args[0]}, args[2:]...), true, nil
 	}
-	return args, false, nil
+	return nil, false, fmt.Errorf("expected version as first ssh argument (usage: ./dialtone.sh ssh src_v1 <command> [args])")
 }
 
 func PrintUsage() {

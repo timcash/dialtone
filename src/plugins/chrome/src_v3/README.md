@@ -27,7 +27,7 @@ In the task-first REPL design, a normal Chrome command should behave like this:
 host-name> /chrome src_v3 status --host legion --role dev
 dialtone> Request received.
 dialtone> Task queued as task-20260327-abc123.
-dialtone> Task room: task.task-20260327-abc123
+dialtone> Task topic: task.task-20260327-abc123
 dialtone> Task log: ~/.dialtone/logs/task-20260327-abc123.log
 dialtone> chrome service on legion role=dev is healthy.
 dialtone> Task task-20260327-abc123 exited with code 0.

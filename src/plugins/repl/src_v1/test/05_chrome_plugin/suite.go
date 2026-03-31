@@ -21,12 +21,12 @@ func Register(r *testv1.Registry) {
 			}
 			if err := support.RequireContainsAll(out, []string{
 				prompt + "> chrome src_v1 list",
-				"DIALTONE> Request received. Spawning subtone for chrome src_v1...",
-				"DIALTONE> Subtone for chrome src_v1 exited with code 0.",
+				"DIALTONE> Request received. Starting task worker for chrome src_v1...",
+				"DIALTONE> Task worker for chrome src_v1 exited with code 0.",
 			}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("chrome foundation check failed: %w", err)
 			}
-			return testv1.StepRunResult{Report: "chrome foundation command executed through repl subtone"}, nil
+			return testv1.StepRunResult{Report: "chrome foundation command executed through repl task worker"}, nil
 		},
 	})
 }

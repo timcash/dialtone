@@ -13,17 +13,17 @@ import (
 	"time"
 )
 
-type SubtoneEventType string
+type TaskWorkerEventType string
 
 const (
-	SubtoneEventStarted SubtoneEventType = "started"
-	SubtoneEventStdout  SubtoneEventType = "stdout"
-	SubtoneEventStderr  SubtoneEventType = "stderr"
-	SubtoneEventExited  SubtoneEventType = "exited"
+	TaskWorkerEventStarted TaskWorkerEventType = "started"
+	TaskWorkerEventStdout  TaskWorkerEventType = "stdout"
+	TaskWorkerEventStderr  TaskWorkerEventType = "stderr"
+	TaskWorkerEventExited  TaskWorkerEventType = "exited"
 )
 
-type SubtoneEvent struct {
-	Type      SubtoneEventType
+type TaskWorkerEvent struct {
+	Type      TaskWorkerEventType
 	PID       int
 	Args      []string
 	LogPath   string
@@ -32,13 +32,13 @@ type SubtoneEvent struct {
 	ExitCode  int
 }
 
-type SubtoneEventHandler func(SubtoneEvent)
+type TaskWorkerEventHandler func(TaskWorkerEvent)
 
-func RunSubtone(args []string) int {
-	return RunSubtoneWithEvents(args, nil)
+func RunTaskWorker(args []string) int {
+	return RunTaskWorkerWithEvents(args, nil)
 }
 
-func RunSubtoneWithEvents(args []string, onEvent SubtoneEventHandler) int {
+func RunTaskWorkerWithEvents(args []string, onEvent TaskWorkerEventHandler) int {
 	cwd, _ := os.Getwd()
 	repoRoot := cwd
 	if filepath.Base(cwd) == "src" {
@@ -46,20 +46,19 @@ func RunSubtoneWithEvents(args []string, onEvent SubtoneEventHandler) int {
 	}
 	dialtoneSh := filepath.Join(repoRoot, "dialtone.sh")
 
-	internalArgs := append([]string{"--subtone-internal"}, args...)
-	cmd := exec.Command(dialtoneSh, internalArgs...)
+	cmd := exec.Command(dialtoneSh, args...)
 	cmd.Dir = repoRoot
 	cmd.Env = append(os.Environ(), "DIALTONE_CONTEXT=repl")
 	logDir := filepath.Join(defaultDialtoneHome(), "logs")
 	return runCommandWithEvents(cmd, args, logDir, onEvent)
 }
 
-func RunHostCommandWithEvents(command string, onEvent SubtoneEventHandler) int {
+func RunHostCommandWithEvents(command string, onEvent TaskWorkerEventHandler) int {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		if onEvent != nil {
-			onEvent(SubtoneEvent{
-				Type:     SubtoneEventExited,
+			onEvent(TaskWorkerEvent{
+				Type:     TaskWorkerEventExited,
 				ExitCode: 1,
 				Line:     "empty host command",
 			})
@@ -80,8 +79,8 @@ func RunHostCommandWithEvents(command string, onEvent SubtoneEventHandler) int {
 	return runCommandWithEvents(cmd, trackArgs, logDir, onEvent)
 }
 
-func runCommandWithEvents(cmd *exec.Cmd, trackArgs []string, logDir string, onEvent SubtoneEventHandler) int {
-	emit := func(ev SubtoneEvent) {
+func runCommandWithEvents(cmd *exec.Cmd, trackArgs []string, logDir string, onEvent TaskWorkerEventHandler) int {
+	emit := func(ev TaskWorkerEvent) {
 		if onEvent != nil {
 			onEvent(ev)
 		}
@@ -93,12 +92,12 @@ func runCommandWithEvents(cmd *exec.Cmd, trackArgs []string, logDir string, onEv
 	stderr, _ := cmd.StderrPipe()
 
 	if err := cmd.Start(); err != nil {
-		emit(SubtoneEvent{
-			Type:     SubtoneEventExited,
+		emit(TaskWorkerEvent{
+			Type:     TaskWorkerEventExited,
 			PID:      0,
 			Args:     append([]string(nil), trackArgs...),
 			ExitCode: 1,
-			Line:     fmt.Sprintf("failed to start subtone: %v", err),
+			Line:     fmt.Sprintf("failed to start task worker: %v", err),
 		})
 		return 1
 	}
@@ -107,7 +106,7 @@ func runCommandWithEvents(cmd *exec.Cmd, trackArgs []string, logDir string, onEv
 	TrackProcess(pid, trackArgs)
 	defer UntrackProcess(pid)
 
-	logger, err := NewSubtoneLogger(pid, trackArgs, logDir)
+	logger, err := NewTaskWorkerLogger(pid, trackArgs, logDir)
 	if err == nil {
 		logger.StartHeartbeat(3 * time.Second)
 		defer logger.Stop()
@@ -118,8 +117,8 @@ func runCommandWithEvents(cmd *exec.Cmd, trackArgs []string, logDir string, onEv
 		logPath = logger.LogPath
 		startedAt = logger.StartTime
 	}
-	emit(SubtoneEvent{
-		Type:      SubtoneEventStarted,
+	emit(TaskWorkerEvent{
+		Type:      TaskWorkerEventStarted,
 		PID:       pid,
 		Args:      append([]string(nil), trackArgs...),
 		LogPath:   logPath,
@@ -134,8 +133,8 @@ func runCommandWithEvents(cmd *exec.Cmd, trackArgs []string, logDir string, onEv
 			if logger != nil {
 				logger.LogLine(line)
 			}
-			emit(SubtoneEvent{
-				Type: SubtoneEventStdout,
+			emit(TaskWorkerEvent{
+				Type: TaskWorkerEventStdout,
 				PID:  pid,
 				Line: line,
 			})
@@ -152,8 +151,8 @@ func runCommandWithEvents(cmd *exec.Cmd, trackArgs []string, logDir string, onEv
 		if logger != nil {
 			logger.LogError(line)
 		}
-		emit(SubtoneEvent{
-			Type: SubtoneEventStderr,
+		emit(TaskWorkerEvent{
+			Type: TaskWorkerEventStderr,
 			PID:  pid,
 			Line: line,
 		})
@@ -173,8 +172,8 @@ func runCommandWithEvents(cmd *exec.Cmd, trackArgs []string, logDir string, onEv
 	if exitCode == 1 && reportedExitCode > 1 {
 		exitCode = reportedExitCode
 	}
-	emit(SubtoneEvent{
-		Type:     SubtoneEventExited,
+	emit(TaskWorkerEvent{
+		Type:     TaskWorkerEventExited,
 		PID:      pid,
 		Args:     append([]string(nil), trackArgs...),
 		ExitCode: exitCode,

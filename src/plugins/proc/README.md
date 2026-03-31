@@ -1,6 +1,6 @@
 # proc Plugin
 
-Managed process/subtone library + CLI.
+Managed process/task-worker library + CLI.
 
 Provides:
 - `proc src_v1 sleep <seconds>`

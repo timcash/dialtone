@@ -126,14 +126,15 @@ class VideoControl implements VisualizationControl {
 
   private async bookmarkFrame() {
     try {
+      const img = this.img;
       const canvas = document.createElement('canvas');
-      canvas.width = this.img.naturalWidth || 1280;
-      canvas.height = this.img.naturalHeight || 720;
+      canvas.width = img?.naturalWidth || 1280;
+      canvas.height = img?.naturalHeight || 720;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      if (this.img && this.img.complete && this.img.naturalWidth > 0 && this.img.naturalHeight > 0) {
-        ctx.drawImage(this.img, 0, 0, canvas.width, canvas.height);
+      if (img && img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       } else {
         ctx.fillStyle = '#05070a';
         ctx.fillRect(0, 0, canvas.width, canvas.height);

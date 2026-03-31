@@ -119,7 +119,7 @@ Immediate debug follow-up inside this lane:
 
 As code changes land:
 
-- remove stale `subtone` / `room` language
+- remove stale task-worker / room language
 - keep plugin READMEs aligned with actual command flags and defaults
 - keep examples versioned and current
 - rerun focused tmux-visible tests after each substantial change

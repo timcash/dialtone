@@ -159,7 +159,7 @@ func Register(r *testv1.Registry) {
 
 			ctx.TestPassf("ssh remote command routed through llm-codex REPL prompt path via alias %s", hostName)
 			return testv1.StepRunResult{
-				Report: fmt.Sprintf("Joined REPL as llm-codex, added the sample SSH host alias `%s` through the REPL prompt flow, exercised SSH resolve through the prompt, verified the SSH resolve report selected the expected host/user/port plus a usable auth source and host-key mode, confirmed reachability and auth with the REPL SSH probe, then ran `whoami` through the REPL SSH subtone and verified the remote user output.", hostName),
+				Report: fmt.Sprintf("Joined REPL as llm-codex, added the sample SSH host alias `%s` through the REPL prompt flow, exercised SSH resolve through the prompt, verified the SSH resolve report selected the expected host/user/port plus a usable auth source and host-key mode, confirmed reachability and auth with the REPL SSH probe, then ran `whoami` through the REPL SSH task and verified the remote user output.", hostName),
 			}, nil
 		},
 	})

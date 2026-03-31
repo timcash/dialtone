@@ -52,7 +52,7 @@ func heartbeatSubject(host, mode, serviceName string, pid int) string {
 	return fmt.Sprintf("repl.host.%s.heartbeat.%s.unknown", host, mode)
 }
 
-func buildManagedHeartbeat(host, room, mode, serviceName string, ev proc.SubtoneEvent, state string, exitCode int) managedHeartbeat {
+func buildManagedHeartbeat(host, room, mode, serviceName string, ev proc.TaskWorkerEvent, state string, exitCode int) managedHeartbeat {
 	now := time.Now().UTC()
 	h := managedHeartbeat{
 		Host:        strings.TrimSpace(host),

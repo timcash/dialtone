@@ -11,7 +11,6 @@ type TableRow = {
 
 class TableControl implements VisualizationControl {
   private allRows = new Map<string, TableRow>();
-  private visible = false;
   private unsubscribe: (() => void) | null = null;
   private lastStatusText = '';
   private lastCommandAckCommand = '';
@@ -126,7 +125,6 @@ class TableControl implements VisualizationControl {
   }
 
   setVisible(visible: boolean): void {
-    this.visible = visible;
     if (visible) {
       this.subscribe();
       this.renderRows();

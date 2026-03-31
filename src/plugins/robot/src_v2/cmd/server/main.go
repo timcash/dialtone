@@ -23,6 +23,8 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+var embeddedAppVersion string
+
 type initResponse struct {
 	Version        string `json:"version"`
 	WSPort         int    `json:"ws_port"`
@@ -459,6 +461,9 @@ func uiDistReady(uiDist string) bool {
 
 func resolveAppVersion(uiDist string) string {
 	if v := strings.TrimSpace(os.Getenv("APP_VERSION")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(embeddedAppVersion); v != "" {
 		return v
 	}
 	if strings.TrimSpace(uiDist) == "" {

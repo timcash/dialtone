@@ -13,7 +13,6 @@ import {
 } from '../../data/steering_settings';
 
 class SteeringSettingsControl implements VisualizationControl {
-  private visible = false;
   private selectedIndex = 0;
   private settings: SteeringSettings = loadSteeringSettings();
   private status = 'Loaded';
@@ -84,7 +83,6 @@ class SteeringSettingsControl implements VisualizationControl {
   dispose(): void {}
 
   setVisible(visible: boolean): void {
-    this.visible = visible;
     if (visible) {
       this.settings = loadSteeringSettings();
       this.render();

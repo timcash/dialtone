@@ -6,6 +6,10 @@
 
 ```sh
 ./dialtone.sh config src_v1 help
+./dialtone.sh config src_v1 install
+./dialtone.sh config src_v1 format
+./dialtone.sh config src_v1 lint
+./dialtone.sh config src_v1 build
 ./dialtone.sh config src_v1 runtime
 ./dialtone.sh config src_v1 apply
 ./dialtone.sh config src_v1 test

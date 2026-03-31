@@ -26,7 +26,7 @@ func replIndexInfof(format string, args ...any) {
 	if msg == "" {
 		return
 	}
-	if strings.TrimSpace(os.Getenv("DIALTONE_INTERNAL_SUBTONE")) == "1" {
+	if logs.IsREPLContext() {
 		logs.Info("DIALTONE_INDEX: %s", msg)
 		return
 	}

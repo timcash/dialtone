@@ -11,7 +11,7 @@ import (
 	"github.com/shirou/gopsutil/v3/process"
 )
 
-type SubtoneLogger struct {
+type TaskWorkerLogger struct {
 	PID        int
 	LogPath    string
 	StartTime  time.Time
@@ -22,7 +22,7 @@ type SubtoneLogger struct {
 	file       *os.File
 }
 
-func NewSubtoneLogger(pid int, args []string, logDir string) (*SubtoneLogger, error) {
+func NewTaskWorkerLogger(pid int, args []string, logDir string) (*TaskWorkerLogger, error) {
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -33,7 +33,7 @@ func NewSubtoneLogger(pid int, args []string, logDir string) (*SubtoneLogger, er
 	if err != nil {
 		return nil, err
 	}
-	logger := &SubtoneLogger{
+	logger := &TaskWorkerLogger{
 		PID:        pid,
 		LogPath:    path,
 		StartTime:  startedAt,
@@ -45,7 +45,7 @@ func NewSubtoneLogger(pid int, args []string, logDir string) (*SubtoneLogger, er
 	return logger, nil
 }
 
-func (l *SubtoneLogger) StartHeartbeat(interval time.Duration) {
+func (l *TaskWorkerLogger) StartHeartbeat(interval time.Duration) {
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -60,7 +60,7 @@ func (l *SubtoneLogger) StartHeartbeat(interval time.Duration) {
 	}()
 }
 
-func (l *SubtoneLogger) Stop() {
+func (l *TaskWorkerLogger) Stop() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	select {
@@ -74,11 +74,11 @@ func (l *SubtoneLogger) Stop() {
 	}
 }
 
-func (l *SubtoneLogger) LogLine(line string) {
+func (l *TaskWorkerLogger) LogLine(line string) {
 	l.writef("stdout %s", line)
 }
 
-func (l *SubtoneLogger) LogError(line string) {
+func (l *TaskWorkerLogger) LogError(line string) {
 	l.writef("stderr %s", line)
 
 	l.mu.Lock()
@@ -89,7 +89,7 @@ func (l *SubtoneLogger) LogError(line string) {
 	}
 }
 
-func (l *SubtoneLogger) logHeartbeat() {
+func (l *TaskWorkerLogger) logHeartbeat() {
 	p, err := process.NewProcess(int32(l.PID))
 	if err != nil {
 		return
@@ -113,7 +113,7 @@ func (l *SubtoneLogger) logHeartbeat() {
 	l.writef("heartbeat cpu=%.1f mem_rss=%d ports=%d", cpu, memUsage, ports)
 }
 
-func (l *SubtoneLogger) writef(format string, args ...any) {
+func (l *TaskWorkerLogger) writef(format string, args ...any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.file == nil {

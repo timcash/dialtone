@@ -6,9 +6,9 @@ Plain `./dialtone.sh autoswap src_v1 ...` is the default operator path.
 
 That command is normally routed through the local REPL leader, which means:
 - `DIALTONE>` should stay high-level
-- full command output stays in the subtone log
-- use `./dialtone.sh repl src_v3 subtone-list --count 20`
-- use `./dialtone.sh repl src_v3 subtone-log --pid <pid> --lines 200`
+- full command output stays in the task log
+- use `./dialtone.sh repl src_v3 task list --count 20`
+- use `./dialtone.sh repl src_v3 task log --task-id <task-id> --lines 200`
 
 `--host` is plugin-local for `autoswap` and should keep meaning the target mesh node, for example `rover`.
 

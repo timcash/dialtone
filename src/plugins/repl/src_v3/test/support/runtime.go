@@ -850,7 +850,7 @@ func (rt *Runtime) waitForAnyOutputGroupAfter(timeout time.Duration, groups [][]
 	return err
 }
 
-func (rt *Runtime) LatestSubtonePID() (int, error) {
+func (rt *Runtime) LatestTaskWorkerPID() (int, error) {
 	rt.bufMu.Lock()
 	recentRoom := append([]string(nil), rt.recentRoom...)
 	rt.bufMu.Unlock()
@@ -972,8 +972,8 @@ func (rt *Runtime) waitForTaskIDForCommandAfter(command string, timeout time.Dur
 	return "", fmt.Errorf("timeout waiting for task id for command %q", command)
 }
 
-func (rt *Runtime) LatestSubtonePIDForCommand(command string) (int, error) {
-	return rt.latestSubtonePIDForCommandAfter(command, 0)
+func (rt *Runtime) LatestTaskWorkerPIDForCommand(command string) (int, error) {
+	return rt.latestTaskWorkerPIDForCommandAfter(command, 0)
 }
 
 func (rt *Runtime) latestTaskIDForCommandAfter(command string, afterSeq int) (string, error) {
@@ -1012,7 +1012,7 @@ func (rt *Runtime) latestTaskIDForCommandAfter(command string, afterSeq int) (st
 	return "", fmt.Errorf("no task id found for command %q", command)
 }
 
-func (rt *Runtime) latestSubtonePIDForCommandAfter(command string, afterSeq int) (int, error) {
+func (rt *Runtime) latestTaskWorkerPIDForCommandAfter(command string, afterSeq int) (int, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return 0, fmt.Errorf("command is required")
@@ -1055,27 +1055,27 @@ func (rt *Runtime) latestSubtonePIDForCommandAfter(command string, afterSeq int)
 	return 0, fmt.Errorf("no task pid found for command %q", command)
 }
 
-func (rt *Runtime) WaitForSubtonePIDForCommand(command string, timeout time.Duration) (int, error) {
-	return rt.waitForSubtonePIDForCommandAfter(command, timeout, 0)
+func (rt *Runtime) WaitForTaskWorkerPIDForCommand(command string, timeout time.Duration) (int, error) {
+	return rt.waitForTaskWorkerPIDForCommandAfter(command, timeout, 0)
 }
 
-func (rt *Runtime) WaitForSubtonePIDForCommandAfter(command string, timeout time.Duration, afterSeq int) (int, error) {
-	return rt.waitForSubtonePIDForCommandAfter(command, timeout, afterSeq)
+func (rt *Runtime) WaitForTaskWorkerPIDForCommandAfter(command string, timeout time.Duration, afterSeq int) (int, error) {
+	return rt.waitForTaskWorkerPIDForCommandAfter(command, timeout, afterSeq)
 }
 
 func (rt *Runtime) LatestTaskPID() (int, error) {
-	return rt.LatestSubtonePID()
+	return rt.LatestTaskWorkerPID()
 }
 
 func (rt *Runtime) WaitForTaskPIDForCommand(command string, timeout time.Duration) (int, error) {
-	return rt.waitForSubtonePIDForCommandAfter(command, timeout, 0)
+	return rt.waitForTaskWorkerPIDForCommandAfter(command, timeout, 0)
 }
 
 func (rt *Runtime) WaitForTaskPIDForCommandAfter(command string, timeout time.Duration, afterSeq int) (int, error) {
-	return rt.waitForSubtonePIDForCommandAfter(command, timeout, afterSeq)
+	return rt.waitForTaskWorkerPIDForCommandAfter(command, timeout, afterSeq)
 }
 
-func (rt *Runtime) waitForSubtonePIDForCommandAfter(command string, timeout time.Duration, afterSeq int) (int, error) {
+func (rt *Runtime) waitForTaskWorkerPIDForCommandAfter(command string, timeout time.Duration, afterSeq int) (int, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return 0, fmt.Errorf("command is required")
@@ -1083,7 +1083,7 @@ func (rt *Runtime) waitForSubtonePIDForCommandAfter(command string, timeout time
 	if timeout <= 0 {
 		timeout = 12 * time.Second
 	}
-	if pid, err := rt.latestSubtonePIDForCommandAfter(command, afterSeq); err == nil && pid > 0 {
+	if pid, err := rt.latestTaskWorkerPIDForCommandAfter(command, afterSeq); err == nil && pid > 0 {
 		return pid, nil
 	}
 	deadline := time.Now().Add(timeout)
@@ -1091,7 +1091,7 @@ func (rt *Runtime) waitForSubtonePIDForCommandAfter(command string, timeout time
 		if err := rt.checkJoinExited(); err != nil {
 			return 0, err
 		}
-		if pid, err := rt.latestSubtonePIDForCommandAfter(command, afterSeq); err == nil && pid > 0 {
+		if pid, err := rt.latestTaskWorkerPIDForCommandAfter(command, afterSeq); err == nil && pid > 0 {
 			return pid, nil
 		}
 		select {
@@ -1212,18 +1212,18 @@ func readConfigTopLevelString(path string, key string) string {
 	return strings.TrimSpace(s)
 }
 
-func StandardSubtoneRoomPatterns(cmdName string, exitPattern string) []string {
+func StandardTaskWorkerRoomPatterns(cmdName string, exitPattern string) []string {
 	cmdName = strings.TrimSpace(cmdName)
 	exitPattern = strings.TrimSpace(exitPattern)
 	if exitPattern == "" && cmdName != "" {
-		exitPattern = fmt.Sprintf("Subtone for %s exited with code 0.", cmdName)
+		exitPattern = fmt.Sprintf("Task worker for %s exited with code 0.", cmdName)
 	}
 	patterns := []string{
 		`"scope":"index"`,
-		fmt.Sprintf("Request received. Spawning subtone for %s", cmdName),
-		`Subtone started as pid `,
-		`Subtone topic: subtone-`,
-		`Subtone log file: `,
+		fmt.Sprintf("Request received. Starting task worker for %s", cmdName),
+		`Task worker started as pid `,
+		`Task topic: task-worker-`,
+		`Task log: `,
 	}
 	if exitPattern != "" {
 		patterns = append(patterns, exitPattern)
@@ -1231,17 +1231,17 @@ func StandardSubtoneRoomPatterns(cmdName string, exitPattern string) []string {
 	return patterns
 }
 
-func StandardSubtoneOutputPatterns(cmdName string, exitPattern string) []string {
+func StandardTaskWorkerOutputPatterns(cmdName string, exitPattern string) []string {
 	cmdName = strings.TrimSpace(cmdName)
 	exitPattern = strings.TrimSpace(exitPattern)
 	if exitPattern == "" && cmdName != "" {
-		exitPattern = fmt.Sprintf("Subtone for %s exited with code 0.", cmdName)
+		exitPattern = fmt.Sprintf("Task worker for %s exited with code 0.", cmdName)
 	}
 	patterns := []string{
-		fmt.Sprintf("dialtone> Request received. Spawning subtone for %s", cmdName),
-		"dialtone> Subtone started as pid ",
-		"dialtone> Subtone topic: subtone-",
-		"dialtone> Subtone log file: ",
+		fmt.Sprintf("dialtone> Request received. Starting task worker for %s", cmdName),
+		"dialtone> Task worker started as pid ",
+		"dialtone> Task topic: task-worker-",
+		"dialtone> Task log: ",
 	}
 	if exitPattern != "" {
 		patterns = append(patterns, exitPattern)
@@ -1288,13 +1288,13 @@ func StandardTaskOutputPatterns(exitPattern string) []string {
 	return patterns
 }
 
-func StandardCommandRoomPatternGroups(cmdName string, subtoneExitPattern string, taskExitPattern string) [][]string {
+func StandardCommandRoomPatternGroups(cmdName string, taskWorkerExitPattern string, taskExitPattern string) [][]string {
 	return [][]string{
 		StandardTaskRoomPatterns(taskExitPattern),
 	}
 }
 
-func StandardCommandOutputPatternGroups(cmdName string, subtoneExitPattern string, taskExitPattern string) [][]string {
+func StandardCommandOutputPatternGroups(cmdName string, taskWorkerExitPattern string, taskExitPattern string) [][]string {
 	return [][]string{
 		StandardTaskOutputPatterns(taskExitPattern),
 	}

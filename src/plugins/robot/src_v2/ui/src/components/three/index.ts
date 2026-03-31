@@ -28,7 +28,7 @@ class ThreeControl implements VisualizationControl {
   private chatlogTerm: Terminal | null = null;
   private chatlogLines: string[] = [];
 
-  constructor(private container: HTMLElement, canvas: HTMLCanvasElement) {
+  constructor(container: HTMLElement, canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setClearColor(0x05070a, 1);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));

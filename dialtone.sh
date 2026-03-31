@@ -8,9 +8,6 @@ export CGO_ENABLED=0
 ENV_FILE_JSON_DEFAULT="$LAUNCH_DIR/env/dialtone.json"
 
 log_info() {
-    if [ "${DIALTONE_INTERNAL_SUBTONE:-}" = "1" ]; then
-        return
-    fi
     if [ "${DIALTONE_CONTEXT:-}" = "repl" ]; then
         echo "$*"
         return
@@ -386,15 +383,6 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --stdout) export DIALTONE_LOG_STDOUT=1; shift ;;
-        --subtone-internal)
-            export DIALTONE_INTERNAL_SUBTONE=1
-            shift
-            ;;
-        --subtone)
-            log_err "--subtone is deprecated and not supported."
-            log_err "Subtone mode is internal to dialtone> execution paths."
-            exit 1
-            ;;
         *) PASSTHRU_ARGS+=("$1"); shift ;;
     esac
 done

@@ -118,6 +118,7 @@ func requestNATSURL() string {
 type replLeaderStateDoc struct {
 	NATSURL      string `json:"nats_url"`
 	TSNetNATSURL string `json:"tsnet_nats_url,omitempty"`
+	Running      bool   `json:"running,omitempty"`
 }
 
 func readManagerLeaderState() replLeaderStateDoc {
@@ -137,7 +138,7 @@ func managerNATSURLForNode(node sshv1.MeshNode) string {
 	if raw := strings.TrimSpace(configv1.LookupEnvString("DIALTONE_REPL_MANAGER_NATS_URL")); raw != "" {
 		return raw
 	}
-	if st := readManagerLeaderState(); strings.TrimSpace(st.TSNetNATSURL) != "" {
+	if st := readManagerLeaderState(); st.Running && strings.TrimSpace(st.TSNetNATSURL) != "" {
 		return strings.TrimSpace(st.TSNetNATSURL)
 	}
 	raw := strings.TrimSpace(configv1.ResolveREPLManagerNATSURL())
@@ -209,7 +210,7 @@ func remoteDialtoneCommand(node sshv1.MeshNode, args []string) string {
 
 func remoteDialtoneCommandPOSIX(node sshv1.MeshNode, args []string) string {
 	run := make([]string, 0, len(args)+2)
-	run = append(run, "./dialtone.sh", "--subtone-internal")
+	run = append(run, "./dialtone.sh", "repl")
 	run = append(run, args...)
 	joined := shellJoinChrome(run)
 	if len(node.RepoCandidates) > 0 && strings.TrimSpace(node.RepoCandidates[0]) != "" {
@@ -252,8 +253,7 @@ func encodePowerShellCommand(script string) string {
 }
 
 func remoteDialtoneCommandWindows(node sshv1.MeshNode, args []string) string {
-	items := make([]string, 0, len(args)+2)
-	items = append(items, "'--subtone-internal'")
+	items := make([]string, 0, len(args)+1)
 	for _, arg := range append([]string{"repl"}, args...) {
 		items = append(items, psQuote(arg))
 	}
@@ -462,27 +462,43 @@ func stopRemoteService(node sshv1.MeshNode, role string) error {
 	if role == "" {
 		role = defaultRole
 	}
-	if _, err := sendRemoteCommand(node, commandRequest{Command: "shutdown", Role: role, TimeoutMS: 1200}); err == nil {
-		return nil
-	}
+	_, shutdownErr := sendRemoteCommand(node, commandRequest{Command: "shutdown", Role: role, TimeoutMS: 1200})
 	remoteBin, err := remoteBinaryPath(node)
 	if err != nil {
+		if shutdownErr != nil {
+			return shutdownErr
+		}
 		return err
 	}
+	chromePort := roleChromePort(role)
 	if strings.EqualFold(node.OS, "windows") {
-		cmd := fmt.Sprintf(`$role=%s; Get-CimInstance Win32_Process | Where-Object {
+		cmd := fmt.Sprintf(`$role=%s; $chromePort=%d; Get-CimInstance Win32_Process | Where-Object {
   $_.Name -eq 'dialtone_chrome_v3.exe' -and $_.ExecutablePath -eq %s -and (
     $_.CommandLine -like ('*--role ' + $role + '*') -or
-    $_.CommandLine -like ('*"--role" "' + $role + '"*')
+    $_.CommandLine -like ('*"--role" "' + $role + '"*') -or
+    $_.CommandLine -like ('*--chrome-port ' + $chromePort + '*') -or
+    $_.CommandLine -like ('*"--chrome-port" "' + $chromePort + '"*')
   )
 } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`,
-			psQuote(role), psQuote(remoteBin))
+			psQuote(role), chromePort, psQuote(remoteBin))
 		_, err = sshv1.RunNodeCommand(node.Name, cmd, sshv1.CommandOptions{})
+		if err != nil {
+			if shutdownErr != nil {
+				return fmt.Errorf("shutdown request failed: %v; process sweep failed: %w", shutdownErr, err)
+			}
+			return err
+		}
+		return nil
+	}
+	cmd := fmt.Sprintf("ps -eo pid,args | grep '[d]ialtone_chrome_v3' | grep -- %s | grep -E -- '(^| )--role %s($| )|(^| )--chrome-port %d($| )' | awk '{print $1}' | xargs -r kill -9", shellQuote(remoteBin), shellQuote(role), chromePort)
+	_, err = sshv1.RunNodeCommand(node.Name, cmd, sshv1.CommandOptions{})
+	if err != nil {
+		if shutdownErr != nil {
+			return fmt.Errorf("shutdown request failed: %v; process sweep failed: %w", shutdownErr, err)
+		}
 		return err
 	}
-	cmd := fmt.Sprintf("ps -eo pid,args | grep '[d]ialtone_chrome_v3' | grep -- %s | grep -- '--role %s' | awk '{print $1}' | xargs -r kill -9", shellQuote(remoteBin), shellQuote(role))
-	_, err = sshv1.RunNodeCommand(node.Name, cmd, sshv1.CommandOptions{})
-	return err
+	return nil
 }
 
 func waitForRemoteService(node sshv1.MeshNode, role string, timeout time.Duration) error {

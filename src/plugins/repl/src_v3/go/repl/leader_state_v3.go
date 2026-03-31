@@ -173,7 +173,6 @@ func syncLeaderRuntimeConfig(st LeaderState) error {
 	updates := map[string]any{
 		"DIALTONE_REPL_RUNNING":         "0",
 		"DIALTONE_REPL_TOPIC":           topic,
-		"DIALTONE_REPL_ROOM":            topic,
 		"DIALTONE_REPL_HOSTNAME":        normalizePromptName(st.HostName),
 		"DIALTONE_REPL_SERVER_ID":       strings.TrimSpace(st.ServerID),
 		"DIALTONE_REPL_LAST_HEALTHY_AT": strings.TrimSpace(st.LastHealthyAt),
@@ -220,7 +219,6 @@ func syncLeaderRuntimeConfig(st LeaderState) error {
 	}{
 		{Key: "DIALTONE_REPL_RUNNING", Value: "0"},
 		{Key: "DIALTONE_REPL_TOPIC", Value: topic},
-		{Key: "DIALTONE_REPL_ROOM", Value: topic},
 		{Key: "DIALTONE_REPL_HOSTNAME", Value: normalizePromptName(st.HostName)},
 		{Key: "DIALTONE_REPL_SERVER_ID", Value: strings.TrimSpace(st.ServerID)},
 		{Key: "DIALTONE_REPL_LAST_HEALTHY_AT", Value: strings.TrimSpace(st.LastHealthyAt)},

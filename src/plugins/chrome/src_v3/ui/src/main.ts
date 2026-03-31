@@ -28,7 +28,7 @@ registerUISharedSections({
 
 void sections.navigateTo("chrome-home-docs");
 
-function decorateSection(entry: SectionEntry, container: HTMLElement): void {
+function decorateSection(entry: UISharedSectionEntry, container: HTMLElement): void {
   if (container.dataset.enhanced === "1") {
     return;
   }

@@ -101,12 +101,12 @@ func Register(r *testv1.Registry) {
 					fmt.Sprintf("\"type\":\"join\",\"from\":\"%s\"", h.Name),
 					fmt.Sprintf("\"type\":\"input\",\"from\":\"%s\"", h.Name),
 					"/go src_v1 version",
-					"Subtone for go src_v1 exited with code 0.",
+					"Task worker for go src_v1 exited with code 0.",
 					fmt.Sprintf("/@%s echo %s", target, token),
-					"\"command\":\"run_host_subtone\"",
+					"\"command\":\"run_host_task\"",
 					fmt.Sprintf("\"target\":\"%s\"", target),
 					fmt.Sprintf("echo %s", token),
-					fmt.Sprintf("Subtone on %s exited with code 0.", target),
+					fmt.Sprintf("Task on %s exited with code 0.", target),
 				}
 				err := ctx.WaitForAllMessagesAfterAction("repl.>", patterns, 35*time.Second, func() error {
 					return runRemoteJoinScript(h, remoteNATSURL, target, token)

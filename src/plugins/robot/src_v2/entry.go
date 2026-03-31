@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	bun_plugin "dialtone/dev/plugins/bun/src_v1/go"
@@ -34,6 +33,9 @@ func Run(version, command string, args []string) error {
 	if version == "src_v1" {
 		return fmt.Errorf("robot src_v1 is no longer supported from this scaffold; use ./dialtone.sh robot src_v2 ...")
 	}
+	if strings.TrimSpace(version) == "" {
+		return fmt.Errorf("missing robot version (usage: ./dialtone.sh robot src_v2 <command> [args])")
+	}
 	return runGeneric(version, command, repoRoot, args)
 }
 
@@ -42,9 +44,6 @@ func isHelp(s string) bool {
 }
 
 func runGeneric(version, command, repoRoot string, args []string) error {
-	if version == "" {
-		version = getLatestVersionDir(repoRoot)
-	}
 	rt, err := configv1.ResolveRuntime(repoRoot)
 	if err != nil {
 		return err
@@ -229,31 +228,6 @@ func normalizeRobotBackendURL(raw string) (string, error) {
 	u.RawQuery = ""
 	u.Fragment = ""
 	return u.String(), nil
-}
-
-func getLatestVersionDir(repoRoot string) string {
-	rt, err := configv1.ResolveRuntime(repoRoot)
-	if err != nil {
-		return "src_v1"
-	}
-	pluginDir := configv1.NewPluginPreset(rt, "robot", "src_v1").PluginBase
-	entries, err := os.ReadDir(pluginDir)
-	if err != nil {
-		return "src_v1"
-	}
-	maxVer := 0
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), "src_v") {
-			v, _ := strconv.Atoi(entry.Name()[5:])
-			if v > maxVer {
-				maxVer = v
-			}
-		}
-	}
-	if maxVer == 0 {
-		return "src_v1"
-	}
-	return fmt.Sprintf("src_v%d", maxVer)
 }
 
 func PrintUsage() {

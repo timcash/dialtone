@@ -223,6 +223,8 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
     renderLogs();
   };
 
+  const isFilterActive = (filter: LogFilter) => activeFilter === filter;
+
   const togglePause = () => {
     paused = !paused;
     renderButtons(ROBOT_SECTION_IDS.xterm);
@@ -310,13 +312,13 @@ export function mountXterm(container: HTMLElement): VisualizationControl {
       { label: 'Copy', action: () => copySelection() },
     ],
     Filter: [
-      { label: 'All', action: () => setFilter('all'), active: activeFilter === 'all' },
-      { label: 'MAV', action: () => setFilter('mavlink'), active: activeFilter === 'mavlink' },
-      { label: 'Cmd', action: () => setFilter('command'), active: activeFilter === 'command' },
-      { label: 'UI', action: () => setFilter('ui'), active: activeFilter === 'ui' },
-      { label: 'Cam', action: () => setFilter('camera'), active: activeFilter === 'camera' },
-      { label: 'Svc', action: () => setFilter('service'), active: activeFilter === 'service' },
-      { label: 'Err', action: () => setFilter('error'), active: activeFilter === 'error' },
+      { label: 'All', action: () => setFilter('all'), active: isFilterActive('all') },
+      { label: 'MAV', action: () => setFilter('mavlink'), active: isFilterActive('mavlink') },
+      { label: 'Cmd', action: () => setFilter('command'), active: isFilterActive('command') },
+      { label: 'UI', action: () => setFilter('ui'), active: isFilterActive('ui') },
+      { label: 'Cam', action: () => setFilter('camera'), active: isFilterActive('camera') },
+      { label: 'Svc', action: () => setFilter('service'), active: isFilterActive('service') },
+      { label: 'Err', action: () => setFilter('error'), active: isFilterActive('error') },
       { label: 'Clear', action: () => clearLogs() },
     ],
     Command: [

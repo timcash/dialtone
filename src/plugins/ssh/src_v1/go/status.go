@@ -67,7 +67,7 @@ func runStatus(args []string) error {
 		logs.Raw("%s", string(raw))
 	} else {
 		logs.Raw("%-9s %-15s %-8s %-8s %-10s %-26s %-10s %-8s %s", "NAME", "HOST", "OS", "CPU", "MEM_FREE", "NETWORK", "DISK_FREE", "BATTERY", "ERROR")
-		logs.Raw(strings.Repeat("-", 120))
+		logs.Raw("%s", strings.Repeat("-", 120))
 		for _, r := range rows {
 			logs.Raw("%-9s %-15s %-8s %-8s %-10s %-26s %-10s %-8s %s",
 				r.Name, r.Host, r.OS, r.CPU, r.MemFree, truncate(r.Network, 26), r.DiskFree, r.Battery, truncate(r.Error, 40))

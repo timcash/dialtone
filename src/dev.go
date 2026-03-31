@@ -374,7 +374,7 @@ func main() {
 	normalizeGlobalFlags()
 	initLogger()
 	LoadConfig()
-	if strings.TrimSpace(os.Getenv("DIALTONE_INTERNAL_SUBTONE")) != "1" && shouldLogBootstrapChecks() {
+	if shouldLogBootstrapChecks() {
 		logBootstrapChecks()
 	}
 	defer func() {
@@ -528,7 +528,7 @@ func extractTransportFlags(command string, args []string) (targetHost string, ss
 }
 
 func shouldRouteCommandViaREPL(command string, args []string) bool {
-	if strings.TrimSpace(os.Getenv("DIALTONE_INTERNAL_SUBTONE")) == "1" {
+	if logs.IsREPLContext() {
 		return false
 	}
 	switch strings.TrimSpace(command) {
@@ -586,9 +586,6 @@ func scaffoldSubcommand(args []string) string {
 
 func resolveREPLTopicEnv() string {
 	topic := strings.TrimSpace(os.Getenv("DIALTONE_REPL_TOPIC"))
-	if topic == "" {
-		topic = strings.TrimSpace(os.Getenv("DIALTONE_REPL_ROOM"))
-	}
 	if topic == "" {
 		topic = "index"
 	}
@@ -977,7 +974,7 @@ func runViaSSHHost(host, command string, args []string) error {
 	if host == "" {
 		return fmt.Errorf("--ssh-host requires a host value")
 	}
-	baseArgs := append([]string{"./dialtone.sh", "--subtone-internal", command}, args...)
+	baseArgs := append([]string{"./dialtone.sh", command}, args...)
 	remoteDialtoneCmd := shellJoin(baseArgs)
 	remoteRepo := strings.TrimSpace(os.Getenv("DIALTONE_REMOTE_REPO"))
 	var remoteCmd string
@@ -1353,7 +1350,7 @@ func detectMissingForREPL() []MissingInstall {
 		missing = append(missing, MissingInstall{
 			Tool:    "Go runtime",
 			Command: installPrefix + " go src_v1 install",
-			Why:     "required to run plugin scaffolds and subtones",
+			Why:     "required to run plugin scaffolds and queued task workers",
 		})
 	}
 	bunBin := filepath.Join(envDir, "bun", "bin", bunBinName)

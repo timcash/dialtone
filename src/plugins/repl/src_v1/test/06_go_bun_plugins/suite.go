@@ -28,15 +28,15 @@ func Register(r *testv1.Registry) {
 			}
 			if err := support.RequireContainsAll(out, []string{
 				prompt + "> go src_v1 test",
-				"DIALTONE> Request received. Spawning subtone for go src_v1...",
-				"DIALTONE> Subtone for go src_v1 exited with code 0.",
+				"DIALTONE> Request received. Starting task worker for go src_v1...",
+				"DIALTONE> Task worker for go src_v1 exited with code 0.",
 				prompt + "> bun src_v1 test",
-				"DIALTONE> Request received. Spawning subtone for bun src_v1...",
-				"DIALTONE> Subtone for bun src_v1 exited with code 0.",
+				"DIALTONE> Request received. Starting task worker for bun src_v1...",
+				"DIALTONE> Task worker for bun src_v1 exited with code 0.",
 			}); err != nil {
 				return testv1.StepRunResult{}, fmt.Errorf("go/bun foundation check failed: %w", err)
 			}
-			return testv1.StepRunResult{Report: "go and bun plugin tests executed through repl subtone flow"}, nil
+			return testv1.StepRunResult{Report: "go and bun plugin tests executed through repl task worker flow"}, nil
 		},
 	})
 }

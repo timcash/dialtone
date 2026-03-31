@@ -518,7 +518,7 @@ This works, but it is more implicit than ideal.
 - service logs: `~/.dialtone/chrome-v3/<role>/service/daemon.out.log` and `daemon.err.log`
 - Chrome test reports: `plugins/chrome/src_v3/TEST.md` and `plugins/chrome/src_v3/TEST_RAW.md`
 - suite log subject: `logs.test.chrome-src-v3`
-- wrapper/subtone logs when invoked through `dialtone.sh`: `~/.dialtone/logs/subtone-*.log`
+- wrapper/task-worker logs when invoked through `dialtone.sh`: `~/.dialtone/logs/task-worker-*.log`
 
 ### What logs tell you
 
@@ -531,7 +531,7 @@ If something breaks, each source answers a different question:
 | `TEST_RAW.md` | step-by-step test progress and failures |
 | `TEST.md` | summarized report for humans |
 | suite NATS logs | live test progress stream |
-| subtone logs | what the wrapper launched and what it printed |
+| task-worker logs | what the wrapper launched and what it printed |
 
 ### Current logging weakness
 
