@@ -26,6 +26,8 @@ func main() {
 
 func run() int {
 	logs.SetOutput(os.Stdout)
+	const reportPath = "plugins/repl/src_v3/TEST.md"
+	const rawReportPath = "plugins/repl/src_v3/TEST_RAW.md"
 	fs := flag.NewFlagSet("repl-src-v3-test", flag.ContinueOnError)
 	filter := fs.String("filter", "", "Run only matching test steps")
 	if err := fs.Parse(os.Args[1:]); err != nil {
@@ -49,6 +51,7 @@ func run() int {
 	if filtered := filterSteps(reg.Steps, strings.TrimSpace(*filter)); len(filtered) > 0 {
 		reg.Steps = filtered
 	}
+	logs.Info("Running repl src_v3 tests in single process (%d steps)", len(reg.Steps))
 	support.EnableSharedRuntime()
 	defer support.CloseSharedRuntime()
 
@@ -59,8 +62,8 @@ func run() int {
 		NATSSubject:   "logs.test.repl-src-v3",
 		AutoStartNATS: false,
 		QuietConsole:  true,
-		ReportPath:    "plugins/repl/src_v3/TEST.md",
-		RawReportPath: "plugins/repl/src_v3/TEST_RAW.md",
+		ReportPath:    reportPath,
+		RawReportPath: rawReportPath,
 		ReportFormat:  "template",
 		ReportTitle:   "REPL Plugin src_v3 Test Report",
 		ReportRunner:  "test/src_v1",
@@ -69,9 +72,7 @@ func run() int {
 		logs.Error("repl src_v3 tests failed: %v", err)
 		return 1
 	}
-	if strings.TrimSpace(os.Getenv("DIALTONE_REPL_V3_TEST_VERBOSE")) == "1" {
-		logs.Info("repl src_v3 tests passed")
-	}
+	logs.Info("repl src_v3 tests passed (report=%s raw=%s)", reportPath, rawReportPath)
 	return 0
 }
 

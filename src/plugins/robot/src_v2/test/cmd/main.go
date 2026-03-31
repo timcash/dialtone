@@ -30,8 +30,8 @@ func main() {
 	browserBaseURL := fs.String("browser-base-url", "", "Override the base URL used by attached browsers for the local mock UI server")
 	commonBindings := testv1.BindCommonTestFlags(fs, testv1.CommonTestCLIOptions{
 		DefaultAttachNode: strings.TrimSpace(configv1.LookupEnvString("DIALTONE_TEST_BROWSER_NODE")),
-		AttachRole:       "robot-test",
-		ActionsPerMinute: 300,
+		AttachRole:        "robot-test",
+		ActionsPerMinute:  300,
 	})
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

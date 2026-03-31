@@ -32,6 +32,13 @@ The recent alignment work also pushed the core plugins closer to the desired mod
 - core dev/browser attach behavior is flag-driven instead of env-toggle-driven
 - one-off attach/default-attach flows are more consistent across `test`, `ui`, `cad`, and `robot`
 - shared browser-service communication still goes through REPL/NATS and the `chrome src_v3` daemon
+- `logs`, `ui`, and `ssh` top-level legacy CLI glue now routes through version-owned entrypoints
+- the `robot` scaffold now parses the top-level CLI contract and dispatches into `src/plugins/robot/src_v2`
+- `robot src_v2` entry/dispatch and remote-ops command families now live in separate version-owned files
+- `robot src_v2` diagnostic now verifies the latest release-channel manifest/artifact digests and checks the public UI at `https://rover-1.dialtone.earth`
+- `robot src_v2 publish` is now verified against the real GitHub release path, and the live rover diagnostic correctly fails when autoswap has not converged to the newest manifest yet
+- `repl src_v3 test` is verified through the WSL bootstrap path, and its test runner now prints explicit start/pass lines while still writing `TEST.md` and `TEST_RAW.md`
+- a visible WSL tmux sweep revalidated `logs`, `test`, `ssh`, `repl`, `cloudflare`, `robot`, and `cad`; `cloudflare` needed the public `cloudflare src_v1 install` step first so the UI lint/build toolchain was present
 
 ## What To Do Next
 
@@ -58,12 +65,19 @@ Work through these next:
 
 The repo should keep moving toward thin `scaffold/main.go` files and version-owned logic.
 
-Highest-value cleanup targets:
+Recently completed in this lane:
 
-- `robot` scaffold
 - `logs` top-level CLI glue
 - `ui` top-level CLI glue
 - `ssh` remaining dispatch glue
+- `robot` scaffold
+
+Next cleanup targets:
+
+- split the remaining `robot src_v2` publish/build family and the diagnostic helpers out of `src/plugins/robot/src_v2/plugin.go`
+- use the stricter `robot src_v2 diagnostic` after publish/rollout work and treat stale-manifest failures as rollout convergence bugs, not as a reason to weaken the diagnostic
+- keep new scaffolds version-first and keep tests routing through `src_vN/test/cmd/main.go`
+- rerun public `./dialtone.sh <plugin> <src_vN> build` and focused `test --filter ...` flows after each split
 
 The target is simple:
 
