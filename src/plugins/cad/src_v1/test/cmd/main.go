@@ -11,6 +11,7 @@ import (
 	chromev3 "dialtone/dev/plugins/chrome/src_v3"
 	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
+	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 	testv1 "dialtone/dev/plugins/test/src_v1/go"
 )
 
@@ -18,7 +19,8 @@ func main() {
 	logs.SetOutput(os.Stdout)
 	fs := flag.NewFlagSet("cad-src-v1-test", flag.ExitOnError)
 	commonBindings := testv1.BindCommonTestFlags(fs, testv1.CommonTestCLIOptions{
-		AttachRole: "cad-smoke",
+		DefaultAttachNode: strings.TrimSpace(configv1.LookupEnvString("DIALTONE_TEST_BROWSER_NODE")),
+		AttachRole:        "cad-smoke",
 	})
 	_ = fs.Parse(os.Args[1:])
 	common, err := commonBindings.Resolve()
@@ -26,8 +28,22 @@ func main() {
 		logs.Error("cad src_v1 test flag parse failed: %v", err)
 		os.Exit(1)
 	}
+	testv1.ApplyDefaultBrowserAttach(&common, "cad-smoke")
 	common.ApplyRuntimeConfig()
 	if attach := strings.TrimSpace(common.AttachNode); attach != "" {
+		if !common.NoSSH {
+			if node, nerr := sshv1.ResolveMeshNode(attach); nerr == nil && strings.EqualFold(strings.TrimSpace(node.OS), "windows") && node.PreferWSLPowerShell {
+				testv1.UpdateRuntimeConfig(func(cfg *testv1.RuntimeConfig) {
+					if cfg.RemoteDebugPort <= 0 {
+						cfg.RemoteDebugPort = 9333
+					}
+					if len(cfg.RemoteDebugPorts) == 0 {
+						cfg.RemoteDebugPorts = []int{9333, 9334, 9335}
+					}
+				})
+				logs.Info("cad src_v1 enabled windows debug port defaults for node=%s (SSH fallback allowed)", attach)
+			}
+		}
 		if err := ensureAttachBrowser(attach); err != nil {
 			logs.Error("cad src_v1 attach preflight failed: %v", err)
 			os.Exit(1)
