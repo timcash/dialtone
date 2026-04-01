@@ -11,6 +11,23 @@ Use this mental model:
 - `DIALTONE>` stays short
 - full CAD server logs and browser-test logs stay in the task log
 
+## Real Test
+
+From WSL, the real end-to-end test is:
+
+```bash
+./dialtone.sh cad src_v1 test
+```
+
+That command now auto-attaches to the default Windows Chrome host from WSL, runs the HTTP checks, and runs the real browser smoke against the CAD UI.
+
+Use these only when you want narrower coverage:
+
+```bash
+./dialtone.sh cad src_v1 test --filter self-check
+./dialtone.sh cad src_v1 test --attach legion --filter cad-ui-browser-smoke
+```
+
 ## Current Status
 
 Working now:
@@ -21,6 +38,7 @@ Working now:
 - `./dialtone.sh cad src_v1 serve`
 - `./dialtone.sh cad src_v1 status`
 - `./dialtone.sh cad src_v1 stop`
+- `./dialtone.sh cad src_v1 test` now passes from WSL and runs the real browser smoke through `chrome src_v3`
 - the CAD UI loads and can generate STL-backed gear geometry
 - the floor plane is now positioned from the loaded mesh bounds so it sits below the gear instead of intersecting it
 - `./dialtone.sh cad src_v1 test --attach legion --filter cad-ui-browser-smoke` now passes
@@ -35,6 +53,12 @@ What to debug next:
 ## Default Use
 
 ```bash
+./dialtone.sh cad src_v1 test
+./dialtone.sh cad src_v1 test --filter self-check
+./dialtone.sh cad src_v1 test --attach legion --filter cad-ui-browser-smoke
+```
+
+```bash
 ./dialtone.sh cad src_v1 install
 ./dialtone.sh cad src_v1 format
 ./dialtone.sh cad src_v1 lint
@@ -42,11 +66,6 @@ What to debug next:
 ./dialtone.sh cad src_v1 serve
 ./dialtone.sh cad src_v1 status
 ./dialtone.sh cad src_v1 stop
-```
-
-```bash
-./dialtone.sh cad src_v1 test --filter self-check
-./dialtone.sh cad src_v1 test --attach legion --filter cad-ui-browser-smoke
 ```
 
 The focused smoke currently verifies:
@@ -109,7 +128,7 @@ DIALTONE> cad stop: server stopped
 # Build the UI assets.
 ./dialtone.sh cad src_v1 build
 
-# Run all CAD tests.
+# Run the real WSL-backed CAD test flow.
 ./dialtone.sh cad src_v1 test
 
 # Run the lightweight self-check slice.
